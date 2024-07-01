@@ -45,7 +45,9 @@ export type Delimiter =
   | '\\lceil'
   | '\\rceil'
   | '\\lfloor'
-  | '\\rfloor';
+  | '\\rfloor'
+  | '\\llbracket'
+  | '\\rrbracket';
 
 /** @category Latex Parsing and Serialization */
 export type DelimiterScale = 'normal' | 'scaled' | 'big' | 'none';

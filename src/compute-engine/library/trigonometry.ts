@@ -94,10 +94,7 @@ export const TRIGONOMETRY_LIBRARY: IdentifierDefinitions[] = [
           ce
             .box(['Sqrt', ['Add', ['Square', ops[0]], ['Square', ops[1]]]])
             .simplify(),
-        evaluate: [
-          'Function',
-          ['Sqrt', ['Add', ['Square', '_1'], ['Square', '_2']]],
-        ],
+        evaluate: ['Sqrt', ['Add', ['Square', '_1'], ['Square', '_2']]],
       },
     },
     Sin: {

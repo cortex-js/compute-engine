@@ -4,11 +4,7 @@ import { Decimal } from 'decimal.js';
 import { Expression } from '../../math-json/math-json-format';
 
 import { LatexString } from '../public';
-import {
-  Rational,
-  isBigRational,
-  isMachineRational,
-} from '../numerics/rationals';
+import { Rational } from '../numerics/rationals';
 import { compileToJavascript } from '../compile';
 import {
   getApplyFunctionStyle,
@@ -45,6 +41,7 @@ import {
 } from './public';
 import { SerializeLatexOptions } from '../latex-syntax/public';
 import { asFloat } from './numerics';
+import { toAsciiMath } from './ascii-math';
 
 /**
  * _BoxedExpression
@@ -754,4 +751,3 @@ export function getSubexpressions(
 // function *after* the class definition
 
 import { serializeJson } from './serialize';
-import { toAsciiMath } from './ascii-math.js';

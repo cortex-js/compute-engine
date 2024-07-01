@@ -25,6 +25,7 @@ engine.assign('f6', ['Function', ['Add', '_1', 1]]);
 engine.assign('f7', ['Function', ['Add', '_2', 1]]);
 engine.assign('f8', ['Add', '_', 1]);
 engine.assign('f9', ['Add', '_1', 1]);
+engine.assign('f10', ['Add', ['Divide', '_1', '_2'], '_3']);
 
 describe('Infer result domain', () => {
   // By calling add, the result of `f1` is inferred to be a number
@@ -45,7 +46,9 @@ describe('Anonymous function', () => {
 
 describe('Anonymous function with missing param', () => {
   test('Missing Param Function', () =>
-    expect(evaluate(['f1'])).toMatchInlineSnapshot(`["f1"]`));
+    expect(evaluate(['f1'])).toMatchInlineSnapshot(
+      `["Function", ["Add", "_1", 1], "_1"]`
+    ));
   test('Missing Param Expression', () =>
     expect(evaluate(['f2'])).toMatchInlineSnapshot(`["f2"]`));
   test('Missing Param JS Function', () =>
@@ -74,12 +77,15 @@ describe('Anonymous function with anonymous parameters', () => {
     expect(evaluate(['f5', 10])).toMatchInlineSnapshot(`11`));
   test('Anon Param: F6', () =>
     expect(evaluate(['f6', 10])).toMatchInlineSnapshot(`11`));
-  test('Anon Param: F7', () =>
-    expect(evaluate(['f7', 10])).toMatchInlineSnapshot(`["f7", 10]`));
   test('Anon Param: F8', () =>
     expect(evaluate(['f8', 10])).toMatchInlineSnapshot(`["f8", 10]`));
   test('Anon Param: F9', () =>
     expect(evaluate(['f9', 10])).toMatchInlineSnapshot(`11`));
+});
+
+describe('currying', () => {
+  test('f7 expects two arguments. Only one provided', () =>
+    expect(evaluate(['f10', 5])).toMatchInlineSnapshot(`6`)); // @fixme
 });
 
 describe('Expression head', () => {

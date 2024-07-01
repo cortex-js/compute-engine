@@ -1,6 +1,20 @@
-import { InfixEntry, LatexDictionary, Parser, Terminator } from '../public';
-import { head, missingIfEmpty, op } from '../../../math-json/utils';
+import {
+  InfixEntry,
+  LatexDictionary,
+  Parser,
+  Serializer,
+  Terminator,
+} from '../public';
+import {
+  getSequence,
+  head,
+  missingIfEmpty,
+  op,
+  ops,
+  symbol,
+} from '../../../math-json/utils';
 import { Expression } from '../../../math-json';
+import { DEFINITIONS_INEQUALITIES } from './definitions-relational-operators';
 
 // See https://en.wikipedia.org/wiki/List_of_logic_symbols
 
@@ -228,6 +242,82 @@ export const DEFINITIONS_LOGIC: LatexDictionary = [
     precedence: 200, // Has to be lower than COMPARISON_PRECEDENCE,
     serialize: '\\exists!',
     parse: parseQuantifier('ExistsUnique'),
+  },
+
+  {
+    name: 'KroneckerDelta',
+    kind: 'prefix',
+    latexTrigger: ['\\delta', '_'],
+    precedence: 200,
+    serialize: (serializer: Serializer, expr: Expression) => {
+      const args = ops(expr);
+      if (!args) return '\\delta';
+
+      // If only symbol arguments, just concatenate them
+      // ['KroneckerDelta', 'n', 'm'] -> \delta_{nm}
+      if (args.every((x) => symbol(x)))
+        return `\\delta_{${args.map((arg) => serializer.serialize(arg)).join('')}}`;
+
+      // Otherwise, use commas
+      return `\\delta_{${args.map((arg) => serializer.serialize(arg)).join(', ')}}`;
+    },
+    parse: (parser) => {
+      const group = parser.parseGroup();
+      if (!group) {
+        const token = parser.parseToken();
+        if (!token) return null;
+        // \\delta_n
+        return ['KroneckerDelta', token];
+      }
+
+      const seq = getSequence(group);
+
+      // \\delta_{n, m}
+      if (seq && seq.length <= 2) return ['KroneckerDelta', ...seq];
+
+      // \\delta_{nm}
+      if (head(group) === 'InvisibleOperator')
+        return ['KroneckerDelta', ...ops(group)!];
+
+      // \\delta_{n}
+      if (group) return ['KroneckerDelta', group];
+
+      return null;
+    },
+  },
+
+  // Iverson brackets. Also called the "indicator function"
+  // Must have a single argument, a relational expression, i.e.
+  // `[ a = b ]` or `[ x \leq 0 ]`
+  // Otherwise, it gets rejected, it could be something else, like a list or
+  // tuple.
+  {
+    name: 'Boole',
+    kind: 'matchfix',
+    openTrigger: '[',
+    closeTrigger: ']',
+    // serialize: (serializer: Serializer, expr: Expression) => {
+    //   const args = ops(expr);
+    //   return `[${serializer.serialize(arg)}]`;
+    // },
+    parse: (_parser, body) => {
+      const h = head(body);
+      if (typeof h !== 'string') return null;
+      if (!DEFINITIONS_INEQUALITIES.some((x) => x.name === h)) return null;
+      return ['Boole', body];
+    },
+  },
+
+  {
+    kind: 'matchfix',
+    openTrigger: '\\llbracket',
+    closeTrigger: '\\rrbracket',
+    parse: (_parser, body) => {
+      const h = head(body);
+      if (typeof h !== 'string') return null;
+      if (!DEFINITIONS_INEQUALITIES.some((x) => x.name === h)) return null;
+      return ['Boole', body];
+    },
   },
 ];
 

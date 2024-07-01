@@ -1518,9 +1518,7 @@ export class ComputeEngine implements IComputeEngine {
       if (unknowns.some((x) => /\_[\d]+/.test(x))) {
         // This is a function
         expr = this.box(['Function', expr]);
-        this.defineFunction(id, {
-          signature: { evaluate: expr },
-        });
+        this.defineFunction(id, { signature: { evaluate: expr } });
         return this;
       }
 

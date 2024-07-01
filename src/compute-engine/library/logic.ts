@@ -98,6 +98,33 @@ export const LOGIC_LIBRARY: IdentifierDefinitions = {
   Exists: { signature: { domain: 'Functions' }, hold: 'all' },
   ExistsUnique: { signature: { domain: 'Functions' }, hold: 'all' },
   ForAll: { signature: { domain: 'Functions' }, hold: 'all' },
+
+  KroneckerDelta: {
+    signature: {
+      domain: 'Functions',
+      evaluate: (ce, args) => {
+        if (args.length === 1)
+          return args[0].symbol === 'True' ? ce.One : ce.Zero;
+
+        if (args.length === 2)
+          return args[0].isEqual(args[1]) ? ce.One : ce.Zero;
+
+        // More than two arguments: they should all be equal
+        for (let i = 1; i < args.length; i++) {
+          if (!args[i].isEqual(args[0])) return ce.Zero;
+        }
+        return ce.One;
+      },
+    },
+  },
+
+  // Iverson bracket
+  Boole: {
+    signature: {
+      domain: 'Functions',
+      evaluate: (ce, args) => (args[0].symbol === 'True' ? ce.One : ce.Zero),
+    },
+  },
 };
 
 function processAnd(

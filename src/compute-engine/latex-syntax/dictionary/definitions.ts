@@ -204,7 +204,7 @@ export type IndexedLatexDictionary = {
 };
 
 //
-// This table is used for the default serialzier for matchfix operators
+// This table is used for the default serializer for matchfix operators
 //
 const DEFAULT_DELIMITER: { [key: string]: LatexString } = {
   '(': '(',
@@ -981,6 +981,7 @@ function isValidEntry(
 export const DEFAULT_LATEX_DICTIONARY: {
   [category in LibraryCategory]?: LatexDictionary;
 } = {
+  'symbols': DEFINITIONS_SYMBOLS,
   'algebra': DEFINITIONS_ALGEBRA,
   'arithmetic': DEFINITIONS_ARITHMETIC,
   'calculus': DEFINITIONS_CALCULUS,
@@ -999,7 +1000,6 @@ export const DEFAULT_LATEX_DICTIONARY: {
   ],
   'sets': DEFINITIONS_SETS,
   'statistics': DEFINITIONS_STATISTICS,
-  'symbols': DEFINITIONS_SYMBOLS,
   'trigonometry': DEFINITIONS_TRIGONOMETRY,
 };
 

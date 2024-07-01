@@ -138,103 +138,72 @@ describe('Nth PRIME NUMBER', () =>
         [
           "Add",
           [
-            "Delimiter",
+            "Sum",
             [
-              "Sum",
+              "Delimiter",
               [
-                "Delimiter",
+                "Floor",
                 [
-                  "Floor",
+                  "Divide",
+                  1,
                   [
-                    "Divide",
-                    1,
+                    "Add",
                     [
-                      "Add",
+                      "Power",
+                      0,
                       [
-                        "Power",
-                        0,
+                        "Subtract",
+                        "n",
                         [
-                          "Add",
-                          "n",
+                          "Sum",
                           [
-                            "Negate",
+                            "Delimiter",
                             [
                               "Delimiter",
                               [
-                                "Sum",
+                                "Product",
                                 [
                                   "Delimiter",
                                   [
-                                    "Delimiter",
+                                    "Add",
                                     [
-                                      "Product",
+                                      "Power",
+                                      0,
                                       [
-                                        "Delimiter",
+                                        "Abs",
                                         [
-                                          "Add",
-                                          1,
-                                          [
-                                            "Power",
-                                            0,
-                                            [
-                                              "Abs",
-                                              [
-                                                "Add",
-                                                [
-                                                  "Floor",
-                                                  [
-                                                    "Divide",
-                                                    ["Subscript", "v", 2],
-                                                    ["Subscript", "v", 3]
-                                                  ]
-                                                ],
-                                                [
-                                                  "Negate",
-                                                  [
-                                                    "Divide",
-                                                    ["Subscript", "v", 2],
-                                                    ["Subscript", "v", 3]
-                                                  ]
-                                                ]
-                                              ]
-                                            ]
-                                          ]
-                                        ]
-                                      ],
-                                      [
-                                        "Tuple",
-                                        ["Subscript", "v", 3],
-                                        2,
-                                        [
-                                          "Floor",
-                                          ["Sqrt", ["Subscript", "v", 2]]
+                                          "Subtract",
+                                          ["Floor", ["Divide", "v_2", "v_3"]],
+                                          ["Divide", "v_2", "v_3"]
                                         ]
                                       ]
-                                    ]
+                                    ],
+                                    1
                                   ]
                                 ],
                                 [
-                                  "Tuple",
-                                  ["Subscript", "v", 2],
+                                  "Triple",
+                                  "v_3",
                                   2,
-                                  ["Subscript", "v", 1]
+                                  ["Floor", ["Sqrt", "v_2"]]
                                 ]
                               ]
                             ]
-                          ]
+                          ],
+                          ["Triple", "v_2", 2, "v_1"]
                         ]
-                      ],
-                      1
-                    ]
+                      ]
+                    ],
+                    1
                   ]
                 ]
-              ],
-              [
-                "Tuple",
-                ["Subscript", "v", 1],
-                2,
-                ["Floor", ["Multiply", 1.5, "n", ["Ln", "n"]]]
               ]
+            ],
+            [
+              "Triple",
+              "v_1",
+              2,
+              ["Floor", ["Multiply", 1.5, "n", ["Ln", "n"]]]
             ]
           ],
           2

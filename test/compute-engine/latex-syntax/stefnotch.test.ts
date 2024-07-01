@@ -128,9 +128,7 @@ describe('STEFNOTCH #13', () => {
   });
 
   test('4/ \\[1,2\\]', () => {
-    expect(parse('[1,2]')).toMatchInlineSnapshot(
-      `["Error", ["ErrorCode", "'unexpected-token'", "'['"]]`
-    );
+    expect(parse('[1,2]')).toMatchInlineSnapshot(`["List", 1, 2]`);
   });
 
   test('5/ \\frac{2}{\\sqrt{n}}\\Leftrightarrow n>\\frac{5}{n^2}', () => {

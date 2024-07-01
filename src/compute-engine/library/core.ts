@@ -25,6 +25,9 @@ import { asFloat, asMachineInteger } from '../boxed-expression/numerics';
 // Symbols() -> return list of all known symbols
 // FreeVariables(expr) -> return list of all free variables in expr
 
+// xcas/gias https://www-fourier.ujf-grenoble.fr/~parisse/giac/doc/en/cascmd_en/cascmd_en.html
+// https://www.haskell.org/onlinereport/haskell2010/haskellch9.html#x16-1720009.1
+
 export const CORE_LIBRARY: IdentifierDefinitions[] = [
   {
     Nothing: { domain: 'NothingDomain' },
@@ -442,15 +445,26 @@ export const CORE_LIBRARY: IdentifierDefinitions[] = [
 
           if (args.length === 0) return ce.box(['Sequence']);
 
-          const result =
-            args.length === 1
-              ? canonicalFunctionExpression(args[0])
-              : ce._fn('Function', args);
-          return result ?? null;
+          const canonicalFn = canonicalFunctionExpression(
+            args[0],
+            args.slice(1)
+          );
+          if (!canonicalFn) return null;
+
+          const body = canonicalFn[0].canonical;
+          const params = canonicalFn
+            .slice(1)
+            .map((x) => ce.symbol(x as string));
+
+          // If the function has no arguments, it is equivalent to the body
+          if (params.length === 0) return body;
+
+          return ce._fn('Function', [body, ...params]);
         },
         evaluate: (_ce, _args) => {
           // "evaluating" a function expression is not the same
           // as applying arguments to it.
+          // See `function apply()` for that.
 
           return undefined;
         },

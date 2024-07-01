@@ -1,24 +1,57 @@
-## [Unrelease]
+## [Unreleased]
 
 ### New Features
 
 - The `expr.toString()` method now returns a serialization of the expression
   using the [AsciiMath](https://asciimath.org/) format.
+
+- Added support for Kronecker delta notation, i.e. `\delta_{ij}`, which is
+  parsed as `["KroneckerDelta", "i", "j"]` and is equal to 1 if `i = j` and 0
+  otherwise.
+
+  Also support single index, whose value is 1 if the index is 0 and 0 otherwise,
+  and multiple indexes whose value is 1 if all indexes are equal and 0
+  otherwise.
+
+- Added support for Iverson Bracket notation, i.e. `[a = b]`, which is parsed as
+  `["Boole", ["Equal", "a", "b"]]` and is equal to 1 if its argument is true and
+  0 otherwise. The argument is expected to be a relational expression.
+
 - Implemented the Map, Filter and Tabulate functions. These functions can be
   used to transform collections, for example:
 
   ```js
+  // Using LaTeX
+  console.log(ce.parse('\\mathrm{Map}([3, 5, 7], x \\mapsto x^2)').toString());
+  // -> [9, 25, 49]
+
+  // Using boxed expressions
   console.log(
-    ce.box(['Map', ['List', 3, 5, 7], ['Function', ['Square', '_']]]).value
+    ce.box(['Map', ['List', 3, 5, 7], ['Square', '_']]).value
   );
   // -> [9, 25, 49]
 
-  console.log(ce.box(['Tabulate', ['Function', ['Square', '_']], 5]).value);
+  console.log(ce.box(['Tabulate',['Square', '_'], 5]).value);
   // -> [1, 4, 9, 16, 25]
+  ```
+
+  Tabulate can be used with multiple indexes. For example, to generate a 4x4
+  unit matrix:
+
+  ```js
+  console.log(ce.box(['Tabulate', ['If', ['Equal', '_1', '_2'], 1, 0]], 4, 4).value);
+  // -> [[1, 0, 0, 0], [0, 1, 0, 0], [0, 0, 1, 0], [0, 0, 0, 1]]
+
+  // Using the Kronecker delta notation:
+  console.log(ce.parse('\\mathrm{Tabulate}(i, j \\mapsto \\delta_{ij}, 4, 4)').value);
+  // -> [[1, 0, 0, 0], [0, 1, 0, 0], [0, 0, 1, 0], [0, 0, 0, 1]]
+
   ```
 
 ### Issues Resolved
 
+- Improved parsing of functions, including when a mixture of named and
+  positional arguments are used.
 - **#175** Matching some patterns when the target had not enough operands would
   result in a runtime error.
 
@@ -36,6 +69,9 @@
   ```js
   expr.simplify(["\\frac{x}{x} -> 1", "x + x -> 2x"]);
   ```
+
+Single letter variables are assumed to be wildcards, so `x` is interpreted as
+the wildcard `_x`.
 
 Additionally, the expanded form can also include LaTeX strings. The previous
 syntax using expressions can still be used, and the new and old syntax can be
@@ -59,7 +95,7 @@ expr.simplify([
 The `condition` function can also be expressed as a LaTeX string.
 
 ```js
-  expr.simplify([ { match: "\\frac{x}{x}", replace: "1", condition: "x != 0" }, ]);
+  expr.simplify([ { match: "\\frac{x}{x}", replace: 1, condition: "x != 0" }, ]);
 ```
 
 The shorthand syntax can be used any where a ruleset is expected, including with

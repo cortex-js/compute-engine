@@ -46,11 +46,28 @@ const OPERATORS = {
   Multiply: [
     (expr) => {
       if (expr.nops === 2) {
-        if (expr.op1.numericValue !== null) {
-          return toAsciiMath(expr.op1, 12) + toAsciiMath(expr.op2, 12);
+        const lhs = expr.op1.numericValue;
+        if (lhs !== null) {
+          if (lhs === 1) return toAsciiMath(expr.op2, 12);
+          if (lhs === -1) return `-${toAsciiMath(expr.op2, 12)}`;
+          const rhs = expr.op2;
+          if (rhs.symbol)
+            return toAsciiMath(expr.op1, 12) + toAsciiMath(expr.op2, 12);
         }
       }
-      return expr.ops?.map((x) => toAsciiMath(x, 12)).join(` * `) ?? '';
+      if (!expr.ops) return '';
+      // Use a reduce over each term
+      return expr.ops
+        .reduce((acc, x) => {
+          let rhs = toAsciiMath(x, 12);
+          if (rhs.startsWith('+') || rhs.startsWith('-'))
+            return [...acc, `(${rhs})`];
+          const lhs = acc[acc.length - 1];
+          if (lhs === '-1' || lhs === '(-1)')
+            return [...acc.slice(0, -1), `-${rhs}`];
+          return [...acc, rhs];
+        }, [])
+        .join(' * ');
     },
     12,
   ],
@@ -110,23 +127,28 @@ const FUNCTIONS = {
   Max: 'max',
   Min: 'min',
 
+  Sum: (expr) => bigOp(expr, 'sum'),
+  Product: (expr) => bigOp(expr, 'prod'),
+  Integrate: (expr) => bigOp(expr, 'int'),
+
   Delimiter: (expr) => delimiter(expr.op1, expr.op2.string),
   Sequence: (expr) => {
-    const delimiter = expr.op1;
-    return `(${toAsciiMath(delimiter)})${toAsciiMath(expr.op2)}`;
-  },
-  Tuple: (expr) => {
-    const delimiter = expr.op1;
-    return `(${toAsciiMath(delimiter)})${toAsciiMath(expr.op2)}`;
-  },
-  Pair: (expr) => {
-    const delimiter = expr.op1;
-    return `(${toAsciiMath(delimiter)})${toAsciiMath(expr.op2)}`;
+    if (expr.nops === 0) return '';
+    return expr.ops.map((x) => toAsciiMath(x)).join('');
   },
 
-  Sum: (expr) => bigOp(expr, 'sum'),
-  Integrate: (expr) => bigOp(expr, 'int'),
   List: (expr) => `[${expr.ops?.map((x) => toAsciiMath(x)) ?? ''}]`,
+  Single: (expr) => `(${expr.ops.map((x) => toAsciiMath(x)).join(', ')})`,
+  Pair: (expr) => `(${expr.ops.map((x) => toAsciiMath(x)).join(', ')})`,
+  Triple: (expr) => `(${expr.ops.map((x) => toAsciiMath(x)).join(', ')})`,
+  Tuple: (expr) => `(${expr.ops.map((x) => toAsciiMath(x)).join(', ')})`,
+
+  Function: (expr) =>
+    `(${expr
+      .ops!.slice(1)
+      .map((x) => toAsciiMath(x))
+      .join(', ')}) |-> {${toAsciiMath(expr.op1)}}`,
+
   Domain: (expr) => JSON.stringify(expr.json),
 };
 

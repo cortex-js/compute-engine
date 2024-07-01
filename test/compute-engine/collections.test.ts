@@ -505,12 +505,12 @@ describe('INDEXABLE OPERATIONS', () => {
 
   test('Tally', () =>
     expect(evaluate(['Tally', list3])).toMatchInlineSnapshot(
-      `["Tally", ["List", 3, 5, 7, 7, 1, 3, 5, 9, 7, 3, 5, 7, 1, 2, 5, 9]]`
+      `["Pair", ["List", 3, 5, 7, 1, 9, 2], ["List", 3, 4, 4, 2, 2, 1]]`
     ));
 
   test('Unique', () =>
     expect(evaluate(['Unique', list3])).toMatchInlineSnapshot(
-      `["Unique", ["List", 3, 5, 7, 7, 1, 3, 5, 9, 7, 3, 5, 7, 1, 2, 5, 9]]`
+      `["List", 3, 5, 7, 1, 9, 2]`
     ));
 });
 
@@ -526,49 +526,30 @@ describe('ITERABLE OPERATIONS', () => {
     ));
 
   test('Map', () =>
-    expect(evaluate(['Map', list, ['Function', ['Add', 'x', 1], 'x']]))
-      .toMatchInlineSnapshot(`
-      [
-        "Map",
-        ["List", 7, 13, 5, 19, 2, 3, 11],
-        ["Function", ["Add", "x", 1], "x"]
-      ]
-    `));
+    expect(
+      evaluate(['Map', list, ['Function', ['Add', 'x', 1], 'x']])
+    ).toMatchInlineSnapshot(`["List", 8, 14, 6, 20, 3, 4, 12]`));
 
   test('Map', () =>
-    expect(evaluate(['Map', list, ['Plus', '_', 1]])).toMatchInlineSnapshot(
-      `["Map", ["List", 7, 13, 5, 19, 2, 3, 11], ["Plus", "_", 1]]`
+    expect(evaluate(['Map', list, ['Add', '_', 1]])).toMatchInlineSnapshot(
+      `["List", 8, 14, 6, 20, 3, 4, 12]`
     ));
 
   test('Filter', () =>
-    expect(evaluate(['Filter', list, ['Greater', '_', 10]]))
-      .toMatchInlineSnapshot(`
-      [
-        "Filter",
-        ["List", 7, 13, 5, 19, 2, 3, 11],
-        [
-          "Error",
-          [
-            "ErrorCode",
-            "'incompatible-domain'",
-            ["FunctionOf", ["VarArg", "Anything"], "Anything"],
-            "Booleans"
-          ],
-          ["Less", 10, "_"]
-        ]
-      ]
-    `));
+    expect(
+      evaluate(['Filter', list, ['Greater', '_', 10]])
+    ).toMatchInlineSnapshot(`["List", 13, 19, 11]`));
 
   test('Reduce', () =>
     expect(
-      evaluate(['Reduce', list, ['Plus', '_1', '_2']])
+      evaluate(['Reduce', list, ['Add', '_1', '_2']])
     ).toMatchInlineSnapshot(
-      `["Reduce", ["List", 7, 13, 5, 19, 2, 3, 11], ["Plus", "_1", "_2"]]`
+      `["Reduce", ["List", 7, 13, 5, 19, 2, 3, 11], ["Add", "_1", "_2"]]`
     ));
 
   test('Reduce', () =>
-    expect(evaluate(['Reduce', list, 'Plus'])).toMatchInlineSnapshot(
-      `["Reduce", ["List", 7, 13, 5, 19, 2, 3, 11], "Plus"]`
+    expect(evaluate(['Reduce', list, 'Add'])).toMatchInlineSnapshot(
+      `["Reduce", ["List", 7, 13, 5, 19, 2, 3, 11], "Add"]`
     ));
 
   test('Zip', () =>
@@ -578,7 +559,7 @@ describe('ITERABLE OPERATIONS', () => {
 
   test('Join', () =>
     expect(evaluate(['Join', list1, list2])).toMatchInlineSnapshot(
-      `["Join", ["List", 100, 4, 2, 62, 34, 16, 8], ["List", 9, 7, 2, 24]]`
+      `["List", 100, 4, 2, 62, 34, 16, 8, 9, 7, 2, 24]`
     ));
 });
 

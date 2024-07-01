@@ -73,7 +73,6 @@ export function order(
 /**
  * Given an expression, rewrite it to a canonical Function form.
  *
- *
  * - explicit parameters (no change)
  *      ["Function", ["Add, "x", 1], "x"]
  *      -> ["Function", ["Add, "x", 1], "x"]
@@ -86,61 +85,50 @@ export function order(
  *      ["Add", "_1", "_2"]
  *      -> ["Function", ["Add", "_1", "_2"], "_1", "_2"]
  *
+ *
  */
 export function canonicalFunctionExpression(
-  expr: BoxedExpression
-): BoxedExpression | undefined {
-  //
-  // Convert N operators:
-  //  - N(Integrate) -> NIntegrate()
-  //  - N(Limit) -> NLimit()
-  //
-  if (expr.head === 'N' && typeof expr.op1.head === 'string') {
-    const newHead = { Integrate: 'NIntegrate', Limit: 'NLimit' }[expr.op1.head];
-    if (newHead) expr = expr.engine._fn(newHead, expr.op1.ops!);
-  }
-
-  //
-  // Is it a Function expression?
-  //
-  if (expr.head === 'Function') return expr;
-
-  // @todo an expression could include a scoped environment
-  // and we currently don't handle that case.
-  // e.e. ["Function",
-  //        ["Block",
-  //          ["Add", "x", 1],
-  //          ["Block",
-  //            ["Declare", "x", "String"],   // shadow outer x
-  //            ["Add", "x", 2],              // references inner x
-  //          ]
-  //        ]
-  //      x"]
-
-  // We have a "simple" expression, possibly with some
-  // anonymous parameters, e.g. `["Add", "_1", "_2"]`
-
-  let unknowns = expr.unknowns;
-
+  body: BoxedExpression,
+  args: BoxedExpression[] = []
+): [body: BoxedExpression, ...params: string[]] | undefined {
+  // The body of a Function expression could use a combination of named
+  // parameters and wildcards. For example:
+  // ["Function", ["Add", "x", "_2", "_1"], "x"]
+  // That needs to be transformed to:
+  // ["Function", ["Add", "x", "_2", "x"], "x", "_2"]
+  const params = args.map((x, i) => {
+    if (!x.symbol || x.symbol === 'Nothing') return `_${i + 1}`;
+    return x.symbol;
+  });
+  let unknowns = body.unknowns;
   if (unknowns.includes('_')) {
-    expr = expr.subs({ _: '_1' });
-    unknowns = expr.unknowns;
+    body = body.subs({ _: '_1' });
+    unknowns = body.unknowns;
   }
-
-  let count = 0;
+  let count = params.length;
+  // Add any anonymous parameters that are not already in the list
   for (const unknown of unknowns) {
     if (unknown.startsWith('_')) {
       const n = Number(unknown.slice(1));
+      if (n <= params.length) body = body.subs({ [unknown]: params[n - 1] });
       if (n > count) count = n;
     }
   }
 
-  const ce = expr.engine;
-  const result = ce._fn('Function', [
-    expr,
-    ...Array.from({ length: count }, (_, i) => ce.symbol(`_${i + 1}`)),
-  ]);
-  return result;
+  for (let i = params.length; i < count; i++) params.push(`_${i + 1}`);
+
+  // Remove any trailing anonymous parameters that are not used
+  // For example in `() -> 2`. An implicit Nothing -> _1 parameter. We need to
+  // remove it now.
+  let i = count;
+  while (i > 0) {
+    if (params[i - 1] === `_${i}`) {
+      if (!unknowns.includes(`_${i}`)) params.pop();
+    } else break;
+    i--;
+  }
+
+  return [body, ...params];
 }
 
 /**
@@ -167,12 +155,14 @@ function makeLambda(
     return (params) => ce._fn(expr, params);
   }
 
-  const fnExpr = canonicalFunctionExpression(expr);
-  if (!fnExpr) return undefined;
-  console.assert(fnExpr.head === 'Function');
-
-  // Extract the parameters from the function signature ("x", "y")
-  const params = fnExpr.ops!.slice(1).map((x) => x.symbol ?? 'Nothing');
+  // Turn the expression into a canonical Function expression
+  // For example, ["Add", "_", 1] -> ["Function", ["Add", "_", 1], "_"]
+  let canonicalFn;
+  if (expr.head === 'Function') {
+    canonicalFn = canonicalFunctionExpression(expr.op1, expr.ops!.slice(1));
+  } else canonicalFn = canonicalFunctionExpression(expr);
+  if (!canonicalFn) return undefined;
+  const [body, ...params] = canonicalFn;
 
   // Create a scope for the arguments and locals
   ce.pushScope();
@@ -181,7 +171,7 @@ function makeLambda(
   // with coincidentally the same name as the parameter.
   for (const param of params)
     ce.declare(param, { inferred: true, domain: undefined });
-  const fn = fnExpr.op1.canonical;
+  const fn = body.canonical;
 
   fn.bind();
   ce.popScope();
@@ -203,9 +193,25 @@ function makeLambda(
   }
 
   return (args) => {
-    if (ce.strict) {
-      args = checkArity(ce, args, params.length);
-      if (!args.every((x) => x.isValid)) return undefined;
+    // If there are more arguments than expected, exit
+    if (args.length > params.length) return undefined;
+
+    // If an argument is invalid, exit
+    if (ce.strict && !args.every((x) => x.isValid)) return undefined;
+
+    // If there are fewer arguments than expected, curry the function
+    if (args.length < params.length) {
+      // const sub = Object.fromEntries(
+      //   params.slice(args.length).map((x, i) => [x, ce.symbol(`_${i + 1}`)])
+      // );
+      const extras = params
+        .slice(args.length)
+        .map((x, i) => ce.symbol(`_${i + 1}`));
+      const newBody = apply(ce.box(['Function', body, ...params]), [
+        ...args,
+        ...extras,
+      ]).evaluate();
+      return ce.box(['Function', newBody]);
     }
 
     // Evaluate the arguments, in the current scope
@@ -286,37 +292,6 @@ export function applicableN1(fn: BoxedExpression): (x: number) => number {
 
   return (x) => ce._fn(fn.evaluate(), [ce.number(x)]).value as number;
 }
-
-// xcas/gias https://www-fourier.ujf-grenoble.fr/~parisse/giac/doc/en/cascmd_en/cascmd_en.html
-// https://www.haskell.org/onlinereport/haskell2010/haskellch9.html#x16-1720009.1
-
-/*
- DICTIONARY
- aka Association in Wolfram, Dictionary in Python and Swift, Record in Maple,
- Map Containers in mathlab, Map in JavaScript
- Dictionary("field1", "value1", "field2", "value2"...)
- Need a new atomic 'dict' MathJSON type?
-  {{name: 'dict',"field1": "value1", "field2": "value2"}}
-*/
-
-// LISTS
-// https://www.mathworks.com/help/referencelist.html?type=function&listtype=cat&category=&blocktype=&capability=&s_tid=CRUX_lftnav
-
-// == NestList ??
-// Append (python) / Push
-// Insert(i, x)
-// Pop(): remove last, Pop(i): remove item at [i]
-
-// set, delayed-set
-// index
-// Bind // replace  ( x-> 1)
-// rule ->
-// delayed-rule: :> (value of replacement is recalculated each time)
-// set, set delayed
-// join
-// convert(expr, CONVERT_TO, OPTIONS) -- See Maple
-// convert(expr, options), with options such as 'cos', 'sin, 'trig, 'exp', 'ln', 'latex', 'string', etc...)
-// spread -> expand the elements of a list. If inside a list, insert the list into its parent
 
 /**
  * Give a string like "f(x,y)" return, ["f", ["x", "y"]]

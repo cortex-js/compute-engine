@@ -49,18 +49,20 @@ const DELIMITER_SHORTHAND: { [key: string]: LatexToken[] } = {
   ':': [':', '\\colon'],
   '|': ['|', '\\|', '\\lvert', '\\rvert'], //special: '\lvert` when open, `\rvert` when close
   '||': ['||', '\\Vert', '\\lVert', '\\rVert'], // special: `\lVert` when open, `\rVert` when close
-  '\\lfloor': ['\\lfloor'],
-  '\\rfloor': ['\\rfloor'],
-  '\\lceil': ['\\lceil'],
-  '\\rceil': ['\\rceil'],
-  '\\ulcorner': ['\\ulcorner'],
-  '\\urcorner': ['\\urcorner'],
-  '\\llcorner': ['\\llcorner'],
-  '\\lrcorner': ['\\lrcorner'],
-  '\\lgroup': ['\\lgroup'],
-  '\\rgroup': ['\\rgroup'],
-  '\\lmoustache': ['\\lmoustache'],
-  '\\rmoustache': ['\\rmoustache'],
+  // '\\lfloor': ['\\lfloor'],
+  // '\\rfloor': ['\\rfloor'],
+  // '\\lceil': ['\\lceil'],
+  // '\\rceil': ['\\rceil'],
+  // '\\ulcorner': ['\\ulcorner'],
+  // '\\urcorner': ['\\urcorner'],
+  // '\\llcorner': ['\\llcorner'],
+  // '\\lrcorner': ['\\lrcorner'],
+  // '\\lgroup': ['\\lgroup'],
+  // '\\rgroup': ['\\rgroup'],
+  // '\\lmoustache': ['\\lmoustache'],
+  // '\\rmoustache': ['\\rmoustache'],
+  // '\\llbracket': ['\\llbracket'],
+  // '\\rrbracket': ['\\rrbracket'],
 };
 
 // const MIDDLE_DELIMITER = {
@@ -120,6 +122,7 @@ const CLOSE_DELIMITER = {
   '\\llcorner': '\\lrcorner',
   '\\lgroup': '\\rgroup',
   '\\lmoustache': '\\rmoustache',
+  '\\llbracket': '\\rrbracket',
 };
 
 /**
@@ -619,12 +622,12 @@ export class _Parser implements Parser {
    * If the next token matches the open delimiter, set a boundary with
    * the close token and return true.
    *
-   * Note this method handles "shorthand" delimiters, i.e. '(' will match both
+   * This method handles prefixes like `\left` and `\bigl`.
+   *
+   * It also handles "shorthand" delimiters, i.e. '(' will match both
    * `(` and `\lparen`. If a shorthand is used for the open delimiter, the
    * corresponding shorthand will be used for the close delimiter.
    * See DELIMITER_SHORTHAND.
-   *
-   * It also handles prefixes like `\left` and `\bigl`.
    *
    */
   private matchDelimiter(
@@ -2137,13 +2140,24 @@ export class _Parser implements Parser {
     return false;
   }
 
-  /** Return all defs of the specified kind */
+  /** Return all defs of the specified kind.
+   * The defs at the end of the dictionary have priority, since they may
+   * override previous definitions. (For example, there is a core definition
+   * for matchfix[], which maps to a List, and a logic definition which
+   * matches to Boole. The logic definition should take precedence.)
+   */
   *getDefs(kind: string): Iterable<IndexedLatexDictionaryEntry> {
     if (kind === 'operator') {
-      for (const def of this._dictionary.defs)
+      for (let i = this._dictionary.defs.length - 1; i >= 0; i--) {
+        const def = this._dictionary.defs[i];
         if (/^prefix|infix|postfix/.test(def.kind)) yield def;
+      }
     } else {
-      for (const def of this._dictionary.defs) if (def.kind === kind) yield def;
+      // Iterate over the definitions, backwards
+      for (let i = this._dictionary.defs.length - 1; i >= 0; i--) {
+        const def = this._dictionary.defs[i];
+        if (def.kind === kind) yield def;
+      }
     }
   }
 }
