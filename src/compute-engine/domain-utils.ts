@@ -178,7 +178,7 @@ export function signatureToDomain(
 
     return ce.domain(['FunctionOf', ...(fnParams as DomainExpression[])]);
   } catch (e) {
-    console.log('signatureToDomain():', e);
+    console.error('signatureToDomain():', e);
   }
   return ce.domain(['FunctionOf', 'Anything', 'Anything']);
 }
