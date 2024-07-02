@@ -96,7 +96,7 @@ function serializeRoot(
   degree = degree ?? 2;
   if (style === 'solidus') {
     return (
-      serializer.wrapShort(base) + '^{1\\/' + serializer.serialize(degree) + '}'
+      serializer.wrapShort(base) + '^{1/' + serializer.serialize(degree) + '}'
     );
   } else if (style === 'quotient') {
     return (
@@ -439,7 +439,7 @@ function serializeFraction(
     const numerStr = serializer.wrapShort(numer);
     const denomStr = serializer.wrapShort(denom);
 
-    if (style === 'inline-solidus') return `${numerStr}\\/${denomStr}`;
+    if (style === 'inline-solidus') return `${numerStr}/${denomStr}`;
     return `{}^{${numerStr}}\\!\\!/\\!{}_{${denomStr}}`;
   } else if (style === 'reciprocal') {
     if (machineValue(numer) === 1) return serializer.wrap(denom) + '^{-1}';
@@ -743,6 +743,8 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
     parse: 'Divide',
   },
   {
+    // The \/ command is recognized by MathLive, but not by KaTeX, so we
+    // try to avoid generating it.
     latexTrigger: ['\\/'],
     kind: 'infix',
     associativity: 'left',

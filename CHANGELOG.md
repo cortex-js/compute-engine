@@ -17,6 +17,18 @@
   `["Boole", ["Equal", "a", "b"]]` and is equal to 1 if its argument is true and
   0 otherwise. The argument is expected to be a relational expression.
 
+- Implemented Unique and Tally on collections. Unique returns a collection with
+  only the unique elements of the input collection, and Tally returns a
+  collection with the count of each unique element.
+
+  ```js
+  console.log(ce.box(['Unique', ['List', 1, 2, 3, 1, 2, 3, 4, 5]]).value);
+  // -> [1, 2, 3, 4, 5]
+
+  console.log(ce.box(['Tally', ['List', 1, 2, 3, 1, 2, 3, 4, 5]]).value);
+  // -> [['List', 1, 2, 3, 4, 5], ['List', 2, 2, 2, 1, 1]]
+  ```
+
 - Implemented the Map, Filter and Tabulate functions. These functions can be
   used to transform collections, for example:
 
@@ -50,8 +62,15 @@
 
 ### Issues Resolved
 
+- Some LaTeX renderer can't render `\/`, so use `/` instead.
+
+- When definitions are added to the LaTeX dictionary, they now take precedence
+  over the built-in definitions. This allows users to override the built-in
+  definitions.
+
 - Improved parsing of functions, including when a mixture of named and
   positional arguments are used.
+
 - **#175** Matching some patterns when the target had not enough operands would
   result in a runtime error.
 
