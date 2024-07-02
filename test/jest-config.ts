@@ -85,6 +85,8 @@ class CortexConsole extends CustomConsole {
     this['_logError']('log', msg);
   }
   error(...message) {
+    debugger;
+
     let msg = '';
     try {
       throw new Error();
@@ -97,6 +99,9 @@ class CortexConsole extends CustomConsole {
   }
   assert(value, ...message) {
     if (value) return;
+
+    debugger;
+
     let msg = '';
     try {
       throw new Error();
