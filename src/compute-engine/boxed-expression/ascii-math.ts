@@ -1,7 +1,28 @@
 import Complex from 'complex.js';
 import Decimal from 'decimal.js';
-import { isBigRational, isMachineRational } from '../numerics/rationals';
+import {
+  isBigRational,
+  isMachineRational,
+  isRational,
+} from '../numerics/rationals';
 import { BoxedExpression } from './public';
+
+export type AsciiMathSerializer = (
+  expr: BoxedExpression,
+  precedence?: number
+) => string;
+
+export type AsciiMathOptions = {
+  symbols: Record<string, string>;
+  operators: Record<
+    string,
+    [string | ((expr: BoxedExpression) => string), number]
+  >;
+  functions: Record<
+    string,
+    string | ((expr: BoxedExpression, serialize: AsciiMathSerializer) => string)
+  >;
+};
 
 const SYMBOLS = {
   PositiveInfinity: 'oo',
@@ -13,11 +34,11 @@ const SYMBOLS = {
 
 const OPERATORS = {
   Add: [
-    (expr) => {
+    (expr, serialize) => {
       // Use a reduce, so that if the second argument starts with a + or -, don't include a '+' in the result
       return (
         expr.ops?.reduce((acc, x) => {
-          let rhs = toAsciiMath(x, 11);
+          let rhs = serialize(x, 11);
           if (acc === '') return rhs;
           if (rhs.startsWith('+') || rhs.startsWith('-'))
             return `${acc} ${rhs}`;
@@ -29,10 +50,10 @@ const OPERATORS = {
   ],
   Negate: ['-', 14], // Unary operator
   Subtract: [
-    (expr) => {
+    (expr, serialize) => {
       return (
         expr.ops?.reduce((acc, x) => {
-          let rhs = toAsciiMath(x, 11);
+          let rhs = serialize(x, 11);
           if (acc === '') return rhs;
           if (rhs.startsWith('+') || rhs.startsWith('-'))
             return `${acc} ${rhs}`;
@@ -44,22 +65,30 @@ const OPERATORS = {
     11,
   ],
   Multiply: [
-    (expr) => {
+    (expr, serialize) => {
       if (expr.nops === 2) {
         const lhs = expr.op1.numericValue;
         if (lhs !== null) {
-          if (lhs === 1) return toAsciiMath(expr.op2, 12);
-          if (lhs === -1) return `-${toAsciiMath(expr.op2, 12)}`;
+          if (lhs === 1) return serialize(expr.op2, 12);
+          if (lhs === -1) return `-${serialize(expr.op2, 12)}`;
           const rhs = expr.op2;
-          if (rhs.symbol)
-            return toAsciiMath(expr.op1, 12) + toAsciiMath(expr.op2, 12);
+          if (rhs.symbol || typeof FUNCTIONS[rhs.head] === 'string') {
+            if (isRational(lhs)) {
+              const den = lhs[1];
+              return `${serialize(expr.op2, 12)}/${den}`;
+            }
+            // if (typeof lhs === 'number' && Number.isInteger(lhs))
+            //   return serialize(expr.op1, 12) + serialize(expr.op2, 12);
+
+            return serialize(expr.op1, 12) + serialize(expr.op2, 12);
+          }
         }
       }
       if (!expr.ops) return '';
       // Use a reduce over each term
       return expr.ops
         .reduce((acc, x) => {
-          let rhs = toAsciiMath(x, 12);
+          let rhs = serialize(x, 12);
           if (rhs.startsWith('+') || rhs.startsWith('-'))
             return [...acc, `(${rhs})`];
           const lhs = acc[acc.length - 1];
@@ -73,7 +102,12 @@ const OPERATORS = {
   ],
   Divide: ['/', 13],
   Power: [
-    (expr) => expr.ops?.map((x) => toAsciiMath(x, 12)).join(`^`) ?? '',
+    (expr, serialize) => {
+      const exponent = serialize(expr.op2, 15);
+      if (exponent === '1') return serialize(expr.op1);
+      if (exponent === '(1/2)') return `sqrt(${serialize(expr.op1)})`;
+      return `${serialize(expr.op1, 15)}^${exponent}`;
+    },
     15,
   ],
   Equal: ['===', 8],
@@ -88,7 +122,7 @@ const OPERATORS = {
 };
 
 const FUNCTIONS = {
-  Abs: (expr: BoxedExpression) => `|${toAsciiMath(expr.op1)}|`,
+  Abs: (expr: BoxedExpression, serialize) => `|${serialize(expr.op1)}|`,
 
   Sin: 'sin',
   Cos: 'cos',
@@ -105,16 +139,17 @@ const FUNCTIONS = {
   Csch: 'csch',
   Coth: 'coth',
 
-  Ceil: (expr) => `|~${toAsciiMath(expr.op1)}~|`,
+  Ceil: (expr, serialize) => `|~${serialize(expr.op1)}~|`,
   Exp: 'exp',
-  Factorial: (expr) => `${toAsciiMath(expr.op1)}!`,
-  Floor: (expr) => `|__${toAsciiMath(expr.op1)}__|`,
+  Factorial: (expr, serialize) => `${serialize(expr.op1)}!`,
+  Floor: (expr, serialize) => `|__${serialize(expr.op1)}__|`,
   Log: 'log',
   Ln: 'ln',
   Log10: 'log10',
   Sqrt: 'sqrt',
-  Root: (expr) => `root(${toAsciiMath(expr.op1)})(${toAsciiMath(expr.op2)})`,
-  Square: (expr) => `${toAsciiMath(expr.op1, 12)}^2`,
+  Root: (expr, serialize) =>
+    `root(${serialize(expr.op1)})(${serialize(expr.op2)})`,
+  Square: (expr, serialize) => `${serialize(expr.op1, 12)}^2`,
 
   Det: 'det',
   Dim: 'dim',
@@ -127,33 +162,50 @@ const FUNCTIONS = {
   Max: 'max',
   Min: 'min',
 
-  Sum: (expr) => bigOp(expr, 'sum'),
-  Product: (expr) => bigOp(expr, 'prod'),
-  Integrate: (expr) => bigOp(expr, 'int'),
+  Sum: (expr, serialize) => bigOp(expr, 'sum', serialize),
+  Product: (expr, serialize) => bigOp(expr, 'prod', serialize),
+  Integrate: (expr, serialize) => bigOp(expr, 'int', serialize),
 
-  Delimiter: (expr) => delimiter(expr.op1, expr.op2.string),
-  Sequence: (expr) => {
+  Delimiter: (expr, serialize) =>
+    delimiter(expr.op1, expr.op2.string, serialize),
+  Sequence: (expr, serialize) => {
     if (expr.nops === 0) return '';
-    return expr.ops.map((x) => toAsciiMath(x)).join('');
+    return expr.ops.map((x) => serialize(x)).join('');
   },
 
-  List: (expr) => `[${expr.ops?.map((x) => toAsciiMath(x)) ?? ''}]`,
-  Single: (expr) => `(${expr.ops.map((x) => toAsciiMath(x)).join(', ')})`,
-  Pair: (expr) => `(${expr.ops.map((x) => toAsciiMath(x)).join(', ')})`,
-  Triple: (expr) => `(${expr.ops.map((x) => toAsciiMath(x)).join(', ')})`,
-  Tuple: (expr) => `(${expr.ops.map((x) => toAsciiMath(x)).join(', ')})`,
+  List: (expr, serialize) => `[${expr.ops?.map((x) => serialize(x)) ?? ''}]`,
+  Single: (expr, serialize) =>
+    `(${expr.ops.map((x) => serialize(x)).join(', ')})`,
+  Pair: (expr, serialize) =>
+    `(${expr.ops.map((x) => serialize(x)).join(', ')})`,
+  Triple: (expr, serialize) =>
+    `(${expr.ops.map((x) => serialize(x)).join(', ')})`,
+  Tuple: (expr, serialize) =>
+    `(${expr.ops.map((x) => serialize(x)).join(', ')})`,
 
-  Function: (expr) =>
+  Function: (expr, serialize) =>
     `(${expr
       .ops!.slice(1)
-      .map((x) => toAsciiMath(x))
-      .join(', ')}) |-> {${toAsciiMath(expr.op1)}}`,
+      .map((x) => serialize(x))
+      .join(', ')}) |-> {${serialize(expr.op1)}}`,
 
   Domain: (expr) => JSON.stringify(expr.json),
 };
 
-export function toAsciiMath(expr: BoxedExpression, precedence = 0): string {
-  if (expr.symbol) return SYMBOLS[expr.symbol] ?? expr.symbol;
+export function toAsciiMath(
+  expr: BoxedExpression,
+  options: Partial<AsciiMathOptions> = {},
+  precedence = 0
+): string {
+  if (expr.symbol) {
+    const symbols = options.symbols
+      ? { ...SYMBOLS, ...options.symbols }
+      : SYMBOLS;
+    return symbols[expr.symbol] ?? expr.symbol;
+  }
+
+  const serialize: AsciiMathSerializer = (expr, precedence = 0) =>
+    toAsciiMath(expr, options, precedence);
 
   if (expr.string) return expr.string;
   const num = expr.numericValue;
@@ -178,35 +230,45 @@ export function toAsciiMath(expr: BoxedExpression, precedence = 0): string {
   }
 
   if (expr.head && typeof expr.head === 'string') {
-    const [operator, precedence_] = OPERATORS[expr.head] ?? [];
+    const operators = options.operators
+      ? { ...OPERATORS, ...options.operators }
+      : OPERATORS;
+    const [operator, precedence_] = operators[expr.head] ?? [];
     if (operator) {
       // Go over each operands and convert them to ascii math
       let result = '';
       if (typeof operator === 'function') {
-        result = operator(expr);
+        result = operator(expr, serialize);
       } else {
         if (expr.nops === 1)
-          return `${operator}${toAsciiMath(expr.op1, precedence_)}`;
+          return `${operator}${serialize(expr.op1, precedence_)}`;
 
         result =
           expr.ops
-            ?.map((x) => toAsciiMath(x, precedence_))
+            ?.map((x) => serialize(x, precedence_))
             .join(` ${operator} `) ?? '';
       }
       if (precedence > precedence_) result = `(${result})`;
       return result;
     }
-    const func = FUNCTIONS[expr.head];
-    if (typeof func === 'function') return func(expr);
+    const functions = options.functions
+      ? { ...FUNCTIONS, ...options.functions }
+      : FUNCTIONS;
+    const func = functions[expr.head];
+    if (typeof func === 'function') return func(expr, serialize);
     if (typeof func === 'string')
-      return `${func}(${expr.ops?.map((x) => toAsciiMath(x)).join(', ') ?? ''})`;
-    return `${expr.head}(${expr.ops?.map((x) => toAsciiMath(x)).join(', ') ?? ''})`;
+      return `${func}(${expr.ops?.map((x) => serialize(x)).join(', ') ?? ''})`;
+    return `${expr.head}(${expr.ops?.map((x) => serialize(x)).join(', ') ?? ''})`;
   }
 
   return JSON.stringify(expr.json);
 }
 
-function bigOp(expr: BoxedExpression, op: string) {
+function bigOp(
+  expr: BoxedExpression,
+  op: string,
+  serialize: AsciiMathSerializer
+) {
   const op2 = expr.op2;
   let index: BoxedExpression | null = op2?.op1;
   let start: BoxedExpression | null = op2?.op2;
@@ -217,19 +279,19 @@ function bigOp(expr: BoxedExpression, op: string) {
 
   let result = op;
 
-  if (index && start)
-    result += `_(${toAsciiMath(index)}=${toAsciiMath(start)})`;
+  if (index && start) result += `_(${serialize(index)}=${serialize(start)})`;
 
-  if (end) result += `^(${toAsciiMath(end)})`;
+  if (end) result += `^(${serialize(end)})`;
 
-  result += `(${toAsciiMath(expr.op1)})`;
+  result += `(${serialize(expr.op1)})`;
 
   return result;
 }
 
 function delimiter(
   expr: BoxedExpression,
-  delimiter: string | undefined | null
+  delimiter: string | undefined | null,
+  serialize: AsciiMathSerializer
 ) {
   if (!delimiter) delimiter = '(,)';
   let separator = '';
@@ -249,5 +311,5 @@ function delimiter(
   let items: ReadonlyArray<BoxedExpression> = [expr.op1];
   if (expr.op1.head === 'Sequence') items = expr.op1.ops!;
 
-  return `${open}${items.map((x) => toAsciiMath(x)).join(separator)}${close}`;
+  return `${open}${items.map((x) => serialize(x)).join(separator)}${close}`;
 }

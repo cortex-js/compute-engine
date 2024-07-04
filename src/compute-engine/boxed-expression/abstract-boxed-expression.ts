@@ -41,7 +41,7 @@ import {
 } from './public';
 import { SerializeLatexOptions } from '../latex-syntax/public';
 import { asFloat } from './numerics';
-import { toAsciiMath } from './ascii-math';
+import { AsciiMathOptions, toAsciiMath } from './ascii-math';
 
 /**
  * _BoxedExpression
@@ -94,6 +94,10 @@ export abstract class _BoxedExpression implements BoxedExpression {
     if (typeof this.string === 'string') return this.string;
     if (typeof this.symbol === 'string') return this.symbol;
     return asFloat(this) ?? this.toString();
+  }
+
+  toAsciiMath(options: Partial<AsciiMathOptions> = {}): string {
+    return toAsciiMath(this, options);
   }
 
   /** Object.toString() */

@@ -5,6 +5,14 @@
 - The `expr.toString()` method now returns a serialization of the expression
   using the [AsciiMath](https://asciimath.org/) format.
 
+- The serialization to AsciiMath can be customized using the `toAsciiMath()`
+  method. For example:
+
+  ```js
+  console.log(ce.box(['Sigma', 2]).toAsciiMath({functions: {Sigma: 'sigma'}}));
+  // -> sigma(2)
+  ```
+
 - Added support for Kronecker delta notation, i.e. `\delta_{ij}`, which is
   parsed as `["KroneckerDelta", "i", "j"]` and is equal to 1 if `i = j` and 0
   otherwise.
