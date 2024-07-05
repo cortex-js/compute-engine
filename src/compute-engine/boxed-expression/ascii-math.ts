@@ -38,10 +38,10 @@ const OPERATORS = {
       // Use a reduce, so that if the second argument starts with a + or -, don't include a '+' in the result
       return (
         expr.ops?.reduce((acc, x) => {
-          let rhs = serialize(x, 11);
+          let rhs = serialize(x, 10);
           if (acc === '') return rhs;
-          if (rhs.startsWith('+') || rhs.startsWith('-'))
-            return `${acc} ${rhs}`;
+          if (rhs.startsWith('+')) return `${acc} + ${rhs.substring(1)}`;
+          if (rhs.startsWith('-')) return `${acc} - ${rhs.substring(1)}`;
           return `${acc} + ${rhs}`;
         }, '') ?? ''
       );
@@ -53,7 +53,7 @@ const OPERATORS = {
     (expr, serialize) => {
       return (
         expr.ops?.reduce((acc, x) => {
-          let rhs = serialize(x, 11);
+          let rhs = serialize(x, 10);
           if (acc === '') return rhs;
           if (rhs.startsWith('+') || rhs.startsWith('-'))
             return `${acc} ${rhs}`;
@@ -69,18 +69,23 @@ const OPERATORS = {
       if (expr.nops === 2) {
         const lhs = expr.op1.numericValue;
         if (lhs !== null) {
-          if (lhs === 1) return serialize(expr.op2, 12);
-          if (lhs === -1) return `-${serialize(expr.op2, 12)}`;
+          if (lhs === 1) return serialize(expr.op2, 11);
+          if (lhs === -1) return `-${serialize(expr.op2, 11)}`;
           const rhs = expr.op2;
-          if (rhs.symbol || typeof FUNCTIONS[rhs.head] === 'string') {
+          if (
+            rhs.symbol ||
+            rhs.head === 'Power' ||
+            rhs.head === 'Square' ||
+            typeof FUNCTIONS[rhs.head] === 'string'
+          ) {
             if (isRational(lhs)) {
               const den = lhs[1];
-              return `${serialize(expr.op2, 12)}/${den}`;
+              return `${serialize(expr.op2, 11)}/${den}`;
             }
             // if (typeof lhs === 'number' && Number.isInteger(lhs))
             //   return serialize(expr.op1, 12) + serialize(expr.op2, 12);
 
-            return serialize(expr.op1, 12) + serialize(expr.op2, 12);
+            return serialize(expr.op1, 11) + serialize(expr.op2, 11);
           }
         }
       }
@@ -88,9 +93,7 @@ const OPERATORS = {
       // Use a reduce over each term
       return expr.ops
         .reduce((acc, x) => {
-          let rhs = serialize(x, 12);
-          if (rhs.startsWith('+') || rhs.startsWith('-'))
-            return [...acc, `(${rhs})`];
+          let rhs = serialize(x, 11);
           const lhs = acc[acc.length - 1];
           if (lhs === '-1' || lhs === '(-1)')
             return [...acc.slice(0, -1), `-${rhs}`];
@@ -103,10 +106,10 @@ const OPERATORS = {
   Divide: ['/', 13],
   Power: [
     (expr, serialize) => {
-      const exponent = serialize(expr.op2, 15);
+      const exponent = serialize(expr.op2, 14);
       if (exponent === '1') return serialize(expr.op1);
       if (exponent === '(1/2)') return `sqrt(${serialize(expr.op1)})`;
-      return `${serialize(expr.op1, 15)}^${exponent}`;
+      return `${serialize(expr.op1, 14)}^${exponent}`;
     },
     15,
   ],
@@ -241,11 +244,11 @@ export function toAsciiMath(
         result = operator(expr, serialize);
       } else {
         if (expr.nops === 1)
-          return `${operator}${serialize(expr.op1, precedence_)}`;
+          return `${operator}${serialize(expr.op1, precedence_ - 1)}`;
 
         result =
           expr.ops
-            ?.map((x) => serialize(x, precedence_))
+            ?.map((x) => serialize(x, precedence_ - 1))
             .join(` ${operator} `) ?? '';
       }
       if (precedence > precedence_) result = `(${result})`;
