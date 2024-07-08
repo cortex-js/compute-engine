@@ -219,8 +219,10 @@ describe('MULTIPLY', () => {
 
   test(`with zero`, () =>
     expect(checkJson(['Multiply', 'x', 2, 3.1, 0])).toMatchSnapshot());
+
   test(`with NaN`, () =>
     expect(checkJson(['Multiply', 'x', 2, 3.1, 'NaN'])).toMatchSnapshot());
+
   test(`with <0`, () =>
     expect(checkJson(['Multiply', 'x', -2, 3.1, -5.2])).toMatchSnapshot());
 
@@ -231,7 +233,14 @@ describe('MULTIPLY', () => {
 
   test(`with -Infinity`, () =>
     expect(
-      checkJson(['Multiply', 'x', -2, 3.1, { num: '-Infinity' }])
+      checkJson([
+        'Multiply',
+        'x',
+        -2,
+        3.1,
+        'NegativeInfinity',
+        { num: '-Infinity' },
+      ])
     ).toMatchSnapshot());
 
   test(`with -Infinity and +Infinity`, () =>
@@ -241,6 +250,20 @@ describe('MULTIPLY', () => {
         'x',
         -2,
         3.1,
+        'PositiveInfinity',
+        { num: '-Infinity' },
+        { num: '+Infinity' },
+      ])
+    ).toMatchSnapshot());
+
+  test(`with Nan, -Infinity and +Infinity`, () =>
+    expect(
+      checkJson([
+        'Multiply',
+        'x',
+        -2,
+        3.1,
+        'NaN',
         { num: '-Infinity' },
         { num: '+Infinity' },
       ])
@@ -488,7 +511,7 @@ describe('Max', () => {
   test('Max of a list with non-comparable', () => {
     expect(
       ce.box(['Max', ['List', 4, 1, 'bar', 56, 'foo', 18]]).value
-    ).toMatchInlineSnapshot(`max(56, bar, foo)`);
+    ).toMatchInlineSnapshot(`max(56, "bar", "foo")`);
   });
 });
 
@@ -638,12 +661,12 @@ describe('GCD/LCM', () => {
   it('should compute the GCD of some integers and other stuff', () =>
     expect(
       ce.box(['GCD', 60, 'foo', 12]).evaluate().toString()
-    ).toMatchInlineSnapshot(`gcd(12, foo)`));
+    ).toMatchInlineSnapshot(`gcd(12, "foo")`));
 
   it('should compute the GCD of only stuff', () =>
     expect(
       ce.box(['GCD', 'foo', 'bar']).evaluate().toString()
-    ).toMatchInlineSnapshot(`gcd(foo, bar)`));
+    ).toMatchInlineSnapshot(`gcd("foo", "bar")`));
 
   it('should compute the GCD of a single number', () =>
     expect(ce.box(['GCD', 42]).evaluate().toString()).toMatchInlineSnapshot(
@@ -666,12 +689,12 @@ describe('GCD/LCM', () => {
   it('should compute the LCM of some integers and other stuff', () =>
     expect(
       ce.box(['LCM', 60, 'foo', 12]).evaluate().toString()
-    ).toMatchInlineSnapshot(`lcm(60, foo)`));
+    ).toMatchInlineSnapshot(`lcm(60, "foo")`));
 
   it('should compute the LCM of only stuff', () =>
     expect(
       ce.box(['LCM', 'foo', 'bar']).evaluate().toString()
-    ).toMatchInlineSnapshot(`lcm(foo, bar)`));
+    ).toMatchInlineSnapshot(`lcm("foo", "bar")`));
 
   it('should compute the LCM of a single number', () =>
     expect(ce.box(['LCM', 42]).evaluate().toString()).toMatchInlineSnapshot(
@@ -715,5 +738,5 @@ describe('FACTOR', () => {
         .box(['Factor', ce.parse('\\sqrt{3}x+2\\sqrt{3}x')])
         .evaluate()
         .toString()
-    ).toMatchInlineSnapshot(`x * 3 * sqrt(3)`));
+    ).toMatchInlineSnapshot(`3sqrt(3) * x`));
 });

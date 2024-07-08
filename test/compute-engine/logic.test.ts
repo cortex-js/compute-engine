@@ -6,40 +6,46 @@ function box(expr: any) {
 
 describe('Logic', () => {
   it('should evaluate True and False', () => {
-    expect(box('True')).toMatchInlineSnapshot(`True`);
-    expect(box('False')).toMatchInlineSnapshot(`False`);
+    expect(box('True')).toMatchInlineSnapshot(`"True"`);
+    expect(box('False')).toMatchInlineSnapshot(`"False"`);
   });
 
   it('should evaluate Not', () => {
-    expect(box(['Not', 'True'])).toMatchInlineSnapshot(`False`);
-    expect(box(['Not', 'False'])).toMatchInlineSnapshot(`True`);
+    expect(box(['Not', 'True'])).toMatchInlineSnapshot(`"False"`);
+    expect(box(['Not', 'False'])).toMatchInlineSnapshot(`"True"`);
   });
 
   it('should evaluate And', () => {
-    expect(box(['And', 'True', 'True'])).toMatchInlineSnapshot(`True`);
-    expect(box(['And', 'True', 'False'])).toMatchInlineSnapshot(`False`);
-    expect(box(['And', 'False', 'True'])).toMatchInlineSnapshot(`False`);
-    expect(box(['And', 'False', 'False'])).toMatchInlineSnapshot(`False`);
+    expect(box(['And', 'True', 'True'])).toMatchInlineSnapshot(`"True"`);
+    expect(box(['And', 'True', 'False'])).toMatchInlineSnapshot(`"False"`);
+    expect(box(['And', 'False', 'True'])).toMatchInlineSnapshot(`"False"`);
+    expect(box(['And', 'False', 'False'])).toMatchInlineSnapshot(`"False"`);
   });
   it('should evaluate Or', () => {
-    expect(box(['Or', 'True', 'True'])).toMatchInlineSnapshot(`True`);
-    expect(box(['Or', 'True', 'False'])).toMatchInlineSnapshot(`True`);
-    expect(box(['Or', 'False', 'True'])).toMatchInlineSnapshot(`True`);
-    expect(box(['Or', 'False', 'False'])).toMatchInlineSnapshot(`False`);
+    expect(box(['Or', 'True', 'True'])).toMatchInlineSnapshot(`"True"`);
+    expect(box(['Or', 'True', 'False'])).toMatchInlineSnapshot(`"True"`);
+    expect(box(['Or', 'False', 'True'])).toMatchInlineSnapshot(`"True"`);
+    expect(box(['Or', 'False', 'False'])).toMatchInlineSnapshot(`"False"`);
   });
 
   it('should evaluate Implies', () => {
-    expect(box(['Implies', 'True', 'True'])).toMatchInlineSnapshot(`True`);
-    expect(box(['Implies', 'True', 'False'])).toMatchInlineSnapshot(`False`);
-    expect(box(['Implies', 'False', 'True'])).toMatchInlineSnapshot(`True`);
-    expect(box(['Implies', 'False', 'False'])).toMatchInlineSnapshot(`True`);
+    expect(box(['Implies', 'True', 'True'])).toMatchInlineSnapshot(`"True"`);
+    expect(box(['Implies', 'True', 'False'])).toMatchInlineSnapshot(`"False"`);
+    expect(box(['Implies', 'False', 'True'])).toMatchInlineSnapshot(`"True"`);
+    expect(box(['Implies', 'False', 'False'])).toMatchInlineSnapshot(`"True"`);
   });
 
   it('should evaluate Equivalent', () => {
-    expect(box(['Equivalent', 'True', 'True'])).toMatchInlineSnapshot(`True`);
-    expect(box(['Equivalent', 'True', 'False'])).toMatchInlineSnapshot(`False`);
-    expect(box(['Equivalent', 'False', 'True'])).toMatchInlineSnapshot(`False`);
-    expect(box(['Equivalent', 'False', 'False'])).toMatchInlineSnapshot(`True`);
+    expect(box(['Equivalent', 'True', 'True'])).toMatchInlineSnapshot(`"True"`);
+    expect(box(['Equivalent', 'True', 'False'])).toMatchInlineSnapshot(
+      `"False"`
+    );
+    expect(box(['Equivalent', 'False', 'True'])).toMatchInlineSnapshot(
+      `"False"`
+    );
+    expect(box(['Equivalent', 'False', 'False'])).toMatchInlineSnapshot(
+      `"True"`
+    );
   });
 });
 

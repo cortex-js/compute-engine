@@ -15,7 +15,8 @@
     "noLib": false,
     "removeComments": false,
     "sourceMap": true,
-    "strictNullChecks": true,
+    "strictNullChecks": true
+    // "isolatedDeclarations": true
   },
-  "include": ["src/**/*"],
+  "include": ["src/**/*"]
 }

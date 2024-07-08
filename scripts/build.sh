@@ -8,7 +8,8 @@ set -o pipefail  # don't hide errors within pipes
 export BASENAME="\033[40m Compute Engine \033[0;0m " # `basename "$0"`
 # export DOT="\033[32m  \033[0m" # Gear
 #  export DOT="\033[32m  \033[0m" # Watch 
-export DOT="\033[32m 羽 \033[0;0m" # Hourglass
+# export DOT="\033[32m 羽 😀 ⧖⧗⏳⌛️⚙⛭⚙️\033[0;0m" # Hourglass
+export DOT="\033[32m ⚙ \033[0;0m" # Gear
 export CHECK="\033[32m ✔ \033[0;0m"
 export ERROR="\033[31;7m ERROR \033[0;0m"
 export LINECLEAR="\033[1G\033[2K" # position to column 1; erase whole line
@@ -58,14 +59,14 @@ export SDK_VERSION=$(cat package.json \
 | tr -d '[[:space:]]')
 
 # Clean output directories
-printf "$BASENAME$DOT${RESET}Cleaning output directories"
+# printf "$BASENAME$DOT${RESET} Cleaning output directories"
 rm -rf ./dist
 rm -rf ./declarations
 rm -rf ./build
 rm -rf ./coverage
 
 mkdir -p dist
-echo -e  $LINECLEAR$BASENAME$CHECK${DIM}"Cleaning output directories"$RESET
+# echo -e  $LINECLEAR$BASENAME$CHECK${DIM}" Cleaning output directories"$RESET
 
 
 #
@@ -91,34 +92,31 @@ echo -e $LINECLEAR$BASENAME$CHECK$DIM" Building TypeScript declaration files$RES
 #
 # Do build (development or production)
 #
-echo -e $BASENAME$DOT$RESET"Making a \033[33m$BUILD\033[0m build"
+printf $BASENAME$DOT$RESET" Making a \033[33m$BUILD\033[0m build"
 
-# use -experimental-json-modules for now instead of:
-# npx rollup --silent --config config/rollup.config.mjs
+# To get more details about errors, uncomment the following line
+# export NODE_DEBUG=esm
+# The '--no-warnings' option is used to suppress a warning about importing
+# the package.json file in build.mjs.
+node --no-warnings ./scripts/build.mjs
 
-# node --experimental-json-modules ./node_modules/.bin/rollup --config config/rollup.config.mjs
-# node rollup --config config/rollup.config.js
-
-node --experimental-json-modules ./scripts/build.mjs
-
-echo -e "$BASENAME$CHECK$DIM \033[33m"$BUILD$DIM" build done$RESET"
 
 if [ "$BUILD" = "production" ]; then    
     # Linting
-    # echo -e "\033[40m`basename "$0"`\033[0m 🚀 Linting"
+    # printf "$BASENAME$DOT Linting"
     # npm run lint
+    # echo -e $LINECLEAR$BASENAME$CHECK$DIM" Linting$RESET"
 
     # Stamp the SDK version number
-    printf "$BASENAME$DOT Stamping output files"
     find ./dist -type f \( -name '*.js' -o -name '*.mjs' \) -exec bash -c 'sedi s/{{SDK_VERSION}}/$SDK_VERSION/g {}' \;
     find ./dist -type f -name '*.d.ts' -exec bash -c 'sedi "1s/^/\/\* $SDK_VERSION \*\/$(printf '"'"'\r'"'"')/" {}' \;
     find ./dist -type f -name '*.d.ts' -exec bash -c 'sedi "s/{{SDK_VERSION}}/$SDK_VERSION/" {}' \;
-    echo -e "$LINECLEAR$BASENAME$CHECK$DIM Output files stamped$RESET"
 
 
     # Run test suite
     # printf "$BASENAME$DOT Running test suite"
     # npx jest --config ./config/jest.config.cjs ./test --silent --reporters jest-silent-reporter
-    # echo -e "$LINECLEAR$BASENAME$CHECK$DIM Test suite complete$RESET"
+    # echo -e $LINECLEAR$BASENAME$CHECK$DIM" Running test suite$RESET"
 fi
 
+echo -e $LINECLEAR$BASENAME$CHECK$DIM" Making a \033[33m$BUILD$DIM build"
