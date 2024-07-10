@@ -20,6 +20,8 @@ console.log(ce.parse('0.3').simplify().toString());
 console.log(ce.parse('\\frac{\\sqrt5+1}{4}').simplify().toString());
 
 const exprs: [Expression, Expression][] = [
+  ['\\frac{\\ln{9}}{\\ln{3}}', 2],
+  ['e e^x e^{-x}', 'e'],
   ['1+0', 1],
   ['x+0', 'x'],
   ['\\frac{\\sqrt5+1}{4}', '\\frac{\\sqrt5+1}{4}'],
