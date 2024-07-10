@@ -420,16 +420,25 @@ export const COLLECTIONS_LIBRARY: IdentifierDefinitions = {
   At: {
     complexity: 8200,
     signature: {
-      domain: ['FunctionOf', 'Values', 'Values', 'Values'],
+      params: ['Values'],
+      restParam: 'Values',
+
       evaluate: (ce, ops) => {
-        const expr = ops[0];
-        const def = expr.functionDefinition;
-        if (!def?.at) return undefined;
-        const s = ops[1].string;
-        if (s !== null) return def.at(expr, 1) ?? ce.Nothing;
-        const i = asFloat(ops[1]);
-        if (i === null || !Number.isInteger(i)) return undefined;
-        return def.at(expr, i) ?? ce.Nothing;
+        let expr = ops[0];
+        let index = 1;
+        while (ops[index]) {
+          const def = expr.functionDefinition;
+          if (!def?.at) return undefined;
+          const s = ops[index].string;
+          if (s !== null) expr = def.at(expr, s) ?? ce.Nothing;
+          else {
+            const i = asFloat(ops[index]);
+            if (i === null || !Number.isInteger(i)) return undefined;
+            expr = def.at(expr, i) ?? ce.Nothing;
+          }
+          index += 1;
+        }
+        return expr;
       },
     },
   },

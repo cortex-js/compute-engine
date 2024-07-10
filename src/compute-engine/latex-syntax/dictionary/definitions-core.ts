@@ -485,6 +485,32 @@ export const DEFINITIONS_CORE: LatexDictionary = [
   { name: 'LatexTokens', serialize: serializeLatexTokens },
 
   {
+    name: 'At',
+    kind: 'postfix',
+    precedence: 810,
+    latexTrigger: ['['],
+    parse: parseAt(']'),
+    serialize: (serializer, expr) =>
+      joinLatex(['\\lbrack', serializeOps(', ')(serializer, expr), '\\rbrack']),
+  },
+  {
+    kind: 'postfix',
+    precedence: 810,
+    latexTrigger: ['\\lbrack'],
+    parse: parseAt('\\rbrack'),
+  },
+  {
+    kind: 'postfix',
+    precedence: 810,
+    latexTrigger: ['\\left', '\\lbrack'],
+    parse: parseAt('\\right', '\\rbrack'),
+  },
+  {
+    kind: 'postfix',
+    latexTrigger: ['_'],
+    parse: parseAt(),
+  },
+  {
     name: 'List',
     kind: 'matchfix',
     openTrigger: '[',
@@ -1051,9 +1077,18 @@ function parseParenDelimiter(
   _parser: Parser,
   body: Expression
 ): Expression | null {
-  // Handle `()` used for example with `f()`
+  // During parsing, we keep a Delimiter expression as it captures the most
+  // information (separator and fences).
+  // The Delimiter canonicalization will turn it into something else if
+  // appropriate (Tuple, etc...).
+
+  // Handle `()` used for example with `f()`. This will be handled in
+  // `canonicalInvisibleOperator()`
   if (body === null || isEmptySequence(body)) return ['Delimiter'];
+
   const h = head(body);
+  // We have a Delimiter inside parens: e.g. `(a, b, c)` with `a, b, c` the
+  // Delimiter function.
   if (h === 'Delimiter' && op(body, 2)) {
     const delims = stringValue(op(body, 2));
     if (delims?.length === 1) {
@@ -1062,6 +1097,10 @@ function parseParenDelimiter(
     }
   }
 
+  // @fixme
+  if (h === 'Sequence') debugger;
+  console.assert(h !== 'Sequence');
+
   if (h === 'Sequence') {
     if (nops(body) === 0) return ['Delimiter'];
     if (nops(body) === 1) return ['Delimiter', op(body, 1)!];
@@ -1069,7 +1108,7 @@ function parseParenDelimiter(
   }
 
   if (h === 'Matrix') {
-    let delims = stringValue(op(body, 2)) ?? '..';
+    const delims = stringValue(op(body, 2)) ?? '..';
     if (delims === '..') return ['Matrix', op(body, 1)!];
   }
 
@@ -1267,4 +1306,29 @@ function parseWhich(parser: Parser): Expression | null {
     }
   }
   return result;
+}
+
+function parseAt(...close: string[]): (parser, lhs) => Expression | null {
+  return (parser: Parser, lhs: Expression): Expression | null => {
+    // If the lhs is a symbol or a List literal...
+    if (!symbol(lhs) && head(lhs) !== 'List') return null;
+    const index = parser.index;
+
+    let rhs: Expression | null = null;
+    if (close.length === 0) rhs = parser.parseGroup();
+    rhs ??= parser.parseExpression({ minPrec: 0 });
+    if (rhs === null) {
+      parser.index = index;
+      return null;
+    }
+
+    if (close.length > 0 && !parser.matchAll(close)) {
+      parser.index = index;
+      return null;
+    }
+
+    if (head(rhs) === 'Delimiter') rhs = op(rhs, 1) ?? ['Sequence'];
+    if (head(rhs) === 'Sequence') return ['At', lhs, ...ops(rhs)!];
+    return ['At', lhs, rhs];
+  };
 }
