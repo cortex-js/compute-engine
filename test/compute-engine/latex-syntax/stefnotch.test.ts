@@ -106,21 +106,9 @@ describe('STEFNOTCH #13', () => {
   });
 
   test('2/ x_{1,2}=1,2', () => {
-    expect(parse('x_{1,2}=1,2')).toMatchInlineSnapshot(`
-      [
-        "Delimiter",
-        [
-          "Sequence",
-          [
-            "Equal",
-            ["Subscript", "x", ["Delimiter", ["Sequence", 1, 2], "','"]],
-            1
-          ],
-          2
-        ],
-        "','"
-      ]
-    `);
+    expect(parse('x_{1,2}=1,2')).toMatchInlineSnapshot(
+      `["Pair", ["Equal", ["At", "x", 1, 2], 1], 2]`
+    );
   }); // @fixme unclear what the right answer is
 
   test('3/  \\{1,2\\}', () => {
@@ -147,8 +135,23 @@ describe('STEFNOTCH #13', () => {
       .toMatchInlineSnapshot(`
       [
         "Implies",
-        ["LessEqual", ["Abs", "a_n"], ["Divide", 2, ["Sqrt", "n"]]],
-        ["Equal", ["To", "a_n", 0], 0]
+        [
+          "LessEqual",
+          [
+            "Abs",
+            [
+              "Error",
+              ["ErrorCode", "'incompatible-domain'", "Numbers", "Anything"],
+              ["At", "a", "n"]
+            ]
+          ],
+          ["Divide", 2, ["Sqrt", "n"]]
+        ],
+        [
+          "Error",
+          ["ErrorCode", "'incompatible-domain'", "Booleans", "Anything"],
+          ["At", "a", ["Equal", ["To", "n", 0], 0]]
+        ]
       ]
     `);
   });
@@ -173,8 +176,19 @@ describe('STEFNOTCH #13', () => {
             "'expected-closing-delimiter'",
             ["LatexString", "'{\\displaystyle\\lim_{n\\to\\infty}'"]
           ],
-          "a_n",
-          ["Error", "'unexpected-closing-delimiter'", ["LatexString", "'}'"]]
+          [
+            "At",
+            "a",
+            [
+              "InvisibleOperator",
+              "n",
+              [
+                "Error",
+                "'unexpected-closing-delimiter'",
+                ["LatexString", "'}'"]
+              ]
+            ]
+          ]
         ]
       ]
     `);
@@ -202,14 +216,21 @@ describe('STEFNOTCH #13', () => {
           "ForAll",
           "n",
           [
-            "Implies",
+            "At",
+            "a",
             [
               "LessEqual",
-              ["Subscript", "a", "n"],
-              ["Subscript", "c", "n"],
-              ["Subscript", "b", "n"]
-            ],
-            ["Error", "'missing'"]
+              "n",
+              [
+                "At",
+                "c",
+                [
+                  "LessEqual",
+                  "n",
+                  ["At", "b", ["Implies", "n", ["Error", "'missing'"]]]
+                ]
+              ]
+            ]
           ]
         ],
         [

@@ -274,7 +274,7 @@ export class _BoxedFunctionDefinition implements BoxedFunctionDefinition {
       };
     }
   }
-  reset() {
+  reset(): void {
     return;
   }
 }

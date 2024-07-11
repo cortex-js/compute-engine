@@ -989,7 +989,7 @@ export type SerializeLatexOptions = NumberSerializationFormat & {
   invisibleMultiply: LatexString;
 
   /**
-   * LaTeX string used to render mixed numbers e.g. in '1 3/4'.
+   * LaTeX string used to render [mixed numbers](https://en.wikipedia.org/wiki/Fraction#Mixed_numbers) e.g. '1 3/4'.
    *
    * Leave it empty to join the main number and the fraction, i.e. render it
    * as `1\frac{3}{4}`.
@@ -1004,9 +1004,11 @@ export type SerializeLatexOptions = NumberSerializationFormat & {
   /**
    * LaTeX string used to render an explicit multiply operator.
    *
+   * For example, `\times`, `\cdot`, etc...
+   *
    * Default: `\times`
    */
-  multiply: LatexString; // e.g. '\\times', '\\cdot'
+  multiply: LatexString;
 
   /**
    * Serialize the expression `["Error", "'missing'"]`,  with this LaTeX string
@@ -1065,8 +1067,8 @@ export interface Serializer {
 
   /** "depth" of the expression:
    * - 0 for the root
-   * - 1 for the arguments of the root
-   * - 2 for the arguments of the arguments of the root
+   * - 1 for a subexpression of the root
+   * - 2 for subexpressions of the subexpressions of the root
    * - etc...
    *
    * This allows the serialized LaTeX to vary depending on the depth of the

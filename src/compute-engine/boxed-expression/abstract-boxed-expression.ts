@@ -31,12 +31,10 @@ import {
   IComputeEngine,
   JsonSerializationOptions,
   Metadata,
-  NOptions,
   PatternMatchOptions,
   Rule,
   RuntimeScope,
   SemiBoxedExpression,
-  SimplifyOptions,
   Substitution,
 } from './public';
 import { SerializeLatexOptions } from '../latex-syntax/public';
@@ -574,7 +572,7 @@ export abstract class _BoxedExpression implements BoxedExpression {
     return false;
   }
 
-  get value(): number | boolean | string | Object | undefined {
+  get value(): number | boolean | string | object | undefined {
     return this.N().valueOf();
   }
 
@@ -584,7 +582,6 @@ export abstract class _BoxedExpression implements BoxedExpression {
     throw new Error(`Can't change the value of \\(${this.latex}\\)`);
   }
 
-  // @ts-ignore
   get domain(): BoxedDomain | undefined {
     return undefined;
   }
@@ -629,15 +626,15 @@ export abstract class _BoxedExpression implements BoxedExpression {
     return undefined;
   }
 
-  simplify(_options?: SimplifyOptions): BoxedExpression {
+  simplify(): BoxedExpression {
     return this;
   }
 
-  evaluate(_options?: EvaluateOptions): BoxedExpression {
+  evaluate(_options?: Partial<EvaluateOptions>): BoxedExpression {
     return this.simplify();
   }
 
-  N(_options?: NOptions): BoxedExpression {
+  N(): BoxedExpression {
     return this.evaluate({ numericMode: true });
   }
 

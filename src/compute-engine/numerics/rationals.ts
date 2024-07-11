@@ -1,9 +1,5 @@
 import { factorPower, gcd } from './numeric';
-import {
-  bigint,
-  gcd as bigGcd,
-  factorPower as bigFactorPower,
-} from './numeric-bigint';
+import { gcd as bigGcd, factorPower as bigFactorPower } from './numeric-bigint';
 
 /**
  * @category Boxed Expression
@@ -22,22 +18,22 @@ export function isBigRational(x: any | null): x is [bigint, bigint] {
   return x !== null && Array.isArray(x) && typeof x[0] === 'bigint';
 }
 
-export function isRationalZero(x: Rational): boolean {
+export function isZero(x: Rational): boolean {
   // Note '==' to convert bigint to number
   return x[0] == 0;
 }
 
-export function isRationalOne(x: Rational): boolean {
+export function isOne(x: Rational): boolean {
   return x[0] === x[1];
 }
 
-// True if the denominator is 1
-export function isRationalInteger(x: Rational): boolean {
-  return x[1] === 1 || x[1] === BigInt(1);
+export function isNegativeOne(x: Rational): boolean {
+  return x[0] === -x[1];
 }
 
-export function isRationalNegativeOne(x: Rational): boolean {
-  return x[0] === -x[1];
+// True if the denominator is 1
+export function isInteger(x: Rational): boolean {
+  return x[1] === 1 || x[1] === BigInt(1);
 }
 
 export function machineNumerator(x: Rational): number {
@@ -46,6 +42,10 @@ export function machineNumerator(x: Rational): number {
 
 export function machineDenominator(x: Rational): number {
   return Number(x[1]);
+}
+
+export function rationalAsFloat(x: Rational): number {
+  return Number(x[0]) / Number(x[1]);
 }
 
 export function isNeg(x: Rational): boolean {
@@ -81,8 +81,8 @@ export function pow(r: Rational, exp: number): Rational {
 
   // Always use bigint to calculate powers. Avoids underflow/overflow.
 
-  const bigexp = bigint(exp);
-  return [bigint(r[0]) ** bigexp, bigint(r[1]) ** bigexp];
+  const bigexp = BigInt(exp);
+  return [BigInt(r[0]) ** bigexp, BigInt(r[1]) ** bigexp];
 }
 
 export function sqrt(r: Rational): Rational | undefined {
@@ -93,9 +93,12 @@ export function sqrt(r: Rational): Rational | undefined {
   return undefined;
 }
 
-// export function rationalGcd(lhs: Rational, rhs: Rational): Rational {
-//   return [gcd(lhs[0] * rhs[1], lhs[1] * rhs[0]), lhs[1] * rhs[1]] as Rational;
-// }
+export function rationalGcd(lhs: Rational, rhs: Rational): Rational {
+  return [
+    bigGcd(BigInt(lhs[0]), BigInt(rhs[1])),
+    bigGcd(BigInt(lhs[1]), BigInt(rhs[0])),
+  ] as Rational;
+}
 
 // export function rationalLcm(
 //   [a, b]: [number, number],
@@ -165,23 +168,20 @@ export function rationalize(x: number): [n: number, d: number] | number {
   return [h, k];
 }
 
-/** Return [factor, root] such that factor * sqrt(root) = n
+/** Return [factor, root] such that factor * sqrt(root) = sqrt(n)
  * when factor and root are rationals
  */
 export function reduceRationalSquareRoot(
   n: Rational
-): [factor: Rational, root: Rational] {
+): [factor: Rational, root: number | bigint] {
   if (isBigRational(n)) {
     const [num, den] = n;
     const [nFactor, nRoot] = bigFactorPower(num, 2);
     const [dFactor, dRoot] = bigFactorPower(den, 2);
-    return [
-      reducedRational([nFactor, dFactor]),
-      reducedRational([nRoot, dRoot]),
-    ];
+    return [reducedRational([nFactor, dFactor * dRoot]), nRoot * dRoot];
   }
   const [num, den] = n;
   const [nFactor, nRoot] = factorPower(num, 2);
   const [dFactor, dRoot] = factorPower(den, 2);
-  return [reducedRational([nFactor, dFactor]), reducedRational([nRoot, dRoot])];
+  return [reducedRational([nFactor, dFactor * dRoot]), nRoot * dRoot];
 }

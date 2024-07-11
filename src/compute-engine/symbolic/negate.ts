@@ -5,6 +5,7 @@ import { neg } from '../numerics/rationals';
 import { BoxedExpression, IComputeEngine, Metadata } from '../public';
 import { flattenOps, flattenSequence } from './flatten';
 import { canonicalAdd } from '../library/arithmetic-add';
+import { order } from '../boxed-expression/order';
 
 function negateLiteral(expr: BoxedExpression): BoxedExpression | null {
   // Applying negation is safe (doesn't introduce numeric errors)
@@ -46,7 +47,7 @@ export function evalNegate(expr: BoxedExpression): BoxedExpression {
   // Distribute over addition
   // Negate(Add(a, b)) -> Add(Negate(a), Negate(b))
   if (expr.head === 'Add') {
-    let ops = expr.ops!.map((x) => evalNegate(x));
+    const ops = expr.ops!.map((x) => evalNegate(x));
     return ce.add(...ops);
   }
 
@@ -73,7 +74,7 @@ export function canonicalNegate(expr: BoxedExpression): BoxedExpression {
   const ce = expr.engine;
 
   if (expr.head === 'Add') {
-    let ops = expr.ops!.map((x) => canonicalNegate(x));
+    const ops = expr.ops!.map((x) => canonicalNegate(x));
     return canonicalAdd(ce, flattenOps(flattenSequence(ops), 'Add'));
   }
 
@@ -87,7 +88,7 @@ export function canonicalNegate(expr: BoxedExpression): BoxedExpression {
 // 1/ constants over symbols and expressions
 // 2/ negative constants over positive ones
 // 3/ `Negate` expressions
-function negateProduct(
+export function negateProduct(
   ce: IComputeEngine,
   args: ReadonlyArray<BoxedExpression>
 ): BoxedExpression {
@@ -102,6 +103,7 @@ function negateProduct(
   }
   if (done) return ce.mul(...result);
 
+  // @fixme: usse negateLiteral() instead of canonicalNegate. And don't need multiple loops. Also, don't need to push 1 in the result.
   // else If there is a literal integer, negate it
   result = [];
   for (const arg of args) {
@@ -125,7 +127,7 @@ function negateProduct(
   }
   if (done) return ce.mul(...result);
 
-  return ce._fn('Negate', [ce._fn('Multiply', args)]);
+  return ce._fn('Negate', [ce._fn('Multiply', [...args].sort(order))]);
 }
 
 export function processNegate(

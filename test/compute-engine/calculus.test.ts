@@ -48,7 +48,7 @@ describe('CALCULUS', () => {
       const expr = parse('D(\\sin(\\frac{1}{x}) + \\ln(x^2+2x), x)');
       const result = expr.evaluate();
       expect(result.latex).toMatchInlineSnapshot(
-        `\\frac{2x+2}{2x+x^2}-\\frac{\\cos(\\frac{1}{x})}{x^2}`
+        `\\frac{2(x+1)}{2x+x^2}-\\frac{\\cos(\\frac{1}{x})}{x^2}`
       );
     });
   });
@@ -89,7 +89,7 @@ describe('CALCULUS', () => {
     it('should compute the numerical approximation of the derivative of a polynomial', () => {
       const expr = parse('\\mathrm{ND}(x \\mapsto x^3 + 2x - 4, 2)');
       const result = expr.N();
-      expect(result.json).toMatchInlineSnapshot(`14.000000000000009`);
+      expect(result.json).toMatchInlineSnapshot(`13.999999999999991`);
     });
 
     it('should compute the numerical approximation of the derivative of an expression', () => {

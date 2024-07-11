@@ -18,6 +18,7 @@ import { normalizeIndexingSet } from './utils';
 import { canonicalForm } from '../boxed-expression/canonical';
 import { BoxedExpression } from '../boxed-expression/public';
 import { asFloat, asMachineInteger } from '../boxed-expression/numerics';
+import { order } from '../boxed-expression/order';
 
 //   // := assign 80 // @todo
 // compose (compose(f, g) -> a new function such that compose(f, g)(x) -> f(g(x))
@@ -40,32 +41,39 @@ export const CORE_LIBRARY: IdentifierDefinitions[] = [
     /**
      * ### THEORY OF OPERATIONS: SEQUENCES
      *
-     * There are two similar functions used to represent sequences of
+     * There are three similar functions used to represent sequences of
      * expressions:
      *
      * - `InvisibleOperator` represent a sequence of expressions
      *  that are syntactically juxtaposed without any separator or
-     *  operators combining them. For example, `2x` is represented as
-     *  `["InvisibleOperator", 2, "x"]`. `InvisibleOperator` gets
-     *  transformed into `Multiply` (or some other semantic operation)
-     *  during canonicalization.
+     *  operators combining them.
+     *
+     *  For example, `2x` is represented as `["InvisibleOperator", 2, "x"]`.
+     *  `InvisibleOperator` gets transformed into `Multiply` (or some other
+     *  semantic operation) during canonicalization.
      *
      * - `Sequence` is used to represent a sequence of expressions
      *   at a semantic level. It is a collection, but it is handled
      *   specially when canonicalizing expressions, for example it
      *   is automatically flattened and hoisted to the top level of the
      *   argument list.
-     *   For example:
-     *    `["Add", "a", ["Sequence", "b", "c"]]` is canonicalized
-     *      to `["Add", "a", "b", "c"]`.
      *
-     * The empty `Sequence` expression (i.e. `["Sequence"]`) is ignored
-     * but it can be used to represent an "empty" expression.
+     *   For example:
+     *
+     *     `["Add", "a", ["Sequence", "b", "c"]]`
+     *
+     *   is canonicalized to
+     *
+     *     `["Add", "a", "b", "c"]`.
+     *
+     *   The empty `Sequence` expression (i.e. `["Sequence"]`) is ignored
+     *   but it can be used to represent an "empty" expression.
      *
      * - `Delimiter` is used to represent a group of expressions
-     *   with an open and close delimiter and separator. They capture the
-     *   input syntax, and can get transformed into other expressions
-     *   during boxing and canonicalization.
+     *   with an open and close delimiter and a separator.
+     *
+     *   They capture the input syntax, and can get transformed into other
+     *   expressions during boxing and canonicalization.
      *
      *   The first argument is a function expression, such as `List`
      *   or `Sequence`. The arguments of that expression are represented
@@ -148,32 +156,45 @@ export const CORE_LIBRARY: IdentifierDefinitions[] = [
           return args[0].domain;
         },
 
-        // During canonicalization, Delimiters get replaced by their first
-        // argument, which is a function expression (e.g. `List` or `Sequence`)
         canonical: (ce, args) => {
+          // During parsing, no interpretation is made of the delimiters.
+          // This gives more option to this handler, or handler of
+          // other functions that use `Delimiter` as a parameter.
+
+          // An empty delimiter, i.e. `()` is an empty tuple.
+          // Note: this codepath is not hit by `f()`, which is
+          // handled in `InvisibleOperator`.
           if (args.length === 0) return ce._fn('Tuple', []);
 
-          let body = args[0];
-
-          // If the body is a sequence, preserve it (don't flatten it)
-          if (body.head === 'Sequence')
-            body = ce._fn('Sequence', canonical(body.ops!));
-          else body = body.canonical;
-
-          // If it's a sequence with a single element, unpack it
-          if (body.head === 'Sequence' && body.ops!.length === 1)
-            body = body.ops![0];
-
-          args = [body, ...args.slice(1)];
-
-          if (args.length === 1) return ce._fn('Delimiter', args);
-
+          // The Delimiter function can have:
+          // - a single argument, which is a sequence of expressions
+          // - two arguments, the first is a sequence of expressions
+          //   and the second is a delimiter string
           if (args.length > 2)
             return ce._fn('Delimiter', checkArity(ce, args, 2));
 
-          if ((args[1].string?.length ?? 0) > 3) {
+          let body = args[0];
+
+          // If the body is a sequence, turn it into a Tuple
+          // We'll have a sequence when there is a delimiter inside
+          // the sequence, like `(a, b, c)`. The sequence is used to group
+          // the arguments, so it needs to be preserved.
+          // If there is a single element, unpack it.
+          if (body.head === 'Sequence')
+            return ce._fn('Tuple', canonical(body.ops!));
+
+          body = body.canonical;
+
+          const delim = args[1]?.string;
+
+          // If we have a single argument and parentheses, i.e. `(2)`, return
+          // the argument
+          if (!delim || (delim.startsWith('(') && delim.endsWith(')')))
+            return body;
+
+          if ((delim?.length ?? 0) > 3) {
             return ce._fn('Delimiter', [
-              args[0],
+              body,
               ce.error('invalid-delimiter', args[1]),
             ]);
           }
@@ -480,7 +501,7 @@ export const CORE_LIBRARY: IdentifierDefinitions[] = [
           return ops[0].domain;
         },
         canonical: (ce, ops) => ce._fn('Simplify', checkArity(ce, ops, 1)),
-        evaluate: (_ce, ops) => ops[0].simplify(),
+        evaluate: (_ce, ops) => ops[0]?.simplify() ?? undefined,
       },
     },
 
@@ -855,12 +876,13 @@ export function canonicalInvisibleOperator(
     // Is it a function application: symbol with a function
     // definition followed by delimiter
     //
-    let rhs = ops[1];
+    const rhs = ops[1];
     if (
       lhs.symbol &&
       rhs.head === 'Delimiter' &&
       !ce.lookupSymbol(lhs.symbol)
     ) {
+      // @fixme: should use symbol table to check if it's a function
       // We have encountered something like `f(a+b)`, where `f` is not
       // defined. But it also could be `x(x+1)` where `x` is a number.
       // So, start with boxing the arguments and see if it makes sense.
@@ -882,6 +904,16 @@ export function canonicalInvisibleOperator(
         return ce.function(lhs.symbol, args);
       }
     }
+
+    // Is is an index operation, i.e. "v[1,2]"?
+    if (
+      lhs.symbol &&
+      rhs.head === 'Delimiter' &&
+      (rhs.op2.string === '[,]' || rhs.op2.string === '[;]')
+    ) {
+      const args = rhs.op1.head === 'Sequence' ? rhs.op1.ops! : [rhs.op1];
+      return ce._fn('At', [lhs, ...args]);
+    }
   }
 
   // Only call canonical here, because it will bind (auto-declare) the arguments
@@ -902,7 +934,7 @@ export function canonicalInvisibleOperator(
   ) {
     ops = flattenOps(ops, 'Multiply');
     if (ops.length === 1) return ops[0];
-    return ce._fn('Multiply', ops);
+    return ce._fn('Multiply', [...ops].sort(order));
   }
 
   //

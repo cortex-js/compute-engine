@@ -254,10 +254,11 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
         result: 'Numbers',
 
         canonical: (ce, args) => {
+          // @fastpath: this code path is never taken, canonicalDivide is called directly
           args = checkNumericArgs(ce, args);
-          if (args.length < 2) return args[0] ?? ce.error('missing');
           let result = args[0];
           if (!result) return ce.error('missing');
+          if (args.length < 2) return result;
           const rest = args.slice(1);
           for (const x of rest) result = canonicalDivide(ce, result, x);
 
@@ -549,7 +550,7 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
           ops = ops.map((x) => x.evaluate());
           const expr = distribute(ops);
           if (expr.head !== 'Multiply') return expr.evaluate();
-          // ops = flattenOps(expr.ops!, 'Multiply');
+          // ops = flattenOps(expr.ops!, 'Multiply'); //@fixme that seems important
           return evalMultiply(ce, ops);
         },
         N: (ce, ops) => {

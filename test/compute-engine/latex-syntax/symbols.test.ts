@@ -256,7 +256,7 @@ describe('SYMBOLS', () => {
       expect(parse('\\mathrm{speed_{max}}')).toMatchInlineSnapshot(`speed_max`);
       // An expression, not an identifier:
       expect(parse('\\mathrm{speed}_{max}')).toMatchInlineSnapshot(
-        `["Subscript", "speed", ["InvisibleOperator", "m", "a", "x"]]`
+        `["At", "speed", ["Multiply", "a", "m", "x"]]`
       ); // @fixme
     });
 
@@ -313,7 +313,7 @@ describe('SYMBOLS', () => {
       expect(parse('x^2')).toMatchInlineSnapshot(`["Square", "x"]`);
       expect(parse('a^b')).toMatchInlineSnapshot(`["Power", "a", "b"]`);
       expect(parse('x_{i+1}')).toMatchInlineSnapshot(
-        `["Subscript", "x", ["Add", "i", 1]]`
+        `["At", "x", ["Complex", 1, 1]]`
       );
       expect(parse('\\vec{x}')).toMatchInlineSnapshot(`["OverVector", "x"]`);
       expect(parse('x^\\prime')).toMatchInlineSnapshot(`["Prime", "x"]`);

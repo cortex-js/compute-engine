@@ -198,7 +198,12 @@ export function findUnivariateRoots(
   const ce = expr.engine;
 
   if (expr.head === 'Equal') {
-    expr = ce.add(expr.op1.canonical, ce.neg(expr.op2.canonical)).simplify();
+    expr = ce
+      .function('Add', [
+        expr.op1.canonical,
+        ce.function('Negate', [expr.op2.canonical]),
+      ])
+      .simplify();
   }
 
   const rules = ce.getRuleSet('solve-univariate')!;
@@ -368,7 +373,7 @@ export const HARMONIZATION_RULES: Rule[] = [
 function harmonize(expr: BoxedExpression): BoxedExpression[] {
   const ce = expr.engine;
   const rules = ce.getRuleSet('harmonization')!;
-  let result = matchRules(expr, rules, { _x: ce.symbol('_x') });
+  const result = matchRules(expr, rules, { _x: ce.symbol('_x') });
 
   return result;
 }

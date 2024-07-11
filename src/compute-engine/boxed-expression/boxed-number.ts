@@ -5,9 +5,7 @@ import {
   BoxedDomain,
   IComputeEngine,
   Metadata,
-  NOptions,
   PatternMatchOptions,
-  SimplifyOptions,
   BoxedSubstitution,
   EvaluateOptions,
   SemiBoxedExpression,
@@ -19,8 +17,8 @@ import {
   Rational,
   isBigRational,
   isRational,
-  isRationalNegativeOne,
-  isRationalOne,
+  isNegativeOne,
+  isOne,
   reducedRational,
 } from '../numerics/rationals';
 
@@ -374,7 +372,7 @@ export class BoxedNumber extends _BoxedExpression {
     if (this._value instanceof Complex)
       return this._value.im === 0 && this._value.re === 1;
 
-    return isRationalOne(this._value);
+    return isOne(this._value);
   }
 
   get isNegativeOne(): boolean {
@@ -387,7 +385,7 @@ export class BoxedNumber extends _BoxedExpression {
     if (this._value instanceof Complex)
       return this._value.im === 0 && this._value.re === -1;
 
-    return isRationalNegativeOne(this._value);
+    return isNegativeOne(this._value);
   }
 
   get isOdd(): boolean | undefined {
@@ -557,16 +555,16 @@ export class BoxedNumber extends _BoxedExpression {
     return this.engine.number(canonicalNumber(this.engine, this._value));
   }
 
-  simplify(_options?: SimplifyOptions): BoxedExpression {
+  simplify(): BoxedExpression {
     return this.canonical;
   }
 
   evaluate(options?: EvaluateOptions): BoxedExpression {
-    if (options?.numericMode) return this.N(options);
+    if (options?.numericMode) return this.N();
     return this;
   }
 
-  N(_options?: NOptions): BoxedExpression {
+  N(): BoxedExpression {
     if (!Array.isArray(this._value)) return this;
 
     // If a rational, evaluate as an approximation

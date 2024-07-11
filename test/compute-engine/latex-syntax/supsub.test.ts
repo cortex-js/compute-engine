@@ -49,7 +49,7 @@ describe('SUPSUB', () => {
     expect(ce.parse('2^{10}')).toMatchInlineSnapshot(`["Power", 2, 10]`);
     expect(ce.parse('\\pi^2')).toMatchInlineSnapshot(`["Square", "Pi"]`);
     expect(ce.parse('2^23')).toMatchInlineSnapshot(
-      `["Multiply", ["Square", 2], 3]`
+      `["Multiply", 3, ["Square", 2]]`
     );
     expect(ce.parse('2^\\pi')).toMatchInlineSnapshot(`["Power", 2, "Pi"]`);
     expect(ce.parse('2^\\frac12')).toMatchInlineSnapshot(`["Sqrt", 2]`);
@@ -67,7 +67,7 @@ describe('SUPSUB', () => {
       `["Power", 2, ["Power", 3, 4]]`
     );
     expect(ce.parse('12^34.5')).toMatchInlineSnapshot(
-      `["Multiply", ["Power", 12, 3], 4.5]`
+      `["Multiply", 4.5, ["Power", 12, 3]]`
     );
     expect(ce.parse('x^2')).toMatchInlineSnapshot(`["Square", "x"]`);
     expect(ce.parse('x^{x+1}')).toMatchInlineSnapshot(
@@ -75,22 +75,30 @@ describe('SUPSUB', () => {
     );
   });
   test('Subscript', () => {
-    expect(ce.parse('x_0')).toMatchInlineSnapshot(`x_0`);
+    expect(ce.parse('x_0')).toMatchInlineSnapshot(`["At", "x", 0]`);
     expect(ce.parse('x^2_0')).toMatchInlineSnapshot(`["Square", "x_0"]`);
-    expect(ce.parse('x_0^2')).toMatchInlineSnapshot(`["Square", "x_0"]`);
+    expect(ce.parse('x_0^2')).toMatchInlineSnapshot(`["At", "x", 0]`);
     expect(ce.parse('x_{n+1}')).toMatchInlineSnapshot(
-      `["Subscript", "x", ["Add", "n", 1]]`
+      `["At", "x", ["Add", "n", 1]]`
     );
-    expect(ce.parse('x_n_{+1}')).toMatchInlineSnapshot(
-      `["Subscript", "x", ["List", "n", 1]]`
-    );
+    expect(ce.parse('x_n_{+1}')).toMatchInlineSnapshot(`
+      [
+        "At",
+        "x",
+        [
+          "Error",
+          ["ErrorCode", "'incompatible-domain'", "Values", "Anything"],
+          ["At", "n", 1]
+        ]
+      ]
+    `);
   });
   test('Pre-sup, pre-sub', () => {
     expect(ce.parse('_p^qx')).toMatchInlineSnapshot(
-      `["Multiply", "_", ["Power", "p", "q"], "x"]`
+      `["Multiply", "_", "x", ["Power", "p", "q"]]`
     ); // @fixme: nope...
     expect(ce.parse('_p^qx_r^s')).toMatchInlineSnapshot(
-      `["Multiply", "_", ["Power", "p", "q"], ["Power", "x_r", "s"]]`
+      `["Triple", "_", ["Power", "p", "q"], ["At", "x", ["Power", "r", "s"]]]`
     ); // @fixme: nope...
     expect(ce.parse('_{p+1}^{q+1}x_{r+1}^{s+1}')).toMatchInlineSnapshot(`
       [
@@ -101,8 +109,8 @@ describe('SUPSUB', () => {
           "Power",
           [
             "Error",
-            ["ErrorCode", "'incompatible-domain'", "Numbers", "Symbols"],
-            ["Subscript", "x", ["Add", "r", 1]]
+            ["ErrorCode", "'incompatible-domain'", "Numbers", "Anything"],
+            ["At", "x", ["Add", "r", 1]]
           ],
           ["Add", "s", 1]
         ]
@@ -124,8 +132,8 @@ describe('SUPSUB', () => {
           "Power",
           [
             "Error",
-            ["ErrorCode", "'incompatible-domain'", "Numbers", "Symbols"],
-            ["Subscript", "x", ["Add", "r", 1]]
+            ["ErrorCode", "'incompatible-domain'", "Numbers", "Anything"],
+            ["At", "x", ["Add", "r", 1]]
           ],
           ["Add", "s", 1]
         ]
@@ -137,10 +145,10 @@ describe('SUPSUB', () => {
       `["Power", ["Add", "x", 1], ["Subtract", "n", 1]]`
     );
     expect(ce.parse('(x+1)_{n-1}')).toMatchInlineSnapshot(
-      `["Subscript", ["Delimiter", ["Add", "x", 1]], ["Add", "n", -1]]`
+      `["Subscript", ["Add", "x", 1], ["Add", "n", -1]]`
     );
     expect(ce.parse('(x+1)^n_0')).toMatchInlineSnapshot(
-      `["Power", ["Subscript", ["Delimiter", ["Add", "x", 1]], 0], "n"]`
+      `["Power", ["Subscript", ["Add", "x", 1], 0], "n"]`
     );
     expect(ce.parse('^p_q{x+1}^n_0')).toMatchInlineSnapshot(`
       [

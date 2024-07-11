@@ -204,7 +204,7 @@ export function canonicalOrder(
     const ce = expr.engine;
     if (expr.head === 'Add') ops = sortAdd(ops);
     else {
-      let isCommutative =
+      const isCommutative =
         expr.head === 'Multiply' ||
         (ce.lookupFunction(expr.head)?.commutative ?? false);
       if (isCommutative) ops = [...ops].sort(order);

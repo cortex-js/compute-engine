@@ -5,10 +5,8 @@ import {
   BoxedExpression,
   IComputeEngine,
   EvaluateOptions,
-  NOptions,
   BoxedRuleSet,
   SemiBoxedExpression,
-  SimplifyOptions,
   ReplaceOptions,
   Substitution,
   Metadata,
@@ -175,7 +173,7 @@ export class BoxedDictionary extends _BoxedExpression {
     return true;
   }
 
-  evaluate(_options?: EvaluateOptions): BoxedExpression {
+  evaluate(_options?: Partial<EvaluateOptions>): BoxedExpression {
     return this;
   }
 
@@ -191,11 +189,11 @@ export class BoxedDictionary extends _BoxedExpression {
     return new BoxedDictionary(this.engine, this._value, { canonical: true });
   }
 
-  simplify(_options?: SimplifyOptions): BoxedExpression {
+  simplify(): BoxedExpression {
     return this;
   }
 
-  N(_options?: NOptions): BoxedExpression {
+  N(): BoxedExpression {
     return this;
   }
 

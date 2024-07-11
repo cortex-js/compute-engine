@@ -1097,16 +1097,7 @@ function parseParenDelimiter(
     }
   }
 
-  // @fixme
-  if (h === 'Sequence') debugger;
-  console.assert(h !== 'Sequence');
-
-  if (h === 'Sequence') {
-    if (nops(body) === 0) return ['Delimiter'];
-    if (nops(body) === 1) return ['Delimiter', op(body, 1)!];
-    return ['Delimiter', body];
-  }
-
+  // @todo: does this codepath ever get hit?
   if (h === 'Matrix') {
     const delims = stringValue(op(body, 2)) ?? '..';
     if (delims === '..') return ['Matrix', op(body, 1)!];

@@ -19,7 +19,7 @@ export function bigintValue(
     return Number.isInteger(num) ? BigInt(num) : null;
   if (typeof num !== 'string') return null;
 
-  let s = num
+  const s = num
     .toLowerCase()
     .replace(/[nd]$/, '')
     .replace(/[\u0009-\u000d\u0020\u00a0]/g, '');
@@ -161,7 +161,7 @@ export function factorPower(
   const factors = primeFactors(n);
   let f = BigInt(1);
   let r = BigInt(1);
-  const exp = bigint(exponent);
+  const exp = BigInt(exponent);
   for (const [k, v] of factors) {
     const v2 = bigint(v);
     f = f * k ** (v2 / exp);

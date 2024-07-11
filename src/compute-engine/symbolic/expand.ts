@@ -1,12 +1,21 @@
 import { asMachineInteger } from '../boxed-expression/numerics';
+import { isRelationalOperator } from '../boxed-expression/utils';
 import { simplifyAdd } from '../library/arithmetic-add';
 import { BoxedExpression } from '../public';
 import { canonicalNegate } from './negate';
 
 function distribute2(
-  lhs: BoxedExpression,
-  rhs: BoxedExpression
+  lhs: Readonly<BoxedExpression>,
+  rhs: Readonly<BoxedExpression>
 ): BoxedExpression {
+  // Expand power
+  lhs = expandMultinomial(lhs) ?? lhs;
+  rhs = expandMultinomial(rhs) ?? rhs;
+
+  //
+  // Negate
+  //
+
   if (lhs.head === 'Negate' && rhs.head === 'Negate')
     return distribute2(lhs.op1, rhs.op1);
 
@@ -15,6 +24,9 @@ function distribute2(
 
   const ce = lhs.engine;
 
+  //
+  // Divide
+  //
   if (lhs.head === 'Divide' && rhs.head === 'Divide') {
     // Apply distribute to the numerators only.
     const denom = ce.mul(lhs.op2, rhs.op2);
@@ -24,6 +36,9 @@ function distribute2(
   if (lhs.head === 'Divide') return ce.div(distribute2(lhs.op1, rhs), lhs.op2);
   if (rhs.head === 'Divide') return ce.div(distribute2(lhs, rhs.op1), rhs.op2);
 
+  //
+  // Add
+  //
   if (lhs.head === 'Add')
     return ce.add(...lhs.ops!.map((x) => distribute2(x, rhs)));
   if (rhs.head === 'Add')
@@ -101,11 +116,17 @@ export function expandMultinomial(
   expr: BoxedExpression
 ): BoxedExpression | null {
   if (expr.head !== 'Power') return null;
+  const ce = expr.engine;
   const exp = asMachineInteger(expr.op2);
-  if (exp === null || exp < 0) return null;
+  if (exp === null) return null;
+  if (exp < 0) {
+    expr =
+      expandMultinomial(ce._fn('Power', [expr.op1, ce.number(-exp)])) ?? expr;
+    if (expr === null) return null;
+    return ce.div(expr.engine.One, expr);
+  }
   if (exp === 0) return expr.engine.One;
   if (exp === 1) return expand(expr.op1);
-  const ce = expr.engine;
   if (expr.op1.head === 'Negate') {
     const sign = exp % 2 === 0 ? 1 : -1;
     const result = expandMultinomial(ce._fn('Power', [expr.op1.op1, expr.op2]));
@@ -195,30 +216,39 @@ function expandDenominator(expr: BoxedExpression): BoxedExpression | null {
  * Expand the expression if it is a power of a sum.
  * Expand the terms of the expression if it is a sum or negate.
  * If the expression is a fraction, expand the numerator.
+ * If the exression is a relational operator, expand the operands.
  * Return null if the expression cannot be expanded.
  */
 export function expand(
   expr: BoxedExpression | undefined
 ): BoxedExpression | null {
   if (!expr) return null;
-  let result = expandNumerator(expr);
+
+  // Expand relational operators
+  const h = expr.head;
+  if (isRelationalOperator(h)) {
+    return expr.engine._fn(
+      h,
+      expr.ops!.map((x) => expand(x) ?? x)
+    );
+  }
+
+  const result = expandNumerator(expr);
   if (result !== null) return result;
-  if (expr.head === 'Multiply') {
-    result = distribute(expr.ops!);
-    if (result !== null) return result;
+
+  if (h === 'Multiply') return distribute(expr.ops!);
+
+  // Note arg simplifyAdd will simplify each argument (which in turn will
+  // expand them), so no need to expand the arguments here.
+  if (h === 'Add') return simplifyAdd(expr.engine, expr.ops!);
+
+  if (h === 'Negate') {
+    const op = expand(expr.op1);
+    if (op === null) return null;
+    return expr.engine.neg(op);
   }
-  if (expr.head === 'Add') {
-    const ops = expr.ops!.map((x) => expand(x) ?? x);
-    return simplifyAdd(expr.engine, ops);
-  }
-  if (expr.head === 'Negate') {
-    result = expand(expr.op1);
-    if (result !== null) return expr.engine.neg(result);
-  }
-  if (expr.head === 'Power') {
-    result = expandMultinomial(expr);
-    if (result !== null) return result;
-  }
+
+  if (h === 'Power') return expandMultinomial(expr);
 
   return null;
 }

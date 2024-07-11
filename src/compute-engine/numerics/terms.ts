@@ -1,41 +1,88 @@
-import Complex from 'complex.js';
-import Decimal from 'decimal.js';
-
 import { BoxedExpression, IComputeEngine } from '../public';
 
-import { bignumPreferred } from '../boxed-expression/utils';
+import { NumericValue } from '../numeric-value/public';
 
-import { applyCoefficient } from '../boxed-expression/factor';
-import {
-  Rational,
-  isBigRational,
-  isMachineRational,
-  isRational,
-  isRationalNegativeOne,
-  isRationalOne,
-  isRationalZero,
-  neg,
-} from './rationals';
-import { add, asCoefficient, mul } from '../boxed-expression/numerics';
-
+// Represent a sum of terms
 export class Terms {
   private engine: IComputeEngine;
-  private terms: { coef: Rational; term: BoxedExpression }[] = [];
+  private terms: { coef: NumericValue; term: BoxedExpression }[] = [];
 
-  constructor(ce: IComputeEngine, terms: ReadonlyArray<BoxedExpression>) {
+  _numericValueOne: NumericValue | null = null;
+  get coefOne(): NumericValue {
+    if (this._numericValueOne === null)
+      this._numericValueOne = this.engine._numericValue(1);
+    return this._numericValueOne;
+  }
+
+  constructor(
+    ce: IComputeEngine,
+    terms: ReadonlyArray<BoxedExpression>,
+    { exact = true } = {}
+  ) {
     this.engine = ce;
-    for (const term of terms) this.add(term);
+    // @fastpath: if there is only one term, and the term is a numericValue, @fixme
+    let posInfinityCount = 0;
+    let negInfinityCount = 0;
+    // We're going to keep track of numeric values in an array, so that we can
+    // sum them exactly at the end (some inexact values may cancel each other,
+    // for example (0.1 - 0.1 + 1/4) -> 1/4.
+    // If we added as we go, we would get 0.25.
+    let numericValues: NumericValue[] = [];
+    for (const term of terms) {
+      if (term.isZero) continue;
+      if (term.isImaginary && term.isInfinity) {
+        this.terms = [{ term: ce.ComplexInfinity, coef: this.coefOne }];
+        return;
+      }
+      if (term.isNaN || term.symbol === 'Undefined') {
+        this.terms = [{ term: ce.NaN, coef: this.coefOne }];
+        return;
+      }
+
+      const [coef, rest] = ce._toNumericValue(term);
+      if (coef.isPositiveInfinity) posInfinityCount += 1;
+      else if (coef.isNegativeInfinity) negInfinityCount += 1;
+
+      if (rest.isOne) {
+        if (!coef.isZero) numericValues.push(coef);
+      } else this.add(rest, coef);
+    }
+
+    if (posInfinityCount > 0 && negInfinityCount > 0) {
+      this.terms = [{ term: ce.NaN, coef: this.coefOne }];
+      return;
+    }
+    if (posInfinityCount > 0) {
+      this.terms = [{ term: ce.PositiveInfinity, coef: this.coefOne }];
+      return;
+    }
+    if (negInfinityCount > 0) {
+      this.terms = [{ term: ce.NegativeInfinity, coef: this.coefOne }];
+      return;
+    }
+    if (numericValues.length !== 0) {
+      if (!exact) {
+        this.add(
+          ce._fromNumericValue(numericValues.reduce((a, b) => a.add(b.N())))
+        );
+      } else {
+        // If we're doing an exact sum, we may have multiple terms: one
+        // rational and one for square roots. We need to sum them separately.
+        ce._numericValue(0)
+          .sum(...numericValues)
+          .forEach((x) => this.add(ce._fromNumericValue(x)));
+      }
+    }
   }
 
-  sub(term: BoxedExpression): void {
-    this.add(term, [-1, 1] as Rational);
-  }
+  // sub(term: BoxedExpression): void {
+  //   this.add(term, this.engine._numericValue(-1));
+  // }
 
-  add(term2: BoxedExpression, coef2?: Rational): void {
-    coef2 ??= [1, 1] as Rational;
-    let [coef, term] = asCoefficient(term2);
-    coef = mul(coef, coef2);
-    if (isRationalZero(coef)) return;
+  private add(term2: BoxedExpression, coef2?: NumericValue): void {
+    let [coef, term] = this.engine._toNumericValue(term2);
+    if (coef2 !== undefined) coef = coef.mul(coef2);
+    if (coef.isZero) return;
 
     if (term.head === 'Add') {
       for (const x of term.ops!) this.add(x, coef);
@@ -43,15 +90,27 @@ export class Terms {
     }
 
     if (term.head === 'Negate') {
-      this.add(term.op1, neg(coef));
+      this.add(term.op1, coef.neg());
       return;
     }
 
-    const i = this.find(term);
-    if (i >= 0) {
-      this.terms[i].coef = add(this.terms[i].coef, coef);
+    if (term.isOne) {
+      // We have a numeric value. Keep it in the terms,
+      // so that "1+sqrt(3)" remains exact.
+      this.terms.push({
+        coef: this.engine._numericValue(1),
+        term: this.engine._fromNumericValue(coef, term),
+      });
       return;
     }
+
+    // Try to find a like term, i.e. if "2x", look for "x"
+    const i = this.find(term);
+    if (i >= 0) {
+      this.terms[i].coef = this.terms[i].coef.add(coef);
+      return;
+    }
+    console.assert(term.numericValue === null || term.isOne);
     this.terms.push({ coef, term });
   }
 
@@ -59,158 +118,27 @@ export class Terms {
     return this.terms.findIndex((x) => x.term.isSame(term));
   }
 
-  /** If `exact` is true, keep exact numbers */
-  reduceNumbers({ exact }: { exact: boolean }): void {
+  asExpression(): BoxedExpression {
     const ce = this.engine;
-    let terms = this.terms;
-    this.terms = [];
-    let posInfinityCount = 0;
-    let negInfinityCount = 0;
-    let real = 0;
-    let imaginary = 0;
-    let rational = [0, 1] as Rational;
-    let bignum = ce._BIGNUM_ZERO;
 
-    // Iterate over all the terms and isolate numeric values
-    for (const { coef, term } of terms) {
-      if (term.isNaN) {
-        this.terms = [{ term: ce.NaN, coef: [1, 1] }];
-        return;
-      }
-      if (term.isFinite === false) {
-        if (term.isPositive) posInfinityCount++;
-        else negInfinityCount++;
-        continue;
-      }
-
-      if (term.numericValue !== null) {
-        const n = applyCoefficient(term.numericValue, coef);
-        if (n !== null) {
-          if (isRational(n)) rational = add(rational, n);
-          else if (n instanceof Decimal) bignum = bignum.add(n);
-          else if (n instanceof Complex) {
-            if (bignumPreferred(ce)) bignum = bignum.add(n.re);
-            else real += n.re;
-            imaginary += n.im;
-          } else if (bignumPreferred(ce)) bignum = bignum.add(n);
-          else real += n;
-          continue;
-        }
-      }
-
-      this.terms.push({ coef, term });
-    }
-
-    if (posInfinityCount > 0 && negInfinityCount > 0) {
-      this.terms = [{ term: ce.NaN, coef: [1, 1] }];
-      return;
-    }
-    if (posInfinityCount > 0) {
-      this.terms = [{ term: ce.PositiveInfinity, coef: [1, 1] }];
-      return;
-    }
-    if (negInfinityCount > 0) {
-      this.terms = [{ term: ce.NegativeInfinity, coef: [1, 1] }];
-      return;
-    }
-
-    // Should we collapse the numeric values?
-    if (
-      !exact ||
-      !Number.isInteger(real) ||
-      !bignum.isInteger() ||
-      !Number.isInteger(imaginary)
-    ) {
-      if (!isRationalZero(rational)) {
-        bignum = bignum.add(ce.bignum(rational[0]).div(ce.bignum(rational[1])));
-        rational = [0, 1] as Rational;
-      }
-
-      if (!bignum.isZero() && bignumPreferred(ce)) {
-        bignum = bignum.add(real);
-        bignum = bignum.add(ce.bignum(rational[0]).div(ce.bignum(rational[1])));
-
-        this.terms.push({ term: ce.number(bignum), coef: [1, 1] });
-
-        if (imaginary !== 0) {
-          this.terms.push({
-            term: ce.number(ce.complex(0, imaginary)),
-            coef: [1, 1],
-          });
-        }
-        return;
-      }
-      const r =
-        real + bignum.toNumber() + Number(rational[0]) / Number(rational[1]);
-
-      if (imaginary !== 0) {
-        this.terms.push({
-          term: ce.number(ce.complex(r, imaginary)),
-          coef: [1, 1],
-        });
-      } else if (r !== 0) this.terms.push({ term: ce.number(r), coef: [1, 1] });
-      return;
-    }
-
-    if (!bignum.isZero()) {
-      bignum = bignum.add(real);
-      real = 0;
-      if (!isRationalZero(rational)) {
-        bignum = bignum.add(ce.bignum(rational[0]).div(ce.bignum(rational[1])));
-        rational = [0, 1] as Rational;
-      }
-      this.terms.push({ coef: [1, 1], term: ce.number(bignum) });
-    }
-
-    if (imaginary !== 0) {
-      if (!isRationalZero(rational))
-        real += Number(rational[0]) / Number(rational[1]);
-
-      this.terms.push({
-        coef: [1, 1],
-        term: ce.number(ce.complex(real, imaginary)),
-      });
-    } else if (real !== 0)
-      this.terms.push({ coef: [1, 1], term: ce.number(real) });
-
-    if (!isRationalZero(rational))
-      this.terms.push({ coef: [1, 1], term: ce.number(rational) });
-  }
-
-  asExpression(options: { exact: boolean }): BoxedExpression {
-    const ce = this.engine;
-    const { exact } = options;
-
+    //@fixme: might not be needed
     const terms = this.terms.filter(
-      ({ coef, term }) => !isRationalZero(coef) && !term.isZero
+      ({ coef, term }) => !coef.isZero && !term.isZero
     );
 
     if (terms.length === 0) return ce.Zero;
 
     if (terms.length === 1) {
       const { coef, term } = terms[0];
-      if (isRationalOne(coef)) return term;
-      if (isRationalNegativeOne(coef)) return ce.neg(term);
-      let c: number | Rational | Decimal = coef;
-      if (!exact) {
-        if (isMachineRational(coef)) c = coef[0] / coef[1];
-        else if (isBigRational(coef))
-          c = ce.bignum(coef[0]).div(ce.bignum(coef[1]));
-      }
-      return ce.mul(ce.number(c), term);
+      if (coef.isOne) return term;
+      if (coef.isNegativeOne) return ce.function('Negate', [term]);
+
+      return this.engine._fromNumericValue(coef, term);
     }
 
     return ce.function(
       'Add',
-      terms.map(({ coef, term }) => {
-        let c: number | Rational | Decimal = coef;
-        if (!exact) {
-          if (isMachineRational(coef)) c = coef[0] / coef[1];
-          else if (isBigRational(coef))
-            c = ce.bignum(coef[0]).div(ce.bignum(coef[1]));
-        }
-        return ce.mul(ce.number(c), term);
-      })
+      terms.map(({ coef, term }) => this.engine._fromNumericValue(coef, term))
     );
   }
 }

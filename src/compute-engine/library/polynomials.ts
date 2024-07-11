@@ -6,9 +6,10 @@ export const POLYNOMIALS_LIBRARY: IdentifierDefinitions[] = [
   {
     Expand: {
       description: 'Expand out products and positive integer powers',
+      hold: 'all',
       signature: {
         domain: ['FunctionOf', 'Values', 'Values'],
-        evaluate: (_ce, ops) => expand(ops[0]) ?? ops[0],
+        evaluate: (_ce, ops) => expand(ops[0].canonical) ?? ops[0],
       },
     },
     ExpandAll: {
@@ -22,9 +23,10 @@ export const POLYNOMIALS_LIBRARY: IdentifierDefinitions[] = [
     Factor: {
       description:
         'Factors an algebraic expression into a product of irreducible factors',
+      hold: 'all',
       signature: {
         domain: ['FunctionOf', 'Values', 'Values'],
-        evaluate: (_ce, ops) => factor(ops[0]),
+        evaluate: (_ce, ops) => factor(ops[0].canonical),
       },
     },
     Together: {

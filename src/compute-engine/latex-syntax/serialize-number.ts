@@ -346,7 +346,7 @@ function serializeAutoNotationNumber(
     }
   }
 
-  let exponent = formatExponent(exp.toString(), options);
+  const exponent = formatExponent(exp.toString(), options);
 
   if (fractionalPart)
     fractionalPart =
@@ -566,7 +566,7 @@ function insertSeparatorEveryNDigitsFromRight(
 }
 
 function insertIndianNumberingSystem(numberString: string, separator: string) {
-  let reverseString = numberString.split('').reverse().join('');
+  const reverseString = numberString.split('').reverse().join('');
   const reversedSeparator = separator.split('').reverse().join('');
   let formattedString = reverseString.replace(
     /(\d{3})(?=\d)/,

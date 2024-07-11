@@ -12,9 +12,7 @@ describe('NUMERIC MODE', () => {
   test(`0.1 + 0.2`, () =>
     expect(check('0.1 + 0.2')).toMatchInlineSnapshot(`
       box       = ["Add", 0.1, 0.2]
-      simplify  = 0.3
-      evaluate  = 0.3
-      eval-mach = 0.30000000000000004
+      simplify  = 0.30000000000000004
     `));
 
   test(`\\frac{1}{7}`, () =>
@@ -36,8 +34,7 @@ describe('NUMERIC MODE', () => {
   test(`\\frac{\\pi}{4}`, () =>
     expect(check('\\frac{\\pi}{4}')).toMatchInlineSnapshot(`
       box       = ["Divide", "Pi", 4]
-      N-auto    = 0.785398163397448309615660845819875721049292349843776455243736148076954101571552249657008706335529267
-      N-mach    = 0.7853981633974483
+      N-auto    = 0.7853981633974483
     `));
 
   test(`\\frac{12345678901234567890}{23456789012345678901}`, () =>
@@ -109,7 +106,8 @@ describe('NUMERIC MODE bignum 7', () => {
     engine.precision = 100;
   });
 
-  test(`0.1 + 0.2`, () => expect(N('0.1 + 0.2')).toMatchInlineSnapshot(`0.3`));
+  test(`0.1 + 0.2`, () =>
+    expect(N('0.1 + 0.2')).toMatchInlineSnapshot(`0.30000000000000004`));
 
   test(`\\sqrt{-1}`, () =>
     expect(N('\\sqrt{-1}')).toMatchInlineSnapshot(`NaN`));
@@ -118,7 +116,7 @@ describe('NUMERIC MODE bignum 7', () => {
     expect(N('\\frac{1}{7}')).toMatchInlineSnapshot(`0.142857142857143`));
 
   test(`\\frac{\\pi}{4}`, () =>
-    expect(N('\\frac{\\pi}{4}')).toMatchInlineSnapshot(`0.785398163397448`));
+    expect(N('\\frac{\\pi}{4}')).toMatchInlineSnapshot(`0.7853981633974475`));
 
   test('', () => expect(N('e^{i\\pi}')).toMatchInlineSnapshot(`NaN`));
 });

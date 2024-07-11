@@ -7,159 +7,18 @@ import {
   isBigRational,
   isMachineRational,
   isRational,
-  isRationalOne,
-  neg,
-  pow,
   rationalize,
-  sqrt,
 } from '../numerics/rationals';
 import { BoxedExpression } from './public';
 import { SMALL_INTEGER, chop } from '../numerics/numeric';
 import { bigint } from '../numerics/numeric-bigint';
-import { Coefficient } from './coefficient-field';
-
-/**
- * Attempt to factor a numeric coefficient `c` and a `rest` out of a
- * canonical expression `expr` such that `ce.mul(c, rest)` is equal to `expr`.
- *
- * Attempts to make `rest` a positive value (i.e. pulls out negative sign).
- *
- * For example:
- *
- * ['Multiply', 2, 'x', 3, 'a']
- *    -> [6, ['Multiply', 'x', 'a']]
- *
- * ['Divide', ['Multiply', 2, 'x'], ['Multiply', 3, 'y', 'a']]
- *    -> [['Rational', 2, 3], ['Divide', 'x', ['Multiply, 'y', 'a']]]
- */
-export function asCoefficient(
-  expr: BoxedExpression
-): [coef: Rational, rest: BoxedExpression] {
-  const [oldCoef, oldRest] = oldAsCoefficient(expr);
-
-  return [oldCoef, oldRest];
-
-  const [coef, rest] = Coefficient.fromExpression(expr);
-  // if (coef.sqrt === 1 && coef.float === 1) return [coef.rational, rest];
-  const ce = expr.engine;
-
-  const restCoef = coef.float * Math.sqrt(coef.sqrt);
-
-  let newRest = restCoef === 1 ? rest : ce.mul(ce.number(restCoef), rest);
-
-  if (add(coef.rational, neg(oldCoef))[0] !== 0) {
-    const [againCoef, againRest] = Coefficient.fromExpression(expr);
-    console.log(`asCoefficient(${expr.toString()}) ${oldCoef} -> ${coef}`);
-  }
-
-  if (!oldRest.isSame(newRest)) {
-    const [againCoef, againRest] = Coefficient.fromExpression(expr);
-    console.log(
-      `asCoefficient(${expr.toString()}) ${oldRest.toString()} -> ${newRest.toString()}`
-    );
-  }
-
-  return [coef.rational, newRest];
-}
-
-function oldAsCoefficient(
-  expr: BoxedExpression
-): [coef: Rational, rest: BoxedExpression] {
-  console.assert(expr.isCanonical);
-
-  const ce = expr.engine;
-
-  //
-  // Multiply
-  //
-  if (expr.head === 'Multiply') {
-    const rest: BoxedExpression[] = [];
-    let coef: Rational = [1, 1];
-    for (const arg of expr.ops!) {
-      const r = asApproximateRational(arg);
-      if (r) coef = mul(coef, r);
-      else rest.push(arg);
-    }
-
-    if (isRationalOne(coef)) return [coef, expr];
-    return [coef, ce.mul(...rest)];
-  }
-
-  //
-  // Divide
-  //
-  if (expr.head === 'Divide') {
-    // eslint-disable-next-line prefer-const
-    const [coef1, numer] = asCoefficient(expr.op1);
-    const [coef2, denom] = asCoefficient(expr.op2);
-
-    const coef = mul(coef1, inverse(coef2));
-
-    if (denom.isOne) return [coef, numer];
-    if (isRationalOne(coef)) return [coef, expr];
-    return [coef, ce.div(numer, denom)];
-  }
-
-  //
-  // Power
-  //
-  if (expr.head === 'Power') {
-    // We can only extract a coef if the exponent is a literal
-    if (expr.op2.numericValue === null) return [[1, 1], expr];
-
-    // eslint-disable-next-line prefer-const
-    let [coef, base] = asCoefficient(expr.op1);
-    if (isRationalOne(coef)) return [coef, expr];
-
-    const exponent = asFloat(expr.op2);
-    if (typeof exponent === 'number' && Number.isInteger(exponent))
-      return [pow(coef, exponent), ce.pow(base, expr.op2)];
-
-    return [[1, 1], expr];
-  }
-
-  if (expr.head === 'Sqrt') {
-    const [coef, rest] = asCoefficient(expr.op1);
-    let sqrtCoef = sqrt(coef);
-    return sqrtCoef ? [sqrtCoef, ce.sqrt(rest)] : [[1, 1], expr];
-  }
-
-  //
-  // Add
-  //
-  if (expr.head === 'Add') {
-    // @todo: use factor() to factor out common factors
-  }
-
-  //
-  // Negate
-  //
-  if (expr.head === 'Negate') {
-    const [coef, rest] = asCoefficient(expr.op1);
-    return [neg(coef), rest];
-  }
-
-  // @todo:  could consider others.. `Ln`, `Abs`, trig functions
-
-  //
-  // Literal
-  //
-
-  // Make the part positive if the real part is negative
-  const z = expr.numericValue;
-  if (z instanceof Complex && z.re < 0)
-    return [[-1, 1], ce.number(ce.complex(-z.re, -z.im))];
-
-  const r = asRational(expr);
-  return r ? [r, ce.One] : [[1, 1], expr];
-}
 
 export function asRational(expr: BoxedExpression): Rational | undefined {
   const num = expr.numericValue;
   if (Array.isArray(num)) return num;
   if (num === null) return undefined;
   if (typeof num === 'number' && Number.isInteger(num)) {
-    if (num > 1e9 || num < -1e9) return [bigint(num), BigInt(1)];
+    if (num > 1e9 || num < -1e9) return [BigInt(num), BigInt(1)];
     return [num, 1];
   }
   if (num instanceof Decimal && num.isInteger())
@@ -251,8 +110,8 @@ export function mul(lhs: Rational, rhs: BoxedExpression | Rational): Rational {
   if (Array.isArray(rhs)) {
     if (isMachineRational(lhs) && isMachineRational(rhs))
       return [lhs[0] * rhs[0], lhs[1] * rhs[1]];
-    if (isMachineRational(lhs)) lhs = [bigint(lhs[0]), bigint(lhs[1])];
-    if (isMachineRational(rhs)) rhs = [bigint(rhs[0]), bigint(rhs[1])];
+    if (isMachineRational(lhs)) lhs = [BigInt(lhs[0]), BigInt(lhs[1])];
+    if (isMachineRational(rhs)) rhs = [BigInt(rhs[0]), BigInt(rhs[1])];
     return [lhs[0] * rhs[0], lhs[1] * rhs[1]];
   }
 
@@ -381,17 +240,18 @@ export function signDiff(
   const lhsN = lhs.N();
   const rhsN = rhs.N();
 
+  if (lhsN.isSame(rhsN)) return 0;
+
   const lhsNum = lhsN.numericValue;
   const rhsNum = rhsN.numericValue;
 
   if (lhsNum === null || rhsNum === null) {
-    // Couldn't calculate numeric value, use the `sgn` property
-    const lhsS = lhsN.sgn;
-    const rhsS = rhsN.sgn;
-    if (typeof lhsS !== 'number' || typeof rhsS !== 'number') return undefined;
-    if (lhsS === 0 && rhsS === 0) return 0;
-    if (lhsS < 0 && rhsS > 0) return -1;
-    if (lhsS > 0 && rhsS < 0) return +1;
+    const ce = lhs.engine;
+    const diff = ce.add(lhsN, ce.neg(rhsN));
+    if (diff.isZero) return 0;
+    // @fixme: use diff.numericValue & chop
+    const s = diff.sgn;
+    if (s !== null) return s;
     return undefined;
   }
 

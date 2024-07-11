@@ -22,11 +22,11 @@ export function MultiIndexingSet(
 ): ReadonlyArray<BoxedExpression> | undefined {
   if (!indexingSet) return undefined;
   const ce = indexingSet.engine;
-  let indexes: BoxedExpression[] = [];
-  let hasSuperSequence = true ? indexingSet.ops?.length == 3 : false;
+  const indexes: BoxedExpression[] = [];
+  const hasSuperSequence = true ? indexingSet.ops?.length == 3 : false;
 
-  let subSequence = indexingSet.ops![0].ops![0].ops;
-  let sequenceLength = subSequence?.length ?? 0;
+  const subSequence = indexingSet.ops![0].ops![0].ops;
+  const sequenceLength = subSequence?.length ?? 0;
   let superSequence: ReadonlyArray<BoxedExpression> | null = null;
   if (hasSuperSequence) {
     superSequence = indexingSet.ops![2].ops![0].ops;

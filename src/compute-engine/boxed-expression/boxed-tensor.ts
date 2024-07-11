@@ -5,7 +5,6 @@ import {
   BoxedExpression,
   IComputeEngine,
   EvaluateOptions,
-  NOptions,
   SimplifyOptions,
   Metadata,
   BoxedDomain,
@@ -115,7 +114,7 @@ export class BoxedTensor extends _BoxedExpression {
   reset(): void {}
 
   get hash(): number {
-    let h = hashCode('BoxedTensor');
+    const h = hashCode('BoxedTensor');
     // for (const [k, v] of this._value) h ^= hashCode(k) ^ v.hash;
     return h;
   }
@@ -249,14 +248,14 @@ export class BoxedTensor extends _BoxedExpression {
     return this.expression.evaluate(options);
   }
 
-  simplify(options?: SimplifyOptions): BoxedExpression {
+  simplify(options?: Partial<SimplifyOptions>): BoxedExpression {
     if (this._tensor) return this;
     return this.expression.simplify(options);
   }
 
-  N(options?: NOptions): BoxedExpression {
+  N(): BoxedExpression {
     if (this._tensor) return this;
-    return this.expression.N(options);
+    return this.expression.N();
   }
 }
 
@@ -267,9 +266,14 @@ export function isBoxedTensor(val: unknown): val is BoxedTensor {
 export function expressionTensorInfo(
   head: string,
   rows: ReadonlyArray<BoxedExpression>
-) {
+):
+  | {
+      shape: number[];
+      dtype: TensorDataType | undefined;
+    }
+  | undefined {
   let dtype: TensorDataType | undefined = undefined;
-  let shape: number[] = [];
+  const shape: number[] = [];
   let valid = true;
 
   const visit = (t: ReadonlyArray<BoxedExpression>, axis = 0) => {
@@ -290,15 +294,14 @@ export function expressionTensorInfo(
 
   visit(rows);
 
-  if (!valid) return undefined;
-  return { shape, dtype };
+  return valid ? { shape, dtype } : undefined;
 }
 
 export function expressionAsTensor<T extends TensorDataType>(
   head: string,
   rows: ReadonlyArray<BoxedExpression>
 ): TensorData<T> | undefined {
-  let { shape, dtype } = expressionTensorInfo(head, rows) ?? {
+  const { shape, dtype } = expressionTensorInfo(head, rows) ?? {
     shape: [],
     dtype: undefined,
   };

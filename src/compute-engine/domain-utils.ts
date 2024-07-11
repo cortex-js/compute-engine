@@ -173,7 +173,7 @@ export function signatureToDomain(
     if (sig.restParam) fnParams.push(['VarArg', sig.restParam]);
 
     if (typeof sig.result === 'function')
-      fnParams.push(sig.result(ce, []) ?? ce.symbol('Undefined'));
+      fnParams.push(sig.result(ce, []) ?? ce.symbol('Anything'));
     else fnParams.push(sig.result);
 
     return ce.domain(['FunctionOf', ...(fnParams as DomainExpression[])]);

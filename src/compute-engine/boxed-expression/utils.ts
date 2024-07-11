@@ -15,7 +15,7 @@ export function isBoxedExpression(x: unknown): x is BoxedExpression {
  * For any numeric result, if `bignumPreferred()` is true, calculate using
  * bignums. If `bignumPreferred()` is false, calculate using machine numbers
  */
-export function bignumPreferred(ce: IComputeEngine) {
+export function bignumPreferred(ce: IComputeEngine): boolean {
   return ce.numericMode === 'bignum' || ce.numericMode === 'auto';
 }
 
@@ -23,7 +23,7 @@ export function bignumPreferred(ce: IComputeEngine) {
  * return `NaN` if not `complexallowed()`
  */
 
-export function complexAllowed(ce: IComputeEngine) {
+export function complexAllowed(ce: IComputeEngine): boolean {
   return ce.numericMode === 'auto' || ce.numericMode === 'complex';
 }
 
@@ -35,7 +35,7 @@ export function isLatexString(s: unknown): s is string {
 export function asLatexString(s: unknown): string | null {
   if (typeof s === 'number') return s.toString();
   if (typeof s === 'string') {
-    let str = s.trim();
+    const str = s.trim();
 
     if (str.startsWith('$$') && str.endsWith('$$')) return str.slice(2, -2);
     if (str.startsWith('$') && str.endsWith('$')) return str.slice(1, -1);

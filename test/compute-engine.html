@@ -344,6 +344,53 @@
     import { convertLatexToMarkup } from "https://unpkg.com/mathlive/dist/mathlive.min.mjs";
     import { ComputeEngine } from "../compute-engine.esm.js";
 
+
+    function ceBaselineN(numRandos) {
+      const ce = new ComputeEngine();
+
+      let randos = numRandos.map((n) => ce.number(n));
+
+      let start = globalThis.performance.now();
+
+      randos = randos.map((n, i) => {
+        // Do some arithmetic calculations
+        if (i % 2 === 0)
+          return ce
+            .box([
+              'Add',
+              [
+                'Multiply',
+                ['Rational', 4, 3],
+                ['Square', n],
+                ['Multiply', ['Rational', 3, 2], n],
+                2,
+              ],
+            ])
+            .N();
+
+        // Trigonometry, log, exp
+        return ce.box(['Add', ['Tan', n], ['Log', ['Abs', n], ['Exp', n]]]).N();
+      });
+
+      return globalThis.performance.now() - start;
+    }
+
+    function randNumbers(n) {
+      let randos = [];
+      for (let i = 0; i < n; i++) {
+        const n = Math.floor(Math.random() * Number.MAX_SAFE_INTEGER);
+        randos.push(n);
+      }
+      return randos;
+    }
+
+    // console.profile();
+    console.log('before');
+    ceBaselineN(randNumbers(100));
+    console.log('after');
+    // console.profileEnd();
+
+
     const MAX_LINE_LENGTH = 64;
 
     document.getElementById("random").addEventListener("click", (ev) => {

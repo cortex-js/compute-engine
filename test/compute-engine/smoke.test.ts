@@ -165,16 +165,16 @@ describe('PARSING numbers', () => {
                                                     "Floor",
                                                     [
                                                       "Divide",
-                                                      ["Subscript", "v", 2],
-                                                      ["Subscript", "v", 3]
+                                                      ["At", "v", 2],
+                                                      ["At", "v", 3]
                                                     ]
                                                   ],
                                                   [
                                                     "Negate",
                                                     [
                                                       "Divide",
-                                                      ["Subscript", "v", 2],
-                                                      ["Subscript", "v", 3]
+                                                      ["At", "v", 2],
+                                                      ["At", "v", 3]
                                                     ]
                                                   ]
                                                 ]
@@ -184,21 +184,18 @@ describe('PARSING numbers', () => {
                                         ],
                                         [
                                           "Tuple",
-                                          ["Subscript", "v", 3],
+                                          ["At", "v", 3],
                                           2,
-                                          [
-                                            "Floor",
-                                            ["Sqrt", ["Subscript", "v", 2]]
-                                          ]
+                                          ["Floor", ["Sqrt", ["At", "v", 2]]]
                                         ]
                                       ]
                                     ]
                                   ],
                                   [
                                     "Tuple",
-                                    ["Subscript", "v", 2],
+                                    ["At", "v", 2],
                                     2,
-                                    ["Subscript", "v", 1]
+                                    ["At", "v", 1]
                                   ]
                                 ]
                               ]
@@ -212,7 +209,7 @@ describe('PARSING numbers', () => {
                 ],
                 [
                   "Tuple",
-                  ["Subscript", "v", 1],
+                  ["At", "v", 1],
                   2,
                   ["Floor", ["Multiply", 1.5, "n", ["Ln", "n"]]]
                 ]
@@ -473,8 +470,7 @@ describe('CANONICALIZATION divide', () => {
       [
         Divide,
         [
-          Multiply,
-          -1,
+          Negate,
           x,
         ],
         2,
@@ -484,10 +480,16 @@ describe('CANONICALIZATION divide', () => {
   test(`\\frac{-x}{\\frac{1}{n}}`, () => {
     expect(canonicalToJson('\\frac{-x}{\\frac{1}{n}}')).toMatchInlineSnapshot(`
       [
-        Multiply,
-        -1,
-        n,
-        x,
+        Negate,
+        [
+          Divide,
+          [
+            Multiply,
+            n,
+            x,
+          ],
+          1,
+        ],
       ]
     `);
   });
@@ -647,38 +649,38 @@ describe('SIMPLIFICATION sqrt', () => {
       [
         Divide,
         [
-          Add,
+          Multiply,
           [
-            Negate,
+            Sqrt,
+            2,
+          ],
+          [
+            Subtract,
+            [
+              Sqrt,
+              [
+                Add,
+                [
+                  Sqrt,
+                  3,
+                ],
+                2,
+              ],
+            ],
             [
               Sqrt,
               [
                 Add,
                 [
                   Multiply,
-                  10,
+                  5,
                   [
                     Sqrt,
                     3,
                   ],
                 ],
-                28,
+                14,
               ],
-            ],
-          ],
-          [
-            Sqrt,
-            [
-              Add,
-              [
-                Multiply,
-                2,
-                [
-                  Sqrt,
-                  3,
-                ],
-              ],
-              4,
             ],
           ],
         ],
@@ -701,7 +703,7 @@ describe('SIMPLIFICATION trigonometry', () => {
 
   test(`simplify('1+4\\times\\sin\\frac{\\pi}{10}')`, () =>
     expect(simplify('1+4\\times\\sin\\frac{\\pi}{10}')).toMatchInlineSnapshot(
-      `["Sqrt", 5]`
+      `["Add", ["Sqrt", 5], -1, 1]`
     ));
 });
 
@@ -751,7 +753,7 @@ describe('SIMPLIFICATION multiply', () => {
     expect(
       simplify('-\\frac{-x+2\\times x}{-2\\times x + 1}')
     ).toMatchInlineSnapshot(
-      `["Divide", ["Negate", "x"], ["Add", ["Multiply", -2, "x"], 1]]`
+      `["Negate", ["Divide", "x", ["Add", ["Multiply", -2, "x"], 1]]]`
     );
   });
 });

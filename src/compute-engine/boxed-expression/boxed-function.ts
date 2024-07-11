@@ -11,7 +11,6 @@ import {
 import {
   BoxedFunctionDefinition,
   IComputeEngine,
-  NOptions,
   BoxedRuleSet,
   SimplifyOptions,
   Substitution,
@@ -53,6 +52,7 @@ import { canonicalMultiply } from '../library/arithmetic-multiply';
 import { BoxedExpression, SemiBoxedExpression } from './public';
 import { signDiff } from './numerics';
 import { match } from './match';
+import { factor } from './factor';
 
 /**
  * A boxed function represent an expression that can be
@@ -343,80 +343,85 @@ export class BoxedFunction extends _BoxedExpression {
   isEqual(rhs: BoxedExpression): boolean {
     if (this === rhs) return true;
 
-    const head = this.head;
+    const lhs = this.simplify();
+    rhs = rhs.simplify();
+
+    const head = lhs.head;
     //
     // Handle relational operators
     //
     if (head === 'Equal' || head === 'NotEqual' || head === 'Unequal') {
+      // @fixme: put lhs and rhs in canonical form, i.e. x + 1 = 2 -> x - 1 = 0
       if (rhs.head !== head) return false;
       // Equality is commutative
       if (
-        (this.op1.isEqual(rhs.op1) && this.op2.isEqual(rhs.op2)) ||
-        (this.op1.isEqual(rhs.op2) && this.op2.isEqual(rhs.op1))
+        (lhs.op1.isEqual(rhs.op1) && lhs.op2.isEqual(rhs.op2)) ||
+        (lhs.op1.isEqual(rhs.op2) && lhs.op2.isEqual(rhs.op1))
       )
         return true;
-      return false;
     }
     if (head === 'Less') {
       if (rhs.head === 'Less') {
-        if (this.op1.isEqual(rhs.op1) && this.op2.isEqual(rhs.op2)) return true;
+        if (lhs.op1.isEqual(rhs.op1) && lhs.op2.isEqual(rhs.op2)) return true;
         return false;
       }
       if (rhs.head === 'Greater') {
-        if (this.op1.isEqual(rhs.op2) && this.op2.isEqual(rhs.op1)) return true;
+        if (lhs.op1.isEqual(rhs.op2) && lhs.op2.isEqual(rhs.op1)) return true;
         return false;
       }
       return false;
     }
     if (head === 'Greater') {
       if (rhs.head === 'Greater') {
-        if (this.op1.isEqual(rhs.op1) && this.op2.isEqual(rhs.op2)) return true;
+        if (lhs.op1.isEqual(rhs.op1) && lhs.op2.isEqual(rhs.op2)) return true;
         return false;
       }
       if (rhs.head === 'Less') {
-        if (this.op1.isEqual(rhs.op2) && this.op2.isEqual(rhs.op1)) return true;
+        if (lhs.op1.isEqual(rhs.op2) && lhs.op2.isEqual(rhs.op1)) return true;
         return false;
       }
       return false;
     }
     if (head === 'LessEqual') {
       if (rhs.head === 'LessEqual') {
-        if (this.op1.isEqual(rhs.op1) && this.op2.isEqual(rhs.op2)) return true;
+        if (lhs.op1.isEqual(rhs.op1) && lhs.op2.isEqual(rhs.op2)) return true;
         return false;
       }
       if (rhs.head === 'GreaterEqual') {
-        if (this.op1.isEqual(rhs.op2) && this.op2.isEqual(rhs.op1)) return true;
+        if (lhs.op1.isEqual(rhs.op2) && lhs.op2.isEqual(rhs.op1)) return true;
         return false;
       }
       return false;
     }
     if (head === 'GreaterEqual') {
       if (rhs.head === 'GreaterEqual') {
-        if (this.op1.isEqual(rhs.op1) && this.op2.isEqual(rhs.op2)) return true;
+        if (lhs.op1.isEqual(rhs.op1) && lhs.op2.isEqual(rhs.op2)) return true;
         return false;
       }
       if (rhs.head === 'LessEqual') {
-        if (this.op1.isEqual(rhs.op2) && this.op2.isEqual(rhs.op1)) return true;
+        if (lhs.op1.isEqual(rhs.op2) && lhs.op2.isEqual(rhs.op1)) return true;
         return false;
       }
       return false;
     }
     if (isRelationalOperator(head)) {
-      if (rhs.head !== this.head) return false;
-      if (this.op1.isEqual(rhs.op1) && this.op2.isEqual(rhs.op2)) return true;
+      if (rhs.head !== lhs.head) return false;
+      if (lhs.op1.isEqual(rhs.op1) && lhs.op2.isEqual(rhs.op2)) return true;
       return false;
     }
 
     // Not a relational operator. An algebraic expression?
-    const s = signDiff(this, rhs);
+    // Note: signDiff will attempt to subtract the two expressions to check
+    // if the difference is zero.
+    const s = signDiff(lhs, rhs);
     if (s === 0) return true;
     if (s !== undefined) return false;
 
     // Try to simplify the difference of the expressions
-    const diff = this.engine.add(this, this.engine.neg(rhs)).simplify();
+    const diff = this.engine.add(lhs, this.engine.neg(rhs)).simplify();
     if (diff.isZero) return true;
 
-    return this.isSame(rhs);
+    return lhs.isSame(rhs);
   }
 
   get isNumber(): boolean | undefined {
@@ -478,6 +483,7 @@ export class BoxedFunction extends _BoxedExpression {
   // }
 
   simplify(options?: SimplifyOptions): BoxedExpression {
+    // @fixme: simplify logic, only use rules, including "core" rules (i.e. expand/distribute/factor)
     //
     // 1/ Use the canonical form
     //
@@ -491,25 +497,44 @@ export class BoxedFunction extends _BoxedExpression {
     //
     // 2/ Apply expand
     //
-    const recursive = options?.recursive ?? true;
+    const depth = options?.depth ?? 0;
+    const maxDepth = options?.maxDepth ?? Infinity;
+    const recursive = depth < maxDepth;
 
     let expr: BoxedExpression | undefined | null;
     if (recursive) {
-      expr = expand(this);
-      if (expr !== null) {
-        if (!expr.ops) return expr;
-        expr = this.engine
-          ._fn(
-            expr.head,
-            expr.ops.map((x) => x.simplify(options))
+      expr = expand(this) ?? this;
+      if (expr?.ops) {
+        expr = this.engine._fn(
+          expr.head,
+          expr.ops.map((x) =>
+            x.simplify({ ...options, depth: depth + 1, maxDepth })
           )
-          .simplify({ ...options, recursive: false });
-        return cheapest(this, expr);
+        );
+      }
+      expr = expr.simplify({ ...options, depth: depth + 1, maxDepth: 0 });
+    }
+
+    //
+    // 3/ Factor if a relational operator
+    //    2x < 4t -> x < 2t
+    if (isRelationalOperator(this.head)) {
+      expr = factor(expr ?? this);
+      expr = expr ?? this;
+      console.assert(isRelationalOperator(expr.head));
+      if (expr.nops === 2) {
+        // Try f(x) < g(x) -> f(x) - g(x) < 0
+        const ce = this.engine;
+        const alt = ce._fn(expr.head, [
+          ce.add(expr.op1, ce.neg(expr.op2)),
+          ce.Zero,
+        ]);
+        expr = cheapest(expr, alt);
       }
     }
 
     //
-    // 3/ Simplify the applicable operands
+    // 4/ Simplify the applicable operands
     // @todo not clear if this is always the best strategy. Might be better to
     // defer to the handler.
     //
@@ -519,21 +544,21 @@ export class BoxedFunction extends _BoxedExpression {
           this._ops,
           def?.hold ?? 'none',
           def?.associative ? def.name : '',
-          (x) => x.simplify(options)
+          (x) => x.simplify({ ...options, depth: depth + 1, maxDepth })
         )
       : this._ops;
 
     //
-    // 4/ If a function expression, apply the arguments, and simplify the result
+    // 5/ If a function expression, apply the arguments, and simplify the result
     //
     if (typeof this._head !== 'string') {
       expr = apply(this._head, tail);
       if (typeof expr.head !== 'string') return expr;
-      return expr.simplify(options);
+      return expr.simplify({ ...options, depth, maxDepth });
     }
 
     //
-    // 5/ Apply `simplify` handler
+    // 6/ Apply `simplify` handler
     //
 
     if (def) {
@@ -552,16 +577,21 @@ export class BoxedFunction extends _BoxedExpression {
     if (options?.rules === null) return expr;
 
     //
-    // 6/ Apply rules, until no rules can be applied
+    // 7/ Apply rules, until no rules can be applied
     //
     const rules =
       options?.rules ?? this.engine.getRuleSet('standard-simplification')!;
 
     let iterationCount = 0;
     do {
-      let newExpr = expr!.replace(rules);
+      const newExpr = expr!.replace(rules);
       if (!newExpr) break;
-      expr = newExpr.simplify({ rules: null });
+      expr = newExpr.simplify({
+        ...options,
+        depth: depth + 1,
+        maxDepth,
+        rules: null,
+      });
 
       iterationCount += 1;
     } while (iterationCount < this.engine.iterationLimit);
@@ -671,8 +701,8 @@ export class BoxedFunction extends _BoxedExpression {
     return result ?? this.engine.box([this._head, ...tail]);
   }
 
-  N(options?: NOptions): BoxedExpression {
-    return this.evaluate({ ...options, numericMode: true });
+  N(): BoxedExpression {
+    return this.evaluate({ numericMode: true });
   }
 
   solve(
@@ -788,7 +818,7 @@ export function makeCanonicalFunction(
     );
   }
 
-  let xs: BoxedExpression[] = [];
+  const xs: BoxedExpression[] = [];
 
   for (let i = 0; i < ops.length; i++) {
     if (!shouldHold(def.hold, ops.length - 1, i)) {
@@ -809,6 +839,8 @@ export function makeCanonicalFunction(
   // arguments, sorting them, applying involution and idempotent to
   // the expression, flatenning sequences and validating the signature
   // (domain and number of arguments)
+  //
+  // The arguments have been put in canonical form, as per hold rules.
   //
   if (sig.canonical) {
     try {

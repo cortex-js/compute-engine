@@ -210,7 +210,7 @@ function matchRecursive(
   console.assert(expr.ops !== null);
   let result: BoxedSubstitution | null = null;
   for (const op of expr.ops!) {
-    let r = matchOnce(op, pattern, substitution, options);
+    const r = matchOnce(op, pattern, substitution, options);
     if (r !== null) {
       result = r;
       substitution = r;
@@ -236,7 +236,6 @@ function matchVariants(
   console.assert(typeof pattern.head === 'string');
   const head = pattern.head;
   const ce = expr.engine;
-  let result: BoxedSubstitution | null = null;
 
   const varOptions = { ...options, acceptVariants: false };
 
@@ -370,7 +369,7 @@ function matchVariants(
     }
   }
 
-  return result;
+  return null;
 }
 
 function matchPermutation(

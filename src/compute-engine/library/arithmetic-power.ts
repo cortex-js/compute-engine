@@ -15,7 +15,7 @@ import {
   isBigRational,
   isMachineRational,
   isRational,
-  isRationalOne,
+  isOne,
   machineDenominator,
   machineNumerator,
 } from '../numerics/rationals';
@@ -274,7 +274,7 @@ export function processPower(
       }
     }
 
-    if (!isRationalOne(c) || !isRationalOne(sqrt)) {
+    if (!isOne(c) || !isOne(sqrt)) {
       const a1 = processPower(ce, ce.number(c), exponent, mode);
       const a2 = processPower(
         ce,

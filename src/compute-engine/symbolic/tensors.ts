@@ -334,7 +334,7 @@ export abstract class AbstractTensor<DT extends keyof DataTypeMap>
     if (axis1 <= 0 || axis1 > this.shape.length) return undefined;
     if (this.shape[axis1 - 1] !== this.shape[axis2 - 1]) return undefined;
 
-    let diag: DataTypeMap[DT][] = new Array(this.shape[axis1 - 1]);
+    const diag: DataTypeMap[DT][] = new Array(this.shape[axis1 - 1]);
     const data = this.data;
     const n = this.shape[axis1 - 1];
     for (let i = 0; i < n; i++) diag[i] = data[i * n + i];
@@ -351,7 +351,7 @@ export abstract class AbstractTensor<DT extends keyof DataTypeMap>
     if (m !== n) return undefined;
 
     const data = this.data;
-    let trace: DataTypeMap[DT][] = new Array(m);
+    const trace: DataTypeMap[DT][] = new Array(m);
     for (let i = 0; i < m; i++) trace[i] = data[i * m + i];
     return this.field.addn(...trace);
   }
@@ -703,7 +703,7 @@ export abstract class AbstractTensor<DT extends keyof DataTypeMap>
 }
 
 function getStrides(shape: number[]): number[] {
-  let strides = new Array(shape.length);
+  const strides = new Array(shape.length);
   for (let i = shape.length - 1, stride = 1; i >= 0; i--) {
     strides[i] = stride;
     stride *= shape[i];

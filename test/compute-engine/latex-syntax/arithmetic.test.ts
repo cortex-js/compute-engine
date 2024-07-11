@@ -40,14 +40,9 @@ describe('PRODUCT', () => {
   });
 
   test('testing parsing of double indexed summation', () => {
-    expect(engine.parse(`\\sum_{n,m} k_{n,m}`)).toMatchInlineSnapshot(`
-      [
-        "Sum",
-        ["Subscript", "k", ["Delimiter", ["Sequence", "n", "m"], "','"]],
-        "n",
-        "m"
-      ]
-    `);
+    expect(engine.parse(`\\sum_{n,m} k_{n,m}`)).toMatchInlineSnapshot(
+      `["Sum", ["At", "k", "n", "m"], "n", "m"]`
+    );
   });
 
   test('testing parsing of double indexed summation with upper and lower bounds', () => {
@@ -62,9 +57,7 @@ describe('PRODUCT', () => {
   });
 
   test('testing parsing of summation with element boxed expression', () => {
-    expect(engine.parse(`\\sum_{n \\in N}K_n`)).toMatchInlineSnapshot(
-      `["Sum", "K_n", ["Element", "n", "N"]]`
-    );
+    expect(engine.parse(`\\sum_{n \\in \\N}K_n`)).toMatchInlineSnapshot();
   });
 
   test('testing parsing of multi indexed summation with different index variables', () => {
@@ -87,13 +80,13 @@ describe('PRODUCT', () => {
 
   test('testing parsing of summation with a subscripted subscript index', () => {
     expect(engine.parse(`\\sum_{d_1} K`)).toMatchInlineSnapshot(
-      `["Sum", "K", ["Subscript", "d", 1]]`
+      `["Sum", "K", ["At", "d", 1]]`
     );
   });
 
   test('testing parsing of summation with a subscripted subscript index and value', () => {
     expect(engine.parse(`\\sum_{d_{1} = 2} K`)).toMatchInlineSnapshot(
-      `["Sum", "K", ["Pair", "d_1", 2]]`
+      `["Sum", "K", ["Pair", ["At", "d", 1], 2]]`
     );
   });
 

@@ -1009,7 +1009,7 @@ export class _Parser implements Parser {
 
   parseRepeatingDecimal(): string {
     const start = this.index;
-    let format = this.options.repeatingDecimal;
+    const format = this.options.repeatingDecimal;
 
     let repeatingDecimals = '';
     if ((format === 'auto' || format === 'parentheses') && this.match('(')) {
@@ -1172,8 +1172,8 @@ export class _Parser implements Parser {
       const n = fractionalPart.length;
 
       // Calculate numerator and denominator
-      const numerator = whole * Math.pow(10, n) + fraction;
-      const denominator = Math.pow(10, n);
+      const numerator = whole * 10 ** n + fraction;
+      const denominator = 10 ** n;
 
       if (exponent) {
         return [
@@ -1367,73 +1367,6 @@ export class _Parser implements Parser {
     this.index = savedIndex;
     return null;
   }
-
-  /** If matches the normalized open delimiter, return the
-   * expected closing delimiter.
-   *
-   * For example, if `delimiter` is `(`, it would match `\left\lparen` and
-   * return `['\right', '\rparen']`, which can be matched with `matchAll()`
-   *
-   * If you need to match several tokens, use `matchAll()`
-   *
-   * @internal
-   */
-  // private matchOpenDelimiter(
-  //   openDelim: Delimiter,
-  //   closeDelim: Delimiter
-  // ): LatexToken[] | null {
-  //   const index = this.index;
-
-  //   const closePrefix = OPEN_DELIMITER_PREFIX[this.peek];
-  //   if (closePrefix) this.nextToken();
-
-  //   const alternatives = DELIMITER_SHORTHAND[openDelim] ?? [openDelim];
-
-  //   const result = closePrefix ? [closePrefix] : [];
-
-  //   // Special case '||' delimiter
-  //   if (alternatives.includes('||') && this.matchAll(['|', '|'])) {
-  //     result.push('|');
-  //     result.push('|');
-  //     return result;
-  //   }
-
-  //   if (!alternatives.includes(this.peek)) {
-  //     // Not the delimiter we were expecting: backtrack
-  //     this.index = index;
-  //     return null;
-  //   }
-
-  //   if (CLOSE_DELIMITER[openDelim] === closeDelim) {
-  //     // If this is the standard pair (i.e. '(' and ')')
-  //     // use the matching closing (i.e. '\lparen' -> '\rparen')
-  //     result.push(CLOSE_DELIMITER[this.peek]);
-  //   } else {
-  //     result.push(closeDelim);
-  //   }
-
-  //   this.nextToken();
-
-  //   return result;
-  // }
-
-  // matchMiddleDelimiter(delimiter: '|' | ':' | LatexToken): boolean {
-  //   const delimiters = MIDDLE_DELIMITER[delimiter] ?? [delimiter];
-  //   if (MIDDLE_DELIMITER_PREFIX.includes(this.peek)) {
-  //     const index = this.index;
-  //     this.nextToken();
-  //     if (delimiters.includes(this.peek)) {
-  //       this.nextToken();
-  //       return true;
-  //     }
-  //     this.index = index;
-  //     return false;
-  //   } else if (delimiters.include(this.peek)) {
-  //     this.nextToken();
-  //     return true;
-  //   }
-  //   return false;
-  // }
 
   /**
    * An enclosure is an opening matchfix operator, an optional expression,

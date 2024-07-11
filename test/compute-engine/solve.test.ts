@@ -17,7 +17,7 @@ describe('SOLVING A QUADRATIC EQUATION', () => {
       ?.map((x) => x.json);
     expect(result).toMatchInlineSnapshot(`
       [
-        7.4999999971875e-8,
+        7.500000265281415e-8,
         -200.000000075,
       ]
     `);
@@ -28,6 +28,7 @@ describe('SOLVING A QUADRATIC EQUATION', () => {
     const result = eqn.solve('x')?.map((x) => x.json);
     expect(result).toMatchInlineSnapshot(`
       [
+        0,
         0,
       ]
     `);
@@ -144,20 +145,19 @@ describe('expr.solve()', () => {
           2,
         ],
         [
-          Add,
+          Divide,
           [
-            Multiply,
+            Add,
             [
-              Rational,
-              -1,
-              2,
+              Negate,
+              [
+                Sqrt,
+                3,
+              ],
             ],
-            [
-              Sqrt,
-              3,
-            ],
+            -2,
           ],
-          -1,
+          2,
         ],
       ]
     `);

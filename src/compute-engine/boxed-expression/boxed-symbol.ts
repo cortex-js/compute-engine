@@ -8,7 +8,6 @@ import {
   BoxedSymbolDefinition,
   IComputeEngine,
   EvaluateOptions,
-  NOptions,
   ReplaceOptions,
   SimplifyOptions,
   Substitution,
@@ -150,7 +149,7 @@ export class BoxedSymbol extends _BoxedExpression {
     this._id = this._def.name;
   }
 
-  reset() {
+  reset(): void {
     this._def?.reset();
     this._def = undefined;
   }
@@ -243,7 +242,7 @@ export class BoxedSymbol extends _BoxedExpression {
     return false;
   }
 
-  get value(): number | boolean | string | Object | undefined {
+  get value(): number | boolean | string | object | undefined {
     const def = this._def;
     if (def && def instanceof _BoxedSymbolDefinition) return def.value?.value;
     return undefined;
@@ -260,6 +259,7 @@ export class BoxedSymbol extends _BoxedExpression {
       | number[]
       | BoxedExpression
       | number
+      | object
       | undefined
   ) {
     const ce = this.engine;
@@ -325,7 +325,6 @@ export class BoxedSymbol extends _BoxedExpression {
     }
   }
 
-  // @ts-ignore
   get domain(): BoxedDomain | undefined {
     const def = this._def;
     if (def) {
@@ -592,7 +591,7 @@ export class BoxedSymbol extends _BoxedExpression {
     return this.symbolDefinition?.imaginary;
   }
 
-  simplify(options?: SimplifyOptions): BoxedExpression {
+  simplify(options?: Partial<SimplifyOptions>): BoxedExpression {
     // If allowed replace this symbol with its value/definition.
     // In some cases this may allow for some additional simplifications (e.g. `GoldenRatio`).
     const def = this.symbolDefinition;
@@ -609,7 +608,7 @@ export class BoxedSymbol extends _BoxedExpression {
     if (def) {
       if (options?.numericMode) {
         if (def.holdUntil === 'never') return this;
-        return def.value?.N(options) ?? this;
+        return def.value?.N() ?? this;
       }
       if (def.holdUntil === 'simplify' || def.holdUntil === 'evaluate') {
         return def.value?.evaluate(options) ?? this;
@@ -618,11 +617,11 @@ export class BoxedSymbol extends _BoxedExpression {
     return this;
   }
 
-  N(options?: NOptions): BoxedExpression {
+  N(): BoxedExpression {
     // If we're doing a numeric evaluation, the `hold` does not apply
     const def = this.symbolDefinition;
     if (def && def.holdUntil === 'never') return this;
-    return def?.value?.N(options) ?? this;
+    return def?.value?.N() ?? this;
   }
 
   replace(

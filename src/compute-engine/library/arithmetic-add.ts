@@ -19,7 +19,7 @@ import { asBignum, asFloat } from '../boxed-expression/numerics';
 
 /** The canonical form of `Add`:
  * - removes `0`
- * - capture complex numbers (a + ib or ai +b)
+ * - capture complex numbers (`a + ib` or `ai + b`)
  * */
 export function canonicalAdd(
   ce: IComputeEngine,
@@ -68,28 +68,11 @@ export function simplifyAdd(
   ce: IComputeEngine,
   args: ReadonlyArray<BoxedExpression>
 ): BoxedExpression {
-  // console.assert(args.length > 1, `simplifyAdd: not enough args`);
-
-  const terms = new Terms(ce, []);
-
-  for (let arg of args) {
-    arg = arg.simplify();
-    if (arg.isImaginary && arg.isInfinity) return ce.ComplexInfinity;
-    if (arg.isNaN || arg.symbol === 'Undefined') return ce.NaN;
-    terms.add(arg);
-  }
-  terms.reduceNumbers({ exact: true });
-  return terms.asExpression({ exact: true });
-
-  // const sum = new Sum(ce);
-  // for (let arg of args) {
-  //   arg = arg.simplify();
-  //   if (arg.isImaginary && arg.isInfinity) return ce.ComplexInfinity;
-  //   if (arg.isNaN || arg.symbol === 'Undefined') return ce.NaN;
-  //   if (!arg.isZero) sum.addTerm(arg);
-  // }
-
-  // return sum.asExpression('expression');
+  const terms = new Terms(
+    ce,
+    args.map((x) => x.simplify())
+  );
+  return terms.asExpression();
 }
 
 function evalAddNum(ops: ReadonlyArray<BoxedExpression>): number | null {
@@ -113,25 +96,15 @@ export function evalAdd(
     const sum = evalAddNum(ops);
     if (sum !== null) return ce.number(sum);
   }
+  const numericMode = mode == 'N';
+  // @fixme: should not need to call evalute. Could be done inside the Terms constructor
+  const terms = new Terms(
+    ce,
+    ops.map((x) => x.evaluate({ numericMode })),
+    { exact: !numericMode }
+  );
 
-  //
-  // First pass: looking for early exits
-  //
-  for (const arg of ops) {
-    if (arg.isImaginary && arg.isInfinity) return ce.ComplexInfinity;
-    if (arg.isNaN || arg.symbol === 'Undefined') return ce.NaN;
-    if (arg.numericValue !== null && !arg.isExact) mode = 'N';
-  }
-
-  if (mode === 'N') ops = ops.map((x) => x.N());
-  else ops = ops.map((x) => x.evaluate());
-
-  const terms = new Terms(ce, ops);
-  terms.reduceNumbers({ exact: mode !== 'N' });
-
-  return terms.asExpression({ exact: mode !== 'N' });
-
-  // return new Sum(ce, ops).asExpression(mode === 'N' ? 'numeric' : 'expression');
+  return terms.asExpression();
 }
 
 export function canonicalSummation(
@@ -143,20 +116,20 @@ export function canonicalSummation(
   ce.pushScope();
 
   body ??= ce.error('missing');
-  var result: BoxedExpression | undefined = undefined;
+  let result: BoxedExpression | undefined = undefined;
 
   if (
     indexingSet &&
     indexingSet.ops &&
     indexingSet.ops[0]?.head === 'Delimiter'
   ) {
-    var multiIndex = MultiIndexingSet(indexingSet);
+    const multiIndex = MultiIndexingSet(indexingSet);
     if (!multiIndex) return null;
-    var bodyAndIndex = [body.canonical];
+    const bodyAndIndex = [body.canonical];
     multiIndex.forEach((element) => bodyAndIndex.push(element));
     result = ce._fn('Sum', bodyAndIndex);
   } else {
-    var singleIndex = SingleIndexingSet(indexingSet);
+    const singleIndex = SingleIndexingSet(indexingSet);
     result = singleIndex
       ? ce._fn('Sum', [body.canonical, singleIndex])
       : ce._fn('Sum', [body.canonical]);
@@ -171,7 +144,7 @@ export function evalSummation(
   summationEquation: ReadonlyArray<BoxedExpression>,
   mode: 'simplify' | 'N' | 'evaluate'
 ): BoxedExpression | undefined {
-  let expr = summationEquation[0];
+  const expr = summationEquation[0];
   let indexingSet: BoxedExpression[] = [];
   if (summationEquation) {
     indexingSet = [];
@@ -224,10 +197,10 @@ export function evalSummation(
   const fn = expr;
   ce.pushScope();
 
-  var indexArray: string[] = [];
-  let lowerArray: number[] = [];
-  let upperArray: number[] = [];
-  let isFiniteArray: boolean[] = [];
+  const indexArray: string[] = [];
+  const lowerArray: number[] = [];
+  const upperArray: number[] = [];
+  const isFiniteArray: boolean[] = [];
   indexingSet.forEach((indexingSetElement) => {
     const [index, lower, upper, isFinite] = normalizeIndexingSet(
       indexingSetElement.evaluate()

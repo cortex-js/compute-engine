@@ -103,20 +103,7 @@ export const TRIGONOMETRY_LIBRARY: IdentifierDefinitions[] = [
       signature: {
         domain: ['FunctionOf', 'Numbers', 'Numbers'],
         simplify: (ce, ops) =>
-          constructibleValues(ce, 'Sin', ops[0])?.simplify() ??
-          (complexAllowed(ce)
-            ? ce
-                .box([
-                  'Divide',
-                  [
-                    'Subtract',
-                    ['Exp', ['Multiply', 'ImaginaryUnit', ops[0]]],
-                    ['Exp', ['Multiply', 'ImaginaryUnit', ['Negate', ops[0]]]],
-                  ],
-                  ['Complex', 0, 2],
-                ])
-                .simplify()
-            : undefined),
+          constructibleValues(ce, 'Sin', ops[0])?.simplify() ?? undefined,
 
         evaluate: (ce, ops) => evalTrig(ce, 'evaluate', 'Sin', ops[0]),
         N: (ce, ops) => evalTrig(ce, 'N', 'Sin', ops[0]),
@@ -155,6 +142,7 @@ export const TRIGONOMETRY_LIBRARY: IdentifierDefinitions[] = [
       threadable: true,
       signature: {
         domain: ['FunctionOf', 'Numbers', 'Numbers'],
+        // @fixme: if not a constructible, don't simplify. Rules will take care of that.
         simplify: (ce, ops) =>
           constructibleValues(ce, 'Cos', ops[0])?.simplify() ??
           ce
@@ -780,7 +768,7 @@ function constructibleValuesInverse(
   let x_N = asFloat(x.N());
   if (x_N === null) return undefined;
   // head is arcFn, and inverse_head is Fn
-  let inverse_head = inverseTrigFuncName(head);
+  const inverse_head = inverseTrigFuncName(head);
 
   //
   // Create the cache of special values of the head function by inverting
@@ -793,11 +781,11 @@ function constructibleValuesInverse(
   const specialInverseValues = ce.cache<ConstructibleTrigValuesInverse>(
     'constructible-inverse-trigonometric-values-' + head,
     () => {
-      let cache: ConstructibleTrigValuesInverse = [];
+      const cache: ConstructibleTrigValuesInverse = [];
       for (const [[n, d], value] of specialValues) {
         const r = value[inverse_head!];
         if (r === undefined) continue;
-        let rn = asFloat(r.N());
+        const rn = asFloat(r.N());
         if (rn === null) continue;
         cache.push([
           [r, rn],

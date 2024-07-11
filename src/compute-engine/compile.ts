@@ -282,13 +282,15 @@ export class ComputeEngineFunction extends Function {
     lngamma: gammaln,
     limit: limit,
   };
-  constructor(body) {
+  constructor(body: string) {
     super('_SYS', '_', `return ${body}`);
     return new Proxy(this, {
       apply: (target, thisArg, argumentsList) =>
         super.apply(thisArg, [this.sys, ...argumentsList]),
       get: (target, prop) => {
-        if (prop === 'toString') return () => body;
+        // Expose the `toString` method so that the JavaScript source can be
+        // inspected
+        if (prop === 'toString') return (): string => body;
         return target[prop];
       },
     });

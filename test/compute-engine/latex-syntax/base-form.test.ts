@@ -10,16 +10,7 @@ describe('BASE FORM', () => {
     expect(json('\\text{00111}_{2}')).toMatchInlineSnapshot(`7`);
     expect(json('\\text{00111}_2')).toMatchInlineSnapshot(`7`);
     expect(json('\\text{00\\;111}_2')).toMatchInlineSnapshot(`7`);
-    expect(json('(\\text{00\\;111})_2')).toMatchInlineSnapshot(`
-      [
-        Subscript,
-        [
-          Delimiter,
-          '00 111',
-        ],
-        2,
-      ]
-    `); // @fixme
+    expect(json('(\\text{00\\;111})_2')).toMatchInlineSnapshot(`7`);
   });
   test('decimal', () => {
     expect(json('\\text{123}_{10}')).toMatchInlineSnapshot(`123`);

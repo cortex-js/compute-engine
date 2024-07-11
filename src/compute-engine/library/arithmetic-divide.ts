@@ -1,20 +1,13 @@
 import { BoxedExpression, IComputeEngine } from '../public';
-import { apply2N, makePositive } from '../symbolic/utils';
-import { canonicalNegate } from '../symbolic/negate';
+import { apply2N } from '../symbolic/utils';
 import {
   inverse,
   isBigRational,
   isMachineRational,
-  isRationalOne,
-  isRationalZero,
+  isZero,
 } from '../numerics/rationals';
 import { Product } from '../symbolic/product';
-import {
-  asCoefficient,
-  asRational,
-  div,
-  mul,
-} from '../boxed-expression/numerics';
+import { asRational, mul } from '../boxed-expression/numerics';
 
 /**
  * Canonical form of 'Divide' (and 'Rational')
@@ -22,7 +15,8 @@ import {
  * - simplify the signs
  * - factor out negate (make the numerator and denominator positive)
  * - if numerator and denominator are integer literals, return a rational number
- *   or Rational experssion
+ *   or Rational expression
+ * - evaluate number literals
  */
 export function canonicalDivide(
   ce: IComputeEngine,
@@ -43,76 +37,68 @@ export function canonicalDivide(
     if (op1.isNegativeOne) return ce.neg(ce.inv(op2));
     const r1 = asRational(op1);
     const r2 = asRational(op2);
-    if (r1 && r2 && !isRationalZero(r2)) return ce.number(mul(r1, inverse(r2)));
+    if (r1 && r2 && !isZero(r2)) return ce.number(mul(r1, inverse(r2)));
   }
 
   if (op1.head === 'Divide' && op2.head === 'Divide') {
     return canonicalDivide(
       ce,
-      ce.mul(op1.op1, op2.op2),
-      ce.mul(op1.op2, op2.op1)
+      ce.function('Multiply', [op1.op1, op2.op2]),
+      ce.function('Multiply', [op1.op2, op2.op1])
     );
   }
   if (op1.head === 'Divide')
-    return canonicalDivide(ce, op1.op1, ce.mul(op1.op2, op2));
+    return canonicalDivide(
+      ce,
+      op1.op1,
+      ce.function('Multiply', [op1.op2, op2])
+    );
   if (op2.head === 'Divide')
-    return canonicalDivide(ce, ce.mul(op1, op2.op2), op2.op1);
+    return canonicalDivide(
+      ce,
+      ce.function('Multiply', [op1, op2.op2]),
+      op2.op1
+    );
 
-  const num1 = op1.numericValue;
-  if (num1 !== null) {
-    if (isMachineRational(num1)) {
-      const [a, b] = num1;
-      return canonicalDivide(ce, ce.number(a), ce.mul(ce.number(b), op2));
-    }
-    if (isBigRational(num1)) {
-      const [a, b] = num1;
-      return canonicalDivide(ce, ce.number(a), ce.mul(ce.number(b), op2));
-    }
-  }
-  const num2 = op2.numericValue;
-  if (num2 !== null) {
-    if (isMachineRational(num2)) {
-      const [a, b] = num2;
-      return canonicalDivide(ce, ce.mul(op1, ce.number(b)), ce.number(a));
-    }
-    if (isBigRational(num2)) {
-      const [a, b] = num2;
-      return canonicalDivide(ce, ce.mul(op1, ce.number(b)), ce.number(a));
-    }
-  }
+  // @fixme: enable below and compare test results
+  // const num1 = op1.numericValue;
+  // if (num1 !== null) {
+  //   if (isMachineRational(num1)) {
+  //     const [a, b] = num1;
+  //     return canonicalDivide(ce, ce.number(a), ce.mul(ce.number(b), op2));
+  //   }
+  //   if (isBigRational(num1)) {
+  //     const [a, b] = num1;
+  //     return canonicalDivide(ce, ce.number(a), ce.mul(ce.number(b), op2));
+  //   }
+  // }
+  // const num2 = op2.numericValue;
+  // if (num2 !== null) {
+  //   if (isMachineRational(num2)) {
+  //     const [a, b] = num2;
+  //     return canonicalDivide(ce, ce.mul(op1, ce.number(b)), ce.number(a));
+  //   }
+  //   if (isBigRational(num2)) {
+  //     const [a, b] = num2;
+  //     return canonicalDivide(ce, ce.mul(op1, ce.number(b)), ce.number(a));
+  //   }
+  // }
 
-  const [c1, t1] = asCoefficient(op1);
-  const [c2, t2] = asCoefficient(op2);
-  if (!isRationalOne(c1) || !isRationalOne(c2)) {
-    const [n, d] = div(c1, c2);
-    let [nt, dt] = [ce.mul(ce.number(n), t1), ce.mul(ce.number(d), t2)];
-    if (dt.isNegative) {
-      dt = ce.neg(dt);
-      nt = ce.neg(nt);
-    }
-    if (dt.head === 'Negate') {
-      dt = dt.op1;
-      nt = ce.neg(nt);
-    }
-    if (nt.isZero) return ce.Zero;
-    if (dt.isOne) return nt;
-    return ce._fn('Divide', [nt, dt]);
-  }
+  const [c1, t1] = ce._toNumericValue(op1);
+  const [c2, t2] = ce._toNumericValue(op2);
 
-  // eslint-disable-next-line prefer-const
-  let [nSign, n] = makePositive(op1);
-  // eslint-disable-next-line prefer-const
-  let [dSign, d] = makePositive(op2);
+  const c = c1.div(c2);
+  if (c.isZero) return ce.Zero;
+  if (c.isOne) return ce._fn('Divide', [t1, t2]);
+  if (c.isNegativeOne)
+    // @fixme: check that having the negate outside is the best (does canonicalNegate propagate inside?)
+    return ce.function('Negate', [ce._fn('Divide', [t1, t2])]);
 
-  n = n.canonical;
-  d = d.canonical;
+  const num = ce._fromNumericValue(c.num, t1);
+  const denom = ce._fromNumericValue(c.denom, t2);
+  if (denom.isOne) return num;
 
-  if (d.numericValue !== null && d.isOne)
-    return nSign * dSign < 0 ? canonicalNegate(n) : n;
-
-  if (nSign * dSign > 0) return ce._fn('Divide', [n, d]);
-  if (n.numericValue) return ce._fn('Divide', [canonicalNegate(n), d]);
-  return canonicalNegate(ce._fn('Divide', [n, d]));
+  return ce._fn('Divide', [num, denom]);
 }
 
 /**
@@ -124,11 +110,12 @@ export function simplifyDivide(
   op1: BoxedExpression,
   op2: BoxedExpression
 ): BoxedExpression | undefined {
-  if (op1.numericValue !== null && op2.numericValue !== null) {
-    const r1 = asRational(op1);
-    const r2 = asRational(op2);
-    if (r1 && r2 && !isRationalZero(r2)) return ce.number(mul(r1, inverse(r2)));
-  }
+  // @fixme: this is a potential fast path, but not necessary
+  // if (op1.numericValue !== null && op2.numericValue !== null) {
+  //   const r1 = asRational(op1);
+  //   const r2 = asRational(op2);
+  //   if (r1 && r2 && !isZero(r2)) return ce.number(mul(r1, inverse(r2)));
+  // }
 
   return new Product(ce, [op1, ce.inv(op2)]).asRationalExpression();
 }

@@ -24,15 +24,15 @@ describe('COMPILE', () => {
   describe('Blocks', () => {
     it('should compile a simple block', () => {
       const expr = ce.box(['Block', ['Multiply', 10, 2]]);
-      expect(expr.compile()?.toString() ?? '').toMatchInlineSnapshot(`10 * 2`);
+      expect(expr.compile()?.toString() ?? '').toMatchInlineSnapshot(`20`);
     });
 
     it('should compile a block with two statements', () => {
       const expr = ce.box(['Block', ['Add', 13, 15], ['Multiply', 10, 2]]);
       expect(expr.compile()?.toString() ?? '').toMatchInlineSnapshot(`
         (() => {
-        13 + 15;
-        return 10 * 2
+        28;
+        return 20
         })()
       `);
     });
@@ -48,7 +48,7 @@ describe('COMPILE', () => {
         (() => {
         let x;
         x = 4.1;
-        return x * _.n
+        return _.n * x
         })()
       `);
     });
@@ -66,7 +66,7 @@ describe('COMPILE', () => {
         let x;
         x = 4.1;
         return x + 1;
-        return x * 2
+        return 2 * x
         })()
       `);
     });

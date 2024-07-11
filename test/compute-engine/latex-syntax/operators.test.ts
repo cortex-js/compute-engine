@@ -16,7 +16,7 @@ describe('OPERATOR oprel', () => {
   test('x+y=1+1', () =>
     expect(check('x+y=1+1')).toMatchInlineSnapshot(`
       box       = ["Equal", ["Add", "x", "y"], ["Add", 1, 1]]
-      simplify  = ["Equal", ["Add", "x", "y"], 2]
+      simplify  = ["Equal", ["Add", "x", "y", -2], 0]
       evaluate  = False
     `));
 
@@ -30,7 +30,8 @@ describe('OPERATOR oprel', () => {
   test('x+y<1+1', () =>
     expect(check('x+y<1+1')).toMatchInlineSnapshot(`
       box       = ["Less", ["Add", "x", "y"], ["Add", 1, 1]]
-      simplify  = ["Less", ["Add", "x", "y"], 2]
+      simplify  = ["Less", ["Add", "x", "y", -2], 0]
+      evaluate  = ["Less", ["Add", "x", "y"], 2]
     `));
 
   test('x>=1', () =>
@@ -97,7 +98,7 @@ describe('OPERATOR invisible', () => {
   test('2^{3}4+5 // Invisible operator', () =>
     expect(check('2^{3}4+5')).toMatchInlineSnapshot(`
       box       = ["Add", ["InvisibleOperator", ["Power", 2, 3], 4], 5]
-      canonical = ["Add", ["Multiply", ["Power", 2, 3], 4], 5]
+      canonical = ["Add", ["Multiply", 4, ["Power", 2, 3]], 5]
       simplify  = 37
     `));
 
@@ -109,8 +110,7 @@ describe('OPERATOR invisible', () => {
   test('x2z // Invisible operator', () =>
     expect(check('x2z')).toMatchInlineSnapshot(`
       box       = ["InvisibleOperator", "x", 2, "z"]
-      canonical = ["Multiply", "x", 2, "z"]
-      simplify  = ["Multiply", 2, "x", "z"]
+      canonical = ["Multiply", 2, "x", "z"]
     `));
 
   test('2(xyz) // Invisible operator', () =>
@@ -130,7 +130,7 @@ describe('OPERATOR invisible', () => {
         "q",
         ["Delimiter", ["InvisibleOperator", 2, "q"]]
       ]
-      canonical = ["Multiply", "q", 2, "q"]
+      canonical = ["Multiply", 2, "q", "q"]
       evaluate  = ["Multiply", 2, ["Square", "q"]]
     `));
 
@@ -171,13 +171,11 @@ describe('OPERATOR prefix', () => {
     expect(check('-x-1')).toMatchInlineSnapshot(`
       box       = ["Add", ["Negate", "x"], -1]
       canonical = ["Subtract", -1, "x"]
-      evaluate  = ["Subtract", ["Negate", "x"], 1]
     `));
   test('-x+1 // Negate', () =>
     expect(check('-x+1')).toMatchInlineSnapshot(`
       box       = ["Add", ["Negate", "x"], 1]
       canonical = ["Subtract", 1, "x"]
-      evaluate  = ["Add", ["Negate", "x"], 1]
     `));
   test('-ab // Negate', () =>
     expect(check('-ab')).toMatchInlineSnapshot(`
@@ -268,14 +266,13 @@ describe('OPERATOR multiply', () => {
     expect(check('2(x+1)')).toMatchInlineSnapshot(`
       box       = ["InvisibleOperator", 2, ["Delimiter", ["Add", "x", 1]]]
       canonical = ["Multiply", 2, ["Add", "x", 1]]
-      simplify  = ["Add", ["Multiply", 2, "x"], 2]
+      evaluate  = ["Add", ["Multiply", 2, "x"], 2]
     `));
   test('2\\pi', () =>
     expect(check('2\\pi')).toMatchInlineSnapshot(`
       box       = ["InvisibleOperator", 2, "Pi"]
       canonical = ["Multiply", 2, "Pi"]
-      N-auto    = 6.283185307179586476925286766559005768394338798750211641949889184615632812572417997256069650684234136
-      N-mach    = 6.283185307179586
+      N-auto    = 6.283185307179586
     `));
 
   test('2\\sin(x), function apply', () =>
@@ -286,16 +283,15 @@ describe('OPERATOR multiply', () => {
   test('2\\sin(x)\\frac12, function apply', () =>
     expect(check('2\\sin(x)\\frac12')).toMatchInlineSnapshot(`
       box       = ["InvisibleOperator", 2, ["Sin", "x"], ["Divide", 1, 2]]
-      canonical = ["Multiply", 2, ["Sin", "x"], "Half"]
+      canonical = ["Multiply", "Half", 2, ["Sin", "x"]]
       simplify  = ["Sin", "x"]
     `));
   test('3\\pi5', () =>
     expect(check('3\\pi5')).toMatchInlineSnapshot(`
       box       = ["InvisibleOperator", 3, "Pi", 5]
-      canonical = ["Multiply", 3, "Pi", 5]
+      canonical = ["Multiply", 3, 5, "Pi"]
       simplify  = ["Multiply", 15, "Pi"]
-      N-auto    = 47.12388980384689857693965074919254326295754099062658731462416888461724609429313497942052238013175602
-      N-mach    = 47.12388980384689
+      N-auto    = 47.12388980384689
     `));
 });
 
@@ -408,7 +404,7 @@ describe('OPERATOR postfix', () => {
     expect(check('-2-5!')).toMatchInlineSnapshot(`
       box       = ["Add", -2, ["Factorial", -5]]
       canonical = ["Subtract", -2, ["Factorial", 5]]
-      simplify  = -122
+      evaluate  = -122
     `));
   test('-5! // Precedence', () =>
     expect(check('-5!')).toMatchInlineSnapshot(`

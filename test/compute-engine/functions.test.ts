@@ -9,7 +9,7 @@ engine.assign('f2', ['Add', '_', 1]);
 
 // Arguments are not checked by the Compute Engine
 // so we must use caution when accessing them
-engine.assign('f3', (ce, args) => ce.number(args[0]?.value + 1));
+engine.assign('f3', (ce, args) => ce.number((args[0]?.value as number) + 1));
 
 // With a declared function, the arguments are checked by the Compute Engine
 engine.declare('f4', {

@@ -1,32 +1,109 @@
 import { ComputeEngine } from '../src/compute-engine';
-import { add, mul } from '../src/compute-engine/boxed-expression/numerics';
-import { primeFactors as bigPrimeFactors } from '../src/compute-engine/numerics/numeric-bigint';
-import { primeFactors } from '../src/compute-engine/numerics/primes';
-import {
-  Rational,
-  reducedRational,
-} from '../src/compute-engine/numerics/rationals';
 
 const ce = new ComputeEngine();
 
-ce.assign('f10', ['Add', ['Divide', '_1', '_2'], '_3']);
-console.log(ce.box(['f10', 5]).evaluate().toString());
+// Should be the gamma function, not the gamma constant
+ce.parse('\\gamma(2, 1)').print();
 
-console.log(
-  ce.box(['Tabulate', ce.parse('i, j \\mapsto \\delta_{ij}'), 4, 4]).value
-);
+// Should error nicely. Probably return as many indexes as possible
+ce.box(['At', ['List', 7, 13, 5, 19, 2, 3, 11], 1, 2])
+  .evaluate()
+  .print();
 
-///
-///
-///
-///
-let expr0 = ce.parse('2(2x+1)');
-console.log('expr0: ', expr0.evaluate().toString());
+ce.parse('8x^2 - 488 x + 7243').simplify().print();
 
-let expr1 = ce.parse('2(13.1x+1)');
-let expr2 = ce.parse('26.2x+2');
-console.log('expr1: ', expr1.evaluate().toString());
-console.log('expr1 is equal to expr2: ', expr1.isEqual(expr2));
+// Should not be a At, but a Subscript
+ce.parse(`\\sum_{n,m} k_{n,m}`).print();
+
+// ce.box([
+//   'Multiply',
+//   'Pi',
+//   ['Add', ['Rational', -5, 2], ['Rational', 0, 1]],
+// ]).print();
+
+// console.profile();
+// ceBaselineN(randNumbers(1000));
+// console.profileEnd();
+
+// ce.box([
+//   'Multiply',
+//   'Pi',
+//   ['Add', ['Rational', -4, 2], ['Rational', 1, 12]],
+// ]).print();
+
+// ce.box(['Multiply', 'Pi', ['Add', ['Rational', -4, 2], ['Rational', 1, 12]]])
+//   .simplify()
+//   .print();
+
+// ce.box(['Rational', -4, 2]).simplify().print();
+// ce.box(['Rational', 1, 12]).simplify().print();
+
+// 4x(3x+2)-5(5x-4)
+
+// Should not be modified (Expand should be hold "hold")
+ce.box(['Expand', ce.parse('4x(3x+2)-5(5x-4)')])
+  .simplify()
+  .print();
+
+// Should be expanded, and use -25, not Negate(25x)
+ce.box(['Expand', ce.parse('4x(3x+2)-5(5x-4)')])
+  .evaluate()
+  .print();
+
+// Should not have a divide by 1,
+ce.parse('\\frac{-x}{\\frac{1}{n}}').print();
+
+ce.box(['Add', -2, ['Rational', 1, 12]])
+  .simplify()
+  .print();
+
+ce.parse('\\sin(\\frac{-23\\pi}{12})').evaluate().print();
+
+// Should parse correctly, without a Single for the parens
+ce.parse('\\int^\\infty_0(3x+x^2dx) = 2').print();
+
+// Type error: bigint conversion
+ce.box(['Sqrt', { num: '12345670000000000000000000' }])
+  .evaluate()
+  .print();
+
+// Should have an error, not an At
+ce.parse('x__+1').print();
+
+// Expect 1/3
+ce.parse('\\int_{0}^{1} x^2 dx').evaluate().print();
+
+console.log(ce.parse('2x+1=0').isEqual(ce.parse('x=-\\frac12')));
+
+console.log(ce.parse('2\\times3xxx').simplify().toString());
+
+// Should have a single solution, 0
+const eqn = ce.box(['Multiply', 5, 'x']);
+const r1 = eqn.solve('x');
+console.info(r1?.map((x) => x.toString()).join(', '));
+
+const e = ce.parse('x = \\sqrt{5}');
+const r2 = e.solve('x')?.map((x) => x.toString());
+console.log(r2);
+
+// Should be √5
+console.log(ce.parse('1+4\\times\\sin\\frac{\\pi}{10}').simplify().toString());
+
+// console.log(ce.parse('3x + 1 = 0').isEqual(ce.parse('6x + 2 = 0')));
+
+//
+//
+//
+
+// Simple performance benchmark
+
+ce.box(['Multiply', 3, ['Add', ['Negate', 1], ['Rational', 1, 2]]])
+  .evaluate()
+  .print();
+
+//
+//
+//
 
 ce.assign('A', ce.box(['Matrix', ['List', ['List', 1, 2], ['List', 3, 4]]]));
 ce.assign(
@@ -77,11 +154,6 @@ console.info(xp.simplify().toString());
 // function
 ce.assume(['Element', 'f', 'Functions']);
 ce.assume(['Equal', 'one', 1]);
-
-slowEval();
-fastEval();
-turboEval();
-// perfTestRationals();
 
 const t1 = ce.parse('\\cos(5\\pi+k)');
 // Canonical should simplify argument to -π/+π range
@@ -275,142 +347,41 @@ console.info(ce.parse('f|_{3}').canonical.json);
 // Application to a range (return a list)
 console.info(ce.parse('f|_{3..5}').canonical.json);
 
-function perfTestRationals() {
-  let randos: number[] = [];
-  let bigrandos: bigint[] = [];
-  for (let i = 0; i < 1000; i++) {
-    const n = Math.floor(Math.random() * Number.MAX_SAFE_INTEGER);
-    randos.push(n);
-    bigrandos.push(BigInt(n));
-  }
+function ceBaselineN(numRandos: number[]): number {
+  const ce = new ComputeEngine();
+
+  let randos = numRandos.map((n) => ce.number(n));
 
   let start = globalThis.performance.now();
 
-  for (let i = 0; i < 1000; i++) {
-    primeFactors(randos[i]);
-  }
+  randos = randos.map((n, i) => {
+    // Do some arithmetic calculations
+    if (i % 2 === 0)
+      return ce
+        .box([
+          'Add',
+          [
+            'Multiply',
+            ['Rational', 4, 3],
+            ['Square', n],
+            ['Multiply', ['Rational', 3, 2], n],
+            2,
+          ],
+        ])
+        .N();
 
-  let timing = Math.floor((globalThis.performance.now() - start) / 10);
+    // Trigonometry, log, exp
+    return ce.box(['Add', ['Tan', n], ['Log', ['Abs', n], ['Exp', n]]]).N();
+  });
 
-  console.info(timing);
+  return globalThis.performance.now() - start;
+}
 
-  start = globalThis.performance.now();
-
-  for (let i = 0; i < 1000; i++) {
-    bigPrimeFactors(bigrandos[i]);
-  }
-
-  timing = Math.floor((globalThis.performance.now() - start) / 10);
-  console.info(timing);
-
-  randos = [];
-  bigrandos = [];
-
-  const N = 1000000;
-  for (let i = 0; i < N * 4; i++) {
-    const n = Math.floor(Math.random() * 20000) - 10000;
+function randNumbers(n: number): number[] {
+  let randos: number[] = [];
+  for (let i = 0; i < n; i++) {
+    const n = Math.floor(Math.random() * Number.MAX_SAFE_INTEGER);
     randos.push(n);
-    bigrandos.push(BigInt(n));
   }
-
-  start = globalThis.performance.now();
-  let r: Rational = [1, 1];
-  for (let i = 0; i < N; i++) {
-    const a: Rational = reducedRational([randos[i], randos[i + 1]]);
-    const b: Rational = reducedRational([randos[i + 2], randos[i + 3]]);
-    r = reducedRational(mul(add(r, a), b));
-  }
-
-  timing = Math.floor((globalThis.performance.now() - start) / 10);
-  console.info(timing);
-
-  start = globalThis.performance.now();
-  let r2: Rational = [1n, 1n];
-  for (let i = 0; i < N; i++) {
-    const a: Rational = reducedRational([bigrandos[i], bigrandos[i + 1]]);
-    const b: Rational = reducedRational([bigrandos[i + 2], bigrandos[i + 3]]);
-    r2 = reducedRational(mul(add(r, a), b));
-  }
-
-  timing = Math.floor((globalThis.performance.now() - start) / 10);
-  console.info(timing);
-}
-
-function slowEval() {
-  ///
-  const ce = new ComputeEngine();
-
-  const expr = ce.parse('ax^2+bx+c'); // like $$ ax^2+bx+c $$
-  const vars = { a: 2, b: 3, c: 4 };
-
-  // Factor out substitution of constants
-
-  ce.numericMode = 'machine';
-  ce.strict = true;
-
-  let y = 0;
-  const startTime = performance.now();
-  for (let x = 0; x <= Math.PI; x += 0.01) {
-    y += Number(expr.subs(vars).subs({ x }).N().numericValue?.valueOf());
-  }
-
-  console.info(
-    `Slow eval:  y = ${y} in ${Number(performance.now() - startTime).toFixed(
-      2
-    )} ms`
-  );
-}
-
-function fastEval() {
-  ///
-  const ce = new ComputeEngine();
-
-  const expr = ce.parse('ax^2+bx+c'); // like $$ ax^2+bx+c $$
-  const vars = { a: 2, b: 3, c: 4 };
-
-  // Factor out substitution of constants
-  const expr3 = expr.subs(vars).N();
-
-  ce.numericMode = 'machine';
-  ce.strict = false;
-
-  let y = 0;
-  const startTime = performance.now();
-  for (let x = 0; x <= Math.PI; x += 0.01) {
-    ce.assign('x', x);
-    y += Number(expr3.value);
-  }
-
-  console.info(
-    `Fast eval:  y = ${y} in ${Number(performance.now() - startTime).toFixed(
-      2
-    )} ms`
-  );
-}
-
-function turboEval() {
-  const ce = new ComputeEngine();
-
-  const expr = ce.parse('ax^2+bx+c'); // like $$ ax^2+bx+c $$
-  const vars = { a: 2, b: 3, c: 4 };
-
-  // Factor out substitution of constants
-  const expr3 = expr.subs(vars).N();
-
-  try {
-    const fn = expr3.compile()!;
-    let y = 0;
-    const startTime = performance.now();
-    for (let x = 0; x <= Math.PI; x += 0.01) {
-      y += fn({ x });
-    }
-
-    console.info(
-      `Turbo eval: y = ${y} in ${Number(performance.now() - startTime).toFixed(
-        2
-      )} ms`
-    );
-  } catch (e) {
-    console.error(e);
-  }
+  return randos;
 }

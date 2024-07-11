@@ -103,11 +103,7 @@ describe('Anonymous functions, multiple args', () => {
 
 describe('Invalid', () => {
   test('Parens around arguments required', () =>
-    expect(parse('x, y\\mapsto x + y')).toMatchInlineSnapshot(`
-      [
-        "Delimiter",
-        ["Sequence", "x", ["Function", ["Add", "x", "y"], "y"]],
-        "','"
-      ]
-    `));
+    expect(parse('x, y\\mapsto x + y')).toMatchInlineSnapshot(
+      `["Pair", "x", ["Function", ["Add", "x", "y"], "y"]]`
+    ));
 });

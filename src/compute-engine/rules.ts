@@ -8,6 +8,7 @@ import {
   BoxedSubstitution,
   PatternConditionFunction,
   SemiBoxedExpression,
+  PatternReplaceFunction,
 } from './public';
 import { asLatexString } from './boxed-expression/utils';
 
@@ -26,7 +27,7 @@ export function matchRules(
     const r = applyRule(rule, expr, sub);
     if (r === null) continue;
     // Verify that the results are unique
-    if (results.some((x) => x.isEqual(r))) continue;
+    if (results.some((x) => x.isSame(r))) continue;
     results.push(r);
   }
 
@@ -62,8 +63,9 @@ export function boxRules(ce: IComputeEngine, rs: Iterable<Rule>): BoxedRuleSet {
 
 function normalizeLatexRule(
   ce: IComputeEngine,
-  rule: string | SemiBoxedExpression
-): BoxedExpression {
+  rule?: string | SemiBoxedExpression | PatternReplaceFunction
+): BoxedExpression | undefined {
+  if (rule === undefined || typeof rule === 'function') return undefined;
   if (typeof rule === 'string') {
     let expr = ce.parse(rule, { canonical: false });
     expr = expr.map(
@@ -83,7 +85,7 @@ function normalizeStringRule(ce: IComputeEngine, rule: string): BoxedRule {
   const [lhs, rhs] = rule.split(/->|\\to/).map((x) => x.trim());
   return normalizeRule(ce, {
     match: normalizeLatexRule(ce, lhs),
-    replace: normalizeLatexRule(ce, rhs),
+    replace: normalizeLatexRule(ce, rhs)!,
     priority: 0,
     condition: undefined,
     id: lhs + ' -> ' + rhs,
@@ -94,6 +96,7 @@ function normalizeRule(ce: IComputeEngine, rule: Rule): BoxedRule {
   if (typeof rule === 'string') return normalizeStringRule(ce, rule);
 
   const { match, replace, condition, priority, id } = rule;
+
   // Normalize the condition to a function
   let condFn: undefined | PatternConditionFunction;
   if (typeof condition === 'string') {
@@ -107,22 +110,14 @@ function normalizeRule(ce: IComputeEngine, rule: Rule): BoxedRule {
   } else condFn = condition;
 
   const matchExpr = normalizeLatexRule(ce, match);
-  const replaceExpr =
-    typeof replace === 'function' ? '()' : normalizeLatexRule(ce, replace);
+  const replaceExpr = normalizeLatexRule(ce, replace);
   return {
     match: matchExpr,
-    replace:
-      typeof replace === 'function'
-        ? replace
-        : (replaceExpr as BoxedExpression),
+    replace: replaceExpr ?? (replace as PatternReplaceFunction),
     priority: priority ?? 0,
     condition: condFn,
     exact: rule.exact ?? true,
-    id:
-      id ??
-      matchExpr.latex +
-        +' -> ' +
-        (typeof replaceExpr === 'string' ? replaceExpr : replaceExpr.latex),
+    id: id ?? (matchExpr?.latex ?? '') + ' -> ' + replaceExpr?.latex ?? '',
   };
 }
 
@@ -156,7 +151,9 @@ function applyRule(
   }
 
   const exact = rule.exact ?? true;
-  const sub = expr.match(match, { substitution, ...options, exact });
+  const sub = match
+    ? expr.match(match, { substitution, ...options, exact })
+    : {};
 
   // If the `expr` does not match the pattern, the rule doesn't apply
   if (sub === null) return changed ? expr : null;
@@ -187,7 +184,7 @@ function applyRule(
   //     .map((x) => `${x} -> ${sub[x].toString()}`)
   //     .join(', ')
   // );
-  if (typeof replace === 'function') return replace(expr, sub);
+  if (typeof replace === 'function') return replace(expr, sub) ?? null;
   return replace.subs(sub, { canonical: expr.isCanonical });
 }
 

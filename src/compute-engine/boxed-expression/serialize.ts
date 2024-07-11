@@ -36,6 +36,7 @@ import { BoxedFunction } from './boxed-function';
 import { BoxedTensor } from './boxed-tensor';
 import { BoxedDictionary } from './boxed-dictionary';
 import { _BoxedDomain } from './boxed-domain';
+import { order } from './order';
 
 function _escapeJsonString(s: undefined): undefined;
 function _escapeJsonString(s: string): string;
@@ -120,7 +121,7 @@ function serializePrettyJsonFunction(
       return serializeJsonFunction(
         ce,
         'Negate',
-        [ce._fn('Multiply', args.slice(1))],
+        [ce._fn('Multiply', [...args.slice(1)].sort(order))],
         options,
         metadata
       );

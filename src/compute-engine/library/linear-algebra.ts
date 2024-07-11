@@ -155,7 +155,7 @@ export const LINEAR_ALGEBRA_LIBRARY: IdentifierDefinitions[] = [
       signature: {
         domain: ['FunctionOf', 'Values', 'Values'],
         evaluate: (ce, ops) => {
-          let op1 = ops[0];
+          const op1 = ops[0];
           let axis1 = 1;
           let axis2 = 2;
           if (ops.length === 3) {

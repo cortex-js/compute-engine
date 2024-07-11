@@ -158,7 +158,7 @@ export class _BoxedSymbolDefinition implements BoxedSymbolDefinition {
       this.inferredDomain = true;
     }
   }
-  reset() {
+  reset(): void {
     // Force the value to be recalculated based on the original definition
     // Useful when the environment (e.g.) precision changes
     if (this.constant) this._value = null;

@@ -30,6 +30,44 @@ const SYMBOLS = {
   Pi: 'pi',
   ExponentialE: 'e',
   ImaginaryUnit: 'i',
+  // Greek letters are valid symbols (i.e. don't need to be quoted)
+  alpha: 'alpha',
+  beta: 'beta',
+  gamma: 'gamma',
+  delta: 'delta',
+  epsilon: 'epsilon',
+  epsilonSymbol: 'varepsilon',
+  zeta: 'zeta',
+  eta: 'eta',
+  theta: 'theta',
+  thetaSymbol: 'vartheta',
+  iota: 'iota',
+  kappa: 'kappa',
+  lambda: 'lambda',
+  mu: 'mu',
+  nu: 'nu',
+  xi: 'xi',
+  omicron: 'omicron',
+  pi: 'pi',
+  rho: 'rho',
+  sigma: 'sigma',
+  tau: 'tau',
+  upsilon: 'upsilon',
+  phi: 'phi',
+  phiSymbol: 'varphi',
+  chi: 'chi',
+  psi: 'psi',
+  omega: 'omega',
+  Gamma: 'Gamma',
+  Delta: 'Delta',
+  Theta: 'Theta',
+  Lambda: 'Lambda',
+  Xi: 'Xi',
+  Sigma: 'Sigma',
+  Upsilon: 'Upsilon',
+  Phi: 'Phi',
+  Psi: 'Psi',
+  Omega: 'Omega',
 };
 
 const OPERATORS = {
@@ -38,7 +76,14 @@ const OPERATORS = {
       // Use a reduce, so that if the second argument starts with a + or -, don't include a '+' in the result
       return (
         expr.ops?.reduce((acc, x) => {
-          let rhs = serialize(x, 10);
+          if (x.head === 'Negate') {
+            const rhs = serialize(x.op1, 10);
+            if (acc === '') return `-${rhs}`;
+            if (rhs.startsWith('+')) return `${acc} - ${rhs.substring(1)}`;
+            if (rhs.startsWith('-')) return `${acc} + ${rhs.substring(1)}`;
+            return `${acc} - ${rhs}`;
+          }
+          const rhs = serialize(x, 10);
           if (acc === '') return rhs;
           if (rhs.startsWith('+')) return `${acc} + ${rhs.substring(1)}`;
           if (rhs.startsWith('-')) return `${acc} - ${rhs.substring(1)}`;
@@ -53,7 +98,7 @@ const OPERATORS = {
     (expr, serialize) => {
       return (
         expr.ops?.reduce((acc, x) => {
-          let rhs = serialize(x, 10);
+          const rhs = serialize(x, 10);
           if (acc === '') return rhs;
           if (rhs.startsWith('+') || rhs.startsWith('-'))
             return `${acc} ${rhs}`;
@@ -69,8 +114,14 @@ const OPERATORS = {
       if (expr.nops === 2) {
         const lhs = expr.op1.numericValue;
         if (lhs !== null) {
-          if (lhs === 1) return serialize(expr.op2, 11);
-          if (lhs === -1) return `-${serialize(expr.op2, 11)}`;
+          if (lhs === 1) return serialize(expr.op2, 12);
+          if (lhs === -1) return `-${serialize(expr.op2, 12)}`;
+          if (lhs instanceof Complex) {
+            if (lhs.re === 0 && lhs.im === 1)
+              return `${serialize(expr.op2, 12)}i`;
+            if (lhs.re === 0) return `${serialize(expr.op2, 12)} * ${lhs.im}i`;
+            return `${serialize(expr.op2, 12)} * (${lhs.re} + ${lhs.im}i)`;
+          }
           const rhs = expr.op2;
           if (
             rhs.symbol ||
@@ -78,28 +129,35 @@ const OPERATORS = {
             rhs.head === 'Square' ||
             typeof FUNCTIONS[rhs.head] === 'string'
           ) {
-            if (isRational(lhs)) {
+            if (isRational(lhs) && lhs[0] === 1) {
               const den = lhs[1];
-              return `${serialize(expr.op2, 11)}/${den}`;
+              return `${serialize(rhs, 12)}/${den}`;
             }
-            // if (typeof lhs === 'number' && Number.isInteger(lhs))
-            //   return serialize(expr.op1, 12) + serialize(expr.op2, 12);
-
-            return serialize(expr.op1, 11) + serialize(expr.op2, 11);
           }
+          const l = serialize(expr.op1, 12);
+          const r = serialize(expr.op2, 12);
+          // Is it a digit followed by a non-digit?
+          if (l.match(/\d$/) && r.match(/^[a-zA-Z\(]/)) return l + r;
+          if (r.match(/\d$/) && l.match(/^[a-zA-Z\(]/)) return r + l;
+          return l + ' * ' + r;
         }
       }
       if (!expr.ops) return '';
       // Use a reduce over each term
-      return expr.ops
-        .reduce((acc, x) => {
-          let rhs = serialize(x, 11);
-          const lhs = acc[acc.length - 1];
-          if (lhs === '-1' || lhs === '(-1)')
-            return [...acc.slice(0, -1), `-${rhs}`];
-          return [...acc, rhs];
-        }, [])
-        .join(' * ');
+      return (
+        expr.ops
+          // .reverse()
+          .reduce((acc, x) => {
+            const rhs = serialize(x, 12);
+            const lhs = acc[0];
+            if (lhs === '-1' || lhs === '(-1)')
+              return [...acc.slice(1), `-${rhs}`];
+            if (lhs && /\d$/.test(lhs) && /^[a-zA-Z\(]/.test(rhs))
+              return [...acc.slice(1), `${lhs}${rhs}`];
+            return [...acc, rhs];
+          }, [])
+          .join(' * ')
+      );
     },
     12,
   ],
@@ -142,10 +200,10 @@ const FUNCTIONS = {
   Csch: 'csch',
   Coth: 'coth',
 
-  Ceil: (expr, serialize) => `|~${serialize(expr.op1)}~|`,
+  Ceil: 'ceil', // also: (expr, serialize) => `|~${serialize(expr.op1)}~|`,
   Exp: 'exp',
   Factorial: (expr, serialize) => `${serialize(expr.op1)}!`,
-  Floor: (expr, serialize) => `|__${serialize(expr.op1)}__|`,
+  Floor: 'floor', // also: (expr, serialize) => `|__${serialize(expr.op1)}__|`,
   Log: 'log',
   Ln: 'ln',
   Log10: 'log10',
@@ -169,11 +227,13 @@ const FUNCTIONS = {
   Product: (expr, serialize) => bigOp(expr, 'prod', serialize),
   Integrate: (expr, serialize) => bigOp(expr, 'int', serialize),
 
+  // Note: use ops[0], not op1 because op1 is "Nothing" when empty, and
+  // we need to correctly handle `["Delimiter"]`
   Delimiter: (expr, serialize) =>
-    delimiter(expr.op1, expr.op2.string, serialize),
+    delimiter(expr.ops[0], expr.ops[1]?.string, serialize),
   Sequence: (expr, serialize) => {
     if (expr.nops === 0) return '';
-    return expr.ops.map((x) => serialize(x)).join('');
+    return expr.ops.map((x) => serialize(x)).join(' ');
   },
 
   List: (expr, serialize) => `[${expr.ops?.map((x) => serialize(x)) ?? ''}]`,
@@ -204,7 +264,9 @@ export function toAsciiMath(
     const symbols = options.symbols
       ? { ...SYMBOLS, ...options.symbols }
       : SYMBOLS;
-    return symbols[expr.symbol] ?? expr.symbol;
+    if (symbols[expr.symbol]) return symbols[expr.symbol];
+    if (expr.symbol.length === 1) return expr.symbol;
+    return `"${expr.symbol}"`;
   }
 
   const serialize: AsciiMathSerializer = (expr, precedence = 0) =>
@@ -221,14 +283,14 @@ export function toAsciiMath(
     if (typeof num === 'number') return num.toString();
     if (num instanceof Decimal) return num.toString();
     if (isMachineRational(num))
-      return `(${num[0].toString()}/${num[1].toString()})`;
+      return wrap(`${num[0].toString()}/${num[1].toString()}`, precedence, 12);
     if (isBigRational(num))
-      return `(${num[0].toString()}/${num[1].toString()})`;
+      return wrap(`${num[0].toString()}/${num[1].toString()}`, precedence, 12);
     if (num instanceof Complex) {
       const im = num.im === 1 ? '' : num.im === -1 ? '-' : num.im.toString();
       if (num.re === 0) return im + 'i';
       if (num.im < 0) return `${num.re.toString()}${im}i`;
-      return `(${num.re.toString()}+${im}i)`;
+      return wrap(`${num.re.toString()}+${im}i`, precedence, 11);
     }
   }
 
@@ -244,11 +306,11 @@ export function toAsciiMath(
         result = operator(expr, serialize);
       } else {
         if (expr.nops === 1)
-          return `${operator}${serialize(expr.op1, precedence_ - 1)}`;
+          return `${operator}${serialize(expr.op1, precedence_ + 1)}`;
 
         result =
           expr.ops
-            ?.map((x) => serialize(x, precedence_ - 1))
+            ?.map((x) => serialize(x, precedence_ + 1))
             .join(` ${operator} `) ?? '';
       }
       if (precedence > precedence_) result = `(${result})`;
@@ -292,7 +354,7 @@ function bigOp(
 }
 
 function delimiter(
-  expr: BoxedExpression,
+  expr: BoxedExpression | undefined,
   delimiter: string | undefined | null,
   serialize: AsciiMathSerializer
 ) {
@@ -311,8 +373,15 @@ function delimiter(
     close = delimiter[2];
   }
 
+  if (!expr) return `${open}${close}`;
+
   let items: ReadonlyArray<BoxedExpression> = [expr.op1];
   if (expr.op1.head === 'Sequence') items = expr.op1.ops!;
 
   return `${open}${items.map((x) => serialize(x)).join(separator)}${close}`;
+}
+
+function wrap(s: string, precedence: number, target: number): string {
+  if (precedence >= target) return `(${s})`;
+  return s;
 }

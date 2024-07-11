@@ -24,7 +24,7 @@ describe('ADVANCED PARSING', () => {
 describe('FUNCTIONS', () => {
   test('Multiple arguments', () =>
     expect(parse('\\gamma(2, 1)')).toMatchInlineSnapshot(
-      `["Multiply", "EulerGamma", 2, 1]`
+      `["Multiply", "EulerGamma", ["Pair", 2, 1]]`
     ));
 });
 

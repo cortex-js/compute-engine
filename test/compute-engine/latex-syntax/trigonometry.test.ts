@@ -1,4 +1,4 @@
-import { check, engine as ce } from '../../utils';
+import { check } from '../../utils';
 
 describe('TRIGONOMETRIC FUNCTIONS implicit arguments', () => {
   test(`\\cos x + 1`, () =>
@@ -9,7 +9,6 @@ describe('TRIGONOMETRIC FUNCTIONS implicit arguments', () => {
     expect(check('\\cos x - \\sin x')).toMatchInlineSnapshot(`
       box       = ["Add", ["Cos", "x"], ["Negate", ["Sin", "x"]]]
       canonical = ["Subtract", ["Cos", "x"], ["Sin", "x"]]
-      simplify  = ["Add", ["Cos", "x"], ["Negate", ["Sin", "x"]]]
     `));
   test(`\\cos \\frac{x}{2}^2`, () =>
     expect(check('\\cos \\frac{x}{2}^2')).toMatchInlineSnapshot(`
@@ -50,24 +49,14 @@ describe('TRIGONOMETRIC FUNCTIONS', () => {
   test(`\\cos(k\\pi)`, () =>
     expect(check('\\cos(k\\pi)')).toMatchInlineSnapshot(`
       box       = ["Cos", ["InvisibleOperator", "k", "Pi"]]
-      canonical = ["Cos", ["Multiply", "k", "Pi"]]
-      simplify  = ["Cos", ["Multiply", "Pi", "k"]]
-      N-auto    = [
-        "Cos",
-        [
-          "Multiply",
-          "3.141592653589793238462643383279502884197169399375105820974944592307816406286208998628034825342117068",
-          "k"
-        ]
-      ]
-      N-mach    = ["Cos", ["Multiply", 3.141592653589793, "k"]]
+      canonical = ["Cos", ["Multiply", "Pi", "k"]]
+      N-auto    = ["Cos", ["Multiply", 3.141592653589793, "k"]]
     `));
   test(`\\cos(\\frac{\\pi}{5})`, () =>
     expect(check('\\cos(\\frac{\\pi}{5})')).toMatchInlineSnapshot(`
       box       = ["Cos", ["Divide", "Pi", 5]]
       simplify  = ["Divide", ["Add", ["Sqrt", 5], 1], 4]
-      N-auto    = 0.8090169943749474241022934171828190588601545899028814310677243113526302314094512248536036020946955688
-      N-mach    = 0.8090169943749475
+      N-auto    = 0.8090169943749475
     `));
 });
 
@@ -77,8 +66,7 @@ describe('TRIGONOMETRIC DEGREES', () => {
       box       = ["Cos", ["Degrees", 30]]
       canonical = ["Cos", ["Divide", "Pi", 6]]
       simplify  = ["Divide", ["Sqrt", 3], 2]
-      N-auto    = 0.866025403784438646763723170752936183471402626905190314027903489725966508454400018540573093378624288
-      N-mach    = 0.8660254037844386
+      N-auto    = 0.8660254037844386
     `));
 
   test('\\cos(30\\degree)', () =>
@@ -86,8 +74,7 @@ describe('TRIGONOMETRIC DEGREES', () => {
       box       = ["Cos", ["Degrees", 30]]
       canonical = ["Cos", ["Divide", "Pi", 6]]
       simplify  = ["Divide", ["Sqrt", 3], 2]
-      N-auto    = 0.866025403784438646763723170752936183471402626905190314027903489725966508454400018540573093378624288
-      N-mach    = 0.8660254037844386
+      N-auto    = 0.8660254037844386
     `));
 
   test('\\cos(30^\\circ)', () =>
@@ -95,8 +82,7 @@ describe('TRIGONOMETRIC DEGREES', () => {
       box       = ["Cos", ["Degrees", 30]]
       canonical = ["Cos", ["Divide", "Pi", 6]]
       simplify  = ["Divide", ["Sqrt", 3], 2]
-      N-auto    = 0.866025403784438646763723170752936183471402626905190314027903489725966508454400018540573093378624288
-      N-mach    = 0.8660254037844386
+      N-auto    = 0.8660254037844386
     `));
 
   test('\\cos(\\ang{30})', () =>
@@ -104,7 +90,6 @@ describe('TRIGONOMETRIC DEGREES', () => {
       box       = ["Cos", ["Degrees", 30]]
       canonical = ["Cos", ["Divide", "Pi", 6]]
       simplify  = ["Divide", ["Sqrt", 3], 2]
-      N-auto    = 0.866025403784438646763723170752936183471402626905190314027903489725966508454400018540573093378624288
-      N-mach    = 0.8660254037844386
+      N-auto    = 0.8660254037844386
     `));
 });

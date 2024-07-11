@@ -164,7 +164,7 @@ describe('INTEGRAL', () => {
         "Equal",
         [
           "Integrate",
-          ["Delimiter", ["Add", ["Multiply", 3, "x"], ["Square", "x"]]],
+          ["Single", ["Add", ["Multiply", 3, "x"], ["Square", "x"]]],
           ["Triple", "x", 0, "PositiveInfinity"]
         ],
         2
@@ -177,7 +177,7 @@ describe('INTEGRAL', () => {
         "Equal",
         [
           "Integrate",
-          ["Delimiter", ["Add", ["Multiply", 3, "x"], ["Square", "x"]]],
+          ["Add", ["Multiply", 3, "x"], ["Square", "x"]],
           ["Triple", "x", 0, "PositiveInfinity"]
         ],
         2
