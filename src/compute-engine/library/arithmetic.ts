@@ -91,30 +91,6 @@ export type CanonicalArithmeticFunctions =
 // - Subtract -> Add(_1, Negate(_2))
 // - Rational -> Rational number
 
-// @todo Future additions to the dictionary
-
-// See Scala/Breeze "universal functions": https://github.com/scalanlp/breeze/wiki/Universal-Functions
-
-// LogOnePlus: { domain: 'Numbers' },
-// See https://numerics.diploid.ca/floating-point-part-4.html,
-// regarding 'remainder' and 'truncatingRemainder'
-// Boole
-// Zeta function
-// Random() -> random number between 0 and 1
-// Random(n) -> random integer between 1 and n
-// Random(n, m) -> random integer between n and m
-// Hash
-
-// # Prime Numbers:
-// Prime: gives the nth prime number
-// NextPrime: the smallest prime larger than `n`
-// PrimeFactors
-// Divisors
-
-// # Combinatorials
-// Binomial
-// Fibonacci
-
 /*
 
 ### THEORY OF OPERATIONS:  PRECEDENCE
@@ -176,28 +152,15 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
       hold: 'all',
       signature: {
         domain: 'NumericFunctions',
-        result: (ce, args) =>
+        result: (ce, ops) =>
           domainAdd(
             ce,
-            args.map((x) => x.domain)
+            ops.map((x) => x.domain)
           ),
         // canonical: (ce, args) => canonicalAdd(ce, args), // never called: shortpath
-        simplify: (ce, ops) =>
-          simplifyAdd(
-            ce,
-            ops.map((x) => x.simplify())
-          ),
-        evaluate: (ce, ops) =>
-          evalAdd(
-            ce,
-            ops.map((x) => x.evaluate())
-          ),
-        N: (ce, ops) =>
-          evalAdd(
-            ce,
-            ops.map((x) => x.N()),
-            'N'
-          ),
+        simplify: (ce, ops) => simplifyAdd(ce, ops),
+        evaluate: (ce, ops) => evalAdd(ce, ops),
+        N: (ce, ops) => evalAdd(ce, ops, 'N'),
       },
     },
 
@@ -540,24 +503,24 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
         // Never called: fastpath
         // canonical: (ce, args) => canonicalMultiply(ce, args)
         //
-        simplify: (ce, ops) =>
-          simplifyMultiply(
-            ce,
-            ops.map((x) => x.simplify())
-          ),
+        simplify: (ce, ops) => simplifyMultiply(ce, ops),
 
         evaluate: (ce, ops) => {
           ops = ops.map((x) => x.evaluate());
-          const expr = distribute(ops);
-          if (expr.head !== 'Multiply') return expr.evaluate();
-          // ops = flattenOps(expr.ops!, 'Multiply'); //@fixme that seems important
+          const expr = distribute(ce, 'Multiply', ops);
+          if (expr !== null) {
+            if (expr.head !== 'Multiply') return expr.evaluate();
+            ops = flattenOps(expr.ops!, 'Multiply');
+          }
           return evalMultiply(ce, ops);
         },
         N: (ce, ops) => {
           ops = ops.map((x) => x.N());
-          const expr = distribute(ops);
-          if (expr.head !== 'Multiply') return expr.N();
-          ops = flattenOps(expr.ops!, 'Multiply');
+          const expr = distribute(ce, 'Multiply', ops);
+          if (expr !== null) {
+            if (expr.head !== 'Multiply') return expr.N();
+            ops = flattenOps(expr.ops!, 'Multiply');
+          }
           return evalMultiply(ce, ops, 'N');
         },
       },

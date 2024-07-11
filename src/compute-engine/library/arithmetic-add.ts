@@ -90,14 +90,9 @@ export function evalAdd(
   ops: ReadonlyArray<BoxedExpression>,
   mode: 'N' | 'evaluate' = 'evaluate'
 ): BoxedExpression {
-  // @fastpath
-  if (mode === 'N' && ce.numericMode === 'machine') {
-    ops = ops.map((x) => x.N());
-    const sum = evalAddNum(ops);
-    if (sum !== null) return ce.number(sum);
-  }
   const numericMode = mode == 'N';
-  // @fixme: should not need to call evalute. Could be done inside the Terms constructor
+  // Note: we need to call evaluate here, because in the case of
+  // simplify, we want to simplify the arguments, but not evaluate them.
   const terms = new Terms(
     ce,
     ops.map((x) => x.evaluate({ numericMode })),

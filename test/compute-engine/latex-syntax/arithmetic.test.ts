@@ -57,7 +57,9 @@ describe('PRODUCT', () => {
   });
 
   test('testing parsing of summation with element boxed expression', () => {
-    expect(engine.parse(`\\sum_{n \\in \\N}K_n`)).toMatchInlineSnapshot();
+    expect(engine.parse(`\\sum_{n \\in \\N}K_n`)).toMatchInlineSnapshot(
+      `["Sum", ["At", "K", "n"], ["Element", "n", "NonNegativeIntegers"]]`
+    );
   });
 
   test('testing parsing of multi indexed summation with different index variables', () => {

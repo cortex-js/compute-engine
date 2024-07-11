@@ -1,16 +1,14 @@
 import { asMachineInteger } from '../boxed-expression/numerics';
 import { isRelationalOperator } from '../boxed-expression/utils';
 import { simplifyAdd } from '../library/arithmetic-add';
-import { BoxedExpression } from '../public';
+import { BoxedExpression, IComputeEngine } from '../public';
 import { canonicalNegate } from './negate';
 
 function distribute2(
   lhs: Readonly<BoxedExpression>,
   rhs: Readonly<BoxedExpression>
 ): BoxedExpression {
-  // Expand power
-  lhs = expandMultinomial(lhs) ?? lhs;
-  rhs = expandMultinomial(rhs) ?? rhs;
+  // @fixme: if both lhs and rhs are not functions, just return their product. Do we need to call mul(), which will evaluate them?
 
   //
   // Negate
@@ -50,12 +48,35 @@ function distribute2(
  * Assuming `expr` is a product of expressions, distribute each term of the product.
  */
 export function distribute(
-  expr: ReadonlyArray<BoxedExpression>
-): BoxedExpression {
-  if (expr.length === 1) return expr[0];
-  if (expr.length === 2) return distribute2(expr[0], expr[1]);
+  ce: IComputeEngine,
+  head: string,
+  ops: ReadonlyArray<BoxedExpression>
+): BoxedExpression | null {
+  if (head === 'Power') {
+    const exp = asMachineInteger(ops[1]);
+    if (exp === null) return null;
+    return expandPower(ops[0], exp);
+  }
 
-  return distribute2(expr[0], distribute(expr.slice(1)));
+  if (head === 'Negate')
+    return distribute(ce, 'Multiply', [ce.NegativeOne, ops[0]]);
+
+  if (head === 'Divide') {
+    if (!ops[0]?.ops || typeof ops[0].head !== 'string') return null;
+    const num = distribute(ce, ops[0].head!, ops[0].ops);
+    if (!num) return null;
+    return ce.div(num, ops[1]);
+  }
+
+  if (head === 'Multiply') {
+    if (ops.length === 1) return ops[0];
+    if (ops.length === 2) return distribute2(ops[0], ops[1]);
+
+    const rhs = distribute(ce, head, ops.slice(1));
+    if (!rhs) return null;
+    return distribute2(ops[0], rhs);
+  }
+  return null;
 }
 
 const binomials = [
@@ -104,41 +125,31 @@ function* powers(n: number, exp: number): Generator<number[]> {
     for (const p of powers(n - 1, exp - i)) yield [i, ...p];
 }
 
-/** Use the multinomial theorem (https://en.wikipedia.org/wiki/Multinomial_theorem) to expand the expression.
- * The expression must be a power of a sum of terms.
- * The power must be a positive integer.
- * - expr = '(a + b)^2'
- *     ->  'a^2 + 2ab + b^2'
- * - expr = '(a + b)^3'
- *    -> 'a^3 + 3a^2b + 3ab^2 + b^3'
- */
-export function expandMultinomial(
-  expr: BoxedExpression
+function expandPower(
+  base: BoxedExpression,
+  exp: number
 ): BoxedExpression | null {
-  if (expr.head !== 'Power') return null;
-  const ce = expr.engine;
-  const exp = asMachineInteger(expr.op2);
-  if (exp === null) return null;
+  const ce = base.engine;
   if (exp < 0) {
-    expr =
-      expandMultinomial(ce._fn('Power', [expr.op1, ce.number(-exp)])) ?? expr;
-    if (expr === null) return null;
-    return ce.div(expr.engine.One, expr);
+    const expr = expandPower(base, -exp);
+    return expr ? ce.inv(expr) : null;
   }
-  if (exp === 0) return expr.engine.One;
-  if (exp === 1) return expand(expr.op1);
-  if (expr.op1.head === 'Negate') {
-    const sign = exp % 2 === 0 ? 1 : -1;
-    const result = expandMultinomial(ce._fn('Power', [expr.op1.op1, expr.op2]));
-    if (result === null) return null;
-    return sign > 0 ? result : ce.neg(result);
+  if (exp === 0) return ce.One;
+  if (exp === 1) return expand(base);
+  if (base.head === 'Negate') {
+    if (Number.isInteger(exp)) {
+      const sign = exp % 2 === 0 ? 1 : -1;
+      const result = expandPower(base.op1, exp);
+      if (result === null) return null;
+      return sign > 0 ? result : ce.neg(result);
+    }
   }
 
   // Subtract is non-canonical, so we don't expect to see it here.
-  console.assert(expr.op1.head !== 'Subtract');
+  console.assert(base.head !== 'Subtract');
 
   // We can expand only if the expression is a power of a sum.
-  if (expr.op1.head !== 'Add') return null;
+  if (base.head !== 'Add') return null;
 
   // Apply the multinomial theorem
   // https://en.wikipedia.org/wiki/Multinomial_theorem
@@ -151,7 +162,7 @@ export function expandMultinomial(
   // (a + b + c)^2 = (a + b + c) (a + b + c) = a^2 + b^2 + c^2 + 2ab + 2ac + 2bc
   // (a + b + c)^3 = (a + b + c) (a + b + c) (a + b + c) = a^3 + b^3 + c^3 + 3a^2b + 3a^2c + 3b^2a + 3b^2c + 3c^2a + 3c^2b + 6abc
 
-  const terms = expr.op1.ops!;
+  const terms = base.ops!;
   const it = powers(terms.length, exp);
 
   const result: BoxedExpression[] = [];
@@ -166,6 +177,24 @@ export function expandMultinomial(
     result.push(ce.mul(...product));
   }
   return ce.add(...result);
+}
+
+/** Use the multinomial theorem (https://en.wikipedia.org/wiki/Multinomial_theorem) to expand the expression.
+ * The expression must be a power of a sum of terms.
+ * The power must be a positive integer.
+ * - expr = '(a + b)^2'
+ *     ->  'a^2 + 2ab + b^2'
+ * - expr = '(a + b)^3'
+ *    -> 'a^3 + 3a^2b + 3ab^2 + b^3'
+ */
+export function expandMultinomial(
+  expr: BoxedExpression
+): BoxedExpression | null {
+  if (expr.head !== 'Power') return null;
+  const exp = asMachineInteger(expr.op2);
+  if (exp === null) return null;
+
+  return expandPower(expr.op1, exp);
 }
 
 /** Expand all
@@ -236,7 +265,7 @@ export function expand(
   const result = expandNumerator(expr);
   if (result !== null) return result;
 
-  if (h === 'Multiply') return distribute(expr.ops!);
+  if (h === 'Multiply') return distribute(expr.engine, 'Multiply', expr.ops!);
 
   // Note arg simplifyAdd will simplify each argument (which in turn will
   // expand them), so no need to expand the arguments here.

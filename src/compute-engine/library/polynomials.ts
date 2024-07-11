@@ -38,27 +38,13 @@ export const POLYNOMIALS_LIBRARY: IdentifierDefinitions[] = [
     },
     Distribute: {
       description: 'Distribute multiplication over addition',
+      hold: 'all',
       signature: {
         domain: ['FunctionOf', 'Values', 'Values'],
-        evaluate: (ce, ops) => {
-          const h = ops[0].head;
-          if (h === 'Multiply') return distribute(ops[0].ops!) ?? ops[0];
-          if (h === 'Negate')
-            return distribute([ce.NegativeOne, ...ops[0].ops!]) ?? ops[0];
-          if (h === 'Divide' && ops[0].ops![0].head === 'Multiply') {
-            const numerator = distribute(ops[0].ops!);
-            const denominator = ops[0].ops![1];
-            if (numerator) {
-              if (numerator.head === 'Add')
-                return ce
-                  .add(...numerator.ops!.map((x) => ce.div(x, denominator)))
-                  .evaluate();
-
-              return ce.div(numerator, denominator).evaluate();
-            }
-          }
-          return ops[0];
-        },
+        evaluate: (ce, ops) =>
+          !ops[0].ops || typeof ops[0].head !== 'string'
+            ? ops[0]
+            : distribute(ce, ops[0].head, ops[0].ops) ?? ops[0],
       },
     },
   },
