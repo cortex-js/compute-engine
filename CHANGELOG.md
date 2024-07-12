@@ -120,6 +120,9 @@
 
   ```
 
+- Added Choose function to compute binomial coefficients, i.e. `Choose(5, 2)` is
+  equal to 10.
+
 ### Issues Resolved
 
 - Some LaTeX renderer can't render `\/`, so use `/` instead.

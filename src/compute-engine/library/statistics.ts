@@ -2,11 +2,30 @@ import { asFloat } from '../boxed-expression/numerics';
 import { each } from '../collection-utils';
 import { erf, erfInv } from '../numerics/numeric';
 import { IdentifierDefinitions } from '../public';
+import { choose } from '../symbolic/expand.js';
 
 // Geometric mean:
 // Harmonic mean:
 
 export const STATISTICS_LIBRARY: IdentifierDefinitions[] = [
+  {
+    Choose: {
+      complexity: 1200,
+      signature: {
+        params: ['Numbers', 'Numbers'],
+        result: 'Numbers',
+
+        evaluate: (ce, ops) => {
+          const n = asFloat(ops[0]);
+          if (n === null) return undefined;
+          const k = asFloat(ops[1]);
+          if (k === null) return undefined;
+          if (n < 0 || k < 0 || k > n) return ce.NaN;
+          return ce.number(choose(n, k));
+        },
+      },
+    },
+  },
   {
     // https://towardsdatascience.com/on-average-youre-using-the-wrong-average-geometric-harmonic-means-in-data-analysis-2a703e21ea0?gi=d56d047586c6
     // https://towardsdatascience.com/on-average-youre-using-the-wrong-average-part-ii-b32fcb41527e
