@@ -59,7 +59,7 @@ import { boxRules } from './rules';
 import { BoxedString } from './boxed-expression/boxed-string';
 import { BoxedNumber } from './boxed-expression/boxed-number';
 import { _BoxedSymbolDefinition } from './boxed-expression/boxed-symbol-definition';
-import { canonicalPower, processSqrt } from './library/arithmetic-power';
+import { canonicalPower } from './library/arithmetic-power';
 import { BoxedFunction } from './boxed-expression/boxed-function';
 import { evalMultiply } from './library/arithmetic-multiply';
 import { evalDivide } from './library/arithmetic-divide';
@@ -1067,14 +1067,39 @@ export class ComputeEngine implements IComputeEngine {
     let sign = 1;
 
     if (coeff.sign !== 0) {
+      // There is some real part
       if (!coeff.isExact) {
-        const r = this.number(coeff.bignumRe ?? coeff.re);
-        if (!r.isZero) terms.push(r);
+        // The real part is a floating point number
+        terms.push(this.number(coeff.bignumRe ?? coeff.re));
       } else {
+        // The real part is a rational and/or radical
         if (coeff.sign < 0) sign = -1;
-        if (!isOne(coeff.rational)) terms.push(this.number(coeff.rational));
-        if (coeff.radical !== 1)
-          terms.push(this.function('Sqrt', [this.number(coeff.radical)]));
+
+        if (coeff.radical === 1) {
+          // No radical, but a rational part
+          if (!isOne(coeff.rational)) terms.push(this.number(coeff.rational));
+        } else {
+          // At least a radical, maybe a rational as well.
+          const radical = this._fn('Sqrt', [this.number(coeff.radical)]);
+          if (isOne(coeff.rational)) terms.push(radical);
+          else {
+            const [n, d] = coeff.rational;
+            if (d === 1) {
+              if (n === 1) terms.push(radical);
+              else terms.push(this._fn('Multiply', [this.number(n), radical]));
+            } else {
+              if (n === 1)
+                terms.push(this._fn('Divide', [radical, this.number(d)]));
+              else
+                terms.push(
+                  this._fn('Divide', [
+                    this._fn('Multiply', [this.number(n), radical]),
+                    this.number(d),
+                  ])
+                );
+            }
+          }
+        }
       }
     }
 
@@ -2004,18 +2029,6 @@ export class ComputeEngine implements IComputeEngine {
     // Short path. Note that are arguments are **not** validated.
 
     return evalDivide(this, num.canonical, denom.canonical);
-  }
-
-  /**
-   *
-   * Shortcut for `this.box(["Sqrt", base]).evaluate()`
-   *
-   */
-  sqrt(base: BoxedExpression): BoxedExpression {
-    return (
-      processSqrt(this, base, 'evaluate') ??
-      this._fn('Power', [base, this.Half])
-    );
   }
 
   /**

@@ -35,20 +35,22 @@ export class ExactNumericValue extends NumericValue<number, [number, number]> {
   constructor(value: Partial<PrivateExactNumericValueData>) {
     super();
     console.assert(value.re === undefined || typeof value.re === 'number');
+
     this.sign = value.sign ?? 1;
-    if (!('re' in value) && !('rational' in value) && !('radical' in value)) {
-      this.decimal = 0;
-      this.rational = [0, 1];
-      this.radical = 0;
-    } else {
+    this.im = value.im ?? 0;
+
+    if ('re' in value || 'rational' in value || 'radical' in value) {
       // If we have one of those three properties, their default value is 1
-      // Otherwise, the default value is 0. This is to support
-      // {im: 2} as a shorthand for {im: 2, re: 0, }
+      // Otherwise, their default value is 0.
+      // This is to support {im: 2} as a shorthand for {im: 2, re: 0, }
       this.decimal = value.re ?? 1;
       this.rational = value.rational ? [...value.rational] : [1, 1];
       this.radical = value.radical ?? 1;
+    } else {
+      this.decimal = 0;
+      this.rational = [0, 1];
+      this.radical = 0;
     }
-    this.im = value.im ?? 0;
 
     this.normalize();
   }
@@ -426,10 +428,9 @@ export class ExactNumericValue extends NumericValue<number, [number, number]> {
     }
 
     console.assert(this.im === 0);
-    return new ExactNumericValue({
-      re: Math.sqrt(Math.abs(this.re)),
-      im: this.sign < 0 ? 1 : 0,
-    });
+
+    if (this.sign > 0) return new ExactNumericValue({ re: Math.sqrt(this.re) });
+    return new ExactNumericValue({ im: Math.sqrt(-this.re) });
   }
 
   gcd(other: ExactNumericValue): ExactNumericValue {

@@ -28,7 +28,6 @@ import {
 } from '../numerics/rationals';
 import { IdentifierDefinitions } from '../public';
 import { bignumPreferred, complexAllowed } from '../boxed-expression/utils';
-import { negate } from '../symbolic/negate';
 import {
   domainAdd,
   evalSummation,
@@ -48,7 +47,7 @@ import {
   evalNDivide,
   simplifyDivide,
 } from './arithmetic-divide';
-import { processPower, processSqrt } from './arithmetic-power';
+import { processPower } from './arithmetic-power';
 import { applyN, apply2N, canonical } from '../symbolic/utils';
 import {
   checkDomain,
@@ -807,9 +806,13 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
           if (args.length !== 1) return ce._fn('Sqrt', args);
           return ce.pow(args[0], ce.Half);
         },
-        simplify: (ce, ops) => processSqrt(ce, ops[0], 'simplify'),
-        evaluate: (ce, ops) => processSqrt(ce, ops[0], 'evaluate'),
-        N: (ce, ops) => processSqrt(ce, ops[0], 'N'),
+        simplify: (ce, ops) => ops[0].sqrt(),
+        evaluate: (ce, ops) => ops[0].sqrt(),
+        N: (ce, ops) => {
+          const n = ops[0].numericValue;
+          if (n === null) return ops[0].sqrt();
+          return ce._fromNumericValue(ce._numericValue(n).sqrt().N());
+        },
         // evalDomain: Square root of a prime is irrational
         // https://proofwiki.org/wiki/Square_Root_of_Prime_is_Irrational
       },

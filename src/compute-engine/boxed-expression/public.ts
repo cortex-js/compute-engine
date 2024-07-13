@@ -1982,8 +1982,6 @@ export interface IComputeEngine {
     exponent: number | Rational | BoxedExpression
   ): BoxedExpression;
 
-  sqrt(base: BoxedExpression): BoxedExpression;
-
   inv(expr: BoxedExpression): BoxedExpression;
 
   div(num: BoxedExpression, denom: BoxedExpression): BoxedExpression;
