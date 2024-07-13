@@ -33,11 +33,11 @@ import {
  *
  */
 export function canonicalPower(
-  ce: IComputeEngine,
   base: BoxedExpression,
   exponent: BoxedExpression,
   metadata?: Metadata
 ): BoxedExpression {
+  const ce = base.engine;
   if (exponent.symbol === 'ComplexInfinity') return ce.NaN;
 
   if (exponent.isZero) return ce.One;

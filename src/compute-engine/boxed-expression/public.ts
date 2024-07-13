@@ -586,6 +586,22 @@ export interface BoxedExpression {
    */
   readonly numericValue: number | Decimal | Complex | Rational | null;
 
+  //
+  // Algebraic operations
+  //
+  neg(): BoxedExpression;
+  inv(): BoxedExpression;
+  abs(): BoxedExpression;
+  add(...rhs: (number | BoxedExpression)[]): BoxedExpression;
+  sub(rhs: BoxedExpression): BoxedExpression;
+  mul(...rhs: (number | BoxedExpression)[]): BoxedExpression;
+  div(rhs: BoxedExpression): BoxedExpression;
+  pow(exp: number | BoxedExpression): BoxedExpression;
+  sqrt(): BoxedExpression;
+  // root(exp: number | BoxedExpression): BoxedExpression;
+  // log(base?: SemiBoxedExpression): BoxedExpression;
+  // exp(): BoxedExpression;
+
   /** The shape describes the axis of the expression.
    * When the expression is a scalar (number), the shape is `[]`.
    * When the expression is a vector, the shape is `[n]`.

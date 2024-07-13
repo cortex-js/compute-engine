@@ -52,6 +52,9 @@ import { BoxedExpression, SemiBoxedExpression } from './public';
 import { signDiff } from './numerics';
 import { match } from './match';
 import { factor } from './factor';
+import { negate } from '../symbolic/negate';
+import { Terms } from '../numerics/terms';
+import { Product } from '../symbolic/product';
 
 /**
  * A boxed function represent an expression that can be
@@ -315,6 +318,66 @@ export class BoxedFunction extends _BoxedExpression {
     options?: PatternMatchOptions
   ): BoxedSubstitution | null {
     return match(this, pattern, options);
+  }
+
+  //
+  //
+  // ALGEBRAIC OPERATIONS
+  //
+
+  neg(): BoxedExpression {
+    return negate(this);
+  }
+
+  inv(): BoxedExpression {
+    return this.engine.One.div(this);
+  }
+
+  abs(): BoxedExpression {
+    if (this.head === 'Abs' || this.head === 'Negate') return this;
+    if (this.isNonNegative) return this;
+    if (this.isNonPositive) return this.neg();
+    return this.engine._fn('Abs', [this]);
+  }
+
+  add(...rhs: (number | BoxedExpression)[]): BoxedExpression {
+    if (rhs.length === 0) return this;
+    const ce = this.engine;
+
+    return new Terms(ce, [
+      this,
+      ...rhs.map((x) => (typeof x === 'number' ? ce.number(x) : x)),
+    ]).asExpression();
+  }
+
+  sub(rhs: BoxedExpression): BoxedExpression {
+    return this.add(rhs.neg());
+  }
+
+  mul(...rhs: (number | BoxedExpression)[]): BoxedExpression {
+    if (rhs.length === 0) return this;
+
+    const ce = this.engine;
+
+    return new Product(ce, [
+      this,
+      ...rhs.map((x) => (typeof x === 'number' ? ce.number(x) : x)),
+    ]).asExpression();
+  }
+
+  div(rhs: BoxedExpression): BoxedExpression {
+    return canonicalDivide(this, rhs);
+  }
+
+  pow(exp: number | BoxedExpression): BoxedExpression {
+    return canonicalPower(
+      this,
+      typeof exp === 'number' ? this.engine.number(exp) : exp
+    );
+  }
+
+  sqrt(): BoxedExpression {
+    return canonicalPower(this, this.engine.Half);
   }
 
   //
@@ -754,18 +817,17 @@ function makeNumericFunction(
   if (head === 'Multiply')
     return canonicalMultiply(ce, flattenOps(flattenSequence(ops), 'Multiply'));
   if (head === 'Divide')
-    return ops.slice(1).reduce((a, b) => canonicalDivide(ce, a, b), ops[0]);
-  if (head === 'Exp') return canonicalPower(ce, ce.E, ops[0].canonical);
+    return ops.slice(1).reduce((a, b) => canonicalDivide(a, b), ops[0]);
+  if (head === 'Exp') return canonicalPower(ce.E, ops[0].canonical);
   if (head === 'Power')
-    return canonicalPower(ce, ops[0].canonical, ops[1].canonical);
-  if (head === 'Square')
-    return canonicalPower(ce, ops[0].canonical, ce.number(2));
+    return canonicalPower(ops[0].canonical, ops[1].canonical);
+  if (head === 'Square') return canonicalPower(ops[0].canonical, ce.number(2));
   if (head === 'Sqrt') {
     const op = ops[0].canonical;
     // We preserve square roots of rationals as "exact" values
     if (isRational(op.numericValue)) return ce._fn('Sqrt', [op], metadata);
 
-    return canonicalPower(ce, op, ce.Half);
+    return canonicalPower(op, ce.Half);
   }
   if (head === 'Ln') return ce._fn('Ln', ops, metadata);
 

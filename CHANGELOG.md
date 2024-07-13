@@ -1,5 +1,16 @@
 ## [Unreleased]
 
+### Breaking Changes
+
+- The methods for algebraic operations (`add`, `div`, `mul`, etc...) have been
+  moved from the Compute Engine to the Boxed Expression class. Instead of
+  calling `ce.add(a, b)`, call `a.add(b)`.
+
+  Those methods also behave more consistently: they apply some additional
+  simplication rules over canonicalization. For example, while
+  `ce.parse('1 + 2')` return `["Add", 1, 2]`, `ce.box(1).add(2)` will return
+  `3`.
+
 ### New Features and Improvements
 
 - **Exact calculations**

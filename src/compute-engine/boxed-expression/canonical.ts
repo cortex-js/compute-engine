@@ -153,11 +153,7 @@ function powerForm(expr: BoxedExpression) {
 
   // If this is a power, canonicalize it
   if (expr.head === 'Power')
-    return canonicalPower(
-      expr.engine,
-      powerForm(expr.op1),
-      powerForm(expr.op2)
-    );
+    return canonicalPower(powerForm(expr.op1), powerForm(expr.op2));
 
   // Recursively visit all sub-expressions
   if (!expr.ops) return expr;
@@ -168,11 +164,7 @@ function powerForm(expr: BoxedExpression) {
 function divideForm(expr: BoxedExpression) {
   // If this is a divide, canonicalize it
   if (expr.head === 'Divide')
-    return canonicalDivide(
-      expr.engine,
-      powerForm(expr.op1),
-      powerForm(expr.op2)
-    );
+    return canonicalDivide(powerForm(expr.op1), powerForm(expr.op2));
 
   // Recursively visit all sub-expressions
   if (!expr.ops) return expr;

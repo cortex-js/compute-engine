@@ -6,6 +6,7 @@ import { BoxedExpression, IComputeEngine, Metadata } from '../public';
 import { order } from '../boxed-expression/order';
 
 function negateLiteral(expr: BoxedExpression): BoxedExpression | null {
+  // @fixme: wherever it's called, replace with expr.neg()
   // Applying negation is safe (doesn't introduce numeric errors)
   // even on floating point numbers
   let n = expr.numericValue;

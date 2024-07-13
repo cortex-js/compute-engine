@@ -20,13 +20,17 @@ import {
   isNegativeOne,
   isOne,
   reducedRational,
+  neg,
 } from '../numerics/rationals';
 
 import { _BoxedExpression } from './abstract-boxed-expression';
 import { hashCode, bignumPreferred } from './utils';
 import { Expression } from '../../math-json';
-import { signDiff } from './numerics';
+import { asMachineInteger, signDiff } from './numerics';
 import { match } from './match';
+import { Terms } from '../numerics/terms';
+import { Product } from '../symbolic/product';
+import { canonicalDivide } from '../library/arithmetic-divide';
 
 /**
  * BoxedNumber
@@ -193,6 +197,105 @@ export class BoxedNumber extends _BoxedExpression {
   get numericValue(): number | Decimal | Complex | Rational {
     return this._value;
   }
+
+  neg(): BoxedExpression {
+    let n = this._value;
+
+    if (typeof n === 'number') n = -n;
+    else if (n instanceof Decimal) n = n.neg();
+    else if (n instanceof Complex) n = n.neg();
+    else if (Array.isArray(n)) n = neg(n);
+
+    return this.engine.number(n);
+  }
+
+  inv(): BoxedExpression {
+    let n = this.engine._numericValue(this._value);
+    return this.engine._fromNumericValue(n.inv());
+  }
+
+  abs(): BoxedExpression {
+    let n = this.engine._numericValue(this._value);
+    return this.engine._fromNumericValue(n.abs());
+  }
+
+  add(...rhs: (number | BoxedExpression)[]): BoxedExpression {
+    if (rhs.length === 0) return this;
+    const ce = this.engine;
+
+    // @fastpath
+    if (rhs.length === 1) {
+      let n = ce._numericValue(this._value);
+      if (typeof rhs[0] === 'number')
+        return ce._fromNumericValue(n.add(rhs[0]));
+
+      if (rhs[0].numericValue !== null)
+        return ce._fromNumericValue(
+          n.add(ce._numericValue(rhs[0].numericValue))
+        );
+    }
+
+    return new Terms(ce, [
+      this,
+      ...rhs.map((x) => (typeof x === 'number' ? ce.number(x) : x)),
+    ]).asExpression();
+  }
+
+  sub(rhs: BoxedExpression): BoxedExpression {
+    return this.add(rhs.neg());
+  }
+
+  mul(...rhs: (number | BoxedExpression)[]): BoxedExpression {
+    if (rhs.length === 0) return this;
+
+    const ce = this.engine;
+
+    // @fastpath
+    if (rhs.length === 1) {
+      let n = ce._numericValue(this._value);
+      if (typeof rhs[0] === 'number')
+        return ce._fromNumericValue(n.mul(rhs[0]));
+
+      if (rhs[0].numericValue !== null)
+        return ce._fromNumericValue(
+          n.mul(ce._numericValue(rhs[0].numericValue))
+        );
+    }
+
+    return new Product(ce, [
+      this,
+      ...rhs.map((x) => (typeof x === 'number' ? ce.number(x) : x)),
+    ]).asExpression();
+  }
+
+  div(rhs: BoxedExpression): BoxedExpression {
+    return canonicalDivide(this, rhs);
+  }
+
+  pow(exp: number | BoxedExpression): BoxedExpression {
+    if (exp === 0.5) return this.sqrt();
+    if (exp === -0.5) return this.sqrt().inv();
+    const e = typeof exp === 'number' ? exp : asMachineInteger(exp);
+    console.assert(Number.isInteger(e));
+    if (!e) return this.engine.NaN;
+    let n = this.engine._numericValue(this._value);
+    return this.engine._fromNumericValue(n.pow(e));
+  }
+
+  sqrt(): BoxedExpression {
+    let n = this.engine._numericValue(this._value);
+    return this.engine._fromNumericValue(n.sqrt());
+  }
+
+  // root(exp: number | BoxedExpression): BoxedExpression {
+  //   if (exp === 2) return this.sqrt();
+  //   const e = typeof exp === 'number' ? exp : asMachineInteger(exp);
+  //   if (!e) return this.engine.NaN;
+  //   let n = this.engine._numericValue(this._value);
+  //   return this.engine._fromNumericValue(n.root(e));
+
+  //   return this.engine.NaN;
+  // }
 
   get domain(): BoxedDomain {
     this._domain ??= this.engine.domain(inferNumericDomain(this._value));

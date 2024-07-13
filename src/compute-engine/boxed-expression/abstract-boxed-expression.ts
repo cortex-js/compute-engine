@@ -400,6 +400,42 @@ export abstract class _BoxedExpression implements BoxedExpression {
     return null;
   }
 
+  //
+  // Algebraic operations
+  //
+  neg(): BoxedExpression {
+    return this.engine.NaN;
+  }
+  inv(): BoxedExpression {
+    return this.engine.NaN;
+  }
+  abs(): BoxedExpression {
+    return this.engine.NaN;
+  }
+  add(...rhs: (number | BoxedExpression)[]): BoxedExpression {
+    return this.engine.NaN;
+  }
+  sub(rhs: BoxedExpression): BoxedExpression {
+    return this.engine.NaN;
+  }
+  mul(...rhs: (number | BoxedExpression)[]): BoxedExpression {
+    return this.engine.NaN;
+  }
+  div(rhs: BoxedExpression): BoxedExpression {
+    return this.engine.NaN;
+  }
+  pow(exp: number | BoxedExpression): BoxedExpression {
+    return this.engine.NaN;
+  }
+  sqrt(): BoxedExpression {
+    return this.engine.NaN;
+  }
+  // root(exp: number | BoxedExpression): BoxedExpression {
+  //   return this.engine.NaN;
+  // }
+  // log(base?: SemiBoxedExpression): BoxedExpression;
+  // exp(): BoxedExpression;
+
   get sgn(): -1 | 0 | 1 | undefined | null {
     return null;
   }

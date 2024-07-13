@@ -31,6 +31,11 @@ import { _BoxedFunctionDefinition } from './boxed-function-definition';
 import { narrow } from './boxed-domain';
 import { domainToSignature, signatureToDomain } from '../domain-utils';
 import { match } from './match';
+import { canonicalDivide } from '../library/arithmetic-divide';
+import { canonicalPower } from '../library/arithmetic-power';
+import { Terms } from '../numerics/terms';
+import { negate } from '../symbolic/negate';
+import { Product } from '../symbolic/product';
 
 /**
  * BoxedSymbol
@@ -167,6 +172,60 @@ export class BoxedSymbol extends _BoxedExpression {
     if (this._scope) return this;
     // Return a new canonical symbol, scoped in the current context
     return this.engine.box(this._id);
+  }
+
+  neg(): BoxedExpression {
+    return negate(this);
+  }
+
+  inv(): BoxedExpression {
+    return this.engine.One.div(this);
+  }
+
+  abs(): BoxedExpression {
+    if (this.isNonNegative) return this;
+    if (this.isNonPositive) return this.neg();
+    return this.engine._fn('Abs', [this]);
+  }
+
+  add(...rhs: (number | BoxedExpression)[]): BoxedExpression {
+    if (rhs.length === 0) return this;
+    const ce = this.engine;
+
+    return new Terms(ce, [
+      this,
+      ...rhs.map((x) => (typeof x === 'number' ? ce.number(x) : x)),
+    ]).asExpression();
+  }
+
+  sub(rhs: BoxedExpression): BoxedExpression {
+    return this.add(rhs.neg());
+  }
+
+  mul(...rhs: (number | BoxedExpression)[]): BoxedExpression {
+    if (rhs.length === 0) return this;
+
+    const ce = this.engine;
+
+    return new Product(ce, [
+      this,
+      ...rhs.map((x) => (typeof x === 'number' ? ce.number(x) : x)),
+    ]).asExpression();
+  }
+
+  div(rhs: BoxedExpression): BoxedExpression {
+    return canonicalDivide(this, rhs);
+  }
+
+  pow(exp: number | BoxedExpression): BoxedExpression {
+    return canonicalPower(
+      this,
+      typeof exp === 'number' ? this.engine.number(exp) : exp
+    );
+  }
+
+  sqrt(): BoxedExpression {
+    return canonicalPower(this, this.engine.Half);
   }
 
   solve(

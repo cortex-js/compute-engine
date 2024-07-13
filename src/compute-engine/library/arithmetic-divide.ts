@@ -19,10 +19,10 @@ import { asRational, mul } from '../boxed-expression/numerics';
  * - evaluate number literals
  */
 export function canonicalDivide(
-  ce: IComputeEngine,
   op1: BoxedExpression,
   op2: BoxedExpression
 ): BoxedExpression {
+  const ce = op1.engine;
   if (!op1.isValid || !op2.isValid) return ce._fn('Divide', [op1, op2]);
 
   if (op1.head === 'Negate' && op2.head === 'Negate') {
@@ -42,23 +42,14 @@ export function canonicalDivide(
 
   if (op1.head === 'Divide' && op2.head === 'Divide') {
     return canonicalDivide(
-      ce,
       ce.function('Multiply', [op1.op1, op2.op2]),
       ce.function('Multiply', [op1.op2, op2.op1])
     );
   }
   if (op1.head === 'Divide')
-    return canonicalDivide(
-      ce,
-      op1.op1,
-      ce.function('Multiply', [op1.op2, op2])
-    );
+    return canonicalDivide(op1.op1, ce.function('Multiply', [op1.op2, op2]));
   if (op2.head === 'Divide')
-    return canonicalDivide(
-      ce,
-      ce.function('Multiply', [op1, op2.op2]),
-      op2.op1
-    );
+    return canonicalDivide(ce.function('Multiply', [op1, op2.op2]), op2.op1);
 
   // @fixme: enable below and compare test results
   // const num1 = op1.numericValue;

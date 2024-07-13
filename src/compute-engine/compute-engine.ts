@@ -2042,7 +2042,7 @@ export class ComputeEngine implements IComputeEngine {
     if (typeof exponent === 'number' || isRational(exponent))
       exponent = this.number(exponent);
 
-    return canonicalPower(this, base, exponent);
+    return canonicalPower(base, exponent);
   }
 
   /**

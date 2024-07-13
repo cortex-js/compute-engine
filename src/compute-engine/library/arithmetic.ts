@@ -235,7 +235,7 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
           if (!result) return ce.error('missing');
           if (args.length < 2) return result;
           const rest = args.slice(1);
-          for (const x of rest) result = canonicalDivide(ce, result, x);
+          for (const x of rest) result = canonicalDivide(result, x);
 
           return result;
         },
