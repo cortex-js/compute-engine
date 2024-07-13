@@ -247,7 +247,7 @@ export function signDiff(
 
   if (lhsNum === null || rhsNum === null) {
     const ce = lhs.engine;
-    const diff = ce.add(lhsN, ce.neg(rhsN));
+    const diff = ce.add(lhsN, rhsN.neg());
     if (diff.isZero) return 0;
     // @fixme: use diff.numericValue & chop
     const s = diff.sgn;

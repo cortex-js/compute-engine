@@ -5,21 +5,6 @@ import { neg } from '../numerics/rationals';
 import { BoxedExpression, IComputeEngine, Metadata } from '../public';
 import { order } from '../boxed-expression/order';
 
-function negateLiteral(expr: BoxedExpression): BoxedExpression | null {
-  // @fixme: wherever it's called, replace with expr.neg()
-  // Applying negation is safe (doesn't introduce numeric errors)
-  // even on floating point numbers
-  let n = expr.numericValue;
-  if (n === null) return null;
-
-  if (typeof n === 'number') n = -n;
-  else if (n instanceof Decimal) n = n.neg();
-  else if (n instanceof Complex) n = n.neg();
-  else if (Array.isArray(n)) n = neg(n);
-
-  return expr.engine.number(n);
-}
-
 /**
  * Distribute `Negate` (multiply by -1) if expr is a number literal, an
  * addition or multiplication or another `Negate`.
@@ -36,7 +21,7 @@ export function negate(expr: BoxedExpression): BoxedExpression {
   }
   if (sign === 1) return expr;
 
-  if (expr.numericValue !== null) return negateLiteral(expr)!;
+  if (expr.numericValue !== null) return expr.neg();
 
   const ce = expr.engine;
 
@@ -95,7 +80,7 @@ export function negateProduct(
         result.push(arg);
       else {
         done = true;
-        if (!arg.isNegativeOne) result.push(negateLiteral(arg) ?? arg);
+        if (!arg.isNegativeOne) result.push(arg.neg());
       }
     }
   }
@@ -108,7 +93,7 @@ export function negateProduct(
       if (done || arg.numericValue === null || !arg.isNumber) result.push(arg);
       else {
         done = true;
-        if (!arg.isNegativeOne) result.push(negateLiteral(arg) ?? arg);
+        if (!arg.isNegativeOne) result.push(arg.neg());
       }
     }
   }

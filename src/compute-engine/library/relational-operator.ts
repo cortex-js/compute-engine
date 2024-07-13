@@ -124,9 +124,9 @@ export const RELOP_LIBRARY: IdentifierDefinitions = {
           if (!arg.isNumber) return undefined;
           if (!lhs) lhs = arg;
           else {
-            const test = ce.box(['Subtract', arg, lhs]).N().sgn;
+            const test = ce.box(['Subtract', arg, lhs]).N().sgn; // @fixme: use signdiff
             if (test === null || test === undefined) return undefined;
-            if (test <= 0) return ce.False;
+            if (test <= 0) return ce.False; // @fixme: shouldn't that be test < 0?
             lhs = arg;
           }
         }

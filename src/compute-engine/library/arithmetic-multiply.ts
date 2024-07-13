@@ -69,7 +69,7 @@ export function canonicalMultiply(
     }
     if (op.numericValue !== null && op.isNegative) {
       sign = -sign;
-      result.push(ce.neg(op));
+      result.push(op.neg());
       continue;
     }
     if (op.symbol === 'ImaginaryUnit') {
@@ -99,7 +99,7 @@ export function canonicalMultiply(
 
   if (sign < 0) {
     if (result.length === 0) return ce.NegativeOne;
-    if (result.length === 1) return ce.neg(result[0]);
+    if (result.length === 1) return result[0].neg();
     return negateProduct(ce, [...result].sort(order));
   }
 
@@ -226,11 +226,11 @@ function multiply2(
   if (op2.symbol === 'Nothing') return op1;
   if (op1.numericValue !== null) {
     if (op1.isOne) return op2;
-    if (op1.isNegativeOne) return op2.engine.neg(op2);
+    if (op1.isNegativeOne) return op2.neg();
   }
   if (op2.numericValue !== null) {
     if (op2.isOne) return op1;
-    if (op2.isNegativeOne) return op1.engine.neg(op1);
+    if (op2.isNegativeOne) return op1.neg();
   }
   let sign = 1;
   let [t, c] = op1.numericValue !== null ? [op1, op2] : [op2, op1];
@@ -247,7 +247,7 @@ function multiply2(
       if (isOne(r)) return t;
       if (isZero(r)) return ce.Zero;
       if (t.head === 'Add') {
-        if (sign < 0) c = c.engine.neg(c);
+        if (sign < 0) c = c.neg();
         return ce.add(...t.ops!.map((x) => multiply2(c, x)));
       }
 
@@ -256,7 +256,7 @@ function multiply2(
         const p = mul(r, tr);
         return ce.number(sign < 0 ? neg(p) : p);
       }
-      if (sign < 0) return ce._fn('Multiply', [c.engine.neg(c), t]);
+      if (sign < 0) return ce._fn('Multiply', [c.neg(), t]);
       return ce._fn('Multiply', [c, t]);
     }
   }
@@ -264,7 +264,7 @@ function multiply2(
   if (c.hash === t.hash && c.isSame(t)) return square(ce, c);
 
   const product = new Product(ce, [c, t]).asExpression();
-  return sign > 0 ? product : product.engine.neg(product);
+  return sign > 0 ? product : product.neg();
 }
 
 // Canonical form of `["Product"]` (`\prod`) expressions.

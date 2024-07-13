@@ -326,14 +326,15 @@ export class BoxedFunction extends _BoxedExpression {
   //
 
   neg(): BoxedExpression {
-    return negate(this);
+    return negate(this.canonical);
   }
 
   inv(): BoxedExpression {
-    return this.engine.One.div(this);
+    return this.engine.One.div(this.canonical);
   }
 
   abs(): BoxedExpression {
+    if (!this.isCanonical) return this.canonical.abs();
     if (this.head === 'Abs' || this.head === 'Negate') return this;
     if (this.isNonNegative) return this;
     if (this.isNonPositive) return this.neg();
@@ -341,6 +342,7 @@ export class BoxedFunction extends _BoxedExpression {
   }
 
   add(...rhs: (number | BoxedExpression)[]): BoxedExpression {
+    if (!this.isCanonical) return this.canonical.add(...rhs);
     if (rhs.length === 0) return this;
     const ce = this.engine;
 
@@ -355,6 +357,7 @@ export class BoxedFunction extends _BoxedExpression {
   }
 
   mul(...rhs: (number | BoxedExpression)[]): BoxedExpression {
+    if (!this.isCanonical) return this.canonical.mul(...rhs);
     if (rhs.length === 0) return this;
 
     const ce = this.engine;
@@ -366,18 +369,18 @@ export class BoxedFunction extends _BoxedExpression {
   }
 
   div(rhs: BoxedExpression): BoxedExpression {
-    return canonicalDivide(this, rhs);
+    return canonicalDivide(this.canonical, rhs.canonical);
   }
 
   pow(exp: number | BoxedExpression): BoxedExpression {
     return canonicalPower(
-      this,
-      typeof exp === 'number' ? this.engine.number(exp) : exp
+      this.canonical,
+      typeof exp === 'number' ? this.engine.number(exp) : exp.canonical
     );
   }
 
   sqrt(): BoxedExpression {
-    return canonicalPower(this, this.engine.Half);
+    return canonicalPower(this.canonical, this.engine.Half);
   }
 
   //
@@ -480,7 +483,7 @@ export class BoxedFunction extends _BoxedExpression {
     if (s !== undefined) return false;
 
     // Try to simplify the difference of the expressions
-    const diff = this.engine.add(lhs, this.engine.neg(rhs)).simplify();
+    const diff = this.engine.add(lhs, rhs.neg()).simplify();
     if (diff.isZero) return true;
 
     return lhs.isSame(rhs);
@@ -588,7 +591,7 @@ export class BoxedFunction extends _BoxedExpression {
         // Try f(x) < g(x) -> f(x) - g(x) < 0
         const ce = this.engine;
         const alt = ce._fn(expr.head, [
-          ce.add(expr.op1, ce.neg(expr.op2)),
+          ce.add(expr.op1, expr.op2.neg()),
           ce.Zero,
         ]);
         expr = cheapest(expr, alt);
@@ -813,7 +816,7 @@ function makeNumericFunction(
   //
   if (head === 'Add')
     return canonicalAdd(ce, flattenOps(flattenSequence(ops), 'Add'));
-  if (head === 'Negate') return ce.neg(ops[0]);
+  if (head === 'Negate') return ops[0].neg();
   if (head === 'Multiply')
     return canonicalMultiply(ce, flattenOps(flattenSequence(ops), 'Multiply'));
   if (head === 'Divide')

@@ -275,7 +275,7 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
         canonical: (ce, args) => {
           const base = args[0];
           if (base instanceof BoxedNumber && base.isNegative)
-            return ce.neg(ce._fn('Factorial', [ce.neg(base)]));
+            return ce._fn('Factorial', [base.neg()]).neg();
           return ce._fn('Factorial', [base]);
         },
         evaluate: (ce, ops) => {
@@ -569,11 +569,11 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
           args = checkNumericArgs(ce, args);
           if (args.length === 0) return ce.error('missing');
 
-          return ce.neg(args[0]);
+          return args[0].neg();
         },
-        simplify: (ce, ops) => negate(ops[0]),
-        evaluate: (ce, ops) => negate(ops[0]),
-        N: (ce, ops) => negate(ops[0]),
+        simplify: (ce, ops) => ops[0].neg(),
+        evaluate: (ce, ops) => ops[0].neg(),
+        N: (ce, ops) => ops[0].neg(),
         sgn: (_ce, args): -1 | 0 | 1 | undefined => {
           const s = args[0].sgn;
           if (s === undefined || s === null) return undefined;
@@ -595,7 +595,7 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
         domain: ['FunctionOf', 'Values', 'Tuples'],
         evaluate: (ce, ops) => {
           if (ops.length !== 1) return undefined;
-          return ce.box(['Pair', ops[0], ce.neg(ops[0])]);
+          return ce.box(['Pair', ops[0], ops[0].neg()]);
         },
       },
     },
@@ -614,7 +614,7 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
           // If the base is a literal number and negative, treat it as a Negate
           // i.e. -2^3 -> -(2^3)
           if (base instanceof BoxedNumber && base.isNegative)
-            return ce.neg(ce.pow(base, exp));
+            return ce.pow(base, exp).neg();
 
           return ce.pow(base, exp);
         },
@@ -849,7 +849,7 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
           const rest = args.slice(1);
           return canonicalAdd(
             ce,
-            flattenOps([first, ...rest.map((x) => ce.neg(x))], 'Add')
+            flattenOps([first, ...rest.map((x) => x.neg())], 'Add')
           );
         },
       },
@@ -1347,7 +1347,7 @@ function processAbs(
     }
   }
   if (arg.isNonNegative) return arg;
-  if (arg.isNegative) return ce.neg(arg);
+  if (arg.isNegative) return arg.neg();
   return undefined;
 }
 
@@ -1507,7 +1507,7 @@ function processLn(ce: IComputeEngine, ops: ReadonlyArray<BoxedExpression>) {
     const [a, b] = n.ops!;
     return ce.add(
       ce.box(['Ln', a]).simplify(),
-      ce.neg(ce.box(['Ln', b]).simplify())
+      ce.box(['Ln', b]).neg().simplify()
     );
   }
 }

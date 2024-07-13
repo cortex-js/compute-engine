@@ -1057,7 +1057,7 @@ export class ComputeEngine implements IComputeEngine {
     if (coeff.isZero) return this.Zero;
     if (expr?.isOne) expr = undefined;
     if (coeff.isOne) return expr ?? this.One;
-    if (coeff.isNegativeOne) return expr ? this.neg(expr) : this.NegativeOne;
+    if (coeff.isNegativeOne) return expr ? expr.neg() : this.NegativeOne;
 
     if (!expr && coeff.radical === 1 && isOne(coeff.rational) && coeff.im === 0)
       return this.number(coeff.bignumRe ?? coeff.re);
@@ -1082,14 +1082,14 @@ export class ComputeEngine implements IComputeEngine {
     if (coeff.im === 0) {
       if (terms.length === 0) return this.Zero;
       result = terms.length === 1 ? terms[0] : this.function('Multiply', terms);
-      if (sign < 0) return this.neg(result);
+      if (sign < 0) return result.neg();
       return result;
     }
 
     if (terms.length === 0) return this.number(this.complex(0, coeff.im));
 
     result = terms.length === 1 ? terms[0] : this.function('Multiply', terms);
-    if (sign < 0) return this.neg(result);
+    if (sign < 0) return result.neg();
     return this.function('Add', [
       result,
       this.number(this.complex(0, coeff.im)),
@@ -1985,16 +1985,6 @@ export class ComputeEngine implements IComputeEngine {
 
   /**
    *
-   * Shortcut for `this.box(["Negate", expr])`
-   *
-   */
-  neg(expr: BoxedExpression): BoxedExpression {
-    // Short path. Note that are arguments are **not** validated.
-    return negate(expr.canonical);
-  }
-
-  /**
-   *
    * Shortcut for `this.box(["Multiply", ...]).evaluate()`
    *
    */
@@ -2078,7 +2068,7 @@ export class ComputeEngine implements IComputeEngine {
       if (expr.op2.isNegativeOne) return expr.op1;
 
       // Inverse(x^n) -> x^{-n}
-      e = this.neg(expr.op2);
+      e = expr.op2.neg();
       expr = expr.op1;
     }
     if (e.isNegativeOne) return this._fn('Divide', [this.One, expr]);

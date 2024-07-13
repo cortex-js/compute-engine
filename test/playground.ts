@@ -2,6 +2,8 @@ import { ComputeEngine } from '../src/compute-engine';
 
 const ce = new ComputeEngine();
 
+console.log(ce.parse('x+y<1+1').simplify().toString());
+
 // Quick perf testing
 
 // console.time('simplify');

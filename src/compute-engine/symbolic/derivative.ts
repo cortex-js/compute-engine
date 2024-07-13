@@ -161,8 +161,8 @@ export function differentiate(
   if (expr.head && typeof expr.head === 'string') {
     if (expr.head === 'Negate') {
       const gPrime = differentiate(expr.op1, v);
-      if (gPrime) return ce.neg(gPrime);
-      return ce.neg(ce._fn('D', [expr.op1!, ce.symbol(v)]));
+      if (gPrime) return gPrime.neg();
+      return ce._fn('D', [expr.op1!, ce.symbol(v)]).neg();
     }
 
     // Sum rule
@@ -222,7 +222,7 @@ export function differentiate(
       return ce.div(
         ce.add(
           ce.evalMul(gPrime, denominator),
-          ce.neg(ce.evalMul(hPrime, numerator))
+          ce.evalMul(hPrime, numerator).neg()
         ),
         ce.pow(denominator, 2)
       );

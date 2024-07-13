@@ -324,11 +324,11 @@ export class TensorFieldExpression implements TensorField<BoxedExpression> {
   }
 
   neg(x: BoxedExpression): BoxedExpression {
-    return this.ce.neg(x);
+    return x.neg();
   }
 
   sub(lhs: BoxedExpression, rhs: BoxedExpression): BoxedExpression {
-    return this.ce.add(lhs, this.ce.neg(rhs));
+    return this.ce.add(lhs, rhs.neg());
   }
 
   mul(lhs: BoxedExpression, rhs: BoxedExpression): BoxedExpression {

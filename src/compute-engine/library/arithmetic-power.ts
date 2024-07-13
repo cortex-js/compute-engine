@@ -389,7 +389,7 @@ export function processPower(
       }
       if (base.isNegative) {
         if (!complexAllowed) return ce.NaN;
-        return ce.evalMul(ce.I, ce.box(['Sqrt', ce.neg(base)]));
+        return ce.evalMul(ce.I, ce.box(['Sqrt', base.neg()]));
       }
       return undefined;
     }

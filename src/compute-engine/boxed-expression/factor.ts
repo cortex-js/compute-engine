@@ -13,7 +13,7 @@ export function together(op: BoxedExpression): BoxedExpression {
 
   if (h === 'Divide') return ce.div(op.ops![0], op.ops![1]);
 
-  if (h === 'Negate') return ce.neg(together(op.ops![0]));
+  if (h === 'Negate') return together(op.ops![0]).neg();
 
   if (h === 'Add') {
     const [numer, denom] = op.ops!.reduce(
@@ -51,7 +51,7 @@ export function factor(expr: BoxedExpression): BoxedExpression {
     return expr.engine.function(h, [lhs.asExpression(), rhs.asExpression()]);
   }
 
-  if (h === 'Negate') return expr.engine.neg(factor(expr.ops![0]));
+  if (h === 'Negate') return factor(expr.ops![0]).neg();
 
   if (h === 'Add') {
     const ce = expr.engine;

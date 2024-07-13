@@ -859,7 +859,7 @@ export function canonicalInvisibleOperator(
           Number.isInteger(d)
         ) {
           let frac = rhs.canonical;
-          if (lhsNumber < 0) frac = ce.neg(frac);
+          if (lhsNumber < 0) frac = frac.neg();
 
           return ce._fn('Add', [lhs.canonical, frac]);
         }

@@ -293,7 +293,7 @@ export class Product {
 
     // If the coef is -1, negate the expression and reset the coef
     if (isNegativeOne) {
-      const result = ce.neg(termsAsExpression(ce, groupedTerms));
+      const result = termsAsExpression(ce, groupedTerms).neg();
       this.coefficient = ce._numericValue(-1);
       return result;
     }
@@ -330,7 +330,7 @@ export class Product {
     const num = termsAsExpression(ce, xsNumerator);
 
     return [
-      isNegativeOne ? ce.neg(num) : num,
+      isNegativeOne ? num.neg() : num,
       termsAsExpression(ce, xsDenominator),
     ];
   }
@@ -338,7 +338,7 @@ export class Product {
   asRationalExpression(): BoxedExpression {
     const [numerator, denominator] = this.asNumeratorDenominator();
     if (denominator.isOne) return numerator;
-    if (denominator.isNegativeOne) return this.engine.neg(numerator);
+    if (denominator.isNegativeOne) return numerator.neg();
     return this.engine._fn('Divide', [numerator, denominator]);
   }
 }

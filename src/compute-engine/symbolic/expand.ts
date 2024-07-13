@@ -133,7 +133,7 @@ function expandPower(
       const sign = exp % 2 === 0 ? 1 : -1;
       const result = expandPower(base.op1, exp);
       if (result === null) return null;
-      return sign > 0 ? result : ce.neg(result);
+      return sign > 0 ? result : result.neg();
     }
   }
 
@@ -230,7 +230,7 @@ export function expandFunction(
   //
   if (h === 'Negate') {
     result = expand(ops[0]);
-    return result ? ce.neg(result) : null;
+    return result ? result.neg() : null;
   }
 
   //

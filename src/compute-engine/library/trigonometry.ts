@@ -670,7 +670,7 @@ function constructibleValues(
     const r = value[head];
     if (r && ce.chop(theta - (Math.PI * n) / d) === 0) {
       if (r.symbol === 'ComplexInfinity') return r;
-      return identitySign * sign < 0 ? ce.neg(r) : r.evaluate();
+      return identitySign * sign < 0 ? r.neg() : r.evaluate();
     }
   }
   return undefined;
@@ -728,7 +728,7 @@ function constructibleValuesInverse(
     quadrant = trigFuncParity(inverse_head!) == -1 ? -1 : 1;
     // shift x to quadrant 0 to match the key in specialInverseValues
     x_N = -x_N;
-    x = ce.neg(x);
+    x = x.neg();
   }
 
   for (const [[match_arg, match_arg_N], [n, d]] of specialInverseValues) {
@@ -736,7 +736,7 @@ function constructibleValuesInverse(
       // there is an implicit Pi in the numerator
       let theta = ce.box(['Divide', ['Multiply', n, 'Pi'], d]);
       if (quadrant == -1) {
-        theta = ce.neg(theta);
+        theta = theta.neg();
       } else if (quadrant == 1) {
         theta = ce.box(['Subtract', 'Pi', theta]);
       }

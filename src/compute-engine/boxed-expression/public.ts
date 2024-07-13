@@ -1986,8 +1986,6 @@ export interface IComputeEngine {
 
   inv(expr: BoxedExpression): BoxedExpression;
 
-  neg(expr: BoxedExpression): BoxedExpression;
-
   div(num: BoxedExpression, denom: BoxedExpression): BoxedExpression;
 
   pair(

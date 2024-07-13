@@ -32,9 +32,9 @@ export function canonicalDivide(
 
   if (op1.numericValue !== null && op2.numericValue !== null) {
     if (op2.isOne) return op1;
-    if (op2.isNegativeOne) return ce.neg(op1);
+    if (op2.isNegativeOne) return op1.neg();
     if (op1.isOne) return ce.inv(op2);
-    if (op1.isNegativeOne) return ce.neg(ce.inv(op2));
+    if (op1.isNegativeOne) return ce.inv(op2).neg();
     const r1 = asRational(op1);
     const r2 = asRational(op2);
     if (r1 && r2 && !isZero(r2)) return ce.number(mul(r1, inverse(r2)));
@@ -82,8 +82,8 @@ export function canonicalDivide(
   if (c.isZero) return ce.Zero;
   if (c.isOne) return ce._fn('Divide', [t1, t2]);
   if (c.isNegativeOne)
-    // Note that ce.neg() will propagate inside the expression if possible
-    return ce.neg(ce._fn('Divide', [t1, t2]));
+    // Note that .neg() will propagate inside the expression if possible
+    return ce._fn('Divide', [t1, t2]).neg();
 
   const num = ce._fromNumericValue(c.num, t1);
   const denom = ce._fromNumericValue(c.denom, t2);
