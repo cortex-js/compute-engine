@@ -2,81 +2,64 @@ import { asMachineInteger } from '../boxed-expression/numerics';
 import { isRelationalOperator } from '../boxed-expression/utils';
 import { simplifyAdd } from '../library/arithmetic-add';
 import { BoxedExpression, IComputeEngine } from '../public';
-import { canonicalNegate } from './negate';
 
-function distribute2(
+function expandProduct(
   lhs: Readonly<BoxedExpression>,
   rhs: Readonly<BoxedExpression>
 ): BoxedExpression {
-  // @fixme: if both lhs and rhs are not functions, just return their product. Do we need to call mul(), which will evaluate them?
-
   //
   // Negate
   //
 
   if (lhs.head === 'Negate' && rhs.head === 'Negate')
-    return distribute2(lhs.op1, rhs.op1);
-
-  if (lhs.head === 'Negate') return canonicalNegate(distribute2(lhs.op1, rhs));
-  if (rhs.head === 'Negate') return canonicalNegate(distribute2(lhs, rhs.op1));
+    return expandProduct(lhs.op1, rhs.op1);
 
   const ce = lhs.engine;
+
+  if (lhs.head === 'Negate')
+    return ce.evalMul(ce.NegativeOne, expandProduct(lhs.op1, rhs));
+  if (rhs.head === 'Negate')
+    return ce.evalMul(ce.NegativeOne, expandProduct(lhs, rhs.op1));
 
   //
   // Divide
   //
   if (lhs.head === 'Divide' && rhs.head === 'Divide') {
     // Apply distribute to the numerators only.
-    const denom = ce.mul(lhs.op2, rhs.op2);
-    return ce.div(distribute2(lhs.op1, rhs.op1), denom);
+    const denom = ce.evalMul(lhs.op2, rhs.op2);
+    return ce.div(expandProduct(lhs.op1, rhs.op1), denom);
   }
 
-  if (lhs.head === 'Divide') return ce.div(distribute2(lhs.op1, rhs), lhs.op2);
-  if (rhs.head === 'Divide') return ce.div(distribute2(lhs, rhs.op1), rhs.op2);
+  if (lhs.head === 'Divide')
+    return ce.div(expandProduct(lhs.op1, rhs), lhs.op2);
+  if (rhs.head === 'Divide')
+    return ce.div(expandProduct(lhs, rhs.op1), rhs.op2);
 
   //
   // Add
   //
   if (lhs.head === 'Add')
-    return ce.add(...lhs.ops!.map((x) => distribute2(x, rhs)));
+    return ce.add(...lhs.ops!.map((x) => expandProduct(x, rhs)));
   if (rhs.head === 'Add')
-    return ce.add(...rhs.ops!.map((x) => distribute2(lhs, x)));
-  return ce.mul(lhs, rhs);
+    return ce.add(...rhs.ops!.map((x) => expandProduct(lhs, x)));
+
+  //
+  // Something else...
+  //
+  return ce.evalMul(lhs, rhs);
 }
 
-/* Distribute
- * Assuming `expr` is a product of expressions, distribute each term of the product.
- */
-export function distribute(
+export function expandProducts(
   ce: IComputeEngine,
-  head: string,
   ops: ReadonlyArray<BoxedExpression>
 ): BoxedExpression | null {
-  if (head === 'Power') {
-    const exp = asMachineInteger(ops[1]);
-    if (exp === null) return null;
-    return expandPower(ops[0], exp);
-  }
+  if (ops.length === 0) return null;
+  if (ops.length === 1) return ops[0];
+  if (ops.length === 2) return expandProduct(ops[0], ops[1]);
 
-  if (head === 'Negate')
-    return distribute(ce, 'Multiply', [ce.NegativeOne, ops[0]]);
-
-  if (head === 'Divide') {
-    if (!ops[0]?.ops || typeof ops[0].head !== 'string') return null;
-    const num = distribute(ce, ops[0].head!, ops[0].ops);
-    if (!num) return null;
-    return ce.div(num, ops[1]);
-  }
-
-  if (head === 'Multiply') {
-    if (ops.length === 1) return ops[0];
-    if (ops.length === 2) return distribute2(ops[0], ops[1]);
-
-    const rhs = distribute(ce, head, ops.slice(1));
-    if (!rhs) return null;
-    return distribute2(ops[0], rhs);
-  }
-  return null;
+  const rhs = expandProducts(ce, ops.slice(1));
+  if (!rhs) return null;
+  return expandProduct(ops[0], rhs);
 }
 
 const binomials = [
@@ -91,7 +74,7 @@ const binomials = [
   [1, 8, 28, 56, 70, 56, 28, 8, 1],
 ];
 
-function choose(n: number, k: number): number {
+export function choose(n: number, k: number): number {
   while (n >= binomials.length) {
     const s = binomials.length;
     const nextRow = [1];
@@ -124,6 +107,15 @@ function* powers(n: number, exp: number): Generator<number[]> {
   for (let i = 0; i <= exp; i += 1)
     for (const p of powers(n - 1, exp - i)) yield [i, ...p];
 }
+
+/** Use the multinomial theorem (https://en.wikipedia.org/wiki/Multinomial_theorem) to expand the expression.
+ * The expression must be a power of a sum of terms.
+ * The power must be a positive integer.
+ * - expr = '(a + b)^2'
+ *     ->  'a^2 + 2ab + b^2'
+ * - expr = '(a + b)^3'
+ *    -> 'a^3 + 3a^2b + 3ab^2 + b^3'
+ */
 
 function expandPower(
   base: BoxedExpression,
@@ -174,40 +166,9 @@ function expandPower(
         else product.push(ce.pow(terms[i], val[i]));
       }
     }
-    result.push(ce.mul(...product));
+    result.push(ce.evalMul(...product));
   }
   return ce.add(...result);
-}
-
-/** Use the multinomial theorem (https://en.wikipedia.org/wiki/Multinomial_theorem) to expand the expression.
- * The expression must be a power of a sum of terms.
- * The power must be a positive integer.
- * - expr = '(a + b)^2'
- *     ->  'a^2 + 2ab + b^2'
- * - expr = '(a + b)^3'
- *    -> 'a^3 + 3a^2b + 3ab^2 + b^3'
- */
-export function expandMultinomial(
-  expr: BoxedExpression
-): BoxedExpression | null {
-  if (expr.head !== 'Power') return null;
-  const exp = asMachineInteger(expr.op2);
-  if (exp === null) return null;
-
-  return expandPower(expr.op1, exp);
-}
-
-/** Expand all
- * Recursive expand of all terms in the expression
- */
-export function expandAll(expr: BoxedExpression): BoxedExpression | null {
-  if (expr.head && expr.ops) {
-    const ops = expr.ops.map((x) => expandAll(x) ?? x);
-    const result = expr.engine.box([expr.head, ...ops]);
-    return expand(result) ?? result;
-  }
-
-  return null;
 }
 
 /** ExpandNumerator
@@ -240,6 +201,67 @@ function expandDenominator(expr: BoxedExpression): BoxedExpression | null {
   return ce.div(expr.op1, expandedDenominator);
 }
 
+/** Attempt to transform the expression (h, ops) into a sum */
+export function expandFunction(
+  ce: IComputeEngine,
+  h: string,
+  ops: ReadonlyArray<BoxedExpression>
+): BoxedExpression | null {
+  let result: BoxedExpression | null = null;
+
+  //
+  // Divide
+  //
+  if (h === 'Divide') {
+    const num = expand(ops[0]);
+    if (!num) return null;
+    if (num?.head === 'Add')
+      result = ce.add(...num.ops!.map((x) => ce.div(x, ops[1])));
+    else result = ce._fn('Divide', [num, ops[1]]);
+  }
+
+  //
+  // Multiply
+  //
+  if (h === 'Multiply') result = expandProducts(ce, ops);
+
+  //
+  // Negate
+  //
+  if (h === 'Negate') {
+    result = expand(ops[0]);
+    return result ? ce.neg(result) : null;
+  }
+
+  //
+  //
+  // Add
+  //
+
+  if (h === 'Add')
+    return simplifyAdd(
+      ce,
+      ops.map((x) => expand(x) ?? x)
+    );
+
+  //
+  // Power
+  //
+  if (h === 'Power') {
+    const exp = asMachineInteger(ops[1]);
+    result = exp !== null ? expandPower(ops[0], exp) : null;
+  }
+
+  // Simplify the sum
+  if (result && result.head === 'Add')
+    result = simplifyAdd(
+      ce,
+      result.ops!.map((x) => x.simplify())
+    );
+
+  return result;
+}
+
 /** Apply the distributive law if the expression is a product of sums.
  * For example, a(b + c) = ab + ac
  * Expand the expression if it is a power of a sum.
@@ -251,33 +273,36 @@ function expandDenominator(expr: BoxedExpression): BoxedExpression | null {
 export function expand(
   expr: BoxedExpression | undefined
 ): BoxedExpression | null {
-  if (!expr) return null;
+  if (!expr || typeof expr.head !== 'string') return null;
 
+  //
   // Expand relational operators
-  const h = expr.head;
-  if (isRelationalOperator(h)) {
+  //
+  if (isRelationalOperator(expr.head)) {
     return expr.engine._fn(
-      h,
+      expr.head,
       expr.ops!.map((x) => expand(x) ?? x)
     );
   }
 
-  const result = expandNumerator(expr);
-  if (result !== null) return result;
+  return expandFunction(expr.engine, expr.head, expr.ops ?? []);
+}
 
-  if (h === 'Multiply') return distribute(expr.engine, 'Multiply', expr.ops!);
+/**
+ * Recursive expand of all terms in the expression.
+ *
+ * `expand()` only expands the top level of the expression.
+ */
+export function expandAll(expr: BoxedExpression): BoxedExpression | null {
+  if (!expr.head || !expr.ops) return null;
 
-  // Note arg simplifyAdd will simplify each argument (which in turn will
-  // expand them), so no need to expand the arguments here.
-  if (h === 'Add') return simplifyAdd(expr.engine, expr.ops!);
+  const ce = expr.engine;
+  const ops = expr.ops.map((x) =>
+    typeof x.head === 'string' && x.ops
+      ? expandFunction(ce, x.head, x.ops) ?? x
+      : x
+  );
 
-  if (h === 'Negate') {
-    const op = expand(expr.op1);
-    if (op === null) return null;
-    return expr.engine.neg(op);
-  }
-
-  if (h === 'Power') return expandMultinomial(expr);
-
-  return null;
+  const result = expr.engine.function(expr.head, ops);
+  return expand(result) ?? result;
 }

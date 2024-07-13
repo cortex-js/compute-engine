@@ -134,12 +134,6 @@ describe('Euler Prime Generating Polynomial', () => {
         ["Multiply", -488, "x"],
         7243
       ]
-      simplify  = [
-        "Add",
-        ["Multiply", 8, ["Square", "x"]],
-        ["Negate", ["Multiply", 488, "x"]],
-        7243
-      ]
     `));
   test('x in ', () =>
     expect(check('43 x^2 - 537x + 2971')).toMatchInlineSnapshot(`
@@ -153,12 +147,6 @@ describe('Euler Prime Generating Polynomial', () => {
         "Add",
         ["Multiply", 43, ["Square", "x"]],
         ["Multiply", -537, "x"],
-        2971
-      ]
-      simplify  = [
-        "Add",
-        ["Multiply", 43, ["Square", "x"]],
-        ["Negate", ["Multiply", 537, "x"]],
         2971
       ]
     `));
@@ -176,18 +164,11 @@ describe('Euler Prime Generating Polynomial', () => {
         ["Multiply", -810, "x"],
         2763
       ]
-      simplify  = [
-        "Add",
-        ["Multiply", 36, ["Square", "x"]],
-        ["Negate", ["Multiply", 810, "x"]],
-        2763
-      ]
     `));
   test('x in', () =>
     expect(check('x^2 - 79x + 1601')).toMatchInlineSnapshot(`
       box       = ["Add", ["Power", "x", 2], ["InvisibleOperator", -79, "x"], 1601]
       canonical = ["Add", ["Multiply", -79, "x"], ["Square", "x"], 1601]
-      simplify  = ["Add", ["Negate", ["Multiply", 79, "x"]], ["Square", "x"], 1601]
     `));
   test('x in 0..10', () =>
     expect(check('2x^2 + 11')).toMatchInlineSnapshot(`

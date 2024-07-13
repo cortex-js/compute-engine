@@ -68,11 +68,8 @@ export function simplifyAdd(
   ce: IComputeEngine,
   args: ReadonlyArray<BoxedExpression>
 ): BoxedExpression {
-  const terms = new Terms(
-    ce,
-    args.map((x) => x.simplify())
-  );
-  return terms.asExpression();
+  if (args.length === 1) return args[0];
+  return new Terms(ce, args).asExpression();
 }
 
 function evalAddNum(ops: ReadonlyArray<BoxedExpression>): number | null {
@@ -83,23 +80,6 @@ function evalAddNum(ops: ReadonlyArray<BoxedExpression>): number | null {
     else return null;
   }
   return sum;
-}
-
-export function evalAdd(
-  ce: IComputeEngine,
-  ops: ReadonlyArray<BoxedExpression>,
-  mode: 'N' | 'evaluate' = 'evaluate'
-): BoxedExpression {
-  const numericMode = mode == 'N';
-  // Note: we need to call evaluate here, because in the case of
-  // simplify, we want to simplify the arguments, but not evaluate them.
-  const terms = new Terms(
-    ce,
-    ops.map((x) => x.evaluate({ numericMode })),
-    { exact: !numericMode }
-  );
-
-  return terms.asExpression();
 }
 
 export function canonicalSummation(

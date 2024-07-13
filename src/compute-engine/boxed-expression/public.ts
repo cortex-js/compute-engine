@@ -1959,7 +1959,7 @@ export interface IComputeEngine {
 
   add(...ops: ReadonlyArray<BoxedExpression>): BoxedExpression;
 
-  mul(...ops: ReadonlyArray<BoxedExpression>): BoxedExpression;
+  evalMul(...ops: ReadonlyArray<BoxedExpression>): BoxedExpression;
 
   pow(
     base: BoxedExpression,
@@ -2003,7 +2003,8 @@ export interface IComputeEngine {
   /**
    * This is a primitive to create a boxed function.
    *
-   * In general, consider using `ce.box()` or `canonicalXXX()` instead.
+   * In general, consider using `ce.box()` or `ce.functin()` or
+   * `canonicalXXX()` instead.
    *
    * The caller must ensure that the arguments are in canonical form:
    * - arguments are `canonical()`

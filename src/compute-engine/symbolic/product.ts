@@ -271,7 +271,6 @@ export class Product {
       }
       if (!found) xs.push({ exponent, terms: [t.term] });
     }
-
     return xs;
   }
 
@@ -283,10 +282,21 @@ export class Product {
     if (coef.isNegativeInfinity) return ce.NegativeInfinity;
     if (coef.isZero) return ce.Zero;
 
+    // If the coef is -1, temporarily set it to 1
+    const isNegativeOne = coef.isNegativeOne;
+    if (isNegativeOne) this.coefficient = ce._numericValue(1);
+
     const groupedTerms = this.groupedByDegrees({
       mode: mode === 'N' ? 'numeric' : 'expression',
     });
     if (groupedTerms === null) return ce.NaN;
+
+    // If the coef is -1, negate the expression and reset the coef
+    if (isNegativeOne) {
+      const result = ce.neg(termsAsExpression(ce, groupedTerms));
+      this.coefficient = ce._numericValue(-1);
+      return result;
+    }
 
     return termsAsExpression(ce, groupedTerms);
   }
@@ -299,7 +309,14 @@ export class Product {
     if (coef.isPositiveInfinity || coef.isNegativeInfinity)
       return [ce.NaN, ce.NaN];
 
+    // If the coef is -1, temporarily set it to 1
+    const isNegativeOne = coef.isNegativeOne;
+    if (isNegativeOne) this.coefficient = ce._numericValue(1);
+
     const xs = this.groupedByDegrees({ mode: 'rational' });
+
+    if (isNegativeOne) this.coefficient = ce._numericValue(-1);
+
     if (xs === null) return [ce.NaN, ce.NaN];
 
     const xsNumerator = xs.filter((x) => x.exponent[0] >= 0);
@@ -310,8 +327,10 @@ export class Product {
         terms: x.terms,
       }));
 
+    const num = termsAsExpression(ce, xsNumerator);
+
     return [
-      termsAsExpression(ce, xsNumerator),
+      isNegativeOne ? ce.neg(num) : num,
       termsAsExpression(ce, xsDenominator),
     ];
   }
@@ -328,7 +347,7 @@ export function commonTerms(lhs: Product, rhs: Product): BoxedExpression {
   const ce = lhs.engine;
 
   // The common coefficient between the two products
-  const coef = ce._fromNumericValue(lhs.coefficient.gcd(rhs.coefficient));
+  const coef = lhs.coefficient.gcd(rhs.coefficient);
 
   // Extract common terms between two products
 
@@ -344,10 +363,7 @@ export function commonTerms(lhs: Product, rhs: Product): BoxedExpression {
   }
 
   // Put everything together
-
-  if (xs.length === 0) return coef;
-  if (coef.isOne) return ce._fn('Multiply', [...xs].sort(order));
-  return ce._fn('Multiply', [coef, ...xs].sort(order));
+  return ce.function('Multiply', [ce._fromNumericValue(coef), ...xs]);
 }
 
 // Put the exponents in a bucket:

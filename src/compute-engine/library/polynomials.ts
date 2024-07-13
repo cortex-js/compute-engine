@@ -1,6 +1,7 @@
 import { factor, together } from '../boxed-expression/factor';
 import { IdentifierDefinitions } from '../public';
-import { distribute, expand, expandAll } from '../symbolic/expand';
+import { distribute } from '../symbolic/distribute';
+import { expand, expandAll } from '../symbolic/expand';
 
 export const POLYNOMIALS_LIBRARY: IdentifierDefinitions[] = [
   {
@@ -41,10 +42,7 @@ export const POLYNOMIALS_LIBRARY: IdentifierDefinitions[] = [
       hold: 'all',
       signature: {
         domain: ['FunctionOf', 'Values', 'Values'],
-        evaluate: (ce, ops) =>
-          !ops[0].ops || typeof ops[0].head !== 'string'
-            ? ops[0]
-            : distribute(ce, ops[0].head, ops[0].ops) ?? ops[0],
+        evaluate: (_ce, ops) => (!ops[0] ? ops[0] : distribute(ops[0])),
       },
     },
   },

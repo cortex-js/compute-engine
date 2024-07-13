@@ -103,7 +103,7 @@ describe('RELATIONAL OPERATORS', () => {
   // Simplify coefficient with a common factor
   test(`2x^2 < 4x^3`, () =>
     expect(simplify('2x^2 \\lt 4x^3')).toMatchInlineSnapshot(
-      `["Less", 1, ["Multiply", 2, "x"]]`
+      `["Less", ["Add", ["Multiply", -2, ["Square", "x"]], "x"], 0]`
     ));
 
   test(`2a < 4ab`, () =>

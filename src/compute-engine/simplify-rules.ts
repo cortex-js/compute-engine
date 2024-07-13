@@ -86,6 +86,74 @@ export const SIMPLIFY_RULES: Rule[] = [
   // '\\sin(x)^2 + \\cos(x)^2 -> 1',
   '\\sin(x)^2 -> \\frac{1 - \\cos(2x)}{2}',
   '\\cos(x)^2 -> \\frac{1 + \\cos(2x)}{2}',
+  {
+    match: ['Tan', '__x'],
+    replace: ['Divide', ['Sin', '__x'], ['Cos', '__x']],
+  },
+  {
+    match: ['Cot', '__x'],
+    replace: ['Divide', ['Cos', '__x'], ['Sin', '__x']],
+  },
+  {
+    match: ['Sec', '__x'],
+    replace: ['Divide', 1, ['Cos', '__x']],
+  },
+  {
+    match: ['Csc', '__x'],
+    replace: ['Divide', 1, ['Sin', '__x']],
+  },
+  // {
+  //   match: ['Cos', '__x'],
+  //   replace: ['Sin', ['Add', ['Divide', 'Pi', 2], '__x']],
+  // },
+  {
+    match: ['Arcosh', '__x'],
+    replace: [
+      'Ln',
+      ['Add', '__x', ['Sqrt', ['Subtract', ['Square', '__x'], 1]]],
+    ],
+    condition: (sub, ce) => sub.__x.isGreater(ce.One) ?? false,
+  },
+  {
+    match: ['Arcsin', '__x'],
+    replace: [
+      'Multiply',
+      2,
+      [
+        'Arctan2',
+        '__x',
+        ['Add', 1, ['Sqrt', ['Subtract', 1, ['Square', '__x']]]],
+      ],
+    ],
+  },
+  {
+    match: ['Arsinh', '__x'],
+    replace: [
+      'Multiply',
+      2,
+      ['Ln', ['Add', '__x', ['Sqrt', ['Add', ['Square', '__x'], 1]]]],
+    ],
+  },
+  {
+    match: ['Artanh', '__x'],
+    replace: [
+      'Multiply',
+      'Half',
+      ['Ln', ['Divide', ['Add', 1, '__x'], ['Subtract', 1, '__x']]],
+    ],
+  },
+  {
+    match: ['Cosh', '__x'],
+    replace: ['Divide', ['Add', ['Exp', '__x'], ['Exp', ['Negate', '__x']]], 2],
+  },
+  {
+    match: ['Sinh', '__x'],
+    replace: [
+      'Divide',
+      ['Subtract', ['Exp', '__x'], ['Exp', ['Negate', '__x']]],
+      2,
+    ],
+  },
 ];
 //  [
 //   // `Subtract`

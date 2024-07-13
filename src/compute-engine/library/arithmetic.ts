@@ -28,14 +28,13 @@ import {
 } from '../numerics/rationals';
 import { IdentifierDefinitions } from '../public';
 import { bignumPreferred, complexAllowed } from '../boxed-expression/utils';
-import { canonicalNegate, processNegate } from '../symbolic/negate';
+import { negate } from '../symbolic/negate';
 import {
-  simplifyAdd,
-  evalAdd,
   domainAdd,
   evalSummation,
   canonicalSummation,
   canonicalAdd,
+  simplifyAdd,
 } from './arithmetic-add';
 import {
   simplifyMultiply,
@@ -66,7 +65,7 @@ import {
   asRational,
   asBignum,
 } from '../boxed-expression/numerics';
-import { distribute } from '../symbolic/expand';
+import { expandProducts } from '../symbolic/expand';
 
 // When considering processing an arithmetic expression, the following
 // are the core canonical arithmetic operations that should be considered:
@@ -158,9 +157,22 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
             ops.map((x) => x.domain)
           ),
         // canonical: (ce, args) => canonicalAdd(ce, args), // never called: shortpath
-        simplify: (ce, ops) => simplifyAdd(ce, ops),
-        evaluate: (ce, ops) => evalAdd(ce, ops),
-        N: (ce, ops) => evalAdd(ce, ops, 'N'),
+        simplify: (ce, ops) =>
+          simplifyAdd(
+            ce,
+            ops.map((x) => x.simplify())
+          ),
+        evaluate: (ce, ops) =>
+          simplifyAdd(
+            ce,
+            ops.map((x) => x.evaluate())
+          ),
+
+        N: (ce, ops) =>
+          simplifyAdd(
+            ce,
+            ops.map((x) => x.N())
+          ),
       },
     },
 
@@ -506,8 +518,10 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
         simplify: (ce, ops) => simplifyMultiply(ce, ops),
 
         evaluate: (ce, ops) => {
+          // @fixme: move call to expandProducts() and flattenOps() inside
+          // evalMultiply (once ce.mul() has been changed to not evaluate)
           ops = ops.map((x) => x.evaluate());
-          const expr = distribute(ce, 'Multiply', ops);
+          const expr = expandProducts(ce, ops);
           if (expr !== null) {
             if (expr.head !== 'Multiply') return expr.evaluate();
             ops = flattenOps(expr.ops!, 'Multiply');
@@ -516,7 +530,7 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
         },
         N: (ce, ops) => {
           ops = ops.map((x) => x.N());
-          const expr = distribute(ce, 'Multiply', ops);
+          const expr = expandProducts(ce, ops);
           if (expr !== null) {
             if (expr.head !== 'Multiply') return expr.N();
             ops = flattenOps(expr.ops!, 'Multiply');
@@ -557,9 +571,9 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
 
           return ce.neg(args[0]);
         },
-        simplify: (ce, ops) => processNegate(ce, ops[0], 'simplify'),
-        evaluate: (ce, ops) => processNegate(ce, ops[0], 'evaluate'),
-        N: (ce, ops) => processNegate(ce, ops[0], 'N'),
+        simplify: (ce, ops) => negate(ops[0]),
+        evaluate: (ce, ops) => negate(ops[0]),
+        N: (ce, ops) => negate(ops[0]),
         sgn: (_ce, args): -1 | 0 | 1 | undefined => {
           const s = args[0].sgn;
           if (s === undefined || s === null) return undefined;
@@ -835,7 +849,7 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
           const rest = args.slice(1);
           return canonicalAdd(
             ce,
-            flattenOps([first, ...rest.map((x) => canonicalNegate(x))], 'Add')
+            flattenOps([first, ...rest.map((x) => ce.neg(x))], 'Add')
           );
         },
       },
@@ -1477,12 +1491,13 @@ function processLn(ce: IComputeEngine, ops: ReadonlyArray<BoxedExpression>) {
   const n = ops[0];
   if (n.isZero) return ce.NaN;
   if (n.isOne) return ce.Zero;
-  if (n.isNegativeOne && complexAllowed(ce)) return ce.mul(ce.Pi, ce.I);
+  if (n.isNegativeOne && complexAllowed(ce))
+    return ce._fn('Multiply', [ce.Pi, ce.I]);
   if (n.symbol === 'ExponentialE') return ce.One;
   if (n.head === 'Power' && n.op1.symbol === 'ExporentialE') return n.op2;
   if (n.head === 'Power') {
     const [base, exp] = n.ops!;
-    return ce.mul(exp, ce.box(['Ln', base]).simplify());
+    return ce.evalMul(exp, ce.box(['Ln', base]).simplify());
   }
   if (n.head === 'Multiply') {
     const [a, b] = n.ops!;

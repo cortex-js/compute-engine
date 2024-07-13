@@ -429,7 +429,7 @@ describe('Inverse', () => {
   it('should calculate the inverse of a matrix with unknowns', () => {
     const result = ce.box(['Inverse', sq2_x]).evaluate();
     expect(result.toString()).toMatchInlineSnapshot(
-      `[[d / (a * d - b * c),(-b) / (a * d - b * c)],[(-c) / (a * d - b * c),a / (a * d - b * c)]]`
+      `[[d / (a * d - b * c),-b / (a * d - b * c)],[-c / (a * d - b * c),a / (a * d - b * c)]]`
     );
   });
 

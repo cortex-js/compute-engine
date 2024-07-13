@@ -136,6 +136,14 @@ export class _BoxedDomain extends _BoxedExpression implements BoxedDomain {
     return this._hash;
   }
 
+  evaluate(): BoxedDomain {
+    return this;
+  }
+
+  simplify(): BoxedDomain {
+    return this;
+  }
+
   isCompatible(
     dom: BoxedDomain | DomainLiteral,
     compatibility: DomainCompatibility = 'covariant'

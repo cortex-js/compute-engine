@@ -364,7 +364,7 @@ export function boxFunction(
         const im = asFloat(op1);
         if (im !== null && im !== 0)
           return ce.number(ce.complex(0, im), options);
-        return ce.mul(op1, ce.I);
+        return ce.evalMul(op1, ce.I);
       }
       if (ops.length === 2) {
         const op1 = box(ce, ops[0], options);
@@ -377,7 +377,7 @@ export function boxFunction(
             return ce.number(ce.complex(re, im), options);
           return op1;
         }
-        return ce.add(op1, ce.mul(op2, ce.I));
+        return ce.add(op1, ce.evalMul(op2, ce.I));
       }
       throw new Error('Expected one or two arguments with Complex expression');
     }

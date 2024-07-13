@@ -2,6 +2,25 @@ import { ComputeEngine } from '../src/compute-engine';
 
 const ce = new ComputeEngine();
 
+// Quick perf testing
+
+// console.time('simplify');
+// ce.parse('(2x^2+3x+1)(2x+1)').simplify().print();
+// console.timeLog('simplify');
+
+console.time('evaluate');
+ce.parse('(2x^2+3x+1)(2x+1)').evaluate().print();
+// ce.parse('x+1').evaluate().print();
+console.timeLog('evaluate');
+
+// ce.parse('(0+1.1-1.1)(0+1/4-1/4)').simplify().print();
+ce.parse('(0+1.1-1.1)(0+1/4-1/4)').evaluate().print();
+ce.parse('(0+1.1-1.1)(0+1/4-1/4)').N().print();
+
+console.time('N');
+ce.parse('(2x^2+3x+1)(2x+1)').N().print();
+console.timeLog('N');
+
 // Should be the gamma function, not the gamma constant
 ce.parse('\\gamma(2, 1)').print();
 

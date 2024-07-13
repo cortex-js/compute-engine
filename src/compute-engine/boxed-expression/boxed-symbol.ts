@@ -592,6 +592,7 @@ export class BoxedSymbol extends _BoxedExpression {
   }
 
   simplify(options?: Partial<SimplifyOptions>): BoxedExpression {
+    // console.count('simplify symbol ' + this.toString());
     // If allowed replace this symbol with its value/definition.
     // In some cases this may allow for some additional simplifications (e.g. `GoldenRatio`).
     const def = this.symbolDefinition;
@@ -604,6 +605,8 @@ export class BoxedSymbol extends _BoxedExpression {
   }
 
   evaluate(options?: EvaluateOptions): BoxedExpression {
+    // console.count('symbol evaluate ' + this.toString());
+    // console.log('symbol evaluate', this.toString());
     const def = this.symbolDefinition;
     if (def) {
       if (options?.numericMode) {
@@ -618,6 +621,7 @@ export class BoxedSymbol extends _BoxedExpression {
   }
 
   N(): BoxedExpression {
+    // console.count('symbol N ' + this.toString());
     // If we're doing a numeric evaluation, the `hold` does not apply
     const def = this.symbolDefinition;
     if (def && def.holdUntil === 'never') return this;

@@ -46,7 +46,6 @@ import { at, isFiniteIndexableCollection } from '../collection-utils';
 import { narrow } from './boxed-domain';
 import { canonicalAdd } from '../library/arithmetic-add';
 import { canonicalPower, isSqrt } from '../library/arithmetic-power';
-import { canonicalNegate } from '../symbolic/negate';
 import { canonicalDivide } from '../library/arithmetic-divide';
 import { canonicalMultiply } from '../library/arithmetic-multiply';
 import { BoxedExpression, SemiBoxedExpression } from './public';
@@ -751,7 +750,7 @@ function makeNumericFunction(
   //
   if (head === 'Add')
     return canonicalAdd(ce, flattenOps(flattenSequence(ops), 'Add'));
-  if (head === 'Negate') return canonicalNegate(ops[0]);
+  if (head === 'Negate') return ce.neg(ops[0]);
   if (head === 'Multiply')
     return canonicalMultiply(ce, flattenOps(flattenSequence(ops), 'Multiply'));
   if (head === 'Divide')

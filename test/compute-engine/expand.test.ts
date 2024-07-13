@@ -64,16 +64,11 @@ describe('EXPAND PRODUCT', () => {
         "Expand",
         [
           "Add",
+          ["Multiply", -25, "x"],
           ["Multiply", 4, "x", ["Add", ["Multiply", 3, "x"], 2]],
-          ["Negate", ["Multiply", 25, "x"]],
           20
         ]
       ]
-      evaluate  = [
-        "Add",
-        ["Multiply", 4, "x", ["Add", ["Multiply", 3, "x"], 2]],
-        ["Negate", ["Multiply", 25, "x"]],
-        20
-      ]
+      evaluate  = ["Add", ["Multiply", 12, ["Square", "x"]], ["Multiply", -17, "x"], 20]
     `));
 });

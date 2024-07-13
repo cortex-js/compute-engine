@@ -62,7 +62,6 @@ import { _BoxedSymbolDefinition } from './boxed-expression/boxed-symbol-definiti
 import { canonicalPower, processSqrt } from './library/arithmetic-power';
 import { BoxedFunction } from './boxed-expression/boxed-function';
 import { evalMultiply } from './library/arithmetic-multiply';
-import { evalAdd } from './library/arithmetic-add';
 import { evalDivide } from './library/arithmetic-divide';
 import {
   BoxedSymbol,
@@ -76,7 +75,7 @@ import {
   _BoxedFunctionDefinition,
 } from './boxed-expression/boxed-function-definition';
 import { Rational, inverse, isRational, isOne } from './numerics/rationals';
-import { canonicalNegate, evalNegate } from './symbolic/negate';
+import { negate } from './symbolic/negate';
 import { flattenOps, flattenSequence } from './symbolic/flatten';
 import { bigint } from './numerics/numeric-bigint';
 import { parseFunctionSignature } from './function-utils';
@@ -115,6 +114,7 @@ import {
   asRational,
 } from './boxed-expression/numerics';
 import { factor } from './boxed-expression/factor';
+import { Terms } from './numerics/terms';
 
 /**
  *
@@ -1057,8 +1057,7 @@ export class ComputeEngine implements IComputeEngine {
     if (coeff.isZero) return this.Zero;
     if (expr?.isOne) expr = undefined;
     if (coeff.isOne) return expr ?? this.One;
-    if (coeff.isNegativeOne)
-      return expr ? this.function('Negate', [expr]) : this.NegativeOne;
+    if (coeff.isNegativeOne) return expr ? this.neg(expr) : this.NegativeOne;
 
     if (!expr && coeff.radical === 1 && isOne(coeff.rational) && coeff.im === 0)
       return this.number(coeff.bignumRe ?? coeff.re);
@@ -1083,14 +1082,14 @@ export class ComputeEngine implements IComputeEngine {
     if (coeff.im === 0) {
       if (terms.length === 0) return this.Zero;
       result = terms.length === 1 ? terms[0] : this.function('Multiply', terms);
-      if (sign < 0) return this.function('Negate', [result]);
+      if (sign < 0) return this.neg(result);
       return result;
     }
 
     if (terms.length === 0) return this.number(this.complex(0, coeff.im));
 
     result = terms.length === 1 ? terms[0] : this.function('Multiply', terms);
-    if (sign < 0) return this.function('Negate', [result]);
+    if (sign < 0) return this.neg(result);
     return this.function('Add', [
       result,
       this.number(this.complex(0, coeff.im)),
@@ -1980,18 +1979,18 @@ export class ComputeEngine implements IComputeEngine {
    */
   add(...ops: BoxedExpression[]): BoxedExpression {
     // Short path. Note that are arguments are **not** validated.
-
-    return evalAdd(this, flattenOps(flattenSequence(ops), 'Add'));
+    ops = flattenOps(flattenSequence(ops), 'Add').map((x) => x.evaluate());
+    return new Terms(this, ops).asExpression();
   }
 
   /**
    *
-   * Shortcut for `this.box(["Negate", expr]).evaluate()`
+   * Shortcut for `this.box(["Negate", expr])`
    *
    */
   neg(expr: BoxedExpression): BoxedExpression {
     // Short path. Note that are arguments are **not** validated.
-    return evalNegate(expr.canonical);
+    return negate(expr.canonical);
   }
 
   /**
@@ -1999,7 +1998,7 @@ export class ComputeEngine implements IComputeEngine {
    * Shortcut for `this.box(["Multiply", ...]).evaluate()`
    *
    */
-  mul(...ops: ReadonlyArray<BoxedExpression>): BoxedExpression {
+  evalMul(...ops: ReadonlyArray<BoxedExpression>): BoxedExpression {
     // Short path. Note that are arguments are **not** validated.
     const flatOps = flattenOps(flattenSequence(ops), 'Multiply');
     return evalMultiply(this, flatOps);
@@ -2079,7 +2078,7 @@ export class ComputeEngine implements IComputeEngine {
       if (expr.op2.isNegativeOne) return expr.op1;
 
       // Inverse(x^n) -> x^{-n}
-      e = canonicalNegate(expr.op2);
+      e = this.neg(expr.op2);
       expr = expr.op1;
     }
     if (e.isNegativeOne) return this._fn('Divide', [this.One, expr]);

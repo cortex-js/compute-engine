@@ -106,6 +106,7 @@ export class ExactNumericValue extends NumericValue<number, [number, number]> {
     //
     if (typeof this.rational[0] === 'bigint')
       this.rational = [Number(this.rational[0]), Number(this.rational[1])];
+    if (typeof this.radical === 'bigint') this.radical = Number(this.radical);
 
     if (!isFinite(this.rational[0])) {
       this.decimal = this.rational[0];

@@ -91,8 +91,8 @@ export function canonicalDivide(
   if (c.isZero) return ce.Zero;
   if (c.isOne) return ce._fn('Divide', [t1, t2]);
   if (c.isNegativeOne)
-    // @fixme: check that having the negate outside is the best (does canonicalNegate propagate inside?)
-    return ce.function('Negate', [ce._fn('Divide', [t1, t2])]);
+    // Note that ce.neg() will propagate inside the expression if possible
+    return ce.neg(ce._fn('Divide', [t1, t2]));
 
   const num = ce._fromNumericValue(c.num, t1);
   const denom = ce._fromNumericValue(c.denom, t2);

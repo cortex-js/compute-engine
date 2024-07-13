@@ -177,9 +177,9 @@ export function differentiate(
       const terms = expr.ops!.map((op, i) => {
         const otherTerms = expr.ops!.slice();
         otherTerms.splice(i, 1);
-        const otherProduct = ce.mul(...otherTerms);
+        const otherProduct = ce.evalMul(...otherTerms);
         const gPrime = differentiate(op, v) ?? ce._fn('D', [op, ce.symbol(v)]);
-        return ce.mul(gPrime, otherProduct);
+        return ce.evalMul(gPrime, otherProduct);
       });
       if (terms.some((term) => term === undefined)) return undefined;
       return ce.add(...(terms as BoxedExpression[]));
@@ -192,7 +192,10 @@ export function differentiate(
         // Derivative Power Rule
         // d/dx x^n = n * x^(n-1)
 
-        return ce.mul(exponent, ce.pow(base, ce.add(exponent, ce.NegativeOne)));
+        return ce.evalMul(
+          exponent,
+          ce.pow(base, ce.add(exponent, ce.NegativeOne))
+        );
       }
 
       // Generalized case:
@@ -202,10 +205,10 @@ export function differentiate(
       const fPrime = differentiate(f, v) ?? ce._fn('D', [f, ce.symbol(v)]);
       const gPrime = differentiate(g, v) ?? ce._fn('D', [g, ce.symbol(v)]);
       const lnf = ce.box(['Ln', f]).evaluate();
-      const term1 = ce.mul(gPrime, lnf);
-      const term2 = ce.mul(g, fPrime);
+      const term1 = ce.evalMul(gPrime, lnf);
+      const term2 = ce.evalMul(g, fPrime);
       const term3 = ce.div(term2, f);
-      return ce.mul(expr, ce.add(term1, term3));
+      return ce.evalMul(expr, ce.add(term1, term3));
     }
 
     // Quotient rule
@@ -217,7 +220,10 @@ export function differentiate(
         differentiate(denominator, v) ??
         ce._fn('D', [denominator, ce.symbol(v)]);
       return ce.div(
-        ce.add(ce.mul(gPrime, denominator), ce.neg(ce.mul(hPrime, numerator))),
+        ce.add(
+          ce.evalMul(gPrime, denominator),
+          ce.neg(ce.evalMul(hPrime, numerator))
+        ),
         ce.pow(denominator, 2)
       );
     }
@@ -233,14 +239,14 @@ export function differentiate(
       const g = expr.ops![0];
       const gPrime = differentiate(g, v) ?? ce._fn('D', [g, ce.symbol(v)]);
       if (!gPrime.isValid) return undefined;
-      return ce.mul(ce._fn('Apply', [fPrime, g]), gPrime);
+      return ce.evalMul(ce._fn('Apply', [fPrime, g]), gPrime);
     }
     // Apply the chain rule:
     // d/dx f(g(x)) = f'(g(x)) * g'(x)
     if (expr.nops > 1) return ce._fn('D', [expr, ce.symbol(v)]);
     const g = expr.ops![0];
     const gPrime = differentiate(g, v) ?? ce._fn('D', [g, ce.symbol(v)]);
-    return ce.mul(apply(ce.box(h), [g]), gPrime);
+    return ce.evalMul(apply(ce.box(h), [g]), gPrime);
   }
 
   return undefined;

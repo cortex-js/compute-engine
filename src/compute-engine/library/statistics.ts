@@ -2,7 +2,7 @@ import { asFloat } from '../boxed-expression/numerics';
 import { each } from '../collection-utils';
 import { erf, erfInv } from '../numerics/numeric';
 import { IdentifierDefinitions } from '../public';
-import { choose } from '../symbolic/expand.js';
+import { choose } from '../symbolic/expand';
 
 // Geometric mean:
 // Harmonic mean:

@@ -51,15 +51,14 @@ describe('CANONICAL FORMS', () => {
   test('\\frac{x}{-n}"', () => {
     expect(check('\\frac{x}{-n}')).toMatchInlineSnapshot(`
       box       = ["Divide", "x", ["Negate", "n"]]
-      canonical = ["Negate", ["Divide", "x", "n"]]
+      canonical = ["Divide", ["Negate", "x"], "n"]
     `);
   });
 
   test('\\frac{-x}{n}"', () => {
-    expect(check('\\frac{-x}{n}')).toMatchInlineSnapshot(`
-      box       = ["Divide", ["Negate", "x"], "n"]
-      canonical = ["Negate", ["Divide", "x", "n"]]
-    `);
+    expect(check('\\frac{-x}{n}')).toMatchInlineSnapshot(
+      `["Divide", ["Negate", "x"], "n"]`
+    );
   });
 
   test('\\frac{-101}{10^{\\frac{2}{3}}}', () => {

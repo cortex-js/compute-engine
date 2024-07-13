@@ -19,13 +19,13 @@ N-auto    = NegativeInfinity
 
 exports[` 4`] = `
 box       = ["Ln", -1]
-simplify  = ["Multiply", ["Complex", 0, 1], "Pi"]
-evaluate  = ["Multiply", ["Complex", 0, 1], "Pi"]
+simplify  = ["Multiply", "Pi", ["Complex", 0, 1]]
+evaluate  = ["Multiply", "Pi", ["Complex", 0, 1]]
 N-auto    = ["Complex", 0, 3.141592653589793]
 eval-big  = ["Ln", -1]
 N-big     = NaN
 eval-mach = ["Ln", -1]
-eval-cplx = ["Multiply", ["Complex", 0, 1], "Pi"]
+eval-cplx = ["Multiply", "Pi", ["Complex", 0, 1]]
 N-cplx    = ["Complex", 0, 3.141592653589793]
 `;
 

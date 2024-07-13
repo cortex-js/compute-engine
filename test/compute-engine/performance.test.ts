@@ -43,8 +43,8 @@ function ceBaseline(numRandos: number[]): number {
     // Do some arithmetic calculations
     if (i % 2 === 0)
       return ce.add(
-        ce.mul(ce.number([4, 3]), ce.pow(n, 2)),
-        ce.mul(n, ce.number([3, 2])),
+        ce.evalMul(ce.number([4, 3]), ce.pow(n, 2)),
+        ce.evalMul(n, ce.number([3, 2])),
         ce.number(2)
       );
     // Trigonometry, log, exp

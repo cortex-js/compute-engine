@@ -2,7 +2,7 @@ import { BoxedExpression, IComputeEngine } from '../public';
 
 import { MAX_SYMBOLIC_TERMS } from '../numerics/numeric';
 import { bignumPreferred } from '../boxed-expression/utils';
-import { canonicalNegate, negateProduct } from '../symbolic/negate';
+import { negateProduct } from '../symbolic/negate';
 import { Product } from '../symbolic/product';
 import { isOne, isZero, neg } from '../numerics/rationals';
 import { apply2N } from '../symbolic/utils';
@@ -226,11 +226,11 @@ function multiply2(
   if (op2.symbol === 'Nothing') return op1;
   if (op1.numericValue !== null) {
     if (op1.isOne) return op2;
-    if (op1.isNegativeOne) return canonicalNegate(op2);
+    if (op1.isNegativeOne) return op2.engine.neg(op2);
   }
   if (op2.numericValue !== null) {
     if (op2.isOne) return op1;
-    if (op2.isNegativeOne) return canonicalNegate(op1);
+    if (op2.isNegativeOne) return op1.engine.neg(op1);
   }
   let sign = 1;
   let [t, c] = op1.numericValue !== null ? [op1, op2] : [op2, op1];
@@ -247,7 +247,7 @@ function multiply2(
       if (isOne(r)) return t;
       if (isZero(r)) return ce.Zero;
       if (t.head === 'Add') {
-        if (sign < 0) c = canonicalNegate(c);
+        if (sign < 0) c = c.engine.neg(c);
         return ce.add(...t.ops!.map((x) => multiply2(c, x)));
       }
 
@@ -256,17 +256,15 @@ function multiply2(
         const p = mul(r, tr);
         return ce.number(sign < 0 ? neg(p) : p);
       }
-      if (sign < 0) return ce._fn('Multiply', [canonicalNegate(c), t]);
+      if (sign < 0) return ce._fn('Multiply', [c.engine.neg(c), t]);
       return ce._fn('Multiply', [c, t]);
     }
   }
 
   if (c.hash === t.hash && c.isSame(t)) return square(ce, c);
 
-  const product = new Product(ce, [c, t]);
-
-  if (sign > 0) return product.asExpression();
-  return canonicalNegate(product.asExpression());
+  const product = new Product(ce, [c, t]).asExpression();
+  return sign > 0 ? product : product.engine.neg(product);
 }
 
 // Canonical form of `["Product"]` (`\prod`) expressions.
@@ -397,9 +395,9 @@ export function evalMultiplication(
       const terms: BoxedExpression[] = [];
       for (let i = lower; i <= upper; i++) {
         ce.assign({ [index]: i });
-        terms.push(fn.simplify());
+        terms.push(fn.simplify()); // @fixme: call evaluate() instead
       }
-      result = ce.mul(...terms).simplify();
+      result = ce.evalMul(...terms).simplify();
     }
   }
 
@@ -433,7 +431,7 @@ export function evalMultiplication(
       //ce.assign({ [index]: i });
       terms.push(fn.evaluate());
     }
-    result = ce.mul(...terms).evaluate();
+    result = ce.evalMul(...terms).evaluate(); // @fixme: no need to call evaluate()
   }
 
   if (mode === 'N') {

@@ -67,12 +67,11 @@ export function factor(expr: BoxedExpression): BoxedExpression {
 
     if (!common || common?.isOne) return expr;
 
-    const newTerms = terms.map(({ coeff, term }) => {
-      if (coeff.isOne) return term;
-      return ce.mul(ce._fromNumericValue(coeff.div(common)), term);
-    });
+    const newTerms = terms.map(({ coeff, term }) =>
+      ce._fromNumericValue(coeff.div(common), term)
+    );
 
-    return ce.mul(ce._fromNumericValue(common), ce.add(...newTerms));
+    return ce._fromNumericValue(common, ce.add(...newTerms));
   }
 
   return Product.from(together(expr)).asExpression();

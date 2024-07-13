@@ -44,6 +44,10 @@
   In the future, the `numericValue` property may change to return a
   `NumericValue` object.
 
+- Improved results for `Expand`. In some cases the expression was not fully
+  expanded. For example, `4x(3x+2)-5(5x-4)` now returns `12x^2 - 17x + 20`.
+  Previously it returned `4x(3x+2)+25x-20`.
+
 - **AsciiMath serialization** The `expr.toString()` method now returns a
   serialization of the expression using the [AsciiMath](https://asciimath.org/)
   format.
@@ -122,6 +126,9 @@
 
 - Added Choose function to compute binomial coefficients, i.e. `Choose(5, 2)` is
   equal to 10.
+
+- The fallback for non-constructible complex values of trigonometric functions
+  is now implemented via rules.
 
 ### Issues Resolved
 

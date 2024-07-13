@@ -332,11 +332,11 @@ export class TensorFieldExpression implements TensorField<BoxedExpression> {
   }
 
   mul(lhs: BoxedExpression, rhs: BoxedExpression): BoxedExpression {
-    return this.ce.mul(lhs, rhs);
+    return this.ce.evalMul(lhs, rhs);
   }
 
   muln(...xs: BoxedExpression[]): BoxedExpression {
-    return this.ce.mul(...xs);
+    return this.ce.evalMul(...xs);
   }
 
   div(lhs: BoxedExpression, rhs: BoxedExpression): BoxedExpression {

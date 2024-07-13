@@ -3,8 +3,6 @@ import { Decimal } from 'decimal.js';
 import { neg } from '../numerics/rationals';
 
 import { BoxedExpression, IComputeEngine, Metadata } from '../public';
-import { flattenOps, flattenSequence } from './flatten';
-import { canonicalAdd } from '../library/arithmetic-add';
 import { order } from '../boxed-expression/order';
 
 function negateLiteral(expr: BoxedExpression): BoxedExpression | null {
@@ -28,7 +26,7 @@ function negateLiteral(expr: BoxedExpression): BoxedExpression | null {
  * It is important to do all these to handle cases like
  * `-3x` -> ["Negate, ["Multiply", 3, "x"]] -> ["Multiply, -3, x]
  */
-export function evalNegate(expr: BoxedExpression): BoxedExpression {
+export function negate(expr: BoxedExpression): BoxedExpression {
   // Negate(Negate(x)) -> x
   let sign = -1;
   while (expr.head === 'Negate') {
@@ -42,12 +40,12 @@ export function evalNegate(expr: BoxedExpression): BoxedExpression {
   const ce = expr.engine;
 
   // Negate(Subtract(a, b)) -> Subtract(b, a)
-  if (expr.head === 'Subtract') return ce.add(expr.op2, evalNegate(expr.op1));
+  if (expr.head === 'Subtract') return ce.add(expr.op2, negate(expr.op1));
 
   // Distribute over addition
   // Negate(Add(a, b)) -> Add(Negate(a), Negate(b))
   if (expr.head === 'Add') {
-    const ops = expr.ops!.map((x) => evalNegate(x));
+    const ops = expr.ops!.map((x) => negate(x));
     return ce.add(...ops);
   }
 
@@ -57,28 +55,7 @@ export function evalNegate(expr: BoxedExpression): BoxedExpression {
 
   // Distribute over division
   // Negate(Divide(a, b)) -> Divide(Negate(a), b)
-  if (expr.head === 'Divide') return ce.div(evalNegate(expr.op1), expr.op2);
-
-  return ce._fn('Negate', [expr]);
-}
-
-export function canonicalNegate(expr: BoxedExpression): BoxedExpression {
-  // Negate(Negate(x)) -> x
-  let sign = -1;
-  while (expr.head === 'Negate') {
-    expr = expr.op1;
-    sign = -sign;
-  }
-  if (sign === 1) return expr;
-
-  const ce = expr.engine;
-
-  if (expr.head === 'Add') {
-    const ops = expr.ops!.map((x) => canonicalNegate(x));
-    return canonicalAdd(ce, flattenOps(flattenSequence(ops), 'Add'));
-  }
-
-  if (expr.numericValue !== null) return negateLiteral(expr)!;
+  if (expr.head === 'Divide') return ce.div(negate(expr.op1), expr.op2);
 
   return ce._fn('Negate', [expr]);
 }
@@ -93,47 +70,49 @@ export function negateProduct(
   args: ReadonlyArray<BoxedExpression>
 ): BoxedExpression {
   let result: BoxedExpression[] = [];
+
+  // Look for an argument that can be negated. We do multiple passes to
+  // give priority as follow:
+  // 1/ Negate
+  // 2/ Literal integers
+  // 3/ Literal numbers
+
   let done = false;
   // If there is `Negate` as one of the args, remove it
   for (const arg of args) {
     if (!done && arg.head === 'Negate') {
       done = true;
-      result.push(arg.op1);
+      if (!arg.op1.isOne) result.push(arg.op1);
     } else result.push(arg);
   }
-  if (done) return ce.mul(...result);
 
-  // @fixme: usse negateLiteral() instead of canonicalNegate. And don't need multiple loops. Also, don't need to push 1 in the result.
   // else If there is a literal integer, negate it
-  result = [];
-  for (const arg of args) {
-    if (done || arg.numericValue === null || !arg.isInteger) result.push(arg);
-    else {
-      done = true;
-      result.push(canonicalNegate(arg));
+  if (!done) {
+    result = [];
+    for (const arg of args) {
+      if (done || (arg.numericValue === null && !arg.isInteger))
+        result.push(arg);
+      else {
+        done = true;
+        if (!arg.isNegativeOne) result.push(negateLiteral(arg) ?? arg);
+      }
     }
   }
-
-  if (done) return ce.mul(...result);
+  if (done) return ce._fn('Multiply', result);
 
   // else If there is a literal number, negate it
-  result = [];
-  for (const arg of args) {
-    if (done || arg.numericValue === null || !arg.isNumber) result.push(arg);
-    else {
-      done = true;
-      result.push(canonicalNegate(arg));
+  if (!done) {
+    result = [];
+    for (const arg of args) {
+      if (done || arg.numericValue === null || !arg.isNumber) result.push(arg);
+      else {
+        done = true;
+        if (!arg.isNegativeOne) result.push(negateLiteral(arg) ?? arg);
+      }
     }
   }
-  if (done) return ce.mul(...result);
+
+  if (done) return ce._fn('Multiply', result);
 
   return ce._fn('Negate', [ce._fn('Multiply', [...args].sort(order))]);
-}
-
-export function processNegate(
-  _ce: IComputeEngine,
-  x: BoxedExpression,
-  _mode: 'simplify' | 'evaluate' | 'N' = 'simplify'
-): BoxedExpression {
-  return canonicalNegate(x);
 }

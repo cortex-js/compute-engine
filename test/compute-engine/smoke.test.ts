@@ -482,13 +482,9 @@ describe('CANONICALIZATION divide', () => {
       [
         Negate,
         [
-          Divide,
-          [
-            Multiply,
-            n,
-            x,
-          ],
-          1,
+          Multiply,
+          n,
+          x,
         ],
       ]
     `);
@@ -753,7 +749,7 @@ describe('SIMPLIFICATION multiply', () => {
     expect(
       simplify('-\\frac{-x+2\\times x}{-2\\times x + 1}')
     ).toMatchInlineSnapshot(
-      `["Negate", ["Divide", "x", ["Add", ["Multiply", -2, "x"], 1]]]`
+      `["Divide", ["Negate", "x"], ["Add", ["Multiply", -2, "x"], 1]]`
     );
   });
 });
