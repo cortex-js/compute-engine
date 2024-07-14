@@ -34,7 +34,7 @@ const TEST_CASES: [Expression, Expression][] = [
   ['\\frac{3.1}{2.8}', '\\frac{3.1}{2.8}'], // Floating point division
   [' 2x\\times x \\times 3 \\times x', '6x^3'], // Product of x should be simplified
   ['2(13.1+x)', '26.2+2x'], // Product of floating point should be simplified
-  ['2(13.1+x)-26.2+2x', 0],
+  ['2(13.1+x) - 26.2 - 2x', 0],
   // ['2\\left(13.1+x\\right)-\\left(26.2+2x\\right)', 0],
   ['\\frac12 + 0.5', 1], // Floating point and exact should get simplified
   // ['\\sqrt{3}(\\sqrt2x + x)', '(\\sqrt3+\\sqrt6)x'],
@@ -53,7 +53,7 @@ describe('SIMPLIFY', () => {
     else b = ce.box(expr[1]);
 
     test(`simplify("${a.latex}") = "${b.latex}"`, () =>
-      expect(a.simplify()).toEqual(b));
+      expect(a.simplify().json).toEqual(b.json));
   }
 });
 

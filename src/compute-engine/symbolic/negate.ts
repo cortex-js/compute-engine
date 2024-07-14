@@ -41,7 +41,7 @@ export function negate(expr: BoxedExpression): BoxedExpression {
 
   // Distribute over division
   // Negate(Divide(a, b)) -> Divide(Negate(a), b)
-  if (expr.head === 'Divide') return ce.div(negate(expr.op1), expr.op2);
+  if (expr.head === 'Divide') return negate(expr.op1).div(expr.op2);
 
   return ce._fn('Negate', [expr]);
 }

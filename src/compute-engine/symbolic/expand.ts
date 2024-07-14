@@ -27,13 +27,11 @@ function expandProduct(
   if (lhs.head === 'Divide' && rhs.head === 'Divide') {
     // Apply distribute to the numerators only.
     const denom = ce.evalMul(lhs.op2, rhs.op2);
-    return ce.div(expandProduct(lhs.op1, rhs.op1), denom);
+    return expandProduct(lhs.op1, rhs.op1).div(denom);
   }
 
-  if (lhs.head === 'Divide')
-    return ce.div(expandProduct(lhs.op1, rhs), lhs.op2);
-  if (rhs.head === 'Divide')
-    return ce.div(expandProduct(lhs, rhs.op1), rhs.op2);
+  if (lhs.head === 'Divide') return expandProduct(lhs.op1, rhs).div(lhs.op2);
+  if (rhs.head === 'Divide') return expandProduct(lhs, rhs.op1).div(rhs.op2);
 
   //
   // Add
@@ -181,9 +179,9 @@ function expandNumerator(expr: BoxedExpression): BoxedExpression | null {
   if (expandedNumerator === null) return null;
   const ce = expr.engine;
   if (expandedNumerator.head === 'Add') {
-    return ce.add(...expandedNumerator.ops!.map((x) => ce.div(x, expr.op2)));
+    return ce.add(...expandedNumerator.ops!.map((x) => x.div(expr.op2)));
   }
-  return expr.engine.div(expandedNumerator, expr.op2);
+  return expandedNumerator.div(expr.op2);
 }
 
 /** ExpandDenominator
@@ -196,9 +194,9 @@ function expandDenominator(expr: BoxedExpression): BoxedExpression | null {
   if (expandedDenominator === null) return null;
   const ce = expr.engine;
   if (expandedDenominator.head === 'Add') {
-    return ce.add(...expandedDenominator.ops!.map((x) => ce.div(expr.op1, x)));
+    return ce.add(...expandedDenominator.ops!.map((x) => expr.op1.div(x)));
   }
-  return ce.div(expr.op1, expandedDenominator);
+  return expr.op1.div(expandedDenominator);
 }
 
 /** Attempt to transform the expression (h, ops) into a sum */
@@ -216,7 +214,7 @@ export function expandFunction(
     const num = expand(ops[0]);
     if (!num) return null;
     if (num?.head === 'Add')
-      result = ce.add(...num.ops!.map((x) => ce.div(x, ops[1])));
+      result = ce.add(...num.ops!.map((x) => x.div(ops[1])));
     else result = ce._fn('Divide', [num, ops[1]]);
   }
 

@@ -371,8 +371,11 @@ export class BoxedFunction extends _BoxedExpression {
     ]).asExpression();
   }
 
-  div(rhs: BoxedExpression): BoxedExpression {
-    return canonicalDivide(this.canonical, rhs.canonical);
+  div(rhs: number | BoxedExpression): BoxedExpression {
+    return new Product(this.engine, [
+      this,
+      this.engine.box(rhs).inv(),
+    ]).asRationalExpression();
   }
 
   pow(
@@ -863,8 +866,7 @@ function makeNumericFunction(
   if (head === 'Negate') return ops[0].neg();
   if (head === 'Multiply')
     return canonicalMultiply(ce, flattenOps(flattenSequence(ops), 'Multiply'));
-  if (head === 'Divide')
-    return ops.slice(1).reduce((a, b) => canonicalDivide(a, b), ops[0]);
+  if (head === 'Divide') return ops.slice(1).reduce((a, b) => a.div(b), ops[0]);
   if (head === 'Exp') return ce.E.pow(ops[0]);
   if (head === 'Power') return ops[0].pow(ops[1]);
   if (head === 'Square') return ops[0].pow(2);

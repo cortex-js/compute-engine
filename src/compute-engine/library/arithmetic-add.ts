@@ -337,7 +337,7 @@ export function evalSummation(
         ce.assign(index, 999);
         const nMaxMinusOne = fn.N();
 
-        const ratio = asFloat(ce.div(nMax, nMaxMinusOne).N());
+        const ratio = asFloat(nMax.div(nMaxMinusOne).N());
         if (ratio !== null && Number.isFinite(ratio) && Math.abs(ratio) > 1) {
           result = ce.PositiveInfinity;
         } else {

@@ -470,7 +470,8 @@ describe('CANONICALIZATION divide', () => {
       [
         Divide,
         [
-          Negate,
+          Multiply,
+          -1,
           x,
         ],
         2,

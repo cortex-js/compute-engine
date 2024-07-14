@@ -11,7 +11,7 @@ export function together(op: BoxedExpression): BoxedExpression {
   // Thread over inequality
   if (isRelationalOperator(h)) return ce.function(h, op.ops!.map(together));
 
-  if (h === 'Divide') return ce.div(op.ops![0], op.ops![1]);
+  if (h === 'Divide') return op.ops![0].div(op.ops![1]);
 
   if (h === 'Negate') return together(op.ops![0]).neg();
 
@@ -26,7 +26,7 @@ export function together(op: BoxedExpression): BoxedExpression {
       },
       [[], []] as BoxedExpression[][]
     );
-    return ce.div(ce.add(...numer), ce.add(...denom));
+    return ce.add(...numer).div(ce.add(...denom));
   }
 
   return op;

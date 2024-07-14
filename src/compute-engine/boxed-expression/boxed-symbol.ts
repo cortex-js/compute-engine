@@ -212,8 +212,8 @@ export class BoxedSymbol extends _BoxedExpression {
     ]).asExpression();
   }
 
-  div(rhs: BoxedExpression): BoxedExpression {
-    return canonicalDivide(this, rhs);
+  div(rhs: number | BoxedExpression): BoxedExpression {
+    return canonicalDivide(this, this.engine.box(rhs));
   }
 
   pow(

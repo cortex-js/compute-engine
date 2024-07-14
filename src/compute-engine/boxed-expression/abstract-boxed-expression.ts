@@ -421,7 +421,7 @@ export abstract class _BoxedExpression implements BoxedExpression {
   mul(...rhs: (number | BoxedExpression)[]): BoxedExpression {
     return this.engine.NaN;
   }
-  div(rhs: BoxedExpression): BoxedExpression {
+  div(rhs: number | BoxedExpression): BoxedExpression {
     return this.engine.NaN;
   }
   pow(

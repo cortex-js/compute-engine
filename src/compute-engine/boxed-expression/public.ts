@@ -595,7 +595,7 @@ export interface BoxedExpression {
   add(...rhs: (number | BoxedExpression)[]): BoxedExpression;
   sub(rhs: BoxedExpression): BoxedExpression;
   mul(...rhs: (number | BoxedExpression)[]): BoxedExpression;
-  div(rhs: BoxedExpression): BoxedExpression;
+  div(rhs: number | BoxedExpression): BoxedExpression;
   pow(
     exp: number | [num: number, denom: number] | BoxedExpression
   ): BoxedExpression;
@@ -1978,8 +1978,6 @@ export interface IComputeEngine {
   add(...ops: ReadonlyArray<BoxedExpression>): BoxedExpression;
 
   evalMul(...ops: ReadonlyArray<BoxedExpression>): BoxedExpression;
-
-  div(num: BoxedExpression, denom: BoxedExpression): BoxedExpression;
 
   pair(
     first: BoxedExpression,

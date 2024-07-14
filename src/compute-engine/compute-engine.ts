@@ -2028,18 +2028,6 @@ export class ComputeEngine implements IComputeEngine {
     return evalMultiply(this, flatOps);
   }
 
-  /**
-   *
-   * Shortcut for `this.box(["Divide", num, denom]).evaluate()`
-   *
-   * The result is canonical.
-   */
-  div(num: BoxedExpression, denom: BoxedExpression): BoxedExpression {
-    // Short path. Note that are arguments are **not** validated.
-
-    return evalDivide(this, num.canonical, denom.canonical);
-  }
-
   /** Shortcut for `this.box(["Pair", ...])`
    *
    * The result is canonical.

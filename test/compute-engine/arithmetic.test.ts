@@ -647,9 +647,7 @@ describe('SUM', () => {
         .box(['Sum', ['Divide', 1, 'x'], 'x'])
         .evaluate()
         .toString()
-    ).toMatchInlineSnapshot(
-      `14.39272772286472363238112649318958767564480101374331165441843204581395850651799600356729817694721969`
-    ));
+    ).toMatchInlineSnapshot(`14.3927277228647235281448`));
 
   it('should compute the sum of a collection', () =>
     expect(

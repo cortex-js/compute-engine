@@ -66,17 +66,16 @@ export const TRIGONOMETRY_LIBRARY: IdentifierDefinitions[] = [
               const fRadians = reducedRational([fArg, 180]);
               if (fRadians[0] === 0) return ce.Zero;
               if (fRadians[0] === 1 && fRadians[1] === 1) return ce.Pi;
-              if (fRadians[0] === 1)
-                return ce.div(ce.Pi, ce.number(fRadians[1]));
+              if (fRadians[0] === 1) return ce.Pi.div(fRadians[1]);
               return ce.evalMul(ce.number(fRadians), ce.Pi);
             }
-            return ce.evalMul(ce.div(ce.number(fArg), ce.number(180)), ce.Pi);
+            return ce.evalMul(ce.number(fArg).div(180), ce.Pi);
           }
-          return ce.div(ce.evalMul(arg, ce.Pi), ce.number(180));
+          return ce.evalMul(arg, ce.Pi).div(180);
         },
         evaluate: (ce, ops) => {
           if (ce.angularUnit === 'deg') return ops[0];
-          return ce.evalMul(ops[0], ce.div(ce.Pi, ce.number(180))).evaluate();
+          return ce.evalMul(ops[0], ce.Pi.div(180)).evaluate();
         },
       },
     },

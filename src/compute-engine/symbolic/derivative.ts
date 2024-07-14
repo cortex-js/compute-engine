@@ -204,7 +204,7 @@ export function differentiate(
       const lnf = ce.box(['Ln', f]).evaluate();
       const term1 = ce.evalMul(gPrime, lnf);
       const term2 = ce.evalMul(g, fPrime);
-      const term3 = ce.div(term2, f);
+      const term3 = term2.div(f);
       return ce.evalMul(expr, ce.add(term1, term3));
     }
 
@@ -216,13 +216,12 @@ export function differentiate(
       const hPrime =
         differentiate(denominator, v) ??
         ce._fn('D', [denominator, ce.symbol(v)]);
-      return ce.div(
-        ce.add(
+      return ce
+        .add(
           ce.evalMul(gPrime, denominator),
           ce.evalMul(hPrime, numerator).neg()
-        ),
-        denominator.pow(2)
-      );
+        )
+        .div(denominator.pow(2));
     }
 
     const h = DERIVATIVES_TABLE[expr.head];

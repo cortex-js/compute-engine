@@ -144,7 +144,7 @@ export function boxNumber(
       );
 
     if (!isFinite(n) || !isFinite(d))
-      return ce.div(ce.number(n, options), ce.number(d, options));
+      return ce.number(n, options).div(ce.number(d, options));
 
     if (!Number.isInteger(n) || !Number.isInteger(d))
       throw new Error('Array argument to `boxNumber()` should be two integers');

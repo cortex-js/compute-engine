@@ -126,7 +126,7 @@ export const UNIVARIATE_ROOTS: Rule[] = [
     replace: ['Divide', ['Ln', ['Negate', ['Divide', '__c', '__a']]], '__b'],
     exact: false,
     condition: ({ __a, __c }, ce) =>
-      ((!__a.isZero && ce.div(__c, __a).isNegative) ?? false) &&
+      ((!__a.isZero && __c.div(__a).isNegative) ?? false) &&
       !__a.has('_x') &&
       !__c.has('_x'),
   },
@@ -137,7 +137,7 @@ export const UNIVARIATE_ROOTS: Rule[] = [
     replace: ['Ln', ['Negate', ['Divide', '__c', '__a']]],
     exact: false,
     condition: ({ __a, __c }, ce) =>
-      ((!__a.isZero && ce.div(__c, __a).isNegative) ?? false) &&
+      ((!__a.isZero && __c.div(__a).isNegative) ?? false) &&
       !__a.has('_x') &&
       !__c.has('_x'),
   },

@@ -688,8 +688,7 @@ canonical = [
   5,
   "Pi"
 ]
-simplify  = ["Multiply", 8.642416214502248, "Pi"]
-evaluate  = 27.15095128874557
+simplify  = 27.15095128874557
 N-auto    = 27.150951288745578
 `;
 

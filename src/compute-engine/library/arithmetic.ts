@@ -41,12 +41,7 @@ import {
   evalMultiplication,
   canonicalProduct,
 } from './arithmetic-multiply';
-import {
-  canonicalDivide,
-  evalDivide,
-  evalNDivide,
-  simplifyDivide,
-} from './arithmetic-divide';
+import { canonicalDivide, evalDivide, evalNDivide } from './arithmetic-divide';
 import { processPower } from './arithmetic-power';
 import { applyN, apply2N, canonical } from '../symbolic/utils';
 import {
@@ -238,7 +233,7 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
 
           return result;
         },
-        simplify: (ce, args) => simplifyDivide(ce, args[0], args[1]),
+        simplify: (ce, args) => args[0].div(args[1]),
         evaluate: (ce, ops) => evalDivide(ce, ops[0], ops[1]),
         N: (ce, ops) => evalNDivide(ce, ops[0], ops[1]),
       },
@@ -666,11 +661,11 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
           if (args.length !== 2 || !args[0].isValid || !args[1].isValid)
             return ce._fn('Rational', args);
 
-          return ce.div(args[0], args[1]);
+          return args[0].div(args[1]);
         },
         simplify: (ce, ops) => {
           if (ops.length !== 2) return undefined;
-          return simplifyDivide(ce, ops[0], ops[1]);
+          return ops[0].div(ops[1]);
         },
         evaluate: (ce, ops) => {
           if (ops.length === 2) {

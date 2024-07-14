@@ -47,7 +47,7 @@ describe('Primality Test', () => {
           ]
         ]
       ]
-      evaluate  = [
+      simplify  = [
         "Negate",
         [
           "Floor",

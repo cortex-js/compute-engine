@@ -23,6 +23,7 @@ import {
   asRational,
   mul,
 } from '../boxed-expression/numerics';
+import { expandProducts } from '../symbolic/expand';
 
 /** The canonical form of `Multiply`:
  * - remove `1`
@@ -113,6 +114,11 @@ export function simplifyMultiply(
   ops: ReadonlyArray<BoxedExpression>
 ): BoxedExpression {
   console.assert(ops.every((x) => x.head !== 'Multiply'));
+  const expr = expandProducts(ce, ops);
+  if (expr) {
+    if (expr.head === 'Multiply') ops = expr.ops!;
+    else return expr.simplify();
+  }
   const product = new Product(ce);
   for (let op of ops) {
     op = op.simplify();
@@ -507,7 +513,7 @@ export function evalMultiplication(
         ce.assign({ [index]: 999 });
         const nMaxMinusOne = fn.N();
 
-        const ratio = asFloat(ce.div(nMax, nMaxMinusOne).N());
+        const ratio = asFloat(nMax.div(nMaxMinusOne).N());
         if (ratio !== null && Number.isFinite(ratio) && Math.abs(ratio) > 1) {
           result = ce.PositiveInfinity;
         } else {

@@ -220,7 +220,7 @@ export class BoxedTensor extends _BoxedExpression {
     return this.expression.mul(...rhs);
   }
 
-  div(rhs: BoxedExpression): BoxedExpression {
+  div(rhs: number | BoxedExpression): BoxedExpression {
     return this.expression.div(rhs);
   }
 

@@ -81,9 +81,7 @@ export function canonicalDivide(
   const c = c1.div(c2);
   if (c.isZero) return ce.Zero;
   if (c.isOne) return ce._fn('Divide', [t1, t2]);
-  if (c.isNegativeOne)
-    // Note that .neg() will propagate inside the expression if possible
-    return ce._fn('Divide', [t1, t2]).neg();
+  if (c.isNegativeOne) return ce._fn('Divide', [t1.neg(), t2]);
 
   const num = ce._fromNumericValue(c.num, t1);
   const denom = ce._fromNumericValue(c.denom, t2);
@@ -92,31 +90,12 @@ export function canonicalDivide(
   return ce._fn('Divide', [num, denom]);
 }
 
-/**
- * Simplify form of 'Divide' (and 'Rational')
- */
-
-export function simplifyDivide(
-  ce: IComputeEngine,
-  op1: BoxedExpression,
-  op2: BoxedExpression
-): BoxedExpression | undefined {
-  // @fixme: this is a potential fast path, but not necessary
-  // if (op1.numericValue !== null && op2.numericValue !== null) {
-  //   const r1 = asRational(op1);
-  //   const r2 = asRational(op2);
-  //   if (r1 && r2 && !isZero(r2)) return ce.number(mul(r1, inverse(r2)));
-  // }
-
-  return new Product(ce, [op1, op2.inv()]).asRationalExpression();
-}
-
 export function evalDivide(
   ce: IComputeEngine,
   op1: BoxedExpression,
   op2: BoxedExpression
 ): BoxedExpression {
-  let result = simplifyDivide(ce, op1, op2);
+  let result = op1.div(op2);
   if (result?.head === 'Divide') {
     if (!result.op1.isExact || !result.op2.isExact) {
       result =
@@ -140,7 +119,7 @@ export function evalNDivide(
   op1: BoxedExpression,
   op2: BoxedExpression
 ): BoxedExpression {
-  let result = simplifyDivide(ce, op1, op2);
+  let result = op1.div(op2);
   if (result?.head === 'Divide') {
     result =
       apply2N(

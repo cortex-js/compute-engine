@@ -271,7 +271,13 @@ export class BoxedNumber extends _BoxedExpression {
     ]).asExpression();
   }
 
-  div(rhs: BoxedExpression): BoxedExpression {
+  div(rhs: number | BoxedExpression): BoxedExpression {
+    if (typeof rhs === 'number') rhs = this.engine.number(rhs);
+    if (rhs.numericValue !== null) {
+      const ce = this.engine;
+      let n = ce._numericValue(this._value);
+      return ce._fromNumericValue(n.div(ce._numericValue(rhs.numericValue)));
+    }
     return canonicalDivide(this, rhs);
   }
 
@@ -717,10 +723,11 @@ export class BoxedNumber extends _BoxedExpression {
 
   evaluate(options?: EvaluateOptions): BoxedExpression {
     if (options?.numericMode) return this.N();
-    return this;
+    return this.canonical;
   }
 
   N(): BoxedExpression {
+    if (!this.isCanonical) return this.canonical.N();
     if (!Array.isArray(this._value)) return this;
 
     // If a rational, evaluate as an approximation
