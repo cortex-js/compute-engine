@@ -44,30 +44,22 @@ describe('COMPLEX SYMBOLS', () => {
 
 describe('SUPSUB', () => {
   test('Superscript', () => {
-    expect(ce.parse('2^2')).toMatchInlineSnapshot(`["Square", 2]`);
+    expect(ce.parse('2^2')).toMatchInlineSnapshot(`4`);
     expect(ce.parse('x^t')).toMatchInlineSnapshot(`["Power", "x", "t"]`);
-    expect(ce.parse('2^{10}')).toMatchInlineSnapshot(`["Power", 2, 10]`);
+    expect(ce.parse('2^{10}')).toMatchInlineSnapshot(`1024`);
     expect(ce.parse('\\pi^2')).toMatchInlineSnapshot(`["Square", "Pi"]`);
-    expect(ce.parse('2^23')).toMatchInlineSnapshot(
-      `["Multiply", 3, ["Square", 2]]`
-    );
+    expect(ce.parse('2^23')).toMatchInlineSnapshot(`["Multiply", 3, 4]`);
     expect(ce.parse('2^\\pi')).toMatchInlineSnapshot(`["Power", 2, "Pi"]`);
     expect(ce.parse('2^\\frac12')).toMatchInlineSnapshot(`["Sqrt", 2]`);
-    expect(ce.parse('2^{3^4}')).toMatchInlineSnapshot(
-      `["Power", 2, ["Power", 3, 4]]`
-    );
-    expect(ce.parse('2^{10}')).toMatchInlineSnapshot(`["Power", 2, 10]`);
-    expect(ce.parse('2^{-2}')).toMatchInlineSnapshot(
-      `["Divide", 1, ["Square", 2]]`
-    );
+    expect(ce.parse('2^{3^4}')).toMatchInlineSnapshot(`2.4178516392292583e+24`);
+    expect(ce.parse('2^{10}')).toMatchInlineSnapshot(`1024`);
+    expect(ce.parse('2^{-2}')).toMatchInlineSnapshot(`["Rational", 1, 4]`);
     expect(ce.parse('2^3^4')).toMatchInlineSnapshot(
       `["Power", 2, ["List", 3, 4]]`
     );
-    expect(ce.parse('2^{3^4}')).toMatchInlineSnapshot(
-      `["Power", 2, ["Power", 3, 4]]`
-    );
+    expect(ce.parse('2^{3^4}')).toMatchInlineSnapshot(`2.4178516392292583e+24`);
     expect(ce.parse('12^34.5')).toMatchInlineSnapshot(
-      `["Multiply", 4.5, ["Power", 12, 3]]`
+      `["Multiply", 4.5, 1728]`
     );
     expect(ce.parse('x^2')).toMatchInlineSnapshot(`["Square", "x"]`);
     expect(ce.parse('x^{x+1}')).toMatchInlineSnapshot(

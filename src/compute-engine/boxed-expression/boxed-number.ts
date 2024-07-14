@@ -21,16 +21,19 @@ import {
   isOne,
   reducedRational,
   neg,
+  asMachineRational,
 } from '../numerics/rationals';
 
 import { _BoxedExpression } from './abstract-boxed-expression';
-import { hashCode, bignumPreferred } from './utils';
+import { hashCode, bignumPreferred, asBigint } from './utils';
 import { Expression } from '../../math-json';
-import { asMachineInteger, signDiff } from './numerics';
+import { signDiff } from './numerics';
 import { match } from './match';
 import { Terms } from '../numerics/terms';
 import { Product } from '../symbolic/product';
 import { canonicalDivide } from '../library/arithmetic-divide';
+import { NumericValue } from '../numeric-value/public';
+import { factorPower } from '../numerics/numeric-bigint';
 
 /**
  * BoxedNumber
@@ -272,14 +275,64 @@ export class BoxedNumber extends _BoxedExpression {
     return canonicalDivide(this, rhs);
   }
 
-  pow(exp: number | BoxedExpression): BoxedExpression {
+  pow(
+    exp: number | [num: number, denom: number] | BoxedExpression
+  ): BoxedExpression {
+    if (exp === 0) return this.engine.One;
+    if (exp === 1) return this;
+    if (exp === -1) return this.inv();
+
+    if (!this.isCanonical) return this.canonical.pow(exp);
+
+    if (typeof exp !== 'number') {
+      exp = this.engine.box(exp);
+      if (exp.isZero) return this.engine.One;
+      if (exp.isOne) return this;
+      if (exp.isNegativeOne) return this.inv();
+      if (exp.isEqual(this.engine.Half)) return this.sqrt();
+      if (exp.isEqual(this.engine.Half.neg())) return this.sqrt().inv();
+      if (exp.head === 'Negate') return this.pow(exp.op1).inv();
+    }
+
     if (exp === 0.5) return this.sqrt();
     if (exp === -0.5) return this.sqrt().inv();
-    const e = typeof exp === 'number' ? exp : asMachineInteger(exp);
-    console.assert(Number.isInteger(e));
-    if (!e) return this.engine.NaN;
+
     let n = this.engine._numericValue(this._value);
-    return this.engine._fromNumericValue(n.pow(e));
+
+    const e = typeof exp === 'number' ? exp : exp.numericValue;
+    if (e !== null) {
+      let v: NumericValue | undefined = undefined;
+      if (typeof e === 'number') v = n.pow(e);
+      if (e instanceof Decimal) v = n.pow(e.toNumber());
+      if (isRational(e)) {
+        const r = asMachineRational(e);
+        if (n.im === 0 && r[1] === 3) {
+          // If we have a cube root, attempt to extract a perfect cube
+          // If the base is real, and the exponent is an integer,
+          const base = n.re;
+          if (Number.isInteger(base)) {
+            const sign = base < 0 ? -1 : 1;
+            const bigBase = asBigint(this)!;
+            const [factor, root] = factorPower(
+              sign > 0 ? bigBase : -bigBase,
+              3
+            );
+            if (factor !== BigInt(1)) {
+              const ce = this.engine;
+              return ce
+                .number(sign)
+                .mul(ce.number(factor), ce.number(root).pow([1, 3]))
+                .pow(r[0]);
+            }
+          }
+        }
+        v = n.pow(r);
+      }
+      if (e instanceof Complex) v = n.pow(e);
+      if (v && v.isExact) return this.engine._fromNumericValue(v);
+    }
+
+    return this.engine._fn('Power', [this, this.engine.box(exp)]);
   }
 
   sqrt(): BoxedExpression {

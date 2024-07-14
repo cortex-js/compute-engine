@@ -198,14 +198,6 @@ describe("Mill's formula https://en.wikipedia.org/wiki/Mills%27_constant", () =>
         "Floor",
         ["Power", ["Rational", 3540326840, 2710032743], ["Power", 3, "n"]]
       ]
-      evaluate  = [
-        "Floor",
-        [
-          "Multiply",
-          ["Power", 3540326840, ["Power", 3, "n"]],
-          ["Power", 2710032743, ["Negate", ["Power", 3, "n"]]]
-        ]
-      ]
       N-auto    = [
         "Floor",
         [
@@ -252,20 +244,24 @@ describe('RAMANUJAN FACTORIAL APPROXIMATION', () =>
         ]
       ]
       canonical = [
-        "Multiply",
-        ["Sqrt", "Pi"],
-        ["Power", ["Divide", "n", "ExponentialE"], "n"],
+        "Divide",
         [
-          "Root",
+          "Multiply",
+          ["Power", "n", "n"],
+          ["Sqrt", "Pi"],
           [
-            "Add",
-            ["Multiply", 8, ["Power", "n", 3]],
-            ["Multiply", 4, ["Square", "n"]],
-            "n",
-            ["Rational", 1, 30]
-          ],
-          6
-        ]
+            "Root",
+            [
+              "Add",
+              ["Multiply", 8, ["Power", "n", 3]],
+              ["Multiply", 4, ["Square", "n"]],
+              "n",
+              ["Rational", 1, 30]
+            ],
+            6
+          ]
+        ],
+        ["Exp", "n"]
       ]
       evaluate  = [
         "Multiply",
@@ -285,36 +281,48 @@ describe('RAMANUJAN FACTORIAL APPROXIMATION', () =>
         ]
       ]
       N-auto    = [
-        "Multiply",
-        1.772453850905516,
-        ["Power", ["Multiply", 0.36787944117144233, "n"], "n"],
+        "Divide",
+        [
+          "Multiply",
+          1.7724538509055159,
+          ["Power", "n", "n"],
+          [
+            "Power",
+            [
+              "Add",
+              ["Multiply", 8, ["Power", "n", 3]],
+              ["Multiply", 4, ["Square", "n"]],
+              "n",
+              0.03333333333333333
+            ],
+            "0.1(6)"
+          ]
+        ],
         [
           "Power",
-          [
-            "Add",
-            ["Multiply", 8, ["Power", "n", 3]],
-            ["Multiply", 4, ["Square", "n"]],
-            "n",
-            0.03333333333333333
-          ],
-          "0.1(6)"
+          "2.718281828459045235360287471352662497757247093699959574966967627724076630353547594571382178525166427",
+          "n"
         ]
       ]
       N-mach    = [
-        "Multiply",
-        1.7724538509055159,
-        ["Power", ["Multiply", 0.36787944117144233, "n"], "n"],
+        "Divide",
         [
-          "Power",
+          "Multiply",
+          1.7724538509055159,
+          ["Power", "n", "n"],
           [
-            "Add",
-            ["Multiply", 8, ["Power", "n", 3]],
-            ["Multiply", 4, ["Square", "n"]],
-            "n",
-            0.03333333333333333
-          ],
-          0.16666666666666666
-        ]
+            "Power",
+            [
+              "Add",
+              ["Multiply", 8, ["Power", "n", 3]],
+              ["Multiply", 4, ["Square", "n"]],
+              "n",
+              0.03333333333333333
+            ],
+            0.16666666666666666
+          ]
+        ],
+        ["Power", 2.718281828459045, "n"]
       ]
     `)));
 

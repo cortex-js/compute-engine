@@ -191,6 +191,49 @@ export class BoxedTensor extends _BoxedExpression {
     return this.expression.op3;
   }
 
+  //
+  //
+  // ALGEBRAIC OPERATIONS
+  //
+
+  neg(): BoxedExpression {
+    return this.expression.neg();
+  }
+
+  inv(): BoxedExpression {
+    return this.engine.One.div(this.expression);
+  }
+
+  abs(): BoxedExpression {
+    return this.expression.abs();
+  }
+
+  add(...rhs: (number | BoxedExpression)[]): BoxedExpression {
+    return this.expression.add(...rhs);
+  }
+
+  sub(rhs: BoxedExpression): BoxedExpression {
+    return this.expression.sub(rhs);
+  }
+
+  mul(...rhs: (number | BoxedExpression)[]): BoxedExpression {
+    return this.expression.mul(...rhs);
+  }
+
+  div(rhs: BoxedExpression): BoxedExpression {
+    return this.expression.div(rhs);
+  }
+
+  pow(
+    exp: number | [num: number, denom: number] | BoxedExpression
+  ): BoxedExpression {
+    return this.expression.pow(exp);
+  }
+
+  sqrt(): BoxedExpression {
+    return this.expression.sqrt();
+  }
+
   get shape(): number[] {
     return this.tensor.shape;
   }

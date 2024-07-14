@@ -6,6 +6,7 @@ import { BoxedExpression, IComputeEngine } from '../public';
 import { order } from '../boxed-expression/order';
 import {
   Rational,
+  asMachineRational,
   isOne,
   machineDenominator,
   machineNumerator,
@@ -233,7 +234,11 @@ export class Product {
     const ce = this.engine;
     const xs: { exponent: Rational; terms: BoxedExpression[] }[] = [];
     if (!this.coefficient.isOne) {
-      if (mode === 'rational' && this.coefficient.isExact) {
+      if (
+        mode === 'rational' &&
+        this.coefficient.isExact &&
+        this.coefficient.im === 0
+      ) {
         // Numerator
         let num = ce._fromNumericValue(this.coefficient.num);
         if (!num.isOne) xs.push({ exponent: [1, 1], terms: [num] });
@@ -359,7 +364,7 @@ export function commonTerms(lhs: Product, rhs: Product): BoxedExpression {
     if (!y) continue;
     const exponent = rationalGcd(x.exponent, y.exponent);
     if (isOne(exponent)) xs.push(x.term);
-    else xs.push(ce.pow(x.term, exponent));
+    else xs.push(x.term.pow(asMachineRational(exponent)));
   }
 
   // Put everything together
@@ -416,7 +421,7 @@ function termsAsExpression(
       const t = flattenOps(x.terms, 'Multiply');
       const base =
         t.length <= 1 ? t[0] : ce._fn('Multiply', [...t].sort(order));
-      return ce.pow(base, x.exponent);
+      return base.pow(ce.number(x.exponent));
     });
   result = flattenOps(result, 'Multiply') ?? result;
   if (result.length === 0) return ce.One;

@@ -596,7 +596,9 @@ export interface BoxedExpression {
   sub(rhs: BoxedExpression): BoxedExpression;
   mul(...rhs: (number | BoxedExpression)[]): BoxedExpression;
   div(rhs: BoxedExpression): BoxedExpression;
-  pow(exp: number | BoxedExpression): BoxedExpression;
+  pow(
+    exp: number | [num: number, denom: number] | BoxedExpression
+  ): BoxedExpression;
   sqrt(): BoxedExpression;
   // root(exp: number | BoxedExpression): BoxedExpression;
   // log(base?: SemiBoxedExpression): BoxedExpression;
@@ -1976,11 +1978,6 @@ export interface IComputeEngine {
   add(...ops: ReadonlyArray<BoxedExpression>): BoxedExpression;
 
   evalMul(...ops: ReadonlyArray<BoxedExpression>): BoxedExpression;
-
-  pow(
-    base: BoxedExpression,
-    exponent: number | Rational | BoxedExpression
-  ): BoxedExpression;
 
   inv(expr: BoxedExpression): BoxedExpression;
 

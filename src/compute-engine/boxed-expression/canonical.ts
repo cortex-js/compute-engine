@@ -1,7 +1,6 @@
 import { canonicalAdd } from '../library/arithmetic-add';
 import { canonicalDivide } from '../library/arithmetic-divide';
 import { canonicalMultiply } from '../library/arithmetic-multiply';
-import { canonicalPower } from '../library/arithmetic-power';
 import { canonicalInvisibleOperator } from '../library/core';
 import { BoxedExpression, CanonicalOptions } from '../public';
 import { flattenOps } from '../symbolic/flatten';
@@ -143,7 +142,7 @@ function addForm(expr: BoxedExpression) {
   if (expr.head === 'Add') return canonicalAdd(expr.engine, ops);
 
   if (expr.head === 'Subtract')
-    return canonicalAdd(expr.engine, [ops[0], expr.engine.neg(ops[1])]);
+    return canonicalAdd(expr.engine, [ops[0], ops[1].neg()]);
 
   return expr.engine._fn(expr.head, ops);
 }
@@ -153,7 +152,7 @@ function powerForm(expr: BoxedExpression) {
 
   // If this is a power, canonicalize it
   if (expr.head === 'Power')
-    return canonicalPower(powerForm(expr.op1), powerForm(expr.op2));
+    return powerForm(expr.op1).pow(powerForm(expr.op2));
 
   // Recursively visit all sub-expressions
   if (!expr.ops) return expr;

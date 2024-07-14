@@ -136,25 +136,7 @@ export class ExactNumericValue extends NumericValue<number, [number, number]> {
     }
 
     //
-    // 5/ If float is an integer, convert to rational
-    //
-    if (this.decimal !== 1 && Number.isInteger(this.decimal)) {
-      this.rational[0] *= this.decimal;
-      this.decimal = 1;
-    }
-
-    //
-    // 6/ Reduce rational
-    //
-
-    this.rational = reducedRational(this.rational);
-    if (this.radical < 0) {
-      this.radical = -this.radical;
-      this.im += 1;
-    }
-
-    //
-    // 7/ Capture the sign
+    // 5/ Capture the sign
     //
     if (this.decimal < 0) {
       this.sign *= -1;
@@ -163,6 +145,24 @@ export class ExactNumericValue extends NumericValue<number, [number, number]> {
     if (this.rational[0] < 0) {
       this.sign *= -1;
       this.rational[0] = -this.rational[0];
+    }
+
+    //
+    // 6/ If float is an integer, convert to rational
+    //
+    if (this.decimal !== 1 && Number.isInteger(this.decimal)) {
+      this.rational[0] *= this.decimal;
+      this.decimal = 1;
+    }
+
+    //
+    // 7/ Reduce rational
+    //
+
+    this.rational = reducedRational(this.rational);
+    if (this.radical < 0) {
+      this.radical = -this.radical;
+      this.im += 1;
     }
 
     //
@@ -178,10 +178,11 @@ export class ExactNumericValue extends NumericValue<number, [number, number]> {
     }
   }
 
-  // This is an "exact" numeric value if it can be represented as a product
-  // of rational numbers: a/b * sqrt(c/d)
+  // This is an "exact" numeric value if it can be represented as a the sum of
+  // a product of rational numbers and a gaussian number (integer imaginary):
+  //                          a/b * sqrt(c/d) + ki
   get isExact(): boolean {
-    return this.sign === 0 || (this.decimal === 1 && this.im === 0);
+    return (this.sign === 0 || this.decimal === 1) && Number.isInteger(this.im);
   }
 
   get isNaN(): boolean {
@@ -362,25 +363,106 @@ export class ExactNumericValue extends NumericValue<number, [number, number]> {
     });
   }
 
-  pow(exponent: number): ExactNumericValue {
-    if (exponent === 1) return this;
-    if (exponent === 0) return new ExactNumericValue({ re: 1 });
-    if (exponent === -1) return this.inv();
-    if (exponent === 0.5) return this.sqrt();
-    if (exponent === -0.5) return this.sqrt().inv();
+  pow(
+    exponent: number | [number, number] | { re: number; im: number }
+  ): ExactNumericValue {
+    if (Array.isArray(exponent)) exponent = exponent[0] / exponent[1];
 
-    console.assert(Number.isInteger(exponent));
+    if (typeof exponent === 'number' && isNaN(exponent))
+      return new ExactNumericValue({ re: NaN });
+    if (this.isNaN) return this;
+
+    // Special square root, where we try to preserve the rational part
+    if (exponent === 0.5) return this.sqrt();
+
+    //
+    // For the special cases we implement the same (somewhat arbitrary) results
+    // as sympy. See https://docs.sympy.org/1.6/modules/core.html#pow
+    //
+
+    // If the exponent is a complex number, we use the formula:
+    // z^w = (r^w) * (cos(wθ) + i * sin(wθ)),
+    // where z = r * (cos(θ) + i * sin(θ))
+
+    if (
+      typeof exponent === 'object' &&
+      ('re' in exponent || 'im' in exponent)
+    ) {
+      const [re, im] = [exponent?.re ?? 0, exponent?.im ?? 0];
+      if (Number.isNaN(im) || Number.isNaN(re))
+        return new ExactNumericValue({ re: NaN });
+      if (im === 0) {
+        exponent = re; // fallthrough and continue
+      } else {
+        // Complex Infinity ^ z -> NaN
+        if (this.im === Infinity) return new ExactNumericValue({ re: NaN });
+        if (this.isNegativeInfinity) return new ExactNumericValue({ re: 0 });
+        if (this.isPositiveInfinity)
+          return new ExactNumericValue({ im: Infinity });
+
+        const zRe = this.pow(re);
+        const zArg = im * Math.log(this.re); // @fixme: this should be the argument of the complex number. We need a log() method
+        const zIm = new ExactNumericValue({
+          re: Math.cos(zArg),
+          im: Math.sin(zArg),
+        });
+        return zRe.mul(zIm);
+      }
+    }
+
+    if (this.isPositiveInfinity) {
+      if (exponent === -1) return new ExactNumericValue({ re: 0 });
+      if (exponent === Infinity) return new ExactNumericValue({ re: Infinity });
+      if (exponent === -Infinity) return new ExactNumericValue({ re: 0 });
+    } else if (this.isNegativeInfinity) {
+      if (exponent === Infinity) return new ExactNumericValue({ re: NaN });
+    }
+
+    if (
+      (exponent === Infinity || exponent === -Infinity) &&
+      (this.isOne || this.isNegativeOne)
+    )
+      return new ExactNumericValue({ re: NaN });
+
+    if (exponent === 1) return this;
+    if (exponent === -1) return this.inv();
+
+    if (exponent === 0) return new ExactNumericValue({ re: 1 });
+
+    if (this.isZero) {
+      if (exponent > 0) return this; // 0^x = 0 when x > 0
+      if (exponent < 0) return new ExactNumericValue({ im: Infinity }); // Complex/unsigned infinity
+    }
 
     if (exponent < 0) return this.pow(-exponent).inv();
 
+    // Is it a multiple of square root?
+    // Decompose to try to preserve the rational part
+    if (exponent % 1 === 0.5)
+      return this.pow(Math.floor(exponent)).mul(this.sqrt());
+
     if (this.im === 0) {
+      if (this.sign < 0) {
+        if (Number.isInteger(exponent)) {
+          return new ExactNumericValue({
+            sign: exponent % 2 === 0 ? 1 : -1,
+            re: this.decimal ** exponent,
+            rational: [
+              this.rational[0] ** exponent,
+              this.rational[1] ** exponent,
+            ],
+            radical: this.radical ** exponent,
+          });
+        }
+        return new ExactNumericValue({ im: (-this.re) ** exponent });
+      }
       return new ExactNumericValue({
-        sign: this.sign < 0 && exponent % 2 === 0 ? -1 : 1,
         re: this.decimal ** exponent,
         rational: [this.rational[0] ** exponent, this.rational[1] ** exponent],
         radical: this.radical ** exponent,
       });
     }
+
     const a = this.re;
     const b = this.im;
     const modulus = Math.hypot(a, b);
@@ -394,7 +476,7 @@ export class ExactNumericValue extends NumericValue<number, [number, number]> {
   }
 
   sqrt(): ExactNumericValue {
-    if (this.sign === 0) return this;
+    if (this.isZero) return this;
 
     if (this.im !== 0) {
       // Complex square root:
@@ -434,7 +516,14 @@ export class ExactNumericValue extends NumericValue<number, [number, number]> {
   }
 
   gcd(other: ExactNumericValue): ExactNumericValue {
-    if (!this.isExact || !other.isExact || this.isOne || other.isOne)
+    if (
+      !this.isExact ||
+      this.im !== 0 ||
+      this.isOne ||
+      !other.isExact ||
+      other.im !== 0 ||
+      other.isOne
+    )
       return new ExactNumericValue({ re: 1 });
 
     // Calculate the GCD of the rational parts

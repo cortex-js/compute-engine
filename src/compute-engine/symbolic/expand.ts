@@ -163,7 +163,7 @@ function expandPower(
     for (let i = 0; i < val.length; i += 1) {
       if (val[i] !== 0) {
         if (val[i] === 1) product.push(terms[i]);
-        else product.push(ce.pow(terms[i], val[i]));
+        else product.push(terms[i].pow(val[i]));
       }
     }
     result.push(ce.evalMul(...product));

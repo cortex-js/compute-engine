@@ -192,10 +192,7 @@ export function differentiate(
         // Derivative Power Rule
         // d/dx x^n = n * x^(n-1)
 
-        return ce.evalMul(
-          exponent,
-          ce.pow(base, ce.add(exponent, ce.NegativeOne))
-        );
+        return ce.evalMul(exponent, base.pow(ce.add(exponent, ce.NegativeOne)));
       }
 
       // Generalized case:
@@ -224,7 +221,7 @@ export function differentiate(
           ce.evalMul(gPrime, denominator),
           ce.evalMul(hPrime, numerator).neg()
         ),
-        ce.pow(denominator, 2)
+        denominator.pow(2)
       );
     }
 

@@ -155,7 +155,7 @@ describe('multiplication', () => {
     const b = ce._numericValue(1).div(a);
     expect(`${b.re}, ${b.im}`).toMatch(`0, -0.5`);
     // integer / complex = complex
-    expect(b.toString()).toMatchInlineSnapshot(`-0.5i`);
+    expect(b.toString()).toMatchInlineSnapshot(`-0.5 i`);
   });
 });
 

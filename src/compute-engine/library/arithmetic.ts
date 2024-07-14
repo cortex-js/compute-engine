@@ -257,7 +257,7 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
           // The canonical handler is responsible for arg validation
           args = checkNumericArgs(ce, args, 1);
           if (args.length !== 1) return ce.function('Power', [ce.E, ...args]);
-          return ce.pow(ce.E, args[0]);
+          return ce.E.pow(args[0]);
         },
       },
     },
@@ -607,30 +607,30 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
       signature: {
         domain: ['FunctionOf', 'Numbers', 'Numbers', 'Numbers'],
         canonical: (ce, args) => {
+          // See also shortcut in makeNumericFunction()
           args = checkNumericArgs(ce, args, 2);
           if (args.length !== 2) return ce._fn('Power', args);
           const [base, exp] = args;
+
+          const e = exp.numericValue;
+          if (e !== null) {
+            // If the numeric value is greater than 10, use a Power expression
+            if (typeof e === 'number' && e > 10) return ce._fn('Power', args);
+            if (e instanceof Complex) return ce._fn('Power', args);
+            if (e instanceof Decimal && e.greaterThan(10))
+              return ce._fn('Power', args);
+          }
+
           // If the base is a literal number and negative, treat it as a Negate
           // i.e. -2^3 -> -(2^3)
-          if (base instanceof BoxedNumber && base.isNegative)
-            return ce.pow(base, exp).neg();
+          if (base.numericValue !== null && base.isNegative)
+            return base.pow(exp).neg();
 
-          return ce.pow(base, exp);
+          return base.pow(exp);
         },
         simplify: (ce, ops) => processPower(ce, ops[0], ops[1], 'simplify'),
         evaluate: (ce, ops) => processPower(ce, ops[0], ops[1], 'evaluate'),
-        N: (ce, ops) => {
-          // @fastpath
-          if (
-            ce.numericMode === 'machine' &&
-            typeof ops[0].numericValue === 'number' &&
-            typeof ops[1].numericValue === 'number'
-          )
-            return ce.number(
-              Math.pow(ops[0].numericValue, ops[1].numericValue)
-            );
-          return processPower(ce, ops[0], ops[1], 'N');
-        },
+        N: (ce, ops) => processPower(ce, ops[0], ops[1], 'N'),
         // Defined as RealNumbers for all power in RealNumbers when base > 0;
         // when x < 0, only defined if n is an integer
         // if x is a non-zero complex, defined as ComplexNumbers
@@ -713,8 +713,7 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
           const [base, exp] = args;
           if (args.length !== 2 || !base.isValid || !exp.isValid)
             return ce._fn('Root', args);
-
-          return ce.pow(base, ce.inv(exp));
+          return base.pow(ce.inv(exp));
         },
       },
     },
@@ -801,10 +800,10 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
 
       signature: {
         domain: ['FunctionOf', 'Numbers', 'Numbers'],
-        canonical: (ce, args) => {
-          args = flattenSequence(canonical(args));
-          if (args.length !== 1) return ce._fn('Sqrt', args);
-          return ce.pow(args[0], ce.Half);
+        canonical: (ce, ops) => {
+          ops = flattenSequence(canonical(ops));
+          if (ops.length !== 1) return ce._fn('Sqrt', ops);
+          return ops[0].sqrt();
         },
         simplify: (ce, ops) => ops[0].sqrt(),
         evaluate: (ce, ops) => ops[0].sqrt(),

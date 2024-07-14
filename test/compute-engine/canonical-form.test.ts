@@ -35,8 +35,7 @@ describe('CANONICAL FORMS', () => {
   test('2^3x"', () => {
     expect(check('2^3x')).toMatchInlineSnapshot(`
       box       = ["InvisibleOperator", ["Power", 2, 3], "x"]
-      canonical = ["Multiply", "x", ["Power", 2, 3]]
-      simplify  = ["Multiply", 8, "x"]
+      canonical = ["Multiply", 8, "x"]
     `);
   });
 
@@ -65,7 +64,7 @@ describe('CANONICAL FORMS', () => {
     expect(check('\\frac{-101}{10^{\\frac{2}{3}}}')).toMatchInlineSnapshot(`
       box       = ["Divide", -101, ["Power", 10, ["Divide", 2, 3]]]
       canonical = ["Divide", -101, ["Power", 10, ["Rational", 2, 3]]]
-      N-auto    = -21.759790369322026
+      simplify  = -21.759790369322026
     `);
   });
 
@@ -114,10 +113,25 @@ describe('CANONICAL FORMS', () => {
   });
 
   // Negative exponents become fractions
-  test('2xy^{-n}"', () => {
-    expect(check('2xy^{-n}')).toMatchInlineSnapshot(`
-      box       = ["InvisibleOperator", 2, "x", ["Power", "y", ["Negate", "n"]]]
-      canonical = ["Multiply", 2, "x", ["Power", "y", ["Negate", "n"]]]
+  test('(2xy)^{-n}"', () => {
+    expect(check('(2xy)^{-n}')).toMatchInlineSnapshot(`
+      box       = [
+        "Power",
+        ["Delimiter", ["InvisibleOperator", 2, "x", "y"]],
+        ["Negate", "n"]
+      ]
+      canonical = ["Divide", 1, ["Power", ["Multiply", 2, "x", "y"], "n"]]
+      simplify  = ["Power", ["Multiply", 2, "x", "y"], ["Negate", "n"]]
+      evaluate  = [
+        "Divide",
+        1,
+        [
+          "Multiply",
+          ["Power", 2, "n"],
+          ["Power", "x", "n"],
+          ["Power", "y", "n"]
+        ]
+      ]
     `);
   });
 

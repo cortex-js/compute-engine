@@ -32,7 +32,6 @@ import { narrow } from './boxed-domain';
 import { domainToSignature, signatureToDomain } from '../domain-utils';
 import { match } from './match';
 import { canonicalDivide } from '../library/arithmetic-divide';
-import { canonicalPower } from '../library/arithmetic-power';
 import { Terms } from '../numerics/terms';
 import { negate } from '../symbolic/negate';
 import { Product } from '../symbolic/product';
@@ -217,15 +216,33 @@ export class BoxedSymbol extends _BoxedExpression {
     return canonicalDivide(this, rhs);
   }
 
-  pow(exp: number | BoxedExpression): BoxedExpression {
-    return canonicalPower(
-      this,
-      typeof exp === 'number' ? this.engine.number(exp) : exp
-    );
+  pow(
+    exp: number | [num: number, denom: number] | BoxedExpression
+  ): BoxedExpression {
+    const ce = this.engine;
+    if (this.symbol === 'ComplexInfinity') return ce.NaN;
+
+    if (exp === 0) return this.engine.One;
+    if (exp === 1) return this;
+    if (exp === -1) return this.inv();
+    if (exp === 0.5) exp = [1, 2];
+    if (exp === -0.5) exp = [-1, 2];
+
+    if (!this.isCanonical) return this.canonical.pow(exp);
+
+    if (typeof exp !== 'number') {
+      exp = ce.box(exp); // Canonicalize and box fractions
+      if (exp.isZero) return this.engine.One;
+      if (exp.isOne) return this;
+      if (exp.isNegativeOne) return this.inv();
+      if (exp.head === 'Negate') return this.pow(exp.op1).inv();
+    }
+
+    return ce._fn('Power', [this, ce.box(exp)]);
   }
 
   sqrt(): BoxedExpression {
-    return canonicalPower(this, this.engine.Half);
+    return this.pow([1, 2]);
   }
 
   solve(

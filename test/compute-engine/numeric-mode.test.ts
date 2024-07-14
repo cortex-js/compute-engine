@@ -49,7 +49,7 @@ describe('NUMERIC MODE', () => {
     expect(check('12345678901234567890^{23456789012345678901}'))
       .toMatchInlineSnapshot(`
       box       = ["Power", "12345678901234567890", "23456789012345678901"]
-      N-auto    = PositiveInfinity
+      simplify  = PositiveInfinity
     `));
 
   test(`\\cos(555555^{-1})`, () =>
@@ -72,11 +72,7 @@ describe('NUMERIC MODE', () => {
   test(`\\sqrt{-1}`, () =>
     expect(check('\\sqrt{-1}')).toMatchInlineSnapshot(`
       box       = ["Sqrt", -1]
-      simplify  = ["Complex", 0, 1]
-      evaluate  = ["Complex", 0, 1]
-      eval-big  = NaN
-      eval-mach = NaN
-      eval-cplx = ["Complex", 0, 1]
+      canonical = ["Complex", 0, 1]
     `));
 
   test('e^{i\\pi}', () =>
@@ -86,8 +82,13 @@ describe('NUMERIC MODE', () => {
       evaluate  = ["Exp", ["Multiply", ["Complex", 0, 1], "Pi"]]
       N-auto    = -1
       eval-big  = ["Exp", "NaN"]
-      N-big     = NaN
+      N-big     = [
+        "Power",
+        "2.718281828459045235360287471352662497757247093699959574966967627724076630353547594571382178525166427",
+        "NaN"
+      ]
       eval-mach = ["Exp", "NaN"]
+      N-mach    = ["Power", 2.718281828459045, "NaN"]
       eval-cplx = ["Exp", ["Multiply", ["Complex", 0, 1], "Pi"]]
       N-cplx    = -1
     `));
@@ -110,7 +111,7 @@ describe('NUMERIC MODE bignum 7', () => {
     expect(N('0.1 + 0.2')).toMatchInlineSnapshot(`0.30000000000000004`));
 
   test(`\\sqrt{-1}`, () =>
-    expect(N('\\sqrt{-1}')).toMatchInlineSnapshot(`NaN`));
+    expect(N('\\sqrt{-1}')).toMatchInlineSnapshot(`["Complex", 0, 1]`));
 
   test(`\\frac{1}{7}`, () =>
     expect(N('\\frac{1}{7}')).toMatchInlineSnapshot(`0.142857142857143`));
@@ -118,5 +119,8 @@ describe('NUMERIC MODE bignum 7', () => {
   test(`\\frac{\\pi}{4}`, () =>
     expect(N('\\frac{\\pi}{4}')).toMatchInlineSnapshot(`0.7853981633974475`));
 
-  test('', () => expect(N('e^{i\\pi}')).toMatchInlineSnapshot(`NaN`));
+  test('', () =>
+    expect(N('e^{i\\pi}')).toMatchInlineSnapshot(
+      `["Power", 2.71828182845905, "NaN"]`
+    ));
 });

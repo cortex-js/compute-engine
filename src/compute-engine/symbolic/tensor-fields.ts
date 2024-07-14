@@ -1,5 +1,6 @@
 import Complex from 'complex.js';
 import { BoxedExpression, IComputeEngine } from '../public';
+import { isRelationalOperator } from '../boxed-expression/utils';
 
 export type DataTypeMap = {
   float64: number;
@@ -328,11 +329,11 @@ export class TensorFieldExpression implements TensorField<BoxedExpression> {
   }
 
   sub(lhs: BoxedExpression, rhs: BoxedExpression): BoxedExpression {
-    return this.ce.add(lhs, rhs.neg());
+    return lhs.sub(rhs);
   }
 
   mul(lhs: BoxedExpression, rhs: BoxedExpression): BoxedExpression {
-    return this.ce.evalMul(lhs, rhs);
+    return lhs.mul(rhs);
   }
 
   muln(...xs: BoxedExpression[]): BoxedExpression {
@@ -340,11 +341,11 @@ export class TensorFieldExpression implements TensorField<BoxedExpression> {
   }
 
   div(lhs: BoxedExpression, rhs: BoxedExpression): BoxedExpression {
-    return this.ce.div(lhs, rhs);
+    return lhs.div(rhs);
   }
 
   pow(lhs: BoxedExpression, rhs: number): BoxedExpression {
-    return this.ce.pow(lhs, rhs);
+    return lhs.pow(rhs);
   }
 
   conjugate(x: BoxedExpression): BoxedExpression {
@@ -504,6 +505,9 @@ export function getSupertype(
 export function getExpressionDatatype(expr: BoxedExpression): TensorDataType {
   // Depending on whether the expr is a literal number, a string, etc, set the dtype
   // appropriately
+
+  if (isRelationalOperator(expr)) return 'bool';
+
   const val = expr.value;
   if (typeof val === 'number') {
     if (Number.isInteger(val)) {

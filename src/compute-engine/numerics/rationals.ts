@@ -66,7 +66,7 @@ export function inverse(x: Rational): Rational {
   return (x[0] < 0 ? [-x[1], -x[0]] : [x[1], x[0]]) as Rational;
 }
 
-function asMachineRational(r: Rational): [number, number] {
+export function asMachineRational(r: Rational): [number, number] {
   return [Number(r[0]), Number(r[1])];
 }
 

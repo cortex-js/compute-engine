@@ -424,7 +424,9 @@ export abstract class _BoxedExpression implements BoxedExpression {
   div(rhs: BoxedExpression): BoxedExpression {
     return this.engine.NaN;
   }
-  pow(exp: number | BoxedExpression): BoxedExpression {
+  pow(
+    exp: number | [num: number, denom: number] | BoxedExpression
+  ): BoxedExpression {
     return this.engine.NaN;
   }
   sqrt(): BoxedExpression {

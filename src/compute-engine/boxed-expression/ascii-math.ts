@@ -93,7 +93,16 @@ const OPERATORS = {
     },
     11,
   ],
-  Negate: ['-', 14], // Unary operator
+  Negate: [
+    (expr, serialize) => {
+      const base = serialize(expr.op1, 14);
+      // Always wrap the base in parentheses if power to avoid ambiguity,
+      // i.e. -3^2 -> -(3^2)
+      if (base === 'Power') return `-${base}`;
+      return `-${base}`;
+    },
+    14,
+  ],
   Subtract: [
     (expr, serialize) => {
       return (
@@ -118,9 +127,9 @@ const OPERATORS = {
           if (lhs === -1) return `-${serialize(expr.op2, 12)}`;
           if (lhs instanceof Complex) {
             if (lhs.re === 0 && lhs.im === 1)
-              return `${serialize(expr.op2, 12)}i`;
-            if (lhs.re === 0) return `${serialize(expr.op2, 12)} * ${lhs.im}i`;
-            return `${serialize(expr.op2, 12)} * (${lhs.re} + ${lhs.im}i)`;
+              return `${serialize(expr.op2, 12)} i`;
+            if (lhs.re === 0) return `${serialize(expr.op2, 12)} * ${lhs.im} i`;
+            return `${serialize(expr.op2, 12)} * (${lhs.re} + ${lhs.im} i)`;
           }
           const rhs = expr.op2;
           if (
@@ -166,8 +175,13 @@ const OPERATORS = {
     (expr, serialize) => {
       const exponent = serialize(expr.op2, 14);
       if (exponent === '1') return serialize(expr.op1);
-      if (exponent === '(1/2)') return `sqrt(${serialize(expr.op1)})`;
-      return `${serialize(expr.op1, 14)}^${exponent}`;
+      if (exponent === '(1/2)' || exponent === '1/2' || exponent === '0.5')
+        return `sqrt(${serialize(expr.op1)})`;
+      let base = serialize(expr.op1, 14);
+      // Always wrap the base in parentheses if negative to avoid ambiguity,
+      // i.e. -3^2 -> (-3)^2
+      if (base.startsWith('-')) base = `(${base})`;
+      return `${base}^${exponent}`;
     },
     15,
   ],
@@ -264,7 +278,10 @@ export function toAsciiMath(
     const symbols = options.symbols
       ? { ...SYMBOLS, ...options.symbols }
       : SYMBOLS;
-    if (symbols[expr.symbol]) return symbols[expr.symbol];
+    if (symbols[expr.symbol]) {
+      if (symbols[expr.symbol].length === 1) return symbols[expr.symbol];
+      return `${symbols[expr.symbol]}`;
+    }
     if (expr.symbol.length === 1) return expr.symbol;
     return `"${expr.symbol}"`;
   }

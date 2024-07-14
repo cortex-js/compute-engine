@@ -145,11 +145,13 @@ function serializePrettyJsonFunction(
   }
 
   if (head === 'Power') {
+    // e^x -> Exp(x)
     if (!exclusions.includes('Exp') && args[0]?.symbol === 'ExponentialE')
       return serializeJsonFunction(ce, 'Exp', [args[1]], options, metadata);
 
     if (args[1]?.numericValue !== null) {
       const exp = asMachineInteger(args[1]);
+      // x^2 -> Square(x)
       if (exp === 2 && !exclusions.includes('Square'))
         return serializeJsonFunction(
           ce,
@@ -163,7 +165,7 @@ function serializePrettyJsonFunction(
         return serializeJsonFunction(
           ce,
           'Divide',
-          [ce.One, exp === -1 ? args[0] : ce.pow(args[0], -exp)],
+          [ce.One, exp === -1 ? args[0] : args[0].pow(-exp)],
           options,
           metadata
         );

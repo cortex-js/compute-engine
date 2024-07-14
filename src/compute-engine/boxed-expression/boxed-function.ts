@@ -27,7 +27,7 @@ import {
   CanonicalOptions,
 } from '../public';
 import { findUnivariateRoots } from '../solve';
-import { isRational } from '../numerics/rationals';
+import { isMachineRational } from '../numerics/rationals';
 import { replace } from '../rules';
 import { DEFAULT_COMPLEXITY, order } from './order';
 import {
@@ -45,7 +45,7 @@ import { semiCanonical, shouldHold } from '../symbolic/utils';
 import { at, isFiniteIndexableCollection } from '../collection-utils';
 import { narrow } from './boxed-domain';
 import { canonicalAdd } from '../library/arithmetic-add';
-import { canonicalPower, isSqrt } from '../library/arithmetic-power';
+import { isSqrt } from '../library/arithmetic-power';
 import { canonicalDivide } from '../library/arithmetic-divide';
 import { canonicalMultiply } from '../library/arithmetic-multiply';
 import { BoxedExpression, SemiBoxedExpression } from './public';
@@ -372,15 +372,56 @@ export class BoxedFunction extends _BoxedExpression {
     return canonicalDivide(this.canonical, rhs.canonical);
   }
 
-  pow(exp: number | BoxedExpression): BoxedExpression {
-    return canonicalPower(
-      this.canonical,
-      typeof exp === 'number' ? this.engine.number(exp) : exp.canonical
-    );
+  pow(
+    exp: number | [num: number, denom: number] | BoxedExpression
+  ): BoxedExpression {
+    if (exp === 0) return this.engine.One;
+    if (exp === 1) return this;
+    if (exp === -1) return this.inv();
+
+    if (!this.isCanonical) return this.canonical.pow(exp);
+
+    if (typeof exp !== 'number') {
+      exp = this.engine.box(exp);
+      if (exp.isZero) return this.engine.One;
+      if (exp.isOne) return this;
+      if (exp.isNegativeOne) return this.inv();
+      if (exp.head === 'Negate') return this.pow(exp.op1).inv();
+    }
+
+    // (a^b)^c -> a^(b*c)
+    if (this.head === 'Power') {
+      const [base, power] = this.ops;
+      return base.pow(power.mul(exp));
+    }
+
+    // (a/b)^c -> a^c / b^c
+    if (this.head === 'Divide') {
+      const [num, denom] = this.ops;
+      return num.pow(exp).div(denom.pow(exp));
+    }
+
+    if (this.head === 'Negate') {
+      const e = typeof exp === 'number' ? exp : exp.numericValue;
+      // (-x)^n = (-1)^n x^n
+      if (typeof e === 'number' && e % 2 === 0) return this.op1.pow(exp).neg();
+    }
+
+    if (this.head === 'Sqrt') {
+      const e = typeof exp === 'number' ? exp : exp.numericValue;
+      if (exp === 2) return this.op1;
+      if (typeof e === 'number' && Number.isInteger(e))
+        return this.op1.pow([e, 2]);
+      if (isMachineRational(e)) return this.op1.pow([e[0], 2 * e[1]]);
+    }
+
+    if (this.head === 'Exp') return this.engine.E.pow(this.op1.mul(exp));
+
+    return this.engine._fn('Power', [this, this.engine.box(exp)]);
   }
 
   sqrt(): BoxedExpression {
-    return canonicalPower(this.canonical, this.engine.Half);
+    return this.pow([1, 2]);
   }
 
   //
@@ -821,17 +862,11 @@ function makeNumericFunction(
     return canonicalMultiply(ce, flattenOps(flattenSequence(ops), 'Multiply'));
   if (head === 'Divide')
     return ops.slice(1).reduce((a, b) => canonicalDivide(a, b), ops[0]);
-  if (head === 'Exp') return canonicalPower(ce.E, ops[0].canonical);
-  if (head === 'Power')
-    return canonicalPower(ops[0].canonical, ops[1].canonical);
-  if (head === 'Square') return canonicalPower(ops[0].canonical, ce.number(2));
-  if (head === 'Sqrt') {
-    const op = ops[0].canonical;
-    // We preserve square roots of rationals as "exact" values
-    if (isRational(op.numericValue)) return ce._fn('Sqrt', [op], metadata);
+  if (head === 'Exp') return ce.E.pow(ops[0]);
+  if (head === 'Power') return ops[0].pow(ops[1]);
+  if (head === 'Square') return ops[0].pow(2);
+  if (head === 'Sqrt') return ops[0].sqrt();
 
-    return canonicalPower(op, ce.Half);
-  }
   if (head === 'Ln') return ce._fn('Ln', ops, metadata);
 
   return null;

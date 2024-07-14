@@ -54,12 +54,11 @@ import {
 
 import { DEFAULT_COST_FUNCTION } from './cost-function';
 import { ExpressionMap } from './boxed-expression/expression-map';
-import { asLatexString, bignumPreferred } from './boxed-expression/utils';
+import { asLatexString } from './boxed-expression/utils';
 import { boxRules } from './rules';
 import { BoxedString } from './boxed-expression/boxed-string';
 import { BoxedNumber } from './boxed-expression/boxed-number';
 import { _BoxedSymbolDefinition } from './boxed-expression/boxed-symbol-definition';
-import { canonicalPower } from './library/arithmetic-power';
 import { BoxedFunction } from './boxed-expression/boxed-function';
 import { evalMultiply } from './library/arithmetic-multiply';
 import { evalDivide } from './library/arithmetic-divide';
@@ -74,8 +73,13 @@ import {
   makeFunctionDefinition,
   _BoxedFunctionDefinition,
 } from './boxed-expression/boxed-function-definition';
-import { Rational, inverse, isRational, isOne } from './numerics/rationals';
-import { negate } from './symbolic/negate';
+import {
+  Rational,
+  inverse,
+  isRational,
+  isOne,
+  asMachineRational,
+} from './numerics/rationals';
 import { flattenOps, flattenSequence } from './symbolic/flatten';
 import { bigint } from './numerics/numeric-bigint';
 import { parseFunctionSignature } from './function-utils';
@@ -910,10 +914,7 @@ export class ComputeEngine implements IComputeEngine {
 
     // Convert BigRational to Rational
     if (machineValue.rational)
-      machineValue.rational = [
-        Number(machineValue.rational[0]),
-        Number(machineValue.rational[1]),
-      ];
+      machineValue.rational = asMachineRational(machineValue.rational);
     return new ExactNumericValue(machineValue);
   }
 
@@ -1066,9 +1067,12 @@ export class ComputeEngine implements IComputeEngine {
 
     let sign = 1;
 
+    //
+    // Real Part
+    //
     if (coeff.sign !== 0) {
       // There is some real part
-      if (!coeff.isExact) {
+      if (coeff.decimal !== 1) {
         // The real part is a floating point number
         terms.push(this.number(coeff.bignumRe ?? coeff.re));
       } else {
@@ -1077,7 +1081,8 @@ export class ComputeEngine implements IComputeEngine {
 
         if (coeff.radical === 1) {
           // No radical, but a rational part
-          if (!isOne(coeff.rational)) terms.push(this.number(coeff.rational));
+          if (!expr || !isOne(coeff.rational))
+            terms.push(this.number(coeff.rational));
         } else {
           // At least a radical, maybe a rational as well.
           const radical = this._fn('Sqrt', [this.number(coeff.radical)]);
@@ -1104,6 +1109,7 @@ export class ComputeEngine implements IComputeEngine {
     }
 
     let result: BoxedExpression;
+
     if (coeff.im === 0) {
       if (terms.length === 0) return this.Zero;
       result = terms.length === 1 ? terms[0] : this.function('Multiply', terms);
@@ -1111,6 +1117,9 @@ export class ComputeEngine implements IComputeEngine {
       return result;
     }
 
+    //
+    // Imaginary Part
+    //
     if (terms.length === 0) return this.number(this.complex(0, coeff.im));
 
     result = terms.length === 1 ? terms[0] : this.function('Multiply', terms);
@@ -2029,23 +2038,6 @@ export class ComputeEngine implements IComputeEngine {
     // Short path. Note that are arguments are **not** validated.
 
     return evalDivide(this, num.canonical, denom.canonical);
-  }
-
-  /**
-   *
-   * Shortcut for `this.box(["Power", base, exponent]).evaluate()`
-   *
-   */
-  pow(
-    base: BoxedExpression,
-    exponent: number | Rational | BoxedExpression
-  ): BoxedExpression {
-    // Short path. Note that arguments are **not** validated.
-
-    if (typeof exponent === 'number' || isRational(exponent))
-      exponent = this.number(exponent);
-
-    return canonicalPower(base, exponent);
   }
 
   /**

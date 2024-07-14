@@ -2,13 +2,6 @@ import { ComputeEngine } from '../src/compute-engine';
 
 const ce = new ComputeEngine();
 
-console.log(
-  ce
-    .box(['Sqrt', ['Divide', 5, 7]])
-    .simplify()
-    .toString()
-);
-
 // Quick perf testing
 
 // console.time('simplify');

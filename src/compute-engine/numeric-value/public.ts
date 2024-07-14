@@ -93,7 +93,9 @@ export abstract class NumericValue<
   abstract div(
     other: Partial<NumericValueData<D, R>> | number | Rational
   ): NumericValue<D, R>;
-  abstract pow(n: number): NumericValue<D, R>;
+  abstract pow(
+    n: number | [number, number] | { re: number; im: number }
+  ): NumericValue<D, R>;
   abstract sqrt(): NumericValue<D, R>;
   abstract gcd(other: NumericValue<D, R>): NumericValue<D, R>;
   abstract abs(): NumericValue<D, R>;
@@ -143,16 +145,22 @@ export abstract class NumericValue<
     if (this.isOne) return '1';
     if (this.isNegativeOne) return '-1';
 
-    const sign = this.sign < 0 ? '-' : '';
+    let sign = this.sign < 0 ? '-' : '';
 
     const products: string[] = [];
 
-    {
-      const r = this.decimal.toString();
-      if (r !== '1') {
-        if (r.startsWith('-')) products.push(r.slice(1));
-        else products.push(r);
+    if (this.im === 0) {
+      {
+        const r = this.decimal.toString();
+        if (r !== '1') {
+          if (r.startsWith('-')) products.push(r.slice(1));
+          else products.push(r);
+        }
       }
+    } else {
+      if (this.sign !== 0 && isOne(this.rational) && this.radical === 1)
+        products.push(`${sign}${this.decimal.toString()}`);
+      sign = '';
     }
 
     if (!isOne(this.rational)) {
@@ -165,11 +173,11 @@ export abstract class NumericValue<
 
     if (this.radical !== 1) products.push(`sqrt(${this.radical})`);
 
-    if (this.im !== 0 && this.re === 0) return `${this.im}i`;
+    if (this.im !== 0 && this.re === 0) return `${this.im} i`;
 
     let im = '';
-    if (this.im < 0) im = `${this.im}i`;
-    else if (this.im > 0) im = `+${this.im}i`;
+    if (this.im < 0) im = `${this.im} i`;
+    else if (this.im > 0) im = `+${this.im} i`;
 
     return `${sign}${products.join(' * ')}${im}`;
   }
