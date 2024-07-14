@@ -1979,8 +1979,6 @@ export interface IComputeEngine {
 
   evalMul(...ops: ReadonlyArray<BoxedExpression>): BoxedExpression;
 
-  inv(expr: BoxedExpression): BoxedExpression;
-
   div(num: BoxedExpression, denom: BoxedExpression): BoxedExpression;
 
   pair(

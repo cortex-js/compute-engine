@@ -2040,46 +2040,6 @@ export class ComputeEngine implements IComputeEngine {
     return evalDivide(this, num.canonical, denom.canonical);
   }
 
-  /**
-   *
-   * Shortcut for `this.box(["Divide", 1, expr]).evaluate()`
-   *
-   */
-  inv(expr: BoxedExpression): BoxedExpression {
-    // Short path. Note that are arguments are **not** validated.
-    if (expr.isOne) return this.One;
-    if (expr.isNegativeOne) return this.NegativeOne;
-    if (expr.isInfinity) return this.Zero;
-    const n = expr.numericValue;
-    if (n !== null) {
-      if (isRational(n)) return this.number(inverse(n));
-      if (typeof n === 'number' && Number.isInteger(n))
-        return this.number([1, n]);
-
-      if (n instanceof Decimal && n.isInteger())
-        return this.number([BigInt(1), bigint(n)]);
-      return this._fn('Divide', [this.One, expr]);
-    }
-
-    if (expr.head === 'Sqrt') return this._fn('Sqrt', [this.inv(expr.op1)]);
-
-    if (expr.head === 'Divide') return this._fn('Divide', [expr.op1, expr.op2]);
-
-    // Inverse(expr) -> expr^{-1}
-    let e = this.NegativeOne;
-
-    if (expr.head === 'Power') {
-      // Inverse(x^{-1}) -> x
-      if (expr.op2.isNegativeOne) return expr.op1;
-
-      // Inverse(x^n) -> x^{-n}
-      e = expr.op2.neg();
-      expr = expr.op1;
-    }
-    if (e.isNegativeOne) return this._fn('Divide', [this.One, expr]);
-    return this._fn('Power', [expr, e]);
-  }
-
   /** Shortcut for `this.box(["Pair", ...])`
    *
    * The result is canonical.

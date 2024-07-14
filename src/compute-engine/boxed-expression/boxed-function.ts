@@ -330,6 +330,9 @@ export class BoxedFunction extends _BoxedExpression {
   }
 
   inv(): BoxedExpression {
+    if (!this.isCanonical) return this.canonical.inv();
+    if (this.head === 'Sqrt') return this.op1.inv().sqrt();
+    if (this.head === 'Divide') return this.op2.div(this.op1);
     return this.engine.One.div(this.canonical);
   }
 

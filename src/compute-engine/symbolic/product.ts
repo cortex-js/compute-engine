@@ -198,7 +198,7 @@ export class Product {
   div(term: NumericValue | BoxedExpression) {
     if (term instanceof NumericValue)
       this.coefficient = this.coefficient.div(term);
-    else this.mul(term.engine.inv(term));
+    else this.mul(term.inv());
   }
 
   /** The terms of the product, grouped by degrees.

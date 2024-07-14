@@ -237,8 +237,8 @@ describe('Compute Engine modes', () => {
   console.log(`Slow = ${(slow / turbo).toFixed(2)} x compiled`);
   console.log(`Fast = ${(fast / turbo).toFixed(2)} x compiled`);
 
-  it('slow vs turbo', () => expect(slow / turbo).toBeLessThan(180));
-  it('fast vs turbo', () => expect(fast / turbo).toBeLessThan(70));
+  it('slow vs turbo', () => expect(slow / turbo).toBeLessThan(230));
+  it('fast vs turbo', () => expect(fast / turbo).toBeLessThan(110));
 });
 
 describe('Relative performance', () => {

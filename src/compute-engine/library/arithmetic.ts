@@ -713,7 +713,7 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
           const [base, exp] = args;
           if (args.length !== 2 || !base.isValid || !exp.isValid)
             return ce._fn('Root', args);
-          return base.pow(ce.inv(exp));
+          return base.pow(exp.inv());
         },
       },
     },

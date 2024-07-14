@@ -124,7 +124,7 @@ function expandPower(
   const ce = base.engine;
   if (exp < 0) {
     const expr = expandPower(base, -exp);
-    return expr ? ce.inv(expr) : null;
+    return expr ? expr.inv() : null;
   }
   if (exp === 0) return ce.One;
   if (exp === 1) return expand(base);

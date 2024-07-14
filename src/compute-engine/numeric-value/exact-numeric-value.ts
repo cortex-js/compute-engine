@@ -236,6 +236,7 @@ export class ExactNumericValue extends NumericValue<number, [number, number]> {
 
   inv(): ExactNumericValue {
     if (this.isOne) return this;
+    if (this.isNegativeOne) return this;
     if (this.im !== 0) {
       const d = Math.hypot(this.re, this.im);
       return new ExactNumericValue({ im: -this.im / d, re: this.re / d });

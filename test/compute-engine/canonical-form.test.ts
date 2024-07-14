@@ -121,7 +121,6 @@ describe('CANONICAL FORMS', () => {
         ["Negate", "n"]
       ]
       canonical = ["Divide", 1, ["Power", ["Multiply", 2, "x", "y"], "n"]]
-      simplify  = ["Power", ["Multiply", 2, "x", "y"], ["Negate", "n"]]
       evaluate  = [
         "Divide",
         1,

@@ -263,23 +263,6 @@ describe('RAMANUJAN FACTORIAL APPROXIMATION', () =>
         ],
         ["Exp", "n"]
       ]
-      evaluate  = [
-        "Multiply",
-        ["Power", "n", "n"],
-        ["Sqrt", "Pi"],
-        ["Exp", ["Negate", "n"]],
-        [
-          "Root",
-          [
-            "Add",
-            ["Multiply", 8, ["Power", "n", 3]],
-            ["Multiply", 4, ["Square", "n"]],
-            "n",
-            ["Rational", 1, 30]
-          ],
-          6
-        ]
-      ]
       N-auto    = [
         "Divide",
         [
