@@ -45,13 +45,15 @@ describe('SIMPLIFY', () => {
   for (const expr of TEST_CASES) {
     let a: BoxedExpression;
     let b: BoxedExpression;
+
     if (typeof expr[0] === 'string') a = ce.parse(expr[0]);
     else a = ce.box(expr[0]);
+
     if (typeof expr[1] === 'string') b = ce.parse(expr[1]);
     else b = ce.box(expr[1]);
-    test(`simplify("${a.latex}") = "${b.latex}"`, () => {
-      expect(a.json).toEqual(b.json);
-    });
+
+    test(`simplify("${a.latex}") = "${b.latex}"`, () =>
+      expect(a.simplify()).toEqual(b));
   }
 });
 
