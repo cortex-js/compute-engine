@@ -371,9 +371,20 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
 
       signature: {
         params: ['Numbers'],
+        optParams: ['Numbers'],
         result: 'Numbers',
-        simplify: processLn,
-        evaluate: processLn,
+        canonical: (ce, ops) => {
+          if (ops.length === 1) {
+            let op = ops[0];
+            if (op.isOne) return ce.Zero;
+            if (op.isEqual(ce.E)) return ce.One;
+            return ce._fn('Ln', [checkDomain(ce, ops[0], 'Numbers')]);
+          }
+
+          return ce.function('Log', ops);
+        },
+        simplify: (_ce, ops) => processLn(ops[0]),
+        evaluate: (_ce, ops) => processLn(ops[0]),
         N: (ce, ops) =>
           applyN(
             ops[0],
@@ -391,17 +402,31 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
       threadable: true,
 
       signature: {
-        domain: ['FunctionOf', 'Numbers', ['OptArg', 'Numbers'], 'Numbers'],
+        params: ['Numbers'],
+        optParams: ['Numbers'],
+        result: 'Numbers',
         canonical: (ce, ops) => {
+          let [arg, base] = ops;
+          if (arg.isOne) return ce.Zero;
+          if (arg.isZero) return ce.NaN;
+          base ??= ce.number(10);
+
+          if (arg.isEqual(base)) return ce.One;
+
           if (ops.length === 1)
             return ce._fn('Log', [checkDomain(ce, ops[0], 'Numbers')]);
 
           ops = checkNumericArgs(ce, ops, 2);
           if (ops.length !== 2) return ce._fn('Log', ops);
-          const [arg, base] = ops;
+
           if (base.numericValue === 10) return ce._fn('Log', [arg]);
           return ce._fn('Log', [arg, base]);
         },
+
+        simplify: (ce, ops) => processLn(ops[0], ops[1] ?? ce.number(10)),
+
+        evaluate: (ce, ops) => processLn(ops[0], ops[1] ?? ce.number(10)),
+
         N: (ce, ops) => {
           if (ops[1] === undefined)
             return applyN(
@@ -434,17 +459,20 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
       signature: {
         params: ['Numbers'],
         result: 'Numbers',
-
-        N: (ce, ops) =>
-          applyN(
-            ops[0],
-            (x) => (x >= 0 ? Math.log2(x) : ce.complex(x).log().div(Math.LN2)),
-            (x) =>
-              x.isNeg()
-                ? Decimal.log10(x)
-                : ce.complex(x.toNumber()).log().div(Math.LN2),
-            (z) => z.log().div(Math.LN2)
-          ),
+        // Note: we are calling ce.function() because we want the canonicalization
+        // to be applied to the expression, for example for `['Lb', 0]` to be
+        // canonicalized to `NaN` (instead of `['Log', 0, 2]`).
+        canonical: (ce, args) => ce.function('Log', [args[0], ce.number(2)]),
+        // N: (ce, ops) =>
+        //   applyN(
+        //     ops[0],
+        //     (x) => (x >= 0 ? Math.log2(x) : ce.complex(x).log().div(Math.LN2)),
+        //     (x) =>
+        //       x.isNeg()
+        //         ? Decimal.log10(x)
+        //         : ce.complex(x.toNumber()).log().div(Math.LN2),
+        //     (z) => z.log().div(Math.LN2)
+        //   ),
       },
     },
 
@@ -457,17 +485,18 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
       signature: {
         params: ['Numbers'],
         result: 'Numbers',
-        N: (ce, ops) =>
-          applyN(
-            ops[0],
-            (x) =>
-              x >= 0 ? Math.log10(x) : ce.complex(x).log().div(Math.LN10),
-            (x) =>
-              !x.isNeg()
-                ? Decimal.log10(x)
-                : ce.complex(x.toNumber()).log().div(Math.LN10),
-            (z) => z.log().div(Math.LN10)
-          ),
+        canonical: (ce, args) => ce._fn('Log', [args[0]]),
+        // N: (ce, ops) =>
+        //   applyN(
+        //     ops[0],
+        //     (x) =>
+        //       x >= 0 ? Math.log10(x) : ce.complex(x).log().div(Math.LN10),
+        //     (x) =>
+        //       !x.isNeg()
+        //         ? Decimal.log10(x)
+        //         : ce.complex(x.toNumber()).log().div(Math.LN10),
+        //     (z) => z.log().div(Math.LN10)
+        //   ),
       },
     },
 
@@ -1484,27 +1513,14 @@ function processGcdLcm(
   return ce._fn(mode, [ce.number(result), ...rest]);
 }
 
-function processLn(ce: IComputeEngine, ops: ReadonlyArray<BoxedExpression>) {
-  const n = ops[0];
+function processLn(
+  n: BoxedExpression,
+  base?: BoxedExpression
+): BoxedExpression {
+  const ce = n.engine;
   if (n.isZero) return ce.NaN;
   if (n.isOne) return ce.Zero;
-  if (n.isNegativeOne && complexAllowed(ce))
-    return ce._fn('Multiply', [ce.Pi, ce.I]);
-  if (n.symbol === 'ExponentialE') return ce.One;
-  if (n.head === 'Power' && n.op1.symbol === 'ExporentialE') return n.op2;
-  if (n.head === 'Power') {
-    const [base, exp] = n.ops!;
-    return ce.evalMul(exp, ce.box(['Ln', base]).simplify());
-  }
-  if (n.head === 'Multiply') {
-    const [a, b] = n.ops!;
-    return ce.add(ce.box(['Ln', a]).simplify(), ce.box(['Ln', b]).simplify());
-  }
-  if (n.head === 'Divide') {
-    const [a, b] = n.ops!;
-    return ce.add(
-      ce.box(['Ln', a]).simplify(),
-      ce.box(['Ln', b]).neg().simplify()
-    );
-  }
+  if (n.isNegativeOne && complexAllowed(ce)) return ce.Pi.mul(ce.I);
+  if (base) return ce._fn('Log', [n, base]);
+  return ce._fn('Ln', [n]);
 }

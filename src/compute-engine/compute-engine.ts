@@ -2008,16 +2008,6 @@ export class ComputeEngine implements IComputeEngine {
   }
 
   /**
-   * Shortcut for `this.box(["Add", ...]).evaluate()`.
-   *
-   */
-  add(...ops: BoxedExpression[]): BoxedExpression {
-    // Short path. Note that are arguments are **not** validated.
-    ops = flattenOps(flattenSequence(ops), 'Add').map((x) => x.evaluate());
-    return new Terms(this, ops).asExpression();
-  }
-
-  /**
    *
    * Shortcut for `this.box(["Multiply", ...]).evaluate()`
    *

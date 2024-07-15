@@ -26,7 +26,7 @@ export function together(op: BoxedExpression): BoxedExpression {
       },
       [[], []] as BoxedExpression[][]
     );
-    return ce.add(...numer).div(ce.add(...denom));
+    return ce.Zero.add(...numer).div(ce.Zero.add(...denom));
   }
 
   return op;
@@ -71,7 +71,7 @@ export function factor(expr: BoxedExpression): BoxedExpression {
       ce._fromNumericValue(coeff.div(common), term)
     );
 
-    return ce._fromNumericValue(common, ce.add(...newTerms));
+    return ce._fromNumericValue(common, ce.Zero.add(...newTerms));
   }
 
   return Product.from(together(expr)).asExpression();

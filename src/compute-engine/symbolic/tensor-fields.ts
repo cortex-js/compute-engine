@@ -317,11 +317,11 @@ export class TensorFieldExpression implements TensorField<BoxedExpression> {
   }
 
   add(lhs: BoxedExpression, rhs: BoxedExpression): BoxedExpression {
-    return this.ce.add(lhs, rhs);
+    return lhs.add(rhs);
   }
 
   addn(...xs: BoxedExpression[]): BoxedExpression {
-    return this.ce.add(...xs);
+    return xs[0].add(...xs.slice(1));
   }
 
   neg(x: BoxedExpression): BoxedExpression {

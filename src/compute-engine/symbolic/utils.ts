@@ -149,10 +149,6 @@ export function semiCanonical(
 export function canonical(
   xs: ReadonlyArray<BoxedExpression>
 ): ReadonlyArray<BoxedExpression> {
-  if (!xs.every((x) => x instanceof _BoxedExpression))
-    return xs.map((x) => x.canonical);
   // Avoid memory allocation if possible
-  return xs.every((x) => x instanceof _BoxedExpression && x.isCanonical)
-    ? xs
-    : xs.map((x) => x.canonical);
+  return xs.every((x) => x.isCanonical) ? xs : xs.map((x) => x.canonical);
 }

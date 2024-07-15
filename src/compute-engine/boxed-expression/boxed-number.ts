@@ -273,6 +273,10 @@ export class BoxedNumber extends _BoxedExpression {
 
   div(rhs: number | BoxedExpression): BoxedExpression {
     if (typeof rhs === 'number') rhs = this.engine.number(rhs);
+    if (this.isNaN || rhs.isNaN) return this.engine.NaN;
+    if (this.isZero && rhs.isZero) return this.engine.NaN;
+    if (this.isZero && rhs.isFinite) return this.engine.Zero;
+
     if (rhs.numericValue !== null) {
       const ce = this.engine;
       let n = ce._numericValue(this._value);

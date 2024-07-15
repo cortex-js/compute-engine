@@ -37,7 +37,7 @@ import {
   normalizedUnknownsForSolve,
   isRelationalOperator,
 } from './utils';
-import { flattenOps, flattenSequence } from '../symbolic/flatten';
+import { flatten, flattenOps, flattenSequence } from '../symbolic/flatten';
 import { checkNumericArgs, adjustArguments } from './validate';
 import { expand } from '../symbolic/expand';
 import { apply } from '../function-utils';
@@ -349,10 +349,12 @@ export class BoxedFunction extends _BoxedExpression {
     if (rhs.length === 0) return this;
     const ce = this.engine;
 
-    return new Terms(ce, [
-      this,
-      ...rhs.map((x) => (typeof x === 'number' ? ce.number(x) : x)),
-    ]).asExpression();
+    const xs = flatten(
+      rhs.map((x) => (typeof x === 'number' ? ce.number(x) : x)),
+      'Add'
+    );
+
+    return new Terms(ce, [this, ...xs]).asExpression();
   }
 
   sub(rhs: BoxedExpression): BoxedExpression {
@@ -530,7 +532,7 @@ export class BoxedFunction extends _BoxedExpression {
     if (s !== undefined) return false;
 
     // Try to simplify the difference of the expressions
-    const diff = this.engine.add(lhs, rhs.neg()).simplify();
+    const diff = lhs.sub(rhs);
     if (diff.isZero) return true;
 
     return lhs.isSame(rhs);
@@ -637,10 +639,7 @@ export class BoxedFunction extends _BoxedExpression {
       if (expr.nops === 2) {
         // Try f(x) < g(x) -> f(x) - g(x) < 0
         const ce = this.engine;
-        const alt = ce._fn(expr.head, [
-          ce.add(expr.op1, expr.op2.neg()),
-          ce.Zero,
-        ]);
+        const alt = ce._fn(expr.head, [expr.op1.sub(expr.op2), ce.Zero]);
         expr = cheapest(expr, alt);
       }
     }

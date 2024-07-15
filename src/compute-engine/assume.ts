@@ -99,11 +99,7 @@ function assumeEquality(proposition: BoxedExpression): AssumeResult {
     const sols = findUnivariateRoots(proposition, lhs);
     if (sols.length === 0) {
       ce.assumptions.set(
-        ce.box([
-          'Equal',
-          ce.add(proposition.op1.canonical, proposition.op2.neg()).simplify(),
-          0,
-        ]),
+        ce.box(['Equal', proposition.op1.sub(proposition.op2), 0]),
         true
       );
     }
@@ -195,7 +191,7 @@ function assumeInequality(proposition: BoxedExpression): AssumeResult {
     op = '<=';
   }
   if (!op) return 'internal-error';
-  const p = ce.add(lhs!.canonical, rhs!.neg()).simplify();
+  const p = lhs!.sub(rhs!);
 
   // Case 2
   const result = ce.box([op === '<' ? 'Less' : 'LessEqual', p, 0]).evaluate();

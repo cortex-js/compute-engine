@@ -377,7 +377,7 @@ export function boxFunction(
             return ce.number(ce.complex(re, im), options);
           return op1;
         }
-        return ce.add(op1, ce.evalMul(op2, ce.I));
+        return op1.add(ce.evalMul(op2, ce.I));
       }
       throw new Error('Expected one or two arguments with Complex expression');
     }

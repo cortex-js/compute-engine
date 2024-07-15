@@ -26,13 +26,13 @@ export function negate(expr: BoxedExpression): BoxedExpression {
   const ce = expr.engine;
 
   // Negate(Subtract(a, b)) -> Subtract(b, a)
-  if (expr.head === 'Subtract') return ce.add(expr.op2, negate(expr.op1));
+  if (expr.head === 'Subtract') return expr.op2.sub(expr.op1);
 
   // Distribute over addition
   // Negate(Add(a, b)) -> Add(Negate(a), Negate(b))
   if (expr.head === 'Add') {
     const ops = expr.ops!.map((x) => negate(x));
-    return ce.add(...ops);
+    return ops[0].add(...ops.slice(1));
   }
 
   // Distribute over multiplication

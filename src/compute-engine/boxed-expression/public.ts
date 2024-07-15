@@ -1975,8 +1975,6 @@ export interface IComputeEngine {
 
   hold(expr: SemiBoxedExpression): BoxedExpression;
 
-  add(...ops: ReadonlyArray<BoxedExpression>): BoxedExpression;
-
   evalMul(...ops: ReadonlyArray<BoxedExpression>): BoxedExpression;
 
   pair(
