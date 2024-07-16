@@ -68,9 +68,6 @@ export class Terms {
   }
 
   private add(coef: NumericValue, term: BoxedExpression): void {
-    const [coef2, term2] = this.engine._toNumericValue(term);
-    console.assert(coef2.isOne);
-
     if (term.isZero || coef.isZero) return;
     if (term.isOne) {
       // We have a numeric value. Keep it in the terms,
@@ -109,6 +106,29 @@ export class Terms {
     return this.terms.findIndex((x) => x.term.isSame(term));
   }
 
+  N(): BoxedExpression {
+    const ce = this.engine;
+
+    const terms = this.terms;
+
+    if (terms.length === 0) return ce.Zero;
+
+    if (terms.length === 1) {
+      const { coef, term } = terms[0];
+      if (coef.isOne) return term.N();
+      if (coef.isNegativeOne) return term.N().neg();
+
+      return this.engine._fromNumericValue(coef.N(), term.N());
+    }
+
+    return ce.function(
+      'Add',
+      terms.map(({ coef, term }) =>
+        this.engine._fromNumericValue(coef.N(), term.N())
+      )
+    );
+  }
+
   asExpression(): BoxedExpression {
     const ce = this.engine;
 
@@ -118,8 +138,9 @@ export class Terms {
 
     if (terms.length === 1) {
       const { coef, term } = terms[0];
+      if (term.isNaN) return ce.NaN;
       if (coef.isOne) return term;
-      if (coef.isNegativeOne) return ce.function('Negate', [term]);
+      if (coef.isNegativeOne) return term.neg();
 
       return this.engine._fromNumericValue(coef, term);
     }

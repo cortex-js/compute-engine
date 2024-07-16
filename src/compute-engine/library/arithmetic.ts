@@ -33,13 +33,14 @@ import {
   evalSummation,
   canonicalSummation,
   canonicalAdd,
-  simplifyAdd,
+  add,
+  addN,
 } from './arithmetic-add';
 import {
-  simplifyMultiply,
-  evalMultiply,
-  evalMultiplication,
+  evalProduct,
   canonicalProduct,
+  mul,
+  mulN,
 } from './arithmetic-multiply';
 import { canonicalDivide, evalDivide, evalNDivide } from './arithmetic-divide';
 import { processPower } from './arithmetic-power';
@@ -49,7 +50,7 @@ import {
   checkDomains,
   checkNumericArgs,
 } from '../boxed-expression/validate';
-import { flattenOps, flattenSequence } from '../symbolic/flatten';
+import { flatten, flattenOps, flattenSequence } from '../symbolic/flatten';
 import { each, isCollection } from '../collection-utils';
 import { BoxedNumber } from '../boxed-expression/boxed-number';
 import { IComputeEngine, BoxedExpression } from '../boxed-expression/public';
@@ -59,7 +60,6 @@ import {
   asRational,
   asBignum,
 } from '../boxed-expression/numerics';
-import { expandProducts } from '../symbolic/expand';
 
 // When considering processing an arithmetic expression, the following
 // are the core canonical arithmetic operations that should be considered:
@@ -150,23 +150,11 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
             ce,
             ops.map((x) => x.domain)
           ),
-        // canonical: (ce, args) => canonicalAdd(ce, args), // never called: shortpath
-        simplify: (ce, ops) =>
-          simplifyAdd(
-            ce,
-            ops.map((x) => x.simplify())
-          ),
-        evaluate: (ce, ops) =>
-          simplifyAdd(
-            ce,
-            ops.map((x) => x.evaluate())
-          ),
-
-        N: (ce, ops) =>
-          simplifyAdd(
-            ce,
-            ops.map((x) => x.N())
-          ),
+        // @fastpath: canonicalization is done in the function
+        // makeNumericFunction().
+        simplify: (ce, ops) => add(...ops.map((x) => x.simplify())),
+        evaluate: (ce, ops) => add(...ops.map((x) => x.evaluate())),
+        N: (ce, ops) => addN(...ops.map((x) => x.N())),
       },
     },
 
@@ -228,14 +216,15 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
           let result = args[0];
           if (!result) return ce.error('missing');
           if (args.length < 2) return result;
+
           const rest = args.slice(1);
           for (const x of rest) result = canonicalDivide(result, x);
 
           return result;
         },
         simplify: (ce, args) => args[0].div(args[1]),
-        evaluate: (ce, ops) => evalDivide(ce, ops[0], ops[1]),
-        N: (ce, ops) => evalNDivide(ce, ops[0], ops[1]),
+        evaluate: (ce, ops) => evalDivide(ops[0], ops[1]),
+        N: (ce, ops) => evalNDivide(ops[0], ops[1]),
       },
     },
 
@@ -535,31 +524,12 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
 
       signature: {
         domain: 'NumericFunctions',
-        // Never called: fastpath
-        // canonical: (ce, args) => canonicalMultiply(ce, args)
+        // @fastpath: canonicalization is done in the function
+        // makeNumericFunction().
         //
-        simplify: (ce, ops) => simplifyMultiply(ce, ops),
-
-        evaluate: (ce, ops) => {
-          // @fixme: move call to expandProducts() and flattenOps() inside
-          // evalMultiply (once ce.mul() has been changed to not evaluate)
-          ops = ops.map((x) => x.evaluate());
-          const expr = expandProducts(ce, ops);
-          if (expr !== null) {
-            if (expr.head !== 'Multiply') return expr.evaluate();
-            ops = flattenOps(expr.ops!, 'Multiply');
-          }
-          return evalMultiply(ce, ops);
-        },
-        N: (ce, ops) => {
-          ops = ops.map((x) => x.N());
-          const expr = expandProducts(ce, ops);
-          if (expr !== null) {
-            if (expr.head !== 'Multiply') return expr.N();
-            ops = flattenOps(expr.ops!, 'Multiply');
-          }
-          return evalMultiply(ce, ops, 'N');
-        },
+        simplify: (ce, ops) => mul(...ops.map((x) => x.simplify())),
+        evaluate: (ce, ops) => mul(...ops.map((x) => x.evaluate())),
+        N: (ce, ops) => mulN(...ops.map((x) => x.N())),
       },
     },
 
@@ -675,7 +645,7 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
           'RationalNumbers',
         ],
         canonical: (ce, args) => {
-          args = flattenSequence(canonical(args));
+          args = flatten(args);
 
           if (args.length === 0)
             return ce._fn('Rational', [ce.error('missing')]);
@@ -825,7 +795,7 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
       signature: {
         domain: ['FunctionOf', 'Numbers', 'Numbers'],
         canonical: (ce, ops) => {
-          ops = flattenSequence(canonical(ops));
+          ops = flattenSequence(ops);
           if (ops.length !== 1) return ce._fn('Sqrt', ops);
           return ops[0].sqrt();
         },
@@ -849,7 +819,7 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
       signature: {
         domain: ['FunctionOf', 'Numbers', 'Numbers'],
         canonical: (ce, args) => {
-          args = flattenSequence(canonical(args));
+          args = flatten(args);
           if (args.length !== 1) return ce._fn('Square', args);
           return ce._fn('Power', [args[0], ce.number(2)]).canonical;
         },
@@ -1222,9 +1192,9 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
         // codomain: (ce, args) => domainAdd(ce, args),
         // The 'body' and 'range' need to be interpreted by canonicalMultiplication(). Don't canonicalize them yet.
         canonical: (ce, ops) => canonicalProduct(ce, ops[0], ops[1]),
-        simplify: (ce, ops) => evalMultiplication(ce, ops, 'simplify'),
-        evaluate: (ce, ops) => evalMultiplication(ce, ops, 'evaluate'),
-        N: (ce, ops) => evalMultiplication(ce, ops, 'N'),
+        simplify: (ce, ops) => evalProduct(ce, ops, 'simplify'),
+        evaluate: (ce, ops) => evalProduct(ce, ops, 'evaluate'),
+        N: (ce, ops) => evalProduct(ce, ops, 'N'),
       },
     },
 

@@ -2,6 +2,7 @@ import { BoxedExpression } from './public';
 import { isRelationalOperator } from './utils';
 import { Product, commonTerms } from '../symbolic/product';
 import { NumericValue } from '../numeric-value/public';
+import { add } from '../library/arithmetic-add';
 
 /** Combine rational expressions into a single fraction */
 export function together(op: BoxedExpression): BoxedExpression {
@@ -26,7 +27,7 @@ export function together(op: BoxedExpression): BoxedExpression {
       },
       [[], []] as BoxedExpression[][]
     );
-    return ce.Zero.add(...numer).div(ce.Zero.add(...denom));
+    return add(...numer).div(add(...denom));
   }
 
   return op;
@@ -71,7 +72,7 @@ export function factor(expr: BoxedExpression): BoxedExpression {
       ce._fromNumericValue(coeff.div(common), term)
     );
 
-    return ce._fromNumericValue(common, ce.Zero.add(...newTerms));
+    return ce._fromNumericValue(common, add(...newTerms));
   }
 
   return Product.from(together(expr)).asExpression();

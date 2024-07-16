@@ -141,7 +141,7 @@ function getDegree(expr: BoxedExpression | undefined): number {
 
 /**
  * The total degree of an expression is the sum of the
- * of the positive integer degrees of the factors in the expression:
+ * positive integer degrees of the factors in the expression:
  *
  * `3√2x^5y^3` -> 8 (5 + 3)
  */
@@ -160,6 +160,18 @@ export function totalDegree(expr: BoxedExpression): number {
     }
     return deg;
   }
+
+  if (expr.head === 'Add' || expr.head === 'Subtract') {
+    let deg = 0;
+    for (const arg of expr.ops!) deg = Math.max(deg, totalDegree(arg));
+    return deg;
+  }
+
+  if (expr.head === 'Negate') return totalDegree(expr.op1);
+
+  if (expr.head === 'Divide') return totalDegree(expr.op1);
+
+  if (expr.numericValue || (expr.symbol && expr.isConstant)) return 0;
 
   return 1;
 }

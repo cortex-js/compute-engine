@@ -981,12 +981,12 @@ function canonicalList(
   ops = ops.map((op) => {
     if (op.head === 'Delimiter') {
       if (op.op1.head === 'Sequence')
-        return ce.box(['List', ...canonical(op.op1.ops!)]);
-      return ce.box(['List', op.op1?.canonical ?? ce.Nothing]);
+        return ce._fn('List', canonical(op.op1.ops!));
+      return ce._fn('List', [op.op1?.canonical ?? ce.Nothing]);
     }
     return op.canonical;
   });
-  return ce.box(['List', ...ops]);
+  return ce._fn('List', ops);
 }
 
 function canonicalSet(
@@ -999,7 +999,7 @@ function canonicalSet(
 
   for (const op of ops) if (!has(op)) set.push(op);
 
-  return ce.function('Set', set, { canonical: false });
+  return ce._fn('Set', set);
 }
 
 function collectionFunction(

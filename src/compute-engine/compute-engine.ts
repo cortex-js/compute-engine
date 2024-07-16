@@ -60,8 +60,6 @@ import { BoxedString } from './boxed-expression/boxed-string';
 import { BoxedNumber } from './boxed-expression/boxed-number';
 import { _BoxedSymbolDefinition } from './boxed-expression/boxed-symbol-definition';
 import { BoxedFunction } from './boxed-expression/boxed-function';
-import { evalMultiply } from './library/arithmetic-multiply';
-import { evalDivide } from './library/arithmetic-divide';
 import {
   BoxedSymbol,
   makeCanonicalSymbol,
@@ -1931,7 +1929,7 @@ export class ComputeEngine implements IComputeEngine {
   function(
     head: string,
     ops: SemiBoxedExpression[],
-    options?: { metadata?: Metadata; canonical?: CanonicalOptions }
+    options?: { metadata?: Metadata; canonical: CanonicalOptions }
   ): BoxedExpression {
     return boxFunction(this, head, ops, options);
   }
@@ -2005,17 +2003,6 @@ export class ComputeEngine implements IComputeEngine {
    */
   hold(expr: SemiBoxedExpression): BoxedExpression {
     return this._fn('Hold', [this.box(expr, { canonical: false })]);
-  }
-
-  /**
-   *
-   * Shortcut for `this.box(["Multiply", ...]).evaluate()`
-   *
-   */
-  evalMul(...ops: ReadonlyArray<BoxedExpression>): BoxedExpression {
-    // Short path. Note that are arguments are **not** validated.
-    const flatOps = flattenOps(flattenSequence(ops), 'Multiply');
-    return evalMultiply(this, flatOps);
   }
 
   /** Shortcut for `this.box(["Pair", ...])`

@@ -32,9 +32,9 @@ import { narrow } from './boxed-domain';
 import { domainToSignature, signatureToDomain } from '../domain-utils';
 import { match } from './match';
 import { canonicalDivide } from '../library/arithmetic-divide';
-import { Terms } from '../numerics/terms';
 import { negate } from '../symbolic/negate';
-import { Product } from '../symbolic/product';
+import { add } from '../library/arithmetic-add';
+import { mul } from '../library/arithmetic-multiply';
 
 /**
  * BoxedSymbol
@@ -178,7 +178,7 @@ export class BoxedSymbol extends _BoxedExpression {
   }
 
   inv(): BoxedExpression {
-    return this.engine.One.div(this);
+    return this.engine._fn('Divide', [this.engine.One, this]);
   }
 
   abs(): BoxedExpression {
@@ -189,27 +189,13 @@ export class BoxedSymbol extends _BoxedExpression {
 
   add(...rhs: (number | BoxedExpression)[]): BoxedExpression {
     if (rhs.length === 0) return this;
-    const ce = this.engine;
-
-    return new Terms(ce, [
-      this,
-      ...rhs.map((x) => (typeof x === 'number' ? ce.number(x) : x)),
-    ]).asExpression();
-  }
-
-  sub(rhs: BoxedExpression): BoxedExpression {
-    return this.add(rhs.neg());
+    return add(this.canonical, ...rhs.map((x) => this.engine.box(x)));
   }
 
   mul(...rhs: (number | BoxedExpression)[]): BoxedExpression {
     if (rhs.length === 0) return this;
 
-    const ce = this.engine;
-
-    return new Product(ce, [
-      this,
-      ...rhs.map((x) => (typeof x === 'number' ? ce.number(x) : x)),
-    ]).asExpression();
+    return mul(this.canonical, ...rhs.map((x) => this.engine.box(x)));
   }
 
   div(rhs: number | BoxedExpression): BoxedExpression {

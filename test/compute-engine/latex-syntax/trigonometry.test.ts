@@ -54,7 +54,7 @@ describe('TRIGONOMETRIC FUNCTIONS', () => {
   test(`\\cos(\\frac{\\pi}{5})`, () =>
     expect(check('\\cos(\\frac{\\pi}{5})')).toMatchInlineSnapshot(`
       box       = ["Cos", ["Divide", "Pi", 5]]
-      simplify  = ["Divide", ["Add", ["Sqrt", 5], 1], 4]
+      simplify  = ["Divide", ["Add", 1, ["Sqrt", 5]], 4]
       N-auto    = 0.8090169943749475
     `));
 });

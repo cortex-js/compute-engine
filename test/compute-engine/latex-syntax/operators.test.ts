@@ -131,7 +131,7 @@ describe('OPERATOR invisible', () => {
         ["Delimiter", ["InvisibleOperator", 2, "q"]]
       ]
       canonical = ["Multiply", 2, "q", "q"]
-      evaluate  = ["Multiply", 2, ["Square", "q"]]
+      simplify  = ["Multiply", 2, ["Square", "q"]]
     `));
 
   test('f(2q) // Invisible operator as a function', () =>
@@ -159,7 +159,8 @@ describe('OPERATOR invisible', () => {
   test('2\\frac{a}{b} // Invisible MULTIPLY operator', () =>
     expect(check('2\\frac{a}{b}')).toMatchInlineSnapshot(`
       box       = ["InvisibleOperator", 2, ["Divide", "a", "b"]]
-      canonical = ["Divide", ["Multiply", 2, "a"], "b"]
+      canonical = ["Multiply", 2, ["Divide", "a", "b"]]
+      simplify  = ["Divide", ["Multiply", 2, "a"], "b"]
     `));
 });
 
@@ -245,7 +246,7 @@ describe('OPERATOR infix', () => {
   test('a-b+c+d // Add', () =>
     expect(check('a-b+c+d')).toMatchInlineSnapshot(`
       box       = ["Add", "a", ["Negate", "b"], "c", "d"]
-      canonical = ["Add", ["Negate", "b"], "a", "c", "d"]
+      canonical = ["Add", "a", "c", "d", ["Negate", "b"]]
     `));
 
   test('-2+3x-4', () =>
@@ -283,7 +284,7 @@ describe('OPERATOR multiply', () => {
   test('2\\sin(x)\\frac12, function apply', () =>
     expect(check('2\\sin(x)\\frac12')).toMatchInlineSnapshot(`
       box       = ["InvisibleOperator", 2, ["Sin", "x"], ["Divide", 1, 2]]
-      canonical = ["Multiply", "Half", 2, ["Sin", "x"]]
+      canonical = ["Multiply", 2, "Half", ["Sin", "x"]]
       simplify  = ["Sin", "x"]
     `));
   test('3\\pi5', () =>
@@ -446,7 +447,7 @@ describe('OPERATOR serialize, valid', () => {
 
   test('1-(2i+1)', () =>
     expect(latex(['Subtract', 1, ['Complex', 1, 2]])).toMatchInlineSnapshot(
-      `1+(-1-2\\imaginaryI)`
+      `-1-2\\imaginaryI+1`
     ));
 
   test(`['Multiply', 2, 3]`, () =>
@@ -460,12 +461,12 @@ describe('OPERATOR serialize, valid', () => {
   test(`['Multiply', ['Divide', 2, 'x'], ['Divide', 'x', 3]]`, () =>
     expect(
       latex(['Multiply', ['Divide', 2, 'x'], ['Divide', 'x', 3]])
-    ).toMatchInlineSnapshot(`\\frac{2}{3}`));
+    ).toMatchInlineSnapshot(`\\frac{2x}{3x}`));
 
   test(`['Multiply', ['Divide', 2, 'x'], ['Power', 'x', -2]]`, () =>
     expect(
       latex(['Multiply', ['Divide', 2, 'x'], ['Power', 'x', -2]])
-    ).toMatchInlineSnapshot(`\\frac{2}{x^3}`));
+    ).toMatchInlineSnapshot(`\\frac{\\frac{2}{x}}{x^2}`));
 
   test(`['Divide', 2, 3]`, () =>
     expect(latex(['Divide', 2, 3])).toMatchInlineSnapshot(`\\frac{2}{3}`));

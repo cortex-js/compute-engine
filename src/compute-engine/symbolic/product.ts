@@ -16,7 +16,7 @@ import {
 } from '../numerics/rationals';
 import { asRationalSqrt } from '../library/arithmetic-power';
 
-import { flattenOps } from './flatten';
+import { flatten, flattenOps } from './flatten';
 import { asRational, add } from '../boxed-expression/numerics';
 import { NumericValue } from '../numeric-value/public';
 
@@ -78,6 +78,12 @@ export class Product {
    */
   mul(term: BoxedExpression) {
     console.assert(term.isCanonical);
+    if (this.coefficient.isNaN) return;
+
+    if (term.isNaN) {
+      this.coefficient = this.engine._numericValue(NaN);
+      return;
+    }
 
     if (term.head === 'Multiply') {
       for (const t of term.ops!) this.mul(t);
@@ -95,7 +101,8 @@ export class Product {
 
       // If we're calculation a canonical  product, fold exact literals into
       // running terms
-      if (term.numericValue !== null) {
+      const num = term.numericValue;
+      if (num !== null) {
         if (term.isOne) return;
 
         if (term.isZero) {
@@ -116,15 +123,12 @@ export class Product {
           return;
         }
 
-        const num = term.numericValue;
-        if (num !== null) {
-          this.coefficient = this.coefficient.mul(
-            num instanceof Decimal || num instanceof Complex
-              ? this.engine._numericValue(num)
-              : num
-          );
-          return;
-        }
+        this.coefficient = this.coefficient.mul(
+          num instanceof Decimal || num instanceof Complex
+            ? this.engine._numericValue(num)
+            : num
+        );
+        return;
       }
 
       const radical = asRationalSqrt(term);
@@ -137,61 +141,74 @@ export class Product {
       }
     }
 
-    let rest = term;
     if (this._isCanonical && !term.symbol) {
       // If possible, factor out a rational coefficient
       let coef: NumericValue;
-      [coef, rest] = this.engine._toNumericValue(term);
+      [coef, term] = this.engine._toNumericValue(term);
       this.coefficient = this.coefficient.mul(coef);
     }
 
-    // Note: rest should be positive, so no need to handle the -1 case
-    if (rest.isOne) return;
+    // Note: term should be positive, so no need to handle the -1 case
+    if (term.isOne) return;
 
     // If this is a power expression, extract the exponent
     let exponent: Rational = [1, 1];
-    if (rest.head === 'Power') {
+    if (term.head === 'Power') {
       // Term is `Power(op1, op2)`
-      const r = asRational(rest.op2);
+      const r = asRational(term.op2);
       if (r) {
-        const exponentExpr = rest.op2;
+        const exponentExpr = term.op2;
         exponent = r;
-        rest = rest.op1;
-        if (rest.head === 'Multiply') {
+        term = term.op1;
+        if (term.head === 'Multiply') {
           // We have Power(Multiply(...), exponent): apply the power law
           // to each term
-          for (const x of rest.ops!)
+          for (const x of term.ops!)
             this.mul(this.engine._fn('Power', [x, exponentExpr]));
           return;
-        } else if (rest.head === 'Divide') {
+        } else if (term.head === 'Divide') {
           // We have Power(Divide(...), exponent): apply the power law
           // to each term
-          this.mul(this.engine._fn('Power', [rest.op1, exponentExpr]));
+          this.mul(this.engine._fn('Power', [term.op1, exponentExpr]));
           this.mul(
             this.engine._fn('Power', [
-              rest.op2,
+              term.op2,
               this.engine.number(neg(exponent)),
             ])
           );
           return;
         }
       }
-    } else if (rest.head === 'Divide') {
-      this.mul(rest.op1);
-      exponent = [-1, 1];
-      rest = rest.op2;
+    } else if (term.head === 'Divide') {
+      // In order to correctly account for the denominator, invert it.
+      // For example, in the case `a^4/a^2' we want to add
+      // `a^(-2)` to the product, not `1/a^2`. The former will get the exponent
+      // extracted, while the latter will consider the denominator as a
+      // separate term.
+      const inv = term.op2.inv();
+      // If the inverse is not a Divide, multiply it, otherwise keep it as
+      // a term
+      if (inv.head !== 'Divide') {
+        this.mul(term.op1);
+        this.mul(inv);
+        return;
+      }
+      if (term.op1.isOne) {
+        term = term.op2;
+        exponent = [-1, 1];
+      }
     }
 
     // Look for the base, and add the exponent if already in the list of terms
     let found = false;
     for (const x of this.terms) {
-      if (x.term.isSame(rest)) {
+      if (x.term.isSame(term)) {
         x.exponent = add(x.exponent, exponent);
         found = true;
         break;
       }
     }
-    if (!found) this.terms.push({ term: rest, exponent });
+    if (!found) this.terms.push({ term, exponent });
   }
 
   /** Divide the product by a term of coefficient */
@@ -283,6 +300,7 @@ export class Product {
     const ce = this.engine;
 
     const coef = this.coefficient;
+    if (coef.isNaN) return ce.NaN;
     if (coef.isPositiveInfinity) return ce.PositiveInfinity;
     if (coef.isNegativeInfinity) return ce.NegativeInfinity;
     if (coef.isZero) return ce.Zero;
@@ -415,16 +433,15 @@ function termsAsExpression(
   ce: IComputeEngine,
   terms: { exponent: Rational; terms: ReadonlyArray<BoxedExpression> }[]
 ): BoxedExpression {
-  let result: ReadonlyArray<BoxedExpression> = terms
-    .sort(degreeOrder)
-    .map((x) => {
-      const t = flattenOps(x.terms, 'Multiply');
-      const base =
-        t.length <= 1 ? t[0] : ce._fn('Multiply', [...t].sort(order));
-      return base.pow(ce.number(x.exponent));
-    });
-  result = flattenOps(result, 'Multiply') ?? result;
+  let result = terms.map(({ terms, exponent }) => {
+    const t = flatten(terms, 'Multiply');
+    const base = t.length <= 1 ? t[0] : ce._fn('Multiply', [...t].sort(order));
+    return isOne(exponent) ? base : base.pow(ce.number(exponent));
+  });
+
+  result = flatten(result, 'Multiply');
   if (result.length === 0) return ce.One;
   if (result.length === 1) return result[0];
-  return ce._fn('Multiply', [...result].sort(order));
+
+  return ce._fn('Multiply', result.sort(order));
 }

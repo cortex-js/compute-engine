@@ -299,15 +299,15 @@ box       = [
 canonical = [
   "Add",
   "Pi",
-  ["Sqrt", 5],
-  ["Sqrt", 5],
-  ["Rational", 3, 11],
-  ["Rational", 5, 7],
   1.5,
   1.7,
   2,
   2,
-  4
+  4,
+  ["Rational", 3, 11],
+  ["Rational", 5, 7],
+  ["Sqrt", 5],
+  ["Sqrt", 5]
 ]
 simplify  = ["Add", "Pi", 16.659148942012568]
 N-auto    = 19.80074159560236
@@ -349,7 +349,7 @@ N-auto    = 0.33333271264575426
 
 exports[`ADD Add \\sqrt{3}+2\\sqrt{3} 1`] = `["Multiply", 3, ["Sqrt", 3]]`;
 
-exports[`ADD Add 8+\\sqrt{3} 1`] = `["Add", ["Sqrt", 3], 8]`;
+exports[`ADD Add 8+\\sqrt{3} 1`] = `["Add", 8, ["Sqrt", 3]]`;
 
 exports[`ADD Add 8.1+\\sqrt{3} 1`] = `9.832050807568876`;
 
@@ -373,7 +373,8 @@ N-mach    = 2.718281828459045
 
 exports[`CONSTANTS GoldenRatio 1`] = `
 box       = GoldenRatio
-simplify  = ["Divide", ["Add", ["Sqrt", 5], 1], 2]
+simplify  = ["Add", ["Divide", ["Sqrt", 5], 2], "Half"]
+evaluate  = ["Divide", ["Add", 1, ["Sqrt", 5]], 2]
 N-auto    = 1.618033988749895
 `;
 
@@ -402,14 +403,13 @@ exports[`DIVIDE Divide with single argument 1`] = `2.5`;
 
 exports[`EXACT EVALUATION Add: All exact 1`] = `
 box       = ["Add", 6, ["Divide", 10, 14], ["Sqrt", ["Divide", 18, 9]]]
-canonical = ["Add", ["Sqrt", 2], ["Rational", 5, 7], 6]
-simplify  = ["Add", ["Sqrt", 2], ["Rational", 47, 7]]
+canonical = ["Add", 6, ["Rational", 5, 7], ["Sqrt", 2]]
+simplify  = ["Add", ["Rational", 47, 7], ["Sqrt", 2]]
 N-auto    = 8.12849927665881
 `;
 
 exports[`EXACT EVALUATION Add: All exact 2`] = `
 box       = ["Add", 6, ["Sqrt", 2], ["Sqrt", 5]]
-canonical = ["Add", ["Sqrt", 2], ["Sqrt", 5], 6]
 N-auto    = 9.650281539872886
 `;
 
@@ -418,13 +418,13 @@ box       = ["Add", 2, 5, ["Divide", 5, 7], ["Divide", 7, 9], ["Sqrt", 2], "Pi"]
 canonical = [
   "Add",
   "Pi",
-  ["Sqrt", 2],
+  2,
+  5,
   ["Rational", 5, 7],
   ["Rational", 7, 9],
-  2,
-  5
+  ["Sqrt", 2]
 ]
-simplify  = ["Add", "Pi", ["Sqrt", 2], ["Rational", 535, 63]]
+simplify  = ["Add", "Pi", ["Rational", 535, 63], ["Sqrt", 2]]
 N-auto    = 13.04786970802638
 `;
 
@@ -442,12 +442,12 @@ box       = [
 canonical = [
   "Add",
   "Pi",
-  ["Sqrt", 2],
-  ["Rational", 5, 7],
-  ["Rational", 7, 9],
   1.1,
   2,
-  5
+  5,
+  ["Rational", 5, 7],
+  ["Rational", 7, 9],
+  ["Sqrt", 2]
 ]
 simplify  = ["Add", "Pi", 11.006277054436588]
 N-auto    = 14.14786970802638
@@ -465,14 +465,14 @@ box       = [
 ]
 canonical = [
   "Add",
-  ["Sqrt", 5],
-  ["Sqrt", 7],
   -2.12,
+  2.12,
   ["Rational", 1, 4],
   ["Rational", 1, 4],
-  2.12
+  ["Sqrt", 5],
+  ["Sqrt", 7]
 ]
-simplify  = ["Add", ["Sqrt", 5], ["Sqrt", 7], "Half"]
+simplify  = ["Add", "Half", ["Sqrt", 5], ["Sqrt", 7]]
 N-auto    = 5.3818192885643805
 `;
 
@@ -511,19 +511,19 @@ box       = [
 ]
 canonical = [
   "Add",
+  2,
+  ["Rational", 1, 4],
+  ["Rational", 1, 4],
   ["Sqrt", 5],
-  ["Sqrt", 7],
-  ["Rational", 1, 4],
-  ["Rational", 1, 4],
-  2
+  ["Sqrt", 7]
 ]
-simplify  = ["Add", ["Sqrt", 5], ["Sqrt", 7], ["Rational", 5, 2]]
+simplify  = ["Add", ["Rational", 5, 2], ["Sqrt", 5], ["Sqrt", 7]]
 N-auto    = 7.3818192885643805
 `;
 
 exports[`EXACT EVALUATION Inexact values propagate 1`] = `
 box       = ["Add", 0.1, 2, ["Divide", 1, 4]]
-canonical = ["Add", 0.1, ["Rational", 1, 4], 2]
+canonical = ["Add", 0.1, 2, ["Rational", 1, 4]]
 simplify  = 2.35
 `;
 
@@ -618,7 +618,6 @@ eval-cplx = ["Complex", 0, 2.2]
 
 exports[`MULTIPLY 2x(2/3) 1`] = `
 box       = ["Multiply", 2, ["Rational", 2, 3]]
-canonical = ["Multiply", ["Rational", 2, 3], 2]
 simplify  = ["Rational", 4, 3]
 N-auto    = 1.3333333333333333
 `;
@@ -631,7 +630,7 @@ simplify  = 823045260658436200
 
 exports[`MULTIPLY 2x-1234567890987654321.123456789 1`] = `
 box       = ["Multiply", 2, "1234567890987654321.123456789"]
-evaluate  = 2469135781975309000
+simplify  = 2469135781975309000
 `;
 
 exports[`MULTIPLY 2x1234567890987654321 1`] = `
@@ -674,12 +673,12 @@ box       = [
   2,
   ["Multiply", ["Divide", 5, 7], ["Divide", 7, 9]]
 ]
-canonical = ["Multiply", ["Rational", 5, 7], ["Rational", 7, 9], 2]
+canonical = ["Multiply", 2, ["Rational", 5, 7], ["Rational", 7, 9]]
 simplify  = ["Rational", 10, 9]
 N-auto    = 1.1111111111111112
 `;
 
-exports[`MULTIPLY Multiply: All exact 2`] = `
+exports[`MULTIPLY Multiply: All exact with symbol 1`] = `
 box       = [
   "Multiply",
   2,
@@ -691,15 +690,16 @@ box       = [
 ]
 canonical = [
   "Multiply",
-  ["Sqrt", 2],
-  ["Rational", 5, 7],
-  ["Rational", 7, 9],
   2,
   5,
+  ["Rational", 5, 7],
+  ["Rational", 7, 9],
+  ["Sqrt", 2],
   "Pi"
 ]
-simplify  = ["Divide", ["Multiply", 50, "Pi", ["Sqrt", 2]], 9]
-N-auto    = 24.682682989768704
+simplify  = ["Divide", ["Multiply", 50, ["Sqrt", 2], "Pi"], 9]
+evaluate  = ["Multiply", "Pi", ["Divide", ["Multiply", 50, ["Sqrt", 2]], 9]]
+N-auto    = 24.6826829897687
 `;
 
 exports[`MULTIPLY Multiply: One inexact 1`] = `
@@ -715,16 +715,16 @@ box       = [
 ]
 canonical = [
   "Multiply",
-  ["Sqrt", 2],
-  ["Rational", 5, 7],
-  ["Rational", 7, 9],
   1.1,
   2,
   5,
+  ["Rational", 5, 7],
+  ["Rational", 7, 9],
+  ["Sqrt", 2],
   "Pi"
 ]
-simplify  = 27.15095128874557
-N-auto    = 27.150951288745578
+simplify  = ["Multiply", 8.64241621450225, "Pi"]
+N-auto    = 27.150951288745574
 `;
 
 exports[`MULTIPLY with +Infinity 1`] = `

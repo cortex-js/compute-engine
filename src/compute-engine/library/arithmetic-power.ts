@@ -11,6 +11,7 @@ import {
   asRational,
   asMachineInteger,
 } from '../boxed-expression/numerics';
+import { mul } from './arithmetic-multiply';
 
 export function square(
   ce: IComputeEngine,
@@ -33,7 +34,7 @@ export function square(
   if (base.head === 'Power') {
     const exp = asMachineInteger(base.op2);
     if (exp !== null) return base.op1.pow(exp * 2);
-    return base.op1.pow(ce.evalMul(ce.number(2), base.op2));
+    return base.op1.pow(ce.number(2).mul(base.op2));
   }
 
   return base.pow(2);
@@ -51,7 +52,7 @@ export function processPower(
       (x) =>
         processPower(ce, x, exponent, mode) ?? ce._fn('Power', [x, exponent])
     );
-    return ce.evalMul(...ops);
+    return mul(...ops);
   }
 
   if (base.numericValue && exponent.numericValue) {

@@ -78,18 +78,14 @@ describe('NUMERIC MODE', () => {
   test('e^{i\\pi}', () =>
     expect(check('e^{i\\pi}')).toMatchInlineSnapshot(`
       box       = ["Power", "e", ["InvisibleOperator", "i", "Pi"]]
-      canonical = ["Exp", ["Multiply", "ImaginaryUnit", "Pi"]]
-      evaluate  = ["Exp", ["Multiply", ["Complex", 0, 1], "Pi"]]
+      canonical = ["Exp", ["Multiply", ["Complex", 0, 1], "Pi"]]
       N-auto    = -1
-      eval-big  = ["Exp", "NaN"]
       N-big     = [
         "Power",
         "2.718281828459045235360287471352662497757247093699959574966967627724076630353547594571382178525166427",
         "NaN"
       ]
-      eval-mach = ["Exp", "NaN"]
       N-mach    = ["Power", 2.718281828459045, "NaN"]
-      eval-cplx = ["Exp", ["Multiply", ["Complex", 0, 1], "Pi"]]
       N-cplx    = -1
     `));
 });

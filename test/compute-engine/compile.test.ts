@@ -17,22 +17,22 @@ describe('COMPILE', () => {
     it('should compile an expression with trig functions', () => {
       expect(
         ce.parse('2 \\cos(\\frac{\\pi}{5})').compile()?.toString()
-      ).toMatchInlineSnapshot(`0.5 * (Math.sqrt(5) + 1)`);
+      ).toMatchInlineSnapshot(`(1 + Math.sqrt(5)) / 2`);
     });
   });
 
   describe('Blocks', () => {
     it('should compile a simple block', () => {
       const expr = ce.box(['Block', ['Multiply', 10, 2]]);
-      expect(expr.compile()?.toString() ?? '').toMatchInlineSnapshot(`20`);
+      expect(expr.compile()?.toString() ?? '').toMatchInlineSnapshot(`10 * 2`);
     });
 
     it('should compile a block with two statements', () => {
       const expr = ce.box(['Block', ['Add', 13, 15], ['Multiply', 10, 2]]);
       expect(expr.compile()?.toString() ?? '').toMatchInlineSnapshot(`
         (() => {
-        28;
-        return 20
+        13 + 15;
+        return 10 * 2
         })()
       `);
     });
@@ -48,7 +48,7 @@ describe('COMPILE', () => {
         (() => {
         let x;
         x = 4.1;
-        return _.n * x
+        return x * _.n
         })()
       `);
     });
@@ -66,7 +66,7 @@ describe('COMPILE', () => {
         let x;
         x = 4.1;
         return x + 1;
-        return 2 * x
+        return x * 2
         })()
       `);
     });

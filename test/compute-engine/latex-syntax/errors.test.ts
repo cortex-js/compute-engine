@@ -292,15 +292,11 @@ check('VALID function application', () =>
 // This is valid, because Multiply is threaded, and can accept an empty
 // tuple as an argument.
 check('VALID empty delimiter expression', () =>
-  expect(engine.parse('1()')).toMatchInlineSnapshot(
-    `["Multiply", 1, ["Tuple"]]`
-  )
+  expect(engine.parse('1()')).toMatchInlineSnapshot(`["Tuple"]`)
 );
 
 check('VALID empty delimiter expression', () =>
-  expect(engine.parse('1\\left(\\right)')).toMatchInlineSnapshot(
-    `["Multiply", 1, ["Tuple"]]`
-  )
+  expect(engine.parse('1\\left(\\right)')).toMatchInlineSnapshot(`["Tuple"]`)
 );
 
 check('Invalid delimiter: expected closing', () =>

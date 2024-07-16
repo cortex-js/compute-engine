@@ -67,15 +67,15 @@ export const TRIGONOMETRY_LIBRARY: IdentifierDefinitions[] = [
               if (fRadians[0] === 0) return ce.Zero;
               if (fRadians[0] === 1 && fRadians[1] === 1) return ce.Pi;
               if (fRadians[0] === 1) return ce.Pi.div(fRadians[1]);
-              return ce.evalMul(ce.number(fRadians), ce.Pi);
+              return ce.number(fRadians).mul(ce.Pi);
             }
-            return ce.evalMul(ce.number(fArg).div(180), ce.Pi);
+            return ce.number(fArg).div(180).mul(ce.Pi);
           }
-          return ce.evalMul(arg, ce.Pi).div(180);
+          return arg.mul(ce.Pi).div(180);
         },
         evaluate: (ce, ops) => {
           if (ce.angularUnit === 'deg') return ops[0];
-          return ce.evalMul(ops[0], ce.Pi.div(180)).evaluate();
+          return ops[0].mul(ce.Pi.div(180)).evaluate();
         },
       },
     },
@@ -280,9 +280,7 @@ export const TRIGONOMETRY_LIBRARY: IdentifierDefinitions[] = [
       threadable: true,
       signature: {
         domain: domainNumberToRealNumber('Csch'),
-        simplify: (ce, ops) =>
-          constructibleValues(ce, 'Csch', ops[0]) ??
-          ce.box(['Divide', 1, ['Sinh', ops[0]]]).simplify(),
+        simplify: (ce, ops) => constructibleValues(ce, 'Csch', ops[0]),
         evaluate: (ce, ops) => evalTrig(ce, 'evaluate', 'Csch', ops[0]),
         N: (ce, ops) => evalTrig(ce, 'N', 'Csch', ops[0]),
       },
@@ -1072,4 +1070,37 @@ function radiansToAngle(
   if (angularUnit === 'grad') return ce.number(theta * (200 / Math.PI));
   if (angularUnit === 'turn') return ce.number(theta / (2 * Math.PI));
   return x;
+}
+
+const TRIG_FUNCTIONS: { [key: string]: boolean } = {
+  Sin: true,
+  Cos: true,
+  Tan: true,
+  Cot: true,
+  Sec: true,
+  Csc: true,
+  Sinh: true,
+  Cosh: true,
+  Tanh: true,
+  Coth: true,
+  Sech: true,
+  Csch: true,
+  Arcsin: true,
+  Arccos: true,
+  Arctan: true,
+  Arccot: true,
+  Arcsec: true,
+  Arccsc: true,
+  Arsinh: true,
+  Arcosh: true,
+  Artanh: true,
+  Arcoth: true,
+  Arcsch: true,
+  Arsech: true,
+  Arcsech: true,
+};
+
+export function isTrigonometricFunction(head: any): boolean {
+  if (!head || typeof head !== 'string') return false;
+  return head in TRIG_FUNCTIONS;
 }

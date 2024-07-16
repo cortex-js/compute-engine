@@ -19,6 +19,72 @@ import { Rational } from '../numerics/rationals';
 import { NumericValue } from '../numeric-value/public';
 
 import './serialize';
+/**
+ * :::info[THEORY OF OPERATIONS]
+ *
+ * To create a boxed expression:
+ *
+ * - Use `ce._fn()` to create a new function expression.
+ *
+ *   This is a low level method which is typically invoked in the canonical
+ *   handler of a function definition.
+ *
+ *  The arguments are not modified. The expression is not put in canonical
+ *  form. The canonical handler is *not* called.
+ *
+ * - Use `ce.box()` or `ce.parse()` to get a canonical expression.
+ *    - the arguments are put in canonical form
+ *    - a limited number of core simplifications have been applied,
+ *      for example 0 is removed from additions
+ *    - sequences are flattened: `["Add", 1, ["Sequence", 2, 3]]` is
+ *      transformed to `["Add", 1, 2, 3]`
+ *    - invisible operators are made explicit
+ *    - commutative functions are sorted
+ *    - associative functions are flattened: `["Add", 1, ["Add", 2, 3]]` is
+ *      transformed to `["Add", 1, 2, 3]`
+ *    - the expression is in a form that is suitable for further processing
+ *    - identifiers are not replaced with their values
+ *
+ * - canonical handlers are responsible for:
+ *    - validating the arguments
+ *    - flattening sequences
+ *    - flattening associative functions
+ *    - calling `ce._fn()` to create a new function expression
+ *    - sort their arguments (if the function is commutative)
+ *    - if the function definition has a hold, they should also put
+ *      their arguments in canonical form, if appropriate
+ *
+ * - boxed expression algebraic methods, i.e. `add`, `mul`, `div`, `pow`, etc.
+ *    - the arguments are not modified (made canonical, evaluated, etc...)
+ *    - the canonical handler is not called
+ *    - sequences are not flattened (they should have been flattened during
+ *      canonicalization of the arguments)
+ *    - some further simplifications are applied, for example number
+ *      literals are combined. However, the result is exact, and no
+ *      approximation is made.
+ *    - these methods are suitable for internal calculations, although they
+ *      may be used as part of the public API as well.
+ *
+ * - for 'add' and 'mul', which take multiple arguments, separate functions
+ *   are provided that take an array of arguments. They are equivalent
+ *   to calling the boxed algebraic method, i.e. `ce.Zero.add(1, 2, 3)` or
+ *   `add(1, 2, 3)` are equivalent.
+ *
+ * - `ce.function()` is used to create a new function expression. The arguments
+ *   are put in canonical form and the canonical handler is called.
+ *
+ *   Note that this is just a specialized version of `ce.box()`.
+ *
+ *   For algebraic functions (add, mul, etc..), if the arguments are already
+ *   in canonical form, consider using the algebraic methods directly,
+ *   i.e. `a.add(b)` instead of `ce.function('Add', a, b)`. Note however
+ *   the algebraic methods will apply further simplifications,
+ *    while `ce.function()` will not. For example, exact literals will be
+ *   combined.
+ *
+ *
+ * :::
+ */
 
 /**
  * :::info[THEORY OF OPERATIONS]
@@ -1737,8 +1803,7 @@ export type DomainExpression<T = SemiBoxedExpression> =
  * @category Compute Engine
  */
 export type SimplifyOptions = {
-  depth: number; // Depth in the expression tree
-  maxDepth: number; // Do not simplify beyong this depth
+  recursive?: boolean; // Default to true
   rules: null | BoxedRuleSet;
 };
 
@@ -1974,8 +2039,6 @@ export interface IComputeEngine {
   ): BoxedExpression;
 
   hold(expr: SemiBoxedExpression): BoxedExpression;
-
-  evalMul(...ops: ReadonlyArray<BoxedExpression>): BoxedExpression;
 
   pair(
     first: BoxedExpression,

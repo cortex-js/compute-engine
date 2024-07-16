@@ -4,12 +4,6 @@ const ce = new ComputeEngine();
 
 // Quick perf testing
 
-// console.log(ce.parse('2(13.1+x)').evaluate().toString());
-console.log(ce.parse('2(x+13.1)').simplify().toString());
-ce.parse('\\frac{\\pi}{4}').N().print();
-
-console.log(ce.parse('2\\times3xxx').simplify().toString());
-
 // console.time('simplify');
 // ce.parse('(2x^2+3x+1)(2x+1)').simplify().print();
 // console.timeLog('simplify');

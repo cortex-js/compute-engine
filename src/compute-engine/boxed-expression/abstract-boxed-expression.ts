@@ -406,29 +406,37 @@ export abstract class _BoxedExpression implements BoxedExpression {
   neg(): BoxedExpression {
     return this.engine.NaN;
   }
+
   inv(): BoxedExpression {
     return this.engine.NaN;
   }
+
   abs(): BoxedExpression {
     return this.engine.NaN;
   }
+
   add(...rhs: (number | BoxedExpression)[]): BoxedExpression {
     return this.engine.NaN;
   }
+
   sub(rhs: BoxedExpression): BoxedExpression {
-    return this.engine.NaN;
+    return this.add(rhs.neg());
   }
+
   mul(...rhs: (number | BoxedExpression)[]): BoxedExpression {
     return this.engine.NaN;
   }
+
   div(rhs: number | BoxedExpression): BoxedExpression {
     return this.engine.NaN;
   }
+
   pow(
     exp: number | [num: number, denom: number] | BoxedExpression
   ): BoxedExpression {
     return this.engine.NaN;
   }
+
   sqrt(): BoxedExpression {
     return this.engine.NaN;
   }

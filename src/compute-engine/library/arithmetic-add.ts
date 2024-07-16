@@ -16,22 +16,27 @@ import {
   range,
 } from './utils';
 import { asBignum, asFloat } from '../boxed-expression/numerics';
+import { flatten } from '../symbolic/flatten';
 
 /** The canonical form of `Add`:
  * - removes `0`
  * - capture complex numbers (`a + ib` or `ai + b`)
+ * - sort the terms
+ * - arguments are canonicalized, result is canonical
  * */
 export function canonicalAdd(
   ce: IComputeEngine,
   ops: ReadonlyArray<BoxedExpression>
 ): BoxedExpression {
-  console.assert(ops.every((x) => x.isCanonical));
+  // Make canonical, flatten, and lift nested expressions
+  ops = flatten(ops, 'Add');
 
   // Remove literal 0
   ops = ops.filter((x) => x.numericValue === null || !x.isZero);
 
   if (ops.length === 0) return ce.Zero;
   if (ops.length === 1 && !isIndexableCollection(ops[0])) return ops[0];
+
   //
   // Is this a  complex number, i.e. `a + ib` or `ai + b`?
   //
@@ -62,14 +67,6 @@ export function domainAdd(
     dom = widen(dom, arg);
   }
   return dom;
-}
-
-export function simplifyAdd(
-  ce: IComputeEngine,
-  args: ReadonlyArray<BoxedExpression>
-): BoxedExpression {
-  if (args.length === 1) return args[0];
-  return new Terms(ce, args).asExpression();
 }
 
 function evalAddNum(ops: ReadonlyArray<BoxedExpression>): number | null {
@@ -214,7 +211,7 @@ export function evalSummation(
         ce.assign(index, i);
         terms.push(fn.simplify());
       }
-      result = ce.Zero.add(...terms).simplify();
+      result = add(...terms).simplify();
     }
   }
 
@@ -247,7 +244,7 @@ export function evalSummation(
       });
       terms.push(fn.evaluate());
     }
-    result = ce.Zero.add(...terms).evaluate();
+    result = add(...terms).evaluate();
   }
 
   for (let i = 0; i < indexArray.length; i++) {
@@ -381,6 +378,8 @@ export function evalSummation(
  * - ['Multiply', 5, 'ImaginaryUnit'] -> 5
  * - ['Multiply', 'ImaginaryUnit', 5] -> 5
  * - ['Divide', 'ImaginaryUnit', 2] -> 0.5
+ *
+ * @fixme: use NumericValue instead
  */
 export function getImaginaryCoef(expr: BoxedExpression): number {
   if (expr.symbol === 'ImaginaryUnit') return 1;
@@ -403,4 +402,16 @@ export function getImaginaryCoef(expr: BoxedExpression): number {
   }
 
   return 0;
+}
+
+export function add(...xs: ReadonlyArray<BoxedExpression>): BoxedExpression {
+  console.assert(xs.length > 0);
+
+  return new Terms(xs[0].engine, xs).asExpression();
+}
+
+export function addN(...xs: ReadonlyArray<BoxedExpression>): BoxedExpression {
+  console.assert(xs.length > 0);
+
+  return new Terms(xs[0].engine, xs).N();
 }

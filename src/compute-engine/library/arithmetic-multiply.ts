@@ -2,10 +2,6 @@ import { BoxedExpression, IComputeEngine } from '../public';
 
 import { MAX_SYMBOLIC_TERMS } from '../numerics/numeric';
 import { bignumPreferred } from '../boxed-expression/utils';
-import { negateProduct } from '../symbolic/negate';
-import { Product } from '../symbolic/product';
-import { isOne, isZero, neg } from '../numerics/rationals';
-import { apply2N } from '../symbolic/utils';
 import {
   MultiIndexingSet,
   SingleIndexingSet,
@@ -14,163 +10,13 @@ import {
   range,
 } from './utils';
 import { each, isCollection } from '../collection-utils';
-import { order } from '../boxed-expression/order';
 
-import { square } from './arithmetic-power';
-import {
-  asBignum,
-  asFloat,
-  asRational,
-  mul,
-} from '../boxed-expression/numerics';
+import { asBignum, asFloat } from '../boxed-expression/numerics';
+import { Product } from '../symbolic/product';
 import { expandProducts } from '../symbolic/expand';
-
-/** The canonical form of `Multiply`:
- * - remove `1`
- * - simplify the signs:
- *    - i.e. `-y \times -x` -> `x \times y`
- *    - `2 \times -x` -> `-2 \times x`
- * - arguments are sorted
- * - complex numbers promoted (['Multiply', 2, 'ImaginaryUnit'] -> 2i)
- *
- * The ops must be canonical, the result is canonical.
- */
-export function canonicalMultiply(
-  ce: IComputeEngine,
-  ops: ReadonlyArray<BoxedExpression>
-): BoxedExpression {
-  console.assert(ops.every((x) => x.isCanonical));
-
-  if (ops.length === 0) return ce.One;
-  if (ops.length === 1) return ops[0];
-
-  const result: BoxedExpression[] = [];
-  let sign = 1;
-  let num: number | undefined = undefined;
-  let imaginaryCount = 0;
-  for (const op of ops) {
-    if (op.isOne) continue;
-    if (op.isNegativeOne) {
-      sign = -sign;
-      continue;
-    }
-    if (op.head === 'Negate') {
-      sign = -sign;
-      result.push(op.op1);
-      continue;
-    }
-    // Capture the first machine literal, to potentially use as a imaginary coef
-    if (num === undefined && typeof op.numericValue === 'number') {
-      num = op.numericValue;
-      if (num < 0) {
-        sign = -sign;
-        num = -num;
-      }
-      continue;
-    }
-    if (op.numericValue !== null && op.isNegative) {
-      sign = -sign;
-      result.push(op.neg());
-      continue;
-    }
-    if (op.symbol === 'ImaginaryUnit') {
-      imaginaryCount++;
-      continue;
-    }
-    result.push(op);
-  }
-
-  // See if we had a complex number
-  if (imaginaryCount > 0) {
-    if (imaginaryCount % 2 === 0) {
-      // Even number of imaginary units
-      sign = -sign;
-    } else {
-      // Odd number of imaginary units
-      result.push(ce.number(ce.complex(0, sign * (num ?? 1))));
-      sign = 1;
-      num = undefined;
-    }
-  }
-
-  if (typeof num === 'number') {
-    result.push(ce.number(sign * num));
-    sign = 1;
-  }
-
-  if (sign < 0) {
-    if (result.length === 0) return ce.NegativeOne;
-    if (result.length === 1) return result[0].neg();
-    return negateProduct(ce, [...result].sort(order));
-  }
-
-  if (result.length === 0) return ce.One;
-  if (result.length === 1) return result[0];
-  return ce._fn('Multiply', [...result].sort(order));
-}
-
-export function simplifyMultiply(
-  ce: IComputeEngine,
-  ops: ReadonlyArray<BoxedExpression>
-): BoxedExpression {
-  console.assert(ops.every((x) => x.head !== 'Multiply'));
-  const expr = expandProducts(ce, ops);
-  if (expr) {
-    if (expr.head === 'Multiply') ops = expr.ops!;
-    else return expr.simplify();
-  }
-  const product = new Product(ce);
-  for (let op of ops) {
-    op = op.simplify();
-    if (op.isNaN || op.symbol === 'Undefined') return ce.NaN;
-    product.mul(op);
-  }
-
-  return product.asExpression();
-}
-
-export function evalMultiply(
-  ce: IComputeEngine,
-  ops: ReadonlyArray<BoxedExpression>,
-  mode: 'N' | 'evaluate' = 'evaluate'
-): BoxedExpression {
-  // @fixme: review caller. In some cases, call distribute. Maybe should be done here. Also call evaluate() and N() multiple times. (but, incorrectly, not when length is 1)
-  if (ops.length === 1) return ops[0];
-
-  //
-  // @fastpath
-  //
-  if (mode === 'N') {
-    ops = ops.map((x) => x.N());
-    if (
-      (ce.numericMode === 'machine' || ce.numericMode === 'auto') &&
-      ops.every((x) => typeof x.numericValue === 'number')
-    ) {
-      let prod = 1;
-      for (const op of ops) prod *= op.numericValue as number;
-      return ce.number(prod);
-    }
-  }
-
-  //
-  // First pass: looking for early exits
-  //
-  // @fixme: don't need to do this loop and special case for 'N' mode
-  for (const op of ops) {
-    if (op.isNaN || op.symbol === 'Undefined') return ce.NaN;
-    if (op.numericValue !== null && !op.isExact) mode = 'N';
-  }
-  console.assert(ops.every((x) => x.head !== 'Multiply'));
-
-  if (mode === 'N') ops = ops.map((x) => x.N());
-  else ops = ops.map((x) => x.evaluate());
-
-  //
-  // Second pass
-  //
-
-  return new Product(ce, ops).asExpression(mode);
-}
+import { flatten } from '../symbolic/flatten';
+import { negateProduct } from '../symbolic/negate';
+import { order } from '../boxed-expression/order';
 
 // Canonical form of `["Product"]` (`\prod`) expressions.
 export function canonicalProduct(
@@ -207,7 +53,7 @@ export function canonicalProduct(
   return result;
 }
 
-export function evalMultiplication(
+export function evalProduct(
   ce: IComputeEngine,
   summationEquation: ReadonlyArray<BoxedExpression>,
   mode: 'simplify' | 'N' | 'evaluate'
@@ -302,7 +148,7 @@ export function evalMultiplication(
         ce.assign({ [index]: i });
         terms.push(fn.simplify()); // @fixme: call evaluate() instead
       }
-      result = ce.evalMul(...terms).simplify();
+      result = mul(...terms);
     }
   }
 
@@ -336,7 +182,7 @@ export function evalMultiplication(
       //ce.assign({ [index]: i });
       terms.push(fn.evaluate());
     }
-    result = ce.evalMul(...terms).evaluate(); // @fixme: no need to call evaluate()
+    result = mul(...terms);
   }
 
   if (mode === 'N') {
@@ -452,4 +298,125 @@ export function evalMultiplication(
   ce.popScope();
 
   return result ?? undefined;
+}
+
+/** The canonical form of `Multiply`:
+ * - remove `1` anb `-1`
+ * - simplify the signs:
+ *    - i.e. `-y \times -x` -> `x \times y`
+ *    - `2 \times -x` -> `-2 \times x`
+ * - arguments are sorted
+ * - complex numbers promoted (['Multiply', 2, 'ImaginaryUnit'] -> 2i)
+ *
+ * The ops may not be canonical, the result is canonical.
+ */
+export function canonicalMultiply(
+  ce: IComputeEngine,
+  ops: ReadonlyArray<BoxedExpression>
+): BoxedExpression {
+  // Make canonical, flatten, and lift nested expressions
+  ops = flatten(ops, 'Multiply');
+
+  if (ops.length === 1) return ops[0];
+
+  const xs: BoxedExpression[] = [];
+  let sign = 1;
+  let num: number | undefined = undefined;
+  let imaginaryCount = 0;
+  for (const op of ops) {
+    if (op.isOne) continue;
+    if (op.isNegativeOne) {
+      sign = -sign;
+      continue;
+    }
+    if (op.head === 'Negate') {
+      sign = -sign;
+      xs.push(op.op1);
+      continue;
+    }
+    // Capture the first machine literal, to potentially use as a imaginary coef
+    if (num === undefined && typeof op.numericValue === 'number') {
+      num = op.numericValue;
+      if (num < 0) {
+        sign = -sign;
+        num = -num;
+      }
+      continue;
+    }
+    if (op.numericValue !== null && op.isNegative) {
+      sign = -sign;
+      xs.push(op.neg());
+      continue;
+    }
+    if (op.symbol === 'ImaginaryUnit') {
+      imaginaryCount++;
+      continue;
+    }
+    xs.push(op);
+  }
+
+  // See if we had a complex number
+  if (imaginaryCount > 0) {
+    if (imaginaryCount % 2 === 0) {
+      // Even number of imaginary units
+      sign = -sign;
+    } else {
+      // Odd number of imaginary units
+      xs.push(ce.number(ce.complex(0, sign * (num ?? 1))));
+      sign = 1;
+      num = undefined;
+    }
+  }
+
+  if (typeof num === 'number') {
+    xs.push(ce.number(sign * num));
+    sign = 1;
+  }
+
+  if (sign < 0) {
+    if (xs.length === 0) return ce.NegativeOne;
+    if (xs.length === 1) return xs[0].neg();
+    return negateProduct(ce, xs);
+  }
+
+  if (xs.length === 0) return ce.One;
+  if (xs.length === 1) return xs[0];
+  return ce._fn('Multiply', [...xs].sort(order));
+}
+
+/** The canonical form of `Multiply`:
+ * - remove `1`
+ * - simplify the signs:
+ *    - i.e. `-y \times -x` -> `x \times y`
+ *    - `2 \times -x` -> `-2 \times x`
+ * - arguments are sorted
+ * - complex numbers promoted (['Multiply', 2, 'ImaginaryUnit'] -> 2i)
+ *
+ * The ops must be canonical, the result is canonical.
+ */
+
+export function mul(...xs: ReadonlyArray<BoxedExpression>): BoxedExpression {
+  console.assert(xs.length > 0);
+  const ce = xs[0].engine;
+
+  const exp = expandProducts(ce, xs);
+  if (exp) {
+    if (exp.head !== 'Multiply') return exp;
+    xs = exp.ops!;
+  }
+
+  return new Product(ce, xs).asExpression();
+}
+
+export function mulN(...xs: ReadonlyArray<BoxedExpression>): BoxedExpression {
+  console.assert(xs.length > 0);
+  const ce = xs[0].engine;
+
+  const exp = expandProducts(ce, xs);
+  if (exp) {
+    if (exp.head !== 'Multiply') return exp;
+    xs = exp.ops!;
+  }
+
+  return new Product(ce, xs).asExpression('N');
 }

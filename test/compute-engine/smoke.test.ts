@@ -87,7 +87,7 @@ describe('PARSING numbers', () => {
 
   test(`\\frac34 + 1e199`, () =>
     expect(ce.parse('\\frac34 + 1e199')).toMatchInlineSnapshot(
-      '["Add", ["Rational", 3, 4], 1e+199]'
+      `["Add", 1e+199, ["Rational", 3, 4]]`
     ));
 
   test(`-5-2-3 (non-canonical)`, () =>
@@ -301,23 +301,31 @@ describe('CANONICALIZATION Add', () => {
     expect(canonicalToJson('7 + \\frac12')).toMatchInlineSnapshot(`
       [
         Add,
+        7,
         [
           Rational,
           1,
           2,
         ],
-        7,
       ]
     `));
 
-  test(`1 + 2 + x`, () =>
-    expect(canonicalToJson('1 + 2 + x')).toMatchObject(['Add', 'x', 1, 2]));
+  test(`1 + x + 2`, () =>
+    expect(canonicalToJson('1 + x + 2')).toMatchInlineSnapshot(`
+      [
+        Add,
+        x,
+        1,
+        2,
+      ]
+    `));
 
-  test(`1 + \\infty`, () =>
-    expect(canonicalToJson('1 + \\infty')).toMatchInlineSnapshot(`
+  test(`2 + \\infty + 1`, () =>
+    expect(canonicalToJson('2 + \\infty + 1')).toMatchInlineSnapshot(`
       [
         Add,
         1,
+        2,
         PositiveInfinity,
       ]
     `));
@@ -390,12 +398,12 @@ describe('CANONICALIZATION multiply', () => {
     expect(canonicalToJson('2\\times\\frac12')).toMatchInlineSnapshot(`
       [
         Multiply,
+        2,
         [
           Rational,
           1,
           2,
         ],
-        2,
       ]
     `));
 
@@ -440,13 +448,13 @@ describe('CANONICALIZATION multiply', () => {
       [
         Multiply,
         -2,
+        3.2,
+        5.23,
         [
           Rational,
           2,
           3,
         ],
-        3.2,
-        5.23,
         x,
         [
           Divide,
@@ -556,12 +564,12 @@ describe('CANONICALIZATION invisible operators', () => {
     expect(canonicalToJson('2x+x')).toMatchInlineSnapshot(`
       [
         Add,
+        x,
         [
           Multiply,
           2,
           x,
         ],
-        x,
       ]
     `));
 });
@@ -662,11 +670,11 @@ describe('SIMPLIFICATION sqrt', () => {
               Sqrt,
               [
                 Add,
+                2,
                 [
                   Sqrt,
                   3,
                 ],
-                2,
               ],
             ],
             [
@@ -705,7 +713,7 @@ describe('SIMPLIFICATION trigonometry', () => {
 
   test(`simplify('1+4\\times\\sin\\frac{\\pi}{10}')`, () =>
     expect(simplify('1+4\\times\\sin\\frac{\\pi}{10}')).toMatchInlineSnapshot(
-      `["Add", ["Sqrt", 5], -1, 1]`
+      `["Add", -1, 1, ["Sqrt", 5]]`
     ));
 });
 
@@ -721,9 +729,18 @@ describe('SIMPLIFICATION power', () => {
     ));
 
   test(`simplify('(a+b)^6')`, () =>
-    expect(simplify('(a+b)^6')).toMatchInlineSnapshot(
-      `["Power", ["Add", "a", "b"], 6]`
-    ));
+    expect(simplify('(a+b)^6')).toMatchInlineSnapshot(`
+      [
+        "Add",
+        ["Power", "a", 6],
+        ["Power", "b", 6],
+        ["Multiply", 15, ["Power", "a", 4], ["Square", "b"]],
+        ["Multiply", 15, ["Power", "b", 4], ["Square", "a"]],
+        ["Multiply", 6, "a", ["Power", "b", 5]],
+        ["Multiply", 6, "b", ["Power", "a", 5]],
+        ["Multiply", 20, ["Power", ["Multiply", "a", "b"], 3]]
+      ]
+    `));
 });
 
 describe('EXPAND', () => {
@@ -732,13 +749,13 @@ describe('EXPAND', () => {
       .toMatchInlineSnapshot(`
       [
         "Add",
-        ["Multiply", 20, ["Power", ["Multiply", "a", "b"], 3]],
-        ["Multiply", 15, ["Square", "a"], ["Power", "b", 4]],
-        ["Multiply", 15, ["Square", "b"], ["Power", "a", 4]],
+        ["Power", "a", 6],
+        ["Power", "b", 6],
+        ["Multiply", 15, ["Power", "a", 4], ["Square", "b"]],
+        ["Multiply", 15, ["Power", "b", 4], ["Square", "a"]],
         ["Multiply", 6, "a", ["Power", "b", 5]],
         ["Multiply", 6, "b", ["Power", "a", 5]],
-        ["Power", "a", 6],
-        ["Power", "b", 6]
+        ["Multiply", 20, ["Power", ["Multiply", "a", "b"], 3]]
       ]
     `));
 });

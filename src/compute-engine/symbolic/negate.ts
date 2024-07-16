@@ -98,7 +98,7 @@ export function negateProduct(
     }
   }
 
-  if (done) return ce._fn('Multiply', result);
+  if (done) return ce._fn('Multiply', result.sort(order));
 
   return ce._fn('Negate', [ce._fn('Multiply', [...args].sort(order))]);
 }

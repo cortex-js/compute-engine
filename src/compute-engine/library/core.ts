@@ -912,7 +912,7 @@ export function canonicalInvisibleOperator(
       (rhs.op2.string === '[,]' || rhs.op2.string === '[;]')
     ) {
       const args = rhs.op1.head === 'Sequence' ? rhs.op1.ops! : [rhs.op1];
-      return ce._fn('At', [lhs, ...args]);
+      return ce.function('At', [lhs, ...args]);
     }
   }
 
@@ -934,7 +934,7 @@ export function canonicalInvisibleOperator(
   ) {
     ops = flattenOps(ops, 'Multiply');
     if (ops.length === 1) return ops[0];
-    return ce._fn('Multiply', [...ops].sort(order));
+    return ce.function('Multiply', ops);
   }
 
   //

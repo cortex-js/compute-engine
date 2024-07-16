@@ -219,7 +219,7 @@ export function findUnivariateRoots(
   //
   // Note: @todo we can try different heuristics here:
   // Collection: reduce the numbers of occurrences of the unknown
-  // Attraction: bring the occurences of the unknonw closer together
+  // Attraction: bring the occurrences of the unknown closer together
   // Function Swapping: replacing function with ones easier to solve
   //    - square roots: square both sides
   //    - logs: exponentiate both sides

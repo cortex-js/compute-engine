@@ -59,7 +59,7 @@ describe('PARSING OF NUMBER', () => {
       `["Subtract", ["Rational", -1, 4], 3]`
     );
     expect(parse('3\\frac14+\\frac12')).toMatchInlineSnapshot(
-      `["Add", ["Rational", 1, 4], "Half", 3]`
+      `["Add", 3, ["Rational", 1, 4], "Half"]`
     );
   });
 

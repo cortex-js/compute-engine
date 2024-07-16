@@ -1,7 +1,9 @@
 import { asMachineInteger } from '../boxed-expression/numerics';
 import { isRelationalOperator } from '../boxed-expression/utils';
-import { simplifyAdd } from '../library/arithmetic-add';
+import { add } from '../library/arithmetic-add';
+import { mul } from '../library/arithmetic-multiply';
 import { BoxedExpression, IComputeEngine } from '../public';
+import { Product } from './product';
 
 function expandProduct(
   lhs: Readonly<BoxedExpression>,
@@ -16,17 +18,15 @@ function expandProduct(
 
   const ce = lhs.engine;
 
-  if (lhs.head === 'Negate')
-    return ce.evalMul(ce.NegativeOne, expandProduct(lhs.op1, rhs));
-  if (rhs.head === 'Negate')
-    return ce.evalMul(ce.NegativeOne, expandProduct(lhs, rhs.op1));
+  if (lhs.head === 'Negate') return expandProduct(lhs.op1, rhs).neg();
+  if (rhs.head === 'Negate') return expandProduct(lhs, rhs.op1).neg();
 
   //
   // Divide
   //
   if (lhs.head === 'Divide' && rhs.head === 'Divide') {
     // Apply distribute to the numerators only.
-    const denom = ce.evalMul(lhs.op2, rhs.op2);
+    const denom = lhs.op2.mul(rhs.op2);
     return expandProduct(lhs.op1, rhs.op1).div(denom);
   }
 
@@ -37,14 +37,14 @@ function expandProduct(
   // Add
   //
   if (lhs.head === 'Add')
-    return ce.Zero.add(...lhs.ops!.map((x) => expandProduct(x, rhs)));
+    return add(...lhs.ops!.map((x) => expandProduct(x, rhs)));
   if (rhs.head === 'Add')
-    return ce.Zero.add(...rhs.ops!.map((x) => expandProduct(lhs, x)));
+    return add(...rhs.ops!.map((x) => expandProduct(lhs, x)));
 
   //
   // Something else...
   //
-  return ce.evalMul(lhs, rhs);
+  return new Product(ce, [lhs, rhs]).asExpression();
 }
 
 export function expandProducts(
@@ -164,9 +164,9 @@ function expandPower(
         else product.push(terms[i].pow(val[i]));
       }
     }
-    result.push(ce.evalMul(...product));
+    result.push(mul(...product));
   }
-  return ce.Zero.add(...result);
+  return add(...result);
 }
 
 /** ExpandNumerator
@@ -179,7 +179,7 @@ function expandNumerator(expr: BoxedExpression): BoxedExpression | null {
   if (expandedNumerator === null) return null;
   const ce = expr.engine;
   if (expandedNumerator.head === 'Add') {
-    return ce.Zero.add(...expandedNumerator.ops!.map((x) => x.div(expr.op2)));
+    return add(...expandedNumerator.ops!.map((x) => x.div(expr.op2)));
   }
   return expandedNumerator.div(expr.op2);
 }
@@ -194,7 +194,7 @@ function expandDenominator(expr: BoxedExpression): BoxedExpression | null {
   if (expandedDenominator === null) return null;
   const ce = expr.engine;
   if (expandedDenominator.head === 'Add') {
-    return ce.Zero.add(...expandedDenominator.ops!.map((x) => expr.op1.div(x)));
+    return add(...expandedDenominator.ops!.map((x) => expr.op1.div(x)));
   }
   return expr.op1.div(expandedDenominator);
 }
@@ -213,34 +213,26 @@ export function expandFunction(
   if (h === 'Divide') {
     const num = expand(ops[0]);
     if (!num) return null;
-    if (num?.head === 'Add')
-      result = ce.Zero.add(...num.ops!.map((x) => x.div(ops[1])));
-    else result = ce._fn('Divide', [num, ops[1]]);
+    if (num?.head === 'Add') return add(...num.ops!.map((x) => x.div(ops[1])));
+    return ce._fn('Divide', [num, ops[1]]);
   }
 
   //
   // Multiply
   //
-  if (h === 'Multiply') result = expandProducts(ce, ops);
+  if (h === 'Multiply') return expandProducts(ce, ops);
 
   //
   // Negate
   //
-  if (h === 'Negate') {
-    result = expand(ops[0]);
-    return result ? result.neg() : null;
-  }
+  if (h === 'Negate') return expand(ops[0])?.neg() ?? null;
 
   //
   //
   // Add
   //
 
-  if (h === 'Add')
-    return simplifyAdd(
-      ce,
-      ops.map((x) => expand(x) ?? x)
-    );
+  if (h === 'Add') return add(...ops.map((x) => expand(x) ?? x));
 
   //
   // Power
@@ -249,13 +241,6 @@ export function expandFunction(
     const exp = asMachineInteger(ops[1]);
     result = exp !== null ? expandPower(ops[0], exp) : null;
   }
-
-  // Simplify the sum
-  if (result && result.head === 'Add')
-    result = simplifyAdd(
-      ce,
-      result.ops!.map((x) => x.simplify())
-    );
 
   return result;
 }

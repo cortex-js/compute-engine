@@ -147,7 +147,8 @@ function applyRule(
       if (subExpr) changed = true;
       return subExpr ?? op;
     });
-    if (changed) expr = ce.function(expr.head, newOps, { canonical: false });
+    if (changed)
+      expr = ce.function(expr.head, newOps, { canonical: expr.isCanonical });
   }
 
   const exact = rule.exact ?? true;
@@ -184,8 +185,13 @@ function applyRule(
   //     .map((x) => `${x} -> ${sub[x].toString()}`)
   //     .join(', ')
   // );
-  if (typeof replace === 'function') return replace(expr, sub) ?? null;
-  return replace.subs(sub, { canonical: expr.isCanonical });
+  let result =
+    typeof replace === 'function'
+      ? replace(expr, sub)
+      : replace.subs(sub, { canonical: expr.isCanonical });
+  if (!result) return null;
+  if (expr.isCanonical) return result.canonical;
+  return result;
 }
 
 /**

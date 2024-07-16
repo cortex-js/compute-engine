@@ -1,4 +1,4 @@
-import { BoxedExpression, IComputeEngine } from '../public';
+import { BoxedExpression } from '../public';
 import { apply2N } from '../symbolic/utils';
 import {
   inverse,
@@ -6,7 +6,6 @@ import {
   isMachineRational,
   isZero,
 } from '../numerics/rationals';
-import { Product } from '../symbolic/product';
 import { asRational, mul } from '../boxed-expression/numerics';
 
 /**
@@ -75,26 +74,29 @@ export function canonicalDivide(
   //   }
   // }
 
+  if (op2.isOne) return op1;
+
   const [c1, t1] = ce._toNumericValue(op1);
   const [c2, t2] = ce._toNumericValue(op2);
 
   const c = c1.div(c2);
   if (c.isZero) return ce.Zero;
-  if (c.isOne) return ce._fn('Divide', [t1, t2]);
-  if (c.isNegativeOne) return ce._fn('Divide', [t1.neg(), t2]);
+  if (c.isOne) return t2.isOne ? t1 : ce._fn('Divide', [t1, t2]);
+
+  if (c.isNegativeOne)
+    return t2.isOne ? t1.neg() : ce._fn('Divide', [t1.neg(), t2]);
 
   const num = ce._fromNumericValue(c.num, t1);
   const denom = ce._fromNumericValue(c.denom, t2);
-  if (denom.isOne) return num;
 
-  return ce._fn('Divide', [num, denom]);
+  return denom.isOne ? num : ce._fn('Divide', [num, denom]);
 }
 
 export function evalDivide(
-  ce: IComputeEngine,
   op1: BoxedExpression,
   op2: BoxedExpression
 ): BoxedExpression {
+  const ce = op1.engine;
   let result = op1.div(op2);
   if (result?.head === 'Divide') {
     if (!result.op1.isExact || !result.op2.isExact) {
@@ -115,10 +117,10 @@ export function evalDivide(
 }
 
 export function evalNDivide(
-  ce: IComputeEngine,
   op1: BoxedExpression,
   op2: BoxedExpression
 ): BoxedExpression {
+  const ce = op1.engine;
   let result = op1.div(op2);
   if (result?.head === 'Divide') {
     result =

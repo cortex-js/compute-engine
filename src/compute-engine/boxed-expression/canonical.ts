@@ -126,9 +126,8 @@ function multiplyForm(expr: BoxedExpression) {
       ops.map((x) => x.canonical)
     );
 
-  if (expr.head === 'Negate') {
+  if (expr.head === 'Negate')
     return canonicalMultiply(expr.engine, [ops[0], expr.engine.NegativeOne]);
-  }
 
   return expr;
 }

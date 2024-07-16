@@ -1,6 +1,6 @@
 import { each, isFiniteIndexableCollection } from '../collection-utils';
 import { IComputeEngine, BoxedDomain, DomainLiteral, Hold } from '../public';
-import { flattenOps, flattenSequence } from '../symbolic/flatten';
+import { flatten, flattenSequence } from '../symbolic/flatten';
 import { canonical, shouldHold } from '../symbolic/utils';
 import { BoxedExpression } from './public';
 
@@ -49,18 +49,19 @@ export function checkArity(
  *
  * We also assume that the function is threadable.
  *
- * Converts the arguments to canonical, and flattens the sequence.
+ * The arguments are made canonical.
+ *
+ * Flattens sequence expressions.
  */
 export function checkNumericArgs(
   ce: IComputeEngine,
   ops: ReadonlyArray<BoxedExpression>,
-  options?: number | { count?: number; flatten?: boolean | string }
+  options?: number | { count?: number; flatten?: string }
 ): ReadonlyArray<BoxedExpression> {
   let count = typeof options === 'number' ? options : options?.count;
-  const flatten = typeof options === 'number' || (options?.flatten ?? true);
-  ops = canonical(ops);
-  if (flatten) ops = flattenSequence(ops);
-  if (typeof flatten === 'string') flattenOps(ops, flatten);
+  const flattenHead =
+    typeof options === 'number' ? undefined : options?.flatten;
+  ops = flatten(ops, flattenHead);
 
   // @fastpath
   if (!ce.strict) {

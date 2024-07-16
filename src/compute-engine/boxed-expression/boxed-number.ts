@@ -29,11 +29,11 @@ import { hashCode, bignumPreferred, asBigint } from './utils';
 import { Expression } from '../../math-json';
 import { signDiff } from './numerics';
 import { match } from './match';
-import { Terms } from '../numerics/terms';
-import { Product } from '../symbolic/product';
 import { canonicalDivide } from '../library/arithmetic-divide';
 import { NumericValue } from '../numeric-value/public';
 import { factorPower } from '../numerics/numeric-bigint';
+import { add } from '../library/arithmetic-add';
+import { mul } from '../library/arithmetic-multiply';
 
 /**
  * BoxedNumber
@@ -228,47 +228,39 @@ export class BoxedNumber extends _BoxedExpression {
 
     // @fastpath
     if (rhs.length === 1) {
-      let n = ce._numericValue(this._value);
-      if (typeof rhs[0] === 'number')
+      if (typeof rhs[0] === 'number') {
+        let n = ce._numericValue(this._value);
         return ce._fromNumericValue(n.add(rhs[0]));
-
-      if (rhs[0].numericValue !== null)
+      }
+      if (rhs[0].numericValue !== null) {
+        let n = ce._numericValue(this._value);
         return ce._fromNumericValue(
           n.add(ce._numericValue(rhs[0].numericValue))
         );
+      }
     }
 
-    return new Terms(ce, [
-      this,
-      ...rhs.map((x) => (typeof x === 'number' ? ce.number(x) : x)),
-    ]).asExpression();
-  }
-
-  sub(rhs: BoxedExpression): BoxedExpression {
-    return this.add(rhs.neg());
+    return add(this.canonical, ...rhs.map((x) => ce.box(x)));
   }
 
   mul(...rhs: (number | BoxedExpression)[]): BoxedExpression {
     if (rhs.length === 0) return this;
-
-    const ce = this.engine;
-
     // @fastpath
     if (rhs.length === 1) {
-      let n = ce._numericValue(this._value);
-      if (typeof rhs[0] === 'number')
+      const ce = this.engine;
+      if (typeof rhs[0] === 'number') {
+        let n = ce._numericValue(this._value);
         return ce._fromNumericValue(n.mul(rhs[0]));
-
-      if (rhs[0].numericValue !== null)
+      }
+      if (rhs[0].numericValue !== null) {
+        let n = ce._numericValue(this._value);
         return ce._fromNumericValue(
           n.mul(ce._numericValue(rhs[0].numericValue))
         );
+      }
     }
 
-    return new Product(ce, [
-      this,
-      ...rhs.map((x) => (typeof x === 'number' ? ce.number(x) : x)),
-    ]).asExpression();
+    return mul(this.canonical, ...rhs.map((x) => this.engine.box(x)));
   }
 
   div(rhs: number | BoxedExpression): BoxedExpression {

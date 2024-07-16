@@ -2,32 +2,53 @@ import Complex from 'complex.js';
 import { lex, maxDegree, totalDegree } from '../symbolic/polynomials';
 import { BoxedExpression, SemiBoxedExpression } from './public';
 import { asFloat } from './numerics';
+import { isRational } from '../numerics/rationals';
+import { isTrigonometricFunction } from '../library/trigonometry';
 
 export type Order = 'lex' | 'dexlex' | 'grevlex' | 'elim';
 
 export const DEFAULT_COMPLEXITY = 100000;
 
+const ADD_RANKS = [
+  'power',
+  'symbol',
+
+  'multiply',
+  'divide',
+  'add',
+  'trig',
+  'fn',
+
+  'complex',
+  'constant',
+
+  'number',
+  'rational',
+  'sqrt',
+
+  'string',
+  'dict',
+  'other',
+] as const;
+
 /**
- * Sort by higher total degree (sum of degree), if tied, sort by max degree,
- * if tied,
+ * Sort by higher total degree (sum of degree), if tied, sort by max degree.
+ *
+ * E.g.
+ * - 2x^2 + 3x + 1
+ * - 2x^2y^3 + 5x^3y
  */
 export function sortAdd(
   ops: ReadonlyArray<BoxedExpression>
 ): ReadonlyArray<BoxedExpression> {
   return [...ops].sort((a, b) => {
-    const aLex = lex(a);
-    const bLex = lex(b);
-    if (!aLex && !bLex) return order(a, b);
-    if (!aLex) return +1;
-    if (!bLex) return -1;
-    if (aLex < bLex) return -1;
-    if (aLex > bLex) return +1;
-    const aTotalDeg = totalDegree(a);
-    const bTotalDeg = totalDegree(b);
-    if (aTotalDeg !== bTotalDeg) return bTotalDeg - aTotalDeg;
-    const aMaxDeg = maxDegree(a);
-    const bMaxDeg = maxDegree(b);
-    if (aMaxDeg !== bMaxDeg) return aMaxDeg - bMaxDeg;
+    const r = rank(a);
+    const rankA = ADD_RANKS.indexOf(r);
+    const rankB = ADD_RANKS.indexOf(rank(b));
+    if (rankA !== rankB) return rankA - rankB;
+    if (r === 'power') {
+      // Higher order terms first
+    }
     return order(a, b);
   });
 }
@@ -35,6 +56,72 @@ export function sortAdd(
 // export function isSorted(expr: BoxedExpression): BoxedExpression {
 
 // }
+
+// The "kind" of subexpressions. The order here indicates the
+// order in which the expressions should be sorted
+const RANKS = [
+  'number',
+  'rational',
+  'sqrt',
+  'complex',
+  'constant',
+  'symbol',
+  'multiply',
+  'divide',
+  'add',
+  'trig',
+  'fn',
+  'power',
+  'string',
+  'dict',
+  'other',
+] as const;
+export type Rank = (typeof RANKS)[number];
+
+/**
+ * Return the "rank", the order in which the expression should be
+ * sorted.
+ */
+function rank(expr: BoxedExpression): Rank {
+  if (expr.numericValue && isRational(expr.numericValue)) return 'rational';
+
+  // Complex numbers
+  if (expr.numericValue instanceof Complex || expr.symbol === 'ImaginaryUnit')
+    return 'complex';
+
+  // Other real numbers
+  if (expr.numericValue !== null) return 'number';
+
+  // Square root of a number
+  if (expr.head === 'Sqrt' && expr.op1.numericValue) {
+    const n = asFloat(expr.op1);
+    if (n !== null && Number.isInteger(n)) return 'sqrt';
+  }
+
+  // Constant symbols
+  if (expr.symbol && expr.isConstant) return 'constant';
+
+  // Other symbols
+  if (expr.symbol) return 'symbol';
+
+  if (isTrigonometricFunction(expr.head)) return 'trig';
+
+  if (expr.head === 'Add') return 'add';
+
+  if (expr.head === 'Power') return 'power';
+
+  if (expr.head === 'Multiply' || expr.head === 'Negate') return 'multiply';
+
+  if (expr.head === 'Divide') return 'divide';
+
+  if (expr.ops) return 'fn';
+
+  if (expr.string) return 'string';
+
+  if (expr.keys) return 'dict';
+
+  return 'other';
+}
 
 /**
  * Given two expressions `a` and `b`, return:
@@ -45,7 +132,7 @@ export function sortAdd(
  * The default order is as follow:
  *
  * 1/ Literal numeric values (rational,  machine numbers and Decimal numbers),
- *  ordered by they numeric value (smaller numbers before larger numbers)
+ *  ordered by their numeric value (smaller numbers before larger numbers)
  *
  * 2/ Literal complex numbers, ordered by their real parts. In case of a tie,
  * ordered by the absolute value of their imaginary parts. In case of a tie,
@@ -68,119 +155,139 @@ export function sortAdd(
  * 7/ Dictionaries, ordered by the number of keys. If there is a tie, by the
  * sum of the complexities of the values of the dictionary
  *
+ * See https://reference.wolfram.com/language/ref/Sort.html for a
+ * description of the ordering of expressions in Mathematica.
  *
  */
 export function order(a: BoxedExpression, b: BoxedExpression): number {
-  // console.assert(a.isCanonical && b.isCanonical);
-
   if (a === b) return 0;
-  if (a.numericValue !== null && a.numericValue === b.numericValue) return 0;
 
-  //
-  //  1/ Literal numeric values
-  //
-  const af = asFloat(a);
-  if (af !== null) {
+  const rankA = rank(a);
+  const rankB = rank(b);
+  if (rankA !== rankB) return RANKS.indexOf(rankA) - RANKS.indexOf(rankB);
+
+  if (rankA === 'number' || rankA === 'rational') {
+    const af = asFloat(a);
     const bf = asFloat(b);
-    if (bf !== null) return af - bf;
-
-    return -1;
+    if (af !== null && bf !== null) return af - bf;
+    return -1; // Literals before non-literals
   }
 
-  //
-  // 2/ Complex numbers
-  //
-  if (a.numericValue instanceof Complex) {
-    if (b.numericValue instanceof Complex) {
-      if (a.numericValue.re === b.numericValue.re) {
-        if (Math.abs(a.numericValue.im) === Math.abs(b.numericValue.im)) {
-          return a.numericValue.im - b.numericValue.im;
-        }
-        return Math.abs(a.numericValue.im) - Math.abs(b.numericValue.im);
+  if (rankA === 'complex') {
+    const zA =
+      a.symbol === 'ImaginaryUnit'
+        ? a.engine.complex(0, 1)
+        : (a.numericValue as Complex);
+
+    const zB =
+      b.symbol === 'ImaginaryUnit'
+        ? b.engine.complex(0, 1)
+        : (b.numericValue as Complex);
+
+    if (zA.im === zB.im) return zA.re - zB.re;
+    return zA.im - zB.im;
+  }
+
+  if (rankA === 'sqrt') return order(a.op1, b.op1);
+
+  if (rankA === 'constant' || rankA === 'symbol') {
+    if (a.symbol === b.symbol) return 0;
+    return a.symbol! > b.symbol! ? 1 : -1;
+  }
+
+  if (rankA === 'add') {
+    const aOps = a.ops!;
+    const bOps = b.ops!;
+    if (aOps.length !== bOps.length) return bOps.length - aOps.length;
+    for (let i = 0; i < aOps.length; i++) {
+      const cmp = order(aOps[i], bOps[i]);
+      if (cmp !== 0) return cmp;
+    }
+    return 0;
+  }
+
+  if (rankA === 'power') {
+    // console.log('power', a.toString(), b.toString());
+    const totalDegreeA = totalDegree(a);
+    const totalDegreeB = totalDegree(b);
+    if (totalDegreeA !== totalDegreeB) {
+      // console.log('totalDegree diff = ', totalDegreeB - totalDegreeA);
+      return totalDegreeB - totalDegreeA;
+    }
+    const maxDegreeA = maxDegree(a);
+    const maxDegreeB = maxDegree(b);
+    if (maxDegreeA !== maxDegreeB) {
+      // console.log('maxDegree diff = ', totalDegreeB - totalDegreeA);
+      return maxDegreeA - maxDegreeB;
+    }
+
+    // console.log('same degree ', order(a.op1, b.op1));
+    return order(a.op1, b.op1);
+  }
+
+  if (rankA === 'multiply') {
+    const totalDegreeA = totalDegree(a);
+    const totalDegreeB = totalDegree(b);
+    if (totalDegreeA !== totalDegreeB) return totalDegreeB - totalDegreeA;
+    const maxDegreeA = maxDegree(a);
+    const maxDegreeB = maxDegree(b);
+    if (maxDegreeA !== maxDegreeB) return maxDegreeA - maxDegreeB;
+
+    const aOps = a.ops!;
+    const bOps = b.ops!;
+
+    if (aOps.length !== bOps.length) return bOps.length - aOps.length;
+    for (let i = 0; i < aOps.length; i++) {
+      const cmp = order(aOps[i], bOps[i]);
+      if (cmp !== 0) return cmp;
+    }
+    return 0;
+  }
+
+  if (rankA === 'divide') {
+    const totalDegreeA = totalDegree(a.op1);
+    const totalDegreeB = totalDegree(b.op1);
+    if (totalDegreeA !== totalDegreeB) return totalDegreeB - totalDegreeA;
+    const maxDegreeA = maxDegree(a.op1);
+    const maxDegreeB = maxDegree(b.op1);
+    if (maxDegreeA !== maxDegreeB) return maxDegreeA - maxDegreeB;
+
+    const numOrder = order(a.op1, b.op1);
+    if (numOrder !== 0) return numOrder;
+    return order(a.op2, b.op2);
+  }
+
+  if (rankA === 'fn' || rankA === 'trig') {
+    if (a.head == b.head && a.nops === 1 && b.nops === 1) {
+      return order(a.op1, b.op1);
+    }
+    const aComplexity = a.functionDefinition?.complexity ?? DEFAULT_COMPLEXITY;
+    const bComplexity = b.functionDefinition?.complexity ?? DEFAULT_COMPLEXITY;
+    if (aComplexity === bComplexity) {
+      if (typeof a.head === 'string' && typeof b.head === 'string') {
+        if (a.head === b.head) return getLeafCount(a) - getLeafCount(b);
+
+        if (a.head < b.head) return +1;
+        return -1;
       }
-      return a.numericValue.re - b.numericValue.re;
+      return getLeafCount(a) - getLeafCount(b);
     }
-    if (b.numericValue !== null) return +1;
-    return -1;
+    return aComplexity - bComplexity;
   }
 
-  if (a.numericValue) {
-    if (b.numericValue) {
-      return +1;
-    }
-    return -1;
-  }
-
-  if (a.head === 'Sqrt' && a.op1.numericValue) {
-    if (b.head === 'Sqrt' && b.op1.numericValue) return order(a.op1, b.op1);
-    return -1;
-  }
-
-  //
-  // 3/ Symbols
-  //
-  if (a.symbol) {
-    if (b.symbol) {
-      if (a.symbol === b.symbol) return 0;
-      return a.symbol > b.symbol ? 1 : -1;
-    }
-    if (b.numericValue !== null) return +1;
-    return -1;
-  }
-
-  //
-  // 4/ Functions
-  //
-  if (a.ops) {
-    if (b.ops) {
-      // Note: we may not have a function definition if it's
-      // an "anonymous" function, i.e. `f` in `f(x)`
-      const aComplexity =
-        a.functionDefinition?.complexity ?? DEFAULT_COMPLEXITY;
-      const bComplexity =
-        b.functionDefinition?.complexity ?? DEFAULT_COMPLEXITY;
-      if (aComplexity === bComplexity) {
-        if (typeof a.head === 'string' && typeof b.head === 'string') {
-          if (a.head === b.head) {
-            return getLeafCount(a) - getLeafCount(b);
-          }
-          if (a.head < b.head) return +1;
-          return -1;
-        }
-        return getLeafCount(a) - getLeafCount(b);
-      }
-      return aComplexity - bComplexity;
-    }
-    if (b.numericValue !== null || b.symbol) return +1;
-    return -1;
-  }
-
-  //
-  // 5/ Strings
-  //
-  if (a.string) {
-    if (b.string) {
-      // Order strings by their length, then by their lexicographic order
-      if (a.string.length !== b.string.length)
-        return b.string.length - a.string.length;
-      if (b.string < a.string) return -1;
-      if (a.string > b.string) return +1;
-      return 0;
-    }
-    if (b.keys) return -1;
+  if (rankA === 'string') {
+    if (a.string === b.string) return 0;
+    if (b.string! < a.string!) return -1;
     return +1;
   }
 
-  //
-  // 7/ Dictionaries
-  //
-  if (a.keys && b.keys) {
+  if (rankA === 'dict') {
     if (a.keysCount !== b.keysCount) return b.keysCount - a.keysCount;
     let bComplexity = 0;
     let aComplexity = 0;
-    for (const key of b.keys)
+    for (const key of b.keys!)
       bComplexity += b.getKey(key)!.complexity ?? DEFAULT_COMPLEXITY;
-    for (const key of a.keys)
+    for (const key of a.keys!)
       aComplexity += a.getKey(key)!.complexity ?? DEFAULT_COMPLEXITY;
     return aComplexity - bComplexity;
   }
@@ -197,21 +304,21 @@ export function canonicalOrder(
   expr: BoxedExpression,
   { recursive = false }: { recursive?: boolean }
 ): BoxedExpression {
-  if (expr.ops) {
-    let ops = expr.ops;
-    if (recursive) ops = ops.map((x) => canonicalOrder(x, { recursive }));
+  // If the expression is already in canonical form, return it as is
+  if (expr.isCanonical || !expr.ops) return expr;
 
-    const ce = expr.engine;
-    if (expr.head === 'Add') ops = sortAdd(ops);
-    else {
-      const isCommutative =
-        expr.head === 'Multiply' ||
-        (ce.lookupFunction(expr.head)?.commutative ?? false);
-      if (isCommutative) ops = [...ops].sort(order);
-    }
-    return ce._fn(expr.head, ops, { canonical: expr.isCanonical });
+  let ops = expr.ops;
+  if (recursive) ops = ops.map((x) => canonicalOrder(x, { recursive }));
+
+  const ce = expr.engine;
+  if (expr.head === 'Add') ops = sortAdd(ops);
+  else {
+    const isCommutative =
+      expr.head === 'Multiply' ||
+      (ce.lookupFunction(expr.head)?.commutative ?? false);
+    if (isCommutative) ops = [...ops].sort(order);
   }
-  return expr;
+  return ce._fn(expr.head, ops, { canonical: false });
 }
 
 /**
