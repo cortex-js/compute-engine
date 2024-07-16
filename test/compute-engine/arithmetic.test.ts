@@ -337,12 +337,13 @@ describe('MULTIPLY', () => {
   test(`Multiply: All exact`, () =>
     expect(check('2\\frac{5}{7}\\times\\frac{7}{9}')).toMatchSnapshot());
 
-  test(`Multiply: All exact`, () =>
+  test(`Multiply: All exact with symbol`, () =>
     expect(
       check(
         '2\\times 5\\times\\frac{5}{7}\\times\\frac{7}{9}\\times\\sqrt{2}\\times\\pi'
       )
     ).toMatchSnapshot());
+
   test(`Multiply: One inexact`, () =>
     expect(
       check(

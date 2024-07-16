@@ -141,6 +141,9 @@
 - The fallback for non-constructible complex values of trigonometric functions
   is now implemented via rules.
 
+- The canonical order of the arguments has changed and should be more consistent
+  and predictable.
+
 ### Issues Resolved
 
 - Some LaTeX renderer can't render `\/`, so use `/` instead.
