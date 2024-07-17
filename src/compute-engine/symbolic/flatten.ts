@@ -1,4 +1,4 @@
-import { BoxedExpression } from '../public';
+import { BoxedExpression, SemiBoxedExpression } from '../public';
 
 /**
  *
@@ -15,9 +15,9 @@ import { BoxedExpression } from '../public';
  */
 export function flatten<
   T extends ReadonlyArray<BoxedExpression> | BoxedExpression[],
->(xs: ReadonlyArray<BoxedExpression>, head?: string): T {
+>(ops: T, head?: string): T {
   // Make all the arguments canonical.
-  xs = xs.every((x) => x.isCanonical) ? xs : xs.map((x) => x.canonical);
+  let xs = ops.every((x) => x.isCanonical) ? ops : ops.map((x) => x.canonical);
 
   if (head) {
     // Bypass memory allocation for the common case where there is nothing to flatten

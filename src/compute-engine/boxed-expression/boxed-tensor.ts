@@ -67,7 +67,8 @@ export class BoxedTensor extends _BoxedExpression {
       this._tensor = input;
     } else {
       this._head = input.head ?? 'List';
-      this._ops = options.canonical === true ? canonical(input.ops) : input.ops;
+      this._ops =
+        options.canonical === true ? canonical(ce, input.ops) : input.ops;
 
       this._expression = ce._fn(this._head, this._ops, {
         canonical: options.canonical,

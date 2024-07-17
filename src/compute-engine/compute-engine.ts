@@ -73,13 +73,10 @@ import {
 } from './boxed-expression/boxed-function-definition';
 import {
   Rational,
-  inverse,
   isRational,
   isOne,
   asMachineRational,
 } from './numerics/rationals';
-import { flattenOps, flattenSequence } from './symbolic/flatten';
-import { bigint } from './numerics/numeric-bigint';
 import { parseFunctionSignature } from './function-utils';
 import { CYAN, INVERSE_RED, RESET, YELLOW } from '../common/ansi-codes';
 import {
@@ -116,7 +113,6 @@ import {
   asRational,
 } from './boxed-expression/numerics';
 import { factor } from './boxed-expression/factor';
-import { Terms } from './numerics/terms';
 
 /**
  *
@@ -2040,10 +2036,8 @@ export class ComputeEngine implements IComputeEngine {
     return new BoxedFunction(
       this,
       'Tuple',
-      canonical(
-        elements.map((x) =>
-          typeof x === 'number' ? this.number(x) : x.canonical
-        )
+      elements.map((x) =>
+        typeof x === 'number' ? this.number(x) : x.canonical
       ),
       {
         metadata,

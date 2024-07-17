@@ -1,7 +1,7 @@
 import { each, isFiniteIndexableCollection } from '../collection-utils';
 import { IComputeEngine, BoxedDomain, DomainLiteral, Hold } from '../public';
-import { flatten, flattenSequence } from '../symbolic/flatten';
-import { canonical, shouldHold } from '../symbolic/utils';
+import { flatten } from '../symbolic/flatten';
+import { shouldHold } from '../symbolic/utils';
 import { BoxedExpression } from './public';
 
 /**
@@ -13,11 +13,8 @@ export function checkArity(
   ce: IComputeEngine,
   ops: ReadonlyArray<BoxedExpression>,
   count: number
-  // { flatten } = { flatten: true }
 ): ReadonlyArray<BoxedExpression> {
-  ops = canonical(ops);
-  // if (flatten) ops = flattenSequence(ops);
-  ops = flattenSequence(ops);
+  ops = flatten(ops);
 
   // @fastpath
   if (!ce.strict) return ops;

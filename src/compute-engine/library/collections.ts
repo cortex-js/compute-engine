@@ -302,7 +302,7 @@ export const COLLECTIONS_LIBRARY: IdentifierDefinitions = {
     complexity: 8200,
     signature: {
       domain: ['FunctionOf', 'Anything', ['VarArg', 'Anything'], 'Tuples'],
-      canonical: (ce, ops) => ce.tuple(canonical(ops)),
+      canonical: (ce, ops) => ce.tuple(ops),
     },
     size: (expr) => expr.nops!,
     at: (expr, index) =>
@@ -981,7 +981,7 @@ function canonicalList(
   ops = ops.map((op) => {
     if (op.head === 'Delimiter') {
       if (op.op1.head === 'Sequence')
-        return ce._fn('List', canonical(op.op1.ops!));
+        return ce._fn('List', canonical(ce, op.op1.ops!));
       return ce._fn('List', [op.op1?.canonical ?? ce.Nothing]);
     }
     return op.canonical;

@@ -29,8 +29,8 @@ import { BoxedTensor, expressionTensorInfo } from './boxed-tensor';
 import { canonicalForm } from './canonical';
 import { asFloat, asMachineInteger } from './numerics';
 import { canonicalAdd } from '../library/arithmetic-add';
-import { flattenSequence, flattenOps } from '../symbolic/flatten';
-import { shouldHold, semiCanonical } from '../symbolic/utils';
+import { flatten } from '../symbolic/flatten';
+import { shouldHold, semiCanonical, canonical } from '../symbolic/utils';
 import { order } from './order';
 import { adjustArguments, checkNumericArgs } from './validate';
 import { canonicalMultiply } from '../library/arithmetic-multiply';
@@ -672,13 +672,10 @@ function makeCanonicalFunction(
   const def = ce.lookupFunction(head);
   if (!def) {
     // No def. This is for example `["f", 2]` where "f" is not declared.
-    // @todo: should we create a def for it?
-    return new BoxedFunction(
-      ce,
-      head,
-      flattenSequence(ops.map((x) => ce.box(x))), // @fixme: call canonical()
-      { metadata, canonical: true }
-    );
+    return new BoxedFunction(ce, head, flatten(canonical(ce, ops)), {
+      metadata,
+      canonical: true,
+    });
   }
 
   const xs: BoxedExpression[] = [];
@@ -721,8 +718,10 @@ function makeCanonicalFunction(
   // Flatten any sequence
   // f(a, Sequence(b, c), Sequence(), d) -> f(a, b, c, d)
   //
-  let args = flattenSequence(xs);
-  if (def.associative) args = flattenOps(args, head as string);
+  let args: ReadonlyArray<BoxedExpression> = flatten(
+    xs,
+    def.associative && typeof head === 'string' ? head : undefined
+  );
 
   const adjustedArgs = adjustArguments(
     ce,

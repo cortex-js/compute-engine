@@ -198,7 +198,19 @@ describe('STEFNOTCH #13', () => {
     expect(parse('\\forall x\\in\\C^2:|x|<0')).toMatchInlineSnapshot(`
       [
         "ForAll",
-        ["Element", "x", ["Power", "ComplexNumbers", 2]],
+        [
+          "Element",
+          "x",
+          [
+            "Power",
+            [
+              "Error",
+              ["ErrorCode", "'incompatible-domain'", "Numbers", "Domains"],
+              "ComplexNumbers"
+            ],
+            2
+          ]
+        ],
         ["Less", ["Abs", "x"], 0]
       ]
     `);

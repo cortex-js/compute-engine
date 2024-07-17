@@ -50,7 +50,7 @@ import {
   checkDomains,
   checkNumericArgs,
 } from '../boxed-expression/validate';
-import { flatten, flattenOps, flattenSequence } from '../symbolic/flatten';
+import { flatten } from '../symbolic/flatten';
 import { each, isCollection } from '../collection-utils';
 import { BoxedNumber } from '../boxed-expression/boxed-number';
 import { IComputeEngine, BoxedExpression } from '../boxed-expression/public';
@@ -795,7 +795,7 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
       signature: {
         domain: ['FunctionOf', 'Numbers', 'Numbers'],
         canonical: (ce, ops) => {
-          ops = flattenSequence(ops);
+          ops = flatten(ops);
           if (ops.length !== 1) return ce._fn('Sqrt', ops);
           return ops[0].sqrt();
         },
@@ -843,10 +843,7 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
           const first = args[0];
           if (!first) return ce.error('missing');
           const rest = args.slice(1);
-          return canonicalAdd(
-            ce,
-            flattenOps([first, ...rest.map((x) => x.neg())], 'Add')
-          );
+          return canonicalAdd(ce, [first, ...rest.map((x) => x.neg())]);
         },
       },
     },

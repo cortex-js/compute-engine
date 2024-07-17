@@ -16,7 +16,7 @@ import {
 } from '../numerics/rationals';
 import { asRationalSqrt } from '../library/arithmetic-power';
 
-import { flatten, flattenOps } from './flatten';
+import { flatten } from './flatten';
 import { asRational, add } from '../boxed-expression/numerics';
 import { NumericValue } from '../numeric-value/public';
 

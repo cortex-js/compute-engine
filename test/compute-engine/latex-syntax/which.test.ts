@@ -14,8 +14,8 @@ describe('WHICH', () => {
         0,
         ["Equal", "n", 1],
         1,
-        ["GreaterEqual", "n", 2],
-        ["Add", ["Power", "n", 2], 1]
+        ["LessEqual", 2, "n"],
+        ["Add", ["Square", "n"], 1]
       ]
     `);
   });

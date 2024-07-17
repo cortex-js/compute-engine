@@ -13,12 +13,11 @@ import { apply, canonicalFunctionExpression } from '../function-utils';
 import { canonical } from '../symbolic/utils';
 import { isDomain } from '../boxed-expression/boxed-domain';
 import { isIndexableCollection } from '../collection-utils';
-import { flattenOps, flattenSequence } from '../symbolic/flatten';
+import { flatten, flattenSequence } from '../symbolic/flatten';
 import { normalizeIndexingSet } from './utils';
 import { canonicalForm } from '../boxed-expression/canonical';
 import { BoxedExpression } from '../boxed-expression/public';
 import { asFloat, asMachineInteger } from '../boxed-expression/numerics';
-import { order } from '../boxed-expression/order';
 
 //   // := assign 80 // @todo
 // compose (compose(f, g) -> a new function such that compose(f, g)(x) -> f(g(x))
@@ -135,7 +134,7 @@ export const CORE_LIBRARY: IdentifierDefinitions[] = [
           return ce.Anything;
         },
         canonical: (ce, args) => {
-          const xs = flattenSequence(canonical(args));
+          const xs = flatten(args);
           if (xs.length === 0) return ce._fn('Sequence', []);
           if (xs.length === 1) return xs[0];
           return ce._fn('Sequence', xs);
@@ -181,7 +180,7 @@ export const CORE_LIBRARY: IdentifierDefinitions[] = [
           // the arguments, so it needs to be preserved.
           // If there is a single element, unpack it.
           if (body.head === 'Sequence')
-            return ce._fn('Tuple', canonical(body.ops!));
+            return ce._fn('Tuple', canonical(ce, body.ops!));
 
           body = body.canonical;
 
@@ -324,7 +323,7 @@ export const CORE_LIBRARY: IdentifierDefinitions[] = [
           if (args.length !== 1) return null;
           const op1 = args[0];
           if (op1.head) return ce.box(op1.head);
-          return ce._fn('Head', canonical(args));
+          return ce._fn('Head', canonical(ce, args));
         },
         evaluate: (ce, ops) => {
           const op1 = ops[0];
@@ -343,7 +342,7 @@ export const CORE_LIBRARY: IdentifierDefinitions[] = [
           if (args.length !== 1) return null;
           const op1 = args[0];
           if (op1.ops) return ce._fn('Sequence', op1.ops);
-          return ce._fn('Tail', canonical(args));
+          return ce._fn('Tail', canonical(ce, args));
         },
         evaluate: (ce, ops) => {
           const op1 = ops[0];
@@ -896,7 +895,7 @@ export function canonicalInvisibleOperator(
       // Parse the arguments first, in case they reference lhs.symbol
       // i.e. `x(x+1)`.
       let args = rhs.op1.head === 'Sequence' ? rhs.op1.ops! : [rhs.op1];
-      args = flattenSequence(canonical(args));
+      args = flatten(args);
       if (!ce.lookupSymbol(lhs.symbol)) {
         // Still not a symbol (i.e. wasn't used as a symbol in the
         // subexpression), so it's a function call.
@@ -915,9 +914,8 @@ export function canonicalInvisibleOperator(
       return ce.function('At', [lhs, ...args]);
     }
   }
-
-  // Only call canonical here, because it will bind (auto-declare) the arguments
-  ops = flattenSequence(canonical(ops));
+  // Only call flatten here, because it will bind (auto-declare) the arguments
+  ops = flatten(ops);
 
   //
   // Is it an invisible multiplication?
@@ -932,7 +930,8 @@ export function canonicalInvisibleOperator(
           (isIndexableCollection(x) && !x.string))
     )
   ) {
-    ops = flattenOps(ops, 'Multiply');
+    // Only call flatten here, because it will bind (auto-declare) the arguments
+    ops = flatten(ops, 'Multiply');
     if (ops.length === 1) return ops[0];
     return ce.function('Multiply', ops);
   }

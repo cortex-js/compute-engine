@@ -1,12 +1,10 @@
 import { isRelationalOperator } from '../boxed-expression/utils';
-import { checkPure } from '../boxed-expression/validate';
 import {
   BoxedExpression,
   IComputeEngine,
   IdentifierDefinitions,
 } from '../public';
-import { flattenOps, flattenSequence } from '../symbolic/flatten';
-import { canonical } from '../symbolic/utils';
+import { flatten } from '../symbolic/flatten';
 
 //   // eq, lt, leq, gt, geq, neq, approx
 //   //     shortLogicalImplies: 52, // ➔
@@ -381,7 +379,7 @@ function canonicalRelational(
   head: string,
   ops: ReadonlyArray<BoxedExpression>
 ): BoxedExpression {
-  ops = flattenOps(flattenSequence(canonical(ops)), head);
+  ops = flatten(ops, head);
 
   const nestedRelational: BoxedExpression[] = [];
   const newOps: BoxedExpression[] = [];
