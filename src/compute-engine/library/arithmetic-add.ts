@@ -52,8 +52,9 @@ export function canonicalAdd(
       return ce.number(ce.complex(re, im));
   }
 
-  // Commutative, sort
   if (ops.length === 1) return ops[0];
+
+  // Commutative, sort
   return ce._fn('Add', sortAdd(ops));
 }
 
@@ -379,9 +380,8 @@ export function evalSummation(
  * - ['Multiply', 'ImaginaryUnit', 5] -> 5
  * - ['Divide', 'ImaginaryUnit', 2] -> 0.5
  *
- * @fixme: use NumericValue instead
  */
-export function getImaginaryCoef(expr: BoxedExpression): number {
+function getImaginaryCoef(expr: BoxedExpression): number {
   if (expr.symbol === 'ImaginaryUnit') return 1;
 
   const z = expr.numericValue;
@@ -395,10 +395,8 @@ export function getImaginaryCoef(expr: BoxedExpression): number {
   }
 
   if (expr.head === 'Divide') {
-    const v = getImaginaryCoef(expr.op1);
     const denom = asFloat(expr.op2);
-    if (denom === null) return 0;
-    return v / denom;
+    if (denom !== null) return getImaginaryCoef(expr.op1) / denom;
   }
 
   return 0;
