@@ -1804,7 +1804,7 @@ export type DomainExpression<T = SemiBoxedExpression> =
  */
 export type SimplifyOptions = {
   recursive?: boolean; // Default to true
-  rules: null | BoxedRuleSet;
+  rules: null | Rule | Rule[] | BoxedRuleSet;
 };
 
 /** Options for `BoxedExpression.evaluate()`
