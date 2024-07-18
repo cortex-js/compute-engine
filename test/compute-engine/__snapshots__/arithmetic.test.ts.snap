@@ -797,8 +797,7 @@ simplify  = NaN
 
 exports[`MULTIPLY with zero 1`] = `
 box       = ["Multiply", "x", 2, 3.1, 0]
-canonical = ["Multiply", 0, 2, 3.1, "x"]
-simplify  = 0
+canonical = 0
 `;
 
 exports[`Max Max 1`] = `

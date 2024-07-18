@@ -324,6 +324,7 @@ export function canonicalMultiply(
   let num: number | undefined = undefined;
   let imaginaryCount = 0;
   for (const op of ops) {
+    if (op.isZero) return ce.Zero;
     if (op.isOne) continue;
     if (op.isNegativeOne) {
       sign = -sign;

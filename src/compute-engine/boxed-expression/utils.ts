@@ -157,5 +157,5 @@ export function isRelationalOperator(name: BoxedExpression | string): boolean {
 export function isInequality(expr: BoxedExpression): boolean {
   const h = expr.head;
   if (typeof h !== 'string') return false;
-  return ['Equal', 'Less', 'LessEqual', 'Greater', 'GreaterEqual'].includes(h);
+  return ['Less', 'LessEqual', 'Greater', 'GreaterEqual'].includes(h);
 }

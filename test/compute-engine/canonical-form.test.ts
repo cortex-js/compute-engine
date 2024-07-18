@@ -107,8 +107,7 @@ describe('CANONICAL FORMS', () => {
   test('2x\\frac{0}{5}"', () => {
     expect(check('2x\\frac{0}{5}')).toMatchInlineSnapshot(`
       box       = ["InvisibleOperator", 2, "x", ["Divide", 0, 5]]
-      canonical = ["Multiply", 0, 2, "x"]
-      simplify  = 0
+      canonical = 0
     `);
   });
 
@@ -133,8 +132,7 @@ describe('CANONICAL FORMS', () => {
   test('"2\\times0\\times5\\times4"', () => {
     expect(check('2\\times0\\times5\\times4')).toMatchInlineSnapshot(`
       box       = ["Multiply", 2, 0, 5, 4]
-      canonical = ["Multiply", 0, 2, 4, 5]
-      simplify  = 0
+      canonical = 0
     `);
   });
 

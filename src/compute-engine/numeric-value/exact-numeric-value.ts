@@ -351,6 +351,9 @@ export class ExactNumericValue extends NumericValue<number, [number, number]> {
       });
     }
 
+    if (rhs.sign === 0)
+      return new ExactNumericValue({ re: this.sign === 0 ? NaN : Infinity });
+
     // (a/b √c) / (d/e √f) = (ad/be) * √(c/f) =
     // ((a/b)/(d/e))*(1/f) * √(cf)
     return new ExactNumericValue({

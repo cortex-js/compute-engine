@@ -265,7 +265,8 @@ export function univariateSolve(
     return null;
   }
 
-  if (name === null || !isInequality(expr)) return null;
+  if (name === null || !(expr.head === 'Equal' || isInequality(expr)))
+    return null;
 
   let lhs: SemiBoxedExpression = expr.op1;
   const rhs = expr.op2;

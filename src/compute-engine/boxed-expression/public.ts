@@ -1242,38 +1242,6 @@ export interface BoxedDomain extends BoxedExpression {
 
   readonly isNumeric: boolean;
   readonly isFunction: boolean;
-  // readonly isNothing: boolean;
-  // readonly isBoolean: boolean;
-  // readonly isPredicate: boolean;
-  /**
-   * If true, when all the arguments are numeric, the result of the
-   * evaluation is numeric. Numeric is any value with a domain of `Number`.
-   *
-   * Example of numeric functions: `Add`, `Multiply`, `Power`, `Abs`
-   *
-   * Default: `false`
-   */
-  // readonly isNumericFunction: boolean;
-  // readonly isRealFunction: boolean;
-  /**
-   * If true, when all the arguments are boolean, the result of the
-   * evaluation is a boolean. Boolean is any value with a domain of `MaybeBoolean`.
-   *
-   * Example of logic functions: `And`, `Or`, `Not`, `Implies`
-   *
-   * **Default:** `false`
-   */
-  // readonly isLogicOperator: boolean;
-  /**
-   * The function represent a relation between the first argument and
-   * the second argument, and evaluates to a boolean indicating if the relation
-   * is satisfied.
-   *
-   * For example, `Equal`, `Less`, `Approx`, etc...
-   *
-   * **Default:** `false`
-   */
-  // readonly isRelationalOperator: boolean;
 }
 
 /**

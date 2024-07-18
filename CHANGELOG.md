@@ -13,6 +13,157 @@
 
 ### New Features and Improvements
 
+- **Rule Wildcards**
+
+  When defining a rule as a LaTeX expression, single character identifiers are
+  interpreted as wildcards. For example, the rule `x + x -> 2x` will match any
+  expression with two identical terms. The wildcard corresponding to `x` is
+  `_x`.
+
+  It is now possible to define sequence wildcards and optional sequence
+  wildcards. Sequence wildcards match 1 or more expressions, while optional
+  sequence wildcards match 0 or more expressions.
+
+  They are indicated in LaTeX as `...x` and `...x?` respectively. For example:
+
+  ```js
+  expr.simplify("x + ...y -> 2x");
+  ```
+
+  If `expr` is `a + b + c` the rule will match and return `2a`
+
+  ```js
+  expr.simplify("x + ...y? -> 3x");
+  ```
+
+  If `expr` is `a + b + c` the rule will match and return `3a`. If `expr` is `a`
+  the rule will match and return `3a`.
+
+- **Conditional Rules**
+
+  Rules can now include conditions that are evaluated at runtime. If the
+  condition is not satisfied, the rules does not apply.
+
+  For example, to simplify the expression `|x|`:
+
+  ```js
+  expr.simplify({rules: [
+    "|x_{>=0}| -> x",
+    "|x_{<0}| -> -x",
+  ]});
+  ```
+
+  The condition is indicated as a subscript of the wildcard. The condition can
+  be one of:
+
+  - `boolean` - a boolean value, True or False
+  - `string` - a string of characters
+  - `number` - a number literal
+  - `symbol`
+  - `expression`
+
+  - `numeric` - an expression that has a numeric value, i.e. 2√3, 1/2, 3.14
+  - `integer` - an integer value, -2, -1, 0, 1, 2, 3, ...
+  - `natural` - a natural number, 0, 1, 2, 3, ...
+  - `real` - real numbers, including integers
+  - `imaginary` - imaginary numbers, i.e. 2i, 3√-1 (not including real numbers)
+  - `complex` - complex numbers, including real and imaginary
+  - `rational` - rational numbers, 1/2, 3/4, 5/6, ...
+  - `irrational` - irrational numbers, √2, √3, π, ...
+  - `algebraic` - algebraic numbers, rational and irrational
+  - `transcendental` - transcendental numbers, π, e, ...
+
+  - `positive` - positive real numbers, > 0
+  - `negative` - negative real numbers, < 0
+  - `nonnegative` - nonnegative real numbers, >= 0
+  - `nonpositive` - nonpositive real numbers, <= 0
+
+  - `even` - even integers, 0, 2, 4, 6, ...
+  - `odd` - odd integers, 1, 3, 5, 7, ...
+
+  - `prime` :A000040 - prime numbers, 2, 3, 5, 7, 11, ...
+  - `composite` :A002808 - composite numbers, 4, 6, 8, 9, 10, ...
+
+  - `notzero` - a value that is not zero
+  - `notone` - a value that is not one
+
+  - `finite` - a finite value, not infinite
+  - `infinite`
+
+  - `constant`
+  - `variable`
+
+  - `function`
+
+  - `operator`
+  - `relation` - an equation or inequality
+  - `equation`
+  - `inequality`
+
+  - `vector` - a tensor of rank 1
+  - `matrix` - a tensor of rank 2
+  - `list` - a collection of values
+  - `set` - a collection of unique values
+  - `tuple` - a fixed length list
+  - `single` - a tuple of length 1
+  - `pair` - a tuple of length 2
+  - `triple` - a tuple of length 3
+  - `collection` - a list, set, or tuple
+  - `tensor` - a nested list of values of the same type
+  - `scalar` - not a tensor or list
+
+  or one of the following expressions:
+
+  - `>0'` -> `positive`,
+  - `\gt0'` -> `positive`,
+  - `<0'` -> `negative`,
+  - `\lt0'` -> `negative`,
+  - `>=0'` -> `nonnegative`,
+  - `\geq0'` -> `nonnegative`,
+  - `<=0'` -> `nonpositive`,
+  - `\leq0'` -> `nonpositive`,
+  - `!=0'` -> `notzero`,
+  - `\neq0'` -> `notzero`,
+  - `!=1'` -> `notone`,
+  - `\neq1'` -> `notone`,
+  - `\in\Z'` -> `integer`,
+  - `\in\mathbb{Z}'` -> `integer`,
+  - `\in\N'` -> `natural`,
+  - `\in\mathbb{N}'` -> `natural`,
+  - `\in\R'` -> `real`,
+  - `\in\mathbb{R}'` -> `real`,
+  - `\in\C'` -> `complex`,
+  - `\in\mathbb{C}'` -> `complex`,
+  - `\in\Q'` -> `rational`,
+  - `\in\mathbb{Q}'` -> `rational`,
+  - `\in\Z^+'` -> `integer,positive`,
+  - `\in\Z^-'` -> `intger,negative`,
+  - `\in\Z^*'` -> `nonzero`,
+  - `\in\R^+'` -> `positive`,
+  - `\in\R^-'` -> `negative`,
+  - `\in\R^*'` -> `real,nonzero`,
+  - `\in\N^*'` -> `integer,positive`,
+  - `\in\N_0'` -> `integer,nonnegative`,
+  - `\in\R\backslash\Q'` -> `irrational`,
+
+  More complex conditions can be specified following a semi-colon, for example:
+
+  ```js
+  expr.simplify({x -> 2x; x < 10});
+  ```
+
+  Note that this syntax complements the existing rule syntax, and can be used
+  together with the existing, more verbose, rule syntax.
+
+  ```js
+  expr.simplify({rules: [
+    {match: "x + x", replace: "2x", condition: "x < 10"}
+  ]});
+  ```
+
+  This advanced syntax can specify more complex conditions, for example above
+  the rule will only apply if `x` is less than 10.
+
 - **Exact calculations**
 
   The Compute Engine attempts to perform exact calculations when possible.
@@ -144,7 +295,7 @@
 - The canonical order of the arguments has changed and should be more consistent
   and predictable. In particular, for polynomials, the
   [monomial order](https://en.wikipedia.org/wiki/Monomial_order) is now
-  degrevlex.
+  **degrevlex**.
 
 ### Issues Resolved
 
