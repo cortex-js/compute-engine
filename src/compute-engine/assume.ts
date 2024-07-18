@@ -37,8 +37,6 @@ import { findUnivariateRoots } from './solve';
 export function assume(proposition: BoxedExpression): AssumeResult {
   if (proposition.head === 'Element') return assumeElement(proposition);
   if (proposition.head === 'Equal') return assumeEquality(proposition);
-  // isInequality also returns true for 'Equal', but we have already handled
-  // it above.
   if (isInequality(proposition)) return assumeInequality(proposition);
 
   return 'not-a-predicate';

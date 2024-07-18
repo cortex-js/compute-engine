@@ -127,10 +127,9 @@ describe('MATCHFIX abs and norm', () => {
   test('||a||', () =>
     expect(check('||a||')).toMatchInlineSnapshot(`["Norm", "a"]`));
   test('||a||+|b|', () =>
-    expect(check('||a||+|b|')).toMatchInlineSnapshot(`
-      box       = ["Add", ["Norm", "a"], ["Abs", "b"]]
-      canonical = ["Add", ["Abs", "b"], ["Norm", "a"]]
-    `));
+    expect(check('||a||+|b|')).toMatchInlineSnapshot(
+      `["Add", ["Norm", "a"], ["Abs", "b"]]`
+    ));
 });
 
 describe('MATCHFIX invalid', () => {

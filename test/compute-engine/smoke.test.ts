@@ -734,10 +734,10 @@ describe('SIMPLIFICATION power', () => {
         "Add",
         ["Power", "a", 6],
         ["Power", "b", 6],
-        ["Multiply", 15, ["Power", "a", 4], ["Square", "b"]],
-        ["Multiply", 15, ["Power", "b", 4], ["Square", "a"]],
-        ["Multiply", 6, "a", ["Power", "b", 5]],
         ["Multiply", 6, "b", ["Power", "a", 5]],
+        ["Multiply", 6, "a", ["Power", "b", 5]],
+        ["Multiply", 15, ["Power", "b", 4], ["Square", "a"]],
+        ["Multiply", 15, ["Power", "a", 4], ["Square", "b"]],
         ["Multiply", 20, ["Power", ["Multiply", "a", "b"], 3]]
       ]
     `));
@@ -751,10 +751,10 @@ describe('EXPAND', () => {
         "Add",
         ["Power", "a", 6],
         ["Power", "b", 6],
-        ["Multiply", 15, ["Power", "a", 4], ["Square", "b"]],
-        ["Multiply", 15, ["Power", "b", 4], ["Square", "a"]],
-        ["Multiply", 6, "a", ["Power", "b", 5]],
         ["Multiply", 6, "b", ["Power", "a", 5]],
+        ["Multiply", 6, "a", ["Power", "b", 5]],
+        ["Multiply", 15, ["Power", "b", 4], ["Square", "a"]],
+        ["Multiply", 15, ["Power", "a", 4], ["Square", "b"]],
         ["Multiply", 20, ["Power", ["Multiply", "a", "b"], 3]]
       ]
     `));

@@ -143,20 +143,25 @@ function getDegree(expr: BoxedExpression | undefined): number {
  * The total degree of an expression is the sum of the
  * positive integer degrees of the factors in the expression:
  *
- * `3√2x^5y^3` -> 8 (5 + 3)
+ * `3√2x^5y^3` -> 5 + 3 = 8
  */
 export function totalDegree(expr: BoxedExpression): number {
+  // e.g. "x"
+  if (expr.symbol && !expr.isConstant) return 1;
+
   if (expr.head === 'Power' && expr.op2.numericValue !== null) {
+    // If the base has no unknowns, the degree is 0, e.g. 2^3
+    if (totalDegree(expr.op1) === 0) return 0;
     const deg = asMachineInteger(expr.op2);
     if (deg !== null && deg > 0) return deg;
-    return 1;
+    return 0;
   }
 
   if (expr.head === 'Multiply') {
-    let deg = 1;
+    let deg = 0;
     for (const arg of expr.ops!) {
       const t = totalDegree(arg);
-      if (t > 1) deg = deg + t;
+      deg = deg + t;
     }
     return deg;
   }
@@ -171,49 +176,60 @@ export function totalDegree(expr: BoxedExpression): number {
 
   if (expr.head === 'Divide') return totalDegree(expr.op1);
 
-  if (expr.numericValue || (expr.symbol && expr.isConstant)) return 0;
-
-  return 1;
+  return 0;
 }
 
 /**
- * The max degree of an expression is the largest positive integer degree
- * in the factors of the expression
+ * The max degree of a polynomial is the largest positive integer degree
+ * in the factors (monomials) of the expression
  *
  * `3√2x^5y^3` -> 5
  *
  */
 export function maxDegree(expr: BoxedExpression): number {
+  // e.g. "x"
+  if (expr.symbol && !expr.isConstant) return 1;
+
   if (expr.head === 'Power' && expr.op2.numericValue !== null) {
+    // If the base has no unknowns, the degree is 0, e.g. 2^3
+    if (maxDegree(expr.op1) === 0) return 0;
+
     const deg = asMachineInteger(expr.op2);
     if (deg !== null && deg > 0) return deg;
-    return 1;
+    return 0;
   }
 
-  if (expr.head === 'Multiply') {
-    let deg = 1;
+  if (
+    expr.head === 'Multiply' ||
+    expr.head === 'Add' ||
+    expr.head === 'Subtract'
+  ) {
+    let deg = 0;
     for (const arg of expr.ops!) deg = Math.max(deg, totalDegree(arg));
     return deg;
   }
 
-  return 1;
+  if (expr.head === 'Negate') return maxDegree(expr.op1);
+
+  if (expr.head === 'Divide') return maxDegree(expr.op1);
+
+  return 0;
 }
 
 /**
- * Return a lexicographic key of the expression
+ * Return a lexicographic key of the expression, for example
+ * `xy^2` -> `x y`
+ * `x\frac{1}{y}` -> `x y`
+ * `2xy + y^2` -> `x y y`
+ *
  */
 export function lex(expr: BoxedExpression): string {
-  if (expr.symbol) return expr.symbol;
-  if (expr.ops) {
-    const h = typeof expr.head === 'string' ? expr.head : lex(expr.head);
-    return (
-      h +
-      '"' +
-      expr.ops
-        .map((x) => lex(x))
-        .filter((x) => x.length > 0)
-        .join('"')
-    );
-  }
-  return '';
+  // Consider symbols, but ignore constants such as "Pi" or "ExponentialE"
+  if (expr.symbol && !expr.isConstant) return expr.symbol;
+  if (!expr.ops) return '';
+  return expr.ops.map((x) => lex(x)).join(' ');
+}
+
+export function revlex(expr: BoxedExpression): string {
+  return lex(expr).split(' ').reverse().join(' ');
 }

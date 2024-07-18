@@ -298,7 +298,6 @@ box       = [
 ]
 canonical = [
   "Add",
-  "Pi",
   1.5,
   1.7,
   2,
@@ -307,9 +306,10 @@ canonical = [
   ["Rational", 3, 11],
   ["Rational", 5, 7],
   ["Sqrt", 5],
-  ["Sqrt", 5]
+  ["Sqrt", 5],
+  "Pi"
 ]
-simplify  = ["Add", "Pi", 16.659148942012568]
+simplify  = ["Add", 16.659148942012568, "Pi"]
 N-auto    = 19.80074159560236
 `;
 
@@ -417,14 +417,14 @@ exports[`EXACT EVALUATION Add: All exact 3`] = `
 box       = ["Add", 2, 5, ["Divide", 5, 7], ["Divide", 7, 9], ["Sqrt", 2], "Pi"]
 canonical = [
   "Add",
-  "Pi",
   2,
   5,
   ["Rational", 5, 7],
   ["Rational", 7, 9],
-  ["Sqrt", 2]
+  ["Sqrt", 2],
+  "Pi"
 ]
-simplify  = ["Add", "Pi", ["Rational", 535, 63], ["Sqrt", 2]]
+simplify  = ["Add", ["Rational", 535, 63], ["Sqrt", 2], "Pi"]
 N-auto    = 13.04786970802638
 `;
 
@@ -441,15 +441,15 @@ box       = [
 ]
 canonical = [
   "Add",
-  "Pi",
   1.1,
   2,
   5,
   ["Rational", 5, 7],
   ["Rational", 7, 9],
-  ["Sqrt", 2]
+  ["Sqrt", 2],
+  "Pi"
 ]
-simplify  = ["Add", "Pi", 11.006277054436588]
+simplify  = ["Add", 11.006277054436588, "Pi"]
 N-auto    = 14.14786970802638
 `;
 

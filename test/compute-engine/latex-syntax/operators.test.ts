@@ -244,10 +244,9 @@ describe('OPERATOR infix', () => {
       simplify  = 0
     `));
   test('a-b+c+d // Add', () =>
-    expect(check('a-b+c+d')).toMatchInlineSnapshot(`
-      box       = ["Add", "a", ["Negate", "b"], "c", "d"]
-      canonical = ["Add", "a", "c", "d", ["Negate", "b"]]
-    `));
+    expect(check('a-b+c+d')).toMatchInlineSnapshot(
+      `["Add", "a", ["Negate", "b"], "c", "d"]`
+    ));
 
   test('-2+3x-4', () =>
     expect(check('-2+3x-4')).toMatchInlineSnapshot(`
@@ -404,7 +403,7 @@ describe('OPERATOR postfix', () => {
   test('-5!-2 // Precedence', () =>
     expect(check('-2-5!')).toMatchInlineSnapshot(`
       box       = ["Add", -2, ["Factorial", -5]]
-      canonical = ["Subtract", -2, ["Factorial", 5]]
+      canonical = ["Subtract", ["Negate", ["Factorial", 5]], 2]
       evaluate  = -122
     `));
   test('-5! // Precedence', () =>
@@ -447,7 +446,7 @@ describe('OPERATOR serialize, valid', () => {
 
   test('1-(2i+1)', () =>
     expect(latex(['Subtract', 1, ['Complex', 1, 2]])).toMatchInlineSnapshot(
-      `-1-2\\imaginaryI+1`
+      `1+(-1-2\\imaginaryI)`
     ));
 
   test(`['Multiply', 2, 3]`, () =>

@@ -1,5 +1,5 @@
 import Complex from 'complex.js';
-import { lex, maxDegree, totalDegree } from '../symbolic/polynomials';
+import { lex, maxDegree, revlex, totalDegree } from '../symbolic/polynomials';
 import { BoxedExpression, SemiBoxedExpression } from './public';
 import { asFloat } from './numerics';
 import { isRational } from '../numerics/rationals';
@@ -32,7 +32,12 @@ const ADD_RANKS = [
 ] as const;
 
 /**
- * Sort by higher total degree (sum of degree), if tied, sort by max degree.
+ * The sorting order of arguments of the Add function uses a modified degrevlex:
+ * - Sort by total degree (sum of degree)
+ * - Sort by max degree.
+ * - Sort reverse lexicographically
+ * - Sort by rank
+ *
  *
  * E.g.
  * - 2x^2 + 3x + 1
@@ -42,12 +47,25 @@ export function sortAdd(
   ops: ReadonlyArray<BoxedExpression>
 ): ReadonlyArray<BoxedExpression> {
   return [...ops].sort((a, b) => {
-    const r = rank(a);
-    const rankA = ADD_RANKS.indexOf(r);
-    const rankB = ADD_RANKS.indexOf(rank(b));
-    if (rankA !== rankB) return rankA - rankB;
-    if (r === 'power') {
-      // Higher order terms first
+    if (a.toString() === 'b' && b.toString() === '7') debugger;
+    if (b.toString() === 'b' && a.toString() === '7') debugger;
+    const aTotalDeg = totalDegree(a);
+    const bTotalDeg = totalDegree(b);
+    if (aTotalDeg !== bTotalDeg) return bTotalDeg - aTotalDeg;
+
+    const aMaxDeg = maxDegree(a);
+    const bMaxDeg = maxDegree(b);
+    if (aMaxDeg !== bMaxDeg) return bMaxDeg - aMaxDeg;
+
+    // Get a lexicographic key of the expression
+    // i.e. `xy^2` -> `x y`
+    const aLex = revlex(a);
+    const bLex = revlex(b);
+    if (aLex || bLex) {
+      if (!aLex) return +1;
+      if (!bLex) return -1;
+      if (aLex < bLex) return -1;
+      if (aLex > bLex) return +1;
     }
     return order(a, b);
   });

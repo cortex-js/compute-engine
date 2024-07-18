@@ -1,7 +1,9 @@
 import { checkJson, engine } from '../utils';
 
 function checkExpand(s: string): string {
-  return checkJson(engine.box(['Expand', engine.parse(s)]));
+  return checkJson(
+    engine.box(['Expand', engine.parse(s, { canonical: false })])
+  );
 }
 
 describe('EXPAND POWER', () => {
@@ -12,10 +14,10 @@ describe('EXPAND POWER', () => {
         "Add",
         ["Power", "a", 6],
         ["Power", "b", 6],
-        ["Multiply", 15, ["Power", "a", 4], ["Square", "b"]],
-        ["Multiply", 15, ["Power", "b", 4], ["Square", "a"]],
-        ["Multiply", 6, "a", ["Power", "b", 5]],
         ["Multiply", 6, "b", ["Power", "a", 5]],
+        ["Multiply", 6, "a", ["Power", "b", 5]],
+        ["Multiply", 15, ["Power", "b", 4], ["Square", "a"]],
+        ["Multiply", 15, ["Power", "a", 4], ["Square", "b"]],
         ["Multiply", 20, ["Power", ["Multiply", "a", "b"], 3]]
       ]
     `));
@@ -34,8 +36,8 @@ describe('EXPAND POWER', () => {
       evaluate  = [
         "Add",
         ["Multiply", 4096, ["Power", "b", 12]],
-        ["Multiply", 15360, ["Power", "b", 8], ["Square", "a"]],
         ["Multiply", 12288, "a", ["Power", "b", 10]],
+        ["Multiply", 15360, ["Power", "b", 8], ["Square", "a"]],
         ["Multiply", 10240, ["Power", "b", 6], ["Power", "a", 3]],
         ["Multiply", 768, ["Power", "a", 5], ["Square", "b"]],
         ["Multiply", 64, ["Power", "a", 6]],

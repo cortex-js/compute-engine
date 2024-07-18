@@ -271,7 +271,7 @@ describe('Determinant', () => {
 
   it('should calculate the determinant of a matrix with unknowns', () => {
     const result = ce.box(['Determinant', sq2_x]).evaluate();
-    expect(result.toString()).toMatchInlineSnapshot(`a * d - b * c`);
+    expect(result.toString()).toMatchInlineSnapshot(`-b * c + a * d`);
   });
 
   it('should calculate the determinant of a numeric tensor', () => {
@@ -429,7 +429,7 @@ describe('Inverse', () => {
   it('should calculate the inverse of a matrix with unknowns', () => {
     const result = ce.box(['Inverse', sq2_x]).evaluate();
     expect(result.toString()).toMatchInlineSnapshot(
-      `[[d / (a * d - b * c),-b / (a * d - b * c)],[-c / (a * d - b * c),a / (a * d - b * c)]]`
+      `[[d / (-b * c + a * d),-b / (-b * c + a * d)],[-c / (-b * c + a * d),a / (-b * c + a * d)]]`
     );
   });
 

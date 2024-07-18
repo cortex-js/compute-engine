@@ -142,7 +142,9 @@
   is now implemented via rules.
 
 - The canonical order of the arguments has changed and should be more consistent
-  and predictable.
+  and predictable. In particular, for polynomials, the
+  [monomial order](https://en.wikipedia.org/wiki/Monomial_order) is now
+  degrevlex.
 
 ### Issues Resolved
 

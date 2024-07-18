@@ -252,9 +252,9 @@ describe('RAMANUJAN FACTORIAL APPROXIMATION', () =>
           "Root",
           [
             "Add",
-            "n",
             ["Multiply", 8, ["Power", "n", 3]],
             ["Multiply", 4, ["Square", "n"]],
+            "n",
             ["Rational", 1, 30]
           ],
           6
@@ -273,9 +273,9 @@ describe('RAMANUJAN FACTORIAL APPROXIMATION', () =>
           "Power",
           [
             "Add",
-            "n",
             ["Multiply", 8, ["Power", "n", 3]],
             ["Multiply", 4, ["Square", "n"]],
+            "n",
             0.03333333333333333
           ],
           "0.1(6)"
@@ -290,9 +290,9 @@ describe('RAMANUJAN FACTORIAL APPROXIMATION', () =>
           "Power",
           [
             "Add",
-            "n",
             ["Multiply", 8, ["Power", "n", 3]],
             ["Multiply", 4, ["Square", "n"]],
+            "n",
             0.03333333333333333
           ],
           0.16666666666666666
