@@ -97,12 +97,12 @@ function assumeEquality(proposition: BoxedExpression): AssumeResult {
     const sols = findUnivariateRoots(proposition, lhs);
     if (sols.length === 0) {
       ce.assumptions.set(
-        ce.box(['Equal', proposition.op1.sub(proposition.op2), 0]),
+        ce.function('Equal', [proposition.op1.sub(proposition.op2), 0]),
         true
       );
     }
 
-    const val = sols.length === 1 ? sols[0] : ce.box(['List', ...sols]);
+    const val = sols.length === 1 ? sols[0] : ce.function('List', sols);
     const def = ce.lookupSymbol(lhs);
     if (!def) {
       ce.defineSymbol(lhs, { value: val, domain: val.domain });

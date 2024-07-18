@@ -2001,37 +2001,13 @@ export class ComputeEngine implements IComputeEngine {
     return this._fn('Hold', [this.box(expr, { canonical: false })]);
   }
 
-  /** Shortcut for `this.box(["Pair", ...])`
-   *
-   * The result is canonical.
-   */
-  pair(
-    first: BoxedExpression,
-    second: BoxedExpression,
-    metadata?: Metadata
-  ): BoxedExpression {
-    // Short path
-    return new BoxedFunction(
-      this,
-      'Tuple',
-      [first.canonical, second.canonical],
-      {
-        metadata,
-        canonical: true,
-      }
-    );
-  }
-
   /** Shortcut for `this.box(["Tuple", ...])`
    *
    * The result is canonical.
    */
-  tuple(elements: number[], metadata?: Metadata): BoxedExpression;
-  tuple(elements: BoxedExpression[], metadata?: Metadata): BoxedExpression;
-  tuple(
-    elements: (number | BoxedExpression)[],
-    metadata?: Metadata
-  ): BoxedExpression {
+  tuple(...elements: ReadonlyArray<number>): BoxedExpression;
+  tuple(...elements: ReadonlyArray<BoxedExpression>): BoxedExpression;
+  tuple(...elements: ReadonlyArray<number | BoxedExpression>): BoxedExpression {
     // Short path
     return new BoxedFunction(
       this,
@@ -2039,23 +2015,8 @@ export class ComputeEngine implements IComputeEngine {
       elements.map((x) =>
         typeof x === 'number' ? this.number(x) : x.canonical
       ),
-      {
-        metadata,
-        canonical: true,
-      }
+      { canonical: true }
     );
-  }
-
-  array(
-    elements: ArrayValue[] | ArrayValue[][],
-    metadata?: Metadata
-  ): BoxedExpression {
-    // @todo
-    // return new BoxedFunction(this, 'List', canonical(elements), {
-    //   metadata,
-    //   canonical: true,
-    // });
-    return this.Nothing;
   }
 
   string(s: string, metadata?: Metadata): BoxedExpression {

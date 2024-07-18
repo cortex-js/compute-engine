@@ -27,7 +27,7 @@ import {
 import { _BoxedExpression } from './abstract-boxed-expression';
 import { hashCode, bignumPreferred, asBigint } from './utils';
 import { Expression } from '../../math-json';
-import { signDiff } from './numerics';
+import { asFloat, signDiff } from './numerics';
 import { match } from './match';
 import { canonicalDivide } from '../library/arithmetic-divide';
 import { NumericValue } from '../numeric-value/public';
@@ -342,15 +342,25 @@ export class BoxedNumber extends _BoxedExpression {
     return this.engine._fromNumericValue(n.sqrt());
   }
 
-  // root(exp: number | BoxedExpression): BoxedExpression {
-  //   if (exp === 2) return this.sqrt();
-  //   const e = typeof exp === 'number' ? exp : asMachineInteger(exp);
-  //   if (!e) return this.engine.NaN;
-  //   let n = this.engine._numericValue(this._value);
-  //   return this.engine._fromNumericValue(n.root(e));
+  ln(semiBase?: SemiBoxedExpression): BoxedExpression {
+    const base = semiBase ? this.engine.box(semiBase) : undefined;
+    if (!this.isCanonical) return this.canonical.ln(base);
+    if (this.isOne) return this.engine.Zero;
+    if (this.isZero) return this.engine.NaN;
+    if (base && this.isEqual(base)) return this.engine.One;
+    if (
+      (!base || base.symbol === 'ExponentialE') &&
+      this.symbol === 'ExponentialE'
+    )
+      return this.engine.One;
 
-  //   return this.engine.NaN;
-  // }
+    if (base) {
+      if (asFloat(base) === 10) return this.engine._fn('Log', [this]);
+      return this.engine._fn('Log', [this, base]);
+    }
+
+    return this.engine._fn('Ln', [this]);
+  }
 
   get domain(): BoxedDomain {
     this._domain ??= this.engine.domain(inferNumericDomain(this._value));

@@ -261,9 +261,9 @@ volumes
           // The range bounds, if present, should be numbers
           if (lower) lower = checkDomain(ce, lower, ce.Numbers);
           if (upper) upper = checkDomain(ce, upper, ce.Numbers);
-          if (lower && upper) range = ce.tuple([index, lower, upper]);
-          else if (upper) range = ce.tuple([index, ce.NegativeInfinity, upper]);
-          else if (lower) range = ce.tuple([index, lower]);
+          if (lower && upper) range = ce.tuple(index, lower, upper);
+          else if (upper) range = ce.tuple(index, ce.NegativeInfinity, upper);
+          else if (lower) range = ce.tuple(index, lower);
           else range = index;
 
           let body = ops[0] ?? ce.error('missing');

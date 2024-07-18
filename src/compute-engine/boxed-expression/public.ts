@@ -666,8 +666,7 @@ export interface BoxedExpression {
     exp: number | [num: number, denom: number] | BoxedExpression
   ): BoxedExpression;
   sqrt(): BoxedExpression;
-  // root(exp: number | BoxedExpression): BoxedExpression;
-  // log(base?: SemiBoxedExpression): BoxedExpression;
+  ln(base?: SemiBoxedExpression): BoxedExpression;
   // exp(): BoxedExpression;
 
   /** The shape describes the axis of the expression.
@@ -2008,24 +2007,10 @@ export interface IComputeEngine {
 
   hold(expr: SemiBoxedExpression): BoxedExpression;
 
-  pair(
-    first: BoxedExpression,
-    second: BoxedExpression,
-    metadata?: Metadata
-  ): BoxedExpression;
+  tuple(...elements: ReadonlyArray<number>): BoxedExpression;
+  tuple(...elements: ReadonlyArray<BoxedExpression>): BoxedExpression;
 
-  tuple(elements: ReadonlyArray<number>, metadata?: Metadata): BoxedExpression;
-  tuple(
-    elements: ReadonlyArray<BoxedExpression>,
-    metadata?: Metadata
-  ): BoxedExpression;
-
-  array(
-    elements: ArrayValue[] | ArrayValue[][],
-    metadata?: Metadata
-  ): BoxedExpression;
-
-  rules(rules: Rule[]): BoxedRuleSet;
+  rules(rules: ReadonlyArray<Rule>): BoxedRuleSet;
 
   /**
    * Return a set of built-in rules.

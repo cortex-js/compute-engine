@@ -253,7 +253,7 @@ export const COLLECTIONS_LIBRARY: IdentifierDefinitions = {
         const [key, value] = checkDomains(ce, args, [ce.Strings, 'Values']);
         if (!key.isValid || !value.isValid)
           return ce._fn('KeyValuePair', [key, value]);
-        return ce.tuple([key, value]);
+        return ce.tuple(key, value);
       },
     },
     size: (_expr) => 1,
@@ -264,7 +264,7 @@ export const COLLECTIONS_LIBRARY: IdentifierDefinitions = {
     complexity: 8200,
     signature: {
       domain: ['FunctionOf', 'Anything', 'Tuples'],
-      canonical: (ce, ops) => ce.tuple(checkArity(ce, ops, 1)),
+      canonical: (ce, ops) => ce.tuple(...checkArity(ce, ops, 1)),
     },
     size: (expr) => expr.nops!,
     at: (expr, index) => {
@@ -278,7 +278,7 @@ export const COLLECTIONS_LIBRARY: IdentifierDefinitions = {
     complexity: 8200,
     signature: {
       domain: ['FunctionOf', 'Anything', 'Anything', 'Tuples'],
-      canonical: (ce, ops) => ce.tuple(checkArity(ce, ops, 2)),
+      canonical: (ce, ops) => ce.tuple(...checkArity(ce, ops, 2)),
     },
     size: (expr) => expr.nops!,
     at: (expr, index) =>
@@ -290,7 +290,7 @@ export const COLLECTIONS_LIBRARY: IdentifierDefinitions = {
     complexity: 8200,
     signature: {
       domain: ['FunctionOf', 'Anything', 'Anything', 'Anything', 'Tuples'],
-      canonical: (ce, ops) => ce.tuple(checkArity(ce, ops, 3)),
+      canonical: (ce, ops) => ce.tuple(...checkArity(ce, ops, 3)),
     },
     size: (expr) => expr.nops!,
     at: (expr, index) =>
@@ -302,7 +302,7 @@ export const COLLECTIONS_LIBRARY: IdentifierDefinitions = {
     complexity: 8200,
     signature: {
       domain: ['FunctionOf', 'Anything', ['VarArg', 'Anything'], 'Tuples'],
-      canonical: (ce, ops) => ce.tuple(ops),
+      canonical: (ce, ops) => ce.tuple(...ops),
     },
     size: (expr) => expr.nops!,
     at: (expr, index) =>
@@ -412,7 +412,7 @@ export const COLLECTIONS_LIBRARY: IdentifierDefinitions = {
             const val = def.at(ops[0], i);
             if (val) result.push(val);
           }
-        return ce.box(['List', ...result]);
+        return ce.function('List', result);
       },
     },
   },
@@ -700,10 +700,10 @@ export const COLLECTIONS_LIBRARY: IdentifierDefinitions = {
       evaluate: (ce, ops) => {
         if (!isFiniteCollection(ops[0])) return undefined;
         const [values, counts] = tally(ops[0]!);
-        return ce.tuple([
+        return ce.tuple(
           ce.function('List', values),
-          ce.function('List', counts),
-        ]);
+          ce.function('List', counts)
+        );
       },
     },
   },
@@ -922,7 +922,7 @@ function take(
       }
     }
   }
-  return ce.box(['List', ...list]);
+  return ce.function('List', list);
 }
 
 function takeString(

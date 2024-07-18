@@ -440,11 +440,10 @@ export abstract class _BoxedExpression implements BoxedExpression {
   sqrt(): BoxedExpression {
     return this.engine.NaN;
   }
-  // root(exp: number | BoxedExpression): BoxedExpression {
-  //   return this.engine.NaN;
-  // }
-  // log(base?: SemiBoxedExpression): BoxedExpression;
-  // exp(): BoxedExpression;
+
+  ln(base?: SemiBoxedExpression): BoxedExpression {
+    return this.engine.NaN;
+  }
 
   get sgn(): -1 | 0 | 1 | undefined | null {
     return null;

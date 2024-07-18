@@ -29,7 +29,7 @@ import {
 import { findUnivariateRoots } from '../solve';
 import { isMachineRational } from '../numerics/rationals';
 import { replace } from '../rules';
-import { DEFAULT_COMPLEXITY, order } from './order';
+import { DEFAULT_COMPLEXITY } from './order';
 import {
   complexAllowed,
   hashCode,
@@ -49,7 +49,7 @@ import { match } from './match';
 import { factor } from './factor';
 import { negate } from '../symbolic/negate';
 import { Product } from '../symbolic/product';
-import { signDiff } from './numerics';
+import { asFloat, signDiff } from './numerics';
 import { add } from '../library/arithmetic-add';
 import { mul } from '../library/arithmetic-multiply';
 
@@ -418,6 +418,27 @@ export class BoxedFunction extends _BoxedExpression {
 
   sqrt(): BoxedExpression {
     return this.pow([1, 2]);
+  }
+
+  ln(semiBase?: SemiBoxedExpression): BoxedExpression {
+    const base = semiBase ? this.engine.box(semiBase) : undefined;
+    if (!this.isCanonical) return this.canonical.ln(base);
+    if (this.head === 'Exp') return this.op1;
+    if (base && this.isEqual(base)) return this.engine.One;
+    if (!base && this.isEqual(this.engine.E)) return this.engine.One;
+    if (this.head === 'Power') {
+      const [b, exp] = this.ops;
+      if (b.isEqual(this.engine.E)) return exp;
+      return exp.mul(b.ln(base));
+    }
+    if (this.head === 'Sqrt') return this.op1.ln(base).div(2);
+    if (this.head === 'Divide') return this.op1.ln(base).sub(this.op2.ln(base));
+
+    if (base) {
+      if (asFloat(base) === 10) return this.engine._fn('Log', [this]);
+      return this.engine._fn('Log', [this, base]);
+    }
+    return this.engine._fn('Ln', [this]);
   }
 
   //

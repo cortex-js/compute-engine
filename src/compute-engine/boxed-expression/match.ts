@@ -242,7 +242,7 @@ function matchVariants(
   if (head === 'Add') {
     // a+x -> x
     let result = matchOnce(
-      ce.box(['Add', 0, expr], { canonical: false }),
+      ce.function('Add', [0, expr], { canonical: false }),
       pattern,
       substitution,
       varOptions
@@ -252,7 +252,7 @@ function matchVariants(
     // a+x -> a-(-x)
     if (expr.head === 'Subtract') {
       result = matchOnce(
-        ce.box(['Add', expr.op1!, ['Negate', expr.op2!]], {
+        ce.function('Add', [expr.op1!, ['Negate', expr.op2!]], {
           canonical: false,
         }),
         pattern,
@@ -265,7 +265,7 @@ function matchVariants(
 
   if (head === 'Subtract') {
     let result = matchOnce(
-      ce.box(['Subtract', expr, 0], { canonical: false }),
+      ce.function('Subtract', [expr, 0], { canonical: false }),
       pattern,
       substitution,
       varOptions
@@ -274,7 +274,7 @@ function matchVariants(
 
     if (expr.head === 'Negate') {
       result = matchOnce(
-        ce.box(['Subtract', 0, expr.op1!], { canonical: false }),
+        ce.function('Subtract', [0, expr.op1!], { canonical: false }),
         pattern,
         substitution,
         varOptions
@@ -286,7 +286,7 @@ function matchVariants(
   if (head === 'Multiply') {
     // ax -> x
     let result = matchOnce(
-      ce.box(['Multiply', 1, expr], { canonical: false }),
+      ce.function('Multiply', [1, expr], { canonical: false }),
       pattern,
       substitution,
       varOptions
@@ -296,7 +296,7 @@ function matchVariants(
     // ax -> -x
     if (expr.head === 'Negate') {
       result = matchOnce(
-        ce.box(['Multiply', -1, expr.op1!], { canonical: false }),
+        ce.function('Multiply', [-1, expr.op1!], { canonical: false }),
         pattern,
         substitution,
         varOptions
@@ -307,7 +307,7 @@ function matchVariants(
     // ax -> x/a
     if (expr.head === 'Divide') {
       result = matchOnce(
-        ce.box(['Multiply', expr.op1!, ['Divide', 1, expr.op2!]], {
+        ce.function('Multiply', [expr.op1!, ['Divide', 1, expr.op2!]], {
           canonical: false,
         }),
         pattern,
@@ -320,7 +320,7 @@ function matchVariants(
 
   if (head === 'Divide') {
     const result = matchOnce(
-      ce.box(['Divide', expr, 1], { canonical: false }),
+      ce.function('Divide', [expr, 1], { canonical: false }),
       pattern,
       substitution,
       varOptions
@@ -330,7 +330,7 @@ function matchVariants(
 
   if (head === 'Square') {
     const result = matchOnce(
-      ce.box(['Power', expr, 2], { canonical: false }),
+      ce.function('Power', [expr, 2], { canonical: false }),
       pattern,
       substitution,
       varOptions
@@ -340,7 +340,7 @@ function matchVariants(
 
   if (head === 'Exp') {
     const result = matchOnce(
-      ce.box(['Power', ce.box('ExponentialE'), expr], { canonical: false }),
+      ce.function('Power', [ce.E, expr], { canonical: false }),
       pattern,
       substitution,
       varOptions
@@ -351,7 +351,7 @@ function matchVariants(
   if (head === 'Power') {
     if (pattern.op2.numericValue === 2) {
       const result = matchOnce(
-        ce.box(['Square', expr], { canonical: false }),
+        ce.function('Square', [expr], { canonical: false }),
         pattern,
         substitution,
         varOptions
@@ -360,7 +360,7 @@ function matchVariants(
     }
     if (pattern.op1.symbol === 'ExponentialE') {
       const result = matchOnce(
-        ce.box(['Exp', expr], { canonical: false }),
+        ce.function('Exp', [expr], { canonical: false }),
         pattern,
         substitution,
         varOptions
@@ -436,7 +436,7 @@ function matchArguments(
         if (j <= 1) {
           if (expr.head === 'Add') value = ce.Zero;
           else if (expr.head === 'Multiply') value = ce.One;
-          else value = ce.box(['Sequence']);
+          else value = ce.function('Sequence', []);
         } else if (j === 2) {
           // Capturing a single element
           if (ops.length === 0) return null;
@@ -445,9 +445,9 @@ function matchArguments(
           const def = ce.lookupFunction(expr.head);
           const args = ops.splice(0, j - 1);
           if (def?.associative) {
-            value = ce.box([expr.head, ...args], { canonical: false });
+            value = ce.function(expr.head, args, { canonical: false });
           } else {
-            value = ce.box(['Sequence', ...args], { canonical: false });
+            value = ce.function('Sequence', args, { canonical: false });
           }
         }
         result = captureWildcard(argName, value, result);

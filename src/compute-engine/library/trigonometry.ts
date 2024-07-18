@@ -731,12 +731,10 @@ function constructibleValuesInverse(
   for (const [[match_arg, match_arg_N], [n, d]] of specialInverseValues) {
     if (ce.chop(x_N - match_arg_N) === 0) {
       // there is an implicit Pi in the numerator
-      let theta = ce.box(['Divide', ['Multiply', n, 'Pi'], d]);
-      if (quadrant == -1) {
-        theta = theta.neg();
-      } else if (quadrant == 1) {
-        theta = ce.box(['Subtract', 'Pi', theta]);
-      }
+      let theta = ce.Pi.mul(n).div(d);
+      if (quadrant == -1) theta = theta.neg();
+      else if (quadrant == 1) theta = ce.Pi.sub(theta);
+
       return theta.evaluate();
     }
   }

@@ -57,11 +57,11 @@ export function MultiIndexingSet(
     }
 
     if (upper && lower)
-      canonicalizedIndex = SingleIndexingSet(ce.tuple([index, lower, upper]));
+      canonicalizedIndex = SingleIndexingSet(ce.tuple(index, lower, upper));
     else if (upper)
-      canonicalizedIndex = SingleIndexingSet(ce.tuple([index, ce.One, upper]));
+      canonicalizedIndex = SingleIndexingSet(ce.tuple(index, ce.One, upper));
     else if (lower)
-      canonicalizedIndex = SingleIndexingSet(ce.tuple([index, lower]));
+      canonicalizedIndex = SingleIndexingSet(ce.tuple(index, lower));
     else canonicalizedIndex = SingleIndexingSet(index);
 
     if (canonicalizedIndex) indexes.push(canonicalizedIndex);
@@ -118,9 +118,9 @@ export function SingleIndexingSet(
   if (lower && lower.isFinite) lower = checkDomain(ce, lower, 'Integers');
   if (upper && upper.isFinite) upper = checkDomain(ce, upper, 'Integers');
 
-  if (lower && upper) return ce.tuple([index, lower, upper]);
-  if (upper) return ce.tuple([index, ce.One, upper]);
-  if (lower) return ce.tuple([index, lower]);
+  if (lower && upper) return ce.tuple(index, lower, upper);
+  if (upper) return ce.tuple(index, ce.One, upper);
+  if (lower) return ce.tuple(index, lower);
 
   return index;
 }

@@ -31,10 +31,10 @@ export const LINEAR_ALGEBRA_LIBRARY: IdentifierDefinitions[] = [
         result: 'Lists',
         canonical: (ce, ops) => {
           return ce._fn('Matrix', [
-            ce.box([
+            ce.function(
               'List',
-              ...ops.map((op) => ce.box(['List', op.canonical])),
-            ]),
+              ops.map((op) => ce.function('List', [op]))
+            ),
           ]);
         },
       },
@@ -50,9 +50,9 @@ export const LINEAR_ALGEBRA_LIBRARY: IdentifierDefinitions[] = [
         evaluate: (ce, ops) => {
           const op1 = ops[0];
 
-          if (isBoxedTensor(op1)) return ce.tuple(op1.tensor.shape);
+          if (isBoxedTensor(op1)) return ce.tuple(...op1.tensor.shape);
 
-          return ce.tuple([]);
+          return ce.tuple();
         },
       },
     },
@@ -84,7 +84,7 @@ export const LINEAR_ALGEBRA_LIBRARY: IdentifierDefinitions[] = [
           // If a finite indexable collection, convert to a list
           // -> BoxedTensor
           if (!isBoxedTensor(op1) && isFiniteIndexableCollection(op1))
-            op1 = ce.box(['List', ...each(op1)]);
+            op1 = ce.function('List', [...each(op1)]);
 
           if (isBoxedTensor(op1))
             return op1.tensor.reshape(...shape).expression;
@@ -110,7 +110,7 @@ export const LINEAR_ALGEBRA_LIBRARY: IdentifierDefinitions[] = [
             ]);
 
           if (isFiniteIndexableCollection(op1))
-            return ce.box(['List', ...each(op1)]);
+            return ce.function('List', [...each(op1)]);
 
           return undefined;
         },
@@ -139,7 +139,7 @@ export const LINEAR_ALGEBRA_LIBRARY: IdentifierDefinitions[] = [
           }
           if (axis1 === axis2) return undefined;
           if (!isBoxedTensor(op1) && isFiniteIndexableCollection(op1))
-            op1 = ce.box(['List', ...each(op1)]);
+            op1 = ce.function('List', [...each(op1)]);
           if (isBoxedTensor(op1)) {
             if (axis1 === 1 && axis2 === 2)
               return op1.tensor.transpose()?.expression;

@@ -290,7 +290,7 @@ export const CORE_LIBRARY: IdentifierDefinitions[] = [
         canonical: (ce, args) => {
           if (args.length === 2) return args[0].canonical;
           // Returning an empty `["Sequence"]` will make the expression be ignored
-          return ce.box(['Sequence']);
+          return ce._fn('Sequence', []);
         },
       },
     },
@@ -338,17 +338,13 @@ export const CORE_LIBRARY: IdentifierDefinitions[] = [
       signature: {
         domain: 'Functions',
         canonical: (ce, args) => {
-          // **IMPORTANT** Tail should work on non-canonical expressions
           if (args.length !== 1) return null;
           const op1 = args[0];
           if (op1.ops) return ce._fn('Sequence', op1.ops);
           return ce._fn('Tail', canonical(ce, args));
         },
-        evaluate: (ce, ops) => {
-          const op1 = ops[0];
-          if (op1?.ops) return ce.box(['Sequence', ...op1.ops]);
-          return ce.box(['Sequence']);
-        },
+        // **IMPORTANT** Tail should work on non-canonical expressions
+        evaluate: (ce, ops) => ce._fn('Sequence', ops[0]?.ops ?? []),
       },
     },
 
@@ -463,7 +459,7 @@ export const CORE_LIBRARY: IdentifierDefinitions[] = [
           // create a new scope and declare all the arguments as
           // variables in that scope.
 
-          if (args.length === 0) return ce.box(['Sequence']);
+          if (args.length === 0) return ce._fn('Sequence', []);
 
           const canonicalFn = canonicalFunctionExpression(
             args[0],
@@ -549,7 +545,7 @@ export const CORE_LIBRARY: IdentifierDefinitions[] = [
               return null;
             const fn = ops[0].op1;
             return ce._fn('NIntegrate', [
-              ce.box(['Function', fn, index]),
+              ce.function('Function', [fn, index]),
               ce.number(lower),
               ce.number(upper),
             ]);
@@ -578,7 +574,7 @@ export const CORE_LIBRARY: IdentifierDefinitions[] = [
           const name = ops[0].symbol;
           if (!name) return ce.Nothing;
           const def = ce.lookupFunction(name);
-          if (!def) return ce.box(['List']);
+          if (!def) return ce._fn('List', []);
           const sig = def.signature;
           const fnParams: BoxedExpression[] = [...sig.params];
           if (sig.optParams.length > 0)
@@ -588,7 +584,7 @@ export const CORE_LIBRARY: IdentifierDefinitions[] = [
           if (typeof sig.result === 'function')
             fnParams.push(sig.result(ce, []) ?? ce.symbol('Undefined'));
           else fnParams.push(sig.result);
-          return ce.box(['List', ...fnParams]);
+          return ce.function('List', fnParams);
         },
       },
     },
@@ -718,7 +714,7 @@ export const CORE_LIBRARY: IdentifierDefinitions[] = [
             const result = ops[0].evaluate();
             const timing = 1000 * (globalThis.performance.now() - start);
 
-            return ce.pair(ce.number(timing), result);
+            return ce.tuple(ce.number(timing), result);
           }
 
           // Evaluate multiple times
@@ -738,8 +734,8 @@ export const CORE_LIBRARY: IdentifierDefinitions[] = [
           timings = timings.filter((x) => x > min && x < max);
           const sum = timings.reduce((acc, v) => acc + v, 0);
 
-          if (sum === 0) return ce.pair(ce.number(max), result!);
-          return ce.pair(ce.number(sum / timings.length), result!);
+          if (sum === 0) return ce.tuple(ce.number(max), result!);
+          return ce.tuple(ce.number(sum / timings.length), result!);
         },
       },
     },
@@ -810,11 +806,11 @@ export const CORE_LIBRARY: IdentifierDefinitions[] = [
       signature: {
         domain: ['FunctionOf', 'Anything', 'Anything'],
         evaluate: (ce, ops) => {
-          if (ops.length === 0) return ce.box(['Sequence']);
+          if (ops.length === 0) return ce._fn('Sequence', []);
           const op1 = ops[0];
           const s =
             op1.string ?? op1.head === 'LatexString' ? op1.op1.string : '';
-          return ce.parse(s) ?? ce.box(['Sequence']);
+          return ce.parse(s) ?? ce._fn('Sequence', []);
         },
       },
     },

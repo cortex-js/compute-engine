@@ -362,16 +362,8 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
         params: ['Numbers'],
         optParams: ['Numbers'],
         result: 'Numbers',
-        canonical: (ce, ops) => {
-          if (ops.length === 1) {
-            let op = ops[0];
-            if (op.isOne) return ce.Zero;
-            if (op.isEqual(ce.E)) return ce.One;
-            return ce._fn('Ln', [checkDomain(ce, ops[0], 'Numbers')]);
-          }
-
-          return ce.function('Log', ops);
-        },
+        canonical: (ce, ops) =>
+          ops[1] ? ce.function('Log', ops) : ops[0].ln(),
         simplify: (_ce, ops) => processLn(ops[0]),
         evaluate: (_ce, ops) => processLn(ops[0]),
         N: (ce, ops) =>
@@ -394,23 +386,7 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
         params: ['Numbers'],
         optParams: ['Numbers'],
         result: 'Numbers',
-        canonical: (ce, ops) => {
-          let [arg, base] = ops;
-          if (arg.isOne) return ce.Zero;
-          if (arg.isZero) return ce.NaN;
-          base ??= ce.number(10);
-
-          if (arg.isEqual(base)) return ce.One;
-
-          if (ops.length === 1)
-            return ce._fn('Log', [checkDomain(ce, ops[0], 'Numbers')]);
-
-          ops = checkNumericArgs(ce, ops, 2);
-          if (ops.length !== 2) return ce._fn('Log', ops);
-
-          if (base.numericValue === 10) return ce._fn('Log', [arg]);
-          return ce._fn('Log', [arg, base]);
-        },
+        canonical: (ce, ops) => ops[0].ln(ops[1] ?? 10),
 
         simplify: (ce, ops) => processLn(ops[0], ops[1] ?? ce.number(10)),
 
@@ -448,10 +424,7 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
       signature: {
         params: ['Numbers'],
         result: 'Numbers',
-        // Note: we are calling ce.function() because we want the canonicalization
-        // to be applied to the expression, for example for `['Lb', 0]` to be
-        // canonicalized to `NaN` (instead of `['Log', 0, 2]`).
-        canonical: (ce, args) => ce.function('Log', [args[0], ce.number(2)]),
+        canonical: (ce, args) => args[0].ln(2),
         // N: (ce, ops) =>
         //   applyN(
         //     ops[0],
@@ -588,7 +561,7 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
         domain: ['FunctionOf', 'Values', 'Tuples'],
         evaluate: (ce, ops) => {
           if (ops.length !== 1) return undefined;
-          return ce.box(['Pair', ops[0], ops[0].neg()]);
+          return ce.tuple(ops[0], ops[0].neg());
         },
       },
     },
@@ -1011,15 +984,15 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
           // **IMPORTANT**: We want Numerator to work on non-canonical
           // expressions, so that you can determine if a user input is
           // reductible, for example.
-          if (ops.length === 0) return ce.box(['Sequence']);
+          if (ops.length === 0) return ce.function('Sequence', []);
           const op = ops[0];
           if (op.head === 'Rational' || op.head === 'Divide') return op.op1;
           const num = asRational(op);
           if (num !== undefined) return ce.number(num[0]);
-          return ce._fn('Numerator', canonical(ops));
+          return ce._fn('Numerator', canonical(ce, ops));
         },
         evaluate: (ce, ops) => {
-          if (ops.length === 0) return ce.box(['Sequence']);
+          if (ops.length === 0) return ce.function('Sequence', []);
           const op = ops[0];
           if (op.head === 'Rational' || op.head === 'Divide')
             return op.op1.evaluate();
@@ -1043,15 +1016,15 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
           // **IMPORTANT**: We want Denominator to work on non-canonical
           // expressions, so that you can determine if a user input is
           // reductible, for example.
-          if (ops.length === 0) return ce.box(['Sequence']);
+          if (ops.length === 0) return ce.function('Sequence', []);
           const op = ops[0];
           if (op.head === 'Rational' || op.head === 'Divide') return op.op2;
           const num = asRational(op);
           if (num !== undefined) return ce.number(num[1]);
-          return ce._fn('Denominator', canonical(ops));
+          return ce._fn('Denominator', canonical(ce, ops));
         },
         evaluate: (ce, ops) => {
-          if (ops.length === 0) return ce.box(['Sequence']);
+          if (ops.length === 0) return ce.function('Sequence', []);
           const op = ops[0];
           if (op.head === 'Rational' || op.head === 'Divide')
             return op.op2.evaluate();
@@ -1076,7 +1049,7 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
           // **IMPORTANT**: We want NumeratorDenominator to work on non-canonical
           // expressions, so that you can determine if a user input is
           // reductible, for example.
-          if (ops.length === 0) return ce.box(['Sequence']);
+          if (ops.length === 0) return ce.function('Sequence', []);
           const op = ops[0];
           if (op.head === 'Rational' || op.head === 'Divide')
             return ce._fn('Sequence', op.ops!);
@@ -1089,14 +1062,14 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
           );
         },
         evaluate: (ce, ops) => {
-          if (ops.length === 0) return ce.box(['Sequence']);
+          if (ops.length === 0) return ce.function('Sequence', []);
           const op = ops[0];
           if (op.head === 'Rational' || op.head === 'Divide')
             return ce._fn('Sequence', op.ops!);
           const num = asRational(op);
           if (num !== undefined)
             return ce._fn('Sequence', [ce.number(num[0]), ce.number(num[1])]);
-          return ce._fn('NumeratorDenominator', canonical(ops));
+          return ce._fn('NumeratorDenominator', canonical(ce, ops));
         },
       },
     },
@@ -1116,7 +1089,7 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
         simplify: (ce, ops) => {
           if (ops.length === 0) return ce.NegativeInfinity;
           if (ops.length === 1) return ops[0];
-          return ce.box(['Max', ...ops]);
+          return ce.function('Max', ops);
         },
         evaluate: (ce, ops) => processMinMax(ce, ops, 'Max'),
       },
@@ -1132,7 +1105,7 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
         simplify: (ce, ops) => {
           if (ops.length === 0) return ce.PositiveInfinity;
           if (ops.length === 1) return ops[0];
-          return ce.box(['Min', ...ops]);
+          return ce.function('Min', ops);
         },
         evaluate: (ce, ops) => processMinMax(ce, ops, 'Min'),
       },
@@ -1149,7 +1122,7 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
         simplify: (ce, ops) => {
           if (ops.length === 0) return ce.NegativeInfinity;
           if (ops.length === 1) return ops[0];
-          return ce.box(['Min', ...ops]);
+          return ce._fn('Min', ops);
         },
         evaluate: (ce, ops) => processMinMax(ce, ops, 'Supremum'),
       },
@@ -1166,7 +1139,7 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
         simplify: (ce, ops) => {
           if (ops.length === 0) return ce.PositiveInfinity;
           if (ops.length === 1) return ops[0];
-          return ce.box(['Min', ...ops]);
+          return ce._fn('Infimum', ops);
         },
         evaluate: (ce, ops) => processMinMax(ce, ops, 'Infimum'),
       },

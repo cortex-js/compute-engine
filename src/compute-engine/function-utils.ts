@@ -207,11 +207,11 @@ function makeLambda(
       const extras = params
         .slice(args.length)
         .map((x, i) => ce.symbol(`_${i + 1}`));
-      const newBody = apply(ce.box(['Function', body, ...params]), [
+      const newBody = apply(ce.function('Function', [body, ...params]), [
         ...args,
         ...extras,
       ]).evaluate();
-      return ce.box(['Function', newBody]);
+      return ce.function('Function', [newBody]);
     }
 
     // Evaluate the arguments, in the current scope

@@ -35,6 +35,7 @@ import { canonicalDivide } from '../library/arithmetic-divide';
 import { negate } from '../symbolic/negate';
 import { add } from '../library/arithmetic-add';
 import { mul } from '../library/arithmetic-multiply';
+import { asFloat } from './numerics';
 
 /**
  * BoxedSymbol
@@ -229,6 +230,23 @@ export class BoxedSymbol extends _BoxedExpression {
 
   sqrt(): BoxedExpression {
     return this.pow([1, 2]);
+  }
+
+  ln(semiBase?: SemiBoxedExpression): BoxedExpression {
+    const base = semiBase ? this.engine.box(semiBase) : undefined;
+    if (!this.isCanonical) return this.canonical.ln(base);
+    if (
+      (!base || base.symbol === 'ExponentialE') &&
+      this.symbol === 'ExponentialE'
+    )
+      return this.engine.One;
+
+    if (base) {
+      if (asFloat(base) === 10) return this.engine._fn('Log', [this]);
+      return this.engine._fn('Log', [this, base]);
+    }
+
+    return this.engine._fn('Ln', [this]);
   }
 
   solve(

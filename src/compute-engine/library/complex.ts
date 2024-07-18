@@ -56,15 +56,11 @@ export const COMPLEX_LIBRARY: IdentifierDefinitions[] = [
         evaluate: (ce, ops) => {
           const op = ops[0].numericValue;
           if (op === null) return undefined;
-          if (ce.isComplex(op))
-            return ce.tuple([ce.number(op.abs()), ce.number(op.arg())]);
+          if (ce.isComplex(op)) return ce.tuple(op.abs(), op.arg());
 
           const f = asFloat(ops[0]);
           if (f === null) return undefined;
-          return ce.tuple([
-            ce.number(Math.abs(f)),
-            ce.number(f >= 0 ? 0 : Math.PI),
-          ]);
+          return ce.tuple(Math.abs(f), f >= 0 ? 0 : Math.PI);
         },
       },
     },
