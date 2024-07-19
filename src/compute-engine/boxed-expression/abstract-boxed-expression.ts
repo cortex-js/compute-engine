@@ -253,6 +253,10 @@ export abstract class _BoxedExpression implements BoxedExpression {
     );
   }
 
+  toNumericValue(): [NumericValue, BoxedExpression] {
+    return [this.engine._numericValue(1), this];
+  }
+
   get scope(): RuntimeScope | null {
     return null;
   }
@@ -797,3 +801,4 @@ export function getSubexpressions(
 // function *after* the class definition
 
 import { serializeJson } from './serialize';
+import { NumericValue } from '../numeric-value/public.js';

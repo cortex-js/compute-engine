@@ -1,7 +1,7 @@
 import Complex from 'complex.js';
 import Decimal from 'decimal.js';
 
-import { NUMERIC_TOLERANCE } from '../numerics/numeric';
+import { NUMERIC_MACHINE_TOLERANCE } from '../numerics/numeric';
 import { permutations } from '../../common/utils';
 import { _BoxedExpression } from './abstract-boxed-expression';
 import { BoxedNumber } from './boxed-number';
@@ -84,7 +84,8 @@ function matchOnce(
   // Match a number
   //
   if (pattern instanceof BoxedNumber) {
-    const numericTolerance = options?.numericTolerance ?? NUMERIC_TOLERANCE;
+    const numericTolerance =
+      options?.numericTolerance ?? NUMERIC_MACHINE_TOLERANCE;
     if (!(expr instanceof BoxedNumber)) return null;
     if (
       (numericTolerance === 0 && pattern.isSame(expr)) ||
@@ -507,7 +508,7 @@ export function match(
     recursive: options?.recursive ?? false,
     exact: options?.exact ?? false,
     acceptVariants: !(options?.exact ?? false),
-    numericTolerance: options?.numericTolerance ?? NUMERIC_TOLERANCE,
+    numericTolerance: options?.numericTolerance ?? NUMERIC_MACHINE_TOLERANCE,
   };
   const substitution = options?.substitution ?? {};
 

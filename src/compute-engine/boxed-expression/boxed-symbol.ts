@@ -36,6 +36,7 @@ import { negate } from '../symbolic/negate';
 import { add } from '../library/arithmetic-add';
 import { mul } from '../library/arithmetic-multiply';
 import { asFloat } from './numerics';
+import { NumericValue } from '../numeric-value/public.js';
 
 /**
  * BoxedSymbol
@@ -172,6 +173,21 @@ export class BoxedSymbol extends _BoxedExpression {
     if (this._scope) return this;
     // Return a new canonical symbol, scoped in the current context
     return this.engine.box(this._id);
+  }
+
+  toNumericValue(): [NumericValue, BoxedExpression] {
+    console.assert(this.isCanonical);
+    const ce = this.engine;
+
+    if (this.symbol === 'ImaginaryUnit')
+      return [ce._numericValue({ re: 0, im: 1 }), ce.One];
+    if (this.symbol === 'PositiveInfinity')
+      return [ce._numericValue(Infinity), ce.One];
+    if (this.symbol === 'NegativeInfinity')
+      return [ce._numericValue(-Infinity), ce.One];
+    if (this.symbol === 'NaN') return [ce._numericValue(NaN), ce.One];
+
+    return [ce._numericValue(1), this];
   }
 
   neg(): BoxedExpression {

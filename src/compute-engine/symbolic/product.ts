@@ -145,7 +145,7 @@ export class Product {
     if (this._isCanonical && !term.symbol) {
       // If possible, factor out a rational coefficient
       let coef: NumericValue;
-      [coef, term] = this.engine._toNumericValue(term);
+      [coef, term] = term.toNumericValue();
       this.coefficient = this.coefficient.mul(coef);
     }
 

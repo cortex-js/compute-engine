@@ -49,9 +49,10 @@ import { match } from './match';
 import { factor } from './factor';
 import { negate } from '../symbolic/negate';
 import { Product } from '../symbolic/product';
-import { asFloat, signDiff } from './numerics';
+import { asFloat, asMachineInteger, asRational, signDiff } from './numerics';
 import { add } from '../library/arithmetic-add';
 import { mul } from '../library/arithmetic-multiply';
+import { NumericValue } from '../numeric-value/public';
 
 /**
  * A boxed function represent an expression that can be
@@ -243,6 +244,122 @@ export class BoxedFunction extends _BoxedExpression {
       : this;
 
     return this._canonical;
+  }
+
+  toNumericValue(): [NumericValue, BoxedExpression] {
+    console.assert(this.isCanonical);
+    const ce = this.engine;
+
+    if (this.head === 'Complex') {
+      return [
+        ce._numericValue({
+          re: asFloat(this.op1) ?? 0,
+          im: asFloat(this.op2) ?? 0,
+        }),
+        ce.One,
+      ];
+    }
+
+    //
+    // Add
+    //
+    //  use factor() to factor out common factors
+    let expr: BoxedExpression = this;
+    if (expr.head === 'Add') {
+      expr = factor(this);
+      // if (expr.head !== 'Add') return expr.toNumericValue();
+    }
+
+    //
+    // Negate
+    //
+    if (expr.head === 'Negate') {
+      const [coef, rest] = expr.op1.toNumericValue();
+      return [coef.neg(), rest];
+    }
+
+    //
+    // Multiply
+    //
+    if (expr.head === 'Multiply') {
+      const rest: BoxedExpression[] = [];
+      let coef = ce._numericValue(1);
+      for (const arg of expr.ops!) {
+        const [c, r] = arg.toNumericValue();
+        coef = coef.mul(c);
+        if (!r.isOne) rest.push(r);
+      }
+      if (rest.length === 0) return [coef, ce.One];
+      if (rest.length === 1) return [coef, rest[0]];
+      return [coef, ce.function('Multiply', rest)];
+    }
+
+    //
+    // Divide
+    //
+    if (expr.head === 'Divide') {
+      const [coef1, numer] = expr.op1.toNumericValue();
+      const [coef2, denom] = expr.op2.toNumericValue();
+      const coef = coef1.div(coef2);
+      if (denom.isOne) return [coef, numer];
+      return [coef, ce.function('Divide', [numer, denom])];
+    }
+
+    //
+    // Power
+    //
+    if (expr.head === 'Power') {
+      // We can only extract a coef if the exponent is a literal
+      if (expr.op2.numericValue === null) return [ce._numericValue(1), this];
+
+      // eslint-disable-next-line prefer-const
+      let [coef, base] = expr.op1.toNumericValue();
+      if (coef.isOne) return [coef, this];
+
+      const exponent = asMachineInteger(expr.op2);
+      if (exponent !== null)
+        return [coef.pow(exponent), ce.function('Power', [base, expr.op2])];
+
+      if (asFloat(expr.op2) === 0.5)
+        return [coef.sqrt(), ce.function('Sqrt', [base])];
+
+      return [ce._numericValue(1), this];
+    }
+
+    if (expr.head === 'Sqrt') {
+      const [coef, rest] = expr.op1.toNumericValue();
+      return [coef.sqrt(), ce.function('Sqrt', [rest])];
+    }
+
+    //
+    // Abs
+    //
+    if (expr.head === 'Abs') {
+      const [coef, rest] = expr.op1.toNumericValue();
+      return [coef.abs(), ce.function('Abs', [rest])];
+    }
+    console.assert(expr.head !== 'Complex');
+    console.assert(expr.head !== 'Exp');
+    console.assert(expr.head !== 'Root');
+
+    //
+    // Log/Ln
+    //
+    if (expr.head === 'Log' || expr.head === 'Ln') {
+      let base = asFloat(expr.op2) ?? undefined;
+      if (!base && expr.head === 'Log') base = 10;
+
+      const [coef, rest] = expr.op1.toNumericValue();
+      if (coef.isOne) return [coef, this];
+      return ce
+        ._fromNumericValue(coef.ln(base))
+        .add(ce.function(expr.head, [rest, expr.op2]))
+        .toNumericValue();
+    }
+
+    // @todo:  could consider others: Exp, trig functions
+
+    return [ce._numericValue(1), expr];
   }
 
   // Note: the resulting expression is bound to the current scope, not

@@ -53,8 +53,8 @@ export function canonicalDivide(
 
   if (op2.isOne) return op1;
 
-  const [c1, t1] = ce._toNumericValue(op1);
-  const [c2, t2] = ce._toNumericValue(op2);
+  const [c1, t1] = op1.toNumericValue();
+  const [c2, t2] = op2.toNumericValue();
 
   const c = c1.div(c2);
   if (c.isZero) return ce.Zero;

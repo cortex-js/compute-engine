@@ -25,9 +25,9 @@ import {
 } from '../numerics/rationals';
 
 import { _BoxedExpression } from './abstract-boxed-expression';
-import { hashCode, bignumPreferred, asBigint } from './utils';
+import { hashCode, bignumPreferred, asBigint, complexAllowed } from './utils';
 import { Expression } from '../../math-json';
-import { asFloat, signDiff } from './numerics';
+import { asFloat, asRational, signDiff } from './numerics';
 import { match } from './match';
 import { canonicalDivide } from '../library/arithmetic-divide';
 import { NumericValue } from '../numeric-value/public';
@@ -346,6 +346,8 @@ export class BoxedNumber extends _BoxedExpression {
     const base = semiBase ? this.engine.box(semiBase) : undefined;
     if (!this.isCanonical) return this.canonical.ln(base);
     if (this.isOne) return this.engine.Zero;
+    if (this.isNegativeOne && complexAllowed(this.engine))
+      return this.engine.Pi.mul(this.engine.I);
     if (this.isZero) return this.engine.NaN;
     if (base && this.isEqual(base)) return this.engine.One;
     if (
@@ -362,7 +364,7 @@ export class BoxedNumber extends _BoxedExpression {
     }
 
     const f = asFloat(this);
-    if (f !== null && Number.isInteger(f)) {
+    if (f !== null && Number.isInteger(f) && f > 0) {
       const ce = this.engine;
       let [factor, root] = factorPower(BigInt(f), 3);
       if (factor !== BigInt(1))
@@ -739,6 +741,22 @@ export class BoxedNumber extends _BoxedExpression {
     if (this._isCanonical) return this;
 
     return this.engine.number(canonicalNumber(this.engine, this._value));
+  }
+
+  toNumericValue(): [NumericValue, BoxedExpression] {
+    console.assert(this.isCanonical);
+    const v = this.numericValue;
+    if (typeof v === 'number' || isRational(v) || v instanceof Decimal)
+      return [this.engine._numericValue(v), this.engine.One];
+    if (v instanceof Complex)
+      return [this.engine._numericValue(v), this.engine.One];
+
+    const r = asRational(this);
+    return r
+      ? [this.engine._numericValue(r), this.engine.One]
+      : [this.engine._numericValue(1), this];
+
+    // return [this.engine._numericValue(this._value), this.engine.One];
   }
 
   simplify(): BoxedExpression {

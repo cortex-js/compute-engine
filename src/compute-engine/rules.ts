@@ -165,7 +165,7 @@ export const CONDITIONS = {
   expression: (x: BoxedExpression) => true,
 
   numeric: (x: BoxedExpression) => {
-    const [c, term] = x.engine._toNumericValue(x);
+    const [c, term] = x.toNumericValue();
     return term.isOne;
   },
   integer: (x: BoxedExpression) => x.isInteger,

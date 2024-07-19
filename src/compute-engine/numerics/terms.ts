@@ -30,7 +30,7 @@ export class Terms {
         return;
       }
 
-      const [coef, rest] = ce._toNumericValue(term);
+      const [coef, rest] = term.toNumericValue();
       if (coef.isPositiveInfinity) posInfinityCount += 1;
       else if (coef.isNegativeInfinity) negInfinityCount += 1;
 
@@ -81,7 +81,7 @@ export class Terms {
 
     if (term.head === 'Add') {
       for (const x of term.ops!) {
-        const [c, t] = this.engine._toNumericValue(x);
+        const [c, t] = x.toNumericValue();
         this.add(coef.mul(c), t);
       }
       return;

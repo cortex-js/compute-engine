@@ -61,13 +61,14 @@ canonical = NaN
 
 exports[` 10`] = `
 box       = ["Lb", -1]
-canonical = ["Log", -1, 2]
-simplify  = ["Multiply", ["Complex", 0, 1], "Pi"]
+canonical = ["Multiply", ["Complex", 0, 1], "Pi"]
 evaluate  = ["Multiply", ["Complex", 0, 1], "Pi"]
-N-auto    = NaN
+N-auto    = ["Complex", 0, 3.141592653589793]
 eval-big  = ["Log", -1, 2]
+N-big     = NaN
 eval-mach = ["Log", -1, 2]
 eval-cplx = ["Multiply", ["Complex", 0, 1], "Pi"]
+N-cplx    = ["Complex", 0, 3.141592653589793]
 `;
 
 exports[` 11`] = `
@@ -88,7 +89,6 @@ N-cplx    = ["Complex", 0.637503523749935, 1.1330900354567985]
 exports[` 13`] = `
 box       = ["Lg", 1.1]
 canonical = ["Log", 1.1]
-evaluate  = ["Log", 1.1, 10]
 N-auto    = 0.04139268515822504075
 N-mach    = 0.04139268515822507
 `;
@@ -112,9 +112,9 @@ canonical = ["Log", -1]
 simplify  = ["Multiply", ["Complex", 0, 1], "Pi"]
 evaluate  = ["Multiply", ["Complex", 0, 1], "Pi"]
 N-auto    = ["Complex", 0, 1.3643763538418412]
-eval-big  = ["Log", -1, 10]
+eval-big  = ["Log", -1]
 N-big     = NaN
-eval-mach = ["Log", -1, 10]
+eval-mach = ["Log", -1]
 eval-cplx = ["Multiply", ["Complex", 0, 1], "Pi"]
 N-cplx    = ["Complex", 0, 1.3643763538418412]
 `;
@@ -122,7 +122,6 @@ N-cplx    = ["Complex", 0, 1.3643763538418412]
 exports[` 17`] = `
 box       = ["Lg", "Pi"]
 canonical = ["Log", "Pi"]
-evaluate  = ["Log", "Pi", 10]
 N-auto    = 0.49714987269413385435
 N-mach    = 0.4971498726941338
 `;
@@ -130,7 +129,6 @@ N-mach    = 0.4971498726941338
 exports[` 18`] = `
 box       = ["Lg", ["Complex", 1.1, 1.1]]
 canonical = ["Log", ["Complex", 1.1, 1.1]]
-simplify  = ["Log", ["Complex", 1.1, 1.1], 10]
 N-auto    = ["Complex", 0.19190768299021566, 0.3410940884604603]
 N-big     = NaN
 N-cplx    = ["Complex", 0.19190768299021566, 0.3410940884604603]
@@ -138,7 +136,6 @@ N-cplx    = ["Complex", 0.19190768299021566, 0.3410940884604603]
 
 exports[` 19`] = `
 box       = ["Log", 1.1]
-evaluate  = ["Log", 1.1, 10]
 N-auto    = 0.04139268515822504075
 N-mach    = 0.04139268515822507
 `;
@@ -155,26 +152,24 @@ canonical = NaN
 
 exports[` 22`] = `
 box       = ["Log", -1]
-simplify  = ["Multiply", ["Complex", 0, 1], "Pi"]
+canonical = ["Multiply", ["Complex", 0, 1], "Pi"]
 evaluate  = ["Multiply", ["Complex", 0, 1], "Pi"]
-N-auto    = ["Complex", 0, 1.3643763538418412]
-eval-big  = ["Log", -1, 10]
+N-auto    = ["Complex", 0, 3.141592653589793]
+eval-big  = ["Log", -1]
 N-big     = NaN
-eval-mach = ["Log", -1, 10]
+eval-mach = ["Log", -1]
 eval-cplx = ["Multiply", ["Complex", 0, 1], "Pi"]
-N-cplx    = ["Complex", 0, 1.3643763538418412]
+N-cplx    = ["Complex", 0, 3.141592653589793]
 `;
 
 exports[` 23`] = `
 box       = ["Log", "Pi"]
-evaluate  = ["Log", "Pi", 10]
 N-auto    = 0.49714987269413385435
 N-mach    = 0.4971498726941338
 `;
 
 exports[` 24`] = `
 box       = ["Log", ["Complex", 1.1, 1.1]]
-simplify  = ["Log", ["Complex", 1.1, 1.1], 10]
 N-auto    = ["Complex", 0.19190768299021566, 0.3410940884604603]
 N-big     = NaN
 N-cplx    = ["Complex", 0.19190768299021566, 0.3410940884604603]
@@ -198,12 +193,14 @@ canonical = NaN
 
 exports[` 28`] = `
 box       = ["Log", -1, 5]
-simplify  = ["Multiply", ["Complex", 0, 1], "Pi"]
+canonical = ["Multiply", ["Complex", 0, 1], "Pi"]
 evaluate  = ["Multiply", ["Complex", 0, 1], "Pi"]
-N-auto    = NaN
+N-auto    = ["Complex", 0, 3.141592653589793]
 eval-big  = ["Log", -1, 5]
+N-big     = NaN
 eval-mach = ["Log", -1, 5]
 eval-cplx = ["Multiply", ["Complex", 0, 1], "Pi"]
+N-cplx    = ["Complex", 0, 3.141592653589793]
 `;
 
 exports[` 29`] = `

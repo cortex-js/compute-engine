@@ -652,6 +652,23 @@ export interface BoxedExpression {
    */
   readonly numericValue: number | Decimal | Complex | Rational | null;
 
+  /**
+   * Attempt to factor a numeric coefficient `c` and a `rest` out of a
+   * canonical expression `expr` such that `ce.mul(c, rest)` is equal to `expr`.
+   *
+   * Attempts to make `rest` a positive value (i.e. pulls out negative sign).
+   *
+   * For example:
+   *
+   * ['Multiply', 2, 'x', 3, 'a']
+   *    -> [NumericValue(6), ['Multiply', 'x', 'a']]
+   *
+   * ['Divide', ['Multiply', 2, 'x'], ['Multiply', 3, 'y', 'a']]
+   *    -> [NumericValue({rational: [2, 3]}), ['Divide', 'x', ['Multiply, 'y', 'a']]]
+   */
+
+  toNumericValue(): [NumericValue, BoxedExpression];
+
   //
   // Algebraic operations
   //
@@ -1938,8 +1955,6 @@ export interface IComputeEngine {
   _numericValue(
     value: number | Rational | Decimal | Complex | { re: number; im?: number }
   ): NumericValue;
-  /** @internal */
-  _toNumericValue(expr: BoxedExpression): [NumericValue, BoxedExpression];
   /** @internal */
   _fromNumericValue(
     coeff: NumericValue,

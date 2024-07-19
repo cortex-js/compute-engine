@@ -99,6 +99,7 @@ export abstract class NumericValue<
   abstract sqrt(): NumericValue<D, R>;
   abstract gcd(other: NumericValue<D, R>): NumericValue<D, R>;
   abstract abs(): NumericValue<D, R>;
+  abstract ln(base?: number): NumericValue<D, R>;
 
   // When using add(), inexact value propagate, i.e. '1.2 + 1/4' -> '1.45'
   // This may not be desirable when adding many values, i.e. '1.2 - 1.2 + 1/4' -> '1/4'

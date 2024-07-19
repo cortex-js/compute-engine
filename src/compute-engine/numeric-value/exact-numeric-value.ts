@@ -550,6 +550,37 @@ export class ExactNumericValue extends NumericValue<number, [number, number]> {
     });
   }
 
+  ln(base?: number): ExactNumericValue {
+    if (this.isZero) return new ExactNumericValue({ re: -Infinity });
+    if (this.isNegativeInfinity) return new ExactNumericValue({ re: NaN });
+    if (this.isPositiveInfinity) return new ExactNumericValue({ re: Infinity });
+
+    const lnBase = base === undefined ? 1 : Math.log(base);
+
+    if (this.im === 0) {
+      if (this.sign < 0) return new ExactNumericValue({ re: NaN });
+      if (this.isOne) return new ExactNumericValue({ re: 0 });
+      if (this.isNegativeOne) return new ExactNumericValue({ im: Math.PI });
+
+      // ln(a/b √c) = ln(a) - ln(b) + 0.5 * ln(c)
+      const [a, b] = this.rational;
+      const re =
+        Math.log(this.decimal) +
+        Math.log(a) -
+        Math.log(b) +
+        Math.log(this.radical) / 2;
+      return new ExactNumericValue({ re: re / lnBase });
+    }
+
+    // ln(a + bi) = ln(|a + bi|) + i * arg(a + bi)
+    const modulus = Math.hypot(this.re, this.im);
+    const argument = Math.atan2(this.im, this.re);
+    return new ExactNumericValue({
+      re: Math.log(modulus) / lnBase,
+      im: argument / lnBase,
+    });
+  }
+
   sum(...values: ExactNumericValue[]): ExactNumericValue[] {
     let imSum = this.im;
     let decimalSum = 0;
