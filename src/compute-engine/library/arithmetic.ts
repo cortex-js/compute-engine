@@ -364,8 +364,8 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
         result: 'Numbers',
         canonical: (ce, ops) =>
           ops[1] ? ce.function('Log', ops) : ops[0].ln(),
-        simplify: (_ce, ops) => processLn(ops[0]),
-        evaluate: (_ce, ops) => processLn(ops[0]),
+        simplify: (ce, ops) => ops[0].ln(ops[1]),
+        evaluate: (ce, ops) => ops[0].ln(ops[1]),
         N: (ce, ops) =>
           applyN(
             ops[0],
@@ -387,10 +387,8 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
         optParams: ['Numbers'],
         result: 'Numbers',
         canonical: (ce, ops) => ops[0].ln(ops[1] ?? 10),
-
-        simplify: (ce, ops) => processLn(ops[0], ops[1] ?? ce.number(10)),
-
-        evaluate: (ce, ops) => processLn(ops[0], ops[1] ?? ce.number(10)),
+        simplify: (ce, ops) => ops[0].ln(ops[1] ?? ce.number(10)),
+        evaluate: (ce, ops) => ops[0].ln(ops[1] ?? ce.number(10)),
 
         N: (ce, ops) => {
           if (ops[1] === undefined)

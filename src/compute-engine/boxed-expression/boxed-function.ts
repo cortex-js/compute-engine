@@ -683,7 +683,7 @@ export class BoxedFunction extends _BoxedExpression {
     if (!expr) expr = this.engine.box([this._head, ...tail]);
     else expr = cheapest(this.engine.box([this._head, ...tail]), expr);
 
-    expr = cheapest(this, expr);
+    if (recursive) expr = cheapest(this, expr);
 
     if (options?.rules === null) return expr;
 

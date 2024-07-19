@@ -354,6 +354,24 @@ export class BoxedNumber extends _BoxedExpression {
     )
       return this.engine.One;
 
+    if (isRational(this._value)) {
+      const [num, denom] = this._value;
+      const ce = this.engine;
+      if (num === 1) return ce.number(denom).ln(base).neg();
+      return ce.number(num).ln(base).sub(ce.number(denom).ln(base));
+    }
+
+    const f = asFloat(this);
+    if (f !== null && Number.isInteger(f)) {
+      const ce = this.engine;
+      let [factor, root] = factorPower(BigInt(f), 3);
+      if (factor !== BigInt(1))
+        return ce.number(factor).ln(base).mul(3).add(ce.number(root).ln(base));
+      [factor, root] = factorPower(BigInt(f), 2);
+      if (factor !== BigInt(1))
+        return ce.number(factor).ln(base).mul(2).add(ce.number(root).ln(base));
+    }
+
     if (base) {
       if (asFloat(base) === 10) return this.engine._fn('Log', [this]);
       return this.engine._fn('Log', [this, base]);
