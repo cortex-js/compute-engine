@@ -19,6 +19,7 @@ import { asRationalSqrt } from '../library/arithmetic-power';
 import { flatten } from './flatten';
 import { asRational, add } from '../boxed-expression/numerics';
 import { NumericValue } from '../numeric-value/public';
+import { mul } from '../library/arithmetic-multiply';
 
 /**
  * Group terms in a product by common term.
@@ -386,7 +387,7 @@ export function commonTerms(lhs: Product, rhs: Product): BoxedExpression {
   }
 
   // Put everything together
-  return ce.function('Multiply', [ce._fromNumericValue(coef), ...xs]);
+  return mul(ce._fromNumericValue(coef), ...xs);
 }
 
 // Put the exponents in a bucket:

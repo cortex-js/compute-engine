@@ -7,6 +7,7 @@ import {
   isZero,
 } from '../numerics/rationals';
 import { asRational, mul } from '../boxed-expression/numerics';
+import { canonicalMultiply } from './arithmetic-multiply';
 
 /**
  * Canonical form of 'Divide' (and 'Rational')
@@ -41,38 +42,14 @@ export function canonicalDivide(
 
   if (op1.head === 'Divide' && op2.head === 'Divide') {
     return canonicalDivide(
-      ce.function('Multiply', [op1.op1, op2.op2]),
-      ce.function('Multiply', [op1.op2, op2.op1])
+      canonicalMultiply(ce, [op1.op1, op2.op2]),
+      canonicalMultiply(ce, [op1.op2, op2.op1])
     );
   }
   if (op1.head === 'Divide')
-    return canonicalDivide(op1.op1, ce.function('Multiply', [op1.op2, op2]));
+    return canonicalDivide(op1.op1, canonicalMultiply(ce, [op1.op2, op2]));
   if (op2.head === 'Divide')
-    return canonicalDivide(ce.function('Multiply', [op1, op2.op2]), op2.op1);
-
-  // @fixme: enable below and compare test results
-  // const num1 = op1.numericValue;
-  // if (num1 !== null) {
-  //   if (isMachineRational(num1)) {
-  //     const [a, b] = num1;
-  //     return canonicalDivide(ce, ce.number(a), ce.mul(ce.number(b), op2));
-  //   }
-  //   if (isBigRational(num1)) {
-  //     const [a, b] = num1;
-  //     return canonicalDivide(ce, ce.number(a), ce.mul(ce.number(b), op2));
-  //   }
-  // }
-  // const num2 = op2.numericValue;
-  // if (num2 !== null) {
-  //   if (isMachineRational(num2)) {
-  //     const [a, b] = num2;
-  //     return canonicalDivide(ce, ce.mul(op1, ce.number(b)), ce.number(a));
-  //   }
-  //   if (isBigRational(num2)) {
-  //     const [a, b] = num2;
-  //     return canonicalDivide(ce, ce.mul(op1, ce.number(b)), ce.number(a));
-  //   }
-  // }
+    return canonicalDivide(canonicalMultiply(ce, [op1, op2.op2]), op2.op1);
 
   if (op2.isOne) return op1;
 

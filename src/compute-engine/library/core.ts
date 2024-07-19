@@ -18,6 +18,7 @@ import { normalizeIndexingSet } from './utils';
 import { canonicalForm } from '../boxed-expression/canonical';
 import { BoxedExpression } from '../boxed-expression/public';
 import { asFloat, asMachineInteger } from '../boxed-expression/numerics';
+import { canonicalMultiply, mul } from './arithmetic-multiply';
 
 //   // := assign 80 // @todo
 // compose (compose(f, g) -> a new function such that compose(f, g)(x) -> f(g(x))
@@ -928,8 +929,7 @@ export function canonicalInvisibleOperator(
   ) {
     // Only call flatten here, because it will bind (auto-declare) the arguments
     ops = flatten(ops, 'Multiply');
-    if (ops.length === 1) return ops[0];
-    return ce.function('Multiply', ops);
+    return canonicalMultiply(ce, ops);
   }
 
   //

@@ -398,6 +398,8 @@ export function canonicalMultiply(
 
 export function mul(...xs: ReadonlyArray<BoxedExpression>): BoxedExpression {
   console.assert(xs.length > 0);
+  if (xs.length === 1) return xs[0];
+
   const ce = xs[0].engine;
 
   const exp = expandProducts(ce, xs);
