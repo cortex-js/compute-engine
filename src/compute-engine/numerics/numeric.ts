@@ -4,6 +4,8 @@ import { Decimal } from 'decimal.js';
 import { extrapolate } from './richardson';
 import { primeFactors } from './primes';
 
+export const DEFAULT_BIGNUM_PRECISION = 300;
+
 export const MACHINE_PRECISION_BITS = 53;
 export const MACHINE_PRECISION = Math.log10(
   Math.pow(2, MACHINE_PRECISION_BITS)
@@ -17,8 +19,11 @@ export const MACHINE_TOLERANCE = Math.pow(
   -(MACHINE_PRECISION_BITS - MACHINE_TOLERANCE_BITS)
 );
 
-// Positive values smaller than NUMERIC_TOLERANCE are considered to be zero
-export const NUMERIC_TOLERANCE = Math.pow(10, -10);
+//
+
+// Positive values smaller than tolerance are considered to be zero
+export const NUMERIC_MACHINE_TOLERANCE = 1e-10;
+export const NUMERIC_BIGNUM_TOLERANCE = 1e-200;
 
 // When applying simplifications, only considers integers whose absolute value
 // is less than SMALL_INTEGER. This avoid loss of precision by preventing

@@ -15,7 +15,12 @@ import type {
 
 import { assume } from './assume';
 
-import { MACHINE_PRECISION, NUMERIC_TOLERANCE } from './numerics/numeric';
+import {
+  DEFAULT_BIGNUM_PRECISION,
+  MACHINE_PRECISION,
+  NUMERIC_BIGNUM_TOLERANCE,
+  NUMERIC_MACHINE_TOLERANCE,
+} from './numerics/numeric';
 
 import {
   AssumeResult,
@@ -393,15 +398,23 @@ export class ComputeEngine implements IComputeEngine {
     };
 
     // Set the default precision for `bignum` calculations
-    this._numericMode = options?.numericMode ?? 'auto';
-    this._precision = Math.max(
-      options?.numericPrecision ?? 100,
-      Math.floor(MACHINE_PRECISION)
-    );
+    const numericMode = options?.numericMode ?? 'auto';
+    this._numericMode = numericMode;
+    const precision =
+      numericMode === 'auto' || numericMode === 'bignum'
+        ? Math.max(
+            options?.numericPrecision ?? DEFAULT_BIGNUM_PRECISION,
+            Math.floor(MACHINE_PRECISION)
+          )
+        : MACHINE_PRECISION;
+    this._precision = precision;
 
-    this._bignum = Decimal.clone({ precision: this._precision });
+    this._bignum = Decimal.clone({ precision });
 
-    this.tolerance = options?.tolerance ?? NUMERIC_TOLERANCE;
+    this._tolerance = NUMERIC_MACHINE_TOLERANCE;
+    this._bignumTolerance = new this._bignum(NUMERIC_BIGNUM_TOLERANCE);
+
+    if (options?.tolerance !== undefined) this.tolerance = options.tolerance;
 
     this._angularUnit = 'rad';
 
@@ -739,7 +752,7 @@ export class ComputeEngine implements IComputeEngine {
   set tolerance(val: number) {
     if (typeof val === 'number' && Number.isFinite(val))
       this._tolerance = Math.max(val, 0);
-    else this._tolerance = NUMERIC_TOLERANCE;
+    else this._tolerance = NUMERIC_MACHINE_TOLERANCE;
     this._bignumTolerance = this.bignum(this._tolerance);
   }
 

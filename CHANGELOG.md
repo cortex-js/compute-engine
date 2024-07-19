@@ -13,6 +13,9 @@
 
 ### New Features and Improvements
 
+- Improved the default precision to 300 digits. The precision can be changed by
+  setting the `ce.precision` property.
+
 - **Rule Wildcards**
 
   When defining a rule as a LaTeX expression, single character identifiers are
