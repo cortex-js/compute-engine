@@ -362,6 +362,7 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
         params: ['Numbers'],
         optParams: ['Numbers'],
         result: 'Numbers',
+        // @fastpath: this doesn't get called. See makeNumericFunction()
         canonical: (ce, ops) =>
           ops[1] ? ce.function('Log', ops) : ops[0].ln(),
         simplify: (ce, ops) => ops[0].ln(ops[1]),
@@ -772,10 +773,9 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
         },
         simplify: (ce, ops) => ops[0].sqrt(),
         evaluate: (ce, ops) => ops[0].sqrt(),
-        N: (ce, ops) => {
-          const n = ops[0].numericValue;
-          if (n === null) return ops[0].sqrt();
-          return ce._fromNumericValue(ce._numericValue(n).sqrt().N());
+        N: (ce, ops): BoxedExpression => {
+          const [c, rest] = ops[0].toNumericValue();
+          return ce._fromNumericValue(c.sqrt().N()).mul(rest);
         },
         // evalDomain: Square root of a prime is irrational
         // https://proofwiki.org/wiki/Square_Root_of_Prime_is_Irrational

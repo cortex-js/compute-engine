@@ -36,7 +36,7 @@ import { negate } from '../symbolic/negate';
 import { add } from '../library/arithmetic-add';
 import { mul } from '../library/arithmetic-multiply';
 import { asFloat } from './numerics';
-import { NumericValue } from '../numeric-value/public.js';
+import { NumericValue } from '../numeric-value/public';
 
 /**
  * BoxedSymbol
@@ -209,10 +209,19 @@ export class BoxedSymbol extends _BoxedExpression {
     return add(this.canonical, ...rhs.map((x) => this.engine.box(x)));
   }
 
-  mul(...rhs: (number | BoxedExpression)[]): BoxedExpression {
+  mul(...rhs: [NumericValue]): BoxedExpression;
+  mul(...rhs: (number | BoxedExpression)[]): BoxedExpression;
+  mul(...rhs: (NumericValue | number | BoxedExpression)[]): BoxedExpression {
     if (rhs.length === 0) return this;
-
-    return mul(this.canonical, ...rhs.map((x) => this.engine.box(x)));
+    if (rhs.length === 1 && rhs[0] instanceof NumericValue) {
+      if (rhs[0].isOne) return this;
+      if (rhs[0].isNegativeOne) return this.neg();
+      return mul(this, this.engine._fromNumericValue(rhs[0]));
+    }
+    return mul(
+      this.canonical,
+      ...rhs.map((x) => this.engine.box(x as number | BoxedExpression))
+    );
   }
 
   div(rhs: number | BoxedExpression): BoxedExpression {

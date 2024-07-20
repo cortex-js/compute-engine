@@ -3,6 +3,7 @@ import { isRelationalOperator } from './utils';
 import { Product, commonTerms } from '../symbolic/product';
 import { NumericValue } from '../numeric-value/public';
 import { add } from '../library/arithmetic-add';
+import { canonicalMultiply } from '../library/arithmetic-multiply';
 
 /** Combine rational expressions into a single fraction */
 export function together(op: BoxedExpression): BoxedExpression {
@@ -61,7 +62,7 @@ export function factor(expr: BoxedExpression): BoxedExpression {
     // Calculate the GCD of all coefficients
     const terms: { coeff: NumericValue; term: BoxedExpression }[] = [];
     for (const op of expr.ops!) {
-      const [coeff, term] = ce._toNumericValue(op);
+      const [coeff, term] = op.toNumericValue();
       common = common ? common.gcd(coeff) : coeff;
       if (!coeff.isZero) terms.push({ coeff, term });
     }
@@ -69,10 +70,15 @@ export function factor(expr: BoxedExpression): BoxedExpression {
     if (!common || common?.isOne) return expr;
 
     const newTerms = terms.map(({ coeff, term }) =>
-      ce._fromNumericValue(coeff.div(common), term)
+      // term.mul(ce._fromNumericValue(coeff.div(common)))
+      canonicalMultiply(ce, [term, ce._fromNumericValue(coeff.div(common))])
     );
 
-    return ce._fromNumericValue(common, add(...newTerms));
+    // return ce._fromNumericValue(common).mul(add(...newTerms));
+    return canonicalMultiply(ce, [
+      ce._fromNumericValue(common),
+      add(...newTerms),
+    ]);
   }
 
   return Product.from(together(expr)).asExpression();

@@ -51,7 +51,7 @@ import { negate } from '../symbolic/negate';
 import { Product } from '../symbolic/product';
 import { asFloat, asMachineInteger, asRational, signDiff } from './numerics';
 import { add } from '../library/arithmetic-add';
-import { mul } from '../library/arithmetic-multiply';
+import { canonicalMultiply, mul } from '../library/arithmetic-multiply';
 import { NumericValue } from '../numeric-value/public';
 
 /**
@@ -291,7 +291,7 @@ export class BoxedFunction extends _BoxedExpression {
       }
       if (rest.length === 0) return [coef, ce.One];
       if (rest.length === 1) return [coef, rest[0]];
-      return [coef, ce.function('Multiply', rest)];
+      return [coef, canonicalMultiply(this.engine, rest)];
     }
 
     //
@@ -457,7 +457,6 @@ export class BoxedFunction extends _BoxedExpression {
     if (this.head === 'Negate') return this.op1.inv().neg();
 
     return this.engine._fn('Divide', [this.engine.One, this.canonical]);
-    // return this.engine.One.div(this.canonical);
   }
 
   abs(): BoxedExpression {
@@ -473,10 +472,19 @@ export class BoxedFunction extends _BoxedExpression {
     return add(this.canonical, ...rhs.map((x) => this.engine.box(x)));
   }
 
-  mul(...rhs: (number | BoxedExpression)[]): BoxedExpression {
-    if (rhs.length === 0) return this;
-
-    return mul(this.canonical, ...rhs.map((x) => this.engine.box(x)));
+  mul(...rhs: [NumericValue]): BoxedExpression;
+  mul(...rhs: (number | BoxedExpression)[]): BoxedExpression;
+  mul(...rhs: (NumericValue | number | BoxedExpression)[]): BoxedExpression {
+    if (rhs.length === 0) return this.canonical;
+    if (rhs.length === 1 && rhs[0] instanceof NumericValue) {
+      if (rhs[0].isOne) return this.canonical;
+      if (rhs[0].isNegativeOne) return this.neg();
+      return mul(this.canonical, this.engine._fromNumericValue(rhs[0]));
+    }
+    return mul(
+      this.canonical,
+      ...rhs.map((x) => this.engine.box(x as number | BoxedExpression))
+    );
   }
 
   div(rhs: number | BoxedExpression): BoxedExpression {

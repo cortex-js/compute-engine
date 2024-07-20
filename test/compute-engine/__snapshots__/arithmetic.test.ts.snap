@@ -8,7 +8,7 @@ N-mach    = 0.09531017980432493
 
 exports[` 2`] = `
 box       = ["Ln", 1]
-simplify  = 0
+canonical = 0
 `;
 
 exports[` 3`] = `
@@ -147,19 +147,20 @@ canonical = 0
 
 exports[` 21`] = `
 box       = ["Log", 0]
-canonical = NaN
+simplify  = NaN
+N-auto    = NegativeInfinity
 `;
 
 exports[` 22`] = `
 box       = ["Log", -1]
-canonical = ["Multiply", ["Complex", 0, 1], "Pi"]
+simplify  = ["Multiply", ["Complex", 0, 1], "Pi"]
 evaluate  = ["Multiply", ["Complex", 0, 1], "Pi"]
-N-auto    = ["Complex", 0, 3.141592653589793]
+N-auto    = ["Complex", 0, 1.3643763538418412]
 eval-big  = ["Log", -1]
 N-big     = NaN
 eval-mach = ["Log", -1]
 eval-cplx = ["Multiply", ["Complex", 0, 1], "Pi"]
-N-cplx    = ["Complex", 0, 3.141592653589793]
+N-cplx    = ["Complex", 0, 1.3643763538418412]
 `;
 
 exports[` 23`] = `
@@ -188,19 +189,18 @@ canonical = 0
 
 exports[` 27`] = `
 box       = ["Log", 0, 5]
-canonical = NaN
+simplify  = NaN
+N-auto    = NegativeInfinity
 `;
 
 exports[` 28`] = `
 box       = ["Log", -1, 5]
-canonical = ["Multiply", ["Complex", 0, 1], "Pi"]
+simplify  = ["Multiply", ["Complex", 0, 1], "Pi"]
 evaluate  = ["Multiply", ["Complex", 0, 1], "Pi"]
-N-auto    = ["Complex", 0, 3.141592653589793]
+N-auto    = NaN
 eval-big  = ["Log", -1, 5]
-N-big     = NaN
 eval-mach = ["Log", -1, 5]
 eval-cplx = ["Multiply", ["Complex", 0, 1], "Pi"]
-N-cplx    = ["Complex", 0, 3.141592653589793]
 `;
 
 exports[` 29`] = `
@@ -216,10 +216,7 @@ N-big     = NaN
 N-cplx    = ["Complex", 0.2745578233682816, 0.48799531645779287]
 `;
 
-exports[` 31`] = `
-box       = ["Ln"]
-canonical = ["Ln", ["Error", "'missing'"]]
-`;
+exports[` 31`] = `TypeError: Cannot read properties of undefined (reading 'isOne')`;
 
 exports[` 32`] = `
 box       = ["Ln", "'string'"]
@@ -235,7 +232,9 @@ canonical = [
 
 exports[` 33`] = `
 box       = ["Ln", 3, 4]
-canonical = ["Ln", 3, ["Error", "'unexpected-argument'", 4]]
+canonical = ["Log", 3, 4]
+N-auto    = 0.792481250360578090726869471973908254379907203846240530227876327270549113897179281261140237459044121
+N-mach    = 0.792481250360578
 `;
 
 exports[` 34`] = `

@@ -243,10 +243,19 @@ export class BoxedNumber extends _BoxedExpression {
     return add(this.canonical, ...rhs.map((x) => ce.box(x)));
   }
 
-  mul(...rhs: (number | BoxedExpression)[]): BoxedExpression {
+  mul(...rhs: [NumericValue]): BoxedExpression;
+  mul(...rhs: (number | BoxedExpression)[]): BoxedExpression;
+  mul(...rhs: (NumericValue | number | BoxedExpression)[]): BoxedExpression {
     if (rhs.length === 0) return this;
     // @fastpath
     if (rhs.length === 1) {
+      if (rhs[0] instanceof NumericValue) {
+        if (this.isOne) return this.engine._fromNumericValue(rhs[0]);
+        if (this.isNegativeOne)
+          return this.engine._fromNumericValue(rhs[0].neg());
+        let n = this.engine._numericValue(this._value);
+        return this.engine._fromNumericValue(n.mul(rhs[0]));
+      }
       const ce = this.engine;
       if (typeof rhs[0] === 'number') {
         let n = ce._numericValue(this._value);
@@ -260,7 +269,10 @@ export class BoxedNumber extends _BoxedExpression {
       }
     }
 
-    return mul(this.canonical, ...rhs.map((x) => this.engine.box(x)));
+    return mul(
+      this.canonical,
+      ...rhs.map((x) => this.engine.box(x as number | BoxedExpression))
+    );
   }
 
   div(rhs: number | BoxedExpression): BoxedExpression {

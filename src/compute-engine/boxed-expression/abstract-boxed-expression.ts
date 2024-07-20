@@ -427,7 +427,9 @@ export abstract class _BoxedExpression implements BoxedExpression {
     return this.add(rhs.neg());
   }
 
-  mul(...rhs: (number | BoxedExpression)[]): BoxedExpression {
+  mul(...rhs: [NumericValue]): BoxedExpression;
+  mul(...rhs: (number | BoxedExpression)[]): BoxedExpression;
+  mul(...rhs: (NumericValue | number | BoxedExpression)[]): BoxedExpression {
     return this.engine.NaN;
   }
 
@@ -801,4 +803,4 @@ export function getSubexpressions(
 // function *after* the class definition
 
 import { serializeJson } from './serialize';
-import { NumericValue } from '../numeric-value/public.js';
+import { NumericValue } from '../numeric-value/public';

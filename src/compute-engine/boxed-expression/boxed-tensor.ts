@@ -26,6 +26,7 @@ import { _BoxedExpression } from './abstract-boxed-expression';
 import { hashCode, isBoxedExpression } from './utils';
 import { canonical } from '../symbolic/utils';
 import { isWildcard, wildcardName } from './boxed-patterns';
+import { NumericValue } from '../numeric-value/public';
 
 /**
  * A boxed tensor represents an expression that can be
@@ -217,8 +218,10 @@ export class BoxedTensor extends _BoxedExpression {
     return this.expression.sub(rhs);
   }
 
-  mul(...rhs: (number | BoxedExpression)[]): BoxedExpression {
-    return this.expression.mul(...rhs);
+  mul(...rhs: [NumericValue]): BoxedExpression;
+  mul(...rhs: (number | BoxedExpression)[]): BoxedExpression;
+  mul(...rhs: (NumericValue | number | BoxedExpression)[]): BoxedExpression {
+    return this.expression.mul(...(rhs as any));
   }
 
   div(rhs: number | BoxedExpression): BoxedExpression {

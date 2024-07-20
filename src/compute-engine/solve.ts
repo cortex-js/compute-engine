@@ -3,6 +3,7 @@ import {
   SemiBoxedExpression,
 } from './boxed-expression/public';
 import { isInequality } from './boxed-expression/utils';
+import { canonicalAdd } from './library/arithmetic-add';
 import { Rule } from './public';
 import { matchRules } from './rules';
 import { expand } from './symbolic/expand';
@@ -198,12 +199,7 @@ export function findUnivariateRoots(
   const ce = expr.engine;
 
   if (expr.head === 'Equal') {
-    expr = ce
-      .function('Add', [
-        expr.op1.canonical,
-        ce.function('Negate', [expr.op2.canonical]),
-      ])
-      .simplify();
+    expr = canonicalAdd(ce, [expr.op1.canonical, expr.op2.neg()]).simplify();
   }
 
   const rules = ce.getRuleSet('solve-univariate')!;

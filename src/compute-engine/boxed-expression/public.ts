@@ -24,65 +24,85 @@ import './serialize';
  *
  * To create a boxed expression:
  *
- * - Use `ce._fn()` to create a new function expression.
- *
- *   This is a low level method which is typically invoked in the canonical
- *   handler of a function definition.
- *
- *  The arguments are not modified. The expression is not put in canonical
- *  form. The canonical handler is *not* called.
- *
- * - Use `ce.box()` or `ce.parse()` to get a canonical expression.
+ * ### `ce.box()` and `ce.parse()`
+ * 
+ * Use `ce.box()` or `ce.parse()` to get a canonical expression.
  *    - the arguments are put in canonical form
- *    - a limited number of core simplifications have been applied,
+ *    - invisible operators are made explicit
+ *    - a limited number of core simplifications are applied,
  *      for example 0 is removed from additions
  *    - sequences are flattened: `["Add", 1, ["Sequence", 2, 3]]` is
  *      transformed to `["Add", 1, 2, 3]`
- *    - invisible operators are made explicit
- *    - commutative functions are sorted
  *    - associative functions are flattened: `["Add", 1, ["Add", 2, 3]]` is
  *      transformed to `["Add", 1, 2, 3]`
- *    - the expression is in a form that is suitable for further processing
+ *    - commutative functions are sorted
  *    - identifiers are not replaced with their values
  *
- * - canonical handlers are responsible for:
- *    - validating the arguments
- *    - flattening sequences
- *    - flattening associative functions
- *    - calling `ce._fn()` to create a new function expression
- *    - sort their arguments (if the function is commutative)
- *    - if the function definition has a hold, they should also put
- *      their arguments in canonical form, if appropriate
+ * ### Algebraic methods (expr.add(), expr.mul(), etc...)
+ * The boxed expression have some algebraic methods, i.e. `add`, `mul`, `div`, `pow`, etc. These methods are suitable for internal calculations, although they may be used as part of the public API as well.
+ 
+ *     - the operation is performed on the canonical version of the expression
+ *    - the arguments are not evaluated
+ *    - the canonical handler (of the corresponding operation) is not called
+ *    - sequences are flattened as part of the canonicalization process
+ *    - some additional simplifications over canonicalization are applied, for
+ *      example number literals are combined. However, the result is exact, 
+ *      and no approximation is made. Use `.N()` to get an approximate value.
  *
- * - boxed expression algebraic methods, i.e. `add`, `mul`, `div`, `pow`, etc.
- *    - the arguments are not modified (made canonical, evaluated, etc...)
- *    - the canonical handler is not called
- *    - sequences are not flattened (they should have been flattened during
- *      canonicalization of the arguments)
- *    - some further simplifications are applied, for example number
- *      literals are combined. However, the result is exact, and no
- *      approximation is made.
- *    - these methods are suitable for internal calculations, although they
- *      may be used as part of the public API as well.
- *
- * - for 'add' and 'mul', which take multiple arguments, separate functions
+ * For 'add' and 'mul', which take multiple arguments, separate functions
  *   are provided that take an array of arguments. They are equivalent
  *   to calling the boxed algebraic method, i.e. `ce.Zero.add(1, 2, 3)` or
  *   `add(1, 2, 3)` are equivalent.
  *
- * - `ce.function()` is used to create a new function expression. The arguments
- *   are put in canonical form and the canonical handler is called.
+ * ### `ce._fn()`
+ * 
+ * Use `ce._fn()` to create a new function expression.
  *
- *   Note that this is just a specialized version of `ce.box()`.
+ * This is a low level method which is typically invoked in the canonical
+ * handler of a function definition.
  *
- *   For algebraic functions (add, mul, etc..), if the arguments are already
- *   in canonical form, consider using the algebraic methods directly,
- *   i.e. `a.add(b)` instead of `ce.function('Add', a, b)`. Note however
- *   the algebraic methods will apply further simplifications,
- *    while `ce.function()` will not. For example, exact literals will be
- *   combined.
+ * The arguments are not modified. The expression is not put in canonical
+ * form. The canonical handler is *not* called.
+ * 
+ * A canonical flag can be set when calling the function, but it only 
+ * asserts that the function and its arguments are canonical. The caller
+ * is responsible for ensuring that is the case.
  *
+ * 
+ * ### `ce.function()`
+ * 
+ * This is a specialized version of `ce.box()`. It is used to create a new
+ * function expression.
+ * 
+ * The arguments are put in canonical form and the canonical handler is called.
  *
+ * For algebraic functions (add, mul, etc..), use the corresponding 
+ * canonicalization function, i.e. `canonicalAdd(a, b)` instead of
+ * `ce.function('Add', a, b)`.
+ * 
+ * Another option is to use the algebraic methods directly, i.e. `a.add(b)`
+ * instead of `ce.function('Add', a, b)`. However, the algebraic methods will
+ * apply further simplifications which may or may not be desirable. For
+ * example, exact literals will be combined.
+ *
+ * ### Canonical Handlers
+ * 
+ * Canonical handlers are responsible for:
+ *    - validating the signature (domain and number of arguments)
+ *    - flattening sequences
+ *    - flattening associative functions
+ *    - sort the arguments (if the function is commutative)
+ *    - calling `ce._fn()` to create a new function expression
+ *    - if the function definition has a hold, they should also put
+ *      their arguments in canonical form, if appropriate
+ *
+ * When the canonical handler is invoked, the arguments have been put in 
+ * canonical form according to the `hold` flag.
+ * 
+ * Some canonical handlers are available as separate functions and can be
+ * used directly, for example `canonicalAdd(a, b)` instead of 
+ * `ce.function('Add', [a, b])`.
+ * 
  * :::
  */
 
@@ -645,7 +665,7 @@ export interface BoxedExpression {
    *
    * Conversely, `isNumber` may be true even if `numericValue` is `null`,
    * example the symbol `Pi` return true for `isNumber` but `numericValue` is
-   * `null`. Its value can be accessed with `.value.numericValue`
+   * `null`. Its value can be accessed with `.N().numericValue`
    *
    * @category Numeric Expression
    *
@@ -654,7 +674,7 @@ export interface BoxedExpression {
 
   /**
    * Attempt to factor a numeric coefficient `c` and a `rest` out of a
-   * canonical expression `expr` such that `ce.mul(c, rest)` is equal to `expr`.
+   * canonical expression such that `rest.mul(c)` is equal to `this`.
    *
    * Attempts to make `rest` a positive value (i.e. pulls out negative sign).
    *
@@ -677,6 +697,7 @@ export interface BoxedExpression {
   abs(): BoxedExpression;
   add(...rhs: (number | BoxedExpression)[]): BoxedExpression;
   sub(rhs: BoxedExpression): BoxedExpression;
+  mul(...rhs: [NumericValue]): BoxedExpression;
   mul(...rhs: (number | BoxedExpression)[]): BoxedExpression;
   div(rhs: number | BoxedExpression): BoxedExpression;
   pow(
@@ -1956,10 +1977,7 @@ export interface IComputeEngine {
     value: number | Rational | Decimal | Complex | { re: number; im?: number }
   ): NumericValue;
   /** @internal */
-  _fromNumericValue(
-    coeff: NumericValue,
-    expr?: BoxedExpression
-  ): BoxedExpression;
+  _fromNumericValue(coeff: NumericValue): BoxedExpression;
 
   set precision(p: number | 'machine');
   get precision(): number;

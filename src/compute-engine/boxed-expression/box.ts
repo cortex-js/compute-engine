@@ -718,7 +718,7 @@ function makeCanonicalFunction(
   // Flatten any sequence
   // f(a, Sequence(b, c), Sequence(), d) -> f(a, b, c, d)
   //
-  let args: ReadonlyArray<BoxedExpression> = flatten(
+  let args: BoxedExpression[] = flatten(
     xs,
     def.associative && typeof head === 'string' ? head : undefined
   );
@@ -745,13 +745,13 @@ function makeCanonicalFunction(
     if (def.involution) return args[0].op1;
 
     // f(f(x)) -> f(x)
-    if (def.idempotent) args = xs[0].ops!;
+    if (def.idempotent) return ce._fn(head, xs[0].ops!, metadata);
   }
 
   //
   // 5/ Sort the arguments
   //
-  if (args.length > 1 && def.commutative === true) args = [...args].sort(order);
+  if (args.length > 1 && def.commutative === true) args = args.sort(order);
 
   return ce._fn(head, args, metadata);
 }
@@ -770,10 +770,11 @@ function makeNumericFunction(
     head === 'Negate' ||
     head === 'Square' ||
     head === 'Sqrt' ||
-    head === 'Exp' ||
-    head === 'Ln'
+    head === 'Exp'
   )
     ops = checkNumericArgs(ce, semiCanonical(ce, semiOps), 1);
+  else if (head === 'Ln' || head === 'Log')
+    ops = checkNumericArgs(ce, semiCanonical(ce, semiOps));
   else if (head === 'Power')
     ops = checkNumericArgs(ce, semiCanonical(ce, semiOps), 2);
   else if (head === 'Divide')
@@ -797,7 +798,11 @@ function makeNumericFunction(
   if (head === 'Square') return ops[0].pow(2);
   if (head === 'Sqrt') return ops[0].sqrt();
 
-  if (head === 'Ln') return ce._fn('Ln', ops, metadata);
+  if (head === 'Ln' || head === 'Log') {
+    if (ops[0].isOne) return ce.Zero;
+    if (ops.length === 1) return ce._fn(head, ops, metadata);
+    return ce._fn('Log', ops, metadata);
+  }
 
   return null;
 }

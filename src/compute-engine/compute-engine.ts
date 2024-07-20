@@ -112,12 +112,9 @@ import {
   ExactNumericValue,
   ExactNumericValueData,
 } from './numeric-value/exact-numeric-value';
-import {
-  asFloat,
-  asMachineInteger,
-  asRational,
-} from './boxed-expression/numerics';
 import { factor } from './boxed-expression/factor';
+import { canonicalMultiply } from './library/arithmetic-multiply';
+import { canonicalAdd } from './library/arithmetic-add';
 
 /**
  *
@@ -925,19 +922,15 @@ export class ComputeEngine implements IComputeEngine {
     return new ExactNumericValue(machineValue);
   }
 
-  _fromNumericValue(
-    coeff: NumericValue,
-    expr?: BoxedExpression
-  ): BoxedExpression {
+  _fromNumericValue(coeff: NumericValue): BoxedExpression {
     if (coeff.isZero) return this.Zero;
-    if (expr?.isOne) expr = undefined;
-    if (coeff.isOne) return expr ?? this.One;
-    if (coeff.isNegativeOne) return expr ? expr.neg() : this.NegativeOne;
+    if (coeff.isOne) return this.One;
+    if (coeff.isNegativeOne) return this.NegativeOne;
 
-    if (!expr && coeff.radical === 1 && isOne(coeff.rational) && coeff.im === 0)
+    if (coeff.radical === 1 && isOne(coeff.rational) && coeff.im === 0)
       return this.number(coeff.bignumRe ?? coeff.re);
 
-    const terms: BoxedExpression[] = expr ? [expr] : [];
+    const terms: BoxedExpression[] = [];
 
     let sign = 1;
 
@@ -955,8 +948,7 @@ export class ComputeEngine implements IComputeEngine {
 
         if (coeff.radical === 1) {
           // No radical, but a rational part
-          if (!expr || !isOne(coeff.rational))
-            terms.push(this.number(coeff.rational));
+          terms.push(this.number(coeff.rational));
         } else {
           // At least a radical, maybe a rational as well.
           const radical = this._fn('Sqrt', [this.number(coeff.radical)]);
@@ -986,7 +978,7 @@ export class ComputeEngine implements IComputeEngine {
 
     if (coeff.im === 0) {
       if (terms.length === 0) return this.Zero;
-      result = terms.length === 1 ? terms[0] : this.function('Multiply', terms);
+      result = terms.length === 1 ? terms[0] : canonicalMultiply(this, terms);
       if (sign < 0) return result.neg();
       return result;
     }
@@ -996,12 +988,9 @@ export class ComputeEngine implements IComputeEngine {
     //
     if (terms.length === 0) return this.number(this.complex(0, coeff.im));
 
-    result = terms.length === 1 ? terms[0] : this.function('Multiply', terms);
+    result = terms.length === 1 ? terms[0] : canonicalMultiply(this, terms);
     if (sign < 0) return result.neg();
-    return this.function('Add', [
-      result,
-      this.number(this.complex(0, coeff.im)),
-    ]);
+    return canonicalAdd(this, [result, this.number(this.complex(0, coeff.im))]);
   }
 
   /**

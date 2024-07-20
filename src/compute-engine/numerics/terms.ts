@@ -1,6 +1,8 @@
 import { BoxedExpression, IComputeEngine } from '../public';
 
 import { NumericValue } from '../numeric-value/public';
+import { canonicalAdd } from '../library/arithmetic-add';
+import { canonicalMultiply } from '../library/arithmetic-multiply';
 
 // Represent a sum of terms
 export class Terms {
@@ -72,9 +74,10 @@ export class Terms {
     if (term.isOne) {
       // We have a numeric value. Keep it in the terms,
       // so that "1+sqrt(3)" remains exact.
+      const ce = this.engine;
       this.terms.push({
-        coef: this.engine._numericValue(1),
-        term: this.engine._fromNumericValue(coef, term),
+        coef: ce._numericValue(1),
+        term: canonicalMultiply(ce, [ce._fromNumericValue(coef), term]),
       });
       return;
     }
@@ -118,15 +121,14 @@ export class Terms {
       if (coef.isOne) return term.N();
       if (coef.isNegativeOne) return term.N().neg();
 
-      return this.engine._fromNumericValue(coef.N(), term.N());
+      return term.N().mul(ce._fromNumericValue(coef.N()));
     }
 
-    return ce.function(
-      'Add',
-      terms.map(({ coef, term }) =>
-        this.engine._fromNumericValue(coef.N(), term.N())
-      )
-    );
+    return canonicalAdd(ce, [
+      ...terms.map(({ coef, term }) =>
+        canonicalMultiply(ce, [term.N(), ce._fromNumericValue(coef.N())])
+      ),
+    ]);
   }
 
   asExpression(): BoxedExpression {
@@ -142,12 +144,16 @@ export class Terms {
       if (coef.isOne) return term;
       if (coef.isNegativeOne) return term.neg();
 
-      return this.engine._fromNumericValue(coef, term);
+      // return ce._fromNumericValue(coef, term);
+      return canonicalMultiply(ce, [term, ce._fromNumericValue(coef)]);
+      // return term.mul(coef);
     }
 
-    return ce.function(
-      'Add',
-      terms.map(({ coef, term }) => this.engine._fromNumericValue(coef, term))
+    return canonicalAdd(
+      ce,
+      terms.map(({ coef, term }) =>
+        canonicalMultiply(ce, [term, ce._fromNumericValue(coef)])
+      )
     );
   }
 }
