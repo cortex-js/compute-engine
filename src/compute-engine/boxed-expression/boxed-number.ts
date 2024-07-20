@@ -214,12 +214,12 @@ export class BoxedNumber extends _BoxedExpression {
 
   inv(): BoxedExpression {
     let n = this.engine._numericValue(this._value);
-    return this.engine._fromNumericValue(n.inv());
+    return this.engine.box(n.inv());
   }
 
   abs(): BoxedExpression {
     let n = this.engine._numericValue(this._value);
-    return this.engine._fromNumericValue(n.abs());
+    return this.engine.box(n.abs());
   }
 
   add(...rhs: (number | BoxedExpression)[]): BoxedExpression {
@@ -230,13 +230,11 @@ export class BoxedNumber extends _BoxedExpression {
     if (rhs.length === 1) {
       if (typeof rhs[0] === 'number') {
         let n = ce._numericValue(this._value);
-        return ce._fromNumericValue(n.add(rhs[0]));
+        return ce.box(n.add(rhs[0]));
       }
       if (rhs[0].numericValue !== null) {
         let n = ce._numericValue(this._value);
-        return ce._fromNumericValue(
-          n.add(ce._numericValue(rhs[0].numericValue))
-        );
+        return ce.box(n.add(ce._numericValue(rhs[0].numericValue)));
       }
     }
 
@@ -250,22 +248,19 @@ export class BoxedNumber extends _BoxedExpression {
     // @fastpath
     if (rhs.length === 1) {
       if (rhs[0] instanceof NumericValue) {
-        if (this.isOne) return this.engine._fromNumericValue(rhs[0]);
-        if (this.isNegativeOne)
-          return this.engine._fromNumericValue(rhs[0].neg());
+        if (this.isOne) return this.engine.box(rhs[0]);
+        if (this.isNegativeOne) return this.engine.box(rhs[0].neg());
         let n = this.engine._numericValue(this._value);
-        return this.engine._fromNumericValue(n.mul(rhs[0]));
+        return this.engine.box(n.mul(rhs[0]));
       }
       const ce = this.engine;
       if (typeof rhs[0] === 'number') {
         let n = ce._numericValue(this._value);
-        return ce._fromNumericValue(n.mul(rhs[0]));
+        return ce.box(n.mul(rhs[0]));
       }
       if (rhs[0].numericValue !== null) {
         let n = ce._numericValue(this._value);
-        return ce._fromNumericValue(
-          n.mul(ce._numericValue(rhs[0].numericValue))
-        );
+        return ce.box(n.mul(ce._numericValue(rhs[0].numericValue)));
       }
     }
 
@@ -284,7 +279,7 @@ export class BoxedNumber extends _BoxedExpression {
     if (rhs.numericValue !== null) {
       const ce = this.engine;
       let n = ce._numericValue(this._value);
-      return ce._fromNumericValue(n.div(ce._numericValue(rhs.numericValue)));
+      return ce.box(n.div(ce._numericValue(rhs.numericValue)));
     }
     return canonicalDivide(this, rhs);
   }
@@ -343,7 +338,7 @@ export class BoxedNumber extends _BoxedExpression {
         v = n.pow(r);
       }
       if (e instanceof Complex) v = n.pow(e);
-      if (v && v.isExact) return this.engine._fromNumericValue(v);
+      if (v && v.isExact) return this.engine.box(v);
     }
 
     return this.engine._fn('Power', [this, this.engine.box(exp)]);
@@ -351,7 +346,7 @@ export class BoxedNumber extends _BoxedExpression {
 
   sqrt(): BoxedExpression {
     let n = this.engine._numericValue(this._value);
-    return this.engine._fromNumericValue(n.sqrt());
+    return this.engine.box(n.sqrt());
   }
 
   ln(semiBase?: SemiBoxedExpression): BoxedExpression {

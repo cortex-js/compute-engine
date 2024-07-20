@@ -77,7 +77,7 @@ export class Terms {
       const ce = this.engine;
       this.terms.push({
         coef: ce._numericValue(1),
-        term: canonicalMultiply(ce, [ce._fromNumericValue(coef), term]),
+        term: canonicalMultiply(ce, [ce.box(coef), term]),
       });
       return;
     }
@@ -121,12 +121,12 @@ export class Terms {
       if (coef.isOne) return term.N();
       if (coef.isNegativeOne) return term.N().neg();
 
-      return term.N().mul(ce._fromNumericValue(coef.N()));
+      return term.N().mul(ce.box(coef.N()));
     }
 
     return canonicalAdd(ce, [
       ...terms.map(({ coef, term }) =>
-        canonicalMultiply(ce, [term.N(), ce._fromNumericValue(coef.N())])
+        canonicalMultiply(ce, [term.N(), ce.box(coef.N())])
       ),
     ]);
   }
@@ -144,16 +144,12 @@ export class Terms {
       if (coef.isOne) return term;
       if (coef.isNegativeOne) return term.neg();
 
-      // return ce._fromNumericValue(coef, term);
-      return canonicalMultiply(ce, [term, ce._fromNumericValue(coef)]);
-      // return term.mul(coef);
+      return canonicalMultiply(ce, [term, ce.box(coef)]);
     }
 
     return canonicalAdd(
       ce,
-      terms.map(({ coef, term }) =>
-        canonicalMultiply(ce, [term, ce._fromNumericValue(coef)])
-      )
+      terms.map(({ coef, term }) => canonicalMultiply(ce, [term, ce.box(coef)]))
     );
   }
 }

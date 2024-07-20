@@ -59,7 +59,7 @@ export function processPower(
     let n = ce._numericValue(base.numericValue);
     let e = ce._numericValue(exponent.numericValue);
     const v = n.pow(e);
-    return ce._fromNumericValue(mode === 'N' ? v.N() : v);
+    return ce.box(mode === 'N' ? v.N() : v);
   }
 
   return base.pow(exponent);

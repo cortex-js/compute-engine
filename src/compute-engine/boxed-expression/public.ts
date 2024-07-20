@@ -1976,8 +1976,6 @@ export interface IComputeEngine {
   _numericValue(
     value: number | Rational | Decimal | Complex | { re: number; im?: number }
   ): NumericValue;
-  /** @internal */
-  _fromNumericValue(coeff: NumericValue): BoxedExpression;
 
   set precision(p: number | 'machine');
   get precision(): number;
@@ -1988,6 +1986,7 @@ export interface IComputeEngine {
 
   box(
     expr:
+      | NumericValue
       | Decimal
       | Complex
       | [num: number, denom: number]

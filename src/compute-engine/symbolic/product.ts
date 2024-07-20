@@ -258,10 +258,10 @@ export class Product {
         this.coefficient.im === 0
       ) {
         // Numerator
-        let num = ce._fromNumericValue(this.coefficient.num);
+        let num = ce.box(this.coefficient.num);
         if (!num.isOne) xs.push({ exponent: [1, 1], terms: [num] });
         // Denominator
-        const denom = ce._fromNumericValue(this.coefficient.denom);
+        const denom = ce.box(this.coefficient.denom);
         if (!denom.isOne) xs.push({ exponent: [-1, 1], terms: [denom] });
       } else if (mode === 'numeric') {
         const c = this.coefficient.N();
@@ -272,7 +272,7 @@ export class Product {
       } else {
         xs.push({
           exponent: [1, 1],
-          terms: [ce._fromNumericValue(this.coefficient)],
+          terms: [ce.box(this.coefficient)],
         });
       }
     }
@@ -387,7 +387,7 @@ export function commonTerms(lhs: Product, rhs: Product): BoxedExpression {
   }
 
   // Put everything together
-  return mul(ce._fromNumericValue(coef), ...xs);
+  return mul(ce.box(coef), ...xs);
 }
 
 // Put the exponents in a bucket:

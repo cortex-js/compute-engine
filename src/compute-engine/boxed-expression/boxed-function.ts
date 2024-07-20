@@ -352,7 +352,7 @@ export class BoxedFunction extends _BoxedExpression {
       const [coef, rest] = expr.op1.toNumericValue();
       if (coef.isOne) return [coef, this];
       return ce
-        ._fromNumericValue(coef.ln(base))
+        .box(coef.ln(base))
         .add(ce.function(expr.head, [rest, expr.op2]))
         .toNumericValue();
     }
@@ -479,7 +479,7 @@ export class BoxedFunction extends _BoxedExpression {
     if (rhs.length === 1 && rhs[0] instanceof NumericValue) {
       if (rhs[0].isOne) return this.canonical;
       if (rhs[0].isNegativeOne) return this.neg();
-      return mul(this.canonical, this.engine._fromNumericValue(rhs[0]));
+      return mul(this.canonical, this.engine.box(rhs[0]));
     }
     return mul(
       this.canonical,

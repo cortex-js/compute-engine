@@ -63,8 +63,8 @@ export function canonicalDivide(
   if (c.isNegativeOne)
     return t2.isOne ? t1.neg() : ce._fn('Divide', [t1.neg(), t2]);
 
-  const num = t1.mul(ce._fromNumericValue(c.num));
-  const denom = t2.mul(ce._fromNumericValue(c.denom));
+  const num = t1.mul(ce.box(c.num));
+  const denom = t2.mul(ce.box(c.denom));
 
   return denom.isOne ? num : ce._fn('Divide', [num, denom]);
 }

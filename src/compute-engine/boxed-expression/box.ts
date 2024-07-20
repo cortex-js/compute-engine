@@ -19,6 +19,7 @@ import {
   Rational,
   isBigRational,
   isMachineRational,
+  isOne,
   isRational,
   neg,
 } from '../numerics/rationals';
@@ -34,6 +35,7 @@ import { shouldHold, semiCanonical, canonical } from '../symbolic/utils';
 import { order } from './order';
 import { adjustArguments, checkNumericArgs } from './validate';
 import { canonicalMultiply } from '../library/arithmetic-multiply';
+import { NumericValue } from '../numeric-value/public';
 
 /**
  * ### THEORY OF OPERATIONS
@@ -449,10 +451,19 @@ export function boxFunction(
 
 export function box(
   ce: IComputeEngine,
-  expr: null | undefined | Decimal | Complex | Rational | SemiBoxedExpression,
+  expr:
+    | null
+    | undefined
+    | NumericValue
+    | Decimal
+    | Complex
+    | Rational
+    | SemiBoxedExpression,
   options?: { canonical?: CanonicalOptions }
 ): BoxedExpression {
   if (expr === null || expr === undefined) return ce._fn('Sequence', []);
+
+  if (expr instanceof NumericValue) return fromNumericValue(ce, expr);
 
   if (expr instanceof _BoxedExpression)
     return canonicalForm(expr, options?.canonical ?? true);
@@ -805,4 +816,77 @@ function makeNumericFunction(
   }
 
   return null;
+}
+
+function fromNumericValue(ce: IComputeEngine, value: NumericValue) {
+  if (value.isZero) return ce.Zero;
+  if (value.isOne) return ce.One;
+  if (value.isNegativeOne) return ce.NegativeOne;
+  if (value.isNaN) return ce.NaN;
+  if (value.isNegativeInfinity) return ce.NegativeInfinity;
+  if (value.isPositiveInfinity) return ce.PositiveInfinity;
+
+  if (value.radical === 1 && isOne(value.rational) && value.im === 0)
+    return ce.number(value.bignumRe ?? value.re);
+
+  const terms: BoxedExpression[] = [];
+
+  let sign = 1;
+
+  //
+  // Real Part
+  //
+  if (value.sign !== 0) {
+    // There is some real part
+    if (value.decimal !== 1) {
+      // The real part is a floating point number
+      terms.push(ce.number(value.bignumRe ?? value.re));
+    } else {
+      // The real part is a rational and/or radical
+      if (value.sign < 0) sign = -1;
+
+      if (value.radical === 1) {
+        // No radical, but a rational part
+        terms.push(ce.number(value.rational));
+      } else {
+        // At least a radical, maybe a rational as well.
+        const radical = ce._fn('Sqrt', [ce.number(value.radical)]);
+        if (isOne(value.rational)) terms.push(radical);
+        else {
+          const [n, d] = value.rational;
+          if (d === 1) {
+            if (n === 1) terms.push(radical);
+            else terms.push(ce._fn('Multiply', [ce.number(n), radical]));
+          } else {
+            if (n === 1) terms.push(ce._fn('Divide', [radical, ce.number(d)]));
+            else
+              terms.push(
+                ce._fn('Divide', [
+                  ce._fn('Multiply', [ce.number(n), radical]),
+                  ce.number(d),
+                ])
+              );
+          }
+        }
+      }
+    }
+  }
+
+  let result: BoxedExpression;
+
+  if (value.im === 0) {
+    if (terms.length === 0) return ce.Zero;
+    result = terms.length === 1 ? terms[0] : canonicalMultiply(ce, terms);
+    if (sign < 0) return result.neg();
+    return result;
+  }
+
+  //
+  // Imaginary Part
+  //
+  if (terms.length === 0) return ce.number(ce.complex(0, value.im));
+
+  result = terms.length === 1 ? terms[0] : canonicalMultiply(ce, terms);
+  if (sign < 0) return result.neg();
+  return canonicalAdd(ce, [result, ce.number(ce.complex(0, value.im))]);
 }

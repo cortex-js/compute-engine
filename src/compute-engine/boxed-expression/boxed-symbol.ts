@@ -216,7 +216,7 @@ export class BoxedSymbol extends _BoxedExpression {
     if (rhs.length === 1 && rhs[0] instanceof NumericValue) {
       if (rhs[0].isOne) return this;
       if (rhs[0].isNegativeOne) return this.neg();
-      return mul(this, this.engine._fromNumericValue(rhs[0]));
+      return mul(this, this.engine.box(rhs[0]));
     }
     return mul(
       this.canonical,

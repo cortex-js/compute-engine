@@ -775,7 +775,7 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
         evaluate: (ce, ops) => ops[0].sqrt(),
         N: (ce, ops): BoxedExpression => {
           const [c, rest] = ops[0].toNumericValue();
-          return ce._fromNumericValue(c.sqrt().N()).mul(rest);
+          return ce.box(c.sqrt().N()).mul(rest);
         },
         // evalDomain: Square root of a prime is irrational
         // https://proofwiki.org/wiki/Square_Root_of_Prime_is_Irrational

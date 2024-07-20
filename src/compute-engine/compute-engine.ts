@@ -922,77 +922,6 @@ export class ComputeEngine implements IComputeEngine {
     return new ExactNumericValue(machineValue);
   }
 
-  _fromNumericValue(coeff: NumericValue): BoxedExpression {
-    if (coeff.isZero) return this.Zero;
-    if (coeff.isOne) return this.One;
-    if (coeff.isNegativeOne) return this.NegativeOne;
-
-    if (coeff.radical === 1 && isOne(coeff.rational) && coeff.im === 0)
-      return this.number(coeff.bignumRe ?? coeff.re);
-
-    const terms: BoxedExpression[] = [];
-
-    let sign = 1;
-
-    //
-    // Real Part
-    //
-    if (coeff.sign !== 0) {
-      // There is some real part
-      if (coeff.decimal !== 1) {
-        // The real part is a floating point number
-        terms.push(this.number(coeff.bignumRe ?? coeff.re));
-      } else {
-        // The real part is a rational and/or radical
-        if (coeff.sign < 0) sign = -1;
-
-        if (coeff.radical === 1) {
-          // No radical, but a rational part
-          terms.push(this.number(coeff.rational));
-        } else {
-          // At least a radical, maybe a rational as well.
-          const radical = this._fn('Sqrt', [this.number(coeff.radical)]);
-          if (isOne(coeff.rational)) terms.push(radical);
-          else {
-            const [n, d] = coeff.rational;
-            if (d === 1) {
-              if (n === 1) terms.push(radical);
-              else terms.push(this._fn('Multiply', [this.number(n), radical]));
-            } else {
-              if (n === 1)
-                terms.push(this._fn('Divide', [radical, this.number(d)]));
-              else
-                terms.push(
-                  this._fn('Divide', [
-                    this._fn('Multiply', [this.number(n), radical]),
-                    this.number(d),
-                  ])
-                );
-            }
-          }
-        }
-      }
-    }
-
-    let result: BoxedExpression;
-
-    if (coeff.im === 0) {
-      if (terms.length === 0) return this.Zero;
-      result = terms.length === 1 ? terms[0] : canonicalMultiply(this, terms);
-      if (sign < 0) return result.neg();
-      return result;
-    }
-
-    //
-    // Imaginary Part
-    //
-    if (terms.length === 0) return this.number(this.complex(0, coeff.im));
-
-    result = terms.length === 1 ? terms[0] : canonicalMultiply(this, terms);
-    if (sign < 0) return result.neg();
-    return canonicalAdd(this, [result, this.number(this.complex(0, coeff.im))]);
-  }
-
   /**
    * Return a LaTeX dictionary suitable for the specified category, or `"all"`
    * for all categories (`"arithmetic"`, `"algebra"`, etc...).
@@ -1782,6 +1711,7 @@ export class ComputeEngine implements IComputeEngine {
    */
   box(
     expr:
+      | NumericValue
       | Decimal
       | Complex
       | [num: number, denom: number]

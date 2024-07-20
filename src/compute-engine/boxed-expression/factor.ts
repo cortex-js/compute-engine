@@ -70,15 +70,10 @@ export function factor(expr: BoxedExpression): BoxedExpression {
     if (!common || common?.isOne) return expr;
 
     const newTerms = terms.map(({ coeff, term }) =>
-      // term.mul(ce._fromNumericValue(coeff.div(common)))
-      canonicalMultiply(ce, [term, ce._fromNumericValue(coeff.div(common))])
+      canonicalMultiply(ce, [term, ce.box(coeff.div(common))])
     );
 
-    // return ce._fromNumericValue(common).mul(add(...newTerms));
-    return canonicalMultiply(ce, [
-      ce._fromNumericValue(common),
-      add(...newTerms),
-    ]);
+    return canonicalMultiply(ce, [ce.box(common), add(...newTerms)]);
   }
 
   return Product.from(together(expr)).asExpression();
