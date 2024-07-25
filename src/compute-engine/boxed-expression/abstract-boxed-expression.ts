@@ -346,10 +346,6 @@ export abstract class _BoxedExpression implements BoxedExpression {
     return false;
   }
 
-  get isExact(): boolean {
-    return false;
-  }
-
   /** For a symbol, true if the symbol is a constant (unchangeable value) */
   get isConstant(): boolean {
     return false;
@@ -419,7 +415,7 @@ export abstract class _BoxedExpression implements BoxedExpression {
     return this.engine.NaN;
   }
 
-  add(...rhs: (number | BoxedExpression)[]): BoxedExpression {
+  add(rhs: number | BoxedExpression): BoxedExpression {
     return this.engine.NaN;
   }
 
@@ -427,9 +423,7 @@ export abstract class _BoxedExpression implements BoxedExpression {
     return this.add(rhs.neg());
   }
 
-  mul(...rhs: [NumericValue]): BoxedExpression;
-  mul(...rhs: (number | BoxedExpression)[]): BoxedExpression;
-  mul(...rhs: (NumericValue | number | BoxedExpression)[]): BoxedExpression {
+  mul(rhs: NumericValue | number | BoxedExpression): BoxedExpression {
     return this.engine.NaN;
   }
 

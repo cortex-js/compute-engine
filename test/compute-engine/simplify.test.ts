@@ -58,8 +58,8 @@ describe('SIMPLIFY', () => {
 });
 
 describe('SIMPLIFY', () => {
-  test(`simplify(1 + 1e199) (precision loss)`, () =>
-    expect(simplify('1 + 1e999')).toMatchInlineSnapshot(`PositiveInfinity`));
+  test(`simplify(1 + 1e999) (expect precision loss)`, () =>
+    expect(simplify('1 + 1e999')).toMatchInlineSnapshot(`1e+999`));
 
   test(`1.234 + 5678`, () =>
     expect(simplify('1.234 + 5678')).toMatchInlineSnapshot(`5679.234`));
@@ -88,7 +88,7 @@ describe('SIMPLIFY', () => {
 
   test(`1234 + 5678  + 1.0000000000001`, () =>
     expect(simplify('1234 + 5678  + 1.0000000000001')).toMatchInlineSnapshot(
-      `6913`
+      `6913.0000000000001`
     ));
 
   test(`1e149 + 1e150`, () =>

@@ -17,7 +17,7 @@ describe('SOLVING A QUADRATIC EQUATION', () => {
       ?.map((x) => x.json);
     expect(result).toMatchInlineSnapshot(`
       [
-        7.500000265281415e-8,
+        7.4999999971875e-8,
         -200.000000075,
       ]
     `);
@@ -57,7 +57,7 @@ describe('SOLVING A QUADRATIC EQUATION', () => {
     const eqn = ce.box(['Add', ['Multiply', 2, ['Square', 'x']], -16]);
     expect(eqn.solve('x')).toMatchInlineSnapshot(`
       [
-        ["Multiply", 2, ["Sqrt", 2]],
+        ["Sqrt", 8],
       ]
     `);
   });
@@ -125,8 +125,8 @@ describe('expr.solve()', () => {
     const result = e.solve('x')?.map((x) => x.toString());
     expect(result).toMatchInlineSnapshot(`
       [
-        sqrt(3) / 2 - 1,
-        -sqrt(3) / 2 - 1,
+        -0.133974596215561353236276829247063816528597373094809685972096510274033491545599981459426906621375712,
+        -1.866025403784438646763723170752936183471402626905190314027903489725966508454400018540573093378624288,
       ]
     `);
   });

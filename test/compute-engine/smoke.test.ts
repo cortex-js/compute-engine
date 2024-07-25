@@ -592,7 +592,7 @@ describe('SIMPLIFICATION add', () => {
 
   test(`2\\sqrt{3}+\\sqrt{1+2}`, () =>
     expect(simplify('2\\sqrt{3}+\\sqrt{1+2}')).toMatchInlineSnapshot(
-      `["Multiply", 3, ["Sqrt", 3]]`
+      `5.196152422706631880582339024517617100828415761431141884167420938355799050726400111243438560271745728`
     ));
 
   test(`2x+x`, () =>

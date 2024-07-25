@@ -94,45 +94,29 @@ export function simplify(latex: string): string {
 export function checkJson(inExpr: SemiBoxedExpression | null): string {
   if (!inExpr) return 'null';
   try {
-    const precision = engine.precision;
-    engine.numericMode = 'auto';
+    engine.precision = 'auto';
 
     const boxed = exprToString(engine.box(inExpr, { canonical: false }));
 
     const expr = engine.box(inExpr);
     const canonical = exprToString(expr);
-    const simplify = exprToString(expr.simplify());
 
-    const evaluate = exprToString(expr.evaluate());
-    const numEvalAuto = exprToString(expr.N());
-    engine.numericMode = 'bignum';
+    const simplify = expr.simplify().toString();
+    const evalAuto = expr.evaluate().toString();
+    const numEvalAuto = expr.N().toString();
 
-    engine.precision = precision;
-    const evalBignum = exprToString(engine.box(inExpr).evaluate());
-    const numEvalBignum = exprToString(engine.box(inExpr).N());
-    exprToString;
-    engine.numericMode = 'machine';
-    const evalMachine = exprToString(engine.box(inExpr).evaluate());
-    const numEvalMachine = exprToString(engine.box(inExpr).N());
+    engine.precision = 'machine';
+    const evalMachine = expr.evaluate().toString();
+    const numEvalMachine = expr.N().toString();
 
-    engine.numericMode = 'complex';
-    const evalComplex = exprToString(engine.box(inExpr).evaluate());
-    const numEvalComplex = exprToString(engine.box(inExpr).N());
-
-    engine.numericMode = 'auto';
-    engine.precision = precision;
+    engine.precision = 'auto';
 
     if (
       boxed === canonical &&
-      boxed === simplify &&
-      boxed === evaluate &&
-      evalMachine === evaluate &&
-      evalBignum === evaluate &&
-      evalComplex === evaluate &&
-      boxed === numEvalAuto &&
-      boxed === numEvalMachine &&
-      boxed === numEvalBignum &&
-      boxed === numEvalComplex
+      evalAuto === simplify &&
+      evalAuto === evalMachine &&
+      evalAuto === numEvalAuto &&
+      evalAuto === numEvalMachine
     ) {
       return boxed;
     }
@@ -140,27 +124,21 @@ export function checkJson(inExpr: SemiBoxedExpression | null): string {
     const result = ['box       = ' + boxed];
 
     if (canonical !== boxed) result.push('canonical = ' + canonical);
-    if (simplify !== canonical) result.push('simplify  = ' + simplify);
+    if (simplify !== expr.toString()) result.push('simplify  = ' + simplify);
+
     if (
-      evaluate !== simplify ||
-      evalMachine !== evaluate ||
-      evalBignum !== evaluate ||
-      evalComplex !== evaluate
+      evalAuto !== simplify ||
+      evalMachine !== evalAuto ||
+      numEvalAuto !== evalAuto
     )
-      result.push('evaluate  = ' + evaluate);
-    if (numEvalAuto !== evaluate) result.push('N-auto    = ' + numEvalAuto);
+      result.push('eval-auto = ' + evalAuto);
 
-    if (evalBignum !== evaluate) result.push('eval-big  = ' + evalBignum);
-    if (numEvalBignum !== numEvalAuto && numEvalBignum !== evalBignum)
-      result.push('N-big     = ' + numEvalBignum);
+    if (evalMachine !== evalAuto || numEvalAuto !== evalAuto)
+      result.push('eval-mach = ' + evalMachine);
 
-    if (evalMachine !== evaluate) result.push('eval-mach = ' + evalMachine);
-    if (numEvalMachine !== numEvalBignum && numEvalMachine !== evalMachine)
+    if (numEvalAuto !== evalAuto) result.push('N-auto    = ' + numEvalAuto);
+    if (numEvalMachine !== evalMachine)
       result.push('N-mach    = ' + numEvalMachine);
-
-    if (evalComplex !== evalMachine) result.push('eval-cplx = ' + evalComplex);
-    if (numEvalComplex !== numEvalMachine && numEvalComplex !== evalComplex)
-      result.push('N-cplx    = ' + numEvalComplex);
 
     return result.join('\n');
   } catch (e) {

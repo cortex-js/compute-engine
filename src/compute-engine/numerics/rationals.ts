@@ -23,6 +23,10 @@ export function isZero(x: Rational): boolean {
   return x[0] == 0;
 }
 
+export function isPositive(x: Rational): boolean {
+  return x[0] > 0;
+}
+
 export function isOne(x: Rational): boolean {
   return x[0] === x[1];
 }

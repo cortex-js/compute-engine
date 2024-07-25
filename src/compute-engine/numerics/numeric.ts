@@ -4,7 +4,7 @@ import { Decimal } from 'decimal.js';
 import { extrapolate } from './richardson';
 import { primeFactors } from './primes';
 
-export const DEFAULT_BIGNUM_PRECISION = 300;
+export const DEFAULT_PRECISION = 300;
 
 export const MACHINE_PRECISION_BITS = 53;
 export const MACHINE_PRECISION = Math.log10(
@@ -23,7 +23,7 @@ export const MACHINE_TOLERANCE = Math.pow(
 
 // Positive values smaller than tolerance are considered to be zero
 export const NUMERIC_MACHINE_TOLERANCE = 1e-10;
-export const NUMERIC_BIGNUM_TOLERANCE = 1e-200;
+export const NUMERIC_BIGNUM_TOLERANCE = 1e-290;
 
 // When applying simplifications, only considers integers whose absolute value
 // is less than SMALL_INTEGER. This avoid loss of precision by preventing
@@ -37,7 +37,7 @@ export const SMALL_INTEGER = 1000000;
 export const MAX_ITERATION = 1000000;
 
 // When doing a symbolic calculations using multiple terms, do
-// not expand beyond these many terms
+// not expand beyond this many terms
 export const MAX_SYMBOLIC_TERMS = 200;
 
 /**
@@ -109,11 +109,40 @@ export function canonicalInteger(n: number): [a: number, b: number, c: number] {
 export function factorPower(
   n: number,
   exponent: number
-): [factor: number, root: number] {
+): readonly [factor: number, root: number] {
   if (n >= Number.MAX_SAFE_INTEGER) return [1, n];
   if (n === 0) return [0, 0];
+  if (n === 1) return [1, 1];
   // @todo: handle negative n
   console.assert(Number.isInteger(n) && n > 0 && n < Number.MAX_SAFE_INTEGER);
+  if (exponent === 2) {
+    const result = (
+      [
+        [0, 0],
+        [1, 1],
+        [1, 2],
+        [1, 3],
+        [2, 1],
+        [1, 5],
+        [1, 6],
+        [1, 7],
+        [1, 8],
+        [3, 1],
+        [1, 10],
+        [1, 11],
+        [2, 3],
+        [1, 13],
+        [1, 14],
+        [1, 15],
+        [4, 1],
+        [1, 17],
+        [3, 2],
+        [1, 19],
+        [1, 20],
+      ] as const
+    )[n];
+    if (result) return result;
+  }
   const factors = primeFactors(n);
   let f = 1;
   let r = 1;

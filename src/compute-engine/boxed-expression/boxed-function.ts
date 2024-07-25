@@ -31,7 +31,6 @@ import { isMachineRational } from '../numerics/rationals';
 import { replace } from '../rules';
 import { DEFAULT_COMPLEXITY } from './order';
 import {
-  complexAllowed,
   hashCode,
   bignumPreferred,
   normalizedUnknownsForSolve,
@@ -167,10 +166,6 @@ export class BoxedFunction extends _BoxedExpression {
   reset(): void {
     // Note: a non-canonical expression is never bound
     // this._def = null;
-  }
-
-  get isExact(): boolean {
-    return isSqrt(this) && this.op1.isExact;
   }
 
   get isCanonical(): boolean {
@@ -467,24 +462,19 @@ export class BoxedFunction extends _BoxedExpression {
     return this.engine._fn('Abs', [this]);
   }
 
-  add(...rhs: (number | BoxedExpression)[]): BoxedExpression {
-    if (rhs.length === 0) return this;
-    return add(this.canonical, ...rhs.map((x) => this.engine.box(x)));
+  add(rhs: number | BoxedExpression): BoxedExpression {
+    if (rhs === 0) return this;
+    return add(this.canonical, this.engine.box(rhs));
   }
 
-  mul(...rhs: [NumericValue]): BoxedExpression;
-  mul(...rhs: (number | BoxedExpression)[]): BoxedExpression;
-  mul(...rhs: (NumericValue | number | BoxedExpression)[]): BoxedExpression {
-    if (rhs.length === 0) return this.canonical;
-    if (rhs.length === 1 && rhs[0] instanceof NumericValue) {
-      if (rhs[0].isOne) return this.canonical;
-      if (rhs[0].isNegativeOne) return this.neg();
-      return mul(this.canonical, this.engine.box(rhs[0]));
+  mul(rhs: NumericValue | number | BoxedExpression): BoxedExpression {
+    if (rhs instanceof NumericValue) {
+      if (rhs.isZero) return this.engine.Zero;
+      if (rhs.isOne) return this.canonical;
+      if (rhs.isNegativeOne) return this.neg();
+      return mul(this.canonical, this.engine.box(rhs));
     }
-    return mul(
-      this.canonical,
-      ...rhs.map((x) => this.engine.box(x as number | BoxedExpression))
-    );
+    return mul(this.canonical, this.engine.box(rhs));
   }
 
   div(rhs: number | BoxedExpression): BoxedExpression {
@@ -927,9 +917,7 @@ export class BoxedFunction extends _BoxedExpression {
     if (result) {
       const num = result.numericValue;
       if (num !== null) {
-        if (!complexAllowed(this.engine) && num instanceof Complex)
-          result = this.engine.NaN;
-        else if (!bignumPreferred(this.engine) && num instanceof Decimal)
+        if (!bignumPreferred(this.engine) && num instanceof Decimal)
           result = this.engine.number(num.toNumber());
       }
     }

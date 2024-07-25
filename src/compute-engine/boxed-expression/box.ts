@@ -36,37 +36,30 @@ import { order } from './order';
 import { adjustArguments, checkNumericArgs } from './validate';
 import { canonicalMultiply } from '../library/arithmetic-multiply';
 import { NumericValue } from '../numeric-value/public';
+import { ExactNumericValue } from '../numeric-value/exact-numeric-value';
 
 /**
  * ### THEORY OF OPERATIONS
  *
- * 1/ Boxing does not depend on the numeric mode. The numeric mode could be
- * changed later, but the previously boxed numbers could not be retroactively
- * upgraded.
  *
- * The `numericMode` is taken into account only during evaluation.
+ * 1/ The result of boxing is canonical by default.
  *
- * Therefore, a boxed expression may contain a mix of number representations.
+ *   This is the most common need (i.e. to evaluate an expression you need it
+ *   in canonical form). Creating a boxed expression which is canonical from the
+ *   start avoid going through an intermediary step with a non-canonical
+ *   expression.
  *
- * 2/ The result of boxing is canonical by default.
- *
- * This is the most common need (i.e. as soon as you want to evaluate an
- * expression you need a canonical expression). Creating a boxed expression
- * which is canonical from the start avoid going through an intermediary step
- * with a non-canonical expression.
- *
- * 3/ When boxing (and canonicalizing), if the function is "scoped", a new
+ * 2/ When boxing (and canonicalizing), if the function is "scoped", a new
  *    scope is created before the canonicalization, so that any declaration
  *    are done within that scope. Example of scoped functions include `Block`
  *    and `Sum`.
  *
- * 4/ When implementing an `evaluate()`:
+ * 3/ When implementing an `evaluate()`:
  * - if `bignumPreferred()` all operations should be done in bignum and complex,
  *    otherwise, they should all be done in machine numbers and complex.
- * - if not `complexAllowed()`, return `NaN` if a complex value is encountered
- * - if a `Sqrt` (of a rational) is encountered, preserve it
- * - if a `hold` constant is encountered, preserve it
  * - if a rational is encountered, preserve it
+ * - if a `Sqrt` of a rational is encountered, preserve it
+ * - if a `hold` constant is encountered, preserve it
  * - if one of the arguments is not exact, return an approximation
  *
  * EXACT
@@ -334,30 +327,17 @@ export function boxFunction(
     // Rational (as Divide)
     //
     if ((head === 'Divide' || head === 'Rational') && ops.length === 2) {
-      if (
-        ops[0] instanceof _BoxedExpression &&
-        ops[1] instanceof _BoxedExpression
-      ) {
-        if (ce.numericMode === 'machine') {
-          const [fn, fd] = [asFloat(ops[0]), asFloat(ops[1])];
-          if (
-            fn !== null &&
-            Number.isInteger(fn) &&
-            fd !== null &&
-            Number.isInteger(fd)
-          )
-            return ce.number([fn, fd], options);
-        }
-        const [n, d] = [asBigint(ops[0]), asBigint(ops[1])];
-        if (n !== null && d !== null) return ce.number([n, d], options);
-      } else {
-        const [n, d] = [
-          bigintValue(ops[0] as Expression),
-          bigintValue(ops[1] as Expression),
-        ];
-        if (n !== null && d !== null) return ce.number([n, d], options);
+      const n =
+        ops[0] instanceof _BoxedExpression
+          ? asBigint(ops[0])
+          : bigintValue(ops[0] as Expression);
+      if (n !== null) {
+        const d =
+          ops[1] instanceof _BoxedExpression
+            ? asBigint(ops[1])
+            : bigintValue(ops[1] as Expression);
+        if (d !== null) return ce.number([n, d], options);
       }
-
       head = 'Divide';
     }
 
@@ -818,7 +798,10 @@ function makeNumericFunction(
   return null;
 }
 
-function fromNumericValue(ce: IComputeEngine, value: NumericValue) {
+function fromNumericValue(
+  ce: IComputeEngine,
+  value: NumericValue
+): BoxedExpression {
   if (value.isZero) return ce.Zero;
   if (value.isOne) return ce.One;
   if (value.isNegativeOne) return ce.NegativeOne;
@@ -826,8 +809,18 @@ function fromNumericValue(ce: IComputeEngine, value: NumericValue) {
   if (value.isNegativeInfinity) return ce.NegativeInfinity;
   if (value.isPositiveInfinity) return ce.PositiveInfinity;
 
-  if (value.radical === 1 && isOne(value.rational) && value.im === 0)
-    return ce.number(value.bignumRe ?? value.re);
+  if (!(value instanceof ExactNumericValue)) {
+    const im = value.im;
+    if (im === 0) return ce.number(value.bignumRe ?? value.re);
+    if (value.re === 0) return ce.number(ce.complex(0, im));
+    if (value.bignumRe) {
+      return canonicalMultiply(ce, [
+        ce.number(value.bignumRe),
+        ce.number(ce.complex(0, im)),
+      ]);
+    }
+    return ce.number(ce.complex(value.re, value.im));
+  }
 
   const terms: BoxedExpression[] = [];
 
@@ -837,36 +830,31 @@ function fromNumericValue(ce: IComputeEngine, value: NumericValue) {
   // Real Part
   //
   if (value.sign !== 0) {
-    // There is some real part
-    if (value.decimal !== 1) {
-      // The real part is a floating point number
-      terms.push(ce.number(value.bignumRe ?? value.re));
-    } else {
-      // The real part is a rational and/or radical
-      if (value.sign < 0) sign = -1;
+    // The real part is the product of a rational and radical
 
-      if (value.radical === 1) {
-        // No radical, but a rational part
-        terms.push(ce.number(value.rational));
-      } else {
-        // At least a radical, maybe a rational as well.
-        const radical = ce._fn('Sqrt', [ce.number(value.radical)]);
-        if (isOne(value.rational)) terms.push(radical);
-        else {
-          const [n, d] = value.rational;
-          if (d === 1) {
-            if (n === 1) terms.push(radical);
-            else terms.push(ce._fn('Multiply', [ce.number(n), radical]));
-          } else {
-            if (n === 1) terms.push(ce._fn('Divide', [radical, ce.number(d)]));
-            else
-              terms.push(
-                ce._fn('Divide', [
-                  ce._fn('Multiply', [ce.number(n), radical]),
-                  ce.number(d),
-                ])
-              );
-          }
+    if (value.radical === 1) {
+      // No radical, just a rational part
+      terms.push(ce.number(value.rational));
+    } else {
+      if (value.sign < 0) sign = -1;
+      const rational = sign < 0 ? neg(value.rational) : value.rational;
+      // At least a radical, maybe a rational as well.
+      const radical = ce._fn('Sqrt', [ce.number(value.radical)]);
+      if (isOne(rational)) terms.push(radical);
+      else {
+        const [n, d] = rational;
+        if (d === 1) {
+          if (n === 1) terms.push(radical);
+          else terms.push(ce._fn('Multiply', [ce.number(n), radical]));
+        } else {
+          if (n === 1) terms.push(ce._fn('Divide', [radical, ce.number(d)]));
+          else
+            terms.push(
+              ce._fn('Divide', [
+                ce._fn('Multiply', [ce.number(n), radical]),
+                ce.number(d),
+              ])
+            );
         }
       }
     }
@@ -877,8 +865,7 @@ function fromNumericValue(ce: IComputeEngine, value: NumericValue) {
   if (value.im === 0) {
     if (terms.length === 0) return ce.Zero;
     result = terms.length === 1 ? terms[0] : canonicalMultiply(ce, terms);
-    if (sign < 0) return result.neg();
-    return result;
+    return sign < 0 ? result.neg() : result;
   }
 
   //
@@ -887,6 +874,8 @@ function fromNumericValue(ce: IComputeEngine, value: NumericValue) {
   if (terms.length === 0) return ce.number(ce.complex(0, value.im));
 
   result = terms.length === 1 ? terms[0] : canonicalMultiply(ce, terms);
-  if (sign < 0) return result.neg();
-  return canonicalAdd(ce, [result, ce.number(ce.complex(0, value.im))]);
+  return canonicalAdd(ce, [
+    sign < 0 ? result.neg() : result,
+    ce.number(ce.complex(0, value.im)),
+  ]);
 }

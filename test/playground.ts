@@ -2,6 +2,41 @@ import { ComputeEngine } from '../src/compute-engine';
 
 const ce = new ComputeEngine();
 
+// Does not evaluate, only simplifies Degree
+// See trigonometry.test.ts:65
+// ce.box(['Cos', ['Degrees', 30]])
+//   .evaluate()
+//   .print();
+
+// Correct result in machine
+// ce.precision = 'machine';
+// ce.box(['Cos', ['Degrees', 30]])
+//   .evaluate()
+//   .print();
+
+// Issue: loss of precision. Need a bigint in ExactNumericValue and/or BoxedNumber
+ce.parse('\\frac34 + 1e99').simplify().print();
+
+ce.parse('\\sin\\frac\\pi3').evaluate().print();
+
+// Boxed as Divide(1, 4), should be Rational(1, 4)
+console.info(ce.parse('2^{-2}').evaluate().json);
+
+// Eval returns NaN, N() returns -oo
+ce.parse('\\ln(0)').evaluate().print();
+ce.parse('\\ln(0)').N().print();
+
+ce.precision = 'machine';
+ce.box(['Cos', ['Complex', 3, 4]])
+  .evaluate()
+  .print();
+
+ce.parse('\\frac{\\pi}{4}').evaluate().print();
+
+// Should be [Complex, 0, 1], not NaN.
+ce.precision = 'machine';
+ce.box(['Negate', 'i']).evaluate().print();
+
 // Quick perf testing
 
 // console.time('simplify');

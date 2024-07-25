@@ -11,6 +11,11 @@
   `ce.parse('1 + 2')` return `["Add", 1, 2]`, `ce.box(1).add(2)` will return
   `3`.
 
+- The `ce.numericMode` option has been removed. Instead, set the `ce.precision`
+  property to the desired precision. Set the precision to 'machine' for machine
+  precision calculations (about 15 digits). Set it to 'auto' for a default of
+  300 digits. Set it to a number for a fixed precision.
+
 ### New Features and Improvements
 
 - Improved the default precision to 300 digits. The precision can be changed by

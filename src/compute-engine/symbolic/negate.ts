@@ -1,9 +1,6 @@
-import Complex from 'complex.js';
-import { Decimal } from 'decimal.js';
-import { neg } from '../numerics/rationals';
-
-import { BoxedExpression, IComputeEngine, Metadata } from '../public';
+import { BoxedExpression, IComputeEngine } from '../public';
 import { order } from '../boxed-expression/order';
+import { add } from '../library/arithmetic-add';
 
 /**
  * Distribute `Negate` (multiply by -1) if expr is a number literal, an
@@ -30,10 +27,7 @@ export function negate(expr: BoxedExpression): BoxedExpression {
 
   // Distribute over addition
   // Negate(Add(a, b)) -> Add(Negate(a), Negate(b))
-  if (expr.head === 'Add') {
-    const ops = expr.ops!.map((x) => negate(x));
-    return ops[0].add(...ops.slice(1));
-  }
+  if (expr.head === 'Add') return add(...expr.ops!.map((x) => negate(x)));
 
   // Distribute over multiplication
   // Negate(Multiply(a, b)) -> Multiply(Negate(a), b)

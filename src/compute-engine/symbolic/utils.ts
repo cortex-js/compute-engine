@@ -1,6 +1,6 @@
 import Complex from 'complex.js';
 import { Decimal } from 'decimal.js';
-import { complexAllowed, bignumPreferred } from '../boxed-expression/utils';
+import { bignumPreferred } from '../boxed-expression/utils';
 import {
   isMachineRational,
   isBigRational,
@@ -41,7 +41,7 @@ export function apply(
   }
 
   if (n instanceof Complex) {
-    if (!complexFn || !complexAllowed(ce)) return NaN;
+    if (!complexFn) return NaN;
     return ce.chop(complexFn(n));
   }
 
@@ -92,7 +92,7 @@ export function apply2(
   if (b1 && b2) return bigFn?.(b1, b2) ?? fn(b1.toNumber(), b2.toNumber());
 
   if (m1 instanceof Complex || m2 instanceof Complex) {
-    if (!complexFn || !complexAllowed(ce)) return NaN;
+    if (!complexFn) return NaN;
     return complexFn(
       ce.complex((m1 as number) ?? b1?.toNumber() ?? NaN),
       ce.complex((m2 as number) ?? b2?.toNumber() ?? NaN)

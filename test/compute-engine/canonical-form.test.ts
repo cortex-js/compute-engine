@@ -64,7 +64,9 @@ describe('CANONICAL FORMS', () => {
     expect(check('\\frac{-101}{10^{\\frac{2}{3}}}')).toMatchInlineSnapshot(`
       box       = ["Divide", -101, ["Power", 10, ["Divide", 2, 3]]]
       canonical = ["Divide", -101, ["Power", 10, ["Rational", 2, 3]]]
-      simplify  = -21.759790369322026
+      simplify  = -21.7597903693220289300201270935987611762189573536718945707042077101466145808445095045981174421644395678740657161922980612298250329550440254995432338510653685487443648659333188509382508544965893579076310985477663983529561192592748819564670746070928330874336982221528557115136848243740360285850291743803
+      eval-auto = -21.7597903693220289300201270935987611762189573536718945707042077101466145808445095045981174421644395678740657161922980612298250329550440254995432338510653685487443648659333188509382508544965893579076310985477663983529561192592748819564670746070928330874336982221528557115136848243740360285850291743803
+      eval-mach = -21.75979036932203
     `);
   });
 
@@ -120,12 +122,7 @@ describe('CANONICAL FORMS', () => {
         ["Negate", "n"]
       ]
       canonical = ["Power", ["Multiply", 2, "x", "y"], ["Negate", "n"]]
-      evaluate  = [
-        "Multiply",
-        ["Power", 2, ["Negate", "n"]],
-        ["Power", "x", ["Negate", "n"]],
-        ["Power", "y", ["Negate", "n"]]
-      ]
+      eval-auto = 2^-n * x^-n * y^-n
     `);
   });
 
@@ -148,7 +145,7 @@ describe('CANONICAL FORMS', () => {
     expect(check('2\\frac{x}{a}\\frac{y}{b}')).toMatchInlineSnapshot(`
       box       = ["InvisibleOperator", 2, ["Divide", "x", "a"], ["Divide", "y", "b"]]
       canonical = ["Multiply", 2, ["Divide", "x", "a"], ["Divide", "y", "b"]]
-      simplify  = ["Divide", ["Multiply", 2, "x", "y"], ["Multiply", "a", "b"]]
+      simplify  = (2x * y) / (a * b)
     `);
   });
 });
@@ -196,15 +193,11 @@ describe('COMMUTATIVE ORDER', () => {
         "z",
         ["Sqrt", "y"]
       ]
-      simplify  = [
-        "Multiply",
-        ["Rational", -45, 2],
-        "Pi",
-        "x",
-        "z",
-        ["Power", "y", ["Rational", 3, 2]]
-      ]
-      N-auto    = ["Multiply", -70.68583470577033, "x", "y", "z", ["Sqrt", "y"]]
+      simplify  = (-45/2) * pi * x * z * y^(3/2)
+      eval-auto = (-45/2) * pi * x * z * y^(3/2)
+      eval-mach = (-45/2) * pi * x * z * y^(3/2)
+      N-auto    = -70.68583470577035 * x * y * z * sqrt(y)
+      N-mach    = -70.68583470577033 * x * y * z * sqrt(y)
     `);
   });
 
@@ -237,17 +230,7 @@ describe('COMMUTATIVE ORDER', () => {
         ["Square", "b"],
         ["Square", "c"]
       ]
-      simplify  = [
-        "Multiply",
-        3,
-        "d",
-        "g",
-        "y",
-        ["Power", "x", 12],
-        ["Power", "b", 6],
-        ["Power", "a", 5],
-        ["Square", "c"]
-      ]
+      simplify  = 3d * g * y * x^12 * b^6 * a^5 * c^2
     `);
   });
 });
@@ -268,7 +251,7 @@ describe('POLYNOMIAL ORDER', () => {
     expect(check('c+7+a+5+b')).toMatchInlineSnapshot(`
       box       = ["Add", "c", 7, "a", 5, "b"]
       canonical = ["Add", "a", "b", "c", 5, 7]
-      simplify  = ["Add", "a", "b", "c", 12]
+      simplify  = a + b + c + 12
     `);
   });
 
@@ -294,13 +277,7 @@ describe('POLYNOMIAL ORDER', () => {
         3,
         6
       ]
-      simplify  = [
-        "Add",
-        ["Multiply", 7, "a"],
-        ["Multiply", 2, "b"],
-        ["Multiply", 5, "c"],
-        9
-      ]
+      simplify  = 7a + 2b + 5c + 9
     `);
   });
 
@@ -319,7 +296,7 @@ describe('POLYNOMIAL ORDER', () => {
         ["Multiply", 5, "a"],
         ["Multiply", 7, "a"]
       ]
-      simplify  = ["Multiply", 15, "a"]
+      simplify  = 15a
     `);
   });
 
@@ -337,8 +314,11 @@ describe('POLYNOMIAL ORDER', () => {
         ["Multiply", 2, "Pi", ["Power", "x", 3]],
         ["Multiply", 3, 4, "Pi", ["Power", "x", 3]]
       ]
-      simplify  = ["Add", ["Power", "x", 3], ["Multiply", 14, "Pi", ["Power", "x", 3]]]
-      N-auto    = ["Multiply", 44.982297150257104, ["Power", "x", 3]]
+      simplify  = x^3 + 14pi * x^3
+      eval-auto = x^3 + 14pi * x^3
+      eval-mach = x^3 + 14pi * x^3
+      N-auto    = 44.982297150257106 * x^3
+      N-mach    = 44.982297150257104 * x^3
     `);
   });
 
@@ -360,14 +340,7 @@ describe('POLYNOMIAL ORDER', () => {
         ["Multiply", ["Power", "x", 3], ["Square", "y"]],
         ["Multiply", ["Square", "x"], ["Square", "y"]]
       ]
-      simplify  = [
-        "Add",
-        ["Multiply", "y", ["Power", "x", 4]],
-        ["Multiply", "x", ["Power", "y", 4]],
-        ["Multiply", ["Power", "y", 3], ["Square", "x"]],
-        ["Multiply", ["Power", "x", 3], ["Square", "y"]],
-        ["Square", ["Multiply", "x", "y"]]
-      ]
+      simplify  = y * x^4 + x * y^4 + y^3 * x^2 + x^3 * y^2 + (x * y)^2
     `);
   });
 
@@ -396,13 +369,7 @@ describe('POLYNOMIAL ORDER', () => {
         ["Multiply", ["Power", "a", 3], ["Square", "a"]],
         ["Multiply", ["Power", "b", 3], ["Square", "b"]]
       ]
-      simplify  = [
-        "Add",
-        ["Power", "b", 6],
-        ["Multiply", "b", ["Power", "a", 5]],
-        ["Multiply", 2, ["Power", "a", 5]],
-        ["Power", "b", 5]
-      ]
+      simplify  = b^6 + b * a^5 + 2a^5 + b^5
     `);
   });
 

@@ -1,4 +1,3 @@
-import Complex from 'complex.js';
 import { Decimal } from 'decimal.js';
 
 import { BoxedExpression, IComputeEngine } from '../public';
@@ -125,19 +124,21 @@ export class Product {
         }
 
         this.coefficient = this.coefficient.mul(
-          num instanceof Decimal || num instanceof Complex
-            ? this.engine._numericValue(num)
-            : num
+          num instanceof Decimal || typeof num === 'number'
+            ? num
+            : this.engine._numericValue(num)
         );
         return;
       }
 
       const radical = asRationalSqrt(term);
       if (radical) {
-        this.coefficient = this.coefficient.mul({
-          radical: (radical[0] as number) * (radical[1] as number),
-          rational: [1, Number(radical[1])],
-        });
+        this.coefficient = this.coefficient.mul(
+          this.engine._numericValue({
+            radical: (radical[0] as number) * (radical[1] as number),
+            rational: [1, Number(radical[1])],
+          })
+        );
         return;
       }
     }

@@ -145,9 +145,9 @@ const OPERATORS = {
           }
           const l = serialize(expr.op1, 12);
           const r = serialize(expr.op2, 12);
-          // Is it a digit followed by a non-digit?
-          if (l.match(/\d$/) && r.match(/^[a-zA-Z\(]/)) return l + r;
-          if (r.match(/\d$/) && l.match(/^[a-zA-Z\(]/)) return r + l;
+          // Is it a sequence of digits (integer) followed by a non-digit?
+          if (l.match(/^[-+]?\d+$/) && r.match(/^[a-zA-Z\(]/)) return l + r;
+          if (r.match(/^[-+]?\d+$/) && l.match(/^[a-zA-Z\(]/)) return r + l;
           return l + ' * ' + r;
         }
       }
@@ -161,7 +161,7 @@ const OPERATORS = {
             const lhs = acc[0];
             if (lhs === '-1' || lhs === '(-1)')
               return [...acc.slice(1), `-${rhs}`];
-            if (lhs && /\d$/.test(lhs) && /^[a-zA-Z\(]/.test(rhs))
+            if (lhs && /^[-+]?\d+$/.test(lhs) && /^[a-zA-Z\(]/.test(rhs))
               return [...acc.slice(1), `${lhs}${rhs}`];
             return [...acc, rhs];
           }, [])

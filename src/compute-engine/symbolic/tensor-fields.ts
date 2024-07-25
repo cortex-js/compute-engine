@@ -2,6 +2,7 @@ import Complex from 'complex.js';
 import { BoxedExpression, IComputeEngine } from '../public';
 import { isRelationalOperator } from '../boxed-expression/utils';
 import { mul } from '../library/arithmetic-multiply';
+import { add } from '../library/arithmetic-add';
 
 export type DataTypeMap = {
   float64: number;
@@ -322,7 +323,7 @@ export class TensorFieldExpression implements TensorField<BoxedExpression> {
   }
 
   addn(...xs: BoxedExpression[]): BoxedExpression {
-    return xs[0].add(...xs.slice(1));
+    return add(...xs);
   }
 
   neg(x: BoxedExpression): BoxedExpression {

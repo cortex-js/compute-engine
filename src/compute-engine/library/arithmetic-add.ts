@@ -303,9 +303,8 @@ export function evalSummation(
           if (result === null) result = ce.number(sum);
         } else {
           // Machine precision
-          const numericMode = ce.numericMode;
           const precision = ce.precision;
-          ce.numericMode = 'machine';
+          ce.precision = 'machine';
           let sum = 0;
           for (let i = lower; i <= upper; i++) {
             ce.assign(index, i);
@@ -320,7 +319,6 @@ export function evalSummation(
             }
             sum += term;
           }
-          ce.numericMode = numericMode;
           ce.precision = precision;
           if (result === null) result = ce.number(sum);
         }
@@ -343,9 +341,8 @@ export function evalSummation(
           // Evaluate as a machine number (it's an approximation to infinity, so
           // no point in calculating with high precision), and check for convergence
           let sum = 0;
-          const numericMode = ce.numericMode;
           const precision = ce.precision;
-          ce.numericMode = 'machine';
+          ce.precision = 'machine';
           for (let i = lower; i <= upper; i++) {
             ce.assign(index, i);
             const term = asFloat(fn.N());
@@ -358,7 +355,6 @@ export function evalSummation(
               break;
             sum += term;
           }
-          ce.numericMode = numericMode;
           ce.precision = precision;
           if (result === null) result = ce.number(sum);
         }

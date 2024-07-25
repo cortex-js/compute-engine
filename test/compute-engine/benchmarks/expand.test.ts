@@ -12,8 +12,7 @@ function expand(e: BoxedExpression): BoxedExpression {
 const p = engine.parse(`3x^2yz^7 + 7xyz^2 + 4x + xy^4`);
 const e = engine.parse(`(x + y +  z + 1)^{32}`);
 
-// engine.numericMode = 'machine';
-// engine.precision = 14;
+// engine.precision = 'machine';
 
 // console.info(expand(e).toJSON());
 

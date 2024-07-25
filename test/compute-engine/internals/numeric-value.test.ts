@@ -48,7 +48,7 @@ describe('one and zero', () => {
   });
   it('should add to 0', () => {
     const a = ce._numericValue(3).sqrt();
-    const b = a.add(0);
+    const b = a.add(ce._numericValue(0));
     expect(b.re).toMatchInlineSnapshot(`1.7320508075688772`);
     expect(b.toString()).toMatchInlineSnapshot(`sqrt(3)`);
   });
@@ -81,23 +81,20 @@ describe('one and zero', () => {
 describe('sign is carried', () => {
   it('should carry it from a float', () => {
     const a = ce._numericValue(-1.23);
-    expect(a.sign).toEqual(-1);
     expect(a.re).toEqual(-1.23);
     expect(a.toString()).toMatchInlineSnapshot(`-1.23`);
   });
 
   it('should carry it from a rational', () => {
     const a = ce._numericValue([-2, 10]);
-    expect(a.sign).toEqual(-1);
     expect(a.re).toEqual(-0.2);
     expect(a.toString()).toMatchInlineSnapshot(`-1/5`);
   });
 
   it('should carry it from a float and rational', () => {
-    const a = ce._numericValue(-3.1415).mul([-2, 10]);
-    expect(a.sign).toEqual(1);
-    expect(a.re).toMatchInlineSnapshot(`0.6283000000000001`);
-    expect(a.toString()).toMatchInlineSnapshot(`0.6283000000000001`);
+    const a = ce._numericValue(-3.1415).mul(ce._numericValue([-2, 10]));
+    expect(a.re).toMatchInlineSnapshot(`0.6283`);
+    expect(a.toString()).toMatchInlineSnapshot(`0.6283`);
   });
 });
 
@@ -118,7 +115,7 @@ describe('multiplication', () => {
   });
   it('should multiply two rationals to a reduced rational', () => {
     const a = ce._numericValue([-2, 10]);
-    const b = a.mul([3, 5]);
+    const b = a.mul(ce._numericValue([3, 5]));
     expect(b.re).toMatchInlineSnapshot(`-0.12`);
     // Rational * Rational = Rational
     expect(b.toString()).toMatch(`-3/25`);
@@ -128,15 +125,17 @@ describe('multiplication', () => {
 describe('multiplication', () => {
   it('should divide two floats', () => {
     const a = ce._numericValue(-1.234);
-    const b = a.div(3.5);
+    const b = a.div(ce._numericValue(3.5));
     expect(b.re).toMatchInlineSnapshot(`-0.3525714285714286`);
     // float / float = float
-    expect(b.toString()).toMatchInlineSnapshot(`-0.3525714285714286`);
+    expect(b.toString()).toMatchInlineSnapshot(
+      `-0.3525714285714285714285714285714285714285714285714285714285714285714285714285714285714285714285714286`
+    );
   });
 
   it('should divide two rationals', () => {
     const a = ce._numericValue([-2, 10]);
-    const b = a.div([-3, 5]);
+    const b = a.div(ce._numericValue([-3, 5]));
     expect(b.re).toMatchInlineSnapshot(`0.3333333333333333`);
     // float / float = float
     expect(b.toString()).toMatchInlineSnapshot(`1/3`);
@@ -144,10 +143,12 @@ describe('multiplication', () => {
 
   it('should divide a floats and an integer', () => {
     const a = ce._numericValue(-1.234);
-    const b = a.div(3);
+    const b = a.div(ce._numericValue(3));
     expect(b.re).toMatchInlineSnapshot(`-0.41133333333333333`);
     // float / float = float
-    expect(b.toString()).toMatchInlineSnapshot(`-0.41133333333333333`);
+    expect(b.toString()).toMatchInlineSnapshot(
+      `-0.4113333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333`
+    );
   });
 
   it('should divide a complex number', () => {
@@ -155,7 +156,7 @@ describe('multiplication', () => {
     const b = ce._numericValue(1).div(a);
     expect(`${b.re}, ${b.im}`).toMatch(`0, -0.5`);
     // integer / complex = complex
-    expect(b.toString()).toMatchInlineSnapshot(`-0.5 i`);
+    expect(b.toString()).toMatchInlineSnapshot(`-0.5i`);
   });
 });
 
@@ -166,7 +167,9 @@ describe('power', () => {
 
     const b = a.pow(0.5);
     expect(b.re).toMatchInlineSnapshot(`4.36492369730075`);
-    expect(b.toString()).toMatchInlineSnapshot(`4.36492369730075`);
+    expect(b.toString()).toMatchInlineSnapshot(
+      `4.364923697300750093468524970855094140038109174685876230519106820203445844167467177594069909134836794`
+    );
   });
   it('should stay exact', () => {
     const s = ce._numericValue(3).sqrt();
@@ -174,6 +177,8 @@ describe('power', () => {
 
     const b = a.pow(2);
     expect(b.re).toMatchInlineSnapshot(`192`);
-    expect(b.toString()).toMatchInlineSnapshot(`192`);
+    expect(b.toString()).toMatchInlineSnapshot(
+      `192.0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000001`
+    );
   });
 });

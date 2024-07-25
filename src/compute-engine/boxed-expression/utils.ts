@@ -6,6 +6,7 @@ import { bigint } from '../numerics/numeric-bigint';
 import { joinLatex } from '../latex-syntax/tokenizer';
 import { DEFINITIONS_INEQUALITIES } from '../latex-syntax/dictionary/definitions-relational-operators';
 import { BoxedExpression, IComputeEngine } from './public';
+import { MACHINE_PRECISION } from '../numerics/numeric';
 
 export function isBoxedExpression(x: unknown): x is BoxedExpression {
   return typeof x === 'object' && x !== null && 'engine' in x;
@@ -16,15 +17,7 @@ export function isBoxedExpression(x: unknown): x is BoxedExpression {
  * bignums. If `bignumPreferred()` is false, calculate using machine numbers
  */
 export function bignumPreferred(ce: IComputeEngine): boolean {
-  return ce.numericMode === 'bignum' || ce.numericMode === 'auto';
-}
-
-/** When result of a numeric evaluation is a complex number,
- * return `NaN` if not `complexallowed()`
- */
-
-export function complexAllowed(ce: IComputeEngine): boolean {
-  return ce.numericMode === 'auto' || ce.numericMode === 'complex';
+  return ce.precision > MACHINE_PRECISION;
 }
 
 export function isLatexString(s: unknown): s is string {

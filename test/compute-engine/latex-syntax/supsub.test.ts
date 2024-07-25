@@ -51,13 +51,17 @@ describe('SUPSUB', () => {
     expect(ce.parse('2^23')).toMatchInlineSnapshot(`["Multiply", 3, 4]`);
     expect(ce.parse('2^\\pi')).toMatchInlineSnapshot(`["Power", 2, "Pi"]`);
     expect(ce.parse('2^\\frac12')).toMatchInlineSnapshot(`["Sqrt", 2]`);
-    expect(ce.parse('2^{3^4}')).toMatchInlineSnapshot(`2.4178516392292583e+24`);
+    expect(ce.parse('2^{3^4}')).toMatchInlineSnapshot(
+      `2417851639229258349412352`
+    );
     expect(ce.parse('2^{10}')).toMatchInlineSnapshot(`1024`);
-    expect(ce.parse('2^{-2}')).toMatchInlineSnapshot(`["Rational", 1, 4]`);
+    expect(ce.parse('2^{-2}')).toMatchInlineSnapshot(`["Divide", 1, 4]`);
     expect(ce.parse('2^3^4')).toMatchInlineSnapshot(
       `["Power", 2, ["List", 3, 4]]`
     );
-    expect(ce.parse('2^{3^4}')).toMatchInlineSnapshot(`2.4178516392292583e+24`);
+    expect(ce.parse('2^{3^4}')).toMatchInlineSnapshot(
+      `2417851639229258349412352`
+    );
     expect(ce.parse('12^34.5')).toMatchInlineSnapshot(
       `["Multiply", 4.5, 1728]`
     );

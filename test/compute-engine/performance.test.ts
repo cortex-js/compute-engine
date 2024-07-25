@@ -41,15 +41,11 @@ function ceBaseline(numRandos: number[]): number {
 
   randos = randos.map((n, i) => {
     // Do some arithmetic calculations
-    if (i % 2 === 0)
-      return ce
-        .number([4, 3])
-        .mul(n.pow(2))
-        .add(n.mul(ce.number([3, 2])), ce.number(2));
+    if (i % 2 === 0) return n.mul(4).pow(2).div(3).add(n.mul(3).div(2)).add(2);
     // Trigonometry, log, exp
     return ce
       .box(['Tan', n])
-      .add(ce.box(['Log', ['Abs', n]]), ce.box(['Exp', n]));
+      .add(ce.box(['Log', ['Abs', n]]).add(ce.box(['Exp', n])));
   });
 
   return globalThis.performance.now() - start;
@@ -65,18 +61,8 @@ function ceBaselineN(numRandos: number[]): number {
   randos = randos.map((n, i) => {
     // Do some arithmetic calculations
     if (i % 2 === 0)
-      return ce
-        .box([
-          'Add',
-          [
-            'Multiply',
-            ['Rational', 4, 3],
-            ['Square', n],
-            ['Multiply', ['Rational', 3, 2], n],
-            2,
-          ],
-        ])
-        .N();
+      if (i % 2 === 0)
+        return n.mul(4).pow(2).div(3).add(n.mul(3).div(2)).add(2).N();
 
     // Trigonometry, log, exp
     return ce.box(['Add', ['Tan', n], ['Log', ['Abs', n], ['Exp', n]]]).N();
@@ -163,7 +149,7 @@ function slowEval() {
 
   // Factor out substitution of constants
 
-  ce.numericMode = 'machine';
+  ce.precision = 'machine';
   ce.strict = true;
 
   let y = 0;
@@ -185,7 +171,7 @@ function fastEval() {
   // Factor out substitution of constants
   const expr3 = expr.subs(vars).N();
 
-  ce.numericMode = 'machine';
+  ce.precision = 'machine';
   ce.strict = false;
 
   let y = 0;

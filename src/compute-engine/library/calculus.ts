@@ -290,10 +290,9 @@ volumes
         params: ['Functions', 'Numbers', 'Numbers'],
         restParam: 'Numbers',
         evaluate: (ce, ops) => {
-          // Switch to machine mode
-          const numericMode = ce.numericMode;
+          // Switch to machine precision
           const precision = ce.precision;
-          ce.numericMode = 'machine';
+          ce.precision = 'machine';
           const wasStrict = ce.strict;
           ce.strict = false;
 
@@ -303,7 +302,6 @@ volumes
             const f = applicableN1(ops[0]);
             result = ce.number(monteCarloEstimate(f, a, b));
           }
-          ce.numericMode = numericMode;
           ce.precision = precision;
           ce.strict = wasStrict;
           return result;

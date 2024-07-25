@@ -204,24 +204,20 @@ export class BoxedSymbol extends _BoxedExpression {
     return this.engine._fn('Abs', [this]);
   }
 
-  add(...rhs: (number | BoxedExpression)[]): BoxedExpression {
-    if (rhs.length === 0) return this;
-    return add(this.canonical, ...rhs.map((x) => this.engine.box(x)));
+  add(rhs: number | BoxedExpression): BoxedExpression {
+    return add(this.canonical, this.engine.box(rhs));
   }
 
-  mul(...rhs: [NumericValue]): BoxedExpression;
-  mul(...rhs: (number | BoxedExpression)[]): BoxedExpression;
-  mul(...rhs: (NumericValue | number | BoxedExpression)[]): BoxedExpression {
-    if (rhs.length === 0) return this;
-    if (rhs.length === 1 && rhs[0] instanceof NumericValue) {
-      if (rhs[0].isOne) return this;
-      if (rhs[0].isNegativeOne) return this.neg();
-      return mul(this, this.engine.box(rhs[0]));
+  mul(rhs: NumericValue | number | BoxedExpression): BoxedExpression {
+    if (rhs === 1) return this;
+    if (rhs === -1) return this.neg();
+    if (rhs === 0) return this.engine.Zero;
+    if (rhs instanceof NumericValue) {
+      if (rhs.isOne) return this;
+      if (rhs.isNegativeOne) return this.neg();
+      if (rhs.isZero) return this.engine.Zero;
     }
-    return mul(
-      this.canonical,
-      ...rhs.map((x) => this.engine.box(x as number | BoxedExpression))
-    );
+    return mul(this.canonical, this.engine.box(rhs));
   }
 
   div(rhs: number | BoxedExpression): BoxedExpression {

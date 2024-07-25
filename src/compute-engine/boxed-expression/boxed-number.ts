@@ -25,15 +25,15 @@ import {
 } from '../numerics/rationals';
 
 import { _BoxedExpression } from './abstract-boxed-expression';
-import { hashCode, bignumPreferred, asBigint, complexAllowed } from './utils';
+import { hashCode, bignumPreferred } from './utils';
 import { Expression } from '../../math-json';
 import { asFloat, asRational, signDiff } from './numerics';
 import { match } from './match';
 import { canonicalDivide } from '../library/arithmetic-divide';
 import { NumericValue } from '../numeric-value/public';
-import { factorPower } from '../numerics/numeric-bigint';
 import { add } from '../library/arithmetic-add';
 import { mul } from '../library/arithmetic-multiply';
+import { factorPower } from '../numerics/numeric';
 
 /**
  * BoxedNumber
@@ -177,15 +177,6 @@ export class BoxedNumber extends _BoxedExpression {
     return true;
   }
 
-  get isExact(): boolean {
-    const v = this._value;
-    if (typeof v === 'number') return Number.isInteger(v);
-    if (v instanceof Decimal) return v.isInteger();
-    if (v instanceof Complex)
-      return Number.isInteger(v.re) && Number.isInteger(v.im);
-    return isRational(v);
-  }
-
   get isCanonical(): boolean {
     return this._isCanonical;
   }
@@ -222,52 +213,36 @@ export class BoxedNumber extends _BoxedExpression {
     return this.engine.box(n.abs());
   }
 
-  add(...rhs: (number | BoxedExpression)[]): BoxedExpression {
-    if (rhs.length === 0) return this;
+  add(rhs: number | BoxedExpression): BoxedExpression {
     const ce = this.engine;
-
-    // @fastpath
-    if (rhs.length === 1) {
-      if (typeof rhs[0] === 'number') {
-        let n = ce._numericValue(this._value);
-        return ce.box(n.add(rhs[0]));
-      }
-      if (rhs[0].numericValue !== null) {
-        let n = ce._numericValue(this._value);
-        return ce.box(n.add(ce._numericValue(rhs[0].numericValue)));
-      }
+    if (typeof rhs === 'number') {
+      let n = ce._numericValue(this._value);
+      return ce.box(n.add(ce._numericValue(rhs)));
     }
-
-    return add(this.canonical, ...rhs.map((x) => ce.box(x)));
+    if (rhs.numericValue !== null) {
+      let n = ce._numericValue(this._value);
+      return ce.box(n.add(ce._numericValue(rhs.numericValue)));
+    }
+    return add(this.canonical, rhs.canonical);
   }
 
-  mul(...rhs: [NumericValue]): BoxedExpression;
-  mul(...rhs: (number | BoxedExpression)[]): BoxedExpression;
-  mul(...rhs: (NumericValue | number | BoxedExpression)[]): BoxedExpression {
-    if (rhs.length === 0) return this;
-    // @fastpath
-    if (rhs.length === 1) {
-      if (rhs[0] instanceof NumericValue) {
-        if (this.isOne) return this.engine.box(rhs[0]);
-        if (this.isNegativeOne) return this.engine.box(rhs[0].neg());
-        let n = this.engine._numericValue(this._value);
-        return this.engine.box(n.mul(rhs[0]));
-      }
-      const ce = this.engine;
-      if (typeof rhs[0] === 'number') {
-        let n = ce._numericValue(this._value);
-        return ce.box(n.mul(rhs[0]));
-      }
-      if (rhs[0].numericValue !== null) {
-        let n = ce._numericValue(this._value);
-        return ce.box(n.mul(ce._numericValue(rhs[0].numericValue)));
-      }
+  mul(rhs: NumericValue | number | BoxedExpression): BoxedExpression {
+    if (rhs instanceof NumericValue) {
+      if (this.isOne) return this.engine.box(rhs);
+      if (this.isNegativeOne) return this.engine.box(rhs.neg());
+      let n = this.engine._numericValue(this._value);
+      return this.engine.box(n.mul(rhs));
     }
-
-    return mul(
-      this.canonical,
-      ...rhs.map((x) => this.engine.box(x as number | BoxedExpression))
-    );
+    const ce = this.engine;
+    if (typeof rhs === 'number') {
+      let n = ce._numericValue(this._value);
+      return ce.box(n.mul(rhs));
+    }
+    if (rhs.numericValue !== null) {
+      let n = ce._numericValue(this._value);
+      return ce.box(n.mul(ce._numericValue(rhs.numericValue)));
+    }
+    return mul(this, rhs);
   }
 
   div(rhs: number | BoxedExpression): BoxedExpression {
@@ -311,32 +286,32 @@ export class BoxedNumber extends _BoxedExpression {
     const e = typeof exp === 'number' ? exp : exp.numericValue;
     if (e !== null) {
       let v: NumericValue | undefined = undefined;
+
       if (typeof e === 'number') v = n.pow(e);
+
       if (e instanceof Decimal) v = n.pow(e.toNumber());
+
       if (isRational(e)) {
         const r = asMachineRational(e);
         if (n.im === 0 && r[1] === 3) {
           // If we have a cube root, attempt to extract a perfect cube
-          // If the base is real, and the exponent is an integer,
+          // if the base is an integer. @fixme: that should be in ExactNumericValue
           const base = n.re;
           if (Number.isInteger(base)) {
             const sign = base < 0 ? -1 : 1;
-            const bigBase = asBigint(this)!;
-            const [factor, root] = factorPower(
-              sign > 0 ? bigBase : -bigBase,
-              3
-            );
-            if (factor !== BigInt(1)) {
+            const [factor, root] = factorPower(sign > 0 ? base : -base, 3);
+            if (factor !== 1) {
               const ce = this.engine;
               return ce
-                .number(sign)
-                .mul(ce.number(factor), ce.number(root).pow([1, 3]))
+                .number(sign * factor)
+                .mul(ce.number(root).pow([1, 3]))
                 .pow(r[0]);
             }
           }
         }
         v = n.pow(r);
       }
+
       if (e instanceof Complex) v = n.pow(e);
       if (v && v.isExact) return this.engine.box(v);
     }
@@ -353,8 +328,7 @@ export class BoxedNumber extends _BoxedExpression {
     const base = semiBase ? this.engine.box(semiBase) : undefined;
     if (!this.isCanonical) return this.canonical.ln(base);
     if (this.isOne) return this.engine.Zero;
-    if (this.isNegativeOne && complexAllowed(this.engine))
-      return this.engine.Pi.mul(this.engine.I);
+    if (this.isNegativeOne) return this.engine.Pi.mul(this.engine.I);
     if (this.isZero) return this.engine.NaN;
     if (base && this.isEqual(base)) return this.engine.One;
     if (
@@ -373,11 +347,12 @@ export class BoxedNumber extends _BoxedExpression {
     const f = asFloat(this);
     if (f !== null && Number.isInteger(f) && f > 0) {
       const ce = this.engine;
-      let [factor, root] = factorPower(BigInt(f), 3);
-      if (factor !== BigInt(1))
+      // @fixme: should use canonicalInteger
+      let [factor, root] = factorPower(f, 3);
+      if (factor !== 1)
         return ce.number(factor).ln(base).mul(3).add(ce.number(root).ln(base));
-      [factor, root] = factorPower(BigInt(f), 2);
-      if (factor !== BigInt(1))
+      [factor, root] = factorPower(f, 2);
+      if (factor !== 1)
         return ce.number(factor).ln(base).mul(2).add(ce.number(root).ln(base));
     }
 

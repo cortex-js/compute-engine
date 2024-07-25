@@ -229,9 +229,8 @@ export function evalProduct(
 
         // Machine precision
         let product = 1;
-        const numericMode = ce.numericMode;
         const precision = ce.precision;
-        ce.numericMode = 'machine';
+        ce.precision = 'machine';
         for (let i = lower; i <= upper; i++) {
           ce.assign({ [index]: i });
           const term = asFloat(fn.N());
@@ -241,7 +240,6 @@ export function evalProduct(
           }
           product *= term;
         }
-        ce.numericMode = numericMode;
         ce.precision = precision;
 
         if (result === null) result = ce.number(product);
@@ -266,9 +264,8 @@ export function evalProduct(
           // Evaluate as a machine number (it's an approximation to infinity, so
           // no point in calculating with high precision), and check for convergence
           let product = 1;
-          const numericMode = ce.numericMode;
           const precision = ce.precision;
-          ce.numericMode = 'machine';
+          ce.precision = 'machine';
           for (let i = lower; i <= upper; i++) {
             ce.assign({ [index]: i });
             const term = asFloat(fn.N());
@@ -282,7 +279,6 @@ export function evalProduct(
             product *= term;
           }
           if (result === null) result = ce.number(product);
-          ce.numericMode = numericMode;
           ce.precision = precision;
         }
       }

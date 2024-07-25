@@ -1,11 +1,5 @@
 import { BoxedExpression } from '../public';
-import { apply2N } from '../symbolic/utils';
-import {
-  inverse,
-  isBigRational,
-  isMachineRational,
-  isZero,
-} from '../numerics/rationals';
+import { inverse, isZero } from '../numerics/rationals';
 import { asRational, mul } from '../boxed-expression/numerics';
 import { canonicalMultiply } from './arithmetic-multiply';
 
@@ -54,73 +48,23 @@ export function canonicalDivide(
   if (op2.isOne) return op1;
 
   const [c1, t1] = op1.toNumericValue();
+  if (c1.isZero) return ce.Zero;
+
   const [c2, t2] = op2.toNumericValue();
 
   const c = c1.div(c2);
-  if (c.isZero) return ce.Zero;
+
   if (c.isOne) return t2.isOne ? t1 : ce._fn('Divide', [t1, t2]);
 
   if (c.isNegativeOne)
     return t2.isOne ? t1.neg() : ce._fn('Divide', [t1.neg(), t2]);
 
-  const num = t1.mul(ce.box(c.num));
-  const denom = t2.mul(ce.box(c.denom));
+  // If c is not exact, don't use. For example: `π/4` would remain as
+  // `π/4` and not `0.25π`
+  if (!c.isExact) return ce._fn('Divide', [t1.mul(c1), t2.mul(c2)]);
+
+  const num = c.num.isOne ? t1 : t1.mul(ce.box(c.num));
+  const denom = c.denom.isOne ? t2 : t2.mul(ce.box(c.denom));
 
   return denom.isOne ? num : ce._fn('Divide', [num, denom]);
-}
-
-export function evalDivide(
-  op1: BoxedExpression,
-  op2: BoxedExpression
-): BoxedExpression {
-  const ce = op1.engine;
-  let result = op1.div(op2);
-  if (result?.head === 'Divide') {
-    if (!result.op1.isExact || !result.op2.isExact) {
-      result =
-        apply2N(
-          op1,
-          op2,
-          (n, d) => n / d,
-          (n, d) => n.div(d),
-          (n, d) => n.div(d)
-        ) ?? result;
-    }
-  }
-
-  if (result !== undefined) return result;
-
-  return ce._fn('Divide', [op1, op2]);
-}
-
-export function evalNDivide(
-  op1: BoxedExpression,
-  op2: BoxedExpression
-): BoxedExpression {
-  const ce = op1.engine;
-  let result = op1.div(op2);
-  if (result?.head === 'Divide') {
-    result =
-      apply2N(
-        op1,
-        op2,
-        (n, d) => n / d,
-        (n, d) => n.div(d),
-        (n, d) => n.div(d)
-      ) ?? result;
-  }
-
-  const num = result?.numericValue;
-  if (isBigRational(num)) {
-    const [n, d] = num;
-    return ce.number(n / d);
-  }
-  if (isMachineRational(num)) {
-    const [n, d] = num;
-    return ce.number(n / d);
-  }
-
-  if (result !== undefined) return result;
-
-  return ce._fn('Divide', [op1, op2]);
 }

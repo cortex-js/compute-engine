@@ -5,33 +5,32 @@ describe('OPERATOR oprel', () => {
   test('x=1', () =>
     expect(check('x=1')).toMatchInlineSnapshot(`
       box       = ["Equal", "x", 1]
-      evaluate  = False
+      eval-auto = "False"
     `));
   test('x=1+1', () =>
     expect(check('x=1+1')).toMatchInlineSnapshot(`
       box       = ["Equal", "x", ["Add", 1, 1]]
-      simplify  = ["Equal", "x", 2]
-      evaluate  = False
+      simplify  = x === 2
+      eval-auto = "False"
     `));
   test('x+y=1+1', () =>
     expect(check('x+y=1+1')).toMatchInlineSnapshot(`
       box       = ["Equal", ["Add", "x", "y"], ["Add", 1, 1]]
-      simplify  = ["Equal", ["Add", "x", "y", -2], 0]
-      evaluate  = False
+      simplify  = x + y - 2 === 0
+      eval-auto = "False"
     `));
 
   test('x<1', () =>
     expect(check('x<1')).toMatchInlineSnapshot(`["Less", "x", 1]`));
   test('x<1+1', () =>
-    expect(check('x<1+1')).toMatchInlineSnapshot(`
-      box       = ["Less", "x", ["Add", 1, 1]]
-      simplify  = ["Less", "x", 2]
-    `));
+    expect(check('x<1+1')).toMatchInlineSnapshot(
+      `["Less", "x", ["Add", 1, 1]]`
+    ));
   test('x+y<1+1', () =>
     expect(check('x+y<1+1')).toMatchInlineSnapshot(`
       box       = ["Less", ["Add", "x", "y"], ["Add", 1, 1]]
-      simplify  = ["Less", ["Add", "x", "y", -2], 0]
-      evaluate  = ["Less", ["Add", "x", "y"], 2]
+      simplify  = x + y - 2 < 0
+      eval-auto = x + y < 2
     `));
 
   test('x>=1', () =>
@@ -43,28 +42,22 @@ describe('OPERATOR oprel', () => {
     expect(check('x>=1+1')).toMatchInlineSnapshot(`
       box       = ["GreaterEqual", "x", ["Add", 1, 1]]
       canonical = ["LessEqual", ["Add", 1, 1], "x"]
-      simplify  = ["LessEqual", 2, "x"]
+      simplify  = 2 <= x
     `));
   test('x+y>=1+1', () =>
     expect(check('x+y>=1+1')).toMatchInlineSnapshot(`
       box       = ["GreaterEqual", ["Add", "x", "y"], ["Add", 1, 1]]
       canonical = ["LessEqual", ["Add", 1, 1], ["Add", "x", "y"]]
-      simplify  = ["LessEqual", 2, ["Add", "x", "y"]]
+      simplify  = 2 <= x + y
     `));
 });
 
 describe('OPERATOR add/subtract', () => {
   test('1+2', () =>
-    expect(check('1+2')).toMatchInlineSnapshot(`
-      box       = ["Add", 1, 2]
-      simplify  = 3
-    `));
+    expect(check('1+2')).toMatchInlineSnapshot(`["Add", 1, 2]`));
 
   test('1+2+3', () =>
-    expect(check('1+2+3')).toMatchInlineSnapshot(`
-      box       = ["Add", 1, 2, 3]
-      simplify  = 6
-    `));
+    expect(check('1+2+3')).toMatchInlineSnapshot(`["Add", 1, 2, 3]`));
 
   test('1+(2+3)', () =>
     expect(check('1+(2+3)')).toMatchInlineSnapshot(`
@@ -88,10 +81,9 @@ describe('OPERATOR add/subtract', () => {
     `));
 
   test('1+\\infty', () =>
-    expect(check('1+\\infty')).toMatchInlineSnapshot(`
-      box       = ["Add", 1, "PositiveInfinity"]
-      simplify  = PositiveInfinity
-    `));
+    expect(check('1+\\infty')).toMatchInlineSnapshot(
+      `["Add", 1, "PositiveInfinity"]`
+    ));
 });
 
 describe('OPERATOR invisible', () => {
@@ -131,7 +123,7 @@ describe('OPERATOR invisible', () => {
         ["Delimiter", ["InvisibleOperator", 2, "q"]]
       ]
       canonical = ["Multiply", 2, "q", "q"]
-      simplify  = ["Multiply", 2, ["Square", "q"]]
+      simplify  = 2q^2
     `));
 
   test('f(2q) // Invisible operator as a function', () =>
@@ -153,14 +145,17 @@ describe('OPERATOR invisible', () => {
     expect(check('2\\frac{1}{4}')).toMatchInlineSnapshot(`
       box       = ["InvisibleOperator", 2, ["Divide", 1, 4]]
       canonical = ["Add", 2, ["Rational", 1, 4]]
-      simplify  = ["Rational", 9, 4]
+      simplify  = 9/4
+      eval-auto = 9/4
+      eval-mach = 9/4
       N-auto    = 2.25
+      N-mach    = 2.25
     `));
   test('2\\frac{a}{b} // Invisible MULTIPLY operator', () =>
     expect(check('2\\frac{a}{b}')).toMatchInlineSnapshot(`
       box       = ["InvisibleOperator", 2, ["Divide", "a", "b"]]
       canonical = ["Multiply", 2, ["Divide", "a", "b"]]
-      simplify  = ["Divide", ["Multiply", 2, "a"], "b"]
+      simplify  = (2a) / b
     `));
 });
 
@@ -202,10 +197,6 @@ describe('OPERATOR prefix', () => {
     expect(check('-i')).toMatchInlineSnapshot(`
       box       = ["Negate", "i"]
       canonical = ["Negate", "ImaginaryUnit"]
-      evaluate  = ["Complex", 0, -1]
-      eval-big  = NaN
-      eval-mach = NaN
-      eval-cplx = ["Complex", 0, -1]
     `));
   test('-\\infty // Negate', () =>
     expect(check('-\\infty')).toMatchInlineSnapshot(`NegativeInfinity`));
@@ -218,10 +209,6 @@ describe('OPERATOR prefix', () => {
     expect(check('+i')).toMatchInlineSnapshot(`
       box       = i
       canonical = ImaginaryUnit
-      evaluate  = ["Complex", 0, 1]
-      eval-big  = NaN
-      eval-mach = NaN
-      eval-cplx = ["Complex", 0, 1]
     `));
   test('+\\infty // Infix plus', () =>
     expect(check('+\\infty')).toMatchInlineSnapshot(`PositiveInfinity`));
@@ -252,7 +239,7 @@ describe('OPERATOR infix', () => {
     expect(check('-2+3x-4')).toMatchInlineSnapshot(`
       box       = ["Add", -2, ["InvisibleOperator", 3, "x"], -4]
       canonical = ["Add", ["Multiply", 3, "x"], -4, -2]
-      simplify  = ["Subtract", ["Multiply", 3, "x"], 6]
+      simplify  = 3x - 6
     `));
 });
 
@@ -266,13 +253,16 @@ describe('OPERATOR multiply', () => {
     expect(check('2(x+1)')).toMatchInlineSnapshot(`
       box       = ["InvisibleOperator", 2, ["Delimiter", ["Add", "x", 1]]]
       canonical = ["Multiply", 2, ["Add", "x", 1]]
-      simplify  = ["Add", ["Multiply", 2, "x"], 2]
+      simplify  = 2x + 2
     `));
   test('2\\pi', () =>
     expect(check('2\\pi')).toMatchInlineSnapshot(`
       box       = ["InvisibleOperator", 2, "Pi"]
       canonical = ["Multiply", 2, "Pi"]
-      N-auto    = 6.283185307179586
+      eval-auto = 2pi
+      eval-mach = 2pi
+      N-auto    = 6.28318530717958647692528676655900576839433879875021164194988918461563281257241799725606965068423413596429617302656461329418768921910116446345071881625696223490056820540387704221111928924589790986076392885762195133186689225695129646757356633054240381829129713384692069722090865329642678721452049828254
+      N-mach    = 6.283185307179586
     `));
 
   test('2\\sin(x), function apply', () =>
@@ -284,14 +274,17 @@ describe('OPERATOR multiply', () => {
     expect(check('2\\sin(x)\\frac12')).toMatchInlineSnapshot(`
       box       = ["InvisibleOperator", 2, ["Sin", "x"], ["Divide", 1, 2]]
       canonical = ["Multiply", 2, "Half", ["Sin", "x"]]
-      simplify  = ["Sin", "x"]
+      simplify  = sin(x)
     `));
   test('3\\pi5', () =>
     expect(check('3\\pi5')).toMatchInlineSnapshot(`
       box       = ["InvisibleOperator", 3, "Pi", 5]
       canonical = ["Multiply", 3, 5, "Pi"]
-      simplify  = ["Multiply", 15, "Pi"]
-      N-auto    = 47.12388980384689
+      simplify  = 15pi
+      eval-auto = 15pi
+      eval-mach = 15pi
+      N-auto    = 47.1238898038468985769396507491925432629575409906265873146241688846172460942931349794205223801317560197322212976992345997064076691432587334758803911219272167617542615405290778165833946693442343239557294664321646349890016919271347235068017474790680286371847285038519052291568148997232009041089037371192
+      N-mach    = 47.12388980384689
     `));
 });
 
@@ -300,7 +293,10 @@ describe('OPERATOR divide', () => {
     expect(check('\\frac12')).toMatchInlineSnapshot(`
       box       = ["Divide", 1, 2]
       canonical = Half
+      eval-auto = 1/2
+      eval-mach = 1/2
       N-auto    = 0.5
+      N-mach    = 0.5
     `));
   test('\\frac31', () =>
     expect(check('\\frac31')).toMatchInlineSnapshot(`
@@ -311,21 +307,30 @@ describe('OPERATOR divide', () => {
     expect(check('\\frac75')).toMatchInlineSnapshot(`
       box       = ["Divide", 7, 5]
       canonical = ["Rational", 7, 5]
+      eval-auto = 7/5
+      eval-mach = 7/5
       N-auto    = 1.4
+      N-mach    = 1.4
     `));
 
   test('\\frac 7 5', () =>
     expect(check('\\frac 7 5')).toMatchInlineSnapshot(`
       box       = ["Divide", 7, 5]
       canonical = ["Rational", 7, 5]
+      eval-auto = 7/5
+      eval-mach = 7/5
       N-auto    = 1.4
+      N-mach    = 1.4
     `));
 
   test('\\frac    7    5', () =>
     expect(check('\\frac    7    5')).toMatchInlineSnapshot(`
       box       = ["Divide", 7, 5]
       canonical = ["Rational", 7, 5]
+      eval-auto = 7/5
+      eval-mach = 7/5
       N-auto    = 1.4
+      N-mach    = 1.4
     `));
 
   test('\\frac{10}{5}', () =>
@@ -377,10 +382,9 @@ describe.skip('OPERATOR partial derivative', () => {
 
 describe('OPERATOR precedence', () => {
   test('2\\times3+4 // Precedence', () =>
-    expect(check('2\\times3+4')).toMatchInlineSnapshot(`
-      box       = ["Add", ["Multiply", 2, 3], 4]
-      simplify  = 10
-    `));
+    expect(check('2\\times3+4')).toMatchInlineSnapshot(
+      `["Add", ["Multiply", 2, 3], 4]`
+    ));
   test('-2\\times-3-4 // Precedence', () =>
     expect(check('-2\\times-3-4')).toMatchInlineSnapshot(`
       box       = ["Add", ["Multiply", -2, -3], -4]
@@ -404,13 +408,13 @@ describe('OPERATOR postfix', () => {
     expect(check('-2-5!')).toMatchInlineSnapshot(`
       box       = ["Add", -2, ["Factorial", -5]]
       canonical = ["Subtract", ["Negate", ["Factorial", 5]], 2]
-      evaluate  = -122
+      eval-auto = -122
     `));
   test('-5! // Precedence', () =>
     expect(check('-5!')).toMatchInlineSnapshot(`
       box       = ["Factorial", -5]
       canonical = ["Negate", ["Factorial", 5]]
-      evaluate  = -120
+      eval-auto = -120
     `));
   test('-n!', () =>
     expect(check('-n!')).toMatchInlineSnapshot(

@@ -27,7 +27,7 @@ import {
   rationalize,
 } from '../numerics/rationals';
 import { IdentifierDefinitions } from '../public';
-import { bignumPreferred, complexAllowed } from '../boxed-expression/utils';
+import { bignumPreferred } from '../boxed-expression/utils';
 import {
   domainAdd,
   evalSummation,
@@ -42,7 +42,7 @@ import {
   mul,
   mulN,
 } from './arithmetic-multiply';
-import { canonicalDivide, evalDivide, evalNDivide } from './arithmetic-divide';
+import { canonicalDivide } from './arithmetic-divide';
 import { processPower } from './arithmetic-power';
 import { applyN, apply2N, canonical } from '../symbolic/utils';
 import {
@@ -222,9 +222,9 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
 
           return result;
         },
-        simplify: (ce, args) => args[0].div(args[1]),
-        evaluate: (ce, ops) => evalDivide(ops[0], ops[1]),
-        N: (ce, ops) => evalNDivide(ops[0], ops[1]),
+        simplify: (ce, ops) => ops[0].div(ops[1]),
+        evaluate: (ce, ops) => ops[0].div(ops[1]),
+        N: (ce, ops) => ops[0].div(ops[1]),
       },
     },
 
@@ -573,7 +573,7 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
       signature: {
         domain: ['FunctionOf', 'Numbers', 'Numbers', 'Numbers'],
         canonical: (ce, args) => {
-          // See also shortcut in makeNumericFunction()
+          // @fastpath: See also shortcut in makeNumericFunction()
           args = checkNumericArgs(ce, args, 2);
           if (args.length !== 2) return ce._fn('Power', args);
           const [base, exp] = args;
@@ -1458,7 +1458,7 @@ function processLn(
   const ce = n.engine;
   if (n.isZero) return ce.NaN;
   if (n.isOne) return ce.Zero;
-  if (n.isNegativeOne && complexAllowed(ce)) return ce.Pi.mul(ce.I);
+  if (n.isNegativeOne) return ce.Pi.mul(ce.I);
   if (base) return ce._fn('Log', [n, base]);
   return ce._fn('Ln', [n]);
 }

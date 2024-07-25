@@ -3,6 +3,10 @@ import { BoxedExpression, IComputeEngine } from '../public';
 import { NumericValue } from '../numeric-value/public';
 import { canonicalAdd } from '../library/arithmetic-add';
 import { canonicalMultiply } from '../library/arithmetic-multiply';
+import { ExactNumericValue } from '../numeric-value/exact-numeric-value';
+import { BigNumericValue } from '../numeric-value/big-numeric-value';
+import { MACHINE_PRECISION } from './numeric';
+import { MachineNumericValue } from '../numeric-value/machine-numeric-value';
 
 // Represent a sum of terms
 export class Terms {
@@ -53,7 +57,9 @@ export class Terms {
       this.terms = [{ term: ce.NegativeInfinity, coef: ce._numericValue(1) }];
       return;
     }
-    if (numericValues.length !== 0) {
+    if (numericValues.length === 1) {
+      this.add(exact ? numericValues[0] : numericValues[0].N(), ce.One);
+    } else if (numericValues.length > 0) {
       if (!exact) {
         this.add(
           numericValues.reduce((a, b) => a.add(b.N())),
@@ -62,9 +68,13 @@ export class Terms {
       } else {
         // If we're doing an exact sum, we may have multiple terms: a
         // rational and a radical. We need to sum them separately.
-        ce._numericValue(0)
-          .sum(...numericValues)
-          .forEach((x) => this.add(x, ce.One));
+        const factory =
+          ce.precision > MACHINE_PRECISION
+            ? (x) => new BigNumericValue(x, (x) => ce.bignum(x))
+            : (x) => new MachineNumericValue(x);
+        ExactNumericValue.sum(numericValues, factory).forEach((x) =>
+          this.add(x, ce.One)
+        );
       }
     }
   }
@@ -75,10 +85,7 @@ export class Terms {
       // We have a numeric value. Keep it in the terms,
       // so that "1+sqrt(3)" remains exact.
       const ce = this.engine;
-      this.terms.push({
-        coef: ce._numericValue(1),
-        term: canonicalMultiply(ce, [ce.box(coef), term]),
-      });
+      this.terms.push({ coef: ce._numericValue(1), term: ce.box(coef) });
       return;
     }
 
@@ -144,12 +151,15 @@ export class Terms {
       if (coef.isOne) return term;
       if (coef.isNegativeOne) return term.neg();
 
+      if (term.isOne) return ce.box(coef);
       return canonicalMultiply(ce, [term, ce.box(coef)]);
     }
 
     return canonicalAdd(
       ce,
-      terms.map(({ coef, term }) => canonicalMultiply(ce, [term, ce.box(coef)]))
+      terms.map(({ coef, term }) =>
+        coef.isOne ? term : canonicalMultiply(ce, [term, ce.box(coef)])
+      )
     );
   }
 }

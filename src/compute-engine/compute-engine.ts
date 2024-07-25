@@ -16,8 +16,9 @@ import type {
 import { assume } from './assume';
 
 import {
-  DEFAULT_BIGNUM_PRECISION,
+  DEFAULT_PRECISION,
   MACHINE_PRECISION,
+  MACHINE_TOLERANCE,
   NUMERIC_BIGNUM_TOLERANCE,
   NUMERIC_MACHINE_TOLERANCE,
 } from './numerics/numeric';
@@ -29,7 +30,6 @@ import {
   IComputeEngine,
   IdentifierDefinitions,
   ExpressionMapInterface,
-  NumericMode,
   RuntimeScope,
   Scope,
   SymbolDefinition,
@@ -43,7 +43,6 @@ import {
   BoxedSubstitution,
   AssignValue,
   DomainLiteral,
-  ArrayValue,
   AngularUnit,
   CanonicalOptions,
 } from './public';
@@ -76,12 +75,7 @@ import {
   makeFunctionDefinition,
   _BoxedFunctionDefinition,
 } from './boxed-expression/boxed-function-definition';
-import {
-  Rational,
-  isRational,
-  isOne,
-  asMachineRational,
-} from './numerics/rationals';
+import { Rational, isRational, asMachineRational } from './numerics/rationals';
 import { parseFunctionSignature } from './function-utils';
 import { CYAN, INVERSE_RED, RESET, YELLOW } from '../common/ansi-codes';
 import {
@@ -89,7 +83,6 @@ import {
   DOMAIN_CONSTRUCTORS,
   isDomainLiteral,
 } from './library/domains';
-import { canonical } from './symbolic/utils';
 import { domainToSignature } from './domain-utils';
 import {
   IndexedLatexDictionary,
@@ -107,14 +100,11 @@ import {
 import './boxed-expression/serialize';
 import { SIMPLIFY_RULES } from './simplify-rules';
 import { HARMONIZATION_RULES, UNIVARIATE_ROOTS } from './solve';
-import { NumericValue } from './numeric-value/public';
-import {
-  ExactNumericValue,
-  ExactNumericValueData,
-} from './numeric-value/exact-numeric-value';
-import { factor } from './boxed-expression/factor';
-import { canonicalMultiply } from './library/arithmetic-multiply';
-import { canonicalAdd } from './library/arithmetic-add';
+import { NumericValue, NumericValueData } from './numeric-value/public';
+import { ExactNumericValue } from './numeric-value/exact-numeric-value';
+import { isInMachineRange } from './numerics/numeric-bignum';
+import { BigNumericValue } from './numeric-value/big-numeric-value';
+import { MachineNumericValue } from './numeric-value/machine-numeric-value';
 
 /**
  *
@@ -208,9 +198,6 @@ export class ComputeEngine implements IComputeEngine {
 
   /** @internal */
   private _precision: number;
-
-  /** @internal */
-  private _numericMode: NumericMode;
 
   /** @ internal */
   private _angularUnit: AngularUnit;
@@ -365,13 +352,9 @@ export class ComputeEngine implements IComputeEngine {
    * as domains (`Booleans`, `Numbers`, etc...) that are used by later
    * dictionaries.
    *
-   * @param options.numericMode The default mode is `"auto"`. Use `"machine"`
-   * to perform numeric calculations using 64-bit floats. Use `"bignum"` to
-   * perform calculations using arbitrary precision floating point numbers.
-   * Use `"auto"` or `"complex"` to allow calculations on complex numbers.
    *
-   * @param options.numericPrecision Specific how many digits of precision
-   * for the numeric calculations. Default is 100.
+   * @param options.precision Specific how many digits of precision
+   * for the numeric calculations. Default is 300.
    *
    * @param options.tolerance If the absolute value of the difference of two
    * numbers is less than `tolerance`, they are considered equal. Used by
@@ -379,8 +362,7 @@ export class ComputeEngine implements IComputeEngine {
    */
   constructor(options?: {
     ids?: readonly IdentifierDefinitions[];
-    numericMode?: NumericMode;
-    numericPrecision?: number;
+    precision?: number | 'machine';
     tolerance?: number;
   }) {
     if (options !== undefined && typeof options !== 'object')
@@ -394,18 +376,9 @@ export class ComputeEngine implements IComputeEngine {
       expressions: new Set<BoxedExpression>(),
     };
 
-    // Set the default precision for `bignum` calculations
-    const numericMode = options?.numericMode ?? 'auto';
-    this._numericMode = numericMode;
-    const precision =
-      numericMode === 'auto' || numericMode === 'bignum'
-        ? Math.max(
-            options?.numericPrecision ?? DEFAULT_BIGNUM_PRECISION,
-            Math.floor(MACHINE_PRECISION)
-          )
-        : MACHINE_PRECISION;
-    this._precision = precision;
-
+    // Set the default precision for calculations
+    let precision = options?.precision ?? DEFAULT_PRECISION;
+    if (precision === 'machine') precision = Math.floor(MACHINE_PRECISION);
     this._bignum = Decimal.clone({ precision });
 
     this._tolerance = NUMERIC_MACHINE_TOLERANCE;
@@ -524,15 +497,15 @@ export class ComputeEngine implements IComputeEngine {
     this._BIGNUM_PI = this._BIGNUM_NEGATIVE_ONE.acos();
 
     // Recreate the numeric values
-    this._NUMERIC_VALUE_NEGATIVE_ONE = new ExactNumericValue({
-      rational: [-1, 1],
-    });
-    this._NUMERIC_VALUE_ZERO = new ExactNumericValue({
-      rational: [0, 1],
-    });
-    this._NUMERIC_VALUE_ONE = new ExactNumericValue({
-      rational: [1, 1],
-    });
+    this._NUMERIC_VALUE_NEGATIVE_ONE = new ExactNumericValue(-1, (x) =>
+      this._numericValue(x)
+    );
+    this._NUMERIC_VALUE_ZERO = new ExactNumericValue(0, (x) =>
+      this._numericValue(x)
+    );
+    this._NUMERIC_VALUE_ONE = new ExactNumericValue(1, (x) =>
+      this._numericValue(x)
+    );
 
     // Reset all the known expressions/symbols
     const symbols = this._stats.symbols.values();
@@ -631,8 +604,6 @@ export class ComputeEngine implements IComputeEngine {
   _bignum: Decimal.Constructor;
 
   get precision(): number {
-    if (this._numericMode === 'machine' || this._numericMode === 'complex')
-      return Math.floor(MACHINE_PRECISION);
     return this._precision;
   }
 
@@ -647,8 +618,9 @@ export class ComputeEngine implements IComputeEngine {
    * Trigonometric operations are accurate for precision up to 1,000.
    *
    */
-  set precision(p: number | 'machine') {
+  set precision(p: number | 'machine' | 'auto') {
     if (p === 'machine') p = Math.floor(MACHINE_PRECISION);
+    if (p === 'auto') p = DEFAULT_PRECISION;
     const currentPrecision = this._precision;
 
     if (p === currentPrecision) return;
@@ -661,35 +633,14 @@ export class ComputeEngine implements IComputeEngine {
 
     this._precision = Math.max(p, Math.floor(MACHINE_PRECISION));
 
-    if (
-      this._numericMode !== 'auto' &&
-      this._numericMode !== 'bignum' &&
-      this._precision > Math.floor(MACHINE_PRECISION)
-    )
-      this._numericMode = 'auto';
-
     this._bignum = this._bignum.config({ precision: this._precision });
+
+    // Reset the tolerance
+    this.tolerance = NUMERIC_MACHINE_TOLERANCE;
+    // this.tolerance = 10 ** -(this._precision - 5);
 
     // Reset the caches
     // (the values in the cache depend on the current precision)
-    this.reset();
-  }
-
-  get numericMode(): NumericMode {
-    return this._numericMode;
-  }
-
-  /** {@inheritDoc  NumericMode} */
-  set numericMode(f: NumericMode) {
-    if (f === this._numericMode) return;
-
-    if (typeof f !== 'string') throw Error('Expected a string');
-
-    this._numericMode = f;
-    if (f === 'complex' || f === 'machine')
-      this._precision = Math.floor(MACHINE_PRECISION);
-
-    // Reset the caches: the values in the cache depend on the numeric mode)
     this.reset();
   }
 
@@ -747,10 +698,11 @@ export class ComputeEngine implements IComputeEngine {
    * equal to `a`.
    */
   set tolerance(val: number) {
-    if (typeof val === 'number' && Number.isFinite(val))
-      this._tolerance = Math.max(val, 0);
-    else this._tolerance = NUMERIC_MACHINE_TOLERANCE;
-    this._bignumTolerance = this.bignum(this._tolerance);
+    if (!Number.isFinite(val) || val <= 0) val = NUMERIC_MACHINE_TOLERANCE;
+
+    this._bignumTolerance = this.bignum(val);
+
+    this._tolerance = Math.min(MACHINE_TOLERANCE, val);
   }
 
   /** Replace a number that is close to 0 with the exact integer 0.
@@ -761,7 +713,10 @@ export class ComputeEngine implements IComputeEngine {
   chop(n: Decimal): Decimal | 0;
   chop(n: Complex): Complex | 0;
   chop(n: number | Decimal | Complex): number | Decimal | Complex {
-    if (typeof n === 'number' && Math.abs(n) <= this._tolerance) return 0;
+    if (typeof n === 'number') {
+      if (Math.abs(n) <= this._tolerance) return 0;
+      return n;
+    }
 
     if (n instanceof Decimal && n.abs().lte(this._bignumTolerance)) return 0;
 
@@ -895,31 +850,70 @@ export class ComputeEngine implements IComputeEngine {
   }
 
   _numericValue(
-    value: number | Rational | Decimal | Complex | { re?: number; im?: number }
+    value: number | Rational | Decimal | Complex | NumericValueData
   ): NumericValue {
-    // if (bignumPreferred(this))
-    // @fixme: handle other Numeric Values, i.e. PreciseExactNumericValue
-
     if (value === 1) return this._NUMERIC_VALUE_ONE;
     if (value === -1) return this._NUMERIC_VALUE_NEGATIVE_ONE;
     if (value === 0) return this._NUMERIC_VALUE_ZERO;
 
-    let machineValue: Partial<ExactNumericValueData>;
-    if (typeof value === 'number') machineValue = { re: value };
-    else if (isRational(value))
-      machineValue = { rational: value as [number, number] };
-    else if (value instanceof Decimal) machineValue = { re: value.toNumber() };
-    else if (value instanceof Complex)
-      machineValue = { re: value.re, im: value.im };
-    else machineValue = value as Partial<ExactNumericValueData>;
+    const factory =
+      this._precision > MACHINE_PRECISION
+        ? (x) => new BigNumericValue(x, (x) => this.bignum(x))
+        : (x) => new MachineNumericValue(x);
 
-    if (machineValue.re && (machineValue.re as any) instanceof Decimal)
-      machineValue.re = (machineValue.re as any as Decimal).toNumber();
+    if (typeof value === 'number') {
+      if (Number.isInteger(value)) return new ExactNumericValue(value, factory);
+      return factory(value);
+    }
 
-    // Convert BigRational to Rational
-    if (machineValue.rational)
-      machineValue.rational = asMachineRational(machineValue.rational);
-    return new ExactNumericValue(machineValue);
+    if (isRational(value)) {
+      return new ExactNumericValue(
+        { rational: asMachineRational(value) },
+        factory
+      );
+    }
+
+    if (value instanceof Decimal) {
+      if (value.isInteger() && isInMachineRange(value))
+        return new ExactNumericValue(value.toNumber(), factory);
+      return factory(value);
+    }
+
+    if (value instanceof Complex) {
+      if (value.im === 0) return this._numericValue(value.re);
+      if (Number.isInteger(value.im) && Number.isInteger(value.re)) {
+        return new ExactNumericValue(
+          { im: value.im, rational: [value.re, 1] },
+          factory
+        );
+      }
+      return factory(value);
+    }
+
+    //
+    // We have a NumericValueData
+    //
+
+    // A decimal property indicates a non-exact number
+    if (value.decimal !== undefined) return factory(value);
+
+    // If there's a non-Gaussian imaginary part, use non-exact representation
+    const im = value.im ?? 0;
+    if (!Number.isInteger(im)) return factory(value);
+
+    // Validate radical part
+    if (value.radical !== undefined && !Number.isInteger(value.radical))
+      return factory(value);
+
+    // Validate rational part
+    if (
+      value.rational &&
+      (!Number.isInteger(value.rational[0]) ||
+        !Number.isInteger(value.rational[1]))
+    )
+      return factory(value);
+
+    return new ExactNumericValue(value, factory);
   }
 
   /**

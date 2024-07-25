@@ -16,7 +16,7 @@ import type {
 } from '../latex-syntax/public';
 import { IndexedLatexDictionary } from '../latex-syntax/dictionary/definitions';
 import { Rational } from '../numerics/rationals';
-import { NumericValue } from '../numeric-value/public';
+import { NumericValue, NumericValueData } from '../numeric-value/public';
 
 import './serialize';
 /**
@@ -432,22 +432,6 @@ export interface BoxedExpression {
    */
   readonly isValid: boolean;
 
-  /**
-   * An exact value is not further transformed when evaluated. To get an
-   * approximate evaluation of an exact value, use `.N()`.
-   *
-   * Exact numbers are:
-   * - rationals (including integers)
-   * - complex numbers with integer real and imaginary parts (Gaussian integers)
-   * - square root of rationals
-   *
-   * Non-exact values includes:
-   * - numbers with a fractional part
-   * - complex numbers with a real or imaginary fractional part
-   *
-   */
-  readonly isExact: boolean;
-
   /** If true, the value of the expression never changes and evaluating it has
    * no side-effects.
    * If false, the value of the expression may change, if the
@@ -695,10 +679,9 @@ export interface BoxedExpression {
   neg(): BoxedExpression;
   inv(): BoxedExpression;
   abs(): BoxedExpression;
-  add(...rhs: (number | BoxedExpression)[]): BoxedExpression;
+  add(rhs: number | BoxedExpression): BoxedExpression;
   sub(rhs: BoxedExpression): BoxedExpression;
-  mul(...rhs: [NumericValue]): BoxedExpression;
-  mul(...rhs: (number | BoxedExpression)[]): BoxedExpression;
+  mul(rhs: NumericValue | number | BoxedExpression): BoxedExpression;
   div(rhs: number | BoxedExpression): BoxedExpression;
   pow(
     exp: number | [num: number, denom: number] | BoxedExpression
@@ -992,8 +975,8 @@ export interface BoxedExpression {
    * Any necessary calculations, including on decimal numbers (non-integers),
    * are performed.
    *
-   * The calculations are performed according to the `numericMode` and
-   * `precision` properties of the `ComputeEngine`.
+   * The calculations are performed according to the
+   * `precision` property of the `ComputeEngine`.
    *
    * To only perform exact calculations, use `this.evaluate()` instead.
    *
@@ -1821,24 +1804,6 @@ export type EvaluateOptions = {
 };
 
 /**
- * The numeric evaluation mode:
- * 
-<div className="symbols-table">
-
-| Mode | |
-| :--- | :----- |
-| `"auto"`| Use bignum or complex numbers. |
-| `"machine"` |  **IEEE 754-2008**, 64-bit floating point numbers: 52-bit mantissa, about 15 digits of precision |
-| `"bignum"` | Arbitrary precision floating point numbers, as provided by the "decimal.js" library | 
-| `"complex"` | Complex number represented by two machine numbers, a real and an imaginary part, as provided by the "complex.js" library |
-
-</div>
-
- * @category Compute Engine
- */
-export type NumericMode = 'auto' | 'machine' | 'bignum' | 'complex';
-
-/**
  * Metadata that can be associated with a `BoxedExpression`
  *
  * @category Boxed Expression
@@ -1955,12 +1920,6 @@ export interface IComputeEngine {
   /** @hidden */
   readonly recursionLimit: number;
 
-  numericMode: NumericMode;
-
-  tolerance: number;
-
-  angularUnit: AngularUnit;
-
   chop(n: number): number;
   chop(n: Decimal): Decimal | 0;
   chop(n: Complex): Complex | 0;
@@ -1974,11 +1933,23 @@ export interface IComputeEngine {
 
   /** @internal */
   _numericValue(
-    value: number | Rational | Decimal | Complex | { re: number; im?: number }
+    value: number | Rational | Decimal | Complex | NumericValueData
   ): NumericValue;
 
-  set precision(p: number | 'machine');
+  /** If the precision is set to `machine`, floating point numbers
+   * are represented internally as a 64-bit floating point number (as
+   * per IEEE 754-2008), with a 52-bit mantissa, which gives about 15
+   * digits of precision.
+   *
+   * If the precision is set to `auto`, the precision is set to 300 digits.
+   *
+   */
+  set precision(p: number | 'machine' | 'auto');
   get precision(): number;
+
+  tolerance: number;
+
+  angularUnit: AngularUnit;
 
   costFunction: (expr: BoxedExpression) => number;
 
@@ -2548,9 +2519,6 @@ export type FunctionSignature = {
    * this handler should account for it. Notably, if it is commutative, the
    * arguments should be sorted in canonical order.
    *
-   * The handler can make transformations based on the value of the arguments
-   * that are exact and literal (i.e.
-   * `arg.numericValue !== null && arg.isExact`).
    *
    * Values of symbols should not be substituted, unless they have
    * a `holdUntil` attribute of `"never"`.
@@ -2652,23 +2620,6 @@ export type FunctionSignature = {
    * Return `NaN` if there is enough information to  perform the
    * evaluation, but a literal argument is out of range or
    * not of the expected type.
-   *
-   * Use the value of `ce.numericMode` to determine how to perform
-   * the numeric evaluation.
-   *
-   * Note that regardless of the current value of `ce.numericMode`, the
-   * arguments may be boxed numbers representing machine numbers, bignum
-   * numbers, complex numbers, rationals or big rationals.
-   *
-   * If the numeric mode does not allow complex numbers (the
-   * `engine.numericMode` is not `"complex"` or `"auto"`) and the result of
-   * the evaluation would be a complex number, return `NaN` instead.
-   *
-   * If `ce.numericMode` is `"bignum"` or `"auto"` the evaluation should
-   * be done using bignums.
-   *
-   * Otherwise, `ce.numericMode` is `"machine", the evaluation should be
-   * performed using machine numbers.
    *
    * You may perform any necessary computations, including approximate
    * calculations on floating point numbers.

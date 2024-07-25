@@ -210,18 +210,16 @@ export class BoxedTensor extends _BoxedExpression {
     return this.expression.abs();
   }
 
-  add(...rhs: (number | BoxedExpression)[]): BoxedExpression {
-    return this.expression.add(...rhs);
+  add(rhs: number | BoxedExpression): BoxedExpression {
+    return this.expression.add(rhs);
   }
 
   sub(rhs: BoxedExpression): BoxedExpression {
     return this.expression.sub(rhs);
   }
 
-  mul(...rhs: [NumericValue]): BoxedExpression;
-  mul(...rhs: (number | BoxedExpression)[]): BoxedExpression;
-  mul(...rhs: (NumericValue | number | BoxedExpression)[]): BoxedExpression {
-    return this.expression.mul(...(rhs as any));
+  mul(rhs: NumericValue | number | BoxedExpression): BoxedExpression {
+    return this.expression.mul(rhs);
   }
 
   div(rhs: number | BoxedExpression): BoxedExpression {
