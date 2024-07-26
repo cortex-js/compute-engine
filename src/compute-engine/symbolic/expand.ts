@@ -56,8 +56,7 @@ export function expandProducts(
   if (ops.length === 2) return expandProduct(ops[0], ops[1]);
 
   const rhs = expandProducts(ce, ops.slice(1));
-  if (!rhs) return null;
-  return expandProduct(ops[0], rhs);
+  return rhs === null ? null : expandProduct(ops[0], rhs);
 }
 
 const binomials = [
@@ -212,8 +211,8 @@ export function expandFunction(
   //
   if (h === 'Divide') {
     const num = expand(ops[0]);
-    if (!num) return null;
-    if (num?.head === 'Add') return add(...num.ops!.map((x) => x.div(ops[1])));
+    if (num === null) return null;
+    if (num.head === 'Add') return add(...num.ops!.map((x) => x.div(ops[1])));
     return ce._fn('Divide', [num, ops[1]]);
   }
 

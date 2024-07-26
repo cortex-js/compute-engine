@@ -18,7 +18,6 @@ import { IndexedLatexDictionary } from '../latex-syntax/dictionary/definitions';
 import { Rational } from '../numerics/rationals';
 import { NumericValue, NumericValueData } from '../numeric-value/public';
 
-import './serialize';
 /**
  * :::info[THEORY OF OPERATIONS]
  *
@@ -2647,3 +2646,5 @@ export type FunctionSignature = {
   /** Return a compiled (optimized) expression. */
   compile?: (expr: BoxedExpression) => CompiledExpression;
 };
+
+import './serialize';

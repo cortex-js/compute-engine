@@ -93,15 +93,18 @@ export function boxNumber(
   num:
     | MathJsonNumber
     | number
+    | bigint
     | string
     | Complex
     | Decimal
     | Rational
     | [Decimal, Decimal],
-  options?: { metadata?: Metadata; canonical?: boolean }
+  options: { metadata?: Metadata; canonical: boolean }
 ): BoxedExpression | null {
-  options = options ? { ...options } : {};
-  if (!('canonical' in options)) options.canonical = true;
+  //
+  // Bigint?
+  // @fixme: handle bigint directly without going through bignum
+  if (typeof num === 'bigint') num = ce.bignum(num);
 
   //
   // Do we have a machine number or bignum?
@@ -113,48 +116,29 @@ export function boxNumber(
   // Do we have a rational or big rational?
   //
 
-  if (
-    Array.isArray(num) &&
-    num.length === 2 &&
-    num[0] instanceof Decimal &&
-    num[1] instanceof Decimal
-  ) {
-    if (!num[0].isInteger() || !num[1].isInteger())
-      throw new Error('Array argument to `boxNumber()` should be two integers');
-    num = [bigint(num[0].toString()), bigint(num[1].toString())];
-  }
-
   if (isRational(num)) {
-    if (num.length !== 2)
-      throw new Error(
-        'Array argument to `boxNumber()` should be two integers or two bignums'
-      );
-    const [n, d] = num;
+    console.assert(num.length === 2);
+    const [n, d]: [number, number] | [bigint, bigint] = num;
     if (typeof n === 'bigint' && typeof d === 'bigint') {
       if (n === d) return d === BigInt(0) ? ce.NaN : ce.One;
       if (n === BigInt(0)) return ce.Zero;
       if (d === BigInt(1)) return ce.number(n, options);
       if (d === BigInt(-1)) return ce.number(-n, options);
       if (n === BigInt(1) && d === BigInt(2)) return ce.Half;
-      return new BoxedNumber(ce, [n, d], options);
+      return new BoxedNumber(ce, num, options);
     }
 
-    if (typeof n !== 'number' || typeof d !== 'number')
-      throw new Error(
-        'Array argument to `boxNumber()` should be two integers or two bignums'
-      );
+    console.assert(Number.isInteger(n) && Number.isInteger(d));
 
-    if (!isFinite(n) || !isFinite(d))
+    if (!isFinite(n as number) || !isFinite(d as number))
       return ce.number(n, options).div(ce.number(d, options));
 
-    if (!Number.isInteger(n) || !Number.isInteger(d))
-      throw new Error('Array argument to `boxNumber()` should be two integers');
     if (d === n) return d === 0 ? ce.NaN : ce.One;
     if (n === 0) return ce.Zero;
     if (d === 1) return ce.number(n, options);
     if (d === -1) return ce.number(-n, options);
     if (n === 1 && d === 2) return ce.Half;
-    return new BoxedNumber(ce, [n, d], options);
+    return new BoxedNumber(ce, num, options);
   }
 
   //
@@ -183,39 +167,38 @@ export function boxNumber(
     strNum = num.num;
   }
 
-  if (strNum) {
-    strNum = strNum.toLowerCase();
+  if (!strNum) return null;
 
-    // Remove trailing "n" or "d" letter (from legacy version of MathJSON spec)
-    if (/[0-9][nd]$/.test(strNum)) strNum = strNum.slice(0, -1);
+  strNum = strNum.toLowerCase();
 
-    // Remove any whitespace:
-    // Tab, New Line, Vertical Tab, Form Feed, Carriage Return, Space, Non-Breaking Space
-    strNum = strNum.replace(/[\u0009-\u000d\u0020\u00a0]/g, '');
+  // Remove trailing "n" or "d" letter (from legacy version of MathJSON spec)
+  if (/[0-9][nd]$/.test(strNum)) strNum = strNum.slice(0, -1);
 
-    // Special case some common values to share boxed instances
-    if (strNum === 'nan') return ce.NaN;
-    if (strNum === 'infinity' || strNum === '+infinity')
-      return ce.PositiveInfinity;
-    if (strNum === '-infinity') return ce.NegativeInfinity;
-    if (strNum === '0') return ce.Zero;
-    if (strNum === '1') return ce.One;
-    if (strNum === '-1') return ce.NegativeOne;
+  // Remove any whitespace:
+  // Tab, New Line, Vertical Tab, Form Feed, Carriage Return, Space, Non-Breaking Space
+  strNum = strNum.replace(/[\u0009-\u000d\u0020\u00a0]/g, '');
 
-    // Do we have repeating digits?
-    if (/\([0-9]+\)/.test(strNum)) {
-      const [_, body, repeat, trail] =
-        strNum.match(/(.+)\(([0-9]+)\)(.+)?$/) ?? [];
-      // @todo we probably shouldn't be using the ce.precision since it may change later
-      strNum =
-        body +
-        repeat.repeat(Math.ceil(ce.precision / repeat.length)) +
-        (trail ?? '');
-    }
+  // Special case some common values to share boxed instances
+  if (strNum === 'nan') return ce.NaN;
+  if (strNum === 'infinity' || strNum === '+infinity')
+    return ce.PositiveInfinity;
+  if (strNum === '-infinity') return ce.NegativeInfinity;
+  if (strNum === '0') return ce.Zero;
+  if (strNum === '1') return ce.One;
+  if (strNum === '-1') return ce.NegativeOne;
 
-    return boxNumber(ce, ce.bignum(strNum), options);
+  // Do we have repeating digits?
+  if (/\([0-9]+\)/.test(strNum)) {
+    const [_, body, repeat, trail] =
+      strNum.match(/(.+)\(([0-9]+)\)(.+)?$/) ?? [];
+    // @todo we probably shouldn't be using the ce.precision since it may change later
+    strNum =
+      body +
+      repeat.repeat(Math.ceil(ce.precision / repeat.length)) +
+      (trail ?? '');
   }
-  return null;
+
+  return boxNumber(ce, ce.bignum(strNum), options);
 }
 
 function boxHold(

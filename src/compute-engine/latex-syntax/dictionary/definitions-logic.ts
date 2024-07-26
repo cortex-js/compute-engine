@@ -251,7 +251,7 @@ export const DEFINITIONS_LOGIC: LatexDictionary = [
     precedence: 200,
     serialize: (serializer: Serializer, expr: Expression) => {
       const args = ops(expr);
-      if (!args) return '\\delta';
+      if (args === null) return '\\delta';
 
       // If only symbol arguments, just concatenate them
       // ['KroneckerDelta', 'n', 'm'] -> \delta_{nm}
@@ -263,7 +263,7 @@ export const DEFINITIONS_LOGIC: LatexDictionary = [
     },
     parse: (parser) => {
       const group = parser.parseGroup();
-      if (!group) {
+      if (group === null) {
         const token = parser.parseToken();
         if (!token) return null;
         // \\delta_n
@@ -280,7 +280,7 @@ export const DEFINITIONS_LOGIC: LatexDictionary = [
         return ['KroneckerDelta', ...ops(group)!];
 
       // \\delta_{n}
-      if (group) return ['KroneckerDelta', group];
+      if (group !== null) return ['KroneckerDelta', group];
 
       return null;
     },

@@ -368,12 +368,10 @@ function parseRule(ce: IComputeEngine, rule: string): BoxedRule {
         if (!wildcards[x]) wildcards[x] = `_${x}`;
         // conditions are `:condition` or `:condition1,condition2,...`
         // or `:\mathrm{condition}`
-        let conditions = parseModifierExpression(parser);
+        const conditions = parseModifierExpression(parser);
         if (conditions === null) return null;
-        if (conditions) {
-          if (!wildcardConditions[x]) wildcardConditions[x] = conditions;
-          else wildcardConditions[x] += ',' + conditions;
-        }
+        if (!wildcardConditions[x]) wildcardConditions[x] = conditions;
+        else wildcardConditions[x] += ',' + conditions;
 
         return wildcards[x];
       },
@@ -409,13 +407,11 @@ function parseRule(ce: IComputeEngine, rule: string): BoxedRule {
         if (!wildcards[id]) wildcards[id] = `${prefix}${id}`;
 
         // Check for conditions
-        let conditions = parseModifierExpression(parser);
+        const conditions = parseModifierExpression(parser);
         if (conditions === null) return null;
 
-        if (conditions) {
-          if (!wildcardConditions[id]) wildcardConditions[id] = conditions;
-          else wildcardConditions[id] += ',' + conditions;
-        }
+        if (!wildcardConditions[id]) wildcardConditions[id] = conditions;
+        else wildcardConditions[id] += ',' + conditions;
 
         return `${prefix}${id}`;
       },
@@ -427,16 +423,16 @@ function parseRule(ce: IComputeEngine, rule: string): BoxedRule {
       latexTrigger: '->',
       parse: (parser, lhs, until) => {
         const rhs = parser.parseExpression(until);
-        if (!rhs) return null;
+        if (rhs === null) return null;
         if (parser.match(';')) {
           // condition is either a predicate, or a sequence of wildcards + ":" + modifiers
           // Try the sequence of wildcards first
           let done = false;
-          let start = parser.index;
+          const start = parser.index;
           do {
             const id = parser.nextToken();
             if (wildcards[id]) {
-              let conditions = parseModifierExpression(parser);
+              const conditions = parseModifierExpression(parser);
               if (conditions === null || !conditions) {
                 done = true;
                 parser.index = start;
@@ -449,11 +445,11 @@ function parseRule(ce: IComputeEngine, rule: string): BoxedRule {
           if (!parser.atEnd) {
             parser.index = start;
             const condition = parser.parseExpression(until);
-            if (condition) return ['Rule', lhs, rhs, condition];
+            if (condition !== null) return ['Rule', lhs, rhs, condition];
           }
         }
         // Check if we have some accumulated conditions
-        let conditions: any[] = [];
+        const conditions: any[] = [];
         for (const id in wildcardConditions) {
           const xs = wildcardConditions[id].split(',');
           if (xs.length === 0) continue;
@@ -468,14 +464,14 @@ function parseRule(ce: IComputeEngine, rule: string): BoxedRule {
       },
     },
   ];
-  let expr = ce.parse(rule, { canonical: false });
+  const expr = ce.parse(rule, { canonical: false });
   ce.latexDictionary = previousDictionary;
 
   if (expr.head !== 'Rule') throw new Error(`Invalid rule ${rule}`);
   const [match, replace, condition] = expr.ops!;
 
   let condFn: undefined | PatternConditionFunction = undefined;
-  if (condition) {
+  if (condition !== null) {
     condFn = (sub: BoxedSubstitution, _ce: IComputeEngine): boolean => {
       for (const id of Object.keys(sub)) {
         // Map the id to a wildcard
@@ -622,7 +618,7 @@ function applyRule(
   //     .map((x) => `${x} -> ${sub[x].toString()}`)
   //     .join(', ')
   // );
-  let result =
+  const result =
     typeof replace === 'function'
       ? replace(expr, sub)
       : replace.subs(sub, { canonical: expr.isCanonical });

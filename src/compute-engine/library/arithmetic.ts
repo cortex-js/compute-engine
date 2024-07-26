@@ -214,7 +214,7 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
           // @fastpath: this code path is never taken, canonicalDivide is called directly
           args = checkNumericArgs(ce, args);
           let result = args[0];
-          if (!result) return ce.error('missing');
+          if (result === undefined) return ce.error('missing');
           if (args.length < 2) return result;
 
           const rest = args.slice(1);
@@ -811,8 +811,8 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
           // left-associative: a - b - c -> (a - b) - c
 
           args = checkNumericArgs(ce, args);
+          if (args.length === 0) return ce.error('missing');
           const first = args[0];
-          if (!first) return ce.error('missing');
           const rest = args.slice(1);
           return canonicalAdd(ce, [first, ...rest.map((x) => x.neg())]);
         },

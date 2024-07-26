@@ -33,8 +33,8 @@ describe('PARSING OF NUMBER', () => {
   });
 
   test('Special Values', () => {
-    expect(parseVal('+0')).toEqual(+0);
-    expect(parseVal('-0')).toEqual(-0);
+    expect(parseVal('+0')).toEqual(0);
+    expect(parseVal('-0')).toEqual(0);
     expect(parseVal('-\\infty')).toEqual(-Infinity);
     expect(parseVal('\\mathrm{NaN}')).toEqual(NaN);
   });

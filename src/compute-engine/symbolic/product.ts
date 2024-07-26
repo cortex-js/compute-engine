@@ -259,7 +259,7 @@ export class Product {
         this.coefficient.im === 0
       ) {
         // Numerator
-        let num = ce.box(this.coefficient.num);
+        const num = ce.box(this.coefficient.num);
         if (!num.isOne) xs.push({ exponent: [1, 1], terms: [num] });
         // Denominator
         const denom = ce.box(this.coefficient.denom);

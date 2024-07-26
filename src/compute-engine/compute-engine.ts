@@ -158,6 +158,7 @@ export class ComputeEngine implements IComputeEngine {
   readonly One: BoxedExpression;
   readonly Half: BoxedExpression;
   readonly NegativeOne: BoxedExpression;
+  readonly Two: BoxedExpression;
   readonly I: BoxedExpression;
   readonly NaN: BoxedExpression;
   readonly PositiveInfinity: BoxedExpression;
@@ -392,6 +393,7 @@ export class ComputeEngine implements IComputeEngine {
     this.One = new BoxedNumber(this, 1);
     this.Half = new BoxedNumber(this, [1, 2]);
     this.NegativeOne = new BoxedNumber(this, -1);
+    this.Two = new BoxedNumber(this, 2);
     this.NaN = new BoxedNumber(this, Number.NaN);
     this.PositiveInfinity = new BoxedNumber(this, Number.POSITIVE_INFINITY);
     this.NegativeInfinity = new BoxedNumber(this, Number.NEGATIVE_INFINITY);
@@ -1930,37 +1932,31 @@ export class ComputeEngine implements IComputeEngine {
       | Decimal
       | Complex
       | Rational,
-    options?: { metadata?: Metadata; canonical?: CanonicalOptions }
+    options?: { metadata: Metadata; canonical: CanonicalOptions }
   ): BoxedExpression {
-    options = options ? { ...options } : {};
-    if (!('canonical' in options)) options.canonical = true;
-    if (options.canonical === 'Number') options.canonical = true;
-    if (
-      Array.isArray(options.canonical) &&
-      options.canonical.includes('Number')
-    )
-      options.canonical = true;
-
+    const metadata = options?.metadata;
     //
     // Is this number eligible to be a cached number expression?
     // (i.e. it has no associated metadata)
     //
-    if (options.metadata === undefined) {
+    if (metadata === undefined) {
       if (typeof value === 'bigint') {
         if (value === BigInt(1)) return this.One;
         if (value === BigInt(0)) return this.Zero;
         if (value === BigInt(-1)) return this.NegativeOne;
+        if (value === BigInt(2)) return this.Two;
       }
       if (typeof value === 'number') {
         const n = value;
         if (n === 1) return this.One;
         if (n === 0) return this.Zero;
         if (n === -1) return this.NegativeOne;
+        if (n === 2) return this.Two;
 
         if (Number.isInteger(n) && this._commonNumbers[n] !== undefined) {
-          if (this._commonNumbers[n] === null)
-            this._commonNumbers[n] = boxNumber(this, value) ?? this.NaN;
-          return this._commonNumbers[n]!;
+          this._commonNumbers[n] ??=
+            boxNumber(this, value, { canonical: true }) ?? this.NaN;
+          return this._commonNumbers[n];
         }
 
         if (Number.isNaN(n)) return this.NaN;
@@ -1970,14 +1966,17 @@ export class ComputeEngine implements IComputeEngine {
       }
     }
 
-    if (typeof value === 'bigint') value = this.bignum(value);
+    let canonical = false;
+    if (!options || options.canonical === undefined) canonical = true;
+    else if (options.canonical === 'Number' || options.canonical === true)
+      canonical = true;
+    else if (
+      Array.isArray(options.canonical) &&
+      options.canonical.includes('Number')
+    )
+      canonical = true;
 
-    return (
-      boxNumber(this, value, {
-        metadata: options.metadata,
-        canonical: options.canonical === true,
-      }) ?? this.NaN
-    );
+    return boxNumber(this, value, { metadata, canonical }) ?? this.NaN;
   }
 
   rules(rules: Rule[]): BoxedRuleSet {
@@ -2088,7 +2087,7 @@ export class ComputeEngine implements IComputeEngine {
       this.indexedLatexDictionary,
       { ...defaultOptions, ...options }
     );
-    if (!result) throw Error('Failed to parse LaTeX string');
+    if (result === null) throw Error('Failed to parse LaTeX string');
     return this.box(result, { canonical: options?.canonical ?? true });
   }
 

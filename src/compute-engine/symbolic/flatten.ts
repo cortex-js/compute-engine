@@ -17,7 +17,9 @@ export function flatten<
   T extends ReadonlyArray<BoxedExpression> | BoxedExpression[],
 >(ops: T, head?: string): T {
   // Make all the arguments canonical.
-  let xs = ops.every((x) => x.isCanonical) ? ops : ops.map((x) => x.canonical);
+  const xs = ops.every((x) => x.isCanonical)
+    ? ops
+    : ops.map((x) => x.canonical);
 
   if (head) {
     // Bypass memory allocation for the common case where there is nothing to flatten

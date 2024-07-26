@@ -13,7 +13,7 @@
  *
  */
 
-import {
+import type {
   BoxedExpression,
   FunctionDefinition,
   SemiBoxedExpression,

@@ -452,7 +452,7 @@ export class ExactNumericValue extends NumericValue {
       // √(n/d) = √(n/d) = √(nd) / d
       // (if nd is a perfect square, or a product of perfect squares it
       // will get normalized to the rational numerator)
-      let [n, d] = this.rational;
+      const [n, d] = this.rational;
       if (n > 0) return this.clone({ radical: n * d, rational: [1, d] });
 
       //
@@ -525,7 +525,7 @@ export class ExactNumericValue extends NumericValue {
 
     let imSum = 0;
     let rationalSum: [number, number] = [0, 1];
-    let radicals: { multiple: [number, number]; radical: number }[] = [];
+    const radicals: { multiple: [number, number]; radical: number }[] = [];
 
     for (const value of values) {
       if (value.isNaN) return [new ExactNumericValue(NaN, factory)];

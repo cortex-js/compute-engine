@@ -487,11 +487,11 @@ export class _Parser implements Parser {
     }
 
     if (!this.options.skipSpace) return false;
-    let result = false;
-    while (this.match('<space>')) result = true;
-    if (result) this.skipSpace();
+    let found = false;
+    while (this.match('<space>')) found = true;
+    if (found) this.skipSpace();
 
-    return result;
+    return found;
   }
 
   skipVisualSpace(): void {
@@ -720,23 +720,9 @@ export class _Parser implements Parser {
 
     // Is it a single digit?
     // Note: `x^23` is `x^{2}3`, not x^{23}
-    if (/^[0-9]$/.test(this.peek)) return parseInt(this.nextToken());
+    if (/^[0-9]$/.test(this.peek)) return parseInt(this.nextToken(), 10);
 
-    // This can be a generic expression or a symbol
-    // Setup the token stream to include only the next token
-    // const start = this.index;
-    // const token = this.peek;
-    // const tokens = this._tokens;
-    // this._tokens = [token];
-    // this.index = 0;
-
-    const result = this.parseGenericExpression() ?? this.parseSymbol();
-
-    // this._tokens = tokens;
-    // this.index = start;
-    if (!result) return null;
-    // this.index += 1;
-    return result;
+    return this.parseGenericExpression() ?? this.parseSymbol();
   }
 
   /**
@@ -786,7 +772,7 @@ export class _Parser implements Parser {
               return peek === '&' || peek === '\\\\' || peek === '\\cr';
             },
           });
-          if (expr) cell.push(expr);
+          if (expr !== null) cell.push(expr);
           else {
             cell.push(['Error', ["'unexpected-token'", peek]]);
             this.nextToken();
@@ -1152,11 +1138,18 @@ export class _Parser implements Parser {
       // The '.' may be part of something else, i.e. '1..2'
       // so backtrack
       this.index = fractionalIndex;
+      if (wholePart.length < 10) return sign * parseInt(wholePart, 10);
       return { num: sign < 0 ? '-' + wholePart : wholePart };
     }
 
     const exponent = this.parseExponent();
 
+    // If we have a small-ish whole number, use a shortcut for the number
+    if (!hasFractionalPart && !exponent && wholePart.length < 10)
+      return sign * parseInt(wholePart, 10);
+
+    // If we prefer to parse numbers as rationals, and there is no repeating part
+    // we can return a rational number
     if (!hasRepeatingPart && this.options.parseNumbers === 'rational') {
       const whole = parseInt(wholePart, 10);
 
@@ -1184,6 +1177,7 @@ export class _Parser implements Parser {
       }
       return ['Rational', sign * numerator, denominator];
     }
+
     return {
       num:
         (sign < 0 ? '-' : '') +
@@ -1287,7 +1281,7 @@ export class _Parser implements Parser {
     for (const [def, n] of this.peekDefinitions('prefix')) {
       this.index = start + n;
       const rhs = def.parse(this, { ...until, minPrec: def.precedence + 1 });
-      if (rhs) return rhs;
+      if (rhs !== null) return rhs;
     }
     this.index = start;
     return null;
@@ -1306,7 +1300,7 @@ export class _Parser implements Parser {
       if (def.precedence >= until.minPrec) {
         this.index = start + n;
         const rhs = def.parse(this, lhs, until);
-        if (rhs) return rhs;
+        if (rhs !== null) return rhs;
       }
     }
     this.index = start;
@@ -1520,7 +1514,7 @@ export class _Parser implements Parser {
       // @todo: should capture symbol, and check it is not in use as a symbol,  function, or inferred (calling getIdentifierType() or somethinglike it (getIdentifierType() may aggressively return 'symbol'...)). Maybe not during parsing, but canonicalization
       if (typeof def.parse === 'function') {
         const result = def.parse(this, until);
-        if (result) return result;
+        if (result !== null) return result;
       } else return def.name!;
     }
 
@@ -1617,7 +1611,7 @@ export class _Parser implements Parser {
           if (typeof def.parse === 'function')
             result = def.parse(this, arg, { minPrec: 0 });
           else result = arg;
-          if (result) break;
+          if (result !== null) break;
         }
       }
     }
@@ -1648,7 +1642,7 @@ export class _Parser implements Parser {
             if (typeof def.parse === 'function')
               result = def.parse(this, arg, { minPrec: 0 });
             else result = arg;
-            if (result) break;
+            if (result !== null) break;
           }
         }
       }
@@ -1715,7 +1709,7 @@ export class _Parser implements Parser {
         this.index += n;
         if (typeof def.parse === 'function') {
           const result = def.parse(this, this.error('missing', start));
-          if (result) return result;
+          if (result !== null) return result;
         }
         if (def.name) return [def.name, this.error('missing', start)];
         return this.error('unexpected-operator', start);
@@ -1728,7 +1722,7 @@ export class _Parser implements Parser {
         this.index += n;
         if (typeof def.parse === 'function') {
           const result = def.parse(this, { minPrec: 0 });
-          if (result) return result;
+          if (result !== null) return result;
         }
         if (def.name)
           return [
@@ -1746,7 +1740,7 @@ export class _Parser implements Parser {
         const result = def.parse(this, this.error('missing', start), {
           minPrec: 0,
         });
-        if (result) return result;
+        if (result !== null) return result;
         // if (def.name)
         //   return [
         //     def.name,
@@ -1760,9 +1754,10 @@ export class _Parser implements Parser {
     const index = this.index;
 
     let id = parseInvalidIdentifier(this);
-    if (id) return id;
+    if (id !== null) return id;
     id = parseIdentifier(this);
-    if (id) return this.error(['unexpected-identifier', { str: id }], index);
+    if (id !== null)
+      return this.error(['unexpected-identifier', { str: id }], index);
 
     const command = this.peek;
     if (!command) return this.error('syntax-error', start);
@@ -1978,7 +1973,7 @@ export class _Parser implements Parser {
     //
     // 3. Are there some infix operators?
     //
-    if (lhs) {
+    if (lhs !== null) {
       let done = false;
       while (!done && !this.atTerminator(until)) {
         this.skipSpace();

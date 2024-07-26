@@ -307,7 +307,7 @@ function serializeMultiply(
       // It's a power with a fractional exponent,
       // it's a nth-root
       const r = rationalValue(op(arg, 2));
-      if (r) {
+      if (r !== undefined && r !== null) {
         const [n, d] = r;
         if (n === 1 && d !== null) {
           result += serializeRoot(
@@ -1228,13 +1228,14 @@ function parseBigOp(name: string, prec: number) {
 
     parser.popSymbolTable();
 
-    if (!fn) return [name];
+    if (fn === null) return [name];
 
-    if (sup) return [name, fn, ['Tuple', index ?? 'Nothing', lower ?? 1, sup]];
+    if (sup !== null)
+      return [name, fn, ['Tuple', index ?? 'Nothing', lower ?? 1, sup]];
 
-    if (lower) return [name, fn, ['Tuple', index ?? 'Nothing', lower]];
+    if (lower !== null) return [name, fn, ['Tuple', index ?? 'Nothing', lower]];
 
-    if (index) return [name, fn, ['Tuple', index]];
+    if (index !== null) return [name, fn, ['Tuple', index]];
 
     return [name, fn];
   };
@@ -1250,11 +1251,11 @@ function serializeBigOp(command: string) {
       arg = null;
 
     let index = op(arg, 1);
-    if (index && head(index) === 'Hold') index = op(index, 1);
+    if (index !== null && head(index) === 'Hold') index = op(index, 1);
 
     const fn = op(expr, 1);
 
-    if (!arg) {
+    if (arg !== null) {
       if (!op(expr, 2)) return joinLatex([command, serializer.serialize(fn)]);
       return joinLatex([
         command,
@@ -1272,12 +1273,13 @@ function serializeBigOp(command: string) {
       sub = [serializer.serialize(index), '=', serializer.serialize(lower)];
     else if (index && symbol(index) !== 'Nothing')
       sub = [serializer.serialize(index)];
-    else if (lower) sub = [serializer.serialize(lower)];
+    else if (lower !== null) sub = [serializer.serialize(lower)];
 
     if (sub.length > 0) sub = ['_{', ...sub, '}'];
 
     let sup: string[] = [];
-    if (op(arg, 3)) sup = ['^{', serializer.serialize(op(arg, 3)), '}'];
+    if (op(arg, 3) !== null)
+      sup = ['^{', serializer.serialize(op(arg, 3)), '}'];
 
     return joinLatex([command, ...sup, ...sub, serializer.serialize(fn)]);
   };

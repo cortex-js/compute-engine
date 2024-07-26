@@ -83,7 +83,7 @@ export abstract class _BoxedExpression implements BoxedExpression {
    * Primitive values are: boolean, number, bigint, string, null, undefined
    *
    */
-  valueOf(): number | Object | string | boolean {
+  valueOf(): number | object | string | boolean {
     if (this.symbol === 'True') return true;
     if (this.symbol === 'False') return false;
     if (this.symbol === 'NaN') return NaN;

@@ -204,23 +204,23 @@ export class BoxedNumber extends _BoxedExpression {
   }
 
   inv(): BoxedExpression {
-    let n = this.engine._numericValue(this._value);
+    const n = this.engine._numericValue(this._value);
     return this.engine.box(n.inv());
   }
 
   abs(): BoxedExpression {
-    let n = this.engine._numericValue(this._value);
+    const n = this.engine._numericValue(this._value);
     return this.engine.box(n.abs());
   }
 
   add(rhs: number | BoxedExpression): BoxedExpression {
     const ce = this.engine;
     if (typeof rhs === 'number') {
-      let n = ce._numericValue(this._value);
+      const n = ce._numericValue(this._value);
       return ce.box(n.add(ce._numericValue(rhs)));
     }
     if (rhs.numericValue !== null) {
-      let n = ce._numericValue(this._value);
+      const n = ce._numericValue(this._value);
       return ce.box(n.add(ce._numericValue(rhs.numericValue)));
     }
     return add(this.canonical, rhs.canonical);
@@ -230,16 +230,16 @@ export class BoxedNumber extends _BoxedExpression {
     if (rhs instanceof NumericValue) {
       if (this.isOne) return this.engine.box(rhs);
       if (this.isNegativeOne) return this.engine.box(rhs.neg());
-      let n = this.engine._numericValue(this._value);
+      const n = this.engine._numericValue(this._value);
       return this.engine.box(n.mul(rhs));
     }
     const ce = this.engine;
     if (typeof rhs === 'number') {
-      let n = ce._numericValue(this._value);
+      const n = ce._numericValue(this._value);
       return ce.box(n.mul(rhs));
     }
     if (rhs.numericValue !== null) {
-      let n = ce._numericValue(this._value);
+      const n = ce._numericValue(this._value);
       return ce.box(n.mul(ce._numericValue(rhs.numericValue)));
     }
     return mul(this, rhs);
@@ -253,7 +253,7 @@ export class BoxedNumber extends _BoxedExpression {
 
     if (rhs.numericValue !== null) {
       const ce = this.engine;
-      let n = ce._numericValue(this._value);
+      const n = ce._numericValue(this._value);
       return ce.box(n.div(ce._numericValue(rhs.numericValue)));
     }
     return canonicalDivide(this, rhs);
@@ -281,7 +281,7 @@ export class BoxedNumber extends _BoxedExpression {
     if (exp === 0.5) return this.sqrt();
     if (exp === -0.5) return this.sqrt().inv();
 
-    let n = this.engine._numericValue(this._value);
+    const n = this.engine._numericValue(this._value);
 
     const e = typeof exp === 'number' ? exp : exp.numericValue;
     if (e !== null) {
@@ -320,7 +320,7 @@ export class BoxedNumber extends _BoxedExpression {
   }
 
   sqrt(): BoxedExpression {
-    let n = this.engine._numericValue(this._value);
+    const n = this.engine._numericValue(this._value);
     return this.engine.box(n.sqrt());
   }
 

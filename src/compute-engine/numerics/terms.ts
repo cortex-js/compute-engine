@@ -25,7 +25,7 @@ export class Terms {
     // sum them exactly at the end (some inexact values may cancel each other,
     // for example (0.1 - 0.1 + 1/4) -> 1/4.
     // If we added as we go, we would get 0.25.
-    let numericValues: NumericValue[] = [];
+    const numericValues: NumericValue[] = [];
     for (const term of terms) {
       if (term.isImaginary && term.isInfinity) {
         this.terms = [{ term: ce.ComplexInfinity, coef: ce._numericValue(1) }];
