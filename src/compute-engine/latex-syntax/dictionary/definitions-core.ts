@@ -1292,7 +1292,7 @@ function parseWhich(parser: Parser): Expression | null {
     } else if (row.length === 2) {
       const s = stringValue(row[1]);
       // If a string, probably 'else' or 'otherwise'
-      result.push(s ? 'True' : stripText(row[1]) ?? 'True');
+      result.push(s ? 'True' : (stripText(row[1]) ?? 'True'));
       result.push(row[0]);
     }
   }

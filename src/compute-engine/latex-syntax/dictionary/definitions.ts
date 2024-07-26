@@ -554,7 +554,7 @@ function makeParseHandler(
   // If there is a custom parser function, always use it.
   if ('parse' in entry && typeof entry.parse === 'function') return entry.parse;
 
-  const kind = 'kind' in entry ? entry.kind : 'expression' ?? 'expression';
+  const kind = ('kind' in entry ? entry.kind : 'expression') ?? 'expression';
 
   // If there is a parse handler as an Expression , use the
   // expression, but depending on the kind of the entry

@@ -702,7 +702,7 @@ export class BoxedSymbol extends _BoxedExpression {
 
     // By default, there is no simplification of symbols,
     // however if a custom set of rules is provided, apply them
-    return options?.rules ? this.replace(options.rules) ?? this : this;
+    return options?.rules ? (this.replace(options.rules) ?? this) : this;
   }
 
   evaluate(options?: EvaluateOptions): BoxedExpression {

@@ -810,7 +810,7 @@ export const CORE_LIBRARY: IdentifierDefinitions[] = [
           if (ops.length === 0) return ce._fn('Sequence', []);
           const op1 = ops[0];
           const s =
-            op1.string ?? op1.head === 'LatexString' ? op1.op1.string : '';
+            op1.string ?? (op1.head === 'LatexString' ? op1.op1.string : '');
           return ce.parse(s) ?? ce._fn('Sequence', []);
         },
       },

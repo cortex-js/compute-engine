@@ -869,7 +869,7 @@ export class BoxedFunction extends _BoxedExpression {
       for (let i = 0; i <= length - 1; i++) {
         const args = this._ops.map((x) =>
           isFiniteIndexableCollection(x)
-            ? at(x, (i % length) + 1) ?? this.engine.Nothing
+            ? (at(x, (i % length) + 1) ?? this.engine.Nothing)
             : x
         );
         results.push(this.engine._fn(this.head, args).evaluate(options));

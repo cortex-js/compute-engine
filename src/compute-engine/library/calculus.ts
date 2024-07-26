@@ -337,7 +337,7 @@ volumes
                 return typeof y === 'number' ? y : Number.NaN;
               },
               target,
-              dir ? asFloat(dir) ?? 1 : 1
+              dir ? (asFloat(dir) ?? 1) : 1
             )
           );
         },
@@ -368,7 +368,7 @@ volumes
                 return typeof y === 'number' ? y : Number.NaN;
               },
               target,
-              dir ? asFloat(dir) ?? 1 : 1
+              dir ? (asFloat(dir) ?? 1) : 1
             )
           );
         },
