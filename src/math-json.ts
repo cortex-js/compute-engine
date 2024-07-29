@@ -23,11 +23,10 @@ export {
   isFunctionObject,
   isDictionaryObject,
   stringValue as getStringValue,
-  xhead as head,
+  operator,
+  operand,
   symbol,
   mapArgs,
-  xop as op,
-  xnops as nops,
   dictionary as getDictionary,
 } from './math-json/utils';
 

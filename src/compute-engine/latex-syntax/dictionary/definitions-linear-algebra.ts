@@ -1,5 +1,5 @@
 import { Expression, op } from '../../../math-json';
-import { stringValue, xops } from '../../../math-json/utils';
+import { stringValue, operands } from '../../../math-json/utils';
 import { LatexDictionary, Parser, Serializer } from '../public';
 import { joinLatex } from '../tokenizer';
 import { DELIMITERS_SHORTHAND } from './definitions-core';
@@ -11,7 +11,7 @@ export const DEFINITIONS_LINEAR_ALGEBRA: LatexDictionary = [
   {
     name: 'Matrix',
     serialize: (serializer: Serializer, expr: Expression): string => {
-      const rows = xops(op(expr, 1)) ?? [];
+      const rows = operands(op(expr, 1));
 
       return serializeTabular(
         serializer,
@@ -26,7 +26,7 @@ export const DEFINITIONS_LINEAR_ALGEBRA: LatexDictionary = [
   {
     name: 'Vector',
     serialize: (serializer: Serializer, expr: Expression): string => {
-      const columns = xops(expr) ?? [];
+      const columns = operands(expr);
 
       // Flip the columns into rows
       return serializeTabular(
@@ -240,7 +240,10 @@ function parseCells(parser: Parser): [head: string, cells: Expression | null] {
   if (!tabular) return ['', null];
   return [
     'Matrix',
-    ['List', ...tabular.map((row) => ['List', ...row])] as Expression,
+    [
+      'List',
+      ...tabular.map((row) => ['List', ...row] as Expression),
+    ] as Expression,
   ];
 }
 
@@ -283,7 +286,7 @@ function serializeTabular(
   const serializedRows: string[] = [];
   for (const row of rows ?? []) {
     const cells: string[] = [];
-    for (const cell of xops(row) ?? []) cells.push(serializer.serialize(cell));
+    for (const cell of operands(row)) cells.push(serializer.serialize(cell));
     serializedRows.push(cells.join(' & '));
   }
 

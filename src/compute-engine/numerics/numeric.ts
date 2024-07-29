@@ -475,7 +475,7 @@ export function limit(f: (x: number) => number, x: number, dir = 1): number {
     return (left + right) / 2;
   }
 
-  const [val, err] = extrapolate(f, x, { step: dir > 0 ? 1 : -1 });
+  const [val, _err] = extrapolate(f, x, { step: dir > 0 ? 1 : -1 });
   return val;
 }
 

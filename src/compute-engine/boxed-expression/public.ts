@@ -2644,5 +2644,3 @@ export type FunctionSignature = {
   /** Return a compiled (optimized) expression. */
   compile?: (expr: BoxedExpression) => CompiledExpression;
 };
-
-import './serialize';

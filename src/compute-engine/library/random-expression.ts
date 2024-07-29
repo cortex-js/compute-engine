@@ -51,7 +51,7 @@ function randomTrig(): Expression {
 export function randomExpression(level?: number): Expression {
   level ??= 1;
   if (level === 1) {
-    const h = oneOf([
+    const h: Expression = oneOf([
       [
         'Sqrt',
         [

@@ -13,12 +13,12 @@ import { DEFINITIONS_CALCULUS } from './definitions-calculus';
 import { DEFINITIONS_SYMBOLS } from './definitions-symbols';
 import {
   foldAssociativeOperator,
-  xhead,
+  operator,
   isEmptySequence,
   missingIfEmpty,
-  xnops,
-  xop,
-  xops,
+  nops,
+  operand,
+  operands,
 } from '../../../math-json/utils';
 import { ErrorSignal, WarningSignal } from '../../../common/signals';
 import { DEFINITIONS_COMPLEX } from './definitions-complex';
@@ -449,7 +449,7 @@ function makeSerializeHandler(
     return (serializer, expr) =>
       joinLatex([
         `\\begin{${envName}}`,
-        serializer.serialize(xop(expr, 1)),
+        serializer.serialize(operand(expr, 1)),
         `\\end{${envName}}`,
       ]);
   }
@@ -466,7 +466,11 @@ function makeSerializeHandler(
         : tokensToString(entry.closeTrigger);
 
     return (serializer, expr) =>
-      joinLatex([openDelim, serializer.serialize(xop(expr, 1)), closeDelim]);
+      joinLatex([
+        openDelim,
+        serializer.serialize(operand(expr, 1)),
+        closeDelim,
+      ]);
   }
 
   let latex = entry.serialize;
@@ -478,20 +482,20 @@ function makeSerializeHandler(
   if (latex) {
     if (kind === 'postfix')
       return (serializer, expr) =>
-        joinLatex([serializer.serialize(xop(expr, 1)), latex!]);
+        joinLatex([serializer.serialize(operand(expr, 1)), latex!]);
 
     if (kind === 'prefix')
       return (serializer, expr) =>
-        joinLatex([latex!, serializer.serialize(xop(expr, 1))]);
+        joinLatex([latex!, serializer.serialize(operand(expr, 1))]);
 
     if (kind === 'infix') {
       return (serializer, expr) => {
-        const n = xnops(expr);
+        const n = nops(expr);
         if (n === 0) return '';
         const prec = entry['precedence'] ?? 10000;
         // Insert the operator (latex) between each argument
         return joinLatex(
-          xops(expr)!.flatMap((val, i) => {
+          operands(expr).flatMap((val, i) => {
             const arg = serializer.wrap(val, prec + 1);
             return i < n - 1 ? [arg, latex!] : [arg];
           })
@@ -504,7 +508,7 @@ function makeSerializeHandler(
     // of the expression). However, by the time this serializer is called,
     // `expr` is either a symbol or a function expression.
     return (serializer, expr) =>
-      xhead(expr)
+      operator(expr)
         ? joinLatex([latex!, serializer.wrapArguments(expr)])
         : latex!;
   }
@@ -516,7 +520,7 @@ function makeSerializeHandler(
   if (kind === 'postfix')
     return (serializer, expr) =>
       joinLatex([
-        serializer.serialize(xop(expr, 1)),
+        serializer.serialize(operand(expr, 1)),
         serializer.serializeSymbol(id),
       ]);
 
@@ -524,15 +528,15 @@ function makeSerializeHandler(
     return (serializer, expr) =>
       joinLatex([
         serializer.serializeSymbol(id),
-        serializer.serialize(xop(expr, 1)),
+        serializer.serialize(operand(expr, 1)),
       ]);
 
   if (kind === 'infix')
     return (serializer, expr) =>
       joinLatex([
-        serializer.serialize(xop(expr, 1)),
+        serializer.serialize(operand(expr, 1)),
         serializer.serializeSymbol(id),
-        serializer.serialize(xop(expr, 2)),
+        serializer.serialize(operand(expr, 2)),
       ]);
 
   // Function, symbol or expression. Depends on the actual shape of the
@@ -540,7 +544,7 @@ function makeSerializeHandler(
   // of the expression). However, by the time this serializer is called,
   // `expr` is either a symbol or a function expression.
   return (serializer, expr) =>
-    xhead(expr)
+    operator(expr)
       ? joinLatex([
           serializer.serializeSymbol(id),
           serializer.wrapArguments(expr),
@@ -630,8 +634,8 @@ function makeParseHandler(
       const h = entry.name ?? entry.parse;
       return (_parser, arg) => [
         h,
-        missingIfEmpty(xop(arg, 1)),
-        missingIfEmpty(xop(arg, 2)),
+        missingIfEmpty(operand(arg, 1)),
+        missingIfEmpty(operand(arg, 2)),
       ];
     }
     const h = entry.parse ?? entry.name ?? idTrigger;

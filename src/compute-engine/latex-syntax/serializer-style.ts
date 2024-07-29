@@ -1,5 +1,5 @@
 import { Expression } from '../../math-json/types';
-import { countLeaves, xhead, xop1, xop2 } from '../../math-json/utils';
+import { countLeaves, operator, operands } from '../../math-json/utils';
 import { DelimiterScale } from './public';
 
 export function getApplyFunctionStyle(
@@ -36,8 +36,9 @@ export function getFractionStyle(
   | 'factor' {
   if (level > 3) return 'inline-solidus';
 
-  if (xhead(expr) === 'Divide') {
-    const [n, d] = [countLeaves(xop1(expr)), countLeaves(xop2(expr))];
+  if (operator(expr) === 'Divide') {
+    const [op1, op2] = operands(expr);
+    const [n, d] = [countLeaves(op1), countLeaves(op2)];
     if (d <= 2 && n > 5) return 'factor';
     if (n <= 2 && d > 5) return 'reciprocal';
   }

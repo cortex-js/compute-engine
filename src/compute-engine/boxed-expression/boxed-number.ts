@@ -31,9 +31,9 @@ import { asFloat, asRational, signDiff } from './numerics';
 import { match } from './match';
 import { canonicalDivide } from '../library/arithmetic-divide';
 import { NumericValue } from '../numeric-value/public';
-import { add } from '../library/arithmetic-add';
 import { mul } from '../library/arithmetic-multiply';
 import { factorPower } from '../numerics/numeric';
+import { add } from '../numerics/terms';
 
 /**
  * BoxedNumber

@@ -163,3 +163,15 @@ export class Terms {
     );
   }
 }
+
+export function add(...xs: ReadonlyArray<BoxedExpression>): BoxedExpression {
+  console.assert(xs.length > 0);
+
+  return new Terms(xs[0].engine, xs).asExpression();
+}
+
+export function addN(...xs: ReadonlyArray<BoxedExpression>): BoxedExpression {
+  console.assert(xs.length > 0);
+
+  return new Terms(xs[0].engine, xs).N();
+}

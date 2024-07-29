@@ -1,7 +1,7 @@
 import { asMachineInteger } from '../boxed-expression/numerics';
 import { isRelationalOperator } from '../boxed-expression/utils';
-import { add } from '../library/arithmetic-add';
 import { mul } from '../library/arithmetic-multiply';
+import { add } from '../numerics/terms';
 import { BoxedExpression, IComputeEngine } from '../public';
 import { Product } from './product';
 

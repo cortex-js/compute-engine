@@ -6,13 +6,13 @@ import {
 } from '../public';
 
 import {
-  xop,
-  xhead,
+  operand,
+  operator,
   getSequence,
   dictionary,
   stringValue,
   machineValue,
-  xops,
+  operands,
   isEmptySequence,
   symbol,
 } from '../../../math-json/utils';
@@ -143,15 +143,13 @@ export const DEFINITIONS_OTHERS: LatexDictionary = [
     },
     serialize: (serializer: Serializer, expr: Expression): string => {
       let result = '\\partial';
-      const fn = xop(expr, 1);
-      const vars = xop(expr, 2);
-      const degree = xop(expr, 3);
+      const fn = operand(expr, 1);
+      const vars = operand(expr, 2);
+      const degree = operand(expr, 3);
       if (vars !== null && vars !== 'Nothing') {
-        if (xhead(vars) === 'List') {
+        if (operator(vars) === 'List') {
           result +=
-            '_{' +
-            serializer.serialize(['Sequence', ...(xops(vars) ?? [])]) +
-            '}';
+            '_{' + serializer.serialize(['Sequence', ...operands(vars)]) + '}';
         } else {
           result += '_{' + serializer.serialize(vars) + '}';
         }
@@ -298,9 +296,9 @@ export const DEFINITIONS_OTHERS: LatexDictionary = [
   {
     name: 'Style',
     serialize: (serializer, expr): string => {
-      let result = serializer.serialize(xop(expr, 1));
+      let result = serializer.serialize(operand(expr, 1));
 
-      const dict = dictionary(xop(expr, 2));
+      const dict = dictionary(operand(expr, 2));
       if (dict === null) return result;
 
       if (stringValue(dict.display) === 'block')
@@ -377,12 +375,12 @@ export const DEFINITIONS_OTHERS: LatexDictionary = [
     // `["HorizontalSpacing", number]` -> indicate a space of mu units
     // `["HorizontalSpacing", expr, 'op'|'bin'|rel]` -> indicate a spacing around and expression, i.e. `\mathbin{x}`, etc...
     serialize: (serializer, expr): string => {
-      if (xop(expr, 2)) {
+      if (operand(expr, 2)) {
         // @todo: handle op(expr,2) == 'op', 'bin', etc...
-        return serializer.serialize(xop(expr, 1));
+        return serializer.serialize(operand(expr, 1));
       }
 
-      const v = machineValue(xop(expr, 1));
+      const v = machineValue(operand(expr, 1));
       if (v === null) return '';
       return (
         {

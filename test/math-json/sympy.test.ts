@@ -167,7 +167,7 @@ describe('Sympy serializing Baseform', () => {
     expect(serialize(['BaseForm', 42])).toMatch('42');
   });
   test('', () => {
-    expect(serialize(['BaseForm'])).toMatchInlineSnapshot(`"BaseForm()"`);
+    expect(serialize(['BaseForm'])).toMatchInlineSnapshot(`""`);
   });
   test('', () => {
     expect(serialize(['BaseForm', -32, 10])).toMatchInlineSnapshot(

@@ -44,9 +44,9 @@ import { factor } from './factor';
 import { negate } from '../symbolic/negate';
 import { Product } from '../symbolic/product';
 import { asFloat, asMachineInteger, asRational, signDiff } from './numerics';
-import { add } from '../library/arithmetic-add';
 import { canonicalMultiply, mul } from '../library/arithmetic-multiply';
 import { NumericValue } from '../numeric-value/public';
+import { add } from '../numerics/terms';
 
 /**
  * A boxed function represent an expression that can be

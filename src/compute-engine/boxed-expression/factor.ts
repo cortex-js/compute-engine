@@ -2,8 +2,8 @@ import { BoxedExpression } from './public';
 import { isRelationalOperator } from './utils';
 import { Product, commonTerms } from '../symbolic/product';
 import { NumericValue } from '../numeric-value/public';
-import { add } from '../library/arithmetic-add';
 import { canonicalMultiply } from '../library/arithmetic-multiply';
+import { add } from '../numerics/terms';
 
 /** Combine rational expressions into a single fraction */
 export function together(op: BoxedExpression): BoxedExpression {

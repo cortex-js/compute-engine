@@ -119,6 +119,12 @@ export type MathJsonDictionary = {
   dict: { [key: string]: Expression };
 } & Attributes;
 
+export type ExpressionObject =
+  | MathJsonNumber
+  | MathJsonString
+  | MathJsonSymbol
+  | MathJsonFunction
+  | MathJsonDictionary;
 /**
  * A MathJSON expression is a recursive data structure.
  *
@@ -128,16 +134,12 @@ export type MathJsonDictionary = {
  * @category MathJSON
  */
 export type Expression =
-  // Shortcut for MathJsonNumber without metadata and in the JavaScript
-  // 64-bit float range.
+  | ExpressionObject
+  // Shortcut for MathJsonNumber in the JavaScript 64-bit float range.
   | number
-  // Shortcut for a MathJsonSymbol with no metadata
+  // Shortcut for a MathJsonSymbol
   | MathJsonIdentifier
   // Shortcut for a string or a number
   | string
-  | MathJsonNumber
-  | MathJsonString
-  | MathJsonSymbol
-  | MathJsonFunction
-  | MathJsonDictionary
+  // Shortcut for a function
   | readonly [MathJsonIdentifier, ...Expression[]];

@@ -1,11 +1,11 @@
 import { Expression } from './types';
-import { xop, machineValue, symbol, xhead, xops } from './utils';
+import { operand, machineValue, symbol, operator, operands } from './utils';
 
 function serializeBaseForm(expr: Expression): string | null {
-  if (xhead(expr) !== 'BaseForm') return null;
-  const op1 = machineValue(xop(expr, 1));
+  if (operator(expr) !== 'BaseForm') return null;
+  const op1 = machineValue(operand(expr, 1));
   if (op1 === null || !Number.isInteger(op1) || op1 < 0) return null;
-  const base = machineValue(xop(expr, 2)) ?? 10;
+  const base = machineValue(operand(expr, 2)) ?? 10;
   if (base === 2) return `0b${op1.toString(2)}`;
   if (base === 8) return `0o${op1.toString(8)}`;
   if (base === 16) return `0x${op1.toString(16)}`;
@@ -13,9 +13,9 @@ function serializeBaseForm(expr: Expression): string | null {
 }
 
 function serializeNumber(expr: Expression): string | null {
-  if (xhead(expr) === 'Complex') {
-    const op1 = xop(expr, 1);
-    const op2 = xop(expr, 2);
+  if (operator(expr) === 'Complex') {
+    const op1 = operand(expr, 1);
+    const op2 = operand(expr, 2);
     if (op1 === null || op2 === null) return null;
     if (machineValue(op1) === 0) {
       return serializeNumber(op2) + 'j';
@@ -24,15 +24,15 @@ function serializeNumber(expr: Expression): string | null {
     return '(' + serializeNumber(op1) + ' + ' + serializeNumber(op2) + 'j)';
   }
 
-  if (xhead(expr) === 'Rational') {
-    const op1 = xop(expr, 1);
-    const op2 = xop(expr, 2);
+  if (operator(expr) === 'Rational') {
+    const op1 = operand(expr, 1);
+    const op2 = operand(expr, 2);
     if (op1 === null || op2 === null) return null;
     return `Rational(${serializeNumber(op1)},${serializeNumber(op2)})`;
   }
 
-  if (xhead(expr) === 'Number') {
-    const op1 = machineValue(xop(expr, 1));
+  if (operator(expr) === 'Number') {
+    const op1 = machineValue(operand(expr, 1));
     if (op1 === null) return null;
     return op1.toString();
   }
@@ -54,7 +54,7 @@ function serializeFunction(expr: Expression): string | null {
   const result = serializeBaseForm(expr);
   if (result !== null) return result;
 
-  const h = xhead(expr);
+  const h = operator(expr);
   if (!h) return null;
 
   // @todo Convert special head:
@@ -62,8 +62,8 @@ function serializeFunction(expr: Expression): string | null {
   // List, Tuple, Pair, KeyValuePair,
   // String, Number,
 
-  const args = xops(expr);
-  if (args === null) return null;
+  const args = operands(expr);
+  if (args.length === 0) return null;
   return `${h}(${args.map((x) => serializeExpression(x) ?? '')})`;
   // @todo lambdas
 }

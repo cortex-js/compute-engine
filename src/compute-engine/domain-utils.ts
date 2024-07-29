@@ -10,7 +10,7 @@ import type {
   IComputeEngine,
   SemiBoxedExpression,
 } from './public';
-import { xops, xhead, xnops } from '../math-json/utils';
+import { operands, operator, nops } from '../math-json/utils';
 
 /**
  * Determine the numeric domain of a number.
@@ -109,28 +109,28 @@ export function functionDomain(
   const result = ce.domain(allParams[allParams.length - 1]);
 
   for (const arg of allParams.slice(0, -1)) {
-    if (xhead(arg) === 'OptArg') {
+    if (operator(arg) === 'OptArg') {
       if (optParams.length > 0)
         throw Error(`Unexpected multiple OptArg in domain ${dom}`);
       if (restParam)
         throw Error(`Unexpected OptArg after VarArg in domain ${dom}`);
-      if (xnops(arg) === 0)
+      if (nops(arg) === 0)
         throw Error(`Unexpected empty OptArg in domain ${dom}`);
-      for (const optParam of xops(arg)!) {
-        if (xhead(optParam) === 'OptArg')
+      for (const optParam of operands(arg)) {
+        if (operator(optParam) === 'OptArg')
           throw Error(`Unexpected OptArg of OptArg in domain ${dom}`);
-        if (xhead(optParam) === 'VarArg')
+        if (operator(optParam) === 'VarArg')
           throw Error(
             `Unexpected superfluous OptArg of VarArg in domain ${dom}`
           );
         optParams.push(ce.domain(optParam as DomainExpression));
       }
-    } else if (xhead(arg) === 'VarArg') {
-      const params = xops(arg)!;
+    } else if (operator(arg) === 'VarArg') {
+      const params = operands(arg);
       if (params.length !== 1) throw Error(`Invalid VarArg in domain ${dom}`);
-      if (xhead(params[0]) === 'OptArg')
+      if (operator(params[0]) === 'OptArg')
         throw Error(`Unexpectedf VarArg of OptArg in domain ${dom}`);
-      if (xhead(params[0]) === 'VarArg')
+      if (operator(params[0]) === 'VarArg')
         throw Error(`Unexpected VarArg of VarArg in domain ${dom}`);
 
       restParam = ce.domain(params[0] as DomainExpression);

@@ -397,7 +397,9 @@ function serializeJsonFunction(
 
   // Determine if we need some LaTeX metadata
   if (options.metadata.includes('latex')) {
-    md.latex = _escapeJsonString(md.latex ?? ce.box({ fn }).latex);
+    md.latex = _escapeJsonString(
+      md.latex ?? ce.box({ fn } as Expression).latex
+    );
   } else md.latex = '';
 
   // Determine if we have some wikidata metadata
@@ -409,10 +411,10 @@ function serializeJsonFunction(
 
   // No shorthand allowed, or some metadata to include
   if (md.latex && md.wikidata)
-    return { fn, latex: md.latex, wikidata: md.wikidata };
-  if (md.latex) return { fn, latex: md.latex };
-  if (md.wikidata) return { fn, wikidata: md.wikidata };
-  return { fn };
+    return { fn, latex: md.latex, wikidata: md.wikidata } as Expression;
+  if (md.latex) return { fn, latex: md.latex } as Expression;
+  if (md.wikidata) return { fn, wikidata: md.wikidata } as Expression;
+  return { fn } as Expression;
 }
 
 function serializeJsonString(

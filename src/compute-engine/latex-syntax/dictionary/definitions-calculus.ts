@@ -1,10 +1,10 @@
 import { Expression } from '../../../math-json/types';
 import {
-  xhead,
+  operator,
   isEmptySequence,
-  xnops,
-  xop,
-  xops,
+  nops,
+  operand,
+  operands,
   subs,
   symbol,
 } from '../../../math-json/utils';
@@ -47,12 +47,12 @@ function parseIntegral(command: string, n = 1) {
     let [fn, index] = parseIntegralBody(parser, n);
 
     if (fn && !index) {
-      if (xhead(fn) === 'Add' || xhead(fn) === 'Subtract') {
+      if (operator(fn) === 'Add' || operator(fn) === 'Subtract') {
         // If the function is an addition, it could appear in any of the terms,
         // e.g. `\int \sin xdx + 1`
         const newOp: Expression[] = [];
         const rest: Expression[] = [];
-        for (const op of xops(fn) ?? []) {
+        for (const op of operands(fn)) {
           if (index) rest.push(op);
           else {
             let op2: Expression | null;
@@ -72,12 +72,12 @@ function parseIntegral(command: string, n = 1) {
             ...rest,
           ];
         }
-      } else if (xhead(fn) === 'Divide') {
+      } else if (operator(fn) === 'Divide') {
         // We recognize \frac{dx}{x} as an integral
         let altNumerator: Expression | null;
-        [altNumerator, index] = parseIntegralBodyExpression(xop(fn, 1)!);
+        [altNumerator, index] = parseIntegralBodyExpression(operand(fn, 1)!);
         if (altNumerator !== null && index !== null) {
-          fn = ['Divide', altNumerator, xop(fn, 2)!];
+          fn = ['Divide', altNumerator, operand(fn, 2)!];
         }
       }
     }
@@ -175,18 +175,18 @@ function parseIndexes(parser: Parser, _n = 1): string[] {
 function parseIntegralBodyExpression(
   expr: Expression
 ): [body: Expression | null, index: string | null] {
-  const h = xhead(expr);
-  const op1 = xop(expr, 1);
+  const h = operator(expr);
+  const op1 = operand(expr, 1);
   if (!op1) return [expr, null];
 
-  if (h === 'Sequence' && xnops(expr) === 1) {
+  if (h === 'Sequence' && nops(expr) === 1) {
     return parseIntegralBodyExpression(op1);
   }
 
   if (h === 'Multiply' || h === 'InvisibleOperator') {
     // Handle the case `3xdx` where the `dx` is the last term of a
     // multiplication (in a subexpression, i.e. `\sin 3xdx`)
-    const args = xops(expr);
+    const args = operands(expr);
     if (args && args.length > 1) {
       const sym = symbol(args[args.length - 2]);
       if (sym === 'd' || sym === 'd_upright') {
@@ -204,11 +204,14 @@ function parseIntegralBodyExpression(
     const [fn2, index] = parseIntegralBodyExpression(op1);
     if (index) {
       if (!fn2) return [null, index];
-      return [['Delimiter', ['Sequence', fn2], ...xops(expr)!.slice(1)], index];
+      return [
+        ['Delimiter', ['Sequence', fn2], ...operands(expr).slice(1)],
+        index,
+      ];
     }
   } else if (h === 'Add') {
-    const args = xops(expr);
-    if (args && args.length > 0) {
+    const args = operands(expr);
+    if (args.length > 0) {
       const [fn2, index] = parseIntegralBodyExpression(args[args.length - 1]);
       if (index) {
         if (fn2) return [['Add', ...args.slice(0, -1), fn2], index];
@@ -221,15 +224,15 @@ function parseIntegralBodyExpression(
     if (index) return [fn2 ? ['Negate', fn2] : null, index];
   } else if (h === 'Divide') {
     const [fn2, index] = parseIntegralBodyExpression(op1);
-    if (index) return [['Divide', fn2 ?? 1, xop(expr, 2)!], index];
+    if (index) return [['Divide', fn2 ?? 1, operand(expr, 2)!], index];
   } else {
     // Some other function, e.g. trig function, etc...
-    const args = xops(expr);
-    if (args?.length === 1) {
+    const args = operands(expr);
+    if (args.length === 1) {
       //If it has a single argument, we'll check if it includes an index
       // e.g. \sin 2xdx
       const [arg2, index] = parseIntegralBodyExpression(args[0]);
-      if (index) return [[xhead(expr), arg2] as Expression, index];
+      if (index) return [[operator(expr), arg2] as Expression, index];
     }
   }
 
@@ -238,26 +241,26 @@ function parseIntegralBodyExpression(
 
 function serializeIntegral(command: string) {
   return (serializer: Serializer, expr: Expression): string => {
-    if (!xop(expr, 1)) return command;
+    if (!operand(expr, 1)) return command;
 
-    let arg = xop(expr, 2);
-    const h = xhead(arg);
+    let arg = operand(expr, 2);
+    const h = operator(arg);
     let indexExpr: Expression | null = null;
     if (h === 'Tuple' || h === 'Triple' || h === 'Pair' || h === 'Single') {
-      indexExpr = xop(arg, 1);
+      indexExpr = operand(arg, 1);
     } else if (h === 'Hold') {
-      indexExpr = xop(arg, 1);
+      indexExpr = operand(arg, 1);
     } else {
-      indexExpr = xop(arg, 1) ?? 'x';
+      indexExpr = operand(arg, 1) ?? 'x';
       arg = null;
     }
-    if (xhead(indexExpr) === 'Hold') indexExpr = xop(indexExpr, 1);
+    if (operator(indexExpr) === 'Hold') indexExpr = operand(indexExpr, 1);
 
     const index: string | null = indexExpr !== null ? symbol(indexExpr) : null;
 
-    let fn = xop(expr, 1);
-    if (xhead(fn) === 'Lambda' && xop(fn, 1))
-      fn = subs(xop(fn, 1)!, { _: index ?? 'x', _1: index ?? 'x' });
+    let fn = operand(expr, 1);
+    if (operator(fn) === 'Lambda' && operand(fn, 1))
+      fn = subs(operand(fn, 1)!, { _: index ?? 'x', _1: index ?? 'x' });
 
     if (!arg) {
       if (!index || index === 'Nothing')
@@ -271,16 +274,18 @@ function serializeIntegral(command: string) {
       ]);
     }
 
-    const subSymbol = xop(arg, 2) ? symbol(xop(arg, 2)) : null;
+    const subSymbol = operand(arg, 2) ? symbol(operand(arg, 2)) : null;
     let sub =
-      arg && subSymbol !== 'Nothing' ? serializer.serialize(xop(arg, 2)) : '';
+      arg && subSymbol !== 'Nothing'
+        ? serializer.serialize(operand(arg, 2))
+        : '';
 
     if (sub.length > 0) sub = `_{${sub}}`;
 
     let sup = '';
-    const supSymbol = xop(arg, 3) ? symbol(xop(arg, 3)) : null;
-    if (xop(arg, 3) && supSymbol !== 'Nothing')
-      sup = `^{${serializer.serialize(xop(arg, 3))}}`;
+    const supSymbol = operand(arg, 3) ? symbol(operand(arg, 3)) : null;
+    if (operand(arg, 3) && supSymbol !== 'Nothing')
+      sup = `^{${serializer.serialize(operand(arg, 3))}}`;
 
     return joinLatex([
       command,

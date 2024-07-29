@@ -5,7 +5,7 @@ import { isNumberExpression, isNumberObject } from '../../math-json/utils';
 import { bigint } from '../numerics/numeric-bigint';
 import { joinLatex } from '../latex-syntax/tokenizer';
 import { DEFINITIONS_INEQUALITIES } from '../latex-syntax/dictionary/definitions-relational-operators';
-import { BoxedExpression, IComputeEngine } from './public';
+import type { BoxedExpression, IComputeEngine } from './public';
 import { MACHINE_PRECISION } from '../numerics/numeric';
 
 export function isBoxedExpression(x: unknown): x is BoxedExpression {

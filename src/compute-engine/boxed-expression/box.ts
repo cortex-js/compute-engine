@@ -14,7 +14,7 @@ import { BoxedFunction } from './boxed-function';
 import { BoxedNumber } from './boxed-number';
 import { BoxedString } from './boxed-string';
 import { Expression, MathJsonNumber } from '../../math-json/types';
-import { missingIfEmpty, xops } from '../../math-json/utils';
+import { missingIfEmpty, operands } from '../../math-json/utils';
 import {
   Rational,
   isBigRational,
@@ -461,7 +461,7 @@ export function box(
     if (isBigRational(expr)) return ce.number(expr);
 
     return canonicalForm(
-      boxFunction(ce, expr[0], xops(expr)!, { canonical }),
+      boxFunction(ce, expr[0], operands(expr), { canonical }),
       options.canonical!
     );
   }

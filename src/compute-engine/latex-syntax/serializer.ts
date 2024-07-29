@@ -1,13 +1,13 @@
 import type { Expression } from '../../math-json/types';
 import {
-  xnops,
+  nops,
   dictionary,
   stringValue,
-  xhead,
+  operator,
   symbol,
   isNumberObject,
   isSymbolObject,
-  xops,
+  operands,
   isNumberExpression,
   machineValue,
 } from '../../math-json/utils';
@@ -100,7 +100,7 @@ export class Serializer {
         return this.wrap(expr);
       return this.serialize(expr);
     }
-    const name = xhead(expr);
+    const name = operator(expr);
     if (name && name !== 'Delimiter' && name !== 'Subscript') {
       const def = this.dictionary.ids.get(name);
       if (
@@ -138,8 +138,8 @@ export class Serializer {
     if (isNum && !/^(-|\.)/.test(exprStr)) return exprStr;
 
     // If the default Delimiter (i.e. using parens), don't wrap
-    const h = xhead(expr);
-    if (h === 'Delimiter' && xnops(expr) === 1) return exprStr;
+    const h = operator(expr);
+    if (h === 'Delimiter' && nops(expr) === 1) return exprStr;
     if (
       h !== 'Add' &&
       h !== 'Negate' &&
@@ -187,7 +187,9 @@ export class Serializer {
 
   wrapArguments(expr: Expression): string {
     return this.wrapString(
-      (xops(expr) ?? []).map((x) => this.serialize(x)).join(', '),
+      operands(expr)
+        .map((x) => this.serialize(x))
+        .join(', '),
       this.options.applyFunctionStyle(expr, this.level)
     );
   }
@@ -220,7 +222,7 @@ export class Serializer {
     // It's a function without a serializer.
     // It may have come from `getIdentifierType()`
     // Serialize the arguments as function arguments
-    const h = xhead(expr);
+    const h = operator(expr);
     if (typeof h === 'string')
       return serializeIdentifier(h, 'auto') + this.wrapArguments(expr);
 
@@ -229,17 +231,17 @@ export class Serializer {
     // See https://en.wikipedia.org/wiki/Apply
     //
 
-    if (xhead(h) === 'InverseFunction' || xhead(h) === 'Derivative') {
+    if (operator(h) === 'InverseFunction' || operator(h) === 'Derivative') {
       // For inverse functions and derivatives display as a regular function,
       // e.g. \sin^{-1} x, f'(x) instead of x \rhd f' and x \rhd \sin^{-1}
 
       return (
-        this.serializeFunction(h!, this.dictionary.ids.get(xhead(h))) +
+        this.serializeFunction(h!, this.dictionary.ids.get(operator(h))) +
         this.wrapArguments(expr)
       );
     }
 
-    const args = xops(expr) ?? [];
+    const args = operands(expr);
     if (args.length === 1) {
       // If there's a single argument, we can use the pipeline operator
       // (i.e. `\rhd` `|>`)
@@ -309,7 +311,7 @@ export class Serializer {
         //
         // 5. Is it a function?
         //
-        const fnName = xhead(expr);
+        const fnName = operator(expr);
         if (fnName) {
           const def = this.dictionary.ids.get(fnName);
           return this.serializeFunction(expr, def);

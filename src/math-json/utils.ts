@@ -67,11 +67,13 @@ export function stripText(
   if (expr === null || expr === undefined || stringValue(expr) !== null)
     return null;
 
-  const h = xhead(expr);
+  const h = operator(expr);
   if (!h) return expr;
   return [
     h,
-    ...(xops(expr) ?? []).map((x) => stripText(x)!).filter((x) => x !== null),
+    ...operands(expr)
+      .map((x) => stripText(x)!)
+      .filter((x) => x !== null),
   ];
 }
 
@@ -83,7 +85,9 @@ export function stripText(
  * Examples:
  * * `["Negate", 5]`  -> `"Negate"`
  */
-export function xhead(expr: Expression | null | undefined): MathJsonIdentifier {
+export function operator(
+  expr: Expression | null | undefined
+): MathJsonIdentifier {
   if (Array.isArray(expr)) return expr[0];
 
   if (expr === null || expr === undefined) return '';
@@ -94,42 +98,29 @@ export function xhead(expr: Expression | null | undefined): MathJsonIdentifier {
 }
 
 /**
- * Return all the elements but the first one, i.e. the arguments of a
- * function.
+ * Return the arguments of a function, or an empty array if not a function
+ * or no arguments.
  */
-export function xops(expr: Expression | null | undefined): Expression[] | null {
+export function operands(expr: Expression | null): Expression[] {
   if (Array.isArray(expr)) return expr.slice(1) as Expression[];
+  if (expr !== undefined && isFunctionObject(expr)) return expr.fn.slice(1);
 
-  if (expr === null || expr === undefined) return null;
-
-  if (isFunctionObject(expr)) return expr.fn.slice(1);
-
-  return null;
+  return [];
 }
 
-/** Return the nth argument of a function expression */
-export function xop(
+/** Return the nth operand of a function expression */
+export function operand(
   expr: Expression | null | undefined,
   n: number
 ): Expression | null {
   if (Array.isArray(expr)) return expr[n] ?? null;
 
-  if (expr === null || expr === undefined) return null;
-
-  if (isFunctionObject(expr)) return expr.fn[n] ?? null;
+  if (expr !== undefined && isFunctionObject(expr)) return expr.fn[n] ?? null;
 
   return null;
 }
 
-export function xop1(expr: Expression | null | undefined): Expression | null {
-  return xop(expr, 1);
-}
-
-export function xop2(expr: Expression | null | undefined): Expression | null {
-  return xop(expr, 2);
-}
-
-export function xnops(expr: Expression | null | undefined): number {
+export function nops(expr: Expression | null | undefined): number {
   if (expr === null || expr === undefined) return 0;
   if (Array.isArray(expr)) return Math.max(0, expr.length - 1);
   if (isFunctionObject(expr)) return Math.max(0, expr.fn.length - 1);
@@ -138,7 +129,7 @@ export function xnops(expr: Expression | null | undefined): number {
 
 export function unhold(expr: Expression | null | undefined): Expression | null {
   if (expr === null || expr === undefined) return null;
-  if (xhead(expr) === 'Hold') return xop(expr, 1);
+  if (operator(expr) === 'Hold') return operand(expr, 1);
   return expr;
 }
 
@@ -163,11 +154,12 @@ export function symbol(expr: Expression | null | undefined): string | null {
 function keyValuePair(
   expr: Expression | null
 ): null | [key: string, value: Expression] {
-  const h = xhead(expr);
+  const h = operator(expr);
   if (h === 'KeyValuePair' || h === 'Tuple' || h === 'Pair') {
-    const key = stringValue(xop1(expr));
+    const [k, v] = operands(expr);
+    const key = stringValue(k);
     if (!key) return null;
-    return [key, xop2(expr) ?? 'Nothing'];
+    return [key, v ?? 'Nothing'];
   }
 
   return null;
@@ -182,11 +174,11 @@ export function dictionary(
   const kv = keyValuePair(expr);
   if (kv) return { [kv[0]]: kv[1] };
 
-  const h = xhead(expr);
+  const h = operator(expr);
   if (h === 'Dictionary') {
     const result = {};
-    for (let i = 1; i < xnops(expr); i++) {
-      const kv = keyValuePair(xop(expr, i));
+    for (let i = 1; i < nops(expr); i++) {
+      const kv = keyValuePair(operand(expr, i));
       if (kv) result[kv[0]] = kv[1];
     }
 
@@ -255,40 +247,45 @@ export function rationalValue(
 
   if (symbol(expr) === 'Half') return [1, 2];
 
-  const h = xhead(expr);
+  const h = operator(expr);
   if (!h) return null;
 
   let numer: number | null = null;
   let denom: number | null = null;
 
   if (h === 'Negate') {
-    const r = rationalValue(xop1(expr));
+    const r = rationalValue(operands(expr)[0]);
     if (r) return [-r[0], r[1]];
   }
 
   if (h === 'Rational' || h === 'Divide') {
-    numer = machineValue(xop1(expr)) ?? NaN;
-    denom = machineValue(xop2(expr)) ?? NaN;
+    const [n, d] = operands(expr);
+    numer = machineValue(n) ?? NaN;
+    denom = machineValue(d) ?? NaN;
   }
 
   if (h === 'Power') {
-    const exponent = machineValue(xop2(expr));
+    const [base, exp] = operands(expr);
+    const exponent = machineValue(exp);
     if (exponent === 1) {
-      numer = machineValue(xop1(expr));
+      numer = machineValue(base);
       denom = 1;
     } else if (exponent === -1) {
       numer = 1;
-      denom = machineValue(xop1(expr));
+      denom = machineValue(base);
     }
   }
 
-  if (
-    h === 'Multiply' &&
-    xhead(xop2(expr)) === 'Power' &&
-    machineValue(xop2(xop2(expr))) === -1
-  ) {
-    numer = machineValue(xop1(expr));
-    denom = machineValue(xop1(xop2(expr)));
+  if (h === 'Multiply') {
+    const [op1, op2] = operands(expr);
+
+    if (operator(op2) === 'Power') {
+      const [op21, op22] = operands(op2);
+      if (machineValue(op22) === -1) {
+        numer = machineValue(op1);
+        denom = machineValue(op21);
+      }
+    }
   }
 
   if (numer === null || denom === null) return null;
@@ -302,11 +299,11 @@ export function subs(
   expr: Expression,
   s: { [symbol: string]: Expression }
 ): Expression {
-  const h = xhead(expr);
+  const h = operator(expr);
   if (h)
     return [
       subs(h, s) as MathJsonIdentifier,
-      ...(xops(expr) ?? []).map((x) => subs(x, s)),
+      ...operands(expr).map((x) => subs(x, s)),
     ];
 
   const dict = dictionary(expr);
@@ -350,14 +347,14 @@ export function foldAssociativeOperator(
   lhs: Expression,
   rhs: Expression
 ): Expression {
-  const lhsName = xhead(lhs);
-  const rhsName = xhead(rhs);
+  const lhsName = operator(lhs);
+  const rhsName = operator(rhs);
 
   if (lhsName === op && rhsName === op)
-    return [op, ...(xops(lhs) ?? []), ...(xops(rhs) ?? [])];
+    return [op, ...operands(lhs), ...operands(rhs)];
 
-  if (lhsName === op) return [op, ...(xops(lhs) ?? []), rhs];
-  if (rhsName === op) return [op, lhs, ...(xops(rhs) ?? [])];
+  if (lhsName === op) return [op, ...operands(lhs), rhs];
+  if (rhsName === op) return [op, lhs, ...operands(rhs)];
   return [op, lhs, rhs];
 }
 
@@ -365,21 +362,21 @@ export function foldAssociativeOperator(
 export function getSequence(expr: Expression | null): Expression[] | null {
   if (expr === null) return null;
 
-  let h = xhead(expr);
+  let h = operator(expr);
   if (h === 'Delimiter') {
-    expr = xop(expr, 1);
+    expr = operand(expr, 1);
     if (expr === null) return [];
-    h = xhead(expr);
+    h = operator(expr);
     if (h !== 'Sequence') return [expr];
   }
 
   if (h !== 'Sequence') return null;
 
-  return xops(expr) ?? [];
+  return operands(expr);
 }
 
 export function isEmptySequence(expr: Expression | null): boolean {
-  return xhead(expr) === 'Sequence' && xnops(expr) === 0;
+  return operator(expr) === 'Sequence' && nops(expr) === 0;
 }
 
 export function missingIfEmpty(expr: Expression | null): Expression {

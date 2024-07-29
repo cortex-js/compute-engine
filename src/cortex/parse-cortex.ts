@@ -31,7 +31,7 @@ import {
 import { Grammar } from '../point-free-parser/grammar';
 // import { parseShebang } from '../fixed-point-parser/whitespace-parsers';
 import {
-  xop,
+  operand,
   machineValue,
   stringValue,
   isStringObject,
@@ -165,14 +165,16 @@ grammar.rule(
       } else if (fn.value === '#env') {
         if ('process' in globalThis && process.env) {
           return {
-            str: process.env[expressionToString(xop(args.value!, 1))] ?? '',
+            str: process.env[expressionToString(operand(args.value!, 1))] ?? '',
           };
         }
       } else if (fn.value === '#navigator') {
         // eslint-disable-next-line no-restricted-globals
         if ('navigator' in globalThis) {
           // eslint-disable-next-line no-restricted-globals
-          return { str: navigator[expressionToString(xop(args.value!, 1))] };
+          return {
+            str: navigator[expressionToString(operand(args.value!, 1))],
+          };
         }
       }
       return 'Nothing';

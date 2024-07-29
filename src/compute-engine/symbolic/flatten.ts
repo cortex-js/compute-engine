@@ -1,4 +1,4 @@
-import { BoxedExpression, SemiBoxedExpression } from '../public';
+import { BoxedExpression } from '../public';
 
 /**
  *

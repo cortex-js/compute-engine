@@ -1,11 +1,10 @@
-import type { Expression } from '../../math-json/types';
+import type { Expression, ExpressionObject } from '../../math-json/types';
 import {
   getSequence,
-  xhead,
   missingIfEmpty,
-  xnops,
-  xop1,
-  xops,
+  operator,
+  operands,
+  nops,
   symbol,
 } from '../../math-json/utils';
 
@@ -680,7 +679,7 @@ export class _Parser implements Parser {
       if (this.matchBoundary()) return expr ?? ['Sequence'];
       // Try to find the boundary (or the end)
       while (!this.matchBoundary() && !this.atEnd) this.nextToken();
-      if (xhead(expr) === 'Error') return expr;
+      if (operator(expr) === 'Error') return expr;
       const err = this.error('expected-closing-delimiter', start);
       return expr ? ['InvisibleOperator', expr, err] : err;
     }
@@ -1336,12 +1335,13 @@ export class _Parser implements Parser {
     // We are looking for an expression inside an optional pair of `()`
     // (i.e. trig functions, as in `\cos x`.)
     if (kind === 'implicit') {
-      if (xhead(group) === 'Delimiter') {
-        if (xhead(xop1(group)) === 'Sequence') {
-          const seq = xop1(xop1(group));
+      if (operator(group) === 'Delimiter') {
+        const op1 = operands(group)[0];
+        if (operator(op1) === 'Sequence') {
+          const seq = operands(op1)[0];
           return seq ? [seq] : [];
         }
-        return xop1(group) ? [xop1(group)!] : [];
+        return op1 ? [op1] : [];
       }
 
       // Was there a matchfix? the "group" is the argument, i.e.
@@ -1626,7 +1626,7 @@ export class _Parser implements Parser {
 
       if (defs) {
         const nonEmptySuperscripts = superscripts.filter(
-          (x) => !(xhead(x) === 'Sequence' && xnops(x) === 0)
+          (x) => !(operator(x) === 'Sequence' && nops(x) === 0)
         ) as Expression[];
         if (nonEmptySuperscripts.length !== 0) {
           const superscriptExpression: Expression =
@@ -1967,7 +1967,7 @@ export class _Parser implements Parser {
       // If we got an empty sequence, ignore it.
       // This is returned by some purely presentational commands,
       // for example `\displaystyle`
-      if (xhead(lhs) === 'Sequence' && xnops(lhs) === 0) lhs = null;
+      if (operator(lhs) === 'Sequence' && nops(lhs) === 0) lhs = null;
     }
 
     //
@@ -1988,12 +1988,16 @@ export class _Parser implements Parser {
               minPrec: MULTIPLICATION_PRECEDENCE,
             });
             if (rhs !== null) {
-              if (xhead(lhs) === 'InvisibleOperator') {
-                if (xhead(rhs) === 'InvisibleOperator')
-                  result = ['InvisibleOperator', ...xops(lhs)!, ...xops(rhs)!];
-                else result = ['InvisibleOperator', ...xops(lhs)!, rhs];
-              } else if (xhead(rhs) === 'InvisibleOperator') {
-                result = ['InvisibleOperator', lhs, ...xops(rhs)!];
+              if (operator(lhs) === 'InvisibleOperator') {
+                if (operator(rhs) === 'InvisibleOperator')
+                  result = [
+                    'InvisibleOperator',
+                    ...operands(lhs),
+                    ...operands(rhs),
+                  ];
+                else result = ['InvisibleOperator', ...operands(lhs), rhs];
+              } else if (operator(rhs) === 'InvisibleOperator') {
+                result = ['InvisibleOperator', lhs, ...operands(rhs)];
               } else result = ['InvisibleOperator', lhs, rhs];
             } else {
               if (result === null) {
@@ -2023,14 +2027,15 @@ export class _Parser implements Parser {
     if (!this.options.preserveLatex) return expr;
 
     const latex = this.latex(start, this.index);
+
     if (Array.isArray(expr)) {
-      expr = { latex, fn: expr };
+      expr = { latex, fn: expr } as Expression;
     } else if (typeof expr === 'number') {
       expr = { latex, num: Number(expr).toString() };
     } else if (typeof expr === 'string') {
       expr = { latex, sym: expr };
     } else if (typeof expr === 'object' && expr !== null) {
-      expr.latex = latex;
+      (expr as ExpressionObject).latex = latex;
     }
     return expr;
   }
@@ -2176,7 +2181,7 @@ export function parse(
   expr ??= ['Sequence'];
 
   if (options.preserveLatex) {
-    if (Array.isArray(expr)) expr = { latex, fn: expr };
+    if (Array.isArray(expr)) expr = { latex, fn: expr } as Expression;
     else if (typeof expr === 'number')
       expr = { latex, num: Number(expr).toString() };
     else if (
@@ -2186,7 +2191,8 @@ export function parse(
     )
       expr = { latex, str: expr.slice(1, -1) };
     else if (typeof expr === 'string') expr = { latex, sym: expr };
-    else if (typeof expr === 'object' && expr !== null) expr.latex = latex;
+    else if (typeof expr === 'object' && expr !== null)
+      (expr as ExpressionObject).latex = latex;
   }
 
   return expr;

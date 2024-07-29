@@ -33,8 +33,6 @@ import {
   evalSummation,
   canonicalSummation,
   canonicalAdd,
-  add,
-  addN,
 } from './arithmetic-add';
 import {
   evalProduct,
@@ -60,6 +58,7 @@ import {
   asRational,
   asBignum,
 } from '../boxed-expression/numerics';
+import { add, addN } from '../numerics/terms';
 
 // When considering processing an arithmetic expression, the following
 // are the core canonical arithmetic operations that should be considered:

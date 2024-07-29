@@ -2,6 +2,8 @@
 
 ### Breaking Changes
 
+- The utility function `head()` and `op()` have been renamed to `operator()` and
+  `operand()` respectively.
 - The methods for algebraic operations (`add`, `div`, `mul`, etc...) have been
   moved from the Compute Engine to the Boxed Expression class. Instead of
   calling `ce.add(a, b)`, call `a.add(b)`.

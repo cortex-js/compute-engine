@@ -1,6 +1,6 @@
 import { BoxedExpression, IComputeEngine } from '../public';
 import { order } from '../boxed-expression/order';
-import { add } from '../library/arithmetic-add';
+import { add } from '../numerics/terms';
 
 /**
  * Distribute `Negate` (multiply by -1) if expr is a number literal, an

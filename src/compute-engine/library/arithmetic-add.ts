@@ -6,7 +6,7 @@ import { MAX_SYMBOLIC_TERMS } from '../numerics/numeric';
 import { widen } from '../boxed-expression/boxed-domain';
 import { sortAdd } from '../boxed-expression/order';
 import { each, isCollection, isIndexableCollection } from '../collection-utils';
-import { Terms } from '../numerics/terms';
+import { add } from '../numerics/terms';
 
 import {
   MultiIndexingSet,
@@ -396,16 +396,4 @@ function getImaginaryCoef(expr: BoxedExpression): number {
   }
 
   return 0;
-}
-
-export function add(...xs: ReadonlyArray<BoxedExpression>): BoxedExpression {
-  console.assert(xs.length > 0);
-
-  return new Terms(xs[0].engine, xs).asExpression();
-}
-
-export function addN(...xs: ReadonlyArray<BoxedExpression>): BoxedExpression {
-  console.assert(xs.length > 0);
-
-  return new Terms(xs[0].engine, xs).N();
 }

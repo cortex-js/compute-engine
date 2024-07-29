@@ -7,10 +7,10 @@ import {
 } from '../public';
 import {
   getSequence,
-  xhead,
+  operator,
   missingIfEmpty,
-  xop,
-  xops,
+  operand,
+  operands,
   symbol,
 } from '../../../math-json/utils';
 import { Expression } from '../../../math-json';
@@ -186,8 +186,8 @@ export const DEFINITIONS_LOGIC: LatexDictionary = [
       const index = parser.index;
 
       const modulus = parser.parseExpression({ ...terminator, minPrec: 219 });
-      if (modulus && xhead(modulus) === 'Mod')
-        return ['Congruent', lhs, rhs, missingIfEmpty(xop(modulus, 1))];
+      if (modulus && operator(modulus) === 'Mod')
+        return ['Congruent', lhs, rhs, missingIfEmpty(operand(modulus, 1))];
 
       parser.index = index;
       return ['Equivalent', lhs, missingIfEmpty(rhs)] as Expression;
@@ -250,8 +250,8 @@ export const DEFINITIONS_LOGIC: LatexDictionary = [
     latexTrigger: ['\\delta', '_'],
     precedence: 200,
     serialize: (serializer: Serializer, expr: Expression) => {
-      const args = xops(expr);
-      if (args === null) return '\\delta';
+      const args = operands(expr);
+      if (args.length === 0) return '\\delta';
 
       // If only symbol arguments, just concatenate them
       // ['KroneckerDelta', 'n', 'm'] -> \delta_{nm}
@@ -276,8 +276,8 @@ export const DEFINITIONS_LOGIC: LatexDictionary = [
       if (seq && seq.length <= 2) return ['KroneckerDelta', ...seq];
 
       // \\delta_{nm}
-      if (xhead(group) === 'InvisibleOperator')
-        return ['KroneckerDelta', ...xops(group)!];
+      if (operator(group) === 'InvisibleOperator')
+        return ['KroneckerDelta', ...operands(group)];
 
       // \\delta_{n}
       if (group !== null) return ['KroneckerDelta', group];
@@ -301,7 +301,7 @@ export const DEFINITIONS_LOGIC: LatexDictionary = [
     //   return `[${serializer.serialize(arg)}]`;
     // },
     parse: (_parser, body) => {
-      const h = xhead(body);
+      const h = operator(body);
       if (!h) return null;
       if (!DEFINITIONS_INEQUALITIES.some((x) => x.name === h)) return null;
       return ['Boole', body];
@@ -313,7 +313,7 @@ export const DEFINITIONS_LOGIC: LatexDictionary = [
     openTrigger: '\\llbracket',
     closeTrigger: '\\rrbracket',
     parse: (_parser, body) => {
-      const h = xhead(body);
+      const h = operator(body);
       if (!h) return null;
       if (!DEFINITIONS_INEQUALITIES.some((x) => x.name === h)) return null;
       return ['Boole', body];

@@ -2,7 +2,7 @@ import Complex from 'complex.js';
 import { BoxedExpression, IComputeEngine } from '../public';
 import { isRelationalOperator } from '../boxed-expression/utils';
 import { mul } from '../library/arithmetic-multiply';
-import { add } from '../library/arithmetic-add';
+import { add } from '../numerics/terms';
 
 export type DataTypeMap = {
   float64: number;

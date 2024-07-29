@@ -32,7 +32,6 @@ import { domainToSignature, signatureToDomain } from '../domain-utils';
 import { match } from './match';
 import { canonicalDivide } from '../library/arithmetic-divide';
 import { negate } from '../symbolic/negate';
-import { add } from '../library/arithmetic-add';
 import { mul } from '../library/arithmetic-multiply';
 import { asFloat } from './numerics';
 import { NumericValue } from '../numeric-value/public';
@@ -40,6 +39,7 @@ import {
   isValidIdentifier,
   validateIdentifier,
 } from '../../math-json/identifiers';
+import { add } from '../numerics/terms';
 
 /**
  * BoxedSymbol
