@@ -195,6 +195,8 @@ export interface BoxedExpression {
    */
   toLatex(options?: Partial<SerializeLatexOptions>): LatexString;
 
+  verbatimLatex?: string;
+
   /** If `true`, this expression is in a canonical form. */
   get isCanonical(): boolean;
 

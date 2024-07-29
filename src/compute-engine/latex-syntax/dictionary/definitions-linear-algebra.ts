@@ -1,5 +1,5 @@
-import { Expression, op } from '../../../math-json';
-import { stringValue, operands } from '../../../math-json/utils';
+import { Expression } from '../../../math-json';
+import { stringValue, operands, operand } from '../../../math-json/utils';
 import { LatexDictionary, Parser, Serializer } from '../public';
 import { joinLatex } from '../tokenizer';
 import { DELIMITERS_SHORTHAND } from './definitions-core';
@@ -11,13 +11,13 @@ export const DEFINITIONS_LINEAR_ALGEBRA: LatexDictionary = [
   {
     name: 'Matrix',
     serialize: (serializer: Serializer, expr: Expression): string => {
-      const rows = operands(op(expr, 1));
+      const rows = operands(operand(expr, 1));
 
       return serializeTabular(
         serializer,
         rows,
-        stringValue(op(expr, 2)),
-        stringValue(op(expr, 3))
+        stringValue(operand(expr, 2)),
+        stringValue(operand(expr, 3))
       );
     },
   },
@@ -32,8 +32,8 @@ export const DEFINITIONS_LINEAR_ALGEBRA: LatexDictionary = [
       return serializeTabular(
         serializer,
         columns.map((column) => ['List', column]),
-        stringValue(op(expr, 2)),
-        stringValue(op(expr, 3))
+        stringValue(operand(expr, 2)),
+        stringValue(operand(expr, 3))
       );
     },
   },

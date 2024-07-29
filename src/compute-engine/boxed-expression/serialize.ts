@@ -1,11 +1,7 @@
 import Complex from 'complex.js';
 import { Decimal } from 'decimal.js';
 
-import {
-  Expression,
-  MathJsonFunction,
-  MathJsonIdentifier,
-} from '../../math-json/types';
+import { Expression } from '../../math-json/types';
 
 import {
   BoxedExpression,
@@ -29,13 +25,7 @@ import {
 
 import { Product } from '../symbolic/product';
 
-import { BoxedString } from './boxed-string';
-import { BoxedSymbol } from './boxed-symbol';
-import { BoxedNumber } from './boxed-number';
-import { BoxedFunction } from './boxed-function';
 import { BoxedTensor } from './boxed-tensor';
-import { BoxedDictionary } from './boxed-dictionary';
-import { _BoxedDomain } from './boxed-domain';
 import { order } from './order';
 
 function _escapeJsonString(s: undefined): undefined;
@@ -526,14 +516,14 @@ function serializeRepeatingDecimals(
 }
 
 function serializeDictionary(
-  expr: BoxedDictionary,
+  expr: BoxedExpression,
   options: Readonly<JsonSerializationOptions>
 ): Expression {
   const ce = expr.engine;
   // Is dictionary shorthand notation allowed?
   if (options.shorthands.includes('dictionary')) {
     const dict = {};
-    for (const key of expr.keys)
+    for (const key of expr.keys!)
       dict[key] = serializeJson(expr.engine, expr.getKey(key)!, options);
     return { dict };
   }
@@ -541,7 +531,7 @@ function serializeDictionary(
   // The dictionary shorthand is not allowed, output it as a "Dictionary"
   // function
   const kvs: BoxedExpression[] = [];
-  for (const key of expr.keys)
+  for (const key of expr.keys!)
     kvs.push(ce._fn('KeyValuePair', [ce.string(key), expr.getKey(key)!]));
 
   return serializeJsonFunction(ce, 'Dictionary', kvs, options, {
@@ -698,12 +688,18 @@ export function serializeJson(
   // We want to avoid that.
   const wikidata = expr.scope ? expr.wikidata : undefined;
 
-  if (expr instanceof BoxedNumber)
+  if (expr.numericValue !== null)
     return serializeJsonNumber(ce, expr.numericValue, options, {
       latex: expr.verbatimLatex,
     });
 
-  if (expr instanceof BoxedFunction) {
+  if (expr instanceof BoxedTensor) {
+    // @todo tensor: could be optimized by avoiding creating
+    // an expression and getting the JSON from the tensor directly
+    return serializeJson(ce, expr.expression, options);
+  }
+
+  if (expr.ops) {
     if (expr.isValid && expr.isCanonical && options.prettify)
       return serializePrettyJsonFunction(ce, expr.head, expr.ops, options, {
         latex: expr.verbatimLatex,
@@ -715,19 +711,11 @@ export function serializeJson(
     });
   }
 
-  if (expr instanceof BoxedDictionary)
-    return serializeDictionary(expr, options);
+  if (expr.keys) return serializeDictionary(expr, options);
 
-  if (expr instanceof BoxedTensor) {
-    // @todo tensor: could be optimized by avoiding creating
-    // an expression and getting the JSON from the tensor directly
-    return serializeJson(ce, expr.expression, options);
-  }
+  if (expr.string !== null) return serializeJsonString(expr.string, options);
 
-  if (expr instanceof BoxedString)
-    return serializeJsonString(expr.string, options);
-
-  if (expr instanceof BoxedSymbol) {
+  if (expr.symbol !== null) {
     return serializeJsonSymbol(ce, expr.symbol, options, {
       latex: expr.verbatimLatex,
       wikidata,
