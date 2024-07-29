@@ -80,46 +80,44 @@ export function costFunction(expr: BoxedExpression): number {
     if (expr.isNumber) return 2;
   }
 
-  const head = expr.head;
-  let headCost = 2;
-  if (typeof head === 'string') {
-    if (['Add', 'Divide'].includes(head)) headCost = 3;
-    else if (['Subtract', 'Negate'].includes(head)) headCost = 4;
-    else if (['Square', 'Sqrt', 'Multiply', 'Root'].includes(head))
-      headCost = 5;
-    else if (['Power'].includes(head)) headCost = 6;
-    else if (['Ln', 'Exp', 'Log'].includes(head)) headCost = 7;
-    else if (
-      [
-        'Arcsin',
-        'Arccos',
-        'Arctan',
-        'Arcsec',
-        ' Arccsc',
-        'Arsinh',
-        'Arcosh',
-        'Artanh',
-        'Arcsech',
-        'Arcsch',
-        'Cosh',
-        'Cos',
-        'Csc',
-        'Csch',
-        // '??': 'Cot',
-        // '??': 'Coth',
-        'Sec',
-        'Sech',
-        'Sin',
-        'Sinh',
-        'Tan',
-        'Tanh',
-      ].includes(head)
-    )
-      headCost = 9;
-    else headCost = 10;
-  } else headCost = costFunction(head);
+  const name = expr.head;
+  let nameCost = 2;
+  if (['Add', 'Divide'].includes(name)) nameCost = 3;
+  else if (['Subtract', 'Negate'].includes(name)) nameCost = 4;
+  else if (['Square', 'Sqrt', 'Multiply', 'Root'].includes(name)) nameCost = 5;
+  else if (['Power'].includes(name)) nameCost = 6;
+  else if (['Ln', 'Exp', 'Log'].includes(name)) nameCost = 7;
+  else if (
+    [
+      'Arcsin',
+      'Arccos',
+      'Arctan',
+      'Arcsec',
+      ' Arccsc',
+      'Arsinh',
+      'Arcosh',
+      'Artanh',
+      'Arcsech',
+      'Arcsch',
+      'Cosh',
+      'Cos',
+      'Csc',
+      'Csch',
+      // '??': 'Cot',
+      // '??': 'Coth',
+      'Sec',
+      'Sech',
+      'Sin',
+      'Sinh',
+      'Tan',
+      'Tanh',
+    ].includes(name)
+  )
+    nameCost = 9;
+  else nameCost = 10;
+
   return (
-    headCost + (expr.ops?.reduce((acc, x) => acc + costFunction(x), 0) ?? 0)
+    nameCost + (expr.ops?.reduce((acc, x) => acc + costFunction(x), 0) ?? 0)
   );
 }
 

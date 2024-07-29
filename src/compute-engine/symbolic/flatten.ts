@@ -15,23 +15,25 @@ import { BoxedExpression, SemiBoxedExpression } from '../public';
  */
 export function flatten<
   T extends ReadonlyArray<BoxedExpression> | BoxedExpression[],
->(ops: T, head?: string): T {
+>(ops: T, operator?: string): T {
   // Make all the arguments canonical.
-  const xs = ops.every((x) => x.isCanonical)
+  const xs: ReadonlyArray<BoxedExpression> = ops.every((x) => x.isCanonical)
     ? ops
     : ops.map((x) => x.canonical);
 
-  if (head) {
+  if (operator) {
     // Bypass memory allocation for the common case where there is nothing to flatten
-    if (xs.every((x) => !x.ops || (x.head !== head && x.head !== 'Sequence')))
+    if (
+      xs.every((x) => !x.ops || (x.head !== operator && x.head !== 'Sequence'))
+    )
       return xs as T;
 
     // Iterate over the list of expressions and flatten them
     const ys: BoxedExpression[] = [];
     for (const x of xs) {
       // If the head matches, flatten the expression
-      if (x.ops && (x.head === head || x.head === 'Sequence'))
-        ys.push(...flatten(x.ops, head));
+      if (x.ops && (x.head === operator || x.head === 'Sequence'))
+        ys.push(...flatten(x.ops, operator));
       else ys.push(x);
     }
     return ys as T;
@@ -43,7 +45,7 @@ export function flatten<
   const ys: BoxedExpression[] = [];
   for (const x of xs) {
     // If the head matches, flatten the expression
-    if (x.ops && x.head === 'Sequence') ys.push(...flatten(x.ops, head));
+    if (x.ops && x.head === 'Sequence') ys.push(...flatten(x.ops, operator));
     else ys.push(x);
   }
   return ys as T;

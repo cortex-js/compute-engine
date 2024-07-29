@@ -91,11 +91,6 @@ describe('LATEX SERIALIZING', () => {
         ["LatexString", "'\\foo[0]{1}{2}'"]
       ]
     `);
-
-    // Head as expression
-    expect(latex([['g', 'f'], 'x', 1, 0] as any)).toMatchInlineSnapshot(
-      `\\operatorname{apply}(g(f), \\bigl\\lbrack x, 1, 0\\bigr\\rbrack)`
-    );
   });
 
   test('Basic operations', () => {
@@ -193,7 +188,12 @@ describe('LATEX', () => {
     expect(ce.box(['Parse', "'\\frac{2}{\\cos x}'"]).evaluate().json)
       .toMatchInlineSnapshot(`
       [
-        Sequence,
+        Divide,
+        2,
+        [
+          Cos,
+          x,
+        ],
       ]
     `);
   });

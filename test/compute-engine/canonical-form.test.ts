@@ -122,7 +122,7 @@ describe('CANONICAL FORMS', () => {
         ["Negate", "n"]
       ]
       canonical = ["Power", ["Multiply", 2, "x", "y"], ["Negate", "n"]]
-      eval-auto = 2^-n * x^-n * y^-n
+      eval-auto = 2^(-n) * x^(-n) * y^(-n)
     `);
   });
 
@@ -193,9 +193,9 @@ describe('COMMUTATIVE ORDER', () => {
         "z",
         ["Sqrt", "y"]
       ]
-      simplify  = (-45/2) * pi * x * z * y^(3/2)
-      eval-auto = (-45/2) * pi * x * z * y^(3/2)
-      eval-mach = (-45/2) * pi * x * z * y^(3/2)
+      simplify  = -45/2 * pi * x * z * y^(3/2)
+      eval-auto = -45/2 * pi * x * z * y^(3/2)
+      eval-mach = -45/2 * pi * x * z * y^(3/2)
       N-auto    = -70.68583470577035 * x * y * z * sqrt(y)
       N-mach    = -70.68583470577033 * x * y * z * sqrt(y)
     `);
@@ -230,7 +230,7 @@ describe('COMMUTATIVE ORDER', () => {
         ["Square", "b"],
         ["Square", "c"]
       ]
-      simplify  = 3d * g * y * x^12 * b^6 * a^5 * c^2
+      simplify  = 3d * g * y * x^(12) * b^6 * a^5 * c^2
     `);
   });
 });

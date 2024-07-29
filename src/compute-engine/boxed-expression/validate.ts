@@ -284,6 +284,7 @@ export function adjustArguments(
     }
     if (shouldHold(hold, params.length, i)) {
       result.push(op);
+      i += 1;
       continue;
     }
     if (!op.isValid) {
@@ -301,6 +302,7 @@ export function adjustArguments(
     }
     if (threadable && isFiniteIndexableCollection(op)) {
       result.push(op);
+      i += 1;
       continue;
     }
     if (
@@ -310,6 +312,7 @@ export function adjustArguments(
       // There was an inferred domain, and it is contravrariant with Numbers
       // e.g. "Anything". We'll narrow it down to Number when we infer later.
       result.push(op);
+      i += 1;
       continue;
     }
     if (!op.domain.isCompatible(param)) {

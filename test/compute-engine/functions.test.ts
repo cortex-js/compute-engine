@@ -1,6 +1,7 @@
+import { Expression } from '../../src/math-json.ts';
 import { engine, exprToString } from '../utils';
 
-function evaluate(expr) {
+function evaluate(expr: Expression) {
   return exprToString(engine.box(expr)?.evaluate());
 }
 
@@ -88,17 +89,16 @@ describe('currying', () => {
     expect(evaluate(['f10', 5])).toMatchInlineSnapshot(`6`)); // @fixme
 });
 
-describe('Expression head', () => {
+describe('Apply', () => {
   // Note: we use 'x' both as a the param, and as the argument to
   // ensure the correct definition is used. Should not create an infinite loop.
   test('Function', () =>
-    expect(evaluate([['Function', 'x', 'x'], 'x'])).toMatchInlineSnapshot(`x`));
+    expect(
+      evaluate(['Apply', ['Function', 'x', 'x'], 'x'])
+    ).toMatchInlineSnapshot(`x`));
 
   test('Function and Hold', () =>
     expect(
-      evaluate([
-        ['Function', 'x', 'x'],
-        ['Hold', 'x'],
-      ])
+      evaluate(['Apply', ['Function', 'x', 'x'], ['Hold', 'x']])
     ).toMatchInlineSnapshot(`x`));
 });

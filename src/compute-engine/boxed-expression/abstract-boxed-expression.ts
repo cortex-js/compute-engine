@@ -48,7 +48,7 @@ import { AsciiMathOptions, toAsciiMath } from './ascii-math';
 export abstract class _BoxedExpression implements BoxedExpression {
   abstract readonly hash: number;
   abstract readonly json: Expression;
-  abstract readonly head: BoxedExpression | string;
+  abstract readonly head: string;
   abstract get isCanonical(): boolean;
   abstract set isCanonical(_val: boolean);
 
@@ -476,18 +476,14 @@ export abstract class _BoxedExpression implements BoxedExpression {
         this.engine.function(
           this.head,
           this.ops.map((x) => fn(x)),
-          {
-            canonical,
-          }
+          { canonical }
         )
       );
     return fn(
       this.engine.function(
         this.head,
         this.ops.map((x) => x.map(fn, options)),
-        {
-          canonical,
-        }
+        { canonical }
       )
     );
   }
@@ -725,9 +721,6 @@ function getFreeVariables(expr: BoxedExpression, result: Set<string>): void {
     return;
   }
 
-  if (expr.head && typeof expr.head !== 'string')
-    getFreeVariables(expr.head, result);
-
   if (expr.ops) for (const op of expr.ops) getFreeVariables(op, result);
 
   if (expr.keys)
@@ -739,8 +732,6 @@ function getSymbols(expr: BoxedExpression, result: Set<string>): void {
     result.add(expr.symbol);
     return;
   }
-
-  if (expr.head && typeof expr.head !== 'string') getSymbols(expr.head, result);
 
   if (expr.ops) for (const op of expr.ops) getSymbols(op, result);
 
@@ -770,9 +761,6 @@ function getUnknowns(expr: BoxedExpression, result: Set<string>): void {
     return;
   }
 
-  if (expr.head && typeof expr.head !== 'string')
-    getUnknowns(expr.head, result);
-
   if (expr.ops) for (const op of expr.ops) getUnknowns(op, result);
 
   if (expr.keys)
@@ -781,14 +769,14 @@ function getUnknowns(expr: BoxedExpression, result: Set<string>): void {
 
 export function getSubexpressions(
   expr: BoxedExpression,
-  head: string
+  name: string
 ): ReadonlyArray<BoxedExpression> {
-  const result = !head || expr.head === head ? [expr] : [];
+  const result = !name || expr.head === name ? [expr] : [];
   if (expr.ops) {
-    for (const op of expr.ops) result.push(...getSubexpressions(op, head));
+    for (const op of expr.ops) result.push(...getSubexpressions(op, name));
   } else if (expr.keys) {
     for (const op of expr.keys)
-      result.push(...getSubexpressions(expr.getKey(op)!, head));
+      result.push(...getSubexpressions(expr.getKey(op)!, name));
   }
   return result;
 }

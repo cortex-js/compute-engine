@@ -24,7 +24,7 @@ import {
 import { AbstractTensor, TensorData, makeTensor } from '../symbolic/tensors';
 import { _BoxedExpression } from './abstract-boxed-expression';
 import { hashCode, isBoxedExpression } from './utils';
-import { canonical } from '../symbolic/utils';
+import { canonical as makeCanonical } from '../symbolic/utils';
 import { isWildcard, wildcardName } from './boxed-patterns';
 import { NumericValue } from '../numeric-value/public';
 
@@ -45,7 +45,7 @@ import { NumericValue } from '../numeric-value/public';
 export class BoxedTensor extends _BoxedExpression {
   private _tensor: undefined | AbstractTensor<'expression'>;
 
-  private readonly _head?: string;
+  private readonly _operator?: string;
   private readonly _ops?: ReadonlyArray<BoxedExpression>;
   private _expression: undefined | BoxedExpression;
 
@@ -53,27 +53,22 @@ export class BoxedTensor extends _BoxedExpression {
     ce: IComputeEngine,
     input:
       | {
-          head?: string;
+          op?: string;
           ops: ReadonlyArray<BoxedExpression>;
         }
       | AbstractTensor<'expression'>,
-    options?: { metadata?: Metadata; canonical?: boolean }
+    readonly options?: { metadata?: Metadata; canonical?: boolean }
   ) {
-    options = options ? { ...options } : {};
-    options.canonical ??= true;
-
-    super(ce, options.metadata);
+    super(ce, options?.metadata);
 
     if (input instanceof AbstractTensor) {
       this._tensor = input;
     } else {
-      this._head = input.head ?? 'List';
-      this._ops =
-        options.canonical === true ? canonical(ce, input.ops) : input.ops;
+      const canonical = options?.canonical ?? true;
+      this._operator = input.op ?? 'List';
+      this._ops = canonical ? makeCanonical(ce, input.ops) : input.ops;
 
-      this._expression = ce._fn(this._head, this._ops, {
-        canonical: options.canonical,
-      });
+      this._expression = ce._fn(this._operator, this._ops, { canonical });
     }
 
     ce._register(this);
@@ -89,12 +84,9 @@ export class BoxedTensor extends _BoxedExpression {
   /** Create the tensor on demand */
   get tensor(): AbstractTensor<'expression'> {
     if (this._tensor === undefined) {
-      console.assert(this._head !== undefined);
+      console.assert(this._operator !== undefined);
       console.assert(this._ops !== undefined);
-      const tensorData = expressionAsTensor<'expression'>(
-        this._head!,
-        this._ops!
-      );
+      const tensorData = expressionAsTensor(this._operator!, this._ops!);
       if (tensorData === undefined) throw new Error('Invalid tensor');
       this._tensor = makeTensor(this.engine, tensorData);
     }
@@ -125,7 +117,7 @@ export class BoxedTensor extends _BoxedExpression {
     if (this.isCanonical) return this;
     return new BoxedTensor(
       this.engine,
-      { head: this._head, ops: this._ops! },
+      { op: this._operator, ops: this._ops! },
       { canonical: true }
     );
   }
@@ -154,7 +146,7 @@ export class BoxedTensor extends _BoxedExpression {
   }
 
   get head(): string {
-    return this._tensor ? 'List' : this._head!;
+    return this._tensor ? 'List' : this._operator!;
   }
 
   get nops(): number {
@@ -309,7 +301,7 @@ export function isBoxedTensor(val: unknown): val is BoxedTensor {
 }
 
 export function expressionTensorInfo(
-  head: string,
+  operator: string,
   rows: ReadonlyArray<BoxedExpression>
 ):
   | {
@@ -328,11 +320,9 @@ export function expressionTensorInfo(
     else shape[axis] = Math.max(shape[axis] ?? 0, t.length);
 
     for (const item of t) {
-      if (item.head === head) visit(item.ops!, axis + 1);
-      else {
-        if (dtype === undefined) dtype = getExpressionDatatype(item);
-        else dtype = getSupertype(dtype, getExpressionDatatype(item));
-      }
+      if (item.head === operator) visit(item.ops!, axis + 1);
+      else dtype = getSupertype(dtype, getExpressionDatatype(item));
+
       if (!valid) return;
     }
   };
@@ -342,11 +332,11 @@ export function expressionTensorInfo(
   return valid ? { shape, dtype } : undefined;
 }
 
-export function expressionAsTensor<T extends TensorDataType>(
-  head: string,
+export function expressionAsTensor<T extends TensorDataType = 'expression'>(
+  operator: string,
   rows: ReadonlyArray<BoxedExpression>
 ): TensorData<T> | undefined {
-  const { shape, dtype } = expressionTensorInfo(head, rows) ?? {
+  const { shape, dtype } = expressionTensorInfo(operator, rows) ?? {
     shape: [],
     dtype: undefined,
   };
@@ -358,7 +348,7 @@ export function expressionAsTensor<T extends TensorDataType>(
   const cast = f.cast.bind(f);
   const visit = (t: ReadonlyArray<BoxedExpression>) => {
     for (const item of t) {
-      if (item.head === head) visit(item.ops!);
+      if (item.head === operator) visit(item.ops!);
       else {
         const v = cast(item, dtype);
         if (v === undefined) {

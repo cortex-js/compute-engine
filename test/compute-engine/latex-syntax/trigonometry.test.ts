@@ -21,26 +21,26 @@ describe('TRIGONOMETRIC FUNCTIONS inverse, prime', () => {
   test(`\\sin^{-1}'(x)`, () =>
     expect(check("\\sin^{-1}'(x)")).toMatchInlineSnapshot(`
       box       = ["Apply", ["Derivative", ["InverseFunction", "Sin"]], "x"]
-      simplify  = Apply(Derivative("Arcsin"), x)
-      eval-auto = Derivative(InverseFunction("Sin"))
+      canonical = ["Apply", ["Derivative", "Arcsin"], "x"]
+      eval-auto = (1/sqrt(-x^2 + 1))
     `));
   test(`\\sin^{-1}''(x)`, () =>
     expect(check("\\sin^{-1}''(x)")).toMatchInlineSnapshot(`
       box       = ["Apply", ["Derivative", ["InverseFunction", "Sin"], 2], "x"]
-      simplify  = Apply(Derivative("Arcsin", 2), x)
-      eval-auto = Derivative(InverseFunction("Sin"), 2)
+      canonical = ["Apply", ["Derivative", "Arcsin", 2], "x"]
+      eval-auto = (x * (1/sqrt(-x^2 + 1))) / (-x^2 + 1)
     `));
   test(`\\cos^{-1\\doubleprime}(x)`, () =>
     expect(check('\\cos^{-1\\doubleprime}(x)')).toMatchInlineSnapshot(`
       box       = ["Apply", ["Derivative", ["InverseFunction", "Cos"], 2], "x"]
-      simplify  = Apply(Derivative("Arccos", 2), x)
-      eval-auto = Derivative(InverseFunction("Cos"), 2)
+      canonical = ["Apply", ["Derivative", "Arccos", 2], "x"]
+      eval-auto = -(x * (1/sqrt(-x^2 + 1))) / (-x^2 + 1)
     `));
   test(`\\cos^{-1}\\doubleprime(x)`, () =>
     expect(check('\\cos^{-1}\\doubleprime(x)')).toMatchInlineSnapshot(`
       box       = ["Apply", ["Derivative", ["InverseFunction", "Cos"], 2], "x"]
-      simplify  = Apply(Derivative("Arccos", 2), x)
-      eval-auto = Derivative(InverseFunction("Cos"), 2)
+      canonical = ["Apply", ["Derivative", "Arccos", 2], "x"]
+      eval-auto = -(x * (1/sqrt(-x^2 + 1))) / (-x^2 + 1)
     `));
 });
 

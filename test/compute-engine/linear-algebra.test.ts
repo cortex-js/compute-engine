@@ -1,28 +1,41 @@
+import { Expression } from '../../src/math-json.ts';
 import { engine as ce } from '../utils';
+import { BoxedTensor } from '../../src/compute-engine/boxed-expression/boxed-tensor';
 
-const v2_n = ['List', 7, 11];
+const v2_n: Expression = ['List', 7, 11];
 
-const v7_n = ['List', 7, -2, 11, -5, 13, -7, 17];
-const v9_x = ['List', 'a', 'b', 'c', 'd', 'e_1', 'f', 'g', 'h', 'i_1'];
+const v7_n: Expression = ['List', 7, -2, 11, -5, 13, -7, 17];
+const v9_x: Expression = [
+  'List',
+  'a',
+  'b',
+  'c',
+  'd',
+  'e_1',
+  'f',
+  'g',
+  'h',
+  'i_1',
+];
 
-const sq2_n = ['List', ['List', 1, 2], ['List', 3, 4]];
+const sq2_n: Expression = ['List', ['List', 1, 2], ['List', 3, 4]];
 
 // Square matrix with some complex values
-const sq4_c = [
+const sq4_c: Expression = [
   'List',
   ['List', ['Complex', 2, 3], 2],
   ['List', 0, ['Complex', 0, -1]],
 ];
 
 // Square matrix with unknowns
-const sq2_x = ['List', ['List', 'a', 'b'], ['List', 'c', 'd']];
+const sq2_x: Expression = ['List', ['List', 'a', 'b'], ['List', 'c', 'd']];
 
-const sq2_n2 = ['List', ['List', 5, 6], ['List', 7, 8]];
+const sq2_n2: Expression = ['List', ['List', 5, 6], ['List', 7, 8]];
 
-const m23_n = ['List', ['List', 1, 2, 3], ['List', 4, 5, 6]];
+const m23_n: Expression = ['List', ['List', 1, 2, 3], ['List', 4, 5, 6]];
 
 // Tensor of rank 3, shape [2, 3, 4]
-const t234_n = [
+const t234_n: Expression = [
   'List',
   ['List', ['List', 1, 2, 3, 4], ['List', 5, 6, 7, 8], ['List', 9, 10, 11, 12]],
   [
@@ -34,7 +47,7 @@ const t234_n = [
 ];
 
 // Tensor of shape [3, 4, 2] with unknowns
-const t234_x = [
+const t234_x: Expression = [
   'List',
   [
     'List',

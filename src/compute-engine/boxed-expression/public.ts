@@ -285,14 +285,14 @@ export interface BoxedExpression {
    */
   readonly string: string | null;
 
-  /** All the subexpressions matching the head
+  /** All the subexpressions matching the named operator
    *
    * :::info[Note]
    * Applicable to canonical and non-canonical expressions.
    * :::
    *
    */
-  getSubexpressions(head: string): ReadonlyArray<BoxedExpression>;
+  getSubexpressions(name: string): ReadonlyArray<BoxedExpression>;
 
   /** All the subexpressions in this expression, recursively
    *
@@ -337,21 +337,19 @@ export interface BoxedExpression {
    */
   readonly errors: ReadonlyArray<BoxedExpression>;
 
-  /** All boxed expressions have a head.
+  /**
+   * The name of the operator of the expression.
    *
-   * If not a function this can be `Symbol`, `String`, `Number` or `Dictionary`.
+   * For example, the name of the operator of `["Add", 2, 3]` is `"Add"`.
    *
-   * If the head expression can be represented as a string, it is returned
-   * as a string.
+   * A string literal has a `"String"` operator.
    *
-   * :::info[Note]
-   * Applicable to canonical and non-canonical expressions. The head
-   * of a non-canonical expression may be different than the head of its
-   * canonical counterpart. For example the canonical counterpart of `["Divide", 5, 7]` is `["Rational", 5, 7]`.
-   * :::
-
-  */
-  readonly head: BoxedExpression | string;
+   * A symbol has a `"Symbol"` operator.
+   *
+   * A number has a `"Number"`, `"Real"`, `"Rational"` or `"Integer"` operator.
+   *
+   */
+  readonly head: string;
 
   /** The list of arguments of the function, its "tail".
    *
@@ -1177,8 +1175,8 @@ export type SemiBoxedExpression =
   | MathJsonString
   | MathJsonSymbol
   | MathJsonFunction
+  | [MathJsonIdentifier, ...SemiBoxedExpression[]]
   | MathJsonDictionary
-  | SemiBoxedExpression[]
   | BoxedExpression;
 
 /**
@@ -1965,7 +1963,7 @@ export interface IComputeEngine {
   ): BoxedExpression;
 
   function(
-    head: string | BoxedExpression,
+    name: string,
     ops: ReadonlyArray<SemiBoxedExpression>,
     options?: { metadata?: Metadata; canonical?: CanonicalOptions }
   ): BoxedExpression;
@@ -2024,7 +2022,7 @@ export interface IComputeEngine {
   /**
    * This is a primitive to create a boxed function.
    *
-   * In general, consider using `ce.box()` or `ce.functin()` or
+   * In general, consider using `ce.box()` or `ce.function()` or
    * `canonicalXXX()` instead.
    *
    * The caller must ensure that the arguments are in canonical form:
@@ -2035,7 +2033,7 @@ export interface IComputeEngine {
    * @internal
    */
   _fn(
-    head: string | BoxedExpression,
+    name: string,
     ops: ReadonlyArray<BoxedExpression>,
     options?: Metadata & { canonical?: boolean }
   ): BoxedExpression;
@@ -2073,7 +2071,7 @@ export interface IComputeEngine {
     def: FunctionDefinition
   ): BoxedFunctionDefinition;
   lookupFunction(
-    head: string | BoxedExpression,
+    name: string,
     scope?: RuntimeScope | null
   ): undefined | BoxedFunctionDefinition;
 

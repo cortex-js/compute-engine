@@ -206,16 +206,19 @@ function boxHold(
   expr: SemiBoxedExpression | null,
   options: { canonical?: CanonicalOptions }
 ): BoxedExpression {
-  if (expr === null) return ce.error('missing');
-  if (typeof expr === 'object' && expr instanceof _BoxedExpression) return expr;
+  if (expr instanceof _BoxedExpression) return expr;
 
   expr = missingIfEmpty(expr as Expression);
 
   if (typeof expr === 'string') return box(ce, expr, options);
 
   if (Array.isArray(expr)) {
-    const boxed = expr.map((x) => boxHold(ce, x, options));
-    return new BoxedFunction(ce, boxed[0], boxed.slice(1));
+    const [fnName, ...ops] = expr;
+    return new BoxedFunction(
+      ce,
+      fnName,
+      ops.map((x) => boxHold(ce, x, options))
+    );
   }
   if (typeof expr === 'object') {
     if ('dict' in expr) return new BoxedDictionary(ce, expr.dict);
@@ -238,7 +241,7 @@ function boxHold(
 
 export function boxFunction(
   ce: IComputeEngine,
-  head: string,
+  name: string,
   ops: readonly SemiBoxedExpression[],
   options?: { metadata?: Metadata; canonical?: CanonicalOptions }
 ): BoxedExpression {
@@ -249,7 +252,7 @@ export function boxFunction(
   // Hold
   //
 
-  if (head === 'Hold') {
+  if (name === 'Hold') {
     return new BoxedFunction(ce, 'Hold', [boxHold(ce, ops[0], options)], {
       ...options,
       canonical: true,
@@ -259,9 +262,9 @@ export function boxFunction(
   //
   // Error
   //
-  if (head === 'Error' || head === 'ErrorCode') {
+  if (name === 'Error' || name === 'ErrorCode') {
     return ce._fn(
-      head,
+      name,
       ops.map((x) => ce.box(x, { canonical: false })),
       options.metadata
     );
@@ -270,7 +273,7 @@ export function boxFunction(
   //
   // String
   //
-  if (head === 'String') {
+  if (name === 'String') {
     if (ops.length === 0) return new BoxedString(ce, '', options.metadata);
     return new BoxedString(
       ce,
@@ -282,20 +285,20 @@ export function boxFunction(
   //
   // Symbol
   //
-  if (head === 'Symbol' && ops.length > 0) {
+  if (name === 'Symbol' && ops.length > 0) {
     return ce.symbol(ops.map((x) => asString(x) ?? '').join(''), options);
   }
 
   //
   // Domain
   //
-  if (head === 'Domain')
+  if (name === 'Domain')
     return ce.domain(ops[0] as DomainExpression, options.metadata);
 
   //
   // Number
   //
-  if (head === 'Number' && ops.length === 1) return box(ce, ops[0], options);
+  if (name === 'Number' && ops.length === 1) return box(ce, ops[0], options);
 
   const canonicalNumber =
     options.canonical === true ||
@@ -309,7 +312,7 @@ export function boxFunction(
     //
     // Rational (as Divide)
     //
-    if ((head === 'Divide' || head === 'Rational') && ops.length === 2) {
+    if ((name === 'Divide' || name === 'Rational') && ops.length === 2) {
       const n =
         ops[0] instanceof _BoxedExpression
           ? asBigint(ops[0])
@@ -321,13 +324,13 @@ export function boxFunction(
             : bigintValue(ops[1] as Expression);
         if (d !== null) return ce.number([n, d], options);
       }
-      head = 'Divide';
+      name = 'Divide';
     }
 
     //
     // Complex
     //
-    if (head === 'Complex') {
+    if (name === 'Complex') {
       if (ops.length === 1) {
         // If single argument, assume it's imaginary
         // @todo: use machineValue() & symbol() instead of box()
@@ -358,7 +361,7 @@ export function boxFunction(
     //
     // Distribute over literals
     //
-    if (head === 'Negate' && ops.length === 1) {
+    if (name === 'Negate' && ops.length === 1) {
       const op1 = ops[0];
       if (typeof op1 === 'number') return ce.number(-op1, options);
       if (op1 instanceof Decimal) return ce.number(op1.neg(), options);
@@ -373,12 +376,12 @@ export function boxFunction(
   }
 
   if (options.canonical === true)
-    return makeCanonicalFunction(ce, head, ops, options.metadata);
+    return makeCanonicalFunction(ce, name, ops, options.metadata);
 
   return canonicalForm(
     new BoxedFunction(
       ce,
-      head,
+      name,
       ops.map((x) => box(ce, x, { canonical: options.canonical })),
       { metadata: options.metadata, canonical: false }
     ),
@@ -450,28 +453,16 @@ export function box(
         return ce.number(expr);
       // This wasn't a valid rational, turn it into a `Divide`
       return canonicalForm(
-        ce.function('Divide', expr, { canonical }),
+        boxFunction(ce, 'Divide', expr, { canonical }),
         options.canonical!
       );
     }
     if (isBigRational(expr)) return ce.number(expr);
 
-    if (typeof expr[0] === 'string')
-      return canonicalForm(
-        ce.function(expr[0], expr.slice(1), { canonical }),
-        options.canonical!
-      );
-
-    console.assert(Array.isArray(expr[0]));
-
-    // It's a function with a head expression
-    // Try to evaluate to something simpler
-    const ops = expr.slice(1).map((x) => box(ce, x, options));
-    // The head could include some unknowns, i.e. `_` which we do *not*
-    // want to get declated in the current scope, so use canonical: false
-    // to avoid that.
-    const head = box(ce, expr[0], { canonical: false });
-    return canonicalForm(new BoxedFunction(ce, head, ops), options.canonical!);
+    return canonicalForm(
+      boxFunction(ce, expr[0], expr.slice(1), { canonical }),
+      options.canonical!
+    );
   }
 
   //
@@ -515,18 +506,9 @@ export function box(
         options.canonical!
       );
     if ('fn' in expr) {
-      if (typeof expr.fn[0] === 'string')
-        return canonicalForm(
-          ce.function(expr.fn[0], expr.fn.slice(1), { canonical }),
-          options.canonical!
-        );
+      const [fnName, ...ops] = expr.fn;
       return canonicalForm(
-        new BoxedFunction(
-          ce,
-          box(ce, expr.fn[0], options),
-          expr.fn.slice(1).map((x) => box(ce, x, options)),
-          { metadata }
-        ),
+        boxFunction(ce, fnName, ops, { canonical }),
         options.canonical!
       );
     }
@@ -565,88 +547,71 @@ function asString(expr: SemiBoxedExpression): string | null {
 
 function makeCanonicalFunction(
   ce: IComputeEngine,
-  head: string | BoxedExpression,
+  operator: string,
   ops: ReadonlyArray<SemiBoxedExpression>,
   metadata?: Metadata
 ): BoxedExpression {
+  const result = makeNumericFunction(ce, operator, ops, metadata);
+  if (result) return result;
+
   //
-  // Is the head an expression? For example, `['InverseFunction', 'Sin']`
+  // Do we have a vector/matrix/tensor?
+  // It has to have a compatible shape: i.e. all elements on an axis have
+  // the same shape.
   //
-  if (typeof head !== 'string') {
-    // We need a new scope to capture any locals that might get bound
-    // while evaluating the head.
-    ce.pushScope();
-    head = head.evaluate().symbol ?? head;
-    ce.popScope();
+  if (operator === 'List') {
+    // @todo: note: we could have a special canonical form for tensors
+    const boxedOps = ops.map((x) => ce.box(x));
+    const { shape, dtype } = expressionTensorInfo('List', boxedOps) ?? {};
+
+    if (dtype && shape) {
+      const boxedTensor = new BoxedTensor(ce, { op: 'List', ops: boxedOps });
+      console.log(boxedTensor);
+      return boxedTensor;
+    }
+
+    return ce._fn('List', boxedOps);
   }
 
-  if (typeof head === 'string') {
-    const result = makeNumericFunction(ce, head, ops, metadata);
-    if (result) return result;
-
-    //
-    // Do we have a vector/matrix/tensor?
-    // It has to have a compatible shape: i.e. all elements on an axis have
-    // the same shape.
-    //
-    if (head === 'List') {
-      // @todo: note: we could have a special canonical form for tensors
-      const boxedOps = ops.map((x) => ce.box(x));
-      const { shape, dtype } = expressionTensorInfo('List', boxedOps) ?? {};
-
-      if (dtype && shape) return new BoxedTensor(ce, { head, ops: boxedOps });
-
-      return ce._fn(head, boxedOps);
-    }
-
-    //
-    // Dictionary
-    //
-    if (head === 'Dictionary') {
-      const dict = {};
-      for (const op of ops) {
-        const arg = ce.box(op);
-        const head = arg.head;
-        if (
-          head === 'KeyValuePair' ||
-          head === 'Pair' ||
-          (head === 'Tuple' && arg.nops === 2)
-        ) {
-          const key = arg.op1;
-          if (key.isValid && key.symbol !== 'Nothing') {
-            const value = arg.op2;
-            let k = key.symbol ?? key.string;
-            if (!k && (key.numericValue !== null || key.string)) {
-              const n =
-                typeof key.numericValue === 'number'
-                  ? key.numericValue
-                  : asMachineInteger(key);
-              if (n && Number.isFinite(n) && Number.isInteger(n))
-                k = n.toString();
-            }
-            if (k) dict[k] = value;
+  //
+  // Dictionary
+  //
+  if (operator === 'Dictionary') {
+    const dict = {};
+    for (const op of ops) {
+      const arg = ce.box(op);
+      const operator = arg.head;
+      if (
+        operator === 'KeyValuePair' ||
+        operator === 'Pair' ||
+        (operator === 'Tuple' && arg.nops === 2)
+      ) {
+        const key = arg.op1;
+        if (key.isValid && key.symbol !== 'Nothing') {
+          const value = arg.op2;
+          let k = key.symbol ?? key.string;
+          if (!k && (key.numericValue !== null || key.string)) {
+            const n =
+              typeof key.numericValue === 'number'
+                ? key.numericValue
+                : asMachineInteger(key);
+            if (n && Number.isFinite(n) && Number.isInteger(n))
+              k = n.toString();
           }
+          if (k) dict[k] = value;
         }
       }
-      return new BoxedDictionary(ce, dict, { metadata });
     }
-  } else {
-    if (!head.isValid)
-      return new BoxedFunction(
-        ce,
-        head,
-        ops.map((x) => ce.box(x, { canonical: false })),
-        { metadata, canonical: false }
-      );
+    return new BoxedDictionary(ce, dict, { metadata });
   }
 
   //
   // Didn't match a short path, look for a definition
   //
-  const def = ce.lookupFunction(head);
+  const def = ce.lookupFunction(operator);
   if (!def) {
     // No def. This is for example `["f", 2]` where "f" is not declared.
-    return new BoxedFunction(ce, head, flatten(canonical(ce, ops)), {
+    return new BoxedFunction(ce, operator, flatten(canonical(ce, ops)), {
       metadata,
       canonical: true,
     });
@@ -685,7 +650,7 @@ function makeCanonicalFunction(
       console.error(e?.stack ?? e.toString());
     }
     // The canonical handler gave up, return a non-canonical expression
-    return new BoxedFunction(ce, head, xs, { metadata, canonical: false });
+    return new BoxedFunction(ce, operator, xs, { metadata, canonical: false });
   }
 
   //
@@ -694,7 +659,7 @@ function makeCanonicalFunction(
   //
   let args: BoxedExpression[] = flatten(
     xs,
-    def.associative && typeof head === 'string' ? head : undefined
+    def.associative ? operator : undefined
   );
 
   const adjustedArgs = adjustArguments(
@@ -709,17 +674,17 @@ function makeCanonicalFunction(
 
   // If we have some adjusted arguments, the arguments did not
   // match the parameters of the signature. We're done.
-  if (adjustedArgs) return ce._fn(head, adjustedArgs, metadata);
+  if (adjustedArgs) return ce._fn(operator, adjustedArgs, metadata);
 
   //
   // 4/ Apply `idempotent` and `involution`
   //
-  if (args.length === 1 && args[0].head === head) {
+  if (args.length === 1 && args[0].head === operator) {
     // f(f(x)) -> x
     if (def.involution) return args[0].op1;
 
     // f(f(x)) -> f(x)
-    if (def.idempotent) return ce._fn(head, xs[0].ops!, metadata);
+    if (def.idempotent) return ce._fn(operator, xs[0].ops!, metadata);
   }
 
   //
@@ -727,7 +692,7 @@ function makeCanonicalFunction(
   //
   if (args.length > 1 && def.commutative === true) args = args.sort(order);
 
-  return ce._fn(head, args, metadata);
+  return ce._fn(operator, args, metadata);
 }
 
 function makeNumericFunction(

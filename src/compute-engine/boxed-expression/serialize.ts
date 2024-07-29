@@ -90,21 +90,21 @@ function serializeSubtract(
  */
 function serializePrettyJsonFunction(
   ce: IComputeEngine,
-  head: string | BoxedExpression,
+  name: string,
   args: ReadonlyArray<BoxedExpression>,
   options: Readonly<JsonSerializationOptions>,
   metadata?: Metadata
 ): Expression {
   const exclusions = options.exclude;
 
-  if (head === 'Add' && args.length === 2 && !exclusions.includes('Subtract')) {
+  if (name === 'Add' && args.length === 2 && !exclusions.includes('Subtract')) {
     const sub =
       serializeSubtract(ce, args[0], args[1], options, metadata) ??
       serializeSubtract(ce, args[1], args[0], options, metadata);
     if (sub) return sub;
   }
 
-  if (head === 'Divide' && args.length === 2 && exclusions.includes('Divide')) {
+  if (name === 'Divide' && args.length === 2 && exclusions.includes('Divide')) {
     return serializeJsonFunction(
       ce,
       'Multiply',
@@ -114,7 +114,7 @@ function serializePrettyJsonFunction(
     );
   }
 
-  if (head === 'Multiply' && !exclusions.includes('Negate')) {
+  if (name === 'Multiply' && !exclusions.includes('Negate')) {
     if (asFloat(args[0]) === -1) {
       if (args.length === 2)
         return serializeJsonFunction(ce, 'Negate', [args[1]], options);
@@ -128,7 +128,7 @@ function serializePrettyJsonFunction(
     }
   }
 
-  if (head === 'Multiply' && !exclusions.includes('Divide')) {
+  if (name === 'Multiply' && !exclusions.includes('Divide')) {
     // Display a product with negative exponents as a division if
     // there are terms with a negative degree
     const result = new Product(ce, args, {
@@ -144,7 +144,7 @@ function serializePrettyJsonFunction(
       );
   }
 
-  if (head === 'Power') {
+  if (name === 'Power') {
     // e^x -> Exp(x)
     if (!exclusions.includes('Exp') && args[0]?.symbol === 'ExponentialE')
       return serializeJsonFunction(ce, 'Exp', [args[1]], options, metadata);
@@ -227,7 +227,7 @@ function serializePrettyJsonFunction(
     }
   }
 
-  if (head === 'Add' && args.length === 2 && !exclusions.includes('Subtract')) {
+  if (name === 'Add' && args.length === 2 && !exclusions.includes('Subtract')) {
     if (args[1]?.numericValue !== null) {
       const t1 = asMachineInteger(args[1]);
       if (t1 !== null && t1 < 0)
@@ -250,7 +250,7 @@ function serializePrettyJsonFunction(
     }
   }
 
-  if (head === 'Tuple') {
+  if (name === 'Tuple') {
     if (args.length === 1 && !exclusions.includes('Single'))
       return serializeJsonFunction(ce, 'Single', args, options, metadata);
     if (args.length === 2 && !exclusions.includes('Pair'))
@@ -259,12 +259,12 @@ function serializePrettyJsonFunction(
       return serializeJsonFunction(ce, 'Triple', args, options, metadata);
   }
 
-  return serializeJsonFunction(ce, head, args, options, metadata);
+  return serializeJsonFunction(ce, name, args, options, metadata);
 }
 
 function serializeJsonFunction(
   ce: IComputeEngine,
-  head: string | BoxedExpression,
+  name: string,
   args: ReadonlyArray<undefined | BoxedExpression>,
   options: Readonly<JsonSerializationOptions>,
   metadata?: Metadata
@@ -275,7 +275,7 @@ function serializeJsonFunction(
   // Negate(number) is always prettyfied as a negative number, since `-2` gets
   // parsed as `['Negate', 2]` and not `-2`.
   //
-  if (head === 'Negate' && args.length === 1) {
+  if (name === 'Negate' && args.length === 1) {
     const num0 = args[0]?.numericValue;
     if (num0 !== null) {
       if (typeof num0 === 'number')
@@ -292,11 +292,11 @@ function serializeJsonFunction(
   // If there are some exclusions, try to avoid them.
   // This is done both to canonical or non-canonical expressions.
   //
-  if (typeof head === 'string' && exclusions.includes(head)) {
-    if (head === 'Rational' && args.length === 2)
+  if (typeof name === 'string' && exclusions.includes(name)) {
+    if (name === 'Rational' && args.length === 2)
       return serializeJsonFunction(ce, 'Divide', args, options, metadata);
 
-    if (head === 'Complex' && args.length === 2)
+    if (name === 'Complex' && args.length === 2)
       return serializeJsonFunction(
         ce,
         'Add',
@@ -308,7 +308,7 @@ function serializeJsonFunction(
         metadata
       );
 
-    if (head === 'Sqrt' && args.length === 1)
+    if (name === 'Sqrt' && args.length === 1)
       return serializeJsonFunction(
         ce,
         'Power',
@@ -318,7 +318,7 @@ function serializeJsonFunction(
       );
 
     if (
-      head === 'Root' &&
+      name === 'Root' &&
       args.length === 2 &&
       args[1]?.numericValue !== null
     ) {
@@ -351,7 +351,7 @@ function serializeJsonFunction(
       }
     }
 
-    if (head === 'Square' && args.length === 1)
+    if (name === 'Square' && args.length === 1)
       return serializeJsonFunction(
         ce,
         'Power',
@@ -360,7 +360,7 @@ function serializeJsonFunction(
         metadata
       );
 
-    if (head === 'Exp' && args.length === 1)
+    if (name === 'Exp' && args.length === 1)
       return serializeJsonFunction(
         ce,
         'Power',
@@ -369,12 +369,12 @@ function serializeJsonFunction(
         metadata
       );
 
-    if (head === 'Pair' || head == 'Single' || head === 'Triple')
+    if (name === 'Pair' || name == 'Single' || name === 'Triple')
       return serializeJsonFunction(ce, 'Tuple', args, options, metadata);
 
     // Note: even though 'Subtract' is boxed out, we still need to handle it here
     // because the function may be called with a non-canonical 'Subtract' head.
-    if (head === 'Subtract' && args.length === 2)
+    if (name === 'Subtract' && args.length === 2)
       return serializeJsonFunction(
         ce,
         'Add',
@@ -382,16 +382,11 @@ function serializeJsonFunction(
         options,
         metadata
       );
-    if (head === 'Subtract' && args.length === 1)
+    if (name === 'Subtract' && args.length === 1)
       return serializeJsonFunction(ce, 'Negate', args, options, metadata);
   }
 
-  const jsonHead =
-    typeof head === 'string'
-      ? _escapeJsonString(head)
-      : (serializeJson(ce, head, options) as
-          | MathJsonIdentifier
-          | MathJsonFunction);
+  const jsonHead = _escapeJsonString(name);
 
   const fn: Expression = [
     jsonHead,

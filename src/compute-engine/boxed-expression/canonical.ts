@@ -81,7 +81,7 @@ function flattenForm(expr: BoxedExpression) {
     if (def?.associative) isAssociative = true;
   }
 
-  if (isAssociative && typeof expr.head === 'string')
+  if (isAssociative)
     return ce.function(
       expr.head,
       flattenOps(expr.ops.map(flattenForm), expr.head)

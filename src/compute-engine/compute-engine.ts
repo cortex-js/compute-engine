@@ -1027,16 +1027,16 @@ export class ComputeEngine implements IComputeEngine {
    * to differentiate between symbols that might represent a function application, e.g. `f` vs `x`.
    */
   lookupFunction(
-    head: string | BoxedExpression,
+    name: string,
     scope?: RuntimeScope | null
   ): undefined | BoxedFunctionDefinition {
-    if (typeof head !== 'string') return undefined;
+    if (typeof name !== 'string') return undefined;
 
     if (!this.context) return undefined;
 
     scope ??= this.context;
     while (scope) {
-      const def = scope.ids?.get(head);
+      const def = scope.ids?.get(name);
       if (def instanceof _BoxedFunctionDefinition) return def;
       scope = scope.parentScope;
     }
@@ -1731,12 +1731,6 @@ export class ComputeEngine implements IComputeEngine {
    *
    * The result is canonical.
    */
-  // error(
-  //   message:
-  //     | MathJsonIdentifier
-  //     | [MathJsonIdentifier, ...SemiBoxedExpression[]],
-  //   where?: SemiBoxedExpression
-  // ): BoxedExpression;
   error(
     message:
       | MathJsonIdentifier
@@ -2019,12 +2013,12 @@ export class ComputeEngine implements IComputeEngine {
    *
    * @internal */
   _fn(
-    head: string | BoxedExpression,
+    name: string,
     ops: BoxedExpression[],
     options?: Metadata & { canonical?: boolean }
   ): BoxedExpression {
     const canonical = options?.canonical ?? true;
-    return new BoxedFunction(this, head, ops, { ...options, canonical });
+    return new BoxedFunction(this, name, ops, { ...options, canonical });
   }
 
   /**

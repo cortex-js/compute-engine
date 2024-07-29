@@ -90,7 +90,7 @@ export function order(
 export function canonicalFunctionExpression(
   body: BoxedExpression,
   args: BoxedExpression[] = []
-): [body: BoxedExpression, ...params: string[]] | undefined {
+): [body: BoxedExpression, ...params: string[]] {
   // The body of a Function expression could use a combination of named
   // parameters and wildcards. For example:
   // ["Function", ["Add", "x", "_2", "_1"], "x"]
@@ -141,18 +141,18 @@ export function canonicalFunctionExpression(
 
 function makeLambda(
   expr: BoxedExpression
-):
-  | ((params: ReadonlyArray<BoxedExpression>) => BoxedExpression | undefined)
-  | undefined {
+): (params: ReadonlyArray<BoxedExpression>) => BoxedExpression | undefined {
   const ce = expr.engine;
   //
   // Is `expr` a function name, e.g. `Sin`
   //
-  const fnDef = expr.symbol ? ce.lookupFunction(expr.symbol) : undefined;
-  if (fnDef) {
-    const fn = fnDef.signature.N ?? fnDef.signature.evaluate;
-    if (fn) return (params) => fn(ce, params) ?? ce._fn(expr, params);
-    return (params) => ce._fn(expr, params);
+  if (expr.symbol) {
+    const fnDef = ce.lookupFunction(expr.symbol);
+    if (fnDef) {
+      const fn = fnDef.signature.N ?? fnDef.signature.evaluate;
+      if (fn) return (params) => fn(ce, params) ?? ce._fn(expr.symbol!, params);
+      return (params) => ce._fn(expr.symbol!, params);
+    }
   }
 
   // Turn the expression into a canonical Function expression
@@ -161,7 +161,6 @@ function makeLambda(
   if (expr.head === 'Function') {
     canonicalFn = canonicalFunctionExpression(expr.op1, expr.ops!.slice(1));
   } else canonicalFn = canonicalFunctionExpression(expr);
-  if (!canonicalFn) return undefined;
   const [body, ...params] = canonicalFn;
 
   // Create a scope for the arguments and locals
@@ -244,7 +243,9 @@ export function apply(
   fn: BoxedExpression,
   args: ReadonlyArray<BoxedExpression>
 ): BoxedExpression {
-  return makeLambda(fn)?.(args) ?? fn.engine._fn(fn, args);
+  const result = makeLambda(fn)?.(args);
+  if (result) return result;
+  return fn.engine.function('Apply', [fn, ...args]);
 }
 
 /**
@@ -273,7 +274,10 @@ export function makeLambdaN1(
 export function applicable(
   fn: BoxedExpression
 ): (args: BoxedExpression[]) => BoxedExpression | undefined {
-  return makeLambda(fn) ?? ((args) => fn.engine._fn(fn.N(), args).N());
+  return (
+    makeLambda(fn) ??
+    ((args) => fn.engine.function('Apply', [fn.N(), ...args]).N())
+  );
 }
 
 /**
@@ -290,7 +294,8 @@ export function applicableN1(fn: BoxedExpression): (x: number) => number {
   const lambda = makeLambda(fn);
   if (lambda) return (x) => (lambda([ce.number(x)])?.value as number) ?? NaN;
 
-  return (x) => ce._fn(fn.evaluate(), [ce.number(x)]).value as number;
+  return (x) =>
+    ce.function('Apply', [fn.evaluate(), ce.number(x)]).value as number;
 }
 
 /**

@@ -133,10 +133,10 @@ export function normalizedUnknownsForSolve(
 //   expr: BoxedExpression,
 //   result: Set<string>
 // ): void {
-//   const h = expr.head;
+//   const h = expr.op;
 //   if (h !== 'Block') return;
 //   for (const statement of expr.ops!)
-//     if (statement.head === 'Declare') {
+//     if (statement.op === 'Declare') {
 //       const id = statement.op1.symbol;
 //       if (id) result.add(id);
 //     }

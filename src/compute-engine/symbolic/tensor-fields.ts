@@ -484,9 +484,10 @@ export class TensorFieldComplex implements TensorField<Complex> {
 }
 
 export function getSupertype(
-  t1: TensorDataType,
+  t1: TensorDataType | undefined,
   t2: TensorDataType
 ): TensorDataType {
+  if (t1 === undefined) return t2;
   // Of the two types, return the one which is the most generic, i.e.
   // the least upper bound (LUB) or supertype
   // If the two types are incompatible, return undefined
