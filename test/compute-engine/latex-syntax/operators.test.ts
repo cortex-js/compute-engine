@@ -1,5 +1,5 @@
-import { Expression } from '../../../src/math-json/math-json-format';
-import { engine as ce, latex, check, exprToString } from '../../utils';
+import { Expression } from '../../../src/math-json/types.ts';
+import { engine as ce, latex, check } from '../../utils';
 
 describe('OPERATOR oprel', () => {
   test('x=1', () =>

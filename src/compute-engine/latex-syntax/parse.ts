@@ -1,11 +1,11 @@
-import type { Expression } from '../../math-json/math-json-format';
+import type { Expression } from '../../math-json/types';
 import {
   getSequence,
-  head,
+  xhead,
   missingIfEmpty,
-  nops,
-  op1,
-  ops,
+  xnops,
+  xop1,
+  xops,
   symbol,
 } from '../../math-json/utils';
 
@@ -680,7 +680,7 @@ export class _Parser implements Parser {
       if (this.matchBoundary()) return expr ?? ['Sequence'];
       // Try to find the boundary (or the end)
       while (!this.matchBoundary() && !this.atEnd) this.nextToken();
-      if (head(expr) === 'Error') return expr;
+      if (xhead(expr) === 'Error') return expr;
       const err = this.error('expected-closing-delimiter', start);
       return expr ? ['InvisibleOperator', expr, err] : err;
     }
@@ -1336,12 +1336,12 @@ export class _Parser implements Parser {
     // We are looking for an expression inside an optional pair of `()`
     // (i.e. trig functions, as in `\cos x`.)
     if (kind === 'implicit') {
-      if (head(group) === 'Delimiter') {
-        if (head(op1(group)) === 'Sequence') {
-          const seq = op1(op1(group));
+      if (xhead(group) === 'Delimiter') {
+        if (xhead(xop1(group)) === 'Sequence') {
+          const seq = xop1(xop1(group));
           return seq ? [seq] : [];
         }
-        return op1(group) ? [op1(group)!] : [];
+        return xop1(group) ? [xop1(group)!] : [];
       }
 
       // Was there a matchfix? the "group" is the argument, i.e.
@@ -1626,7 +1626,7 @@ export class _Parser implements Parser {
 
       if (defs) {
         const nonEmptySuperscripts = superscripts.filter(
-          (x) => !(head(x) === 'Sequence' && nops(x) === 0)
+          (x) => !(xhead(x) === 'Sequence' && xnops(x) === 0)
         ) as Expression[];
         if (nonEmptySuperscripts.length !== 0) {
           const superscriptExpression: Expression =
@@ -1967,7 +1967,7 @@ export class _Parser implements Parser {
       // If we got an empty sequence, ignore it.
       // This is returned by some purely presentational commands,
       // for example `\displaystyle`
-      if (head(lhs) === 'Sequence' && nops(lhs) === 0) lhs = null;
+      if (xhead(lhs) === 'Sequence' && xnops(lhs) === 0) lhs = null;
     }
 
     //
@@ -1988,12 +1988,12 @@ export class _Parser implements Parser {
               minPrec: MULTIPLICATION_PRECEDENCE,
             });
             if (rhs !== null) {
-              if (head(lhs) === 'InvisibleOperator') {
-                if (head(rhs) === 'InvisibleOperator')
-                  result = ['InvisibleOperator', ...ops(lhs)!, ...ops(rhs)!];
-                else result = ['InvisibleOperator', ...ops(lhs)!, rhs];
-              } else if (head(rhs) === 'InvisibleOperator') {
-                result = ['InvisibleOperator', lhs, ...ops(rhs)!];
+              if (xhead(lhs) === 'InvisibleOperator') {
+                if (xhead(rhs) === 'InvisibleOperator')
+                  result = ['InvisibleOperator', ...xops(lhs)!, ...xops(rhs)!];
+                else result = ['InvisibleOperator', ...xops(lhs)!, rhs];
+              } else if (xhead(rhs) === 'InvisibleOperator') {
+                result = ['InvisibleOperator', lhs, ...xops(rhs)!];
               } else result = ['InvisibleOperator', lhs, rhs];
             } else {
               if (result === null) {

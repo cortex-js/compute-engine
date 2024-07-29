@@ -13,8 +13,8 @@ import { BoxedDictionary } from './boxed-dictionary';
 import { BoxedFunction } from './boxed-function';
 import { BoxedNumber } from './boxed-number';
 import { BoxedString } from './boxed-string';
-import { Expression, MathJsonNumber } from '../../math-json/math-json-format';
-import { isValidIdentifier, missingIfEmpty } from '../../math-json/utils';
+import { Expression, MathJsonNumber } from '../../math-json/types';
+import { missingIfEmpty, xops } from '../../math-json/utils';
 import {
   Rational,
   isBigRational,
@@ -37,6 +37,7 @@ import { adjustArguments, checkNumericArgs } from './validate';
 import { canonicalMultiply } from '../library/arithmetic-multiply';
 import { NumericValue } from '../numeric-value/public';
 import { ExactNumericValue } from '../numeric-value/exact-numeric-value';
+import { isValidIdentifier } from '../../math-json/identifiers';
 
 /**
  * ### THEORY OF OPERATIONS
@@ -460,7 +461,7 @@ export function box(
     if (isBigRational(expr)) return ce.number(expr);
 
     return canonicalForm(
-      boxFunction(ce, expr[0], expr.slice(1), { canonical }),
+      boxFunction(ce, expr[0], xops(expr)!, { canonical }),
       options.canonical!
     );
   }
@@ -495,11 +496,9 @@ export function box(
   //
   // Box a MathJSON object literal
   //
-  if (typeof expr === 'object') {
-    const metadata = {
-      latex: expr.latex,
-      wikidata: expr.wikidata,
-    };
+  if (!Array.isArray(expr) && typeof expr === 'object') {
+    // @ts-ignore
+    const metadata = { latex: expr.latex, wikidata: expr.wikidata };
     if ('dict' in expr)
       return canonicalForm(
         new BoxedDictionary(ce, expr.dict, { canonical: true, metadata }),
@@ -547,11 +546,11 @@ function asString(expr: SemiBoxedExpression): string | null {
 
 function makeCanonicalFunction(
   ce: IComputeEngine,
-  operator: string,
+  name: string,
   ops: ReadonlyArray<SemiBoxedExpression>,
   metadata?: Metadata
 ): BoxedExpression {
-  const result = makeNumericFunction(ce, operator, ops, metadata);
+  const result = makeNumericFunction(ce, name, ops, metadata);
   if (result) return result;
 
   //
@@ -559,16 +558,14 @@ function makeCanonicalFunction(
   // It has to have a compatible shape: i.e. all elements on an axis have
   // the same shape.
   //
-  if (operator === 'List') {
+  if (name === 'List') {
     // @todo: note: we could have a special canonical form for tensors
+    // @fixme: don't box the arguments: they may be lists themselves...
     const boxedOps = ops.map((x) => ce.box(x));
     const { shape, dtype } = expressionTensorInfo('List', boxedOps) ?? {};
 
-    if (dtype && shape) {
-      const boxedTensor = new BoxedTensor(ce, { op: 'List', ops: boxedOps });
-      console.log(boxedTensor);
-      return boxedTensor;
-    }
+    if (dtype && shape)
+      return new BoxedTensor(ce, { op: 'List', ops: boxedOps });
 
     return ce._fn('List', boxedOps);
   }
@@ -576,7 +573,7 @@ function makeCanonicalFunction(
   //
   // Dictionary
   //
-  if (operator === 'Dictionary') {
+  if (name === 'Dictionary') {
     const dict = {};
     for (const op of ops) {
       const arg = ce.box(op);
@@ -608,10 +605,10 @@ function makeCanonicalFunction(
   //
   // Didn't match a short path, look for a definition
   //
-  const def = ce.lookupFunction(operator);
+  const def = ce.lookupFunction(name);
   if (!def) {
     // No def. This is for example `["f", 2]` where "f" is not declared.
-    return new BoxedFunction(ce, operator, flatten(canonical(ce, ops)), {
+    return new BoxedFunction(ce, name, flatten(canonical(ce, ops)), {
       metadata,
       canonical: true,
     });
@@ -650,17 +647,14 @@ function makeCanonicalFunction(
       console.error(e?.stack ?? e.toString());
     }
     // The canonical handler gave up, return a non-canonical expression
-    return new BoxedFunction(ce, operator, xs, { metadata, canonical: false });
+    return new BoxedFunction(ce, name, xs, { metadata, canonical: false });
   }
 
   //
   // Flatten any sequence
   // f(a, Sequence(b, c), Sequence(), d) -> f(a, b, c, d)
   //
-  let args: BoxedExpression[] = flatten(
-    xs,
-    def.associative ? operator : undefined
-  );
+  let args: BoxedExpression[] = flatten(xs, def.associative ? name : undefined);
 
   const adjustedArgs = adjustArguments(
     ce,
@@ -674,17 +668,17 @@ function makeCanonicalFunction(
 
   // If we have some adjusted arguments, the arguments did not
   // match the parameters of the signature. We're done.
-  if (adjustedArgs) return ce._fn(operator, adjustedArgs, metadata);
+  if (adjustedArgs) return ce._fn(name, adjustedArgs, metadata);
 
   //
   // 4/ Apply `idempotent` and `involution`
   //
-  if (args.length === 1 && args[0].head === operator) {
+  if (args.length === 1 && args[0].head === name) {
     // f(f(x)) -> x
     if (def.involution) return args[0].op1;
 
     // f(f(x)) -> f(x)
-    if (def.idempotent) return ce._fn(operator, xs[0].ops!, metadata);
+    if (def.idempotent) return ce._fn(name, xs[0].ops!, metadata);
   }
 
   //
@@ -692,7 +686,7 @@ function makeCanonicalFunction(
   //
   if (args.length > 1 && def.commutative === true) args = args.sort(order);
 
-  return ce._fn(operator, args, metadata);
+  return ce._fn(name, args, metadata);
 }
 
 function makeNumericFunction(

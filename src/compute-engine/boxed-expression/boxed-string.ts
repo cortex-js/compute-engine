@@ -1,4 +1,4 @@
-import { Expression } from '../../math-json/math-json-format';
+import { Expression } from '../../math-json/types';
 import { _BoxedExpression } from './abstract-boxed-expression';
 import {
   BoxedExpression,

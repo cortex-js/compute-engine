@@ -450,13 +450,13 @@
 
     function customCanonical(expr) {
       if (typeof expr.value === 'number') {
-        if (expr.head === 'Divide' || expr.head === 'Rational') {
+        if (expr.op === 'Divide' || expr.op === 'Rational') {
           if (expr.engine.box(["GCD", expr.op1, expr.op2]).value !== 1) return expr;
         }
         return expr.engine.number(expr.value);
       }
 
-      if (expr.ops) return expr.engine.box([expr.head, ...expr.ops.map(customCanonical)], { canonical: ['InvisibleOperator', 'Order'] });
+      if (expr.ops) return expr.engine.box([expr.op, ...expr.ops.map(customCanonical)], { canonical: ['InvisibleOperator', 'Order'] });
 
       return expr.canonical;
     }
@@ -481,7 +481,7 @@
 
     // function customCanonical(expr) {
     //   if (expr.ops) {
-    //     return ce.function(expr.head, ...expr.ops.map(customCanonical), { canonical: ['InvisibleOperator', 'Order'] });
+    //     return ce.function(expr.op, ...expr.ops.map(customCanonical), { canonical: ['InvisibleOperator', 'Order'] });
     //   }
     //   return typeof expr.value === 'number' ? ce.number(expr.value) : expr.canonical;
     // }

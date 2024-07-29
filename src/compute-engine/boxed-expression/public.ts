@@ -1175,7 +1175,7 @@ export type SemiBoxedExpression =
   | MathJsonString
   | MathJsonSymbol
   | MathJsonFunction
-  | [MathJsonIdentifier, ...SemiBoxedExpression[]]
+  | readonly [MathJsonIdentifier, ...SemiBoxedExpression[]]
   | MathJsonDictionary
   | BoxedExpression;
 

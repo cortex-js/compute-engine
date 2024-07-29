@@ -1,4 +1,4 @@
-import type { Expression } from '../../math-json/math-json-format';
+import type { Expression } from '../../math-json/types';
 
 export type SymbolType = 'symbol' | 'function' | 'unknown';
 

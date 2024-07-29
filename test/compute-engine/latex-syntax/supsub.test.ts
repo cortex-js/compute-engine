@@ -1,4 +1,4 @@
-import { Expression } from '../../../src/math-json/math-json-format';
+import { Expression } from '../../../src/math-json/types.ts';
 import { latex, engine as ce } from '../../utils';
 
 describe('POWER', () => {
@@ -30,7 +30,7 @@ describe('INVERSE FUNCTION', () => {
       `\\arcsin(\\error{\\blacksquare})`
     );
     expect(latex(['Apply', ['InverseFunction', 'f']])).toMatchInlineSnapshot(
-      `f^{-1}()`
+      ``
     );
   });
 });

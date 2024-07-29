@@ -1,9 +1,9 @@
 import { Expression } from '../../math-json';
 import {
-  ONLY_EMOJIS,
+  EMOJIS,
   isValidIdentifier,
   validateIdentifier,
-} from '../../math-json/utils';
+} from '../../math-json/identifiers';
 import { SYMBOLS } from './dictionary/definitions-symbols';
 import { Parser } from './public';
 
@@ -321,7 +321,7 @@ export function parseIdentifier(parser: Parser): string | null {
   //
   if (!id) {
     id = '';
-    while (!parser.atEnd && ONLY_EMOJIS.test(id + parser.peek))
+    while (!parser.atEnd && EMOJIS.test(id + parser.peek))
       id += parser.nextToken();
     if (!id) id = null;
   }

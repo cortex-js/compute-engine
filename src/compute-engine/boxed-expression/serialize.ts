@@ -5,7 +5,7 @@ import {
   Expression,
   MathJsonFunction,
   MathJsonIdentifier,
-} from '../../math-json/math-json-format';
+} from '../../math-json/types';
 
 import {
   BoxedExpression,

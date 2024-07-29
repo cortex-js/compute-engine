@@ -1,4 +1,4 @@
-import { MathJsonIdentifier } from '../math-json/math-json-format';
+import { MathJsonIdentifier } from '../math-json/types';
 import { asFloat } from './boxed-expression/numerics';
 import { isRelationalOperator } from './boxed-expression/utils';
 import { isCollection, isFiniteIndexableCollection } from './collection-utils';

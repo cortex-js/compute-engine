@@ -1,5 +1,5 @@
 import { Expression, op } from '../../../math-json';
-import { stringValue, ops } from '../../../math-json/utils';
+import { stringValue, xops } from '../../../math-json/utils';
 import { LatexDictionary, Parser, Serializer } from '../public';
 import { joinLatex } from '../tokenizer';
 import { DELIMITERS_SHORTHAND } from './definitions-core';
@@ -11,7 +11,7 @@ export const DEFINITIONS_LINEAR_ALGEBRA: LatexDictionary = [
   {
     name: 'Matrix',
     serialize: (serializer: Serializer, expr: Expression): string => {
-      const rows = ops(op(expr, 1)) ?? [];
+      const rows = xops(op(expr, 1)) ?? [];
 
       return serializeTabular(
         serializer,
@@ -26,7 +26,7 @@ export const DEFINITIONS_LINEAR_ALGEBRA: LatexDictionary = [
   {
     name: 'Vector',
     serialize: (serializer: Serializer, expr: Expression): string => {
-      const columns = ops(expr) ?? [];
+      const columns = xops(expr) ?? [];
 
       // Flip the columns into rows
       return serializeTabular(
@@ -283,7 +283,7 @@ function serializeTabular(
   const serializedRows: string[] = [];
   for (const row of rows ?? []) {
     const cells: string[] = [];
-    for (const cell of ops(row) ?? []) cells.push(serializer.serialize(cell));
+    for (const cell of xops(row) ?? []) cells.push(serializer.serialize(cell));
     serializedRows.push(cells.join(' & '));
   }
 

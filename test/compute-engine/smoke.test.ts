@@ -14,7 +14,7 @@
  * - numerical evaluation
  */
 
-import { Expression } from '../../src/math-json/math-json-format';
+import { Expression } from '../../src/math-json/types.ts';
 import { engine, simplify } from '../utils';
 
 const ce = engine;

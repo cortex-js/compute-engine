@@ -1,4 +1,4 @@
-import { validateIdentifier } from '../../../src/math-json/utils';
+import { validateIdentifier } from '../../../src/math-json/identifiers';
 import { engine as ce, exprToString, latex } from '../../utils';
 
 function box(expr) {

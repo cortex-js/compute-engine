@@ -3,7 +3,7 @@ import { Decimal } from 'decimal.js';
 
 import { _BoxedExpression } from './abstract-boxed-expression';
 
-import { Expression } from '../../math-json/math-json-format';
+import { Expression } from '../../math-json/types';
 import {
   BoxedFunctionDefinition,
   IComputeEngine,

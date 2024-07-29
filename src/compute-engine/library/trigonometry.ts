@@ -8,7 +8,7 @@ import {
   LatexString,
 } from '../public';
 import { asLatexString, bignumPreferred } from '../boxed-expression/utils';
-import { Expression } from '../../math-json/math-json-format';
+import { Expression } from '../../math-json/types';
 import { applyN, apply2N } from '../symbolic/utils';
 import { checkArity } from '../boxed-expression/validate';
 import { reducedRational } from '../numerics/rationals';

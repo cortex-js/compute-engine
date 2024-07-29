@@ -1,6 +1,6 @@
 import { Decimal } from 'decimal.js';
 
-import { Expression } from '../../math-json/math-json-format';
+import { Expression } from '../../math-json/types';
 import { isNumberExpression, isNumberObject } from '../../math-json/utils';
 import { bigint } from '../numerics/numeric-bigint';
 import { joinLatex } from '../latex-syntax/tokenizer';

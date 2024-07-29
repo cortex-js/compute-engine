@@ -11,11 +11,6 @@
 | `e^{\imaginaryI \pi }+1=0` | `["Eq", ["Power", "E", ["Add", ["Multiply", "Pi", "ImaginaryI"], 1]], 0]` |
 | `\sin^{-1}\prime(x)`       | `[["Derivative", ["InverseFunction", "Sin"]], "x"]`                       |
 
-This section of the repo contains code to:
-
-- parse LaTeX to MathJSON
-- serialize MathJSON to LaTeX
-
 Reference documentation and guides at
 [cortexjs.io/math-json](https://cortexjs.io/math-json/).
 

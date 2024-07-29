@@ -1,6 +1,5 @@
-import { Expression } from '../../src/math-json.ts';
+import { Expression } from '../../src/math-json/types.ts';
 import { engine as ce } from '../utils';
-import { BoxedTensor } from '../../src/compute-engine/boxed-expression/boxed-tensor';
 
 const v2_n: Expression = ['List', 7, 11];
 

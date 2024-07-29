@@ -1,6 +1,6 @@
 import Complex from 'complex.js';
 import Decimal from 'decimal.js';
-import { Expression } from '../../math-json/math-json-format';
+import { Expression } from '../../math-json/types';
 import {
   BoxedExpression,
   IComputeEngine,

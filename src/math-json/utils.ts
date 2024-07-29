@@ -1,11 +1,11 @@
-import {
+import type {
   Expression,
   MathJsonFunction,
   MathJsonIdentifier,
   MathJsonNumber,
   MathJsonString,
   MathJsonSymbol,
-} from './math-json-format';
+} from './types';
 
 export const MISSING: Expression = ['Error', "'missing'"];
 
@@ -45,143 +45,6 @@ export function isDictionaryObject(expr: Expression): expr is MathJsonNumber {
   return expr !== null && typeof expr === 'object' && 'dict' in expr;
 }
 
-let recommendedScriptsRegex: RegExp;
-
-function isRecommendedScripts(text: string): boolean {
-  if (!recommendedScriptsRegex) {
-    // Define the recommended script property notation from UAX#31Table 5
-    // https://www.unicode.org/reports/tr31/#Table_Recommended_Scripts
-    const recommendedScripts = [
-      'Zyyy',
-      'Zinh',
-      'Arab',
-      'Armn',
-      'Beng',
-      'Bopo',
-      'Cyrl',
-      'Deva',
-      'Ethi',
-      'Geor',
-      'Grek',
-      'Gujr',
-      'Guru',
-      'Hang',
-      'Hani',
-      'Hebr',
-      'Hira',
-      'Kana',
-      'Knda',
-      'Khmr',
-      'Laoo',
-      'Latn',
-      'Mlym',
-      'Mymr',
-      'Orya',
-      'Sinh',
-      'Taml',
-      'Telu',
-      'Thaa',
-      'Thai',
-      'Tibt',
-    ];
-
-    // Combine the recommended script properties into a single regex pattern
-    const regexPattern = `^[${recommendedScripts
-      .map((x) => `\\p{Script=${x}}`)
-      .join('')}]*$`;
-
-    // Test if the input text contains only characters from the
-    // recommended scripts
-    recommendedScriptsRegex = new RegExp(regexPattern, 'u');
-  }
-  return recommendedScriptsRegex.test(text);
-}
-
-// Return true if the string is a valid identifier.
-// Check for identifiers matching a profile of [Unicode UAX31]
-// (https://unicode.org/reports/tr31/)
-// See https://cortexjs.io/math-json/#identifiers for a full definition of the
-// profile.
-
-export function isValidIdentifier(s: string): boolean {
-  // Quick check for simple identifiers
-  if (/^[a-zA-Z_][a-zA-Z0-9_]*$/.test(s)) return true;
-
-  // Is it an emoji, with possibly a ZWJ sequence, as in 👨🏻‍🎤,
-  // or flags, or characters that are legacy non-presentation emoji
-  // (like the sunglass emoji)?
-  if (ONLY_EMOJIS.test(s)) return true;
-
-  // Only consider recommended scripts
-  if (!isRecommendedScripts(s)) return false;
-
-  // Non-ASCII identifiers
-  return /^[\p{XIDS}_]\p{XIDC}*$/u.test(s);
-}
-
-const VS16 = '\\u{FE0F}'; // Variation Selector-16, forces emoji presentation
-const KEYCAP = '\\u{20E3}'; // Combining Enclosing Keycap
-const ZWJ = '\\u{200D}'; // Zero Width Joiner
-
-const FLAG_SEQUENCE = '\\p{RI}\\p{RI}';
-
-const TAG_MOD = `(?:[\\u{E0020}-\\u{E007E}]+\\u{E007F})`;
-const EMOJI_MOD = `(?:\\p{EMod}|${VS16}${KEYCAP}?|${TAG_MOD})`;
-const EMOJI_NOT_IDENTIFIER = `(?:(?=\\P{XIDC})\\p{Emoji})`;
-const ZWJ_ELEMENT = `(?:${EMOJI_NOT_IDENTIFIER}${EMOJI_MOD}*|\\p{Emoji}${EMOJI_MOD}+|${FLAG_SEQUENCE})`;
-const POSSIBLE_EMOJI = `(?:${ZWJ_ELEMENT})(${ZWJ}${ZWJ_ELEMENT})*`;
-const SOME_EMOJI = new RegExp(`(?:${POSSIBLE_EMOJI})+`, 'u');
-export const ONLY_EMOJIS = new RegExp(`^(?:${POSSIBLE_EMOJI})+$`, 'u');
-
-// Examine the string and return a string indicating if it's a valid identifier,
-// and if not, why not.
-// Useful for debugging. In production, use `isValidIdentifier()` instead.
-export function validateIdentifier(
-  s: unknown
-):
-  | 'valid'
-  | 'not-a-string'
-  | 'empty-string'
-  | 'expected-nfc'
-  | 'unexpected-mixed-emoji'
-  | 'unexpected-bidi-marker'
-  | 'unexpected-script'
-  | 'invalid-first-char'
-  | 'invalid-char' {
-  if (typeof s !== 'string') return 'not-a-string';
-
-  // console.log([...s].map((x) => x.codePointAt(0)!.toString(16)).join(' '));
-
-  if (s === '') return 'empty-string';
-
-  // MathJSON symbols are always stored in Unicode NFC canonical order.
-  // See https://unicode.org/reports/tr15/
-  if (s.normalize() !== s) return 'expected-nfc';
-
-  // Does the string contain any bidi marker?
-  // See https://www.unicode.org/L2/L2022/22028-bidi-prog.pdf
-  // > For identifiers, there should be no need to allow
-  // > [bidi control characters] at all, even if formally allowed.
-  if (/[\u200E\u200F\u2066-\u2069\u202A-\u202E]/.test(s))
-    return 'unexpected-bidi-marker';
-
-  // Does the string contains some emojis (or flags) mixed with other characters?
-  if (ONLY_EMOJIS.test(s)) return 'valid';
-  if (/\p{XIDC}/u.test(s) && SOME_EMOJI.test(s))
-    return 'unexpected-mixed-emoji';
-
-  // Does the string contain scripts that are not recommended?
-  if (!isRecommendedScripts(s)) return 'unexpected-script';
-
-  // It's a supported script, but is it a valid identifier?
-  if (!isValidIdentifier(s)) {
-    if (!isValidIdentifier(s[0])) return 'invalid-first-char';
-    return 'invalid-char';
-  }
-
-  return 'valid';
-}
-
 /**  If expr is a string literal, return it.
  *
  * A string literal is a JSON string that begins and ends with
@@ -204,53 +67,38 @@ export function stripText(
   if (expr === null || expr === undefined || stringValue(expr) !== null)
     return null;
 
-  const h = head(expr);
-  if (h == null) return expr;
+  const h = xhead(expr);
+  if (!h) return expr;
   return [
-    h as MathJsonIdentifier | MathJsonFunction,
-    ...(ops(expr) ?? []).map((x) => stripText(x)!).filter((x) => x !== null),
+    h,
+    ...(xops(expr) ?? []).map((x) => stripText(x)!).filter((x) => x !== null),
   ];
 }
 
 /**
- * The head of a function can be an identifier or an expression.
+ * The operator of a function is an identifier
  *
- * Return `null` if the expression is not a function.
+ * Return an empty string if the expression is not a function.
  *
  * Examples:
  * * `["Negate", 5]`  -> `"Negate"`
- * * `[["Prime", "f"], "x"]` -> `["Prime", "f"]`
  */
-export function head(expr: Expression | null | undefined): Expression | null {
-  if (Array.isArray(expr)) {
-    if (typeof expr[0] === 'string' && !isValidIdentifier(expr[0])) {
-      console.error(
-        `Invalid identifier "${expr[0]}": ${validateIdentifier(expr[0])}`
-      );
-      return null;
-    }
-    return expr[0];
-  }
+export function xhead(expr: Expression | null | undefined): MathJsonIdentifier {
+  if (Array.isArray(expr)) return expr[0];
 
-  if (expr === null || expr === undefined) return null;
+  if (expr === null || expr === undefined) return '';
 
   if (isFunctionObject(expr)) return expr.fn[0];
 
-  return null;
-}
-
-/** Return the head of an expression, only if it's a string */
-export function headName(expr: Expression | null): string {
-  const h = head(expr);
-  return typeof h === 'string' ? h : '';
+  return '';
 }
 
 /**
  * Return all the elements but the first one, i.e. the arguments of a
  * function.
  */
-export function ops(expr: Expression | null | undefined): Expression[] | null {
-  if (Array.isArray(expr)) return expr.slice(1);
+export function xops(expr: Expression | null | undefined): Expression[] | null {
+  if (Array.isArray(expr)) return expr.slice(1) as Expression[];
 
   if (expr === null || expr === undefined) return null;
 
@@ -260,7 +108,7 @@ export function ops(expr: Expression | null | undefined): Expression[] | null {
 }
 
 /** Return the nth argument of a function expression */
-export function op(
+export function xop(
   expr: Expression | null | undefined,
   n: number
 ): Expression | null {
@@ -273,15 +121,15 @@ export function op(
   return null;
 }
 
-export function op1(expr: Expression | null | undefined): Expression | null {
-  return op(expr, 1);
+export function xop1(expr: Expression | null | undefined): Expression | null {
+  return xop(expr, 1);
 }
 
-export function op2(expr: Expression | null | undefined): Expression | null {
-  return op(expr, 2);
+export function xop2(expr: Expression | null | undefined): Expression | null {
+  return xop(expr, 2);
 }
 
-export function nops(expr: Expression | null | undefined): number {
+export function xnops(expr: Expression | null | undefined): number {
   if (expr === null || expr === undefined) return 0;
   if (Array.isArray(expr)) return Math.max(0, expr.length - 1);
   if (isFunctionObject(expr)) return Math.max(0, expr.fn.length - 1);
@@ -290,7 +138,7 @@ export function nops(expr: Expression | null | undefined): number {
 
 export function unhold(expr: Expression | null | undefined): Expression | null {
   if (expr === null || expr === undefined) return null;
-  if (head(expr) === 'Hold') return op(expr, 1);
+  if (xhead(expr) === 'Hold') return xop(expr, 1);
   return expr;
 }
 
@@ -315,11 +163,11 @@ export function symbol(expr: Expression | null | undefined): string | null {
 function keyValuePair(
   expr: Expression | null
 ): null | [key: string, value: Expression] {
-  const h = head(expr);
+  const h = xhead(expr);
   if (h === 'KeyValuePair' || h === 'Tuple' || h === 'Pair') {
-    const key = stringValue(op1(expr));
+    const key = stringValue(xop1(expr));
     if (!key) return null;
-    return [key, op2(expr) ?? 'Nothing'];
+    return [key, xop2(expr) ?? 'Nothing'];
   }
 
   return null;
@@ -334,11 +182,11 @@ export function dictionary(
   const kv = keyValuePair(expr);
   if (kv) return { [kv[0]]: kv[1] };
 
-  const h = head(expr);
+  const h = xhead(expr);
   if (h === 'Dictionary') {
     const result = {};
-    for (let i = 1; i < nops(expr); i++) {
-      const kv = keyValuePair(op(expr, i));
+    for (let i = 1; i < xnops(expr); i++) {
+      const kv = keyValuePair(xop(expr, i));
       if (kv) result[kv[0]] = kv[1];
     }
 
@@ -407,40 +255,40 @@ export function rationalValue(
 
   if (symbol(expr) === 'Half') return [1, 2];
 
-  const h = head(expr);
+  const h = xhead(expr);
   if (!h) return null;
 
   let numer: number | null = null;
   let denom: number | null = null;
 
   if (h === 'Negate') {
-    const r = rationalValue(op1(expr));
+    const r = rationalValue(xop1(expr));
     if (r) return [-r[0], r[1]];
   }
 
   if (h === 'Rational' || h === 'Divide') {
-    numer = machineValue(op1(expr)) ?? NaN;
-    denom = machineValue(op2(expr)) ?? NaN;
+    numer = machineValue(xop1(expr)) ?? NaN;
+    denom = machineValue(xop2(expr)) ?? NaN;
   }
 
   if (h === 'Power') {
-    const exponent = machineValue(op2(expr));
+    const exponent = machineValue(xop2(expr));
     if (exponent === 1) {
-      numer = machineValue(op1(expr));
+      numer = machineValue(xop1(expr));
       denom = 1;
     } else if (exponent === -1) {
       numer = 1;
-      denom = machineValue(op1(expr));
+      denom = machineValue(xop1(expr));
     }
   }
 
   if (
     h === 'Multiply' &&
-    head(op2(expr)) === 'Power' &&
-    machineValue(op2(op2(expr))) === -1
+    xhead(xop2(expr)) === 'Power' &&
+    machineValue(xop2(xop2(expr))) === -1
   ) {
-    numer = machineValue(op1(expr));
-    denom = machineValue(op1(op2(expr)));
+    numer = machineValue(xop1(expr));
+    denom = machineValue(xop1(xop2(expr)));
   }
 
   if (numer === null || denom === null) return null;
@@ -450,36 +298,15 @@ export function rationalValue(
   return null;
 }
 
-export function applyRecursively<T extends Expression = Expression>(
-  expr: T,
-  fn: (x: T) => T
-): Expression {
-  const h = head(expr);
-  if (h !== null) {
-    return [
-      fn(h as T) as MathJsonIdentifier | MathJsonFunction,
-      ...(ops(expr) ?? []).map(fn),
-    ];
-  }
-  const dict = dictionary(expr);
-  if (dict !== null) {
-    const keys = Object.keys(dict);
-    const result = {};
-    for (const key of keys) result[key] = fn(dict[key] as T);
-    return { dict: result };
-  }
-  return fn(expr);
-}
-
 export function subs(
   expr: Expression,
   s: { [symbol: string]: Expression }
 ): Expression {
-  const h = head(expr);
-  if (h !== null)
+  const h = xhead(expr);
+  if (h)
     return [
-      subs(h, s) as MathJsonIdentifier | MathJsonFunction,
-      ...(ops(expr) ?? []).map((x) => subs(x, s)),
+      subs(h, s) as MathJsonIdentifier,
+      ...(xops(expr) ?? []).map((x) => subs(x, s)),
     ];
 
   const dict = dictionary(expr);
@@ -523,14 +350,14 @@ export function foldAssociativeOperator(
   lhs: Expression,
   rhs: Expression
 ): Expression {
-  const lhsName = head(lhs);
-  const rhsName = head(rhs);
+  const lhsName = xhead(lhs);
+  const rhsName = xhead(rhs);
 
   if (lhsName === op && rhsName === op)
-    return [op, ...(ops(lhs) ?? []), ...(ops(rhs) ?? [])];
+    return [op, ...(xops(lhs) ?? []), ...(xops(rhs) ?? [])];
 
-  if (lhsName === op) return [op, ...(ops(lhs) ?? []), rhs];
-  if (rhsName === op) return [op, lhs, ...(ops(rhs) ?? [])];
+  if (lhsName === op) return [op, ...(xops(lhs) ?? []), rhs];
+  if (rhsName === op) return [op, lhs, ...(xops(rhs) ?? [])];
   return [op, lhs, rhs];
 }
 
@@ -538,21 +365,21 @@ export function foldAssociativeOperator(
 export function getSequence(expr: Expression | null): Expression[] | null {
   if (expr === null) return null;
 
-  let h = head(expr);
+  let h = xhead(expr);
   if (h === 'Delimiter') {
-    expr = op(expr, 1);
+    expr = xop(expr, 1);
     if (expr === null) return [];
-    h = head(expr);
+    h = xhead(expr);
     if (h !== 'Sequence') return [expr];
   }
 
   if (h !== 'Sequence') return null;
 
-  return ops(expr) ?? [];
+  return xops(expr) ?? [];
 }
 
 export function isEmptySequence(expr: Expression | null): boolean {
-  return head(expr) === 'Sequence' && nops(expr) === 0;
+  return xhead(expr) === 'Sequence' && xnops(expr) === 0;
 }
 
 export function missingIfEmpty(expr: Expression | null): Expression {

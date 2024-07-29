@@ -1,10 +1,7 @@
 import Complex from 'complex.js';
 import { Decimal } from 'decimal.js';
 
-import {
-  MathJsonIdentifier,
-  MathJsonNumber,
-} from '../math-json/math-json-format';
+import { MathJsonIdentifier, MathJsonNumber } from '../math-json/types';
 
 import type {
   LibraryCategory,
@@ -70,7 +67,6 @@ import {
 } from './boxed-expression/boxed-symbol';
 import { _BoxedDomain, isDomain } from './boxed-expression/boxed-domain';
 import { _BoxedExpression } from './boxed-expression/abstract-boxed-expression';
-import { isValidIdentifier, validateIdentifier } from '../math-json/utils';
 import {
   makeFunctionDefinition,
   _BoxedFunctionDefinition,
@@ -105,6 +101,10 @@ import { ExactNumericValue } from './numeric-value/exact-numeric-value';
 import { isInMachineRange } from './numerics/numeric-bignum';
 import { BigNumericValue } from './numeric-value/big-numeric-value';
 import { MachineNumericValue } from './numeric-value/machine-numeric-value';
+import {
+  isValidIdentifier,
+  validateIdentifier,
+} from '../math-json/identifiers';
 
 /**
  *

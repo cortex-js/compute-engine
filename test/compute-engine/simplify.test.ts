@@ -1,5 +1,5 @@
 import { BoxedExpression, ComputeEngine } from '../../src/compute-engine';
-import { Expression } from '../../src/math-json/math-json-format';
+import { Expression } from '../../src/math-json/types.ts';
 import { simplify } from '../utils';
 
 export const ce = new ComputeEngine();

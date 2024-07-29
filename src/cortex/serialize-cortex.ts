@@ -1,9 +1,8 @@
 import {
-  op,
-  nops,
+  xop,
+  xnops,
   dictionary,
-  head,
-  headName,
+  xhead,
   machineValue,
   stringValue,
   symbol,
@@ -15,7 +14,7 @@ import {
   COMPARISON_PRECEDENCE,
   NumberSerializationFormat,
 } from '../compute-engine/latex-syntax/public';
-import { Expression } from '../math-json/math-json-format';
+import { Expression } from '../math-json/types';
 import {
   serializeHexFloat,
   serializeNumber,
@@ -93,8 +92,8 @@ export function serializeCortex(
 
     const comment = serializeComment(expr);
     let body: FormattingBlock | undefined;
-    const h = head(expr);
-    if (h !== null) {
+    const h = xhead(expr);
+    if (h) {
       body =
         serializeFunction(expr) ??
         serializeOperator(expr) ??
@@ -246,8 +245,8 @@ export function serializeCortex(
     BaseForm: (expr: Expression): FormattingBlock => {
       // CAUTION: machineValue will truncate number expessions to a machine
       // number, which may result in a loss of precision
-      const base = machineValue(op(expr, 2)) ?? 16;
-      const arg1 = op(expr, 1);
+      const base = machineValue(xop(expr, 2)) ?? 16;
+      const arg1 = xop(expr, 1);
       const value = machineValue(arg1);
       if (
         value === null ||
@@ -312,7 +311,7 @@ export function serializeCortex(
     //
     // Interpolated string, e.g. `["String", "'hello '", "name"]`
     Set: (expr: Expression): FormattingBlock => {
-      if (nops(expr) === 0) return fmt.text('EmptySet');
+      if (xnops(expr) === 0) return fmt.text('EmptySet');
       return fmt.fencedList(
         '[',
         fmt.separator(','),
@@ -325,12 +324,12 @@ export function serializeCortex(
   };
 
   function serializeFunction(expr: Expression): FormattingBlock | null {
-    return FUNCTIONS[headName(expr)]?.(expr) ?? null;
+    return FUNCTIONS[xhead(expr)]?.(expr) ?? null;
   }
 
   function serializeGenericFunction(expr: Expression): FormattingBlock {
-    const h = head(expr);
-    if (typeof h === 'string') {
+    const h = xhead(expr);
+    if (h) {
       // It's a function application with a named function
       return fmt.line(
         escapeSymbol(h),
@@ -360,7 +359,7 @@ export function serializeCortex(
 
   // @todo: 2x, 2(x+1)
   function serializeOperator(expr: Expression): FormattingBlock | null {
-    const head = headName(expr);
+    const head = xhead(expr);
     if (!head) return null;
 
     const operator = OPERATORS[head];
@@ -370,9 +369,9 @@ export function serializeCortex(
       : operator.symbol;
 
     if (operator.unary) {
-      if (nops(expr) !== 1) return null;
-      const arg = op(expr, 1);
-      const argHead = headName(arg);
+      if (xnops(expr) !== 1) return null;
+      const arg = xop(expr, 1);
+      const argHead = xhead(arg);
       const argOp = OPERATORS[argHead];
       if (argOp && argOp.precedence < operator.precedence) {
         return fmt.line(opSymbol, '(', serializeExpression(arg), ')');
@@ -381,7 +380,7 @@ export function serializeCortex(
     }
 
     const operands = mapArgs<FormattingBlock>(expr, (arg) => {
-      const argHead = headName(arg);
+      const argHead = xhead(arg);
       const argOp = OPERATORS[argHead];
       if (argOp && argOp.precedence < operator.precedence) {
         return fmt.line('(', serializeExpression(arg), ')');

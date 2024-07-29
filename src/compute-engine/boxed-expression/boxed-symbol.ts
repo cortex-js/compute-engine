@@ -1,6 +1,6 @@
 import Complex from 'complex.js';
 import { Decimal } from 'decimal.js';
-import { Expression } from '../../math-json/math-json-format';
+import { Expression } from '../../math-json/types';
 import { _BoxedExpression } from './abstract-boxed-expression';
 import {
   BoxedExpression,
@@ -24,7 +24,6 @@ import {
   CanonicalOptions,
 } from './public';
 import { replace } from '../rules';
-import { isValidIdentifier, validateIdentifier } from '../../math-json/utils';
 import { hashCode, normalizedUnknownsForSolve } from './utils';
 import { _BoxedSymbolDefinition } from './boxed-symbol-definition';
 import { _BoxedFunctionDefinition } from './boxed-function-definition';
@@ -37,6 +36,10 @@ import { add } from '../library/arithmetic-add';
 import { mul } from '../library/arithmetic-multiply';
 import { asFloat } from './numerics';
 import { NumericValue } from '../numeric-value/public';
+import {
+  isValidIdentifier,
+  validateIdentifier,
+} from '../../math-json/identifiers';
 
 /**
  * BoxedSymbol

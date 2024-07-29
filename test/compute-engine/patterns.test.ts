@@ -7,7 +7,7 @@ import {
   SemiBoxedExpression,
   Substitution,
 } from '../../src/compute-engine';
-import { Expression } from '../../src/math-json';
+import { Expression } from '../../src/math-json/types';
 import { engine, latex } from '../utils';
 
 const ce = engine;
@@ -25,7 +25,7 @@ function match(
 }
 
 describe('Examples from Patterns and Rules guide', () => {
-  const pattern = ['Add', '_', 'x'];
+  const pattern: Expression = ['Add', '_', 'x'];
 
   // console.log("x+42", ce.box(["Add", "x", 42]).match(pattern));
   // ➔ { } : the expression matches the pattern by commutativity
@@ -83,7 +83,7 @@ describe('Examples from Patterns and Rules guide', () => {
 
 describe('PATTERNS  MATCH - Universal wildcard', () => {
   // Return not null (i.e. `{}`) when there is a match
-  const pattern = ['Add', 1, '__'];
+  const pattern: Expression = ['Add', 1, '__'];
   test('Simple match', () =>
     expect(match(pattern, ['Add', 1, 2])).toMatchInlineSnapshot(`{}`));
   test('Commutative', () =>
@@ -98,7 +98,7 @@ describe('PATTERNS  MATCH - Universal wildcard', () => {
 });
 
 describe('PATTERNS  MATCH - Named wildcard', () => {
-  const pattern = ['Add', 1, '__a'];
+  const pattern: Expression = ['Add', 1, '__a'];
   test('Commutative wildcards', () => {
     expect(match(pattern, ['Add', 1, 2])).toMatchInlineSnapshot(`
       {

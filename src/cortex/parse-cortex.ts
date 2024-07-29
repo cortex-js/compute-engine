@@ -1,4 +1,4 @@
-import { Expression } from '../math-json/math-json-format';
+import { Expression } from '../math-json/types';
 import { Origin } from '../common/debug';
 import {
   FatalParsingError,
@@ -31,7 +31,7 @@ import {
 import { Grammar } from '../point-free-parser/grammar';
 // import { parseShebang } from '../fixed-point-parser/whitespace-parsers';
 import {
-  op,
+  xop,
   machineValue,
   stringValue,
   isStringObject,
@@ -165,14 +165,14 @@ grammar.rule(
       } else if (fn.value === '#env') {
         if ('process' in globalThis && process.env) {
           return {
-            str: process.env[expressionToString(op(args.value!, 1))] ?? '',
+            str: process.env[expressionToString(xop(args.value!, 1))] ?? '',
           };
         }
       } else if (fn.value === '#navigator') {
         // eslint-disable-next-line no-restricted-globals
         if ('navigator' in globalThis) {
           // eslint-disable-next-line no-restricted-globals
-          return { str: navigator[expressionToString(op(args.value!, 1))] };
+          return { str: navigator[expressionToString(xop(args.value!, 1))] };
         }
       }
       return 'Nothing';

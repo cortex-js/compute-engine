@@ -1,16 +1,14 @@
-import type { Expression } from '../../math-json/math-json-format';
+import type { Expression } from '../../math-json/types';
 import {
-  nops,
+  xnops,
   dictionary,
   stringValue,
-  head,
-  headName,
+  xhead,
   symbol,
   isNumberObject,
   isSymbolObject,
-  ops,
+  xops,
   isNumberExpression,
-  ONLY_EMOJIS,
   machineValue,
 } from '../../math-json/utils';
 
@@ -30,6 +28,7 @@ import { countTokens, joinLatex, supsub } from './tokenizer';
 import { serializeNumber } from './serialize-number';
 import { SYMBOLS } from './dictionary/definitions-symbols';
 import { DELIMITERS_SHORTHAND } from './dictionary/definitions-core';
+import { EMOJIS } from '../../math-json/identifiers';
 
 const ACCENT_MODIFIERS = {
   deg: (s: string) => `${s}\\degree`,
@@ -101,12 +100,8 @@ export class Serializer {
         return this.wrap(expr);
       return this.serialize(expr);
     }
-    const name = head(expr);
-    if (
-      typeof name === 'string' &&
-      name !== 'Delimiter' &&
-      name !== 'Subscript'
-    ) {
+    const name = xhead(expr);
+    if (name && name !== 'Delimiter' && name !== 'Subscript') {
       const def = this.dictionary.ids.get(name);
       if (
         def &&
@@ -137,14 +132,14 @@ export class Serializer {
     const exprStr = this.serialize(expr);
 
     if (symbol(expr) !== null) return exprStr;
-    // If the default Delimiter (i.e. using parens), don't wrap
-    if (head(expr) === 'Delimiter' && nops(expr) === 1) return exprStr;
 
     const isNum = isNumberExpression(expr);
     // It's not a negative number, or a decimal number
     if (isNum && !/^(-|\.)/.test(exprStr)) return exprStr;
 
-    const h = head(expr);
+    // If the default Delimiter (i.e. using parens), don't wrap
+    const h = xhead(expr);
+    if (h === 'Delimiter' && xnops(expr) === 1) return exprStr;
     if (
       h !== 'Add' &&
       h !== 'Negate' &&
@@ -192,7 +187,7 @@ export class Serializer {
 
   wrapArguments(expr: Expression): string {
     return this.wrapString(
-      (ops(expr) ?? []).map((x) => this.serialize(x)).join(', '),
+      (xops(expr) ?? []).map((x) => this.serialize(x)).join(', '),
       this.options.applyFunctionStyle(expr, this.level)
     );
   }
@@ -225,7 +220,7 @@ export class Serializer {
     // It's a function without a serializer.
     // It may have come from `getIdentifierType()`
     // Serialize the arguments as function arguments
-    const h = head(expr);
+    const h = xhead(expr);
     if (typeof h === 'string')
       return serializeIdentifier(h, 'auto') + this.wrapArguments(expr);
 
@@ -234,17 +229,17 @@ export class Serializer {
     // See https://en.wikipedia.org/wiki/Apply
     //
 
-    if (head(h) === 'InverseFunction' || head(h) === 'Derivative') {
+    if (xhead(h) === 'InverseFunction' || xhead(h) === 'Derivative') {
       // For inverse functions and derivatives display as a regular function,
       // e.g. \sin^{-1} x, f'(x) instead of x \rhd f' and x \rhd \sin^{-1}
 
       return (
-        this.serializeFunction(h!, this.dictionary.ids.get(head(h) as string)) +
+        this.serializeFunction(h!, this.dictionary.ids.get(xhead(h))) +
         this.wrapArguments(expr)
       );
     }
 
-    const args = ops(expr) ?? [];
+    const args = xops(expr) ?? [];
     if (args.length === 1) {
       // If there's a single argument, we can use the pipeline operator
       // (i.e. `\rhd` `|>`)
@@ -312,22 +307,16 @@ export class Serializer {
         }
 
         //
-        // 5. Is it a named function?
+        // 5. Is it a function?
         //
-        const fnName = headName(expr);
+        const fnName = xhead(expr);
         if (fnName) {
           const def = this.dictionary.ids.get(fnName);
           return this.serializeFunction(expr, def);
         }
 
         //
-        // 6/ Is it a function with a head expression?
-        //
-        // For example [['derive', "f"], x]
-        if (head(expr) !== null) return this.serializeFunction(expr);
-
-        //
-        // 7. Unknown expression
+        // 6. Unknown expression
         //
         // This doesn't look like a symbol, or a function,
         // or anything we were expecting.
@@ -609,7 +598,7 @@ function serializeIdentifier(
   if (s === null) return null;
 
   // If the identifier contains emojis, skip the wrapping
-  if (ONLY_EMOJIS.test(s)) return s;
+  if (EMOJIS.test(s)) return s;
 
   // If the identifier starts with one or more underscore,
   // it's a wildcard symbol and always wrapped with \operatorname{...}.

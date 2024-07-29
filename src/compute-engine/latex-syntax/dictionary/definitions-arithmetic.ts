@@ -1,20 +1,19 @@
-import { Expression } from '../../../math-json/math-json-format';
+import { Expression } from '../../../math-json/types';
 import {
   machineValue,
   foldAssociativeOperator,
   rationalValue,
-  op,
-  nops,
-  head,
-  op1,
-  op2,
-  ops,
+  xop,
+  xnops,
+  xhead,
+  xop1,
+  xop2,
+  xops,
   symbol,
   isEmptySequence,
   missingIfEmpty,
   isNumberExpression,
   MISSING,
-  headName,
 } from '../../../math-json/utils';
 import {
   Serializer,
@@ -35,16 +34,16 @@ import { joinLatex, supsub } from '../tokenizer';
  * with a positive exponent (or no exponent) in the numerator.
  */
 function numeratorDenominator(expr: Expression): [Expression[], Expression[]] {
-  if (head(expr) !== 'Multiply') return [[], []];
+  if (xhead(expr) !== 'Multiply') return [[], []];
   const numerator: Expression[] = [];
   const denominator: Expression[] = [];
-  const args = ops(expr) ?? [];
+  const args = xops(expr) ?? [];
   for (const arg of args) {
-    if (head(arg) === 'Power') {
-      const op1 = op(arg, 1);
-      const op2 = op(arg, 2);
-      if (head(op2) === 'Negate') {
-        const b = op(op2, 1);
+    if (xhead(arg) === 'Power') {
+      const op1 = xop(arg, 1);
+      const op2 = xop(arg, 2);
+      if (xhead(op2) === 'Negate') {
+        const b = xop(op2, 1);
         if (op1 && b) denominator.push(['Power', op1, b]);
       } else {
         const exponentVal = machineValue(op2) ?? NaN;
@@ -57,11 +56,11 @@ function numeratorDenominator(expr: Expression): [Expression[], Expression[]] {
         }
       }
     } else if (
-      (head(arg) === 'Rational' && nops(arg) === 2) ||
-      head(arg) === 'Divide'
+      (xhead(arg) === 'Rational' && xnops(arg) === 2) ||
+      xhead(arg) === 'Divide'
     ) {
-      const op1 = op(arg, 1)!;
-      const op2 = op(arg, 2)!;
+      const op1 = xop(arg, 1)!;
+      const op2 = xop(arg, 2)!;
       if (machineValue(op1) !== 1) numerator.push(op1);
       if (machineValue(op2) !== 1) denominator.push(op2);
     } else {
@@ -125,14 +124,14 @@ function serializeAdd(serializer: Serializer, expr: Expression): string {
   // so, preventively decrease it now.
   serializer.level -= 1;
 
-  const name = head(expr);
+  const name = xhead(expr);
   let result = '';
-  let arg = op(expr, 1);
+  let arg = xop(expr, 1);
   if (name === 'Negate') {
     result = '-' + serializer.wrap(arg, ADDITION_PRECEDENCE + 1);
   } else if (name === 'Subtract') {
     result = serializer.wrap(arg, ADDITION_PRECEDENCE);
-    const arg2 = op(expr, 2);
+    const arg2 = xop(expr, 2);
     if (arg2 !== null) {
       const term = serializer.wrap(arg2, ADDITION_PRECEDENCE);
       if (term[0] === '-') result += '+' + term.slice(1);
@@ -144,10 +143,10 @@ function serializeAdd(serializer: Serializer, expr: Expression): string {
     // (e.g. 1 + 1/2 -> 1 1/2)
     if (
       serializer.options.prettify &&
-      nops(expr) === 2 &&
+      xnops(expr) === 2 &&
       serializer.options.invisiblePlus !== '+'
     ) {
-      const [op1, op2] = [op(expr, 1), op(expr, 2)];
+      const [op1, op2] = [xop(expr, 1), xop(expr, 2)];
 
       let [lhs, rhs] = [op1, op2];
       let lhsValue = machineValue(lhs);
@@ -184,9 +183,9 @@ function serializeAdd(serializer: Serializer, expr: Expression): string {
     }
 
     // If we have (-a)+b, we want to render it as b-a
-    if (serializer.options.prettify && nops(expr) === 2) {
+    if (serializer.options.prettify && xnops(expr) === 2) {
       const [first, firstSign] = unsign(arg!);
-      const [second, secondSign] = unsign(op(expr, 2)!);
+      const [second, secondSign] = unsign(xop(expr, 2)!);
       if (firstSign < 0 && secondSign > 0) {
         result =
           serializer.wrap(second, ADDITION_PRECEDENCE) +
@@ -198,9 +197,9 @@ function serializeAdd(serializer: Serializer, expr: Expression): string {
     }
 
     result = serializer.serialize(arg);
-    const last = nops(expr) + 1;
+    const last = xnops(expr) + 1;
     for (let i = 2; i < last; i++) {
-      arg = op(expr, i)!;
+      arg = xop(expr, i)!;
       if (serializer.options.prettify) {
         const [newArg, sign] = unsign(arg);
         const term = serializer.wrap(newArg, ADDITION_PRECEDENCE);
@@ -267,8 +266,8 @@ function serializeMultiply(
 
   let isNegative = false;
   let arg: Expression | null = null;
-  const count = nops(expr) + 1;
-  let xs = ops(expr) ?? [];
+  const count = xnops(expr) + 1;
+  let xs = xops(expr) ?? [];
 
   if (serializer.options.prettify === true) {
     if (xs.length === 2) {
@@ -303,17 +302,17 @@ function serializeMultiply(
       continue;
     }
 
-    if (head(arg) === 'Power') {
+    if (xhead(arg) === 'Power') {
       // It's a power with a fractional exponent,
       // it's a nth-root
-      const r = rationalValue(op(arg, 2));
+      const r = rationalValue(xop(arg, 2));
       if (r !== undefined && r !== null) {
         const [n, d] = r;
         if (n === 1 && d !== null) {
           result += serializeRoot(
             serializer,
             serializer.rootStyle(arg, serializer.level),
-            op(arg, 1),
+            xop(arg, 1),
             d
           );
           prevWasNumber = false;
@@ -322,7 +321,7 @@ function serializeMultiply(
       }
     }
 
-    if (head(arg) === 'Power' && !isNaN(machineValue(op(arg, 1)) ?? NaN)) {
+    if (xhead(arg) === 'Power' && !isNaN(machineValue(xop(arg, 1)) ?? NaN)) {
       // It's a power and the base is a number...
       // add a multiply...
       term = serializer.serialize(arg);
@@ -333,8 +332,8 @@ function serializeMultiply(
       continue;
     }
 
-    if (head(arg) === 'Negate') {
-      arg = op(arg, 1);
+    if (xhead(arg) === 'Negate') {
+      arg = xop(arg, 1);
       isNegative = !isNegative;
     }
     // 2.1 Wrap the term if necessary
@@ -346,7 +345,7 @@ function serializeMultiply(
       // First term
       result = term;
     } else {
-      const h = head(arg);
+      const h = xhead(arg);
       if (prevWasNumber && (h === 'Divide' || h === 'Rational')) {
         // Can't use an invisible multiply if a number
         // multiplied by a fraction
@@ -386,30 +385,30 @@ function parseFraction(parser: Parser): Expression | null {
   numer = missingIfEmpty(numer);
   denom = missingIfEmpty(denom);
   if (
-    head(numer) === 'PartialDerivative' &&
-    (head(denom) === 'PartialDerivative' ||
-      (head(denom) === 'Multiply' &&
-        head(op(denom, 1)) === 'PartialDerivative'))
+    xhead(numer) === 'PartialDerivative' &&
+    (xhead(denom) === 'PartialDerivative' ||
+      (xhead(denom) === 'Multiply' &&
+        xhead(xop(denom, 1)) === 'PartialDerivative'))
   ) {
     // It's a Leibniz notation partial derivative
     // `∂f(x)/∂x` or `∂^2f(x)/∂x∂y` or `∂/∂x f(x)`
-    const degree = op(numer, 3) ?? null;
+    const degree = xop(numer, 3) ?? null;
     // Expect: getArg(numer, 2) === 'Nothing' -- no args
-    let fn = op(numer, 1);
+    let fn = xop(numer, 1);
     if (fn === null) fn = missingIfEmpty(parser.parseExpression());
 
     let vars: Expression[] = [];
-    if (head(denom) === 'Multiply') {
+    if (xhead(denom) === 'Multiply') {
       // ?/∂x∂y
-      for (const arg of ops(denom) ?? []) {
-        if (head(arg) === 'PartialDerivative') {
-          const v = op(arg, 2);
+      for (const arg of xops(denom) ?? []) {
+        if (xhead(arg) === 'PartialDerivative') {
+          const v = xop(arg, 2);
           if (v) vars.push(v);
         }
       }
     } else {
       // ?/∂x
-      const v = op(denom, 2);
+      const v = xop(denom, 2);
       if (v) vars.push(v);
     }
     if (vars.length > 1) {
@@ -429,8 +428,8 @@ function serializeFraction(
   // console.assert(getFunctionName(expr) === 'Divide');
   if (expr === null) return '';
 
-  const numer = missingIfEmpty(op(expr, 1));
-  const denom = missingIfEmpty(op(expr, 2));
+  const numer = missingIfEmpty(xop(expr, 1));
+  const denom = missingIfEmpty(xop(expr, 2));
 
   const style = serializer.options.prettify
     ? serializer.fractionStyle(expr, serializer.level)
@@ -473,8 +472,8 @@ function serializePower(
 ): string {
   if (!expr) return '';
 
-  const name = head(expr);
-  const base = missingIfEmpty(op(expr, 1));
+  const name = xhead(expr);
+  const base = missingIfEmpty(xop(expr, 1));
 
   if (name === 'Sqrt') {
     return serializeRoot(
@@ -485,7 +484,7 @@ function serializePower(
     );
   }
 
-  const exp = missingIfEmpty(op(expr, 2));
+  const exp = missingIfEmpty(xop(expr, 2));
   if (name === 'Root')
     return serializeRoot(
       serializer,
@@ -500,24 +499,24 @@ function serializePower(
       return serializer.serialize(['Divide', '1', base]);
     } else if (val2 < 0) {
       return serializer.serialize(['Divide', '1', ['Power', base, -val2]]);
-    } else if (head(exp) === 'Divide' || head(exp) === 'Rational') {
-      if (machineValue(op(exp, 1)) === 1) {
+    } else if (xhead(exp) === 'Divide' || xhead(exp) === 'Rational') {
+      if (machineValue(xop(exp, 1)) === 1) {
         // It's x^{1/n} -> it's a root
         const style = serializer.rootStyle(expr, serializer.level);
-        return serializeRoot(serializer, style, base, op(exp, 2));
+        return serializeRoot(serializer, style, base, xop(exp, 2));
       }
-      if (machineValue(op(exp, 2)) === 2) {
+      if (machineValue(xop(exp, 2)) === 2) {
         // It's x^(n/2) -> it's √x^n
         return `${serializer.serialize(['Sqrt', base])}${supsub(
           '^',
-          serializer.serialize(op(exp, 1))
+          serializer.serialize(xop(exp, 1))
         )}`;
       }
-    } else if (head(exp) === 'Power') {
-      if (machineValue(op(exp, 2)) === -1) {
+    } else if (xhead(exp) === 'Power') {
+      if (machineValue(xop(exp, 2)) === -1) {
         // It's x^{n^-1} -> it's a root
         const style = serializer.rootStyle(expr, serializer.level);
-        return serializeRoot(serializer, style, base, op(exp, 1));
+        return serializeRoot(serializer, style, base, xop(exp, 1));
       }
     }
   }
@@ -536,7 +535,7 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
     precedence: 880,
     parse: (_parser, lhs) => ['Degrees', lhs],
     serialize: (serializer: Serializer, expr: Expression): string => {
-      return joinLatex([serializer.serialize(op(expr, 1)), '\\degree']);
+      return joinLatex([serializer.serialize(xop(expr, 1)), '\\degree']);
     },
   },
   {
@@ -706,9 +705,9 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
     name: 'Complex',
     precedence: ADDITION_PRECEDENCE - 1, // One less than precedence of `Add`: used for correct wrapping
     serialize: (serializer: Serializer, expr: Expression): string => {
-      const rePart = serializer.serialize(op(expr, 1));
+      const rePart = serializer.serialize(xop(expr, 1));
 
-      const im = machineValue(op(expr, 2));
+      const im = machineValue(xop(expr, 2));
       if (im === 0) return rePart;
 
       const imPart =
@@ -716,9 +715,9 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
           ? '\\imaginaryI'
           : im === -1
             ? '-\\imaginaryI'
-            : joinLatex([serializer.serialize(op(expr, 2)), '\\imaginaryI']);
+            : joinLatex([serializer.serialize(xop(expr, 2)), '\\imaginaryI']);
 
-      const re = machineValue(op(expr, 1));
+      const re = machineValue(xop(expr, 1));
       if (re === 0) return imPart;
 
       if (im !== null && im < 0) return joinLatex([rePart, imPart]);
@@ -770,7 +769,7 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
   {
     name: 'Exp',
     serialize: (serializer: Serializer, expr: Expression): string => {
-      const op1 = op(expr, 1);
+      const op1 = xop(expr, 1);
       if (symbol(op1) || machineValue(op1) !== null)
         return joinLatex(['\\exponentialE^{', serializer.serialize(op1), '}']);
 
@@ -856,14 +855,14 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
     latexTrigger: ['\\log'],
     parse: (parser: Parser) => parseLog('Log', parser),
     serialize: (serializer, expr) => {
-      const base = op2(expr);
+      const base = xop2(expr);
       if (!base) return '\\log' + serializer.wrapArguments(expr);
 
       return joinLatex([
         '\\log_{',
         serializer.serialize(base),
         '}',
-        serializer.wrap(op1(expr)),
+        serializer.wrap(xop1(expr)),
       ]);
     },
   },
@@ -892,26 +891,26 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
     parse: (parser: Parser) => {
       if (!parser.match('_')) return null;
       const base = parser.parseGroup();
-      if (head(base) !== 'To') return null;
+      if (xhead(base) !== 'To') return null;
       const expr = parser.parseArguments('implicit');
       if (!expr) return null;
       return [
         'Limit',
-        ['Function', expr[0], op(base, 1)],
-        op(base, 2),
+        ['Function', expr[0], xop(base, 1)],
+        xop(base, 2),
       ] as Expression;
     },
     serialize: (serializer, expr) => {
-      const fn = op(expr, 1);
-      const fnVar = op(fn, 2);
-      const to = op(expr, 2);
+      const fn = xop(expr, 1);
+      const fnVar = xop(fn, 2);
+      const to = xop(expr, 2);
       return joinLatex([
         '\\lim_{',
         serializer.serialize(fnVar),
         '\\to',
         serializer.serialize(to),
         '}',
-        serializer.serialize(op(fn, 1)),
+        serializer.serialize(xop(fn, 1)),
       ]);
     },
   },
@@ -968,9 +967,9 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
     kind: 'infix',
     precedence: DIVISION_PRECEDENCE,
     serialize: (serializer, expr) => {
-      if (nops(expr) !== 2) return '';
-      const lhs = serializer.serialize(op(expr, 1));
-      const rhs = serializer.serialize(op(expr, 2));
+      if (xnops(expr) !== 2) return '';
+      const lhs = serializer.serialize(xop(expr, 1));
+      const rhs = serializer.serialize(xop(expr, 2));
       return joinLatex([lhs, '\\bmod', rhs]);
     },
   },
@@ -993,10 +992,10 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
   {
     name: 'Congruent',
     serialize: (serializer, expr) => {
-      const lhs = serializer.serialize(op(expr, 1));
-      const rhs = serializer.serialize(op(expr, 2));
-      if (op(expr, 3) === null) return joinLatex([lhs, '\\equiv', rhs]);
-      const modulus = serializer.serialize(op(expr, 3));
+      const lhs = serializer.serialize(xop(expr, 1));
+      const rhs = serializer.serialize(xop(expr, 2));
+      if (xop(expr, 3) === null) return joinLatex([lhs, '\\equiv', rhs]);
+      const modulus = serializer.serialize(xop(expr, 3));
       return joinLatex([lhs, '\\equiv', rhs, '\\pmod{', modulus, '}']);
     },
   },
@@ -1066,11 +1065,11 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
     associativity: 'any',
     precedence: ARROW_PRECEDENCE,
     serialize: (serializer, expr) => {
-      const op1 = op(expr, 1);
+      const op1 = xop(expr, 1);
       if (op1 === null) return '\\pm';
-      if (nops(expr) === 1)
+      if (xnops(expr) === 1)
         return joinLatex(['\\pm', serializer.serialize(op1)]);
-      const op2 = op(expr, 2);
+      const op2 = xop(expr, 2);
       return joinLatex([
         serializer.serialize(op1),
         '\\pm',
@@ -1131,7 +1130,7 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
     name: 'Rational',
     precedence: DIVISION_PRECEDENCE,
     serialize: (serializer: Serializer, expr: Expression | null): string => {
-      if (expr && nops(expr) === 1)
+      if (expr && xnops(expr) === 1)
         return '\\operatorname{Rational}' + serializer.wrapArguments(expr);
       return serializeFraction(serializer, expr);
     },
@@ -1148,7 +1147,7 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
   {
     name: 'Square',
     precedence: 720,
-    serialize: (serializer, expr) => serializer.wrapShort(op(expr, 1)) + '^2',
+    serialize: (serializer, expr) => serializer.wrapShort(xop(expr, 1)) + '^2',
   },
   {
     latexTrigger: ['\\sum'],
@@ -1186,8 +1185,8 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
       return ['Add', lhs, missingIfEmpty(rhs)] as Expression;
     },
     serialize: (serializer, expr) => {
-      const lhs = serializer.wrap(op(expr, 1), ADDITION_PRECEDENCE + 2);
-      const rhs = serializer.wrap(op(expr, 2), ADDITION_PRECEDENCE + 3);
+      const lhs = serializer.wrap(xop(expr, 1), ADDITION_PRECEDENCE + 2);
+      const rhs = serializer.wrap(xop(expr, 2), ADDITION_PRECEDENCE + 3);
       return joinLatex([lhs, '-', rhs]);
     },
   },
@@ -1213,9 +1212,9 @@ function parseBigOp(name: string, prec: number) {
     // @todo: parse multiple indexes in sub, i.e. \sum_{i=1..2; j=2..5}(i+j)
     let index: Expression | null = null;
     let lower: Expression | null = null;
-    if (head(sub) === 'Equal') {
-      index = op(sub, 1);
-      lower = op(sub, 2);
+    if (xhead(sub) === 'Equal') {
+      index = xop(sub, 1);
+      lower = xop(sub, 2);
       // @todo else head(sub) === 'ElementOf'
     } else {
       index = sub;
@@ -1243,30 +1242,30 @@ function parseBigOp(name: string, prec: number) {
 
 function serializeBigOp(command: string) {
   return (serializer, expr) => {
-    if (!op(expr, 1)) return command;
+    if (!xop(expr, 1)) return command;
 
-    let arg = op(expr, 2);
-    const h = head(arg);
+    let arg = xop(expr, 2);
+    const h = xhead(arg);
     if (h !== 'Tuple' && h !== 'Triple' && h !== 'Pair' && h !== 'Single')
       arg = null;
 
-    let index = op(arg, 1);
-    if (index !== null && head(index) === 'Hold') index = op(index, 1);
+    let index = xop(arg, 1);
+    if (index !== null && xhead(index) === 'Hold') index = xop(index, 1);
 
-    const fn = op(expr, 1);
+    const fn = xop(expr, 1);
 
     if (arg !== null) {
-      if (!op(expr, 2)) return joinLatex([command, serializer.serialize(fn)]);
+      if (!xop(expr, 2)) return joinLatex([command, serializer.serialize(fn)]);
       return joinLatex([
         command,
         '_{',
-        serializer.serialize(op(expr, 2)),
+        serializer.serialize(xop(expr, 2)),
         '}',
         serializer.serialize(fn),
       ]);
     }
 
-    const lower = op(arg, 2);
+    const lower = xop(arg, 2);
 
     let sub: string[] = [];
     if (index && symbol(index) !== 'Nothing' && lower)
@@ -1278,8 +1277,8 @@ function serializeBigOp(command: string) {
     if (sub.length > 0) sub = ['_{', ...sub, '}'];
 
     let sup: string[] = [];
-    if (op(arg, 3) !== null)
-      sup = ['^{', serializer.serialize(op(arg, 3)), '}'];
+    if (xop(arg, 3) !== null)
+      sup = ['^{', serializer.serialize(xop(arg, 3)), '}'];
 
     return joinLatex([command, ...sup, ...sub, serializer.serialize(fn)]);
   };
@@ -1315,21 +1314,22 @@ function unsign(expr: Expression): [Expression, -1 | 1] {
   let newExpr = expr;
   do {
     expr = newExpr;
-    if (headName(expr) === 'Negate') {
+    const fnName = xhead(expr);
+    if (fnName === 'Negate') {
       sign *= -1;
-      newExpr = op(expr, 1)!;
-    } else if (headName(expr) === 'Multiply') {
-      const [first, firstSign] = unsign(op(expr, 1)!);
+      newExpr = xop(expr, 1)!;
+    } else if (fnName === 'Multiply') {
+      const [first, firstSign] = unsign(xop(expr, 1)!);
       if (firstSign < 0) {
         sign *= -1;
-        if (first === 1) newExpr = ['Multiply', ...ops(expr)!.slice(1)];
-        else newExpr = ['Multiply', first, ...ops(expr)!.slice(1)];
+        if (first === 1) newExpr = ['Multiply', ...xops(expr)!.slice(1)];
+        else newExpr = ['Multiply', first, ...xops(expr)!.slice(1)];
       }
-    } else if (headName(expr) === 'Divide' || headName(expr) === 'Rational') {
-      const [numer, numerSign] = unsign(op(expr, 1)!);
+    } else if (fnName === 'Divide' || fnName === 'Rational') {
+      const [numer, numerSign] = unsign(xop(expr, 1)!);
       if (numerSign < 0) {
         sign *= -1;
-        newExpr = [headName(expr)! as string, numer, op(expr, 2)!];
+        newExpr = [fnName, numer, xop(expr, 2)!];
       }
     } else {
       const val = machineValue(expr);

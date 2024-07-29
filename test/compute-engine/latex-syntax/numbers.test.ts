@@ -1,5 +1,5 @@
 import { SerializeLatexOptions } from '../../../src/compute-engine/latex-syntax/public.ts';
-import { Expression } from '../../../src/math-json/math-json-format';
+import { Expression } from '../../../src/math-json/types.ts';
 import { exprToString, engine as ce } from '../../utils';
 
 function parse(s: string) {

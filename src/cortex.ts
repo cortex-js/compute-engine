@@ -1,7 +1,7 @@
 // This is the root of the package for the Cortex language.
 // It include everything that's needed to parse, serialize and execute Cortex.
 
-export * from './math-json/math-json-format';
+export * from './math-json/types';
 
 // export { Expression } from './public';
 

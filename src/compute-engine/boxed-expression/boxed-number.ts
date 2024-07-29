@@ -170,6 +170,7 @@ export class BoxedNumber extends _BoxedExpression {
   }
 
   get head(): string {
+    // @fixme: return 'Number', 'Integer', 'Rational', 'Real'
     return 'Number';
   }
 

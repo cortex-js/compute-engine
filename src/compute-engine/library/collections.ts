@@ -905,7 +905,7 @@ function take(
   const def = expr.functionDefinition;
   if (!def?.at) return ce.Nothing;
 
-  const list: SemiBoxedExpression = [];
+  const list: SemiBoxedExpression[] = [];
 
   for (const index of indexes) {
     const [lower, upper, step] = index;

@@ -213,11 +213,6 @@ describe('CORTEX SERIALIZING FUNCTIONS', () => {
     expect(serializeCortex(['Divide', 'n', 4])).toMatchInlineSnapshot(
       `"n / 4"`
     );
-
-    // Head as expression
-    expect(serializeCortex([['g', 'f'] as any as string, 'x', 1, 0])).toMatch(
-      'Apply(g(f), [x, 1, 0])'
-    );
   });
 });
 

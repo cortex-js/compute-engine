@@ -140,4 +140,4 @@ export type Expression =
   | MathJsonSymbol
   | MathJsonFunction
   | MathJsonDictionary
-  | [MathJsonIdentifier, ...Expression[]];
+  | readonly [MathJsonIdentifier, ...Expression[]];

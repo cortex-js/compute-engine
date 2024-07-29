@@ -1,4 +1,4 @@
-import { Expression } from '../../math-json/math-json-format';
+import { Expression } from '../../math-json/types';
 import { NumberFormat, NumberSerializationFormat } from './public';
 
 // Some vocabulary:

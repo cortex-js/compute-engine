@@ -1,4 +1,4 @@
-import { Expression } from '../../src/math-json.ts';
+import { Expression } from '../../src/math-json/types';
 import { engine, exprToString } from '../utils';
 
 function evaluate(expr: Expression) {

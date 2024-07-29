@@ -22,9 +22,12 @@ import {
 } from '../public';
 import { _BoxedSymbolDefinition } from '../boxed-expression/boxed-symbol-definition';
 import { makeFunctionDefinition } from '../boxed-expression/boxed-function-definition';
-import { isValidIdentifier, validateIdentifier } from '../../math-json/utils';
 import { domainSetsLibrary } from './domains';
 import { _BoxedExpression } from '../boxed-expression/abstract-boxed-expression';
+import {
+  isValidIdentifier,
+  validateIdentifier,
+} from '../../math-json/identifiers';
 
 export function getStandardLibrary(
   categories: LibraryCategory[] | LibraryCategory | 'all'

@@ -1,4 +1,4 @@
-import { Expression } from '../../../src/math-json';
+import { Expression } from '../../../src/math-json/types.ts';
 import { engine } from '../../utils';
 
 function json(latex: string): Expression {
