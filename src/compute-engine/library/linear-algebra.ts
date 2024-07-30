@@ -270,18 +270,18 @@ export const LINEAR_ALGEBRA_LIBRARY: IdentifierDefinitions[] = [
 function canonicalMatrix(
   ce: IComputeEngine,
   ops: BoxedExpression[],
-  head = 'Matrix'
+  operator = 'Matrix'
 ): BoxedExpression | null {
-  if (ops.length === 0) return ce._fn(head, []);
+  if (ops.length === 0) return ce._fn(operator, []);
 
   const body =
-    ops[0].head === 'Vector' ? ops[0].canonical.ops![0] : ops[0].canonical;
+    ops[0].operator === 'Vector' ? ops[0].canonical.ops![0] : ops[0].canonical;
   const delims = ops[1]?.canonical;
   const columns = ops[2]?.canonical;
 
-  if (ops.length > 3) return ce._fn(head, checkArity(ce, ops, 3));
+  if (ops.length > 3) return ce._fn(operator, checkArity(ce, ops, 3));
 
-  if (columns) return ce._fn(head, [body, delims, columns]);
-  if (delims) return ce._fn(head, [body, delims]);
-  return ce._fn(head, [body]);
+  if (columns) return ce._fn(operator, [body, delims, columns]);
+  if (delims) return ce._fn(operator, [body, delims]);
+  return ce._fn(operator, [body]);
 }

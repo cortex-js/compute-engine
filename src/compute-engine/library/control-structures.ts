@@ -56,8 +56,8 @@ export const CONTROL_STRUCTURES_LIBRARY: IdentifierDefinitions[] = [
 
             for (const x of each(collection)) {
               result = fn([x]) ?? ce.Nothing;
-              if (result.head === 'Break') return result.op1;
-              if (result.head === 'Return') return result;
+              if (result.operator === 'Break') return result.op1;
+              if (result.operator === 'Return') return result;
               if (i++ > ce.iterationLimit)
                 return ce.error('iteration-limit-exceeded');
             }
@@ -69,8 +69,8 @@ export const CONTROL_STRUCTURES_LIBRARY: IdentifierDefinitions[] = [
           let i = 0;
           while (true) {
             const result = body.evaluate();
-            if (result.head === 'Break') return result.op1;
-            if (result.head === 'Return') return result;
+            if (result.operator === 'Break') return result.op1;
+            if (result.operator === 'Return') return result;
             if (i++ > ce.iterationLimit)
               return ce.error('iteration-limit-exceeded');
           }
@@ -133,7 +133,7 @@ function evaluateBlock(
 
   let result: BoxedExpression | undefined = undefined;
   for (const op of ops) {
-    const h = op.head;
+    const h = op.operator;
     if (h === 'Return') {
       result = op.op1.evaluate();
       break;
@@ -170,7 +170,7 @@ function canonicalBlock(
   const declarations: BoxedExpression[] = [];
   const body: BoxedExpression[] = [];
   for (const op of ops) {
-    if (op.head === 'Declare') declarations.push(op);
+    if (op.operator === 'Declare') declarations.push(op);
     else body.push(invalidateDeclare(op));
   }
 
@@ -181,10 +181,10 @@ function canonicalBlock(
 }
 
 function invalidateDeclare(expr: BoxedExpression): BoxedExpression {
-  if (expr.head === 'Declare') expr.engine.error('unexpected-declare');
+  if (expr.operator === 'Declare') expr.engine.error('unexpected-declare');
 
   if (expr.ops)
-    return expr.engine._fn(expr.head, expr.ops.map(invalidateDeclare));
+    return expr.engine._fn(expr.operator, expr.ops.map(invalidateDeclare));
 
   return expr;
 }

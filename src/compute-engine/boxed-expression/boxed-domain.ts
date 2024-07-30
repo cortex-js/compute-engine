@@ -201,7 +201,7 @@ export class _BoxedDomain extends _BoxedExpression implements BoxedDomain {
     return null;
   }
 
-  get head(): string {
+  get operator(): string {
     return 'Domain';
   }
 

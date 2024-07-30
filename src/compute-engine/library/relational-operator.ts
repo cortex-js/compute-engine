@@ -343,10 +343,10 @@ export const RELOP_LIBRARY: IdentifierDefinitions = {
 
 function canonicalRelational(
   ce: IComputeEngine,
-  head: string,
+  operator: string,
   ops: ReadonlyArray<BoxedExpression>
 ): BoxedExpression {
-  ops = flatten(ops, head);
+  ops = flatten(ops, operator);
 
   const nestedRelational: BoxedExpression[] = [];
   const newOps: BoxedExpression[] = [];
@@ -358,9 +358,9 @@ function canonicalRelational(
     } else newOps.push(op);
   }
 
-  if (nestedRelational.length === 0) return ce._fn(head, newOps);
+  if (nestedRelational.length === 0) return ce._fn(operator, newOps);
 
-  return ce._fn('And', [ce._fn(head, newOps), ...nestedRelational]);
+  return ce._fn('And', [ce._fn(operator, newOps), ...nestedRelational]);
 
   // if (!ops.every((op) => op.isValid))
 }

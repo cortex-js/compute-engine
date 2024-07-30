@@ -258,8 +258,8 @@ function evaluateElement(
   }
 
   // Is the element `lhs` or the sublist `lhs` inside `rhs`?
-  if (rhs.head === 'List') {
-    if (lhs.head === 'List') {
+  if (rhs.operator === 'List') {
+    if (lhs.operator === 'List') {
       let found = false;
       for (let i = 0; i < 1 + (rhs.nops - lhs.nops); ++i) {
         found = true;
@@ -275,7 +275,7 @@ function evaluateElement(
       return ce.False;
     }
     // Is the `lhs` element inside the list?
-    const val = lhs.head === 'Hold' ? lhs.op1 : lhs;
+    const val = lhs.operator === 'Hold' ? lhs.op1 : lhs;
     for (const elem of rhs.ops!) if (val.isEqual(elem)) return ce.True;
 
     return ce.False;

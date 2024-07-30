@@ -145,7 +145,7 @@ export class BoxedTensor extends _BoxedExpression {
     return 97;
   }
 
-  get head(): string {
+  get operator(): string {
     return this._tensor ? 'List' : this._operator!;
   }
 
@@ -320,7 +320,7 @@ export function expressionTensorInfo(
     else shape[axis] = Math.max(shape[axis] ?? 0, t.length);
 
     for (const item of t) {
-      if (item.head === operator) visit(item.ops!, axis + 1);
+      if (item.operator === operator) visit(item.ops!, axis + 1);
       else dtype = getSupertype(dtype, getExpressionDatatype(item));
 
       if (!valid) return;
@@ -348,7 +348,7 @@ export function expressionAsTensor<T extends TensorDataType = 'expression'>(
   const cast = f.cast.bind(f);
   const visit = (t: ReadonlyArray<BoxedExpression>) => {
     for (const item of t) {
-      if (item.head === operator) visit(item.ops!);
+      if (item.operator === operator) visit(item.ops!);
       else {
         const v = cast(item, dtype);
         if (v === undefined) {

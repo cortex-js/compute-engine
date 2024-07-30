@@ -43,14 +43,14 @@ export const DEFINITIONS_LINEAR_ALGEBRA: LatexDictionary = [
     identifierTrigger: 'pmatrix',
     parse: (parser: Parser) => {
       const columns = parseColumnFormat(parser);
-      const [head, cells] = parseCells(parser);
+      const [operator, cells] = parseCells(parser);
 
       if (columns)
-        return [head, cells, { str: '()' }, { str: columns }] as Expression;
+        return [operator, cells, { str: '()' }, { str: columns }] as Expression;
 
       // `pmatrix` is the default environment, so no need to specify the
       // delimiters
-      return [head, cells] as Expression;
+      return [operator, cells] as Expression;
     },
   },
 
@@ -59,12 +59,12 @@ export const DEFINITIONS_LINEAR_ALGEBRA: LatexDictionary = [
     identifierTrigger: 'bmatrix',
     parse: (parser: Parser) => {
       const columns = parseColumnFormat(parser);
-      const [head, cells] = parseCells(parser);
+      const [operator, cells] = parseCells(parser);
 
       if (columns)
-        return [head, cells, { str: '[]' }, { str: columns }] as Expression;
+        return [operator, cells, { str: '[]' }, { str: columns }] as Expression;
 
-      return [head, cells, { str: '[]' }] as Expression;
+      return [operator, cells, { str: '[]' }] as Expression;
     },
   },
 
@@ -73,12 +73,12 @@ export const DEFINITIONS_LINEAR_ALGEBRA: LatexDictionary = [
     identifierTrigger: 'Bmatrix',
     parse: (parser: Parser) => {
       const columns = parseColumnFormat(parser);
-      const [head, cells] = parseCells(parser);
+      const [operator, cells] = parseCells(parser);
 
       if (columns)
-        return [head, cells, { str: '{}' }, { str: columns }] as Expression;
+        return [operator, cells, { str: '{}' }, { str: columns }] as Expression;
 
-      return [head, cells, { str: '{}' }] as Expression;
+      return [operator, cells, { str: '{}' }] as Expression;
     },
   },
 
@@ -87,12 +87,12 @@ export const DEFINITIONS_LINEAR_ALGEBRA: LatexDictionary = [
     identifierTrigger: 'vmatrix',
     parse: (parser: Parser) => {
       const columns = parseColumnFormat(parser);
-      const [head, cells] = parseCells(parser);
+      const [operator, cells] = parseCells(parser);
 
       if (columns)
-        return [head, cells, { str: '||' }, { str: columns }] as Expression;
+        return [operator, cells, { str: '||' }, { str: columns }] as Expression;
 
-      return [head, cells, { str: '||' }] as Expression;
+      return [operator, cells, { str: '||' }] as Expression;
     },
   },
 
@@ -101,12 +101,12 @@ export const DEFINITIONS_LINEAR_ALGEBRA: LatexDictionary = [
     identifierTrigger: 'Vmatrix',
     parse: (parser: Parser) => {
       const columns = parseColumnFormat(parser);
-      const [head, cells] = parseCells(parser);
+      const [operator, cells] = parseCells(parser);
 
       if (columns)
-        return [head, cells, { str: '‖‖' }, { str: columns }] as Expression;
+        return [operator, cells, { str: '‖‖' }, { str: columns }] as Expression;
 
-      return [head, cells, { str: '‖‖' }] as Expression;
+      return [operator, cells, { str: '‖‖' }] as Expression;
     },
   },
 
@@ -115,12 +115,12 @@ export const DEFINITIONS_LINEAR_ALGEBRA: LatexDictionary = [
     identifierTrigger: 'smallmatrix',
     parse: (parser: Parser) => {
       const columns = parseColumnFormat(parser);
-      const [head, cells] = parseCells(parser);
+      const [operator, cells] = parseCells(parser);
 
       if (columns)
-        return [head, cells, { str: '()' }, { str: columns }] as Expression;
+        return [operator, cells, { str: '()' }, { str: columns }] as Expression;
 
-      return [head, cells] as Expression;
+      return [operator, cells] as Expression;
     },
   },
 
@@ -129,12 +129,12 @@ export const DEFINITIONS_LINEAR_ALGEBRA: LatexDictionary = [
     identifierTrigger: 'array',
     parse: (parser: Parser) => {
       const columns = parseColumnFormat(parser, false);
-      const [head, cells] = parseCells(parser);
+      const [operator, cells] = parseCells(parser);
 
       if (columns)
-        return [head, cells, { str: '..' }, { str: columns }] as Expression;
+        return [operator, cells, { str: '..' }, { str: columns }] as Expression;
 
-      return [head, cells, { str: '..' }] as Expression;
+      return [operator, cells, { str: '..' }] as Expression;
     },
   },
 
@@ -143,12 +143,12 @@ export const DEFINITIONS_LINEAR_ALGEBRA: LatexDictionary = [
     identifierTrigger: 'matrix',
     parse: (parser: Parser) => {
       const columns = parseColumnFormat(parser);
-      const [head, cells] = parseCells(parser);
+      const [operator, cells] = parseCells(parser);
 
       if (columns)
-        return [head, cells, { str: '..' }, { str: columns }] as Expression;
+        return [operator, cells, { str: '..' }, { str: columns }] as Expression;
 
-      return [head, cells, { str: '..' }] as Expression;
+      return [operator, cells, { str: '..' }] as Expression;
     },
   },
   {
@@ -156,12 +156,12 @@ export const DEFINITIONS_LINEAR_ALGEBRA: LatexDictionary = [
     identifierTrigger: 'matrix*',
     parse: (parser: Parser) => {
       const columns = parseColumnFormat(parser);
-      const [head, cells] = parseCells(parser);
+      const [operator, cells] = parseCells(parser);
 
       if (columns)
-        return [head, cells, { str: '..' }, { str: columns }] as Expression;
+        return [operator, cells, { str: '..' }, { str: columns }] as Expression;
 
-      return [head, cells, { str: '..' }] as Expression;
+      return [operator, cells, { str: '..' }] as Expression;
     },
   },
 
@@ -234,7 +234,9 @@ export const DEFINITIONS_LINEAR_ALGEBRA: LatexDictionary = [
   },
 ];
 
-function parseCells(parser: Parser): [head: string, cells: Expression | null] {
+function parseCells(
+  parser: Parser
+): [operator: string, cells: Expression | null] {
   const tabular: Expression[][] | null = parser.parseTabular();
   // @todo tensor: check if it's a vector, Victor.
   if (!tabular) return ['', null];

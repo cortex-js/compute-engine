@@ -419,7 +419,7 @@ const S6: Expression = ['Sqrt', 6];
 // The key is the argument in radian, as (num * π / den)
 const CONSTRUCTIBLE_VALUES: [
   key: [numerator: number, denominator: number],
-  values: { [head: string]: Expression | LatexString },
+  values: { [name: string]: Expression | LatexString },
 ][] = [
   [
     [0, 1],
@@ -570,7 +570,7 @@ const CONSTRUCTIBLE_VALUES: [
 // For each trig function, by quadrant (0..π/2, π/2..π, π..3π/2, 3π/2..2π),
 // what is the corresponding identity (sign and function)
 // E.g 'Sin[θ+π/2] = Cos[θ]` -> Quadrant 2, Positive sign, Cos
-const TRIG_IDENTITIES: { [key: string]: [sign: number, head: string][] } = {
+const TRIG_IDENTITIES: { [key: string]: [sign: number, name: string][] } = {
   Sin: [
     [+1, 'Sin'],
     [+1, 'Cos'],
@@ -611,11 +611,11 @@ const TRIG_IDENTITIES: { [key: string]: [sign: number, head: string][] } = {
 
 type ConstructibleTrigValues = [
   [numerator: number, denominator: number],
-  { [head: string]: BoxedExpression },
+  { [operator: string]: BoxedExpression },
 ][];
 
 function constructibleValues(
-  head: string,
+  operator: string,
   x: BoxedExpression | undefined
 ): undefined | BoxedExpression {
   if (!x) return undefined;
@@ -630,8 +630,8 @@ function constructibleValues(
       return CONSTRUCTIBLE_VALUES.map(([val, results]) => [
         val,
         Object.fromEntries(
-          Object.entries(results).map(([head, r]) => [
-            head,
+          Object.entries(results).map(([op, r]) => [
+            op,
             (ce.parse(asLatexString(r)) ?? ce.box(r)).evaluate(),
           ])
         ),
@@ -646,8 +646,8 @@ function constructibleValues(
     }
   );
 
-  if (isInverseTrigFunc(head))
-    return constructibleValuesInverse(ce, head, x, specialValues);
+  if (isInverseTrigFunc(operator))
+    return constructibleValuesInverse(ce, operator, x, specialValues);
 
   let theta = asFloat(x.N());
   if (theta === null) return undefined;
@@ -660,7 +660,7 @@ function constructibleValues(
   }
 
   // Odd-even identities
-  const identitySign = trigFuncParity(head) == -1 ? Math.sign(theta) : +1;
+  const identitySign = trigFuncParity(operator) == -1 ? Math.sign(theta) : +1;
 
   theta = Math.abs(theta % (2 * Math.PI));
 
@@ -670,10 +670,10 @@ function constructibleValues(
 
   // Adjusting for the position in the quadrant
   let sign: number;
-  [sign, head] = TRIG_IDENTITIES[head]?.[quadrant] ?? [1, head];
+  [sign, operator] = TRIG_IDENTITIES[operator]?.[quadrant] ?? [1, operator];
 
   for (const [[n, d], value] of specialValues) {
-    const r = value[head];
+    const r = value[operator];
     if (r && Math.abs(theta - (Math.PI * n) / d) <= 1e-12) {
       if (r.symbol === 'ComplexInfinity') return r;
       return identitySign * sign < 0 ? r.neg() : r;
@@ -684,30 +684,30 @@ function constructibleValues(
 
 function constructibleValuesInverse(
   ce: IComputeEngine,
-  head: string,
+  operator: string,
   x: BoxedExpression | undefined,
   specialValues: ConstructibleTrigValues
 ): undefined | BoxedExpression {
   if (!x) return undefined;
   let x_N = asFloat(x.N());
   if (x_N === null) return undefined;
-  // head is arcFn, and inverse_head is Fn
-  const inverse_head = inverseTrigFuncName(head);
+  // operator is arcFn, and inv_operator is Fn
+  const inv_operator = inverseTrigFuncName(operator);
 
   //
-  // Create the cache of special values of the head function by inverting
-  // specialValues of inverse_head function
+  // Create the cache of special values of the operator function by inverting
+  // specialValues of inv_operator function
   //
   type ConstructibleTrigValuesInverse = [
     [match_arg: BoxedExpression, match_arg_N: number],
     angle: [numerator: number, denominator: number],
   ][];
   const specialInverseValues = ce.cache<ConstructibleTrigValuesInverse>(
-    'constructible-inverse-trigonometric-values-' + head,
+    'constructible-inverse-trigonometric-values-' + operator,
     () => {
       const cache: ConstructibleTrigValuesInverse = [];
       for (const [[n, d], value] of specialValues) {
-        const r = value[inverse_head!];
+        const r = value[inv_operator!];
         if (r === undefined) continue;
         const rn = asFloat(r.N());
         if (rn === null) continue;
@@ -731,7 +731,7 @@ function constructibleValuesInverse(
 
   let quadrant = 0;
   if (x_N < 0) {
-    quadrant = trigFuncParity(inverse_head!) == -1 ? -1 : 1;
+    quadrant = trigFuncParity(inv_operator!) == -1 ? -1 : 1;
     // shift x to quadrant 0 to match the key in specialInverseValues
     x_N = -x_N;
     x = x.neg();
@@ -750,17 +750,17 @@ function constructibleValuesInverse(
   return undefined;
 }
 
-function trigFuncParity(head: string): number {
+function trigFuncParity(name: string): number {
   // Cos and Sec are even functions, the others are odd
-  return head !== 'Cos' && head !== 'Sec' ? -1 : 1;
+  return name !== 'Cos' && name !== 'Sec' ? -1 : 1;
 }
 
-function isInverseTrigFunc(head: string): boolean {
-  if (head.startsWith('Ar') && inverseTrigFuncName(head)) return true;
+function isInverseTrigFunc(name: string): boolean {
+  if (name.startsWith('Ar') && inverseTrigFuncName(name)) return true;
   return false;
 }
 
-function inverseTrigFuncName(head: string): string | undefined {
+function inverseTrigFuncName(name: string): string | undefined {
   return {
     Sin: 'Arcsin',
     Cos: 'Arccos',
@@ -783,7 +783,7 @@ function inverseTrigFuncName(head: string): string | undefined {
     Arsinh: 'Sinh',
     Arctan: 'Tan',
     Artanh: 'Tanh',
-  }[head];
+  }[name];
 }
 
 function processInverseFunction(
@@ -792,21 +792,21 @@ function processInverseFunction(
 ): BoxedExpression | undefined {
   if (xs.length !== 1 || !xs[0].isValid) return undefined;
   const expr = xs[0];
-  const head = expr.symbol;
-  if (typeof head !== 'string') return undefined;
-  if (head === 'InverseFunction') return expr.op1;
-  const newHead = inverseTrigFuncName(head);
+  const name = expr.symbol;
+  if (typeof name !== 'string') return undefined;
+  if (name === 'InverseFunction') return expr.op1;
+  const newHead = inverseTrigFuncName(name);
   return newHead ? ce.symbol(newHead) : undefined;
 }
 
 function evalTrig(
-  head: string,
+  name: string,
   op: BoxedExpression | undefined
 ): BoxedExpression | undefined {
   if (!op) return undefined;
   const ce = op.engine;
 
-  switch (head) {
+  switch (name) {
     case 'Arccos':
       return radiansToAngle(
         applyN(
@@ -1103,7 +1103,7 @@ const TRIG_FUNCTIONS: { [key: string]: boolean } = {
   Arcsech: true,
 };
 
-export function isTrigonometricFunction(head: any): boolean {
-  if (!head || typeof head !== 'string') return false;
-  return head in TRIG_FUNCTIONS;
+export function isTrigonometricFunction(operator: any): boolean {
+  if (!operator || typeof operator !== 'string') return false;
+  return operator in TRIG_FUNCTIONS;
 }

@@ -198,7 +198,7 @@ export function findUnivariateRoots(
 ): ReadonlyArray<BoxedExpression> {
   const ce = expr.engine;
 
-  if (expr.head === 'Equal') {
+  if (expr.operator === 'Equal') {
     expr = canonicalAdd(ce, [expr.op1.canonical, expr.op2.neg()]).simplify();
   }
 
@@ -243,10 +243,10 @@ export function findUnivariateRoots(
   return result.map((x) => x.evaluate().simplify());
 }
 
-/** Expr is an equation with a head of
+/** Expr is an equation with an operator of
  * - `Equal`, `Less`, `Greater`, `LessEqual`, `GreaterEqual`
  *
- * Return an expression with the same head, but with the first argument
+ * Return an expression with the same operator, but with the first argument
  * a variable, if possible:
  * `2x < 4` => `x < 2`
  */
@@ -255,13 +255,13 @@ export function univariateSolve(
   x: string
 ): ReadonlyArray<SemiBoxedExpression> | null {
   const ce = expr.engine;
-  const name = expr.head;
+  const name = expr.operator;
   if (name === 'Tuple') {
     // @todo: System of equations
     return null;
   }
 
-  if (name === null || !(expr.head === 'Equal' || isInequality(expr)))
+  if (name === null || !(expr.operator === 'Equal' || isInequality(expr)))
     return null;
 
   let lhs: SemiBoxedExpression = expr.op1;

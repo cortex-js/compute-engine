@@ -80,7 +80,7 @@ export function costFunction(expr: BoxedExpression): number {
     if (expr.isNumber) return 2;
   }
 
-  const name = expr.head;
+  const name = expr.operator;
   let nameCost = 2;
   if (['Add', 'Divide'].includes(name)) nameCost = 3;
   else if (['Subtract', 'Negate'].includes(name)) nameCost = 4;

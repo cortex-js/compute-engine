@@ -25,13 +25,13 @@ export function square(
     return ce.number([num[1] * num[1], num[0] * num[0]]);
   if (isBigRational(num)) return ce.number([num[1] * num[1], num[0] * num[0]]);
 
-  if (base.head === 'Multiply')
+  if (base.operator === 'Multiply')
     return ce._fn(
       'Multiply',
       base.ops!.map((x) => square(ce, x))
     ); // Don't call ce.mul() to avoid infinite loops
 
-  if (base.head === 'Power') {
+  if (base.operator === 'Power') {
     const exp = asMachineInteger(base.op2);
     if (exp !== null) return base.op1.pow(exp * 2);
     return base.op1.pow(ce.number(2).mul(base.op2));
@@ -47,7 +47,7 @@ export function processPower(
   mode: 'simplify' | 'evaluate' | 'N'
 ): BoxedExpression | undefined {
   // Distribute multiplication over power
-  if (base.head === 'Multiply') {
+  if (base.operator === 'Multiply') {
     const ops = base.ops!.map(
       (x) =>
         processPower(ce, x, exponent, mode) ?? ce._fn('Power', [x, exponent])
@@ -67,7 +67,8 @@ export function processPower(
 
 export function isSqrt(expr: BoxedExpression): boolean {
   return (
-    expr.head === 'Sqrt' || (expr.head === 'Power' && asFloat(expr.op2) === 0.5)
+    expr.operator === 'Sqrt' ||
+    (expr.operator === 'Power' && asFloat(expr.op2) === 0.5)
   );
 }
 

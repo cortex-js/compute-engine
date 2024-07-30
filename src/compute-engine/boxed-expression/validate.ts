@@ -150,7 +150,7 @@ export function checkDomain(
   if (arg === undefined || arg === null) return ce.error('missing');
   if (dom === undefined) return ce.error('unexpected-argument', arg);
   arg = arg.canonical;
-  if (arg.head === 'Sequence') arg = arg.op1;
+  if (arg.operator === 'Sequence') arg = arg.op1;
   if (!arg.isValid) return arg;
   if (!arg.domain || arg.domain.isCompatible(dom)) return arg;
   return ce.domainError(dom, arg.domain, arg);

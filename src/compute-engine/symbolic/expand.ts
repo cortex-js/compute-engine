@@ -13,32 +13,34 @@ function expandProduct(
   // Negate
   //
 
-  if (lhs.head === 'Negate' && rhs.head === 'Negate')
+  if (lhs.operator === 'Negate' && rhs.operator === 'Negate')
     return expandProduct(lhs.op1, rhs.op1);
 
   const ce = lhs.engine;
 
-  if (lhs.head === 'Negate') return expandProduct(lhs.op1, rhs).neg();
-  if (rhs.head === 'Negate') return expandProduct(lhs, rhs.op1).neg();
+  if (lhs.operator === 'Negate') return expandProduct(lhs.op1, rhs).neg();
+  if (rhs.operator === 'Negate') return expandProduct(lhs, rhs.op1).neg();
 
   //
   // Divide
   //
-  if (lhs.head === 'Divide' && rhs.head === 'Divide') {
+  if (lhs.operator === 'Divide' && rhs.operator === 'Divide') {
     // Apply distribute to the numerators only.
     const denom = lhs.op2.mul(rhs.op2);
     return expandProduct(lhs.op1, rhs.op1).div(denom);
   }
 
-  if (lhs.head === 'Divide') return expandProduct(lhs.op1, rhs).div(lhs.op2);
-  if (rhs.head === 'Divide') return expandProduct(lhs, rhs.op1).div(rhs.op2);
+  if (lhs.operator === 'Divide')
+    return expandProduct(lhs.op1, rhs).div(lhs.op2);
+  if (rhs.operator === 'Divide')
+    return expandProduct(lhs, rhs.op1).div(rhs.op2);
 
   //
   // Add
   //
-  if (lhs.head === 'Add')
+  if (lhs.operator === 'Add')
     return add(...lhs.ops!.map((x) => expandProduct(x, rhs)));
-  if (rhs.head === 'Add')
+  if (rhs.operator === 'Add')
     return add(...rhs.ops!.map((x) => expandProduct(lhs, x)));
 
   //
@@ -125,7 +127,7 @@ function expandPower(
   }
   if (exp === 0) return ce.One;
   if (exp === 1) return expand(base);
-  if (base.head === 'Negate') {
+  if (base.operator === 'Negate') {
     if (Number.isInteger(exp)) {
       const sign = exp % 2 === 0 ? 1 : -1;
       const result = expandPower(base.op1, exp);
@@ -135,10 +137,10 @@ function expandPower(
   }
 
   // Subtract is non-canonical, so we don't expect to see it here.
-  console.assert(base.head !== 'Subtract');
+  console.assert(base.operator !== 'Subtract');
 
   // We can expand only if the expression is a power of a sum.
-  if (base.head !== 'Add') return null;
+  if (base.operator !== 'Add') return null;
 
   // Apply the multinomial theorem
   // https://en.wikipedia.org/wiki/Multinomial_theorem
@@ -173,11 +175,11 @@ function expandPower(
  */
 
 function expandNumerator(expr: BoxedExpression): BoxedExpression | null {
-  if (expr.head !== 'Divide') return null;
+  if (expr.operator !== 'Divide') return null;
   const expandedNumerator = expand(expr.op1);
   if (expandedNumerator === null) return null;
   const ce = expr.engine;
-  if (expandedNumerator.head === 'Add') {
+  if (expandedNumerator.operator === 'Add') {
     return add(...expandedNumerator.ops!.map((x) => x.div(expr.op2)));
   }
   return expandedNumerator.div(expr.op2);
@@ -188,11 +190,11 @@ function expandNumerator(expr: BoxedExpression): BoxedExpression | null {
  */
 
 function expandDenominator(expr: BoxedExpression): BoxedExpression | null {
-  if (expr.head !== 'Divide') return null;
+  if (expr.operator !== 'Divide') return null;
   const expandedDenominator = expand(expr.op2);
   if (expandedDenominator === null) return null;
   const ce = expr.engine;
-  if (expandedDenominator.head === 'Add') {
+  if (expandedDenominator.operator === 'Add') {
     return add(...expandedDenominator.ops!.map((x) => expr.op1.div(x)));
   }
   return expr.op1.div(expandedDenominator);
@@ -212,7 +214,8 @@ export function expandFunction(
   if (h === 'Divide') {
     const num = expand(ops[0]);
     if (num === null) return null;
-    if (num.head === 'Add') return add(...num.ops!.map((x) => x.div(ops[1])));
+    if (num.operator === 'Add')
+      return add(...num.ops!.map((x) => x.div(ops[1])));
     return ce._fn('Divide', [num, ops[1]]);
   }
 
@@ -255,19 +258,19 @@ export function expandFunction(
 export function expand(
   expr: BoxedExpression | undefined
 ): BoxedExpression | null {
-  if (!expr || typeof expr.head !== 'string') return null;
+  if (!expr || typeof expr.operator !== 'string') return null;
 
   //
   // Expand relational operators
   //
-  if (isRelationalOperator(expr.head)) {
+  if (isRelationalOperator(expr.operator)) {
     return expr.engine._fn(
-      expr.head,
+      expr.operator,
       expr.ops!.map((x) => expand(x) ?? x)
     );
   }
 
-  return expandFunction(expr.engine, expr.head, expr.ops ?? []);
+  return expandFunction(expr.engine, expr.operator, expr.ops ?? []);
 }
 
 /**
@@ -276,15 +279,15 @@ export function expand(
  * `expand()` only expands the top level of the expression.
  */
 export function expandAll(expr: BoxedExpression): BoxedExpression | null {
-  if (!expr.head || !expr.ops) return null;
+  if (!expr.operator || !expr.ops) return null;
 
   const ce = expr.engine;
   const ops = expr.ops.map((x) =>
-    typeof x.head === 'string' && x.ops
-      ? (expandFunction(ce, x.head, x.ops) ?? x)
+    typeof x.operator === 'string' && x.ops
+      ? (expandFunction(ce, x.operator, x.ops) ?? x)
       : x
   );
 
-  const result = expr.engine.function(expr.head, ops);
+  const result = expr.engine.function(expr.operator, ops);
   return expand(result) ?? result;
 }

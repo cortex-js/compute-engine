@@ -141,7 +141,7 @@ export function derivative(
     // We have, e.g. fn = 'Sin"
     fn = apply(ce.symbol(fn.symbol), [ce.symbol('_')]);
   }
-  if (fn.head === 'Function') {
+  if (fn.operator === 'Function') {
     // We have, e.g. fn = ['Function', ['Sin', 'x'], 'x']
     v = fn.ops![1].symbol ?? '_';
     fn = fn.ops![0];
@@ -170,22 +170,22 @@ export function differentiate(
   if (expr.numericValue !== null) return expr.engine.Zero;
   if (expr.symbol === v) return expr.engine.One;
   if (expr.symbol) return expr.engine.Zero;
-  if (!expr.head) return undefined;
-  if (expr.head === 'Negate') {
+  if (!expr.operator) return undefined;
+  if (expr.operator === 'Negate') {
     const gPrime = differentiate(expr.op1, v);
     if (gPrime) return gPrime.neg();
     return ce._fn('D', [expr.op1!, ce.symbol(v)]).neg();
   }
 
   // Sum rule
-  if (expr.head === 'Add') {
+  if (expr.operator === 'Add') {
     const terms = expr.ops!.map((op) => differentiate(op, v));
     if (terms.some((term) => term === undefined)) return undefined;
     return add(...(terms as BoxedExpression[])).evaluate();
   }
 
   // Product rule
-  if (expr.head === 'Multiply') {
+  if (expr.operator === 'Multiply') {
     const terms = expr.ops!.map((op, i) => {
       const otherTerms = expr.ops!.slice();
       otherTerms.splice(i, 1);
@@ -198,7 +198,7 @@ export function differentiate(
   }
 
   // Power rule
-  if (expr.head === 'Power') {
+  if (expr.operator === 'Power') {
     const [base, exponent] = expr.ops!;
     if (base.symbol === v) {
       // Derivative Power Rule
@@ -219,7 +219,7 @@ export function differentiate(
   }
 
   // Quotient rule
-  if (expr.head === 'Divide') {
+  if (expr.operator === 'Divide') {
     const [numerator, denominator] = expr.ops!;
     const gPrime =
       differentiate(numerator, v) ?? ce._fn('D', [numerator, ce.symbol(v)]);
@@ -232,13 +232,13 @@ export function differentiate(
       .evaluate();
   }
 
-  const h = DERIVATIVES_TABLE[expr.head];
+  const h = DERIVATIVES_TABLE[expr.operator];
   if (!h) {
     if (expr.nops > 1) return undefined;
 
     // If we don't know how to differentiate this function, assume it's a
     // function of v and apply the chain rule.
-    const fPrime = ce._fn('Derivative', [ce.symbol(expr.head), ce.One]);
+    const fPrime = ce._fn('Derivative', [ce.symbol(expr.operator), ce.One]);
     if (!fPrime.isValid) return undefined;
     const g = expr.ops![0];
     const gPrime = differentiate(g, v) ?? ce._fn('D', [g, ce.symbol(v)]);

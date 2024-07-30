@@ -197,19 +197,59 @@ export const DEFINITIONS_CORE: LatexDictionary = [
     kind: 'function',
     identifierTrigger: 'apply',
     serialize: (serializer: Serializer, expr: Expression): string => {
-      const h = operand(expr, 1);
-      const rhs = operand(expr, 2);
-      if (typeof h === 'string' || !rhs) {
+      const lhs = operand(expr, 1); // The function body
+
+      const h = operator(lhs);
+      if (h === 'InverseFunction' || h === 'Derivative') {
+        // For inverse functions and derivatives display as a regular function,
+        // e.g. \sin^{-1} x, f'(x) instead of x \rhd f' and x \rhd \sin^{-1}
+        const style = serializer.options.applyFunctionStyle(
+          expr,
+          serializer.level
+        );
+        const args = operands(expr).slice(1) as any as Expression[];
+        return (
+          serializer.serializeFunction(
+            lhs!,
+            serializer.dictionary.ids.get(h!)
+          ) +
+          serializer.wrapString(
+            args.map((x) => serializer.serialize(x)).join(', '),
+            style
+          )
+        );
+      }
+
+      // If no argument, or the body is a single symbol, display as a regular function
+      const rhs = operand(expr, 2); // The first argument
+      if (typeof lhs === 'string' || !rhs) {
         // e.g. "Apply(f, x)" -> "f(x)"
         const fn = operands(expr).slice(1) as any as Expression;
         return serializer.serialize(fn);
       }
 
-      // e.g., "Apply(x+1, 2)" -> "x+1 \\lhd 2"
+      if (nops(expr) === 2) {
+        // If there's a single argument, we can use the pipeline operator
+        // (i.e. `\rhd` `|>`)
+        return joinLatex([
+          serializer.wrap(lhs, 20),
+          '\\lhd',
+          serializer.wrap(rhs, 20),
+        ]);
+      }
+
+      const style = serializer.options.applyFunctionStyle(
+        expr,
+        serializer.level
+      );
       return joinLatex([
-        serializer.wrap(h, 20),
-        '\\lhd',
-        serializer.wrap(operand(expr, 2), 20),
+        '\\operatorname{apply}',
+        serializer.wrapString(
+          serializer.serialize(h) +
+            ', ' +
+            serializer.serialize(['List', ...operands(expr)]),
+          style
+        ),
       ]);
     },
   },

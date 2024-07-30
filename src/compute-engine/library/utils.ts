@@ -47,7 +47,7 @@ export function MultiIndexingSet(
 
     index = subSequence![i].canonical;
     if (subSequence) {
-      if (subSequence[i].head === 'Equal') {
+      if (subSequence[i].operator === 'Equal') {
         index = subSequence[i].op1.canonical;
         lower = subSequence[i].op2.canonical;
       }
@@ -93,10 +93,10 @@ export function SingleIndexingSet(
   let lower: BoxedExpression | null = null;
   let upper: BoxedExpression | null = null;
   if (
-    indexingSet.head !== 'Tuple' &&
-    indexingSet.head !== 'Triple' &&
-    indexingSet.head !== 'Pair' &&
-    indexingSet.head !== 'Single'
+    indexingSet.operator !== 'Tuple' &&
+    indexingSet.operator !== 'Triple' &&
+    indexingSet.operator !== 'Pair' &&
+    indexingSet.operator !== 'Single'
   ) {
     index = indexingSet;
   } else {
@@ -107,7 +107,7 @@ export function SingleIndexingSet(
     lower = indexingSet.ops![1]?.canonical ?? null;
     upper = indexingSet.ops![2]?.canonical ?? null;
   }
-  if (index.head === 'Hold') index = index.op1;
+  if (index.operator === 'Hold') index = index.op1;
 
   if (index.symbol) {
     ce.declare(index.symbol, { domain: 'Integers' });
@@ -153,13 +153,13 @@ export function normalizeIndexingSet(
   let isFinite = true;
   if (
     limits &&
-    (limits.head === 'Tuple' ||
-      limits.head === 'Triple' ||
-      limits.head === 'Pair' ||
-      limits.head === 'Single')
+    (limits.operator === 'Tuple' ||
+      limits.operator === 'Triple' ||
+      limits.operator === 'Pair' ||
+      limits.operator === 'Single')
   ) {
     index =
-      (limits.op1.head === 'Hold'
+      (limits.op1.operator === 'Hold'
         ? limits.op1.op1.symbol
         : limits.op1.symbol) ?? 'Nothing';
     lower = asMachineInteger(limits.op2) ?? 1;
@@ -180,7 +180,8 @@ export function normalizeIndexingSet(
   } else if (limits) {
     // Assume we only have an index, no bounds
     index =
-      (limits.head === 'Hold' ? limits.op1.symbol : limits.symbol) ?? 'Nothing';
+      (limits.operator === 'Hold' ? limits.op1.symbol : limits.symbol) ??
+      'Nothing';
     lower = 1;
     upper = lower + MAX_ITERATION;
   }

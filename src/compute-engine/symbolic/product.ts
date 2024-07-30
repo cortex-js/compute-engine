@@ -85,12 +85,12 @@ export class Product {
       return;
     }
 
-    if (term.head === 'Multiply') {
+    if (term.operator === 'Multiply') {
       for (const t of term.ops!) this.mul(t);
       return;
     }
 
-    if (term.head === 'Negate') {
+    if (term.operator === 'Negate') {
       this.mul(term.op1);
       this.coefficient = this.coefficient.neg();
       return;
@@ -155,20 +155,20 @@ export class Product {
 
     // If this is a power expression, extract the exponent
     let exponent: Rational = [1, 1];
-    if (term.head === 'Power') {
+    if (term.operator === 'Power') {
       // Term is `Power(op1, op2)`
       const r = asRational(term.op2);
       if (r) {
         const exponentExpr = term.op2;
         exponent = r;
         term = term.op1;
-        if (term.head === 'Multiply') {
+        if (term.operator === 'Multiply') {
           // We have Power(Multiply(...), exponent): apply the power law
           // to each term
           for (const x of term.ops!)
             this.mul(this.engine._fn('Power', [x, exponentExpr]));
           return;
-        } else if (term.head === 'Divide') {
+        } else if (term.operator === 'Divide') {
           // We have Power(Divide(...), exponent): apply the power law
           // to each term
           this.mul(this.engine._fn('Power', [term.op1, exponentExpr]));
@@ -181,7 +181,7 @@ export class Product {
           return;
         }
       }
-    } else if (term.head === 'Divide') {
+    } else if (term.operator === 'Divide') {
       // In order to correctly account for the denominator, invert it.
       // For example, in the case `a^4/a^2' we want to add
       // `a^(-2)` to the product, not `1/a^2`. The former will get the exponent
@@ -190,7 +190,7 @@ export class Product {
       const inv = term.op2.inv();
       // If the inverse is not a Divide, multiply it, otherwise keep it as
       // a term
-      if (inv.head !== 'Divide') {
+      if (inv.operator !== 'Divide') {
         this.mul(term.op1);
         this.mul(inv);
         return;

@@ -359,10 +359,10 @@ export function serializeCortex(
 
   // @todo: 2x, 2(x+1)
   function serializeOperator(expr: Expression): FormattingBlock | null {
-    const head = operator(expr);
-    if (!head) return null;
+    const opName = operator(expr);
+    if (!opName) return null;
 
-    const op = OPERATORS[head];
+    const op = OPERATORS[opName];
     if (!op) return null;
     const opSymbol = options?.fancySymbols
       ? (op.fancySymbol ?? op.symbol)

@@ -180,7 +180,7 @@ export const CORE_LIBRARY: IdentifierDefinitions[] = [
           // the sequence, like `(a, b, c)`. The sequence is used to group
           // the arguments, so it needs to be preserved.
           // If there is a single element, unpack it.
-          if (body.head === 'Sequence')
+          if (body.operator === 'Sequence')
             return ce._fn('Tuple', canonical(ce, body.ops!));
 
           body = body.canonical;
@@ -209,7 +209,7 @@ export const CORE_LIBRARY: IdentifierDefinitions[] = [
 
           const op1 = ops[0];
 
-          if (op1.head === 'Sequence' || op1.head === 'Delimiter')
+          if (op1.operator === 'Sequence' || op1.operator === 'Delimiter')
             ops = flattenSequence(ops[0].ops!);
 
           if (ops.length === 1) return ops[0].evaluate();
@@ -224,7 +224,7 @@ export const CORE_LIBRARY: IdentifierDefinitions[] = [
 
           const op1 = ops[0];
 
-          if (op1.head === 'Sequence' || op1.head === 'Delimiter')
+          if (op1.operator === 'Sequence' || op1.operator === 'Delimiter')
             ops = flattenSequence(ops[0].ops!);
 
           if (ops.length === 1) return ops[0].N();
@@ -276,7 +276,7 @@ export const CORE_LIBRARY: IdentifierDefinitions[] = [
           const op1 = args[0];
           if (op1.symbol) return ce.domain('Symbols');
           if (op1.string) return ce.domain('Strings');
-          if (op1.head === 'Numbers') return ce.domain('Numbers');
+          if (op1.operator === 'Numbers') return ce.domain('Numbers');
           return op1.domain;
         },
         // By definition, for arguments of the canonical expression of
@@ -323,13 +323,13 @@ export const CORE_LIBRARY: IdentifierDefinitions[] = [
           // **IMPORTANT** Head should work on non-canonical expressions
           if (args.length !== 1) return null;
           const op1 = args[0];
-          if (op1.head) return ce.box(op1.head);
+          if (op1.operator) return ce.box(op1.operator);
           return ce._fn('Head', canonical(ce, args));
         },
         evaluate: (ce, ops) => {
           const op1 = ops[0];
-          if (typeof op1?.head === 'string') return ce.symbol(op1.head);
-          return op1?.head ?? ce.Nothing;
+          if (typeof op1?.operator === 'string') return ce.symbol(op1.operator);
+          return op1?.operator ?? ce.Nothing;
         },
       },
     },
@@ -365,7 +365,7 @@ export const CORE_LIBRARY: IdentifierDefinitions[] = [
       signature: {
         domain: 'Functions',
         canonical: (ce, args) => {
-          if (args[0].symbol) return ce.box([args[0].symbol, ...args.slice(1)]);
+          if (args[0].symbol) return ce.function(args[0].symbol, args.slice(1));
           return ce._fn('Apply', args);
         },
         evaluate: (_ce, ops) => apply(ops[0], ops.slice(1)),
@@ -538,7 +538,7 @@ export const CORE_LIBRARY: IdentifierDefinitions[] = [
           // argument length is invalid
           if (ops.length !== 1) return ce._fn('N', checkArity(ce, ops, 1));
 
-          const h = ops[0].head;
+          const h = ops[0].operator;
           if (h === 'N') return ops[0].canonical;
           if (h === 'Integrate') {
             const [index, lower, upper] = normalizeIndexingSet(ops[0].op2);
@@ -622,7 +622,7 @@ export const CORE_LIBRARY: IdentifierDefinitions[] = [
           if (op1.string && asMachineInteger(op2) !== null)
             return ce.domain('Integers');
           if (op1.symbol) {
-            const vh = op1.evaluate()?.head;
+            const vh = op1.evaluate()?.operator;
             if (vh) {
               const def = ce.lookupFunction(vh);
               if (def?.at) return undefined;
@@ -653,7 +653,7 @@ export const CORE_LIBRARY: IdentifierDefinitions[] = [
           // or an indexable collection?
           if (op1.symbol) {
             // Is the value of the symbol an indexable collection?
-            const vh = op1.evaluate()?.head;
+            const vh = op1.evaluate()?.operator;
             if (vh) {
               const def = ce.lookupFunction(vh);
               if (def?.at) return ce._fn('At', [op1.canonical, op2.canonical]);
@@ -664,7 +664,7 @@ export const CORE_LIBRARY: IdentifierDefinitions[] = [
 
             if (sub) return ce.symbol(op1.symbol + '_' + sub);
           }
-          if (op2.head === 'Sequence')
+          if (op2.operator === 'Sequence')
             ce._fn('Subscript', [op1, ce._fn('List', op2.ops!)]);
 
           return ce._fn('Subscript', args);
@@ -810,7 +810,8 @@ export const CORE_LIBRARY: IdentifierDefinitions[] = [
           if (ops.length === 0) return ce._fn('Sequence', []);
           const op1 = ops[0];
           const s =
-            op1.string ?? (op1.head === 'LatexString' ? op1.op1.string : '');
+            op1.string ??
+            (op1.operator === 'LatexString' ? op1.op1.string : '');
           return ce.parse(s) ?? ce._fn('Sequence', []);
         },
       },
@@ -842,7 +843,7 @@ export function canonicalInvisibleOperator(
     const lhsNumber = asFloat(lhs);
     if (lhsNumber !== null && Number.isInteger(lhsNumber)) {
       const rhs = ops[1];
-      if (rhs.head === 'Divide' || rhs.head === 'Rational') {
+      if (rhs.operator === 'Divide' || rhs.operator === 'Rational') {
         const [n, d] = [asFloat(rhs.op1), asFloat(rhs.op2)];
         if (
           n !== null &&
@@ -875,7 +876,7 @@ export function canonicalInvisibleOperator(
     const rhs = ops[1];
     if (
       lhs.symbol &&
-      rhs.head === 'Delimiter' &&
+      rhs.operator === 'Delimiter' &&
       !ce.lookupSymbol(lhs.symbol)
     ) {
       // @fixme: should use symbol table to check if it's a function
@@ -891,7 +892,7 @@ export function canonicalInvisibleOperator(
 
       // Parse the arguments first, in case they reference lhs.symbol
       // i.e. `x(x+1)`.
-      let args = rhs.op1.head === 'Sequence' ? rhs.op1.ops! : [rhs.op1];
+      let args = rhs.op1.operator === 'Sequence' ? rhs.op1.ops! : [rhs.op1];
       args = flatten(args);
       if (!ce.lookupSymbol(lhs.symbol)) {
         // Still not a symbol (i.e. wasn't used as a symbol in the
@@ -904,10 +905,10 @@ export function canonicalInvisibleOperator(
     // Is is an index operation, i.e. "v[1,2]"?
     if (
       lhs.symbol &&
-      rhs.head === 'Delimiter' &&
+      rhs.operator === 'Delimiter' &&
       (rhs.op2.string === '[,]' || rhs.op2.string === '[;]')
     ) {
-      const args = rhs.op1.head === 'Sequence' ? rhs.op1.ops! : [rhs.op1];
+      const args = rhs.op1.operator === 'Sequence' ? rhs.op1.ops! : [rhs.op1];
       return ce.function('At', [lhs, ...args]);
     }
   }

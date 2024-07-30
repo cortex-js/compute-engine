@@ -51,11 +51,11 @@ function parseTrig(op: string): ExpressionParseHandler {
       '\\tg': 'Tan',
       '\\th': 'Tanh',
     };
-    const head: Expression = trigCommands[op ?? ''] ?? op ?? '';
+    const operator: Expression = trigCommands[op ?? ''] ?? op ?? '';
 
-    if (parser.atTerminator(until)) return head;
+    if (parser.atTerminator(until)) return operator;
 
-    let fn: Expression | null = head;
+    let fn: Expression | null = operator;
     do {
       const pf = parser.parsePostfixOperator(fn, until);
       if (pf === null) break;

@@ -1,29 +1,32 @@
-import { Expression } from '../../math-json';
+import { Expression, MathJsonIdentifier } from '../../math-json';
 
 function oneOf<T = Expression>(xs: T[]): T {
   return xs[Math.floor(Math.random() * xs.length)];
 }
 
-function randomExpressionWithHead(head: string, level: number): Expression {
-  if (head === 'Add' || head === 'Multiply') {
+function randomExpressionWithHead(
+  operator: MathJsonIdentifier,
+  level: number
+): Expression {
+  if (operator === 'Add' || operator === 'Multiply') {
     const ops: Expression[] = [];
     let count = 1 + Math.floor(Math.random() * 12);
     while (count > 0) {
       ops.push(randomExpression(level + 1));
       count -= 1;
     }
-    return [head, ...ops];
+    return [operator, ...ops];
   }
-  if (head === 'Divide' || head === 'Power') {
-    return [head, randomExpression(level + 1), randomExpression(level + 1)];
+  if (operator === 'Divide' || operator === 'Power') {
+    return [operator, randomExpression(level + 1), randomExpression(level + 1)];
   }
-  if (head === 'Root') {
-    return [head, randomExpression(level + 1), randomExpression(10)];
+  if (operator === 'Root') {
+    return [operator, randomExpression(level + 1), randomExpression(10)];
   }
 
-  if (head === 'trig') return randomTrig();
+  if (operator === 'trig') return randomTrig();
 
-  return [head, randomExpression(level + 1)];
+  return [operator, randomExpression(level + 1)];
 }
 
 function randomTrig(): Expression {

@@ -199,29 +199,29 @@ export const CONDITIONS = {
     x.symbol !== null && !x.domain?.isFunction && !x.isConstant,
   function: (x: BoxedExpression) => x.symbol !== null && x.domain?.isFunction,
 
-  relation: (x: BoxedExpression) => isRelationalOperator(x.head),
-  equation: (x: BoxedExpression) => x.head === 'Equal',
+  relation: (x: BoxedExpression) => isRelationalOperator(x.operator),
+  equation: (x: BoxedExpression) => x.operator === 'Equal',
   inequality: (x: BoxedExpression) => isInequality(x),
 
   collection: (x: BoxedExpression) => isCollection(x),
-  list: (x: BoxedExpression) => x.head === 'List',
-  set: (x: BoxedExpression) => x.head === 'Set',
+  list: (x: BoxedExpression) => x.operator === 'List',
+  set: (x: BoxedExpression) => x.operator === 'Set',
   tuple: (x: BoxedExpression) =>
-    x.head === 'Tuple' ||
-    x.head === 'Single' ||
-    x.head === 'Pair' ||
-    x.head === 'Triple',
-  single: (x: BoxedExpression) => x.head === 'Single',
-  pair: (x: BoxedExpression) => x.head === 'Pair',
-  triple: (x: BoxedExpression) => x.head === 'Triple',
+    x.operator === 'Tuple' ||
+    x.operator === 'Single' ||
+    x.operator === 'Pair' ||
+    x.operator === 'Triple',
+  single: (x: BoxedExpression) => x.operator === 'Single',
+  pair: (x: BoxedExpression) => x.operator === 'Pair',
+  triple: (x: BoxedExpression) => x.operator === 'Triple',
   tensor: (x: BoxedExpression) => x.rank > 0,
   vector: (x: BoxedExpression) => x.rank === 1,
   matrix: (x: BoxedExpression) => x.rank === 2,
   scalar: (x: BoxedExpression) => x.rank === 0,
 
-  unit: (x: BoxedExpression) => x.head === 'Unit',
-  dimension: (x: BoxedExpression) => x.head === 'Dimension',
-  angle: (x: BoxedExpression) => x.head === 'Angle',
+  unit: (x: BoxedExpression) => x.operator === 'Unit',
+  dimension: (x: BoxedExpression) => x.operator === 'Dimension',
+  angle: (x: BoxedExpression) => x.operator === 'Angle',
   polynomial: (x: BoxedExpression) => x.unknowns.length === 1,
 };
 
@@ -467,7 +467,7 @@ function parseRule(ce: IComputeEngine, rule: string): BoxedRule {
   const expr = ce.parse(rule, { canonical: false });
   ce.latexDictionary = previousDictionary;
 
-  if (expr.head !== 'Rule') throw new Error(`Invalid rule ${rule}`);
+  if (expr.operator !== 'Rule') throw new Error(`Invalid rule ${rule}`);
   const [match, replace, condition] = expr.ops!;
 
   let condFn: undefined | PatternConditionFunction = undefined;
@@ -581,7 +581,9 @@ function applyRule(
       return subExpr ?? op;
     });
     if (changed)
-      expr = ce.function(expr.head, newOps, { canonical: expr.isCanonical });
+      expr = ce.function(expr.operator, newOps, {
+        canonical: expr.isCanonical,
+      });
   }
 
   const exact = rule.exact ?? true;

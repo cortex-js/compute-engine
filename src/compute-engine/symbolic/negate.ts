@@ -12,7 +12,7 @@ import { add } from '../numerics/terms';
 export function negate(expr: BoxedExpression): BoxedExpression {
   // Negate(Negate(x)) -> x
   let sign = -1;
-  while (expr.head === 'Negate') {
+  while (expr.operator === 'Negate') {
     expr = expr.op1;
     sign = -sign;
   }
@@ -23,19 +23,19 @@ export function negate(expr: BoxedExpression): BoxedExpression {
   const ce = expr.engine;
 
   // Negate(Subtract(a, b)) -> Subtract(b, a)
-  if (expr.head === 'Subtract') return expr.op2.sub(expr.op1);
+  if (expr.operator === 'Subtract') return expr.op2.sub(expr.op1);
 
   // Distribute over addition
   // Negate(Add(a, b)) -> Add(Negate(a), Negate(b))
-  if (expr.head === 'Add') return add(...expr.ops!.map((x) => negate(x)));
+  if (expr.operator === 'Add') return add(...expr.ops!.map((x) => negate(x)));
 
   // Distribute over multiplication
   // Negate(Multiply(a, b)) -> Multiply(Negate(a), b)
-  if (expr.head === 'Multiply') return negateProduct(ce, expr.ops!);
+  if (expr.operator === 'Multiply') return negateProduct(ce, expr.ops!);
 
   // Distribute over division
   // Negate(Divide(a, b)) -> Divide(Negate(a), b)
-  if (expr.head === 'Divide') return negate(expr.op1).div(expr.op2);
+  if (expr.operator === 'Divide') return negate(expr.op1).div(expr.op2);
 
   return ce._fn('Negate', [expr]);
 }
@@ -60,7 +60,7 @@ export function negateProduct(
   let done = false;
   // If there is `Negate` as one of the args, remove it
   for (const arg of args) {
-    if (!done && arg.head === 'Negate') {
+    if (!done && arg.operator === 'Negate') {
       done = true;
       if (!arg.op1.isOne) result.push(arg.op1);
     } else result.push(arg);

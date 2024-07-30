@@ -94,7 +94,7 @@ export function canonicalSummation(
   if (
     indexingSet &&
     indexingSet.ops &&
-    indexingSet.ops[0]?.head === 'Delimiter'
+    indexingSet.ops[0]?.operator === 'Delimiter'
   ) {
     const multiIndex = MultiIndexingSet(indexingSet);
     if (!multiIndex) return null;
@@ -383,14 +383,14 @@ function getImaginaryCoef(expr: BoxedExpression): number {
   const z = expr.numericValue;
   if (z !== null && z instanceof Complex && z.re === 0) return z.im;
 
-  if (expr.head === 'Negate') return -getImaginaryCoef(expr.op1);
+  if (expr.operator === 'Negate') return -getImaginaryCoef(expr.op1);
 
-  if (expr.head === 'Multiply' && expr.nops === 2) {
+  if (expr.operator === 'Multiply' && expr.nops === 2) {
     if (expr.op1.symbol === 'ImaginaryUnit') return asFloat(expr.op2) ?? 0;
     if (expr.op2.symbol === 'ImaginaryUnit') return asFloat(expr.op1) ?? 0;
   }
 
-  if (expr.head === 'Divide') {
+  if (expr.operator === 'Divide') {
     const denom = asFloat(expr.op2);
     if (denom !== null) return getImaginaryCoef(expr.op1) / denom;
   }

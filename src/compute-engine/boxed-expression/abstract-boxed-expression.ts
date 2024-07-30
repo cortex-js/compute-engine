@@ -1,7 +1,7 @@
 import Complex from 'complex.js';
 import { Decimal } from 'decimal.js';
 
-import { Expression } from '../../math-json/types';
+import { Expression, MathJsonIdentifier } from '../../math-json/types';
 
 import { LatexString } from '../public';
 import { Rational } from '../numerics/rationals';
@@ -48,7 +48,13 @@ import { AsciiMathOptions, toAsciiMath } from './ascii-math';
 export abstract class _BoxedExpression implements BoxedExpression {
   abstract readonly hash: number;
   abstract readonly json: Expression;
-  abstract readonly head: string;
+  abstract readonly operator: string;
+
+  /** @deprecated */
+  get head(): string {
+    return this.operator;
+  }
+
   abstract get isCanonical(): boolean;
   abstract set isCanonical(_val: boolean);
 
@@ -287,8 +293,10 @@ export abstract class _BoxedExpression implements BoxedExpression {
     return null;
   }
 
-  getSubexpressions(head: string): ReadonlyArray<BoxedExpression> {
-    return getSubexpressions(this, head);
+  getSubexpressions(
+    operator: MathJsonIdentifier
+  ): ReadonlyArray<BoxedExpression> {
+    return getSubexpressions(this, operator);
   }
 
   get subexpressions(): ReadonlyArray<BoxedExpression> {
@@ -474,14 +482,14 @@ export abstract class _BoxedExpression implements BoxedExpression {
     if (!recursive)
       return fn(
         this.engine.function(
-          this.head,
+          this.operator,
           this.ops.map((x) => fn(x)),
           { canonical }
         )
       );
     return fn(
       this.engine.function(
-        this.head,
+        this.operator,
         this.ops.map((x) => x.map(fn, options)),
         { canonical }
       )
@@ -707,7 +715,7 @@ export abstract class _BoxedExpression implements BoxedExpression {
 function getFreeVariables(expr: BoxedExpression, result: Set<string>): void {
   // @todo: need to check for '["Block"]' which may contain ["Declare"] expressions and exclude those
 
-  if (expr.head === 'Block') {
+  if (expr.operator === 'Block') {
   }
 
   if (expr.symbol) {
@@ -769,9 +777,9 @@ function getUnknowns(expr: BoxedExpression, result: Set<string>): void {
 
 export function getSubexpressions(
   expr: BoxedExpression,
-  name: string
+  name: MathJsonIdentifier
 ): ReadonlyArray<BoxedExpression> {
-  const result = !name || expr.head === name ? [expr] : [];
+  const result = !name || expr.operator === name ? [expr] : [];
   if (expr.ops) {
     for (const op of expr.ops) result.push(...getSubexpressions(op, name));
   } else if (expr.keys) {

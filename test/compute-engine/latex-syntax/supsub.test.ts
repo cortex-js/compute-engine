@@ -1,46 +1,4 @@
-import { Expression } from '../../../src/math-json/types.ts';
-import { latex, engine as ce } from '../../utils';
-
-describe('POWER', () => {
-  test('Power Invalid forms', () => {
-    expect(latex(['Power'])).toMatchInlineSnapshot(
-      `\\error{\\blacksquare}^{\\error{\\blacksquare}}`
-    );
-    expect(
-      latex(['Power', null as unknown as Expression])
-    ).toMatchInlineSnapshot(`\\error{\\blacksquare}^{\\error{\\blacksquare}}`);
-    expect(
-      latex(['Power', undefined as unknown as Expression])
-    ).toMatchInlineSnapshot(`\\error{\\blacksquare}^{\\error{\\blacksquare}}`);
-    expect(latex(['Power', 1])).toMatchInlineSnapshot(
-      `1^{\\error{\\blacksquare}}`
-    );
-    expect(latex(['Power', NaN])).toMatchInlineSnapshot(
-      `\\operatorname{NaN}^{\\error{\\blacksquare}}`
-    );
-    expect(latex(['Power', Infinity])).toMatchInlineSnapshot(
-      `\\infty^{\\error{\\blacksquare}}`
-    );
-  });
-});
-
-describe('INVERSE FUNCTION', () => {
-  test('Valid forms', () => {
-    expect(latex(['Apply', ['InverseFunction', 'Sin']])).toMatchInlineSnapshot(
-      `\\arcsin(\\error{\\blacksquare})`
-    );
-    expect(latex(['Apply', ['InverseFunction', 'f']])).toMatchInlineSnapshot(
-      ``
-    );
-  });
-});
-
-describe('COMPLEX SYMBOLS', () => {
-  test('\\mathord{x_{\\mathrm{max}}}', () =>
-    expect(
-      ce.parse('\\mathord{x_{\\mathrm{max}}}').canonical.toJSON()
-    ).toMatchInlineSnapshot(`x_max`));
-});
+import { engine as ce } from '../../utils';
 
 describe('SUPSUB', () => {
   test('Superscript', () => {

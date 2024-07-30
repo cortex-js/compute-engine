@@ -72,7 +72,7 @@ describe('Examples from Patterns and Rules guide', () => {
       }
     `));
 
-  test('Capture function head', () =>
+  test('Capture function name', () =>
     expect(match(['_f', '__args'], ['Add', 'x', 1])).toMatchInlineSnapshot(`
       {
         __args: ["Add", "x", 1],

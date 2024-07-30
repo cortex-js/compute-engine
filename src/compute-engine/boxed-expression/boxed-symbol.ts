@@ -246,7 +246,7 @@ export class BoxedSymbol extends _BoxedExpression {
       if (exp.isZero) return this.engine.One;
       if (exp.isOne) return this;
       if (exp.isNegativeOne) return this.inv();
-      if (exp.head === 'Negate') return this.pow(exp.op1).inv();
+      if (exp.operator === 'Negate') return this.pow(exp.op1).inv();
     }
 
     return ce._fn('Power', [this, ce.box(exp)]);
@@ -290,7 +290,7 @@ export class BoxedSymbol extends _BoxedExpression {
     return 7;
   }
 
-  get head(): string {
+  get operator(): string {
     return 'Symbol';
   }
 

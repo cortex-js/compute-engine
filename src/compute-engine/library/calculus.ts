@@ -181,7 +181,7 @@ volumes
           ce.swapScope(context);
           f = f?.canonical;
           // Avoid recursive evaluation
-          return f?.head === 'D' ? f : f?.evaluate();
+          return f?.operator === 'D' ? f : f?.evaluate();
         },
       },
     },
@@ -221,10 +221,10 @@ volumes
           let upper: BoxedExpression | null = null;
           if (
             range &&
-            range.head !== 'Tuple' &&
-            range.head !== 'Triple' &&
-            range.head !== 'Pair' &&
-            range.head !== 'Single'
+            range.operator !== 'Tuple' &&
+            range.operator !== 'Triple' &&
+            range.operator !== 'Pair' &&
+            range.operator !== 'Single'
           ) {
             index = range;
           } else if (range) {
@@ -236,8 +236,8 @@ volumes
             upper = range.ops?.[2]?.canonical ?? null;
           }
           // The index, if present, should be a symbol
-          if (index && index.head === 'Hold') index = index.op1;
-          if (index && index.head === 'ReleaseHold')
+          if (index && index.operator === 'Hold') index = index.op1;
+          if (index && index.operator === 'ReleaseHold')
             index = index.op1.evaluate();
           index ??= ce.Nothing;
           if (!index.symbol)
@@ -253,7 +253,7 @@ volumes
 
           let body = ops[0] ?? ce.error('missing');
           body = body.canonical;
-          if (body.head === 'Delimiter' && body.op1.head === 'Sequence')
+          if (body.operator === 'Delimiter' && body.op1.operator === 'Sequence')
             body = body.op1.op1;
 
           return ce._fn('Integrate', [body, range]);

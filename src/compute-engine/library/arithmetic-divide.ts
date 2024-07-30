@@ -19,7 +19,7 @@ export function canonicalDivide(
   const ce = op1.engine;
   if (!op1.isValid || !op2.isValid) return ce._fn('Divide', [op1, op2]);
 
-  if (op1.head === 'Negate' && op2.head === 'Negate') {
+  if (op1.operator === 'Negate' && op2.operator === 'Negate') {
     op1 = op1.op1;
     op2 = op2.op1;
   }
@@ -34,15 +34,15 @@ export function canonicalDivide(
     if (r1 && r2 && !isZero(r2)) return ce.number(mul(r1, inverse(r2)));
   }
 
-  if (op1.head === 'Divide' && op2.head === 'Divide') {
+  if (op1.operator === 'Divide' && op2.operator === 'Divide') {
     return canonicalDivide(
       canonicalMultiply(ce, [op1.op1, op2.op2]),
       canonicalMultiply(ce, [op1.op2, op2.op1])
     );
   }
-  if (op1.head === 'Divide')
+  if (op1.operator === 'Divide')
     return canonicalDivide(op1.op1, canonicalMultiply(ce, [op1.op2, op2]));
-  if (op2.head === 'Divide')
+  if (op2.operator === 'Divide')
     return canonicalDivide(canonicalMultiply(ce, [op1, op2.op2]), op2.op1);
 
   if (op2.isOne) return op1;

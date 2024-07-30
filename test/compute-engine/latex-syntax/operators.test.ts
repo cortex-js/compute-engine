@@ -533,3 +533,14 @@ describe('OPERATOR serialize, invalid', () => {
       `\\operatorname{NaN}`
     ));
 });
+
+describe('APPLY', () => {
+  test('inverse function', () => {
+    expect(latex(['Apply', ['InverseFunction', 'Sin']])).toMatchInlineSnapshot(
+      `\\arcsin(\\error{\\blacksquare})`
+    );
+    expect(latex(['Apply', ['InverseFunction', 'f']])).toMatchInlineSnapshot(
+      `f^{-1}()`
+    );
+  });
+});

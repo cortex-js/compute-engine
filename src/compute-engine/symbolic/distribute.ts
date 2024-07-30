@@ -8,9 +8,9 @@ function distribute2(
 ): BoxedExpression {
   const ce = lhs.engine;
 
-  if (lhs.head === g)
+  if (lhs.operator === g)
     return ce.box([f, ...lhs.ops!.map((x) => distribute2(x, rhs, g, f))]);
-  if (rhs.head === g)
+  if (rhs.operator === g)
     return ce.box([f, ...rhs.ops!.map((x) => distribute2(lhs, x, g, f))]);
 
   return ce.box([f, lhs, rhs]);
@@ -25,7 +25,7 @@ export function distribute(
   g = 'Add',
   f = 'Multiply'
 ): BoxedExpression {
-  if (expr.head !== f) return expr;
+  if (expr.operator !== f) return expr;
   const ops = expr.ops;
   if (!ops || ops.length < 2) return expr;
 

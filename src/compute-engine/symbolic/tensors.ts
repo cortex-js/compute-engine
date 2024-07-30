@@ -771,7 +771,7 @@ export function makeTensor<T extends TensorDataType>(
   ce: IComputeEngine,
   data:
     | TensorData<T>
-    | { head: string; ops: BoxedExpression[]; dtype: T; shape: number[] }
+    | { operator: string; ops: BoxedExpression[]; dtype: T; shape: number[] }
 ): AbstractTensor<T> {
   const dtype: T = data.dtype;
   if (

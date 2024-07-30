@@ -1,4 +1,8 @@
-import type { Expression, ExpressionObject } from '../../math-json/types';
+import type {
+  Expression,
+  ExpressionObject,
+  MathJsonIdentifier,
+} from '../../math-json/types';
 import {
   getSequence,
   missingIfEmpty,
@@ -269,7 +273,7 @@ export class _Parser implements Parser {
     this._imaginaryUnitTokens = tokenize(this.options.imaginaryUnit);
   }
 
-  getIdentifierType(id: string): SymbolType {
+  getIdentifierType(id: MathJsonIdentifier): SymbolType {
     // Check if the identifier is in the symbol table
     // (which means it has been encountered as part of the current parsing)
     let table: SymbolTable | null = this.symbolTable;
@@ -1476,7 +1480,7 @@ export class _Parser implements Parser {
     if (fn === null) {
       this.index = start;
       fn = parseIdentifier(this);
-      if (!this.isFunctionHead(fn)) {
+      if (!this.isFunctionOperator(fn)) {
         this.index = start;
         return null;
       }
@@ -1524,13 +1528,7 @@ export class _Parser implements Parser {
     this.index = start;
 
     const id = parseIdentifier(this);
-    if (id === null) return null;
-
-    // Are we OK with it as a symbol?
-    // Note: by the time we call getIdentifierType(), we know it is a valid
-    // identifier
-    const type = this.getIdentifierType(id);
-    if (type === 'symbol') return id;
+    if (id !== null && this.getIdentifierType(id) === 'symbol') return id;
 
     // This was an identifier, but not a valid symbol. Backtrack
     this.index = start;
@@ -2059,16 +2057,13 @@ export class _Parser implements Parser {
       : ['Error', msg];
   }
 
-  private isFunctionHead(expr: Expression | null): boolean {
-    if (expr === null) return false;
-
-    const s = symbol(expr);
-    if (!s) return false;
+  private isFunctionOperator(id: MathJsonIdentifier | null): boolean {
+    if (id === null) return false;
 
     // Is this a valid function identifier?
-    if (this.getIdentifierType(s) === 'function') return true;
+    if (this.getIdentifierType(id) === 'function') return true;
 
-    // This doesn't look like the expression could be the head of a function:
+    // This doesn't look like the expression could be the name of a function:
     // it's a number, a string, a symbol identifier or something else.
     return false;
   }

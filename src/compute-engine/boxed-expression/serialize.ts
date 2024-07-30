@@ -67,7 +67,7 @@ function serializeSubtract(
         metadata
       );
   }
-  if (a.head === 'Negate' && b.head !== 'Negate')
+  if (a.operator === 'Negate' && b.operator !== 'Negate')
     return serializeJsonFunction(ce, 'Subtract', [b, a.op1], options, metadata);
 
   return null;
@@ -124,10 +124,10 @@ function serializePrettyJsonFunction(
     const result = new Product(ce, args, {
       canonical: false,
     }).asRationalExpression();
-    if (result.head === 'Divide')
+    if (result.operator === 'Divide')
       return serializeJsonFunction(
         ce,
-        result.head,
+        result.operator,
         result.ops!,
         options,
         metadata
@@ -229,7 +229,7 @@ function serializePrettyJsonFunction(
           metadata
         );
     }
-    if (args[1]?.head === 'Negate') {
+    if (args[1]?.operator === 'Negate') {
       return serializeJsonFunction(
         ce,
         'Subtract',
@@ -363,7 +363,7 @@ function serializeJsonFunction(
       return serializeJsonFunction(ce, 'Tuple', args, options, metadata);
 
     // Note: even though 'Subtract' is boxed out, we still need to handle it here
-    // because the function may be called with a non-canonical 'Subtract' head.
+    // because the function may be called with a non-canonical 'Subtract' operator.
     if (name === 'Subtract' && args.length === 2)
       return serializeJsonFunction(
         ce,
@@ -701,11 +701,11 @@ export function serializeJson(
 
   if (expr.ops) {
     if (expr.isValid && expr.isCanonical && options.prettify)
-      return serializePrettyJsonFunction(ce, expr.head, expr.ops, options, {
+      return serializePrettyJsonFunction(ce, expr.operator, expr.ops, options, {
         latex: expr.verbatimLatex,
         wikidata,
       });
-    return serializeJsonFunction(ce, expr.head, expr.ops, options, {
+    return serializeJsonFunction(ce, expr.operator, expr.ops, options, {
       latex: expr.verbatimLatex,
       wikidata,
     });

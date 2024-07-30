@@ -983,7 +983,8 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
           // reductible, for example.
           if (ops.length === 0) return ce.function('Sequence', []);
           const op = ops[0];
-          if (op.head === 'Rational' || op.head === 'Divide') return op.op1;
+          if (op.operator === 'Rational' || op.operator === 'Divide')
+            return op.op1;
           const num = asRational(op);
           if (num !== undefined) return ce.number(num[0]);
           return ce._fn('Numerator', canonical(ce, ops));
@@ -991,7 +992,7 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
         evaluate: (ce, ops) => {
           if (ops.length === 0) return ce.function('Sequence', []);
           const op = ops[0];
-          if (op.head === 'Rational' || op.head === 'Divide')
+          if (op.operator === 'Rational' || op.operator === 'Divide')
             return op.op1.evaluate();
           const num = asRational(op.evaluate());
           if (num !== undefined) return ce.number(num[0]);
@@ -1015,7 +1016,8 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
           // reductible, for example.
           if (ops.length === 0) return ce.function('Sequence', []);
           const op = ops[0];
-          if (op.head === 'Rational' || op.head === 'Divide') return op.op2;
+          if (op.operator === 'Rational' || op.operator === 'Divide')
+            return op.op2;
           const num = asRational(op);
           if (num !== undefined) return ce.number(num[1]);
           return ce._fn('Denominator', canonical(ce, ops));
@@ -1023,7 +1025,7 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
         evaluate: (ce, ops) => {
           if (ops.length === 0) return ce.function('Sequence', []);
           const op = ops[0];
-          if (op.head === 'Rational' || op.head === 'Divide')
+          if (op.operator === 'Rational' || op.operator === 'Divide')
             return op.op2.evaluate();
           const num = asRational(op.evaluate());
           if (num !== undefined) return ce.number(num[1]);
@@ -1048,7 +1050,7 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
           // reductible, for example.
           if (ops.length === 0) return ce.function('Sequence', []);
           const op = ops[0];
-          if (op.head === 'Rational' || op.head === 'Divide')
+          if (op.operator === 'Rational' || op.operator === 'Divide')
             return ce._fn('Sequence', op.ops!);
           const num = asRational(op.evaluate());
           if (num !== undefined)
@@ -1061,7 +1063,7 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
         evaluate: (ce, ops) => {
           if (ops.length === 0) return ce.function('Sequence', []);
           const op = ops[0];
-          if (op.head === 'Rational' || op.head === 'Divide')
+          if (op.operator === 'Rational' || op.operator === 'Divide')
             return ce._fn('Sequence', op.ops!);
           const num = asRational(op);
           if (num !== undefined)
@@ -1322,7 +1324,7 @@ function processMinMaxItem(
   const upper = mode === 'Max' || mode === 'Supremum';
 
   // An interval is continuous
-  if (item.head === 'Interval') {
+  if (item.operator === 'Interval') {
     const b = upper ? item.op2 : item.op1;
 
     if (!b.isNumber || b.numericValue === undefined) return [undefined, [item]];
@@ -1330,7 +1332,7 @@ function processMinMaxItem(
   }
 
   // A range is discrete, the last element may not be included
-  if (item.head === 'Range') {
+  if (item.operator === 'Range') {
     if (item.nops === 1) item = upper ? item.op1 : ce.One;
     else if (!upper) {
       item = item.op1;
@@ -1346,7 +1348,7 @@ function processMinMaxItem(
     return [item, []];
   }
 
-  if (item.head === 'Linspace') {
+  if (item.operator === 'Linspace') {
     if (item.nops === 1) item = upper ? item.op1 : ce.One;
     else if (upper) item = item.op2;
     else item = item.op1;

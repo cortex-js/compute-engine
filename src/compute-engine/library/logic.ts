@@ -145,8 +145,8 @@ function processAnd(
           // Duplicate element, ignore it
           duplicate = true;
         } else if (
-          (arg.head === 'Not' && arg.op1.isSame(x)) ||
-          (x.head === 'Not' && x.op1.isSame(arg))
+          (arg.operator === 'Not' && arg.op1.isSame(x)) ||
+          (x.operator === 'Not' && x.op1.isSame(arg))
         ) {
           // ['And', ['Not', a],... a]
           // Contradiction
@@ -179,8 +179,8 @@ function processOr(
           // Duplicate element, ignore it
           duplicate = true;
         } else if (
-          (arg.head === 'Not' && arg.op1.isSame(x)) ||
-          (x.head === 'Not' && x.op1.isSame(arg))
+          (arg.operator === 'Not' && arg.op1.isSame(x)) ||
+          (x.operator === 'Not' && x.op1.isSame(arg))
         ) {
           // ['Or', ['Not', a],... a]
           // Tautology

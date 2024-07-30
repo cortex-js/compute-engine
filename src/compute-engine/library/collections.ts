@@ -558,7 +558,7 @@ export const COLLECTIONS_LIBRARY: IdentifierDefinitions = {
         const result: BoxedExpression[] = [];
         for (const op of collection) result.push(fn([op]) ?? ce.Nothing);
 
-        const h = ops[0].head;
+        const h = ops[0].operator;
         const newHead =
           {
             List: 'List',
@@ -603,7 +603,7 @@ export const COLLECTIONS_LIBRARY: IdentifierDefinitions = {
         for (const op of each(collection))
           if (fn([op])?.symbol === 'True') result.push(op);
 
-        const h = collection.head;
+        const h = collection.operator;
         const newHead =
           {
             List: 'List',
@@ -775,7 +775,7 @@ export const COLLECTIONS_LIBRARY: IdentifierDefinitions = {
         for (const op of ops) {
           if (op.nops === 0) values.push(op);
           else {
-            if (op.head !== 'Set') isSet = false;
+            if (op.operator !== 'Set') isSet = false;
             values.push(...op.ops!);
           }
         }
@@ -880,7 +880,7 @@ function indexRangeArg(
   }
 
   // We may have a Tuple...
-  const h = op.head;
+  const h = op.operator;
   if (!h || typeof h !== 'string' || !/^(Single|Pair|Triple|Tuple|)$/.test(h))
     return [0, 0, 0];
   let [lower, upper, step] = rangeArgs(op);
@@ -968,7 +968,7 @@ function canonicalList(
   // \left\lbrack \begin{array}...\end{array} \right\rbrack
 
   const op1 = ops[0];
-  if (ops.length === 1 && op1.head === 'Matrix') {
+  if (ops.length === 1 && op1.operator === 'Matrix') {
     // Adjust the matrix to have the correct delimiter
     const [body, delimiters, columns] = op1.ops!;
 
@@ -979,8 +979,8 @@ function canonicalList(
   }
 
   ops = ops.map((op) => {
-    if (op.head === 'Delimiter') {
-      if (op.op1.head === 'Sequence')
+    if (op.operator === 'Delimiter') {
+      if (op.op1.operator === 'Sequence')
         return ce._fn('List', canonical(ce, op.op1.ops!));
       return ce._fn('List', [op.op1?.canonical ?? ce.Nothing]);
     }

@@ -7,8 +7,8 @@ import { BoxedExpression } from '../public';
  * "Lift" Sequence expressions to the top level.
  * e.g. `["Add", 1, ["Sequence", 2, 3]]` -> `["Add", 1, 2, 3]`
  *
- * Additionally, if a head is provided, also lift nested expressions
- * with the same head.
+ * Additionally, if an operator is provided, also lift nested expressions
+ * with the same operator.
  *  e.g. `["f", a, ["f", b, c]]` -> `["f", a, b, c]`
  *
  * Note: *not* recursive
@@ -24,28 +24,31 @@ export function flatten<
   if (operator) {
     // Bypass memory allocation for the common case where there is nothing to flatten
     if (
-      xs.every((x) => !x.ops || (x.head !== operator && x.head !== 'Sequence'))
+      xs.every(
+        (x) => !x.ops || (x.operator !== operator && x.operator !== 'Sequence')
+      )
     )
       return xs as T;
 
     // Iterate over the list of expressions and flatten them
     const ys: BoxedExpression[] = [];
     for (const x of xs) {
-      // If the head matches, flatten the expression
-      if (x.ops && (x.head === operator || x.head === 'Sequence'))
+      // If the operator matches, flatten the expression
+      if (x.ops && (x.operator === operator || x.operator === 'Sequence'))
         ys.push(...flatten(x.ops, operator));
       else ys.push(x);
     }
     return ys as T;
   }
 
-  if (xs.every((x) => !x.ops || x.head !== 'Sequence')) return xs as T;
+  if (xs.every((x) => !x.ops || x.operator !== 'Sequence')) return xs as T;
 
   // Iterate over the list of expressions and flatten them
   const ys: BoxedExpression[] = [];
   for (const x of xs) {
-    // If the head matches, flatten the expression
-    if (x.ops && x.head === 'Sequence') ys.push(...flatten(x.ops, operator));
+    // If the operator matches, flatten the expression
+    if (x.ops && x.operator === 'Sequence')
+      ys.push(...flatten(x.ops, operator));
     else ys.push(x);
   }
   return ys as T;
@@ -59,18 +62,18 @@ export function flatten<
 
 export function flattenOps<
   T extends ReadonlyArray<BoxedExpression> | BoxedExpression[],
->(ops: T, head: string): T {
-  if (!head) return ops;
+>(ops: T, operator: string): T {
+  if (!operator) return ops;
   // Bypass memory allocation for the common case where there is nothing to flatten
-  if (ops.every((x) => !x.ops || x.head !== head)) return ops;
+  if (ops.every((x) => !x.ops || x.operator !== operator)) return ops;
 
   const result: BoxedExpression[] = [];
   for (const arg of ops) {
-    if (!arg.ops || arg.head !== head) result.push(arg);
+    if (!arg.ops || arg.operator !== operator) result.push(arg);
     else {
       // ["f", a, ["f", b, c]] -> ["f", a, b, c]
       // or ["f", ["f", a]] -> ["f", a]
-      result.push(...flattenOps(arg.ops, head));
+      result.push(...flattenOps(arg.ops, operator));
     }
   }
 
@@ -88,20 +91,20 @@ export function flattenSequence(
   xs: ReadonlyArray<BoxedExpression>
 ): ReadonlyArray<BoxedExpression> {
   // Bypass memory allocation for the common case where there are no sequences or delimiters
-  if (xs.every((x) => x.head !== 'Sequence' && x.head !== 'Delimiter'))
+  if (xs.every((x) => x.operator !== 'Sequence' && x.operator !== 'Delimiter'))
     return xs;
 
   const ys: BoxedExpression[] = [];
   for (const x of xs) {
     if (!x.isValid) ys.push(x);
-    else if (x.head === 'Delimiter') {
-      if (x.op1.head === 'Sequence') {
+    else if (x.operator === 'Delimiter') {
+      if (x.op1.operator === 'Sequence') {
         const seq = x.op1.ops ?? [];
         // If this is an empty delimiter, i.e. `()`, preserve it as a tuple, don't flatten it.
         if (seq.length === 0) ys.push(x.engine.box(['Tuple']));
         else ys.push(...flattenSequence(seq));
       } else ys.push(x.op1);
-    } else if (x.head === 'Sequence') {
+    } else if (x.operator === 'Sequence') {
       if (x.ops) ys.push(...x.ops);
     } else ys.push(x);
   }

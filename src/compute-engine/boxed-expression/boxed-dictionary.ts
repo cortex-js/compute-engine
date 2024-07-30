@@ -70,7 +70,7 @@ export class BoxedDictionary extends _BoxedExpression {
     return 97;
   }
 
-  get head(): 'Dictionary' {
+  get operator(): 'Dictionary' {
     return 'Dictionary';
   }
 

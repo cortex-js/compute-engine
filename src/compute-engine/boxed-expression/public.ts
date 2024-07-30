@@ -351,7 +351,7 @@ export interface BoxedExpression {
    * A number has a `"Number"`, `"Real"`, `"Rational"` or `"Integer"` operator.
    *
    */
-  readonly head: string;
+  readonly operator: string;
 
   /** The list of arguments of the function, its "tail".
    *
@@ -522,7 +522,7 @@ export interface BoxedExpression {
   ): null | BoxedExpression;
 
   /**
-   * True if the expression includes a symbol `v` or a function head `v`.
+   * True if the expression includes a symbol `v` or a function operator `v`.
    *
    * :::info[Note]
    * Applicable to canonical and non-canonical expressions.
@@ -832,7 +832,7 @@ export interface BoxedExpression {
   readonly description: undefined | string[];
 
   /** An optional URL pointing to more information about the symbol or
-   *  function head.
+   *  function operator.
    *
    * :::info[Note]
    * `undefined` if not a canonical expression.
@@ -1041,7 +1041,7 @@ export interface BoxedExpression {
    *
    * If a symbol the domain of the value of the symbol.
    *
-   * Use `expr.head` to determine if an expression is a symbol or function
+   * Use `expr.operator` to determine if an expression is a symbol or function
    * expression.
    *
    * :::info[Note]
@@ -1217,7 +1217,7 @@ export type DomainCompatibility =
   | 'bivariant' // A <: B and A :>B, A := B
   | 'invariant'; // Neither A <: B, nor A :> B
 
-/** A domain constructor is the head of a domain expression.
+/** A domain constructor is the operator of a domain expression.
  *
  * @category Boxed Expression
  *
@@ -2456,7 +2456,7 @@ export type BaseDefinition = {
   /** A short (about 1 line) description. May contain Markdown. */
   description?: string | string[];
 
-  /** A URL pointing to more information about this symbol or head. */
+  /** A URL pointing to more information about this symbol or operator. */
   url?: string;
 
   /**

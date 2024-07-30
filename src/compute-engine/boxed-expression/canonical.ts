@@ -63,11 +63,11 @@ export function canonicalForm(
  * This function is recursive.
  */
 function flattenForm(expr: BoxedExpression) {
-  if (!expr.head) return expr;
+  if (!expr.operator) return expr;
 
   if (!expr.ops || expr.nops === 0) return expr;
 
-  if (expr.head === 'Delimiter') return flattenForm(expr.op1);
+  if (expr.operator === 'Delimiter') return flattenForm(expr.op1);
 
   //
   // Now, flatten any associative function
@@ -75,16 +75,16 @@ function flattenForm(expr: BoxedExpression) {
 
   const ce = expr.engine;
 
-  let isAssociative = expr.head === 'Add' || expr.head === 'Multiply';
+  let isAssociative = expr.operator === 'Add' || expr.operator === 'Multiply';
   if (!isAssociative) {
-    const def = ce.lookupFunction(expr.head);
+    const def = ce.lookupFunction(expr.operator);
     if (def?.associative) isAssociative = true;
   }
 
   if (isAssociative)
     return ce.function(
-      expr.head,
-      flattenOps(expr.ops.map(flattenForm), expr.head)
+      expr.operator,
+      flattenOps(expr.ops.map(flattenForm), expr.operator)
     );
 
   return expr;
@@ -93,7 +93,7 @@ function flattenForm(expr: BoxedExpression) {
 function invisibleOperatorForm(expr: BoxedExpression) {
   if (!expr.ops) return expr;
 
-  if (expr.head === 'InvisibleOperator') {
+  if (expr.operator === 'InvisibleOperator') {
     return (
       canonicalInvisibleOperator(
         expr.engine,
@@ -102,7 +102,7 @@ function invisibleOperatorForm(expr: BoxedExpression) {
     );
   }
 
-  return expr.engine._fn(expr.head, expr.ops.map(invisibleOperatorForm));
+  return expr.engine._fn(expr.operator, expr.ops.map(invisibleOperatorForm));
 }
 
 function numberForm(expr: BoxedExpression) {
@@ -110,7 +110,7 @@ function numberForm(expr: BoxedExpression) {
   if (expr.numericValue) return expr.canonical;
 
   // Recursively visit all sub-expressions
-  if (expr.ops) return expr.engine._fn(expr.head, expr.ops.map(numberForm));
+  if (expr.ops) return expr.engine._fn(expr.operator, expr.ops.map(numberForm));
   return expr;
 }
 
@@ -120,13 +120,13 @@ function multiplyForm(expr: BoxedExpression) {
   const ops = expr.ops.map(multiplyForm);
 
   // If this is a multiply, canonicalize it
-  if (expr.head === 'Multiply')
+  if (expr.operator === 'Multiply')
     return canonicalMultiply(
       expr.engine,
       ops.map((x) => x.canonical)
     );
 
-  if (expr.head === 'Negate')
+  if (expr.operator === 'Negate')
     return canonicalMultiply(expr.engine, [ops[0], expr.engine.NegativeOne]);
 
   return expr;
@@ -138,34 +138,34 @@ function addForm(expr: BoxedExpression) {
   const ops = expr.ops.map(addForm);
 
   // If this is an addition or subtraction, canonicalize it
-  if (expr.head === 'Add') return canonicalAdd(expr.engine, ops);
+  if (expr.operator === 'Add') return canonicalAdd(expr.engine, ops);
 
-  if (expr.head === 'Subtract')
+  if (expr.operator === 'Subtract')
     return canonicalAdd(expr.engine, [ops[0], ops[1].neg()]);
 
-  return expr.engine._fn(expr.head, ops);
+  return expr.engine._fn(expr.operator, ops);
 }
 
 function powerForm(expr: BoxedExpression) {
   if (!expr.ops) return expr;
 
   // If this is a power, canonicalize it
-  if (expr.head === 'Power')
+  if (expr.operator === 'Power')
     return powerForm(expr.op1).pow(powerForm(expr.op2));
 
   // Recursively visit all sub-expressions
   if (!expr.ops) return expr;
 
-  return expr.engine._fn(expr.head, expr.ops.map(powerForm));
+  return expr.engine._fn(expr.operator, expr.ops.map(powerForm));
 }
 
 function divideForm(expr: BoxedExpression) {
   // If this is a divide, canonicalize it
-  if (expr.head === 'Divide')
+  if (expr.operator === 'Divide')
     return canonicalDivide(powerForm(expr.op1), powerForm(expr.op2));
 
   // Recursively visit all sub-expressions
   if (!expr.ops) return expr;
 
-  return expr.engine._fn(expr.head, expr.ops.map(divideForm));
+  return expr.engine._fn(expr.operator, expr.ops.map(divideForm));
 }

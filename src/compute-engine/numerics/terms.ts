@@ -89,7 +89,7 @@ export class Terms {
       return;
     }
 
-    if (term.head === 'Add') {
+    if (term.operator === 'Add') {
       for (const x of term.ops!) {
         const [c, t] = x.toNumericValue();
         this.add(coef.mul(c), t);
@@ -97,7 +97,7 @@ export class Terms {
       return;
     }
 
-    if (term.head === 'Negate') {
+    if (term.operator === 'Negate') {
       this.add(coef.neg(), term.op1);
       return;
     }

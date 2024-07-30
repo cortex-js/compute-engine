@@ -13,7 +13,11 @@ import { BoxedDictionary } from './boxed-dictionary';
 import { BoxedFunction } from './boxed-function';
 import { BoxedNumber } from './boxed-number';
 import { BoxedString } from './boxed-string';
-import { Expression, MathJsonNumber } from '../../math-json/types';
+import {
+  Expression,
+  MathJsonIdentifier,
+  MathJsonNumber,
+} from '../../math-json/types';
 import { missingIfEmpty, operands } from '../../math-json/utils';
 import {
   Rational,
@@ -233,7 +237,7 @@ function boxHold(
 }
 
 /**
- * Given a head and a set of arguments, return a boxed function expression.
+ * Given a name and a set of arguments, return a boxed function expression.
  *
  * If available, preserve LaTeX and wikidata metadata in the boxed expression.
  *
@@ -242,7 +246,7 @@ function boxHold(
 
 export function boxFunction(
   ce: IComputeEngine,
-  name: string,
+  name: MathJsonIdentifier,
   ops: readonly SemiBoxedExpression[],
   options?: { metadata?: Metadata; canonical?: CanonicalOptions }
 ): BoxedExpression {
@@ -393,10 +397,10 @@ export function boxFunction(
 /**
  * Notes about the boxed form:
  *
- * [1] Expression with a head of `Number`, `String`, `Symbol` and `Dictionary`
+ * [1] Expression with an operator of `Number`, `String`, `Symbol` and `Dictionary`
  *      are converted to the corresponding atomic expression.
  *
- * [2] Expressions with a head of `Complex` are converted to a (complex) number
+ * [2] Expressions with an operator of `Complex` are converted to a (complex) number
  *     or a `Add`/`Multiply` expression.
  *
  *     The precedence of `Complex` (for serialization) is sometimes the
@@ -404,8 +408,8 @@ export function boxFunction(
  *    `Multiply` (when im or re === 0). Using a number or an explicit
  *    `Add`/`Multiply` expression avoids this ambiguity.
  *
- * [3] An expression with a `Rational` head is converted to a rational number.
- *    if possible, to a `Divide` otherwise.
+ * [3] An expression with a `Rational` operator is converted to a rational
+ *    number if possible, to a `Divide` otherwise.
  *
  * [4] A `Negate` function applied to a number literal is converted to a number.
  *
@@ -577,7 +581,7 @@ function makeCanonicalFunction(
     const dict = {};
     for (const op of ops) {
       const arg = ce.box(op);
-      const operator = arg.head;
+      const operator = arg.operator;
       if (
         operator === 'KeyValuePair' ||
         operator === 'Pair' ||
@@ -621,7 +625,7 @@ function makeCanonicalFunction(
       xs.push(ce.box(ops[i]));
     } else {
       const y = ce.box(ops[i], { canonical: false });
-      if (y.head === 'ReleaseHold') xs.push(y.op1.canonical);
+      if (y.operator === 'ReleaseHold') xs.push(y.op1.canonical);
       else xs.push(y);
     }
   }
@@ -673,7 +677,7 @@ function makeCanonicalFunction(
   //
   // 4/ Apply `idempotent` and `involution`
   //
-  if (args.length === 1 && args[0].head === name) {
+  if (args.length === 1 && args[0].operator === name) {
     // f(f(x)) -> x
     if (def.involution) return args[0].op1;
 
@@ -691,49 +695,49 @@ function makeCanonicalFunction(
 
 function makeNumericFunction(
   ce: IComputeEngine,
-  head: string,
+  name: MathJsonIdentifier,
   semiOps: ReadonlyArray<SemiBoxedExpression>,
   metadata?: Metadata
 ): BoxedExpression | null {
   // @todo: is it really necessary to accept semiboxed expressions?
   let ops: ReadonlyArray<BoxedExpression> = [];
-  if (head === 'Add' || head === 'Multiply')
-    ops = checkNumericArgs(ce, semiCanonical(ce, semiOps), { flatten: head });
+  if (name === 'Add' || name === 'Multiply')
+    ops = checkNumericArgs(ce, semiCanonical(ce, semiOps), { flatten: name });
   else if (
-    head === 'Negate' ||
-    head === 'Square' ||
-    head === 'Sqrt' ||
-    head === 'Exp'
+    name === 'Negate' ||
+    name === 'Square' ||
+    name === 'Sqrt' ||
+    name === 'Exp'
   )
     ops = checkNumericArgs(ce, semiCanonical(ce, semiOps), 1);
-  else if (head === 'Ln' || head === 'Log')
+  else if (name === 'Ln' || name === 'Log')
     ops = checkNumericArgs(ce, semiCanonical(ce, semiOps));
-  else if (head === 'Power')
+  else if (name === 'Power')
     ops = checkNumericArgs(ce, semiCanonical(ce, semiOps), 2);
-  else if (head === 'Divide')
+  else if (name === 'Divide')
     ops = checkNumericArgs(ce, semiCanonical(ce, semiOps));
   else return null;
 
   // If some of the arguments are not valid, we're done
   // (note: the result is canonical, but not valid)
-  if (!ops.every((x) => x.isValid)) return ce._fn(head, ops, metadata);
+  if (!ops.every((x) => x.isValid)) return ce._fn(name, ops, metadata);
 
   //
   // Short path for some functions
   // (avoid looking up a definition)
   //
-  if (head === 'Add') return canonicalAdd(ce, ops);
-  if (head === 'Negate') return ops[0].neg();
-  if (head === 'Multiply') return canonicalMultiply(ce, ops);
-  if (head === 'Divide') return ops.slice(1).reduce((a, b) => a.div(b), ops[0]);
-  if (head === 'Exp') return ce.E.pow(ops[0]);
-  if (head === 'Power') return ops[0].pow(ops[1]);
-  if (head === 'Square') return ops[0].pow(2);
-  if (head === 'Sqrt') return ops[0].sqrt();
+  if (name === 'Add') return canonicalAdd(ce, ops);
+  if (name === 'Negate') return ops[0].neg();
+  if (name === 'Multiply') return canonicalMultiply(ce, ops);
+  if (name === 'Divide') return ops.slice(1).reduce((a, b) => a.div(b), ops[0]);
+  if (name === 'Exp') return ce.E.pow(ops[0]);
+  if (name === 'Power') return ops[0].pow(ops[1]);
+  if (name === 'Square') return ops[0].pow(2);
+  if (name === 'Sqrt') return ops[0].sqrt();
 
-  if (head === 'Ln' || head === 'Log') {
+  if (name === 'Ln' || name === 'Log') {
     if (ops[0].isOne) return ce.Zero;
-    if (ops.length === 1) return ce._fn(head, ops, metadata);
+    if (ops.length === 1) return ce._fn(name, ops, metadata);
     return ce._fn('Log', ops, metadata);
   }
 

@@ -425,7 +425,7 @@ function compileExpr(
     // Get all the Declare statements
     const locals: string[] = [];
     for (const arg of args) {
-      if (arg.head === 'Declare') locals.push(arg.ops![0].symbol!);
+      if (arg.operator === 'Declare') locals.push(arg.ops![0].symbol!);
     }
 
     if (args.length === 1 && locals.length === 0)
@@ -510,7 +510,7 @@ export function compile(
   }
 
   // Is it a function expression?
-  const h = expr.head;
+  const h = expr.operator;
   if (typeof h === 'string') return compileExpr(h, expr.ops!, prec, target);
 
   return '';

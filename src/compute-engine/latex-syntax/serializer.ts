@@ -223,46 +223,7 @@ export class Serializer {
     // It may have come from `getIdentifierType()`
     // Serialize the arguments as function arguments
     const h = operator(expr);
-    if (typeof h === 'string')
-      return serializeIdentifier(h, 'auto') + this.wrapArguments(expr);
-
-    //
-    // It's a function with a head expression. Use an `apply()`
-    // See https://en.wikipedia.org/wiki/Apply
-    //
-
-    if (operator(h) === 'InverseFunction' || operator(h) === 'Derivative') {
-      // For inverse functions and derivatives display as a regular function,
-      // e.g. \sin^{-1} x, f'(x) instead of x \rhd f' and x \rhd \sin^{-1}
-
-      return (
-        this.serializeFunction(h!, this.dictionary.ids.get(operator(h))) +
-        this.wrapArguments(expr)
-      );
-    }
-
-    const args = operands(expr);
-    if (args.length === 1) {
-      // If there's a single argument, we can use the pipeline operator
-      // (i.e. `\rhd` `|>`)
-      return joinLatex([
-        this.serialize(args[0]),
-        '\\rhd',
-        this.wrapString(
-          this.serialize(h),
-          this.options.applyFunctionStyle(expr, this.level)
-        ),
-      ]);
-    }
-
-    const style = this.options.applyFunctionStyle(expr, this.level);
-    return joinLatex([
-      '\\operatorname{apply}',
-      this.wrapString(
-        this.serialize(h) + ', ' + this.serialize(['List', ...args]),
-        style
-      ),
-    ]);
+    return serializeIdentifier(h, 'auto') + this.wrapArguments(expr);
   }
 
   serializeDictionary(dict: { [key: string]: Expression }): string {

@@ -1018,7 +1018,7 @@ export class ComputeEngine implements IComputeEngine {
   }
 
   /**
-   * Return the definition for a function matching this head.
+   * Return the definition for a function with this operator name.
    *
    * Start looking in the current context, than up the scope chain.
    *
@@ -1027,7 +1027,7 @@ export class ComputeEngine implements IComputeEngine {
    * to differentiate between symbols that might represent a function application, e.g. `f` vs `x`.
    */
   lookupFunction(
-    name: string,
+    name: MathJsonIdentifier,
     scope?: RuntimeScope | null
   ): undefined | BoxedFunctionDefinition {
     if (typeof name !== 'string') return undefined;
@@ -1550,7 +1550,7 @@ export class ComputeEngine implements IComputeEngine {
       // as a side effect of canonicalization.
       let expr = this.box(value, { canonical: false });
 
-      if (expr.head === 'Function') {
+      if (expr.operator === 'Function') {
         // If no arguments are specified in the signature, add the 'args'
         expr = this.box([
           'Function',
@@ -1718,11 +1718,11 @@ export class ComputeEngine implements IComputeEngine {
   }
 
   function(
-    head: string,
+    name: string,
     ops: SemiBoxedExpression[],
     options?: { metadata?: Metadata; canonical: CanonicalOptions }
   ): BoxedExpression {
-    return boxFunction(this, head, ops, options);
+    return boxFunction(this, name, ops, options);
   }
 
   /**
@@ -2002,7 +2002,7 @@ export class ComputeEngine implements IComputeEngine {
    * Return a function expression, but the caller is responsible for making
    * sure that the arguments are canonical.
    *
-   * Unlike ce.function(), the head of the  result is the head argument.
+   * Unlike ce.function(), the operator of the  result is the name argument.
    * Calling this function directly is potentially unsafe, as it bypasses
    * the canonicalization of the arguments.
    *
@@ -2013,7 +2013,7 @@ export class ComputeEngine implements IComputeEngine {
    *
    * @internal */
   _fn(
-    name: string,
+    name: MathJsonIdentifier,
     ops: BoxedExpression[],
     options?: Metadata & { canonical?: boolean }
   ): BoxedExpression {

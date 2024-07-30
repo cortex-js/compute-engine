@@ -79,7 +79,7 @@ const OPERATORS: Record<
       // Use a reduce, so that if the second argument starts with a + or -, don't include a '+' in the result
       return (
         expr.ops?.reduce((acc: string, x) => {
-          if (x.head === 'Negate') {
+          if (x.operator === 'Negate') {
             const rhs = serialize(x.op1, 10);
             if (acc === '') return `-${rhs}`;
             if (rhs.startsWith('+')) return `${acc} - ${rhs.substring(1)}`;
@@ -136,9 +136,9 @@ const OPERATORS: Record<
           const rhs = expr.op2;
           if (
             rhs.symbol ||
-            rhs.head === 'Power' ||
-            rhs.head === 'Square' ||
-            typeof FUNCTIONS[rhs.head] === 'string'
+            rhs.operator === 'Power' ||
+            rhs.operator === 'Square' ||
+            typeof FUNCTIONS[rhs.operator] === 'string'
           ) {
             if (isRational(lhs) && lhs[0] === 1) {
               const den = lhs[1];
@@ -321,11 +321,11 @@ export function toAsciiMath(
     }
   }
 
-  if (expr.head && typeof expr.head === 'string') {
+  if (expr.operator && typeof expr.operator === 'string') {
     const operators = options.operators
       ? { ...OPERATORS, ...options.operators }
       : OPERATORS;
-    const [operator, precedence_] = operators[expr.head] ?? [];
+    const [operator, precedence_] = operators[expr.operator] ?? [];
     if (operator) {
       // Go over each operands and convert them to ascii math
       let result = '';
@@ -345,11 +345,11 @@ export function toAsciiMath(
     const functions = options.functions
       ? { ...FUNCTIONS, ...options.functions }
       : FUNCTIONS;
-    const func = functions[expr.head];
+    const func = functions[expr.operator];
     if (typeof func === 'function') return func(expr, serialize);
     if (typeof func === 'string')
       return `${func}(${expr.ops?.map((x) => serialize(x)).join(', ') ?? ''})`;
-    return `${expr.head}(${expr.ops?.map((x) => serialize(x)).join(', ') ?? ''})`;
+    return `${expr.operator}(${expr.ops?.map((x) => serialize(x)).join(', ') ?? ''})`;
   }
 
   return JSON.stringify(expr.json);
@@ -400,7 +400,7 @@ function delimiter(
   if (!expr) return `${open}${close}`;
 
   let items: ReadonlyArray<BoxedExpression> = [expr.op1];
-  if (expr.op1.head === 'Sequence') items = expr.op1.ops!;
+  if (expr.op1.operator === 'Sequence') items = expr.op1.ops!;
 
   return `${open}${items.map((x) => serialize(x)).join(separator)}${close}`;
 }

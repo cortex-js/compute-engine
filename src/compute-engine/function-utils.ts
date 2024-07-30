@@ -21,7 +21,7 @@ import { checkArity } from './boxed-expression/validate';
  * #### DURING BOXING (in makeLambda())
  *
  * During the boxing/canonicalization phase of a function
- * (`["Function"]` expression or head expression):
+ * (`["Function"]` expression or operator of expression):
  *
  * 1/ If not a `["Function"]` expression, the expression is rewritten
  *    to a `["Function"]` expression with anonymous parameters
@@ -158,7 +158,7 @@ function makeLambda(
   // Turn the expression into a canonical Function expression
   // For example, ["Add", "_", 1] -> ["Function", ["Add", "_", 1], "_"]
   let canonicalFn;
-  if (expr.head === 'Function') {
+  if (expr.operator === 'Function') {
     canonicalFn = canonicalFunctionExpression(expr.op1, expr.ops!.slice(1));
   } else canonicalFn = canonicalFunctionExpression(expr);
   const [body, ...params] = canonicalFn;

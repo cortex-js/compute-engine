@@ -1,4 +1,5 @@
-import { engine, evaluate } from '../../utils';
+import { Expression } from '../../../src/math-json/types.ts';
+import { engine, evaluate, latex } from '../../utils';
 
 describe('SUM', () => {
   test('k is an Integer (as the index) and used a a Number (in the fraction)', () => {
@@ -116,5 +117,28 @@ describe('PRODUCT', () => {
     expect(
       evaluate(`\\prod_{n=1}^{2}\\prod_{m=1}^{3}nm`)
     ).toMatchInlineSnapshot(`288`);
+  });
+});
+
+describe('POWER', () => {
+  test('Power Invalid forms', () => {
+    expect(latex(['Power'])).toMatchInlineSnapshot(
+      `\\error{\\blacksquare}^{\\error{\\blacksquare}}`
+    );
+    expect(
+      latex(['Power', null as unknown as Expression])
+    ).toMatchInlineSnapshot(`\\error{\\blacksquare}^{\\error{\\blacksquare}}`);
+    expect(
+      latex(['Power', undefined as unknown as Expression])
+    ).toMatchInlineSnapshot(`\\error{\\blacksquare}^{\\error{\\blacksquare}}`);
+    expect(latex(['Power', 1])).toMatchInlineSnapshot(
+      `1^{\\error{\\blacksquare}}`
+    );
+    expect(latex(['Power', NaN])).toMatchInlineSnapshot(
+      `\\operatorname{NaN}^{\\error{\\blacksquare}}`
+    );
+    expect(latex(['Power', Infinity])).toMatchInlineSnapshot(
+      `\\infty^{\\error{\\blacksquare}}`
+    );
   });
 });

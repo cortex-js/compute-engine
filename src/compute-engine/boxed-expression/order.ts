@@ -111,7 +111,7 @@ function rank(expr: BoxedExpression): Rank {
   if (expr.numericValue !== null) return 'number';
 
   // Square root of a number
-  if (expr.head === 'Sqrt' && expr.op1.numericValue) {
+  if (expr.operator === 'Sqrt' && expr.op1.numericValue) {
     const n = asFloat(expr.op1);
     if (n !== null && Number.isInteger(n)) return 'sqrt';
   }
@@ -122,15 +122,16 @@ function rank(expr: BoxedExpression): Rank {
   // Other symbols
   if (expr.symbol) return 'symbol';
 
-  if (isTrigonometricFunction(expr.head)) return 'trig';
+  if (isTrigonometricFunction(expr.operator)) return 'trig';
 
-  if (expr.head === 'Add') return 'add';
+  if (expr.operator === 'Add') return 'add';
 
-  if (expr.head === 'Power') return 'power';
+  if (expr.operator === 'Power') return 'power';
 
-  if (expr.head === 'Multiply' || expr.head === 'Negate') return 'multiply';
+  if (expr.operator === 'Multiply' || expr.operator === 'Negate')
+    return 'multiply';
 
-  if (expr.head === 'Divide') return 'divide';
+  if (expr.operator === 'Divide') return 'divide';
 
   if (expr.ops) return 'fn';
 
@@ -161,7 +162,7 @@ function rank(expr: BoxedExpression): Rank {
  * 4/ Addition, ordered as a polynom, with higher degree terms first
  *
  * 5/ Other functions, ordered by their `complexity` property. In case
- * of a tie, ordered by the head of the expression as a string. In case of a
+ * of a tie, ordered by the operator of the expression as a string. In case of a
  * tie, by the leaf count of each expression. In case of a tie, by the order
  * of each argument, left to right.
  *
@@ -276,16 +277,16 @@ export function order(a: BoxedExpression, b: BoxedExpression): number {
   }
 
   if (rankA === 'fn' || rankA === 'trig') {
-    if (a.head == b.head && a.nops === 1 && b.nops === 1) {
+    if (a.operator == b.operator && a.nops === 1 && b.nops === 1) {
       return order(a.op1, b.op1);
     }
     const aComplexity = a.functionDefinition?.complexity ?? DEFAULT_COMPLEXITY;
     const bComplexity = b.functionDefinition?.complexity ?? DEFAULT_COMPLEXITY;
     if (aComplexity === bComplexity) {
-      if (typeof a.head === 'string' && typeof b.head === 'string') {
-        if (a.head === b.head) return getLeafCount(a) - getLeafCount(b);
+      if (typeof a.operator === 'string' && typeof b.operator === 'string') {
+        if (a.operator === b.operator) return getLeafCount(a) - getLeafCount(b);
 
-        if (a.head < b.head) return +1;
+        if (a.operator < b.operator) return +1;
         return -1;
       }
       return getLeafCount(a) - getLeafCount(b);
@@ -329,14 +330,14 @@ export function canonicalOrder(
   if (recursive) ops = ops.map((x) => canonicalOrder(x, { recursive }));
 
   const ce = expr.engine;
-  if (expr.head === 'Add') ops = sortAdd(ops);
+  if (expr.operator === 'Add') ops = sortAdd(ops);
   else {
     const isCommutative =
-      expr.head === 'Multiply' ||
-      (ce.lookupFunction(expr.head)?.commutative ?? false);
+      expr.operator === 'Multiply' ||
+      (ce.lookupFunction(expr.operator)?.commutative ?? false);
     if (isCommutative) ops = [...ops].sort(order);
   }
-  return ce._fn(expr.head, ops, { canonical: false });
+  return ce._fn(expr.operator, ops, { canonical: false });
 }
 
 /**
@@ -392,7 +393,7 @@ function getLeafCount(expr: BoxedExpression): number {
   if (expr.keys !== null) return 1 + expr.keysCount;
   if (!expr.ops) return 1;
   return (
-    (typeof expr.head === 'string' ? 1 : getLeafCount(expr.head)) +
+    (typeof expr.operator === 'string' ? 1 : getLeafCount(expr.operator)) +
     [...expr.ops].reduce((acc, x) => acc + getLeafCount(x), 0)
   );
 }

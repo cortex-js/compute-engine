@@ -1,4 +1,4 @@
-import { Expression } from '../../math-json';
+import { Expression, MathJsonIdentifier } from '../../math-json';
 import {
   EMOJIS,
   isValidIdentifier,
@@ -303,7 +303,7 @@ export function parseInvalidIdentifier(parser: Parser): Expression | null {
  *    - `\mathrm{\alpha_{12}}` or
  *    - `\mathit{speed\unicode{"2012}of\unicode{"2012}sound}`
  */
-export function parseIdentifier(parser: Parser): string | null {
+export function parseIdentifier(parser: Parser): MathJsonIdentifier | null {
   //
   // Shortcut: Is it a single-letter identifier?
   //

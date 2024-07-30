@@ -8,7 +8,7 @@ import { add } from '../numerics/terms';
 /** Combine rational expressions into a single fraction */
 export function together(op: BoxedExpression): BoxedExpression {
   const ce = op.engine;
-  const h = op.head;
+  const h = op.operator;
 
   // Thread over inequality
   if (isRelationalOperator(h)) return ce.function(h, op.ops!.map(together));
@@ -20,7 +20,7 @@ export function together(op: BoxedExpression): BoxedExpression {
   if (h === 'Add') {
     const [numer, denom] = op.ops!.reduce(
       (acc, x) => {
-        if (x.head === 'Divide') {
+        if (x.operator === 'Divide') {
           acc[0].push(x.ops![0]);
           acc[1].push(x.ops![1]);
         } else acc[0].push(x);
@@ -41,7 +41,7 @@ export function together(op: BoxedExpression): BoxedExpression {
  * - (2x) * (2y) -> 4xy
  */
 export function factor(expr: BoxedExpression): BoxedExpression {
-  const h = expr.head;
+  const h = expr.operator;
   if (isRelationalOperator(h)) {
     const lhs = Product.from(expr.op1);
     const rhs = Product.from(expr.op2);

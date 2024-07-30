@@ -1,10 +1,14 @@
-import type { Expression } from '../../math-json/types';
+import type { Expression, MathJsonIdentifier } from '../../math-json/types';
+import {
+  IndexedLatexDictionary,
+  IndexedLatexDictionaryEntry,
+} from './dictionary/definitions.js';
 
 export type SymbolType = 'symbol' | 'function' | 'unknown';
 
 export type SymbolTable = {
   parent: SymbolTable | null;
-  ids: { [id: string]: SymbolType };
+  ids: { [id: MathJsonIdentifier]: SymbolType };
 };
 
 /**
@@ -301,7 +305,7 @@ export type LatexArgumentType =
 
 export type Trigger = {
   latexTrigger?: LatexString | LatexToken[];
-  identifierTrigger?: string;
+  identifierTrigger?: MathJsonIdentifier;
 };
 
 /**
@@ -326,7 +330,7 @@ export type BaseEntry = {
    * entry. Otherwise, if the trigger of the entry matches the current
    * token, the `parse` handler is invoked.
    */
-  name?: string;
+  name?: MathJsonIdentifier;
 
   /**
    * Transform an expression into a LaTeX string.
@@ -444,7 +448,7 @@ export type PrefixEntry = BaseEntry &
 export type EnvironmentEntry = BaseEntry & {
   kind: 'environment';
   parse: EnvironmentParseHandler;
-  identifierTrigger: string;
+  identifierTrigger: MathJsonIdentifier;
 };
 
 /**
@@ -696,7 +700,7 @@ export type ParseLatexOptions = NumberFormat & {
    *
    * - `"unknown"`: the identifier is not recognized.
    */
-  getIdentifierType: (identifier: string) => SymbolType;
+  getIdentifierType: (identifier: MathJsonIdentifier) => SymbolType;
 
   /** This handler is invoked when the parser encounters an unexpected token.
    *
@@ -747,13 +751,13 @@ export type ParseLatexOptions = NumberFormat & {
 export interface Parser {
   readonly options: Required<ParseLatexOptions>;
 
-  getIdentifierType(id: string): SymbolType;
+  getIdentifierType(id: MathJsonIdentifier): SymbolType;
 
   pushSymbolTable(): void;
 
   popSymbolTable(): void;
 
-  addSymbol(id: string, type: SymbolType): void;
+  addSymbol(id: MathJsonIdentifier, type: SymbolType): void;
 
   /** The index of the current token */
   index: number;
@@ -1064,6 +1068,7 @@ export type SerializeLatexOptions = NumberSerializationFormat & {
  */
 export interface Serializer {
   readonly options: Required<SerializeLatexOptions>;
+  readonly dictionary: IndexedLatexDictionary;
 
   /** "depth" of the expression:
    * - 0 for the root
@@ -1081,7 +1086,10 @@ export interface Serializer {
   /** Output a LaTeX string representing the expression */
   serialize: (expr: Expression | null) => string;
 
-  serializeFunction(expr: Expression): LatexString;
+  serializeFunction(
+    expr: Expression,
+    def?: IndexedLatexDictionaryEntry
+  ): LatexString;
 
   serializeSymbol(expr: Expression): LatexString;
 

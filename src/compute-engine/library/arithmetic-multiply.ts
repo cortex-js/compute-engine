@@ -33,7 +33,7 @@ export function canonicalProduct(
   if (
     indexingSet &&
     indexingSet.ops &&
-    indexingSet.ops[0]?.head === 'Delimiter'
+    indexingSet.ops[0]?.operator === 'Delimiter'
   ) {
     const multiIndex = MultiIndexingSet(indexingSet);
     if (!multiIndex) return null;
@@ -326,7 +326,7 @@ export function canonicalMultiply(
       sign = -sign;
       continue;
     }
-    if (op.head === 'Negate') {
+    if (op.operator === 'Negate') {
       sign = -sign;
       xs.push(op.op1);
       continue;
@@ -400,7 +400,7 @@ export function mul(...xs: ReadonlyArray<BoxedExpression>): BoxedExpression {
 
   const exp = expandProducts(ce, xs);
   if (exp) {
-    if (exp.head !== 'Multiply') return exp;
+    if (exp.operator !== 'Multiply') return exp;
     xs = exp.ops!;
   }
 
@@ -413,7 +413,7 @@ export function mulN(...xs: ReadonlyArray<BoxedExpression>): BoxedExpression {
 
   const exp = expandProducts(ce, xs);
   if (exp) {
-    if (exp.head !== 'Multiply') return exp;
+    if (exp.operator !== 'Multiply') return exp;
     xs = exp.ops!;
   }
 

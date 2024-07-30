@@ -169,7 +169,7 @@ export class BoxedNumber extends _BoxedExpression {
     return value;
   }
 
-  get head(): string {
+  get operator(): string {
     // @fixme: return 'Number', 'Integer', 'Rational', 'Real'
     return 'Number';
   }
@@ -276,7 +276,7 @@ export class BoxedNumber extends _BoxedExpression {
       if (exp.isNegativeOne) return this.inv();
       if (exp.isEqual(this.engine.Half)) return this.sqrt();
       if (exp.isEqual(this.engine.Half.neg())) return this.sqrt().inv();
-      if (exp.head === 'Negate') return this.pow(exp.op1).inv();
+      if (exp.operator === 'Negate') return this.pow(exp.op1).inv();
     }
 
     if (exp === 0.5) return this.sqrt();
