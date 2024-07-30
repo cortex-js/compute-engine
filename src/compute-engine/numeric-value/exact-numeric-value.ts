@@ -171,16 +171,7 @@ export class ExactNumericValue extends NumericValue {
     }
 
     //
-    // 2/ Propagate non-finite values
-    //  @fixme: not needed
-    if (!isFinite(this.radical)) {
-      this.rational = [this.radical, 1];
-      this.radical = 1;
-      return;
-    }
-
-    //
-    // 3/ If sqrt is a product of exact square, simplify
+    // 2/ If sqrt is a product of exact square, simplify
     // sqrt(75) = sqrt(25 * 3) = 5 * sqrt(3)
     //
     if (this.radical >= 4) {
@@ -190,7 +181,7 @@ export class ExactNumericValue extends NumericValue {
     }
 
     //
-    // 5/ Reduce rational
+    // 3/ Reduce rational
     //
 
     this.rational = reducedRational(this.rational);
