@@ -6,7 +6,6 @@ import {
   MathJsonString,
   MathJsonSymbol,
   MathJsonFunction,
-  MathJsonDictionary,
   MathJsonIdentifier,
 } from '../../math-json';
 import type {
@@ -773,38 +772,6 @@ export interface BoxedExpression {
    */
   readonly isNonPositive: boolean | undefined;
 
-  /** The keys of the dictionary.
-   *
-   * If this expression not a dictionary, return `null`
-   *
-   * @category Dictionary Expression
-   *
-   */
-  readonly keys: IterableIterator<string> | null;
-
-  /**
-   *
-   * @category Dictionary Expression
-   */
-  readonly keysCount: number;
-
-  /**
-   * If this expression is a dictionary, return the value of the `key` entry.
-   *
-   * @category Dictionary Expression
-   *
-   */
-  getKey(key: string): BoxedExpression | undefined;
-
-  /**
-   * If this expression is a dictionary, return true if the
-   *  dictionary has a `key` entry.
-   *
-   * @category Dictionary Expression
-   *
-   */
-  hasKey(key: string): boolean;
-
   //
   // CANONICAL EXPRESSIONS ONLY
   //
@@ -1178,7 +1145,6 @@ export type SemiBoxedExpression =
   | MathJsonSymbol
   | MathJsonFunction
   | readonly [MathJsonIdentifier, ...SemiBoxedExpression[]]
-  | MathJsonDictionary
   | BoxedExpression;
 
 /**
@@ -2181,14 +2147,7 @@ export type JsonSerializationOptions = {
    *
    * **Default**: `["all"]`
    */
-  shorthands: (
-    | 'all'
-    | 'number'
-    | 'symbol'
-    | 'function'
-    | 'dictionary'
-    | 'string'
-  )[];
+  shorthands: ('all' | 'number' | 'symbol' | 'function' | 'string')[];
 
   /** A list of space separated keywords indicating which metadata should be
    * included in the MathJSON. If metadata is included, shorthand notation

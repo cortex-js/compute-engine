@@ -2,6 +2,8 @@
 
 ### Breaking Changes
 
+- The MathJSON Dictionary has been deprecated. Use a `Dictionary` expression
+  instead.
 - The property `expr.head` has been deprecated. Use `expr.operator` instead.
   `expr.head` is still supported in this version but will be removed in a future
   update.

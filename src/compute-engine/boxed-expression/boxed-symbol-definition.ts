@@ -1,4 +1,3 @@
-import Complex from 'complex.js';
 import { Decimal } from 'decimal.js';
 import { isPrime } from '../numerics/primes';
 import {

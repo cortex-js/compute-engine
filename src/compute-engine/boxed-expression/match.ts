@@ -22,10 +22,6 @@ function hasWildcards(expr: string | BoxedExpression): boolean {
   if (expr.ops)
     return hasWildcards(expr.operator) || expr.ops.some(hasWildcards);
 
-  if (expr.keys)
-    for (const key of expr.keys)
-      if (hasWildcards(expr.getKey(key)!)) return true;
-
   return false;
 }
 
@@ -117,21 +113,6 @@ function matchOnce(
     // (e.g. `x` to `0+x`).
     if (!acceptVariants) return null;
     return matchVariants(expr, pattern, substitution, options);
-  }
-
-  //
-  // Match a dictionary
-  //
-  const keys = pattern.keys;
-  if (keys !== null) {
-    const exprKeys = expr.keys;
-    if (exprKeys === null) return null; // A dictionary vs not a dictionary
-    for (const key of keys) {
-      const r = matchOnce(exprKeys[key], keys[key], substitution, options);
-      if (r === null) return null;
-      substitution = r;
-    }
-    return substitution;
   }
 
   //

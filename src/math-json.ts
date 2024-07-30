@@ -13,7 +13,6 @@ export type {
   MathJsonSymbol,
   MathJsonString,
   MathJsonFunction,
-  MathJsonDictionary,
   MathJsonIdentifier,
 } from './math-json/types';
 
@@ -21,7 +20,6 @@ export {
   isSymbolObject,
   isStringObject,
   isFunctionObject,
-  isDictionaryObject,
   stringValue as getStringValue,
   operator,
   operand,

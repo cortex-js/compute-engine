@@ -41,10 +41,6 @@ export function isFunctionObject(
   return expr !== null && typeof expr === 'object' && 'fn' in expr;
 }
 
-export function isDictionaryObject(expr: Expression): expr is MathJsonNumber {
-  return expr !== null && typeof expr === 'object' && 'dict' in expr;
-}
-
 /**  If expr is a string literal, return it.
  *
  * A string literal is a JSON string that begins and ends with
@@ -169,7 +165,6 @@ export function dictionary(
   expr: Expression | null
 ): null | Record<string, Expression> {
   if (expr === null) return null;
-  if (typeof expr === 'object' && 'dict' in expr) return expr.dict;
 
   const kv = keyValuePair(expr);
   if (kv) return { [kv[0]]: kv[1] };
@@ -186,6 +181,16 @@ export function dictionary(
   }
 
   return null;
+}
+
+export function dictionaryFrom(dict: Record<string, Expression>): Expression {
+  const keys = Object.keys(dict);
+  if (keys.length === 0) return ['Dictionary'];
+  if (keys.length === 1) return ['Pair', { str: keys[0] }, dict[keys[0]]];
+
+  const entries: Expression[] = [];
+  for (const key of keys) entries.push(['Pair', { str: key }, dict[key]]);
+  return ['Dictionary', ...entries];
 }
 
 function machineValueOfString(s: string): number | null {
@@ -299,23 +304,15 @@ export function subs(
   expr: Expression,
   s: { [symbol: string]: Expression }
 ): Expression {
+  const sym = symbol(expr);
+  if (sym && s[sym]) return s[sym];
+
   const h = operator(expr);
   if (h)
     return [
       subs(h, s) as MathJsonIdentifier,
       ...operands(expr).map((x) => subs(x, s)),
     ];
-
-  const dict = dictionary(expr);
-  if (dict !== null) {
-    const keys = Object.keys(dict);
-    const result = {};
-    for (const key of keys) result[key] = subs(dict[key], s);
-    return { dict: result };
-  }
-
-  const sym = symbol(expr);
-  if (sym && s[sym]) return s[sym];
 
   return expr;
 }

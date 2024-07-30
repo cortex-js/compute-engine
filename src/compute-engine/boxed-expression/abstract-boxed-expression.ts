@@ -139,7 +139,7 @@ export abstract class _BoxedExpression implements BoxedExpression {
   ): Expression {
     const defaultOptions: JsonSerializationOptions = {
       exclude: [],
-      shorthands: ['function', 'symbol', 'string', 'dictionary', 'number'],
+      shorthands: ['function', 'symbol', 'string', 'number'],
       metadata: [],
       fractionalDigits: 'max',
       repeatingDecimal: true,
@@ -152,13 +152,7 @@ export abstract class _BoxedExpression implements BoxedExpression {
           options.shorthands === 'all') ||
         options.shorthands?.includes('all')
       ) {
-        defaultOptions.shorthands = [
-          'function',
-          'symbol',
-          'string',
-          'dictionary',
-          'number',
-        ];
+        defaultOptions.shorthands = ['function', 'symbol', 'string', 'number'];
       }
       if (
         (typeof options.metadata === 'string' && options.metadata === 'all') ||
@@ -608,19 +602,6 @@ export abstract class _BoxedExpression implements BoxedExpression {
     return;
   }
 
-  get keys(): IterableIterator<string> | null {
-    return null;
-  }
-  get keysCount() {
-    return 0;
-  }
-  getKey(_key: string): BoxedExpression | undefined {
-    return undefined;
-  }
-  hasKey(_key: string): boolean {
-    return false;
-  }
-
   get value(): number | boolean | string | object | undefined {
     return this.N().valueOf();
   }
@@ -730,9 +711,6 @@ function getFreeVariables(expr: BoxedExpression, result: Set<string>): void {
   }
 
   if (expr.ops) for (const op of expr.ops) getFreeVariables(op, result);
-
-  if (expr.keys)
-    for (const key of expr.keys) getFreeVariables(expr.getKey(key)!, result);
 }
 
 function getSymbols(expr: BoxedExpression, result: Set<string>): void {
@@ -742,9 +720,6 @@ function getSymbols(expr: BoxedExpression, result: Set<string>): void {
   }
 
   if (expr.ops) for (const op of expr.ops) getSymbols(op, result);
-
-  if (expr.keys)
-    for (const key of expr.keys) getSymbols(expr.getKey(key)!, result);
 }
 
 /**
@@ -770,9 +745,6 @@ function getUnknowns(expr: BoxedExpression, result: Set<string>): void {
   }
 
   if (expr.ops) for (const op of expr.ops) getUnknowns(op, result);
-
-  if (expr.keys)
-    for (const key of expr.keys) getUnknowns(expr.getKey(key)!, result);
 }
 
 export function getSubexpressions(
@@ -782,9 +754,6 @@ export function getSubexpressions(
   const result = !name || expr.operator === name ? [expr] : [];
   if (expr.ops) {
     for (const op of expr.ops) result.push(...getSubexpressions(op, name));
-  } else if (expr.keys) {
-    for (const op of expr.keys)
-      result.push(...getSubexpressions(expr.getKey(op)!, name));
   }
   return result;
 }

@@ -70,43 +70,13 @@ export function nextDown(x: number): number {
 
 /* @todo Consider https://cp-algorithms.com/algebra/factorization.html */
 
-/**
- * Return a, b, c such that n = a * b^c
- * @param n
- *
- */
-export function canonicalInteger(n: number): [a: number, b: number, c: number] {
-  console.assert(Number.isInteger(n));
-  if (n === 0) return [0, 1, 1];
-  let sign = 1;
-  if (n < 0) {
-    n = -n;
-    sign = -1;
-  }
-  if (n === 1) return [sign, 1, 1];
-  const factors = primeFactors(n);
-  let a = 1;
-  let b = 1;
-  let c = 1;
-  for (const k of Object.keys(factors)) {
-    const v = parseInt(k);
-    if (factors[k] % 2 === 0) {
-      a = a * Math.pow(v, factors[k] / 2);
-    } else {
-      b = b * v;
-      c = c * factors[k];
-    }
-  }
-  return [sign * a, b, c];
-}
-
 /** Return `[factor, root]` such that
  * pow(n, 1/exponent) = factor * pow(root, 1/exponent)
  *
- * factorPower(75, 2) -> [5, 3] = 5^2 * 3
+ * canonicalInteger(75, 2) -> [5, 3] = 5^2 * 3
  *
  */
-export function factorPower(
+export function canonicalInteger(
   n: number,
   exponent: number
 ): readonly [factor: number, root: number] {

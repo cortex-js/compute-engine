@@ -1,5 +1,8 @@
-import { factorPower, gcd } from './numeric';
-import { gcd as bigGcd, factorPower as bigFactorPower } from './numeric-bigint';
+import { canonicalInteger, gcd } from './numeric';
+import {
+  gcd as bigGcd,
+  canonicalInteger as bigCanonicalInteger,
+} from './numeric-bigint';
 
 /**
  * @category Boxed Expression
@@ -180,12 +183,12 @@ export function reduceRationalSquareRoot(
 ): [factor: Rational, root: number | bigint] {
   if (isBigRational(n)) {
     const [num, den] = n;
-    const [nFactor, nRoot] = bigFactorPower(num, 2);
-    const [dFactor, dRoot] = bigFactorPower(den, 2);
+    const [nFactor, nRoot] = bigCanonicalInteger(num, 2);
+    const [dFactor, dRoot] = bigCanonicalInteger(den, 2);
     return [reducedRational([nFactor, dFactor * dRoot]), nRoot * dRoot];
   }
   const [num, den] = n;
-  const [nFactor, nRoot] = factorPower(num, 2);
-  const [dFactor, dRoot] = factorPower(den, 2);
+  const [nFactor, nRoot] = canonicalInteger(num, 2);
+  const [dFactor, dRoot] = canonicalInteger(den, 2);
   return [reducedRational([nFactor, dFactor * dRoot]), nRoot * dRoot];
 }

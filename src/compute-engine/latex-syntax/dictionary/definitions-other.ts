@@ -16,11 +16,7 @@ import {
   isEmptySequence,
   symbol,
 } from '../../../math-json/utils';
-import {
-  Expression,
-  MathJsonFunction,
-  MathJsonIdentifier,
-} from '../../../math-json/types';
+import { Expression, MathJsonIdentifier } from '../../../math-json/types';
 import { joinLatex } from '../tokenizer';
 
 function parseSingleArg(cmd: string): (parser: Parser) => Expression {

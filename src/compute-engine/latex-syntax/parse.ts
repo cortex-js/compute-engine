@@ -9,7 +9,6 @@ import {
   operator,
   operands,
   nops,
-  symbol,
 } from '../../math-json/utils';
 
 import {

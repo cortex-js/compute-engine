@@ -25,7 +25,6 @@ import {
 
 import { Product } from '../symbolic/product';
 
-import { BoxedTensor } from './boxed-tensor';
 import { order } from './order';
 
 function _escapeJsonString(s: undefined): undefined;
@@ -515,30 +514,6 @@ function serializeRepeatingDecimals(
   return `${wholepart}.${fractionalPart}`;
 }
 
-function serializeDictionary(
-  expr: BoxedExpression,
-  options: Readonly<JsonSerializationOptions>
-): Expression {
-  const ce = expr.engine;
-  // Is dictionary shorthand notation allowed?
-  if (options.shorthands.includes('dictionary')) {
-    const dict = {};
-    for (const key of expr.keys!)
-      dict[key] = serializeJson(expr.engine, expr.getKey(key)!, options);
-    return { dict };
-  }
-
-  // The dictionary shorthand is not allowed, output it as a "Dictionary"
-  // function
-  const kvs: BoxedExpression[] = [];
-  for (const key of expr.keys!)
-    kvs.push(ce._fn('KeyValuePair', [ce.string(key), expr.getKey(key)!]));
-
-  return serializeJsonFunction(ce, 'Dictionary', kvs, options, {
-    latex: expr.verbatimLatex,
-  });
-}
-
 function serializeJsonNumber(
   ce: IComputeEngine,
   value: number | Decimal | Complex | Rational,
@@ -693,10 +668,10 @@ export function serializeJson(
       latex: expr.verbatimLatex,
     });
 
-  if (expr instanceof BoxedTensor) {
+  if (expr.rank > 0) {
     // @todo tensor: could be optimized by avoiding creating
     // an expression and getting the JSON from the tensor directly
-    return serializeJson(ce, expr.expression, options);
+    return expr.json;
   }
 
   if (expr.ops) {
@@ -710,8 +685,6 @@ export function serializeJson(
       wikidata,
     });
   }
-
-  if (expr.keys) return serializeDictionary(expr, options);
 
   if (expr.string !== null) return serializeJsonString(expr.string, options);
 

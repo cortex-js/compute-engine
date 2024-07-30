@@ -32,7 +32,7 @@ import { match } from './match';
 import { canonicalDivide } from '../library/arithmetic-divide';
 import { NumericValue } from '../numeric-value/public';
 import { mul } from '../library/arithmetic-multiply';
-import { factorPower } from '../numerics/numeric';
+import { canonicalInteger } from '../numerics/numeric';
 import { add } from '../numerics/terms';
 
 /**
@@ -300,7 +300,7 @@ export class BoxedNumber extends _BoxedExpression {
           const base = n.re;
           if (Number.isInteger(base)) {
             const sign = base < 0 ? -1 : 1;
-            const [factor, root] = factorPower(sign > 0 ? base : -base, 3);
+            const [factor, root] = canonicalInteger(sign > 0 ? base : -base, 3);
             if (factor !== 1) {
               const ce = this.engine;
               return ce
@@ -348,11 +348,10 @@ export class BoxedNumber extends _BoxedExpression {
     const f = asFloat(this);
     if (f !== null && Number.isInteger(f) && f > 0) {
       const ce = this.engine;
-      // @fixme: should use canonicalInteger
-      let [factor, root] = factorPower(f, 3);
+      let [factor, root] = canonicalInteger(f, 3);
       if (factor !== 1)
         return ce.number(factor).ln(base).mul(3).add(ce.number(root).ln(base));
-      [factor, root] = factorPower(f, 2);
+      [factor, root] = canonicalInteger(f, 2);
       if (factor !== 1)
         return ce.number(factor).ln(base).mul(2).add(ce.number(root).ln(base));
     }

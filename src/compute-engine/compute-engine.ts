@@ -2072,7 +2072,7 @@ export class ComputeEngine implements IComputeEngine {
         // if (def?.domain) return 'symbol';
         return 'symbol';
       },
-      parseUnexpectedToken: (lhs, parser) => null,
+      parseUnexpectedToken: (_lhs, _parser) => null,
       preserveLatex: false,
     };
 

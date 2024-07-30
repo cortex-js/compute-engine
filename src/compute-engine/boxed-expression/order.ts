@@ -27,7 +27,6 @@ const ADD_RANKS = [
   'sqrt',
 
   'string',
-  'dict',
   'other',
 ] as const;
 
@@ -91,7 +90,6 @@ const RANKS = [
   'fn',
   'power',
   'string',
-  'dict',
   'other',
 ] as const;
 export type Rank = (typeof RANKS)[number];
@@ -136,8 +134,6 @@ function rank(expr: BoxedExpression): Rank {
   if (expr.ops) return 'fn';
 
   if (expr.string) return 'string';
-
-  if (expr.keys) return 'dict';
 
   return 'other';
 }
@@ -300,17 +296,6 @@ export function order(a: BoxedExpression, b: BoxedExpression): number {
     return +1;
   }
 
-  if (rankA === 'dict') {
-    if (a.keysCount !== b.keysCount) return b.keysCount - a.keysCount;
-    let bComplexity = 0;
-    let aComplexity = 0;
-    for (const key of b.keys!)
-      bComplexity += b.getKey(key)!.complexity ?? DEFAULT_COMPLEXITY;
-    for (const key of a.keys!)
-      aComplexity += a.getKey(key)!.complexity ?? DEFAULT_COMPLEXITY;
-    return aComplexity - bComplexity;
-  }
-
   return (
     (a.complexity ?? DEFAULT_COMPLEXITY) - (b.complexity ?? DEFAULT_COMPLEXITY)
   );
@@ -390,7 +375,6 @@ export function eliminationOrder(
 
 /** Get the number of atomic elements in the expression */
 function getLeafCount(expr: BoxedExpression): number {
-  if (expr.keys !== null) return 1 + expr.keysCount;
   if (!expr.ops) return 1;
   return (
     (typeof expr.operator === 'string' ? 1 : getLeafCount(expr.operator)) +

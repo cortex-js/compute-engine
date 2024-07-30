@@ -226,14 +226,6 @@ export class Serializer {
     return serializeIdentifier(h, 'auto') + this.wrapArguments(expr);
   }
 
-  serializeDictionary(dict: { [key: string]: Expression }): string {
-    return `\\left\\lbrack\\begin{array}{lll}${Object.keys(dict)
-      .map((x) => {
-        return `\\textbf{${x}} & \\rightarrow & ${this.serialize(dict[x])}`;
-      })
-      .join('\\\\')}\\end{array}\\right\\rbrack`;
-  }
-
   serialize(expr: Expression | null): LatexString {
     if (expr === null || expr === undefined) return '';
 
@@ -253,13 +245,7 @@ export class Serializer {
         if (s !== null) return `\\text{${s}}`;
 
         //
-        // 3. Is it a dictionary?
-        //
-        const dict = dictionary(expr);
-        if (dict !== null) return this.serializeDictionary(dict);
-
-        //
-        // 4. Is it a symbol?
+        // 3. Is it a symbol?
         //
         const symbolName = symbol(expr);
         if (symbolName !== null) {
@@ -270,7 +256,7 @@ export class Serializer {
         }
 
         //
-        // 5. Is it a function?
+        // 4. Is it a function?
         //
         const fnName = operator(expr);
         if (fnName) {
@@ -279,7 +265,7 @@ export class Serializer {
         }
 
         //
-        // 6. Unknown expression
+        // 5. Unknown expression
         //
         // This doesn't look like a symbol, or a function,
         // or anything we were expecting.

@@ -1,4 +1,4 @@
-import type { Expression } from '../src/math-json/math-json-format';
+import { Expression } from '../src/math-json/types';
 import { ParsingDiagnostic } from '../src/point-free-parser/parsers';
 import { ComputeEngine, SemiBoxedExpression } from '../src/compute-engine';
 
@@ -197,7 +197,9 @@ function strip(expr: Expression): Expression | null {
     return expr;
   }
   if (Array.isArray(expr))
-    return expr.map((x) => strip(x ?? 'Nothing') ?? 'Nothing') as Expression;
+    return expr.map(
+      (x) => strip(x ?? 'Nothing') ?? 'Nothing'
+    ) as any as Expression;
 
   if (typeof expr === 'object') {
     if ('num' in expr) return validJSONNumber(expr.num);
@@ -205,16 +207,7 @@ function strip(expr: Expression): Expression | null {
     if ('fn' in expr) {
       return expr.fn.map(
         (x) => strip(x ?? 'Nothing') ?? 'Nothing'
-      ) as Expression;
-    }
-    if ('dict' in expr) {
-      return {
-        dict: Object.fromEntries(
-          Object.entries(expr.dict).map((keyValue) => {
-            return [keyValue[0], strip(keyValue[1]) ?? 'Nothing'];
-          })
-        ),
-      };
+      ) as any as Expression;
     }
 
     if ('str' in expr) return { str: expr.str };

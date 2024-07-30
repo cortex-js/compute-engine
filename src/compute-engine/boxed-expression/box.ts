@@ -9,7 +9,6 @@ import {
   CanonicalOptions,
 } from './public';
 import { _BoxedExpression } from './abstract-boxed-expression';
-import { BoxedDictionary } from './boxed-dictionary';
 import { BoxedFunction } from './boxed-function';
 import { BoxedNumber } from './boxed-number';
 import { BoxedString } from './boxed-string';
@@ -28,11 +27,11 @@ import {
   neg,
 } from '../numerics/rationals';
 import { asBigint } from './utils';
-import { bigint, bigintValue } from '../numerics/numeric-bigint';
+import { bigintValue } from '../numerics/numeric-bigint';
 import { isDomainLiteral } from '../library/domains';
 import { BoxedTensor, expressionTensorInfo } from './boxed-tensor';
 import { canonicalForm } from './canonical';
-import { asFloat, asMachineInteger } from './numerics';
+import { asFloat } from './numerics';
 import { canonicalAdd } from '../library/arithmetic-add';
 import { flatten } from '../symbolic/flatten';
 import { shouldHold, semiCanonical, canonical } from '../symbolic/utils';
@@ -226,7 +225,6 @@ function boxHold(
     );
   }
   if (typeof expr === 'object') {
-    if ('dict' in expr) return new BoxedDictionary(ce, expr.dict);
     if ('fn' in expr) return boxHold(ce, expr.fn, options);
     if ('str' in expr) return new BoxedString(ce, expr.str);
     if ('sym' in expr) return box(ce, expr.sym, options);
@@ -501,13 +499,8 @@ export function box(
   // Box a MathJSON object literal
   //
   if (!Array.isArray(expr) && typeof expr === 'object') {
-    // @ts-ignore
+    // @ts-expect-error
     const metadata = { latex: expr.latex, wikidata: expr.wikidata };
-    if ('dict' in expr)
-      return canonicalForm(
-        new BoxedDictionary(ce, expr.dict, { canonical: true, metadata }),
-        options.canonical!
-      );
     if ('fn' in expr) {
       const [fnName, ...ops] = expr.fn;
       return canonicalForm(
@@ -572,38 +565,6 @@ function makeCanonicalFunction(
       return new BoxedTensor(ce, { op: 'List', ops: boxedOps });
 
     return ce._fn('List', boxedOps);
-  }
-
-  //
-  // Dictionary
-  //
-  if (name === 'Dictionary') {
-    const dict = {};
-    for (const op of ops) {
-      const arg = ce.box(op);
-      const operator = arg.operator;
-      if (
-        operator === 'KeyValuePair' ||
-        operator === 'Pair' ||
-        (operator === 'Tuple' && arg.nops === 2)
-      ) {
-        const key = arg.op1;
-        if (key.isValid && key.symbol !== 'Nothing') {
-          const value = arg.op2;
-          let k = key.symbol ?? key.string;
-          if (!k && (key.numericValue !== null || key.string)) {
-            const n =
-              typeof key.numericValue === 'number'
-                ? key.numericValue
-                : asMachineInteger(key);
-            if (n && Number.isFinite(n) && Number.isInteger(n))
-              k = n.toString();
-          }
-          if (k) dict[k] = value;
-        }
-      }
-    }
-    return new BoxedDictionary(ce, dict, { metadata });
   }
 
   //

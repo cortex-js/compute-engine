@@ -238,6 +238,7 @@ export class BoxedFunction extends _BoxedExpression {
     // Add
     //
     //  use factor() to factor out common factors
+    // @es-lint-disable-no-this-alias
     let expr: BoxedExpression = this;
     if (expr.operator === 'Add') {
       expr = factor(this);

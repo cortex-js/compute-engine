@@ -618,11 +618,6 @@ function insertWholeGroupSeparator(
   return insertGroupSeparator(numberString, options, 0);
 }
 
-interface Result {
-  newWholePart: string;
-  newFractionalPart: string;
-}
-
 // Given a whole part, fractional part and exponent, return a new whole part
 // and fractional part that represents the number in decimal form
 // For example, toDecimalNumber(123, 456, 2) -> 12345.6

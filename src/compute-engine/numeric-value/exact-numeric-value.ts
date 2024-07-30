@@ -1,6 +1,6 @@
 import Decimal from 'decimal.js';
 import { add } from '../boxed-expression/numerics';
-import { factorPower, gcd, SMALL_INTEGER } from '../numerics/numeric';
+import { canonicalInteger, gcd, SMALL_INTEGER } from '../numerics/numeric';
 import {
   isOne,
   isZero,
@@ -184,7 +184,7 @@ export class ExactNumericValue extends NumericValue {
     // sqrt(75) = sqrt(25 * 3) = 5 * sqrt(3)
     //
     if (this.radical >= 4) {
-      const [factor, root] = factorPower(this.radical, 2);
+      const [factor, root] = canonicalInteger(this.radical, 2);
       this.rational[0] *= factor;
       this.radical = root;
     }

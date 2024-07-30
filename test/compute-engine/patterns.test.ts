@@ -184,7 +184,6 @@ const sameExprs: [SemiBoxedExpression, SemiBoxedExpression][] = [
     ['Add', 'x', 1],
   ],
   [{ fn: ['Add', 'x', 1] }, ['Add', 'x', 1]],
-  // [{ dict: { Alpha: 'a', Beta: 'b' } }, { dict: { Alpha: 'a', Beta: 'b' } }],
 ];
 
 const notSameExprs: [Expression, Expression][] = [
@@ -217,13 +216,6 @@ const notSameExprs: [Expression, Expression][] = [
     ['Add', 1, 2, 3],
     ['Add', 1, 2, 4],
   ],
-  [
-    { dict: { Alpha: 'a', Beta: 'b' } },
-    { dict: { Alpha: 'a', Beta: 'b', Gamma: 'g' } },
-  ],
-  [{ dict: { Alpha: 'a', Beta: 'b' } }, { dict: { Alpha: 'a', Beta: 'c' } }],
-  ['Nothing', { dict: { Alpha: 'a', Beta: 'b', Gamma: 'g' } }],
-  [['Add', 2, 'x'], { dict: { Alpha: 'a', Beta: 'b', Gamma: 'g' } }],
 ];
 
 describe('MATCH', () => {

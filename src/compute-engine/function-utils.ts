@@ -1,7 +1,5 @@
 import { BoxedExpression } from './public';
 
-import { checkArity } from './boxed-expression/validate';
-
 /***
  * ### THEORY OF OPERATIONS
  *

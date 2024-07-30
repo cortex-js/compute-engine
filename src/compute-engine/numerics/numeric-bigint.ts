@@ -150,10 +150,10 @@ export function primeFactors(d: bigint): Map<bigint, number> {
 /** Return `[factor, root]` such that
  * pow(n, 1/exponent) = factor * pow(root, 1/exponent)
  *
- * factorPower(75, 2) -> [5, 3] = 5^2 * 3
+ * canonicalInteger(75, 2) -> [5, 3] = 5^2 * 3
  *
  */
-export function factorPower(
+export function canonicalInteger(
   n: bigint,
   exponent: number
 ): [factor: bigint, root: bigint] {
@@ -168,34 +168,4 @@ export function factorPower(
     r = r * k ** (v2 % exp);
   }
   return [f, r];
-}
-
-/**
- * Return a, b, c such that n = a * b^c
- * @param n
- *
- */
-export function canonicalInteger(n: bigint): [a: bigint, b: bigint, c: bigint] {
-  if (n === BigInt(0)) return [BigInt(0), BigInt(0), BigInt(1)];
-  let sign = BigInt(1);
-  if (n < 0) {
-    sign = BigInt(-1);
-    n = -n;
-  }
-
-  if (n === BigInt(1)) return [sign, BigInt(1), BigInt(1)];
-
-  const factors = primeFactors(n);
-  let a = BigInt(1);
-  let b = BigInt(1);
-  let c = BigInt(0);
-  for (const [k, v] of factors) {
-    if (v === 1) {
-      a = a * k;
-    } else {
-      b = k;
-      c = BigInt(v);
-    }
-  }
-  return [sign * a, b, c];
 }

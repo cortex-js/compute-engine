@@ -114,17 +114,11 @@ export type MathJsonFunction = {
   fn: [MathJsonIdentifier, ...Expression[]];
 } & Attributes;
 
-/** @category MathJSON */
-export type MathJsonDictionary = {
-  dict: { [key: string]: Expression };
-} & Attributes;
-
 export type ExpressionObject =
   | MathJsonNumber
   | MathJsonString
   | MathJsonSymbol
-  | MathJsonFunction
-  | MathJsonDictionary;
+  | MathJsonFunction;
 /**
  * A MathJSON expression is a recursive data structure.
  *

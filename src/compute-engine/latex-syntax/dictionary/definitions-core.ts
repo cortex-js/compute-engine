@@ -12,6 +12,7 @@ import {
   isEmptySequence,
   unhold,
   symbol,
+  dictionaryFrom,
 } from '../../../math-json/utils';
 import {
   ADDITION_PRECEDENCE,
@@ -945,7 +946,7 @@ function parseTextRun(
       if (color !== null) {
         // Stash the current text/runinstyle
         if (runinStyle !== null && text) {
-          runs.push(['Style', text, { dict: runinStyle }]);
+          runs.push(['Style', text, dictionaryFrom(runinStyle)]);
         } else if (text) {
           runs.push(['String', text]);
         }
@@ -1029,7 +1030,7 @@ function parseTextRun(
 
   // Apply leftovers
   if (runinStyle !== null && text) {
-    runs.push(['Style', `'${text}'`, { dict: runinStyle }]);
+    runs.push(['Style', `'${text}'`, dictionaryFrom(runinStyle)]);
   } else if (text) {
     runs.push(`'${text}'`);
   }
@@ -1042,7 +1043,7 @@ function parseTextRun(
     else body = ['String', ...runs];
   }
 
-  return style ? ['Style', body, { dict: style }] : body;
+  return style ? ['Style', body, dictionaryFrom(style)] : body;
 }
 
 function serializeLatexTokens(

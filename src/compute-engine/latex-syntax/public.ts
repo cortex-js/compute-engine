@@ -2,7 +2,7 @@ import type { Expression, MathJsonIdentifier } from '../../math-json/types';
 import {
   IndexedLatexDictionary,
   IndexedLatexDictionaryEntry,
-} from './dictionary/definitions.js';
+} from './dictionary/definitions';
 
 export type SymbolType = 'symbol' | 'function' | 'unknown';
 
