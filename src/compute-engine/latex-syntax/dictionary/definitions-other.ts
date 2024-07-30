@@ -67,7 +67,6 @@ export const DEFINITIONS_OTHERS: LatexDictionary = [
     kind: 'prefix',
     precedence: 880,
     parse: (parser, until): Expression | null => {
-      if (until && ADDITION_PRECEDENCE < until.minPrec) return null; // @fixme: not needed?
       const rhs = parser.parseExpression(until);
       if (symbol(rhs) === null) return null;
       return ['PreIncrement', rhs!];
@@ -79,7 +78,6 @@ export const DEFINITIONS_OTHERS: LatexDictionary = [
     kind: 'prefix',
     precedence: 880,
     parse: (parser, until): Expression | null => {
-      if (until && ADDITION_PRECEDENCE < until.minPrec) return null;
       const rhs = parser.parseExpression(until);
       if (symbol(rhs) === null) return null;
       return ['PreDecrement', rhs!];

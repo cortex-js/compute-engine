@@ -184,10 +184,7 @@ describe('OPERATOR prefix', () => {
       canonical = ["Negate", ["Multiply", "a", "b"]]
     `));
   test('--x // Predecrement', () =>
-    expect(check('--x')).toMatchInlineSnapshot(`
-      box       = ["Negate", ["Negate", "x"]]
-      canonical = x
-    `));
+    expect(check('--x')).toMatchInlineSnapshot(`["PreDecrement", "x"]`));
   test('-(-x) // Negate', () =>
     expect(check('-(-x)')).toMatchInlineSnapshot(`
       box       = ["Negate", ["Delimiter", ["Negate", "x"]]]

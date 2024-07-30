@@ -658,8 +658,6 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
     associativity: 'any',
     precedence: ADDITION_PRECEDENCE,
     parse: (parser, lhs, until) => {
-      if (until && ADDITION_PRECEDENCE < until.minPrec) return null;
-
       const rhs = parser.parseExpression({
         ...until,
         minPrec: ADDITION_PRECEDENCE,
@@ -678,7 +676,6 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
     latexTrigger: ['+'],
     precedence: ADDITION_PRECEDENCE,
     parse: (parser, until) => {
-      if (until && ADDITION_PRECEDENCE < until.minPrec) return null;
       return parser.parseExpression({ ...until, minPrec: 400 });
     },
   },
