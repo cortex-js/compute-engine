@@ -27,33 +27,537 @@ import { Rule } from './public';
  * may be necessary as the expression could be simplified by the canonicalization.
  */
 export const SIMPLIFY_RULES: Rule[] = [
-  '\\frac{x}{x} -> 1', // Note this is not true for x = 0
+  /*
+  //NEW (doesn't work b/c keeps - sign)
+  {
+    match: '(-x)^n',
+    replace: 'x^n',
+    condition: ({ _n }) => _n.isEven === true,
+  },
+  {
+    match: '(-x)^{n/m}',
+    replace: 'x^{n/m}',
+    condition: ({ _n, _m }) => _n.isEven === true && _m.isOdd === true,
+  },
 
-  '\\frac{x^n}{x^m} -> x^{n-m}', // Note this is not always true
-  'x^n * x^m -> x^{n+m}',
-  'x^a * x^b -> x^{a+b}',
-  'x^n^m -> x^{n * m}',
+  //NEW
+  {
+    match: '(-x)^n',
+    replace: '-x^n',
+    condition: ({ _n }) => _n.isOdd === true,
+  },
+  {
+    match: '(-x)^{n/m}',
+    replace: '-x^{n/m}',
+    condition: (ids) => ids._n.isOdd === true && ids._m.isOdd === true,
+  },
 
-  // Exponential and logarithms
-  '\\log(xy) -> \\log(x) + \\log(y)',
-  '\\log(x^n) -> n \\log(x)',
-  '\\log(\\frac{x}{y}) -> \\log(x) - \\log(y)',
-  '\\log(\\exp(x) * y) -> x + \\log(y)',
-  '\\log(\\exp(x) / y) -> x - \\log(y)',
-  '\\log(\\exp(x)^y) -> y * x',
-  '\\log(\\exp(x)) -> x',
+  //Situational and Not Being Run
+  {
+    match: 'a/b+c/d',
+    replace: '(a*d+b*c)/(b*d)',
+    condition: (ids) => ids._a.isNotZero === true,
+  },
 
-  '\\exp(x) * \\exp(y) -> \\exp(x + y)',
-  '\\exp(x)^n -> \\exp(n x)',
-  '\\exp(\\log(x)) -> x',
-  '\\exp(\\log(x) + y) -> x * \\exp(y)',
-  '\\exp(\\log(x) - y) -> x / \\exp(y)',
-  '\\exp(\\log(x) * y) -> x^y',
-  '\\exp(\\log(x) / y) -> x^(1/y)',
-  '\\exp(\\log(x) * \\log(y)) -> x^\\log(y)',
-  '\\exp(\\log(x) / \\log(y)) -> x^{1/\\log(y)}',
+  //Not Being Run (gives infinity instead of NaN)
+  'x/0 -> \\operatorname{NaN}',
+  {
+    match: '0^x',
+    replace: '\\operatorname{NaN}',
+    condition: (ids) => ids._x.isNonPositive === true,
+  },
 
-  // Trigonometric
+  //Currently gives 0
+  {
+    match: '0*x',
+    replace: '\\operatorname{NaN}',
+    condition: (_x) => _x._x.isInfinity === true,
+  },
+
+  //Ln
+  '\\log(x) -> \\ln(x)',
+  '\\ln(x)+\\ln(y) -> \\ln(x*y)', //assumes negative arguments are allowed
+  '\\ln(x)-\\ln(y) -> \\ln(x/y)',
+  'e^{\\ln(x)+y} -> x*e^y',
+  'e^{\\ln(x)-y} -> x/e^y',
+  'e^{\\ln(x)*y} -> x^y',
+  'e^{\\ln(x)/y} -> x^{1/y}',
+  'e^\\ln(x) -> x',
+  '\\ln(e^x*y) -> x+\\ln(y)',
+  '\\ln(e^x/y) -> x-\\ln(y)',
+  '\\ln(y/e^x) -> \\ln(y)-x',
+  '\\ln(0) -> \\operatorname{NaN}',
+
+  //Log base c
+  {
+    match: '\\log_c(x)',
+    replace: '\\operatorname{NaN}',
+    condition: (id) => id._c.isZero === true || id._c.isOne === true,
+  },
+  '\\log_c(x)+\\log_c(y) -> \\log_c(x*y)', //assumes negative arguments are allowed
+  '\\log_c(x)-\\log_c(y) -> \\log_c(x/y)',
+  '\\log_c(c^x) -> x',
+  '\\log_c(c) -> 1',
+  '\\log_c(0) -> \\operatorname{NaN}',
+  'c^{\\log_c(x)} -> x',
+  'c^{\\log_c(x)*y} -> x^y',
+  'c^{\\log_c(x)/y} -> x^{1/y}',
+  '\\log_c(c^x*y) -> x+\\log_c(y)',
+  '\\log_c(c^x/y) -> x-\\log_c(y)',
+  '\\log_c(y/c^x) -> \\log_c(y)-x',
+  'c^{\\log_c(x)+y} -> x*c^y',
+  'c^{\\log_c(x)-y} -> x/c^y',
+
+  //Change of Base
+  '\\log_{1/c}(a) -> -\\log_c(a)',
+  '\\log_c(a)*\\ln(a) -> \\ln(c)',
+  '\\log_c(a)/\\log_c(b) -> \\ln(a)/\\ln(b)',
+  '\\log_c(a)/\\ln(a) -> 1/\\ln(c)',
+  '\\ln(a)/\\log_c(a) -> \\ln(c)',
+
+  //Absolute Value
+  '|-x| -> |x|',
+  {
+    match: '|x|',
+    replace: 'x',
+    condition: (ids) => ids._x.isNonNegative === true,
+  },
+  {
+    match: '|x|',
+    replace: '-x',
+    condition: (ids) => ids._x.isNonPositive === true,
+  },
+  {
+    match: '|xy|',
+    replace: 'x|y|',
+    condition: (ids) => ids._x.isNonNegative === true,
+  },
+  {
+    match: '|xy|',
+    replace: '-x|y|',
+    condition: (ids) => ids._x.isNonPositive === true,
+  },
+
+  '|xy| -> |x||y|',
+  '|\\frac{x}{y}| -> \\frac{|x|}{|y|}',
+  { match: '|x|^n', replace: 'x^n', condition: (id) => id._n.isEven === true },
+  {
+    match: '|x|^{n/m}',
+    replace: 'x^{n/m}',
+    condition: (id) => id._n.isEven === true && id._m.isOdd === true,
+  },
+  {
+    match: '|x^n|',
+    replace: '|x|^n',
+    condition: (id) => id._n.isOdd === true || id._n.isRational === false,
+  },
+  {
+    match: '|x^{n/m}|',
+    replace: '|x|^{n/m}',
+    condition: (id) => id._n.isOdd === true || id._m.isInteger === true,
+  },
+
+  {
+    match: '|\\frac{x}{y}|',
+    replace: '\\frac{x}{|y|}',
+    condition: (ids) => ids._x.isNonNegative === true,
+  },
+  {
+    match: '|\\frac{x}{y}|',
+    replace: '-\\frac{x}{|y|}',
+    condition: (ids) => ids._x.isNonPositive === true,
+  },
+  {
+    match: '|\\frac{x}{y}|',
+    replace: '\\frac{|x|}{y}',
+    condition: (ids) => ids._y.isNonNegative === true,
+  },
+  {
+    match: '|\\frac{x}{y}|',
+    replace: '-\\frac{|x|}{y}',
+    condition: (ids) => ids._y.isNonPositive === true,
+  },
+
+  //Even functions
+  '\\cos(|x|) -> \\cos(x)',
+  '\\sec(|x|) -> \\sec(x)',
+  '\\cosh(|x|) -> \\cosh(x)',
+  '\\sech(|x|) -> \\sech(x)',
+
+  //Odd Trig Functions
+  '|\\sin(x)| -> \\sin(|x|)',
+  '|\\tan(x)| -> \\tan(|x|)',
+  '|\\cot(x)| -> \\cot(|x|)',
+  '|\\csc(x)| -> \\csc(|x|)',
+  '|\\arcsin(x)| -> \\arcsin(|x|)',
+  '|\\arctan(x)| -> \\arctan(|x|)',
+  '|\\arccot(x)| -> \\arccot(|x|)',
+  '|\\arccsc(x)| -> \\arccsc(|x|)',
+  //Odd Hyperbolic Trig Functions
+  '|\\sinh(x)| -> \\sinh(|x|)',
+  '|\\tanh(x)| -> \\tanh(|x|)',
+  '|\\coth(x)| -> \\coth(|x|)',
+  '|\\csch(x)| -> \\csch(|x|)',
+  '|\\arcsinh(x)| -> \\arcsinh(|x|)',
+  '|\\arctanh(x)| -> \\arctanh(|x|)',
+  '|\\arccoth(x)| -> \\arccoth(|x|)',
+  '|\\arccsch(x)| -> \\arccsch(|x|)',
+
+  //Negative Exponents in Denominator
+  {
+    match: '\\frac{a}{b^{-n}}',
+    replace: 'a*b^n',
+    condition: ({ _b }) => _b.isNotZero === true,
+  }, // doesn't work but {match:'\\frac{a}{b^n}',replace:'a*b^{-n}',condition:ids=>ids._n.isNotZero===true} works
+  {
+    match: '\\frac{a}{d*b^{-n}}',
+    replace: '\\frac{a}{d}*b^n',
+    condition: (ids) => ids._b.isNotZero === true,
+  }, // doesn't work but {match:'\\frac{a}{d*b^n}',replace:'\\frac{a}{d}*b^{-n}',condition:ids=>ids._n.isNotZero===true} works
+
+  //Indeterminate Forms Involving Infinity
+  { match: '0*x', replace: '0', condition: (_x) => _x._x.isFinite === true },
+  { match: '1^x', replace: '1', condition: (_x) => _x._x.isFinite === true },
+  {
+    match: 'a^0',
+    replace: '\\operatorname{NaN}',
+    condition: (id) => id._a.isInfinity === true,
+  },
+
+  //Infinity and Multiplication
+  {
+    match: '\\infty*x',
+    replace: '\\infty',
+    condition: (_x) => _x._x.isPositive === true,
+  },
+  {
+    match: 'x*(-\\infty)',
+    replace: '-\\infty',
+    condition: (_x) => _x._x.isPositive === true,
+  },
+  {
+    match: '\\infty*x',
+    replace: '-\\infty',
+    condition: (_x) => _x._x.isNegative === true,
+  },
+  {
+    match: 'x*(-\\infty)',
+    replace: '\\infty',
+    condition: (_x) => _x._x.isNegative === true,
+  },
+
+  //Infinity and Division
+  {
+    match: '\\infty/x',
+    replace: '\\infty',
+    condition: (_x) => _x._x.isPositive === true && _x._x.isFinite === true,
+  },
+  {
+    match: '(-\\infty)/x',
+    replace: '-\\infty',
+    condition: (_x) => _x._x.isPositive === true && _x._x.isFinite === true,
+  },
+  {
+    match: '\\infty/x',
+    replace: '-\\infty',
+    condition: (_x) => _x._x.isNegative === true && _x._x.isFinite === true,
+  },
+  {
+    match: '(-\\infty)/x',
+    replace: '\\infty',
+    condition: (_x) => _x._x.isNegative === true && _x._x.isFinite === true,
+  },
+  {
+    match: 'x/y',
+    replace: '\\operatorname{NaN}',
+    condition: (_x) => _x._x.isInfinity === true && _x._y.isInfinity === true,
+  },
+
+  //Infinity and Powers (doesn't work for a=\\pi)
+  {
+    match: 'a^\\infty',
+    replace: '\\infty',
+    condition: (id) => id._a.isGreater(1) === true,
+  },
+  {
+    match: 'a^\\infty',
+    replace: '0',
+    condition: (id) => id._a.isPositive === true && id._a.isLess(1) === true,
+  },
+  {
+    match: '\\infty^a',
+    replace: '0',
+    condition: (id) => id._a.isNegative === true,
+  },
+  {
+    match: '(-\\infty)^a',
+    replace: '0',
+    condition: (id) => id._a.isNegative === true,
+  },
+  {
+    match: 'a^{-\\infty}',
+    replace: '0',
+    condition: (id) => id._a.isGreater(1) === true,
+  },
+  {
+    match: 'a^{-\\infty}',
+    replace: '\\infty',
+    condition: (id) => id._a.isPositive === true && id._a.isLess(1) === true,
+  },
+  //This one works for \\pi
+  // {match:'\\infty^a',replace:'\\infty',condition:id=>id._a.isPositive===true},
+
+  //Logs and Infinity
+  '\\ln(\\infty) -> \\infty',
+  {
+    match: '\\log_c(\\infty)',
+    replace: '\\infty',
+    condition: (id) => id._c.isGreater(1) === true,
+  },
+  {
+    match: '\\log_c(\\infty)',
+    replace: '-\\infty',
+    condition: (id) => id._c.isLess(1) === true && id._c.isPositive === true,
+  },
+  {
+    match: '\\log_\\infty(c)',
+    replace: '0',
+    condition: (id) =>
+      id._c.isPositive === true &&
+      id._c.isOne === false &&
+      id._c.isFinite === true,
+  },
+
+  //Trig and Infinity
+  {
+    match: '\\sin(x)',
+    replace: '\\operatorname{NaN}',
+    condition: (id) => id._x.isInfinity === true,
+  },
+  {
+    match: '\\cos(x)',
+    replace: '\\operatorname{NaN}',
+    condition: (id) => id._x.isInfinity === true,
+  },
+  {
+    match: '\\tan(x)',
+    replace: '\\operatorname{NaN}',
+    condition: (id) => id._x.isInfinity === true,
+  },
+  {
+    match: '\\cot(x)',
+    replace: '\\operatorname{NaN}',
+    condition: (id) => id._x.isInfinity === true,
+  },
+  {
+    match: '\\sec(x)',
+    replace: '\\operatorname{NaN}',
+    condition: (id) => id._x.isInfinity === true,
+  },
+  {
+    match: '\\csc(x)',
+    replace: '\\operatorname{NaN}',
+    condition: (id) => id._x.isInfinity === true,
+  },
+
+  //Inverse Trig and Infinity
+  '\\arcsin(\\infty) -> \\operatorname{NaN}',
+  '\\arccos(\\infty) -> \\operatorname{NaN}',
+  '\\arcsin(-\\infty) -> \\operatorname{NaN}',
+  '\\arccos(-\\infty) -> \\operatorname{NaN}',
+  '\\arctan(\\infty) -> \\frac{\\pi}{2}',
+  '\\arctan(-\\infty) -> -\\frac{\\pi}{2}',
+  '\\arccot(\\infty) -> 0',
+  '\\arccot(-\\infty) -> \\pi',
+  '\\arcsec(\\infty) -> \\frac{\\pi}{2}',
+  '\\arcsec(-\\infty) -> \\frac{\\pi}{2}',
+  '\\arccsc(\\infty) -> 0',
+  '\\arccsc(-\\infty) -> 0',
+
+  //Hyperbolic Trig and Infinity
+  '\\sinh(\\infty) -> \\infty',
+  '\\sinh(-\\infty) -> -\\infty',
+  '\\cosh(\\infty) -> \\infty',
+  '\\cosh(-\\infty) -> \\infty',
+  '\\tanh(\\infty) -> 1',
+  '\\tanh(-\\infty) -> -1',
+  '\\coth(\\infty) -> 1',
+  '\\coth(-\\infty) -> -1',
+  '\\sech(\\infty) -> 0',
+  '\\sech(-\\infty) -> 0',
+  '\\csch(\\infty) -> 0',
+  '\\csch(-\\infty) -> 0',
+
+  //Inverse Hyperbolic Trig and Infinity
+  '\\arcsinh(\\infty) -> \\infty',
+  '\\arcsinh(-\\infty) -> -\\infty',
+  '\\arccosh(\\infty) -> \\infty',
+  '\\arccosh(-\\infty) -> \\operatorname{NaN}',
+
+  {
+    match: '\\arctanh(x)',
+    replace: '\\operatorname{NaN}',
+    condition: (id) => id._x.isInfinity === true,
+  },
+  {
+    match: '\\arccoth(x)',
+    replace: '\\operatorname{NaN}',
+    condition: (id) => id._x.isInfinity === true,
+  },
+  {
+    match: '\\arcsech(x)',
+    replace: '\\operatorname{NaN}',
+    condition: (id) => id._x.isInfinity === true,
+  },
+  {
+    match: '\\arccsch(x)',
+    replace: '\\operatorname{NaN}',
+    condition: (id) => id._x.isInfinity === true,
+  },
+
+  //----------- DOMAIN ISSUES -----------
+
+  //Division
+  { match: 'a/a', replace: '1', condition: (ids) => ids._a.isNotZero === true },
+  {
+    match: '1/(1/a)',
+    replace: 'a',
+    condition: (ids) => ids._a.isNotZero === true,
+  },
+  {
+    match: 'a/(1/b)',
+    replace: 'a*b',
+    condition: (ids) => ids._b.isNotZero === true,
+  },
+  {
+    match: 'a/(b/c)',
+    replace: '(a*c)/b',
+    condition: (ids) => ids._c.isNotZero === true,
+  },
+  { match: '0/a', replace: '0', condition: ({ _a }) => _a.isNotZero === true },
+
+  //Powers
+  {
+    match: 'x^0',
+    replace: '1',
+    condition: (ids) => ids._x.isNotZero === true && ids._x.isFinite === true,
+  },
+  {
+    match: 'x/x^n',
+    replace: '1/x^{n-1}',
+    condition: (ids) => ids._x.isNotZero || ids._n.isGreater(1) === true,
+  },
+  {
+    match: 'x^n/x',
+    replace: '1/x^{1-n}',
+    condition: (ids) => ids._x.isNotZero || ids._n.isLess(1) === true,
+  },
+  {
+    match: 'x^n*x',
+    replace: 'x^{n+1}',
+    condition: (ids) =>
+      ids._x.isNotZero === true ||
+      ids._n.isPositive === true ||
+      ids._x.isLess(-1) === true,
+  },
+  {
+    match: 'x^n*x^m',
+    replace: 'x^{n+m}',
+    condition: (ids) =>
+      (ids._x.isNotZero === true ||
+        ids._n.add(ids._m).isNegative === true ||
+        ids._n.mul(ids._m).isPositive === true) &&
+      (ids._n.isInteger === true ||
+        ids._m.isInteger === true ||
+        ids._n.add(ids._m).isRational === false ||
+        ids._x.isNonNegative === true),
+  }, //also check if at least one power is not an even root or sum is an even root
+  {
+    match: 'x^n/x^m',
+    replace: 'x^{n+m}',
+    condition: (ids) =>
+      (ids._x.isNotZero === true || ids._n.add(ids._m).isNegative === true) &&
+      (ids._n.isInteger === true ||
+        ids._m.isInteger === true ||
+        ids._n.sub(ids._m).isRational === false ||
+        ids._x.isNonNegative === true),
+  }, //also check if at least one power is not an even root or difference is an even root
+
+  {
+    match: 'a/(b/c)^d',
+    replace: 'a*(c/b)^d',
+    condition: (ids) => ids._c.isNotZero === true,
+  },
+  {
+    match: '(b/c)^{-d}',
+    replace: '(c/b)^d',
+    condition: (ids) => ids._c.isNotZero === true,
+  },
+  {
+    match: '(b/c)^{-1}',
+    replace: 'c/b',
+    condition: (ids) => ids._c.isNotZero === true,
+  },
+  {
+    match: '(a^n)^m',
+    replace: 'a^{m*n}',
+    condition: (ids) =>
+      ((ids._n.isInteger === true && ids._m.isInteger === true) ||
+        ids._a.isNonNegative ||
+        ids._n.mul(ids._m).isRational === false) &&
+      (ids._n.isPositive === true || ids._m.isPositive === true),
+  }, //also check if n*m not rational with even denominator
+
+  //Logs and Powers
+  {
+    match: '\\ln(x^n)',
+    replace: 'n*\\ln(x)',
+    condition: (ids) =>
+      ids._x.isNonNegative ||
+      ids._n.isOdd === true ||
+      ids._n.isRational === false,
+  },
+  {
+    match: '\\ln(x^{n/k})',
+    replace: 'n*\\ln(x)/k',
+    condition: (ids) => ids._x.isNonNegative || ids._n.isOdd === true,
+  },
+  {
+    match: '\\ln(x^{n/k})',
+    replace: 'n*\\ln(|x|)/k',
+    condition: (ids) => ids._n.isEven === true && ids._k.isOdd === true,
+  },
+  {
+    match: '\\ln(x^n)',
+    replace: 'n*\\ln(|x|)',
+    condition: (ids) => ids._n.isEven === true,
+  },
+
+  {
+    match: '\\log_c(x^n)',
+    replace: 'n*\\log_c(x)',
+    condition: (ids) =>
+      ids._x.isNonNegative ||
+      ids._n.isOdd === true ||
+      ids._n.isRational === false,
+  },
+  {
+    match: '\\log_c(x^{n/k})',
+    replace: 'n*\\log_c(x)/k',
+    condition: (ids) => ids._x.isNonNegative || ids._n.isOdd === true,
+  },
+  {
+    match: '\\log_c(x^{n/k})',
+    replace: 'n*\\log_c(|x|)/k',
+    condition: (ids) => ids._n.isEven === true && ids._k.isOdd === true,
+  },
+  {
+    match: '\\log_c(x^n)',
+    replace: 'n*\\log_c(|x|)',
+    condition: (ids) => ids._n.isEven === true,
+  },
+
+  // -------- TRIGONOMETRIC --------
   '\\sin(-x) -> -\\sin(x)',
   '\\cos(-x) -> \\cos(x)',
   '\\tan(-x) -> -\\tan(x)',
@@ -154,6 +658,135 @@ export const SIMPLIFY_RULES: Rule[] = [
       2,
     ],
   },
+
+  // '\\frac{x}{x} -> 1', // Note this is not true for x = 0
+
+  // '\\frac{x^n}{x^m} -> x^{n-m}', // Note this is not always true
+  // 'x^n * x^m -> x^{n+m}',
+  // 'x^a * x^b -> x^{a+b}',
+  // 'x^n^m -> x^{n * m}',
+
+  // // Exponential and logarithms
+  // '\\log(xy) -> \\log(x) + \\log(y)',
+  // '\\log(x^n) -> n \\log(x)',
+  // '\\log(\\frac{x}{y}) -> \\log(x) - \\log(y)',
+  // '\\log(\\exp(x) * y) -> x + \\log(y)',
+  // '\\log(\\exp(x) / y) -> x - \\log(y)',
+  // '\\log(\\exp(x)^y) -> y * x',
+  // '\\log(\\exp(x)) -> x',
+
+  // '\\exp(x) * \\exp(y) -> \\exp(x + y)',
+  // '\\exp(x)^n -> \\exp(n x)',
+  // '\\exp(\\log(x)) -> x',
+  // '\\exp(\\log(x) + y) -> x * \\exp(y)',
+  // '\\exp(\\log(x) - y) -> x / \\exp(y)',
+  // '\\exp(\\log(x) * y) -> x^y',
+  // '\\exp(\\log(x) / y) -> x^(1/y)',
+  // '\\exp(\\log(x) * \\log(y)) -> x^\\log(y)',
+  // '\\exp(\\log(x) / \\log(y)) -> x^{1/\\log(y)}',
+
+  // // Trigonometric
+  // '\\sin(-x) -> -\\sin(x)',
+  // '\\cos(-x) -> \\cos(x)',
+  // '\\tan(-x) -> -\\tan(x)',
+  // '\\cot(-x) -> -\\cot(x)',
+  // '\\sec(-x) -> \\sec(x)',
+  // '\\csc(-x) -> -\\csc(x)',
+  // '\\sin(\\pi - x) -> \\sin(x)',
+  // '\\cos(\\pi - x) -> -\\cos(x)',
+  // '\\tan(\\pi - x) -> -\\tan(x)',
+  // '\\cot(\\pi - x) -> -\\cot(x)',
+  // '\\sec(\\pi - x) -> -\\sec(x)',
+  // '\\csc(\\pi - x) -> \\csc(x)',
+  // '\\sin(\\pi + x) -> -\\sin(x)',
+  // '\\cos(\\pi + x) -> -\\cos(x)',
+  // '\\tan(\\pi + x) -> \\tan(x)',
+  // '\\cot(\\pi + x) -> -\\cot(x)',
+  // '\\sec(\\pi + x) -> -\\sec(x)',
+  // '\\csc(\\pi + x) -> \\csc(x)',
+
+  // '\\sin(\\frac{\\pi}{2} - x) -> \\cos(x)',
+  // '\\cos(\\frac{\\pi}{2} - x) -> \\sin(x)',
+  // '\\tan(\\frac{\\pi}{2} - x) -> \\cot(x)',
+  // '\\cot(\\frac{\\pi}{2} - x) -> \\tan(x)',
+  // '\\sec(\\frac{\\pi}{2} - x) -> \\csc(x)',
+  // '\\csc(\\frac{\\pi}{2} - x) -> \\sec(x)',
+  // '\\sin(x) * \\cos(x) -> \\frac{1}{2} \\sin(2x)',
+  // '\\sin(x) * \\sin(y) -> \\frac{1}{2} (\\cos(x-y) - \\cos(x+y))',
+  // '\\cos(x) * \\cos(y) -> \\frac{1}{2} (\\cos(x-y) + \\cos(x+y))',
+  // '\\tan(x) * \\cot(x) -> 1',
+  // // '\\sin(x)^2 + \\cos(x)^2 -> 1',
+  // '\\sin(x)^2 -> \\frac{1 - \\cos(2x)}{2}',
+  // '\\cos(x)^2 -> \\frac{1 + \\cos(2x)}{2}',
+  // {
+  //   match: ['Tan', '__x'],
+  //   replace: ['Divide', ['Sin', '__x'], ['Cos', '__x']],
+  // },
+  // {
+  //   match: ['Cot', '__x'],
+  //   replace: ['Divide', ['Cos', '__x'], ['Sin', '__x']],
+  // },
+  // {
+  //   match: ['Sec', '__x'],
+  //   replace: ['Divide', 1, ['Cos', '__x']],
+  // },
+  // {
+  //   match: ['Csc', '__x'],
+  //   replace: ['Divide', 1, ['Sin', '__x']],
+  // },
+  // {
+  //   match: ['Cos', '__x'],
+  //   replace: ['Sin', ['Add', ['Divide', 'Pi', 2], '__x']],
+  // },
+  {
+    match: ['Arcosh', '__x'],
+    replace: [
+      'Ln',
+      ['Add', '__x', ['Sqrt', ['Subtract', ['Square', '__x'], 1]]],
+    ],
+    condition: ({ __x }) => __x.isGreater(1) ?? false,
+  },
+  {
+    match: ['Arcsin', '__x'],
+    replace: [
+      'Multiply',
+      2,
+      [
+        'Arctan2',
+        '__x',
+        ['Add', 1, ['Sqrt', ['Subtract', 1, ['Square', '__x']]]],
+      ],
+    ],
+  },
+  {
+    match: ['Arsinh', '__x'],
+    replace: [
+      'Multiply',
+      2,
+      ['Ln', ['Add', '__x', ['Sqrt', ['Add', ['Square', '__x'], 1]]]],
+    ],
+  },
+  {
+    match: ['Artanh', '__x'],
+    replace: [
+      'Multiply',
+      'Half',
+      ['Ln', ['Divide', ['Add', 1, '__x'], ['Subtract', 1, '__x']]],
+    ],
+  },
+  {
+    match: ['Cosh', '__x'],
+    replace: ['Divide', ['Add', ['Exp', '__x'], ['Exp', ['Negate', '__x']]], 2],
+  },
+  {
+    match: ['Sinh', '__x'],
+    replace: [
+      'Divide',
+      ['Subtract', ['Exp', '__x'], ['Exp', ['Negate', '__x']]],
+      2,
+    ],
+  },
+  */
 ];
 //  [
 //   // `Subtract`
