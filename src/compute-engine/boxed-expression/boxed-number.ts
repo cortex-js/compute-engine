@@ -556,17 +556,13 @@ export class BoxedNumber extends _BoxedExpression {
   }
 
   get isInteger(): boolean {
-    if (typeof this._value === 'number') {
-      console.assert(
-        Number.isInteger(this._value) || !Number.isFinite(this._value)
-      );
-      return Number.isInteger(this._value);
-    }
+    if (typeof this._value === 'number') return Number.isInteger(this._value);
+
     return this._value.type === 'integer';
   }
 
   get isRational(): boolean {
-    if (typeof this._value === 'number') return false;
+    if (typeof this._value === 'number') return Number.isInteger(this._value);
     const t = this._value.type;
     // Every integer is also a rational
     return t === 'integer' || t === 'rational';

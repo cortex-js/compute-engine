@@ -599,15 +599,20 @@ export class BoxedSymbol extends _BoxedExpression {
     return false;
   }
 
-  isLess(rhs: BoxedExpression): boolean | undefined {
+  isLess(rhs: number | BoxedExpression): boolean | undefined {
     // Idempotency
-    if (rhs.symbol !== null && rhs.symbol === this._id) return false;
+    if (
+      typeof rhs !== 'number' &&
+      rhs.symbol !== null &&
+      rhs.symbol === this._id
+    )
+      return false;
 
     // Mathematical/numeric equality
     const lhsVal = this.symbolDefinition?.value?.N();
-    if (lhsVal) return lhsVal.isLess(rhs.N());
+    if (lhsVal) return lhsVal.isLess(rhs);
 
-    if (rhs.isZero) {
+    if (rhs === 0 || (typeof rhs !== 'number' && rhs.isZero)) {
       const s = this.sgn;
       if (s === null) return false;
       if (s !== undefined) return s < 0;
@@ -619,15 +624,20 @@ export class BoxedSymbol extends _BoxedExpression {
     return undefined;
   }
 
-  isLessEqual(rhs: BoxedExpression): boolean | undefined {
+  isLessEqual(rhs: number | BoxedExpression): boolean | undefined {
     // Idempotency
-    if (rhs.symbol !== null && rhs.symbol === this._id) return true;
+    if (
+      typeof rhs !== 'number' &&
+      rhs.symbol !== null &&
+      rhs.symbol === this._id
+    )
+      return true;
 
     // Mathematical/numeric equality
     const lhsVal = this.symbolDefinition?.value?.N();
-    if (lhsVal) return lhsVal.isLessEqual(rhs.N());
+    if (lhsVal) return lhsVal.isLessEqual(rhs);
 
-    if (rhs.isZero) {
+    if (rhs === 0 || (typeof rhs !== 'number' && rhs.isZero)) {
       const s = this.sgn;
       if (s === null) return false;
       if (s !== undefined) return s <= 0;
@@ -637,15 +647,20 @@ export class BoxedSymbol extends _BoxedExpression {
     return this.isLess(rhs) || this.isEqual(rhs);
   }
 
-  isGreater(rhs: BoxedExpression): boolean | undefined {
+  isGreater(rhs: number | BoxedExpression): boolean | undefined {
     // Idempotency
-    if (rhs.symbol !== null && rhs.symbol === this._id) return false;
+    if (
+      typeof rhs !== 'number' &&
+      rhs.symbol !== null &&
+      rhs.symbol === this._id
+    )
+      return false;
 
     // Mathematical/numeric equality
     const lhsVal = this.symbolDefinition?.value?.N();
-    if (lhsVal) return lhsVal.isGreater(rhs.N());
+    if (lhsVal) return lhsVal.isGreater(rhs);
 
-    if (rhs.isZero) {
+    if (rhs === 0 || (typeof rhs !== 'number' && rhs.isZero)) {
       const s = this.sgn;
       if (s === null) return false;
       if (s !== undefined) return s > 0;
@@ -657,15 +672,20 @@ export class BoxedSymbol extends _BoxedExpression {
     return undefined;
   }
 
-  isGreaterEqual(rhs: BoxedExpression): boolean | undefined {
+  isGreaterEqual(rhs: number | BoxedExpression): boolean | undefined {
     // Idempotency
-    if (rhs.symbol !== null && rhs.symbol === this._id) return true;
+    if (
+      typeof rhs !== 'number' &&
+      rhs.symbol !== null &&
+      rhs.symbol === this._id
+    )
+      return true;
 
     // Mathematical/numeric equality
     const lhsVal = this.symbolDefinition?.value?.N();
-    if (lhsVal) return lhsVal.isGreaterEqual(rhs.N());
+    if (lhsVal) return lhsVal.isGreaterEqual(rhs);
 
-    if (rhs.isZero) {
+    if (rhs === 0 || (typeof rhs !== 'number' && rhs.isZero)) {
       const s = this.sgn;
       if (s === null) return false;
       if (s !== undefined) return s >= 0;
