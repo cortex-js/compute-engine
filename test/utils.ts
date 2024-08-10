@@ -71,6 +71,7 @@ function exprToStringRecursive(expr: SemiBoxedExpression, start: number) {
 export function exprToString(
   expr: SemiBoxedExpression | null | undefined
 ): string {
+  if (typeof expr === 'number') return expr.toString();
   if (!expr) return '';
   return exprToStringRecursive(expr, 0);
 }
