@@ -2018,9 +2018,6 @@ export class ComputeEngine implements IComputeEngine {
     ops: BoxedExpression[],
     options?: Metadata & { canonical?: boolean }
   ): BoxedExpression {
-    if (name === 'Multiply') {
-      if (ops.some((x) => x.isOne)) debugger;
-    }
     const canonical = options?.canonical ?? true;
     return new BoxedFunction(this, name, ops, { ...options, canonical });
   }

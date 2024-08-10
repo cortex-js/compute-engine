@@ -86,20 +86,6 @@ export class ExactNumericValue extends NumericValue {
       this.rational = rational;
 
       this.normalize();
-
-      if (!isMachineRational(this.rational)) {
-        const [n, d] = this.rational;
-        if (
-          n >= Number.MIN_SAFE_INTEGER &&
-          n <= Number.MAX_SAFE_INTEGER &&
-          d >= Number.MIN_SAFE_INTEGER &&
-          d <= Number.MAX_SAFE_INTEGER
-        ) {
-          debugger;
-
-          console.log(reducedRational(this.rational));
-        }
-      }
     } else {
       this.rational = [0, 1];
       this.radical = 1;

@@ -237,7 +237,6 @@ export class _Parser implements Parser {
   ) {
     this._tokens = tokens;
     this.options = options;
-    if (!dictionary) debugger;
     this._dictionary = dictionary;
 
     this._positiveInfinityTokens = tokenize(this.options.positiveInfinity);
