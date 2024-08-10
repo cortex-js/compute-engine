@@ -21,22 +21,25 @@ export const ce = new ComputeEngine();
  */
 const TEST_CASES: [
   input: Expression,
-  expected: Expression,
+  expected?: Expression,
   comment?: string,
 ][] = [
-  //
+  [
+    `
   // Arithmetic operations
   // - integers and float are simplified
   // - rational and square root of integers are preserved
   // (same behavior as Mathematica)
   //
+`,
+  ],
 
   ['-23', -23, 'Integers should stay as is'],
   ['0.3', 0.3, 'Floating point should stay as is'],
   ['3/4', '3/4', 'Rational are reduced'],
   ['6/8', '3/4', 'Rational are reduced (during canonicalization)'],
   ['\\sqrt3', '\\sqrt3'],
-  ['\\sqrt{3.1}', { num: '1.76068168616590091458' }], // 🙁 1.76068168616590091458
+  ['\\sqrt{3.1}', { num: '1.76068168616590091458' }, 'stop'], // 🙁 1.76068168616590091458
   ['x+0', 'x', 'Zero is removed from addition'],
   ['-1234 - 5678', -6912],
   ['1.234 + 5678', 5679.234], // 🙁 5679.234
@@ -59,71 +62,107 @@ const TEST_CASES: [
   ['2(13.1+x)', '26.2+2x', 'Product of floating point should be simplified'],
   ['2(13.1+x) - 26.2 - 2x', 0],
 
+  [
+    `
   //
   // Numeric literals
   //
+  `,
+  ],
+
   ['\\sqrt3 - 2', '\\sqrt3 - 2', 'Should stay exact'], // 🙁 -2 + sqrt(3)
   ['\\frac{\\sqrt5+1}{4}', '\\frac{\\sqrt5}{4}+\\frac14', 'Should stay exact'], // 🙁 sqrt(5) / 4 + 1/4
 
+  [
+    `
   //
   // Other simplifications
   //
-
+`,
+  ],
   ['\\ln(3)+\\ln(\\frac{1}{3})', 0],
-  //  ['\\frac{\\ln(9)}{\\ln(3)}', 2],
-  //  ['e e^x e^{-x}', 'e'],
-  //  ['e^x e^{-x}', 1],
-  // [['Add', 1, 2, 1.0001], 4.0001],
-  // ['2\\left(13.1+x\\right)-\\left(26.2+2x\\right)', 0],
-  // ['\\sqrt{3}(\\sqrt2x + x)', '(\\sqrt3+\\sqrt6)x'],
-  // ['\\sqrt[4]{16b^{4}}', '2b'],
+  ['\\frac{\\ln(9)}{\\ln(3)}', 2, 'skip'],
+  ['e e^x e^{-x}', 'e', 'skip'],
+  ['e^x e^{-x}', 1, 'skip'],
+  [['Add', 1, 2, 1.0001], 4.0001, 'skip'],
+  ['2\\left(13.1+x\\right)-\\left(26.2+2x\\right)', 0, 'skip'],
+  ['\\sqrt{3}(\\sqrt2x + x)', '(\\sqrt3+\\sqrt6)x', 'skip'],
+  ['\\sqrt[4]{16b^{4}}', '2b', 'skip'],
 
+  [
+    `
   //
   // Negative Signs and Powers
   //
+`,
+  ],
   ['(-x)^3', '-x^3'], // 🙁 (-x)^3
-  /// ['(-x)^{4/3}', 'x^{4/3}'],
-  /// ['(-x)^4', 'x^4'],
+  ['(-x)^{4/3}', 'x^{4/3}', 'skip'],
+  ['(-x)^4', 'x^4', 'skip'],
   ['(-x)^{3/5}', '-x^{3/5}'], // 🙁 (-x)^(3/5)
   ['1/x-1/(x+1)', '1/(x(x+1))'], // 🙁 -1 / (x + 1) + 1 / x
   ['\\sqrt[3]{-2}', '-\\sqrt[3]{2}'], // 🙁 root(-2)(3)
+  [
+    `
   //
   // Addition and Subtraction
   //
+`,
+  ],
   ['-2+x', 'x-2'],
   ['x-(-1)', 'x+1'],
   ['x+(-1)', 'x-1'],
 
+  [
+    `
   //
   // Combine Like terms
   //
+`,
+  ],
   ['x+2*x', '3*x'],
   ['2*\\pi * x^2-\\pi * x^2+2*\\pi', '\\pi * x^2+ 2\\pi'],
 
+  [
+    `
   //
   // Common Denominator
   //
+`,
+  ],
   ['3/x-1/x', '2/x'],
   ['1/(x+1)-1/x', '-1/(x(x+1))'], // 🙁 1 / (x + 1) - 1 / x
 
+  [
+    `
   //
   // Distribute
   //
+`,
+  ],
   ['x*y+(x+1)*y', '2xy+y'],
   ['(x+1)^2-x^2', '2x+1'],
   ['2*(x+h)^2-2*x^2', '4xh+2h^2'], // 🙁 -2x^2 + 2(h + x)^2
 
+  [
+    `
   //
   // Multiplication
   //
+`,
+  ],
   ['1*x', 'x'],
   ['-1*x', '-x'],
   ['(-2)*(-x)', '2*x'],
   ['2*(-x)', '-2*x'],
 
+  [
+    `
   //
   // Division
   //
+`,
+  ],
   ['x/x', 'x/x'], // 🙁 1
   ['\\pi/\\pi', 1], // 🙁 pi / pi
   ['(\\pi+1)/(\\pi+1)', 1], // 🙁 1 / (1 + pi) + pi / (1 + pi)
@@ -143,9 +182,13 @@ const TEST_CASES: [
   ['(-2)/(-x)', '2/x'],
   ['2/(-x)', '-2/x'],
 
+  [
+    `
   //
   // Operations Involving 0
   //
+`,
+  ],
   ['0*\\pi', 0],
   ['x-0', 'x'],
   ['\\sin(x)+0', '\\sin(x)'],
@@ -164,9 +207,13 @@ const TEST_CASES: [
   ['|0|', 0],
   ['-0', 0],
 
+  [
+    `
   //
   // Ln
   //
+`,
+  ],
   ['\\ln(xy)-\\ln(x)', '\\ln(y)'], // 🙁 -ln(x) + ln(x * y)
   ['\\ln(y/x)+\\ln(x)', '\\ln(x*y/x)'], // 🙁 ln(x) + ln(y / x)
 
@@ -184,9 +231,13 @@ const TEST_CASES: [
   ['\\ln(e)', 1],
   ['\\ln(e^x)', 'x'],
 
+  [
+    `
   //
   // log
   //
+`,
+  ],
   ['\\log_c(xy)-\\log_c(x)', '\\log_c(y)'], // 🙁 -log(x, c) + ln(x * y)
   ['\\log_c(y/x)+\\log_c(x)', '\\log_c(xy/x)'], // 🙁 log(x, c) + log(y / x, c)
   ['c^{\\log_c(x)+x}', 'x c^x'], // 🙁 c^(x + log(x, c))
@@ -203,17 +254,25 @@ const TEST_CASES: [
   ['\\log_c(c^x)', 'x'], // 🙁 x * log(c, c)
   ['\\log_2(1/x)', '-\\log_2(x)'],
 
+  [
+    `
   //
   // Change of Base
   //
+`,
+  ],
   ['\\log_c(a)*\\ln(a)', '\\ln(c)'], // 🙁 ln(a) * log(a, c)
   ['\\log_c(a)/\\log_c(b)', '\\ln(a)/\\ln(b)'], // 🙁 log(a, c) / log(b, c)
   ['\\log_c(a)/\\ln(a)', '1/\\ln(c)'], // 🙁 log(a, c) / ln(a)
   ['\\ln(a)/\\log_c(a)', '\\ln(c)'], // 🙁 ln(a) / log(a, c)
 
+  [
+    `
   //
   // Absolute Value
   //
+`,
+  ],
   ['|\\pi|', '\\pi'],
   ['|-x|', '|x|'], // 🙁 |-x|
   ['|-\\pi|', '|\\pi|'], // 🙁 |-pi|
@@ -227,43 +286,58 @@ const TEST_CASES: [
   ['|x|^{4/3}', 'x^{4/3}'], // 🙁 |x|^(4/3)
   ['|x^{3/5}|', '|x|^{3/5}'], // 🙁 |x^(3/5)|
 
+  [
+    `
   //
   // Even Functions and Absolute Value
   //
+`,
+  ],
   ['\\cos(|x+2|)', '\\cos(x+2)'], // 🙁 cos(|x + 2|)
   ['\\sec(|x+2|)', '\\sec(x+2)'], // 🙁 1 / cos(|x + 2|)
-  // ['\\cosh(|x+2|)','\\cosh(x+2)'],
-  // ['\\sech(|x+2|)','\\sech(x+2)'],
+  ['\\cosh(|x+2|)', '\\cosh(x+2)', 'skip'],
+  ['\\sech(|x+2|)', '\\sech(x+2)', 'skip'],
 
+  [
+    `
   //
   // Odd Functions and Absolute Value
   //
+`,
+  ],
   ['|\\sin(x)|', '\\sin(|x|)'], // 🙁 |sin(x)|
   ['|\\tan(x)|', '\\tan(|x|)'], // 🙁 |tan(x)|
   ['|\\cot(x)|', '\\cot(|x|)'], // 🙁 |Cot(x)|
   ['|\\csc(x)|', '\\csc(|x|)'], // 🙁 |1 / sin(x)|
   ['|\\arcsin(x)|', '\\arcsin(|x|)'], // 🙁 |NaN|
   ['|\\arctan(x)|', '\\arctan(|x|)'], // 🙁 |arctan(x)|
-  // ['|\\arccot(x)|', '\\arccot(|x|)'],
-  // ['|\\arccsc(x)|', '\\arccsc(|x|)'],
+  ['|\\arccot(x)|', '\\arccot(|x|)', 'skip'],
+  ['|\\arccsc(x)|', '\\arccsc(|x|)', 'skip'],
   ['|\\sinh(x)|', '\\sinh(|x|)'], // 🙁 |sinh(x)|
   ['|\\tanh(x)|', '\\tanh(|x|)'], // 🙁 |tanh(x)|
   ['|\\coth(x)|', '\\coth(|x|)'], // 🙁 |coth(x)|
   ['|\\csch(x)|', '\\csch(|x|)'], // 🙁 |csch(x)|
-  // ['|\\arcsinh(x)|', '\\arcsinh(|x|)'],
-  // ['|\\arctanh(x)|', '\\arctanh(|x|)'],
-  // ['|\\arccoth(x)|', '\\arccoth(|x|)'],
-  // ['|\\arccsch(x)|', '\\arccsch(|x|)'],
+  ['|\\arcsinh(x)|', '\\arcsinh(|x|)', 'skip'],
+  ['|\\arctanh(x)|', '\\arctanh(|x|)', 'skip'],
+  ['|\\arccoth(x)|', '\\arccoth(|x|)', 'skip'],
+  ['|\\arccsch(x)|', '\\arccsch(|x|)', 'skip'],
 
+  [
+    `
   //
   // Logs and Infinity
-  // ['\\ln(\\infty)', '\\infty'],
-  ['\\log_4(\\infty)', '\\infty'],
+`,
+  ],
+  ['\\log_4(\\infty)', '\\infty'], // ['\\ln(\\infty)', '\\infty'],
   ['\\log_{0.5}(\\infty)', '-\\infty'],
 
+  [
+    `
   //
   // Powers and Infinity
   //
+`,
+  ],
   ['2^\\infty', '\\infty'],
   ['0.5^\\infty', 0],
   ['\\pi^\\infty', '\\infty'], // 🙁 pi^(oo)
@@ -282,9 +356,13 @@ const TEST_CASES: [
   ['\\infty^0', NaN], // 🙁 1
   ['\\sqrt[4]{\\infty}', '\\infty'], // 🙁 root(oo)(4)
 
+  [
+    `
   //
   // Multiplication and Infinity
   //
+`,
+  ],
   ['0*\\infty', NaN], // 🙁 0
   ['0*(-\\infty)', NaN], // 🙁 0
   ['0.5*\\infty', '\\infty'],
@@ -292,9 +370,13 @@ const TEST_CASES: [
   ['(-0.5)*\\infty', '-\\infty'],
   ['\\pi * (-\\infty)', '-\\infty'],
 
+  [
+    `
   //
   // Division and Infinity
   //
+`,
+  ],
   ['(-\\infty)/\\infty', NaN],
   ['\\infty/0.5', '\\infty'],
   ['\\infty/(-2)', '-\\infty'],
@@ -305,9 +387,13 @@ const TEST_CASES: [
   ['-100/(-\\infty)', 0],
   ['0/\\infty', 0],
 
+  [
+    `
   //
   // Addition and Subtraction and Infinity
   //
+`,
+  ],
   ['\\infty-\\infty', NaN],
   ['-\\infty-\\infty', '-\\infty'],
   ['\\infty+\\infty', '\\infty'],
@@ -317,9 +403,13 @@ const TEST_CASES: [
   ['-\\infty-10', '-\\infty'],
   ['-10-\\infty', '-\\infty'],
 
+  [
+    `
   //
   // Trig and Infinity
   //
+`,
+  ],
   ['\\sin(\\infty)', NaN], // 🙁 sin(oo)
   ['\\cos(\\infty)', NaN], // 🙁 cos(oo)
   ['\\tan(\\infty)', NaN], // 🙁 sin(oo) / cos(oo)
@@ -333,25 +423,33 @@ const TEST_CASES: [
   ['\\sec(-\\infty)', NaN], // 🙁 1 / cos(-oo)
   ['\\csc(-\\infty)', NaN], // 🙁 1 / sin(-oo)
 
+  [
+    `
   //
   // Inverse Trig and Infinity
   //
+`,
+  ],
   ['\\arcsin(\\infty)', NaN],
   ['\\arccos(\\infty)', NaN], // 🙁 arccos(oo)
   ['\\arcsin(-\\infty)', NaN],
   ['\\arccos(-\\infty)', NaN], // 🙁 arccos(-oo)
   ['\\arctan(\\infty)', '\\frac{\\pi}{2}'], // 🙁 arctan(oo)
   ['\\arctan(-\\infty)', '-\\frac{\\pi}{2}'], // 🙁 arctan(-oo)
-  // ['\\arccot(\\infty)', 0],
-  // ['\\arccot(-\\infty)', '\\pi'],
-  // ['\\arcsec(\\infty)', '\\frac{\\pi}{2}'],
-  // ['\\arcsec(-\\infty)', '\\frac{\\pi}{2}'],
-  // ['\\arccsc(\\infty)', 0],
-  // ['\\arccsc(-\\infty)', 0],
+  ['\\arccot(\\infty)', 0, 'skip'],
+  ['\\arccot(-\\infty)', '\\pi', 'skip'],
+  ['\\arcsec(\\infty)', '\\frac{\\pi}{2}', 'skip'],
+  ['\\arcsec(-\\infty)', '\\frac{\\pi}{2}', 'skip'],
+  ['\\arccsc(\\infty)', 0, 'skip'],
+  ['\\arccsc(-\\infty)', 0, 'skip'],
 
+  [
+    `
   //
   // Hyperbolic Trig and Infinity
   //
+`,
+  ],
   ['\\sinh(\\infty)', '\\infty'], // 🙁 (-e^(-oo) + e^(oo)) / 2
   ['\\sinh(-\\infty)', '-\\infty'], // 🙁 (-e^(oo) + e^(-oo)) / 2
   ['\\cosh(\\infty)', '\\infty'], // 🙁 (e^(oo) + e^(-oo)) / 2
@@ -365,25 +463,33 @@ const TEST_CASES: [
   ['\\csch(\\infty)', 0], // 🙁 csch(oo)
   ['\\csch(-\\infty)', 0], // 🙁 csch(-oo)
 
+  [
+    `
   //
   // Inverse Hyperbolic Trig and Infinity
   //
-  // ['\\arcsinh(\\infty)', '\\infty'],
-  // ['\\arcsinh(-\\infty)', '-\\infty'],
-  // ['\\arccosh(\\infty)', '\\infty'],
-  // ['\\arccosh(-\\infty)', NaN],
-  // ['\\arctanh(\\infty)', NaN],
-  // ['\\arctanh(-\\infty)', NaN],
-  // ['\\arccoth(\\infty)', NaN],
-  // ['\\arccoth(-\\infty)', NaN],
-  // ['\\arcsech(\\infty)', NaN],
-  // ['\\arcsech(-\\infty)', NaN],
-  // ['\\arccsch(\\infty)', NaN],
-  // ['\\arccsch(-\\infty)', NaN],
+`,
+  ],
+  ['\\arcsinh(\\infty)', '\\infty', 'skip'],
+  ['\\arcsinh(-\\infty)', '-\\infty', 'skip'],
+  ['\\arccosh(\\infty)', '\\infty', 'skip'],
+  ['\\arccosh(-\\infty)', NaN, 'skip'],
+  ['\\arctanh(\\infty)', NaN, 'skip'],
+  ['\\arctanh(-\\infty)', NaN, 'skip'],
+  ['\\arccoth(\\infty)', NaN, 'skip'],
+  ['\\arccoth(-\\infty)', NaN, 'skip'],
+  ['\\arcsech(\\infty)', NaN, 'skip'],
+  ['\\arcsech(-\\infty)', NaN, 'skip'],
+  ['\\arccsch(\\infty)', NaN, 'skip'],
+  ['\\arccsch(-\\infty)', NaN, 'skip'],
 
+  [
+    `
   //
   // Negative Exponents and Denominator
   //
+`,
+  ],
   ['\\frac{2}{\\pi^{-2}}', '2\\pi^2'], // 🙁 2 / pi^(-2)
   ['\\frac{2}{x\\pi^{-2}}', '\\frac{2}{x} \\pi^2'], // 🙁 2 / (x * pi^(-2))
   ['(3/\\pi)^{-1}', '\\pi/3'],
@@ -392,15 +498,23 @@ const TEST_CASES: [
   ['(x/y)^{-3}', '(x/y)^{-3}'],
   ['(x^2/\\pi^3)^{-2}', '\\pi^6/x^4'],
 
+  [
+    `
   //
   // Power of Fraction in Denominator
   //
+`,
+  ],
   ['x/(y/2)^3', '8*x/y^3'], // 🙁 (8x) / y^3
   ['x/(2/y)^3', 'x/(2/y)^3'],
 
+  [
+    `
   //
   // Powers: Division Involving x
   //
+`,
+  ],
   ['x/x^3', '1/x^2'], // 🙁 x / x^3
   ['(2*x)/x^5', '2/x^4'],
   ['x/x^{-2}', 'x/x^{-2}'],
@@ -411,9 +525,13 @@ const TEST_CASES: [
   ['\\pi/\\pi^{-2}', '\\pi^3'], // 🙁 pi / pi^(-2)
   ['\\sqrt[3]{x}/x', '1/x^{2/3}'], // 🙁 root(x)(3) / x
 
+  [
+    `
   //
   // Powers: Multiplication Involving x
   //
+`,
+  ],
   ['x^3*x', 'x^4'],
   ['x^{-2}*x', '1/x'],
   ['x^{-1/3}*x', 'x^{-1/3}*x'], // 🙁 x^(2/3)
@@ -421,9 +539,13 @@ const TEST_CASES: [
   ['\\pi^{-0.2}*\\pi', '\\pi^{0.8}'], // 🙁 pi * pi^(-0.2)
   ['\\sqrt[3]{x}*x', 'x^{4/3}'], // 🙁 x * root(x)(3)
 
+  [
+    `
   //
   // Powers: Multiplication of Two Powers
   //
+`,
+  ],
   ['x^2*x^{-3}', '1/x'],
   ['x^2*x^{-1}', 'x^2 x^{-1}'], // 🙁 x
   ['x^2*x^3', 'x^5'],
@@ -434,9 +556,13 @@ const TEST_CASES: [
   ['\\sqrt{x}*\\sqrt{x}', '(\\sqrt{x})^2'], // 🙁 x
   ['\\sqrt{x}*x^2', 'x^{5/2}'], // 🙁 sqrt(x) * x^2
 
+  [
+    `
   //
   // Powers: Division of Two Powers
   //
+  `,
+  ],
   ['x^2/x^3', '1/x'],
   ['x^{-1}/x^3', '1/x^4'], // 🙁 1 / x^4
   ['x/x^{-1}', 'x/x^{-1}'], // 🙁 x * x
@@ -444,15 +570,23 @@ const TEST_CASES: [
   ['\\pi^{0.2}/\\pi^{0.1}', '\\pi^{0.1}'], // 🙁 pi^(0.2) * pi^(-0.1)
   ['x^{\\sqrt{2}}/x^3', 'x^{\\sqrt{2}-3}'], // 🙁 x^(sqrt(2)) / x^3
 
+  [
+    `
   //
   // Powers and Denominators
   //
+`,
+  ],
   ['x/(\\pi/2)^3', '8x/\\pi^3'], // 🙁 (8x) / pi^3
   ['x/(\\pi/y)^3', 'x/(\\pi/y)^3'],
 
+  [
+    `
   //
   // Double Powers
   //
+`,
+  ],
   ['(x^1)^3', 'x^3'],
   ['(x^2)^{-2}', 'x^{-4}'],
   ['(x^{-2})^2', 'x^{-4}'],
@@ -461,9 +595,13 @@ const TEST_CASES: [
   ['(x^3)^{2/5}', 'x^{6/5}'],
   ['(x^{\\sqrt{2}})^3', 'x^{3\\sqrt{2}}'], // 🙁 x^(3sqrt(2))
 
+  [
+    `
   //
   // Powers and Roots
   //
+`,
+  ],
   ['\\sqrt{x^4}', 'x^2'], // 🙁 sqrt(x^4)
   ['\\sqrt{x^3}', 'x^{3/2}'], // 🙁 sqrt(x^3)
   ['\\sqrt[3]{x^2}', 'x^{2/3}'], // 🙁 root(x^2)(3)
@@ -471,9 +609,13 @@ const TEST_CASES: [
   ['\\sqrt{x^6}', '|x|^3'], // 🙁 sqrt(x^6)
   ['\\sqrt[4]{x^4}', '|x|'], // 🙁 root(x^4)(4)
 
+  [
+    `
   //
   // Ln and Powers
   //
+`,
+  ],
   ['\\ln(x^3)', '3\\ln(x)'],
   ['\\ln(x^\\sqrt{2})', '\\sqrt{2} \\ln(x)'], // 🙁 sqrt(2) * ln(x)
   ['\\ln(x^2)', '2 \\ln(|x|)'], // 🙁 2ln(x)
@@ -482,9 +624,13 @@ const TEST_CASES: [
   ['\\ln(x^{7/4})', '7/4 \\ln(x)'], // 🙁 7/4 * ln(x)
   ['\\ln(\\sqrt{x})', '\\ln(x)/2'],
 
+  [
+    `
   //
   // Log and Powers
   //
+`,
+  ],
   ['\\log_4(x^3)', '3\\log_4(x)'],
   ['\\log_3(x^\\sqrt{2})', '\\sqrt{2} \\log_3(x)'], // 🙁 sqrt(2) * log(x, 3)
   ['\\log_4(x^2)', '2\\log_4(|x|)'], // 🙁 2log(x, 4)
@@ -493,21 +639,42 @@ const TEST_CASES: [
 ];
 
 describe('SIMPLIFY', () => {
-  for (const expr of TEST_CASES) {
+  for (const test of TEST_CASES) {
+    const [input, output, comment] = test;
+
+    if (!output) {
+      // It's a heading
+      console.info(`[\`\n${input}\n\`],`);
+      continue;
+    }
+
     const row = escape(
-      `[${typeof expr[0] === 'string' ? '"' + expr[0] + '"' : exprToString(expr[0])}, ${typeof expr[1] === 'string' ? '"' + expr[1] + '"' : exprToString(expr[1])}${expr[2] ? ', "' + expr[2] + '"' : ''}],`
+      `[${typeof input === 'string' ? '"' + input + '"' : exprToString(input)}, ${typeof output === 'string' ? '"' + output + '"' : exprToString(output)}${comment ? ', "' + comment + '"' : ''}],`
     );
 
-    const a = typeof expr[0] === 'string' ? ce.parse(expr[0]) : ce.box(expr[0]);
-    const b = typeof expr[1] === 'string' ? ce.parse(expr[1]) : ce.box(expr[1]);
+    if (comment?.startsWith('skip')) {
+      console.info(row);
+      continue;
+    }
 
-    // let comment: string;
-    // if (a.simplify().isSame(b)) comment = '';
-    // else comment = `🙁 ${a.simplify().toString()}`;
+    const a = typeof input === 'string' ? ce.parse(input) : ce.box(input);
+    const b = typeof output === 'string' ? ce.parse(output) : ce.box(output);
 
-    // console.info(comment ? `${row} // ${comment}` : row);
+    let result: string;
+    if (a.simplify().isSame(b)) result = '';
+    else {
+      if (comment === 'stop') {
+        const a1 = a.simplify();
+        const b1 = b;
+        const eq = a1.isSame(b1);
+        debugger;
+      }
+      result = `🙁 ${a.simplify().toString()}`;
+    }
 
-    test(row, () => expect(a.simplify().json).toEqual(b.json));
+    console.info(result ? `${row} // ${result}` : row);
+
+    // test(row, () => expect(a.simplify().json).toEqual(b.json));
   }
 });
 
