@@ -377,9 +377,12 @@ export class BoxedNumber extends _BoxedExpression {
     if (!(rhs instanceof BoxedNumber)) return false;
 
     if (typeof this._value === 'number') {
-      if (typeof rhs._value !== 'number') return false;
-      return this._value === rhs._value;
+      if (typeof rhs._value === 'number') return this._value === rhs._value;
+      return rhs._value.im === 0 && this._value === rhs._value.re;
     }
+
+    if (typeof rhs._value === 'number')
+      return this._value.im === 0 && this._value.re === rhs._value;
 
     const ce = this.engine;
     const rhsV = ce._numericValue(rhs._value);
