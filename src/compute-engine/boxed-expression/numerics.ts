@@ -9,11 +9,15 @@ import { ExactNumericValue } from '../numeric-value/exact-numeric-value';
 export function asRational(expr: BoxedExpression): Rational | undefined {
   const num = expr.numericValue;
   if (num === null) return undefined;
+  if (typeof num === 'number' && !Number.isFinite(num)) return undefined;
+  if (
+    num instanceof ExactNumericValue &&
+    (num.isNaN || num.isPositiveInfinity || num.isNegativeInfinity)
+  )
+    return undefined;
 
   if (typeof num === 'number') {
-    console.assert(
-      Number.isInteger(num) && num <= SMALL_INTEGER && num >= -SMALL_INTEGER
-    );
+    if (!Number.isInteger(num)) return undefined;
     return [num, 1];
   }
 
@@ -28,10 +32,11 @@ export function asRational(expr: BoxedExpression): Rational | undefined {
   }
 
   const bignumRe = num.bignumRe;
-  if (bignumRe !== undefined) return [bigint(bignumRe)!, BigInt(1)];
+  if (bignumRe !== undefined && Number.isInteger(bignumRe))
+    return [bigint(bignumRe)!, BigInt(1)];
+
   const re = num.re;
-  if (Number.isInteger(re) && re > -SMALL_INTEGER && re < SMALL_INTEGER)
-    return [re, 1];
+  if (Number.isInteger(re)) return [re, 1];
 
   return undefined;
 }

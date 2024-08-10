@@ -53,8 +53,7 @@ export function canonicalDivide(
   // 0/a = 0, 0/0 = NaN
   if (op1.isZero) return op2.isZero ? ce.NaN : ce.Zero;
 
-  // (-1)/a = -(a^-1)
-  if (op1.isNegativeOne) return op2.inv().neg();
+  // Note: (-1)/a ≠ -(a^-1). We distribute Negate over Divide.
 
   // Are both op1 and op2 a numeric value?
   let v1 = op1.numericValue;
