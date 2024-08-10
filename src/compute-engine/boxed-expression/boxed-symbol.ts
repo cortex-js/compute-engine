@@ -568,7 +568,8 @@ export class BoxedSymbol extends _BoxedExpression {
     return match(this, pattern, options);
   }
 
-  isEqual(rhs: BoxedExpression): boolean {
+  isEqual(rhs: number | BoxedExpression): boolean {
+    if (typeof rhs === 'number') return false;
     if (!this.isCanonical) return this.canonical.isEqual(rhs);
     rhs = rhs.canonical;
 

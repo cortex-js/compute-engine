@@ -387,12 +387,14 @@ export class BoxedNumber extends _BoxedExpression {
     return this._value.sub(rhsV).sgn() === 0;
   }
 
-  isEqual(rhs: BoxedExpression): boolean {
+  isEqual(rhs: number | BoxedExpression): boolean {
     // Note: this is not the same as `isSame()`: we want 0.09 and 9/100
     // to be considered equal.
     // We also want a number to be equal to an exact expression, so don't
     // bail if rhs is not a BoxedNumber
     // Note: signDiff() uses the tolerance of the engine by default
+    if (typeof rhs === 'number') return this.im === 0 && this.re === rhs;
+
     return this === rhs || signDiff(this, rhs) === 0;
   }
 
@@ -408,23 +410,39 @@ export class BoxedNumber extends _BoxedExpression {
     return match(this, pattern, options);
   }
 
-  isLess(rhs: BoxedExpression): boolean | undefined {
+  isLess(rhs: number | BoxedExpression): boolean | undefined {
+    if (typeof rhs === 'number') {
+      if (typeof this._value === 'number') return this._value < rhs;
+      return this._value.re < rhs;
+    }
     const s = signDiff(this, rhs);
     if (s === undefined) return undefined;
     return s < 0;
   }
 
-  isLessEqual(rhs: BoxedExpression): boolean | undefined {
+  isLessEqual(rhs: number | BoxedExpression): boolean | undefined {
+    if (typeof rhs === 'number') {
+      if (typeof this._value === 'number') return this._value <= rhs;
+      return this._value.re <= rhs;
+    }
     const s = signDiff(this, rhs);
     if (s === undefined) return undefined;
     return s <= 0;
   }
 
-  isGreater(rhs: BoxedExpression): boolean | undefined {
+  isGreater(rhs: number | BoxedExpression): boolean | undefined {
+    if (typeof rhs === 'number') {
+      if (typeof this._value === 'number') return this._value > rhs;
+      return this._value.re > rhs;
+    }
     return rhs.isLessEqual(this);
   }
 
-  isGreaterEqual(rhs: BoxedExpression): boolean | undefined {
+  isGreaterEqual(rhs: number | BoxedExpression): boolean | undefined {
+    if (typeof rhs === 'number') {
+      if (typeof this._value === 'number') return this._value >= rhs;
+      return this._value.re >= rhs;
+    }
     return rhs.isLess(this);
   }
 

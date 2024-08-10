@@ -261,6 +261,9 @@
     representation is not available.
   - `expr.root()` to get the root of the expression. For example, `expr.root(3)`
     will return the cube root of the expression.
+  - Additionally, the relational operators (`expr.isLess(), expr.isEqual()`,
+    etc...) now accept a number argument. For example, `expr.isGreater(1)` will
+    return true if the expression is greater than 1.
 
 - Added LaTeX syntax to index collections. If `a` is a collection:
 

@@ -608,7 +608,8 @@ export class BoxedFunction extends _BoxedExpression {
   }
 
   /** `isEqual` is mathematical equality */
-  isEqual(rhs: BoxedExpression): boolean {
+  isEqual(rhs: number | BoxedExpression): boolean {
+    rhs = this.engine.box(rhs);
     if (this === rhs) return true;
 
     // Put the expressions in a "more canonical" form

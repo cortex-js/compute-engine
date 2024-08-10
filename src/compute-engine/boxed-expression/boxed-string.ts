@@ -63,7 +63,8 @@ export class BoxedString extends _BoxedExpression {
   get string(): string {
     return this._string;
   }
-  isEqual(rhs: BoxedExpression): boolean {
+  isEqual(rhs: number | BoxedExpression): boolean {
+    if (typeof rhs === 'number') return false;
     return rhs.string === this._string;
   }
   isSame(rhs: BoxedExpression): boolean {

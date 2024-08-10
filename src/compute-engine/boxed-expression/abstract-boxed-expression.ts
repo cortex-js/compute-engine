@@ -58,7 +58,7 @@ export abstract class _BoxedExpression implements BoxedExpression {
   abstract set isCanonical(_val: boolean);
 
   abstract isSame(rhs: BoxedExpression): boolean;
-  abstract isEqual(rhs: BoxedExpression): boolean;
+  abstract isEqual(rhs: number | BoxedExpression): boolean;
   abstract match(
     pattern:
       | Decimal
@@ -519,19 +519,19 @@ export abstract class _BoxedExpression implements BoxedExpression {
     return false;
   }
 
-  isLess(_rhs: BoxedExpression): boolean | undefined {
+  isLess(_rhs: number | BoxedExpression): boolean | undefined {
     return undefined;
   }
 
-  isLessEqual(_rhs: BoxedExpression): boolean | undefined {
+  isLessEqual(_rhs: number | BoxedExpression): boolean | undefined {
     return undefined;
   }
 
-  isGreater(_rhs: BoxedExpression): boolean | undefined {
+  isGreater(_rhs: number | BoxedExpression): boolean | undefined {
     return undefined;
   }
 
-  isGreaterEqual(_rhs: BoxedExpression): boolean | undefined {
+  isGreaterEqual(_rhs: number | BoxedExpression): boolean | undefined {
     return undefined;
   }
 

@@ -173,7 +173,7 @@ export class _BoxedDomain extends _BoxedExpression implements BoxedDomain {
     return !isSubdomainOf1(rhs, lhs) && !isSubdomainOf1(lhs, rhs);
   }
 
-  isEqual(rhs: BoxedExpression): boolean {
+  isEqual(rhs: number | BoxedExpression): boolean {
     if (!(rhs instanceof _BoxedDomain)) return false;
     if (this === rhs) return true;
     return this.isCompatible(rhs, 'invariant');

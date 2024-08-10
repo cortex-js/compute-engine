@@ -265,7 +265,7 @@ export class BoxedTensor extends _BoxedExpression {
   }
 
   /** Mathematical equality */
-  isEqual(rhs: BoxedExpression): boolean {
+  isEqual(rhs: number | BoxedExpression): boolean {
     if (this === rhs) return true;
 
     if (rhs instanceof BoxedTensor) return this.tensor.equals(rhs.tensor);

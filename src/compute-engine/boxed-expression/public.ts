@@ -805,25 +805,25 @@ export interface BoxedExpression {
    *
    * @category Relational Operator
    */
-  isLess(rhs: BoxedExpression): boolean | undefined;
+  isLess(rhs: number | BoxedExpression): boolean | undefined;
 
   /**
    * The numeric value of both expressions are compared.
    * @category Relational Operator
    */
-  isLessEqual(rhs: BoxedExpression): boolean | undefined;
+  isLessEqual(rhs: number | BoxedExpression): boolean | undefined;
 
   /**
    * The numeric value of both expressions are compared.
    * @category Relational Operator
    */
-  isGreater(rhs: BoxedExpression): boolean | undefined;
+  isGreater(rhs: number | BoxedExpression): boolean | undefined;
 
   /**
    * The numeric value of both expressions are compared.
    * @category Relational Operator
    */
-  isGreaterEqual(rhs: BoxedExpression): boolean | undefined;
+  isGreaterEqual(rhs: number | BoxedExpression): boolean | undefined;
 
   /** The numeric value of this expression is > 0, same as `isGreater(0)`
    *
@@ -1195,7 +1195,7 @@ export interface BoxedExpression {
    *
    * @category Relational Operator
    */
-  isEqual(rhs: BoxedExpression): boolean;
+  isEqual(rhs: number | BoxedExpression): boolean;
 }
 
 /** A semi boxed expression is a MathJSON expression which can include some
