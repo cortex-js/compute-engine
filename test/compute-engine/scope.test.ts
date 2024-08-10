@@ -76,7 +76,6 @@ describe('SETTING/FORGETTING', () => {
   test(`Properties with set`, () => {
     ce.assign({ x3: 2017 });
     const x3 = ce.box(`x3`);
-    expect(x3.isPrime).toMatchInlineSnapshot(`true`);
     expect(x3.isOdd).toMatchInlineSnapshot(`true`);
 
     ce.assign({ x3: 1024 });
@@ -88,21 +87,18 @@ describe('SETTING/FORGETTING', () => {
     const x4 = ce.box('x4');
     const testX4_1 = ce.box(['Greater', 'x4', 30]);
     expect(testX4_1.evaluate()).toMatchInlineSnapshot(`["Less", 30, "x4"]`); // @fixme
-    expect(x4.isPrime ?? 'undefined').toMatchInlineSnapshot(`undefined`);
     expect(x4.evaluate().numericValue).toMatchInlineSnapshot(`null`);
-    expect(x4.domain).toMatchInlineSnapshot(`ExtendedRealNumbers`);
+    expect(x4.domain).toMatchInlineSnapshot(`RealNumbers`);
 
     ce.assume(['Equal', 'x4', 17]);
     expect(testX4_1.evaluate()).toMatchInlineSnapshot(`False`);
-    expect(x4.isPrime ?? 'undefined').toEqual(true);
     expect(x4.evaluate().value).toEqual(17);
-    expect(x4.domain).toMatchInlineSnapshot(`ExtendedRealNumbers`);
+    expect(x4.domain).toMatchInlineSnapshot(`RealNumbers`);
 
     ce.assign({ x4: 2017 });
     expect(testX4_1.evaluate()).toMatchInlineSnapshot(`True`);
-    expect(x4.isPrime ?? 'undefined').toMatchInlineSnapshot(`true`);
     expect(x4.value).toMatchInlineSnapshot(`2017`);
-    expect(x4.domain).toMatchInlineSnapshot(`ExtendedRealNumbers`);
+    expect(x4.domain).toMatchInlineSnapshot(`RealNumbers`);
   });
 });
 

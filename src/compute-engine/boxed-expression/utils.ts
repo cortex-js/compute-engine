@@ -1,8 +1,3 @@
-import { Decimal } from 'decimal.js';
-
-import { Expression } from '../../math-json/types';
-import { isNumberExpression, isNumberObject } from '../../math-json/utils';
-import { bigint } from '../numerics/numeric-bigint';
 import { joinLatex } from '../latex-syntax/tokenizer';
 import { DEFINITIONS_INEQUALITIES } from '../latex-syntax/dictionary/definitions-relational-operators';
 import type { BoxedExpression, IComputeEngine } from './public';
@@ -46,57 +41,6 @@ export function hashCode(s: string): number {
     hash = (Math.imul(31, hash) + s.charCodeAt(i)) | 0; // | 0 to convert to 32-bit int
 
   return Math.abs(hash);
-}
-
-/**
- * If `expr` is a number, return it as a Decimal (it might be
- * in the machine value range or not). Use `isInMachineRange()` to check.
- *
- * Use this instead of `machineValue()` when possible, as `machineValue` will
- * truncate bignums to machine numbers
- */
-export function bignumValue(
-  ce: IComputeEngine,
-  expr: Expression | null | undefined
-): Decimal | null {
-  if (typeof expr === 'number') return ce.bignum(expr);
-
-  if (expr === null || expr === undefined) return null;
-
-  if (!isNumberExpression(expr)) return null;
-
-  const num = isNumberObject(expr) ? expr.num : expr;
-
-  if (typeof num === 'number') return ce.bignum(num);
-  if (typeof num !== 'string') return null;
-
-  let s = num
-    .toLowerCase()
-    .replace(/[0-9][nd]$/, '')
-    .replace(/[\u0009-\u000d\u0020\u00a0]/g, '');
-  if (/\([0-9]+\)/.test(s)) {
-    const [_, body, repeat, trail] = s.match(/(.+)\(([0-9]+)\)(.*)$/) ?? [];
-    s =
-      body +
-      repeat.repeat(Math.ceil(ce.precision / repeat.length)) +
-      (trail ?? '');
-  }
-
-  if (s === 'nan') return ce.bignum('NaN');
-  if (s === 'infinity' || s === '+infinity') return ce.bignum('+Infinity');
-  if (s === '-infinity') return ce.bignum('-Infinity');
-
-  return ce.bignum(s);
-}
-
-export function asBigint(expr: BoxedExpression): bigint | null {
-  const num = expr.numericValue;
-
-  if (typeof num === 'number' && Number.isInteger(num)) return bigint(num);
-
-  if (num instanceof Decimal && num.isInteger()) return bigint(num);
-
-  return null;
 }
 
 export function normalizedUnknownsForSolve(
@@ -152,3 +96,61 @@ export function isInequality(expr: BoxedExpression): boolean {
   if (typeof h !== 'string') return false;
   return ['Less', 'LessEqual', 'Greater', 'GreaterEqual'].includes(h);
 }
+
+export function getImaginaryFactor(
+  expr: BoxedExpression
+): BoxedExpression | undefined {
+  const ce = expr.engine;
+  if (expr.symbol === 'ImaginaryUnit') return ce.One;
+
+  if (expr.re === 0) return ce.number(expr.im!);
+
+  if (expr.operator === 'Negate') return getImaginaryFactor(expr.op1)?.neg();
+
+  if (expr.operator === 'Multiply' && expr.nops === 2) {
+    if (expr.op1.symbol === 'ImaginaryUnit') return expr.op2;
+    if (expr.op2.symbol === 'ImaginaryUnit') return expr.op1;
+    if (expr.op1.isNumberLiteral && expr.op1.re === 0 && expr.op1.im !== 0)
+      return expr.op2.mul(expr.op1.im!);
+    if (expr.op2.isNumberLiteral && expr.op2.re === 0 && expr.op2.im !== 0)
+      return expr.op1.mul(expr.op2.im!);
+  }
+
+  if (expr.operator === 'Divide') {
+    const denom = expr.op2;
+    if (denom.isZero) return undefined;
+    return getImaginaryFactor(expr.op1)?.div(denom);
+  }
+
+  return undefined;
+}
+
+// export function getImaginaryFactor(
+//   expr: BoxedExpression
+// ): NumericValue | undefined {
+//   const ce = expr.engine;
+//   if (expr.symbol === 'ImaginaryUnit') return ce._numericValue(1);
+
+//   if (expr.re === 0) return ce._numericValue(expr.im!);
+
+//   if (expr.operator === 'Negate') return getImaginaryFactor(expr.op1)?.neg();
+
+//   if (expr.operator === 'Multiply' && expr.nops === 2) {
+//     if (expr.op1.symbol === 'ImaginaryUnit')
+//       return expr.op2.numericValue === null
+//         ? undefined
+//         : ce._numericValue(expr.op2.numericValue);
+//     if (expr.op2.symbol === 'ImaginaryUnit')
+//       return expr.op1.numericValue === null
+//         ? undefined
+//         : ce._numericValue(expr.op1.numericValue);
+//   }
+
+//   if (expr.operator === 'Divide') {
+//     const denom = expr.op2.numericValue;
+//     if (denom === null || expr.op2.isZero) return undefined;
+//     return getImaginaryFactor(expr.op1)?.div(denom);
+//   }
+
+//   return undefined;
+// }

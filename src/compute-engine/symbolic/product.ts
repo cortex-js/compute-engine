@@ -1,10 +1,9 @@
-import { Decimal } from 'decimal.js';
-
 import { BoxedExpression, IComputeEngine } from '../public';
 
 import { order } from '../boxed-expression/order';
 import {
   Rational,
+  add,
   asMachineRational,
   isOne,
   machineDenominator,
@@ -13,12 +12,12 @@ import {
   rationalGcd,
   reducedRational,
 } from '../numerics/rationals';
-import { asRationalSqrt } from '../library/arithmetic-power';
+import { asRadical } from '../library/arithmetic-power';
 
 import { flatten } from './flatten';
-import { asRational, add } from '../boxed-expression/numerics';
+import { asRational } from '../boxed-expression/numerics';
 import { NumericValue } from '../numeric-value/public';
-import { mul } from '../library/arithmetic-multiply';
+import { canonicalMultiply, mul } from '../library/arithmetic-multiply';
 
 /**
  * Group terms in a product by common term.
@@ -123,16 +122,12 @@ export class Product {
           return;
         }
 
-        this.coefficient = this.coefficient.mul(
-          num instanceof Decimal || typeof num === 'number'
-            ? num
-            : this.engine._numericValue(num)
-        );
+        this.coefficient = this.coefficient.mul(num);
         return;
       }
 
-      const radical = asRationalSqrt(term);
-      if (radical) {
+      const radical = asRadical(term);
+      if (radical !== null) {
         this.coefficient = this.coefficient.mul(
           this.engine._numericValue({
             radical: (radical[0] as number) * (radical[1] as number),
@@ -259,10 +254,10 @@ export class Product {
         this.coefficient.im === 0
       ) {
         // Numerator
-        const num = ce.box(this.coefficient.num);
+        const num = ce.box(this.coefficient.numerator);
         if (!num.isOne) xs.push({ exponent: [1, 1], terms: [num] });
         // Denominator
-        const denom = ce.box(this.coefficient.denom);
+        const denom = ce.box(this.coefficient.denominator);
         if (!denom.isOne) xs.push({ exponent: [-1, 1], terms: [denom] });
       } else if (mode === 'numeric') {
         const c = this.coefficient.N();
@@ -384,11 +379,17 @@ export function commonTerms(lhs: Product, rhs: Product): BoxedExpression {
     if (!y) continue;
     const exponent = rationalGcd(x.exponent, y.exponent);
     if (isOne(exponent)) xs.push(x.term);
-    else xs.push(x.term.pow(asMachineRational(exponent)));
+    else {
+      const [n, d] = asMachineRational(exponent);
+      if (d === 1) xs.push(x.term.pow(n));
+      else if (n === 1) xs.push(x.term.root(d));
+      else xs.push(x.term.pow(n).root(d));
+    }
   }
 
   // Put everything together
   return mul(ce.box(coef), ...xs);
+  // return canonicalMultiply(ce, [ce.box(coef), ...xs]);
 }
 
 // Put the exponents in a bucket:

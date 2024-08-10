@@ -1,10 +1,8 @@
 import Complex from 'complex.js';
 import Decimal from 'decimal.js';
 
-import { NUMERIC_MACHINE_TOLERANCE } from '../numerics/numeric';
 import { permutations } from '../../common/utils';
 import { _BoxedExpression } from './abstract-boxed-expression';
-import { BoxedNumber } from './boxed-number';
 import { isBoxedExpression } from './utils';
 import {
   BoxedSubstitution,
@@ -80,15 +78,9 @@ function matchOnce(
   //
   // Match a number
   //
-  if (pattern instanceof BoxedNumber) {
-    const numericTolerance =
-      options?.numericTolerance ?? NUMERIC_MACHINE_TOLERANCE;
-    if (!(expr instanceof BoxedNumber)) return null;
-    if (
-      (numericTolerance === 0 && pattern.isSame(expr)) ||
-      pattern.isEqualWithTolerance(expr, numericTolerance)
-    )
-      return substitution;
+  if (pattern.numericValue !== null) {
+    if (expr.numericValue === null) return null;
+    if (pattern.isEqual(expr)) return substitution;
 
     // Attempt to match the expression to a variant of the pattern
     // (e.g. `5` to `5+_`).
@@ -332,7 +324,7 @@ function matchVariants(
   }
 
   if (operator === 'Power') {
-    if (pattern.op2.numericValue === 2) {
+    if (pattern.op2.re === 2) {
       const result = matchOnce(
         ce.function('Square', [expr], { canonical: false }),
         pattern,
@@ -490,7 +482,6 @@ export function match(
     recursive: options?.recursive ?? false,
     exact: options?.exact ?? false,
     acceptVariants: !(options?.exact ?? false),
-    numericTolerance: options?.numericTolerance ?? NUMERIC_MACHINE_TOLERANCE,
   };
   const substitution = options?.substitution ?? {};
 

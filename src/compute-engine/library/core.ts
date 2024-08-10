@@ -5,7 +5,6 @@ import {
   IdentifierDefinitions,
 } from '../public';
 import { joinLatex } from '../latex-syntax/tokenizer';
-import { fromDigits } from '../numerics/numeric';
 
 import { checkDomain, checkArity } from '../boxed-expression/validate';
 import { randomExpression } from './random-expression';
@@ -17,8 +16,9 @@ import { flatten, flattenSequence } from '../symbolic/flatten';
 import { normalizeIndexingSet } from './utils';
 import { canonicalForm } from '../boxed-expression/canonical';
 import { BoxedExpression } from '../boxed-expression/public';
-import { asFloat, asMachineInteger } from '../boxed-expression/numerics';
-import { canonicalMultiply, mul } from './arithmetic-multiply';
+import { asSmallInteger } from '../boxed-expression/numerics';
+import { canonicalMultiply } from './arithmetic-multiply';
+import { fromDigits } from '../numerics/strings';
 
 //   // := assign 80 // @todo
 // compose (compose(f, g) -> a new function such that compose(f, g)(x) -> f(g(x))
@@ -619,7 +619,7 @@ export const CORE_LIBRARY: IdentifierDefinitions[] = [
           if (args.length !== 2) return ce.domain('NothingDomain');
           const op1 = args[0];
           const op2 = args[1];
-          if (op1.string && asMachineInteger(op2) !== null)
+          if (op1.string && asSmallInteger(op2) !== null)
             return ce.domain('Integers');
           if (op1.symbol) {
             const vh = op1.evaluate()?.operator;
@@ -637,7 +637,7 @@ export const CORE_LIBRARY: IdentifierDefinitions[] = [
           // Is it a string in a base form:
           // `"deadbeef"_{16}` `"0101010"_2?
           if (op1.string) {
-            const base = asMachineInteger(op2);
+            const base = asSmallInteger(op2);
             if (base !== null && base > 1 && base <= 36) {
               const [value, rest] = fromDigits(op1.string, base);
               if (rest) {
@@ -660,7 +660,7 @@ export const CORE_LIBRARY: IdentifierDefinitions[] = [
             }
             // Maybe a compound symbol
             const sub =
-              op2.string ?? op2.symbol ?? asMachineInteger(op2)?.toString();
+              op2.string ?? op2.symbol ?? asSmallInteger(op2)?.toString();
 
             if (sub) return ce.symbol(op1.symbol + '_' + sub);
           }
@@ -684,8 +684,7 @@ export const CORE_LIBRARY: IdentifierDefinitions[] = [
           if (ops.length === 0) return ce.Nothing;
           const arg = ops
             .map(
-              (x) =>
-                x.symbol ?? x.string ?? asMachineInteger(x)?.toString() ?? ''
+              (x) => x.symbol ?? x.string ?? asSmallInteger(x)?.toString() ?? ''
             )
             .join('');
 
@@ -719,7 +718,7 @@ export const CORE_LIBRARY: IdentifierDefinitions[] = [
           }
 
           // Evaluate multiple times
-          let n = Math.max(3, Math.round(asMachineInteger(ops[1]) ?? 3));
+          let n = Math.max(3, Math.round(asSmallInteger(ops[1]) ?? 3));
 
           let timings: number[] = [];
           let result: BoxedExpression;
@@ -833,21 +832,24 @@ export function canonicalInvisibleOperator(
   ops: ReadonlyArray<BoxedExpression>
 ): BoxedExpression | null {
   if (ops.length === 0) return null;
+
   const lhs = ops[0];
   if (ops.length === 1) return lhs.canonical;
 
   if (ops.length === 2) {
     //
     // Is it an implicit addition/mixed fraction, e.g. "3 1/4"
+    // Note: the numerators and denominators are limited to 999
     //
-    const lhsNumber = asFloat(lhs);
-    if (lhsNumber !== null && Number.isInteger(lhsNumber)) {
-      const rhs = ops[1];
+    const lhsNumber = lhs.canonical.re ?? NaN;
+    if (Number.isInteger(lhsNumber)) {
+      let rhs = ops[1];
       if (rhs.operator === 'Divide' || rhs.operator === 'Rational') {
-        const [n, d] = [asFloat(rhs.op1), asFloat(rhs.op2)];
+        const [n, d] = [
+          rhs.op1.canonical.re ?? NaN,
+          rhs.op2.canonical.re ?? NaN,
+        ];
         if (
-          n !== null &&
-          d !== null &&
           n > 0 &&
           n <= 1000 &&
           d > 1 &&
@@ -866,14 +868,14 @@ export function canonicalInvisibleOperator(
     //
     // Is it a complex number, i.e. "2i"?
     //
-    if (lhsNumber !== null && ops[1].symbol === 'ImaginaryUnit')
+    const rhs = ops[1];
+    if (lhsNumber !== null && rhs.canonical.symbol === 'ImaginaryUnit')
       return ce.number(ce.complex(0, lhsNumber));
 
     //
     // Is it a function application: symbol with a function
     // definition followed by delimiter
     //
-    const rhs = ops[1];
     if (
       lhs.symbol &&
       rhs.operator === 'Delimiter' &&

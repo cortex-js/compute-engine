@@ -1,13 +1,9 @@
-import { asFloat } from '../boxed-expression/numerics';
 import { checkDomain } from '../boxed-expression/validate';
 import { applicable, applicableN1 } from '../function-utils';
-import {
-  centeredDiff8thOrder,
-  limit,
-  monteCarloEstimate,
-} from '../numerics/numeric';
-import { BoxedExpression, IdentifierDefinitions } from '../public';
+import { monteCarloEstimate } from '../numerics/monte-carlo';
+import { centeredDiff8thOrder, limit } from '../numerics/numeric';
 import { derivative, differentiate } from '../symbolic/derivative';
+import { BoxedExpression, IdentifierDefinitions } from '../public';
 
 export const CALCULUS_LIBRARY: IdentifierDefinitions[] = [
   {
@@ -113,7 +109,7 @@ volumes
         evaluate: (ce, ops) => {
           // Is it a function name, i.e. ["Derivative", "Sin"]?
           const op = ops[0].evaluate();
-          const degree = Math.floor(asFloat(ops[1]?.evaluate()) ?? 1);
+          const degree = Math.floor(ops[1]?.evaluate().re ?? 1);
           return derivative(op, degree);
         },
       },
@@ -312,8 +308,8 @@ volumes
         ],
         N: (ce, ops) => {
           const [f, x, dir] = ops;
-          const target = asFloat(x.N());
-          if (target === null) return undefined;
+          const target = x.N().re ?? NaN;
+          if (!isFinite(target)) return undefined;
           const fn = applicable(f);
           return ce.number(
             limit(
@@ -322,7 +318,7 @@ volumes
                 return typeof y === 'number' ? y : Number.NaN;
               },
               target,
-              dir ? (asFloat(dir) ?? 1) : 1
+              dir ? (dir.re ?? 1) : 1
             )
           );
         },
@@ -343,8 +339,8 @@ volumes
         ],
         evaluate: (ce, ops) => {
           const [f, x, dir] = ops;
-          const target = asFloat(x.N());
-          if (target === null) return undefined;
+          const target = x.N().re ?? NaN;
+          if (Number.isNaN(target)) return undefined;
           const fn = applicable(f);
           return ce.number(
             limit(
@@ -353,7 +349,7 @@ volumes
                 return typeof y === 'number' ? y : Number.NaN;
               },
               target,
-              dir ? (asFloat(dir) ?? 1) : 1
+              dir ? (dir.re ?? 1) : 1
             )
           );
         },

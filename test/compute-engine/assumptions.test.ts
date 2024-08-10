@@ -111,7 +111,7 @@ describe('canonical domains', () => {
       `PositiveNumbers`
     ); //@fixme should be NonNegativeNumber
     expect(ce.box('s').domain?.toJSON() ?? 'undefined').toMatchInlineSnapshot(
-      `ExtendedRealNumbers`
+      `RealNumbers`
     );
   });
 });

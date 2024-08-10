@@ -20,7 +20,6 @@ import './solve';
 export * from './assume';
 export * from './boxed-expression/expression-map';
 export * from './boxed-expression/abstract-boxed-expression';
-export * from './boxed-expression/boxed-dictionary';
 export * from './boxed-expression/boxed-domain';
 export * from './boxed-expression/boxed-function';
 export * from './boxed-expression/boxed-number';

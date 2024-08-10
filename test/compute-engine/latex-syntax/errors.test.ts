@@ -1,6 +1,7 @@
 import { engine } from '../../utils';
 
 engine.assume(['Element', 'f', 'Functions']);
+engine.assume(['Element', 'g', 'Functions']);
 
 function check(s: string, f: jest.ProvidesCallback) {
   describe(s, () => test(s, f));
@@ -242,7 +243,7 @@ check('Supsub syntax error', () =>
 );
 
 check('VALID infix command', () =>
-  expect(engine.parse('1\\over 2')).toMatchInlineSnapshot(`Half`)
+  expect(engine.parse('1\\over 2')).toMatchInlineSnapshot(`["Rational", 1, 2]`)
 );
 
 // @fixme
@@ -373,7 +374,7 @@ check('Unexpected closing delimiter', () =>
       "Add",
       [
         "Tuple",
-        "Half",
+        ["Rational", 1, 2],
         ["Error", "'unexpected-closing-delimiter'", ["LatexString", "'}'"]]
       ],
       1

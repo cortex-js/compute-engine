@@ -1,4 +1,4 @@
-import { Expression } from '../math-json/types';
+import { Expression, MathJsonIdentifier } from '../math-json/types';
 import { Origin } from '../common/debug';
 import {
   FatalParsingError,
@@ -61,13 +61,18 @@ function exprOrigin(
   offsets: [number, number] | Result
 ): Expression {
   if (!Array.isArray(offsets)) offsets = offsets.range;
-  if (Array.isArray(expr)) return { fn: expr, sourceOffsets: offsets };
+  if (Array.isArray(expr))
+    return {
+      fn: expr as [MathJsonIdentifier, ...Expression[]],
+      sourceOffsets: offsets,
+    };
 
-  if (typeof expr === 'object') return { ...expr, sourceOffsets: offsets };
+  if (typeof expr === 'object')
+    return { ...expr, sourceOffsets: offsets } as Expression;
 
-  if (typeof expr === 'number') {
+  if (typeof expr === 'number')
     return { num: expr.toString(), sourceOffsets: offsets };
-  }
+
   if (
     typeof expr === 'string' &&
     expr[0] === "'" &&
@@ -171,8 +176,8 @@ grammar.rule(
       } else if (fn.value === '#navigator') {
         // eslint-disable-next-line no-restricted-globals
         if ('navigator' in globalThis) {
-          // eslint-disable-next-line no-restricted-globals
           return {
+            // eslint-disable-next-line no-restricted-globals
             str: navigator[expressionToString(operand(args.value!, 1))],
           };
         }

@@ -1,7 +1,6 @@
 import type { Expression } from '../../math-json/types';
 import {
   nops,
-  dictionary,
   stringValue,
   operator,
   symbol,
@@ -24,7 +23,7 @@ import {
   IndexedLatexDictionaryEntry,
 } from './dictionary/definitions';
 
-import { countTokens, joinLatex, supsub } from './tokenizer';
+import { countTokens, supsub } from './tokenizer';
 import { serializeNumber } from './serialize-number';
 import { SYMBOLS } from './dictionary/definitions-symbols';
 import { DELIMITERS_SHORTHAND } from './dictionary/definitions-core';
@@ -85,8 +84,8 @@ export class Serializer {
    * of precedence less than or equal to prec, wrap it in some parens.
    * @todo: don't wrap Abs, Floor, Ceil, Delimiter
    */
-  wrap(expr: Expression | null, prec?: number): string {
-    if (expr === null) return '';
+  wrap(expr: Expression | null | undefined, prec?: number): string {
+    if (expr === null || expr === undefined) return '';
     if (prec === undefined) {
       return this.wrapString(
         this.serialize(expr),
@@ -127,8 +126,8 @@ export class Serializer {
    * This is called by the serializer for power and division (i.e. "(a+1)/b")
    *
    */
-  wrapShort(expr: Expression | null): string {
-    if (expr === null) return '';
+  wrapShort(expr: Expression | null | undefined): string {
+    if (expr === null || expr === undefined) return '';
     const exprStr = this.serialize(expr);
 
     if (symbol(expr) !== null) return exprStr;
@@ -226,7 +225,7 @@ export class Serializer {
     return serializeIdentifier(h, 'auto') + this.wrapArguments(expr);
   }
 
-  serialize(expr: Expression | null): LatexString {
+  serialize(expr: Expression | null | undefined): LatexString {
     if (expr === null || expr === undefined) return '';
 
     this.level += 1;

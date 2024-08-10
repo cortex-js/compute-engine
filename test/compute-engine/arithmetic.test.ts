@@ -574,63 +574,82 @@ describe('RATIONAL', () => {
     expect(checkJson(['Rational', 'Pi'])).toMatchSnapshot());
 });
 
+describe('Log', () => {
+  test(`Log 1.1`, () => expect(checkJson(['Log', 1.1])).toMatchSnapshot());
+  test(`Log 1`, () => expect(checkJson(['Log', 1])).toMatchSnapshot());
+  test(`Log 0`, () => expect(checkJson(['Log', 0])).toMatchSnapshot());
+  test(`Log -1`, () => expect(checkJson(['Log', -1])).toMatchSnapshot());
+  test(`Log -2`, () => expect(checkJson(['Log', -2])).toMatchSnapshot());
+  test(`Log 'Pi'`, () => expect(checkJson(['Log', 'Pi'])).toMatchSnapshot());
+  test(`Log ['Complex', 1.1, 1.1]`, () =>
+    expect(checkJson(['Log', ['Complex', 1.1, 1.1]])).toMatchSnapshot());
+});
+
 describe('LN', () => {
-  expect(checkJson(['Ln', 1.1])).toMatchSnapshot();
-  expect(checkJson(['Ln', 1])).toMatchSnapshot();
-  expect(checkJson(['Ln', 0])).toMatchSnapshot();
-  expect(checkJson(['Ln', -1])).toMatchSnapshot();
-  expect(checkJson(['Ln', 'Pi'])).toMatchSnapshot();
-  expect(checkJson(['Ln', ['Complex', 1.1, 1.1]])).toMatchSnapshot();
+  test(`Ln 1.1`, () => expect(checkJson(['Ln', 1.1])).toMatchSnapshot());
+  test(`Ln 1`, () => expect(checkJson(['Ln', 1])).toMatchSnapshot());
+  test(`Ln 0`, () => expect(checkJson(['Ln', 0])).toMatchSnapshot());
+  test(`Ln -1`, () => expect(checkJson(['Ln', -1])).toMatchSnapshot());
+  test(`Ln -2`, () => expect(checkJson(['Ln', -2])).toMatchSnapshot());
+  test(`Ln 'Pi'`, () => expect(checkJson(['Ln', 'Pi'])).toMatchSnapshot());
+  test(`Ln ['Complex', 1.1, 1.1]`, () =>
+    expect(checkJson(['Ln', ['Complex', 1.1, 1.1]])).toMatchSnapshot());
 });
 
 describe('LB', () => {
-  expect(checkJson(['Lb', 1.1])).toMatchSnapshot();
-  expect(checkJson(['Lb', 1])).toMatchSnapshot();
-  expect(checkJson(['Lb', 0])).toMatchSnapshot();
-  expect(checkJson(['Lb', -1])).toMatchSnapshot();
-  expect(checkJson(['Lb', 'Pi'])).toMatchSnapshot();
-  expect(checkJson(['Lb', ['Complex', 1.1, 1.1]])).toMatchSnapshot();
+  test(`Lb 1.1`, () => expect(checkJson(['Lb', 1.1])).toMatchSnapshot());
+  test(`Lb 1`, () => expect(checkJson(['Lb', 1])).toMatchSnapshot());
+  test(`Lb 0`, () => expect(checkJson(['Lb', 0])).toMatchSnapshot());
+  test(`Lb -1`, () => expect(checkJson(['Lb', -1])).toMatchSnapshot());
+  test(`Lb -2`, () => expect(checkJson(['Lb', -2])).toMatchSnapshot());
+  test(`Lb 'Pi'`, () => expect(checkJson(['Lb', 'Pi'])).toMatchSnapshot());
+  test(`Lb ['Complex', 1.1, 1.1]`, () =>
+    expect(checkJson(['Lb', ['Complex', 1.1, 1.1]])).toMatchSnapshot());
 });
 
 describe('LG', () => {
-  expect(checkJson(['Lg', 1.1])).toMatchSnapshot();
-  expect(checkJson(['Lg', 1])).toMatchSnapshot();
-  expect(checkJson(['Lg', 0])).toMatchSnapshot();
-  expect(checkJson(['Lg', -1])).toMatchSnapshot();
-  expect(checkJson(['Lg', 'Pi'])).toMatchSnapshot();
-  expect(checkJson(['Lg', ['Complex', 1.1, 1.1]])).toMatchSnapshot();
+  test(`LG 1.1`, () => expect(checkJson(['Lg', 1.1])).toMatchSnapshot());
+  test(`LG 1`, () => expect(checkJson(['Lg', 1])).toMatchSnapshot());
+  test(`LG 0`, () => expect(checkJson(['Lg', 0])).toMatchSnapshot());
+  test(`LG -1`, () => expect(checkJson(['Lg', -1])).toMatchSnapshot());
+  test(`LG 'Pi'`, () => expect(checkJson(['Lg', 'Pi'])).toMatchSnapshot());
+  test(`LG ['Complex', 1.1, 1.1]`, () =>
+    expect(checkJson(['Lg', ['Complex', 1.1, 1.1]])).toMatchSnapshot());
 });
 
 describe('LOG(a,b)', () => {
-  expect(checkJson(['Log', 1.1])).toMatchSnapshot();
-  expect(checkJson(['Log', 1])).toMatchSnapshot();
-  expect(checkJson(['Log', 0])).toMatchSnapshot();
-  expect(checkJson(['Log', -1])).toMatchSnapshot();
-  expect(checkJson(['Log', 'Pi'])).toMatchSnapshot();
-  expect(checkJson(['Log', ['Complex', 1.1, 1.1]])).toMatchSnapshot();
-
-  expect(checkJson(['Log', 1.1, 5])).toMatchSnapshot();
-  expect(checkJson(['Log', 1, 5])).toMatchSnapshot();
-  expect(checkJson(['Log', 0, 5])).toMatchSnapshot();
-  expect(checkJson(['Log', -1, 5])).toMatchSnapshot();
-  expect(checkJson(['Log', 'Pi', 5])).toMatchSnapshot();
-  expect(checkJson(['Log', ['Complex', 1.1, 1.1], 5])).toMatchSnapshot();
+  describe('LOG(a,b)', () => {
+    test(`Log 1.1, 5`, () =>
+      expect(checkJson(['Log', 1.1, 5])).toMatchSnapshot());
+    test(`Log 1, 5`, () => expect(checkJson(['Log', 1, 5])).toMatchSnapshot());
+    test(`Log 0, 5`, () => expect(checkJson(['Log', 0, 5])).toMatchSnapshot());
+    test(`Log -1, 5`, () =>
+      expect(checkJson(['Log', -1, 5])).toMatchSnapshot());
+    test(`Log 'Pi', 5`, () =>
+      expect(checkJson(['Log', 'Pi', 5])).toMatchSnapshot());
+    test(`Log ['Complex', 1.1, 1.1], 5`, () =>
+      expect(checkJson(['Log', ['Complex', 1.1, 1.1], 5])).toMatchSnapshot());
+  });
 });
 
 describe('INVALID LOG', () => {
-  expect(checkJson(['Ln'])).toMatchSnapshot();
-  expect(checkJson(['Ln', "'string'"])).toMatchSnapshot();
-  expect(checkJson(['Ln', 3, 4])).toMatchSnapshot();
+  test(`Ln`, () => expect(checkJson(['Ln'])).toMatchSnapshot());
+  test(`Ln with string argument`, () =>
+    expect(checkJson(['Ln', "'string'"])).toMatchSnapshot());
+  test(`Ln with two numeric arguments`, () =>
+    expect(checkJson(['Ln', 3, 4])).toMatchSnapshot());
 });
 
 describe('EXP', () => {
-  expect(checkJson(['Exp', 1.1])).toMatchSnapshot();
-  expect(checkJson(['Exp', 1])).toMatchSnapshot();
-  expect(checkJson(['Exp', 0])).toMatchSnapshot();
-  expect(checkJson(['Exp', -1])).toMatchSnapshot();
-  expect(checkJson(['Exp', 'Pi'])).toMatchSnapshot();
-  expect(checkJson(['Exp', ['Complex', 1.1, 1.1]])).toMatchSnapshot();
-  expect(checkJson(['Exp', ['List', 1.1, 2, 4]])).toMatchSnapshot();
+  test(`Exp 1.1`, () => expect(checkJson(['Exp', 1.1])).toMatchSnapshot());
+  test(`Exp 1`, () => expect(checkJson(['Exp', 1])).toMatchSnapshot());
+  test(`Exp 0`, () => expect(checkJson(['Exp', 0])).toMatchSnapshot());
+  test(`Exp -1`, () => expect(checkJson(['Exp', -1])).toMatchSnapshot());
+  test(`Exp 'Pi'`, () => expect(checkJson(['Exp', 'Pi'])).toMatchSnapshot());
+  test(`Exp ['Complex', 1.1, 1.1]`, () =>
+    expect(checkJson(['Exp', ['Complex', 1.1, 1.1]])).toMatchSnapshot());
+  test(`Exp ['List', 1.1, 2, 4]`, () =>
+    expect(checkJson(['Exp', ['List', 1.1, 2, 4]])).toMatchSnapshot());
 });
 
 describe('SUM', () => {
@@ -648,7 +667,7 @@ describe('SUM', () => {
         .box(['Sum', ['Divide', 1, 'x'], 'x'])
         .evaluate()
         .toString()
-    ).toMatchInlineSnapshot(`14.3927277228647235281448`));
+    ).toMatchInlineSnapshot(`14.3927277228647238754`));
 
   it('should compute the sum of a collection', () =>
     expect(

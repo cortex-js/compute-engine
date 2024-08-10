@@ -1,6 +1,6 @@
 import { apply } from '../function-utils';
 import { mul } from '../library/arithmetic-multiply';
-import { add } from '../numerics/terms';
+import { add } from '../boxed-expression/terms';
 import { BoxedExpression } from '../public';
 
 // See also:
@@ -166,7 +166,7 @@ export function differentiate(
   const ce = expr.engine;
 
   // A few easy ones...
-  if (expr.string || expr.keys) return undefined;
+  if (expr.string) return undefined;
   if (expr.numericValue !== null) return expr.engine.Zero;
   if (expr.symbol === v) return expr.engine.One;
   if (expr.symbol) return expr.engine.Zero;

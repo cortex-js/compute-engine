@@ -85,10 +85,10 @@ function parseRoot(parser: Parser): Expression | null {
 function serializeRoot(
   serializer: Serializer,
   style: 'radical' | 'quotient' | 'solidus',
-  base: Expression | null,
-  degree: Expression | null
+  base: Expression | null | undefined,
+  degree: Expression | null | undefined
 ): string {
-  if (base === null) return '\\sqrt{}';
+  if (base === null || base === undefined) return '\\sqrt{}';
   degree = degree ?? 2;
   if (style === 'solidus') {
     return (
@@ -195,8 +195,9 @@ function serializeAdd(serializer: Serializer, expr: Expression): string {
 
     result = serializer.serialize(arg);
     const last = nops(expr) + 1;
+    const ops = operands(expr);
     for (let i = 2; i < last; i++) {
-      arg = operand(expr, i)!;
+      arg = ops[i - 1];
       if (serializer.options.prettify) {
         const [newArg, sign] = unsign(arg);
         const term = serializer.wrap(newArg, ADDITION_PRECEDENCE);
@@ -262,7 +263,7 @@ function serializeMultiply(
   }
 
   let isNegative = false;
-  let arg: Expression | null = null;
+  let arg: Expression | null | undefined = null;
   const count = nops(expr) + 1;
   let xs = operands(expr);
 
@@ -395,7 +396,8 @@ function parseFraction(parser: Parser): Expression | null {
     const degree = operand(numer, 3) ?? null;
     // Expect: getArg(numer, 2) === 'Nothing' -- no args
     let fn = operand(numer, 1);
-    if (fn === null) fn = missingIfEmpty(parser.parseExpression());
+    if (fn === null || fn === undefined)
+      fn = missingIfEmpty(parser.parseExpression());
 
     let vars: Expression[] = [];
     if (operator(denom) === 'Multiply') {
@@ -1211,8 +1213,8 @@ function parseBigOp(name: string, prec: number) {
     if (sup === 'Nothing' || isEmptySequence(sup)) sup = null;
 
     // @todo: parse multiple indexes in sub, i.e. \sum_{i=1..2; j=2..5}(i+j)
-    let index: Expression | null = null;
-    let lower: Expression | null = null;
+    let index: Expression | null | undefined = null;
+    let lower: Expression | null | undefined = null;
     if (operator(sub) === 'Equal') {
       index = operand(sub, 1);
       lower = operand(sub, 2);
@@ -1233,9 +1235,11 @@ function parseBigOp(name: string, prec: number) {
     if (sup !== null)
       return [name, fn, ['Tuple', index ?? 'Nothing', lower ?? 1, sup]];
 
-    if (lower !== null) return [name, fn, ['Tuple', index ?? 'Nothing', lower]];
+    if (lower !== null && lower !== undefined)
+      return [name, fn, ['Tuple', index ?? 'Nothing', lower]];
 
-    if (index !== null) return [name, fn, ['Tuple', index]];
+    if (index !== null && index !== undefined)
+      return [name, fn, ['Tuple', index]];
 
     return [name, fn];
   };
@@ -1243,7 +1247,7 @@ function parseBigOp(name: string, prec: number) {
 
 function serializeBigOp(command: string) {
   return (serializer, expr) => {
-    if (!operand(expr, 1)) return command;
+    if (operand(expr, 1) !== null) return command;
 
     let arg = operand(expr, 2);
     const h = operator(arg);
@@ -1255,8 +1259,8 @@ function serializeBigOp(command: string) {
 
     const fn = operand(expr, 1);
 
-    if (arg !== null) {
-      if (!operand(expr, 2))
+    if (arg !== null && arg !== undefined) {
+      if (operand(expr, 2) !== null)
         return joinLatex([command, serializer.serialize(fn)]);
       return joinLatex([
         command,

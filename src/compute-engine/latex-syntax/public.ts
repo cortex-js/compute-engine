@@ -1084,7 +1084,7 @@ export interface Serializer {
   level: number;
 
   /** Output a LaTeX string representing the expression */
-  serialize: (expr: Expression | null) => string;
+  serialize: (expr: Expression | null | undefined) => string;
 
   serializeFunction(
     expr: Expression,
@@ -1112,12 +1112,12 @@ export interface Serializer {
   /** Add a group fence around the expression if it is
    * an operator of precedence less than or equal to `prec`.
    */
-  wrap: (expr: Expression | null, prec?: number) => LatexString;
+  wrap: (expr: Expression | null | undefined, prec?: number) => LatexString;
 
   /** Add a group fence around the expression if it is
    * short (not a function)
    */
-  wrapShort(expr: Expression | null): LatexString;
+  wrapShort(expr: Expression | null | undefined): LatexString;
 
   /** Styles */
   applyFunctionStyle: (expr: Expression, level: number) => DelimiterScale;

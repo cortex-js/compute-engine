@@ -10,28 +10,19 @@ import {
 } from './public';
 import { _BoxedExpression } from './abstract-boxed-expression';
 import { BoxedFunction } from './boxed-function';
-import { BoxedNumber } from './boxed-number';
 import { BoxedString } from './boxed-string';
-import {
-  Expression,
-  MathJsonIdentifier,
-  MathJsonNumber,
-} from '../../math-json/types';
-import { missingIfEmpty, operands } from '../../math-json/utils';
+import { Expression, MathJsonIdentifier } from '../../math-json/types';
+import { machineValue, missingIfEmpty, operands } from '../../math-json/utils';
 import {
   Rational,
   isBigRational,
   isMachineRational,
   isOne,
-  isRational,
   neg,
 } from '../numerics/rationals';
-import { asBigint } from './utils';
-import { bigintValue } from '../numerics/numeric-bigint';
 import { isDomainLiteral } from '../library/domains';
 import { BoxedTensor, expressionTensorInfo } from './boxed-tensor';
 import { canonicalForm } from './canonical';
-import { asFloat } from './numerics';
 import { canonicalAdd } from '../library/arithmetic-add';
 import { flatten } from '../symbolic/flatten';
 import { shouldHold, semiCanonical, canonical } from '../symbolic/utils';
@@ -41,6 +32,11 @@ import { canonicalMultiply } from '../library/arithmetic-multiply';
 import { NumericValue } from '../numeric-value/public';
 import { ExactNumericValue } from '../numeric-value/exact-numeric-value';
 import { isValidIdentifier } from '../../math-json/identifiers';
+import { canonicalDivide } from '../library/arithmetic-divide';
+import { asBigint } from './numerics';
+import { bigintValue } from '../numerics/expression';
+import { canonicalPower, canonicalRoot } from '../library/arithmetic';
+import { bigint } from '../numerics/numeric-bigint';
 
 /**
  * ### THEORY OF OPERATIONS
@@ -85,125 +81,6 @@ import { isValidIdentifier } from '../../math-json/identifiers';
  * - 5/7 + √2.1 -> 2.16342
  * - sin(2) + √2.1 -> 2.35844
  */
-
-/**
- * Return a boxed number representing `num`.
- *
- * Note: `boxNumber()` should only be called from `ce.number()` in order to
- * benefit from number expression caching.
- */
-export function boxNumber(
-  ce: IComputeEngine,
-  num:
-    | MathJsonNumber
-    | number
-    | bigint
-    | string
-    | Complex
-    | Decimal
-    | Rational
-    | [Decimal, Decimal],
-  options: { metadata?: Metadata; canonical: boolean }
-): BoxedExpression | null {
-  //
-  // Bigint?
-  // @fixme: handle bigint directly without going through bignum
-  if (typeof num === 'bigint') num = ce.bignum(num);
-
-  //
-  // Do we have a machine number or bignum?
-  //
-  if (typeof num === 'number' || num instanceof Decimal)
-    return new BoxedNumber(ce, num, options);
-
-  //
-  // Do we have a rational or big rational?
-  //
-
-  if (isRational(num)) {
-    console.assert(num.length === 2);
-    const [n, d]: [number, number] | [bigint, bigint] = num;
-    if (typeof n === 'bigint' && typeof d === 'bigint') {
-      if (n === d) return d === BigInt(0) ? ce.NaN : ce.One;
-      if (n === BigInt(0)) return ce.Zero;
-      if (d === BigInt(1)) return ce.number(n, options);
-      if (d === BigInt(-1)) return ce.number(-n, options);
-      if (n === BigInt(1) && d === BigInt(2)) return ce.Half;
-      return new BoxedNumber(ce, num, options);
-    }
-
-    console.assert(Number.isInteger(n) && Number.isInteger(d));
-
-    if (!isFinite(n as number) || !isFinite(d as number))
-      return ce.number(n, options).div(ce.number(d, options));
-
-    if (d === n) return d === 0 ? ce.NaN : ce.One;
-    if (n === 0) return ce.Zero;
-    if (d === 1) return ce.number(n, options);
-    if (d === -1) return ce.number(-n, options);
-    if (n === 1 && d === 2) return ce.Half;
-    return new BoxedNumber(ce, num, options);
-  }
-
-  //
-  // Do we have a complex number?
-  //
-  if (num instanceof Complex) {
-    if (num.isNaN()) return ce.NaN;
-    if (num.isZero()) return ce.Zero;
-    if (num.isInfinite()) return ce.ComplexInfinity;
-    if (ce.chop(num.im) === 0) return ce.number(num.re, options);
-    return new BoxedNumber(ce, num, options);
-  }
-
-  //
-  // Do we have a string of digits?
-  //
-  let strNum = '';
-  if (typeof num === 'string') strNum = num;
-  else if (typeof num === 'object' && 'num' in num) {
-    // Technically, num.num as a number is not valid MathJSON: it should be a
-    // string, but we'll allow it.
-    if (typeof num.num === 'number') return ce.number(num.num, options);
-
-    if (typeof num.num !== 'string')
-      throw new Error('MathJSON `num` property should be a string of digits');
-    strNum = num.num;
-  }
-
-  if (!strNum) return null;
-
-  strNum = strNum.toLowerCase();
-
-  // Remove trailing "n" or "d" letter (from legacy version of MathJSON spec)
-  if (/[0-9][nd]$/.test(strNum)) strNum = strNum.slice(0, -1);
-
-  // Remove any whitespace:
-  // Tab, New Line, Vertical Tab, Form Feed, Carriage Return, Space, Non-Breaking Space
-  strNum = strNum.replace(/[\u0009-\u000d\u0020\u00a0]/g, '');
-
-  // Special case some common values to share boxed instances
-  if (strNum === 'nan') return ce.NaN;
-  if (strNum === 'infinity' || strNum === '+infinity')
-    return ce.PositiveInfinity;
-  if (strNum === '-infinity') return ce.NegativeInfinity;
-  if (strNum === '0') return ce.Zero;
-  if (strNum === '1') return ce.One;
-  if (strNum === '-1') return ce.NegativeOne;
-
-  // Do we have repeating digits?
-  if (/\([0-9]+\)/.test(strNum)) {
-    const [_, body, repeat, trail] =
-      strNum.match(/(.+)\(([0-9]+)\)(.+)?$/) ?? [];
-    // @todo we probably shouldn't be using the ce.precision since it may change later
-    strNum =
-      body +
-      repeat.repeat(Math.ceil(ce.precision / repeat.length)) +
-      (trail ?? '');
-  }
-
-  return boxNumber(ce, ce.bignum(strNum), options);
-}
 
 function boxHold(
   ce: IComputeEngine,
@@ -316,15 +193,9 @@ export function boxFunction(
     // Rational (as Divide)
     //
     if ((name === 'Divide' || name === 'Rational') && ops.length === 2) {
-      const n =
-        ops[0] instanceof _BoxedExpression
-          ? asBigint(ops[0])
-          : bigintValue(ops[0] as Expression);
+      const n = toBigint(ops[0]);
       if (n !== null) {
-        const d =
-          ops[1] instanceof _BoxedExpression
-            ? asBigint(ops[1])
-            : bigintValue(ops[1] as Expression);
+        const d = toBigint(ops[1]);
         if (d !== null) return ce.number([n, d], options);
       }
       name = 'Divide';
@@ -336,25 +207,32 @@ export function boxFunction(
     if (name === 'Complex') {
       if (ops.length === 1) {
         // If single argument, assume it's imaginary
-        // @todo: use machineValue() & symbol() instead of box()
-        const op1 = box(ce, ops[0], options);
-        const im = asFloat(op1);
+        const op1 = ops[0];
+        if (op1 instanceof _BoxedExpression)
+          return ce.number(ce.complex(0, op1.re ?? 0), options);
+
+        const im = machineValue(ops[0] as Expression);
         if (im !== null && im !== 0)
           return ce.number(ce.complex(0, im), options);
-        return op1.mul(ce.I);
+
+        return ce.box(op1).mul(ce.I);
       }
       if (ops.length === 2) {
-        const op1 = box(ce, ops[0], options);
-        const op2 = box(ce, ops[1], options);
-        const re = asFloat(op1);
-        const im = asFloat(op2);
+        const re =
+          ops[0] instanceof _BoxedExpression
+            ? (ops[0].re ?? null)
+            : machineValue(ops[0] as Expression);
+        const im =
+          ops[1] instanceof _BoxedExpression
+            ? (ops[1].re ?? null)
+            : machineValue(ops[1] as Expression);
         if (im !== null && re !== null) {
           if (im === 0 && re === 0) return ce.Zero;
-          if (im !== null && im !== 0)
-            return ce.number(ce.complex(re, im), options);
-          return op1;
+          if (im !== 0)
+            return ce.number(ce._numericValue({ decimal: re, im }), options);
+          return box(ce, ops[0], options);
         }
-        return op1.add(op2.mul(ce.I));
+        return box(ce, ops[0], options).add(box(ce, ops[1], options).mul(ce.I));
       }
       throw new Error('Expected one or two arguments with Complex expression');
     }
@@ -369,12 +247,8 @@ export function boxFunction(
       if (typeof op1 === 'number') return ce.number(-op1, options);
       if (op1 instanceof Decimal) return ce.number(op1.neg(), options);
       const num = ce.box(op1, options).numericValue;
-      if (num !== null) {
-        if (typeof num === 'number') return ce.number(-num, options);
-        if (num instanceof Decimal) return ce.number(num.neg(), options);
-        if (num instanceof Complex) return ce.number(num.neg());
-        if (isRational(num)) return ce.number(neg(num));
-      }
+      if (num !== null)
+        return ce.number(typeof num === 'number' ? -num : num.neg(), options);
     }
   }
 
@@ -673,7 +547,7 @@ function makeNumericFunction(
     ops = checkNumericArgs(ce, semiCanonical(ce, semiOps), 1);
   else if (name === 'Ln' || name === 'Log')
     ops = checkNumericArgs(ce, semiCanonical(ce, semiOps));
-  else if (name === 'Power')
+  else if (name === 'Power' || name === 'Root')
     ops = checkNumericArgs(ce, semiCanonical(ce, semiOps), 2);
   else if (name === 'Divide')
     ops = checkNumericArgs(ce, semiCanonical(ce, semiOps));
@@ -690,15 +564,22 @@ function makeNumericFunction(
   if (name === 'Add') return canonicalAdd(ce, ops);
   if (name === 'Negate') return ops[0].neg();
   if (name === 'Multiply') return canonicalMultiply(ce, ops);
-  if (name === 'Divide') return ops.slice(1).reduce((a, b) => a.div(b), ops[0]);
-  if (name === 'Exp') return ce.E.pow(ops[0]);
-  if (name === 'Power') return ops[0].pow(ops[1]);
-  if (name === 'Square') return ops[0].pow(2);
-  if (name === 'Sqrt') return ops[0].sqrt();
+  if (name === 'Divide') {
+    if (ops.length === 2)
+      return canonicalDivide(...(ops as [BoxedExpression, BoxedExpression]));
+    return ops.slice(1).reduce((a, b) => canonicalDivide(a, b), ops[0]);
+  }
+  if (name === 'Exp') return canonicalPower(ce.E, ops[0]);
+  if (name === 'Square') return canonicalPower(ops[0], ce.number(2));
+  if (name === 'Power') return canonicalPower(ops[0], ops[1]);
+  if (name === 'Root') return canonicalRoot(ops[0], ops[1]);
+  if (name === 'Sqrt') return canonicalRoot(ops[0], 2);
 
   if (name === 'Ln' || name === 'Log') {
-    if (ops[0].isOne) return ce.Zero;
-    if (ops.length === 1) return ce._fn(name, ops, metadata);
+    if (ops.length > 0) {
+      if (ops[0].isOne) return ce.Zero;
+      if (ops.length === 1) return ce._fn(name, ops, metadata);
+    }
     return ce._fn('Log', ops, metadata);
   }
 
@@ -785,4 +666,20 @@ function fromNumericValue(
     sign < 0 ? result.neg() : result,
     ce.number(ce.complex(0, value.im)),
   ]);
+}
+
+export function toBigint(x: SemiBoxedExpression): bigint | null {
+  if (typeof x === 'bigint') return x;
+  if (typeof x === 'number' && Number.isInteger(x)) return BigInt(x);
+
+  if (x instanceof _BoxedExpression) return asBigint(x);
+
+  if (x instanceof Decimal || typeof x === 'string') return bigint(x);
+
+  if (x instanceof Complex) {
+    if (x.im === 0) return bigint(x.re);
+    return null;
+  }
+
+  return bigintValue(x as Expression);
 }

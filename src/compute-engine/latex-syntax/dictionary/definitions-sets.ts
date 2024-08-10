@@ -22,7 +22,6 @@ export const DEFINITIONS_SETS: LatexDictionary = [
   { name: 'ComplexNumbers', latexTrigger: ['\\C'] },
   { latexTrigger: '\\mathbb{C}', parse: 'ComplexNumbers' },
   { name: 'ImaginaryNumbers', latexTrigger: ['\\imaginaryI', '\\R'] },
-  { name: 'ExtendedComplexNumbers', latexTrigger: ['\\bar', '\\C'] },
   { name: 'EmptySet', latexTrigger: ['\\emptyset'] },
   { latexTrigger: ['\\varnothing'], parse: 'EmptySet' }, // Parsing only
   { name: 'Integers', latexTrigger: ['\\Z'] },
@@ -30,7 +29,6 @@ export const DEFINITIONS_SETS: LatexDictionary = [
   { name: 'RationalNumbers', latexTrigger: ['\\Q'] },
   { name: 'RealNumbers', latexTrigger: ['\\R'] },
   { latexTrigger: '\\mathbb{R}', parse: 'RealNumbers' },
-  { name: 'ExtendedRealNumbers', latexTrigger: ['\\bar', '\\R'] },
   { name: 'TranscendentalNumberss', latexTrigger: '\\R-\\bar\\Q' },
   { latexTrigger: '\\R\\backslash\\bar\\Q', parse: 'TranscendentalNumbers' },
 

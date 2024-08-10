@@ -3,7 +3,7 @@ import { isRelationalOperator } from './utils';
 import { Product, commonTerms } from '../symbolic/product';
 import { NumericValue } from '../numeric-value/public';
 import { canonicalMultiply } from '../library/arithmetic-multiply';
-import { add } from '../numerics/terms';
+import { add } from './terms';
 
 /** Combine rational expressions into a single fraction */
 export function together(op: BoxedExpression): BoxedExpression {
@@ -77,4 +77,66 @@ export function factor(expr: BoxedExpression): BoxedExpression {
   }
 
   return Product.from(together(expr)).asExpression();
+}
+
+/*
+ * Return k and t such that expr = k * pi + t.
+ * If no pi factor is found, or k or t are not numeric values, return [0, 0].
+ */
+export function getPiTerm(
+  expr: BoxedExpression
+): [k: NumericValue, t: NumericValue] {
+  const ce = expr.engine;
+  if (expr.symbol === 'Pi') return [ce._numericValue(1), ce._numericValue(0)];
+
+  if (expr.operator === 'Negate') {
+    const [k, t] = getPiTerm(expr.ops![0]);
+    return [k.neg(), t];
+  }
+
+  if (expr.operator === 'Add' && expr.nops === 2) {
+    const [k1, t1] = getPiTerm(expr.op1);
+    const [k2, t2] = getPiTerm(expr.op2);
+    return [k1.add(k2), t1.add(t2)];
+  }
+
+  if (expr.operator === 'Multiply' && expr.nops === 2) {
+    if (expr.op1.isNumberLiteral) {
+      const [k, t] = getPiTerm(expr.op2);
+      const n = expr.op1.numericValue!;
+      return [k.mul(n), t.mul(n)];
+    }
+    if (expr.op2.isNumberLiteral) {
+      const [k, t] = getPiTerm(expr.op1);
+      const n = expr.op2.numericValue!;
+      return [k.mul(n), t.mul(n)];
+    }
+  }
+
+  if (expr.operator === 'Divide') {
+    if (expr.op2.isNumberLiteral) {
+      const [k1, t1] = getPiTerm(expr.op1);
+      const d = expr.op2.numericValue!;
+      return [k1.div(d), t1.div(d)];
+    }
+  }
+
+  if (expr.operator === 'Power') {
+    const [k, t] = getPiTerm(expr.op1);
+    const n = expr.op2.re;
+    if (n !== undefined) return [k.pow(n), t.pow(n)];
+  }
+
+  if (expr.operator === 'Sqrt') {
+    const [k, t] = getPiTerm(expr.ops![0]);
+    return [k.sqrt(), t.sqrt()];
+  }
+
+  if (expr.operator === 'Root') {
+    const [k, t] = getPiTerm(expr.ops![0]);
+    const n = expr.ops![1].re;
+    if (n !== undefined) return [k.root(n), t.root(n)];
+  }
+
+  return [ce._numericValue(0), ce._numericValue(0)];
 }

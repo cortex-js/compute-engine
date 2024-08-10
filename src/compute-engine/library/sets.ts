@@ -250,13 +250,6 @@ function evaluateElement(
     return ce.False;
   }
 
-  // Is the key `lhs` in the dictionary `rhs`?
-  if (rhs.keys) {
-    if (lhs.string)
-      for (const key of rhs.keys) if (key === lhs.string) return ce.True;
-    return ce.False;
-  }
-
   // Is the element `lhs` or the sublist `lhs` inside `rhs`?
   if (rhs.operator === 'List') {
     if (lhs.operator === 'List') {

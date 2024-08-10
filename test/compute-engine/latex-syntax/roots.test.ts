@@ -8,14 +8,12 @@ describe('ROOT FUNCTION', () => {
   test('Valid forms', () => {
     expect(parse('\\sqrt{x}')).toMatchInlineSnapshot(`["Sqrt", "x"]`);
     expect(parse('\\sqrt[3]{x}')).toMatchInlineSnapshot(`["Root", "x", 3]`);
-    expect(parse('\\sqrt[n]{x}')).toMatchInlineSnapshot(
-      '["Power", "x", ["Divide", 1, "n"]]'
-    );
+    expect(parse('\\sqrt[n]{x}')).toMatchInlineSnapshot(`["Root", "x", "n"]`);
     expect(parse('\\frac{1}{\\sqrt[3]{x}}')).toMatchInlineSnapshot(
-      `["Divide", 1, ["Root", "x", 3]]`
+      `["Root", "x", -3]`
     );
     expect(parse('\\frac{1}{\\sqrt[3]{\\sqrt{x}}}')).toMatchInlineSnapshot(
-      `["Divide", 1, ["Root", "x", 6]]`
+      `["Root", ["Sqrt", "x"], -3]`
     );
   });
 });

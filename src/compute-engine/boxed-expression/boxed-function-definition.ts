@@ -33,6 +33,8 @@ export class _BoxedFunctionDefinition implements BoxedFunctionDefinition {
 
   signature: BoxedFunctionSignature;
 
+  type: 'function';
+
   iterator?: (
     expr: BoxedExpression,
     start?: number,

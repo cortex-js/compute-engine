@@ -2,7 +2,7 @@ import Complex from 'complex.js';
 import { BoxedExpression, IComputeEngine } from '../public';
 import { isRelationalOperator } from '../boxed-expression/utils';
 import { mul } from '../library/arithmetic-multiply';
-import { add } from '../numerics/terms';
+import { add } from '../boxed-expression/terms';
 
 export type DataTypeMap = {
   float64: number;
@@ -289,8 +289,7 @@ export class TensorFieldExpression implements TensorField<BoxedExpression> {
       case 'complex128':
       case 'complex64':
         if (typeof v === 'number') return this.ce.complex(v);
-        const n = x.numericValue;
-        if (n instanceof Complex) return n;
+        if (x.im !== undefined) return this.ce.complex(x.re!, x.im);
         return undefined;
       case 'bool':
         return typeof v === 'boolean' ? v : undefined;
@@ -511,16 +510,27 @@ export function getExpressionDatatype(expr: BoxedExpression): TensorDataType {
 
   if (isRelationalOperator(expr)) return 'bool';
 
-  const val = expr.value;
-  if (typeof val === 'number') {
-    if (Number.isInteger(val)) {
+  switch (expr.type) {
+    case 'real':
+    case 'rational':
+      return 'float64';
+
+    case 'complex':
+      return 'complex128';
+
+    case 'integer': {
+      const val = expr.re!;
       if (val >= 0 && val <= 255) return 'uint8';
       return 'int32';
     }
-    return 'float64';
+
+    case 'boolean':
+      return 'bool';
+
+    case 'string':
+      return 'string';
+
+    default:
+      return 'expression';
   }
-  const nVal = expr.numericValue;
-  if (nVal !== null && nVal instanceof Complex) return 'complex128';
-  if (expr.string) return 'string';
-  return 'expression';
 }

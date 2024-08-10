@@ -1,4 +1,3 @@
-import { asFloat } from '../../src/compute-engine/boxed-expression/numerics';
 import { engine } from '../utils';
 
 describe('TRIGONOMETRY constructible values', () => {
@@ -58,18 +57,18 @@ describe('TRIGONOMETRY constructible values', () => {
 
         // The numeric and exact values should be the same
 
-        test(`${h}(${arg.latex}) exact = numeric`, () =>
+        test(`${h}(${arg.toString()}) exact = numeric`, () =>
           expect(fNumeric.isEqual(fExact)).toBeTruthy());
 
         if (fNumeric.symbol === 'ComplexInfinity') {
-          test(`${h}(${arg.latex})`, () =>
+          test(`${h}(${arg.toString})`, () =>
             expect(Math.abs(jsValue) > 1e6).toBeTruthy());
         } else {
-          let f = asFloat(fNumeric) ?? NaN;
+          let f = fNumeric.re ?? NaN;
 
           if (Math.abs(f) > 1000000) f = +Infinity;
           if (Math.abs(jsValue) > 1000000) jsValue = +Infinity;
-          test(`${h}(${arg.latex})`, () =>
+          test(`${h}(${arg.toString()})`, () =>
             expect(Math.abs(f - jsValue)).toBeCloseTo(0, 10));
         }
       }

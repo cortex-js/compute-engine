@@ -1,6 +1,5 @@
-import { asFloat } from '../boxed-expression/numerics';
 import { each } from '../collection-utils';
-import { erf, erfInv } from '../numerics/numeric';
+import { erf, erfInv } from '../numerics/special-functions';
 import { IdentifierDefinitions } from '../public';
 import { choose } from '../symbolic/expand';
 
@@ -16,10 +15,9 @@ export const STATISTICS_LIBRARY: IdentifierDefinitions[] = [
         result: 'Numbers',
 
         evaluate: (ce, ops) => {
-          const n = asFloat(ops[0]);
-          if (n === null) return undefined;
-          const k = asFloat(ops[1]);
-          if (k === null) return undefined;
+          const n = ops[0].re ?? NaN;
+          const k = ops[1].re ?? NaN;
+          if (!Number.isFinite(n) || !Number.isFinite(k)) return undefined;
           if (n < 0 || k < 0 || k > n) return ce.NaN;
           return ce.number(choose(n, k));
         },
@@ -36,12 +34,11 @@ export const STATISTICS_LIBRARY: IdentifierDefinitions[] = [
       signature: {
         domain: ['FunctionOf', 'Collections', 'Numbers'],
         evaluate: (ce, ops) => {
+          // @todo: do bignum version
           let sum = 0;
           let count = 0;
           for (const op of each(ops[0])) {
-            const v = asFloat(op);
-            if (v === null) return undefined;
-            sum += v;
+            sum += op.re ?? NaN;
             count++;
           }
           if (count === 0) return ce.NaN;
@@ -56,15 +53,18 @@ export const STATISTICS_LIBRARY: IdentifierDefinitions[] = [
       signature: {
         domain: ['FunctionOf', 'Collections', 'Numbers'],
         evaluate: (ce, ops) => {
+          // @todo: do bignum version
           const values: number[] = [];
           for (const op of each(ops[0])) {
-            const v = asFloat(op);
-            if (v === null) return undefined;
+            const v = op.re ?? NaN;
+            if (!Number.isFinite(v)) return ce.NaN;
             values.push(v);
           }
+
           if (values.length === 0) return ce.NaN;
           values.sort((a, b) => a - b);
           const mid = Math.floor(values.length / 2);
+
           if (values.length % 2 === 0)
             return ce.number((values[mid - 1] + values[mid]) / 2);
 
@@ -83,8 +83,8 @@ export const STATISTICS_LIBRARY: IdentifierDefinitions[] = [
           let sum2 = 0;
           let count = 0;
           for (const op of each(ops[0])) {
-            const v = asFloat(op);
-            if (v === null) return undefined;
+            const v = op.re ?? NaN;
+            if (!Number.isFinite(v)) return ce.NaN;
             sum += v;
             sum2 += v * v;
             count++;
@@ -106,8 +106,8 @@ export const STATISTICS_LIBRARY: IdentifierDefinitions[] = [
           let sum2 = 0;
           let count = 0;
           for (const op of each(ops[0])) {
-            const v = asFloat(op);
-            if (v === null) return undefined;
+            const v = op.re ?? NaN;
+            if (!Number.isFinite(v)) return ce.NaN;
             sum += v;
             sum2 += v * v;
             count++;
@@ -131,8 +131,8 @@ export const STATISTICS_LIBRARY: IdentifierDefinitions[] = [
           let sum4 = 0;
           let count = 0;
           for (const op of each(ops[0])) {
-            const v = asFloat(op);
-            if (v === null) return undefined;
+            const v = op.re ?? NaN;
+            if (!Number.isFinite(v)) return ce.NaN;
             sum += v;
             sum2 += v * v;
             sum4 += v * v * v * v;
@@ -158,8 +158,8 @@ export const STATISTICS_LIBRARY: IdentifierDefinitions[] = [
           let sum3 = 0;
           let count = 0;
           for (const op of each(ops[0])) {
-            const v = asFloat(op);
-            if (v === null) return undefined;
+            const v = op.re ?? NaN;
+            if (!Number.isFinite(v)) return ce.NaN;
             sum += v;
             sum2 += v * v;
             sum3 += v * v * v;
@@ -182,8 +182,8 @@ export const STATISTICS_LIBRARY: IdentifierDefinitions[] = [
         evaluate: (ce, ops) => {
           const values: number[] = [];
           for (const op of each(ops[0])) {
-            const v = asFloat(op);
-            if (v === null) return undefined;
+            const v = op.re ?? NaN;
+            if (!Number.isFinite(v)) return ce.NaN;
             values.push(v);
           }
           if (values.length === 0) return ce.NaN;
@@ -214,8 +214,8 @@ export const STATISTICS_LIBRARY: IdentifierDefinitions[] = [
         evaluate: (ce, ops) => {
           const values: number[] = [];
           for (const op of each(ops[0])) {
-            const v = asFloat(op);
-            if (v === null) return undefined;
+            const v = op.re ?? NaN;
+            if (!Number.isFinite(v)) return ce.NaN;
             values.push(v);
           }
           if (values.length === 0) return ce.NaN;
@@ -241,8 +241,8 @@ export const STATISTICS_LIBRARY: IdentifierDefinitions[] = [
         evaluate: (ce, ops) => {
           const values: number[] = [];
           for (const op of each(ops[0])) {
-            const v = asFloat(op);
-            if (v === null) return undefined;
+            const v = op.re ?? NaN;
+            if (!Number.isFinite(v)) return ce.NaN;
             values.push(v);
           }
           if (values.length === 0) return ce.NaN;
@@ -263,8 +263,8 @@ export const STATISTICS_LIBRARY: IdentifierDefinitions[] = [
       signature: {
         domain: ['FunctionOf', 'Numbers', 'Numbers'],
         evaluate: (ce, ops) => {
-          const x = asFloat(ops[0]);
-          if (x === null) return undefined;
+          const x = ops[0].re ?? NaN;
+          if (!Number.isFinite(x)) return undefined;
           return ce.number(erf(x));
         },
       },
@@ -275,8 +275,8 @@ export const STATISTICS_LIBRARY: IdentifierDefinitions[] = [
       signature: {
         domain: ['FunctionOf', 'Numbers', 'Numbers'],
         evaluate: (ce, ops) => {
-          const x = asFloat(ops[0]);
-          if (x === null) return undefined;
+          const x = ops[0].re ?? NaN;
+          if (!Number.isFinite(x)) return undefined;
           return ce.number(1 - erf(x));
         },
       },
@@ -287,8 +287,8 @@ export const STATISTICS_LIBRARY: IdentifierDefinitions[] = [
       signature: {
         domain: ['FunctionOf', 'Numbers', 'Numbers'],
         evaluate: (ce, ops) => {
-          const x = asFloat(ops[0]);
-          if (x === null) return undefined;
+          const x = ops[0].re ?? NaN;
+          if (!Number.isFinite(x)) return undefined;
           return ce.number(erfInv(x));
         },
       },

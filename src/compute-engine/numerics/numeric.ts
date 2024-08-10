@@ -4,26 +4,23 @@ import { Decimal } from 'decimal.js';
 import { extrapolate } from './richardson';
 import { primeFactors } from './primes';
 
-export const DEFAULT_PRECISION = 300;
+// Number of significant digits for Decimal
+// The Decimal implementation groups digits by 7
+export const DEFAULT_PRECISION = 21;
 
+// IEEE 754 double precision floating point numbers have 53 bits of precision
 export const MACHINE_PRECISION_BITS = 53;
-export const MACHINE_PRECISION = Math.log10(
-  Math.pow(2, MACHINE_PRECISION_BITS)
-); // ≈ 15.95 = number of digits of precision
+export const MACHINE_PRECISION = Math.floor(
+  Math.log10(Math.pow(2, MACHINE_PRECISION_BITS))
+); // ≈ 15.95 = 15 number of digits of precision
 
-// Numerical tolerance is in number of digits at the end of the number that
-// are ignored for sameness evaluation, 7-bit ≈ 2.10721 digits.
+// Number of digits at the end of the number that are ignored for sameness
+// evaluation, 7-bit ≈ 2.10721 digits.
 export const MACHINE_TOLERANCE_BITS = 7;
 export const MACHINE_TOLERANCE = Math.pow(
   2,
   -(MACHINE_PRECISION_BITS - MACHINE_TOLERANCE_BITS)
 );
-
-//
-
-// Positive values smaller than tolerance are considered to be zero
-export const NUMERIC_MACHINE_TOLERANCE = 1e-10;
-export const NUMERIC_BIGNUM_TOLERANCE = 1e-290;
 
 // When applying simplifications, only considers integers whose absolute value
 // is less than SMALL_INTEGER. This avoid loss of precision by preventing
@@ -31,6 +28,14 @@ export const NUMERIC_BIGNUM_TOLERANCE = 1e-290;
 // Note: SMALL_INTEGER ≈ 10^(MACHINE_PRECISION / 2)
 // so that the product of two small integers does not lose precision
 export const SMALL_INTEGER = 1000000;
+
+type IsInteger<N extends number> = `${N}` extends `${string}.${string}`
+  ? never
+  : `${N}` extends `-${string}.${string}`
+    ? never
+    : number;
+
+export type SmallInteger = IsInteger<number>;
 
 // When doing a calculation via iteration (e.g. to calculate a sum)
 // do not iterate more than this value
@@ -182,67 +187,6 @@ export function factorial2(n: number): number {
   return result;
 }
 
-const gammaG = 7;
-const lanczos_7_c = [
-  0.99999999999980993, 676.5203681218851, -1259.1392167224028,
-  771.32342877765313, -176.61502916214059, 12.507343278686905,
-  -0.13857109526572012, 9.9843695780195716e-6, 1.5056327351493116e-7,
-];
-
-// const gammaGLn = 607 / 128;
-// const gammaPLn = [
-//   0.999999999999997, 57.156235665862923, -59.59796035547549, 14.13609797474174,
-//   -0.4919138160976202, 0.3399464998481188e-4, 0.4652362892704857e-4,
-//   -0.9837447530487956e-4, 0.1580887032249125e-3, -0.21026444172410488e-3,
-//   0.2174396181152126e-3, -0.16431810653676389e-3, 0.8441822398385274e-4,
-//   -0.261908384015814e-4, 0.3689918265953162e-5,
-// ];
-
-export function gammaln(z: number): number {
-  // From WikiPedia:
-  // \ln \Gamma (z)=z\ln z-z-{\tfrac {1}{2}}\ln z+{\tfrac {1}{2}}\ln 2\pi +{\frac {1}{12z}}-{\frac {1}{360z^{3}}}+{\frac {1}{1260z^{5}}}+o\left({\frac {1}{z^{5}}}\right)
-
-  if (z < 0) return NaN;
-  const pi = Math.PI;
-  const z3 = z * z * z;
-  return (
-    z * Math.log(z) -
-    z -
-    0.5 * Math.log(z) +
-    0.5 * Math.log(2 * pi) +
-    1 / (12 * z) -
-    1 / (360 * z3) +
-    1 / (1260 * z3 * z * z)
-  );
-
-  // Spouge approximation (suitable for large arguments)
-  // if (z < 0) return NaN;
-  // let x = gammaPLn[0];
-  // for (let i = gammaPLn.length - 1; i > 0; --i) x += gammaPLn[i] / (z + i);
-  // const t = z + gammaGLn + 0.5;
-  // return (
-  //   0.5 * Math.log(2 * Math.PI) +
-  //   (z + 0.5) * Math.log(t) -
-  //   t +
-  //   Math.log(x) -
-  //   Math.log(z)
-  // );
-}
-
-// From https://github.com/substack/gamma.js/blob/master/index.js
-export function gamma(z: number): number {
-  if (z < 0.5) return Math.PI / (Math.sin(Math.PI * z) * gamma(1 - z));
-  if (z > 100) return Math.exp(gammaln(z));
-
-  z -= 1;
-  let x = lanczos_7_c[0];
-  for (let i = 1; i < gammaG + 2; i++) x += lanczos_7_c[i] / (z + i);
-
-  const t = z + gammaG + 0.5;
-
-  return Math.sqrt(2 * Math.PI) * Math.pow(t, z + 0.5) * Math.exp(-t) * x;
-}
-
 export function chop(n: number, tolerance: number): number;
 export function chop(n: Decimal, tolerance: number): 0 | Decimal;
 export function chop(n: Complex, tolerance: number): 0 | Complex;
@@ -262,79 +206,6 @@ export function chop(
     return 0;
 
   return n;
-}
-
-/**
- * An approximation of the gaussian error function, Erf(), using
- * Abramowitz and Stegun approximation.
- * 
- * Thoughts for future improvements:
- * - https://math.stackexchange.com/questions/321569/approximating-the-error-function-erf-by-analytical-functions
- * - https://en.wikipedia.org/wiki/Error_function#Approximation_with_elementary_functions
-
- * 
- * References:
- * - NIST: https://dlmf.nist.gov/7.24#i
- */
-
-export function erf(x: number): number {
-  const a1 = 0.254829592;
-  const a2 = -0.284496736;
-  const a3 = 1.421413741;
-  const a4 = -1.453152027;
-  const a5 = 1.061405429;
-  const p = 0.3275911;
-
-  // Save the sign of x
-  const sign = x < 0 ? -1 : 1;
-  x = Math.abs(x);
-
-  // Abramowitz and Stegun approximation
-  // https://personal.math.ubc.ca/~cbm/aands/page_299.htm
-  const t = 1.0 / (1.0 + p * x);
-  const y = ((((a5 * t + a4) * t + a3) * t + a2) * t + a1) * t;
-
-  return sign * (1 - y * Math.exp(-x * x));
-}
-
-/**
- * Trivial function, used when compiling.
- */
-export function erfc(x: number): number {
-  return 1 - erf(x);
-}
-
-/**
- * Inverse Error Function.
- *
- */
-export function erfInv(x: number): number {
-  // From https://en.wikipedia.org/wiki/Error_function#Numerical_approximations
-  // {\displaystyle \operatorname {erf} ^{-1}z={\frac {\sqrt {\pi }}{2}}\left(z+{\frac {\pi }{12}}z^{3}+{\frac {7\pi ^{2}}{480}}z^{5}+{\frac {127\pi ^{3}}{40320}}z^{7}+{\frac {4369\pi ^{4}}{5806080}}z^{9}+{\frac {34807\pi ^{5}}{182476800}}z^{11}+\cdots \right).}
-
-  const pi = Math.PI;
-  const pi2 = pi * pi;
-  const pi3 = pi2 * pi;
-  const x2 = x * x;
-  const x3 = x * x2;
-  const x5 = x3 * x2;
-  const x7 = x5 * x2;
-
-  return (
-    (Math.sqrt(pi) / 2) *
-    (x +
-      (pi / 12) * x3 +
-      ((7 * pi2) / 480) * x5 +
-      ((127 * pi3) / 40320) * x7 +
-      ((4369 * pi2 * pi2) / 5806080) * x7 * x2 +
-      ((34807 * pi3 * pi2) / 182476800) * x7 * x2 * x2)
-  );
-
-  // const a = 0.147;
-  // const b = 2 / (Math.PI * a) + Math.log(1 - x ** 2) / 2;
-  // const sqrt1 = Math.sqrt(b ** 2 - Math.log(1 - x ** 2) / a);
-  // const sqrt2 = Math.sqrt(sqrt1 - b);
-  // return sqrt2 * Math.sign(x);
 }
 
 /**
@@ -374,61 +245,6 @@ export function centeredDiff8thOrder(
 }
 
 /**
- * Return a numerical approximation of the integral
- * of the function `f` from `a` to `b` using Monte Carlo integration.
- *
- * Thoughts for future improvements:
- * - use a MISER algorithm to improve the accuracy
- * - use a stratified sampling to improve the accuracy
- * - use a quasi-Monte Carlo method to improve the accuracy
- * - use a Markov Chain Monte Carlo method to improve the accuracy
- * - use a Metropolis-Hastings algorithm to improve the accuracy
- * - use a Hamiltonian Monte Carlo algorithm to improve the accuracy
- * - use a Gibbs sampling algorithm to improve the accuracy
- *
- *
- * See:
- * - https://64.github.io/monte-carlo/
- *
- */
-export function monteCarloEstimate(
-  f: (x: number) => number,
-  a: number,
-  b: number,
-  n = 1e5
-): number {
-  let sum = 0;
-
-  if (a === -Infinity && b === Infinity) {
-    for (let i = 0; i < n; i++) {
-      const u = Math.random();
-      const x = Math.tan(Math.PI * (u - 0.5));
-      const jacobian = Math.PI * (1 + x * x);
-      sum += f(x) / jacobian;
-    }
-  } else if (a === -Infinity) {
-    for (let i = 0; i < n; i++) {
-      const u = Math.random();
-      const x = b - Math.log(1 - u);
-      const jacobian = 1 / (1 - u);
-      sum += f(x) / jacobian;
-    }
-  } else if (b === Infinity) {
-    for (let i = 0; i < n; i++) {
-      const u = Math.random();
-      const x = a + Math.log(u);
-      const jacobian = 1 / u;
-      sum += f(x) / jacobian;
-    }
-  } else {
-    // Proper integral
-    for (let i = 0; i < n; i++) sum += f(a + Math.random() * (b - a));
-  }
-
-  return (sum / n) * (b - a);
-}
-
-/**
  *
  * @param f
  * @param x
@@ -447,136 +263,4 @@ export function limit(f: (x: number) => number, x: number, dir = 1): number {
 
   const [val, _err] = extrapolate(f, x, { step: dir > 0 ? 1 : -1 });
   return val;
-}
-
-export function fromRoman(roman: string): [result: number, rest: string] {
-  if (roman === 'N') return [0, ''];
-
-  const romanMap = {
-    I: 1,
-    V: 5,
-    X: 10,
-    L: 50,
-    C: 100,
-    D: 500,
-    M: 1000,
-  };
-
-  let total = 0;
-  let prevValue = 0;
-
-  roman = roman.toUpperCase();
-
-  for (let i = roman.length - 1; i >= 0; i--) {
-    const currentValue = romanMap[roman[i]];
-    if (currentValue === undefined) return [total, roman.slice(i)];
-
-    if (currentValue < prevValue) total -= currentValue;
-    else total += currentValue;
-
-    prevValue = currentValue;
-  }
-
-  return [total, ''];
-}
-
-export function fromDigits(
-  s: string,
-  baseInput?: string | number
-): [result: number, rest: string] {
-  s = s.trim();
-  if (s.length === 0) return [NaN, ''];
-  if (s.startsWith('+')) return fromDigits(s.slice(1), baseInput);
-  if (s.startsWith('-')) {
-    const [v, r] = fromDigits(s.slice(1), baseInput);
-    return [-v, r];
-  }
-  let base = 10;
-  if (typeof baseInput === 'string') baseInput = baseInput.toLowerCase();
-  if (s.startsWith('0x')) {
-    base = 16;
-    s = s.slice(2);
-  } else if (s.startsWith('0b')) {
-    base = 2;
-    s = s.slice(2);
-  } else if (baseInput === 'roman') {
-    return fromRoman(s);
-  } else if (baseInput === 'base64' || baseInput === 'base-64') {
-    try {
-      return [parseInt(btoa(s)), ''];
-    } catch (e) {
-      return [NaN, ''];
-    }
-  } else if (typeof baseInput === 'number') {
-    base = baseInput;
-  } else if (typeof baseInput === 'string') {
-    base = parseInt(baseInput);
-  }
-
-  let value = 0;
-  for (let i = 0; i < s.length; i++) {
-    const k = {
-      ' ': -1,
-      '\u00a0': -1, // NBS
-      '\u2000': -1, // EN QUAD
-      '\u2001': -1, // EM QUAD
-      '\u2002': -1, // EN SPACE
-      '\u2003': -1, // EM SPACE
-      '\u2004': -1, // THREE-PER-EM SPACE
-      '\u2005': -1, // FOUR-PER-EM SPACE
-      '\u2006': -1, // SIX-PER-EM SPACE
-      '\u2007': -1, // FIGURE SPACE
-      '\u2008': -1, // PUNCTUATION SPACE
-      '\u2009': -1, // THIN SPACE
-      '\u200a': -1, // HAIR SPACE
-      '\u200b': -1, // ZWS
-      '\u202f': -1, // NARROW NBS
-      '\u205f': -1, // MEDIUM MATHEMATICAL SPACE
-      '_': -1,
-      ',': -1,
-      '0': 0,
-      '1': 1,
-      '2': 2,
-      '3': 3,
-      '4': 4,
-      '5': 5,
-      '6': 6,
-      '7': 7,
-      '8': 8,
-      '9': 9,
-      'a': 10,
-      'b': 11,
-      'c': 12,
-      'd': 13,
-      'e': 14,
-      'f': 15,
-      'g': 16,
-      'h': 17,
-      'i': 18,
-      'j': 19,
-      'k': 20,
-      'l': 21,
-      'm': 22,
-      'n': 23,
-      'o': 24,
-      'p': 25,
-      'q': 26,
-      'r': 27,
-      's': 28,
-      't': 29,
-      'u': 30,
-      'v': 31,
-      'w': 32,
-      'x': 33,
-      'y': 34,
-      'z': 35,
-    }[s[i]];
-    if (k !== -1) {
-      if (k === undefined) return [value, s.substring(i)];
-      if (k >= base) return [value, s.substring(i)];
-      value = value * base + k;
-    }
-  }
-
-  return [value, ''];
 }

@@ -1145,7 +1145,7 @@ function parseParenDelimiter(
   const h = operator(body);
   // We have a Delimiter inside parens: e.g. `(a, b, c)` with `a, b, c` the
   // Delimiter function.
-  if (h === 'Delimiter' && operand(body, 2)) {
+  if (h === 'Delimiter' && operand(body, 2) !== null) {
     const delims = stringValue(operand(body, 2));
     if (delims?.length === 1) {
       // We have a Delimiter with a single character separator
@@ -1184,8 +1184,12 @@ function parseParenDelimiter(
  * - a list comprehension, e.g. `[x^2 for x in 1..3 if x > 1]` (not yet supported)
  *
  */
-function parseBrackets(parser: Parser, body: Expression | null): Expression {
-  if (body === null || isEmptySequence(body)) return ['List'];
+function parseBrackets(
+  parser: Parser,
+  body: Expression | null | undefined
+): Expression {
+  if (body === null || body === undefined || isEmptySequence(body))
+    return ['List'];
 
   const h = operator(body);
   if (h === 'Range' || h === 'Linspace') return body;
@@ -1220,8 +1224,8 @@ function parseRange(parser: Parser, lhs: Expression): Expression | null {
   if (!lhs) return null;
 
   // Is there a step implied? e.g. "1,3..10"
-  let start: Expression | null = null;
-  let second: Expression | null = null;
+  let start: Expression | null | undefined = null;
+  let second: Expression | null | undefined = null;
   if (operator(lhs) === 'Sequence') {
     if (nops(lhs) !== 2) return null;
     start = operand(lhs, 1);
@@ -1232,7 +1236,7 @@ function parseRange(parser: Parser, lhs: Expression): Expression | null {
     }
   } else start = operand(lhs, 1);
 
-  if (start === null) return null;
+  if (start === null || start === undefined) return null;
 
   const end = parser.parseExpression({ minPrec: 0 });
   if (!end) {

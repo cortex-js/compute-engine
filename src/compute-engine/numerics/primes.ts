@@ -1,7 +1,9 @@
-export const LARGE_PRIME = 1125899906842597; // Largest prime < 2^50
+import { bigint } from './numeric-bigint';
+
+const LARGE_PRIME = 1125899906842597; // Largest prime < 2^50
 
 // prettier-ignore
-export const SMALL_PRIMES = new Set<number>([
+const SMALL_PRIMES = new Set<number>([
   2, 3, 5, 7, 11, 13, 17, 19, 23, 29, 31, 37, 41, 43, 47, 53, 59, 61, 67, 71,
   73, 79, 83, 89, 97, 101, 103, 107, 109, 113, 127, 131, 137, 139, 149, 151,
   157, 163, 167, 173, 179, 181, 191, 193, 197, 199, 211, 223, 227, 229, 233,
@@ -148,10 +150,9 @@ export function isPrime(n: number): boolean | undefined {
     if (n % smallPrime === 0) return false;
   }
 
-  if (n >= LARGE_PRIME) {
-    return probablyPrime(n, 30) ? undefined : false;
-  }
-  return n === leastFactor(n);
+  if (n < LARGE_PRIME) n === leastFactor(n);
+
+  return probablyPrime(n, 30) ? undefined : false;
 }
 
 function leastFactor(n: number): number {
@@ -175,6 +176,43 @@ function leastFactor(n: number): number {
   return n;
 }
 
+export function isPrimeBigint(n: bigint): boolean | undefined {
+  if (n <= 1) return false;
+
+  // Is it a known small prime?
+  if (n <= LARGEST_SMALL_PRIME) return isPrime(Number(n));
+
+  // Is it a factor of a small known prime?
+  for (const smallPrime of SMALL_PRIMES) {
+    if (n % BigInt(smallPrime) === BigInt(0)) return false;
+  }
+
+  if (n < LARGE_PRIME) n = leastBigFactor(n);
+
+  return probablyPrimeBigint(n, 30) ? undefined : false;
+}
+
+function leastBigFactor(n: bigint): bigint {
+  if (n === BigInt(1)) return BigInt(1);
+  if (n % BigInt(2) === BigInt(0)) return BigInt(2);
+  if (n % BigInt(3) === BigInt(0)) return BigInt(3);
+  if (n % BigInt(5) === BigInt(0)) return BigInt(5);
+  const m = BigInt(Math.floor(Math.sqrt(Number(n))));
+  let i = BigInt(7);
+  while (i <= m) {
+    if (n % i === BigInt(0)) return i;
+    if (n % (i + BigInt(4)) === BigInt(0)) return i + BigInt(4);
+    if (n % (i + BigInt(6)) === BigInt(0)) return i + BigInt(6);
+    if (n % (i + BigInt(10)) === BigInt(0)) return i + BigInt(10);
+    if (n % (i + BigInt(12)) === BigInt(0)) return i + BigInt(12);
+    if (n % (i + BigInt(16)) === BigInt(0)) return i + BigInt(16);
+    if (n % (i + BigInt(22)) === BigInt(0)) return i + BigInt(22);
+    if (n % (i + BigInt(24)) === BigInt(0)) return i + BigInt(24);
+    i += BigInt(30);
+  }
+  return n;
+}
+
 /**
  *  Miller-Rabin primality test
  */
@@ -185,8 +223,8 @@ function probablyPrime(n: number, k: number): boolean {
   // 	return false;
 
   // Write (n - 1) as 2^s * d
-  let s = 0,
-    d = n - 1;
+  let s = 0;
+  let d = n - 1;
   while (d % 2 === 0) {
     d /= 2;
     ++s;
@@ -208,4 +246,120 @@ function probablyPrime(n: number, k: number): boolean {
   } while (--k);
 
   return true;
+}
+
+function probablyPrimeBigint(n: bigint, k: number): boolean {
+  // if (n === 2 || n === 3)
+  // 	return true;
+  // if (n % 2 === 0 || n < 2)
+  // 	return false;
+
+  // Write (n - 1) as 2^s * d
+  let s = 0;
+  let d = n - BigInt(1);
+  while (d % BigInt(2) === BigInt(0)) {
+    d = d / BigInt(2);
+    ++s;
+  }
+
+  WitnessLoop: do {
+    // A base between 2 and n - 2
+    let x = BigInt(2 + Math.floor(Math.random() * (Number(n) - 3))) ** d % n;
+
+    if (x === BigInt(1) || x === n - BigInt(1)) continue;
+
+    for (let i = s - 1; i--; ) {
+      x = (x * x) % n;
+      if (x === BigInt(1)) return false;
+      if (x === n - BigInt(1)) continue WitnessLoop;
+    }
+
+    return false;
+  } while (--k);
+
+  return true;
+}
+
+// Difference between primes from 7 to 31
+const PRIME_WHEEL_INC = [
+  BigInt(4),
+  BigInt(2),
+  BigInt(4),
+  BigInt(2),
+  BigInt(4),
+  BigInt(6),
+  BigInt(2),
+  BigInt(6),
+];
+
+export function bigPrimeFactors(d: bigint): Map<bigint, number> {
+  if (d < Number.MAX_SAFE_INTEGER) {
+    const factors = primeFactors(Number(d));
+    const result = new Map<bigint, number>();
+    for (const f of Object.keys(factors)) result.set(bigint(f)!, factors[f]);
+    return result;
+  }
+
+  //https:rosettacode.org/wiki/Prime_decomposition#JavaScript
+
+  let n = d;
+  const result = new Map<string, number>();
+
+  // Wheel factorization
+  // @todo: see https://github.com/Fairglow/prime-factor/blob/main/src/lib.rs
+
+  let count2 = 0;
+  let count3 = 0;
+  let count5 = 0;
+
+  let k = BigInt(10);
+  while (n % k === BigInt(0)) {
+    count2 += 1;
+    count5 += 1;
+    n = n / k;
+  }
+
+  k = BigInt(5);
+  while (n % k === BigInt(0)) {
+    count5 += 1;
+    n = n / k;
+  }
+
+  k = BigInt(3);
+  while (n % k === BigInt(0)) {
+    count3 += 1;
+    n = n / k;
+  }
+
+  k = BigInt(2);
+  while (n % k === BigInt(0)) {
+    count2 += 1;
+    n = n / k;
+  }
+
+  if (count2 > 0) result.set('2', count2);
+  if (count3 > 0) result.set('3', count3);
+  if (count5 > 0) result.set('5', count5);
+
+  k = BigInt(7);
+  let kIndex = '';
+  let i = 0;
+  while (k * k < n) {
+    if (n % k === BigInt(0)) {
+      if (!kIndex) kIndex = k.toString();
+      result.set(kIndex, (result.get(kIndex) ?? 0) + 1);
+      n = n / k;
+    } else {
+      k = k + PRIME_WHEEL_INC[i];
+      kIndex = '';
+      i = i < 7 ? i + 1 : 0;
+    }
+  }
+
+  if (n !== BigInt(1))
+    result.set(n.toString(), (result.get(n.toString()) ?? 0) + 1);
+
+  const r = new Map<bigint, number>();
+  for (const [k, v] of result) r.set(bigint(k)!, v);
+  return r;
 }

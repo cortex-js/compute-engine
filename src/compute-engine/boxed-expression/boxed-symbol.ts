@@ -22,9 +22,14 @@ import {
   Rule,
   SemiBoxedExpression,
   CanonicalOptions,
+  Type,
 } from './public';
 import { replace } from '../rules';
-import { hashCode, normalizedUnknownsForSolve } from './utils';
+import {
+  getImaginaryFactor,
+  hashCode,
+  normalizedUnknownsForSolve,
+} from './utils';
 import { _BoxedSymbolDefinition } from './boxed-symbol-definition';
 import { _BoxedFunctionDefinition } from './boxed-function-definition';
 import { narrow } from './boxed-domain';
@@ -33,13 +38,13 @@ import { match } from './match';
 import { canonicalDivide } from '../library/arithmetic-divide';
 import { negate } from '../symbolic/negate';
 import { mul } from '../library/arithmetic-multiply';
-import { asFloat } from './numerics';
 import { NumericValue } from '../numeric-value/public';
 import {
   isValidIdentifier,
   validateIdentifier,
 } from '../../math-json/identifiers';
-import { add } from '../numerics/terms';
+import { add } from './terms';
+import { canonicalAngle, radiansToAngle } from './trigonometry';
 
 /**
  * BoxedSymbol
@@ -208,6 +213,7 @@ export class BoxedSymbol extends _BoxedExpression {
   }
 
   add(rhs: number | BoxedExpression): BoxedExpression {
+    if (rhs === 0) return this;
     return add(this.canonical, this.engine.box(rhs));
   }
 
@@ -224,36 +230,83 @@ export class BoxedSymbol extends _BoxedExpression {
   }
 
   div(rhs: number | BoxedExpression): BoxedExpression {
-    return canonicalDivide(this, this.engine.box(rhs));
+    if (rhs === 1) return this;
+    if (rhs === -1) return this.neg();
+    if (rhs === 0) return this.engine.NaN;
+    if (typeof rhs !== 'number') return canonicalDivide(this, rhs);
+    return canonicalDivide(this, this.engine.number(rhs));
   }
 
-  pow(
-    exp: number | [num: number, denom: number] | BoxedExpression
-  ): BoxedExpression {
+  pow(exp: number | BoxedExpression): BoxedExpression {
+    if (!this.isCanonical) return this.canonical.pow(exp);
+
     const ce = this.engine;
     if (this.symbol === 'ComplexInfinity') return ce.NaN;
 
-    if (exp === 0) return this.engine.One;
-    if (exp === 1) return this;
-    if (exp === -1) return this.inv();
-    if (exp === 0.5) exp = [1, 2];
-    if (exp === -0.5) exp = [-1, 2];
+    if (typeof exp !== 'number') exp = exp.canonical;
 
-    if (!this.isCanonical) return this.canonical.pow(exp);
+    let e = typeof exp === 'number' ? exp : exp.im === 0 ? exp.re : undefined;
+
+    if (e === 0) return this.engine.One;
+    if (e === 1) return this;
+    if (e === -1) return this.inv();
+    if (e === 0.5) return this.sqrt();
+    if (e === -0.5) return this.sqrt().inv();
 
     if (typeof exp !== 'number') {
-      exp = ce.box(exp); // Canonicalize and box fractions
-      if (exp.isZero) return this.engine.One;
-      if (exp.isOne) return this;
-      if (exp.isNegativeOne) return this.inv();
       if (exp.operator === 'Negate') return this.pow(exp.op1).inv();
+      if (this.symbol === 'ExponentialE') {
+        // Is the argument an imaginary or complex number?
+        let theta = getImaginaryFactor(exp);
+        if (theta !== undefined) {
+          // We have an expression of the form `e^(i theta)`
+          theta = canonicalAngle(theta);
+          if (theta !== undefined) {
+            // Use Euler's formula to return a complex trigonometric expression
+            return ce
+              .function('Cos', [theta])
+              .add(ce.function('Sin', [theta]).mul(ce.I))
+              .simplify();
+            // } else if (theta) {
+            //   // Return simplify angle
+            //   return ce._fn('Power', [ce.E, radiansToAngle(theta)!.mul(ce.I)]);
+          }
+        } else if (exp.isNumberLiteral) {
+          return ce.number(
+            ce._numericValue(ce.E.N().numericValue!).pow(exp.numericValue!)
+          );
+        }
+      }
     }
 
     return ce._fn('Power', [this, ce.box(exp)]);
   }
 
+  root(n: number | BoxedExpression): BoxedExpression {
+    if (!this.isCanonical) return this.canonical.root(n);
+
+    if (typeof n !== 'number') n = n.canonical;
+
+    let e = typeof n === 'number' ? n : n.im === 0 ? n.re : undefined;
+
+    const ce = this.engine;
+    if (this.symbol === 'ComplexInfinity') return ce.NaN;
+    if (e === 0) return ce.NaN;
+    if (e === 1) return this;
+    if (e === 2) return this.sqrt();
+    if (e === -1) return this.inv();
+
+    return ce._fn('Root', [this, ce.box(n)]);
+  }
+
   sqrt(): BoxedExpression {
-    return this.pow([1, 2]);
+    const ce = this.engine;
+    if (this.symbol === 'ComplexInfinity') return ce.NaN;
+    if (this.isZero) return this;
+    if (this.isOne) return this.engine.One;
+    if (this.isNegativeOne) return ce.I;
+
+    return ce._fn('Root', [this, ce.number(2)]);
   }
 
   ln(semiBase?: SemiBoxedExpression): BoxedExpression {
@@ -266,7 +319,7 @@ export class BoxedSymbol extends _BoxedExpression {
       return this.engine.One;
 
     if (base) {
-      if (asFloat(base) === 10) return this.engine._fn('Log', [this]);
+      if (base.re === 10) return this.engine._fn('Log', [this]);
       return this.engine._fn('Log', [this, base]);
     }
 
@@ -381,7 +434,7 @@ export class BoxedSymbol extends _BoxedExpression {
     if (typeof value === 'string') value = ce.string(value);
     if (typeof value === 'object') {
       if ('re' in value && 'im' in value)
-        value = ce.complex(value.re, value.im);
+        value = ce.complex(value.re ?? 0, value.im);
       else if ('num' in value && 'denom' in value)
         value = ce.number([value.num, value.denom]);
       else if (Array.isArray(value))
@@ -438,6 +491,12 @@ export class BoxedSymbol extends _BoxedExpression {
         return (def as BoxedSymbolDefinition).domain ?? undefined;
     }
     return undefined;
+  }
+
+  // The type of the value of the symbol.
+  // If the symbol is not bound to a definition, the type is 'symbol'
+  get type(): Type {
+    return this._def?.type ?? 'symbol';
   }
 
   set domain(inDomain: DomainExpression | BoxedDomain) {
@@ -643,14 +702,6 @@ export class BoxedSymbol extends _BoxedExpression {
     return this.symbolDefinition?.even;
   }
 
-  get isPrime(): boolean | undefined {
-    return this.symbolDefinition?.prime;
-  }
-
-  get isComposite(): boolean | undefined {
-    return this.symbolDefinition?.composite;
-  }
-
   get isInfinity(): boolean | undefined {
     return this.symbolDefinition?.infinity;
   }
@@ -679,14 +730,8 @@ export class BoxedSymbol extends _BoxedExpression {
   get isRational(): boolean | undefined {
     return this.symbolDefinition?.rational;
   }
-  get isAlgebraic(): boolean | undefined {
-    return this.symbolDefinition?.rational;
-  }
   get isReal(): boolean | undefined {
     return this.symbolDefinition?.real;
-  }
-  get isExtendedReal(): boolean | undefined {
-    return this.symbolDefinition?.extendedReal;
   }
   get isComplex(): boolean | undefined {
     return this.symbolDefinition?.complex;

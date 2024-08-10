@@ -9,6 +9,7 @@ import {
   operator,
   operands,
   nops,
+  operand,
 } from '../../math-json/utils';
 
 import {
@@ -1338,13 +1339,13 @@ export class _Parser implements Parser {
     // We are looking for an expression inside an optional pair of `()`
     // (i.e. trig functions, as in `\cos x`.)
     if (kind === 'implicit') {
+      // Even though they're optional, do we have some parentheses?
       if (operator(group) === 'Delimiter') {
-        const op1 = operands(group)[0];
-        if (operator(op1) === 'Sequence') {
-          const seq = operands(op1)[0];
-          return seq ? [seq] : [];
-        }
-        return op1 ? [op1] : [];
+        const op1 = operand(group, 1);
+
+        if (operator(op1) === 'Sequence') return operands(op1);
+
+        return op1 === null ? [] : [op1];
       }
 
       // Was there a matchfix? the "group" is the argument, i.e.

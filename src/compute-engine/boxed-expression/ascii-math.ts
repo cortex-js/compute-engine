@@ -1,10 +1,4 @@
-import Complex from 'complex.js';
-import Decimal from 'decimal.js';
-import {
-  isBigRational,
-  isMachineRational,
-  isRational,
-} from '../numerics/rationals';
+import { isRational } from '../numerics/rationals';
 import { BoxedExpression } from './public';
 
 export type AsciiMathSerializer = (
@@ -30,6 +24,7 @@ const SYMBOLS = {
   Pi: 'pi',
   ExponentialE: 'e',
   ImaginaryUnit: 'i',
+
   // Greek letters are valid symbols (i.e. don't need to be quoted)
   alpha: 'alpha',
   beta: 'beta',
@@ -72,11 +67,15 @@ const SYMBOLS = {
 
 const OPERATORS: Record<
   string,
-  [string | ((x: BoxedExpression, AsciiMathSerializer) => string), number]
+  [
+    string | ((x: BoxedExpression, AsciiMathSerializer) => string),
+    precedence: number,
+  ]
 > = {
   Add: [
     (expr, serialize) => {
-      // Use a reduce, so that if the second argument starts with a + or -, don't include a '+' in the result
+      // Use a reduce, so that if the second argument starts with a + or -
+      // we don't include a '+' in the result
       return (
         expr.ops?.reduce((acc: string, x) => {
           if (x.operator === 'Negate') {
@@ -101,7 +100,7 @@ const OPERATORS: Record<
       const base = serialize(expr.op1, 14);
       // Always wrap the base in parentheses if power to avoid ambiguity,
       // i.e. -3^2 -> -(3^2)
-      if (base === 'Power') return `-${base}`;
+      if (base === 'Power') return `-(${base})`;
       return `-${base}`;
     },
     14,
@@ -127,11 +126,13 @@ const OPERATORS: Record<
         if (lhs !== null) {
           if (lhs === 1) return serialize(expr.op2, 12);
           if (lhs === -1) return `-${serialize(expr.op2, 12)}`;
-          if (lhs instanceof Complex) {
+          if (typeof lhs !== 'number' && lhs.im !== 0) {
             if (lhs.re === 0 && lhs.im === 1)
-              return `${serialize(expr.op2, 12)} i`;
-            if (lhs.re === 0) return `${serialize(expr.op2, 12)} * ${lhs.im} i`;
-            return `${serialize(expr.op2, 12)} * (${lhs.re} + ${lhs.im} i)`;
+              return `${serialize(expr.op2, 12)}i`;
+            if (lhs.re === 0) return `${serialize(expr.op2, 12)} * ${lhs.im}i`;
+            if (lhs.im > 0)
+              return `${serialize(expr.op2, 12)} * (${lhs.re} + ${lhs.im}i)`;
+            return `${serialize(expr.op2, 12)} * (${lhs.re} - ${-lhs.im}i)`;
           }
           const rhs = expr.op2;
           if (
@@ -147,7 +148,13 @@ const OPERATORS: Record<
           }
           const l = serialize(expr.op1, 12);
           const r = serialize(expr.op2, 12);
+          if (r === 'i') return l + ' i';
+          if (r === '-i') return '-' + l + ' i';
+          if (l === 'i') return r + ' i';
+          if (l === '-i') return '-' + r + ' i';
+
           // Is it a sequence of digits (integer) followed by a non-digit?
+          // e.g. 2x, 3y, 4z, etc.
           if (l.match(/^[-+]?\d+$/) && r.match(/^[a-zA-Z\(]/)) return l + r;
           if (r.match(/^[-+]?\d+$/) && l.match(/^[a-zA-Z\(]/)) return r + l;
           return l + ' * ' + r;
@@ -224,14 +231,16 @@ const FUNCTIONS: Record<
 
   Ceil: 'ceil', // also: (expr, serialize) => `|~${serialize(expr.op1)}~|`,
   Exp: 'exp',
-  Factorial: (expr, serialize) => `${serialize(expr.op1)}!`,
+  Factorial: (expr, serialize) => `${serialize(expr.op1, 12)}!`,
   Floor: 'floor', // also: (expr, serialize) => `|__${serialize(expr.op1)}__|`,
   Log: 'log',
   Ln: 'ln',
   Log10: 'log10',
   Sqrt: 'sqrt',
-  Root: (expr, serialize) =>
-    `root${wrap(serialize(expr.op1))}${wrap(serialize(expr.op2))}`,
+  Root: (expr, serialize) => {
+    if (expr.op1.numericValue === 2) return `sqrt${wrap(serialize(expr.op2))}`;
+    return `root${wrap(serialize(expr.op1))}${wrap(serialize(expr.op2))}`;
+  },
   Square: (expr, serialize) => `${serialize(expr.op1, 12)}^2`,
 
   Det: 'det',
@@ -278,82 +287,6 @@ const FUNCTIONS: Record<
 
   Domain: (expr: BoxedExpression) => JSON.stringify(expr.json),
 };
-
-export function toAsciiMath(
-  expr: BoxedExpression,
-  options: Partial<AsciiMathOptions> = {},
-  precedence = 0
-): string {
-  if (expr.symbol) {
-    const symbols = options.symbols
-      ? { ...SYMBOLS, ...options.symbols }
-      : SYMBOLS;
-    if (symbols[expr.symbol]) {
-      if (symbols[expr.symbol].length === 1) return symbols[expr.symbol];
-      return `${symbols[expr.symbol]}`;
-    }
-    if (expr.symbol.length === 1) return expr.symbol;
-    return `"${expr.symbol}"`;
-  }
-
-  const serialize: AsciiMathSerializer = (expr, precedence = 0) =>
-    toAsciiMath(expr, options, precedence);
-
-  if (expr.string) return expr.string;
-  const num = expr.numericValue;
-  if (num !== null) {
-    if (expr.isNaN) return 'NaN';
-    if (!expr.isFinite) {
-      if (expr.isNegative) return '-oo';
-      return 'oo';
-    }
-    if (typeof num === 'number') return num.toString();
-    if (num instanceof Decimal) return num.toString();
-    if (isMachineRational(num))
-      return wrap(`${num[0].toString()}/${num[1].toString()}`, precedence, 12);
-    if (isBigRational(num))
-      return wrap(`${num[0].toString()}/${num[1].toString()}`, precedence, 12);
-    if (num instanceof Complex) {
-      const im = num.im === 1 ? '' : num.im === -1 ? '-' : num.im.toString();
-      if (num.re === 0) return im + 'i';
-      if (num.im < 0) return `${num.re.toString()}${im}i`;
-      return wrap(`${num.re.toString()}+${im}i`, precedence, 11);
-    }
-  }
-
-  if (expr.operator && typeof expr.operator === 'string') {
-    const operators = options.operators
-      ? { ...OPERATORS, ...options.operators }
-      : OPERATORS;
-    const [operator, precedence_] = operators[expr.operator] ?? [];
-    if (operator) {
-      // Go over each operands and convert them to ascii math
-      let result = '';
-      if (typeof operator === 'function') {
-        result = operator(expr, serialize);
-      } else {
-        if (expr.nops === 1)
-          return `${operator}${serialize(expr.op1, precedence_ + 1)}`;
-
-        result =
-          expr.ops
-            ?.map((x) => serialize(x, precedence_ + 1))
-            .join(` ${operator} `) ?? '';
-      }
-      return wrap(result, precedence, precedence_);
-    }
-    const functions = options.functions
-      ? { ...FUNCTIONS, ...options.functions }
-      : FUNCTIONS;
-    const func = functions[expr.operator];
-    if (typeof func === 'function') return func(expr, serialize);
-    if (typeof func === 'string')
-      return `${func}(${expr.ops?.map((x) => serialize(x)).join(', ') ?? ''})`;
-    return `${expr.operator}(${expr.ops?.map((x) => serialize(x)).join(', ') ?? ''})`;
-  }
-
-  return JSON.stringify(expr.json);
-}
 
 function bigOp(
   expr: BoxedExpression,
@@ -408,4 +341,77 @@ function delimiter(
 function wrap(s: string, precedence = 0, target = -1): string {
   if (precedence > target && !/^\(.+\)$/.test(s)) return `(${s})`;
   return s;
+}
+
+export function toAsciiMath(
+  expr: BoxedExpression,
+  options: Partial<AsciiMathOptions> = {},
+  precedence = 0
+): string {
+  //
+  // A symbol?
+  //
+  if (expr.symbol) {
+    const symbols = options.symbols
+      ? { ...SYMBOLS, ...options.symbols }
+      : SYMBOLS;
+    if (symbols[expr.symbol]) {
+      if (symbols[expr.symbol].length === 1) return symbols[expr.symbol];
+      return `${symbols[expr.symbol]}`;
+    }
+    if (expr.symbol.length === 1) return expr.symbol;
+    return `"${expr.symbol}"`;
+  }
+
+  const serialize: AsciiMathSerializer = (expr, precedence = 0) =>
+    toAsciiMath(expr, options, precedence);
+
+  // A string ?
+  if (expr.string) return expr.string;
+
+  // A number ?
+  const num = expr.numericValue;
+  if (num !== null) {
+    if (expr.isNaN) return 'NaN';
+    if (!expr.isFinite) return expr.isNegative ? '-oo' : 'oo';
+
+    // It's either a plain number or a NumericValue...
+    return num.toString();
+  }
+
+  //
+  // A function expression?
+  //
+  if (expr.operator && typeof expr.operator === 'string') {
+    const operators = options.operators
+      ? { ...OPERATORS, ...options.operators }
+      : OPERATORS;
+    const [operator, precedence_] = operators[expr.operator] ?? [];
+    if (operator) {
+      // Go over each operands and convert them to ascii math
+      let result = '';
+      if (typeof operator === 'function') {
+        result = operator(expr, serialize);
+      } else {
+        if (expr.nops === 1)
+          return `${operator}${serialize(expr.op1, precedence_ + 1)}`;
+
+        result =
+          expr.ops
+            ?.map((x) => serialize(x, precedence_ + 1))
+            .join(` ${operator} `) ?? '';
+      }
+      return wrap(result, precedence, precedence_);
+    }
+    const functions = options.functions
+      ? { ...FUNCTIONS, ...options.functions }
+      : FUNCTIONS;
+    const func = functions[expr.operator];
+    if (typeof func === 'function') return func(expr, serialize);
+    if (typeof func === 'string')
+      return `${func}(${expr.ops?.map((x) => serialize(x)).join(', ') ?? ''})`;
+    return `${expr.operator}(${expr.ops?.map((x) => serialize(x)).join(', ') ?? ''})`;
+  }
+
+  return JSON.stringify(expr.json);
 }

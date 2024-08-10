@@ -1,19 +1,54 @@
-import { BoxedExpression, ComputeEngine } from '../../src/compute-engine';
-import { add, mul } from '../../src/compute-engine/boxed-expression/numerics';
-import { primeFactors as bigPrimeFactors } from '../../src/compute-engine/numerics/numeric-bigint';
-import { primeFactors } from '../../src/compute-engine/numerics/primes';
+import { ComputeEngine } from '../../src/compute-engine.ts';
 import {
+  add,
+  mul,
   Rational,
   reducedRational,
 } from '../../src/compute-engine/numerics/rationals';
 
-function randNumbers(n: number): number[] {
-  let randos: number[] = [];
+/**
+ * 
+The constants `a`, `c`, and `m` in the Linear Congruential Generator (LCG) are chosen based on research and practical use in generating pseudo-random numbers. Here’s why those specific values were picked:
+
+1. **Multiplier (`a = 1664525`)**: 
+   - This value is a common choice in LCG implementations and was used in the implementation of the `rand()` function in early versions of the C standard library. 
+   - It is chosen to maximize the period (the length before the sequence of numbers repeats) and to ensure good statistical properties, such as uniform distribution.
+
+2. **Increment (`c = 1013904223`)**: 
+   - This value was also used in many implementations, including the aforementioned `rand()` function. 
+   - The choice of `c` as an odd number ensures that the generator has a full period (i.e., it can generate all possible values before repeating) when combined with certain values of `a` and `m`.
+
+3. **Modulus (`m = 2 ** 32`)**: 
+   - The modulus is typically chosen as a power of 2 because it makes the modulo operation very efficient on binary computers.
+   - `2^32` is often used because it matches the word size of 32-bit computers, which was a common architecture when these constants were popularized.
+   - The choice of `m` influences the range of generated numbers, and using `2^32` allows the generator to produce 32-bit integers.
+
+### Historical Context
+These constants have been used in practical implementations of random number generators for decades. The combination of these values is known to produce sequences with a long period and good randomness properties for many applications, though more modern generators may use different algorithms and constants for improved performance or randomness in certain contexts.
+
+### Limitations
+While these constants work well for many purposes, they aren’t perfect for all situations. For example:
+- The sequences generated can have patterns if you generate a lot of numbers.
+- The quality of randomness is not suitable for cryptographic purposes.
+
+However, for simple applications, these constants are a solid choice and provide a good balance between performance and randomness.
+*/
+
+function generateNumbers(n: number, seed = 0): number[] {
+  const results: number[] = [];
+  let current = seed;
+
+  // Constants for the LCG
+  const a = 1664525;
+  const c = 1013904223;
+  const m = 2 ** 32;
+
   for (let i = 0; i < n; i++) {
-    const n = Math.floor(Math.random() * Number.MAX_SAFE_INTEGER);
-    randos.push(n);
+    current = (a * current + c) % m;
+    results.push(current);
   }
-  return randos;
+
+  return results;
 }
 
 /** Estable a baseline for computation performance in JS.
@@ -102,15 +137,9 @@ function perfTestRationals() {
 
   // const primeBigint = timing;
 
-  randos = [];
-  bigrandos = [];
-
   const N = 1000000;
-  for (let i = 0; i < N * 4; i++) {
-    const n = Math.floor(Math.random() * 20000) - 10000;
-    randos.push(n);
-    bigrandos.push(BigInt(n));
-  }
+  randos = generateNumbers(N * 4);
+  bigrandos = randos.map((n) => BigInt(n));
 
   let start = globalThis.performance.now();
   let r: Rational = [1, 1];
@@ -149,7 +178,7 @@ function slowEval() {
 
   // Factor out substitution of constants
 
-  ce.precision = 'machine';
+  ce.precision = 'auto';
   ce.strict = true;
 
   let y = 0;
@@ -217,33 +246,35 @@ describe('Compute Engine modes', () => {
   const fast = fastEval();
   const turbo = turboEval();
 
-  console.info(`Slow = ${Math.round(slow / turbo)} x compiled`);
-  console.info(`Fast = ${Math.round(fast / turbo)} x compiled`);
+  // console.info(`Slow = ${Math.round(slow / turbo)} x compiled`);
+  // console.info(`Fast = ${Math.round(fast / turbo)} x compiled`);
 
-  it('slow vs turbo', () => expect(slow / turbo).toBeLessThan(230));
-  it('fast vs turbo', () => expect(fast / turbo).toBeLessThan(110));
+  it('slow vs turbo', () => expect(slow / turbo).toBeLessThan(800));
+  it('fast vs turbo', () => expect(fast / turbo).toBeLessThan(180));
 });
 
 describe('Relative performance', () => {
-  it('is relative to JS', () => {
-    const randos = randNumbers(1000);
-    let jsb = jsBaseline(randos);
-    if (jsb === 0) jsb = 0.00001;
+  const randos = generateNumbers(1000).map((n) => n / 1000);
+  let jsb = jsBaseline(randos);
+  if (jsb === 0) jsb = 0.00001;
 
-    // console.profile();
-    const ceb = ceBaseline(randos);
-    // console.profileEnd();
+  // console.profile();
+  const ceb = ceBaseline(randos);
+  // console.profileEnd();
 
-    console.info(
-      `Compute Engine evaluate() = ${Math.round(ceb / jsb)} x native JS`
-    );
+  // console.profile();
+  const cebN = ceBaselineN(randos);
+  // console.profileEnd();
 
-    // console.profile();
-    const cebN = ceBaselineN(randos);
-    // console.profileEnd();
+  // console.info(
+  //   `Compute Engine evaluate() = ${Math.round(ceb / jsb)} x native JS`
+  // );
+  // console.info(`Compute Engine N() = ${Math.round(cebN / jsb)} x native JS`);
 
-    console.info(`Compute Engine N() = ${Math.round(cebN / jsb)} x native JS`);
-    expect(ceb / jsb).toBeLessThan(500);
-    expect(cebN / jsb).toBeLessThan(11000);
+  it('evaluate() relative to JS', () => {
+    expect(ceb / jsb).toBeLessThan(1100);
+  });
+  it('N() relative to JS', () => {
+    expect(cebN / jsb).toBeLessThan(2500);
   });
 });

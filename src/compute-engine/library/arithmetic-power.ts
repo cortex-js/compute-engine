@@ -1,78 +1,28 @@
-import Complex from 'complex.js';
-import { Decimal } from 'decimal.js';
-import {
-  Rational,
-  isBigRational,
-  isMachineRational,
-} from '../numerics/rationals';
-import { BoxedExpression, IComputeEngine } from '../public';
-import {
-  asFloat,
-  asRational,
-  asMachineInteger,
-} from '../boxed-expression/numerics';
-import { mul } from './arithmetic-multiply';
+import { Rational } from '../numerics/rationals';
+import { BoxedExpression } from '../public';
+import { asRational } from '../boxed-expression/numerics';
 
-export function square(
-  ce: IComputeEngine,
-  base: BoxedExpression
-): BoxedExpression {
-  const num = base.numericValue;
-  if (typeof num === 'number') return ce.number(num * num);
-  if (num instanceof Decimal) return ce.number(num.pow(2));
-  if (num instanceof Complex) return ce.number(num.pow(2));
-  if (isMachineRational(num))
-    return ce.number([num[1] * num[1], num[0] * num[0]]);
-  if (isBigRational(num)) return ce.number([num[1] * num[1], num[0] * num[0]]);
-
-  if (base.operator === 'Multiply')
-    return ce._fn(
-      'Multiply',
-      base.ops!.map((x) => square(ce, x))
-    ); // Don't call ce.mul() to avoid infinite loops
-
-  if (base.operator === 'Power') {
-    const exp = asMachineInteger(base.op2);
-    if (exp !== null) return base.op1.pow(exp * 2);
-    return base.op1.pow(ce.number(2).mul(base.op2));
-  }
-
-  return base.pow(2);
-}
-
-export function processPower(
-  ce: IComputeEngine,
-  base: BoxedExpression,
-  exponent: BoxedExpression,
-  mode: 'simplify' | 'evaluate' | 'N'
-): BoxedExpression | undefined {
-  // Distribute multiplication over power
-  if (base.operator === 'Multiply') {
-    const ops = base.ops!.map(
-      (x) =>
-        processPower(ce, x, exponent, mode) ?? ce._fn('Power', [x, exponent])
-    );
-    return mul(...ops);
-  }
-
-  if (base.numericValue && exponent.numericValue) {
-    const n = ce._numericValue(base.numericValue);
-    const e = ce._numericValue(exponent.numericValue);
-    const v = n.pow(e);
-    return ce.box(mode === 'N' ? v.N() : v);
-  }
-
-  return base.pow(exponent);
-}
-
-export function isSqrt(expr: BoxedExpression): boolean {
+function isSqrt(expr: BoxedExpression): boolean {
   return (
     expr.operator === 'Sqrt' ||
-    (expr.operator === 'Power' && asFloat(expr.op2) === 0.5)
+    (expr.operator === 'Power' && expr.op2.im === 0 && expr.op2.re === 0.5) ||
+    (expr.operator === 'Root' && expr.op2.im === 0 && expr.op2.re === 2)
   );
 }
 
-export function asRationalSqrt(expr: BoxedExpression): Rational | null {
-  if (!isSqrt(expr)) return null;
-  return asRational(expr.op1) ?? null;
+// If the expression is of the form
+// : sqrt(n), return n/1
+// : sqrt(n/m), return n/m
+// : 1/sqrt(n), return 1/n
+// : (could do): sqrt(n)/m, return n/m^2
+export function asRadical(expr: BoxedExpression): Rational | null {
+  if (isSqrt(expr)) return asRational(expr.op1) ?? null;
+
+  if (expr.operator === 'Divide' && expr.op1.isOne && isSqrt(expr.op2)) {
+    const n = expr.op2.re;
+    if (n === undefined || !Number.isInteger(n)) return null;
+    return [1, n];
+  }
+
+  return null;
 }

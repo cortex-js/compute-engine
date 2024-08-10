@@ -1,7 +1,4 @@
-import Complex from 'complex.js';
-import { isMachineRational, isRational } from './numerics/rationals';
 import { BoxedExpression } from './public';
-import { asFloat } from './boxed-expression/numerics';
 
 /**
  * The Cost Function is used to select the simplest between two expressions:
@@ -58,35 +55,21 @@ export function costFunction(expr: BoxedExpression): number {
   //
   // 2/ Literal Numeric Values
   //
+  if (expr.isZero) return 1;
+
   const num = expr.numericValue;
   if (num !== null) {
-    if (expr.isZero) return 1;
-    if (expr.isInteger) return numericCostFunction(asFloat(expr)!);
-
-    if (isRational(num)) {
-      if (isMachineRational(num))
-        return numericCostFunction(num[0]) + numericCostFunction(num[1]) + 1;
-      else
-        return (
-          numericCostFunction(Number(num[0])) +
-          numericCostFunction(Number(num[1])) +
-          1
-        );
-    }
-
-    if (num instanceof Complex)
-      return numericCostFunction(num.re) + numericCostFunction(num.im) + 1;
-
-    if (expr.isNumber) return 2;
+    if (typeof num === 'number') return numericCostFunction(num);
+    return 2;
   }
 
   const name = expr.operator;
   let nameCost = 2;
   if (['Add', 'Divide'].includes(name)) nameCost = 3;
   else if (['Subtract', 'Negate'].includes(name)) nameCost = 4;
-  else if (['Square', 'Sqrt', 'Multiply', 'Root'].includes(name)) nameCost = 5;
-  else if (['Power'].includes(name)) nameCost = 6;
-  else if (['Ln', 'Exp', 'Log'].includes(name)) nameCost = 7;
+  else if (['Square', 'Sqrt', 'Multiply'].includes(name)) nameCost = 5;
+  else if (['Power', 'Root'].includes(name)) nameCost = 6;
+  else if (['Ln', 'Exp', 'Log', 'Lb'].includes(name)) nameCost = 7;
   else if (
     [
       'Arcsin',

@@ -1,4 +1,3 @@
-import Complex from 'complex.js';
 import { Decimal } from 'decimal.js';
 import {
   gamma as gammaComplex,
@@ -7,25 +6,17 @@ import {
 import {
   factorial as bigFactorial,
   factorial2 as bigFactorial2,
-  gamma as bigGamma,
-  gammaln as bigLngamma,
   gcd as bigGcd,
   lcm as bigLcm,
 } from '../numerics/numeric-bignum';
 import {
-  factorial,
-  factorial2,
-  fromDigits,
   gamma,
   gammaln,
-  gcd,
-  lcm,
-} from '../numerics/numeric';
-import {
-  isBigRational,
-  isMachineRational,
-  rationalize,
-} from '../numerics/rationals';
+  bigGamma,
+  bigGammaln,
+} from '../numerics/special-functions';
+import { factorial, factorial2, gcd, lcm } from '../numerics/numeric';
+import { rationalize } from '../numerics/rationals';
 import { IdentifierDefinitions } from '../public';
 import { bignumPreferred } from '../boxed-expression/utils';
 import {
@@ -41,8 +32,7 @@ import {
   mulN,
 } from './arithmetic-multiply';
 import { canonicalDivide } from './arithmetic-divide';
-import { processPower } from './arithmetic-power';
-import { applyN, apply2N, canonical } from '../symbolic/utils';
+import { apply, apply2, canonical } from '../symbolic/utils';
 import {
   checkDomain,
   checkDomains,
@@ -50,25 +40,27 @@ import {
 } from '../boxed-expression/validate';
 import { flatten } from '../symbolic/flatten';
 import { each, isCollection } from '../collection-utils';
-import { BoxedNumber } from '../boxed-expression/boxed-number';
 import { IComputeEngine, BoxedExpression } from '../boxed-expression/public';
 import {
-  asMachineInteger,
-  asFloat,
+  asSmallInteger,
   asRational,
   asBignum,
+  asBigint,
 } from '../boxed-expression/numerics';
-import { add, addN } from '../numerics/terms';
+import { add, addN } from '../boxed-expression/terms';
+import { isPrime as isPrimeMachine, isPrimeBigint } from '../numerics/primes';
+import { fromDigits } from '../numerics/strings';
 
 // When considering processing an arithmetic expression, the following
 // are the core canonical arithmetic operations that should be considered:
 export type CanonicalArithmeticFunctions =
   | 'Add'
   | 'Negate' // Distributed over mul/div/add
-  | 'Sqrt' // Square root of rationals are preserved as "exact" values
   | 'Multiply'
   | 'Divide'
   | 'Power'
+  | 'Sqrt'
+  | 'Root'
   | 'Ln';
 
 // Non-canonical functions: the following functions get transformed during
@@ -76,12 +68,10 @@ export type CanonicalArithmeticFunctions =
 // expression (they are not canonicalized):
 //
 // - Complex -> Complex number
+// - Rational -> Rational number
 // - Exp -> Power(E, _)
-// - Root -> Power(_1, 1/_2)
-// - Sqrt -> Power(_, 1/2) (converted if argument is *not* a rational)
 // - Square -> Power(_, 2)
 // - Subtract -> Add(_1, Negate(_2))
-// - Rational -> Rational number
 
 /*
 
@@ -164,7 +154,7 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
       signature: {
         domain: ['FunctionOf', 'Numbers', 'Integers'],
         evaluate: (_ce, ops) =>
-          applyN(
+          apply(
             ops[0],
             Math.ceil,
             (x) => x.ceil(),
@@ -182,7 +172,7 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
       signature: {
         domain: ['FunctionOf', 'Numbers', 'Numbers'],
         evaluate: (ce, ops) =>
-          applyN(
+          apply(
             ops[0],
             (x) => ce.chop(x),
             (x) => ce.chop(x),
@@ -239,8 +229,7 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
         canonical: (ce, args) => {
           // The canonical handler is responsible for arg validation
           args = checkNumericArgs(ce, args, 1);
-          if (args.length !== 1) return ce.function('Power', [ce.E, ...args]);
-          return ce.E.pow(args[0]);
+          return ce.function('Power', [ce.E, ...args]);
         },
       },
     },
@@ -255,25 +244,27 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
         params: ['Numbers'],
         result: 'Numbers',
         canonical: (ce, args) => {
-          const base = args[0];
-          if (base instanceof BoxedNumber && base.isNegative)
-            return ce._fn('Factorial', [base.neg()]).neg();
-          return ce._fn('Factorial', [base]);
+          const x = args[0];
+          if (x.numericValue !== null && x.isNegative)
+            return ce._fn('Factorial', [x.neg()]).neg();
+          return ce._fn('Factorial', [x]);
         },
         evaluate: (ce, ops) => {
-          const n = asMachineInteger(ops[0]);
-          if (n !== null && n >= 0) {
-            if (!bignumPreferred(ce)) return ce.number(factorial(n));
-            return ce.number(bigFactorial(ce, ce.bignum(n)));
-          }
-          const num = ops[0].numericValue;
-          if (num !== null && num instanceof Complex)
-            return ce.number(gammaComplex(num.add(1)));
+          const x = ops[0];
 
-          const f = asFloat(ops[0]);
-          if (f !== null) return ce.number(gamma(1 + f));
+          // Is the argument a complex number?
+          if (x.im !== 0 && x.im !== undefined)
+            return ce.number(gammaComplex(ce.complex(x.im, x.re).add(1)));
 
-          return undefined;
+          // The argument is real...
+          const n = x.re;
+          if (n === undefined) return undefined;
+
+          // Not a positive integer, use the Gamma function
+          if (n < 0 || !Number.isInteger(n)) return ce.number(gamma(1 + n));
+
+          if (!bignumPreferred(ce)) return ce.number(factorial(n));
+          return ce.number(bigFactorial(ce, ce.bignum(n)));
         },
       },
     },
@@ -289,7 +280,7 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
         evaluate: (ce, ops) => {
           // 2^{\frac{n}{2}+\frac{1}{4}(1-\cos(\pi n))}\pi^{\frac{1}{4}(\cos(\pi n)-1)}\Gamma\left(\frac{n}{2}+1\right)
 
-          const n = asMachineInteger(ops[0]);
+          const n = asSmallInteger(ops[0]);
           if (n === null) return undefined;
           if (bignumPreferred(ce))
             return ce.number(bigFactorial2(ce, ce.bignum(n)));
@@ -305,9 +296,9 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
       threadable: true,
 
       signature: {
-        domain: ['FunctionOf', 'Numbers', 'ExtendedRealNumbers'],
+        domain: ['FunctionOf', 'Numbers', 'RealNumbers'],
         evaluate: (ce, ops) =>
-          applyN(
+          apply(
             ops[0],
             Math.floor,
             (x) => x.floor(),
@@ -325,7 +316,7 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
         params: ['Numbers'],
         result: 'Numbers',
         N: (ce, ops) =>
-          applyN(
+          apply(
             ops[0],
             (x) => gamma(x),
             (x) => bigGamma(ce, x),
@@ -342,10 +333,10 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
         params: ['Numbers'],
         result: 'Numbers',
         N: (ce, ops) =>
-          applyN(
+          apply(
             ops[0],
             (x) => gammaln(x),
-            (x) => bigLngamma(ce, x),
+            (x) => bigGammaln(ce, x),
             (x) => lngammaComplex(x)
           ),
       },
@@ -367,11 +358,16 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
         simplify: (ce, ops) => ops[0].ln(ops[1]),
         evaluate: (ce, ops) => ops[0].ln(ops[1]),
         N: (ce, ops) =>
-          applyN(
+          apply(
             ops[0],
-            (x) => (x >= 0 ? Math.log(x) : ce.complex(x).log()),
-            (x) => (!x.isNeg() ? x.ln() : ce.complex(x.toNumber()).log()),
-            (z) => z.log()
+            (x) => (x === 0 ? NaN : x >= 0 ? Math.log(x) : ce.complex(x).log()),
+            (x) =>
+              x.isZero()
+                ? NaN
+                : !x.isNeg()
+                  ? x.ln()
+                  : ce.complex(x.toNumber()).log(),
+            (z) => (z.isZero() ? NaN : z.log())
           ),
       },
     },
@@ -386,23 +382,29 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
         params: ['Numbers'],
         optParams: ['Numbers'],
         result: 'Numbers',
-        canonical: (ce, ops) => ops[0].ln(ops[1] ?? 10),
-        simplify: (ce, ops) => ops[0].ln(ops[1] ?? ce.number(10)),
-        evaluate: (ce, ops) => ops[0].ln(ops[1] ?? ce.number(10)),
+        canonical: (ce, ops) => ops[0]?.ln(ops[1] ?? 10) ?? undefined,
+        simplify: (ce, ops) => ops[0]?.ln(ops[1] ?? ce.number(10)) ?? undefined,
+        evaluate: (ce, ops) => ops[0]?.ln(ops[1] ?? ce.number(10)) ?? undefined,
 
         N: (ce, ops) => {
           if (ops[1] === undefined)
-            return applyN(
+            return apply(
               ops[0],
               (x) =>
-                x >= 0 ? Math.log10(x) : ce.complex(x).log().div(Math.LN10),
+                x === 0
+                  ? NaN
+                  : x >= 0
+                    ? Math.log10(x)
+                    : ce.complex(x).log().div(Math.LN10),
               (x) =>
-                !x.isNeg()
-                  ? Decimal.log10(x)
-                  : ce.complex(x.toNumber()).log().div(Math.LN10),
-              (z) => z.log().div(Math.LN10)
+                x.isZero()
+                  ? NaN
+                  : !x.isNeg()
+                    ? Decimal.log10(x)
+                    : ce.complex(x.toNumber()).log().div(Math.LN10),
+              (z) => (z.isZero() ? NaN : z.log().div(Math.LN10))
             );
-          return apply2N(
+          return apply2(
             ops[0],
             ops[1],
             (a, b) => Math.log(a) / Math.log(b),
@@ -424,7 +426,7 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
         result: 'Numbers',
         canonical: (ce, args) => args[0].ln(2),
         // N: (ce, ops) =>
-        //   applyN(
+        //   apply(
         //     ops[0],
         //     (x) => (x >= 0 ? Math.log2(x) : ce.complex(x).log().div(Math.LN2)),
         //     (x) =>
@@ -447,7 +449,7 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
         result: 'Numbers',
         canonical: (ce, args) => ce._fn('Log', [args[0]]),
         // N: (ce, ops) =>
-        //   applyN(
+        //   apply(
         //     ops[0],
         //     (x) =>
         //       x >= 0 ? Math.log10(x) : ce.complex(x).log().div(Math.LN10),
@@ -468,19 +470,15 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
 
       signature: {
         domain: ['FunctionOf', 'Numbers', 'Numbers', 'Numbers'],
-        evaluate: (ce, ops) => {
-          if (ops.length !== 2) return undefined;
-          const [lhs, rhs] = ops;
-          // @todo: use .numericValue instead, and handle bignum,
-          // complexnumbers, rationals, etc.
-          const nLhs = lhs.value;
-          const nRhs = rhs.value;
-          if (typeof nLhs !== 'number') return undefined;
-          if (typeof nRhs !== 'number') return undefined;
-          // In JavaScript, the % is remainder, not modulo
-          // so adapt it to return a modulo
-          return ce.number(((nLhs % nRhs) + nRhs) % nRhs);
-        },
+        evaluate: (ce, ops) =>
+          apply2(
+            ops[0],
+            ops[1],
+            // In JavaScript, the % is remainder, not modulo
+            // so adapt it to return a modulo
+            (a, b) => ((a % b) + b) % b,
+            (a, b) => a.modulo(b)
+          ),
       },
     },
 
@@ -576,32 +574,16 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
           args = checkNumericArgs(ce, args, 2);
           if (args.length !== 2) return ce._fn('Power', args);
           const [base, exp] = args;
-
-          const e = exp.numericValue;
-          if (e !== null) {
-            // If the numeric value is greater than 10, use a Power expression
-            if (typeof e === 'number' && e > 10) return ce._fn('Power', args);
-            if (e instanceof Complex) return ce._fn('Power', args);
-            if (e instanceof Decimal && e.greaterThan(10))
-              return ce._fn('Power', args);
-          }
-
-          // If the base is a literal number and negative, treat it as a Negate
-          // i.e. -2^3 -> -(2^3)
-          if (base.numericValue !== null && base.isNegative)
-            return base.pow(exp).neg();
-
-          return base.pow(exp);
+          return canonicalPower(base, exp);
         },
-        simplify: (ce, ops) => processPower(ce, ops[0], ops[1], 'simplify'),
-        evaluate: (ce, ops) => processPower(ce, ops[0], ops[1], 'evaluate'),
-        N: (ce, ops) => processPower(ce, ops[0], ops[1], 'N'),
+        simplify: (ce, ops) => ops[0].pow(ops[1]),
+        evaluate: (ce, ops) => ops[0].pow(ops[1]),
+        N: (ce, ops) => ops[0].pow(ops[1]),
         // Defined as RealNumbers for all power in RealNumbers when base > 0;
         // when x < 0, only defined if n is an integer
         // if x is a non-zero complex, defined as ComplexNumbers
         // Square root of a prime is irrational (AlgebraicNumbers)
         // https://proofwiki.org/wiki/Square_Root_of_Prime_is_Irrational
-        // evalDomain: (ce, base: BoxedExpression, power: BoxedExpression) ;
       },
     },
 
@@ -623,7 +605,7 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
 
           if (args.length === 1)
             return ce._fn('Rational', [
-              checkDomain(ce, args[0], 'ExtendedRealNumbers'),
+              checkDomain(ce, args[0], 'RealNumbers'),
             ]);
 
           args = checkDomains(ce, args, ['Integers', 'Integers']);
@@ -639,7 +621,7 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
         },
         evaluate: (ce, ops) => {
           if (ops.length === 2) {
-            const [n, d] = [asMachineInteger(ops[0]), asMachineInteger(ops[1])];
+            const [n, d] = [asSmallInteger(ops[0]), asSmallInteger(ops[1])];
             if (n !== null && d !== null) return ce.number([n, d]);
             return undefined;
           }
@@ -648,14 +630,15 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
           // If there is a single argument, i.e. `['Rational', 'Pi']`
           // the function evaluates to a rational expression of the argument
           //
-          const f = asFloat(ops[0].N());
-          if (f === null) return undefined;
-          return ce.number(rationalize(f));
+          const f = ops[0].N();
+          if (f.numericValue === null) return undefined;
+          if (f.im !== 0) return undefined;
+          return ce.number(rationalize(f.re ?? NaN));
         },
         N: (ce, ops) => {
           if (ops.length === 1) return ops[0];
 
-          return apply2N(
+          return apply2(
             ops[0],
             ops[1],
             (a, b) => a / b,
@@ -676,10 +659,10 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
         canonical: (ce, args) => {
           args = checkNumericArgs(ce, args, 2);
           const [base, exp] = args;
-          if (args.length !== 2 || !base.isValid || !exp.isValid)
-            return ce._fn('Root', args);
-          return base.pow(exp.inv());
+          return canonicalRoot(base, exp);
         },
+        evaluate: (ce, ops) => ops[0].root(ops[1]),
+        N: (ce, ops) => ops[0].root(ops[1]),
       },
     },
 
@@ -690,7 +673,7 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
       signature: {
         domain: ['FunctionOf', 'Numbers', 'Numbers'],
         evaluate: (ce, ops) =>
-          applyN(
+          apply(
             ops[0],
             Math.round,
             (x) => x.round(),
@@ -826,7 +809,7 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
     // that are defined above. This avoid circular references.
     //
     e: {
-      domain: 'TranscendentalNumbers',
+      domain: 'RealNumbers',
       constant: true,
       holdUntil: 'never',
       value: 'ExponentialE',
@@ -867,8 +850,7 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
       value: ['Complex', 0, 1],
     },
     ExponentialE: {
-      domain: 'TranscendentalNumbers',
-      flags: { algebraic: false, real: true },
+      domain: 'RealNumbers',
       wikidata: 'Q82435',
       constant: true,
       holdUntil: 'N',
@@ -880,13 +862,11 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
       domain: 'AlgebraicNumbers',
       wikidata: 'Q41690',
       constant: true,
-      flags: { algebraic: true },
       holdUntil: 'simplify',
       value: ['Divide', ['Add', 1, ['Sqrt', 5]], 2],
     },
     CatalanConstant: {
       domain: 'RealNumbers',
-      flags: { algebraic: undefined }, // Not proven irrational or transcendental
 
       wikidata: 'Q855282',
       constant: true,
@@ -919,7 +899,6 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
     EulerGamma: {
       // From http://www.fullbooks.com/Miscellaneous-Mathematical-Constants2.html
       domain: 'RealNumbers',
-      flags: { algebraic: undefined }, // Not proven irrational or transcendental
       wikidata: 'Q273023',
       holdUntil: 'N',
       constant: true,
@@ -948,6 +927,70 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
     },
   },
 
+  //
+  // Property predicates
+  //
+
+  {
+    IsPrime: {
+      description: 'Prime Number',
+      wikidata: 'Q49008',
+      complexity: 1200,
+      threadable: true,
+      signature: {
+        domain: ['FunctionOf', 'Numbers', 'Booleans'],
+        evaluate: (ce, ops) => {
+          const result = isPrime(ops[0]);
+          if (result === undefined) return undefined;
+          return ce.symbol(result ? 'True' : 'False');
+        },
+      },
+    },
+    IsComposite: {
+      description: 'Composite Number',
+      complexity: 1200,
+      threadable: true,
+      signature: {
+        domain: ['FunctionOf', 'Numbers', 'Booleans'],
+        canonical: (ce, ops) => ce.box(['Not', ['IsPrime', ...ops]]),
+      },
+    },
+    IsOdd: {
+      description: 'Odd Number',
+      complexity: 1200,
+      threadable: true,
+      signature: {
+        domain: ['FunctionOf', 'Numbers', 'Booleans'],
+        evaluate: (ce, ops) => {
+          let fail = false;
+          const result = ops.every((op) => {
+            if (op.im !== 0) return false;
+
+            const b = asBigint(op);
+            if (b !== null) return b % BigInt(2) !== BigInt(0);
+
+            const n = op.re;
+            if (n !== undefined && Number.isInteger(n)) return n % 2 !== 0;
+
+            fail = true;
+            return false;
+          });
+          if (fail) return undefined;
+          return ce.symbol(result ? 'False' : 'True');
+        },
+      },
+    },
+    isEven: {
+      description: 'Odd Number',
+      complexity: 1200,
+      threadable: true,
+      signature: {
+        domain: ['FunctionOf', 'Numbers', 'Booleans'],
+        canonical: (ce, ops) => ce.box(['Not', ['IsOdd', ...ops]]),
+      },
+    },
+    // @todo: Divisor:
+  },
   {
     GCD: {
       description: 'Greatest Common Divisor',
@@ -1228,8 +1271,13 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
           if (op2.symbol === 'Nothing')
             return ce.number(Number.parseInt(op1, 10));
 
-          const base = asFloat(op2)!;
-          if (base && (!Number.isInteger(base) || base < 2 || base > 36))
+          const base = op2.re ?? NaN;
+          if (
+            op2.type !== 'integer' ||
+            !Number.isFinite(base) ||
+            base < 2 ||
+            base > 36
+          )
             return ce.error(['unexpected-base', base], op2);
 
           const [value, rest] = fromDigits(op1, op2.string ?? op2.symbol ?? 10);
@@ -1255,26 +1303,23 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
         domain: ['FunctionOf', 'Integers', ['OptArg', 'Integers'], 'Strings'],
         evaluate: (ce, ops) => {
           const op1 = ops[0];
-          const val = asFloat(op1) ?? NaN;
-          if (Number.isNaN(val) || !Number.isInteger(val))
+          if (op1.type !== 'integer')
+            return ce.domainError('Integers', op1.domain, op1);
+
+          const val = op1.re ?? NaN;
+          if (!Number.isFinite(val))
             return ce.domainError('Integers', op1.domain, op1);
 
           const op2 = ops[1] ?? ce.Nothing;
           if (op2.symbol === 'Nothing') {
-            const op1Num = op1.numericValue;
-            if (typeof op1Num === 'number')
-              return ce.string(Math.abs(op1Num).toString());
-            if (op1Num instanceof Decimal)
-              return ce.string(op1Num.abs().toString());
-            return ce.string(
-              Math.abs(Math.round(asFloat(op1) ?? NaN)).toString()
-            );
+            if (op1.bignumRe !== undefined)
+              return ce.string(op1.bignumRe.abs().toString());
+            return ce.string(Math.abs(val).toString());
           }
 
-          if (asMachineInteger(op2) === null)
-            return ce.domainError('Integers', op2.domain, op2);
+          const base = asSmallInteger(op2);
+          if (base === null) return ce.domainError('Integers', op2.domain, op2);
 
-          const base = asMachineInteger(op2)!;
           if (base < 2 || base > 36)
             return ce.error(['out-of-range', 2, 36, base], op2);
 
@@ -1294,21 +1339,7 @@ function processAbs(
     const num = arg.numericValue;
     if (num !== null) {
       if (typeof num === 'number') return ce.number(Math.abs(num));
-      if (num instanceof Decimal) return ce.number(num.abs());
-      if (num instanceof Complex) return ce.number(num.abs());
-      if (isMachineRational(num))
-        return ce.number(
-          mode === 'N' ? Math.abs(num[0] / num[1]) : [Math.abs(num[0]), num[1]]
-        );
-
-      if (isBigRational(num)) {
-        const [n, d] = num;
-        return ce.number(
-          mode === 'N'
-            ? ce.bignum(n).div(ce.bignum(d)).abs()
-            : [n > 0 ? n : -n, d]
-        );
-      }
+      return ce.number(num.abs());
     }
   }
   if (arg.isNonNegative) return arg;
@@ -1327,7 +1358,7 @@ function processMinMaxItem(
   if (item.operator === 'Interval') {
     const b = upper ? item.op2 : item.op1;
 
-    if (!b.isNumber || b.numericValue === undefined) return [undefined, [item]];
+    if (!b.isNumber || b.numericValue === null) return [undefined, [item]];
     return [b, []];
   }
 
@@ -1337,10 +1368,14 @@ function processMinMaxItem(
     else if (!upper) {
       item = item.op1;
     } else {
-      const step = item.nops === 2 ? 1 : asFloat(item.op3);
-      if (step === null || !isFinite(step)) return [undefined, [item]];
-      const [a, b] = [asFloat(item.op1), asFloat(item.op2)];
-      if (a === null || b === null) return [undefined, [item]];
+      let step = 1;
+      if (item.nops === 3) {
+        if (item.op3.type !== 'integer') return [undefined, [item]];
+        step = item.op3.re ?? 1;
+        if (step === 0 || !isFinite(step)) return [undefined, [item]];
+      }
+      const [a, b] = [item.op1.re, item.op2.re];
+      if (a === undefined || b === undefined) return [undefined, [item]];
       const steps = Math.floor((b - a) / step);
       item = ce.number(a + step * steps);
     }
@@ -1375,8 +1410,7 @@ function processMinMaxItem(
     return [result, rest];
   }
 
-  if (!item.isNumber || item.numericValue === undefined)
-    return [undefined, [item]];
+  if (!item.isNumber || item.numericValue === null) return [undefined, [item]];
   return [item, []];
 }
 
@@ -1439,12 +1473,10 @@ function processGcdLcm(
   let result: number | null = null;
   for (const op of ops) {
     if (result === null) {
-      result = asFloat(op);
-      if (result === null || !Number.isInteger(result)) rest.push(op);
+      if (op.type !== 'integer') rest.push(op);
     } else {
-      const d = asFloat(op);
-      if (d && Number.isInteger(d)) result = fn(result, d);
-      else rest.push(op);
+      if (!op.isInteger) rest.push(op);
+      else result = fn(result, op.re!);
     }
   }
   if (rest.length === 0) return result === null ? ce.One : ce.number(result);
@@ -1452,14 +1484,56 @@ function processGcdLcm(
   return ce._fn(mode, [ce.number(result), ...rest]);
 }
 
-function processLn(
-  n: BoxedExpression,
-  base?: BoxedExpression
+export function isPrime(expr: BoxedExpression): boolean | undefined {
+  if (!expr.isInteger) return undefined;
+  if (expr.isNegative) return undefined;
+
+  const value = expr.numericValue;
+  if (value === null) return undefined;
+
+  const n = asSmallInteger(expr);
+  if (n !== null) return isPrimeMachine(n);
+  const b = asBigint(expr);
+  if (b !== null) return isPrimeBigint(b);
+
+  return undefined;
+}
+
+export function canonicalPower(
+  a: BoxedExpression,
+  b: BoxedExpression
 ): BoxedExpression {
-  const ce = n.engine;
-  if (n.isZero) return ce.NaN;
-  if (n.isOne) return ce.Zero;
-  if (n.isNegativeOne) return ce.Pi.mul(ce.I);
-  if (base) return ce._fn('Log', [n, base]);
-  return ce._fn('Ln', [n]);
+  const ce = a.engine;
+  a = a.canonical;
+  b = b.canonical;
+  const exp = b.re;
+  if (exp !== undefined) {
+    if (exp === 0) return ce.One;
+    if (exp === 1) return a;
+    if (exp === 0.5) return canonicalRoot(a, 2);
+  }
+  return ce._fn('Power', [a, b]);
+}
+
+export function canonicalRoot(
+  a: BoxedExpression,
+  b: BoxedExpression | number
+): BoxedExpression {
+  a = a.canonical;
+  const ce = a.engine;
+  const exp = typeof b === 'number' ? b : b.re;
+  if (exp === 1) return a;
+  if (exp === 2) {
+    if (
+      a.numericValue !== null &&
+      (a.type === 'integer' || a.type === 'rational')
+    )
+      return a.sqrt();
+    return ce._fn('Sqrt', [a]);
+  }
+
+  return ce._fn('Root', [
+    a,
+    typeof b === 'number' ? ce.number(b) : b.canonical,
+  ]);
 }

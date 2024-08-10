@@ -4,7 +4,6 @@ import { Decimal } from 'decimal.js';
 import { Expression, MathJsonIdentifier } from '../../math-json/types';
 
 import { LatexString } from '../public';
-import { Rational } from '../numerics/rationals';
 import { compileToJavascript } from '../compile';
 import {
   getApplyFunctionStyle,
@@ -36,9 +35,9 @@ import {
   RuntimeScope,
   SemiBoxedExpression,
   Substitution,
+  Type,
 } from './public';
 import { SerializeLatexOptions } from '../latex-syntax/public';
-import { asFloat } from './numerics';
 import { AsciiMathOptions, toAsciiMath } from './ascii-math';
 
 /**
@@ -97,7 +96,8 @@ export abstract class _BoxedExpression implements BoxedExpression {
     if (this.symbol === 'NegativeInfinity') return -Infinity;
     if (typeof this.string === 'string') return this.string;
     if (typeof this.symbol === 'string') return this.symbol;
-    return asFloat(this) ?? this.toString();
+    if (this.im === 0) return this.re ?? this.toString();
+    return this.toString();
   }
 
   toAsciiMath(options: Partial<AsciiMathOptions> = {}): string {
@@ -324,7 +324,7 @@ export abstract class _BoxedExpression implements BoxedExpression {
     return null;
   }
 
-  get nops(): number {
+  get nops(): SmallInteger {
     return 0;
   }
 
@@ -390,16 +390,25 @@ export abstract class _BoxedExpression implements BoxedExpression {
     return undefined;
   }
 
-  get isPrime(): boolean | undefined {
-    return undefined;
-  }
-
-  get isComposite(): boolean | undefined {
-    return undefined;
-  }
-
-  get numericValue(): number | Decimal | Complex | Rational | null {
+  get numericValue(): number | NumericValue | null {
     return null;
+  }
+
+  get isNumberLiteral(): boolean {
+    return this.numericValue !== null;
+  }
+
+  get re(): number | undefined {
+    return undefined;
+  }
+  get im(): number | undefined {
+    return undefined;
+  }
+  get bignumRe(): Decimal | undefined {
+    return undefined;
+  }
+  get bignumIm(): Decimal | undefined {
+    return undefined;
   }
 
   //
@@ -433,9 +442,11 @@ export abstract class _BoxedExpression implements BoxedExpression {
     return this.engine.NaN;
   }
 
-  pow(
-    exp: number | [num: number, denom: number] | BoxedExpression
-  ): BoxedExpression {
+  pow(exp: number | BoxedExpression): BoxedExpression {
+    return this.engine.NaN;
+  }
+
+  root(exp: number | BoxedExpression): BoxedExpression {
     return this.engine.NaN;
   }
 
@@ -619,6 +630,10 @@ export abstract class _BoxedExpression implements BoxedExpression {
     throw new Error(`Can't change the domain of \\(${this.latex}\\)`);
   }
 
+  get type(): Type {
+    return 'unknown';
+  }
+
   get isNumber(): boolean | undefined {
     return undefined;
   }
@@ -631,16 +646,7 @@ export abstract class _BoxedExpression implements BoxedExpression {
     return undefined;
   }
 
-  get isAlgebraic(): boolean | undefined {
-    return false;
-  }
-
   get isReal(): boolean | undefined {
-    return undefined;
-  }
-
-  // Real or +-Infinity
-  get isExtendedReal(): boolean | undefined {
     return undefined;
   }
 
@@ -649,10 +655,6 @@ export abstract class _BoxedExpression implements BoxedExpression {
   }
 
   get isImaginary(): boolean | undefined {
-    return undefined;
-  }
-
-  get isExtendedComplex(): boolean | undefined {
     return undefined;
   }
 
@@ -763,3 +765,4 @@ export function getSubexpressions(
 
 import { serializeJson } from './serialize';
 import { NumericValue } from '../numeric-value/public';
+import { SmallInteger } from '../numerics/numeric';

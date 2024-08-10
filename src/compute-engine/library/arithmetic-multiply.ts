@@ -11,12 +11,14 @@ import {
 } from './utils';
 import { each, isCollection } from '../collection-utils';
 
-import { asBignum, asFloat } from '../boxed-expression/numerics';
+import { asBignum } from '../boxed-expression/numerics';
 import { Product } from '../symbolic/product';
 import { expandProducts } from '../symbolic/expand';
 import { flatten } from '../symbolic/flatten';
 import { negateProduct } from '../symbolic/negate';
 import { order } from '../boxed-expression/order';
+import { ExactNumericValue } from '../numeric-value/exact-numeric-value';
+import { isInteger } from '../numerics/rationals';
 
 // Canonical form of `["Product"]` (`\prod`) expressions.
 export function canonicalProduct(
@@ -93,12 +95,12 @@ export function evalProduct(
     } else {
       let product = 1;
       for (const x of each(body)) {
-        const term = asFloat(x);
-        if (term === null) {
+        const term = x.re;
+        if (term === undefined) {
           result = undefined;
           break;
         }
-        if (term === null || !Number.isFinite(term)) {
+        if (!Number.isFinite(term)) {
           product = term;
           break;
         }
@@ -146,7 +148,7 @@ export function evalProduct(
       const terms: BoxedExpression[] = [];
       for (let i = lower; i <= upper; i++) {
         ce.assign({ [index]: i });
-        terms.push(fn.simplify()); // @fixme: call evaluate() instead
+        terms.push(fn.evaluate());
       }
       result = mul(...terms);
     }
@@ -217,32 +219,23 @@ export function evalProduct(
           let product = ce.bignum(1);
           for (let i = lower; i <= upper; i++) {
             ce.assign({ [index]: i });
-            const term = asBignum(fn.N());
-            if (term === null || term.isFinite() === false) {
-              result = term !== null ? ce.number(term) : undefined;
-              break;
-            }
-            product = product.mul(term);
+            const term = fn.N();
+            product = product.mul(term.bignumRe ?? term.re ?? NaN);
           }
-          if (result === null) result = ce.number(product);
-        }
-
-        // Machine precision
-        let product = 1;
-        const precision = ce.precision;
-        ce.precision = 'machine';
-        for (let i = lower; i <= upper; i++) {
-          ce.assign({ [index]: i });
-          const term = asFloat(fn.N());
-          if (term === null || !Number.isFinite(term)) {
-            result = term !== null ? ce.number(term) : undefined;
-            break;
+          result = ce.number(product);
+        } else {
+          // Machine precision
+          let product = 1;
+          const precision = ce.precision;
+          ce.precision = 'machine';
+          for (let i = lower; i <= upper; i++) {
+            ce.assign({ [index]: i });
+            product *= fn.N().re ?? NaN;
           }
-          product *= term;
-        }
-        ce.precision = precision;
+          ce.precision = precision;
 
-        if (result === null) result = ce.number(product);
+          result = ce.number(product);
+        }
       }
 
       if (result === null) {
@@ -256,29 +249,26 @@ export function evalProduct(
         ce.assign({ [index]: 999 });
         const nMaxMinusOne = fn.N();
 
-        const ratio = asFloat(nMax.div(nMaxMinusOne).N());
-        if (ratio !== null && Number.isFinite(ratio) && Math.abs(ratio) > 1) {
+        const ratio = nMax.div(nMaxMinusOne).N().re ?? NaN;
+        if (Number.isFinite(ratio) && Math.abs(ratio) > 1) {
           result = ce.PositiveInfinity;
         } else {
           // Potentially converging series.
           // Evaluate as a machine number (it's an approximation to infinity, so
-          // no point in calculating with high precision), and check for convergence
+          // no point in calculating with high precision),
+          // and check for convergence
           let product = 1;
           const precision = ce.precision;
           ce.precision = 'machine';
           for (let i = lower; i <= upper; i++) {
             ce.assign({ [index]: i });
-            const term = asFloat(fn.N());
-            if (term === null) {
-              result = undefined;
-              break;
-            }
+            const term = fn.N().re ?? NaN;
             // Converged (or diverged), early exit
             if (Math.abs(1 - term) < Number.EPSILON || !Number.isFinite(term))
               break;
             product *= term;
           }
-          if (result === null) result = ce.number(product);
+          result = ce.number(product);
           ce.precision = precision;
         }
       }
@@ -317,56 +307,79 @@ export function canonicalMultiply(
 
   const xs: BoxedExpression[] = [];
   let sign = 1;
-  let num: number | undefined = undefined;
   let imaginaryCount = 0;
-  for (const op of ops) {
+  let imaginaryCoef: number | undefined = undefined;
+
+  const handle = (op: BoxedExpression): BoxedExpression | undefined => {
     if (op.isZero) return ce.Zero;
-    if (op.isOne) continue;
+    if (op.isOne) return undefined;
     if (op.isNegativeOne) {
       sign = -sign;
-      continue;
+      return undefined;
     }
     if (op.operator === 'Negate') {
       sign = -sign;
-      xs.push(op.op1);
-      continue;
-    }
-    // Capture the first machine literal, to potentially use as a imaginary coef
-    if (num === undefined && typeof op.numericValue === 'number') {
-      num = op.numericValue;
-      if (num < 0) {
-        sign = -sign;
-        num = -num;
-      }
-      continue;
-    }
-    if (op.numericValue !== null && op.isNegative) {
-      sign = -sign;
-      xs.push(op.neg());
-      continue;
+      return handle(op.op1);
     }
     if (op.symbol === 'ImaginaryUnit') {
       imaginaryCount++;
-      continue;
+      return undefined;
     }
-    xs.push(op);
+    if (op.numericValue === null) return op;
+
+    // Capture the sign
+    if (op.isNegative) {
+      sign = -sign;
+      op = op.neg();
+    }
+
+    // Capture the first machine literal, to potentially use as a imaginary coef
+    if (imaginaryCoef !== undefined) return op;
+
+    if (op.re === 0 && op.im !== 0) {
+      imaginaryCount++;
+      imaginaryCoef = op.im;
+      return undefined;
+    }
+
+    if (op.im !== 0) return op;
+
+    // If an exact number with a radical or rational part, keep as is
+    const v = op.numericValue;
+    if (
+      v instanceof ExactNumericValue &&
+      (v.radical !== 1 || !isInteger(v.rational))
+    )
+      return op;
+
+    imaginaryCoef = op.re;
+    return undefined;
+  };
+
+  for (const op of ops) {
+    const x = handle(op);
+    if (x?.isZero) return ce.Zero;
+    if (x !== undefined) xs.push(x);
   }
 
   // See if we had a complex number
   if (imaginaryCount > 0) {
     if (imaginaryCount % 2 === 0) {
-      // Even number of imaginary units
+      // Even number of imaginary units -> -1
       sign = -sign;
     } else {
       // Odd number of imaginary units
-      xs.push(ce.number(ce.complex(0, sign * (num ?? 1))));
-      sign = 1;
-      num = undefined;
+      if (imaginaryCoef !== undefined) {
+        xs.push(ce.number(ce.complex(0, sign * imaginaryCoef)));
+        sign = 1;
+      } else xs.push(ce.I);
+      imaginaryCoef = undefined;
     }
   }
 
-  if (typeof num === 'number') {
-    xs.push(ce.number(sign * num));
+  // If we couldn't use the imaginary coef, add it back
+  if (imaginaryCoef !== undefined) {
+    xs.push(ce.number(sign * imaginaryCoef));
     sign = 1;
   }
 

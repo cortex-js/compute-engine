@@ -1,7 +1,7 @@
-import { asMachineInteger } from '../boxed-expression/numerics';
+import { asSmallInteger } from '../boxed-expression/numerics';
 import { isRelationalOperator } from '../boxed-expression/utils';
 import { mul } from '../library/arithmetic-multiply';
-import { add } from '../numerics/terms';
+import { add } from '../boxed-expression/terms';
 import { BoxedExpression, IComputeEngine } from '../public';
 import { Product } from './product';
 
@@ -240,7 +240,7 @@ export function expandFunction(
   // Power
   //
   if (h === 'Power') {
-    const exp = asMachineInteger(ops[1]);
+    const exp = asSmallInteger(ops[1]);
     result = exp !== null ? expandPower(ops[0], exp) : null;
   }
 

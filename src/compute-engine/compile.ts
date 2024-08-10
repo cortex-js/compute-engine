@@ -1,18 +1,10 @@
 import { MathJsonIdentifier } from '../math-json/types';
-import { asFloat } from './boxed-expression/numerics';
 import { isRelationalOperator } from './boxed-expression/utils';
 import { isCollection, isFiniteIndexableCollection } from './collection-utils';
 import { normalizeIndexingSet } from './library/utils';
-import {
-  chop,
-  factorial,
-  gamma,
-  gcd,
-  lcm,
-  gammaln,
-  limit,
-  monteCarloEstimate,
-} from './numerics/numeric';
+import { monteCarloEstimate } from './numerics/monte-carlo';
+import { chop, factorial, gcd, lcm, limit } from './numerics/numeric';
+import { gamma, gammaln } from './numerics/special-functions';
 import { BoxedExpression } from './public';
 
 export type CompiledType = boolean | number | string | object;
@@ -96,7 +88,7 @@ const NATIVE_JS_FUNCTIONS: CompiledFunctions = {
   Power: (args, compile) => {
     const arg = args[0];
     if (arg === null) throw new Error('Power: no argument');
-    const exp = asFloat(args[1]);
+    const exp = args[1].re;
     if (exp === 0.5) return `Math.sqrt(${compile(arg)})`;
     if (exp === 1 / 3) return `Math.cbrt(${compile(arg)})`;
     if (exp === 1) return compile(arg);
@@ -144,6 +136,10 @@ const NATIVE_JS_FUNCTIONS: CompiledFunctions = {
     if (arg === null) throw new Error('Root: no argument');
     const exp = args[1];
     if (exp === null) return `Math.sqrt(${compile(arg)})`;
+    if (exp.re === 2) return `Math.sqrt(${compile(arg)})`;
+    if (exp.re === 3) return `Math.cbrt(${compile(arg)})`;
+    if (exp.re !== undefined)
+      return `Math.pow(${compile(arg)},  ${1 / exp.re})`;
     return `Math.pow(${compile(arg)}, 1 / (${compile(exp)}))`;
   },
   Random: 'Math.random',
@@ -190,7 +186,7 @@ const NATIVE_JS_FUNCTIONS: CompiledFunctions = {
   // GCD: 'Math.gcd',
   // LCM: 'Math.lcm',
   // Divisors: 'Math.divisors',
-  // PrimeQ: 'Math.isPrime',
+  // IsPrime: 'Math.isPrime',
   // PrimePi: 'Math.primePi',
   // Prime: 'Math.prime',
   // NextPrime: 'Math.nextPrime',
@@ -485,8 +481,11 @@ export function compile(
   //
   // Is it a number?
   //
-  const f = asFloat(expr);
-  if (f !== null) return target.number(f);
+  const f = expr.re;
+  if (f !== undefined) {
+    if (expr.im !== 0) throw new Error('Complex numbers not supported');
+    return target.number(f);
+  }
 
   //
   // Is it a symbol?

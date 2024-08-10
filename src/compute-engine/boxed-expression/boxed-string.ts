@@ -7,6 +7,7 @@ import {
   PatternMatchOptions,
   BoxedSubstitution,
   SemiBoxedExpression,
+  Type,
 } from './public';
 import { hashCode, isBoxedExpression } from './utils';
 import Complex from 'complex.js';
@@ -47,9 +48,15 @@ export class BoxedString extends _BoxedExpression {
   set isCanonical(_va: boolean) {
     return;
   }
+
   get domain(): BoxedDomain {
     return this.engine.Strings;
   }
+
+  get type(): Type {
+    return 'string';
+  }
+
   get complexity(): number {
     return 19;
   }

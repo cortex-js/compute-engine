@@ -17,7 +17,7 @@ describe('COMPILE', () => {
     it('should compile an expression with trig functions', () => {
       expect(
         ce.parse('2 \\cos(\\frac{\\pi}{5})').compile()?.toString()
-      ).toMatchInlineSnapshot(`(1 + Math.sqrt(5)) / 2`);
+      ).toMatchInlineSnapshot(`Math.sqrt(5) / 2 + 0.5`);
     });
   });
 

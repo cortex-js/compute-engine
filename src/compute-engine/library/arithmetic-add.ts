@@ -1,12 +1,10 @@
-import Complex from 'complex.js';
-
 import { BoxedDomain, BoxedExpression, IComputeEngine } from '../public';
 import { bignumPreferred } from '../boxed-expression/utils';
 import { MAX_SYMBOLIC_TERMS } from '../numerics/numeric';
 import { widen } from '../boxed-expression/boxed-domain';
 import { sortAdd } from '../boxed-expression/order';
 import { each, isCollection, isIndexableCollection } from '../collection-utils';
-import { add } from '../numerics/terms';
+import { add } from '../boxed-expression/terms';
 
 import {
   MultiIndexingSet,
@@ -15,7 +13,7 @@ import {
   cartesianProduct,
   range,
 } from './utils';
-import { asBignum, asFloat } from '../boxed-expression/numerics';
+import { asBignum } from '../boxed-expression/numerics';
 import { flatten } from '../symbolic/flatten';
 
 /** The canonical form of `Add`:
@@ -41,15 +39,23 @@ export function canonicalAdd(
   // Is this a  complex number, i.e. `a + ib` or `ai + b`?
   //
   if (ops.length === 2) {
-    let im: number | null = 0;
-    let re = asFloat(ops[0]);
-    if (re !== null && re !== 0) im = getImaginaryCoef(ops[1]);
-    else {
+    let im: number | undefined = 0;
+
+    // Is the second term an imaginary number?
+    im = getImaginaryCoef(ops[1]);
+    if (im !== 0) {
+      const re = ops[0].bignumRe ?? ops[0].re;
+      if (re !== undefined)
+        return ce.number(ce._numericValue({ decimal: re, im }));
+    } else {
+      // Is the first term an imaginary number?
       im = getImaginaryCoef(ops[0]);
-      if (im !== 0 && ops[1].numericValue !== null) re = asFloat(ops[1]);
+      if (im !== 0) {
+        const re = ops[1].bignumRe ?? ops[1].re;
+        if (re !== undefined)
+          return ce.number(ce._numericValue({ decimal: re, im }));
+      }
     }
-    if (re !== null && im !== null && im !== 0)
-      return ce.number(ce.complex(re, im));
   }
 
   if (ops.length === 1) return ops[0];
@@ -68,16 +74,6 @@ export function domainAdd(
     dom = widen(dom, arg);
   }
   return dom;
-}
-
-function evalAddNum(ops: ReadonlyArray<BoxedExpression>): number | null {
-  let sum = 0;
-  for (const op of ops) {
-    const v = op.numericValue;
-    if (typeof v === 'number') sum += v;
-    else return null;
-  }
-  return sum;
 }
 
 export function canonicalSummation(
@@ -151,12 +147,12 @@ export function evalSummation(
     } else {
       let sum = 0;
       for (const x of each(body)) {
-        const term = asFloat(x);
-        if (term === null) {
+        const term = x.re;
+        if (term === undefined) {
           result = undefined;
           break;
         }
-        if (term === null || !Number.isFinite(term)) {
+        if (!Number.isFinite(term)) {
           sum = term;
           break;
         }
@@ -308,8 +304,8 @@ export function evalSummation(
           let sum = 0;
           for (let i = lower; i <= upper; i++) {
             ce.assign(index, i);
-            const term = asFloat(fn.N());
-            if (term === null) {
+            const term = fn.N().re;
+            if (term === undefined) {
               result = undefined;
               break;
             }
@@ -333,8 +329,12 @@ export function evalSummation(
         ce.assign(index, 999);
         const nMaxMinusOne = fn.N();
 
-        const ratio = asFloat(nMax.div(nMaxMinusOne).N());
-        if (ratio !== null && Number.isFinite(ratio) && Math.abs(ratio) > 1) {
+        const ratio = nMax.div(nMaxMinusOne).re;
+        if (
+          ratio !== undefined &&
+          Number.isFinite(ratio) &&
+          Math.abs(ratio) > 1
+        ) {
           result = ce.PositiveInfinity;
         } else {
           // Potentially converging series.
@@ -345,8 +345,8 @@ export function evalSummation(
           ce.precision = 'machine';
           for (let i = lower; i <= upper; i++) {
             ce.assign(index, i);
-            const term = asFloat(fn.N());
-            if (term === null) {
+            const term = fn.N().re;
+            if (term === undefined) {
               result = undefined;
               break;
             }
@@ -378,21 +378,22 @@ export function evalSummation(
  *
  */
 function getImaginaryCoef(expr: BoxedExpression): number {
+  // @fixme: try this instead
+  // return getImaginaryFactor(expr)?.re ?? 0;{
   if (expr.symbol === 'ImaginaryUnit') return 1;
 
-  const z = expr.numericValue;
-  if (z !== null && z instanceof Complex && z.re === 0) return z.im;
+  if (expr.re === 0) return expr.im!;
 
   if (expr.operator === 'Negate') return -getImaginaryCoef(expr.op1);
 
   if (expr.operator === 'Multiply' && expr.nops === 2) {
-    if (expr.op1.symbol === 'ImaginaryUnit') return asFloat(expr.op2) ?? 0;
-    if (expr.op2.symbol === 'ImaginaryUnit') return asFloat(expr.op1) ?? 0;
+    if (expr.op1.symbol === 'ImaginaryUnit') return expr.op2.re ?? 0;
+    if (expr.op2.symbol === 'ImaginaryUnit') return expr.op1.re ?? 0;
   }
 
   if (expr.operator === 'Divide') {
-    const denom = asFloat(expr.op2);
-    if (denom !== null) return getImaginaryCoef(expr.op1) / denom;
+    const denom = expr.op2.re;
+    if (denom !== undefined) return getImaginaryCoef(expr.op1) / denom;
   }
 
   return 0;

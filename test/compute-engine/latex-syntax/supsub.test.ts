@@ -2,26 +2,28 @@ import { engine as ce } from '../../utils';
 
 describe('SUPSUB', () => {
   test('Superscript', () => {
-    expect(ce.parse('2^2')).toMatchInlineSnapshot(`4`);
+    expect(ce.parse('2^2')).toMatchInlineSnapshot(`["Square", 2]`);
     expect(ce.parse('x^t')).toMatchInlineSnapshot(`["Power", "x", "t"]`);
-    expect(ce.parse('2^{10}')).toMatchInlineSnapshot(`1024`);
+    expect(ce.parse('2^{10}')).toMatchInlineSnapshot(`["Power", 2, 10]`);
     expect(ce.parse('\\pi^2')).toMatchInlineSnapshot(`["Square", "Pi"]`);
-    expect(ce.parse('2^23')).toMatchInlineSnapshot(`["Multiply", 3, 4]`);
+    expect(ce.parse('2^23')).toMatchInlineSnapshot(
+      `["Multiply", 3, ["Square", 2]]`
+    );
     expect(ce.parse('2^\\pi')).toMatchInlineSnapshot(`["Power", 2, "Pi"]`);
     expect(ce.parse('2^\\frac12')).toMatchInlineSnapshot(`["Sqrt", 2]`);
     expect(ce.parse('2^{3^4}')).toMatchInlineSnapshot(
-      `2417851639229258349412352`
+      `["Power", 2, ["Power", 3, 4]]`
     );
-    expect(ce.parse('2^{10}')).toMatchInlineSnapshot(`1024`);
+    expect(ce.parse('2^{10}')).toMatchInlineSnapshot(`["Power", 2, 10]`);
     expect(ce.parse('2^{-2}')).toMatchInlineSnapshot(`["Divide", 1, 4]`);
     expect(ce.parse('2^3^4')).toMatchInlineSnapshot(
       `["Power", 2, ["List", 3, 4]]`
     );
     expect(ce.parse('2^{3^4}')).toMatchInlineSnapshot(
-      `2417851639229258349412352`
+      `["Power", 2, ["Power", 3, 4]]`
     );
     expect(ce.parse('12^34.5')).toMatchInlineSnapshot(
-      `["Multiply", 4.5, 1728]`
+      `["Multiply", 4.5, ["Power", 12, 3]]`
     );
     expect(ce.parse('x^2')).toMatchInlineSnapshot(`["Square", "x"]`);
     expect(ce.parse('x^{x+1}')).toMatchInlineSnapshot(
@@ -31,7 +33,9 @@ describe('SUPSUB', () => {
   test('Subscript', () => {
     expect(ce.parse('x_0')).toMatchInlineSnapshot(`["At", "x", 0]`);
     expect(ce.parse('x^2_0')).toMatchInlineSnapshot(`["Square", "x_0"]`);
-    expect(ce.parse('x_0^2')).toMatchInlineSnapshot(`["At", "x", 0]`);
+    expect(ce.parse('x_0^2')).toMatchInlineSnapshot(
+      `["At", "x", ["Square", 0]]`
+    );
     expect(ce.parse('x_{n+1}')).toMatchInlineSnapshot(
       `["At", "x", ["Add", "n", 1]]`
     );

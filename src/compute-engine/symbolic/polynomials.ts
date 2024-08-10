@@ -1,6 +1,5 @@
-import Decimal from 'decimal.js';
 import { BoxedExpression, SemiBoxedExpression } from '../public';
-import { asMachineInteger } from '../boxed-expression/numerics';
+import { asSmallInteger } from '../boxed-expression/numerics';
 
 /**
  * Coefficient of a univariate (single variable) polynomial.
@@ -120,14 +119,8 @@ function getDegree(expr: BoxedExpression | undefined): number {
 
   if (expr.ops) {
     const operator = expr.operator;
-    if (operator === 'Power') {
-      const exponent = expr.op2.numericValue;
-      if (typeof exponent === 'number')
-        return Number.isInteger(exponent) ? exponent : 0;
-      if (exponent instanceof Decimal)
-        return exponent.isInteger() ? exponent.toNumber() : 0;
-      return 0;
-    }
+    if (operator === 'Power') return expr.op2.re ?? 0;
+
     if (operator === 'Multiply') {
       return [...expr.ops].reduce((acc, x) => acc + getDegree(x), 0);
     }
@@ -152,7 +145,7 @@ export function totalDegree(expr: BoxedExpression): number {
   if (expr.operator === 'Power' && expr.op2.numericValue !== null) {
     // If the base has no unknowns, the degree is 0, e.g. 2^3
     if (totalDegree(expr.op1) === 0) return 0;
-    const deg = asMachineInteger(expr.op2);
+    const deg = asSmallInteger(expr.op2);
     if (deg !== null && deg > 0) return deg;
     return 0;
   }
@@ -194,7 +187,7 @@ export function maxDegree(expr: BoxedExpression): number {
     // If the base has no unknowns, the degree is 0, e.g. 2^3
     if (maxDegree(expr.op1) === 0) return 0;
 
-    const deg = asMachineInteger(expr.op2);
+    const deg = asSmallInteger(expr.op2);
     if (deg !== null && deg > 0) return deg;
     return 0;
   }

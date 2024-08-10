@@ -10,13 +10,16 @@ import {
   Metadata,
 } from '../public';
 
-import { asMachineInteger, asFloat } from './numerics';
+import { asSmallInteger } from './numerics';
 
 import { isInMachineRange } from '../numerics/numeric-bignum';
 
 import {
   Rational,
+  isInteger,
   isMachineRational,
+  isNegativeOne,
+  isOne,
   isRational,
   machineDenominator,
   machineNumerator,
@@ -26,6 +29,10 @@ import {
 import { Product } from '../symbolic/product';
 
 import { order } from './order';
+import { NumericValue } from '../numeric-value/public';
+import { ExactNumericValue } from '../numeric-value/exact-numeric-value';
+import { numberToString } from '../numerics/strings';
+import { numberToExpression } from '../numerics/expression';
 
 function _escapeJsonString(s: undefined): undefined;
 function _escapeJsonString(s: string): string;
@@ -33,8 +40,11 @@ function _escapeJsonString(s: string | undefined): string | undefined {
   return s;
 }
 
-/** Attempt to expression a+b as a subtraction. Return null
+/** Attempt to transform an expression a+b as a subtraction b-a. Return null
  * if could not.
+ *
+ * The caller should have checked that 'Subtract' is not in the exclusions.
+ *
  */
 function serializeSubtract(
   ce: IComputeEngine,
@@ -43,29 +53,39 @@ function serializeSubtract(
   options: Readonly<JsonSerializationOptions>,
   metadata?: Metadata
 ): Expression | null {
-  if (a.numericValue !== null) {
-    if (isRational(a.numericValue)) {
-      if (machineNumerator(a.numericValue) < 0) {
-        return serializeJsonFunction(
-          ce,
-          'Subtract',
-          [b, ce.number(neg(a.numericValue))],
-          options,
-          metadata
-        );
-      }
-      return null;
-    }
-    const t0 = asMachineInteger(a);
-    if (t0 !== null && t0 < 0)
+  if (a.numericValue !== null && a.isNegative) {
+    const v = a.numericValue;
+    if (typeof v === 'number') {
       return serializeJsonFunction(
         ce,
         'Subtract',
-        [b, ce.number(-t0)],
+        [b, ce.number(-v)],
         options,
         metadata
       );
+    }
+
+    if (a.type === 'rational') {
+      return serializeJsonFunction(
+        ce,
+        'Subtract',
+        [b, ce.number(v.neg())],
+        options,
+        metadata
+      );
+    }
+
+    if (a.type === 'integer') {
+      return serializeJsonFunction(
+        ce,
+        'Subtract',
+        [b, ce.number(v.neg())],
+        options,
+        metadata
+      );
+    }
   }
+
   if (a.operator === 'Negate' && b.operator !== 'Negate')
     return serializeJsonFunction(ce, 'Subtract', [b, a.op1], options, metadata);
 
@@ -104,7 +124,7 @@ function serializePrettyJsonFunction(
   }
 
   if (name === 'Multiply' && !exclusions.includes('Negate')) {
-    if (asFloat(args[0]) === -1) {
+    if (args[0].re === -1) {
       if (args.length === 2)
         return serializeJsonFunction(ce, 'Negate', [args[1]], options);
       return serializeJsonFunction(
@@ -139,7 +159,7 @@ function serializePrettyJsonFunction(
       return serializeJsonFunction(ce, 'Exp', [args[1]], options, metadata);
 
     if (args[1]?.numericValue !== null) {
-      const exp = asMachineInteger(args[1]);
+      const exp = asSmallInteger(args[1]);
       // x^2 -> Square(x)
       if (exp === 2 && !exclusions.includes('Square'))
         return serializeJsonFunction(
@@ -160,7 +180,7 @@ function serializePrettyJsonFunction(
         );
       }
 
-      const r = args[1].numericValue;
+      const r = args[1].re;
 
       if (!exclusions.includes('Sqrt') && r === 0.5)
         return serializeJsonFunction(ce, 'Sqrt', [args[0]], options, metadata);
@@ -218,7 +238,7 @@ function serializePrettyJsonFunction(
 
   if (name === 'Add' && args.length === 2 && !exclusions.includes('Subtract')) {
     if (args[1]?.numericValue !== null) {
-      const t1 = asMachineInteger(args[1]);
+      const t1 = asSmallInteger(args[1]);
       if (t1 !== null && t1 < 0)
         return serializeJsonFunction(
           ce,
@@ -311,7 +331,7 @@ function serializeJsonFunction(
       args.length === 2 &&
       args[1]?.numericValue !== null
     ) {
-      const n = asMachineInteger(args[1]);
+      const n = asSmallInteger(args[1]);
       if (n === 2) return serializeJsonFunction(ce, 'Sqrt', [args[0]], options);
 
       if (n !== null) {
@@ -516,7 +536,7 @@ function serializeRepeatingDecimals(
 
 function serializeJsonNumber(
   ce: IComputeEngine,
-  value: number | Decimal | Complex | Rational,
+  value: number | bigint | NumericValue | Decimal | Complex | Rational,
   options: Readonly<JsonSerializationOptions>,
   metadata?: Metadata
 ): Expression {
@@ -531,6 +551,99 @@ function serializeJsonNumber(
     options.shorthands.includes('number');
 
   const exclusions = options.exclude;
+
+  if (value instanceof NumericValue) {
+    if (value.isNaN) return serializeJsonSymbol(ce, 'NaN', options, metadata);
+
+    if (value.isPositiveInfinity)
+      return serializeJsonSymbol(ce, 'PositiveInfinity', options, metadata);
+
+    if (value.isNegativeInfinity)
+      return serializeJsonSymbol(ce, 'NegativeInfinity', options, metadata);
+
+    if (shorthandAllowed) {
+      if (value.isZero) return 0;
+      if (value.isOne) return 1;
+      if (value.isNegativeOne) return -1;
+    }
+
+    // We have an exact numeric value, possibly with an imaginary part
+    if (value instanceof ExactNumericValue) {
+      // Calculate the real part
+
+      let rational: Expression;
+
+      if (isInteger(value.rational)) {
+        rational = serializeJsonNumber(ce, value.rational[0], options);
+      } else {
+        rational = [
+          'Rational',
+          serializeJsonNumber(ce, value.rational[0], options),
+          serializeJsonNumber(ce, value.rational[1], options),
+        ];
+      }
+
+      if (value.radical === 1) {
+        // No radical
+        if (value.im === 0) return rational;
+
+        if (typeof rational === 'number')
+          return ['Complex', rational, value.im];
+        return ['Add', rational, ['Complex', 0, value.im]];
+      }
+
+      // If rational was 0, radical would be 1, and we would have returned
+      // a number already
+      console.assert(rational !== 0);
+
+      if (isOne(value.rational)) {
+        if (value.im === 0) return ['Sqrt', value.radical];
+
+        return ['Add', ['Sqrt', value.radical], ['Complex', 0, value.im]];
+      }
+
+      if (isNegativeOne(value.rational)) {
+        if (value.im === 0) return ['Negate', ['Sqrt', value.radical]];
+
+        return [
+          'Add',
+          ['Negate', ['Sqrt', value.radical]],
+          ['Complex', 0, value.im],
+        ];
+      }
+
+      // There is a radical part
+      if (value.im === 0)
+        return ['Multiply', rational, ['Sqrt', value.radical]];
+
+      return [
+        'Add',
+        ['Multiply', rational, ['Sqrt', value.radical]],
+        ['Complex', 0, value.im],
+      ];
+    }
+
+    // We have a real number (big or machine)
+    if (value.im === 0) {
+      const re = value.bignumRe ?? value.re;
+      return serializeJsonNumber(ce, re, options, metadata);
+    }
+
+    // We have a complex number
+    if (!Number.isFinite(value.im))
+      return serializeJsonSymbol(ce, 'ComplexInfinity', options, metadata);
+
+    return serializeJsonFunction(
+      ce,
+      'Complex',
+      [ce.number(value.bignumRe ?? value.re), ce.number(value.im)],
+      options,
+      {
+        ...metadata,
+        wikidata: 'Q11567',
+      }
+    );
+  }
 
   //
   // Bignum
@@ -631,6 +744,26 @@ function serializeJsonNumber(
       { ...metadata }
     );
   }
+
+  //
+  // BigInt
+  //
+  if (typeof value === 'bigint') {
+    if (value >= Number.MIN_SAFE_INTEGER && value <= Number.MAX_SAFE_INTEGER) {
+      value = Number(value);
+    } else {
+      if (options.metadata.includes('latex'))
+        metadata.latex =
+          metadata.latex ?? ce.box({ num: value.toString() }).latex;
+
+      if (metadata.latex !== undefined)
+        return { num: value.toString(), latex: metadata.latex };
+      return shorthandAllowed
+        ? numberToExpression(value)
+        : { num: numberToString(value) };
+    }
+  }
+
   //
   // Machine number
   //
@@ -663,17 +796,27 @@ export function serializeJson(
   // We want to avoid that.
   const wikidata = expr.scope ? expr.wikidata : undefined;
 
+  // Is it a number literal?
   if (expr.numericValue !== null)
     return serializeJsonNumber(ce, expr.numericValue, options, {
       latex: expr.verbatimLatex,
     });
 
-  if (expr.rank > 0) {
-    // @todo tensor: could be optimized by avoiding creating
-    // an expression and getting the JSON from the tensor directly
-    return expr.json;
+  // Is it a tensor?
+  if (expr.rank > 0) return expr.json;
+
+  // Is it a string?
+  if (expr.string !== null) return serializeJsonString(expr.string, options);
+
+  // Is it a symbol?
+  if (expr.symbol !== null) {
+    return serializeJsonSymbol(ce, expr.symbol, options, {
+      latex: expr.verbatimLatex,
+      wikidata,
+    });
   }
 
+  // Is it a function?
   if (expr.ops) {
     if (expr.isValid && expr.isCanonical && options.prettify)
       return serializePrettyJsonFunction(ce, expr.operator, expr.ops, options, {
@@ -685,18 +828,6 @@ export function serializeJson(
       wikidata,
     });
   }
-
-  if (expr.string !== null) return serializeJsonString(expr.string, options);
-
-  if (expr.symbol !== null) {
-    return serializeJsonSymbol(ce, expr.symbol, options, {
-      latex: expr.verbatimLatex,
-      wikidata,
-    });
-  }
-
-  // if (expr instanceof _BoxedDomain) {
-  // }
 
   return expr.json;
 }

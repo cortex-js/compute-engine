@@ -1,193 +1,88 @@
 import Decimal from 'decimal.js';
-import Complex from 'complex.js';
 
-import {
-  Rational,
-  inverse,
-  isBigRational,
-  isMachineRational,
-  isRational,
-  rationalize,
-} from '../numerics/rationals';
+import { Rational } from '../numerics/rationals';
 import { BoxedExpression } from './public';
 import { SMALL_INTEGER, chop } from '../numerics/numeric';
 import { bigint } from '../numerics/numeric-bigint';
+import { ExactNumericValue } from '../numeric-value/exact-numeric-value';
 
 export function asRational(expr: BoxedExpression): Rational | undefined {
   const num = expr.numericValue;
-  if (Array.isArray(num)) return num;
   if (num === null) return undefined;
-  if (typeof num === 'number' && Number.isInteger(num)) {
-    if (num > 1e9 || num < -1e9) return [BigInt(num), BigInt(1)];
+
+  if (typeof num === 'number') {
+    console.assert(
+      Number.isInteger(num) && num <= SMALL_INTEGER && num >= -SMALL_INTEGER
+    );
     return [num, 1];
   }
-  if (num instanceof Decimal && num.isInteger())
-    return [bigint(num), BigInt(1)];
+
+  const type = num.type;
+  if (type !== 'integer' && type !== 'rational') return undefined;
+
+  if (num.im !== 0) return undefined;
+
+  if (num instanceof ExactNumericValue) {
+    if (num.radical !== 1) return undefined;
+    return num.rational;
+  }
+
+  const bignumRe = num.bignumRe;
+  if (bignumRe !== undefined) return [bigint(bignumRe)!, BigInt(1)];
+  const re = num.re;
+  if (Number.isInteger(re) && re > -SMALL_INTEGER && re < SMALL_INTEGER)
+    return [re, 1];
+
   return undefined;
 }
 
-export function asApproximateRational(
-  expr: BoxedExpression
-): Rational | undefined {
-  let result: number | Rational | undefined = asRational(expr);
-  if (result) return result;
-  const f = asFloat(expr);
-  if (f === null) return undefined;
-  result = rationalize(f);
-  if (isRational(result)) return result;
-  return undefined;
-}
-
-export function div(lhs: Rational, rhs: Rational): Rational {
-  return mul(lhs, inverse(rhs));
-}
-
-/**
- * Add a literal numeric value to a rational.
- * If the rational is a bigint, this is a hint to do the calculation in bigint
- * (no need to check `bignumPreferred()`).
- * @param lhs
- * @param rhs
- * @returns
- */
-export function add(lhs: Rational, rhs: BoxedExpression | Rational): Rational {
-  console.assert(
-    Array.isArray(rhs) ||
-      (rhs.numericValue !== null && !(rhs.numericValue instanceof Complex))
-  );
-  // If the lhs is infinity (or NaN) return as is
-  // (note that bigint cannot be infinite)
-  if (typeof lhs[0] === 'number' && !Number.isFinite(lhs[0])) return lhs;
-
-  const rhsNum = Array.isArray(rhs) ? rhs : rhs.numericValue;
-
-  if (rhsNum === null) return lhs;
-
-  if (Array.isArray(rhsNum)) {
-    if (isBigRational(rhsNum)) {
-      lhs = [BigInt(lhs[0]), BigInt(lhs[1])];
-      return [rhsNum[1] * lhs[0] + rhsNum[0] * lhs[1], rhsNum[1] * lhs[1]];
-    }
-    if (!Number.isFinite(rhsNum[0])) return rhsNum;
-    if (isBigRational(lhs)) {
-      const bigRhs = [BigInt(rhsNum[0]), BigInt(rhsNum[1])];
-      return [bigRhs[1] * lhs[0] + bigRhs[0] * lhs[1], bigRhs[1] * lhs[1]];
-    }
-    return [rhsNum[1] * lhs[0] + rhsNum[0] * lhs[1], rhsNum[1] * lhs[1]];
-  }
-
-  if (rhsNum instanceof Decimal) {
-    if (rhsNum.isNaN()) return [Number.NaN, 1];
-    if (!rhsNum.isFinite())
-      return [rhsNum.isNegative() ? -Infinity : Infinity, 1];
-
-    console.assert(rhsNum.isInteger());
-
-    if (isMachineRational(lhs)) lhs = [BigInt(lhs[0]), BigInt(lhs[1])];
-    // Decimal and Rational return a bigRational
-    return [lhs[0] + lhs[1] * bigint(rhsNum.toString()), lhs[1]];
-  }
-
-  // Can't add a complex to a rational
-  if (rhsNum instanceof Complex) return [Number.NaN, 1];
-
-  console.assert(!Number.isFinite(rhsNum) || Number.isInteger(rhsNum));
-
-  if (!Number.isFinite(rhsNum)) return [rhsNum, 1];
-
-  if (isMachineRational(lhs)) return [lhs[0] + lhs[1] * rhsNum, lhs[1]];
-
-  // By this point, lhs is a bigRational, rhsNum is a number
-  return [lhs[0] + lhs[1] * bigint(rhsNum), lhs[1]];
-}
-
-export function mul(lhs: Rational, rhs: BoxedExpression | Rational): Rational {
-  console.assert(
-    Array.isArray(rhs) ||
-      (rhs.numericValue !== null && !(rhs instanceof Complex))
-  );
-
-  if (Array.isArray(rhs)) {
-    if (isMachineRational(lhs) && isMachineRational(rhs))
-      return [lhs[0] * rhs[0], lhs[1] * rhs[1]];
-    if (isMachineRational(lhs)) lhs = [BigInt(lhs[0]), BigInt(lhs[1])];
-    if (isMachineRational(rhs)) rhs = [BigInt(rhs[0]), BigInt(rhs[1])];
-    return [lhs[0] * rhs[0], lhs[1] * rhs[1]];
-  }
-
-  const rhsNum = rhs.numericValue;
-  if (rhsNum !== null && typeof rhsNum === 'number') {
-    console.assert(Number.isInteger(rhsNum));
-    if (isMachineRational(lhs)) return [lhs[0] * rhsNum, lhs[1]];
-    return [lhs[0] * bigint(rhsNum), lhs[1]];
-  }
-
-  if (rhsNum instanceof Decimal) {
-    console.assert(rhsNum.isInteger());
-    if (isMachineRational(lhs))
-      return [bigint(rhsNum.toString()) * bigint(lhs[0]), bigint(lhs[1])];
-    return [bigint(rhsNum.toString()) * lhs[0], lhs[1]];
-  }
-
-  if (Array.isArray(rhsNum)) {
-    if (isBigRational(rhsNum))
-      return [rhsNum[0] * bigint(lhs[0]), rhsNum[1] * bigint(lhs[1])];
-    else if (isMachineRational(lhs))
-      return [lhs[0] * rhsNum[0], lhs[1] * rhsNum[1]];
-
-    return [lhs[0] * bigint(rhsNum[0]), lhs[1] * bigint(rhsNum[1])];
-  }
-
-  // If we've reached this point, rhsNum is a Complex
-  debugger;
-  return lhs;
-}
-
-export function asFloat(expr: BoxedExpression | undefined): number | null {
+export function asBigint(expr: BoxedExpression | undefined): bigint | null {
   if (expr === undefined || expr === null) return null;
   const num = expr.numericValue;
   if (num === null) return null;
 
-  if (typeof num === 'number') return num;
-
-  if (num instanceof Decimal) return num.toNumber();
-
-  if (Array.isArray(num)) {
-    const [n, d] = num;
-    if (typeof n === 'number' && typeof d === 'number') return n / d;
-    return Number(n as bigint) / Number(d as bigint);
+  if (typeof num === 'number') {
+    if (Number.isInteger(num)) return BigInt(num);
+    return null;
   }
 
-  console.assert(!(num instanceof Complex) || num.im !== 0);
+  if (num.im !== 0) return null;
 
-  return null;
+  const n = num.bignumRe;
+  if (n?.isInteger()) return bigint(n);
+
+  if (num.re === undefined || !Number.isInteger(num.re)) return null;
+
+  return BigInt(num.re);
 }
 
 export function asBignum(expr: BoxedExpression | undefined): Decimal | null {
   if (expr === undefined || expr === null) return null;
-  const num = expr.numericValue;
+  const num = typeof expr === 'number' ? expr : expr.numericValue;
   if (num === null) return null;
-
-  if (num instanceof Decimal) return num;
 
   if (typeof num === 'number') return expr.engine.bignum(num);
 
-  if (Array.isArray(num)) {
-    const [n, d] = num;
-    if (typeof n === 'number' && typeof d === 'number')
-      return expr.engine.bignum(n / d);
-    return expr.engine.bignum(n).div(d.toString());
-  }
+  if (num.im !== 0) return null;
 
-  console.assert(!(num instanceof Complex) || num.im !== 0);
-
-  return null;
+  const re = num.bignumRe ?? num.re;
+  if (re === undefined) return null;
+  return expr.engine.bignum(re);
 }
 
-export function asMachineInteger(
-  expr: BoxedExpression | undefined
+export function asSmallInteger(
+  expr: number | BoxedExpression | undefined
 ): number | null {
   if (expr === undefined || expr === null) return null;
+  if (typeof expr === 'number') {
+    if (
+      Number.isInteger(expr) &&
+      expr >= -SMALL_INTEGER &&
+      expr <= SMALL_INTEGER
+    )
+      return expr;
+    return null;
+  }
   const num = expr.numericValue;
   if (num === null) return null;
 
@@ -197,30 +92,10 @@ export function asMachineInteger(
     return null;
   }
 
-  if (num instanceof Decimal) {
-    if (num.isInteger()) {
-      const n = num.toNumber();
-      if (n >= -SMALL_INTEGER && n <= SMALL_INTEGER) return n;
-    }
-    return null;
-  }
+  if (num.im !== 0) return null;
 
-  // If we're canonical, a rational is never a small integer
-  if (expr.isCanonical) return null;
-
-  // We're not canonical, a rational could be a small integer, i.e. 4/2
-  const r = num;
-  if (Array.isArray(r)) {
-    const [n, d] = r;
-    let v: number;
-    if (typeof n === 'number' && typeof d === 'number') v = n / d;
-    else v = Number(n) / Number(d);
-
-    if (Number.isInteger(v) && v >= -SMALL_INTEGER && v <= SMALL_INTEGER)
-      return v;
-    return null;
-  }
-
+  const n = num.re;
+  if (n >= -SMALL_INTEGER && n <= SMALL_INTEGER) return Number(n);
   return null;
 }
 
@@ -235,51 +110,37 @@ export function signDiff(
   rhs: BoxedExpression,
   tolerance?: number
 ): -1 | 0 | 1 | undefined {
+  // Identity?
   if (lhs === rhs) return 0;
 
   const lhsN = lhs.N();
   const rhsN = rhs.N();
 
+  // Structural equality?
   if (lhsN.isSame(rhsN)) return 0;
 
   const lhsNum = lhsN.numericValue;
   const rhsNum = rhsN.numericValue;
 
-  if (lhsNum === null || rhsNum === null) {
-    const diff = lhsN.sub(rhsN);
-    if (diff.isZero) return 0;
-    // @fixme: use diff.numericValue & chop
-    const s = diff.sgn;
-    if (s !== null) return s;
-    return undefined;
-  }
+  // In general, it is impossible to always prove equality
+  // (Richardson's theorem) but this works often...
+  if (lhsNum === null || rhsNum === null)
+    return lhs.sub(rhs).N().sgn ?? undefined;
 
   tolerance ??= lhs.engine.tolerance;
 
-  if (lhsNum instanceof Complex && rhsNum instanceof Complex)
-    return chop(lhsNum.re - rhsNum.re, tolerance) === 0 &&
-      chop(lhsNum.im - rhsNum.im, tolerance) === 0
-      ? 0
-      : undefined;
-
-  if (lhsNum instanceof Complex || rhsNum instanceof Complex) return undefined;
-
-  // In general, it is impossible to always prove equality
-  // (Richardson's theorem) but this works often...
-
-  // At this point, lhsNum and rhsNum are either number or Decimal
-  // (it can't be a rational, because lhs.N() simplifies rationals to number or Decimal)
-  console.assert(!isRational(lhsNum) && !isRational(rhsNum));
+  // At this point, lhsNum and rhsNum are numeric values
 
   if (typeof lhsNum === 'number' && typeof rhsNum === 'number') {
     if (chop(rhsNum - lhsNum, tolerance) === 0) return 0;
     return lhsNum < rhsNum ? -1 : 1;
   }
   const ce = lhs.engine;
-  const delta = ce
-    .bignum(rhsNum as number | Decimal)
-    .sub(ce.bignum(lhsNum as number | Decimal));
+  const lhsV = ce._numericValue(lhsNum);
+  const rhsV = ce._numericValue(rhsNum);
 
-  if (chop(delta, tolerance) === 0) return 0;
-  return delta.isPos() ? 1 : -1;
+  const delta = lhsV.sub(rhsV);
+
+  if (delta.isZeroWithTolerance(tolerance)) return 0;
+  return delta.sgn();
 }

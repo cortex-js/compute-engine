@@ -1,6 +1,10 @@
 import Decimal from 'decimal.js';
-import { add } from '../boxed-expression/numerics';
-import { canonicalInteger, gcd, SMALL_INTEGER } from '../numerics/numeric';
+import {
+  canonicalInteger,
+  gcd,
+  SMALL_INTEGER,
+  SmallInteger,
+} from '../numerics/numeric';
 import {
   isOne,
   isZero,
@@ -10,8 +14,17 @@ import {
   isInteger,
   isNegativeOne,
   rationalAsFloat,
+  add,
+  Rational,
+  mul,
+  isMachineRational,
+  rationalGcd,
 } from '../numerics/rationals';
 import { NumericValue, NumericValueData, NumericValueFactory } from './public';
+import { Expression } from '../../math-json/types';
+import { isNumberExpression } from '../../math-json/utils';
+import { numberToExpression } from '../numerics/expression';
+import { numberToString } from '../numerics/strings';
 
 /**
  * An ExactNumericValue is the sum of a Gaussian imaginary and the product of
@@ -24,10 +37,10 @@ import { NumericValue, NumericValueData, NumericValueFactory } from './public';
  *
  */
 export class ExactNumericValue extends NumericValue {
-  rational: [number, number];
-  radical: number;
+  rational: Rational;
+  radical: number; // An integer > 0
 
-  im: number;
+  im: number; // An integer @fixme: remove.
 
   factory: NumericValueFactory;
 
@@ -36,20 +49,35 @@ export class ExactNumericValue extends NumericValue {
    * - radical is an integer
    * - im is an integer
    */
-  constructor(value: number | NumericValueData, factory: NumericValueFactory) {
+  constructor(
+    value: number | bigint | NumericValueData,
+    factory: NumericValueFactory
+  ) {
     super();
     this.factory = factory;
+
+    if (typeof value === 'object' && value.im !== 0 && value.im !== undefined) {
+      debugger; // @fixme
+    }
 
     if (typeof value === 'number') {
       console.assert(!Number.isFinite(value) || Number.isInteger(value));
       this.im = 0;
       this.rational = [value, 1];
-      this.radical = value === 0 ? 0 : 1;
+      this.radical = 1;
+      return;
+    }
+
+    if (typeof value === 'bigint') {
+      this.im = 0;
+      this.rational = [value, BigInt(1)];
+      this.radical = 1;
       return;
     }
 
     this.im = value.im ?? 0;
     console.assert(Number.isInteger(this.im));
+    console.assert(this.im === 0);
 
     if ('rational' in value || 'radical' in value || 'decimal' in value) {
       let decimal = value.decimal ?? 1;
@@ -57,22 +85,80 @@ export class ExactNumericValue extends NumericValue {
       console.assert(Number.isInteger(decimal));
       if (decimal === 0) {
         this.rational = [0, 1];
-        this.radical = 0;
+        this.radical = 1;
         return;
       }
-      let rational = value.rational
-        ? ([...value.rational] as const)
+      let rational: Rational = value.rational
+        ? [...value.rational]
         : ([1, 1] as const);
-      if (decimal !== 1) rational = [rational[0] * decimal, rational[1]];
+      if (decimal !== 1) rational = mul(rational, [decimal, 1]);
 
       this.radical = value.radical ?? 1;
-      this.rational = rational as [number, number];
+      console.assert(this.radical <= SMALL_INTEGER && this.radical >= 1);
+      this.rational = rational;
 
       this.normalize();
+
+      if (!isMachineRational(this.rational)) {
+        const [n, d] = this.rational;
+        if (
+          n >= Number.MIN_SAFE_INTEGER &&
+          n <= Number.MAX_SAFE_INTEGER &&
+          d >= Number.MIN_SAFE_INTEGER &&
+          d <= Number.MAX_SAFE_INTEGER
+        ) {
+          debugger;
+
+          console.log(reducedRational(this.rational));
+        }
+      }
     } else {
       this.rational = [0, 1];
-      this.radical = 0;
+      this.radical = 1;
     }
+  }
+
+  get type(): 'complex' | 'real' | 'rational' | 'integer' {
+    if (this.im !== 0) return 'complex';
+    if (this.radical !== 1) return 'real';
+    return isInteger(this.rational) ? 'integer' : 'rational';
+  }
+
+  toJSON(): Expression {
+    if (this.isNaN) return 'NaN';
+    if (this.isPositiveInfinity) return 'PositiveInfinity';
+    if (this.isNegativeInfinity) return 'NegativeInfinity';
+    if (this.isZero) return 0;
+    if (this.isOne) return 1;
+    if (this.isNegativeOne) return -1;
+
+    let re: Expression = 0;
+
+    const rationalExpr = (r: Rational) => {
+      if (isInteger(r)) return numberToExpression(r[0]);
+      return [
+        'Rational',
+        numberToExpression(r[0]),
+        numberToExpression(r[1]),
+      ] as Expression;
+    };
+
+    if (!isZero(this.rational)) {
+      // Only have a rational
+      if (this.radical === 1) re = rationalExpr(this.rational);
+      // Only have a radical
+      else if (isOne(this.rational)) re = ['Sqrt', this.radical];
+      else if (isNegativeOne(this.rational))
+        re = ['Negate', ['Sqrt', this.radical]];
+      // Have both a radical and a rational
+      else
+        re = ['Multiply', rationalExpr(this.rational), ['Sqrt', this.radical]];
+    }
+
+    if (this.im === 0) return re;
+
+    if (isNumberExpression(re)) return ['Complex', re, this.im];
+    return ['Add', re, ['Complex', 0, this.im]];
   }
 
   get isExact(): boolean {
@@ -96,32 +182,40 @@ export class ExactNumericValue extends NumericValue {
     if (this.isOne) return '1';
     if (this.isNegativeOne) return '-1';
 
-    const products: string[] = [];
+    let re = '';
+
+    const rationalStr = (r: Rational) => {
+      if (isInteger(r)) return numberToString(r[0]);
+
+      return `${numberToString(r[0])}/${numberToString(r[1])}`;
+    };
+
+    const radicalStr = (r: number) => `sqrt(${numberToString(r)})`;
 
     if (!isZero(this.rational)) {
-      if (!isOne(this.rational) && !isNegativeOne(this.rational)) {
-        if (isInteger(this.rational)) products.push(toFixed(this.rational[0]));
-        else
-          products.push(
-            `${toFixed(this.rational[0])}/${toFixed(this.rational[1])}`
-          );
-      }
-      if (this.radical !== 1) {
-        products.push(
-          `${isNegativeOne(this.rational) ? '-' : ''}sqrt(${this.radical})`
-        );
-      } else if (isNegativeOne(this.rational)) {
-        products.push('-1');
-      } else if (isOne(this.rational)) {
-        products.push('1');
-      }
+      // Only have a rational
+      if (this.radical === 1) re = rationalStr(this.rational);
+      // Only have a radical
+      else if (isOne(this.rational)) re = radicalStr(this.radical);
+      else if (isNegativeOne(this.rational))
+        re = `-${radicalStr(this.radical)}`;
+      // Have both a radical and a rational
+      else re = `${rationalStr(this.rational)}${radicalStr(this.radical)}`;
     }
 
     let im = '';
-    if (this.im < 0) im = `${this.im} i`;
-    else if (this.im > 0) im = `+${this.im} i`;
+    if (this.im < 0) {
+      if (this.im === -1) im = `-i`;
+      else {
+        if (re.length > 0) im = ` - ${-this.im}i`;
+        else im = `-${-this.im}i`;
+      }
+    } else if (this.im > 0) {
+      im = this.im === 1 ? `i` : `${this.im}i`;
+      if (re.length > 0) im = ` + ${im}`;
+    }
 
-    return `${products.join(' * ')}${im}`;
+    return `${re}${im}`;
   }
 
   get sign(): -1 | 0 | 1 {
@@ -134,25 +228,26 @@ export class ExactNumericValue extends NumericValue {
     return rationalAsFloat(this.rational) * Math.sqrt(this.radical);
   }
 
-  get num(): ExactNumericValue {
+  get numerator(): ExactNumericValue {
     if (this.rational[1] === 1) return this;
     return this.clone({
       im: this.im,
-      rational: [this.rational[0], 1],
+      rational: isMachineRational(this.rational)
+        ? [this.rational[0], 1]
+        : [this.rational[0], BigInt(1)],
       radical: this.radical,
     });
   }
 
-  get denom(): ExactNumericValue {
-    return this.clone(this.rational[1]);
+  get denominator(): ExactNumericValue {
+    if (isMachineRational(this.rational)) return this.clone(this.rational[1]);
+    return this.clone({ rational: [this.rational[1], BigInt(1)] });
   }
 
   normalize(): void {
     console.assert(
-      Number.isInteger(this.rational[0]) &&
-        Number.isInteger(this.rational[1]) &&
-        Number.isInteger(this.radical) &&
-        this.radical >= 0 &&
+      Number.isInteger(this.radical) &&
+        this.radical > 0 &&
         Number.isFinite(this.radical) &&
         Number.isInteger(this.im)
     );
@@ -162,21 +257,41 @@ export class ExactNumericValue extends NumericValue {
     //
 
     //
-    // 1/ Is the rational or radical zero?
+    // 1/ Propagate NaN
     //
-    if (this.radical === 0 || isZero(this.rational)) {
-      this.rational = [0, 1];
-      this.radical = 0;
+    if (isNaN(this.im) || isNaN(this.radical)) {
+      this.rational = [NaN, 1];
+      this.radical = 1;
+      this.im = 0;
+      return;
+    }
+    // 0/0 -> NaN
+    const [n, d] = this.rational;
+    // Use double equal to catch both number and bigint
+    if (n == 0 && d == 0) {
+      this.rational = [NaN, 1];
+      this.radical = 1;
+      this.im = 0;
       return;
     }
 
     //
-    // 2/ If sqrt is a product of exact square, simplify
+    // 2/ Is the rational or radical zero?
+    //
+    if (this.radical === 0 || n === 0) {
+      this.rational = [0, 1];
+      this.radical = 1;
+      return;
+    }
+
+    //
+    // 3/ If sqrt is a product of exact square, simplify
     // sqrt(75) = sqrt(25 * 3) = 5 * sqrt(3)
     //
     if (this.radical >= 4) {
       const [factor, root] = canonicalInteger(this.radical, 2);
-      this.rational[0] *= factor;
+      if (typeof this.rational[0] === 'number') this.rational[0] *= factor;
+      else this.rational = mul(this.rational, [factor, 1]);
       this.radical = root;
     }
 
@@ -217,9 +332,21 @@ export class ExactNumericValue extends NumericValue {
     return true;
   }
 
+  sgn(): -1 | 0 | 1 | undefined {
+    if (this.im !== 0 || Number.isNaN(this.rational[0])) return undefined;
+    if (isZero(this.rational)) return 0;
+    return isPositive(this.rational) ? 1 : -1;
+  }
+
   N(): NumericValue {
-    if (this.isZero || this.isOne || this.isNegativeOne || this.isNaN)
+    if (
+      this.isZero ||
+      this.isOne ||
+      this.isNegativeOne ||
+      !Number.isFinite(this.rational[0])
+    )
       return this;
+    if (this.rational[1] === 1 && this.radical === 1) return this;
     return this.factory(this);
   }
 
@@ -244,12 +371,28 @@ export class ExactNumericValue extends NumericValue {
     // inv(a/b√c) = b/(a√c) = (b√c)/(ac) = (b/ac)√c
 
     return this.clone({
-      rational: [this.rational[1], this.rational[0] * this.radical],
+      rational: isMachineRational(this.rational)
+        ? [this.rational[1], this.rational[0] * this.radical]
+        : [this.rational[1], this.rational[0] * BigInt(this.radical)],
       radical: this.radical,
     });
   }
 
-  add(other: NumericValue): NumericValue {
+  add(other: number | NumericValue): NumericValue {
+    if (typeof other === 'number') {
+      if (other === 0) return this;
+      if (Number.isInteger(other) && this.radical === 1)
+        return this.clone({
+          im: this.im,
+          rational: isMachineRational(this.rational)
+            ? [this.rational[0] + other * this.rational[1], this.rational[1]]
+            : [
+                this.rational[0] + BigInt(other) * this.rational[1],
+                this.rational[1],
+              ],
+        });
+      return this.factory(this).add(other);
+    }
     if (other.isZero) return this;
     if (this.isZero) return other;
 
@@ -259,10 +402,8 @@ export class ExactNumericValue extends NumericValue {
     // Yes, if both numbers are rational and have the same radical
 
     if (this.radical === other.radical) {
-      const [a, b] = this.rational;
-      const [c, d] = other.rational;
       return this.clone({
-        rational: [a * d + b * c, b * d],
+        rational: add(this.rational, other.rational),
         radical: this.radical,
         im: this.im + other.im,
       });
@@ -283,7 +424,9 @@ export class ExactNumericValue extends NumericValue {
       if (Number.isInteger(other))
         return this.clone({
           im: this.im * other,
-          rational: [this.rational[0] * other, this.rational[1]],
+          rational: isMachineRational(this.rational)
+            ? [this.rational[0] * other, this.rational[1]]
+            : [this.rational[0] * BigInt(other), this.rational[1]],
           radical: this.radical,
         });
       return this.factory(this).mul(other);
@@ -307,15 +450,25 @@ export class ExactNumericValue extends NumericValue {
       this.factory(this).mul(other);
     }
     return this.clone({
-      rational: [
-        this.rational[0] * other.rational[0],
-        this.rational[1] * other.rational[1],
-      ],
+      rational: mul(this.rational, other.rational),
       radical: this.radical * other.radical,
     });
   }
 
-  div(other: NumericValue): NumericValue {
+  div(other: SmallInteger | NumericValue): NumericValue {
+    if (typeof other === 'number') {
+      if (other === 1) return this;
+      if (other === -1) return this.neg();
+      if (other === 0) return this.clone(NaN);
+      return this.clone({
+        rational: isMachineRational(this.rational)
+          ? [this.rational[0], this.rational[1] * other]
+          : [this.rational[0], this.rational[1] * BigInt(other)],
+        radical: this.radical,
+        im: this.im / other,
+      });
+    }
+
     if (other.isOne) return this;
     if (other.isNegativeOne) return this.neg();
     if (this.isZero) {
@@ -331,17 +484,21 @@ export class ExactNumericValue extends NumericValue {
     if (this.im !== 0 || other.im !== 0) return this.factory(this).div(other);
 
     // (a/b √c) / (d/e √f) = (ae/bdf) * √(cf)
-    const [a, b] = this.rational;
-    const [d, e] = other.rational;
-    return this.clone({
-      rational: [a * e, b * d * other.radical],
-      radical: this.radical * other.radical,
-    });
+    let rational: Rational;
+    if (isMachineRational(this.rational) && isMachineRational(other.rational)) {
+      const [a, b] = this.rational;
+      const [d, e] = other.rational;
+      rational = [a * e, b * d * other.radical];
+    } else {
+      rational = mul(this.rational, [
+        BigInt(other.rational[1]),
+        BigInt(other.rational[0]) * BigInt(other.radical),
+      ]);
+    }
+    return this.clone({ rational, radical: this.radical * other.radical });
   }
 
-  pow(
-    exponent: number | [number, number] | { re: number; im: number }
-  ): NumericValue {
+  pow(exponent: number | { re: number; im: number }): NumericValue {
     if (Array.isArray(exponent)) exponent = exponent[0] / exponent[1];
 
     if (this.isNaN) return this;
@@ -399,7 +556,8 @@ export class ExactNumericValue extends NumericValue {
     if (
       this.radical > SMALL_INTEGER ||
       Math.abs(this.im) > SMALL_INTEGER ||
-      Math.abs(this.rational[0]) > SMALL_INTEGER ||
+      this.rational[0] > SMALL_INTEGER ||
+      this.rational[0] < -SMALL_INTEGER ||
       this.rational[1] > SMALL_INTEGER
     )
       return this.factory(this).pow(exponent);
@@ -408,16 +566,71 @@ export class ExactNumericValue extends NumericValue {
       if (Number.isInteger(exponent)) {
         const sign = exponent % 2 === 0 ? 1 : -1;
         return this.clone({
-          rational: [
-            sign * (-this.rational[0]) ** exponent,
-            this.rational[1] ** exponent,
-          ],
+          rational: isMachineRational(this.rational)
+            ? [
+                sign * (-this.rational[0]) ** exponent,
+                this.rational[1] ** exponent,
+              ]
+            : [
+                BigInt(sign) * (-this.rational[0]) ** BigInt(exponent),
+                this.rational[1] ** BigInt(exponent),
+              ],
           radical: this.radical ** exponent,
         });
       }
       return this.cloneIm((-this.re) ** exponent);
     }
     return this.factory(this).pow(exponent);
+  }
+
+  root(exponent: number): NumericValue {
+    if (exponent === 0) return this.clone(NaN);
+
+    if (this.isNaN) return this;
+    if (this.isZero) return this;
+    if (exponent === 1) return this;
+    if (exponent === -1) return this.inv();
+
+    if (exponent < 0) return this.root(-exponent).inv();
+
+    // Is it a multiple of square root?
+    // Decompose to try to preserve the rational part
+    if (exponent % 1 === 0.5) return this.root(Math.floor(exponent)).sqrt();
+
+    if (this.im !== 0) return this.factory(this).root(exponent);
+
+    if (this.radical === 1) {
+      if (this.sign > 0) {
+        const re = this.re;
+        if (Number.isInteger(re)) {
+          if (re > 0) {
+            const root = Math.pow(re, 1 / exponent);
+            if (Number.isInteger(root)) return this.clone(root);
+          }
+          return this.factory(this).root(exponent);
+        }
+      }
+      return this.factory(this).root(exponent);
+    }
+
+    if (this.sign < 0) return this.cloneIm(Math.pow(-this.re, 1 / exponent));
+
+    // If the parts (rational or radical) are too large, we convert to float
+    if (
+      this.radical > SMALL_INTEGER ||
+      Math.abs(this.im) > SMALL_INTEGER ||
+      this.rational[0] > SMALL_INTEGER ||
+      this.rational[0] < -SMALL_INTEGER ||
+      this.rational[1] > SMALL_INTEGER
+    )
+      return this.factory(this).root(exponent);
+
+    if (this.rational[1] === 1) {
+      const root = Math.pow(this.rational[0] as number, 1 / exponent);
+      if (Number.isInteger(root)) return this.clone(root);
+    }
+
+    return this.factory(this).root(exponent);
   }
 
   sqrt(): NumericValue {
@@ -443,13 +656,20 @@ export class ExactNumericValue extends NumericValue {
       // √(n/d) = √(n/d) = √(nd) / d
       // (if nd is a perfect square, or a product of perfect squares it
       // will get normalized to the rational numerator)
-      const [n, d] = this.rational;
-      if (n > 0) return this.clone({ radical: n * d, rational: [1, d] });
+      if (isMachineRational(this.rational)) {
+        const [n, d] = this.rational;
+        if (n * d > SMALL_INTEGER) return this.factory(this).sqrt();
+        if (n > 0) return this.clone({ radical: n * d, rational: [1, d] });
 
-      //
-      // Negative Rational: convert to imaginary
-      //
-      return this.cloneIm(Math.sqrt(-n * d) / d);
+        //
+        // Negative Rational: convert to imaginary
+        //
+        return this.cloneIm(Math.sqrt(-n * d) / d);
+      } else {
+        // If we have a big rational, we convert to float
+        // (we can't keep the radical part)
+        return this.factory(this).sqrt();
+      }
     }
 
     console.assert(this.im === 0);
@@ -467,26 +687,18 @@ export class ExactNumericValue extends NumericValue {
       return this.clone(1);
 
     // Calculate the GCD of the rational parts
-    const rational: [number, number] = [
-      gcd(this.rational[0], other.rational[0]),
-      gcd(this.rational[1], other.rational[1]),
-    ];
-    const radical: number = gcd(this.radical, other.radical);
+    const rational = rationalGcd(this.rational, other.rational);
+    const radical = gcd(this.radical, other.radical);
     return this.clone({ rational, radical });
   }
 
   abs(): NumericValue {
-    if (this.im === 0) {
-      if (this.sign === -1) return this.neg();
-      return this;
-    }
-    // abs(z) = √(z.real² + z.imaginary²)
-    if (this.sign === 0) return this.clone({ im: -this.im });
+    if (this.im === 0) return this.sign === -1 ? this.neg() : this;
     return this.factory(this).abs();
   }
 
   ln(base?: number): NumericValue {
-    if (this.isZero) return this.clone(-Infinity);
+    if (this.isZero) return this.clone(NaN);
     if (this.isPositiveInfinity) return this.clone(Infinity);
 
     if (this.im === 0) {
@@ -496,6 +708,32 @@ export class ExactNumericValue extends NumericValue {
     }
 
     return this.factory(this).ln(base);
+  }
+
+  exp(): NumericValue {
+    if (this.isNaN) return this.clone(NaN);
+    if (this.isZero) return this.clone(1);
+    if (this.isNegativeInfinity) return this.clone(0);
+    if (this.isPositiveInfinity) return this.clone(Infinity);
+    return this.factory(this).exp();
+  }
+
+  floor(): NumericValue {
+    if (this.isNaN || this.im !== 0) return this.clone(NaN);
+    if (this.type === 'integer') return this;
+    return this.clone(Math.floor(this.re));
+  }
+
+  ceil(): NumericValue {
+    if (this.isNaN || this.im !== 0) return this.clone(NaN);
+    if (this.type === 'integer') return this;
+    return this.clone(Math.ceil(this.re));
+  }
+
+  round(): NumericValue {
+    if (this.isNaN || this.im !== 0) return this.clone(NaN);
+    if (this.type === 'integer') return this;
+    return this.clone(Math.round(this.re));
   }
 
   // When using add(), inexact values propagate, i.e. '1.2 + 1/4' -> '1.45'
@@ -515,8 +753,8 @@ export class ExactNumericValue extends NumericValue {
     }
 
     let imSum = 0;
-    let rationalSum: [number, number] = [0, 1];
-    const radicals: { multiple: [number, number]; radical: number }[] = [];
+    let rationalSum: Rational = [0, 1];
+    const radicals: { multiple: Rational; radical: number }[] = [];
 
     for (const value of values) {
       if (value.isNaN) return [new ExactNumericValue(NaN, factory)];
@@ -528,7 +766,7 @@ export class ExactNumericValue extends NumericValue {
       const rational = value.rational;
       if (value.radical === 1) {
         // Just a fraction, add it to the sum
-        rationalSum = add(rationalSum, rational) as [number, number];
+        rationalSum = add(rationalSum, rational);
       } else {
         // We have a rational and a radical, e.g. 2√5 or (1/3)√7 or √2
         const index = radicals.findIndex((x) => x.radical === value.radical);
@@ -536,10 +774,7 @@ export class ExactNumericValue extends NumericValue {
           radicals.push({ multiple: rational, radical: value.radical });
         } else {
           // There was already a radical, add to it, e.g. "√2 + √2" = "2√2"
-          radicals[index].multiple = add(
-            radicals[index].multiple,
-            rational
-          ) as [number, number];
+          radicals[index].multiple = add(radicals[index].multiple, rational);
         }
       }
     }
@@ -558,17 +793,4 @@ export class ExactNumericValue extends NumericValue {
         )
     );
   }
-}
-
-function toFixed(n: bigint | number): string {
-  if (typeof n === 'number') return n.toFixed();
-  let result = n.toString();
-  // Remove any trailing zeros and count them
-  let zeros = 0;
-  while (result.endsWith('0')) {
-    zeros++;
-    result = result.slice(0, -1);
-  }
-  if (zeros === 0) return result;
-  return `${result}e${zeros}`;
 }

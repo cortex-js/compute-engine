@@ -98,7 +98,7 @@ function formatExponent(exp: string, options: NumberFormat): string {
 
 /**
  * @param expr - A number, can be represented as a string
- *  particularly useful for arbitrary precision numbers) or a number (-12.45)
+ *  (particularly useful for arbitrary precision numbers) or a number (-12.45)
  * @return A textual representation of the number, formatted according to the
  * `options`
  */
@@ -338,11 +338,14 @@ function serializeAutoNotationNumber(
   const avoid = options.avoidExponentsInRange;
   if (exp !== 0 && avoid) {
     if (exp >= avoid[0] && exp <= avoid[1]) {
+      // We want to avoid an exponent, so we'll padd the whole part
+      // with zeros and adjust the exponent
       [wholePart, fractionalPart] = toDecimalNumber(
         wholePart,
         fractionalPart,
         exp
       );
+      exp = 0;
     }
   }
 

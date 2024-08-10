@@ -1,11 +1,12 @@
 import { BoxedExpression, IComputeEngine } from '../public';
 
-import { NumericValue } from '../numeric-value/public';
 import { canonicalAdd } from '../library/arithmetic-add';
 import { canonicalMultiply } from '../library/arithmetic-multiply';
+import { MACHINE_PRECISION } from '../numerics/numeric';
+
+import { NumericValue } from '../numeric-value/public';
 import { ExactNumericValue } from '../numeric-value/exact-numeric-value';
 import { BigNumericValue } from '../numeric-value/big-numeric-value';
-import { MACHINE_PRECISION } from './numeric';
 import { MachineNumericValue } from '../numeric-value/machine-numeric-value';
 
 // Represent a sum of terms

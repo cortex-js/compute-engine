@@ -22,6 +22,7 @@ export const POLYNOMIALS_LIBRARY: IdentifierDefinitions[] = [
       },
     },
     Factor: {
+      // @todo: extend to factor over the integers: return a ['Multiply', ['Power', a, b], ...]
       description:
         'Factors an algebraic expression into a product of irreducible factors',
       hold: 'all',

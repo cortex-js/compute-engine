@@ -10,7 +10,7 @@ describe('EXPAND POWER', () => {
   test(`Power`, () =>
     expect(checkExpand(`(a+b)^6`)).toMatchInlineSnapshot(`
       box       = ["Expand", ["Power", ["Add", "a", "b"], 6]]
-      eval-auto = a^6 + b^6 + 6b * a^5 + 6a * b^5 + 15b^4 * a^2 + 15a^4 * b^2 + 20(a * b)^3
+      eval-auto = a^6 + b^6 + 6b * a^5 + 6a * b^5 + 15b^4 * a^2 + 15a^4 * b^2 + 20a^3 * b^3
     `));
 
   // 64*a**6 + 768*a**5*b**2 + 3840*a**4*b**4 + 10240*a**3*b**6 + 15360*a**2*b**8 + 12288*a*b**10 + 4096*b**12
@@ -24,7 +24,7 @@ describe('EXPAND POWER', () => {
           6
         ]
       ]
-      eval-auto = 4096b^(12) + 12288a * b^(10) + 15360b^8 * a^2 + 10240b^6 * a^3 + 768a^5 * b^2 + 64a^6 + 3840(a * b)^4
+      eval-auto = 4096b^(12) + 12288a * b^(10) + 15360b^8 * a^2 + 10240b^6 * a^3 + 3840a^4 * b^4 + 768a^5 * b^2 + 64a^6
     `));
 });
 

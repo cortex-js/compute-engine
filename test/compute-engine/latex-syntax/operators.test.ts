@@ -90,7 +90,7 @@ describe('OPERATOR invisible', () => {
   test('2^{3}4+5 // Invisible operator', () =>
     expect(check('2^{3}4+5')).toMatchInlineSnapshot(`
       box       = ["Add", ["InvisibleOperator", ["Power", 2, 3], 4], 5]
-      canonical = ["Add", ["Multiply", 4, 8], 5]
+      canonical = ["Add", ["Multiply", 4, ["Power", 2, 3]], 5]
       simplify  = 37
     `));
 
@@ -258,7 +258,7 @@ describe('OPERATOR multiply', () => {
       canonical = ["Multiply", 2, "Pi"]
       eval-auto = 2pi
       eval-mach = 2pi
-      N-auto    = 6.28318530717958647692528676655900576839433879875021164194988918461563281257241799725606965068423413596429617302656461329418768921910116446345071881625696223490056820540387704221111928924589790986076392885762195133186689225695129646757356633054240381829129713384692069722090865329642678721452049828254
+      N-auto    = 6.28318530717958647692
       N-mach    = 6.283185307179586
     `));
 
@@ -270,7 +270,7 @@ describe('OPERATOR multiply', () => {
   test('2\\sin(x)\\frac12, function apply', () =>
     expect(check('2\\sin(x)\\frac12')).toMatchInlineSnapshot(`
       box       = ["InvisibleOperator", 2, ["Sin", "x"], ["Divide", 1, 2]]
-      canonical = ["Multiply", 2, "Half", ["Sin", "x"]]
+      canonical = ["Multiply", 2, ["Rational", 1, 2], ["Sin", "x"]]
       simplify  = sin(x)
     `));
   test('3\\pi5', () =>
@@ -280,7 +280,7 @@ describe('OPERATOR multiply', () => {
       simplify  = 15pi
       eval-auto = 15pi
       eval-mach = 15pi
-      N-auto    = 47.1238898038468985769396507491925432629575409906265873146241688846172460942931349794205223801317560197322212976992345997064076691432587334758803911219272167617542615405290778165833946693442343239557294664321646349890016919271347235068017474790680286371847285038519052291568148997232009041089037371192
+      N-auto    = 47.1238898038468985769
       N-mach    = 47.12388980384689
     `));
 });
@@ -289,7 +289,7 @@ describe('OPERATOR divide', () => {
   test('\\frac12', () =>
     expect(check('\\frac12')).toMatchInlineSnapshot(`
       box       = ["Divide", 1, 2]
-      canonical = Half
+      canonical = ["Rational", 1, 2]
       eval-auto = 1/2
       eval-mach = 1/2
       N-auto    = 0.5
@@ -513,7 +513,9 @@ describe('OPERATOR serialize, invalid', () => {
     expect(latex(['Divide', 2])).toMatchInlineSnapshot(`2`));
 
   test(`['Divide', 2, 3, 4] // Invalid form`, () =>
-    expect(latex(['Divide', 2, 3, 4])).toMatchInlineSnapshot(`\\frac{1}{6}`));
+    expect(latex(['Divide', 2, 3, 4])).toMatchInlineSnapshot(
+      `\\frac{\\frac{2}{3}}{4}`
+    ));
 
   test(`['Divide', null] // Invalid form`, () =>
     expect(

@@ -1,9 +1,8 @@
-import Complex from 'complex.js';
-import { lex, maxDegree, revlex, totalDegree } from '../symbolic/polynomials';
+import { maxDegree, revlex, totalDegree } from '../symbolic/polynomials';
 import { BoxedExpression, SemiBoxedExpression } from './public';
-import { asFloat } from './numerics';
-import { isRational } from '../numerics/rationals';
-import { isTrigonometricFunction } from '../library/trigonometry';
+import { NumericValue } from '../numeric-value/public';
+import { asRadical } from '../library/arithmetic-power';
+import { isTrigonometricFunction } from './trigonometry';
 
 export type Order = 'lex' | 'dexlex' | 'grevlex' | 'elim';
 
@@ -24,7 +23,7 @@ const ADD_RANKS = [
 
   'number',
   'rational',
-  'sqrt',
+  'radical',
 
   'string',
   'other',
@@ -46,8 +45,6 @@ export function sortAdd(
   ops: ReadonlyArray<BoxedExpression>
 ): ReadonlyArray<BoxedExpression> {
   return [...ops].sort((a, b) => {
-    if (a.toString() === 'b' && b.toString() === '7') debugger;
-    if (b.toString() === 'b' && a.toString() === '7') debugger;
     const aTotalDeg = totalDegree(a);
     const bTotalDeg = totalDegree(b);
     if (aTotalDeg !== bTotalDeg) return bTotalDeg - aTotalDeg;
@@ -76,10 +73,12 @@ export function sortAdd(
 
 // The "kind" of subexpressions. The order here indicates the
 // order in which the expressions should be sorted
+// @fixme: add 'integer'
 const RANKS = [
-  'number',
+  'integer',
   'rational',
-  'sqrt',
+  'radical', // Square root of a rational literal
+  'real',
   'complex',
   'constant',
   'symbol',
@@ -99,20 +98,14 @@ export type Rank = (typeof RANKS)[number];
  * sorted.
  */
 function rank(expr: BoxedExpression): Rank {
-  if (expr.numericValue && isRational(expr.numericValue)) return 'rational';
+  if (typeof expr.numericValue === 'number') return 'integer';
+  if (expr.numericValue) return expr.numericValue.type;
 
   // Complex numbers
-  if (expr.numericValue instanceof Complex || expr.symbol === 'ImaginaryUnit')
-    return 'complex';
-
-  // Other real numbers
-  if (expr.numericValue !== null) return 'number';
+  if (expr.symbol === 'ImaginaryUnit') return 'complex';
 
   // Square root of a number
-  if (expr.operator === 'Sqrt' && expr.op1.numericValue) {
-    const n = asFloat(expr.op1);
-    if (n !== null && Number.isInteger(n)) return 'sqrt';
-  }
+  if (asRadical(expr)) return 'radical';
 
   // Constant symbols
   if (expr.symbol && expr.isConstant) return 'constant';
@@ -181,29 +174,32 @@ export function order(a: BoxedExpression, b: BoxedExpression): number {
   const rankB = rank(b);
   if (rankA !== rankB) return RANKS.indexOf(rankA) - RANKS.indexOf(rankB);
 
-  if (rankA === 'number' || rankA === 'rational') {
-    const af = asFloat(a);
-    const bf = asFloat(b);
-    if (af !== null && bf !== null) return af - bf;
-    return -1; // Literals before non-literals
-  }
-
   if (rankA === 'complex') {
-    const zA =
-      a.symbol === 'ImaginaryUnit'
-        ? a.engine.complex(0, 1)
-        : (a.numericValue as Complex);
+    // If the rank is complex, the numericValues can't be a number
+    const aV = a.numericValue as NumericValue;
+    const bV = b.numericValue as NumericValue;
 
-    const zB =
-      b.symbol === 'ImaginaryUnit'
-        ? b.engine.complex(0, 1)
-        : (b.numericValue as Complex);
+    const imA = a.symbol === 'ImaginaryUnit' ? 1 : aV.im;
+    const imB = a.symbol === 'ImaginaryUnit' ? 1 : bV.im;
 
-    if (zA.im === zB.im) return zA.re - zB.re;
-    return zA.im - zB.im;
+    if (imA !== imB) return imA - imB;
+
+    const reA = a.symbol === 'ImaginaryUnit' ? 0 : aV.re;
+    const reB = a.symbol === 'ImaginaryUnit' ? 0 : bV.re;
+    return reA - reB;
   }
 
-  if (rankA === 'sqrt') return order(a.op1, b.op1);
+  if (rankA === 'integer' || rankA === 'rational' || rankA === 'real') {
+    const aN = a.numericValue;
+    const bN = b.numericValue;
+
+    const af = typeof aN === 'number' ? aN : aN!.re;
+    const bf = typeof bN === 'number' ? bN : bN!.re;
+
+    return af - bf;
+  }
+
+  if (rankA === 'radical') return order(a.op1, b.op1);
 
   if (rankA === 'constant' || rankA === 'symbol') {
     if (a.symbol === b.symbol) return 0;

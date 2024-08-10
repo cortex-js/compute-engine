@@ -241,7 +241,7 @@ function parseIntegralBodyExpression(
 
 function serializeIntegral(command: string) {
   return (serializer: Serializer, expr: Expression): string => {
-    if (!operand(expr, 1)) return command;
+    if (operand(expr, 1) !== null) return command;
 
     let arg = operand(expr, 2);
     const h = operator(arg);
@@ -259,7 +259,7 @@ function serializeIntegral(command: string) {
     const index: string | null = indexExpr !== null ? symbol(indexExpr) : null;
 
     let fn = operand(expr, 1);
-    if (operator(fn) === 'Lambda' && operand(fn, 1))
+    if (operator(fn) === 'Lambda' && operand(fn, 1) !== null)
       fn = subs(operand(fn, 1)!, { _: index ?? 'x', _1: index ?? 'x' });
 
     if (!arg) {
@@ -284,7 +284,7 @@ function serializeIntegral(command: string) {
 
     let sup = '';
     const supSymbol = operand(arg, 3) ? symbol(operand(arg, 3)) : null;
-    if (operand(arg, 3) && supSymbol !== 'Nothing')
+    if (operand(arg, 3) !== null && supSymbol !== 'Nothing')
       sup = `^{${serializer.serialize(operand(arg, 3))}}`;
 
     return joinLatex([

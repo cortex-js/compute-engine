@@ -26,7 +26,7 @@ describe('JSON PROPERTY', () => {
       [
         Divide,
         [
-          Power,
+          Sqrt,
           [
             Add,
             [
@@ -36,11 +36,6 @@ describe('JSON PROPERTY', () => {
             ],
             -1,
           ],
-          [
-            Rational,
-            1,
-            2,
-          ],
         ],
         2,
       ]
@@ -49,19 +44,23 @@ describe('JSON PROPERTY', () => {
 
   test(`Approximate numbers (precision)`, () => {
     const expr = ce.parse('1.2345678912345678901234');
-    expect(expr.json).toMatchInlineSnapshot(`1.234567891234568`);
+    expect(expr.json).toMatchObject({ num: '1.2345678912345678901234' });
   });
   test(`Approximate numbers (range to infinity)`, () => {
     const expr = ce.parse('1.23456789e400');
-    expect(expr.json).toMatchInlineSnapshot(`PositiveInfinity`);
+    expect(expr.json).toMatchObject({ num: '123456789e+392' });
   });
   test(`Approximate numbers (range to 0)`, () => {
     const expr = ce.parse('1.23456789e-400');
-    expect(expr.json).toMatchInlineSnapshot(`0`);
+    expect(expr.json).toMatchObject({ num: '1.23456789e-400' });
   });
   test(`Approximate numbers (repeating decimal)`, () => {
     const expr = ce.parse('1.(2345)');
-    expect(expr.json).toMatchInlineSnapshot(`1.2345234523452344`);
+    expect(expr.json).toMatchInlineSnapshot(`
+      {
+        num: 1.2345234523452345234523452345234523452345234523452345234523452345234523452345234523452345234523452345,
+      }
+    `);
   });
 });
 
@@ -107,7 +106,11 @@ describe('DEFAULT JSON SERIALIZATION', () => {
   });
   test(`Approximate numbers (range to infinity)`, () => {
     const expr = ce.parse('1.23456789e400');
-    expect(expr.toMathJson({})).toMatchInlineSnapshot(`1.23456789e+400`);
+    expect(expr.toMathJson({})).toMatchInlineSnapshot(`
+      {
+        num: 123456789e+392,
+      }
+    `);
   });
   test(`Approximate numbers (range to 0)`, () => {
     const expr = ce.parse('1.23456789e-400');
@@ -164,7 +167,11 @@ describe('CUSTOM JSON SERIALIZATION', () => {
   });
   test(`Approximate numbers (range to infinity)`, () => {
     const expr = ce.parse('1.23456789e400');
-    expect(expr.toMathJson(opts)).toMatchInlineSnapshot(`1.23456789e+400`);
+    expect(expr.toMathJson(opts)).toMatchInlineSnapshot(`
+      {
+        num: 123456789e+392,
+      }
+    `);
   });
   test(`Approximate numbers (range to 0)`, () => {
     const expr = ce.parse('1.23456789e-400');

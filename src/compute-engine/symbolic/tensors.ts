@@ -802,3 +802,10 @@ export function makeTensor<T extends TensorDataType>(
     data as TensorData<'expression'>
   ) as AbstractTensor<T>;
 }
+
+// 0 -> scalar
+// 1 -> vector
+// 2 -> 2D matrix
+// export function rank(tensor: TensorData): number {
+//   return tensor.shape.length;
+// }

@@ -2,13 +2,13 @@
 
 ### Breaking Changes
 
-- The MathJSON Dictionary has been deprecated. Use a `Dictionary` expression
-  instead.
 - The property `expr.head` has been deprecated. Use `expr.operator` instead.
   `expr.head` is still supported in this version but will be removed in a future
   update.
-- The utility function `head()` and `op()` have been renamed to `operator()` and
-  `operand()` respectively.
+
+- The MathJSON utility functions `head()` and `op()` have been renamed to
+  `operator()` and `operand()` respectively.
+
 - The methods for algebraic operations (`add`, `div`, `mul`, etc...) have been
   moved from the Compute Engine to the Boxed Expression class. Instead of
   calling `ce.add(a, b)`, call `a.add(b)`.
@@ -19,14 +19,59 @@
   `3`.
 
 - The `ce.numericMode` option has been removed. Instead, set the `ce.precision`
-  property to the desired precision. Set the precision to 'machine' for machine
-  precision calculations (about 15 digits). Set it to 'auto' for a default of
-  300 digits. Set it to a number for a fixed precision.
+  property to the desired precision. Set the precision to `"machine"` for
+  machine precision calculations (about 15 digits). Set it to `"auto"` for a
+  default of 21 digits. Set it to a number for a greater fixed precision.
+
+- The MathJSON Dictionary element has been deprecated. Use a `Dictionary`
+  expression instead.
+
+- The `ExtendedRealNumbers`, `ExtendedComplexNumbers` domains have been
+  deprecated. Use the `RealNumbers` and `ComplexNumbers` domains instead.
+
+  Note that an upcoming version will substantially revise domain handling.
+  Please contact me if you are currently using domains.
 
 ### New Features and Improvements
 
-- Improved the default precision to 300 digits. The precision can be changed by
-  setting the `ce.precision` property.
+- **Exact calculations**
+
+  The Compute Engine has a new backed for numerical calculations. The new backed
+  can handle arbitrary precision calculations, including real and complex
+  numbers. It can also handle exact calculations, preserving calculations with
+  rationals and radicals (square root of integers). For example `1/2 + 1/3` is
+  evaluated to `5/6` instead of `0.8(3)`.
+
+  To get an approximate result, use the `N()` method, for example
+  `ce.parse("\\frac12 + \\frac13").N()`.
+
+  Previously the result of calculations was not always an exact number but
+  returned a numerical approximation instead.
+
+  This has now been improved by introducing a `NumericValue` type that
+  encapsulates exact numbers and by doing all calculations in this type.
+  Previously the calculations were handled manually in the various evaluation
+  functions. This made the code complicated and error prone.
+
+  A `NumericValue` is made of:
+
+  - an imaginary part, represented as a fixed-precision number
+  - a real part, represented either as a fixed or arbitrary precision number or
+    as the product of a rational number and the square root of an integer.
+
+  For example:
+
+  - 234.567
+  - 1/2
+  - 3√5
+  - √7/3
+  - 4-3i
+
+  While this is a significant change internally, the external API remains the
+  same. The result of calculations should be more predictable and more accurate.
+
+  One change to the public API is that the `expr.numericValue` property is now
+  either a machine precision number or a `NumericValue` object.
 
 - **Rule Wildcards**
 
@@ -179,48 +224,6 @@
   This advanced syntax can specify more complex conditions, for example above
   the rule will only apply if `x` is less than 10.
 
-- **Exact calculations**
-
-  The Compute Engine attempts to perform exact calculations when possible.
-
-  For example `1/2 + 1/3` is evaluated to `5/6` instead of `0.8(3)`.
-
-  To get an approximate result, use the `N()` method, for example
-  `ce.parse("\\frac12 + \\frac13").N()`.
-
-  Previously the result of calculations was not always an exact number but
-  returned a numerical approximation instead.
-
-  This has now been improved by introducing internally a `NumericValue` type
-  that encapsulates exact numbers and by doing all calculations in this type.
-  Previously the calculations were handled manually in the various evaluation
-  functions. This made the code complicated and error prone.
-
-  Since the Compute Engine supports multiple numeric mode, including
-  fixed-precision and arbitrary precision, the special cases that had to be
-  handled could be quite complicated. By using the `NumericValue` type, the code
-  is simpler and more robust.
-
-  A `NumericValue` is made of:
-
-  - an imaginary part, represented as a fixed-precision number
-  - a real part, represented either as a fixed or arbitrary precision number or
-    as the product of a rational number and the square root of an integer.
-
-  For example:
-
-  - 234.567
-  - 1/2
-  - 3√5
-  - √7/3
-  - 4-3i
-
-  While this is a significant change internally, the API remains the same. The
-  result of calculations should be more predictable and more accurate.
-
-  In the future, the `numericValue` property may change to return a
-  `NumericValue` object.
-
 - Improved results for `Expand`. In some cases the expression was not fully
   expanded. For example, `4x(3x+2)-5(5x-4)` now returns `12x^2 - 17x + 20`.
   Previously it returned `4x(3x+2)+25x-20`.
@@ -236,6 +239,28 @@
   console.log(ce.box(['Sigma', 2]).toAsciiMath({functions: {Sigma: 'sigma'}}));
   // -> sigma(2)
   ```
+
+- The tolerance can now be specified with a value of `"auto"` which will use the
+  precision to determine a reasonable tolerance. The tolerance is used when
+  comparing two numbers for equality. The tolerance can be specified with the
+  `ce.tolerance` property or in the Compute Engine constructor.
+
+- Boxed expressions have some additional properties:
+
+  - `expr.isNumberLiteral` - true if the expression is a number literal.This is
+    equivalent to checking if `expr.numericValue` is not `null`.
+  - `expr.re` - the real part of the expression, if it is a number literal,
+    `undefined` if not a number literal.
+  - `expr.im` - the imaginary part of the expression, if it is a number literal,
+    `undefined` if not a number literal.
+  - `expr.bignumRe` - the real part of the expression as a bignum, if it is a
+    number literal, `undefined` if not a number literal or a bignum
+    representation is not available.
+  - `expr.bignumIm` - the imaginary part of the expression as a bignum, if it is
+    a number literal, `undefined` if not a number literal or if a bignum
+    representation is not available.
+  - `expr.root()` to get the root of the expression. For example, `expr.root(3)`
+    will return the cube root of the expression.
 
 - Added LaTeX syntax to index collections. If `a` is a collection:
 
@@ -311,6 +336,10 @@
   and predictable. In particular, for polynomials, the
   [monomial order](https://en.wikipedia.org/wiki/Monomial_order) is now
   **degrevlex**.
+
+- Canonical expressions can now include a `Root` expression. For example, the
+  canonical form of `\\sqrt[3]{5}` is `["Root", 5, 3]`. Previously, these were
+  represented as `["Power", 5, ["Divide", 1, 3]]`.
 
 ### Issues Resolved
 
@@ -616,14 +645,14 @@ the `ce.rule()` function.
   - new syntax: `{match: ["Add", "_x", "_x"], replace: ["Multiply", 2, "_x"]}`
 
   The `condition` property is optional, and is either a boxed function or a
-  JavaScript function. For example, to add a condition that cheks that `_x` is a
-  number literal:
+  JavaScript function. For example, to add a condition that checks that `_x` is
+  a number literal:
 
   ```js
   {
     match: ["Add", "_x", "_x"],
     replace: ["Multiply", 2, "_x"],
-    condition: (_x) => _x.numericValue !== null
+    condition: ({_x}) => _x.isNumberLiteral
   }
   ```
 

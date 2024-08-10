@@ -11,20 +11,19 @@ import type {
   SemiBoxedExpression,
 } from './public';
 import { operands, operator, nops } from '../math-json/utils';
+import { NumericValue } from './numeric-value/public';
 
 /**
  * Determine the numeric domain of a number.
  */
 export function inferNumericDomain(
-  value: number | Decimal | Complex | Rational
+  value: number | Decimal | Complex | Rational | NumericValue
 ): DomainLiteral {
   //
   // 1. Is it a number?
   //
 
   if (typeof value === 'number' && !isNaN(value)) {
-    if (!isFinite(value)) return 'ExtendedRealNumbers';
-
     // if (value === 0) return 'NonNegativeInteger'; // Bias: Could be NonPositiveInteger
 
     if (Number.isInteger(value)) {
@@ -39,12 +38,18 @@ export function inferNumericDomain(
     return 'RealNumbers';
   }
 
+  if (value instanceof NumericValue) {
+    if (value.type === 'integer') return 'Integers';
+    if (value.type === 'rational') return 'RationalNumbers';
+    if (value.im === 0) return 'RealNumbers';
+    return 'ComplexNumbers';
+  }
+
   //
   // 2 Is it a bignum?
   //
   if (value instanceof Decimal) {
     if (value.isNaN()) return 'Numbers';
-    if (!value.isFinite()) return 'ExtendedRealNumbers';
     // if (value.isZero()) return 'NonNegativeInteger'; // Bias: Could be NonPositiveInteger
 
     if (value.isInteger()) {

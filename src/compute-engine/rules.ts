@@ -17,7 +17,8 @@ import {
 } from './boxed-expression/utils';
 import { isCollection } from './collection-utils';
 import { Parser } from './latex-syntax/public';
-import { isRational } from './numerics/rationals';
+import { isPrime } from './library/arithmetic';
+import { isValidIdentifier } from '../math-json/identifiers';
 
 // @todo ['Alternatives', ...]:
 // @todo: ['Condition',...] : Conditional match
@@ -107,8 +108,6 @@ export const ConditionParent = {
   integer: 'real',
   rational: 'real',
   irrational: 'real',
-  algebraic: 'real',
-  transcendental: 'real',
 
   notzero: 'number',
   notone: 'number',
@@ -158,9 +157,9 @@ export const ConditionParent = {
 };
 
 export const CONDITIONS = {
-  boolean: (x: BoxedExpression) => x.domain?.isCompatible('Booleans'),
+  boolean: (x: BoxedExpression) => x.domain?.isCompatible('Booleans'), // @fixme: x.type === 'boolean'
   string: (x: BoxedExpression) => x.string !== null,
-  number: (x: BoxedExpression) => x.numericValue !== null,
+  number: (x: BoxedExpression) => x.isNumberLiteral,
   symbol: (x: BoxedExpression) => x.symbol !== null,
   expression: (x: BoxedExpression) => true,
 
@@ -174,8 +173,6 @@ export const CONDITIONS = {
   imaginary: (x: BoxedExpression) => x.isImaginary,
   rational: (x: BoxedExpression) => x.isRational,
   irrational: (x: BoxedExpression) => x.domain?.isRational === false,
-  algebraic: (x: BoxedExpression) => x.isAlgebraic,
-  transcendental: (x: BoxedExpression) => x.domain?.isAlgebraic === false,
 
   positive: (x: BoxedExpression) => x.isPositive,
   negative: (x: BoxedExpression) => x.isNegative,
@@ -185,8 +182,8 @@ export const CONDITIONS = {
   even: (x: BoxedExpression) => x.isEven,
   odd: (x: BoxedExpression) => x.isOdd,
 
-  prime: (x: BoxedExpression) => x.isPrime,
-  composite: (x: BoxedExpression) => x.isComposite,
+  prime: (x: BoxedExpression) => isPrime(x) === true,
+  composite: (x: BoxedExpression) => isPrime(x) === false,
 
   notzero: (x: BoxedExpression) => x.isNotZero,
   notone: (x: BoxedExpression) => !x.isOne,
@@ -324,7 +321,7 @@ function parserModifiers(parser: Parser): string {
 // `:condition1,condition2,...`
 // or `_{condition1,condition2,...}`
 function parseModifierExpression(parser: Parser): string | null {
-  let conditions = '';
+  let conditions: string | null = null;
   if (parser.match(':')) conditions = parserModifiers(parser);
   else if (parser.matchAll(['_', '<{>'])) {
     conditions = parserModifiers(parser);
@@ -453,9 +450,9 @@ function parseRule(ce: IComputeEngine, rule: string): BoxedRule {
         for (const id in wildcardConditions) {
           const xs = wildcardConditions[id].split(',');
           if (xs.length === 0) continue;
-          if (xs.length === 1)
+          if (xs.length === 1) {
             conditions.push(['Condition', wildcards[id], xs[0]]);
-          else conditions.push(['Condition', wildcards[id], ['List', ...xs]]);
+          } else conditions.push(['Condition', wildcards[id], ['List', ...xs]]);
         }
 
         if (conditions.length === 0) return ['Rule', lhs, rhs];
@@ -555,20 +552,7 @@ function applyRule(
   substitution: BoxedSubstitution,
   options?: ReplaceOptions
 ): BoxedExpression | null {
-  const { match, replace, condition, id } = rule;
-
-  if (expr.numericValue && isRational(expr.numericValue)) {
-    // If the expression is a rational, i.e. 1/2, 3/4, 5/6, etc.
-    // apply the rule to the numerator and the denominator
-    const [num, den] = expr.numericValue;
-    const numExpr = expr.engine.number(num);
-    const denExpr = expr.engine.number(den);
-    const numResult =
-      applyRule(rule, numExpr, substitution, options) ?? numExpr;
-    const denResult =
-      applyRule(rule, denExpr, substitution, options) ?? denExpr;
-    return numResult.div(denResult);
-  }
+  const { match, replace, condition } = rule;
 
   let changed = false;
   if (expr.ops && options?.recursive) {
@@ -625,8 +609,7 @@ function applyRule(
       ? replace(expr, sub)
       : replace.subs(sub, { canonical: expr.isCanonical });
   if (!result) return null;
-  if (expr.isCanonical) return result.canonical;
-  return result;
+  return expr.isCanonical ? result.canonical : result;
 }
 
 /**

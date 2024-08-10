@@ -1,8 +1,5 @@
-import { Decimal } from 'decimal.js';
-import { isPrime } from '../numerics/primes';
 import {
   BoxedExpression,
-  BoxedFunctionDefinition,
   BoxedSymbolDefinition,
   BoxedDomain,
   DomainExpression,
@@ -12,11 +9,11 @@ import {
   SymbolDefinition,
   NumericFlags,
   LatexString,
+  Type,
 } from './public';
 import { _BoxedExpression } from './abstract-boxed-expression';
-import { bignumPreferred, isLatexString } from './utils';
+import { isLatexString } from './utils';
 import { widen } from './boxed-domain';
-import { asFloat } from './numerics';
 
 /**
  * ### THEORY OF OPERATIONS
@@ -57,19 +54,26 @@ export class _BoxedSymbolDefinition implements BoxedSymbolDefinition {
 
   // If `null`, the value needs to be recalculated from _defValue
   private _value: BoxedExpression | undefined | null;
+
   // If `null`, the domain is the domain of the _value
   private _domain: BoxedDomain | undefined | null;
+
   // If true, the _domain is inferred
   inferredDomain: boolean;
-  private _flags: Partial<NumericFlags> | undefined;
+
+  // If `null`, the type is the type of the value
+  // @fixme: update property where needed
+  private _type: Type | undefined | null;
+
+  // If true, the _type is inferred
+  // @fixme: update property where needed
+  inferredType: boolean;
 
   constant: boolean;
+
   holdUntil: 'never' | 'simplify' | 'evaluate' | 'N';
 
-  // readonly unit?: BoxedExpression;
-
-  prototype?: BoxedFunctionDefinition; // @todo for collections and other special data structures
-  self?: unknown; // @todo
+  private _flags: Partial<NumericFlags> | undefined;
 
   constructor(ce: IComputeEngine, name: string, def: SymbolDefinition) {
     if (!ce.context) throw Error('No context available');
@@ -88,6 +92,7 @@ export class _BoxedSymbolDefinition implements BoxedSymbolDefinition {
 
     this._domain = def.domain ? ce.domain(def.domain) : undefined;
     this.inferredDomain = def.inferred ?? false;
+    this.inferredType = def.inferred ?? false; // @fixme...
 
     this.constant = def.constant ?? false;
     this.holdUntil = def.holdUntil ?? 'evaluate';
@@ -111,6 +116,9 @@ export class _BoxedSymbolDefinition implements BoxedSymbolDefinition {
     if (this._value && !this._domain) {
       this._domain = this._value.domain;
       this.inferredDomain = true;
+
+      this._type = this._value.type;
+      this.inferredType = true;
     }
   }
 
@@ -157,6 +165,7 @@ export class _BoxedSymbolDefinition implements BoxedSymbolDefinition {
       this.inferredDomain = true;
     }
   }
+
   reset(): void {
     // Force the value to be recalculated based on the original definition
     // Useful when the environment (e.g.) precision changes
@@ -164,21 +173,16 @@ export class _BoxedSymbolDefinition implements BoxedSymbolDefinition {
   }
 
   get value(): BoxedExpression | undefined {
-    if (this._value === null) {
-      const ce = this._engine;
-      if (isLatexString(this._defValue))
-        this._value = ce.parse(this._defValue) ?? ce.symbol('Undefined');
-      else if (typeof this._defValue === 'function')
-        this._value = ce.box(this._defValue(ce) ?? 'Undefined');
-      else if (this._defValue) this._value = ce.box(this._defValue);
-      else this._value = undefined;
+    if (this._value !== null) return this._value ?? undefined;
 
-      if (this._value?.numericValue) {
-        const val = this._value.numericValue;
-        if (!bignumPreferred(ce) && val instanceof Decimal)
-          this._value = ce.number(val.toNumber());
-      }
-    }
+    const ce = this._engine;
+
+    if (isLatexString(this._defValue))
+      this._value = ce.parse(this._defValue) ?? ce.symbol('Undefined');
+    else if (typeof this._defValue === 'function')
+      this._value = ce.box(this._defValue(ce) ?? 'Undefined');
+    else if (this._defValue) this._value = ce.box(this._defValue);
+    else this._value = undefined;
     return this._value ?? undefined;
   }
 
@@ -256,6 +260,34 @@ export class _BoxedSymbolDefinition implements BoxedSymbolDefinition {
       this._flags = domainToFlags(domain);
   }
 
+  get type(): Type {
+    if (this._type) return this._type;
+    if (this._value) return this._value.type;
+    return 'unknown';
+  }
+
+  set type(type: Type) {
+    if (this.constant)
+      throw new Error(
+        `The type of the constant "${this.name}" cannot be changed`
+      );
+
+    if (!this.inferredType)
+      throw Error(
+        `The type of "${this.name}" cannot be changed because it has already been declared`
+      );
+
+    // @fixme: should be more leninent here, i.e. allow type widening or narrowing
+    if (this._value && this._value.type !== type)
+      throw Error(
+        `The type of "${this.name}" cannot be changed because its value has a type of "${this._value.type}"`
+      );
+
+    // @fixme: update the flags based on the type
+
+    this._type = type;
+  }
+
   //
   // Flags
   //
@@ -279,37 +311,17 @@ export class _BoxedSymbolDefinition implements BoxedSymbolDefinition {
   set rational(val: boolean | undefined) {
     this.updateFlags({ rational: val });
   }
-  get algebraic(): boolean | undefined {
-    // Most numbers will return undefined, so the flag will provide the info if
-    // present
-    return this.value?.isAlgebraic ?? this._flags?.algebraic;
-  }
-  set algebraic(val: boolean | undefined) {
-    this.updateFlags({ algebraic: val });
-  }
   get real(): boolean | undefined {
     return this.value?.isReal ?? this._flags?.real;
   }
   set real(val: boolean | undefined) {
     this.updateFlags({ real: val });
   }
-  get extendedReal(): boolean | undefined {
-    return this.value?.isExtendedReal ?? this._flags?.extendedReal;
-  }
-  set extendedReal(val: boolean | undefined) {
-    this.updateFlags({ extendedReal: val });
-  }
   get complex(): boolean | undefined {
     return this.value?.isComplex ?? this._flags?.complex;
   }
   set complex(val: boolean | undefined) {
     this.updateFlags({ complex: val });
-  }
-  get extendedComplex(): boolean | undefined {
-    return this.value?.isExtendedComplex ?? this._flags?.extendedComplex;
-  }
-  set extendedComplex(val: boolean | undefined) {
-    this.updateFlags({ extendedComplex: val });
   }
   get imaginary(): boolean | undefined {
     return this.value?.isImaginary ?? this._flags?.imaginary;
@@ -395,30 +407,6 @@ export class _BoxedSymbolDefinition implements BoxedSymbolDefinition {
   set odd(val: boolean | undefined) {
     this.updateFlags({ odd: val });
   }
-  get prime(): boolean | undefined {
-    const val = this._value;
-    if (val) {
-      if (!val.isInteger || val.isNonPositive) return false;
-      return isPrime(asFloat(val) ?? NaN);
-    }
-
-    return this._flags?.prime;
-  }
-  set prime(val: boolean | undefined) {
-    this.updateFlags({ prime: val });
-  }
-  get composite(): boolean | undefined {
-    const val = this._value;
-    if (val) {
-      if (!val.isInteger || val.isNonPositive) return false;
-      return !isPrime(asFloat(val) ?? NaN);
-    }
-
-    return this._flags?.composite;
-  }
-  set composite(val: boolean | undefined) {
-    this.updateFlags({ composite: val });
-  }
 
   updateFlags(flags: Partial<NumericFlags>): void {
     // If this is a constant, can set the flags
@@ -441,21 +429,12 @@ export class _BoxedSymbolDefinition implements BoxedSymbolDefinition {
           case 'rational':
             consistent = this._value.isRational === flags.rational;
             break;
-          case 'algebraic':
-            consistent = this._value.isAlgebraic === flags.algebraic;
-            break;
           case 'real':
             consistent = this._value.isReal === flags.real;
-            break;
-          case 'extendedReal':
-            consistent = this._value.isExtendedReal === flags.extendedReal;
             break;
           case 'complex':
             consistent = this._value.isComplex === flags.complex;
             break;
-          case 'extendedComplex':
-            consistent =
-              this._value.isExtendedComplex === flags.extendedComplex;
             break;
           case 'imaginary':
             consistent = this._value.isImaginary === flags.imaginary;
@@ -499,12 +478,6 @@ export class _BoxedSymbolDefinition implements BoxedSymbolDefinition {
           case 'odd':
             consistent = this._value.isOdd === flags.odd;
             break;
-          case 'prime':
-            consistent = this._value.isPrime === flags.prime;
-            break;
-          case 'composite':
-            consistent = this._value.isComposite === flags.composite;
-            break;
         }
       }
     }
@@ -547,10 +520,6 @@ function normalizeFlags(flags: Partial<NumericFlags>): NumericFlags {
 
     result.even = flags.one;
     result.odd = !flags.one;
-
-    // 0, 1 and -1 are neither prime nor composite
-    result.prime = false;
-    result.composite = false;
   }
 
   if (result.zero) {
@@ -617,37 +586,15 @@ function normalizeFlags(flags: Partial<NumericFlags>): NumericFlags {
     result.finite = false;
     result.NaN = false;
   }
-  if (result.infinity === false) {
-    result.extendedComplex = false;
-    result.extendedReal = false;
-  }
 
   if (flags.even) result.odd = false;
   if (flags.odd) result.even = false;
 
   // Adjust domain flags
   if (result.integer) result.rational = true;
-  if (result.rational) result.algebraic = true;
-  if (result.algebraic) result.real = true;
   if (result.real) result.complex = true;
   if (result.imaginary) result.complex = true;
   if (result.complex) result.number = true;
-  if (result.real && result.infinity !== false) result.extendedReal = true;
-  if (result.complex && result.infinity !== false)
-    result.extendedComplex = true;
-
-  // Adjust primality (depends on domain)
-  if (
-    result.even ||
-    result.infinity ||
-    result.NaN ||
-    result.negative ||
-    result.imaginary ||
-    result.integer === false
-  )
-    result.prime = false;
-
-  if (result.number && result.prime) result.composite = false;
 
   return result as NumericFlags;
 }
@@ -662,11 +609,8 @@ export function domainToFlags(
     result.number = false;
     result.integer = false;
     result.rational = false;
-    result.algebraic = false;
     result.real = false;
-    result.extendedReal = false;
     result.complex = false;
-    result.extendedComplex = false;
     result.imaginary = false;
 
     result.positive = false;
@@ -683,8 +627,6 @@ export function domainToFlags(
     result.odd = false;
     result.even = false;
 
-    result.prime = false;
-    result.composite = false;
     return result;
   }
 
@@ -693,15 +635,8 @@ export function domainToFlags(
   result.number = true;
   if (base === 'Integers') result.integer = true;
   if (base === 'RationalNumbers') result.rational = true;
-  if (base === 'AlgebraicNumbers') result.algebraic = true;
-  if (base === 'TranscendentalNumbers') {
-    result.algebraic = false;
-    result.real = true;
-  }
-  if (base === 'ExtendedRealNumbers') result.extendedReal = true;
   if (base === 'RealNumbers') result.real = true;
   if (base === 'ImaginaryNumbers') result.imaginary = true;
-  if (base === 'ExtendedComplexNumbers') result.extendedComplex = true;
   if (base === 'ComplexNumbers') result.complex = true;
 
   if (base === 'PositiveNumbers') {

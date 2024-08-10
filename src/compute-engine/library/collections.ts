@@ -6,7 +6,7 @@ import {
   IdentifierDefinitions,
   SemiBoxedExpression,
 } from '../public';
-import { asFloat, asMachineInteger } from '../boxed-expression/numerics';
+import { asSmallInteger } from '../boxed-expression/numerics';
 import {
   each,
   isFiniteCollection,
@@ -195,7 +195,7 @@ export const COLLECTIONS_LIBRARY: IdentifierDefinitions = {
       ],
     },
     size: (expr) => {
-      const count = asFloat(expr.op3) ?? DEFAULT_LINSPACE_COUNT;
+      const count = expr.op3.re ?? DEFAULT_LINSPACE_COUNT;
       return Math.max(0, Math.floor(count));
     },
     at: (
@@ -203,9 +203,9 @@ export const COLLECTIONS_LIBRARY: IdentifierDefinitions = {
       index: number | string
     ): undefined | BoxedExpression => {
       if (typeof index !== 'number') return undefined;
-      const lower = asFloat(expr.op1);
-      const upper = asFloat(expr.op2);
-      const count = asFloat(expr.op3) ?? DEFAULT_LINSPACE_COUNT;
+      const lower = expr.op1.re;
+      const upper = expr.op2.re;
+      const count = expr.op3.re ?? DEFAULT_LINSPACE_COUNT;
       if (lower === undefined || upper === undefined) return undefined;
       if (index < 1 || index > count) return undefined;
       return expr.engine.number(
@@ -213,15 +213,14 @@ export const COLLECTIONS_LIBRARY: IdentifierDefinitions = {
       );
     },
     iterator: (expr, start, count) => {
-      let lower = asFloat(expr.op1);
-      let upper = asFloat(expr.op2);
+      let lower = expr.op1.re;
+      let upper = expr.op2.re;
       let totalCount: number;
       if (upper === undefined) {
         upper = lower;
         lower = 1;
         totalCount = DEFAULT_LINSPACE_COUNT;
-      } else
-        totalCount = Math.max(0, asFloat(expr.op3) ?? DEFAULT_LINSPACE_COUNT);
+      } else totalCount = Math.max(0, expr.op3.re ?? DEFAULT_LINSPACE_COUNT);
 
       let index = start ?? 1;
       count = Math.min(count ?? totalCount, totalCount);
@@ -432,8 +431,8 @@ export const COLLECTIONS_LIBRARY: IdentifierDefinitions = {
           const s = ops[index].string;
           if (s !== null) expr = def.at(expr, s) ?? ce.Nothing;
           else {
-            const i = asFloat(ops[index]);
-            if (i === null || !Number.isInteger(i)) return undefined;
+            const i = ops[index].re ?? NaN;
+            if (!Number.isInteger(i)) return undefined;
             expr = def.at(expr, i) ?? ce.Nothing;
           }
           index += 1;
@@ -657,7 +656,7 @@ export const COLLECTIONS_LIBRARY: IdentifierDefinitions = {
         const fn = applicable(ops[0]);
         if (!fn) return undefined;
         if (ops.length === 1) return ce.function('List', []);
-        const dims = ops.slice(1).map((op) => asMachineInteger(op));
+        const dims = ops.slice(1).map((op) => asSmallInteger(op));
         if (dims.some((d) => d === null || d <= 0)) return undefined;
         if (dims.length === 1) {
           // @fastpath
@@ -844,10 +843,10 @@ export const COLLECTIONS_LIBRARY: IdentifierDefinitions = {
 function rangeArgs(
   expr: BoxedExpression
 ): [lower: number, upper: number, step: number] {
-  const lower = asFloat(expr.op1) ?? 1;
-  const upper = asFloat(expr.op2);
+  const lower = expr.op1.re ?? 1;
+  const upper = expr.op2.re;
   if (upper === undefined) return [1, lower, 1];
-  const step = asFloat(expr.op3) ?? 1;
+  const step = expr.op3.re ?? 1;
   return [lower, upper!, step];
 }
 
@@ -868,9 +867,9 @@ function indexRangeArg(
   l: number | undefined
 ): [lower: number, upper: number, step: number] {
   if (!op) return [0, 0, 0];
-  let n = asFloat(op);
+  let n = op.re;
 
-  if (n !== null) {
+  if (n !== undefined) {
     n = Math.round(n);
     if (n < 0) {
       if (l === undefined) return [0, 0, 0];

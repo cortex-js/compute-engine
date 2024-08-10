@@ -238,7 +238,7 @@ describe('ConjugateTranspose', () => {
 
   it('should conjugate transpose a complex matrix', () => {
     const result = ce.box(['ConjugateTranspose', sq4_c]).evaluate();
-    expect(result.toString()).toMatchInlineSnapshot(`[[2-3i,0],[2,i]]`);
+    expect(result.toString()).toMatchInlineSnapshot(`[[(2 - 3i),0],[2,i]]`);
   });
 
   it('should conjugate transpose a matrix with unknowns', () => {

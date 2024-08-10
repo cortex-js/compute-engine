@@ -2,34 +2,18 @@ import { ComputeEngine } from '../src/compute-engine';
 
 const ce = new ComputeEngine();
 
-// Does not evaluate, only simplifies Degree
-// See trigonometry.test.ts:65
-// ce.box(['Cos', ['Degrees', 30]])
-//   .evaluate()
-//   .print();
+// y powers should combine
+console.log(
+  ce.parse('-2x5z\\sqrt{y}\\frac{3}{4}3\\pi y').simplify().toString()
+);
 
-// Correct result in machine
-// ce.precision = 'machine';
-// ce.box(['Cos', ['Degrees', 30]])
-//   .evaluate()
-//   .print();
-
-// Issue: loss of precision. Need a bigint in ExactNumericValue and/or BoxedNumber
-ce.parse('\\frac34 + 1e99').simplify().print();
-
-ce.parse('\\sin\\frac\\pi3').evaluate().print();
-
-// Boxed as Divide(1, 4), should be Rational(1, 4)
-console.info(ce.parse('2^{-2}').evaluate().json);
-
-// Eval returns NaN, N() returns -oo
-ce.parse('\\ln(0)').evaluate().print();
-ce.parse('\\ln(0)').N().print();
-
-ce.precision = 'machine';
-ce.box(['Cos', ['Complex', 3, 4]])
-  .evaluate()
-  .print();
+// Produces * 0.25. Maybe / 4?
+console.log(
+  ce
+    .box(['Square', ['Divide', 'x', 2]])
+    .evaluate()
+    .toString()
+);
 
 ce.parse('\\frac{\\pi}{4}').evaluate().print();
 

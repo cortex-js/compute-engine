@@ -25,11 +25,13 @@
  */
 
 import Decimal from 'decimal.js';
+import { SmallInteger } from '../numerics/numeric';
+import { Rational } from '../numerics/rationals';
 
 /** The value is equal to `(decimal * rational * sqrt(radical)) + im * i` */
 export interface NumericValueData {
   decimal?: Decimal | number; // A floating point number (non-integer)
-  rational?: [number, number]; // A rational number, may not be reduced
+  rational?: Rational; // A rational number, may not be reduced
   radical?: number; // A square root of an integer, may not be reduced
   im?: number; // The imaginary part of the number
 }
@@ -43,10 +45,14 @@ export abstract class NumericValue {
     return false;
   }
 
-  /** The imaginary part of this numeric value. Can be negative, zero or
-   *  positive.
+  // Note: complex :> real :> rational :> integer
+  abstract get type(): 'complex' | 'real' | 'rational' | 'integer';
+
+  /** The imaginary part of this numeric value.
+   *
+   * Can be negative, zero or positive.
    */
-  im: number;
+  readonly im: number;
 
   /** The real part of this numeric value.
    *
@@ -59,35 +65,41 @@ export abstract class NumericValue {
     return undefined;
   }
 
-  /** The numerator of this numeric value */
-  abstract get num(): NumericValue;
-
-  /** The denominator of this numeric value */
-  abstract get denom(): NumericValue;
+  abstract get numerator(): NumericValue;
+  abstract get denominator(): NumericValue;
 
   abstract get isNaN(): boolean;
   abstract get isPositiveInfinity(): boolean;
   abstract get isNegativeInfinity(): boolean;
 
   abstract get isZero(): boolean;
+  isZeroWithTolerance(_tolerance: number | Decimal): boolean {
+    return this.isZero;
+  }
   abstract get isOne(): boolean;
   abstract get isNegativeOne(): boolean;
+
+  /** The sign of complex numbers is undefined */
+  abstract sgn(): -1 | 0 | 1 | undefined;
 
   abstract N(): NumericValue;
 
   abstract neg(): NumericValue;
   abstract inv(): NumericValue;
-  abstract add(other: NumericValueData): NumericValue;
+  abstract add(other: number | NumericValueData): NumericValue;
   abstract sub(other: NumericValueData): NumericValue;
   abstract mul(other: number | Decimal | NumericValueData): NumericValue;
-  abstract div(other: NumericValueData): NumericValue;
-  abstract pow(
-    n: number | [number, number] | { re: number; im: number }
-  ): NumericValue;
+  abstract div(other: SmallInteger | NumericValueData): NumericValue;
+  abstract pow(n: number | { re: number; im: number }): NumericValue;
+  abstract root(n: number): NumericValue;
   abstract sqrt(): NumericValue;
   abstract gcd(other: NumericValue): NumericValue;
   abstract abs(): NumericValue;
   abstract ln(base?: number): NumericValue;
+  abstract exp(): NumericValue;
+  abstract floor(): NumericValue;
+  abstract ceil(): NumericValue;
+  abstract round(): NumericValue;
 
   //
   // JavaScript Object methods

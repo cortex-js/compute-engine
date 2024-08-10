@@ -1,13 +1,15 @@
 import { SerializeLatexOptions } from '../../../src/compute-engine/latex-syntax/public.ts';
-import { Expression } from '../../../src/math-json/types.ts';
 import { exprToString, engine as ce } from '../../utils';
 
 function parse(s: string) {
   return ce.parse(s);
 }
 
-function parseVal(s: string) {
-  return ce.parse(s).numericValue;
+function parseVal(s: string): number {
+  const result = ce.parse(s).numericValue;
+  if (typeof result === 'number') return result;
+  if (result === null) return NaN;
+  return result.re;
 }
 
 describe('PARSING OF NUMBER', () => {
@@ -25,11 +27,11 @@ describe('PARSING OF NUMBER', () => {
     expect(parseVal('-12.1234 E 5')).toEqual(-1212340);
     expect(parseVal('-12.1234e-5')).toEqual(-0.000121234);
     expect(parseVal('3 \\times 10 ^ 4')).toEqual(30000);
-    expect(parseVal('1.234\\times 10^ { -5678 }')).toMatchInlineSnapshot(
+    expect(parse('1.234\\times 10^ { -5678 }')).toMatchInlineSnapshot(
       `1.234e-5678`
     );
     // Invalid exponent (decimal point in exponent)
-    expect(parseVal('1.234\\times10^{1.234}')).toMatchInlineSnapshot(`null`);
+    expect(parseVal('1.234\\times10^{1.234}')).toMatchInlineSnapshot(`NaN`);
   });
 
   test('Special Values', () => {
@@ -41,7 +43,7 @@ describe('PARSING OF NUMBER', () => {
 
   test('Parsing plus/minus', () => {
     expect(parseVal('+1')).toEqual(1);
-    expect(parse('-1')).toMatchInlineSnapshot(`-1`);
+    expect(parseVal('-1')).toEqual(-1);
     expect(parse('++1')).toMatchInlineSnapshot(`1`);
     expect(parse('-++1')).toMatchInlineSnapshot(`-1`);
     expect(parse('--1')).toMatchInlineSnapshot(`1`);
@@ -55,11 +57,12 @@ describe('PARSING OF NUMBER', () => {
     expect(parse('3\\frac14')).toMatchInlineSnapshot(
       `["Add", 3, ["Rational", 1, 4]]`
     );
+    // Negative mixed fraction
     expect(parse('-3\\frac14')).toMatchInlineSnapshot(
       `["Subtract", ["Rational", -1, 4], 3]`
     );
     expect(parse('3\\frac14+\\frac12')).toMatchInlineSnapshot(
-      `["Add", 3, ["Rational", 1, 4], "Half"]`
+      `["Add", 3, ["Rational", 1, 4], ["Rational", 1, 2]]`
     );
   });
 
@@ -115,7 +118,7 @@ describe('PARSING OF NUMBER', () => {
       `["Equal", "x", ["Add", 1, 1230]]`
     );
     expect(parse('x=.123\\ldots e-423+1')).toMatchInlineSnapshot(
-      `["Equal", "x", ["Add", "1.23e-424", 1]]`
+      `["Equal", "x", ["Add", 1, "1.23e-424"]]`
     );
   });
 
@@ -142,7 +145,7 @@ describe('PARSING OF NUMBER', () => {
       `123456712345.6`
     );
     expect(parse('123\\,45\\,67.123\\,456\\,e12\\,345')).toMatchInlineSnapshot(
-      `1.234567123456e+12351`
+      `{num: "1234567123456e+12339"}`
     );
 
     expect(parse('-1 2')).toMatchInlineSnapshot(`-12`);
@@ -163,29 +166,63 @@ describe('PARSING OF NUMBER', () => {
     expect(parseVal('3.424242334e4')).toEqual(34242.42334);
   });
 
+  test('Complex Numbers', () => {
+    expect(parseVal('2i')).toMatchInlineSnapshot(`0`);
+    expect(parseVal('1-i')).toMatchInlineSnapshot(`1`);
+    expect(parseVal('2-3i')).toMatchInlineSnapshot(`2`);
+    expect(parseVal('-1.2345-5.6789i')).toMatchInlineSnapshot(`-1.2345`);
+    expect(parseVal('2-1.2345-5.6789i')).toMatchInlineSnapshot(`NaN`);
+  });
+
+  test('Rationals and radicals', () => {
+    expect(parseVal('\\sqrt{2}')).toMatchInlineSnapshot(`1.4142135623730951`);
+    expect(parseVal('\\sqrt{2.1}')).toMatchInlineSnapshot(`1.449137674618944`);
+    expect(parseVal('3\\sqrt{2}')).toMatchInlineSnapshot(`NaN`);
+    expect(parseVal('\\frac{3/4}\\sqrt{2}')).toMatchInlineSnapshot(`NaN`);
+
+    expect(parseVal('\\sqrt{9007199254740997}')).toMatchInlineSnapshot(
+      `94906265.62425157`
+    );
+
+    expect(parseVal('9007199254741033\\sqrt{3}')).toMatchInlineSnapshot(`NaN`);
+
+    expect(
+      parseVal('9007199254741033\\sqrt{9007199254740997}')
+    ).toMatchInlineSnapshot(`NaN`);
+    expect(
+      parseVal(
+        '\\frac{9007199254741033}{9007199254740997}\\sqrt{9007199254740997}'
+      )
+    ).toMatchInlineSnapshot(`NaN`);
+  });
+
   test('Non-machine number', () => {
     // Exponent larger than 10^308 (Number.MAX_VALUE = 1.7976931348623157e+308)
-    expect(ce.parse('421.35e+1000')).toMatchInlineSnapshot(`4.2135e+1002`);
+    expect(ce.parse('421.35e+1000')).toMatchInlineSnapshot(
+      `{num: "42135e+998"}`
+    );
     // Exponent smaller than 10^-323 (Number.MIN_VALUE = 5e-324)
     expect(ce.parse('421.35e-323')).toMatchInlineSnapshot(`4.2135e-321`);
 
     //  More than 15 digits
     expect(ce.parse('9007199234534554740991')).toMatchInlineSnapshot(
-      `9007199234534554740991`
+      `{num: "9007199234534554740991"}`
     );
 
     expect(ce.parse('900719923453434553453454740992')).toMatchInlineSnapshot(
-      `900719923453434553453454740992`
+      `{num: "900719923453434553453454740992"}`
     );
     expect(
       ce.parse(
         '900719923453434553982347938645934876598347659823479234879234867923487692348792348692348769234876923487692348769234876923487634876234876234987692348762348769234876348576453454740992123456789'
       )
-    ).toMatchInlineSnapshot(
-      `900719923453434553982347938645934876598347659823479234879234867923487692348792348692348769234876923487692348769234876923487634876234876234987692348762348769234876348576453454740992123456789`
-    );
+    ).toMatchInlineSnapshot(`
+      {
+        num: "900719923453434553982347938645934876598347659823479234879234867923487692348792348692348769234876923487692348769234876923487634876234876234987692348762348769234876348576453454740992123456789"
+      }
+    `);
     expect(ce.parse('31324234.23423143\\times10^{5000}')).toMatchInlineSnapshot(
-      `3.132423423423143e+5007`
+      `{num: "3132423423423143e+4992"}`
     );
   });
 
@@ -195,44 +232,24 @@ describe('PARSING OF NUMBER', () => {
       `["Add", 2, "PositiveInfinity"]`
     );
     expect(parse('\\infty-\\infty')).toMatchInlineSnapshot(
-      `["Add", "NegativeInfinity", "PositiveInfinity"]`
+      `["Subtract", "PositiveInfinity", "PositiveInfinity"]`
     );
     // Should not be interpreted as infinity
     expect(parseVal('\\frac{0}{0}')).toEqual(NaN);
   });
 
   test('Not numbers', () => {
-    expect(ce.box(NaN).numericValue).toEqual(NaN);
-    expect(ce.box(Infinity).numericValue).toEqual(Infinity);
-    // Invalid box
-    expect(ce.box({ num: Infinity } as any as Expression).numericValue).toEqual(
-      Infinity
-    );
-    expect(ce.box({ num: 'infinity' }).numericValue).toEqual(Infinity);
     expect(parse('3\\times x')).toMatchInlineSnapshot(`["Multiply", 3, "x"]`);
     expect(parse('3\\times10^n')).toMatchInlineSnapshot(
       `["Multiply", 3, ["Power", 10, "n"]]`
     );
+    expect(parseVal('\\frac{2}{0}')).toMatchInlineSnapshot(`Infinity`);
     expect(parseVal('\\operatorname{NaN}')).toEqual(NaN);
   });
-  test('Bigints', () => {
-    // expect(latex({ num: 12n })).toMatchInlineSnapshot();
-    expect(ce.box({ num: '12n' }).numericValue).toEqual(12);
-    // 1.873 461 923 786 192 834 612 398 761 298 192 306 423 768 912 387 649 238 476 9... × 10^196
-    expect(
-      ce.box({
-        num: '187346192378619283461239876129819230642376891238764923847000000000000000000000',
-      })
-    ).toMatchInlineSnapshot(
-      `1.87346192378619283461239876129819230642376891238764923847e+77`
-    );
 
-    expect(
-      ce.box({
-        num: '18734619237861928346123987612981923064237689123876492384769123786412837040123612308964123876412307864012346012837491237864192837641923876419238764123987642198764987162398716239871236912347619238764n',
-      })
-    ).toMatchInlineSnapshot(
-      `18734619237861928346123987612981923064237689123876492384769123786412837040123612308964123876412307864012346012837491237864192837641923876419238764123987642198764987162398716239871236912347619238764`
+  test('Bigints', () => {
+    expect(parse('9007199254741033')).toMatchInlineSnapshot(
+      `{num: "9007199254741033"}`
     );
   });
 });

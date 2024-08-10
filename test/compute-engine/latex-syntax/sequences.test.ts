@@ -228,9 +228,9 @@ describe('DELIMITERS PARSING', () => {
           "'(;)'"
         ]
       ]
-      canonical = ["q", ["Triple", 1, 2, 3], ["Triple", 4, 5, 6]]
+      canonical = ["Multiply", "q", ["Pair", ["Triple", 1, 2, 3], ["Triple", 4, 5, 6]]]
       box-latex = q(1,2,3;4,5,6)
-      latex     = q(\\mathrm{Triple}(1, 2, 3), \\mathrm{Triple}(4, 5, 6))
+      latex     = q\\mathrm{Pair}(\\mathrm{Triple}(1, 2, 3), \\mathrm{Triple}(4, 5, 6))
     `);
 
     expect(check('\\lbrack x+1=0, 2x^2+5=1\\rbrack')).toMatchInlineSnapshot(`

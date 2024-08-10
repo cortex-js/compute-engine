@@ -83,7 +83,9 @@ describe('PARSING numbers', () => {
     expect(ce.parse('1 + 1e199')).toMatchInlineSnapshot(`["Add", 1, 1e+199]`));
 
   test(`421.35e+1000`, () =>
-    expect(ce.parse('421.35e+1000')).toMatchInlineSnapshot(`4.2135e+1002`));
+    expect(ce.parse('421.35e+1000')).toMatchInlineSnapshot(
+      `{num: "42135e+998"}`
+    ));
 
   test(`\\frac34 + 1e199`, () =>
     expect(ce.parse('\\frac34 + 1e199')).toMatchInlineSnapshot(
@@ -449,12 +451,12 @@ describe('CANONICALIZATION multiply', () => {
         Multiply,
         -2,
         3.2,
-        5.23,
         [
           Rational,
           2,
           3,
         ],
+        5.23,
         x,
         [
           Divide,
@@ -478,8 +480,7 @@ describe('CANONICALIZATION divide', () => {
       [
         Divide,
         [
-          Multiply,
-          -1,
+          Negate,
           x,
         ],
         2,
@@ -501,7 +502,16 @@ describe('CANONICALIZATION divide', () => {
 });
 describe('CANONICALIZATION sqrt', () => {
   test('\\sqrt{3^2}', () => {
-    expect(canonicalToJson('\\sqrt{3^2}')).toMatchInlineSnapshot(`3`);
+    expect(canonicalToJson('\\sqrt{3^2}')).toMatchInlineSnapshot(`
+      [
+        Sqrt,
+        [
+          Power,
+          3,
+          2,
+        ],
+      ]
+    `);
 
     // Canonical of Sqrt should not transform to Power
     expect(canonicalToJson('\\sqrt{12}')).toMatchInlineSnapshot(`
@@ -518,25 +528,16 @@ describe('CANONICALIZATION sqrt', () => {
   test(`\\sqrt[3]{x}`, () =>
     expect(canonicalToJson('\\sqrt[3]{x}')).toMatchInlineSnapshot(`
       [
-        Power,
+        Root,
         x,
-        [
-          Rational,
-          1,
-          3,
-        ],
+        3,
       ]
     `));
   test(`\\sqrt{x}`, () =>
     expect(canonicalToJson('\\sqrt{x}')).toMatchInlineSnapshot(`
       [
-        Power,
+        Sqrt,
         x,
-        [
-          Rational,
-          1,
-          2,
-        ],
       ]
     `));
 });
@@ -592,7 +593,7 @@ describe('SIMPLIFICATION add', () => {
 
   test(`2\\sqrt{3}+\\sqrt{1+2}`, () =>
     expect(simplify('2\\sqrt{3}+\\sqrt{1+2}')).toMatchInlineSnapshot(
-      `5.196152422706631880582339024517617100828415761431141884167420938355799050726400111243438560271745728`
+      `["Multiply", 3, ["Sqrt", 3]]`
     ));
 
   test(`2x+x`, () =>
@@ -738,7 +739,7 @@ describe('SIMPLIFICATION power', () => {
         ["Multiply", 6, "a", ["Power", "b", 5]],
         ["Multiply", 15, ["Power", "b", 4], ["Square", "a"]],
         ["Multiply", 15, ["Power", "a", 4], ["Square", "b"]],
-        ["Multiply", 20, ["Power", ["Multiply", "a", "b"], 3]]
+        ["Multiply", 20, ["Power", "a", 3], ["Power", "b", 3]]
       ]
     `));
 });
@@ -755,7 +756,7 @@ describe('EXPAND', () => {
         ["Multiply", 6, "a", ["Power", "b", 5]],
         ["Multiply", 15, ["Power", "b", 4], ["Square", "a"]],
         ["Multiply", 15, ["Power", "a", 4], ["Square", "b"]],
-        ["Multiply", 20, ["Power", ["Multiply", "a", "b"], 3]]
+        ["Multiply", 20, ["Power", "a", 3], ["Power", "b", 3]]
       ]
     `));
 });
@@ -785,23 +786,31 @@ describe('SYMBOLIC EVALUATION trigonometric functions', () => {
   test(`\\sin\\frac\\pi3 // constructible values`, () =>
     expect(evaluateToJson('\\sin\\frac\\pi3')).toMatchInlineSnapshot(`
       [
-        Divide,
+        Multiply,
+        [
+          Rational,
+          1,
+          2,
+        ],
         [
           Sqrt,
           3,
         ],
-        2,
       ]
     `));
   test(`\\sin(\\frac13\\pi) // constructible values`, () =>
     expect(evaluateToJson('\\sin(\\frac13\\pi)')).toMatchInlineSnapshot(`
       [
-        Divide,
+        Multiply,
+        [
+          Rational,
+          1,
+          2,
+        ],
         [
           Sqrt,
           3,
         ],
-        2,
       ]
     `));
 });
@@ -810,9 +819,11 @@ describe('SYMBOLIC EVALUATION Other functions', () => {
   test('-(-x)', () => expect(NToJson('-(-x)')).toMatch('x'));
 
   test('50!', () =>
-    expect(evaluateToJson('50!')).toMatchInlineSnapshot(
-      `3.0414093201713378043612608166064768844377641568960512e+64`
-    ));
+    expect(evaluateToJson('50!')).toMatchInlineSnapshot(`
+      {
+        num: 30414093201713378043612608166064768844377641568960512e+12,
+      }
+    `));
 
   test(`eval('8844418+\\frac{85}{7}')`, () =>
     expect(evaluateToJson('8844418+\\frac{85}{7}')).toMatchObject([
@@ -828,7 +839,9 @@ describe('SYMBOLIC EVALUATION Other functions', () => {
 
 describe('NUMERIC EVALUATION arithmetic', () => {
   test(`N('88444111111113418+8')`, () => {
-    expect(NToJson('88444111111113418+8')).toEqual('88444111111113426');
+    expect(NToJson('88444111111113418+8')).toMatchObject({
+      num: '88444111111113426',
+    });
   });
 
   test(`N('1 + \\frac{1}{3}')`, () => {
@@ -843,7 +856,7 @@ describe('NUMERIC EVALUATION arithmetic', () => {
       '1.00000000000000000000000000000075e+30'
     ));
 
-  test(`N('\\frac34 + 1e99') // Precision is at 100 digits, so loss of 3/4 is expected`, () =>
+  test(`N('\\frac34 + 1e199') // Precision is at 100 digits, so loss of 3/4 is expected`, () =>
     expect(NToJson('\\frac34 + 1e199')).toEqual(1e199));
 
   test(`NToJson('12345678^3 + \\frac{1}{3}')`, () =>
@@ -852,9 +865,9 @@ describe('NUMERIC EVALUATION arithmetic', () => {
     ));
 
   test(`NToJson('50!')`, () =>
-    expect(NToJson('50!')).toMatch(
-      '3.0414093201713378043612608166064768844377641568960512e+64'
-    ));
+    expect(NToJson('50!')).toMatchObject({
+      num: '30414093201713378043612608166064768844377641568960512e+12',
+    }));
 
   test(`Wester-3`, () =>
     expect(

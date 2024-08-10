@@ -159,7 +159,7 @@ function assumeInequality(proposition: BoxedExpression): AssumeResult {
       }
     } else {
       ce.defineSymbol(proposition.op1.symbol, {
-        domain: ce.domain('ExtendedRealNumbers'),
+        domain: ce.domain('RealNumbers'),
       });
       ce.assumptions.set(proposition, true);
     }
@@ -203,7 +203,7 @@ function assumeInequality(proposition: BoxedExpression): AssumeResult {
   // Case 3
   if (unknowns.length === 1) {
     if (!ce.lookupSymbol(unknowns[0]))
-      ce.defineSymbol(unknowns[0], { domain: 'ExtendedRealNumbers' });
+      ce.defineSymbol(unknowns[0], { domain: 'RealNumbers' });
   }
 
   // Case 3, 4

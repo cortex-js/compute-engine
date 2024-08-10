@@ -369,7 +369,7 @@ export const DEFINITIONS_OTHERS: LatexDictionary = [
     // `["HorizontalSpacing", number]` -> indicate a space of mu units
     // `["HorizontalSpacing", expr, 'op'|'bin'|rel]` -> indicate a spacing around and expression, i.e. `\mathbin{x}`, etc...
     serialize: (serializer, expr): string => {
-      if (operand(expr, 2)) {
+      if (operand(expr, 2) !== null) {
         // @todo: handle op(expr,2) == 'op', 'bin', etc...
         return serializer.serialize(operand(expr, 1));
       }

@@ -1,11 +1,7 @@
 import Complex from 'complex.js';
 import { Decimal } from 'decimal.js';
 import { bignumPreferred } from '../boxed-expression/utils';
-import {
-  isMachineRational,
-  isBigRational,
-  Rational,
-} from '../numerics/rationals';
+import { isRational, Rational } from '../numerics/rationals';
 import {
   BoxedExpression,
   Hold,
@@ -19,100 +15,69 @@ export function apply(
   fn: (x: number) => number | Complex,
   bigFn?: (x: Decimal) => Decimal | Complex | number,
   complexFn?: (x: Complex) => number | Complex
-): number | Decimal | Complex {
-  const n = expr.numericValue!;
-  const ce = expr.engine;
-  console.assert(n !== null);
-
-  if (typeof n === 'number') {
-    if (bignumPreferred(ce) && bigFn) return ce.chop(bigFn(ce.bignum(n)));
-    return ce.chop(fn(n));
-  }
-
-  if (n instanceof Decimal) return ce.chop(bigFn?.(n) ?? fn(n.toNumber()));
-
-  if (isMachineRational(n)) {
-    if (!bignumPreferred(ce) || !bigFn) return ce.chop(fn(n[0] / n[1]));
-    return ce.chop(bigFn(ce.bignum(n[0]).div(n[1])));
-  }
-  if (isBigRational(n)) {
-    if (bigFn) return ce.chop(bigFn(ce.bignum(n[0]).div(ce.bignum(n[1]))));
-    return ce.chop(fn(Number(n[0]) / Number(n[1])));
-  }
-
-  if (n instanceof Complex) {
-    if (!complexFn) return NaN;
-    return ce.chop(complexFn(n));
-  }
-
-  debugger;
-  return NaN;
-}
-
-export function applyN(
-  expr: BoxedExpression,
-  fn: (x: number) => number | Complex,
-  bigFn?: (x: Decimal) => Decimal | Complex | number,
-  complexFn?: (x: Complex) => number | Complex
 ): BoxedExpression | undefined {
   if ((expr?.numericValue ?? null) === null) return undefined;
-  return expr.engine.number(apply(expr, fn, bigFn, complexFn));
+  const ce = expr.engine;
+
+  let result: number | Complex | Decimal | undefined = undefined;
+  if (expr.im !== 0) result = complexFn?.(ce.complex(expr.re ?? 0, expr.im));
+  else {
+    const bigRe = expr.bignumRe;
+    if (bigRe !== undefined && bignumPreferred(ce) && bigFn)
+      result = bigFn(bigRe);
+    else {
+      const re = expr.re;
+      console.assert(re !== undefined);
+      if (bignumPreferred(ce) && bigFn) result = bigFn(ce.bignum(re!));
+      else result = fn(re!);
+    }
+  }
+
+  if (result === undefined) return undefined;
+  return ce.number(ce.chop(result));
 }
 
 export function apply2(
   expr1: BoxedExpression,
   expr2: BoxedExpression,
-  fn: (x1: number, x2: number) => number | Complex | Rational,
-  bigFn?: (x1: Decimal, x2: Decimal) => Decimal | Complex | Rational | number,
-  complexFn?: (x1: Complex, x2: number | Complex) => Complex | number
-): number | Decimal | Complex | Rational {
-  console.assert(expr1.numericValue !== null && expr2.numericValue !== null);
-
-  const ce = expr1.engine;
-
-  let m1 = expr1.numericValue;
-  if (isMachineRational(m1)) m1 = m1[0] / m1[1];
-
-  let m2 = expr2.numericValue;
-  if (isMachineRational(m2)) m2 = m2[0] / m2[1];
-
-  if (!bignumPreferred(ce) && typeof m1 === 'number' && typeof m2 === 'number')
-    return fn(m1, m2);
-
-  let b1: Decimal | undefined = undefined;
-  if (m1 instanceof Decimal) b1 = m1;
-  else if (isBigRational(m1)) b1 = ce.bignum(m1[0]).div(ce.bignum(m1[1]));
-  else if (m1 !== null && typeof m1 === 'number') b1 = ce.bignum(m1);
-
-  let b2: Decimal | undefined = undefined;
-  if (m2 instanceof Decimal) b2 = m2;
-  else if (isBigRational(m2)) b1 = ce.bignum(m2[0]).div(ce.bignum(m2[1]));
-  else if (m2 !== null && typeof m2 === 'number') b2 = ce.bignum(m2);
-
-  if (b1 && b2) return bigFn?.(b1, b2) ?? fn(b1.toNumber(), b2.toNumber());
-
-  if (m1 instanceof Complex || m2 instanceof Complex) {
-    if (!complexFn) return NaN;
-    return complexFn(
-      ce.complex((m1 as number) ?? b1?.toNumber() ?? NaN),
-      ce.complex((m2 as number) ?? b2?.toNumber() ?? NaN)
-    );
-  }
-
-  debugger;
-  return NaN;
-}
-
-export function apply2N(
-  expr1: BoxedExpression,
-  expr2: BoxedExpression,
-  fn: (x1: number, x2: number) => number | Complex | Rational,
-  bigFn?: (x1: Decimal, x2: Decimal) => Decimal | Complex | number | Rational,
+  fn: (x1: number, x2: number) => number | Complex,
+  bigFn?: (x1: Decimal, x2: Decimal) => Decimal | Complex | number,
   complexFn?: (x1: Complex, x2: number | Complex) => Complex | number
 ): BoxedExpression | undefined {
   if (expr1.numericValue === null || expr2.numericValue === null)
     return undefined;
-  return expr1.engine.number(apply2(expr1, expr2, fn, bigFn, complexFn));
+
+  const ce = expr1.engine;
+  let result: number | Complex | Decimal | undefined = undefined;
+  if (expr1.im !== 0 || expr2.im !== 0) {
+    result = complexFn?.(
+      ce.complex(expr1.re ?? 0, expr1.im),
+      ce.complex(expr2.re ?? 0, expr2.im)
+    );
+  }
+
+  if (bigFn) {
+    const bigRe1 = expr1.bignumRe;
+    const bigRe2 = expr2.bignumRe;
+    if (bigRe1 !== undefined && bigRe2 !== undefined) {
+      if (bignumPreferred(ce) && bigFn) result = bigFn(bigRe1, bigRe2);
+      else result = fn(bigRe1.toNumber(), bigRe2.toNumber());
+    }
+  }
+
+  const re1 = expr1.re;
+  const re2 = expr2.re;
+  if (re1 !== undefined && re2 !== undefined) {
+    if (bignumPreferred(ce) && bigFn)
+      result = bigFn(
+        ce.bignum(expr1.bignumRe ?? re1),
+        ce.bignum(expr2.bignumRe ?? re2)
+      );
+    else result = fn(re1, re2);
+  }
+
+  if (result === undefined) return undefined;
+  return ce.number(ce.chop(result));
 }
 
 export function shouldHold(skip: Hold, count: number, index: number): boolean {

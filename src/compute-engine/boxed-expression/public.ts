@@ -1,5 +1,4 @@
 import Complex from 'complex.js';
-import Decimal from 'decimal.js';
 import {
   Expression,
   MathJsonNumber,
@@ -16,6 +15,7 @@ import type {
 import { IndexedLatexDictionary } from '../latex-syntax/dictionary/definitions';
 import { Rational } from '../numerics/rationals';
 import { NumericValue, NumericValueData } from '../numeric-value/public';
+import { BigNum, IBigNum } from '../numerics/bignum';
 
 /**
  * :::info[THEORY OF OPERATIONS]
@@ -33,24 +33,34 @@ import { NumericValue, NumericValueData } from '../numeric-value/public';
  *      transformed to `["Add", 1, 2, 3]`
  *    - associative functions are flattened: `["Add", 1, ["Add", 2, 3]]` is
  *      transformed to `["Add", 1, 2, 3]`
- *    - commutative functions are sorted
- *    - identifiers are not replaced with their values
+ *    - the arguments of commutative functions are sorted
+ *    - identifiers are **not** replaced with their values
  *
  * ### Algebraic methods (expr.add(), expr.mul(), etc...)
- * The boxed expression have some algebraic methods, i.e. `add`, `mul`, `div`, `pow`, etc. These methods are suitable for internal calculations, although they may be used as part of the public API as well.
- 
- *     - the operation is performed on the canonical version of the expression
+ * 
+ * The boxed expression have some algebraic methods, 
+ * i.e. `add`, `mul`, `div`, `pow`, etc. These methods are suitable for
+ * internal calculations, although they may be used as part of the public 
+ * API as well.
+ * 
+ *    - the operation is performed on the canonical version of the expression
  *    - the arguments are not evaluated
  *    - the canonical handler (of the corresponding operation) is not called
- *    - sequences are flattened as part of the canonicalization process
  *    - some additional simplifications over canonicalization are applied, for
  *      example number literals are combined. However, the result is exact, 
  *      and no approximation is made. Use `.N()` to get an approximate value.
+ *      This is equivalent to calling `simplify()` on the expression.
+ 
+ *    - sequences were already flattened as part of the canonicalization process
  *
- * For 'add' and 'mul', which take multiple arguments, separate functions
+ *   For 'add' and 'mul', which take multiple arguments, separate functions
  *   are provided that take an array of arguments. They are equivalent
  *   to calling the boxed algebraic method, i.e. `ce.Zero.add(1, 2, 3)` or
  *   `add(1, 2, 3)` are equivalent.
+ * 
+ * These methods are not equivalent to calling `expr.evaluate()` on the
+ * expression: evaluate will replace identifiers with their values, and
+ * evaluate the expression.
  *
  * ### `ce._fn()`
  * 
@@ -81,7 +91,7 @@ import { NumericValue, NumericValueData } from '../numeric-value/public';
  * Another option is to use the algebraic methods directly, i.e. `a.add(b)`
  * instead of `ce.function('Add', a, b)`. However, the algebraic methods will
  * apply further simplifications which may or may not be desirable. For
- * example, exact literals will be combined.
+ * example, number literals will be combined.
  *
  * ### Canonical Handlers
  * 
@@ -103,6 +113,21 @@ import { NumericValue, NumericValueData } from '../numeric-value/public';
  * 
  * :::
  */
+
+export type Type =
+  | 'complex'
+  | 'real'
+  | 'rational'
+  | 'integer'
+  | 'boolean'
+  | 'string'
+  | 'expression'
+  | 'collection'
+  | 'function'
+  | 'symbol'
+  | 'unknown'
+  | 'error'
+  | 'nothing';
 
 /**
  * :::info[THEORY OF OPERATIONS]
@@ -561,7 +586,7 @@ export interface BoxedExpression {
    */
   match(
     pattern:
-      | Decimal
+      | BigNum
       | Complex
       | [num: number, denom: number]
       | SemiBoxedExpression
@@ -596,24 +621,25 @@ export interface BoxedExpression {
   readonly isNotZero: boolean | undefined;
 
   /**
-   * The numeric value of this expression is not 1.
+   * The numeric value of this expression is 1.
    * @category Numeric Expression
    */
   readonly isOne: boolean | undefined;
 
   /**
-   * The numeric value of this expression is not -1.
+   * The numeric value of this expression is -1.
    * @category Numeric Expression
    */
   readonly isNegativeOne: boolean | undefined;
 
-  /** The numeric value of this expression is ±Infinity or Complex Infinity
+  /**
+   * The numeric value of this expression is `±Infinity` or Complex Infinity
    *
    * @category Numeric Expression
    */
   readonly isInfinity: boolean | undefined;
 
-  /** This expression is a number, but not ±Infinity and not `NaN`
+  /** This expression is a number, but not `±Infinity` and not `NaN`
    *
    * @category Numeric Expression
    */
@@ -630,16 +656,6 @@ export interface BoxedExpression {
   readonly isOdd: boolean | undefined;
 
   /**
-   * @category Numeric Expression
-   */
-  readonly isPrime: boolean | undefined;
-
-  /**
-   * @category Numeric Expression
-   */
-  readonly isComposite: boolean | undefined;
-
-  /**
    * Return the value of this expression, if a number literal.
    *
    * Note it is possible for `numericValue` to be `null`, and for `isNotZero`
@@ -652,7 +668,64 @@ export interface BoxedExpression {
    * @category Numeric Expression
    *
    */
-  readonly numericValue: number | Decimal | Complex | Rational | null;
+  readonly numericValue: number | NumericValue | null;
+
+  /**
+   * Return `true` if this expression is a number literal, for example
+   * `2`, `3.14`, `1/2`, `√2` etc.
+   *
+   * This is equivalent to checking if `this.numericValue` is not `null`
+   * or `this.re` is not `undefined`.
+   *
+   * @category Numeric Expression
+   *
+   */
+  readonly isNumberLiteral: boolean;
+
+  /**
+   * If this expression is a number literal, return the real part of the value.
+   *
+   * If the expression is not a number literal, return `undefined`.
+   *
+   * @category Numeric Expression
+   */
+  readonly re: number | undefined;
+  /**
+   * If this expression is a number literal, return the imaginary part of the
+   * value. It may be 0 if the number is real.
+   *
+   * If the expression is not a number literal, return `undefined`.
+   *
+   * @category Numeric Expression
+   */
+  readonly im: number | undefined;
+  /**
+   * If this expression is a number literal, return the real part as a `BigNum`.
+   *
+   * If the expression is not a number literal or the value is not available
+   * as a bignum return `undefined`. That is, the value is not upconverted
+   * to a bignum.
+   *
+   * To get the value either as a bignum or a number, use
+   * `this.bignumRe ?? this.re`.
+   *
+   * @category Numeric Expression
+   *
+   */
+  readonly bignumRe: BigNum | undefined;
+  /**
+   * If this expression is a number literal, return the imaginary part as a `BigNum`.
+   * It may be 0 if the number is real.
+   * If the expression is not a number literal or the value is not available
+   * as a bignum return `undefined`. That is, the value is not upconverted
+   * to a bignum.
+   *
+   * To get the value either as a bignum or a number, use
+   * `this.bignumIm ?? this.im`.
+   *
+   * @category Numeric Expression
+   */
+  readonly bignumIm: BigNum | undefined;
 
   /**
    * Attempt to factor a numeric coefficient `c` and a `rest` out of a
@@ -681,21 +754,25 @@ export interface BoxedExpression {
   sub(rhs: BoxedExpression): BoxedExpression;
   mul(rhs: NumericValue | number | BoxedExpression): BoxedExpression;
   div(rhs: number | BoxedExpression): BoxedExpression;
-  pow(
-    exp: number | [num: number, denom: number] | BoxedExpression
-  ): BoxedExpression;
+  pow(exp: number | BoxedExpression): BoxedExpression;
+  root(exp: number | BoxedExpression): BoxedExpression;
   sqrt(): BoxedExpression;
   ln(base?: SemiBoxedExpression): BoxedExpression;
   // exp(): BoxedExpression;
 
   /** The shape describes the axis of the expression.
+   *
    * When the expression is a scalar (number), the shape is `[]`.
+   *
    * When the expression is a vector, the shape is `[n]`.
+   *
    * When the expression is a matrix, the shape is `[n, m]`.
    */
   readonly shape: number[];
 
-  /** Return 0 for a scalar, 1 for a vector, 2 for a matrix, > 2 for a multidimensional matrix. It's the length of `expr.shape` */
+  /** Return 0 for a scalar, 1 for a vector, 2 for a matrix, > 2 for a multidimensional matrix.
+   *
+   * The rank is equivalent to the length of `expr.shape` */
   readonly rank: number;
 
   /**
@@ -989,7 +1066,7 @@ export interface BoxedExpression {
     value:
       | boolean
       | string
-      | Decimal
+      | BigNum
       | Complex
       | { re: number; im: number }
       | { num: number; denom: number }
@@ -1018,6 +1095,23 @@ export interface BoxedExpression {
    */
   get domain(): BoxedDomain | undefined;
 
+  /**
+   *
+   * The type of the value of this expression.
+   *
+   * If a function expression, the type of the value of the function
+   * (the result type).
+   *
+   * If a symbol the type of the value of the symbol.
+   *
+   * :::info[Note]
+   * If not valid, return `error`.
+   * If non-canonical, return `undefined`.
+   * :::
+   *
+   */
+  get type(): Type;
+
   /** Modify the domain of a symbol.
    *
    * :::info[Note]
@@ -1029,16 +1123,26 @@ export interface BoxedExpression {
 
   /** `true` if the value of this expression is a number.
    *
-   * `isExtendedComplex || isNaN` = `isReal || isImaginary || isInfinity || isNaN`
+   * `isReal || isImaginary`
    *
    * Note that in a fateful twist of cosmic irony, `NaN` ("Not a Number")
    * **is** a number.
+   *
+   * If `isNumber` is `true`, this indicates that evaluate the expression
+   * will return a number. This does not indicate that the expression
+   * is a number literal. To check if the expression is a number literal,
+   * use `expr.isNumberLiteral`.
+   *
+   * For example, the expression `["Add", 1, 2]` is a number and
+   * `expr.isNumber` is `true`, but `isNumberLiteral` is `false`.
    *
    * @category Domain Properties
    */
   readonly isNumber: boolean | undefined;
 
-  /** The value of this expression is an element of the set ℤ: ...,-2, -1, 0, 1, 2...
+  /**
+   *
+   * The value of this expression is an element of the set ℤ: ...,-2, -1, 0, 1, 2...
    *
    *
    * @category Domain Properties
@@ -1055,43 +1159,17 @@ export interface BoxedExpression {
    *
    */
   readonly isRational: boolean | undefined;
-
   /**
-   * The value of this expression is a number that is the root of a non-zero
-   * univariate polynomial with rational coefficients.
-   *
-   * All integers and rational numbers are algebraic.
-   *
-   * Transcendental numbers, such as \\( \pi \\) or \\( e \\) are not algebraic.
-   *
-   *
-   * @category Domain Properties
-   *
-   */
-  readonly isAlgebraic: boolean | undefined;
-  /**
-   * The value of this expression is real number: finite and not imaginary.
-   *
-   * `isFinite && !isImaginary`
+   * The value of this expression is real number.
    *
    *
    * @category Domain Properties
    */
   readonly isReal: boolean | undefined;
 
-  /** Real or ±Infinity
-   *
-   * `isReal || isInfinity`
-   *
-   *
-   * @category Domain Properties
-   */
-  readonly isExtendedReal: boolean | undefined;
-
   /**
-   * The value of this expression is a number, but not `NaN` or any Infinity
+   * The value of this expression is a number.
    *
-   * `isReal || isImaginary`
    *
    *
    * @category Domain Properties
@@ -1099,14 +1177,7 @@ export interface BoxedExpression {
    */
   readonly isComplex: boolean | undefined;
 
-  /** `isReal || isImaginary || isInfinity`
-   *
-   *
-   * @category Domain Properties
-   */
-  readonly isExtendedComplex: boolean | undefined;
-
-  /** The value of this expression is a number with a imaginary part
+  /** The value of this expression is a number with an imaginary part
    *
    *
    * @category Domain Properties
@@ -1138,7 +1209,7 @@ export interface BoxedExpression {
 export type SemiBoxedExpression =
   | number
   | string
-  | Decimal
+  | BigNum
   | Complex
   | MathJsonNumber
   | MathJsonString
@@ -1466,6 +1537,8 @@ export type BoxedFunctionDefinition = BoxedBaseDefinition &
     hold: Hold;
 
     signature: BoxedFunctionSignature;
+
+    type: 'function';
   };
 
 /**
@@ -1515,20 +1588,14 @@ export type SymbolAttributes = {
  * If provided, they will override the value derived from
  * the symbol's value.
  *
- * For example, it might be useful to override `algebraic = false`
- * for a transcendental number.
- *
  * @category Definitions
  */
 export type NumericFlags = {
   number: boolean | undefined;
   integer: boolean | undefined;
   rational: boolean | undefined;
-  algebraic: boolean | undefined;
   real: boolean | undefined;
-  extendedReal: boolean | undefined;
   complex: boolean | undefined;
-  extendedComplex: boolean | undefined;
   imaginary: boolean | undefined;
 
   positive: boolean | undefined; // x > 0
@@ -1546,9 +1613,6 @@ export type NumericFlags = {
 
   even: boolean | undefined;
   odd: boolean | undefined;
-
-  prime: boolean | undefined;
-  composite: boolean | undefined; // True if not a prime number
 };
 
 /**
@@ -1567,6 +1631,8 @@ export interface BoxedSymbolDefinition
   // it can be updated as more information becomes available.
   // A domain that is not inferred, but has been set explicitly, cannot be updated.
   inferredDomain: boolean;
+
+  type: Type;
 }
 
 /** @category Rules */
@@ -1714,7 +1780,6 @@ export type DomainLiteral =
   | 'RealFunctions'
   | 'Numbers'
   | 'ComplexNumbers'
-  | 'ExtendedRealNumbers'
   | 'ImaginaryNumbers'
   | 'Integers'
   | 'Rationals'
@@ -1726,7 +1791,6 @@ export type DomainLiteral =
   | 'NonNegativeIntegers'
   | 'NonPositiveNumbers'
   | 'NonPositiveIntegers'
-  | 'ExtendedComplexNumbers'
   | 'TranscendentalNumbers'
   | 'AlgebraicNumbers'
   | 'RationalNumbers'
@@ -1797,7 +1861,7 @@ export type ArrayValue =
   | boolean
   | number
   | string
-  | Decimal
+  | BigNum
   | Complex
   | BoxedExpression
   | undefined;
@@ -1815,7 +1879,7 @@ export type AssignValue =
   | boolean
   | number
   | string
-  | Decimal
+  | BigNum
   | Complex
   | LatexString
   | SemiBoxedExpression
@@ -1823,7 +1887,7 @@ export type AssignValue =
   | undefined;
 
 /** @internal */
-export interface IComputeEngine {
+export interface IComputeEngine extends IBigNum {
   latexDictionary: readonly LatexDictionaryEntry[];
 
   /** @private */
@@ -1856,19 +1920,19 @@ export interface IComputeEngine {
   readonly ComplexInfinity: BoxedExpression;
 
   /** @internal */
-  readonly _BIGNUM_NAN: Decimal;
+  readonly _BIGNUM_NAN: BigNum;
   /** @internal */
-  readonly _BIGNUM_ZERO: Decimal;
+  readonly _BIGNUM_ZERO: BigNum;
   /** @internal */
-  readonly _BIGNUM_ONE: Decimal;
+  readonly _BIGNUM_ONE: BigNum;
   /** @internal */
-  readonly _BIGNUM_TWO: Decimal;
+  readonly _BIGNUM_TWO: BigNum;
   /** @internal */
-  readonly _BIGNUM_HALF: Decimal;
+  readonly _BIGNUM_HALF: BigNum;
   /** @internal */
-  readonly _BIGNUM_PI: Decimal;
+  readonly _BIGNUM_PI: BigNum;
   /** @internal */
-  readonly _BIGNUM_NEGATIVE_ONE: Decimal;
+  readonly _BIGNUM_NEGATIVE_ONE: BigNum;
 
   /** The current scope */
   context: RuntimeScope | null;
@@ -1886,19 +1950,18 @@ export interface IComputeEngine {
   readonly recursionLimit: number;
 
   chop(n: number): number;
-  chop(n: Decimal): Decimal | 0;
+  chop(n: BigNum): BigNum | 0;
   chop(n: Complex): Complex | 0;
-  chop(n: number | Decimal | Complex): number | Decimal | Complex;
+  chop(n: number | BigNum | Complex): number | BigNum | Complex;
 
-  bignum: (a: Decimal.Value | bigint) => Decimal;
-  isBignum(a: unknown): a is Decimal;
+  bignum: (a: string | number | bigint | BigNum) => BigNum;
 
   complex: (a: number | Complex, b?: number) => Complex;
-  isComplex(a: unknown): a is Complex;
+  // isComplex(a: unknown): a is Complex;
 
   /** @internal */
   _numericValue(
-    value: number | Rational | Decimal | Complex | NumericValueData
+    value: number | bigint | Rational | BigNum | Complex | NumericValueData
   ): NumericValue;
 
   /** If the precision is set to `machine`, floating point numbers
@@ -1923,7 +1986,7 @@ export interface IComputeEngine {
   box(
     expr:
       | NumericValue
-      | Decimal
+      | BigNum
       | Complex
       | [num: number, denom: number]
       | SemiBoxedExpression,
@@ -1941,8 +2004,9 @@ export interface IComputeEngine {
       | number
       | bigint
       | string
+      | NumericValue
       | MathJsonNumber
-      | Decimal
+      | BigNum
       | Complex
       | Rational,
     options?: { metadata?: Metadata; canonical?: CanonicalOptions }
@@ -2186,9 +2250,8 @@ export type LatexString = string;
 /**
  * Control how a pattern is matched to an expression.
  *
- * - `substitution`: if present, assumes these values for the named wildcards, and ensure that subsequent occurence of the same wildcard have the same value.
+ * - `substitution`: if present, assumes these values for the named wildcards, and ensure that subsequent occurrence of the same wildcard have the same value.
  * - `recursive`: if true, match recursively, otherwise match only the top level.
- * - `numericTolerance`: if present, the tolerance for numeric comparison.
  * - `exact`: if true, only match expressions that are structurally identical. If false, match expressions that are structurally identical or equivalent. For example, when false, `["Add", '_a', 2]` matches `2`, with a value of `_a` of `0`. If true, the expression does not match.
  *
  * @category Pattern Matching
@@ -2197,7 +2260,6 @@ export type LatexString = string;
 export type PatternMatchOptions = {
   substitution?: BoxedSubstitution;
   recursive?: boolean;
-  numericTolerance?: number;
   exact?: boolean;
 };
 
@@ -2337,7 +2399,7 @@ export type RuntimeScope = Scope & {
 
 /**
  * A bound symbol (i.e. one with an associated definition) has either a domain
- * (e.g. ∀ x ∈ ℝ), a value (x = 5) or both (π: value = 3.14... domain = TranscendentalNumbers)
+ * (e.g. ∀ x ∈ ℝ), a value (x = 5) or both (π: value = 3.14... domain = RealNumbers)
  * @category Definitions
  */
 export type SymbolDefinition = BaseDefinition &

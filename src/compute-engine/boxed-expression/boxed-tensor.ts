@@ -13,6 +13,7 @@ import {
   BoxedBaseDefinition,
   BoxedFunctionDefinition,
   SemiBoxedExpression,
+  Type,
 } from '../public';
 import {
   DataTypeMap,
@@ -218,10 +219,12 @@ export class BoxedTensor extends _BoxedExpression {
     return this.expression.div(rhs);
   }
 
-  pow(
-    exp: number | [num: number, denom: number] | BoxedExpression
-  ): BoxedExpression {
+  pow(exp: number | BoxedExpression): BoxedExpression {
     return this.expression.pow(exp);
+  }
+
+  root(exp: number | BoxedExpression): BoxedExpression {
+    return this.expression.root(exp);
   }
 
   sqrt(): BoxedExpression {
@@ -239,6 +242,11 @@ export class BoxedTensor extends _BoxedExpression {
   get domain(): BoxedDomain | undefined {
     if (this._tensor) return this.engine.domain('Lists');
     return this.expression.domain;
+  }
+
+  get type(): Type {
+    if (!this.isValid) return 'error';
+    return 'collection';
   }
 
   get json(): Expression {

@@ -31,11 +31,11 @@ describe('INFERRED DOMAINS', () => {
     ));
   test('Pi', () =>
     expect(engine.box('Pi').domain?.toJSON()).toMatchInlineSnapshot(
-      `TranscendentalNumbers`
+      `RealNumbers`
     ));
   test('-3.1415', () =>
     expect(engine.box(-3.1415).domain?.toJSON()).toMatchInlineSnapshot(
-      `NegativeNumbers`
+      `RealNumbers`
     ));
 
   test('sym', () =>
@@ -181,9 +181,9 @@ describe('NUMERIC', () => {
       engine.domain('Integers').isCompatible(engine.domain('RealNumbers'))
     ).toBeTruthy();
   });
-  test('RationalNumber <: ExtendedRealNumber', () => {
+  test('RationalNumber <: RealNumber', () => {
     expect(
-      engine.domain('RationalNumbers').isCompatible('ExtendedRealNumbers')
+      engine.domain('RationalNumbers').isCompatible('RealNumbers')
     ).toBeTruthy();
   });
   test('RealNumber <: Integer', () => {

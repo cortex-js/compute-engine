@@ -1,7 +1,7 @@
 import { BoxedExpression } from '../public';
-import { inverse, isZero } from '../numerics/rationals';
-import { asRational, mul } from '../boxed-expression/numerics';
 import { canonicalMultiply } from './arithmetic-multiply';
+import { NumericValue } from '../numeric-value/public';
+import { bigint } from '../numerics/numeric-bigint';
 
 /**
  * Canonical form of 'Divide' (and 'Rational')
@@ -19,33 +19,81 @@ export function canonicalDivide(
   const ce = op1.engine;
   if (!op1.isValid || !op2.isValid) return ce._fn('Divide', [op1, op2]);
 
+  // -a/-b = a/b
   if (op1.operator === 'Negate' && op2.operator === 'Negate') {
     op1 = op1.op1;
     op2 = op2.op1;
   }
 
-  if (op1.numericValue !== null && op2.numericValue !== null) {
-    if (op2.isOne) return op1;
-    if (op2.isNegativeOne) return op1.neg();
-    if (op1.isOne) return op2.inv();
-    if (op1.isNegativeOne) return op2.inv().neg();
-    const r1 = asRational(op1);
-    const r2 = asRational(op2);
-    if (r1 && r2 && !isZero(r2)) return ce.number(mul(r1, inverse(r2)));
-  }
-
+  // (a/b)/(c/d) = (a*d)/(b*c)
   if (op1.operator === 'Divide' && op2.operator === 'Divide') {
     return canonicalDivide(
       canonicalMultiply(ce, [op1.op1, op2.op2]),
       canonicalMultiply(ce, [op1.op2, op2.op1])
     );
   }
+
+  // (a/b)/c = a/(b*c)
   if (op1.operator === 'Divide')
     return canonicalDivide(op1.op1, canonicalMultiply(ce, [op1.op2, op2]));
+
+  // a/(b/c) = (a*c)/b
   if (op2.operator === 'Divide')
     return canonicalDivide(canonicalMultiply(ce, [op1, op2.op2]), op2.op1);
 
+  // a/1 = a
   if (op2.isOne) return op1;
+
+  // 1/a = a^-1
+  if (op1.isOne) return op2.inv();
+
+  // a/(-1) = -a
+  if (op2.isNegativeOne) return op1.neg();
+
+  // 0/a = 0, 0/0 = NaN
+  if (op1.isZero) return op2.isZero ? ce.NaN : ce.Zero;
+
+  // (-1)/a = -(a^-1)
+  if (op1.isNegativeOne) return op2.inv().neg();
+
+  // Are both op1 and op2 a numeric value?
+  let v1 = op1.numericValue;
+  const v2 = op2.numericValue;
+  if (v1 !== null && v2 !== null) {
+    if (
+      (typeof v1 !== 'number' && v1.im !== 0) ||
+      (typeof v2 !== 'number' && v2.im !== 0)
+    ) {
+      // If we have an imaginary part, not a rational
+      return ce._fn('Divide', [op1, op2]);
+    }
+
+    if (
+      typeof v1 === 'number' &&
+      Number.isInteger(v1) &&
+      typeof v2 === 'number' &&
+      Number.isInteger(v2)
+    )
+      return ce.number([v1, v2]);
+
+    if (typeof v1 === 'number' && Number.isInteger(v1)) {
+      if (v1 === 0) return ce.Zero;
+      if ((v2 as NumericValue).type === 'integer') {
+        const b = (v2 as NumericValue).bignumRe;
+        if (b !== undefined) {
+          if (b.isInteger()) return ce.number([bigint(v1)!, bigint(b)!]);
+        } else {
+          const d = (v2 as NumericValue).re;
+          if (Number.isInteger(d)) return ce.number([v1, d]);
+        }
+      }
+    }
+
+    return ce._fn('Divide', [op1, op2]);
+  }
+
+  // At least one of op1 or op2 are not numeric value.
+  // Try to factor them.
 
   const [c1, t1] = op1.toNumericValue();
   if (c1.isZero) return ce.Zero;
@@ -63,8 +111,8 @@ export function canonicalDivide(
   // `π/4` and not `0.25π`
   if (!c.isExact) return ce._fn('Divide', [t1.mul(c1), t2.mul(c2)]);
 
-  const num = c.num.isOne ? t1 : t1.mul(ce.box(c.num));
-  const denom = c.denom.isOne ? t2 : t2.mul(ce.box(c.denom));
+  const num = c.numerator.isOne ? t1 : t1.mul(ce.number(c.numerator));
+  const denom = c.denominator.isOne ? t2 : t2.mul(ce.number(c.denominator));
 
   return denom.isOne ? num : ce._fn('Divide', [num, denom]);
 }

@@ -24,9 +24,9 @@ export const DOMAIN_ALIAS = {
   NumericFunctions: ['FunctionOf', 'Numbers', ['VarArg', 'Numbers'], 'Numbers'],
   RealFunctions: [
     'FunctionOf',
-    'ExtendedRealNumbers',
-    ['VarArg', 'ExtendedRealNumbers'],
-    'ExtendedRealNumbers',
+    'RealNumbers',
+    ['VarArg', 'RealNumbers'],
+    'RealNumbers',
   ],
   LogicOperators: [
     'FunctionOf',
@@ -185,11 +185,9 @@ const DOMAIN_LITERAL: Record<string, DomainLiteral | DomainLiteral[]> = {
   // https://en.wikipedia.org/wiki/Category_of_sets
   //
   Numbers: 'Values',
-  ExtendedComplexNumbers: 'Numbers',
-  ComplexNumbers: 'ExtendedComplexNumbers',
+  ComplexNumbers: 'Numbers',
   ImaginaryNumbers: 'ComplexNumbers',
-  ExtendedRealNumbers: 'ExtendedComplexNumbers',
-  RealNumbers: ['ComplexNumbers', 'ExtendedRealNumbers'],
+  RealNumbers: 'ComplexNumbers',
 
   PositiveNumbers: 'NonNegativeNumbers',
   NonNegativeNumbers: 'RealNumbers',

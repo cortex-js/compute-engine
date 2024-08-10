@@ -97,7 +97,7 @@ export function operator(
  * Return the arguments of a function, or an empty array if not a function
  * or no arguments.
  */
-export function operands(expr: Expression | null): Expression[] {
+export function operands(expr: Expression | null | undefined): Expression[] {
   if (Array.isArray(expr)) return expr.slice(1) as Expression[];
   if (expr !== undefined && isFunctionObject(expr)) return expr.fn.slice(1);
 
@@ -106,14 +106,14 @@ export function operands(expr: Expression | null): Expression[] {
 
 /** Return the nth operand of a function expression */
 export function operand(
-  expr: Expression | null | undefined,
-  n: number
+  expr: Expression | null,
+  n: 1 | 2 | 3
 ): Expression | null {
   if (Array.isArray(expr)) return expr[n] ?? null;
 
-  if (expr !== undefined && isFunctionObject(expr)) return expr.fn[n] ?? null;
+  if (expr === null || !isFunctionObject(expr)) return null;
 
-  return null;
+  return expr.fn[n] ?? null;
 }
 
 export function nops(expr: Expression | null | undefined): number {
@@ -123,7 +123,7 @@ export function nops(expr: Expression | null | undefined): number {
   return 0;
 }
 
-export function unhold(expr: Expression | null | undefined): Expression | null {
+export function unhold(expr: Expression | null): Expression | null {
   if (expr === null || expr === undefined) return null;
   if (operator(expr) === 'Hold') return operand(expr, 1);
   return expr;
@@ -148,7 +148,7 @@ export function symbol(expr: Expression | null | undefined): string | null {
 }
 
 function keyValuePair(
-  expr: Expression | null
+  expr: Expression | null | undefined
 ): null | [key: string, value: Expression] {
   const h = operator(expr);
   if (h === 'KeyValuePair' || h === 'Tuple' || h === 'Pair') {
@@ -172,8 +172,9 @@ export function dictionary(
   const h = operator(expr);
   if (h === 'Dictionary') {
     const result = {};
+    const ops = operands(expr);
     for (let i = 1; i < nops(expr); i++) {
-      const kv = keyValuePair(operand(expr, i));
+      const kv = keyValuePair(ops[i]);
       if (kv) result[kv[0]] = kv[1];
     }
 
@@ -225,10 +226,8 @@ export function machineValue(
 
   if (typeof expr === 'string') return machineValueOfString(expr);
 
-  if (expr === null || expr === undefined) return null;
-
-  // Stricly, expr.num should be a string, but we allow it to be a number
-  if (isNumberObject(expr)) return machineValue(expr.num);
+  // Strictly, expr.num should be a string, but we allow it to be a number
+  if (expr !== undefined && isNumberObject(expr)) return machineValue(expr.num);
 
   return null;
 }
@@ -356,15 +355,17 @@ export function foldAssociativeOperator(
 }
 
 /** Return the elements of a sequence, or null if the expression is not a sequence. The sequence can be optionally enclosed by a`["Delimiter"]` expression  */
-export function getSequence(expr: Expression | null): Expression[] | null {
-  if (expr === null) return null;
+export function getSequence(
+  expr: Expression | null | undefined
+): Expression[] | null {
+  if (expr === null || expr === undefined) return null;
 
   let h = operator(expr);
   if (h === 'Delimiter') {
     expr = operand(expr, 1);
     if (expr === null) return [];
     h = operator(expr);
-    if (h !== 'Sequence') return [expr];
+    if (h !== 'Sequence') return [expr!];
   }
 
   if (h !== 'Sequence') return null;
@@ -372,11 +373,13 @@ export function getSequence(expr: Expression | null): Expression[] | null {
   return operands(expr);
 }
 
-export function isEmptySequence(expr: Expression | null): boolean {
+export function isEmptySequence(expr: Expression | null | undefined): boolean {
   return operator(expr) === 'Sequence' && nops(expr) === 0;
 }
 
-export function missingIfEmpty(expr: Expression | null): Expression {
+export function missingIfEmpty(
+  expr: Expression | null | undefined
+): Expression {
   if (isEmptySequence(expr)) return MISSING;
   return expr ?? MISSING;
 }
