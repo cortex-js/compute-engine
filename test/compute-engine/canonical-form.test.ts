@@ -318,8 +318,8 @@ describe('POLYNOMIAL ORDER', () => {
       simplify  = x^3 + 14pi * x^3
       eval-auto = x^3 + 14pi * x^3
       eval-mach = x^3 + 14pi * x^3
-      N-auto    = x^3 + 43.982297150257104 * x^3
-      N-mach    = x^3 + 43.982297150257104 * x^3
+      N-auto    = 44.982297150257106 * x^3
+      N-mach    = 44.982297150257104 * x^3
     `);
   });
 
@@ -369,7 +369,7 @@ describe('POLYNOMIAL ORDER', () => {
         ["Multiply", ["Power", "a", 3], ["Square", "a"]],
         ["Multiply", ["Power", "b", 3], ["Square", "b"]]
       ]
-      simplify  = b^6 + b * a^5 + a^5 + a^5 + b^5
+      simplify  = b^6 + b * a^5 + 2a^5 + b^5
     `);
   });
 
