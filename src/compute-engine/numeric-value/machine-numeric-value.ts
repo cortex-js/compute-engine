@@ -157,10 +157,9 @@ export class MachineNumericValue extends NumericValue {
   }
 
   sgn(): -1 | 0 | 1 | undefined {
-    if (this.im !== 0) return undefined;
-    const s = Math.sign(this.decimal);
-    if (Number.isFinite(s)) return s as -1 | 0 | 1;
-    return undefined;
+    if (this.im !== 0 || !Number.isFinite(this.decimal)) return undefined;
+
+    return Math.sign(this.decimal) as -1 | 0 | 1;
   }
 
   N(): NumericValue {
@@ -489,6 +488,37 @@ export class MachineNumericValue extends NumericValue {
     if (this.isNaN || this.im !== 0) return this._makeExact(NaN);
     if (Number.isInteger(this.decimal)) return this;
     return this._makeExact(Math.round(this.decimal));
+  }
+
+  eq(other: number | NumericValue): boolean {
+    if (typeof other === 'number') return chop(this.decimal - other) === 0;
+    return (
+      chop(this.decimal - other.re) === 0 && chop(this.im - other.im) === 0
+    );
+  }
+
+  lt(other: number | NumericValue): boolean | undefined {
+    if (this.im !== 0) undefined;
+    if (typeof other === 'number') return this.decimal < other;
+    return this.decimal < other.re;
+  }
+
+  lte(other: number | NumericValue): boolean | undefined {
+    if (this.im !== 0) undefined;
+    if (typeof other === 'number') return this.decimal <= other;
+    return this.decimal <= other.re;
+  }
+
+  gt(other: number | NumericValue): boolean | undefined {
+    if (this.im !== 0) undefined;
+    if (typeof other === 'number') return this.decimal > other;
+    return this.decimal > other.re;
+  }
+
+  gte(other: number | NumericValue): boolean | undefined {
+    if (this.im !== 0) undefined;
+    if (typeof other === 'number') return this.decimal >= other;
+    return this.decimal >= other.re;
   }
 }
 

@@ -649,6 +649,47 @@ export class ExactNumericValue extends NumericValue {
     return this.clone(Math.round(this.re));
   }
 
+  eq(other: number | NumericValue): boolean {
+    if (typeof other === 'number')
+      return (
+        this.radical === 1 &&
+        isInteger(this.rational) &&
+        this.rational[0] === other
+      );
+    if (other instanceof ExactNumericValue) {
+      return (
+        this.radical === other.radical &&
+        this.rational[0] == other.rational[0] &&
+        this.rational[1] == other.rational[1]
+      );
+    }
+    return other.im === 0 && other.re === this.re;
+  }
+
+  lt(other: number | NumericValue): boolean | undefined {
+    if (this.im !== 0) undefined;
+    if (typeof other === 'number') return this.re < other;
+    return this.re < other.re;
+  }
+
+  lte(other: number | NumericValue): boolean | undefined {
+    if (this.im !== 0) undefined;
+    if (typeof other === 'number') return this.re <= other;
+    return this.re <= other.re;
+  }
+
+  gt(other: number | NumericValue): boolean | undefined {
+    if (this.im !== 0) undefined;
+    if (typeof other === 'number') return this.re > other;
+    return this.re > other.re;
+  }
+
+  gte(other: number | NumericValue): boolean | undefined {
+    if (this.im !== 0) undefined;
+    if (typeof other === 'number') return this.re >= other;
+    return this.re >= other.re;
+  }
+
   // When using add(), inexact values propagate, i.e. '1.2 + 1/4' -> '1.45'
   // This may not be desirable when adding many values, i.e. '1.2 - 1.2 + 1/4' -> '1/4'
   // Furthermore we may want to keep track of rational and square rational parts

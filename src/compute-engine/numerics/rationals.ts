@@ -34,7 +34,7 @@ export function isPositive(x: Rational): boolean {
 }
 
 export function isOne(x: Rational): boolean {
-  return x[0] === x[1];
+  return x[0] == x[1];
 }
 
 export function isNegativeOne(x: Rational): boolean {
@@ -43,7 +43,8 @@ export function isNegativeOne(x: Rational): boolean {
 
 // True if the denominator is 1
 export function isInteger(x: Rational): boolean {
-  return x[1] === 1 || x[1] === BigInt(1);
+  // Note '==' to convert bigint to number
+  return x[1] == 1;
 }
 
 export function machineNumerator(x: Rational): number {

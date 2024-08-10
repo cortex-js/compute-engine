@@ -177,9 +177,9 @@ export class BigNumericValue extends NumericValue {
 
   sgn(): -1 | 0 | 1 | undefined {
     if (this.im !== 0) return undefined;
+    if (this.decimal.isZero()) return 0;
     if (this.decimal.isPositive()) return 1;
     if (this.decimal.isNegative()) return -1;
-    if (this.decimal.isZero()) return 0;
     return undefined;
   }
 
@@ -538,6 +538,38 @@ export class BigNumericValue extends NumericValue {
     if (this.isNaN || this.im !== 0) return this._makeExact(NaN);
     if (this.decimal.isInteger()) return this;
     return this._makeExact(bigint(this.decimal.round())!);
+  }
+
+  eq(other: number | NumericValue): boolean {
+    if (typeof other === 'number') return this.decimal.eq(other);
+    return (
+      this.decimal.eq(other.bignumRe ?? other.re) &&
+      chop(this.im - other.im) === 0
+    );
+  }
+
+  lt(other: number | NumericValue): boolean | undefined {
+    if (this.im !== 0) undefined;
+    if (typeof other === 'number') return this.decimal.lt(other);
+    return this.decimal.lt(other.bignumRe ?? other.re);
+  }
+
+  lte(other: number | NumericValue): boolean | undefined {
+    if (this.im !== 0) undefined;
+    if (typeof other === 'number') return this.decimal.lte(other);
+    return this.decimal.lte(other.bignumRe ?? other.re);
+  }
+
+  gt(other: number | NumericValue): boolean | undefined {
+    if (this.im !== 0) undefined;
+    if (typeof other === 'number') return this.decimal.gt(other);
+    return this.decimal.gt(other.bignumRe ?? other.re);
+  }
+
+  gte(other: number | NumericValue): boolean | undefined {
+    if (this.im !== 0) undefined;
+    if (typeof other === 'number') return this.decimal.gte(other);
+    return this.decimal.gte(other.bignumRe ?? other.re);
   }
 }
 

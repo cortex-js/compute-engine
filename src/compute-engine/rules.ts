@@ -18,7 +18,6 @@ import {
 import { isCollection } from './collection-utils';
 import { Parser } from './latex-syntax/public';
 import { isPrime } from './library/arithmetic';
-import { isValidIdentifier } from '../math-json/identifiers';
 
 // @todo ['Alternatives', ...]:
 // @todo: ['Condition',...] : Conditional match

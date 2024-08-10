@@ -387,7 +387,7 @@ export class BoxedNumber extends _BoxedExpression {
     const ce = this.engine;
     const rhsV = ce._numericValue(rhs._value);
 
-    return this._value.sub(rhsV).sgn() === 0;
+    return this._value.eq(rhsV);
   }
 
   isEqual(rhs: number | BoxedExpression): boolean {

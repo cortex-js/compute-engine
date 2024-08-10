@@ -93,13 +93,22 @@ export abstract class NumericValue {
   abstract pow(n: number | { re: number; im: number }): NumericValue;
   abstract root(n: number): NumericValue;
   abstract sqrt(): NumericValue;
+
   abstract gcd(other: NumericValue): NumericValue;
   abstract abs(): NumericValue;
+
   abstract ln(base?: number): NumericValue;
   abstract exp(): NumericValue;
+
   abstract floor(): NumericValue;
   abstract ceil(): NumericValue;
   abstract round(): NumericValue;
+
+  abstract eq(other: number | NumericValue): boolean;
+  abstract lt(other: number | NumericValue): boolean | undefined;
+  abstract lte(other: number | NumericValue): boolean | undefined;
+  abstract gt(other: number | NumericValue): boolean | undefined;
+  abstract gte(other: number | NumericValue): boolean | undefined;
 
   //
   // JavaScript Object methods
