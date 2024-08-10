@@ -73,7 +73,6 @@ export function sortAdd(
 
 // The "kind" of subexpressions. The order here indicates the
 // order in which the expressions should be sorted
-// @fixme: add 'integer'
 const RANKS = [
   'integer',
   'rational',

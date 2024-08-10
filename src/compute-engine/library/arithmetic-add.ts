@@ -1,5 +1,5 @@
 import { BoxedDomain, BoxedExpression, IComputeEngine } from '../public';
-import { bignumPreferred } from '../boxed-expression/utils';
+import { bignumPreferred, getImaginaryFactor } from '../boxed-expression/utils';
 import { MAX_SYMBOLIC_TERMS } from '../numerics/numeric';
 import { widen } from '../boxed-expression/boxed-domain';
 import { sortAdd } from '../boxed-expression/order';
@@ -42,14 +42,14 @@ export function canonicalAdd(
     let im: number | undefined = 0;
 
     // Is the second term an imaginary number?
-    im = getImaginaryCoef(ops[1]);
+    im = getImaginaryFactor(ops[1])?.re ?? 0;
     if (im !== 0) {
       const re = ops[0].bignumRe ?? ops[0].re;
       if (re !== undefined)
         return ce.number(ce._numericValue({ decimal: re, im }));
     } else {
       // Is the first term an imaginary number?
-      im = getImaginaryCoef(ops[0]);
+      im = getImaginaryFactor(ops[0])?.re ?? 0;
       if (im !== 0) {
         const re = ops[1].bignumRe ?? ops[1].re;
         if (re !== undefined)
@@ -365,36 +365,4 @@ export function evalSummation(
   ce.popScope();
 
   return result ?? undefined;
-}
-
-/**
- * Return a multiple of the imaginary unit, e.g.
- * - 'ImaginaryUnit'  -> 1
- * - ['Negate', 'ImaginaryUnit']  -> -1
- * - ['Negate', ['Multiply', 3, 'ImaginaryUnit']] -> -3
- * - ['Multiply', 5, 'ImaginaryUnit'] -> 5
- * - ['Multiply', 'ImaginaryUnit', 5] -> 5
- * - ['Divide', 'ImaginaryUnit', 2] -> 0.5
- *
- */
-function getImaginaryCoef(expr: BoxedExpression): number {
-  // @fixme: try this instead
-  // return getImaginaryFactor(expr)?.re ?? 0;{
-  if (expr.symbol === 'ImaginaryUnit') return 1;
-
-  if (expr.re === 0) return expr.im!;
-
-  if (expr.operator === 'Negate') return -getImaginaryCoef(expr.op1);
-
-  if (expr.operator === 'Multiply' && expr.nops === 2) {
-    if (expr.op1.symbol === 'ImaginaryUnit') return expr.op2.re ?? 0;
-    if (expr.op2.symbol === 'ImaginaryUnit') return expr.op1.re ?? 0;
-  }
-
-  if (expr.operator === 'Divide') {
-    const denom = expr.op2.re;
-    if (denom !== undefined) return getImaginaryCoef(expr.op1) / denom;
-  }
-
-  return 0;
 }

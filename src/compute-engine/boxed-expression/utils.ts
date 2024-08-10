@@ -97,6 +97,17 @@ export function isInequality(expr: BoxedExpression): boolean {
   return ['Less', 'LessEqual', 'Greater', 'GreaterEqual'].includes(h);
 }
 
+/**
+ * Return a multiple of the imaginary unit, e.g.
+ * - 'ImaginaryUnit'  -> 1
+ * - ['Negate', 'ImaginaryUnit']  -> -1
+ * - ['Negate', ['Multiply', 3, 'ImaginaryUnit']] -> -3
+ * - ['Multiply', 5, 'ImaginaryUnit'] -> 5
+ * - ['Multiply', 'ImaginaryUnit', 5] -> 5
+ * - ['Divide', 'ImaginaryUnit', 2] -> 0.5
+ *
+ */
+
 export function getImaginaryFactor(
   expr: BoxedExpression
 ): BoxedExpression | undefined {
