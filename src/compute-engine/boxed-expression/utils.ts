@@ -107,7 +107,6 @@ export function isInequality(expr: BoxedExpression): boolean {
  * - ['Divide', 'ImaginaryUnit', 2] -> 0.5
  *
  */
-
 export function getImaginaryFactor(
   expr: BoxedExpression
 ): BoxedExpression | undefined {
