@@ -75,7 +75,7 @@ export const SIMPLIFY_RULES: Rule[] = [
   },
 
   //Ln
-  '\\log(x) -> \\ln(x)',
+  // '\\log(x) -> \\ln(x)',
   '\\ln(x)+\\ln(y) -> \\ln(x*y)', //assumes negative arguments are allowed
   '\\ln(x)-\\ln(y) -> \\ln(x/y)',
   'e^{\\ln(x)+y} -> x*e^y',
