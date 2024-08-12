@@ -146,6 +146,7 @@ const OPERATORS: Record<
               return `${serialize(rhs, 12)}/${den}`;
             }
           }
+
           const l = serialize(expr.op1, 12);
           const r = serialize(expr.op2, 12);
           if (r === 'i') return l + ' i';
@@ -382,7 +383,7 @@ export function toAsciiMath(
   //
   // A function expression?
   //
-  if (expr.operator && typeof expr.operator === 'string') {
+  if (expr.operator) {
     const operators = options.operators
       ? { ...OPERATORS, ...options.operators }
       : OPERATORS;

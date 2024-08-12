@@ -17,8 +17,6 @@ import { expandProducts } from '../symbolic/expand';
 import { flatten } from '../symbolic/flatten';
 import { negateProduct } from '../symbolic/negate';
 import { order } from '../boxed-expression/order';
-import { ExactNumericValue } from '../numeric-value/exact-numeric-value';
-import { isInteger } from '../numerics/rationals';
 
 // Canonical form of `["Product"]` (`\prod`) expressions.
 export function canonicalProduct(
@@ -307,87 +305,119 @@ export function canonicalMultiply(
 
   const xs: BoxedExpression[] = [];
   let sign = 1;
-  let imaginaryCount = 0;
-  let imaginaryCoef: number | undefined = undefined;
 
-  const handle = (op: BoxedExpression): BoxedExpression | undefined => {
+  for (let i = 0; i < ops.length; i++) {
+    let op = ops[i];
     if (op.isZero) return ce.Zero;
-    if (op.isOne) return undefined;
+    if (op.isOne) continue;
     if (op.isNegativeOne) {
       sign = -sign;
-      return undefined;
+      continue;
     }
     if (op.operator === 'Negate') {
       sign = -sign;
-      return handle(op.op1);
+      op = op.op1;
     }
     if (op.symbol === 'ImaginaryUnit') {
-      imaginaryCount++;
-      return undefined;
+      xs.push(ce.number(ce.complex(0, 1)));
+      continue;
     }
-    if (op.numericValue === null) return op;
+    let v = op.numericValue;
+    if (v === null) {
+      xs.push(op);
+      continue;
+    }
+    //
+    // Number
+    //
+    if (typeof v === 'number') {
+      if (v < 0) {
+        sign = -sign;
+        v = -v;
+      }
 
-    // Capture the sign
-    if (op.isNegative) {
+      // Are we followed by a complex number?
+      if (ops[i + 1]?.symbol === 'ImaginaryUnit') {
+        xs.push(ce.number(ce.complex(0, v)));
+        i++;
+        continue;
+      }
+
+      // Are we followed by a sqrt?
+      const next = ops[i + 1]?.structural;
+      if (next?.operator === 'Sqrt') {
+        const a = next.op1.numericValue;
+        if (typeof a === 'number' && a > 0 && Number.isInteger(a)) {
+          // we had v√a
+          xs.push(ce.number(ce._numericValue({ decimal: v, radical: a })));
+          i++;
+          continue;
+        }
+      }
+
+      xs.push(ce.number(v));
+      continue;
+    }
+
+    //
+    // Numeric Value
+    //
+    if (v.im !== 0) {
+      xs.push(op);
+      continue;
+    }
+
+    if (v.sgn() === -1) {
       sign = -sign;
-      op = op.neg();
+      v = v.neg();
     }
 
-    // Capture the first machine literal, to potentially use as a imaginary coef
-    if (imaginaryCoef !== undefined) return op;
+    if (!v.isExact) {
+      // We have a numeric value, but it's not exact, it's a float
 
-    if (op.re === 0 && op.im !== 0) {
-      imaginaryCount++;
-      imaginaryCoef = op.im;
-      return undefined;
+      // Are we followed by a complex number?
+      if (ops[i + 1]?.symbol === 'ImaginaryUnit') {
+        xs.push(ce.number(ce.complex(0, v.re)));
+        i++;
+        continue;
+      }
+      xs.push(ce.number(v));
+      continue;
     }
 
-    if (op.im !== 0) return op;
-
-    // If an exact number with a radical or rational part, keep as is
-    const v = op.numericValue;
-    if (
-      v instanceof ExactNumericValue &&
-      (v.radical !== 1 || !isInteger(v.rational))
-    )
-      return op;
-
-    imaginaryCoef = op.re;
-    return undefined;
-  };
-
-  for (const op of ops) {
-    const x = handle(op);
-    if (x?.isZero) return ce.Zero;
-    if (x !== undefined) xs.push(x);
-  }
-
-  // See if we had a complex number
-  if (imaginaryCount > 0) {
-    if (imaginaryCount % 2 === 0) {
-      // Even number of imaginary units -> -1
-      sign = -sign;
-    } else {
-      // Odd number of imaginary units
-      if (imaginaryCoef !== undefined) {
-        xs.push(ce.number(ce.complex(0, sign * imaginaryCoef)));
-        sign = 1;
-      } else xs.push(ce.I);
-      imaginaryCoef = undefined;
+    // Are we followed by a sqrt?
+    const next = ops[i + 1]?.structural;
+    if (next?.operator === 'Sqrt') {
+      const a = next.op1.numericValue;
+      if (typeof a === 'number') {
+        if (a > 0 && Number.isInteger(a)) {
+          // we had v√a
+          xs.push(ce.number(v.mul(ce._numericValue({ radical: a }))));
+          i++;
+          continue;
+        }
+      } else if (a !== null) {
+        if (a.type === 'integer') {
+          // we had v√a
+          xs.push(ce.number(v.mul(ce._numericValue({ radical: a.re }))));
+          i++;
+          continue;
+        }
+        if (a.type === 'rational') {
+          // we had v√(n/d) -> (v/d)√(nd)
+          const [n, d] = [a.numerator, a.denominator];
+          xs.push(
+            ce.number(v.mul(ce._numericValue({ radical: n.re * d.re })).div(d))
+          );
+          i++;
+          continue;
+        }
+      }
     }
+    xs.push(ce.number(v));
   }
 
-  // If we couldn't use the imaginary coef, add it back
-  if (imaginaryCoef !== undefined) {
-    xs.push(ce.number(sign * imaginaryCoef));
-    sign = 1;
-  }
-
-  if (sign < 0) {
-    if (xs.length === 0) return ce.NegativeOne;
-    if (xs.length === 1) return xs[0].neg();
-    return negateProduct(ce, xs);
-  }
+  if (sign < 0) return negateProduct(ce, xs);
 
   if (xs.length === 0) return ce.One;
   if (xs.length === 1) return xs[0];

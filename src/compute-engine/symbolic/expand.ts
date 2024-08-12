@@ -283,9 +283,7 @@ export function expandAll(expr: BoxedExpression): BoxedExpression | null {
 
   const ce = expr.engine;
   const ops = expr.ops.map((x) =>
-    typeof x.operator === 'string' && x.ops
-      ? (expandFunction(ce, x.operator, x.ops) ?? x)
-      : x
+    x.ops ? (expandFunction(ce, x.operator, x.ops) ?? x) : x
   );
 
   const result = expr.engine.function(expr.operator, ops);

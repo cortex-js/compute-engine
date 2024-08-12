@@ -137,69 +137,58 @@ describe('PARSING numbers', () => {
                           "Power",
                           0,
                           [
-                            "Add",
+                            "Subtract",
                             "n",
                             [
-                              "Negate",
+                              "Delimiter",
                               [
-                                "Delimiter",
+                                "Sum",
                                 [
-                                  "Sum",
+                                  "Delimiter",
                                   [
                                     "Delimiter",
                                     [
-                                      "Delimiter",
+                                      "Product",
                                       [
-                                        "Product",
+                                        "Delimiter",
                                         [
-                                          "Delimiter",
+                                          "Add",
+                                          1,
                                           [
-                                            "Add",
-                                            1,
+                                            "Power",
+                                            0,
                                             [
-                                              "Power",
-                                              0,
+                                              "Abs",
                                               [
-                                                "Abs",
+                                                "Subtract",
                                                 [
-                                                  "Add",
+                                                  "Floor",
                                                   [
-                                                    "Floor",
-                                                    [
-                                                      "Divide",
-                                                      ["At", "v", 2],
-                                                      ["At", "v", 3]
-                                                    ]
-                                                  ],
-                                                  [
-                                                    "Negate",
-                                                    [
-                                                      "Divide",
-                                                      ["At", "v", 2],
-                                                      ["At", "v", 3]
-                                                    ]
+                                                    "Divide",
+                                                    ["At", "v", 2],
+                                                    ["At", "v", 3]
                                                   ]
+                                                ],
+                                                [
+                                                  "Divide",
+                                                  ["At", "v", 2],
+                                                  ["At", "v", 3]
                                                 ]
                                               ]
                                             ]
                                           ]
-                                        ],
-                                        [
-                                          "Tuple",
-                                          ["At", "v", 3],
-                                          2,
-                                          ["Floor", ["Sqrt", ["At", "v", 2]]]
                                         ]
+                                      ],
+                                      [
+                                        "Triple",
+                                        ["At", "v", 3],
+                                        2,
+                                        ["Floor", ["Sqrt", ["At", "v", 2]]]
                                       ]
                                     ]
-                                  ],
-                                  [
-                                    "Tuple",
-                                    ["At", "v", 2],
-                                    2,
-                                    ["At", "v", 1]
                                   ]
-                                ]
+                                ],
+                                ["Triple", ["At", "v", 2], 2, ["At", "v", 1]]
                               ]
                             ]
                           ]
@@ -210,7 +199,7 @@ describe('PARSING numbers', () => {
                   ]
                 ],
                 [
-                  "Tuple",
+                  "Triple",
                   ["At", "v", 1],
                   2,
                   ["Floor", ["Multiply", 1.5, "n", ["Ln", "n"]]]
@@ -450,12 +439,12 @@ describe('CANONICALIZATION multiply', () => {
       [
         Multiply,
         -2,
-        3.2,
         [
           Rational,
           2,
           3,
         ],
+        3.2,
         5.23,
         x,
         [
@@ -658,44 +647,44 @@ describe('SIMPLIFICATION sqrt', () => {
       evaluateToJson('\\frac{\\sqrt{4+2\\sqrt{3}}-\\sqrt{28+10\\sqrt{3}}}{15}')
     ).toMatchInlineSnapshot(`
       [
-        Divide,
+        Multiply,
         [
-          Multiply,
+          Divide,
           [
             Sqrt,
             2,
           ],
+          15,
+        ],
+        [
+          Subtract,
           [
-            Subtract,
+            Sqrt,
             [
-              Sqrt,
+              Add,
+              2,
               [
-                Add,
-                2,
+                Sqrt,
+                3,
+              ],
+            ],
+          ],
+          [
+            Sqrt,
+            [
+              Add,
+              [
+                Multiply,
+                5,
                 [
                   Sqrt,
                   3,
                 ],
               ],
-            ],
-            [
-              Sqrt,
-              [
-                Add,
-                [
-                  Multiply,
-                  5,
-                  [
-                    Sqrt,
-                    3,
-                  ],
-                ],
-                14,
-              ],
+              14,
             ],
           ],
         ],
-        15,
       ]
     `));
 });

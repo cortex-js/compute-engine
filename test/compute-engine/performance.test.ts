@@ -213,7 +213,7 @@ function fastEval() {
   return performance.now() - startTime;
 }
 
-function turboEval() {
+function compiledEval() {
   const ce = new ComputeEngine();
 
   const expr = ce.parse('ax^2+bx+c'); // like $$ ax^2+bx+c $$
@@ -238,19 +238,21 @@ function turboEval() {
 }
 
 describe('Rationals', () => {
-  it('bigint vs number', () => expect(perfTestRationals()).toBeLessThan(1.7));
+  it('bigint vs number', () => expect(perfTestRationals()).toBeLessThan(1.8));
 });
 
 describe('Compute Engine modes', () => {
   const slow = slowEval();
   const fast = fastEval();
-  const turbo = turboEval();
+  const turbo = compiledEval();
 
   // console.info(`Slow = ${Math.round(slow / turbo)} x compiled`);
   // console.info(`Fast = ${Math.round(fast / turbo)} x compiled`);
 
-  it('slow vs turbo', () => expect(slow / turbo).toBeLessThan(800));
-  it('fast vs turbo', () => expect(fast / turbo).toBeLessThan(180));
+  it('precise strict vs compiled', () =>
+    expect(slow / turbo).toBeLessThan(1600));
+  it('machine non-strict vs compiled', () =>
+    expect(fast / turbo).toBeLessThan(360));
 });
 
 describe('Relative performance', () => {

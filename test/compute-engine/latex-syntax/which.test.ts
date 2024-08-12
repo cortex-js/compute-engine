@@ -10,9 +10,9 @@ describe('WHICH', () => {
     ).toMatchInlineSnapshot(`
       [
         "Which",
-        ["Equal", "n", 0],
+        ["Equal", 0, "n"],
         0,
-        ["Equal", "n", 1],
+        ["Equal", 1, "n"],
         1,
         ["LessEqual", 2, "n"],
         ["Add", ["Square", "n"], 1]

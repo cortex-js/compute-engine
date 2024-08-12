@@ -103,7 +103,7 @@ describe('SUPSUB', () => {
       `["Power", ["Add", "x", 1], ["Subtract", "n", 1]]`
     );
     expect(ce.parse('(x+1)_{n-1}')).toMatchInlineSnapshot(
-      `["Subscript", ["Add", "x", 1], ["Add", "n", -1]]`
+      `["Subscript", ["Add", "x", 1], ["Subtract", "n", 1]]`
     );
     expect(ce.parse('(x+1)^n_0')).toMatchInlineSnapshot(
       `["Power", ["Subscript", ["Add", "x", 1], 0], "n"]`

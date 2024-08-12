@@ -93,8 +93,15 @@ export class ExactNumericValue extends NumericValue {
   }
 
   get type(): 'complex' | 'real' | 'rational' | 'integer' {
+    // a/b√c -> real number (c can't be a perfect square)
     if (this.radical !== 1) return 'real';
+    if (this.isNaN || this.isPositiveInfinity || this.isNegativeInfinity)
+      return 'real';
     return isInteger(this.rational) ? 'integer' : 'rational';
+  }
+
+  get isExact(): boolean {
+    return true;
   }
 
   toJSON(): Expression {
@@ -131,10 +138,6 @@ export class ExactNumericValue extends NumericValue {
     return re;
   }
 
-  get isExact(): boolean {
-    return true;
-  }
-
   cloneIm(im: number): NumericValue {
     // If a gaussian imaginary, keep it as an exact value
     if (Number.isInteger(im))
@@ -152,28 +155,30 @@ export class ExactNumericValue extends NumericValue {
     if (this.isOne) return '1';
     if (this.isNegativeOne) return '-1';
 
-    let re = '';
-
     const rationalStr = (r: Rational) => {
       if (isInteger(r)) return numberToString(r[0]);
 
       return `${numberToString(r[0])}/${numberToString(r[1])}`;
     };
 
+    // Only have a rational
+    if (this.radical === 1) return rationalStr(this.rational);
+
     const radicalStr = (r: number) => `sqrt(${numberToString(r)})`;
 
-    if (!isZero(this.rational)) {
-      // Only have a rational
-      if (this.radical === 1) re = rationalStr(this.rational);
-      // Only have a radical
-      else if (isOne(this.rational)) re = radicalStr(this.radical);
-      else if (isNegativeOne(this.rational))
-        re = `-${radicalStr(this.radical)}`;
-      // Have both a radical and a rational
-      else re = `${rationalStr(this.rational)}${radicalStr(this.radical)}`;
-    }
+    // Only have a radical
+    // 1√b = √b
+    if (isOne(this.rational)) return radicalStr(this.radical);
+    // -1√b = -√b
+    if (isNegativeOne(this.rational)) return `-${radicalStr(this.radical)}`;
+    // 1/a√b = √b/a
+    if (this.rational[0] == 1)
+      return `${radicalStr(this.radical)}/${numberToString(this.rational[1])}`;
+    if (this.rational[0] == -1)
+      return `-${radicalStr(this.radical)}/${numberToString(this.rational[1])}`;
 
-    return re;
+    // Have both a radical and a rational
+    return `${rationalStr(this.rational)}${radicalStr(this.radical)}`;
   }
 
   get sign(): -1 | 0 | 1 {

@@ -878,13 +878,20 @@ export class ComputeEngine implements IComputeEngine {
 
     // Check if decimal part is an integer
     if (value.decimal !== undefined) {
+      console.assert(value.rational === undefined);
       if (value.decimal instanceof Decimal && value.decimal.isInteger())
         return new ExactNumericValue(
-          bigint(value.decimal.toString())!,
+          {
+            rational: [bigint(value.decimal.toString())!, BigInt(1)],
+            radical: value.radical,
+          },
           makeNumericValue
         );
       if (typeof value.decimal === 'number' && Number.isInteger(value.decimal))
-        return new ExactNumericValue(value.decimal, makeNumericValue);
+        return new ExactNumericValue(
+          { rational: [value.decimal, 1], radical: value.radical },
+          makeNumericValue
+        );
       return makeNumericValue(value);
     }
 
@@ -1700,7 +1707,7 @@ export class ComputeEngine implements IComputeEngine {
       | Complex
       | [num: number, denom: number]
       | SemiBoxedExpression,
-    options?: { canonical?: CanonicalOptions }
+    options?: { canonical?: CanonicalOptions; structural?: boolean }
   ): BoxedExpression {
     return box(this, expr, options);
   }
@@ -1708,7 +1715,11 @@ export class ComputeEngine implements IComputeEngine {
   function(
     name: string,
     ops: SemiBoxedExpression[],
-    options?: { metadata?: Metadata; canonical: CanonicalOptions }
+    options?: {
+      metadata?: Metadata;
+      canonical: CanonicalOptions;
+      structural: boolean;
+    }
   ): BoxedExpression {
     return boxFunction(this, name, ops, options);
   }

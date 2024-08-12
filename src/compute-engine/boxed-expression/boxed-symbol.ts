@@ -306,7 +306,7 @@ export class BoxedSymbol extends _BoxedExpression {
     if (this.isOne) return this.engine.One;
     if (this.isNegativeOne) return ce.I;
 
-    return ce._fn('Root', [this, ce.number(2)]);
+    return ce._fn('Sqrt', [this]);
   }
 
   ln(semiBase?: SemiBoxedExpression): BoxedExpression {
@@ -552,6 +552,10 @@ export class BoxedSymbol extends _BoxedExpression {
 
   isSame(rhs: BoxedExpression): boolean {
     if (this === rhs) return true;
+
+    // If the rhs is a complex number i, we want to compare it to the symbol 'ImaginaryUnit'
+    rhs = rhs.structural;
+
     if (!(rhs instanceof BoxedSymbol)) return false;
     return this._id === rhs._id;
   }

@@ -75,12 +75,12 @@ describe('PARSING OF NUMBER', () => {
     expect(exprToString(ce.box({ num: '0.(142857)' }))).toMatchInlineSnapshot(
       `0.(142857)`
     );
-    expect(parse('x=.123')).toMatchInlineSnapshot(`["Equal", "x", 0.123]`);
+    expect(parse('x=.123')).toMatchInlineSnapshot(`["Equal", 0.123, "x"]`);
     expect(parse('x=.123(45)')).toMatchInlineSnapshot(
-      `["Equal", "x", "0.123(45)"]`
+      `["Equal", "0.123(45)", "x"]`
     );
     expect(parse('x=-987.123(45)')).toMatchInlineSnapshot(
-      `["Equal", "x", "-987.123(45)"]`
+      `["Equal", "-987.123(45)", "x"]`
     );
 
     // Vinculum
@@ -109,10 +109,10 @@ describe('PARSING OF NUMBER', () => {
 
   test('Parsing numbers with truncation mark', () => {
     expect(parse('x=.123\\ldots')).toMatchInlineSnapshot(
-      `["Equal", "x", 0.123]`
+      `["Equal", 0.123, "x"]`
     );
     expect(parse('x=.123\\ldots e4')).toMatchInlineSnapshot(
-      `["Equal", "x", 1230]`
+      `["Equal", 1230, "x"]`
     );
     expect(parse('x=.123\\ldots e4+1')).toMatchInlineSnapshot(
       `["Equal", "x", ["Add", 1, 1230]]`
@@ -125,7 +125,7 @@ describe('PARSING OF NUMBER', () => {
   test('Parsing numbers with INVALID truncation mark', () => {
     // Invalid: \ldots after repeating pattern
     expect(parse('x=.123(45)\\ldots')).toMatchInlineSnapshot(
-      `["Equal", "x", "0.123(45)"]`
+      `["Equal", "0.123(45)", "x"]`
     );
   });
 
@@ -177,14 +177,18 @@ describe('PARSING OF NUMBER', () => {
   test('Rationals and radicals', () => {
     expect(parseVal('\\sqrt{2}')).toMatchInlineSnapshot(`1.4142135623730951`);
     expect(parseVal('\\sqrt{2.1}')).toMatchInlineSnapshot(`1.449137674618944`);
-    expect(parseVal('3\\sqrt{2}')).toMatchInlineSnapshot(`NaN`);
-    expect(parseVal('\\frac{3/4}\\sqrt{2}')).toMatchInlineSnapshot(`NaN`);
+    expect(parseVal('3\\sqrt{2}')).toMatchInlineSnapshot(`4.242640687119286`);
+    expect(parseVal('\\frac{3}{4}\\sqrt{2}')).toMatchInlineSnapshot(
+      `1.0606601717798214`
+    );
 
     expect(parseVal('\\sqrt{9007199254740997}')).toMatchInlineSnapshot(
       `94906265.62425157`
     );
 
-    expect(parseVal('9007199254741033\\sqrt{3}')).toMatchInlineSnapshot(`NaN`);
+    expect(parseVal('9007199254741033\\sqrt{3}')).toMatchInlineSnapshot(
+      `15600926743107994`
+    );
 
     expect(
       parseVal('9007199254741033\\sqrt{9007199254740997}')

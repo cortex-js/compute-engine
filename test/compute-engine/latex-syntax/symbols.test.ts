@@ -280,7 +280,7 @@ describe('SYMBOLS', () => {
     test('emojis', () => {
       // Sequence of emojis do not need to be wrapped...
       expect(parse('🥤+🍔🍟=3')).toMatchInlineSnapshot(
-        `["Equal", ["Add", "🍔🍟", "🥤"], 3]`
+        `["Equal", 3, ["Add", "🍔🍟", "🥤"]]`
       );
       // ... but optionally they can be.
       expect(parse('\\operatorname{😎🤏😳🕶🤏}')).toMatchInlineSnapshot(
@@ -313,7 +313,7 @@ describe('SYMBOLS', () => {
       expect(parse('x^2')).toMatchInlineSnapshot(`["Square", "x"]`);
       expect(parse('a^b')).toMatchInlineSnapshot(`["Power", "a", "b"]`);
       expect(parse('x_{i+1}')).toMatchInlineSnapshot(
-        `["At", "x", ["Complex", 1, 1]]`
+        `["At", "x", ["Add", 1, "ImaginaryUnit"]]`
       );
       expect(parse('\\vec{x}')).toMatchInlineSnapshot(`["OverVector", "x"]`);
       expect(parse('x^\\prime')).toMatchInlineSnapshot(`["Prime", "x"]`);

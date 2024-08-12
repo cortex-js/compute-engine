@@ -66,7 +66,7 @@ exports[`ADD Add ['Add'] 1`] = `0`;
 
 exports[`ADD Add \\frac{2}{-3222233}+\\frac{1}{3} 1`] = `
 box       = ["Add", ["Divide", 2, -3222233], ["Divide", 1, 3]]
-canonical = ["Subtract", ["Rational", 1, 3], ["Rational", 2, 3222233]]
+canonical = ["Add", ["Rational", -2, 3222233], ["Rational", 1, 3]]
 simplify  = 3222227/9666699
 eval-auto = 3222227/9666699
 eval-mach = 3222227/9666699
@@ -285,8 +285,8 @@ N-mach    = 2.23606797749979
 exports[`EXACT EVALUATION Sqrt: Exact rational 1`] = `
 box       = ["Sqrt", ["Divide", 5, 7]]
 canonical = ["Multiply", ["Rational", 1, 7], ["Sqrt", 35]]
-eval-auto = 1/7sqrt(35)
-eval-mach = 1/7sqrt(35)
+eval-auto = sqrt(35)/7
+eval-mach = sqrt(35)/7
 N-auto    = 0.845154254728516577511
 N-mach    = 0.845154254728518
 `;
@@ -735,11 +735,11 @@ canonical = [
   ["Sqrt", 2],
   "Pi"
 ]
-simplify  = (50sqrt(2) * pi) / 9
+simplify  = pi * (50sqrt(2)) / 9
 eval-auto = pi * (50sqrt(2)) / 9
 eval-mach = pi * (50sqrt(2)) / 9
-N-auto    = 24.6826829897687013724
-N-mach    = 24.6826829897688
+N-auto    = 24.6826829897687013722
+N-mach    = 24.6826829897687
 `;
 
 exports[`MULTIPLY Multiply: One inexact 1`] = `
@@ -759,13 +759,13 @@ canonical = [
   5,
   ["Rational", 5, 7],
   ["Rational", 7, 9],
-  1.1,
   ["Sqrt", 2],
+  1.1,
   "Pi"
 ]
-simplify  = 8.64241621450224825314 * pi
-eval-auto = 8.64241621450224825314 * pi
-eval-mach = 8.642416214502223 * pi
+simplify  = 8.64241621450224931572 * pi
+eval-auto = 8.64241621450224931572 * pi
+eval-mach = 8.64241621450225 * pi
 N-auto    = 27.1509512887455715096
 N-mach    = 27.150951288745603
 `;
@@ -812,7 +812,7 @@ simplify  = oo
 
 exports[`MULTIPLY with NaN 1`] = `
 box       = ["Multiply", "x", 2, 3.1, "NaN"]
-canonical = ["Multiply", "NaN", 2, 3.1, "x"]
+canonical = ["Multiply", 2, "NaN", 3.1, "x"]
 simplify  = NaN
 `;
 
@@ -828,8 +828,8 @@ box       = [
 ]
 canonical = [
   "Multiply",
-  "NaN",
   2,
+  "NaN",
   "PositiveInfinity",
   "PositiveInfinity",
   3.1,
@@ -1119,8 +1119,8 @@ N-mach    = 2x
 exports[`SQRT √(5/7) 1`] = `
 box       = ["Sqrt", ["Rational", 5, 7]]
 canonical = ["Multiply", ["Rational", 1, 7], ["Sqrt", 35]]
-eval-auto = 1/7sqrt(35)
-eval-mach = 1/7sqrt(35)
+eval-auto = sqrt(35)/7
+eval-mach = sqrt(35)/7
 N-auto    = 0.845154254728516577511
 N-mach    = 0.845154254728518
 `;

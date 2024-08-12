@@ -326,11 +326,7 @@ export const CORE_LIBRARY: IdentifierDefinitions[] = [
           if (op1.operator) return ce.box(op1.operator);
           return ce._fn('Head', canonical(ce, args));
         },
-        evaluate: (ce, ops) => {
-          const op1 = ops[0];
-          if (typeof op1?.operator === 'string') return ce.symbol(op1.operator);
-          return op1?.operator ?? ce.Nothing;
-        },
+        evaluate: (ce, ops) => ce.symbol(ops[0]?.operator ?? 'Undefined'),
       },
     },
 

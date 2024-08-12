@@ -5,6 +5,7 @@ describe('OPERATOR oprel', () => {
   test('x=1', () =>
     expect(check('x=1')).toMatchInlineSnapshot(`
       box       = ["Equal", "x", 1]
+      canonical = ["Equal", 1, "x"]
       eval-auto = "False"
     `));
   test('x=1+1', () =>
@@ -16,6 +17,7 @@ describe('OPERATOR oprel', () => {
   test('x+y=1+1', () =>
     expect(check('x+y=1+1')).toMatchInlineSnapshot(`
       box       = ["Equal", ["Add", "x", "y"], ["Add", 1, 1]]
+      canonical = ["Equal", ["Add", 1, 1], ["Add", "x", "y"]]
       simplify  = x + y - 2 === 0
       eval-auto = "False"
     `));

@@ -14,11 +14,7 @@ export class Terms {
   private engine: IComputeEngine;
   private terms: { coef: NumericValue; term: BoxedExpression }[] = [];
 
-  constructor(
-    ce: IComputeEngine,
-    terms: ReadonlyArray<BoxedExpression>,
-    { exact = true } = {}
-  ) {
+  constructor(ce: IComputeEngine, terms: ReadonlyArray<BoxedExpression>) {
     this.engine = ce;
     let posInfinityCount = 0;
     let negInfinityCount = 0;
@@ -59,24 +55,17 @@ export class Terms {
       return;
     }
     if (numericValues.length === 1) {
-      this.add(exact ? numericValues[0] : numericValues[0].N(), ce.One);
+      this.add(numericValues[0], ce.One);
     } else if (numericValues.length > 0) {
-      if (!exact) {
-        this.add(
-          numericValues.reduce((a, b) => a.add(b.N())),
-          ce.One
-        );
-      } else {
-        // If we're doing an exact sum, we may have multiple terms: a
-        // rational and a radical. We need to sum them separately.
-        const factory =
-          ce.precision > MACHINE_PRECISION
-            ? (x) => new BigNumericValue(x, (x) => ce.bignum(x))
-            : (x) => new MachineNumericValue(x);
-        ExactNumericValue.sum(numericValues, factory).forEach((x) =>
-          this.add(x, ce.One)
-        );
-      }
+      // We're doing an exact sum, we may have multiple terms: a
+      // rational and a radical. We need to sum them separately.
+      const factory =
+        ce.precision > MACHINE_PRECISION
+          ? (x) => new BigNumericValue(x, (x) => ce.bignum(x))
+          : (x) => new MachineNumericValue(x);
+      ExactNumericValue.sum(numericValues, factory).forEach((x) =>
+        this.add(x, ce.One)
+      );
     }
   }
 
@@ -134,7 +123,7 @@ export class Terms {
 
     return canonicalAdd(ce, [
       ...terms.map(({ coef, term }) =>
-        canonicalMultiply(ce, [term.N(), ce.box(coef.N())])
+        coef.isOne ? term : canonicalMultiply(ce, [term, ce.box(coef.N())])
       ),
     ]);
   }

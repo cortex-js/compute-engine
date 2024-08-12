@@ -20,7 +20,7 @@ describe('LIST PARSING', () => {
 
   test('Iverson bracket (not a list)', () => {
     expect(parse('\\lbrack x+1=0\\rbrack')).toMatchInlineSnapshot(
-      `["Boole", ["Equal", ["Add", "x", 1], 0]]`
+      `["Boole", ["Equal", 0, ["Add", "x", 1]]]`
     );
   });
 
@@ -34,8 +34,8 @@ describe('LIST PARSING', () => {
     expect(parse('\\lbrack x+1=0, 2x^2+5=1\\rbrack')).toMatchInlineSnapshot(`
       [
         "List",
-        ["Equal", ["Add", "x", 1], 0],
-        ["Equal", ["Add", ["Multiply", 2, ["Power", "x", 2]], 5], 1]
+        ["Equal", 0, ["Add", "x", 1]],
+        ["Equal", 1, ["Add", ["Multiply", 2, ["Power", "x", 2]], 5]]
       ]
     `);
   });

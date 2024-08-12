@@ -271,6 +271,14 @@ export abstract class _BoxedExpression implements BoxedExpression {
     return this;
   }
 
+  get structural(): BoxedExpression {
+    return this;
+  }
+
+  get isStructural(): boolean {
+    return true;
+  }
+
   get latex(): LatexString {
     return this.toLatex();
   }

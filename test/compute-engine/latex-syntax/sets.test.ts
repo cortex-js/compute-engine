@@ -24,7 +24,7 @@ describe('SERIALIZING SETS', () => {
         ['Condition', ['NotEqual', 'x', 0]],
       ])
     ).toMatchInlineSnapshot(
-      `\\lbrace x\\in\\mathrm{Numbers}, \\mathrm{Condition}(x\\ne0)\\rbrace`
+      `\\lbrace x\\in\\mathrm{Numbers}, \\mathrm{Condition}(0\\ne x)\\rbrace`
     );
   });
 

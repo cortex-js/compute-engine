@@ -116,12 +116,22 @@ function rank(expr: BoxedExpression): Rank {
 
   if (expr.operator === 'Add') return 'add';
 
-  if (expr.operator === 'Power') return 'power';
+  if (expr.operator === 'Power' || expr.operator === 'Root') return 'power';
 
   if (expr.operator === 'Multiply' || expr.operator === 'Negate')
     return 'multiply';
 
   if (expr.operator === 'Divide') return 'divide';
+
+  if (expr.operator === 'Rational') return 'rational';
+
+  if (expr.operator === 'Complex') return expr.im !== 0 ? 'complex' : 'real';
+
+  if (expr.operator === 'Sqrt') {
+    if (expr.op1.isNumberLiteral && (expr.op1.isInteger || expr.op1.isRational))
+      return 'radical';
+    return 'power';
+  }
 
   if (expr.ops) return 'fn';
 
@@ -175,22 +185,20 @@ export function order(a: BoxedExpression, b: BoxedExpression): number {
 
   if (rankA === 'complex') {
     // If the rank is complex, the numericValues can't be a number
-    const aV = a.numericValue as NumericValue;
-    const bV = b.numericValue as NumericValue;
-
-    const imA = a.symbol === 'ImaginaryUnit' ? 1 : aV.im;
-    const imB = a.symbol === 'ImaginaryUnit' ? 1 : bV.im;
+    const [reA, imA] = getComplex(a);
+    const [reB, imB] = getComplex(b);
 
     if (imA !== imB) return imA - imB;
 
-    const reA = a.symbol === 'ImaginaryUnit' ? 0 : aV.re;
-    const reB = a.symbol === 'ImaginaryUnit' ? 0 : bV.re;
     return reA - reB;
   }
 
   if (rankA === 'integer' || rankA === 'rational' || rankA === 'real') {
-    const aN = a.numericValue;
-    const bN = b.numericValue;
+    let aN = a.numericValue;
+    let bN = b.numericValue;
+
+    if (aN === null && a.operator === 'Rational') aN = a.op1.re! / a.op2.re!;
+    if (bN === null && b.operator === 'Rational') bN = b.op1.re! / b.op2.re!;
 
     const af = typeof aN === 'number' ? aN : aN!.re;
     const bf = typeof bN === 'number' ? bN : bN!.re;
@@ -274,13 +282,10 @@ export function order(a: BoxedExpression, b: BoxedExpression): number {
     const aComplexity = a.functionDefinition?.complexity ?? DEFAULT_COMPLEXITY;
     const bComplexity = b.functionDefinition?.complexity ?? DEFAULT_COMPLEXITY;
     if (aComplexity === bComplexity) {
-      if (typeof a.operator === 'string' && typeof b.operator === 'string') {
-        if (a.operator === b.operator) return getLeafCount(a) - getLeafCount(b);
+      if (a.operator === b.operator) return getLeafCount(a) - getLeafCount(b);
 
-        if (a.operator < b.operator) return +1;
-        return -1;
-      }
-      return getLeafCount(a) - getLeafCount(b);
+      if (a.operator < b.operator) return +1;
+      return -1;
     }
     return aComplexity - bComplexity;
   }
@@ -371,8 +376,25 @@ export function eliminationOrder(
 /** Get the number of atomic elements in the expression */
 function getLeafCount(expr: BoxedExpression): number {
   if (!expr.ops) return 1;
-  return (
-    (typeof expr.operator === 'string' ? 1 : getLeafCount(expr.operator)) +
-    [...expr.ops].reduce((acc, x) => acc + getLeafCount(x), 0)
-  );
+  return 1 + [...expr.ops].reduce((acc, x) => acc + getLeafCount(x), 0);
+}
+
+function getComplex(a: BoxedExpression): [number, number] {
+  if (a.symbol === 'ImaginaryUnit') return [0, 1];
+  if (a.numericValue) {
+    if (typeof a.numericValue === 'number') return [a.numericValue, 0];
+    const v = a.numericValue;
+    return [v.re, v.im];
+  }
+  if (a.operator === 'Complex') {
+    const op1 = a.op1.numericValue;
+    if (op1 === null) return [0, 0];
+    const re = typeof op1 === 'number' ? op1 : op1!.re;
+    const op2 = a.op2.numericValue;
+    if (op2 === null) return [0, 0];
+    const im = typeof op2 === 'number' ? op2 : op2!.re;
+    return [re, im];
+  }
+
+  return [0, 0];
 }

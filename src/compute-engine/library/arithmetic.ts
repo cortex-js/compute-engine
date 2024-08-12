@@ -1524,10 +1524,7 @@ export function canonicalRoot(
   const exp = typeof b === 'number' ? b : b.re;
   if (exp === 1) return a;
   if (exp === 2) {
-    if (
-      a.numericValue !== null &&
-      (a.type === 'integer' || a.type === 'rational')
-    )
+    if (a.isNumberLiteral && (a.type === 'integer' || a.type === 'rational'))
       return a.sqrt();
     return ce._fn('Sqrt', [a]);
   }

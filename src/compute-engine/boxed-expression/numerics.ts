@@ -100,7 +100,8 @@ export function asSmallInteger(
   if (num.im !== 0) return null;
 
   const n = num.re;
-  if (n >= -SMALL_INTEGER && n <= SMALL_INTEGER) return Number(n);
+  if (Number.isInteger(n) && n >= -SMALL_INTEGER && n <= SMALL_INTEGER)
+    return Number(n);
   return null;
 }
 

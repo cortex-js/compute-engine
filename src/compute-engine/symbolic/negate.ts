@@ -35,7 +35,9 @@ export function negate(expr: BoxedExpression): BoxedExpression {
 
   // Distribute over division
   // Negate(Divide(a, b)) -> Divide(Negate(a), b)
-  if (expr.operator === 'Divide') return negate(expr.op1).div(expr.op2);
+  if (expr.operator === 'Divide') {
+    return negate(expr.op1).div(expr.op2);
+  }
 
   return ce._fn('Negate', [expr]);
 }
@@ -49,6 +51,9 @@ export function negateProduct(
   ce: IComputeEngine,
   args: ReadonlyArray<BoxedExpression>
 ): BoxedExpression {
+  if (args.length === 0) return ce.NegativeOne;
+  if (args.length === 1) return negate(args[0]);
+
   let result: BoxedExpression[] = [];
 
   // Look for an argument that can be negated. We do multiple passes to
@@ -78,7 +83,7 @@ export function negateProduct(
       }
     }
   }
-  if (done) return ce._fn('Multiply', result);
+  if (done) return ce._fn('Multiply', result.sort(order));
 
   // else If there is a literal number, negate it
   if (!done) {

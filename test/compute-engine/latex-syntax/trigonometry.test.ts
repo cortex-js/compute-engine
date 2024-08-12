@@ -12,8 +12,7 @@ describe('TRIGONOMETRIC FUNCTIONS implicit arguments', () => {
     `));
   test(`\\cos \\frac{x}{2}^2`, () =>
     expect(check('\\cos \\frac{x}{2}^2')).toMatchInlineSnapshot(`
-      box       = ["Cos", ["Power", ["Divide", "x", 2], 2]]
-      canonical = ["Cos", ["Square", ["Divide", "x", 2]]]
+      box       = ["Cos", ["Square", ["Divide", "x", 2]]]
       eval-auto = cos(0.25 * x^2)
     `));
 });
@@ -71,9 +70,9 @@ describe('TRIGONOMETRIC DEGREES', () => {
     expect(check('\\cos(30\\degree)')).toMatchInlineSnapshot(`
       box       = ["Cos", ["Degrees", 30]]
       canonical = ["Cos", ["Divide", "Pi", 6]]
-      simplify  = 1/2sqrt(3)
-      eval-auto = 1/2sqrt(3)
-      eval-mach = 1/2sqrt(3)
+      simplify  = sqrt(3)/2
+      eval-auto = sqrt(3)/2
+      eval-mach = sqrt(3)/2
       N-auto    = 0.866025403784438646764
       N-mach    = 0.8660254037844387
     `));
@@ -82,9 +81,9 @@ describe('TRIGONOMETRIC DEGREES', () => {
     expect(check('\\cos(30\\degree)')).toMatchInlineSnapshot(`
       box       = ["Cos", ["Degrees", 30]]
       canonical = ["Cos", ["Divide", "Pi", 6]]
-      simplify  = 1/2sqrt(3)
-      eval-auto = 1/2sqrt(3)
-      eval-mach = 1/2sqrt(3)
+      simplify  = sqrt(3)/2
+      eval-auto = sqrt(3)/2
+      eval-mach = sqrt(3)/2
       N-auto    = 0.866025403784438646764
       N-mach    = 0.8660254037844387
     `));
@@ -93,9 +92,9 @@ describe('TRIGONOMETRIC DEGREES', () => {
     expect(check('\\cos(30^\\circ)')).toMatchInlineSnapshot(`
       box       = ["Cos", ["Degrees", 30]]
       canonical = ["Cos", ["Divide", "Pi", 6]]
-      simplify  = 1/2sqrt(3)
-      eval-auto = 1/2sqrt(3)
-      eval-mach = 1/2sqrt(3)
+      simplify  = sqrt(3)/2
+      eval-auto = sqrt(3)/2
+      eval-mach = sqrt(3)/2
       N-auto    = 0.866025403784438646764
       N-mach    = 0.8660254037844387
     `));
@@ -104,9 +103,9 @@ describe('TRIGONOMETRIC DEGREES', () => {
     expect(check('\\cos(\\ang{30})')).toMatchInlineSnapshot(`
       box       = ["Cos", ["Degrees", 30]]
       canonical = ["Cos", ["Divide", "Pi", 6]]
-      simplify  = 1/2sqrt(3)
-      eval-auto = 1/2sqrt(3)
-      eval-mach = 1/2sqrt(3)
+      simplify  = sqrt(3)/2
+      eval-auto = sqrt(3)/2
+      eval-mach = sqrt(3)/2
       N-auto    = 0.866025403784438646764
       N-mach    = 0.8660254037844387
     `));

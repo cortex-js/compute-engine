@@ -123,10 +123,16 @@ export function boxFunction(
   ce: IComputeEngine,
   name: MathJsonIdentifier,
   ops: readonly SemiBoxedExpression[],
-  options?: { metadata?: Metadata; canonical?: CanonicalOptions }
+  options?: {
+    metadata?: Metadata;
+    canonical?: CanonicalOptions;
+    structural?: boolean;
+  }
 ): BoxedExpression {
   options = options ? { ...options } : {};
   if (!('canonical' in options)) options.canonical = true;
+
+  const structural = options.structural ?? false;
 
   //
   // Hold
@@ -136,6 +142,7 @@ export function boxFunction(
     return new BoxedFunction(ce, 'Hold', [boxHold(ce, ops[0], options)], {
       ...options,
       canonical: true,
+      structural,
     });
   }
 
@@ -181,9 +188,11 @@ export function boxFunction(
   if (name === 'Number' && ops.length === 1) return box(ce, ops[0], options);
 
   const canonicalNumber =
-    options.canonical === true ||
-    options.canonical === 'Number' ||
-    (Array.isArray(options.canonical) && options.canonical.includes('Number'));
+    structural === false &&
+    (options.canonical === true ||
+      options.canonical === 'Number' ||
+      (Array.isArray(options.canonical) &&
+        options.canonical.includes('Number')));
 
   if (canonicalNumber) {
     // If we have a full canonical form or a canonical form for numbers
@@ -259,8 +268,17 @@ export function boxFunction(
     new BoxedFunction(
       ce,
       name,
-      ops.map((x) => box(ce, x, { canonical: options.canonical })),
-      { metadata: options.metadata, canonical: false }
+      ops.map((x) =>
+        box(ce, x, {
+          canonical: options.canonical,
+          structural,
+        })
+      ),
+      {
+        metadata: options.metadata,
+        canonical: false,
+        structural,
+      }
     ),
     options.canonical ?? false
   );
@@ -302,7 +320,7 @@ export function box(
     | Complex
     | Rational
     | SemiBoxedExpression,
-  options?: { canonical?: CanonicalOptions }
+  options?: { canonical?: CanonicalOptions; structural?: boolean }
 ): BoxedExpression {
   if (expr === null || expr === undefined) return ce._fn('Sequence', []);
 
@@ -319,6 +337,8 @@ export function box(
   // arguments during create, we'll call canonicalForm to take care of it
   const canonical = options.canonical === true;
 
+  const structural = options.structural ?? false;
+
   //
   //  Box a function or a rational
   //
@@ -330,14 +350,14 @@ export function box(
         return ce.number(expr);
       // This wasn't a valid rational, turn it into a `Divide`
       return canonicalForm(
-        boxFunction(ce, 'Divide', expr, { canonical }),
+        boxFunction(ce, 'Divide', expr, { canonical, structural }),
         options.canonical!
       );
     }
     if (isBigRational(expr)) return ce.number(expr);
 
     return canonicalForm(
-      boxFunction(ce, expr[0], operands(expr), { canonical }),
+      boxFunction(ce, expr[0], operands(expr), { canonical, structural }),
       options.canonical!
     );
   }
@@ -378,7 +398,7 @@ export function box(
     if ('fn' in expr) {
       const [fnName, ...ops] = expr.fn;
       return canonicalForm(
-        boxFunction(ce, fnName, ops, { canonical }),
+        boxFunction(ce, fnName, ops, { canonical, structural }),
         options.canonical!
       );
     }
@@ -612,8 +632,6 @@ function fromNumericValue(
 
   const terms: BoxedExpression[] = [];
 
-  let sign = 1;
-
   //
   // Real Part
   //
@@ -624,8 +642,7 @@ function fromNumericValue(
       // No radical, just a rational part
       terms.push(ce.number(value.rational));
     } else {
-      if (value.sign < 0) sign = -1;
-      const rational = sign < 0 ? neg(value.rational) : value.rational;
+      const rational = value.rational;
       // At least a radical, maybe a rational as well.
       const radical = ce._fn('Sqrt', [ce.number(value.radical)]);
       if (isOne(rational)) terms.push(radical);
@@ -653,7 +670,7 @@ function fromNumericValue(
   if (value.im === 0) {
     if (terms.length === 0) return ce.Zero;
     result = terms.length === 1 ? terms[0] : canonicalMultiply(ce, terms);
-    return sign < 0 ? result.neg() : result;
+    return result;
   }
 
   //
@@ -662,10 +679,7 @@ function fromNumericValue(
   if (terms.length === 0) return ce.number(ce.complex(0, value.im));
 
   result = terms.length === 1 ? terms[0] : canonicalMultiply(ce, terms);
-  return canonicalAdd(ce, [
-    sign < 0 ? result.neg() : result,
-    ce.number(ce.complex(0, value.im)),
-  ]);
+  return canonicalAdd(ce, [result, ce.number(ce.complex(0, value.im))]);
 }
 
 export function toBigint(x: SemiBoxedExpression): bigint | null {

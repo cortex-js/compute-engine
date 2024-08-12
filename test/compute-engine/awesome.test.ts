@@ -22,7 +22,11 @@ describe('Primality Test', () => {
               "Pi",
               [
                 "Divide",
-                ["Add", ["Factorial", ["Delimiter", ["Add", "n", -1]]], 1],
+                [
+                  "Add",
+                  ["Factorial", ["Delimiter", ["Subtract", "n", 1]]],
+                  1
+                ],
                 "n"
               ]
             ]
@@ -49,7 +53,7 @@ describe('Primality Test', () => {
       ]
       eval-auto = -floor(cos((pi * (n - 1)! + pi) / n))
       eval-mach = -floor(cos((pi * (n - 1)! + pi) / n))
-      N-auto    = -floor(cos((3.141592653589793 * (n - 1)! + 3.14159265358979323846) / n))
+      N-auto    = -floor(cos((3.14159265358979323846 * (n - 1)! + 3.14159265358979323846) / n))
       N-mach    = -floor(cos((3.141592653589793 * (n - 1)! + 3.141592653589793) / n))
     `));
   // 	https://en.wikipedia.org/wiki/Wilson%27s_theorem
@@ -80,15 +84,14 @@ describe('Nth PRIME NUMBER', () =>
 // The value of these polynomials for x in 0..n are all prime numbers
 describe('Euler Prime Generating Polynomial', () => {
   test('x in 0..39', () =>
-    expect(check('n^2 + n + 41')).toMatchInlineSnapshot(`
-      box       = ["Add", ["Power", "n", 2], "n", 41]
-      canonical = ["Add", ["Square", "n"], "n", 41]
-    `));
+    expect(check('n^2 + n + 41')).toMatchInlineSnapshot(
+      `["Add", ["Square", "n"], "n", 41]`
+    ));
   test('x in 0..61', () =>
     expect(check('8x^2 - 488 x + 7243')).toMatchInlineSnapshot(`
       box       = [
         "Add",
-        ["InvisibleOperator", 8, ["Power", "x", 2]],
+        ["InvisibleOperator", 8, ["Square", "x"]],
         ["InvisibleOperator", -488, "x"],
         7243
       ]
@@ -103,7 +106,7 @@ describe('Euler Prime Generating Polynomial', () => {
     expect(check('43 x^2 - 537x + 2971')).toMatchInlineSnapshot(`
       box       = [
         "Add",
-        ["InvisibleOperator", 43, ["Power", "x", 2]],
+        ["InvisibleOperator", 43, ["Square", "x"]],
         ["InvisibleOperator", -537, "x"],
         2971
       ]
@@ -118,7 +121,7 @@ describe('Euler Prime Generating Polynomial', () => {
     expect(check('36 x^2 - 810 x + 2763')).toMatchInlineSnapshot(`
       box       = [
         "Add",
-        ["InvisibleOperator", 36, ["Power", "x", 2]],
+        ["InvisibleOperator", 36, ["Square", "x"]],
         ["InvisibleOperator", -810, "x"],
         2763
       ]
@@ -131,19 +134,18 @@ describe('Euler Prime Generating Polynomial', () => {
     `));
   test('x in', () =>
     expect(check('x^2 - 79x + 1601')).toMatchInlineSnapshot(`
-      box       = ["Add", ["Power", "x", 2], ["InvisibleOperator", -79, "x"], 1601]
+      box       = ["Add", ["Square", "x"], ["InvisibleOperator", -79, "x"], 1601]
       canonical = ["Add", ["Square", "x"], ["Multiply", -79, "x"], 1601]
     `));
   test('x in 0..10', () =>
     expect(check('2x^2 + 11')).toMatchInlineSnapshot(`
-      box       = ["Add", ["InvisibleOperator", 2, ["Power", "x", 2]], 11]
+      box       = ["Add", ["InvisibleOperator", 2, ["Square", "x"]], 11]
       canonical = ["Add", ["Multiply", 2, ["Square", "x"]], 11]
     `));
   test('x in 0..10', () =>
-    expect(check('x^3 + x^2 + 17')).toMatchInlineSnapshot(`
-      box       = ["Add", ["Power", "x", 3], ["Power", "x", 2], 17]
-      canonical = ["Add", ["Power", "x", 3], ["Square", "x"], 17]
-    `));
+    expect(check('x^3 + x^2 + 17')).toMatchInlineSnapshot(
+      `["Add", ["Power", "x", 3], ["Square", "x"], 17]`
+    ));
 });
 
 describe("Mill's formula https://en.wikipedia.org/wiki/Mills%27_constant", () =>
@@ -173,7 +175,7 @@ describe('⌈e⌉ = ⌊π⌋', () =>
   test('', () =>
     expect(check('⌈e⌉ = ⌊π⌋')).toMatchInlineSnapshot(`
       box       = ["Equal", ["Ceil", "e"], ["Floor", "Pi"]]
-      canonical = ["Equal", ["Ceil", "ExponentialE"], ["Floor", "Pi"]]
+      canonical = ["Equal", ["Floor", "Pi"], ["Ceil", "ExponentialE"]]
       eval-auto = "True"
     `)));
 
@@ -195,7 +197,7 @@ describe('RAMANUJAN FACTORIAL APPROXIMATION', () =>
           [
             "Add",
             ["InvisibleOperator", 8, ["Power", "n", 3]],
-            ["InvisibleOperator", 4, ["Power", "n", 2]],
+            ["InvisibleOperator", 4, ["Square", "n"]],
             "n",
             ["Divide", 1, 30]
           ],
@@ -205,6 +207,7 @@ describe('RAMANUJAN FACTORIAL APPROXIMATION', () =>
       canonical = [
         "Multiply",
         ["Sqrt", "Pi"],
+        ["Power", ["Divide", "n", "ExponentialE"], "n"],
         [
           "Root",
           [
@@ -215,13 +218,12 @@ describe('RAMANUJAN FACTORIAL APPROXIMATION', () =>
             ["Rational", 1, 30]
           ],
           6
-        ],
-        ["Power", ["Divide", "n", "ExponentialE"], "n"]
+        ]
       ]
-      eval-auto = sqrt(pi) * root(8n^3 + 4n^2 + n + 1/30)(6) * e^(-n) * n^n
-      eval-mach = sqrt(pi) * root(8n^3 + 4n^2 + n + 1/30)(6) * e^(-n) * n^n
-      N-auto    = 1.772453850905516 * root(8n^3 + 4n^2 + n + 0.03333333333333333)(6) * 2.71828182845904523536^(-n) * n^n
-      N-mach    = 1.7724538509055159 * root(8n^3 + 4n^2 + n + 0.0333333333333333)(6) * 2.718281828459045^(-n) * n^n
+      eval-auto = e^(-n) * sqrt(pi) * n^n * root(8n^3 + 4n^2 + n + 1/30)(6)
+      eval-mach = e^(-n) * sqrt(pi) * n^n * root(8n^3 + 4n^2 + n + 1/30)(6)
+      N-auto    = 1.772453850905516 * 2.71828182845904523536^(-n) * n^n * root(8n^3 + 4n^2 + n + 0.0333333333333333333333)(6)
+      N-mach    = 1.7724538509055159 * 2.718281828459045^(-n) * n^n * root(8n^3 + 4n^2 + n + 0.0333333333333333)(6)
     `)));
 
 /*

@@ -56,6 +56,10 @@ export class MachineNumericValue extends NumericValue {
     return 'real';
   }
 
+  get isExact(): boolean {
+    return this.im === 0 && Number.isInteger(this.decimal);
+  }
+
   toJSON(): Expression {
     if (this.isNaN) return 'NaN';
     if (this.isPositiveInfinity) return 'PositiveInfinity';
@@ -87,13 +91,6 @@ export class MachineNumericValue extends NumericValue {
     else im = `- ${numberToString(-this.im)}i`;
 
     return `(${numberToString(this.decimal)} ${im})`;
-  }
-
-  get isExact(): boolean {
-    return (
-      (Number.isInteger(this.decimal) && Number.isInteger(this.im)) ||
-      !isFinite(this.decimal)
-    );
   }
 
   clone(value: number | Decimal | NumericValueData) {

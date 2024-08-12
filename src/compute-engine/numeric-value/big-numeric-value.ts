@@ -62,6 +62,10 @@ export class BigNumericValue extends NumericValue {
     return 'real';
   }
 
+  get isExact(): boolean {
+    return this.im === 0 && this.decimal.isInteger();
+  }
+
   toJSON(): Expression {
     if (this.isNaN) return 'NaN';
     if (this.isPositiveInfinity) return 'PositiveInfinity';
@@ -101,13 +105,6 @@ export class BigNumericValue extends NumericValue {
     else im = `- ${-this.im}i`;
 
     return `(${decimalToString(this.decimal)} ${im})`;
-  }
-
-  get isExact(): boolean {
-    return (
-      (this.decimal.isInteger() && Number.isInteger(this.im)) ||
-      !this.decimal.isFinite()
-    );
   }
 
   clone(value: number | Decimal | NumericValueData) {

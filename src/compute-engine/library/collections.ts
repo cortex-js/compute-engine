@@ -569,7 +569,7 @@ export const COLLECTIONS_LIBRARY: IdentifierDefinitions = {
             Triple: 'List',
             Tuple: 'List',
             String: 'String',
-          }[typeof h === 'string' ? h : 'List'] ?? 'List';
+          }[h] ?? 'List';
 
         return ce.function(newHead, result);
       },
@@ -613,7 +613,7 @@ export const COLLECTIONS_LIBRARY: IdentifierDefinitions = {
             Pair: 'List',
             Triple: 'List',
             Tuple: 'List',
-          }[typeof h === 'string' ? h : 'List'] ?? 'List';
+          }[h] ?? 'List';
 
         return ce.function(newHead, result);
       },

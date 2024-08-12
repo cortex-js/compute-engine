@@ -289,11 +289,11 @@ export class BoxedNumber extends _BoxedExpression {
       if (e === 3) this.engine.number(Math.cbrt(this._value));
       const n = asSmallInteger(exp);
       if (n !== null) return this.engine.number(Math.pow(this._value, 1 / n));
-      return this.engine._fn('Root', [this, this.engine.box(exp)]);
+      return this.engine.function('Root', [this, this.engine.box(exp)]);
     }
     const n = asSmallInteger(exp);
     if (n === null)
-      return this.engine._fn('Root', [this, this.engine.box(exp)]);
+      return this.engine.function('Root', [this, this.engine.box(exp)]);
     return this.engine.number(this._value.root(n));
   }
 
@@ -374,8 +374,20 @@ export class BoxedNumber extends _BoxedExpression {
 
   isSame(rhs: BoxedExpression): boolean {
     if (this === rhs) return true;
+
+    //
+    // Make a structural comparison if necessary
+    // For example, to compare a rational 3/4 with an expression
+    //  ['Rational, 3, 4]
+    //
+    const lhs = this.structural;
+    if (!(lhs instanceof BoxedNumber)) return lhs.isSame(rhs.structural);
+    rhs = rhs.structural;
     if (!(rhs instanceof BoxedNumber)) return false;
 
+    //
+    // Compare two rational numbers
+    //
     if (typeof this._value === 'number') {
       if (typeof rhs._value === 'number') return this._value === rhs._value;
       return rhs._value.im === 0 && this._value === rhs._value.re;
@@ -587,6 +599,10 @@ export class BoxedNumber extends _BoxedExpression {
 
   get canonical(): BoxedExpression {
     return this;
+  }
+
+  get structural(): BoxedExpression {
+    return this.engine.box(this.json, { canonical: false, structural: true });
   }
 
   toNumericValue(): [NumericValue, BoxedExpression] {

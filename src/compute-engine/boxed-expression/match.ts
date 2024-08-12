@@ -119,42 +119,29 @@ function matchOnce(
 
     const operator = pattern.operator;
 
-    if (typeof operator === 'string') {
-      if (operator.startsWith('_')) {
-        //
-        // 1. The pattern operator is a wildcard
-        //
-        result = captureWildcard(operator, ce.box(expr.operator), substitution);
-        if (result !== null)
-          result = matchArguments(expr, pattern.ops, result, options);
-      } else if (operator === expr.operator) {
-        //
-        // 2. Both heads are strings and they match
-        //
-        const def = ce.lookupFunction(operator);
-        result = def?.commutative
-          ? matchPermutation(expr, pattern, substitution, options)
-          : matchArguments(expr, pattern.ops, substitution, options);
-      } else if (typeof expr.operator === 'string' && !exact) {
-        //
-        // 3. Both heads are strings and they don't match
-        //
-        if (!acceptVariants) return null;
-        result = matchVariants(expr, pattern, substitution, options);
-      }
-    } else if (typeof expr.operator !== 'string') {
+    if (operator.startsWith('_')) {
       //
-      // 4. The heads are an expression, let's try to match them
+      // 1. The pattern operator is a wildcard
       //
-      result = matchOnce(
-        ce.box(expr.operator, { canonical: false }),
-        ce.box(operator, { canonical: false }),
-        substitution,
-        options
-      );
+      result = captureWildcard(operator, ce.box(expr.operator), substitution);
       if (result !== null)
         result = matchArguments(expr, pattern.ops, result, options);
+    } else if (operator === expr.operator) {
+      //
+      // 2. Both heads are strings and they match
+      //
+      const def = ce.lookupFunction(operator);
+      result = def?.commutative
+        ? matchPermutation(expr, pattern, substitution, options)
+        : matchArguments(expr, pattern.ops, substitution, options);
+    } else if (!exact) {
+      //
+      // 3. Both heads are strings and they don't match
+      //
+      if (!acceptVariants) return null;
+      result = matchVariants(expr, pattern, substitution, options);
     }
+
     if (result !== null) substitution = result;
 
     // If requested, try to match the pattern recursively
@@ -208,7 +195,6 @@ function matchVariants(
   options: PatternMatchOptions
 ): BoxedSubstitution | null {
   if (options.exact) return null;
-  console.assert(typeof pattern.operator === 'string');
   const operator = pattern.operator;
   const ce = expr.engine;
 
@@ -473,6 +459,10 @@ export function match(
   if (!isBoxedExpression(pattern))
     pattern = subject.engine.box(pattern, { canonical: false });
 
+  // If we have a rational number, unbox it into a ['Rational', num, denom]
+  // expression.
+  pattern = pattern.structural;
+
   // If the pattern is a wildcard, capture the subject
   if (isWildcard(pattern as BoxedExpression))
     return { [wildcardName(pattern as BoxedExpression)!]: subject };
@@ -485,5 +475,10 @@ export function match(
   };
   const substitution = options?.substitution ?? {};
 
-  return matchOnce(subject, pattern as BoxedExpression, substitution, opts);
+  return matchOnce(
+    subject.structural,
+    pattern as BoxedExpression,
+    substitution,
+    opts
+  );
 }

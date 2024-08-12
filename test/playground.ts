@@ -1,8 +1,142 @@
 import { ComputeEngine } from '../src/compute-engine';
+import { check } from './utils.ts';
 
 const ce = new ComputeEngine();
 
-console.log(ce.parse('2(13.1+x)<(10-5)').isEqual(ce.parse('26.2+2x<5')));
+console.info(ce.parse('1.2345+5.6789i').json);
+
+console.info(ce.parse('-1.2345-5.6789i').json);
+console.info(ce.parse('-1.2345-5.6789i').toString());
+
+// Canonical order: rational before functions
+console.info(ce.parse('2\\sin(x)\\frac12').json);
+
+console.log(ce.box(['Power', 'x', 2]).json);
+console.log(ce.box(['Power', 'x', 2]).toMathJson());
+
+console.log(
+  ce.box([
+    'Multiply',
+    2,
+    5,
+    ['Divide', 5, 7],
+    ['Divide', 7, 9],
+    ['Sqrt', 2],
+    'Pi',
+  ]).json
+);
+
+console.log(
+  ce
+    .box([
+      'Multiply',
+      2,
+      5,
+      ['Divide', 5, 7],
+      ['Divide', 7, 9],
+      ['Sqrt', 2],
+      'Pi',
+    ])
+    .toMathJson()
+);
+
+console.log(
+  ce.parse(
+    '\\sqrt{\\pi}\\left(\\frac{n}{e}\\right)^n\\sqrt[6]{8n^3+4n^2+n+\\frac{1}{30}}'
+  ).json
+);
+
+// const result = ce
+//   .parse(
+//     '\\sqrt{\\pi}\\left(\\frac{n}{e}\\right)^n\\sqrt[6]{8n^3+4n^2+n+\\frac{1}{30}}'
+//   )
+//   .evaluate();
+
+let result = ce.parse('\\sqrt{\\pi}');
+
+console.log(result.toMathJson());
+
+result = result.evaluate();
+
+console.log(result.toMathJson());
+
+// See terms.ts:134. Explore options for shortcircuting when values are 1 or -1,
+// or canonicalMultiply2() for the same.
+console.log(ce.parse('-x-1').N().toString());
+
+console.log(ce.parse('-1.2345-5.6789i').numericValue?.toString());
+
+console.log(
+  ce.parse(
+    '2\\times 5\\times\\frac{5}{7}\\times\\frac{7}{9}\\times\\sqrt{2}\\times\\pi'
+  ).json
+);
+
+console.log(ce.box(['Add', ['Add', 'x', 3], 5]).toMathJson());
+
+console.log(ce.parse('(n - 1)!').evaluate().toString());
+
+console.log(ce.parse('\\frac34 \\sqrt{3} + i').evaluate().toString());
+
+console.log(
+  ce.box(['Divide', ['Subtract', ['Sqrt', 6], ['Sqrt', 2]], 4]).toString()
+);
+
+console.log(
+  ce
+    .box(['Cos', ['Multiply', ['Rational', 7, 12], 'Pi']])
+    .evaluate()
+    .toString()
+);
+
+console.log(ce.box(['Rational', 7, 12]).N().toString());
+console.log(
+  ce
+    .box(['Multiply', ['Rational', 7, 12], 'Pi'])
+    .N()
+    .toString()
+);
+
+console.log(ce.box(['Sqrt', 2]).numericValue?.toString());
+
+console.log(ce.box(['Sqrt', ['Rational', 3, 4]]).numericValue?.toString());
+
+console.log(ce.box(['Multiply', 2, ['Sqrt', 3]]).numericValue?.toString());
+
+console.log(
+  ce.box(['Multiply', 2, ['Sqrt', ['Rational', 3, 5]]]).numericValue?.toString()
+);
+
+console.log(
+  ce
+    .box(['Multiply', ['Rational', 3, 4], ['Sqrt', ['Rational', 3, 4]]])
+    .numericValue?.toString()
+);
+
+console.log(
+  ce
+    .box(['Multiply', 5, ['Rational', 3, 4], ['Sqrt', ['Rational', 3, 4]]])
+    .numericValue?.toString()
+);
+
+console.log(
+  ce
+    .box(['Multiply', 'x', 5, ['Rational', 3, 4], ['Sqrt', ['Rational', 3, 4]]])
+    .toString()
+);
+
+console.log(ce.parse('\\sqrt{-1}').toString());
+
+// Should be -sqrt(3)(2)
+console.log(ce.parse('\\sqrt[3]{-2}').simplify().toString());
+console.log(ce.parse('\\sqrt[3]{-2}').simplify().latex);
+
+// console.log(ce.parse('2(13.1+x)<(10-5)').isEqual(ce.parse('26.2+2x<5')));
+
+// Should be equal to 1
+console.log(ce.parse('\\tanh(\\infty)').simplify().json);
+console.log(ce.parse('\\tanh(\\infty)').simplify().isEqual(1));
+console.log(ce.parse('\\tanh(\\infty)').simplify().toString());
 
 // y powers should combine
 console.log(

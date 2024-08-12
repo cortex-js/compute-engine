@@ -2,6 +2,7 @@ import { BoxedExpression } from '../public';
 import { canonicalMultiply } from './arithmetic-multiply';
 import { NumericValue } from '../numeric-value/public';
 import { bigint } from '../numerics/numeric-bigint';
+import { asSmallInteger } from '../boxed-expression/numerics';
 
 /**
  * Canonical form of 'Divide' (and 'Rational')
@@ -54,6 +55,26 @@ export function canonicalDivide(
   if (op1.isZero) return op2.isZero ? ce.NaN : ce.Zero;
 
   // Note: (-1)/a ≠ -(a^-1). We distribute Negate over Divide.
+
+  // √a/√b = √(a/b) as a numeric value
+  if (op1.operator === 'Sqrt' && op2.operator === 'Sqrt') {
+    const a = asSmallInteger(op1.op1);
+    const b = asSmallInteger(op2.op1);
+    if (a !== null && b !== null)
+      return ce.number(ce._numericValue({ radical: a * b, rational: [1, b] }));
+  } else if (op1.operator === 'Sqrt') {
+    // √a/b = √(a/b) as a numeric value
+    const a = asSmallInteger(op1.op1);
+    const b = asSmallInteger(op2);
+    if (a !== null && b !== null)
+      return ce.number(ce._numericValue({ radical: a, rational: [1, b] }));
+  } else if (op2.operator === 'Sqrt') {
+    // a/√b = a/(√b) as a numeric value
+    const a = asSmallInteger(op1);
+    const b = asSmallInteger(op2.op1);
+    if (a !== null && b !== null)
+      return ce.number(ce._numericValue({ radical: b, rational: [a, b] }));
+  }
 
   // Are both op1 and op2 a numeric value?
   let v1 = op1.numericValue;
@@ -108,7 +129,8 @@ export function canonicalDivide(
 
   // If c is not exact, don't use. For example: `π/4` would remain as
   // `π/4` and not `0.25π`
-  if (!c.isExact) return ce._fn('Divide', [t1.mul(c1), t2.mul(c2)]);
+  if (c.type !== 'integer' && c.type !== 'rational')
+    return ce._fn('Divide', [t1.mul(c1), t2.mul(c2)]);
 
   const num = c.numerator.isOne ? t1 : t1.mul(ce.number(c.numerator));
   const denom = c.denominator.isOne ? t2 : t2.mul(ce.number(c.denominator));

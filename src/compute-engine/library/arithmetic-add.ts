@@ -15,6 +15,7 @@ import {
 } from './utils';
 import { asBignum } from '../boxed-expression/numerics';
 import { flatten } from '../symbolic/flatten';
+import { NumericValue } from '../numeric-value/public';
 
 /** The canonical form of `Add`:
  * - removes `0`
@@ -35,33 +36,44 @@ export function canonicalAdd(
   if (ops.length === 0) return ce.Zero;
   if (ops.length === 1 && !isIndexableCollection(ops[0])) return ops[0];
 
-  //
-  // Is this a  complex number, i.e. `a + ib` or `ai + b`?
-  //
-  if (ops.length === 2) {
-    let im: number | undefined = 0;
+  // Iterate over the terms and check if any are complex numbers
+  // (a real number followed by an imaginary number)
+  const xs: BoxedExpression[] = [];
+  for (let i = 0; i < ops.length; i++) {
+    const op = ops[i];
+    if (op.isNumberLiteral) {
+      const nv = op.numericValue!;
 
-    // Is the second term an imaginary number?
-    im = getImaginaryFactor(ops[1])?.re ?? 0;
-    if (im !== 0) {
-      const re = ops[0].bignumRe ?? ops[0].re;
-      if (re !== undefined)
-        return ce.number(ce._numericValue({ decimal: re, im }));
-    } else {
-      // Is the first term an imaginary number?
-      im = getImaginaryFactor(ops[0])?.re ?? 0;
-      if (im !== 0) {
-        const re = ops[1].bignumRe ?? ops[1].re;
-        if (re !== undefined)
-          return ce.number(ce._numericValue({ decimal: re, im }));
+      if (
+        typeof nv === 'number' ||
+        (nv.type === 'real' && !nv.isExact) ||
+        nv.type === 'integer'
+      ) {
+        // We have a number such as 4, 3.14, etc. but not 2/3, √2, etc.
+        // Check the following term to see if it's an imaginary number
+
+        const next = ops[i + 1];
+        if (next) {
+          const fac = getImaginaryFactor(next)?.numericValue;
+          if (fac) {
+            const im = typeof fac === 'number' ? fac : fac?.re;
+            if (im !== 0) {
+              const re = typeof nv === 'number' ? nv : nv.re;
+              xs.push(ce.number(ce._numericValue({ decimal: re, im })));
+              i++;
+              continue;
+            }
+          }
+        }
       }
     }
+    xs.push(op);
   }
 
-  if (ops.length === 1) return ops[0];
+  if (xs.length === 1) return xs[0];
 
   // Commutative, sort
-  return ce._fn('Add', sortAdd(ops));
+  return ce._fn('Add', sortAdd(xs));
 }
 
 export function domainAdd(

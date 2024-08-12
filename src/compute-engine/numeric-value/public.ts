@@ -41,18 +41,17 @@ export type NumericValueFactory = (
 ) => NumericValue;
 
 export abstract class NumericValue {
-  get isExact(): boolean {
-    return false;
-  }
-
   // Note: complex :> real :> rational :> integer
   abstract get type(): 'complex' | 'real' | 'rational' | 'integer';
 
-  /** The imaginary part of this numeric value.
+  /** True if numeric value is the product of a rational and the square root of an integer.
    *
-   * Can be negative, zero or positive.
+   * This includes: 3/4√5, -2, √2, etc...
+   *
+   * But it doesn't include 0.5, 3.141592, etc...
+   *
    */
-  readonly im: number;
+  abstract get isExact(): boolean;
 
   /** The real part of this numeric value.
    *
@@ -62,6 +61,16 @@ export abstract class NumericValue {
 
   /**  bignum version of .re, if available */
   get bignumRe(): Decimal | undefined {
+    return undefined;
+  }
+
+  /** The imaginary part of this numeric value.
+   *
+   * Can be negative, zero or positive.
+   */
+  readonly im: number;
+
+  get bignumIm(): Decimal | undefined {
     return undefined;
   }
 
@@ -86,10 +95,10 @@ export abstract class NumericValue {
 
   abstract neg(): NumericValue;
   abstract inv(): NumericValue;
-  abstract add(other: number | NumericValueData): NumericValue;
-  abstract sub(other: NumericValueData): NumericValue;
-  abstract mul(other: number | Decimal | NumericValueData): NumericValue;
-  abstract div(other: SmallInteger | NumericValueData): NumericValue;
+  abstract add(other: number | NumericValue): NumericValue;
+  abstract sub(other: NumericValue): NumericValue;
+  abstract mul(other: number | Decimal | NumericValue): NumericValue;
+  abstract div(other: SmallInteger | NumericValue): NumericValue;
   abstract pow(n: number | { re: number; im: number }): NumericValue;
   abstract root(n: number): NumericValue;
   abstract sqrt(): NumericValue;

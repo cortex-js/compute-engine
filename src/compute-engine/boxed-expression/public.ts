@@ -229,6 +229,9 @@ export interface BoxedExpression {
    */
   set isCanonical(val: boolean);
 
+  /** If `true`, this expression is in a structural form. */
+  get isStructural(): boolean;
+
   /** MathJSON representation of this expression.
    *
    * This representation always use shorthands when possible. Metadata is not
@@ -492,6 +495,20 @@ export interface BoxedExpression {
    *
    */
   get canonical(): BoxedExpression;
+
+  /**
+   * Return the structural form of this expression.
+   *
+   * Some expressions, such as rational numbers, ar represented with
+   * a BoxedExpression object. In some cases, for example when doing a
+   * structural comparison of two expressions, it is useful to have a
+   * structural representation of the expression where the rational numbers
+   * is represented by a function expression instead.
+   *
+   * If there is a structural representation of the expression, return it.
+   *
+   */
+  get structural(): BoxedExpression;
 
   /**
    * Replace all the symbols in the expression as indicated.
@@ -1990,13 +2007,17 @@ export interface IComputeEngine extends IBigNum {
       | Complex
       | [num: number, denom: number]
       | SemiBoxedExpression,
-    options?: { canonical?: CanonicalOptions }
+    options?: { canonical?: CanonicalOptions; structural?: boolean }
   ): BoxedExpression;
 
   function(
     name: string,
     ops: ReadonlyArray<SemiBoxedExpression>,
-    options?: { metadata?: Metadata; canonical?: CanonicalOptions }
+    options?: {
+      metadata?: Metadata;
+      canonical?: CanonicalOptions;
+      structural?: boolean;
+    }
   ): BoxedExpression;
 
   number(

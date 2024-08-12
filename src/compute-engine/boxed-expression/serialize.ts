@@ -818,15 +818,31 @@ export function serializeJson(
 
   // Is it a function?
   if (expr.ops) {
-    if (expr.isValid && expr.isCanonical && options.prettify)
-      return serializePrettyJsonFunction(ce, expr.operator, expr.ops, options, {
+    if (
+      expr.isValid &&
+      (expr.isCanonical || expr.isStructural) &&
+      options.prettify
+    )
+      return serializePrettyJsonFunction(
+        ce,
+        expr.operator,
+        expr.structural.ops!,
+        options,
+        {
+          latex: expr.verbatimLatex,
+          wikidata,
+        }
+      );
+    return serializeJsonFunction(
+      ce,
+      expr.operator,
+      expr.structural.ops!,
+      options,
+      {
         latex: expr.verbatimLatex,
         wikidata,
-      });
-    return serializeJsonFunction(ce, expr.operator, expr.ops, options, {
-      latex: expr.verbatimLatex,
-      wikidata,
-    });
+      }
+    );
   }
 
   return expr.json;

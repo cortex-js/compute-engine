@@ -5,6 +5,7 @@ import {
   Rational,
   add,
   asMachineRational,
+  inverse,
   isOne,
   machineDenominator,
   machineNumerator,
@@ -76,7 +77,7 @@ export class Product {
    * Otherwise, terms and their exponent are tallied.
    */
   mul(term: BoxedExpression) {
-    console.assert(term.isCanonical);
+    console.assert(term.isCanonical || term.isStructural);
     if (this.coefficient.isNaN) return;
 
     if (term.isNaN) {
@@ -176,6 +177,17 @@ export class Product {
           return;
         }
       }
+    } else if (term.operator === 'Sqrt') {
+      // Term is `Sqrt(op1)`
+      term = term.op1;
+      exponent = [1, 2];
+    } else if (term.operator === 'Root') {
+      // Term is `Root(op1, op2)`
+      const r = asRational(term.op2);
+      if (r) {
+        term = term.op1;
+        exponent = inverse(r);
+      }
     } else if (term.operator === 'Divide') {
       // In order to correctly account for the denominator, invert it.
       // For example, in the case `a^4/a^2' we want to add
@@ -248,17 +260,14 @@ export class Product {
     const ce = this.engine;
     const xs: { exponent: Rational; terms: BoxedExpression[] }[] = [];
     if (!this.coefficient.isOne) {
-      if (
-        mode === 'rational' &&
-        this.coefficient.isExact &&
-        this.coefficient.im === 0
-      ) {
+      if (mode === 'rational' && this.coefficient.type === 'rational') {
         // Numerator
-        const num = ce.box(this.coefficient.numerator);
-        if (!num.isOne) xs.push({ exponent: [1, 1], terms: [num] });
+        const num = this.coefficient.numerator;
+        if (!num.isOne) xs.push({ exponent: [1, 1], terms: [ce.number(num)] });
         // Denominator
-        const denom = ce.box(this.coefficient.denominator);
-        if (!denom.isOne) xs.push({ exponent: [-1, 1], terms: [denom] });
+        const denom = this.coefficient.denominator;
+        if (!denom.isOne)
+          xs.push({ exponent: [-1, 1], terms: [ce.number(denom)] });
       } else if (mode === 'numeric') {
         const c = this.coefficient.N();
         xs.push({

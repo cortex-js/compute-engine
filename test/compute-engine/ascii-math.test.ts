@@ -96,17 +96,17 @@ describe('NUMBERS', () => {
     expect(check('\\sqrt{2}')).toMatchInlineSnapshot(`sqrt(2)`);
     expect(check('-\\sqrt{2}')).toMatchInlineSnapshot(`-sqrt(2)`);
     expect(check('2\\sqrt{2}')).toMatchInlineSnapshot(`2sqrt(2)`);
-    expect(check('\\frac34 \\sqrt{3}')).toMatchInlineSnapshot(`3/4 * sqrt(3)`);
+    expect(check('\\frac34 \\sqrt{3}')).toMatchInlineSnapshot(`3/4sqrt(3)`);
     expect(check('\\frac34 \\sqrt{3} + i')).toMatchInlineSnapshot(
-      `3/4 * sqrt(3) + i`
+      `3/4sqrt(3) + i`
     );
     // This should be an exact NumericValue
     expect(check('\\frac34 \\sqrt{3} - 2i')).toMatchInlineSnapshot(
-      `3/4 * sqrt(3) - 2i`
+      `3/4sqrt(3) - 2i`
     );
     // This is not an exact NumericValue (non-gaussian imaginary part)
     expect(check('\\frac34 \\sqrt{3} - 2.12i')).toMatchInlineSnapshot(
-      `3/4 * sqrt(3) - 2.12i`
+      `3/4sqrt(3) - 2.12i`
     );
   });
 });

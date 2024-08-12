@@ -64,9 +64,9 @@ describe('CANONICAL FORMS', () => {
   test('\\frac{-101}{10^{\\frac{2}{3}}}', () => {
     expect(check('\\frac{-101}{10^{\\frac{2}{3}}}')).toMatchInlineSnapshot(`
       box       = ["Divide", -101, ["Power", 10, ["Divide", 2, 3]]]
-      canonical = ["Divide", -101, "4.6415888336127781799"]
-      simplify  = -21.75979036932202893
-      eval-auto = -21.75979036932202893
+      canonical = ["Divide", -101, ["Power", 10, ["Rational", 2, 3]]]
+      simplify  = -21.7597903693220297734
+      eval-auto = -21.7597903693220297734
       eval-mach = -21.759790369322
     `);
   });
@@ -136,7 +136,7 @@ describe('CANONICAL FORMS', () => {
 
   test('"2\\times(5-5)\\times5\\times4"', () => {
     expect(check('2\\times(5-5)\\times5\\times4')).toMatchInlineSnapshot(`
-      box       = ["Multiply", 2, ["Delimiter", ["Add", 5, -5]], 5, 4]
+      box       = ["Multiply", 2, ["Delimiter", ["Subtract", 5, 5]], 5, 4]
       canonical = ["Multiply", 2, 4, 5, ["Subtract", 5, 5]]
       simplify  = 0
     `);
@@ -194,9 +194,9 @@ describe('COMMUTATIVE ORDER', () => {
         "z",
         ["Sqrt", "y"]
       ]
-      simplify  = -45/2 * pi * x * y * z * sqrt(y)
-      eval-auto = -45/2 * pi * x * y * z * sqrt(y)
-      eval-mach = -45/2 * pi * x * y * z * sqrt(y)
+      simplify  = -45/2 * pi * x * z * y^(3/2)
+      eval-auto = -45/2 * pi * x * z * y^(3/2)
+      eval-mach = -45/2 * pi * x * z * y^(3/2)
       N-auto    = -70.68583470577035 * x * z * y^2
       N-mach    = -70.6858347057702 * x * z * y^2
     `);
@@ -208,13 +208,13 @@ describe('COMMUTATIVE ORDER', () => {
         "InvisibleOperator",
         [
           "Delimiter",
-          ["InvisibleOperator", ["Power", "b", 3], ["Power", "c", 2], "d"]
+          ["InvisibleOperator", ["Power", "b", 3], ["Square", "c"], "d"]
         ],
         ["Delimiter", ["InvisibleOperator", ["Power", "x", 7], "y"]],
         ["Delimiter", ["InvisibleOperator", ["Power", "a", 5], "g"]],
         [
           "Delimiter",
-          ["InvisibleOperator", ["Power", "b", 2], ["Power", "x", 5], "b", 3]
+          ["InvisibleOperator", ["Square", "b"], ["Power", "x", 5], "b", 3]
         ]
       ]
       canonical = [
@@ -327,11 +327,11 @@ describe('POLYNOMIAL ORDER', () => {
     expect(check('x^2y^3+x^3y^2+xy^4+x^4y+x^2y^2')).toMatchInlineSnapshot(`
       box       = [
         "Add",
-        ["InvisibleOperator", ["Power", "x", 2], ["Power", "y", 3]],
-        ["InvisibleOperator", ["Power", "x", 3], ["Power", "y", 2]],
+        ["InvisibleOperator", ["Square", "x"], ["Power", "y", 3]],
+        ["InvisibleOperator", ["Power", "x", 3], ["Square", "y"]],
         ["InvisibleOperator", "x", ["Power", "y", 4]],
         ["InvisibleOperator", ["Power", "x", 4], "y"],
-        ["InvisibleOperator", ["Power", "x", 2], ["Power", "y", 2]]
+        ["InvisibleOperator", ["Square", "x"], ["Square", "y"]]
       ]
       canonical = [
         "Add",
@@ -351,11 +351,11 @@ describe('POLYNOMIAL ORDER', () => {
         "Add",
         [
           "Delimiter",
-          ["InvisibleOperator", ["Power", "b", 3], ["Power", "b", 2]]
+          ["InvisibleOperator", ["Power", "b", 3], ["Square", "b"]]
         ],
         [
           "Delimiter",
-          ["InvisibleOperator", ["Power", "a", 3], ["Power", "a", 2]]
+          ["InvisibleOperator", ["Power", "a", 3], ["Square", "a"]]
         ],
         ["Delimiter", ["Power", "b", 6]],
         ["Delimiter", ["InvisibleOperator", ["Power", "a", 5], "b"]],
@@ -377,7 +377,7 @@ describe('POLYNOMIAL ORDER', () => {
     expect(check('5c^2a^4+2b^8+7b^3a')).toMatchInlineSnapshot(`
       box       = [
         "Add",
-        ["InvisibleOperator", 5, ["Power", "c", 2], ["Power", "a", 4]],
+        ["InvisibleOperator", 5, ["Square", "c"], ["Power", "a", 4]],
         ["InvisibleOperator", 2, ["Power", "b", 8]],
         ["InvisibleOperator", 7, ["Power", "b", 3], "a"]
       ]
