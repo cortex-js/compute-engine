@@ -14,16 +14,26 @@ export const ce = new ComputeEngine();
 // -> 1
 
 /**
- * A set of test cases for the simplification of expressions.
  * Each test case is a tuple of two expressions:
  * - The first expression is the input expression to simplify.
  * - The second expression is the expected simplified expression.
+ *
+ * A third, optional element, is a comment to describe the test case.
+ * If the comment starts with the keyword "skip", the test case will be skipped.
+ * If the comment starts with the keyword "stop", the debugger will stop at this test case.
  */
-const TEST_CASES: [
-  input: Expression,
-  expected?: Expression,
-  comment?: string,
-][] = [
+export type TestCase =
+  | [
+      input: Expression | string,
+      expected: Expression | string,
+      comment?: string,
+    ]
+  | [heading: string];
+
+/*
+ * Some expressions get simplified during canonicalization.
+ */
+const CANONICALIZATION_TEST_CASES: TestCase[] = [
   [
     `
     // Arithmetic operations
@@ -69,7 +79,12 @@ const TEST_CASES: [
   ],
   ['\\sqrt3 - 2', '\\sqrt3 - 2', 'Should stay exact'],
   ['\\frac{\\sqrt5+1}{4}', '\\frac{\\sqrt5}{4}+\\frac14', 'Should stay exact'],
+];
 
+/**
+ * A set of test cases for the simplification of expressions.
+ */
+const RULE_TEST_CASES: TestCase[] = [
   [
     `
     //
@@ -78,13 +93,13 @@ const TEST_CASES: [
   `,
   ],
   ['\\ln(3)+\\ln(\\frac{1}{3})', 0],
-  ['\\frac{\\ln(9)}{\\ln(3)}', 2, 'skip'],
-  ['e e^x e^{-x}', 'e', 'skip'],
-  ['e^x e^{-x}', 1, 'skip'],
-  [['Add', 1, 2, 1.0001], 4.0001, 'skip'],
-  ['2\\left(13.1+x\\right)-\\left(26.2+2x\\right)', 0, 'skip'],
-  ['\\sqrt{3}(\\sqrt2x + x)', '(\\sqrt3+\\sqrt6)x', 'skip'],
-  ['\\sqrt[4]{16b^{4}}', '2b', 'skip'],
+  ['\\frac{\\ln(9)}{\\ln(3)}', 2],
+  ['e e^x e^{-x}', 'e'], // 🙁 e * e^x * e^(-x)
+  ['e^x e^{-x}', 1], // 🙁 e^x * e^(-x)
+  [['Add', 1, 2, 1.0001], 4.0001],
+  ['2\\left(13.1+x\\right)-\\left(26.2+2x\\right)', 0],
+  ['\\sqrt{3}(\\sqrt2x + x)', '(\\sqrt3+\\sqrt6)x'], // 🙁 4.18154055035205529353 * x
+  ['\\sqrt[4]{16b^{4}}', '2b'], // 🙁 root(16b^4)(4)
 
   [
     `
@@ -94,8 +109,8 @@ const TEST_CASES: [
   `,
   ],
   ['(-x)^3', '-x^3'], // 🙁 (-x)^3
-  ['(-x)^{4/3}', 'x^{4/3}', 'skip'],
-  ['(-x)^4', 'x^4', 'skip'],
+  ['(-x)^{4/3}', 'x^{4/3}'], // 🙁 (-x)^(4/3)
+  ['(-x)^4', 'x^4'], // 🙁 -x^4
   ['(-x)^{3/5}', '-x^{3/5}'], // 🙁 (-x)^(3/5)
   ['1/x-1/(x+1)', '1/(x(x+1))'], // 🙁 -1 / (x + 1) + 1 / x
   ['\\sqrt[3]{-2}', '-\\sqrt[3]{2}'], // 🙁 root(-2)(3)
@@ -292,8 +307,8 @@ const TEST_CASES: [
   ],
   ['\\cos(|x+2|)', '\\cos(x+2)'], // 🙁 cos(|x + 2|)
   ['\\sec(|x+2|)', '\\sec(x+2)'], // 🙁 sec(|x + 2|)
-  ['\\cosh(|x+2|)', '\\cosh(x+2)', 'skip'],
-  ['\\sech(|x+2|)', '\\sech(x+2)', 'skip'],
+  ['\\cosh(|x+2|)', '\\cosh(x+2)'], // 🙁 cosh(|x + 2|)
+  ['\\sech(|x+2|)', '\\sech(x+2)'], // 🙁 sech(|x + 2|)
 
   [
     `
@@ -308,16 +323,16 @@ const TEST_CASES: [
   ['|\\csc(x)|', '\\csc(|x|)'], // 🙁 |csc(x)|
   ['|\\arcsin(x)|', '\\arcsin(|x|)'], // 🙁 |arcsin(x)|
   ['|\\arctan(x)|', '\\arctan(|x|)'], // 🙁 |arctan(x)|
-  ['|\\arccot(x)|', '\\arccot(|x|)', 'skip'],
-  ['|\\arccsc(x)|', '\\arccsc(|x|)', 'skip'],
+  ['|\\arccot(x)|', '\\arccot(|x|)'], // 🙁 Error(ErrorCode(unexpected-token, |))
+  ['|\\arccsc(x)|', '\\arccsc(|x|)'], // 🙁 |Arccsc(x)|
   ['|\\sinh(x)|', '\\sinh(|x|)'], // 🙁 |sinh(x)|
   ['|\\tanh(x)|', '\\tanh(|x|)'], // 🙁 |tanh(x)|
   ['|\\coth(x)|', '\\coth(|x|)'], // 🙁 |coth(x)|
   ['|\\csch(x)|', '\\csch(|x|)'], // 🙁 |csch(x)|
-  ['|\\arcsinh(x)|', '\\arcsinh(|x|)', 'skip'],
-  ['|\\arctanh(x)|', '\\arctanh(|x|)', 'skip'],
-  ['|\\arccoth(x)|', '\\arccoth(|x|)', 'skip'],
-  ['|\\arccsch(x)|', '\\arccsch(|x|)', 'skip'],
+  ['|\\arcsinh(x)|', '\\arcsinh(|x|)'], // 🙁 Error(ErrorCode(unexpected-token, |))
+  ['|\\arctanh(x)|', '\\arctanh(|x|)'], // 🙁 Error(ErrorCode(unexpected-token, |))
+  ['|\\arccoth(x)|', '\\arccoth(|x|)'], // 🙁 Error(ErrorCode(unexpected-token, |))
+  ['|\\arccsch(x)|', '\\arccsch(|x|)'], // 🙁 Error(ErrorCode(unexpected-token, |))
 
   [
     `
@@ -434,12 +449,12 @@ const TEST_CASES: [
   ['\\arccos(-\\infty)', NaN], // 🙁 arccos(-oo)
   ['\\arctan(\\infty)', '\\frac{\\pi}{2}'], // 🙁 arctan(oo)
   ['\\arctan(-\\infty)', '-\\frac{\\pi}{2}'], // 🙁 arctan(-oo)
-  ['\\arccot(\\infty)', 0, 'skip'],
-  ['\\arccot(-\\infty)', '\\pi', 'skip'],
-  ['\\arcsec(\\infty)', '\\frac{\\pi}{2}', 'skip'],
-  ['\\arcsec(-\\infty)', '\\frac{\\pi}{2}', 'skip'],
-  ['\\arccsc(\\infty)', 0, 'skip'],
-  ['\\arccsc(-\\infty)', 0, 'skip'],
+  ['\\arccot(\\infty)', 0], // 🙁 Error(ErrorCode(unexpected-command, \arccot), LatexString(\arccot))
+  ['\\arccot(-\\infty)', '\\pi'], // 🙁 Error(ErrorCode(unexpected-command, \arccot), LatexString(\arccot))
+  ['\\arcsec(\\infty)', '\\frac{\\pi}{2}'], // 🙁 Error(ErrorCode(unexpected-command, \arcsec), LatexString(\arcsec))
+  ['\\arcsec(-\\infty)', '\\frac{\\pi}{2}'], // 🙁 Error(ErrorCode(unexpected-command, \arcsec), LatexString(\arcsec))
+  ['\\arccsc(\\infty)', 0], // 🙁 Arccsc(oo)
+  ['\\arccsc(-\\infty)', 0], // 🙁 Arccsc(-oo)
 
   [
     `
@@ -468,18 +483,18 @@ const TEST_CASES: [
     //
   `,
   ],
-  ['\\arcsinh(\\infty)', '\\infty', 'skip'],
-  ['\\arcsinh(-\\infty)', '-\\infty', 'skip'],
-  ['\\arccosh(\\infty)', '\\infty', 'skip'],
-  ['\\arccosh(-\\infty)', NaN, 'skip'],
-  ['\\arctanh(\\infty)', NaN, 'skip'],
-  ['\\arctanh(-\\infty)', NaN, 'skip'],
-  ['\\arccoth(\\infty)', NaN, 'skip'],
-  ['\\arccoth(-\\infty)', NaN, 'skip'],
-  ['\\arcsech(\\infty)', NaN, 'skip'],
-  ['\\arcsech(-\\infty)', NaN, 'skip'],
-  ['\\arccsch(\\infty)', NaN, 'skip'],
-  ['\\arccsch(-\\infty)', NaN, 'skip'],
+  ['\\arcsinh(\\infty)', '\\infty'], // 🙁 Error(ErrorCode(unexpected-command, \arcsinh), LatexString(\arcsinh))
+  ['\\arcsinh(-\\infty)', '-\\infty'], // 🙁 Error(ErrorCode(unexpected-command, \arcsinh), LatexString(\arcsinh))
+  ['\\arccosh(\\infty)', '\\infty'], // 🙁 Error(ErrorCode(unexpected-command, \arccosh), LatexString(\arccosh))
+  ['\\arccosh(-\\infty)', NaN], // 🙁 Error(ErrorCode(unexpected-command, \arccosh), LatexString(\arccosh))
+  ['\\arctanh(\\infty)', NaN], // 🙁 Error(ErrorCode(unexpected-command, \arctanh), LatexString(\arctanh))
+  ['\\arctanh(-\\infty)', NaN], // 🙁 Error(ErrorCode(unexpected-command, \arctanh), LatexString(\arctanh))
+  ['\\arccoth(\\infty)', NaN], // 🙁 Error(ErrorCode(unexpected-command, \arccoth), LatexString(\arccoth))
+  ['\\arccoth(-\\infty)', NaN], // 🙁 Error(ErrorCode(unexpected-command, \arccoth), LatexString(\arccoth))
+  ['\\arcsech(\\infty)', NaN], // 🙁 Error(ErrorCode(unexpected-command, \arcsech), LatexString(\arcsech))
+  ['\\arcsech(-\\infty)', NaN], // 🙁 Error(ErrorCode(unexpected-command, \arcsech), LatexString(\arcsech))
+  ['\\arccsch(\\infty)', NaN], // 🙁 Error(ErrorCode(unexpected-command, \arccsch), LatexString(\arccsch))
+  ['\\arccsch(-\\infty)', NaN], // 🙁 Error(ErrorCode(unexpected-command, \arccsch), LatexString(\arccsch))
 
   [
     `
@@ -503,7 +518,7 @@ const TEST_CASES: [
     //
   `,
   ],
-  ['x/(y/2)^3', '(8*x)/y^3'], // 🙁 (8x) / y^3
+  ['x/(y/2)^3', '(8*x)/y^3'],
   ['x/(2/y)^3', 'x/(2/y)^3'],
 
   [
@@ -637,46 +652,11 @@ const TEST_CASES: [
 ];
 
 describe('SIMPLIFY', () => {
-  for (const test of TEST_CASES) {
-    const [input, output, comment] = test;
+  console.info('Canonicalization test cases\n\n');
+  for (const test of CANONICALIZATION_TEST_CASES) runTestCase(test);
 
-    if (output === undefined) {
-      // It's a heading
-      console.info(`\n[\`${input}\`],`);
-      continue;
-    }
-
-    const row = escape(
-      `[${
-        typeof input === 'string' ? '"' + input + '"' : exprToString(input)
-      }, ${
-        typeof output === 'string' ? '"' + output + '"' : exprToString(output)
-      }${comment ? ', "' + comment + '"' : ''}],`
-    );
-
-    if (comment?.startsWith('skip')) {
-      console.info(row);
-      continue;
-    }
-
-    const a = typeof input === 'string' ? ce.parse(input) : ce.box(input);
-    const b = typeof output === 'string' ? ce.parse(output) : ce.box(output);
-
-    let result: string;
-    if (a.simplify().isSame(b)) result = '';
-    else {
-      if (comment?.startsWith('stop')) {
-        const a1 = a.simplify();
-        const b1 = b;
-        const eq = a1.isSame(b1);
-        debugger;
-      }
-      result = `🙁 ${a.simplify().toString()}`;
-    }
-
-    console.info(result ? `${row} // ${result}` : row);
-    // test(row, () => expect(a.simplify().json).toEqual(b.json));
-  }
+  console.info('\n\nRule test cases\n\n');
+  for (const test of RULE_TEST_CASES) runTestCase(test);
 });
 
 describe('SIMPLIFY', () => {
@@ -730,4 +710,47 @@ describe('RELATIONAL OPERATORS', () => {
 
 function escape(s: string): string {
   return s.replace(/\\/g, '\\\\');
+}
+
+function runTestCase(test: TestCase): void {
+  if (test.length === 1) {
+    // It's a heading
+    // It's a heading
+    console.info(`\n[\`${test[0]}\`],`);
+    return;
+  }
+
+  const [input, expected, comment] = test;
+
+  const row = escape(
+    `[${typeof input === 'string' ? '"' + input + '"' : exprToString(input)}, ${
+      typeof expected === 'string'
+        ? '"' + expected + '"'
+        : exprToString(expected)
+    }${comment ? ', "' + comment + '"' : ''}],`
+  );
+
+  if (comment?.startsWith('skip')) {
+    console.info(row);
+    return;
+  }
+
+  const a = typeof input === 'string' ? ce.parse(input) : ce.box(input);
+  const b =
+    typeof expected === 'string' ? ce.parse(expected) : ce.box(expected);
+
+  let result: string;
+  if (a.simplify().isSame(b)) result = '';
+  else {
+    if (comment?.startsWith('stop')) {
+      const a1 = a.simplify();
+      const b1 = b;
+      const eq = a1.isSame(b1);
+      debugger;
+    }
+    result = `🙁 ${a.simplify().toString()}`;
+  }
+
+  console.info(result ? `${row} // ${result}` : row);
+  // test(row, () => expect(a.simplify().json).toEqual(b.json));
 }
