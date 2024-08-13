@@ -556,6 +556,7 @@ export const CORE_LIBRARY: IdentifierDefinitions[] = [
     },
 
     Random: {
+      pure: false,
       signature: {
         domain: [
           'FunctionOf',
@@ -574,7 +575,7 @@ export const CORE_LIBRARY: IdentifierDefinitions[] = [
           let upper: number;
           if (upperOp === undefined) {
             lower = 0;
-            upper = Math.floor(lowerOp.re ?? 0)!;
+            upper = Math.floor((lowerOp.re ?? 1) - 1)!;
           } else {
             lower = Math.floor(lowerOp.re ?? 0)!;
             upper = Math.floor(upperOp.re ?? 0)!;
