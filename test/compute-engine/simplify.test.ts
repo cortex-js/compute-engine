@@ -26,7 +26,7 @@ export type TestCase =
   | [
       input: Expression | string,
       expected: Expression | string,
-      comment?: string,
+      comment?: string
     ]
   | [heading: string];
 
@@ -133,7 +133,11 @@ const CANONICALIZATION_TEST_CASES: TestCase[] = [
   ['(x^1)^3', 'x^3'],
   ['(x^2)^{-2}', 'x^{-4}'],
   ['(x^{-2})^2', 'x^{-4}'],
-  ['(x^{-2})^{-2}', '(x^{-2})^{-2}'], // 🙁 x^4
+  [
+    '(x^{-2})^{-2}',
+    'x^4',
+    'Not defined at x=0, but we assume variables represent values in the general domain where the operation is valid ',
+  ],
   ['(x^{1/3})^8', 'x^{8/3}'],
   ['(x^3)^{2/5}', 'x^{6/5}'],
   ['(x^{\\sqrt{2}})^3', 'x^{3\\sqrt{2}}'],
