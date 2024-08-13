@@ -177,6 +177,14 @@ export class BoxedFunction extends _BoxedExpression {
     return pure;
   }
 
+  /** The value of the function is constant if the function is
+   * pure, and all its arguments are constant.
+   */
+  get isConstant(): boolean {
+    if (!this.isPure) return false;
+    return this._ops.every((x) => x.isConstant);
+  }
+
   get json(): Expression {
     return [this._name, ...this.structural.ops!.map((x) => x.json)];
   }

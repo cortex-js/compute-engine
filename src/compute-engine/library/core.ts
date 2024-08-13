@@ -558,12 +558,9 @@ export const CORE_LIBRARY: IdentifierDefinitions[] = [
     Random: {
       pure: false,
       signature: {
-        domain: [
-          'FunctionOf',
-          ['OptArg', 'Integers'],
-          ['OptArg', 'Integers'],
-          'Anything',
-        ],
+        params: [],
+        optParams: ['Integers', 'Integers'],
+        result: 'Numbers',
         evaluate: (ce, ops) => {
           // With no arguments, return a random number between 0 and 1
           if (ops.length === 0) return ce.number(Math.random());

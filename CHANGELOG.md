@@ -333,6 +333,11 @@
   0 and 1. `["Random", 10]` returns an integer between 0 and 9,
   `["Random", 5, 10]` returns an integer between 5 and 10.
 
+- Extended the definition of `expr.isConstant`. Previously, it only applied to
+  symbols, e.g. `Pi`. Now it apply to all expressions. `expr.isConstant` is true
+  if the expression is a number literal, a symbol with a constant value, or a
+  pure function with constant arguments.
+
 - Added Choose function to compute binomial coefficients, i.e. `Choose(5, 2)` is
   equal to 10.
 

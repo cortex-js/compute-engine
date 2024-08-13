@@ -356,9 +356,12 @@ export abstract class _BoxedExpression implements BoxedExpression {
     return false;
   }
 
-  /** For a symbol, true if the symbol is a constant (unchangeable value) */
+  /** Literals (number, string, boolean) are constants. Some symbols
+   * may also be constants (e.g. Pi, E, True, False). Expressions of constant
+   * symbols are also constants (if the function is pure).
+   */
   get isConstant(): boolean {
-    return false;
+    return true;
   }
 
   get isNaN(): boolean | undefined {

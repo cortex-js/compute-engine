@@ -474,7 +474,17 @@ export interface BoxedExpression {
    */
   readonly isPure: boolean;
 
-  /** True if the expression is a constant, that is a symbol with an immutable value */
+  /**
+   * True if the the value of the expression does not depend on the value of
+   * any other expression.
+   *
+   * For example, a number literal, a symbol with a constant value.
+   * - `2` is constant
+   * - `Pi` is constant
+   * - `["Add", "Pi", 2]` is constant
+   * - `x` is not constant
+   * - `["Add", "x", 2]` is not constant
+   */
   readonly isConstant: boolean;
 
   /**

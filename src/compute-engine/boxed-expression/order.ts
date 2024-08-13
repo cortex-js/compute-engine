@@ -110,7 +110,7 @@ function rank(expr: BoxedExpression): Rank {
   // Square root of a number
   if (asRadical(expr)) return 'radical';
 
-  // Constant symbols
+  // Constant symbols (π, e, etc.)
   if (expr.symbol && expr.isConstant) return 'constant';
 
   // Other symbols
