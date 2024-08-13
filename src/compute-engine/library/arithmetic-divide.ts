@@ -22,6 +22,14 @@ export function canonicalDivide(
 
   if (op2.isZero) return ce.NaN;
 
+  // a/a = 1 (if a ≠ 0)
+  if (op2.isNotZero === true) {
+    if (op1.symbol !== null && op1.symbol === op2.symbol && op1.isConstant)
+      return ce.One;
+
+    if (op1.isSame(op2)) return ce.One;
+  }
+
   // -a/-b = a/b
   if (op1.operator === 'Negate' && op2.operator === 'Negate') {
     op1 = op1.op1;

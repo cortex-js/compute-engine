@@ -79,6 +79,90 @@ const CANONICALIZATION_TEST_CASES: TestCase[] = [
   ],
   ['\\sqrt3 - 2', '\\sqrt3 - 2', 'Should stay exact'],
   ['\\frac{\\sqrt5+1}{4}', '\\frac{\\sqrt5}{4}+\\frac14', 'Should stay exact'],
+
+  [
+    `
+    //
+    // Addition and Subtraction
+    //
+  `,
+  ],
+  ['-2+x', 'x-2'],
+  ['x-(-1)', 'x+1'],
+  ['x+(-1)', 'x-1'],
+
+  [
+    `
+    //
+    // Multiplication
+    //
+  `,
+  ],
+  ['1*x', 'x'],
+  ['-1*x', '-x'],
+  ['(-2)*(-x)', '2*x'],
+  ['2*(-x)', '-2*x'],
+
+  [
+    `
+    //
+    // Combine Like terms
+    //
+  `,
+  ],
+  ['x+2*x', '3*x'],
+  ['2*\\pi * x^2-\\pi * x^2+2*\\pi', '\\pi * x^2+ 2\\pi'],
+
+  [
+    `
+    //
+    // Power of Fraction in Denominator
+    //
+  `,
+  ],
+  ['x/(y/2)^3', '(8*x)/y^3'],
+  ['x/(2/y)^3', 'x/(2/y)^3'],
+
+  [
+    `
+    //
+    // Double Powers
+    //
+  `,
+  ],
+  ['(x^1)^3', 'x^3'],
+  ['(x^2)^{-2}', 'x^{-4}'],
+  ['(x^{-2})^2', 'x^{-4}'],
+  ['(x^{-2})^{-2}', '(x^{-2})^{-2}'], // 🙁 x^4
+  ['(x^{1/3})^8', 'x^{8/3}'],
+  ['(x^3)^{2/5}', 'x^{6/5}'],
+  ['(x^{\\sqrt{2}})^3', 'x^{3\\sqrt{2}}'],
+
+  [
+    `
+    //
+    // Ln/Log
+    //
+  `,
+  ],
+  ['\\ln(3)+\\ln(\\frac{1}{3})', 0],
+  ['\\frac{\\ln(9)}{\\ln(3)}', 2],
+  ['\\ln(e^x/y)', 'x-\\ln(y)'],
+  ['\\ln(y/e^x)', '\\ln(y)-x'],
+  ['\\ln(0)', NaN],
+  ['\\ln(1/x)', '-\\ln(x)'],
+  ['\\ln(1)', 0],
+  ['\\ln(e)', 1],
+  ['\\ln(e^x)', 'x'],
+
+  [
+    `
+    //
+    // Others
+    //
+  `,
+  ],
+  ['2\\left(13.1+x\\right)-\\left(26.2+2x\\right)', 0],
 ];
 
 /**
@@ -92,12 +176,9 @@ const RULE_TEST_CASES: TestCase[] = [
     //
   `,
   ],
-  ['\\ln(3)+\\ln(\\frac{1}{3})', 0],
-  ['\\frac{\\ln(9)}{\\ln(3)}', 2],
   ['e e^x e^{-x}', 'e'], // 🙁 e * e^x * e^(-x)
   ['e^x e^{-x}', 1], // 🙁 e^x * e^(-x)
   [['Add', 1, 2, 1.0001], 4.0001],
-  ['2\\left(13.1+x\\right)-\\left(26.2+2x\\right)', 0],
   ['\\sqrt{3}(\\sqrt2x + x)', '(\\sqrt3+\\sqrt6)x'], // 🙁 4.18154055035205529353 * x
   ['\\sqrt[4]{16b^{4}}', '2b'], // 🙁 root(16b^4)(4)
 
@@ -114,27 +195,6 @@ const RULE_TEST_CASES: TestCase[] = [
   ['(-x)^{3/5}', '-x^{3/5}'], // 🙁 (-x)^(3/5)
   ['1/x-1/(x+1)', '1/(x(x+1))'], // 🙁 -1 / (x + 1) + 1 / x
   ['\\sqrt[3]{-2}', '-\\sqrt[3]{2}'], // 🙁 root(-2)(3)
-
-  [
-    `
-    //
-    // Addition and Subtraction
-    //
-  `,
-  ],
-  ['-2+x', 'x-2'],
-  ['x-(-1)', 'x+1'],
-  ['x+(-1)', 'x-1'],
-
-  [
-    `
-    //
-    // Combine Like terms
-    //
-  `,
-  ],
-  ['x+2*x', '3*x'],
-  ['2*\\pi * x^2-\\pi * x^2+2*\\pi', '\\pi * x^2+ 2\\pi'],
 
   [
     `
@@ -160,24 +220,12 @@ const RULE_TEST_CASES: TestCase[] = [
   [
     `
     //
-    // Multiplication
-    //
-  `,
-  ],
-  ['1*x', 'x'],
-  ['-1*x', '-x'],
-  ['(-2)*(-x)', '2*x'],
-  ['2*(-x)', '-2*x'],
-
-  [
-    `
-    //
     // Division
     //
   `,
   ],
   ['x/x', 'x/x'],
-  ['\\pi/\\pi', 1], // 🙁 pi / pi
+  ['\\pi/\\pi', 1],
   ['(\\pi+1)/(\\pi+1)', 1], // 🙁 1 / (1 + pi) + pi / (1 + pi)
   ['1/(1/0)', NaN],
   ['1/(1/\\pi)', '\\pi'],
@@ -235,13 +283,6 @@ const RULE_TEST_CASES: TestCase[] = [
   ['e^{3\\ln(x)}', 'x^3'], // 🙁 e^(3ln(x))
   ['e^{\\ln(x)/3}', 'x^{1/3}'], // 🙁 e^(ln(x) / 3)
   ['\\ln(e^x*y)', 'x+\\ln(y)'], // 🙁 ln(y * e^x)
-  ['\\ln(e^x/y)', 'x-\\ln(y)'],
-  ['\\ln(y/e^x)', '\\ln(y)-x'],
-  ['\\ln(0)', NaN],
-  ['\\ln(1/x)', '-\\ln(x)'],
-  ['\\ln(1)', 0],
-  ['\\ln(e)', 1],
-  ['\\ln(e^x)', 'x'],
 
   [
     `
@@ -260,10 +301,10 @@ const RULE_TEST_CASES: TestCase[] = [
   ['\\log_c(c^x*y)', 'x+\\log_c(y)'], // 🙁 ln(y * c^x)
   ['\\log_c(c^x/y)', 'x-\\log_c(y)'], // 🙁 log(c^x / y, c)
   ['\\log_c(y/c^x)', '\\log_c(y)-x'], // 🙁 log(y / c^x, c)
-  ['\\log_c(0)', NaN],
-  ['\\log_c(1)', 0],
   ['\\log_c(c)', 1], // 🙁 log(c, c)
   ['\\log_c(c^x)', 'x'], // 🙁 x * log(c, c)
+  ['\\log_c(0)', NaN],
+  ['\\log_c(1)', 0],
   ['\\log_2(1/x)', '-\\log_2(x)'],
 
   [
@@ -281,18 +322,28 @@ const RULE_TEST_CASES: TestCase[] = [
   [
     `
     //
+    // Logs and Infinity
+  `,
+  ],
+  ['\\ln(\\infty)', '\\infty'],
+  ['\\log_4(\\infty)', '\\infty'],
+  ['\\log_{0.5}(\\infty)', '-\\infty'], // 🙁 ln(oo)
+
+  [
+    `
+    //
     // Absolute Value
     //
   `,
   ],
   ['|\\pi|', '\\pi'],
+  ['|\\infty|', '\\infty'],
+  ['|-\\infty|', '\\infty'],
   ['|-x|', '|x|'], // 🙁 |-x|
   ['|-\\pi|', '|\\pi|'], // 🙁 |-pi|
   ['|\\pi * x|', '\\pi * x'], // 🙁 |pi * x|
   ['|\\frac{x}{\\pi}|', '\\frac{|x|}{\\pi}'], // 🙁 |x / pi|
   ['|\\frac{2}{x}|', '\\frac{2}{|x|}'], // 🙁 |2 / x|
-  ['|\\infty|', '\\infty'],
-  ['|-\\infty|', '\\infty'],
   ['|x|^4', 'x^4'], // 🙁 |x|^4
   ['|x^3|', '|x|^3'], // 🙁 |x^3|
   ['|x|^{4/3}', 'x^{4/3}'], // 🙁 |x|^(4/3)
@@ -333,16 +384,6 @@ const RULE_TEST_CASES: TestCase[] = [
   ['|\\arctanh(x)|', '\\arctanh(|x|)'], // 🙁 Error(ErrorCode(unexpected-token, |))
   ['|\\arccoth(x)|', '\\arccoth(|x|)'], // 🙁 Error(ErrorCode(unexpected-token, |))
   ['|\\arccsch(x)|', '\\arccsch(|x|)'], // 🙁 Error(ErrorCode(unexpected-token, |))
-
-  [
-    `
-    //
-    // Logs and Infinity
-  `,
-  ],
-  ['\\ln(\\infty)', '\\infty'],
-  ['\\log_4(\\infty)', '\\infty'],
-  ['\\log_{0.5}(\\infty)', '-\\infty'], // 🙁 ln(oo)
 
   [
     `
@@ -514,16 +555,6 @@ const RULE_TEST_CASES: TestCase[] = [
   [
     `
     //
-    // Power of Fraction in Denominator
-    //
-  `,
-  ],
-  ['x/(y/2)^3', '(8*x)/y^3'],
-  ['x/(2/y)^3', 'x/(2/y)^3'],
-
-  [
-    `
-    //
     // Powers: Division Involving x
     //
   `,
@@ -596,21 +627,6 @@ const RULE_TEST_CASES: TestCase[] = [
   [
     `
     //
-    // Double Powers
-    //
-  `,
-  ],
-  ['(x^1)^3', 'x^3'],
-  ['(x^2)^{-2}', 'x^{-4}'],
-  ['(x^{-2})^2', 'x^{-4}'],
-  ['(x^{-2})^{-2}', '(x^{-2})^{-2}'], // 🙁 x^4
-  ['(x^{1/3})^8', 'x^{8/3}'],
-  ['(x^3)^{2/5}', 'x^{6/5}'],
-  ['(x^{\\sqrt{2}})^3', 'x^{3\\sqrt{2}}'],
-
-  [
-    `
-    //
     // Powers and Roots
     //
   `,
@@ -648,7 +664,7 @@ const RULE_TEST_CASES: TestCase[] = [
   ['\\log_3(x^\\sqrt{2})', '\\sqrt{2} \\log_3(x)'],
   ['\\log_4(x^2)', '2\\log_4(|x|)'], // 🙁 2log(x, 4)
   ['\\log_4(x^{2/3})', '2/3 \\log_4(|x|)'], // 🙁 2/3 * log(x, 4)
-  ['\\log_4(x^{7/4})', '7/4 \\log_4(x)'], // 🙁 7/4 * log(x, 4)];
+  ['\\log_4(x^{7/4})', '7/4 \\log_4(x)'], // 🙁 7/4 * log(x, 4)
 ];
 
 describe('SIMPLIFY', () => {

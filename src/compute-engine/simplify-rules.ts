@@ -507,6 +507,7 @@ export const SIMPLIFY_RULES: Rule[] = [
         ids._n.mul(ids._m).isRational === false) &&
       (ids._n.isPositive === true || ids._m.isPositive === true),
   }, //also check if n*m not rational with even denominator
+  // @fixme: this rule may not be correct: (a^n)^m -> a^{m*n} for every n,m
 
   //Logs and Powers
   {
