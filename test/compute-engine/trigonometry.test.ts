@@ -68,8 +68,15 @@ describe('TRIGONOMETRY constructible values', () => {
 
           if (Math.abs(f) > 1000000) f = +Infinity;
           if (Math.abs(jsValue) > 1000000) jsValue = +Infinity;
-          test(`${h}(${arg.toString()})`, () =>
-            expect(Math.abs(f - jsValue)).toBeCloseTo(0, 10));
+
+          test(`${h}(${arg.toString()})`, () => {
+            if (!Number.isFinite(Math.abs(f - jsValue))) {
+              const expr = engine.box([h, arg]).evaluate();
+              const again = fExact.N();
+              console.error('Invalid trig result', fNumeric.toString());
+            }
+            expect(Math.abs(f - jsValue)).toBeCloseTo(0, 10);
+          });
         }
       }
     }

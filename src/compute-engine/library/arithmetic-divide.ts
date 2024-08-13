@@ -20,6 +20,8 @@ export function canonicalDivide(
   const ce = op1.engine;
   if (!op1.isValid || !op2.isValid) return ce._fn('Divide', [op1, op2]);
 
+  if (op2.isZero) return ce.NaN;
+
   // -a/-b = a/b
   if (op1.operator === 'Negate' && op2.operator === 'Negate') {
     op1 = op1.op1;
@@ -51,8 +53,8 @@ export function canonicalDivide(
   // a/(-1) = -a
   if (op2.isNegativeOne) return op1.neg();
 
-  // 0/a = 0, 0/0 = NaN
-  if (op1.isZero) return op2.isZero ? ce.NaN : ce.Zero;
+  // 0/a = 0, 0
+  if (op1.isZero) return ce.Zero;
 
   // Note: (-1)/a ≠ -(a^-1). We distribute Negate over Divide.
 

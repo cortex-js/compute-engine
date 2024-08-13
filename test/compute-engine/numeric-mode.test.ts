@@ -79,10 +79,7 @@ describe('NUMERIC MODE', () => {
     `));
 
   test(`\\sqrt{-1}`, () =>
-    expect(check('\\sqrt{-1}')).toMatchInlineSnapshot(`
-      box       = ["Sqrt", -1]
-      canonical = ["Complex", 0, 1]
-    `));
+    expect(check('\\sqrt{-1}')).toMatchInlineSnapshot(`["Sqrt", -1]`));
 
   test('e^{i\\pi}', () =>
     expect(check('e^{i\\pi}')).toMatchInlineSnapshot(`

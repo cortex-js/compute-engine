@@ -16,8 +16,6 @@ box       = [
 ]
 canonical = [
   "Add",
-  1.5,
-  1.7,
   2,
   2,
   4,
@@ -25,6 +23,8 @@ canonical = [
   ["Rational", 5, 7],
   ["Sqrt", 5],
   ["Sqrt", 5],
+  1.5,
+  1.7,
   "Pi"
 ]
 simplify  = 16.659148942012567 + pi
@@ -78,7 +78,7 @@ exports[`ADD Add \\sqrt{3}+2\\sqrt{3} 1`] = `["Multiply", 3, ["Sqrt", 3]]`;
 
 exports[`ADD Add 8+\\sqrt{3} 1`] = `["Add", 8, ["Sqrt", 3]]`;
 
-exports[`ADD Add 8.1+\\sqrt{3} 1`] = `9.8320508075688772`;
+exports[`ADD Add 8.1+\\sqrt{3} 1`] = `9.83205080756887729353`;
 
 exports[`CONSTANTS CatalanConstant 1`] = `
 box       = CatalanConstant
@@ -106,7 +106,7 @@ N-mach    = 2.718281828459045
 
 exports[`CONSTANTS GoldenRatio 1`] = `
 box       = GoldenRatio
-simplify  = sqrt(5) / 2 + 1/2
+simplify  = 1/2 + sqrt(5) / 2
 eval-auto = (1 + sqrt(5)) / 2
 eval-mach = (1 + sqrt(5)) / 2
 N-auto    = 1.61803398874989484821
@@ -182,12 +182,12 @@ box       = [
 ]
 canonical = [
   "Add",
-  1.1,
   2,
   5,
   ["Rational", 5, 7],
   ["Rational", 7, 9],
   ["Sqrt", 2],
+  1.1,
   "Pi"
 ]
 simplify  = 11.0062770544365872 + pi
@@ -209,12 +209,12 @@ box       = [
 ]
 canonical = [
   "Add",
-  -2.12,
-  2.12,
   ["Rational", 1, 4],
   ["Rational", 1, 4],
   ["Sqrt", 5],
-  ["Sqrt", 7]
+  ["Sqrt", 7],
+  -2.12,
+  2.12
 ]
 simplify  = 5.3818192885643807
 eval-auto = 5.3818192885643807
@@ -270,7 +270,7 @@ N-mach    = 7.38181928856438
 
 exports[`EXACT EVALUATION Inexact values propagate 1`] = `
 box       = ["Add", 0.1, 2, ["Divide", 1, 4]]
-canonical = ["Add", 0.1, 2, ["Rational", 1, 4]]
+canonical = ["Add", 2, ["Rational", 1, 4], 0.1]
 simplify  = 2.35
 `;
 
@@ -293,7 +293,9 @@ N-mach    = 0.845154254728518
 
 exports[`EXACT EVALUATION Sqrt: Inexact Fractional part 1`] = `
 box       = ["Sqrt", 5.1]
-canonical = 2.25831795812724298497
+simplify  = 2.25831795812724298497
+eval-auto = 2.25831795812724298497
+eval-mach = 2.258317958127243
 `;
 
 exports[`EXACT EVALUATION Square rationals are grouped together 1`] = `
@@ -772,7 +774,7 @@ N-mach    = 27.150951288745603
 
 exports[`MULTIPLY with +Infinity 1`] = `
 box       = ["Multiply", "x", -2, 3.1, "PositiveInfinity"]
-canonical = ["Multiply", -2, "PositiveInfinity", 3.1, "x"]
+canonical = ["Multiply", -2, 3.1, "PositiveInfinity", "x"]
 simplify  = oo
 `;
 
@@ -784,7 +786,7 @@ simplify  = 32.24 * x
 
 exports[`MULTIPLY with -Infinity 1`] = `
 box       = ["Multiply", "x", -2, 3.1, "NegativeInfinity", "NegativeInfinity"]
-canonical = ["Multiply", -2, "PositiveInfinity", "PositiveInfinity", 3.1, "x"]
+canonical = ["Multiply", -2, 3.1, "PositiveInfinity", "PositiveInfinity", "x"]
 simplify  = oo
 `;
 
@@ -801,10 +803,10 @@ box       = [
 canonical = [
   "Multiply",
   2,
-  "PositiveInfinity",
-  "PositiveInfinity",
-  "PositiveInfinity",
   3.1,
+  "PositiveInfinity",
+  "PositiveInfinity",
+  "PositiveInfinity",
   "x"
 ]
 simplify  = oo
@@ -812,7 +814,7 @@ simplify  = oo
 
 exports[`MULTIPLY with NaN 1`] = `
 box       = ["Multiply", "x", 2, 3.1, "NaN"]
-canonical = ["Multiply", 2, "NaN", 3.1, "x"]
+canonical = ["Multiply", 2, 3.1, "NaN", "x"]
 simplify  = NaN
 `;
 
@@ -829,10 +831,10 @@ box       = [
 canonical = [
   "Multiply",
   2,
+  3.1,
   "NaN",
   "PositiveInfinity",
   "PositiveInfinity",
-  3.1,
   "x"
 ]
 simplify  = NaN
@@ -1097,14 +1099,7 @@ canonical = ["Sqrt", 2.5, ["Error", "'unexpected-argument'", 1.1]]
 
 exports[`SQRT √ of list 1`] = `[2,1,7.48331477354788277116,4.2426406871192851464]`;
 
-exports[`SQRT √(3+4i) 1`] = `
-box       = ["Sqrt", ["Complex", 3, 4]]
-simplify  = (2 + i)
-eval-auto = (2 + i)
-eval-mach = (2 + i)
-N-auto    = 2i
-N-mach    = 2i
-`;
+exports[`SQRT √(3+4i) 1`] = `["Sqrt", ["Complex", 3, 4]]`;
 
 exports[`SQRT √(3^2) 1`] = `["Sqrt", ["Square", 3]]`;
 
@@ -1142,12 +1137,16 @@ N-mach    = 13.228756555323
 
 exports[`SQRT √(1000000/49) 1`] = `
 box       = ["Sqrt", ["Rational", 1000000, 49]]
-canonical = 142.857142857142857143
+simplify  = 142.857142857142857143
+eval-auto = 142.857142857142857143
+eval-mach = 142.857142857143
 `;
 
 exports[`SQRT √(1000001/7) 1`] = `
 box       = ["Sqrt", ["Rational", 1000001, 7]]
-canonical = 377.964661991416486293
+simplify  = 377.964661991416486293
+eval-auto = 377.964661991416486293
+eval-mach = 377.964661991417
 `;
 
 exports[`SQRT √(12345678901234567890/23456789012345678901) 1`] = `
@@ -1159,12 +1158,17 @@ box       = [
     {num: "23456789012345678901"}
   ]
 ]
-canonical = 0.725476264027701313101
+canonical = ["Sqrt", ["Rational", 137174210, 260630989]]
+simplify  = 0.725476264027701313101
+eval-auto = 0.725476264027701313101
+eval-mach = 0.725476264027701
 `;
 
 exports[`SQRT √(12345670000000000000000000) 1`] = `
 box       = ["Sqrt", {num: "1234567e+19"}]
-canonical = 3513640562152.02524805
+simplify  = 3513640562152.02524805
+eval-auto = 3513640562152.02524805
+eval-mach = 3513640562152.03
 `;
 
 exports[`SQRT √0 1`] = `
@@ -1188,7 +1192,9 @@ eval-mach = 11111.1110611111
 
 exports[`SQRT √12345678901234567890 1`] = `
 box       = ["Sqrt", {num: "12345678901234567890"}]
-canonical = 3513641828.82014425309
+simplify  = 3513641828.82014425309
+eval-auto = 3513641828.82014425309
+eval-mach = 3513641828.82015
 `;
 
 exports[`SUBTRACT Subtract 1`] = `2.5`;

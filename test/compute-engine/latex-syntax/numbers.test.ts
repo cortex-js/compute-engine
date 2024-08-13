@@ -5,11 +5,11 @@ function parse(s: string) {
   return ce.parse(s);
 }
 
-function parseVal(s: string): number {
+function parseVal(s: string): string | number {
   const result = ce.parse(s).numericValue;
   if (typeof result === 'number') return result;
   if (result === null) return NaN;
-  return result.re;
+  return result.toString();
 }
 
 describe('PARSING OF NUMBER', () => {
@@ -75,12 +75,12 @@ describe('PARSING OF NUMBER', () => {
     expect(exprToString(ce.box({ num: '0.(142857)' }))).toMatchInlineSnapshot(
       `0.(142857)`
     );
-    expect(parse('x=.123')).toMatchInlineSnapshot(`["Equal", 0.123, "x"]`);
+    expect(parse('x=.123')).toMatchInlineSnapshot(`["Equal", "x", 0.123]`);
     expect(parse('x=.123(45)')).toMatchInlineSnapshot(
-      `["Equal", "0.123(45)", "x"]`
+      `["Equal", "x", "0.123(45)"]`
     );
     expect(parse('x=-987.123(45)')).toMatchInlineSnapshot(
-      `["Equal", "-987.123(45)", "x"]`
+      `["Equal", "x", "-987.123(45)"]`
     );
 
     // Vinculum
@@ -109,10 +109,10 @@ describe('PARSING OF NUMBER', () => {
 
   test('Parsing numbers with truncation mark', () => {
     expect(parse('x=.123\\ldots')).toMatchInlineSnapshot(
-      `["Equal", 0.123, "x"]`
+      `["Equal", "x", 0.123]`
     );
     expect(parse('x=.123\\ldots e4')).toMatchInlineSnapshot(
-      `["Equal", 1230, "x"]`
+      `["Equal", "x", 1230]`
     );
     expect(parse('x=.123\\ldots e4+1')).toMatchInlineSnapshot(
       `["Equal", "x", ["Add", 1, 1230]]`
@@ -125,7 +125,7 @@ describe('PARSING OF NUMBER', () => {
   test('Parsing numbers with INVALID truncation mark', () => {
     // Invalid: \ldots after repeating pattern
     expect(parse('x=.123(45)\\ldots')).toMatchInlineSnapshot(
-      `["Equal", "0.123(45)", "x"]`
+      `["Equal", "x", "0.123(45)"]`
     );
   });
 
@@ -167,27 +167,30 @@ describe('PARSING OF NUMBER', () => {
   });
 
   test('Complex Numbers', () => {
-    expect(parseVal('2i')).toMatchInlineSnapshot(`0`);
-    expect(parseVal('1-i')).toMatchInlineSnapshot(`1`);
-    expect(parseVal('2-3i')).toMatchInlineSnapshot(`2`);
-    expect(parseVal('-1.2345-5.6789i')).toMatchInlineSnapshot(`-1.2345`);
+    expect(parseVal('2i')).toMatchInlineSnapshot(`2i`);
+    expect(parseVal('1-i')).toMatchInlineSnapshot(`(1 - i)`);
+    expect(parseVal('2-3i')).toMatchInlineSnapshot(`(2 - 3i)`);
+    expect(parseVal('-1.2345-5.6789i')).toMatchInlineSnapshot(
+      `(-1.2345 - 5.6789i)`
+    );
+    // This is an expression, not a number
     expect(parseVal('2-1.2345-5.6789i')).toMatchInlineSnapshot(`NaN`);
   });
 
   test('Rationals and radicals', () => {
-    expect(parseVal('\\sqrt{2}')).toMatchInlineSnapshot(`1.4142135623730951`);
-    expect(parseVal('\\sqrt{2.1}')).toMatchInlineSnapshot(`1.449137674618944`);
-    expect(parseVal('3\\sqrt{2}')).toMatchInlineSnapshot(`4.242640687119286`);
+    expect(parseVal('\\sqrt{2}')).toMatchInlineSnapshot(`sqrt(2)`);
+    expect(parseVal('3\\sqrt{2}')).toMatchInlineSnapshot(`3sqrt(2)`);
     expect(parseVal('\\frac{3}{4}\\sqrt{2}')).toMatchInlineSnapshot(
-      `1.0606601717798214`
+      `3/4sqrt(2)`
     );
+    // This is an expression, not a number, should be NaN
+    expect(parseVal('\\sqrt{2.1}')).toMatchInlineSnapshot(`NaN`);
 
-    expect(parseVal('\\sqrt{9007199254740997}')).toMatchInlineSnapshot(
-      `94906265.62425157`
-    );
+    // This is also an expression (not a small integer), so should be NaN
+    expect(parseVal('\\sqrt{9007199254740997}')).toMatchInlineSnapshot(`NaN`);
 
     expect(parseVal('9007199254741033\\sqrt{3}')).toMatchInlineSnapshot(
-      `15600926743107994`
+      `9007199254741033sqrt(3)`
     );
 
     expect(
@@ -247,7 +250,7 @@ describe('PARSING OF NUMBER', () => {
     expect(parse('3\\times10^n')).toMatchInlineSnapshot(
       `["Multiply", 3, ["Power", 10, "n"]]`
     );
-    expect(parseVal('\\frac{2}{0}')).toMatchInlineSnapshot(`Infinity`);
+    expect(parseVal('\\frac{2}{0}')).toMatchInlineSnapshot(`NaN`);
     expect(parseVal('\\operatorname{NaN}')).toEqual(NaN);
   });
 

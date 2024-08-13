@@ -138,8 +138,8 @@ describe('POWERS/ROOTS', () => {
     expect(check('x^{\\frac12}')).toMatchInlineSnapshot(`sqrt(x)`);
     expect(check('2^{\\frac12}')).toMatchInlineSnapshot(`sqrt(2)`);
     expect(check('(x+1)^{\\frac12}')).toMatchInlineSnapshot(`sqrt(x + 1)`);
-    expect(check('(-1)^{\\frac12}')).toMatchInlineSnapshot(`i`);
-    expect(check('x+(-1)^{\\frac12}')).toMatchInlineSnapshot(`x + i`);
+    expect(check('(-1)^{\\frac12}')).toMatchInlineSnapshot(`sqrt(-1)`);
+    expect(check('x+(-1)^{\\frac12}')).toMatchInlineSnapshot(`x + sqrt(-1)`);
 
     expect(check('x^{\\frac34}')).toMatchInlineSnapshot(`x^(3/4)`);
     expect(check('2^{\\frac34}')).toMatchInlineSnapshot(`2^(3/4)`);
@@ -166,6 +166,17 @@ describe('ARITHMETIC OPERATORS', () => {
     expect(check('1+2')).toMatchInlineSnapshot(`1 + 2`);
     expect(check('1-2')).toMatchInlineSnapshot(`-2 + 1`);
     expect(check('-1-2')).toMatchInlineSnapshot(`-2 - 1`);
+    expect(check('-1-2-3')).toMatchInlineSnapshot(`-3 - 2 - 1`);
+    expect(check('-1.23 - 2.3454 - 3.455')).toMatchInlineSnapshot(
+      `-3.455 - 2.3454 - 1.23`
+    );
+    expect(check('-1.23e30 - 2.3454e32 - 3.455e35')).toMatchInlineSnapshot(
+      `-3455e+32 - 23454e+28 - 123e+28`
+    );
+    expect(check('1 + (2+3i)')).toMatchInlineSnapshot(`1 + (2 + 3i)`);
+    expect(check('1 + (-2-3i)')).toMatchInlineSnapshot(`1 + (-2 - 3i)`);
+    expect(check('\\pi + (-2-3i)')).toMatchInlineSnapshot(`(-2 - 3i) + pi`);
+    expect(check('x + (-2-3i)')).toMatchInlineSnapshot(`x + (-2 - 3i)`);
     expect(check('1+(-x)')).toMatchInlineSnapshot(`-x + 1`);
     expect(check('(-x)-1')).toMatchInlineSnapshot(`-x - 1`);
     expect(check('(-y)+(-x)-1')).toMatchInlineSnapshot(`-x - y - 1`);
@@ -178,10 +189,47 @@ describe('ARITHMETIC OPERATORS', () => {
   });
 
   it('should serialize Multiply', () => {
+    expect(check('2 \\times 3')).toMatchInlineSnapshot(`2 * 3`);
+    expect(check('1 \\times 3')).toMatchInlineSnapshot(`3`);
+    expect(check('-1 \\times 3')).toMatchInlineSnapshot(`-3`);
+    expect(check('2 \\times 1')).toMatchInlineSnapshot(`2`);
+    expect(check('2 \\times -1')).toMatchInlineSnapshot(`-2`);
+    expect(check('2 \\times -3')).toMatchInlineSnapshot(`-2 * 3`);
+    expect(check('-2 \\times -3')).toMatchInlineSnapshot(`2 * 3`);
+    expect(check('-2 \\times -3 \\times -4')).toMatchInlineSnapshot(
+      `-2 * 3 * 4`
+    );
+    expect(check('-x \\times -3 \\times -4 \\times -5')).toMatchInlineSnapshot(
+      `3 * 4 * 5 * x`
+    );
+    expect(check('2 \\times 3 \\times -4 \\times 5')).toMatchInlineSnapshot(
+      `-2 * 3 * 4 * 5`
+    );
+    expect(
+      check('2.123 \\times 3.456 \\times -4.465 \\times 5.564')
+    ).toMatchInlineSnapshot(`-2.123 * 3.456 * 4.465 * 5.564`);
+    expect(
+      check('2.123e32 \\times 3.456e33 \\times -4.465 \\times 5')
+    ).toMatchInlineSnapshot(`-2123e+29 * 5 * 3456e+30 * 4.465`);
+
+    expect(check('\\pi \\times 4')).toMatchInlineSnapshot(`4pi`);
+    expect(check('4 \\times \\pi')).toMatchInlineSnapshot(`4pi`);
+    expect(check('4 \\times \\pi \\times 3')).toMatchInlineSnapshot(
+      `3 * 4 * pi`
+    );
+
+    expect(check('4 \\times (2+3i)')).toMatchInlineSnapshot(`4(2 + 3i)`);
+    expect(check('(2+3i) \\times 4')).toMatchInlineSnapshot(`4(2 + 3i)`);
+    expect(check('-4 \\times (-2-3i)')).toMatchInlineSnapshot(`-4(-2 - 3i)`);
+    expect(check('(-2-3i) \\times -4')).toMatchInlineSnapshot(`4(2 + 3i)`);
+    expect(check('\\pi \\times i')).toMatchInlineSnapshot(`i * pi`);
+    expect(check('\\pi \\times -i')).toMatchInlineSnapshot(`-i * pi`);
+
     expect(check('x \\times y')).toMatchInlineSnapshot(`x * y`);
     expect(check('2 \\times y')).toMatchInlineSnapshot(`2y`);
     expect(check('-2 \\times -3')).toMatchInlineSnapshot(`2 * 3`);
     expect(check('-2 \\times x')).toMatchInlineSnapshot(`-2x`);
+    expect(check('-2 \\times -x')).toMatchInlineSnapshot(`2x`);
 
     expect(check('-23456.262 \\times x')).toMatchInlineSnapshot(
       `-23456.262 * x`
@@ -191,34 +239,34 @@ describe('ARITHMETIC OPERATORS', () => {
 
     expect(check('-1 \\times x')).toMatchInlineSnapshot(`-x`);
 
-    expect(check('(2-3i) \\times x')).toMatchInlineSnapshot(`x * (2 - 3i)`);
+    expect(check('(2-3i) \\times x')).toMatchInlineSnapshot(`(2 - 3i) * x`);
 
-    expect(check('3/4 \\pi')).toMatchInlineSnapshot(`3 / (4pi)`);
+    expect(check('(3/4) \\pi')).toMatchInlineSnapshot(`3/4 * pi`);
 
-    expect(check('3/4 x^2')).toMatchInlineSnapshot(`3 / (4x^2)`);
-    expect(check('3/4 x^3')).toMatchInlineSnapshot(`3 / (4x^3)`);
-    expect(check('3/4 \\cos(x)')).toMatchInlineSnapshot(`3 / (4cos(x))`);
+    expect(check('(3/4) x^2')).toMatchInlineSnapshot(`3/4 * x^2`);
+    expect(check('(3/4) x^3')).toMatchInlineSnapshot(`3/4 * x^3`);
+    expect(check('(3/4) \\cos(x)')).toMatchInlineSnapshot(`3/4 * cos(x)`);
   });
 });
 
 describe('PRECEDENCE', () => {
   it('should correctly put parentheses where needed', () => {
-    expect(check('1+2*3')).toMatchInlineSnapshot(`2 * 3 + 1`);
+    expect(check('1+2*3')).toMatchInlineSnapshot(`1 + 2 * 3`);
     expect(check('(1+2)*3')).toMatchInlineSnapshot(`3(1 + 2)`);
     expect(check('1*2+3')).toMatchInlineSnapshot(`2 + 3`);
     expect(check('1*(2+3)')).toMatchInlineSnapshot(`2 + 3`);
-    expect(check('1+2^3')).toMatchInlineSnapshot(`2^3 + 1`);
+    expect(check('1+2^3')).toMatchInlineSnapshot(`1 + 2^3`);
     expect(check('(1+2)^3')).toMatchInlineSnapshot(`(1 + 2)^3`);
-    expect(check('1^2+3')).toMatchInlineSnapshot(`1^2 + 3`);
+    expect(check('1^2+3')).toMatchInlineSnapshot(`3 + 1^2`);
     expect(check('1^{2+3}')).toMatchInlineSnapshot(`1^(2 + 3)`);
     expect(check('1+2/3')).toMatchInlineSnapshot(`1 + 2/3`);
     expect(check('(1+2)/3')).toMatchInlineSnapshot(`(1 + 2) / 3`);
     expect(check('1/2+3')).toMatchInlineSnapshot(`3 + 1/2`);
     expect(check('1/(2+3)')).toMatchInlineSnapshot(`1 / (2 + 3)`);
     expect(check('1+(2/3)+4')).toMatchInlineSnapshot(`1 + 4 + 2/3`);
-    expect(check('1+2/(3+4)')).toMatchInlineSnapshot(`2 / (3 + 4) + 1`);
-    expect(check('(1+2)/3+4')).toMatchInlineSnapshot(`(1 + 2) / 3 + 4`);
-    expect(check('1+(2/3)*4')).toMatchInlineSnapshot(`4 * 2/3 + 1`);
+    expect(check('1+2/(3+4)')).toMatchInlineSnapshot(`1 + 2 / (3 + 4)`);
+    expect(check('(1+2)/3+4')).toMatchInlineSnapshot(`4 + (1 + 2) / 3`);
+    expect(check('1+(2/3)*4')).toMatchInlineSnapshot(`1 + 4 * 2/3`);
   });
 
   it('should correctly put parentheses with relational operators', () => {

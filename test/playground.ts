@@ -1,70 +1,10 @@
 import { ComputeEngine } from '../src/compute-engine';
-import { check } from './utils.ts';
 
 const ce = new ComputeEngine();
-
-console.info(ce.parse('1.2345+5.6789i').json);
-
-console.info(ce.parse('-1.2345-5.6789i').json);
-console.info(ce.parse('-1.2345-5.6789i').toString());
-
-// Canonical order: rational before functions
-console.info(ce.parse('2\\sin(x)\\frac12').json);
-
-console.log(ce.box(['Power', 'x', 2]).json);
-console.log(ce.box(['Power', 'x', 2]).toMathJson());
-
-console.log(
-  ce.box([
-    'Multiply',
-    2,
-    5,
-    ['Divide', 5, 7],
-    ['Divide', 7, 9],
-    ['Sqrt', 2],
-    'Pi',
-  ]).json
-);
-
-console.log(
-  ce
-    .box([
-      'Multiply',
-      2,
-      5,
-      ['Divide', 5, 7],
-      ['Divide', 7, 9],
-      ['Sqrt', 2],
-      'Pi',
-    ])
-    .toMathJson()
-);
-
-console.log(
-  ce.parse(
-    '\\sqrt{\\pi}\\left(\\frac{n}{e}\\right)^n\\sqrt[6]{8n^3+4n^2+n+\\frac{1}{30}}'
-  ).json
-);
-
-// const result = ce
-//   .parse(
-//     '\\sqrt{\\pi}\\left(\\frac{n}{e}\\right)^n\\sqrt[6]{8n^3+4n^2+n+\\frac{1}{30}}'
-//   )
-//   .evaluate();
-
-let result = ce.parse('\\sqrt{\\pi}');
-
-console.log(result.toMathJson());
-
-result = result.evaluate();
-
-console.log(result.toMathJson());
 
 // See terms.ts:134. Explore options for shortcircuting when values are 1 or -1,
 // or canonicalMultiply2() for the same.
 console.log(ce.parse('-x-1').N().toString());
-
-console.log(ce.parse('-1.2345-5.6789i').numericValue?.toString());
 
 console.log(
   ce.parse(

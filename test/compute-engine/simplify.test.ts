@@ -26,7 +26,7 @@ export type TestCase =
   | [
       input: Expression | string,
       expected: Expression | string,
-      comment?: string,
+      comment?: string
     ]
   | [heading: string];
 

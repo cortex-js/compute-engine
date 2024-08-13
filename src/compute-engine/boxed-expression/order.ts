@@ -1,33 +1,11 @@
 import { maxDegree, revlex, totalDegree } from '../symbolic/polynomials';
 import { BoxedExpression, SemiBoxedExpression } from './public';
-import { NumericValue } from '../numeric-value/public';
 import { asRadical } from '../library/arithmetic-power';
 import { isTrigonometricFunction } from './trigonometry';
 
 export type Order = 'lex' | 'dexlex' | 'grevlex' | 'elim';
 
 export const DEFAULT_COMPLEXITY = 100000;
-
-const ADD_RANKS = [
-  'power',
-  'symbol',
-
-  'multiply',
-  'divide',
-  'add',
-  'trig',
-  'fn',
-
-  'complex',
-  'constant',
-
-  'number',
-  'rational',
-  'radical',
-
-  'string',
-  'other',
-] as const;
 
 /**
  * The sorting order of arguments of the Add function uses a modified degrevlex:
@@ -41,30 +19,54 @@ const ADD_RANKS = [
  * - 2x^2 + 3x + 1
  * - 2x^2y^3 + 5x^3y
  */
-export function sortAdd(
-  ops: ReadonlyArray<BoxedExpression>
-): ReadonlyArray<BoxedExpression> {
-  return [...ops].sort((a, b) => {
-    const aTotalDeg = totalDegree(a);
-    const bTotalDeg = totalDegree(b);
-    if (aTotalDeg !== bTotalDeg) return bTotalDeg - aTotalDeg;
 
-    const aMaxDeg = maxDegree(a);
-    const bMaxDeg = maxDegree(b);
-    if (aMaxDeg !== bMaxDeg) return bMaxDeg - aMaxDeg;
+export function addOrder(a: BoxedExpression, b: BoxedExpression): number {
+  const aTotalDeg = totalDegree(a);
+  const bTotalDeg = totalDegree(b);
+  if (aTotalDeg !== bTotalDeg) return bTotalDeg - aTotalDeg;
 
-    // Get a lexicographic key of the expression
-    // i.e. `xy^2` -> `x y`
-    const aLex = revlex(a);
-    const bLex = revlex(b);
-    if (aLex || bLex) {
-      if (!aLex) return +1;
-      if (!bLex) return -1;
-      if (aLex < bLex) return -1;
-      if (aLex > bLex) return +1;
-    }
-    return order(a, b);
-  });
+  const aMaxDeg = maxDegree(a);
+  const bMaxDeg = maxDegree(b);
+  if (aMaxDeg !== bMaxDeg) return bMaxDeg - aMaxDeg;
+
+  // Get a lexicographic key of the expression
+  // i.e. `xy^2` -> `x y`
+  const aLex = revlex(a);
+  const bLex = revlex(b);
+  if (aLex || bLex) {
+    if (!aLex) return +1;
+    if (!bLex) return -1;
+    if (aLex < bLex) return -1;
+    if (aLex > bLex) return +1;
+  }
+  return order(a, b);
+}
+
+export function equalOrder(a: BoxedExpression, b: BoxedExpression): number {
+  // Rank 1: symbols
+  // Ranks 2: expression
+  // Rank 3: numbers
+  const rank = (x: BoxedExpression): number => {
+    if (x.symbol !== null) return 1;
+    if (x.isNumberLiteral) return 3;
+    return 2;
+  };
+  const aRank = rank(a);
+  const bRank = rank(b);
+  if (aRank < bRank) return -1;
+  if (bRank < aRank) return +1;
+  if (aRank === 1) {
+    if (a.symbol === b.symbol) return 0;
+    return a.symbol! > b.symbol! ? 1 : -1;
+  }
+  if (aRank === 3) {
+    const aN = a.numericValue;
+    const bN = b.numericValue;
+    const af = typeof aN === 'number' ? aN : aN!.re;
+    const bf = typeof bN === 'number' ? bN : bN!.re;
+    return af - bf;
+  }
+  return order(a, b);
 }
 
 // export function isSorted(expr: BoxedExpression): BoxedExpression {
@@ -97,7 +99,9 @@ export type Rank = (typeof RANKS)[number];
  * sorted.
  */
 function rank(expr: BoxedExpression): Rank {
-  if (typeof expr.numericValue === 'number') return 'integer';
+  if (typeof expr.numericValue === 'number') {
+    return Number.isInteger(expr.numericValue) ? 'integer' : 'real';
+  }
   if (expr.numericValue) return expr.numericValue.type;
 
   // Complex numbers
@@ -168,9 +172,6 @@ function rank(expr: BoxedExpression): Rank {
  * sort order is quick to calculate, it can produce unexpected results, for
  * example "E" < "e" < "È" and "11" < "2". This ordering is not suitable to
  * collate natural language strings.
- *
- * 7/ Dictionaries, ordered by the number of keys. If there is a tie, by the
- * sum of the complexities of the values of the dictionary
  *
  * See https://reference.wolfram.com/language/ref/Sort.html for a
  * description of the ordering of expressions in Mathematica.
@@ -314,15 +315,31 @@ export function canonicalOrder(
   let ops = expr.ops;
   if (recursive) ops = ops.map((x) => canonicalOrder(x, { recursive }));
 
-  const ce = expr.engine;
-  if (expr.operator === 'Add') ops = sortAdd(ops);
-  else {
-    const isCommutative =
-      expr.operator === 'Multiply' ||
-      (ce.lookupFunction(expr.operator)?.commutative ?? false);
-    if (isCommutative) ops = [...ops].sort(order);
-  }
-  return ce._fn(expr.operator, ops, { canonical: false });
+  ops = sortOperands(expr.operator, ops);
+
+  return expr.engine._fn(expr.operator, ops, { canonical: false });
+}
+
+export function sortOperands(
+  operator: string,
+  xs: ReadonlyArray<BoxedExpression>
+): ReadonlyArray<BoxedExpression> {
+  if (xs.length === 0) return xs;
+  const ce = xs[0].engine;
+
+  // @fastpath
+  if (operator === 'Add') return [...xs].sort(addOrder);
+  if (operator === 'Multiply') return [...xs].sort(order);
+
+  const def = ce.lookupFunction(operator);
+  if (!def) return xs;
+
+  const isCommutative = def.commutative;
+  if (!isCommutative) return xs;
+
+  if (def.commutativeOrder) return [...xs].sort(def.commutativeOrder);
+
+  return [...xs].sort(order);
 }
 
 /**

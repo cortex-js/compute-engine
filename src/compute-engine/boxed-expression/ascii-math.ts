@@ -85,11 +85,7 @@ const OPERATORS: Record<
             if (rhs.startsWith('-')) return `${acc} + ${rhs.substring(1)}`;
             return `${acc} - ${rhs}`;
           }
-          const rhs = serialize(x, 10);
-          if (acc === '') return rhs;
-          if (rhs.startsWith('+')) return `${acc} + ${rhs.substring(1)}`;
-          if (rhs.startsWith('-')) return `${acc} - ${rhs.substring(1)}`;
-          return `${acc} + ${rhs}`;
+          return joinAdd(acc, serialize(x, 10));
         }, '') ?? ''
       );
     },
@@ -111,8 +107,7 @@ const OPERATORS: Record<
         expr.ops?.reduce((acc, x) => {
           const rhs = serialize(x, 10);
           if (acc === '') return rhs;
-          if (rhs.startsWith('+') || rhs.startsWith('-'))
-            return `${acc} ${rhs}`;
+          if (rhs.startsWith('-')) return `${acc} - (${rhs})`;
           return `${acc} - ${rhs}`;
         }, '') ?? ''
       );
@@ -121,19 +116,17 @@ const OPERATORS: Record<
   ],
   Multiply: [
     (expr, serialize) => {
+      if (!expr.ops) return '';
       if (expr.nops === 2) {
         const lhs = expr.op1.numericValue;
         if (lhs !== null) {
-          if (lhs === 1) return serialize(expr.op2, 12);
-          if (lhs === -1) return `-${serialize(expr.op2, 12)}`;
           if (typeof lhs !== 'number' && lhs.im !== 0) {
-            if (lhs.re === 0 && lhs.im === 1)
-              return `${serialize(expr.op2, 12)}i`;
-            if (lhs.re === 0) return `${serialize(expr.op2, 12)} * ${lhs.im}i`;
-            if (lhs.im > 0)
-              return `${serialize(expr.op2, 12)} * (${lhs.re} + ${lhs.im}i)`;
-            return `${serialize(expr.op2, 12)} * (${lhs.re} - ${-lhs.im}i)`;
+            joinMul(
+              serialize(expr.op2, 12),
+              joinAdd(lhs.re.toString(), `${lhs.im}i`)
+            );
           }
+
           const rhs = expr.op2;
           if (
             rhs.symbol ||
@@ -147,36 +140,11 @@ const OPERATORS: Record<
             }
           }
 
-          const l = serialize(expr.op1, 12);
-          const r = serialize(expr.op2, 12);
-          if (r === 'i') return l + ' i';
-          if (r === '-i') return '-' + l + ' i';
-          if (l === 'i') return r + ' i';
-          if (l === '-i') return '-' + r + ' i';
-
-          // Is it a sequence of digits (integer) followed by a non-digit?
-          // e.g. 2x, 3y, 4z, etc.
-          if (l.match(/^[-+]?\d+$/) && r.match(/^[a-zA-Z\(]/)) return l + r;
-          if (r.match(/^[-+]?\d+$/) && l.match(/^[a-zA-Z\(]/)) return r + l;
-          return l + ' * ' + r;
+          return joinMul(serialize(expr.op1, 12), serialize(expr.op2, 12));
         }
       }
-      if (!expr.ops) return '';
       // Use a reduce over each term
-      return (
-        expr.ops
-          // .reverse()
-          .reduce((acc, x) => {
-            const rhs = serialize(x, 12);
-            const lhs = acc[0];
-            if (lhs === '-1' || lhs === '(-1)')
-              return [...acc.slice(1), `-${rhs}`];
-            if (lhs && /^[-+]?\d+$/.test(lhs) && /^[a-zA-Z\(]/.test(rhs))
-              return [...acc.slice(1), `${lhs}${rhs}`];
-            return [...acc, rhs];
-          }, [])
-          .join(' * ')
-      );
+      return expr.ops.reduce((acc, x) => joinMul(acc, serialize(x, 12)), '');
     },
     12,
   ],
@@ -415,4 +383,30 @@ export function toAsciiMath(
   }
 
   return JSON.stringify(expr.json);
+}
+
+function joinMul(lhs: string, rhs: string) {
+  if (!lhs) return rhs;
+  if (!rhs) return lhs;
+  if (lhs === '1') return rhs;
+  if (rhs === '1') return lhs;
+
+  if (rhs.startsWith('-')) rhs = `(${rhs})`;
+
+  if (lhs === '-1') return `-${rhs}`;
+  if (rhs === '-1') return `-${lhs}`;
+
+  // Is it a sequence of digits (integer) followed by a non-digit?
+  // e.g. 2x, 3y, 4z, etc.
+  if (lhs.match(/^[-+]?\d+$/) && rhs.match(/^[a-zA-Z\(]/)) return lhs + rhs;
+  return `${lhs} * ${rhs}`;
+}
+
+function joinAdd(lhs: string, rhs: string) {
+  if (!lhs) return rhs;
+  if (!rhs) return lhs;
+  if (lhs === '0') return rhs;
+  if (rhs === '0') return lhs;
+  if (rhs.startsWith('-')) return `${lhs} - ${rhs.substring(1)}`;
+  return `${lhs} + ${rhs}`;
 }

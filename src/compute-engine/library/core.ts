@@ -865,7 +865,7 @@ export function canonicalInvisibleOperator(
     // Is it a complex number, i.e. "2i"?
     //
     const rhs = ops[1];
-    if (lhsNumber !== null && rhs.canonical.symbol === 'ImaginaryUnit')
+    if (!isNaN(lhsNumber) && rhs.canonical.symbol === 'ImaginaryUnit')
       return ce.number(ce.complex(0, lhsNumber));
 
     //

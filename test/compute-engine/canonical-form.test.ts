@@ -311,13 +311,13 @@ describe('POLYNOMIAL ORDER', () => {
       ]
       canonical = [
         "Add",
-        ["Power", "x", 3],
+        ["Multiply", 3, 4, "Pi", ["Power", "x", 3]],
         ["Multiply", 2, "Pi", ["Power", "x", 3]],
-        ["Multiply", 3, 4, "Pi", ["Power", "x", 3]]
+        ["Power", "x", 3]
       ]
-      simplify  = x^3 + 14pi * x^3
-      eval-auto = x^3 + 14pi * x^3
-      eval-mach = x^3 + 14pi * x^3
+      simplify  = 14pi * x^3 + x^3
+      eval-auto = 14pi * x^3 + x^3
+      eval-mach = 14pi * x^3 + x^3
       N-auto    = 44.982297150257106 * x^3
       N-mach    = 44.982297150257104 * x^3
     `);

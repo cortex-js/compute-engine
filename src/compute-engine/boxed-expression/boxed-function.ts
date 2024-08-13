@@ -24,7 +24,7 @@ import {
 } from '../public';
 import { findUnivariateRoots } from '../solve';
 import { replace } from '../rules';
-import { DEFAULT_COMPLEXITY, order, sortAdd } from './order';
+import { DEFAULT_COMPLEXITY, sortOperands } from './order';
 import {
   hashCode,
   normalizedUnknownsForSolve,
@@ -226,21 +226,22 @@ export class BoxedFunction extends _BoxedExpression {
     if (def?.associative || def?.commutative) {
       // Flatten the arguments if they are the same as the operator
       const xs: BoxedExpression[] = this.ops.map((x) => x.structural);
-      const ys: BoxedExpression[] = [];
-      if (!def.associative) ys.push(...xs);
+      let ys: BoxedExpression[] = [];
+      if (!def.associative) ys = xs;
       else {
         for (const x of xs) {
           if (x.operator === this.operator) ys.push(...x.ops!);
           else ys.push(x);
         }
       }
-      // @fixme: kinda ugly to check the name here
-      if (this.isValid && def.commutative)
-        this._name === 'Add' ? sortAdd(ys) : ys.sort(order);
-      return this.engine.function(this._name, ys, {
-        canonical: false,
-        structural: true,
-      });
+      return this.engine.function(
+        this._name,
+        this.isValid ? sortOperands(this._name, ys) : ys,
+        {
+          canonical: false,
+          structural: true,
+        }
+      );
     }
     return this.engine.function(
       this._name,

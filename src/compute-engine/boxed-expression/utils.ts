@@ -117,13 +117,24 @@ export function getImaginaryFactor(
 
   if (expr.operator === 'Negate') return getImaginaryFactor(expr.op1)?.neg();
 
+  if (expr.operator === 'Complex') {
+    if (expr.op1.isZero && expr.op2.re !== undefined)
+      return ce.number(expr.op2.re);
+    return undefined;
+  }
+
   if (expr.operator === 'Multiply' && expr.nops === 2) {
-    if (expr.op1.symbol === 'ImaginaryUnit') return expr.op2;
-    if (expr.op2.symbol === 'ImaginaryUnit') return expr.op1;
-    if (expr.op1.isNumberLiteral && expr.op1.re === 0 && expr.op1.im !== 0)
-      return expr.op2.mul(expr.op1.im!);
-    if (expr.op2.isNumberLiteral && expr.op2.re === 0 && expr.op2.im !== 0)
-      return expr.op1.mul(expr.op2.im!);
+    const [op1, op2] = expr.ops!;
+    if (op1.symbol === 'ImaginaryUnit') return op2;
+    if (op2.symbol === 'ImaginaryUnit') return op1;
+
+    // c * (bi)
+    if (op2.isNumberLiteral && op2.re === 0 && op2.im !== 0)
+      return op1.mul(op2.im!);
+
+    // (bi) * c
+    if (op1.isNumberLiteral && op1.re === 0 && op1.im !== 0)
+      return op2.mul(op1.im!);
   }
 
   if (expr.operator === 'Divide') {
@@ -134,33 +145,3 @@ export function getImaginaryFactor(
 
   return undefined;
 }
-
-// export function getImaginaryFactor(
-//   expr: BoxedExpression
-// ): NumericValue | undefined {
-//   const ce = expr.engine;
-//   if (expr.symbol === 'ImaginaryUnit') return ce._numericValue(1);
-
-//   if (expr.re === 0) return ce._numericValue(expr.im!);
-
-//   if (expr.operator === 'Negate') return getImaginaryFactor(expr.op1)?.neg();
-
-//   if (expr.operator === 'Multiply' && expr.nops === 2) {
-//     if (expr.op1.symbol === 'ImaginaryUnit')
-//       return expr.op2.numericValue === null
-//         ? undefined
-//         : ce._numericValue(expr.op2.numericValue);
-//     if (expr.op2.symbol === 'ImaginaryUnit')
-//       return expr.op1.numericValue === null
-//         ? undefined
-//         : ce._numericValue(expr.op1.numericValue);
-//   }
-
-//   if (expr.operator === 'Divide') {
-//     const denom = expr.op2.numericValue;
-//     if (denom === null || expr.op2.isZero) return undefined;
-//     return getImaginaryFactor(expr.op1)?.div(denom);
-//   }
-
-//   return undefined;
-// }

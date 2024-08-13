@@ -310,6 +310,7 @@ export class BoxedNumber extends _BoxedExpression {
 
       return this.engine.number(this.engine._numericValue(this._value).sqrt());
     }
+    if (this.isZero || this.isOne) return this;
 
     return this.engine.number(this._value.sqrt());
   }
@@ -358,7 +359,8 @@ export class BoxedNumber extends _BoxedExpression {
   }
 
   get type(): Type {
-    if (typeof this._value === 'number') return 'integer';
+    if (typeof this._value === 'number')
+      return Number.isInteger(this._value) ? 'integer' : 'real';
     return this._value.type;
   }
 
@@ -699,6 +701,21 @@ export function canonicalNumber(
   //
   // It's a rational
   //
+  // a/0 -> NaN
+  if (value[1] == 0) return NaN;
+  // a/±oo
+  if (typeof value[1] === 'number' && !Number.isFinite(value[1])) {
+    // ±oo/±oo
+    if (!Number.isFinite(value[0])) return NaN;
+    return 0;
+  }
+  // // ±oo/a
+  if (typeof value[0] === 'number' && !Number.isFinite(value[0])) {
+    const sign = value[0] > 0 ? +1 : -1;
+    if (value[0] > 0) return sign > 0 ? +Infinity : -Infinity;
+    if (value[0] < 0) return sign > 0 ? -Infinity : +Infinity;
+    return NaN;
+  }
 
   return ce._numericValue(value);
 }

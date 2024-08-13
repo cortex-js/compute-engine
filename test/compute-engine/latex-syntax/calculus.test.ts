@@ -7,7 +7,7 @@ function parse(s: string) {
 describe('INTEGRAL', () => {
   test('simple with no index', () => {
     expect(parse('\\int\\sin x + 1 = 2')).toMatchInlineSnapshot(
-      `["Equal", 2, ["Integrate", ["Add", ["Sin", "x"], 1], "Nothing"]]`
+      `["Equal", ["Integrate", ["Add", ["Sin", "x"], 1], "Nothing"], 2]`
     );
   });
 
@@ -15,18 +15,18 @@ describe('INTEGRAL', () => {
     expect(
       parse('\\int\\sin x \\operatorname{d} x+1 = 2')
     ).toMatchInlineSnapshot(
-      `["Equal", 2, ["Add", ["Integrate", ["Sin", "x"], "x"], 1]]`
+      `["Equal", ["Add", ["Integrate", ["Sin", "x"], "x"], 1], 2]`
     );
   });
   test('simple with mathrm', () => {
     expect(parse('\\int\\sin x dx+1 = 2')).toMatchInlineSnapshot(
-      `["Equal", 2, ["Add", ["Integrate", ["Sin", "x"], "x"], 1]]`
+      `["Equal", ["Add", ["Integrate", ["Sin", "x"], "x"], 1], 2]`
     );
   });
 
   test('simple with \\alpha', () => {
     expect(parse('\\int\\alpha d\\alpha+1 = 2')).toMatchInlineSnapshot(
-      `["Equal", 2, ["Add", ["Integrate", "alpha", "alpha"], 1]]`
+      `["Equal", ["Add", ["Integrate", "alpha", "alpha"], 1], 2]`
     );
   });
 
@@ -34,7 +34,7 @@ describe('INTEGRAL', () => {
     expect(
       parse('\\int\\sin x \\, \\operatorname{d}x+1 = 2')
     ).toMatchInlineSnapshot(
-      `["Equal", 2, ["Add", ["Integrate", ["Sin", "x"], "x"], 1]]`
+      `["Equal", ["Add", ["Integrate", ["Sin", "x"], "x"], 1], 2]`
     );
   });
 
@@ -42,7 +42,7 @@ describe('INTEGRAL', () => {
     expect(
       parse('\\int_0\\sin x \\, \\operatorname{d}x+1 = 2')
     ).toMatchInlineSnapshot(
-      `["Equal", 2, ["Add", ["Integrate", ["Sin", "x"], ["Pair", "x", 0]], 1]]`
+      `["Equal", ["Add", ["Integrate", ["Sin", "x"], ["Pair", "x", 0]], 1], 2]`
     );
   });
 
@@ -51,7 +51,6 @@ describe('INTEGRAL', () => {
       .toMatchInlineSnapshot(`
       [
         "Equal",
-        2,
         [
           "Add",
           [
@@ -60,7 +59,8 @@ describe('INTEGRAL', () => {
             ["Triple", "x", "Nothing", "PositiveInfinity"]
           ],
           1
-        ]
+        ],
+        2
       ]
     `);
   });
@@ -69,12 +69,12 @@ describe('INTEGRAL', () => {
       .toMatchInlineSnapshot(`
       [
         "Equal",
-        2,
         [
           "Add",
           ["Integrate", ["Sin", "x"], ["Triple", "x", 0, "PositiveInfinity"]],
           1
-        ]
+        ],
+        2
       ]
     `);
   });
@@ -83,12 +83,12 @@ describe('INTEGRAL', () => {
     expect(parse('\\int^\\infty_0\\sin x +1 = 2')).toMatchInlineSnapshot(`
       [
         "Equal",
-        2,
         [
           "Integrate",
           ["Add", ["Sin", "x"], 1],
           ["Triple", "Nothing", 0, "PositiveInfinity"]
-        ]
+        ],
+        2
       ]
     `));
 
@@ -96,12 +96,12 @@ describe('INTEGRAL', () => {
     expect(parse('\\int^\\infty_0\\frac{3xdx}{5} = 2')).toMatchInlineSnapshot(`
       [
         "Equal",
-        2,
         [
           "Integrate",
           ["Divide", ["Multiply", 3, "x"], 5],
           ["Triple", "x", 0, "PositiveInfinity"]
-        ]
+        ],
+        2
       ]
     `));
 
@@ -110,12 +110,12 @@ describe('INTEGRAL', () => {
       .toMatchInlineSnapshot(`
       [
         "Equal",
-        2,
         [
           "Integrate",
           ["Divide", ["Multiply", 3, "x"], 5],
           ["Triple", "x", 0, "PositiveInfinity"]
-        ]
+        ],
+        2
       ]
     `));
 
@@ -123,12 +123,12 @@ describe('INTEGRAL', () => {
     expect(parse('\\int^\\infty_0\\frac{3x}{5dx} = 2')).toMatchInlineSnapshot(`
       [
         "Equal",
-        2,
         [
           "Integrate",
           ["Divide", ["Multiply", 3, "x"], ["Multiply", 5, "d", "x"]],
           ["Triple", "Nothing", 0, "PositiveInfinity"]
-        ]
+        ],
+        2
       ]
     `)); // @fixme, should error
 
@@ -136,12 +136,12 @@ describe('INTEGRAL', () => {
     expect(parse('\\int^\\infty_03x+kxdx = 2')).toMatchInlineSnapshot(`
       [
         "Equal",
-        2,
         [
           "Integrate",
           ["Add", ["Multiply", "k", "x"], ["Multiply", 3, "x"]],
           ["Triple", "x", 0, "PositiveInfinity"]
-        ]
+        ],
+        2
       ]
     `));
 
@@ -149,12 +149,12 @@ describe('INTEGRAL', () => {
     expect(parse('\\int^\\infty_0-xdx = 2')).toMatchInlineSnapshot(`
       [
         "Equal",
-        2,
         [
           "Integrate",
           ["Negate", "x"],
           ["Triple", "x", 0, "PositiveInfinity"]
-        ]
+        ],
+        2
       ]
     `));
 
@@ -162,12 +162,12 @@ describe('INTEGRAL', () => {
     expect(parse('\\int^\\infty_0(3x+x^2dx) = 2')).toMatchInlineSnapshot(`
       [
         "Equal",
-        2,
         [
           "Integrate",
           ["Single", ["Add", ["Square", "x"], ["Multiply", 3, "x"]]],
           ["Triple", "x", 0, "PositiveInfinity"]
-        ]
+        ],
+        2
       ]
     `));
 
@@ -175,12 +175,12 @@ describe('INTEGRAL', () => {
     expect(parse('\\int^\\infty_0(3x+x^2)dx = 2')).toMatchInlineSnapshot(`
       [
         "Equal",
-        2,
         [
           "Integrate",
           ["Add", ["Square", "x"], ["Multiply", 3, "x"]],
           ["Triple", "x", 0, "PositiveInfinity"]
-        ]
+        ],
+        2
       ]
     `));
 
@@ -188,8 +188,8 @@ describe('INTEGRAL', () => {
     expect(parse('\\int^\\infty_0\\sin x dx = 2')).toMatchInlineSnapshot(`
       [
         "Equal",
-        2,
-        ["Integrate", ["Sin", "x"], ["Triple", "x", 0, "PositiveInfinity"]]
+        ["Integrate", ["Sin", "x"], ["Triple", "x", 0, "PositiveInfinity"]],
+        2
       ]
     `));
 

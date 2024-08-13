@@ -439,11 +439,11 @@ check('VALID comment', () =>
 );
 
 check('VALID empty group', () =>
-  expect(engine.parse('x={}2')).toMatchInlineSnapshot(`["Equal", 2, "x"]`)
+  expect(engine.parse('x={}2')).toMatchInlineSnapshot(`["Equal", "x", 2]`)
 );
 
 check('VALID empty group', () =>
-  expect(engine.parse('x={  }2')).toMatchInlineSnapshot(`["Equal", 2, "x"]`)
+  expect(engine.parse('x={  }2')).toMatchInlineSnapshot(`["Equal", "x", 2]`)
 );
 
 check('Syntax error', () =>

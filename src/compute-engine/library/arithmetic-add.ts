@@ -2,7 +2,6 @@ import { BoxedDomain, BoxedExpression, IComputeEngine } from '../public';
 import { bignumPreferred, getImaginaryFactor } from '../boxed-expression/utils';
 import { MAX_SYMBOLIC_TERMS } from '../numerics/numeric';
 import { widen } from '../boxed-expression/boxed-domain';
-import { sortAdd } from '../boxed-expression/order';
 import { each, isCollection, isIndexableCollection } from '../collection-utils';
 import { add } from '../boxed-expression/terms';
 
@@ -15,7 +14,7 @@ import {
 } from './utils';
 import { asBignum } from '../boxed-expression/numerics';
 import { flatten } from '../symbolic/flatten';
-import { NumericValue } from '../numeric-value/public';
+import { addOrder } from '../boxed-expression/order';
 
 /** The canonical form of `Add`:
  * - removes `0`
@@ -55,7 +54,7 @@ export function canonicalAdd(
         const next = ops[i + 1];
         if (next) {
           const fac = getImaginaryFactor(next)?.numericValue;
-          if (fac) {
+          if (fac !== undefined) {
             const im = typeof fac === 'number' ? fac : fac?.re;
             if (im !== 0) {
               const re = typeof nv === 'number' ? nv : nv.re;
@@ -73,7 +72,7 @@ export function canonicalAdd(
   if (xs.length === 1) return xs[0];
 
   // Commutative, sort
-  return ce._fn('Add', sortAdd(xs));
+  return ce._fn('Add', [...xs].sort(addOrder));
 }
 
 export function domainAdd(

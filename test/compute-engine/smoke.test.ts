@@ -153,7 +153,6 @@ describe('PARSING numbers', () => {
                                         "Delimiter",
                                         [
                                           "Add",
-                                          1,
                                           [
                                             "Power",
                                             0,
@@ -176,7 +175,8 @@ describe('PARSING numbers', () => {
                                                 ]
                                               ]
                                             ]
-                                          ]
+                                          ],
+                                          1
                                         ]
                                       ],
                                       [
@@ -673,6 +673,7 @@ describe('SIMPLIFICATION sqrt', () => {
             Sqrt,
             [
               Add,
+              14,
               [
                 Multiply,
                 5,
@@ -681,7 +682,6 @@ describe('SIMPLIFICATION sqrt', () => {
                   3,
                 ],
               ],
-              14,
             ],
           ],
         ],

@@ -5,7 +5,6 @@ describe('OPERATOR oprel', () => {
   test('x=1', () =>
     expect(check('x=1')).toMatchInlineSnapshot(`
       box       = ["Equal", "x", 1]
-      canonical = ["Equal", 1, "x"]
       eval-auto = "False"
     `));
   test('x=1+1', () =>
@@ -92,7 +91,7 @@ describe('OPERATOR invisible', () => {
   test('2^{3}4+5 // Invisible operator', () =>
     expect(check('2^{3}4+5')).toMatchInlineSnapshot(`
       box       = ["Add", ["InvisibleOperator", ["Power", 2, 3], 4], 5]
-      canonical = ["Add", ["Multiply", 4, ["Power", 2, 3]], 5]
+      canonical = ["Add", 5, ["Multiply", 4, ["Power", 2, 3]]]
       simplify  = 37
     `));
 
@@ -381,9 +380,11 @@ describe.skip('OPERATOR partial derivative', () => {
 
 describe('OPERATOR precedence', () => {
   test('2\\times3+4 // Precedence', () =>
-    expect(check('2\\times3+4')).toMatchInlineSnapshot(
-      `["Add", ["Multiply", 2, 3], 4]`
-    ));
+    expect(check('2\\times3+4')).toMatchInlineSnapshot(`
+      box       = ["Add", ["Multiply", 2, 3], 4]
+      canonical = ["Add", 4, ["Multiply", 2, 3]]
+      simplify  = 10
+    `));
   test('-2\\times-3-4 // Precedence', () =>
     expect(check('-2\\times-3-4')).toMatchInlineSnapshot(`
       box       = ["Add", ["Multiply", -2, -3], -4]

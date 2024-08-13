@@ -107,7 +107,7 @@ describe('STEFNOTCH #13', () => {
 
   test('2/ x_{1,2}=1,2', () => {
     expect(parse('x_{1,2}=1,2')).toMatchInlineSnapshot(
-      `["Pair", ["Equal", 1, ["At", "x", 1, 2]], 2]`
+      `["Pair", ["Equal", ["At", "x", 1, 2], 1], 2]`
     );
   }); // @fixme unclear what the right answer is
 
@@ -150,7 +150,7 @@ describe('STEFNOTCH #13', () => {
         [
           "Error",
           ["ErrorCode", "'incompatible-domain'", "Booleans", "Anything"],
-          ["At", "a", ["Equal", 0, ["To", "n", 0]]]
+          ["At", "a", ["Equal", ["To", "n", 0], 0]]
         ]
       ]
     `);

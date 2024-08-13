@@ -1,4 +1,5 @@
 import { signDiff } from '../boxed-expression/numerics';
+import { equalOrder } from '../boxed-expression/order';
 import { isRelationalOperator } from '../boxed-expression/utils';
 import {
   BoxedExpression,
@@ -19,7 +20,6 @@ import { flatten } from '../symbolic/flatten';
 
 export const RELOP_LIBRARY: IdentifierDefinitions = {
   Congruent: {
-    commutative: false,
     complexity: 11000,
     numeric: true,
     signature: {
@@ -49,6 +49,8 @@ export const RELOP_LIBRARY: IdentifierDefinitions = {
   IsSame: {
     description: 'Compare two expressions for structural equality',
     hold: 'all',
+    commutative: true,
+    commutativeOrder: equalOrder,
     signature: {
       domain: 'RelationalOperators',
 
@@ -64,6 +66,7 @@ export const RELOP_LIBRARY: IdentifierDefinitions = {
 
   Equal: {
     commutative: true,
+    commutativeOrder: equalOrder,
     complexity: 11000,
     signature: {
       domain: 'RelationalOperators',
@@ -88,6 +91,7 @@ export const RELOP_LIBRARY: IdentifierDefinitions = {
   NotEqual: {
     wikidata: 'Q28113351',
     commutative: true,
+    commutativeOrder: equalOrder,
     complexity: 11000,
     signature: {
       domain: 'RelationalOperators',

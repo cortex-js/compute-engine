@@ -220,9 +220,12 @@ export function lex(expr: BoxedExpression): string {
   // Consider symbols, but ignore constants such as "Pi" or "ExponentialE"
   if (expr.symbol && !expr.isConstant) return expr.symbol;
   if (!expr.ops) return '';
-  return expr.ops.map((x) => lex(x)).join(' ');
+  return expr.ops
+    .map((x) => lex(x))
+    .join(' ')
+    .trim();
 }
 
 export function revlex(expr: BoxedExpression): string {
-  return lex(expr).split(' ').reverse().join(' ');
+  return lex(expr).split(' ').reverse().join(' ').trim();
 }

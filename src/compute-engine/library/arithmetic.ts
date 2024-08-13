@@ -50,6 +50,7 @@ import {
 import { add, addN } from '../boxed-expression/terms';
 import { isPrime as isPrimeMachine, isPrimeBigint } from '../numerics/primes';
 import { fromDigits } from '../numerics/strings';
+import { addOrder } from '../boxed-expression/order';
 
 // When considering processing an arithmetic expression, the following
 // are the core canonical arithmetic operations that should be considered:
@@ -128,6 +129,7 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
       wikidata: 'Q32043',
       associative: true,
       commutative: true,
+      commutativeOrder: addOrder,
       threadable: true,
       idempotent: true,
       complexity: 1300,
@@ -564,7 +566,6 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
 
     Power: {
       wikidata: 'Q33456',
-      commutative: false,
       threadable: true,
       complexity: 3500,
       signature: {
@@ -757,6 +758,7 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
         evaluate: (ce, ops) => ops[0].sqrt(),
         N: (ce, ops): BoxedExpression => {
           const [c, rest] = ops[0].toNumericValue();
+          if (rest.isOne) return ce.box(c.sqrt().N());
           return ce.box(c.sqrt().N()).mul(rest);
         },
         // evalDomain: Square root of a prime is irrational
@@ -1521,16 +1523,22 @@ export function canonicalRoot(
 ): BoxedExpression {
   a = a.canonical;
   const ce = a.engine;
-  const exp = typeof b === 'number' ? b : b.re;
+  let exp: number | undefined = undefined;
+  if (typeof b === 'number') exp = b;
+  else {
+    b = b.canonical;
+    if (b.isNumberLiteral && b.im === 0) exp = b.re!;
+  }
+
   if (exp === 1) return a;
   if (exp === 2) {
-    if (a.isNumberLiteral && (a.type === 'integer' || a.type === 'rational'))
-      return a.sqrt();
+    if (a.isNumberLiteral && (a.type === 'integer' || a.type === 'rational')) {
+      const v = a.sqrt();
+      if (typeof v.numericValue === 'number') return v;
+      if (v.numericValue!.isExact) return v;
+    }
     return ce._fn('Sqrt', [a]);
   }
 
-  return ce._fn('Root', [
-    a,
-    typeof b === 'number' ? ce.number(b) : b.canonical,
-  ]);
+  return ce._fn('Root', [a, typeof b === 'number' ? ce.number(b) : b]);
 }

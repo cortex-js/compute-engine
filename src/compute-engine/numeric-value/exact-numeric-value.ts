@@ -38,6 +38,8 @@ import { numberToString } from '../numerics/strings';
 export class ExactNumericValue extends NumericValue {
   rational: Rational;
   radical: number; // An integer > 0
+
+  // For exact numeric values, the imaginary part is always 0
   im = 0;
 
   factory: NumericValueFactory;
@@ -66,6 +68,8 @@ export class ExactNumericValue extends NumericValue {
       this.radical = 1;
       return;
     }
+
+    console.assert(typeof value !== 'object' || !('im' in value));
 
     if ('rational' in value || 'radical' in value || 'decimal' in value) {
       let decimal = value.decimal ?? 1;
@@ -136,13 +140,6 @@ export class ExactNumericValue extends NumericValue {
     }
 
     return re;
-  }
-
-  cloneIm(im: number): NumericValue {
-    // If a gaussian imaginary, keep it as an exact value
-    if (Number.isInteger(im))
-      return new ExactNumericValue({ im }, this.factory);
-    return this.factory({ im });
   }
 
   clone(value: number | NumericValueData): ExactNumericValue {
@@ -225,10 +222,10 @@ export class ExactNumericValue extends NumericValue {
       this.radical = 1;
       return;
     }
-    // 0/0 -> NaN
+    // a/0 -> NaN
     const [n, d] = this.rational;
     // Use double equal to catch both number and bigint
-    if (n == 0 && d == 0) {
+    if (d == 0) {
       this.rational = [NaN, 1];
       this.radical = 1;
       return;
@@ -518,7 +515,7 @@ export class ExactNumericValue extends NumericValue {
           radical: this.radical ** exponent,
         });
       }
-      return this.cloneIm((-this.re) ** exponent);
+      return this.factory({ im: (-this.re) ** exponent });
     }
     return this.factory(this).pow(exponent);
   }
@@ -551,7 +548,8 @@ export class ExactNumericValue extends NumericValue {
       return this.factory(this).root(exponent);
     }
 
-    if (this.sign < 0) return this.cloneIm(Math.pow(-this.re, 1 / exponent));
+    if (this.sign < 0)
+      return this.factory({ im: Math.pow(-this.re, 1 / exponent) });
 
     // If the parts (rational or radical) are too large, we convert to float
     if (
@@ -588,7 +586,7 @@ export class ExactNumericValue extends NumericValue {
         //
         // Negative Rational: convert to imaginary
         //
-        return this.cloneIm(Math.sqrt(-n * d) / d);
+        return this.factory({ im: Math.sqrt(-n * d) / d });
       } else {
         // If we have a big rational, we convert to float
         // (we can't keep the radical part)
@@ -739,8 +737,10 @@ export class ExactNumericValue extends NumericValue {
     }
 
     // If we add no additional rational or radical,
-    if (isZero(rationalSum) && radicals.length === 0)
-      return [new ExactNumericValue({ im: imSum }, factory)];
+    if (isZero(rationalSum) && radicals.length === 0) {
+      if (imSum === 0) return [new ExactNumericValue(0, factory)];
+      return [factory({ im: imSum })];
+    }
 
     // If we have a rational, merge it with the radicals
     radicals.push({ multiple: rationalSum, radical: 1 });

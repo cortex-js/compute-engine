@@ -1414,27 +1414,17 @@ export type FunctionDefinitionFlags = {
    */
   commutative: boolean;
 
-  /** If `true`, when the function is univariate, `["f", ["Add", x, c]]` where `c`
-   * is constant, is simplified to `["Add", ["f", x], c]`.
+  /**
+   * If `commutative` is `true`, the order of the arguments is determined by
+   * this function.
    *
-   * When the function is multivariate, additivity is considered only on the
-   * first argument: `["f", ["Add", x, c], y]` simplifies to `["Add", ["f", x, y], c]`.
+   * If the function is not provided, the arguments are ordered by the
+   * default order of the arguments.
    *
-   * For example, `Log` is additive.
-   *
-   * **Default**: `false`
    */
-  // additive: boolean;
-
-  /** If `true`, when the function is univariate, `["f", ["Multiply", x, y]]`
-   * simplifies to `["Multiply", ["f", x], ["f", y]]`.
-   *
-   * When the function is multivariate, multiplicativity is considered only on the
-   * first argument: `["f", ["Multiply", x, y], z]` simplifies to
-   * `["Multiply", ["f", x, z], ["f", y, z]]`
-   *
-   * **Default**: `false`
-   */
+  commutativeOrder:
+    | ((a: BoxedExpression, b: BoxedExpression) => number)
+    | undefined;
 
   /** If `true`, when the function is univariate, `["f", ["Multiply", x, c]]`
    * simplifies to `["Multiply", ["f", x], c]` where `c` is constant

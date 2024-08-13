@@ -1,5 +1,5 @@
 import { IComputeEngine } from '../../compute-engine.js';
-import { BigNum } from './bignum.js';
+import { BigNum } from './bignum';
 
 const gammaG = 7;
 const lanczos_7_c = [

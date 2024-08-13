@@ -26,7 +26,7 @@ import { canonicalForm } from './canonical';
 import { canonicalAdd } from '../library/arithmetic-add';
 import { flatten } from '../symbolic/flatten';
 import { shouldHold, semiCanonical, canonical } from '../symbolic/utils';
-import { order } from './order';
+import { sortOperands } from './order';
 import { adjustArguments, checkNumericArgs } from './validate';
 import { canonicalMultiply } from '../library/arithmetic-multiply';
 import { NumericValue } from '../numeric-value/public';
@@ -37,6 +37,7 @@ import { asBigint } from './numerics';
 import { bigintValue } from '../numerics/expression';
 import { canonicalPower, canonicalRoot } from '../library/arithmetic';
 import { bigint } from '../numerics/numeric-bigint';
+import { isInMachineRange } from '../numerics/numeric-bignum';
 
 /**
  * ### THEORY OF OPERATIONS
@@ -255,7 +256,9 @@ export function boxFunction(
       const op1 = ops[0];
       if (typeof op1 === 'number') return ce.number(-op1, options);
       if (op1 instanceof Decimal) return ce.number(op1.neg(), options);
-      const num = ce.box(op1, options).numericValue;
+      const boxedop1 = ce.box(op1, options);
+      ops = [boxedop1];
+      const num = boxedop1.numericValue;
       if (num !== null)
         return ce.number(typeof num === 'number' ? -num : num.neg(), options);
     }
@@ -541,11 +544,10 @@ function makeCanonicalFunction(
   }
 
   //
-  // 5/ Sort the arguments
+  // 5/ Sort the operands
   //
-  if (args.length > 1 && def.commutative === true) args = args.sort(order);
 
-  return ce._fn(name, args, metadata);
+  return ce._fn(name, sortOperands(name, args), metadata);
 }
 
 function makeNumericFunction(
@@ -621,8 +623,8 @@ function fromNumericValue(
     const im = value.im;
     if (im === 0) return ce.number(value.bignumRe ?? value.re);
     if (value.re === 0) return ce.number(ce.complex(0, im));
-    if (value.bignumRe) {
-      return canonicalMultiply(ce, [
+    if (value.bignumRe !== undefined && !isInMachineRange(value.bignumRe)) {
+      return canonicalAdd(ce, [
         ce.number(value.bignumRe),
         ce.number(ce.complex(0, im)),
       ]);

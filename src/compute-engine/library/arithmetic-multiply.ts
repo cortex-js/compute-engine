@@ -392,16 +392,22 @@ export function canonicalMultiply(
       if (typeof a === 'number') {
         if (a > 0 && Number.isInteger(a)) {
           // we had v√a
-          xs.push(ce.number(v.mul(ce._numericValue({ radical: a }))));
-          i++;
-          continue;
+          const x = v.mul(ce._numericValue({ radical: a }));
+          if (x.isExact) {
+            xs.push(ce.number(x));
+            i++;
+            continue;
+          }
         }
       } else if (a !== null) {
         if (a.type === 'integer') {
           // we had v√a
-          xs.push(ce.number(v.mul(ce._numericValue({ radical: a.re }))));
-          i++;
-          continue;
+          const x = v.mul(ce._numericValue({ radical: a.re }));
+          if (x.isExact) {
+            xs.push(ce.number(x));
+            i++;
+            continue;
+          }
         }
         if (a.type === 'rational') {
           // we had v√(n/d) -> (v/d)√(nd)

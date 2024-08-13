@@ -21,6 +21,9 @@ export class _BoxedFunctionDefinition implements BoxedFunctionDefinition {
   threadable: boolean;
   associative: boolean;
   commutative: boolean;
+  commutativeOrder:
+    | ((a: BoxedExpression, b: BoxedExpression) => number)
+    | undefined;
   idempotent: boolean;
   involution: boolean;
   pure: boolean;
@@ -73,6 +76,7 @@ export class _BoxedFunctionDefinition implements BoxedFunctionDefinition {
     this.threadable = def.threadable ?? false;
     this.associative = def.associative ?? false;
     this.commutative = def.commutative ?? false;
+    this.commutativeOrder = def.commutativeOrder;
     this.idempotent = idempotent;
     this.involution = involution;
     this.inert = def.inert ?? false;
