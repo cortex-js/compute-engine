@@ -703,7 +703,7 @@ export class ExactNumericValue extends NumericValue {
     factory: NumericValueFactory
   ): NumericValue[] {
     // If we have some inexact values, just do a simple sum
-    if (!values.every((x) => x instanceof ExactNumericValue)) {
+    if (!values.every((x) => x.isExact)) {
       let sum = factory(0);
       for (const value of values) sum = sum.add(value);
       return [sum];
@@ -720,19 +720,24 @@ export class ExactNumericValue extends NumericValue {
       imSum += value.im;
 
       // We have a rational or a radical
-      const rational = value.rational;
-      if (value.radical === 1) {
-        // Just a fraction, add it to the sum
-        rationalSum = add(rationalSum, rational);
-      } else {
-        // We have a rational and a radical, e.g. 2√5 or (1/3)√7 or √2
-        const index = radicals.findIndex((x) => x.radical === value.radical);
-        if (index === -1) {
-          radicals.push({ multiple: rational, radical: value.radical });
+      if (value instanceof ExactNumericValue) {
+        const rational = value.rational;
+        if (value.radical === 1) {
+          // Just a fraction, add it to the sum
+          rationalSum = add(rationalSum, rational);
         } else {
-          // There was already a radical, add to it, e.g. "√2 + √2" = "2√2"
-          radicals[index].multiple = add(radicals[index].multiple, rational);
+          // We have a rational and a radical, e.g. 2√5 or (1/3)√7 or √2
+          const index = radicals.findIndex((x) => x.radical === value.radical);
+          if (index === -1) {
+            radicals.push({ multiple: rational, radical: value.radical });
+          } else {
+            // There was already a radical, add to it, e.g. "√2 + √2" = "2√2"
+            radicals[index].multiple = add(radicals[index].multiple, rational);
+          }
         }
+      } else {
+        console.assert(value.type === 'integer');
+        rationalSum = add(rationalSum, [value.re, 1]);
       }
     }
 

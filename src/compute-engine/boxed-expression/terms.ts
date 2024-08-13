@@ -12,7 +12,7 @@ import { MachineNumericValue } from '../numeric-value/machine-numeric-value';
 // Represent a sum of terms
 export class Terms {
   private engine: IComputeEngine;
-  private terms: { coef: NumericValue; term: BoxedExpression }[] = [];
+  private terms: { coef: BoxedExpression; term: BoxedExpression }[] = [];
 
   constructor(ce: IComputeEngine, terms: ReadonlyArray<BoxedExpression>) {
     this.engine = ce;
@@ -25,11 +25,11 @@ export class Terms {
     const numericValues: NumericValue[] = [];
     for (const term of terms) {
       if (term.isImaginary && term.isInfinity) {
-        this.terms = [{ term: ce.ComplexInfinity, coef: ce._numericValue(1) }];
+        this.terms = [{ term: ce.ComplexInfinity, coef: ce.One }];
         return;
       }
       if (term.isNaN || term.symbol === 'Undefined') {
-        this.terms = [{ term: ce.NaN, coef: ce._numericValue(1) }];
+        this.terms = [{ term: ce.NaN, coef: ce.One }];
         return;
       }
 
@@ -43,15 +43,15 @@ export class Terms {
     }
 
     if (posInfinityCount > 0 && negInfinityCount > 0) {
-      this.terms = [{ term: ce.NaN, coef: ce._numericValue(1) }];
+      this.terms = [{ term: ce.NaN, coef: ce.One }];
       return;
     }
     if (posInfinityCount > 0) {
-      this.terms = [{ term: ce.PositiveInfinity, coef: ce._numericValue(1) }];
+      this.terms = [{ term: ce.PositiveInfinity, coef: ce.One }];
       return;
     }
     if (negInfinityCount > 0) {
-      this.terms = [{ term: ce.NegativeInfinity, coef: ce._numericValue(1) }];
+      this.terms = [{ term: ce.NegativeInfinity, coef: ce.One }];
       return;
     }
     if (numericValues.length === 1) {
@@ -75,7 +75,7 @@ export class Terms {
       // We have a numeric value. Keep it in the terms,
       // so that "1+sqrt(3)" remains exact.
       const ce = this.engine;
-      this.terms.push({ coef: ce._numericValue(1), term: ce.box(coef) });
+      this.terms.push({ coef: ce.One, term: ce.box(coef) });
       return;
     }
 
@@ -95,11 +95,24 @@ export class Terms {
     // Try to find a like term, i.e. if "2x", look for "x"
     const i = this.find(term);
     if (i >= 0) {
-      this.terms[i].coef = this.terms[i].coef.add(coef);
+      if (this.terms[i].coef.isNumberLiteral && coef) {
+        const newCoef = coef.add(this.terms[i].coef.numericValue!);
+        if (newCoef.isExact) this.terms[i].coef = this.engine.number(newCoef);
+        else
+          this.terms[i].coef = this.engine.function('Add', [
+            this.terms[i].coef,
+            this.engine.number(coef),
+          ]);
+      } else {
+        this.terms[i].coef = this.engine.function('Add', [
+          this.terms[i].coef,
+          this.engine.number(coef),
+        ]);
+      }
       return;
     }
     console.assert(term.numericValue === null || term.isOne);
-    this.terms.push({ coef, term });
+    this.terms.push({ coef: this.engine.number(coef), term });
   }
 
   private find(term: BoxedExpression): number {
