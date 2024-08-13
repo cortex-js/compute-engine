@@ -304,24 +304,66 @@ export function canonicalMultiply(
   if (ops.length === 1) return ops[0];
 
   const xs: BoxedExpression[] = [];
+  const denominator: BoxedExpression[] = [];
   let sign = 1;
+  let infinityCount = 0;
+  let isZero = false;
 
   for (let i = 0; i < ops.length; i++) {
     let op = ops[i];
-    if (op.isZero) return ce.Zero;
-    if (op.isOne) continue;
-    if (op.isNegativeOne) {
-      sign = -sign;
-      continue;
-    }
+
+    // Order matters: function that may change the op must be first
+    // -(x)
     if (op.operator === 'Negate') {
       sign = -sign;
       op = op.op1;
     }
+
+    // a/b -> separate numerator and denominator
+    if (op.operator === 'Divide') {
+      const [a, b] = op.ops!;
+      if (a.isOne) {
+        denominator.push(b);
+        continue;
+      }
+      if (a.isNegativeOne) {
+        sign = -sign;
+        denominator.push(b);
+        continue;
+      }
+      if (b.isZero) return ce.NaN;
+      denominator.push(b);
+      op = a;
+    }
+
+    if (op.symbol === 'PositiveInfinity') {
+      infinityCount += 1;
+      continue;
+    }
+    if (op.symbol === 'NegativeInfinity') {
+      infinityCount += 1;
+      sign = -sign;
+      continue;
+    }
+
+    if (op.isZero) {
+      isZero = true;
+      continue;
+    }
+
+    if (op.isOne) continue;
+
+    if (op.isNegativeOne) {
+      sign = -sign;
+      continue;
+    }
+
+    // i
     if (op.symbol === 'ImaginaryUnit') {
       xs.push(ce.number(ce.complex(0, 1)));
       continue;
     }
+
     let v = op.numericValue;
     if (v === null) {
       xs.push(op);
@@ -357,6 +399,22 @@ export function canonicalMultiply(
 
       xs.push(ce.number(v));
       continue;
+    }
+
+    if (v.type === 'rational') {
+      if (v.numerator.isZero) isZero = true;
+
+      denominator.push(ce.number(v.denominator));
+      v = v.numerator;
+      if (v.isOne) continue;
+      if (v.isNegativeOne) {
+        sign = -sign;
+        continue;
+      }
+      if (v.isZero) {
+        isZero = true;
+        continue;
+      }
     }
 
     //
@@ -423,10 +481,43 @@ export function canonicalMultiply(
     xs.push(ce.number(v));
   }
 
+  if (isZero) return infinityCount > 0 ? ce.NaN : ce.Zero;
+
+  if (denominator.length > 0) {
+    const den = canonicalMultiply(ce, denominator);
+    if (den.isZero || den.isNaN) return ce.NaN;
+    if (den.isInfinity) return infinityCount > 0 ? ce.NaN : ce.Zero;
+    if (den.isNegativeOne) sign = -sign;
+    else if (!den.isOne) {
+      let num: BoxedExpression;
+      if (xs.length === 0) {
+        num = sign < 0 ? ce.NegativeOne : ce.One;
+      } else if (xs.length === 1) {
+        num = sign < 0 ? xs[0].neg() : xs[0];
+      } else {
+        if (sign < 0) num = negateProduct(ce, xs);
+        else num = ce._fn('Multiply', [...xs].sort(order));
+      }
+
+      if (num.isNumberLiteral && den.isNumberLiteral) {
+        const nv = ce._numericValue(num.numericValue!);
+        const dv = ce._numericValue(den.numericValue!);
+        const r = nv.div(dv);
+        if (r.isExact) return ce.number(r);
+      }
+
+      return ce._fn('Divide', [num, den]);
+    }
+  }
+
+  if (infinityCount > 0)
+    return sign < 0 ? ce.NegativeInfinity : ce.PositiveInfinity;
+
+  if (xs.length === 0) return sign < 0 ? ce.NegativeOne : ce.One;
+  if (xs.length === 1) return sign < 0 ? xs[0].neg() : xs[0];
+
   if (sign < 0) return negateProduct(ce, xs);
 
-  if (xs.length === 0) return ce.One;
-  if (xs.length === 1) return xs[0];
   return ce._fn('Multiply', [...xs].sort(order));
 }
 

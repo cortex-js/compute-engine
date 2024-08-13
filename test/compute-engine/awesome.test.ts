@@ -40,13 +40,13 @@ describe('Primality Test', () => {
           [
             "Cos",
             [
-              "Multiply",
-              "Pi",
+              "Divide",
               [
-                "Divide",
-                ["Add", ["Factorial", ["Subtract", "n", 1]], 1],
-                "n"
-              ]
+                "Multiply",
+                "Pi",
+                ["Add", ["Factorial", ["Subtract", "n", 1]], 1]
+              ],
+              "n"
             ]
           ]
         ]

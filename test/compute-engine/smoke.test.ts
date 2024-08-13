@@ -386,17 +386,7 @@ describe('CANONICALIZATION multiply', () => {
     ]));
 
   test(`2\\times\\frac12`, () =>
-    expect(canonicalToJson('2\\times\\frac12')).toMatchInlineSnapshot(`
-      [
-        Multiply,
-        2,
-        [
-          Rational,
-          1,
-          2,
-        ],
-      ]
-    `));
+    expect(canonicalToJson('2\\times\\frac12')).toMatchInlineSnapshot(`1`));
 
   test(`2\\times(5-5)\\times5\\times4`, () =>
     expect(canonicalToJson('2\\times(5-5)\\times5\\times4'))
@@ -418,15 +408,15 @@ describe('CANONICALIZATION multiply', () => {
     expect(canonicalToJson('(-2)\\times(-x)\\times y\\times\\frac{3}{-5}'))
       .toMatchInlineSnapshot(`
       [
-        Multiply,
-        -2,
+        Divide,
         [
-          Rational,
+          Multiply,
+          -2,
           3,
-          5,
+          x,
+          y,
         ],
-        x,
-        y,
+        5,
       ]
     `));
 
@@ -437,19 +427,18 @@ describe('CANONICALIZATION multiply', () => {
       )
     ).toMatchInlineSnapshot(`
       [
-        Multiply,
-        -2,
+        Divide,
         [
-          Rational,
+          Multiply,
+          -2,
           2,
-          3,
+          3.2,
+          5.23,
+          x,
         ],
-        3.2,
-        5.23,
-        x,
         [
-          Divide,
-          1,
+          Multiply,
+          3,
           x,
         ],
       ]

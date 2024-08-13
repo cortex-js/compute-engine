@@ -145,8 +145,7 @@ describe('CANONICAL FORMS', () => {
   test('"2\\frac{x}{a}\\frac{y}{b}"', () => {
     expect(check('2\\frac{x}{a}\\frac{y}{b}')).toMatchInlineSnapshot(`
       box       = ["InvisibleOperator", 2, ["Divide", "x", "a"], ["Divide", "y", "b"]]
-      canonical = ["Multiply", 2, ["Divide", "x", "a"], ["Divide", "y", "b"]]
-      simplify  = (2x * y) / (a * b)
+      canonical = ["Divide", ["Multiply", 2, "x", "y"], ["Multiply", "a", "b"]]
     `);
   });
 });
@@ -183,22 +182,15 @@ describe('COMMUTATIVE ORDER', () => {
         "y"
       ]
       canonical = [
-        "Multiply",
-        -2,
-        3,
-        5,
-        ["Rational", 3, 4],
-        "Pi",
-        "x",
-        "y",
-        "z",
-        ["Sqrt", "y"]
+        "Divide",
+        ["Multiply", -2, 3, 3, 5, "Pi", "x", "y", "z", ["Sqrt", "y"]],
+        4
       ]
-      simplify  = -45/2 * pi * x * z * y^(3/2)
-      eval-auto = -45/2 * pi * x * z * y^(3/2)
-      eval-mach = -45/2 * pi * x * z * y^(3/2)
+      simplify  = (-45pi * x * z * y^(3/2)) / 2
+      eval-auto = (-45pi * x * z * y^(3/2)) / 2
+      eval-mach = (-45pi * x * z * y^(3/2)) / 2
       N-auto    = -70.68583470577035 * x * z * y^2
-      N-mach    = -70.6858347057702 * x * z * y^2
+      N-mach    = -70.68583470577033 * x * z * y^2
     `);
   });
 

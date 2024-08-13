@@ -5,6 +5,7 @@ function parse(s: string) {
   return ce.parse(s);
 }
 
+/** parseVal checks that the result is a numericValue (or an integer) */
 function parseVal(s: string): string | number {
   const result = ce.parse(s).numericValue;
   if (typeof result === 'number') return result;

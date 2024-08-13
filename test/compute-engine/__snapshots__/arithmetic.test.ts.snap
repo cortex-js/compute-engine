@@ -633,12 +633,8 @@ N-mach    = 0.04139268515822507
 
 exports[`MULTIPLY 2x(-2/3) 1`] = `
 box       = ["Multiply", 2, ["Rational", -2, 3]]
-canonical = ["Multiply", -2, ["Rational", 2, 3]]
+canonical = ["Divide", ["Multiply", -2, 2], 3]
 simplify  = -4/3
-eval-auto = -4/3
-eval-mach = -4/3
-N-auto    = -1.33333333333333333333
-N-mach    = -1.33333333333333
 `;
 
 exports[`MULTIPLY 2x(1+1.1i) 1`] = `["Multiply", 2, ["Complex", 1, 1.1]]`;
@@ -653,11 +649,8 @@ exports[`MULTIPLY 2x(1.1i) 1`] = `["Multiply", 2, ["Complex", 0, 1.1]]`;
 
 exports[`MULTIPLY 2x(2/3) 1`] = `
 box       = ["Multiply", 2, ["Rational", 2, 3]]
+canonical = ["Divide", ["Multiply", 2, 2], 3]
 simplify  = 4/3
-eval-auto = 4/3
-eval-mach = 4/3
-N-auto    = 1.33333333333333333333
-N-mach    = 1.33333333333333
 `;
 
 exports[`MULTIPLY 2x(1234567890987654321/3) 1`] = `
@@ -710,12 +703,9 @@ box       = [
   2,
   ["Multiply", ["Divide", 5, 7], ["Divide", 7, 9]]
 ]
-canonical = ["Multiply", 2, ["Rational", 5, 7], ["Rational", 7, 9]]
-simplify  = 10/9
+canonical = ["Divide", ["Multiply", 2, 5, 7], ["Multiply", 7, 9]]
+simplify  = 10 / 9
 eval-auto = 10/9
-eval-mach = 10/9
-N-auto    = 1.11111111111111111111
-N-mach    = 1.11111111111111
 `;
 
 exports[`MULTIPLY Multiply: All exact with symbol 1`] = `
@@ -729,19 +719,15 @@ box       = [
   "Pi"
 ]
 canonical = [
-  "Multiply",
-  2,
-  5,
-  ["Rational", 5, 7],
-  ["Rational", 7, 9],
-  ["Sqrt", 2],
-  "Pi"
+  "Divide",
+  ["Multiply", 2, 5, 5, 7, ["Sqrt", 2], "Pi"],
+  ["Multiply", 7, 9]
 ]
 simplify  = pi * (50sqrt(2)) / 9
 eval-auto = pi * (50sqrt(2)) / 9
 eval-mach = pi * (50sqrt(2)) / 9
 N-auto    = 24.6826829897687013722
-N-mach    = 24.6826829897687
+N-mach    = 24.68268298976881
 `;
 
 exports[`MULTIPLY Multiply: One inexact 1`] = `
@@ -756,20 +742,15 @@ box       = [
   "Pi"
 ]
 canonical = [
-  "Multiply",
-  2,
-  5,
-  ["Rational", 5, 7],
-  ["Rational", 7, 9],
-  ["Sqrt", 2],
-  1.1,
-  "Pi"
+  "Divide",
+  ["Multiply", 2, 5, 5, 7, ["Sqrt", 2], 1.1, "Pi"],
+  ["Multiply", 7, 9]
 ]
-simplify  = 8.64241621450224931572 * pi
-eval-auto = 8.64241621450224931572 * pi
-eval-mach = 8.64241621450225 * pi
-N-auto    = 27.1509512887455715096
-N-mach    = 27.150951288745603
+simplify  = 8.64241621450224728022 * pi
+eval-auto = 8.64241621450224728022 * pi
+eval-mach = 8.642416214502223 * pi
+N-auto    = 27.1509512887455715095
+N-mach    = 27.150951288745713
 `;
 
 exports[`MULTIPLY with +Infinity 1`] = `

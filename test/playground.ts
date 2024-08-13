@@ -2,6 +2,24 @@ import { ComputeEngine } from '../src/compute-engine';
 
 const ce = new ComputeEngine();
 
+console.log(ce.parse('\\frac{3}{4}\\sqrt{2}').numericValue?.toString());
+
+const b = ce.parse('\\pi * (x/a)');
+
+const a = ce.parse('x/(a/\\pi)');
+const c = ce.parse('(\\pi * x)/a');
+console.log(a.json, b.json, c.json);
+
+const eq1 = '3x + 1 = 0';
+const eq2 = '6x + 2 = 0';
+
+// Convertir les équations en MathJSON
+const mathJson1 = ce.parse(eq1);
+const mathJson2 = ce.parse(eq2);
+
+// Comparer les équations
+const areEqual = mathJson1.isEqual(mathJson2);
+
 // See terms.ts:134. Explore options for shortcircuting when values are 1 or -1,
 // or canonicalMultiply2() for the same.
 console.log(ce.parse('-x-1').N().toString());
