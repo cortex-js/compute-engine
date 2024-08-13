@@ -811,20 +811,21 @@ export interface BoxedExpression {
    * * `undefined` this value may be positive, negative or zero. We don't know
    *    right now (a symbol with an Integer domain, but no currently assigned
    *    value, for example)
-   * * `null` this value will never be positive, negative or zero (`NaN`,
+   * * `NaN` this value will never be positive, negative or zero (`NaN`,
    *     a string or a complex number for example)
    *
    * Note that complex numbers have no natural ordering,
-   * so if the value is a complex number, `sgn` is either 0, or `null`
+   * so if the value is an imaginary number (a complex number with a non-zero
+   * imaginary part), `this.sgn` will return `NaN`.
    *
    * If a symbol, this does take assumptions into account, that is `this.sgn`
-   * will return `1` if `isPositive` is `true`, even if this expression has
-   * no value
+   * will return `1` if the symbol is assumed to be positive
+   * (using `ce.assume()`).
    *
    * @category Numeric Expression
    *
    */
-  readonly sgn: -1 | 0 | 1 | undefined | null;
+  readonly sgn: -1 | 0 | 1 | undefined | typeof NaN;
 
   /** If the expressions cannot be compared, return `undefined`
    *

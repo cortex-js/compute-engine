@@ -86,6 +86,9 @@ export class BoxedFunction extends _BoxedExpression {
 
   private _hash: number | undefined;
 
+  // Cached sign of the function (if all the arguments are constant)
+  private _sgn: number | undefined | typeof NaN | null = null;
+
   constructor(
     ce: IComputeEngine,
     name: string,
@@ -417,6 +420,81 @@ export class BoxedFunction extends _BoxedExpression {
     } else if (x.includes(this._name)) return true;
     for (const arg of this._ops) if (arg.has(x)) return true;
     return false;
+  }
+
+  get sgn(): -1 | 0 | 1 | undefined | typeof NaN {
+    if (this._sgn !== null) return this._sgn;
+
+    // @todo: Could also cache non-constant values, but this
+    // would require keeping track of the state of the compute engine
+    // (maybe with a version number that would get incremented when
+    // a value is updated)
+
+    const memoizable = this.isPure && this._ops.every((x) => x.isConstant);
+
+    let s: -1 | 0 | 1 | undefined | typeof NaN = undefined;
+    if (this.isValid) {
+      const sig = this.functionDefinition?.signature;
+      if (sig?.sgn) {
+        s = sig.sgn(this.engine, this._ops);
+      }
+    }
+    if (memoizable) this._sgn = s;
+    return s;
+  }
+
+  get isZero(): boolean | undefined {
+    const s = this.sgn;
+    if (s === undefined || isNaN(s)) return undefined;
+    return s === 0;
+  }
+
+  get isNotZero(): boolean | undefined {
+    const s = this.sgn;
+    if (s === undefined || isNaN(s)) return undefined;
+    return s !== 0;
+  }
+
+  get isOne(): boolean | undefined {
+    const s = this.sgn;
+    if (s === undefined || isNaN(s)) return undefined;
+    if (s <= 0) return false;
+    return undefined;
+  }
+
+  get isNegativeOne(): boolean | undefined {
+    const s = this.sgn;
+    if (s === undefined || isNaN(s)) return undefined;
+    if (s >= 0) return false;
+    return undefined;
+  }
+
+  // x > 0
+  get isPositive(): boolean | undefined {
+    const s = this.sgn;
+    if (s === undefined || isNaN(s)) return undefined;
+    return s > 0;
+  }
+
+  // x >= 0
+  get isNonNegative(): boolean | undefined {
+    const s = this.sgn;
+    if (s === undefined || isNaN(s)) return undefined;
+    return s >= 0;
+  }
+
+  // x < 0
+  get isNegative(): boolean | undefined {
+    const s = this.sgn;
+    if (s === undefined || isNaN(s)) return undefined;
+    return s < 0;
+  }
+
+  // x <= 0
+  get isNonPositive(): boolean | undefined {
+    const s = this.sgn;
+    if (s === undefined || isNaN(s)) return undefined;
+    return s <= 0;
   }
 
   /** `isSame` is structural/symbolic equality */

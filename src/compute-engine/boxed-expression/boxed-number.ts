@@ -364,14 +364,14 @@ export class BoxedNumber extends _BoxedExpression {
     return this._value.type;
   }
 
-  get sgn(): -1 | 0 | 1 | undefined | null {
+  get sgn(): -1 | 0 | 1 | undefined | typeof NaN {
     if (this._value === 0) return 0;
 
     if (typeof this._value === 'number') {
       const s = Math.sign(this._value);
-      return Number.isNaN(s) ? undefined : (s as -1 | 0 | 1);
+      return Number.isNaN(s) ? NaN : (s as -1 | 0 | 1);
     }
-    return this._value.sgn();
+    return this._value.sgn() ?? NaN;
   }
 
   isSame(rhs: BoxedExpression): boolean {

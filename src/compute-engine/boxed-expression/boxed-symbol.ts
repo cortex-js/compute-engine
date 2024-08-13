@@ -525,11 +525,11 @@ export class BoxedSymbol extends _BoxedExpression {
     }
   }
 
-  get sgn(): -1 | 0 | 1 | undefined | null {
+  get sgn(): -1 | 0 | 1 | undefined | typeof NaN {
     // If available, use the value associated with this symbol.
     // Note that `null` is an acceptable and valid value
     const def = this._def;
-    if (!def || !(def instanceof _BoxedSymbolDefinition)) return null;
+    if (!def || !(def instanceof _BoxedSymbolDefinition)) return NaN;
 
     const v = def.value;
     if (v && v !== this) {

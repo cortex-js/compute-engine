@@ -469,8 +469,8 @@ export abstract class _BoxedExpression implements BoxedExpression {
     return this.engine.NaN;
   }
 
-  get sgn(): -1 | 0 | 1 | undefined | null {
-    return null;
+  get sgn(): -1 | 0 | 1 | undefined | typeof NaN {
+    return NaN;
   }
 
   get shape(): number[] {

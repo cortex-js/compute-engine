@@ -119,6 +119,7 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
       complexity: 1200,
       signature: {
         domain: ['FunctionOf', 'Numbers', 'NonNegativeNumbers'],
+        sgn: () => 1,
         simplify: (ce, ops) => processAbs(ce, ops[0], 'simplify'),
         evaluate: (ce, ops) => processAbs(ce, ops[0], 'evaluate'),
         N: (ce, ops) => processAbs(ce, ops[0], 'N'),
@@ -512,6 +513,11 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
 
       signature: {
         params: ['Numbers'],
+        sgn: (ce, args) => {
+          const s = args[0].sgn;
+          if (typeof s === 'number') return -s;
+          return s;
+        },
         result: (ce, args) => {
           if (args.length !== 1) return ce.domain('NothingDomain');
           const arg = args[0].domain;
