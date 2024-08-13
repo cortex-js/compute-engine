@@ -26,7 +26,7 @@ export type TestCase =
   | [
       input: Expression | string,
       expected: Expression | string,
-      comment?: string
+      comment?: string,
     ]
   | [heading: string];
 
@@ -144,7 +144,7 @@ const RULE_TEST_CASES: TestCase[] = [
   `,
   ],
   ['3/x-1/x', '2/x'],
-  ['1/(x+1)-1/x', '-1/(x(x+1))'], // 🙁 1 / (x + 1) - 1 / x
+  ['1/(x+1)-1/x', '-1/(x(x+1))'], // 🙁 -1 / x + 1 / (x + 1)
 
   [
     `
@@ -179,7 +179,7 @@ const RULE_TEST_CASES: TestCase[] = [
   ['x/x', 'x/x'],
   ['\\pi/\\pi', 1], // 🙁 pi / pi
   ['(\\pi+1)/(\\pi+1)', 1], // 🙁 1 / (1 + pi) + pi / (1 + pi)
-  ['1/(1/0)', NaN], // 🙁 0
+  ['1/(1/0)', NaN],
   ['1/(1/\\pi)', '\\pi'],
   ['1/(1/x)', '1/(1/x)'],
   ['y/(1/2)', '2*y'],
@@ -206,7 +206,7 @@ const RULE_TEST_CASES: TestCase[] = [
   ['x-0', 'x'],
   ['\\sin(x)+0', '\\sin(x)'],
   ['0/0', NaN],
-  ['2/0', NaN], // 🙁 1/0
+  ['2/0', NaN],
   ['0^\\pi', 0], // 🙁 0^(pi)
   ['0^{-2}', NaN], // 🙁 oo
   ['0^{-\\pi}', NaN], // 🙁 0^(-pi)
@@ -342,7 +342,7 @@ const RULE_TEST_CASES: TestCase[] = [
   ],
   ['\\ln(\\infty)', '\\infty'],
   ['\\log_4(\\infty)', '\\infty'],
-  ['\\log_{0.5}(\\infty)', '-\\infty'],
+  ['\\log_{0.5}(\\infty)', '-\\infty'], // 🙁 ln(oo)
 
   [
     `
@@ -380,7 +380,7 @@ const RULE_TEST_CASES: TestCase[] = [
   ['0*(-\\infty)', NaN], // 🙁 0
   ['0.5*\\infty', '\\infty'],
   ['(-0.5)*(-\\infty)', '\\infty'],
-  ['(-0.5)*\\infty', '-\\infty'],
+  ['(-0.5)*\\infty', '-\\infty'], // 🙁 oo
   ['\\pi * (-\\infty)', '-\\infty'],
 
   [
@@ -648,7 +648,7 @@ const RULE_TEST_CASES: TestCase[] = [
   ['\\log_3(x^\\sqrt{2})', '\\sqrt{2} \\log_3(x)'],
   ['\\log_4(x^2)', '2\\log_4(|x|)'], // 🙁 2log(x, 4)
   ['\\log_4(x^{2/3})', '2/3 \\log_4(|x|)'], // 🙁 2/3 * log(x, 4)
-  ['\\log_4(x^{7/4})', '7/4 \\log_4(x)'], // 🙁 7/4 * log(x, 4)
+  ['\\log_4(x^{7/4})', '7/4 \\log_4(x)'], // 🙁 7/4 * log(x, 4)];
 ];
 
 describe('SIMPLIFY', () => {
