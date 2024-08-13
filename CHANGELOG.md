@@ -329,6 +329,10 @@
 
   ```
 
+- Added Random function. `["Random"]` returns a real pseudo-random number betwen
+  0 and 1. `["Random", 10]` returns an integer between 0 and 9,
+  `["Random", 5, 10]` returns an integer between 5 and 10.
+
 - Added Choose function to compute binomial coefficients, i.e. `Choose(5, 2)` is
   equal to 10.
 

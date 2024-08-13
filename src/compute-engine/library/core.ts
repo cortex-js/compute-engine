@@ -555,6 +555,35 @@ export const CORE_LIBRARY: IdentifierDefinitions[] = [
       },
     },
 
+    Random: {
+      signature: {
+        domain: [
+          'FunctionOf',
+          ['OptArg', 'Integers'],
+          ['OptArg', 'Integers'],
+          'Anything',
+        ],
+        evaluate: (ce, ops) => {
+          // With no arguments, return a random number between 0 and 1
+          if (ops.length === 0) return ce.number(Math.random());
+
+          // If one or more arguments are provided, they must be integers
+          // The result will be an integer between the two arguments
+          let [lowerOp, upperOp] = ops;
+          let lower: number;
+          let upper: number;
+          if (upperOp === undefined) {
+            lower = 0;
+            upper = Math.floor(lowerOp.re ?? 0)!;
+          } else {
+            lower = Math.floor(lowerOp.re ?? 0)!;
+            upper = Math.floor(upperOp.re ?? 0)!;
+          }
+          return ce.number(lower + Math.floor(Math.random() * (upper - lower)));
+        },
+      },
+    },
+
     // @todo: need review
     Signatures: {
       signature: {
