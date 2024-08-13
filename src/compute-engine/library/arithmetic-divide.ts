@@ -130,6 +130,8 @@ export function canonicalDivide(
 
   const [c2, t2] = op2.toNumericValue();
 
+  if (c2.isZero) return ce.NaN;
+
   const c = c1.div(c2);
 
   if (c.isOne) return t2.isOne ? t1 : ce._fn('Divide', [t1, t2]);
