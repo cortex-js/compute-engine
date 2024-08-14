@@ -463,7 +463,9 @@ function parseRule(ce: IComputeEngine, rule: string): BoxedRule {
   const expr = ce.parse(rule, { canonical: false });
   ce.latexDictionary = previousDictionary;
 
-  if (expr.operator !== 'Rule') throw new Error(`Invalid rule ${rule}`);
+  if (!expr.isValid || expr.operator !== 'Rule') {
+    throw new Error(`Invalid rule ${rule}: ${expr.toString()}`);
+  }
   const [match, replace, condition] = expr.ops!;
 
   let condFn: undefined | PatternConditionFunction = undefined;
