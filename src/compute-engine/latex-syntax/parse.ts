@@ -549,6 +549,92 @@ export class _Parser implements Parser {
     return '';
   }
 
+  /**
+   * A Latex number can be a decimal, hex or octal number.
+   * It is used in some Latex commands, such as `\char`
+   *
+   * From TeX:8695 (scan_int):
+   * > An integer number can be preceded by any number of spaces and `+' or
+   * > `-' signs. Then comes either a decimal constant (i.e., radix 10), an
+   * > octal constant (i.e., radix 8, preceded by '), a hexadecimal constant
+   * > (radix 16, preceded by "), an alphabetic constant (preceded by `), or
+   * > an internal variable.
+   */
+  matchLatexNumber(isInteger = true): null | number {
+    let negative = false;
+    let token = this.peek;
+    while (token === '<space>' || token === '+' || token === '-') {
+      if (token === '-') negative = !negative;
+      this.nextToken();
+      token = this.peek;
+    }
+
+    let radix = 10;
+    let digits = ['0', '1', '2', '3', '4', '5', '6', '7', '8', '9'];
+    if (this.match("'")) {
+      // Apostrophe indicates an octal value
+      radix = 8;
+      digits = ['0', '1', '2', '3', '4', '5', '6', '7'];
+      isInteger = true;
+    } else if (this.match('"') || this.match('x')) {
+      // Double-quote indicates a hex value
+      // The 'x' prefix notation for the hexadecimal numbers is a MathJax extension.
+      // For example: 'x3A'
+      radix = 16;
+      // Hex digits have to be upper-case
+      digits = [
+        '0',
+        '1',
+        '2',
+        '3',
+        '4',
+        '5',
+        '6',
+        '7',
+        '8',
+        '9',
+        'A',
+        'B',
+        'C',
+        'D',
+        'E',
+        'F',
+      ];
+      isInteger = true;
+    } else if (this.match('`')) {
+      // A backtick indicates an alphabetic constant: a letter, or a single-letter command
+      token = this.nextToken();
+      if (token) {
+        if (token.startsWith('\\') && token.length === 2) {
+          return (negative ? -1 : 1) * (token.codePointAt(1) ?? 0);
+        }
+
+        return (negative ? -1 : 1) * (token.codePointAt(0) ?? 0);
+      }
+
+      return null;
+    }
+
+    let value = '';
+    while (digits.includes(this.peek)) {
+      value += this.nextToken();
+    }
+
+    // Parse the fractional part, if applicable
+    if (!isInteger && this.match('.')) {
+      value += '.';
+      while (digits.includes(this.peek)) {
+        value += this.nextToken();
+      }
+    }
+
+    const result: number = isInteger
+      ? Number.parseInt(value, radix)
+      : Number.parseFloat(value);
+    if (Number.isNaN(result)) return null;
+    return negative ? -result : result;
+  }
+
   // Match a LaTeX char, which can be a char literal, or a Unicode codepoint
   // in hexadecimal or decimal notation  with the `\char` or `\unicode` command,
   // or the `^` character repeated twice followed by a hexadecimal codepoint.
@@ -1189,92 +1275,6 @@ export class _Parser implements Parser {
     };
   }
 
-  /**
-   * A Latex number can be a decimal, hex or octal number.
-   * It is used in some Latex commands, such as `\char`
-   *
-   * From TeX:8695 (scan_int):
-   * > An integer number can be preceded by any number of spaces and `+' or
-   * > `-' signs. Then comes either a decimal constant (i.e., radix 10), an
-   * > octal constant (i.e., radix 8, preceded by '), a hexadecimal constant
-   * > (radix 16, preceded by "), an alphabetic constant (preceded by `), or
-   * > an internal variable.
-   */
-  matchLatexNumber(isInteger = true): null | number {
-    let negative = false;
-    let token = this.peek;
-    while (token === '<space>' || token === '+' || token === '-') {
-      if (token === '-') negative = !negative;
-      this.nextToken();
-      token = this.peek;
-    }
-
-    let radix = 10;
-    let digits = ['0', '1', '2', '3', '4', '5', '6', '7', '8', '9'];
-    if (this.match("'")) {
-      // Apostrophe indicates an octal value
-      radix = 8;
-      digits = ['0', '1', '2', '3', '4', '5', '6', '7'];
-      isInteger = true;
-    } else if (this.match('"') || this.match('x')) {
-      // Double-quote indicates a hex value
-      // The 'x' prefix notation for the hexadecimal numbers is a MathJax extension.
-      // For example: 'x3A'
-      radix = 16;
-      // Hex digits have to be upper-case
-      digits = [
-        '0',
-        '1',
-        '2',
-        '3',
-        '4',
-        '5',
-        '6',
-        '7',
-        '8',
-        '9',
-        'A',
-        'B',
-        'C',
-        'D',
-        'E',
-        'F',
-      ];
-      isInteger = true;
-    } else if (this.match('`')) {
-      // A backtick indicates an alphabetic constant: a letter, or a single-letter command
-      token = this.nextToken();
-      if (token) {
-        if (token.startsWith('\\') && token.length === 2) {
-          return (negative ? -1 : 1) * (token.codePointAt(1) ?? 0);
-        }
-
-        return (negative ? -1 : 1) * (token.codePointAt(0) ?? 0);
-      }
-
-      return null;
-    }
-
-    let value = '';
-    while (digits.includes(this.peek)) {
-      value += this.nextToken();
-    }
-
-    // Parse the fractional part, if applicable
-    if (!isInteger && this.match('.')) {
-      value += '.';
-      while (digits.includes(this.peek)) {
-        value += this.nextToken();
-      }
-    }
-
-    const result: number = isInteger
-      ? Number.parseInt(value, radix)
-      : Number.parseFloat(value);
-    if (Number.isNaN(result)) return null;
-    return negative ? -result : result;
-  }
-
   private parsePrefixOperator(until?: Readonly<Terminator>): Expression | null {
     if (!until) until = { minPrec: 0 };
     if (!until.minPrec) until = { ...until, minPrec: 0 };
@@ -1759,16 +1759,16 @@ export class _Parser implements Parser {
     const command = this.peek;
     if (!command) return this.error('syntax-error', start);
 
+    // If the command is an open or close delimiter prefix, exit
+    if (isDelimiterCommand(this))
+      return this.error('unexpected-delimiter', start);
+
     if (command[0] !== '\\') {
       return this.error(
         ['unexpected-token', { str: tokensToString(command) }],
         start
       );
     }
-
-    // If the command is an open or close delimiter prefix, exit
-    if (isDelimiterCommand(this))
-      return this.error('unexpected-delimiter', start);
 
     const errorToken = this.nextToken();
 
@@ -1918,6 +1918,12 @@ export class _Parser implements Parser {
 
     if (result === null) {
       result = this.options.parseUnexpectedToken?.(null, this) ?? null;
+      if (result === null && this.peek.startsWith('\\')) {
+        // We've encountered an unknown LaTeX command. May be a typo.
+        // Gobble it.
+        this.nextToken();
+        result = this.error('unexpected-command', start);
+      }
     }
 
     return this.decorate(result, start);
