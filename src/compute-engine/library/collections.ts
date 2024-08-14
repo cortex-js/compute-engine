@@ -335,6 +335,13 @@ export const COLLECTIONS_LIBRARY: IdentifierDefinitions = {
         if (s !== null) return ce.number(s.length);
         return ce.Zero;
       },
+      sgn: (ce, ops) => {
+        const def = ops[0].functionDefinition;
+        if (def?.size) return def.size(ops[0]) === 0 ? 0 : 1;
+        const s = ops[0].string;
+        if (s !== null) return s.length === 0 ? 0 : 1;
+        return undefined;
+      },
     },
   },
 

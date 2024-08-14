@@ -2684,7 +2684,7 @@ export type FunctionSignature = {
   sgn?: (
     ce: IComputeEngine,
     args: ReadonlyArray<BoxedExpression>
-  ) => -1 | 0 | 1 | undefined;
+  ) => -1 | 0 | 1 | undefined | typeof NaN;
 
   /** Return a compiled (optimized) expression. */
   compile?: (expr: BoxedExpression) => CompiledExpression;

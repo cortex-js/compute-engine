@@ -329,8 +329,8 @@
 
   ```
 
-- Added Random function. `["Random"]` returns a real pseudo-random number betwen
-  0 and 1. `["Random", 10]` returns an integer between 0 and 9,
+- Added `Random` function. `["Random"]` returns a real pseudo-random number
+  betwen 0 and 1. `["Random", 10]` returns an integer between 0 and 9,
   `["Random", 5, 10]` returns an integer between 5 and 10.
 
 - Extended the definition of `expr.isConstant`. Previously, it only applied to
@@ -338,8 +338,18 @@
   if the expression is a number literal, a symbol with a constant value, or a
   pure function with constant arguments.
 
-- Added Choose function to compute binomial coefficients, i.e. `Choose(5, 2)` is
-  equal to 10.
+- The boxed expression properties `isPositive`, `isNegative`, `isNonNegative`,
+  `isNonPositive`, `isZero`, `isNotZero` now return a useful value for most
+  function expressions. For example, `ce.parse('|x + 1|').isPositive` is true.
+
+  If the value cannot be determined, the property will return `undefined`. For
+  example, `ce.parse('|x + 1|').isZero` is `undefined`.
+
+  If the expression is not a real number, the property will return `NaN`. For
+  example, `ce.parse('i').isPositive` is `NaN`.
+
+- Added `Choose` function to compute binomial coefficients, i.e. `Choose(5, 2)`
+  is equal to 10.
 
 - The fallback for non-constructible complex values of trigonometric functions
   is now implemented via rules.

@@ -2,13 +2,8 @@ import { ComputeEngine } from '../src/compute-engine';
 
 const ce = new ComputeEngine();
 
-console.log(ce.parse('\\frac{3}{4}\\sqrt{2}').numericValue?.toString());
-
-const b = ce.parse('\\pi * (x/a)');
-
-const a = ce.parse('x/(a/\\pi)');
-const c = ce.parse('(\\pi * x)/a');
-console.log(a.json, b.json, c.json);
+const expression = ce.parse('-\\pi');
+console.log(expression.isPositive);
 
 const eq1 = '3x + 1 = 0';
 const eq2 = '6x + 2 = 0';

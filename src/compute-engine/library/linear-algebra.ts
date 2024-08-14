@@ -61,6 +61,7 @@ export const LINEAR_ALGEBRA_LIBRARY: IdentifierDefinitions[] = [
       complexity: 8200,
       signature: {
         domain: ['FunctionOf', 'Values', 'Numbers'],
+        sgn: (ce, ops) => 1,
         evaluate: (ce, ops) => {
           const op1 = ops[0];
 

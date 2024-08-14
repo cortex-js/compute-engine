@@ -70,7 +70,7 @@ describe('IS_ZERO', () => {
 
   it('should return false for constant expressions not equal to 0', () => {
     const expression = engine.parse('5 + 3');
-    expect(expression.isZero).toBeUndefined();
+    expect(expression.isZero).toBe(false);
   });
 
   it('should return false for constant symbols not equal to 0', () => {
@@ -88,9 +88,14 @@ describe('IS_ZERO', () => {
     expect(expression.isZero).toBeUndefined();
   });
 
-  it('should return undefined for constant expressions with function calls', () => {
+  it('should return false for constant expressions with function calls', () => {
     const expression = engine.parse('\\cos{\\pi}');
-    expect(expression.isZero).toBeUndefined();
+    expect(expression.isZero).toBe(false);
+  });
+
+  it('should return true for cos pi/2', () => {
+    const expression = engine.parse('\\cos{\\pi/2}');
+    expect(expression.isZero).toBe(true);
   });
 
   it('should return false for non-constant expressions with non-pure function calls not equal to 0', () => {
@@ -122,7 +127,7 @@ describe('IS_NOT_ZERO', () => {
 
   it('should return undefined for constant expressions not equal to 0', () => {
     const expression = engine.parse('5 + 3');
-    expect(expression.isNotZero).toBeUndefined();
+    expect(expression.isNotZero).toBe(true);
   });
 
   it('should return true for constant symbols not equal to 0', () => {
@@ -140,9 +145,9 @@ describe('IS_NOT_ZERO', () => {
     expect(expression.isNotZero).toBeUndefined();
   });
 
-  it('should return undefined for constant expressions with function calls', () => {
+  it('should return true for constant expressions with function calls', () => {
     const expression = engine.parse('\\cos{\\pi}');
-    expect(expression.isNotZero).toBeUndefined();
+    expect(expression.isNotZero).toBe(true);
   });
 
   it('should return undefined for non-constant expressions with non-pure function calls not equal to 0', () => {
@@ -199,7 +204,7 @@ describe('IS_POSITIVE', () => {
 
   it('should return undefined for constant expressions with function calls', () => {
     const expression = engine.parse('\\cos{\\pi}');
-    expect(expression.isPositive).toBeUndefined();
+    expect(expression.isPositive).toBe(true);
   });
 
   it('should return undefined for non-constant expressions with non-pure function calls', () => {

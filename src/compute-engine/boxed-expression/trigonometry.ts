@@ -638,6 +638,28 @@ function constructibleValuesInverse(
   return undefined;
 }
 
+export function trigSign(
+  operator: string,
+  x: BoxedExpression
+): number | undefined {
+  const [q, pos] = quadrant(x);
+  if (q === undefined) return undefined;
+  if (pos !== undefined) {
+    if ((operator === 'Sin' || operator === 'Tan') && (pos === 0 || pos === 2))
+      return 0;
+    if ((operator === 'Cos' || operator === 'Cot') && (pos === 1 || pos === 3))
+      return 0;
+  }
+  return {
+    Sin: [1, 1, -1, -1],
+    Cos: [1, -1, -1, 1],
+    Sec: [1, -1, -1, 1],
+    Csc: [1, 1, -1, -1],
+    Tan: [1, -1, 1, -1],
+    Cot: [1, -1, 1, -1],
+  }[operator]?.[q];
+}
+
 export function constructibleValues(
   operator: string,
   x: BoxedExpression | undefined
@@ -715,6 +737,29 @@ export function constructibleValues(
   return undefined;
 }
 
+// Return the quadrant of the angle (1..4) and the position on the
+// circle 0...4 corresponding to 0, π/2, π, 3π/2, 2π.
+function quadrant(
+  theta: BoxedExpression
+): [number | undefined, number | undefined] {
+  theta = theta.N();
+  if (!theta.isValid || !theta.isNumberLiteral) return [undefined, undefined];
+  if (theta.im !== 0) return [undefined, undefined];
+
+  // Normalize the angle to the range [0, 2π)
+  const t = theta.re;
+  if (t === undefined) return [undefined, undefined];
+  const normalizedTheta = ((t % (2 * Math.PI)) + 2 * Math.PI) % (2 * Math.PI);
+
+  if (Math.abs(normalizedTheta) < 1e-12) return [1, 0];
+  if (Math.abs(normalizedTheta - Math.PI / 2) < 1e-12) return [2, 1];
+  if (Math.abs(normalizedTheta - Math.PI) < 1e-12) return [3, 2];
+  if (Math.abs(normalizedTheta - (3 * Math.PI) / 2) < 1e-12) return [4, 3];
+
+  // Use Math.floor to determine the quadrant
+  return [Math.floor(normalizedTheta / (Math.PI / 2)) + 1, undefined];
+}
+
 export function canonicalAngle(
   x: BoxedExpression | undefined
 ): BoxedExpression | undefined {
@@ -726,11 +771,11 @@ export function canonicalAngle(
 
   // Get k, t such that theta = k * 2π + t
   const [k, t] = getPiTerm(theta);
-  const ce = theta.engine;
   if (k.isZero) return theta;
 
   // Normalize to [0, 2π)
+  const ce = theta.engine;
   const twoPi = ce.Pi.mul(2);
   const n = ce._numericValue(theta.div(twoPi)).floor();
-  return theta.sub(ce.number(n.mul(twoPi)));
+  return theta.sub(ce.number(n.mul(ce._numericValue(twoPi))));
 }

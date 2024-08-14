@@ -137,6 +137,18 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
       hold: 'all',
       signature: {
         domain: 'NumericFunctions',
+        sgn: (ce, ops) => {
+          if (ops.some((x) => x.sgn === undefined)) return undefined;
+          if (ops.some((x) => isNaN(x.sgn!))) return NaN;
+          if (ops.every((x) => x.sgn === 0)) return 0;
+          if (ops.every((x) => x.sgn === 1)) return 1;
+          if (ops.every((x) => x.sgn === -1)) return -1;
+          const v = addN(...ops.map((x) => x.N()));
+          if (v.isPositive) return 1;
+          if (v.isNegative) return -1;
+          if (v.isZero) return 0;
+          return undefined;
+        },
         result: (ce, ops) =>
           domainAdd(
             ce,
@@ -202,6 +214,15 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
         restParam: 'Numbers',
         result: 'Numbers',
 
+        sgn: (ce, ops) => {
+          const [n, d] = [ops[0].sgn, ops[1].sgn];
+          if (n === undefined || d === undefined) return undefined;
+          if (isNaN(n) || isNaN(d)) return NaN;
+          if (n === 0) return 0;
+          if (n === 0 && d === 0) return NaN;
+          if (d === 0) return n;
+          return n * d;
+        },
         canonical: (ce, args) => {
           // @fastpath: this code path is never taken, canonicalDivide is called directly
           args = checkNumericArgs(ce, args);
@@ -246,6 +267,7 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
       signature: {
         params: ['Numbers'],
         result: 'Numbers',
+        sgn: () => 1,
         canonical: (ce, args) => {
           const x = args[0];
           if (x.numericValue !== null && x.isNegative)
@@ -280,6 +302,7 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
       signature: {
         params: ['Numbers'],
         result: 'Numbers',
+        sgn: () => 1,
         evaluate: (ce, ops) => {
           // 2^{\frac{n}{2}+\frac{1}{4}(1-\cos(\pi n))}\pi^{\frac{1}{4}(\cos(\pi n)-1)}\Gamma\left(\frac{n}{2}+1\right)
 
@@ -300,6 +323,7 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
 
       signature: {
         domain: ['FunctionOf', 'Numbers', 'RealNumbers'],
+        sgn: (ce, ops) => ops[0].sgn,
         evaluate: (ce, ops) =>
           apply(
             ops[0],
@@ -314,10 +338,16 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
       wikidata: 'Q190573',
       complexity: 8000,
       threadable: true,
-
       signature: {
         params: ['Numbers'],
         result: 'Numbers',
+        sgn: (ce, ops) => {
+          const s = ops[0].sgn;
+          if (s === undefined || isNaN(s)) return undefined;
+          if (s >= 0) return 1; // Gamma is positive for positive real numbers
+          if (ops[0].isInteger) return NaN; // Gamma is not defined for negative integers
+          return undefined;
+        },
         N: (ce, ops) =>
           apply(
             ops[0],
@@ -355,6 +385,16 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
         params: ['Numbers'],
         optParams: ['Numbers'],
         result: 'Numbers',
+        sgn: (ce, ops) => {
+          const s = ops[0].sgn;
+          if (s === undefined || isNaN(s)) return undefined;
+          if (s < 0) return undefined; // complex
+          if (s === 0) return NaN;
+          const v = ops[0].N().numericValue;
+          if (v === null) return undefined;
+          if (typeof v === 'number') return v > 1 ? 1 : -1;
+          return v?.gt(1) ? 1 : -1;
+        },
         // @fastpath: this doesn't get called. See makeNumericFunction()
         canonical: (ce, ops) =>
           ops[1] ? ce.function('Log', ops) : ops[0].ln(),
@@ -385,6 +425,16 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
         params: ['Numbers'],
         optParams: ['Numbers'],
         result: 'Numbers',
+        sgn: (ce, ops) => {
+          const s = ops[0].sgn;
+          if (s === undefined || isNaN(s)) return undefined;
+          if (s < 0) return undefined; // complex
+          if (s === 0) return NaN;
+          const v = ops[0].N().numericValue;
+          if (v === null) return undefined;
+          if (typeof v === 'number') return v > 1 ? 1 : -1;
+          return v?.gt(1) ? 1 : -1;
+        },
         canonical: (ce, ops) => ops[0]?.ln(ops[1] ?? 10) ?? undefined,
         simplify: (ce, ops) => ops[0]?.ln(ops[1] ?? ce.number(10)) ?? undefined,
         evaluate: (ce, ops) => ops[0]?.ln(ops[1] ?? ce.number(10)) ?? undefined,
@@ -473,6 +523,23 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
 
       signature: {
         domain: ['FunctionOf', 'Numbers', 'Numbers', 'Numbers'],
+        sgn: (ce, ops) => {
+          const s = ops[1].sgn;
+          if (s === undefined || isNaN(s)) return undefined;
+          if (s === 0) return NaN;
+          if (ops[0].isNumberLiteral && ops[1].isNumberLiteral) {
+            const v = apply2(
+              ops[0],
+              ops[1],
+              // In JavaScript, the % is remainder, not modulo
+              // so adapt it to return a modulo
+              (a, b) => ((a % b) + b) % b,
+              (a, b) => a.modulo(b)
+            );
+            return v?.sgn ?? undefined;
+          }
+          return undefined;
+        },
         evaluate: (ce, ops) =>
           apply2(
             ops[0],
@@ -499,6 +566,12 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
         // @fastpath: canonicalization is done in the function
         // makeNumericFunction().
         //
+        sgn: (ce, ops) => {
+          if (ops.some((x) => x.sgn === undefined)) return undefined;
+          if (ops.some((x) => isNaN(x.sgn!))) return NaN;
+          if (ops.some((x) => x.sgn === 0)) return 0;
+          return ops.reduce((acc, x) => acc * x.sgn!, 1);
+        },
         simplify: (ce, ops) => mul(...ops.map((x) => x.simplify())),
         evaluate: (ce, ops) => mul(...ops.map((x) => x.evaluate())),
         N: (ce, ops) => mulN(...ops.map((x) => x.N())),
@@ -513,11 +586,6 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
 
       signature: {
         params: ['Numbers'],
-        sgn: (ce, args) => {
-          const s = args[0].sgn;
-          if (typeof s === 'number') return -s;
-          return s;
-        },
         result: (ce, args) => {
           if (args.length !== 1) return ce.domain('NothingDomain');
           const arg = args[0].domain;
@@ -535,6 +603,11 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
           if (negDomain) return ce.domain(negDomain);
           return arg;
         },
+        sgn: (ce, args) => {
+          const s = args[0].sgn;
+          if (typeof s === 'number') return -s;
+          return s;
+        },
         canonical: (ce, args) => {
           args = checkNumericArgs(ce, args);
           if (args.length === 0) return ce.error('missing');
@@ -544,14 +617,6 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
         simplify: (ce, ops) => ops[0].neg(),
         evaluate: (ce, ops) => ops[0].neg(),
         N: (ce, ops) => ops[0].neg(),
-        sgn: (_ce, args): -1 | 0 | 1 | undefined => {
-          const s = args[0].sgn;
-          if (s === undefined || s === null) return undefined;
-          if (s === 0) return 0;
-          if (s > 0) return -1;
-          if (s < 0) return +1;
-          return undefined;
-        },
       },
     },
 
@@ -583,6 +648,20 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
           const [base, exp] = args;
           return canonicalPower(base, exp);
         },
+        sgn: (ce, ops) => {
+          const [a, b] = ops;
+          if (a.isComplex || b.isComplex) return undefined;
+          const sA = a.sgn;
+          const sB = b.sgn;
+          if (sA === undefined) return undefined;
+          if (sA > 0) return 1;
+          if (sB === undefined) return undefined;
+          if (isNaN(sA) || isNaN(sB)) return NaN;
+          if (sA === 0) return sB > 0 ? 0 : NaN;
+          if (b.isEven === true) return 1;
+          if (b.isOdd === true) return -1;
+          return undefined;
+        },
         simplify: (ce, ops) => ops[0].pow(ops[1]),
         evaluate: (ce, ops) => ops[0].pow(ops[1]),
         N: (ce, ops) => ops[0].pow(ops[1]),
@@ -604,6 +683,7 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
           ['OptArg', 'Numbers'],
           'RationalNumbers',
         ],
+        sgn: (ce, ops) => ops[0].sgn,
         canonical: (ce, args) => {
           args = flatten(args);
 
@@ -663,6 +743,15 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
       signature: {
         params: ['Numbers', 'Numbers'],
         result: 'Numbers',
+        sgn: (ce, ops) => {
+          const [a, b] = ops;
+          if (a.isComplex || b.isComplex) return NaN;
+          if (a.isZero) return b.isZero ? NaN : 0;
+          if (a.isPositive === true) return 1;
+          if (b.isOdd === true) return -1;
+          if (b.isEven === true) return NaN;
+          return NaN;
+        },
         canonical: (ce, args) => {
           args = checkNumericArgs(ce, args, 2);
           const [base, exp] = args;
@@ -679,6 +768,7 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
 
       signature: {
         domain: ['FunctionOf', 'Numbers', 'Numbers'],
+        sgn: (ce, ops) => ops[0].sgn,
         evaluate: (ce, ops) =>
           apply(
             ops[0],
@@ -695,6 +785,7 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
 
       signature: {
         domain: ['FunctionOf', 'Numbers', 'Integers'],
+        sgn: (ce, ops) => ops[0].sgn,
         simplify: (ce, ops) => {
           const s = ops[0].sgn;
           if (s === 0) return ce.Zero;
@@ -759,6 +850,15 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
           ops = flatten(ops);
           if (ops.length !== 1) return ce._fn('Sqrt', ops);
           return ops[0].sqrt();
+        },
+        sgn: (ce, ops) => {
+          const s = ops[0].sgn;
+          if (s === undefined) return undefined;
+          if (isNaN(s)) return NaN;
+          if (s === 0) return 0;
+          if (s === 1) return 1;
+          if (s === -1) return NaN;
+          return undefined;
         },
         simplify: (ce, ops) => ops[0].sqrt(),
         evaluate: (ce, ops) => ops[0].sqrt(),
@@ -1007,6 +1107,7 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
       // including collections
       signature: {
         domain: ['FunctionOf', ['VarArg', 'Anything'], 'Numbers'],
+        sgn: (ce, ops) => 1,
         evaluate: (ce, ops) => processGcdLcm(ce, ops, 'GCD'),
       },
     },
@@ -1017,6 +1118,7 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
       // including collections
       signature: {
         domain: ['FunctionOf', ['VarArg', 'Anything'], 'Numbers'],
+        sgn: (ce, ops) => 1,
         evaluate: (ce, ops) => processGcdLcm(ce, ops, 'LCM'),
       },
     },
@@ -1040,6 +1142,7 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
           if (num !== undefined) return ce.number(num[0]);
           return ce._fn('Numerator', canonical(ce, ops));
         },
+        sgn: (ce, ops) => ops[0].sgn,
         evaluate: (ce, ops) => {
           if (ops.length === 0) return ce.function('Sequence', []);
           const op = ops[0];
@@ -1073,6 +1176,7 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
           if (num !== undefined) return ce.number(num[1]);
           return ce._fn('Denominator', canonical(ce, ops));
         },
+        sgn: (ce, ops) => 1,
         evaluate: (ce, ops) => {
           if (ops.length === 0) return ce.function('Sequence', []);
           const op = ops[0];
@@ -1136,6 +1240,14 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
       // including collections
       signature: {
         domain: ['FunctionOf', ['VarArg', 'Values'], 'Numbers'],
+        sgn: (ce, ops) => {
+          if (ops.some((x) => x.sgn === undefined)) return undefined;
+          if (ops.some((x) => isNaN(x.sgn!))) return NaN;
+          if (ops.every((x) => x.sgn === 1)) return 1;
+          if (ops.every((x) => x.sgn === -1)) return -1;
+          if (ops.every((x) => x.sgn === 0)) return 0;
+          return undefined;
+        },
         simplify: (ce, ops) => {
           if (ops.length === 0) return ce.NegativeInfinity;
           if (ops.length === 1) return ops[0];
@@ -1156,6 +1268,14 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
           if (ops.length === 0) return ce.PositiveInfinity;
           if (ops.length === 1) return ops[0];
           return ce.function('Min', ops);
+        },
+        sgn: (ce, ops) => {
+          if (ops.some((x) => x.sgn === undefined)) return undefined;
+          if (ops.some((x) => isNaN(x.sgn!))) return NaN;
+          if (ops.every((x) => x.sgn === 1)) return 1;
+          if (ops.every((x) => x.sgn === -1)) return -1;
+          if (ops.every((x) => x.sgn === 0)) return 0;
+          return undefined;
         },
         evaluate: (ce, ops) => processMinMax(ce, ops, 'Min'),
       },
@@ -1212,6 +1332,7 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
         // codomain: (ce, args) => domainAdd(ce, args),
         // The 'body' and 'range' need to be interpreted by canonicalMultiplication(). Don't canonicalize them yet.
         canonical: (ce, ops) => canonicalProduct(ce, ops[0], ops[1]),
+        sgn: (ce, ops) => evalProduct(ce, ops, 'N')?.sgn,
         simplify: (ce, ops) => evalProduct(ce, ops, 'simplify'),
         evaluate: (ce, ops) => evalProduct(ce, ops, 'evaluate'),
         N: (ce, ops) => evalProduct(ce, ops, 'N'),
@@ -1232,6 +1353,7 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
           // ],
           'Numbers',
         ],
+        sgn: (ce, ops) => evalSummation(ce, ops, 'N')?.sgn,
         canonical: (ce, ops) => canonicalSummation(ce, ops[0], ops[1]),
         simplify: (ce, ops) => evalSummation(ce, ops, 'simplify'),
         evaluate: (ce, ops) => evalSummation(ce, ops, 'evaluate'),

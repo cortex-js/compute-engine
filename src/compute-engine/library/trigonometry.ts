@@ -8,6 +8,7 @@ import {
   constructibleValues,
   evalTrig,
   processInverseFunction,
+  trigSign,
 } from '../boxed-expression/trigonometry';
 
 const domainNumberToRealNumber = (_head: string): DomainExpression => {
@@ -82,6 +83,7 @@ export const TRIGONOMETRY_LIBRARY: IdentifierDefinitions[] = [
       threadable: true,
       signature: {
         domain: ['FunctionOf', 'Numbers', 'Numbers', 'NonNegativeNumbers'],
+        sgn: (ce, ops) => 1,
         simplify: (ce, ops) =>
           ce
             .box(['Sqrt', ['Add', ['Square', ops[0]], ['Square', ops[1]]]])
@@ -97,6 +99,7 @@ export const TRIGONOMETRY_LIBRARY: IdentifierDefinitions[] = [
       threadable: true,
       signature: {
         domain: ['FunctionOf', 'Numbers', 'Numbers'],
+        sgn: (ce, ops) => trigSign('Sin', ops[0]),
         simplify: (ce, ops) => constructibleValues('Sin', ops[0]),
         evaluate: (ce, ops) =>
           constructibleValues('Sin', ops[0]) ?? evalTrig('Sin', ops[0]),
@@ -115,6 +118,7 @@ export const TRIGONOMETRY_LIBRARY: IdentifierDefinitions[] = [
       threadable: true,
       signature: {
         domain: domainNumberToRealNumber('Arctan'),
+        sgn: (ce, ops) => trigSign('Arctan', ops[0]),
         simplify: (ce, ops) => constructibleValues('Arctan', ops[0]),
         evaluate: (ce, ops) =>
           constructibleValues('Arctan', ops[0]) ?? evalTrig('Arctan', ops[0]),
@@ -158,6 +162,7 @@ export const TRIGONOMETRY_LIBRARY: IdentifierDefinitions[] = [
       threadable: true,
       signature: {
         domain: ['FunctionOf', 'Numbers', 'Numbers'],
+        sgn: (ce, ops) => trigSign('Cos', ops[0]),
         simplify: (ce, ops) => constructibleValues('Cos', ops[0]),
         evaluate: (ce, ops) =>
           constructibleValues('Cos', ops[0]) ?? evalTrig('Cos', ops[0]),
@@ -171,6 +176,7 @@ export const TRIGONOMETRY_LIBRARY: IdentifierDefinitions[] = [
       threadable: true,
       signature: {
         domain: trigFunction('Tan'),
+        sgn: (ce, ops) => trigSign('Tan', ops[0]),
         simplify: (ce, ops) => constructibleValues('Tan', ops[0]),
         evaluate: (ce, ops) =>
           constructibleValues('Tan', ops[0]) ?? evalTrig('Tan', ops[0]),
@@ -193,6 +199,7 @@ export const TRIGONOMETRY_LIBRARY: IdentifierDefinitions[] = [
       threadable: true,
       signature: {
         domain: hyperbolicFunction('Arcosh'),
+        sgn: (ce, ops) => trigSign('Arcosh', ops[0]),
         simplify: (ce, ops) => constructibleValues('Arcosh', ops[0]),
         evaluate: (ce, ops) =>
           constructibleValues('Arcosh', ops[0]) ?? evalTrig('Arcosh', ops[0]),
@@ -205,6 +212,7 @@ export const TRIGONOMETRY_LIBRARY: IdentifierDefinitions[] = [
       threadable: true,
       signature: {
         domain: hyperbolicFunction('Arcsin'),
+        sgn: (ce, ops) => trigSign('Arcsin', ops[0]),
         simplify: (ce, ops) => constructibleValues('Arcsin', ops[0]),
         evaluate: (ce, ops) =>
           constructibleValues('Arcsin', ops[0]) ?? evalTrig('Arcsin', ops[0]),
@@ -218,6 +226,7 @@ export const TRIGONOMETRY_LIBRARY: IdentifierDefinitions[] = [
       threadable: true,
       signature: {
         domain: hyperbolicFunction('Arsinh'),
+        sgn: (ce, ops) => trigSign('Arsinh', ops[0]),
         simplify: (ce, ops) => constructibleValues('Arsinh', ops[0]),
         evaluate: (ce, ops) =>
           constructibleValues('Arsinh', ops[0]) ?? evalTrig('Arsinh', ops[0]),
@@ -230,6 +239,7 @@ export const TRIGONOMETRY_LIBRARY: IdentifierDefinitions[] = [
       threadable: true,
       signature: {
         domain: hyperbolicFunction('Artanh'),
+        sgn: (ce, ops) => trigSign('Artanh', ops[0]),
         simplify: (ce, ops) => constructibleValues('Artanh', ops[0]),
         evaluate: (ce, ops) =>
           constructibleValues('Artanh', ops[0]) ?? evalTrig('Artanh', ops[0]),
@@ -242,6 +252,7 @@ export const TRIGONOMETRY_LIBRARY: IdentifierDefinitions[] = [
       threadable: true,
       signature: {
         domain: hyperbolicFunction('Cosh'),
+        sgn: (ce, ops) => trigSign('Cosh', ops[0]),
         simplify: (ce, ops) => constructibleValues('Cosh', ops[0]),
         evaluate: (ce, ops) =>
           constructibleValues('Cosh', ops[0]) ?? evalTrig('Cosh', ops[0]),
@@ -254,6 +265,7 @@ export const TRIGONOMETRY_LIBRARY: IdentifierDefinitions[] = [
       threadable: true,
       signature: {
         domain: trigFunction('Cot'),
+        sgn: (ce, ops) => trigSign('Cot', ops[0]),
         simplify: (ce, ops) => constructibleValues('Cot', ops[0]),
         evaluate: (ce, ops) =>
           constructibleValues('Cot', ops[0]) ?? evalTrig('Cot', ops[0]),
@@ -267,6 +279,7 @@ export const TRIGONOMETRY_LIBRARY: IdentifierDefinitions[] = [
       threadable: true,
       signature: {
         domain: trigFunction('Csc'),
+        sgn: (ce, ops) => trigSign('Csc', ops[0]),
         simplify: (ce, ops) => constructibleValues('Csc', ops[0]),
         evaluate: (ce, ops) =>
           constructibleValues('Csc', ops[0]) ?? evalTrig('Csc', ops[0]),
@@ -280,6 +293,7 @@ export const TRIGONOMETRY_LIBRARY: IdentifierDefinitions[] = [
       threadable: true,
       signature: {
         domain: trigFunction('Sec'),
+        sgn: (ce, ops) => trigSign('Sec', ops[0]),
         simplify: (ce, ops) => constructibleValues('Sec', ops[0]),
         evaluate: (ce, ops) =>
           constructibleValues('Sec', ops[0]) ?? evalTrig('Sec', ops[0]),
@@ -293,6 +307,7 @@ export const TRIGONOMETRY_LIBRARY: IdentifierDefinitions[] = [
       threadable: true,
       signature: {
         domain: hyperbolicFunction('Sinh'),
+        sgn: (ce, ops) => trigSign('Sinh', ops[0]),
         simplify: (ce, ops) => constructibleValues('Sinh', ops[0]),
         evaluate: (ce, ops) =>
           constructibleValues('Sinh', ops[0]) ?? evalTrig('Sinh', ops[0]),
@@ -326,6 +341,7 @@ export const TRIGONOMETRY_LIBRARY: IdentifierDefinitions[] = [
       threadable: true,
       signature: {
         domain: domainNumberToRealNumber('Csch'),
+        sgn: (ce, ops) => trigSign('Csch', ops[0]),
         simplify: (ce, ops) => constructibleValues('Csch', ops[0]),
         evaluate: (ce, ops) =>
           constructibleValues('Csch', ops[0]) ?? evalTrig('Csch', ops[0]),
@@ -338,6 +354,7 @@ export const TRIGONOMETRY_LIBRARY: IdentifierDefinitions[] = [
       threadable: true,
       signature: {
         domain: ['FunctionOf', 'Numbers', 'Numbers'],
+        sgn: (ce, ops) => trigSign('Sech', ops[0]),
         simplify: (ce, ops) => constructibleValues('Sech', ops[0]),
         evaluate: (ce, ops) =>
           constructibleValues('Sech', ops[0]) ?? evalTrig('Sech', ops[0]),
@@ -351,6 +368,7 @@ export const TRIGONOMETRY_LIBRARY: IdentifierDefinitions[] = [
       threadable: true,
       signature: {
         domain: hyperbolicFunction('Tanh'),
+        sgn: (ce, ops) => trigSign('Tanh', ops[0]),
         simplify: (ce, ops) => constructibleValues('Tanh', ops[0]),
         evaluate: (ce, ops) =>
           constructibleValues('Tanh', ops[0]) ?? evalTrig('Tanh', ops[0]),
@@ -364,6 +382,7 @@ export const TRIGONOMETRY_LIBRARY: IdentifierDefinitions[] = [
       threadable: true,
       signature: {
         domain: domainNumberToRealNumber('Arccos'),
+        sgn: (ce, ops) => trigSign('Arccos', ops[0]),
         simplify: (ce, ops) => constructibleValues('Arccos', ops[0]),
         evaluate: (ce, ops) =>
           constructibleValues('Arccos', ops[0]) ?? evalTrig('Arccos', ops[0]),
@@ -376,6 +395,7 @@ export const TRIGONOMETRY_LIBRARY: IdentifierDefinitions[] = [
       threadable: true,
       signature: {
         domain: domainNumberToRealNumber('Arccot'),
+        sgn: (ce, ops) => trigSign('Arccot', ops[0]),
         simplify: (ce, ops) => constructibleValues('Arccot', ops[0]),
         evaluate: (ce, ops) =>
           constructibleValues('Arccot', ops[0]) ?? evalTrig('Arccot', ops[0]),
@@ -388,6 +408,7 @@ export const TRIGONOMETRY_LIBRARY: IdentifierDefinitions[] = [
       threadable: true,
       signature: {
         domain: domainNumberToRealNumber('Arcoth'),
+        sgn: (ce, ops) => trigSign('Arcoth', ops[0]),
         simplify: (ce, ops) => constructibleValues('Arcoth', ops[0]),
         evaluate: (ce, ops) =>
           constructibleValues('Arcoth', ops[0]) ?? evalTrig('Arcoth', ops[0]),
@@ -400,6 +421,7 @@ export const TRIGONOMETRY_LIBRARY: IdentifierDefinitions[] = [
       threadable: true,
       signature: {
         domain: domainNumberToRealNumber('Arcsch'),
+        sgn: (ce, ops) => trigSign('Arcsch', ops[0]),
         simplify: (ce, ops) => constructibleValues('Arcsch', ops[0]),
         evaluate: (ce, ops) =>
           constructibleValues('Arcsch', ops[0]) ?? evalTrig('Arcsch', ops[0]),
@@ -412,6 +434,7 @@ export const TRIGONOMETRY_LIBRARY: IdentifierDefinitions[] = [
       threadable: true,
       signature: {
         domain: domainNumberToRealNumber('Arcsec'),
+        sgn: (ce, ops) => trigSign('Arcsec', ops[0]),
         simplify: (ce, ops) => constructibleValues('Arcsec', ops[0]),
         evaluate: (ce, ops) =>
           constructibleValues('Arcsec', ops[0]) ?? evalTrig('Arcsec', ops[0]),
@@ -424,6 +447,7 @@ export const TRIGONOMETRY_LIBRARY: IdentifierDefinitions[] = [
       threadable: true,
       signature: {
         domain: domainNumberToRealNumber('Arsech'),
+        sgn: (ce, ops) => trigSign('Arsech', ops[0]),
         simplify: (ce, ops) => constructibleValues('Arsech', ops[0]),
         evaluate: (ce, ops) =>
           constructibleValues('Arsech', ops[0]) ?? evalTrig('Arsech', ops[0]),
@@ -436,6 +460,7 @@ export const TRIGONOMETRY_LIBRARY: IdentifierDefinitions[] = [
       threadable: true,
       signature: {
         domain: domainNumberToRealNumber('Arccsc'),
+        sgn: (ce, ops) => trigSign('Arccsc', ops[0]),
         simplify: (ce, ops) => constructibleValues('Arccsc', ops[0]),
         evaluate: (ce, ops) =>
           constructibleValues('Arccsc', ops[0]) ?? evalTrig('Arccsc', ops[0]),
@@ -448,6 +473,7 @@ export const TRIGONOMETRY_LIBRARY: IdentifierDefinitions[] = [
       threadable: true,
       signature: {
         domain: hyperbolicFunction('Coth'),
+        sgn: (ce, ops) => trigSign('Coth', ops[0]),
         simplify: (ce, ops) => constructibleValues('Coth', ops[0]),
         evaluate: (ce, ops) =>
           constructibleValues('Coth', ops[0]) ?? evalTrig('Coth', ops[0]),
