@@ -795,17 +795,12 @@ export const DEFINITIONS_CORE: LatexDictionary = [
       const sym = symbol(lhs);
       if (!sym || parser.getIdentifierType(sym) !== 'function') return null;
 
-      const start = parser.index;
       parser.addBoundary([')']);
       const expr = parser.parseExpression(until);
-      if (!parser.matchBoundary()) {
-        parser.index = start;
-        return null;
-      }
-      if (!parser.match('<}>')) {
-        parser.index = start;
-        return null;
-      }
+      if (!parser.matchBoundary()) return null;
+
+      if (!parser.match('<}>')) return null;
+
       return ['Derivative', lhs, expr] as Expression;
     },
   },
@@ -824,16 +819,12 @@ export const DEFINITIONS_CORE: LatexDictionary = [
       // \tripleprime in the superscript. Account for them.
 
       let primeCount = 0;
-      const start = parser.index;
       while (!parser.atEnd && !parser.match('<}>')) {
         if (parser.match("'")) primeCount++;
         else if (parser.match('\\prime')) primeCount++;
         else if (parser.match('\\doubleprime')) primeCount += 2;
         else if (parser.match('\\tripleprime')) primeCount += 3;
-        else {
-          parser.index = start;
-          return null;
-        }
+        else return null;
       }
       if (primeCount === 1) return ['Derivative', ['InverseFunction', lhs]];
       if (primeCount > 0)
@@ -1220,7 +1211,6 @@ function parseBrackets(
  * Optionally, they may include a step, e.g. `1, 3..10`.
  */
 function parseRange(parser: Parser, lhs: Expression): Expression | null {
-  const index = parser.index;
   if (!lhs) return null;
 
   // Is there a step implied? e.g. "1,3..10"
@@ -1230,19 +1220,13 @@ function parseRange(parser: Parser, lhs: Expression): Expression | null {
     if (nops(lhs) !== 2) return null;
     start = operand(lhs, 1);
     second = operand(lhs, 2);
-    if (second === null) {
-      parser.index = index;
-      return null;
-    }
+    if (second === null) return null;
   } else start = operand(lhs, 1);
 
   if (start === null || start === undefined) return null;
 
   const end = parser.parseExpression({ minPrec: 0 });
-  if (!end) {
-    parser.index = index;
-    return null;
-  }
+  if (!end) return null;
 
   // Is there an implied step?
   if (second) {
@@ -1295,8 +1279,6 @@ export function latexToDelimiterShorthand(s: string): string | undefined {
 }
 
 function parseAssign(parser: Parser, lhs: Expression): Expression | null {
-  const index = parser.index;
-
   // Do we have an assignment of the form `f(x) := ...`?
   if (
     operator(lhs) === 'InvisibleOperator' &&
@@ -1307,10 +1289,7 @@ function parseAssign(parser: Parser, lhs: Expression): Expression | null {
     if (!fn) return null;
 
     const rhs = parser.parseExpression({ minPrec: 0 });
-    if (rhs === null) {
-      parser.index = index;
-      return null;
-    }
+    if (rhs === null) return null;
 
     const delimBody = operand(operand(lhs, 2), 1);
     let args: Expression[] = [];
@@ -1326,20 +1305,15 @@ function parseAssign(parser: Parser, lhs: Expression): Expression | null {
   if (fn) {
     const args = operands(lhs);
     const rhs = parser.parseExpression({ minPrec: 0 });
-    if (rhs === null) {
-      parser.index = index;
-      return null;
-    }
+    if (rhs === null) return null;
+
     return ['Assign', fn, ['Function', rhs, ...args]];
   }
 
   if (!symbol(lhs)) return null;
 
   const rhs = parser.parseExpression({ minPrec: 0 });
-  if (rhs === null) {
-    parser.index = index;
-    return null;
-  }
+  if (rhs === null) return null;
 
   return ['Assign', lhs, rhs];
 }
@@ -1369,20 +1343,13 @@ function parseAt(...close: string[]): (parser, lhs) => Expression | null {
   return (parser: Parser, lhs: Expression): Expression | null => {
     // If the lhs is a symbol or a List literal...
     if (!symbol(lhs) && operator(lhs) !== 'List') return null;
-    const index = parser.index;
 
     let rhs: Expression | null = null;
     if (close.length === 0) rhs = parser.parseGroup();
     rhs ??= parser.parseExpression({ minPrec: 0 });
-    if (rhs === null) {
-      parser.index = index;
-      return null;
-    }
+    if (rhs === null) return null;
 
-    if (close.length > 0 && !parser.matchAll(close)) {
-      parser.index = index;
-      return null;
-    }
+    if (close.length > 0 && !parser.matchAll(close)) return null;
 
     if (operator(rhs) === 'Delimiter') rhs = operand(rhs, 1) ?? ['Sequence'];
     if (operator(rhs) === 'Sequence') return ['At', lhs, ...operands(rhs)];

@@ -354,10 +354,8 @@ function parseQuantifier(
       }
       if (parser.match('(')) {
         const body = parser.parseExpression(terminator);
-        if (!parser.match(')')) {
-          parser.index = index;
-          return null;
-        }
+        if (!parser.match(')')) return null;
+
         return [kind, id, missingIfEmpty(body)];
       }
     }
@@ -367,10 +365,8 @@ function parseQuantifier(
     //
     parser.index = index;
     const condition = parser.parseExpression(terminator);
-    if (!condition) {
-      parser.index = index;
-      return null;
-    }
+    if (!condition) return null;
+
     // Either a separator or a parenthesis
     parser.skipSpace();
     if (parser.matchAny([',', '\\mid', ':', '\\colon'])) {
@@ -379,14 +375,10 @@ function parseQuantifier(
     }
     if (parser.match('(')) {
       const body = parser.parseExpression(terminator);
-      if (!parser.match(')')) {
-        parser.index = index;
-        return null;
-      }
+      if (!parser.match(')')) return null;
       return [kind, condition, missingIfEmpty(body)] as Expression;
     }
 
-    parser.index = index;
     return null;
   };
 }
