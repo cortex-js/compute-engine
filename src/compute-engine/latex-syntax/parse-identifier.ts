@@ -113,21 +113,15 @@ function parseIdentifierToken(
 function parseIdentifierBody(parser: Parser): string | null {
   let id = matchPrefixedIdentifier(parser);
 
-  const start = parser.index;
-
   const prefix = IDENTIFIER_MODIFIER[parser.peek] ?? null;
 
   if (prefix) {
     parser.nextToken();
-    if (!parser.match('<{>')) {
-      parser.index = start;
-      return null;
-    }
+    if (!parser.match('<{>')) return null;
+
     const body = parseIdentifierBody(parser);
-    if (body === null || !parser.match('<}>')) {
-      parser.index = start;
-      return null;
-    }
+    if (body === null || !parser.match('<}>')) return null;
+
     id = `${body}${prefix}`;
   }
 
@@ -140,10 +134,7 @@ function parseIdentifierBody(parser: Parser): string | null {
       const token = parser.peek;
       if (token === '<}>' || token === '_' || token === '^') break;
       const next = parseIdentifierToken(parser, { toplevel: false });
-      if (next === null) {
-        parser.index = start;
-        return null;
-      }
+      if (next === null) return null;
       id += next;
     }
     // If we're immediately followed by a sequence of digits, capture them
@@ -168,18 +159,12 @@ function parseIdentifierBody(parser: Parser): string | null {
     if (parser.match('_')) {
       const hasBrace = parser.match('<{>');
       const sub = parseIdentifierBody(parser);
-      if ((hasBrace && !parser.match('<}>')) || sub === null) {
-        parser.index = start;
-        return null;
-      }
+      if ((hasBrace && !parser.match('<}>')) || sub === null) return null;
       subs.push(sub);
     } else if (parser.match('^')) {
       const hasBrace = parser.match('<{>');
       const sup = parseIdentifierBody(parser);
-      if ((hasBrace && !parser.match('<}>')) || sup === null) {
-        parser.index = start;
-        return null;
-      }
+      if ((hasBrace && !parser.match('<}>')) || sup === null) return null;
       sups.push(sup);
     } else break;
   }
@@ -202,8 +187,6 @@ function parseIdentifierBody(parser: Parser): string | null {
  * - an identifier with modifiers as subscripts/superscript: `\mathrm{\alpha_{12}}` or `\mathit{speed\unicode{"2012}of\unicode{"2012}sound}`
  */
 function matchPrefixedIdentifier(parser: Parser): string | null {
-  const start = parser.index;
-
   //
   // Is it a prefix identifier, e.g. `\\mathrm{abc}`?
   //
@@ -235,10 +218,7 @@ function matchPrefixedIdentifier(parser: Parser): string | null {
     }
 
     body += parseIdentifierBody(parser);
-    if (body === null || !parser.match('<}>')) {
-      parser.index = start;
-      return null;
-    }
+    if (body === null || !parser.match('<}>')) return null;
     // Multi-character identifiers do not need a prefix
     // if they are upright (that's their default presentation)
     if (prefix === '_upright' && body.length > 1) return body;
@@ -248,7 +228,6 @@ function matchPrefixedIdentifier(parser: Parser): string | null {
   //
   // Not a prefixed identifier
   //
-  parser.index = start;
   return null;
 }
 
@@ -258,10 +237,8 @@ function matchPrefixedIdentifier(parser: Parser): string | null {
 export function parseInvalidIdentifier(parser: Parser): Expression | null {
   const start = parser.index;
   const id = matchPrefixedIdentifier(parser);
-  if (id === null || isValidIdentifier(id)) {
-    parser.index = start;
-    return null;
-  }
+  if (id === null || isValidIdentifier(id)) return null;
+
   return parser.error(
     ['invalid-identifier', { str: validateIdentifier(id) }],
     start
@@ -313,7 +290,6 @@ export function parseIdentifier(parser: Parser): MathJsonIdentifier | null {
   //
   // Is it a prefixed, identifier?
   //
-  const start = parser.index;
   let id = matchPrefixedIdentifier(parser);
 
   //
@@ -330,6 +306,7 @@ export function parseIdentifier(parser: Parser): MathJsonIdentifier | null {
   // Is it a single-token identifier?
   // (other than a letter, it could be a command, e.g. \alpha)
   //
+  const index = parser.index;
   id ??= parseIdentifierToken(parser, { toplevel: true });
 
   if (id) {
@@ -340,7 +317,6 @@ export function parseIdentifier(parser: Parser): MathJsonIdentifier | null {
   //
   // Not a valid identifier
   //
-
-  parser.index = start;
+  parser.index = index;
   return null;
 }
