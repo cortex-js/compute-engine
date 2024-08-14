@@ -584,7 +584,9 @@ export class BoxedSymbol extends _BoxedExpression {
     if (rhs.symbol !== null) return rhs.symbol === this._id;
 
     // Mathematical/numeric equality
-    const lhsVal = this.symbolDefinition?.value?.N();
+    const lhsVal = this.isZero
+      ? this.engine.Zero
+      : this.symbolDefinition?.value?.N();
     if (lhsVal) return lhsVal.isEqual(rhs.N());
 
     if (rhs.isZero) {
@@ -613,7 +615,9 @@ export class BoxedSymbol extends _BoxedExpression {
       return false;
 
     // Mathematical/numeric equality
-    const lhsVal = this.symbolDefinition?.value?.N();
+    const lhsVal = this.isZero
+      ? this.engine.Zero
+      : this.symbolDefinition?.value?.N();
     if (lhsVal) return lhsVal.isLess(rhs);
 
     if (rhs === 0 || (typeof rhs !== 'number' && rhs.isZero)) {
@@ -638,7 +642,9 @@ export class BoxedSymbol extends _BoxedExpression {
       return true;
 
     // Mathematical/numeric equality
-    const lhsVal = this.symbolDefinition?.value?.N();
+    const lhsVal = this.isZero
+      ? this.engine.Zero
+      : this.symbolDefinition?.value?.N();
     if (lhsVal) return lhsVal.isLessEqual(rhs);
 
     if (rhs === 0 || (typeof rhs !== 'number' && rhs.isZero)) {
@@ -661,7 +667,10 @@ export class BoxedSymbol extends _BoxedExpression {
       return false;
 
     // Mathematical/numeric equality
-    const lhsVal = this.symbolDefinition?.value?.N();
+
+    const lhsVal = this.isZero
+      ? this.engine.Zero
+      : this.symbolDefinition?.value?.N();
     if (lhsVal) return lhsVal.isGreater(rhs);
 
     if (rhs === 0 || (typeof rhs !== 'number' && rhs.isZero)) {
@@ -686,7 +695,9 @@ export class BoxedSymbol extends _BoxedExpression {
       return true;
 
     // Mathematical/numeric equality
-    const lhsVal = this.symbolDefinition?.value?.N();
+    const lhsVal = this.isZero
+      ? this.engine.Zero
+      : this.symbolDefinition?.value?.N();
     if (lhsVal) return lhsVal.isGreaterEqual(rhs);
 
     if (rhs === 0 || (typeof rhs !== 'number' && rhs.isZero)) {
