@@ -255,6 +255,18 @@ const FUNCTIONS: Record<
       .join(', ')}) |-> {${serialize(expr.op1)}}`,
 
   Domain: (expr: BoxedExpression) => JSON.stringify(expr.json),
+  Error: (expr: BoxedExpression, serialize) => {
+    if (expr.nops === 1) return `Error(${serialize(expr.op1)})`;
+    if (expr.nops === 2) {
+      if (expr.op1.string)
+        return `Error("${expr.op1.string}", ${serialize(expr.op2)})`;
+      return `Error(${serialize(expr.op1)}, ${serialize(expr.op2)})`;
+    }
+    return `Error(${expr.ops!.map((x) => serialize(x)).join(', ')})`;
+  },
+  LatexString: (expr: BoxedExpression) => {
+    return `"${expr.op1.string ?? ''}"`;
+  },
 };
 
 function bigOp(
