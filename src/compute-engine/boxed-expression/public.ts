@@ -1722,7 +1722,7 @@ export type BoxedRule = {
 };
 
 /** @category Rules */
-export type BoxedRuleSet = Iterable<BoxedRule>;
+export type BoxedRuleSet = ReadonlyArray<BoxedRule>;
 
 /**
  * @noInheritDoc
