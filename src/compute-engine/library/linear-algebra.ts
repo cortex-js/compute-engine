@@ -57,7 +57,9 @@ export const LINEAR_ALGEBRA_LIBRARY: IdentifierDefinitions[] = [
       },
     },
 
+    
     Rank: {
+      description: "The length of the shape of the expression. Note this is not the matrix rank (the number of linearly independent rows or columns in the matrix)",
       complexity: 8200,
       signature: {
         domain: ['FunctionOf', 'Values', 'Numbers'],
