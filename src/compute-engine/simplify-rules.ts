@@ -199,7 +199,7 @@ export const SIMPLIFY_RULES: Rule[] = [
   '|\\coth(x)| -> \\coth(|x|)',
   '|\\csch(x)| -> \\csch(|x|)',
   '|\\arcsinh(x)| -> \\arcsinh(|x|)',
-  '|\\arctanh(x)| -> \\arctanh(|x|)',
+  '|\\artanh(x)| -> \\artanh(|x|)',
   '|\\arccoth(x)| -> \\arccoth(|x|)',
   '|\\arccsch(x)| -> \\arccsch(|x|)',
 
@@ -395,7 +395,7 @@ export const SIMPLIFY_RULES: Rule[] = [
   '\\arccosh(-\\infty) -> \\operatorname{NaN}',
 
   {
-    match: '\\arctanh(x)',
+    match: '\\artanh(x)',
     replace: '\\operatorname{NaN}',
     condition: (id) => id._x.isInfinity === true,
   },
