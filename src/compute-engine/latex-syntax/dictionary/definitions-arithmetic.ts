@@ -1012,13 +1012,8 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
       // not a Negate
       if (/\d/.test(parser.peek)) return null;
 
-      const index = parser.index;
-
       // If the next token is a number, it's not a Negate, backtrack
-      if (parser.parseNumber() !== null) {
-        parser.index = index;
-        return null;
-      }
+      if (parser.parseNumber() !== null) return null;
 
       const rhs = parser.parseExpression({
         ...terminator,
@@ -1190,7 +1185,8 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
         ...terminator,
         minPrec: ADDITION_PRECEDENCE + 3,
       });
-      return ['Add', lhs, missingIfEmpty(rhs)] as Expression;
+      if (rhs === null) return null;
+      return ['Add', lhs, rhs] as Expression;
     },
     serialize: (serializer, expr) => {
       const lhs = serializer.wrap(operand(expr, 1), ADDITION_PRECEDENCE + 2);
@@ -1298,7 +1294,7 @@ function serializeBigOp(command: string) {
 function parseLog(command: string, parser: Parser): Expression | null {
   let sub: Expression | null = null;
 
-  if (parser.match('_')) sub = parser.parseGroup() ?? parser.nextToken();
+  if (parser.match('_')) sub = parser.parseGroup() ?? parser.parseToken();
 
   const args = parser.parseArguments('implicit');
 
