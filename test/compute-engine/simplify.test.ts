@@ -26,7 +26,7 @@ export type TestCase =
   | [
       input: Expression | string,
       expected: Expression | string,
-      comment?: string
+      comment?: string,
     ]
   | [heading: string];
 
@@ -183,7 +183,7 @@ const RULE_TEST_CASES: TestCase[] = [
   ['e e^x e^{-x}', 'e'], // 🙁 e * e^x * e^(-x)
   ['e^x e^{-x}', 1], // 🙁 e^x * e^(-x)
   [['Add', 1, 2, 1.0001], 4.0001],
-  ['\\sqrt{3}(\\sqrt2x + x)', '(\\sqrt3+\\sqrt6)x'], // 🙁 4.18154055035205529353 * x
+  ['\\sqrt{3}(\\sqrt2x + x)', '(\\sqrt3+\\sqrt6)x'],
   ['\\sqrt[4]{16b^{4}}', '2b'], // 🙁 root(16b^4)(4)
 
   [
@@ -230,13 +230,13 @@ const RULE_TEST_CASES: TestCase[] = [
   ],
   ['x/x', 'x/x'],
   ['\\pi/\\pi', 1],
-  ['(\\pi+1)/(\\pi+1)', 1], // 🙁 1 / (1 + pi) + pi / (1 + pi)
+  ['(\\pi+1)/(\\pi+1)', 1],
   ['1/(1/0)', NaN],
   ['1/(1/\\pi)', '\\pi'],
   ['1/(1/x)', '1/(1/x)'],
   ['y/(1/2)', '2*y'],
   ['x/(1/(-\\pi))', '-\\pi * x'],
-  ['x/(a/\\pi)', '\\pi * x/a'], // 🙁 (pi * x) / a
+  ['x/(a/\\pi)', '\\pi * x/a'],
   ['x/(a/b)', 'x/(a/b)'],
   ['(x/y)/(\\pi/2)', '(2*x)/(\\pi * y)'],
   ['2/3*5/x', '10/(3*x)'],
@@ -344,7 +344,7 @@ const RULE_TEST_CASES: TestCase[] = [
   ['|\\infty|', '\\infty'],
   ['|-\\infty|', '\\infty'],
   ['|-x|', '|x|'], // 🙁 |-x|
-  ['|-\\pi|', '|\\pi|'], // 🙁 |-pi|
+  ['|-\\pi|', '\\pi'],
   ['|\\pi * x|', '\\pi * x'], // 🙁 |pi * x|
   ['|\\frac{x}{\\pi}|', '\\frac{|x|}{\\pi}'], // 🙁 |x / pi|
   ['|\\frac{2}{x}|', '\\frac{2}{|x|}'], // 🙁 |2 / x|
@@ -625,7 +625,7 @@ const RULE_TEST_CASES: TestCase[] = [
     //
   `,
   ],
-  ['x/(\\pi/2)^3', '8x/\\pi^3'], // 🙁 (8x) / pi^3
+  ['x/(\\pi/2)^3', '8x/\\pi^3'],
   ['x/(\\pi/y)^3', 'x/(\\pi/y)^3'],
 
   [
