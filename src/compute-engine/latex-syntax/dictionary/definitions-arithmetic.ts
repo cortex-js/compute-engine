@@ -1007,7 +1007,7 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
     latexTrigger: ['-'],
     kind: 'prefix',
     precedence: ADDITION_PRECEDENCE + 2,
-    parse: (parser, terminator) => {
+    parse: (parser, terminator): Expression | null => {
       // Quick check if the next token is a digit, if so, it's a number
       // not a Negate
       if (/\d/.test(parser.peek)) return null;
@@ -1024,7 +1024,12 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
         ...terminator,
         minPrec: ADDITION_PRECEDENCE + 3,
       });
-      return ['Negate', missingIfEmpty(rhs)] as Expression;
+
+      // If we did not see a valid rhs, this may not be a negate, for example
+      // "->" is not a negate, so return null
+      if (rhs === null) return null;
+
+      return ['Negate', rhs];
     },
   },
   // {
