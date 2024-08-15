@@ -19,8 +19,9 @@ export type AsciiMathOptions = {
 };
 
 const SYMBOLS = {
-  PositiveInfinity: 'oo',
+  PositiveInfinity: '+oo',
   NegativeInfinity: '-oo',
+  ComplexInfinity: '~oo',
   Pi: 'pi',
   ExponentialE: 'e',
   ImaginaryUnit: 'i',
