@@ -187,24 +187,11 @@ export function factorial2(n: number): number {
   return result;
 }
 
-export function chop(n: number, tolerance: number): number;
-export function chop(n: Decimal, tolerance: number): 0 | Decimal;
-export function chop(n: Complex, tolerance: number): 0 | Complex;
 export function chop(
-  n: number | Decimal | Complex,
-  tolerance: number
+  n: number,
+  tolerance = MACHINE_TOLERANCE
 ): 0 | number | Decimal | Complex {
   if (typeof n === 'number' && Math.abs(n) <= tolerance) return 0;
-
-  if (n instanceof Decimal && n.abs().lte(tolerance)) return 0;
-
-  if (
-    n instanceof Complex &&
-    Math.abs(n.re) <= tolerance &&
-    Math.abs(n.im) <= tolerance
-  )
-    return 0;
-
   return n;
 }
 
