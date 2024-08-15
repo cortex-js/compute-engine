@@ -757,6 +757,7 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
           const [base, exp] = args;
           return canonicalRoot(base, exp);
         },
+        simplify: (ce, ops) => ops[0].pow(ops[1]),
         evaluate: (ce, ops) => ops[0].root(ops[1]),
         N: (ce, ops) => ops[0].root(ops[1]),
       },

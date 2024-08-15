@@ -94,6 +94,11 @@ export abstract class _BoxedExpression implements BoxedExpression {
     if (this.symbol === 'NaN') return NaN;
     if (this.symbol === 'PositiveInfinity') return Infinity;
     if (this.symbol === 'NegativeInfinity') return -Infinity;
+    if (this.isInfinity) {
+      if (this.isPositive) return Infinity;
+      if (this.isNegative) return -Infinity;
+      return NaN;
+    }
     if (typeof this.string === 'string') return this.string;
     if (typeof this.symbol === 'string') return this.symbol;
     if (this.im === 0) return this.re ?? this.toString();

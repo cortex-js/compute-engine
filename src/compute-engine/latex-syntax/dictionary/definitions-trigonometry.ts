@@ -122,6 +122,12 @@ export const DEFINITIONS_TRIGONOMETRY: LatexDictionary = [
     parse: parseTrig('Arccot'),
   },
   {
+    name: 'Arcoth',
+    identifierTrigger: 'arcoth',
+
+    parse: parseTrig('Arccot'),
+  },
+  {
     name: 'Arcsec',
     latexTrigger: ['\\arcsec'],
 

@@ -250,6 +250,14 @@ export class BoxedNumber extends _BoxedExpression {
     if (e === -1) return this.inv();
     if (exp === 0.5) return this.sqrt();
     if (exp === -0.5) return this.sqrt().inv();
+    if (e === Number.POSITIVE_INFINITY) {
+      if (this.isGreater(1)) return ce.PositiveInfinity;
+      if (this.isPositive && this.isLess(1)) return ce.Zero;
+    }
+    if (e === Number.NEGATIVE_INFINITY) {
+      if (this.isGreater(1)) return ce.Zero;
+      if (this.isPositive && this.isLess(1)) return ce.PositiveInfinity;
+    }
 
     if (exp === 2) {
       if (typeof this._value === 'number')

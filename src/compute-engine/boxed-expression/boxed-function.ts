@@ -620,6 +620,15 @@ export class BoxedFunction extends _BoxedExpression {
     if (e === 0) return this.engine.One;
     if (e === 1) return this;
     if (e === -1) return this.inv();
+    const ce = this.engine;
+    if (e === Number.POSITIVE_INFINITY) {
+      if (this.isGreater(1)) return ce.PositiveInfinity;
+      if (this.isPositive && this.isLess(1)) return ce.Zero;
+    }
+    if (e === Number.NEGATIVE_INFINITY) {
+      if (this.isGreater(1)) return ce.Zero;
+      if (this.isPositive && this.isLess(1)) return ce.PositiveInfinity;
+    }
 
     if (typeof exp !== 'number' && exp.operator === 'Negate')
       return this.pow(exp.op1).inv();

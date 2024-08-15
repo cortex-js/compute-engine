@@ -57,7 +57,7 @@ const DERIVATIVES_TABLE = {
     'Negate',
     ['Power', ['Multiply', '2', 'Add', ['Power', '_', 2]], ['Negate', 'Half']],
   ],
-  Arccoth: ['Negate', ['Power', ['Subtract', 1, ['Power', '_', 2]], -1]],
+  Arcoth: ['Negate', ['Power', ['Subtract', 1, ['Power', '_', 2]], -1]],
   // Exp: ['Exp', '_'],   // Gets canonicalized to Power
   Ln: ['Divide', 1, '_'],
   Log: ['Power', ['Multiply', '_', ['Ln', '10']], -1],

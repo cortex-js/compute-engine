@@ -189,9 +189,15 @@ export class BoxedSymbol extends _BoxedExpression {
 
     if (this.symbol === 'ImaginaryUnit')
       return [ce._numericValue({ re: 0, im: 1 }), ce.One];
-    if (this.symbol === 'PositiveInfinity')
+    if (
+      this.symbol === 'PositiveInfinity' ||
+      (this.isInfinity && this.isPositive)
+    )
       return [ce._numericValue(Infinity), ce.One];
-    if (this.symbol === 'NegativeInfinity')
+    if (
+      this.symbol === 'NegativeInfinity' ||
+      (this.isInfinity && this.isNegative)
+    )
       return [ce._numericValue(-Infinity), ce.One];
     if (this.symbol === 'NaN') return [ce._numericValue(NaN), ce.One];
 
@@ -252,6 +258,14 @@ export class BoxedSymbol extends _BoxedExpression {
     if (e === -1) return this.inv();
     if (e === 0.5) return this.sqrt();
     if (e === -0.5) return this.sqrt().inv();
+    if (e === Number.POSITIVE_INFINITY) {
+      if (this.isGreater(1)) return ce.PositiveInfinity;
+      if (this.isPositive && this.isLess(1)) return ce.Zero;
+    }
+    if (e === Number.NEGATIVE_INFINITY) {
+      if (this.isGreater(1)) return ce.Zero;
+      if (this.isPositive && this.isLess(1)) return ce.PositiveInfinity;
+    }
 
     if (typeof exp !== 'number') {
       if (exp.operator === 'Negate') return this.pow(exp.op1).inv();

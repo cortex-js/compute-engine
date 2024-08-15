@@ -133,8 +133,11 @@ export function signDiff(
 
   // In general, it is impossible to always prove equality
   // (Richardson's theorem) but this works often...
-  if (lhsNum === null || rhsNum === null)
-    return lhs.sub(rhs).N().sgn ?? undefined;
+  if (lhsNum === null || rhsNum === null) {
+    const s = lhs.sub(rhs).N().sgn;
+    if (s == undefined || isNaN(s)) return undefined;
+    return s as -1 | 0 | 1;
+  }
 
   tolerance ??= lhs.engine.tolerance;
 

@@ -336,16 +336,6 @@ export function canonicalMultiply(
       op = a;
     }
 
-    if (op.symbol === 'PositiveInfinity') {
-      infinityCount += 1;
-      continue;
-    }
-    if (op.symbol === 'NegativeInfinity') {
-      infinityCount += 1;
-      sign = -sign;
-      continue;
-    }
-
     if (op.isZero) {
       isZero = true;
       continue;
@@ -362,6 +352,21 @@ export function canonicalMultiply(
     if (op.symbol === 'ImaginaryUnit') {
       xs.push(ce.number(ce.complex(0, 1)));
       continue;
+    }
+
+    if (op.symbol === 'PositiveInfinity') {
+      infinityCount += 1;
+      continue;
+    }
+    if (op.symbol === 'NegativeInfinity') {
+      infinityCount += 1;
+      sign = -sign;
+      continue;
+    }
+
+    if (op.isInfinity) {
+      if (op.isNegative) sign = -sign;
+      infinityCount += 1;
     }
 
     let v = op.numericValue;
