@@ -647,7 +647,10 @@ export class BoxedFunction extends _BoxedExpression {
 
     if (this.operator === 'Negate') {
       // (-x)^n = (-1)^n x^n
-      if (e !== undefined && e % 2 === 0) return this.op1.pow(exp).neg();
+      if (e !== undefined) {
+        if (e % 2 === 0) return this.op1.pow(exp);
+        return this.op1.pow(exp).neg();
+      }
     }
 
     // (√a)^b -> a^(b/2) or √(a^b)
@@ -663,8 +666,8 @@ export class BoxedFunction extends _BoxedExpression {
     // (a*b)^c -> a^c * b^c
     if (this.operator === 'Multiply') {
       const ops = this.ops.map((x) => x.pow(exp));
-      // return mul(...ops);
-      return this.engine._fn('Multiply', ops);
+      return mul(...ops);
+      // return this.engine._fn('Multiply', ops);
     }
 
     // a^(b/c) -> root(a, c)^b if b = 1 or c = 1
@@ -700,9 +703,59 @@ export class BoxedFunction extends _BoxedExpression {
     if (e === -1) return this.inv();
     if (e === 2) return this.engine.function('Sqrt', [this]);
 
+    // root(a^b, c) -> a^(b/c)
     if (this.operator === 'Power' && e !== undefined) {
       const [base, power] = this.ops;
       return base.pow(power.div(e));
+    }
+
+    if (this.operator === 'Divide') {
+      const [num, denom] = this.ops;
+      return num.root(exp).div(denom.root(exp));
+    }
+
+    // (-x)^n = (-1)^n x^n
+    if (this.operator === 'Negate') {
+      if (e !== undefined) {
+        if (e % 2 === 0) return this.op1.root(exp);
+        return this.op1.root(exp).neg();
+      }
+    }
+
+    // (√a)^b -> a^(b/2) or √(a^b)
+    if (this.operator === 'Sqrt') {
+      if (e !== undefined) return this.op1.root(e + 2);
+      if (typeof exp !== 'number') return this.op1.root(exp.add(2));
+    }
+
+    if (this.operator === 'Multiply') {
+      const ops = this.ops.map((x) => x.root(exp));
+      return mul(...ops);
+    }
+
+    if (this.operator === 'Root') {
+      const [base, root] = this.ops;
+      return base.root(root.mul(exp));
+    }
+
+    if (this.isNumberLiteral) {
+      const v = this.numericValue!;
+      if (typeof v === 'number') {
+        if (v < 0) return this.engine.NaN;
+        if (v === 0) return this.engine.Zero;
+        if (v === 1) return this.engine.One;
+        if (e !== undefined) {
+          const r = this.engine.number(Math.pow(v, 1 / e));
+          if (!r.isFinite || r.isInteger) return r;
+        }
+      } else {
+        if (v.isOne) return this.engine.One;
+        if (v.isZero) return this.engine.Zero;
+        if (e !== undefined) {
+          const r = v.root(e);
+          if (r.isExact) return this.engine.number(r);
+        }
+      }
     }
 
     return this.engine._fn('Root', [this, this.engine.box(exp)]);
