@@ -4,13 +4,14 @@ describe('STYLE - MATH MODE', () => {
   test('\\textcolor', () => {
     expect(check('x \\textcolor{red}{=} y')).toMatchInlineSnapshot(`
       [
-        "Sequence",
+        "InvisibleOperator",
         "x",
-        [
-          "Error",
-          ["ErrorCode", "'unexpected-command'", "'\\textcolor'"],
-          ["LatexString", "'\\textcolor{red}{=}'"]
-        ]
+        ["Error", "'unexpected-command'", ["LatexString", "'\\textcolor'"]],
+        "r",
+        "e",
+        "d",
+        ["Error", "'expected-closing-delimiter'", ["LatexString", "'{=}'"]],
+        "y"
       ]
     `);
   });

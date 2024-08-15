@@ -55,6 +55,7 @@ function parseTrig(op: string): ExpressionParseHandler {
 
     if (parser.atTerminator(until)) return operator;
 
+    // Check for \sin' x, \sin^{-1} x, etc.
     let fn: Expression | null = operator;
     do {
       const pf = parser.parsePostfixOperator(fn, until);
@@ -62,8 +63,13 @@ function parseTrig(op: string): ExpressionParseHandler {
       fn = pf;
     } while (true);
 
+    parser.skipSpace();
+
+    // Check for \sin^2 x
     let sup: Expression | null = null;
     if (parser.match('^')) sup = parser.parseGroup() ?? parser.parseToken();
+
+    parser.skipSpace();
 
     // Look for an implicit argument (a product of terms) but stop if another
     // trig function is encountered, i.e. ensure that
@@ -117,7 +123,7 @@ export const DEFINITIONS_TRIGONOMETRY: LatexDictionary = [
   },
   {
     name: 'Arcsec',
-    latexTrigger: 'arcsec',
+    latexTrigger: ['\\arcsec'],
 
     parse: parseTrig('Arcsec'),
   },

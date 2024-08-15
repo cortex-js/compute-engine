@@ -40,6 +40,9 @@ class Tokenizer {
     // directionality of the math expression.
     s = s.replace(/[\u200E\u200F\u2066-\u2069\u202A-\u202E]/g, '');
 
+    // Replace the Unicode minus sign (U+2212: MINUS SIGN) with a hyphen
+    s = s.replace(/\u2212/g, '-');
+
     this.s = splitGraphemes(s);
     this.pos = 0;
   }

@@ -20,22 +20,8 @@ describe('MATCHFIX', () => {
   test('\\sin\\lbrack a, \\lbrack b, c\\rbrack\\rbrack', () =>
     expect(check('\\sin\\lbrack a, \\lbrack b, c\\rbrack\\rbrack'))
       .toMatchInlineSnapshot(`
-      box       = ["At", "Sin", "a", ["List", "b", "c"]]
-      canonical = [
-        "At",
-        [
-          "Error",
-          [
-            "ErrorCode",
-            "'incompatible-domain'",
-            "Values",
-            ["FunctionOf", "Numbers", "Numbers"]
-          ],
-          "Sin"
-        ],
-        "a",
-        ["List", "b", "c"]
-      ]
+      box       = ["Sin", ["List", "a", ["List", "b", "c"]]]
+      eval-auto = [sin(a),[sin(b),sin(c)]]
     `));
 });
 
@@ -135,27 +121,23 @@ describe('MATCHFIX abs and norm', () => {
 describe('MATCHFIX invalid', () => {
   test('( // missing closing fence', () =>
     expect(check('(')).toMatchInlineSnapshot(
-      `["Error", ["ErrorCode", "'unexpected-token'", "'('"]]`
+      `["Error", "'unexpected-delimiter'", ["LatexString", "'('"]]`
     ));
   test(') // missing opening fence', () => {
     expect(check(')')).toMatchInlineSnapshot(
-      `["Error", ["ErrorCode", "'unexpected-token'", "')'"]]`
+      `["Error", "'unexpected-delimiter'", ["LatexString", "')'"]]`
     );
   });
 
   test('-( // missing closing fence', () => {
-    expect(engine.parse('-(')).toMatchInlineSnapshot(`
-      [
-        "Sequence",
-        ["Negate", ["Error", "'missing'"]],
-        ["Error", ["ErrorCode", "'unexpected-token'", "'('"]]
-      ]
-    `);
+    expect(engine.parse('-(')).toMatchInlineSnapshot(
+      `["Negate", ["Error", "'missing'", ["LatexString", "'-'"]]]`
+    );
   });
 
   test('(3+x // missing closing fence', () => {
     expect(engine.parse('(3+x')).toMatchInlineSnapshot(
-      `["Error", ["ErrorCode", "'unexpected-token'", "'('"]]`
+      `["Error", "'unexpected-delimiter'", ["LatexString", "'('"]]`
     );
   });
 });

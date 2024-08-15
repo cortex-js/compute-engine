@@ -30,32 +30,33 @@ describe('FUNCTIONS', () => {
 
 describe('UNKNOWN COMMANDS', () => {
   test('Parse', () => {
-    expect(parse('\\foo')).toMatchInlineSnapshot(`
-      [
-        "Error",
-        ["ErrorCode", "'unexpected-command'", "'\\foo'"],
-        ["LatexString", "'\\foo'"]
-      ]
-    `);
+    expect(parse('\\foo')).toMatchInlineSnapshot(
+      `["Error", "'unexpected-command'", ["LatexString", "'\\foo'"]]`
+    );
     expect(parse('x=\\foo+1')).toMatchInlineSnapshot(`
       [
-        "Sequence",
-        ["Equal", "x", ["Error", "'missing'"]],
+        "Equal",
+        "x",
         [
-          "Error",
-          ["ErrorCode", "'unexpected-command'", "'\\foo'"],
-          ["LatexString", "'\\foo'"]
+          "Add",
+          ["Error", "'unexpected-command'", ["LatexString", "'\\foo'"]],
+          1
         ]
       ]
     `);
     expect(parse('x=\\foo   {1}  {x+1}+1')).toMatchInlineSnapshot(`
       [
-        "Sequence",
-        ["Equal", "x", ["Error", "'missing'"]],
+        "Equal",
+        "x",
         [
-          "Error",
-          ["ErrorCode", "'unexpected-command'", "'\\foo'"],
-          ["LatexString", "'\\foo{1}'"]
+          "Add",
+          [
+            "Tuple",
+            ["Error", "'unexpected-command'", ["LatexString", "'\\foo'"]],
+            1,
+            ["Add", "x", 1]
+          ],
+          1
         ]
       ]
     `);

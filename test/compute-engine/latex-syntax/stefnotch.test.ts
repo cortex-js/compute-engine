@@ -38,9 +38,12 @@ describe('STEFNOTCH #10', () => {
   test('4/ \\color{red}3', () => {
     expect(parse('\\color{red}3')).toMatchInlineSnapshot(`
       [
-        "Error",
-        ["ErrorCode", "'unexpected-command'", "'\\color'"],
-        ["LatexString", "'\\color{red}'"]
+        "Tuple",
+        ["Error", "'unexpected-command'", ["LatexString", "'\\color'"]],
+        "r",
+        "ExponentialE",
+        "d",
+        3
       ]
     `);
   });
@@ -223,32 +226,40 @@ describe('STEFNOTCH #13', () => {
       )
     ).toMatchInlineSnapshot(`
       [
-        "Sequence",
+        "ForAll",
+        "n",
         [
-          "ForAll",
-          "n",
+          "At",
+          "a",
           [
-            "At",
-            "a",
+            "LessEqual",
+            "n",
             [
-              "LessEqual",
-              "n",
+              "At",
+              "c",
               [
-                "At",
-                "c",
+                "LessEqual",
+                "n",
                 [
-                  "LessEqual",
-                  "n",
-                  ["At", "b", ["Implies", "n", ["Error", "'missing'"]]]
+                  "At",
+                  "b",
+                  [
+                    "Implies",
+                    "n",
+                    [
+                      "Limit",
+                      ["Function", ["At", "c", ["Equal", "a", "n"]], "n"],
+                      [
+                        "Error",
+                        "'unexpected-command'",
+                        ["LatexString", "'\\infin'"]
+                      ]
+                    ]
+                  ]
                 ]
               ]
             ]
           ]
-        ],
-        [
-          "Error",
-          ["ErrorCode", "'unexpected-command'", "'\\lim'"],
-          ["LatexString", "'\\lim'"]
         ]
       ]
     `);

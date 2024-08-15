@@ -94,18 +94,61 @@ describe('PARSING SETS', () => {
     expect(parse('\\{1, 2, 3\\}')).toMatchInlineSnapshot(`["Set", 1, 2, 3]`);
 
     // Infinite sets
-    expect(parse('\\{1, 2, 3...\\}')).toMatchInlineSnapshot(
-      `["Error", "'unexpected-delimiter'", ["LatexString", "'\\{'"]]`
-    );
-    expect(parse('\\{1, 2, 3, ...\\}')).toMatchInlineSnapshot(
-      `["Error", "'unexpected-delimiter'", ["LatexString", "'\\{'"]]`
-    );
-    expect(parse('\\{...-2, -1, 0, 1, 2, 3...\\}')).toMatchInlineSnapshot(
-      `["Error", "'unexpected-delimiter'", ["LatexString", "'\\{'"]]`
-    );
-    expect(parse('\\{...-2, -1, 0\\}')).toMatchInlineSnapshot(
-      `["Error", "'unexpected-delimiter'", ["LatexString", "'\\{'"]]`
-    );
+    expect(parse('\\{1, 2, 3...\\}')).toMatchInlineSnapshot(`
+      [
+        "Sequence",
+        [
+          "Delimiter",
+          [
+            "Sequence",
+            [
+              "InvisibleOperator",
+              ["Error", "'unexpected-command'", ["LatexString", "'\\{'"]],
+              1
+            ],
+            2,
+            3
+          ],
+          "','"
+        ],
+        ["Error", "'unexpected-operator'", ["LatexString", "'..'"]]
+      ]
+    `);
+    expect(parse('\\{1, 2, 3, ...\\}')).toMatchInlineSnapshot(`
+      [
+        "Sequence",
+        [
+          "Delimiter",
+          [
+            "Sequence",
+            [
+              "InvisibleOperator",
+              ["Error", "'unexpected-command'", ["LatexString", "'\\{'"]],
+              1
+            ],
+            2,
+            3,
+            "Nothing"
+          ],
+          "','"
+        ],
+        ["Error", "'unexpected-operator'", ["LatexString", "'..'"]]
+      ]
+    `);
+    expect(parse('\\{...-2, -1, 0, 1, 2, 3...\\}')).toMatchInlineSnapshot(`
+      [
+        "Sequence",
+        ["Error", "'unexpected-command'", ["LatexString", "'\\{'"]],
+        ["Error", "'unexpected-operator'", ["LatexString", "'..'"]]
+      ]
+    `);
+    expect(parse('\\{...-2, -1, 0\\}')).toMatchInlineSnapshot(`
+      [
+        "Sequence",
+        ["Error", "'unexpected-command'", ["LatexString", "'\\{'"]],
+        ["Error", "'unexpected-operator'", ["LatexString", "'..'"]]
+      ]
+    `);
   });
   test('Union, Intersection, etc...', () => {
     expect(parse('\\N \\cup \\R')).toMatchInlineSnapshot(

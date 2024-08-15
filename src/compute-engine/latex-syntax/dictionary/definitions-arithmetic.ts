@@ -1008,6 +1008,7 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
     kind: 'prefix',
     precedence: ADDITION_PRECEDENCE + 2,
     parse: (parser, terminator): Expression | null => {
+      parser.skipSpace();
       // Quick check if the next token is a digit, if so, it's a number
       // not a Negate
       if (/\d/.test(parser.peek)) return null;
@@ -1027,6 +1028,7 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
       return ['Negate', rhs];
     },
   },
+
   // {
   //   /** If the argument is a vector */
   //   /** @todo: domain check */

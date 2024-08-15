@@ -70,16 +70,16 @@ describe('basic', () => {
     expect(parse('1\\times')).toMatchInlineSnapshot(
       `["Multiply", 1, ["Error", "'missing'"]]`
     );
-    expect(parse('\\times')).toMatchInlineSnapshot(`
+    expect(parse('\\times')).toMatchInlineSnapshot(
+      `["Error", "'unexpected-command'", ["LatexString", "'\\times'"]]`
+    );
+    expect(parse('\\times3')).toMatchInlineSnapshot(`
       [
-        "Multiply",
-        ["Error", "'missing'", ["LatexString", "'\\times'"]],
-        ["Error", "'missing'"]
+        "Tuple",
+        ["Error", "'unexpected-command'", ["LatexString", "'\\times'"]],
+        3
       ]
     `);
-    expect(parse('\\times3')).toMatchInlineSnapshot(
-      `["Multiply", ["Error", "'missing'", ["LatexString", "'\\times'"]], 3]`
-    );
     expect(parse('2*')).toMatchInlineSnapshot(
       `["Multiply", 2, ["Error", "'missing'"]]`
     );
