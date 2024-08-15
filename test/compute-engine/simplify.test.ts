@@ -1146,7 +1146,7 @@ const RULE_TEST_CASES: TestCase[] = [
   `,
   ],
   ['e e^x e^{-x}', 'e'], // 🙁 e * e^x * e^(-x)
-  ['e^x e^{-x}', 1], // 🙁 e^x * e^(-x)
+  ['e^x e^{-x}', 1], // 🙁 e^(x - x)
   ['\\sqrt[4]{16b^{4}}', '2b'], // 🙁 65536b^(16)
 
   [
@@ -1160,7 +1160,7 @@ const RULE_TEST_CASES: TestCase[] = [
   ['(-x)^{4/3}', 'x^{4/3}'], // 🙁 (-x)^(4/3)
   ['(-x)^4', 'x^4'], // 🙁 -x^4
   ['(-x)^{3/5}', '-x^{3/5}'], // 🙁 (-x)^(3/5)
-  ['1/x-1/(x+1)', '1/(x(x+1))'], // 🙁 -1 / (x + 1) + 1 / x
+  ['1/x-1/(x+1)', '1/(x(x+1))'], // 🙁 (x - x + 1) / (x * (x + 1))
   ['\\sqrt[3]{-2}', '-\\sqrt[3]{2}'], // 🙁 -8
 
   [
@@ -1171,7 +1171,7 @@ const RULE_TEST_CASES: TestCase[] = [
   `,
   ],
   ['3/x-1/x', '2/x'],
-  ['1/(x+1)-1/x', '-1/(x(x+1))'], // 🙁 -1 / x + 1 / (x + 1)
+  ['1/(x+1)-1/x', '-1/(x(x+1))'], // 🙁 (x - x - 1) / (x * (x + 1))
 
   [
     `
@@ -1294,7 +1294,7 @@ const RULE_TEST_CASES: TestCase[] = [
   ],
   ['\\ln(\\infty)', '\\infty'],
   ['\\log_4(\\infty)', '\\infty'],
-  ['\\log_{0.5}(\\infty)', '-\\infty'], // 🙁 ln(oo)
+  ['\\log_{0.5}(\\infty)', '-\\infty'], // 🙁 oo
 
   [
     `
@@ -1324,8 +1324,8 @@ const RULE_TEST_CASES: TestCase[] = [
   `,
   ],
   ['\\cos(|x+2|)', '\\cos(x+2)'], // 🙁 cos(|x + 2|)
-  ['\\sec(|x+2|)', '\\sec(x+2)'], // 🙁 sec(|x + 2|)
-  ['\\cosh(|x+2|)', '\\cosh(x+2)'], // 🙁 cosh(|x + 2|)
+  ['\\sec(|x+2|)', '\\sec(x+2)'], // 🙁 1 / cos(|x + 2|)
+  ['\\cosh(|x+2|)', '\\cosh(x+2)'], // 🙁 (e^(|x + 2|) + e^(-|x + 2|)) / 2
   ['\\sech(|x+2|)', '\\sech(x+2)'], // 🙁 sech(|x + 2|)
 
   [
@@ -1348,8 +1348,8 @@ const RULE_TEST_CASES: TestCase[] = [
   ['|\\coth(x)|', '\\coth(|x|)'], // |coth(x)| -> coth(|x|)
   ['|\\csch(x)|', '\\csch(|x|)'], // |csch(x)| -> csch(|x|)
   ['|\\arsinh(x)|', '\\arsinh(|x|)'], // |Arsinh(x)| -> Arsinh(|x|)
-  ['|\\artanh(x)|', '\\artanh(|x|)'], // 🙁 |(Error("unexpected-command", "\arctanh"), x)|
-  ['|\\arcoth(x)|', '\\arcoth(|x|)'], // 🙁 |(Error("unexpected-command", "\arccoth"), x)|
+  ['|\\artanh(x)|', '\\artanh(|x|)'], // |Artanh(x)| -> Artanh(|x|)
+  ['|\\arcoth(x)|', '\\arcoth(|x|)'], // 🙁 |(Error("unexpected-command", "\arcoth"), x)|
   ['|\\arcsch(x)|', '\\arcsch(|x|)'], // |Arcsch(x)| -> Arcsch(|x|)
 
   [
@@ -1472,9 +1472,9 @@ const RULE_TEST_CASES: TestCase[] = [
   `,
   ],
   ['\\sinh(\\infty)', '\\infty'], // sinh(oo) -> oo
-  ['\\sinh(-\\infty)', '-\\infty'], // 🙁 sinh(-oo)
+  ['\\sinh(-\\infty)', '-\\infty'], // 🙁 (-e^(oo) + e^(-oo)) / 2
   ['\\cosh(\\infty)', '\\infty'], // cosh(oo) -> oo
-  ['\\cosh(-\\infty)', '\\infty'], // 🙁 cosh(-oo)
+  ['\\cosh(-\\infty)', '\\infty'], // 🙁 (e^(-oo) + e^(oo)) / 2
   ['\\tanh(\\infty)', 1], // tanh(oo) -> 1
   ['\\tanh(-\\infty)', -1], // 🙁 tanh(-oo)
   ['\\coth(\\infty)', 1], // coth(oo) -> 1
@@ -1492,13 +1492,13 @@ const RULE_TEST_CASES: TestCase[] = [
   `,
   ],
   ['\\arsinh(\\infty)', '\\infty'], // Arsinh(oo) -> oo
-  ['\\arsinh(-\\infty)', '-\\infty'], // 🙁 Arsinh(-oo)
+  ['\\arsinh(-\\infty)', '-\\infty'], // 🙁 NaN
   ['\\arcosh(\\infty)', '\\infty'], // Arcosh(oo) -> oo
   ['\\arcosh(-\\infty)', NaN], // 🙁 Arcosh(-oo)
   ['\\arctanh(\\infty)', NaN], // 🙁 (Error("unexpected-command", "\arctanh"), oo)
   ['\\arctanh(-\\infty)', NaN], // 🙁 (Error("unexpected-command", "\arctanh"), -oo)
-  ['\\operatorname{arcoth}(\\infty)', NaN], // 🙁 (Error("unexpected-command", "\arccoth"), oo)
-  ['\\operatorname{arcoth}(-\\infty)', NaN], // 🙁 (Error("unexpected-command", "\arccoth"), -oo)
+  ['\\operatorname{arcoth}(\\infty)', NaN], // 🙁 0
+  ['\\operatorname{arcoth}(-\\infty)', NaN], // 🙁 Arccot(-oo)
   ['\\arcsech(\\infty)', NaN], // 🙁 (Error("unexpected-command", "\arcsech"), oo)
   ['\\arcsech(-\\infty)', NaN], // 🙁 (Error("unexpected-command", "\arcsech"), -oo)
   ['\\arcsch(\\infty)', NaN], // \arcsch(\operatorname{\_x}) -> \operatorname{NaN}
@@ -1547,7 +1547,7 @@ const RULE_TEST_CASES: TestCase[] = [
   ['x^{-2}*x', '1/x'],
   ['x^{-1/3}*x', 'x^{-1/3}*x'], // 🙁 x^(2/3)
   ['\\pi^{-2}*\\pi', '1/\\pi'],
-  ['\\pi^{-0.2}*\\pi', '\\pi^{0.8}'], // 🙁 pi * pi^(-0.2)
+  ['\\pi^{-0.2}*\\pi', '\\pi^{0.8}'], // 🙁 pi^(1 - 0.2)
   ['\\sqrt[3]{x}*x', 'x^{4/3}'],
 
   [
@@ -1578,7 +1578,7 @@ const RULE_TEST_CASES: TestCase[] = [
   ['x^{-1}/x^3', '1/x^4'], // 🙁 1 / x^4
   ['x/x^{-1}', 'x/x^{-1}'], // 🙁 x * x
   ['\\pi / \\pi^{-1}', '\\pi^2'], // 🙁 pi * pi
-  ['\\pi^{0.2}/\\pi^{0.1}', '\\pi^{0.1}'], // 🙁 pi^(0.2) * pi^(-0.1)
+  ['\\pi^{0.2}/\\pi^{0.1}', '\\pi^{0.1}'], // 🙁 pi^(-0.1 + 0.2)
   ['x^{\\sqrt{2}}/x^3', 'x^{\\sqrt{2}-3}'], // 🙁 x^(sqrt(2)) / x^3
 
   [
@@ -1747,17 +1747,16 @@ function tryRules(
 
   // One rule at a time
   let i = 0;
-  let rules: BoxedRule[] = [];
   const ruleCount = allRules.length - 1;
   while (i <= ruleCount) {
     const sa = a.simplify({ rules: [allRules[i]] });
     if (sa.isSame(b)) return ruleName(allRules[i]);
-    rules.push(allRules[i]);
     i += 1;
   }
 
   // Many rules at a time
   i = 0;
+  let rules: BoxedRule[] = [];
   while (i <= ruleCount) {
     const sa = a.simplify({ rules });
     if (sa.isSame(b)) return 'up to ' + ruleName(rules.pop());
@@ -1765,7 +1764,7 @@ function tryRules(
     i += 1;
   }
 
-  return `🙁 ${a.simplify().toString()}`;
+  return `🙁 ${a.simplify({ rules }).toString()}`;
 }
 
 function ruleName(rule: Rule | undefined): string {
