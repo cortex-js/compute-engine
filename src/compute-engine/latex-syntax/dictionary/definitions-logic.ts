@@ -334,6 +334,8 @@ function parseQuantifier(
     // - \forall x \in S (x>0)
     // - \forall x  \mid x>0
     // - \forall x.(P(x))
+    // - \forall x: P(x)
+    // - \forall \colon P(x)
 
     // As a BNF:
     // - <quantifier> ::= '\forall' | '\exists' | '\forall!' | '\exists!'
@@ -348,7 +350,13 @@ function parseQuantifier(
     const id = parser.parseSymbol(terminator);
     if (id) {
       parser.skipSpace();
-      if (parser.match(',') || parser.match('\\mid') || parser.match('.')) {
+      if (
+        parser.match(',') ||
+        parser.match('\\mid') ||
+        parser.match('.') ||
+        parser.match(':') ||
+        parser.match('\\colon')
+      ) {
         const body = parser.parseExpression(terminator);
         return [kind, id, missingIfEmpty(body)] as Expression;
       }
