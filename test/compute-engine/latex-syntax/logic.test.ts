@@ -127,20 +127,17 @@ describe('Logic', () => {
   it('should parse XOR', () => {
     expect(ce.parse('p \\oplus q').json).toMatchInlineSnapshot(`
       [
-        Sequence,
+        Tuple,
         p,
         [
           Error,
-          [
-            ErrorCode,
-            'unexpected-command',
-            '\\oplus',
-          ],
+          'unexpected-command',
           [
             LatexString,
             '\\oplus',
           ],
         ],
+        q,
       ]
     `);
   });
@@ -148,20 +145,17 @@ describe('Logic', () => {
   it('should parse NAND', () => {
     expect(ce.parse('p \\uparrow q').json).toMatchInlineSnapshot(`
       [
-        Sequence,
+        Tuple,
         p,
         [
           Error,
-          [
-            ErrorCode,
-            'unexpected-command',
-            '\\uparrow',
-          ],
+          'unexpected-command',
           [
             LatexString,
             '\\uparrow',
           ],
         ],
+        q,
       ]
     `);
   });
@@ -169,20 +163,17 @@ describe('Logic', () => {
   it('should parse NOR', () => {
     expect(ce.parse('p \\downarrow q').json).toMatchInlineSnapshot(`
       [
-        Sequence,
+        Tuple,
         p,
         [
           Error,
-          [
-            ErrorCode,
-            'unexpected-command',
-            '\\downarrow',
-          ],
+          'unexpected-command',
           [
             LatexString,
             '\\downarrow',
           ],
         ],
+        q,
       ]
     `);
   });
@@ -200,7 +191,15 @@ describe('Logic', () => {
   it('should parse ForAll', () => {
     expect(ce.parse('\\forall x').json).toMatchInlineSnapshot(`
       [
-        ForAll,
+        Tuple,
+        [
+          Error,
+          'unexpected-command',
+          [
+            LatexString,
+            '\\forall',
+          ],
+        ],
         x,
       ]
     `);
@@ -209,7 +208,15 @@ describe('Logic', () => {
   it('should parse Exists', () => {
     expect(ce.parse('\\exists x').json).toMatchInlineSnapshot(`
       [
-        Exists,
+        Tuple,
+        [
+          Error,
+          'unexpected-command',
+          [
+            LatexString,
+            '\\exists',
+          ],
+        ],
         x,
       ]
     `);
@@ -218,8 +225,26 @@ describe('Logic', () => {
   it('should parse ExistsUnique', () => {
     expect(ce.parse('\\exists! x').json).toMatchInlineSnapshot(`
       [
-        ExistsUnique,
-        x,
+        Sequence,
+        [
+          Error,
+          'unexpected-command',
+          [
+            LatexString,
+            '\\exists',
+          ],
+        ],
+        [
+          Factorial,
+          [
+            Error,
+            'missing',
+            [
+              LatexString,
+              '!',
+            ],
+          ],
+        ],
       ]
     `);
   });
