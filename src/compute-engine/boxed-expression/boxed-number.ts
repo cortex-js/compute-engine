@@ -12,7 +12,7 @@ import {
   Type,
 } from '../public';
 import { inferNumericDomain } from '../domain-utils';
-import { Rational, isRational } from '../numerics/rationals';
+import { Rational } from '../numerics/rationals';
 
 import { _BoxedExpression } from './abstract-boxed-expression';
 import { hashCode } from './utils';
@@ -216,9 +216,9 @@ export class BoxedNumber extends _BoxedExpression {
 
   div(rhs: number | BoxedExpression): BoxedExpression {
     if (typeof rhs === 'number') {
-      if (rhs === 0) return this.engine.NaN;
       if (rhs === 1) return this;
       if (rhs === -1) return this.neg();
+      if (rhs === 0) return this.engine.NaN;
       if (isNaN(rhs)) return this.engine.NaN;
       // @fastpath
       if (typeof this._value === 'number')

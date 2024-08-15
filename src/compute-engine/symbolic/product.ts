@@ -18,7 +18,7 @@ import { asRadical } from '../library/arithmetic-power';
 import { flatten } from './flatten';
 import { asRational } from '../boxed-expression/numerics';
 import { NumericValue } from '../numeric-value/public';
-import { canonicalMultiply, mul } from '../library/arithmetic-multiply';
+import { mul } from '../library/arithmetic-multiply';
 
 /**
  * Group terms in a product by common term.

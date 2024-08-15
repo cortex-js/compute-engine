@@ -604,7 +604,12 @@ export class BoxedFunction extends _BoxedExpression {
   }
 
   div(rhs: number | BoxedExpression): BoxedExpression {
-    if (rhs === 1) return this;
+    if (typeof rhs === 'number') {
+      if (rhs === 1) return this;
+      if (rhs === -1) return this.neg();
+      if (rhs === 0) return this.engine.NaN;
+      if (isNaN(rhs)) return this.engine.NaN;
+    }
     const result = new Product(this.engine, [this]);
     result.div(typeof rhs === 'number' ? this.engine._numericValue(rhs) : rhs);
     return result.asRationalExpression();

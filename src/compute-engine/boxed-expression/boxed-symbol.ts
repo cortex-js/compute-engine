@@ -35,7 +35,6 @@ import { _BoxedFunctionDefinition } from './boxed-function-definition';
 import { narrow } from './boxed-domain';
 import { domainToSignature, signatureToDomain } from '../domain-utils';
 import { match } from './match';
-import { canonicalDivide } from '../library/arithmetic-divide';
 import { negate } from '../symbolic/negate';
 import { mul } from '../library/arithmetic-multiply';
 import { NumericValue } from '../numeric-value/public';
@@ -44,7 +43,8 @@ import {
   validateIdentifier,
 } from '../../math-json/identifiers';
 import { add } from './terms';
-import { canonicalAngle, radiansToAngle } from './trigonometry';
+import { canonicalAngle } from './trigonometry';
+import { Product } from '../symbolic/product.js';
 
 /**
  * BoxedSymbol
@@ -236,11 +236,15 @@ export class BoxedSymbol extends _BoxedExpression {
   }
 
   div(rhs: number | BoxedExpression): BoxedExpression {
-    if (rhs === 1) return this;
-    if (rhs === -1) return this.neg();
-    if (rhs === 0) return this.engine.NaN;
-    if (typeof rhs !== 'number') return canonicalDivide(this, rhs);
-    return canonicalDivide(this, this.engine.number(rhs));
+    if (typeof rhs === 'number') {
+      if (rhs === 1) return this;
+      if (rhs === -1) return this.neg();
+      if (rhs === 0) return this.engine.NaN;
+      if (isNaN(rhs)) return this.engine.NaN;
+    }
+    const result = new Product(this.engine, [this]);
+    result.div(typeof rhs === 'number' ? this.engine._numericValue(rhs) : rhs);
+    return result.asRationalExpression();
   }
 
   pow(exp: number | BoxedExpression): BoxedExpression {
