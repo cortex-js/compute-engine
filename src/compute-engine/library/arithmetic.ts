@@ -15,7 +15,14 @@ import {
   bigGamma,
   bigGammaln,
 } from '../numerics/special-functions';
-import { factorial, factorial2, gcd, lcm } from '../numerics/numeric';
+import {
+  chop,
+  factorial,
+  factorial2,
+  gcd,
+  lcm,
+  MACHINE_TOLERANCE,
+} from '../numerics/numeric';
 import { rationalize } from '../numerics/rationals';
 import { IdentifierDefinitions } from '../public';
 import { bignumPreferred } from '../boxed-expression/utils';
@@ -93,7 +100,7 @@ References:
 - APS Physical Review Style and Notation Guide https://cdn.journals.aps.org/files/styleguide-pr.pdf p21
 
 - David Linkletter: https://plus.maths.org/content/pemdas-paradox
-- Sass' article: 
+- Sass' article:
 - First year algebra: https://archive.org/details/firstyearalgebra00well/page/18/mode/2up also p85
 - First course in algebra:  https://archive.org/details/firstcourseinal01toutgoog/page/n23/mode/2up (p10) also p74 (page 90 of the pdf)
 - Second course in algebra: https://archive.org/details/secondcourseinal00wellrich/page/4/mode/2up also  p64
@@ -119,8 +126,8 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
       complexity: 1200,
       signature: {
         domain: ['FunctionOf', 'Numbers', 'NonNegativeNumbers'],
-        sgn: () => 1,
-        simplify: (ce, ops) => processAbs(ce, ops[0], 'simplify'),
+        sgn: (ce, ops) =>
+          ops[0].isZero ? 0 : ops[0].isNotZero ? 1 : undefined,
         evaluate: (ce, ops) => processAbs(ce, ops[0], 'evaluate'),
         N: (ce, ops) => processAbs(ce, ops[0], 'N'),
       },
@@ -139,7 +146,6 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
         domain: 'NumericFunctions',
         sgn: (ce, ops) => {
           if (ops.some((x) => x.sgn === undefined)) return undefined;
-          if (ops.some((x) => isNaN(x.sgn!))) return NaN;
           if (ops.every((x) => x.sgn === 0)) return 0;
           if (ops.every((x) => x.sgn === 1)) return 1;
           if (ops.every((x) => x.sgn === -1)) return -1;
@@ -147,6 +153,7 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
           if (v.isPositive) return 1;
           if (v.isNegative) return -1;
           if (v.isZero) return 0;
+          if (v.isComplex) return NaN;
           return undefined;
         },
         result: (ce, ops) =>
@@ -168,6 +175,14 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
       threadable: true,
       signature: {
         domain: ['FunctionOf', 'Numbers', 'Integers'],
+        sgn: (ce, ops) => {
+          let x = ops[0];
+          if (x.isLessEqual(-1)) return -1;
+          if (x.isGreater(0)) return 1;
+          if (x.isLess(0) && x.isGreater(-1)) return 0;
+          if (x.isComplex) return x.im! < 0 && x.im! > -1 ? 0 : NaN;
+          return undefined;
+        },
         evaluate: (_ce, ops) =>
           apply(
             ops[0],
@@ -183,7 +198,9 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
       threadable: true,
       idempotent: true,
       complexity: 1200,
-
+      // sgn:(ce,ops)=>{
+      //
+      // },
       signature: {
         domain: ['FunctionOf', 'Numbers', 'Numbers'],
         evaluate: (ce, ops) =>
@@ -217,10 +234,8 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
         sgn: (ce, ops) => {
           const [n, d] = [ops[0].sgn, ops[1].sgn];
           if (n === undefined || d === undefined) return undefined;
-          if (isNaN(n) || isNaN(d)) return NaN;
+          if (d === 0) return NaN;
           if (n === 0) return 0;
-          if (n === 0 && d === 0) return NaN;
-          if (d === 0) return n;
           return n * d;
         },
         canonical: (ce, args) => {
@@ -250,6 +265,17 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
       signature: {
         params: ['Numbers'],
         result: 'Numbers',
+        sgn: (ce, ops) => {
+          let x = ops[0];
+          let n = chop(1 - (x.im ?? 0) / Math.PI) + 1;
+          if (x.isReal || n % 1 === 0) {
+            if (x.isNegative && x.isInfinity) return 0;
+            return n % 2 === 0 || x.isReal ? 1 : -1;
+          }
+          if (n % 1 !== 0) return NaN;
+
+          return undefined;
+        },
         canonical: (ce, args) => {
           // The canonical handler is responsible for arg validation
           args = checkNumericArgs(ce, args, 1);
@@ -323,7 +349,14 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
 
       signature: {
         domain: ['FunctionOf', 'Numbers', 'RealNumbers'],
-        sgn: (ce, ops) => ops[0].sgn,
+        sgn: (ce, ops) => {
+          let x = ops[0];
+          if (x.isLess(0)) return -1;
+          if (x.isGreaterEqual(1)) return 1;
+          if (x.isGreater(0) && x.isLess(1)) return 0;
+          if (x.isComplex) return x.im! > 0 && x.im! < 1 ? 0 : NaN;
+          return undefined;
+        },
         evaluate: (ce, ops) =>
           apply(
             ops[0],
@@ -387,13 +420,12 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
         result: 'Numbers',
         sgn: (ce, ops) => {
           const s = ops[0].sgn;
-          if (s === undefined || isNaN(s)) return undefined;
-          if (s < 0) return undefined; // complex
-          if (s === 0) return NaN;
-          const v = ops[0].N().numericValue;
-          if (v === null) return undefined;
-          if (typeof v === 'number') return v > 1 ? 1 : -1;
-          return v?.gt(1) ? 1 : -1;
+          if (s === undefined) return undefined;
+          if (s <= 0 || isNaN(s)) return NaN; // complex
+          if (ops[0].isGreater(1)) return 1;
+          if (ops[0].isLess(1)) return -1;
+          if (ops[0].isOne) return 0;
+          return undefined;
         },
         // @fastpath: this doesn't get called. See makeNumericFunction()
         canonical: (ce, ops) =>
@@ -568,8 +600,8 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
         //
         sgn: (ce, ops) => {
           if (ops.some((x) => x.sgn === undefined)) return undefined;
-          if (ops.some((x) => isNaN(x.sgn!))) return NaN;
-          if (ops.some((x) => x.sgn === 0)) return 0;
+          if (ops.some((x) => x.sgn === 0))
+            return ops.every((x) => x.isFinite) ? 0 : NaN;
           return ops.reduce((acc, x) => acc * x.sgn!, 1);
         },
         simplify: (ce, ops) => mul(...ops.map((x) => x.simplify())),
@@ -625,7 +657,6 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
       wikidata: 'Q120812',
       complexity: 1200,
       involution: true,
-
       signature: {
         domain: ['FunctionOf', 'Values', 'Tuples'],
         evaluate: (ce, ops) => {
@@ -649,13 +680,13 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
           return canonicalPower(base, exp);
         },
         sgn: (ce, ops) => {
+          //Missing some cases like (-1)^{1/3}
           const [a, b] = ops;
           if (a.isComplex || b.isComplex) return undefined;
           const sA = a.sgn;
           const sB = b.sgn;
-          if (sA === undefined) return undefined;
+          if (sA === undefined || sB === undefined) return undefined;
           if (sA > 0) return 1;
-          if (sB === undefined) return undefined;
           if (isNaN(sA) || isNaN(sB)) return NaN;
           if (sA === 0) return sB > 0 ? 0 : NaN;
           if (b.isEven === true) return 1;
@@ -757,7 +788,6 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
           const [base, exp] = args;
           return canonicalRoot(base, exp);
         },
-        simplify: (ce, ops) => ops[0].root(ops[1]),
         evaluate: (ce, ops) => ops[0].root(ops[1]),
         N: (ce, ops) => ops[0].root(ops[1]),
       },
@@ -769,7 +799,13 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
 
       signature: {
         domain: ['FunctionOf', 'Numbers', 'Numbers'],
-        sgn: (ce, ops) => ops[0].sgn,
+        sgn: (ce, ops) => {
+          let x = ops[0];
+          if (x.isGreaterEqual(0.5)) return 1;
+          if (x.isLessEqual(-0.5)) return -1;
+          if (x.isGreater(-0.5) && x.isLess(0.5)) return 0;
+          return undefined;
+        },
         evaluate: (ce, ops) =>
           apply(
             ops[0],
@@ -877,8 +913,15 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
       wikidata: 'Q3075175',
       complexity: 3100,
       threadable: true,
-
       signature: {
+        sgn: (ce, ops) => {
+          let x = ops[0];
+          if (x.isZero) return 0;
+          if (x.isReal) return 1;
+          if (x.isImaginary) return -1;
+          if (x.isComplex) return NaN;
+          return undefined;
+        },
         domain: ['FunctionOf', 'Numbers', 'Numbers'],
         canonical: (ce, args) => {
           args = flatten(args);
@@ -1244,9 +1287,9 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
         sgn: (ce, ops) => {
           if (ops.some((x) => x.sgn === undefined)) return undefined;
           if (ops.some((x) => isNaN(x.sgn!))) return NaN;
-          if (ops.every((x) => x.sgn === 1)) return 1;
+          if (ops.some((x) => x.sgn === 1)) return 1;
+          if (ops.some((x) => x.sgn === 0)) return 0;
           if (ops.every((x) => x.sgn === -1)) return -1;
-          if (ops.every((x) => x.sgn === 0)) return 0;
           return undefined;
         },
         simplify: (ce, ops) => {
@@ -1273,9 +1316,9 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
         sgn: (ce, ops) => {
           if (ops.some((x) => x.sgn === undefined)) return undefined;
           if (ops.some((x) => isNaN(x.sgn!))) return NaN;
+          if (ops.some((x) => x.sgn === -1)) return -1;
+          if (ops.some((x) => x.sgn === 0)) return 0;
           if (ops.every((x) => x.sgn === 1)) return 1;
-          if (ops.every((x) => x.sgn === -1)) return -1;
-          if (ops.every((x) => x.sgn === 0)) return 0;
           return undefined;
         },
         evaluate: (ce, ops) => processMinMax(ce, ops, 'Min'),

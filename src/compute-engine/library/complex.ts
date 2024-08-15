@@ -81,6 +81,7 @@ export const COMPLEX_LIBRARY: IdentifierDefinitions[] = [
       threadable: true,
       complexity: 1200,
       signature: {
+        sgn: (ce, ops) => ops[0]?.sgn,
         domain: ['FunctionOf', 'Numbers', 'Numbers'],
         evaluate: (ce, ops) => {
           const op = ops[0].numericValue;
