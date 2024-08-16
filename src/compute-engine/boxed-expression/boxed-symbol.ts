@@ -23,6 +23,7 @@ import {
   SemiBoxedExpression,
   CanonicalOptions,
   Type,
+  BoxedRule,
 } from './public';
 import { replace } from '../rules';
 import {
@@ -44,7 +45,8 @@ import {
 } from '../../math-json/identifiers';
 import { add } from './terms';
 import { canonicalAngle } from './trigonometry';
-import { Product } from '../symbolic/product.js';
+import { Product } from '../symbolic/product';
+import { simplify } from '../symbolic/simplify';
 
 /**
  * BoxedSymbol
@@ -795,16 +797,23 @@ export class BoxedSymbol extends _BoxedExpression {
   }
 
   simplify(options?: Partial<SimplifyOptions>): BoxedExpression {
-    // console.count('simplify symbol ' + this.toString());
     // If allowed replace this symbol with its value/definition.
     // In some cases this may allow for some additional simplifications (e.g. `GoldenRatio`).
     const def = this.symbolDefinition;
-    if (def?.holdUntil === 'simplify' && def.value)
+    if (
+      (options?.applyDefaultSimplifications ?? true) &&
+      def?.holdUntil === 'simplify' &&
+      def.value
+    )
       return def.value.simplify(options);
 
     // By default, there is no simplification of symbols,
     // however if a custom set of rules is provided, apply them
-    return options?.rules ? (this.replace(options.rules) ?? this) : this;
+    if (!options?.rules) return this;
+
+    const results = simplify(this, options);
+    if (results.length === 0) return this;
+    return results[results.length - 1].value;
   }
 
   evaluate(options?: EvaluateOptions): BoxedExpression {
@@ -832,10 +841,12 @@ export class BoxedSymbol extends _BoxedExpression {
   }
 
   replace(
-    rules: BoxedRuleSet | Rule | Rule[],
+    rules: Rule | (Rule | BoxedRule)[] | BoxedRuleSet,
     options?: ReplaceOptions
   ): BoxedExpression | null {
-    return replace(this, rules, options);
+    const steps = replace(this, rules, options);
+    if (steps.length === 0) return null;
+    return steps[steps.length - 1].value;
   }
 
   subs(

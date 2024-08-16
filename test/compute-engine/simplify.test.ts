@@ -1146,7 +1146,7 @@ const RULE_TEST_CASES: TestCase[] = [
   `,
   ],
   ['e e^x e^{-x}', 'e'], // 🙁 e * e^x * e^(-x)
-  ['e^x e^{-x}', 1], // 🙁 e^(x - x)
+  ['e^x e^{-x}', 1, 'stop'], // 🙁 e^(x - x)
   ['\\sqrt[4]{16b^{4}}', '2b'], // 🙁 65536b^(16)
 
   [
@@ -1636,7 +1636,8 @@ const RULE_TEST_CASES: TestCase[] = [
 
 describe('SIMPLIFY', () => {
   console.info('Canonicalization test cases\n\n');
-  for (const test of CANONICALIZATION_TEST_CASES) runTestCase(test, []);
+  for (const test of CANONICALIZATION_TEST_CASES)
+    runTestCase(test, { rules: [] });
 
   console.info('\n\nRule test cases\n\n');
   const rules = ce.rules(RULES);
@@ -1724,13 +1725,11 @@ function runTestCase(test: TestCase, rules: BoxedRuleSet): void {
     typeof expected === 'string' ? ce.parse(expected) : ce.box(expected);
 
   let result = tryRules(a, b, rules);
-  if (result.startsWith('🙁')) {
-    if (comment?.startsWith('stop')) {
-      const a1 = a.simplify();
-      const b1 = b;
-      const eq = a1.isSame(b1);
-      debugger;
-    }
+  if (comment?.startsWith('stop')) {
+    let a1 = a.simplify({ rules });
+    const eq = a1.isSame(b);
+    debugger;
+    a1 = a.simplify({ rules });
   }
 
   console.info(result ? `${row} // ${result}` : row);
@@ -1747,7 +1746,7 @@ function tryRules(
 
   // One rule at a time
   let i = 0;
-  const ruleCount = allRules.length - 1;
+  const ruleCount = allRules.rules.length - 1;
   while (i <= ruleCount) {
     const sa = a.simplify({ rules: [allRules[i]] });
     if (sa.isSame(b)) return ruleName(allRules[i]);
@@ -1767,9 +1766,9 @@ function tryRules(
   return `🙁 ${a.simplify({ rules }).toString()}`;
 }
 
-function ruleName(rule: Rule | undefined): string {
+function ruleName(rule: BoxedRule | undefined): string {
   if (!rule) return '';
-  if (typeof rule === 'string') return rule;
   if (rule.id) return rule.id;
+  if (typeof rule.replace === 'function') return `function ${rule.toString()}`;
   return 'unknown rule';
 }

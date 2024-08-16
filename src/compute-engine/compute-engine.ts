@@ -93,7 +93,7 @@ import {
 // To avoid circular dependencies, serializeToJson is forward declared. Type
 // to import it.
 import './boxed-expression/serialize';
-import { SIMPLIFY_RULES } from './simplify-rules';
+import { SIMPLIFY_RULES } from './symbolic/simplify-rules';
 import { HARMONIZATION_RULES, UNIVARIATE_ROOTS } from './solve';
 import { NumericValue, NumericValueData } from './numeric-value/public';
 import { ExactNumericValue } from './numeric-value/exact-numeric-value';

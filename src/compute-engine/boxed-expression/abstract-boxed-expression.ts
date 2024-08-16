@@ -34,6 +34,7 @@ import {
   Rule,
   RuntimeScope,
   SemiBoxedExpression,
+  SimplifyOptions,
   Substitution,
   Type,
 } from './public';
@@ -674,7 +675,7 @@ export abstract class _BoxedExpression implements BoxedExpression {
     return undefined;
   }
 
-  simplify(): BoxedExpression {
+  simplify(_options?: Partial<SimplifyOptions>): BoxedExpression {
     return this;
   }
 

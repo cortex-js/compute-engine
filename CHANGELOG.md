@@ -34,6 +34,53 @@
 
 ### New Features and Improvements
 
+- **New Simplification Engine**
+
+  The way expressions are simplified has been completely rewritten. The new
+  engine is more powerful and more flexible.
+
+  The core API remains the same: to simplify an expression, use
+  `expr.simplify()`.
+
+  To use a custom set of rules, pass the rules as an argument to `simplify()`:
+
+  ```js
+  expr.simplify({rules: [
+    "|x:<0| -> -x",
+    "|x:>=0| -> x",
+  ]});
+  ```
+
+  There are a few changes to the way rules are represented. The `priority`
+  property has been removed. Instead, rules are applied in the order in which
+  they are defined.
+
+  A rule can also now be a function that takes an expression and returns a new
+  expression. For example:
+
+  ```js
+  expr.simplify({rules: [
+    (expr) => {
+      if (expr.operator !== 'Abs') return undefined;
+      const x = expr.args[0];
+      return x.isNegative ? x.negate() : expr;
+    }
+  ]});
+  ```
+
+  This can be used to perform more complex transformations at the cost of more
+  verbose JavaScript code.
+
+  The algorithm for simplification has been simplified. It attempts to apply
+  each rule in the rule set in turn, then restarts the process until no more
+  rules can be applied or the result of applying a rule returns a previously
+  seen expression.
+
+  Function definitions previously included a `simplify` handler that could be
+  used to perform simplifications specific to this function. This has been
+  removed. Instead, use a rule that matches the function and returns the
+  simplified expression.
+
 - **Exact calculations**
 
   The Compute Engine has a new backed for numerical calculations. The new backed

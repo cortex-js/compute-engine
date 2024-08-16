@@ -993,16 +993,17 @@ export interface BoxedExpression {
   //
 
   /**
-   * Return a simpler form of the canonical form of this expression.
+   * Return a simpler form of this expression.
    *
    * A series of rewriting rules are applied repeatedly, until no more rules
    * apply.
    *
    * If a custom `simplify` handler is associated with this function
-   * definition, it is invoked.
+   * definition, it is invoked, unless `options.applyDefaultSimplifications`
+   *  is `false`.
    *
    * The values assigned to symbols and the assumptions about symbols may be
-   * used, for example `arg.isInteger` or `arg.isPositive`.
+   * used, for example `expr.isInteger` or `expr.isPositive`.
    *
    * No calculations involving decimal numbers (numbers that are not
    * integers) are performed but exact calculations may be performed,
@@ -1010,7 +1011,8 @@ export interface BoxedExpression {
    *
    * \\( \sin(\frac{\pi}{4}) \longrightarrow \frac{\sqrt{2}}{2} \\).
    *
-   * The result is in canonical form.
+   * If this is canonical or `options.applyDefaultSimplifications` is `true`,
+   * the result is in canonical form.
    *
    */
   simplify(options?: Partial<SimplifyOptions>): BoxedExpression;
@@ -1536,7 +1538,7 @@ export type BoxedFunctionSignature = {
   sgn?: (
     ce: IComputeEngine,
     args: ReadonlyArray<BoxedExpression>
-  ) => -1 | 0 | 1 | undefined;
+  ) => -1 | 0 | 1 | typeof NaN | undefined;
 
   compile?: (expr: BoxedExpression) => CompiledExpression;
 };
@@ -1653,17 +1655,38 @@ export interface BoxedSymbolDefinition
   type: Type;
 }
 
-/** @category Rules */
-export type PatternReplaceFunction = (
+/**
+ * Given an expression and set of wildcards, return a new expression.
+ *
+ * For example:
+ *
+ * ```ts
+ * {
+ *    match: '_x',
+ *    replace: (expr, {_x}) => { return ['Add', 1, _x] }
+ * }
+ * ```
+ *
+ * @category Rules */
+export type RuleReplaceFunction = (
   expr: BoxedExpression,
   wildcards: BoxedSubstitution
 ) => BoxedExpression | undefined;
 
 /** @category Rules */
-export type PatternConditionFunction = (
+export type RuleConditionFunction = (
   wildcards: BoxedSubstitution,
   ce: IComputeEngine
 ) => boolean;
+
+/** @category Rules */
+export type RuleFunction = (
+  expr: BoxedExpression
+) => undefined | BoxedExpression | RuleStep;
+
+export function isRuleStep(x: any): x is RuleStep {
+  return x && typeof x === 'object' && x.value && x.because;
+}
 
 /**
  * A rule describes how to modify an expressions that matches a pattern `match`
@@ -1687,8 +1710,15 @@ export type PatternConditionFunction = (
  * a sequence of one or more expressions, and bind the sequence to the
  * wildcard name.
  *
- * If `exact` is false, the rule will match variants. For example
- * 'x' will match 'a + x', 'x' will match 'ax', etc...
+ * Sequence wildcards are useful when the number of elements in the sequence
+ * is not known in advance. For example, in a sum, the number of terms is
+ * not known in advance. ["Add", 0, `__a`] will match two or more terms and
+ * the `__a` wildcard will be a sequence of the matchign terms.
+ *
+ * If `exact` is false, the rule will match variants.
+ *
+ * For example 'x' will match 'a + x', 'x' will match 'ax', etc...
+ *
  * For simplification rules, you generally want `exact` to be true, but
  * to solve equations, you want it to be false. Default to true.
  *
@@ -1699,21 +1729,28 @@ export type PatternConditionFunction = (
 
 export type Rule =
   | string
+  | RuleFunction
   | {
       match?: LatexString | SemiBoxedExpression | Pattern;
-      replace: LatexString | SemiBoxedExpression | PatternReplaceFunction;
-      condition?: LatexString | PatternConditionFunction;
+      replace: LatexString | SemiBoxedExpression | RuleReplaceFunction;
+      condition?: LatexString | RuleConditionFunction;
       exact?: boolean; // Default to true
-      priority?: number;
-      id?: string; // For debugging
+      id?: string; // Optional, for debugging or filtering
     };
 
-/** @category Rules */
+/**
+ *
+ * If the `match` property is `undefined`, all expressions match this rule
+ * and `condition` should also be `undefined`. The `replace` property should
+ * be a `BoxedExpression` or a `RuleFunction`, and further filtering can be
+ * done in the `replace` function.
+ *
+ * @category Rules */
 export type BoxedRule = {
-  match?: Pattern;
-  replace: BoxedExpression | PatternReplaceFunction;
-  condition: undefined | PatternConditionFunction;
-  priority: number;
+  _tag: 'boxed-rule';
+  match: undefined | Pattern;
+  replace: BoxedExpression | RuleReplaceFunction | RuleFunction;
+  condition: undefined | RuleConditionFunction;
   exact?: boolean; // If false, the rule will match variants, for example
   // 'x' will match 'a + x', 'x' will match 'ax', etc...
   // For simplification rules, you generally want exact to be true, but
@@ -1721,8 +1758,24 @@ export type BoxedRule = {
   id?: string; // For debugging
 };
 
-/** @category Rules */
-export type BoxedRuleSet = ReadonlyArray<BoxedRule>;
+export function isBoxedRule(x: any): x is BoxedRule {
+  return x && typeof x === 'object' && x._tag === 'boxed-rule';
+}
+
+export type RuleStep = {
+  value: BoxedExpression;
+  because: string; // id of the rule
+};
+
+export type RuleSteps = ReadonlyArray<RuleStep>;
+
+/**
+ * To create a BoxedRuleSet use the `ce.rules()` method.
+ *
+ * Do not create a `BoxedRuleSet` directly.
+ *
+ * @category Rules */
+export type BoxedRuleSet = { rules: ReadonlyArray<BoxedRule> };
 
 /**
  * @noInheritDoc
@@ -1838,8 +1891,26 @@ export type DomainExpression<T = SemiBoxedExpression> =
  * @category Compute Engine
  */
 export type SimplifyOptions = {
-  recursive?: boolean; // Default to true
-  rules: null | Rule | Rule[] | BoxedRuleSet;
+  /**
+   * Apply the rules recursively. If `false`, only apply the rules once.
+   *
+   * **Default**: `true`
+   */
+  recursive?: boolean;
+
+  /**
+   * If `true`, if a function has a built-in simplification handler,
+   * use it.
+   *
+   * **Default**: `true`
+   *
+   */
+  applyDefaultSimplifications?: boolean;
+
+  /**
+   * The set of rules to apply. If `null`, use no rules.
+   */
+  rules?: null | Rule | (BoxedRule | Rule)[] | BoxedRuleSet;
 };
 
 /** Options for `BoxedExpression.evaluate()`
@@ -2064,7 +2135,7 @@ export interface IComputeEngine extends IBigNum {
   tuple(...elements: ReadonlyArray<number>): BoxedExpression;
   tuple(...elements: ReadonlyArray<BoxedExpression>): BoxedExpression;
 
-  rules(rules: ReadonlyArray<Rule>): BoxedRuleSet;
+  rules(rules: ReadonlyArray<Rule | BoxedRule>): BoxedRuleSet;
 
   /**
    * Return a set of built-in rules.
@@ -2272,9 +2343,16 @@ export type LatexString = string;
 /**
  * Control how a pattern is matched to an expression.
  *
- * - `substitution`: if present, assumes these values for the named wildcards, and ensure that subsequent occurrence of the same wildcard have the same value.
- * - `recursive`: if true, match recursively, otherwise match only the top level.
- * - `exact`: if true, only match expressions that are structurally identical. If false, match expressions that are structurally identical or equivalent. For example, when false, `["Add", '_a', 2]` matches `2`, with a value of `_a` of `0`. If true, the expression does not match.
+ * - `substitution`: if present, assumes these values for the named wildcards,
+ *    and ensure that subsequent occurrence of the same wildcard have the same
+ *    value.
+ * - `recursive`: if true, match recursively, otherwise match only the top
+ *    level.
+ * - `exact`: if true, only match expressions that are structurally identical.
+ *    If false, match expressions that are structurally identical or equivalent.
+ *
+ *    For example, when false, `["Add", '_a', 2]` matches `2`, with a value of
+ *    `_a` of `0`. If true, the expression does not match. **Default**: `true`
  *
  * @category Pattern Matching
  *

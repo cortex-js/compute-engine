@@ -5,7 +5,7 @@ import {
 import { isInequality } from './boxed-expression/utils';
 import { canonicalAdd } from './library/arithmetic-add';
 import { Rule } from './public';
-import { matchRules } from './rules';
+import { matchAnyRules } from './rules';
 import { expand } from './symbolic/expand';
 
 // https://en.wikipedia.org/wiki/Equation_solving
@@ -208,7 +208,7 @@ export function findUnivariateRoots(
   let exprs = [expr.subs({ [x]: '_x' }, { canonical: false })];
 
   let result = exprs.flatMap((expr) =>
-    matchRules(expr, rules, { _x: ce.symbol('_x') })
+    matchAnyRules(expr, rules, { _x: ce.symbol('_x') })
   );
 
   // If we didn't find a solution yet, try modifying the expression
@@ -226,7 +226,7 @@ export function findUnivariateRoots(
   if (result.length === 0) {
     exprs = exprs.flatMap((expr) => harmonize(expr));
     result = exprs.flatMap((expr) =>
-      matchRules(expr, rules, { _x: ce.symbol(x) })
+      matchAnyRules(expr, rules, { _x: ce.symbol(x) })
     );
   }
 
@@ -236,7 +236,7 @@ export function findUnivariateRoots(
       .filter((x) => x !== null) as BoxedExpression[];
     exprs = exprs.flatMap((expr) => harmonize(expr));
     result = exprs.flatMap((expr) =>
-      matchRules(expr, rules, { _x: ce.symbol(x) })
+      matchAnyRules(expr, rules, { _x: ce.symbol(x) })
     );
   }
 
@@ -370,7 +370,5 @@ export const HARMONIZATION_RULES: Rule[] = [
 function harmonize(expr: BoxedExpression): BoxedExpression[] {
   const ce = expr.engine;
   const rules = ce.getRuleSet('harmonization')!;
-  const result = matchRules(expr, rules, { _x: ce.symbol('_x') });
-
-  return result;
+  return matchAnyRules(expr, rules, { _x: ce.symbol('_x') });
 }

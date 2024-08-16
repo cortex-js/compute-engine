@@ -1,4 +1,5 @@
-import { Rule } from './public';
+import { Rule } from '../public';
+import { expand } from './expand';
 
 /**
  * @todo: a set to "tidy" an expression. Different from a canonical form, but
@@ -27,6 +28,23 @@ import { Rule } from './public';
  * may be necessary as the expression could be simplified by the canonicalization.
  */
 export const SIMPLIFY_RULES: Rule[] = [
+  // Try to expand the expression:
+  // x*(y+z) -> x*y + x*z
+  (x) => expand(x) ?? undefined,
+
+  // Abs
+  {
+    replace: (x) => {
+      if (x.operator !== 'Abs') return undefined;
+      const op = x.op1;
+      const s = op.sgn;
+      if (op.isNonNegative) return op;
+      if (op.isNegative) return op.neg();
+      return undefined;
+    },
+    id: 'abs',
+  },
+
   /*
   //NEW (doesn't work b/c keeps - sign)
   {

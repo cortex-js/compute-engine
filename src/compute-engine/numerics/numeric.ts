@@ -187,10 +187,7 @@ export function factorial2(n: number): number {
   return result;
 }
 
-export function chop(
-  n: number,
-  tolerance = MACHINE_TOLERANCE
-): 0 | number | Decimal | Complex {
+export function chop(n: number, tolerance = MACHINE_TOLERANCE): 0 | number {
   if (typeof n === 'number' && Math.abs(n) <= tolerance) return 0;
   return n;
 }

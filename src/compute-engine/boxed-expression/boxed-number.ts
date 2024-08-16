@@ -10,6 +10,12 @@ import {
   EvaluateOptions,
   SemiBoxedExpression,
   Type,
+  BoxedRuleSet,
+  ReplaceOptions,
+  Rule,
+  Substitution,
+  CanonicalOptions,
+  SimplifyOptions,
 } from '../public';
 import { inferNumericDomain } from '../domain-utils';
 import { Rational } from '../numerics/rationals';
@@ -30,6 +36,8 @@ import {
 import { add } from './terms';
 import { bigint } from '../numerics/numeric-bigint';
 import { isInMachineRange } from '../numerics/numeric-bignum';
+import { replace } from '../rules';
+import { simplify } from '../symbolic/simplify';
 
 /**
  * BoxedNumber
@@ -423,6 +431,25 @@ export class BoxedNumber extends _BoxedExpression {
     return this === rhs || signDiff(this, rhs) === 0;
   }
 
+  subs(
+    sub: Substitution,
+    options?: { canonical?: CanonicalOptions }
+  ): BoxedExpression {
+    return this.structural.subs(sub, options);
+  }
+
+  replace(
+    rules: BoxedRuleSet | Rule | Rule[],
+    options?: ReplaceOptions
+  ): BoxedExpression | null {
+    // Apply the replace on the structural version of the number.
+    // This will allow transformations to be applied on ["Rational", 3, 4]
+    // for example.
+    const steps = replace(this.structural, rules, options);
+    if (steps.length === 0) return null;
+    return steps[steps.length - 1].value;
+  }
+
   match(
     pattern:
       | Decimal
@@ -432,7 +459,7 @@ export class BoxedNumber extends _BoxedExpression {
       | BoxedExpression,
     options?: PatternMatchOptions
   ): BoxedSubstitution | null {
-    return match(this, pattern, options);
+    return match(this.structural, pattern, options);
   }
 
   isLess(rhs: number | BoxedExpression): boolean | undefined {
@@ -623,8 +650,11 @@ export class BoxedNumber extends _BoxedExpression {
     return [v, this.engine.One];
   }
 
-  simplify(): BoxedExpression {
-    return this;
+  simplify(options?: Partial<SimplifyOptions>): BoxedExpression {
+    const results = simplify(this.canonical.structural, options);
+
+    if (results.length === 0) return this;
+    return results[results.length - 1].value;
   }
 
   evaluate(options?: EvaluateOptions): BoxedExpression {

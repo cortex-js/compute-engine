@@ -44,6 +44,7 @@ import { asSmallInteger, signDiff } from './numerics';
 import { canonicalMultiply, mul } from '../library/arithmetic-multiply';
 import { NumericValue } from '../numeric-value/public';
 import { add } from './terms';
+import { simplify } from '../symbolic/simplify';
 
 /**
  * A boxed function represent an expression that can be
@@ -105,10 +106,8 @@ export class BoxedFunction extends _BoxedExpression {
     this._ops = ops;
     this._isStructural = options?.structural ?? false;
 
-    if (options?.canonical) {
-      this._canonical = this;
-      this.bind();
-    }
+    if (options?.canonical) this._canonical = this;
+    if (options?.canonical || this._isStructural) this.bind();
 
     ce._register(this);
   }
@@ -411,7 +410,21 @@ export class BoxedFunction extends _BoxedExpression {
     rules: BoxedRuleSet | Rule | Rule[],
     options?: ReplaceOptions
   ): BoxedExpression | null {
-    return replace(this, rules, options);
+    const results = replace(this, rules, options);
+    if (results.length === 0) return null;
+    return results[results.length - 1].value;
+  }
+
+  match(
+    pattern:
+      | Decimal
+      | Complex
+      | [num: number, denom: number]
+      | SemiBoxedExpression
+      | BoxedExpression,
+    options?: PatternMatchOptions
+  ): BoxedSubstitution | null {
+    return match(this, pattern, options);
   }
 
   has(x: string | string[]): boolean {
@@ -529,18 +542,6 @@ export class BoxedFunction extends _BoxedExpression {
       if (!lhsTail[i].isSame(rhsTail[i])) return false;
 
     return true;
-  }
-
-  match(
-    pattern:
-      | Decimal
-      | Complex
-      | [num: number, denom: number]
-      | SemiBoxedExpression
-      | BoxedExpression,
-    options?: PatternMatchOptions
-  ): BoxedSubstitution | null {
-    return match(this, pattern, options);
   }
 
   //
@@ -933,109 +934,23 @@ export class BoxedFunction extends _BoxedExpression {
     return 'expression';
   }
 
-  // simplify(options?: SimplifyOptions): BoxedExpression {
-  //   const result = this.simplifyAll(options);
-  //   if (result.length === 1) return result[0];
-  //   const ce = this.engine;
-  //   result.sort((a, b) => {
-  //     if (a === b) return 0;
-  //     return ce.costFunction(a) - ce.costFunction(b);
-  //   });
-  //   return result[0];
-  // }
-
-  simplify(options?: SimplifyOptions): BoxedExpression {
-    // @fixme: simplify logic, only use rules, including "core" rules (i.e. expand/distribute/factor)
-    //
-    // 1/ Use the canonical form
-    //
-    if (!this.isValid) return this;
-    if (!this.isCanonical) {
-      const canonical = this.canonical;
-      if (!canonical.isCanonical || !canonical.isValid) return this;
-      return canonical.simplify(options);
-    }
-
-    //
-    // 2/ Apply expand
-    //
-    const recursive = options?.recursive ?? true;
-
-    let expr: BoxedExpression | undefined | null;
-    if (recursive) {
-      expr = expand(this);
-      if (expr && !expr.isSame(this))
-        return expr.simplify({ ...options, recursive: false });
-    }
-
-    //
-    // 3/ Factor if a relational operator
-    //    2x < 4t -> x < 2t
-    if (isRelationalOperator(this.operator)) {
-      expr = factor(expr ?? this);
-      expr = expr ?? this;
-      console.assert(isRelationalOperator(expr.operator));
-      if (expr.nops === 2) {
-        // Try f(x) < g(x) -> f(x) - g(x) < 0
-        const ce = this.engine;
-        const alt = ce._fn(expr.operator, [expr.op1.sub(expr.op2), ce.Zero]);
-        expr = cheapest(expr, alt);
-      }
-    }
-
-    //
-    // 4/ Simplify the applicable operands
-    // @todo not clear if this is always the best strategy. Might be better to
-    // defer to the handler.
-    //
-    const def = this.functionDefinition;
-    const tail = recursive
-      ? holdMap(
-          this._ops,
-          def?.hold ?? 'none',
-          def?.associative ? def.name : '',
-          (x) => x.simplify({ ...options, recursive: false })
-        )
-      : this._ops;
-
-    //
-    // 5/ Apply `simplify` handler
-    //
-
-    if (def) {
-      if (def.inert) expr = tail[0]?.canonical ?? this;
-      else {
-        const sig = def.signature;
-        if (sig?.simplify) expr = sig.simplify(this.engine, tail);
-      }
-    }
-
-    if (!expr) expr = this.engine.box([this._name, ...tail]);
-    else expr = cheapest(this.engine.box([this._name, ...tail]), expr);
-
-    if (recursive) expr = cheapest(this, expr);
-
-    if (options?.rules === null) return expr;
-
-    //
-    // 6/ Apply rules, until no rules can be applied
-    //
-    const rules =
-      options?.rules ?? this.engine.getRuleSet('standard-simplification')!;
-
-    let iterationCount = 0;
-    do {
-      const newExpr = expr!.replace(rules);
-      if (!newExpr) break;
-      expr = newExpr.simplify({
-        ...options,
-        recursive: false,
-        rules: null,
+  simplify(options?: Partial<SimplifyOptions>): BoxedExpression {
+    let expr: BoxedExpression = this;
+    if (options?.recursive) {
+      const def = this.functionDefinition;
+      const ops = holdMap(
+        this._ops,
+        def?.hold ?? 'none',
+        def?.associative ? def.name : '',
+        (x) => x.simplify({ ...options, recursive: false })
+      );
+      expr = this.engine.function(this._name, ops, {
+        canonical: this.isCanonical,
       });
-
-      iterationCount += 1;
-    } while (iterationCount < this.engine.iterationLimit);
-    return expr!; // cheapest(this, expr);
+    }
+    const results = simplify(expr, options);
+    if (results.length === 0) return this;
+    return results[results.length - 1].value;
   }
 
   evaluate(options?: EvaluateOptions): BoxedExpression {
@@ -1217,33 +1132,3 @@ export function holdMap(
 // ): BoxedFunctionSignature | undefined {
 //   return def.signature;
 // }
-
-/**
- * Considering an old (existing) expression and a new (simplified) one,
- * return the cheapest of the two, with a bias towards the new (which can
- * actually be a bit more expensive than the old one, and still be picked).
- */
-function cheapest(
-  oldExpr: BoxedExpression,
-  newExpr: SemiBoxedExpression | null | undefined
-): BoxedExpression {
-  if (newExpr === null || newExpr === undefined) return oldExpr;
-  if (oldExpr === newExpr) return oldExpr;
-
-  const ce = oldExpr.engine;
-  const boxedNewExpr = ce.box(newExpr);
-
-  if (oldExpr.isSame(boxedNewExpr)) return oldExpr;
-
-  if (ce.costFunction(boxedNewExpr) <= 1.2 * ce.costFunction(oldExpr)) {
-    // console.log(
-    //   'Picked new' + boxedNewExpr.toString() + ' over ' + oldExpr.toString()
-    // );
-    return boxedNewExpr;
-  }
-
-  // console.log(
-  //   'Picked old ' + oldExpr.toString() + ' over ' + newExpr.toString()
-  // );
-  return oldExpr;
-}

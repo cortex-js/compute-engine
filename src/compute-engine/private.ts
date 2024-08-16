@@ -14,7 +14,7 @@ import './boxed-expression/order';
 import './boxed-expression/utils';
 import './boxed-expression/serialize';
 import './rules';
-import './simplify-rules';
+import './symbolic/simplify-rules';
 import './solve';
 
 export * from './assume';
@@ -32,5 +32,5 @@ export * from './compute-engine';
 export * from './debug';
 export * from './domain-utils';
 export * from './rules';
-export * from './simplify-rules';
+export * from './symbolic/simplify-rules';
 export * from './solve';

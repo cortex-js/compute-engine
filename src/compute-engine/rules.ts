@@ -6,9 +6,14 @@ import {
   BoxedRuleSet,
   ReplaceOptions,
   BoxedSubstitution,
-  PatternConditionFunction,
+  RuleConditionFunction,
   SemiBoxedExpression,
-  PatternReplaceFunction,
+  RuleReplaceFunction,
+  RuleFunction,
+  RuleSteps,
+  RuleStep,
+  isRuleStep,
+  isBoxedRule,
 } from './public';
 import {
   asLatexString,
@@ -171,7 +176,7 @@ export const CONDITIONS = {
   complex: (x: BoxedExpression) => x.isComplex,
   imaginary: (x: BoxedExpression) => x.isImaginary,
   rational: (x: BoxedExpression) => x.isRational,
-  irrational: (x: BoxedExpression) => x.domain?.isRational === false,
+  irrational: (x: BoxedExpression) => x.isRational === false,
 
   positive: (x: BoxedExpression) => x.isPositive,
   negative: (x: BoxedExpression) => x.isNegative,
@@ -185,10 +190,10 @@ export const CONDITIONS = {
   composite: (x: BoxedExpression) => isPrime(x) === false,
 
   notzero: (x: BoxedExpression) => x.isNotZero,
-  notone: (x: BoxedExpression) => !x.isOne,
+  notone: (x: BoxedExpression) => x.isOne === false,
 
   finite: (x: BoxedExpression) => x.isFinite,
-  infinite: (x: BoxedExpression) => !x.isFinite,
+  infinite: (x: BoxedExpression) => x.isFinite === false,
 
   constant: (x: BoxedExpression) => x.symbol !== null && x.isConstant,
   variable: (x: BoxedExpression) =>
@@ -210,10 +215,11 @@ export const CONDITIONS = {
   single: (x: BoxedExpression) => x.operator === 'Single',
   pair: (x: BoxedExpression) => x.operator === 'Pair',
   triple: (x: BoxedExpression) => x.operator === 'Triple',
+
+  scalar: (x: BoxedExpression) => x.rank === 0,
   tensor: (x: BoxedExpression) => x.rank > 0,
   vector: (x: BoxedExpression) => x.rank === 1,
   matrix: (x: BoxedExpression) => x.rank === 2,
-  scalar: (x: BoxedExpression) => x.rank === 0,
 
   unit: (x: BoxedExpression) => x.operator === 'Unit',
   dimension: (x: BoxedExpression) => x.operator === 'Dimension',
@@ -232,11 +238,12 @@ function tokenizeLaTeX(input: string): string[] {
   // Regular expression to match LaTeX tokens
   const regex = /\\[a-zA-Z]+|[{}]|[\d]+|[+\-*/^_=(),.;]|[a-zA-Z]/g;
 
-  // Match the input string against the regular expression
   const tokens = input.match(regex);
-  // If no tokens are found, return an empty array
+
   if (!tokens) return [];
-  return tokens.filter((x) => x !== ' '); // Remove spaces;
+
+  // Filter blank spaces
+  return tokens.filter((x) => !/^[ \f\n\r\t\v\xA0\u2028\u2029]+$/.test(x));
 }
 
 function parseModifier(parser: Parser): string | null {
@@ -317,8 +324,7 @@ function parserModifiers(parser: Parser): string {
 }
 
 // Look for a modifier expression of the form
-// `:condition1,condition2,...`
-// or `_{condition1,condition2,...}`
+// `:condition1,condition2,...` or `_{condition1,condition2,...}`
 function parseModifierExpression(parser: Parser): string | null {
   let conditions: string | null = null;
   if (parser.match(':')) conditions = parserModifiers(parser);
@@ -331,7 +337,7 @@ function parseModifierExpression(parser: Parser): string | null {
 
 function parseLatexRule(
   ce: IComputeEngine,
-  rule?: string | SemiBoxedExpression | PatternReplaceFunction
+  rule?: string | SemiBoxedExpression | RuleReplaceFunction
 ): BoxedExpression | undefined {
   if (rule === undefined || typeof rule === 'function') return undefined;
   if (typeof rule === 'string') {
@@ -468,7 +474,7 @@ function parseRule(ce: IComputeEngine, rule: string): BoxedRule {
   }
   const [match, replace, condition] = expr.ops!;
 
-  let condFn: undefined | PatternConditionFunction = undefined;
+  let condFn: undefined | RuleConditionFunction = undefined;
   if (condition !== null) {
     condFn = (sub: BoxedSubstitution, _ce: IComputeEngine): boolean => {
       for (const id of Object.keys(sub)) {
@@ -493,38 +499,75 @@ function parseRule(ce: IComputeEngine, rule: string): BoxedRule {
   return boxRule(ce, {
     match,
     replace,
-    priority: 0,
     condition: condFn,
     id: match.toString() + ' -> ' + replace.toString(),
   });
 }
 
-function boxRule(ce: IComputeEngine, rule: Rule): BoxedRule {
+function boxRule(ce: IComputeEngine, rule: Rule | BoxedRule): BoxedRule {
+  if (isBoxedRule(rule)) return rule;
+  // If the rule is defined as a single string, parse it
+  // e.g. `|x| -> x; x > 0`
   if (typeof rule === 'string') return parseRule(ce, rule);
 
-  const { match, replace, condition, priority, id } = rule;
+  // If the rule is defined as a function, the function will be called
+  // on every expression to process it.
+  if (typeof rule === 'function')
+    return {
+      _tag: 'boxed-rule',
+      match: undefined,
+      replace: rule,
+      condition: undefined,
+      id: '',
+    };
+
+  const { match, replace, condition, id } = rule;
 
   // Normalize the condition to a function
-  let condFn: undefined | PatternConditionFunction;
+  let condFn: undefined | RuleConditionFunction;
   if (typeof condition === 'string') {
     const latex = asLatexString(condition);
     if (latex) {
-      // Substitute any unbound vars in the condition to a wildcard
+      // If the condition is a LaTeX string, it should be a predicate
+      // (an expression with a Boolean value).
       const condPattern = ce.parse(latex, { canonical: false });
+      // Substitute any unbound vars in the condition to a wildcard,
+      // then evaluate the condition
       condFn = (x: BoxedSubstitution, _ce: IComputeEngine): boolean =>
         condPattern.subs(x).evaluate()?.symbol === 'True';
     }
-  } else condFn = condition;
+  } else {
+    if (condition !== undefined && typeof condition !== 'function')
+      throw new Error(
+        `Invalid rule ${id ?? rule}: condition is not a valid function`
+      );
+    condFn = condition;
+  }
+
+  if (typeof match === 'function') {
+    throw new Error(
+      `Invalid rule ${id ?? rule}: match is not a valid expression. Use a replace function instead to validate and replace the expression`
+    );
+  }
 
   const matchExpr = parseLatexRule(ce, match);
   const replaceExpr = parseLatexRule(ce, replace);
+
+  if (!replaceExpr && typeof replace !== 'function')
+    throw new Error(
+      `Invalid rule ${id ?? rule}: replace is not a valid expression`
+    );
+
   return {
+    _tag: 'boxed-rule',
     match: matchExpr,
-    replace: replaceExpr ?? (replace as PatternReplaceFunction),
-    priority: priority ?? 0,
+    replace: replaceExpr ?? (replace as RuleReplaceFunction | RuleFunction),
     condition: condFn,
     exact: rule.exact ?? true,
-    id: id ?? (matchExpr?.latex ?? '') + ' -> ' + replaceExpr?.latex ?? '',
+    id:
+      id ??
+      (matchExpr?.toString() ?? '') + ' -> ' + replaceExpr?.toString() ??
+      '',
   };
 }
 
@@ -532,11 +575,15 @@ function boxRule(ce: IComputeEngine, rule: Rule): BoxedRule {
  * Create a boxed rule set from a collection of non-boxed rules
  */
 export function boxRules(ce: IComputeEngine, rs: Iterable<Rule>): BoxedRuleSet {
-  const result: BoxedRule[] = [];
+  const rules: BoxedRule[] = [];
 
-  for (const rule of rs) result.push(boxRule(ce, rule));
-
-  return result.sort((a, b) => b.priority - a.priority);
+  try {
+    for (const rule of rs) rules.push(boxRule(ce, rule));
+  } catch (e) {
+    console.error(e);
+    return { rules: [] };
+  }
+  return { rules };
 }
 
 /**
@@ -609,50 +656,56 @@ function applyRule(
     typeof replace === 'function'
       ? replace(expr, sub)
       : replace.subs(sub, { canonical: expr.isCanonical });
+
   if (!result) return null;
-  return expr.isCanonical ? result.canonical : result;
+  if (expr.isCanonical)
+    return isRuleStep(result) ? result.value.canonical : result.canonical;
+
+  return isRuleStep(result) ? result.value : result;
 }
 
 /**
- * Apply the rules in the ruleset and return a modified expression.
+ * Apply the rules in the ruleset and return a modified expression
+ * and the set of rules that were applied.
  *
- * If no rule applied, return `null`.
  */
 export function replace(
   expr: BoxedExpression,
-  ruleSet: BoxedRuleSet | Rule | Rule[],
+  rules: Rule | (Rule | BoxedRule)[] | BoxedRuleSet,
   options?: ReplaceOptions
-): BoxedExpression | null {
+): RuleSteps {
+  if (!rules) throw new Error('replace(): Expected one or more rules');
+
   const iterationLimit = options?.iterationLimit ?? 1;
   let iterationCount = 0;
   const once = options?.once ?? false;
 
-  if (!(ruleSet instanceof Set))
+  let ruleSet: ReadonlyArray<BoxedRule>;
+  if (typeof rules === 'object' && 'rules' in rules) ruleSet = rules.rules;
+  else {
     ruleSet = expr.engine.rules(
-      Array.isArray(ruleSet) ? ruleSet : [ruleSet as Rule]
-    );
+      Array.isArray(rules) ? rules : [rules as Rule | BoxedRule]
+    ).rules;
+  }
 
   let done = false;
-  let atLeastOneRule = false;
+  const steps: RuleStep[] = [];
   try {
     while (!done && iterationCount < iterationLimit) {
       done = true;
-      const appliedRules: string[] = [];
       for (const rule of ruleSet) {
         const result = applyRule(rule, expr, {}, options);
         if (result !== null && result !== expr) {
-          // If once flag is set, bail on first matching rule
-          if (once) return result;
-          // If the rule has already been applied, skip it
-          if (appliedRules.includes(rule.id)) {
-            console.error(
-              'Rule cycle detected',
-              appliedRules.reduce((a, b) => a + ' -> ' + b, '')
-            );
-          }
-          appliedRules.push(rule.id);
+          // If `once` flag is set, bail on first matching rule
+          if (once) return [{ value: result, because: rule.id ?? '' }];
+
+          // If we have detected a loop, exit
+          if (steps.some((x) => x.value.isSame(expr))) return steps;
+
+          steps.push({ value: result, because: rule.id ?? '' });
+
+          // We have a rule apply, so we'll want to continue iterating
           done = false;
-          atLeastOneRule = true;
           expr = result;
         }
       }
@@ -661,7 +714,7 @@ export function replace(
   } catch (e) {
     console.error(e);
   }
-  return atLeastOneRule ? expr : null;
+  return steps;
 }
 
 /**
@@ -669,13 +722,13 @@ export function replace(
  *
  * @param rules
  */
-export function matchRules(
+export function matchAnyRules(
   expr: BoxedExpression,
   rules: BoxedRuleSet,
   sub: BoxedSubstitution
 ): BoxedExpression[] {
   const results: BoxedExpression[] = [];
-  for (const rule of rules) {
+  for (const rule of rules.rules) {
     const r = applyRule(rule, expr, sub);
     if (r === null) continue;
     // Verify that the results are unique

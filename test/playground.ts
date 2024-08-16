@@ -2,8 +2,40 @@ import { ComputeEngine } from '../src/compute-engine';
 
 const ce = new ComputeEngine();
 
-const expression = ce.parse('-\\pi');
-console.log(expression.isPositive);
+let expression = ce.parse('|-\\pi|').simplify();
+expression.print();
+console.log(expression.latex);
+console.log(expression.json);
+
+// Should simplify....
+expression = ce.parse('e^x e^{-x}').simplify();
+expression.print();
+console.log(expression.latex);
+console.log(expression.json);
+
+// Should output abs, and asciimath of log should use _ for subscript
+expression = ce.parse('\\log_4(x^2)').simplify();
+expression.print();
+console.log(expression.latex);
+console.log(expression.json);
+
+// Should give NaN
+expression = ce.parse('\\sin(\\infty)').simplify();
+expression.print();
+console.log(expression.latex);
+console.log(expression.json);
+
+// Expected answer is '7/4 \\log_4(x)' but does not match
+expression = ce.parse('\\log_4(x^{7/4})').simplify();
+expression.print();
+console.log(expression.latex);
+console.log(expression.json);
+
+// arcsinh does not exist, but give unexpected token error
+expression = ce.parse('|\\arcsinh(x)|').simplify();
+expression.print();
+console.log(expression.latex);
+console.log(expression.json);
 
 const eq1 = '3x + 1 = 0';
 const eq2 = '6x + 2 = 0';
