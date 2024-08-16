@@ -17,6 +17,7 @@ import { expandProducts } from '../symbolic/expand';
 import { flatten } from '../symbolic/flatten';
 import { negateProduct } from '../symbolic/negate';
 import { order } from '../boxed-expression/order';
+import { reduceCollection } from './collections';
 
 // Canonical form of `["Product"]` (`\prod`) expressions.
 export function canonicalProduct(
@@ -73,40 +74,14 @@ export function evalProduct(
       mode === 'simplify'
         ? expr.simplify()
         : expr.evaluate({ numericMode: mode === 'N' });
-
-    // The body is a collection, e.g. Product({1, 2, 3})
-    if (bignumPreferred(ce)) {
-      let product = ce.bignum(1);
-      for (const x of each(body)) {
-        const term = asBignum(x);
-        if (term === null) {
-          result = undefined;
-          break;
-        }
-        if (term.isFinite() === false) {
-          product = term;
-          break;
-        }
-        product = product.mul(term);
-      }
-      if (result === null) result = ce.number(product);
-    } else {
-      let product = 1;
-      for (const x of each(body)) {
-        const term = x.re;
-        if (term === undefined) {
-          result = undefined;
-          break;
-        }
-        if (!Number.isFinite(term)) {
-          product = term;
-          break;
-        }
-        product *= term;
-      }
-      if (result === null) result = ce.number(product);
-    }
-    return result ?? undefined;
+    const result = reduceCollection(
+      body,
+      (acc, next) =>
+        next.isNumberLiteral ? acc.mul(next.numericValue!) : null,
+      ce._numericValue(1)
+    );
+    if (result === undefined) return undefined;
+    return ce.number(result);
   }
 
   const fn = expr;

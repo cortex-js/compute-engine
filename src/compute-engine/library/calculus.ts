@@ -102,14 +102,10 @@ volumes
           ['OptArg', 'Numbers'], // The order of the derivative
           'Functions',
         ],
-        simplify: (ce, ops) => {
-          const expr = ops[0].simplify();
-          return ce._fn('Derivative', ops[1] ? [expr, ops[1]] : [expr]);
-        },
         evaluate: (ce, ops) => {
           // Is it a function name, i.e. ["Derivative", "Sin"]?
           const op = ops[0].evaluate();
-          const degree = Math.floor(ops[1]?.evaluate().re ?? 1);
+          const degree = Math.floor(ops[1]?.N().re ?? 1);
           return derivative(op, degree);
         },
       },

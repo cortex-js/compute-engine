@@ -825,7 +825,7 @@ export interface BoxedExpression {
    * @category Numeric Expression
    *
    */
-  readonly sgn: -1 | 0 | 1 | undefined | typeof NaN;
+  readonly sgn: number | undefined;
 
   /** If the expressions cannot be compared, return `undefined`
    *
@@ -1519,10 +1519,6 @@ export type BoxedFunctionSignature = {
     ce: IComputeEngine,
     args: ReadonlyArray<BoxedExpression>
   ) => BoxedExpression | null;
-  simplify?: (
-    ce: IComputeEngine,
-    args: ReadonlyArray<BoxedExpression>
-  ) => BoxedExpression | undefined;
   evaluate?: (
     ce: IComputeEngine,
     args: ReadonlyArray<BoxedExpression>
@@ -2658,38 +2654,6 @@ export type FunctionSignature = {
     ce: IComputeEngine,
     args: ReadonlyArray<BoxedExpression>
   ) => BoxedExpression | null;
-
-  /**
-   * Rewrite an expression into a simpler form.
-   *
-   * The arguments are in canonical form and have been simplified.
-   *
-   * The handler can use the values assigned to symbols and the assumptions
-   * about symbols, for example with `arg.numericValue`, `arg.isInteger` or
-   * `arg.isPositive`.
-   *
-   * Even though a symbol may not have a value, there may be some information
-   * about it reflected for example in `this.isZero` or `this.isPrime`.
-   *
-   * The handler should not perform approximate numeric calculations, such
-   * as calculations involving decimal numbers (non-integers). Making exact
-   * calculations on integers or rationals is OK.
-   *
-   * Do not reduce constants with a `holdUntil` attribute of `"N"`
-   * or `"evaluate"`.
-   *
-   * This handler should not have any side-effects: do not modify
-   * the environment of the `ComputeEngine` instance, do not perform I/O,
-   * do not do calculations that depend on random values.
-   *
-   * If no simplification can be performed due to the values, domains or
-   * assumptions about its arguments, for example, return `undefined`.
-   *
-   */
-  simplify?: (
-    ce: IComputeEngine,
-    args: ReadonlyArray<BoxedExpression>
-  ) => BoxedExpression | undefined;
 
   /**
    * Evaluate a function expression.

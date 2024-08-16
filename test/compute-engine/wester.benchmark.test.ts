@@ -20,7 +20,7 @@ describe.skip('Wester CAS Test Suite', () => {
 
   test(`Wester 2`, () => {
     expect(
-      ce.box([['Factors', 'Factorial', 50]]).evaluate()
+      ce.box(['Factors', ['Factorial', 50]]).evaluate()
     ).toMatchInlineSnapshot(
       `"[\\"Pattern\\",[[\\"Pattern\\",\\"Factors\\"],[\\"Pattern\\",\\"Factorial\\"],[\\"Pattern\\",50]]]"`
     );

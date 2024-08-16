@@ -31,7 +31,6 @@ export const LOGIC_LIBRARY: IdentifierDefinitions = {
     complexity: 10000,
     signature: {
       domain: 'LogicOperators',
-      simplify: processAnd,
       evaluate: processAnd,
     },
   },
@@ -44,7 +43,6 @@ export const LOGIC_LIBRARY: IdentifierDefinitions = {
     complexity: 10000,
     signature: {
       domain: 'LogicOperators',
-      simplify: processOr,
       evaluate: processOr,
     },
   },
@@ -56,7 +54,6 @@ export const LOGIC_LIBRARY: IdentifierDefinitions = {
     // @todo: this may not be needed, since we also have rules.
     signature: {
       domain: 'LogicOperators',
-      simplify: processNot,
       evaluate: processNot,
     },
   },
@@ -81,7 +78,6 @@ export const LOGIC_LIBRARY: IdentifierDefinitions = {
           return ce.False;
         return ce._fn('Equivalent', args);
       },
-      simplify: processEquivalent,
       evaluate: processEquivalent,
     },
   },
@@ -91,7 +87,6 @@ export const LOGIC_LIBRARY: IdentifierDefinitions = {
     complexity: 10200,
     signature: {
       domain: 'LogicOperators',
-      simplify: processImplies,
       evaluate: processImplies,
     },
   },
@@ -238,4 +233,21 @@ function processImplies(
     return ce.True;
   if (lhs === 'True' && rhs === 'False') return ce.False;
   return undefined;
+}
+
+export function simplifyLogicFunction(
+  x: BoxedExpression
+): { value: BoxedExpression; because: string } | undefined {
+  const value = {
+    And: processAnd,
+    Or: processOr,
+    Not: processNot,
+    Equivalent: processEquivalent,
+
+    Implies: processImplies,
+  }[x.operator]?.(x.engine, x.ops!);
+
+  if (!value) return undefined;
+
+  return { value, because: 'logic' };
 }

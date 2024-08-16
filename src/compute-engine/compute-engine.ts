@@ -1169,7 +1169,6 @@ export class ComputeEngine implements IComputeEngine {
           ...sig,
           evaluate: undefined,
           N: undefined,
-          simplify: undefined,
           canonical: undefined,
         };
       }
@@ -1625,7 +1624,6 @@ export class ComputeEngine implements IComputeEngine {
       fnDef.signature = {
         ...sig,
         N: undefined,
-        simplify: undefined,
         canonical: undefined,
         evaluate: value as any as () => any,
       };
@@ -2184,7 +2182,6 @@ export class ComputeEngine implements IComputeEngine {
             ...sig,
             evaluate: undefined,
             N: undefined,
-            simplify: undefined,
             canonical: undefined,
           };
         }

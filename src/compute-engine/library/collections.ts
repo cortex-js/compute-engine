@@ -1063,3 +1063,24 @@ function tally(
 
   return [values, counts];
 }
+
+/**
+ * This function is used to reduce a collection of expressions to a single value. It
+ * iterates over the collection, applying the given function to each element and the
+ * accumulator. If the function returns `null`, the iteration is stopped and `undefined`
+ * is returned. Otherwise, the result of the function is used as the new accumulator.
+ * If the iteration completes, the final accumulator is returned.
+ */
+export function reduceCollection<T>(
+  collection: BoxedExpression,
+  fn: (acc: T, next: BoxedExpression) => T | null,
+  initial: T
+): T | undefined {
+  let acc = initial;
+  for (const x of each(collection)) {
+    const result = fn(acc, x);
+    if (result === null) return undefined;
+    acc = result;
+  }
+  return acc;
+}

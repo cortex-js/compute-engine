@@ -255,7 +255,6 @@ export class _BoxedFunctionDefinition implements BoxedFunctionDefinition {
         restParam: restParam ? restParam : undefined,
         result,
         canonical: sig.canonical,
-        simplify: sig.simplify,
         evaluate,
         N: sig.N,
         evalDimension: sig.evalDimension,

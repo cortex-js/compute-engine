@@ -15,6 +15,7 @@ import {
 import { asBignum } from '../boxed-expression/numerics';
 import { flatten } from '../symbolic/flatten';
 import { addOrder } from '../boxed-expression/order';
+import { reduceCollection } from './collections.js';
 
 /** The canonical form of `Add`:
  * - removes `0`
@@ -119,60 +120,46 @@ export function canonicalSummation(
   return result;
 }
 
+// export function loopClosedInterval<T>(
+//   lower: number,
+//   upper: number,
+//   fn: (i: number) => void,
+//   initial: T
+// ): T {
+//   for (let i = lower; i <= upper; i++) fn(i);
+// }
+
+export function evalBigop(
+  ops: ReadonlyArray<BoxedExpression>
+): BoxedExpression | undefined {
+  return undefined;
+}
+
 export function evalSummation(
   ce: IComputeEngine,
   summationEquation: ReadonlyArray<BoxedExpression>,
   mode: 'simplify' | 'N' | 'evaluate'
 ): BoxedExpression | undefined {
   const expr = summationEquation[0];
-  let indexingSet: BoxedExpression[] = [];
-  if (summationEquation) {
-    indexingSet = [];
-    for (let i = 1; i < summationEquation.length; i++)
-      indexingSet.push(summationEquation[i]);
-  }
-  let result: BoxedExpression | undefined | null = null;
 
-  if (indexingSet?.length === 0 || isCollection(expr)) {
+  if (summationEquation.length === 1 || isCollection(expr)) {
     // The body is a collection, e.g. Sum({1, 2, 3})
+    // or a constant, e.g. Sum(3)
     const body =
       mode === 'simplify'
         ? expr.simplify()
         : expr.evaluate({ numericMode: mode === 'N' });
-
-    if (bignumPreferred(ce)) {
-      let sum = ce.bignum(0);
-      for (const x of each(body)) {
-        const term = asBignum(x);
-        if (term === null) {
-          result = undefined;
-          break;
-        }
-        if (term.isFinite() === false) {
-          sum = term;
-          break;
-        }
-        sum = sum.add(term);
-      }
-      if (result === null) result = ce.number(sum);
-    } else {
-      let sum = 0;
-      for (const x of each(body)) {
-        const term = x.re;
-        if (term === undefined) {
-          result = undefined;
-          break;
-        }
-        if (!Number.isFinite(term)) {
-          sum = term;
-          break;
-        }
-        sum += term;
-      }
-      if (result === null) result = ce.number(sum);
-    }
-    return result ?? undefined;
+    const result = reduceCollection(
+      body,
+      (acc, next) =>
+        next.isNumberLiteral ? acc.add(next.numericValue!) : null,
+      ce._numericValue(0)
+    );
+    if (result === undefined) return undefined;
+    return ce.number(result);
   }
+
+  let result: BoxedExpression | undefined | null = null;
 
   const fn = expr;
   ce.pushScope();
@@ -181,7 +168,7 @@ export function evalSummation(
   const lowerArray: number[] = [];
   const upperArray: number[] = [];
   const isFiniteArray: boolean[] = [];
-  indexingSet.forEach((indexingSetElement) => {
+  summationEquation.slice(1).forEach((indexingSetElement) => {
     const [index, lower, upper, isFinite] = normalizeIndexingSet(
       indexingSetElement.evaluate()
     );

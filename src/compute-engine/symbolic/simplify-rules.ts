@@ -1,4 +1,12 @@
-import { Rule } from '../public';
+import { add } from '../boxed-expression/terms';
+import {
+  constructibleValues,
+  isConstructible,
+  processInverseFunction,
+} from '../boxed-expression/trigonometry';
+import { mul } from '../library/arithmetic-multiply';
+import { simplifyLogicFunction } from '../library/logic';
+import { Rule, RuleStep } from '../public';
 import { expand } from './expand';
 
 /**
@@ -32,18 +40,217 @@ export const SIMPLIFY_RULES: Rule[] = [
   // x*(y+z) -> x*y + x*z
   (x) => expand(x) ?? undefined,
 
-  // Abs
-  {
-    replace: (x) => {
-      if (x.operator !== 'Abs') return undefined;
-      const op = x.op1;
-      const s = op.sgn;
-      if (op.isNonNegative) return op;
-      if (op.isNegative) return op.neg();
-      return undefined;
-    },
-    id: 'abs',
+  //
+  // Add, Negate
+  //
+  (x): RuleStep | undefined => {
+    if (x.operator !== 'Add') return undefined;
+    // The Add function has a 'hold-all' property, so we have to simplify
+    // the operands first
+    return {
+      value: add(...x.ops!.map((x) => x.simplify())),
+      because: 'addition',
+    };
   },
+
+  (x): RuleStep | undefined => {
+    if (x.operator !== 'Negate') return undefined;
+    return { value: x.op1.neg(), because: 'negation' };
+  },
+
+  //
+  // Multiply
+  //
+  (x): RuleStep | undefined => {
+    if (x.operator !== 'Multiply') return undefined;
+    // The Multiply function has a 'hold-all' property, so we have to simplify
+    // the operands first
+    return {
+      value: mul(...x.ops!.map((x) => x.simplify())),
+      because: 'multiplication',
+    };
+  },
+
+  //
+  // Divide, Rational
+  //
+  (x): RuleStep | undefined => {
+    if (x.operator === 'Divide')
+      return { value: x.op1.div(x.op2), because: 'division' };
+    if (x.operator === 'Rational' && x.nops === 2)
+      return { value: x.op1.div(x.op2), because: 'rational' };
+    return undefined;
+  },
+
+  //
+  // Power, Root, Sqrt
+  //
+  (x): RuleStep | undefined => {
+    if (x.operator === 'Power')
+      return { value: x.op1.pow(x.op2), because: 'power' };
+    if (x.operator === 'Root')
+      return { value: x.op1.root(x.op2), because: 'root' };
+    if (x.operator === 'Sqrt') return { value: x.op1.sqrt(), because: 'sqrt' };
+    return undefined;
+  },
+
+  //
+  // Abs
+  //
+  (x): RuleStep | undefined => {
+    if (x.operator !== 'Abs') return undefined;
+    const op = x.op1;
+    if (op.isNonNegative) return { value: op, because: '|x| -> x' };
+    if (op.isNegative) return { value: op.neg(), because: '|x| -> -x' };
+    return undefined;
+  },
+
+  //
+  // Sign
+  //
+  (x): RuleStep | undefined => {
+    if (x.operator !== 'Sign') return undefined;
+    const s = x.sgn;
+    const ce = x.engine;
+    if (s === undefined) return undefined;
+    if (s > 0) return { value: ce.One, because: 'sign >0' };
+    if (s < 0) return { value: ce.NegativeOne, because: 'sign <0' };
+    if (s === 0) return { value: ce.Zero, because: 'sign =0' };
+    if (isNaN(s)) return { value: ce.NaN, because: 'sign NaN' };
+    return undefined;
+  },
+
+  //
+  // Ln, Log
+  //
+  (x): RuleStep | undefined => {
+    if (x.operator === 'Ln')
+      return { value: x.op1.ln(x.ops![1]), because: 'ln' };
+    if (x.operator === 'Log')
+      return { value: x.op1.ln(x.ops![1] ?? 10), because: 'log' };
+    return undefined;
+  },
+
+  //
+  // Min/Max/Supremum/Infimum
+  //
+  (x): RuleStep | undefined => {
+    if (x.operator === 'Max') {
+      if (x.nops === 0)
+        return { value: x.engine.NegativeInfinity, because: 'max' };
+      if (x.nops === 1) return { value: x.op1, because: 'max' };
+    } else if (x.operator === 'Min') {
+      if (x.nops === 0)
+        return { value: x.engine.PositiveInfinity, because: 'min' };
+      if (x.nops === 1) return { value: x.op1, because: 'min' };
+    } else if (x.operator === 'Supremum') {
+      if (x.nops === 0)
+        return { value: x.engine.NegativeInfinity, because: 'sup' };
+      if (x.nops === 1) return { value: x.op1, because: 'sup' };
+    } else if (x.operator === 'Infimum') {
+      if (x.nops === 0)
+        return { value: x.engine.PositiveInfinity, because: 'inf' };
+      if (x.nops === 1) return { value: x.op1, because: 'inf' };
+    }
+    return undefined;
+  },
+
+  //
+  // Derivative
+  //
+  (x): RuleStep | undefined => {
+    if (x.operator !== 'Derivative') return undefined;
+    const ce = x.engine;
+    const [f, degree] = x.ops!;
+    // @todo: we could *actually* compute the derivative here. Not sure if this is expected.
+    // const degree = Math.floor(degree?.N().re ?? 1);
+    // return derivative(fn, degree);
+    if (x.nops === 2)
+      return {
+        value: ce.function('Derivative', [f.simplify(), degree]),
+        because: 'derivative',
+      };
+    if (x.nops === 1) {
+      return {
+        value: ce.function('Derivative', [f.simplify()]),
+        because: 'derivative',
+      };
+    }
+  },
+
+  //
+  // Hypot
+  //
+  (x): RuleStep | undefined => {
+    if (x.operator !== 'Hypot') return undefined;
+    const ce = x.engine;
+    return {
+      value: ce
+        .box(['Sqrt', ['Add', ['Square', x.op1], ['Square', x.op2]]])
+        .simplify(),
+      because: 'hypot(x,y) -> sqrt(x^2+y^2)',
+    };
+  },
+
+  //
+  // Product, Sum
+  //
+  (x): RuleStep | undefined => {
+    if (x.operator === 'Max') {
+    }
+    return undefined;
+  },
+
+  //
+  // Constructible values of trig functions
+  //
+  (x): RuleStep | undefined => {
+    if (!isConstructible(x)) return undefined;
+    const value = constructibleValues(x.operator, x.op1);
+    if (!value) return undefined;
+    return { value, because: 'constructible value' };
+  },
+
+  //
+  // Inverse Function (i.e. sin^{-1})
+  //
+  (x): RuleStep | undefined => {
+    if (x.operator !== 'InverseFunction') return undefined;
+    const value = processInverseFunction(x.engine, x.ops!);
+    if (!value) return undefined;
+    return { value, because: 'inverse function' };
+  },
+
+  //
+  // Arctan2
+  //
+  (expr): RuleStep | undefined => {
+    if (expr.operator !== 'Arctan2') return undefined;
+    // See https://en.wikipedia.org/wiki/Argument_(complex_analysis)#Realizations_of_the_function_in_computer_languages
+    const [y, x] = expr.ops!;
+    const ce = expr.engine;
+    if (!y.isFinite && !x.isFinite)
+      return { value: ce.NaN, because: 'arctan2' };
+    if (y.isZero && x.isZero) return { value: ce.Zero, because: 'arctan2' };
+    if (!x.isFinite)
+      return { value: x.isPositive ? ce.Zero : ce.Pi, because: 'arctan2' };
+    if (!y.isFinite)
+      return {
+        value: y.isPositive ? ce.Pi.div(2) : ce.Pi.div(-2),
+        because: 'arctan2',
+      };
+    if (y.isZero)
+      return { value: x.isPositive ? ce.Zero : ce.Pi, because: 'arctan2' };
+    return {
+      value: ce.function('Arctan', [y.div(x)]).simplify(),
+      because: 'arctan2',
+    };
+  },
+
+  //
+  // Logic
+  //
+  simplifyLogicFunction,
 
   /*
   //NEW (doesn't work b/c keeps - sign)

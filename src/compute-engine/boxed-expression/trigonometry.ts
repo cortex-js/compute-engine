@@ -660,17 +660,18 @@ export function trigSign(
   }[operator]?.[q];
 }
 
+export function isConstructible(x: string | BoxedExpression): boolean {
+  return ['Sin', 'Cos', 'Tan', 'Csc', 'Sec', 'Cot'].includes(
+    typeof x === 'string' ? x : x.operator
+  );
+}
+
 export function constructibleValues(
   operator: string,
   x: BoxedExpression | undefined
 ): undefined | BoxedExpression {
-  if (!x) return undefined;
+  if (!x || !isConstructible(operator)) return undefined;
   const ce = x.engine;
-
-  // Check that the operator is a constructible trigonometric function
-  if (!['Sin', 'Cos', 'Tan', 'Csc', 'Sec', 'Cot'].includes(operator)) {
-    return undefined;
-  }
 
   x = x.N();
   // If the argument has an imaginary part, it's not a constructible value
