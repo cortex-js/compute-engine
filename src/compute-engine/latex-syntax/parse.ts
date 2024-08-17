@@ -36,6 +36,7 @@ import type {
   IndexedEnvironmentEntry,
   IndexedMatchfixEntry,
 } from './dictionary/definitions';
+import { SMALL_INTEGER } from '../numerics/numeric.js';
 
 /** These delimiters can be used as 'shorthand' delimiters in
  * `openTrigger` and `closeTrigger` for `matchfix` operators.
@@ -770,7 +771,7 @@ export class _Parser implements Parser {
       while (!this.matchBoundary() && !this.atEnd) this.nextToken();
       if (operator(expr) === 'Error') return expr;
       const err = this.error('expected-closing-delimiter', start);
-      return expr ? ['InvisibleOperator', expr, err] : err;
+      return expr !== null ? ['InvisibleOperator', expr, err] : err;
     }
 
     this.index = start;
@@ -1226,7 +1227,8 @@ export class _Parser implements Parser {
       // The '.' may be part of something else, i.e. '1..2'
       // so backtrack
       this.index = fractionalIndex;
-      if (wholePart.length < 10) return sign * parseInt(wholePart, 10);
+      if (wholePart.length < 10)
+        return numberExpression(sign * parseInt(wholePart, 10));
       return { num: sign < 0 ? '-' + wholePart : wholePart };
     }
 
@@ -1234,7 +1236,7 @@ export class _Parser implements Parser {
 
     // If we have a small-ish whole number, use a shortcut for the number
     if (!hasFractionalPart && !exponent && wholePart.length < 10)
-      return sign * parseInt(wholePart, 10);
+      return numberExpression(sign * parseInt(wholePart, 10));
 
     // If we prefer to parse numbers as rationals, and there is no repeating part
     // we can return a rational number
@@ -1244,7 +1246,7 @@ export class _Parser implements Parser {
       if (!fractionalPart) {
         if (exponent)
           return ['Multiply', sign * whole, ['Power', 10, exponent]];
-        return sign * whole;
+        return numberExpression(sign * whole);
       }
 
       const fraction = parseInt(fractionalPart, 10);
@@ -2175,7 +2177,7 @@ export function parse(
     const error = parser.parseSyntaxError();
     // Note: there may still be tokens left in the input, but we will
     // ignore them
-    expr = expr ? ['Sequence', expr, error] : error;
+    expr = expr !== null ? ['Sequence', expr, error] : error;
   }
 
   expr ??= ['Sequence'];
@@ -2196,4 +2198,24 @@ export function parse(
   }
 
   return expr;
+}
+
+/**
+ * If n is a small number, use a shorthand (i.e. a JS number). Otherwise, use a {num: n} object.
+ * For zero, always use a {num} object. While `0` is a valid Expression, it is too easy to confuse it with null or undefined and
+ * to do for example:
+ * ```
+ * expr = getExpression();
+ * if (expr) {...}
+ * ```
+ *
+ * instead of
+ * ```
+ * if (expr !== undefined && expr !== null) {...}
+ * ```
+ */
+function numberExpression(n: number): Expression {
+  if (n === 0) return { num: '0' };
+  if (Number.isInteger(n) && Math.abs(n) < SMALL_INTEGER) return n;
+  return { num: n.toString() };
 }
