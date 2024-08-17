@@ -989,7 +989,7 @@ export type TestCase =
   | [
       input: Expression | string,
       expected: Expression | string,
-      comment?: string
+      comment?: string,
     ]
   | [heading: string];
 
@@ -1140,45 +1140,45 @@ const CANONICALIZATION_TEST_CASES: TestCase[] = [
 const RULE_TEST_CASES: TestCase[] = [
   [
     `
-    //
-    // Other simplifications
-    //
-  `,
+  //
+  // Other simplifications
+  //
+`,
   ],
   ['e e^x e^{-x}', 'e'], // 🙁 e * e^x * e^(-x)
   ['e^x e^{-x}', 1], // 🙁 e^(x - x)
-  ['\\sqrt[4]{16b^{4}}', '2b'], // 🙁 65536b^(16)
+  ['\\sqrt[4]{16b^{4}}', '2b'],
 
   [
     `
-    //
-    // Negative Signs and Powers
-    //
-  `,
+  //
+  // Negative Signs and Powers
+  //
+`,
   ],
-  ['(-x)^3', '-x^3'], // 🙁 (-x)^3
+  ['(-x)^3', '-x^3'],
   ['(-x)^{4/3}', 'x^{4/3}'], // 🙁 (-x)^(4/3)
-  ['(-x)^4', 'x^4'], // 🙁 -x^4
-  ['(-x)^{3/5}', '-x^{3/5}'], // 🙁 (-x)^(3/5)
-  ['1/x-1/(x+1)', '1/(x(x+1))'], // 🙁 (x - x + 1) / (x * (x + 1))
-  ['\\sqrt[3]{-2}', '-\\sqrt[3]{2}'], // 🙁 -8
+  ['(-x)^4', 'x^4'],
+  ['(-x)^{3/5}', '-x^{3/5}'],
+  ['1/x-1/(x+1)', '1/(x(x+1))'], // 🙁 -1 / (x + 1) + 1 / x
+  ['\\sqrt[3]{-2}', '-\\sqrt[3]{2}'], // 🙁 root(-2)(3)
 
   [
     `
-    //
-    // Common Denominator
-    //
-  `,
+  //
+  // Common Denominator
+  //
+`,
   ],
   ['3/x-1/x', '2/x'],
-  ['1/(x+1)-1/x', '-1/(x(x+1))'], // 🙁 (x - x - 1) / (x * (x + 1))
+  ['1/(x+1)-1/x', '-1/(x(x+1))'], // 🙁 -1 / x + 1 / (x + 1)
 
   [
     `
-    //
-    // Distribute
-    //
-  `,
+  //
+  // Distribute
+  //
+`,
   ],
   ['x*y+(x+1)*y', '2xy+y'],
   ['(x+1)^2-x^2', '2x+1'],
@@ -1186,12 +1186,12 @@ const RULE_TEST_CASES: TestCase[] = [
 
   [
     `
-    //
-    // Division
-    //
-  `,
+  //
+  // Division
+  //
+`,
   ],
-  ['x/x', 'x/x'],
+  ['x/x', 'x/x'], // ("_x")^("_n") -> "_x"^("_n")
   ['\\pi/\\pi', 1],
   ['(\\pi+1)/(\\pi+1)', 1],
   ['1/(1/0)', NaN],
@@ -1212,10 +1212,10 @@ const RULE_TEST_CASES: TestCase[] = [
 
   [
     `
-    //
-    // Operations Involving 0
-    //
-  `,
+  //
+  // Operations Involving 0
+  //
+`,
   ],
   ['0*\\pi', 0],
   ['x-0', 'x'],
@@ -1223,24 +1223,24 @@ const RULE_TEST_CASES: TestCase[] = [
   ['0/0', NaN],
   ['2/0', NaN],
   ['0^\\pi', 0], // 🙁 0^(pi)
-  ['0^{-2}', NaN], // 🙁 oo
-  ['0^{-\\pi}', NaN], // 🙁 0^(-pi)
+  ['0^{-2}', NaN], // 0^("_x") -> NaN
+  ['0^{-\\pi}', NaN], // 0^("_x") -> NaN
   ['0^0', NaN], // 🙁 1
   ['2^0', 1],
   ['\\pi^0', 1],
   ['0/2', 0],
   ['\\sqrt{0}', 0],
-  ['\\sqrt[n]{0}', 0], // 🙁 0^n
+  ['\\sqrt[n]{0}', 0], // 🙁 root(0)(n)
   ['e^0', 1],
   ['|0|', 0],
   ['-0', 0],
 
   [
     `
-    //
-    // Ln
-    //
-  `,
+  //
+  // Ln
+  //
+`,
   ],
   ['\\ln(xy)-\\ln(x)', '\\ln(y)'], // 🙁 -ln(x) + ln(x * y)
   ['\\ln(y/x)+\\ln(x)', '\\ln(x*y/x)'], // 🙁 ln(x) + ln(y / x)
@@ -1253,33 +1253,33 @@ const RULE_TEST_CASES: TestCase[] = [
 
   [
     `
-    //
-    // log
-    //
-  `,
+  //
+  // log
+  //
+`,
   ],
-  ['\\log_c(xy)-\\log_c(x)', '\\log_c(y)'], // 🙁 -log(x, c) + ln(x * y)
+  ['\\log_c(xy)-\\log_c(x)', '\\log_c(y)'], // 🙁 -log(x, c) + log(x * y, c)
   ['\\log_c(y/x)+\\log_c(x)', '\\log_c(xy/x)'], // 🙁 log(x, c) + log(y / x, c)
   ['c^{\\log_c(x)+x}', 'x c^x'], // 🙁 c^(x + log(x, c))
   ['c^{\\log_c(x)-2*x}', 'x c^{-2*x}'], // 🙁 c^(-2x + log(x, c))
   ['c^\\log_c(x)', 'x'], // c^(log(x, c)) -> x
   ['c^{3\\log_c(x)}', 'x^3'], // 🙁 c^(3log(x, c))
   ['c^{\\log_c(x)/3}', 'x^{1/3}'], // 🙁 c^(log(x, c) / 3)
-  ['\\log_c(c^x*y)', 'x+\\log_c(y)'], // 🙁 ln(y * c^x)
+  ['\\log_c(c^x*y)', 'x+\\log_c(y)'], // log(c^x * y, c) -> x + log(y, c)
   ['\\log_c(c^x/y)', 'x-\\log_c(y)'], // log(c^x / y, c) -> x - log(y, c)
   ['\\log_c(y/c^x)', '\\log_c(y)-x'], // log(y / c^x, c) -> log(y, c) - x
   ['\\log_c(c)', 1], // log(c, c) -> 1
-  ['\\log_c(c^x)', 'x'], // 🙁 x * log(c, c)
+  ['\\log_c(c^x)', 'x'], // log(c^x, c) -> x
   ['\\log_c(0)', NaN],
   ['\\log_c(1)', 0],
   ['\\log_2(1/x)', '-\\log_2(x)'],
 
   [
     `
-    //
-    // Change of Base
-    //
-  `,
+  //
+  // Change of Base
+  //
+`,
   ],
   ['\\log_c(a)*\\ln(a)', '\\ln(c)'], // log(a, c) * ln(a) -> ln(c)
   ['\\log_c(a)/\\log_c(b)', '\\ln(a)/\\ln(b)'], // log(a, c) / log(b, c) -> ln(a) / ln(b)
@@ -1288,20 +1288,20 @@ const RULE_TEST_CASES: TestCase[] = [
 
   [
     `
-    //
-    // Logs and Infinity
-  `,
+  //
+  // Logs and Infinity
+`,
   ],
   ['\\ln(\\infty)', '\\infty'],
   ['\\log_4(\\infty)', '\\infty'],
-  ['\\log_{0.5}(\\infty)', '-\\infty'], // 🙁 oo
+  ['\\log_{0.5}(\\infty)', '-\\infty'], // log(+oo, "_c") -> -+oo
 
   [
     `
-    //
-    // Absolute Value
-    //
-  `,
+  //
+  // Absolute Value
+  //
+`,
   ],
   ['|\\pi|', '\\pi'],
   ['|\\infty|', '\\infty'],
@@ -1309,31 +1309,31 @@ const RULE_TEST_CASES: TestCase[] = [
   ['|-x|', '|x|'], // |-x| -> |x|
   ['|-\\pi|', '\\pi'],
   ['|\\pi * x|', '\\pi * x'], // 🙁 |pi * x|
-  ['|\\frac{x}{\\pi}|', '\\frac{|x|}{\\pi}'], // \vert\frac{\operatorname{\_x}}{\operatorname{\_y}}\vert -> \frac{\vert\operatorname{\_x}\vert}{\operatorname{\_y}}
-  ['|\\frac{2}{x}|', '\\frac{2}{|x|}'], // \vert\frac{\operatorname{\_x}}{\operatorname{\_y}}\vert -> \frac{\operatorname{\_x}}{\vert\operatorname{\_y}\vert}
-  ['|x|^4', 'x^4'], // \vert\operatorname{\_x}\vert^{\operatorname{\_n}} -> \operatorname{\_x}^{\operatorname{\_n}}
-  ['|x^3|', '|x|^3'], // \vert\operatorname{\_x}^{\operatorname{\_n}}\vert -> \vert\operatorname{\_x}\vert^{\operatorname{\_n}}
-  ['|x|^{4/3}', 'x^{4/3}'], // 🙁 |x|^(4/3)
+  ['|\\frac{x}{\\pi}|', '\\frac{|x|}{\\pi}'], // |"_x" / "_y"| -> |"_x"| / "_y"
+  ['|\\frac{2}{x}|', '\\frac{2}{|x|}'], // |"_x" / "_y"| -> "_x" / |"_y"|
+  ['|x|^4', 'x^4'], // |"_x"|^("_n") -> "_x"^("_n")
+  ['|x^3|', '|x|^3'], // |"_x"^("_n")| -> |"_x"|^("_n")
+  ['|x|^{4/3}', 'x^{4/3}'], // |"_x"|^("_n") -> "_x"^("_n")
   ['|x^{3/5}|', '|x|^{3/5}'], // 🙁 |x^(3/5)|
 
   [
     `
-    //
-    // Even Functions and Absolute Value
-    //
-  `,
+  //
+  // Even Functions and Absolute Value
+  //
+`,
   ],
   ['\\cos(|x+2|)', '\\cos(x+2)'], // 🙁 cos(|x + 2|)
   ['\\sec(|x+2|)', '\\sec(x+2)'], // 🙁 1 / cos(|x + 2|)
-  ['\\cosh(|x+2|)', '\\cosh(x+2)'], // 🙁 (e^(|x + 2|) + e^(-|x + 2|)) / 2
+  ['\\cosh(|x+2|)', '\\cosh(x+2)'], // 🙁 cosh(|x + 2|)
   ['\\sech(|x+2|)', '\\sech(x+2)'], // 🙁 sech(|x + 2|)
 
   [
     `
-    //
-    // Odd Functions and Absolute Value
-    //
-  `,
+  //
+  // Odd Functions and Absolute Value
+  //
+`,
   ],
   ['|\\sin(x)|', '\\sin(|x|)'], // |sin(x)| -> sin(|x|)
   ['|\\tan(x)|', '\\tan(|x|)'], // |tan(x)| -> tan(|x|)
@@ -1349,15 +1349,15 @@ const RULE_TEST_CASES: TestCase[] = [
   ['|\\csch(x)|', '\\csch(|x|)'], // |csch(x)| -> csch(|x|)
   ['|\\arsinh(x)|', '\\arsinh(|x|)'], // |Arsinh(x)| -> Arsinh(|x|)
   ['|\\artanh(x)|', '\\artanh(|x|)'], // |Artanh(x)| -> Artanh(|x|)
-  ['|\\arcoth(x)|', '\\arcoth(|x|)'], // 🙁 |(Error("unexpected-command", "\arcoth"), x)|
+  ['|\\operatorname{arcoth}(x)|', '\\operatorname{arcoth}(|x|)'],
   ['|\\arcsch(x)|', '\\arcsch(|x|)'], // |Arcsch(x)| -> Arcsch(|x|)
 
   [
     `
-    //
-    // Powers and Infinity
-    //
-  `,
+  //
+  // Powers and Infinity
+  //
+`,
   ],
   ['2^\\infty', '\\infty'],
   ['0.5^\\infty', 0],
@@ -1369,7 +1369,7 @@ const RULE_TEST_CASES: TestCase[] = [
   ['(1/2)^{-\\infty}', '\\infty'],
   ['(-\\infty)^4', '\\infty'],
   ['(\\infty)^{1.4}', '\\infty'],
-  ['(-\\infty)^{1/3}', '-\\infty'], // 🙁 oo
+  ['(-\\infty)^{1/3}', '-\\infty'], // 🙁 (-oo)^(1/3)
   ['(-\\infty)^{-1}', 0],
   ['(\\infty)^{-2}', 0],
   ['1^{-\\infty}', NaN],
@@ -1379,24 +1379,24 @@ const RULE_TEST_CASES: TestCase[] = [
 
   [
     `
-    //
-    // Multiplication and Infinity
-    //
-  `,
+  //
+  // Multiplication and Infinity
+  //
+`,
   ],
   ['0*\\infty', NaN],
   ['0*(-\\infty)', NaN],
   ['0.5*\\infty', '\\infty'],
   ['(-0.5)*(-\\infty)', '\\infty'], // 🙁 -oo
   ['(-0.5)*\\infty', '-\\infty'],
-  ['\\pi * (-\\infty)', '-\\infty'], // 🙁 oo
+  ['\\pi * (-\\infty)', '-\\infty'], // 🙁 +oo
 
   [
     `
-    //
-    // Division and Infinity
-    //
-  `,
+  //
+  // Division and Infinity
+  //
+`,
   ],
   ['(-\\infty)/\\infty', NaN],
   ['\\infty/0.5', '\\infty'],
@@ -1410,10 +1410,10 @@ const RULE_TEST_CASES: TestCase[] = [
 
   [
     `
-    //
-    // Addition and Subtraction and Infinity
-    //
-  `,
+  //
+  // Addition and Subtraction and Infinity
+  //
+`,
   ],
   ['\\infty-\\infty', NaN],
   ['-\\infty-\\infty', '-\\infty'],
@@ -1426,212 +1426,212 @@ const RULE_TEST_CASES: TestCase[] = [
 
   [
     `
-    //
-    // Trig and Infinity
-    //
-  `,
+  //
+  // Trig and Infinity
+  //
+`,
   ],
-  ['\\sin(\\infty)', NaN], // \sin(\operatorname{\_x}) -> \operatorname{NaN}
-  ['\\cos(\\infty)', NaN], // \cos(\operatorname{\_x}) -> \operatorname{NaN}
-  ['\\tan(\\infty)', NaN], // \tan(\operatorname{\_x}) -> \operatorname{NaN}
-  ['\\cot(\\infty)', NaN], // \cot(\operatorname{\_x}) -> \operatorname{NaN}
-  ['\\sec(\\infty)', NaN], // \sec(\operatorname{\_x}) -> \operatorname{NaN}
-  ['\\csc(\\infty)', NaN], // \csc(\operatorname{\_x}) -> \operatorname{NaN}
-  ['\\sin(-\\infty)', NaN], // \sin(\operatorname{\_x}) -> \operatorname{NaN}
-  ['\\cos(-\\infty)', NaN], // \cos(\operatorname{\_x}) -> \operatorname{NaN}
-  ['\\tan(-\\infty)', NaN], // \tan(\operatorname{\_x}) -> \operatorname{NaN}
-  ['\\cot(-\\infty)', NaN], // \cot(\operatorname{\_x}) -> \operatorname{NaN}
-  ['\\sec(-\\infty)', NaN], // \sec(\operatorname{\_x}) -> \operatorname{NaN}
-  ['\\csc(-\\infty)', NaN], // \csc(\operatorname{\_x}) -> \operatorname{NaN}
+  ['\\sin(\\infty)', NaN], // sin("_x") -> NaN
+  ['\\cos(\\infty)', NaN], // cos("_x") -> NaN
+  ['\\tan(\\infty)', NaN], // tan("_x") -> NaN
+  ['\\cot(\\infty)', NaN], // Cot("_x") -> NaN
+  ['\\sec(\\infty)', NaN], // sec("_x") -> NaN
+  ['\\csc(\\infty)', NaN], // csc("_x") -> NaN
+  ['\\sin(-\\infty)', NaN], // sin("_x") -> NaN
+  ['\\cos(-\\infty)', NaN], // cos("_x") -> NaN
+  ['\\tan(-\\infty)', NaN], // tan("_x") -> NaN
+  ['\\cot(-\\infty)', NaN], // Cot("_x") -> NaN
+  ['\\sec(-\\infty)', NaN], // sec("_x") -> NaN
+  ['\\csc(-\\infty)', NaN], // csc("_x") -> NaN
 
   [
     `
-    //
-    // Inverse Trig and Infinity
-    //
-  `,
+  //
+  // Inverse Trig and Infinity
+  //
+`,
   ],
-  ['\\arcsin(\\infty)', NaN], // arcsin(oo) -> NaN
-  ['\\arccos(\\infty)', NaN], // arccos(oo) -> NaN
-  ['\\arcsin(-\\infty)', NaN], // \arcsin(\operatorname{\_\_x}) -> 2\mathrm{Arctan_2}(\operatorname{\_\_x}, 1+\sqrt{1-\operatorname{\_\_x}^2})
+  ['\\arcsin(\\infty)', NaN], // arcsin(+oo) -> NaN
+  ['\\arccos(\\infty)', NaN], // arccos(+oo) -> NaN
+  ['\\arcsin(-\\infty)', NaN], // 🙁 arcsin(-oo)
   ['\\arccos(-\\infty)', NaN], // 🙁 arccos(-oo)
-  ['\\arctan(\\infty)', '\\frac{\\pi}{2}'], // arctan(oo) -> pi / 2
+  ['\\arctan(\\infty)', '\\frac{\\pi}{2}'], // arctan(+oo) -> pi / 2
   ['\\arctan(-\\infty)', '-\\frac{\\pi}{2}'], // 🙁 arctan(-oo)
-  ['\\arcctg(\\infty)', 0], // Arccot(oo) -> 0
+  ['\\arcctg(\\infty)', 0], // Arccot(+oo) -> 0
   ['\\arcctg(-\\infty)', '\\pi'], // 🙁 Arccot(-oo)
-  ['\\arcsec(\\infty)', '\\frac{\\pi}{2}'], // Arcsec(oo) -> pi / 2
+  ['\\arcsec(\\infty)', '\\frac{\\pi}{2}'], // Arcsec(+oo) -> pi / 2
   ['\\arcsec(-\\infty)', '\\frac{\\pi}{2}'], // 🙁 Arcsec(-oo)
-  ['\\arccsc(\\infty)', 0], // Arccsc(oo) -> 0
+  ['\\arccsc(\\infty)', 0], // Arccsc(+oo) -> 0
   ['\\arccsc(-\\infty)', 0], // 🙁 Arccsc(-oo)
 
   [
     `
-    //
-    // Hyperbolic Trig and Infinity
-    //
-  `,
+  //
+  // Hyperbolic Trig and Infinity
+  //
+`,
   ],
-  ['\\sinh(\\infty)', '\\infty'], // sinh(oo) -> oo
-  ['\\sinh(-\\infty)', '-\\infty'], // 🙁 (-e^(oo) + e^(-oo)) / 2
-  ['\\cosh(\\infty)', '\\infty'], // cosh(oo) -> oo
-  ['\\cosh(-\\infty)', '\\infty'], // 🙁 (e^(-oo) + e^(oo)) / 2
-  ['\\tanh(\\infty)', 1], // tanh(oo) -> 1
+  ['\\sinh(\\infty)', '\\infty'], // sinh(+oo) -> +oo
+  ['\\sinh(-\\infty)', '-\\infty'], // 🙁 sinh(-oo)
+  ['\\cosh(\\infty)', '\\infty'], // cosh(+oo) -> +oo
+  ['\\cosh(-\\infty)', '\\infty'], // 🙁 cosh(-oo)
+  ['\\tanh(\\infty)', 1], // tanh(+oo) -> 1
   ['\\tanh(-\\infty)', -1], // 🙁 tanh(-oo)
-  ['\\coth(\\infty)', 1], // coth(oo) -> 1
+  ['\\coth(\\infty)', 1], // coth(+oo) -> 1
   ['\\coth(-\\infty)', -1], // 🙁 coth(-oo)
-  ['\\sech(\\infty)', 0], // sech(oo) -> 0
+  ['\\sech(\\infty)', 0], // sech(+oo) -> 0
   ['\\sech(-\\infty)', 0], // 🙁 sech(-oo)
-  ['\\csch(\\infty)', 0], // csch(oo) -> 0
+  ['\\csch(\\infty)', 0], // csch(+oo) -> 0
   ['\\csch(-\\infty)', 0], // 🙁 csch(-oo)
 
   [
     `
-    //
-    // Inverse Hyperbolic Trig and Infinity
-    //
-  `,
+  //
+  // Inverse Hyperbolic Trig and Infinity
+  //
+`,
   ],
-  ['\\arsinh(\\infty)', '\\infty'], // Arsinh(oo) -> oo
-  ['\\arsinh(-\\infty)', '-\\infty'], // 🙁 NaN
-  ['\\arcosh(\\infty)', '\\infty'], // Arcosh(oo) -> oo
+  ['\\arsinh(\\infty)', '\\infty'], // Arsinh(+oo) -> +oo
+  ['\\arsinh(-\\infty)', '-\\infty'], // 🙁 Arsinh(-oo)
+  ['\\arcosh(\\infty)', '\\infty'], // Arcosh(+oo) -> +oo
   ['\\arcosh(-\\infty)', NaN], // 🙁 Arcosh(-oo)
-  ['\\arctanh(\\infty)', NaN], // 🙁 (Error("unexpected-command", "\arctanh"), oo)
+  ['\\arctanh(\\infty)', NaN], // 🙁 (Error("unexpected-command", "\arctanh"), +oo)
   ['\\arctanh(-\\infty)', NaN], // 🙁 (Error("unexpected-command", "\arctanh"), -oo)
   ['\\operatorname{arcoth}(\\infty)', NaN], // 🙁 0
   ['\\operatorname{arcoth}(-\\infty)', NaN], // 🙁 Arccot(-oo)
-  ['\\arcsech(\\infty)', NaN], // 🙁 (Error("unexpected-command", "\arcsech"), oo)
+  ['\\arcsech(\\infty)', NaN], // 🙁 (Error("unexpected-command", "\arcsech"), +oo)
   ['\\arcsech(-\\infty)', NaN], // 🙁 (Error("unexpected-command", "\arcsech"), -oo)
-  ['\\arcsch(\\infty)', NaN], // \arcsch(\operatorname{\_x}) -> \operatorname{NaN}
-  ['\\arcsch(-\\infty)', NaN], // \arcsch(\operatorname{\_x}) -> \operatorname{NaN}
+  ['\\arcsch(\\infty)', NaN], // Arcsch("_x") -> NaN
+  ['\\arcsch(-\\infty)', NaN], // Arcsch("_x") -> NaN
 
   [
     `
-    //
-    // Negative Exponents and Denominator
-    //
-  `,
+  //
+  // Negative Exponents and Denominator
+  //
+`,
   ],
   ['\\frac{2}{\\pi^{-2}}', '2\\pi^2'], // 🙁 2 / pi^(-2)
   ['\\frac{2}{x\\pi^{-2}}', '\\frac{2}{x} \\pi^2'], // 🙁 2 / (x * pi^(-2))
   ['(3/\\pi)^{-1}', '\\pi/3'],
-  ['(3/x)^{-1}', '(3/x)^{-1}'], // 🙁 x / 3
+  ['(3/x)^{-1}', '(3/x)^{-1}'], // ("_x")^("_n") -> "_x"^("_n")
   ['(x/\\pi)^{-3}', '\\pi^3 / x^3'], // 🙁 (x / pi)^(-3)
   ['(x/y)^{-3}', '(x/y)^{-3}'],
   ['(x^2/\\pi^3)^{-2}', '\\pi^6/x^4'],
 
   [
     `
-    //
-    // Powers: Division Involving x
-    //
-  `,
+  //
+  // Powers: Division Involving x
+  //
+`,
   ],
-  ['x/x^3', '1/x^2'], // \frac{\operatorname{\_x}}{\operatorname{\_x}^{\operatorname{\_n}}} -> \frac{1}{\operatorname{\_x}^{\operatorname{\_n}-1}}
+  ['x/x^3', '1/x^2'], // "_x" / "_x"^("_n") -> 1 / "_x"^("_n" - 1)
   ['(2*x)/x^5', '2/x^4'],
-  ['x/x^{-2}', 'x/x^{-2}'],
-  ['x^2/x', 'x^2/x'], // 🙁 x
-  ['x^{0.3}/x', '1/x^{0.7}'], // \frac{\operatorname{\_x}^{\operatorname{\_n}}}{\operatorname{\_x}} -> \frac{1}{\operatorname{\_x}^{1-\operatorname{\_n}}}
-  ['x^{-3/5}/x', '1/x^{8/5}'], // 🙁 1 / x^(8/5)
+  ['x/x^{-2}', 'x/x^{-2}'], // ("_x")^("_n") -> "_x"^("_n")
+  ['x^2/x', 'x^2/x'], // ("_x")^("_n") -> "_x"^("_n")
+  ['x^{0.3}/x', '1/x^{0.7}'], // "_x"^("_n") / "_x" -> 1 / "_x"^(1 - "_n")
+  ['x^{-3/5}/x', '1/x^{8/5}'], // "_x"^("_n") / "_x" -> 1 / "_x"^(1 - "_n")
   ['\\pi^2/\\pi', '\\pi'],
-  ['\\pi/\\pi^{-2}', '\\pi^3'], // \frac{\operatorname{\_x}}{\operatorname{\_x}^{\operatorname{\_n}}} -> \frac{1}{\operatorname{\_x}^{\operatorname{\_n}-1}}
-  ['\\sqrt[3]{x}/x', '1/x^{2/3}'], // 🙁 x^2
+  ['\\pi/\\pi^{-2}', '\\pi^3'],
+  ['\\sqrt[3]{x}/x', '1/x^{2/3}'], // 🙁 root(x)(3) / x
 
   [
     `
-    //
-    // Powers: Multiplication Involving x
-    //
-  `,
+  //
+  // Powers: Multiplication Involving x
+  //
+`,
   ],
   ['x^3*x', 'x^4'],
   ['x^{-2}*x', '1/x'],
-  ['x^{-1/3}*x', 'x^{-1/3}*x'], // 🙁 x^(2/3)
+  ['x^{-1/3}*x', 'x^{-1/3}*x'], // ("_x")^("_n") -> "_x"^("_n")
   ['\\pi^{-2}*\\pi', '1/\\pi'],
   ['\\pi^{-0.2}*\\pi', '\\pi^{0.8}'], // 🙁 pi^(1 - 0.2)
   ['\\sqrt[3]{x}*x', 'x^{4/3}'],
 
   [
     `
-    //
-    // Powers: Multiplication of Two Powers
-    //
-  `,
+  //
+  // Powers: Multiplication of Two Powers
+  //
+`,
   ],
   ['x^2*x^{-3}', '1/x'],
-  ['x^2*x^{-1}', 'x^2 x^{-1}'], // 🙁 x
+  ['x^2*x^{-1}', 'x^2 x^{-1}'], // ("_x")^("_n") -> "_x"^("_n")
   ['x^2*x^3', 'x^5'],
   ['x^{-2}*x^{-1}', '1/x^3'],
   ['x^{2/3}*x^2', 'x^{8/3}'],
   ['x^{5/2}*x^3', 'x^{11/2}'],
   ['\\pi^{-1}*\\pi^2', '\\pi'],
-  ['\\sqrt{x}*\\sqrt{x}', '(\\sqrt{x})^2'], // 🙁 x
+  ['\\sqrt{x}*\\sqrt{x}', '(\\sqrt{x})^2'], // 🙁 sqrt(x) * sqrt(x)
   ['\\sqrt{x}*x^2', 'x^{5/2}'],
 
   [
     `
-    //
-    // Powers: Division of Two Powers
-    //
-    `,
+  //
+  // Powers: Division of Two Powers
+  //
+  `,
   ],
   ['x^2/x^3', '1/x'],
-  ['x^{-1}/x^3', '1/x^4'], // 🙁 1 / x^4
-  ['x/x^{-1}', 'x/x^{-1}'], // 🙁 x * x
-  ['\\pi / \\pi^{-1}', '\\pi^2'], // 🙁 pi * pi
-  ['\\pi^{0.2}/\\pi^{0.1}', '\\pi^{0.1}'], // 🙁 pi^(-0.1 + 0.2)
+  ['x^{-1}/x^3', '1/x^4'], // 🙁 x^(-1) / x^3
+  ['x/x^{-1}', 'x/x^{-1}'], // ("_x")^("_n") -> "_x"^("_n")
+  ['\\pi / \\pi^{-1}', '\\pi^2'], // "_x" / "_x"^("_n") -> 1 / "_x"^("_n" - 1)
+  ['\\pi^{0.2}/\\pi^{0.1}', '\\pi^{0.1}'], // 🙁 pi^(0.1 + 0.2)
   ['x^{\\sqrt{2}}/x^3', 'x^{\\sqrt{2}-3}'], // 🙁 x^(sqrt(2)) / x^3
 
   [
     `
-    //
-    // Powers and Denominators
-    //
-  `,
+  //
+  // Powers and Denominators
+  //
+`,
   ],
   ['x/(\\pi/2)^3', '8x/\\pi^3'],
   ['x/(\\pi/y)^3', 'x/(\\pi/y)^3'],
 
   [
     `
-    //
-    // Powers and Roots
-    //
-  `,
+  //
+  // Powers and Roots
+  //
+`,
   ],
   ['\\sqrt{x^4}', 'x^2'], // 🙁 sqrt(x^4)
   ['\\sqrt{x^3}', 'x^{3/2}'], // 🙁 sqrt(x^3)
-  ['\\sqrt[3]{x^2}', 'x^{2/3}'], // 🙁 x^6
-  ['\\sqrt[4]{x^6}', 'x^{3/2}'], // 🙁 x^(24)
+  ['\\sqrt[3]{x^2}', 'x^{2/3}'],
+  ['\\sqrt[4]{x^6}', 'x^{3/2}'],
   ['\\sqrt{x^6}', '|x|^3'], // 🙁 sqrt(x^6)
-  ['\\sqrt[4]{x^4}', '|x|'], // 🙁 x^(16)
+  ['\\sqrt[4]{x^4}', '|x|'], // 🙁 root(x^4)(4)
 
   [
     `
-    //
-    // Ln and Powers
-    //
-  `,
+  //
+  // Ln and Powers
+  //
+`,
   ],
   ['\\ln(x^3)', '3\\ln(x)'],
   ['\\ln(x^\\sqrt{2})', '\\sqrt{2} \\ln(x)'],
-  ['\\ln(x^2)', '2 \\ln(|x|)'], // 🙁 2ln(x)
-  ['\\ln(x^{2/3})', '2/3 \\ln(|x|)'], // 🙁 2/3 * ln(x)
-  ['\\ln(\\pi^{2/3})', '2/3 \\ln(\\pi)'], // 🙁 2/3 * ln(pi)
-  ['\\ln(x^{7/4})', '7/4 \\ln(x)'], // 🙁 7/4 * ln(x)
+  ['\\ln(x^2)', '2 \\ln(|x|)'], // 🙁 ln(x^2)
+  ['\\ln(x^{2/3})', '2/3 \\ln(|x|)'], // 🙁 ln(x^(2/3))
+  ['\\ln(\\pi^{2/3})', '2/3 \\ln(\\pi)'], // 🙁 ln(pi^(2/3))
+  ['\\ln(x^{7/4})', '7/4 \\ln(x)'], // 🙁 ln(x^(7/4))
   ['\\ln(\\sqrt{x})', '\\ln(x)/2'],
 
   [
     `
-    //
-    // Log and Powers
-    //
-  `,
+  //
+  // Log and Powers
+  //
+`,
   ],
   ['\\log_4(x^3)', '3\\log_4(x)'],
   ['\\log_3(x^\\sqrt{2})', '\\sqrt{2} \\log_3(x)'],
-  ['\\log_4(x^2)', '2\\log_4(|x|)'], // 🙁 2log(x, 4)
-  ['\\log_4(x^{2/3})', '2/3 \\log_4(|x|)'], // 🙁 2/3 * log(x, 4)
-  ['\\log_4(x^{7/4})', '7/4 \\log_4(x)'], // 🙁 7/4 * log(x, 4)
+  ['\\log_4(x^2)', '2\\log_4(|x|)'], // 🙁 log(x^2, 4)
+  ['\\log_4(x^{2/3})', '2/3 \\log_4(|x|)'], // 🙁 log(x^(2/3), 4)
+  ['\\log_4(x^{7/4})', '7/4 \\log_4(x)'], // 🙁 log(x^(7/4), 4)
 ];
 
 describe('SIMPLIFY', () => {
