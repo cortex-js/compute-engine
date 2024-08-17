@@ -193,6 +193,23 @@ export const SIMPLIFY_RULES: Rule[] = [
   },
 
   //
+  // Congruent
+  //
+  (x): RuleStep | undefined => {
+    if (x.operator !== 'Congruent') return undefined;
+    if (x.nops < 3) return undefined;
+    const ce = x.engine;
+    return {
+      value: ce
+        ._fn('Equal', [
+          ce.function('Mod', [x.ops![0], x.ops![2]]).simplify(),
+          ce.function('Mod', [x.ops![1], x.ops![2]]).simplify(),
+        ])
+        .simplify(),
+      because: 'congruent',
+    };
+  },
+  //
   // Product, Sum
   //
   (x): RuleStep | undefined => {

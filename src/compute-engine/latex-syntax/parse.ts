@@ -36,7 +36,7 @@ import type {
   IndexedEnvironmentEntry,
   IndexedMatchfixEntry,
 } from './dictionary/definitions';
-import { SMALL_INTEGER } from '../numerics/numeric.js';
+import { SMALL_INTEGER } from '../numerics/numeric';
 
 /** These delimiters can be used as 'shorthand' delimiters in
  * `openTrigger` and `closeTrigger` for `matchfix` operators.

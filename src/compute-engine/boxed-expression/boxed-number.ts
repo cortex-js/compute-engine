@@ -38,6 +38,7 @@ import { bigint } from '../numerics/numeric-bigint';
 import { isInMachineRange } from '../numerics/numeric-bignum';
 import { replace } from '../rules';
 import { simplify } from '../symbolic/simplify';
+import { ExactNumericValue } from '../numeric-value/exact-numeric-value';
 
 /**
  * BoxedNumber
@@ -435,6 +436,7 @@ export class BoxedNumber extends _BoxedExpression {
     sub: Substitution,
     options?: { canonical?: CanonicalOptions }
   ): BoxedExpression {
+    if (this.isStructural) return this;
     return this.structural.subs(sub, options);
   }
 
@@ -638,7 +640,15 @@ export class BoxedNumber extends _BoxedExpression {
     return this;
   }
 
+  get isStructural(): boolean {
+    if (typeof this._value === 'number') return true;
+    if (this.type === 'integer' || this.type === 'rational') return true;
+    if (this._value instanceof ExactNumericValue) return false;
+    return true;
+  }
+
   get structural(): BoxedExpression {
+    if (this.isStructural) return this;
     return this.engine.box(this.json, { canonical: false, structural: true });
   }
 

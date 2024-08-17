@@ -17,7 +17,7 @@ export function simplify(
   //
   if (!expr.isValid) return [];
 
-  expr = expr.structural;
+  // expr = expr.structural;
 
   if (
     (options?.applyDefaultSimplifications ?? true) &&
@@ -35,10 +35,11 @@ export function simplify(
   //
   // 2/ Is it a symbol?
   // Some symbols can get simplified by substitution, for example,
-  // phi, the golden ratio, can be replaced by (1 + sqrt(5)) / 2
+  // phi, the golden ratio, can be replaced by `(1 + sqrt(5)) / 2`
   //
+  // We check for `!expr.isStructural` to avoid infinite recursion
 
-  if (expr.symbol)
+  if (expr.symbol && !expr.isStructural)
     return [
       { value: expr.simplify(options), because: `value of ${expr.toString()}` },
     ];
@@ -59,6 +60,7 @@ export function simplify(
     const op1 = expr.op1.simplify(options);
     const op2 = expr.op2.simplify(options);
     expr = ce.function(expr.operator, [op1, op2]);
+    if (!expr.isCanonical) debugger;
 
     //
     // 3.2/ Try to factor terms across the relational operator
@@ -68,11 +70,13 @@ export function simplify(
     console.assert(isRelationalOperator(expr.operator));
     if (expr.nops === 2) {
       // Try f(x) < g(x) -> f(x) - g(x) < 0
-      const alt = factor(
-        ce.function(expr.operator, [expr.op1.sub(expr.op2), ce.Zero])
-      );
-      // Pick the cheapest (simplest) of the two
-      expr = cheapest(expr, alt);
+      if (expr.op2.isNotZero) {
+        const alt = factor(
+          ce.function(expr.operator, [expr.op1.sub(expr.op2), ce.Zero])
+        );
+        // Pick the cheapest (simplest) of the two
+        expr = cheapest(expr, alt);
+      }
     }
     return [{ value: expr, because: 'factor-relational-operator' }];
   }
@@ -95,34 +99,38 @@ export function simplify(
   do {
     const newSteps = replace(expr, rules, options);
     if (newSteps.length === 0) break;
-    steps.push(...newSteps);
+
+    const alt = newSteps.at(-1)!.value;
+    if (isCheaper(expr, alt)) {
+      expr = alt;
+      steps.push(...newSteps);
+    }
   } while (!steps.some((x) => x.value.isSame(expr)));
 
   return steps as RuleSteps;
+}
 
-  ///---
-  /*
+function isCheaper(
+  oldExpr: BoxedExpression,
+  newExpr: BoxedExpression | null | undefined
+): boolean {
+  if (newExpr === null || newExpr === undefined) return false;
+  if (oldExpr === newExpr) return false;
 
-    //
-    // 6/ Apply rules, until no rules can be applied
-    //
-    const rules =
-      options?.rules ?? expr.engine.getRuleSet('standard-simplification')!;
+  if (oldExpr.isSame(newExpr)) return false;
 
-    let iterationCount = 0;
-    do {
-      const newExpr = expr!.replace(rules);
-      if (!newExpr) break;
-      expr = newExpr.simplify({
-        ...options,
-        recursive: false,
-        rules: null,
-      });
+  const ce = oldExpr.engine;
+  if (ce.costFunction(newExpr) <= 1.2 * ce.costFunction(oldExpr)) {
+    // console.log(
+    //   'Picked new' + boxedNewExpr.toString() + ' over ' + oldExpr.toString()
+    // );
+    return true;
+  }
 
-      iterationCount += 1;
-    } while (iterationCount < expr.engine.iterationLimit);
-    return expr!; // cheapest(expr, expr);
-    */
+  // console.log(
+  //   'Picked old ' + oldExpr.toString() + ' over ' + newExpr.toString()
+  // );
+  return false;
 }
 
 /**
@@ -134,23 +142,5 @@ function cheapest(
   oldExpr: BoxedExpression,
   newExpr: BoxedExpression | null | undefined
 ): BoxedExpression {
-  if (newExpr === null || newExpr === undefined) return oldExpr;
-  if (oldExpr === newExpr) return oldExpr;
-
-  const ce = oldExpr.engine;
-  const boxedNewExpr = ce.box(newExpr);
-
-  if (oldExpr.isSame(boxedNewExpr)) return oldExpr;
-
-  if (ce.costFunction(boxedNewExpr) <= 1.2 * ce.costFunction(oldExpr)) {
-    // console.log(
-    //   'Picked new' + boxedNewExpr.toString() + ' over ' + oldExpr.toString()
-    // );
-    return boxedNewExpr;
-  }
-
-  // console.log(
-  //   'Picked old ' + oldExpr.toString() + ' over ' + newExpr.toString()
-  // );
-  return oldExpr;
+  return isCheaper(oldExpr, newExpr) ? newExpr! : oldExpr;
 }

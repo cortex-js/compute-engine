@@ -22,6 +22,7 @@ const SYMBOLS = {
   PositiveInfinity: '+oo',
   NegativeInfinity: '-oo',
   ComplexInfinity: '~oo',
+  NaN: 'NaN',
   Pi: 'pi',
   ExponentialE: 'e',
   ImaginaryUnit: 'i',
@@ -325,6 +326,20 @@ function wrap(s: string, precedence = 0, target = -1): string {
   return s;
 }
 
+function serializeSymbol(
+  symbol: string,
+  options: Partial<AsciiMathOptions> = {}
+): string {
+  // Is there a custom definition for this symbol?
+  if (options.symbols?.[symbol]) return options.symbols[symbol];
+
+  // Is there a default definition for this symbol?
+  if (SYMBOLS[symbol]) return SYMBOLS[symbol];
+
+  // Otherwise, quote the symbol if it's not a single character
+  return symbol.length === 1 ? symbol : `"${symbol}"`;
+}
+
 export function toAsciiMath(
   expr: BoxedExpression,
   options: Partial<AsciiMathOptions> = {},
@@ -333,29 +348,29 @@ export function toAsciiMath(
   //
   // A symbol?
   //
-  if (expr.symbol) {
-    const symbols = options.symbols
-      ? { ...SYMBOLS, ...options.symbols }
-      : SYMBOLS;
-    if (symbols[expr.symbol]) {
-      if (symbols[expr.symbol].length === 1) return symbols[expr.symbol];
-      return `${symbols[expr.symbol]}`;
-    }
-    if (expr.symbol.length === 1) return expr.symbol;
-    return `"${expr.symbol}"`;
-  }
+  if (expr.symbol) return serializeSymbol(expr.symbol, options);
 
   const serialize: AsciiMathSerializer = (expr, precedence = 0) =>
     toAsciiMath(expr, options, precedence);
 
+  //
   // A string ?
+  //
   if (expr.string) return expr.string;
 
+  //
   // A number ?
+  //
   const num = expr.numericValue;
   if (num !== null) {
-    if (expr.isNaN) return 'NaN';
-    if (!expr.isFinite) return expr.isNegative ? '-oo' : 'oo';
+    const ce = expr.engine;
+    if (expr.isNaN) return serializeSymbol('NaN', options);
+    if (!expr.isFinite) {
+      return serializeSymbol(
+        expr.isNegative ? 'NegativeInfinity' : 'PositiveInfinity',
+        options
+      );
+    }
 
     // It's either a plain number or a NumericValue...
     return num.toString();

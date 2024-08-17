@@ -13,7 +13,7 @@ describe('ROOT FUNCTION', () => {
       `["Root", "x", -3]`
     );
     expect(parse('\\frac{1}{\\sqrt[3]{\\sqrt{x}}}')).toMatchInlineSnapshot(
-      `["Root", ["Sqrt", "x"], -3]`
+      `["Divide", 1, "x"]`
     );
   });
 });

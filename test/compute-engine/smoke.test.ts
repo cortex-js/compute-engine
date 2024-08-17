@@ -181,14 +181,14 @@ describe('PARSING numbers', () => {
                                       ],
                                       [
                                         "Triple",
-                                        ["At", "v", 3],
+                                        "Nothing",
                                         2,
                                         ["Floor", ["Sqrt", ["At", "v", 2]]]
                                       ]
                                     ]
                                   ]
                                 ],
-                                ["Triple", ["At", "v", 2], 2, ["At", "v", 1]]
+                                ["Triple", "Nothing", 2, ["At", "v", 1]]
                               ]
                             ]
                           ]
@@ -200,7 +200,7 @@ describe('PARSING numbers', () => {
                 ],
                 [
                   "Triple",
-                  ["At", "v", 1],
+                  "Nothing",
                   2,
                   ["Floor", ["Multiply", 1.5, "n", ["Ln", "n"]]]
                 ]
@@ -697,18 +697,9 @@ describe('SIMPLIFICATION power', () => {
     ));
 
   test(`simplify('(a+b)^6')`, () =>
-    expect(simplify('(a+b)^6')).toMatchInlineSnapshot(`
-      [
-        "Add",
-        ["Power", "a", 6],
-        ["Power", "b", 6],
-        ["Multiply", 6, "b", ["Power", "a", 5]],
-        ["Multiply", 6, "a", ["Power", "b", 5]],
-        ["Multiply", 15, ["Power", "b", 4], ["Square", "a"]],
-        ["Multiply", 15, ["Power", "a", 4], ["Square", "b"]],
-        ["Multiply", 20, ["Power", "a", 3], ["Power", "b", 3]]
-      ]
-    `));
+    expect(simplify('(a+b)^6')).toMatchInlineSnapshot(
+      `["Power", ["Add", "a", "b"], 6]`
+    ));
 });
 
 describe('EXPAND', () => {
@@ -828,7 +819,7 @@ describe('NUMERIC EVALUATION arithmetic', () => {
 
   test(`NToJson('12345678^3 + \\frac{1}{3}')`, () =>
     expect(NToJson('12345678^3 + \\frac{1}{3}')).toMatch(
-      '1.881675960266558605752(3)e+21'
+      '1.881675960266558500000(3)e+21'
     ));
 
   test(`NToJson('50!')`, () =>

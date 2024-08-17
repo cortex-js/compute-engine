@@ -86,12 +86,15 @@ export class BoxedSymbol extends _BoxedExpression {
     | null
     | undefined;
 
+  private _isStructural: boolean = false;
+
   constructor(
     ce: IComputeEngine,
     name: string,
     options?: {
       metadata?: Metadata;
       canonical?: CanonicalOptions;
+      structural?: boolean;
       def?: BoxedSymbolDefinition | BoxedFunctionDefinition;
     }
   ) {
@@ -103,6 +106,8 @@ export class BoxedSymbol extends _BoxedExpression {
     );
     this._id = name;
     this._def = options?.def ?? undefined; // Mark the def as not cached if not provided
+
+    if (options?.structural) this._isStructural = true;
 
     if ((options?.canonical ?? true) !== true) this._scope = null;
     else if (this._def) this._scope = ce.context;
@@ -120,6 +125,18 @@ export class BoxedSymbol extends _BoxedExpression {
 
   get isPure(): boolean {
     return true;
+  }
+
+  get isStructural(): boolean {
+    return this._isStructural;
+  }
+
+  get structural(): BoxedExpression {
+    if (this.isStructural) return this;
+    return new BoxedSymbol(this.engine, this._id, {
+      structural: true,
+      def: this._def ?? undefined,
+    });
   }
 
   get scope(): RuntimeScope | null {
@@ -797,8 +814,9 @@ export class BoxedSymbol extends _BoxedExpression {
   }
 
   simplify(options?: Partial<SimplifyOptions>): BoxedExpression {
-    // If allowed replace this symbol with its value/definition.
-    // In some cases this may allow for some additional simplifications (e.g. `GoldenRatio`).
+    // If allowed, replace this symbol with its value/definition.
+    // In some cases this may allow for some additional simplifications
+    // (e.g. `GoldenRatio`).
     const def = this.symbolDefinition;
     if (
       (options?.applyDefaultSimplifications ?? true) &&
@@ -811,9 +829,11 @@ export class BoxedSymbol extends _BoxedExpression {
     // however if a custom set of rules is provided, apply them
     if (!options?.rules) return this;
 
-    const results = simplify(this, options);
-    if (results.length === 0) return this;
-    return results[results.length - 1].value;
+    // We use the structural form to avoid infinite recursion, by
+    // detecting in `simplify()` that the expression should have rules applied
+    // to it and avoid calling `expr.simplify()`.
+    const results = simplify(this.structural, options);
+    return results.at(-1)?.value ?? this;
   }
 
   evaluate(options?: EvaluateOptions): BoxedExpression {

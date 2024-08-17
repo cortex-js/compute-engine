@@ -989,7 +989,7 @@ export type TestCase =
   | [
       input: Expression | string,
       expected: Expression | string,
-      comment?: string,
+      comment?: string
     ]
   | [heading: string];
 
@@ -1146,7 +1146,7 @@ const RULE_TEST_CASES: TestCase[] = [
   `,
   ],
   ['e e^x e^{-x}', 'e'], // 🙁 e * e^x * e^(-x)
-  ['e^x e^{-x}', 1, 'stop'], // 🙁 e^(x - x)
+  ['e^x e^{-x}', 1], // 🙁 e^(x - x)
   ['\\sqrt[4]{16b^{4}}', '2b'], // 🙁 65536b^(16)
 
   [
@@ -1636,8 +1636,7 @@ const RULE_TEST_CASES: TestCase[] = [
 
 describe('SIMPLIFY', () => {
   console.info('Canonicalization test cases\n\n');
-  for (const test of CANONICALIZATION_TEST_CASES)
-    runTestCase(test, { rules: [] });
+  for (const test of CANONICALIZATION_TEST_CASES) runTestCase(test);
 
   console.info('\n\nRule test cases\n\n');
   const rules = ce.rules(RULES);
@@ -1683,21 +1682,29 @@ describe('RELATIONAL OPERATORS', () => {
 
   // Simplify coefficient with a common factor
   test(`2x^2 < 4x^3`, () =>
-    expect(simplify('2x^2 \\lt 4x^3')).toMatchInlineSnapshot(
-      `["Less", ["Add", ["Multiply", -2, ["Square", "x"]], "x"], 0]`
-    ));
+    expect(simplify('2x^2 \\lt 4x^3')).toMatchInlineSnapshot(`
+      [
+        "Less",
+        ["Divide", ["Square", "x"], ["Abs", "x"]],
+        ["Divide", ["Multiply", 2, ["Power", "x", 3]], ["Abs", "x"]]
+      ]
+    `));
 
   test(`2a < 4ab`, () =>
-    expect(simplify('2a < 4ab')).toMatchInlineSnapshot(
-      `["Less", 1, ["Multiply", 2, "b"]]`
-    ));
+    expect(simplify('2a < 4ab')).toMatchInlineSnapshot(`
+      [
+        "Less",
+        ["Divide", "a", ["Abs", "a"]],
+        ["Divide", ["Multiply", 2, "a", "b"], ["Abs", "a"]]
+      ]
+    `));
 });
 
 function escape(s: string): string {
   return s.replace(/\\/g, '\\\\');
 }
 
-function runTestCase(test: TestCase, rules: BoxedRuleSet): void {
+function runTestCase(test: TestCase, rules?: BoxedRuleSet): void {
   if (test.length === 1) {
     // It's a heading
     // It's a heading
@@ -1739,17 +1746,19 @@ function runTestCase(test: TestCase, rules: BoxedRuleSet): void {
 function tryRules(
   a: BoxedExpression,
   b: BoxedExpression,
-  allRules: BoxedRuleSet
+  allRules?: BoxedRuleSet
 ): string {
   // No rules
-  if (a.simplify({ rules: [] }).isSame(b)) return '';
+  if (a.simplify().isSame(b)) return '';
+
+  if (!allRules) return '';
 
   // One rule at a time
   let i = 0;
   const ruleCount = allRules.rules.length - 1;
   while (i <= ruleCount) {
-    const sa = a.simplify({ rules: [allRules[i]] });
-    if (sa.isSame(b)) return ruleName(allRules[i]);
+    const sa = a.simplify({ rules: [allRules.rules[i]] });
+    if (sa.isSame(b)) return ruleName(allRules.rules[i]);
     i += 1;
   }
 
@@ -1759,7 +1768,7 @@ function tryRules(
   while (i <= ruleCount) {
     const sa = a.simplify({ rules });
     if (sa.isSame(b)) return 'up to ' + ruleName(rules.pop());
-    rules.push(allRules[i]);
+    rules.push(allRules.rules[i]);
     i += 1;
   }
 

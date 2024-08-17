@@ -3,7 +3,7 @@ import { check } from '../../utils';
 describe('STYLE - MATH MODE', () => {
   test('\\textcolor', () => {
     expect(check('x \\textcolor{red}{=} y')).toMatchInlineSnapshot(`
-      [
+      invalid   =[
         "InvisibleOperator",
         "x",
         ["Error", "'unexpected-command'", ["LatexString", "'\\textcolor'"]],

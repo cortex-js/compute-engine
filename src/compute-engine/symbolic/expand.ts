@@ -258,6 +258,9 @@ export function expandFunction(
 export function expand(
   expr: BoxedExpression | undefined
 ): BoxedExpression | null {
+  // To expand an expression, we need to use its canonical form
+  expr = expr?.canonical;
+
   if (!expr || typeof expr.operator !== 'string') return null;
 
   //

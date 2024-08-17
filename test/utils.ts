@@ -100,6 +100,9 @@ export function checkJson(inExpr: SemiBoxedExpression | null): string {
     const boxed = exprToString(engine.box(inExpr, { canonical: false }));
 
     const expr = engine.box(inExpr);
+
+    if (!expr.isValid) return `invalid   =${exprToString(expr)}`;
+
     const canonical = exprToString(expr);
 
     const simplify = expr.simplify().toString();

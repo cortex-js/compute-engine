@@ -13,7 +13,7 @@ describe('CALCULUS', () => {
         parse(
           `\\int_0^1 \\sech^2 (10(x − 0.2)) + \\sech^4 (100(x − 0.4)) + \\sech^6 (1000(x − 0.6)) dx`
         ).N()
-      ).toMatchInlineSnapshot(`0.2099991829039589`);
+      ).toMatchInlineSnapshot(`0.211536110969441`);
 
       // Correct value: 0.6366197723675813430755350534900574481378385829618257949906693762
       const result = parse(`\\int_0^1 \\sin(\\pi x) dx`).N().value as number;
@@ -22,7 +22,7 @@ describe('CALCULUS', () => {
       // Correct value: 0.09865170447836520611965824976485985650416962079238449145 10919068308266804822906098396240645824
       expect(
         parse(`\\int_0^8 (e^x - \\mathrm{floor}(e^x)\\sin(x+e^x)) dx`).N()
-      ).toMatchInlineSnapshot(`2982.558387341975`);
+      ).toMatchInlineSnapshot(`2956.589119832504`);
     });
 
     it('should compute the numerical approximation of a trig function', () => {

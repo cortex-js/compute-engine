@@ -77,7 +77,7 @@ describe('Nth PRIME NUMBER', () =>
         'p(n):=(\\sum_{v_{1}=2}^{\\operatorname{floor}\\left(1.5*n*\\ln(n)\\right)}(\\operatorname{floor}(\\frac{1}{0^{n-(\\sum_{v_{2}=2}^{v_{1}}((\\prod_{v_{3}=2}^{\\operatorname{floor}(\\sqrt{v_{2}})}(1-0^{\\operatorname{abs}(\\operatorname{floor}(\\frac{v_{2}}{v_{3}})-\\frac{v_{2}}{v_{3}})}))))}+1})))+2'
       )
     ).toMatchInlineSnapshot(
-      `Error: Invalid function (n) |-> {sum_(At(v, 1)=2)^(floor(1.5 * n * ln(n)))(floor(1 / (0^(n - sum_(At(v, 2)=2)^(At(v, 1))(prod_(At(v, 3)=2)^(floor(sqrt(Error(ErrorCode(incompatible-domain, "Numbers", "Anything"), At(v, 2)))))(1 + 0^(|floor(Error(ErrorCode(incompatible-domain, "Numbers", "Anything"), At(v, 2)) / Error(ErrorCode(incompatible-domain, "Numbers", "Anything"), At(v, 3))) - Error(ErrorCode(incompatible-domain, "Numbers", "Anything"), At(v, 2)) / Error(ErrorCode(incompatible-domain, "Numbers", "Anything"), At(v, 3))|)))) + 1))) + 2}`
+      `Error: Invalid function (n) |-> {sum^(floor(1.5 * n * ln(n)))(floor(1 / (0^(n - sum^(At(v, 1))(prod^(floor(sqrt(Error(ErrorCode(incompatible-domain, "Numbers", "Anything"), At(v, 2)))))(1 + 0^(|floor(Error(ErrorCode(incompatible-domain, "Numbers", "Anything"), At(v, 2)) / Error(ErrorCode(incompatible-domain, "Numbers", "Anything"), At(v, 3))) - Error(ErrorCode(incompatible-domain, "Numbers", "Anything"), At(v, 2)) / Error(ErrorCode(incompatible-domain, "Numbers", "Anything"), At(v, 3))|)))) + 1))) + 2}`
     );
   }));
 
@@ -222,8 +222,8 @@ describe('RAMANUJAN FACTORIAL APPROXIMATION', () =>
       ]
       eval-auto = e^(-n) * sqrt(pi) * n^n * root(8n^3 + 4n^2 + n + 1/30)(6)
       eval-mach = e^(-n) * sqrt(pi) * n^n * root(8n^3 + 4n^2 + n + 1/30)(6)
-      N-auto    = 1.772453850905516 * 2.71828182845904523536^(-n) * n^n * root(8n^3 + 4n^2 + n + 0.0333333333333333333333)(6)
-      N-mach    = 1.7724538509055159 * 2.718281828459045^(-n) * n^n * root(8n^3 + 4n^2 + n + 0.0333333333333333)(6)
+      N-auto    = 1.772453850905516 * 0.367879441171442321596^n * n^n * root(8n^3 + 4n^2 + n + 0.0333333333333333333333)(6)
+      N-mach    = 1.7724538509055159 * 0.36787944117144233^n * n^n * root(8n^3 + 4n^2 + n + 0.0333333333333333)(6)
     `)));
 
 /*

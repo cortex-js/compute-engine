@@ -31,7 +31,6 @@ import {
   isRelationalOperator,
 } from './utils';
 import { flattenOps } from '../symbolic/flatten';
-import { expand } from '../symbolic/expand';
 import { shouldHold } from '../symbolic/utils';
 import { at, isFiniteIndexableCollection } from '../collection-utils';
 import { narrow } from './boxed-domain';
@@ -232,6 +231,7 @@ export class BoxedFunction extends _BoxedExpression {
   }
 
   get structural(): BoxedExpression {
+    if (this.isStructural) return this;
     const def = this.functionDefinition;
     if (def?.associative || def?.commutative) {
       // Flatten the arguments if they are the same as the operator
@@ -265,7 +265,8 @@ export class BoxedFunction extends _BoxedExpression {
   }
 
   toNumericValue(): [NumericValue, BoxedExpression] {
-    console.assert(this.isCanonical);
+    console.assert(this.isCanonical || this.isStructural);
+
     const ce = this.engine;
 
     if (this.operator === 'Complex') {
@@ -449,7 +450,9 @@ export class BoxedFunction extends _BoxedExpression {
     if (this.isValid) {
       const sig = this.functionDefinition?.signature;
       if (sig?.sgn) {
+        const context = this.engine.swapScope(this.scope);
         s = sig.sgn(this.engine, this._ops);
+        this.engine.swapScope(context);
       }
     }
     if (memoizable) this._sgn = s;
@@ -458,56 +461,56 @@ export class BoxedFunction extends _BoxedExpression {
 
   get isZero(): boolean | undefined {
     const s = this.sgn;
-    if (s === undefined || isNaN(s)) return undefined;
+    if (s === undefined) return undefined;
     return s === 0;
   }
 
   get isNotZero(): boolean | undefined {
     const s = this.sgn;
-    if (s === undefined || isNaN(s)) return undefined;
+    if (s === undefined) return undefined;
     return s !== 0;
   }
 
   get isOne(): boolean | undefined {
     const s = this.sgn;
-    if (s === undefined || isNaN(s)) return undefined;
-    if (s <= 0) return false;
+    if (s === undefined) return undefined;
+    if (isNaN(s) || s <= 0) return false;
     return undefined;
   }
 
   get isNegativeOne(): boolean | undefined {
     const s = this.sgn;
-    if (s === undefined || isNaN(s)) return undefined;
-    if (s >= 0) return false;
+    if (s === undefined) return undefined;
+    if (isNaN(s) || s >= 0) return false;
     return undefined;
   }
 
   // x > 0
   get isPositive(): boolean | undefined {
     const s = this.sgn;
-    if (s === undefined || isNaN(s)) return undefined;
-    return s > 0;
+    if (s === undefined) return undefined;
+    return !isNaN(s) && s > 0;
   }
 
   // x >= 0
   get isNonNegative(): boolean | undefined {
     const s = this.sgn;
-    if (s === undefined || isNaN(s)) return undefined;
-    return s >= 0;
+    if (s === undefined) return undefined;
+    return !isNaN(s) && s >= 0;
   }
 
   // x < 0
   get isNegative(): boolean | undefined {
     const s = this.sgn;
-    if (s === undefined || isNaN(s)) return undefined;
-    return s < 0;
+    if (s === undefined) return undefined;
+    return !isNaN(s) && s < 0;
   }
 
   // x <= 0
   get isNonPositive(): boolean | undefined {
     const s = this.sgn;
-    if (s === undefined || isNaN(s)) return undefined;
-    return s <= 0;
+    if (s === undefined) return undefined;
+    return !isNaN(s) && s <= 0;
   }
 
   /** `isSame` is structural/symbolic equality */
@@ -672,8 +675,8 @@ export class BoxedFunction extends _BoxedExpression {
     // (a*b)^c -> a^c * b^c
     if (this.operator === 'Multiply') {
       const ops = this.ops.map((x) => x.pow(exp));
-      return mul(...ops);
-      // return this.engine._fn('Multiply', ops);
+      // return mul(...ops);  // don't call: infinite recursion
+      return this.engine._fn('Multiply', ops);
     }
 
     // a^(b/c) -> root(a, c)^b if b = 1 or c = 1
@@ -936,7 +939,7 @@ export class BoxedFunction extends _BoxedExpression {
 
   simplify(options?: Partial<SimplifyOptions>): BoxedExpression {
     let expr: BoxedExpression = this;
-    if (options?.recursive) {
+    if (options?.recursive ?? true) {
       const def = this.functionDefinition;
       const ops = holdMap(
         this._ops,
@@ -946,10 +949,12 @@ export class BoxedFunction extends _BoxedExpression {
       );
       expr = this.engine.function(this._name, ops, {
         canonical: this.isCanonical,
+        structural: this.isStructural,
       });
     }
+
     const results = simplify(expr, options);
-    if (results.length === 0) return this;
+    if (results.length === 0) return expr;
     return results[results.length - 1].value;
   }
 

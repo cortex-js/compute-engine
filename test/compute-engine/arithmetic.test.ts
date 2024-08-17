@@ -667,7 +667,7 @@ describe('SUM', () => {
         .box(['Sum', ['Divide', 1, 'x'], 'x'])
         .evaluate()
         .toString()
-    ).toMatchInlineSnapshot(`14.3927277228647238754`));
+    ).toMatchInlineSnapshot(`44057567621371730/3061099221058841`));
 
   it('should compute the sum of a collection', () =>
     expect(
@@ -676,6 +676,19 @@ describe('SUM', () => {
         .evaluate()
         .toString()
     ).toMatchInlineSnapshot(`55`));
+
+  it('should compute the sum of a function over two indices (with optional Hold)', () =>
+    expect(
+      ce
+        .box([
+          'Sum',
+          ['Multiply', 'i', 'j'],
+          ['Tuple', ['Hold', 'i'], 1, 10],
+          ['Tuple', 'j', 3, 13],
+        ])
+        .evaluate()
+        .toString()
+    ).toMatchInlineSnapshot(`4840`));
 });
 
 describe('GCD/LCM', () => {
@@ -763,7 +776,7 @@ describe('FACTOR', () => {
         .box(['Factor', ce.parse('\\sqrt{7}\\sqrt{35}x^2 \\lt \\sqrt{5}x')])
         .evaluate()
         .toString()
-    ).toMatchInlineSnapshot(`7x < 1`));
+    ).toMatchInlineSnapshot(`7 * 1 / |x| * x^2 < x * 1 / |x|`));
 
   it('should factor integers', () =>
     expect(

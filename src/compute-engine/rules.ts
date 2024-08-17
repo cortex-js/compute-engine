@@ -505,6 +505,8 @@ function parseRule(ce: IComputeEngine, rule: string): BoxedRule {
 }
 
 function boxRule(ce: IComputeEngine, rule: Rule | BoxedRule): BoxedRule {
+  if (rule === undefined || rule === null)
+    throw new Error('Expected a rule, not ' + rule);
   if (isBoxedRule(rule)) return rule;
   // If the rule is defined as a single string, parse it
   // e.g. `|x| -> x; x > 0`
@@ -700,7 +702,7 @@ export function replace(
           if (once) return [{ value: result, because: rule.id ?? '' }];
 
           // If we have detected a loop, exit
-          if (steps.some((x) => x.value.isSame(expr))) return steps;
+          if (steps.some((x) => x.value.isSame(result))) return steps;
 
           steps.push({ value: result, because: rule.id ?? '' });
 

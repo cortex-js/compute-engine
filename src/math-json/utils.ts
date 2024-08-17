@@ -53,7 +53,7 @@ export function stringValue(
   if (typeof expr === 'object' && 'str' in expr) return expr.str;
   if (typeof expr !== 'string') return null;
   if (expr.length < 2) return null;
-  if (expr[0] !== "'" || expr[expr.length - 1] !== "'") return null;
+  if (expr.at(0) !== "'" || expr.at(-1) !== "'") return null;
   return expr.substring(1, expr.length - 1);
 }
 

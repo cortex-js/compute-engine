@@ -510,7 +510,7 @@ function compileLoop(
   if (!args[0]) throw new Error('Sum/Product: no body');
   // if (!args[1]) throw new Error('Sum/Product: no limits');
 
-  const [index, lower, upper, _isFinite] = normalizeIndexingSet(args[1]);
+  const { index, lower, upper, isFinite } = normalizeIndexingSet(args[1]);
 
   const op = h === 'Sum' ? '+' : '*';
 
@@ -577,7 +577,7 @@ function rndVar(): string {
 }
 
 function compileIntegrate(args, _, target: CompileTarget): string {
-  const [index, lower, upper] = normalizeIndexingSet(args[1]);
+  const { index, lower, upper } = normalizeIndexingSet(args[1]);
   const f = compile(args[0], {
     ...target,
     var: (id) => (id === index ? id : target.var(id)),

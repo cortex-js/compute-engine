@@ -23,15 +23,6 @@ export const RELOP_LIBRARY: IdentifierDefinitions = {
     complexity: 11000,
     numeric: true,
     signature: {
-      simplify: (ce, ops) => {
-        if (ops.length < 3) return undefined;
-        return ce
-          ._fn('Equal', [
-            ce.function('Mod', [ops[0], ops[2]]).simplify(),
-            ce.function('Mod', [ops[1], ops[2]]).simplify(),
-          ])
-          .simplify();
-      },
       evaluate: (ce, ops) => {
         if (ops.length < 3) return undefined;
         const [lhs, rhs, modulo] = ops;

@@ -12,6 +12,7 @@ import {
   missingIfEmpty,
   isNumberExpression,
   MISSING,
+  getSequence,
 } from '../../../math-json/utils';
 import {
   Serializer,
@@ -1198,11 +1199,86 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
   },
 ];
 
+/**
+ * Expect an expression of the form ['Equal', index, lower] or
+ * ['Equal', index, ['Range', lower, upper]]
+ *
+ */
+function getIndexAssignment(
+  expr: Expression | null,
+  upper?: Expression | undefined
+):
+  | {
+      index: string;
+      lower?: Expression;
+      upper?: Expression;
+    }
+  | undefined {
+  if (expr === null) return undefined;
+  // We only have a symbol, e.g. `i`
+  if (symbol(expr)) return { index: symbol(expr) ?? 'Nothing', upper };
+
+  // We have `i>=1` in the subscript
+  if (operator(expr) === 'GreaterEqual') {
+    const index = symbol(operand(expr, 1)) ?? 'Nothing';
+    const lower = operand(expr, 2) ?? 1;
+    return { index, lower, upper };
+  }
+
+  // We have `i=1` or `i=1..10` in the subscript
+  if (operator(expr) === 'Equal') {
+    const index = symbol(operand(expr, 1)) ?? 'Nothing';
+    // We have i=1..10
+    const rhs = operand(expr, 2);
+    if (operator(rhs) === 'Range') {
+      const lower = operand(rhs, 1) ?? 1;
+      const upper = operand(rhs, 2) ?? undefined;
+      // @todo: we currently do not support step range, i.e. `i=1..3..10`. The step is the third argument of Range. We should extend the indexing set to include step-range and collections, i.e. i={1,2,3,4}
+      return { index, lower, upper };
+    }
+    // We have i=1
+    const lower = rhs ?? 1;
+    return { index, lower, upper };
+  }
+
+  return undefined;
+}
+
+function getIndexes(
+  sub: Expression | null,
+  sup: Expression | null
+): {
+  index: string;
+  lower?: Expression;
+  upper?: Expression;
+}[] {
+  if (sub === 'Nothing' || isEmptySequence(sub)) sub = null;
+  if (sup === 'Nothing' || isEmptySequence(sup)) sup = null;
+
+  const subs = sub === null ? [] : (getSequence(sub) ?? [sub]);
+  const sups = sup === null ? [] : (getSequence(sup) ?? [sup]);
+
+  // If we have a superscript, we expect to have a subscript of the form
+  // `i=1, j=1` with a superscript of the form `10, 20`
+  // If we don't have a superscript, we may have a subscript of the form
+  // `i=1..10, j=1..20`... or just `i=1, j=1` with an implied
+  // infinite upper bound
+
+  // In both cases, we access sups[i], which may be undefined
+
+  return subs
+    .map((subExpr, i) => getIndexAssignment(subExpr, sups[i]))
+    .filter((x) => x !== undefined);
+}
+
 function parseBigOp(name: string, prec: number) {
   return (parser: Parser): Expression | null => {
-    // Look for sub and sup
     parser.skipSpace();
 
+    //
+    // Capture the subscripts and superscripts
+    // e.g. \sum_{i=1}^{10} i -> sup = `10`, sub = `i=1`
+    //
     let sup: Expression | null = null;
     let sub: Expression | null = null;
     while (!(sub && sup) && (parser.peek === '_' || parser.peek === '^')) {
@@ -1212,22 +1288,15 @@ function parseBigOp(name: string, prec: number) {
       parser.skipSpace();
     }
 
-    if (sub === 'Nothing' || isEmptySequence(sub)) sub = null;
-    if (sup === 'Nothing' || isEmptySequence(sup)) sup = null;
+    const indexes = getIndexes(sub, sup);
 
-    // @todo: parse multiple indexes in sub, i.e. \sum_{i=1..2; j=2..5}(i+j)
-    let index: Expression | null | undefined = null;
-    let lower: Expression | null | undefined = null;
-    if (operator(sub) === 'Equal') {
-      index = operand(sub, 1);
-      lower = operand(sub, 2);
-      // @todo else head(sub) === 'ElementOf'
-    } else {
-      index = sub;
-    }
-
+    //
+    // Parse the body of the function
+    //
     parser.pushSymbolTable();
-    if (index) parser.addSymbol(symbol(index)!, 'symbol');
+
+    for (const indexinSet of indexes)
+      parser.addSymbol(indexinSet.index, 'symbol');
 
     const fn = parser.parseExpression({ minPrec: prec + 1 });
 
@@ -1235,16 +1304,21 @@ function parseBigOp(name: string, prec: number) {
 
     if (fn === null) return [name];
 
-    if (sup !== null)
-      return [name, fn, ['Tuple', index ?? 'Nothing', lower ?? 1, sup]];
-
-    if (lower !== null && lower !== undefined)
-      return [name, fn, ['Tuple', index ?? 'Nothing', lower]];
-
-    if (index !== null && index !== undefined)
-      return [name, fn, ['Tuple', index]];
-
-    return [name, fn];
+    //
+    // Turn the indexing sets into a sequence of tuples
+    //
+    const indexingSetArguments: Expression[] = [];
+    for (const indexinSet of indexes) {
+      let lower = indexinSet.lower;
+      let upper = indexinSet.upper;
+      const index = indexinSet.index ?? 'Nothing';
+      if (upper !== null && upper !== undefined)
+        indexingSetArguments.push(['Tuple', index, lower ?? 1, upper]);
+      else if (lower !== null && lower !== undefined)
+        indexingSetArguments.push(['Tuple', index, lower]);
+      else indexingSetArguments.push(['Tuple', index]);
+    }
+    return [name, fn, ...indexingSetArguments];
   };
 }
 

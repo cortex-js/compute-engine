@@ -124,7 +124,7 @@ describe('OPERATOR invisible', () => {
         ["Delimiter", ["InvisibleOperator", 2, "q"]]
       ]
       canonical = ["Multiply", 2, "q", "q"]
-      simplify  = 2q^2
+      eval-auto = 2q^2
     `));
 
   test('f(2q) // Invisible operator as a function', () =>
@@ -214,11 +214,11 @@ describe('OPERATOR prefix', () => {
 describe('OPERATOR infix', () => {
   test('- // Invalid negate', () =>
     expect(check('-')).toMatchInlineSnapshot(
-      `["Negate", ["Error", "'missing'", ["LatexString", "'-'"]]]`
+      `invalid   =["Negate", ["Error", "'missing'", ["LatexString", "'-'"]]]`
     ));
   test('1- // Invalid subtract', () =>
     expect(check('1-')).toMatchInlineSnapshot(`
-      [
+      invalid   =[
         "Sequence",
         1,
         ["Negate", ["Error", "'missing'", ["LatexString", "'-'"]]]

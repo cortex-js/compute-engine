@@ -378,6 +378,8 @@ export function commonTerms(lhs: Product, rhs: Product): BoxedExpression {
   // The common coefficient between the two products
   const coef = lhs.coefficient.gcd(rhs.coefficient);
 
+  if (coef.isOne) return ce.One;
+
   // Extract common terms between two products
 
   const xs: BoxedExpression[] = [];

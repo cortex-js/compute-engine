@@ -56,3 +56,57 @@ describe('LIST SERIALIZATION', () => {
       `\\error{\\text{\\lbrack\\rbrack}}`
     ));
 });
+
+describe('RANGE', () => {
+  test('simple range', () => {
+    expect(parse('1..5')).toMatchInlineSnapshot(`["Range", 1, 5]`);
+  });
+
+  test('simple range with step', () => {
+    expect(parse('1..3..5')).toMatchInlineSnapshot(`
+      [
+        "Range",
+        1,
+        [
+          "Error",
+          ["ErrorCode", "'incompatible-domain'", "Numbers", "Values"],
+          ["Range", 3, 5]
+        ]
+      ]
+    `);
+  });
+
+  test('range with expressions', () => {
+    expect(parse('n+1..n+10')).toMatchInlineSnapshot(
+      `["Add", "n", ["Range", 1, ["Add", "n", 10]]]`
+    );
+  });
+
+  test('range with expressions with multiplication', () => {
+    expect(parse('2n..3n')).toMatchInlineSnapshot(
+      `["Multiply", 2, ["Range", "n", ["Multiply", 3, "n"]]]`
+    );
+  });
+
+  test('range with expressions with addition and multiplication', () => {
+    expect(parse('(2n + 1)..(3n + 10)')).toMatchInlineSnapshot(`
+      [
+        "Range",
+        ["Add", ["Multiply", 2, "n"], 1],
+        ["Add", ["Multiply", 3, "n"], 10]
+      ]
+    `);
+  });
+
+  test('range with equality', () => {
+    expect(parse('x = n+1..n+10')).toMatchInlineSnapshot(
+      `["Equal", "x", ["Add", "n", ["Range", 1, ["Add", "n", 10]]]]`
+    );
+  });
+
+  test('range with assignment', () => {
+    expect(parse('x := 5..13')).toMatchInlineSnapshot(
+      `["Assign", "x", ["Range", 5, 13]]`
+    );
+  });
+});

@@ -537,7 +537,7 @@ export const CORE_LIBRARY: IdentifierDefinitions[] = [
           const h = ops[0].operator;
           if (h === 'N') return ops[0].canonical;
           if (h === 'Integrate') {
-            const [index, lower, upper] = normalizeIndexingSet(ops[0].op2);
+            const { index, lower, upper } = normalizeIndexingSet(ops[0].op2);
             if (!index || lower === undefined || upper === undefined)
               return null;
             const fn = ops[0].op1;

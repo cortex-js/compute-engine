@@ -66,7 +66,7 @@ exports[`ADD Add ['Add'] 1`] = `0`;
 
 exports[`ADD Add \\frac{2}{-3222233}+\\frac{1}{3} 1`] = `
 box       = ["Add", ["Divide", 2, -3222233], ["Divide", 1, 3]]
-canonical = ["Add", ["Rational", -2, 3222233], ["Rational", 1, 3]]
+canonical = ["Subtract", ["Rational", 1, 3], ["Rational", 2, 3222233]]
 simplify  = 3222227/9666699
 eval-auto = 3222227/9666699
 eval-mach = 3222227/9666699
@@ -106,7 +106,7 @@ N-mach    = 2.718281828459045
 
 exports[`CONSTANTS GoldenRatio 1`] = `
 box       = GoldenRatio
-simplify  = 1/2 + sqrt(5) / 2
+simplify  = (1 + sqrt(5)) / 2
 eval-auto = (1 + sqrt(5)) / 2
 eval-mach = (1 + sqrt(5)) / 2
 N-auto    = 1.61803398874989484821
@@ -136,7 +136,6 @@ exports[`DIVIDE Divide with single argument 1`] = `2.5`;
 exports[`EXACT EVALUATION Add: All exact 1`] = `
 box       = ["Add", 6, ["Divide", 10, 14], ["Sqrt", ["Divide", 18, 9]]]
 canonical = ["Add", 6, ["Rational", 5, 7], ["Sqrt", 2]]
-simplify  = 47/7 + sqrt(2)
 eval-auto = 47/7 + sqrt(2)
 eval-mach = 47/7 + sqrt(2)
 N-auto    = 8.12849927665880933451
@@ -261,7 +260,6 @@ canonical = [
   ["Sqrt", 5],
   ["Sqrt", 7]
 ]
-simplify  = 5/2 + sqrt(5) + sqrt(7)
 eval-auto = 5/2 + sqrt(5) + sqrt(7)
 eval-mach = 5/2 + sqrt(5) + sqrt(7)
 N-auto    = 7.38181928856438028691
@@ -285,6 +283,7 @@ N-mach    = 2.23606797749979
 exports[`EXACT EVALUATION Sqrt: Exact rational 1`] = `
 box       = ["Sqrt", ["Divide", 5, 7]]
 canonical = ["Multiply", ["Rational", 1, 7], ["Sqrt", 35]]
+simplify  = sqrt(35) / 7
 eval-auto = sqrt(35)/7
 eval-mach = sqrt(35)/7
 N-auto    = 0.845154254728516577511
@@ -300,7 +299,6 @@ eval-mach = 2.258317958127243
 
 exports[`EXACT EVALUATION Square rationals are grouped together 1`] = `
 box       = ["Add", ["Sqrt", 5], ["Sqrt", 5]]
-simplify  = 2sqrt(5)
 eval-auto = 2sqrt(5)
 eval-mach = 2sqrt(5)
 N-auto    = 4.47213595499957939282
@@ -361,11 +359,12 @@ eval-mach = 3.004166023946433
 exports[`INVALID LOG Ln 1`] = `
 box       = ["Ln"]
 canonical = ["Log"]
+simplify  = log("Nothing")
+eval-auto = log()
 `;
 
 exports[`INVALID LOG Ln with string argument 1`] = `
-box       = ["Ln", "'string'"]
-canonical = [
+invalid   =[
   "Ln",
   [
     "Error",
@@ -704,8 +703,7 @@ box       = [
   ["Multiply", ["Divide", 5, 7], ["Divide", 7, 9]]
 ]
 canonical = ["Divide", ["Multiply", 2, 5, 7], ["Multiply", 7, 9]]
-simplify  = 10 / 9
-eval-auto = 10/9
+simplify  = 10/9
 `;
 
 exports[`MULTIPLY Multiply: All exact with symbol 1`] = `
@@ -755,8 +753,7 @@ N-mach    = 27.150951288745713
 
 exports[`MULTIPLY with +Infinity 1`] = `
 box       = ["Multiply", "x", -2, 3.1, "PositiveInfinity"]
-canonical = ["Multiply", -2, 3.1, "PositiveInfinity", "x"]
-simplify  = oo
+canonical = NegativeInfinity
 `;
 
 exports[`MULTIPLY with <0 1`] = `
@@ -767,8 +764,7 @@ simplify  = 32.24 * x
 
 exports[`MULTIPLY with -Infinity 1`] = `
 box       = ["Multiply", "x", -2, 3.1, "NegativeInfinity", "NegativeInfinity"]
-canonical = ["Multiply", -2, 3.1, "PositiveInfinity", "PositiveInfinity", "x"]
-simplify  = oo
+canonical = NegativeInfinity
 `;
 
 exports[`MULTIPLY with -Infinity and +Infinity 1`] = `
@@ -781,16 +777,7 @@ box       = [
   "NegativeInfinity",
   "PositiveInfinity"
 ]
-canonical = [
-  "Multiply",
-  2,
-  3.1,
-  "PositiveInfinity",
-  "PositiveInfinity",
-  "PositiveInfinity",
-  "x"
-]
-simplify  = oo
+canonical = NegativeInfinity
 `;
 
 exports[`MULTIPLY with NaN 1`] = `
@@ -809,16 +796,7 @@ box       = [
   "NegativeInfinity",
   "PositiveInfinity"
 ]
-canonical = [
-  "Multiply",
-  2,
-  3.1,
-  "NaN",
-  "PositiveInfinity",
-  "PositiveInfinity",
-  "x"
-]
-simplify  = NaN
+canonical = NegativeInfinity
 `;
 
 exports[`MULTIPLY with zero 1`] = `
@@ -973,8 +951,7 @@ N-mach    = 0.526315809667591
 `;
 
 exports[`RATIONAL INVALID Rational 1`] = `
-box       = ["Rational", 2.5, -1.1, 18.4]
-canonical = [
+invalid   =[
   "Rational",
   [
     "Error",
@@ -990,10 +967,7 @@ canonical = [
 ]
 `;
 
-exports[`RATIONAL INVALID Rational 2`] = `
-box       = ["Rational", 2, 3, 5]
-canonical = ["Rational", 2, 3, ["Error", "'unexpected-argument'", 5]]
-`;
+exports[`RATIONAL INVALID Rational 2`] = `invalid   =["Rational", 2, 3, ["Error", "'unexpected-argument'", 5]]`;
 
 exports[`RATIONAL Rational 1`] = `
 box       = ["Rational", 3, 4]
@@ -1064,8 +1038,7 @@ exports[`ROOT Root 1234567890987654321 1`] = `1072765.97992715828118`;
 exports[`ROOT Root 1234567890987654321.123456789 1`] = `1072765.97992715828122`;
 
 exports[`SQRT INVALID  Sqrt 1`] = `
-box       = ["Sqrt", 2.5, -1.1, 18.4]
-canonical = [
+invalid   =[
   "Sqrt",
   2.5,
   ["Error", "'unexpected-argument'", -1.1],
@@ -1073,10 +1046,7 @@ canonical = [
 ]
 `;
 
-exports[`SQRT INVALID Sqrt 1`] = `
-box       = ["Sqrt", 2.5, 1.1]
-canonical = ["Sqrt", 2.5, ["Error", "'unexpected-argument'", 1.1]]
-`;
+exports[`SQRT INVALID Sqrt 1`] = `invalid   =["Sqrt", 2.5, ["Error", "'unexpected-argument'", 1.1]]`;
 
 exports[`SQRT √ of list 1`] = `[2,1,7.48331477354788277116,4.2426406871192851464]`;
 
@@ -1095,6 +1065,7 @@ N-mach    = 2x
 exports[`SQRT √(5/7) 1`] = `
 box       = ["Sqrt", ["Rational", 5, 7]]
 canonical = ["Multiply", ["Rational", 1, 7], ["Sqrt", 35]]
+simplify  = sqrt(35) / 7
 eval-auto = sqrt(35)/7
 eval-mach = sqrt(35)/7
 N-auto    = 0.845154254728516577511
@@ -1186,14 +1157,10 @@ exports[`SUBTRACT Subtract with multiple arguments 1`] = `-14.8`;
 
 exports[`SUBTRACT Subtract with single argument 1`] = `2.5`;
 
-exports[`Square INVALID Square 1`] = `
-box       = ["Square", 2.5, 1.1]
-canonical = ["Square", 2.5, ["Error", "'unexpected-argument'", 1.1]]
-`;
+exports[`Square INVALID Square 1`] = `invalid   =["Square", 2.5, ["Error", "'unexpected-argument'", 1.1]]`;
 
 exports[`Square INVALID Square 2`] = `
-box       = ["Square", 2.5, -1.1, 18.4]
-canonical = [
+invalid   =[
   "Square",
   2.5,
   ["Error", "'unexpected-argument'", -1.1],

@@ -1,5 +1,5 @@
 import { BoxedExpression } from './public';
-import { isRelationalOperator } from './utils';
+import { isInequality, isRelationalOperator } from './utils';
 import { Product, commonTerms } from '../symbolic/product';
 import { NumericValue } from '../numeric-value/public';
 import { canonicalMultiply } from '../library/arithmetic-multiply';
@@ -45,8 +45,13 @@ export function factor(expr: BoxedExpression): BoxedExpression {
   if (isRelationalOperator(h)) {
     const lhs = Product.from(expr.op1);
     const rhs = Product.from(expr.op2);
-    const common = commonTerms(lhs, rhs);
+    let common = commonTerms(lhs, rhs);
+
     if (!common.isOne) {
+      // For -x < 0, only divide by the absolute value of the common factor
+      // For an equation (-x = 0), divide by the common factor
+      if (isInequality(expr)) common = common.abs();
+
       lhs.div(common);
       rhs.div(common);
     }

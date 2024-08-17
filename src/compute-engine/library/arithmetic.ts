@@ -15,29 +15,12 @@ import {
   bigGamma,
   bigGammaln,
 } from '../numerics/special-functions';
-import {
-  chop,
-  factorial,
-  factorial2,
-  gcd,
-  lcm,
-  MACHINE_TOLERANCE,
-} from '../numerics/numeric';
+import { chop, factorial, factorial2, gcd, lcm } from '../numerics/numeric';
 import { rationalize } from '../numerics/rationals';
 import { IdentifierDefinitions } from '../public';
 import { bignumPreferred } from '../boxed-expression/utils';
-import {
-  domainAdd,
-  evalSummation,
-  canonicalSummation,
-  canonicalAdd,
-} from './arithmetic-add';
-import {
-  evalProduct,
-  canonicalProduct,
-  mul,
-  mulN,
-} from './arithmetic-multiply';
+import { domainAdd, canonicalAdd } from './arithmetic-add';
+import { mul, mulN } from './arithmetic-multiply';
 import { canonicalDivide } from './arithmetic-divide';
 import { apply, apply2, canonical } from '../symbolic/utils';
 import {
@@ -58,6 +41,7 @@ import { add, addN } from '../boxed-expression/terms';
 import { isPrime as isPrimeMachine, isPrimeBigint } from '../numerics/primes';
 import { fromDigits } from '../numerics/strings';
 import { addOrder } from '../boxed-expression/order';
+import { canonicalBigop, reduceBigOp } from './utils';
 
 // When considering processing an arithmetic expression, the following
 // are the core canonical arithmetic operations that should be considered:
@@ -147,8 +131,20 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
         sgn: (ce, ops) => {
           if (ops.some((x) => x.sgn === undefined)) return undefined;
           if (ops.every((x) => x.sgn === 0)) return 0;
-          if (ops.every((x) => x.sgn === 1)) return 1;
-          if (ops.every((x) => x.sgn === -1)) return -1;
+          if (
+            ops.every((x) => {
+              const s = x.sgn;
+              return typeof s === 'number' ? s >= 0 : false;
+            })
+          )
+            return 1;
+          if (
+            ops.every((x) => {
+              const s = x.sgn;
+              return typeof s === 'number' ? s <= 0 : false;
+            })
+          )
+            return 1;
           const v = addN(...ops.map((x) => x.N()));
           if (v.isPositive) return 1;
           if (v.isNegative) return -1;
@@ -231,7 +227,7 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
         result: 'Numbers',
 
         sgn: (ce, ops) => {
-          const [n, d] = [ops[0].sgn, ops[1].sgn];
+          const [n, d] = [ops[0]?.sgn, ops[1]?.sgn];
           if (n === undefined || d === undefined) return undefined;
           if (d === 0) return NaN;
           if (n === 0) return 0;
@@ -373,7 +369,7 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
         params: ['Numbers'],
         result: 'Numbers',
         sgn: (ce, ops) => {
-          const s = ops[0].sgn;
+          const s = ops[0]?.sgn;
           if (s === undefined || isNaN(s)) return undefined;
           if (s >= 0) return 1; // Gamma is positive for positive real numbers
           if (ops[0].isInteger) return NaN; // Gamma is not defined for negative integers
@@ -417,7 +413,7 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
         optParams: ['Numbers'],
         result: 'Numbers',
         sgn: (ce, ops) => {
-          const s = ops[0].sgn;
+          const s = ops[0]?.sgn;
           if (s === undefined) return undefined;
           if (s <= 0 || isNaN(s)) return NaN; // complex
           if (ops[0].isGreater(1)) return 1;
@@ -455,7 +451,7 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
         optParams: ['Numbers'],
         result: 'Numbers',
         sgn: (ce, ops) => {
-          const s = ops[0].sgn;
+          const s = ops[0]?.sgn;
           if (s === undefined || isNaN(s)) return undefined;
           if (s < 0) return undefined; // complex
           if (s === 0) return NaN;
@@ -552,7 +548,7 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
       signature: {
         domain: ['FunctionOf', 'Numbers', 'Numbers', 'Numbers'],
         sgn: (ce, ops) => {
-          const s = ops[1].sgn;
+          const s = ops[1]?.sgn;
           if (s === undefined || isNaN(s)) return undefined;
           if (s === 0) return NaN;
           if (ops[0].isNumberLiteral && ops[1].isNumberLiteral) {
@@ -631,7 +627,7 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
           return arg;
         },
         sgn: (ce, args) => {
-          const s = args[0].sgn;
+          const s = args[0]?.sgn;
           if (typeof s === 'number') return -s;
           return s;
         },
@@ -707,7 +703,7 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
           ['OptArg', 'Numbers'],
           'RationalNumbers',
         ],
-        sgn: (ce, ops) => ops[0].sgn,
+        sgn: (ce, ops) => ops[0]?.sgn,
         canonical: (ce, args) => {
           args = flatten(args);
 
@@ -811,7 +807,7 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
 
       signature: {
         domain: ['FunctionOf', 'Numbers', 'Integers'],
-        sgn: (ce, ops) => ops[0].sgn,
+        sgn: (ce, ops) => ops[0]?.sgn,
         evaluate: (ce, ops) => {
           const s = ops[0].sgn;
           if (s === 0) return ce.Zero;
@@ -871,7 +867,7 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
           return ops[0].sqrt();
         },
         sgn: (ce, ops) => {
-          const s = ops[0].sgn;
+          const s = ops[0]?.sgn;
           if (s === undefined) return undefined;
           if (isNaN(s)) return NaN;
           if (s === 0) return 0;
@@ -1167,7 +1163,7 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
           if (num !== undefined) return ce.number(num[0]);
           return ce._fn('Numerator', canonical(ce, ops));
         },
-        sgn: (ce, ops) => ops[0].sgn,
+        sgn: (ce, ops) => ops[0]?.sgn,
         evaluate: (ce, ops) => {
           if (ops.length === 0) return ce.function('Sequence', []);
           const op = ops[0];
@@ -1329,17 +1325,82 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
         domain: [
           'FunctionOf',
           'Anything',
-          ['OptArg', 'Tuples'],
+          ['VarArg', 'Tuples'],
           // ['Tuple', 'Symbols', ['OptArg', 'Integers'], ['OptArg', 'Integers']],
           // ],
           'Numbers',
         ],
         // codomain: (ce, args) => domainAdd(ce, args),
         // The 'body' and 'range' need to be interpreted by canonicalMultiplication(). Don't canonicalize them yet.
-        canonical: (ce, ops) => canonicalProduct(ce, ops[0], ops[1]),
-        sgn: (ce, ops) => evalProduct(ce, ops, 'N')?.sgn,
-        evaluate: (ce, ops) => evalProduct(ce, ops, 'evaluate'),
-        N: (ce, ops) => evalProduct(ce, ops, 'N'),
+        canonical: (ce, ops) => canonicalBigop('Product', ops[0], ops.slice(1)),
+        sgn: (ce, ops) => {
+          // Check if the body has a determined sign (i.e. is always positive,
+          // negative or 0)
+          const s = ops[0]?.sgn;
+          if (s === 0) return 0;
+          if (s === 1) return 1;
+          if (s === -1) return -1;
+          if (s !== undefined && isNaN(s)) return NaN;
+
+          // The sign could not be determined by just looking at the body.
+          // Look at each term
+
+          let countZero = 0;
+          let sign = 1;
+          let countNaN = 0;
+          let countInfinity = 0;
+          let countUndefined = 0;
+
+          // Go over each term, and count the signs of the terms
+          let total = reduceBigOp(
+            ops[0],
+            ops.slice(1),
+            (acc, x) => {
+              if (x.isInfinity) countInfinity++;
+              const s = x.sgn;
+              if (s === 0) countZero++;
+              else if (s === -1) sign = -sign;
+              else if (typeof s === 'number' && isNaN(s)) countNaN++;
+              else if (s === undefined) countUndefined++;
+              return acc + 1;
+            },
+            0
+          );
+          if (countUndefined > 0) return undefined;
+          if (countNaN > 0) return NaN;
+          if (countZero > 0) return countInfinity > 0 ? NaN : 0;
+          return sign > 0 ? 1 : -1;
+        },
+        evaluate: (ce, ops) => {
+          const fn = (acc, x) => {
+            x = x.evaluate();
+            if (!x.isNumberLiteral) return null;
+            return acc.mul(x.numericValue!);
+          };
+
+          const result = reduceBigOp(
+            ops[0],
+            ops.slice(1),
+            fn,
+            ce._numericValue(1)
+          );
+          return ce.number(result ?? NaN);
+        },
+        N: (ce, ops) => {
+          const fn = (acc, x) => {
+            x = x.N();
+            if (!x.isNumberLiteral) return null;
+            return acc.mul(x.numericValue!);
+          };
+
+          const result = reduceBigOp(
+            ops[0],
+            ops.slice(1),
+            fn,
+            ce._numericValue(1)
+          );
+          return ce.number(result ?? NaN);
+        },
       },
     },
 
@@ -1352,15 +1413,77 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
         domain: [
           'FunctionOf',
           ['Union', 'Collections', 'Functions'],
-          ['OptArg', 'Tuples'],
+          ['VarArg', 'Tuples'],
           // ['Tuple', 'Symbols', ['OptArg', 'Integers'], ['OptArg', 'Integers']],
           // ],
           'Numbers',
         ],
-        sgn: (ce, ops) => evalSummation(ce, ops, 'N')?.sgn,
-        canonical: (ce, ops) => canonicalSummation(ce, ops[0], ops[1]),
-        evaluate: (ce, ops) => evalSummation(ce, ops, 'evaluate'),
-        N: (ce, ops) => evalSummation(ce, ops, 'N'),
+        sgn: (ce, ops) => {
+          // Check if the body has a determined sign (i.e. is always positive,
+          // negative or 0)
+          const s = ops[0]?.sgn;
+          if (s === 0) return 0;
+          if (s === 1) return 1;
+          if (s === -1) return -1;
+          if (s !== undefined && isNaN(s)) return NaN;
+
+          // The sign could not be determined by just looking at the body.
+          // Look at each term
+
+          let countZero = 0;
+          let countPos = 0;
+          let countNeg = 0;
+          let countNaN = 0;
+          let countUndefined = 0;
+          // Go over each term, and count the signs of the terms
+          let total = reduceBigOp(
+            ops[0],
+            ops.slice(1),
+            (acc, x) => {
+              const s = x.sgn;
+              if (s === 0) countZero++;
+              else if (s === 1) countPos++;
+              else if (s === -1) countNeg++;
+              else if (typeof s === 'number' && isNaN(s)) countNaN++;
+              else countUndefined++;
+              return acc + 1;
+            },
+            0
+          );
+          if (countUndefined > 0) return undefined;
+          if (countNaN > 0) return NaN;
+          if (countZero === total) return 0;
+          if (countNeg + countZero === total) return -1;
+          if (countPos + countZero === total) return 1;
+          return undefined;
+        },
+        canonical: (ce, ops) => canonicalBigop('Sum', ops[0], ops.slice(1)),
+        evaluate: (ce, ops) =>
+          ce.number(
+            reduceBigOp(
+              ops[0],
+              ops.slice(1),
+              (acc, x) => {
+                x = x.evaluate();
+                if (!x.isNumberLiteral) return null;
+                return acc.add(x.numericValue!);
+              },
+              ce._numericValue(0)
+            ) ?? NaN
+          ),
+        N: (ce, ops) =>
+          ce.number(
+            reduceBigOp(
+              ops[0],
+              ops.slice(1),
+              (acc, x) => {
+                x = x.N();
+                if (!x.isNumberLiteral) return null;
+                return acc.add(x.numericValue!);
+              },
+              ce._numericValue(0)
+            ) ?? NaN
+          ),
       },
     },
   },

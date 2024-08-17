@@ -55,7 +55,7 @@ export function costFunction(expr: BoxedExpression): number {
   //
   // 2/ Literal Numeric Values
   //
-  if (expr.isZero) return 1;
+  if (expr.isNumberLiteral && expr.isZero) return 1;
 
   const num = expr.numericValue;
   if (num !== null) {
