@@ -254,7 +254,7 @@ export function radiansToAngle(
   return x;
 }
 
-const TRIG_FUNCTIONS: { [key: string]: boolean } = {
+const TRIGONOMETRIC_OPERATORS: { [key: string]: boolean } = {
   Sin: true,
   Cos: true,
   Tan: true,
@@ -284,7 +284,7 @@ const TRIG_FUNCTIONS: { [key: string]: boolean } = {
 
 export function isTrigonometricFunction(operator: any): boolean {
   if (!operator || typeof operator !== 'string') return false;
-  return operator in TRIG_FUNCTIONS;
+  return operator in TRIGONOMETRIC_OPERATORS;
 }
 
 export function evalTrig(

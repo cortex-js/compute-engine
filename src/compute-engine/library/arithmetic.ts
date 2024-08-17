@@ -45,7 +45,7 @@ import { canonicalBigop, reduceBigOp } from './utils';
 
 // When considering processing an arithmetic expression, the following
 // are the core canonical arithmetic operations that should be considered:
-export type CanonicalArithmeticFunctions =
+export type CanonicalArithmeticOperators =
   | 'Add'
   | 'Negate' // Distributed over mul/div/add
   | 'Multiply'
