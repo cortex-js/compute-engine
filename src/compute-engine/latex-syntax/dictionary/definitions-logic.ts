@@ -186,7 +186,7 @@ export const DEFINITIONS_LOGIC: LatexDictionary = [
       const index = parser.index;
 
       const modulus = parser.parseExpression({ ...terminator, minPrec: 219 });
-      if (modulus && operator(modulus) === 'Mod')
+      if (modulus !== null && operator(modulus) === 'Mod')
         return ['Congruent', lhs, rhs, missingIfEmpty(operand(modulus, 1))];
 
       parser.index = index;
@@ -373,7 +373,7 @@ function parseQuantifier(
     //
     parser.index = index;
     const condition = parser.parseExpression(terminator);
-    if (!condition) return null;
+    if (condition === null) return null;
 
     // Either a separator or a parenthesis
     parser.skipSpace();

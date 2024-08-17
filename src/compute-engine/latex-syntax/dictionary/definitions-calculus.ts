@@ -153,7 +153,7 @@ function parseIntegralBody(
 
   // If we didn't get a `\operatorname{d}x` or `dx` at the same level as the
   // expression, perhaps it was in a subexpression, e.g. `\frac{dx}{x}` or `3xdx`
-  if (fn && !found) return parseIntegralBodyExpression(fn);
+  if (fn !== null && !found) return parseIntegralBodyExpression(fn);
 
   const indexes = parseIndexes(parser, n);
   return [fn, indexes[0] ?? null];

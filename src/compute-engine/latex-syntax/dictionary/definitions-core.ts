@@ -619,39 +619,44 @@ export const DEFINITIONS_CORE: LatexDictionary = [
     name: 'Range',
     latexTrigger: ['.', '.'],
     kind: 'infix',
-    precedence: 10,
+    precedence: 800,
     parse: parseRange,
     serialize: (serializer: Serializer, expr: Expression): string => {
       const args = operands(expr);
       if (args.length === 0) return '';
       if (args.length === 1)
         return '1..' + serializer.serialize(operand(expr, 1));
+      // 1..2
       if (args.length === 2)
         return (
           serializer.wrap(operand(expr, 1), 10) +
           '..' +
           serializer.wrap(operand(expr, 2), 10)
         );
+      // 1..3..7
       if (args.length === 3) {
+        // Are step and start numeric values?
         const step = machineValue(operand(expr, 3));
         const start = machineValue(operand(expr, 1));
         if (step !== null && start !== null) {
           return (
             serializer.wrap(operand(expr, 1), 10) +
-            ',' +
+            '..' +
             serializer.wrap(start + step, 10) +
             '..' +
             serializer.wrap(operand(expr, 2), 10)
           );
         }
 
+        // We have arbitrary expressions for start (a) or step (b)...
+        // i.e. a..(a+b)..c
         return (
           serializer.wrap(operand(expr, 1), 10) +
-          ',' +
-          (serializer.wrap(operand(expr, 3), ADDITION_PRECEDENCE) +
+          '..(' +
+          (serializer.wrap(operand(expr, 1), ADDITION_PRECEDENCE) +
             '+' +
             serializer.wrap(operand(expr, 3), ADDITION_PRECEDENCE)) +
-          '..' +
+          ')..' +
           serializer.wrap(operand(expr, 2), 10)
         );
       }
@@ -1208,38 +1213,37 @@ function parseBrackets(
 
 /**
  * A range is a sequence of numbers, e.g. `1..10`.
- * Optionally, they may include a step, e.g. `1, 3..10`.
+ * Optionally, they may include a step, e.g. `1..3..10`.
  */
-function parseRange(parser: Parser, lhs: Expression): Expression | null {
-  if (!lhs) return null;
+function parseRange(parser: Parser, lhs: Expression | null): Expression | null {
+  if (lhs === null) return null;
 
-  // Is there a step implied? e.g. "1,3..10"
-  let start: Expression | null | undefined = null;
-  let second: Expression | null | undefined = null;
-  if (operator(lhs) === 'Sequence') {
-    if (nops(lhs) !== 2) return null;
-    start = operand(lhs, 1);
-    second = operand(lhs, 2);
-    if (second === null) return null;
-  } else start = operand(lhs, 1);
+  const second = parser.parseExpression({ minPrec: 270 });
+  // This was `1..`. Don't know what to do with it. Bail.
+  if (second === null) return null;
 
-  if (start === null || start === undefined) return null;
+  // Is there a `..` after the second expression?
+  if (parser.matchAll(['.', '.'])) {
+    // It's a range with a step, i.e. "1..3..10"
+    const end = parser.parseExpression({ minPrec: 270 });
+    // If we get `1..3..` we don't know what to do with it. Bail.
+    if (end === null) return null;
 
-  const end = parser.parseExpression({ minPrec: 0 });
-  if (!end) return null;
-
-  // Is there an implied step?
-  if (second) {
-    // If the step is a number, use it
+    // The step is the difference between the second and first values
+    // Are they both numbers?
+    const lhsValue = machineValue(lhs);
     const secondValue = machineValue(second);
-    const startValue = machineValue(start);
-    if (secondValue !== null && startValue !== null) {
-      return ['Range', start, end, secondValue - startValue];
+    if (lhsValue !== null && secondValue !== null) {
+      // If we get `2..2..3`, bail.
+      if (secondValue <= lhsValue) return null;
+      // If the step is 1, we don't need to include it
+      if (secondValue - lhsValue === 1) return ['Range', lhs, end];
+      return ['Range', lhs, end, secondValue - lhsValue];
     }
-    return ['Range', start, end, ['Subtract', second, start]];
+    return ['Range', lhs, end, ['Subtract', second, lhs]];
   }
 
-  return ['Range', start, end];
+  return ['Range', lhs, second];
 }
 
 export const DELIMITERS_SHORTHAND = {
