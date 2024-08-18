@@ -10,7 +10,8 @@ import {
   BoxedDomain,
 } from '../public';
 import { DEFAULT_COMPLEXITY } from './order';
-import { BoxedExpression } from './public';
+import { BoxedExpression, NumericFlags } from './public';
+import { normalizeFlags } from './utils.js';
 
 export class _BoxedFunctionDefinition implements BoxedFunctionDefinition {
   engine: IComputeEngine;
@@ -35,6 +36,8 @@ export class _BoxedFunctionDefinition implements BoxedFunctionDefinition {
   dynamic: boolean;
 
   signature: BoxedFunctionSignature;
+
+  flags?: Partial<NumericFlags>;
 
   type: 'function';
 
@@ -276,6 +279,8 @@ export class _BoxedFunctionDefinition implements BoxedFunctionDefinition {
         result: ce.Anything,
       };
     }
+
+    this.flags = def.flags ? normalizeFlags(def.flags) : undefined;
   }
   reset(): void {
     return;

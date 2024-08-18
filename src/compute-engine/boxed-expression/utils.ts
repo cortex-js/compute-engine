@@ -1,6 +1,6 @@
 import { joinLatex } from '../latex-syntax/tokenizer';
 import { DEFINITIONS_INEQUALITIES } from '../latex-syntax/dictionary/definitions-relational-operators';
-import type { BoxedExpression, IComputeEngine } from './public';
+import type { BoxedExpression, IComputeEngine, NumericFlags } from './public';
 import { MACHINE_PRECISION } from '../numerics/numeric';
 
 export function isBoxedExpression(x: unknown): x is BoxedExpression {
@@ -144,4 +144,102 @@ export function getImaginaryFactor(
   }
 
   return undefined;
+}
+
+export function normalizeFlags(flags: Partial<NumericFlags>): NumericFlags {
+  const result = { ...flags };
+
+  if (flags.zero || flags.one || flags.negativeOne) {
+    result.zero = flags.zero && !flags.one && !flags.negativeOne;
+    result.notZero = !flags.zero || flags.one || flags.negativeOne;
+    result.one = flags.one && !flags.zero && !flags.negativeOne;
+    result.negativeOne = flags.negativeOne && !flags.zero && !flags.one;
+    result.infinity = false;
+    result.NaN = false;
+    result.finite = true;
+
+    result.integer = true;
+    result.finite = true;
+    result.infinity = false;
+    result.NaN = false;
+
+    result.even = flags.one;
+    result.odd = !flags.one;
+  }
+
+  if (result.zero) {
+    result.positive = false;
+    result.negative = false;
+    result.nonPositive = true;
+    result.nonNegative = true;
+  }
+  if (result.notZero === true) {
+    if (!result.imaginary) result.real = true;
+    result.zero = false;
+  }
+  if (result.one) {
+    result.positive = true;
+  }
+  if (result.negativeOne) {
+    result.nonPositive = true;
+  }
+
+  if (result.positive || result.nonNegative) {
+    result.negativeOne = false;
+  }
+  if (result.positive) {
+    result.nonPositive = false;
+    result.negative = false;
+    result.nonNegative = true;
+  } else if (result.nonPositive) {
+    result.positive = false;
+    result.negative = result.notZero;
+    result.nonNegative = !result.zero;
+  } else if (result.negative) {
+    result.positive = false;
+    result.nonPositive = result.notZero;
+    result.nonNegative = false;
+  } else if (result.nonNegative) {
+    result.positive = result.notZero;
+    result.nonPositive = !result.zero;
+    result.negative = false;
+  }
+
+  // Positive or negative numbers are real (not imaginary)
+  if (
+    result.positive ||
+    result.negative ||
+    result.nonPositive ||
+    result.nonNegative
+  ) {
+    result.number = true;
+    if (result.finite) result.real = true;
+    // All non-imaginary numbers are complex
+    else if (!result.finite) result.complex = true; // All non-imaginary numbers are complex
+
+    result.imaginary = false;
+  }
+
+  if (result.finite) {
+    result.number = true;
+    result.complex = true;
+    result.infinity = false;
+    result.NaN = false;
+  }
+
+  if (result.infinity) {
+    result.finite = false;
+    result.NaN = false;
+  }
+
+  if (flags.even) result.odd = false;
+  if (flags.odd) result.even = false;
+
+  // Adjust domain flags
+  if (result.integer) result.rational = true;
+  if (result.real) result.complex = true;
+  if (result.imaginary) result.complex = true;
+  if (result.complex) result.number = true;
+
+  return result as NumericFlags;
 }

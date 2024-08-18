@@ -1550,6 +1550,8 @@ export type BoxedFunctionDefinition = BoxedBaseDefinition &
 
     signature: BoxedFunctionSignature;
 
+    flags?: Partial<NumericFlags>;
+
     type: 'function';
   };
 
@@ -2562,6 +2564,8 @@ export type FunctionDefinition = BaseDefinition &
     hold?: Hold;
 
     signature: FunctionSignature;
+
+    flags?: Partial<NumericFlags>;
   };
 
 /**

@@ -108,6 +108,11 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
       threadable: true,
       idempotent: true,
       complexity: 1200,
+      flags: {
+        negative: false,
+        nonNegative: true,
+        negativeOne: false,
+      },
       signature: {
         domain: ['FunctionOf', 'Numbers', 'NonNegativeNumbers'],
         sgn: (ce, ops) =>

@@ -439,6 +439,11 @@ export class BoxedFunction extends _BoxedExpression {
   get sgn(): -1 | 0 | 1 | undefined | typeof NaN {
     if (this._sgn !== null) return this._sgn;
 
+    // Check flags in priority
+    if (this._def?.flags?.zero) return 0;
+    if (this._def?.flags?.positive) return 1;
+    if (this._def?.flags?.negative) return -1;
+
     // @todo: Could also cache non-constant values, but this
     // would require keeping track of the state of the compute engine
     // (maybe with a version number that would get incremented when
@@ -460,18 +465,27 @@ export class BoxedFunction extends _BoxedExpression {
   }
 
   get isZero(): boolean | undefined {
+    // Use a flag in priority
+    if (this._def?.flags?.zero) return true;
+
     const s = this.sgn;
     if (s === undefined) return undefined;
     return s === 0;
   }
 
   get isNotZero(): boolean | undefined {
+    // Use a flag in priority
+    if (this._def?.flags?.notZero) return true;
+
     const s = this.sgn;
     if (s === undefined) return undefined;
     return s !== 0;
   }
 
   get isOne(): boolean | undefined {
+    // Use a flag in priority
+    if (this._def?.flags?.notZero) return true;
+
     const s = this.sgn;
     if (s === undefined) return undefined;
     if (isNaN(s) || s <= 0) return false;
@@ -479,6 +493,9 @@ export class BoxedFunction extends _BoxedExpression {
   }
 
   get isNegativeOne(): boolean | undefined {
+    // Use a flag in priority
+    if (this._def?.flags?.negativeOne) return true;
+
     const s = this.sgn;
     if (s === undefined) return undefined;
     if (isNaN(s) || s >= 0) return false;
@@ -487,6 +504,9 @@ export class BoxedFunction extends _BoxedExpression {
 
   // x > 0
   get isPositive(): boolean | undefined {
+    // Use a flag in priority
+    if (this._def?.flags?.positive) return true;
+
     const s = this.sgn;
     if (s === undefined) return undefined;
     return !isNaN(s) && s > 0;
@@ -494,6 +514,9 @@ export class BoxedFunction extends _BoxedExpression {
 
   // x >= 0
   get isNonNegative(): boolean | undefined {
+    // Use a flag in priority
+    if (this._def?.flags?.nonNegative) return true;
+
     const s = this.sgn;
     if (s === undefined) return undefined;
     return !isNaN(s) && s >= 0;
@@ -501,6 +524,9 @@ export class BoxedFunction extends _BoxedExpression {
 
   // x < 0
   get isNegative(): boolean | undefined {
+    // Use a flag in priority
+    if (this._def?.flags?.negative) return true;
+
     const s = this.sgn;
     if (s === undefined) return undefined;
     return !isNaN(s) && s < 0;
@@ -508,6 +534,9 @@ export class BoxedFunction extends _BoxedExpression {
 
   // x <= 0
   get isNonPositive(): boolean | undefined {
+    // Use a flag in priority
+    if (this._def?.flags?.nonPositive) return true;
+
     const s = this.sgn;
     if (s === undefined) return undefined;
     return !isNaN(s) && s <= 0;
@@ -894,21 +923,34 @@ export class BoxedFunction extends _BoxedExpression {
   }
 
   get isNumber(): boolean | undefined {
+    if (this._def?.flags?.number) return true;
+
     return this.domain?.isCompatible('Numbers');
   }
   get isInteger(): boolean | undefined {
+    // Use a flag in priority
+    if (this._def?.flags?.integer) return true;
+
     return this.domain?.isCompatible('Integers');
   }
   get isRational(): boolean | undefined {
+    if (this._def?.flags?.rational) return true;
+
     return this.domain?.isCompatible('RationalNumbers');
   }
   get isReal(): boolean | undefined {
+    if (this._def?.flags?.real) return true;
+
     return this.domain?.isCompatible('RealNumbers');
   }
   get isComplex(): boolean | undefined {
+    if (this._def?.flags?.complex) return true;
+
     return this.domain?.isCompatible('ComplexNumbers');
   }
   get isImaginary(): boolean | undefined {
+    if (this._def?.flags?.imaginary) return true;
+
     return this.domain?.isCompatible('ImaginaryNumbers');
   }
 
