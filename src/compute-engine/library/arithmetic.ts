@@ -111,7 +111,6 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
       flags: {
         negative: false,
         nonNegative: true,
-        negativeOne: false,
       },
       signature: {
         domain: ['FunctionOf', 'Numbers', 'NonNegativeNumbers'],
