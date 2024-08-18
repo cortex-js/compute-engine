@@ -466,7 +466,7 @@ export class BoxedFunction extends _BoxedExpression {
 
   get isZero(): boolean | undefined {
     // Use a flag in priority
-    if (this._def?.flags?.zero) return true;
+    if (this._def?.flags?.zero !== undefined) return this._def.flags.zero;
 
     const s = this.sgn;
     if (s === undefined) return undefined;
@@ -475,7 +475,7 @@ export class BoxedFunction extends _BoxedExpression {
 
   get isNotZero(): boolean | undefined {
     // Use a flag in priority
-    if (this._def?.flags?.notZero) return true;
+    if (this._def?.flags?.notZero !== undefined) return this._def.flags.notZero;
 
     const s = this.sgn;
     if (s === undefined) return undefined;
@@ -484,7 +484,7 @@ export class BoxedFunction extends _BoxedExpression {
 
   get isOne(): boolean | undefined {
     // Use a flag in priority
-    if (this._def?.flags?.notZero) return true;
+    if (this._def?.flags?.notZero !== undefined) return this._def.flags.notZero;
 
     const s = this.sgn;
     if (s === undefined) return undefined;
@@ -494,7 +494,8 @@ export class BoxedFunction extends _BoxedExpression {
 
   get isNegativeOne(): boolean | undefined {
     // Use a flag in priority
-    if (this._def?.flags?.negativeOne) return true;
+    if (this._def?.flags?.negativeOne !== undefined)
+      return this._def.flags.negativeOne;
 
     const s = this.sgn;
     if (s === undefined) return undefined;
@@ -505,7 +506,8 @@ export class BoxedFunction extends _BoxedExpression {
   // x > 0
   get isPositive(): boolean | undefined {
     // Use a flag in priority
-    if (this._def?.flags?.positive) return true;
+    if (this._def?.flags?.positive !== undefined)
+      return this._def.flags.positive;
 
     const s = this.sgn;
     if (s === undefined) return undefined;
@@ -515,7 +517,8 @@ export class BoxedFunction extends _BoxedExpression {
   // x >= 0
   get isNonNegative(): boolean | undefined {
     // Use a flag in priority
-    if (this._def?.flags?.nonNegative) return true;
+    if (this._def?.flags?.nonNegative !== undefined)
+      return this._def.flags.nonNegative;
 
     const s = this.sgn;
     if (s === undefined) return undefined;
@@ -525,7 +528,8 @@ export class BoxedFunction extends _BoxedExpression {
   // x < 0
   get isNegative(): boolean | undefined {
     // Use a flag in priority
-    if (this._def?.flags?.negative) return true;
+    if (this._def?.flags?.negative !== undefined)
+      return this._def.flags.negative;
 
     const s = this.sgn;
     if (s === undefined) return undefined;
@@ -535,7 +539,8 @@ export class BoxedFunction extends _BoxedExpression {
   // x <= 0
   get isNonPositive(): boolean | undefined {
     // Use a flag in priority
-    if (this._def?.flags?.nonPositive) return true;
+    if (this._def?.flags?.nonPositive !== undefined)
+      return this._def.flags.nonPositive;
 
     const s = this.sgn;
     if (s === undefined) return undefined;
@@ -923,33 +928,37 @@ export class BoxedFunction extends _BoxedExpression {
   }
 
   get isNumber(): boolean | undefined {
-    if (this._def?.flags?.number) return true;
+    if (this._def?.flags?.number !== undefined) return this._def.flags.number;
+    this._def?.flags?.notZero;
 
     return this.domain?.isCompatible('Numbers');
   }
   get isInteger(): boolean | undefined {
     // Use a flag in priority
-    if (this._def?.flags?.integer) return true;
+    if (this._def?.flags?.integer !== undefined) return this._def.flags.integer;
 
     return this.domain?.isCompatible('Integers');
   }
   get isRational(): boolean | undefined {
-    if (this._def?.flags?.rational) return true;
+    if (this._def?.flags?.rational !== undefined)
+      return this._def.flags.rational;
 
     return this.domain?.isCompatible('RationalNumbers');
   }
   get isReal(): boolean | undefined {
-    if (this._def?.flags?.real) return true;
+    if (this._def?.flags?.real !== undefined) return this._def.flags.real;
 
     return this.domain?.isCompatible('RealNumbers');
   }
   get isComplex(): boolean | undefined {
-    if (this._def?.flags?.complex) return true;
+    if (this._def?.flags?.complex !== undefined) return this._def.flags.complex;
+    this._def?.flags?.notZero;
 
     return this.domain?.isCompatible('ComplexNumbers');
   }
   get isImaginary(): boolean | undefined {
-    if (this._def?.flags?.imaginary) return true;
+    if (this._def?.flags?.imaginary !== undefined)
+      return this._def.flags.imaginary;
 
     return this.domain?.isCompatible('ImaginaryNumbers');
   }
@@ -976,6 +985,11 @@ export class BoxedFunction extends _BoxedExpression {
 
   get type(): Type {
     if (!this.isValid) return 'error';
+    if (this.isInteger) return 'integer';
+    if (this.isRational) return 'rational';
+    if (this.isReal) return 'real';
+    if (this.isComplex) return 'complex';
+
     return 'expression';
   }
 
