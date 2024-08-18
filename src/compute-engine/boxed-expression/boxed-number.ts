@@ -335,7 +335,9 @@ export class BoxedNumber extends _BoxedExpression {
   ln(semiBase?: SemiBoxedExpression): BoxedExpression {
     const base = semiBase ? this.engine.box(semiBase) : undefined;
     if (!this.isCanonical) return this.canonical.ln(base);
-    if (this.isZero) return this.engine.NaN;
+
+    // Mathematica returns `Log[0]` as `-∞`
+    if (this.isZero) return this.engine.NegativeInfinity;
 
     if (base && this.isEqual(base)) return this.engine.One;
     if (

@@ -440,10 +440,14 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
           return apply(
             ops[0],
             (x) =>
-              x === 0 ? NaN : x >= 0 ? Math.log(x) : engine.complex(x).log(),
+              x === 0
+                ? -Infinity
+                : x >= 0
+                  ? Math.log(x)
+                  : engine.complex(x).log(),
             (x) =>
               x.isZero()
-                ? NaN
+                ? -Infinity
                 : !x.isNeg()
                   ? x.ln()
                   : engine.complex(x.toNumber()).log(),
@@ -483,13 +487,13 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
               ops[0],
               (x) =>
                 x === 0
-                  ? NaN
+                  ? -Infinity
                   : x >= 0
                     ? Math.log10(x)
                     : ce.complex(x).log().div(Math.LN10),
               (x) =>
                 x.isZero()
-                  ? NaN
+                  ? -Infinity
                   : !x.isNeg()
                     ? Decimal.log10(x)
                     : ce.complex(x.toNumber()).log().div(Math.LN10),
@@ -516,16 +520,6 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
         params: ['Numbers'],
         result: 'Numbers',
         canonical: (ce, args) => args[0].ln(2),
-        // N: (ce, ops) =>
-        //   apply(
-        //     ops[0],
-        //     (x) => (x >= 0 ? Math.log2(x) : ce.complex(x).log().div(Math.LN2)),
-        //     (x) =>
-        //       x.isNeg()
-        //         ? Decimal.log10(x)
-        //         : ce.complex(x.toNumber()).log().div(Math.LN2),
-        //     (z) => z.log().div(Math.LN2)
-        //   ),
       },
     },
 
@@ -990,7 +984,7 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
       domain: 'AlgebraicNumbers',
       wikidata: 'Q41690',
       constant: true,
-      holdUntil: 'simplify',
+      holdUntil: 'N',
       value: ['Divide', ['Add', 1, ['Sqrt', 5]], 2],
     },
     CatalanConstant: {

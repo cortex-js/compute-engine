@@ -349,6 +349,10 @@ export class BoxedSymbol extends _BoxedExpression {
   ln(semiBase?: SemiBoxedExpression): BoxedExpression {
     const base = semiBase ? this.engine.box(semiBase) : undefined;
     if (!this.isCanonical) return this.canonical.ln(base);
+
+    // Mathematica returns `Log[0]` as `-∞`
+    if (this.isZero) return this.engine.NegativeInfinity;
+
     if (
       (!base || base.symbol === 'ExponentialE') &&
       this.symbol === 'ExponentialE'
@@ -814,26 +818,13 @@ export class BoxedSymbol extends _BoxedExpression {
   }
 
   simplify(options?: Partial<SimplifyOptions>): BoxedExpression {
-    // If allowed, replace this symbol with its value/definition.
-    // In some cases this may allow for some additional simplifications
-    // (e.g. `GoldenRatio`).
-    const def = this.symbolDefinition;
-    if (
-      (options?.applyDefaultSimplifications ?? true) &&
-      def?.holdUntil === 'simplify' &&
-      def.value
-    )
-      return def.value.simplify(options);
-
-    // By default, there is no simplification of symbols,
-    // however if a custom set of rules is provided, apply them
+    // If there are no rules, return the symbol
     if (!options?.rules) return this;
 
     // We use the structural form to avoid infinite recursion, by
     // detecting in `simplify()` that the expression should have rules applied
     // to it and avoid calling `expr.simplify()`.
-    const results = simplify(this.structural, options);
-    return results.at(-1)?.value ?? this;
+    return simplify(this.structural, options).at(-1)?.value ?? this;
   }
 
   evaluate(options?: EvaluateOptions): BoxedExpression {
@@ -841,13 +832,12 @@ export class BoxedSymbol extends _BoxedExpression {
     // console.log('symbol evaluate', this.toString());
     const def = this.symbolDefinition;
     if (def) {
-      if (options?.numericApproximation) {
-        if (def.holdUntil === 'never') return this;
-        return def.value?.N() ?? this;
-      }
-      if (def.holdUntil === 'simplify' || def.holdUntil === 'evaluate') {
+      if (def.holdUntil === 'never') return this;
+
+      if (options?.numericApproximation) return def.value?.N() ?? this;
+
+      if (def.holdUntil === 'evaluate')
         return def.value?.evaluate(options) ?? this;
-      }
     }
     return this;
   }

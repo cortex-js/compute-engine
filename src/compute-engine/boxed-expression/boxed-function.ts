@@ -811,6 +811,10 @@ export class BoxedFunction extends _BoxedExpression {
   ln(semiBase?: SemiBoxedExpression): BoxedExpression {
     const base = semiBase ? this.engine.box(semiBase) : undefined;
     if (!this.isCanonical) return this.canonical.ln(base);
+
+    // Mathematica returns `Log[0]` as `-∞`
+    if (this.isZero) return this.engine.NegativeInfinity;
+
     if (this.operator === 'Exp') return this.op1;
     if (base && this.isEqual(base)) return this.engine.One;
     if (!base && this.isEqual(this.engine.E)) return this.engine.One;
@@ -1009,9 +1013,7 @@ export class BoxedFunction extends _BoxedExpression {
       });
     }
 
-    const results = simplify(expr, options);
-    if (results.length === 0) return expr;
-    return results[results.length - 1].value;
+    return simplify(expr, options).at(-1)?.value ?? expr;
   }
 
   evaluate(options?: EvaluateOptions): BoxedExpression {
