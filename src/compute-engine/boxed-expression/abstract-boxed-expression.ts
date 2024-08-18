@@ -684,7 +684,7 @@ export abstract class _BoxedExpression implements BoxedExpression {
   }
 
   N(): BoxedExpression {
-    return this.evaluate({ numericMode: true });
+    return this.evaluate({ numericApproximation: true });
   }
 
   compile(
@@ -723,7 +723,7 @@ function getFreeVariables(expr: BoxedExpression, result: Set<string>): void {
     if (def && def.value !== undefined) return;
 
     const fnDef = expr.engine.lookupFunction(expr.symbol);
-    if (fnDef && (fnDef.signature.evaluate || fnDef.signature.N)) return;
+    if (fnDef && fnDef.signature.evaluate) return;
 
     result.add(expr.symbol);
     return;
@@ -757,7 +757,7 @@ function getUnknowns(expr: BoxedExpression, result: Set<string>): void {
     if (def && def.value !== undefined) return;
 
     const fnDef = expr.engine.lookupFunction(s);
-    if (fnDef && (fnDef.signature.evaluate || fnDef.signature.N)) return;
+    if (fnDef && fnDef.signature.evaluate) return;
 
     result.add(s);
     return;

@@ -1520,12 +1520,8 @@ export type BoxedFunctionSignature = {
     args: ReadonlyArray<BoxedExpression>
   ) => BoxedExpression | null;
   evaluate?: (
-    ce: IComputeEngine,
-    args: ReadonlyArray<BoxedExpression>
-  ) => BoxedExpression | undefined;
-  N?: (
-    ce: IComputeEngine,
-    args: ReadonlyArray<BoxedExpression>
+    args: ReadonlyArray<BoxedExpression>,
+    options: EvaluateOptions & { engine: IComputeEngine }
   ) => BoxedExpression | undefined;
   evalDimension?: (
     ce: IComputeEngine,
@@ -1914,7 +1910,7 @@ export type SimplifyOptions = {
  * @category Boxed Expression
  */
 export type EvaluateOptions = {
-  numericMode?: boolean; // Default to false
+  numericApproximation?: boolean; // Default to false
 };
 
 /**
@@ -1968,7 +1964,10 @@ export type AssignValue =
   | Complex
   | LatexString
   | SemiBoxedExpression
-  | ((ce: IComputeEngine, args: BoxedExpression[]) => BoxedExpression)
+  | ((
+      args: BoxedExpression[],
+      options: EvaluateOptions & { engine: IComputeEngine }
+    ) => BoxedExpression)
   | undefined;
 
 /** @internal */
@@ -2663,16 +2662,14 @@ export type FunctionSignature = {
    *
    * It is not necessary to further simplify or evaluate the arguments.
    *
-   * If performing numerical calculations, if all the arguments are exact,
-   * return an exact expression. If any of the arguments is not exact, that is
-   * if it is a literal decimal (non-integer) number, return an approximation.
-   * In this case, the value may be the same as `expr.N()`.
+   * If performing numerical calculations and `options.numericalApproximation`
+   * is `false` return an exact numeric value, for example return a rational
+   * number or a square root, rather than a floating point approximation.
+   * Use `ce.number()` to create the numeric value.
    *
-   * When doing an exact calculation:
+   * When `numericalApproximation` is `false`, return a floating point number:
    * - do not reduce rational numbers to decimal (floating point approximation)
-   * - do not down convert bignums to machine numbers
    * - do not reduce square roots of rational numbers
-   * - do not reduce constants with a `holdUntil` attribute of `"N"`
    *
    * If the expression cannot be evaluated, due to the values, domains, or
    * assumptions about its arguments, for example, return `undefined` or
@@ -2681,38 +2678,9 @@ export type FunctionSignature = {
   evaluate?:
     | SemiBoxedExpression
     | ((
-        ce: IComputeEngine,
-        args: ReadonlyArray<BoxedExpression>
+        args: ReadonlyArray<BoxedExpression>,
+        options: EvaluateOptions & { engine: IComputeEngine }
       ) => BoxedExpression | undefined);
-
-  /**
-   * Evaluate numerically a function expression.
-   *
-   * The arguments `args` have been simplified and evaluated, numerically
-   * if possible, except the arguments to which a `hold` apply.
-   *
-   * The arguments may be a combination of numbers, symbolic
-   * expressions and other expressions.
-   *
-   * Perform as many calculations as possible, and return the result.
-   *
-   * Return `undefined` if there isn't enough information to perform
-   * the evaluation, for example one of the arguments is a symbol with
-   * no value. If the handler returns `undefined`, symbolic evaluation of
-   * the expression will be returned instead to the caller.
-   *
-   * Return `NaN` if there is enough information to  perform the
-   * evaluation, but a literal argument is out of range or
-   * not of the expected type.
-   *
-   * You may perform any necessary computations, including approximate
-   * calculations on floating point numbers.
-   *
-   */
-  N?: (
-    ce: IComputeEngine,
-    args: ReadonlyArray<BoxedExpression>
-  ) => BoxedExpression | undefined;
 
   /** Dimensional analysis
    * @experimental

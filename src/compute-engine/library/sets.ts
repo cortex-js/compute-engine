@@ -35,7 +35,7 @@ export const SETS_LIBRARY: IdentifierDefinitions = {
           return ce._fn('Element', [args[0], ce.domain(args[1])]);
         return ce._fn('Element', args);
       },
-      evaluate: (ce, args) => evaluateElement(ce, args),
+      evaluate: (args, options) => evaluateElement(args, options),
     },
   },
   NotElement: {
@@ -185,8 +185,8 @@ function subsetEqual(
 }
 
 function union(
-  ce: IComputeEngine,
-  ops: ReadonlyArray<BoxedExpression>
+  ops: ReadonlyArray<BoxedExpression>,
+  { engine: ce }: { engine: IComputeEngine }
 ): BoxedExpression {
   const elements: BoxedExpression[] = [];
   for (const op of ops) {
@@ -205,8 +205,8 @@ function union(
 }
 
 function intersection(
-  ce: IComputeEngine,
-  ops: ReadonlyArray<BoxedExpression>
+  ops: ReadonlyArray<BoxedExpression>,
+  { engine: ce }: { engine: IComputeEngine }
 ): BoxedExpression {
   let elements: BoxedExpression[] = [...(ops[0].ops ?? [])];
 
@@ -227,21 +227,21 @@ function intersection(
 }
 
 function setMinus(
-  ce: IComputeEngine,
-  _ops: BoxedExpression[]
+  _ops: BoxedExpression[],
+  { engine: ce }: { engine: IComputeEngine }
 ): BoxedExpression {
   return ce.symbol('EmptySet');
 }
 function cartesianProduct(
-  ce: IComputeEngine,
-  _ops: BoxedExpression[]
+  _ops: BoxedExpression[],
+  { engine: ce }: { engine: IComputeEngine }
 ): BoxedExpression {
   return ce.symbol('EmptySet');
 }
 
 function evaluateElement(
-  ce: IComputeEngine,
-  ops: ReadonlyArray<BoxedExpression>
+  ops: ReadonlyArray<BoxedExpression>,
+  { engine: ce }: { engine: IComputeEngine }
 ): BoxedExpression {
   console.assert(ops.length === 2);
   const [lhs, rhs] = ops;

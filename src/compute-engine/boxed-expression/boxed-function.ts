@@ -963,7 +963,10 @@ export class BoxedFunction extends _BoxedExpression {
     // 1/ Use the canonical form
     //
     if (!this.isValid) return this;
-    if (options?.numericMode) {
+
+    options ??= { numericApproximation: false };
+
+    if (options.numericApproximation) {
       const h = this.operator;
 
       //
@@ -1033,14 +1036,12 @@ export class BoxedFunction extends _BoxedExpression {
     let result: BoxedExpression | undefined | null = undefined;
 
     //
-    // 5/ Call the `evaluate` or `N` handler
+    // 5/ Call the `evaluate` handler
     //
     const sig = def?.signature;
     if (sig) {
-      const numericMode = options?.numericMode ?? false;
       const context = this.engine.swapScope(this.scope);
-      if (numericMode && sig.N) result = sig.N!(this.engine, tail);
-      if (!result && sig.evaluate) result = sig.evaluate!(this.engine, tail);
+      result = sig.evaluate?.(tail, { ...options, engine: this.engine });
       this.engine.swapScope(context);
     }
 
@@ -1048,7 +1049,7 @@ export class BoxedFunction extends _BoxedExpression {
   }
 
   N(): BoxedExpression {
-    return this.evaluate({ numericMode: true });
+    return this.evaluate({ numericApproximation: true });
   }
 
   solve(

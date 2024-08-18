@@ -102,7 +102,7 @@ volumes
           ['OptArg', 'Numbers'], // The order of the derivative
           'Functions',
         ],
-        evaluate: (ce, ops) => {
+        evaluate: (ops) => {
           // Is it a function name, i.e. ["Derivative", "Sin"]?
           const op = ops[0].evaluate();
           const degree = Math.floor(ops[1]?.N().re ?? 1);
@@ -156,7 +156,8 @@ volumes
           ce.popScope();
           return result;
         },
-        evaluate: (ce, ops) => {
+        evaluate: (ops, { engine }) => {
+          const ce = engine;
           let f: BoxedExpression | undefined = ops[0].canonical;
           const context = ce.swapScope(f.scope);
           f = f.evaluate();
@@ -184,12 +185,12 @@ volumes
       threadable: false,
       signature: {
         domain: ['FunctionOf', 'Anything', 'Numbers', 'Functions'],
-        N: (ce, ops) => {
+        evaluate: (ops, { engine }) => {
           const x = ops[1]?.value;
           if (typeof x !== 'number') return undefined;
 
-          const f = applicableN1(ce.box(ops[0]));
-          return ce.number(centeredDiff8thOrder(f, x));
+          const f = applicableN1(engine.box(ops[0]));
+          return engine.number(centeredDiff8thOrder(f, x));
         },
       },
     },
@@ -266,21 +267,21 @@ volumes
         domain: ['FunctionOf', 'Functions', 'Numbers', 'Numbers', 'Numbers'],
         params: ['Functions', 'Numbers', 'Numbers'],
         restParam: 'Numbers',
-        evaluate: (ce, ops) => {
+        evaluate: (ops, { engine }) => {
           // Switch to machine precision
-          const precision = ce.precision;
-          ce.precision = 'machine';
-          const wasStrict = ce.strict;
-          ce.strict = false;
+          const precision = engine.precision;
+          engine.precision = 'machine';
+          const wasStrict = engine.strict;
+          engine.strict = false;
 
           const [a, b] = ops.slice(1).map((op) => op.value);
           let result: BoxedExpression | undefined = undefined;
           if (typeof a === 'number' && typeof b === 'number') {
             const f = applicableN1(ops[0]);
-            result = ce.number(monteCarloEstimate(f, a, b));
+            result = engine.number(monteCarloEstimate(f, a, b));
           }
-          ce.precision = precision;
-          ce.strict = wasStrict;
+          engine.precision = precision;
+          engine.strict = wasStrict;
           return result;
         },
       },
@@ -302,7 +303,7 @@ volumes
           ['OptArg', 'Numbers'],
           'Numbers',
         ],
-        N: (ce, ops) => {
+        evaluate: (ops, { engine: ce }) => {
           const [f, x, dir] = ops;
           const target = x.N().re ?? NaN;
           if (!isFinite(target)) return undefined;
@@ -333,15 +334,14 @@ volumes
           ['OptArg', 'Numbers'],
           'Numbers',
         ],
-        evaluate: (ce, ops) => {
-          const [f, x, dir] = ops;
+        evaluate: ([f, x, dir], { engine }) => {
           const target = x.N().re ?? NaN;
           if (Number.isNaN(target)) return undefined;
           const fn = applicable(f);
-          return ce.number(
+          return engine.number(
             limit(
               (x) => {
-                const y = fn([ce.number(x)])?.value;
+                const y = fn([engine.number(x)])?.value;
                 return typeof y === 'number' ? y : Number.NaN;
               },
               target,

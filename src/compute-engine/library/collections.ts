@@ -312,9 +312,9 @@ export const COLLECTIONS_LIBRARY: IdentifierDefinitions = {
     threadable: true,
     signature: {
       domain: ['FunctionOf', ['OptArg', 'Anything'], 'Strings'],
-      evaluate: (ce, ops) => {
-        if (ops.length === 0) return ce.string('');
-        return ce.string(ops.map((x) => x.string ?? x.toString()).join(''));
+      evaluate: (ops, { engine }) => {
+        if (ops.length === 0) return engine.string('');
+        return engine.string(ops.map((x) => x.string ?? x.toString()).join(''));
       },
     },
   },
@@ -327,13 +327,13 @@ export const COLLECTIONS_LIBRARY: IdentifierDefinitions = {
     complexity: 8200,
     signature: {
       domain: ['FunctionOf', 'Values', 'Numbers'],
-      evaluate: (ce, ops) => {
+      evaluate: ([x], { engine }) => {
         // @todo: could have fast path for List.
-        const def = ops[0].functionDefinition;
-        if (def?.size) return ce.number(def.size(ops[0]));
-        const s = ops[0].string;
-        if (s !== null) return ce.number(s.length);
-        return ce.Zero;
+        const def = x.functionDefinition;
+        if (def?.size) return engine.number(def.size(x));
+        const s = x.string;
+        if (s !== null) return engine.number(s.length);
+        return engine.Zero;
       },
       sgn: (ce, ops) => {
         const def = ops[0].functionDefinition;
@@ -349,7 +349,7 @@ export const COLLECTIONS_LIBRARY: IdentifierDefinitions = {
     complexity: 8200,
     signature: {
       domain: ['FunctionOf', 'Values', 'Numbers'],
-      evaluate: (ce, ops) => {
+      evaluate: (ops, { engine: ce }) => {
         // @todo: could have fast path for List.
         const def = ops[0].functionDefinition;
         let l: number | undefined = undefined;
@@ -370,7 +370,7 @@ export const COLLECTIONS_LIBRARY: IdentifierDefinitions = {
     complexity: 8200,
     signature: {
       domain: ['FunctionOf', 'Values', ['VarArg', 'Values'], 'Values'],
-      evaluate: (ce, ops) => {
+      evaluate: (ops, { engine: ce }) => {
         if (ops.length < 2) return undefined;
         const s = ops[0].string;
         if (s !== null) {
@@ -393,7 +393,7 @@ export const COLLECTIONS_LIBRARY: IdentifierDefinitions = {
     complexity: 8200,
     signature: {
       domain: ['FunctionOf', 'Values', ['VarArg', 'Values'], 'Values'],
-      evaluate: (ce, ops) => {
+      evaluate: (ops, { engine: ce }) => {
         if (ops.length < 2) return undefined;
         const s = ops[0].string;
         if (s !== null) {
@@ -429,7 +429,7 @@ export const COLLECTIONS_LIBRARY: IdentifierDefinitions = {
       params: ['Values'],
       restParam: 'Values',
 
-      evaluate: (ce, ops) => {
+      evaluate: (ops, { engine: ce }) => {
         let expr = ops[0];
         let index = 1;
         while (ops[index]) {
@@ -453,7 +453,7 @@ export const COLLECTIONS_LIBRARY: IdentifierDefinitions = {
     complexity: 8200,
     signature: {
       domain: ['FunctionOf', 'Values', 'Values'],
-      evaluate: (ce, ops) => {
+      evaluate: (ops, { engine: ce }) => {
         const expr = ops[0];
         const def = expr.functionDefinition;
         if (!def?.at) return ce.Nothing;
@@ -466,7 +466,7 @@ export const COLLECTIONS_LIBRARY: IdentifierDefinitions = {
     complexity: 8200,
     signature: {
       domain: ['FunctionOf', 'Values', 'Values'],
-      evaluate: (ce, ops) => {
+      evaluate: (ops, { engine: ce }) => {
         const expr = ops[0];
         const def = expr.functionDefinition;
         if (!def?.at) return ce.Nothing;
@@ -479,7 +479,7 @@ export const COLLECTIONS_LIBRARY: IdentifierDefinitions = {
     complexity: 8200,
     signature: {
       domain: ['FunctionOf', 'Values', 'Values'],
-      evaluate: (ce, ops) => {
+      evaluate: (ops, { engine: ce }) => {
         const expr = ops[0];
         const def = expr.functionDefinition;
         if (!def?.at) return ce.Nothing;
@@ -492,7 +492,7 @@ export const COLLECTIONS_LIBRARY: IdentifierDefinitions = {
     complexity: 8200,
     signature: {
       domain: ['FunctionOf', 'Values', 'Values'],
-      evaluate: (_ce, ops) => take(ops[0], [[2, -1, 1]]),
+      evaluate: (ops) => take(ops[0], [[2, -1, 1]]),
     },
   },
 
@@ -500,7 +500,7 @@ export const COLLECTIONS_LIBRARY: IdentifierDefinitions = {
     complexity: 8200,
     signature: {
       domain: ['FunctionOf', 'Values', 'Values'],
-      evaluate: (_ce, ops) => take(ops[0], [[1, -2, 1]]),
+      evaluate: (ops) => take(ops[0], [[1, -2, 1]]),
     },
   },
 
@@ -508,7 +508,7 @@ export const COLLECTIONS_LIBRARY: IdentifierDefinitions = {
     complexity: 8200,
     signature: {
       domain: ['FunctionOf', 'Values', 'Values'],
-      evaluate: (_ce, ops) => take(ops[0], [[-1, 2, 1]]),
+      evaluate: ([xs]) => take(xs, [[-1, 2, 1]]),
     },
   },
 
@@ -520,7 +520,7 @@ export const COLLECTIONS_LIBRARY: IdentifierDefinitions = {
     complexity: 8200,
     signature: {
       domain: ['FunctionOf', 'Values', ['OptArg', 'Functions'], 'Values'],
-      evaluate: (_ce, _ops) => {
+      evaluate: (_ops) => {
         // @todo
         return undefined;
       },
@@ -531,7 +531,7 @@ export const COLLECTIONS_LIBRARY: IdentifierDefinitions = {
     complexity: 8200,
     signature: {
       domain: ['FunctionOf', 'Values', ['OptArg', 'Functions'], 'Values'],
-      evaluate: (_ce, _ops) => {
+      evaluate: (_ops) => {
         // @todo
         return undefined;
       },
@@ -543,7 +543,7 @@ export const COLLECTIONS_LIBRARY: IdentifierDefinitions = {
     complexity: 8200,
     signature: {
       domain: ['FunctionOf', 'Values', 'Values'],
-      evaluate: (_ce, _ops) => {
+      evaluate: (_ops) => {
         // @todo
         return undefined;
       },
@@ -557,7 +557,7 @@ export const COLLECTIONS_LIBRARY: IdentifierDefinitions = {
     hold: 'last',
     signature: {
       domain: ['FunctionOf', 'Collections', 'Anything', 'Collections'],
-      evaluate: (ce, ops) => {
+      evaluate: (ops, { engine: ce }) => {
         const [collection, fn] = collectionFunction(ops);
         if (!fn) return undefined;
 
@@ -590,7 +590,7 @@ export const COLLECTIONS_LIBRARY: IdentifierDefinitions = {
     hold: 'last',
     signature: {
       domain: ['FunctionOf', 'Values', 'Anything', 'Values'],
-      evaluate: (ce, ops) => {
+      evaluate: (ops, { engine: ce }) => {
         const fn = applicable(ops[1]);
         if (!fn) return undefined;
 
@@ -640,7 +640,7 @@ export const COLLECTIONS_LIBRARY: IdentifierDefinitions = {
         ['OptArg', 'Values'],
         'Values',
       ],
-      evaluate: (_ce, _ops) => {
+      evaluate: (_ops) => {
         // @todo
         return undefined;
       },
@@ -658,7 +658,7 @@ export const COLLECTIONS_LIBRARY: IdentifierDefinitions = {
         ['VarArg', 'Integers'],
         'Values',
       ],
-      evaluate: (ce, ops) => {
+      evaluate: (ops, { engine: ce }) => {
         // treated as multidimensional indexes
         const fn = applicable(ops[0]);
         if (!fn) return undefined;
@@ -703,7 +703,7 @@ export const COLLECTIONS_LIBRARY: IdentifierDefinitions = {
     complexity: 8200,
     signature: {
       domain: ['FunctionOf', 'Values', 'Tuples'],
-      evaluate: (ce, ops) => {
+      evaluate: (ops, { engine: ce }) => {
         if (!isFiniteCollection(ops[0])) return undefined;
         const [values, counts] = tally(ops[0]!);
         return ce.tuple(
@@ -721,7 +721,7 @@ export const COLLECTIONS_LIBRARY: IdentifierDefinitions = {
     complexity: 8200,
     signature: {
       domain: ['FunctionOf', 'Values', 'Tuples'],
-      evaluate: (ce, ops) => {
+      evaluate: (ops, { engine: ce }) => {
         if (!isFiniteCollection(ops[0])) return undefined;
         const [values, _counts] = tally(ops[0]!);
         return ce.function('List', values);
@@ -737,7 +737,7 @@ export const COLLECTIONS_LIBRARY: IdentifierDefinitions = {
     complexity: 8200,
     signature: {
       domain: ['FunctionOf', 'Values', ['VarArg', 'Values'], 'Values'],
-      evaluate: (_ce, _ops) => {
+      evaluate: (_ops) => {
         // @todo
         return undefined;
       },
@@ -748,7 +748,7 @@ export const COLLECTIONS_LIBRARY: IdentifierDefinitions = {
     complexity: 8200,
     signature: {
       domain: ['FunctionOf', 'Values', ['OptArg', 'Integers'], 'Values'],
-      evaluate: (_ce, _ops) => {
+      evaluate: (_ops) => {
         // @todo
         return undefined;
       },
@@ -759,7 +759,7 @@ export const COLLECTIONS_LIBRARY: IdentifierDefinitions = {
     complexity: 8200,
     signature: {
       domain: ['FunctionOf', 'Values', ['OptArg', 'Integers'], 'Values'],
-      evaluate: (_ce, _ops) => {
+      evaluate: (_ops) => {
         // @todo
         return undefined;
       },
@@ -773,7 +773,7 @@ export const COLLECTIONS_LIBRARY: IdentifierDefinitions = {
     complexity: 8200,
     signature: {
       domain: ['FunctionOf', ['VarArg', 'Values'], 'Values'],
-      evaluate: (ce, ops) => {
+      evaluate: (ops, { engine: ce }) => {
         // @todo
         const values: BoxedExpression[] = [];
         let isSet = true;
@@ -797,7 +797,7 @@ export const COLLECTIONS_LIBRARY: IdentifierDefinitions = {
     complexity: 8200,
     signature: {
       domain: ['FunctionOf', 'Values', ['OptArg', 'Values'], 'Values'],
-      evaluate: (_ce, _ops) => {
+      evaluate: (_ops) => {
         // @todo
         return undefined;
       },
@@ -812,7 +812,7 @@ export const COLLECTIONS_LIBRARY: IdentifierDefinitions = {
     complexity: 8200,
     signature: {
       domain: ['FunctionOf', 'Values', 'Values'],
-      evaluate: (_ce, _ops) => {
+      evaluate: (_ops) => {
         // @todo
         return undefined;
       },
@@ -825,7 +825,7 @@ export const COLLECTIONS_LIBRARY: IdentifierDefinitions = {
     complexity: 8200,
     signature: {
       domain: ['FunctionOf', 'Values', 'Values'],
-      evaluate: (_ce, _ops) => {
+      evaluate: (_ops) => {
         // @todo
         return undefined;
       },
@@ -839,7 +839,7 @@ export const COLLECTIONS_LIBRARY: IdentifierDefinitions = {
     complexity: 8200,
     signature: {
       domain: ['FunctionOf', 'Values', 'Values'],
-      evaluate: (_ce, _ops) => {
+      evaluate: (_ops) => {
         // @todo
         return undefined;
       },

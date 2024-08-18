@@ -23,7 +23,7 @@ export const RELOP_LIBRARY: IdentifierDefinitions = {
     complexity: 11000,
     numeric: true,
     signature: {
-      evaluate: (ce, ops) => {
+      evaluate: (ops, { engine: ce }) => {
         if (ops.length < 3) return undefined;
         const [lhs, rhs, modulo] = ops;
         const nLhs = lhs.value;
@@ -47,7 +47,7 @@ export const RELOP_LIBRARY: IdentifierDefinitions = {
 
       // Since we want to work on non-canonical expressions,
       // do nothing to canonicalize the arguments
-      evaluate: (ce, ops) => {
+      evaluate: (ops, { engine: ce }) => {
         if (ops.length !== 2) return undefined;
         const [lhs, rhs] = ops;
         return lhs.isSame(rhs) === true ? ce.True : ce.False;
@@ -64,7 +64,7 @@ export const RELOP_LIBRARY: IdentifierDefinitions = {
 
       canonical: (ce, args) => canonicalRelational(ce, 'Equal', args),
 
-      evaluate: (ce, ops) => {
+      evaluate: (ops, { engine: ce }) => {
         if (ops.length < 2) return ce.True;
         let lhs: BoxedExpression | undefined = undefined;
         for (const arg of ops) {
@@ -89,7 +89,7 @@ export const RELOP_LIBRARY: IdentifierDefinitions = {
 
       canonical: (ce, args) => canonicalRelational(ce, 'NotEqual', args),
 
-      evaluate: (ce, ops) => {
+      evaluate: (ops, { engine: ce }) => {
         if (ops.length < 2) return ce.False;
         let lhs: BoxedExpression | undefined = undefined;
         for (const arg of ops!) {
@@ -111,7 +111,7 @@ export const RELOP_LIBRARY: IdentifierDefinitions = {
 
       canonical: (ce, ops) => canonicalRelational(ce, 'Less', ops),
 
-      evaluate: (ce, ops) => {
+      evaluate: (ops, { engine: ce }) => {
         if (ops.length < 2) return ce.True;
         let lhs: BoxedExpression | undefined = undefined;
         for (const arg of ops!) {
@@ -161,7 +161,7 @@ export const RELOP_LIBRARY: IdentifierDefinitions = {
 
       canonical: (ce, ops) => canonicalRelational(ce, 'LessEqual', ops),
 
-      evaluate: (ce, ops) => {
+      evaluate: (ops, { engine: ce }) => {
         if (ops.length < 2) return ce.True;
         let lhs: BoxedExpression | undefined = undefined;
         for (const arg of ops!) {

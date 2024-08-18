@@ -71,7 +71,8 @@ describe('TRIGONOMETRY constructible values', () => {
 
           test(`${h}(${arg.toString()})`, () => {
             if (!Number.isFinite(Math.abs(f - jsValue))) {
-              const expr = engine.box([h, arg]).evaluate();
+              let expr = engine.box([h, arg]);
+              expr = expr.evaluate();
               const again = fExact.N();
               console.error('Invalid trig result', fNumeric.toString());
             }

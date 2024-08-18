@@ -17,7 +17,7 @@ export const COMPLEX_LIBRARY: IdentifierDefinitions[] = [
           if (re === 0) return 0;
           return re > 0 ? 1 : -1;
         },
-        evaluate: (ce, ops) => {
+        evaluate: (ops, { engine: ce }) => {
           const op = ops[0].numericValue;
           if (op === null) return undefined;
           if (typeof op === 'number') return ops[0];
@@ -37,7 +37,7 @@ export const COMPLEX_LIBRARY: IdentifierDefinitions[] = [
           if (re === 0) return 0;
           return re > 0 ? 1 : -1;
         },
-        evaluate: (ce, ops) => {
+        evaluate: (ops, { engine: ce }) => {
           const op = ops[0].numericValue;
           if (op === null) return undefined;
           if (typeof op === 'number') return ce.Zero;
@@ -50,7 +50,7 @@ export const COMPLEX_LIBRARY: IdentifierDefinitions[] = [
       complexity: 1200,
       signature: {
         domain: ['FunctionOf', 'Numbers', 'Numbers'],
-        evaluate: (ce, ops) => {
+        evaluate: (ops, { engine: ce }) => {
           const op = ops[0].numericValue;
           if (op === null) return undefined;
           if (typeof op === 'number') return op >= 0 ? ce.Zero : ce.Pi;
@@ -67,7 +67,7 @@ export const COMPLEX_LIBRARY: IdentifierDefinitions[] = [
       complexity: 1200,
       signature: {
         domain: ['FunctionOf', 'Numbers', 'Tuples'],
-        evaluate: (ce, ops) => {
+        evaluate: (ops, { engine: ce }) => {
           if (ops[0].numericValue === null) return undefined;
           return ce.tuple(
             ce.function('Abs', ops).evaluate(),
@@ -83,7 +83,7 @@ export const COMPLEX_LIBRARY: IdentifierDefinitions[] = [
       signature: {
         sgn: (ce, ops) => ops[0]?.sgn,
         domain: ['FunctionOf', 'Numbers', 'Numbers'],
-        evaluate: (ce, ops) => {
+        evaluate: (ops, { engine: ce }) => {
           const op = ops[0].numericValue;
           if (op === null) return undefined;
           if (typeof op === 'number' || op.im === 0) return ops[0];
@@ -97,7 +97,7 @@ export const COMPLEX_LIBRARY: IdentifierDefinitions[] = [
       complexity: 1200,
       signature: {
         domain: ['FunctionOf', 'Numbers', 'Numbers', 'Lists'],
-        evaluate: (ce, ops) => {
+        evaluate: (ops, { engine: ce }) => {
           const re = ops[0].re;
           if (re === undefined) return undefined;
           const n = ops[1].re;

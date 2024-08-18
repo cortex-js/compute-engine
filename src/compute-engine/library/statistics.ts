@@ -14,7 +14,7 @@ export const STATISTICS_LIBRARY: IdentifierDefinitions[] = [
         params: ['Numbers', 'Numbers'],
         result: 'Numbers',
 
-        evaluate: (ce, ops) => {
+        evaluate: (ops, { engine: ce }) => {
           const n = ops[0].re ?? NaN;
           const k = ops[1].re ?? NaN;
           if (!Number.isFinite(n) || !Number.isFinite(k)) return undefined;
@@ -33,7 +33,7 @@ export const STATISTICS_LIBRARY: IdentifierDefinitions[] = [
       threadable: false,
       signature: {
         domain: ['FunctionOf', 'Collections', 'Numbers'],
-        evaluate: (ce, ops) => {
+        evaluate: (ops, { engine: ce }) => {
           // @todo: do bignum version
           let sum = 0;
           let count = 0;
@@ -52,7 +52,7 @@ export const STATISTICS_LIBRARY: IdentifierDefinitions[] = [
       threadable: false,
       signature: {
         domain: ['FunctionOf', 'Collections', 'Numbers'],
-        evaluate: (ce, ops) => {
+        evaluate: (ops, { engine: ce }) => {
           // @todo: do bignum version
           const values: number[] = [];
           for (const op of each(ops[0])) {
@@ -78,7 +78,7 @@ export const STATISTICS_LIBRARY: IdentifierDefinitions[] = [
       threadable: false,
       signature: {
         domain: ['FunctionOf', 'Collections', 'Numbers'],
-        evaluate: (ce, ops) => {
+        evaluate: (ops, { engine: ce }) => {
           let sum = 0;
           let sum2 = 0;
           let count = 0;
@@ -101,7 +101,7 @@ export const STATISTICS_LIBRARY: IdentifierDefinitions[] = [
       description: 'Sample Standard Deviation of a collection of numbers.',
       signature: {
         domain: ['FunctionOf', 'Collections', 'Numbers'],
-        evaluate: (ce, ops) => {
+        evaluate: (ops, { engine: ce }) => {
           let sum = 0;
           let sum2 = 0;
           let count = 0;
@@ -125,7 +125,7 @@ export const STATISTICS_LIBRARY: IdentifierDefinitions[] = [
       threadable: false,
       signature: {
         domain: ['FunctionOf', 'Collections', 'Numbers'],
-        evaluate: (ce, ops) => {
+        evaluate: (ops, { engine: ce }) => {
           let sum = 0;
           let sum2 = 0;
           let sum4 = 0;
@@ -152,7 +152,7 @@ export const STATISTICS_LIBRARY: IdentifierDefinitions[] = [
       threadable: false,
       signature: {
         domain: ['FunctionOf', 'Collections', 'Numbers'],
-        evaluate: (ce, ops) => {
+        evaluate: (ops, { engine: ce }) => {
           let sum = 0;
           let sum2 = 0;
           let sum3 = 0;
@@ -179,7 +179,7 @@ export const STATISTICS_LIBRARY: IdentifierDefinitions[] = [
       threadable: false,
       signature: {
         domain: ['FunctionOf', 'Collections', 'Numbers'],
-        evaluate: (ce, ops) => {
+        evaluate: (ops, { engine: ce }) => {
           const values: number[] = [];
           for (const op of each(ops[0])) {
             const v = op.re ?? NaN;
@@ -211,7 +211,7 @@ export const STATISTICS_LIBRARY: IdentifierDefinitions[] = [
       threadable: false,
       signature: {
         domain: ['FunctionOf', 'Collections', 'Lists'],
-        evaluate: (ce, ops) => {
+        evaluate: (ops, { engine: ce }) => {
           const values: number[] = [];
           for (const op of each(ops[0])) {
             const v = op.re ?? NaN;
@@ -238,7 +238,7 @@ export const STATISTICS_LIBRARY: IdentifierDefinitions[] = [
       threadable: false,
       signature: {
         domain: ['FunctionOf', 'Collections', 'Numbers'],
-        evaluate: (ce, ops) => {
+        evaluate: (ops, { engine: ce }) => {
           const values: number[] = [];
           for (const op of each(ops[0])) {
             const v = op.re ?? NaN;
@@ -262,7 +262,7 @@ export const STATISTICS_LIBRARY: IdentifierDefinitions[] = [
       complexity: 7500,
       signature: {
         domain: ['FunctionOf', 'Numbers', 'Numbers'],
-        evaluate: (ce, ops) => {
+        evaluate: (ops, { engine: ce }) => {
           const x = ops[0].re ?? NaN;
           if (!Number.isFinite(x)) return undefined;
           return ce.number(erf(x));
@@ -274,7 +274,7 @@ export const STATISTICS_LIBRARY: IdentifierDefinitions[] = [
       complexity: 7500,
       signature: {
         domain: ['FunctionOf', 'Numbers', 'Numbers'],
-        evaluate: (ce, ops) => {
+        evaluate: (ops, { engine: ce }) => {
           const x = ops[0].re ?? NaN;
           if (!Number.isFinite(x)) return undefined;
           return ce.number(1 - erf(x));
@@ -286,7 +286,7 @@ export const STATISTICS_LIBRARY: IdentifierDefinitions[] = [
       complexity: 7500,
       signature: {
         domain: ['FunctionOf', 'Numbers', 'Numbers'],
-        evaluate: (ce, ops) => {
+        evaluate: (ops, { engine: ce }) => {
           const x = ops[0].re ?? NaN;
           if (!Number.isFinite(x)) return undefined;
           return ce.number(erfInv(x));

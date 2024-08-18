@@ -841,7 +841,7 @@ export class BoxedSymbol extends _BoxedExpression {
     // console.log('symbol evaluate', this.toString());
     const def = this.symbolDefinition;
     if (def) {
-      if (options?.numericMode) {
+      if (options?.numericApproximation) {
         if (def.holdUntil === 'never') return this;
         return def.value?.N() ?? this;
       }

@@ -230,15 +230,14 @@ export class _BoxedFunctionDefinition implements BoxedFunctionDefinition {
         restParam = ce.Anything;
         result = ce.Anything;
       }
-
-      let evaluate: ((ce, args) => BoxedExpression | undefined) | undefined =
+      let evaluate: ((xs) => BoxedExpression | undefined) | undefined =
         undefined;
       if (sig.evaluate && typeof sig.evaluate !== 'function') {
         const boxedFn = ce.box(sig.evaluate, { canonical: false });
         if (!boxedFn.isValid)
           throw Error(`Invalid function ${boxedFn.toString()}`);
         const fn = applicable(boxedFn);
-        evaluate = (_ce, xs) => fn(xs);
+        evaluate = (xs) => fn(xs);
         evaluate.toString = () => boxedFn.toString(); // For debugging/_printScope()
       } else evaluate = sig.evaluate as any;
 
@@ -255,8 +254,7 @@ export class _BoxedFunctionDefinition implements BoxedFunctionDefinition {
         restParam: restParam ? restParam : undefined,
         result,
         canonical: sig.canonical,
-        evaluate,
-        N: sig.N,
+        evaluate: evaluate,
         evalDimension: sig.evalDimension,
         sgn: sig.sgn,
         compile: sig.compile,

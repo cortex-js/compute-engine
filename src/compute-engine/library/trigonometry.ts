@@ -1,5 +1,9 @@
 import { Decimal } from 'decimal.js';
-import { IdentifierDefinitions, DomainExpression } from '../public';
+import {
+  IdentifierDefinitions,
+  DomainExpression,
+  FunctionDefinition,
+} from '../public';
 import { bignumPreferred } from '../boxed-expression/utils';
 import { apply2 } from '../symbolic/utils';
 import { checkArity } from '../boxed-expression/validate';
@@ -10,18 +14,6 @@ import {
   processInverseFunction,
   trigSign,
 } from '../boxed-expression/trigonometry';
-
-const domainNumberToRealNumber = (_head: string): DomainExpression => {
-  return ['FunctionOf', 'Numbers', 'RealNumbers'];
-};
-
-const trigFunction = (_head: string): DomainExpression => {
-  return ['FunctionOf', 'Numbers', 'Numbers'];
-};
-
-const hyperbolicFunction = (_head: string): DomainExpression => {
-  return ['FunctionOf', 'Numbers', 'Numbers'];
-};
 
 //
 // Note: Names of trigonometric functions follow ISO 80000 Section 13
@@ -71,7 +63,7 @@ export const TRIGONOMETRY_LIBRARY: IdentifierDefinitions[] = [
           }
           return ce.number(fArg).div(180).mul(ce.Pi);
         },
-        evaluate: (ce, ops) => {
+        evaluate: (ops, { engine: ce }) => {
           if (ce.angularUnit === 'deg') return ops[0];
           return ops[0].mul(ce.Pi.div(180)).evaluate();
         },
@@ -90,17 +82,7 @@ export const TRIGONOMETRY_LIBRARY: IdentifierDefinitions[] = [
 
     // The definition of other functions may rely on Sin, so it is defined first
     // in a separate section
-    Sin: {
-      complexity: 5000,
-      threadable: true,
-      signature: {
-        domain: ['FunctionOf', 'Numbers', 'Numbers'],
-        sgn: (ce, ops) => trigSign('Sin', ops[0]),
-        evaluate: (ce, ops) =>
-          constructibleValues('Sin', ops[0]) ?? evalTrig('Sin', ops[0]),
-        N: (ce, ops) => evalTrig('Sin', ops[0]),
-      },
-    },
+    Sin: trigFunction('Sin', 5000),
   },
   {
     //
@@ -112,11 +94,12 @@ export const TRIGONOMETRY_LIBRARY: IdentifierDefinitions[] = [
       complexity: 5200,
       threadable: true,
       signature: {
-        domain: domainNumberToRealNumber('Arctan'),
+        domain: ['FunctionOf', 'Numbers', 'RealNumbers'],
         sgn: (ce, ops) => trigSign('Arctan', ops[0]),
-        evaluate: (ce, ops) =>
-          constructibleValues('Arctan', ops[0]) ?? evalTrig('Arctan', ops[0]),
-        N: (ce, ops) => evalTrig('Arctan', ops[0]),
+        evaluate: ([x], { numericApproximation }) =>
+          numericApproximation
+            ? evalTrig('Arctan', x)
+            : (constructibleValues('Arctan', x) ?? evalTrig('Arctan', x)),
       },
     },
 
@@ -126,9 +109,11 @@ export const TRIGONOMETRY_LIBRARY: IdentifierDefinitions[] = [
       threadable: true,
       signature: {
         domain: ['FunctionOf', 'Numbers', 'Numbers', 'Numbers'],
-        evaluate: (ce, ops) => {
+        evaluate: ([y, x], { engine: ce, numericApproximation }) => {
+          if (numericApproximation)
+            return apply2(y, x, Math.atan2, (a, b) => Decimal.atan2(a, b));
+
           // See https://en.wikipedia.org/wiki/Argument_(complex_analysis)#Realizations_of_the_function_in_computer_languages
-          const [y, x] = ops;
           if (!y.isFinite && !x.isFinite) return ce.NaN;
           if (y.isZero && x.isZero) return ce.Zero;
           if (!x.isFinite) return x.isPositive ? ce.Zero : ce.Pi;
@@ -136,35 +121,12 @@ export const TRIGONOMETRY_LIBRARY: IdentifierDefinitions[] = [
           if (y.isZero) return x.isPositive ? ce.Zero : ce.Pi;
           return ce.function('Arctan', [y.div(x)]).evaluate();
         },
-        N: (_ce, ops) =>
-          apply2(ops[0], ops[1], Math.atan2, (a, b) => Decimal.atan2(a, b)),
       },
     },
 
-    Cos: {
-      complexity: 5050,
-      threadable: true,
-      signature: {
-        domain: ['FunctionOf', 'Numbers', 'Numbers'],
-        sgn: (ce, ops) => trigSign('Cos', ops[0]),
-        evaluate: (ce, ops) =>
-          constructibleValues('Cos', ops[0]) ?? evalTrig('Cos', ops[0]),
-        N: (ce, ops) => evalTrig('Cos', ops[0]),
-      },
-    },
+    Cos: trigFunction('Cos', 5050),
 
-    Tan: {
-      // Range: 'RealNumbers',
-      complexity: 5100,
-      threadable: true,
-      signature: {
-        domain: trigFunction('Tan'),
-        sgn: (ce, ops) => trigSign('Tan', ops[0]),
-        evaluate: (ce, ops) =>
-          constructibleValues('Tan', ops[0]) ?? evalTrig('Tan', ops[0]),
-        N: (ce, ops) => evalTrig('Tan', ops[0]),
-      },
-    },
+    Tan: trigFunction('Tan', 5100),
     /* converts (x, y) -> (radius, angle) */
     // ToPolarCoordinates: {
     //   domain: 'Functions',
@@ -176,117 +138,24 @@ export const TRIGONOMETRY_LIBRARY: IdentifierDefinitions[] = [
   // trigonometric functions above
   //
   {
-    Arcosh: {
-      complexity: 6200,
-      threadable: true,
-      signature: {
-        domain: hyperbolicFunction('Arcosh'),
-        sgn: (ce, ops) => trigSign('Arcosh', ops[0]),
-        evaluate: (ce, ops) =>
-          constructibleValues('Arcosh', ops[0]) ?? evalTrig('Arcosh', ops[0]),
-        N: (ce, ops) => evalTrig('Arcosh', ops[0]),
-      },
-    },
+    Arcosh: trigFunction('Arcosh', 6200),
 
-    Arcsin: {
-      complexity: 5500,
-      threadable: true,
-      signature: {
-        domain: hyperbolicFunction('Arcsin'),
-        sgn: (ce, ops) => trigSign('Arcsin', ops[0]),
-        evaluate: (ce, ops) =>
-          constructibleValues('Arcsin', ops[0]) ?? evalTrig('Arcsin', ops[0]),
-        N: (ce, ops) => evalTrig('Arcsin', ops[0]),
-      },
-    },
+    Arcsin: trigFunction('Arcsin', 5500),
 
     //Note: Arsinh, not ArCsinh
-    Arsinh: {
-      complexity: 6100,
-      threadable: true,
-      signature: {
-        domain: hyperbolicFunction('Arsinh'),
-        sgn: (ce, ops) => trigSign('Arsinh', ops[0]),
-        evaluate: (ce, ops) =>
-          constructibleValues('Arsinh', ops[0]) ?? evalTrig('Arsinh', ops[0]),
-        N: (ce, ops) => evalTrig('Arsinh', ops[0]),
-      },
-    },
+    Arsinh: trigFunction('Arsinh', 6100),
 
-    Artanh: {
-      complexity: 6300,
-      threadable: true,
-      signature: {
-        domain: hyperbolicFunction('Artanh'),
-        sgn: (ce, ops) => trigSign('Artanh', ops[0]),
-        evaluate: (ce, ops) =>
-          constructibleValues('Artanh', ops[0]) ?? evalTrig('Artanh', ops[0]),
-        N: (ce, ops) => evalTrig('Artanh', ops[0]),
-      },
-    },
+    Artanh: trigFunction('Artanh', 6300),
 
-    Cosh: {
-      complexity: 6050,
-      threadable: true,
-      signature: {
-        domain: hyperbolicFunction('Cosh'),
-        sgn: (ce, ops) => trigSign('Cosh', ops[0]),
-        evaluate: (ce, ops) =>
-          constructibleValues('Cosh', ops[0]) ?? evalTrig('Cosh', ops[0]),
-        N: (ce, ops) => evalTrig('Cosh', ops[0]),
-      },
-    },
+    Cosh: trigFunction('Cosh', 6050),
 
-    Cot: {
-      complexity: 5600,
-      threadable: true,
-      signature: {
-        domain: trigFunction('Cot'),
-        sgn: (ce, ops) => trigSign('Cot', ops[0]),
-        evaluate: (ce, ops) =>
-          constructibleValues('Cot', ops[0]) ?? evalTrig('Cot', ops[0]),
-        N: (ce, ops) => evalTrig('Cot', ops[0]),
-      },
-    },
+    Cot: trigFunction('Cot', 5600),
 
-    Csc: {
-      description: 'Cosecant',
-      complexity: 5600,
-      threadable: true,
-      signature: {
-        domain: trigFunction('Csc'),
-        sgn: (ce, ops) => trigSign('Csc', ops[0]),
-        evaluate: (ce, ops) =>
-          constructibleValues('Csc', ops[0]) ?? evalTrig('Csc', ops[0]),
-        N: (ce, ops) => evalTrig('Csc', ops[0]),
-      },
-    },
+    Csc: trigFunction('Csc', 5600, 'Cosecant'),
 
-    Sec: {
-      description: 'Secant, inverse of cosine',
-      complexity: 5500,
-      threadable: true,
-      signature: {
-        domain: trigFunction('Sec'),
-        sgn: (ce, ops) => trigSign('Sec', ops[0]),
-        evaluate: (ce, ops) =>
-          constructibleValues('Sec', ops[0]) ?? evalTrig('Sec', ops[0]),
-        N: (ce, ops) => evalTrig('Sec', ops[0]),
-      },
-    },
+    Sec: trigFunction('Sec', 5600, 'Secant, inverse of cosine'),
 
-    Sinh: {
-      // Range: ['Interval', -Infinity, Infinity],
-      complexity: 6000,
-      threadable: true,
-      signature: {
-        domain: hyperbolicFunction('Sinh'),
-        sgn: (ce, ops) => trigSign('Sinh', ops[0]),
-        evaluate: (ce, ops) =>
-          constructibleValues('Sinh', ops[0]) ?? evalTrig('Sinh', ops[0]),
-        N: (ce, ops) => evalTrig('Sinh', ops[0]),
-      },
-    },
+    Sinh: trigFunction('Sinh', 6000),
 
     /** = sin(z/2)^2 = (1 - cos z) / 2*/
     Haversine: {
@@ -309,139 +178,28 @@ export const TRIGONOMETRY_LIBRARY: IdentifierDefinitions[] = [
     },
   },
   {
-    Csch: {
-      complexity: 6200,
-      threadable: true,
-      signature: {
-        domain: domainNumberToRealNumber('Csch'),
-        sgn: (ce, ops) => trigSign('Csch', ops[0]),
-        evaluate: (ce, ops) =>
-          constructibleValues('Csch', ops[0]) ?? evalTrig('Csch', ops[0]),
-        N: (ce, ops) => evalTrig('Csch', ops[0]),
-      },
-    },
+    Csch: trigFunction('Csch', 6200, 'Hyperbolic cosecant'),
 
-    Sech: {
-      complexity: 6200,
-      threadable: true,
-      signature: {
-        domain: ['FunctionOf', 'Numbers', 'Numbers'],
-        sgn: (ce, ops) => trigSign('Sech', ops[0]),
-        evaluate: (ce, ops) =>
-          constructibleValues('Sech', ops[0]) ?? evalTrig('Sech', ops[0]),
-        N: (ce, ops) => evalTrig('Sech', ops[0]),
-      },
-    },
+    Sech: trigFunction('Sech', 6200, 'Hyperbolic secant'),
 
-    Tanh: {
-      // Range: ['Interval', -Infinity, Infinity],
-      complexity: 6200,
-      threadable: true,
-      signature: {
-        domain: hyperbolicFunction('Tanh'),
-        sgn: (ce, ops) => trigSign('Tanh', ops[0]),
-        evaluate: (ce, ops) =>
-          constructibleValues('Tanh', ops[0]) ?? evalTrig('Tanh', ops[0]),
-        N: (ce, ops) => evalTrig('Tanh', ops[0]),
-      },
-    },
+    Tanh: trigFunction('Tanh', 6200, 'Hyperbolic tangent'),
   },
   {
-    Arccos: {
-      complexity: 5550,
-      threadable: true,
-      signature: {
-        domain: domainNumberToRealNumber('Arccos'),
-        sgn: (ce, ops) => trigSign('Arccos', ops[0]),
-        evaluate: (ce, ops) =>
-          constructibleValues('Arccos', ops[0]) ?? evalTrig('Arccos', ops[0]),
-        N: (ce, ops) => evalTrig('Arccos', ops[0]),
-      },
-    },
+    Arccos: trigFunction('Arccos', 5550),
 
-    Arccot: {
-      numeric: true,
-      threadable: true,
-      signature: {
-        domain: domainNumberToRealNumber('Arccot'),
-        sgn: (ce, ops) => trigSign('Arccot', ops[0]),
-        evaluate: (ce, ops) =>
-          constructibleValues('Arccot', ops[0]) ?? evalTrig('Arccot', ops[0]),
-        N: (ce, ops) => evalTrig('Arccot', ops[0]),
-      },
-    },
+    Arccot: trigFunction('Arccot', 5650),
 
-    Arcoth: {
-      numeric: true,
-      threadable: true,
-      signature: {
-        domain: domainNumberToRealNumber('Arcoth'),
-        sgn: (ce, ops) => trigSign('Arcoth', ops[0]),
-        evaluate: (ce, ops) =>
-          constructibleValues('Arcoth', ops[0]) ?? evalTrig('Arcoth', ops[0]),
-        N: (ce, ops) => evalTrig('Arcoth', ops[0]),
-      },
-    },
+    Arcoth: trigFunction('Arcoth', 6350),
 
-    Arcsch: {
-      numeric: true,
-      threadable: true,
-      signature: {
-        domain: domainNumberToRealNumber('Arcsch'),
-        sgn: (ce, ops) => trigSign('Arcsch', ops[0]),
-        evaluate: (ce, ops) =>
-          constructibleValues('Arcsch', ops[0]) ?? evalTrig('Arcsch', ops[0]),
-        N: (ce, ops) => evalTrig('Arcsch', ops[0]),
-      },
-    },
+    Arcsch: trigFunction('Arcsch', 6250),
 
-    Arcsec: {
-      numeric: true,
-      threadable: true,
-      signature: {
-        domain: domainNumberToRealNumber('Arcsec'),
-        sgn: (ce, ops) => trigSign('Arcsec', ops[0]),
-        evaluate: (ce, ops) =>
-          constructibleValues('Arcsec', ops[0]) ?? evalTrig('Arcsec', ops[0]),
-        N: (ce, ops) => evalTrig('Arcsec', ops[0]),
-      },
-    },
+    Arcsec: trigFunction('Arcsec', 5650),
 
-    Arsech: {
-      numeric: true,
-      threadable: true,
-      signature: {
-        domain: domainNumberToRealNumber('Arsech'),
-        sgn: (ce, ops) => trigSign('Arsech', ops[0]),
-        evaluate: (ce, ops) =>
-          constructibleValues('Arsech', ops[0]) ?? evalTrig('Arsech', ops[0]),
-        N: (ce, ops) => evalTrig('Arsech', ops[0]),
-      },
-    },
+    Arsech: trigFunction('Arsech', 6250),
 
-    Arccsc: {
-      numeric: true,
-      threadable: true,
-      signature: {
-        domain: domainNumberToRealNumber('Arccsc'),
-        sgn: (ce, ops) => trigSign('Arccsc', ops[0]),
-        evaluate: (ce, ops) =>
-          constructibleValues('Arccsc', ops[0]) ?? evalTrig('Arccsc', ops[0]),
-        N: (ce, ops) => evalTrig('Arccsc', ops[0]),
-      },
-    },
+    Arccsc: trigFunction('Arccsc', 5650),
 
-    Coth: {
-      complexity: 6300,
-      threadable: true,
-      signature: {
-        domain: hyperbolicFunction('Coth'),
-        sgn: (ce, ops) => trigSign('Coth', ops[0]),
-        evaluate: (ce, ops) =>
-          constructibleValues('Coth', ops[0]) ?? evalTrig('Coth', ops[0]),
-        N: (ce, ops) => evalTrig('Coth', ops[0]),
-      },
-    },
+    Coth: trigFunction('Coth', 6300),
 
     /* converts (radius, angle) -> (x, y) */
     // FromPolarCoordinates: {
@@ -458,8 +216,29 @@ export const TRIGONOMETRY_LIBRARY: IdentifierDefinitions[] = [
             processInverseFunction(ce, ops) ?? ce._fn('InverseFunction', ops)
           );
         },
-        evaluate: (ce, ops) => processInverseFunction(ce, ops),
+        evaluate: (ops, { engine: ce }) => processInverseFunction(ce, ops),
       },
     },
   },
 ];
+
+function trigFunction(
+  operator: string,
+  complexity: number,
+  description?: string
+): FunctionDefinition {
+  return {
+    complexity,
+    description,
+    threadable: true,
+    signature: {
+      domain: ['FunctionOf', 'Numbers', 'Numbers'],
+      sgn: (ce, ops) => trigSign(operator, ops[0]),
+      evaluate: ([x], { numericApproximation }) => {
+        if (numericApproximation) return evalTrig(operator, x);
+        const a = constructibleValues(operator, x);
+        return a ?? evalTrig(operator, x);
+      },
+    },
+  };
+}

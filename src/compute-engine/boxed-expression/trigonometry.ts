@@ -677,7 +677,7 @@ export function constructibleValues(
   // If the argument has an imaginary part, it's not a constructible value
   if (x.im !== 0) return undefined;
 
-  let theta = x.N().re ?? NaN;
+  let theta = x.re ?? NaN;
   if (Number.isNaN(theta)) return undefined;
 
   //

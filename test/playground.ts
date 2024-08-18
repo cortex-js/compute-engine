@@ -2,6 +2,115 @@ import { ComputeEngine } from '../src/compute-engine';
 
 const ce = new ComputeEngine();
 
+// console.log(ce.parse('i=1..3..7').json);
+
+// Single index with no upper
+// console.log(ce.parse('\\sum_{i=1..10} i').evaluate().toString());
+// console.log(ce.parse('\\sum_{i=1..10} i').sgn);
+
+// Single index with upper
+// console.log(ce.parse('\\sum_{i=1}^7 i').json);
+
+// Multiple indexes with no upper
+// console.log(ce.parse('\\sum_{i=1, j=2} (i+j)').json);
+
+// Multiple indexes with uppers
+// console.log(ce.parse('\\sum_{i=1, j=2}^{3, 5} (i+j)').json);
+
+// Single index with range
+// console.log(ce.parse('\\sum_{i=1..3} (i+1)').json);
+
+// Multiple indexes as ranges
+// console.log(ce.parse('\\sum_{i=1..3, j=2..5} (i+j)').json);
+
+// On close interval
+// let bigop = ce.function('Sum', [
+//   ['Divide', 'y', 'x'],
+//   ['Tuple', 'x', 1, 3],
+//   ['Tuple', 'y', 1, 5],
+//   ['Tuple', 'z', 1, 7],
+// ]);
+// bigop.evaluate().print();
+
+// Should be 55 (on collection)
+// bigop = ce.function('Sum', [['Range', 1, 10]]);
+// console.log(bigop.sgn);
+// bigop.evaluate().print();
+
+// On open interval
+// let bigop = ce.function('Sum', [['Divide', 1, 'x'], 'x']);
+// console.log(bigop.sgn);
+// bigop.evaluate().print();
+
+// Canonical should not be subtract
+// const expr1 = ce.parse('\\frac{2}{-3222233}+\\frac{1}{3}');
+// console.log(expr1.json);
+
+// ce.parse('(b^3c^2d)(x^7y)(a^5g)(b^2x^5b3)').print();
+
+// console.log(ce.parse('2\\times\\sqrt{3}').print());
+// console.log(ce.parse('2\\times\\sqrt{3}').json);
+// console.log(ce.parse('2\\times\\sqrt{3}').numericValue);
+
+// console.log(ce.parse('2\\pi').json);
+
+// The ['Hold'] is causing the issue
+// ce.box([
+//   'Sum',
+//   ['Multiply', 'i', 'j'],
+//   ['Tuple', 'i', 1, 10],
+//   ['Tuple', 'j', 3, 13],
+// ])
+//   .evaluate()
+//   .print();
+
+console.info(
+  ce
+    .parse('\\sin(2x)')
+    .simplify({ rules: ['\\sin(2x) -> 2\\sin(x)\\cos(x)'] })
+    .toString()
+);
+
+console.info(
+  ce
+    .parse('-\\cos(x)^4 - \\sin(2x)^2 / 4 - \\sin(y)^2 + 1')
+    .simplify({
+      rules: ['\\sin(2x) -> 2\\sin(x)\\cos(x)', '\\cos(2x) -> 2\\cos^2(x) - 1'],
+    })
+    .toString()
+);
+
+// in Add.sgn() should check x.isNegative instead of x.sgn, and have Abd.isNegative always return false
+ce.parse('|(1+|a|+2)|')
+  .simplify({ rules: ['abc', 'def'] })
+  .print();
+
+ce.parse('||a| + 3|').simplify().print();
+
+const cx = ce.box(ce.box(['If', ['Greater', 'x', 0], 'x', ['Negate', 'x']]));
+console.log(cx.json);
+console.log(cx.toString());
+
+// Should simplify...
+// ce.parse('1+2').simplify().print();
+ce.parse('-1234 - 5678').simplify().print();
+ce.parse('2\\sqrt{3}+\\sqrt{1+2}').simplify().print();
+
+// Serialize correctly?
+ce.parse('\\cos(30\\degree)').simplify().print();
+
+// Should not be Subtract.
+console.info(ce.parse('\\frac{2}{-3222233}+\\frac{1}{3}').json);
+
+ce.box([
+  'Sum',
+  ['Multiply', 'i', 'j'],
+  ['Tuple', ['Hold', 'i'], 1, 10],
+  ['Tuple', 'j', 3, 13],
+])
+  .evaluate()
+  .print();
+
 let expression = ce.parse('|-\\pi|').simplify();
 expression.print();
 console.log(expression.latex);

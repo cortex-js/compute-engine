@@ -10,7 +10,7 @@ export const POLYNOMIALS_LIBRARY: IdentifierDefinitions[] = [
       hold: 'all',
       signature: {
         domain: ['FunctionOf', 'Values', 'Values'],
-        evaluate: (_ce, ops) => expand(ops[0].canonical) ?? ops[0],
+        evaluate: ([x]) => expand(x.canonical) ?? x,
       },
     },
     ExpandAll: {
@@ -18,7 +18,7 @@ export const POLYNOMIALS_LIBRARY: IdentifierDefinitions[] = [
         'Recursively expand out products and positive integer powers',
       signature: {
         domain: ['FunctionOf', 'Values', 'Values'],
-        evaluate: (_ce, ops) => expandAll(ops[0]) ?? ops[0],
+        evaluate: ([x]) => expandAll(x) ?? x,
       },
     },
     Factor: {
@@ -28,14 +28,14 @@ export const POLYNOMIALS_LIBRARY: IdentifierDefinitions[] = [
       hold: 'all',
       signature: {
         domain: ['FunctionOf', 'Values', 'Values'],
-        evaluate: (_ce, ops) => factor(ops[0].canonical),
+        evaluate: ([x]) => factor(x.canonical),
       },
     },
     Together: {
       description: 'Combine rational expressions into a single fraction',
       signature: {
         domain: ['FunctionOf', 'Values', 'Values'],
-        evaluate: (_ce, ops) => together(ops[0]),
+        evaluate: ([x]) => together(x),
       },
     },
     Distribute: {
@@ -43,7 +43,7 @@ export const POLYNOMIALS_LIBRARY: IdentifierDefinitions[] = [
       hold: 'all',
       signature: {
         domain: ['FunctionOf', 'Values', 'Values'],
-        evaluate: (_ce, ops) => (!ops[0] ? ops[0] : distribute(ops[0])),
+        evaluate: ([x]) => (!x ? x : distribute(x)),
       },
     },
   },

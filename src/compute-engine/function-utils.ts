@@ -147,9 +147,9 @@ function makeLambda(
   if (expr.symbol) {
     const fnDef = ce.lookupFunction(expr.symbol);
     if (fnDef) {
-      const fn = fnDef.signature.N ?? fnDef.signature.evaluate;
-      if (fn) return (params) => fn(ce, params) ?? ce._fn(expr.symbol!, params);
-      return (params) => ce._fn(expr.symbol!, params);
+      const fn = fnDef.signature.evaluate;
+      if (fn) return (xs) => fn(xs, { engine: ce }) ?? ce._fn(expr.symbol!, xs);
+      return (xs) => ce._fn(expr.symbol!, xs);
     }
   }
 
@@ -271,10 +271,9 @@ export function makeLambdaN1(
  */
 export function applicable(
   fn: BoxedExpression
-): (args: BoxedExpression[]) => BoxedExpression | undefined {
+): (xs: ReadonlyArray<BoxedExpression>) => BoxedExpression | undefined {
   return (
-    makeLambda(fn) ??
-    ((args) => fn.engine.function('Apply', [fn.N(), ...args]).N())
+    makeLambda(fn) ?? ((xs) => fn.engine.function('Apply', [fn.N(), ...xs]).N())
   );
 }
 

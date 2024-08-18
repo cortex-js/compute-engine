@@ -204,7 +204,8 @@ export const CORE_LIBRARY: IdentifierDefinitions[] = [
             checkDomain(ce, args[1], 'Strings'),
           ]);
         },
-        evaluate: (ce, ops) => {
+        evaluate: (ops, options) => {
+          const ce = options.engine;
           if (ops.length === 0) return ce.Nothing;
 
           const op1 = ops[0];
@@ -212,26 +213,11 @@ export const CORE_LIBRARY: IdentifierDefinitions[] = [
           if (op1.operator === 'Sequence' || op1.operator === 'Delimiter')
             ops = flattenSequence(ops[0].ops!);
 
-          if (ops.length === 1) return ops[0].evaluate();
+          if (ops.length === 1) return ops[0].evaluate(options);
 
           return ce._fn(
             'Tuple',
-            ops.map((x) => x.evaluate())
-          );
-        },
-        N: (ce, ops) => {
-          if (ops.length === 0) return ce.Nothing;
-
-          const op1 = ops[0];
-
-          if (op1.operator === 'Sequence' || op1.operator === 'Delimiter')
-            ops = flattenSequence(ops[0].ops!);
-
-          if (ops.length === 1) return ops[0].N();
-
-          return ce._fn(
-            'Tuple',
-            ops.map((x) => x.N())
+            ops.map((x) => x.evaluate(options))
           );
         },
       },
@@ -282,7 +268,7 @@ export const CORE_LIBRARY: IdentifierDefinitions[] = [
         // By definition, for arguments of the canonical expression of
         // `Hold` are not canonicalized.
         canonical: (ce, args) => (args.length !== 1 ? null : ce.hold(args[0])),
-        evaluate: (ce, ops) => ops[0],
+        evaluate: (ops, { engine: ce }) => ops[0],
       },
     },
     HorizontalSpacing: {
@@ -326,7 +312,8 @@ export const CORE_LIBRARY: IdentifierDefinitions[] = [
           if (op1.operator) return ce.box(op1.operator);
           return ce._fn('Head', canonical(ce, args));
         },
-        evaluate: (ce, ops) => ce.symbol(ops[0]?.operator ?? 'Undefined'),
+        evaluate: (ops, { engine: ce }) =>
+          ce.symbol(ops[0]?.operator ?? 'Undefined'),
       },
     },
 
@@ -341,7 +328,8 @@ export const CORE_LIBRARY: IdentifierDefinitions[] = [
           return ce._fn('Tail', canonical(ce, args));
         },
         // **IMPORTANT** Tail should work on non-canonical expressions
-        evaluate: (ce, ops) => ce._fn('Sequence', ops[0]?.ops ?? []),
+        evaluate: (ops, { engine: ce }) =>
+          ce._fn('Sequence', ops[0]?.ops ?? []),
       },
     },
 
@@ -352,7 +340,7 @@ export const CORE_LIBRARY: IdentifierDefinitions[] = [
           if (ops.length !== 1) return ce.domain('NothingDomain');
           return ops[0].domain;
         },
-        evaluate: (_ce, ops) => ops[0],
+        evaluate: ([x]) => x,
       },
     },
   },
@@ -364,7 +352,7 @@ export const CORE_LIBRARY: IdentifierDefinitions[] = [
           if (args[0].symbol) return ce.function(args[0].symbol, args.slice(1));
           return ce._fn('Apply', args);
         },
-        evaluate: (_ce, ops) => apply(ops[0], ops.slice(1)),
+        evaluate: (ops) => apply(ops[0], ops.slice(1)),
       },
     },
 
@@ -380,7 +368,7 @@ export const CORE_LIBRARY: IdentifierDefinitions[] = [
           const op2 = args[1];
           return ce._fn('Assign', [op1, op2]);
         },
-        evaluate: (ce, ops) => {
+        evaluate: (ops, { engine: ce }) => {
           const op1 = ops[0];
           const op2 = ops[1];
           if (!op1.symbol) return ce.Nothing;
@@ -396,7 +384,7 @@ export const CORE_LIBRARY: IdentifierDefinitions[] = [
       pure: false,
       signature: {
         domain: ['FunctionOf', 'Anything', 'Anything'],
-        evaluate: (ce, ops) => ce.string(ce.assume(ops[0])),
+        evaluate: (ops, { engine: ce }) => ce.string(ce.assume(ops[0])),
       },
     },
 
@@ -413,7 +401,7 @@ export const CORE_LIBRARY: IdentifierDefinitions[] = [
           if (op2.symbol) return ce._fn('Declare', args);
           return ce._fn('Declare', [op1, ce._fn('Hold', [op2])]);
         },
-        evaluate: (ce, ops) => {
+        evaluate: (ops, { engine: ce }) => {
           const op1 = ops[0];
           const op2 = ops[1];
           if (!op1.symbol) return ce.Nothing;
@@ -429,7 +417,7 @@ export const CORE_LIBRARY: IdentifierDefinitions[] = [
       /** Return the domain of an expression */
       signature: {
         domain: ['FunctionOf', 'Anything', 'Domains'],
-        evaluate: (_ce, ops) => ops[0].domain,
+        evaluate: ([x]) => x.domain,
       },
     },
 
@@ -442,7 +430,7 @@ export const CORE_LIBRARY: IdentifierDefinitions[] = [
           return ops[0].domain;
         },
         canonical: (ce, ops) => ce._fn('Evaluate', checkArity(ce, ops, 1)),
-        evaluate: (_ce, ops) => ops[0].evaluate(),
+        evaluate: ([x], options) => x.evaluate(options),
       },
     },
 
@@ -474,7 +462,7 @@ export const CORE_LIBRARY: IdentifierDefinitions[] = [
 
           return ce._fn('Function', [body, ...params]);
         },
-        evaluate: (_ce, _args) => {
+        evaluate: (_args) => {
           // "evaluating" a function expression is not the same
           // as applying arguments to it.
           // See `function apply()` for that.
@@ -493,7 +481,7 @@ export const CORE_LIBRARY: IdentifierDefinitions[] = [
           return ops[0].domain;
         },
         canonical: (ce, ops) => ce._fn('Simplify', checkArity(ce, ops, 1)),
-        evaluate: (_ce, ops) => ops[0]?.simplify() ?? undefined,
+        evaluate: ([x]) => x.simplify() ?? undefined,
       },
     },
 
@@ -551,7 +539,7 @@ export const CORE_LIBRARY: IdentifierDefinitions[] = [
 
           return ce._fn('N', ops);
         },
-        evaluate: (_ce, ops) => ops[0].N(),
+        evaluate: ([x]) => x.N(),
       },
     },
 
@@ -561,7 +549,7 @@ export const CORE_LIBRARY: IdentifierDefinitions[] = [
         params: [],
         optParams: ['Integers', 'Integers'],
         result: 'Numbers',
-        evaluate: (ce, ops) => {
+        evaluate: (ops, { engine: ce }) => {
           // With no arguments, return a random number between 0 and 1
           if (ops.length === 0) return ce.number(Math.random());
 
@@ -594,7 +582,7 @@ export const CORE_LIBRARY: IdentifierDefinitions[] = [
             ]);
           return ce._fn('Signatures', ops);
         },
-        evaluate: (ce, ops) => {
+        evaluate: (ops, { engine: ce }) => {
           const name = ops[0].symbol;
           if (!name) return ce.Nothing;
           const def = ce.lookupFunction(name);
@@ -730,7 +718,7 @@ export const CORE_LIBRARY: IdentifierDefinitions[] = [
           ['OptArg', 'Integers'],
           ['TupleOf', 'Values', 'Numbers'],
         ],
-        evaluate: (ce, ops) => {
+        evaluate: (ops, { engine: ce }) => {
           if (ops[1].symbol === 'Nothing') {
             // Evaluate once
             const start = globalThis.performance.now();
@@ -815,7 +803,7 @@ export const CORE_LIBRARY: IdentifierDefinitions[] = [
     Latex: {
       signature: {
         domain: ['FunctionOf', ['VarArg', 'Anything'], 'Strings'],
-        evaluate: (ce, ops) =>
+        evaluate: (ops, { engine: ce }) =>
           ce.box([
             'LatexString',
             ce.string(joinLatex(ops.map((x) => x.latex))),
@@ -828,7 +816,7 @@ export const CORE_LIBRARY: IdentifierDefinitions[] = [
         'Parse a LaTeX string and evaluate to a corresponding expression',
       signature: {
         domain: ['FunctionOf', 'Anything', 'Anything'],
-        evaluate: (ce, ops) => {
+        evaluate: (ops, { engine: ce }) => {
           if (ops.length === 0) return ce._fn('Sequence', []);
           const op1 = ops[0];
           const s =
@@ -844,7 +832,7 @@ export const CORE_LIBRARY: IdentifierDefinitions[] = [
     RandomExpression: {
       signature: {
         domain: 'Functions',
-        evaluate: (ce, _ops) => ce.box(randomExpression()),
+        evaluate: (_ops, { engine }) => engine.box(randomExpression()),
       },
     },
   },

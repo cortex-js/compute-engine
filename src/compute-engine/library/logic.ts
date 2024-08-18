@@ -31,7 +31,7 @@ export const LOGIC_LIBRARY: IdentifierDefinitions = {
     complexity: 10000,
     signature: {
       domain: 'LogicOperators',
-      evaluate: processAnd,
+      evaluate: evaluateAnd,
     },
   },
   Or: {
@@ -43,7 +43,7 @@ export const LOGIC_LIBRARY: IdentifierDefinitions = {
     complexity: 10000,
     signature: {
       domain: 'LogicOperators',
-      evaluate: processOr,
+      evaluate: evaluateOr,
     },
   },
   Not: {
@@ -54,7 +54,7 @@ export const LOGIC_LIBRARY: IdentifierDefinitions = {
     // @todo: this may not be needed, since we also have rules.
     signature: {
       domain: 'LogicOperators',
-      evaluate: processNot,
+      evaluate: evaluateNot,
     },
   },
   Equivalent: {
@@ -78,7 +78,7 @@ export const LOGIC_LIBRARY: IdentifierDefinitions = {
           return ce.False;
         return ce._fn('Equivalent', args);
       },
-      evaluate: processEquivalent,
+      evaluate: evaluateEquivalent,
     },
   },
   Implies: {
@@ -87,7 +87,7 @@ export const LOGIC_LIBRARY: IdentifierDefinitions = {
     complexity: 10200,
     signature: {
       domain: 'LogicOperators',
-      evaluate: processImplies,
+      evaluate: evaluateImplies,
     },
   },
   Exists: { signature: { domain: 'Functions' }, hold: 'all' },
@@ -97,7 +97,7 @@ export const LOGIC_LIBRARY: IdentifierDefinitions = {
   KroneckerDelta: {
     signature: {
       domain: 'Functions',
-      evaluate: (ce, args) => {
+      evaluate: (args, { engine: ce }) => {
         if (args.length === 1)
           return args[0].symbol === 'True' ? ce.One : ce.Zero;
 
@@ -117,14 +117,15 @@ export const LOGIC_LIBRARY: IdentifierDefinitions = {
   Boole: {
     signature: {
       domain: 'Functions',
-      evaluate: (ce, args) => (args[0].symbol === 'True' ? ce.One : ce.Zero),
+      evaluate: (args, { engine: ce }) =>
+        args[0].symbol === 'True' ? ce.One : ce.Zero,
     },
   },
 };
 
-function processAnd(
-  ce: IComputeEngine,
-  args: BoxedExpression[]
+function evaluateAnd(
+  args: ReadonlyArray<BoxedExpression>,
+  { engine: ce }: { engine: IComputeEngine }
 ): BoxedExpression | undefined {
   if (args.length === 0) return ce.True;
   const ops: BoxedExpression[] = [];
@@ -156,9 +157,9 @@ function processAnd(
   return ce._fn('And', ops);
 }
 
-function processOr(
-  ce: IComputeEngine,
-  args: BoxedExpression[]
+function evaluateOr(
+  args: ReadonlyArray<BoxedExpression>,
+  { engine: ce }: { engine: IComputeEngine }
 ): BoxedExpression | undefined {
   if (args.length === 0) return ce.True;
   const ops: BoxedExpression[] = [];
@@ -190,9 +191,9 @@ function processOr(
   return ce._fn('Or', ops);
 }
 
-function processNot(
-  ce: IComputeEngine,
-  args: BoxedExpression[]
+function evaluateNot(
+  args: ReadonlyArray<BoxedExpression>,
+  { engine: ce }: { engine: IComputeEngine }
 ): BoxedExpression | undefined {
   const op1 = args[0]?.symbol;
   if (op1 === 'True') return ce.False;
@@ -200,9 +201,9 @@ function processNot(
   return undefined;
 }
 
-function processEquivalent(
-  ce: IComputeEngine,
-  args: BoxedExpression[]
+function evaluateEquivalent(
+  args: ReadonlyArray<BoxedExpression>,
+  { engine: ce }: { engine: IComputeEngine }
 ): BoxedExpression | undefined {
   const lhs = args[0].symbol;
   const rhs = args[1].symbol;
@@ -219,9 +220,9 @@ function processEquivalent(
   return undefined;
 }
 
-function processImplies(
-  ce: IComputeEngine,
-  args: BoxedExpression[]
+function evaluateImplies(
+  args: ReadonlyArray<BoxedExpression>,
+  { engine: ce }: { engine: IComputeEngine }
 ): BoxedExpression | undefined {
   const lhs = args[0].symbol;
   const rhs = args[1].symbol;
@@ -239,12 +240,12 @@ export function simplifyLogicFunction(
   x: BoxedExpression
 ): { value: BoxedExpression; because: string } | undefined {
   const value = {
-    And: processAnd,
-    Or: processOr,
-    Not: processNot,
-    Equivalent: processEquivalent,
+    And: evaluateAnd,
+    Or: evaluateOr,
+    Not: evaluateNot,
+    Equivalent: evaluateEquivalent,
 
-    Implies: processImplies,
+    Implies: evaluateImplies,
   }[x.operator]?.(x.engine, x.ops!);
 
   if (!value) return undefined;

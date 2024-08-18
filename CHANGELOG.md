@@ -410,6 +410,9 @@
   canonical form of `\\sqrt[3]{5}` is `["Root", 5, 3]`. Previously, these were
   represented as `["Power", 5, ["Divide", 1, 3]]`.
 
+- The function definitions no longer have a `N` handler. Instead the `evaluate`
+  handler has an optional `{numericApproximation}` argument.
+
 ### Issues Resolved
 
 - Some LaTeX renderer can't render `\/`, so use `/` instead.

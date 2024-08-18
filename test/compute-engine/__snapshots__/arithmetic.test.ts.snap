@@ -980,17 +980,11 @@ N-mach    = 0.75
 exports[`RATIONAL Rational approximation 1`] = `
 box       = ["Rational", 2.5]
 eval-auto = 5/2
-eval-mach = 5/2
-N-auto    = 2.5
-N-mach    = 2.5
 `;
 
 exports[`RATIONAL Rational approximation 2`] = `
 box       = ["Rational", "Pi"]
 eval-auto = 80143857/25510582
-eval-mach = 80143857/25510582
-N-auto    = 3.14159265358979323846
-N-mach    = 3.141592653589793
 `;
 
 exports[`RATIONAL Rational as Divide 1`] = `

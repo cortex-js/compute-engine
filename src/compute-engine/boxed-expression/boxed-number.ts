@@ -668,7 +668,7 @@ export class BoxedNumber extends _BoxedExpression {
   }
 
   evaluate(options?: EvaluateOptions): BoxedExpression {
-    if (options?.numericMode) return this.N();
+    if (options?.numericApproximation) return this.N();
     return this;
   }
 

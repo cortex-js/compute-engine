@@ -71,7 +71,7 @@ import {
   _BoxedFunctionDefinition,
 } from './boxed-expression/boxed-function-definition';
 import { Rational, isRational } from './numerics/rationals';
-import { parseFunctionSignature } from './function-utils';
+import { applicable, parseFunctionSignature } from './function-utils';
 import { CYAN, INVERSE_RED, RESET, YELLOW } from '../common/ansi-codes';
 import {
   DOMAIN_ALIAS,
@@ -1068,7 +1068,7 @@ export class ComputeEngine implements IComputeEngine {
   }
 
   /**
-   * Associate a new delookupSymbolfinition to a function in the current context.
+   * Associate a new FunctionDefinition to a function in the current context.
    *
    * If a definition existed previously, it is replaced.
    *
@@ -1168,7 +1168,6 @@ export class ComputeEngine implements IComputeEngine {
         def.signature = {
           ...sig,
           evaluate: undefined,
-          N: undefined,
           canonical: undefined,
         };
       }
@@ -1475,7 +1474,7 @@ export class ComputeEngine implements IComputeEngine {
 
       if (value === undefined || value === null) return this;
 
-      // Will replace definition if it already exists
+      // Will replace definitdefineFunctionion if it already exists
       if (typeof value === 'function') {
         // Make sure defineFunction acts on the correct scope
         const previousScope = this.swapScope(scope!);
@@ -1492,9 +1491,14 @@ export class ComputeEngine implements IComputeEngine {
       const val = args
         ? this.box(['Function', value, ...args])
         : this.box(value);
+      if (!val.isValid) throw Error(`Invalid function ${val.toString()}`);
 
       const previousScope = this.swapScope(scope!);
-      this.defineFunction(id, { signature: { evaluate: val } });
+      const fn = applicable(val);
+
+      this.defineFunction(id, {
+        signature: { evaluate: (xs) => fn(xs) },
+      });
       this.swapScope(previousScope);
 
       return this;
@@ -1623,7 +1627,6 @@ export class ComputeEngine implements IComputeEngine {
       const sig = fnDef.signature;
       fnDef.signature = {
         ...sig,
-        N: undefined,
         canonical: undefined,
         evaluate: value as any as () => any,
       };
@@ -2181,7 +2184,6 @@ export class ComputeEngine implements IComputeEngine {
           def.signature = {
             ...sig,
             evaluate: undefined,
-            N: undefined,
             canonical: undefined,
           };
         }

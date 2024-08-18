@@ -1,6 +1,7 @@
 import {
   BoxedDomain,
   BoxedExpression,
+  EvaluateOptions,
   IComputeEngine,
   IdentifierDefinitions,
 } from '../public';
@@ -27,11 +28,10 @@ export const CONTROL_STRUCTURES_LIBRARY: IdentifierDefinitions[] = [
           if (ops.length !== 2) return ce.domain('NothingDomain');
           return widen(ops[0], ops[1]);
         },
-        evaluate: (ce, ops) => {
-          const cond = ops[0];
+        evaluate: ([cond, ifTrue, ifFalse], { engine }) => {
           if (cond && cond.symbol === 'True')
-            return ops[1] ? ops[1].evaluate() : ce.Nothing;
-          return ops[2] ? ops[2].evaluate() : ce.Nothing;
+            return ifTrue?.evaluate() ?? engine.Nothing;
+          return ifFalse?.evaluate() ?? engine.Nothing;
         },
       },
     },
@@ -40,11 +40,9 @@ export const CONTROL_STRUCTURES_LIBRARY: IdentifierDefinitions[] = [
       hold: 'all', // Do not evaluate anything
       signature: {
         domain: 'Functions',
-        evaluate: (ce, ops) => {
-          const body = ops[0] ?? ce.Nothing;
+        evaluate: ([body, collection], { engine: ce }) => {
+          body ??= ce.Nothing;
           if (body.symbol === 'Nothing') return body;
-
-          const collection = ops[1];
 
           if (collection && isCollection(collection)) {
             //
@@ -83,7 +81,7 @@ export const CONTROL_STRUCTURES_LIBRARY: IdentifierDefinitions[] = [
       signature: {
         domain: 'Functions',
         result: (ce, ops) => domainWhich(ce, ops),
-        evaluate: (ce, ops) => whichEvaluate(ce, ops, 'evaluate'),
+        evaluate: (ops, options) => evaluateWhich(ops, options),
       },
     },
 
@@ -104,27 +102,26 @@ function domainWhich(ce: IComputeEngine, args: BoxedDomain[]): BoxedDomain {
   return dom ?? ce.domain('NothingDomain');
 }
 
-function whichEvaluate(
-  ce: IComputeEngine,
+function evaluateWhich(
   args: ReadonlyArray<BoxedExpression>,
-  mode: 'N' | 'evaluate'
+  options: EvaluateOptions & { engine: IComputeEngine }
 ): BoxedExpression {
   let i = 0;
   while (i < args.length - 1) {
     if (args[i].evaluate().symbol === 'True') {
-      if (!args[i + 1]) return ce.symbol('Undefined');
-      return mode === 'N' ? args[i + 1].N() : args[i + 1].evaluate();
+      if (!args[i + 1]) return options.engine.symbol('Undefined');
+      return args[i + 1].evaluate(options);
     }
     i += 2;
   }
 
-  return ce.symbol('Undefined');
+  return options.engine.symbol('Undefined');
 }
 
 /** Evaluate a Block expression */
 function evaluateBlock(
-  ce: IComputeEngine,
-  ops: ReadonlyArray<BoxedExpression>
+  ops: ReadonlyArray<BoxedExpression>,
+  { engine: ce }
 ): BoxedExpression {
   // Empty block?
   if (ops.length === 0) return ce.Nothing;
