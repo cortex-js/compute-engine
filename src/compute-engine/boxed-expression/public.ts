@@ -1528,8 +1528,8 @@ export type BoxedFunctionSignature = {
     args: ReadonlyArray<BoxedExpression>
   ) => BoxedExpression;
   sgn?: (
-    ce: IComputeEngine,
-    args: ReadonlyArray<BoxedExpression>
+    args: ReadonlyArray<BoxedExpression>,
+    options: { engine: IComputeEngine }
   ) => -1 | 0 | 1 | typeof NaN | undefined;
 
   compile?: (expr: BoxedExpression) => CompiledExpression;
@@ -2696,8 +2696,8 @@ export type FunctionSignature = {
 
   /** Return the sign of the function expression. */
   sgn?: (
-    ce: IComputeEngine,
-    args: ReadonlyArray<BoxedExpression>
+    args: ReadonlyArray<BoxedExpression>,
+    options: { engine: IComputeEngine }
   ) => -1 | 0 | 1 | undefined | typeof NaN;
 
   /** Return a compiled (optimized) expression. */

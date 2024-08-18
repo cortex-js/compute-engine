@@ -11,7 +11,7 @@ import {
 } from '../public';
 import { DEFAULT_COMPLEXITY } from './order';
 import { BoxedExpression, NumericFlags } from './public';
-import { normalizeFlags } from './utils.js';
+import { normalizeFlags } from './utils';
 
 export class _BoxedFunctionDefinition implements BoxedFunctionDefinition {
   engine: IComputeEngine;

@@ -335,10 +335,10 @@ export const COLLECTIONS_LIBRARY: IdentifierDefinitions = {
         if (s !== null) return engine.number(s.length);
         return engine.Zero;
       },
-      sgn: (ce, ops) => {
-        const def = ops[0].functionDefinition;
-        if (def?.size) return def.size(ops[0]) === 0 ? 0 : 1;
-        const s = ops[0].string;
+      sgn: ([xs]) => {
+        const def = xs.functionDefinition;
+        if (def?.size) return def.size(xs) === 0 ? 0 : 1;
+        const s = xs.string;
         if (s !== null) return s.length === 0 ? 0 : 1;
         return undefined;
       },

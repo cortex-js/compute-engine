@@ -456,7 +456,7 @@ export class BoxedFunction extends _BoxedExpression {
       const sig = this.functionDefinition?.signature;
       if (sig?.sgn) {
         const context = this.engine.swapScope(this.scope);
-        s = sig.sgn(this.engine, this._ops);
+        s = sig.sgn(this._ops, { engine: this.engine });
         this.engine.swapScope(context);
       }
     }

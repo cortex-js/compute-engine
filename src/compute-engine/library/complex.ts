@@ -10,8 +10,7 @@ export const COMPLEX_LIBRARY: IdentifierDefinitions[] = [
       complexity: 1200,
       signature: {
         domain: ['FunctionOf', 'Numbers', 'Numbers'],
-        sgn: (ce, ops) => {
-          const op = ops[0];
+        sgn: ([op]) => {
           const re = op.re;
           if (re === undefined) return undefined;
           if (re === 0) return 0;
@@ -30,8 +29,7 @@ export const COMPLEX_LIBRARY: IdentifierDefinitions[] = [
       complexity: 1200,
       signature: {
         domain: ['FunctionOf', 'Numbers', 'Numbers'],
-        sgn: (ce, ops) => {
-          const op = ops[0];
+        sgn: ([op]) => {
           const re = op.im;
           if (re === undefined) return undefined;
           if (re === 0) return 0;
@@ -81,7 +79,7 @@ export const COMPLEX_LIBRARY: IdentifierDefinitions[] = [
       threadable: true,
       complexity: 1200,
       signature: {
-        sgn: (ce, ops) => ops[0]?.sgn,
+        sgn: ([z]) => z.sgn,
         domain: ['FunctionOf', 'Numbers', 'Numbers'],
         evaluate: (ops, { engine: ce }) => {
           const op = ops[0].numericValue;

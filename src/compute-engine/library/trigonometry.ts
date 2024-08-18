@@ -95,7 +95,7 @@ export const TRIGONOMETRY_LIBRARY: IdentifierDefinitions[] = [
       threadable: true,
       signature: {
         domain: ['FunctionOf', 'Numbers', 'RealNumbers'],
-        sgn: (ce, ops) => trigSign('Arctan', ops[0]),
+        sgn: ([x]) => trigSign('Arctan', x),
         evaluate: ([x], { numericApproximation }) =>
           numericApproximation
             ? evalTrig('Arctan', x)
@@ -233,7 +233,7 @@ function trigFunction(
     threadable: true,
     signature: {
       domain: ['FunctionOf', 'Numbers', 'Numbers'],
-      sgn: (ce, ops) => trigSign(operator, ops[0]),
+      sgn: ([x]) => trigSign(operator, x),
       evaluate: ([x], { numericApproximation }) => {
         if (numericApproximation) return evalTrig(operator, x);
         const a = constructibleValues(operator, x);
