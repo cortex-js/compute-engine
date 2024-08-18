@@ -20,7 +20,7 @@ export function canonicalDivide(
   const ce = op1.engine;
   if (!op1.isValid || !op2.isValid) return ce._fn('Divide', [op1, op2]);
 
-  if (op2.isZero) return ce.NaN;
+  if (op2.isZero) return op1.isZero ? ce.NaN : ce.ComplexInfinity;
 
   // a/a = 1 (if a ≠ 0)
   if (op2.isNotZero === true) {
