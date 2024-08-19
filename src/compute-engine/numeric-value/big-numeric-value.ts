@@ -573,16 +573,16 @@ export class BigNumericValue extends NumericValue {
 function decimalToString(num: Decimal): string {
   // Use scientific notation if the exponent is too large or too small
   // Convert the number to a string
-  let numStr = num.toString();
+  const numStr = num.toString();
 
   // Check if the number is in scientific notation
   if (num.isInteger() && numStr.includes('e')) {
     // Convert the number to a fixed notation string with no decimal places
-    let fixedStr = num.toFixed();
+    const fixedStr = num.toFixed();
 
     // Check the number of trailing zeros
-    let trailingZeros = fixedStr.match(/0+$/);
-    let trailingZerosCount = trailingZeros ? trailingZeros[0].length : 0;
+    const trailingZeros = fixedStr.match(/0+$/);
+    const trailingZerosCount = trailingZeros ? trailingZeros[0].length : 0;
 
     // If there are 5 or fewer trailing zeros, return the fixed notation string
     if (trailingZerosCount <= 5) {

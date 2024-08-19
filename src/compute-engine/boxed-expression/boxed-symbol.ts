@@ -274,7 +274,7 @@ export class BoxedSymbol extends _BoxedExpression {
 
     if (typeof exp !== 'number') exp = exp.canonical;
 
-    let e = typeof exp === 'number' ? exp : exp.im === 0 ? exp.re : undefined;
+    const e = typeof exp === 'number' ? exp : exp.im === 0 ? exp.re : undefined;
 
     if (e === 0) return this.engine.One;
     if (e === 1) return this;
@@ -324,7 +324,7 @@ export class BoxedSymbol extends _BoxedExpression {
 
     if (typeof n !== 'number') n = n.canonical;
 
-    let e = typeof n === 'number' ? n : n.im === 0 ? n.re : undefined;
+    const e = typeof n === 'number' ? n : n.im === 0 ? n.re : undefined;
 
     const ce = this.engine;
     if (this.symbol === 'ComplexInfinity') return ce.NaN;

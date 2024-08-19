@@ -133,7 +133,7 @@ export function fromDigits(
 export function numberToString(num: number | bigint): string {
   // Use scientific notation if the exponent is too large or too small
   // Convert the number to a string
-  let numStr = num.toString();
+  const numStr = num.toString();
 
   // Check if the number is in scientific notation
   if (
@@ -143,17 +143,17 @@ export function numberToString(num: number | bigint): string {
   ) {
     // Convert the number to a fixed notation string with no decimal places
     // (note that Number.toFixed() will use scientific notations for large numbers)
-    let fixedStr = BigInt(num).toString();
+    const fixedStr = BigInt(num).toString();
 
     // Check the number of trailing zeros
-    let trailingZeros = fixedStr.match(/0+$/);
-    let trailingZerosCount = trailingZeros ? trailingZeros[0].length : 0;
+    const trailingZeros = fixedStr.match(/0+$/);
+    const trailingZerosCount = trailingZeros ? trailingZeros[0].length : 0;
 
     // If there are 5 or fewer trailing zeros, return the fixed notation string
     if (trailingZerosCount <= 5) return fixedStr;
   } else if (typeof num === 'bigint') {
-    let trailingZeros = numStr.match(/0+$/);
-    let trailingZerosCount = trailingZeros ? trailingZeros[0].length : 0;
+    const trailingZeros = numStr.match(/0+$/);
+    const trailingZerosCount = trailingZeros ? trailingZeros[0].length : 0;
     // Add an 'e' exponent
     if (trailingZerosCount > 5)
       return `${numStr.slice(0, -trailingZerosCount)}e+${trailingZerosCount}`;

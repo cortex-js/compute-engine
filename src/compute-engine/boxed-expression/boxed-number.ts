@@ -251,7 +251,7 @@ export class BoxedNumber extends _BoxedExpression {
 
     if (typeof exp !== 'number') exp = exp.canonical;
 
-    let e = typeof exp === 'number' ? exp : exp.im === 0 ? exp.re : undefined;
+    const e = typeof exp === 'number' ? exp : exp.im === 0 ? exp.re : undefined;
 
     const ce = this.engine;
     if (e === 0) return ce.One;

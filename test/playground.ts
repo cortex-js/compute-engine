@@ -1,21 +1,8 @@
 import { ComputeEngine } from '../src/compute-engine';
-import { costFunction } from '../src/compute-engine/cost-function';
+cost-function';
 
 const ce = new ComputeEngine();
 
-// console.info(ce.parse('1/0').json);
-// console.info(ce.parse('1/0').isComplex);
-
-// console.info(ce.parse('2\\varphi').simplify().toString());
-
-// console.info(costFunction(ce.parse('1')));
-// console.info(costFunction(ce.parse('\\sqrt{5}')));
-// console.info(costFunction(ce.parse('1+\\sqrt{5}')));
-// console.info(costFunction(ce.parse('300')));
-// console.info(costFunction(ce.parse('3/4')));
-// console.info(costFunction(ce.parse('3.141592')));
-// console.info(costFunction(ce.parse('\\pi')));
-// console.info(costFunction(ce.parse('\\sqrt3')));
 
 ce.parse('1')
   .simplify({

@@ -658,7 +658,7 @@ export class BoxedFunction extends _BoxedExpression {
 
     if (typeof exp !== 'number') exp = exp.canonical;
 
-    let e = typeof exp === 'number' ? exp : exp.im === 0 ? exp.re : undefined;
+    const e = typeof exp === 'number' ? exp : exp.im === 0 ? exp.re : undefined;
 
     if (e === 0) return this.engine.One;
     if (e === 1) return this;
@@ -739,7 +739,7 @@ export class BoxedFunction extends _BoxedExpression {
 
     if (typeof exp !== 'number') exp = exp.canonical;
 
-    let e = typeof exp === 'number' ? exp : exp.im === 0 ? exp.re : undefined;
+    const e = typeof exp === 'number' ? exp : exp.im === 0 ? exp.re : undefined;
 
     if (e === 0) return this.engine.NaN;
     if (e === 1) return this;

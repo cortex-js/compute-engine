@@ -510,7 +510,10 @@ function makeCanonicalFunction(
   // Flatten any sequence
   // f(a, Sequence(b, c), Sequence(), d) -> f(a, b, c, d)
   //
-  let args: BoxedExpression[] = flatten(xs, def.associative ? name : undefined);
+  const args: BoxedExpression[] = flatten(
+    xs,
+    def.associative ? name : undefined
+  );
 
   const adjustedArgs = adjustArguments(
     ce,

@@ -87,7 +87,7 @@ export function canonicalDivide(
   }
 
   // Are both op1 and op2 a numeric value?
-  let v1 = op1.numericValue;
+  const v1 = op1.numericValue;
   const v2 = op2.numericValue;
   if (v1 !== null && v2 !== null) {
     if (

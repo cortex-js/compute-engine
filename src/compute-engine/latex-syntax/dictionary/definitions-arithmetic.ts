@@ -1309,8 +1309,8 @@ function parseBigOp(name: string, prec: number) {
     //
     const indexingSetArguments: Expression[] = [];
     for (const indexinSet of indexes) {
-      let lower = indexinSet.lower;
-      let upper = indexinSet.upper;
+      const lower = indexinSet.lower;
+      const upper = indexinSet.upper;
       const index = indexinSet.index ?? 'Nothing';
       if (upper !== null && upper !== undefined)
         indexingSetArguments.push(['Tuple', index, lower ?? 1, upper]);

@@ -555,7 +555,7 @@ export const CORE_LIBRARY: IdentifierDefinitions[] = [
 
           // If one or more arguments are provided, they must be integers
           // The result will be an integer between the two arguments
-          let [lowerOp, upperOp] = ops;
+          const [lowerOp, upperOp] = ops;
           let lower: number;
           let upper: number;
           if (upperOp === undefined) {
@@ -855,7 +855,7 @@ export function canonicalInvisibleOperator(
     //
     const lhsNumber = lhs.canonical.re ?? NaN;
     if (Number.isInteger(lhsNumber)) {
-      let rhs = ops[1];
+      const rhs = ops[1];
       if (rhs.operator === 'Divide' || rhs.operator === 'Rational') {
         const [n, d] = [
           rhs.op1.canonical.re ?? NaN,

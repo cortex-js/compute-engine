@@ -1,12 +1,10 @@
 import { BoxedDomain, BoxedExpression, IComputeEngine } from '../public';
 import { getImaginaryFactor } from '../boxed-expression/utils';
 import { widen } from '../boxed-expression/boxed-domain';
-import { isCollection, isIndexableCollection } from '../collection-utils';
+import { isIndexableCollection } from '../collection-utils';
 
-import { normalizeIndexingSets, indexingSetCartestianProduct } from './utils';
 import { flatten } from '../symbolic/flatten';
 import { addOrder } from '../boxed-expression/order';
-import { reduceCollection } from './collections';
 
 /**
  *

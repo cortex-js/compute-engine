@@ -265,7 +265,7 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
         params: ['Numbers'],
         result: 'Numbers',
         sgn: ([x]) => {
-          let n = chop(1 - (x.im ?? 0) / Math.PI) + 1;
+          const n = chop(1 - (x.im ?? 0) / Math.PI) + 1;
           if (x.isReal || n % 1 === 0) {
             if (x.isNegative && x.isInfinity) return 0;
             return n % 2 === 0 || x.isReal ? 1 : -1;
@@ -1350,7 +1350,7 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
           let countUndefined = 0;
 
           // Go over each term, and count the signs of the terms
-          let total = reduceBigOp(
+          const total = reduceBigOp(
             ops[0],
             ops.slice(1),
             (acc, x) => {
@@ -1419,7 +1419,7 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
           let countNaN = 0;
           let countUndefined = 0;
           // Go over each term, and count the signs of the terms
-          let total = reduceBigOp(
+          const total = reduceBigOp(
             ops[0],
             ops.slice(1),
             (acc, x) => {
