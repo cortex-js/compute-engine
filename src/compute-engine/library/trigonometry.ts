@@ -1,9 +1,5 @@
 import { Decimal } from 'decimal.js';
-import {
-  IdentifierDefinitions,
-  DomainExpression,
-  FunctionDefinition,
-} from '../public';
+import { IdentifierDefinitions, FunctionDefinition } from '../public';
 import { bignumPreferred } from '../boxed-expression/utils';
 import { apply2 } from '../symbolic/utils';
 import { checkArity } from '../boxed-expression/validate';
@@ -30,7 +26,7 @@ export const TRIGONOMETRY_LIBRARY: IdentifierDefinitions[] = [
       holdUntil: 'N',
       wikidata: 'Q167',
       value: (engine) =>
-        bignumPreferred(engine) ? engine._BIGNUM_PI : Math.PI,
+        engine.number(bignumPreferred(engine) ? engine._BIGNUM_PI : Math.PI),
     },
   },
   {

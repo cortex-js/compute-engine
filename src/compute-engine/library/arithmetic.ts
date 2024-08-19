@@ -978,7 +978,9 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
       holdUntil: 'N',
 
       value: (engine) =>
-        bignumPreferred(engine) ? engine._BIGNUM_ONE.exp() : Math.exp(1),
+        engine.number(
+          bignumPreferred(engine) ? engine._BIGNUM_ONE.exp() : Math.exp(1)
+        ),
     },
     GoldenRatio: {
       domain: 'AlgebraicNumbers',

@@ -665,6 +665,7 @@ export const CORE_LIBRARY: IdentifierDefinitions[] = [
           if (op1.symbol) {
             // Is the value of the symbol an indexable collection?
             const vh = op1.evaluate()?.operator;
+            // If "f" was a list, vh would be "List"
             if (vh) {
               const def = ce.lookupFunction(vh);
               if (def?.at) return ce._fn('At', [op1.canonical, op2.canonical]);

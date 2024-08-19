@@ -1702,7 +1702,7 @@ export class ComputeEngine implements IComputeEngine {
    * Calls `ce.function()`, `ce.number()` or `ce.symbol()` as appropriate.
    */
   box(
-    expr: NumericValue | Decimal | Complex | SemiBoxedExpression,
+    expr: NumericValue | Decimal | SemiBoxedExpression,
     options?: { canonical?: CanonicalOptions; structural?: boolean }
   ): BoxedExpression {
     return box(this, expr, options);

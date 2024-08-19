@@ -324,13 +324,7 @@ export function boxFunction(
 
 export function box(
   ce: IComputeEngine,
-  expr:
-    | null
-    | undefined
-    | NumericValue
-    | Decimal
-    | Complex
-    | SemiBoxedExpression,
+  expr: null | undefined | NumericValue | SemiBoxedExpression,
   options?: { canonical?: CanonicalOptions; structural?: boolean }
 ): BoxedExpression {
   if (expr === null || expr === undefined) return ce._fn('Sequence', []);
@@ -354,19 +348,6 @@ export function box(
   //  Box a function
   //
   if (Array.isArray(expr)) {
-    // If the first element is a number, it's not a function, it's a rational
-    // `[number, number]`
-    if (isMachineRational(expr)) {
-      if (Number.isInteger(expr[0]) && Number.isInteger(expr[1]))
-        return ce.number(expr);
-      // This wasn't a valid rational, turn it into a `Divide`
-      return canonicalForm(
-        boxFunction(ce, 'Divide', expr, { canonical, structural }),
-        options.canonical!
-      );
-    }
-    if (isBigRational(expr)) return ce.number(expr);
-
     if (typeof expr[0] !== 'string')
       throw new Error(
         `The first element of an array should be a string (the function name): ${JSON.stringify(expr)}`
@@ -382,14 +363,9 @@ export function box(
   }
 
   //
-  // Box a number (other than a rational)
+  // Box a number
   //
-  if (
-    typeof expr === 'number' ||
-    expr instanceof Complex ||
-    expr instanceof Decimal
-  )
-    return ce.number(expr);
+  if (typeof expr === 'number') return ce.number(expr);
 
   //
   // Box a String, a Symbol or a number as a string shorthand
@@ -424,6 +400,8 @@ export function box(
     if ('str' in expr) return new BoxedString(ce, expr.str, metadata);
     if ('sym' in expr) return ce.symbol(expr.sym, { canonical });
     if ('num' in expr) return ce.number(expr, { canonical });
+
+    throw new Error(`Unexpected MathJSON object: ${JSON.stringify(expr)}`);
   }
 
   return ce.symbol('Undefined');
@@ -522,7 +500,7 @@ function makeCanonicalFunction(
       const result = sig.canonical(ce, xs);
       if (result) return result;
     } catch (e) {
-      console.error(e?.stack ?? e.toString());
+      console.error(e.message);
     }
     // The canonical handler gave up, return a non-canonical expression
     return new BoxedFunction(ce, name, xs, { metadata, canonical: false });

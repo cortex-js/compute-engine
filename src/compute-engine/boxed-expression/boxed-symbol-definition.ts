@@ -181,8 +181,9 @@ export class _BoxedSymbolDefinition implements BoxedSymbolDefinition {
       this._value = ce.parse(this._defValue) ?? ce.symbol('Undefined');
     else if (typeof this._defValue === 'function')
       this._value = ce.box(this._defValue(ce) ?? 'Undefined');
-    else if (this._defValue) this._value = ce.box(this._defValue);
+    else if (this._defValue !== undefined) this._value = ce.box(this._defValue);
     else this._value = undefined;
+
     return this._value ?? undefined;
   }
 
