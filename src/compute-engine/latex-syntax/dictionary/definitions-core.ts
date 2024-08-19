@@ -1297,7 +1297,7 @@ function parseAssign(parser: Parser, lhs: Expression): Expression | null {
 
     const delimBody = operand(operand(lhs, 2), 1);
     let args: Expression[] = [];
-    if (operator(delimBody) === 'Sequence') args = operands(delimBody);
+    if (operator(delimBody) === 'Sequence') args = [...operands(delimBody)];
     else if (delimBody) args = [delimBody!];
 
     return ['Assign', fn, ['Function', rhs, ...(args ?? [])]];

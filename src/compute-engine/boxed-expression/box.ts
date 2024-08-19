@@ -31,7 +31,10 @@ import { adjustArguments, checkNumericArgs } from './validate';
 import { canonicalMultiply } from '../library/arithmetic-multiply';
 import { NumericValue } from '../numeric-value/public';
 import { ExactNumericValue } from '../numeric-value/exact-numeric-value';
-import { isValidIdentifier } from '../../math-json/identifiers';
+import {
+  isValidIdentifier,
+  validateIdentifier,
+} from '../../math-json/identifiers';
 import { canonicalDivide } from '../library/arithmetic-divide';
 import { asBigint } from './numerics';
 import { bigintValue } from '../numerics/expression';
@@ -132,6 +135,12 @@ export function boxFunction(
 ): BoxedExpression {
   options = options ? { ...options } : {};
   if (!('canonical' in options)) options.canonical = true;
+
+  if (!isValidIdentifier(name)) {
+    throw new Error(
+      `Unexpected function name: "${name}" (not a valid identifier: ${validateIdentifier(name)})`
+    );
+  }
 
   const structural = options.structural ?? false;
 
@@ -321,7 +330,6 @@ export function box(
     | NumericValue
     | Decimal
     | Complex
-    | Rational
     | SemiBoxedExpression,
   options?: { canonical?: CanonicalOptions; structural?: boolean }
 ): BoxedExpression {
@@ -343,7 +351,7 @@ export function box(
   const structural = options.structural ?? false;
 
   //
-  //  Box a function or a rational
+  //  Box a function
   //
   if (Array.isArray(expr)) {
     // If the first element is a number, it's not a function, it's a rational
@@ -359,8 +367,16 @@ export function box(
     }
     if (isBigRational(expr)) return ce.number(expr);
 
+    if (typeof expr[0] !== 'string')
+      throw new Error(
+        `The first element of an array should be a string (the function name): ${JSON.stringify(expr)}`
+      );
+
     return canonicalForm(
-      boxFunction(ce, expr[0], operands(expr), { canonical, structural }),
+      boxFunction(ce, expr[0], expr.slice(1) as SemiBoxedExpression[], {
+        canonical,
+        structural,
+      }),
       options.canonical!
     );
   }

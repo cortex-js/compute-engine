@@ -266,7 +266,7 @@ function parseColumnFormat(parser: Parser, optional = true): string {
 
 function serializeTabular(
   serializer: Serializer,
-  rows: Expression[],
+  rows: ReadonlyArray<Expression>,
   delims: string | undefined | null,
   colSpec: string | undefined | null
 ): string {

@@ -898,7 +898,7 @@ export interface Parser {
   parseArguments(
     kind?: 'implicit' | 'enclosure',
     until?: Terminator
-  ): Expression[] | null;
+  ): ReadonlyArray<Expression> | null;
 
   /**
    * Parse a postfix operator, such as `'` or `!`.

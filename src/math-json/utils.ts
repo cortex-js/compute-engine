@@ -97,7 +97,9 @@ export function operator(
  * Return the arguments of a function, or an empty array if not a function
  * or no arguments.
  */
-export function operands(expr: Expression | null | undefined): Expression[] {
+export function operands(
+  expr: Expression | null | undefined
+): ReadonlyArray<Expression> {
   if (Array.isArray(expr)) return expr.slice(1) as Expression[];
   if (expr !== undefined && isFunctionObject(expr)) return expr.fn.slice(1);
 
@@ -357,7 +359,7 @@ export function foldAssociativeOperator(
 /** Return the elements of a sequence, or null if the expression is not a sequence. The sequence can be optionally enclosed by a`["Delimiter"]` expression  */
 export function getSequence(
   expr: Expression | null | undefined
-): Expression[] | null {
+): ReadonlyArray<Expression> | null {
   if (expr === null || expr === undefined) return null;
 
   let h = operator(expr);

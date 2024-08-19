@@ -1324,7 +1324,7 @@ export class _Parser implements Parser {
   parseArguments(
     kind: 'enclosure' | 'implicit' = 'enclosure',
     until?: Readonly<Terminator>
-  ): Expression[] | null {
+  ): ReadonlyArray<Expression> | null {
     if (this.atTerminator(until)) return null;
 
     const savedIndex = this.index;

@@ -415,6 +415,9 @@
 
 ### Issues Resolved
 
+- **#188** Throw an error when invalid expressions are boxed, for example
+  `ce.box(["Add", ["3"]])`.
+
 - Some LaTeX renderer can't render `\/`, so use `/` instead.
 
 - When definitions are added to the LaTeX dictionary, they now take precedence
