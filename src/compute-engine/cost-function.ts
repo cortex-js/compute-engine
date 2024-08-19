@@ -1,3 +1,4 @@
+import { NumericValue } from './numeric-value/public.js';
 import { BoxedExpression } from './public';
 
 /**
@@ -37,14 +38,33 @@ import { BoxedExpression } from './public';
  * ```
  */
 
-function numericCostFunction(n: number): number {
-  if (Number.isInteger(n) && n !== 0) {
-    return Math.floor(Math.log2(Math.abs(n)) / Math.log2(10)) + (n > 0 ? 1 : 2);
+function numericCostFunction(n: NumericValue | number): number {
+  if (typeof n === 'number') {
+    if (n === 0) return 1;
+    if (Number.isInteger(n))
+      return (
+        Math.floor(Math.log2(Math.abs(n)) / Math.log2(10)) + (n > 0 ? 1 : 2)
+      );
+    return 2;
   }
 
-  return 2;
+  if (n.isZero) return 1;
+
+  if (n.im !== 0)
+    return numericCostFunction(n.re) + numericCostFunction(n.im) + 1;
+
+  return numericCostFunction(n.re);
 }
 
+/**
+ * The default cost function, used to determine if a new expression is simpler
+ * than the old one.
+ *
+ * To change the cost function used by the engine, set the
+ * `ce.costFunction` property of the engine or pass a custom cost function
+ * to the `simplify` function.
+ *
+ */
 export function costFunction(expr: BoxedExpression): number {
   //
   // 1/ Symbols
@@ -55,48 +75,18 @@ export function costFunction(expr: BoxedExpression): number {
   //
   // 2/ Literal Numeric Values
   //
-  if (expr.isNumberLiteral && expr.isZero) return 1;
 
-  const num = expr.numericValue;
-  if (num !== null) {
-    if (typeof num === 'number') return numericCostFunction(num);
-    return 2;
-  }
+  if (expr.isNumberLiteral) return numericCostFunction(expr.numericValue!);
 
   const name = expr.operator;
   let nameCost = 2;
-  if (['Add', 'Divide'].includes(name)) nameCost = 3;
+  if (['Add'].includes(name)) nameCost = 3;
   else if (['Subtract', 'Negate'].includes(name)) nameCost = 4;
   else if (['Square', 'Sqrt', 'Multiply'].includes(name)) nameCost = 5;
-  else if (['Power', 'Root'].includes(name)) nameCost = 6;
-  else if (['Ln', 'Exp', 'Log', 'Lb'].includes(name)) nameCost = 7;
-  else if (
-    [
-      'Arcsin',
-      'Arccos',
-      'Arctan',
-      'Arcsec',
-      ' Arccsc',
-      'Arsinh',
-      'Arcosh',
-      'Artanh',
-      'Arcsech',
-      'Arcsch',
-      'Cosh',
-      'Cos',
-      'Csc',
-      'Csch',
-      // '??': 'Cot',
-      // '??': 'Coth',
-      'Sec',
-      'Sech',
-      'Sin',
-      'Sinh',
-      'Tan',
-      'Tanh',
-    ].includes(name)
-  )
-    nameCost = 9;
+  else if (['Divide'].includes(name)) nameCost = 6;
+  else if (['Power', 'Root'].includes(name)) nameCost = 7;
+  else if (['Ln', 'Exp', 'Log', 'Lb'].includes(name)) nameCost = 8;
+  else if (['Cos', 'Sin', 'Tan'].includes(name)) nameCost = 9;
   else nameCost = 10;
 
   return (

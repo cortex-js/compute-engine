@@ -46,7 +46,7 @@ export function bigint(a: Decimal | number | bigint | string): bigint | null {
   try {
     return BigInt(s);
   } catch (e) {
-    console.error(e);
+    console.error(e.message);
     return null;
   }
 }

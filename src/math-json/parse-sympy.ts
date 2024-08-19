@@ -387,7 +387,7 @@ export function parse(s: string): Expression {
 
     return result ?? 'Nothing';
   } catch (e) {
-    console.error(e);
+    console.error(e.message);
   }
   return 'Nothing';
 }

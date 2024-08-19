@@ -117,7 +117,7 @@ export abstract class _BoxedExpression implements BoxedExpression {
 
   print(): void {
     // Make sure the console.log is not removed by minification
-    const log = console['log'];
+    const log = console['info'];
     log?.(this.toString());
   }
 
@@ -499,23 +499,11 @@ export abstract class _BoxedExpression implements BoxedExpression {
     options?: { canonical: CanonicalOptions; recursive?: boolean }
   ): BoxedExpression {
     if (!this.ops) return fn(this);
-    const canonical = options?.canonical ?? true;
+    const canonical = options?.canonical ?? this.isCanonical;
     const recursive = options?.recursive ?? true;
-    if (!recursive)
-      return fn(
-        this.engine.function(
-          this.operator,
-          this.ops.map((x) => fn(x)),
-          { canonical }
-        )
-      );
-    return fn(
-      this.engine.function(
-        this.operator,
-        this.ops.map((x) => x.map(fn, options)),
-        { canonical }
-      )
-    );
+
+    const ops = this.ops.map((x) => (recursive ? x.map(fn, options) : fn(x)));
+    return fn(this.engine.function(this.operator, ops, { canonical }));
   }
 
   solve(

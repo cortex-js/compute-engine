@@ -11,10 +11,9 @@ describe('TRIGONOMETRIC FUNCTIONS implicit arguments', () => {
       canonical = ["Subtract", ["Cos", "x"], ["Sin", "x"]]
     `));
   test(`\\cos \\frac{x}{2}^2`, () =>
-    expect(check('\\cos \\frac{x}{2}^2')).toMatchInlineSnapshot(`
-      box       = ["Cos", ["Square", ["Divide", "x", 2]]]
-      eval-auto = cos(0.25 * x^2)
-    `));
+    expect(check('\\cos \\frac{x}{2}^2')).toMatchInlineSnapshot(
+      `["Cos", ["Square", ["Divide", "x", 2]]]`
+    ));
 });
 
 describe('TRIGONOMETRIC FUNCTIONS inverse, prime', () => {
@@ -57,9 +56,9 @@ describe('TRIGONOMETRIC FUNCTIONS', () => {
   test(`\\cos(\\frac{\\pi}{5})`, () =>
     expect(check('\\cos(\\frac{\\pi}{5})')).toMatchInlineSnapshot(`
       box       = ["Cos", ["Divide", "Pi", 5]]
-      simplify  = (1 + sqrt(5)) / 4
-      eval-auto = (1 + sqrt(5)) / 4
-      eval-mach = (1 + sqrt(5)) / 4
+      simplify  = 1/4 + sqrt(5) / 4
+      eval-auto = 1/4 + sqrt(5) / 4
+      eval-mach = 1/4 + sqrt(5) / 4
       N-auto    = 0.809016994374947424103
       N-mach    = 0.8090169943749475
     `));

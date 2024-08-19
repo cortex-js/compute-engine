@@ -232,7 +232,7 @@ function compiledEval() {
 
     return performance.now() - startTime;
   } catch (e) {
-    console.error(e);
+    console.error(e.message);
   }
   return 0;
 }

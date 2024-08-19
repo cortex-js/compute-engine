@@ -27,7 +27,7 @@ function parseTrig(op: string): ExpressionParseHandler {
       '\\arsinh': 'Arsinh',
       '\\arcosh': 'Arcosh',
       '\\artanh': 'Artanh',
-      '\\arcsech': 'Arcsech',
+      '\\arsech': 'Arcsech',
       '\\arcsch': 'Arcsch',
       // '\\arg',
       '\\ch': 'Cosh',

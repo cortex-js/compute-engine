@@ -36,7 +36,7 @@ import {
 import { add } from './terms';
 import { bigint } from '../numerics/numeric-bigint';
 import { isInMachineRange } from '../numerics/numeric-bignum';
-import { replace } from '../rules';
+import { xreplace } from '../rules';
 import { simplify } from '../symbolic/simplify';
 import { ExactNumericValue } from '../numeric-value/exact-numeric-value';
 
@@ -444,14 +444,12 @@ export class BoxedNumber extends _BoxedExpression {
 
   replace(
     rules: BoxedRuleSet | Rule | Rule[],
-    options?: ReplaceOptions
+    options?: Partial<ReplaceOptions>
   ): BoxedExpression | null {
     // Apply the replace on the structural version of the number.
     // This will allow transformations to be applied on ["Rational", 3, 4]
     // for example.
-    const steps = replace(this.structural, rules, options);
-    if (steps.length === 0) return null;
-    return steps[steps.length - 1].value;
+    return xreplace(this.structural, rules, options).at(-1)?.value ?? null;
   }
 
   match(

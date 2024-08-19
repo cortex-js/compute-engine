@@ -106,9 +106,8 @@ N-mach    = 2.718281828459045
 
 exports[`CONSTANTS GoldenRatio 1`] = `
 box       = GoldenRatio
-simplify  = (1 + sqrt(5)) / 2
-eval-auto = (1 + sqrt(5)) / 2
-eval-mach = (1 + sqrt(5)) / 2
+eval-auto = "GoldenRatio"
+eval-mach = "GoldenRatio"
 N-auto    = 1.61803398874989484821
 N-mach    = 1.618033988749895
 `;
@@ -136,6 +135,7 @@ exports[`DIVIDE Divide with single argument 1`] = `2.5`;
 exports[`EXACT EVALUATION Add: All exact 1`] = `
 box       = ["Add", 6, ["Divide", 10, 14], ["Sqrt", ["Divide", 18, 9]]]
 canonical = ["Add", 6, ["Rational", 5, 7], ["Sqrt", 2]]
+simplify  = 47/7 + sqrt(2)
 eval-auto = 47/7 + sqrt(2)
 eval-mach = 47/7 + sqrt(2)
 N-auto    = 8.12849927665880933451
@@ -260,6 +260,7 @@ canonical = [
   ["Sqrt", 5],
   ["Sqrt", 7]
 ]
+simplify  = 5/2 + sqrt(5) + sqrt(7)
 eval-auto = 5/2 + sqrt(5) + sqrt(7)
 eval-mach = 5/2 + sqrt(5) + sqrt(7)
 N-auto    = 7.38181928856438028691
@@ -283,7 +284,7 @@ N-mach    = 2.23606797749979
 exports[`EXACT EVALUATION Sqrt: Exact rational 1`] = `
 box       = ["Sqrt", ["Divide", 5, 7]]
 canonical = ["Multiply", ["Rational", 1, 7], ["Sqrt", 35]]
-simplify  = sqrt(35) / 7
+simplify  = Rational(1, 7) * sqrt(35)
 eval-auto = sqrt(35)/7
 eval-mach = sqrt(35)/7
 N-auto    = 0.845154254728516577511
@@ -299,6 +300,7 @@ eval-mach = 2.258317958127243
 
 exports[`EXACT EVALUATION Square rationals are grouped together 1`] = `
 box       = ["Add", ["Sqrt", 5], ["Sqrt", 5]]
+simplify  = 2sqrt(5)
 eval-auto = 2sqrt(5)
 eval-mach = 2sqrt(5)
 N-auto    = 4.47213595499957939282
@@ -424,7 +426,7 @@ canonical = NaN
 
 exports[`LB Lb 0 1`] = `
 box       = ["Lb", 0]
-canonical = NaN
+canonical = NegativeInfinity
 `;
 
 exports[`LB Lb 1 1`] = `
@@ -469,7 +471,7 @@ N-mach    = 1.3643763538418412i
 exports[`LG LG 0 1`] = `
 box       = ["Lg", 0]
 canonical = ["Log", 0]
-simplify  = NaN
+simplify  = -oo
 `;
 
 exports[`LG LG 1 1`] = `
@@ -557,14 +559,7 @@ N-mach    = 0.05921954433158507
 
 exports[`LOG(a,b) LOG(a,b) Log -1, 5 1`] = `["Log", -1, 5]`;
 
-exports[`LOG(a,b) LOG(a,b) Log 0, 5 1`] = `
-box       = ["Log", 0, 5]
-simplify  = NaN
-eval-auto = NaN
-eval-mach = NaN
-N-auto    = -oo
-N-mach    = -oo
-`;
+exports[`LOG(a,b) LOG(a,b) Log 0, 5 1`] = `["Log", 0, 5]`;
 
 exports[`LOG(a,b) LOG(a,b) Log 1, 5 1`] = `
 box       = ["Log", 1, 5]
@@ -721,9 +716,9 @@ canonical = [
   ["Multiply", 2, 5, 5, 7, ["Sqrt", 2], "Pi"],
   ["Multiply", 7, 9]
 ]
-simplify  = pi * (50sqrt(2)) / 9
-eval-auto = pi * (50sqrt(2)) / 9
-eval-mach = pi * (50sqrt(2)) / 9
+simplify  = pi * 50sqrt(2) / 9
+eval-auto = pi * 50sqrt(2) / 9
+eval-mach = pi * 50sqrt(2) / 9
 N-auto    = 24.6826829897687013722
 N-mach    = 24.68268298976881
 `;
@@ -744,8 +739,8 @@ canonical = [
   ["Multiply", 2, 5, 5, 7, ["Sqrt", 2], 1.1, "Pi"],
   ["Multiply", 7, 9]
 ]
-simplify  = 8.64241621450224728022 * pi
-eval-auto = 8.64241621450224728022 * pi
+simplify  = 8.64241621450224666911 * pi
+eval-auto = 8.64241621450224666911 * pi
 eval-mach = 8.642416214502223 * pi
 N-auto    = 27.1509512887455715095
 N-mach    = 27.150951288745713
@@ -1059,7 +1054,7 @@ N-mach    = 2x
 exports[`SQRT √(5/7) 1`] = `
 box       = ["Sqrt", ["Rational", 5, 7]]
 canonical = ["Multiply", ["Rational", 1, 7], ["Sqrt", 35]]
-simplify  = sqrt(35) / 7
+simplify  = Rational(1, 7) * sqrt(35)
 eval-auto = sqrt(35)/7
 eval-mach = sqrt(35)/7
 N-auto    = 0.845154254728516577511

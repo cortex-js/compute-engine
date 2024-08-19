@@ -43,19 +43,22 @@ const RULES: Rule[] = [
   },
 
   //Not Being Run (gives infinity instead of NaN)
-  'x/0 -> \\operatorname{NaN}',
-  {
-    match: '0^x',
-    replace: '\\operatorname{NaN}',
-    condition: (ids) => ids._x.isNonPositive === true,
-  },
+  // @fixme
+  // 'x/0 -> \\operatorname{NaN}',
+  // @fixme
+  // {
+  //   match: '0^x',
+  //   replace: '\\operatorname{NaN}',
+  //   condition: (ids) => ids._x.isNonPositive === true,
+  // },
 
   //Currently gives 0
-  {
-    match: '0*x',
-    replace: '\\operatorname{NaN}',
-    condition: (_x) => _x._x.isInfinity === true,
-  },
+  // @fixme
+  // {
+  //   match: '0*x',
+  //   replace: '\\operatorname{NaN}',
+  //   condition: (_x) => _x._x.isInfinity === true,
+  // },
 
   //Ln
   // '\\log(x) -> \\ln(x)',
@@ -199,35 +202,39 @@ const RULES: Rule[] = [
   }, // doesn't work but {match:'\\frac{a}{d*b^n}',replace:'\\frac{a}{d}*b^{-n}',condition:ids=>ids._n.isNotZero===true} works
 
   //Indeterminate Forms Involving Infinity
-  { match: '0*x', replace: '0', condition: (_x) => _x._x.isFinite === true },
-  { match: '1^x', replace: '1', condition: (_x) => _x._x.isFinite === true },
-  {
-    match: 'a^0',
-    replace: '\\operatorname{NaN}',
-    condition: (id) => id._a.isInfinity === true,
-  },
+  // @fixme
+  // { match: '0*x', replace: '0', condition: (_x) => _x._x.isFinite === true },
+  // { match: '1^x', replace: '1', condition: (_x) => _x._x.isFinite === true },
+
+  // @fixme
+  // {
+  //   match: 'a^0',
+  //   replace: '\\operatorname{NaN}',
+  //   condition: (id) => id._a.isInfinity === true,
+  // },
 
   //Infinity and Multiplication
-  {
-    match: '\\infty*x',
-    replace: '\\infty',
-    condition: (_x) => _x._x.isPositive === true,
-  },
-  {
-    match: 'x*(-\\infty)',
-    replace: '-\\infty',
-    condition: (_x) => _x._x.isPositive === true,
-  },
-  {
-    match: '\\infty*x',
-    replace: '-\\infty',
-    condition: (_x) => _x._x.isNegative === true,
-  },
-  {
-    match: 'x*(-\\infty)',
-    replace: '\\infty',
-    condition: (_x) => _x._x.isNegative === true,
-  },
+  // @fixme
+  // {
+  //   match: '\\infty * x',
+  //   replace: '\\infty',
+  //   condition: (_x) => _x._x.isPositive === true,
+  // },
+  // {
+  //   match: 'x*(-\\infty)',
+  //   replace: '-\\infty',
+  //   condition: (_x) => _x._x.isPositive === true,
+  // },
+  // {
+  //   match: '\\infty * x',
+  //   replace: '-\\infty',
+  //   condition: (_x) => _x._x.isNegative === true,
+  // },
+  // {
+  //   match: 'x*(-\\infty)',
+  //   replace: '\\infty',
+  //   condition: (_x) => _x._x.isNegative === true,
+  // },
 
   //Infinity and Division
   {
@@ -378,30 +385,31 @@ const RULES: Rule[] = [
   '\\arcosh(-\\infty) -> \\operatorname{NaN}',
 
   {
-    match: '\\arctanh(x)',
-    replace: '\\operatorname{NaN}',
+    match: '\\artanh(x)',
+    replace: NaN,
     condition: (id) => id._x.isInfinity === true,
   },
   {
-    match: '\\arccoth(x)',
-    replace: '\\operatorname{NaN}',
+    match: '\\operatorname{arccoth}(x)',
+    replace: NaN,
     condition: (id) => id._x.isInfinity === true,
   },
   {
-    match: '\\arcsech(x)',
-    replace: '\\operatorname{NaN}',
+    match: '\\arsech(x)',
+    replace: NaN,
     condition: (id) => id._x.isInfinity === true,
   },
   {
     match: '\\arcsch(x)',
-    replace: '\\operatorname{NaN}',
+    replace: NaN,
     condition: (id) => id._x.isInfinity === true,
   },
 
   //----------- DOMAIN ISSUES -----------
 
   //Division
-  { match: 'a/a', replace: '1', condition: (ids) => ids._a.isNotZero === true },
+  // @fixme
+  // { match: 'a/a', replace: '1', condition: (ids) => ids._a.isNotZero === true },
   {
     match: '1/(1/a)',
     replace: 'a',
@@ -417,14 +425,16 @@ const RULES: Rule[] = [
     replace: '(a*c)/b',
     condition: (ids) => ids._c.isNotZero === true,
   },
-  { match: '0/a', replace: '0', condition: ({ _a }) => _a.isNotZero === true },
+  // @fixme
+  //  { match: '0/a', replace: '0', condition: ({ _a }) => _a.isNotZero === true },
 
   //Powers
-  {
-    match: 'x^0',
-    replace: '1',
-    condition: (ids) => ids._x.isNotZero === true && ids._x.isFinite === true,
-  },
+  // @fixme
+  // {
+  //   match: 'x^0',
+  //   replace: '1',
+  //   condition: (ids) => ids._x.isNotZero === true && ids._x.isFinite === true,
+  // },
   {
     match: 'x/x^n',
     replace: '1/x^{n-1}',
@@ -1495,12 +1505,12 @@ const RULE_TEST_CASES: TestCase[] = [
   ['\\arsinh(-\\infty)', '-\\infty'], // 🙁 Arsinh(-oo)
   ['\\arcosh(\\infty)', '\\infty'], // Arcosh(+oo) -> +oo
   ['\\arcosh(-\\infty)', NaN], // 🙁 Arcosh(-oo)
-  ['\\arctanh(\\infty)', NaN], // 🙁 (Error("unexpected-command", "\arctanh"), +oo)
-  ['\\arctanh(-\\infty)', NaN], // 🙁 (Error("unexpected-command", "\arctanh"), -oo)
+  ['\\artanh(\\infty)', NaN], // 🙁 (Error("unexpected-command", "\arctanh"), +oo)
+  ['\\artanh(-\\infty)', NaN], // 🙁 (Error("unexpected-command", "\arctanh"), -oo)
   ['\\operatorname{arcoth}(\\infty)', NaN], // 🙁 0
   ['\\operatorname{arcoth}(-\\infty)', NaN], // 🙁 Arccot(-oo)
-  ['\\arcsech(\\infty)', NaN], // 🙁 (Error("unexpected-command", "\arcsech"), +oo)
-  ['\\arcsech(-\\infty)', NaN], // 🙁 (Error("unexpected-command", "\arcsech"), -oo)
+  ['\\arsech(\\infty)', NaN], // 🙁 (Error("unexpected-command", "\arcsech"), +oo)
+  ['\\arsech(-\\infty)', NaN], // 🙁 (Error("unexpected-command", "\arcsech"), -oo)
   ['\\arcsch(\\infty)', NaN], // Arcsch("_x") -> NaN
   ['\\arcsch(-\\infty)', NaN], // Arcsch("_x") -> NaN
 

@@ -36,6 +36,10 @@ import { expand } from './expand';
  * may be necessary as the expression could be simplified by the canonicalization.
  */
 export const SIMPLIFY_RULES: Rule[] = [
+  // The Golden Ratio, a constant that can be simplified
+
+  '\\varphi -> \\frac{1+\\sqrt{5}}{2}',
+
   // Try to expand the expression:
   // x*(y+z) -> x*y + x*z
   (x) => expand(x) ?? undefined,
@@ -48,7 +52,7 @@ export const SIMPLIFY_RULES: Rule[] = [
     // The Add function has a 'hold-all' property, so we have to simplify
     // the operands first
     return {
-      value: add(...x.ops!.map((x) => x.simplify())),
+      value: add(...x.ops!.map((x) => x.canonical.simplify())),
       because: 'addition',
     };
   },
@@ -66,7 +70,7 @@ export const SIMPLIFY_RULES: Rule[] = [
     // The Multiply function has a 'hold-all' property, so we have to simplify
     // the operands first
     return {
-      value: mul(...x.ops!.map((x) => x.simplify())),
+      value: mul(...x.ops!.map((x) => x.canonical.simplify())),
       because: 'multiplication',
     };
   },
@@ -468,7 +472,7 @@ export const SIMPLIFY_RULES: Rule[] = [
 
   //Infinity and Multiplication
   {
-    match: '\\infty*x',
+    match: '\\infty *x',
     replace: '\\infty',
     condition: (_x) => _x._x.isPositive === true,
   },
@@ -478,7 +482,7 @@ export const SIMPLIFY_RULES: Rule[] = [
     condition: (_x) => _x._x.isPositive === true,
   },
   {
-    match: '\\infty*x',
+    match: '\\infty * x',
     replace: '-\\infty',
     condition: (_x) => _x._x.isNegative === true,
   },
@@ -647,7 +651,7 @@ export const SIMPLIFY_RULES: Rule[] = [
     condition: (id) => id._x.isInfinity === true,
   },
   {
-    match: '\\arcsech(x)',
+    match: '\\arsech(x)',
     replace: '\\operatorname{NaN}',
     condition: (id) => id._x.isInfinity === true,
   },

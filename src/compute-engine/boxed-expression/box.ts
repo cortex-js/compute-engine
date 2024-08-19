@@ -646,19 +646,20 @@ function fromNumericValue(
     } else {
       const rational = value.rational;
       // At least a radical, maybe a rational as well.
-      const radical = ce._fn('Sqrt', [ce.number(value.radical)]);
+      const radical = ce.function('Sqrt', [ce.number(value.radical)]);
       if (isOne(rational)) terms.push(radical);
       else {
         const [n, d] = rational;
         if (d === 1) {
           if (n === 1) terms.push(radical);
-          else terms.push(ce._fn('Multiply', [ce.number(n), radical]));
+          else terms.push(ce.function('Multiply', [ce.number(n), radical]));
         } else {
-          if (n === 1) terms.push(ce._fn('Divide', [radical, ce.number(d)]));
+          if (n === 1)
+            terms.push(ce.function('Divide', [radical, ce.number(d)]));
           else
             terms.push(
-              ce._fn('Divide', [
-                ce._fn('Multiply', [ce.number(n), radical]),
+              ce.function('Divide', [
+                ce.function('Multiply', [ce.number(n), radical]),
                 ce.number(d),
               ])
             );

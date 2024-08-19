@@ -386,6 +386,7 @@ function parseRule(ce: IComputeEngine, rule: string): BoxedRule {
 
   // A mapping from an identifier to a wildcard
   const wildcards: Record<string, string> = {};
+
   // A mapping from an identifier to a condition
   const wildcardConditions: Record<string, string> = {};
 
@@ -469,17 +470,33 @@ function parseRule(ce: IComputeEngine, rule: string): BoxedRule {
   const expr = ce.parse(rule, { canonical: false });
   ce.latexDictionary = previousDictionary;
 
-  if (!expr.isValid || expr.operator !== 'Rule') {
-    throw new Error(`Invalid rule ${rule}: ${expr.toString()}`);
-  }
+  if (!expr.isValid || expr.operator !== 'Rule')
+    throw new Error(`Invalid rule "${rule}": ${expr.toString()}`);
+
   const [match, replace, condition] = expr.ops!;
 
-  let condFn: undefined | RuleConditionFunction = undefined;
-  if (condition !== null) {
-    condFn = (sub: BoxedSubstitution, _ce: IComputeEngine): boolean => {
-      for (const id of Object.keys(sub)) {
-        // Map the id to a wildcard
+  // Check that all the wildcards in the replace also appear in the match
+  if (!includesWildcards(replace, match))
+    throw new Error(
+      `Invalid rule "${rule}": replace contains wildcards not present in the match`
+    );
 
+  let condFn: undefined | RuleConditionFunction = undefined;
+  if (condition !== undefined) {
+    // Verify that all the wildcards in the condition also appear in the match
+    if (!includesWildcards(condition, match))
+      throw new Error(
+        `Invalid rule "${rule}": condition contains wildcards not present in the match`
+      );
+
+    // Evaluate the condition as a predicate
+    condFn = (sub: BoxedSubstitution): boolean =>
+      condition.subs(sub).evaluate()?.symbol === 'True';
+  } else {
+    // We did not have a condition predicate, used the wildcard conditions
+    // (i.e. _a:>0, _b:integer, _c:prime, etc...)
+    condFn = (sub: BoxedSubstitution): boolean => {
+      for (const id of Object.keys(sub)) {
         // Find a key in the wildcards that matches the id
         const idx =
           Object.keys(wildcards)[
@@ -496,18 +513,19 @@ function parseRule(ce: IComputeEngine, rule: string): BoxedRule {
     };
   }
 
-  return boxRule(ce, {
-    match,
-    replace,
-    condition: condFn,
-    id: match.toString() + ' -> ' + replace.toString(),
-  });
+  // Make an id for the rule
+  const id =
+    dewildcard(match).toString() + ' -> ' + dewildcard(replace).toString();
+
+  return boxRule(ce, { match, replace, condition: condFn, id });
 }
 
 function boxRule(ce: IComputeEngine, rule: Rule | BoxedRule): BoxedRule {
   if (rule === undefined || rule === null)
     throw new Error('Expected a rule, not ' + rule);
+
   if (isBoxedRule(rule)) return rule;
+
   // If the rule is defined as a single string, parse it
   // e.g. `|x| -> x; x > 0`
   if (typeof rule === 'string') return parseRule(ce, rule);
@@ -523,7 +541,12 @@ function boxRule(ce: IComputeEngine, rule: Rule | BoxedRule): BoxedRule {
       id: '',
     };
 
-  const { match, replace, condition, id } = rule;
+  let { match, replace, condition, id } = rule;
+
+  if (replace === undefined)
+    throw new Error(
+      `Invalid rule ${'{"match":"\\\\artanh(x)","replace":null}'}: a rule should include at least a replace property`
+    );
 
   // Normalize the condition to a function
   let condFn: undefined | RuleConditionFunction;
@@ -533,6 +556,7 @@ function boxRule(ce: IComputeEngine, rule: Rule | BoxedRule): BoxedRule {
       // If the condition is a LaTeX string, it should be a predicate
       // (an expression with a Boolean value).
       const condPattern = ce.parse(latex, { canonical: false });
+
       // Substitute any unbound vars in the condition to a wildcard,
       // then evaluate the condition
       condFn = (x: BoxedSubstitution, _ce: IComputeEngine): boolean =>
@@ -541,24 +565,41 @@ function boxRule(ce: IComputeEngine, rule: Rule | BoxedRule): BoxedRule {
   } else {
     if (condition !== undefined && typeof condition !== 'function')
       throw new Error(
-        `Invalid rule ${id ?? rule}: condition is not a valid function`
+        `Invalid rule ${id ?? JSON.stringify(rule)}: condition is not a valid function`
       );
     condFn = condition;
   }
 
   if (typeof match === 'function') {
     throw new Error(
-      `Invalid rule ${id ?? rule}: match is not a valid expression. Use a replace function instead to validate and replace the expression`
+      `Invalid rule ${id ?? JSON.stringify(rule)}: match is not a valid expression. Use a replace function instead to validate and replace the expression`
     );
   }
 
   const matchExpr = parseLatexRule(ce, match);
   const replaceExpr = parseLatexRule(ce, replace);
 
+  if (!matchExpr?.isValid) {
+    throw new Error(
+      `Invalid rule ${id ?? JSON.stringify(rule)}: match is not a valid expression: ${match?.toString()}`
+    );
+  }
+
+  if (!replaceExpr?.isValid) {
+    throw new Error(
+      `Invalid rule ${id ?? JSON.stringify(rule)}: match is not a valid expression: ${match?.toString()}`
+    );
+  }
+
   if (!replaceExpr && typeof replace !== 'function')
     throw new Error(
-      `Invalid rule ${id ?? rule}: replace is not a valid expression`
+      `Invalid rule ${id ?? JSON.stringify(rule)}: replace is not a valid expression`
     );
+
+  id ??=
+    dewildcard(matchExpr).toString() +
+    ' -> ' +
+    dewildcard(replaceExpr).toString();
 
   return {
     _tag: 'boxed-rule',
@@ -566,10 +607,7 @@ function boxRule(ce: IComputeEngine, rule: Rule | BoxedRule): BoxedRule {
     replace: replaceExpr ?? (replace as RuleReplaceFunction | RuleFunction),
     condition: condFn,
     exact: rule.exact ?? true,
-    id:
-      id ??
-      (matchExpr?.toString() ?? '') + ' -> ' + replaceExpr?.toString() ??
-      '',
+    id,
   };
 }
 
@@ -582,7 +620,7 @@ export function boxRules(ce: IComputeEngine, rs: Iterable<Rule>): BoxedRuleSet {
   try {
     for (const rule of rs) rules.push(boxRule(ce, rule));
   } catch (e) {
-    console.error(e);
+    console.error(e.message);
     return { rules: [] };
   }
   return { rules };
@@ -597,30 +635,43 @@ export function boxRules(ce: IComputeEngine, rs: Iterable<Rule>): BoxedRuleSet {
  * @returns A transformed expression, if the rule matched. `null` otherwise.
  */
 function applyRule(
-  rule: BoxedRule,
+  rule: Readonly<BoxedRule>,
   expr: BoxedExpression,
   substitution: BoxedSubstitution,
-  options?: ReplaceOptions
+  options?: Readonly<Partial<ReplaceOptions>>
 ): BoxedExpression | null {
-  const { match, replace, condition } = rule;
+  const canonical =
+    options?.canonical ?? (expr.isCanonical || expr.isStructural);
 
   let changed = false;
   if (expr.ops && options?.recursive) {
     // Apply the rule to the operands of the expression
-    const ce = expr.engine;
     const ops = expr.ops;
     const newOps = ops.map((op) => {
       const subExpr = applyRule(rule, op, {}, options);
-      if (subExpr) changed = true;
-      return subExpr ?? op;
+      if (!subExpr) return op;
+      changed = true;
+      return subExpr;
     });
     if (changed)
-      expr = ce.function(expr.operator, newOps, {
-        canonical: expr.isCanonical,
-      });
+      expr = expr.engine.function(expr.operator, newOps, { canonical });
   }
 
   const exact = rule.exact ?? true;
+
+  let { match, replace, condition } = rule;
+
+  if (canonical && match) {
+    const awc = getWildcards(match);
+    const originalMatch = match;
+    match = match.canonical;
+    const bwc = getWildcards(match);
+    if (!awc.every((x) => bwc.includes(x)))
+      throw new Error(
+        `Rule "${rule.id}: Canonical match "${match.latex}" does not contain all the wildcards of the original match "${dewildcard(originalMatch).latex}"`
+      );
+  }
+
   const sub = match
     ? expr.match(match, { substitution, ...options, exact })
     : {};
@@ -632,49 +683,31 @@ function applyRule(
   if (typeof condition === 'function' && !condition(sub, expr.engine))
     return changed ? expr : null;
 
-  // console.trace('apply rule ', id, 'to', expr.toString());
-  // @debug
-  // if (typeof replace === 'function')
-  //   console.info('Applying rule ', match.toString(), '->', 'function');
-  // else
-  //   console.info('Applying rule ', match.toString(), '->', replace.toString());
-  // console.info(
-  //   'with substitution',
-  //   Object.entries(sub)
-  //     .map(([k, v]) => `${k} -> ${v.toString()}`)
-  //     .join(', ')
-  // );
-  // console.info(
-  //   'applying rule',
-  //   id,
-  //   'to',
-  //   expr.toString(),
-  //   'with',
-  //   Object.keys(sub)
-  //     .map((x) => `${x} -> ${sub[x].toString()}`)
-  //     .join(', ')
-  // );
   const result =
     typeof replace === 'function'
       ? replace(expr, sub)
-      : replace.subs(sub, { canonical: expr.isCanonical });
+      : replace.subs(sub, { canonical });
 
   if (!result) return null;
-  if (expr.isCanonical)
-    return isRuleStep(result) ? result.value.canonical : result.canonical;
 
-  return isRuleStep(result) ? result.value : result;
+  if (isRuleStep(result))
+    return canonical ? result.value.canonical : result.value;
+
+  return canonical ? result.canonical : result;
 }
 
 /**
  * Apply the rules in the ruleset and return a modified expression
  * and the set of rules that were applied.
  *
+ * The `replace` function can be used to apply a rule to a non-canonical
+ * expression. @fixme: account for options.canonical
+ *
  */
-export function replace(
+export function xreplace(
   expr: BoxedExpression,
   rules: Rule | (Rule | BoxedRule)[] | BoxedRuleSet,
-  options?: ReplaceOptions
+  options?: Partial<ReplaceOptions>
 ): RuleSteps {
   if (!rules) throw new Error('replace(): Expected one or more rules');
 
@@ -682,14 +715,19 @@ export function replace(
   let iterationCount = 0;
   const once = options?.once ?? false;
 
+  // Normalize the ruleset
   let ruleSet: ReadonlyArray<BoxedRule>;
-  if (typeof rules === 'object' && 'rules' in rules) ruleSet = rules.rules;
-  else {
-    ruleSet = expr.engine.rules(
-      Array.isArray(rules) ? rules : [rules as Rule | BoxedRule]
-    ).rules;
+  try {
+    if (typeof rules === 'object' && 'rules' in rules) ruleSet = rules.rules;
+    else {
+      ruleSet = expr.engine.rules(
+        Array.isArray(rules) ? rules : [rules as Rule | BoxedRule]
+      ).rules;
+    }
+  } catch (e) {
+    console.error(e.message);
+    return [];
   }
-
   let done = false;
   const steps: RuleStep[] = [];
   try {
@@ -714,7 +752,7 @@ export function replace(
       iterationCount += 1;
     }
   } catch (e) {
-    console.error(e);
+    console.error(e.message);
   }
   return steps;
 }
@@ -739,4 +777,33 @@ export function matchAnyRules(
   }
 
   return results;
+}
+
+/**
+ * Replace all occurrences of a wildcard in an expression with a the corresponding non-wildcard, e.g. `_x` -> `x`
+ */
+function dewildcard(expr: BoxedExpression): BoxedExpression {
+  const symbol = expr.symbol;
+  if (symbol) {
+    if (symbol.startsWith('_')) return expr.engine.symbol(symbol.slice(1));
+  }
+  if (expr.ops) {
+    const ops = expr.ops.map((x) => dewildcard(x));
+    return expr.engine.function(expr.operator, ops);
+  }
+  return expr;
+}
+
+function getWildcards(expr: BoxedExpression): string[] {
+  const wildcards: string[] = [];
+  if (expr.symbol && expr.symbol.startsWith('_')) wildcards.push(expr.symbol);
+  if (expr.ops) expr.ops.forEach((x) => wildcards.push(...getWildcards(x)));
+  return wildcards;
+}
+
+/** Return true if all the wildcards of a are included in b */
+function includesWildcards(a: BoxedExpression, b: BoxedExpression): boolean {
+  const awc = getWildcards(a);
+  const bwc = getWildcards(b);
+  return awc.every((x) => bwc.includes(x));
 }

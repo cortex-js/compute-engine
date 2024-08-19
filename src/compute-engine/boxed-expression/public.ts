@@ -143,7 +143,8 @@ export type Type =
  * having to check what kind of instance they are before manipulating them.
  * :::
  *
- * To get a boxed expression, use `ce.box()` or `ce.parse()`.
+ * To get a boxed expression from a LaTeX string use `ce.parse()`, or to
+ * get a boxed expression from a MathJSON expression use `ce.box()`.
  *
  * @category Boxed Expression
  *
@@ -179,8 +180,9 @@ export interface BoxedExpression {
 
   /** From `Object.toString()`, return a string representation of the
    *  expression. This string is suitable to be output to the console
-   * for debugging, for example. To get a LaTeX representation of the
-   * expression, use `expr.latex`.
+   * for debugging, for example. It is formatted as a ASCIIMath expression.
+   *
+   * To get a LaTeX representation of the expression, use `expr.latex`.
    *
    * Used when coercing a `BoxedExpression` to a `String`.
    *
@@ -196,6 +198,7 @@ export interface BoxedExpression {
   print(): void;
 
   /** Similar to`expr.valueOf()` but includes a hint.
+   *
    * @category Primitive Methods
    */
   [Symbol.toPrimitive](
@@ -242,7 +245,7 @@ export interface BoxedExpression {
    * The expression is represented exactly and no sugaring is applied. For
    * example, `["Power", "x", 2]` is not represented as `["Square", "x"]`.
    *
-   * For more control over the serialization, use `ce.serialize()`.
+   * For more control over the serialization, use `expr.toMathJson()`.
    *
    * :::info[Note]
    * Applicable to canonical and non-canonical expressions.
@@ -253,7 +256,8 @@ export interface BoxedExpression {
 
   /**
    * The scope in which this expression has been defined.
-   * Is null when the expression is not canonical.
+   *
+   * Is `null` when the expression is not canonical.
    */
   readonly scope: RuntimeScope | null;
 
@@ -272,7 +276,7 @@ export interface BoxedExpression {
    * If the expression was parsed from LaTeX, the LaTeX representation is
    * the same as the input LaTeX.
    *
-   * Otherwise, the serialization can be customized with `ComputeEngine.latexOptions`
+   * To customize the serialization, use `expr.toLatex()`.
    *
    * :::info[Note]
    * Applicable to canonical and non-canonical expressions.
@@ -314,7 +318,7 @@ export interface BoxedExpression {
    */
   readonly string: string | null;
 
-  /** All the subexpressions matching the named operator
+  /** All the subexpressions matching the named operator, recursively.
    *
    * :::info[Note]
    * Applicable to canonical and non-canonical expressions.
@@ -357,7 +361,10 @@ export interface BoxedExpression {
    */
   readonly freeVariables: ReadonlyArray<string>;
 
-  /** All the `["Error"]` subexpressions
+  /** All the `["Error"]` subexpressions.
+   *
+   * If an expression includes an error, the expression is also an error.
+   * In that case, the `this.isValid` property is `false`.
    *
    * :::info[Note]
    * Applicable to canonical and non-canonical expressions.
@@ -365,6 +372,21 @@ export interface BoxedExpression {
    *
    */
   readonly errors: ReadonlyArray<BoxedExpression>;
+
+  /** `true` if this expression or any of its subexpressions is an `["Error"]`
+   * expression.
+   *
+   * :::info[Note]
+   * Applicable to canonical and non-canonical expressions. For
+   * non-canonical expression, this may indicate a syntax error while parsing
+   * LaTeX. For canonical expression, this may indicate argument domain
+   * mismatch, or missing or unexpected arguments.
+   * :::
+   *
+   * @category Symbol Expression
+   *
+   */
+  readonly isValid: boolean;
 
   /**
    * The name of the operator of the expression.
@@ -380,7 +402,7 @@ export interface BoxedExpression {
    */
   readonly operator: string;
 
-  /** The list of arguments of the function, its "tail".
+  /** The list of operands of the function.
    *
    * If the expression is not a function, return `null`.
    *
@@ -407,7 +429,9 @@ export interface BoxedExpression {
    */
   readonly nops: number;
 
-  /** First operand, i.e.`this.ops[0]`
+  /** First operand, i.e.`this.ops[0]`.
+   *
+   * If there is no first operand, return the symbol `Nothing`.
    *
    * :::info[Note]
    * Applicable to canonical and non-canonical expressions.
@@ -421,6 +445,8 @@ export interface BoxedExpression {
 
   /** Second operand, i.e.`this.ops[1]`
    *
+   * If there is no second operand, return the symbol `Nothing`.
+   *
    * :::info[Note]
    * Applicable to canonical and non-canonical expressions.
    * :::
@@ -433,6 +459,8 @@ export interface BoxedExpression {
 
   /** Third operand, i.e. `this.ops[2]`
    *
+   * If there is no third operand, return the symbol `Nothing`.
+   *
    * :::info[Note]
    * Applicable to canonical and non-canonical expressions.
    * :::
@@ -443,23 +471,9 @@ export interface BoxedExpression {
    */
   readonly op3: BoxedExpression;
 
-  /** `true` if this expression or any of its subexpressions is an `["Error"]`
-   * expression.
-   *
-   * :::info[Note]
-   * Applicable to canonical and non-canonical expressions. For
-   * non-canonical expression, this may indicate a syntax error while parsing
-   * LaTeX. For canonical expression, this may indicate argument domain
-   * mismatch, or missing or unexpected arguments.
-   * :::
-   *
-   * @category Symbol Expression
-   *
-   */
-  readonly isValid: boolean;
-
   /** If true, the value of the expression never changes and evaluating it has
    * no side-effects.
+   *
    * If false, the value of the expression may change, if the
    * value of other expression changes or for other reasons.
    *
@@ -509,13 +523,14 @@ export interface BoxedExpression {
   /**
    * Return the structural form of this expression.
    *
-   * Some expressions, such as rational numbers, ar represented with
-   * a BoxedExpression object. In some cases, for example when doing a
+   * Some expressions, such as rational numbers, are represented with
+   * a `BoxedExpression` object. In some cases, for example when doing a
    * structural comparison of two expressions, it is useful to have a
    * structural representation of the expression where the rational numbers
    * is represented by a function expression instead.
    *
-   * If there is a structural representation of the expression, return it.
+   * If there is a structural representation of the expression, return it,
+   * otherwise return `this`.
    *
    */
   get structural(): BoxedExpression;
@@ -524,7 +539,13 @@ export interface BoxedExpression {
    * Replace all the symbols in the expression as indicated.
    *
    * Note the same effect can be achieved with `this.replace()`, but
-   * using `this.subs()` is more efficient, and simpler.
+   * using `this.subs()` is more efficient, and simpler, but limited
+   * to replacing symbols.
+   *
+   * The result is bound to the current scope, not to `this.scope`.
+   *
+   * If `options.canonical` is not set, the result is canonical if `this`
+   * is canonical.
    *
    * :::info[Note]
    * Applicable to canonical and non-canonical expressions.
@@ -537,14 +558,17 @@ export interface BoxedExpression {
   ): BoxedExpression;
 
   /**
-   * Recursively replace all the terms in the expression as indicated.
+   * Recursively replace all the subexpressions in the expression as indicated.
    *
-   * To remove a subexpression, return an empty Sequence expression.
+   * To remove a subexpression, return an empty `["Sequence"]` expression.
    *
    * The canonical option is applied to each function subexpression after
    * the substitution is applied.
    *
-   * **Default**: `{canonical: true, recursive: true}`
+   * If no `options.canonical` is set, the result is canonical if `this`
+   * is canonical.
+   *
+   * **Default**: `{ canonical: this.isCanonical, recursive: true }`
    */
   map(
     fn: (expr: BoxedExpression) => BoxedExpression,
@@ -552,19 +576,20 @@ export interface BoxedExpression {
   ): BoxedExpression;
 
   /**
-   * Transform the expression by applying the rules:
+   * Transform the expression by applying one or more replacement rules:
    *
-   * If the expression matches the `match` pattern, replace it with
-   * the `replace` pattern.
+   * - If the expression matches the `match` pattern and the `condition`
+   *  predicate is true, replace it with the `replace` pattern.
    *
-   * If no rules apply, return `null`.
+   * - If no rules apply, return `null`.
    *
-   * See also `subs` for a simple substitution.
+   * See also `expr.subs()` for a simple substitution of symbols.
    *
+   * If `options.canonical` is not set, the result is canonical if `this`
+   * is canonical.
    *
    * :::info[Note]
-   * Applicable to canonical and non-canonical expressions. If the
-   * expression is non-canonical, the result is also non-canonical.
+   * Applicable to canonical and non-canonical expressions.
    * :::
    */
   replace(
@@ -583,7 +608,9 @@ export interface BoxedExpression {
 
   /** Structural/symbolic equality (weak equality).
    *
-   * `ce.parse('1+x').isSame(ce.parse('x+1'))` is `false`
+   * `ce.parse('1+x').isSame(ce.parse('x+1'))` is `false`.
+   *
+   * See `expr.isEqual()` for mathematical equality.
    *
    * :::info[Note]
    * Applicable to canonical and non-canonical expressions.
@@ -638,23 +665,31 @@ export interface BoxedExpression {
   /**
    * The numeric value of this expression is 0.
    *
+   * The expression is not evaluated. For example,
+   * `ce.box(["Add", 1, 1]).isZero` returns `undefined`, but
+   * `ce.box(["Add", 1, 1]).evaluate().isZero` returns `false`.
+   *
    * @category Numeric Expression
    */
   readonly isZero: boolean | undefined;
+
   /**
    * The numeric value of this expression is not 0.
+   *
    * @category Numeric Expression
    */
   readonly isNotZero: boolean | undefined;
 
   /**
    * The numeric value of this expression is 1.
+   *
    * @category Numeric Expression
    */
   readonly isOne: boolean | undefined;
 
   /**
    * The numeric value of this expression is -1.
+   *
    * @category Numeric Expression
    */
   readonly isNegativeOne: boolean | undefined;
@@ -666,7 +701,8 @@ export interface BoxedExpression {
    */
   readonly isInfinity: boolean | undefined;
 
-  /** This expression is a number, but not `±Infinity` and not `NaN`
+  /** This expression is a number, but not `±Infinity`, 'ComplexInfinity` or
+   *  `NaN`
    *
    * @category Numeric Expression
    */
@@ -685,12 +721,17 @@ export interface BoxedExpression {
   /**
    * Return the value of this expression, if a number literal.
    *
-   * Note it is possible for `numericValue` to be `null`, and for `isNotZero`
-   * to be true. For example, when a symbol has been defined with an assumption.
+   * Note it is possible for `this.numericValue` to be `null`, and for
+   * `this.isNotZero` to be true. For example, when a symbol has been
+   * defined with an assumption.
    *
-   * Conversely, `isNumber` may be true even if `numericValue` is `null`,
-   * example the symbol `Pi` return true for `isNumber` but `numericValue` is
-   * `null`. Its value can be accessed with `.N().numericValue`
+   * Conversely, `this.isNumber` may be true even if `numericValue` is `null`,
+   * example the symbol `Pi` return `true` for `isNumber` but `numericValue` is
+   * `null`. Its value can be accessed with `.N().numericValue`.
+   *
+   * To check if an expression is a number literal, use `this.isNumberLiteral`.
+   * If `this.isNumberLiteral` is `true`, `this.numericValue` is not `null`
+   * and `this.re` is not `undefined`.
    *
    * @category Numeric Expression
    *
@@ -717,17 +758,19 @@ export interface BoxedExpression {
    * @category Numeric Expression
    */
   readonly re: number | undefined;
+
   /**
    * If this expression is a number literal, return the imaginary part of the
-   * value. It may be 0 if the number is real.
+   * value. It may be 0 if this is a real number.
    *
    * If the expression is not a number literal, return `undefined`.
    *
    * @category Numeric Expression
    */
   readonly im: number | undefined;
+
   /**
-   * If this expression is a number literal, return the real part as a `BigNum`.
+   * If this expression is a number literal, return the real part as a bignum.
    *
    * If the expression is not a number literal or the value is not available
    * as a bignum return `undefined`. That is, the value is not upconverted
@@ -742,7 +785,9 @@ export interface BoxedExpression {
   readonly bignumRe: BigNum | undefined;
   /**
    * If this expression is a number literal, return the imaginary part as a `BigNum`.
+   *
    * It may be 0 if the number is real.
+   *
    * If the expression is not a number literal or the value is not available
    * as a bignum return `undefined`. That is, the value is not upconverted
    * to a bignum.
@@ -787,17 +832,20 @@ export interface BoxedExpression {
   ln(base?: SemiBoxedExpression): BoxedExpression;
   // exp(): BoxedExpression;
 
-  /** The shape describes the axis of the expression.
+  /**
+   *
+   * The shape describes the axis of the expression.
    *
    * When the expression is a scalar (number), the shape is `[]`.
    *
-   * When the expression is a vector, the shape is `[n]`.
+   * When the expression is a vector of length `n`, the shape is `[n]`.
    *
-   * When the expression is a matrix, the shape is `[n, m]`.
+   * When the expression is a `n` by `m` matrix, the shape is `[n, m]`.
    */
   readonly shape: number[];
 
-  /** Return 0 for a scalar, 1 for a vector, 2 for a matrix, > 2 for a multidimensional matrix.
+  /** Return 0 for a scalar, 1 for a vector, 2 for a matrix, > 2 for
+   * a multidimensional matrix.
    *
    * The rank is equivalent to the length of `expr.shape` */
   readonly rank: number;
@@ -923,8 +971,8 @@ export interface BoxedExpression {
   readonly complexity: number | undefined;
 
   /**
-   * For symbols and functions, a possible definition associated with the
-   *  expression. `baseDefinition` is the base class of symbol and function
+   * For symbols and functions, a definition associated with the
+   *  expression. `this.baseDefinition` is the base class of symbol and function
    *  definition.
    *
    * :::info[Note]
@@ -935,7 +983,7 @@ export interface BoxedExpression {
   readonly baseDefinition: BoxedBaseDefinition | undefined;
 
   /**
-   * For functions, a possible definition associated with the expression.
+   * For functions, a definition associated with the expression.
    *
    * :::info[Note]
    * `undefined` if not a canonical expression or not a function.
@@ -945,7 +993,7 @@ export interface BoxedExpression {
   readonly functionDefinition: BoxedFunctionDefinition | undefined;
 
   /**
-   * For symbols, a possible definition associated with the expression.
+   * For symbols, a definition associated with the expression.
    *
    * Return `undefined` if not a symbol
    *
@@ -998,10 +1046,6 @@ export interface BoxedExpression {
    * A series of rewriting rules are applied repeatedly, until no more rules
    * apply.
    *
-   * If a custom `simplify` handler is associated with this function
-   * definition, it is invoked, unless `options.applyDefaultSimplifications`
-   *  is `false`.
-   *
    * The values assigned to symbols and the assumptions about symbols may be
    * used, for example `expr.isInteger` or `expr.isPositive`.
    *
@@ -1011,8 +1055,9 @@ export interface BoxedExpression {
    *
    * \\( \sin(\frac{\pi}{4}) \longrightarrow \frac{\sqrt{2}}{2} \\).
    *
-   * If this is canonical or `options.applyDefaultSimplifications` is `true`,
-   * the result is in canonical form.
+   * The result is canonical.
+   *
+   * To manipulate symbolically non-canonical expressions, use `expr.replace()`.
    *
    */
   simplify(options?: Partial<SimplifyOptions>): BoxedExpression;
@@ -1030,11 +1075,11 @@ export interface BoxedExpression {
    * example modifying the `ComputeEngine` environment, such as its set of
    * assumptions.
    *
-   * Only exact calculations are performed, no approximate calculations on
-   * decimal numbers (non-integer numbers). Constants, rational numbers and
-   * square root of rational numbers are preserved.
+   * The result may be a rational number or the product of a rational number
+   * and the square root of an integer.
    *
-   * To perform approximate calculations, use `expr.N()` instead.
+   * To perform approximate calculations, use `expr.N()` instead,
+   * or set `options.numericApproximation` to `true`.
    *
    * The result of `expr.evaluate()` may be the same as `expr.simplify()`.
    *
@@ -1060,11 +1105,36 @@ export interface BoxedExpression {
    */
   N(): BoxedExpression;
 
+  /**
+   * Compile the expression to a JavaScript function.
+   *
+   * The function takes an object as argument, with the keys being the
+   * symbols in the expression, and returns the value of the expression.
+   *
+   *
+   * ```javascript
+   * const expr = ce.parse('x^2 + y^2');
+   * const f = expr.compile('javascript');
+   * console.log(f({x: 2, y: 3}));
+   * ```
+   */
   compile(
     to?: 'javascript',
     options?: { optimize: ('simplify' | 'evaluate')[] }
   ): ((args: Record<string, any>) => any | undefined) | undefined;
 
+  /**
+   * If this is an equation, solve the equation for the variables in vars.
+   * Otherwise, solve the equation `this = 0` for the variables in vars.
+   *
+   *
+   * ```javascript
+   * const expr = ce.parse('x^2 + 2*x + 1 = 0');
+   * console.log(expr.solve('x'));
+   * ```
+   *
+   *
+   */
   solve(
     vars:
       | Iterable<string>
@@ -1108,6 +1178,24 @@ export interface BoxedExpression {
 
   /**
    *
+   * The type of the value of this expression.
+   *
+   * If a function expression, the type of the value of the function
+   * (the result type).
+   *
+   * If a symbol the type of the value of the symbol.
+   *
+   * :::info[Note]
+   * If not valid, return `error`.
+   * If non-canonical, return `undefined`.
+   * If the type is not known, return `unknown`.
+   * :::
+   *
+   */
+  get type(): Type;
+
+  /**
+   *
    * The domain of the value of this expression.
    *
    * If a function expression, the domain  of the value of the function
@@ -1124,23 +1212,6 @@ export interface BoxedExpression {
    *
    */
   get domain(): BoxedDomain | undefined;
-
-  /**
-   *
-   * The type of the value of this expression.
-   *
-   * If a function expression, the type of the value of the function
-   * (the result type).
-   *
-   * If a symbol the type of the value of the symbol.
-   *
-   * :::info[Note]
-   * If not valid, return `error`.
-   * If non-canonical, return `undefined`.
-   * :::
-   *
-   */
-  get type(): Type;
 
   /** Modify the domain of a symbol.
    *
@@ -1331,7 +1402,7 @@ export interface BoxedDomain extends BoxedExpression {
 }
 
 /**
- * The handlers are the primitive operations that can be performed on
+ * These handlers are the primitive operations that can be performed on
  * collections.
  *
  * There are two types of collections:
@@ -1576,24 +1647,22 @@ export type SymbolAttributes = {
 
 <div className="symbols-table">
 
-| Operation | `"never"` | `"simplify"` | `"evaluate"` | `"N"` |
+| Operation | `"never"` | `"evaluate"` | `"N"` |
 | :--- | :----- |
-| `canonical()`|  (X) | | | |
-| `simplify()` |   (X) | (X) | | |
-| `evaluate()` |   (X) | (X) | (X) | |
-| `"N()"` |  (X) | (X)  |  (X) | (X)  |
+| `canonical()`|  (X) | | |
+| `evaluate()` |   (X) | (X) | |
+| `"N()"` |  (X) | (X)  |  (X) |
 
 </div>
 
   * Some examples:
-  * - `i` has `holdUntil: 'never'`
-  * - `GoldenRatio` has `holdUntil: 'simplify'` (symbolic constant)
+  * - `i` has `holdUntil: 'never'`: its is never substituted
   * - `x` has `holdUntil: 'evaluate'` (variables)
   * - `Pi` has `holdUntil: 'N'` (special numeric constant)
   * 
   * **Default:** `evaluate`
   */
-  holdUntil: 'never' | 'simplify' | 'evaluate' | 'N';
+  holdUntil: 'never' | 'evaluate' | 'N';
 };
 
 /**
@@ -1902,9 +1971,18 @@ export type SimplifyOptions = {
   applyDefaultSimplifications?: boolean;
 
   /**
-   * The set of rules to apply. If `null`, use no rules.
+   * The set of rules to apply. If `null`, use no rules. If not provided,
+   * use the default simplification rules.
    */
   rules?: null | Rule | (BoxedRule | Rule)[] | BoxedRuleSet;
+
+  /**
+   * Use this cost function to determine if a simplification is worth it.
+   *
+   * If not provided, `ce.costFunction`, the cost function of the engine is
+   * used.
+   */
+  costFunction?: (expr: BoxedExpression) => number;
 };
 
 /** Options for `BoxedExpression.evaluate()`
@@ -2365,12 +2443,15 @@ export type PatternMatchOptions = {
  *
  */
 export type ReplaceOptions = {
-  /** If `true`, apply replacement rules to all sub-expressions.
+  /**
+   * If `true`, apply replacement rules to all sub-expressions.
+   *
    * If `false`, only consider the top-level expression.
    *
    * **Default**: `false`
    */
-  recursive?: boolean;
+  recursive: boolean;
+
   /**
    * If `true`, stop after the first rule that matches.
    *
@@ -2378,16 +2459,24 @@ export type ReplaceOptions = {
    *
    * **Default**: `false`
    */
-  once?: boolean;
+  once: boolean;
+
   /**
    * If `iterationLimit` > 1, the rules will be repeatedly applied
    * until no rules apply, up to `maxIterations` times.
    *
-   * Note that if `once` is true, `maxIterations` has no effect.
+   * Note that if `once` is true, `iterationLimit` has no effect.
    *
    * **Default**: `1`
    */
-  iterationLimit?: number;
+  iterationLimit: number;
+
+  /**
+   * Indicate if the expression should be canonicalized after the replacement.
+   * If not provided, the expression is canonicalized if the the expression
+   * that matched the pattern is canonical.
+   */
+  canonical: CanonicalOptions;
 };
 
 /**
@@ -2395,7 +2484,7 @@ export type ReplaceOptions = {
  * the pattern is equal to a target expression.
  *
  * A substitution can also be considered a more constrained version of a
- * rule whose `lhs` is always a symbol.
+ * rule whose `match` is always a symbol.
 
 * @category Boxed Expression
  */

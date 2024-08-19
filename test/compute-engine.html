@@ -657,7 +657,7 @@
 
     // mf.onInlineShortcut = (_mf, s) => {
     //   const f = s.match(
-    //     /^(cos|sin|tan|arcsin|arccos|arctan|arctg|arcctg|arcsec|arccsc|arsinh|arcosh|artanh|arcsech|arccsch|arg|ch|cosec|cosh|cot|cotg|coth|csc|ctg|cth|log|ln|lg|lb|sec|sinh|sh|tanh|tg|th)(.*)/
+    //     /^(cos|sin|tan|arcsin|arccos|arctan|arctg|arcctg|arcsec|arccsc|arsinh|arcosh|artanh|arsech|arccsch|arg|ch|cosec|cosh|cot|cotg|coth|csc|ctg|cth|log|ln|lg|lb|sec|sinh|sh|tanh|tg|th)(.*)/
     //   );
 
     //   if (f && f[1] && !f[2]) return `\\${f[1]} `;
@@ -770,7 +770,7 @@
           canonical: false,
         }).latex;
       } catch (e) {
-        console.error(e);
+        console.error(e.message);
       }
     }
 

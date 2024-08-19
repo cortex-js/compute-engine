@@ -23,7 +23,7 @@ import {
   CanonicalOptions,
 } from '../public';
 import { findUnivariateRoots } from '../solve';
-import { replace } from '../rules';
+import { xreplace } from '../rules';
 import { DEFAULT_COMPLEXITY, sortOperands } from './order';
 import {
   hashCode,
@@ -409,11 +409,9 @@ export class BoxedFunction extends _BoxedExpression {
 
   replace(
     rules: BoxedRuleSet | Rule | Rule[],
-    options?: ReplaceOptions
+    options?: Partial<ReplaceOptions>
   ): BoxedExpression | null {
-    const results = replace(this, rules, options);
-    if (results.length === 0) return null;
-    return results[results.length - 1].value;
+    return xreplace(this, rules, options).at(-1)?.value ?? null;
   }
 
   match(
@@ -428,12 +426,14 @@ export class BoxedFunction extends _BoxedExpression {
     return match(this, pattern, options);
   }
 
-  has(x: string | string[]): boolean {
-    if (typeof x === 'string') {
-      if (this._name === x) return true;
-    } else if (x.includes(this._name)) return true;
-    for (const arg of this._ops) if (arg.has(x)) return true;
-    return false;
+  has(v: string | string[]): boolean {
+    // Does the operator name match?
+    if (typeof v === 'string') {
+      if (this._name === v) return true;
+    } else if (v.includes(this._name)) return true;
+
+    // Do any of the operands match?
+    return this._ops.some((x) => x.has(v));
   }
 
   get sgn(): -1 | 0 | 1 | undefined | typeof NaN {

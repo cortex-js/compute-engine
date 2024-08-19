@@ -130,7 +130,7 @@ describe('expr.solve()', () => {
     expect(result).toMatchInlineSnapshot(`
       [
         -1 + sqrt(3) / 2,
-        -1 + (-sqrt(3)) / 2,
+        -1 - sqrt(3) / 2,
       ]
     `);
   });

@@ -25,7 +25,7 @@ import {
   Type,
   BoxedRule,
 } from './public';
-import { replace } from '../rules';
+import { xreplace } from '../rules';
 import {
   getImaginaryFactor,
   hashCode,
@@ -852,21 +852,19 @@ export class BoxedSymbol extends _BoxedExpression {
 
   replace(
     rules: Rule | (Rule | BoxedRule)[] | BoxedRuleSet,
-    options?: ReplaceOptions
+    options?: Partial<ReplaceOptions>
   ): BoxedExpression | null {
-    const steps = replace(this, rules, options);
-    if (steps.length === 0) return null;
-    return steps[steps.length - 1].value;
+    return xreplace(this, rules, options).at(-1)?.value ?? null;
   }
 
   subs(
     sub: Substitution,
     options?: { canonical?: CanonicalOptions }
   ): BoxedExpression {
-    if (sub[this._id] === undefined)
-      return options?.canonical === true ? this.canonical : this;
+    const canonical = options?.canonical ?? this.isCanonical;
+    if (sub[this._id] === undefined) return canonical ? this.canonical : this;
 
-    return this.engine.box(sub[this._id], options);
+    return this.engine.box(sub[this._id], { canonical });
   }
 }
 

@@ -6,7 +6,7 @@ import {
   RuleSteps,
   SimplifyOptions,
 } from '../public';
-import { replace } from '../rules';
+import { xreplace as replace } from '../rules';
 
 export function simplify(
   expr: BoxedExpression,
@@ -17,18 +17,9 @@ export function simplify(
   //
   if (!expr.isValid) return [];
 
-  // expr = expr.structural;
-
-  if (
-    (options?.applyDefaultSimplifications ?? true) &&
-    !(expr.isCanonical || expr.isStructural)
-  ) {
+  if (!(expr.isCanonical || expr.isStructural)) {
     const canonical = expr.canonical;
-    if (
-      !(canonical.isCanonical || canonical.isStructural) ||
-      !canonical.isValid
-    )
-      return [];
+    if (!(canonical.isCanonical || canonical.isStructural)) return [];
     return simplify(canonical, options);
   }
 
@@ -60,7 +51,6 @@ export function simplify(
     const op1 = expr.op1.simplify(options);
     const op2 = expr.op2.simplify(options);
     expr = ce.function(expr.operator, [op1, op2]);
-    if (!expr.isCanonical) debugger;
 
     //
     // 3.2/ Try to factor terms across the relational operator
@@ -75,7 +65,7 @@ export function simplify(
           ce.function(expr.operator, [expr.op1.sub(expr.op2), ce.Zero])
         );
         // Pick the cheapest (simplest) of the two
-        expr = cheapest(expr, alt);
+        expr = cheapest(expr, alt, options?.costFunction);
       }
     }
     return [{ value: expr, because: 'factor-relational-operator' }];
@@ -95,13 +85,16 @@ export function simplify(
   //
   // Loop until the expression has been previously seen,
   // or no rules can be applied
-  //
   do {
-    const newSteps = replace(expr, rules, options);
+    const newSteps = replace(expr, rules, {
+      ...options,
+      recursive: true,
+      canonical: true,
+    });
     if (newSteps.length === 0) break;
 
     const alt = newSteps.at(-1)!.value;
-    if (isCheaper(expr, alt)) {
+    if (isCheaper(expr, alt, options?.costFunction)) {
       expr = alt;
       steps.push(...newSteps);
     }
@@ -112,7 +105,8 @@ export function simplify(
 
 function isCheaper(
   oldExpr: BoxedExpression,
-  newExpr: BoxedExpression | null | undefined
+  newExpr: BoxedExpression | null | undefined,
+  costFunction?: (expr: BoxedExpression) => number
 ): boolean {
   if (newExpr === null || newExpr === undefined) return false;
   if (oldExpr === newExpr) return false;
@@ -120,7 +114,10 @@ function isCheaper(
   if (oldExpr.isSame(newExpr)) return false;
 
   const ce = oldExpr.engine;
-  if (ce.costFunction(newExpr) <= 1.2 * ce.costFunction(oldExpr)) {
+
+  costFunction ??= (x) => ce.costFunction(x);
+
+  if (costFunction(newExpr) <= 1.2 * costFunction(oldExpr)) {
     // console.log(
     //   'Picked new' + boxedNewExpr.toString() + ' over ' + oldExpr.toString()
     // );
@@ -140,7 +137,8 @@ function isCheaper(
  */
 function cheapest(
   oldExpr: BoxedExpression,
-  newExpr: BoxedExpression | null | undefined
+  newExpr: BoxedExpression | null | undefined,
+  costFunction?: (expr: BoxedExpression) => number
 ): BoxedExpression {
-  return isCheaper(oldExpr, newExpr) ? newExpr! : oldExpr;
+  return isCheaper(oldExpr, newExpr, costFunction) ? newExpr! : oldExpr;
 }

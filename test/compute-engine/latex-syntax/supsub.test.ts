@@ -39,17 +39,9 @@ describe('SUPSUB', () => {
     expect(ce.parse('x_{n+1}')).toMatchInlineSnapshot(
       `["At", "x", ["Add", "n", 1]]`
     );
-    expect(ce.parse('x_n_{+1}')).toMatchInlineSnapshot(`
-      [
-        "At",
-        "x",
-        [
-          "Error",
-          ["ErrorCode", "'incompatible-domain'", "Values", "Anything"],
-          ["At", "n", 1]
-        ]
-      ]
-    `);
+    expect(ce.parse('x_n_{+1}')).toMatchInlineSnapshot(
+      `["At", "x", ["At", "n", 1]]`
+    );
   });
   test('Pre-sup, pre-sub', () => {
     expect(ce.parse('_p^qx')).toMatchInlineSnapshot(

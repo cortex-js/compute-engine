@@ -169,12 +169,13 @@ export class Terms {
 
 export function add(...xs: ReadonlyArray<BoxedExpression>): BoxedExpression {
   console.assert(xs.length > 0);
-
+  if (!xs.every((x) => x.isValid)) return xs[0].engine._fn('Add', xs);
   return new Terms(xs[0].engine, xs).asExpression();
 }
 
 export function addN(...xs: ReadonlyArray<BoxedExpression>): BoxedExpression {
   console.assert(xs.length > 0);
+  if (!xs.every((x) => x.isValid)) return xs[0].engine._fn('Add', xs);
 
   return new Terms(xs[0].engine, xs).N();
 }

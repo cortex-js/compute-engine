@@ -71,7 +71,7 @@ export class _BoxedSymbolDefinition implements BoxedSymbolDefinition {
 
   constant: boolean;
 
-  holdUntil: 'never' | 'simplify' | 'evaluate' | 'N';
+  holdUntil: 'never' | 'evaluate' | 'N';
 
   private _flags: Partial<NumericFlags> | undefined;
 

@@ -777,7 +777,7 @@ export class ComputeEngine implements IComputeEngine {
     try {
       return new this._bignum(a);
     } catch (e) {
-      console.error(e);
+      console.error(e.message);
     }
     return this._BIGNUM_NAN;
   }
