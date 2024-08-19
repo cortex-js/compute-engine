@@ -131,14 +131,46 @@ describe('DELIMITERS', () => {
     expect(ce.parse('f[3]').json).toMatchInlineSnapshot(`
       [
         At,
-        f,
+        [
+          Error,
+          [
+            ErrorCode,
+            'incompatible-domain',
+            Values,
+            [
+              FunctionOf,
+              [
+                VarArg,
+                Anything,
+              ],
+              Anything,
+            ],
+          ],
+          f,
+        ],
         3,
       ]
     `);
     expect(ce.parse('f[3, 4]').json).toMatchInlineSnapshot(`
       [
         At,
-        f,
+        [
+          Error,
+          [
+            ErrorCode,
+            'incompatible-domain',
+            Values,
+            [
+              FunctionOf,
+              [
+                VarArg,
+                Anything,
+              ],
+              Anything,
+            ],
+          ],
+          f,
+        ],
         3,
         4,
       ]
