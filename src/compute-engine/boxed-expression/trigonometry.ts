@@ -1,9 +1,13 @@
 import Complex from 'complex.js';
 import Decimal from 'decimal.js';
-import { BoxedExpression, IComputeEngine } from './public';
-import { Expression } from '../../math-json/types';
-import { LatexString } from '../latex-syntax/public';
-import { apply } from '../symbolic/utils';
+
+import type { Expression } from '../../math-json/types';
+import type { LatexString } from '../latex-syntax/public';
+
+import type { BoxedExpression, IComputeEngine } from './public';
+
+import { apply } from './apply'; // @fixme
+
 import { asLatexString } from './utils';
 import { getPiTerm } from './factor';
 
@@ -252,39 +256,6 @@ export function radiansToAngle(
   if (angularUnit === 'grad') return ce.number(theta * (200 / Math.PI));
   if (angularUnit === 'turn') return ce.number(theta / (2 * Math.PI));
   return x;
-}
-
-const TRIGONOMETRIC_OPERATORS: { [key: string]: boolean } = {
-  Sin: true,
-  Cos: true,
-  Tan: true,
-  Cot: true,
-  Sec: true,
-  Csc: true,
-  Sinh: true,
-  Cosh: true,
-  Tanh: true,
-  Coth: true,
-  Sech: true,
-  Csch: true,
-  Arcsin: true,
-  Arccos: true,
-  Arctan: true,
-  Arccot: true,
-  Arcsec: true,
-  Arccsc: true,
-  Arsinh: true,
-  Arcosh: true,
-  Artanh: true,
-  Arcoth: true,
-  Arcsch: true,
-  Arsech: true,
-  Arcsech: true,
-};
-
-export function isTrigonometricFunction(operator: any): boolean {
-  if (!operator || typeof operator !== 'string') return false;
-  return operator in TRIGONOMETRIC_OPERATORS;
 }
 
 export function evalTrig(

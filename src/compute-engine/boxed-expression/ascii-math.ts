@@ -1,5 +1,6 @@
+import type { BoxedExpression } from './public';
+
 import { isRational } from '../numerics/rationals';
-import { BoxedExpression } from './public';
 
 export type AsciiMathSerializer = (
   expr: BoxedExpression,

@@ -18,7 +18,7 @@ import {
   ADDITION_PRECEDENCE,
 } from './public';
 
-import {
+import type {
   IndexedLatexDictionary,
   IndexedLatexDictionaryEntry,
 } from './dictionary/definitions';

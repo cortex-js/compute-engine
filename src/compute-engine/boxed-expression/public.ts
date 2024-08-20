@@ -1,5 +1,5 @@
 import Complex from 'complex.js';
-import {
+import type {
   Expression,
   MathJsonNumber,
   MathJsonString,
@@ -12,7 +12,8 @@ import type {
   LatexDictionaryEntry,
   ParseLatexOptions,
 } from '../latex-syntax/public';
-import { IndexedLatexDictionary } from '../latex-syntax/dictionary/definitions';
+
+import type { IndexedLatexDictionary } from '../latex-syntax/dictionary/definitions';
 import { Rational } from '../numerics/rationals';
 import { NumericValue, NumericValueData } from '../numeric-value/public';
 import { BigNum, IBigNum } from '../numerics/bignum';
@@ -1954,13 +1955,6 @@ export type DomainExpression<T = SemiBoxedExpression> =
  */
 export type SimplifyOptions = {
   /**
-   * Apply the rules recursively. If `false`, only apply the rules once.
-   *
-   * **Default**: `true`
-   */
-  recursive?: boolean;
-
-  /**
    * If `true`, if a function has a built-in simplification handler,
    * use it.
    *
@@ -1973,7 +1967,7 @@ export type SimplifyOptions = {
    * The set of rules to apply. If `null`, use no rules. If not provided,
    * use the default simplification rules.
    */
-  rules?: null | Rule | (BoxedRule | Rule)[] | BoxedRuleSet;
+  rules?: null | Rule | ReadonlyArray<BoxedRule | Rule> | BoxedRuleSet;
 
   /**
    * Use this cost function to determine if a simplification is worth it.
@@ -2209,7 +2203,14 @@ export interface IComputeEngine extends IBigNum {
   tuple(...elements: ReadonlyArray<number>): BoxedExpression;
   tuple(...elements: ReadonlyArray<BoxedExpression>): BoxedExpression;
 
-  rules(rules: ReadonlyArray<Rule | BoxedRule>): BoxedRuleSet;
+  rules(
+    rules:
+      | Rule
+      | ReadonlyArray<Rule | BoxedRule>
+      | BoxedRuleSet
+      | undefined
+      | null
+  ): BoxedRuleSet;
 
   /**
    * Return a set of built-in rules.

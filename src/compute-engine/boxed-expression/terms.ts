@@ -1,10 +1,11 @@
-import { BoxedExpression, IComputeEngine } from '../public';
+import type { BoxedExpression, IComputeEngine } from '../public';
 
 import { canonicalAdd } from '../library/arithmetic-add';
 import { canonicalMultiply } from '../library/arithmetic-multiply';
+
 import { MACHINE_PRECISION } from '../numerics/numeric';
 
-import { NumericValue } from '../numeric-value/public';
+import type { NumericValue } from '../numeric-value/public';
 import { ExactNumericValue } from '../numeric-value/exact-numeric-value';
 import { BigNumericValue } from '../numeric-value/big-numeric-value';
 import { MachineNumericValue } from '../numeric-value/machine-numeric-value';

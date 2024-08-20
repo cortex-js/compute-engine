@@ -1,8 +1,13 @@
-import { BoxedExpression } from './public';
+import type { BoxedExpression } from './public';
+
 import { isInequality, isRelationalOperator } from './utils';
-import { Product, commonTerms } from '../symbolic/product';
+
+import { Product, commonTerms } from './product';
+
 import { NumericValue } from '../numeric-value/public';
+
 import { canonicalMultiply } from '../library/arithmetic-multiply';
+
 import { add } from './terms';
 
 /** Combine rational expressions into a single fraction */

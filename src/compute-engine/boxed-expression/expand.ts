@@ -1,8 +1,11 @@
-import { asSmallInteger } from '../boxed-expression/numerics';
-import { isRelationalOperator } from '../boxed-expression/utils';
+import type { BoxedExpression, IComputeEngine } from '../public';
+
+import { asSmallInteger } from './numerics';
+import { isRelationalOperator } from './utils';
+import { add } from './terms';
+
 import { mul } from '../library/arithmetic-multiply';
-import { add } from '../boxed-expression/terms';
-import { BoxedExpression, IComputeEngine } from '../public';
+
 import { Product } from './product';
 
 function expandProduct(
@@ -178,7 +181,6 @@ function expandNumerator(expr: BoxedExpression): BoxedExpression | null {
   if (expr.operator !== 'Divide') return null;
   const expandedNumerator = expand(expr.op1);
   if (expandedNumerator === null) return null;
-  const ce = expr.engine;
   if (expandedNumerator.operator === 'Add') {
     return add(...expandedNumerator.ops!.map((x) => x.div(expr.op2)));
   }

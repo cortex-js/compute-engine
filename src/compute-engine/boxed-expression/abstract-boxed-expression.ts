@@ -1,21 +1,8 @@
-import Complex from 'complex.js';
 import { Decimal } from 'decimal.js';
 
 import { Expression, MathJsonIdentifier } from '../../math-json/types';
 
-import { LatexString } from '../public';
-import { compileToJavascript } from '../compile';
-import {
-  getApplyFunctionStyle,
-  getFractionStyle,
-  getGroupStyle,
-  getLogicStyle,
-  getNumericSetStyle,
-  getPowerStyle,
-  getRootStyle,
-} from '../latex-syntax/serializer-style';
-import { serializeLatex } from '../latex-syntax/serializer';
-import {
+import type {
   BoxedBaseDefinition,
   BoxedDomain,
   BoxedExpression,
@@ -38,7 +25,27 @@ import {
   Substitution,
   Type,
 } from './public';
-import { SerializeLatexOptions } from '../latex-syntax/public';
+
+import type { LatexString } from '../public';
+
+import type { NumericValue } from '../numeric-value/public';
+
+import type { SmallInteger } from '../numerics/numeric';
+
+import { compileToJavascript } from '../compile';
+
+import {
+  getApplyFunctionStyle,
+  getFractionStyle,
+  getGroupStyle,
+  getLogicStyle,
+  getNumericSetStyle,
+  getPowerStyle,
+  getRootStyle,
+} from '../latex-syntax/serializer-style';
+import { serializeLatex } from '../latex-syntax/serializer';
+import type { SerializeLatexOptions } from '../latex-syntax/public';
+
 import { AsciiMathOptions, toAsciiMath } from './ascii-math';
 
 /**
@@ -764,5 +771,3 @@ export function getSubexpressions(
 // function *after* the class definition
 
 import { serializeJson } from './serialize';
-import { NumericValue } from '../numeric-value/public';
-import { SmallInteger } from '../numerics/numeric';

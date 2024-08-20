@@ -1,4 +1,4 @@
-import { BoxedExpression } from './public';
+import type { BoxedExpression } from './public';
 
 export function isCollection(col: BoxedExpression): boolean {
   if (col.string !== null) return true;

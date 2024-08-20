@@ -8,7 +8,7 @@ import {
 import { applicable } from '../function-utils';
 import { widen } from '../boxed-expression/boxed-domain';
 import { each, isCollection } from '../collection-utils';
-import { checkConditions } from '../symbolic/rules';
+import { checkConditions } from '../boxed-expression/rules';
 
 export const CONTROL_STRUCTURES_LIBRARY: IdentifierDefinitions[] = [
   {

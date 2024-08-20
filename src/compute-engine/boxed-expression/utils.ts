@@ -1,6 +1,15 @@
+import type {
+  BoxedExpression,
+  FunctionDefinition,
+  IComputeEngine,
+  NumericFlags,
+  SemiBoxedExpression,
+  SymbolDefinition,
+} from './public';
+
 import { joinLatex } from '../latex-syntax/tokenizer';
 import { DEFINITIONS_INEQUALITIES } from '../latex-syntax/dictionary/definitions-relational-operators';
-import type { BoxedExpression, IComputeEngine, NumericFlags } from './public';
+
 import { MACHINE_PRECISION } from '../numerics/numeric';
 
 export function isBoxedExpression(x: unknown): x is BoxedExpression {
@@ -242,4 +251,42 @@ export function normalizeFlags(flags: Partial<NumericFlags>): NumericFlags {
   if (result.complex) result.number = true;
 
   return result as NumericFlags;
+}
+
+export function isSymbolDefinition(def: any): def is SymbolDefinition {
+  if (def === undefined || def === null || typeof def !== 'object')
+    return false;
+  if (isBoxedExpression(def)) return false;
+  return 'domain' in def || 'value' in def || 'constant' in def;
+}
+
+export function isFunctionDefinition(def: any): def is FunctionDefinition {
+  if (def === undefined || def === null || typeof def !== 'object')
+    return false;
+  if (isBoxedExpression(def)) return false;
+  return 'signature' in def || 'complexity' in def;
+}
+
+export function semiCanonical(
+  ce: IComputeEngine,
+  xs: ReadonlyArray<SemiBoxedExpression>
+): ReadonlyArray<BoxedExpression> {
+  if (!xs.every((x) => isBoxedExpression(x))) return xs.map((x) => ce.box(x));
+
+  // Avoid memory allocation if possible
+  return (xs as ReadonlyArray<BoxedExpression>).every((x) => x.isCanonical)
+    ? (xs as ReadonlyArray<BoxedExpression>)
+    : ((xs as ReadonlyArray<BoxedExpression>).map(
+        (x) => x.canonical
+      ) as ReadonlyArray<BoxedExpression>);
+}
+
+export function canonical(
+  ce: IComputeEngine,
+  xs: ReadonlyArray<SemiBoxedExpression>
+): ReadonlyArray<BoxedExpression> {
+  // Avoid memory allocation if possible
+  return xs.every((x) => isBoxedExpression(x) && x.isCanonical)
+    ? (xs as ReadonlyArray<BoxedExpression>)
+    : xs.map((x) => ce.box(x));
 }

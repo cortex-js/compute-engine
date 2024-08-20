@@ -48,14 +48,16 @@ import { box, boxFunction } from './boxed-expression/box';
 import {
   setIdentifierDefinitions,
   getStandardLibrary,
-  isSymbolDefinition,
-  isFunctionDefinition,
 } from './library/library';
 
 import { DEFAULT_COST_FUNCTION } from './cost-function';
 import { ExpressionMap } from './boxed-expression/expression-map';
-import { asLatexString } from './boxed-expression/utils';
-import { boxRules } from './symbolic/rules';
+import {
+  asLatexString,
+  isFunctionDefinition,
+  isSymbolDefinition,
+} from './boxed-expression/utils';
+import { boxRules } from './boxed-expression/rules';
 import { BoxedString } from './boxed-expression/boxed-string';
 import { BoxedNumber, canonicalNumber } from './boxed-expression/boxed-number';
 import { _BoxedSymbolDefinition } from './boxed-expression/boxed-symbol-definition';
@@ -80,13 +82,14 @@ import {
 } from './library/domains';
 import { domainToSignature } from './domain-utils';
 import {
-  IndexedLatexDictionary,
+  type IndexedLatexDictionary,
   getLatexDictionary,
   indexLatexDictionary,
 } from './latex-syntax/dictionary/definitions';
 import { parse } from './latex-syntax/parse';
 import {
   BoxedExpression,
+  BoxedRule,
   SemiBoxedExpression,
 } from './boxed-expression/public';
 
@@ -94,7 +97,10 @@ import {
 // to import it.
 import './boxed-expression/serialize';
 import { SIMPLIFY_RULES } from './symbolic/simplify-rules';
-import { HARMONIZATION_RULES, UNIVARIATE_ROOTS } from './symbolic/solve';
+import {
+  HARMONIZATION_RULES,
+  UNIVARIATE_ROOTS,
+} from './boxed-expression/solve';
 import { NumericValue, NumericValueData } from './numeric-value/public';
 import { ExactNumericValue } from './numeric-value/exact-numeric-value';
 import { BigNumericValue } from './numeric-value/big-numeric-value';
@@ -103,7 +109,7 @@ import {
   isValidIdentifier,
   validateIdentifier,
 } from '../math-json/identifiers';
-import { bigint } from './numerics/numeric-bigint';
+import { bigint } from './numerics/bigint';
 
 /**
  *
@@ -1981,9 +1987,14 @@ export class ComputeEngine implements IComputeEngine {
     return new BoxedNumber(this, value, { metadata });
   }
 
-  rules(rules: Rule[]): BoxedRuleSet {
-    if (!Array.isArray(rules))
-      throw new Error('ce.rules(): Expected an array of rules');
+  rules(
+    rules:
+      | Rule
+      | ReadonlyArray<Rule | BoxedRule>
+      | BoxedRuleSet
+      | undefined
+      | null
+  ): BoxedRuleSet {
     return boxRules(this, rules);
   }
 

@@ -1,6 +1,7 @@
+import type { BoxedExpression } from '../public';
+
 import { isCollection } from '../collection-utils';
 import { MAX_ITERATION } from '../numerics/numeric';
-import { BoxedExpression } from '../public';
 import { reduceCollection } from './collections';
 
 export type IndexingSet = {
@@ -77,6 +78,7 @@ export function indexingSetCartestianProduct(
   // We have multiple indexes
   //
   for (let i = 1; i < indexingSets.length; i++) {
+    // eslint-disable-next-line prefer-const
     let { index, lower, upper, isFinite } = indexingSets[i];
     if (!isFinite) upper = lower + MAX_ITERATION;
 

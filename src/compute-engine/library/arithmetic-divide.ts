@@ -1,8 +1,9 @@
-import { BoxedExpression } from '../public';
-import { canonicalMultiply } from './arithmetic-multiply';
-import { NumericValue } from '../numeric-value/public';
-import { bigint } from '../numerics/numeric-bigint';
+import type { BoxedExpression } from '../public';
+import type { NumericValue } from '../numeric-value/public';
 import { asSmallInteger } from '../boxed-expression/numerics';
+import { bigint } from '../numerics/bigint';
+
+import { canonicalMultiply } from './arithmetic-multiply';
 
 /**
  * Canonical form of 'Divide' (and 'Rational')

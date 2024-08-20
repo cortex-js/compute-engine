@@ -1,4 +1,4 @@
-import { bigint } from './numeric-bigint';
+import { bigint } from './bigint';
 
 const LARGE_PRIME = 1125899906842597; // Largest prime < 2^50
 

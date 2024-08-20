@@ -1,7 +1,5 @@
-import Complex from 'complex.js';
-import Decimal from 'decimal.js';
-import { Expression } from '../../math-json/types';
-import {
+import type { Expression } from '../../math-json/types';
+import type {
   BoxedExpression,
   IComputeEngine,
   EvaluateOptions,
@@ -12,22 +10,24 @@ import {
   PatternMatchOptions,
   BoxedBaseDefinition,
   BoxedFunctionDefinition,
-  SemiBoxedExpression,
   Type,
 } from '../public';
+
 import {
   DataTypeMap,
   TensorDataType,
   getExpressionDatatype,
   getSupertype,
   makeTensorField,
-} from '../symbolic/tensor-fields';
-import { AbstractTensor, TensorData, makeTensor } from '../symbolic/tensors';
-import { _BoxedExpression } from './abstract-boxed-expression';
-import { hashCode, isBoxedExpression } from './utils';
-import { canonical as makeCanonical } from '../symbolic/utils';
-import { isWildcard, wildcardName } from './boxed-patterns';
+} from './tensor-fields';
+
 import { NumericValue } from '../numeric-value/public';
+
+import { _BoxedExpression } from './abstract-boxed-expression';
+import { isWildcard, wildcardName } from './boxed-patterns';
+import { canonical, hashCode, isBoxedExpression } from './utils';
+
+import { AbstractTensor, TensorData, makeTensor } from '../tensor/tensors'; // @fixme
 
 /**
  * A boxed tensor represents an expression that can be
@@ -65,11 +65,13 @@ export class BoxedTensor extends _BoxedExpression {
     if (input instanceof AbstractTensor) {
       this._tensor = input;
     } else {
-      const canonical = options?.canonical ?? true;
+      const isCanonical = options?.canonical ?? true;
       this._operator = input.op ?? 'List';
-      this._ops = canonical ? makeCanonical(ce, input.ops) : input.ops;
+      this._ops = isCanonical ? canonical(ce, input.ops) : input.ops;
 
-      this._expression = ce._fn(this._operator, this._ops, { canonical });
+      this._expression = ce._fn(this._operator, this._ops, {
+        canonical: isCanonical,
+      });
     }
 
     ce._register(this);

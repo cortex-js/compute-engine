@@ -6,7 +6,7 @@ import {
   IComputeEngine,
   IdentifierDefinitions,
 } from '../public';
-import { flatten } from '../symbolic/flatten';
+import { flatten } from '../boxed-expression/flatten';
 
 //   // eq, lt, leq, gt, geq, neq, approx
 //   //     shortLogicalImplies: 52, // ➔

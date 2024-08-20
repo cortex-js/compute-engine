@@ -1,9 +1,4 @@
-import {
-  ADDITION_PRECEDENCE,
-  LatexDictionary,
-  Parser,
-  Serializer,
-} from '../public';
+import { LatexDictionary, Parser, Serializer } from '../public';
 
 import {
   operand,

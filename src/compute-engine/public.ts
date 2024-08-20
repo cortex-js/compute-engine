@@ -14,7 +14,6 @@
  */
 
 import type {
-  BoxedExpression,
   FunctionDefinition,
   SemiBoxedExpression,
   SymbolDefinition,

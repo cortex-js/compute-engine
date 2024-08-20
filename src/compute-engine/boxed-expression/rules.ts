@@ -1,3 +1,5 @@
+import type { Expression } from '../../math-json/types';
+
 import {
   BoxedExpression,
   BoxedRule,
@@ -15,15 +17,14 @@ import {
   isRuleStep,
   isBoxedRule,
 } from '../public';
-import {
-  asLatexString,
-  isInequality,
-  isRelationalOperator,
-} from '../boxed-expression/utils';
-import { isCollection } from '../collection-utils';
+
+import { asLatexString, isInequality, isRelationalOperator } from './utils';
+
 import { Parser } from '../latex-syntax/public';
+
+import { isCollection } from '../collection-utils';
+
 import { isPrime } from '../library/arithmetic';
-import { Expression } from '../../math-json/types';
 
 // @todo:
 // export function fixPoint(rule: Rule);
@@ -537,6 +538,7 @@ function boxRule(ce: IComputeEngine, rule: Rule | BoxedRule): BoxedRule {
       id: rule.toString().replace(/\n/g, ' '),
     };
 
+  // eslint-disable-next-line prefer-const
   let { match, replace, condition, id } = rule;
 
   if (replace === undefined)
@@ -625,7 +627,16 @@ function boxRule(ce: IComputeEngine, rule: Rule | BoxedRule): BoxedRule {
 /**
  * Create a boxed rule set from a collection of non-boxed rules
  */
-export function boxRules(ce: IComputeEngine, rs: Iterable<Rule>): BoxedRuleSet {
+export function boxRules(
+  ce: IComputeEngine,
+  rs: Rule | ReadonlyArray<Rule | BoxedRule> | BoxedRuleSet | undefined | null
+): BoxedRuleSet {
+  if (!rs) return { rules: [] };
+
+  if (typeof rs === 'object' && 'rules' in rs) return rs as BoxedRuleSet;
+
+  if (!Array.isArray(rs)) rs = [rs as Rule | BoxedRule];
+
   const rules: BoxedRule[] = [];
   for (const rule of rs) {
     try {
@@ -674,6 +685,7 @@ function applyRule(
 
   const exact = rule.exact ?? true;
 
+  // eslint-disable-next-line prefer-const
   let { match, replace, condition } = rule;
 
   if (canonical && match) {

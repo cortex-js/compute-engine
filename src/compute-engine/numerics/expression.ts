@@ -1,6 +1,6 @@
-import { Expression } from '../../math-json';
+import type { Expression } from '../../math-json';
 import { isNumberExpression, isNumberObject } from '../../math-json/utils';
-import { bigint } from './numeric-bigint';
+import { bigint } from './bigint';
 import { numberToString } from './strings';
 
 export function bigintValue(

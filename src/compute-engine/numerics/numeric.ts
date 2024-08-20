@@ -1,6 +1,3 @@
-import Complex from 'complex.js';
-import { Decimal } from 'decimal.js';
-
 import { extrapolate } from './richardson';
 import { primeFactors } from './primes';
 

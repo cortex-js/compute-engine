@@ -1,8 +1,16 @@
+import type { BoxedExpression } from './public';
+
+import type {
+  IComputeEngine,
+  BoxedDomain,
+  DomainLiteral,
+  Hold,
+} from '../public';
+
 import { each, isFiniteIndexableCollection } from '../collection-utils';
-import { IComputeEngine, BoxedDomain, DomainLiteral, Hold } from '../public';
-import { flatten } from '../symbolic/flatten';
-import { shouldHold } from '../symbolic/utils';
-import { BoxedExpression } from './public';
+
+import { flatten } from './flatten';
+import { shouldHold } from './hold';
 
 /**
  * Check that the number of arguments is as expected.

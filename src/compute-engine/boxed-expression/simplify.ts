@@ -1,12 +1,14 @@
-import { factor } from '../boxed-expression/factor';
-import { isRelationalOperator } from '../boxed-expression/utils';
-import {
+import type {
   BoxedExpression,
   RuleStep,
   RuleSteps,
   SimplifyOptions,
 } from '../public';
+
+import { factor } from './factor';
+import { isRelationalOperator } from './utils';
 import { replace } from './rules';
+import { holdMap } from './hold';
 
 export function simplify(
   expr: BoxedExpression,
@@ -75,11 +77,13 @@ export function simplify(
   // 4/ Apply rules, until no rules can be applied
   //
 
-  // We assume that the arguments have been simplified, if necessary
-  // (this is done in `BoxedFunction.simplify()`)
+  // Simplify the operands...
+  expr = simplifyFunctionOperands(expr, options);
 
-  const rules =
-    options?.rules ?? expr.engine.getRuleSet('standard-simplification')!;
+  const rules = options?.rules
+    ? ce.rules(options.rules)
+    : expr.engine.getRuleSet('standard-simplification')!;
+
   const steps: RuleStep[] = [{ value: expr, because: 'initial' }];
 
   //
@@ -89,17 +93,19 @@ export function simplify(
   do {
     const newSteps = replace(expr, rules, {
       ...options,
-      recursive: true,
+      recursive: false,
       canonical: true,
     });
-    if (newSteps.length === 0) break;
 
-    const alt = newSteps.at(-1)!.value;
+    if (newSteps.length === 0 || expr.isSame(newSteps.at(-1)!.value)) break;
+    const alt = simplifyFunctionOperands(newSteps.at(-1)!.value, options);
+    newSteps.at(-1)!.value = alt;
+
     if (isCheaper(expr, alt, options?.costFunction)) {
       expr = alt;
       steps.push(...newSteps);
     }
-  } while (!steps.some((x) => x.value.isSame(expr)));
+  } while (!steps.slice(0, -1).some((x) => x.value.isSame(expr)));
 
   return steps as RuleSteps;
 }
@@ -142,4 +148,16 @@ function cheapest(
   costFunction?: (expr: BoxedExpression) => number
 ): BoxedExpression {
   return isCheaper(oldExpr, newExpr, costFunction) ? newExpr! : oldExpr;
+}
+
+function simplifyFunctionOperands(
+  expr: BoxedExpression,
+  options?: Partial<SimplifyOptions>
+): BoxedExpression {
+  if (!expr.ops) return expr;
+
+  return expr.engine.function(
+    expr.operator,
+    holdMap(expr, (x) => x.simplify(options))
+  );
 }

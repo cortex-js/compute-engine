@@ -1,19 +1,16 @@
 import Complex from 'complex.js';
 import { Decimal } from 'decimal.js';
 
-import { Expression } from '../../math-json/types';
+import type { Expression } from '../../math-json/types';
 
-import {
+import type {
   BoxedExpression,
   IComputeEngine,
   JsonSerializationOptions,
   Metadata,
 } from '../public';
 
-import { asSmallInteger } from './numerics';
-
 import { isInMachineRange } from '../numerics/numeric-bignum';
-
 import {
   Rational,
   isInteger,
@@ -25,14 +22,16 @@ import {
   machineNumerator,
   neg,
 } from '../numerics/rationals';
-
-import { Product } from '../symbolic/product';
-
-import { order } from './order';
-import { NumericValue } from '../numeric-value/public';
-import { ExactNumericValue } from '../numeric-value/exact-numeric-value';
 import { numberToString } from '../numerics/strings';
 import { numberToExpression } from '../numerics/expression';
+
+import { NumericValue } from '../numeric-value/public';
+import { ExactNumericValue } from '../numeric-value/exact-numeric-value';
+
+import { Product } from './product';
+
+import { order } from './order';
+import { asSmallInteger } from './numerics';
 
 function _escapeJsonString(s: undefined): undefined;
 function _escapeJsonString(s: string): string;

@@ -1,6 +1,6 @@
-import { BoxedExpression, IComputeEngine } from '../public';
+import type { BoxedExpression, IComputeEngine } from '../public';
 
-import { order } from '../boxed-expression/order';
+import { order } from './order';
 import {
   Rational,
   add,
@@ -16,7 +16,7 @@ import {
 import { asRadical } from '../library/arithmetic-power';
 
 import { flatten } from './flatten';
-import { asRational } from '../boxed-expression/numerics';
+import { asRational } from './numerics';
 import { NumericValue } from '../numeric-value/public';
 import { mul } from '../library/arithmetic-multiply';
 

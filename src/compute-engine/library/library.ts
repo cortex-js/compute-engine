@@ -14,12 +14,7 @@ import { TRIGONOMETRY_LIBRARY } from './trigonometry';
 
 import { LibraryCategory } from '../latex-syntax/public';
 
-import {
-  FunctionDefinition,
-  IComputeEngine,
-  IdentifierDefinitions,
-  SymbolDefinition,
-} from '../public';
+import { IComputeEngine, IdentifierDefinitions } from '../public';
 import { _BoxedSymbolDefinition } from '../boxed-expression/boxed-symbol-definition';
 import { makeFunctionDefinition } from '../boxed-expression/boxed-function-definition';
 import { domainSetsLibrary } from './domains';
@@ -28,6 +23,10 @@ import {
   isValidIdentifier,
   validateIdentifier,
 } from '../../math-json/identifiers';
+import {
+  isFunctionDefinition,
+  isSymbolDefinition,
+} from '../boxed-expression/utils';
 
 export function getStandardLibrary(
   categories: LibraryCategory[] | LibraryCategory | 'all'
@@ -199,18 +198,4 @@ export function setIdentifierDefinitions(
       idTable.set(name, def);
     }
   }
-}
-
-export function isSymbolDefinition(def: any): def is SymbolDefinition {
-  if (def === undefined || def === null || typeof def !== 'object')
-    return false;
-  if (def instanceof _BoxedExpression) return false;
-  return 'domain' in def || 'value' in def || 'constant' in def;
-}
-
-export function isFunctionDefinition(def: any): def is FunctionDefinition {
-  if (def === undefined || def === null || typeof def !== 'object')
-    return false;
-  if (def instanceof _BoxedExpression) return false;
-  return 'signature' in def || 'complexity' in def;
 }

@@ -1,9 +1,11 @@
-import { BoxedExpression, IComputeEngine } from '../public';
-import { Product } from '../symbolic/product';
-import { expandProducts } from '../symbolic/expand';
-import { flatten } from '../symbolic/flatten';
-import { negateProduct } from '../symbolic/negate';
+import type { BoxedExpression, IComputeEngine } from '../public';
+
 import { order } from '../boxed-expression/order';
+
+import { Product } from '../boxed-expression/product';
+import { expandProducts } from '../boxed-expression/expand';
+import { flatten } from '../boxed-expression/flatten';
+import { negateProduct } from '../boxed-expression/negate';
 
 /**
  * The canonical form of `Multiply`:

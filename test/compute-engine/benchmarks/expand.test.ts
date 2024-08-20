@@ -1,4 +1,4 @@
-import { BoxedExpression } from '../../../src/compute-engine/public';
+import type { BoxedExpression } from '../../../src/compute-engine/public';
 import { benchmark, engine } from '../../utils';
 
 //

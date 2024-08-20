@@ -1,4 +1,4 @@
-import { BoxedExpression } from '../public';
+import type { BoxedExpression } from '../public';
 
 function distribute2(
   lhs: BoxedExpression,

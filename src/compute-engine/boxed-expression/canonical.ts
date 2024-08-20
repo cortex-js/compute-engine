@@ -1,9 +1,12 @@
+import type { BoxedExpression, CanonicalOptions } from '../public';
+
+import { flattenOps } from './flatten';
+
 import { canonicalAdd } from '../library/arithmetic-add';
 import { canonicalDivide } from '../library/arithmetic-divide';
 import { canonicalMultiply } from '../library/arithmetic-multiply';
-import { canonicalInvisibleOperator } from '../library/core';
-import { BoxedExpression, CanonicalOptions } from '../public';
-import { flattenOps } from '../symbolic/flatten';
+import { canonicalInvisibleOperator } from '../library/invisible-operator';
+
 import { canonicalOrder } from './order';
 
 export function canonicalForm(

@@ -1,17 +1,15 @@
-import { _BoxedExpression } from './abstract-boxed-expression';
-import {
+import type {
   BoxedExpression,
   BoxedDomain,
   IComputeEngine,
   Metadata,
   PatternMatchOptions,
   BoxedSubstitution,
-  SemiBoxedExpression,
   Type,
 } from './public';
+
+import { _BoxedExpression } from './abstract-boxed-expression';
 import { hashCode, isBoxedExpression } from './utils';
-import Complex from 'complex.js';
-import Decimal from 'decimal.js';
 import { isWildcard, wildcardName } from './boxed-patterns';
 
 /**

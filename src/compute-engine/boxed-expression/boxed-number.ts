@@ -1,6 +1,6 @@
 import Complex from 'complex.js';
 import { Decimal } from 'decimal.js';
-import {
+import type {
   BoxedExpression,
   BoxedDomain,
   IComputeEngine,
@@ -17,28 +17,33 @@ import {
   CanonicalOptions,
   SimplifyOptions,
 } from '../public';
-import { inferNumericDomain } from '../domain-utils';
-import { Rational } from '../numerics/rationals';
 
-import { _BoxedExpression } from './abstract-boxed-expression';
-import { hashCode } from './utils';
-import { Expression, MathJsonNumber } from '../../math-json';
-import { asSmallInteger, signDiff } from './numerics';
-import { match } from './match';
+import type { Expression, MathJsonNumber } from '../../math-json';
+
+import { inferNumericDomain } from '../domain-utils';
 import { canonicalDivide } from '../library/arithmetic-divide';
-import { NumericValue, NumericValueData } from '../numeric-value/public';
 import { mul } from '../library/arithmetic-multiply';
+
+import { asSmallInteger, signDiff } from './numerics';
 import {
   canonicalInteger,
   SMALL_INTEGER,
   SmallInteger,
 } from '../numerics/numeric';
-import { add } from './terms';
-import { bigint } from '../numerics/numeric-bigint';
+import { Rational } from '../numerics/rationals';
 import { isInMachineRange } from '../numerics/numeric-bignum';
-import { replace } from '../symbolic/rules';
-import { simplify } from '../symbolic/simplify';
+import { bigint } from '../numerics/bigint';
+
+import { NumericValue, NumericValueData } from '../numeric-value/public';
 import { ExactNumericValue } from '../numeric-value/exact-numeric-value';
+
+import { replace } from './rules';
+import { simplify } from './simplify';
+
+import { _BoxedExpression } from './abstract-boxed-expression';
+import { hashCode } from './utils';
+import { match } from './match';
+import { add } from './terms';
 
 /**
  * BoxedNumber

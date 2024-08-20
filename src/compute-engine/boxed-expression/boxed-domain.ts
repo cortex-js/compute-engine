@@ -1,13 +1,8 @@
-import Complex from 'complex.js';
-import Decimal from 'decimal.js';
-import { Expression } from '../../math-json/types';
-import { functionDomain } from '../domain-utils';
-import {
-  ancestors,
-  DOMAIN_CONSTRUCTORS,
-  isDomainLiteral,
-} from '../library/domains';
-import {
+import type { Expression } from '../../math-json/types';
+
+import type { BoxedExpression } from './public';
+
+import type {
   BoxedDomain,
   BoxedSubstitution,
   DomainCompatibility,
@@ -18,10 +13,17 @@ import {
   Metadata,
   PatternMatchOptions,
 } from '../public';
+
+import { functionDomain } from '../domain-utils';
+import {
+  ancestors,
+  DOMAIN_CONSTRUCTORS,
+  isDomainLiteral,
+} from '../library/domains';
+
 import { _BoxedExpression } from './abstract-boxed-expression';
 import { hashCode, isBoxedExpression } from './utils';
 import { isWildcard, wildcardName } from './boxed-patterns';
-import { BoxedExpression, SemiBoxedExpression } from './public';
 
 /**
  * A `_BoxedDomain` is a wrapper around a boxed, canonical, domain

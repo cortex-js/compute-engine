@@ -1,4 +1,26 @@
 import { Decimal } from 'decimal.js';
+
+import type { IdentifierDefinitions } from '../public';
+
+import {
+  checkDomain,
+  checkDomains,
+  checkNumericArgs,
+} from '../boxed-expression/validate';
+import { IComputeEngine, BoxedExpression } from '../boxed-expression/public';
+import { bignumPreferred, canonical } from '../boxed-expression/utils';
+import {
+  asSmallInteger,
+  asRational,
+  asBignum,
+  asBigint,
+} from '../boxed-expression/numerics';
+import { add, addN } from '../boxed-expression/terms';
+import { addOrder } from '../boxed-expression/order';
+
+import { apply, apply2 } from '../boxed-expression/apply';
+import { flatten } from '../boxed-expression/flatten';
+
 import {
   gamma as gammaComplex,
   gammaln as lngammaComplex,
@@ -17,31 +39,16 @@ import {
 } from '../numerics/special-functions';
 import { chop, factorial, factorial2, gcd, lcm } from '../numerics/numeric';
 import { rationalize } from '../numerics/rationals';
-import { IdentifierDefinitions } from '../public';
-import { bignumPreferred } from '../boxed-expression/utils';
+import { isPrime as isPrimeMachine, isPrimeBigint } from '../numerics/primes';
+import { fromDigits } from '../numerics/strings';
+
+import { each, isCollection } from '../collection-utils';
+
 import { domainAdd, canonicalAdd } from './arithmetic-add';
 import { mul, mulN } from './arithmetic-multiply';
 import { canonicalDivide } from './arithmetic-divide';
-import { apply, apply2, canonical } from '../symbolic/utils';
-import {
-  checkDomain,
-  checkDomains,
-  checkNumericArgs,
-} from '../boxed-expression/validate';
-import { flatten } from '../symbolic/flatten';
-import { each, isCollection } from '../collection-utils';
-import { IComputeEngine, BoxedExpression } from '../boxed-expression/public';
-import {
-  asSmallInteger,
-  asRational,
-  asBignum,
-  asBigint,
-} from '../boxed-expression/numerics';
-import { add, addN } from '../boxed-expression/terms';
-import { isPrime as isPrimeMachine, isPrimeBigint } from '../numerics/primes';
-import { fromDigits } from '../numerics/strings';
-import { addOrder } from '../boxed-expression/order';
 import { canonicalBigop, reduceBigOp } from './utils';
+import { canonicalPower, canonicalRoot } from './arithmetic-power';
 
 // When considering processing an arithmetic expression, the following
 // are the core canonical arithmetic operations that should be considered:
@@ -1720,46 +1727,4 @@ export function isPrime(expr: BoxedExpression): boolean | undefined {
   if (b !== null) return isPrimeBigint(b);
 
   return undefined;
-}
-
-export function canonicalPower(
-  a: BoxedExpression,
-  b: BoxedExpression
-): BoxedExpression {
-  const ce = a.engine;
-  a = a.canonical;
-  b = b.canonical;
-  const exp = b.re;
-  if (exp !== undefined) {
-    if (exp === 0) return ce.One;
-    if (exp === 1) return a;
-    if (exp === 0.5) return canonicalRoot(a, 2);
-  }
-  return ce._fn('Power', [a, b]);
-}
-
-export function canonicalRoot(
-  a: BoxedExpression,
-  b: BoxedExpression | number
-): BoxedExpression {
-  a = a.canonical;
-  const ce = a.engine;
-  let exp: number | undefined = undefined;
-  if (typeof b === 'number') exp = b;
-  else {
-    b = b.canonical;
-    if (b.isNumberLiteral && b.im === 0) exp = b.re!;
-  }
-
-  if (exp === 1) return a;
-  if (exp === 2) {
-    if (a.isNumberLiteral && (a.type === 'integer' || a.type === 'rational')) {
-      const v = a.sqrt();
-      if (typeof v.numericValue === 'number') return v;
-      if (v.numericValue!.isExact) return v;
-    }
-    return ce._fn('Sqrt', [a]);
-  }
-
-  return ce._fn('Root', [a, typeof b === 'number' ? ce.number(b) : b]);
 }

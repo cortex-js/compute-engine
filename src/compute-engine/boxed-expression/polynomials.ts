@@ -1,5 +1,5 @@
-import { BoxedExpression, SemiBoxedExpression } from '../public';
-import { asSmallInteger } from '../boxed-expression/numerics';
+import type { BoxedExpression, SemiBoxedExpression } from '../public';
+import { asSmallInteger } from './numerics';
 
 /**
  * Coefficient of a univariate (single variable) polynomial.

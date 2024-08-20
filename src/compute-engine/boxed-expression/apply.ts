@@ -1,14 +1,9 @@
 import Complex from 'complex.js';
 import { Decimal } from 'decimal.js';
-import { bignumPreferred } from '../boxed-expression/utils';
-import { isRational, Rational } from '../numerics/rationals';
-import {
-  BoxedExpression,
-  Hold,
-  IComputeEngine,
-  SemiBoxedExpression,
-} from '../public';
-import { _BoxedExpression } from '../boxed-expression/abstract-boxed-expression';
+
+import type { BoxedExpression } from '../public';
+
+import { bignumPreferred } from './utils';
 
 export function apply(
   expr: BoxedExpression,
@@ -78,45 +73,4 @@ export function apply2(
 
   if (result === undefined) return undefined;
   return ce.number(ce.chop(result));
-}
-
-export function shouldHold(skip: Hold, count: number, index: number): boolean {
-  if (skip === 'all') return true;
-
-  if (skip === 'none') return false;
-
-  if (skip === 'first') return index === 0;
-
-  if (skip === 'rest') return index !== 0;
-
-  if (skip === 'last') return index === count;
-
-  if (skip === 'most') return index !== count;
-
-  return true;
-}
-
-export function semiCanonical(
-  ce: IComputeEngine,
-  xs: ReadonlyArray<SemiBoxedExpression>
-): ReadonlyArray<BoxedExpression> {
-  if (!xs.every((x) => x instanceof _BoxedExpression))
-    return xs.map((x) => ce.box(x));
-
-  // Avoid memory allocation if possible
-  return (xs as ReadonlyArray<BoxedExpression>).every((x) => x.isCanonical)
-    ? (xs as ReadonlyArray<BoxedExpression>)
-    : ((xs as ReadonlyArray<BoxedExpression>).map(
-        (x) => x.canonical
-      ) as ReadonlyArray<BoxedExpression>);
-}
-
-export function canonical(
-  ce: IComputeEngine,
-  xs: ReadonlyArray<SemiBoxedExpression>
-): ReadonlyArray<BoxedExpression> {
-  // Avoid memory allocation if possible
-  return xs.every((x) => x instanceof _BoxedExpression && x.isCanonical)
-    ? (xs as ReadonlyArray<BoxedExpression>)
-    : xs.map((x) => ce.box(x));
 }

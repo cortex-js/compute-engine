@@ -1,7 +1,7 @@
 import { each } from '../collection-utils';
 import { erf, erfInv } from '../numerics/special-functions';
 import { IdentifierDefinitions } from '../public';
-import { choose } from '../symbolic/expand';
+import { choose } from '../boxed-expression/expand';
 
 // Geometric mean:
 // Harmonic mean:

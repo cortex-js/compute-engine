@@ -993,22 +993,27 @@ const CANONICALIZATION_TEST_CASES: TestCase[] = [
   ],
   ['-23', -23, 'Integers should stay as is'],
   ['0.3', 0.3, 'Floating point should stay as is'],
-  ['3/4', '3/4', 'Rational are reduced'],
-  ['6/8', '3/4', 'Rational are reduced (during canonicalization)'],
-  ['\\sqrt3', '\\sqrt3'],
-  ['\\sqrt{3.1}', { num: '1.76068168616590091458' }],
+  ['3/4', '3/4', 'Rationals are not converted to float'],
+  ['6/8', '3/4', 'Rationals are reduced'],
+  ['3/4 + 2', '11/4', 'Rational are reduced, but preserved as exact values'],
+  ['3/4 + 5/7', '41/28', 'Rational are reduced, but preserved as exact values'],
+
+  ['\\sqrt3', '\\sqrt3', 'Square root of integers are not converted to float'],
+  [
+    '\\sqrt{3.1}',
+    { num: '1.76068168616590091458' },
+    'Square root of float are computed',
+  ],
   ['x+0', 'x', 'Zero is removed from addition'],
   ['-1234 - 5678', -6912],
   ['1.234 + 5678', 5679.234],
   ['1.234 + 5.678', 6.912],
   ['1.234 + 5.678 + 1.0001', 7.9121],
   ['2 + 4', 6],
-  ['1/2 + 0.5', 1, 'Floating point and exact should get simplified'],
-  ['\\sqrt3 + 3', '\\sqrt3 + 3', 'should stay exact'],
-  ['\\sqrt3 + 1/2', '\\sqrt3 + 1/2', 'should stay exact'],
+  ['1/2 + 0.5', 1, 'Floating point and exact are simplified'],
+  ['\\sqrt3 + 3', '\\sqrt3 + 3', 'stay exact'],
+  ['\\sqrt3 + 1/2', '\\sqrt3 + 1/2', 'stay exact'],
   ['\\sqrt3 + 0.3', { num: '2.0320508075688772' }],
-  ['3/4 + 2', '11/4', 'Rational are reduced, but preserved as exact values'],
-  ['3/4 + 5/7', '41/28', 'Rational are reduced, but preserved as exact values'],
   ['3.1/2.8', '1.10714285714285714286', 'Floating point division'],
   [
     ' 2x\\times x \\times 3 \\times x',
@@ -1137,7 +1142,7 @@ const RULE_TEST_CASES: TestCase[] = [
   `,
   ],
   ['e e^x e^{-x}', 'e'], // 🙁 e * e^x * e^(-x)
-  ['e^x e^{-x}', 1], // 🙁 e^x * e^(-x)
+  ['e^x e^{-x}', 1, 'stop'], // 🙁 e^x * e^(-x)
   ['\\sqrt[4]{16b^{4}}', '2b'],
 
   [
@@ -1147,10 +1152,10 @@ const RULE_TEST_CASES: TestCase[] = [
     //
   `,
   ],
-  ['(-x)^3', '-x^3'],
+  ['(-x)^3', '-(x^3)'],
   ['(-x)^{4/3}', 'x^{4/3}'], // 👍 (-x)^n:even -> x^n
   ['(-x)^4', 'x^4'],
-  ['(-x)^{3/5}', '-x^{3/5}'],
+  ['(-x)^{3/5}', '-(x^{3/5})'],
   ['1/x-1/(x+1)', '1/(x(x+1))'], // 🙁 -1 / (x + 1) + 1 / x
   ['\\sqrt[3]{-2}', '-\\sqrt[3]{2}'], // 🙁 NaN
 
@@ -1630,8 +1635,8 @@ describe('SIMPLIFY', () => {
 
   console.info('\n\nRule test cases\n\n');
   const rules = ce.rules([
-    ...ce.getRuleSet('standard-simplification')!.rules,
     ...RULES,
+    ...ce.getRuleSet('standard-simplification')!.rules,
   ]);
   for (const test of RULE_TEST_CASES) runTestCase(test, rules);
 

@@ -1,6 +1,7 @@
-import { Rational } from '../numerics/rationals';
-import { BoxedExpression } from '../public';
+import type { BoxedExpression } from '../public';
 import { asRational } from '../boxed-expression/numerics';
+
+import type { Rational } from '../numerics/rationals';
 
 function isSqrt(expr: BoxedExpression): boolean {
   return (
@@ -25,4 +26,46 @@ export function asRadical(expr: BoxedExpression): Rational | null {
   }
 
   return null;
+}
+
+export function canonicalPower(
+  a: BoxedExpression,
+  b: BoxedExpression
+): BoxedExpression {
+  const ce = a.engine;
+  a = a.canonical;
+  b = b.canonical;
+  const exp = b.re;
+  if (exp !== undefined) {
+    if (exp === 0) return ce.One;
+    if (exp === 1) return a;
+    if (exp === 0.5) return canonicalRoot(a, 2);
+  }
+  return ce._fn('Power', [a, b]);
+}
+
+export function canonicalRoot(
+  a: BoxedExpression,
+  b: BoxedExpression | number
+): BoxedExpression {
+  a = a.canonical;
+  const ce = a.engine;
+  let exp: number | undefined = undefined;
+  if (typeof b === 'number') exp = b;
+  else {
+    b = b.canonical;
+    if (b.isNumberLiteral && b.im === 0) exp = b.re!;
+  }
+
+  if (exp === 1) return a;
+  if (exp === 2) {
+    if (a.isNumberLiteral && (a.type === 'integer' || a.type === 'rational')) {
+      const v = a.sqrt();
+      if (typeof v.numericValue === 'number') return v;
+      if (v.numericValue!.isExact) return v;
+    }
+    return ce._fn('Sqrt', [a]);
+  }
+
+  return ce._fn('Root', [a, typeof b === 'number' ? ce.number(b) : b]);
 }

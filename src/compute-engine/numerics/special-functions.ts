@@ -1,4 +1,4 @@
-import { IComputeEngine } from '../../compute-engine.js';
+import type { IComputeEngine } from '../../compute-engine'; // @fixme: circular dependency
 import { BigNum } from './bignum';
 
 const gammaG = 7;

@@ -1,9 +1,12 @@
 import Decimal from 'decimal.js';
 
-import { Rational } from '../numerics/rationals';
-import { BoxedExpression } from './public';
+import type { Rational } from '../numerics/rationals';
+
+import type { BoxedExpression } from './public';
+
 import { SMALL_INTEGER, chop } from '../numerics/numeric';
-import { bigint } from '../numerics/numeric-bigint';
+import { bigint } from '../numerics/bigint';
+
 import { ExactNumericValue } from '../numeric-value/exact-numeric-value';
 
 export function asRational(expr: BoxedExpression): Rational | undefined {

@@ -6,6 +6,7 @@ import { IdentifierDefinitions } from '../public';
 export const COMPLEX_LIBRARY: IdentifierDefinitions[] = [
   {
     Real: {
+      // @todo: could be extended to return an expression, i.e. ["Real", ["Add", "x", ["Complex", 0, 5]]] -> "x". Not for any operator, but at least for Add, Multiply, Negate, etc.
       threadable: true,
       complexity: 1200,
       signature: {

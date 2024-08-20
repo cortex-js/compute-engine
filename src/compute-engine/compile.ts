@@ -1,11 +1,14 @@
-import { MathJsonIdentifier } from '../math-json/types';
+import type { MathJsonIdentifier } from '../math-json/types';
+
+import type { BoxedExpression } from './public';
+
 import { isRelationalOperator } from './boxed-expression/utils';
 import { isCollection, isFiniteIndexableCollection } from './collection-utils';
 import { normalizeIndexingSet } from './library/utils';
+
 import { monteCarloEstimate } from './numerics/monte-carlo';
 import { chop, factorial, gcd, lcm, limit } from './numerics/numeric';
 import { gamma, gammaln } from './numerics/special-functions';
-import { BoxedExpression } from './public';
 
 export type CompiledType = boolean | number | string | object;
 

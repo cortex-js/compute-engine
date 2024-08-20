@@ -1,5 +1,5 @@
 import type { Expression, MathJsonIdentifier } from '../../math-json/types';
-import {
+import type {
   IndexedLatexDictionary,
   IndexedLatexDictionaryEntry,
 } from './dictionary/definitions';

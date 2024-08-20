@@ -1,12 +1,12 @@
 import Complex from 'complex.js';
-import { BoxedExpression, IComputeEngine } from '../public';
+import type { BoxedExpression, IComputeEngine } from '../public';
 import {
   DataTypeMap,
   TensorDataType,
   TensorField,
   getSupertype,
   makeTensorField,
-} from './tensor-fields';
+} from '../boxed-expression/tensor-fields';
 
 /**
  * @noInheritDoc

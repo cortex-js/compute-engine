@@ -7,7 +7,7 @@ import {
 import { mul } from '../library/arithmetic-multiply';
 import { simplifyLogicFunction } from '../library/logic';
 import { Rule, RuleStep } from '../public';
-import { expand } from './expand';
+import { expand } from '../boxed-expression/expand';
 
 /**
  * @todo: a set to "tidy" an expression. Different from a canonical form, but

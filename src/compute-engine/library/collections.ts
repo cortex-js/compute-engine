@@ -1,18 +1,20 @@
-import { checkArity, checkDomains } from '../boxed-expression/validate';
-import { canonical } from '../symbolic/utils';
-import {
+import type {
   BoxedExpression,
   IComputeEngine,
   IdentifierDefinitions,
   SemiBoxedExpression,
 } from '../public';
+
+import { checkArity, checkDomains } from '../boxed-expression/validate';
 import { asSmallInteger } from '../boxed-expression/numerics';
+
 import {
   each,
   isFiniteCollection,
   isFiniteIndexableCollection,
 } from '../collection-utils';
 import { applicable } from '../function-utils';
+import { canonical } from '../boxed-expression/utils';
 
 // From NumPy:
 export const DEFAULT_LINSPACE_COUNT = 50;

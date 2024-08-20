@@ -6,7 +6,7 @@ import { Expression } from '../../math-json/types';
 import { MACHINE_TOLERANCE, SmallInteger } from '../numerics/numeric';
 import { numberToExpression } from '../numerics/expression';
 import { numberToString } from '../numerics/strings';
-import { bigint } from '../numerics/numeric-bigint';
+import { bigint } from '../numerics/bigint';
 
 export type BigNumFactory = (value: Decimal.Value) => Decimal;
 

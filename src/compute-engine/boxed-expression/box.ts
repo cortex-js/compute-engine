@@ -8,39 +8,39 @@ import {
   DomainExpression,
   CanonicalOptions,
 } from './public';
-import { _BoxedExpression } from './abstract-boxed-expression';
-import { BoxedFunction } from './boxed-function';
-import { BoxedString } from './boxed-string';
+
 import { Expression, MathJsonIdentifier } from '../../math-json/types';
-import { machineValue, missingIfEmpty, operands } from '../../math-json/utils';
-import {
-  Rational,
-  isBigRational,
-  isMachineRational,
-  isOne,
-  neg,
-} from '../numerics/rationals';
-import { isDomainLiteral } from '../library/domains';
-import { BoxedTensor, expressionTensorInfo } from './boxed-tensor';
-import { canonicalForm } from './canonical';
-import { canonicalAdd } from '../library/arithmetic-add';
-import { flatten } from '../symbolic/flatten';
-import { shouldHold, semiCanonical, canonical } from '../symbolic/utils';
-import { sortOperands } from './order';
-import { adjustArguments, checkNumericArgs } from './validate';
-import { canonicalMultiply } from '../library/arithmetic-multiply';
-import { NumericValue } from '../numeric-value/public';
-import { ExactNumericValue } from '../numeric-value/exact-numeric-value';
+import { machineValue, missingIfEmpty } from '../../math-json/utils';
 import {
   isValidIdentifier,
   validateIdentifier,
 } from '../../math-json/identifiers';
-import { canonicalDivide } from '../library/arithmetic-divide';
+
+import { isOne } from '../numerics/rationals';
 import { asBigint } from './numerics';
 import { bigintValue } from '../numerics/expression';
-import { canonicalPower, canonicalRoot } from '../library/arithmetic';
-import { bigint } from '../numerics/numeric-bigint';
 import { isInMachineRange } from '../numerics/numeric-bignum';
+import { bigint } from '../numerics/bigint';
+
+import { isDomainLiteral } from '../library/domains';
+import { canonicalAdd } from '../library/arithmetic-add';
+import { canonicalMultiply } from '../library/arithmetic-multiply';
+import { canonicalDivide } from '../library/arithmetic-divide';
+
+import { NumericValue } from '../numeric-value/public';
+import { ExactNumericValue } from '../numeric-value/exact-numeric-value';
+import { canonicalPower, canonicalRoot } from '../library/arithmetic-power';
+
+import { _BoxedExpression } from './abstract-boxed-expression';
+import { BoxedFunction } from './boxed-function';
+import { BoxedString } from './boxed-string';
+import { BoxedTensor, expressionTensorInfo } from './boxed-tensor';
+import { canonicalForm } from './canonical';
+import { sortOperands } from './order';
+import { adjustArguments, checkNumericArgs } from './validate';
+import { flatten } from './flatten';
+import { shouldHold } from './hold';
+import { canonical, semiCanonical } from './utils';
 
 /**
  * ### THEORY OF OPERATIONS
@@ -388,7 +388,7 @@ export function box(
   // Box a MathJSON object literal
   //
   if (!Array.isArray(expr) && typeof expr === 'object') {
-    // @ts-expect-error
+    // @ts-expect-error TypeScript does not know that `expr` is an MathJSON object
     const metadata = { latex: expr.latex, wikidata: expr.wikidata };
     if ('fn' in expr) {
       const [fnName, ...ops] = expr.fn;

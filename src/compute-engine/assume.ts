@@ -7,7 +7,7 @@ import {
   IComputeEngine,
 } from './public';
 
-import { findUnivariateRoots } from './symbolic/solve';
+import { findUnivariateRoots } from './boxed-expression/solve';
 
 /**
  * Add an assumption, in the form of a predicate, for example:

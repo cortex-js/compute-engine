@@ -1,8 +1,5 @@
-import {
-  BoxedExpression,
-  SemiBoxedExpression,
-} from '../boxed-expression/public';
-import { isInequality } from '../boxed-expression/utils';
+import type { BoxedExpression, SemiBoxedExpression } from './public';
+import { isInequality } from './utils';
 import { canonicalAdd } from '../library/arithmetic-add';
 import { Rule } from '../public';
 import { matchAnyRules } from './rules';
@@ -126,7 +123,7 @@ export const UNIVARIATE_ROOTS: Rule[] = [
     ],
     replace: ['Divide', ['Ln', ['Negate', ['Divide', '__c', '__a']]], '__b'],
     exact: false,
-    condition: ({ __a, __c }, ce) =>
+    condition: ({ __a, __c }) =>
       ((!__a.isZero && __c.div(__a).isNegative) ?? false) &&
       !__a.has('_x') &&
       !__c.has('_x'),
@@ -137,7 +134,7 @@ export const UNIVARIATE_ROOTS: Rule[] = [
     match: ['Add', ['Multiply', '__a', ['Exp', '_x']], '__c'],
     replace: ['Ln', ['Negate', ['Divide', '__c', '__a']]],
     exact: false,
-    condition: ({ __a, __c }, ce) =>
+    condition: ({ __a, __c }) =>
       ((!__a.isZero && __c.div(__a).isNegative) ?? false) &&
       !__a.has('_x') &&
       !__c.has('_x'),

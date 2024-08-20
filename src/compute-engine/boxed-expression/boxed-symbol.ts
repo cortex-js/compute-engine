@@ -1,8 +1,12 @@
 import Complex from 'complex.js';
 import { Decimal } from 'decimal.js';
-import { Expression } from '../../math-json/types';
-import { _BoxedExpression } from './abstract-boxed-expression';
+import type { Expression } from '../../math-json/types';
 import {
+  isValidIdentifier,
+  validateIdentifier,
+} from '../../math-json/identifiers';
+
+import type {
   BoxedExpression,
   BoxedRuleSet,
   BoxedSymbolDefinition,
@@ -25,28 +29,30 @@ import {
   Type,
   BoxedRule,
 } from './public';
-import { replace } from '../symbolic/rules';
+
+import { domainToSignature, signatureToDomain } from '../domain-utils';
+
+import { mul } from '../library/arithmetic-multiply';
+
+import { replace } from './rules';
+import { Product } from './product';
+import { simplify } from './simplify';
+import { negate } from './negate';
+
+import { NumericValue } from '../numeric-value/public';
+
+import { canonicalAngle } from './trigonometry';
+import { match } from './match';
+import { _BoxedSymbolDefinition } from './boxed-symbol-definition';
+import { _BoxedFunctionDefinition } from './boxed-function-definition';
+import { narrow } from './boxed-domain';
+import { add } from './terms';
+import { _BoxedExpression } from './abstract-boxed-expression';
 import {
   getImaginaryFactor,
   hashCode,
   normalizedUnknownsForSolve,
 } from './utils';
-import { _BoxedSymbolDefinition } from './boxed-symbol-definition';
-import { _BoxedFunctionDefinition } from './boxed-function-definition';
-import { narrow } from './boxed-domain';
-import { domainToSignature, signatureToDomain } from '../domain-utils';
-import { match } from './match';
-import { negate } from '../symbolic/negate';
-import { mul } from '../library/arithmetic-multiply';
-import { NumericValue } from '../numeric-value/public';
-import {
-  isValidIdentifier,
-  validateIdentifier,
-} from '../../math-json/identifiers';
-import { add } from './terms';
-import { canonicalAngle } from './trigonometry';
-import { Product } from '../symbolic/product';
-import { simplify } from '../symbolic/simplify';
 
 /**
  * BoxedSymbol

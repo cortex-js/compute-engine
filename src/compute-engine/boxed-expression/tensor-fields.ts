@@ -1,8 +1,8 @@
 import Complex from 'complex.js';
-import { BoxedExpression, IComputeEngine } from '../public';
-import { isRelationalOperator } from '../boxed-expression/utils';
+import type { BoxedExpression, IComputeEngine } from '../public';
+import { isRelationalOperator } from './utils';
 import { mul } from '../library/arithmetic-multiply';
-import { add } from '../boxed-expression/terms';
+import { add } from './terms';
 
 export type DataTypeMap = {
   float64: number;

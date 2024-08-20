@@ -1,15 +1,19 @@
 import { Decimal } from 'decimal.js';
+
 import { IdentifierDefinitions, FunctionDefinition } from '../public';
+
 import { bignumPreferred } from '../boxed-expression/utils';
-import { apply2 } from '../symbolic/utils';
 import { checkArity } from '../boxed-expression/validate';
-import { reducedRational } from '../numerics/rationals';
 import {
   constructibleValues,
   evalTrig,
   processInverseFunction,
   trigSign,
 } from '../boxed-expression/trigonometry';
+
+import { apply2 } from '../boxed-expression/apply';
+
+import { reducedRational } from '../numerics/rationals';
 
 //
 // Note: Names of trigonometric functions follow ISO 80000 Section 13
@@ -71,7 +75,7 @@ export const TRIGONOMETRY_LIBRARY: IdentifierDefinitions[] = [
       threadable: true,
       signature: {
         domain: ['FunctionOf', 'Numbers', 'Numbers', 'NonNegativeNumbers'],
-        sgn: ([x]) => 1,
+        sgn: () => 1,
         evaluate: ['Sqrt', ['Add', ['Square', '_1'], ['Square', '_2']]],
       },
     },

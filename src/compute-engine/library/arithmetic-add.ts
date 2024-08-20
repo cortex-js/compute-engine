@@ -1,9 +1,9 @@
-import { BoxedDomain, BoxedExpression, IComputeEngine } from '../public';
+import type { BoxedDomain, BoxedExpression, IComputeEngine } from '../public';
 import { getImaginaryFactor } from '../boxed-expression/utils';
 import { widen } from '../boxed-expression/boxed-domain';
 import { isIndexableCollection } from '../collection-utils';
 
-import { flatten } from '../symbolic/flatten';
+import { flatten } from '../boxed-expression/flatten';
 import { addOrder } from '../boxed-expression/order';
 
 /**

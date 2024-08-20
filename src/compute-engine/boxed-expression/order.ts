@@ -1,11 +1,44 @@
-import { maxDegree, revlex, totalDegree } from '../symbolic/polynomials';
-import { BoxedExpression, SemiBoxedExpression } from './public';
+import type { BoxedExpression, SemiBoxedExpression } from './public';
+
+import { maxDegree, revlex, totalDegree } from './polynomials';
 import { asRadical } from '../library/arithmetic-power';
-import { isTrigonometricFunction } from './trigonometry';
 
 export type Order = 'lex' | 'dexlex' | 'grevlex' | 'elim';
 
 export const DEFAULT_COMPLEXITY = 100000;
+
+const TRIGONOMETRIC_OPERATORS: { [key: string]: boolean } = {
+  Sin: true,
+  Cos: true,
+  Tan: true,
+  Cot: true,
+  Sec: true,
+  Csc: true,
+  Sinh: true,
+  Cosh: true,
+  Tanh: true,
+  Coth: true,
+  Sech: true,
+  Csch: true,
+  Arcsin: true,
+  Arccos: true,
+  Arctan: true,
+  Arccot: true,
+  Arcsec: true,
+  Arccsc: true,
+  Arsinh: true,
+  Arcosh: true,
+  Artanh: true,
+  Arcoth: true,
+  Arcsch: true,
+  Arsech: true,
+  Arcsech: true,
+};
+
+function isTrigonometricFunction(operator: any): boolean {
+  if (!operator || typeof operator !== 'string') return false;
+  return operator in TRIGONOMETRIC_OPERATORS;
+}
 
 /**
  * The sorting order of arguments of the Add function uses a modified degrevlex:

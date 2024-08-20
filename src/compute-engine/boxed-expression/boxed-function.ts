@@ -1,10 +1,5 @@
-import Complex from 'complex.js';
-import { Decimal } from 'decimal.js';
-
-import { _BoxedExpression } from './abstract-boxed-expression';
-
-import { Expression } from '../../math-json/types';
-import {
+import type { Expression } from '../../math-json/types';
+import type {
   BoxedFunctionDefinition,
   IComputeEngine,
   BoxedRuleSet,
@@ -18,32 +13,39 @@ import {
   BoxedSubstitution,
   EvaluateOptions,
   BoxedBaseDefinition,
-  Hold,
   Rule,
   CanonicalOptions,
 } from '../public';
-import { findUnivariateRoots } from '../symbolic/solve';
-import { replace } from '../symbolic/rules';
+
+import type { BoxedExpression, SemiBoxedExpression, Type } from './public';
+
+import { findUnivariateRoots } from './solve';
+import { replace } from './rules';
+import { flattenOps } from './flatten';
+import { negate } from './negate';
+import { Product } from './product';
+import { simplify } from './simplify';
+
+import { asSmallInteger, signDiff } from './numerics';
+
+import { at, isFiniteIndexableCollection } from '../collection-utils';
+
+import { canonicalMultiply, mul } from '../library/arithmetic-multiply';
+
+import { NumericValue } from '../numeric-value/public';
+
+import { _BoxedExpression } from './abstract-boxed-expression';
 import { DEFAULT_COMPLEXITY, sortOperands } from './order';
 import {
   hashCode,
   normalizedUnknownsForSolve,
   isRelationalOperator,
 } from './utils';
-import { flattenOps } from '../symbolic/flatten';
-import { shouldHold } from '../symbolic/utils';
-import { at, isFiniteIndexableCollection } from '../collection-utils';
 import { narrow } from './boxed-domain';
-import { BoxedExpression, SemiBoxedExpression, Type } from './public';
 import { match } from './match';
 import { factor } from './factor';
-import { negate } from '../symbolic/negate';
-import { Product } from '../symbolic/product';
-import { asSmallInteger, signDiff } from './numerics';
-import { canonicalMultiply, mul } from '../library/arithmetic-multiply';
-import { NumericValue } from '../numeric-value/public';
 import { add } from './terms';
-import { simplify } from '../symbolic/simplify';
+import { holdMap } from './hold';
 
 /**
  * A boxed function represent an expression that can be
@@ -280,7 +282,7 @@ export class BoxedFunction extends _BoxedExpression {
     // Add
     //
     //  use factor() to factor out common factors
-    // @es-lint-disable-no-this-alias
+    // eslint-disable-next-line @typescript-eslint/no-this-alias
     let expr: BoxedExpression = this;
     if (expr.operator === 'Add') {
       expr = factor(this);
@@ -993,22 +995,7 @@ export class BoxedFunction extends _BoxedExpression {
   }
 
   simplify(options?: Partial<SimplifyOptions>): BoxedExpression {
-    let expr: BoxedExpression = this;
-    if (options?.recursive ?? true) {
-      const def = this.functionDefinition;
-      const ops = holdMap(
-        this._ops,
-        def?.hold ?? 'none',
-        def?.associative ? def.name : '',
-        (x) => x.simplify({ ...options, recursive: false })
-      );
-      expr = this.engine.function(this._name, ops, {
-        canonical: this.isCanonical,
-        structural: this.isStructural,
-      });
-    }
-
-    return simplify(expr, options).at(-1)?.value ?? expr;
+    return simplify(this, options).at(-1)?.value ?? this;
   }
 
   evaluate(options?: EvaluateOptions): BoxedExpression {
@@ -1074,12 +1061,7 @@ export class BoxedFunction extends _BoxedExpression {
     //
     // 3/ Evaluate the applicable operands
     //
-    const tail = holdMap(
-      this._ops,
-      def?.hold ?? 'none',
-      def?.associative ? def.name : '',
-      (x) => x.evaluate(options)
-    );
+    const tail = holdMap(this, (x) => x.evaluate(options));
 
     //
     // 4/ Inert? Just return the first argument.
@@ -1116,70 +1098,6 @@ export class BoxedFunction extends _BoxedExpression {
     if (varNames.length !== 1) return null;
     return findUnivariateRoots(this.simplify(), varNames[0]);
   }
-}
-
-/** Apply the function `f` to elements of `xs`, except to the elements
- * described by `skip`:
- * - `all`: don't apply f to any elements
- * - `none`: apply `f` to all elements
- * - `first`: apply `f` to all elements except the first
- * - `rest`: apply `f` to the first element, skip the  others
- * - 'last': apply `f` to all elements except the last
- * - 'most': apply `f` to the last elements, skip the others
- *
- * Account for `Hold`, `ReleaseHold`, `Sequence`, `Symbol` and `Nothing`.
- *
- * If `f` returns `null`, the element is not added to the result
- */
-export function holdMap(
-  xs: ReadonlyArray<BoxedExpression>,
-  skip: Hold,
-  associativeHead: string,
-  f: (x: BoxedExpression) => BoxedExpression | null
-): ReadonlyArray<BoxedExpression> {
-  if (xs.length === 0) return [];
-
-  // f(a, f(b, c), d) -> f(a, b, c, d)
-  xs = flattenOps(xs, associativeHead);
-
-  //
-  // Apply the hold as necessary
-  //
-  // @fastpath
-  if (skip === 'all') return xs;
-  if (skip === 'none') {
-    const result: BoxedExpression[] = [];
-    for (const x of xs) {
-      const h = x.operator;
-      if (h === 'Hold') result.push(x);
-      else {
-        const op = h === 'ReleaseHold' ? x.op1 : x;
-        if (op) {
-          const y = f(op);
-          if (y !== null) result.push(y);
-        }
-      }
-    }
-    return flattenOps(result, associativeHead);
-  }
-
-  const result: BoxedExpression[] = [];
-  for (let i = 0; i < xs.length; i++) {
-    if (xs[i].operator === 'Hold') {
-      result.push(xs[i]);
-    } else {
-      let y: BoxedExpression | undefined = undefined;
-      if (xs[i].operator === 'ReleaseHold') y = xs[i].op1;
-      else if (!shouldHold(skip, xs.length - 1, i)) y = xs[i];
-      else result.push(xs[i]);
-
-      if (y) {
-        const x = f(y);
-        if (x !== null) result.push(x);
-      }
-    }
-  }
-  return flattenOps(result, associativeHead);
 }
 
 // @todo: allow selection of one signature amongst multiple

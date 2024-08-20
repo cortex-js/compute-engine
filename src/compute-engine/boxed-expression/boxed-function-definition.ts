@@ -1,6 +1,4 @@
-import { functionDomain } from '../domain-utils';
-import { applicable } from '../function-utils';
-import {
+import type {
   IComputeEngine,
   FunctionDefinition,
   BoxedFunctionDefinition,
@@ -9,8 +7,12 @@ import {
   Hold,
   BoxedDomain,
 } from '../public';
+
+import type { BoxedExpression, NumericFlags } from './public';
+
+import { functionDomain } from '../domain-utils';
+import { applicable } from '../function-utils';
 import { DEFAULT_COMPLEXITY } from './order';
-import { BoxedExpression, NumericFlags } from './public';
 import { normalizeFlags } from './utils';
 
 export class _BoxedFunctionDefinition implements BoxedFunctionDefinition {

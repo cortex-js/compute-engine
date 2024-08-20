@@ -1,10 +1,13 @@
-import { permutations } from '../../common/utils';
-import { _BoxedExpression } from './abstract-boxed-expression';
 import type {
   BoxedSubstitution,
   PatternMatchOptions,
   BoxedExpression,
 } from './public';
+
+import { permutations } from '../../common/utils';
+
+import { _BoxedExpression } from './abstract-boxed-expression';
+
 import { isWildcard, wildcardName } from './boxed-patterns';
 
 function hasWildcards(expr: string | BoxedExpression): boolean {
