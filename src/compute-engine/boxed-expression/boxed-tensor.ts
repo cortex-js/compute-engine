@@ -37,7 +37,7 @@ import { NumericValue } from '../numeric-value/public';
  * The object can be created either from a tensor or from
  * an expression that can be represented as a tensor.
  *
- * The counterpart (expression if input is tensor, or tensor
+ * The stgructural counterpart (expression if input is tensor, or tensor
  * if input is expression) is created lazily.
  *
  * @noInheritDoc
@@ -75,7 +75,7 @@ export class BoxedTensor extends _BoxedExpression {
     ce._register(this);
   }
 
-  get expression(): BoxedExpression {
+  get structural(): BoxedExpression {
     // Make an expression from the tensor
     this._expression ??= this._tensor!.expression;
 
@@ -95,15 +95,15 @@ export class BoxedTensor extends _BoxedExpression {
   }
 
   get baseDefinition(): BoxedBaseDefinition | undefined {
-    return this.expression.baseDefinition;
+    return this.structural.baseDefinition;
   }
 
   get functionDefinition(): BoxedFunctionDefinition | undefined {
-    return this.expression.functionDefinition;
+    return this.structural.functionDefinition;
   }
 
   bind(): void {
-    this.expression.bind();
+    this.structural.bind();
   }
 
   reset(): void {}
@@ -129,17 +129,17 @@ export class BoxedTensor extends _BoxedExpression {
   }
 
   set isCanonical(val: boolean) {
-    if (!this._tensor) this.expression.isCanonical = val;
+    if (!this._tensor) this.structural.isCanonical = val;
   }
 
   get isPure(): boolean {
     if (this._tensor) return true;
-    return this.expression.isPure;
+    return this.structural.isPure;
   }
 
   get isValid(): boolean {
     if (this._tensor) return true;
-    return this.expression.isValid;
+    return this.structural.isValid;
   }
 
   get complexity(): number {
@@ -152,11 +152,11 @@ export class BoxedTensor extends _BoxedExpression {
 
   get nops(): number {
     if (this._tensor) return this._tensor.shape[0];
-    return this.expression.nops;
+    return this.structural.nops;
   }
 
   get ops(): ReadonlyArray<BoxedExpression> {
-    return this.expression.ops!;
+    return this.structural.ops!;
   }
 
   get op1(): BoxedExpression {
@@ -165,7 +165,7 @@ export class BoxedTensor extends _BoxedExpression {
       if (data.length === 0) return this.engine.Nothing;
       return this.engine.box(data[0]);
     }
-    return this.expression.op1;
+    return this.structural.op1;
   }
 
   get op2(): BoxedExpression {
@@ -174,7 +174,7 @@ export class BoxedTensor extends _BoxedExpression {
       if (data.length < 2) return this.engine.Nothing;
       return this.engine.box(data[1]);
     }
-    return this.expression.op2;
+    return this.structural.op2;
   }
 
   get op3(): BoxedExpression {
@@ -183,7 +183,7 @@ export class BoxedTensor extends _BoxedExpression {
       if (data.length < 3) return this.engine.Nothing;
       return this.engine.box(data[2]);
     }
-    return this.expression.op3;
+    return this.structural.op3;
   }
 
   //
@@ -192,43 +192,43 @@ export class BoxedTensor extends _BoxedExpression {
   //
 
   neg(): BoxedExpression {
-    return this.expression.neg();
+    return this.structural.neg();
   }
 
   inv(): BoxedExpression {
-    return this.engine.One.div(this.expression);
+    return this.engine.One.div(this.structural);
   }
 
   abs(): BoxedExpression {
-    return this.expression.abs();
+    return this.structural.abs();
   }
 
   add(rhs: number | BoxedExpression): BoxedExpression {
-    return this.expression.add(rhs);
+    return this.structural.add(rhs);
   }
 
   sub(rhs: BoxedExpression): BoxedExpression {
-    return this.expression.sub(rhs);
+    return this.structural.sub(rhs);
   }
 
   mul(rhs: NumericValue | number | BoxedExpression): BoxedExpression {
-    return this.expression.mul(rhs);
+    return this.structural.mul(rhs);
   }
 
   div(rhs: number | BoxedExpression): BoxedExpression {
-    return this.expression.div(rhs);
+    return this.structural.div(rhs);
   }
 
   pow(exp: number | BoxedExpression): BoxedExpression {
-    return this.expression.pow(exp);
+    return this.structural.pow(exp);
   }
 
   root(exp: number | BoxedExpression): BoxedExpression {
-    return this.expression.root(exp);
+    return this.structural.root(exp);
   }
 
   sqrt(): BoxedExpression {
-    return this.expression.sqrt();
+    return this.structural.sqrt();
   }
 
   get shape(): number[] {
@@ -241,7 +241,7 @@ export class BoxedTensor extends _BoxedExpression {
 
   get domain(): BoxedDomain | undefined {
     if (this._tensor) return this.engine.domain('Lists');
-    return this.expression.domain;
+    return this.structural.domain;
   }
 
   get type(): Type {
@@ -252,7 +252,7 @@ export class BoxedTensor extends _BoxedExpression {
   get json(): Expression {
     // @todo tensor: could be optimized by avoiding creating
     // an expression and getting the JSON from the tensor directly
-    return this.expression.json;
+    return this.structural.json;
   }
 
   /** Structural equality */
@@ -261,7 +261,7 @@ export class BoxedTensor extends _BoxedExpression {
 
     if (rhs instanceof BoxedTensor) return this.tensor.equals(rhs.tensor);
 
-    return this.expression.isSame(rhs);
+    return this.structural.isSame(rhs);
   }
 
   /** Mathematical equality */
@@ -270,7 +270,7 @@ export class BoxedTensor extends _BoxedExpression {
 
     if (rhs instanceof BoxedTensor) return this.tensor.equals(rhs.tensor);
 
-    return this.expression.isEqual(rhs);
+    return this.structural.isEqual(rhs);
   }
 
   match(
@@ -280,22 +280,22 @@ export class BoxedTensor extends _BoxedExpression {
     if (!isBoxedExpression(pattern))
       pattern = this.engine.box(pattern, { canonical: false });
     if (isWildcard(pattern)) return { [wildcardName(pattern)!]: this };
-    return this.expression.match(pattern, options);
+    return this.structural.match(pattern, options);
   }
 
   evaluate(options?: EvaluateOptions): BoxedExpression {
     if (this._tensor) return this;
-    return this.expression.evaluate(options);
+    return this.structural.evaluate(options);
   }
 
   simplify(options?: Partial<SimplifyOptions>): BoxedExpression {
     if (this._tensor) return this;
-    return this.expression.simplify(options);
+    return this.structural.simplify(options);
   }
 
   N(): BoxedExpression {
     if (this._tensor) return this;
-    return this.expression.N();
+    return this.structural.N();
   }
 }
 
