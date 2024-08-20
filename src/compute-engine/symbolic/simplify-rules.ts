@@ -42,7 +42,7 @@ export const SIMPLIFY_RULES: Rule[] = [
 
   // Try to expand the expression:
   // x*(y+z) -> x*y + x*z
-  (x) => expand(x) ?? undefined,
+  { replace: (x) => expand(x) ?? undefined, id: 'expand' },
 
   //
   // Add, Negate

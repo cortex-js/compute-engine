@@ -1982,6 +1982,8 @@ export class ComputeEngine implements IComputeEngine {
   }
 
   rules(rules: Rule[]): BoxedRuleSet {
+    if (!Array.isArray(rules))
+      throw new Error('ce.rules(): Expected an array of rules');
     return boxRules(this, rules);
   }
 

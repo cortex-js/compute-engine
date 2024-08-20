@@ -335,9 +335,12 @@ function parseModifierExpression(parser: Parser): string | null {
   return conditions;
 }
 
-function parseLatexRule(
+/* Return an expression for a match/replace part of a rule if a LaTeX string
+ or MathJSOn expression
+ */
+function parseRulePart(
   ce: IComputeEngine,
-  rule?: string | SemiBoxedExpression | RuleReplaceFunction
+  rule?: string | SemiBoxedExpression | RuleReplaceFunction | RuleFunction
 ): BoxedExpression | undefined {
   if (rule === undefined || typeof rule === 'function') return undefined;
   if (typeof rule === 'string') {
@@ -494,7 +497,7 @@ function parseRule(ce: IComputeEngine, rule: string): BoxedRule {
   // Check that all the wildcards in the replace also appear in the match
   if (!includesWildcards(replace, match))
     throw new Error(
-      `Invalid rule "${rule}"\n|   The replace expression contains wildcards not present in the match`
+      `Invalid rule "${rule}"\n|   The replace expression contains wildcards not present in the match expression`
     );
 
   let condFn: undefined | RuleConditionFunction = undefined;
@@ -502,7 +505,7 @@ function parseRule(ce: IComputeEngine, rule: string): BoxedRule {
     // Verify that all the wildcards in the condition also appear in the match
     if (!includesWildcards(condition, match))
       throw new Error(
-        `Invalid rule "${rule}"\n|   The condition contains wildcards not present in the match`
+        `Invalid rule "${rule}"\n|   The condition expression contains wildcards not present in the match expression`
       );
 
     // Evaluate the condition as a predicate
@@ -510,11 +513,7 @@ function parseRule(ce: IComputeEngine, rule: string): BoxedRule {
       condition.subs(sub).evaluate()?.symbol === 'True';
   }
 
-  // Make an id for the rule
-  const id =
-    dewildcard(match).toString() + ' -> ' + dewildcard(replace).toString();
-
-  return boxRule(ce, { match, replace, condition: condFn, id });
+  return boxRule(ce, { match, replace, condition: condFn, id: rule });
 }
 
 function boxRule(ce: IComputeEngine, rule: Rule | BoxedRule): BoxedRule {
@@ -535,7 +534,7 @@ function boxRule(ce: IComputeEngine, rule: Rule | BoxedRule): BoxedRule {
       match: undefined,
       replace: rule,
       condition: undefined,
-      id: '',
+      id: rule.toString().replace(/\n/g, ' '),
     };
 
   let { match, replace, condition, id } = rule;
@@ -573,18 +572,38 @@ function boxRule(ce: IComputeEngine, rule: Rule | BoxedRule): BoxedRule {
     );
   }
 
-  const matchExpr = parseLatexRule(ce, match);
-  const replaceExpr = parseLatexRule(ce, replace);
+  const matchExpr = parseRulePart(ce, match);
 
-  if (!matchExpr?.isValid) {
+  const replaceExpr = parseRulePart(ce, replace);
+
+  // Make up an id if none is provided
+  if (!id) {
+    if (typeof match === 'string') id = match;
+    else id = JSON.stringify(match);
+
+    if (replace) {
+      id += ' -> ';
+
+      if (typeof replace === 'string') id += replace;
+      else if (typeof replace === 'function')
+        id += replace?.toString().replace(/\n/g, ' ');
+      else id = JSON.stringify(replace);
+    }
+
+    if (typeof condition === 'string') id += `; ${condition}`;
+    else if (typeof condition === 'function')
+      id += `; ${condition.toString().replace(/\n/g, ' ')}`;
+  }
+
+  if (matchExpr && !matchExpr.isValid) {
     throw new Error(
-      `Invalid rule ${id ?? JSON.stringify(rule)}\n|   the match expression is not valid: ${match?.toString()}`
+      `Invalid rule ${id}\n|   the match expression is not valid: ${matchExpr.toString()}`
     );
   }
 
-  if (!replaceExpr?.isValid) {
+  if (replaceExpr && !replaceExpr.isValid) {
     throw new Error(
-      `Invalid rule ${id ?? JSON.stringify(rule)}\n|   The replace expression is not valid: ${match?.toString()}`
+      `Invalid rule ${id ?? JSON.stringify(rule)}\n|   The replace expression is not valid: ${replaceExpr?.toString()}`
     );
   }
 
@@ -592,13 +611,6 @@ function boxRule(ce: IComputeEngine, rule: Rule | BoxedRule): BoxedRule {
     throw new Error(
       `Invalid rule ${id ?? JSON.stringify(rule)}\n|   The replace expression could not be parsed`
     );
-
-  id ??=
-    dewildcard(matchExpr).toString() +
-    ' -> ' +
-    (typeof replace === 'function'
-      ? '...'
-      : dewildcard(replaceExpr).toString());
 
   return {
     _tag: 'boxed-rule',
@@ -671,7 +683,7 @@ function applyRule(
     const bwc = getWildcards(match);
     if (!awc.every((x) => bwc.includes(x)))
       throw new Error(
-        `Invalid rule "${rule.id}"\n|   Canonical match "${dewildcard(match).toString()}" does not contain all the wildcards of the original match "${dewildcard(originalMatch).toString()}"\n|   This indicates that the match expression in canonical form may already be simplified and this rule may not be necessary`
+        `Invalid rule "${rule.id}"\n|   Canonical match "${dewildcard(match).toString()}" does not contain all the wildcards of the original match "${dewildcard(originalMatch).toString()}"\n|   This could indicate that the match expression in canonical form is already be simplified and this rule may not be necessary`
       );
   }
 
@@ -683,8 +695,29 @@ function applyRule(
   if (sub === null) return changed ? expr : null;
 
   // If the condition doesn't match, the rule doesn't apply
-  if (typeof condition === 'function' && !condition(sub, expr.engine))
-    return changed ? expr : null;
+  if (typeof condition === 'function') {
+    // The substitution includes wildcards. Transform wildcards to their
+    // corresponding values
+    // So if sub = {_a: 2, _b: 3}, then the substitution will be {a: 2, b: 3}
+
+    // Because some subtitution  may be sequence wilcards (e.g. ...x)
+    // or optional sequence wildcards (e.g. ...x?) we keep them in the substitution as well
+    const conditionSub = {
+      ...Object.fromEntries(
+        Object.entries(sub).map(([k, v]) => [k.slice(1), v])
+      ),
+      ...sub,
+    };
+
+    try {
+      if (!condition(conditionSub, expr.engine)) return changed ? expr : null;
+    } catch (e) {
+      console.error(
+        `Rule ${rule.id}\n|   Error while checking condition\n|    ${e.message}`
+      );
+      return null;
+    }
+  }
 
   const result =
     typeof replace === 'function'

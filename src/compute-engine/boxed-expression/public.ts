@@ -1790,7 +1790,11 @@ export type Rule =
   | RuleFunction
   | {
       match?: LatexString | SemiBoxedExpression | Pattern;
-      replace: LatexString | SemiBoxedExpression | RuleReplaceFunction;
+      replace:
+        | LatexString
+        | SemiBoxedExpression
+        | RuleReplaceFunction
+        | RuleFunction;
       condition?: LatexString | RuleConditionFunction;
       exact?: boolean; // Default to true
       id?: string; // Optional, for debugging or filtering

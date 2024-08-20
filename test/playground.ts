@@ -2,39 +2,18 @@ import { ComputeEngine } from '../src/compute-engine';
 
 const ce = new ComputeEngine();
 
-const expr = ce.parse('y/(e^x)');
-const rule = 'x^0 -> x';
-expr.simplify({ rules: rule })?.print();
-
-ce.parse('1')
+// 3^{-2} gets calculated in canonicalization. It shouldn't.
+const expr = ce.parse('\\frac{x}{3^{-2}}');
+expr.print();
+expr
   .simplify({
     rules: {
-      match: 'a^0',
-      replace: '\\operatorname{NaN}',
-      condition: (id) => id._a.isInfinity === true,
-    },
+      match: '\\frac{a}{b^{-n}}',
+      replace: 'a*b^n',
+      condition: ({ _b }) => _b.isNotZero === true,
+    }, // doesn't work but {match:'\\frac{a}{b^n}',replace:'a*b^{-n}',,
   })
-  .print();
-
-//   console.info(
-//   ce
-//     .parse('-\\cos(x)^4 - \\sin(2x)^2 / 4 - \\sin(y)^2 + 1')
-//     .simplify({
-//       rules: ['\\sin(2x) -> 2\\sin(x)\\cos(x)'],
-//       costFunction: () => 0,
-//     })
-//     .toString()
-// );
-
-console.info(
-  ce
-    .parse('-\\cos(x)^4 - \\sin(2x)^2 / 4 - \\sin(y)^2 + 1')
-    .simplify({
-      rules: ['\\sin(2x) -> 2\\sin(x)\\cos(x)', '\\cos(2x) -> 2\\cos^2(x) - 1'],
-      costFunction: () => 0,
-    })
-    .toString()
-);
+  ?.print();
 
 // in Add.sgn() should check x.isNegative instead of x.sgn, and have Abd.isNegative always return false
 ce.parse('|(1+|a|+2)|').simplify().print();
