@@ -22,8 +22,8 @@ import {
   Rule,
   CanonicalOptions,
 } from '../public';
-import { findUnivariateRoots } from '../solve';
-import { xreplace } from '../rules';
+import { findUnivariateRoots } from '../symbolic/solve';
+import { replace } from '../symbolic/rules';
 import { DEFAULT_COMPLEXITY, sortOperands } from './order';
 import {
   hashCode,
@@ -411,16 +411,11 @@ export class BoxedFunction extends _BoxedExpression {
     rules: BoxedRuleSet | Rule | Rule[],
     options?: Partial<ReplaceOptions>
   ): BoxedExpression | null {
-    return xreplace(this, rules, options).at(-1)?.value ?? null;
+    return replace(this, rules, options).at(-1)?.value ?? null;
   }
 
   match(
-    pattern:
-      | Decimal
-      | Complex
-      | [num: number, denom: number]
-      | SemiBoxedExpression
-      | BoxedExpression,
+    pattern: BoxedExpression,
     options?: PatternMatchOptions
   ): BoxedSubstitution | null {
     return match(this, pattern, options);

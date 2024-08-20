@@ -639,12 +639,7 @@ export interface BoxedExpression {
    *
    */
   match(
-    pattern:
-      | BigNum
-      | Complex
-      | [num: number, denom: number]
-      | SemiBoxedExpression
-      | BoxedExpression,
+    pattern: BoxedExpression,
     options?: PatternMatchOptions
   ): BoxedSubstitution | null;
 

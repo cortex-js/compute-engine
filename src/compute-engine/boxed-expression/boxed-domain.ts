@@ -184,12 +184,7 @@ export class _BoxedDomain extends _BoxedExpression implements BoxedDomain {
   }
 
   match(
-    pattern:
-      | Decimal
-      | Complex
-      | [num: number, denom: number]
-      | SemiBoxedExpression
-      | BoxedExpression,
+    pattern: BoxedExpression,
     _options?: PatternMatchOptions
   ): BoxedSubstitution | null {
     if (!isBoxedExpression(pattern))

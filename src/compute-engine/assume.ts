@@ -7,7 +7,7 @@ import {
   IComputeEngine,
 } from './public';
 
-import { findUnivariateRoots } from './solve';
+import { findUnivariateRoots } from './symbolic/solve';
 
 /**
  * Add an assumption, in the form of a predicate, for example:

@@ -1,14 +1,9 @@
-import Complex from 'complex.js';
-import Decimal from 'decimal.js';
-
 import { permutations } from '../../common/utils';
 import { _BoxedExpression } from './abstract-boxed-expression';
-import { isBoxedExpression } from './utils';
-import {
+import type {
   BoxedSubstitution,
   PatternMatchOptions,
   BoxedExpression,
-  SemiBoxedExpression,
 } from './public';
 import { isWildcard, wildcardName } from './boxed-patterns';
 
@@ -195,137 +190,94 @@ function matchVariants(
   options: PatternMatchOptions
 ): BoxedSubstitution | null {
   if (options.exact) return null;
-  const operator = pattern.operator;
   const ce = expr.engine;
-
   const varOptions = { ...options, acceptVariants: false };
 
+  const matchVariant = (op, ops) =>
+    matchOnce(
+      ce.function(op, ops, { canonical: false }),
+      pattern,
+      substitution,
+      varOptions
+    );
+
+  const operator = pattern.operator;
+
+  if (operator === 'Negate') {
+    // 0 -> -x (if x=0)
+    if (expr.isZero)
+      return matchOnce(ce.Zero, pattern.op1, substitution, varOptions);
+  }
+
   if (operator === 'Add') {
-    // a+x -> x
-    let result = matchOnce(
-      ce.function('Add', [0, expr], { canonical: false }),
-      pattern,
-      substitution,
-      varOptions
-    );
+    // x -> 0+x
+    let result = matchVariant('Add', [0, expr]);
     if (result !== null) return result;
 
-    // a+x -> a-(-x)
-    if (expr.operator === 'Subtract') {
-      result = matchOnce(
-        ce.function('Add', [expr.op1!, ['Negate', expr.op2!]], {
-          canonical: false,
-        }),
-        pattern,
-        substitution,
-        varOptions
-      );
-    }
+    // a-b -> a+(-b)
+    if (expr.operator === 'Subtract')
+      result = matchVariant('Add', [expr.op1!, ['Negate', expr.op2!]]);
+
     if (result !== null) return result;
   }
 
+  // The pattern is ['Subtract', a, b]
   if (operator === 'Subtract') {
-    let result = matchOnce(
-      ce.function('Subtract', [expr, 0], { canonical: false }),
-      pattern,
-      substitution,
-      varOptions
-    );
+    // a -> a-0
+    let result = matchVariant('Subtract', [expr, 0]);
     if (result !== null) return result;
 
-    if (expr.operator === 'Negate') {
-      result = matchOnce(
-        ce.function('Subtract', [0, expr.op1!], { canonical: false }),
-        pattern,
-        substitution,
-        varOptions
-      );
-    }
+    // -a -> 0-a
+    if (expr.operator === 'Negate')
+      result = matchVariant('Subtract', [0, expr.op1!]);
+
     if (result !== null) return result;
   }
 
+  // The pattern is ['Multiply', a, b]
   if (operator === 'Multiply') {
-    // ax -> x
-    let result = matchOnce(
-      ce.function('Multiply', [1, expr], { canonical: false }),
-      pattern,
-      substitution,
-      varOptions
-    );
+    // x -> 1*x
+    let result = matchVariant('Multiply', [1, expr]);
     if (result !== null) return result;
 
-    // ax -> -x
+    // -x -> -1*x
     if (expr.operator === 'Negate') {
-      result = matchOnce(
-        ce.function('Multiply', [-1, expr.op1!], { canonical: false }),
-        pattern,
-        substitution,
-        varOptions
-      );
+      result = matchVariant('Multiply', [-1, expr.op1!]);
       if (result !== null) return result;
     }
 
-    // ax -> x/a
+    // x/a -> (1/a)*x
     if (expr.operator === 'Divide') {
-      result = matchOnce(
-        ce.function('Multiply', [expr.op1!, ['Divide', 1, expr.op2!]], {
-          canonical: false,
-        }),
-        pattern,
-        substitution,
-        varOptions
-      );
+      result = matchVariant('Multiply', [expr.op1!, ['Divide', 1, expr.op2!]]);
       if (result !== null) return result;
     }
   }
 
   if (operator === 'Divide') {
-    const result = matchOnce(
-      ce.function('Divide', [expr, 1], { canonical: false }),
-      pattern,
-      substitution,
-      varOptions
-    );
+    // x/1 -> x
+    const result = matchVariant('Divide', [expr, 1]);
     if (result !== null) return result;
   }
 
   if (operator === 'Square') {
-    const result = matchOnce(
-      ce.function('Power', [expr, 2], { canonical: false }),
-      pattern,
-      substitution,
-      varOptions
-    );
+    // Power(x, 2) -> Square(x)
+    const result = matchVariant('Power', [expr, 2]);
     if (result !== null) return result;
   }
 
   if (operator === 'Exp') {
-    const result = matchOnce(
-      ce.function('Power', [ce.E, expr], { canonical: false }),
-      pattern,
-      substitution,
-      varOptions
-    );
+    // Power(E, x) -> Exp(x)
+    const result = matchVariant('Power', [ce.E, expr]);
     if (result !== null) return result;
   }
 
   if (operator === 'Power') {
-    if (pattern.op2.re === 2) {
-      const result = matchOnce(
-        ce.function('Square', [expr], { canonical: false }),
-        pattern,
-        substitution,
-        varOptions
-      );
+    if (pattern.op2.re === 2 && pattern.op2.im === 0) {
+      const result = matchVariant('Square', [expr]);
       if (result !== null) return result;
     }
     if (pattern.op1.symbol === 'ExponentialE') {
-      const result = matchOnce(
-        ce.function('Exp', [expr], { canonical: false }),
-        pattern,
-        substitution,
-        varOptions
-      );
+      const result = matchVariant('Exp', [expr]);
       if (result !== null) return result;
     }
   }
@@ -447,25 +399,10 @@ function matchArguments(
  */
 export function match(
   subject: BoxedExpression,
-  pattern:
-    | Decimal
-    | Complex
-    | [num: number, denom: number]
-    | SemiBoxedExpression
-    | BoxedExpression,
+  pattern: BoxedExpression,
   options?: PatternMatchOptions
 ): BoxedSubstitution | null {
-  // If the pattern is not boxed, box it
-  if (!isBoxedExpression(pattern))
-    pattern = subject.engine.box(pattern, { canonical: false });
-
-  // If we have a rational number, unbox it into a ['Rational', num, denom]
-  // expression.
   pattern = pattern.structural;
-
-  // If the pattern is a wildcard, capture the subject
-  if (isWildcard(pattern as BoxedExpression))
-    return { [wildcardName(pattern as BoxedExpression)!]: subject };
 
   // Default options
   const opts = {
@@ -475,10 +412,8 @@ export function match(
   };
   const substitution = options?.substitution ?? {};
 
-  return matchOnce(
-    subject.structural,
-    pattern as BoxedExpression,
-    substitution,
-    opts
-  );
+  // Use 'structural' form, because we want to be able to
+  // match the numerator/denominator of a fraction, for example.
+
+  return matchOnce(subject.structural, pattern.structural, substitution, opts);
 }

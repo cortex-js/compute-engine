@@ -71,12 +71,7 @@ export class BoxedString extends _BoxedExpression {
     return rhs.string === this._string;
   }
   match(
-    pattern:
-      | Decimal
-      | Complex
-      | [num: number, denom: number]
-      | SemiBoxedExpression
-      | BoxedExpression,
+    pattern: BoxedExpression,
     _options?: PatternMatchOptions
   ): BoxedSubstitution | null {
     if (!isBoxedExpression(pattern))

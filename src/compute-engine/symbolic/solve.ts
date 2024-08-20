@@ -1,12 +1,12 @@
 import {
   BoxedExpression,
   SemiBoxedExpression,
-} from './boxed-expression/public';
-import { isInequality } from './boxed-expression/utils';
-import { canonicalAdd } from './library/arithmetic-add';
-import { Rule } from './public';
+} from '../boxed-expression/public';
+import { isInequality } from '../boxed-expression/utils';
+import { canonicalAdd } from '../library/arithmetic-add';
+import { Rule } from '../public';
 import { matchAnyRules } from './rules';
-import { expand } from './symbolic/expand';
+import { expand } from './expand';
 
 // https://en.wikipedia.org/wiki/Equation_solving
 

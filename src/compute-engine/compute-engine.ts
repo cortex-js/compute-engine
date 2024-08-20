@@ -55,7 +55,7 @@ import {
 import { DEFAULT_COST_FUNCTION } from './cost-function';
 import { ExpressionMap } from './boxed-expression/expression-map';
 import { asLatexString } from './boxed-expression/utils';
-import { boxRules } from './rules';
+import { boxRules } from './symbolic/rules';
 import { BoxedString } from './boxed-expression/boxed-string';
 import { BoxedNumber, canonicalNumber } from './boxed-expression/boxed-number';
 import { _BoxedSymbolDefinition } from './boxed-expression/boxed-symbol-definition';
@@ -94,7 +94,7 @@ import {
 // to import it.
 import './boxed-expression/serialize';
 import { SIMPLIFY_RULES } from './symbolic/simplify-rules';
-import { HARMONIZATION_RULES, UNIVARIATE_ROOTS } from './solve';
+import { HARMONIZATION_RULES, UNIVARIATE_ROOTS } from './symbolic/solve';
 import { NumericValue, NumericValueData } from './numeric-value/public';
 import { ExactNumericValue } from './numeric-value/exact-numeric-value';
 import { BigNumericValue } from './numeric-value/big-numeric-value';

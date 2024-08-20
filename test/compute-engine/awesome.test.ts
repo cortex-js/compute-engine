@@ -76,9 +76,145 @@ describe('Nth PRIME NUMBER', () =>
       check(
         'p(n):=(\\sum_{v_{1}=2}^{\\operatorname{floor}\\left(1.5*n*\\ln(n)\\right)}(\\operatorname{floor}(\\frac{1}{0^{n-(\\sum_{v_{2}=2}^{v_{1}}((\\prod_{v_{3}=2}^{\\operatorname{floor}(\\sqrt{v_{2}})}(1-0^{\\operatorname{abs}(\\operatorname{floor}(\\frac{v_{2}}{v_{3}})-\\frac{v_{2}}{v_{3}})}))))}+1})))+2'
       )
-    ).toMatchInlineSnapshot(
-      `Error: Invalid function (n) |-> {sum^(floor(1.5 * n * ln(n)))(floor(1 / (0^(n - sum^(At(v, 1))(prod^(floor(sqrt(Error(ErrorCode(incompatible-domain, "Numbers", "Anything"), At(v, 2)))))(1 + 0^(|floor(Error(ErrorCode(incompatible-domain, "Numbers", "Anything"), At(v, 2)) / Error(ErrorCode(incompatible-domain, "Numbers", "Anything"), At(v, 3))) - Error(ErrorCode(incompatible-domain, "Numbers", "Anything"), At(v, 2)) / Error(ErrorCode(incompatible-domain, "Numbers", "Anything"), At(v, 3))|)))) + 1))) + 2}`
-    );
+    ).toMatchInlineSnapshot(`
+      invalid   =[
+        "Assign",
+        "p",
+        [
+          "Function",
+          [
+            "Add",
+            [
+              "Sum",
+              [
+                "Floor",
+                [
+                  "Divide",
+                  1,
+                  [
+                    "Add",
+                    [
+                      "Power",
+                      0,
+                      [
+                        "Add",
+                        "n",
+                        [
+                          "Negate",
+                          [
+                            "Sum",
+                            [
+                              "Product",
+                              [
+                                "Add",
+                                1,
+                                [
+                                  "Power",
+                                  0,
+                                  [
+                                    "Abs",
+                                    [
+                                      "Add",
+                                      [
+                                        "Floor",
+                                        [
+                                          "Divide",
+                                          [
+                                            "Error",
+                                            [
+                                              "ErrorCode",
+                                              "'incompatible-domain'",
+                                              "Numbers",
+                                              "Anything"
+                                            ],
+                                            ["At", "v", 2]
+                                          ],
+                                          [
+                                            "Error",
+                                            [
+                                              "ErrorCode",
+                                              "'incompatible-domain'",
+                                              "Numbers",
+                                              "Anything"
+                                            ],
+                                            ["At", "v", 3]
+                                          ]
+                                        ]
+                                      ],
+                                      [
+                                        "Negate",
+                                        [
+                                          "Divide",
+                                          [
+                                            "Error",
+                                            [
+                                              "ErrorCode",
+                                              "'incompatible-domain'",
+                                              "Numbers",
+                                              "Anything"
+                                            ],
+                                            ["At", "v", 2]
+                                          ],
+                                          [
+                                            "Error",
+                                            [
+                                              "ErrorCode",
+                                              "'incompatible-domain'",
+                                              "Numbers",
+                                              "Anything"
+                                            ],
+                                            ["At", "v", 3]
+                                          ]
+                                        ]
+                                      ]
+                                    ]
+                                  ]
+                                ]
+                              ],
+                              [
+                                "Tuple",
+                                "Nothing",
+                                2,
+                                [
+                                  "Floor",
+                                  [
+                                    "Sqrt",
+                                    [
+                                      "Error",
+                                      [
+                                        "ErrorCode",
+                                        "'incompatible-domain'",
+                                        "Numbers",
+                                        "Anything"
+                                      ],
+                                      ["At", "v", 2]
+                                    ]
+                                  ]
+                                ]
+                              ]
+                            ],
+                            ["Triple", "Nothing", 2, ["At", "v", 1]]
+                          ]
+                        ]
+                      ]
+                    ],
+                    1
+                  ]
+                ]
+              ],
+              [
+                "Triple",
+                "Nothing",
+                2,
+                ["Floor", ["Multiply", 1.5, "n", ["Ln", "n"]]]
+              ]
+            ],
+            2
+          ],
+          "n"
+        ]
+      ]
+    `);
   }));
 
 // The value of these polynomials for x in 0..n are all prime numbers

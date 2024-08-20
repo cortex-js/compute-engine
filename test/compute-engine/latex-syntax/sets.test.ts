@@ -21,10 +21,10 @@ describe('SERIALIZING SETS', () => {
       latex([
         'Set',
         ['Element', 'x', 'Numbers'],
-        ['Condition', ['NotEqual', 'x', 0]],
+        ['Condition', 'x', ['NotEqual', 'x', 0]],
       ])
     ).toMatchInlineSnapshot(
-      `\\lbrace x\\in\\mathrm{Numbers}, \\mathrm{Condition}(x\\ne0)\\rbrace`
+      `\\lbrace x\\in\\mathrm{Numbers}, \\mathrm{Condition}(x, x\\ne0)\\rbrace`
     );
   });
 

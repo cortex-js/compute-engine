@@ -14,21 +14,18 @@ import {
   RuleStep,
   isRuleStep,
   isBoxedRule,
-} from './public';
+} from '../public';
 import {
   asLatexString,
   isInequality,
   isRelationalOperator,
-} from './boxed-expression/utils';
-import { isCollection } from './collection-utils';
-import { Parser } from './latex-syntax/public';
-import { isPrime } from './library/arithmetic';
+} from '../boxed-expression/utils';
+import { isCollection } from '../collection-utils';
+import { Parser } from '../latex-syntax/public';
+import { isPrime } from '../library/arithmetic';
+import { Expression } from '../../math-json/types';
 
-// @todo ['Alternatives', ...]:
-// @todo: ['Condition',...] : Conditional match
-// @todo: ['Repeated',...] : repeating match
-// @todo _x:Head or _x:RealNumbers
-// @todo Generator functions
+// @todo:
 // export function fixPoint(rule: Rule);
 // export function chain(rules: RuleSet);
 
@@ -227,7 +224,10 @@ export const CONDITIONS = {
   polynomial: (x: BoxedExpression) => x.unknowns.length === 1,
 };
 
-function checkConditions(x: BoxedExpression, conditions: string[]): boolean {
+export function checkConditions(
+  x: BoxedExpression,
+  conditions: string[]
+): boolean {
   // Check for !== true, because result could also be undefined
   for (const cond of conditions) if (CONDITIONS[cond](x) !== true) return false;
 
@@ -236,7 +236,7 @@ function checkConditions(x: BoxedExpression, conditions: string[]): boolean {
 
 function tokenizeLaTeX(input: string): string[] {
   // Regular expression to match LaTeX tokens
-  const regex = /\\[a-zA-Z]+|[{}]|[\d]+|[+\-*/^_=(),.;]|[a-zA-Z]/g;
+  const regex = /\\[a-zA-Z]+|[{}]|[\d]+|[+\-*/^_=()><,.;]|[a-zA-Z]/g;
 
   const tokens = input.match(regex);
 
@@ -309,7 +309,7 @@ function parseModifier(parser: Parser): string | null {
 
   if (!modifier) return null;
   if (!Object.keys(CONDITIONS).includes(modifier))
-    throw new Error(`Unexpected condition ${modifier}`);
+    throw new Error(`Unexpected condition "${modifier}" in a rule`);
   return modifier;
 }
 
@@ -366,15 +366,14 @@ function parseRule(ce: IComputeEngine, rule: string): BoxedRule {
       latexTrigger: x,
       // domain: { kind: 'Any' },
       parse: (parser, until) => {
-        // console.log(parser.peek);
         if (!wildcards[x]) wildcards[x] = `_${x}`;
         // conditions are `:condition` or `:condition1,condition2,...`
         // or `:\mathrm{condition}`
         const conditions = parseModifierExpression(parser);
-        if (conditions === null) return null;
-        if (!wildcardConditions[x]) wildcardConditions[x] = conditions;
-        else wildcardConditions[x] += ',' + conditions;
-
+        if (conditions !== null) {
+          if (!wildcardConditions[x]) wildcardConditions[x] = conditions;
+          else wildcardConditions[x] += ',' + conditions;
+        }
         return wildcards[x];
       },
     };
@@ -406,7 +405,7 @@ function parseRule(ce: IComputeEngine, rule: string): BoxedRule {
         if (parser.match('?')) prefix = '___';
 
         if (wildcards[id] && wildcards[id] !== `${prefix}${id}`)
-          throw new Error(`Duplicate wildcard ${id}`);
+          throw new Error(`Duplicate wildcard "${id}"`);
         if (!wildcards[id]) wildcards[id] = `${prefix}${id}`;
 
         // Check for conditions
@@ -425,10 +424,16 @@ function parseRule(ce: IComputeEngine, rule: string): BoxedRule {
       precedence: 100,
       latexTrigger: '->',
       parse: (parser, lhs, until) => {
-        const rhs = parser.parseExpression(until);
+        const rhs = parser.parseExpression({ ...until, minPrec: 20 });
         if (rhs === null) return null;
+
+        //
+        // Check if we have a condition part after a semicolon
+        // i.e. "a + b -> c; a > 0"
+        //
+        let conditionPredicate: Expression | null = null;
         if (parser.match(';')) {
-          // condition is either a predicate, or a sequence of wildcards + ":" + modifiers
+          // Condition is either a predicate, or a sequence of wildcards + ":" + modifiers
           // Try the sequence of wildcards first
           let done = false;
           const start = parser.index;
@@ -445,25 +450,34 @@ function parseRule(ce: IComputeEngine, rule: string): BoxedRule {
               else wildcardConditions[id] += ',' + conditions;
             }
           } while (!done);
-          if (!parser.atEnd) {
-            parser.index = start;
-            const condition = parser.parseExpression(until);
-            if (condition !== null) return ['Rule', lhs, rhs, condition];
-          }
+
+          // Is there a remaining predicate?
+          conditionPredicate = parser.parseExpression(until);
         }
-        // Check if we have some accumulated conditions
+
+        //
+        // Check if we have some accumulated conditions from inline modifiers
+        // i.e. a:positive or a_{positive}
+        //
         const conditions: any[] = [];
         for (const id in wildcardConditions) {
           const xs = wildcardConditions[id].split(',');
           if (xs.length === 0) continue;
           if (xs.length === 1) {
             conditions.push(['Condition', wildcards[id], xs[0]]);
-          } else conditions.push(['Condition', wildcards[id], ['List', ...xs]]);
+          } else conditions.push(['Condition', wildcards[id], ['And', ...xs]]);
         }
 
-        if (conditions.length === 0) return ['Rule', lhs, rhs];
-        if (conditions.length === 1) return ['Rule', lhs, rhs, conditions[0]];
-        return ['Rule', lhs, rhs, ['List', ...conditions]];
+        let conditionExpression: Expression | undefined = undefined;
+        if (conditionPredicate && conditions.length > 0) {
+          conditionExpression = ['And', conditionPredicate, ...conditions];
+        } else if (conditionPredicate) conditionExpression = conditionPredicate;
+        else if (conditions.length === 1) conditionExpression = conditions[0];
+        else if (conditions.length > 1)
+          conditionExpression = ['And', ...conditions];
+
+        if (conditionExpression) return ['Rule', lhs, rhs, conditionExpression];
+        return ['Rule', lhs, rhs];
       },
     },
   ];
@@ -471,14 +485,16 @@ function parseRule(ce: IComputeEngine, rule: string): BoxedRule {
   ce.latexDictionary = previousDictionary;
 
   if (!expr.isValid || expr.operator !== 'Rule')
-    throw new Error(`Invalid rule "${rule}": ${expr.toString()}`);
+    throw new Error(
+      `Invalid rule "${rule}"\n|   ${dewildcard(expr).toString()}\n|   A rule should be of the form:\n|   <match> -> <replace>; <condition>`
+    );
 
   const [match, replace, condition] = expr.ops!;
 
   // Check that all the wildcards in the replace also appear in the match
   if (!includesWildcards(replace, match))
     throw new Error(
-      `Invalid rule "${rule}": replace contains wildcards not present in the match`
+      `Invalid rule "${rule}"\n|   The replace expression contains wildcards not present in the match`
     );
 
   let condFn: undefined | RuleConditionFunction = undefined;
@@ -486,31 +502,12 @@ function parseRule(ce: IComputeEngine, rule: string): BoxedRule {
     // Verify that all the wildcards in the condition also appear in the match
     if (!includesWildcards(condition, match))
       throw new Error(
-        `Invalid rule "${rule}": condition contains wildcards not present in the match`
+        `Invalid rule "${rule}"\n|   The condition contains wildcards not present in the match`
       );
 
     // Evaluate the condition as a predicate
     condFn = (sub: BoxedSubstitution): boolean =>
       condition.subs(sub).evaluate()?.symbol === 'True';
-  } else {
-    // We did not have a condition predicate, used the wildcard conditions
-    // (i.e. _a:>0, _b:integer, _c:prime, etc...)
-    condFn = (sub: BoxedSubstitution): boolean => {
-      for (const id of Object.keys(sub)) {
-        // Find a key in the wildcards that matches the id
-        const idx =
-          Object.keys(wildcards)[
-            Object.values(wildcards).findIndex((x) => x === id)
-          ];
-        if (idx === undefined) continue;
-
-        const wcCond = wildcardConditions[idx];
-        if (!wcCond) continue;
-        const conditions = wcCond.split(',');
-        if (!checkConditions(sub[id], conditions)) return false;
-      }
-      return true;
-    };
   }
 
   // Make an id for the rule
@@ -545,7 +542,7 @@ function boxRule(ce: IComputeEngine, rule: Rule | BoxedRule): BoxedRule {
 
   if (replace === undefined)
     throw new Error(
-      `Invalid rule ${'{"match":"\\\\artanh(x)","replace":null}'}: a rule should include at least a replace property`
+      `Invalid rule "${id ?? JSON.stringify(rule)}"\n|   A rule must include at least a replace property`
     );
 
   // Normalize the condition to a function
@@ -565,14 +562,14 @@ function boxRule(ce: IComputeEngine, rule: Rule | BoxedRule): BoxedRule {
   } else {
     if (condition !== undefined && typeof condition !== 'function')
       throw new Error(
-        `Invalid rule ${id ?? JSON.stringify(rule)}: condition is not a valid function`
+        `Invalid rule ${id ?? JSON.stringify(rule)}\n|   condition is not a valid function`
       );
     condFn = condition;
   }
 
   if (typeof match === 'function') {
     throw new Error(
-      `Invalid rule ${id ?? JSON.stringify(rule)}: match is not a valid expression. Use a replace function instead to validate and replace the expression`
+      `Invalid rule ${id ?? JSON.stringify(rule)}\n|   match is not a valid expression.\n|   Use a replace function instead to validate and replace the expression`
     );
   }
 
@@ -581,25 +578,27 @@ function boxRule(ce: IComputeEngine, rule: Rule | BoxedRule): BoxedRule {
 
   if (!matchExpr?.isValid) {
     throw new Error(
-      `Invalid rule ${id ?? JSON.stringify(rule)}: match is not a valid expression: ${match?.toString()}`
+      `Invalid rule ${id ?? JSON.stringify(rule)}\n|   the match expression is not valid: ${match?.toString()}`
     );
   }
 
   if (!replaceExpr?.isValid) {
     throw new Error(
-      `Invalid rule ${id ?? JSON.stringify(rule)}: match is not a valid expression: ${match?.toString()}`
+      `Invalid rule ${id ?? JSON.stringify(rule)}\n|   The replace expression is not valid: ${match?.toString()}`
     );
   }
 
   if (!replaceExpr && typeof replace !== 'function')
     throw new Error(
-      `Invalid rule ${id ?? JSON.stringify(rule)}: replace is not a valid expression`
+      `Invalid rule ${id ?? JSON.stringify(rule)}\n|   The replace expression could not be parsed`
     );
 
   id ??=
     dewildcard(matchExpr).toString() +
     ' -> ' +
-    dewildcard(replaceExpr).toString();
+    (typeof replace === 'function'
+      ? '...'
+      : dewildcard(replaceExpr).toString());
 
   return {
     _tag: 'boxed-rule',
@@ -616,12 +615,15 @@ function boxRule(ce: IComputeEngine, rule: Rule | BoxedRule): BoxedRule {
  */
 export function boxRules(ce: IComputeEngine, rs: Iterable<Rule>): BoxedRuleSet {
   const rules: BoxedRule[] = [];
-
-  try {
-    for (const rule of rs) rules.push(boxRule(ce, rule));
-  } catch (e) {
-    console.error(e.message);
-    return { rules: [] };
+  for (const rule of rs) {
+    try {
+      rules.push(boxRule(ce, rule));
+    } catch (e) {
+      // There was a problem with a rule, skip it and continue
+      throw new Error(
+        `\n${e.message}\n|   Skipping rule ${JSON.stringify(rule)}\n\n`
+      );
+    }
   }
   return { rules };
 }
@@ -650,6 +652,7 @@ function applyRule(
     const newOps = ops.map((op) => {
       const subExpr = applyRule(rule, op, {}, options);
       if (!subExpr) return op;
+      if (!subExpr.isCanonical) debugger;
       changed = true;
       return subExpr;
     });
@@ -668,7 +671,7 @@ function applyRule(
     const bwc = getWildcards(match);
     if (!awc.every((x) => bwc.includes(x)))
       throw new Error(
-        `Rule "${rule.id}: Canonical match "${match.latex}" does not contain all the wildcards of the original match "${dewildcard(originalMatch).latex}"`
+        `Invalid rule "${rule.id}"\n|   Canonical match "${dewildcard(match).toString()}" does not contain all the wildcards of the original match "${dewildcard(originalMatch).toString()}"\n|   This indicates that the match expression in canonical form may already be simplified and this rule may not be necessary`
       );
   }
 
@@ -704,7 +707,7 @@ function applyRule(
  * expression. @fixme: account for options.canonical
  *
  */
-export function xreplace(
+export function replace(
   expr: BoxedExpression,
   rules: Rule | (Rule | BoxedRule)[] | BoxedRuleSet,
   options?: Partial<ReplaceOptions>
@@ -717,17 +720,13 @@ export function xreplace(
 
   // Normalize the ruleset
   let ruleSet: ReadonlyArray<BoxedRule>;
-  try {
-    if (typeof rules === 'object' && 'rules' in rules) ruleSet = rules.rules;
-    else {
-      ruleSet = expr.engine.rules(
-        Array.isArray(rules) ? rules : [rules as Rule | BoxedRule]
-      ).rules;
-    }
-  } catch (e) {
-    console.error(e.message);
-    return [];
+  if (typeof rules === 'object' && 'rules' in rules) ruleSet = rules.rules;
+  else {
+    ruleSet = expr.engine.rules(
+      Array.isArray(rules) ? rules : [rules as Rule | BoxedRule]
+    ).rules;
   }
+
   let done = false;
   const steps: RuleStep[] = [];
   try {
@@ -789,7 +788,7 @@ function dewildcard(expr: BoxedExpression): BoxedExpression {
   }
   if (expr.ops) {
     const ops = expr.ops.map((x) => dewildcard(x));
-    return expr.engine.function(expr.operator, ops);
+    return expr.engine.function(expr.operator, ops, { canonical: false });
   }
   return expr;
 }

@@ -61,12 +61,7 @@ export abstract class _BoxedExpression implements BoxedExpression {
   abstract isSame(rhs: BoxedExpression): boolean;
   abstract isEqual(rhs: number | BoxedExpression): boolean;
   abstract match(
-    pattern:
-      | Decimal
-      | Complex
-      | [num: number, denom: number]
-      | SemiBoxedExpression
-      | BoxedExpression,
+    pattern: BoxedExpression,
     options?: PatternMatchOptions
   ): BoxedSubstitution | null;
 

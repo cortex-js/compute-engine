@@ -36,7 +36,7 @@ import {
 import { add } from './terms';
 import { bigint } from '../numerics/numeric-bigint';
 import { isInMachineRange } from '../numerics/numeric-bignum';
-import { xreplace } from '../rules';
+import { replace } from '../symbolic/rules';
 import { simplify } from '../symbolic/simplify';
 import { ExactNumericValue } from '../numeric-value/exact-numeric-value';
 
@@ -449,16 +449,11 @@ export class BoxedNumber extends _BoxedExpression {
     // Apply the replace on the structural version of the number.
     // This will allow transformations to be applied on ["Rational", 3, 4]
     // for example.
-    return xreplace(this.structural, rules, options).at(-1)?.value ?? null;
+    return replace(this.structural, rules, options).at(-1)?.value ?? null;
   }
 
   match(
-    pattern:
-      | Decimal
-      | Complex
-      | [num: number, denom: number]
-      | SemiBoxedExpression
-      | BoxedExpression,
+    pattern: BoxedExpression,
     options?: PatternMatchOptions
   ): BoxedSubstitution | null {
     return match(this.structural, pattern, options);

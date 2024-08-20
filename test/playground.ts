@@ -1,8 +1,10 @@
 import { ComputeEngine } from '../src/compute-engine';
-cost-function';
 
 const ce = new ComputeEngine();
 
+const expr = ce.parse('y/(e^x)');
+const rule = 'x^0 -> x';
+expr.simplify({ rules: rule })?.print();
 
 ce.parse('1')
   .simplify({
@@ -14,15 +16,15 @@ ce.parse('1')
   })
   .print();
 
-console.info(
-  ce
-    .parse('-\\cos(x)^4 - \\sin(2x)^2 / 4 - \\sin(y)^2 + 1')
-    .simplify({
-      rules: ['\\sin(2x) -> 2\\sin(x)\\cos(x)'],
-      costFunction: () => 0,
-    })
-    .toString()
-);
+//   console.info(
+//   ce
+//     .parse('-\\cos(x)^4 - \\sin(2x)^2 / 4 - \\sin(y)^2 + 1')
+//     .simplify({
+//       rules: ['\\sin(2x) -> 2\\sin(x)\\cos(x)'],
+//       costFunction: () => 0,
+//     })
+//     .toString()
+// );
 
 console.info(
   ce
@@ -35,9 +37,7 @@ console.info(
 );
 
 // in Add.sgn() should check x.isNegative instead of x.sgn, and have Abd.isNegative always return false
-ce.parse('|(1+|a|+2)|')
-  .simplify({ rules: ['abc', 'def'] })
-  .print();
+ce.parse('|(1+|a|+2)|').simplify().print();
 
 ce.parse('||a| + 3|').simplify().print();
 

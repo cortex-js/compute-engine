@@ -366,7 +366,7 @@ export const CORE_LIBRARY: IdentifierDefinitions[] = [
           const op1 = args[0];
           if (!op1.symbol) return null;
           const op2 = args[1];
-          return ce._fn('Assign', [op1, op2]);
+          return ce._fn('Assign', [op1.canonical, op2.canonical]);
         },
         evaluate: (ops, { engine: ce }) => {
           const op1 = ops[0];

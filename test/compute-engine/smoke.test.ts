@@ -121,89 +121,128 @@ describe('PARSING numbers', () => {
           [
             "Add",
             [
-              "Delimiter",
+              "Sum",
               [
-                "Sum",
+                "Floor",
                 [
-                  "Delimiter",
+                  "Divide",
+                  1,
                   [
-                    "Floor",
+                    "Add",
                     [
-                      "Divide",
-                      1,
+                      "Power",
+                      0,
                       [
                         "Add",
+                        "n",
                         [
-                          "Power",
-                          0,
+                          "Negate",
                           [
-                            "Subtract",
-                            "n",
+                            "Sum",
                             [
-                              "Delimiter",
+                              "Product",
                               [
-                                "Sum",
+                                "Add",
+                                1,
                                 [
-                                  "Delimiter",
+                                  "Power",
+                                  0,
                                   [
-                                    "Delimiter",
+                                    "Abs",
                                     [
-                                      "Product",
+                                      "Add",
                                       [
-                                        "Delimiter",
+                                        "Floor",
                                         [
-                                          "Add",
+                                          "Divide",
                                           [
-                                            "Power",
-                                            0,
+                                            "Error",
                                             [
-                                              "Abs",
-                                              [
-                                                "Subtract",
-                                                [
-                                                  "Floor",
-                                                  [
-                                                    "Divide",
-                                                    ["At", "v", 2],
-                                                    ["At", "v", 3]
-                                                  ]
-                                                ],
-                                                [
-                                                  "Divide",
-                                                  ["At", "v", 2],
-                                                  ["At", "v", 3]
-                                                ]
-                                              ]
-                                            ]
+                                              "ErrorCode",
+                                              "'incompatible-domain'",
+                                              "Numbers",
+                                              "Anything"
+                                            ],
+                                            ["At", "v", 2]
                                           ],
-                                          1
+                                          [
+                                            "Error",
+                                            [
+                                              "ErrorCode",
+                                              "'incompatible-domain'",
+                                              "Numbers",
+                                              "Anything"
+                                            ],
+                                            ["At", "v", 3]
+                                          ]
                                         ]
                                       ],
                                       [
-                                        "Triple",
-                                        "Nothing",
-                                        2,
-                                        ["Floor", ["Sqrt", ["At", "v", 2]]]
+                                        "Negate",
+                                        [
+                                          "Divide",
+                                          [
+                                            "Error",
+                                            [
+                                              "ErrorCode",
+                                              "'incompatible-domain'",
+                                              "Numbers",
+                                              "Anything"
+                                            ],
+                                            ["At", "v", 2]
+                                          ],
+                                          [
+                                            "Error",
+                                            [
+                                              "ErrorCode",
+                                              "'incompatible-domain'",
+                                              "Numbers",
+                                              "Anything"
+                                            ],
+                                            ["At", "v", 3]
+                                          ]
+                                        ]
                                       ]
                                     ]
                                   ]
-                                ],
-                                ["Triple", "Nothing", 2, ["At", "v", 1]]
+                                ]
+                              ],
+                              [
+                                "Tuple",
+                                "Nothing",
+                                2,
+                                [
+                                  "Floor",
+                                  [
+                                    "Sqrt",
+                                    [
+                                      "Error",
+                                      [
+                                        "ErrorCode",
+                                        "'incompatible-domain'",
+                                        "Numbers",
+                                        "Anything"
+                                      ],
+                                      ["At", "v", 2]
+                                    ]
+                                  ]
+                                ]
                               ]
-                            ]
+                            ],
+                            ["Triple", "Nothing", 2, ["At", "v", 1]]
                           ]
-                        ],
-                        1
+                        ]
                       ]
-                    ]
+                    ],
+                    1
                   ]
-                ],
-                [
-                  "Triple",
-                  "Nothing",
-                  2,
-                  ["Floor", ["Multiply", 1.5, "n", ["Ln", "n"]]]
                 ]
+              ],
+              [
+                "Triple",
+                "Nothing",
+                2,
+                ["Floor", ["Multiply", 1.5, "n", ["Ln", "n"]]]
               ]
             ],
             2

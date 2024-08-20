@@ -17,7 +17,7 @@ function match(
   expr: BoxedExpression | Expression,
   options?: PatternMatchOptions
 ): Substitution | null {
-  const result = engine.box(expr).match(pattern, options);
+  const result = engine.box(expr).match(ce.box(pattern), options);
   if (result === null) return null;
   const r = {};
   for (const key of Object.keys(result)) r[key] = result[key];
@@ -127,37 +127,55 @@ describe('PATTERNS  MATCH - Named wildcard', () => {
 });
 
 describe('PATTERNS  MATCH - Sequence wildcard', () => {
-  test('Sequence wildcard', () => {
+  test('Sequence wildcard at the end', () => {
     expect(match(['Add', 1, '__a'], ['Add', 1, 2, 3, 4]))
       .toMatchInlineSnapshot(`
       {
         __a: ["Add", 2, 3, 4],
       }
     `);
+  });
+  test('Sequence wildcard in the middle', () => {
     expect(match(['Add', 1, '__a', 4], ['Add', 1, 2, 3, 4]))
       .toMatchInlineSnapshot(`
       {
         __a: ["Add", 2, 3],
       }
     `);
+  });
+  test('Sequence wildcard in the middle, matching nothing', () => {
     expect(
       match(['Add', 1, 2, '__a', 3], ['Add', 1, 2, 3])
     ).toMatchInlineSnapshot(`null`);
+  });
+
+  test('Optional sequence wildcard mathching 0', () => {
     expect(match(['Add', 1, 2, '___a', 3], ['Add', 1, 2, 3]))
       .toMatchInlineSnapshot(`
       {
         ___a: 0,
       }
     `);
-    expect(
-      match(['Multiply', 1, 2, '___a', 3], ['Multiply', 1, 2, 3])
-    ).toMatchInlineSnapshot(`null`);
+  });
+
+  test('Optional sequence wildcard matching 1', () => {
+    expect(match(['Multiply', 1, 2, '___a', 3], ['Multiply', 1, 2, 3]))
+      .toMatchInlineSnapshot(`
+      {
+        ___a: 1,
+      }
+    `);
+  });
+
+  test('Sequence wildcard in the middle', () => {
     expect(match(['Add', 1, 2, '__a', 4], ['Add', 1, 2, 3, 4]))
       .toMatchInlineSnapshot(`
       {
         __a: 3,
       }
     `);
+  });
+  test('Sequence wildcard matching nothing', () => {
     expect(
       match(['Add', 1, 2, '__a', 3], ['Add', 1, 2, 3])
     ).toMatchInlineSnapshot(`null`);
@@ -223,9 +241,7 @@ describe('MATCH', () => {
     const lhs = ce.box(expr[0]).canonical;
     const rhs = ce.box(expr[1]).canonical;
     test(`match(${lhs.latex}, ${rhs.latex})`, () => {
-      expect(
-        match(lhs, rhs, { numericTolerance: TOLERANCE }) !== null
-      ).toBeTruthy();
+      expect(match(lhs, rhs) !== null).toBeTruthy();
     });
   }
 });

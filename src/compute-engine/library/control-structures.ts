@@ -8,6 +8,7 @@ import {
 import { applicable } from '../function-utils';
 import { widen } from '../boxed-expression/boxed-domain';
 import { each, isCollection } from '../collection-utils';
+import { checkConditions } from '../symbolic/rules';
 
 export const CONTROL_STRUCTURES_LIBRARY: IdentifierDefinitions[] = [
   {
@@ -17,6 +18,25 @@ export const CONTROL_STRUCTURES_LIBRARY: IdentifierDefinitions[] = [
         domain: 'Functions',
         canonical: canonicalBlock,
         evaluate: evaluateBlock,
+      },
+    },
+
+    // A condition expression tests for one or more conditions of an expression
+    // ['Condition', value, "positive"]
+    Condition: {
+      hold: 'all',
+      signature: {
+        domain: 'Functions',
+        evaluate: ([value, conds], { engine }) => {
+          let conditions: string[] = [];
+          if (conds.symbol) {
+            conditions = [conds.symbol];
+          } else if (conds.operator === 'And') {
+            conditions = conds.ops!.map((op) => op.symbol ?? '');
+          }
+          if (checkConditions(value, conditions)) return engine.True;
+          return engine.False;
+        },
       },
     },
 

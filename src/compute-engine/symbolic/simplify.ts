@@ -6,7 +6,7 @@ import {
   RuleSteps,
   SimplifyOptions,
 } from '../public';
-import { xreplace as replace } from '../rules';
+import { replace } from './rules';
 
 export function simplify(
   expr: BoxedExpression,
@@ -85,6 +85,7 @@ export function simplify(
   //
   // Loop until the expression has been previously seen,
   // or no rules can be applied
+  //
   do {
     const newSteps = replace(expr, rules, {
       ...options,

@@ -274,12 +274,7 @@ export class BoxedTensor extends _BoxedExpression {
   }
 
   match(
-    pattern:
-      | Decimal
-      | Complex
-      | [num: number, denom: number]
-      | SemiBoxedExpression
-      | BoxedExpression,
+    pattern: BoxedExpression,
     options?: PatternMatchOptions
   ): BoxedSubstitution | null {
     if (!isBoxedExpression(pattern))

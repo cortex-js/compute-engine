@@ -25,7 +25,7 @@ import {
   Type,
   BoxedRule,
 } from './public';
-import { xreplace } from '../rules';
+import { replace } from '../symbolic/rules';
 import {
   getImaginaryFactor,
   hashCode,
@@ -602,12 +602,7 @@ export class BoxedSymbol extends _BoxedExpression {
   }
 
   match(
-    pattern:
-      | Decimal
-      | Complex
-      | [num: number, denom: number]
-      | SemiBoxedExpression
-      | BoxedExpression,
+    pattern: BoxedExpression,
     options?: PatternMatchOptions
   ): BoxedSubstitution | null {
     return match(this, pattern, options);
@@ -854,7 +849,7 @@ export class BoxedSymbol extends _BoxedExpression {
     rules: Rule | (Rule | BoxedRule)[] | BoxedRuleSet,
     options?: Partial<ReplaceOptions>
   ): BoxedExpression | null {
-    return xreplace(this, rules, options).at(-1)?.value ?? null;
+    return replace(this, rules, options).at(-1)?.value ?? null;
   }
 
   subs(
