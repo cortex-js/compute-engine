@@ -997,7 +997,6 @@ const CANONICALIZATION_TEST_CASES: TestCase[] = [
   ['6/8', '3/4', 'Rationals are reduced'],
   ['3/4 + 2', '11/4', 'Rational are reduced, but preserved as exact values'],
   ['3/4 + 5/7', '41/28', 'Rational are reduced, but preserved as exact values'],
-
   ['\\sqrt3', '\\sqrt3', 'Square root of integers are not converted to float'],
   [
     '\\sqrt{3.1}',
@@ -1142,7 +1141,7 @@ const RULE_TEST_CASES: TestCase[] = [
   `,
   ],
   ['e e^x e^{-x}', 'e'], // 🙁 e * e^x * e^(-x)
-  ['e^x e^{-x}', 1], // 🙁 e^x * e^(-x)
+  ['e^x e^{-x}', 1], // up to 👍expand
   ['\\sqrt[4]{16b^{4}}', '2b'],
 
   [
@@ -1156,7 +1155,7 @@ const RULE_TEST_CASES: TestCase[] = [
   ['(-x)^{4/3}', 'x^{4/3}'], // 👍 (-x)^n:even -> x^n
   ['(-x)^4', 'x^4'],
   ['(-x)^{3/5}', '-(x^{3/5})'],
-  ['1/x-1/(x+1)', '1/(x(x+1))'], // 🙁 -1 / (x + 1) + 1 / x
+  ['1/x-1/(x+1)', '1/(x(x+1))'], // 🙁 1 / (x^2 + x)
   ['\\sqrt[3]{-2}', '-\\sqrt[3]{2}'], // 🙁 NaN
 
   [
@@ -1167,7 +1166,7 @@ const RULE_TEST_CASES: TestCase[] = [
   `,
   ],
   ['3/x-1/x', '2/x'],
-  ['1/(x+1)-1/x', '-1/(x(x+1))'], // 🙁 -1 / x + 1 / (x + 1)
+  ['1/(x+1)-1/x', '-1/(x(x+1))'], // 🙁 -1 / (x^2 + x)
 
   [
     `
@@ -1178,7 +1177,7 @@ const RULE_TEST_CASES: TestCase[] = [
   ],
   ['x*y+(x+1)*y', '2xy+y'],
   ['(x+1)^2-x^2', '2x+1'],
-  ['2*(x+h)^2-2*x^2', '4xh+2h^2'],
+  ['2*(x+h)^2-2*x^2', '4xh+2h^2'], // 🙁 -2x^2 + 2(h + x)^2
 
   [
     `
@@ -1238,7 +1237,7 @@ const RULE_TEST_CASES: TestCase[] = [
     //
   `,
   ],
-  ['\\ln(xy)-\\ln(x)', '\\ln(y)'], // 🙁 -ln(x) + ln(x * y)
+  ['\\ln(xy)-\\ln(x)', '\\ln(y)'], // up to 👍(x) => {         if (x.operator === 'Divide')             return { value: x.op1.div(x.op2), because: 'division' };         if (x.operator === 'Rational' && x.nops === 2)             return { value: x.op1.div(x.op2), because: 'rational' };         return undefined;     }
   ['\\ln(y/x)+\\ln(x)', '\\ln(x*y/x)'], // 👍 \ln(x) + \ln(y) -> \ln(xy)
   ['e^{\\ln(x)+x}', 'x*e^x'], // 👍 e^{\ln(x)+y} -> x*e^y
   ['e^{\\ln(x)-2*x}', 'x*e^{-2*x}'], // 👍 e^{\ln(x)+y} -> x*e^y
@@ -1254,7 +1253,7 @@ const RULE_TEST_CASES: TestCase[] = [
     //
   `,
   ],
-  ['\\log_c(xy)-\\log_c(x)', '\\log_c(y)'], // 🙁 -log(x, c) + ln(x * y)
+  ['\\log_c(xy)-\\log_c(x)', '\\log_c(y)'], // up to 👍(x) => {         if (x.operator === 'Divide')             return { value: x.op1.div(x.op2), because: 'division' };         if (x.operator === 'Rational' && x.nops === 2)             return { value: x.op1.div(x.op2), because: 'rational' };         return undefined;     }
   ['\\log_c(y/x)+\\log_c(x)', '\\log_c(xy/x)'], // 👍 \log_c(x) + \log_c(y) -> \log_c(xy)
   ['c^{\\log_c(x)+x}', 'x c^x'], // 👍 c^{\log_c(x)+y} -> x*c^y
   ['c^{\\log_c(x)-2*x}', 'x c^{-2*x}'], // 👍 c^{\log_c(x)+y} -> x*c^y
@@ -1543,7 +1542,7 @@ const RULE_TEST_CASES: TestCase[] = [
   ['x^{-2}*x', '1/x'],
   ['x^{-1/3}*x', 'x^{-1/3}*x'], // 🙁 with all rules: x^(2/3)
   ['\\pi^{-2}*\\pi', '1/\\pi'],
-  ['\\pi^{-0.2}*\\pi', '\\pi^{0.8}'], // 🙁 pi * pi^(-0.2)
+  ['\\pi^{-0.2}*\\pi', '\\pi^{0.8}'], // up to 👍expand
   ['\\sqrt[3]{x}*x', 'x^{4/3}'],
 
   [
@@ -1571,10 +1570,10 @@ const RULE_TEST_CASES: TestCase[] = [
     `,
   ],
   ['x^2/x^3', '1/x'],
-  ['x^{-1}/x^3', '1/x^4'], // 🙁 1 / (x * x^3)
+  ['x^{-1}/x^3', '1/x^4'], // 👍 (x) => {         if (x.operator === 'Divide')             return { value: x.op1.div(x.op2), because: 'division' };         if (x.operator === 'Rational' && x.nops === 2)             return { value: x.op1.div(x.op2), because: 'rational' };         return undefined;     }
   ['x/x^{-1}', 'x/x^{-1}'], // 🙁 with all rules: x * x
-  ['\\pi / \\pi^{-1}', '\\pi^2'], // 👍 (x) => {         if (x.operator === 'Divide')             return { value: x.op1.div(x.op2), because: 'division' };         if (x.operator === 'Rational' && x.nops === 2)             return { value: x.op1.div(x.op2), because: 'rational' };         return undefined;     }
-  ['\\pi^{0.2}/\\pi^{0.1}', '\\pi^{0.1}'], // 🙁 pi^(0.2) * pi^(-0.1)
+  ['\\pi / \\pi^{-1}', '\\pi^2'], // 👍 x/x^n -> 1/x^{n-1}; ({ x, n }) => x.isNotZero || n.isGreater(1) === true
+  ['\\pi^{0.2}/\\pi^{0.1}', '\\pi^{0.1}'], // 🙁 pi^(0.3)
   ['x^{\\sqrt{2}}/x^3', 'x^{\\sqrt{2}-3}'], // 🙁 x^(sqrt(2)) / x^3
 
   [
@@ -1610,9 +1609,9 @@ const RULE_TEST_CASES: TestCase[] = [
   ],
   ['\\ln(x^3)', '3\\ln(x)'],
   ['\\ln(x^\\sqrt{2})', '\\sqrt{2} \\ln(x)'],
-  ['\\ln(x^2)', '2 \\ln(|x|)'], // 🙁 2ln(x)
+  ['\\ln(x^2)', '2 \\ln(|x|)'], // 🙁 ln(x^2)
   ['\\ln(x^{2/3})', '2/3 \\ln(|x|)'], // 🙁 ln(x^(2/3))
-  ['\\ln(\\pi^{2/3})', '2/3 \\ln(\\pi)'], // 🙁 2ln(pi)
+  ['\\ln(\\pi^{2/3})', '2/3 \\ln(\\pi)'], // 🙁 ln(pi^(2/3))
   ['\\ln(x^{7/4})', '7/4 \\ln(x)'], // 🙁 ln(x^(7/4))
   ['\\ln(\\sqrt{x})', '\\ln(x)/2'],
 
@@ -1625,10 +1624,11 @@ const RULE_TEST_CASES: TestCase[] = [
   ],
   ['\\log_4(x^3)', '3\\log_4(x)'],
   ['\\log_3(x^\\sqrt{2})', '\\sqrt{2} \\log_3(x)'],
-  ['\\log_4(x^2)', '2\\log_4(|x|)'], // 🙁 2log(x, 4)
+  ['\\log_4(x^2)', '2\\log_4(|x|)'], // 🙁 log(x^2, 4)
   ['\\log_4(x^{2/3})', '2/3 \\log_4(|x|)'], // 🙁 log(x^(2/3), 4)
   ['\\log_4(x^{7/4})', '7/4 \\log_4(x)'], // 🙁 log(x^(7/4), 4)
 ];
+
 describe('SIMPLIFY', () => {
   console.info('Canonicalization test cases\n\n');
   for (const test of CANONICALIZATION_TEST_CASES) runTestCase(test);
