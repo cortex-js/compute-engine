@@ -461,6 +461,33 @@ export class BoxedFunction extends _BoxedExpression {
     return s;
   }
 
+  isLess(rhs: number | BoxedExpression): boolean | undefined {
+    if (rhs === 0 || (typeof rhs !== 'number' && rhs.isZero))
+      return this.isNegative;
+    return undefined;
+  }
+
+  isLessEqual(rhs: number | BoxedExpression): boolean | undefined {
+    if (rhs === 0 || (typeof rhs !== 'number' && rhs.isZero))
+      return this.isNonPositive;
+
+    return undefined;
+  }
+
+  isGreater(rhs: number | BoxedExpression): boolean | undefined {
+    if (rhs === 0 || (typeof rhs !== 'number' && rhs.isZero))
+      return this.isPositive;
+
+    return undefined;
+  }
+
+  isGreaterEqual(rhs: number | BoxedExpression): boolean | undefined {
+    if (rhs === 0 || (typeof rhs !== 'number' && rhs.isZero))
+      return this.isNonNegative;
+
+    return undefined;
+  }
+
   get isZero(): boolean | undefined {
     // Use a flag in priority
     if (this._def?.flags?.zero !== undefined) return this._def.flags.zero;
@@ -858,6 +885,13 @@ export class BoxedFunction extends _BoxedExpression {
 
   /** `isEqual` is mathematical equality */
   isEqual(rhs: number | BoxedExpression): boolean {
+    if (rhs === 0 || (typeof rhs !== 'number' && rhs.isZero))
+      return this.isZero === true;
+    if (rhs === 1 || (typeof rhs !== 'number' && rhs.isOne))
+      return this.isOne === true;
+    if (rhs === -1 || (typeof rhs !== 'number' && rhs.isNegativeOne))
+      return this.isNegativeOne === true;
+
     rhs = this.engine.box(rhs);
     if (this === rhs) return true;
 

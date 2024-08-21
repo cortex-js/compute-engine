@@ -615,7 +615,15 @@ export class BoxedSymbol extends _BoxedExpression {
   }
 
   isEqual(rhs: number | BoxedExpression): boolean {
-    if (typeof rhs === 'number') return false;
+    if (rhs === 0 || (typeof rhs !== 'number' && rhs.isZero))
+      return this.isZero === true;
+    if (rhs === 1 || (typeof rhs !== 'number' && rhs.isOne))
+      return this.isOne === true;
+    if (rhs === -1 || (typeof rhs !== 'number' && rhs.isNegativeOne))
+      return this.isNegativeOne === true;
+
+    rhs = this.engine.box(rhs);
+
     if (!this.isCanonical) return this.canonical.isEqual(rhs);
     rhs = rhs.canonical;
 
@@ -648,6 +656,9 @@ export class BoxedSymbol extends _BoxedExpression {
   }
 
   isLess(rhs: number | BoxedExpression): boolean | undefined {
+    if (rhs === 0 || (typeof rhs !== 'number' && rhs.isZero))
+      return this.isNegative;
+
     // Idempotency
     if (
       typeof rhs !== 'number' &&
@@ -675,6 +686,9 @@ export class BoxedSymbol extends _BoxedExpression {
   }
 
   isLessEqual(rhs: number | BoxedExpression): boolean | undefined {
+    if (rhs === 0 || (typeof rhs !== 'number' && rhs.isZero))
+      return this.isNonPositive;
+
     // Idempotency
     if (
       typeof rhs !== 'number' &&
@@ -700,6 +714,9 @@ export class BoxedSymbol extends _BoxedExpression {
   }
 
   isGreater(rhs: number | BoxedExpression): boolean | undefined {
+    if (rhs === 0 || (typeof rhs !== 'number' && rhs.isZero))
+      return this.isPositive;
+
     // Idempotency
     if (
       typeof rhs !== 'number' &&
@@ -728,6 +745,9 @@ export class BoxedSymbol extends _BoxedExpression {
   }
 
   isGreaterEqual(rhs: number | BoxedExpression): boolean | undefined {
+    if (rhs === 0 || (typeof rhs !== 'number' && rhs.isZero))
+      return this.isNonNegative;
+
     // Idempotency
     if (
       typeof rhs !== 'number' &&
