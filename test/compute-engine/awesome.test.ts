@@ -51,6 +51,7 @@ describe('Primality Test', () => {
           ]
         ]
       ]
+      simplify  = -floor(cos((pi * (n - 1)! + pi) / n))
       eval-auto = -floor(cos((pi * (n - 1)! + pi) / n))
       eval-mach = -floor(cos((pi * (n - 1)! + pi) / n))
       N-auto    = -floor(cos((3.14159265358979323846 * (n - 1)! + 3.14159265358979323846) / n))

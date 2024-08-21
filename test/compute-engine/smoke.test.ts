@@ -720,7 +720,7 @@ describe('SIMPLIFICATION trigonometry', () => {
 
   test(`simplify('1+4\\times\\sin\\frac{\\pi}{10}')`, () =>
     expect(simplify('1+4\\times\\sin\\frac{\\pi}{10}')).toMatchInlineSnapshot(
-      `["Add", -1, 1, ["Sqrt", 5]]`
+      `["Sqrt", 5]`
     ));
 });
 

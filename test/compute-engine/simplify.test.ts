@@ -419,7 +419,7 @@ const RULES: Rule[] = [
   {
     match: 'x/x^n',
     replace: '1/x^{n-1}',
-    condition: ({ c, n }) => c.isNotZero || n.isGreater(1) === true,
+    condition: ({ x, n }) => x.isNotZero || n.isGreater(1) === true,
   },
   {
     match: 'x^n/x',
@@ -1142,7 +1142,7 @@ const RULE_TEST_CASES: TestCase[] = [
   `,
   ],
   ['e e^x e^{-x}', 'e'], // 🙁 e * e^x * e^(-x)
-  ['e^x e^{-x}', 1, 'stop'], // 🙁 e^x * e^(-x)
+  ['e^x e^{-x}', 1], // 🙁 e^x * e^(-x)
   ['\\sqrt[4]{16b^{4}}', '2b'],
 
   [

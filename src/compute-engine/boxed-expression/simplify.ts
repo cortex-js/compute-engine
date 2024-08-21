@@ -101,10 +101,9 @@ export function simplify(
     const alt = simplifyFunctionOperands(newSteps.at(-1)!.value, options);
     newSteps.at(-1)!.value = alt;
 
-    if (isCheaper(expr, alt, options?.costFunction)) {
-      expr = alt;
-      steps.push(...newSteps);
-    }
+    if (!isCheaper(expr, alt, options?.costFunction)) break;
+    expr = alt;
+    steps.push(...newSteps);
   } while (!steps.slice(0, -1).some((x) => x.value.isSame(expr)));
 
   return steps as RuleSteps;

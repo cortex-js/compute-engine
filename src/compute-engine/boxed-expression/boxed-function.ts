@@ -575,10 +575,6 @@ export class BoxedFunction extends _BoxedExpression {
   isSame(rhs: BoxedExpression): boolean {
     if (this === rhs) return true;
 
-    // We want to compare the structure of the expressions, not the
-    // value of the expressions. If a rational number 1/2, we want the
-    // expression ['Rational', 1, 2]
-    rhs = rhs.structural;
     if (!(rhs instanceof BoxedFunction)) return false;
 
     // Number of arguments must match
@@ -587,18 +583,8 @@ export class BoxedFunction extends _BoxedExpression {
     // Operators must match
     if (this.operator !== rhs.operator) return false;
 
-    const operator = this.functionDefinition?.associative ? this.operator : '';
-
-    // Each argument must match
-    const lhsTail = flattenOps(
-      this._ops.map((x) => x.structural),
-      operator
-    );
-    const rhsTail = flattenOps(
-      rhs._ops.map((x) => x.structural),
-      operator
-    );
-
+    const lhsTail = this.ops!;
+    const rhsTail = rhs.ops!;
     for (let i = 0; i < lhsTail.length; i++)
       if (!lhsTail[i].isSame(rhsTail[i])) return false;
 

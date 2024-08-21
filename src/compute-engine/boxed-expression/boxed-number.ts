@@ -401,14 +401,6 @@ export class BoxedNumber extends _BoxedExpression {
   isSame(rhs: BoxedExpression): boolean {
     if (this === rhs) return true;
 
-    //
-    // Make a structural comparison if necessary
-    // For example, to compare a rational 3/4 with an expression
-    //  ['Rational, 3, 4]
-    //
-    const lhs = this.structural;
-    if (!(lhs instanceof BoxedNumber)) return lhs.isSame(rhs.structural);
-    rhs = rhs.structural;
     if (!(rhs instanceof BoxedNumber)) return false;
 
     //

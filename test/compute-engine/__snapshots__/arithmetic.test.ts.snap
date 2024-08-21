@@ -284,7 +284,6 @@ N-mach    = 2.23606797749979
 exports[`EXACT EVALUATION Sqrt: Exact rational 1`] = `
 box       = ["Sqrt", ["Divide", 5, 7]]
 canonical = ["Multiply", ["Rational", 1, 7], ["Sqrt", 35]]
-simplify  = Rational(1, 7) * sqrt(35)
 eval-auto = sqrt(35)/7
 eval-mach = sqrt(35)/7
 N-auto    = 0.845154254728516577511
@@ -716,7 +715,7 @@ canonical = [
   ["Multiply", 2, 5, 5, 7, ["Sqrt", 2], "Pi"],
   ["Multiply", 7, 9]
 ]
-simplify  = pi * 50sqrt(2) / 9
+simplify  = (50sqrt(2) * pi) / 9
 eval-auto = pi * 50sqrt(2) / 9
 eval-mach = pi * 50sqrt(2) / 9
 N-auto    = 24.6826829897687013722
@@ -1054,7 +1053,6 @@ N-mach    = 2x
 exports[`SQRT √(5/7) 1`] = `
 box       = ["Sqrt", ["Rational", 5, 7]]
 canonical = ["Multiply", ["Rational", 1, 7], ["Sqrt", 35]]
-simplify  = Rational(1, 7) * sqrt(35)
 eval-auto = sqrt(35)/7
 eval-mach = sqrt(35)/7
 N-auto    = 0.845154254728516577511
