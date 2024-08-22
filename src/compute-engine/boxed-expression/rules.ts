@@ -294,17 +294,10 @@ function parseModifier(parser: Parser): string | null {
       '\\in\\R\\backslash\\Q': 'irrational',
     };
     for (const shortcut in shortcuts) {
-      const tokens = tokenizeLaTeX(shortcut);
-      const start = parser.index;
-      for (const token of tokens) {
-        if (!parser.match(token)) {
-          parser.index = start;
-          break;
-        }
-        parser.skipSpace();
+      if (parser.matchAll(tokenizeLaTeX(shortcut))) {
+        modifier = shortcuts[shortcut];
+        break;
       }
-      modifier = shortcuts[shortcut];
-      break;
     }
   }
 
@@ -315,13 +308,13 @@ function parseModifier(parser: Parser): string | null {
 }
 
 function parserModifiers(parser: Parser): string {
-  let modifiers = '';
+  let modifiers: string[] = [];
   do {
     const modifier = parseModifier(parser);
     if (!modifier) break;
-    modifiers += modifier;
+    modifiers.push(modifier);
   } while (parser.match(','));
-  return modifiers;
+  return modifiers.join(',');
 }
 
 // Look for a modifier expression of the form
@@ -442,6 +435,7 @@ function parseRule(ce: IComputeEngine, rule: string): BoxedRule {
           let done = false;
           const start = parser.index;
           do {
+            parser.skipSpace();
             const id = parser.nextToken();
             if (wildcards[id]) {
               const conditions = parseModifierExpression(parser);
@@ -453,7 +447,7 @@ function parseRule(ce: IComputeEngine, rule: string): BoxedRule {
               if (!wildcardConditions[id]) wildcardConditions[id] = conditions;
               else wildcardConditions[id] += ',' + conditions;
             }
-          } while (!done);
+          } while (!done && !parser.atEnd);
 
           // Is there a remaining predicate?
           conditionPredicate = parser.parseExpression(until);
@@ -619,7 +613,7 @@ function boxRule(ce: IComputeEngine, rule: Rule | BoxedRule): BoxedRule {
     match: matchExpr,
     replace: replaceExpr ?? (replace as RuleReplaceFunction | RuleFunction),
     condition: condFn,
-    exact: rule.exact ?? true,
+    useVariations: rule.useVariations,
     id,
   };
 }
@@ -659,7 +653,7 @@ export function boxRules(
  * @param options
  * @returns A transformed expression, if the rule matched. `null` otherwise.
  */
-function applyRule(
+export function applyRule(
   rule: Readonly<BoxedRule>,
   expr: BoxedExpression,
   substitution: BoxedSubstitution,
@@ -668,22 +662,19 @@ function applyRule(
   const canonical =
     options?.canonical ?? (expr.isCanonical || expr.isStructural);
 
-  let changed = false;
+  let operandsMatched = false;
+
   if (expr.ops && options?.recursive) {
     // Apply the rule to the operands of the expression
-    const ops = expr.ops;
-    const newOps = ops.map((op) => {
+    const newOps = expr.ops.map((op) => {
       const subExpr = applyRule(rule, op, {}, options);
       if (!subExpr) return op;
-      if (!subExpr.isCanonical) debugger;
-      changed = true;
+      operandsMatched = true;
       return subExpr;
     });
-    if (changed)
+    if (operandsMatched)
       expr = expr.engine.function(expr.operator, newOps, { canonical });
   }
-
-  const exact = rule.exact ?? true;
 
   // eslint-disable-next-line prefer-const
   let { match, replace, condition } = rule;
@@ -699,12 +690,14 @@ function applyRule(
       );
   }
 
+  const useVariations = rule.useVariations ?? options?.useVariations ?? false;
+
   const sub = match
-    ? expr.match(match, { substitution, ...options, exact })
+    ? expr.match(match, { substitution, ...options, useVariations })
     : {};
 
   // If the `expr` does not match the pattern, the rule doesn't apply
-  if (sub === null) return changed ? expr : null;
+  if (sub === null) return operandsMatched ? expr : null;
 
   // If the condition doesn't match, the rule doesn't apply
   if (typeof condition === 'function') {
@@ -722,7 +715,8 @@ function applyRule(
     };
 
     try {
-      if (!condition(conditionSub, expr.engine)) return changed ? expr : null;
+      if (!condition(conditionSub, expr.engine))
+        return operandsMatched ? expr : null;
     } catch (e) {
       console.error(
         `Rule ${rule.id}\n|   Error while checking condition\n|    ${e.message}`
@@ -779,7 +773,7 @@ export function replace(
       done = true;
       for (const rule of ruleSet) {
         const result = applyRule(rule, expr, {}, options);
-        if (result !== null && result !== expr) {
+        if (result !== null && result !== expr && !result.isSame(expr)) {
           // If `once` flag is set, bail on first matching rule
           if (once) return [{ value: result, because: rule.id ?? '' }];
 

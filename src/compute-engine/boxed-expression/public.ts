@@ -1163,7 +1163,6 @@ export interface BoxedExpression {
       | boolean
       | string
       | BigNum
-      | Complex
       | { re: number; im: number }
       | { num: number; denom: number }
       | number[]
@@ -1307,7 +1306,6 @@ export type SemiBoxedExpression =
   | number
   | string
   | BigNum
-  | Complex
   | MathJsonNumber
   | MathJsonString
   | MathJsonSymbol
@@ -1797,7 +1795,7 @@ export type Rule =
         | RuleReplaceFunction
         | RuleFunction;
       condition?: LatexString | RuleConditionFunction;
-      exact?: boolean; // Default to true
+      useVariations?: boolean; // Default to false
       id?: string; // Optional, for debugging or filtering
     };
 
@@ -1810,14 +1808,19 @@ export type Rule =
  *
  * @category Rules */
 export type BoxedRule = {
+  /** @internal */
   _tag: 'boxed-rule';
+
   match: undefined | Pattern;
+
   replace: BoxedExpression | RuleReplaceFunction | RuleFunction;
+
   condition: undefined | RuleConditionFunction;
-  exact?: boolean; // If false, the rule will match variants, for example
+
+  useVariations?: boolean; // If true, the rule will match variations, for example
   // 'x' will match 'a + x', 'x' will match 'ax', etc...
-  // For simplification rules, you generally want exact to be true, but
-  // to solve equations, you want it to be false. Default to true.
+  // Default to false.
+
   id?: string; // For debugging
 };
 
@@ -1830,7 +1833,7 @@ export type RuleStep = {
   because: string; // id of the rule
 };
 
-export type RuleSteps = ReadonlyArray<RuleStep>;
+export type RuleSteps = RuleStep[];
 
 /**
  * To create a BoxedRuleSet use the `ce.rules()` method.
@@ -1955,15 +1958,6 @@ export type DomainExpression<T = SemiBoxedExpression> =
  */
 export type SimplifyOptions = {
   /**
-   * If `true`, if a function has a built-in simplification handler,
-   * use it.
-   *
-   * **Default**: `true`
-   *
-   */
-  applyDefaultSimplifications?: boolean;
-
-  /**
    * The set of rules to apply. If `null`, use no rules. If not provided,
    * use the default simplification rules.
    */
@@ -2016,7 +2010,6 @@ export type ArrayValue =
   | number
   | string
   | BigNum
-  | Complex
   | BoxedExpression
   | undefined;
 
@@ -2034,7 +2027,6 @@ export type AssignValue =
   | number
   | string
   | BigNum
-  | Complex
   | LatexString
   | SemiBoxedExpression
   | ((
@@ -2108,8 +2100,7 @@ export interface IComputeEngine extends IBigNum {
 
   chop(n: number): number;
   chop(n: BigNum): BigNum | 0;
-  chop(n: Complex): Complex | 0;
-  chop(n: number | BigNum | Complex): number | BigNum | Complex;
+  chop(n: number | BigNum): number | BigNum;
 
   bignum: (a: string | number | bigint | BigNum) => BigNum;
 
@@ -2118,7 +2109,7 @@ export interface IComputeEngine extends IBigNum {
 
   /** @internal */
   _numericValue(
-    value: number | bigint | Rational | BigNum | Complex | NumericValueData
+    value: number | bigint | Rational | BigNum | NumericValueData
   ): NumericValue;
 
   /** If the precision is set to `machine`, floating point numbers
@@ -2144,7 +2135,6 @@ export interface IComputeEngine extends IBigNum {
     expr:
       | NumericValue
       | BigNum
-      | Complex
       | [num: number, denom: number]
       | SemiBoxedExpression,
     options?: { canonical?: CanonicalOptions; structural?: boolean }
@@ -2435,7 +2425,7 @@ export type LatexString = string;
 export type PatternMatchOptions = {
   substitution?: BoxedSubstitution;
   recursive?: boolean;
-  exact?: boolean;
+  useVariations?: boolean;
 };
 
 /**
@@ -2460,6 +2450,22 @@ export type ReplaceOptions = {
    * **Default**: `false`
    */
   once: boolean;
+
+  /**
+   * If `true` the rule will use some equivalent variations to match.
+   *
+   * For example when `useVariations` is true:
+   * - `x` matches `a + x` with a = 0
+   * - `x` matches `ax` with a = 1
+   * - etc...
+   *
+   * Setting this to `true` can save time by condensing multiple rules
+   * into one. This can be particularly useful when describing equations
+   * solutions. However, it can lead to infinite recursion and should be
+   * used with caution.
+   *
+   */
+  useVariations: boolean;
 
   /**
    * If `iterationLimit` > 1, the rules will be repeatedly applied

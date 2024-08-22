@@ -655,8 +655,7 @@ export class BoxedNumber extends _BoxedExpression {
   simplify(options?: Partial<SimplifyOptions>): BoxedExpression {
     const results = simplify(this.canonical.structural, options);
 
-    if (results.length === 0) return this;
-    return results[results.length - 1].value;
+    return results.at(-1)!.value ?? this;
   }
 
   evaluate(options?: EvaluateOptions): BoxedExpression {

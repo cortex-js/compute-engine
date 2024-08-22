@@ -273,7 +273,7 @@ export class BoxedFunction extends _BoxedExpression {
 
     if (this.operator === 'Complex') {
       return [
-        ce._numericValue({ re: this.op1.re ?? 0, im: this.op2.re ?? 0 }),
+        ce._numericValue({ decimal: this.op1.re ?? 0, im: this.op2.re ?? 0 }),
         ce.One,
       ];
     }
@@ -825,24 +825,39 @@ export class BoxedFunction extends _BoxedExpression {
     // Mathematica returns `Log[0]` as `-∞`
     if (this.isZero) return this.engine.NegativeInfinity;
 
+    // ln(exp(x)) = x
     if (this.operator === 'Exp') return this.op1;
-    if (base && this.isEqual(base)) return this.engine.One;
-    if (!base && this.isEqual(this.engine.E)) return this.engine.One;
+
+    // ln_c(c) = 1
+    if (base && this.isSame(base)) return this.engine.One;
+
+    // ln(e) = 1
+    if (!base && this.isSame(this.engine.E)) return this.engine.One;
+
+    // ln(e^x) = x
     if (this.operator === 'Power') {
       const [b, exp] = this.ops;
-      if (b.isEqual(this.engine.E)) return exp;
+      if (b.isSame(this.engine.E)) return exp;
       return exp.mul(b.ln(base));
     }
+
+    // ln_c(a^(1/b)) = ln_c(root(a, b)) = 1/b ln_c(a)
     if (this.operator === 'Root') {
-      const [b, exp] = this.ops;
-      return exp.div(b.ln(base));
+      const [a, b] = this.ops;
+      return b.div(a.ln(base));
     }
+
+    // ln_c(√a) = 1/2 ln_c(a)
     if (this.operator === 'Sqrt') return this.op1.ln(base).div(2);
+
+    // ln_c(a/b) = ln_c(a) - ln_c(b)
     if (this.operator === 'Divide')
       return this.op1.ln(base).sub(this.op2.ln(base));
 
     if (base && base.type === 'integer') {
+      // ln_10(x) -> log(x)
       if (base.re === 10) return this.engine._fn('Log', [this]);
+      // ln_n(x) -> log_n(x)
       return this.engine._fn('Log', [this, base]);
     }
     return this.engine._fn('Ln', [this]);
@@ -881,9 +896,7 @@ export class BoxedFunction extends _BoxedExpression {
     rhs = this.engine.box(rhs);
     if (this === rhs) return true;
 
-    // Put the expressions in a "more canonical" form
-    const lhs = this.simplify();
-    rhs = rhs.simplify();
+    const lhs = this;
 
     const operator = lhs.operator;
     //
@@ -935,15 +948,11 @@ export class BoxedFunction extends _BoxedExpression {
     }
 
     // Not a relational operator. An algebraic expression?
-    // Note: signDiff will attempt to subtract the two expressions to check
-    // if the difference is zero.
+    // Note: signDiff will attempt to subtract the value (N()) of the
+    // two expressions to check if the difference is zero.
     const s = signDiff(lhs, rhs);
     if (s === 0) return true;
     if (s !== undefined) return false;
-
-    // Try to simplify the difference of the expressions
-    const diff = lhs.sub(rhs);
-    if (diff.isZero) return true;
 
     return lhs.isSame(rhs);
   }

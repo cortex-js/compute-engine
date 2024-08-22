@@ -2,7 +2,31 @@ import { ComputeEngine } from '../src/compute-engine';
 
 const ce = new ComputeEngine();
 
-ce.parse('e^x e^{-x}')
+// ce.parse('|\\pi * x|')
+//   .simplify({ rules: '|\\frac{x}{y}| -> \\frac{|x|}{|y|}' })
+//   .print();
+
+ce.parse('e * e^x e^{-x}')
+  .simplify({
+    rules: [
+      {
+        match: 'x^n*x^m',
+        replace: 'x^{n+m}',
+        condition: ({ x, n, m }) =>
+          !!(x.isNotZero || n.add(m).isNegative || n.mul(m).isPositive) &&
+          !!(
+            x.isNonNegative ||
+            n.isInteger ||
+            m.isInteger ||
+            n.add(m).isRational === false
+          ),
+      }, //also check if at least one power is not an even root or sum is an even root
+      // ...ce.getRuleSet('standard-simplification')!.rules,
+    ],
+  })
+  .print();
+
+ce.parse('e * e^x e^{-x}')
   .simplify({
     rules: [
       {

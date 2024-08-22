@@ -27,7 +27,7 @@ export const UNIVARIATE_ROOTS: Rule[] = [
     match: ['Multiply', '_x', '__a'],
     replace: 0,
     id: 'ax',
-    exact: false,
+    useVariations: true, // handle x = 0
     condition: ({ __a }) => !__a.has('_x'),
   },
 
@@ -35,7 +35,7 @@ export const UNIVARIATE_ROOTS: Rule[] = [
   {
     match: ['Add', ['Divide', '_a', '_x'], '__b'],
     replace: Infinity,
-    exact: false,
+    useVariations: true, // Handle a/x = 0
     condition: ({ _a, __b }) => !_a.has('_x') && !__b.has('_x'),
   },
 
@@ -43,7 +43,7 @@ export const UNIVARIATE_ROOTS: Rule[] = [
   {
     match: ['Add', ['Multiply', '_x', '__a'], '__b'],
     replace: ['Divide', ['Negate', '__b'], '__a'],
-    exact: false,
+    useVariations: true, // Handle ax = 0
     condition: ({ __a, __b }) => !__a.has('_x') && !__b.has('_x'),
   },
 
@@ -56,7 +56,7 @@ export const UNIVARIATE_ROOTS: Rule[] = [
       ['Divide', 1, '_n'],
     ],
 
-    exact: false,
+    useVariations: true,
     condition: ({ _a, __b, _n }) =>
       !_a.has('_x') && !__b.has('_x') && !_n.isZero,
   },
@@ -85,7 +85,7 @@ export const UNIVARIATE_ROOTS: Rule[] = [
       ],
       ['Multiply', 2, '__a'],
     ],
-    exact: false,
+    useVariations: true,
     condition: ({ __a, __b, __c }) =>
       !__a.has('_x') && !__b.has('_x') && !__c.has('_x'),
   },
@@ -109,7 +109,7 @@ export const UNIVARIATE_ROOTS: Rule[] = [
       ],
       ['Multiply', 2, '__a'],
     ],
-    exact: false,
+    useVariations: true,
     condition: ({ __a, __b, __c }) =>
       !__a.has('_x') && !__b.has('_x') && !__c.has('_x'),
   },
@@ -122,7 +122,7 @@ export const UNIVARIATE_ROOTS: Rule[] = [
       '__c',
     ],
     replace: ['Divide', ['Ln', ['Negate', ['Divide', '__c', '__a']]], '__b'],
-    exact: false,
+    useVariations: true,
     condition: ({ __a, __c }) =>
       ((!__a.isZero && __c.div(__a).isNegative) ?? false) &&
       !__a.has('_x') &&
@@ -133,7 +133,7 @@ export const UNIVARIATE_ROOTS: Rule[] = [
   {
     match: ['Add', ['Multiply', '__a', ['Exp', '_x']], '__c'],
     replace: ['Ln', ['Negate', ['Divide', '__c', '__a']]],
-    exact: false,
+    useVariations: true,
     condition: ({ __a, __c }) =>
       ((!__a.isZero && __c.div(__a).isNegative) ?? false) &&
       !__a.has('_x') &&

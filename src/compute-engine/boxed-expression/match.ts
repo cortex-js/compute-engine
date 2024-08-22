@@ -48,8 +48,9 @@ function captureWildcard(
  * If `expr` matches pattern, given `substitution` (checks for inconsistency)
  * return `substitution`, amended with additional matched. Otherwise, `null`.
  *
- * When `acceptVariants` and `exact` ar `true`, the function will attempt to match the
- * expression to a variant of the pattern (e.g. `5` to `5+_`).
+ * When `acceptVariants` and `useVariations` are `true`, the function will
+ * attempt to match the expression to a variations of the pattern
+ * (e.g. `5` to `5+_`).
  *
  * Set `acceptVariants` to `false` to prevent recursive matching of variants.
  *
@@ -110,7 +111,7 @@ function matchOnce(
   //
 
   if (pattern.ops) {
-    const exact = options.exact ?? false;
+    const useVariations = options.useVariations ?? false;
     const ce = expr.engine;
 
     let result: BoxedSubstitution | null = null;
@@ -126,15 +127,17 @@ function matchOnce(
         result = matchArguments(expr, pattern.ops, result, options);
     } else if (operator === expr.operator) {
       //
-      // 2. Both heads are strings and they match
+      // 2. Both operator names match
       //
       const def = ce.lookupFunction(operator);
       result = def?.commutative
         ? matchPermutation(expr, pattern, substitution, options)
         : matchArguments(expr, pattern.ops, substitution, options);
-    } else if (!exact) {
+    }
+
+    if (result === null && !useVariations) {
       //
-      // 3. Both heads are strings and they don't match
+      // 3. The operators may or may not match, try some variations
       //
       if (!acceptVariants) return null;
       result = matchVariants(expr, pattern, substitution, options);
@@ -192,7 +195,7 @@ function matchVariants(
   substitution: BoxedSubstitution,
   options: PatternMatchOptions
 ): BoxedSubstitution | null {
-  if (options.exact) return null;
+  if (!options.useVariations) return null;
   const ce = expr.engine;
   const varOptions = { ...options, acceptVariants: false };
 
@@ -275,12 +278,19 @@ function matchVariants(
   }
 
   if (operator === 'Power') {
+    // Square(x) -> Power(x, 2)
     if (pattern.op2.re === 2 && pattern.op2.im === 0) {
       const result = matchVariant('Square', [expr]);
       if (result !== null) return result;
     }
+    // Exp(x) -> Power(E, x)
     if (pattern.op1.symbol === 'ExponentialE') {
       const result = matchVariant('Exp', [expr]);
+      if (result !== null) return result;
+    }
+    // x -> Power(x, 1)
+    {
+      const result = matchVariant('Power', [expr, 1]);
       if (result !== null) return result;
     }
   }
@@ -294,6 +304,7 @@ function matchPermutation(
   substitution: BoxedSubstitution,
   options: PatternMatchOptions
 ): BoxedSubstitution | null {
+  console.assert(expr.operator === pattern.operator);
   const patterns = permutations<BoxedExpression>(pattern.ops!);
   for (const pat of patterns) {
     const result = matchArguments(expr, pat, substitution, options);
@@ -410,8 +421,8 @@ export function match(
   // Default options
   const opts = {
     recursive: options?.recursive ?? false,
-    exact: options?.exact ?? false,
-    acceptVariants: !(options?.exact ?? false),
+    useVariations: options?.useVariations ?? false,
+    acceptVariants: !(options?.useVariations ?? false),
   };
   const substitution = options?.substitution ?? {};
 

@@ -125,11 +125,11 @@ export function signDiff(
   const lhsN = lhs.N();
   const rhsN = rhs.N();
 
-  if (lhs.isNumberLiteral && lhs.im !== 0) return undefined;
-  if (rhs.isNumberLiteral && rhs.im !== 0) return undefined;
-
   // Structural equality?
   if (lhsN.isSame(rhsN)) return 0;
+
+  if (lhs.isNumberLiteral && lhs.im !== 0) return undefined;
+  if (rhs.isNumberLiteral && rhs.im !== 0) return undefined;
 
   const lhsNum = lhsN.numericValue;
   const rhsNum = rhsN.numericValue;

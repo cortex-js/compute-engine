@@ -213,7 +213,7 @@ export class BoxedSymbol extends _BoxedExpression {
     const ce = this.engine;
 
     if (this.symbol === 'ImaginaryUnit')
-      return [ce._numericValue({ re: 0, im: 1 }), ce.One];
+      return [ce._numericValue({ decimal: 0, im: 1 }), ce.One];
     if (
       this.symbol === 'PositiveInfinity' ||
       (this.isInfinity && this.isPositive)
@@ -457,7 +457,6 @@ export class BoxedSymbol extends _BoxedExpression {
       | boolean
       | string
       | Decimal
-      | Complex
       | { re: number; im: number }
       | { num: number; denom: number }
       | number[]
@@ -493,7 +492,7 @@ export class BoxedSymbol extends _BoxedExpression {
     }
 
     if (value !== undefined) {
-      const boxedValue = ce.box(value as Complex | Decimal | BoxedExpression);
+      const boxedValue = ce.box(value as Decimal | BoxedExpression);
       v = boxedValue.evaluate();
     }
 

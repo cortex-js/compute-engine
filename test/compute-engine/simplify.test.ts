@@ -15,12 +15,7 @@ const RULES_USED: string[] = [];
 const RULES: Rule[] = [
   '(-x)^n:even -> x^n',
   '(-x)^n:odd -> -(x^n)',
-  {
-    match: '(-x)^{n/m}',
-    replace: 'x^{n/m}',
-    condition: ({ n, m }) => n.isEven === true && m.isOdd === true,
-  },
-
+  '(-x)^{n/m} -> x^{n/m}; n:even, m:odd',
   {
     match: '(-x)^{n/m}',
     replace: '-x^{n/m}',
@@ -491,7 +486,7 @@ const RULES: Rule[] = [
   {
     match: '\\ln(x^{n/k})',
     replace: 'n*\\ln(x)/k',
-    condition: ({ c, n }) => c.isNonNegative || n.isOdd === true,
+    condition: ({ x, n }) => x.isNonNegative || n.isOdd === true,
   },
   {
     match: '\\ln(x^{n/k})',
@@ -1140,8 +1135,8 @@ const RULE_TEST_CASES: TestCase[] = [
     //
   `,
   ],
-  ['e e^x e^{-x}', 'e'], // 🙁 e * e^x * e^(-x)
-  ['e^x e^{-x}', 1], // up to 👍expand
+  ['e e^x e^{-x}', 'e'], // up to 👍x^n*x^m -> x^{n+m}; ({ x, n, m }) => (x.isNotZero === true ||             n.add(m).isNegative === true ||             n.mul(m).isPositive === true) &&             (n.isInteger === true ||                 m.isInteger === true ||                 n.add(m).isRational === false ||                 x.isNonNegative === true)
+  ['e^x e^{-x}', 1], // 👍 x^n*x^m -> x^{n+m}; ({ x, n, m }) => (x.isNotZero === true ||             n.add(m).isNegative === true ||             n.mul(m).isPositive === true) &&             (n.isInteger === true ||                 m.isInteger === true ||                 n.add(m).isRational === false ||                 x.isNonNegative === true)
   ['\\sqrt[4]{16b^{4}}', '2b'],
 
   [
@@ -1177,7 +1172,7 @@ const RULE_TEST_CASES: TestCase[] = [
   ],
   ['x*y+(x+1)*y', '2xy+y'],
   ['(x+1)^2-x^2', '2x+1'],
-  ['2*(x+h)^2-2*x^2', '4xh+2h^2'], // 🙁 -2x^2 + 2(h + x)^2
+  ['2*(x+h)^2-2*x^2', '4xh+2h^2'],
 
   [
     `
@@ -1197,7 +1192,7 @@ const RULE_TEST_CASES: TestCase[] = [
   ['x/(a/\\pi)', '\\pi * x/a'],
   ['x/(a/b)', 'x/(a/b)'],
   ['(x/y)/(\\pi/2)', '(2*x)/(\\pi * y)'],
-  ['2/3*5/x', '10/(3*x)'],
+  ['2/3*5/x', '10/(3*x)'], // 🙁 (2 * 5) / (3x)
   ['a/b*c/d', '(a*c)/(b*d)'],
   ['2/\\pi * \\pi', '2'],
   ['x/1', 'x'],
@@ -1237,8 +1232,8 @@ const RULE_TEST_CASES: TestCase[] = [
     //
   `,
   ],
-  ['\\ln(xy)-\\ln(x)', '\\ln(y)'], // up to 👍(x) => {         if (x.operator === 'Divide')             return { value: x.op1.div(x.op2), because: 'division' };         if (x.operator === 'Rational' && x.nops === 2)             return { value: x.op1.div(x.op2), because: 'rational' };         return undefined;     }
-  ['\\ln(y/x)+\\ln(x)', '\\ln(x*y/x)'], // 👍 \ln(x) + \ln(y) -> \ln(xy)
+  ['\\ln(xy)-\\ln(x)', '\\ln(y)'], // 👍 \ln(x) - \ln(y) -> \ln(x/y)
+  ['\\ln(y/x)+\\ln(x)', '\\ln(x*y/x)'], // 🙁 -ln(x) + ln(x * y)
   ['e^{\\ln(x)+x}', 'x*e^x'], // 👍 e^{\ln(x)+y} -> x*e^y
   ['e^{\\ln(x)-2*x}', 'x*e^{-2*x}'], // 👍 e^{\ln(x)+y} -> x*e^y
   ['e^\\ln(x)', 'x'], // 👍 e^\ln(x) -> x
@@ -1253,8 +1248,8 @@ const RULE_TEST_CASES: TestCase[] = [
     //
   `,
   ],
-  ['\\log_c(xy)-\\log_c(x)', '\\log_c(y)'], // up to 👍(x) => {         if (x.operator === 'Divide')             return { value: x.op1.div(x.op2), because: 'division' };         if (x.operator === 'Rational' && x.nops === 2)             return { value: x.op1.div(x.op2), because: 'rational' };         return undefined;     }
-  ['\\log_c(y/x)+\\log_c(x)', '\\log_c(xy/x)'], // 👍 \log_c(x) + \log_c(y) -> \log_c(xy)
+  ['\\log_c(xy)-\\log_c(x)', '\\log_c(y)'], // 👍 \log_c(x) - \log_c(y) -> \log_c(x/y)
+  ['\\log_c(y/x)+\\log_c(x)', '\\log_c(xy/x)'], // 🙁 -log(x, c) + ln(x * y)
   ['c^{\\log_c(x)+x}', 'x c^x'], // 👍 c^{\log_c(x)+y} -> x*c^y
   ['c^{\\log_c(x)-2*x}', 'x c^{-2*x}'], // 👍 c^{\log_c(x)+y} -> x*c^y
   ['c^\\log_c(x)', 'x'], // 👍 c^{\log_c(x)} -> x
@@ -1304,8 +1299,8 @@ const RULE_TEST_CASES: TestCase[] = [
   ['|-x|', '|x|'], // 👍 |-x| -> |x|
   ['|-\\pi|', '\\pi'],
   ['|\\pi * x|', '\\pi * x'], // 🙁 pi * |x|
-  ['|\\frac{x}{\\pi}|', '\\frac{|x|}{\\pi}'], // 👍 |\frac{x}{y}| -> \frac{|x|}{y}; ({ y }) => y.isNonNegative === true
-  ['|\\frac{2}{x}|', '\\frac{2}{|x|}'], // 👍 |\frac{x}{y}| -> \frac{x}{|y|}; ({ x }) => x.isNonNegative === true
+  ['|\\frac{x}{\\pi}|', '\\frac{|x|}{\\pi}'], // 👍 |\frac{x}{y}| -> \frac{|x|}{|y|}
+  ['|\\frac{2}{x}|', '\\frac{2}{|x|}'], // 👍 |\frac{x}{y}| -> \frac{|x|}{|y|}
   ['|x|^4', 'x^4'], // 👍 |x|^n -> x^n; ({ n }) => n.isEven === true
   ['|x^3|', '|x|^3'], // 👍 |x^n| -> |x|^n; ({ n }) => n.isOdd === true || n.isRational === false
   ['|x|^{4/3}', 'x^{4/3}'], // 👍 |x|^n -> x^n; ({ n }) => n.isEven === true
@@ -1510,8 +1505,8 @@ const RULE_TEST_CASES: TestCase[] = [
   ['\\frac{2}{x\\pi^{-2}}', '\\frac{2}{x} \\pi^2'], // 🙁 2 / (x * pi^(-2))
   ['(3/\\pi)^{-1}', '\\pi/3'],
   ['(3/x)^{-1}', '(3/x)^{-1}'], // 🙁 with all rules: x / 3
-  ['(x/\\pi)^{-3}', '\\pi^3 / x^3'], // 🙁 (x / pi)^(-3)
-  ['(x/y)^{-3}', '(x/y)^{-3}'],
+  ['(x/\\pi)^{-3}', '\\pi^3 / x^3'],
+  ['(x/y)^{-3}', '(x/y)^{-3}'], // 🙁 with all rules: y^3 / x^3
   ['(x^2/\\pi^3)^{-2}', '\\pi^6/x^4'],
 
   [
@@ -1542,7 +1537,7 @@ const RULE_TEST_CASES: TestCase[] = [
   ['x^{-2}*x', '1/x'],
   ['x^{-1/3}*x', 'x^{-1/3}*x'], // 🙁 with all rules: x^(2/3)
   ['\\pi^{-2}*\\pi', '1/\\pi'],
-  ['\\pi^{-0.2}*\\pi', '\\pi^{0.8}'], // up to 👍expand
+  ['\\pi^{-0.2}*\\pi', '\\pi^{0.8}'], // 👍 x^n*x -> x^{n+1}; ({ x, n }) => x.isNotZero === true || n.isPositive === true || x.isLess(-1) === true
   ['\\sqrt[3]{x}*x', 'x^{4/3}'],
 
   [
@@ -1571,8 +1566,8 @@ const RULE_TEST_CASES: TestCase[] = [
   ],
   ['x^2/x^3', '1/x'],
   ['x^{-1}/x^3', '1/x^4'], // 👍 (x) => {         if (x.operator === 'Divide')             return { value: x.op1.div(x.op2), because: 'division' };         if (x.operator === 'Rational' && x.nops === 2)             return { value: x.op1.div(x.op2), because: 'rational' };         return undefined;     }
-  ['x/x^{-1}', 'x/x^{-1}'], // 🙁 with all rules: x * x
-  ['\\pi / \\pi^{-1}', '\\pi^2'], // 👍 x/x^n -> 1/x^{n-1}; ({ x, n }) => x.isNotZero || n.isGreater(1) === true
+  ['x/x^{-1}', 'x/x^{-1}'], // 🙁 with all rules: x^2
+  ['\\pi / \\pi^{-1}', '\\pi^2'],
   ['\\pi^{0.2}/\\pi^{0.1}', '\\pi^{0.1}'], // 🙁 pi^(0.3)
   ['x^{\\sqrt{2}}/x^3', 'x^{\\sqrt{2}-3}'], // 🙁 x^(sqrt(2)) / x^3
 
@@ -1609,10 +1604,10 @@ const RULE_TEST_CASES: TestCase[] = [
   ],
   ['\\ln(x^3)', '3\\ln(x)'],
   ['\\ln(x^\\sqrt{2})', '\\sqrt{2} \\ln(x)'],
-  ['\\ln(x^2)', '2 \\ln(|x|)'], // 🙁 ln(x^2)
-  ['\\ln(x^{2/3})', '2/3 \\ln(|x|)'], // 🙁 ln(x^(2/3))
-  ['\\ln(\\pi^{2/3})', '2/3 \\ln(\\pi)'], // 🙁 ln(pi^(2/3))
-  ['\\ln(x^{7/4})', '7/4 \\ln(x)'], // 🙁 ln(x^(7/4))
+  ['\\ln(x^2)', '2 \\ln(|x|)'], // 👍 \ln(x^n) -> n*\ln(|x|); ({ n }) => n.isEven === true
+  ['\\ln(x^{2/3})', '2/3 \\ln(|x|)'], // 🙁 (2ln(|x|)) / 3
+  ['\\ln(\\pi^{2/3})', '2/3 \\ln(\\pi)'], // 🙁 (2ln(pi)) / 3
+  ['\\ln(x^{7/4})', '7/4 \\ln(x)'], // 🙁 (7ln(|x|)) / 4
   ['\\ln(\\sqrt{x})', '\\ln(x)/2'],
 
   [
@@ -1624,11 +1619,10 @@ const RULE_TEST_CASES: TestCase[] = [
   ],
   ['\\log_4(x^3)', '3\\log_4(x)'],
   ['\\log_3(x^\\sqrt{2})', '\\sqrt{2} \\log_3(x)'],
-  ['\\log_4(x^2)', '2\\log_4(|x|)'], // 🙁 log(x^2, 4)
-  ['\\log_4(x^{2/3})', '2/3 \\log_4(|x|)'], // 🙁 log(x^(2/3), 4)
-  ['\\log_4(x^{7/4})', '7/4 \\log_4(x)'], // 🙁 log(x^(7/4), 4)
+  ['\\log_4(x^2)', '2\\log_4(|x|)'], // 👍 \log_c(x^n) -> n*\log_c(|x|); ({ n }) => n.isEven === true
+  ['\\log_4(x^{2/3})', '2/3 \\log_4(|x|)'], // 🙁 (2log(|x|, 4)) / 3
+  ['\\log_4(x^{7/4})', '7/4 \\log_4(x)'], // 🙁 (7log(|x|, 4)) / 4
 ];
-
 describe('SIMPLIFY', () => {
   console.info('Canonicalization test cases\n\n');
   for (const test of CANONICALIZATION_TEST_CASES) runTestCase(test);
@@ -1738,13 +1732,13 @@ function runTestCase(test: TestCase, rules?: BoxedRuleSet): void {
   const b =
     typeof expected === 'string' ? ce.parse(expected) : ce.box(expected);
 
-  let result = tryRules(a, b, rules);
   if (comment?.startsWith('stop')) {
     let a1 = a.simplify({ rules });
     const eq = a1.isSame(b);
     debugger;
     a1 = a.simplify({ rules });
   }
+  let result = tryRules(a, b, rules);
 
   console.info(result ? `${row} // ${result}` : row);
   // test(row, () => expect(a.simplify().json).toEqual(b.json));
