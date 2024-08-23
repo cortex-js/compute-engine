@@ -21,6 +21,7 @@ import type {
   Rule,
   RuntimeScope,
   SemiBoxedExpression,
+  Sign,
   SimplifyOptions,
   Substitution,
   Type,
@@ -480,6 +481,9 @@ export abstract class _BoxedExpression implements BoxedExpression {
   get sgn(): -1 | 0 | 1 | undefined | typeof NaN {
     return NaN;
   }
+  // get sgn(): Sign | undefined {
+  //   return 'unsigned';
+  // }
 
   get shape(): number[] {
     return [];

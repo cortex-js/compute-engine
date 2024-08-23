@@ -215,7 +215,7 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
             op,
             (x) => ce.chop(x),
             (x) => ce.chop(x),
-            (x) => ce.chop(x)
+            (x) => ce.complex(ce.chop(x.re), ce.chop(x.im))
           );
         },
       },

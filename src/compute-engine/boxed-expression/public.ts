@@ -130,6 +130,25 @@ export type Type =
   | 'error'
   | 'nothing';
 
+export type Sign =
+  /** The expression is equal to 0 */
+  | 'zero'
+  /** The expression is > 0 */
+  | 'positive'
+  /** The expression is < 0 */
+  | 'negative'
+  /** The expression is >= 0 */
+  | 'non-negative'
+  /** The expression is <= 0 */
+  | 'non-positive'
+  /** The expression is not equal to 0, but it's neither positive nor negative */
+  | 'not-zero'
+  /** The expression is ≠ 0 */
+  | 'real-not-zero'
+  /** The expression has no imaginary part ?? */
+  | 'real'
+  /** The expression has an imaginary part */
+  | 'unsigned';
 /**
  * :::info[THEORY OF OPERATIONS]
  *
@@ -869,6 +888,7 @@ export interface BoxedExpression {
    * @category Numeric Expression
    *
    */
+  // readonly sgn: Sign | undefined;
   readonly sgn: number | undefined;
 
   /** If the expressions cannot be compared, return `undefined`
@@ -2790,6 +2810,10 @@ export type FunctionSignature = {
   ) => BoxedExpression;
 
   /** Return the sign of the function expression. */
+  // sgn?: (
+  //   args: ReadonlyArray<BoxedExpression>,
+  //   options: { engine: IComputeEngine }
+  // ) => Sign | undefined;
   sgn?: (
     args: ReadonlyArray<BoxedExpression>,
     options: { engine: IComputeEngine }
