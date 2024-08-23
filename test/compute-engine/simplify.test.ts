@@ -10,6 +10,785 @@ import { simplify, exprToString } from '../utils';
 
 export const ce = new ComputeEngine();
 
+/**
+ * Each test case is a tuple of two expressions:
+ * - The first expression is the input expression to simplify.
+ * - The second expression is the expected simplified expression.
+ *
+ * A third, optional element, is a comment to describe the test case.
+ * If the comment starts with the keyword "skip", the test case will be skipped.
+ * If the comment starts with the keyword "stop", the debugger will stop at this test case.
+ */
+export type TestCase =
+  | [
+      input: Expression | string,
+      expected: Expression | string,
+      comment?: string,
+    ]
+  | [heading: string];
+
+/**
+ * A set of test cases for the simplification of expressions.
+ *
+ * If an entry is followed by a comment:
+ * - if the comment starts with "🙁", it means the result of the simplification was not the expected result.
+ * - if the comment starts with "👍", it means the result of the simplification was the expected result and the rule that applied is indicated.
+ * - If there is no comment, the result was as expected, but only the built-in simplifications were applied.
+ *
+ */
+const CANONICALIZATION_TEST_CASES: TestCase[] = [
+  [
+    `
+      // Arithmetic operations
+      // - integers and float are simplified
+      // - rational and square root of integers are preserved
+      // (same behavior as Mathematica)
+      //
+    `,
+  ],
+  ['-23', -23, 'Integers should stay as is'],
+  ['0.3', 0.3, 'Floating point should stay as is'],
+  ['3/4', '3/4', 'Rationals are not converted to float'],
+  ['6/8', '3/4', 'Rationals are reduced'],
+  ['3/4 + 2', '11/4', 'Rational are reduced, but preserved as exact values'],
+  ['3/4 + 5/7', '41/28', 'Rational are reduced, but preserved as exact values'],
+  ['\\sqrt3', '\\sqrt3', 'Square root of integers are not converted to float'],
+  [
+    '\\sqrt{3.1}',
+    { num: '1.76068168616590091458' },
+    'Square root of float are computed',
+  ],
+  ['x+0', 'x', 'Zero is removed from addition'],
+  ['-1234 - 5678', -6912],
+  ['1.234 + 5678', 5679.234],
+  ['1.234 + 5.678', 6.912],
+  ['1.234 + 5.678 + 1.0001', 7.9121],
+  ['2 + 4', 6],
+  ['1/2 + 0.5', 1, 'Floating point and exact are simplified'],
+  ['\\sqrt3 + 3', '\\sqrt3 + 3', 'stay exact'],
+  ['\\sqrt3 + 1/2', '\\sqrt3 + 1/2', 'stay exact'],
+  ['\\sqrt3 + 0.3', { num: '2.0320508075688772' }],
+  ['3.1/2.8', '1.10714285714285714286', 'Floating point division'],
+  [
+    ' 2x\\times x \\times 3 \\times x',
+    '6x^3',
+    'Product of x should be simplified',
+  ],
+  ['2(13.1+x)', '26.2+2x', 'Product of floating point should be simplified'],
+  ['2(13.1+x) - 26.2 - 2x', 0],
+
+  [
+    `
+      //
+      // Numeric literals
+      //
+      `,
+  ],
+  ['\\sqrt3 - 2', '\\sqrt3 - 2', 'Should stay exact'],
+  ['\\frac{\\sqrt5+1}{4}', '\\frac{\\sqrt5}{4}+\\frac14', 'Should stay exact'],
+
+  [
+    `
+      //
+      // Addition and Subtraction
+      //
+    `,
+  ],
+  ['-2+x', 'x-2'],
+  ['x-(-1)', 'x+1'],
+  ['x+(-1)', 'x-1'],
+
+  [
+    `
+      //
+      // Multiplication
+      //
+    `,
+  ],
+  ['1*x', 'x'],
+  ['-1*x', '-x'],
+  ['(-2)*(-x)', '2*x'],
+  ['2*(-x)', '-2*x'],
+
+  [
+    `
+      //
+      // Combine Like terms
+      //
+    `,
+  ],
+  ['x+2*x', '3*x'],
+  ['2*\\pi * x^2-\\pi * x^2+2*\\pi', '\\pi * x^2+ 2\\pi'],
+
+  [
+    `
+      //
+      // Power of Fraction in Denominator
+      //
+    `,
+  ],
+  ['x/(y/2)^3', '(8*x)/y^3'],
+  ['x/(2/y)^3', 'x/(2/y)^3'],
+
+  [
+    `
+      //
+      // Double Powers
+      //
+    `,
+  ],
+  ['(x^1)^3', 'x^3'],
+  ['(x^2)^{-2}', 'x^{-4}'],
+  ['(x^{-2})^2', 'x^{-4}'],
+  [
+    '(x^{-2})^{-2}',
+    'x^4',
+    'Not defined at x=0, but we assume variables represent values in the general domain where the operation is valid ',
+  ],
+  ['(x^{1/3})^8', 'x^{8/3}'],
+  ['(x^3)^{2/5}', 'x^{6/5}'],
+  ['(x^{\\sqrt{2}})^3', 'x^{3\\sqrt{2}}'],
+
+  [
+    `
+      //
+      // Ln/Log
+      //
+    `,
+  ],
+  ['\\ln(3)+\\ln(\\frac{1}{3})', 0],
+  ['\\frac{\\ln(9)}{\\ln(3)}', 2],
+  ['\\ln(e^x/y)', 'x-\\ln(y)'],
+  ['\\ln(y/e^x)', '\\ln(y)-x'],
+  ['\\ln(0)', NaN],
+  ['\\ln(1/x)', '-\\ln(x)'],
+  ['\\ln(1)', 0],
+  ['\\ln(e)', 1],
+  ['\\ln(e^x)', 'x'],
+
+  [
+    `
+      //
+      // Others
+      //
+    `,
+  ],
+  ['2\\left(13.1+x\\right)-\\left(26.2+2x\\right)', 0],
+  ['\\sqrt{3}(\\sqrt2x + x)', '(\\sqrt3+\\sqrt6)x'],
+  [['Add', 1, 2, 1.0001], 4.0001],
+];
+
+const RULE_TEST_CASES: TestCase[] = [
+  [
+    `
+      //
+      // Other simplifications
+      //
+    `,
+  ],
+  ['e e^x e^{-x}', 'e'], // up to 👍x^n*x^m -> x^{n+m}; ({ x, n, m }) => (x.isNotZero === true ||             n.add(m).isNegative === true ||             n.mul(m).isPositive === true) &&             (n.isInteger === true ||                 m.isInteger === true ||                 n.add(m).isRational === false ||                 x.isNonNegative === true)
+  ['e^x e^{-x}', 1], // 👍 x^n*x^m -> x^{n+m}; ({ x, n, m }) => (x.isNotZero === true ||             n.add(m).isNegative === true ||             n.mul(m).isPositive === true) &&             (n.isInteger === true ||                 m.isInteger === true ||                 n.add(m).isRational === false ||                 x.isNonNegative === true)
+  ['\\sqrt[4]{16b^{4}}', '2b'],
+
+  [
+    `
+      //
+      // Negative Signs and Powers
+      //
+    `,
+  ],
+  ['(-x)^3', '-(x^3)'],
+  ['(-x)^{4/3}', 'x^{4/3}'], // 👍 (-x)^n:even -> x^n
+  ['(-x)^4', 'x^4'],
+  ['(-x)^{3/5}', '-(x^{3/5})'],
+  ['1/x-1/(x+1)', '1/(x(x+1))'], // 🙁 1 / (x^2 + x)
+  ['\\sqrt[3]{-2}', '-\\sqrt[3]{2}'], // 🙁 NaN
+
+  [
+    `
+      //
+      // Common Denominator
+      //
+    `,
+  ],
+  ['3/x-1/x', '2/x'],
+  ['1/(x+1)-1/x', '-1/(x(x+1))'], // 🙁 -1 / (x^2 + x)
+
+  [
+    `
+      //
+      // Distribute
+      //
+    `,
+  ],
+  ['x*y+(x+1)*y', '2xy+y'],
+  ['(x+1)^2-x^2', '2x+1'],
+  ['2*(x+h)^2-2*x^2', '4xh+2h^2'],
+
+  [
+    `
+      //
+      // Division
+      //
+    `,
+  ],
+  ['x/x', 'x/x'], // 🙁 with all rules: 1
+  ['\\pi/\\pi', 1],
+  ['(\\pi+1)/(\\pi+1)', 1],
+  ['1/(1/0)', NaN],
+  ['1/(1/\\pi)', '\\pi'],
+  ['1/(1/x)', '1/(1/x)'],
+  ['y/(1/2)', '2*y'],
+  ['x/(1/(-\\pi))', '-\\pi * x'],
+  ['x/(a/\\pi)', '\\pi * x/a'],
+  ['x/(a/b)', 'x/(a/b)'],
+  ['(x/y)/(\\pi/2)', '(2*x)/(\\pi * y)'],
+  ['2/3*5/x', '10/(3*x)'], // 🙁 (2 * 5) / (3x)
+  ['a/b*c/d', '(a*c)/(b*d)'],
+  ['2/\\pi * \\pi', '2'],
+  ['x/1', 'x'],
+  ['(-1)/x', '-1/x'],
+  ['(-2)/(-x)', '2/x'],
+  ['2/(-x)', '-2/x'],
+
+  [
+    `
+      //
+      // Operations Involving 0
+      //
+    `,
+  ],
+  ['0*\\pi', 0],
+  ['x-0', 'x'],
+  ['\\sin(x)+0', '\\sin(x)'],
+  ['0/0', NaN],
+  ['2/0', NaN],
+  ['0^\\pi', 0], // 🙁 0^(pi)
+  ['0^{-2}', NaN], // 🙁 +oo
+  ['0^{-\\pi}', NaN], // 🙁 0^(-pi)
+  ['0^0', NaN], // 🙁 1
+  ['2^0', 1],
+  ['\\pi^0', 1],
+  ['0/2', 0],
+  ['\\sqrt{0}', 0],
+  ['\\sqrt[n]{0}', 0], // 🙁 root(0)(n)
+  ['e^0', 1],
+  ['|0|', 0],
+  ['-0', 0],
+
+  [
+    `
+      //
+      // Ln
+      //
+    `,
+  ],
+  ['\\ln(xy)-\\ln(x)', '\\ln(y)'], // 👍 \ln(x) - \ln(y) -> \ln(x/y)
+  ['\\ln(y/x)+\\ln(x)', '\\ln(x*y/x)'], // 🙁 -ln(x) + ln(x * y)
+  ['e^{\\ln(x)+x}', 'x*e^x'], // 👍 e^{\ln(x)+y} -> x*e^y
+  ['e^{\\ln(x)-2*x}', 'x*e^{-2*x}'], // 👍 e^{\ln(x)+y} -> x*e^y
+  ['e^\\ln(x)', 'x'], // 👍 e^\ln(x) -> x
+  ['e^{3\\ln(x)}', 'x^3'], // 👍 e^{\ln(x)*y} -> x^y
+  ['e^{\\ln(x)/3}', 'x^{1/3}'], // 👍 e^{\ln(x)/y} -> x^{1/y}
+  ['\\ln(e^x*y)', 'x+\\ln(y)'], // 👍 \ln(e^x*y) -> x+\ln(y)
+
+  [
+    `
+      //
+      // log
+      //
+    `,
+  ],
+  ['\\log_c(xy)-\\log_c(x)', '\\log_c(y)'], // 👍 \log_c(x) - \log_c(y) -> \log_c(x/y)
+  ['\\log_c(y/x)+\\log_c(x)', '\\log_c(xy/x)'], // 🙁 -log(x, c) + ln(x * y)
+  ['c^{\\log_c(x)+x}', 'x c^x'], // 👍 c^{\log_c(x)+y} -> x*c^y
+  ['c^{\\log_c(x)-2*x}', 'x c^{-2*x}'], // 👍 c^{\log_c(x)+y} -> x*c^y
+  ['c^\\log_c(x)', 'x'], // 👍 c^{\log_c(x)} -> x
+  ['c^{3\\log_c(x)}', 'x^3'], // 👍 c^{\log_c(x)*y} -> x^y
+  ['c^{\\log_c(x)/3}', 'x^{1/3}'], // 👍 c^{\log_c(x)/y} -> x^{1/y}
+  ['\\log_c(c^x*y)', 'x+\\log_c(y)'], // 👍 \log_c(c^x*y) -> x+\log_c(y)
+  ['\\log_c(c^x/y)', 'x-\\log_c(y)'], // 👍 \log_c(c^x/y) -> x-\log_c(y)
+  ['\\log_c(y/c^x)', '\\log_c(y)-x'], // 👍 \log_c(y/c^x) -> \log_c(y)-x
+  ['\\log_c(c)', 1], // 👍 \log_c(c) -> 1
+  ['\\log_c(c^x)', 'x'], // 👍 \log_c(c^x) -> x
+  ['\\log_c(0)', NaN], // 👍 \log_c(0) -> \operatorname{NaN}
+  ['\\log_c(1)', 0],
+  ['\\log_2(1/x)', '-\\log_2(x)'],
+
+  [
+    `
+      //
+      // Change of Base
+      //
+    `,
+  ],
+  ['\\log_c(a)*\\ln(a)', '\\ln(c)'], // 👍 \log_c(a)*\ln(a) -> \ln(c)
+  ['\\log_c(a)/\\log_c(b)', '\\ln(a)/\\ln(b)'], // 👍 \log_c(a)/\log_c(b) -> \ln(a)/\ln(b)
+  ['\\log_c(a)/\\ln(a)', '1/\\ln(c)'], // 👍 \log_c(a)/\ln(a) -> 1/\ln(c)
+  ['\\ln(a)/\\log_c(a)', '\\ln(c)'], // 👍 \ln(a)/\log_c(a) -> \ln(c)
+
+  [
+    `
+      //
+      // Logs and Infinity
+    `,
+  ],
+  ['\\ln(\\infty)', '\\infty'],
+  ['\\log_4(\\infty)', '\\infty'],
+  ['\\log_{0.5}(\\infty)', '-\\infty'], // 👍 \log_c(\infty) -> -\infty; ({ c }) => c.isLess(1) === true && c.isPositive === true
+
+  [
+    `
+      //
+      // Absolute Value
+      //
+    `,
+  ],
+  ['|\\pi|', '\\pi'],
+  ['|\\infty|', '\\infty'],
+  ['|-\\infty|', '\\infty'],
+  ['|-x|', '|x|'], // 👍 |-x| -> |x|
+  ['|-\\pi|', '\\pi'],
+  ['|\\pi * x|', '\\pi * x'], // 🙁 pi * |x|
+  ['|\\frac{x}{\\pi}|', '\\frac{|x|}{\\pi}'], // 👍 |\frac{x}{y}| -> \frac{|x|}{|y|}
+  ['|\\frac{2}{x}|', '\\frac{2}{|x|}'], // 👍 |\frac{x}{y}| -> \frac{|x|}{|y|}
+  ['|x|^4', 'x^4'], // 👍 |x|^n -> x^n; ({ n }) => n.isEven === true
+  ['|x^3|', '|x|^3'], // 👍 |x^n| -> |x|^n; ({ n }) => n.isOdd === true || n.isRational === false
+  ['|x|^{4/3}', 'x^{4/3}'], // 👍 |x|^n -> x^n; ({ n }) => n.isEven === true
+  ['|x^{3/5}|', '|x|^{3/5}'], // 🙁 |x^(3/5)|
+
+  [
+    `
+      //
+      // Even Functions and Absolute Value
+      //
+    `,
+  ],
+  ['\\cos(|x+2|)', '\\cos(x+2)'], // 👍 \cos(|x|) -> \cos(x)
+  ['\\sec(|x+2|)', '\\sec(x+2)'], // 👍 \sec(|x|) -> \sec(x)
+  ['\\cosh(|x+2|)', '\\cosh(x+2)'], // 👍 \cosh(|x|) -> \cosh(x)
+  ['\\sech(|x+2|)', '\\sech(x+2)'], // 👍 \sech(|x|) -> \sech(x)
+
+  [
+    `
+      //
+      // Odd Functions and Absolute Value
+      //
+    `,
+  ],
+  ['|\\sin(x)|', '\\sin(|x|)'], // 👍 |\sin(x)| -> \sin(|x|)
+  ['|\\tan(x)|', '\\tan(|x|)'], // 👍 |\tan(x)| -> \tan(|x|)
+  ['|\\cot(x)|', '\\cot(|x|)'], // 👍 |\cot(x)| -> \cot(|x|)
+  ['|\\csc(x)|', '\\csc(|x|)'], // 👍 |\csc(x)| -> \csc(|x|)
+  ['|\\arcsin(x)|', '\\arcsin(|x|)'], // 👍 |\arcsin(x)| -> \arcsin(|x|)
+  ['|\\arctan(x)|', '\\arctan(|x|)'], // 👍 |\arctan(x)| -> \arctan(|x|)
+  ['|\\arcctg(x)|', '\\arcctg(|x|)'], // 👍 |\arcctg(x)| -> \arcctg(|x|)
+  ['|\\arccsc(x)|', '\\arccsc(|x|)'], // 👍 |\arccsc(x)| -> \arccsc(|x|)
+  ['|\\sinh(x)|', '\\sinh(|x|)'], // 👍 |\sinh(x)| -> \sinh(|x|)
+  ['|\\tanh(x)|', '\\tanh(|x|)'], // 👍 |\tanh(x)| -> \tanh(|x|)
+  ['|\\coth(x)|', '\\coth(|x|)'], // 👍 |\coth(x)| -> \coth(|x|)
+  ['|\\csch(x)|', '\\csch(|x|)'], // 👍 |\csch(x)| -> \csch(|x|)
+  ['|\\arsinh(x)|', '\\arsinh(|x|)'], // 👍 |\arsinh(x)| -> \arsinh(|x|)
+  ['|\\artanh(x)|', '\\artanh(|x|)'], // 👍 |\artanh(x)| -> \artanh(|x|)
+  ['|\\operatorname{arcoth}(x)|', '\\operatorname{arcoth}(|x|)'], // 👍 |\arcctg(x)| -> \arcctg(|x|)
+  ['|\\arcsch(x)|', '\\arcsch(|x|)'], // 👍 |\arcsch(x)| -> \arcsch(|x|)
+
+  [
+    `
+      //
+      // Powers and Infinity
+      //
+    `,
+  ],
+  ['2^\\infty', '\\infty'],
+  ['0.5^\\infty', 0],
+  ['\\pi^\\infty', '\\infty'],
+  ['e^\\infty', '\\infty'],
+  ['\\pi^{-\\infty}', 0],
+  ['e^{-\\infty}', 0],
+  ['2^{-\\infty}', 0],
+  ['(1/2)^{-\\infty}', '\\infty'],
+  ['(-\\infty)^4', '\\infty'],
+  ['(\\infty)^{1.4}', '\\infty'],
+  ['(-\\infty)^{1/3}', '-\\infty'], // 🙁 +oo
+  ['(-\\infty)^{-1}', 0],
+  ['(\\infty)^{-2}', 0],
+  ['1^{-\\infty}', NaN],
+  ['1^{\\infty}', NaN],
+  ['\\infty^0', NaN], // 🙁 1
+  ['\\sqrt[4]{\\infty}', '\\infty'],
+
+  [
+    `
+      //
+      // Multiplication and Infinity
+      //
+    `,
+  ],
+  ['0*\\infty', NaN],
+  ['0*(-\\infty)', NaN],
+  ['0.5*\\infty', '\\infty'],
+  ['(-0.5)*(-\\infty)', '\\infty'], // 🙁 -oo
+  ['(-0.5)*\\infty', '-\\infty'],
+  ['\\pi * (-\\infty)', '-\\infty'], // 🙁 +oo
+
+  [
+    `
+      //
+      // Division and Infinity
+      //
+    `,
+  ],
+  ['(-\\infty)/\\infty', NaN],
+  ['\\infty/0.5', '\\infty'],
+  ['\\infty/(-2)', '-\\infty'],
+  ['\\infty/0', NaN], // 🙁 +oo
+  ['(-\\infty)/1.7', '-\\infty'],
+  ['(-\\infty)/(1-3)', '\\infty'],
+  ['2/\\infty', 0],
+  ['-100/(-\\infty)', 0],
+  ['0/\\infty', 0],
+
+  [
+    `
+      //
+      // Addition and Subtraction and Infinity
+      //
+    `,
+  ],
+  ['\\infty-\\infty', NaN],
+  ['-\\infty-\\infty', '-\\infty'],
+  ['\\infty+\\infty', '\\infty'],
+  ['\\infty+10', '\\infty'],
+  ['\\infty-10', '\\infty'],
+  ['-\\infty+10', '-\\infty'],
+  ['-\\infty-10', '-\\infty'],
+  ['-10-\\infty', '-\\infty'],
+
+  [
+    `
+      //
+      // Trig and Infinity
+      //
+    `,
+  ],
+  ['\\sin(\\infty)', NaN], // 👍 \sin(x) -> \operatorname{NaN}; ({ x }) => x.isInfinity === true
+  ['\\cos(\\infty)', NaN], // 👍 \cos(x) -> \operatorname{NaN}; ({ x }) => x.isInfinity === true
+  ['\\tan(\\infty)', NaN], // 👍 \tan(x) -> \operatorname{NaN}; ({ x }) => x.isInfinity === true
+  ['\\cot(\\infty)', NaN], // 👍 \cot(x) -> \operatorname{NaN}; ({ x }) => x.isInfinity === true
+  ['\\sec(\\infty)', NaN], // 👍 \sec(x) -> \operatorname{NaN}; ({ x }) => x.isInfinity === true
+  ['\\csc(\\infty)', NaN], // 👍 \csc(x) -> \operatorname{NaN}; ({ x }) => x.isInfinity === true
+  ['\\sin(-\\infty)', NaN], // 👍 \sin(x) -> \operatorname{NaN}; ({ x }) => x.isInfinity === true
+  ['\\cos(-\\infty)', NaN], // 👍 \cos(x) -> \operatorname{NaN}; ({ x }) => x.isInfinity === true
+  ['\\tan(-\\infty)', NaN], // 👍 \tan(x) -> \operatorname{NaN}; ({ x }) => x.isInfinity === true
+  ['\\cot(-\\infty)', NaN], // 👍 \cot(x) -> \operatorname{NaN}; ({ x }) => x.isInfinity === true
+  ['\\sec(-\\infty)', NaN], // 👍 \sec(x) -> \operatorname{NaN}; ({ x }) => x.isInfinity === true
+  ['\\csc(-\\infty)', NaN], // 👍 \csc(x) -> \operatorname{NaN}; ({ x }) => x.isInfinity === true
+
+  [
+    `
+      //
+      // Inverse Trig and Infinity
+      //
+    `,
+  ],
+  ['\\arcsin(\\infty)', NaN], // 👍 \arcsin(\infty) -> \operatorname{NaN}
+  ['\\arccos(\\infty)', NaN], // 👍 \arccos(\infty) -> \operatorname{NaN}
+  ['\\arcsin(-\\infty)', NaN], // 👍 \arcsin(-\infty) -> \operatorname{NaN}
+  ['\\arccos(-\\infty)', NaN], // 👍 \arccos(-\infty) -> \operatorname{NaN}
+  ['\\arctan(\\infty)', '\\frac{\\pi}{2}'], // 👍 \arctan(\infty) -> \frac{\pi}{2}
+  ['\\arctan(-\\infty)', '-\\frac{\\pi}{2}'], // 🙁 -pi / 2
+  ['\\arcctg(\\infty)', 0], // 👍 \arcctg(\infty) -> 0
+  ['\\arcctg(-\\infty)', '\\pi'], // 👍 \arcctg(-\infty) -> \pi
+  ['\\arcsec(\\infty)', '\\frac{\\pi}{2}'], // 👍 \arcsec(\infty) -> \frac{\pi}{2}
+  ['\\arcsec(-\\infty)', '\\frac{\\pi}{2}'], // 👍 \arcsec(-\infty) -> \frac{\pi}{2}
+  ['\\arccsc(\\infty)', 0], // 👍 \arccsc(\infty) -> 0
+  ['\\arccsc(-\\infty)', 0], // 👍 \arccsc(-\infty) -> 0
+
+  [
+    `
+      //
+      // Hyperbolic Trig and Infinity
+      //
+    `,
+  ],
+  ['\\sinh(\\infty)', '\\infty'], // 👍 \sinh(\infty) -> \infty
+  ['\\sinh(-\\infty)', '-\\infty'], // 👍 \sinh(-\infty) -> -\infty
+  ['\\cosh(\\infty)', '\\infty'], // 👍 \cosh(\infty) -> \infty
+  ['\\cosh(-\\infty)', '\\infty'], // 👍 \cosh(-\infty) -> \infty
+  ['\\tanh(\\infty)', 1], // 👍 \tanh(\infty) -> 1
+  ['\\tanh(-\\infty)', -1], // 👍 \tanh(-\infty) -> -1
+  ['\\coth(\\infty)', 1], // 👍 \coth(\infty) -> 1
+  ['\\coth(-\\infty)', -1], // 👍 \coth(-\infty) -> -1
+  ['\\sech(\\infty)', 0], // 👍 \sech(\infty) -> 0
+  ['\\sech(-\\infty)', 0], // 👍 \sech(-\infty) -> 0
+  ['\\csch(\\infty)', 0], // 👍 \csch(\infty) -> 0
+  ['\\csch(-\\infty)', 0], // 👍 \csch(-\infty) -> 0
+
+  [
+    `
+      //
+      // Inverse Hyperbolic Trig and Infinity
+      //
+    `,
+  ],
+  ['\\arsinh(\\infty)', '\\infty'], // 👍 \arsinh(\infty) -> \infty
+  ['\\arsinh(-\\infty)', '-\\infty'], // 👍 \arsinh(-\infty) -> -\infty
+  ['\\arcosh(\\infty)', '\\infty'], // 👍 \arcosh(\infty) -> \infty
+  ['\\arcosh(-\\infty)', NaN], // 👍 \arcosh(-\infty) -> \operatorname{NaN}
+  ['\\artanh(\\infty)', NaN], // 👍 \artanh(x); ({ x }) => x.isInfinity === true
+  ['\\artanh(-\\infty)', NaN], // 👍 \artanh(x); ({ x }) => x.isInfinity === true
+  ['\\operatorname{arcoth}(\\infty)', NaN], // 🙁 0
+  ['\\operatorname{arcoth}(-\\infty)', NaN], // 🙁 pi
+  ['\\arsech(\\infty)', NaN], // 👍 \arsech(x); ({ x }) => x.isInfinity === true
+  ['\\arsech(-\\infty)', NaN], // 👍 \arsech(x); ({ x }) => x.isInfinity === true
+  ['\\arcsch(\\infty)', NaN], // 👍 \arcsch(x); ({ x }) => x.isInfinity === true
+  ['\\arcsch(-\\infty)', NaN], // 👍 \arcsch(x); ({ x }) => x.isInfinity === true
+
+  [
+    `
+      //
+      // Negative Exponents and Denominator
+      //
+    `,
+  ],
+  ['\\frac{2}{\\pi^{-2}}', '2\\pi^2'], // 🙁 2 / pi^(-2)
+  ['\\frac{2}{x\\pi^{-2}}', '\\frac{2}{x} \\pi^2'], // 🙁 2 / (x * pi^(-2))
+  ['(3/\\pi)^{-1}', '\\pi/3'],
+  ['(3/x)^{-1}', '(3/x)^{-1}'], // 🙁 with all rules: x / 3
+  ['(x/\\pi)^{-3}', '\\pi^3 / x^3'],
+  ['(x/y)^{-3}', '(x/y)^{-3}'], // 🙁 with all rules: y^3 / x^3
+  ['(x^2/\\pi^3)^{-2}', '\\pi^6/x^4'],
+
+  [
+    `
+      //
+      // Powers: Division Involving x
+      //
+    `,
+  ],
+  ['x/x^3', '1/x^2'],
+  ['(2*x)/x^5', '2/x^4'],
+  ['x/x^{-2}', 'x/x^{-2}'], // 🙁 with all rules: x^3
+  ['x^2/x', 'x^2/x'], // 🙁 with all rules: x
+  ['x^{0.3}/x', '1/x^{0.7}'], // 👍 x^n/x -> 1/x^{1-n}; ({ x, n }) => x.isNotZero || n.isLess(1) === true
+  ['x^{-3/5}/x', '1/x^{8/5}'],
+  ['\\pi^2/\\pi', '\\pi'],
+  ['\\pi/\\pi^{-2}', '\\pi^3'],
+  ['\\sqrt[3]{x}/x', '1/x^{2/3}'],
+
+  [
+    `
+      //
+      // Powers: Multiplication Involving x
+      //
+    `,
+  ],
+  ['x^3*x', 'x^4'],
+  ['x^{-2}*x', '1/x'],
+  ['x^{-1/3}*x', 'x^{-1/3}*x'], // 🙁 with all rules: x^(2/3)
+  ['\\pi^{-2}*\\pi', '1/\\pi'],
+  ['\\pi^{-0.2}*\\pi', '\\pi^{0.8}'], // 👍 x^n*x -> x^{n+1}; ({ x, n }) => x.isNotZero === true || n.isPositive === true || x.isLess(-1) === true
+  ['\\sqrt[3]{x}*x', 'x^{4/3}'],
+
+  [
+    `
+      //
+      // Powers: Multiplication of Two Powers
+      //
+    `,
+  ],
+  ['x^2*x^{-3}', '1/x'],
+  ['x^2*x^{-1}', 'x^2 x^{-1}'], // 🙁 with all rules: x
+  ['x^2*x^3', 'x^5'],
+  ['x^{-2}*x^{-1}', '1/x^3'],
+  ['x^{2/3}*x^2', 'x^{8/3}'],
+  ['x^{5/2}*x^3', 'x^{11/2}'],
+  ['\\pi^{-1}*\\pi^2', '\\pi'],
+  ['\\sqrt{x}*\\sqrt{x}', '(\\sqrt{x})^2'], // 🙁 x
+  ['\\sqrt{x}*x^2', 'x^{5/2}'],
+
+  [
+    `
+      //
+      // Powers: Division of Two Powers
+      //
+      `,
+  ],
+  ['x^2/x^3', '1/x'],
+  ['x^{-1}/x^3', '1/x^4'], // 👍 (x) => {         if (x.operator === 'Divide')             return { value: x.op1.div(x.op2), because: 'division' };         if (x.operator === 'Rational' && x.nops === 2)             return { value: x.op1.div(x.op2), because: 'rational' };         return undefined;     }
+  ['x/x^{-1}', 'x/x^{-1}'], // 🙁 with all rules: x^2
+  ['\\pi / \\pi^{-1}', '\\pi^2'],
+  ['\\pi^{0.2}/\\pi^{0.1}', '\\pi^{0.1}'], // 🙁 pi^(0.3)
+  ['x^{\\sqrt{2}}/x^3', 'x^{\\sqrt{2}-3}'], // 🙁 x^(sqrt(2)) / x^3
+
+  [
+    `
+      //
+      // Powers and Denominators
+      //
+    `,
+  ],
+  ['x/(\\pi/2)^3', '8x/\\pi^3'],
+  ['x/(\\pi/y)^3', 'x/(\\pi/y)^3'],
+
+  [
+    `
+      //
+      // Powers and Roots
+      //
+    `,
+  ],
+  ['\\sqrt{x^4}', 'x^2'], // 🙁 sqrt(x^4)
+  ['\\sqrt{x^3}', 'x^{3/2}'], // 🙁 sqrt(x^3)
+  ['\\sqrt[3]{x^2}', 'x^{2/3}'],
+  ['\\sqrt[4]{x^6}', 'x^{3/2}'],
+  ['\\sqrt{x^6}', '|x|^3'], // 🙁 sqrt(x^6)
+  ['\\sqrt[4]{x^4}', '|x|'], // 🙁 x
+
+  [
+    `
+      //
+      // Ln and Powers
+      //
+    `,
+  ],
+  ['\\ln(x^3)', '3\\ln(x)'],
+  ['\\ln(x^\\sqrt{2})', '\\sqrt{2} \\ln(x)'],
+  ['\\ln(x^2)', '2 \\ln(|x|)'], // 👍 \ln(x^n) -> n*\ln(|x|); ({ n }) => n.isEven === true
+  ['\\ln(x^{2/3})', '2/3 \\ln(|x|)'], // 🙁 (2ln(|x|)) / 3
+  ['\\ln(\\pi^{2/3})', '2/3 \\ln(\\pi)'], // 🙁 (2ln(pi)) / 3
+  ['\\ln(x^{7/4})', '7/4 \\ln(x)'], // 🙁 (7ln(|x|)) / 4
+  ['\\ln(\\sqrt{x})', '\\ln(x)/2'],
+
+  [
+    `
+      //
+      // Log and Powers
+      //
+    `,
+  ],
+  ['\\log_4(x^3)', '3\\log_4(x)'],
+  ['\\log_3(x^\\sqrt{2})', '\\sqrt{2} \\log_3(x)'],
+  ['\\log_4(x^2)', '2\\log_4(|x|)'], // 👍 \log_c(x^n) -> n*\log_c(|x|); ({ n }) => n.isEven === true
+  ['\\log_4(x^{2/3})', '2/3 \\log_4(|x|)'], // 🙁 (2log(|x|, 4)) / 3
+  ['\\log_4(x^{7/4})', '7/4 \\log_4(x)'], // 🙁 (7log(|x|, 4)) / 4
+];
+
+/*
+  SUMMARY OF UNUSED RULES:
+  
+     🚫 = rule not used (no test case for this rule)
+  
+
+  
+  🚫 (-x)^n:odd -> -(x^n)
+  🚫 (-x)^{n/m} -> x^{n/m}; n:even, m:odd
+  🚫 (-x)^{n/m} -> -x^{n/m}; ({ n, m }) => n.isOdd === true && m.isOdd === true
+  🚫 a/b+c/d -> (a*d+b*c)/(b*d); ({ a }) => a.isNotZero === true
+  🚫 \ln(x) + \ln(y) -> \ln(xy)
+  🚫 e^{\ln(x)-y} -> x/e^y
+  🚫 \ln(e^x/y) -> x-\ln(y)
+  🚫 \ln(y/e^x) -> \ln(y)-x
+  🚫 \ln(0) -> \operatorname{NaN}
+  🚫 \log_c(x) -> \operatorname{NaN}; ({ c }) => c.isZero === true || c.isOne === true
+  🚫 \log_c(x) + \log_c(y) -> \log_c(xy)
+  🚫 c^{\log_c(x)-y} -> x/c^y
+  🚫 \log_{1/c}(a) -> -\log_c(a)
+  🚫 |x:>=0| -> x
+  🚫 |x:<0| -> -x
+  🚫 |xy| -> x|y|; ({ x }) => x.isNonNegative === true
+  🚫 |xy| -> -x|y|; ({ x }) => x.isNonPositive === true
+  🚫 |xy| -> |x||y|
+  🚫 |x|^{n/m} -> x^{n/m}; ({ n, m }) => n.isEven === true && m.isOdd === true
+  🚫 |x^{n/m}| -> |x|^{n/m}; ({ n, m }) => n.isOdd === true || m.isInteger === true
+  🚫 |\frac{x}{y}| -> \frac{x}{|y|}; ({ x }) => x.isNonNegative === true
+  🚫 |\frac{x}{y}| -> -\frac{x}{|y|}; ({ x }) => x.isNonPositive === true
+  🚫 |\frac{x}{y}| -> \frac{|x|}{y}; ({ y }) => y.isNonNegative === true
+  🚫 |\frac{x}{y}| -> -\frac{|x|}{y}; ({ y }) => y.isNonPositive === true
+  🚫 |\operatorname{arccoth}(x)| -> \operatorname{arccoth}(|x|)
+  🚫 \frac{a}{b^{-n}} -> a*b^n; ({ b }) => b.isNotZero === true
+  🚫 \frac{a}{d*b^{-n}} -> \frac{a}{d}*b^n; ({ b }) => b.isNotZero === true
+  🚫 \infty/x -> \infty; ({ x }) => x.isPositive === true && x.isFinite === true
+  🚫 (-\infty)/x -> -\infty; ({ x }) => x.isPositive === true && x.isFinite === true
+  🚫 \infty/x -> -\infty; ({ x }) => x.isNegative === true && x.isFinite === true
+  🚫 (-\infty)/x -> \infty; ({ x }) => x.isNegative === true && x.isFinite === true
+  🚫 x/y -> \operatorname{NaN}; ({ x, y }) => x.isInfinity === true && y.isInfinity === true
+  🚫 a^\infty -> \infty; ({ a }) => a.isGreater(1) === true
+  🚫 a^\infty -> 0; ({ a }) => a.isPositive === true && a.isLess(1) === true
+  🚫 \infty^a -> 0; ({ a }) => a.isNegative === true
+  🚫 (-\infty)^a -> 0; ({ a }) => a.isNegative === true
+  🚫 a^{-\infty} -> 0; ({ a }) => a.isGreater(1) === true
+  🚫 a^{-\infty} -> \infty; ({ a }) => a.isPositive === true && a.isLess(1) === true
+  🚫 \ln(\infty) -> \infty
+  🚫 \log_c(\infty) -> \infty; ({ c }) => c.isGreater(1) === true
+  🚫 \log_\infty(c) -> 0; ({ c }) => c.isPositive === true && c.isOne === false && c.isFinite === true
+  🚫 \arctan(-\infty) -> -\frac{\pi}{2}
+  🚫 \operatorname{arccoth}(x); ({ x }) => x.isInfinity === true
+  🚫 a/a -> 1; ({ a }) => a.isNotZero === true
+  🚫 1/(1/a) -> a; ({ a }) => a.isNotZero === true
+  🚫 a/(1/b) -> a*b; ({ b }) => b.isNotZero === true
+  🚫 a/(b/c) -> (a*c)/b; ({ c }) => c.isNotZero === true
+  🚫 x/x^n -> 1/x^{n-1}; ({ x, n }) => x.isNotZero || n.isGreater(1) === true
+  🚫 x^n/x^m -> x^{n+m}; ({ x, n, m }) => (x.isNotZero === true || n.add(m).isNegative === true) &&             (n.isInteger === true ||                 m.isInteger === true ||                 n.sub(m).isRational === false ||                 x.isNonNegative === true)
+  🚫 a/(b/c)^d -> a*(c/b)^d; ({ c }) => c.isNotZero === true
+  🚫 (b/c)^{-d} -> (c/b)^d; ({ c }) => c.isNotZero === true
+  🚫 (b/c)^{-1} -> c/b; ({ c }) => c.isNotZero === true
+  🚫 (a^n)^m -> a^{m*n}; ({ a, n, m }) => ((n.isInteger === true && m.isInteger === true) ||             a.isNonNegative ||             n.mul(m).isRational === false) &&             (n.isPositive === true || m.isPositive === true)
+  🚫 \ln(x^n) -> n*\ln(x); ({ x, n }) => x.isNonNegative || n.isOdd === true || n.isRational === false
+  🚫 \ln(x^{n/k}) -> n*\ln(x)/k; ({ x, n }) => x.isNonNegative || n.isOdd === true
+  🚫 \ln(x^{n/k}) -> n*\ln(|x|)/k; ({ n, k }) => n.isEven === true && k.isOdd === true
+  🚫 \log_c(x^n) -> n*\log_c(x); ({ x, n }) => x.isNonNegative || n.isOdd === true || n.isRational === false
+  🚫 \log_c(x^{n/k}) -> n*\log_c(x)/k; ({ c, n }) => c.isNonNegative || n.isOdd === true
+  🚫 \log_c(x^{n/k}) -> n*\log_c(|x|)/k; ({ n, k }) => n.isEven === true && k.isOdd === true
+  🚫 \sin(-x) -> -\sin(x)
+  🚫 \cos(-x) -> \cos(x)
+  🚫 \tan(-x) -> -\tan(x)
+  🚫 \cot(-x) -> -\cot(x)
+  🚫 \sec(-x) -> \sec(x)
+  🚫 \csc(-x) -> -\csc(x)
+  🚫 \sin(\pi - x) -> \sin(x)
+  🚫 \cos(\pi - x) -> -\cos(x)
+  🚫 \tan(\pi - x) -> -\tan(x)
+  🚫 \cot(\pi - x) -> -\cot(x)
+  🚫 \sec(\pi - x) -> -\sec(x)
+  🚫 \csc(\pi - x) -> \csc(x)
+  🚫 \sin(\pi + x) -> -\sin(x)
+  🚫 \cos(\pi + x) -> -\cos(x)
+  🚫 \tan(\pi + x) -> \tan(x)
+  🚫 \cot(\pi + x) -> -\cot(x)
+  🚫 \sec(\pi + x) -> -\sec(x)
+  🚫 \csc(\pi + x) -> \csc(x)
+  🚫 \sin(\frac{\pi}{2} - x) -> \cos(x)
+  🚫 \cos(\frac{\pi}{2} - x) -> \sin(x)
+  🚫 \tan(\frac{\pi}{2} - x) -> \cot(x)
+  🚫 \cot(\frac{\pi}{2} - x) -> \tan(x)
+  🚫 \sec(\frac{\pi}{2} - x) -> \csc(x)
+  🚫 \csc(\frac{\pi}{2} - x) -> \sec(x)
+  🚫 \sin(x) * \cos(x) -> \frac{1}{2} \sin(2x)
+  🚫 \sin(x) * \sin(y) -> \frac{1}{2} (\cos(x-y) - \cos(x+y))
+  🚫 \cos(x) * \cos(y) -> \frac{1}{2} (\cos(x-y) + \cos(x+y))
+  🚫 \tan(x) * \cot(x) -> 1
+  🚫 \sin(x)^2 -> \frac{1 - \cos(2x)}{2}
+  🚫 \cos(x)^2 -> \frac{1 + \cos(2x)}{2}
+  🚫 ["Divide",["Sin","__x"],["Cos","__x"]]
+  🚫 ["Divide",["Cos","__x"],["Sin","__x"]]
+  🚫 ["Divide",1,["Cos","__x"]]
+  🚫 ["Divide",1,["Sin","__x"]]
+  🚫 ["Ln",["Add","__x",["Sqrt",["Subtract",["Square","__x"],1]]]]; (sub, ce) => sub.__x.isGreater(ce.One) ?? false
+  🚫 ["Multiply",2,["Arctan2","__x",["Add",1,["Sqrt",["Subtract",1,["Square","__x"]]]]]]
+  🚫 ["Multiply",2,["Ln",["Add","__x",["Sqrt",["Add",["Square","__x"],1]]]]]
+  🚫 ["Multiply","Half",["Ln",["Divide",["Add",1,"__x"],["Subtract",1,"__x"]]]]
+  🚫 ["Divide",["Add",["Exp","__x"],["Exp",["Negate","__x"]]],2]
+  🚫 ["Divide",["Subtract",["Exp","__x"],["Exp",["Negate","__x"]]],2]
+  🚫 ["Ln",["Add","__x",["Sqrt",["Subtract",["Square","__x"],1]]]]; ({ __x }) => __x.isGreater(1) ?? false
+  🚫 ["Multiply",2,["Arctan2","__x",["Add",1,["Sqrt",["Subtract",1,["Square","__x"]]]]]]
+  🚫 ["Multiply",2,["Ln",["Add","__x",["Sqrt",["Add",["Square","__x"],1]]]]]
+  🚫 ["Multiply","Half",["Ln",["Divide",["Add",1,"__x"],["Subtract",1,"__x"]]]]
+  🚫 ["Divide",["Add",["Exp","__x"],["Exp",["Negate","__x"]]],2]
+  🚫 ["Divide",["Subtract",["Exp","__x"],["Exp",["Negate","__x"]]],2]
+*/
+
 const RULES_USED: string[] = [];
 
 const RULES: Rule[] = [
@@ -956,693 +1735,36 @@ const RULES: Rule[] = [
 // \tan ^2\left(x\right)\cos ^2\left(x\right)+\cot ^2\left(x\right)\sin ^2\left(x\right)
 // -> 1
 
-/**
- * Each test case is a tuple of two expressions:
- * - The first expression is the input expression to simplify.
- * - The second expression is the expected simplified expression.
- *
- * A third, optional element, is a comment to describe the test case.
- * If the comment starts with the keyword "skip", the test case will be skipped.
- * If the comment starts with the keyword "stop", the debugger will stop at this test case.
- */
-export type TestCase =
-  | [
-      input: Expression | string,
-      expected: Expression | string,
-      comment?: string,
-    ]
-  | [heading: string];
-
-/*
- * Some expressions get simplified during canonicalization.
- */
-const CANONICALIZATION_TEST_CASES: TestCase[] = [
-  [
-    `
-    // Arithmetic operations
-    // - integers and float are simplified
-    // - rational and square root of integers are preserved
-    // (same behavior as Mathematica)
-    //
-  `,
-  ],
-  ['-23', -23, 'Integers should stay as is'],
-  ['0.3', 0.3, 'Floating point should stay as is'],
-  ['3/4', '3/4', 'Rationals are not converted to float'],
-  ['6/8', '3/4', 'Rationals are reduced'],
-  ['3/4 + 2', '11/4', 'Rational are reduced, but preserved as exact values'],
-  ['3/4 + 5/7', '41/28', 'Rational are reduced, but preserved as exact values'],
-  ['\\sqrt3', '\\sqrt3', 'Square root of integers are not converted to float'],
-  [
-    '\\sqrt{3.1}',
-    { num: '1.76068168616590091458' },
-    'Square root of float are computed',
-  ],
-  ['x+0', 'x', 'Zero is removed from addition'],
-  ['-1234 - 5678', -6912],
-  ['1.234 + 5678', 5679.234],
-  ['1.234 + 5.678', 6.912],
-  ['1.234 + 5.678 + 1.0001', 7.9121],
-  ['2 + 4', 6],
-  ['1/2 + 0.5', 1, 'Floating point and exact are simplified'],
-  ['\\sqrt3 + 3', '\\sqrt3 + 3', 'stay exact'],
-  ['\\sqrt3 + 1/2', '\\sqrt3 + 1/2', 'stay exact'],
-  ['\\sqrt3 + 0.3', { num: '2.0320508075688772' }],
-  ['3.1/2.8', '1.10714285714285714286', 'Floating point division'],
-  [
-    ' 2x\\times x \\times 3 \\times x',
-    '6x^3',
-    'Product of x should be simplified',
-  ],
-  ['2(13.1+x)', '26.2+2x', 'Product of floating point should be simplified'],
-  ['2(13.1+x) - 26.2 - 2x', 0],
-
-  [
-    `
-    //
-    // Numeric literals
-    //
-    `,
-  ],
-  ['\\sqrt3 - 2', '\\sqrt3 - 2', 'Should stay exact'],
-  ['\\frac{\\sqrt5+1}{4}', '\\frac{\\sqrt5}{4}+\\frac14', 'Should stay exact'],
-
-  [
-    `
-    //
-    // Addition and Subtraction
-    //
-  `,
-  ],
-  ['-2+x', 'x-2'],
-  ['x-(-1)', 'x+1'],
-  ['x+(-1)', 'x-1'],
-
-  [
-    `
-    //
-    // Multiplication
-    //
-  `,
-  ],
-  ['1*x', 'x'],
-  ['-1*x', '-x'],
-  ['(-2)*(-x)', '2*x'],
-  ['2*(-x)', '-2*x'],
-
-  [
-    `
-    //
-    // Combine Like terms
-    //
-  `,
-  ],
-  ['x+2*x', '3*x'],
-  ['2*\\pi * x^2-\\pi * x^2+2*\\pi', '\\pi * x^2+ 2\\pi'],
-
-  [
-    `
-    //
-    // Power of Fraction in Denominator
-    //
-  `,
-  ],
-  ['x/(y/2)^3', '(8*x)/y^3'],
-  ['x/(2/y)^3', 'x/(2/y)^3'],
-
-  [
-    `
-    //
-    // Double Powers
-    //
-  `,
-  ],
-  ['(x^1)^3', 'x^3'],
-  ['(x^2)^{-2}', 'x^{-4}'],
-  ['(x^{-2})^2', 'x^{-4}'],
-  [
-    '(x^{-2})^{-2}',
-    'x^4',
-    'Not defined at x=0, but we assume variables represent values in the general domain where the operation is valid ',
-  ],
-  ['(x^{1/3})^8', 'x^{8/3}'],
-  ['(x^3)^{2/5}', 'x^{6/5}'],
-  ['(x^{\\sqrt{2}})^3', 'x^{3\\sqrt{2}}'],
-
-  [
-    `
-    //
-    // Ln/Log
-    //
-  `,
-  ],
-  ['\\ln(3)+\\ln(\\frac{1}{3})', 0],
-  ['\\frac{\\ln(9)}{\\ln(3)}', 2],
-  ['\\ln(e^x/y)', 'x-\\ln(y)'],
-  ['\\ln(y/e^x)', '\\ln(y)-x'],
-  ['\\ln(0)', NaN],
-  ['\\ln(1/x)', '-\\ln(x)'],
-  ['\\ln(1)', 0],
-  ['\\ln(e)', 1],
-  ['\\ln(e^x)', 'x'],
-
-  [
-    `
-    //
-    // Others
-    //
-  `,
-  ],
-  ['2\\left(13.1+x\\right)-\\left(26.2+2x\\right)', 0],
-  ['\\sqrt{3}(\\sqrt2x + x)', '(\\sqrt3+\\sqrt6)x'],
-  [['Add', 1, 2, 1.0001], 4.0001],
-];
-
-/**
- * A set of test cases for the simplification of expressions.
- *
- * If an entry is followed by a comment:
- * - if the comment starts with "🙁", it means the result of the simplification was not the expected result.
- * - if the comment starts with "👍", it means the result of the simplification was the expected result and the rule that applied is indicated.
- * - If there is no comment, the result was as expected, but only the built-in simplifications were applied.
- *
- */
-const RULE_TEST_CASES: TestCase[] = [
-  [
-    `
-    //
-    // Other simplifications
-    //
-  `,
-  ],
-  ['e e^x e^{-x}', 'e'], // up to 👍x^n*x^m -> x^{n+m}; ({ x, n, m }) => (x.isNotZero === true ||             n.add(m).isNegative === true ||             n.mul(m).isPositive === true) &&             (n.isInteger === true ||                 m.isInteger === true ||                 n.add(m).isRational === false ||                 x.isNonNegative === true)
-  ['e^x e^{-x}', 1], // 👍 x^n*x^m -> x^{n+m}; ({ x, n, m }) => (x.isNotZero === true ||             n.add(m).isNegative === true ||             n.mul(m).isPositive === true) &&             (n.isInteger === true ||                 m.isInteger === true ||                 n.add(m).isRational === false ||                 x.isNonNegative === true)
-  ['\\sqrt[4]{16b^{4}}', '2b'],
-
-  [
-    `
-    //
-    // Negative Signs and Powers
-    //
-  `,
-  ],
-  ['(-x)^3', '-(x^3)'],
-  ['(-x)^{4/3}', 'x^{4/3}'], // 👍 (-x)^n:even -> x^n
-  ['(-x)^4', 'x^4'],
-  ['(-x)^{3/5}', '-(x^{3/5})'],
-  ['1/x-1/(x+1)', '1/(x(x+1))'], // 🙁 1 / (x^2 + x)
-  ['\\sqrt[3]{-2}', '-\\sqrt[3]{2}'], // 🙁 NaN
-
-  [
-    `
-    //
-    // Common Denominator
-    //
-  `,
-  ],
-  ['3/x-1/x', '2/x'],
-  ['1/(x+1)-1/x', '-1/(x(x+1))'], // 🙁 -1 / (x^2 + x)
-
-  [
-    `
-    //
-    // Distribute
-    //
-  `,
-  ],
-  ['x*y+(x+1)*y', '2xy+y'],
-  ['(x+1)^2-x^2', '2x+1'],
-  ['2*(x+h)^2-2*x^2', '4xh+2h^2'],
-
-  [
-    `
-    //
-    // Division
-    //
-  `,
-  ],
-  ['x/x', 'x/x'], // 🙁 with all rules: 1
-  ['\\pi/\\pi', 1],
-  ['(\\pi+1)/(\\pi+1)', 1],
-  ['1/(1/0)', NaN],
-  ['1/(1/\\pi)', '\\pi'],
-  ['1/(1/x)', '1/(1/x)'],
-  ['y/(1/2)', '2*y'],
-  ['x/(1/(-\\pi))', '-\\pi * x'],
-  ['x/(a/\\pi)', '\\pi * x/a'],
-  ['x/(a/b)', 'x/(a/b)'],
-  ['(x/y)/(\\pi/2)', '(2*x)/(\\pi * y)'],
-  ['2/3*5/x', '10/(3*x)'], // 🙁 (2 * 5) / (3x)
-  ['a/b*c/d', '(a*c)/(b*d)'],
-  ['2/\\pi * \\pi', '2'],
-  ['x/1', 'x'],
-  ['(-1)/x', '-1/x'],
-  ['(-2)/(-x)', '2/x'],
-  ['2/(-x)', '-2/x'],
-
-  [
-    `
-    //
-    // Operations Involving 0
-    //
-  `,
-  ],
-  ['0*\\pi', 0],
-  ['x-0', 'x'],
-  ['\\sin(x)+0', '\\sin(x)'],
-  ['0/0', NaN],
-  ['2/0', NaN],
-  ['0^\\pi', 0], // 🙁 0^(pi)
-  ['0^{-2}', NaN], // 🙁 +oo
-  ['0^{-\\pi}', NaN], // 🙁 0^(-pi)
-  ['0^0', NaN], // 🙁 1
-  ['2^0', 1],
-  ['\\pi^0', 1],
-  ['0/2', 0],
-  ['\\sqrt{0}', 0],
-  ['\\sqrt[n]{0}', 0], // 🙁 root(0)(n)
-  ['e^0', 1],
-  ['|0|', 0],
-  ['-0', 0],
-
-  [
-    `
-    //
-    // Ln
-    //
-  `,
-  ],
-  ['\\ln(xy)-\\ln(x)', '\\ln(y)'], // 👍 \ln(x) - \ln(y) -> \ln(x/y)
-  ['\\ln(y/x)+\\ln(x)', '\\ln(x*y/x)'], // 🙁 -ln(x) + ln(x * y)
-  ['e^{\\ln(x)+x}', 'x*e^x'], // 👍 e^{\ln(x)+y} -> x*e^y
-  ['e^{\\ln(x)-2*x}', 'x*e^{-2*x}'], // 👍 e^{\ln(x)+y} -> x*e^y
-  ['e^\\ln(x)', 'x'], // 👍 e^\ln(x) -> x
-  ['e^{3\\ln(x)}', 'x^3'], // 👍 e^{\ln(x)*y} -> x^y
-  ['e^{\\ln(x)/3}', 'x^{1/3}'], // 👍 e^{\ln(x)/y} -> x^{1/y}
-  ['\\ln(e^x*y)', 'x+\\ln(y)'], // 👍 \ln(e^x*y) -> x+\ln(y)
-
-  [
-    `
-    //
-    // log
-    //
-  `,
-  ],
-  ['\\log_c(xy)-\\log_c(x)', '\\log_c(y)'], // 👍 \log_c(x) - \log_c(y) -> \log_c(x/y)
-  ['\\log_c(y/x)+\\log_c(x)', '\\log_c(xy/x)'], // 🙁 -log(x, c) + ln(x * y)
-  ['c^{\\log_c(x)+x}', 'x c^x'], // 👍 c^{\log_c(x)+y} -> x*c^y
-  ['c^{\\log_c(x)-2*x}', 'x c^{-2*x}'], // 👍 c^{\log_c(x)+y} -> x*c^y
-  ['c^\\log_c(x)', 'x'], // 👍 c^{\log_c(x)} -> x
-  ['c^{3\\log_c(x)}', 'x^3'], // 👍 c^{\log_c(x)*y} -> x^y
-  ['c^{\\log_c(x)/3}', 'x^{1/3}'], // 👍 c^{\log_c(x)/y} -> x^{1/y}
-  ['\\log_c(c^x*y)', 'x+\\log_c(y)'], // 👍 \log_c(c^x*y) -> x+\log_c(y)
-  ['\\log_c(c^x/y)', 'x-\\log_c(y)'], // 👍 \log_c(c^x/y) -> x-\log_c(y)
-  ['\\log_c(y/c^x)', '\\log_c(y)-x'], // 👍 \log_c(y/c^x) -> \log_c(y)-x
-  ['\\log_c(c)', 1], // 👍 \log_c(c) -> 1
-  ['\\log_c(c^x)', 'x'], // 👍 \log_c(c^x) -> x
-  ['\\log_c(0)', NaN], // 👍 \log_c(0) -> \operatorname{NaN}
-  ['\\log_c(1)', 0],
-  ['\\log_2(1/x)', '-\\log_2(x)'],
-
-  [
-    `
-    //
-    // Change of Base
-    //
-  `,
-  ],
-  ['\\log_c(a)*\\ln(a)', '\\ln(c)'], // 👍 \log_c(a)*\ln(a) -> \ln(c)
-  ['\\log_c(a)/\\log_c(b)', '\\ln(a)/\\ln(b)'], // 👍 \log_c(a)/\log_c(b) -> \ln(a)/\ln(b)
-  ['\\log_c(a)/\\ln(a)', '1/\\ln(c)'], // 👍 \log_c(a)/\ln(a) -> 1/\ln(c)
-  ['\\ln(a)/\\log_c(a)', '\\ln(c)'], // 👍 \ln(a)/\log_c(a) -> \ln(c)
-
-  [
-    `
-    //
-    // Logs and Infinity
-  `,
-  ],
-  ['\\ln(\\infty)', '\\infty'],
-  ['\\log_4(\\infty)', '\\infty'],
-  ['\\log_{0.5}(\\infty)', '-\\infty'], // 👍 \log_c(\infty) -> -\infty; ({ c }) => c.isLess(1) === true && c.isPositive === true
-
-  [
-    `
-    //
-    // Absolute Value
-    //
-  `,
-  ],
-  ['|\\pi|', '\\pi'],
-  ['|\\infty|', '\\infty'],
-  ['|-\\infty|', '\\infty'],
-  ['|-x|', '|x|'], // 👍 |-x| -> |x|
-  ['|-\\pi|', '\\pi'],
-  ['|\\pi * x|', '\\pi * x'], // 🙁 pi * |x|
-  ['|\\frac{x}{\\pi}|', '\\frac{|x|}{\\pi}'], // 👍 |\frac{x}{y}| -> \frac{|x|}{|y|}
-  ['|\\frac{2}{x}|', '\\frac{2}{|x|}'], // 👍 |\frac{x}{y}| -> \frac{|x|}{|y|}
-  ['|x|^4', 'x^4'], // 👍 |x|^n -> x^n; ({ n }) => n.isEven === true
-  ['|x^3|', '|x|^3'], // 👍 |x^n| -> |x|^n; ({ n }) => n.isOdd === true || n.isRational === false
-  ['|x|^{4/3}', 'x^{4/3}'], // 👍 |x|^n -> x^n; ({ n }) => n.isEven === true
-  ['|x^{3/5}|', '|x|^{3/5}'], // 🙁 |x^(3/5)|
-
-  [
-    `
-    //
-    // Even Functions and Absolute Value
-    //
-  `,
-  ],
-  ['\\cos(|x+2|)', '\\cos(x+2)'], // 👍 \cos(|x|) -> \cos(x)
-  ['\\sec(|x+2|)', '\\sec(x+2)'], // 👍 \sec(|x|) -> \sec(x)
-  ['\\cosh(|x+2|)', '\\cosh(x+2)'], // 👍 \cosh(|x|) -> \cosh(x)
-  ['\\sech(|x+2|)', '\\sech(x+2)'], // 👍 \sech(|x|) -> \sech(x)
-
-  [
-    `
-    //
-    // Odd Functions and Absolute Value
-    //
-  `,
-  ],
-  ['|\\sin(x)|', '\\sin(|x|)'], // 👍 |\sin(x)| -> \sin(|x|)
-  ['|\\tan(x)|', '\\tan(|x|)'], // 👍 |\tan(x)| -> \tan(|x|)
-  ['|\\cot(x)|', '\\cot(|x|)'], // 👍 |\cot(x)| -> \cot(|x|)
-  ['|\\csc(x)|', '\\csc(|x|)'], // 👍 |\csc(x)| -> \csc(|x|)
-  ['|\\arcsin(x)|', '\\arcsin(|x|)'], // 👍 |\arcsin(x)| -> \arcsin(|x|)
-  ['|\\arctan(x)|', '\\arctan(|x|)'], // 👍 |\arctan(x)| -> \arctan(|x|)
-  ['|\\arcctg(x)|', '\\arcctg(|x|)'], // 👍 |\arcctg(x)| -> \arcctg(|x|)
-  ['|\\arccsc(x)|', '\\arccsc(|x|)'], // 👍 |\arccsc(x)| -> \arccsc(|x|)
-  ['|\\sinh(x)|', '\\sinh(|x|)'], // 👍 |\sinh(x)| -> \sinh(|x|)
-  ['|\\tanh(x)|', '\\tanh(|x|)'], // 👍 |\tanh(x)| -> \tanh(|x|)
-  ['|\\coth(x)|', '\\coth(|x|)'], // 👍 |\coth(x)| -> \coth(|x|)
-  ['|\\csch(x)|', '\\csch(|x|)'], // 👍 |\csch(x)| -> \csch(|x|)
-  ['|\\arsinh(x)|', '\\arsinh(|x|)'], // 👍 |\arsinh(x)| -> \arsinh(|x|)
-  ['|\\artanh(x)|', '\\artanh(|x|)'], // 👍 |\artanh(x)| -> \artanh(|x|)
-  ['|\\operatorname{arcoth}(x)|', '\\operatorname{arcoth}(|x|)'], // 👍 |\arcctg(x)| -> \arcctg(|x|)
-  ['|\\arcsch(x)|', '\\arcsch(|x|)'], // 👍 |\arcsch(x)| -> \arcsch(|x|)
-
-  [
-    `
-    //
-    // Powers and Infinity
-    //
-  `,
-  ],
-  ['2^\\infty', '\\infty'],
-  ['0.5^\\infty', 0],
-  ['\\pi^\\infty', '\\infty'],
-  ['e^\\infty', '\\infty'],
-  ['\\pi^{-\\infty}', 0],
-  ['e^{-\\infty}', 0],
-  ['2^{-\\infty}', 0],
-  ['(1/2)^{-\\infty}', '\\infty'],
-  ['(-\\infty)^4', '\\infty'],
-  ['(\\infty)^{1.4}', '\\infty'],
-  ['(-\\infty)^{1/3}', '-\\infty'], // 🙁 +oo
-  ['(-\\infty)^{-1}', 0],
-  ['(\\infty)^{-2}', 0],
-  ['1^{-\\infty}', NaN],
-  ['1^{\\infty}', NaN],
-  ['\\infty^0', NaN], // 🙁 1
-  ['\\sqrt[4]{\\infty}', '\\infty'],
-
-  [
-    `
-    //
-    // Multiplication and Infinity
-    //
-  `,
-  ],
-  ['0*\\infty', NaN],
-  ['0*(-\\infty)', NaN],
-  ['0.5*\\infty', '\\infty'],
-  ['(-0.5)*(-\\infty)', '\\infty'], // 🙁 -oo
-  ['(-0.5)*\\infty', '-\\infty'],
-  ['\\pi * (-\\infty)', '-\\infty'], // 🙁 +oo
-
-  [
-    `
-    //
-    // Division and Infinity
-    //
-  `,
-  ],
-  ['(-\\infty)/\\infty', NaN],
-  ['\\infty/0.5', '\\infty'],
-  ['\\infty/(-2)', '-\\infty'],
-  ['\\infty/0', NaN], // 🙁 +oo
-  ['(-\\infty)/1.7', '-\\infty'],
-  ['(-\\infty)/(1-3)', '\\infty'],
-  ['2/\\infty', 0],
-  ['-100/(-\\infty)', 0],
-  ['0/\\infty', 0],
-
-  [
-    `
-    //
-    // Addition and Subtraction and Infinity
-    //
-  `,
-  ],
-  ['\\infty-\\infty', NaN],
-  ['-\\infty-\\infty', '-\\infty'],
-  ['\\infty+\\infty', '\\infty'],
-  ['\\infty+10', '\\infty'],
-  ['\\infty-10', '\\infty'],
-  ['-\\infty+10', '-\\infty'],
-  ['-\\infty-10', '-\\infty'],
-  ['-10-\\infty', '-\\infty'],
-
-  [
-    `
-    //
-    // Trig and Infinity
-    //
-  `,
-  ],
-  ['\\sin(\\infty)', NaN], // 👍 \sin(x) -> \operatorname{NaN}; ({ x }) => x.isInfinity === true
-  ['\\cos(\\infty)', NaN], // 👍 \cos(x) -> \operatorname{NaN}; ({ x }) => x.isInfinity === true
-  ['\\tan(\\infty)', NaN], // 👍 \tan(x) -> \operatorname{NaN}; ({ x }) => x.isInfinity === true
-  ['\\cot(\\infty)', NaN], // 👍 \cot(x) -> \operatorname{NaN}; ({ x }) => x.isInfinity === true
-  ['\\sec(\\infty)', NaN], // 👍 \sec(x) -> \operatorname{NaN}; ({ x }) => x.isInfinity === true
-  ['\\csc(\\infty)', NaN], // 👍 \csc(x) -> \operatorname{NaN}; ({ x }) => x.isInfinity === true
-  ['\\sin(-\\infty)', NaN], // 👍 \sin(x) -> \operatorname{NaN}; ({ x }) => x.isInfinity === true
-  ['\\cos(-\\infty)', NaN], // 👍 \cos(x) -> \operatorname{NaN}; ({ x }) => x.isInfinity === true
-  ['\\tan(-\\infty)', NaN], // 👍 \tan(x) -> \operatorname{NaN}; ({ x }) => x.isInfinity === true
-  ['\\cot(-\\infty)', NaN], // 👍 \cot(x) -> \operatorname{NaN}; ({ x }) => x.isInfinity === true
-  ['\\sec(-\\infty)', NaN], // 👍 \sec(x) -> \operatorname{NaN}; ({ x }) => x.isInfinity === true
-  ['\\csc(-\\infty)', NaN], // 👍 \csc(x) -> \operatorname{NaN}; ({ x }) => x.isInfinity === true
-
-  [
-    `
-    //
-    // Inverse Trig and Infinity
-    //
-  `,
-  ],
-  ['\\arcsin(\\infty)', NaN], // 👍 \arcsin(\infty) -> \operatorname{NaN}
-  ['\\arccos(\\infty)', NaN], // 👍 \arccos(\infty) -> \operatorname{NaN}
-  ['\\arcsin(-\\infty)', NaN], // 👍 \arcsin(-\infty) -> \operatorname{NaN}
-  ['\\arccos(-\\infty)', NaN], // 👍 \arccos(-\infty) -> \operatorname{NaN}
-  ['\\arctan(\\infty)', '\\frac{\\pi}{2}'], // 👍 \arctan(\infty) -> \frac{\pi}{2}
-  ['\\arctan(-\\infty)', '-\\frac{\\pi}{2}'], // 🙁 -pi / 2
-  ['\\arcctg(\\infty)', 0], // 👍 \arcctg(\infty) -> 0
-  ['\\arcctg(-\\infty)', '\\pi'], // 👍 \arcctg(-\infty) -> \pi
-  ['\\arcsec(\\infty)', '\\frac{\\pi}{2}'], // 👍 \arcsec(\infty) -> \frac{\pi}{2}
-  ['\\arcsec(-\\infty)', '\\frac{\\pi}{2}'], // 👍 \arcsec(-\infty) -> \frac{\pi}{2}
-  ['\\arccsc(\\infty)', 0], // 👍 \arccsc(\infty) -> 0
-  ['\\arccsc(-\\infty)', 0], // 👍 \arccsc(-\infty) -> 0
-
-  [
-    `
-    //
-    // Hyperbolic Trig and Infinity
-    //
-  `,
-  ],
-  ['\\sinh(\\infty)', '\\infty'], // 👍 \sinh(\infty) -> \infty
-  ['\\sinh(-\\infty)', '-\\infty'], // 👍 \sinh(-\infty) -> -\infty
-  ['\\cosh(\\infty)', '\\infty'], // 👍 \cosh(\infty) -> \infty
-  ['\\cosh(-\\infty)', '\\infty'], // 👍 \cosh(-\infty) -> \infty
-  ['\\tanh(\\infty)', 1], // 👍 \tanh(\infty) -> 1
-  ['\\tanh(-\\infty)', -1], // 👍 \tanh(-\infty) -> -1
-  ['\\coth(\\infty)', 1], // 👍 \coth(\infty) -> 1
-  ['\\coth(-\\infty)', -1], // 👍 \coth(-\infty) -> -1
-  ['\\sech(\\infty)', 0], // 👍 \sech(\infty) -> 0
-  ['\\sech(-\\infty)', 0], // 👍 \sech(-\infty) -> 0
-  ['\\csch(\\infty)', 0], // 👍 \csch(\infty) -> 0
-  ['\\csch(-\\infty)', 0], // 👍 \csch(-\infty) -> 0
-
-  [
-    `
-    //
-    // Inverse Hyperbolic Trig and Infinity
-    //
-  `,
-  ],
-  ['\\arsinh(\\infty)', '\\infty'], // 👍 \arsinh(\infty) -> \infty
-  ['\\arsinh(-\\infty)', '-\\infty'], // 👍 \arsinh(-\infty) -> -\infty
-  ['\\arcosh(\\infty)', '\\infty'], // 👍 \arcosh(\infty) -> \infty
-  ['\\arcosh(-\\infty)', NaN], // 👍 \arcosh(-\infty) -> \operatorname{NaN}
-  ['\\artanh(\\infty)', NaN], // 👍 \artanh(x); ({ x }) => x.isInfinity === true
-  ['\\artanh(-\\infty)', NaN], // 👍 \artanh(x); ({ x }) => x.isInfinity === true
-  ['\\operatorname{arcoth}(\\infty)', NaN], // 🙁 0
-  ['\\operatorname{arcoth}(-\\infty)', NaN], // 🙁 pi
-  ['\\arsech(\\infty)', NaN], // 👍 \arsech(x); ({ x }) => x.isInfinity === true
-  ['\\arsech(-\\infty)', NaN], // 👍 \arsech(x); ({ x }) => x.isInfinity === true
-  ['\\arcsch(\\infty)', NaN], // 👍 \arcsch(x); ({ x }) => x.isInfinity === true
-  ['\\arcsch(-\\infty)', NaN], // 👍 \arcsch(x); ({ x }) => x.isInfinity === true
-
-  [
-    `
-    //
-    // Negative Exponents and Denominator
-    //
-  `,
-  ],
-  ['\\frac{2}{\\pi^{-2}}', '2\\pi^2'], // 🙁 2 / pi^(-2)
-  ['\\frac{2}{x\\pi^{-2}}', '\\frac{2}{x} \\pi^2'], // 🙁 2 / (x * pi^(-2))
-  ['(3/\\pi)^{-1}', '\\pi/3'],
-  ['(3/x)^{-1}', '(3/x)^{-1}'], // 🙁 with all rules: x / 3
-  ['(x/\\pi)^{-3}', '\\pi^3 / x^3'],
-  ['(x/y)^{-3}', '(x/y)^{-3}'], // 🙁 with all rules: y^3 / x^3
-  ['(x^2/\\pi^3)^{-2}', '\\pi^6/x^4'],
-
-  [
-    `
-    //
-    // Powers: Division Involving x
-    //
-  `,
-  ],
-  ['x/x^3', '1/x^2'],
-  ['(2*x)/x^5', '2/x^4'],
-  ['x/x^{-2}', 'x/x^{-2}'], // 🙁 with all rules: x^3
-  ['x^2/x', 'x^2/x'], // 🙁 with all rules: x
-  ['x^{0.3}/x', '1/x^{0.7}'], // 👍 x^n/x -> 1/x^{1-n}; ({ x, n }) => x.isNotZero || n.isLess(1) === true
-  ['x^{-3/5}/x', '1/x^{8/5}'],
-  ['\\pi^2/\\pi', '\\pi'],
-  ['\\pi/\\pi^{-2}', '\\pi^3'],
-  ['\\sqrt[3]{x}/x', '1/x^{2/3}'],
-
-  [
-    `
-    //
-    // Powers: Multiplication Involving x
-    //
-  `,
-  ],
-  ['x^3*x', 'x^4'],
-  ['x^{-2}*x', '1/x'],
-  ['x^{-1/3}*x', 'x^{-1/3}*x'], // 🙁 with all rules: x^(2/3)
-  ['\\pi^{-2}*\\pi', '1/\\pi'],
-  ['\\pi^{-0.2}*\\pi', '\\pi^{0.8}'], // 👍 x^n*x -> x^{n+1}; ({ x, n }) => x.isNotZero === true || n.isPositive === true || x.isLess(-1) === true
-  ['\\sqrt[3]{x}*x', 'x^{4/3}'],
-
-  [
-    `
-    //
-    // Powers: Multiplication of Two Powers
-    //
-  `,
-  ],
-  ['x^2*x^{-3}', '1/x'],
-  ['x^2*x^{-1}', 'x^2 x^{-1}'], // 🙁 with all rules: x
-  ['x^2*x^3', 'x^5'],
-  ['x^{-2}*x^{-1}', '1/x^3'],
-  ['x^{2/3}*x^2', 'x^{8/3}'],
-  ['x^{5/2}*x^3', 'x^{11/2}'],
-  ['\\pi^{-1}*\\pi^2', '\\pi'],
-  ['\\sqrt{x}*\\sqrt{x}', '(\\sqrt{x})^2'], // 🙁 x
-  ['\\sqrt{x}*x^2', 'x^{5/2}'],
-
-  [
-    `
-    //
-    // Powers: Division of Two Powers
-    //
-    `,
-  ],
-  ['x^2/x^3', '1/x'],
-  ['x^{-1}/x^3', '1/x^4'], // 👍 (x) => {         if (x.operator === 'Divide')             return { value: x.op1.div(x.op2), because: 'division' };         if (x.operator === 'Rational' && x.nops === 2)             return { value: x.op1.div(x.op2), because: 'rational' };         return undefined;     }
-  ['x/x^{-1}', 'x/x^{-1}'], // 🙁 with all rules: x^2
-  ['\\pi / \\pi^{-1}', '\\pi^2'],
-  ['\\pi^{0.2}/\\pi^{0.1}', '\\pi^{0.1}'], // 🙁 pi^(0.3)
-  ['x^{\\sqrt{2}}/x^3', 'x^{\\sqrt{2}-3}'], // 🙁 x^(sqrt(2)) / x^3
-
-  [
-    `
-    //
-    // Powers and Denominators
-    //
-  `,
-  ],
-  ['x/(\\pi/2)^3', '8x/\\pi^3'],
-  ['x/(\\pi/y)^3', 'x/(\\pi/y)^3'],
-
-  [
-    `
-    //
-    // Powers and Roots
-    //
-  `,
-  ],
-  ['\\sqrt{x^4}', 'x^2'], // 🙁 sqrt(x^4)
-  ['\\sqrt{x^3}', 'x^{3/2}'], // 🙁 sqrt(x^3)
-  ['\\sqrt[3]{x^2}', 'x^{2/3}'],
-  ['\\sqrt[4]{x^6}', 'x^{3/2}'],
-  ['\\sqrt{x^6}', '|x|^3'], // 🙁 sqrt(x^6)
-  ['\\sqrt[4]{x^4}', '|x|'], // 🙁 x
-
-  [
-    `
-    //
-    // Ln and Powers
-    //
-  `,
-  ],
-  ['\\ln(x^3)', '3\\ln(x)'],
-  ['\\ln(x^\\sqrt{2})', '\\sqrt{2} \\ln(x)'],
-  ['\\ln(x^2)', '2 \\ln(|x|)'], // 👍 \ln(x^n) -> n*\ln(|x|); ({ n }) => n.isEven === true
-  ['\\ln(x^{2/3})', '2/3 \\ln(|x|)'], // 🙁 (2ln(|x|)) / 3
-  ['\\ln(\\pi^{2/3})', '2/3 \\ln(\\pi)'], // 🙁 (2ln(pi)) / 3
-  ['\\ln(x^{7/4})', '7/4 \\ln(x)'], // 🙁 (7ln(|x|)) / 4
-  ['\\ln(\\sqrt{x})', '\\ln(x)/2'],
-
-  [
-    `
-    //
-    // Log and Powers
-    //
-  `,
-  ],
-  ['\\log_4(x^3)', '3\\log_4(x)'],
-  ['\\log_3(x^\\sqrt{2})', '\\sqrt{2} \\log_3(x)'],
-  ['\\log_4(x^2)', '2\\log_4(|x|)'], // 👍 \log_c(x^n) -> n*\log_c(|x|); ({ n }) => n.isEven === true
-  ['\\log_4(x^{2/3})', '2/3 \\log_4(|x|)'], // 🙁 (2log(|x|, 4)) / 3
-  ['\\log_4(x^{7/4})', '7/4 \\log_4(x)'], // 🙁 (7log(|x|, 4)) / 4
-];
 describe('SIMPLIFY', () => {
-  console.info('Canonicalization test cases\n\n');
+  console.info('\n\nconst CANONICALIZATION_TEST_CASES: TestCase[] = [\n');
+
   for (const test of CANONICALIZATION_TEST_CASES) runTestCase(test);
 
-  console.info('\n\nRule test cases\n\n');
+  console.info('\n];\n\n');
+
+  console.info('const RULE_TEST_CASES: TestCase[] = [\n\n');
+
   const rules = ce.rules([
     ...RULES,
     ...ce.getRuleSet('standard-simplification')!.rules,
   ]);
   for (const test of RULE_TEST_CASES) runTestCase(test, rules);
 
+  console.info('\n];\n\n');
+
   // Display status of rules...
   console.info(
-    '\n\n\nSUMMARY OF RULES USED:\n\n   ✅ = used (a test case used this rule), 🚫 = not used (no test case for this rule)\n\n'
+    '\n\n\n/*\nSUMMARY OF UNUSED RULES:\n\n   🚫 = rule not used (no test case for this rule)\n\n\n'
   );
+  // console.info(
+  //   '\n\n\n/*\nSUMMARY OF RULE USAGE:\n\n   ✅ = used (a test case used this rule), 🚫 = not used (no test case for this rule)\n\n\n'
+  // );
   for (const rule of ce.rules(RULES).rules) {
-    if (RULES_USED.includes(ruleName(rule) ?? 'no rule'))
-      console.info('✅ ' + ruleName(rule));
-    else console.info('🚫 ' + ruleName(rule));
+    if (!RULES_USED.includes(ruleName(rule) ?? 'no rule'))
+      console.info('🚫 ' + ruleName(rule));
+    // else console.info('✅ ' + ruleName(rule));
   }
+  console.info('*/\n\n\n');
 });
 
 describe('SIMPLIFY', () => {

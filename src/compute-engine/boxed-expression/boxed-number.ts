@@ -614,6 +614,7 @@ export class BoxedNumber extends _BoxedExpression {
   get isReal(): boolean {
     if (typeof this._value === 'number') return true;
     // If it's 'complex', it has an imaginary part, otherwise it's real
+    //    complex :> real :> rational :> integer
     return this._value.type !== 'complex';
   }
 
