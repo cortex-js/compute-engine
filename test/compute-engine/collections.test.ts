@@ -523,10 +523,15 @@ describe('ITERABLE OPERATIONS', () => {
       `["List", 8, 14, 6, 20, 3, 4, 12]`
     ));
 
-  test('Filter', () =>
+  test('Filter a list', () =>
     expect(
       evaluate(['Filter', list, ['Greater', '_', 10]])
     ).toMatchInlineSnapshot(`["List", 13, 19, 11]`));
+
+  test('Filter a set', () =>
+    expect(
+      evaluate(['Filter', ['Element', '_', 'Integers'], ['Greater', '_', 10]])
+    ).toMatchInlineSnapshot()); // @fixme
 
   test('Reduce', () =>
     expect(

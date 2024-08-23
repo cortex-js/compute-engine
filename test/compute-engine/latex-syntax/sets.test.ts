@@ -19,9 +19,9 @@ describe('SERIALIZING SETS', () => {
     // With predicate and named arguments
     expect(
       latex([
-        'Set',
-        ['Element', 'x', 'Numbers'],
-        ['Condition', 'x', ['NotEqual', 'x', 0]],
+        'Filter',
+        ['Set', ['Element', '_', 'Numbers']],
+        ['NotEqual', '_', 0],
       ])
     ).toMatchInlineSnapshot(
       `\\lbrace x\\in\\mathrm{Numbers}, \\mathrm{Condition}(x, x\\ne0)\\rbrace`
