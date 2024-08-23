@@ -17,7 +17,12 @@ import type {
   CanonicalOptions,
 } from '../public';
 
-import type { BoxedExpression, SemiBoxedExpression, Type } from './public';
+import type {
+  BoxedExpression,
+  SemiBoxedExpression,
+  Sign,
+  Type,
+} from './public';
 
 import { findUnivariateRoots } from './solve';
 import { replace } from './rules';
@@ -495,6 +500,19 @@ export class BoxedFunction extends _BoxedExpression {
     const s = this.sgn;
     if (s === undefined) return undefined;
     return s === 0;
+
+    // if (s === 'zero') return true;
+    // if (
+    //   [
+    //     'not-zero',
+    //     'real-not-zero',
+    //     'positive',
+    //     'negative',
+    //     'unsigned',
+    //   ].includes(s)
+    // )
+    //   return false;
+    // return undefined;
   }
 
   get isNotZero(): boolean | undefined {
@@ -504,15 +522,17 @@ export class BoxedFunction extends _BoxedExpression {
     const s = this.sgn;
     if (s === undefined) return undefined;
     return s !== 0;
+
+    // if (['not-zero','real-not-zero','positive','negative'].includes(s)) return true;
+    // if (s==='zero') return false:
+    // return undefined
   }
 
   get isOne(): boolean | undefined {
     // Use a flag in priority
-    if (this._def?.flags?.notZero !== undefined) return this._def.flags.notZero;
+    if (this._def?.flags?.one !== undefined) return this._def.flags.one;
 
-    const s = this.sgn;
-    if (s === undefined) return undefined;
-    if (isNaN(s) || s <= 0) return false;
+    if (this.isNonPositive || this.isImaginary) return false;
     return undefined;
   }
 
@@ -521,9 +541,7 @@ export class BoxedFunction extends _BoxedExpression {
     if (this._def?.flags?.negativeOne !== undefined)
       return this._def.flags.negativeOne;
 
-    const s = this.sgn;
-    if (s === undefined) return undefined;
-    if (isNaN(s) || s >= 0) return false;
+    if (this.isNonNegative || this.isImaginary) return false;
     return undefined;
   }
 
@@ -536,6 +554,12 @@ export class BoxedFunction extends _BoxedExpression {
     const s = this.sgn;
     if (s === undefined) return undefined;
     return !isNaN(s) && s > 0;
+
+    // if (s === 'positive') return true;
+    // if (['non-positive', 'zero', 'unsigned', 'negative'].includes(s))
+    //   return false;
+
+    // return undefined;
   }
 
   // x >= 0
@@ -547,6 +571,10 @@ export class BoxedFunction extends _BoxedExpression {
     const s = this.sgn;
     if (s === undefined) return undefined;
     return !isNaN(s) && s >= 0;
+
+    // if (s === 'positive' || s === 'non-negative') return true;
+    // if (['negative', 'zero', 'unsigned'].includes(s)) return false;
+    // return undefined;
   }
 
   // x < 0
@@ -558,6 +586,10 @@ export class BoxedFunction extends _BoxedExpression {
     const s = this.sgn;
     if (s === undefined) return undefined;
     return !isNaN(s) && s < 0;
+    // if (s === 'negative') return true;
+    // if (['non-negative', 'zero', 'unsigned', 'positive'].includes(s))
+    //   return false;
+    // return undefined;
   }
 
   // x <= 0
@@ -569,6 +601,11 @@ export class BoxedFunction extends _BoxedExpression {
     const s = this.sgn;
     if (s === undefined) return undefined;
     return !isNaN(s) && s <= 0;
+
+    // if (s === 'negative' || s === 'non-positive') return true;
+    // if (['positive', 'zero', 'unsigned'].includes(s)) return false;
+
+    // return undefined;
   }
 
   /** `isSame` is structural/symbolic equality */
