@@ -85,7 +85,7 @@ function matchOnce(
     // (e.g. `5` to `5+_`).
 
     if (!acceptVariants) return null;
-    return matchVariants(expr, pattern, substitution, options);
+    return matchVariations(expr, pattern, substitution, options);
   }
 
   //
@@ -103,7 +103,7 @@ function matchOnce(
     // Match the symbol to a variant of the pattern
     // (e.g. `x` to `0+x`).
     if (!acceptVariants) return null;
-    return matchVariants(expr, pattern, substitution, options);
+    return matchVariations(expr, pattern, substitution, options);
   }
 
   //
@@ -135,12 +135,12 @@ function matchOnce(
         : matchArguments(expr, pattern.ops, substitution, options);
     }
 
-    if (result === null && !useVariations) {
+    if (result === null && useVariations) {
       //
       // 3. The operators may or may not match, try some variations
       //
       if (!acceptVariants) return null;
-      result = matchVariants(expr, pattern, substitution, options);
+      result = matchVariations(expr, pattern, substitution, options);
     }
 
     if (result !== null) substitution = result;
@@ -189,7 +189,7 @@ function matchRecursive(
  * For example, we accept `0+x` as a match for `x`, and
  * 'Square(x)' as a match for 'Power(x, 2)`.
  */
-function matchVariants(
+function matchVariations(
   expr: BoxedExpression,
   pattern: BoxedExpression,
   substitution: BoxedSubstitution,
@@ -199,7 +199,7 @@ function matchVariants(
   const ce = expr.engine;
   const varOptions = { ...options, acceptVariants: false };
 
-  const matchVariant = (op, ops) =>
+  const matchVariation = (op, ops) =>
     matchOnce(
       ce.function(op, ops, { canonical: false }),
       pattern,
@@ -217,12 +217,12 @@ function matchVariants(
 
   if (operator === 'Add') {
     // x -> 0+x
-    let result = matchVariant('Add', [0, expr]);
+    let result = matchVariation('Add', [0, expr]);
     if (result !== null) return result;
 
     // a-b -> a+(-b)
     if (expr.operator === 'Subtract')
-      result = matchVariant('Add', [expr.op1!, ['Negate', expr.op2!]]);
+      result = matchVariation('Add', [expr.op1!, ['Negate', expr.op2!]]);
 
     if (result !== null) return result;
   }
@@ -230,12 +230,12 @@ function matchVariants(
   // The pattern is ['Subtract', a, b]
   if (operator === 'Subtract') {
     // a -> a-0
-    let result = matchVariant('Subtract', [expr, 0]);
+    let result = matchVariation('Subtract', [expr, 0]);
     if (result !== null) return result;
 
     // -a -> 0-a
     if (expr.operator === 'Negate')
-      result = matchVariant('Subtract', [0, expr.op1!]);
+      result = matchVariation('Subtract', [0, expr.op1!]);
 
     if (result !== null) return result;
   }
@@ -243,54 +243,57 @@ function matchVariants(
   // The pattern is ['Multiply', a, b]
   if (operator === 'Multiply') {
     // x -> 1*x
-    let result = matchVariant('Multiply', [1, expr]);
+    let result = matchVariation('Multiply', [1, expr]);
     if (result !== null) return result;
 
     // -x -> -1*x
     if (expr.operator === 'Negate') {
-      result = matchVariant('Multiply', [-1, expr.op1!]);
+      result = matchVariation('Multiply', [-1, expr.op1!]);
       if (result !== null) return result;
     }
 
     // x/a -> (1/a)*x
     if (expr.operator === 'Divide') {
-      result = matchVariant('Multiply', [expr.op1!, ['Divide', 1, expr.op2!]]);
+      result = matchVariation('Multiply', [
+        expr.op1!,
+        ['Divide', 1, expr.op2!],
+      ]);
       if (result !== null) return result;
     }
   }
 
   if (operator === 'Divide') {
     // x/1 -> x
-    const result = matchVariant('Divide', [expr, 1]);
+    const result = matchVariation('Divide', [expr, 1]);
     if (result !== null) return result;
   }
 
   if (operator === 'Square') {
     // Power(x, 2) -> Square(x)
-    const result = matchVariant('Power', [expr, 2]);
+    const result = matchVariation('Power', [expr, 2]);
     if (result !== null) return result;
   }
 
   if (operator === 'Exp') {
     // Power(E, x) -> Exp(x)
-    const result = matchVariant('Power', [ce.E, expr]);
+    const result = matchVariation('Power', [ce.E, expr]);
     if (result !== null) return result;
   }
 
   if (operator === 'Power') {
     // Square(x) -> Power(x, 2)
     if (pattern.op2.re === 2 && pattern.op2.im === 0) {
-      const result = matchVariant('Square', [expr]);
+      const result = matchVariation('Square', [expr]);
       if (result !== null) return result;
     }
     // Exp(x) -> Power(E, x)
     if (pattern.op1.symbol === 'ExponentialE') {
-      const result = matchVariant('Exp', [expr]);
+      const result = matchVariation('Exp', [expr]);
       if (result !== null) return result;
     }
     // x -> Power(x, 1)
     {
-      const result = matchVariant('Power', [expr, 1]);
+      const result = matchVariation('Power', [expr, 1]);
       if (result !== null) return result;
     }
   }
@@ -419,10 +422,11 @@ export function match(
   pattern = pattern.structural;
 
   // Default options
+  const useVariations = options?.useVariations ?? false;
   const opts = {
     recursive: options?.recursive ?? false,
-    useVariations: options?.useVariations ?? false,
-    acceptVariants: !(options?.useVariations ?? false),
+    useVariations,
+    acceptVariants: useVariations,
   };
   const substitution = options?.substitution ?? {};
 

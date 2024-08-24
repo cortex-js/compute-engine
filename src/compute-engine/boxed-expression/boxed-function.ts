@@ -923,17 +923,17 @@ export class BoxedFunction extends _BoxedExpression {
 
   /** `isEqual` is mathematical equality */
   isEqual(rhs: number | BoxedExpression): boolean {
+    const lhs = this.N();
+
     if (rhs === 0 || (typeof rhs !== 'number' && rhs.isZero))
-      return this.isZero === true;
+      return lhs.isZero === true;
     if (rhs === 1 || (typeof rhs !== 'number' && rhs.isOne))
-      return this.isOne === true;
+      return lhs.isOne === true;
     if (rhs === -1 || (typeof rhs !== 'number' && rhs.isNegativeOne))
-      return this.isNegativeOne === true;
+      return lhs.isNegativeOne === true;
 
     rhs = this.engine.box(rhs);
     if (this === rhs) return true;
-
-    const lhs = this;
 
     const operator = lhs.operator;
     //

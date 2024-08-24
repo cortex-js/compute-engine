@@ -105,7 +105,8 @@ export function checkJson(inExpr: SemiBoxedExpression | null): string {
 
     const canonical = exprToString(expr);
 
-    const simplify = expr.simplify().toString();
+    const simplifyExpr = expr.simplify();
+    const simplify = simplifyExpr.toString();
     const evalAuto = expr.evaluate().toString();
     const numEvalAuto = expr.N().toString();
 
@@ -117,6 +118,7 @@ export function checkJson(inExpr: SemiBoxedExpression | null): string {
 
     if (
       boxed === canonical &&
+      simplifyExpr.isSame(expr) &&
       evalAuto === simplify &&
       evalAuto === evalMachine &&
       evalAuto === numEvalAuto &&

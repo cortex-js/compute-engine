@@ -6,8 +6,14 @@ import {
 } from '../boxed-expression/trigonometry';
 import { mul } from '../library/arithmetic-multiply';
 import { simplifyLogicFunction } from '../library/logic';
-import { Rule, RuleStep } from '../public';
+import { BoxedExpression, Rule, RuleStep } from '../public';
 import { expand } from '../boxed-expression/expand';
+import {
+  isEquation,
+  isInequality,
+  isRelationalOperator,
+} from '../boxed-expression/utils';
+import { factor } from '../boxed-expression/factor';
 
 /**
  * @todo: a set to "tidy" an expression. Different from a canonical form, but
@@ -40,9 +46,17 @@ export const SIMPLIFY_RULES: Rule[] = [
 
   '\\varphi -> \\frac{1+\\sqrt{5}}{2}',
 
+  simplifyRelationalOperator,
+
+  simplifySystemOfEquations,
+
   // Try to expand the expression:
   // x*(y+z) -> x*y + x*z
-  { replace: (x) => expand(x) ?? undefined, id: 'expand' },
+  // { replace: (x) => expand(x) ?? undefined, id: 'expand' },
+  (x) => {
+    const result = expand(x);
+    return result ? { value: result, because: 'expand' } : undefined;
+  },
 
   //
   // Add, Negate
@@ -1328,3 +1342,64 @@ export const SIMPLIFY_RULES: Rule[] = [
 //   }
 //   return expr;
 // }
+
+function simplifyRelationalOperator(
+  expr: BoxedExpression
+): RuleStep | undefined {
+  if (!isInequality(expr) && !isEquation(expr)) return undefined;
+
+  let originalExpr = expr;
+
+  const ce = expr.engine;
+
+  //
+  // 1/ Simplify both sides of the relational operator
+  //
+
+  const op1 = expr.op1.simplify();
+  const op2 = expr.op2.simplify();
+  expr = ce.function(expr.operator, [op1, op2]);
+
+  //
+  // 2/ Try to factor terms across the relational operator
+  //   2x < 4t -> x < 2t
+  //
+  expr = factor(expr) ?? expr;
+  console.assert(isRelationalOperator(expr.operator));
+  if (expr.nops === 2) {
+    // Try f(x) < g(x) -> f(x) - g(x) < 0
+    if (expr.op2.isNotZero) {
+      const alt = factor(
+        ce.function(expr.operator, [expr.op1.sub(expr.op2), ce.Zero])
+      );
+      // Pick the cheapest (simplest) of the two
+      if (ce.costFunction(alt) < ce.costFunction(expr)) expr = alt;
+    }
+  }
+
+  if (expr.isSame(originalExpr)) return undefined;
+
+  return { value: expr, because: 'simplify-relational-operator' };
+}
+
+function simplifySystemOfEquations(
+  expr: BoxedExpression
+): RuleStep | undefined {
+  if (expr.operator !== 'List') return undefined;
+
+  // Check if every element is an equation or inequality
+  if (!expr.ops!.every((x) => isEquation(x) || isInequality(x)))
+    return undefined;
+
+  // The result is a list of simplified equations and inequalities
+  // @todo: could also resolve it... See https://github.com/cortex-js/compute-engine/issues/189
+
+  const ce = expr.engine;
+  return {
+    value: ce.function(
+      'List',
+      expr.ops!.map((x) => x.simplify())
+    ),
+    because: 'simplify-system-of-equations',
+  };
+}

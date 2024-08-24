@@ -17,7 +17,9 @@ function match(
   expr: BoxedExpression | Expression,
   options?: PatternMatchOptions
 ): Substitution | null {
-  const result = engine.box(expr).match(ce.box(pattern), options);
+  const result = engine
+    .box(expr)
+    .match(ce.box(pattern), { useVariations: true, ...options });
   if (result === null) return null;
   const r = {};
   for (const key of Object.keys(result)) r[key] = result[key];
@@ -56,7 +58,7 @@ describe('Examples from Patterns and Rules guide', () => {
   test('prevent implicit addition (variants)', () =>
     expect(
       match(['Add', 'x', '_a'], 'x', {
-        exact: true,
+        useVariations: false,
       })
     ).toMatchInlineSnapshot(`null`));
 

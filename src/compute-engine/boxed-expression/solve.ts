@@ -195,9 +195,8 @@ export function findUnivariateRoots(
 ): ReadonlyArray<BoxedExpression> {
   const ce = expr.engine;
 
-  if (expr.operator === 'Equal') {
-    expr = canonicalAdd(ce, [expr.op1.canonical, expr.op2.neg()]).simplify();
-  }
+  if (expr.operator === 'Equal')
+    expr = expr.op1.canonical.sub(expr.op2).simplify();
 
   const rules = ce.getRuleSet('solve-univariate')!;
 
@@ -205,11 +204,16 @@ export function findUnivariateRoots(
   let exprs = [expr.subs({ [x]: '_x' }, { canonical: false })];
 
   let result = exprs.flatMap((expr) =>
-    matchAnyRules(expr, rules, { _x: ce.symbol('_x') })
+    matchAnyRules(
+      expr,
+      rules,
+      { _x: ce.symbol('_x') },
+      { useVariations: true, canonical: true }
+    )
   );
 
   // If we didn't find a solution yet, try modifying the expression
-  //
+  //expr.
   // Note: @todo we can try different heuristics here:
   // Collection: reduce the numbers of occurrences of the unknown
   // Attraction: bring the occurrences of the unknown closer together

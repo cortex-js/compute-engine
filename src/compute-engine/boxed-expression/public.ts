@@ -137,18 +137,19 @@ export type Sign =
   | 'positive'
   /** The expression is < 0 */
   | 'negative'
-  /** The expression is >= 0 */
+  /** The expression is >= 0 and isPositive is either false or undefined*/
   | 'non-negative'
-  /** The expression is <= 0 */
+  /** The expression is <= 0 and isNegative is either false or undefined*/
   | 'non-positive'
-  /** The expression is not equal to 0, but it's neither positive nor negative */
+  /** The expression is not equal to 0 (possibly with an imaginary part) and isPositive, isNegative, isUnsigned are all false or undefined */
   | 'not-zero'
-  /** The expression is ≠ 0 */
+  /** The expression has no imaginary part and a non-zero real part and isPositive and isNegative are false or undefined*/
   | 'real-not-zero'
-  /** The expression has no imaginary part ?? */
+  /** The expression has no imaginary part and isNotZero,isPositive,isNegative,isNonNegative,isNonPositive,isZero are either false or undefined*/
   | 'real'
-  /** The expression has an imaginary part */
+  /** The expression has an imaginary part or is NaN */
   | 'unsigned';
+
 /**
  * :::info[THEORY OF OPERATIONS]
  *
@@ -2219,7 +2220,8 @@ export interface IComputeEngine extends IBigNum {
       | ReadonlyArray<Rule | BoxedRule>
       | BoxedRuleSet
       | undefined
-      | null
+      | null,
+    options?: { canonical?: boolean }
   ): BoxedRuleSet;
 
   /**

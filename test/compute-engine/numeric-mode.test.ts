@@ -57,11 +57,11 @@ describe('NUMERIC MODE', () => {
     `));
 
   test(`12345678901234567890^{23456789012345678901}`, () =>
-    expect(
-      check('12345678901234567890^{23456789012345678901}')
-    ).toMatchInlineSnapshot(
-      `["Power", {num: "12345678901234567890"}, {num: "23456789012345678901"}]`
-    ));
+    expect(check('12345678901234567890^{23456789012345678901}'))
+      .toMatchInlineSnapshot(`
+      box       = ["Power", {num: "12345678901234567890"}, {num: "23456789012345678901"}]
+      simplify  = +oo
+    `));
 
   test(`\\cos(555555^{-1})`, () =>
     expect(check('\\cos(555555^{-1})')).toMatchInlineSnapshot(`
@@ -79,7 +79,10 @@ describe('NUMERIC MODE', () => {
     `));
 
   test(`\\sqrt{-1}`, () =>
-    expect(check('\\sqrt{-1}')).toMatchInlineSnapshot(`["Sqrt", -1]`));
+    expect(check('\\sqrt{-1}')).toMatchInlineSnapshot(`
+      box       = ["Sqrt", -1]
+      simplify  = i
+    `));
 
   test('e^{i\\pi}', () =>
     expect(check('e^{i\\pi}')).toMatchInlineSnapshot(`

@@ -372,15 +372,22 @@ export class Product {
   }
 }
 
-export function commonTerms(lhs: Product, rhs: Product): BoxedExpression {
+export function commonTerms(
+  lhs: Product,
+  rhs: Product
+): [NumericValue, BoxedExpression] {
   const ce = lhs.engine;
 
-  // The common coefficient between the two products
+  //
+  // Extract common number literal between the two products
+  //
   const coef = lhs.coefficient.gcd(rhs.coefficient);
 
-  if (coef.isOne) return ce.One;
+  if (coef.isOne) return [ce._numericValue(1), ce.One];
 
-  // Extract common terms between two products
+  //
+  // Extract common terms between the two products
+  //
 
   const xs: BoxedExpression[] = [];
 
@@ -399,8 +406,7 @@ export function commonTerms(lhs: Product, rhs: Product): BoxedExpression {
   }
 
   // Put everything together
-  return mul(ce.box(coef), ...xs);
-  // return canonicalMultiply(ce, [ce.box(coef), ...xs]);
+  return [coef, xs.length === 0 ? ce.One : mul(...xs)];
 }
 
 // Put the exponents in a bucket:

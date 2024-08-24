@@ -17,21 +17,21 @@ describe('OPERATOR oprel', () => {
     expect(check('x+y=1+1')).toMatchInlineSnapshot(`
       box       = ["Equal", ["Add", "x", "y"], ["Add", 1, 1]]
       canonical = ["Equal", ["Add", 1, 1], ["Add", "x", "y"]]
-      simplify  = x + y - 2 === 0
+      simplify  = x + y === 2
       eval-auto = "False"
     `));
 
   test('x<1', () =>
     expect(check('x<1')).toMatchInlineSnapshot(`["Less", "x", 1]`));
   test('x<1+1', () =>
-    expect(check('x<1+1')).toMatchInlineSnapshot(
-      `["Less", "x", ["Add", 1, 1]]`
-    ));
+    expect(check('x<1+1')).toMatchInlineSnapshot(`
+      box       = ["Less", "x", ["Add", 1, 1]]
+      simplify  = x < 2
+    `));
   test('x+y<1+1', () =>
     expect(check('x+y<1+1')).toMatchInlineSnapshot(`
       box       = ["Less", ["Add", "x", "y"], ["Add", 1, 1]]
-      simplify  = x + y - 2 < 0
-      eval-auto = x + y < 2
+      simplify  = x + y < 2
     `));
 
   test('x>=1', () =>
@@ -55,10 +55,16 @@ describe('OPERATOR oprel', () => {
 
 describe('OPERATOR add/subtract', () => {
   test('1+2', () =>
-    expect(check('1+2')).toMatchInlineSnapshot(`["Add", 1, 2]`));
+    expect(check('1+2')).toMatchInlineSnapshot(`
+      box       = ["Add", 1, 2]
+      simplify  = 3
+    `));
 
   test('1+2+3', () =>
-    expect(check('1+2+3')).toMatchInlineSnapshot(`["Add", 1, 2, 3]`));
+    expect(check('1+2+3')).toMatchInlineSnapshot(`
+      box       = ["Add", 1, 2, 3]
+      simplify  = 6
+    `));
 
   test('1+(2+3)', () =>
     expect(check('1+(2+3)')).toMatchInlineSnapshot(`
@@ -82,9 +88,10 @@ describe('OPERATOR add/subtract', () => {
     `));
 
   test('1+\\infty', () =>
-    expect(check('1+\\infty')).toMatchInlineSnapshot(
-      `["Add", 1, "PositiveInfinity"]`
-    ));
+    expect(check('1+\\infty')).toMatchInlineSnapshot(`
+      box       = ["Add", 1, "PositiveInfinity"]
+      simplify  = +oo
+    `));
 });
 
 describe('OPERATOR invisible', () => {

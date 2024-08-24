@@ -11,9 +11,10 @@ describe('TRIGONOMETRIC FUNCTIONS implicit arguments', () => {
       canonical = ["Subtract", ["Cos", "x"], ["Sin", "x"]]
     `));
   test(`\\cos \\frac{x}{2}^2`, () =>
-    expect(check('\\cos \\frac{x}{2}^2')).toMatchInlineSnapshot(
-      `["Cos", ["Square", ["Divide", "x", 2]]]`
-    ));
+    expect(check('\\cos \\frac{x}{2}^2')).toMatchInlineSnapshot(`
+      box       = ["Cos", ["Square", ["Divide", "x", 2]]]
+      simplify  = cos(0.25 * x^2)
+    `));
 });
 
 describe('TRIGONOMETRIC FUNCTIONS inverse, prime', () => {

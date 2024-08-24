@@ -16,6 +16,7 @@ import type {
   Substitution,
   CanonicalOptions,
   SimplifyOptions,
+  Sign,
 } from '../public';
 
 import type { Expression, MathJsonNumber } from '../../math-json';

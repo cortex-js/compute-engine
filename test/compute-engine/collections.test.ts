@@ -531,7 +531,7 @@ describe('ITERABLE OPERATIONS', () => {
   test('Filter a set', () =>
     expect(
       evaluate(['Filter', ['Element', '_', 'Integers'], ['Greater', '_', 10]])
-    ).toMatchInlineSnapshot()); // @fixme
+    ).toMatchInlineSnapshot(`["Filter", "False", ["Less", 10, "_"]]`)); // @fixme
 
   test('Reduce', () =>
     expect(

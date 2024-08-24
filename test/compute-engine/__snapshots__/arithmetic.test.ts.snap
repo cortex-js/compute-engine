@@ -106,6 +106,7 @@ N-mach    = 2.718281828459045
 
 exports[`CONSTANTS GoldenRatio 1`] = `
 box       = GoldenRatio
+simplify  = 1/2 + sqrt(5) / 2
 eval-auto = "GoldenRatio"
 eval-mach = "GoldenRatio"
 N-auto    = 1.61803398874989484821
@@ -241,7 +242,10 @@ eval-auto = 0.377977742712980563321
 eval-mach = 0.37797774271298024
 `;
 
-exports[`EXACT EVALUATION Cos: Pi (simplify constructible value) 1`] = `["Cos", "Pi"]`;
+exports[`EXACT EVALUATION Cos: Pi (simplify constructible value) 1`] = `
+box       = ["Cos", "Pi"]
+simplify  = -1
+`;
 
 exports[`EXACT EVALUATION Exact values are grouped together 1`] = `
 box       = [
@@ -524,7 +528,10 @@ N-auto    = (0.6931471805599453 + 3.141592653589793i)
 N-mach    = (0.6931471805599453 + 3.141592653589793i)
 `;
 
-exports[`LN Ln 0 1`] = `["Ln", 0]`;
+exports[`LN Ln 0 1`] = `
+box       = ["Ln", 0]
+simplify  = -oo
+`;
 
 exports[`LN Ln 1 1`] = `
 box       = ["Ln", 1]
@@ -556,9 +563,15 @@ N-auto    = 0.0592195443315850221291
 N-mach    = 0.05921954433158507
 `;
 
-exports[`LOG(a,b) LOG(a,b) Log -1, 5 1`] = `["Log", -1, 5]`;
+exports[`LOG(a,b) LOG(a,b) Log -1, 5 1`] = `
+box       = ["Log", -1, 5]
+simplify  = NaN
+`;
 
-exports[`LOG(a,b) LOG(a,b) Log 0, 5 1`] = `["Log", 0, 5]`;
+exports[`LOG(a,b) LOG(a,b) Log 0, 5 1`] = `
+box       = ["Log", 0, 5]
+simplify  = -oo
+`;
 
 exports[`LOG(a,b) LOG(a,b) Log 1, 5 1`] = `
 box       = ["Log", 1, 5]
@@ -608,7 +621,10 @@ N-auto    = (0.30102999566398114 + 1.3643763538418412i)
 N-mach    = (0.30102999566398114 + 1.3643763538418412i)
 `;
 
-exports[`Log Log 0 1`] = `["Log", 0]`;
+exports[`Log Log 0 1`] = `
+box       = ["Log", 0]
+simplify  = -oo
+`;
 
 exports[`Log Log 1 1`] = `
 box       = ["Log", 1]
@@ -630,15 +646,30 @@ canonical = ["Divide", ["Multiply", -2, 2], 3]
 simplify  = -4/3
 `;
 
-exports[`MULTIPLY 2x(1+1.1i) 1`] = `["Multiply", 2, ["Complex", 1, 1.1]]`;
+exports[`MULTIPLY 2x(1+1.1i) 1`] = `
+box       = ["Multiply", 2, ["Complex", 1, 1.1]]
+simplify  = (2 + 2.2i)
+`;
 
-exports[`MULTIPLY 2x(1+i) 1`] = `["Multiply", 2, ["Complex", 1, 1]]`;
+exports[`MULTIPLY 2x(1+i) 1`] = `
+box       = ["Multiply", 2, ["Complex", 1, 1]]
+simplify  = (2 + 2i)
+`;
 
-exports[`MULTIPLY 2x(1.1+1.1i) 1`] = `["Multiply", 2, ["Complex", 1.1, 1.1]]`;
+exports[`MULTIPLY 2x(1.1+1.1i) 1`] = `
+box       = ["Multiply", 2, ["Complex", 1.1, 1.1]]
+simplify  = (2.2 + 2.2i)
+`;
 
-exports[`MULTIPLY 2x(1.1+i) 1`] = `["Multiply", 2, ["Complex", 1.1, 1]]`;
+exports[`MULTIPLY 2x(1.1+i) 1`] = `
+box       = ["Multiply", 2, ["Complex", 1.1, 1]]
+simplify  = (2.2 + 2i)
+`;
 
-exports[`MULTIPLY 2x(1.1i) 1`] = `["Multiply", 2, ["Complex", 0, 1.1]]`;
+exports[`MULTIPLY 2x(1.1i) 1`] = `
+box       = ["Multiply", 2, ["Complex", 0, 1.1]]
+simplify  = 2.2i
+`;
 
 exports[`MULTIPLY 2x(2/3) 1`] = `
 box       = ["Multiply", 2, ["Rational", 2, 3]]
@@ -659,7 +690,10 @@ eval-auto = 2469135781975308642.25
 eval-mach = 2469135781975310000
 `;
 
-exports[`MULTIPLY 2x1234567890987654321 1`] = `["Multiply", 2, {num: "1234567890987654321"}]`;
+exports[`MULTIPLY 2x1234567890987654321 1`] = `
+box       = ["Multiply", 2, {num: "1234567890987654321"}]
+simplify  = 2469135781975308642
+`;
 
 exports[`MULTIPLY 5x(-2.1) 1`] = `
 box       = ["Multiply", 5, -2.1]
@@ -798,7 +832,10 @@ box       = ["Multiply", "x", 2, 3.1, 0]
 canonical = 0
 `;
 
-exports[`Max Max 1`] = `["Max", 2.5]`;
+exports[`Max Max 1`] = `
+box       = ["Max", 2.5]
+simplify  = 2.5
+`;
 
 exports[`Max Max 2`] = `
 box       = ["Max", 2.5, 1.1]
@@ -822,7 +859,10 @@ eval-auto = max(18.4, "foo")
 
 exports[`Max Max 6`] = `["Max", "foo", "bar"]`;
 
-exports[`Min Min 1`] = `["Min", 2.5]`;
+exports[`Min Min 1`] = `
+box       = ["Min", 2.5]
+simplify  = 2.5
+`;
 
 exports[`Min Min 2`] = `
 box       = ["Min", 2.5, 1.1]
@@ -1038,9 +1078,15 @@ exports[`SQRT INVALID Sqrt 1`] = `invalid   =["Sqrt", 2.5, ["Error", "'unexpecte
 
 exports[`SQRT √ of list 1`] = `[2,1,7.48331477354788277116,4.2426406871192851464]`;
 
-exports[`SQRT √(3+4i) 1`] = `["Sqrt", ["Complex", 3, 4]]`;
+exports[`SQRT √(3+4i) 1`] = `
+box       = ["Sqrt", ["Complex", 3, 4]]
+simplify  = (2 + i)
+`;
 
-exports[`SQRT √(3^2) 1`] = `["Sqrt", ["Square", 3]]`;
+exports[`SQRT √(3^2) 1`] = `
+box       = ["Sqrt", ["Square", 3]]
+simplify  = 3
+`;
 
 exports[`SQRT √(4x) 1`] = `
 box       = ["Sqrt", ["Multiply", 4, "x"]]
@@ -1155,4 +1201,7 @@ invalid   =[
 ]
 `;
 
-exports[`Square Square 1`] = `["Square", 2.5]`;
+exports[`Square Square 1`] = `
+box       = ["Square", 2.5]
+simplify  = 6.25
+`;

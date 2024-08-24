@@ -334,11 +334,12 @@ function parseModifierExpression(parser: Parser): string | null {
  */
 function parseRulePart(
   ce: IComputeEngine,
-  rule?: string | SemiBoxedExpression | RuleReplaceFunction | RuleFunction
+  rule?: string | SemiBoxedExpression | RuleReplaceFunction | RuleFunction,
+  options?: { canonical?: boolean }
 ): BoxedExpression | undefined {
   if (rule === undefined || typeof rule === 'function') return undefined;
   if (typeof rule === 'string') {
-    let expr = ce.parse(rule, { canonical: false });
+    let expr = ce.parse(rule, { canonical: options?.canonical ?? false });
     expr = expr.map(
       (x) => {
         // Only transform single character symbols. Avoid \pi, \imaginaryUnit, etc..
@@ -349,14 +350,18 @@ function parseRulePart(
     );
     return expr;
   }
-  return ce.box(rule, { canonical: false });
+  return ce.box(rule, { canonical: options?.canonical ?? false });
 }
 
 /** A rule can be expressed as a string of the form
  * "<match> -> <replace>; <condition>"
  * where `<match>`, `<replace>` and `<condition>` are LaTeX expressions.
  */
-function parseRule(ce: IComputeEngine, rule: string): BoxedRule {
+function parseRule(
+  ce: IComputeEngine,
+  rule: string,
+  options?: { canonical?: boolean }
+): BoxedRule {
   const makeWildcardEntry = (x: string) => {
     return {
       kind: 'symbol',
@@ -479,7 +484,7 @@ function parseRule(ce: IComputeEngine, rule: string): BoxedRule {
       },
     },
   ];
-  const expr = ce.parse(rule, { canonical: false });
+  const expr = ce.parse(rule, { canonical: options?.canonical ?? false });
   ce.latexDictionary = previousDictionary;
 
   if (!expr.isValid || expr.operator !== 'Rule')
@@ -495,6 +500,12 @@ function parseRule(ce: IComputeEngine, rule: string): BoxedRule {
       `Invalid rule "${rule}"\n|   The replace expression contains wildcards not present in the match expression`
     );
 
+  if (match.isSame(replace)) {
+    throw new Error(
+      `Invalid rule "${rule}"\n|   The match and replace expressions are the same.\n|   This may be because the rule is not necessary due to canonical simplification`
+    );
+  }
+
   let condFn: undefined | RuleConditionFunction = undefined;
   if (condition !== undefined) {
     // Verify that all the wildcards in the condition also appear in the match
@@ -508,10 +519,14 @@ function parseRule(ce: IComputeEngine, rule: string): BoxedRule {
       condition.subs(sub).evaluate()?.symbol === 'True';
   }
 
-  return boxRule(ce, { match, replace, condition: condFn, id: rule });
+  return boxRule(ce, { match, replace, condition: condFn, id: rule }, options);
 }
 
-function boxRule(ce: IComputeEngine, rule: Rule | BoxedRule): BoxedRule {
+function boxRule(
+  ce: IComputeEngine,
+  rule: Rule | BoxedRule,
+  options?: { canonical?: boolean }
+): BoxedRule {
   if (rule === undefined || rule === null)
     throw new Error('Expected a rule, not ' + rule);
 
@@ -519,7 +534,7 @@ function boxRule(ce: IComputeEngine, rule: Rule | BoxedRule): BoxedRule {
 
   // If the rule is defined as a single string, parse it
   // e.g. `|x| -> x; x > 0`
-  if (typeof rule === 'string') return parseRule(ce, rule);
+  if (typeof rule === 'string') return parseRule(ce, rule, options);
 
   // If the rule is defined as a function, the function will be called
   // on every expression to process it.
@@ -547,7 +562,9 @@ function boxRule(ce: IComputeEngine, rule: Rule | BoxedRule): BoxedRule {
     if (latex) {
       // If the condition is a LaTeX string, it should be a predicate
       // (an expression with a Boolean value).
-      const condPattern = ce.parse(latex, { canonical: false });
+      const condPattern = ce.parse(latex, {
+        canonical: options?.canonical ?? false,
+      });
 
       // Substitute any unbound vars in the condition to a wildcard,
       // then evaluate the condition
@@ -568,9 +585,9 @@ function boxRule(ce: IComputeEngine, rule: Rule | BoxedRule): BoxedRule {
     );
   }
 
-  const matchExpr = parseRulePart(ce, match);
+  const matchExpr = parseRulePart(ce, match, options);
 
-  const replaceExpr = parseRulePart(ce, replace);
+  const replaceExpr = parseRulePart(ce, replace, options);
 
   // Make up an id if none is provided
   if (!id) {
@@ -623,7 +640,8 @@ function boxRule(ce: IComputeEngine, rule: Rule | BoxedRule): BoxedRule {
  */
 export function boxRules(
   ce: IComputeEngine,
-  rs: Rule | ReadonlyArray<Rule | BoxedRule> | BoxedRuleSet | undefined | null
+  rs: Rule | ReadonlyArray<Rule | BoxedRule> | BoxedRuleSet | undefined | null,
+  options?: { canonical?: boolean }
 ): BoxedRuleSet {
   if (!rs) return { rules: [] };
 
@@ -634,7 +652,7 @@ export function boxRules(
   const rules: BoxedRule[] = [];
   for (const rule of rs) {
     try {
-      rules.push(boxRule(ce, rule));
+      rules.push(boxRule(ce, rule, options));
     } catch (e) {
       // There was a problem with a rule, skip it and continue
       throw new Error(
@@ -803,15 +821,15 @@ export function replace(
 export function matchAnyRules(
   expr: BoxedExpression,
   rules: BoxedRuleSet,
-  sub: BoxedSubstitution
+  sub: BoxedSubstitution,
+  options?: Partial<ReplaceOptions>
 ): BoxedExpression[] {
   const results: BoxedExpression[] = [];
   for (const rule of rules.rules) {
-    const r = applyRule(rule, expr, sub);
+    const r = applyRule(rule, expr, sub, options);
     if (r === null) continue;
     // Verify that the results are unique
-    if (results.some((x) => x.isSame(r))) continue;
-    results.push(r);
+    if (!results.some((x) => x.isSame(r))) results.push(r);
   }
 
   return results;

@@ -56,14 +56,14 @@ describe('INVALID RULES', () => {
     const rule = '\\pi + a';
     expect(() => expr.replace(rule)).toThrowErrorMatchingInlineSnapshot(`
 
-            Invalid rule "\\pi + a"
-            |   pi + a
-            |   A rule should be of the form:
-            |   <match> -> <replace>; <condition>
-            |   Skipping rule "\\\\pi + a"
+                  Invalid rule "\\pi + a"
+                  |   pi + a
+                  |   A rule should be of the form:
+                  |   <match> -> <replace>; <condition>
+                  |   Skipping rule "\\\\pi + a"
 
 
-        `);
+            `);
   });
 
   it('should handle shorthand rule with incorrect wildcards replace', () => {
@@ -71,19 +71,26 @@ describe('INVALID RULES', () => {
     const rule = '\\pi + a -> b';
     expect(() => expr.replace(rule)).toThrowErrorMatchingInlineSnapshot(`
 
-      Invalid rule "\\pi + a -> b"
-      |   The replace expression contains wildcards not present in the match expression
-      |   Skipping rule "\\\\pi + a -> b"
+            Invalid rule "\\pi + a -> b"
+            |   The replace expression contains wildcards not present in the match expression
+            |   Skipping rule "\\\\pi + a -> b"
 
 
-    `);
+        `);
   });
 
   it('should handle redundant rules with simplify', () => {
     const expr = ce.parse('\\pi + 3');
     const rule = '0 + a -> a';
-    expect(() =>
-      expr.simplify({ rules: rule })
-    ).toThrowErrorMatchingInlineSnapshot();
+    expect(() => expr.simplify({ rules: rule }))
+      .toThrowErrorMatchingInlineSnapshot(`
+
+      Invalid rule "0 + a -> a"
+      |   The match and replace expressions are the same.
+      |   This may be because the rule is not necessary due to canonical simplification
+      |   Skipping rule "0 + a -> a"
+
+
+    `);
   });
 });

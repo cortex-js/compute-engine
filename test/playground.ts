@@ -2,58 +2,6 @@ import { ComputeEngine } from '../src/compute-engine';
 
 const ce = new ComputeEngine();
 
-// ce.parse('|\\pi * x|')
-//   .simplify({ rules: '|\\frac{x}{y}| -> \\frac{|x|}{|y|}' })
-//   .print();
-
-ce.parse('e * e^x e^{-x}')
-  .simplify({
-    rules: [
-      {
-        match: 'x^n*x^m',
-        replace: 'x^{n+m}',
-        condition: ({ x, n, m }) =>
-          !!(x.isNotZero || n.add(m).isNegative || n.mul(m).isPositive) &&
-          !!(
-            x.isNonNegative ||
-            n.isInteger ||
-            m.isInteger ||
-            n.add(m).isRational === false
-          ),
-      }, //also check if at least one power is not an even root or sum is an even root
-      // ...ce.getRuleSet('standard-simplification')!.rules,
-    ],
-  })
-  .print();
-
-ce.parse('e * e^x e^{-x}')
-  .simplify({
-    rules: [
-      {
-        match: 'x^n*x',
-        replace: 'x^{n+1}',
-        condition: ({ x, n }) =>
-          x.isNotZero === true ||
-          n.isPositive === true ||
-          x.isLess(-1) === true,
-      },
-      {
-        match: 'x^n*x^m',
-        replace: 'x^{n+m}',
-        condition: ({ x, n, m }) =>
-          (x.isNotZero === true ||
-            n.add(m).isNegative === true ||
-            n.mul(m).isPositive === true) &&
-          (n.isInteger === true ||
-            m.isInteger === true ||
-            n.add(m).isRational === false ||
-            x.isNonNegative === true),
-      }, //also check if at least one power is not an even root or sum is an even root
-      ...ce.getRuleSet('standard-simplification')!.rules,
-    ],
-  })
-  .print();
-
 // 3^{-2} gets calculated in canonicalization. It shouldn't.
 const expr = ce.parse('\\frac{x}{3^{-2}}');
 expr.print();

@@ -33,7 +33,6 @@ describe('SOLVING A QUADRATIC EQUATION', () => {
     expect(result).toMatchInlineSnapshot(`
       [
         0,
-        0,
       ]
     `);
   });

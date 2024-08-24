@@ -5,11 +5,10 @@ import type {
   SimplifyOptions,
 } from '../public';
 
-import { factor } from './factor';
-import { isRelationalOperator } from './utils';
+import { permutations } from '../../common/utils';
+
 import { replace } from './rules';
 import { holdMap } from './hold';
-import { permutations } from '../../common/utils';
 
 type InternalSimplifyOptions = SimplifyOptions & {
   useVariations: boolean;
@@ -39,74 +38,15 @@ export function simplify(
     return simplify(canonical, options, steps);
   }
 
-  //
-  // 2/ Is it a symbol?
-  // Some symbols can get simplified by substitution, for example,
-  // phi, the golden ratio, can be replaced by `(1 + sqrt(5)) / 2`
-  //
-  // We check for `!expr.isStructural` to avoid infinite recursion
-
-  if (expr.symbol && !expr.isStructural)
-    return [
-      ...(steps ?? []),
-      { value: expr.simplify(options), because: `value of ${expr.toString()}` },
-    ];
-
-  // If not a function, we're done
-  if (expr.isNumberLiteral || expr.string || !expr.ops) return steps;
-
-  //
-  // 3/ Relational Operator or Equation?
-  //
   const ce = expr.engine;
-
-  if (isRelationalOperator(expr.operator) || expr.operator === 'Equal') {
-    //
-    // 3.1/ Simplify both sides of the relational operator
-    //
-
-    const op1 = simplify(expr.op1, options, steps).at(-1)?.value ?? expr.op1;
-    const op2 = simplify(expr.op2, options, steps).at(-1)?.value ?? expr.op2;
-    expr = ce.function(expr.operator, [op1, op2]);
-
-    //
-    // 3.2/ Try to factor terms across the relational operator
-    //   2x < 4t -> x < 2t
-    //
-    expr = factor(expr) ?? expr;
-    console.assert(isRelationalOperator(expr.operator));
-    if (expr.nops === 2) {
-      // Try f(x) < g(x) -> f(x) - g(x) < 0
-      if (expr.op2.isNotZero) {
-        const alt = factor(
-          ce.function(expr.operator, [expr.op1.sub(expr.op2), ce.Zero])
-        );
-        // Pick the cheapest (simplest) of the two
-        expr = cheapest(expr, alt, options?.costFunction);
-      }
-    }
-    return [...steps, { value: expr, because: 'factor-relational-operator' }];
-  }
-
-  //
-  // 4/ Apply rules, until no rules can be applied
-  //
-
   const rules = options?.rules
-    ? ce.rules(options.rules)
-    : expr.engine.getRuleSet('standard-simplification')!;
+    ? ce.rules(options.rules, { canonical: true })
+    : ce.getRuleSet('standard-simplification')!;
 
   options = { ...options, rules };
 
-  // Simplify the operands...
-  expr = simplifyFunctionOperands(
-    expr,
-    [{ value: expr, because: 'initial' }],
-    options
-  );
-
   //
-  // Loop until the expression has been previously seen,
+  // 2/ Loop until the expression has been previously seen,
   // or no rules can be applied
   //
   do {
@@ -163,19 +103,15 @@ function cheapest(
   return isCheaper(oldExpr, newExpr, costFunction) ? newExpr! : oldExpr;
 }
 
-function simplifyFunctionOperands(
+function simplifyOperands(
   expr: BoxedExpression,
-  steps: RuleSteps,
   options?: Partial<SimplifyOptions>
 ): BoxedExpression {
   if (!expr.ops) return expr;
 
   return expr.engine.function(
     expr.operator,
-    holdMap(
-      expr,
-      (x) => simplify(x, { ...options, useVariations: false }).at(-1)!?.value
-    )
+    holdMap(expr, (x) => simplify(x, options).at(-1)!.value)
   );
 }
 
@@ -185,17 +121,49 @@ function simplifyExpression(
   options: SimplifyOptions,
   steps: RuleSteps
 ): RuleSteps {
-  //@fixme: move the check for symbols, etc... from xsimplify to here
+  //
+  // 1/ If a number or a string, no simplification to do
+  //
+  if (expr.isNumberLiteral || expr.string) return steps;
 
-  // If this is an associative function, we try to simplify it first
-  let result = simplifyAssociativeFunction(expr, rules, options, steps);
+  //
+  // 2/ Simplify a symbol
+  //
+  if (expr.symbol) {
+    const result = replace(expr, rules, {
+      recursive: false,
+      canonical: true,
+      useVariations: false,
+    });
+    if (result.length > 0) return [...steps, ...result];
+    return steps;
+  }
+
+  //
+  // 3/ Simplify a function expression
+  //
+
+  // Simplify the operands...
+  const alt = simplifyOperands(expr, options);
+  if (!alt.isSame(expr)) {
+    steps = [...steps, { value: alt, because: 'simplified operands' }];
+    expr = alt;
+  }
+
+  // Try to simplify, not considering associativity
+  let result = simplifyNonAssociativeFunction(expr, rules, options, steps);
   if (result.length > steps.length) return result;
 
-  // Try to simplify the expression without considering associativity
-  return simplifyNonAssociativeExpression(expr, rules, options, steps);
+  // If this is an associative function, try variations on the order of the operands
+  if (expr.functionDefinition?.associative === true) {
+    result = simplifyAssociativeFunction(expr, rules, options, steps);
+    if (result.length > steps.length) return result;
+  }
+
+  return steps;
 }
 
-function simplifyNonAssociativeExpression(
+function simplifyNonAssociativeFunction(
   expr: BoxedExpression,
   rules: BoxedRuleSet,
   options: Partial<InternalSimplifyOptions>,
@@ -216,10 +184,10 @@ function simplifyNonAssociativeExpression(
   let last = result.at(-1)!.value;
   if (last.isSame(expr)) return steps;
 
-  last = simplifyFunctionOperands(last, result);
+  last = simplifyOperands(last);
 
   // If the simplified expression is not cheaper, we're done
-  if (!isCheaper(expr, last, options?.costFunction)) [];
+  if (!isCheaper(expr, last, options?.costFunction)) return steps;
 
   result.at(-1)!.value = last;
   return [...steps, ...result];
@@ -229,22 +197,10 @@ function simplifyAssociativeFunction(
   expr: BoxedExpression,
   rules: BoxedRuleSet,
   options: SimplifyOptions,
-  steps: RuleSteps
+  steps: RuleSteps,
+  seen: BoxedExpression[] = []
 ): RuleSteps {
-  if (!(expr.functionDefinition?.associative === true)) return steps;
-
-  //
-  // 1/ First, try to simplify with all the operands
-  //
-  const newSteps = simplifyNonAssociativeExpression(
-    expr,
-    rules,
-    options,
-    steps
-  );
-  if (newSteps.length > steps.length) return newSteps;
-
-  if (expr.nops! < 3) return steps;
+  if (expr.nops < 3) return steps;
 
   const operator = expr.operator;
   const ce = expr.engine;
@@ -260,7 +216,16 @@ function simplifyAssociativeFunction(
     // For a given permutation, try to simplify the first nth arguments
     for (let i = p.length - 1; i >= 2; i--) {
       const left = ce.function(operator, p.slice(0, i));
-      const newSteps = simplifyExpression(left, rules, options, steps);
+      if (seen.some((x) => x.isSame(left))) continue;
+
+      seen.push(left);
+      const newSteps = simplifyAssociativeFunction(
+        left,
+        rules,
+        options,
+        steps,
+        seen
+      );
       if (newSteps.length > steps.length) {
         let last = newSteps.at(-1)!.value;
         const right = ce.function(operator, expr.ops!.slice(i));

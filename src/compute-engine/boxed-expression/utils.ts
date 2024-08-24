@@ -100,10 +100,24 @@ export function isRelationalOperator(name: BoxedExpression | string): boolean {
   return DEFINITIONS_INEQUALITIES.some((x) => x.name === name);
 }
 
+export function isInequalityOperator(operator: string): boolean {
+  return ['Less', 'LessEqual', 'Greater', 'GreaterEqual'].includes(operator);
+}
+
+export function isEquationOperator(operator: string): boolean {
+  return ['Equal', 'NotEqual'].includes(operator);
+}
+
 export function isInequality(expr: BoxedExpression): boolean {
   const h = expr.operator;
   if (typeof h !== 'string') return false;
-  return ['Less', 'LessEqual', 'Greater', 'GreaterEqual'].includes(h);
+  return isInequalityOperator(h);
+}
+
+export function isEquation(expr: BoxedExpression): boolean {
+  const h = expr.operator;
+  if (typeof h !== 'string') return false;
+  return isEquationOperator(h);
 }
 
 /**

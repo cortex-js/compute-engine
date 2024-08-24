@@ -48,18 +48,31 @@ export function together(op: BoxedExpression): BoxedExpression {
 export function factor(expr: BoxedExpression): BoxedExpression {
   const h = expr.operator;
   if (isRelationalOperator(h)) {
-    const lhs = Product.from(expr.op1);
-    const rhs = Product.from(expr.op2);
-    let common = commonTerms(lhs, rhs);
+    let lhs = Product.from(expr.op1);
+    let rhs = Product.from(expr.op2);
+    let [coef, common] = commonTerms(lhs, rhs);
+
+    let flip = coef.sgn() === -1;
+
+    if (!coef.isOne) {
+      lhs.div(coef);
+      rhs.div(coef);
+    }
 
     if (!common.isOne) {
-      // For -x < 0, only divide by the absolute value of the common factor
-      // For an equation (-x = 0), divide by the common factor
-      if (isInequality(expr)) common = common.abs();
-
-      lhs.div(common);
-      rhs.div(common);
+      // We have some symbolic factor in common ("x", etc...)
+      if (common.isPositive) {
+        lhs.div(common);
+        rhs.div(common);
+      } else if (common.isNegative) {
+        lhs.div(common.neg());
+        rhs.div(common.neg());
+        flip = !flip;
+      }
     }
+
+    if (flip) [lhs, rhs] = [rhs, lhs];
+
     return expr.engine.function(h, [lhs.asExpression(), rhs.asExpression()]);
   }
 

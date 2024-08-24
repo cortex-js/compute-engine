@@ -835,13 +835,7 @@ export class BoxedSymbol extends _BoxedExpression {
   }
 
   simplify(options?: Partial<SimplifyOptions>): BoxedExpression {
-    // If there are no rules, return the symbol
-    if (!options?.rules) return this;
-
-    // We use the structural form to avoid infinite recursion, by
-    // detecting in `simplify()` that the expression should have rules applied
-    // to it and avoid calling `expr.simplify()`.
-    return simplify(this.structural, options).at(-1)?.value ?? this;
+    return simplify(this, options).at(-1)?.value ?? this;
   }
 
   evaluate(options?: EvaluateOptions): BoxedExpression {

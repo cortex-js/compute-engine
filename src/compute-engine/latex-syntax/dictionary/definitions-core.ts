@@ -15,6 +15,10 @@ import {
   dictionaryFrom,
 } from '../../../math-json/utils';
 import {
+  isEquationOperator,
+  isInequalityOperator,
+} from '../../boxed-expression/utils';
+import {
   ADDITION_PRECEDENCE,
   ARROW_PRECEDENCE,
   ASSIGNMENT_PRECEDENCE,
@@ -570,13 +574,7 @@ export const DEFINITIONS_CORE: LatexDictionary = [
     openTrigger: '[',
     closeTrigger: ']',
     parse: parseBrackets,
-    // Note: Avoid \\[ ... \\] because it is used for display math
-    serialize: (serializer: Serializer, expr: Expression): string =>
-      joinLatex([
-        '\\bigl\\lbrack',
-        serializeOps(', ')(serializer, expr),
-        '\\bigr\\rbrack',
-      ]),
+    serialize: serializeList,
   },
   {
     kind: 'matchfix',
@@ -862,7 +860,7 @@ export const DEFINITIONS_CORE: LatexDictionary = [
     kind: 'environment',
     name: 'Which',
     identifierTrigger: 'cases',
-    parse: parseWhich,
+    parse: parseCasesEnvironment,
     serialize: (serialize: Serializer, expr: Expression): string => {
       const rows: string[] = [];
       const args = operands(expr);
@@ -880,12 +878,12 @@ export const DEFINITIONS_CORE: LatexDictionary = [
   {
     kind: 'environment',
     identifierTrigger: 'dcases',
-    parse: parseWhich,
+    parse: parseCasesEnvironment,
   },
   {
     kind: 'environment',
     identifierTrigger: 'rcases',
-    parse: parseWhich,
+    parse: parseCasesEnvironment,
   },
 ];
 
@@ -1211,6 +1209,32 @@ function parseBrackets(
   return ['List', body];
 }
 
+/** A "List" expression can represent a collection of arbitrary elements,
+ * or a system of equations.
+ */
+function serializeList(serializer: Serializer, expr: Expression): string {
+  // Is it a system of equations?
+  if (
+    nops(expr) > 1 &&
+    operands(expr).every((x) => {
+      const op = operator(x);
+      return isEquationOperator(op) || isInequalityOperator(op);
+    })
+  ) {
+    return joinLatex([
+      '\\begin{cases}',
+      serializeOps('\\\\')(serializer, expr),
+      '\\end{cases}',
+    ]);
+  }
+
+  // Note: Avoid \\[ ... \\] because it is used for display math
+  return joinLatex([
+    '\\bigl\\lbrack',
+    serializeOps(', ')(serializer, expr),
+    '\\bigr\\rbrack',
+  ]);
+}
 /**
  * A range is a sequence of numbers, e.g. `1..10`.
  * Optionally, they may include a step, e.g. `1..3..10`.
@@ -1322,14 +1346,43 @@ function parseAssign(parser: Parser, lhs: Expression): Expression | null {
   return ['Assign', lhs, rhs];
 }
 
-function parseWhich(parser: Parser): Expression | null {
-  const tabular: Expression[][] | null = parser.parseTabular();
-  if (!tabular) return ['Which'];
+/** Parse a \begin{cases}...\end{cases} expression.
+ *
+ * This could be a "Which" expression, i.e. a sequence of conditions and values
+ * or a system of equations (a "List" of equations or inequalities).
+ *
+ */
+function parseCasesEnvironment(parser: Parser): Expression | null {
+  const rows: Expression[][] | null = parser.parseTabular();
+  if (!rows) return ['List'];
+
+  //
+  // 1/ Is it a system of equations?
+  //
+  // Single column with an equality or inequality
+  //
+  if (
+    rows.every((row) => {
+      if (row.length !== 1) return false;
+      const op = operator(row[0]);
+      return isInequalityOperator(op) || isEquationOperator(op);
+    })
+  ) {
+    return ['List', ...rows.map((row) => row[0])];
+  }
+
+  //
+  // 2/ It's a "Which" expression
+  //
+  // Each row must have 1 or 2 elements:
+  // - 1 element: the default value
+  // - 2 elements: the condition and the value
+
   // Note: return `True` for the condition, because it must be present
   // as the second element of the Tuple. Return an empty sequence for the
   // value, because it is optional
   const result: Expression[] = [];
-  for (const row of tabular) {
+  for (const row of rows) {
     if (row.length === 1) {
       result.push('True');
       result.push(row[0]);

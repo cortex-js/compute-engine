@@ -24,7 +24,7 @@ describe('SERIALIZING SETS', () => {
         ['NotEqual', '_', 0],
       ])
     ).toMatchInlineSnapshot(
-      `\\lbrace x\\in\\mathrm{Numbers}, \\mathrm{Condition}(x, x\\ne0)\\rbrace`
+      `\\mathrm{Filter}(\\lbrace\\operatorname{\\_}\\in\\mathrm{Numbers}\\rbrace, \\operatorname{\\_}\\ne0)`
     );
   });
 

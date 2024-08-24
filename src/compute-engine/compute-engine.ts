@@ -1993,9 +1993,10 @@ export class ComputeEngine implements IComputeEngine {
       | ReadonlyArray<Rule | BoxedRule>
       | BoxedRuleSet
       | undefined
-      | null
+      | null,
+    options?: { canonical?: boolean }
   ): BoxedRuleSet {
-    return boxRules(this, rules);
+    return boxRules(this, rules, options);
   }
 
   getRuleSet(id?: string): BoxedRuleSet | undefined {
@@ -2003,7 +2004,7 @@ export class ComputeEngine implements IComputeEngine {
 
     if (id === 'standard-simplification')
       return this.cache('standard-simplification-rules', () =>
-        boxRules(this, SIMPLIFY_RULES)
+        boxRules(this, SIMPLIFY_RULES, { canonical: true })
       );
 
     if (id === 'solve-univariate')

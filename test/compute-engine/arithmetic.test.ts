@@ -776,7 +776,7 @@ describe('FACTOR', () => {
         .box(['Factor', ce.parse('\\sqrt{7}\\sqrt{35}x^2 \\lt \\sqrt{5}x')])
         .evaluate()
         .toString()
-    ).toMatchInlineSnapshot(`7 * 1 / |x| * x^2 < x * 1 / |x|`));
+    ).toMatchInlineSnapshot(`7x^2 < x`));
 
   it('should factor integers', () =>
     expect(
