@@ -200,7 +200,8 @@ function simplifyAssociativeFunction(
   steps: RuleSteps,
   seen: BoxedExpression[] = []
 ): RuleSteps {
-  if (expr.nops < 3) return steps;
+  if (expr.nops < 3)
+    return simplifyNonAssociativeFunction(expr, rules, options, steps);
 
   const operator = expr.operator;
   const ce = expr.engine;
@@ -216,6 +217,7 @@ function simplifyAssociativeFunction(
     // For a given permutation, try to simplify the first nth arguments
     for (let i = p.length - 1; i >= 2; i--) {
       const left = ce.function(operator, p.slice(0, i));
+
       if (seen.some((x) => x.isSame(left))) continue;
 
       seen.push(left);
