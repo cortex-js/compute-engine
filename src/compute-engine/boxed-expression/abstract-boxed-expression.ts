@@ -669,10 +669,6 @@ export abstract class _BoxedExpression implements BoxedExpression {
     return undefined;
   }
 
-  get isComplex(): boolean | undefined {
-    return undefined;
-  }
-
   get isImaginary(): boolean | undefined {
     return undefined;
   }

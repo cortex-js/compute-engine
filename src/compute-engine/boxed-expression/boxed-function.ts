@@ -440,7 +440,7 @@ export class BoxedFunction extends _BoxedExpression {
   }
 
   get sgn(): Sign | undefined {
-    if (!this.isValid) return undefined;
+    if (!this.isValid || this.isNumber !== true) return undefined;
 
     // If the sign has been computed before, return it
     if (this._sgn !== null) return this._sgn;
@@ -469,8 +469,10 @@ export class BoxedFunction extends _BoxedExpression {
       else if (flagValue(this, 'positive') === true) s = 'positive';
       else if (flagValue(this, 'negative') === true) s = 'negative';
       else if (flagValue(this, 'nonPositive') === true) s = 'non-positive';
-      else if (this.isImaginary || this.isNaN) return 'unsigned';
-      else if (this.isReal && flagValue(this, 'zero') === false)
+      else if (this.isReal === false || this.isNaN === true) {
+        this._sgn = 'unsigned';
+        return this._sgn;
+      } else if (this.isReal && flagValue(this, 'zero') === false)
         s = 'real-not-zero';
       else if (flagValue(this, 'zero') === false) s = 'not-zero';
       else if (this.isReal) s = 'real';
@@ -517,6 +519,7 @@ export class BoxedFunction extends _BoxedExpression {
 
   // Not +- Infinity, not NaN
   get isFinite(): boolean | undefined {
+    if (this.isNumber !== true) return false;
     if (this.isNaN === undefined || this.isInfinity === undefined)
       return undefined;
     if (this.isNaN || this.isInfinity) return false;
@@ -524,6 +527,7 @@ export class BoxedFunction extends _BoxedExpression {
   }
 
   get isZero(): boolean | undefined {
+    if (this.isNumber !== true) return false;
     const s = this.sgn;
 
     if (s === undefined) return undefined;
@@ -542,6 +546,7 @@ export class BoxedFunction extends _BoxedExpression {
   }
 
   get isNotZero(): boolean | undefined {
+    if (this.isNumber !== true) return false;
     const s = this.sgn;
     if (s === undefined) return undefined;
 
@@ -555,7 +560,7 @@ export class BoxedFunction extends _BoxedExpression {
     const f = flagValue(this, 'one');
     if (f !== undefined) return f;
 
-    if (this.isNonPositive || this.isImaginary) return false;
+    if (this.isNonPositive === true || this.isReal === false) return false;
     return undefined;
   }
 
@@ -563,12 +568,14 @@ export class BoxedFunction extends _BoxedExpression {
     const f = flagValue(this, 'negativeOne');
     if (f !== undefined) return f;
 
-    if (this.isNonNegative || this.isImaginary) return false;
+    if (this.isNonNegative === true || this.isReal === false) return false;
     return undefined;
   }
 
   // x > 0
   get isPositive(): boolean | undefined {
+    if (this.isNumber !== true) return false;
+
     const s = this.sgn;
     if (s === undefined) return undefined;
 
@@ -581,6 +588,8 @@ export class BoxedFunction extends _BoxedExpression {
 
   // x >= 0
   get isNonNegative(): boolean | undefined {
+    if (this.isNumber !== true) return false;
+
     const s = this.sgn;
     if (s === undefined) return undefined;
 
@@ -591,6 +600,7 @@ export class BoxedFunction extends _BoxedExpression {
 
   // x < 0
   get isNegative(): boolean | undefined {
+    if (this.isNumber !== true) return false;
     const s = this.sgn;
     if (s === undefined) return undefined;
     if (s === 'negative') return true;
@@ -601,6 +611,7 @@ export class BoxedFunction extends _BoxedExpression {
 
   // x <= 0
   get isNonPositive(): boolean | undefined {
+    if (this.isNumber !== true) return false;
     const s = this.sgn;
     if (s === undefined) return undefined;
 
@@ -640,6 +651,8 @@ export class BoxedFunction extends _BoxedExpression {
 
   get numeratorDenominator(): [BoxedExpression, BoxedExpression] {
     if (!this.isCanonical) return this.canonical.numeratorDenominator;
+    if (this.isNumber !== true)
+      return [this.engine.Nothing, this.engine.Nothing];
 
     const operator = this.operator;
     if (operator === 'Divide') return [this.op1, this.op2];
@@ -1229,6 +1242,8 @@ function flagValue(
   expr: BoxedFunction,
   flag: keyof FunctionNumericFlags
 ): boolean | undefined {
+  if (expr.isNumber !== true) return false;
+
   const def = expr._def;
   if (!def) return undefined;
   const result = expr._def?.signature.flags?.[flag];
