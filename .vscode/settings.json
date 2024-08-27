@@ -10,8 +10,8 @@
   // ESM requires extensions on import paths to work,
   // these options tell VSCode to prefer adding extensions
   // on auto-import.
-  "typescript.preferences.importModuleSpecifierEnding": "js",
-  "javascript.preferences.importModuleSpecifierEnding": "js",
+  "typescript.preferences.importModuleSpecifierEnding": "auto",
+  "javascript.preferences.importModuleSpecifierEnding": "auto",
 
   // Let VSCode auto-update import paths when you move files around
   "typescript.updateImportsOnFileMove.enabled": "always",
