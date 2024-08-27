@@ -1,3 +1,4 @@
+import { isSubtype } from './subtype';
 import type { NamedElement, Type } from './types';
 
 export function typeToString(type: Type): string {
@@ -21,6 +22,26 @@ export function typeToString(type: Type): string {
       return type.types.map(typeToString).join(' & ');
 
     case 'list':
+      if (isSubtype(type.elements, 'number')) {
+        // We have a numeric list, possibly vector or matrix.
+        if (type.dimensions?.length === 1) {
+          if (type.elements === 'number') {
+            if (type.dimensions[0] < 0) return 'vector';
+            return `vector<${type.dimensions[0]}>`;
+          }
+          if (type.dimensions[0] < 0) return `vector<${type.elements}>`;
+          return `vector<${type.elements}^${type.dimensions[0]}>`;
+        }
+        if (type.dimensions?.length === 2) {
+          const dims = type.dimensions;
+          if (type.elements === 'number') {
+            if (dims[0] < 0 && dims[1] < 0) return 'matrix';
+            return `matrix<${dims[0]}x${dims[1]}>`;
+          }
+          if (dims[0] < 0 && dims[1] < 0) return `matrix<${type.elements}>`;
+          return `matrix<${type.elements}^(${dims[0]}x${dims[1]})>`;
+        }
+      }
       // Serialize collection types
       const dimensions = type.dimensions
         ? type.dimensions.length === 1

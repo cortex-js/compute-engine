@@ -268,4 +268,4 @@ export type TypeCompatibility =
   | 'bivariant' // A <: B and A :>B, A := B
   | 'invariant'; // Neither A <: B, nor A :> B
 
-export type TypeNameResolver = (name: string) => Type | undefined;
+export type TypeResolver = (name: string) => Type | undefined;

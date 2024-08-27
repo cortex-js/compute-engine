@@ -210,9 +210,11 @@ class TypeParser {
     const dimensions: number[] = [];
 
     let dim = this.parsePositiveIntegerLiteral();
+    if (this.match('?')) dim = -1;
     if (dim === null)
       this.error(
-        'Expected a positive integer literal, for example : "[number^2]"'
+        'Expected a positive integer literal.',
+        'For example : "[number^2]"'
       );
     do {
       dimensions.push(dim);
@@ -220,15 +222,17 @@ class TypeParser {
       if (!this.match('x')) break;
       this.skipWhitespace();
       dim = this.parsePositiveIntegerLiteral();
+      if (this.match('?')) dim = -1;
       if (dim === null)
         this.error(
-          'Expected a positive integer literal, for example : "[number^2x3]"'
+          'Expected a positive integer literal.',
+          'For example : "[number^2x3]"'
         );
     } while (dim !== null);
 
     this.skipWhitespace();
     if (hasParen && !this.match(')'))
-      this.error('Expected ")". For example "[number^(2x3)]"');
+      this.error('Expected ")".', 'For example "[number^(2x3)]"');
     return dimensions;
   }
 
@@ -250,17 +254,17 @@ class TypeParser {
       if (this.match('^')) {
         dimensions = this.parseDimensions();
         if (dimensions === undefined)
-          this.error('Expected dimensions. For example "list<number^2x3>"');
+          this.error('Expected dimensions.', 'For example "list<number^2x3>"');
       }
 
       this.skipWhitespace();
       if (!this.match('>'))
-        this.error('Expected ">". For example "list<number>"');
+        this.error('Expected ">".', 'For example "list<number>"');
       return { kind: 'list', elements: type, dimensions };
     }
 
-    // `vector(<size>)` and `vector(<type>^<size>)`
-    if (this.match('vector(')) {
+    // `vector<<size>>` and `vector<<type>^<size>>`
+    if (this.match('vector<')) {
       const type = this.parseType() ?? 'number';
 
       let dimensions: number[] | undefined = undefined;
@@ -268,31 +272,44 @@ class TypeParser {
         const size = this.parsePositiveIntegerLiteral();
         if (size === null)
           this.error(
-            'Expected a positive integer literal. For example "vector(3)"'
+            'Expected a positive integer literal.',
+            'For example "vector<3>"',
+            'Use "vector" for a vector of unknown size'
           );
         dimensions = [size];
       }
 
       this.skipWhitespace();
-      if (!this.match(')'))
-        this.error('Expected ")". For example "vector(number)"');
+      if (!this.match('>'))
+        this.error('Expected ">"', 'For example "vector<integer>"');
       return { kind: 'list', elements: type, dimensions };
     }
 
+    if (this.match('vector')) return { kind: 'list', elements: 'number' };
+
     // `matrix(<rows>x<columns>)` and `matrix(<type>^<rows>x<columns>)`
 
-    if (this.match('matrix(')) {
+    if (this.match('matrix<')) {
       const type = this.parseType() ?? 'number';
 
       let dimensions: number[] | undefined = undefined;
       if (this.match('^')) {
         dimensions = this.parseDimensions();
         if (dimensions === undefined)
-          this.error('Expected dimensions. For example "matrix(number^2x3)"');
+          this.error(
+            'Expected dimensions',
+            'For example "matrix<number^2x3>"',
+            'Use "matrix" for a matrix of unknown size'
+          );
       }
+
+      if (!this.match('>'))
+        this.error('Expected ">".', 'For example "matrix<integer>"');
 
       return { kind: 'list', elements: type, dimensions };
     }
+
+    if (this.match('matrix')) return { kind: 'list', elements: 'number' };
 
     // Regular list syntax: `[number^2x3]`
     if (!this.match('[')) return null;
@@ -305,7 +322,7 @@ class TypeParser {
 
     this.skipWhitespace();
     if (!this.match(']'))
-      this.error('Expected "]". For example "[number^2x3]"');
+      this.error('Expected "]".', 'For example "[number^2x3]"');
 
     return { kind: 'list', elements: type, dimensions };
   }
@@ -395,7 +412,8 @@ class TypeParser {
       this.skipWhitespace();
       if (!this.match(')'))
         this.error(
-          'Expected ")". For example "tuple(number, boolean)" or "tuple(x: integer, y: integer)"'
+          'Expected ")".',
+          'For example "tuple(number, boolean)" or "tuple(x: integer, y: integer)"'
         );
       return { kind: 'tuple', elements };
     }
@@ -405,7 +423,8 @@ class TypeParser {
     this.skipWhitespace();
     if (!this.match(')'))
       this.error(
-        'Expected ")". For example "(number, boolean)" or "(x: integer, y: integer)"'
+        'Expected ")".',
+        'For example "(number, boolean)" or "(x: integer, y: integer)"'
       );
 
     // If we have a singleton tuple, return the type directly
@@ -453,7 +472,8 @@ class TypeParser {
     if (!this.match('set<')) {
       if (this.match('set(')) {
         this.error(
-          'Use "set<type>" instead of "set(type)". For example "set<number>"'
+          'Use "set<type>" instead of "set(type)".',
+          'For example "set<number>"'
         );
       }
       if (this.match('set')) return 'set';
@@ -465,7 +485,8 @@ class TypeParser {
       this.error('Expected a type. Use "set<number>" for a set of numbers');
 
     this.skipWhitespace();
-    if (!this.match('>')) this.error('Expected ">". For example "set<number>"');
+    if (!this.match('>'))
+      this.error('Expected ">".', 'For example "set<number>"');
 
     return { kind: 'set', elements: type };
   }
@@ -478,13 +499,15 @@ class TypeParser {
       const key = this.parseName();
       if (key === null)
         this.error(
-          'Expected a name for the key. For example "map(key: string)"'
+          'Expected a name for the key.',
+          'For example "map(key: string)"'
         );
 
       const value = this.parseType();
       if (value === null)
         this.error(
-          'Expected a type for the value. For example "map(key: string)"'
+          'Expected a type for the value.',
+          'For example "map(key: string)"'
         );
 
       entries.push([key, value]);
@@ -503,7 +526,7 @@ class TypeParser {
 
       this.skipWhitespace();
       if (!this.match('}'))
-        this.error('Expected "}". For example "{key: string}"');
+        this.error('Expected "}".', 'For example "{key: string}"');
 
       return { kind: 'map', elements: Object.fromEntries(entries) };
     }
@@ -511,12 +534,14 @@ class TypeParser {
     if (!this.match('map(')) {
       if (this.match('map<')) {
         this.error(
-          'Use "map(key: type)" instead of "map<key: type>". For example "map<key: string>"'
+          'Use "map(key: type)" instead of "map<key: type>".',
+          'For example "map<key: string>"'
         );
       }
       if (this.match('map{')) {
         this.error(
-          'Use "map(key: type)" or "{key: type}" instead of "map{key: type}". For example "map{key: string}" or "{key: string}"'
+          'Use "map(key: type)" or "{key: type}" instead of "map{key: type}".',
+          'For example "map{key: string}" or "{key: string}"'
         );
       }
       // Generic map type
@@ -528,7 +553,7 @@ class TypeParser {
 
     this.skipWhitespace();
     if (!this.match(')'))
-      this.error('Expected ")". For example "map(key: string)"');
+      this.error('Expected ")".', 'For example "map(key: string)"');
 
     return { kind: 'map', elements: Object.fromEntries(entries) };
   }
@@ -539,7 +564,8 @@ class TypeParser {
     if (!this.match('collection<')) {
       if (this.match('collection(')) {
         this.error(
-          'Use "collection<type>" instead of "collection(type)". For example "collection<number>"'
+          'Use "collection<type>" instead of "collection(type)".',
+          'For example "collection<number>"'
         );
       }
       if (this.match('collection')) return 'collection';
@@ -554,7 +580,7 @@ class TypeParser {
 
     this.skipWhitespace();
     if (!this.match('>'))
-      this.error('Expected ">". For example "collection<number>"');
+      this.error('Expected ">".', 'For example "collection<number>"');
 
     return { kind: 'collection', elements: type };
   }

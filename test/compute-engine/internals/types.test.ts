@@ -342,7 +342,8 @@ describe('Type Parser Tests', () => {
       |   set(integer)
       |       ^
       |   
-      |   Use "set<type>" instead of "set(type)". For example "set<number>"
+      |   Use "set<type>" instead of "set(type)".
+      |   For example "set<number>"
       "
     `);
   });
@@ -354,7 +355,8 @@ describe('Type Parser Tests', () => {
       |   collection(integer)
       |              ^
       |   
-      |   Use "collection<type>" instead of "collection(type)". For example "collection<number>"
+      |   Use "collection<type>" instead of "collection(type)".
+      |   For example "collection<number>"
       "
     `);
   });
@@ -365,7 +367,8 @@ describe('Type Parser Tests', () => {
       |   map<integer>
       |       ^
       |   
-      |   Use "map(key: type)" instead of "map<key: type>". For example "map<key: string>"
+      |   Use "map(key: type)" instead of "map<key: type>".
+      |   For example "map<key: string>"
       "
     `);
   });
@@ -388,7 +391,8 @@ describe('Type Parser Tests', () => {
       |   (integer | boolean
       |                     ^
       |   
-      |   Expected ")". For example "(number, boolean)" or "(x: integer, y: integer)"
+      |   Expected ")".
+      |   For example "(number, boolean)" or "(x: integer, y: integer)"
       "
     `);
   });
@@ -411,7 +415,8 @@ describe('Type Parser Tests', () => {
       |   [integer^2x]
       |              ^
       |   
-      |   Expected a positive integer literal, for example : "[number^2x3]"
+      |   Expected a positive integer literal.
+      |   For example : "[number^2x3]"
       "
     `);
   });
@@ -658,13 +663,13 @@ describe('reduceType Tests', () => {
 
   it('should reduce collection types by reducing the element type', () => {
     expect(reduce('[(integer | integer)^2x3]')).toMatchInlineSnapshot(
-      `"[integer^(2x3)]"`
+      `"matrix<integer^(2x3)>"`
     );
   });
 
   it('should handle collections with complex nested types', () => {
     expect(reduce('[(integer & number)^2x3]')).toMatchInlineSnapshot(
-      `"[integer^(2x3)]"`
+      `"matrix<integer^(2x3)>"`
     );
   });
 

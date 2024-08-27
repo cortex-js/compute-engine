@@ -289,10 +289,15 @@ export function isSubtype(lhs: Type, rhs: Type): boolean {
 
     // Check that the dimensions match
     if (rhs.dimensions) {
+      // If rhs has some dimensions, lhs must have dimensions as well
       if (!lhs.dimensions) return false;
+      // The shape (number of dimensions) must match
       if (lhs.dimensions.length !== rhs.dimensions.length) return false;
+
       for (let i = 0; i < lhs.dimensions.length; i++) {
-        if (lhs.dimensions[i] !== rhs.dimensions[i]) return false;
+        // A dimension of -1 means any size is allowed
+        if (rhs.dimensions[i] !== -1 && lhs.dimensions[i] !== rhs.dimensions[i])
+          return false;
       }
     }
 
