@@ -1267,16 +1267,6 @@ export interface BoxedExpression {
    */
   readonly isReal: boolean | undefined;
 
-  /**
-   * The value of this expression is a number.
-   *
-   *
-   *
-   * @category Domain Properties
-   *
-   */
-  readonly isComplex: boolean | undefined;
-
   /** The value of this expression is a number with an imaginary part
    *
    *
@@ -1678,7 +1668,6 @@ export type NumericFlags = {
   integer: boolean | undefined;
   rational: boolean | undefined;
   real: boolean | undefined;
-  complex: boolean | undefined;
   imaginary: boolean | undefined;
 
   positive: boolean | undefined; // x > 0
@@ -2153,7 +2142,6 @@ export interface IComputeEngine extends IBigNum {
   bignum: (a: string | number | bigint | BigNum) => BigNum;
 
   complex: (a: number | Complex, b?: number) => Complex;
-  // isComplex(a: unknown): a is Complex;
 
   /** @internal */
   _numericValue(

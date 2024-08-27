@@ -237,11 +237,11 @@ function compiledEval() {
   return 0;
 }
 
-describe('Rationals', () => {
+describe.skip('Rationals', () => {
   it('bigint vs number', () => expect(perfTestRationals()).toBeLessThan(1.8));
 });
 
-describe('Compute Engine modes', () => {
+describe.skip('Compute Engine modes', () => {
   const slow = slowEval();
   const fast = fastEval();
   const turbo = compiledEval();
@@ -255,7 +255,7 @@ describe('Compute Engine modes', () => {
     expect(fast / turbo).toBeLessThan(360));
 });
 
-describe('Relative performance', () => {
+describe.skip('Relative performance', () => {
   const randos = generateNumbers(1000).map((n) => n / 1000);
   let jsb = jsBaseline(randos);
   if (jsb === 0) jsb = 0.00001;

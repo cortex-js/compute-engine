@@ -1068,11 +1068,6 @@ export class BoxedFunction extends _BoxedExpression {
     // return isSubtype(this.type, 'real');
   }
 
-  get isComplex(): boolean | undefined {
-    return this.domain?.isCompatible('ComplexNumbers');
-    // return isSubtype(this.type, 'complex');
-  }
-
   get isImaginary(): boolean | undefined {
     return this.domain?.isCompatible('ImaginaryNumbers');
     // return isSubtype(this.type, 'imaginary');

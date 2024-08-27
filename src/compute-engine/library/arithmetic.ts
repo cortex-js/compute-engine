@@ -851,7 +851,7 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
         result: 'Numbers',
         sgn: ([a, b]) => {
           // Note: we can't simplify this to a power, then get the sgn of that because this may cause an infinite loop
-          if (a.isComplex || b.isComplex) return 'unsigned';
+          if (a.isReal === false || b.isReal === false) return 'unsigned';
           if (a.isZero) return b.isZero ? 'unsigned' : 'zero';
           if (a.isPositive === true) return 'positive';
           if (b.isOdd === true) return 'negative';

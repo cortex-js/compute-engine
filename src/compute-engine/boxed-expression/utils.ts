@@ -237,15 +237,12 @@ export function normalizeFlags(flags: Partial<NumericFlags>): NumericFlags {
   ) {
     result.number = true;
     if (result.finite) result.real = true;
-    // All non-imaginary numbers are complex
-    else if (!result.finite) result.complex = true; // All non-imaginary numbers are complex
 
     result.imaginary = false;
   }
 
   if (result.finite) {
     result.number = true;
-    result.complex = true;
     result.infinity = false;
     result.NaN = false;
   }
@@ -260,9 +257,8 @@ export function normalizeFlags(flags: Partial<NumericFlags>): NumericFlags {
 
   // Adjust domain flags
   if (result.integer) result.rational = true;
-  if (result.real) result.complex = true;
-  if (result.imaginary) result.complex = true;
-  if (result.complex) result.number = true;
+  if (result.real) result.number = true;
+  if (result.imaginary) result.number = true;
 
   return result as NumericFlags;
 }

@@ -665,12 +665,6 @@ export class BoxedNumber extends _BoxedExpression {
     return this._value.type !== 'complex';
   }
 
-  get isComplex(): boolean | undefined {
-    // A real number, or an imaginary number
-    // isFinite
-    return !this.isNaN;
-  }
-
   get isImaginary(): boolean | undefined {
     if (typeof this._value === 'number') return false;
     return this._value.im !== 0;

@@ -4,7 +4,7 @@ import { Expression } from '../src/math-json';
 
 const ce = new ComputeEngine();
 
-console.info(ce.box(['Ln']).toString());
+console.info(ce.parse('e e^x e^{-x}').toString());
 
 console.info(
   ce

@@ -318,12 +318,6 @@ export class _BoxedSymbolDefinition implements BoxedSymbolDefinition {
   set real(val: boolean | undefined) {
     this.updateFlags({ real: val });
   }
-  get complex(): boolean | undefined {
-    return this.value?.isComplex ?? this._flags?.complex;
-  }
-  set complex(val: boolean | undefined) {
-    this.updateFlags({ complex: val });
-  }
   get imaginary(): boolean | undefined {
     return this.value?.isImaginary ?? this._flags?.imaginary;
   }
@@ -433,10 +427,6 @@ export class _BoxedSymbolDefinition implements BoxedSymbolDefinition {
           case 'real':
             consistent = this._value.isReal === flags.real;
             break;
-          case 'complex':
-            consistent = this._value.isComplex === flags.complex;
-            break;
-            break;
           case 'imaginary':
             consistent = this._value.isImaginary === flags.imaginary;
             break;
@@ -513,7 +503,6 @@ export function domainToFlags(
     result.integer = false;
     result.rational = false;
     result.real = false;
-    result.complex = false;
     result.imaginary = false;
 
     result.positive = false;
@@ -540,7 +529,6 @@ export function domainToFlags(
   if (base === 'RationalNumbers') result.rational = true;
   if (base === 'RealNumbers') result.real = true;
   if (base === 'ImaginaryNumbers') result.imaginary = true;
-  if (base === 'ComplexNumbers') result.complex = true;
 
   if (base === 'PositiveNumbers') {
     result.notZero = true;

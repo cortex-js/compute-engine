@@ -171,7 +171,7 @@ export const CONDITIONS = {
   },
   integer: (x: BoxedExpression) => x.isInteger,
   real: (x: BoxedExpression) => x.isReal,
-  complex: (x: BoxedExpression) => x.isComplex,
+  complex: (x: BoxedExpression) => x.isNumber && x.isFinite,
   imaginary: (x: BoxedExpression) => x.isImaginary,
   rational: (x: BoxedExpression) => x.isRational,
   irrational: (x: BoxedExpression) => x.isRational === false,

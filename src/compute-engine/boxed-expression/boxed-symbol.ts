@@ -814,9 +814,6 @@ export class BoxedSymbol extends _BoxedExpression {
   get isReal(): boolean | undefined {
     return this.symbolDefinition?.real;
   }
-  get isComplex(): boolean | undefined {
-    return this.symbolDefinition?.complex;
-  }
   get isImaginary(): boolean | undefined {
     return this.symbolDefinition?.imaginary;
   }
