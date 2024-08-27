@@ -10,6 +10,7 @@ import {
   operands,
   nops,
   operand,
+  isEmptySequence,
 } from '../../math-json/utils';
 
 import {
@@ -766,7 +767,7 @@ export class _Parser implements Parser {
       this.addBoundary(['<}>']);
       const expr = this.parseExpression();
       this.skipSpace();
-      if (this.matchBoundary()) return expr ?? ['Sequence'];
+      if (this.matchBoundary()) return expr ?? 'Nothing';
       // Try to find the boundary (or the end)
       while (!this.matchBoundary() && !this.atEnd) this.nextToken();
       if (operator(expr) === 'Error') return expr;
@@ -1410,7 +1411,7 @@ export class _Parser implements Parser {
           return null;
         }
       }
-      const result = def.parse(this, body ?? ['Sequence']);
+      const result = def.parse(this, body ?? 'Nothing');
       if (result !== null) return result;
     }
     this.index = start;
@@ -1625,7 +1626,7 @@ export class _Parser implements Parser {
 
       if (defs) {
         const nonEmptySuperscripts = superscripts.filter(
-          (x) => !(operator(x) === 'Sequence' && nops(x) === 0)
+          (x) => !isEmptySequence(x)
         ) as Expression[];
         if (nonEmptySuperscripts.length !== 0) {
           const superscriptExpression: Expression =
@@ -1972,7 +1973,7 @@ export class _Parser implements Parser {
       // If we got an empty sequence, ignore it.
       // This is returned by some purely presentational commands,
       // for example `\displaystyle`
-      if (operator(lhs) === 'Sequence' && nops(lhs) === 0) lhs = null;
+      if (isEmptySequence(lhs)) lhs = null;
     }
 
     //
@@ -2180,7 +2181,7 @@ export function parse(
     expr = expr !== null ? ['Sequence', expr, error] : error;
   }
 
-  expr ??= ['Sequence'];
+  expr ??= 'Nothing';
 
   if (options.preserveLatex) {
     if (Array.isArray(expr)) expr = { latex, fn: expr } as Expression;

@@ -375,15 +375,19 @@ export function getSequence(
   return operands(expr);
 }
 
-export function isEmptySequence(expr: Expression | null | undefined): boolean {
+/** `Nothing` or the empty sequence (`["Sequence"]`) */
+export function isEmptySequence(
+  expr: Expression | null | undefined
+): expr is null | undefined {
+  if (expr === null || expr === undefined) return true;
+  if (expr === 'Nothing') return true;
   return operator(expr) === 'Sequence' && nops(expr) === 0;
 }
 
 export function missingIfEmpty(
   expr: Expression | null | undefined
 ): Expression {
-  if (isEmptySequence(expr)) return MISSING;
-  return expr ?? MISSING;
+  return isEmptySequence(expr) ? MISSING : expr;
 }
 
 function countFunctionLeaves(xs: Expression[]): number {

@@ -366,7 +366,7 @@ function matchArguments(
         if (j <= 1) {
           if (expr.operator === 'Add') value = ce.Zero;
           else if (expr.operator === 'Multiply') value = ce.One;
-          else value = ce.function('Sequence', []);
+          else value = ce.Nothing;
         } else if (j === 2) {
           // Capturing a single element
           if (ops.length === 0) return null;

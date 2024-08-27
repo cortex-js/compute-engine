@@ -823,7 +823,7 @@ export interface Parser {
    * `\frac{1}{2}`.
    *
    * Return `null` if none was found
-   * Return `['Sequence']` if an empty group `{}` was found
+   * Return `Nothing` if an empty group `{}` was found
    */
   parseGroup(): Expression | null;
 

@@ -131,10 +131,10 @@ export const SIMPLIFY_RULES: Rule[] = [
     const s = x.sgn;
     const ce = x.engine;
     if (s === undefined) return undefined;
-    if (s > 0) return { value: ce.One, because: 'sign >0' };
-    if (s < 0) return { value: ce.NegativeOne, because: 'sign <0' };
-    if (s === 0) return { value: ce.Zero, because: 'sign =0' };
-    if (isNaN(s)) return { value: ce.NaN, because: 'sign NaN' };
+    if (s === 'positive') return { value: ce.One, because: 'sign positive' };
+    if (s === 'negative') return { value: ce.One, because: 'sign negative' };
+    if (s === 'zero') return { value: ce.Zero, because: 'sign zero' };
+    if (s === 'unsigned') return { value: ce.NaN, because: 'sign unsinged' };
     return undefined;
   },
 

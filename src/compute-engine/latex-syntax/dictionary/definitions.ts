@@ -697,7 +697,7 @@ function makeParseHandler(
     const h = entry.parse ?? entry.name;
     if (h)
       return (_parser, body) => {
-        if (body === null || isEmptySequence(body)) return null;
+        if (isEmptySequence(body)) return null;
         return [h, body];
       };
   }

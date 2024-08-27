@@ -350,7 +350,7 @@ export class TensorFieldExpression implements TensorField<BoxedExpression> {
   }
 
   conjugate(x: BoxedExpression): BoxedExpression {
-    return this.ce.function('Conjugate', [x]);
+    return this.ce.function('Conjugate', [x]).evaluate();
   }
 }
 

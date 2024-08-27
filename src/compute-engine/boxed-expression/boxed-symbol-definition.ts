@@ -9,11 +9,11 @@ import type {
   SymbolDefinition,
   NumericFlags,
   LatexString,
-  Type,
 } from './public';
 import { _BoxedExpression } from './abstract-boxed-expression';
 import { isLatexString, normalizeFlags } from './utils';
 import { widen } from './boxed-domain';
+import { Type } from '../../common/type/types';
 
 /**
  * ### THEORY OF OPERATIONS

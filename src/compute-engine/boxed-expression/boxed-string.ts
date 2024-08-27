@@ -5,12 +5,12 @@ import type {
   Metadata,
   PatternMatchOptions,
   BoxedSubstitution,
-  Type,
 } from './public';
 
 import { _BoxedExpression } from './abstract-boxed-expression';
 import { hashCode, isBoxedExpression } from './utils';
 import { isWildcard, wildcardName } from './boxed-patterns';
+import { Type } from '../../common/type/types';
 
 /**
  * BoxedString

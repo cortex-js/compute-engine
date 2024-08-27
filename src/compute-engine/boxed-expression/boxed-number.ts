@@ -9,7 +9,6 @@ import type {
   BoxedSubstitution,
   EvaluateOptions,
   SemiBoxedExpression,
-  Type,
   BoxedRuleSet,
   ReplaceOptions,
   Rule,
@@ -45,6 +44,7 @@ import { _BoxedExpression } from './abstract-boxed-expression';
 import { hashCode } from './utils';
 import { match } from './match';
 import { add } from './terms';
+import { Type } from '../../common/type/types';
 
 /**
  * BoxedNumber
@@ -386,17 +386,25 @@ export class BoxedNumber extends _BoxedExpression {
   get type(): Type {
     if (typeof this._value === 'number')
       return Number.isInteger(this._value) ? 'integer' : 'real';
+
+    if (this._value.im !== 0 && this._value.re === 0) return 'imaginary';
+
     return this._value.type;
   }
 
-  get sgn(): -1 | 0 | 1 | undefined | typeof NaN {
-    if (this._value === 0) return 0;
+  get sgn(): Sign | undefined {
+    if (this._value === 0) return 'zero';
 
+    let s: number | undefined;
     if (typeof this._value === 'number') {
-      const s = Math.sign(this._value);
-      return Number.isNaN(s) ? NaN : (s as -1 | 0 | 1);
-    }
-    return this._value.sgn() ?? NaN;
+      if (Number.isNaN(this._value)) return 'unsigned';
+      s = Math.sign(this._value);
+    } else s = this._value.sgn();
+    if (s === undefined) return undefined;
+    if (Number.isNaN(s)) return 'unsigned';
+    if (s === 0) return 'zero';
+    if (s > 0) return 'positive';
+    return 'negative';
   }
 
   isSame(rhs: BoxedExpression): boolean {
@@ -430,6 +438,25 @@ export class BoxedNumber extends _BoxedExpression {
     if (typeof rhs === 'number') return this.im === 0 && this.re === rhs;
 
     return this === rhs || signDiff(this, rhs) === 0;
+  }
+
+  get numerator(): BoxedExpression {
+    if (typeof this._value === 'number') return this;
+    return this.engine.number(this._value.numerator);
+  }
+
+  get denominator(): BoxedExpression {
+    if (typeof this._value === 'number') return this.engine.One;
+    return this.engine.number(this._value.denominator);
+  }
+
+  get numeratorDenominator(): [BoxedExpression, BoxedExpression] {
+    if (typeof this._value === 'number') return [this, this.engine.One];
+    const ce = this.engine;
+    return [
+      ce.number(this._value.numerator),
+      ce.number(this._value.denominator),
+    ];
   }
 
   subs(
@@ -495,34 +522,53 @@ export class BoxedNumber extends _BoxedExpression {
 
   /** x > 0, same as `isGreater(0)` */
   get isPositive(): boolean | undefined {
-    if (typeof this._value === 'number') return this._value > 0;
+    if (typeof this._value === 'number')
+      return !Number.isNaN(this._value) && this._value > 0;
+
     const s = this.sgn;
-    if (s === undefined || s === null) return undefined;
-    return s > 0;
+    if (s === undefined) return undefined;
+
+    if (s === 'positive') return true;
+    if (['non-positive', 'zero', 'unsigned', 'negative'].includes(s))
+      return false;
+
+    return undefined;
   }
 
   /** x >= 0, same as `isGreaterEqual(0)` */
   get isNonNegative(): boolean | undefined {
     if (typeof this._value === 'number') return this._value >= 0;
     const s = this.sgn;
-    if (s === undefined || s === null) return undefined;
-    return s >= 0;
+    if (s === undefined) return undefined;
+
+    if (s === 'positive' || s === 'non-negative') return true;
+    if (['negative', 'zero', 'unsigned'].includes(s)) return false;
+    return undefined;
   }
 
   /** x < 0, same as `isLess(0)` */
   get isNegative(): boolean | undefined {
     if (typeof this._value === 'number') return this._value < 0;
+
     const s = this.sgn;
-    if (s === undefined || s === null) return undefined;
-    return s < 0;
+    if (s === undefined) return undefined;
+    if (s === 'negative') return true;
+    if (['non-negative', 'zero', 'unsigned', 'positive'].includes(s))
+      return false;
+    return undefined;
   }
 
   /** x <= 0, same as `isLessEqual(0)` */
   get isNonPositive(): boolean | undefined {
     if (typeof this._value === 'number') return this._value <= 0;
+
     const s = this.sgn;
-    if (s === undefined || s === null) return undefined;
-    return s <= 0;
+    if (s === undefined) return undefined;
+
+    if (s === 'negative' || s === 'non-positive') return true;
+    if (['positive', 'zero', 'unsigned'].includes(s)) return false;
+
+    return undefined;
   }
 
   get isZero(): boolean {

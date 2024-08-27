@@ -8,12 +8,11 @@ import type {
   BoxedDomain,
 } from '../public';
 
-import type { BoxedExpression, NumericFlags } from './public';
+import type { BoxedExpression, FunctionNumericFlags } from './public';
 
 import { functionDomain } from '../domain-utils';
 import { applicable } from '../function-utils';
 import { DEFAULT_COMPLEXITY } from './order';
-import { normalizeFlags } from './utils';
 
 export class _BoxedFunctionDefinition implements BoxedFunctionDefinition {
   engine: IComputeEngine;
@@ -39,7 +38,7 @@ export class _BoxedFunctionDefinition implements BoxedFunctionDefinition {
 
   signature: BoxedFunctionSignature;
 
-  flags?: Partial<NumericFlags>;
+  flags?: Readonly<Partial<FunctionNumericFlags>>;
 
   type: 'function';
 
@@ -145,7 +144,7 @@ export class _BoxedFunctionDefinition implements BoxedFunctionDefinition {
     if (this.inert) {
       if (def.hold)
         throw Error(
-          `Function Definition "${name}": an inert function should not have a hold`
+          `Function Definition "${name}"\n|   An inert function should not have a hold`
         );
       this.hold = 'rest';
       if (def.signature) {
@@ -160,32 +159,32 @@ export class _BoxedFunctionDefinition implements BoxedFunctionDefinition {
           'compile' in sig
         )
           throw Error(
-            `Function Definition "${name}": an inert function should only have 'canonical' or 'codomain' handlers`
+            `Function Definition "${name}"\n|   An inert function should only have 'canonical' or 'codomain' handlers`
           );
       }
       if (this.threadable)
         throw Error(
-          `Function Definition "${name}": an inert function should not be threadable`
+          `Function Definition "${name}"\n|   An inert function should not be threadable`
         );
       if (this.associative)
         throw Error(
-          `Function Definition "${name}": an inert function should not be associative`
+          `Function Definition "${name}"\n|   An inert function should not be associative`
         );
       if (this.commutative)
         throw Error(
-          `Function Definition "${name}": an inert function should not be commutative`
+          `Function Definition "${name}"\n|   An inert function should not be commutative`
         );
       if (this.idempotent)
         throw Error(
-          `Function Definition "${name}": an inert function should not be idempotent`
+          `Function Definition "${name}"\n|   An inert function should not be idempotent`
         );
       if (this.involution)
         throw Error(
-          `Function Definition "${name}": an inert function should not be involution`
+          `Function Definition "${name}"\n|   An inert function should not be involution`
         );
       if (!this.pure)
         throw Error(
-          `Function Definition "${name}": an inert function should be pure`
+          `Function Definition "${name}"\n|   An inert function should be pure`
         );
     }
     if (def.signature) {
@@ -207,7 +206,7 @@ export class _BoxedFunctionDefinition implements BoxedFunctionDefinition {
         const domain = ce.domain(sig.domain);
         if (!domain.isValid)
           throw Error(
-            `Function Definition "${name}": invalid domain ${JSON.stringify(
+            `Function Definition "${name}"\n|   Invalid domain ${JSON.stringify(
               sig.domain
             )}`
           );
@@ -282,7 +281,23 @@ export class _BoxedFunctionDefinition implements BoxedFunctionDefinition {
       };
     }
 
-    this.flags = def.flags ? normalizeFlags(def.flags) : undefined;
+    this.flags = def.flags;
+
+    if (this.signature.sgn) {
+      const flags = this.flags;
+      if (flags) {
+        if (
+          flags.positive ||
+          flags.negative ||
+          flags.zero ||
+          flags.nonNegative ||
+          flags.nonPositive
+        )
+          throw Error(
+            `Function Definition "${name}"\n|   The flags 'positive', 'negative', 'nonNegative', 'nonPositive' and 'zero' are mutually exclusive with 'sgn'`
+          );
+      }
+    }
   }
   reset(): void {
     return;

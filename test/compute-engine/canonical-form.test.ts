@@ -137,7 +137,8 @@ describe('CANONICAL FORMS', () => {
   test('"2\\times(5-5)\\times5\\times4"', () => {
     expect(check('2\\times(5-5)\\times5\\times4')).toMatchInlineSnapshot(`
       box       = ["Multiply", 2, ["Delimiter", ["Subtract", 5, 5]], 5, 4]
-      canonical = 0
+      canonical = ["Multiply", 2, 4, 5, ["Subtract", 5, 5]]
+      simplify  = 0
     `);
   });
 

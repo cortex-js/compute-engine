@@ -327,7 +327,7 @@ export function box(
   expr: null | undefined | NumericValue | SemiBoxedExpression,
   options?: { canonical?: CanonicalOptions; structural?: boolean }
 ): BoxedExpression {
-  if (expr === null || expr === undefined) return ce._fn('Sequence', []);
+  if (expr === null || expr === undefined) return ce.error('missing');
 
   if (expr instanceof NumericValue) return fromNumericValue(ce, expr);
 
@@ -564,13 +564,19 @@ function makeNumericFunction(
     name === 'Exp'
   )
     ops = checkNumericArgs(ce, semiCanonical(ce, semiOps), 1);
-  else if (name === 'Ln' || name === 'Log')
+  else if (name === 'Ln' || name === 'Log') {
     ops = checkNumericArgs(ce, semiCanonical(ce, semiOps));
-  else if (name === 'Power' || name === 'Root')
+    if (ops.length === 0) ops = [ce.error('missing')];
+  } else if (name === 'Power' || name === 'Root')
     ops = checkNumericArgs(ce, semiCanonical(ce, semiOps), 2);
-  else if (name === 'Divide')
+  else if (name === 'Divide') {
+    // Note: Divide can have more than one argument, i.e.
+    // Divide(a, b, c) = a / b / c
+    // But it needs at least two arguments
     ops = checkNumericArgs(ce, semiCanonical(ce, semiOps));
-  else return null;
+    if (ops.length === 0) ops = [ce.error('missing'), ce.error('missing')];
+    if (ops.length === 1) ops = [ops[0], ce.error('missing')];
+  } else return null;
 
   // If some of the arguments are not valid, we're done
   // (note: the result is canonical, but not valid)

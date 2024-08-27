@@ -19,14 +19,13 @@ import type {
 
 import type {
   BoxedExpression,
+  FunctionNumericFlags,
   SemiBoxedExpression,
   Sign,
-  Type,
 } from './public';
 
 import { findUnivariateRoots } from './solve';
 import { replace } from './rules';
-import { flattenOps } from './flatten';
 import { negate } from './negate';
 import { Product } from './product';
 import { simplify } from './simplify';
@@ -51,6 +50,8 @@ import { match } from './match';
 import { factor } from './factor';
 import { add } from './terms';
 import { holdMap } from './hold';
+import { PrimitiveType, Type } from '../../common/type/types';
+import { isSubtype } from '../../common/type/subtype';
 
 /**
  * A boxed function represent an expression that can be
@@ -82,7 +83,7 @@ export class BoxedFunction extends _BoxedExpression {
   private _scope: RuntimeScope | null;
 
   // Note: only canonical expressions have an associated def
-  private _def: BoxedFunctionDefinition | undefined;
+  _def: BoxedFunctionDefinition | undefined;
 
   private _isPure: boolean;
 
@@ -94,7 +95,7 @@ export class BoxedFunction extends _BoxedExpression {
   private _hash: number | undefined;
 
   // Cached sign of the function (if all the arguments are constant)
-  private _sgn: number | undefined | typeof NaN | null = null;
+  private _sgn: Sign | undefined | null = null;
 
   constructor(
     ce: IComputeEngine,
@@ -438,13 +439,11 @@ export class BoxedFunction extends _BoxedExpression {
     return this._ops.some((x) => x.has(v));
   }
 
-  get sgn(): -1 | 0 | 1 | undefined | typeof NaN {
-    if (this._sgn !== null) return this._sgn;
+  get sgn(): Sign | undefined {
+    if (!this.isValid) return undefined;
 
-    // Check flags in priority
-    if (this._def?.flags?.zero) return 0;
-    if (this._def?.flags?.positive) return 1;
-    if (this._def?.flags?.negative) return -1;
+    // If the sign has been computed before, return it
+    if (this._sgn !== null) return this._sgn;
 
     // @todo: Could also cache non-constant values, but this
     // would require keeping track of the state of the compute engine
@@ -453,15 +452,30 @@ export class BoxedFunction extends _BoxedExpression {
 
     const memoizable = this.isPure && this._ops.every((x) => x.isConstant);
 
-    let s: -1 | 0 | 1 | undefined | typeof NaN = undefined;
-    if (this.isValid) {
-      const sig = this.functionDefinition?.signature;
-      if (sig?.sgn) {
-        const context = this.engine.swapScope(this.scope);
-        s = sig.sgn(this._ops, { engine: this.engine });
-        this.engine.swapScope(context);
-      }
+    let s: Sign | undefined = undefined;
+    const sig = this.functionDefinition?.signature;
+    if (sig?.sgn) {
+      const context = this.engine.swapScope(this.scope);
+      s = sig.sgn(this._ops, { engine: this.engine });
+      this.engine.swapScope(context);
     }
+
+    //
+    // Check the flags
+    //
+    if (s === undefined) {
+      if (flagValue(this, 'zero') === true) s = 'zero';
+      else if (flagValue(this, 'nonNegative') === true) s = 'non-negative';
+      else if (flagValue(this, 'positive') === true) s = 'positive';
+      else if (flagValue(this, 'negative') === true) s = 'negative';
+      else if (flagValue(this, 'nonPositive') === true) s = 'non-positive';
+      else if (this.isImaginary || this.isNaN) return 'unsigned';
+      else if (this.isReal && flagValue(this, 'zero') === false)
+        s = 'real-not-zero';
+      else if (flagValue(this, 'zero') === false) s = 'not-zero';
+      else if (this.isReal) s = 'real';
+    }
+
     if (memoizable) this._sgn = s;
     return s;
   }
@@ -493,53 +507,61 @@ export class BoxedFunction extends _BoxedExpression {
     return undefined;
   }
 
+  get isNaN(): boolean | undefined {
+    return flagValue(this, 'NaN');
+  }
+
+  get isInfinity(): boolean | undefined {
+    return flagValue(this, 'infinity');
+  }
+
+  // Not +- Infinity, not NaN
+  get isFinite(): boolean | undefined {
+    if (this.isNaN === undefined || this.isInfinity === undefined)
+      return undefined;
+    if (this.isNaN || this.isInfinity) return false;
+    return true;
+  }
+
   get isZero(): boolean | undefined {
-    // Use a flag in priority
-    if (this._def?.flags?.zero !== undefined) return this._def.flags.zero;
-
     const s = this.sgn;
-    if (s === undefined) return undefined;
-    return s === 0;
 
-    // if (s === 'zero') return true;
-    // if (
-    //   [
-    //     'not-zero',
-    //     'real-not-zero',
-    //     'positive',
-    //     'negative',
-    //     'unsigned',
-    //   ].includes(s)
-    // )
-    //   return false;
-    // return undefined;
+    if (s === undefined) return undefined;
+    if (s === 'zero') return true;
+    if (
+      [
+        'not-zero',
+        'real-not-zero',
+        'positive',
+        'negative',
+        'unsigned',
+      ].includes(s)
+    )
+      return false;
+    return undefined;
   }
 
   get isNotZero(): boolean | undefined {
-    // Use a flag in priority
-    if (this._def?.flags?.notZero !== undefined) return this._def.flags.notZero;
-
     const s = this.sgn;
     if (s === undefined) return undefined;
-    return s !== 0;
 
-    // if (['not-zero','real-not-zero','positive','negative'].includes(s)) return true;
-    // if (s==='zero') return false:
-    // return undefined
+    if (['not-zero', 'real-not-zero', 'positive', 'negative'].includes(s))
+      return true;
+    if (s === 'zero') return false;
+    return undefined;
   }
 
   get isOne(): boolean | undefined {
-    // Use a flag in priority
-    if (this._def?.flags?.one !== undefined) return this._def.flags.one;
+    const f = flagValue(this, 'one');
+    if (f !== undefined) return f;
 
     if (this.isNonPositive || this.isImaginary) return false;
     return undefined;
   }
 
   get isNegativeOne(): boolean | undefined {
-    // Use a flag in priority
-    if (this._def?.flags?.negativeOne !== undefined)
-      return this._def.flags.negativeOne;
+    const f = flagValue(this, 'negativeOne');
+    if (f !== undefined) return f;
 
     if (this.isNonNegative || this.isImaginary) return false;
     return undefined;
@@ -547,65 +569,45 @@ export class BoxedFunction extends _BoxedExpression {
 
   // x > 0
   get isPositive(): boolean | undefined {
-    // Use a flag in priority
-    if (this._def?.flags?.positive !== undefined)
-      return this._def.flags.positive;
-
     const s = this.sgn;
     if (s === undefined) return undefined;
-    return !isNaN(s) && s > 0;
 
-    // if (s === 'positive') return true;
-    // if (['non-positive', 'zero', 'unsigned', 'negative'].includes(s))
-    //   return false;
+    if (s === 'positive') return true;
+    if (['non-positive', 'zero', 'unsigned', 'negative'].includes(s))
+      return false;
 
-    // return undefined;
+    return undefined;
   }
 
   // x >= 0
   get isNonNegative(): boolean | undefined {
-    // Use a flag in priority
-    if (this._def?.flags?.nonNegative !== undefined)
-      return this._def.flags.nonNegative;
-
     const s = this.sgn;
     if (s === undefined) return undefined;
-    return !isNaN(s) && s >= 0;
 
-    // if (s === 'positive' || s === 'non-negative') return true;
-    // if (['negative', 'zero', 'unsigned'].includes(s)) return false;
-    // return undefined;
+    if (s === 'positive' || s === 'non-negative') return true;
+    if (['negative', 'zero', 'unsigned'].includes(s)) return false;
+    return undefined;
   }
 
   // x < 0
   get isNegative(): boolean | undefined {
-    // Use a flag in priority
-    if (this._def?.flags?.negative !== undefined)
-      return this._def.flags.negative;
-
     const s = this.sgn;
     if (s === undefined) return undefined;
-    return !isNaN(s) && s < 0;
-    // if (s === 'negative') return true;
-    // if (['non-negative', 'zero', 'unsigned', 'positive'].includes(s))
-    //   return false;
-    // return undefined;
+    if (s === 'negative') return true;
+    if (['non-negative', 'zero', 'unsigned', 'positive'].includes(s))
+      return false;
+    return undefined;
   }
 
   // x <= 0
   get isNonPositive(): boolean | undefined {
-    // Use a flag in priority
-    if (this._def?.flags?.nonPositive !== undefined)
-      return this._def.flags.nonPositive;
-
     const s = this.sgn;
     if (s === undefined) return undefined;
-    return !isNaN(s) && s <= 0;
 
-    // if (s === 'negative' || s === 'non-positive') return true;
-    // if (['positive', 'zero', 'unsigned'].includes(s)) return false;
+    if (s === 'negative' || s === 'non-positive') return true;
+    if (['positive', 'zero', 'unsigned'].includes(s)) return false;
 
-    // return undefined;
+    return undefined;
   }
 
   /** `isSame` is structural/symbolic equality */
@@ -626,6 +628,59 @@ export class BoxedFunction extends _BoxedExpression {
       if (!lhsTail[i].isSame(rhsTail[i])) return false;
 
     return true;
+  }
+
+  get numerator(): BoxedExpression {
+    return this.numeratorDenominator[0];
+  }
+
+  get denominator(): BoxedExpression {
+    return this.numeratorDenominator[1];
+  }
+
+  get numeratorDenominator(): [BoxedExpression, BoxedExpression] {
+    if (!this.isCanonical) return this.canonical.numeratorDenominator;
+
+    const operator = this.operator;
+    if (operator === 'Divide') return [this.op1, this.op2];
+
+    if (operator === 'Negate') {
+      const [num, denom] = this.op1.numeratorDenominator;
+      return [num.neg(), denom];
+    }
+
+    if (operator === 'Power') {
+      const [num, denom] = this.op1.numeratorDenominator;
+      return [num.pow(this.op2), denom.pow(this.op2)];
+    }
+
+    if (operator === 'Root') {
+      const [num, denom] = this.op1.numeratorDenominator;
+      return [num.root(this.op2), denom.root(this.op2)];
+    }
+
+    if (operator === 'Sqrt') {
+      const [num, denom] = this.op1.numeratorDenominator;
+      return [num.sqrt(), denom.sqrt()];
+    }
+
+    if (operator === 'Abs') {
+      const [num, denom] = this.op1.numeratorDenominator;
+      return [num.abs(), denom.abs()];
+    }
+
+    if (operator === 'Multiply')
+      return new Product(this.engine, this.ops!).asNumeratorDenominator();
+
+    if (operator === 'Add') {
+      // @todo: we could try to factor out common factors
+    }
+
+    if (operator === 'Log' || operator === 'Ln') {
+      // @todo: we could isolate the base
+    }
+
+    return [this, this.engine.One];
   }
 
   //
@@ -995,39 +1050,32 @@ export class BoxedFunction extends _BoxedExpression {
   }
 
   get isNumber(): boolean | undefined {
-    if (this._def?.flags?.number !== undefined) return this._def.flags.number;
-    this._def?.flags?.notZero;
-
     return this.domain?.isCompatible('Numbers');
+    // return isSubtype(this.type, 'number');
   }
+
   get isInteger(): boolean | undefined {
-    // Use a flag in priority
-    if (this._def?.flags?.integer !== undefined) return this._def.flags.integer;
-
     return this.domain?.isCompatible('Integers');
+    // return isSubtype(this.type, 'integer');
   }
+
   get isRational(): boolean | undefined {
-    if (this._def?.flags?.rational !== undefined)
-      return this._def.flags.rational;
-
-    return this.domain?.isCompatible('RationalNumbers');
+    return isSubtype(this.type, 'rational');
   }
+
   get isReal(): boolean | undefined {
-    if (this._def?.flags?.real !== undefined) return this._def.flags.real;
-
     return this.domain?.isCompatible('RealNumbers');
+    // return isSubtype(this.type, 'real');
   }
+
   get isComplex(): boolean | undefined {
-    if (this._def?.flags?.complex !== undefined) return this._def.flags.complex;
-    this._def?.flags?.notZero;
-
     return this.domain?.isCompatible('ComplexNumbers');
+    // return isSubtype(this.type, 'complex');
   }
-  get isImaginary(): boolean | undefined {
-    if (this._def?.flags?.imaginary !== undefined)
-      return this._def.flags.imaginary;
 
+  get isImaginary(): boolean | undefined {
     return this.domain?.isCompatible('ImaginaryNumbers');
+    // return isSubtype(this.type, 'imaginary');
   }
 
   get domain(): BoxedDomain | undefined {
@@ -1050,14 +1098,20 @@ export class BoxedFunction extends _BoxedExpression {
     return result;
   }
 
+  /** The type of the value of the function */
   get type(): Type {
     if (!this.isValid) return 'error';
-    if (this.isInteger) return 'integer';
-    if (this.isRational) return 'rational';
-    if (this.isReal) return 'real';
-    if (this.isComplex) return 'complex';
 
-    return 'expression';
+    const def = this._def;
+    if (!def) return 'function';
+
+    if (typeof def.signature.type === 'string')
+      return def.signature.type as PrimitiveType;
+
+    if (typeof def.signature.type === 'function')
+      return def.signature.type(this.ops!);
+
+    return 'function';
   }
 
   simplify(options?: Partial<SimplifyOptions>): BoxedExpression {
@@ -1119,7 +1173,7 @@ export class BoxedFunction extends _BoxedExpression {
         results.push(this.engine._fn(this.operator, args).evaluate(options));
       }
 
-      if (results.length === 0) return this.engine.box(['Sequence']);
+      if (results.length === 0) return this.engine.Nothing;
       if (results.length === 1) return results[0];
       return this.engine._fn('List', results);
     }
@@ -1175,3 +1229,20 @@ export class BoxedFunction extends _BoxedExpression {
 // ): BoxedFunctionSignature | undefined {
 //   return def.signature;
 // }
+
+function flagValue(
+  expr: BoxedFunction,
+  flag: keyof FunctionNumericFlags
+): boolean | undefined {
+  const def = expr._def;
+  if (!def) return undefined;
+  const result = expr._def?.signature.flags?.[flag];
+  if (result === undefined) return undefined;
+  if (typeof result === 'boolean') return result;
+
+  const context = expr.engine.swapScope(expr.scope);
+  const f = result(expr.ops!);
+  expr.engine.swapScope(context);
+
+  return f;
+}

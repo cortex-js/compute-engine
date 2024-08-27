@@ -107,8 +107,6 @@ export function canonicalInvisibleOperator(
           (isIndexableCollection(x) && !x.string))
     )
   ) {
-    // Only call flatten here, because it will bind (auto-declare) the arguments
-    ops = flatten(ops, 'Multiply');
     return canonicalMultiply(ce, ops);
   }
 

@@ -1,6 +1,22 @@
 import { ComputeEngine } from '../src/compute-engine';
+import { parseType } from '../src/common/type/parse';
+import { Expression } from '../src/math-json';
 
 const ce = new ComputeEngine();
+
+console.info(ce.box(['Ln']).toString());
+
+console.info(
+  ce
+    .parse(
+      '\\sqrt{\\pi}\\left(\\frac{n}{e}\\right)^n\\sqrt[6]{8n^3+4n^2+n+\\frac{1}{30}}'
+    )
+    .toString()
+);
+
+console.info(ce.parse('\\int\\sin x \\, \\operatorname{d}x+1 ').toString());
+
+console.info(ce.parse('3 + \\pi').isPositive);
 
 // 3^{-2} gets calculated in canonicalization. It shouldn't.
 const expr = ce.parse('\\frac{x}{3^{-2}}');

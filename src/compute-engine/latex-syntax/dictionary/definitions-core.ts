@@ -951,7 +951,7 @@ function parseTextRun(
       text += ' ';
     } else if (parser.match('<$>')) {
       const index = parser.index;
-      const expr = parser.parseExpression() ?? ['Sequence'];
+      const expr = parser.parseExpression() ?? 'Nothing';
       parser.skipSpace();
       if (parser.match('<$>')) {
         runs.push(expr);
@@ -961,7 +961,7 @@ function parseTextRun(
       }
     } else if (parser.match('<$$>')) {
       const index = parser.index;
-      const expr = parser.parseExpression() ?? ['Sequence'];
+      const expr = parser.parseExpression() ?? 'Nothing';
       parser.skipSpace();
       if (parser.match('<$$>')) {
         runs.push(expr);
@@ -1134,7 +1134,7 @@ function parseParenDelimiter(
 
   // Handle `()` used for example with `f()`. This will be handled in
   // `canonicalInvisibleOperator()`
-  if (body === null || isEmptySequence(body)) return ['Delimiter'];
+  if (isEmptySequence(body)) return ['Delimiter'];
 
   const h = operator(body);
   // We have a Delimiter inside parens: e.g. `(a, b, c)` with `a, b, c` the
@@ -1145,7 +1145,7 @@ function parseParenDelimiter(
       // We have a Delimiter with a single character separator
       return [
         'Delimiter',
-        operand(body, 1) ?? ['Sequence'],
+        operand(body, 1) ?? 'Nothing',
         { str: `(${delims})` },
       ];
     }
@@ -1182,8 +1182,7 @@ function parseBrackets(
   parser: Parser,
   body: Expression | null | undefined
 ): Expression {
-  if (body === null || body === undefined || isEmptySequence(body))
-    return ['List'];
+  if (isEmptySequence(body)) return ['List'];
 
   const h = operator(body);
   if (h === 'Range' || h === 'Linspace') return body;
@@ -1202,7 +1201,7 @@ function parseBrackets(
     if (delim === ',' || delim === '.,.') {
       body = operand(body, 1);
       if (operator(body) === 'Sequence') return ['List', ...operands(body)];
-      return ['List', body ?? ['Sequence']];
+      return ['List', body ?? 'Nothing'];
     }
   }
 
@@ -1408,7 +1407,7 @@ function parseAt(...close: string[]): (parser, lhs) => Expression | null {
 
     if (close.length > 0 && !parser.matchAll(close)) return null;
 
-    if (operator(rhs) === 'Delimiter') rhs = operand(rhs, 1) ?? ['Sequence'];
+    if (operator(rhs) === 'Delimiter') rhs = operand(rhs, 1) ?? 'Nothing';
     if (operator(rhs) === 'Sequence') return ['At', lhs, ...operands(rhs)];
     return ['At', lhs, rhs];
   };

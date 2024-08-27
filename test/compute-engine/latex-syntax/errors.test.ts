@@ -22,7 +22,7 @@ check('Syntax error inside group with invisible operator', () =>
 );
 
 check('Valid empty group', () =>
-  expect(engine.parse('{}')).toMatchInlineSnapshot(`["Sequence"]`)
+  expect(engine.parse('{}')).toMatchInlineSnapshot(`Nothing`)
 );
 
 check('Invalid open delimiter', () =>
@@ -155,9 +155,17 @@ check('Missing all arguments with \\frac custom parser', () =>
 );
 
 check('Missing argument with \\placeholder parser', () =>
-  expect(engine.parse('1+\\placeholder')).toMatchInlineSnapshot(
-    `["Add", "Nothing", 1]`
-  )
+  expect(engine.parse('1+\\placeholder')).toMatchInlineSnapshot(`
+    [
+      "Sequence",
+      1,
+      [
+        "Error",
+        "'unexpected-operator'",
+        ["LatexString", "'+\\placeholder'"]
+      ]
+    ]
+  `)
 );
 
 check('Invalid argument in sequence', () =>
@@ -206,7 +214,7 @@ check('Invalid infix operator', () =>
 
 check('Invalid prefix operator', () =>
   expect(engine.parse('2\\partial')).toMatchInlineSnapshot(
-    `["Sequence", 2, ["PartialDerivative", "Nothing", "Nothing", "Nothing"]]`
+    `["Sequence", 2, ["PartialDerivative"]]`
   )
 );
 

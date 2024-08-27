@@ -505,11 +505,11 @@ describe('OPERATOR serialize, invalid', () => {
   test(`['Multiply', null] // Invalid form`, () =>
     expect(
       latex(['Multiply', null as unknown as Expression])
-    ).toMatchInlineSnapshot(`1`));
+    ).toMatchInlineSnapshot(`\\error{\\blacksquare}`));
   test(`['Multiply', undefined] // Invalid form`, () =>
     expect(
       latex(['Multiply', undefined as unknown as Expression])
-    ).toMatchInlineSnapshot(`1`));
+    ).toMatchInlineSnapshot(`\\error{\\blacksquare}`));
   test(`['Multiply', 1] // Invalid form`, () =>
     expect(latex(['Multiply', 1])).toMatchInlineSnapshot(`1`));
   test(`['Multiply', 'NaN'] // Invalid form`, () =>
@@ -520,10 +520,14 @@ describe('OPERATOR serialize, invalid', () => {
     expect(latex(['Multiply', 'Infinity'])).toMatchInlineSnapshot(`\\infty`));
 
   test(`['Divide'] // Invalid form`, () =>
-    expect(latex(['Divide'])).toMatchInlineSnapshot(`\\error{\\blacksquare}`));
+    expect(latex(['Divide'])).toMatchInlineSnapshot(
+      `\\frac{\\error{\\blacksquare}}{\\error{\\blacksquare}}`
+    ));
 
   test(`['Divide', 2] // Invalid form`, () =>
-    expect(latex(['Divide', 2])).toMatchInlineSnapshot(`2`));
+    expect(latex(['Divide', 2])).toMatchInlineSnapshot(
+      `\\frac{2}{\\error{\\blacksquare}}`
+    ));
 
   test(`['Divide', 2, 3, 4] // Invalid form`, () =>
     expect(latex(['Divide', 2, 3, 4])).toMatchInlineSnapshot(
@@ -533,16 +537,20 @@ describe('OPERATOR serialize, invalid', () => {
   test(`['Divide', null] // Invalid form`, () =>
     expect(
       latex(['Divide', null as unknown as Expression])
-    ).toMatchInlineSnapshot(`\\error{\\blacksquare}`));
+    ).toMatchInlineSnapshot(
+      `\\frac{\\error{\\blacksquare}}{\\error{\\blacksquare}}`
+    ));
 
   test(`['Divide, undefined'] // Invalid form`, () =>
     expect(
       latex(['Divide', undefined as unknown as Expression])
-    ).toMatchInlineSnapshot(`\\error{\\blacksquare}`));
+    ).toMatchInlineSnapshot(
+      `\\frac{\\error{\\blacksquare}}{\\error{\\blacksquare}}`
+    ));
 
   test(`['Divide', NaN] // Invalid form`, () =>
     expect(latex(['Divide', NaN])).toMatchInlineSnapshot(
-      `\\operatorname{NaN}`
+      `\\frac{\\operatorname{NaN}}{\\error{\\blacksquare}}`
     ));
 });
 

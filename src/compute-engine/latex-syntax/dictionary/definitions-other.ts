@@ -124,7 +124,7 @@ export const DEFINITIONS_OTHERS: LatexDictionary = [
 
       if (sub === null || sup === null) return null;
       let rhs = parser.parseGroup() ?? 'Nothing';
-      if (rhs !== 'Nothing' && !isEmptySequence(rhs)) {
+      if (!isEmptySequence(rhs)) {
         const args = parser.parseArguments() ?? ['Nothing'];
         rhs = [rhs as MathJsonIdentifier, ...args];
       }
@@ -226,60 +226,60 @@ export const DEFINITIONS_OTHERS: LatexDictionary = [
 
   {
     latexTrigger: ['\\displaystyle'],
-    parse: () => ['Sequence'] as Expression,
+    parse: () => 'Nothing',
   },
   {
     latexTrigger: ['\\textstyle'],
-    parse: () => ['Sequence'] as Expression,
+    parse: () => 'Nothing',
   },
   {
     latexTrigger: ['\\scriptstyle'],
-    parse: () => ['Sequence'] as Expression,
+    parse: () => 'Nothing',
   },
   {
     latexTrigger: ['\\scriptscriptstyle'],
-    parse: () => ['Sequence'] as Expression,
+    parse: () => 'Nothing',
   },
 
   {
     latexTrigger: ['\\tiny'],
-    parse: () => ['Sequence'] as Expression,
+    parse: () => 'Nothing',
   },
   {
     latexTrigger: ['\\scriptsize'],
-    parse: () => ['Sequence'] as Expression,
+    parse: () => 'Nothing',
   },
   {
     latexTrigger: ['\\footnotesize'],
-    parse: () => ['Sequence'] as Expression,
+    parse: () => 'Nothing',
   },
   {
     latexTrigger: ['\\small'],
-    parse: () => ['Sequence'] as Expression,
+    parse: () => 'Nothing',
   },
   {
     latexTrigger: ['\\normalsize'],
-    parse: () => ['Sequence'] as Expression,
+    parse: () => 'Nothing',
   },
   {
     latexTrigger: ['\\large'],
-    parse: () => ['Sequence'] as Expression,
+    parse: () => 'Nothing',
   },
   {
     latexTrigger: ['\\Large'],
-    parse: () => ['Sequence'] as Expression,
+    parse: () => 'Nothing',
   },
   {
     latexTrigger: ['\\LARGE'],
-    parse: () => ['Sequence'] as Expression,
+    parse: () => 'Nothing',
   },
   {
     latexTrigger: ['\\huge'],
-    parse: () => ['Sequence'] as Expression,
+    parse: () => 'Nothing',
   },
   {
     latexTrigger: ['\\Huge'],
-    parse: () => ['Sequence'] as Expression,
+    parse: () => 'Nothing',
   },
 
   {

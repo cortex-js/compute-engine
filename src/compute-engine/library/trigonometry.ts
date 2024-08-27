@@ -75,7 +75,7 @@ export const TRIGONOMETRY_LIBRARY: IdentifierDefinitions[] = [
       threadable: true,
       signature: {
         domain: ['FunctionOf', 'Numbers', 'Numbers', 'NonNegativeNumbers'],
-        sgn: () => 1,
+        sgn: () => 'non-negative',
         evaluate: ['Sqrt', ['Add', ['Square', '_1'], ['Square', '_2']]],
       },
     },

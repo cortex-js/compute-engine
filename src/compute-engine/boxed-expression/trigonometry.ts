@@ -4,7 +4,7 @@ import Decimal from 'decimal.js';
 import type { Expression } from '../../math-json/types';
 import type { LatexString } from '../latex-syntax/public';
 
-import type { BoxedExpression, IComputeEngine } from './public';
+import type { BoxedExpression, IComputeEngine, RuleStep, Sign } from './public';
 
 import { apply } from './apply'; // @fixme
 
@@ -15,6 +15,146 @@ type ConstructibleTrigValues = [
   [numerator: number, denominator: number],
   { [operator: string]: BoxedExpression },
 ][];
+
+export function Fu(exp: BoxedExpression): RuleStep | undefined {
+  const ce = exp.engine;
+
+  // const rationalTrigOps=['Sin','Cos','Tan','Cot','Sec','Csc','Power','Add','Negate','Multiply','Divide'];
+  // function isTrigRational(exp:BoxedExpression){ //Is a rational function of trig functions
+  //   return exp.ops!.every(x => rationalTrigOps.includes(x.operator))
+  // }
+
+  //Number of monomials that are trig functions (including all numerators and denominators); might need to expand first?
+  const cost = (exp: BoxedExpression) => {
+    if (exp.operator === 'Add' || exp.operator === 'Divide')
+      return exp.ops!.reduce((sum, x) => sum + cost(x), 0);
+    if (['Sin', 'Cos', 'Tan', 'Cot', 'Sec', 'Csc'].includes(exp.operator))
+      return 1;
+    return 0;
+  };
+
+  const hasOp = (exp: BoxedExpression, ...ops: string[]) => {
+    if (!exp.ops) return false;
+    return (
+      ops.includes(exp.operator) ||
+      exp.subexpressions.some((x) => ops.includes(x.operator))
+    );
+  };
+
+  let TR1 = ['\\sec x -> 1/(\\cos x)', '\\csc x -> 1/(\\sin x)'];
+  let TR2 = ['\\tan x -> \\sin(x)/(\\cos x)', '\\cot x -> \\cos(x)/(\\sin x)'];
+  let TR5 = ['\\sin^2(x) -> 1-\\cos^2(x)'];
+  let TR6 = ['\\cos^2(x) -> 1-\\sin^2(x)'];
+  let TR7 = ['\\cos^2(x) -> (1+\\cos(2x))/2'];
+  let TR8 = [
+    '\\sin(x)\\cos(y) -> 1/2*(\\sin(x+y)+\\sin(x-y))',
+    '\\cos(x)\\cos(y) -> 1/2*(\\cos(x+y)+\\cos(x-y))',
+    '\\sin(x)\\sin(y) -> 1/2*(\\cos(x+y)-\\cos(x-y))',
+  ];
+  let TR9 = [
+    '\\sin(x)+\\sin(y) -> 2\\sin((x+y)/2)\\cos((x-y)/2)',
+    '\\sin(x)-\\sin(y) -> 2\\sin((x+y)/2)\\sin((x-y)/2)',
+    '\\cos(x)+\\cos(y) -> 2\\sin((x+y)/2)\\sin((x-y)/2)',
+    '\\cos(x)-\\cos(y) -> -2\\sin((x+y)/2)\\sin((x-y)/2)',
+  ];
+  let TR10 = [
+    '\\sin(x+y) -> \\sin(x)\\cos(y)+\\cos(x)\\sin(y)',
+    '\\sin(x-y) -> \\sin(x)\\cos(y)-\\cos(x)\\sin(y)',
+    '\\cos(x+y) -> \\cos(x)\\cos(y)-\\sin(x)\\sin(y)',
+    '\\cos(x-y) -> \\cos(x)\\cos(y)+\\sin(x)\\sin(y)',
+  ];
+  let TR10Inverse = [
+    '\\sin(x)\\cos(y)+\\cos(x)\\sin(y) -> \\sin(x+y)',
+    '\\sin(x)\\cos(y)-\\cos(x)\\sin(y) -> \\sin(x-y)',
+    '\\cos(x)\\cos(y)-\\sin(x)\\sin(y) -> \\cos(x+y)',
+    '\\cos(x)\\cos(y)+\\sin(x)\\sin(y) -> \\cos(x-y)',
+  ];
+  let TR11 = ['\\sin(2x) -> 2\\sin(x)\\cos(x)', '\\cos(2x) -> 2\\cos^2(x) - 1'];
+  let TR12 = [
+    '\\tan(x+y) -> (\\tan(x)+\\tan(y))/(1-\\tan(x)\\tan(y))',
+    '\\tan(x-y) -> (\\tan(x)-\\tan(y))/(1+\\tan(x)\\tan(y))',
+  ];
+  let TR13 = [
+    '\\tan(x)*\\tan(y) -> 1-(\\tan(x)+\\tan(y))\\cdot \\cot(x+y)',
+    '\\cot(x)*\\cot(y) -> 1+(\\cot(x)+\\cot(y))\\cdot \\cot(x+y)',
+  ];
+
+  let applyTR = (exp: BoxedExpression, ...ruless: string[][]) => {
+    for (let rules of ruless) {
+      exp = exp.simplify();
+      const savedCostFunction = ce.costFunction;
+      ce.costFunction = () => 0;
+      exp = exp.simplify({ rules: rules });
+      ce.costFunction = savedCostFunction;
+      return exp.simplify();
+    }
+    return exp;
+  };
+
+  function bestCase(...cases: BoxedExpression[]): BoxedExpression {
+    let costs = cases.map(cost);
+    let bestI = 0;
+    for (let i = 1; i < cases.length; i++) {
+      if (costs[bestI] < costs[i]) {
+        bestI = i;
+      }
+    }
+    return cases[bestI];
+  }
+
+  let CTR1 = (exp: BoxedExpression) =>
+    bestCase(exp, applyTR(exp, TR5), applyTR(exp, TR6));
+  //Factor out TR11 since it applies in all cases
+  let CTR2 = (exp: BoxedExpression) =>
+    bestCase(exp, applyTR(exp, TR5), applyTR(exp, TR6));
+  let CTR3 = (exp: BoxedExpression) => {
+    let exps = [exp, applyTR(exp, TR8), applyTR(exp, TR8, TR10Inverse)];
+    if (cost(exps[2]) < cost(exps[0])) return exps[2];
+    if (cost(exps[1]) < cost(exps[0])) return exps[1];
+    return exp;
+  };
+  let CTR4 = (exp: BoxedExpression) => bestCase(exp, applyTR(exp, TR10Inverse));
+
+  let applyCTR = (exp: BoxedExpression, CTR: Function) => CTR(exp).simplify();
+
+  let RL1 = (exp: BoxedExpression) => {
+    return applyTR(exp, TR12, TR13);
+  };
+
+  let RL2 = (exp: BoxedExpression) => {
+    console.info(applyTR(exp, TR11).toString());
+    exp = applyTR(exp, TR10, TR11, TR5, TR7, TR11);
+    exp = applyCTR(exp, CTR3);
+    exp = applyCTR(exp, CTR1);
+    exp = applyTR(exp, TR9);
+    exp = applyCTR(exp, CTR2);
+    exp = applyTR(exp, TR9);
+    return applyCTR(exp, CTR4);
+  };
+  if (!hasOp(exp, 'Sin', 'Cos', 'Tan', 'Cot', 'Sec', 'Csc')) {
+    return undefined;
+  }
+  let answer = exp;
+
+  if (hasOp(answer, 'Sec', 'Csc')) {
+    //exp contains sec, csc
+    answer = applyTR(answer, TR1);
+  }
+  if (hasOp(answer, 'Tan', 'Cot')) {
+    //exp contains tan, cot
+    answer = RL1(answer);
+  }
+  if (hasOp(answer, 'Tan', 'Cot')) {
+    //exp contains tan, cot
+    answer = applyTR(answer, TR2);
+  }
+  if (hasOp(answer, 'Sin', 'Cos')) {
+    //exp contains sin, cos
+    answer = RL2(answer);
+  }
+  if (answer === exp) return undefined;
+  return { value: answer, because: 'Fu' };
+}
 
 // For each trig function, by quadrant (0..π/2, π/2..π, π..3π/2, 3π/2..2π),
 // what is the corresponding identity (sign and function)
@@ -612,23 +752,23 @@ function constructibleValuesInverse(
 export function trigSign(
   operator: string,
   x: BoxedExpression
-): number | undefined {
+): Sign | undefined {
   const [q, pos] = quadrant(x);
   if (q === undefined) return undefined;
   if (pos !== undefined) {
     if ((operator === 'Sin' || operator === 'Tan') && (pos === 0 || pos === 2))
-      return 0;
+      return 'zero';
     if ((operator === 'Cos' || operator === 'Cot') && (pos === 1 || pos === 3))
-      return 0;
+      return 'zero';
   }
   return {
-    Sin: [1, 1, -1, -1],
-    Cos: [1, -1, -1, 1],
-    Sec: [1, -1, -1, 1],
-    Csc: [1, 1, -1, -1],
-    Tan: [1, -1, 1, -1],
-    Cot: [1, -1, 1, -1],
-  }[operator]?.[q];
+    Sin: ['positive', 'positive', 'negative', 'negative'],
+    Cos: ['positive', 'negative', 'negative', 'positive'],
+    Sec: ['positive', 'negative', 'negative', 'positive'],
+    Csc: ['positive', 'positive', 'negative', 'negative'],
+    Tan: ['positive', 'negative', 'positive', 'negative'],
+    Cot: ['positive', 'negative', 'positive', 'negative'],
+  }[operator]?.[q] as Sign;
 }
 
 export function isConstructible(x: string | BoxedExpression): boolean {

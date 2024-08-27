@@ -159,7 +159,7 @@ export const DEFINITIONS_SETS: LatexDictionary = [
     closeTrigger: '}',
     // @todo: the set syntax can also include conditions...
     parse: (_parser: Parser, body: Expression): Expression => {
-      if (body === null || isEmptySequence(body)) return 'EmptySet';
+      if (isEmptySequence(body)) return 'EmptySet';
       if (
         operator(body) == 'Delimiter' &&
         stringValue(operand(body, 2)) === ','

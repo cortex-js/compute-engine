@@ -288,7 +288,7 @@ describe('SERIALIZING Incomplete expressions', () => {
       ce.box(['Power', undefined as unknown as Expression], {
         canonical: false,
       })
-    ).toMatchInlineSnapshot(`["Power", ["Sequence"]]`));
+    ).toMatchInlineSnapshot(`["Power", ["Error", "'missing'"]]`));
 });
 
 describe('SERIALIZING Negative factors', () => {
@@ -428,9 +428,20 @@ describe('CANONICALIZATION multiply', () => {
     expect(canonicalToJson('2\\times\\frac12')).toMatchInlineSnapshot(`1`));
 
   test(`2\\times(5-5)\\times5\\times4`, () =>
-    expect(
-      canonicalToJson('2\\times(5-5)\\times5\\times4')
-    ).toMatchInlineSnapshot(`0`));
+    expect(canonicalToJson('2\\times(5-5)\\times5\\times4'))
+      .toMatchInlineSnapshot(`
+      [
+        Multiply,
+        2,
+        4,
+        5,
+        [
+          Add,
+          -5,
+          5,
+        ],
+      ]
+    `));
 
   test(`(-2)\\times(-x)\\times y\\times\\frac{3}{-5}`, () =>
     expect(canonicalToJson('(-2)\\times(-x)\\times y\\times\\frac{3}{-5}'))

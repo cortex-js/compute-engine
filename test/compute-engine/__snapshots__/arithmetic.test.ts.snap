@@ -131,7 +131,7 @@ exports[`DIVIDE Divide 6/3 1`] = `2`;
 
 exports[`DIVIDE Divide with many arguments 1`] = `-0.123517786561264822134`;
 
-exports[`DIVIDE Divide with single argument 1`] = `2.5`;
+exports[`DIVIDE Divide with single argument 1`] = `["Divide", 2.5, ["Error", "'missing'"]]`;
 
 exports[`EXACT EVALUATION Add: All exact 1`] = `
 box       = ["Add", 6, ["Divide", 10, 14], ["Sqrt", ["Divide", 18, 9]]]
@@ -361,12 +361,7 @@ eval-auto = 3.00416602394643311206
 eval-mach = 3.004166023946433
 `;
 
-exports[`INVALID LOG Ln 1`] = `
-box       = ["Ln"]
-canonical = ["Log"]
-simplify  = log("Nothing")
-eval-auto = log()
-`;
+exports[`INVALID LOG Ln 1`] = `invalid   =["Ln", ["Error", "'missing'"]]`;
 
 exports[`INVALID LOG Ln with string argument 1`] = `
 invalid   =[

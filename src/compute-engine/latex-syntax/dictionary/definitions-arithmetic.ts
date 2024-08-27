@@ -75,7 +75,7 @@ function numeratorDenominator(expr: Expression): [Expression[], Expression[]] {
 function parseRoot(parser: Parser): Expression | null {
   const degree = parser.parseOptionalGroup();
   const base = parser.parseGroup() ?? parser.parseToken();
-  if (base === null || isEmptySequence(base)) {
+  if (isEmptySequence(base)) {
     if (degree !== null) return ['Root', MISSING, missingIfEmpty(degree)];
     return ['Sqrt', MISSING];
   }
@@ -1252,8 +1252,8 @@ function getIndexes(
   lower?: Expression;
   upper?: Expression;
 }[] {
-  if (sub === 'Nothing' || isEmptySequence(sub)) sub = null;
-  if (sup === 'Nothing' || isEmptySequence(sup)) sup = null;
+  if (isEmptySequence(sub)) sub = null;
+  if (isEmptySequence(sup)) sup = null;
 
   const subs = sub === null ? [] : (getSequence(sub) ?? [sub]);
   const sups = sup === null ? [] : (getSequence(sup) ?? [sup]);

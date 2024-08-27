@@ -138,8 +138,10 @@ export function signDiff(
   // (Richardson's theorem) but this works often...
   if (lhsNum === null || rhsNum === null) {
     const s = lhs.sub(rhs).N().sgn;
-    if (s == undefined || isNaN(s)) return undefined;
-    return s as -1 | 0 | 1;
+    if (s === 'zero') return 0;
+    if (s === 'positive') return 1;
+    if (s === 'negative') return -1;
+    return undefined;
   }
 
   tolerance ??= lhs.engine.tolerance;

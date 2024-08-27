@@ -44,6 +44,7 @@ export function canonicalMultiply(
     }
 
     // a/b -> separate numerator and denominator
+    // @fixme: consider using numeratorDenominator
     if (op.operator === 'Divide') {
       const [a, b] = op.ops!;
       if (a.isOne) {

@@ -139,7 +139,7 @@ export const CORE_LIBRARY: IdentifierDefinitions[] = [
         },
         canonical: (ce, args) => {
           const xs = flatten(args);
-          if (xs.length === 0) return ce._fn('Sequence', []);
+          if (xs.length === 0) return ce.Nothing;
           if (xs.length === 1) return xs[0];
           return ce._fn('Sequence', xs);
         },
@@ -279,8 +279,8 @@ export const CORE_LIBRARY: IdentifierDefinitions[] = [
         domain: 'Functions',
         canonical: (ce, args) => {
           if (args.length === 2) return args[0].canonical;
-          // Returning an empty `["Sequence"]` will make the expression be ignored
-          return ce._fn('Sequence', []);
+          // Returning `Nothing` will make the expression be ignored
+          return ce.Nothing;
         },
       },
     },
@@ -331,8 +331,8 @@ export const CORE_LIBRARY: IdentifierDefinitions[] = [
           return ce._fn('Tail', canonical(ce, args));
         },
         // **IMPORTANT** Tail should work on non-canonical expressions
-        evaluate: (ops, { engine: ce }) =>
-          ce._fn('Sequence', ops[0]?.ops ?? []),
+        evaluate: ([x], { engine: ce }) =>
+          x?.ops ? ce._fn('Sequence', x.ops) : ce.Nothing,
       },
     },
 
@@ -447,7 +447,7 @@ export const CORE_LIBRARY: IdentifierDefinitions[] = [
           // create a new scope and declare all the arguments as
           // variables in that scope.
 
-          if (args.length === 0) return ce._fn('Sequence', []);
+          if (args.length === 0) return ce.Nothing;
 
           const canonicalFn = canonicalFunctionExpression(
             args[0],
@@ -821,12 +821,12 @@ export const CORE_LIBRARY: IdentifierDefinitions[] = [
       signature: {
         domain: ['FunctionOf', 'Anything', 'Anything'],
         evaluate: (ops, { engine: ce }) => {
-          if (ops.length === 0) return ce._fn('Sequence', []);
+          if (ops.length === 0) return ce.Nothing;
           const op1 = ops[0];
           const s =
             op1.string ??
             (op1.operator === 'LatexString' ? op1.op1.string : '');
-          return ce.parse(s) ?? ce._fn('Sequence', []);
+          return ce.parse(s) ?? ce.Nothing;
         },
       },
     },

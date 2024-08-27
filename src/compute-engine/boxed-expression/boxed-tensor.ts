@@ -10,7 +10,6 @@ import type {
   PatternMatchOptions,
   BoxedBaseDefinition,
   BoxedFunctionDefinition,
-  Type,
 } from '../public';
 
 import {
@@ -28,6 +27,7 @@ import { isWildcard, wildcardName } from './boxed-patterns';
 import { canonical, hashCode, isBoxedExpression } from './utils';
 
 import { AbstractTensor, TensorData, makeTensor } from '../tensor/tensors'; // @fixme
+import { Type } from '../../common/type/types';
 
 /**
  * A boxed tensor represents an expression that can be
@@ -247,8 +247,7 @@ export class BoxedTensor extends _BoxedExpression {
   }
 
   get type(): Type {
-    if (!this.isValid) return 'error';
-    return 'collection';
+    return this.isValid ? 'collection' : 'error';
   }
 
   get json(): Expression {

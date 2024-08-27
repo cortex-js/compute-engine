@@ -199,11 +199,8 @@ describe('LATEX', () => {
   });
 
   test('Invalid ParseLatex', () => {
-    expect(ce.box(['Parse', ['Add', 2, 'Pi']]).evaluate().json)
-      .toMatchInlineSnapshot(`
-      [
-        Sequence,
-      ]
-    `);
+    expect(
+      ce.box(['Parse', ['Add', 2, 'Pi']]).evaluate().json
+    ).toMatchInlineSnapshot(`Nothing`);
   });
 });

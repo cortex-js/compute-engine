@@ -302,7 +302,7 @@ describe('FUNCTIONS', () => {
   });
 
   it('should correctly serialize function expressions', () => {
-    expect(check(['Function'])).toMatchInlineSnapshot(``);
+    expect(check(['Function'])).toMatchInlineSnapshot(`"Nothing"`);
     expect(check(['Function', 1])).toMatchInlineSnapshot(`1`);
     expect(check(['Function', '_'])).toMatchInlineSnapshot(`("_1") |-> {"_1"}`);
 

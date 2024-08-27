@@ -24,7 +24,6 @@ import type {
   Sign,
   SimplifyOptions,
   Substitution,
-  Type,
 } from './public';
 
 import type { LatexString } from '../public';
@@ -431,6 +430,18 @@ export abstract class _BoxedExpression implements BoxedExpression {
     return undefined;
   }
 
+  get numerator(): BoxedExpression {
+    return this;
+  }
+
+  get denominator(): BoxedExpression {
+    return this.engine.One;
+  }
+
+  get numeratorDenominator(): [BoxedExpression, BoxedExpression] {
+    return [this, this.engine.One];
+  }
+
   //
   // Algebraic operations
   //
@@ -478,12 +489,9 @@ export abstract class _BoxedExpression implements BoxedExpression {
     return this.engine.NaN;
   }
 
-  get sgn(): -1 | 0 | 1 | undefined | typeof NaN {
-    return NaN;
+  get sgn(): Sign | undefined {
+    return undefined;
   }
-  // get sgn(): Sign | undefined {
-  //   return 'unsigned';
-  // }
 
   get shape(): number[] {
     return [];
@@ -775,3 +783,4 @@ export function getSubexpressions(
 // function *after* the class definition
 
 import { serializeJson } from './serialize';
+import { Type } from '../../common/type/types';

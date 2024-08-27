@@ -22,17 +22,20 @@ export function flatten<
     : ops.map((x) => x.canonical);
 
   if (operator) {
+    const shouldFlatten = (x: BoxedExpression) =>
+      x.symbol === 'Nothing' ||
+      x.operator === operator ||
+      x.operator === 'Sequence';
+
     // Bypass memory allocation for the common case where there is nothing to flatten
-    if (
-      xs.every(
-        (x) => !x.ops || (x.operator !== operator && x.operator !== 'Sequence')
-      )
-    )
-      return xs as T;
+    if (xs.every((x) => !shouldFlatten(x))) return xs as T;
 
     // Iterate over the list of expressions and flatten them
     const ys: BoxedExpression[] = [];
     for (const x of xs) {
+      // Skip Nothing
+      if (x.symbol === 'Nothing') continue;
+
       // If the operator matches, flatten the expression
       if (x.ops && (x.operator === operator || x.operator === 'Sequence'))
         ys.push(...flatten(x.ops, operator));
@@ -41,11 +44,15 @@ export function flatten<
     return ys as T;
   }
 
-  if (xs.every((x) => !x.ops || x.operator !== 'Sequence')) return xs as T;
+  if (xs.every((x) => !(x.symbol === 'Nothing' || x.operator === 'Sequence')))
+    return xs as T;
 
   // Iterate over the list of expressions and flatten them
   const ys: BoxedExpression[] = [];
   for (const x of xs) {
+    // Skip Nothing
+    if (x.symbol === 'Nothing') continue;
+
     // If the operator matches, flatten the expression
     if (x.ops && x.operator === 'Sequence')
       ys.push(...flatten(x.ops, operator));

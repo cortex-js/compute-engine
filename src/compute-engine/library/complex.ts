@@ -14,8 +14,8 @@ export const COMPLEX_LIBRARY: IdentifierDefinitions[] = [
         sgn: ([op]) => {
           const re = op.re;
           if (re === undefined) return undefined;
-          if (re === 0) return 0;
-          return re > 0 ? 1 : -1;
+          if (re === 0) return 'zero';
+          return re > 0 ? 'positive' : 'negative';
         },
         evaluate: (ops, { engine: ce }) => {
           const op = ops[0].numericValue;
@@ -31,10 +31,10 @@ export const COMPLEX_LIBRARY: IdentifierDefinitions[] = [
       signature: {
         domain: ['FunctionOf', 'Numbers', 'Numbers'],
         sgn: ([op]) => {
-          const re = op.im;
-          if (re === undefined) return undefined;
-          if (re === 0) return 0;
-          return re > 0 ? 1 : -1;
+          const im = op.im;
+          if (im === undefined) return undefined;
+          if (im === 0) return 'zero';
+          return im > 0 ? 'positive' : 'negative';
         },
         evaluate: (ops, { engine: ce }) => {
           const op = ops[0].numericValue;

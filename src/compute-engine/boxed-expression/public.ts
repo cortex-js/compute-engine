@@ -17,6 +17,7 @@ import type { IndexedLatexDictionary } from '../latex-syntax/dictionary/definiti
 import { Rational } from '../numerics/rationals';
 import { NumericValue, NumericValueData } from '../numeric-value/public';
 import { BigNum, IBigNum } from '../numerics/bignum';
+import { Type } from '../../common/type/types';
 
 /**
  * :::info[THEORY OF OPERATIONS]
@@ -114,21 +115,6 @@ import { BigNum, IBigNum } from '../numerics/bignum';
  * 
  * :::
  */
-
-export type Type =
-  | 'complex'
-  | 'real'
-  | 'rational'
-  | 'integer'
-  | 'boolean'
-  | 'string'
-  | 'expression'
-  | 'collection'
-  | 'function'
-  | 'symbol'
-  | 'unknown'
-  | 'error'
-  | 'nothing';
 
 export type Sign =
   /** The expression is equal to 0 */
@@ -642,6 +628,13 @@ export interface BoxedExpression {
   isSame(rhs: BoxedExpression): boolean;
 
   /**
+   * Return this expression expressed as a numerator and denominator.
+   */
+  get numerator(): BoxedExpression;
+  get denominator(): BoxedExpression;
+  get numeratorDenominator(): [BoxedExpression, BoxedExpression];
+
+  /**
    * If this expression matches `pattern`, return a substitution that makes
    * `pattern` equal to `this`. Otherwise return `null`.
    *
@@ -867,30 +860,20 @@ export interface BoxedExpression {
   readonly rank: number;
 
   /**
-   * Return the following, depending on the value of this expression:
-   *
-   * * `-1` if it is < 0
-   * * `0` if it is = 0
-   * * `+1` if it is > 0
-   * * `undefined` this value may be positive, negative or zero. We don't know
-   *    right now (a symbol with an Integer domain, but no currently assigned
-   *    value, for example)
-   * * `NaN` this value will never be positive, negative or zero (`NaN`,
-   *     a string or a complex number for example)
+   * Return the sign of the expression.
    *
    * Note that complex numbers have no natural ordering,
    * so if the value is an imaginary number (a complex number with a non-zero
-   * imaginary part), `this.sgn` will return `NaN`.
+   * imaginary part), `this.sgn` will return `unsigned`.
    *
    * If a symbol, this does take assumptions into account, that is `this.sgn`
-   * will return `1` if the symbol is assumed to be positive
+   * will return `positive` if the symbol is assumed to be positive
    * (using `ce.assume()`).
    *
    * @category Numeric Expression
    *
    */
-  // readonly sgn: Sign | undefined;
-  readonly sgn: number | undefined;
+  readonly sgn: Sign | undefined;
 
   /** If the expressions cannot be compared, return `undefined`
    *
@@ -1591,6 +1574,9 @@ export type CompiledExpression = {
 export type BoxedFunctionSignature = {
   inferredSignature: boolean;
 
+  flags?: Readonly<Partial<FunctionNumericFlags>>;
+  type?: Type | ((args: ReadonlyArray<BoxedExpression>) => Type);
+
   params: BoxedDomain[];
   optParams: BoxedDomain[];
   restParam?: BoxedDomain;
@@ -1616,7 +1602,7 @@ export type BoxedFunctionSignature = {
   sgn?: (
     args: ReadonlyArray<BoxedExpression>,
     options: { engine: IComputeEngine }
-  ) => -1 | 0 | 1 | typeof NaN | undefined;
+  ) => Sign | undefined;
 
   compile?: (expr: BoxedExpression) => CompiledExpression;
 };
@@ -1635,8 +1621,6 @@ export type BoxedFunctionDefinition = BoxedBaseDefinition &
     hold: Hold;
 
     signature: BoxedFunctionSignature;
-
-    flags?: Partial<NumericFlags>;
 
     type: 'function';
   };
@@ -1681,7 +1665,8 @@ export type SymbolAttributes = {
 };
 
 /**
- * When used in a `SymbolDefinition`, these flags are optional.
+ * When used in a `SymbolDefinition` or `Functiondefinition` these flags
+ * provide additional information about the value of the symbol or function.
  *
  * If provided, they will override the value derived from
  * the symbol's value.
@@ -1712,6 +1697,48 @@ export type NumericFlags = {
   even: boolean | undefined;
   odd: boolean | undefined;
 };
+
+/**
+ * When used in a `Functiondefinition` the value of these flags
+ * provide additional information about the value of the function based
+ * on the values of its arguments.
+ *
+ * Note that the arguments should not be evaluated, but their properties
+ * should be used to determine the value of the function.
+ *
+ * @category Definitions
+ */
+
+export type FunctionNumericFlags = {
+  /** > 0 */
+  positive: FunctionNumericFlagsValue;
+
+  /** <= 0 */
+  nonPositive: FunctionNumericFlagsValue;
+
+  /** < 0 */
+  negative: FunctionNumericFlagsValue;
+
+  /** >= 0 */
+  nonNegative: FunctionNumericFlagsValue;
+
+  zero: FunctionNumericFlagsValue;
+
+  one: FunctionNumericFlagsValue;
+
+  negativeOne: FunctionNumericFlagsValue;
+
+  infinity: FunctionNumericFlagsValue;
+
+  NaN: FunctionNumericFlagsValue;
+
+  even: FunctionNumericFlagsValue;
+};
+
+export type FunctionNumericFlagsValue =
+  | boolean
+  | undefined
+  | ((ops: ReadonlyArray<BoxedExpression>) => boolean | undefined);
 
 /**
  * @noInheritDoc
@@ -2682,7 +2709,7 @@ export type FunctionDefinition = BaseDefinition &
 
     signature: FunctionSignature;
 
-    flags?: Partial<NumericFlags>;
+    flags?: Readonly<Partial<FunctionNumericFlags>>;
   };
 
 /**
@@ -2718,12 +2745,16 @@ export type FunctionSignature = {
    */
   domain?: DomainExpression;
 
+  /** @deprecated */
   params?: DomainExpression[];
+  /** @deprecated */
   optParams?: DomainExpression[];
+  /** @deprecated */
   restParam?: DomainExpression;
 
   /** The domain of the result of the function. Either a domain
    * expression, or a function that returns a boxed domain.
+   * @deprecated
    */
   result?:
     | DomainExpression
@@ -2819,7 +2850,7 @@ export type FunctionSignature = {
   sgn?: (
     args: ReadonlyArray<BoxedExpression>,
     options: { engine: IComputeEngine }
-  ) => -1 | 0 | 1 | undefined | typeof NaN;
+  ) => Sign | undefined;
 
   /** Return a compiled (optimized) expression. */
   compile?: (expr: BoxedExpression) => CompiledExpression;

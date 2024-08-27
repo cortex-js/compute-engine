@@ -1,6 +1,7 @@
 import type {
   BoxedExpression,
   IComputeEngine,
+  IdentifierDefinition,
   IdentifierDefinitions,
   SemiBoxedExpression,
 } from '../public';
@@ -303,12 +304,15 @@ export const COLLECTIONS_LIBRARY: IdentifierDefinitions = {
     complexity: 8200,
     signature: {
       domain: ['FunctionOf', 'Anything', ['VarArg', 'Anything'], 'Tuples'],
+      type: 'Tuple',
       canonical: (ce, ops) => ce.tuple(...ops),
     },
     size: (expr) => expr.nops!,
-    at: (expr, index) =>
-      typeof index === 'number' ? expr.ops![index - 1] : undefined,
-  },
+    at: (expr, index) => {
+      if (typeof index !== 'number') return undefined;
+      return expr.ops![index - 1];
+    },
+  } as IdentifierDefinition,
 
   String: {
     threadable: true,
@@ -339,9 +343,9 @@ export const COLLECTIONS_LIBRARY: IdentifierDefinitions = {
       },
       sgn: ([xs]) => {
         const def = xs.functionDefinition;
-        if (def?.size) return def.size(xs) === 0 ? 0 : 1;
+        if (def?.size) return def.size(xs) === 0 ? 'zero' : 'positive';
         const s = xs.string;
-        if (s !== null) return s.length === 0 ? 0 : 1;
+        if (s !== null) return s.length === 0 ? 'zero' : 'positive';
         return undefined;
       },
     },

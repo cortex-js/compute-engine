@@ -37,8 +37,8 @@ function parseIntegral(command: string, n = 1) {
       }
       parser.skipSpace();
     }
-    if (sub === 'Nothing' || isEmptySequence(sub)) sub = null;
-    if (sup === 'Nothing' || isEmptySequence(sup)) sup = null;
+    if (isEmptySequence(sub)) sub = null;
+    if (isEmptySequence(sup)) sup = null;
 
     // An integral expression is of the form `\int \sin(x)dx`: `\sin(x)` is
     // the `fn` and `x` is the index.

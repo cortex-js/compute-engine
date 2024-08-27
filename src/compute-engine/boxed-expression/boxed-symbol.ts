@@ -1,10 +1,11 @@
-import Complex from 'complex.js';
 import { Decimal } from 'decimal.js';
 import type { Expression } from '../../math-json/types';
 import {
   isValidIdentifier,
   validateIdentifier,
 } from '../../math-json/identifiers';
+
+import type { Type } from '../../common/type/types';
 
 import type {
   BoxedExpression,
@@ -26,8 +27,8 @@ import type {
   Rule,
   SemiBoxedExpression,
   CanonicalOptions,
-  Type,
   BoxedRule,
+  Sign,
 } from './public';
 
 import { domainToSignature, signatureToDomain } from '../domain-utils';
@@ -571,11 +572,11 @@ export class BoxedSymbol extends _BoxedExpression {
     }
   }
 
-  get sgn(): -1 | 0 | 1 | undefined | typeof NaN {
+  get sgn(): Sign | undefined {
     // If available, use the value associated with this symbol.
     // Note that `null` is an acceptable and valid value
     const def = this._def;
-    if (!def || !(def instanceof _BoxedSymbolDefinition)) return NaN;
+    if (!def || !(def instanceof _BoxedSymbolDefinition)) return undefined;
 
     const v = def.value;
     if (v && v !== this) {
@@ -585,9 +586,15 @@ export class BoxedSymbol extends _BoxedExpression {
 
     // We didn't get a definitive answer from the value
     // of this symbol. Check flags.
-    if (def.zero === true) return 0;
-    if (def.positive === true) return 1;
-    if (def.negative === true) return -1;
+    if (def.zero === true) return 'zero';
+    if (def.positive === true) return 'positive';
+    if (def.negative === true) return 'negative';
+    if (def.nonPositive === true) return 'non-positive';
+    if (def.nonNegative === true) return 'non-negative';
+    if (def.notZero === true) return 'not-zero';
+    if (def.NaN === true) return 'unsigned';
+    if (def.imaginary === true) return 'unsigned';
+
     return undefined;
   }
 
@@ -669,14 +676,8 @@ export class BoxedSymbol extends _BoxedExpression {
       : this.symbolDefinition?.value?.N();
     if (lhsVal) return lhsVal.isLess(rhs);
 
-    if (rhs === 0 || (typeof rhs !== 'number' && rhs.isZero)) {
-      const s = this.sgn;
-      if (s === null) return false;
-      if (s !== undefined) return s < 0;
-    }
-
-    //  @todo Check assumptions, use range
-    //  let x = assumeSymbolValue(this._engine, this._symbol, 'Less');
+    if (rhs === 0 || (typeof rhs !== 'number' && rhs.isZero))
+      return this.isNegative;
 
     return undefined;
   }
@@ -699,12 +700,8 @@ export class BoxedSymbol extends _BoxedExpression {
       : this.symbolDefinition?.value?.N();
     if (lhsVal) return lhsVal.isLessEqual(rhs);
 
-    if (rhs === 0 || (typeof rhs !== 'number' && rhs.isZero)) {
-      const s = this.sgn;
-      if (s === null) return false;
-      if (s !== undefined) return s <= 0;
-    }
-    //  @todo Check assumptions, use range
+    if (rhs === 0 || (typeof rhs !== 'number' && rhs.isZero))
+      return this.isNonPositive;
 
     return this.isLess(rhs) || this.isEqual(rhs);
   }
@@ -728,14 +725,8 @@ export class BoxedSymbol extends _BoxedExpression {
       : this.symbolDefinition?.value?.N();
     if (lhsVal) return lhsVal.isGreater(rhs);
 
-    if (rhs === 0 || (typeof rhs !== 'number' && rhs.isZero)) {
-      const s = this.sgn;
-      if (s === null) return false;
-      if (s !== undefined) return s > 0;
-    }
-
-    //  @todo Check assumptions, use range
-    //  let x = assumeSymbolValue(this._engine, this._symbol, 'Less');
+    if (rhs === 0 || (typeof rhs !== 'number' && rhs.isZero))
+      return this.isPositive;
 
     return undefined;
   }
@@ -758,12 +749,8 @@ export class BoxedSymbol extends _BoxedExpression {
       : this.symbolDefinition?.value?.N();
     if (lhsVal) return lhsVal.isGreaterEqual(rhs);
 
-    if (rhs === 0 || (typeof rhs !== 'number' && rhs.isZero)) {
-      const s = this.sgn;
-      if (s === null) return false;
-      if (s !== undefined) return s >= 0;
-    }
-    //  @todo Check assumptions, use range
+    if (rhs === 0 || (typeof rhs !== 'number' && rhs.isZero))
+      return this.isNonNegative;
 
     return this.isGreater(rhs) || this.isEqual(rhs);
   }
