@@ -1779,7 +1779,7 @@ export type RuleFunction = (
 ) => undefined | BoxedExpression | RuleStep;
 
 export function isRuleStep(x: any): x is RuleStep {
-  return x && typeof x === 'object' && x.value && x.because;
+  return x && typeof x === 'object' && 'because' in x && 'value' in x;
 }
 
 /**
