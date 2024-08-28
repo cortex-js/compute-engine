@@ -470,8 +470,7 @@ export class BoxedFunction extends _BoxedExpression {
       else if (flagValue(this, 'negative') === true) s = 'negative';
       else if (flagValue(this, 'nonPositive') === true) s = 'non-positive';
       else if (this.isReal === false || this.isNaN === true) {
-        this._sgn = 'unsigned';
-        return this._sgn;
+        s = 'unsigned';
       } else if (this.isReal && flagValue(this, 'zero') === false)
         s = 'real-not-zero';
       else if (flagValue(this, 'zero') === false) s = 'not-zero';
