@@ -210,8 +210,10 @@ const FUNCTIONS: Record<
   Log10: 'log10',
   Sqrt: 'sqrt',
   Root: (expr, serialize) => {
-    if (expr.op1.numericValue === 2) return `sqrt${wrap(serialize(expr.op2))}`;
-    return `root${wrap(serialize(expr.op1))}${wrap(serialize(expr.op2))}`;
+    const x = expr.op1;
+    const n = expr.op2;
+    if (n.isEqual(2)) return `sqrt${wrap(serialize(x))}`;
+    return `root${wrap(serialize(n))}${wrap(serialize(x))}`;
   },
   Square: (expr, serialize) => `${serialize(expr.op1, 12)}^2`,
 
