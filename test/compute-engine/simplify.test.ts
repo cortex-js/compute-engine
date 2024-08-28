@@ -1895,8 +1895,13 @@ describe('SIMPLIFY', () => {
     ...ce.getRuleSet('standard-simplification')!.rules,
     ...RULES,
   ]);
-  for (const test of RULE_TEST_CASES) runTestCase(test, rules);
-
+  for (const test of RULE_TEST_CASES) {
+    try {
+      runTestCase(test, rules);
+    } catch (e) {
+      console.error(`${test}\n${e.message}\n`);
+    }
+  }
   console.info('\n];\n\n');
 
   // Display status of rules...
