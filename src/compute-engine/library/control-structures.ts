@@ -26,7 +26,8 @@ export const CONTROL_STRUCTURES_LIBRARY: IdentifierDefinitions[] = [
     Condition: {
       hold: 'all',
       signature: {
-        domain: 'Functions',
+        params: ['Anything', 'Symbols'],
+        result: 'Booleans',
         evaluate: ([value, conds], { engine }) => {
           let conditions: string[] = [];
           if (conds.symbol) {
