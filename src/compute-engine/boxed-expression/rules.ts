@@ -676,7 +676,7 @@ export function applyRule(
   expr: BoxedExpression,
   substitution: BoxedSubstitution,
   options?: Readonly<Partial<ReplaceOptions>>
-): BoxedExpression | null {
+): RuleStep | null {
   const canonical =
     options?.canonical ?? (expr.isCanonical || expr.isStructural);
 
@@ -688,14 +688,16 @@ export function applyRule(
       const subExpr = applyRule(rule, op, {}, options);
       if (!subExpr) return op;
       operandsMatched = true;
-      return subExpr;
+      return subExpr.value;
     });
+
     if (operandsMatched)
       expr = expr.engine.function(expr.operator, newOps, { canonical });
   }
 
   // eslint-disable-next-line prefer-const
-  let { match, replace, condition } = rule;
+  let { match, replace, condition, id } = rule;
+  const because = id ?? '';
 
   if (canonical && match) {
     const awc = getWildcards(match);
@@ -704,7 +706,7 @@ export function applyRule(
     const bwc = getWildcards(match);
     if (!awc.every((x) => bwc.includes(x)))
       throw new Error(
-        `Invalid rule "${rule.id}"\n|   Canonical match "${dewildcard(match).toString()}" does not contain all the wildcards of the original match "${dewildcard(originalMatch).toString()}"\n|   This could indicate that the match expression in canonical form is already be simplified and this rule may not be necessary`
+        `Invalid rule "${rule.id}"\n|   Canonical match "${dewildcard(match).toString()}" does not contain all the wildcards of the original match "${dewildcard(originalMatch).toString()}"\n|   This could indicate that the match expression in canonical form is already simplified and this rule may not be necessary`
       );
   }
 
@@ -715,7 +717,7 @@ export function applyRule(
     : {};
 
   // If the `expr` does not match the pattern, the rule doesn't apply
-  if (sub === null) return operandsMatched ? expr : null;
+  if (sub === null) return operandsMatched ? { value: expr, because } : null;
 
   // If the condition doesn't match, the rule doesn't apply
   if (typeof condition === 'function') {
@@ -734,7 +736,7 @@ export function applyRule(
 
     try {
       if (!condition(conditionSub, expr.engine))
-        return operandsMatched ? expr : null;
+        return operandsMatched ? { value: expr, because } : null;
     } catch (e) {
       console.error(
         `Rule ${rule.id}\n|   Error while checking condition\n|    ${e.message}`
@@ -751,9 +753,9 @@ export function applyRule(
   if (!result) return null;
 
   if (isRuleStep(result))
-    return canonical ? result.value.canonical : result.value;
+    return canonical ? { ...result, value: result.value.canonical } : result;
 
-  return canonical ? result.canonical : result;
+  return { value: canonical ? result.canonical : result, because };
 }
 
 /**
@@ -791,24 +793,28 @@ export function replace(
       done = true;
       for (const rule of ruleSet) {
         const result = applyRule(rule, expr, {}, options);
-        if (result !== null && result !== expr && !result.isSame(expr)) {
+        if (
+          result !== null &&
+          result.value !== expr &&
+          !result.value.isSame(expr)
+        ) {
           // If `once` flag is set, bail on first matching rule
-          if (once) return [{ value: result, because: rule.id ?? '' }];
+          if (once) return [result];
 
           // If we have detected a loop, exit
-          if (steps.some((x) => x.value.isSame(result))) return steps;
+          if (steps.some((x) => x.value.isSame(result.value))) return steps;
 
-          steps.push({ value: result, because: rule.id ?? '' });
+          steps.push(result);
 
           // We have a rule apply, so we'll want to continue iterating
           done = false;
-          expr = result;
+          expr = result.value;
         }
       }
       iterationCount += 1;
     }
   } catch (e) {
-    console.error(e.message);
+    console.error(expr.toString() + '\n' + e.message);
   }
   return steps;
 }
@@ -829,7 +835,7 @@ export function matchAnyRules(
     const r = applyRule(rule, expr, sub, options);
     if (r === null) continue;
     // Verify that the results are unique
-    if (!results.some((x) => x.isSame(r))) results.push(r);
+    if (!results.some((x) => x.isSame(r.value))) results.push(r.value);
   }
 
   return results;
