@@ -21,7 +21,7 @@ function parseTrig(op: string): ExpressionParseHandler {
       '\\arccos': 'Arccos',
       '\\arctan': 'Arctan',
       '\\arctg': 'Arctan',
-      '\\arcctg': 'Arctan',
+      '\\arcctg': 'Arccot',
       '\\arcsec': 'Arcsec',
       '\\arccsc': ' Arccsc',
       '\\arsinh': 'Arsinh',

@@ -1,5 +1,5 @@
 import { apply } from '../function-utils';
-import { mul } from '../library/arithmetic-multiply';
+import { mul } from '../boxed-expression/arithmetic-multiply';
 import { add } from '../boxed-expression/terms';
 import type { BoxedExpression } from '../public';
 

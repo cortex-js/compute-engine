@@ -4,17 +4,9 @@ import { Expression } from '../src/math-json';
 
 const ce = new ComputeEngine();
 
-console.info(ce.parse('e e^x e^{-x}').toString());
+const engine = ce;
 
-console.info(
-  ce
-    .parse(
-      '\\sqrt{\\pi}\\left(\\frac{n}{e}\\right)^n\\sqrt[6]{8n^3+4n^2+n+\\frac{1}{30}}'
-    )
-    .toString()
-);
-
-console.info(ce.parse('\\int\\sin x \\, \\operatorname{d}x+1 ').toString());
+console.info(ce.parse('2\\frac{a}{b}').json);
 
 console.info(ce.parse('3 + \\pi').isPositive);
 
@@ -59,6 +51,59 @@ ce.box([
 ])
   .evaluate()
   .print();
+
+// function comparaisonFraction(input: string, goodAnswer: string) {
+//   const saisie = engine.parse(input, { canonical: false })!;
+//   const reponse = engine.parse(goodAnswer, { canonical: false })!;
+
+//   if (saisie.isInteger && !reponse.isInteger)
+//     console.log(false, 'Résultat incorrect car une fraction est attendue.'); // Sous-entendu : Et pas un nombre (sauf si la fraction se réduit à un entier)
+//   else if (saisie.isInteger && reponse.isInteger) console.log(true);
+//   else if (
+//     saisie.operator === 'Divide' ||
+//     (saisie.operator === 'Rational' &&
+//       saisie.op1.re! < reponse.op1.re! &&
+//       reponse.op1.re! % saisie.op1.re! === 0)
+//   )
+//     console.log(true);
+//   else if (
+//     saisie.operator === 'Divide' ||
+//     (saisie.operator === 'Rational' && saisie.op1.re! >= reponse.op1.re!)
+//   ) {
+//     console.log(
+//       false,
+//       'Résultat incorrect car une fraction simplifiée est attendue.'
+//     );
+//     // Sous-entendu : Et pas une fraction égale mais non simplifiée
+//   } else if (
+//     saisie.op1.re! < reponse.op1.re! &&
+//     reponse.op1.re! % saisie.op1.re! !== 0
+//   )
+//     console.log(
+//       false,
+//       "Résultat incorrect car la fraction n'est pas simplifiée comme il se doit."
+//     );
+//   // Sous-entendu : Les numérateurs/dénominateurs ne sont pas multiples entre les deux fractions ou bien la fraction input continent des valeurs décimales
+//   else console.log(false, 'Résultat incorrect car une fraction est attendue.');
+// }
+
+// comparaisonFraction('\\frac{12}{6}', '\\frac{24}{12}'); // -> true
+
+// comparaisonFraction('\\frac{2}{1}', '\\frac{24}{12}'); // -> true
+
+// comparaisonFraction('2', '\\frac{24}{12}'); // -> true
+
+// comparaisonFraction('\\frac{24}{12}', '\\frac{24}{12}'); // -> false Résultat incorrect car une fraction simplifiée est attendue.
+
+// comparaisonFraction('\\frac{240}{120}', '\\frac{24}{12}'); // -> false Résultat incorrect car une fraction simplifiée est attendue.
+
+// comparaisonFraction('\\frac{10}{5}', '\\frac{24}{12}'); // -> false Résultat incorrect car la fraction n'est pas simplifiée comme il se doit.
+
+// comparaisonFraction('\\frac{2.4}{1.2}', '\\frac{24}{12}'); // -> false Résultat incorrect car la fraction n'est pas simplifiée comme il se doit.
+
+// comparaisonFraction('\\frac{6}{8}', '\\frac{60}{80}'); // -> true
+
+// comparaisonFraction('0.75', '\\frac{60}{80}'); // -> false Résultat incorrect car une fraction est attendue.
 
 let expression = ce.parse('|-\\pi|').simplify();
 expression.print();

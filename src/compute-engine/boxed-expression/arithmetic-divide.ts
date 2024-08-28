@@ -1,9 +1,10 @@
 import type { BoxedExpression } from '../public';
 import type { NumericValue } from '../numeric-value/public';
-import { asSmallInteger } from '../boxed-expression/numerics';
+import { asSmallInteger } from './numerics';
 import { bigint } from '../numerics/bigint';
 
 import { canonicalMultiply } from './arithmetic-multiply';
+import { Product } from './product';
 
 /**
  * Canonical form of 'Divide' (and 'Rational')
@@ -149,4 +150,92 @@ export function canonicalDivide(
   const denom = c.denominator.isOne ? t2 : t2.mul(ce.number(c.denominator));
 
   return denom.isOne ? num : ce._fn('Divide', [num, denom]);
+}
+
+export function div(
+  num: BoxedExpression,
+  denom: number | BoxedExpression
+): BoxedExpression {
+  const ce = num.engine;
+
+  num = num.canonical;
+  if (typeof denom !== 'number') denom = denom.canonical;
+
+  // If the numerator is NaN, return NaN
+  if (num.isNaN) return ce.NaN;
+
+  if (typeof denom === 'number') {
+    if (isNaN(denom)) return ce.NaN;
+    if (num.isZero) {
+      // 0/0 = NaN, 0/±∞ = NaN
+      if (denom === 0 || !isFinite(denom)) return ce.NaN;
+      return num; // 0
+    }
+    // a/1 = a
+    if (denom === 1) return num;
+    // a/(-1) = -a
+    if (denom === -1) return num.neg();
+    // a/0 = NaN (a≠0)
+    if (denom === 0) return ce.NaN;
+
+    if (num.isNumberLiteral) {
+      const n = num.numericValue!;
+      // If num and denom are literal integers, we keep an exact result
+      if (typeof n === 'number') {
+        if (Number.isInteger(n) && Number.isInteger(denom))
+          return ce.number(ce._numericValue({ rational: [n, denom] }));
+      } else if (n.isExact && Number.isInteger(denom)) {
+        return ce.number(n.asExact!.div(denom));
+      }
+    }
+  } else {
+    if (denom.isNaN) return ce.NaN;
+    if (num.isZero) {
+      if (denom.isZero || denom.isFinite === false) return ce.NaN;
+      return ce.Zero;
+    }
+
+    // a/1 = a
+    if (denom.isOne) return num;
+    // a/(-1) = -a
+    if (denom.isNegativeOne) return num.neg();
+    // a/0 = NaN (a≠0)
+    if (denom.isZero) return ce.NaN;
+
+    if (num.isNumberLiteral && denom.isNumberLiteral) {
+      const numV = num.numericValue!;
+      const denomV = denom.numericValue!;
+      if (
+        typeof numV === 'number' &&
+        typeof denomV === 'number' &&
+        Number.isInteger(numV) &&
+        Number.isInteger(denomV)
+      ) {
+        return ce.number(ce._numericValue({ rational: [numV, denomV] }));
+      } else if (
+        typeof numV === 'number' &&
+        Number.isInteger(numV) &&
+        typeof denomV !== 'number'
+      ) {
+        if (denomV.isExact) {
+          return ce.number(ce._numericValue(numV).div(denomV.asExact!));
+        }
+      } else if (
+        typeof denomV === 'number' &&
+        Number.isInteger(denomV) &&
+        typeof numV !== 'number'
+      ) {
+        if (numV.isExact) {
+          return ce.number(numV.asExact!.div(denomV));
+        }
+      } else if (typeof numV !== 'number' && typeof denomV !== 'number') {
+        if (numV.isExact && denomV.isExact) {
+          return ce.number(numV.asExact!.div(denomV.asExact!));
+        }
+      }
+    }
+  }
+  const result = new Product(ce, [num]);
+  result.div(typeof denom === 'number' ? ce._numericValue(denom) : denom);
+  return result.asRationalExpression();
 }

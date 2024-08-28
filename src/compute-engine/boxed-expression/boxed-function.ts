@@ -34,7 +34,7 @@ import { asSmallInteger, signDiff } from './numerics';
 
 import { at, isFiniteIndexableCollection } from '../collection-utils';
 
-import { canonicalMultiply, mul } from '../library/arithmetic-multiply';
+import { canonicalMultiply, mul } from './arithmetic-multiply';
 
 import { NumericValue } from '../numeric-value/public';
 
@@ -52,6 +52,7 @@ import { add } from './terms';
 import { holdMap } from './hold';
 import { PrimitiveType, Type } from '../../common/type/types';
 import { isSubtype } from '../../common/type/subtype';
+import { div } from './arithmetic-divide';
 
 /**
  * A boxed function represent an expression that can be
@@ -312,7 +313,7 @@ export class BoxedFunction extends _BoxedExpression {
       for (const arg of expr.ops!) {
         const [c, r] = arg.toNumericValue();
         coef = coef.mul(c);
-        if (!r.isOne) rest.push(r);
+        if (r.isOne !== true) rest.push(r);
       }
       if (rest.length === 0) return [coef, ce.One];
       if (rest.length === 1) return [coef, rest[0]];
@@ -756,15 +757,7 @@ export class BoxedFunction extends _BoxedExpression {
   }
 
   div(rhs: number | BoxedExpression): BoxedExpression {
-    if (typeof rhs === 'number') {
-      if (rhs === 1) return this;
-      if (rhs === -1) return this.neg();
-      if (rhs === 0) return this.engine.NaN;
-      if (isNaN(rhs)) return this.engine.NaN;
-    }
-    const result = new Product(this.engine, [this]);
-    result.div(typeof rhs === 'number' ? this.engine._numericValue(rhs) : rhs);
-    return result.asRationalExpression();
+    return div(this, rhs);
   }
 
   pow(exp: number | BoxedExpression): BoxedExpression {

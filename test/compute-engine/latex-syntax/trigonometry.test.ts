@@ -13,7 +13,7 @@ describe('TRIGONOMETRIC FUNCTIONS implicit arguments', () => {
   test(`\\cos \\frac{x}{2}^2`, () =>
     expect(check('\\cos \\frac{x}{2}^2')).toMatchInlineSnapshot(`
       box       = ["Cos", ["Square", ["Divide", "x", 2]]]
-      simplify  = cos(0.25 * x^2)
+      simplify  = cos(x^2 / 4)
     `));
 });
 
@@ -73,7 +73,7 @@ describe('TRIGONOMETRIC DEGREES', () => {
       simplify  = sqrt(3)/2
       eval-auto = sqrt(3)/2
       eval-mach = sqrt(3)/2
-      N-auto    = 0.866025403784438646764
+      N-auto    = 0.866025403784438646763
       N-mach    = 0.8660254037844387
     `));
 
@@ -84,7 +84,7 @@ describe('TRIGONOMETRIC DEGREES', () => {
       simplify  = sqrt(3)/2
       eval-auto = sqrt(3)/2
       eval-mach = sqrt(3)/2
-      N-auto    = 0.866025403784438646764
+      N-auto    = 0.866025403784438646763
       N-mach    = 0.8660254037844387
     `));
 
@@ -95,7 +95,7 @@ describe('TRIGONOMETRIC DEGREES', () => {
       simplify  = sqrt(3)/2
       eval-auto = sqrt(3)/2
       eval-mach = sqrt(3)/2
-      N-auto    = 0.866025403784438646764
+      N-auto    = 0.866025403784438646763
       N-mach    = 0.8660254037844387
     `));
 
@@ -106,7 +106,7 @@ describe('TRIGONOMETRIC DEGREES', () => {
       simplify  = sqrt(3)/2
       eval-auto = sqrt(3)/2
       eval-mach = sqrt(3)/2
-      N-auto    = 0.866025403784438646764
+      N-auto    = 0.866025403784438646763
       N-mach    = 0.8660254037844387
     `));
 });

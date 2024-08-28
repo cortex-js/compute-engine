@@ -788,10 +788,10 @@ export function replace(
 
   let done = false;
   const steps: RuleStep[] = [];
-  try {
-    while (!done && iterationCount < iterationLimit) {
-      done = true;
-      for (const rule of ruleSet) {
+  while (!done && iterationCount < iterationLimit) {
+    done = true;
+    for (const rule of ruleSet) {
+      try {
         const result = applyRule(rule, expr, {}, options);
         if (
           result !== null &&
@@ -810,11 +810,12 @@ export function replace(
           done = false;
           expr = result.value;
         }
+      } catch (e) {
+        console.error(`\n${expr.toString()}\n${rule.id}\n${e.message}`);
+        return steps;
       }
-      iterationCount += 1;
     }
-  } catch (e) {
-    console.error(expr.toString() + '\n' + e.message);
+    iterationCount += 1;
   }
   return steps;
 }

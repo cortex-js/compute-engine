@@ -368,7 +368,9 @@ export function toAsciiMath(
   if (num !== null) {
     const ce = expr.engine;
     if (expr.isNaN) return serializeSymbol('NaN', options);
-    if (!expr.isFinite) {
+    if (expr.isFinite === false) {
+      if (expr.isNegative !== true && expr.isPositive !== true)
+        return serializeSymbol('ComplexInfinity', options);
       return serializeSymbol(
         expr.isNegative ? 'NegativeInfinity' : 'PositiveInfinity',
         options

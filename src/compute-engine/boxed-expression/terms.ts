@@ -1,7 +1,7 @@
 import type { BoxedExpression, IComputeEngine } from '../public';
 
-import { canonicalAdd } from '../library/arithmetic-add';
-import { canonicalMultiply } from '../library/arithmetic-multiply';
+import { canonicalAdd } from './arithmetic-add';
+import { canonicalMultiply } from './arithmetic-multiply';
 
 import { MACHINE_PRECISION } from '../numerics/numeric';
 

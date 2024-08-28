@@ -114,10 +114,11 @@ export const TRIGONOMETRY_LIBRARY: IdentifierDefinitions[] = [
             return apply2(y, x, Math.atan2, (a, b) => Decimal.atan2(a, b));
 
           // See https://en.wikipedia.org/wiki/Argument_(complex_analysis)#Realizations_of_the_function_in_computer_languages
-          if (!y.isFinite && !x.isFinite) return ce.NaN;
+          if (y.isFinite === false && x.isFinite === false) return ce.NaN;
           if (y.isZero && x.isZero) return ce.Zero;
-          if (!x.isFinite) return x.isPositive ? ce.Zero : ce.Pi;
-          if (!y.isFinite) return y.isPositive ? ce.Pi.div(2) : ce.Pi.div(-2);
+          if (x.isFinite === false) return x.isPositive ? ce.Zero : ce.Pi;
+          if (y.isFinite === false)
+            return y.isPositive ? ce.Pi.div(2) : ce.Pi.div(-2);
           if (y.isZero) return x.isPositive ? ce.Zero : ce.Pi;
           return ce.function('Arctan', [y.div(x)]).evaluate();
         },

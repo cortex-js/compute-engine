@@ -60,13 +60,12 @@ describe('NUMERIC MODE', () => {
     expect(check('12345678901234567890^{23456789012345678901}'))
       .toMatchInlineSnapshot(`
       box       = ["Power", {num: "12345678901234567890"}, {num: "23456789012345678901"}]
-      simplify  = +oo
+      eval-auto = +oo
     `));
 
   test(`\\cos(555555^{-1})`, () =>
     expect(check('\\cos(555555^{-1})')).toMatchInlineSnapshot(`
       box       = ["Cos", ["Divide", 1, 555555]]
-      simplify  = cos(1/555555)
       eval-auto = 0.99999999999837999676
       eval-mach = 0.99999999999838
     `));

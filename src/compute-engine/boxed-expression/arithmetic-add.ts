@@ -1,10 +1,10 @@
 import type { BoxedDomain, BoxedExpression, IComputeEngine } from '../public';
-import { getImaginaryFactor } from '../boxed-expression/utils';
-import { widen } from '../boxed-expression/boxed-domain';
+import { getImaginaryFactor } from './utils';
+import { widen } from './boxed-domain';
 import { isIndexableCollection } from '../collection-utils';
 
-import { flatten } from '../boxed-expression/flatten';
-import { addOrder } from '../boxed-expression/order';
+import { flatten } from './flatten';
+import { addOrder } from './order';
 
 /**
  *
@@ -23,7 +23,7 @@ export function canonicalAdd(
   ops = flatten(ops, 'Add');
 
   // Remove literal 0
-  ops = ops.filter((x) => x.numericValue === null || !x.isZero);
+  ops = ops.filter((x) => x.numericValue === null || x.isZero !== true);
 
   if (ops.length === 0) return ce.Zero;
   if (ops.length === 1 && !isIndexableCollection(ops[0])) return ops[0];

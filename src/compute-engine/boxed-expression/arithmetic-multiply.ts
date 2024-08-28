@@ -1,11 +1,11 @@
 import type { BoxedExpression, IComputeEngine } from '../public';
 
-import { order } from '../boxed-expression/order';
+import { order } from './order';
 
-import { Product } from '../boxed-expression/product';
-import { expandProducts } from '../boxed-expression/expand';
-import { flatten } from '../boxed-expression/flatten';
-import { negateProduct } from '../boxed-expression/negate';
+import { Product } from './product';
+import { expandProducts } from './expand';
+import { flatten } from './flatten';
+import { negateProduct } from './negate';
 
 /**
  * The canonical form of `Multiply`:
@@ -47,17 +47,15 @@ export function canonicalMultiply(
     // @fixme: consider using numeratorDenominator
     if (op.operator === 'Divide') {
       const [a, b] = op.ops!;
-      if (a.isOne) {
-        denominator.push(b);
-        continue;
-      }
-      if (a.isNegativeOne) {
-        sign = -sign;
-        denominator.push(b);
-        continue;
-      }
       if (b.isZero) return ce.NaN;
       denominator.push(b);
+
+      if (a.isOne) continue;
+      if (a.isNegativeOne) {
+        sign = -sign;
+        continue;
+      }
+
       op = a;
     }
 
@@ -218,7 +216,7 @@ export function canonicalMultiply(
     if (den.isZero || den.isNaN) return ce.NaN;
     if (den.isInfinity) return infinityCount > 0 ? ce.NaN : ce.Zero;
     if (den.isNegativeOne) sign = -sign;
-    else if (!den.isOne) {
+    else if (den.isOne !== true) {
       let num: BoxedExpression;
       if (xs.length === 0) {
         num = sign < 0 ? ce.NegativeOne : ce.One;

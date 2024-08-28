@@ -33,7 +33,7 @@ import type {
 
 import { domainToSignature, signatureToDomain } from '../domain-utils';
 
-import { mul } from '../library/arithmetic-multiply';
+import { mul } from './arithmetic-multiply';
 
 import { replace } from './rules';
 import { Product } from './product';
@@ -54,6 +54,7 @@ import {
   hashCode,
   normalizedUnknownsForSolve,
 } from './utils';
+import { div } from './arithmetic-divide';
 
 /**
  * BoxedSymbol
@@ -262,15 +263,7 @@ export class BoxedSymbol extends _BoxedExpression {
   }
 
   div(rhs: number | BoxedExpression): BoxedExpression {
-    if (typeof rhs === 'number') {
-      if (rhs === 1) return this;
-      if (rhs === -1) return this.neg();
-      if (rhs === 0) return this.engine.NaN;
-      if (isNaN(rhs)) return this.engine.NaN;
-    }
-    const result = new Product(this.engine, [this]);
-    result.div(typeof rhs === 'number' ? this.engine._numericValue(rhs) : rhs);
-    return result.asRationalExpression();
+    return div(this, rhs);
   }
 
   pow(exp: number | BoxedExpression): BoxedExpression {

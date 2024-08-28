@@ -25,7 +25,7 @@ import { Type } from '../../common/type/types';
  * To create a boxed expression:
  *
  * ### `ce.box()` and `ce.parse()`
- * 
+ *
  * Use `ce.box()` or `ce.parse()` to get a canonical expression.
  *    - the arguments are put in canonical form
  *    - invisible operators are made explicit
@@ -39,33 +39,38 @@ import { Type } from '../../common/type/types';
  *    - identifiers are **not** replaced with their values
  *
  * ### Algebraic methods (expr.add(), expr.mul(), etc...)
- * 
- * The boxed expression have some algebraic methods, 
+ *
+ * The boxed expression have some algebraic methods,
  * i.e. `add`, `mul`, `div`, `pow`, etc. These methods are suitable for
- * internal calculations, although they may be used as part of the public 
+ * internal calculations, although they may be used as part of the public
  * API as well.
- * 
+ *
  *    - the operation is performed on the canonical version of the expression
+ *
  *    - the arguments are not evaluated
+ *
  *    - the canonical handler (of the corresponding operation) is not called
- *    - some additional simplifications over canonicalization are applied, for
- *      example number literals are combined. However, the result is exact, 
- *      and no approximation is made. Use `.N()` to get an approximate value.
- *      This is equivalent to calling `simplify()` on the expression.
- 
+ *
+ *    - some additional simplifications over canonicalization are applied.
+ *      For example number literals are combined.
+ *      However, the result is exact, and no approximation is made. Use `.N()`
+ *      to get an approximate value.
+ *      This is equivalent to calling `simplify()` on the expression (but
+ *      without simplifying the arguments).
+ *
  *    - sequences were already flattened as part of the canonicalization process
  *
  *   For 'add' and 'mul', which take multiple arguments, separate functions
  *   are provided that take an array of arguments. They are equivalent
- *   to calling the boxed algebraic method, i.e. `ce.Zero.add(1, 2, 3)` or
+ *   to calling the boxed algebraic method, i.e. `ce.Zero.add(1, 2, 3)` and
  *   `add(1, 2, 3)` are equivalent.
- * 
+ *
  * These methods are not equivalent to calling `expr.evaluate()` on the
  * expression: evaluate will replace identifiers with their values, and
- * evaluate the expression.
+ * evaluate the expression
  *
  * ### `ce._fn()`
- * 
+ *
  * Use `ce._fn()` to create a new function expression.
  *
  * This is a low level method which is typically invoked in the canonical
@@ -73,30 +78,30 @@ import { Type } from '../../common/type/types';
  *
  * The arguments are not modified. The expression is not put in canonical
  * form. The canonical handler is *not* called.
- * 
- * A canonical flag can be set when calling the function, but it only 
+ *
+ * A canonical flag can be set when calling the function, but it only
  * asserts that the function and its arguments are canonical. The caller
  * is responsible for ensuring that is the case.
  *
- * 
+ *
  * ### `ce.function()`
- * 
+ *
  * This is a specialized version of `ce.box()`. It is used to create a new
  * function expression.
- * 
+ *
  * The arguments are put in canonical form and the canonical handler is called.
  *
- * For algebraic functions (add, mul, etc..), use the corresponding 
+ * For algebraic functions (add, mul, etc..), use the corresponding
  * canonicalization function, i.e. `canonicalAdd(a, b)` instead of
  * `ce.function('Add', a, b)`.
- * 
+ *
  * Another option is to use the algebraic methods directly, i.e. `a.add(b)`
  * instead of `ce.function('Add', a, b)`. However, the algebraic methods will
  * apply further simplifications which may or may not be desirable. For
  * example, number literals will be combined.
  *
  * ### Canonical Handlers
- * 
+ *
  * Canonical handlers are responsible for:
  *    - validating the signature (domain and number of arguments)
  *    - flattening sequences
@@ -106,13 +111,13 @@ import { Type } from '../../common/type/types';
  *    - if the function definition has a hold, they should also put
  *      their arguments in canonical form, if appropriate
  *
- * When the canonical handler is invoked, the arguments have been put in 
+ * When the canonical handler is invoked, the arguments have been put in
  * canonical form according to the `hold` flag.
- * 
+ *
  * Some canonical handlers are available as separate functions and can be
- * used directly, for example `canonicalAdd(a, b)` instead of 
+ * used directly, for example `canonicalAdd(a, b)` instead of
  * `ce.function('Add', [a, b])`.
- * 
+ *
  * :::
  */
 

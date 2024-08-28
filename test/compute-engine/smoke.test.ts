@@ -653,7 +653,9 @@ describe('SIMPLIFICATION sqrt', () => {
     `));
 
   test(`simplify('\\sqrt{3^2}')`, () =>
-    expect(simplify('\\sqrt{3^2}')).toMatchInlineSnapshot(`3`));
+    expect(simplify('\\sqrt{3^2}')).toMatchInlineSnapshot(
+      `["Sqrt", ["Square", 3]]`
+    ));
 
   test(`evaluate('\\sqrt{12}')`, () =>
     expect(evaluateToJson('\\sqrt{12}')).toMatchInlineSnapshot(`

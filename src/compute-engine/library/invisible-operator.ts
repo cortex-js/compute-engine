@@ -2,7 +2,7 @@ import type { IComputeEngine, BoxedExpression } from '../public';
 
 import { flatten } from '../boxed-expression/flatten';
 import { isIndexableCollection } from '../collection-utils';
-import { canonicalMultiply } from './arithmetic-multiply';
+import { canonicalMultiply } from '../boxed-expression/arithmetic-multiply';
 
 export function canonicalInvisibleOperator(
   ce: IComputeEngine,

@@ -1,6 +1,6 @@
 import type { BoxedExpression, SemiBoxedExpression } from './public';
 import { isInequality } from './utils';
-import { canonicalAdd } from '../library/arithmetic-add';
+import { canonicalAdd } from './arithmetic-add';
 import { Rule } from '../public';
 import { matchAnyRules } from './rules';
 import { expand } from './expand';

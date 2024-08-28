@@ -6,7 +6,7 @@ import { Product, commonTerms } from './product';
 
 import { NumericValue } from '../numeric-value/public';
 
-import { canonicalMultiply } from '../library/arithmetic-multiply';
+import { canonicalMultiply } from './arithmetic-multiply';
 
 import { add } from './terms';
 

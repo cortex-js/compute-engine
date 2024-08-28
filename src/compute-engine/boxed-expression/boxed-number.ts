@@ -21,10 +21,10 @@ import type {
 import type { Expression, MathJsonNumber } from '../../math-json';
 
 import { inferNumericDomain } from '../domain-utils';
-import { canonicalDivide } from '../library/arithmetic-divide';
-import { mul } from '../library/arithmetic-multiply';
+import { canonicalDivide, div } from './arithmetic-divide';
+import { mul } from './arithmetic-multiply';
 
-import { asSmallInteger, signDiff } from './numerics';
+import { signDiff } from './numerics';
 import {
   canonicalInteger,
   SMALL_INTEGER,
@@ -230,69 +230,80 @@ export class BoxedNumber extends _BoxedExpression {
   }
 
   div(rhs: number | BoxedExpression): BoxedExpression {
-    if (typeof rhs === 'number') {
-      if (rhs === 1) return this;
-      if (rhs === -1) return this.neg();
-      if (rhs === 0) return this.engine.NaN;
-      if (isNaN(rhs)) return this.engine.NaN;
-      // @fastpath
-      if (typeof this._value === 'number')
-        return this.engine.number(this._value / rhs);
-      rhs = this.engine.number(rhs);
-    }
-    if (this.isNaN || rhs.isNaN) return this.engine.NaN;
-    if (this.isZero && rhs.isZero) return this.engine.NaN;
-    if (this.isZero && rhs.isFinite) return this.engine.Zero;
-
-    if (rhs.numericValue !== null) {
-      const ce = this.engine;
-      const n = ce._numericValue(this._value);
-      return ce.number(n.div(rhs.numericValue));
-    }
-    return canonicalDivide(this, rhs);
+    return div(this, rhs);
   }
 
   pow(exp: number | BoxedExpression): BoxedExpression {
     if (!this.isCanonical) return this.canonical.pow(exp);
 
-    if (typeof exp !== 'number') exp = exp.canonical;
-
-    const e = typeof exp === 'number' ? exp : exp.im === 0 ? exp.re : undefined;
-
     const ce = this.engine;
-    if (e === 0) return ce.One;
-    if (e === 1) return this;
-    if (e === -1) return this.inv();
-    if (exp === 0.5) return this.sqrt();
-    if (exp === -0.5) return this.sqrt().inv();
-    if (e === Number.POSITIVE_INFINITY) {
-      if (this.isGreater(1)) return ce.PositiveInfinity;
-      if (this.isPositive && this.isLess(1)) return ce.Zero;
-    }
-    if (e === Number.NEGATIVE_INFINITY) {
-      if (this.isGreater(1)) return ce.Zero;
-      if (this.isPositive && this.isLess(1)) return ce.PositiveInfinity;
-    }
+    // if (typeof exp === 'number') {
+    //   if (this.isZero) {
+    //     // 0^0 is undefined
+    //     if (exp === 0) return ce.NaN;
+    //     // 0^n, n<0 -> Complex Infinity
+    //     if (exp < 0) return ce.ComplexInfinity;
+    //     // 0^n, n>0 -> 0
+    //     return ce.Zero;
+    //   }
 
-    if (exp === 2) {
-      if (typeof this._value === 'number')
-        return ce.number(this._value * this._value);
-      return ce.number(this._value.pow(2));
-    }
+    //   if (exp === 0) return ce.One;
+    //   if (exp === 1) return this;
+    //   // if (exp === -1) return this.inv();
 
-    if (typeof exp !== 'number' && exp.operator === 'Negate')
-      return this.pow(exp.op1).inv();
+    //   // if (this.isNegative) {
+    //   //   if (exp % 2 === 1) return this.neg().pow(exp).neg();
+    //   //   if (exp % 2 === 0) return this.neg().pow(exp);
+    //   // }
 
-    if (e !== undefined) {
-      if (typeof this._value === 'number')
-        return ce.number(Math.pow(this._value, e));
-      return ce.number(this._value.pow(e));
-    }
+    //   if (exp === Number.POSITIVE_INFINITY) {
+    //     if (this.isGreater(1)) return ce.PositiveInfinity;
+    //     if (this.isPositive && this.isLess(1)) return ce.Zero;
+    //   }
+    //   if (exp === Number.NEGATIVE_INFINITY) {
+    //     if (this.isGreater(1)) return ce.Zero;
+    //     if (this.isPositive && this.isLess(1)) return ce.PositiveInfinity;
+    //   }
+    // } else {
+    //   exp = exp.canonical;
 
-    // Could be a complex exponent...
-    if (typeof this._value !== 'number')
-      if (typeof exp !== 'number' && exp.numericValue !== null)
-        return ce.number(this._value.pow(exp.numericValue));
+    //   if (this.isZero) {
+    //     if (exp.isZero) return ce.NaN;
+    //     if (exp.isNegative) return ce.ComplexInfinity;
+    //     return ce.Zero;
+    //   }
+
+    //   if (exp.isZero) return ce.One;
+    //   if (exp.isOne) return this;
+    //   // if (exp.isNegativeOne) return this.inv();
+
+    //   if (this.isNegative) {
+    //     // if (exp.isOdd) return this.neg().pow(exp).neg();
+    //     // if (exp.isEven) return this.neg().pow(exp);
+    //   }
+
+    //   if (exp.isInfinity) {
+    //     if (exp.isPositive) {
+    //       if (this.isGreater(1)) return ce.PositiveInfinity;
+    //       if (this.isPositive && this.isLess(1)) return ce.Zero;
+    //     }
+    //     if (exp.isNegative) {
+    //       if (this.isGreater(1)) return ce.Zero;
+    //       if (this.isPositive && this.isLess(1)) return ce.PositiveInfinity;
+    //     }
+    //   }
+    // }
+
+    // const n = typeof exp === 'number' ? exp : exp.re;
+    // if (n !== undefined && Number.isInteger(n)) {
+    //   if (typeof this._value === 'number') {
+    //     const r = this._value ** n;
+    //     if (Number.isInteger(r)) return ce.number(r);
+    //   } else {
+    //     const r = this._value.pow(n);
+    //     if (r.type === 'integer') return ce.number(r);
+    //   }
+    // }
 
     return ce._fn('Power', [this, ce.box(exp)]);
   }
@@ -300,24 +311,38 @@ export class BoxedNumber extends _BoxedExpression {
   root(exp: number | BoxedExpression): BoxedExpression {
     if (!this.isCanonical) return this.canonical.root(exp);
 
-    if (typeof exp !== 'number') exp = exp.canonical;
-
-    const e = typeof exp === 'number' ? exp : exp.im === 0 ? exp.re : undefined;
-
-    if (e === 0) return this.engine.NaN;
-    if (e === 1) return this;
-    if (e === -1) return this.inv();
-    if (e === 2) return this.sqrt();
-    if (typeof this._value === 'number') {
-      if (e === 3) this.engine.number(Math.cbrt(this._value));
-      const n = asSmallInteger(exp);
-      if (n !== null) return this.engine.number(Math.pow(this._value, 1 / n));
-      return this.engine.function('Root', [this, this.engine.box(exp)]);
+    if (typeof exp === 'number') {
+      if (exp === 0) return this.engine.NaN;
+      if (exp === 1) return this;
+      if (exp === -1) return this.inv();
+      if (exp === 2) return this.sqrt();
+      if (this.isNegative) {
+        if (exp % 2 === 1) return this.neg().root(exp).neg();
+        if (exp % 2 === 0) return this.neg().root(exp);
+      }
+    } else {
+      exp = exp.canonical;
+      if (exp.isZero) return this.engine.NaN;
+      if (exp.isOne) return this;
+      if (exp.isNegativeOne) return this.inv();
+      if (exp.isEqual(2)) return this.sqrt();
+      if (this.isNegative) {
+        if (exp.isOdd) return this.neg().root(exp).neg();
+        if (exp.isEven) return this.neg().root(exp);
+      }
     }
-    const n = asSmallInteger(exp);
-    if (n === null)
-      return this.engine.function('Root', [this, this.engine.box(exp)]);
-    return this.engine.number(this._value.root(n));
+
+    const n = typeof exp === 'number' ? exp : exp.re;
+    if (n !== undefined && Number.isInteger(n)) {
+      if (typeof this._value === 'number') {
+        const r = this._value ** (1 / n);
+        if (Number.isInteger(r)) return this.engine.number(r);
+      } else {
+        const r = this._value.root(n);
+        if (r.type === 'integer') return this.engine.number(r);
+      }
+    }
+    return this.engine._fn('Root', [this, this.engine.box(exp)]);
   }
 
   sqrt(): BoxedExpression {
@@ -400,7 +425,8 @@ export class BoxedNumber extends _BoxedExpression {
       if (Number.isNaN(this._value)) return 'unsigned';
       s = Math.sign(this._value);
     } else s = this._value.sgn();
-    if (s === undefined) return undefined;
+    // The sign of a complex Numeric Value is `undefined`
+    if (s === undefined) return 'unsigned';
     if (Number.isNaN(s)) return 'unsigned';
     if (s === 0) return 'zero';
     if (s > 0) return 'positive';
@@ -537,7 +563,9 @@ export class BoxedNumber extends _BoxedExpression {
 
   /** x >= 0, same as `isGreaterEqual(0)` */
   get isNonNegative(): boolean | undefined {
-    if (typeof this._value === 'number') return this._value >= 0;
+    if (typeof this._value === 'number')
+      return !Number.isNaN(this._value) && this._value >= 0;
+
     const s = this.sgn;
     if (s === undefined) return undefined;
 
@@ -548,7 +576,8 @@ export class BoxedNumber extends _BoxedExpression {
 
   /** x < 0, same as `isLess(0)` */
   get isNegative(): boolean | undefined {
-    if (typeof this._value === 'number') return this._value < 0;
+    if (typeof this._value === 'number')
+      return !Number.isNaN(this._value) && this._value < 0;
 
     const s = this.sgn;
     if (s === undefined) return undefined;
@@ -560,7 +589,8 @@ export class BoxedNumber extends _BoxedExpression {
 
   /** x <= 0, same as `isLessEqual(0)` */
   get isNonPositive(): boolean | undefined {
-    if (typeof this._value === 'number') return this._value <= 0;
+    if (typeof this._value === 'number')
+      return !Number.isNaN(this._value) && this._value <= 0;
 
     const s = this.sgn;
     if (s === undefined) return undefined;
@@ -572,28 +602,25 @@ export class BoxedNumber extends _BoxedExpression {
   }
 
   get isZero(): boolean {
-    if (this._value === 0) return true;
-    if (typeof this._value === 'number') return false;
+    if (typeof this._value === 'number') return this._value === 0;
+
     return this._value.isZero;
   }
 
   get isNotZero(): boolean {
-    if (this._value === 0) return false;
-    if (typeof this._value === 'number') return true;
+    if (typeof this._value === 'number') return this._value !== 0;
 
     return !this._value.isZero;
   }
 
   get isOne(): boolean {
-    if (this._value === 1) return true;
-    if (typeof this._value === 'number') return false;
+    if (typeof this._value === 'number') return this._value === 1;
 
     return this._value.isOne;
   }
 
   get isNegativeOne(): boolean {
-    if (this._value === -1) return true;
-    if (typeof this._value === 'number') return false;
+    if (typeof this._value === 'number') return this._value === -1;
 
     return this._value.isNegativeOne;
   }
@@ -638,7 +665,7 @@ export class BoxedNumber extends _BoxedExpression {
   }
 
   get isFinite(): boolean {
-    return !this.isInfinity && !this.isNaN;
+    return this.isInfinity === false && this.isNaN === false;
   }
 
   get isNumber(): true {

@@ -1351,7 +1351,7 @@ const RULES: Rule[] = [
     match: 'x^n*x',
     replace: 'x^{n+1}',
     condition: ({ x, n }) =>
-      x.isNotZero === true || n.isPositive === true || x.isLess(-1) === true,
+      x.isNotZero === true || n.isPositive === true || n.isLess(-1) === true,
   },
   {
     match: 'x^n*x^m',

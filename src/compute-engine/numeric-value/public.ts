@@ -53,6 +53,10 @@ export abstract class NumericValue {
    */
   abstract get isExact(): boolean;
 
+  /** If `isExact()`, returns an ExactNumericValue, otherwise returns undefined.
+   */
+  abstract get asExact(): NumericValue | undefined;
+
   /** The real part of this numeric value.
    *
    * Can be negative, 0 or positive.
@@ -99,7 +103,9 @@ export abstract class NumericValue {
   abstract sub(other: NumericValue): NumericValue;
   abstract mul(other: number | Decimal | NumericValue): NumericValue;
   abstract div(other: SmallInteger | NumericValue): NumericValue;
-  abstract pow(n: number | { re: number; im: number }): NumericValue;
+  abstract pow(
+    n: number | NumericValue | { re: number; im: number }
+  ): NumericValue;
   abstract root(n: number): NumericValue;
   abstract sqrt(): NumericValue;
 

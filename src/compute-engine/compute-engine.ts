@@ -842,30 +842,41 @@ export class ComputeEngine implements IComputeEngine {
   _numericValue(
     value: number | bigint | Rational | Decimal | Complex | NumericValueData
   ): NumericValue {
-    if (value instanceof NumericValue) return value;
+    // Convert to an ExactNumericValue if possible
+    if (value instanceof NumericValue) return value.asExact ?? value;
 
+    const bignum = (x) => this.bignum(x);
     const makeNumericValue =
       this._precision > MACHINE_PRECISION
-        ? (x) => new BigNumericValue(x, (x) => this.bignum(x))
-        : (x) => new MachineNumericValue(x);
+        ? (x) => new BigNumericValue(x, bignum)
+        : (x) =>
+            new MachineNumericValue(
+              x,
+              (x) => new ExactNumericValue(x, makeNumericValue, bignum)
+            );
 
     if (typeof value === 'number') {
       if (Number.isInteger(value))
-        return new ExactNumericValue(value, makeNumericValue);
+        return new ExactNumericValue(value, makeNumericValue, bignum);
       return makeNumericValue(value);
     }
 
     if (typeof value === 'bigint')
-      return new ExactNumericValue(value, makeNumericValue);
+      return new ExactNumericValue(value, makeNumericValue, bignum);
 
     if (isRational(value))
-      return new ExactNumericValue({ rational: value }, makeNumericValue);
+      return new ExactNumericValue(
+        { rational: value },
+        makeNumericValue,
+        bignum
+      );
 
     if (value instanceof Decimal) {
       if (value.isInteger())
         return new ExactNumericValue(
           bigint(value.toString())!,
-          makeNumericValue
+          makeNumericValue,
+          bignum
         );
       return makeNumericValue(value);
     }
@@ -891,12 +902,14 @@ export class ComputeEngine implements IComputeEngine {
             rational: [bigint(value.decimal.toString())!, BigInt(1)],
             radical: value.radical,
           },
-          makeNumericValue
+          makeNumericValue,
+          bignum
         );
       if (typeof value.decimal === 'number' && Number.isInteger(value.decimal))
         return new ExactNumericValue(
           { rational: [value.decimal, 1], radical: value.radical },
-          makeNumericValue
+          makeNumericValue,
+          bignum
         );
       return makeNumericValue(value);
     }
@@ -916,7 +929,7 @@ export class ComputeEngine implements IComputeEngine {
     )
       return makeNumericValue(value);
 
-    return new ExactNumericValue(value, makeNumericValue);
+    return new ExactNumericValue(value, makeNumericValue, bignum);
   }
 
   /**

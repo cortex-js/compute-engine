@@ -4,6 +4,7 @@ import { order } from './order';
 import {
   Rational,
   add,
+  mul as rationalMul,
   asMachineRational,
   inverse,
   isOne,
@@ -12,13 +13,14 @@ import {
   neg,
   rationalGcd,
   reducedRational,
+  isZero,
 } from '../numerics/rationals';
-import { asRadical } from '../library/arithmetic-power';
+import { asRadical } from './arithmetic-power';
 
 import { flatten } from './flatten';
 import { asRational } from './numerics';
 import { NumericValue } from '../numeric-value/public';
-import { mul } from '../library/arithmetic-multiply';
+import { mul } from './arithmetic-multiply';
 
 /**
  * Group terms in a product by common term.
@@ -76,7 +78,7 @@ export class Product {
    * If `this._isCanonical` a running product of exact terms is kept.
    * Otherwise, terms and their exponent are tallied.
    */
-  mul(term: BoxedExpression) {
+  mul(term: BoxedExpression, exp?: Rational) {
     console.assert(term.isCanonical || term.isStructural);
     if (this.coefficient.isNaN) return;
 
@@ -86,12 +88,12 @@ export class Product {
     }
 
     if (term.operator === 'Multiply') {
-      for (const t of term.ops!) this.mul(t);
+      for (const t of term.ops!) this.mul(t, exp);
       return;
     }
 
     if (term.operator === 'Negate') {
-      this.mul(term.op1);
+      this.mul(term.op1, exp);
       this.coefficient = this.coefficient.neg();
       return;
     }
@@ -99,19 +101,26 @@ export class Product {
     if (this._isCanonical) {
       if (term.symbol === 'Nothing') return;
 
-      // If we're calculation a canonical  product, fold exact literals into
+      exp ??= [1, 1];
+
+      // If we're calculating a canonical product, fold exact literals into
       // running terms
       const num = term.numericValue;
       if (num !== null) {
         if (term.isOne) return;
 
         if (term.isZero) {
-          this.coefficient = this.engine._numericValue(0);
+          this.coefficient = this.engine._numericValue(isZero(exp) ? NaN : 0);
           return;
         }
 
         if (term.isNegativeOne) {
-          this.coefficient = this.coefficient.neg();
+          if (isOne(exp)) this.coefficient = this.coefficient.neg();
+          else {
+            this.coefficient = this.coefficient.mul(
+              this.engine._numericValue(-1).pow(this.engine._numericValue(exp))
+            );
+          }
           return;
         }
 
@@ -123,89 +132,83 @@ export class Product {
           return;
         }
 
-        this.coefficient = this.coefficient.mul(num);
+        if (isOne(exp)) {
+          this.coefficient = this.coefficient.mul(num);
+        } else
+          this.coefficient = this.coefficient.mul(
+            this.engine._numericValue(num).pow(this.engine._numericValue(exp))
+          );
         return;
       }
 
       const radical = asRadical(term);
       if (radical !== null) {
         this.coefficient = this.coefficient.mul(
-          this.engine._numericValue({
-            radical: (radical[0] as number) * (radical[1] as number),
-            rational: [1, Number(radical[1])],
-          })
+          this.engine
+            ._numericValue({
+              radical: (radical[0] as number) * (radical[1] as number),
+              rational: [1, Number(radical[1])],
+            })
+            .pow(this.engine._numericValue(exp))
         );
+        return;
+      }
+
+      if (!term.symbol) {
+        // If possible, factor out a rational coefficient
+        let coef: NumericValue;
+        [coef, term] = term.toNumericValue();
+        if (exp && !isOne(exp)) coef = coef.pow(this.engine._numericValue(exp));
+        this.coefficient = this.coefficient.mul(coef);
+      }
+    }
+
+    // Note: term should be positive, so no need to handle the -1 case
+    if (term.isOne && (!exp || isOne(exp))) return;
+    if (!term.isZero && exp && isZero(exp)) return;
+    if (term.isZero) {
+      if (exp && isZero(exp)) this.coefficient = this.engine._numericValue(NaN);
+      else this.coefficient = this.engine._numericValue(0);
+      return;
+    }
+
+    let exponent: Rational = exp ?? [1, 1];
+
+    // If this is a power expression, extract the exponent
+    if (term.operator === 'Power') {
+      // Term is `Power(op1, op2)`
+      let r = asRational(term.op2);
+      if (r) {
+        this.mul(term.op1, rationalMul(exponent, r));
         return;
       }
     }
 
-    if (this._isCanonical && !term.symbol) {
-      // If possible, factor out a rational coefficient
-      let coef: NumericValue;
-      [coef, term] = term.toNumericValue();
-      this.coefficient = this.coefficient.mul(coef);
+    if (term.operator === 'Sqrt') {
+      // Term is `Sqrt(op1)`
+      this.mul(term.op1, rationalMul(exponent, [1, 2]));
+      return;
     }
 
-    // Note: term should be positive, so no need to handle the -1 case
-    if (term.isOne) return;
-
-    // If this is a power expression, extract the exponent
-    let exponent: Rational = [1, 1];
-    if (term.operator === 'Power') {
-      // Term is `Power(op1, op2)`
-      const r = asRational(term.op2);
-      if (r) {
-        const exponentExpr = term.op2;
-        exponent = r;
-        term = term.op1;
-        if (term.operator === 'Multiply') {
-          // We have Power(Multiply(...), exponent): apply the power law
-          // to each term
-          for (const x of term.ops!)
-            this.mul(this.engine._fn('Power', [x, exponentExpr]));
-          return;
-        } else if (term.operator === 'Divide') {
-          // We have Power(Divide(...), exponent): apply the power law
-          // to each term
-          this.mul(this.engine._fn('Power', [term.op1, exponentExpr]));
-          this.mul(
-            this.engine._fn('Power', [
-              term.op2,
-              this.engine.number(neg(exponent)),
-            ])
-          );
-          return;
-        }
-      }
-    } else if (term.operator === 'Sqrt') {
-      // Term is `Sqrt(op1)`
-      term = term.op1;
-      exponent = [1, 2];
-    } else if (term.operator === 'Root') {
+    if (term.operator === 'Root') {
       // Term is `Root(op1, op2)`
-      const r = asRational(term.op2);
+      let r = asRational(term.op2);
       if (r) {
-        term = term.op1;
-        exponent = inverse(r);
+        this.mul(term.op1, rationalMul(exponent, inverse(r)));
+        return;
       }
-    } else if (term.operator === 'Divide') {
+    }
+
+    if (term.operator === 'Divide') {
       // In order to correctly account for the denominator, invert it.
       // For example, in the case `a^4/a^2' we want to add
       // `a^(-2)` to the product, not `1/a^2`. The former will get the exponent
       // extracted, while the latter will consider the denominator as a
       // separate term.
-      const inv = term.op2.inv();
-      // If the inverse is not a Divide, multiply it, otherwise keep it as
-      // a term
-      if (inv.operator !== 'Divide') {
-        this.mul(term.op1);
-        this.mul(inv);
-        return;
-      }
-      if (term.op1.isOne) {
-        term = term.op2;
-        exponent = [-1, 1];
-      }
+
+      this.mul(term.op1, exponent);
+      this.mul(term.op2, inverse(exponent));
+      return;
     }
 
     // Look for the base, and add the exponent if already in the list of terms
@@ -224,7 +227,7 @@ export class Product {
   div(term: NumericValue | BoxedExpression) {
     if (term instanceof NumericValue)
       this.coefficient = this.coefficient.div(term);
-    else this.mul(term.inv());
+    else this.mul(term, [-1, 1]);
   }
 
   /** The terms of the product, grouped by degrees.

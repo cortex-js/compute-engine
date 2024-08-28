@@ -357,8 +357,8 @@ describe('RAMANUJAN FACTORIAL APPROXIMATION', () =>
           6
         ]
       ]
-      eval-auto = e^(-n) * sqrt(pi) * n^n * root(6)(8n^3 + 4n^2 + n + 1/30)
-      eval-mach = e^(-n) * sqrt(pi) * n^n * root(6)(8n^3 + 4n^2 + n + 1/30)
+      eval-auto = (sqrt(pi) * n^n * root(6)(8n^3 + 4n^2 + n + 1/30)) / e^n
+      eval-mach = (sqrt(pi) * n^n * root(6)(8n^3 + 4n^2 + n + 1/30)) / e^n
       N-auto    = 1.772453850905516 * 0.367879441171442321596^n * n^n * root(6)(8n^3 + 4n^2 + n + 0.0333333333333333333333)
       N-mach    = 1.7724538509055159 * 0.36787944117144233^n * n^n * root(6)(8n^3 + 4n^2 + n + 0.0333333333333333)
     `)));

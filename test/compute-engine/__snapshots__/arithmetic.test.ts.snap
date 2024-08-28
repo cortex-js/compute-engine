@@ -27,8 +27,8 @@ canonical = [
   1.7,
   "Pi"
 ]
-simplify  = 16.659148942012567 + pi
-eval-auto = 16.659148942012567 + pi
+simplify  = 16.6591489420125664058 + pi
+eval-auto = 16.6591489420125664058 + pi
 eval-mach = 16.659148942012564 + pi
 N-auto    = 19.8007415956023596443
 N-mach    = 19.800741595602357
@@ -43,15 +43,15 @@ box       = [
 ]
 canonical = [
   "Add",
-  ["Rational", 6172839456172839, {num: "493827160993827136"}],
+  ["Rational", 1371742101371742, {num: "109739369109739369"}],
   ["Rational", 2, 3],
-  ["Rational", {num: "493827160993827136"}, 6172839456172839]
+  ["Rational", {num: "109739369109739369"}, 1371742101371742]
 ]
-simplify  = 245935579404783291322202257360855153/3048315783912512910223290104359104
-eval-auto = 245935579404783291322202257360855153/3048315783912512910223290104359104
-eval-mach = 245935579404783291322202257360855153/3048315783912512910223290104359104
-N-auto    = 80.6791673955527604164
-N-mach    = 80.67916739555277
+simplify  = 12144966884186830401015120518973257/150534112785803114146067001510798
+eval-auto = 12144966884186830401015120518973257/150534112785803114146067001510798
+eval-mach = 12144966884186830401015120518973257/150534112785803114146067001510798
+N-auto    = 80.6791673955527728817
+N-mach    = 80.67916739555278
 `;
 
 exports[`ADD Add ['Add', 2.5, -1.1, 18.4] 1`] = `19.8`;
@@ -129,7 +129,7 @@ exports[`DIVIDE Divide 2.5/1.1 1`] = `2.(27)`;
 
 exports[`DIVIDE Divide 6/3 1`] = `2`;
 
-exports[`DIVIDE Divide with many arguments 1`] = `-0.123517786561264822134`;
+exports[`DIVIDE Divide with many arguments 1`] = `-0.123517786561264822135`;
 
 exports[`DIVIDE Divide with single argument 1`] = `["Divide", 2.5, ["Error", "'missing'"]]`;
 
@@ -190,8 +190,8 @@ canonical = [
   1.1,
   "Pi"
 ]
-simplify  = 11.0062770544365872 + pi
-eval-auto = 11.0062770544365872 + pi
+simplify  = 11.0062770544365871123 + pi
+eval-auto = 11.0062770544365871123 + pi
 eval-mach = 11.006277054436588 + pi
 N-auto    = 14.1478697080263803508
 N-mach    = 14.147869708026384
@@ -216,10 +216,9 @@ canonical = [
   -2.12,
   2.12
 ]
-simplify  = 5.3818192885643807
-eval-auto = 5.3818192885643807
+simplify  = 5.38181928856438028691
+eval-auto = 5.38181928856438028691
 eval-mach = 5.3818192885643805
-N-auto    = 5.38181928856438028691
 N-mach    = 5.38181928856438
 `;
 
@@ -747,8 +746,8 @@ canonical = [
 simplify  = (50sqrt(2) * pi) / 9
 eval-auto = pi * 50sqrt(2) / 9
 eval-mach = pi * 50sqrt(2) / 9
-N-auto    = 24.6826829897687013722
-N-mach    = 24.68268298976881
+N-auto    = 24.6826829897687013723
+N-mach    = 24.682682989768807
 `;
 
 exports[`MULTIPLY Multiply: One inexact 1`] = `
@@ -767,11 +766,11 @@ canonical = [
   ["Multiply", 2, 5, 5, 7, ["Sqrt", 2], 1.1, "Pi"],
   ["Multiply", 7, 9]
 ]
-simplify  = 8.64241621450224666911 * pi
-eval-auto = 8.64241621450224666911 * pi
-eval-mach = 8.642416214502223 * pi
-N-auto    = 27.1509512887455715095
-N-mach    = 27.150951288745713
+simplify  = 8.64241621450224752049 * pi
+eval-auto = 8.64241621450224752049 * pi
+eval-mach = 8.642416214502301 * pi
+N-auto    = 27.1509512887455715096
+N-mach    = 27.15095128874571
 `;
 
 exports[`MULTIPLY with +Infinity 1`] = `
@@ -1052,13 +1051,13 @@ exports[`RELATIONAL OPERATOR NotEqual 1`] = `False`;
 
 exports[`RELATIONAL OPERATOR NotEqual 2`] = `True`;
 
-exports[`ROOT Root 2.5 1`] = `1.35720880829745328576`;
+exports[`ROOT Root 2.5 1`] = `["Root", 2.5, 3]`;
 
-exports[`ROOT Root 5/7 1`] = `0.893903535096567651288`;
+exports[`ROOT Root 5/7 1`] = `["Root", ["Rational", 5, 7], 3]`;
 
-exports[`ROOT Root 1234567890987654321 1`] = `1072765.97992715828118`;
+exports[`ROOT Root 1234567890987654321 1`] = `["Root", {num: "1234567890987654321"}, 3]`;
 
-exports[`ROOT Root 1234567890987654321.123456789 1`] = `1072765.97992715828122`;
+exports[`ROOT Root 1234567890987654321.123456789 1`] = `["Root", "1234567890987654321.123456789", 3]`;
 
 exports[`SQRT INVALID  Sqrt 1`] = `
 invalid   =[
@@ -1080,7 +1079,7 @@ simplify  = (2 + i)
 
 exports[`SQRT √(3^2) 1`] = `
 box       = ["Sqrt", ["Square", 3]]
-simplify  = 3
+eval-auto = 3
 `;
 
 exports[`SQRT √(4x) 1`] = `
@@ -1198,5 +1197,5 @@ invalid   =[
 
 exports[`Square Square 1`] = `
 box       = ["Square", 2.5]
-simplify  = 6.25
+eval-auto = 6.25
 `;

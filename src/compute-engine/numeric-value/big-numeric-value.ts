@@ -66,6 +66,11 @@ export class BigNumericValue extends NumericValue {
     return this.im === 0 && this.decimal.isInteger();
   }
 
+  get asExact(): ExactNumericValue | undefined {
+    if (!this.isExact) return undefined;
+    return this._makeExact({ decimal: this.decimal });
+  }
+
   toJSON(): Expression {
     if (this.isNaN) return 'NaN';
     if (this.isPositiveInfinity) return 'PositiveInfinity';
@@ -111,8 +116,10 @@ export class BigNumericValue extends NumericValue {
     return new BigNumericValue(value, this.bignum);
   }
 
-  private _makeExact(value: number | bigint): ExactNumericValue {
-    return new ExactNumericValue(value, (x) => this.clone(x));
+  private _makeExact(
+    value: number | bigint | NumericValueData
+  ): ExactNumericValue {
+    return new ExactNumericValue(value, (x) => this.clone(x), this.bignum);
   }
 
   get re(): number {
@@ -296,15 +303,27 @@ export class BigNumericValue extends NumericValue {
     });
   }
 
-  pow(exponent: number | { re: number; im: number }): NumericValue {
-    if (Array.isArray(exponent)) exponent = exponent[0] / exponent[1];
+  pow(
+    exponent: number | NumericValue | { re: number; im: number }
+  ): NumericValue {
+    console.assert(!Array.isArray(exponent));
+    // if (Array.isArray(exponent)) exponent = exponent[0] / exponent[1];
 
     if (this.isNaN) return this;
     if (typeof exponent === 'number' && isNaN(exponent)) return this.clone(NaN);
 
+    if (exponent instanceof NumericValue) {
+      if (exponent.isNaN) return this.clone(NaN);
+      if (exponent.isZero) return this.clone(1);
+      if (exponent.isOne) return this;
+      if (exponent.im) {
+        exponent = { re: exponent.re, im: exponent.im };
+      } else exponent = exponent.re;
+    }
+
     //
     // For the special cases we implement the same (somewhat arbitrary) results
-    // as sympy. See https://docs.sympy.org/1.6/modules/core.html#pow
+    // as sympy. See https://docs.sympy.org/latest/modules/core.html#sympy.core.power.Pow
     //
 
     // If the exponent is a complex number, we use the formula:

@@ -4,7 +4,7 @@ import {
   isConstructible,
   processInverseFunction,
 } from '../boxed-expression/trigonometry';
-import { mul } from '../library/arithmetic-multiply';
+import { mul } from '../boxed-expression/arithmetic-multiply';
 import { simplifyLogicFunction } from '../library/logic';
 import { BoxedExpression, Rule, RuleStep } from '../public';
 import { expand } from '../boxed-expression/expand';
@@ -264,12 +264,12 @@ export const SIMPLIFY_RULES: Rule[] = [
     // See https://en.wikipedia.org/wiki/Argument_(complex_analysis)#Realizations_of_the_function_in_computer_languages
     const [y, x] = expr.ops!;
     const ce = expr.engine;
-    if (!y.isFinite && !x.isFinite)
+    if (y.isFinite === false && x.isFinite === false)
       return { value: ce.NaN, because: 'arctan2' };
     if (y.isZero && x.isZero) return { value: ce.Zero, because: 'arctan2' };
-    if (!x.isFinite)
+    if (x.isFinite === false)
       return { value: x.isPositive ? ce.Zero : ce.Pi, because: 'arctan2' };
-    if (!y.isFinite)
+    if (y.isFinite === false)
       return {
         value: y.isPositive ? ce.Pi.div(2) : ce.Pi.div(-2),
         because: 'arctan2',

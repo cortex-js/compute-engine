@@ -1,7 +1,7 @@
 import type { BoxedExpression, SemiBoxedExpression } from './public';
 
 import { maxDegree, revlex, totalDegree } from './polynomials';
-import { asRadical } from '../library/arithmetic-power';
+import { asRadical } from './arithmetic-power';
 
 export type Order = 'lex' | 'dexlex' | 'grevlex' | 'elim';
 

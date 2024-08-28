@@ -44,12 +44,14 @@ import { fromDigits } from '../numerics/strings';
 
 import { each, isCollection } from '../collection-utils';
 
-import { domainAdd, canonicalAdd } from './arithmetic-add';
-import { mul, mulN } from './arithmetic-multiply';
-import { canonicalDivide } from './arithmetic-divide';
+import { domainAdd, canonicalAdd } from '../boxed-expression/arithmetic-add';
+import { mul, mulN } from '../boxed-expression/arithmetic-multiply';
+import { canonicalDivide } from '../boxed-expression/arithmetic-divide';
 import { canonicalBigop, reduceBigOp } from './utils';
-import { canonicalPower, canonicalRoot } from './arithmetic-power';
-import { missingIfEmpty } from '../../math-json/utils';
+import {
+  canonicalPower,
+  canonicalRoot,
+} from '../boxed-expression/arithmetic-power';
 
 // When considering processing an arithmetic expression, the following
 // are the core canonical arithmetic operations that should be considered:
@@ -776,7 +778,31 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
             return 'unsigned'; //already account for a>=0
           return undefined;
         },
-        evaluate: (ops) => ops[0].pow(ops[1]),
+        // x^n
+        // evaluate: (ops) => ops[0].pow(ops[1]),
+        evaluate: ([x, n], { numericApproximation, engine }) => {
+          if (x.isNumberLiteral && n.isNumberLiteral) {
+            if (
+              typeof x.numericValue === 'number' &&
+              typeof n.numericValue === 'number'
+            ) {
+              return engine.number(x.numericValue ** n.numericValue);
+            }
+            if (typeof x.numericValue === 'number') {
+              if (n.isZero) return x.isZero ? engine.NaN : engine.One;
+              if (n.isOne) return x;
+              if (n.im !== 0) {
+                return engine.number(
+                  engine.complex(x.re!, x.im).pow(engine.complex(n.re!, n.im))
+                );
+              }
+              return engine.number(x.numericValue ** n.re!);
+            }
+            const result = x.numericValue!.pow(n.numericValue!);
+            return engine.number(numericApproximation ? result.N() : result);
+          }
+          return x.pow(n);
+        },
         // Defined as RealNumbers for all power in RealNumbers when base > 0;
         // when x < 0, only defined if n is an integer
         // if x is a non-zero complex, defined as ComplexNumbers
@@ -849,13 +875,13 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
       signature: {
         params: ['Numbers', 'Numbers'],
         result: 'Numbers',
-        sgn: ([a, b]) => {
+        sgn: ([x, n]) => {
           // Note: we can't simplify this to a power, then get the sgn of that because this may cause an infinite loop
-          if (a.isReal === false || b.isReal === false) return 'unsigned';
-          if (a.isZero) return b.isZero ? 'unsigned' : 'zero';
-          if (a.isPositive === true) return 'positive';
-          if (b.isOdd === true) return 'negative';
-          if (b.isEven === true) return 'unsigned';
+          if (x.isReal === false || n.isReal === false) return 'unsigned';
+          if (x.isZero) return n.isZero ? 'unsigned' : 'zero';
+          if (x.isPositive === true) return 'positive';
+          if (n.isOdd === true) return 'negative';
+          if (n.isEven === true) return 'unsigned';
           return undefined;
         },
         canonical: (ce, args) => {
@@ -863,7 +889,7 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
           const [base, exp] = args;
           return canonicalRoot(base, exp);
         },
-        evaluate: (ops) => ops[0].root(ops[1]),
+        evaluate: ([x, n]) => x.root(n),
       },
     },
 

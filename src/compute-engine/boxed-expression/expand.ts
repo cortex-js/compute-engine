@@ -4,7 +4,7 @@ import { asSmallInteger } from './numerics';
 import { isRelationalOperator } from './utils';
 import { add } from './terms';
 
-import { mul } from '../library/arithmetic-multiply';
+import { mul } from './arithmetic-multiply';
 
 import { Product } from './product';
 

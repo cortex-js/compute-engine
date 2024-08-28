@@ -10,9 +10,15 @@ import { numberToExpression } from '../numerics/expression';
 export class MachineNumericValue extends NumericValue {
   decimal: number;
   im: number;
+  _makeExact: (x: number | NumericValueData) => NumericValue;
 
-  constructor(value: number | Decimal | NumericValueData) {
+  constructor(
+    value: number | Decimal | NumericValueData,
+    makeExact: (x: number | NumericValueData) => NumericValue
+  ) {
     super();
+
+    this._makeExact = makeExact;
 
     if (typeof value === 'number') {
       this.decimal = value;
@@ -60,6 +66,11 @@ export class MachineNumericValue extends NumericValue {
     return this.im === 0 && Number.isInteger(this.decimal);
   }
 
+  get asExact(): NumericValue | undefined {
+    if (!this.isExact) return undefined;
+    return this._makeExact({ decimal: this.decimal });
+  }
+
   toJSON(): Expression {
     if (this.isNaN) return 'NaN';
     if (this.isPositiveInfinity) return 'PositiveInfinity';
@@ -94,11 +105,7 @@ export class MachineNumericValue extends NumericValue {
   }
 
   clone(value: number | Decimal | NumericValueData) {
-    return new MachineNumericValue(value);
-  }
-
-  private _makeExact(value: number): ExactNumericValue {
-    return new ExactNumericValue(value, (x) => this.clone(x));
+    return new MachineNumericValue(value, this._makeExact);
   }
 
   get re(): number {
@@ -113,7 +120,7 @@ export class MachineNumericValue extends NumericValue {
     return this;
   }
 
-  get denominator(): ExactNumericValue {
+  get denominator(): NumericValue {
     return this._makeExact(1);
   }
 
@@ -260,10 +267,20 @@ export class MachineNumericValue extends NumericValue {
   }
 
   pow(exponent: number | { re: number; im: number }): NumericValue {
-    if (Array.isArray(exponent)) exponent = exponent[0] / exponent[1];
+    console.assert(!Array.isArray(exponent));
+    // if (Array.isArray(exponent)) exponent = exponent[0] / exponent[1];
 
     if (this.isNaN) return this._makeExact(NaN);
     if (typeof exponent === 'number' && isNaN(exponent)) return this.clone(NaN);
+
+    if (exponent instanceof NumericValue) {
+      if (exponent.isNaN) return this.clone(NaN);
+      if (exponent.isZero) return this.clone(1);
+      if (exponent.isOne) return this;
+      if (exponent.im) {
+        exponent = { re: exponent.re, im: exponent.im };
+      } else exponent = exponent.re;
+    }
 
     //
     // For the special cases we implement the same (somewhat arbitrary) results

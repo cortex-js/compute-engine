@@ -1,5 +1,5 @@
 import type { BoxedExpression } from '../public';
-import { asRational } from '../boxed-expression/numerics';
+import { asRational } from './numerics';
 
 import type { Rational } from '../numerics/rationals';
 
@@ -68,4 +68,12 @@ export function canonicalRoot(
   }
 
   return ce._fn('Root', [a, typeof b === 'number' ? ce.number(b) : b]);
+}
+
+export function pow(a: BoxedExpression, b: BoxedExpression): BoxedExpression {
+  return a.engine._fn('Power', [a, b]);
+}
+
+export function root(a: BoxedExpression, b: BoxedExpression): BoxedExpression {
+  return a.engine._fn('Root', [a, b]);
 }

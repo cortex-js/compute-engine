@@ -2,9 +2,9 @@ import type { BoxedExpression, CanonicalOptions } from '../public';
 
 import { flattenOps } from './flatten';
 
-import { canonicalAdd } from '../library/arithmetic-add';
-import { canonicalDivide } from '../library/arithmetic-divide';
-import { canonicalMultiply } from '../library/arithmetic-multiply';
+import { canonicalAdd } from './arithmetic-add';
+import { canonicalDivide } from './arithmetic-divide';
+import { canonicalMultiply } from './arithmetic-multiply';
 import { canonicalInvisibleOperator } from '../library/invisible-operator';
 
 import { canonicalOrder } from './order';

@@ -8,13 +8,14 @@ import { SMALL_INTEGER, chop } from '../numerics/numeric';
 import { bigint } from '../numerics/bigint';
 
 import { ExactNumericValue } from '../numeric-value/exact-numeric-value';
+import { NumericValue } from '../numeric-value/public';
 
 export function asRational(expr: BoxedExpression): Rational | undefined {
   const num = expr.numericValue;
   if (num === null) return undefined;
   if (typeof num === 'number' && !Number.isFinite(num)) return undefined;
   if (
-    num instanceof ExactNumericValue &&
+    num instanceof NumericValue &&
     (num.isNaN || num.isPositiveInfinity || num.isNegativeInfinity)
   )
     return undefined;

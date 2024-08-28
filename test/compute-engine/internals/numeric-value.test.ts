@@ -177,8 +177,6 @@ describe('power', () => {
 
     const b = a.pow(2);
     expect(b.re).toMatchInlineSnapshot(`192`);
-    expect(b.toString()).toMatchInlineSnapshot(
-      `192.0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000001`
-    );
+    expect(b.toString()).toMatchInlineSnapshot(`192`);
   });
 });

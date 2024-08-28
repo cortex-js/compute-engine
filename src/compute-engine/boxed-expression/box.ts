@@ -23,13 +23,13 @@ import { isInMachineRange } from '../numerics/numeric-bignum';
 import { bigint } from '../numerics/bigint';
 
 import { isDomainLiteral } from '../library/domains';
-import { canonicalAdd } from '../library/arithmetic-add';
-import { canonicalMultiply } from '../library/arithmetic-multiply';
-import { canonicalDivide } from '../library/arithmetic-divide';
+import { canonicalAdd } from './arithmetic-add';
+import { canonicalMultiply } from './arithmetic-multiply';
+import { canonicalDivide } from './arithmetic-divide';
 
 import { NumericValue } from '../numeric-value/public';
 import { ExactNumericValue } from '../numeric-value/exact-numeric-value';
-import { canonicalPower, canonicalRoot } from '../library/arithmetic-power';
+import { canonicalPower, canonicalRoot } from './arithmetic-power';
 
 import { _BoxedExpression } from './abstract-boxed-expression';
 import { BoxedFunction } from './boxed-function';
@@ -59,14 +59,16 @@ import { canonical, semiCanonical } from './utils';
  *    and `Sum`.
  *
  * 3/ When implementing an `evaluate()`:
- * - if `bignumPreferred()` all operations should be done in bignum and complex,
- *    otherwise, they should all be done in machine numbers and complex.
+ * - if `bignumPreferred()` all operations should be done in bignum,
+ *    otherwise, they should all be done in machine numbers.
  * - if a rational is encountered, preserve it
  * - if a `Sqrt` of a rational is encountered, preserve it
  * - if a `hold` constant is encountered, preserve it
- * - if one of the arguments is not exact, return an approximation
+ * - if `numericApproximation` is false and one of the arguments is not exact,
+ *  return an approximation
+ * - if `numericApproximation` is true, always return an approximation
  *
- * EXACT
+ * NUMERIC APPROXIMATION = FALSE
  * - 2 + 5 -> 7
  * - 2 + 5/7 -> 19/7
  * - 2 + √2 -> 2 + √2
@@ -78,8 +80,9 @@ import { canonical, semiCanonical } from './utils';
  * - √2 + √2 -> 2√2
  * - sin(2) -> sin(2)
  * - sin(pi/3) -> √3/2
+ * - 2 + 2.1 -> 2 + 2.1
  *
- * APPROXIMATE
+ * NUMERIC APPROXIMATION = TRUE
  * - 2 + 2.1 -> 4.1
  * - 2 + √2.1 -> 3.44914
  * - 5/7 + √2.1 -> 2.16342
@@ -622,7 +625,9 @@ function fromNumericValue(
   if (value.isNegativeInfinity) return ce.NegativeInfinity;
   if (value.isPositiveInfinity) return ce.PositiveInfinity;
 
-  if (!(value instanceof ExactNumericValue)) {
+  value = value.asExact ?? value;
+
+  if (!value.isExact) {
     const im = value.im;
     if (im === 0) return ce.number(value.bignumRe ?? value.re);
     if (value.re === 0) return ce.number(ce.complex(0, im));
@@ -640,16 +645,17 @@ function fromNumericValue(
   //
   // Real Part
   //
-  if (value.sign !== 0) {
+  const exactValue = value as ExactNumericValue;
+  if (exactValue.sign !== 0) {
     // The real part is the product of a rational and radical
 
-    if (value.radical === 1) {
+    if (exactValue.radical === 1) {
       // No radical, just a rational part
-      terms.push(ce.number(value.rational));
+      terms.push(ce.number(exactValue.rational));
     } else {
-      const rational = value.rational;
+      const rational = exactValue.rational;
       // At least a radical, maybe a rational as well.
-      const radical = ce.function('Sqrt', [ce.number(value.radical)]);
+      const radical = ce.function('Sqrt', [ce.number(exactValue.radical)]);
       if (isOne(rational)) terms.push(radical);
       else {
         const [n, d] = rational;

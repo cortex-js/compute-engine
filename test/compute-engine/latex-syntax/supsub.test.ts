@@ -15,7 +15,9 @@ describe('SUPSUB', () => {
       `["Power", 2, ["Power", 3, 4]]`
     );
     expect(ce.parse('2^{10}')).toMatchInlineSnapshot(`["Power", 2, 10]`);
-    expect(ce.parse('2^{-2}')).toMatchInlineSnapshot(`["Divide", 1, 4]`);
+    expect(ce.parse('2^{-2}')).toMatchInlineSnapshot(
+      `["Divide", 1, ["Square", 2]]`
+    );
     expect(ce.parse('2^3^4')).toMatchInlineSnapshot(
       `["Power", 2, ["List", 3, 4]]`
     );
