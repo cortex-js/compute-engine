@@ -60,6 +60,37 @@ const NATIVE_JS_FUNCTIONS: CompiledFunctions = {
   },
   Arccos: 'Math.acos',
   Arcosh: 'Math.acosh',
+  Arccot: (args, compile) => {
+    const arg = args[0];
+    if (arg === null) throw new Error('Arccot: no argument');
+    return `Math.atan(1 / ${compile(arg)})`;
+  },
+  Arccoth: (args, compile) => {
+    const arg = args[0];
+    if (arg === null) throw new Error('Arccoth: no argument');
+    return `Math.atanh(1 / ${compile(arg)})`;
+  },
+  Arccsc: (args, compile) => {
+    const arg = args[0];
+    if (arg === null) throw new Error('Arccsc: no argument');
+    return `Math.asin(1 / ${compile(arg)})`;
+  },
+  Arccsch: (args, compile) => {
+    const arg = args[0];
+    if (arg === null) throw new Error('Arccsch: no argument');
+    return `Math.asinh(1 / ${compile(arg)})`;
+  },
+  Arcsec: (args, compile) => {
+    const arg = args[0];
+    if (arg === null) throw new Error('Arccot: no argument');
+    return `Math.acos(1 / ${compile(arg)})`;
+  },
+  Arcsech: (args, compile) => {
+    const arg = args[0];
+    if (arg === null) throw new Error('Arccot: no argument');
+    return `Math.acosh(1 / ${compile(arg)})`;
+  },
+
   Arsin: 'Math.asin',
   Arsinh: 'Math.asinh',
   Arctan: 'Math.atan',
@@ -69,6 +100,26 @@ const NATIVE_JS_FUNCTIONS: CompiledFunctions = {
   Chop: '_SYS.chop',
   Cos: 'Math.cos',
   Cosh: 'Math.cosh',
+  Cot: (args, compile) => {
+    const arg = args[0];
+    if (arg === null) throw new Error('Cot: no argument');
+    return `Math.cos(${compile(arg)}) / Math.sin(${compile(arg)})`;
+  },
+  Coth: (args, compile) => {
+    const arg = args[0];
+    if (arg === null) throw new Error('Coth: no argument');
+    return `Math.cosh(${compile(arg)}) / Math.sinh(${compile(arg)})`;
+  },
+  Csc: (args, compile) => {
+    const arg = args[0];
+    if (arg === null) throw new Error('Csc: no argument');
+    return `1 / Math.sin(${compile(arg)})`;
+  },
+  Csch: (args, compile) => {
+    const arg = args[0];
+    if (arg === null) throw new Error('Csch: no argument');
+    return `1 / Math.sinh(${compile(arg)})`;
+  },
   Exp: 'Math.exp',
   Floor: 'Math.floor',
   Gamma: '_SYS.gamma',
@@ -152,6 +203,16 @@ const NATIVE_JS_FUNCTIONS: CompiledFunctions = {
     if (arg === null) throw new Error('Square: no argument');
     return `Math.pow(${compile(arg)}, 2)`;
   },
+  Sec: (args, compile) => {
+    const arg = args[0];
+    if (arg === null) throw new Error('Sec: no argument');
+    return `1 / Math.cos(${compile(arg)})`;
+  },
+  Sech: (args, compile) => {
+    const arg = args[0];
+    if (arg === null) throw new Error('Sech: no argument');
+    return `1 / Math.cosh(${compile(arg)})`;
+  },
   Sgn: 'Math.sign',
   Sin: 'Math.sin',
   Sinh: 'Math.sinh',
@@ -161,18 +222,6 @@ const NATIVE_JS_FUNCTIONS: CompiledFunctions = {
   // Factorial: 'factorial',    // TODO: implement
 
   // Hallucinated by Copilot, but interesting ideas...
-  // Cot: 'Math.cot',
-  // Sec: 'Math.sec',
-  // Csc: 'Math.csc',
-  // ArcCot: 'Math.acot',
-  // ArcSec: 'Math.asec',
-  // ArcCsc: 'Math.acsc',
-  // Coth: 'Math.coth',
-  // Sech: 'Math.sech',
-  // Csch: 'Math.csch',
-  // ArcCoth: 'Math.acoth',
-  // ArcSech: 'Math.asech',
-  // ArcCsch: 'Math.acsch',
   // Root: 'Math.root',
   // Gamma: 'Math.gamma',
   // Erf: 'Math.erf',
