@@ -1,4 +1,4 @@
-import Complex from 'complex.js';
+import { Complex } from 'complex.esm.js';
 import { Decimal } from 'decimal.js';
 import type {
   BoxedExpression,

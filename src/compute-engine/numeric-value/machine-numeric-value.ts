@@ -1,6 +1,5 @@
 import Decimal from 'decimal.js';
 import { NumericValue, NumericValueData } from './public';
-import { ExactNumericValue } from './exact-numeric-value';
 import type { Expression } from '../../math-json/types';
 import { MACHINE_TOLERANCE, SmallInteger } from '../numerics/numeric';
 import { asMachineRational } from '../numerics/rationals';

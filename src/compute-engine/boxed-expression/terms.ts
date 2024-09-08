@@ -63,7 +63,11 @@ export class Terms {
       const factory =
         ce.precision > MACHINE_PRECISION
           ? (x) => new BigNumericValue(x, (x) => ce.bignum(x))
-          : (x) => new MachineNumericValue(x);
+          : (x) =>
+              new MachineNumericValue(
+                x,
+                (x) => new ExactNumericValue(x, factory, ce.bignum)
+              );
       ExactNumericValue.sum(numericValues, factory).forEach((x) =>
         this.add(x, ce.One)
       );

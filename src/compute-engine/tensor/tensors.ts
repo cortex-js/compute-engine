@@ -1,4 +1,4 @@
-import Complex from 'complex.js';
+import { Complex } from 'complex.esm.js';
 import type { BoxedExpression, IComputeEngine } from '../public';
 import {
   DataTypeMap,

@@ -1,4 +1,4 @@
-import Complex from 'complex.js';
+import { Complex } from 'complex.esm.js';
 import type {
   Expression,
   MathJsonNumber,
@@ -1303,6 +1303,7 @@ export interface BoxedExpression {
  */
 export type SemiBoxedExpression =
   | number
+  | bigint
   | string
   | BigNum
   | MathJsonNumber
@@ -1310,7 +1311,8 @@ export type SemiBoxedExpression =
   | MathJsonSymbol
   | MathJsonFunction
   | readonly [MathJsonIdentifier, ...SemiBoxedExpression[]]
-  | BoxedExpression;
+  | BoxedExpression
+  | Complex;
 
 /**
  * @category Definitions
@@ -1653,7 +1655,7 @@ export type SymbolAttributes = {
   * - `i` has `holdUntil: 'never'`: its is never substituted
   * - `x` has `holdUntil: 'evaluate'` (variables)
   * - `Pi` has `holdUntil: 'N'` (special numeric constant)
-  * 
+  *
   * **Default:** `evaluate`
   */
   holdUntil: 'never' | 'evaluate' | 'N';

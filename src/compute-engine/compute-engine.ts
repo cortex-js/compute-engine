@@ -1,4 +1,4 @@
-import Complex from 'complex.js';
+import { Complex } from 'complex.esm.js';
 import { Decimal } from 'decimal.js';
 
 import { MathJsonIdentifier, MathJsonNumber } from '../math-json/types';
@@ -728,8 +728,8 @@ export class ComputeEngine implements IComputeEngine {
     return n;
   }
 
-  /** Create an arbitrary precision number. 
-   * 
+  /** Create an arbitrary precision number.
+   *
    * The return value is an object with methods to perform arithmetic
    * operations:
    * - `toNumber()`: convert to a JavaScript `number` with potential loss of precision
@@ -742,7 +742,7 @@ export class ComputeEngine implements IComputeEngine {
    * - `sqrt()` (square root)
    * - `cbrt()` (cube root)
    * - `exp()`  (e^x)
-   * - `log()` 
+   * - `log()`
    * - `ln()` (natural logarithm)
    * - `mod()`
 
@@ -756,7 +756,7 @@ export class ComputeEngine implements IComputeEngine {
    * - `gte()`
    * - `lt()`
    * - `lte()`
-   * 
+   *
    * - `cos()`
    * - `sin()`
    * - `tanh()`
@@ -768,7 +768,7 @@ export class ComputeEngine implements IComputeEngine {
    * - `acosh()`
    * - `asinh()`
    * - `atanh()`
-   * 
+   *
    * - `isFinite()`
    * - `isInteger()`
    * - `isNaN()`
@@ -776,7 +776,7 @@ export class ComputeEngine implements IComputeEngine {
    * - `isPositive()`
    * - `isZero()`
    * - `sign()` (1, 0 or -1)
-   * 
+   *
    */
   bignum(a: Decimal.Value | bigint): Decimal {
     if (typeof a === 'bigint') return new this._bignum(a.toString());
@@ -801,7 +801,7 @@ export class ComputeEngine implements IComputeEngine {
    * - `pow()`
    * - `sqrt()` (square root)
    * - `exp()`  (e^x)
-   * - `log()` 
+   * - `log()`
    * - `ln()` (natural logarithm)
    * - `mod()`
 
@@ -815,7 +815,7 @@ export class ComputeEngine implements IComputeEngine {
    * - `conjugate()` the conjugate of the complex number
 
    * - `equals()`
-   * 
+   *
    * - `cos()`
    * - `sin()`
    * - `tanh()`
@@ -827,7 +827,7 @@ export class ComputeEngine implements IComputeEngine {
    * - `acosh()`
    * - `asinh()`
    * - `atanh()`
-   * 
+   *
    * - `isFinite()`
    * - `isNaN()`
    * - `isZero()`

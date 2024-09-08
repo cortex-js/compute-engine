@@ -13,7 +13,7 @@
     "version": "bash ./scripts/version.sh",
     "test": "bash ./scripts/test.sh"
   },
-  "name": "@cortex-js/compute-engine",
+  "name": "@holgerengels/compute-engine",
   "description": "Symbolic computing and numeric evaluations for JavaScript and Node.js",
   "homepage": "https://cortexjs.io/compute-engine/",
   "repository": {
@@ -88,7 +88,7 @@
   },
   "prettier": "@cortex-js/prettier-config",
   "dependencies": {
-    "complex.js": "^2.1.1",
+    "complex.esm.js": "^2.1.1-esm5",
     "decimal.js": "^10.4.3"
   }
 }

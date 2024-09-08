@@ -1,4 +1,4 @@
-import Complex from 'complex.js';
+import { Complex } from 'complex.esm.js';
 import { Decimal } from 'decimal.js';
 import {
   IComputeEngine,
@@ -391,7 +391,6 @@ export function box(
   // Box a MathJSON object literal
   //
   if (!Array.isArray(expr) && typeof expr === 'object') {
-    // @ts-expect-error TypeScript does not know that `expr` is an MathJSON object
     const metadata = { latex: expr.latex, wikidata: expr.wikidata };
     if ('fn' in expr) {
       const [fnName, ...ops] = expr.fn;

@@ -24,6 +24,7 @@ import { NumericValue, NumericValueData, NumericValueFactory } from './public';
 import { Expression } from '../../math-json/types';
 import { numberToExpression } from '../numerics/expression';
 import { numberToString } from '../numerics/strings';
+// eslint-disable-next-line import/no-cycle
 import { BigNumFactory } from './big-numeric-value';
 import { isInMachineRange } from '../numerics/numeric-bignum';
 import { bigint } from '../numerics/bigint';
@@ -46,7 +47,7 @@ export class ExactNumericValue extends NumericValue {
   im = 0;
 
   factory: NumericValueFactory;
-  bignum: BigNumFactory;
+  bignum?: BigNumFactory;
 
   /** The caller is responsible to make sure the input is valid, i.e.
    * - rational is a fraction of integers (but it may not be reduced)
@@ -56,7 +57,7 @@ export class ExactNumericValue extends NumericValue {
   constructor(
     value: number | bigint | NumericValueData,
     factory: NumericValueFactory,
-    bignum: BigNumFactory
+    bignum?: BigNumFactory
   ) {
     super();
     this.factory = factory;
@@ -78,7 +79,7 @@ export class ExactNumericValue extends NumericValue {
     console.assert(typeof value !== 'object' || !('im' in value));
 
     if ('rational' in value || 'radical' in value || 'decimal' in value) {
-      let decimal: BigInt | Decimal | number = value.decimal ?? 1;
+      let decimal: bigint | Decimal | number = value.decimal ?? 1;
       if (decimal instanceof Decimal) {
         console.assert(decimal.isInteger());
         if (isInMachineRange(decimal)) decimal = decimal.toNumber();
@@ -209,11 +210,11 @@ export class ExactNumericValue extends NumericValue {
   get bignumRe(): Decimal | undefined {
     let result: Decimal;
     const r = this.rational;
-    if (isMachineRational(r)) result = this.bignum(r[0]).div(r[1]);
+    if (isMachineRational(r)) result = this.bignum!(r[0]).div(r[1]);
     else
-      result = this.bignum(r[0].toString()).div(this.bignum(r[1].toString()));
+      result = this.bignum!(r[0].toString()).div(this.bignum!(r[1].toString()));
     if (this.radical === 1) return result;
-    return result.mul(this.bignum(this.radical).sqrt());
+    return result.mul(this.bignum!(this.radical).sqrt());
   }
 
   get numerator(): ExactNumericValue {
@@ -759,7 +760,7 @@ export class ExactNumericValue extends NumericValue {
   static sum(
     values: NumericValue[],
     factory: NumericValueFactory,
-    bignumFactory: BigNumFactory
+    bignumFactory?: BigNumFactory
   ): NumericValue[] {
     // If we have some inexact values, just do a simple sum
     if (!values.every((x) => x.isExact)) {

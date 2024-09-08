@@ -1,4 +1,4 @@
-import Complex from 'complex.js';
+import { Complex } from 'complex.esm.js';
 import { Decimal } from 'decimal.js';
 
 import type { Expression } from '../../math-json/types';
@@ -28,6 +28,7 @@ import { numberToExpression } from '../numerics/expression';
 import { NumericValue } from '../numeric-value/public';
 import { ExactNumericValue } from '../numeric-value/exact-numeric-value';
 
+// eslint-disable-next-line import/no-cycle
 import { Product } from './product';
 
 import { order } from './order';
@@ -285,7 +286,7 @@ function serializeJsonFunction(
   //
   if (name === 'Negate' && args.length === 1) {
     const num0 = args[0]?.numericValue;
-    if (num0 !== null) {
+    if (num0) {
       if (typeof num0 === 'number')
         return serializeJsonNumber(ce, -num0, options);
       if (num0 instanceof Decimal)
