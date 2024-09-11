@@ -5,7 +5,6 @@ import {
   SemiBoxedExpression,
   BoxedExpression,
   Metadata,
-  DomainExpression,
   CanonicalOptions,
 } from './public';
 
@@ -22,7 +21,6 @@ import { bigintValue } from '../numerics/expression';
 import { isInMachineRange } from '../numerics/numeric-bignum';
 import { bigint } from '../numerics/bigint';
 
-import { isDomainLiteral } from '../library/domains';
 import { canonicalAdd } from './arithmetic-add';
 import { canonicalMultiply } from './arithmetic-multiply';
 import { canonicalDivide } from './arithmetic-divide';
@@ -37,9 +35,8 @@ import { BoxedString } from './boxed-string';
 import { BoxedTensor, expressionTensorInfo } from './boxed-tensor';
 import { canonicalForm } from './canonical';
 import { sortOperands } from './order';
-import { adjustArguments, checkNumericArgs } from './validate';
+import { validateArguments, checkNumericArgs } from './validate';
 import { flatten } from './flatten';
-import { shouldHold } from './hold';
 import { canonical, semiCanonical } from './utils';
 
 /**
@@ -188,12 +185,6 @@ export function boxFunction(
   if (name === 'Symbol' && ops.length > 0) {
     return ce.symbol(ops.map((x) => asString(x) ?? '').join(''), options);
   }
-
-  //
-  // Domain
-  //
-  if (name === 'Domain')
-    return ce.domain(ops[0] as DomainExpression, options.metadata);
 
   //
   // Number
@@ -380,10 +371,7 @@ export function box(
 
     if (/^[+-]?[0-9]/.test(expr)) return ce.number(expr);
 
-    if (isDomainLiteral(expr)) return ce.domain(expr);
-
-    if (!isValidIdentifier(expr))
-      return ce.error('invalid-identifier', { str: expr });
+    if (!isValidIdentifier(expr)) return ce.error('invalid-identifier', expr);
     return ce.symbol(expr, { canonical });
   }
 
@@ -473,19 +461,15 @@ function makeCanonicalFunction(
     });
   }
 
-  const xs: BoxedExpression[] = [];
+  let xs: BoxedExpression[];
 
-  for (let i = 0; i < ops.length; i++) {
-    if (!shouldHold(def.hold, ops.length - 1, i)) {
-      xs.push(ce.box(ops[i]));
-    } else {
-      const y = ce.box(ops[i], { canonical: false });
-      if (y.operator === 'ReleaseHold') xs.push(y.op1.canonical);
-      else xs.push(y);
-    }
-  }
-
-  const sig = def.signature;
+  if (def.hold) {
+    xs = ops.map((x) => {
+      const y = ce.box(x, { canonical: false });
+      if (y.operator === 'ReleaseHold') return y.op1.canonical;
+      return y;
+    });
+  } else xs = ops.map((x) => ce.box(x));
 
   //
   // 3/ Apply `canonical` handler
@@ -498,9 +482,9 @@ function makeCanonicalFunction(
   //
   // The arguments have been put in canonical form, as per hold rules.
   //
-  if (sig.canonical) {
+  if (def.canonical) {
     try {
-      const result = sig.canonical(ce, xs);
+      const result = def.canonical(xs, { engine: ce });
       if (result) return result;
     } catch (e) {
       console.error(e.message);
@@ -518,15 +502,7 @@ function makeCanonicalFunction(
     def.associative ? name : undefined
   );
 
-  const adjustedArgs = adjustArguments(
-    ce,
-    args,
-    def.hold,
-    def.threadable,
-    sig.params,
-    sig.optParams,
-    sig.restParam
-  );
+  const adjustedArgs = validateArguments(ce, args, def);
 
   // If we have some adjusted arguments, the arguments did not
   // match the parameters of the signature. We're done.
@@ -605,9 +581,12 @@ function makeNumericFunction(
 
   if (name === 'Ln' || name === 'Log') {
     if (ops.length > 0) {
-      if (ops[0].isOne) return ce.Zero;
+      // Ln(1) -> 0, Log(1) -> 0
+      if (ops[0].isEqual(1)) return ce.Zero;
+      // Ln(a) -> Ln(a), Log(a) -> Log(a)
       if (ops.length === 1) return ce._fn(name, ops, metadata);
     }
+    // Ln(a,b) -> Log(a, b)
     return ce._fn('Log', ops, metadata);
   }
 

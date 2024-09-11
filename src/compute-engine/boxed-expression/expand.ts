@@ -2,11 +2,11 @@ import type { BoxedExpression, IComputeEngine } from '../public';
 
 import { asSmallInteger } from './numerics';
 import { isRelationalOperator } from './utils';
-import { add } from './terms';
 
 import { mul } from './arithmetic-multiply';
 
 import { Product } from './product';
+import { add } from './arithmetic-add';
 
 function expandProduct(
   lhs: Readonly<BoxedExpression>,

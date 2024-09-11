@@ -1,13 +1,8 @@
-import type {
-  BoxedDomain,
-  CanonicalForm,
-  IdentifierDefinitions,
-} from '../public';
+import type { CanonicalForm, IdentifierDefinitions } from '../public';
 
 import { joinLatex } from '../latex-syntax/tokenizer';
 
-import { checkDomain, checkArity } from '../boxed-expression/validate';
-import { isDomain } from '../boxed-expression/boxed-domain';
+import { checkType, checkArity } from '../boxed-expression/validate';
 import { canonicalForm } from '../boxed-expression/canonical';
 import type { BoxedExpression } from '../boxed-expression/public';
 import { asSmallInteger } from '../boxed-expression/numerics';
@@ -22,6 +17,14 @@ import { randomExpression } from './random-expression';
 import { normalizeIndexingSet } from './utils';
 import { canonicalInvisibleOperator } from './invisible-operator';
 import { canonical } from '../boxed-expression/utils';
+import {
+  collectionElementType,
+  functionResult,
+  functionSignature,
+  isValidType,
+} from '../../common/type/utils';
+import { parseType } from '../../common/type/parse';
+import { isIndexableCollection } from '../collection-utils';
 
 //   // := assign 80 // @todo
 // compose (compose(f, g) -> a new function such that compose(f, g)(x) -> f(g(x))
@@ -34,7 +37,8 @@ import { canonical } from '../boxed-expression/utils';
 
 export const CORE_LIBRARY: IdentifierDefinitions[] = [
   {
-    Nothing: { domain: 'NothingDomain' },
+    // The sole member of the unit type, `nothing`
+    Nothing: { signature: 'nothing' },
   },
 
   //
@@ -70,7 +74,8 @@ export const CORE_LIBRARY: IdentifierDefinitions[] = [
      *     `["Add", "a", "b", "c"]`.
      *
      *   The empty `Sequence` expression (i.e. `["Sequence"]`) is ignored
-     *   but it can be used to represent an "empty" expression.
+     *   but it can be used to represent an "empty" expression. It is a
+     *   synonym for `Nothing`.
      *
      * - `Delimiter` is used to represent a group of expressions
      *   with an open and close delimiter and a separator.
@@ -116,113 +121,103 @@ export const CORE_LIBRARY: IdentifierDefinitions[] = [
      */
     InvisibleOperator: {
       complexity: 9000,
-      hold: 'all',
-      signature: {
-        restParam: 'Anything',
-        result: (ce, args) => {
-          if (args.length === 0) return ce.domain('NothingDomain');
-          if (args.length === 1) return args[0].domain;
-          return ce.Anything;
-        },
-        canonical: canonicalInvisibleOperator,
-      },
+      hold: true,
+      signature: '...any -> any',
+      // Note: since the canonical form will be a different operator,
+      // no need to calculate the result type
+      canonical: canonicalInvisibleOperator,
     },
+
     /** See above for a theory of operations */
     Sequence: {
-      hold: 'all',
-      signature: {
-        restParam: 'Anything',
-        result: (ce, args) => {
-          if (args.length === 0) return ce.domain('NothingDomain');
-          if (args.length === 1) return args[0].domain;
-          return ce.Anything;
-        },
-        canonical: (ce, args) => {
-          const xs = flatten(args);
-          if (xs.length === 0) return ce.Nothing;
-          if (xs.length === 1) return xs[0];
-          return ce._fn('Sequence', xs);
-        },
+      hold: true,
+      signature: '...any -> any',
+      type: (args) => {
+        if (args.length === 0) return 'nothing';
+        if (args.length === 1) return args[0].type;
+        // @fixme: need more logic to determine the result type
+        return 'any';
+      },
+      canonical: (args, { engine: ce }) => {
+        const xs = flatten(args);
+        if (xs.length === 0) return ce.Nothing;
+        if (xs.length === 1) return xs[0];
+        return ce._fn('Sequence', xs);
       },
     },
+
     /** See above for a theory of operations */
     Delimiter: {
       // Use to represent groups of expressions.
       // Named after https://en.wikipedia.org/wiki/Delimiter
       complexity: 9000,
-      hold: 'all',
-      signature: {
-        params: ['Anything'],
-        optParams: ['Strings'],
-        result: (ce, args) => {
-          if (args.length === 0) return ce.domain('NothingDomain');
-          return args[0].domain;
-        },
+      hold: true,
+      signature: '(any, string?) -> any',
+      type: (args) => {
+        if (args.length === 0) return 'nothing';
+        return args[0].type;
+      },
 
-        canonical: (ce, args) => {
-          // During parsing, no interpretation is made of the delimiters.
-          // This gives more option to this handler, or handler of
-          // other functions that use `Delimiter` as a parameter.
+      canonical: (args, { engine: ce }) => {
+        // During parsing, no interpretation is made of the delimiters.
+        // This gives more option to this handler, or handler of
+        // other functions that use `Delimiter` as a parameter.
 
-          // An empty delimiter, i.e. `()` is an empty tuple.
-          // Note: this codepath is not hit by `f()`, which is
-          // handled in `InvisibleOperator`.
-          if (args.length === 0) return ce._fn('Tuple', []);
+        // An empty delimiter, i.e. `()` is an empty tuple.
+        // Note: this codepath is not hit by `f()`, which is
+        // handled in `InvisibleOperator`.
+        if (args.length === 0) return ce._fn('Tuple', []);
 
-          // The Delimiter function can have:
-          // - a single argument, which is a sequence of expressions
-          // - two arguments, the first is a sequence of expressions
-          //   and the second is a delimiter string
-          if (args.length > 2)
-            return ce._fn('Delimiter', checkArity(ce, args, 2));
+        // The Delimiter function can have:
+        // - a single argument, which is a sequence of expressions
+        // - two arguments, the first is a sequence of expressions
+        //   and the second is a delimiter string
+        if (args.length > 2)
+          return ce._fn('Delimiter', checkArity(ce, args, 2));
 
-          let body = args[0];
+        let body = args[0];
 
-          // If the body is a sequence, turn it into a Tuple
-          // We'll have a sequence when there is a delimiter inside
-          // the sequence, like `(a, b, c)`. The sequence is used to group
-          // the arguments, so it needs to be preserved.
-          // If there is a single element, unpack it.
-          if (body.operator === 'Sequence')
-            return ce._fn('Tuple', canonical(ce, body.ops!));
+        // If the body is a sequence, turn it into a Tuple
+        // We'll have a sequence when there is a delimiter inside
+        // the sequence, like `(a, b, c)`. The sequence is used to group
+        // the arguments, so it needs to be preserved.
+        // If there is a single element, unpack it.
+        if (body.operator === 'Sequence')
+          return ce._fn('Tuple', canonical(ce, body.ops!));
 
-          body = body.canonical;
+        body = body.canonical;
 
-          const delim = args[1]?.string;
+        const delim = args[1]?.string;
 
-          // If we have a single argument and parentheses, i.e. `(2)`, return
-          // the argument
-          if (!delim || (delim.startsWith('(') && delim.endsWith(')')))
-            return body;
+        // If we have a single argument and parentheses, i.e. `(2)`, return
+        // the argument
+        if (!delim || (delim.startsWith('(') && delim.endsWith(')')))
+          return body;
 
-          if ((delim?.length ?? 0) > 3) {
-            return ce._fn('Delimiter', [
-              body,
-              ce.error('invalid-delimiter', args[1]),
-            ]);
-          }
-
+        if ((delim?.length ?? 0) > 3) {
           return ce._fn('Delimiter', [
-            args[0],
-            checkDomain(ce, args[1], 'Strings'),
+            body,
+            ce.error('invalid-delimiter', args[1].toString()),
           ]);
-        },
-        evaluate: (ops, options) => {
-          const ce = options.engine;
-          if (ops.length === 0) return ce.Nothing;
+        }
 
-          const op1 = ops[0];
+        return ce._fn('Delimiter', [args[0], checkType(ce, args[1], 'string')]);
+      },
+      evaluate: (ops, options) => {
+        const ce = options.engine;
+        if (ops.length === 0) return ce.Nothing;
 
-          if (op1.operator === 'Sequence' || op1.operator === 'Delimiter')
-            ops = flattenSequence(ops[0].ops!);
+        const op1 = ops[0];
 
-          if (ops.length === 1) return ops[0].evaluate(options);
+        if (op1.operator === 'Sequence' || op1.operator === 'Delimiter')
+          ops = flattenSequence(ops[0].ops!);
 
-          return ce._fn(
-            'Tuple',
-            ops.map((x) => x.evaluate(options))
-          );
-        },
+        if (ops.length === 1) return ops[0].evaluate(options);
+
+        return ce._fn(
+          'Tuple',
+          ops.map((x) => x.evaluate(options))
+        );
       },
     },
 
@@ -234,373 +229,354 @@ export const CORE_LIBRARY: IdentifierDefinitions[] = [
        * of the error. If the error occur while parsing a LaTeX string,
        * for example, the argument will be a `Latex` expression.
        */
-      hold: 'all',
+      hold: true,
       complexity: 500,
-      signature: {
-        domain: ['FunctionOf', 'Anything', ['OptArg', 'Anything'], 'Void'],
-        // To make a canonical expression, don't canonicalize the args
-        canonical: (ce, args) => ce._fn('Error', args),
-      },
+      signature: '((string|expression), expression?) -> nothing',
+      // To make a canonical expression, don't canonicalize the args
+      canonical: (args, { engine: ce }) => ce._fn('Error', args),
     },
     ErrorCode: {
       complexity: 500,
-      hold: 'all',
-      signature: {
-        domain: ['FunctionOf', 'Strings', ['VarArg', 'Anything'], 'Anything'],
-        canonical: (ce, args) => {
-          const code = checkDomain(ce, args[0], ce.Strings).string;
-          if (code === 'incompatible-domain') {
-            return ce._fn('ErrorCode', [ce.string(code), args[1], args[2]]);
-          }
-          return ce._fn('ErrorCode', args);
-        },
+      hold: true,
+      signature: '(string, ...any) -> error',
+      canonical: (args, { engine: ce }) => {
+        const code = checkType(ce, args[0], 'string').string;
+        if (code === 'incompatible-domain') {
+          return ce._fn('ErrorCode', [ce.string(code), args[1], args[2]]);
+        }
+        return ce._fn('ErrorCode', args);
       },
     },
+
     Hold: {
-      hold: 'all',
-      signature: {
-        domain: ['FunctionOf', 'Anything', 'Anything'],
-        result: (ce, args) => {
-          if (args.length !== 1) return ce.domain('NothingDomain');
-          const op1 = args[0];
-          if (op1.symbol) return ce.domain('Symbols');
-          if (op1.string) return ce.domain('Strings');
-          if (op1.operator === 'Numbers') return ce.domain('Numbers');
-          return op1.domain;
-        },
-        // By definition, for arguments of the canonical expression of
-        // `Hold` are not canonicalized.
-        canonical: (ce, args) => (args.length !== 1 ? null : ce.hold(args[0])),
-        evaluate: (ops, { engine: ce }) => ops[0],
+      description: 'Hold an expression, preventing it from being evaluated',
+      hold: true,
+      signature: 'any -> any',
+      type: ([x]) => {
+        if (x.symbol) return 'symbol';
+        if (x.string) return 'string';
+        if (x.isNumberLiteral) return x.type;
+        if (x.ops) return functionSignature(x.type) ?? 'function';
+        return 'expression';
       },
+      // By definition, arguments of the canonical expression of
+      // `Hold` are not canonicalized.
+      canonical: (args, { engine: ce }) =>
+        args.length !== 1 ? null : ce.hold(args[0]),
+      evaluate: ([x]) => x,
     },
+
     HorizontalSpacing: {
-      signature: {
-        domain: 'Functions',
-        canonical: (ce, args) => {
-          if (args.length === 2) return args[0].canonical;
-          // Returning `Nothing` will make the expression be ignored
-          return ce.Nothing;
-        },
+      signature: 'number -> nothing',
+      canonical: (args, { engine: ce }) => {
+        if (args.length === 2) return args[0].canonical;
+        // Returning `Nothing` will make the expression be ignored
+        return ce.Nothing;
       },
     },
+
     Style: {
       complexity: 9000,
-      inert: true,
-      signature: {
-        domain: [
-          'FunctionOf',
-          'Anything',
-          ['OptArg', 'Dictionaries'], // @todo
-          'Anything',
-        ],
-      },
-
-      // @todo: simplify: merge Style(Style(x, s1), s2),  Style(x) -> x
+      signature: '(expression, ...any) -> expression',
+      type: ([x]) => x.type,
+      evaluate: ([x]) => x,
+      // @todo: simplify: merge Style(Style(x, s1), s2),  Style(x) -> x in canonical()
     },
   },
   {
+    //
     // Structural operations that can be applied to non-canonical expressions
-    // @todo
-    About: { signature: { domain: 'Functions' } },
+    //
+    About: {
+      description: 'Return information about an expression',
+      hold: true,
+      signature: 'any -> string',
+      evaluate: ([x], { engine: ce }) => {
+        let s = [x.toString()];
+        s.push(''); // Add a newline
+
+        if (x.string) s.push('string');
+        else if (x.symbol) {
+          if (x.symbolDefinition) {
+            const def = x.symbolDefinition;
+
+            if (def.isConstant) s.push('constant');
+            if (def.isFunction) s.push('function');
+
+            if (typeof def.description === 'string') s.push(def.description);
+            else if (Array.isArray(def.description))
+              s.push(def.description.join('\n'));
+            if (def.wikidata) s.push(`WikiData: ${def.wikidata}`);
+            if (def.url) s.push(`Read More: ${def.url}`);
+          } else {
+            s.push('symbol');
+            s.push(`value: ${x.evaluate().toString()}`);
+          }
+        } else if (x.isNumberLiteral) s.push(x.type.toString());
+        else if (x.ops) {
+          s.push(x.type.toString());
+          s.push(x.isCanonical ? 'canonical' : 'non-canonical');
+        } else s.push("Unknown expression's type");
+        return ce.string(s.join('\n'));
+      },
+    },
 
     Head: {
-      hold: 'all',
-      signature: {
-        domain: 'Functions',
-        canonical: (ce, args) => {
-          // **IMPORTANT** Head should work on non-canonical expressions
-          if (args.length !== 1) return null;
-          const op1 = args[0];
-          if (op1.operator) return ce.box(op1.operator);
-          return ce._fn('Head', canonical(ce, args));
-        },
-        evaluate: (ops, { engine: ce }) =>
-          ce.symbol(ops[0]?.operator ?? 'Undefined'),
+      description: 'Return the head of an expression, the name of the operator',
+      hold: true,
+      signature: 'any -> symbol',
+      canonical: (args, { engine: ce }) => {
+        // **IMPORTANT** Head should work on non-canonical expressions
+        if (args.length !== 1) return null;
+        const op1 = args[0];
+        if (op1.operator) return ce.box(op1.operator);
+        return ce._fn('Head', canonical(ce, args));
       },
+      evaluate: (ops, { engine: ce }) =>
+        ce.symbol(ops[0]?.operator ?? 'Undefined'),
     },
 
     Tail: {
-      hold: 'all',
-      signature: {
-        domain: 'Functions',
-        canonical: (ce, args) => {
-          if (args.length !== 1) return null;
-          const op1 = args[0];
-          if (op1.ops) return ce._fn('Sequence', op1.ops);
-          return ce._fn('Tail', canonical(ce, args));
-        },
-        // **IMPORTANT** Tail should work on non-canonical expressions
-        evaluate: ([x], { engine: ce }) =>
-          x?.ops ? ce._fn('Sequence', x.ops) : ce.Nothing,
+      description:
+        'Return the tail of an expression, the operands of the expression',
+      hold: true,
+      signature: 'any -> collection',
+      canonical: (args, { engine: ce }) => {
+        if (args.length !== 1) return null;
+        const op1 = args[0];
+        if (op1.ops) return ce._fn('Sequence', op1.ops);
+        return ce._fn('Tail', canonical(ce, args));
       },
+      // **IMPORTANT** Tail should work on non-canonical expressions
+      evaluate: ([x], { engine: ce }) =>
+        x?.ops ? ce._fn('Sequence', x.ops) : ce.Nothing,
     },
 
     Identity: {
-      signature: {
-        domain: ['FunctionOf', 'Anything', 'Anything'],
-        result: (ce, ops) => {
-          if (ops.length !== 1) return ce.domain('NothingDomain');
-          return ops[0].domain;
-        },
-        evaluate: ([x]) => x,
-      },
+      description: 'Return the argument unchanged',
+      signature: 'any -> any',
+      type: ([x]) => x.type,
+      evaluate: ([x]) => x,
     },
   },
   {
     Apply: {
-      signature: {
-        domain: 'Functions',
-        canonical: (ce, args) => {
-          if (args[0].symbol) return ce.function(args[0].symbol, args.slice(1));
-          return ce._fn('Apply', args);
-        },
-        evaluate: (ops) => apply(ops[0], ops.slice(1)),
+      description: 'Apply a function to a list of arguments',
+      signature: '(name:symbol, arguments:...expression) -> any',
+      type: ([fn]) => functionResult(fn.type) ?? 'any',
+      canonical: (args, { engine: ce }) => {
+        if (args[0].symbol) return ce.function(args[0].symbol, args.slice(1));
+        return ce._fn('Apply', args);
       },
+      evaluate: (ops) => apply(ops[0], ops.slice(1)),
     },
 
     Assign: {
-      hold: 'all',
+      description: 'Assign a value to a symbol',
+      hold: true,
       pure: false,
-      signature: {
-        domain: ['FunctionOf', 'Anything', 'Anything', 'Anything'],
-        canonical: (ce, args) => {
-          if (args.length !== 2) return null;
-          const op1 = args[0];
-          if (!op1.symbol) return null;
-          const op2 = args[1];
-          return ce._fn('Assign', [op1.canonical, op2.canonical]);
-        },
-        evaluate: (ops, { engine: ce }) => {
-          const op1 = ops[0];
-          const op2 = ops[1];
-          if (!op1.symbol) return ce.Nothing;
-          const val = op2.evaluate();
-          ce.assign(op1.symbol, val);
-          return val;
-        },
+      signature: '(symbol, any) -> any',
+      type: ([_symbol, value]) => value.type,
+      canonical: (args, { engine: ce }) => {
+        if (args.length !== 2) return null;
+        const op1 = args[0];
+        if (!op1.symbol) return null;
+        const op2 = args[1];
+        return ce._fn('Assign', [op1.canonical, op2.canonical]);
+      },
+      evaluate: (ops, { engine: ce }) => {
+        const op1 = ops[0];
+        const op2 = ops[1];
+        if (!op1.symbol) return ce.Nothing;
+        const val = op2.evaluate();
+        ce.assign(op1.symbol, val);
+        return val;
       },
     },
 
     Assume: {
-      hold: 'all',
+      description: 'Assume a type for a symbol',
+      hold: true,
       pure: false,
-      signature: {
-        domain: ['FunctionOf', 'Anything', 'Anything'],
-        evaluate: (ops, { engine: ce }) => ce.string(ce.assume(ops[0])),
-      },
+      signature: 'any -> symbol',
+      evaluate: (ops, { engine: ce }) => ce.symbol(ce.assume(ops[0])),
     },
 
     Declare: {
-      hold: 'all',
+      hold: true,
       pure: false,
-      signature: {
-        domain: ['FunctionOf', 'Symbols', 'Anything'],
-        canonical: (ce, args) => {
-          if (args.length !== 2) return null;
-          const op1 = args[0];
-          const op2 = args[1];
-          if (!op1.symbol) return null;
-          if (op2.symbol) return ce._fn('Declare', args);
-          return ce._fn('Declare', [op1, ce._fn('Hold', [op2])]);
-        },
-        evaluate: (ops, { engine: ce }) => {
-          const op1 = ops[0];
-          const op2 = ops[1];
-          if (!op1.symbol) return ce.Nothing;
-          const val = op2.evaluate();
-          if (!isDomain(val)) return undefined;
-          ce.declare(op1.symbol, val as BoxedDomain);
-          return val;
-        },
+      signature: 'symbol -> any',
+      type: ([_symbol, value]) => value.type,
+      canonical: (args, { engine: ce }) => {
+        if (args.length !== 2) return null;
+        const op1 = args[0];
+        const op2 = args[1];
+        if (!op1.symbol) return null;
+        if (op2.symbol) return ce._fn('Declare', args);
+        return ce._fn('Declare', [op1, ce._fn('Hold', [op2])]);
+      },
+      evaluate: (ops, { engine: ce }) => {
+        const op1 = ops[0];
+        const op2 = ops[1];
+        if (!op1.symbol) return ce.Nothing;
+        const val = op2.evaluate();
+        if (!val.string) return undefined;
+        const type = parseType(val.string);
+        if (!isValidType(type)) return undefined;
+        ce.declare(op1.symbol, type);
+        return val;
       },
     },
 
-    Domain: {
-      /** Return the domain of an expression */
-      signature: {
-        domain: ['FunctionOf', 'Anything', 'Domains'],
-        evaluate: ([x]) => x.domain,
-      },
+    /** Return the type of an expression */
+    Type: {
+      hold: true,
+      signature: 'any -> string',
+      evaluate: ([x], { engine: ce }) => ce.string(x.type.toString()),
     },
 
     Evaluate: {
-      hold: 'all',
-      signature: {
-        domain: ['FunctionOf', 'Anything', 'Anything'],
-        result: (ce, ops) => {
-          if (ops.length !== 1) return ce.domain('NothingDomain');
-          return ops[0].domain;
-        },
-        canonical: (ce, ops) => ce._fn('Evaluate', checkArity(ce, ops, 1)),
-        evaluate: ([x], options) => x.evaluate(options),
-      },
+      hold: true,
+      signature: 'any -> any',
+      type: ([x]) => x.type,
+      canonical: (ops, { engine: ce }) =>
+        ce._fn('Evaluate', checkArity(ce, ops, 1)),
+      evaluate: ([x], options) => x.evaluate(options),
     },
 
     Function: {
       complexity: 9876,
-      hold: 'all',
-      signature: {
-        domain: ['FunctionOf', 'Anything', ['VarArg', 'Symbols'], 'Functions'],
-        canonical: (ce, args) => {
-          // When canonicalizing a function expression, we need to
-          // create a new scope and declare all the arguments as
-          // variables in that scope.
+      hold: true,
+      signature: '(any, ...symbol) -> any',
+      type: ([body]) => body.type,
+      canonical: (args, { engine: ce }) => {
+        // When canonicalizing a function expression, we need to
+        // create a new scope and declare all the arguments as
+        // variables in that scope.
 
-          if (args.length === 0) return ce.Nothing;
+        if (args.length === 0) return ce.Nothing;
 
-          const canonicalFn = canonicalFunctionExpression(
-            args[0],
-            args.slice(1)
-          );
-          if (!canonicalFn) return null;
+        const canonicalFn = canonicalFunctionExpression(args[0], args.slice(1));
+        if (!canonicalFn) return null;
 
-          const body = canonicalFn[0].canonical;
-          const params = canonicalFn
-            .slice(1)
-            .map((x) => ce.symbol(x as string));
+        const body = canonicalFn[0].canonical;
+        const params = canonicalFn.slice(1).map((x) => ce.symbol(x as string));
 
-          // If the function has no arguments, it is equivalent to the body
-          if (params.length === 0) return body;
+        // If the function has no arguments, it is equivalent to the body
+        if (params.length === 0) return body;
 
-          return ce._fn('Function', [body, ...params]);
-        },
-        evaluate: (_args) => {
-          // "evaluating" a function expression is not the same
-          // as applying arguments to it.
-          // See `function apply()` for that.
+        return ce._fn('Function', [body, ...params]);
+      },
+      evaluate: (_args) => {
+        // "evaluating" a function expression is not the same
+        // as applying arguments to it.
+        // See `function apply()` for that.
 
-          return undefined;
-        },
+        return undefined;
       },
     },
 
     Simplify: {
-      hold: 'all',
-      signature: {
-        domain: ['FunctionOf', 'Anything', 'Anything'],
-        result: (ce, ops) => {
-          if (ops.length !== 1) return ce.domain('NothingDomain');
-          return ops[0].domain;
-        },
-        canonical: (ce, ops) => ce._fn('Simplify', checkArity(ce, ops, 1)),
-        evaluate: ([x]) => x.simplify() ?? undefined,
-      },
+      hold: true,
+      signature: 'any -> expression',
+
+      canonical: (ops, { engine: ce }) =>
+        ce._fn('Simplify', checkArity(ce, ops, 1)),
+      evaluate: ([x]) => x.simplify() ?? undefined,
     },
 
-    // Can be used to sort arguments of an expression.
-    // Sorting arguments of commutative functions is a weak form of
-    // canonicalization that can be useful in some cases, for example
-    // to accept "x+1" and "1+x" while rejecting "x+1" and "2x-x+1"
-
     CanonicalForm: {
+      description: [
+        'Return the canonical form of an expression',
+        'Can be used to sort arguments of an expression.',
+        'Sorting arguments of commutative functions is a weak form of canonicalization that can be useful in some cases, for example to accept "x+1" and "1+x" while rejecting "x+1" and "2x-x+1"',
+      ],
       complexity: 8200,
-      hold: 'all',
-      signature: {
-        domain: ['FunctionOf', 'Anything', ['VarArg', 'Symbols'], 'Anything'],
-        // Do not canonicalize the arguments, we want to preserve
-        // the original form before modifying it
-        canonical: (_ce, ops) => {
-          if (ops.length === 1) return ops[0].canonical;
+      hold: true,
+      signature: '(any, ...symbol) -> any',
+      // Do not canonicalize the arguments, we want to preserve
+      // the original form before modifying it
+      canonical: (ops) => {
+        if (ops.length === 1) return ops[0].canonical;
 
-          const forms = ops
-            .slice(1)
-            .map((x) => x.symbol ?? x.string)
-            .filter((x) => x !== undefined && x !== null) as CanonicalForm[];
-          return canonicalForm(ops[0], forms);
-        },
+        const forms = ops
+          .slice(1)
+          .map((x) => x.symbol ?? x.string)
+          .filter((x) => x !== undefined && x !== null) as CanonicalForm[];
+        return canonicalForm(ops[0], forms);
       },
     },
 
     N: {
-      hold: 'all',
-      signature: {
-        domain: ['FunctionOf', 'Anything', 'Anything'],
-        result: (ce, ops) => {
-          if (ops.length !== 1) return ce.domain('NothingDomain');
-          return ops[0].domain;
-        },
-        canonical: (ce, ops) => {
-          // Only call checkArity (which canonicalize) if the
-          // argument length is invalid
-          if (ops.length !== 1) return ce._fn('N', checkArity(ce, ops, 1));
+      description: 'Numerically evaluate an expression',
+      hold: true,
+      signature: 'any -> any',
+      type: ([x]) => x.type,
+      canonical: (ops, { engine: ce }) => {
+        // Only call checkArity (which canonicalize) if the
+        // argument length is invalid
+        if (ops.length !== 1) return ce._fn('N', checkArity(ce, ops, 1));
 
-          const h = ops[0].operator;
-          if (h === 'N') return ops[0].canonical;
-          if (h === 'Integrate') {
-            const { index, lower, upper } = normalizeIndexingSet(ops[0].op2);
-            if (!index || lower === undefined || upper === undefined)
-              return null;
-            const fn = ops[0].op1;
-            return ce._fn('NIntegrate', [
-              ce.function('Function', [fn, index]),
-              ce.number(lower),
-              ce.number(upper),
-            ]);
-          }
-          if (h === 'Limit') return ce._fn('NLimit', ops[0].ops!);
+        const h = ops[0].operator;
+        if (h === 'N') return ops[0].canonical;
+        if (h === 'Integrate') {
+          const { index, lower, upper } = normalizeIndexingSet(ops[0].op2);
+          if (!index || lower === undefined || upper === undefined) return null;
+          const fn = ops[0].op1;
+          return ce._fn('NIntegrate', [
+            ce.function('Function', [fn, index]),
+            ce.number(lower),
+            ce.number(upper),
+          ]);
+        }
+        if (h === 'Limit') return ce._fn('NLimit', ops[0].ops!);
 
-          return ce._fn('N', ops);
-        },
-        evaluate: ([x]) => x.N(),
+        return ce._fn('N', ops);
       },
+      evaluate: ([x]) => x.N(),
     },
 
     Random: {
+      description: [
+        'Random(): Return a random number between 0 and 1',
+        'Random(n): Return a random integer between 0 and n-1',
+        'Random(m, n): Return a random integer between m and n-1',
+      ],
       pure: false,
-      signature: {
-        params: [],
-        optParams: ['Integers', 'Integers'],
-        result: 'Numbers',
-        evaluate: (ops, { engine: ce }) => {
-          // With no arguments, return a random number between 0 and 1
-          if (ops.length === 0) return ce.number(Math.random());
+      signature: '(lower:integer?, upper:integer?) -> finite_number',
+      type: ([lower, upper]) => {
+        if (lower === undefined && upper === undefined) return 'finite_number';
+        return 'finite_integer';
+      },
+      sgn: () => 'non-negative',
+      evaluate: (ops, { engine: ce }) => {
+        // With no arguments, return a random number between 0 and 1
+        if (ops.length === 0) return ce.number(Math.random());
 
-          // If one or more arguments are provided, they must be integers
-          // The result will be an integer between the two arguments
-          const [lowerOp, upperOp] = ops;
-          let lower: number;
-          let upper: number;
-          if (upperOp === undefined) {
-            lower = 0;
-            upper = Math.floor((lowerOp.re ?? 1) - 1)!;
-          } else {
-            lower = Math.floor(lowerOp.re ?? 0)!;
-            upper = Math.floor(upperOp.re ?? 0)!;
-          }
-          return ce.number(lower + Math.floor(Math.random() * (upper - lower)));
-        },
+        // If one or more arguments are provided, they must be integers
+        // The result will be an integer between the two arguments
+        const [lowerOp, upperOp] = ops;
+        let lower: number;
+        let upper: number;
+        if (upperOp === undefined) {
+          lower = 0;
+          upper = Math.floor((lowerOp.re ?? 1) - 1)!;
+        } else {
+          lower = Math.floor(lowerOp.re ?? 0)!;
+          upper = Math.floor(upperOp.re ?? 0)!;
+        }
+        return ce.number(lower + Math.floor(Math.random() * (upper - lower)));
       },
     },
 
     // @todo: need review
-    Signatures: {
-      signature: {
-        domain: ['FunctionOf', 'Symbols', ['ListOf', 'Domains']],
-        canonical: (ce, ops) => {
-          ops = checkArity(ce, ops, 1);
-          if (!ops[0].symbol)
-            return ce._fn('Signatures', [
-              ce.domainError('Symbols', ops[0].domain, ops[0]),
-            ]);
-          return ce._fn('Signatures', ops);
-        },
-        evaluate: (ops, { engine: ce }) => {
-          const name = ops[0].symbol;
-          if (!name) return ce.Nothing;
-          const def = ce.lookupFunction(name);
-          if (!def) return ce._fn('List', []);
-          const sig = def.signature;
-          const fnParams: BoxedExpression[] = [...sig.params];
-          if (sig.optParams.length > 0)
-            fnParams.push(ce._fn('OptArg', sig.optParams));
-          if (sig.restParam) fnParams.push(ce._fn('VarArg', [sig.restParam]));
+    Signature: {
+      hold: true,
+      signature: 'symbol -> string | nothing',
+      evaluate: ([x], { engine: ce }) => {
+        if (!x.functionDefinition) return ce.Nothing;
 
-          if (typeof sig.result === 'function')
-            fnParams.push(sig.result(ce, []) ?? ce.symbol('Undefined'));
-          else fnParams.push(sig.result);
-          return ce.function('List', fnParams);
-        },
+        return ce.string(x.functionDefinition.signature.toString());
       },
     },
 
@@ -625,65 +601,52 @@ export const CORE_LIBRARY: IdentifierDefinitions[] = [
       // The last (subscript) argument can include a delimiter that
       // needs to be interpreted. Without the hold, it would get
       // removed during canonicalization.
-      hold: 'last',
+      hold: true,
 
-      signature: {
-        domain: ['FunctionOf', 'Anything', 'Anything', 'Anything'],
-        result: (ce, args: ReadonlyArray<BoxedExpression>) => {
-          if (args.length !== 2) return ce.domain('NothingDomain');
-          const op1 = args[0];
-          const op2 = args[1];
-          if (op1.string && asSmallInteger(op2) !== null)
-            return ce.domain('Integers');
-          if (op1.symbol) {
-            const vh = op1.evaluate()?.operator;
-            if (vh) {
-              const def = ce.lookupFunction(vh);
-              if (def?.at) return undefined;
-              return ce.domain('Symbols');
-            }
-          }
-          return undefined;
-        },
-        canonical: (ce, args) => {
-          const op1 = args[0];
-          const op2 = args[1];
-          // Is it a string in a base form:
-          // `"deadbeef"_{16}` `"0101010"_2?
-          if (op1.string) {
-            const base = asSmallInteger(op2);
-            if (base !== null && base > 1 && base <= 36) {
-              const [value, rest] = fromDigits(op1.string, base);
-              if (rest) {
-                return ce.error(
-                  ['unexpected-digit', { str: rest[0] }],
-                  ['LatexString', ce.string(op1.string)]
-                );
-              }
-              return ce.number(value);
-            }
-          }
-          // Is it a compound symbol `x_\operatorname{max}`, `\mu_0`
-          // or an indexable collection?
-          if (op1.symbol) {
-            // Is the value of the symbol an indexable collection?
-            const vh = op1.evaluate()?.operator;
-            // If "f" was a list, vh would be "List"
-            if (vh) {
-              const def = ce.lookupFunction(vh);
-              if (def?.at) return ce._fn('At', [op1.canonical, op2.canonical]);
-            }
-            // Maybe a compound symbol
-            const sub =
-              op2.string ?? op2.symbol ?? asSmallInteger(op2)?.toString();
+      signature: '(collection|string, any) -> any',
+      type: ([op1, op2]) => {
+        if (op1.string && asSmallInteger(op2) !== null) return 'integer';
+        if (op1.isCollection && isIndexableCollection(op1))
+          return collectionElementType(op1.type) ?? 'any';
+        if (op1.symbol) return 'symbol';
+        return 'expression';
+      },
 
-            if (sub) return ce.symbol(op1.symbol + '_' + sub);
+      canonical: ([op1, op2], { engine: ce }) => {
+        op1 = op1.canonical;
+        // Is it a string in a base form:
+        // `"deadbeef"_{16}` `"0101010"_2?
+        if (op1.string) {
+          const base = asSmallInteger(op2.canonical);
+          if (base !== null && base > 1 && base <= 36) {
+            const [value, rest] = fromDigits(op1.string, base);
+            if (rest) {
+              return ce.error(['unexpected-digit', rest[0]], op1.toString());
+            }
+            return ce.number(value);
           }
-          if (op2.operator === 'Sequence')
-            ce._fn('Subscript', [op1, ce._fn('List', op2.ops!)]);
+          return ce._fn('Baseform', [
+            op1,
+            ce.error(['invalid-base', op2.toString()]),
+          ]);
+        }
 
-          return ce._fn('Subscript', args);
-        },
+        // Is it a collection?
+        if (op1.isCollection && isIndexableCollection(op1))
+          return ce._fn('At', [op1, op2.canonical]);
+
+        // Is it a compound symbol `x_\operatorname{max}`, `\mu_0`
+        if (op1.symbol) {
+          const sub =
+            op2.string ?? op2.symbol ?? asSmallInteger(op2)?.toString();
+
+          if (sub) return ce.symbol(op1.symbol + '_' + sub);
+        }
+
+        if (op2.operator === 'Sequence')
+          ce._fn('Subscript', [op1, ce._fn('List', op2.ops!)]);
+
+        return ce._fn('Subscript', [op1, op2]);
       },
     },
 
@@ -692,66 +655,62 @@ export const CORE_LIBRARY: IdentifierDefinitions[] = [
       description:
         'Construct a new symbol with a name formed by concatenating the arguments',
       threadable: true,
-      hold: 'all',
-      signature: {
-        domain: ['FunctionOf', ['VarArg', 'Anything'], 'Anything'],
-        canonical: (ce, ops) => {
-          if (ops.length === 0) return ce.Nothing;
-          const arg = ops
-            .map(
-              (x) => x.symbol ?? x.string ?? asSmallInteger(x)?.toString() ?? ''
-            )
-            .join('');
-
-          if (arg.length > 0) return ce.symbol(arg);
-
-          return ce.Nothing;
-        },
-        // Note: a `["Symbol"]` expression is never evaluated, it gets
-        // transformed into something else (a symbol) during canonicalization
+      hold: true,
+      signature: '...any -> any',
+      type: (args) => {
+        if (args.length === 0) return 'nothing';
+        return 'symbol';
       },
+      canonical: (ops, { engine: ce }) => {
+        if (ops.length === 0) return ce.Nothing;
+        const arg = ops
+          .map(
+            (x) => x.symbol ?? x.string ?? asSmallInteger(x)?.toString() ?? ''
+          )
+          .join('');
+
+        if (arg.length > 0) return ce.symbol(arg);
+
+        return ce.Nothing;
+      },
+      // Note: a `["Symbol"]` expression is never evaluated, it gets
+      // transformed into something else (a symbol) during canonicalization
     },
 
     Timing: {
       description:
         '`Timing(expr)` evaluates `expr` and return a `Pair` of the number of second elapsed for the evaluation, and the value of the evaluation',
-      signature: {
-        domain: [
-          'FunctionOf',
-          'Values',
-          ['OptArg', 'Integers'],
-          ['TupleOf', 'Values', 'Numbers'],
-        ],
-        evaluate: (ops, { engine: ce }) => {
-          if (ops[1].symbol === 'Nothing') {
-            // Evaluate once
-            const start = globalThis.performance.now();
-            const result = ops[0].evaluate();
-            const timing = 1000 * (globalThis.performance.now() - start);
+      signature:
+        '(value, repeat: integer?) -> tuple<result:value, time:number>',
+      evaluate: (ops, { engine: ce }) => {
+        if (ops[1].symbol === 'Nothing') {
+          // Evaluate once
+          const start = globalThis.performance.now();
+          const result = ops[0].evaluate();
+          const timing = 1000 * (globalThis.performance.now() - start);
 
-            return ce.tuple(ce.number(timing), result);
-          }
+          return ce.tuple(ce.number(timing), result);
+        }
 
-          // Evaluate multiple times
-          let n = Math.max(3, Math.round(asSmallInteger(ops[1]) ?? 3));
+        // Evaluate multiple times
+        let n = Math.max(3, Math.round(asSmallInteger(ops[1]) ?? 3));
 
-          let timings: number[] = [];
-          let result: BoxedExpression;
-          while (n > 0) {
-            const start = globalThis.performance.now();
-            result = ops[0].evaluate();
-            timings.push(1000 * (globalThis.performance.now() - start));
-            n -= 1;
-          }
+        let timings: number[] = [];
+        let result: BoxedExpression;
+        while (n > 0) {
+          const start = globalThis.performance.now();
+          result = ops[0].evaluate();
+          timings.push(1000 * (globalThis.performance.now() - start));
+          n -= 1;
+        }
 
-          const max = Math.max(...timings);
-          const min = Math.min(...timings);
-          timings = timings.filter((x) => x > min && x < max);
-          const sum = timings.reduce((acc, v) => acc + v, 0);
+        const max = Math.max(...timings);
+        const min = Math.min(...timings);
+        timings = timings.filter((x) => x > min && x < max);
+        const sum = timings.reduce((acc, v) => acc + v, 0);
 
-          if (sum === 0) return ce.tuple(ce.number(max), result!);
-          return ce.tuple(ce.number(sum / timings.length), result!);
-        },
+        if (sum === 0) return ce.tuple(ce.number(max), result!);
+        return ce.tuple(ce.number(sum / timings.length), result!);
       },
     },
   },
@@ -761,33 +720,24 @@ export const CORE_LIBRARY: IdentifierDefinitions[] = [
   //
   {
     Wildcard: {
-      signature: {
-        params: ['Symbols'],
-        result: 'Symbols',
-        canonical: (ce, args) => {
-          if (args.length !== 1) return ce.symbol('_');
-          return ce.symbol('_' + args[0].symbol);
-        },
+      signature: 'symbol -> symbol',
+      canonical: (args, { engine: ce }) => {
+        if (args.length !== 1) return ce.symbol('_');
+        return ce.symbol('_' + args[0].symbol);
       },
     },
     WildcardSequence: {
-      signature: {
-        params: ['Symbols'],
-        result: 'Symbols',
-        canonical: (ce, args) => {
-          if (args.length !== 1) return ce.symbol('__');
-          return ce.symbol('__' + args[0].symbol);
-        },
+      signature: 'symbol -> symbol',
+      canonical: (args, { engine: ce }) => {
+        if (args.length !== 1) return ce.symbol('__');
+        return ce.symbol('__' + args[0].symbol);
       },
     },
     WildcardOptionalSequence: {
-      signature: {
-        params: ['Symbols'],
-        result: 'Symbols',
-        canonical: (ce, args) => {
-          if (args.length !== 1) return ce.symbol('___');
-          return ce.symbol('___' + args[0].symbol);
-        },
+      signature: 'symbol -> symbol',
+      canonical: (args, { engine: ce }) => {
+        if (args.length !== 1) return ce.symbol('___');
+        return ce.symbol('___' + args[0].symbol);
       },
     },
   },
@@ -796,48 +746,32 @@ export const CORE_LIBRARY: IdentifierDefinitions[] = [
   // LaTeX-related
   //
   {
-    // Value preserving type conversion/tag indicating the string
-    // is a LaTeX string
     LatexString: {
-      inert: true,
-      signature: { domain: ['FunctionOf', 'Strings', 'Strings'] },
+      description:
+        'Value preserving type conversion/tag indicating the string is a LaTeX string',
+      signature: 'string -> string',
+      evaluate: ([s]) => s,
     },
 
-    // Serialize one or more expressions to LaTeX
     Latex: {
-      signature: {
-        domain: ['FunctionOf', ['VarArg', 'Anything'], 'Strings'],
-        evaluate: (ops, { engine: ce }) =>
-          ce.box([
-            'LatexString',
-            ce.string(joinLatex(ops.map((x) => x.latex))),
-          ]),
-      },
+      description: 'Serialize an expression to LaTeX',
+      signature: '...any -> string',
+      evaluate: (ops, { engine: ce }) =>
+        ce.box(['LatexString', ce.string(joinLatex(ops.map((x) => x.latex)))]),
     },
 
     Parse: {
       description:
         'Parse a LaTeX string and evaluate to a corresponding expression',
-      signature: {
-        domain: ['FunctionOf', 'Anything', 'Anything'],
-        evaluate: (ops, { engine: ce }) => {
-          if (ops.length === 0) return ce.Nothing;
-          const op1 = ops[0];
-          const s =
-            op1.string ??
-            (op1.operator === 'LatexString' ? op1.op1.string : '');
-          return ce.parse(s) ?? ce.Nothing;
-        },
-      },
+      signature: 'string -> any',
+      evaluate: ([s], { engine: ce }) => ce.parse(s.string) ?? ce.Nothing,
     },
   },
 
   {
     RandomExpression: {
-      signature: {
-        domain: 'Functions',
-        evaluate: (_ops, { engine }) => engine.box(randomExpression()),
-      },
+      signature: '() -> expression',
+      evaluate: (_ops, { engine }) => engine.box(randomExpression()),
     },
   },
 ];

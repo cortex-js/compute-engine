@@ -27,6 +27,7 @@ import { numberToString } from '../numerics/strings';
 import { BigNumFactory } from './big-numeric-value';
 import { isInMachineRange } from '../numerics/numeric-bignum';
 import { bigint } from '../numerics/bigint';
+import { NumericType } from '../../common/type/types';
 
 /**
  * An ExactNumericValue is the sum of a Gaussian imaginary and the product of
@@ -64,6 +65,7 @@ export class ExactNumericValue extends NumericValue {
 
     if (typeof value === 'number') {
       console.assert(!Number.isFinite(value) || Number.isInteger(value));
+      if (!(!Number.isFinite(value) || Number.isInteger(value))) debugger;
       this.rational = [value, 1];
       this.radical = 1;
       return;
@@ -110,12 +112,15 @@ export class ExactNumericValue extends NumericValue {
     }
   }
 
-  get type(): 'complex' | 'real' | 'rational' | 'integer' {
+  get type(): NumericType {
     // a/b√c -> real number (c can't be a perfect square)
-    if (this.radical !== 1) return 'real';
     if (this.isNaN || this.isPositiveInfinity || this.isNegativeInfinity)
-      return 'real';
-    return isInteger(this.rational) ? 'integer' : 'rational';
+      return 'non_finite_number';
+    if (this.radical !== 1) {
+      console.assert(!isZero(this.rational));
+      return 'finite_real';
+    }
+    return isInteger(this.rational) ? 'finite_integer' : 'finite_rational';
   }
 
   get isExact(): boolean {
@@ -761,13 +766,19 @@ export class ExactNumericValue extends NumericValue {
     factory: NumericValueFactory,
     bignumFactory: BigNumFactory
   ): NumericValue[] {
+    if (values.length === 1) return values;
+
     // If we have some inexact values, just do a simple sum
-    if (!values.every((x) => x.isExact)) {
+    if (values.some((x) => !x.isExact)) {
+      if (values.length === 2) return [values[0].add(values[1])];
       let sum = factory(0);
       for (const value of values) sum = sum.add(value);
       return [sum];
     }
 
+    //
+    // We have only exact values, we need to sum decimal, rational and radical parts
+    //
     let imSum = 0;
     let rationalSum: Rational = [0, 1];
     const radicals: { multiple: Rational; radical: number }[] = [];

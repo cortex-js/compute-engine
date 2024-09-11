@@ -147,7 +147,7 @@ function makeLambda(
   if (expr.symbol) {
     const fnDef = ce.lookupFunction(expr.symbol);
     if (fnDef) {
-      const fn = fnDef.signature.evaluate;
+      const fn = fnDef.evaluate;
       if (fn) return (xs) => fn(xs, { engine: ce }) ?? ce._fn(expr.symbol!, xs);
       return (xs) => ce._fn(expr.symbol!, xs);
     }
@@ -167,7 +167,7 @@ function makeLambda(
   // This is to avoid having the arguments bound to an id in a parent scope
   // with coincidentally the same name as the parameter.
   for (const param of params)
-    ce.declare(param, { inferred: true, domain: undefined });
+    ce.declare(param, { inferred: true, type: undefined });
   const fn = body.canonical;
 
   fn.bind();

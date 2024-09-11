@@ -1,18 +1,21 @@
-import type { BoxedDomain, BoxedExpression, IComputeEngine } from '../public';
+import type { BoxedExpression, IComputeEngine } from '../public';
 import { getImaginaryFactor } from './utils';
-import { widen } from './boxed-domain';
 import { isIndexableCollection } from '../collection-utils';
 
 import { flatten } from './flatten';
 import { addOrder } from './order';
+import { Terms } from './terms';
+import { Type } from '../../common/type/types';
+import { widen } from '../../common/type/utils';
+import { isSubtype } from '../../common/type/subtype';
 
 /**
  *
  * The canonical form of `Add`:
- * - canonicalizes the arguments
- * - removes `0`
- * - captures complex numbers (`a + ib` or `ai + b`)
- * - sorts the terms
+ * - canonicalize the arguments
+ * - remove `0`
+ * - capture complex numbers (`a + ib` or `ai + b`)
+ * - sort the terms
  *
  */
 export function canonicalAdd(
@@ -23,7 +26,7 @@ export function canonicalAdd(
   ops = flatten(ops, 'Add');
 
   // Remove literal 0
-  ops = ops.filter((x) => x.numericValue === null || x.isZero !== true);
+  ops = ops.filter((x) => x.numericValue === null || x.isEqual(0) !== true);
 
   if (ops.length === 0) return ce.Zero;
   if (ops.length === 1 && !isIndexableCollection(ops[0])) return ops[0];
@@ -38,8 +41,8 @@ export function canonicalAdd(
 
       if (
         typeof nv === 'number' ||
-        (nv.type === 'real' && !nv.isExact) ||
-        nv.type === 'integer'
+        (isSubtype(nv.type, 'real') && !nv.isExact) ||
+        isSubtype(nv.type, 'integer')
       ) {
         // We have a number such as 4, 3.14, etc. but not 2/3, √2, etc.
         // Check the following term to see if it's an imaginary number
@@ -68,14 +71,20 @@ export function canonicalAdd(
   return ce._fn('Add', [...xs].sort(addOrder));
 }
 
-export function domainAdd(
-  _ce: IComputeEngine,
-  args: (undefined | BoxedDomain)[]
-): BoxedDomain | null | undefined {
-  let dom: BoxedDomain | null | undefined = null;
-  for (const arg of args) {
-    if (!arg?.isNumeric) return null;
-    dom = widen(dom, arg);
-  }
-  return dom;
+export function addType(args: ReadonlyArray<BoxedExpression>): Type {
+  if (args.length === 0) return 'finite_integer'; // = 0
+  if (args.length === 1) return args[0].type;
+  return widen(...args.map((x) => x.type));
+}
+
+export function add(...xs: ReadonlyArray<BoxedExpression>): BoxedExpression {
+  console.assert(xs.length > 0);
+  if (!xs.every((x) => x.isValid)) return xs[0].engine._fn('Add', xs);
+  return new Terms(xs[0].engine, xs).asExpression();
+}
+
+export function addN(...xs: ReadonlyArray<BoxedExpression>): BoxedExpression {
+  console.assert(xs.length > 0);
+  if (!xs.every((x) => x.isValid)) return xs[0].engine._fn('Add', xs);
+  return new Terms(xs[0].engine, xs).N();
 }

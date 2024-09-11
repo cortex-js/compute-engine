@@ -17,7 +17,6 @@ import { LibraryCategory } from '../latex-syntax/public';
 import { IComputeEngine, IdentifierDefinitions } from '../public';
 import { _BoxedSymbolDefinition } from '../boxed-expression/boxed-symbol-definition';
 import { makeFunctionDefinition } from '../boxed-expression/boxed-function-definition';
-import { domainSetsLibrary } from './domains';
 import { _BoxedExpression } from '../boxed-expression/abstract-boxed-expression';
 import {
   isValidIdentifier,
@@ -94,7 +93,7 @@ export const LIBRARIES: {
   // ],
   'arithmetic': [...ARITHMETIC_LIBRARY, ...COMPLEX_LIBRARY],
   'calculus': CALCULUS_LIBRARY,
-  'collections': [SETS_LIBRARY, COLLECTIONS_LIBRARY, domainSetsLibrary()],
+  'collections': [SETS_LIBRARY, COLLECTIONS_LIBRARY],
   'combinatorics': [], // @todo fibonacci, binomial, etc...
   'control-structures': CONTROL_STRUCTURES_LIBRARY,
   'core': CORE_LIBRARY,
@@ -113,7 +112,7 @@ export const LIBRARIES: {
       description: 'Vaccum permeability',
       constant: true,
       wikidata: 'Q1515261',
-      domain: 'RealNumbers',
+      type: 'real',
       value: 1.25663706212e-6,
       // unit: ['Divide', 'N', ['Square', 'A']],
     },
@@ -161,41 +160,76 @@ export function setIdentifierDefinitions(
   //
   // eslint-disable-next-line prefer-const
   for (let [name, entry] of Object.entries(table)) {
-    name = validateDefinitionName(name);
+    try {
+      name = validateDefinitionName(name);
+      if (isFunctionDefinition(entry)) {
+        try {
+          const def = makeFunctionDefinition(engine, name, entry);
 
-    if (isFunctionDefinition(entry)) {
-      const def = makeFunctionDefinition(engine, name, entry);
-
-      if (idTable.has(name))
-        throw new Error(
-          `Duplicate function definition ${name}:\n${JSON.stringify(
-            idTable.get(name)!
-          )}\n${JSON.stringify(entry)}`
-        );
-
-      idTable.set(name, def);
-    } else if (isSymbolDefinition(entry)) {
-      const def = new _BoxedSymbolDefinition(engine, name, entry);
-
-      if (engine.strict && entry.wikidata) {
-        for (const [_, d] of idTable) {
-          if (d.wikidata === entry.wikidata)
+          if (idTable.has(name))
             throw new Error(
-              `Duplicate entries with wikidata "${entry.wikidata}": "${name}" and "${d.name}"`
+              `Duplicate function definition:\n${JSON.stringify(
+                idTable.get(name)!
+              )}\n${JSON.stringify(entry)}`
             );
+
+          idTable.set(name, def);
+        } catch (e) {
+          console.error(
+            [
+              `\nError in function definition`,
+              '',
+              JSON.stringify(entry),
+              '',
+              e.message,
+            ].join('\n|   ') + '\n'
+          );
         }
+      } else if (isSymbolDefinition(entry)) {
+        try {
+          const def = new _BoxedSymbolDefinition(engine, name, entry);
+
+          if (engine.strict && entry.wikidata) {
+            for (const [_, d] of idTable) {
+              if (d.wikidata === entry.wikidata)
+                throw new Error(
+                  `Duplicate entries with wikidata "${entry.wikidata}": "${name}" and "${d.name}"`
+                );
+            }
+          }
+
+          if (idTable.has(name))
+            throw new Error(`The symbol is already defined`);
+
+          idTable.set(name, def);
+        } catch (e) {
+          console.error(
+            [
+              `\nError in symbol definition of "${name}"`,
+              '',
+              JSON.stringify(entry),
+              '',
+              e.message,
+            ].join('\n|   ')
+          );
+        }
+      } else {
+        const def = new _BoxedSymbolDefinition(engine, name, {
+          value: engine.box(entry as any),
+        });
+        console.assert(def);
+        idTable.set(name, def);
       }
-
-      if (idTable.has(name))
-        throw new Error(`Duplicate symbol definition "${name}"`);
-
-      idTable.set(name, def);
-    } else {
-      const def = new _BoxedSymbolDefinition(engine, name, {
-        value: engine.box(entry as any),
-      });
-      console.assert(def);
-      idTable.set(name, def);
+    } catch (e) {
+      console.error(
+        [
+          `\nError in definition of "${name}"`,
+          '',
+          JSON.stringify(entry),
+          '',
+          e.message,
+        ].join('\n|   ') + '\n'
+      );
     }
   }
 }

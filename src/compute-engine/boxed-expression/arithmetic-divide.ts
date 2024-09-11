@@ -1,10 +1,10 @@
 import type { BoxedExpression } from '../public';
-import type { NumericValue } from '../numeric-value/public';
-import { asSmallInteger } from './numerics';
 import { bigint } from '../numerics/bigint';
 
+import { asSmallInteger } from './numerics';
 import { canonicalMultiply } from './arithmetic-multiply';
 import { Product } from './product';
+import { isSubtype } from '../../common/type/subtype';
 
 /**
  * Canonical form of 'Divide' (and 'Rational')
@@ -22,13 +22,18 @@ export function canonicalDivide(
   const ce = op1.engine;
   if (!op1.isValid || !op2.isValid) return ce._fn('Divide', [op1, op2]);
 
-  if (op2.isZero) return op1.isZero ? ce.NaN : ce.ComplexInfinity;
+  // 0/0 = NaN, a/0 = ~∞ (a≠0)
+  if (op2.isEqual(0)) return op1.isEqual(0) ? ce.NaN : ce.ComplexInfinity;
+
+  // 0/a = 0 (a≠0)
+  if (op1.isEqual(0)) return ce.Zero;
 
   // a/a = 1 (if a ≠ 0)
-  if (op2.isNotZero === true) {
+  if (op2.isEqual(0) === false) {
     if (op1.symbol !== null && op1.symbol === op2.symbol && op1.isConstant)
       return ce.One;
 
+    // (x+1)/(x+1) = 1 (if x+1 ≠ 0)
     if (op1.isSame(op2)) return ce.One;
   }
 
@@ -55,33 +60,33 @@ export function canonicalDivide(
     return canonicalDivide(canonicalMultiply(ce, [op1, op2.op2]), op2.op1);
 
   // a/1 = a
-  if (op2.isOne) return op1;
-
-  // 1/a = a^-1
-  if (op1.isOne) return op2.inv();
+  if (op2.isEqual(1)) return op1;
 
   // a/(-1) = -a
-  if (op2.isNegativeOne) return op1.neg();
+  if (op2.isEqual(-1)) return op1.neg();
 
-  // 0/a = 0, 0
-  if (op1.isZero) return ce.Zero;
+  // 1/a = a^-1
+  if (op1.isEqual(1)) return op2.inv();
+
+  // a/∞ = 0, ∞/∞ = NaN
+  if (op2.isInfinity) return op1.isInfinity ? ce.NaN : ce.Zero;
 
   // Note: (-1)/a ≠ -(a^-1). We distribute Negate over Divide.
 
-  // √a/√b = √(a/b) as a numeric value
+  // √a/√b = (1/b)√(ab) as a numeric value
   if (op1.operator === 'Sqrt' && op2.operator === 'Sqrt') {
     const a = asSmallInteger(op1.op1);
     const b = asSmallInteger(op2.op1);
     if (a !== null && b !== null)
       return ce.number(ce._numericValue({ radical: a * b, rational: [1, b] }));
   } else if (op1.operator === 'Sqrt') {
-    // √a/b = √(a/b) as a numeric value
+    // √a/b = (1/b)√a as a numeric value
     const a = asSmallInteger(op1.op1);
     const b = asSmallInteger(op2);
     if (a !== null && b !== null)
       return ce.number(ce._numericValue({ radical: a, rational: [1, b] }));
   } else if (op2.operator === 'Sqrt') {
-    // a/√b = a/(√b) as a numeric value
+    // a/√b = (a/b)√b as a numeric value
     const a = asSmallInteger(op1);
     const b = asSmallInteger(op2.op1);
     if (a !== null && b !== null)
@@ -96,10 +101,11 @@ export function canonicalDivide(
       (typeof v1 !== 'number' && v1.im !== 0) ||
       (typeof v2 !== 'number' && v2.im !== 0)
     ) {
-      // If we have an imaginary part, not a rational
+      // If we have an imaginary part, keep the division
       return ce._fn('Divide', [op1, op2]);
     }
 
+    // a/b with a and b integer literals -> a/b rational
     if (
       typeof v1 === 'number' &&
       Number.isInteger(v1) &&
@@ -110,12 +116,12 @@ export function canonicalDivide(
 
     if (typeof v1 === 'number' && Number.isInteger(v1)) {
       if (v1 === 0) return ce.Zero;
-      if ((v2 as NumericValue).type === 'integer') {
-        const b = (v2 as NumericValue).bignumRe;
+      if (typeof v2 !== 'number' && isSubtype(v2.type, 'integer')) {
+        const b = v2.bignumRe;
         if (b !== undefined) {
           if (b.isInteger()) return ce.number([bigint(v1)!, bigint(b)!]);
         } else {
-          const d = (v2 as NumericValue).re;
+          const d = v2.re;
           if (Number.isInteger(d)) return ce.number([v1, d]);
         }
       }
@@ -127,29 +133,27 @@ export function canonicalDivide(
   // At least one of op1 or op2 are not numeric value.
   // Try to factor them.
 
+  // @fixme: toNumericValue will collapse any exact value. So 2*x*5 will be 10*x. This is not desirable for canonicalization.
   const [c1, t1] = op1.toNumericValue();
-  if (c1.isZero) return ce.Zero;
+  if (c1.isZero) return ce.Zero; // @fixme can't happen? Checked for 0 above
 
   const [c2, t2] = op2.toNumericValue();
 
-  if (c2.isZero) return ce.NaN;
+  if (c2.isZero) return ce.NaN; // @fixme can't happen? Checked for 0 above
 
   const c = c1.div(c2);
 
-  if (c.isOne) return t2.isOne ? t1 : ce._fn('Divide', [t1, t2]);
+  if (c.isOne) return t2.isEqual(1) ? t1 : ce._fn('Divide', [t1, t2]);
 
   if (c.isNegativeOne)
-    return t2.isOne ? t1.neg() : ce._fn('Divide', [t1.neg(), t2]);
+    return t2.isEqual(1) ? t1.neg() : ce._fn('Divide', [t1.neg(), t2]);
 
-  // If c is not exact, don't use. For example: `π/4` would remain as
-  // `π/4` and not `0.25π`
-  if (c.type !== 'integer' && c.type !== 'rational')
-    return ce._fn('Divide', [t1.mul(c1), t2.mul(c2)]);
+  // If c is exact, use as a product: `c * (t1/t2)`
+  // So, π/4 -> 1/4 * π (prefer multiplication over division)
+  if (c.isExact)
+    return ce._fn('Multiply', [ce.number(c), ce._fn('Divide', [t1, t2])]);
 
-  const num = c.numerator.isOne ? t1 : t1.mul(ce.number(c.numerator));
-  const denom = c.denominator.isOne ? t2 : t2.mul(ce.number(c.denominator));
-
-  return denom.isOne ? num : ce._fn('Divide', [num, denom]);
+  return ce._fn('Divide', [op1, op2]);
 }
 
 export function div(
@@ -166,7 +170,7 @@ export function div(
 
   if (typeof denom === 'number') {
     if (isNaN(denom)) return ce.NaN;
-    if (num.isZero) {
+    if (num.isEqual(0)) {
       // 0/0 = NaN, 0/±∞ = NaN
       if (denom === 0 || !isFinite(denom)) return ce.NaN;
       return num; // 0
@@ -190,17 +194,19 @@ export function div(
     }
   } else {
     if (denom.isNaN) return ce.NaN;
-    if (num.isZero) {
-      if (denom.isZero || denom.isFinite === false) return ce.NaN;
+    if (num.isEqual(0)) {
+      if (denom.isEqual(0) || denom.isFinite === false) return ce.NaN;
       return ce.Zero;
     }
 
     // a/1 = a
-    if (denom.isOne) return num;
+    if (denom.isEqual(1)) return num;
+
     // a/(-1) = -a
-    if (denom.isNegativeOne) return num.neg();
+    if (denom.isEqual(-1)) return num.neg();
+
     // a/0 = NaN (a≠0)
-    if (denom.isZero) return ce.NaN;
+    if (denom.isEqual(0)) return ce.NaN;
 
     if (num.isNumberLiteral && denom.isNumberLiteral) {
       const numV = num.numericValue!;

@@ -4,15 +4,12 @@ import { Expression, MathJsonIdentifier } from '../../math-json/types';
 
 import type {
   BoxedBaseDefinition,
-  BoxedDomain,
   BoxedExpression,
   BoxedFunctionDefinition,
   BoxedRuleSet,
   BoxedSubstitution,
   BoxedSymbolDefinition,
   CanonicalOptions,
-  DomainCompatibility,
-  DomainLiteral,
   EvaluateOptions,
   IComputeEngine,
   JsonSerializationOptions,
@@ -65,8 +62,6 @@ export abstract class _BoxedExpression implements BoxedExpression {
   abstract get isCanonical(): boolean;
   abstract set isCanonical(_val: boolean);
 
-  abstract isSame(rhs: BoxedExpression): boolean;
-  abstract isEqual(rhs: number | BoxedExpression): boolean;
   abstract match(
     pattern: BoxedExpression,
     options?: PatternMatchOptions
@@ -82,6 +77,38 @@ export abstract class _BoxedExpression implements BoxedExpression {
   constructor(ce: IComputeEngine, metadata?: Metadata) {
     this.engine = ce;
     if (metadata?.latex !== undefined) this.verbatimLatex = metadata.latex;
+  }
+
+  isSame(rhs: BoxedExpression): boolean {
+    return same(this, rhs);
+  }
+
+  isEqual(rhs: number | BoxedExpression): boolean | undefined {
+    return eq(this, rhs);
+  }
+
+  isLess(_rhs: number | BoxedExpression): boolean | undefined {
+    const c = cmp(this, _rhs);
+    if (c === undefined) return undefined;
+    return c === '<';
+  }
+
+  isLessEqual(_rhs: number | BoxedExpression): boolean | undefined {
+    const c = cmp(this, _rhs);
+    if (c === undefined) return undefined;
+    return c === '<=' || c === '<' || c === '=';
+  }
+
+  isGreater(_rhs: number | BoxedExpression): boolean | undefined {
+    const c = cmp(this, _rhs);
+    if (c === undefined) return undefined;
+    return c === '>';
+  }
+
+  isGreaterEqual(_rhs: number | BoxedExpression): boolean | undefined {
+    const c = cmp(this, _rhs);
+    if (c === undefined) return undefined;
+    return c === '>=' || c === '>' || c === '=';
   }
 
   /**
@@ -272,7 +299,7 @@ export abstract class _BoxedExpression implements BoxedExpression {
   /** Object.is() */
   is(rhs: any): boolean {
     if (rhs === null || rhs === undefined) return false;
-    return this.isSame(this.engine.box(rhs));
+    return same(this, this.engine.box(rhs));
   }
 
   get canonical(): BoxedExpression {
@@ -296,6 +323,10 @@ export abstract class _BoxedExpression implements BoxedExpression {
   }
 
   get symbol(): string | null {
+    return null;
+  }
+
+  get tensor(): null | AbstractTensor<'expression'> {
     return null;
   }
 
@@ -376,22 +407,6 @@ export abstract class _BoxedExpression implements BoxedExpression {
     return undefined;
   }
 
-  get isZero(): boolean | undefined {
-    return undefined;
-  }
-
-  get isNotZero(): boolean | undefined {
-    return undefined;
-  }
-
-  get isOne(): boolean | undefined {
-    return undefined;
-  }
-
-  get isNegativeOne(): boolean | undefined {
-    return undefined;
-  }
-
   get isInfinity(): boolean | undefined {
     return undefined;
   }
@@ -415,6 +430,10 @@ export abstract class _BoxedExpression implements BoxedExpression {
 
   get isNumberLiteral(): boolean {
     return this.numericValue !== null;
+  }
+
+  get isFunctionExpression(): boolean {
+    return false;
   }
 
   get re(): number | undefined {
@@ -538,22 +557,6 @@ export abstract class _BoxedExpression implements BoxedExpression {
     return false;
   }
 
-  isLess(_rhs: number | BoxedExpression): boolean | undefined {
-    return undefined;
-  }
-
-  isLessEqual(_rhs: number | BoxedExpression): boolean | undefined {
-    return undefined;
-  }
-
-  isGreater(_rhs: number | BoxedExpression): boolean | undefined {
-    return undefined;
-  }
-
-  isGreaterEqual(_rhs: number | BoxedExpression): boolean | undefined {
-    return undefined;
-  }
-
   // x > 0
   get isPositive(): boolean | undefined {
     return undefined;
@@ -579,13 +582,6 @@ export abstract class _BoxedExpression implements BoxedExpression {
   //
   //
   //
-
-  isCompatible(
-    _dom: BoxedDomain | DomainLiteral,
-    _kind?: DomainCompatibility
-  ): boolean {
-    return false;
-  }
 
   get description(): string[] | undefined {
     if (!this.baseDefinition) return undefined;
@@ -620,7 +616,7 @@ export abstract class _BoxedExpression implements BoxedExpression {
     return undefined;
   }
 
-  infer(_domain: BoxedDomain): boolean {
+  infer(t: Type): boolean {
     return false; // The inference was ignored if false
   }
 
@@ -642,15 +638,12 @@ export abstract class _BoxedExpression implements BoxedExpression {
     throw new Error(`Can't change the value of \\(${this.latex}\\)`);
   }
 
-  get domain(): BoxedDomain | undefined {
-    return undefined;
-  }
-  set domain(_domain: BoxedDomain) {
-    throw new Error(`Can't change the domain of \\(${this.latex}\\)`);
-  }
-
   get type(): Type {
     return 'unknown';
+  }
+
+  set type(_type: Type) {
+    throw new Error(`Can't change the type of \\(${this.latex}\\)`);
   }
 
   get isNumber(): boolean | undefined {
@@ -666,10 +659,6 @@ export abstract class _BoxedExpression implements BoxedExpression {
   }
 
   get isReal(): boolean | undefined {
-    return undefined;
-  }
-
-  get isImaginary(): boolean | undefined {
     return undefined;
   }
 
@@ -700,6 +689,42 @@ export abstract class _BoxedExpression implements BoxedExpression {
     // } catch (e) {}
     // return undefined;
   }
+
+  get isCollection(): boolean {
+    return false;
+  }
+
+  contains(_rhs: BoxedExpression): boolean {
+    return false;
+  }
+
+  subsetOf(_target: BoxedExpression, _strict: boolean): boolean {
+    return false;
+  }
+
+  get size(): number {
+    return 0;
+  }
+
+  each(_start?: number, _count?: number): Iterator<BoxedExpression, undefined> {
+    return {
+      next() {
+        return { done: true, value: undefined };
+      },
+    };
+  }
+
+  at(_index: number): BoxedExpression | undefined {
+    return undefined;
+  }
+
+  get(_key: string | BoxedExpression): BoxedExpression | undefined {
+    return undefined;
+  }
+
+  indexOf(_expr: BoxedExpression): number {
+    return -1;
+  }
 }
 
 /**
@@ -721,7 +746,7 @@ function getFreeVariables(expr: BoxedExpression, result: Set<string>): void {
     if (def && def.value !== undefined) return;
 
     const fnDef = expr.engine.lookupFunction(expr.symbol);
-    if (fnDef && fnDef.signature.evaluate) return;
+    if (fnDef && fnDef.evaluate) return;
 
     result.add(expr.symbol);
     return;
@@ -755,7 +780,7 @@ function getUnknowns(expr: BoxedExpression, result: Set<string>): void {
     if (def && def.value !== undefined) return;
 
     const fnDef = expr.engine.lookupFunction(s);
-    if (fnDef && fnDef.signature.evaluate) return;
+    if (fnDef && fnDef.evaluate) return;
 
     result.add(s);
     return;
@@ -780,3 +805,5 @@ export function getSubexpressions(
 
 import { serializeJson } from './serialize';
 import { Type } from '../../common/type/types';
+import { cmp, eq, same } from './compare';
+import { AbstractTensor } from '../tensor/tensors';

@@ -854,7 +854,7 @@ export function constructibleValues(
 function quadrant(
   theta: BoxedExpression
 ): [number | undefined, number | undefined] {
-  theta = theta.N();
+  // theta = theta.N();
   if (!theta.isValid || !theta.isNumberLiteral) return [undefined, undefined];
   if (theta.im !== 0) return [undefined, undefined];
 

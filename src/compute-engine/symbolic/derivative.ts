@@ -1,7 +1,7 @@
 import { apply } from '../function-utils';
 import { mul } from '../boxed-expression/arithmetic-multiply';
-import { add } from '../boxed-expression/terms';
 import type { BoxedExpression } from '../public';
+import { add } from '../boxed-expression/arithmetic-add';
 
 // See also:
 //

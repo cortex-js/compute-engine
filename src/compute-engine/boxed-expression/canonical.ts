@@ -98,10 +98,9 @@ function invisibleOperatorForm(expr: BoxedExpression) {
 
   if (expr.operator === 'InvisibleOperator') {
     return (
-      canonicalInvisibleOperator(
-        expr.engine,
-        expr.ops.map(invisibleOperatorForm)
-      ) ?? expr
+      canonicalInvisibleOperator(expr.ops.map(invisibleOperatorForm), {
+        engine: expr.engine,
+      }) ?? expr
     );
   }
 

@@ -6,6 +6,7 @@ import { MACHINE_TOLERANCE, SmallInteger } from '../numerics/numeric';
 import { asMachineRational } from '../numerics/rationals';
 import { numberToString } from '../numerics/strings';
 import { numberToExpression } from '../numerics/expression';
+import { NumericType } from '../../common/type/types';
 
 export class MachineNumericValue extends NumericValue {
   decimal: number;
@@ -56,10 +57,15 @@ export class MachineNumericValue extends NumericValue {
     console.assert(!isNaN(this.im));
   }
 
-  get type(): 'complex' | 'real' | 'rational' | 'integer' {
-    if (this.im !== 0) return 'complex';
-    if (Number.isInteger(this.decimal)) return 'integer';
-    return 'real';
+  get type(): NumericType {
+    if (this.im !== 0) {
+      if (!Number.isFinite(this.im)) return 'non_finite_number';
+      if (this.decimal === 0) return 'finite_imaginary';
+      return 'finite_complex';
+    }
+    if (!Number.isFinite(this.decimal)) return 'non_finite_number';
+    if (Number.isInteger(this.decimal)) return 'finite_integer';
+    return 'finite_real';
   }
 
   get isExact(): boolean {
@@ -505,7 +511,8 @@ export class MachineNumericValue extends NumericValue {
   }
 
   eq(other: number | NumericValue): boolean {
-    if (typeof other === 'number') return chop(this.decimal - other) === 0;
+    if (typeof other === 'number')
+      return this.im === 0 && chop(this.decimal - other) === 0;
     return (
       chop(this.decimal - other.re) === 0 && chop(this.im - other.im) === 0
     );

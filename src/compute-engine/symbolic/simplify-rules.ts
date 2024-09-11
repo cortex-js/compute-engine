@@ -1,4 +1,3 @@
-import { add } from '../boxed-expression/terms';
 import {
   constructibleValues,
   isConstructible,
@@ -14,6 +13,7 @@ import {
   isRelationalOperator,
 } from '../boxed-expression/utils';
 import { factor } from '../boxed-expression/factor';
+import { add } from '../boxed-expression/arithmetic-add';
 
 /**
  * @todo: a set to "tidy" an expression. Different from a canonical form, but
@@ -266,7 +266,8 @@ export const SIMPLIFY_RULES: Rule[] = [
     const ce = expr.engine;
     if (y.isFinite === false && x.isFinite === false)
       return { value: ce.NaN, because: 'arctan2' };
-    if (y.isZero && x.isZero) return { value: ce.Zero, because: 'arctan2' };
+    if (y.isEqual(0) && x.isEqual(0))
+      return { value: ce.Zero, because: 'arctan2' };
     if (x.isFinite === false)
       return { value: x.isPositive ? ce.Zero : ce.Pi, because: 'arctan2' };
     if (y.isFinite === false)
@@ -274,13 +275,20 @@ export const SIMPLIFY_RULES: Rule[] = [
         value: y.isPositive ? ce.Pi.div(2) : ce.Pi.div(-2),
         because: 'arctan2',
       };
-    if (y.isZero)
+    if (y.isEqual(0))
       return { value: x.isPositive ? ce.Zero : ce.Pi, because: 'arctan2' };
     return {
       value: ce.function('Arctan', [y.div(x)]).simplify(),
       because: 'arctan2',
     };
   },
+
+  '\\arsinh(x) -> \\ln(x+\\sqrt{x^2+1})',
+  '\\arcosh(x) -> \\ln(x+\\sqrt{x^2-1})',
+  '\\artanh(x) -> \\frac{1}{2}\\ln(\\frac{1+x}{1-x})',
+  '\\operatorname{arcoth}(x) -> \\frac{1}{2}\\ln(\\frac{x+1}{x-1})',
+  '\\arsech(x) -> \\ln(\\frac{1+\\sqrt{1-x^2}}{x})',
+  '\\operatorname{arccsch}(x) -> \\ln(\\frac{1}{x} + \\sqrt{\\frac{1}{x^2}+1})',
 
   //
   // Logic
@@ -1368,7 +1376,7 @@ function simplifyRelationalOperator(
   console.assert(isRelationalOperator(expr.operator));
   if (expr.nops === 2) {
     // Try f(x) < g(x) -> f(x) - g(x) < 0
-    if (expr.op2.isNotZero) {
+    if (expr.op2.isEqual(0) === false) {
       const alt = factor(
         ce.function(expr.operator, [expr.op1.sub(expr.op2), ce.Zero])
       );

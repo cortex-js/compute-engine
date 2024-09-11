@@ -1,14 +1,13 @@
 import type { BoxedExpression } from './public';
 
-import { isInequality, isRelationalOperator } from './utils';
+import { isRelationalOperator } from './utils';
 
 import { Product, commonTerms } from './product';
 
 import { NumericValue } from '../numeric-value/public';
 
-import { canonicalMultiply } from './arithmetic-multiply';
-
-import { add } from './terms';
+import { mul } from './arithmetic-multiply';
+import { add } from './arithmetic-add';
 
 /** Combine rational expressions into a single fraction */
 export function together(op: BoxedExpression): BoxedExpression {
@@ -59,7 +58,7 @@ export function factor(expr: BoxedExpression): BoxedExpression {
       rhs.div(coef);
     }
 
-    if (!common.isOne) {
+    if (!common.isEqual(1)) {
       // We have some symbolic factor in common ("x", etc...)
       if (common.isPositive) {
         lhs.div(common);
@@ -90,13 +89,13 @@ export function factor(expr: BoxedExpression): BoxedExpression {
       if (!coeff.isZero) terms.push({ coeff, term });
     }
 
-    if (!common || common?.isOne) return expr;
+    if (!common || common.isOne) return expr;
 
     const newTerms = terms.map(({ coeff, term }) =>
-      canonicalMultiply(ce, [term, ce.box(coeff.div(common))])
+      mul(term, ce.box(coeff.div(common)))
     );
 
-    return canonicalMultiply(ce, [ce.box(common), add(...newTerms)]);
+    return mul(ce.number(common), add(...newTerms));
   }
 
   return Product.from(together(expr)).asExpression();

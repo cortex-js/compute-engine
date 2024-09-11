@@ -8,7 +8,6 @@ import type {
   ReplaceOptions,
   Metadata,
   PatternMatchOptions,
-  BoxedDomain,
   RuntimeScope,
   BoxedSubstitution,
   EvaluateOptions,
@@ -17,12 +16,7 @@ import type {
   CanonicalOptions,
 } from '../public';
 
-import type {
-  BoxedExpression,
-  FunctionNumericFlags,
-  SemiBoxedExpression,
-  Sign,
-} from './public';
+import type { BoxedExpression, SemiBoxedExpression, Sign } from './public';
 
 import { findUnivariateRoots } from './solve';
 import { replace } from './rules';
@@ -30,7 +24,7 @@ import { negate } from './negate';
 import { Product } from './product';
 import { simplify } from './simplify';
 
-import { asSmallInteger, signDiff } from './numerics';
+import { asSmallInteger } from './numerics';
 
 import { at, isFiniteIndexableCollection } from '../collection-utils';
 
@@ -40,19 +34,25 @@ import { NumericValue } from '../numeric-value/public';
 
 import { _BoxedExpression } from './abstract-boxed-expression';
 import { DEFAULT_COMPLEXITY, sortOperands } from './order';
-import {
-  hashCode,
-  normalizedUnknownsForSolve,
-  isRelationalOperator,
-} from './utils';
-import { narrow } from './boxed-domain';
+import { hashCode, normalizedUnknownsForSolve } from './utils';
 import { match } from './match';
 import { factor } from './factor';
-import { add } from './terms';
 import { holdMap } from './hold';
-import { PrimitiveType, Type } from '../../common/type/types';
+import { Type } from '../../common/type/types';
 import { isSubtype } from '../../common/type/subtype';
 import { div } from './arithmetic-divide';
+import { add } from './arithmetic-add';
+import { pow } from './arithmetic-power';
+import { functionResult, narrow } from '../../common/type/utils';
+import { parseType } from '../../common/type/parse';
+import {
+  positiveSign,
+  nonNegativeSign,
+  negativeSign,
+  nonPositiveSign,
+  sgn,
+} from './sgn';
+import { cachedValue, CachedValue } from './cache';
 
 /**
  * A boxed function represent an expression that can be
@@ -90,13 +90,25 @@ export class BoxedFunction extends _BoxedExpression {
 
   private _isStructural: boolean;
 
-  // The domain of the value of the function applied to its arguments
-  private _result: BoxedDomain | undefined = undefined;
-
   private _hash: number | undefined;
 
-  // Cached sign of the function (if all the arguments are constant)
-  private _sgn: Sign | undefined | null = null;
+  // Cached properties of the expression
+  private _value: CachedValue<BoxedExpression> = {
+    value: null,
+    generation: -1,
+  };
+  private _valueN: CachedValue<BoxedExpression> = {
+    value: null,
+    generation: -1,
+  };
+  private _sgn: CachedValue<Sign | undefined> = {
+    value: null,
+    generation: -1,
+  };
+  private _type: CachedValue<Type | undefined> = {
+    value: null,
+    generation: -1,
+  };
 
   constructor(
     ce: IComputeEngine,
@@ -138,14 +150,23 @@ export class BoxedFunction extends _BoxedExpression {
   }
 
   // For function expressions, infer infers the result domain of the function
-  infer(domain: BoxedDomain): boolean {
-    const def = this._def;
+  infer(t: Type): boolean {
+    const def = this.functionDefinition;
     if (!def) return false;
 
-    if (!def.signature.inferredSignature) return false;
+    if (!def.inferredSignature) return false;
 
-    if (typeof def.signature.result !== 'function')
-      def.signature.result = narrow(def.signature.result, domain);
+    // If the signature was inferred, refine it bt narrowing the result
+    if (
+      typeof def.signature !== 'string' &&
+      def.signature.kind === 'signature'
+    ) {
+      def.signature = {
+        ...def.signature,
+        result: narrow(def.signature.result, t),
+      };
+    }
+
     return true;
   }
 
@@ -293,6 +314,13 @@ export class BoxedFunction extends _BoxedExpression {
     let expr: BoxedExpression = this;
     if (expr.operator === 'Add') {
       expr = factor(this);
+      if (expr.numericValue !== null) {
+        if (typeof expr.numericValue === 'number') {
+          if (Number.isInteger(expr.numericValue))
+            return [ce._numericValue(expr.numericValue), ce.One];
+        } else if (expr.numericValue.isExact)
+          return [expr.numericValue!, ce.One];
+      }
       // if (expr.op !== 'Add') return expr.toNumericValue();
     }
 
@@ -313,7 +341,7 @@ export class BoxedFunction extends _BoxedExpression {
       for (const arg of expr.ops!) {
         const [c, r] = arg.toNumericValue();
         coef = coef.mul(c);
-        if (r.isOne !== true) rest.push(r);
+        if (r.isEqual(1) !== true) rest.push(r);
       }
       if (rest.length === 0) return [coef, ce.One];
       if (rest.length === 1) return [coef, rest[0]];
@@ -327,7 +355,7 @@ export class BoxedFunction extends _BoxedExpression {
       const [coef1, numer] = expr.op1.toNumericValue();
       const [coef2, denom] = expr.op2.toNumericValue();
       const coef = coef1.div(coef2);
-      if (denom.isOne) return [coef, numer];
+      if (denom.isEqual(1)) return [coef, numer];
       return [coef, ce.function('Divide', [numer, denom])];
     }
 
@@ -355,7 +383,7 @@ export class BoxedFunction extends _BoxedExpression {
     if (expr.operator === 'Sqrt') {
       const [coef, rest] = expr.op1.toNumericValue();
       // @fastpasth
-      if (rest.isOne || rest.isZero) {
+      if (rest.isEqual(1) || rest.isEqual(0)) {
         if (coef.isOne || coef.isZero) return [coef, rest];
         return [coef.sqrt(), rest];
       }
@@ -441,80 +469,26 @@ export class BoxedFunction extends _BoxedExpression {
   }
 
   get sgn(): Sign | undefined {
-    if (!this.isValid || this.isNumber !== true) return undefined;
-
-    // If the sign has been computed before, return it
-    if (this._sgn !== null) return this._sgn;
-
-    // @todo: Could also cache non-constant values, but this
-    // would require keeping track of the state of the compute engine
-    // (maybe with a version number that would get incremented when
-    // a value is updated)
-
-    const memoizable = this.isPure && this._ops.every((x) => x.isConstant);
-
-    let s: Sign | undefined = undefined;
-    const sig = this.functionDefinition?.signature;
-    if (sig?.sgn) {
-      const context = this.engine.swapScope(this.scope);
-      s = sig.sgn(this._ops, { engine: this.engine });
-      this.engine.swapScope(context);
-    }
-
-    //
-    // Check the flags
-    //
-    if (s === undefined) {
-      if (flagValue(this, 'zero') === true) s = 'zero';
-      else if (flagValue(this, 'nonNegative') === true) s = 'non-negative';
-      else if (flagValue(this, 'positive') === true) s = 'positive';
-      else if (flagValue(this, 'negative') === true) s = 'negative';
-      else if (flagValue(this, 'nonPositive') === true) s = 'non-positive';
-      else if (this.isReal === false || this.isNaN === true) {
-        s = 'unsigned';
-      } else if (this.isReal && flagValue(this, 'zero') === false)
-        s = 'real-not-zero';
-      else if (flagValue(this, 'zero') === false) s = 'not-zero';
-      else if (this.isReal) s = 'real';
-    }
-
-    if (memoizable) this._sgn = s;
-    return s;
-  }
-
-  isLess(rhs: number | BoxedExpression): boolean | undefined {
-    if (rhs === 0 || (typeof rhs !== 'number' && rhs.isZero))
-      return this.isNegative;
-    return undefined;
-  }
-
-  isLessEqual(rhs: number | BoxedExpression): boolean | undefined {
-    if (rhs === 0 || (typeof rhs !== 'number' && rhs.isZero))
-      return this.isNonPositive;
-
-    return undefined;
-  }
-
-  isGreater(rhs: number | BoxedExpression): boolean | undefined {
-    if (rhs === 0 || (typeof rhs !== 'number' && rhs.isZero))
-      return this.isPositive;
-
-    return undefined;
-  }
-
-  isGreaterEqual(rhs: number | BoxedExpression): boolean | undefined {
-    if (rhs === 0 || (typeof rhs !== 'number' && rhs.isZero))
-      return this.isNonNegative;
-
-    return undefined;
+    const gen =
+      this.isPure && this._ops.every((x) => x.isConstant)
+        ? undefined
+        : this.engine.generation;
+    return cachedValue(this._sgn, gen, () => {
+      if (!this.isValid || this.isNumber !== true) return undefined;
+      return sgn(this);
+    });
   }
 
   get isNaN(): boolean | undefined {
-    return flagValue(this, 'NaN');
+    return this.sgn === 'nan';
   }
 
   get isInfinity(): boolean | undefined {
-    return flagValue(this, 'infinity');
+    const s = this.sgn;
+    if (s === 'positive-infinity' || s === 'negative-infinity') return true;
+    if (s === 'complex-infinity') return true;
+    return false;
+    // return this.type === 'number' && !this.isNaN;
   }
 
   // Not +- Infinity, not NaN
@@ -526,119 +500,34 @@ export class BoxedFunction extends _BoxedExpression {
     return true;
   }
 
-  get isZero(): boolean | undefined {
-    if (this.isNumber !== true) return false;
-    const s = this.sgn;
-
-    if (s === undefined) return undefined;
-    if (s === 'zero') return true;
-    if (
-      [
-        'not-zero',
-        'real-not-zero',
-        'positive',
-        'negative',
-        'unsigned',
-      ].includes(s)
-    )
-      return false;
-    return undefined;
-  }
-
-  get isNotZero(): boolean | undefined {
-    if (this.isNumber !== true) return false;
-    const s = this.sgn;
-    if (s === undefined) return undefined;
-
-    if (['not-zero', 'real-not-zero', 'positive', 'negative'].includes(s))
-      return true;
-    if (s === 'zero') return false;
-    return undefined;
-  }
-
   get isOne(): boolean | undefined {
-    const f = flagValue(this, 'one');
-    if (f !== undefined) return f;
-
     if (this.isNonPositive === true || this.isReal === false) return false;
     return undefined;
   }
 
   get isNegativeOne(): boolean | undefined {
-    const f = flagValue(this, 'negativeOne');
-    if (f !== undefined) return f;
-
     if (this.isNonNegative === true || this.isReal === false) return false;
     return undefined;
   }
 
   // x > 0
   get isPositive(): boolean | undefined {
-    if (this.isNumber !== true) return false;
-
-    const s = this.sgn;
-    if (s === undefined) return undefined;
-
-    if (s === 'positive') return true;
-    if (['non-positive', 'zero', 'unsigned', 'negative'].includes(s))
-      return false;
-
-    return undefined;
+    return positiveSign(this.sgn);
   }
 
   // x >= 0
   get isNonNegative(): boolean | undefined {
-    if (this.isNumber !== true) return false;
-
-    const s = this.sgn;
-    if (s === undefined) return undefined;
-
-    if (s === 'positive' || s === 'non-negative') return true;
-    if (['negative', 'zero', 'unsigned'].includes(s)) return false;
-    return undefined;
+    return nonNegativeSign(this.sgn);
   }
 
   // x < 0
   get isNegative(): boolean | undefined {
-    if (this.isNumber !== true) return false;
-    const s = this.sgn;
-    if (s === undefined) return undefined;
-    if (s === 'negative') return true;
-    if (['non-negative', 'zero', 'unsigned', 'positive'].includes(s))
-      return false;
-    return undefined;
+    return negativeSign(this.sgn);
   }
 
   // x <= 0
   get isNonPositive(): boolean | undefined {
-    if (this.isNumber !== true) return false;
-    const s = this.sgn;
-    if (s === undefined) return undefined;
-
-    if (s === 'negative' || s === 'non-positive') return true;
-    if (['positive', 'zero', 'unsigned'].includes(s)) return false;
-
-    return undefined;
-  }
-
-  /** `isSame` is structural/symbolic equality */
-  isSame(rhs: BoxedExpression): boolean {
-    if (this === rhs) return true;
-
-    if (!(rhs instanceof BoxedFunction)) return false;
-
-    // Number of arguments must match
-    if (this.nops !== rhs.nops) return false;
-
-    // Operators must match
-    if (this.operator !== rhs.operator) return false;
-
-    const lhsTail = this.ops!;
-    const rhsTail = rhs.ops!;
-    for (let i = 0; i < lhsTail.length; i++)
-      if (!lhsTail[i].isSame(rhsTail[i])) return false;
-
-    return true;
+    return nonPositiveSign(this.sgn);
   }
 
   get numerator(): BoxedExpression {
@@ -761,84 +650,7 @@ export class BoxedFunction extends _BoxedExpression {
   }
 
   pow(exp: number | BoxedExpression): BoxedExpression {
-    if (!this.isCanonical) return this.canonical.pow(exp);
-
-    if (typeof exp !== 'number') exp = exp.canonical;
-
-    const e = typeof exp === 'number' ? exp : exp.im === 0 ? exp.re : undefined;
-
-    if (e === 0) return this.engine.One;
-    if (e === 1) return this;
-    if (e === -1) return this.inv();
-    const ce = this.engine;
-    if (e === Number.POSITIVE_INFINITY) {
-      if (this.isGreater(1)) return ce.PositiveInfinity;
-      if (this.isPositive && this.isLess(1)) return ce.Zero;
-    }
-    if (e === Number.NEGATIVE_INFINITY) {
-      if (this.isGreater(1)) return ce.Zero;
-      if (this.isPositive && this.isLess(1)) return ce.PositiveInfinity;
-    }
-
-    if (typeof exp !== 'number' && exp.operator === 'Negate')
-      return this.pow(exp.op1).inv();
-
-    // (a^b)^c -> a^(b*c)
-    if (this.operator === 'Power') {
-      const [base, power] = this.ops;
-      return base.pow(power.mul(exp));
-    }
-
-    // (a/b)^c -> a^c / b^c
-    if (this.operator === 'Divide') {
-      const [num, denom] = this.ops;
-      return num.pow(exp).div(denom.pow(exp));
-    }
-
-    if (this.operator === 'Negate') {
-      // (-x)^n = (-1)^n x^n
-      if (e !== undefined) {
-        if (e % 2 === 0) return this.op1.pow(exp);
-        return this.op1.pow(exp).neg();
-      }
-    }
-
-    // (√a)^b -> a^(b/2) or √(a^b)
-    if (this.operator === 'Sqrt') {
-      if (e === 2) return this.op1;
-      if (e !== undefined && e % 2 === 0) return this.op1.pow(e / 2);
-      return this.op1.pow(exp).sqrt();
-    }
-
-    // exp(a)^b -> e^(a*b)
-    if (this.operator === 'Exp') return this.engine.E.pow(this.op1.mul(exp));
-
-    // (a*b)^c -> a^c * b^c
-    if (this.operator === 'Multiply') {
-      const ops = this.ops.map((x) => x.pow(exp));
-      // return mul(...ops);  // don't call: infinite recursion
-      return this.engine._fn('Multiply', ops);
-    }
-
-    // a^(b/c) -> root(a, c)^b if b = 1 or c = 1
-    if (
-      typeof exp !== 'number' &&
-      exp.isNumberLiteral &&
-      exp.type === 'rational'
-    ) {
-      const v = exp.numericValue as NumericValue;
-
-      if (v.numerator.isOne) return this.root(v.denominator.re);
-      if (v.denominator.isOne) return this.pow(v.numerator.re);
-    }
-
-    // (a^(1/b))^c -> a^(c/b)
-    if (this.operator === 'Root') {
-      const [base, root] = this.ops;
-      return base.pow(this.engine.box(exp).div(root));
-    }
-
-    return this.engine._fn('Power', [this, this.engine.box(exp)]);
+    return pow(this, exp);
   }
 
   root(exp: number | BoxedExpression): BoxedExpression {
@@ -920,7 +732,7 @@ export class BoxedFunction extends _BoxedExpression {
     if (!this.isCanonical) return this.canonical.ln(base);
 
     // Mathematica returns `Log[0]` as `-∞`
-    if (this.isZero) return this.engine.NegativeInfinity;
+    if (this.isEqual(0)) return this.engine.NegativeInfinity;
 
     // ln(exp(x)) = x
     if (this.operator === 'Exp') return this.op1;
@@ -951,7 +763,7 @@ export class BoxedFunction extends _BoxedExpression {
     if (this.operator === 'Divide')
       return this.op1.ln(base).sub(this.op2.ln(base));
 
-    if (base && base.type === 'integer') {
+    if (base && base.type === 'finite_integer') {
       // ln_10(x) -> log(x)
       if (base.re === 10) return this.engine._fn('Log', [this]);
       // ln_n(x) -> log_n(x)
@@ -974,144 +786,46 @@ export class BoxedFunction extends _BoxedExpression {
   }
 
   get baseDefinition(): BoxedBaseDefinition | undefined {
-    return this.functionDefinition;
+    return this._def;
   }
 
   get functionDefinition(): BoxedFunctionDefinition | undefined {
     return this._def;
   }
 
-  /** `isEqual` is mathematical equality */
-  isEqual(rhs: number | BoxedExpression): boolean {
-    const lhs = this.N();
-
-    if (rhs === 0 || (typeof rhs !== 'number' && rhs.isZero))
-      return lhs.isZero === true;
-    if (rhs === 1 || (typeof rhs !== 'number' && rhs.isOne))
-      return lhs.isOne === true;
-    if (rhs === -1 || (typeof rhs !== 'number' && rhs.isNegativeOne))
-      return lhs.isNegativeOne === true;
-
-    rhs = this.engine.box(rhs);
-    if (this === rhs) return true;
-
-    const operator = lhs.operator;
-    //
-    // Handle relational operators
-    //
-    if (
-      operator === 'Equal' ||
-      operator === 'NotEqual' ||
-      operator === 'Unequal'
-    ) {
-      // @fixme: put lhs and rhs in canonical form, i.e. x + 1 = 2 -> x - 1 = 0
-      if (rhs.operator !== operator) return false;
-      // Equality is commutative
-      if (
-        (lhs.op1.isEqual(rhs.op1) && lhs.op2.isEqual(rhs.op2)) ||
-        (lhs.op1.isEqual(rhs.op2) && lhs.op2.isEqual(rhs.op1))
-      )
-        return true;
-      return false;
-    }
-    if (operator === 'Less') {
-      if (rhs.operator === 'Greater') {
-        if (lhs.op1.isEqual(rhs.op2) && lhs.op2.isEqual(rhs.op1)) return true;
-        return false;
-      }
-    }
-    if (operator === 'Greater') {
-      if (rhs.operator === 'Less') {
-        if (lhs.op1.isEqual(rhs.op2) && lhs.op2.isEqual(rhs.op1)) return true;
-        return false;
-      }
-    }
-    if (operator === 'LessEqual') {
-      if (rhs.operator === 'GreaterEqual') {
-        if (lhs.op1.isEqual(rhs.op2) && lhs.op2.isEqual(rhs.op1)) return true;
-        return false;
-      }
-    }
-    if (operator === 'GreaterEqual') {
-      if (rhs.operator === 'LessEqual') {
-        if (lhs.op1.isEqual(rhs.op2) && lhs.op2.isEqual(rhs.op1)) return true;
-        return false;
-      }
-    }
-    if (isRelationalOperator(operator)) {
-      if (rhs.operator !== lhs.operator) return false;
-      if (lhs.op1.isEqual(rhs.op1) && lhs.op2.isEqual(rhs.op2)) return true;
-      return false;
-    }
-
-    // Not a relational operator. An algebraic expression?
-    // Note: signDiff will attempt to subtract the value (N()) of the
-    // two expressions to check if the difference is zero.
-    const s = signDiff(lhs, rhs);
-    if (s === 0) return true;
-    if (s !== undefined) return false;
-
-    return lhs.isSame(rhs);
-  }
-
   get isNumber(): boolean | undefined {
-    return this.domain?.isCompatible('Numbers');
-    // return isSubtype(this.type, 'number');
+    if (this.type === 'unknown') return undefined;
+    return isSubtype(this.type, 'number');
   }
 
   get isInteger(): boolean | undefined {
-    return this.domain?.isCompatible('Integers');
-    // return isSubtype(this.type, 'integer');
+    if (this.type === 'unknown') return undefined;
+    return isSubtype(this.type, 'integer');
   }
 
   get isRational(): boolean | undefined {
+    if (this.type === 'unknown') return undefined;
+    // integers are rationals
     return isSubtype(this.type, 'rational');
   }
 
   get isReal(): boolean | undefined {
-    return this.domain?.isCompatible('RealNumbers');
-    // return isSubtype(this.type, 'real');
+    if (this.type === 'unknown') return undefined;
+    // rationals and integers are real
+    return isSubtype(this.type, 'real');
   }
 
-  get isImaginary(): boolean | undefined {
-    return this.domain?.isCompatible('ImaginaryNumbers');
-    // return isSubtype(this.type, 'imaginary');
-  }
-
-  get domain(): BoxedDomain | undefined {
-    if (this._result !== undefined) return this._result;
-    if (!this.canonical) return undefined;
-
-    const ce = this.engine;
-
-    let result: BoxedDomain | undefined | null = undefined;
-
-    if (this._def) {
-      const sig = this._def.signature;
-      if (typeof sig.result === 'function') result = sig.result(ce, this._ops);
-      else result = sig.result;
-    }
-
-    result ??= undefined;
-
-    this._result = result;
-    return result;
+  get isFunctionExpression(): boolean {
+    return true;
   }
 
   /** The type of the value of the function */
   get type(): Type {
-    if (!this.isValid) return 'error';
-
-    const def = this._def;
-    if (!def) return 'function';
-
-    if (typeof def.signature.type === 'string')
-      return def.signature.type as PrimitiveType;
-
-    if (typeof def.signature.type === 'function')
-      return def.signature.type(this.ops!);
-
-    return 'function';
+    const gen =
+      this.isPure && this._ops.every((x) => x.isConstant)
+        ? undefined
+        : this.engine.generation;
+    return cachedValue(this._type, gen, () => type(this)) ?? 'unknown';
   }
 
   simplify(options?: Partial<SimplifyOptions>): BoxedExpression {
@@ -1119,88 +833,97 @@ export class BoxedFunction extends _BoxedExpression {
   }
 
   evaluate(options?: EvaluateOptions): BoxedExpression {
-    //
-    // 1/ Use the canonical form
-    //
-    if (!this.isValid) return this;
-
-    options ??= { numericApproximation: false };
-
-    if (options.numericApproximation) {
-      const h = this.operator;
-
+    const computeValue = () => {
       //
-      // Transform N(Integrate) into NIntegrate(), etc...
+      // 1/ Use the canonical form
       //
-      if (h === 'Integrate' || h === 'Limit')
-        return this.engine
-          .box(['N', this], { canonical: true })
-          .evaluate(options);
-    }
-    if (!this.isCanonical) {
-      this.engine.pushScope();
-      const canonical = this.canonical;
-      this.engine.popScope();
-      if (!canonical.isCanonical || !canonical.isValid) return this;
-      return canonical.evaluate(options);
-    }
+      if (!this.isValid) return this;
 
-    const def = this.functionDefinition;
+      options ??= { numericApproximation: false };
 
-    //
-    // 2/ Thread if applicable
-    //
-    // If the function is threadable, iterate
-    //
-    if (
-      def?.threadable &&
-      this.ops!.some((x) => isFiniteIndexableCollection(x))
-    ) {
-      // If one of the arguments is an indexable collection, thread the function
-      // Get the length of the longest sequence
-      const length = Math.max(
-        ...this._ops.map((x) => x.functionDefinition?.size?.(x) ?? 0)
-      );
+      if (options.numericApproximation) {
+        const h = this.operator;
 
-      // Zip
-      const results: BoxedExpression[] = [];
-      for (let i = 0; i <= length - 1; i++) {
-        const args = this._ops.map((x) =>
-          isFiniteIndexableCollection(x)
-            ? (at(x, (i % length) + 1) ?? this.engine.Nothing)
-            : x
-        );
-        results.push(this.engine._fn(this.operator, args).evaluate(options));
+        //
+        // Transform N(Integrate) into NIntegrate(), etc...
+        //
+        if (h === 'Integrate' || h === 'Limit')
+          return this.engine
+            .box(['N', this], { canonical: true })
+            .evaluate(options);
+      }
+      if (!this.isCanonical) {
+        this.engine.pushScope();
+        const canonical = this.canonical;
+        this.engine.popScope();
+        if (!canonical.isCanonical || !canonical.isValid) return this;
+        return canonical.evaluate(options);
       }
 
-      if (results.length === 0) return this.engine.Nothing;
-      if (results.length === 1) return results[0];
-      return this.engine._fn('List', results);
-    }
+      const def = this.functionDefinition;
 
-    //
-    // 3/ Evaluate the applicable operands
-    //
-    const tail = holdMap(this, (x) => x.evaluate(options));
+      //
+      // 2/ Thread if applicable
+      //
+      // If the function is threadable, iterate
+      //
+      if (
+        def?.threadable &&
+        this.ops!.some((x) => isFiniteIndexableCollection(x))
+      ) {
+        // If one of the arguments is an indexable collection, thread the function
+        // Get the length of the longest sequence
+        const length = Math.max(
+          ...this._ops.map(
+            (x) => x.functionDefinition?.collection?.size?.(x) ?? 0
+          )
+        );
 
-    //
-    // 4/ Inert? Just return the first argument.
-    //
-    if (def?.inert) return tail[0] ?? this;
+        // Zip
+        const results: BoxedExpression[] = [];
+        for (let i = 0; i <= length - 1; i++) {
+          const args = this._ops.map((x) =>
+            isFiniteIndexableCollection(x)
+              ? (at(x, (i % length) + 1) ?? this.engine.Nothing)
+              : x
+          );
+          results.push(this.engine._fn(this.operator, args).evaluate(options));
+        }
 
-    let result: BoxedExpression | undefined | null = undefined;
+        if (results.length === 0) return this.engine.Nothing;
+        if (results.length === 1) return results[0];
+        return this.engine._fn('List', results);
+      }
 
-    //
-    // 5/ Call the `evaluate` handler
-    //
-    const sig = def?.signature;
-    if (sig) {
-      const context = this.engine.swapScope(this.scope);
-      result = sig.evaluate?.(tail, { ...options, engine: this.engine });
-      this.engine.swapScope(context);
-    }
+      //
+      // 3/ Evaluate the applicable operands
+      //
+      const tail = holdMap(this, (x) => x.evaluate(options));
 
-    return result ?? this.engine.function(this._name, tail);
+      let result: BoxedExpression | undefined | null = undefined;
+
+      //
+      // 4/ Call the `evaluate` handler
+      //
+      if (def) {
+        const engine = this.engine;
+        const context = engine.swapScope(this.scope);
+        result = def.evaluate?.(tail, { ...options, engine });
+        engine.swapScope(context);
+      }
+
+      return result ?? this.engine.function(this._name, tail);
+    };
+
+    const gen =
+      this.isPure && this._ops.every((x) => x.isConstant)
+        ? undefined
+        : this.engine.generation;
+
+    if (options?.numericApproximation)
+      return cachedValue(this._valueN, gen, computeValue);
+
+    return cachedValue(this._value, gen, computeValue);
   }
 
   N(): BoxedExpression {
@@ -1218,33 +941,126 @@ export class BoxedFunction extends _BoxedExpression {
     if (varNames.length !== 1) return null;
     return findUnivariateRoots(this.simplify(), varNames[0]);
   }
+
+  get isCollection(): boolean {
+    const def = this.functionDefinition;
+    if (!def) return false;
+    // A collection has at least a contains handler or a size handler
+    return (
+      def.collection?.contains !== undefined ||
+      def.collection?.size !== undefined
+    );
+  }
+
+  contains(rhs: BoxedExpression): boolean {
+    return this.functionDefinition?.collection?.contains?.(this, rhs) ?? false;
+  }
+
+  get size(): number {
+    return this.functionDefinition?.collection?.size?.(this) ?? 0;
+  }
+
+  each(start?: number, count?: number): Iterator<BoxedExpression, undefined> {
+    const iter = this.functionDefinition?.collection?.iterator?.(
+      this,
+      start,
+      count
+    );
+    if (!iter)
+      return {
+        next() {
+          return { done: true, value: undefined };
+        },
+      };
+    return iter;
+  }
+
+  at(index: number): BoxedExpression | undefined {
+    return this.functionDefinition?.collection?.at?.(this, index);
+  }
+
+  get(index: BoxedExpression | string): BoxedExpression | undefined {
+    if (typeof index === 'string')
+      return this.functionDefinition?.collection?.at?.(this, index);
+
+    if (!index.string) return undefined;
+    return this.functionDefinition?.collection?.at?.(this, index.string);
+  }
+
+  indexOf(expr: BoxedExpression): number {
+    return this.functionDefinition?.collection?.indexOf?.(this, expr) ?? -1;
+  }
+
+  subsetOf(rhs: BoxedExpression, strict: boolean): boolean {
+    return (
+      this.functionDefinition?.collection?.subsetOf?.(this, rhs, strict) ??
+      false
+    );
+  }
 }
 
-// @todo: allow selection of one signature amongst multiple
-// function matchSignature(
-//   ce: IComputeEngine,
-//   def: BoxedFunctionDefinition,
-//   tail: BoxedExpression[],
-//   codomain?: BoxedExpression
-// ): BoxedFunctionSignature | undefined {
-//   return def.signature;
-// }
+/** Return the type of the value of the expression */
+function type(expr: BoxedExpression): Type | undefined {
+  if (!expr.isValid) return 'error';
 
-function flagValue(
-  expr: BoxedFunction,
-  flag: keyof FunctionNumericFlags
-): boolean | undefined {
-  if (expr.isNumber !== true) return false;
+  expr = expr.evaluate();
 
-  const def = expr._def;
-  if (!def) return undefined;
-  const result = expr._def?.signature.flags?.[flag];
-  if (result === undefined) return undefined;
-  if (typeof result === 'boolean') return result;
+  //
+  // The value is a function expression
+  //
+  if (expr.ops) {
+    // If we're a Hold operator, the type is a `function`
+    if (expr.operator === 'Hold') {
+      const [op] = expr.ops!;
+      if (op.symbol) return 'symbol';
+      if (op.string !== undefined) return 'string';
+      if (op.isNumberLiteral) return op.type;
 
-  const context = expr.engine.swapScope(expr.scope);
-  const f = result(expr.ops!);
-  expr.engine.swapScope(context);
+      if (op.isFunctionExpression) {
+        const def = op.functionDefinition;
+        if (def) {
+          const type = def.signature;
 
-  return f;
+          if (typeof type !== 'string' && type.kind === 'signature') {
+            // Compute the result type based on the arguments
+            // Return a signature modified with the computed result type
+            return {
+              ...type,
+              result:
+                parseType(def.type?.(op.ops!, { engine: expr.engine })) ??
+                type.result,
+            };
+          }
+          return type;
+        }
+      }
+
+      // For a Hold function, the default type is 'function'
+      return 'function';
+    }
+
+    const def = expr.functionDefinition;
+    if (!def) return 'function';
+
+    let sigResult = functionResult(def.signature) ?? 'any';
+
+    // If there is a resultType function, call it
+    if (typeof def.type === 'function')
+      return (
+        parseType(def.type(expr.ops!, { engine: expr.engine })) ?? sigResult
+      );
+
+    return sigResult;
+  }
+
+  //
+  // The value is a symbol or a number literal
+  //
+  if (expr.symbol || expr.isNumberLiteral) return expr.type;
+
+  if (expr.string) return 'string';
+
+  if (expr.tensor) return expr.type;
+
+  return undefined;
 }

@@ -107,14 +107,14 @@ export class Product {
       // running terms
       const num = term.numericValue;
       if (num !== null) {
-        if (term.isOne) return;
+        if (term.isEqual(1)) return;
 
-        if (term.isZero) {
+        if (term.isEqual(0)) {
           this.coefficient = this.engine._numericValue(isZero(exp) ? NaN : 0);
           return;
         }
 
-        if (term.isNegativeOne) {
+        if (term.isEqual(-1)) {
           if (isOne(exp)) this.coefficient = this.coefficient.neg();
           else {
             this.coefficient = this.coefficient.mul(
@@ -164,9 +164,9 @@ export class Product {
     }
 
     // Note: term should be positive, so no need to handle the -1 case
-    if (term.isOne && (!exp || isOne(exp))) return;
-    if (!term.isZero && exp && isZero(exp)) return;
-    if (term.isZero) {
+    if (term.isEqual(1) && (!exp || isOne(exp))) return;
+    if (term.isEqual(0) === false && exp && isZero(exp)) return;
+    if (term.isEqual(0)) {
       if (exp && isZero(exp)) this.coefficient = this.engine._numericValue(NaN);
       else this.coefficient = this.engine._numericValue(0);
       return;
@@ -305,7 +305,9 @@ export class Product {
     return xs;
   }
 
-  asExpression(mode: 'N' | 'evaluate' = 'evaluate'): BoxedExpression {
+  asExpression(
+    options: { numericApproximation: boolean } = { numericApproximation: false }
+  ): BoxedExpression {
     const ce = this.engine;
 
     const coef = this.coefficient;
@@ -319,7 +321,7 @@ export class Product {
     if (isNegativeOne) this.coefficient = ce._numericValue(1);
 
     const groupedTerms = this.groupedByDegrees({
-      mode: mode === 'N' ? 'numeric' : 'expression',
+      mode: options.numericApproximation ? 'numeric' : 'expression',
     });
     if (groupedTerms === null) return ce.NaN;
 
@@ -369,8 +371,8 @@ export class Product {
 
   asRationalExpression(): BoxedExpression {
     const [numerator, denominator] = this.asNumeratorDenominator();
-    if (denominator.isOne) return numerator;
-    if (denominator.isNegativeOne) return numerator.neg();
+    if (denominator.isEqual(1)) return numerator;
+    if (denominator.isEqual(-1)) return numerator.neg();
     return this.engine._fn('Divide', [numerator, denominator]);
   }
 }

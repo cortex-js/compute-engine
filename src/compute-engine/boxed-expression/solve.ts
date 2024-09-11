@@ -27,7 +27,6 @@ export const UNIVARIATE_ROOTS: Rule[] = [
     match: ['Multiply', '_x', '__a'],
     replace: 0,
     id: 'ax',
-    useVariations: true, // handle x = 0
     condition: ({ __a }) => !__a.has('_x'),
   },
 
@@ -58,7 +57,7 @@ export const UNIVARIATE_ROOTS: Rule[] = [
 
     useVariations: true,
     condition: ({ _a, __b, _n }) =>
-      !_a.has('_x') && !__b.has('_x') && !_n.isZero,
+      !_a.has('_x') && !__b.has('_x') && !_n.isEqual(0),
   },
 
   //
@@ -124,7 +123,7 @@ export const UNIVARIATE_ROOTS: Rule[] = [
     replace: ['Divide', ['Ln', ['Negate', ['Divide', '__c', '__a']]], '__b'],
     useVariations: true,
     condition: ({ __a, __c }) =>
-      ((!__a.isZero && __c.div(__a).isNegative) ?? false) &&
+      ((!__a.isEqual(0) && __c.div(__a).isNegative) ?? false) &&
       !__a.has('_x') &&
       !__c.has('_x'),
   },
@@ -135,52 +134,52 @@ export const UNIVARIATE_ROOTS: Rule[] = [
     replace: ['Ln', ['Negate', ['Divide', '__c', '__a']]],
     useVariations: true,
     condition: ({ __a, __c }) =>
-      ((!__a.isZero && __c.div(__a).isNegative) ?? false) &&
+      ((!__a.isEqual(0) && __c.div(__a).isNegative) ?? false) &&
       !__a.has('_x') &&
       !__c.has('_x'),
   },
 
-  // // e^(x) + c = 0
-  // {
-  //   match: ['Add', ['Exp', '_x'], '__c'],
-  //   replace: ['Ln', ['Negate', '__c']],
-  //   exact: false,
-  //  condition: ({ __c }) => __c.isNegative ?? false,
-  // },
+  // e^(x) + c = 0
+  {
+    match: ['Add', ['Exp', '_x'], '__c'],
+    replace: ['Ln', ['Negate', '__c']],
+    useVariations: true,
+    condition: ({ __c }) => __c.isNegative ?? false,
+  },
 
-  // // e^(bx) + c = 0
-  // {
-  //   match: ['Add', ['Exp', ['Multiply', '__b', '_x']], '__c'],
-  //   replace: ['Divide', ['Ln', ['Negate', '__c']], '__b'],
-  //   exact: false,
-  //  condition: ({ __c }) => __c.isNegative ?? false,
-  // },
+  // e^(bx) + c = 0
+  {
+    match: ['Add', ['Exp', ['Multiply', '__b', '_x']], '__c'],
+    replace: ['Divide', ['Ln', ['Negate', '__c']], '__b'],
+    useVariations: true,
+    condition: ({ __c }) => __c.isNegative ?? false,
+  },
 
-  // // a * log_b(x) + c = 0
-  // {
-  //   match: ['Add', ['Multiply', '__a', ['Log', '_x', '__b']], '__c'],
-  //   replace: ['Power', '__b', ['Negate', ['Divide', '__c', '__a']]],
-  //   exact: false,
-  //  condition: ({ __a, __b }) => (!__a.isZero && __b.isPositive) ?? false,
-  // },
+  // a * log_b(x) + c = 0
+  {
+    match: ['Add', ['Multiply', '__a', ['Log', '_x', '__b']], '__c'],
+    replace: ['Power', '__b', ['Negate', ['Divide', '__c', '__a']]],
+    useVariations: true,
+    condition: ({ __a, __b }) => (!__a.isEqual(0) && __b.isPositive) ?? false,
+  },
 
-  // // a * log_b(x) = 0
-  // {
-  //   match: ['Multiply', '__a', ['Log', '_x', '__b']],
-  //   replace: ['Power', '__b', ['Negate', ['Divide', '__c', '__a']]],
-  //   exact: false,
-  //  condition: ({ __a, __b }) => (!__a.isZero && __b.isPositive) ?? false,
-  // },
+  // a * log_b(x) = 0
+  {
+    match: ['Multiply', '__a', ['Log', '_x', '__b']],
+    replace: ['Power', '__b', ['Negate', ['Divide', '__c', '__a']]],
+    useVariations: true,
+    condition: ({ __a, __b }) => (!__a.isEqual(0) && __b.isPositive) ?? false,
+  },
 
-  // // |ax + b| + c = 0
-  // {
-  //   match: ['Add', ['Abs', ['Add', ['Multiply', '__a', '_x'], '__b']], '__c'],
-  //   replace: ['Divide', ['Subtract', '__b', '__c'], '__a'],
-  // },
-  // {
-  //   match: ['Add', ['Abs', ['Add', ['Multiply', '__a', '_x'], '__b']], '__c'],
-  //   replace: ['Divide', ['Negate', ['Add', '__b', '__c'], '__a']],
-  // },
+  // |ax + b| + c = 0
+  {
+    match: ['Add', ['Abs', ['Add', ['Multiply', '__a', '_x'], '__b']], '__c'],
+    replace: ['Divide', ['Subtract', '__b', '__c'], '__a'],
+  },
+  {
+    match: ['Add', ['Abs', ['Add', ['Multiply', '__a', '_x'], '__b']], '__c'],
+    replace: ['Divide', ['Negate', ['Add', '__b', '__c'], '__a']],
+  },
 ];
 
 /**
@@ -267,7 +266,7 @@ export function univariateSolve(
 
   let lhs: SemiBoxedExpression = expr.op1;
   const rhs = expr.op2;
-  if (rhs.isNotZero === true) lhs = ['Subtract', lhs, rhs];
+  if (rhs.isEqual(0) === false) lhs = ['Subtract', lhs, rhs];
 
   const roots = findUnivariateRoots(ce.box(lhs), x);
   if (roots.length === 0) return null;
@@ -294,7 +293,10 @@ export const HARMONIZATION_RULES: Rule[] = [
     match: ['Multiply', '__a', ['Power', '_b', '_n']],
     replace: '_b',
     condition: ({ __a, _b, _n }) =>
-      !__a.has('_x') && _b.has('_x') && !_n.isZero && !_n.has('_x'),
+      !__a.has('_x') &&
+      _b.has('_x') &&
+      _n.isEqual(0) === false &&
+      !_n.has('_x'),
   },
   // a√b(x)  -> a^2 b(x)
   {
@@ -307,7 +309,7 @@ export const HARMONIZATION_RULES: Rule[] = [
     match: ['Divide', '_a', '_b'],
     replace: '_a',
     // @todo: check _b after the substitution
-    condition: ({ _a, _b }) => _a.has('_x') && !_b.isZero,
+    condition: ({ _a, _b }) => _a.has('_x') && _b.isEqual(0) === false,
   },
   // ab(x) -> b(x)
   // The solution for a product are the solutions for each term,

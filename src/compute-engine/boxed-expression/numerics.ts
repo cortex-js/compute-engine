@@ -26,7 +26,7 @@ export function asRational(expr: BoxedExpression): Rational | undefined {
   }
 
   const type = num.type;
-  if (type !== 'integer' && type !== 'rational') return undefined;
+  if (type !== 'finite_integer' && type !== 'finite_rational') return undefined;
 
   if (num.im !== 0) return undefined;
 
@@ -107,58 +107,4 @@ export function asSmallInteger(
   if (Number.isInteger(n) && n >= -SMALL_INTEGER && n <= SMALL_INTEGER)
     return Number(n);
   return null;
-}
-
-/**
- *
- * @param lhs
- * @param rhs
- * @returns the sign (-1, 0, 1) of the difference between `lhs` and `rhs`
- */
-export function signDiff(
-  lhs: BoxedExpression,
-  rhs: BoxedExpression,
-  tolerance?: number
-): -1 | 0 | 1 | undefined {
-  // Identity?
-  if (lhs === rhs) return 0;
-
-  const lhsN = lhs.N();
-  const rhsN = rhs.N();
-
-  // Structural equality?
-  if (lhsN.isSame(rhsN)) return 0;
-
-  if (lhs.isNumberLiteral && lhs.im !== 0) return undefined;
-  if (rhs.isNumberLiteral && rhs.im !== 0) return undefined;
-
-  const lhsNum = lhsN.numericValue;
-  const rhsNum = rhsN.numericValue;
-
-  // In general, it is impossible to always prove equality
-  // (Richardson's theorem) but this works often...
-  if (lhsNum === null || rhsNum === null) {
-    const s = lhs.sub(rhs).N().sgn;
-    if (s === 'zero') return 0;
-    if (s === 'positive') return 1;
-    if (s === 'negative') return -1;
-    return undefined;
-  }
-
-  tolerance ??= lhs.engine.tolerance;
-
-  // At this point, lhsNum and rhsNum are numeric values
-
-  if (typeof lhsNum === 'number' && typeof rhsNum === 'number') {
-    if (chop(rhsNum - lhsNum, tolerance) === 0) return 0;
-    return lhsNum < rhsNum ? -1 : 1;
-  }
-  const ce = lhs.engine;
-  const lhsV = ce._numericValue(lhsNum);
-  const rhsV = ce._numericValue(rhsNum);
-
-  const delta = lhsV.sub(rhsV);
-
-  if (delta.isZeroWithTolerance(tolerance)) return 0;
-  return delta.sgn();
 }

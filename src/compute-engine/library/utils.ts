@@ -1,8 +1,7 @@
 import type { BoxedExpression } from '../public';
 
-import { isCollection } from '../collection-utils';
 import { MAX_ITERATION } from '../numerics/numeric';
-import { reduceCollection } from './collections';
+import { fromRange, reduceCollection } from './collections';
 
 export type IndexingSet = {
   index: string | undefined;
@@ -69,7 +68,7 @@ export function indexingSetCartestianProduct(
   //
   let { index, lower, upper, isFinite } = indexingSets[0];
   if (!isFinite) upper = lower + MAX_ITERATION;
-  let result = range(lower, upper).map((x) => [x]);
+  let result = fromRange(lower, upper).map((x) => [x]);
 
   // We had a single index, we're done
   if (indexingSets.length === 1) return result;
@@ -84,7 +83,7 @@ export function indexingSetCartestianProduct(
 
     result = cartesianProduct(
       result.map((x) => x[0]),
-      range(lower, upper)
+      fromRange(lower, upper)
     );
   }
   return result;
@@ -111,10 +110,6 @@ export function cartesianProduct(
   return array1.flatMap((item1) => array2.map((item2) => [item1, item2]));
 }
 
-export function range(start: number, end: number): number[] {
-  return Array.from({ length: end - start + 1 }, (_, index) => start + index);
-}
-
 export function canonicalIndexingSet(
   expr: BoxedExpression
 ): BoxedExpression | undefined {
@@ -139,7 +134,7 @@ export function canonicalIndexingSet(
   if (!index.symbol) return undefined;
 
   if (index.symbol && index.symbol !== 'Nothing')
-    ce.declare(index.symbol, 'Integers');
+    ce.declare(index.symbol, 'integer');
 
   if (upper && lower) return ce.tuple(index, lower, upper);
   if (upper) return ce.tuple(index, ce.One, upper);
@@ -153,6 +148,7 @@ export function canonicalBigop(
   indexingSets: BoxedExpression[]
 ): BoxedExpression | null {
   const ce = body.engine;
+
   // Sum is a scoped function (to declare the indexes)
   ce.pushScope();
 
@@ -191,7 +187,7 @@ export function reduceBigOp<T>(
 ): T | undefined {
   // If the body is a collection, reduce it
   // i.e. Sum({1, 2, 3}) = 6
-  if (isCollection(body)) return reduceCollection(body, fn, initial);
+  if (body.isCollection) return reduceCollection(body, fn, initial);
 
   // If there are no indexes, the summation is a constant
   // i.e. Sum(3) = 3

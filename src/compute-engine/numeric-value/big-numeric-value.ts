@@ -7,6 +7,7 @@ import { MACHINE_TOLERANCE, SmallInteger } from '../numerics/numeric';
 import { numberToExpression } from '../numerics/expression';
 import { numberToString } from '../numerics/strings';
 import { bigint } from '../numerics/bigint';
+import { NumericType } from '../../common/type/types';
 
 export type BigNumFactory = (value: Decimal.Value) => Decimal;
 
@@ -56,10 +57,15 @@ export class BigNumericValue extends NumericValue {
     console.assert(this.decimal.isNaN() === isNaN(this.im));
   }
 
-  get type(): 'complex' | 'real' | 'rational' | 'integer' {
-    if (this.im !== 0) return 'complex';
-    if (this.decimal.isInteger()) return 'integer';
-    return 'real';
+  get type(): NumericType {
+    if (this.im !== 0) {
+      if (!Number.isFinite(this.im)) return 'non_finite_number';
+      if (this.decimal.isZero()) return 'finite_imaginary';
+      return 'finite_complex';
+    }
+    if (!this.decimal.isFinite()) return 'non_finite_number';
+    if (this.decimal.isInteger()) return 'finite_integer';
+    return 'finite_real';
   }
 
   get isExact(): boolean {
@@ -323,7 +329,7 @@ export class BigNumericValue extends NumericValue {
 
     //
     // For the special cases we implement the same (somewhat arbitrary) results
-    // as sympy. See https://docs.sympy.org/latest/modules/core.html#sympy.core.power.Pow
+    // as SymPy. See https://docs.sympy.org/latest/modules/core.html#sympy.core.power.Pow
     //
 
     // If the exponent is a complex number, we use the formula:
@@ -557,7 +563,8 @@ export class BigNumericValue extends NumericValue {
   }
 
   eq(other: number | NumericValue): boolean {
-    if (typeof other === 'number') return this.decimal.eq(other);
+    if (typeof other === 'number')
+      return this.im === 0 && this.decimal.eq(other);
     return (
       this.decimal.eq(other.bignumRe ?? other.re) &&
       chop(this.im - other.im) === 0

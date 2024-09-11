@@ -27,6 +27,7 @@
 import Decimal from 'decimal.js';
 import { SmallInteger } from '../numerics/numeric';
 import { Rational } from '../numerics/rationals';
+import { NumericType } from '../../common/type/types';
 
 /** The value is equal to `(decimal * rational * sqrt(radical)) + im * i` */
 export interface NumericValueData {
@@ -41,8 +42,7 @@ export type NumericValueFactory = (
 ) => NumericValue;
 
 export abstract class NumericValue {
-  // Note: complex :> real :> rational :> integer
-  abstract get type(): 'complex' | 'real' | 'rational' | 'integer';
+  abstract get type(): NumericType;
 
   /** True if numeric value is the product of a rational and the square root of an integer.
    *

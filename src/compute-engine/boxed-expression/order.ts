@@ -135,7 +135,18 @@ function rank(expr: BoxedExpression): Rank {
   if (typeof expr.numericValue === 'number') {
     return Number.isInteger(expr.numericValue) ? 'integer' : 'real';
   }
-  if (expr.numericValue) return expr.numericValue.type;
+  if (expr.numericValue) {
+    const type = expr.numericValue.type;
+    if (type === 'integer' || type === 'finite_integer') return 'integer';
+    if (type === 'rational' || type === 'finite_rational') return 'rational';
+    if (type === 'real' || type === 'finite_real') return 'real';
+    if (type === 'complex' || type === 'finite_complex') return 'complex';
+    if (type === 'imaginary' || type === 'finite_imaginary') return 'complex';
+    if (type === 'finite_number') return 'complex';
+    if (type === 'non_finite_number') return 'constant';
+    if (type === 'number') return 'real';
+    return 'other';
+  }
 
   // Complex numbers
   if (expr.symbol === 'ImaginaryUnit') return 'complex';

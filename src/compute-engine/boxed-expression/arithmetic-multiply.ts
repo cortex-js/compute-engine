@@ -6,6 +6,11 @@ import { Product } from './product';
 import { expandProducts } from './expand';
 import { flatten } from './flatten';
 import { negateProduct } from './negate';
+import { isSubtype } from '../../common/type/subtype';
+import { NumericValue } from '../numeric-value/public';
+import { ExactNumericValue } from '../numeric-value/exact-numeric-value';
+import { isOne } from '../numerics/rationals';
+import { asRational } from './numerics';
 
 /**
  * The canonical form of `Multiply`:
@@ -15,238 +20,144 @@ import { negateProduct } from './negate';
  *    - `2 \times -x` -> `-2 \times x`
  * - arguments are sorted
  * - complex numbers promoted (['Multiply', 2, 'ImaginaryUnit'] -> 2i)
+ * - Numeric values are promoted (['Multiply', 2, 'Sqrt', 3] -> 2√3)
  *
  * The input ops may not be canonical, the result is canonical.
  */
+
 export function canonicalMultiply(
   ce: IComputeEngine,
   ops: ReadonlyArray<BoxedExpression>
 ): BoxedExpression {
-  // Make canonical, flatten, and lift nested expressions
-  ops = flatten(ops, 'Multiply');
-
-  if (ops.length === 1) return ops[0];
-
-  const xs: BoxedExpression[] = [];
-  const denominator: BoxedExpression[] = [];
+  //
+  // Remove negations and negative numbers
+  //
   let sign = 1;
-  let infinityCount = 0;
-  let isZero = false;
+  let xs: BoxedExpression[] = [];
+  for (const op of ops) {
+    const [o, s] = unnegate(op);
+    sign *= s;
+    xs.push(o);
+  }
 
-  for (let i = 0; i < ops.length; i++) {
-    let op = ops[i];
+  //
+  // Filter out ones
+  //
+  xs = xs.filter((x) => !x.isEqual(1));
 
-    // Order matters: function that may change the op must be first
-    // -(x)
-    if (op.operator === 'Negate') {
-      sign = -sign;
-      op = op.op1;
-    }
-
-    // a/b -> separate numerator and denominator
-    // @fixme: consider using numeratorDenominator
-    if (op.operator === 'Divide') {
-      const [a, b] = op.ops!;
-      if (b.isZero) return ce.NaN;
-      denominator.push(b);
-
-      if (a.isOne) continue;
-      if (a.isNegativeOne) {
-        sign = -sign;
-        continue;
-      }
-
-      op = a;
-    }
-
-    if (op.isZero) {
-      isZero = true;
+  //
+  // If an integer or a rational is followed by a sqrt or an imaginary unit
+  // we promote it
+  //
+  const ys: BoxedExpression[] = [];
+  for (let i = 0; i < xs.length; i++) {
+    const x = xs[i];
+    // Last item?
+    if (i + 1 >= xs.length) {
+      ys.push(x);
       continue;
     }
+    const next = xs[i + 1];
 
-    if (op.isOne) continue;
+    // Do we have a number literal followed either by a sqrt or an imaginary unit?
 
-    if (op.isNegativeOne) {
-      sign = -sign;
-      continue;
-    }
+    if (x.isNumberLiteral) {
+      // Do we have a Sqrt expression?
+      if (
+        next.operator === 'Sqrt' &&
+        next.op1.isNumberLiteral &&
+        isSubtype(next.op1.type, 'finite_integer')
+      ) {
+        // Next is a sqrt of a literal integer
+        let radical = next.op1.numericValue!;
+        if (typeof radical !== 'number') radical = radical.re;
 
-    // i
-    if (op.symbol === 'ImaginaryUnit') {
-      xs.push(ce.number(ce.complex(0, 1)));
-      continue;
-    }
-
-    if (op.symbol === 'PositiveInfinity') {
-      infinityCount += 1;
-      continue;
-    }
-    if (op.symbol === 'NegativeInfinity') {
-      infinityCount += 1;
-      sign = -sign;
-      continue;
-    }
-
-    if (op.isInfinity) {
-      if (op.isNegative) sign = -sign;
-      infinityCount += 1;
-    }
-
-    let v = op.numericValue;
-    if (v === null) {
-      xs.push(op);
-      continue;
-    }
-    //
-    // Number
-    //
-    if (typeof v === 'number') {
-      if (v < 0) {
-        sign = -sign;
-        v = -v;
-      }
-
-      // Are we followed by a complex number?
-      if (ops[i + 1]?.symbol === 'ImaginaryUnit') {
-        xs.push(ce.number(ce.complex(0, v)));
-        i++;
-        continue;
-      }
-
-      // Are we followed by a sqrt?
-      const next = ops[i + 1]?.structural;
-      if (next?.operator === 'Sqrt') {
-        const a = next.op1.numericValue;
-        if (typeof a === 'number' && a > 0 && Number.isInteger(a)) {
-          // we had v√a
-          xs.push(ce.number(ce._numericValue({ decimal: v, radical: a })));
-          i++;
-          continue;
-        }
-      }
-
-      xs.push(ce.number(v));
-      continue;
-    }
-
-    if (v.type === 'rational') {
-      if (v.numerator.isZero) isZero = true;
-
-      denominator.push(ce.number(v.denominator));
-      v = v.numerator;
-      if (v.isOne) continue;
-      if (v.isNegativeOne) {
-        sign = -sign;
-        continue;
-      }
-      if (v.isZero) {
-        isZero = true;
-        continue;
-      }
-    }
-
-    //
-    // Numeric Value
-    //
-    if (v.im !== 0) {
-      xs.push(op);
-      continue;
-    }
-
-    if (v.sgn() === -1) {
-      sign = -sign;
-      v = v.neg();
-    }
-
-    if (!v.isExact) {
-      // We have a numeric value, but it's not exact, it's a float
-
-      // Are we followed by a complex number?
-      if (ops[i + 1]?.symbol === 'ImaginaryUnit') {
-        xs.push(ce.number(ce.complex(0, v.re)));
-        i++;
-        continue;
-      }
-      xs.push(ce.number(v));
-      continue;
-    }
-
-    // Are we followed by a sqrt?
-    const next = ops[i + 1]?.structural;
-    if (next?.operator === 'Sqrt') {
-      const a = next.op1.numericValue;
-      if (typeof a === 'number') {
-        if (a > 0 && Number.isInteger(a)) {
-          // we had v√a
-          const x = v.mul(ce._numericValue({ radical: a }));
-          if (x.isExact) {
-            xs.push(ce.number(x));
-            i++;
-            continue;
-          }
-        }
-      } else if (a !== null) {
-        if (a.type === 'integer') {
-          // we had v√a
-          const x = v.mul(ce._numericValue({ radical: a.re }));
-          if (x.isExact) {
-            xs.push(ce.number(x));
-            i++;
-            continue;
-          }
-        }
-        if (a.type === 'rational') {
-          // we had v√(n/d) -> (v/d)√(nd)
-          const [n, d] = [a.numerator, a.denominator];
-          xs.push(
-            ce.number(v.mul(ce._numericValue({ radical: n.re * d.re })).div(d))
+        // Is it preceded by a rational?
+        if (isSubtype(x.type, 'finite_rational')) {
+          let rational = x.numericValue!;
+          const [num, den] =
+            typeof rational === 'number'
+              ? [rational, 1]
+              : [rational.numerator.re, rational.denominator.re];
+          ys.push(
+            ce.number(ce._numericValue({ rational: [num, den], radical }))
           );
           i++;
           continue;
         }
+      } else if (
+        next.isNumberLiteral &&
+        next.numericValue instanceof NumericValue
+      ) {
+        // Do we have a radical as a numeric value?
+        const nextNv = next.numericValue;
+        if (
+          nextNv instanceof ExactNumericValue &&
+          isOne(nextNv.rational) &&
+          nextNv.radical !== 1
+        ) {
+          // We have a number (n) followed by a radical (r)
+          // Convert to a numeric value
+          const r = asRational(x);
+          if (r) {
+            ys.push(
+              ce.number(
+                ce._numericValue({ rational: r, radical: nextNv.radical })
+              )
+            );
+            i++;
+            continue;
+          }
+        } else if (nextNv.im === 1) {
+          // "Next" is an imaginary unit. Is it preceded by a real number?
+          const nv = x.numericValue!;
+          if (typeof nv === 'number') {
+            ys.push(ce.number(ce.complex(0, nv)));
+            i++;
+            continue;
+          } else if (nv.im === 0) {
+            if (Number.isInteger(nv.re)) {
+              ys.push(ce.number(ce.complex(0, nv.re)));
+              i++;
+              continue;
+            } else if (!nv.isExact) {
+              ys.push(ce.number(ce.complex(0, nv.re)));
+              i++;
+              continue;
+            }
+          }
+        }
       }
     }
-    xs.push(ce.number(v));
+    ys.push(x);
   }
 
-  if (isZero) return infinityCount > 0 ? ce.NaN : ce.Zero;
-
-  if (denominator.length > 0) {
-    const den = canonicalMultiply(ce, denominator);
-    if (den.isZero || den.isNaN) return ce.NaN;
-    if (den.isInfinity) return infinityCount > 0 ? ce.NaN : ce.Zero;
-    if (den.isNegativeOne) sign = -sign;
-    else if (den.isOne !== true) {
-      let num: BoxedExpression;
-      if (xs.length === 0) {
-        num = sign < 0 ? ce.NegativeOne : ce.One;
-      } else if (xs.length === 1) {
-        num = sign < 0 ? xs[0].neg() : xs[0];
-      } else {
-        if (sign < 0) num = negateProduct(ce, xs);
-        else num = ce._fn('Multiply', [...xs].sort(order));
-      }
-
-      if (num.isNumberLiteral && den.isNumberLiteral) {
-        const nv = ce._numericValue(num.numericValue!);
-        const dv = ce._numericValue(den.numericValue!);
-        const r = nv.div(dv);
-        if (r.isExact) return ce.number(r);
-      }
-
-      return ce._fn('Divide', [num, den]);
-    }
+  // Account for the sign (if negative)
+  if (sign < 0) {
+    if (ys.length === 0) return ce.number(-1);
+    if (ys.length === 1) return ys[0].neg();
+    return negateProduct(ce, ys);
   }
 
-  if (infinityCount > 0)
-    return sign < 0 ? ce.NegativeInfinity : ce.PositiveInfinity;
+  if (ys.length === 0) return ce.number(1);
+  if (ys.length === 1) return ys[0];
+  return ce._fn('Multiply', [...ys].sort(order));
+}
 
-  if (xs.length === 0) return sign < 0 ? ce.NegativeOne : ce.One;
-  if (xs.length === 1) return sign < 0 ? xs[0].neg() : xs[0];
+function unnegate(op: BoxedExpression): [BoxedExpression, sign: number] {
+  let sign = 1;
+  while (op.operator === 'Negate') {
+    sign = -sign;
+    op = op.op1;
+  }
 
-  if (sign < 0) return negateProduct(ce, xs);
+  // If a negative number, make it positive
+  if (op.isNumberLiteral && op.isNegative) {
+    sign = -sign;
+    op = op.neg();
+  }
 
-  return ce._fn('Multiply', [...xs].sort(order));
+  return [op, sign];
 }
 
 export function mul(...xs: ReadonlyArray<BoxedExpression>): BoxedExpression {
@@ -274,5 +185,5 @@ export function mulN(...xs: ReadonlyArray<BoxedExpression>): BoxedExpression {
     xs = exp.ops!;
   }
 
-  return new Product(ce, xs).asExpression('N');
+  return new Product(ce, xs).asExpression({ numericApproximation: true });
 }

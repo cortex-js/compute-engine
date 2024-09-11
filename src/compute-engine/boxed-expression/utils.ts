@@ -11,6 +11,7 @@ import { joinLatex } from '../latex-syntax/tokenizer';
 import { DEFINITIONS_INEQUALITIES } from '../latex-syntax/dictionary/definitions-relational-operators';
 
 import { MACHINE_PRECISION } from '../numerics/numeric';
+import { Type } from '../../common/type/types';
 
 export function isBoxedExpression(x: unknown): x is BoxedExpression {
   return typeof x === 'object' && x !== null && 'engine' in x;
@@ -131,8 +132,9 @@ export function isEquation(expr: BoxedExpression): boolean {
  *
  */
 export function getImaginaryFactor(
-  expr: BoxedExpression
+  expr: number | BoxedExpression
 ): BoxedExpression | undefined {
+  if (typeof expr === 'number') return undefined;
   const ce = expr.engine;
   if (expr.symbol === 'ImaginaryUnit') return ce.One;
 
@@ -141,7 +143,7 @@ export function getImaginaryFactor(
   if (expr.operator === 'Negate') return getImaginaryFactor(expr.op1)?.neg();
 
   if (expr.operator === 'Complex') {
-    if (expr.op1.isZero && expr.op2.re !== undefined)
+    if (expr.op1.isEqual(0) && expr.op2.re !== undefined)
       return ce.number(expr.op2.re);
     return undefined;
   }
@@ -162,119 +164,80 @@ export function getImaginaryFactor(
 
   if (expr.operator === 'Divide') {
     const denom = expr.op2;
-    if (denom.isZero) return undefined;
+    if (denom.isEqual(0)) return undefined;
     return getImaginaryFactor(expr.op1)?.div(denom);
   }
 
   return undefined;
 }
 
-export function normalizeFlags(flags: Partial<NumericFlags>): NumericFlags {
+export function normalizeFlags(
+  flags: Partial<NumericFlags> | undefined
+): NumericFlags | undefined {
+  if (!flags) return undefined;
   const result = { ...flags };
 
-  if (flags.zero || flags.one || flags.negativeOne) {
-    result.zero = flags.zero && !flags.one && !flags.negativeOne;
-    result.notZero = !flags.zero || flags.one || flags.negativeOne;
-    result.one = flags.one && !flags.zero && !flags.negativeOne;
-    result.negativeOne = flags.negativeOne && !flags.zero && !flags.one;
-    result.infinity = false;
-    result.NaN = false;
-    result.finite = true;
-
-    result.integer = true;
-    result.finite = true;
-    result.infinity = false;
-    result.NaN = false;
-
-    result.even = flags.one;
-    result.odd = !flags.one;
-  }
-
-  if (result.zero) {
-    result.positive = false;
-    result.negative = false;
-    result.nonPositive = true;
-    result.nonNegative = true;
-  }
-  if (result.notZero === true) {
-    if (!result.imaginary) result.real = true;
-    result.zero = false;
-  }
-  if (result.one) {
-    result.positive = true;
-  }
-  if (result.negativeOne) {
-    result.nonPositive = true;
-  }
-
-  if (result.positive || result.nonNegative) {
-    result.negativeOne = false;
-  }
-  if (result.positive) {
-    result.nonPositive = false;
-    result.negative = false;
-    result.nonNegative = true;
-  } else if (result.nonPositive) {
-    result.positive = false;
-    result.negative = result.notZero;
-    result.nonNegative = !result.zero;
-  } else if (result.negative) {
-    result.positive = false;
-    result.nonPositive = result.notZero;
-    result.nonNegative = false;
-  } else if (result.nonNegative) {
-    result.positive = result.notZero;
-    result.nonPositive = !result.zero;
-    result.negative = false;
-  }
-
-  // Positive or negative numbers are real (not imaginary)
-  if (
-    result.positive ||
-    result.negative ||
-    result.nonPositive ||
-    result.nonNegative
-  ) {
-    result.number = true;
-    if (result.finite) result.real = true;
-
-    result.imaginary = false;
-  }
-
-  if (result.finite) {
-    result.number = true;
-    result.infinity = false;
-    result.NaN = false;
-  }
-
-  if (result.infinity) {
-    result.finite = false;
-    result.NaN = false;
-  }
-
-  if (flags.even) result.odd = false;
-  if (flags.odd) result.even = false;
-
-  // Adjust domain flags
-  if (result.integer) result.rational = true;
-  if (result.real) result.number = true;
-  if (result.imaginary) result.number = true;
+  if (result.odd) result.even = false;
+  if (result.even) result.odd = false;
 
   return result as NumericFlags;
 }
 
 export function isSymbolDefinition(def: any): def is SymbolDefinition {
+  if (def.name === 'Pi') debugger;
   if (def === undefined || def === null || typeof def !== 'object')
     return false;
+
   if (isBoxedExpression(def)) return false;
-  return 'domain' in def || 'value' in def || 'constant' in def;
+
+  if ('type' in def || 'value' in def || 'constant' in def) {
+    if (typeof def.type === 'function') {
+      throw new Error(
+        'The type field of a symbol definition should be a type string'
+      );
+    }
+
+    if ('signature' in def) {
+      throw new Error(
+        'Symbol definition cannot have a signature field. Use a type field instead.'
+      );
+    }
+
+    if ('sgn' in def) {
+      throw new Error(
+        'Symbol definition cannot have a sgn field. Use a flags field instead.'
+      );
+    }
+
+    return true;
+  }
+  return false;
 }
 
 export function isFunctionDefinition(def: any): def is FunctionDefinition {
   if (def === undefined || def === null || typeof def !== 'object')
     return false;
   if (isBoxedExpression(def)) return false;
-  return 'signature' in def || 'complexity' in def;
+  if ('signature' in def || 'complexity' in def) {
+    if ('constant' in def) {
+      throw new Error(
+        'Function definition cannot have a constant field and symbol definition cannot have a signature field.'
+      );
+    }
+    if ('type' in def && typeof def.type !== 'function') {
+      throw new Error(
+        'The type field of a function definition should be a function'
+      );
+    }
+    if ('sgn' in def && typeof def.sgn !== 'function') {
+      throw new Error(
+        'The sgn field of a function definition should be a function'
+      );
+    }
+    return true;
+  }
+
+  return false;
 }
 
 export function semiCanonical(
@@ -299,4 +262,16 @@ export function canonical(
   return xs.every((x) => isBoxedExpression(x) && x.isCanonical)
     ? (xs as ReadonlyArray<BoxedExpression>)
     : xs.map((x) => ce.box(x));
+}
+
+export function domainToType(expr: BoxedExpression): Type {
+  if (expr.symbol === 'Booleans') return 'boolean';
+  if (expr.symbol === 'Strings') return 'string';
+  if (expr.symbol === 'Numbers') return 'number';
+  if (expr.symbol === 'ComplexNumbers') return 'complex';
+  if (expr.symbol === 'ImaginaryNumbers') return 'imaginary';
+  if (expr.symbol === 'RealNumbers') return 'real';
+  if (expr.symbol === 'RationalNumbers') return 'rational';
+  if (expr.symbol === 'Integers') return 'integer';
+  return 'unknown';
 }
