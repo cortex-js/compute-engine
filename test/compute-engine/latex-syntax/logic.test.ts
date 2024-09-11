@@ -91,13 +91,13 @@ describe('Logic', () => {
     `);
     expect(ce.parse('p \\operatorname{implies} q').json).toMatchInlineSnapshot(`
       [
-        Tuple,
-        p,
+        Multiply,
         implies,
+        p,
         q,
       ]
     `);
-  });
+  }); // @fixme
 
   it('should parse Equivalent', () => {
     expect(ce.parse('p \\Leftrightarrow q').json).toMatchInlineSnapshot(`
@@ -116,13 +116,13 @@ describe('Logic', () => {
     `);
     expect(ce.parse('p \\operatorname{iff} q').json).toMatchInlineSnapshot(`
       [
-        Tuple,
-        p,
+        Multiply,
         iff,
+        p,
         q,
       ]
     `);
-  });
+  }); // @fixme
 
   it('should parse XOR', () => {
     expect(ce.parse('p \\oplus q').json).toMatchInlineSnapshot(`

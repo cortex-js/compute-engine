@@ -23,8 +23,8 @@ describe('TAUTOLOGY one = 1', () => {
     expect(ce.box('one').evaluate().json).toEqual(1);
   });
   test(`one.domain`, () => {
-    expect(ce.box('one').domain?.toJSON() ?? 'undefined').toMatchInlineSnapshot(
-      `PositiveIntegers`
+    expect(ce.box('one').type.toString()).toMatchInlineSnapshot(
+      `finite_integer`
     );
   });
   test(`'one' compared to 0`, () => {
@@ -95,23 +95,23 @@ describe.skip('is() values', () => {
 
 describe('canonical domains', () => {
   test(`Range domains`, () => {
-    expect(ce.box('m').domain?.toJSON() ?? 'undefined').toMatchInlineSnapshot(
-      `undefined`
+    expect(ce.box('m').type.toString() ?? 'undefined').toMatchInlineSnapshot(
+      `unknown`
     );
-    expect(ce.box('n').domain?.toJSON() ?? 'undefined').toMatchInlineSnapshot(
-      `undefined`
+    expect(ce.box('n').type.toString() ?? 'undefined').toMatchInlineSnapshot(
+      `unknown`
     );
-    expect(ce.box('q').domain?.toJSON() ?? 'undefined').toMatchInlineSnapshot(
-      `undefined`
+    expect(ce.box('q').type.toString() ?? 'undefined').toMatchInlineSnapshot(
+      `unknown`
     );
   });
 
   test(`Interval domains`, () => {
-    expect(ce.box('t').domain?.toJSON() ?? 'undefined').toMatchInlineSnapshot(
-      `PositiveNumbers`
-    ); //@fixme should be NonNegativeNumber
-    expect(ce.box('s').domain?.toJSON() ?? 'undefined').toMatchInlineSnapshot(
-      `RealNumbers`
+    expect(ce.box('t').type.toString() ?? 'undefined').toMatchInlineSnapshot(
+      `real`
+    );
+    expect(ce.box('s').type.toString() ?? 'undefined').toMatchInlineSnapshot(
+      `real`
     );
   });
 });

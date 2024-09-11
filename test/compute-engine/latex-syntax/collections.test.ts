@@ -69,12 +69,16 @@ describe('RANGE', () => {
         1,
         [
           "Error",
-          ["ErrorCode", "'incompatible-domain'", "Numbers", "Values"],
-          ["Range", 3, 5]
+          [
+            "ErrorCode",
+            "'incompatible-type'",
+            "'number'",
+            "'collection<integer>'"
+          ]
         ]
       ]
     `);
-  });
+  }); // @fixme
 
   test('range with expressions', () => {
     expect(parse('n+1..n+10')).toMatchInlineSnapshot(

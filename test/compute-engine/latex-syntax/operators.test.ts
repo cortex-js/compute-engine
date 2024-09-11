@@ -200,7 +200,7 @@ describe('OPERATOR prefix', () => {
   test('-i // Negate', () =>
     expect(check('-i')).toMatchInlineSnapshot(`
       box       = ["Negate", "i"]
-      canonical = ["Negate", "ImaginaryUnit"]
+      canonical = ["Complex", 0, -1]
     `));
   test('-\\infty // Negate', () =>
     expect(check('-\\infty')).toMatchInlineSnapshot(`NegativeInfinity`));
@@ -212,7 +212,7 @@ describe('OPERATOR prefix', () => {
   test('+i // Infix plus', () =>
     expect(check('+i')).toMatchInlineSnapshot(`
       box       = i
-      canonical = ImaginaryUnit
+      canonical = ["Complex", 0, 1]
     `));
   test('+\\infty // Infix plus', () =>
     expect(check('+\\infty')).toMatchInlineSnapshot(`PositiveInfinity`));

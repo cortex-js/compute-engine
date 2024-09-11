@@ -24,7 +24,7 @@ describe('SETTING/FORGETTING', () => {
     expect(expr).toMatchInlineSnapshot(`["Subtract", "x1", 1]`);
     expect(expr.evaluate()).toMatchInlineSnapshot(`["Subtract", "x1", 1]`);
 
-    expect(ce.box(`x1`).domain).toMatchInlineSnapshot(`PositiveIntegers`);
+    expect(ce.box(`x1`).type).toMatchInlineSnapshot(`finite_integer`);
     expect(ce.box(`x1`)).toMatchInlineSnapshot(`x1`);
     expect(ce.box(`x1`).evaluate()).toMatchInlineSnapshot(`x1`);
     expect(ce.box(['Add', 'x1', 5]).evaluate()).toMatchInlineSnapshot(
@@ -61,7 +61,7 @@ describe('SETTING/FORGETTING', () => {
       ]
     `);
 
-    expect(ce.box(`x2`).domain).toMatchInlineSnapshot(`PositiveIntegers`);
+    expect(ce.box(`x2`).type).toMatchInlineSnapshot(`finite_integer`);
     expect(ce.box(`x2`).json).toMatch('x2');
     expect(ce.box(`x2`).evaluate().json).toMatch('x2');
     expect(ce.box(['Add', 'x2', 5]).evaluate().json).toMatchObject([
@@ -88,17 +88,17 @@ describe('SETTING/FORGETTING', () => {
     const testX4_1 = ce.box(['Greater', 'x4', 30]);
     expect(testX4_1.evaluate()).toMatchInlineSnapshot(`["Less", 30, "x4"]`); // @fixme
     expect(x4.evaluate().numericValue).toMatchInlineSnapshot(`null`);
-    expect(x4.domain).toMatchInlineSnapshot(`RealNumbers`);
+    expect(x4.type).toMatchInlineSnapshot(`real`);
 
     ce.assume(['Equal', 'x4', 17]);
     expect(testX4_1.evaluate()).toMatchInlineSnapshot(`False`);
     expect(x4.evaluate().value).toEqual(17);
-    expect(x4.domain).toMatchInlineSnapshot(`RealNumbers`);
+    expect(x4.type).toMatchInlineSnapshot(`real`);
 
     ce.assign({ x4: 2017 });
     expect(testX4_1.evaluate()).toMatchInlineSnapshot(`True`);
     expect(x4.value).toMatchInlineSnapshot(`2017`);
-    expect(x4.domain).toMatchInlineSnapshot(`RealNumbers`);
+    expect(x4.type).toMatchInlineSnapshot(`real`);
   });
 });
 

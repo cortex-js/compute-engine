@@ -128,8 +128,8 @@ describe('expr.solve()', () => {
     const result = e.solve('x')?.map((x) => x.toString());
     expect(result).toMatchInlineSnapshot(`
       [
-        -1 + sqrt(3) / 2,
-        -1 - sqrt(3) / 2,
+        -1 + sqrt(3)/2,
+        -1 - sqrt(3)/2,
       ]
     `);
   });

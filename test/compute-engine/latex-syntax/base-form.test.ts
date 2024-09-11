@@ -22,10 +22,7 @@ describe('BASE FORM', () => {
           'unexpected-digit',
           'c',
         ],
-        [
-          LatexString,
-          '12c3',
-        ],
+        '12c3',
       ]
     `);
   });
@@ -39,10 +36,7 @@ describe('BASE FORM', () => {
           'unexpected-digit',
           'x',
         ],
-        [
-          LatexString,
-          '1x2gc3',
-        ],
+        '1x2gc3',
       ]
     `);
   });
@@ -54,16 +48,30 @@ describe('BASE FORM', () => {
   test('base 37', () => {
     expect(json('\\text{a1b23}_{37}')).toMatchInlineSnapshot(`
       [
-        Subscript,
+        Baseform,
         'a1b23',
-        37,
+        [
+          Error,
+          [
+            ErrorCode,
+            'invalid-base',
+            '37',
+          ],
+        ],
       ]
     `);
     expect(json('\\text{1x2gc3}_{37}')).toMatchInlineSnapshot(`
       [
-        Subscript,
+        Baseform,
         '1x2gc3',
-        37,
+        [
+          Error,
+          [
+            ErrorCode,
+            'invalid-base',
+            '37',
+          ],
+        ],
       ]
     `);
   });

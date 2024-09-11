@@ -18,7 +18,7 @@ describe('NUMERIC gamma', () => {
       eval-auto = Gamma(1)
       eval-mach = Gamma(1)
       N-auto    = 1
-      N-mach    = 0.9999999999999998
+      N-mach    = 1
     `));
 
   test(`Gamma(5)`, () =>
@@ -27,6 +27,6 @@ describe('NUMERIC gamma', () => {
       eval-auto = Gamma(5)
       eval-mach = Gamma(5)
       N-auto    = 23.9999999999999999994
-      N-mach    = 23.999999999999996
+      N-mach    = 23.9999999999999999994
     `));
 });

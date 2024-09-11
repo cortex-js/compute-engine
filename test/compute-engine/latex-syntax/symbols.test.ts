@@ -313,7 +313,7 @@ describe('SYMBOLS', () => {
       expect(parse('x^2')).toMatchInlineSnapshot(`["Square", "x"]`);
       expect(parse('a^b')).toMatchInlineSnapshot(`["Power", "a", "b"]`);
       expect(parse('x_{i+1}')).toMatchInlineSnapshot(
-        `["At", "x", ["Add", 1, "ImaginaryUnit"]]`
+        `["At", "x", ["Add", 1, ["Complex", 0, 1]]]`
       );
       expect(parse('\\vec{x}')).toMatchInlineSnapshot(`["OverVector", "x"]`);
       expect(parse('x^\\prime')).toMatchInlineSnapshot(`["Prime", "x"]`);
