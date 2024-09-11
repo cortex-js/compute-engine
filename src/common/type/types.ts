@@ -1,4 +1,184 @@
 /**
+ * A primitive type is a simple type that represents a concrete value.
+ *
+ * - `any`: the top type
+ *    - `expression`
+ *    - `error`: an invalid value, such as `["Error", "missing"]`
+ *    - `nothing`: the type of the `Nothing` symbol, the unit type
+ *    - `never`: the bottom type
+ *    - `unknown`: a value whose type is not known
+ *
+ * - `expression`:
+ *    - a symbolic expression, such as `["Add", "x", 1]`
+ *    - <value>
+ *    - `symbol`: a symbol, such as `x`.
+ *    - `function`: a function expression
+ *      such as `["Function", ["Add", "x", 1], "x"]`.
+ *
+ * - `value`
+ *    - `scalar`
+ *      - <number>
+ *      - `boolean`: a boolean value: `True` or `False`.
+ *      - `string`: a string of characters.
+ *    - `collection`
+ *       - `list`: a collection of expressions, possibly recursive,
+ *          with optional dimensions, e.g. `[number]`, `[boolean^32]`,
+ *          `[number^(2x3)]`. Used to represent a vector, a matrix or a
+ *          tensor when the type of its elements is a number
+ *       - `set`: a collection of unique expressions, e.g. `set<string>`.
+ *       - `tuple`: a fixed-size collection of named or unnamed elements, e.g.
+ *          `tuple<number, boolean>`, `tuple<x: number, y: boolean>`.
+ *       - `map`: a set key-value pairs, e.g. `map<x: number, y: boolean>`.
+ *
+ * - `number`: any numeric value:
+ *    - `finite_number`: <finite_complex> or <finite_imaginary> or
+ *       <finite_real> or <finite_rational> or <finite_integer>
+ *    - `non_finite_number`: `NaN`, `PositiveInfinity`, `NegativeInfinity` or
+ *      `ComplexInfinity`
+ *    - `complex` and `finite_complex`: a complex number, with non-zero real
+ *       and imaginary parts.
+ *    - `imaginary` and `finite_imaginary`: a complex number with a real part
+ *       of 0 (pure imaginary).
+ *    - `real` and `finite_real`: a complex number with an imaginary part of 0.
+ *    - `rational` and `finite_rational`: a pure rational number
+ *       (not an integer)
+ *    - `integer` and `finite_integer`: a whole number
+ *
+ *
+ */
+export type PrimitiveType =
+  | NumericType
+  | 'collection'
+  | 'list'
+  | 'set'
+  | 'map'
+  | 'tuple'
+  | 'value'
+  | 'scalar'
+  | 'function'
+  | 'symbol'
+  | 'boolean'
+  | 'string'
+  | 'expression'
+  | 'unknown'
+  | 'error'
+  | 'nothing'
+  | 'never'
+  | 'any';
+
+export type NumericType =
+  | 'number'
+  | 'finite_number'
+  | 'complex'
+  | 'finite_complex'
+  | 'imaginary'
+  | 'finite_imaginary'
+  | 'real'
+  | 'finite_real'
+  | 'rational'
+  | 'finite_rational'
+  | 'integer'
+  | 'finite_integer'
+  | 'non_finite_number';
+
+export type NamedElement = {
+  name?: string;
+  type: Type;
+};
+
+export type FunctionSignature = {
+  kind: 'signature';
+  args?: NamedElement[];
+  optArgs?: NamedElement[];
+  restArg?: NamedElement;
+  result: Type;
+};
+
+export type AlgebraicType = {
+  kind: 'union' | 'intersection';
+  types: Type[];
+};
+
+export type NegationType = {
+  kind: 'negation';
+  type: Type;
+};
+
+export type ValueType = {
+  kind: 'value';
+  value: any;
+};
+
+/** Map is not a collection. It is a set of key/value pairs.
+ * An element of a map whose type is a subtype of `nothing` is optional.
+ * For example, in `{x: number, y: boolean | nothing}` the element `y` is optional.
+ */
+export type MapType = {
+  kind: 'map';
+  elements: Record<string, Type>;
+};
+
+/** Collection, List, Set, Tuple and Map are collections.
+ *
+ * `CollectionType` is a generic collection of elements of a certain type.
+ */
+export type CollectionType = {
+  kind: 'collection';
+  elements: Type;
+};
+
+/**
+ * The elements of a list are ordered.
+ *
+ * All elements of a list have the same type (but it can be a broad type,
+ * up to `any`).
+ *
+ * The same element can be present in the list more than once.
+ *
+ * A list can be multi-dimensional. For example, a list of integers with
+ * dimensions 2x3x4 is a 3D tensor with 2 layers, 3 rows and 4 columns.
+ *
+ */
+export type ListType = {
+  kind: 'list';
+  elements: Type;
+  dimensions?: number[];
+};
+
+/** Each element of a set is unique (is not present in the set more than once).
+ * The elements of a set are not ordered.
+ */
+export type SetType = {
+  kind: 'set';
+  elements: Type;
+};
+
+/* The elements of a tuple are ordered and may be named or unnamed */
+export type TupleType = {
+  kind: 'tuple';
+  elements: NamedElement[];
+};
+
+/** Nominal typing */
+export type TypeReference = {
+  kind: 'reference';
+  ref: string;
+};
+
+export type Type =
+  | PrimitiveType
+  | AlgebraicType
+  | NegationType
+  | CollectionType
+  | ListType
+  | SetType
+  | MapType
+  | TupleType
+  | FunctionSignature
+  | ValueType
+  | TypeReference;
+
+/**
  * The type of a boxed expression indicates the kind of expression it is and
  * the value it represents.
  * 
@@ -115,8 +295,6 @@ Examples of types:
    "(number, y:number?) -> number" -- a function type with an optional named argument (can have several optional arguments, at the end)
    "(number, ...number) -> number" -- a function type with a rest argument (can have only one, and no optional arguments if there is a rest argument).
    "() -> number" -- a function type with an empty argument list
-   "???(number, expression) -> number" -- a function type with a deferred evaluation (hold) indicator. This indicates that the arguments are not evaluated before the function is called. This is useful to pass unevaluated expressions as arguments to a function.
-   ???expression -> number -- a function type with a deferred evaluation (hold) indicator.
 
    "number | boolean" -- a union type
    "(x: number) & (y: number)" -- an intersection type
@@ -124,143 +302,7 @@ Examples of types:
    "(number -> number) | number" -- a union type with a function type
 */
 
-/**
- * A primitive type is a simple type that represents a concrete value.
- *
- * - `number`: any numeric value, including `NaN`, `PositiveInfinity`, `NegativeInfinity`, `ComplexInfinity` and all complex numbers.
- * - `complex`: a complex number, which may have a real and imaginary part.
- * - `imaginary`: a complex number with a real part of 0.
- * - `real`: a complex number with an imaginary part of 0.
- * - `rational`: a rational number, which may be an integer.
- * - `integer`: an integer number.
- *
- * - `collection`: a collection of expressions, such as a list, a set, a vector or a matrix.
- *
- * - `list`: a collection of expressions, possibly recursive, with optional dimensions, e.g. `[number]`, `[boolean^32]`, `[number^(2x3)]`. Used to represent a vector, a matrix or a tensor when the type of its elements is
- *  numeric
- *
- * - `set`: a collection of unique expressions, e.g. `set<string>`.
- *
- * - `tuple`: a fixed-size collection of named or unnamed elements, e.g.
- *   `(number, boolean)`, `(x: number, y: boolean)`.
- *
- * - `value`: a numeric type, such as `number`, `complex`, `imaginary`,
- *   `real`, `rational`, `integer`, or a `boolean` or a `string` or
- *    a collection (set, list, collection) or a map.
- *
- * - `map`: a set key-value pairs, e.g. `{x: number, y: boolean}`. Note that
- *   a map is not a collection.
- *
- *
- * - `function`: a function expression, such as `["Function", ["Add", "x", 1], "x"]`.
- * - `symbol`: a symbol, such as `x`.
- * - `expression`: a symbolic expression, such as `["Add", "x", 1]`. This includes any type, except `any`, `nothing` and `error`.
- *
- * - `string`: a string of characters.
- * - `boolean`: a boolean value: `True` or `False`.
- *
- * - `error`: an invalid value, such as `["Error", "missing"]`.
- * - `nothing`: the type of the `Nothing` symbol, the bottom type.
- * - `unknown`: a value whose type is not known.
- * - `any`: the top type: an `expression`, an `error`, `nothing` or `unknown`.
- *
- */
-export type PrimitiveType =
-  | 'unknown'
-  | 'number'
-  | 'complex'
-  | 'imaginary'
-  | 'real'
-  | 'rational'
-  | 'integer'
-  | 'collection'
-  | 'list'
-  | 'set'
-  | 'map'
-  | 'tuple'
-  | 'value'
-  | 'function'
-  | 'symbol'
-  | 'boolean'
-  | 'string'
-  | 'expression'
-  | 'error'
-  | 'nothing'
-  | 'any';
-
-export type NamedElement = {
-  name?: string;
-  type: Type;
-};
-
-export type FunctionSignature = {
-  kind: 'signature';
-  args?: NamedElement[];
-  hold?: boolean;
-  optArgs?: NamedElement[];
-  restArg?: NamedElement;
-  result: Type;
-};
-
-export type AlgebraicType = {
-  kind: 'union' | 'intersection';
-  types: Type[];
-};
-
-/** Map is not a collection. It is a set of key/value pairs.
- * An element of a map whose type is a subtype of `nothing` is optional.
- * For example, in `{x: number, y: boolean | nothing}` the element `y` is optional.
- */
-export type MapType = {
-  kind: 'map';
-  elements: Record<string, Type>;
-};
-
-/** Collection, List, Set and Tuple are collections. `CollectionType` is
- *  a generic collection of elements of a certain type.
- */
-export type CollectionType = {
-  kind: 'collection';
-  elements: Type;
-};
-
-/** The elements of a list are ordered */
-export type ListType = {
-  kind: 'list';
-  elements: Type;
-  dimensions?: number[];
-};
-
-/** Each element of a set is unique (is not present in the set more than once).
- * The elements of a set are not ordered.
- */
-export type SetType = {
-  kind: 'set';
-  elements: Type;
-};
-
-/* The elements of a tuple are ordered and may be named or unnamed */
-export type TupleType = {
-  kind: 'tuple';
-  elements: NamedElement[];
-};
-
-/** Nominal typing */
-export type TypeReference = {
-  kind: 'reference';
-  ref: string;
-};
-
-export type Type =
-  | PrimitiveType
-  | AlgebraicType
-  | CollectionType
-  | ListType
-  | SetType
-  | MapType
-  | TupleType
-  | FunctionSignature
-  | TypeReference;
+export type TypeString = string;
 
 export type TypeCompatibility =
   | 'covariant' // A <: B
@@ -269,3 +311,19 @@ export type TypeCompatibility =
   | 'invariant'; // Neither A <: B, nor A :> B
 
 export type TypeResolver = (name: string) => Type | undefined;
+
+/* Future considerations:
+ * - Add support for generics (e.g. `List<T>`), i.e. parametric polymorphism,
+ * - Add support for type constraints (e.g. `T extends number`),
+ * - Add support for type aliases
+ * - Add support for type variants (e.g. a la Rust enums)
+ *     Maybe something like
+ *      `variant<Square, Circle>` or
+ *      `variant<Square(side: integer), Circle(radius: integer)>`
+ *      `variant<Square: {side: integer}, Circle: {radius: integer}>`
+ * - Add support for dependent types, with type-level computations
+ * - Add support for integers, booleans, symbols and strings, i.e. "T = "red" | "green" | "blue""
+ * - Add support for conditional types (e.g. `T extends U ? X : Y`)
+ *
+ *
+ */
