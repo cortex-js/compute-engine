@@ -29,8 +29,13 @@
 - The `ExtendedRealNumbers`, `ExtendedComplexNumbers` domains have been
   deprecated. Use the `RealNumbers` and `ComplexNumbers` domains instead.
 
-  Note that an upcoming version will substantially revise domain handling.
-  Please contact me if you are currently using domains.
+- The "Domain" expression has been deprecated. Use types instead (see below).
+
+- Some `BoxedExpression` properties have been removed:
+  - Instead of `expr.isZero`, use `expr.isEqual(0)`.
+  - Instead of `expr.isNotZero`, use `expr.isEqual(0) === false`.
+  - Instead of `expr.isOne`, use `expr.isEqual(1)`.
+  - Instead of `expr.isNegativeOne`, use `expr.isEqual(-1)`.
 
 ### New Features and Improvements
 
@@ -80,6 +85,129 @@
   used to perform simplifications specific to this function. This has been
   removed. Instead, use a rule that matches the function and returns the
   simplified expression.
+
+- **Types**
+
+  Previously, an expression was associated with a domain such as `RealNumbers`
+  or `ComplexNumbers`. This has been replaced with a more flexible system of
+  types.
+
+  A type is a set of values that an expression can take. For example, the type
+  `real` is the set of real numbers, the type `integer` is the set of integers,
+
+  The type of an expression can be set with the `type` property. For example:
+
+  ```js
+  const expr = ce.parse('\\sqrt{-1}');
+  console.info(expr.type); // -> imaginary
+  ```
+
+  The type of a symbol can be set when declaring the symbol. For example:
+
+  ```js
+  ce.declare('x', 'imaginary');
+  ```
+
+  In addition to primitive types, the type system supports more complex types
+  such union types, intersection types, and function types.
+
+  For example, the type `real|imaginary` is the union of the real and imaginary
+  numbers.
+
+  When declaring a function, the type of the arguments and the return value can
+  be specified. For example, to declare a function `f` that takes two integers
+  and returns a real number:
+
+  ```js
+  ce.declare('f', '(integer, integer) -> real');
+  ```
+
+  The sets of numbers are defined as follows:
+
+  - `number` - any number, real or complex, including NaN and infinity
+  - `non_finite_number` - NaN or infinity
+  - `real`
+  - `finite_real` - finite real numbers (exclude NaN and infinity)
+  - `imaginary` - imaginary numbers (complex numbers with a real part of 0)
+  - `finite_imaginary`
+  - `complex` - complex numbers with a real and imaginary part not equal to 0
+  - `finite_complex`
+  - `rational`
+  - `finite_rational`
+  - `integer`
+  - `finite_integer`
+
+  To check the type of an expression, use the `isSubtypeOf()` method. For
+  example:
+
+  ```js
+  let expr = ce.parse('5');
+  console.info(expr.type.isSubtypeOf('rational')); // -> true
+  console.info(expr.type.isSubtypeOf('integer')); // -> true
+
+  expr = ce.parse('\\frac{1}{2}');
+  console.info(expr.type.isSubtypeOf('rational')); // -> true
+  console.info(expr.type.isSubtypeOf('integer')); // -> false
+  ```
+
+  As a shortcut, the properties `isReal`, `isRational`, `isInteger` are
+  available on boxed expressions. For example:
+
+  ```js
+  let expr = ce.parse('5');
+  console.info(expr.isInteger); // -> true
+  console.info(expr.isRational); // -> true
+  ```
+
+  They are equivalent to `expr.type.isSubtypeOf('integer')` and
+  `expr.type.isSubtypeOf('rational')` respectively.
+
+  To check if a number has a non-zero imaginary part, use:
+
+  ```js
+  let expr = ce.parse('5i');
+  console.info(expr.isNumber && expr.isReal === false); // -> true
+  ```
+
+- **Collections**
+
+  Support for collections has been improved. Collections include `List`, `Set`,
+  `Tuple`, `Range`, `Interval`, `Linspace` and `Dictionary`.
+
+  It is now possible to check if an element is contained in a collection using
+  an `Element` expression. For example:
+
+  ```js
+  let expr = ce.parse('[1, 2, 3]');
+  ce.box(['Element', 3, expr]).print(); // -> True
+  ce.box(['Element', 5, expr]).print(); // -> False
+  ```
+
+  To check if a collection is a subset of another collection, use the `Subset`
+  expression. For example:
+
+  ```js
+  ce.box(['Subset', 'Integers', 'RealNumbers']).print(); // -> True
+  ```
+
+  Collections can also be compared for equality. For example:
+
+  ```js
+  let set1 = ce.parse('\\lbrace 1, 2, 3 \\rbrace');
+  let set2 = ce.parse('\\lbrace 3, 2, 1 \\rbrace');
+  console.info(set1.isEqual(set2)); // -> true
+  ```
+
+  There are also additional convenience methods on boxed expressions:
+
+  - `expr.isCollection`
+  - `expr.contains(element)`
+  - `expr.size`
+  - `expr.isSubsetOf(other)`
+  - `expr.indexOf(element)`
+  - `expr.at(index)`
+  - `expr.each()`
+  - `expr.get(key)`
 
 - **Exact calculations**
 
