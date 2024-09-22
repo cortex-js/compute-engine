@@ -82,12 +82,12 @@ const NATIVE_JS_FUNCTIONS: CompiledFunctions = {
   },
   Arcsec: (args, compile) => {
     const arg = args[0];
-    if (arg === null) throw new Error('Arccot: no argument');
+    if (arg === null) throw new Error('Arcsec: no argument');
     return `Math.acos(1 / ${compile(arg)})`;
   },
   Arcsech: (args, compile) => {
     const arg = args[0];
-    if (arg === null) throw new Error('Arccot: no argument');
+    if (arg === null) throw new Error('Arcsech: no argument');
     return `Math.acosh(1 / ${compile(arg)})`;
   },
 
@@ -176,7 +176,7 @@ const NATIVE_JS_FUNCTIONS: CompiledFunctions = {
             (_, i) => fStart + i
           ).join(', ')}]`;
         }
-        return `Array.from({length: ${fStop - fStart + 1} 
+        return `Array.from({length: ${fStop - fStart + 1}
         }, (_, i) => ${start} + i)`;
       }
 
