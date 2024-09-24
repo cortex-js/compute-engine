@@ -1,30 +1,6 @@
 import { SignalOrigin } from './signals';
-import { BOLD, GREY, GREY_BG, RED, RESET } from './ansi-codes';
+import { terminal } from './terminal';
 const LINEBREAK = /\r\n|[\n\r\u2028\u2029]/;
-
-export type Terminal = {
-  joinLines(lines: string[]): string;
-  grey(s: string): string;
-  red(s: string): string;
-  highlightBackground(s: string): string;
-};
-
-export const colorTerminal: Terminal = {
-  joinLines: (lines: string[]): string => lines.join('\n'),
-  grey: (s: string): string => `${GREY}${s}${RESET}`,
-  red: (s: string): string => `${BOLD}${RED}${s}${RESET}`,
-  highlightBackground: (s: string): string => `${GREY_BG}${s}${RESET}`,
-};
-
-const htmlTerminal: Terminal = {
-  joinLines: (lines: string[]) => `<div>${lines.join('</div><div>')}</div>`,
-  grey: (s: string): string => `<span style="opacity:.5">${s}</span>`,
-  red: (s: string): string => `<span style="color:#F33">${s}</span>`,
-  highlightBackground: (s: string): string =>
-    `<span style="background:rgba(255, 100, 100, .1);display:block;border-radius: 4px">${s}</span>`,
-};
-
-const terminal = htmlTerminal;
 
 export class Origin {
   url: string;
@@ -94,14 +70,14 @@ export class Origin {
   }
 
   chalkGutter(s: string): string {
-    return terminal.grey(s);
+    return terminal.renderSpan({ content: s, weight: 'thin' });
   }
 
   chalkMarker(s: string): string {
-    return terminal.red(s);
+    return terminal.renderSpan({ content: s, fg: 'red' });
   }
   chalkMessage(s: string): string {
-    return terminal.red(s);
+    return terminal.renderSpan({ content: s, fg: 'red' });
   }
 
   /** line: 1..., column: 1... */
@@ -124,40 +100,33 @@ export class Origin {
           const markerSpacing = this.lines[index]
             .slice(0, Math.max(column - 1, 0))
             .replace(/[^\t]/g, ' ');
-          markerLine = terminal.joinLines([
-            '',
-            [
-              ' ',
-              this.chalkGutter(gutter.replace(/\d/g, ' ')),
-              markerSpacing,
-              this.chalkMarker('^'),
-            ].join(''),
-          ]);
+          (markerLine = '\n ' + this.chalkGutter(gutter.replace(/\d/g, ' '))),
+            markerSpacing,
+            this.chalkMarker('^');
 
           if (message) {
             markerLine += ' ' + this.chalkMessage(message);
           }
         } else if (message) {
-          markerLine = terminal.joinLines([
-            '',
-            this.chalkGutter(gutter.replace(/\d/g, ' ')) + message,
-          ]);
+          markerLine =
+            '\n' + this.chalkGutter(gutter.replace(/\d/g, ' ')) + message;
         }
         result.push(
-          terminal.highlightBackground(
-            [
-              this.chalkMarker('>'),
-              this.chalkGutter(gutter),
-              this.lines[index],
-              markerLine,
-            ].join('')
-          )
+          [
+            this.chalkMarker('>'),
+            this.chalkGutter(gutter),
+            this.lines[index],
+            markerLine,
+          ].join('')
         );
       } else {
         result.push(` ${this.chalkGutter(gutter)}${this.lines[index]}`);
       }
     }
-    return terminal.joinLines(result);
+    return terminal.renderBlock({
+      tag: 'block',
+      spans: result.map((line) => ({ content: line + '\n' })),
+    });
     /**
   1111 |     expect(
     12 |       rawExpression('\\sqrt{(1+x_0)}=\\frac{\\pi^2}{2}')
@@ -169,70 +138,3 @@ export class Origin {
     */
   }
 }
-
-/** Word-wrap a string that contains ANSI escape sequences.
- *  ANSI escape sequences do not add to the string length.
- */
-export const wrapAnsiString = (
-  string: string,
-  terminalWidth: number
-): string => {
-  if (terminalWidth === 0) {
-    // if the terminal width is zero, don't bother word-wrapping
-    return string;
-  }
-
-  const ANSI_REGEXP = /[\u001b\u009b]\[\d{1,2}m/g;
-  const tokens: ['string' | 'ansi', string][] = [];
-  let lastIndex = 0;
-  let match;
-
-  while ((match = ANSI_REGEXP.exec(string))) {
-    const ansi = match[0];
-    const index = match['index'];
-    if (index != lastIndex) {
-      tokens.push(['string', string.slice(lastIndex, index)]);
-    }
-    tokens.push(['ansi', ansi]);
-    lastIndex = index + ansi.length;
-  }
-
-  if (lastIndex != string.length - 1) {
-    tokens.push(['string', string.slice(lastIndex, string.length)]);
-  }
-
-  let lastLineLength = 0;
-
-  return tokens
-    .reduce(
-      (lines, [kind, token]) => {
-        if (kind === 'string') {
-          if (lastLineLength + token.length > terminalWidth) {
-            while (token.length) {
-              const chunk = token.slice(0, terminalWidth - lastLineLength);
-              const remaining = token.slice(
-                terminalWidth - lastLineLength,
-                token.length
-              );
-              lines[lines.length - 1] += chunk;
-              lastLineLength += chunk.length;
-              token = remaining;
-              if (token.length) {
-                lines.push('');
-                lastLineLength = 0;
-              }
-            }
-          } else {
-            lines[lines.length - 1] += token;
-            lastLineLength += token.length;
-          }
-        } else {
-          lines[lines.length - 1] += token;
-        }
-
-        return lines;
-      },
-      ['']
-    )
-    .join('\n');
-};
