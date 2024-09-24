@@ -98,15 +98,15 @@ describe('NUMBERS', () => {
     expect(check('2\\sqrt{2}')).toMatchInlineSnapshot(`2sqrt(2)`);
     expect(check('\\frac34 \\sqrt{3}')).toMatchInlineSnapshot(`3/4sqrt(3)`);
     expect(check('\\frac34 \\sqrt{3} + i')).toMatchInlineSnapshot(
-      `i + 3/4sqrt(3)`
+      `3/4sqrt(3) + i`
     );
     // This should be an exact NumericValue
     expect(check('\\frac34 \\sqrt{3} - 2i')).toMatchInlineSnapshot(
-      `-2i + 3/4sqrt(3)`
+      `3/4sqrt(3) - 2i`
     );
     // This is not an exact NumericValue (non-gaussian imaginary part)
     expect(check('\\frac34 \\sqrt{3} - 2.12i')).toMatchInlineSnapshot(
-      `-2.12i + 3/4sqrt(3)`
+      `3/4sqrt(3) - 2.12i`
     );
   });
 });
@@ -153,11 +153,11 @@ describe('POWERS/ROOTS', () => {
     expect(check('(-1)^{\\frac32}')).toMatchInlineSnapshot(`(-1)^(3/2)`);
     expect(check('x+(-1)^{\\frac32}')).toMatchInlineSnapshot(`x + (-1)^(3/2)`);
 
-    expect(check('x^{\\frac17}')).toMatchInlineSnapshot(`x^(1/7)`);
-    expect(check('2^{\\frac17}')).toMatchInlineSnapshot(`2^(1/7)`);
-    expect(check('(x+1)^{\\frac17}')).toMatchInlineSnapshot(`(x + 1)^(1/7)`);
-    expect(check('(-1)^{\\frac17}')).toMatchInlineSnapshot(`(-1)^(1/7)`);
-    expect(check('x+(-1)^{\\frac17}')).toMatchInlineSnapshot(`x + (-1)^(1/7)`);
+    expect(check('x^{\\frac17}')).toMatchInlineSnapshot(`root(7)(x)`);
+    expect(check('2^{\\frac17}')).toMatchInlineSnapshot(`root(7)(2)`);
+    expect(check('(x+1)^{\\frac17}')).toMatchInlineSnapshot(`root(7)(x + 1)`);
+    expect(check('(-1)^{\\frac17}')).toMatchInlineSnapshot(`root(7)(-1)`);
+    expect(check('x+(-1)^{\\frac17}')).toMatchInlineSnapshot(`x + root(7)(-1)`);
   });
 });
 
@@ -253,19 +253,19 @@ describe('PRECEDENCE', () => {
   it('should correctly put parentheses where needed', () => {
     expect(check('1+2*3')).toMatchInlineSnapshot(`1 + 2 * 3`);
     expect(check('(1+2)*3')).toMatchInlineSnapshot(`3(1 + 2)`);
-    expect(check('1*2+3')).toMatchInlineSnapshot(`3 + 2`);
-    expect(check('1*(2+3)')).toMatchInlineSnapshot(`(2 + 3)`);
+    expect(check('1*2+3')).toMatchInlineSnapshot(`2 + 3`);
+    expect(check('1*(2+3)')).toMatchInlineSnapshot(`2 + 3`);
     expect(check('1+2^3')).toMatchInlineSnapshot(`1 + 2^3`);
     expect(check('(1+2)^3')).toMatchInlineSnapshot(`(1 + 2)^3`);
     expect(check('1^2+3')).toMatchInlineSnapshot(`3 + 1^2`);
     expect(check('1^{2+3}')).toMatchInlineSnapshot(`1^(2 + 3)`);
     expect(check('1+2/3')).toMatchInlineSnapshot(`1 + 2/3`);
-    expect(check('(1+2)/3')).toMatchInlineSnapshot(`1/3 * (1 + 2) / 1`);
+    expect(check('(1+2)/3')).toMatchInlineSnapshot(`1/3 * (1 + 2)`);
     expect(check('1/2+3')).toMatchInlineSnapshot(`3 + 1/2`);
     expect(check('1/(2+3)')).toMatchInlineSnapshot(`1 / (2 + 3)`);
     expect(check('1+(2/3)+4')).toMatchInlineSnapshot(`1 + 4 + 2/3`);
     expect(check('1+2/(3+4)')).toMatchInlineSnapshot(`1 + 2 * 1 / (3 + 4)`);
-    expect(check('(1+2)/3+4')).toMatchInlineSnapshot(`4 + 1/3 * (1 + 2) / 1`);
+    expect(check('(1+2)/3+4')).toMatchInlineSnapshot(`4 + 1/3 * (1 + 2)`);
     expect(check('1+(2/3)*4')).toMatchInlineSnapshot(`1 + 4 * 2/3`);
   });
 

@@ -97,6 +97,7 @@ export function simplify(latex: string): string {
 export function checkJson(inExpr: SemiBoxedExpression | null): string {
   if (!inExpr) return 'null';
   try {
+    const precision = engine.precision;
     engine.precision = 'auto';
 
     const boxed = exprToString(engine.box(inExpr, { canonical: false }));
@@ -116,7 +117,7 @@ export function checkJson(inExpr: SemiBoxedExpression | null): string {
     const evalMachine = expr.evaluate().toString();
     const numEvalMachine = expr.N().toString();
 
-    engine.precision = 'auto';
+    engine.precision = precision;
 
     if (
       boxed === canonical &&

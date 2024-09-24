@@ -19,6 +19,8 @@ import { engine, simplify } from '../utils';
 
 const ce = engine;
 
+console.log(NToJson('12345678^3 + \\frac{1}{3}'));
+
 function parseToJson(latex: string): Expression {
   return engine.parse(latex, { canonical: false }).json;
 }
@@ -53,12 +55,6 @@ function customCanonical(expr) {
 }
 
 //
-// BOXING
-//
-
-// describe('BOXING', () => {});
-
-//
 // PARSING
 //
 
@@ -72,7 +68,7 @@ describe('PARSING numbers', () => {
     expect(ce.parse('-2+3-4')).toMatchInlineSnapshot(`["Add", -4, -2, 3]`);
   });
   test(`-i`, () => {
-    expect(ce.parse('-i')).toMatchInlineSnapshot(`["Negate", "ImaginaryUnit"]`);
+    expect(ce.parse('-i')).toMatchInlineSnapshot(`["Complex", 0, -1]`);
   });
 
   test(`3.424242334e4`, () =>
@@ -159,21 +155,19 @@ describe('PARSING numbers', () => {
                                             "Error",
                                             [
                                               "ErrorCode",
-                                              "'incompatible-domain'",
-                                              "Numbers",
-                                              "Anything"
-                                            ],
-                                            ["At", "v", 2]
+                                              "'incompatible-type'",
+                                              "'number'",
+                                              "'any'"
+                                            ]
                                           ],
                                           [
                                             "Error",
                                             [
                                               "ErrorCode",
-                                              "'incompatible-domain'",
-                                              "Numbers",
-                                              "Anything"
-                                            ],
-                                            ["At", "v", 3]
+                                              "'incompatible-type'",
+                                              "'number'",
+                                              "'any'"
+                                            ]
                                           ]
                                         ]
                                       ],
@@ -185,21 +179,19 @@ describe('PARSING numbers', () => {
                                             "Error",
                                             [
                                               "ErrorCode",
-                                              "'incompatible-domain'",
-                                              "Numbers",
-                                              "Anything"
-                                            ],
-                                            ["At", "v", 2]
+                                              "'incompatible-type'",
+                                              "'number'",
+                                              "'any'"
+                                            ]
                                           ],
                                           [
                                             "Error",
                                             [
                                               "ErrorCode",
-                                              "'incompatible-domain'",
-                                              "Numbers",
-                                              "Anything"
-                                            ],
-                                            ["At", "v", 3]
+                                              "'incompatible-type'",
+                                              "'number'",
+                                              "'any'"
+                                            ]
                                           ]
                                         ]
                                       ]
@@ -219,11 +211,10 @@ describe('PARSING numbers', () => {
                                       "Error",
                                       [
                                         "ErrorCode",
-                                        "'incompatible-domain'",
-                                        "Numbers",
-                                        "Anything"
-                                      ],
-                                      ["At", "v", 2]
+                                        "'incompatible-type'",
+                                        "'number'",
+                                        "'any'"
+                                      ]
                                     ]
                                   ]
                                 ]
@@ -239,10 +230,21 @@ describe('PARSING numbers', () => {
                 ]
               ],
               [
-                "Triple",
+                "Tuple",
                 "Nothing",
                 2,
-                ["Floor", ["Multiply", 1.5, "n", ["Ln", "n"]]]
+                [
+                  "Floor",
+                  [
+                    "Error",
+                    [
+                      "ErrorCode",
+                      "'incompatible-type'",
+                      "'real'",
+                      "'finite_number'"
+                    ]
+                  ]
+                ]
               ]
             ],
             2
@@ -425,7 +427,17 @@ describe('CANONICALIZATION multiply', () => {
     ]));
 
   test(`2\\times\\frac12`, () =>
-    expect(canonicalToJson('2\\times\\frac12')).toMatchInlineSnapshot(`1`));
+    expect(canonicalToJson('2\\times\\frac12')).toMatchInlineSnapshot(`
+      [
+        Multiply,
+        2,
+        [
+          Rational,
+          1,
+          2,
+        ],
+      ]
+    `));
 
   test(`2\\times(5-5)\\times5\\times4`, () =>
     expect(canonicalToJson('2\\times(5-5)\\times5\\times4'))
@@ -447,15 +459,15 @@ describe('CANONICALIZATION multiply', () => {
     expect(canonicalToJson('(-2)\\times(-x)\\times y\\times\\frac{3}{-5}'))
       .toMatchInlineSnapshot(`
       [
-        Divide,
+        Multiply,
+        -2,
         [
-          Multiply,
-          -2,
+          Rational,
           3,
-          x,
-          y,
+          5,
         ],
-        5,
+        x,
+        y,
       ]
     `));
 
@@ -466,18 +478,19 @@ describe('CANONICALIZATION multiply', () => {
       )
     ).toMatchInlineSnapshot(`
       [
-        Divide,
+        Multiply,
+        -2,
         [
-          Multiply,
-          -2,
+          Rational,
           2,
-          3.2,
-          5.23,
-          x,
-        ],
-        [
-          Multiply,
           3,
+        ],
+        3.2,
+        5.23,
+        x,
+        [
+          Divide,
+          1,
           x,
         ],
       ]
@@ -495,12 +508,13 @@ describe('CANONICALIZATION divide', () => {
   test(`\\frac{-x}{2}`, () => {
     expect(canonicalToJson('\\frac{-x}{2}')).toMatchInlineSnapshot(`
       [
-        Divide,
+        Multiply,
         [
-          Negate,
-          x,
+          Rational,
+          -1,
+          2,
         ],
-        2,
+        x,
       ]
     `);
   });
@@ -602,9 +616,7 @@ describe('SIMPLIFICATION add', () => {
     expect(simplify('2-q')).toMatchInlineSnapshot(`["Subtract", 2, "q"]`));
 
   test(`-i`, () =>
-    expect(simplify('-i')).toMatchInlineSnapshot(
-      `["Negate", "ImaginaryUnit"]`
-    )); // @fixme ['Complex', 0, -1]?
+    expect(simplify('-i')).toMatchInlineSnapshot(`["Complex", 0, -1]`));
   test(`3-i`, () =>
     expect(simplify('3-i')).toMatchInlineSnapshot(`["Complex", 3, -1]`));
 
@@ -630,7 +642,7 @@ describe('SIMPLIFICATION divide', () => {
 
   test(`\\frac{5}{\\frac{7}{x}}`, () =>
     expect(simplify('\\frac{5}{\\frac{7}{x}}')).toMatchInlineSnapshot(
-      `["Divide", ["Multiply", 5, "x"], 7]`
+      `["Multiply", ["Rational", 5, 7], ["Divide", 1, "x"]]`
     ));
 
   test(`simplify('\\frac{\\sqrt{15}}{\\sqrt{3}}')`, () =>
@@ -653,9 +665,7 @@ describe('SIMPLIFICATION sqrt', () => {
     `));
 
   test(`simplify('\\sqrt{3^2}')`, () =>
-    expect(simplify('\\sqrt{3^2}')).toMatchInlineSnapshot(
-      `["Sqrt", ["Square", 3]]`
-    ));
+    expect(simplify('\\sqrt{3^2}')).toMatchInlineSnapshot(`3`));
 
   test(`evaluate('\\sqrt{12}')`, () =>
     expect(evaluateToJson('\\sqrt{12}')).toMatchInlineSnapshot(`
@@ -677,42 +687,53 @@ describe('SIMPLIFICATION sqrt', () => {
       evaluateToJson('\\frac{\\sqrt{4+2\\sqrt{3}}-\\sqrt{28+10\\sqrt{3}}}{15}')
     ).toMatchInlineSnapshot(`
       [
-        Multiply,
+        Add,
         [
-          Divide,
+          Multiply,
           [
-            Sqrt,
-            2,
-          ],
-          15,
-        ],
-        [
-          Subtract,
-          [
-            Sqrt,
-            [
-              Add,
-              2,
-              [
-                Sqrt,
-                3,
-              ],
-            ],
+            Rational,
+            -1,
+            15,
           ],
           [
-            Sqrt,
+            Root,
             [
               Add,
-              14,
+              28,
               [
                 Multiply,
-                5,
+                10,
                 [
                   Sqrt,
                   3,
                 ],
               ],
             ],
+            2,
+          ],
+        ],
+        [
+          Multiply,
+          [
+            Rational,
+            1,
+            15,
+          ],
+          [
+            Root,
+            [
+              Add,
+              4,
+              [
+                Multiply,
+                2,
+                [
+                  Sqrt,
+                  3,
+                ],
+              ],
+            ],
+            2,
           ],
         ],
       ]
@@ -869,9 +890,9 @@ describe('NUMERIC EVALUATION arithmetic', () => {
   test(`N('\\frac34 + 1e199') // Precision is at 100 digits, so loss of 3/4 is expected`, () =>
     expect(NToJson('\\frac34 + 1e199')).toEqual(1e199));
 
-  test(`NToJson('12345678^3 + \\frac{1}{3}')`, () =>
+  test(`NToJson('12345678^3 + \\frac{1}{3} = 1.1.88167596026655860575233333333333333333333333333333333333333*10^21')`, () =>
     expect(NToJson('12345678^3 + \\frac{1}{3}')).toMatch(
-      '1.881675960266558500000(3)e+21'
+      '1.881675960266558605752(3)e+21'
     ));
 
   test(`NToJson('50!')`, () =>

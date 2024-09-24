@@ -64,11 +64,103 @@ describe('CANONICAL FORMS', () => {
   test('\\frac{-101}{10^{\\frac{2}{3}}}', () => {
     expect(check('\\frac{-101}{10^{\\frac{2}{3}}}')).toMatchInlineSnapshot(`
       box       = ["Divide", -101, ["Power", 10, ["Divide", 2, 3]]]
-      canonical = ["Divide", -101, ["Power", 10, ["Rational", 2, 3]]]
+      canonical = ["Multiply", -101, ["Divide", 1, ["Power", 10, ["Rational", 2, 3]]]]
       simplify  = -21.75979036932202893
-      eval-auto = -21.7597903693220297734
-      eval-mach = -21.759790369322026
-      N-mach    = -21.759790369322012
+      eval-auto = -21.75979036932202893
+      eval-mach = -21.75979036932202893
+      N-auto    = -21.7597903693220255898
+      N-mach    = -21.7597903693220255898
+    `);
+  });
+
+  test('Prefer (numeric value) x (term) over (term / numeric value)', () => {
+    expect(check('\\frac{x}{3}')).toMatchInlineSnapshot(`
+      box       = ["Divide", "x", 3]
+      canonical = ["Multiply", ["Rational", 1, 3], "x"]
+      eval-auto = 1/3 * x
+      eval-mach = 1/3 * x
+      N-auto    = 0.333333333333333333333 * x
+      N-mach    = 0.333333333333333 * x
+    `);
+  });
+
+  test('Prefer (numeric value) x (term) over (integer x √(integer) x term)', () => {
+    expect(check('3 \\sqrt{5} x')).toMatchInlineSnapshot(`
+      box       = ["InvisibleOperator", 3, ["Sqrt", 5], "x"]
+      canonical = ["Multiply", 3, ["Sqrt", 5], "x"]
+      eval-auto = 3sqrt(5) * x
+      eval-mach = 3sqrt(5) * x
+      N-auto    = 6.70820393249936908923 * x
+      N-mach    = 6.70820393249937 * x
+    `);
+  });
+
+  test('Prefer (numeric value) x (term) over (integer x √(integer) x (term/integer))', () => {
+    expect(check('3 \\sqrt{5} \\frac{x}{7}')).toMatchInlineSnapshot(`
+      box       = ["InvisibleOperator", 3, ["Sqrt", 5], ["Divide", "x", 7]]
+      canonical = ["Multiply", 3, ["Rational", 1, 7], ["Sqrt", 5], "x"]
+      simplify  = 3/7sqrt(5) * x
+      eval-auto = 3/7sqrt(5) * x
+      eval-mach = 3/7sqrt(5) * x
+      N-auto    = 0.958314847499909869891 * x
+      N-mach    = 0.958314847499911 * x
+    `);
+  });
+
+  test('Prefer (numeric value) x (term) over (integer x √(integer) x (term/integer))', () => {
+    expect(check('3 \\sqrt{5} \\frac{x}{3}')).toMatchInlineSnapshot(`
+      box       = ["InvisibleOperator", 3, ["Sqrt", 5], ["Divide", "x", 3]]
+      canonical = ["Multiply", 3, ["Rational", 1, 3], ["Sqrt", 5], "x"]
+      simplify  = sqrt(5) * x
+      eval-auto = sqrt(5) * x
+      eval-mach = sqrt(5) * x
+      N-auto    = 2.23606797749978969641 * x
+      N-mach    = 2.23606797749979 * x
+    `);
+  });
+
+  test('Prefer (numeric value) x (term) over ((numeric value) x negate(term))', () => {
+    expect(check('3 \\sqrt{5} (-x)')).toMatchInlineSnapshot(`
+      box       = ["InvisibleOperator", 3, ["Sqrt", 5], ["Delimiter", ["Negate", "x"]]]
+      canonical = ["Multiply", -3, ["Sqrt", 5], "x"]
+      eval-auto = -3sqrt(5) * x
+      eval-mach = -3sqrt(5) * x
+      N-auto    = -6.70820393249936908923 * x
+      N-mach    = -6.70820393249937 * x
+    `);
+  });
+
+  test('Convert numbers followed by imaginary unit or radical to complex', () => {
+    expect(check('3i+1.5i')).toMatchInlineSnapshot(`
+      box       = ["Add", ["InvisibleOperator", 3, "i"], ["InvisibleOperator", 1.5, "i"]]
+      canonical = ["Add", ["Complex", 0, 1.5], ["Complex", 0, 3]]
+      simplify  = 4.5i
+    `);
+  });
+
+  test('Convert numbers followed by radical to numeric value', () => {
+    expect(check('5\\sqrt3\\frac17\\frac27\\sqrt5')).toMatchInlineSnapshot(`
+      box       = [
+        "InvisibleOperator",
+        5,
+        ["Sqrt", 3],
+        ["Divide", 1, 7],
+        ["Divide", 2, 7],
+        ["Sqrt", 5]
+      ]
+      canonical = [
+        "Multiply",
+        5,
+        ["Rational", 1, 7],
+        ["Rational", 2, 7],
+        ["Sqrt", 3],
+        ["Sqrt", 5]
+      ]
+      simplify  = 10/49sqrt(15)
+      eval-auto = 10/49sqrt(15)
+      eval-mach = 10/49sqrt(15)
+      N-auto    = 0.790404764532125894938
+      N-mach    = 0.790404764532125894938
     `);
   });
 
@@ -111,7 +203,8 @@ describe('CANONICAL FORMS', () => {
   test('2x\\frac{0}{5}"', () => {
     expect(check('2x\\frac{0}{5}')).toMatchInlineSnapshot(`
       box       = ["InvisibleOperator", 2, "x", ["Divide", 0, 5]]
-      canonical = 0
+      canonical = ["Multiply", 0, 2, "x"]
+      simplify  = 0
     `);
   });
 
@@ -131,7 +224,8 @@ describe('CANONICAL FORMS', () => {
   test('"2\\times0\\times5\\times4"', () => {
     expect(check('2\\times0\\times5\\times4')).toMatchInlineSnapshot(`
       box       = ["Multiply", 2, 0, 5, 4]
-      canonical = 0
+      canonical = ["Multiply", 0, 2, 4, 5]
+      simplify  = 0
     `);
   });
 
@@ -146,7 +240,9 @@ describe('CANONICAL FORMS', () => {
   test('"2\\frac{x}{a}\\frac{y}{b}"', () => {
     expect(check('2\\frac{x}{a}\\frac{y}{b}')).toMatchInlineSnapshot(`
       box       = ["InvisibleOperator", 2, ["Divide", "x", "a"], ["Divide", "y", "b"]]
-      canonical = ["Divide", ["Multiply", 2, "x", "y"], ["Multiply", "a", "b"]]
+      canonical = ["Multiply", 2, ["Divide", "x", "a"], ["Divide", "y", "b"]]
+      simplify  = 2(x * y) / (a * b)
+      eval-auto = (2x * y) / (a * b)
     `);
   });
 });
@@ -183,15 +279,22 @@ describe('COMMUTATIVE ORDER', () => {
         "y"
       ]
       canonical = [
-        "Divide",
-        ["Multiply", -2, 3, 3, 5, "Pi", "x", "y", "z", ["Sqrt", "y"]],
-        4
+        "Multiply",
+        -2,
+        3,
+        5,
+        ["Rational", 3, 4],
+        "Pi",
+        "x",
+        "y",
+        "z",
+        ["Sqrt", "y"]
       ]
-      simplify  = (-45pi * x * z * y^(3/2)) / 2
-      eval-auto = (-45pi * x * z * y^(3/2)) / 2
-      eval-mach = (-45pi * x * z * y^(3/2)) / 2
-      N-auto    = -70.68583470577035 * x * z * y^2
-      N-mach    = -70.68583470577033 * x * z * y^2
+      simplify  = -45/2 * pi * x * z * y^(3/2)
+      eval-auto = -45/2 * pi * x * z * y^(3/2)
+      eval-mach = -45/2 * pi * x * z * y^(3/2)
+      N-auto    = -70.6858347057703478658 * x * z * y^2
+      N-mach    = -70.6858347057702 * x * z * y^2
     `);
   });
 
@@ -311,8 +414,8 @@ describe('POLYNOMIAL ORDER', () => {
       simplify  = 14pi * x^3 + x^3
       eval-auto = 14pi * x^3 + x^3
       eval-mach = 14pi * x^3 + x^3
-      N-auto    = 44.982297150257106 * x^3
-      N-mach    = 44.982297150257104 * x^3
+      N-auto    = 43.9822971502571053384 * x^3 + x^3
+      N-mach    = 43.982297150257104 * x^3 + x^3
     `);
   });
 
