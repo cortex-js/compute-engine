@@ -3,6 +3,7 @@ export const RESERVED_WORDS = new Set<string>([
   'at', // Not in use
   'and', // Not in use
   'as', // Not in use
+  'async', // Not in use
   'assert',
   'await', // Not in use
   'begin', // Not in use
@@ -26,6 +27,7 @@ export const RESERVED_WORDS = new Set<string>([
   'for', // Not in use
   'from', // Not in use
   'function', // Not in use
+  'generator', // Not in use
   'get', // Not in use
   'global', // Not in use
   'goto', // Not in use
@@ -35,6 +37,7 @@ export const RESERVED_WORDS = new Set<string>([
   'interface', // Not in use
   'internal', // Not in use
   'import', // Not in use
+  'iterator', // Not in use
   'label', // Not in use
   'lazy', // Not in use
   'local', // Not in use
@@ -50,6 +53,7 @@ export const RESERVED_WORDS = new Set<string>([
   'optional', // Not in use
   'or', // Not in use
   'package', // Not in use
+  'parallel', // Not in use
   'private', // Not in use
   'protected', // Not in use
   'protocol', // Not in use
@@ -65,9 +69,11 @@ export const RESERVED_WORDS = new Set<string>([
   'throw', // Not in use
   'to', // Not in use
   'try', // Not in use
+  'union', // Not in use
   'until', // Not in use
   'using', // Not in use
   'var', // Not in use
+  'variant', // Not in use
   'warn', // Not in use
   'when', // Not in use
   'where', // Not in use

@@ -361,6 +361,7 @@ grammar.rule(
     sequence(
       [
         maybe('shebang'),
+        // maybe('front-matter'),
         some(
           'expression',
           (...expressions: Result<Expression>[]): Expression => {
