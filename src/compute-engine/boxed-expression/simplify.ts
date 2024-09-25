@@ -151,7 +151,7 @@ function simplifyExpression(
   }
 
   // Try to simplify, not considering associativity
-  let result = simplifyNonCommutativeFunction(expr, rules, options, steps);
+  const result = simplifyNonCommutativeFunction(expr, rules, options, steps);
   if (result.length > steps.length) return result;
 
   // If this is a commutative function, try variations on the order of the operands

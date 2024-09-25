@@ -1,7 +1,11 @@
 import Complex from 'complex.js';
 import { Decimal } from 'decimal.js';
 
-import { MathJsonIdentifier, MathJsonNumber } from '../math-json/types';
+import {
+  Expression,
+  MathJsonIdentifier,
+  MathJsonNumber,
+} from '../math-json/types';
 
 import type {
   LibraryCategory,
@@ -16,6 +20,7 @@ import {
   DEFAULT_PRECISION,
   MACHINE_PRECISION,
   MACHINE_TOLERANCE,
+  MAX_BIGINT_DIGITS,
   SMALL_INTEGER,
 } from './numerics/numeric';
 
@@ -69,7 +74,7 @@ import {
   makeFunctionDefinition,
   _BoxedFunctionDefinition,
 } from './boxed-expression/boxed-function-definition';
-import { Rational, isRational } from './numerics/rationals';
+import { Rational, isMachineRational, isRational } from './numerics/rationals';
 import { applicable, parseFunctionSignature } from './function-utils';
 import { CYAN, INVERSE_RED, RESET, YELLOW } from '../common/ansi-codes';
 import {
@@ -81,6 +86,7 @@ import { parse } from './latex-syntax/parse';
 import {
   BoxedExpression,
   BoxedRule,
+  EvaluateOptions,
   SemiBoxedExpression,
 } from './boxed-expression/public';
 
@@ -92,7 +98,11 @@ import {
   HARMONIZATION_RULES,
   UNIVARIATE_ROOTS,
 } from './boxed-expression/solve';
-import { NumericValue, NumericValueData } from './numeric-value/public';
+import {
+  ExactNumericValueData,
+  NumericValue,
+  NumericValueData,
+} from './numeric-value/public';
 import { ExactNumericValue } from './numeric-value/exact-numeric-value';
 import { BigNumericValue } from './numeric-value/big-numeric-value';
 import { MachineNumericValue } from './numeric-value/machine-numeric-value';
@@ -105,6 +115,9 @@ import { Type, TypeString } from '../common/type/types';
 import { isSubtype } from '../common/type/subtype';
 import { isSignatureType, isValidType } from '../common/type/utils';
 import { parseType } from '../common/type/parse';
+import { hidePrivateProperties } from '../common/utils';
+import { OneOf } from '../common/one-of';
+import { BigNum } from './numerics/bignum';
 
 /**
  *
@@ -159,7 +172,7 @@ export class ComputeEngine implements IComputeEngine {
   readonly ComplexInfinity: BoxedExpression;
 
   /** The symbol separating the whole part of a number from its fractional
-   *  part.
+   *  part in a LaTeX string.
    *
    * Commonly a period (`.`) in English, but a comma (`,`) in many European
    * languages. For the comma, use `"{,}"` so that the spacing is correct.
@@ -172,16 +185,22 @@ export class ComputeEngine implements IComputeEngine {
 
   /** @internal */
   _BIGNUM_NAN: Decimal;
+
   /** @internal */
   _BIGNUM_ZERO: Decimal;
+
   /** @internal */
   _BIGNUM_ONE: Decimal;
+
   /** @internal */
   _BIGNUM_TWO: Decimal;
+
   /** @internal */
   _BIGNUM_HALF: Decimal;
+
   /** @internal */
   _BIGNUM_PI: Decimal;
+
   /** @internal */
   _BIGNUM_NEGATIVE_ONE: Decimal;
 
@@ -406,7 +425,10 @@ export class ComputeEngine implements IComputeEngine {
     this.PositiveInfinity = new BoxedNumber(this, Number.POSITIVE_INFINITY);
     this.NegativeInfinity = new BoxedNumber(this, Number.NEGATIVE_INFINITY);
     this.I = new BoxedNumber(this, { im: 1 });
-    this.ComplexInfinity = new BoxedNumber(this, Complex.INFINITY);
+    this.ComplexInfinity = new BoxedNumber(this, {
+      re: Infinity,
+      im: Infinity,
+    });
 
     // Reset the caches/create numeric constants
     this.reset();
@@ -445,6 +467,8 @@ export class ComputeEngine implements IComputeEngine {
     // Push a fresh scope to protect global definitions:
     // this will be the "user" scope
     this.pushScope();
+
+    hidePrivateProperties(this);
   }
 
   get latexDictionary(): Readonly<LatexDictionaryEntry[]> {
@@ -837,7 +861,10 @@ export class ComputeEngine implements IComputeEngine {
    * @internal
    */
   _numericValue(
-    value: number | bigint | Rational | Decimal | Complex | NumericValueData
+    value:
+      | number
+      | bigint
+      | OneOf<[BigNum | NumericValueData | ExactNumericValueData]>
   ): NumericValue {
     // Convert to an ExactNumericValue if possible
     if (value instanceof NumericValue) return value.asExact ?? value;
@@ -846,11 +873,7 @@ export class ComputeEngine implements IComputeEngine {
     const makeNumericValue =
       this._precision > MACHINE_PRECISION
         ? (x) => new BigNumericValue(x, bignum)
-        : (x) =>
-            new MachineNumericValue(
-              x,
-              (x) => new ExactNumericValue(x, makeNumericValue, bignum)
-            );
+        : (x) => new MachineNumericValue(x, bignum);
 
     if (typeof value === 'number') {
       if (Number.isInteger(value))
@@ -869,7 +892,7 @@ export class ComputeEngine implements IComputeEngine {
       );
 
     if (value instanceof Decimal) {
-      if (value.isInteger())
+      if (value.isInteger() && value.e <= MAX_BIGINT_DIGITS)
         return new ExactNumericValue(
           bigint(value.toString())!,
           makeNumericValue,
@@ -880,53 +903,66 @@ export class ComputeEngine implements IComputeEngine {
 
     if (value instanceof Complex) {
       if (value.im === 0) return this._numericValue(value.re);
-      return makeNumericValue({ decimal: value.re, im: value.im });
+      return makeNumericValue({ re: value.re, im: value.im });
     }
 
     //
     // We have a NumericValueData
     //
 
-    if (value.im !== undefined && value.im !== 0)
-      return makeNumericValue(value);
+    if ('im' in value || 're' in value) {
+      if (value.im !== undefined && value.im !== 0)
+        return makeNumericValue(value);
 
-    // Check if decimal part is an integer
-    if (value.decimal !== undefined) {
-      console.assert(value.rational === undefined);
-      if (value.decimal instanceof Decimal && value.decimal.isInteger())
+      // Check if decimal part is an integer
+      // console.assert(value.rational === undefined);
+      if (value.re instanceof Decimal && value.re.isInteger())
         return new ExactNumericValue(
           {
-            rational: [bigint(value.decimal.toString())!, BigInt(1)],
-            radical: value.radical,
+            rational: [bigint(value.re.toString())!, BigInt(1)],
+            // radical: value.radical,
           },
           makeNumericValue,
           bignum
         );
-      if (typeof value.decimal === 'number' && Number.isInteger(value.decimal))
+      if (typeof value.re === 'number' && Number.isInteger(value.re))
         return new ExactNumericValue(
-          { rational: [value.decimal, 1], radical: value.radical },
+          {
+            rational: [value.re, 1],
+            // radical: value.radical
+          },
           makeNumericValue,
           bignum
         );
       return makeNumericValue(value);
     }
 
-    // Validate radical part
-    if (
-      value.radical !== undefined &&
-      (!Number.isInteger(value.radical) || value.radical >= SMALL_INTEGER)
-    )
-      return makeNumericValue(value);
+    if ('radical' in value || 'rational' in value) {
+      // Validate radical part
+      if (
+        value.radical !== undefined &&
+        (!Number.isInteger(value.radical) || value.radical >= SMALL_INTEGER)
+      ) {
+        // @fixme: this may never happen
+        return makeNumericValue(value);
+      }
 
-    // Validate rational part
-    if (
-      value.rational &&
-      (!Number.isInteger(value.rational[0]) ||
-        !Number.isInteger(value.rational[1]))
-    )
-      return makeNumericValue(value);
+      // Validate rational part
 
-    return new ExactNumericValue(value, makeNumericValue, bignum);
+      if (value.rational) {
+        if (isMachineRational(value.rational)) {
+          if (
+            !Number.isInteger(value.rational[0]) ||
+            !Number.isInteger(value.rational[1])
+          )
+            // @fixme: this may never happen
+            return makeNumericValue(value);
+        }
+      }
+
+      return new ExactNumericValue(value, makeNumericValue, bignum);
+    }
+    throw Error('Unexpected value');
   }
 
   /**
@@ -1030,8 +1066,6 @@ export class ComputeEngine implements IComputeEngine {
     if (!this.context)
       throw Error('Symbol cannot be defined: no scope available');
 
-    if (def.type === 'any') debugger;
-
     if (name.length === 0 || !isValidIdentifier(name))
       throw Error(`Invalid identifier "${name}": ${validateIdentifier(name)}}`);
 
@@ -1089,7 +1123,7 @@ export class ComputeEngine implements IComputeEngine {
    * Create a new scope and add it to the top of the scope stack
    *
    */
-  pushScope(scope?: Partial<Scope>): ComputeEngine {
+  pushScope(scope?: Partial<Scope>): IComputeEngine {
     if (this.context === null) throw Error('No parent scope available');
     this.context = {
       timeLimit: this.context.timeLimit,
@@ -1111,7 +1145,7 @@ export class ComputeEngine implements IComputeEngine {
 
   /** Remove the most recent scope from the scope stack, and set its
    *  parent scope as the current scope. */
-  popScope(): ComputeEngine {
+  popScope(): IComputeEngine {
     if (!this.context) throw Error('No scope available');
 
     this.context = this.context.parentScope ?? null;
@@ -1239,11 +1273,14 @@ export class ComputeEngine implements IComputeEngine {
    */
   declare(
     id: string,
-    def: Type | TypeString | SymbolDefinition | FunctionDefinition
-  ): ComputeEngine;
+    def: Type | TypeString | OneOf<[SymbolDefinition, FunctionDefinition]>
+  ): IComputeEngine;
   declare(identifiers: {
-    [id: string]: Type | TypeString | SymbolDefinition | FunctionDefinition;
-  }): ComputeEngine;
+    [id: string]:
+      | Type
+      | TypeString
+      | OneOf<[SymbolDefinition, FunctionDefinition]>;
+  }): IComputeEngine;
   declare(
     arg1:
       | string
@@ -1251,11 +1288,10 @@ export class ComputeEngine implements IComputeEngine {
           [id: string]:
             | Type
             | TypeString
-            | SymbolDefinition
-            | FunctionDefinition;
+            | OneOf<[SymbolDefinition, FunctionDefinition]>;
         },
-    arg2?: Type | TypeString | SymbolDefinition | FunctionDefinition
-  ): ComputeEngine {
+    arg2?: Type | TypeString | OneOf<[SymbolDefinition, FunctionDefinition]>
+  ): IComputeEngine {
     //
     // If we got an object literal, call `declare` for each entry
     //
@@ -1400,12 +1436,12 @@ export class ComputeEngine implements IComputeEngine {
    * instead, which allows you to specify the type, value and other
    * attributes of the identifier.
    */
-  assign(id: string, value: AssignValue): ComputeEngine;
-  assign(ids: { [id: string]: AssignValue }): ComputeEngine;
+  assign(id: string, value: AssignValue): IComputeEngine;
+  assign(ids: { [id: string]: AssignValue }): IComputeEngine;
   assign(
     arg1: string | { [id: string]: AssignValue },
     arg2?: AssignValue
-  ): ComputeEngine {
+  ): IComputeEngine {
     //
     // If we got an object literal, call `assign` for each entry
     //
@@ -1461,7 +1497,7 @@ export class ComputeEngine implements IComputeEngine {
       // Make sure the value is not a function
       if (!args && !isFunctionValue(value)) {
         if (value === undefined || value === null) symDef.value = undefined;
-        else symDef.value = this.box(value as BoxedExpression);
+        else symDef.value = this.box(value);
 
         // Reinsert the def in the scope
         scope?.ids?.set(symDef.name!, symDef);
@@ -1522,7 +1558,7 @@ export class ComputeEngine implements IComputeEngine {
       // If we don't have a value, let type inference or explicit
       // declaration handle it.
       // We still want to reserve a spot for this value, so we declare it.
-      this.declare(id, { inferred: true, signature: 'unknown' });
+      this.declare(id, { inferred: true, type: 'unknown' });
       return this;
     }
 
@@ -1620,25 +1656,33 @@ export class ComputeEngine implements IComputeEngine {
    * @internal
    */
 
-  _assign(id: string, value: AssignValue): ComputeEngine {
+  _assign(
+    id: string,
+    value:
+      | BoxedExpression
+      | ((
+          ops: ReadonlyArray<BoxedExpression>,
+          options: EvaluateOptions & { engine: IComputeEngine }
+        ) => BoxedExpression | undefined)
+  ): void {
     const symDef = this.lookupSymbol(id);
     if (symDef) {
       console.assert(typeof value !== 'function');
-      symDef.value = this.box(value as SemiBoxedExpression).evaluate();
+      symDef.value = (value as BoxedExpression).evaluate();
       this.generation += 1;
-      return this;
+      return;
     }
+
     const fnDef = this.lookupFunction(id);
     if (fnDef) {
       console.assert(typeof value == 'function');
       fnDef.canonical = undefined;
       fnDef.evaluate = value as any as () => any;
       this.generation += 1;
-      return this;
+      return;
     }
 
     console.assert(false, `Cannot assign to undeclared symbol "${id}"`);
-    return this;
   }
 
   /**
@@ -1694,7 +1738,7 @@ export class ComputeEngine implements IComputeEngine {
    * Calls `ce.function()`, `ce.number()` or `ce.symbol()` as appropriate.
    */
   box(
-    expr: NumericValue | Decimal | SemiBoxedExpression,
+    expr: NumericValue | SemiBoxedExpression,
     options?: { canonical?: CanonicalOptions; structural?: boolean }
   ): BoxedExpression {
     return box(this, expr, options);
@@ -1702,7 +1746,7 @@ export class ComputeEngine implements IComputeEngine {
 
   function(
     name: string,
-    ops: SemiBoxedExpression[],
+    ops: ReadonlyArray<BoxedExpression> | ReadonlyArray<Expression>,
     options?: {
       metadata?: Metadata;
       canonical: CanonicalOptions;
@@ -1719,9 +1763,13 @@ export class ComputeEngine implements IComputeEngine {
    * The result is canonical.
    */
   error(message: string | string[], where?: string): BoxedExpression {
-    let msg: SemiBoxedExpression;
-    if (typeof message === 'string') msg = { str: message };
-    else msg = ['ErrorCode', ...message.map((x) => this.string(x))];
+    let msg: BoxedExpression;
+    if (typeof message === 'string') msg = this.string(message);
+    else
+      msg = this._fn(
+        'ErrorCode',
+        message.map((x) => this.string(x))
+      );
 
     let whereExpr: BoxedExpression | undefined = undefined;
     if (where && isLatexString(where)) {
@@ -1752,7 +1800,7 @@ export class ComputeEngine implements IComputeEngine {
   /**
    * Add a`["Hold"]` wrapper to `expr.
    */
-  hold(expr: SemiBoxedExpression): BoxedExpression {
+  hold(expr: BoxedExpression): BoxedExpression {
     return this._fn('Hold', [this.box(expr, { canonical: false })]);
   }
 
@@ -1953,7 +2001,7 @@ export class ComputeEngine implements IComputeEngine {
    * @internal */
   _fn(
     name: MathJsonIdentifier,
-    ops: BoxedExpression[],
+    ops: ReadonlyArray<BoxedExpression>,
     options?: Metadata & { canonical?: boolean }
   ): BoxedExpression {
     const canonical = options?.canonical ?? true;
@@ -2045,7 +2093,7 @@ export class ComputeEngine implements IComputeEngine {
    *  //  -> [{'val': 0}]
    * ```
    */
-  ask(pattern: SemiBoxedExpression): BoxedSubstitution[] {
+  ask(pattern: BoxedExpression): BoxedSubstitution[] {
     const pat = this.box(pattern, { canonical: false });
     const result: BoxedSubstitution[] = [];
     for (const [assumption, val] of this.assumptions) {
@@ -2060,7 +2108,7 @@ export class ComputeEngine implements IComputeEngine {
    *
    */
 
-  verify(_query: SemiBoxedExpression): boolean {
+  verify(_query: BoxedExpression): boolean {
     // @todo
     return false;
   }
@@ -2078,7 +2126,7 @@ export class ComputeEngine implements IComputeEngine {
    *
    *
    */
-  assume(predicate: LatexString | SemiBoxedExpression): AssumeResult {
+  assume(predicate: BoxedExpression): AssumeResult {
     try {
       const pred = isLatexString(predicate)
         ? this.parse(predicate, { canonical: false })
@@ -2149,7 +2197,12 @@ export class ComputeEngine implements IComputeEngine {
 }
 
 /** Return true if the value is a function  */
-function isFunctionValue(value: AssignValue): boolean {
+function isFunctionValue(
+  value: AssignValue
+): value is (
+  args: ReadonlyArray<BoxedExpression>,
+  options: EvaluateOptions & { engine: IComputeEngine }
+) => BoxedExpression {
   if (typeof value === 'function') return true;
   if (value instanceof _BoxedExpression && isSubtype(value.type, 'function'))
     return true;

@@ -131,7 +131,7 @@ export abstract class _BoxedExpression implements BoxedExpression {
     }
     if (typeof this.string === 'string') return this.string;
     if (typeof this.symbol === 'string') return this.symbol;
-    if (this.im === 0) return this.re ?? this.toString();
+    if (this.im === 0) return this.re;
     return this.toString();
   }
 
@@ -296,9 +296,19 @@ export abstract class _BoxedExpression implements BoxedExpression {
     return null;
   }
 
-  /** Object.is() */
   is(rhs: any): boolean {
+    // If the rhs is a number, the result can only be true if this
+    // is a BoxedNumber
+    if (typeof rhs === 'number' || typeof rhs === 'bigint') return false;
+
+    if (typeof rhs === 'boolean') {
+      if (this.symbol === 'True' && rhs === true) return true;
+      if (this.symbol === 'False' && rhs === false) return true;
+      return false;
+    }
+
     if (rhs === null || rhs === undefined) return false;
+
     return same(this, this.engine.box(rhs));
   }
 
@@ -436,15 +446,18 @@ export abstract class _BoxedExpression implements BoxedExpression {
     return false;
   }
 
-  get re(): number | undefined {
-    return undefined;
+  get re(): number {
+    return NaN;
   }
-  get im(): number | undefined {
-    return undefined;
+
+  get im(): number {
+    return NaN;
   }
+
   get bignumRe(): Decimal | undefined {
     return undefined;
   }
+
   get bignumIm(): Decimal | undefined {
     return undefined;
   }
@@ -504,7 +517,7 @@ export abstract class _BoxedExpression implements BoxedExpression {
     return this.engine.NaN;
   }
 
-  ln(base?: SemiBoxedExpression): BoxedExpression {
+  ln(base?: number | BoxedExpression): BoxedExpression {
     return this.engine.NaN;
   }
 

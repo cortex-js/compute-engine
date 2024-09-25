@@ -23,7 +23,6 @@ import type {
   BoxedBaseDefinition,
   BoxedSubstitution,
   Rule,
-  SemiBoxedExpression,
   CanonicalOptions,
   BoxedRule,
   Sign,
@@ -54,6 +53,8 @@ import {
   negativeSign,
   nonNegativeSign,
 } from './sgn';
+import { BigNum } from '../numerics/bignum';
+import type { OneOf } from '../../common/one-of';
 
 /**
  * BoxedSymbol
@@ -88,8 +89,7 @@ export class BoxedSymbol extends _BoxedExpression {
   // bound.
 
   private _def:
-    | BoxedSymbolDefinition
-    | BoxedFunctionDefinition
+    | OneOf<[BoxedSymbolDefinition, BoxedFunctionDefinition]>
     | null
     | undefined;
 
@@ -102,7 +102,7 @@ export class BoxedSymbol extends _BoxedExpression {
       metadata?: Metadata;
       canonical?: CanonicalOptions;
       structural?: boolean;
-      def?: BoxedSymbolDefinition | BoxedFunctionDefinition;
+      def?: OneOf<[BoxedSymbolDefinition, BoxedFunctionDefinition]>;
     }
   ) {
     super(ce, options?.metadata);
@@ -159,8 +159,7 @@ export class BoxedSymbol extends _BoxedExpression {
   }
 
   private _lookupDef():
-    | BoxedSymbolDefinition
-    | BoxedFunctionDefinition
+    | OneOf<[BoxedSymbolDefinition, BoxedFunctionDefinition]>
     | undefined {
     //  Prefer a symbol definition over a function definition
     // (since symbols can be redefined)
@@ -224,6 +223,13 @@ export class BoxedSymbol extends _BoxedExpression {
     this._def = undefined;
   }
 
+  is(rhs: any): boolean {
+    if (typeof rhs === 'number')
+      return this.symbolDefinition?.value?.is(rhs) ?? false;
+
+    return false;
+  }
+
   get canonical(): BoxedExpression {
     // If a scope has been provided, this symbol is canonical
     if (this._scope) return this;
@@ -236,7 +242,7 @@ export class BoxedSymbol extends _BoxedExpression {
     const ce = this.engine;
 
     if (this.symbol === 'ImaginaryUnit')
-      return [ce._numericValue({ decimal: 0, im: 1 }), ce.One];
+      return [ce._numericValue({ re: 0, im: 1 }), ce.One];
     if (
       this.symbol === 'PositiveInfinity' ||
       (this.isInfinity && this.isPositive)
@@ -288,7 +294,7 @@ export class BoxedSymbol extends _BoxedExpression {
   }
 
   pow(exp: number | BoxedExpression): BoxedExpression {
-    return pow(this, exp);
+    return pow(this, exp, { numericApproximation: false });
   }
 
   root(n: number | BoxedExpression): BoxedExpression {
@@ -311,19 +317,19 @@ export class BoxedSymbol extends _BoxedExpression {
   sqrt(): BoxedExpression {
     const ce = this.engine;
     if (this.symbol === 'ComplexInfinity') return ce.NaN;
-    if (this.isEqual(0)) return this;
-    if (this.isEqual(1)) return this.engine.One;
-    if (this.isEqual(-1)) return ce.I;
+    if (this.is(0)) return this;
+    if (this.is(1)) return this.engine.One;
+    if (this.is(-1)) return ce.I;
 
     return ce._fn('Sqrt', [this]);
   }
 
-  ln(semiBase?: SemiBoxedExpression): BoxedExpression {
+  ln(semiBase?: number | BoxedExpression): BoxedExpression {
     const base = semiBase ? this.engine.box(semiBase) : undefined;
     if (!this.isCanonical) return this.canonical.ln(base);
 
     // Mathematica returns `Log[0]` as `-∞`
-    if (this.isEqual(0)) return this.engine.NegativeInfinity;
+    if (this.is(0)) return this.engine.NegativeInfinity;
 
     if (
       (!base || base.symbol === 'ExponentialE') &&
@@ -404,7 +410,10 @@ export class BoxedSymbol extends _BoxedExpression {
     }
 
     // Narrow the type, if it was previously inferred
-    if (def instanceof _BoxedSymbolDefinition && def.inferredType) {
+    if (
+      def instanceof _BoxedSymbolDefinition &&
+      (def.inferredType || def.type === 'unknown')
+    ) {
       def.type = narrow(def.type, t);
       return true;
     }
@@ -421,10 +430,14 @@ export class BoxedSymbol extends _BoxedExpression {
       | boolean
       | string
       | Decimal
-      | { re: number; im: number }
-      | { num: number; denom: number }
       | number[]
-      | BoxedExpression
+      | OneOf<
+          [
+            { re: number; im: number },
+            { num: number; denom: number },
+            BoxedExpression,
+          ]
+        >
       | number
       | object
       | undefined
@@ -446,7 +459,7 @@ export class BoxedSymbol extends _BoxedExpression {
       if ('re' in value && 'im' in value)
         value = ce.complex(value.re ?? 0, value.im);
       else if ('num' in value && 'denom' in value)
-        value = ce.number([value.num, value.denom]);
+        value = ce.number([value.num!, value.denom!]);
       else if (Array.isArray(value))
         value = ce._fn(
           'List',
@@ -583,23 +596,43 @@ export class BoxedSymbol extends _BoxedExpression {
   }
 
   get isNumber(): boolean | undefined {
-    if (this.type === 'unknown') return undefined;
-    return isSubtype(this.type, 'number');
+    const t = this.type;
+    if (t === 'unknown') return undefined;
+    return isSubtype(t, 'number');
   }
 
   get isInteger(): boolean | undefined {
-    if (this.type === 'unknown') return undefined;
-    return isSubtype(this.type, 'integer');
+    const t = this.type;
+    if (t === 'unknown') return undefined;
+    return isSubtype(t, 'integer');
   }
 
   get isRational(): boolean | undefined {
-    if (this.type === 'unknown') return undefined;
-    return isSubtype(this.type, 'rational');
+    const t = this.type;
+    if (t === 'unknown') return undefined;
+    return isSubtype(t, 'rational');
   }
 
   get isReal(): boolean | undefined {
-    if (this.type === 'unknown') return undefined;
-    return isSubtype(this.type, 'real');
+    const t = this.type;
+    if (t === 'unknown') return undefined;
+    return isSubtype(t, 'real');
+  }
+
+  get re(): number {
+    return this.symbolDefinition?.value?.re ?? NaN;
+  }
+
+  get im(): number {
+    return this.symbolDefinition?.value?.im ?? NaN;
+  }
+
+  get bignumRe(): BigNum | undefined {
+    return this.symbolDefinition?.value?.bignumRe;
+  }
+
+  get bignumIm(): BigNum | undefined {
+    return this.symbolDefinition?.value?.bignumIm;
   }
 
   simplify(options?: Partial<SimplifyOptions>): BoxedExpression {

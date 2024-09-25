@@ -12,7 +12,7 @@ export const COMPLEX_LIBRARY: IdentifierDefinitions[] = [
       signature: 'number -> real',
       sgn: ([op]) => {
         const re = op.re;
-        if (re === undefined) return undefined;
+        if (isNaN(re)) return undefined;
         if (re === 0) return 'zero';
         return re > 0 ? 'positive' : 'negative';
       },
@@ -29,7 +29,7 @@ export const COMPLEX_LIBRARY: IdentifierDefinitions[] = [
       signature: 'number -> real',
       sgn: ([op]) => {
         const im = op.im;
-        if (im === undefined) return undefined;
+        if (isNaN(im)) return undefined;
         if (im === 0) return 'zero';
         return im > 0 ? 'positive' : 'negative';
       },
@@ -88,9 +88,9 @@ export const COMPLEX_LIBRARY: IdentifierDefinitions[] = [
       signature: '(number, number) -> list<number>',
       evaluate: (ops, { engine: ce }) => {
         const re = ops[0].re;
-        if (re === undefined) return undefined;
+        if (isNaN(re)) return undefined;
         const n = ops[1].re;
-        if (n === undefined || !Number.isInteger(n) || n <= 0) return undefined;
+        if (!Number.isInteger(n) || n <= 0) return undefined;
 
         const roots: [number, number][] = [];
 

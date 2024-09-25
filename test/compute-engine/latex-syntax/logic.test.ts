@@ -91,9 +91,9 @@ describe('Logic', () => {
     `);
     expect(ce.parse('p \\operatorname{implies} q').json).toMatchInlineSnapshot(`
       [
-        Multiply,
-        implies,
+        Tuple,
         p,
+        implies,
         q,
       ]
     `);
@@ -116,9 +116,9 @@ describe('Logic', () => {
     `);
     expect(ce.parse('p \\operatorname{iff} q').json).toMatchInlineSnapshot(`
       [
-        Multiply,
-        iff,
+        Tuple,
         p,
+        iff,
         q,
       ]
     `);

@@ -3,7 +3,6 @@ import type {
   CollectionHandlers,
   FunctionDefinition,
   IdentifierDefinitions,
-  SemiBoxedExpression,
 } from '../public';
 
 import { checkArity, checkTypes } from '../boxed-expression/validate';
@@ -87,7 +86,7 @@ export const COLLECTIONS_LIBRARY: IdentifierDefinitions = {
       if (a.operator !== b.operator) return false;
       if (a.nops !== b.nops) return false;
       // The elements are not ordered
-      const has: (x) => boolean = (x) => b.ops!.some((y) => x.isEqual(y));
+      const has: (x) => boolean = (x) => b.ops!.some((y) => x.isSame(y));
       return a.ops!.every(has);
     },
     collection: {
@@ -132,7 +131,7 @@ export const COLLECTIONS_LIBRARY: IdentifierDefinitions = {
       // must be equal.
       return Object.entries(akv).every(([k, v]) => {
         const bv = bkv[k];
-        return bv && v.isEqual(bv);
+        return bv && v.isSame(bv);
       });
     },
 
@@ -168,7 +167,7 @@ export const COLLECTIONS_LIBRARY: IdentifierDefinitions = {
 
       contains: (expr, target) => {
         if (target.type !== 'integer') return false;
-        const t = target.re!;
+        const t = target.re;
         const [lower, upper, step] = range(expr);
         if (step === 0) return false;
         if (step > 0) return t >= lower && t <= upper;
@@ -230,7 +229,7 @@ export const COLLECTIONS_LIBRARY: IdentifierDefinitions = {
         let i = 1;
         for (const x of each(target)) {
           if (!expr.contains(x)) return false;
-          if (!expr.at(i)?.isEqual(x)) return false;
+          if (!expr.at(i)?.isSame(x)) return false;
           i++;
         }
         return true;
@@ -311,7 +310,8 @@ export const COLLECTIONS_LIBRARY: IdentifierDefinitions = {
     // @todo: need eq handler
     collection: {
       size: (expr) => {
-        const count = expr.op3.re ?? DEFAULT_LINSPACE_COUNT;
+        let count = expr.op3.re;
+        if (!isFinite(count)) count = DEFAULT_LINSPACE_COUNT;
         return Math.max(0, Math.floor(count));
       },
       at: (
@@ -321,8 +321,9 @@ export const COLLECTIONS_LIBRARY: IdentifierDefinitions = {
         if (typeof index !== 'number') return undefined;
         const lower = expr.op1.re;
         const upper = expr.op2.re;
-        const count = expr.op3.re ?? DEFAULT_LINSPACE_COUNT;
-        if (lower === undefined || upper === undefined) return undefined;
+        let count = expr.op3.re;
+        if (!isFinite(count)) count = DEFAULT_LINSPACE_COUNT;
+        if (!isFinite(lower) || !isFinite(upper)) return undefined;
         if (index < 1 || index > count) return undefined;
         return expr.engine.number(
           lower! + ((upper! - lower!) * (index - 1)) / count
@@ -332,11 +333,15 @@ export const COLLECTIONS_LIBRARY: IdentifierDefinitions = {
         let lower = expr.op1.re;
         let upper = expr.op2.re;
         let totalCount: number;
-        if (upper === undefined) {
+        if (!isFinite(upper)) {
           upper = lower;
           lower = 1;
           totalCount = DEFAULT_LINSPACE_COUNT;
-        } else totalCount = Math.max(0, expr.op3.re ?? DEFAULT_LINSPACE_COUNT);
+        } else
+          totalCount = Math.max(
+            0,
+            !isFinite(expr.op3.re) ? DEFAULT_LINSPACE_COUNT : expr.op3.re
+          );
 
         let index = start ?? 1;
         count = Math.min(count ?? totalCount, totalCount);
@@ -360,11 +365,12 @@ export const COLLECTIONS_LIBRARY: IdentifierDefinitions = {
       },
       contains: (expr, target) => {
         if (!isSubtype(target.type, 'finite_real')) return false;
-        const t = target.re!;
-        const lower = expr.op1.re!;
-        const upper = expr.op2.re!;
+        const t = target.re;
+        const lower = expr.op1.re;
+        const upper = expr.op2.re;
         if (t < lower || t > upper) return false;
-        const count = expr.op3.re ?? DEFAULT_LINSPACE_COUNT;
+        let count = expr.op3.re;
+        if (!isFinite(count)) count = DEFAULT_LINSPACE_COUNT;
         if (count === 0) return false;
         const step = (upper - lower) / count;
         return (t - lower) % step === 0;
@@ -381,7 +387,7 @@ export const COLLECTIONS_LIBRARY: IdentifierDefinitions = {
     eq: defaultCollectionEq,
     collection: {
       size: (expr) => expr.nops!,
-      contains: (expr, target) => expr.ops!.some((x) => x.isEqual(target)),
+      contains: (expr, target) => expr.ops!.some((x) => x.isSame(target)),
       keys: (expr) => {
         return ['first', 'second', 'last'];
       },
@@ -481,7 +487,7 @@ export const COLLECTIONS_LIBRARY: IdentifierDefinitions = {
         const s = ops[index].string;
         if (s !== null) expr = at(expr, s) ?? ce.Nothing;
         else {
-          const i = ops[index].re ?? NaN;
+          const i = ops[index].re;
           if (!Number.isInteger(i)) return undefined;
           expr = at(expr, i) ?? ce.Nothing;
         }
@@ -497,8 +503,6 @@ export const COLLECTIONS_LIBRARY: IdentifierDefinitions = {
     description: [
       'Take a range of elements from a collection or a string.',
       'If the index is negative, it is counted from the end.',
-      'If the collection has a rank greater than 1, the index is a tuple of indexes.',
-      'If the index is a list, each element of the list is used as an index and the result if a list of the elements.',
     ],
     complexity: 8200,
     signature: '(value: collection|string, count: number) -> list|string',
@@ -511,11 +515,11 @@ export const COLLECTIONS_LIBRARY: IdentifierDefinitions = {
       const s = ops[0].string;
       if (s !== null) {
         const indexes = ops.slice(1).map((op) => indexRangeArg(op, s.length));
-        return ce.string(takeString(s, indexes));
+        return ce.string(sliceString(s, indexes));
       }
 
       const l = length(ops[0]);
-      return take(
+      return slice(
         ops[0],
         ops.slice(1).map((op) => indexRangeArg(op, l))
       );
@@ -549,7 +553,7 @@ export const COLLECTIONS_LIBRARY: IdentifierDefinitions = {
       const at = def?.collection?.at;
       if (!at) return undefined;
       const xs = indexes(ops.slice(1).map((op) => indexRangeArg(op, l)));
-      const result: SemiBoxedExpression[] = [];
+      const result: BoxedExpression[] = [];
       for (let i = 1; i <= l; i++)
         if (!xs.includes(i)) {
           const val = at(ops[0], i);
@@ -585,7 +589,35 @@ export const COLLECTIONS_LIBRARY: IdentifierDefinitions = {
     complexity: 8200,
     signature: '(value: collection|string) -> list',
     // @todo: resultType
-    evaluate: (ops) => take(ops[0], [[2, -1, 1]]),
+    evaluate: (ops) => slice(ops[0], [[2, -1, 1]]),
+  },
+
+  Slice: {
+    description: [
+      'Return a range of elements from a collection or a string.',
+      'If the index is negative, it is counted from the end.',
+    ],
+    complexity: 8200,
+    signature:
+      '(value: collection|string, start: number, end: number) -> list|string',
+    type: (ops) => {
+      if (ops[0].type === 'string') return 'string';
+      return parseType(`list<${collectionElementType(ops[0].type)}>`);
+    },
+    evaluate: (ops, { engine: ce }) => {
+      if (ops.length < 3) return undefined;
+      const s = ops[0].string;
+      if (s !== null) {
+        const [start, end] = ops
+          .slice(1)
+          .map((op) => indexRangeArg(op, s.length));
+        return ce.string(sliceString(s, [start, end]));
+      }
+
+      const l = length(ops[0]);
+      const [start, end] = ops.slice(1).map((op) => indexRangeArg(op, l));
+      return slice(ops[0], [start, end]);
+    },
   },
 
   Most: {
@@ -593,7 +625,7 @@ export const COLLECTIONS_LIBRARY: IdentifierDefinitions = {
     complexity: 8200,
     signature: '(value: collection|string) -> list',
     // @todo: resultType
-    evaluate: (ops) => take(ops[0], [[1, -2, 1]]),
+    evaluate: (ops) => slice(ops[0], [[1, -2, 1]]),
   },
 
   Reverse: {
@@ -601,7 +633,7 @@ export const COLLECTIONS_LIBRARY: IdentifierDefinitions = {
     complexity: 8200,
     signature: '(value: collection|string) -> collection',
     type: (ops) => ops[0].type,
-    evaluate: ([xs]) => take(xs, [[-1, 2, 1]]),
+    evaluate: ([xs]) => slice(xs, [[-1, 2, 1]]),
   },
 
   // Return the indexes of the elements so they are in sorted order.
@@ -963,13 +995,16 @@ export function range(
 ): [lower: number, upper: number, step: number] {
   if (expr.nops === 0) return [1, 0, 0];
 
-  const op1 = Math.round(expr.op1.re ?? 1);
+  let op1 = Math.round(expr.op1.re);
+  if (!isFinite(op1)) op1 = 1;
   if (expr.nops === 1) return [1, op1, 1];
 
-  const op2 = Math.round(expr.op2.re ?? 1);
+  let op2 = Math.round(expr.op2.re);
+  if (!isFinite(op2)) op2 = 1;
   if (expr.nops === 2) return [op1, op2, op2 > op1 ? 1 : -1];
 
-  const op3 = Math.abs(Math.round(expr.op3.re ?? 1));
+  let op3 = Math.abs(Math.round(expr.op3.re));
+  if (!isFinite(op3)) op3 = 1;
 
   return [op1, op2, op1 < op2 ? op3 : -op3];
 }
@@ -1008,7 +1043,7 @@ function indexRangeArg(
   if (!op) return [0, 0, 0];
   let n = op.re;
 
-  if (n !== undefined) {
+  if (isFinite(n)) {
     n = Math.round(n);
     if (n < 0) {
       if (l === undefined) return [0, 0, 0];
@@ -1035,7 +1070,7 @@ function indexRangeArg(
   return [lower, upper, step];
 }
 
-function take(
+function slice(
   expr: BoxedExpression,
   indexes: [lower: number, upper: number, step: number][]
 ): BoxedExpression {
@@ -1064,7 +1099,7 @@ function take(
   return ce.function('List', list);
 }
 
-function takeString(
+function sliceString(
   s: string,
   indexes: [lower: number, upper: number, step: number][]
 ): string {
@@ -1134,7 +1169,7 @@ function canonicalSet(
 ): BoxedExpression {
   // Check that each element is only present once
   const set: BoxedExpression[] = [];
-  const has = (x) => set.some((y) => y.isEqual(x));
+  const has = (x) => set.some((y) => y.isSame(x));
 
   for (const op of ops) if (!has(op)) set.push(op);
 
@@ -1181,7 +1216,7 @@ function tally(
 
   const indexOf = (expr: BoxedExpression) => {
     for (let i = 0; i < values.length; i++)
-      if (values[i].isEqual(expr)) return i;
+      if (values[i].isSame(expr)) return i;
     return -1;
   };
 
@@ -1269,7 +1304,7 @@ function joinSet(
     }
   }
 
-  const has = (x) => set!.some((y) => y.isEqual(x));
+  const has = (x) => set!.some((y) => y.isSame(x));
 
   if (!has(value)) set!.push(value);
   return set!;
@@ -1321,7 +1356,7 @@ function defaultCollectionHandlers(): CollectionHandlers {
   return {
     size: (expr) => expr.nops!,
 
-    contains: (expr, target) => expr.ops!.some((x) => x.isEqual(target)),
+    contains: (expr, target) => expr.ops!.some((x) => x.isSame(target)),
 
     iterator: (expr, start, count) => {
       let index = (start ?? 1) - 1;
@@ -1357,13 +1392,13 @@ function defaultCollectionHandlers(): CollectionHandlers {
         if (from < -expr.nops!) return undefined;
         from = expr.nops + from + 1;
         for (let i = from; i >= 1; i--)
-          if (expr.ops![i - 1]!.isEqual(target)) return i;
+          if (expr.ops![i - 1]!.isSame(target)) return i;
         return undefined;
       }
 
       // Forward search
       for (let i = from; i <= expr.nops; i++)
-        if (expr.ops![i - 1]!.isEqual(target)) return i;
+        if (expr.ops![i - 1]!.isSame(target)) return i;
 
       return undefined;
     },
@@ -1439,7 +1474,7 @@ function defaultCollectionEq(a: BoxedExpression, b: BoxedExpression) {
   if (a.nops !== b.nops) return false;
 
   // The elements are assumed to be in the same order
-  return a.ops!.every((x, i) => x.isEqual(b.ops![i]));
+  return a.ops!.every((x, i) => x.isSame(b.ops![i]));
 }
 
 export function fromRange(start: number, end: number): number[] {

@@ -28,8 +28,8 @@ export function interval(expr: BoxedExpression): Interval | undefined {
       op2 = op2.op1;
     }
 
-    let start = op1.N();
-    let end = op2.N();
+    const start = op1.N();
+    const end = op2.N();
 
     if (!start.isNumberLiteral || !end.isNumberLiteral) return undefined;
 

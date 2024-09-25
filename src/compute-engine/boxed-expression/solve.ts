@@ -1,6 +1,5 @@
-import type { BoxedExpression, SemiBoxedExpression } from './public';
+import type { BoxedExpression } from './public';
 import { isInequality } from './utils';
-import { canonicalAdd } from './arithmetic-add';
 import { Rule } from '../public';
 import { matchAnyRules } from './rules';
 import { expand } from './expand';
@@ -57,7 +56,7 @@ export const UNIVARIATE_ROOTS: Rule[] = [
 
     useVariations: true,
     condition: ({ _a, __b, _n }) =>
-      !_a.has('_x') && !__b.has('_x') && !_n.isEqual(0),
+      !_a.has('_x') && !__b.has('_x') && !_n.is(0),
   },
 
   //
@@ -123,7 +122,7 @@ export const UNIVARIATE_ROOTS: Rule[] = [
     replace: ['Divide', ['Ln', ['Negate', ['Divide', '__c', '__a']]], '__b'],
     useVariations: true,
     condition: ({ __a, __c }) =>
-      ((!__a.isEqual(0) && __c.div(__a).isNegative) ?? false) &&
+      ((!__a.is(0) && __c.div(__a).isNegative) ?? false) &&
       !__a.has('_x') &&
       !__c.has('_x'),
   },
@@ -134,7 +133,7 @@ export const UNIVARIATE_ROOTS: Rule[] = [
     replace: ['Ln', ['Negate', ['Divide', '__c', '__a']]],
     useVariations: true,
     condition: ({ __a, __c }) =>
-      ((!__a.isEqual(0) && __c.div(__a).isNegative) ?? false) &&
+      ((!__a.is(0) && __c.div(__a).isNegative) ?? false) &&
       !__a.has('_x') &&
       !__c.has('_x'),
   },
@@ -160,7 +159,7 @@ export const UNIVARIATE_ROOTS: Rule[] = [
     match: ['Add', ['Multiply', '__a', ['Log', '_x', '__b']], '__c'],
     replace: ['Power', '__b', ['Negate', ['Divide', '__c', '__a']]],
     useVariations: true,
-    condition: ({ __a, __b }) => (!__a.isEqual(0) && __b.isPositive) ?? false,
+    condition: ({ __a, __b }) => (!__a.is(0) && __b.isPositive) ?? false,
   },
 
   // a * log_b(x) = 0
@@ -168,7 +167,7 @@ export const UNIVARIATE_ROOTS: Rule[] = [
     match: ['Multiply', '__a', ['Log', '_x', '__b']],
     replace: ['Power', '__b', ['Negate', ['Divide', '__c', '__a']]],
     useVariations: true,
-    condition: ({ __a, __b }) => (!__a.isEqual(0) && __b.isPositive) ?? false,
+    condition: ({ __a, __b }) => (!__a.is(0) && __b.isPositive) ?? false,
   },
 
   // |ax + b| + c = 0
@@ -253,7 +252,7 @@ export function findUnivariateRoots(
 export function univariateSolve(
   expr: BoxedExpression,
   x: string
-): ReadonlyArray<SemiBoxedExpression> | null {
+): ReadonlyArray<BoxedExpression> | null {
   const ce = expr.engine;
   const name = expr.operator;
   if (name === 'Tuple') {
@@ -264,11 +263,11 @@ export function univariateSolve(
   if (name === null || !(expr.operator === 'Equal' || isInequality(expr)))
     return null;
 
-  let lhs: SemiBoxedExpression = expr.op1;
+  let lhs: BoxedExpression = expr.op1;
   const rhs = expr.op2;
-  if (rhs.isEqual(0) === false) lhs = ['Subtract', lhs, rhs];
+  if (!rhs.is(0)) lhs = ce.box(['Subtract', lhs, rhs]);
 
-  const roots = findUnivariateRoots(ce.box(lhs), x);
+  const roots = findUnivariateRoots(lhs, x);
   if (roots.length === 0) return null;
   return roots;
 }
@@ -293,10 +292,7 @@ export const HARMONIZATION_RULES: Rule[] = [
     match: ['Multiply', '__a', ['Power', '_b', '_n']],
     replace: '_b',
     condition: ({ __a, _b, _n }) =>
-      !__a.has('_x') &&
-      _b.has('_x') &&
-      _n.isEqual(0) === false &&
-      !_n.has('_x'),
+      !__a.has('_x') && _b.has('_x') && !_n.is(0) && !_n.has('_x'),
   },
   // a√b(x)  -> a^2 b(x)
   {
@@ -309,7 +305,7 @@ export const HARMONIZATION_RULES: Rule[] = [
     match: ['Divide', '_a', '_b'],
     replace: '_a',
     // @todo: check _b after the substitution
-    condition: ({ _a, _b }) => _a.has('_x') && _b.isEqual(0) === false,
+    condition: ({ _a, _b }) => _a.has('_x') && !_b.is(0),
   },
   // ab(x) -> b(x)
   // The solution for a product are the solutions for each term,

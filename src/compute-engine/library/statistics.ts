@@ -13,8 +13,8 @@ export const STATISTICS_LIBRARY: IdentifierDefinitions[] = [
       signature: '(n:number, m:number) -> number',
 
       evaluate: (ops, { engine: ce }) => {
-        const n = ops[0].re ?? NaN;
-        const k = ops[1].re ?? NaN;
+        const n = ops[0].re;
+        const k = ops[1].re;
         if (!Number.isFinite(n) || !Number.isFinite(k)) return undefined;
         if (n < 0 || k < 0 || k > n) return ce.NaN;
         return ce.number(choose(n, k));
@@ -34,7 +34,7 @@ export const STATISTICS_LIBRARY: IdentifierDefinitions[] = [
         let sum = 0;
         let count = 0;
         for (const op of each(ops[0])) {
-          sum += op.re ?? NaN;
+          sum += op.re;
           count++;
         }
         if (count === 0) return ce.NaN;
@@ -50,7 +50,7 @@ export const STATISTICS_LIBRARY: IdentifierDefinitions[] = [
         // @todo: do bignum version
         const values: number[] = [];
         for (const op of each(ops[0])) {
-          const v = op.re ?? NaN;
+          const v = op.re;
           if (!Number.isFinite(v)) return ce.NaN;
           values.push(v);
         }
@@ -75,7 +75,7 @@ export const STATISTICS_LIBRARY: IdentifierDefinitions[] = [
         let sum2 = 0;
         let count = 0;
         for (const op of each(ops[0])) {
-          const v = op.re ?? NaN;
+          const v = op.re;
           if (!Number.isFinite(v)) return ce.NaN;
           sum += v;
           sum2 += v * v;
@@ -96,7 +96,7 @@ export const STATISTICS_LIBRARY: IdentifierDefinitions[] = [
         let sum2 = 0;
         let count = 0;
         for (const op of each(ops[0])) {
-          const v = op.re ?? NaN;
+          const v = op.re;
           if (!Number.isFinite(v)) return ce.NaN;
           sum += v;
           sum2 += v * v;
@@ -117,7 +117,7 @@ export const STATISTICS_LIBRARY: IdentifierDefinitions[] = [
         let sum4 = 0;
         let count = 0;
         for (const op of each(ops[0])) {
-          const v = op.re ?? NaN;
+          const v = op.re;
           if (!Number.isFinite(v)) return ce.NaN;
           sum += v;
           sum2 += v * v;
@@ -142,7 +142,7 @@ export const STATISTICS_LIBRARY: IdentifierDefinitions[] = [
         let sum3 = 0;
         let count = 0;
         for (const op of each(ops[0])) {
-          const v = op.re ?? NaN;
+          const v = op.re;
           if (!Number.isFinite(v)) return ce.NaN;
           sum += v;
           sum2 += v * v;
@@ -164,7 +164,7 @@ export const STATISTICS_LIBRARY: IdentifierDefinitions[] = [
       evaluate: (ops, { engine: ce }) => {
         const values: number[] = [];
         for (const op of each(ops[0])) {
-          const v = op.re ?? NaN;
+          const v = op.re;
           if (!Number.isFinite(v)) return ce.NaN;
           values.push(v);
         }
@@ -194,7 +194,7 @@ export const STATISTICS_LIBRARY: IdentifierDefinitions[] = [
       evaluate: (ops, { engine: ce }) => {
         const values: number[] = [];
         for (const op of each(ops[0])) {
-          const v = op.re ?? NaN;
+          const v = op.re;
           if (!Number.isFinite(v)) return ce.tuple(ce.NaN, ce.NaN, ce.NaN);
           values.push(v);
         }
@@ -219,7 +219,7 @@ export const STATISTICS_LIBRARY: IdentifierDefinitions[] = [
       evaluate: (ops, { engine: ce }) => {
         const values: number[] = [];
         for (const op of each(ops[0])) {
-          const v = op.re ?? NaN;
+          const v = op.re;
           if (!Number.isFinite(v)) return ce.NaN;
           values.push(v);
         }
@@ -239,7 +239,7 @@ export const STATISTICS_LIBRARY: IdentifierDefinitions[] = [
       complexity: 7500,
       signature: 'number -> number',
       evaluate: (ops, { engine: ce }) => {
-        const x = ops[0].re ?? NaN;
+        const x = ops[0].re;
         if (!Number.isFinite(x)) return undefined;
         return ce.number(erf(x));
       },
@@ -249,7 +249,7 @@ export const STATISTICS_LIBRARY: IdentifierDefinitions[] = [
       complexity: 7500,
       signature: 'number -> number',
       evaluate: (ops, { engine: ce }) => {
-        const x = ops[0].re ?? NaN;
+        const x = ops[0].re;
         if (!Number.isFinite(x)) return undefined;
         return ce.number(1 - erf(x));
       },
@@ -259,7 +259,7 @@ export const STATISTICS_LIBRARY: IdentifierDefinitions[] = [
       complexity: 7500,
       signature: 'number -> number',
       evaluate: (ops, { engine: ce }) => {
-        const x = ops[0].re ?? NaN;
+        const x = ops[0].re;
         if (!Number.isFinite(x)) return undefined;
         return ce.number(erfInv(x));
       },

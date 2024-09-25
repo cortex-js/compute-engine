@@ -37,14 +37,16 @@ export function normalizeIndexingSet(
   let isFinite = true;
   index = indexingSet.op1.symbol!;
   console.assert(index, 'Indexing set must have an index');
-  lower = Math.floor(indexingSet.op2.re ?? 1);
+  lower = Math.floor(indexingSet.op2.re);
+  if (isNaN(lower)) lower = 1;
 
   if (!Number.isFinite(lower)) isFinite = false;
 
   if (indexingSet.op3.symbol === 'Nothing' || indexingSet.op3.isInfinity) {
     isFinite = false;
   } else {
-    upper = Math.floor(indexingSet.op3.re ?? upper);
+    if (!isNaN(indexingSet.op3.re))
+      upper = Math.floor(indexingSet.op3.re ?? upper);
     if (!Number.isFinite(upper)) isFinite = false;
   }
   if (!isFinite && Number.isFinite(lower)) upper = lower + MAX_ITERATION;

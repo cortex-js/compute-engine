@@ -228,21 +228,10 @@ describe('PARSING numbers', () => {
                 ]
               ],
               [
-                "Tuple",
+                "Triple",
                 "Nothing",
                 2,
-                [
-                  "Floor",
-                  [
-                    "Error",
-                    [
-                      "ErrorCode",
-                      "'incompatible-type'",
-                      "'real'",
-                      "'finite_number'"
-                    ]
-                  ]
-                ]
+                ["Floor", ["Multiply", 1.5, "n", ["Ln", "n"]]]
               ]
             ],
             2

@@ -118,7 +118,7 @@ export function eq(
   // A symbol may have special comparision handlers
   //
   if (a.symbol) {
-    let cmp = a.symbolDefinition?.eq?.(b);
+    const cmp = a.symbolDefinition?.eq?.(b);
     if (cmp !== undefined) return cmp;
     return a.symbol === b.symbol;
   }
@@ -127,8 +127,8 @@ export function eq(
   // If we didn't come to a resolution yet, check the assumptions DB
   //
   const ce = a.engine;
-  if (ce.ask(['Equal', a, b]).length > 0) return true;
-  if (ce.ask(['NotEqual', a, b]).length > 0) return false;
+  if (ce.ask(ce.box(['Equal', a, b])).length > 0) return true;
+  if (ce.ask(ce.box(['NotEqual', a, b])).length > 0) return false;
 
   //
   // For numbers, strings and tensors, mathematical equality is
@@ -143,9 +143,6 @@ export function cmp(
   a: BoxedExpression,
   b: number | BoxedExpression
 ): '<' | '=' | '>' | '>=' | '<=' | undefined {
-  a = a.N();
-  if (typeof b !== 'number') b = b.N();
-
   if (a.isNumberLiteral) {
     //
     // Special case when b is a plain machine number

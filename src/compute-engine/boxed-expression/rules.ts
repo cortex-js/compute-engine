@@ -9,13 +9,13 @@ import {
   ReplaceOptions,
   BoxedSubstitution,
   RuleConditionFunction,
-  SemiBoxedExpression,
   RuleReplaceFunction,
   RuleFunction,
   RuleSteps,
   RuleStep,
   isRuleStep,
   isBoxedRule,
+  SemiBoxedExpression,
 } from '../public';
 
 import { asLatexString, isInequality, isRelationalOperator } from './utils';
@@ -167,7 +167,7 @@ export const CONDITIONS = {
 
   numeric: (x: BoxedExpression) => {
     const [c, term] = x.toNumericValue();
-    return term.isEqual(1);
+    return term.is(1);
   },
   integer: (x: BoxedExpression) => x.isInteger,
   rational: (x: BoxedExpression) => x.isRational,
@@ -191,14 +191,14 @@ export const CONDITIONS = {
   prime: (x: BoxedExpression) => isPrime(x) === true,
   composite: (x: BoxedExpression) => isPrime(x) === false,
 
-  notzero: (x: BoxedExpression) => x.isEqual(0) === false,
-  notone: (x: BoxedExpression) => x.isEqual(1) === false,
+  notzero: (x: BoxedExpression) => x.is(0) === false,
+  notone: (x: BoxedExpression) => x.is(1) === false,
 
   finite: (x: BoxedExpression) => x.isFinite,
   infinite: (x: BoxedExpression) => x.isFinite === false,
 
   constant: (x: BoxedExpression) => x.symbolDefinition?.isConstant ?? false,
-  variable: (x: BoxedExpression) => !x.symbolDefinition?.isConstant ?? true,
+  variable: (x: BoxedExpression) => !(x.symbolDefinition?.isConstant ?? true),
   function: (x: BoxedExpression) => x.symbolDefinition?.isFunction ?? false,
 
   relation: (x: BoxedExpression) => isRelationalOperator(x.operator),
@@ -311,7 +311,7 @@ function parseModifier(parser: Parser): string | null {
 }
 
 function parserModifiers(parser: Parser): string {
-  let modifiers: string[] = [];
+  const modifiers: string[] = [];
   do {
     const modifier = parseModifier(parser);
     if (!modifier) break;
@@ -690,7 +690,6 @@ export function applyRule(
     const newOps = expr.ops.map((op) => {
       const subExpr = applyRule(rule, op, {}, options);
       if (!subExpr) return op;
-      if (!subExpr.value.isFinite) debugger;
       operandsMatched = true;
       return subExpr.value;
     });

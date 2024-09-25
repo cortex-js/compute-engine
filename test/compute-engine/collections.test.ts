@@ -116,7 +116,7 @@ describe('TAKE 1', () => {
             "ErrorCode",
             "'incompatible-type'",
             "'collection | string'",
-            "'finite_number'"
+            "'finite_real'"
           ]
         ],
         1
@@ -124,7 +124,21 @@ describe('TAKE 1', () => {
     `));
 
   test('symbol', () =>
-    expect(evaluate(['Take', symbol, 1])).toMatchInlineSnapshot(`Nothing`));
+    expect(evaluate(['Take', symbol, 1])).toMatchInlineSnapshot(`
+      [
+        "Take",
+        [
+          "Error",
+          [
+            "ErrorCode",
+            "'incompatible-type'",
+            "'collection | string'",
+            "'real'"
+          ]
+        ],
+        1
+      ]
+    `));
 
   test('dict', () =>
     expect(evaluate(['Take', dict, 1])).toMatchInlineSnapshot(`["List"]`));
@@ -172,7 +186,7 @@ describe('SLICE (2,3)', () => {
             "ErrorCode",
             "'incompatible-type'",
             "'collection | string'",
-            "'finite_number'"
+            "'finite_real'"
           ]
         ],
         2,
@@ -181,7 +195,22 @@ describe('SLICE (2,3)', () => {
     `));
 
   test('symbol', () =>
-    expect(evaluate(['Slice', symbol, 2, 3])).toMatchInlineSnapshot(`Nothing`));
+    expect(evaluate(['Slice', symbol, 2, 3])).toMatchInlineSnapshot(`
+      [
+        "Slice",
+        [
+          "Error",
+          [
+            "ErrorCode",
+            "'incompatible-type'",
+            "'collection | string'",
+            "'real'"
+          ]
+        ],
+        2,
+        3
+      ]
+    `));
 
   test('dict', () =>
     expect(evaluate(['Slice', dict, 2, 3])).toMatchInlineSnapshot(`["List"]`));
@@ -231,7 +260,7 @@ describe('SLICE -1,1', () => {
             "ErrorCode",
             "'incompatible-type'",
             "'collection | string'",
-            "'finite_number'"
+            "'finite_real'"
           ]
         ],
         -1,
@@ -240,9 +269,22 @@ describe('SLICE -1,1', () => {
     `));
 
   test('symbol', () =>
-    expect(evaluate(['Slice', symbol, -1, 1])).toMatchInlineSnapshot(
-      `Nothing`
-    ));
+    expect(evaluate(['Slice', symbol, -1, 1])).toMatchInlineSnapshot(`
+      [
+        "Slice",
+        [
+          "Error",
+          [
+            "ErrorCode",
+            "'incompatible-type'",
+            "'collection | string'",
+            "'real'"
+          ]
+        ],
+        -1,
+        1
+      ]
+    `));
 
   test('dict', () =>
     expect(evaluate(['Slice', dict, -1, 1])).toMatchInlineSnapshot(`["List"]`));
@@ -382,7 +424,7 @@ describe('Drop 2', () => {
             "ErrorCode",
             "'incompatible-type'",
             "'collection | string'",
-            "'finite_number'"
+            "'finite_real'"
           ]
         ],
         2
@@ -390,7 +432,21 @@ describe('Drop 2', () => {
     `));
 
   test('symbol', () =>
-    expect(evaluate(['Drop', symbol, 2])).toMatchInlineSnapshot(`Nothing`));
+    expect(evaluate(['Drop', symbol, 2])).toMatchInlineSnapshot(`
+      [
+        "Drop",
+        [
+          "Error",
+          [
+            "ErrorCode",
+            "'incompatible-type'",
+            "'collection | string'",
+            "'real'"
+          ]
+        ],
+        2
+      ]
+    `));
 
   test('dict', () =>
     expect(evaluate(['Drop', dict, 2])).toMatchInlineSnapshot(`["List"]`));

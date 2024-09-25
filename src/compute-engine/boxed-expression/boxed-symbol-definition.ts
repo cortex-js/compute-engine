@@ -140,7 +140,7 @@ export class _BoxedSymbolDefinition implements BoxedSymbolDefinition {
     }
 
     if (this._value) {
-      if (!this._type) {
+      if (!this._type || this._type === 'unknown') {
         // The type is inferred, because the type of the value could be more restrictive than the intended type. For example, the value might be "2" (integer), but the intent is to declare it as a "number".
         this._type = this._value.type;
         this.inferredType = true;
@@ -194,6 +194,7 @@ export class _BoxedSymbolDefinition implements BoxedSymbolDefinition {
         this._type = this._type ? widen(this._type, newVal.type) : newVal.type;
       } else if (
         !this._type ||
+        this.type === 'unknown' ||
         !newVal.type ||
         isSubtype(newVal.type, this._type)
       )
@@ -212,7 +213,7 @@ export class _BoxedSymbolDefinition implements BoxedSymbolDefinition {
         `The type of the constant "${this.name}" cannot be changed`
       );
 
-    if (!this.inferredType)
+    if (!this.inferredType && this.type !== 'unknown')
       throw Error(
         `The type of "${this.name}" cannot be changed because it has already been declared`
       );

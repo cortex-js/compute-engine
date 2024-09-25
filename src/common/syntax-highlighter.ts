@@ -186,7 +186,7 @@ export type SyntaxGrammar = {
 
 const defaultGrammar: SyntaxGrammar = {
   comment: (buf: Buffer) => {
-    let pos = buf.pos;
+    const pos = buf.pos;
     if (buf.match('//')) {
       while (!buf.atEnd() && buf.peek() !== '\n') buf.consume();
       return { content: buf.s.slice(pos, buf.pos), tag: 'comment' };
@@ -205,7 +205,7 @@ const defaultGrammar: SyntaxGrammar = {
   },
 
   number: (buf: Buffer) => {
-    let pos = buf.pos;
+    const pos = buf.pos;
     if (buf.match('0x')) {
       while (!buf.atEnd() && /[0-9a-fA-F]/.test(buf.peek())) buf.consume();
       return { content: buf.s.slice(buf.pos), tag: 'literal' };
@@ -229,7 +229,7 @@ const defaultGrammar: SyntaxGrammar = {
   },
 
   string: (buf: Buffer) => {
-    let pos = buf.pos;
+    const pos = buf.pos;
     const quote = buf.peek();
     if (quote !== '"' && quote !== "'") return undefined;
 
@@ -244,7 +244,7 @@ const defaultGrammar: SyntaxGrammar = {
   },
 
   regex: (buf: Buffer) => {
-    let pos = buf.pos;
+    const pos = buf.pos;
     if (buf.match('//')) {
       buf.pos = pos;
       return undefined;
@@ -263,7 +263,7 @@ const defaultGrammar: SyntaxGrammar = {
   },
 
   identifier: (buf: Buffer) => {
-    let pos = buf.pos;
+    const pos = buf.pos;
     while (!buf.atEnd() && /[a-zA-Z0-9_]/.test(buf.peek())) buf.consume();
     if (buf.pos === pos) return undefined;
     return { content: buf.s.slice(pos, buf.pos), tag: 'identifier' };
@@ -279,7 +279,7 @@ const defaultGrammar: SyntaxGrammar = {
     // Sort by length, longest first
     keywords.sort((a, b) => b.length - a.length);
 
-    let pos = buf.pos;
+    const pos = buf.pos;
     for (const keyword of keywords) {
       buf.pos = pos;
       if (buf.match(keyword)) {
@@ -323,7 +323,7 @@ export function parseCode(
     }
 
     // If last span is default, coalesce with this one
-    let lastSpan = spans.length ? spans[spans.length - 1] : null;
+    const lastSpan = spans.length ? spans[spans.length - 1] : null;
     if (lastSpan?.tag === 'default') {
       lastSpan.content += buf.consume();
     } else {

@@ -19,14 +19,11 @@ export function canonicalInvisibleOperator(
     // Is it an implicit addition/mixed fraction, e.g. "3 1/4"
     // Note: the numerators and denominators are limited to 999
     //
-    const lhsNumber = lhs.canonical.re ?? NaN;
+    const lhsNumber = lhs.canonical.re;
     if (Number.isInteger(lhsNumber)) {
       const rhs = ops[1];
       if (rhs.operator === 'Divide' || rhs.operator === 'Rational') {
-        const [n, d] = [
-          rhs.op1.canonical.re ?? NaN,
-          rhs.op2.canonical.re ?? NaN,
-        ];
+        const [n, d] = [rhs.op1.canonical.re, rhs.op2.canonical.re];
         if (
           n > 0 &&
           n <= 1000 &&

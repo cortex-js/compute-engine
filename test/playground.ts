@@ -1,28 +1,15 @@
 import { ComputeEngine } from '../src/compute-engine';
-import { parseType } from '../src/common/type/parse';
-import { Expression } from '../src/math-json';
-import { isSubtype } from '../src/common/type/subtype';
-
-// console.log(parseType('tuple<symbol, integer?, integer?>').toString());
 
 const ce = new ComputeEngine();
 const engine = ce;
 
-// Does not parse to a numeric value. See canonicalMultiply (or canonical invisible operator).
-// console.log(ce.parse('3\\sqrt{2}').numericValue?.toString());
-
-// Should have a typerror
-// engine.parse('1+(2=2)+3').print();
-
-// Should be true
-ce.box(['Element', 2, 'Numbers']).evaluate().print();
-
-// 3^{-2} gets calculated in canonicalization. It shouldn't.
-const expr = ce.parse('\\frac{x}{3^{-2}}');
+// 3^{-2} gets calculated because canonicalDivide calls toNumericValue, which
+// does simplify the expression, i.e. "(3x)^2" -> "9x^2". That's a bit
+// inconsistent with, e.g. "3 + 5" which does not get reduced...
+// console.info(ce.parse('\\frac{x}{3^{-2}}').json);
 
 // n is of type unknown... Shouldn't it be inferred to be 'real'?
 // also, infer may need an argument to indicate if this is a covariant or contravariant inference
-
 ce.box(['Floor', ['Cos', 'n']])
   .evaluate()
   .print();
@@ -34,16 +21,6 @@ console.info(
     .simplify({ rules: ['\\sin(2x) -> 2\\sin(x)\\cos(x)'] })
     .toString() + ' this ran'
 );
-
-expr
-  .simplify({
-    rules: {
-      match: '\\frac{a}{b^{-n}}',
-      replace: 'a*b^n',
-      condition: ({ _b }) => _b.isEqual(0) === false,
-    }, // doesn't work but {match:'\\frac{a}{b^n}',replace:'a*b^{-n}',,
-  })
-  ?.print();
 
 ce.parse('||a| + 3|').simplify().print();
 
@@ -242,7 +219,7 @@ console.log(ce.parse('\\sqrt[3]{-2}').simplify().latex);
 
 // Should be equal to 1
 console.log(ce.parse('\\tanh(\\infty)').simplify().json);
-console.log(ce.parse('\\tanh(\\infty)').simplify().isEqual(1));
+console.log(ce.parse('\\tanh(\\infty)').simplify().is(1));
 console.log(ce.parse('\\tanh(\\infty)').simplify().toString());
 
 // y powers should combine
@@ -434,7 +411,7 @@ console.info(xp.simplify().toString());
 // For the remainder of theses tests, assume that the symbol `f` represent a
 // function
 ce.declare('f', 'function');
-ce.assume(['Equal', 'one', 1]);
+// ce.assume(['Equal', 'one', 1]);
 
 const t1 = ce.parse('\\cos(5\\pi+k)');
 // Canonical should simplify argument to -π/+π range

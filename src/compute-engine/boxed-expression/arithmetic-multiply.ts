@@ -4,13 +4,13 @@ import { order } from './order';
 
 import { Product } from './product';
 import { expandProducts } from './expand';
-import { flatten } from './flatten';
 import { negateProduct } from './negate';
 import { isSubtype } from '../../common/type/subtype';
 import { NumericValue } from '../numeric-value/public';
 import { ExactNumericValue } from '../numeric-value/exact-numeric-value';
 import { isOne } from '../numerics/rationals';
 import { asRational } from './numerics';
+import { SMALL_INTEGER } from '../numerics/numeric';
 
 /**
  * The canonical form of `Multiply`:
@@ -43,7 +43,7 @@ export function canonicalMultiply(
   //
   // Filter out ones
   //
-  xs = xs.filter((x) => !x.isEqual(1));
+  xs = xs.filter((x) => !x.is(1));
 
   //
   // If an integer or a rational is followed by a sqrt or an imaginary unit
@@ -72,9 +72,11 @@ export function canonicalMultiply(
         let radical = next.op1.numericValue!;
         if (typeof radical !== 'number') radical = radical.re;
 
+        if (radical >= SMALL_INTEGER) continue;
+
         // Is it preceded by a rational?
         if (isSubtype(x.type, 'finite_rational')) {
-          let rational = x.numericValue!;
+          const rational = x.numericValue!;
           const [num, den] =
             typeof rational === 'number'
               ? [rational, 1]
@@ -172,13 +174,13 @@ export function mul(...xs: ReadonlyArray<BoxedExpression>): BoxedExpression {
     xs = exp.ops!;
   }
 
-  return new Product(ce, xs).asExpression();
+  return new Product(ce, xs).asRationalExpression();
 }
 
 export function mulN(...xs: ReadonlyArray<BoxedExpression>): BoxedExpression {
   console.assert(xs.length > 0);
   const ce = xs[0].engine;
-
+  xs = xs.map((x) => x.N());
   const exp = expandProducts(ce, xs);
   if (exp) {
     if (exp.operator !== 'Multiply') return exp;

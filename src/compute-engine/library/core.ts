@@ -292,7 +292,7 @@ export const CORE_LIBRARY: IdentifierDefinitions[] = [
       hold: true,
       signature: 'any -> string',
       evaluate: ([x], { engine: ce }) => {
-        let s = [x.toString()];
+        const s = [x.toString()];
         s.push(''); // Add a newline
 
         if (x.string) s.push('string');
@@ -560,10 +560,13 @@ export const CORE_LIBRARY: IdentifierDefinitions[] = [
         let upper: number;
         if (upperOp === undefined) {
           lower = 0;
-          upper = Math.floor((lowerOp.re ?? 1) - 1)!;
+          upper = Math.floor(lowerOp.re - 1)!;
+          if (isNaN(upper)) upper = 0;
         } else {
-          lower = Math.floor(lowerOp.re ?? 0)!;
-          upper = Math.floor(upperOp.re ?? 0)!;
+          lower = Math.floor(lowerOp.re);
+          upper = Math.floor(upperOp.re);
+          if (isNaN(lower)) lower = 0;
+          if (isNaN(upper)) upper = 0;
         }
         return ce.number(lower + Math.floor(Math.random() * (upper - lower)));
       },

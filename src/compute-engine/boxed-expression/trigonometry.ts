@@ -41,46 +41,52 @@ export function Fu(exp: BoxedExpression): RuleStep | undefined {
     );
   };
 
-  let TR1 = ['\\sec x -> 1/(\\cos x)', '\\csc x -> 1/(\\sin x)'];
-  let TR2 = ['\\tan x -> \\sin(x)/(\\cos x)', '\\cot x -> \\cos(x)/(\\sin x)'];
-  let TR5 = ['\\sin^2(x) -> 1-\\cos^2(x)'];
-  let TR6 = ['\\cos^2(x) -> 1-\\sin^2(x)'];
-  let TR7 = ['\\cos^2(x) -> (1+\\cos(2x))/2'];
-  let TR8 = [
+  const TR1 = ['\\sec x -> 1/(\\cos x)', '\\csc x -> 1/(\\sin x)'];
+  const TR2 = [
+    '\\tan x -> \\sin(x)/(\\cos x)',
+    '\\cot x -> \\cos(x)/(\\sin x)',
+  ];
+  const TR5 = ['\\sin^2(x) -> 1-\\cos^2(x)'];
+  const TR6 = ['\\cos^2(x) -> 1-\\sin^2(x)'];
+  const TR7 = ['\\cos^2(x) -> (1+\\cos(2x))/2'];
+  const TR8 = [
     '\\sin(x)\\cos(y) -> 1/2*(\\sin(x+y)+\\sin(x-y))',
     '\\cos(x)\\cos(y) -> 1/2*(\\cos(x+y)+\\cos(x-y))',
     '\\sin(x)\\sin(y) -> 1/2*(\\cos(x+y)-\\cos(x-y))',
   ];
-  let TR9 = [
+  const TR9 = [
     '\\sin(x)+\\sin(y) -> 2\\sin((x+y)/2)\\cos((x-y)/2)',
     '\\sin(x)-\\sin(y) -> 2\\sin((x+y)/2)\\sin((x-y)/2)',
     '\\cos(x)+\\cos(y) -> 2\\sin((x+y)/2)\\sin((x-y)/2)',
     '\\cos(x)-\\cos(y) -> -2\\sin((x+y)/2)\\sin((x-y)/2)',
   ];
-  let TR10 = [
+  const TR10 = [
     '\\sin(x+y) -> \\sin(x)\\cos(y)+\\cos(x)\\sin(y)',
     '\\sin(x-y) -> \\sin(x)\\cos(y)-\\cos(x)\\sin(y)',
     '\\cos(x+y) -> \\cos(x)\\cos(y)-\\sin(x)\\sin(y)',
     '\\cos(x-y) -> \\cos(x)\\cos(y)+\\sin(x)\\sin(y)',
   ];
-  let TR10Inverse = [
+  const TR10Inverse = [
     '\\sin(x)\\cos(y)+\\cos(x)\\sin(y) -> \\sin(x+y)',
     '\\sin(x)\\cos(y)-\\cos(x)\\sin(y) -> \\sin(x-y)',
     '\\cos(x)\\cos(y)-\\sin(x)\\sin(y) -> \\cos(x+y)',
     '\\cos(x)\\cos(y)+\\sin(x)\\sin(y) -> \\cos(x-y)',
   ];
-  let TR11 = ['\\sin(2x) -> 2\\sin(x)\\cos(x)', '\\cos(2x) -> 2\\cos^2(x) - 1'];
-  let TR12 = [
+  const TR11 = [
+    '\\sin(2x) -> 2\\sin(x)\\cos(x)',
+    '\\cos(2x) -> 2\\cos^2(x) - 1',
+  ];
+  const TR12 = [
     '\\tan(x+y) -> (\\tan(x)+\\tan(y))/(1-\\tan(x)\\tan(y))',
     '\\tan(x-y) -> (\\tan(x)-\\tan(y))/(1+\\tan(x)\\tan(y))',
   ];
-  let TR13 = [
+  const TR13 = [
     '\\tan(x)*\\tan(y) -> 1-(\\tan(x)+\\tan(y))\\cdot \\cot(x+y)',
     '\\cot(x)*\\cot(y) -> 1+(\\cot(x)+\\cot(y))\\cdot \\cot(x+y)',
   ];
 
-  let applyTR = (exp: BoxedExpression, ...ruless: string[][]) => {
-    for (let rules of ruless) {
+  const applyTR = (exp: BoxedExpression, ...ruless: string[][]) => {
+    for (const rules of ruless) {
       exp = exp.simplify();
       const savedCostFunction = ce.costFunction;
       ce.costFunction = () => 0;
@@ -92,7 +98,7 @@ export function Fu(exp: BoxedExpression): RuleStep | undefined {
   };
 
   function bestCase(...cases: BoxedExpression[]): BoxedExpression {
-    let costs = cases.map(cost);
+    const costs = cases.map(cost);
     let bestI = 0;
     for (let i = 1; i < cases.length; i++) {
       if (costs[bestI] < costs[i]) {
@@ -102,26 +108,27 @@ export function Fu(exp: BoxedExpression): RuleStep | undefined {
     return cases[bestI];
   }
 
-  let CTR1 = (exp: BoxedExpression) =>
+  const CTR1 = (exp: BoxedExpression) =>
     bestCase(exp, applyTR(exp, TR5), applyTR(exp, TR6));
   //Factor out TR11 since it applies in all cases
-  let CTR2 = (exp: BoxedExpression) =>
+  const CTR2 = (exp: BoxedExpression) =>
     bestCase(exp, applyTR(exp, TR5), applyTR(exp, TR6));
-  let CTR3 = (exp: BoxedExpression) => {
-    let exps = [exp, applyTR(exp, TR8), applyTR(exp, TR8, TR10Inverse)];
+  const CTR3 = (exp: BoxedExpression) => {
+    const exps = [exp, applyTR(exp, TR8), applyTR(exp, TR8, TR10Inverse)];
     if (cost(exps[2]) < cost(exps[0])) return exps[2];
     if (cost(exps[1]) < cost(exps[0])) return exps[1];
     return exp;
   };
-  let CTR4 = (exp: BoxedExpression) => bestCase(exp, applyTR(exp, TR10Inverse));
+  const CTR4 = (exp: BoxedExpression) =>
+    bestCase(exp, applyTR(exp, TR10Inverse));
 
-  let applyCTR = (exp: BoxedExpression, CTR: Function) => CTR(exp).simplify();
+  const applyCTR = (exp: BoxedExpression, CTR: Function) => CTR(exp).simplify();
 
-  let RL1 = (exp: BoxedExpression) => {
+  const RL1 = (exp: BoxedExpression) => {
     return applyTR(exp, TR12, TR13);
   };
 
-  let RL2 = (exp: BoxedExpression) => {
+  const RL2 = (exp: BoxedExpression) => {
     console.info(applyTR(exp, TR11).toString());
     exp = applyTR(exp, TR10, TR11, TR5, TR7, TR11);
     exp = applyCTR(exp, CTR3);
@@ -390,7 +397,7 @@ export function radiansToAngle(
   const angularUnit = ce.angularUnit;
   if (angularUnit === 'rad') return x;
 
-  const theta = x.N().re ?? NaN;
+  const theta = x.N().re;
   if (Number.isNaN(theta)) return x;
   if (angularUnit === 'deg') return ce.number(theta * (180 / Math.PI));
   if (angularUnit === 'grad') return ce.number(theta * (200 / Math.PI));
@@ -688,7 +695,7 @@ function constructibleValuesInverse(
   specialValues: ConstructibleTrigValues
 ): undefined | BoxedExpression {
   if (!x) return undefined;
-  let x_N = x.N().re ?? NaN;
+  let x_N = x.N().re;
   if (Number.isNaN(x_N)) return undefined;
   // operator is arcFn, and inv_operator is Fn
   const inv_operator = inverseTrigFuncName(operator);
@@ -708,7 +715,7 @@ function constructibleValuesInverse(
       for (const [[n, d], value] of specialValues) {
         const r = value[inv_operator!];
         if (r === undefined) continue;
-        const rn = r.N().re ?? NaN;
+        const rn = r.N().re;
         if (Number.isNaN(rn)) continue;
         cache.push([
           [r, rn],
@@ -788,7 +795,7 @@ export function constructibleValues(
   // If the argument has an imaginary part, it's not a constructible value
   if (x.im !== 0) return undefined;
 
-  let theta = x.re ?? NaN;
+  let theta = x.re;
   if (Number.isNaN(theta)) return undefined;
 
   //
@@ -860,7 +867,7 @@ function quadrant(
 
   // Normalize the angle to the range [0, 2π)
   const t = theta.re;
-  if (t === undefined) return [undefined, undefined];
+  if (isNaN(t)) return [undefined, undefined];
   const normalizedTheta = ((t % (2 * Math.PI)) + 2 * Math.PI) % (2 * Math.PI);
 
   if (Math.abs(normalizedTheta) < 1e-12) return [1, 0];
@@ -879,15 +886,15 @@ export function canonicalAngle(
   const theta = angleToRadians(x);
   if (!theta) return undefined;
 
-  if (theta.im !== 0) return theta;
+  if (theta.N().im !== 0) return theta;
 
-  // Get k, t such that theta = k * 2π + t
-  const [k, t] = getPiTerm(theta);
-  if (k.isZero) return theta;
-
-  // Normalize to [0, 2π)
   const ce = theta.engine;
-  const twoPi = ce.Pi.mul(2);
-  const n = ce._numericValue(theta.div(twoPi)).floor();
-  return theta.sub(ce.number(n.mul(ce._numericValue(twoPi))));
+
+  // Get k, t such that theta = k * π + t
+  const [k, t] = getPiTerm(theta);
+
+  if (k.isZero) return ce.number(t);
+
+  const k2 = ce._numericValue(k.bignumRe ? k.bignumRe.mod(2) : k.re % 2);
+  return ce.number(t.add(ce.Pi.mul(k2).N().numericValue!));
 }

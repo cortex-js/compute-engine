@@ -16,7 +16,7 @@ import type {
   CanonicalOptions,
 } from '../public';
 
-import type { BoxedExpression, SemiBoxedExpression, Sign } from './public';
+import type { BoxedExpression, Sign } from './public';
 
 import { findUnivariateRoots } from './solve';
 import { replace } from './rules';
@@ -300,10 +300,7 @@ export class BoxedFunction extends _BoxedExpression {
     const ce = this.engine;
 
     if (this.operator === 'Complex') {
-      return [
-        ce._numericValue({ decimal: this.op1.re ?? 0, im: this.op2.re ?? 0 }),
-        ce.One,
-      ];
+      return [ce._numericValue({ re: this.op1.re, im: this.op2.re }), ce.One];
     }
 
     //
@@ -341,7 +338,7 @@ export class BoxedFunction extends _BoxedExpression {
       for (const arg of expr.ops!) {
         const [c, r] = arg.toNumericValue();
         coef = coef.mul(c);
-        if (r.isEqual(1) !== true) rest.push(r);
+        if (!r.is(1)) rest.push(r);
       }
       if (rest.length === 0) return [coef, ce.One];
       if (rest.length === 1) return [coef, rest[0]];
@@ -355,7 +352,7 @@ export class BoxedFunction extends _BoxedExpression {
       const [coef1, numer] = expr.op1.toNumericValue();
       const [coef2, denom] = expr.op2.toNumericValue();
       const coef = coef1.div(coef2);
-      if (denom.isEqual(1)) return [coef, numer];
+      if (denom.is(1)) return [coef, numer];
       return [coef, ce.function('Divide', [numer, denom])];
     }
 
@@ -374,8 +371,7 @@ export class BoxedFunction extends _BoxedExpression {
       if (exponent !== null)
         return [coef.pow(exponent), ce.function('Power', [base, expr.op2])];
 
-      if (expr.op2.re === 0.5)
-        return [coef.sqrt(), ce.function('Sqrt', [base])];
+      if (expr.op2.is(0.5)) return [coef.sqrt(), ce.function('Sqrt', [base])];
 
       return [ce._numericValue(1), this];
     }
@@ -383,7 +379,7 @@ export class BoxedFunction extends _BoxedExpression {
     if (expr.operator === 'Sqrt') {
       const [coef, rest] = expr.op1.toNumericValue();
       // @fastpasth
-      if (rest.isEqual(1) || rest.isEqual(0)) {
+      if (rest.is(1) || rest.is(0)) {
         if (coef.isOne || coef.isZero) return [coef, rest];
         return [coef.sqrt(), rest];
       }
@@ -392,8 +388,7 @@ export class BoxedFunction extends _BoxedExpression {
 
     if (expr.operator === 'Root') {
       const exp = expr.op2.re;
-      if (exp === undefined || expr.op2.im !== 0)
-        return [ce._numericValue(1), this];
+      if (isNaN(exp) || expr.op2.im !== 0) return [ce._numericValue(1), this];
 
       const [coef, rest] = expr.op1.toNumericValue();
       if (exp === 2) return [coef.sqrt(), ce.function('Sqrt', [rest])];
@@ -415,7 +410,7 @@ export class BoxedFunction extends _BoxedExpression {
     //
     if (expr.operator === 'Log' || expr.operator === 'Ln') {
       let base = expr.op2.re;
-      if (base === undefined && expr.operator === 'Log') base = 10;
+      if (isNaN(base) && expr.operator === 'Log') base = 10;
 
       const [coef, rest] = expr.op1.toNumericValue();
       if (coef.isOne) return [coef, this];
@@ -650,7 +645,7 @@ export class BoxedFunction extends _BoxedExpression {
   }
 
   pow(exp: number | BoxedExpression): BoxedExpression {
-    return pow(this, exp);
+    return pow(this, exp, { numericApproximation: false });
   }
 
   root(exp: number | BoxedExpression): BoxedExpression {
@@ -727,12 +722,12 @@ export class BoxedFunction extends _BoxedExpression {
     return this.root(2);
   }
 
-  ln(semiBase?: SemiBoxedExpression): BoxedExpression {
+  ln(semiBase?: number | BoxedExpression): BoxedExpression {
     const base = semiBase ? this.engine.box(semiBase) : undefined;
     if (!this.isCanonical) return this.canonical.ln(base);
 
     // Mathematica returns `Log[0]` as `-∞`
-    if (this.isEqual(0)) return this.engine.NegativeInfinity;
+    if (this.is(0)) return this.engine.NegativeInfinity;
 
     // ln(exp(x)) = x
     if (this.operator === 'Exp') return this.op1;
@@ -794,25 +789,29 @@ export class BoxedFunction extends _BoxedExpression {
   }
 
   get isNumber(): boolean | undefined {
-    if (this.type === 'unknown') return undefined;
-    return isSubtype(this.type, 'number');
+    const t = this.type;
+    if (t === 'unknown') return undefined;
+    return isSubtype(t, 'number');
   }
 
   get isInteger(): boolean | undefined {
-    if (this.type === 'unknown') return undefined;
-    return isSubtype(this.type, 'integer');
+    const t = this.type;
+    if (t === 'unknown') return undefined;
+    return isSubtype(t, 'integer');
   }
 
   get isRational(): boolean | undefined {
-    if (this.type === 'unknown') return undefined;
+    const t = this.type;
+    if (t === 'unknown') return undefined;
     // integers are rationals
-    return isSubtype(this.type, 'rational');
+    return isSubtype(t, 'rational');
   }
 
   get isReal(): boolean | undefined {
-    if (this.type === 'unknown') return undefined;
+    const t = this.type;
+    if (t === 'unknown') return undefined;
     // rationals and integers are real
-    return isSubtype(this.type, 'real');
+    return isSubtype(t, 'real');
   }
 
   get isFunctionExpression(): boolean {
@@ -915,15 +914,11 @@ export class BoxedFunction extends _BoxedExpression {
       return result ?? this.engine.function(this._name, tail);
     };
 
-    const gen =
-      this.isPure && this._ops.every((x) => x.isConstant)
-        ? undefined
-        : this.engine.generation;
-
-    if (options?.numericApproximation)
-      return cachedValue(this._valueN, gen, computeValue);
-
-    return cachedValue(this._value, gen, computeValue);
+    return cachedValue(
+      options?.numericApproximation ? this._valueN : this._value,
+      this.engine.generation,
+      computeValue
+    );
   }
 
   N(): BoxedExpression {
@@ -1003,7 +998,7 @@ export class BoxedFunction extends _BoxedExpression {
 function type(expr: BoxedExpression): Type | undefined {
   if (!expr.isValid) return 'error';
 
-  expr = expr.evaluate();
+  // expr = expr.evaluate();
 
   //
   // The value is a function expression
@@ -1042,7 +1037,7 @@ function type(expr: BoxedExpression): Type | undefined {
     const def = expr.functionDefinition;
     if (!def) return 'function';
 
-    let sigResult = functionResult(def.signature) ?? 'any';
+    const sigResult = functionResult(def.signature) ?? 'any';
 
     // If there is a resultType function, call it
     if (typeof def.type === 'function')

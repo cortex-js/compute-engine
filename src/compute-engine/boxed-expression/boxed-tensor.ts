@@ -86,7 +86,6 @@ export class BoxedTensor extends _BoxedExpression {
   /** Create the tensor on demand */
   get tensor(): AbstractTensor<'expression'> {
     if (this._tensor === undefined) {
-      if (this._operator === undefined) debugger;
       console.assert(this._operator !== undefined);
       console.assert(this._ops !== undefined);
       const tensorData = expressionAsTensor(this._operator!, this._ops!);
@@ -270,7 +269,15 @@ export class BoxedTensor extends _BoxedExpression {
 
   contains(rhs: BoxedExpression): boolean {
     const data = this.tensor.data;
-    for (const item of data) if (rhs.isEqual(item)) return true;
+
+    const target = this.tensor.field.cast(rhs, this.tensor.dtype);
+    if (typeof target === 'number') return data.includes(target);
+
+    const items = data.map(
+      (x) => this.tensor.field.cast(x, 'expression') ?? rhs.engine.Nothing
+    );
+
+    for (const item of items) if (rhs.isSame(item)) return true;
     return false;
   }
 

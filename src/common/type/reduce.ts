@@ -276,7 +276,7 @@ function reduceMapType(type: MapType): Type {
 }
 
 function reduceSignatureType(type: FunctionSignature): Type {
-  let reducedArgs = type.args?.map((arg) => ({
+  const reducedArgs = type.args?.map((arg) => ({
     ...arg,
     type: reduceType(arg.type),
   }));
@@ -290,7 +290,7 @@ function reduceSignatureType(type: FunctionSignature): Type {
         type: reduceType(type.restArg.type),
       }
     : undefined;
-  let reducedResult = reduceType(type.result);
+  const reducedResult = reduceType(type.result);
 
   if (reducedArgs?.some((arg) => arg.type === 'error')) return 'error';
   if (reducedOptArgs?.some((arg) => arg.type === 'error')) return 'error';

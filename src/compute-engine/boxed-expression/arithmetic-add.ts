@@ -26,7 +26,7 @@ export function canonicalAdd(
   ops = flatten(ops, 'Add');
 
   // Remove literal 0
-  ops = ops.filter((x) => x.numericValue === null || x.isEqual(0) !== true);
+  ops = ops.filter((x) => x.numericValue === null || !x.is(0));
 
   if (ops.length === 0) return ce.Zero;
   if (ops.length === 1 && !isIndexableCollection(ops[0])) return ops[0];
@@ -54,7 +54,7 @@ export function canonicalAdd(
             const im = typeof fac === 'number' ? fac : fac?.re;
             if (im !== 0) {
               const re = typeof nv === 'number' ? nv : nv.re;
-              xs.push(ce.number(ce._numericValue({ decimal: re, im })));
+              xs.push(ce.number(ce._numericValue({ re, im: im ?? 0 })));
               i++;
               continue;
             }
@@ -86,5 +86,7 @@ export function add(...xs: ReadonlyArray<BoxedExpression>): BoxedExpression {
 export function addN(...xs: ReadonlyArray<BoxedExpression>): BoxedExpression {
   console.assert(xs.length > 0);
   if (!xs.every((x) => x.isValid)) return xs[0].engine._fn('Add', xs);
+  // Don't N() the number literals (fractions) to avoid losing precision
+  xs = xs.map((x) => (x.isNumberLiteral ? x.evaluate() : x.N()));
   return new Terms(xs[0].engine, xs).N();
 }

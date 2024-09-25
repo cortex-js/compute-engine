@@ -103,18 +103,7 @@ describe('STEFNOTCH #13', () => {
         "Q",
         [
           "Function",
-          [
-            "Ceil",
-            [
-              "Error",
-              [
-                "ErrorCode",
-                "'incompatible-type'",
-                "'real'",
-                "'finite_number'"
-              ]
-            ]
-          ],
+          ["Ceil", ["Divide", 4, ["Square", "epsilonSymbol"]]],
           "epsilonSymbol"
         ]
       ]
@@ -127,7 +116,20 @@ describe('STEFNOTCH #13', () => {
         "Tuple",
         [
           "Equal",
-          ["At", "x", 1, ["Error", "'unexpected-argument'", "'2'"]],
+          [
+            "At",
+            [
+              "Error",
+              [
+                "ErrorCode",
+                "'incompatible-type'",
+                "'list | tuple | string'",
+                "'real'"
+              ]
+            ],
+            1,
+            ["Error", "'unexpected-argument'", "'2'"]
+          ],
           1
         ],
         2

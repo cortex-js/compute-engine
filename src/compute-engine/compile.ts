@@ -201,8 +201,7 @@ const NATIVE_JS_FUNCTIONS: CompiledFunctions = {
     if (exp === null) return `Math.sqrt(${compile(arg)})`;
     if (exp?.re === 2) return `Math.sqrt(${compile(arg)})`;
     if (exp?.re === 3) return `Math.cbrt(${compile(arg)})`;
-    if (exp?.re !== undefined)
-      return `Math.pow(${compile(arg)},  ${1 / exp.re})`;
+    if (!isNaN(exp?.re)) return `Math.pow(${compile(arg)},  ${1 / exp.re})`;
     return `Math.pow(${compile(arg)}, 1 / (${compile(exp)}))`;
   },
 
@@ -511,19 +510,19 @@ export function compile(
   }
 
   //
-  // Is it a number?
-  //
-  const f = expr.re;
-  if (f !== undefined) {
-    if (expr.im !== 0) throw new Error('Complex numbers not supported');
-    return target.number(f);
-  }
-
-  //
   // Is it a symbol?
   //
   const s = expr.symbol;
   if (s !== null) return target.var?.(s) ?? s;
+
+  //
+  // Is it a number?
+  //
+  const f = expr.re;
+  if (!isNaN(f)) {
+    if (expr.im !== 0) throw new Error('Complex numbers are not supported');
+    return target.number(f);
+  }
 
   // Is it a string?
   const str = expr.string;

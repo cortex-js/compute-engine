@@ -184,7 +184,7 @@ export function defaultCollectionHandlers(
 ): Partial<CollectionHandlers> | undefined {
   if (!def) return undefined;
 
-  let result: Partial<CollectionHandlers> = {};
+  const result: Partial<CollectionHandlers> = {};
 
   // A collection should have at least a contains and size handler
   // If it has any of the other handlers, but not these two, throw
@@ -231,7 +231,7 @@ export function defaultCollectionHandlers(
       const iter = iterator!(expr);
       let result = iter.next();
       while (!result.done) {
-        if (target.isEqual(result.value)) return i;
+        if (target.isSame(result.value)) return i;
         i++;
         result = iter.next();
       }

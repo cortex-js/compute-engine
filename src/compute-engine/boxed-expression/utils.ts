@@ -143,8 +143,7 @@ export function getImaginaryFactor(
   if (expr.operator === 'Negate') return getImaginaryFactor(expr.op1)?.neg();
 
   if (expr.operator === 'Complex') {
-    if (expr.op1.isEqual(0) && expr.op2.re !== undefined)
-      return ce.number(expr.op2.re);
+    if (expr.op1.is(0) && !isNaN(expr.op2.re)) return ce.number(expr.op2.re);
     return undefined;
   }
 
@@ -164,7 +163,7 @@ export function getImaginaryFactor(
 
   if (expr.operator === 'Divide') {
     const denom = expr.op2;
-    if (denom.isEqual(0)) return undefined;
+    if (denom.is(0)) return undefined;
     return getImaginaryFactor(expr.op1)?.div(denom);
   }
 
@@ -184,7 +183,6 @@ export function normalizeFlags(
 }
 
 export function isSymbolDefinition(def: any): def is SymbolDefinition {
-  if (def.name === 'Pi') debugger;
   if (def === undefined || def === null || typeof def !== 'object')
     return false;
 

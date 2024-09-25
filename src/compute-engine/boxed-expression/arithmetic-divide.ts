@@ -23,13 +23,13 @@ export function canonicalDivide(
   if (!op1.isValid || !op2.isValid) return ce._fn('Divide', [op1, op2]);
 
   // 0/0 = NaN, a/0 = ~∞ (a≠0)
-  if (op2.isEqual(0)) return op1.isEqual(0) ? ce.NaN : ce.ComplexInfinity;
+  if (op2.is(0)) return op1.is(0) ? ce.NaN : ce.ComplexInfinity;
 
   // 0/a = 0 (a≠0)
-  if (op1.isEqual(0)) return ce.Zero;
+  if (op1.is(0)) return ce.Zero;
 
   // a/a = 1 (if a ≠ 0)
-  if (op2.isEqual(0) === false) {
+  if (op2.is(0) === false) {
     if (op1.symbol !== null && op1.symbol === op2.symbol && op1.isConstant)
       return ce.One;
 
@@ -60,13 +60,13 @@ export function canonicalDivide(
     return canonicalDivide(canonicalMultiply(ce, [op1, op2.op2]), op2.op1);
 
   // a/1 = a
-  if (op2.isEqual(1)) return op1;
+  if (op2.is(1)) return op1;
 
   // a/(-1) = -a
-  if (op2.isEqual(-1)) return op1.neg();
+  if (op2.is(-1)) return op1.neg();
 
   // 1/a = a^-1
-  if (op1.isEqual(1)) return op2.inv();
+  if (op1.is(1)) return op2.inv();
 
   // a/∞ = 0, ∞/∞ = NaN
   if (op2.isInfinity) return op1.isInfinity ? ce.NaN : ce.Zero;
@@ -143,16 +143,24 @@ export function canonicalDivide(
 
   const c = c1.div(c2);
 
-  if (c.isOne) return t2.isEqual(1) ? t1 : ce._fn('Divide', [t1, t2]);
+  if (c.isOne) return t2.is(1) ? t1 : ce._fn('Divide', [t1, t2]);
 
   if (c.isNegativeOne)
-    return t2.isEqual(1) ? t1.neg() : ce._fn('Divide', [t1.neg(), t2]);
+    return t2.is(1) ? t1.neg() : ce._fn('Divide', [t1.neg(), t2]);
 
   // If c is exact, use as a product: `c * (t1/t2)`
   // So, π/4 -> 1/4 * π (prefer multiplication over division)
-  if (c.isExact)
-    return ce._fn('Multiply', [ce.number(c), ce._fn('Divide', [t1, t2])]);
+  if (c.isExact) {
+    if (t1.is(1) && t2.is(1)) return ce.number(c);
+    if (t2.is(1)) return canonicalMultiply(ce, [ce.number(c), t1]);
 
+    return ce._fn('Divide', [
+      canonicalMultiply(ce, [ce.number(c.numerator), t1]),
+      canonicalMultiply(ce, [ce.number(c.denominator), t2]),
+    ]);
+
+    return canonicalMultiply(ce, [ce.number(c), ce._fn('Divide', [t1, t2])]);
+  }
   return ce._fn('Divide', [op1, op2]);
 }
 
@@ -170,7 +178,7 @@ export function div(
 
   if (typeof denom === 'number') {
     if (isNaN(denom)) return ce.NaN;
-    if (num.isEqual(0)) {
+    if (num.is(0)) {
       // 0/0 = NaN, 0/±∞ = NaN
       if (denom === 0 || !isFinite(denom)) return ce.NaN;
       return num; // 0
@@ -194,19 +202,19 @@ export function div(
     }
   } else {
     if (denom.isNaN) return ce.NaN;
-    if (num.isEqual(0)) {
-      if (denom.isEqual(0) || denom.isFinite === false) return ce.NaN;
+    if (num.is(0)) {
+      if (denom.is(0) || denom.isFinite === false) return ce.NaN;
       return ce.Zero;
     }
 
     // a/1 = a
-    if (denom.isEqual(1)) return num;
+    if (denom.is(1)) return num;
 
     // a/(-1) = -a
-    if (denom.isEqual(-1)) return num.neg();
+    if (denom.is(-1)) return num.neg();
 
     // a/0 = NaN (a≠0)
-    if (denom.isEqual(0)) return ce.NaN;
+    if (denom.is(0)) return ce.NaN;
 
     if (num.isNumberLiteral && denom.isNumberLiteral) {
       const numV = num.numericValue!;

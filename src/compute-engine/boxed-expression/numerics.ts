@@ -60,7 +60,7 @@ export function asBigint(expr: BoxedExpression | undefined): bigint | null {
   const n = num.bignumRe;
   if (n?.isInteger()) return bigint(n);
 
-  if (num.re === undefined || !Number.isInteger(num.re)) return null;
+  if (!Number.isInteger(num.re)) return null;
 
   return BigInt(num.re);
 }
@@ -75,7 +75,7 @@ export function asBignum(expr: BoxedExpression | undefined): Decimal | null {
   if (num.im !== 0) return null;
 
   const re = num.bignumRe ?? num.re;
-  if (re === undefined) return null;
+  if (typeof re === 'number' && isNaN(re)) return null;
   return expr.engine.bignum(re);
 }
 

@@ -21,6 +21,7 @@ import { flatten } from './flatten';
 import { asRational } from './numerics';
 import { NumericValue } from '../numeric-value/public';
 import { mul } from './arithmetic-multiply';
+import { canonicalDivide } from './arithmetic-divide';
 
 /**
  * Group terms in a product by common term.
@@ -107,14 +108,14 @@ export class Product {
       // running terms
       const num = term.numericValue;
       if (num !== null) {
-        if (term.isEqual(1)) return;
+        if (term.is(1)) return;
 
-        if (term.isEqual(0)) {
+        if (term.is(0)) {
           this.coefficient = this.engine._numericValue(isZero(exp) ? NaN : 0);
           return;
         }
 
-        if (term.isEqual(-1)) {
+        if (term.is(-1)) {
           if (isOne(exp)) this.coefficient = this.coefficient.neg();
           else {
             this.coefficient = this.coefficient.mul(
@@ -164,20 +165,20 @@ export class Product {
     }
 
     // Note: term should be positive, so no need to handle the -1 case
-    if (term.isEqual(1) && (!exp || isOne(exp))) return;
-    if (term.isEqual(0) === false && exp && isZero(exp)) return;
-    if (term.isEqual(0)) {
+    if (term.is(1) && (!exp || isOne(exp))) return;
+    if (term.is(0) === false && exp && isZero(exp)) return;
+    if (term.is(0)) {
       if (exp && isZero(exp)) this.coefficient = this.engine._numericValue(NaN);
       else this.coefficient = this.engine._numericValue(0);
       return;
     }
 
-    let exponent: Rational = exp ?? [1, 1];
+    const exponent: Rational = exp ?? [1, 1];
 
     // If this is a power expression, extract the exponent
     if (term.operator === 'Power') {
       // Term is `Power(op1, op2)`
-      let r = asRational(term.op2);
+      const r = asRational(term.op2);
       if (r) {
         this.mul(term.op1, rationalMul(exponent, r));
         return;
@@ -192,7 +193,7 @@ export class Product {
 
     if (term.operator === 'Root') {
       // Term is `Root(op1, op2)`
-      let r = asRational(term.op2);
+      const r = asRational(term.op2);
       if (r) {
         this.mul(term.op1, rationalMul(exponent, inverse(r)));
         return;
@@ -207,7 +208,7 @@ export class Product {
       // separate term.
 
       this.mul(term.op1, exponent);
-      this.mul(term.op2, inverse(exponent));
+      this.mul(term.op2, neg(exponent));
       return;
     }
 
@@ -261,9 +262,20 @@ export class Product {
     //
     if (this.coefficient.isZero) return [];
     const ce = this.engine;
+
+    // If we have no terms (i.e. it's a literal), just return the coeff
+    if (this.terms.length === 0) {
+      if (mode === 'numeric') {
+        const c = this.coefficient.N();
+        return [{ exponent: [1, 1], terms: [ce.number(c)] }];
+      } else {
+        return [{ exponent: [1, 1], terms: [ce.number(this.coefficient)] }];
+      }
+    }
+
     const xs: { exponent: Rational; terms: BoxedExpression[] }[] = [];
     if (!this.coefficient.isOne) {
-      if (mode === 'rational' && this.coefficient.type === 'rational') {
+      if (mode === 'rational' && this.coefficient.type === 'finite_rational') {
         // Numerator
         const num = this.coefficient.numerator;
         if (!num.isOne) xs.push({ exponent: [1, 1], terms: [ce.number(num)] });
@@ -273,15 +285,9 @@ export class Product {
           xs.push({ exponent: [-1, 1], terms: [ce.number(denom)] });
       } else if (mode === 'numeric') {
         const c = this.coefficient.N();
-        xs.push({
-          exponent: [1, 1],
-          terms: [ce.number(ce.complex(c.re, c.im))],
-        });
+        xs.push({ exponent: [1, 1], terms: [ce.number(c)] });
       } else {
-        xs.push({
-          exponent: [1, 1],
-          terms: [ce.box(this.coefficient)],
-        });
+        xs.push({ exponent: [1, 1], terms: [ce.number(this.coefficient)] });
       }
     }
 
@@ -349,7 +355,7 @@ export class Product {
 
     const xs = this.groupedByDegrees({ mode: 'rational' });
 
-    if (isNegativeOne) this.coefficient = ce._numericValue(-1);
+    this.coefficient = coef;
 
     if (xs === null) return [ce.NaN, ce.NaN];
 
@@ -371,9 +377,7 @@ export class Product {
 
   asRationalExpression(): BoxedExpression {
     const [numerator, denominator] = this.asNumeratorDenominator();
-    if (denominator.isEqual(1)) return numerator;
-    if (denominator.isEqual(-1)) return numerator.neg();
-    return this.engine._fn('Divide', [numerator, denominator]);
+    return canonicalDivide(numerator, denominator);
   }
 }
 

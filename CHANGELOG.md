@@ -32,10 +32,10 @@
 - The "Domain" expression has been deprecated. Use types instead (see below).
 
 - Some `BoxedExpression` properties have been removed:
-  - Instead of `expr.isZero`, use `expr.isEqual(0)`.
-  - Instead of `expr.isNotZero`, use `expr.isEqual(0) === false`.
-  - Instead of `expr.isOne`, use `expr.isEqual(1)`.
-  - Instead of `expr.isNegativeOne`, use `expr.isEqual(-1)`.
+  - Instead of `expr.isZero`, use `expr.is(0)`.
+  - Instead of `expr.isNotZero`, use `!expr.is(0)`.
+  - Instead of `expr.isOne`, use `expr.is(1)`.
+  - Instead of `expr.isNegativeOne`, use `expr.is(-1)`.
 
 ### New Features and Improvements
 

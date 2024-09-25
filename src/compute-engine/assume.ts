@@ -143,7 +143,7 @@ function assumeInequality(proposition: BoxedExpression): AssumeResult {
   const ce = proposition.engine;
   // Case 1
   if (proposition.op1!.symbol && !hasDef(ce, proposition.op1!.symbol)) {
-    if (proposition.op2.evaluate().isEqual(0)) {
+    if (proposition.op2.is(0)) {
       if (proposition.operator === 'Less') {
         // x < 0
         ce.defineSymbol(proposition.op1.symbol, {

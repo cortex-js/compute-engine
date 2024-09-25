@@ -3,11 +3,8 @@ import type { BoxedExpression, Sign } from './public';
 export function sgn(expr: BoxedExpression): Sign | undefined {
   const ce = expr.engine;
 
-  // If we have a hold expression, we don't want to evaluate anything
+  // If we have a hold expression, we don't know the sign
   if (expr.operator === 'Hold') return undefined;
-
-  // We want to get the sign of the value of the expression
-  if (expr.ops || expr.symbol) expr = expr.evaluate();
 
   let s: Sign | undefined = undefined;
 

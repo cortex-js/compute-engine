@@ -102,8 +102,8 @@ volumes
       evaluate: (ops) => {
         // Is it a function name, i.e. ["Derivative", "Sin"]?
         const op = ops[0].evaluate();
-        const degree = Math.floor(ops[1]?.N().re ?? 1);
-        return derivative(op, degree);
+        const degree = Math.floor(ops[1]?.N().re);
+        return derivative(op, isNaN(degree) ? 1 : degree);
       },
     },
 
@@ -177,7 +177,7 @@ volumes
       signature: '(function, point:number) -> number',
       evaluate: (ops, { engine }) => {
         const x = ops[1]?.canonical.re;
-        if (typeof x !== 'number') return undefined;
+        if (isNaN(x)) return undefined;
 
         const f = applicableN1(engine.box(ops[0]));
         return engine.number(centeredDiff8thOrder(f, x));
@@ -189,7 +189,7 @@ volumes
       threadable: false,
 
       hold: true,
-      signature: '(expression, range:(tuple|symbol)) -> number',
+      signature: '(expression, range:(tuple|symbol|nothing)) -> number',
       canonical: (ops, { engine }) => {
         const ce = engine;
         let range = ops[1];
@@ -220,8 +220,10 @@ volumes
         if (!index.symbol) index = ce.typeError('symbol', index.type, index);
 
         // The range bounds, if present, should be numbers
-        if (lower) lower = checkType(ce, lower, 'number');
-        if (upper) upper = checkType(ce, upper, 'number');
+        if (lower && lower.symbol !== 'Nothing')
+          lower = checkType(ce, lower, 'number');
+        if (upper && upper.symbol !== 'Nothing')
+          upper = checkType(ce, upper, 'number');
         if (lower && upper) range = ce.tuple(index, lower, upper);
         else if (upper) range = ce.tuple(index, ce.NegativeInfinity, upper);
         else if (lower) range = ce.tuple(index, lower);
@@ -277,7 +279,7 @@ volumes
       signature: '(expression, point:number, direction:number?) -> number',
       evaluate: (ops, { engine: ce }) => {
         const [f, x, dir] = ops;
-        const target = x.N().re ?? NaN;
+        const target = x.N().re;
         if (!isFinite(target)) return undefined;
         const fn = applicable(f);
         return ce.number(
@@ -287,7 +289,7 @@ volumes
               return typeof y === 'number' ? y : Number.NaN;
             },
             target,
-            dir ? (dir.re ?? 1) : 1
+            dir ? dir.re : 1
           )
         );
       },
@@ -300,7 +302,7 @@ volumes
       hold: true,
       signature: '(expression, point:number, direction:number?) -> number',
       evaluate: ([f, x, dir], { engine }) => {
-        const target = x.N().re ?? NaN;
+        const target = x.N().re;
         if (Number.isNaN(target)) return undefined;
         const fn = applicable(f);
         return engine.number(
@@ -310,7 +312,7 @@ volumes
               return typeof y === 'number' ? y : Number.NaN;
             },
             target,
-            dir ? (dir.re ?? 1) : 1
+            dir ? dir.re : 1
           )
         );
       },

@@ -17,6 +17,7 @@ import { applicable } from '../function-utils';
 import { DEFAULT_COMPLEXITY } from './order';
 import { Type } from '../../common/type/types';
 import { parseType } from '../../common/type/parse';
+import { OneOf } from '../../common/one-of';
 
 const FUNCTION_DEF_KEYS = new Set([
   // Base
@@ -203,7 +204,7 @@ export class _BoxedFunctionDefinition implements BoxedFunctionDefinition {
 export function makeFunctionDefinition(
   engine: IComputeEngine,
   name: string,
-  def: FunctionDefinition | BoxedFunctionDefinition
+  def: OneOf<[FunctionDefinition | BoxedFunctionDefinition]>
 ): BoxedFunctionDefinition {
   if (def instanceof _BoxedFunctionDefinition) return def;
   return new _BoxedFunctionDefinition(engine, name, def as FunctionDefinition);

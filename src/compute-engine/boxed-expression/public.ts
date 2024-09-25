@@ -16,10 +16,15 @@ import type {
 
 import type { IndexedLatexDictionary } from '../latex-syntax/dictionary/definitions';
 import { Rational } from '../numerics/rationals';
-import { NumericValue, NumericValueData } from '../numeric-value/public';
+import {
+  ExactNumericValueData,
+  NumericValue,
+  NumericValueData,
+} from '../numeric-value/public';
 import { BigNum, IBigNum } from '../numerics/bignum';
 import { Type, TypeString } from '../../common/type/types';
 import { AbstractTensor } from '../tensor/tensors';
+import { OneOf } from '../../common/one-of';
 
 /**
  * :::info[THEORY OF OPERATIONS]
@@ -295,12 +300,15 @@ export interface BoxedExpression {
    */
   readonly scope: RuntimeScope | null;
 
-  /** From `Object.is()`. Equivalent to `BoxedExpression.isSame()`
+  /**
+   * Equivalent to `BoxedExpression.isSame()` but the argument can be
+   * a JavaScript primitive. For example, `expr.is(2)` is equivalent to
+   * `expr.isSame(ce.number(2))`.
    *
    * @category Primitive Methods
    *
    */
-  is(rhs: unknown): boolean;
+  is(rhs: any): boolean;
 
   /** @internal */
   readonly hash: number;
@@ -741,7 +749,6 @@ export interface BoxedExpression {
    *
    * To check if an expression is a number literal, use `this.isNumberLiteral`.
    * If `this.isNumberLiteral` is `true`, `this.numericValue` is not `null`
-   * and `this.re` is not `undefined`.
    *
    * @category Numeric Expression
    *
@@ -752,8 +759,7 @@ export interface BoxedExpression {
    * Return `true` if this expression is a number literal, for example
    * `2`, `3.14`, `1/2`, `√2` etc.
    *
-   * This is equivalent to checking if `this.numericValue` is not `null`
-   * or `this.re` is not `undefined`.
+   * This is equivalent to checking if `this.numericValue` is not `null`.
    *
    * @category Numeric Expression
    *
@@ -769,40 +775,49 @@ export interface BoxedExpression {
   readonly isFunctionExpression: boolean;
 
   /**
-   * If this expression is a number literal, return the real part of the value.
+   * If this expression is a number literal or a symbol with a value that
+   * is a number literal, return the real part of the value.
    *
-   * If the expression is not a number literal, return `undefined`.
-   *
-   * @category Numeric Expression
-   */
-  readonly re: number | undefined;
-
-  /**
-   * If this expression is a number literal, return the imaginary part of the
-   * value. It may be 0 if this is a real number.
-   *
-   * If the expression is not a number literal, return `undefined`.
+   * If the expression is not a number literal, or a symbol with a value
+   * that is a number literal, return `NaN` (not a number).
    *
    * @category Numeric Expression
    */
-  readonly im: number | undefined;
+  readonly re: number;
 
   /**
-   * If this expression is a number literal, return the real part as a bignum.
+   * If this expression is a number literal or a symbol with a value that
+   * is a number literal, return the imaginary part of the value. If the value
+   * is a real number, the imaginary part is 0.
    *
-   * If the expression is not a number literal or the value is not available
-   * as a bignum return `undefined`. That is, the value is not upconverted
-   * to a bignum.
+   * If the expression is not a number literal, or a symbol with a value
+   * that is a number literal, return `NaN` (not a number).
    *
-   * To get the value either as a bignum or a number, use
-   * `this.bignumRe ?? this.re`.
+   * @category Numeric Expression
+   */
+  readonly im: number;
+
+  /**
+   * If this expression is a number literal or a symbol with a value that
+   * is a number literal, return the real part of the value as a `BigNum`.
+   *
+   * If the value is not available as a bignum return `undefined`. That is,
+   * the value is not upconverted to a bignum.
+   *
+   * To get the real value either as a bignum or a number, use
+   * `this.bignumRe ?? this.re`. When using this pattern, the value is
+   * returned as a bignum if available, otherwise as a number or NaN if
+   * the value is not a number literal or a symbol with a value that is a
+   * number literal.
    *
    * @category Numeric Expression
    *
    */
   readonly bignumRe: BigNum | undefined;
+
   /**
-   * If this expression is a number literal, return the imaginary part as a `BigNum`.
+   * If this expression is a number literal, return the imaginary part as a
+   * `BigNum`.
    *
    * It may be 0 if the number is real.
    *
@@ -810,8 +825,11 @@ export interface BoxedExpression {
    * as a bignum return `undefined`. That is, the value is not upconverted
    * to a bignum.
    *
-   * To get the value either as a bignum or a number, use
-   * `this.bignumIm ?? this.im`.
+   * To get the imaginary value either as a bignum or a number, use
+   * `this.bignumIm ?? this.im`. When using this pattern, the value is
+   * returned as a bignum if available, otherwise as a number or NaN if
+   * the value is not a number literal or a symbol with a value that is a
+   * number literal.
    *
    * @category Numeric Expression
    */
@@ -847,7 +865,7 @@ export interface BoxedExpression {
   pow(exp: number | BoxedExpression): BoxedExpression;
   root(exp: number | BoxedExpression): BoxedExpression;
   sqrt(): BoxedExpression;
-  ln(base?: SemiBoxedExpression): BoxedExpression;
+  ln(base?: number | BoxedExpression): BoxedExpression;
   // exp(): BoxedExpression;
 
   /**
@@ -888,27 +906,30 @@ export interface BoxedExpression {
    *
    * The numeric value of both expressions are compared.
    *
+   * The expressions are evaluated before being compared, which may be
+   * expensive.
+   *
    * @category Relational Operator
    */
-  isLess(rhs: number | BoxedExpression): boolean | undefined;
+  isLess(other: number | BoxedExpression): boolean | undefined;
 
   /**
    * The numeric value of both expressions are compared.
    * @category Relational Operator
    */
-  isLessEqual(rhs: number | BoxedExpression): boolean | undefined;
+  isLessEqual(other: number | BoxedExpression): boolean | undefined;
 
   /**
    * The numeric value of both expressions are compared.
    * @category Relational Operator
    */
-  isGreater(rhs: number | BoxedExpression): boolean | undefined;
+  isGreater(other: number | BoxedExpression): boolean | undefined;
 
   /**
    * The numeric value of both expressions are compared.
    * @category Relational Operator
    */
-  isGreaterEqual(rhs: number | BoxedExpression): boolean | undefined;
+  isGreaterEqual(other: number | BoxedExpression): boolean | undefined;
 
   /** The numeric value of this expression is > 0, same as `isGreater(0)`
    *
@@ -1259,17 +1280,37 @@ export interface BoxedExpression {
   readonly isReal: boolean | undefined;
 
   /** Mathematical equality (strong equality), that is the value
-   * of this expression and of `rhs` are numerically equal.
+   * of this expression and the value of `other` are numerically equal.
    *
-   * The numeric value of both expressions are compared.
+   * Both expressions are evaluated and the result is compared numerically.
    *
    * Numbers whose difference is less than `engine.tolerance` are
    * considered equal. This tolerance is set when the `engine.precision` is
    * changed to be such that the last two digits are ignored.
    *
+   * The evaluations may be expensive operations. Other options to consider
+   * to compare two expressions include:
+   * - `expr.isSame(other)` for a structural comparison
+   * - `expr.is(other)` for a comparison of a number literal
+   *
+   * ## Examples
+   *
+   * ```js
+   * let expr = ce.parse('2 + 2');
+   * console.log(expr.isEqual(4)); // true
+   * console.log(expr.isSame(ce.parse(4))); // false
+   * console.log(expr.is(4)); // false
+   *
+   * expr = ce.parse('4');
+   * console.log(expr.isEqual(4)); // true
+   * console.log(expr.isSame(ce.parse(4))); // true
+   * console.log(expr.is(4)); // true (fastest)
+   *
+   * ```
+   *
    * @category Relational Operator
    */
-  isEqual(rhs: number | BoxedExpression): boolean | undefined;
+  isEqual(other: number | BoxedExpression): boolean | undefined;
 
   /**
    * Return true if the expression is a collection: a list, a vector, a matrix, a map, a tuple, etc...
@@ -1344,6 +1385,7 @@ export interface BoxedExpression {
  */
 export type SemiBoxedExpression =
   | number
+  | bigint
   | string
   | BigNum
   | MathJsonNumber
@@ -1707,7 +1749,7 @@ export interface BoxedSymbolDefinition
     SymbolAttributes,
     Partial<NumericFlags> {
   get value(): BoxedExpression | undefined;
-  set value(val: SemiBoxedExpression | number | undefined);
+  set value(val: BoxedExpression | number | undefined);
 
   readonly isFunction: boolean;
   readonly isConstant: boolean;
@@ -1822,7 +1864,7 @@ export type Rule =
  * @category Rules */
 export type BoxedRule = {
   /** @internal */
-  _tag: 'boxed-rule';
+  readonly _tag: 'boxed-rule';
 
   match: undefined | Pattern;
 
@@ -1980,11 +2022,10 @@ export type AssignValue =
   | boolean
   | number
   | string
-  | BigNum
   | LatexString
   | SemiBoxedExpression
   | ((
-      args: BoxedExpression[],
+      args: ReadonlyArray<BoxedExpression>,
       options: EvaluateOptions & { engine: IComputeEngine }
     ) => BoxedExpression)
   | undefined;
@@ -2057,7 +2098,10 @@ export interface IComputeEngine extends IBigNum {
 
   /** @internal */
   _numericValue(
-    value: number | bigint | Rational | BigNum | NumericValueData
+    value:
+      | number
+      | bigint
+      | OneOf<[BigNum | NumericValueData | ExactNumericValueData]>
   ): NumericValue;
 
   /** If the precision is set to `machine`, floating point numbers
@@ -2080,11 +2124,7 @@ export interface IComputeEngine extends IBigNum {
   strict: boolean;
 
   box(
-    expr:
-      | NumericValue
-      | BigNum
-      | [num: number, denom: number]
-      | SemiBoxedExpression,
+    expr: NumericValue | SemiBoxedExpression,
     options?: { canonical?: CanonicalOptions; structural?: boolean }
   ): BoxedExpression;
 
@@ -2212,7 +2252,10 @@ export interface IComputeEngine extends IBigNum {
   ): IComputeEngine;
 
   declare(identifiers: {
-    [id: string]: Type | TypeString | SymbolDefinition | FunctionDefinition;
+    [id: string]:
+      | Type
+      | TypeString
+      | OneOf<[SymbolDefinition | FunctionDefinition]>;
   }): IComputeEngine;
   declare(
     id: string,
@@ -2225,21 +2268,20 @@ export interface IComputeEngine extends IBigNum {
           [id: string]:
             | Type
             | TypeString
-            | SymbolDefinition
-            | FunctionDefinition;
+            | OneOf<[SymbolDefinition | FunctionDefinition]>;
         },
-    arg2?: Type | SymbolDefinition | FunctionDefinition
+    arg2?: Type | OneOf<[SymbolDefinition | FunctionDefinition]>
   ): IComputeEngine;
 
-  assume(predicate: SemiBoxedExpression): AssumeResult;
+  assume(predicate: BoxedExpression): AssumeResult;
 
   forget(symbol?: string | string[]): void;
 
   get assumptions(): ExpressionMapInterface<boolean>;
 
-  ask(pattern: SemiBoxedExpression): BoxedSubstitution[];
+  ask(pattern: BoxedExpression): BoxedSubstitution[];
 
-  verify(query: SemiBoxedExpression): boolean;
+  verify(query: BoxedExpression): boolean;
 
   /** @internal */
   shouldContinueExecution(): boolean;
@@ -2450,7 +2492,7 @@ export interface ExpressionMapInterface<U> {
  */
 export type RuntimeIdentifierDefinitions = Map<
   string,
-  BoxedSymbolDefinition | BoxedFunctionDefinition
+  OneOf<[BoxedSymbolDefinition, BoxedFunctionDefinition]>
 >;
 
 /**
@@ -2541,7 +2583,7 @@ export type SymbolDefinition = BaseDefinition &
     value?:
       | LatexString
       | SemiBoxedExpression
-      | ((ce: IComputeEngine) => SemiBoxedExpression | null);
+      | ((ce: IComputeEngine) => BoxedExpression | null);
 
     flags?: Partial<NumericFlags>;
 
@@ -2568,15 +2610,34 @@ export type FunctionDefinition = BaseDefinition &
      */
     signature?: Type | TypeString;
 
-    /** The actual type of the result based on the arguments.
+    /**
+     * The actual type of the result based on the arguments.
+     *
      * Should be a subtype of the type indicated in the signature.
+     *
+     * Do not evaluate the arguments.
+     *
+     * The type of the arguments can be used to determine the type of the
+     * result.
+     *
      */
     type?: (
       ops: ReadonlyArray<BoxedExpression>,
       options: { engine: IComputeEngine }
     ) => Type;
 
-    /** Return the sign of the function expression. */
+    /** Return the sign of the function expression.
+     *
+     * If the sign cannot be determined, return `undefined`.
+     *
+     * When determining the sign, only literal values and the values of
+     * symbols, if they are literals, should be considered.
+     *
+     * Do not evaluate the arguments.
+     *
+     * The type and sign of the arguments can be used to determine the sign.
+     *
+     */
     sgn?: (
       ops: ReadonlyArray<BoxedExpression>,
       options: { engine: IComputeEngine }

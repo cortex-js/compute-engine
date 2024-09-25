@@ -212,7 +212,7 @@ const FUNCTIONS: Record<
   Root: (expr, serialize) => {
     const x = expr.op1;
     const n = expr.op2;
-    if (n.isEqual(2)) return `sqrt${wrap(serialize(x))}`;
+    if (n.is(2)) return `sqrt${wrap(serialize(x))}`;
     return `root${wrap(serialize(n))}${wrap(serialize(x))}`;
   },
   Square: (expr, serialize) => `${serialize(expr.op1, 12)}^2`,

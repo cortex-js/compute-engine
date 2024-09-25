@@ -28,6 +28,7 @@ import { numberToExpression } from '../numerics/expression';
 import { NumericValue } from '../numeric-value/public';
 import { ExactNumericValue } from '../numeric-value/exact-numeric-value';
 
+// eslint-disable-next-line import/no-cycle
 import { Product } from './product';
 
 import { order } from './order';
@@ -282,7 +283,7 @@ function serializeJsonFunction(
       if (num0 instanceof Decimal)
         return serializeJsonNumber(ce, num0.neg(), options);
       if (num0 instanceof Complex)
-        return serializeJsonNumber(ce, num0.neg(), options);
+        return serializeJsonNumber(ce, num0!.neg(), options);
       if (isRational(num0)) return serializeJsonNumber(ce, neg(num0), options);
     }
   }
@@ -550,6 +551,9 @@ function serializeJsonNumber(
 
     if (value.isNegativeInfinity)
       return serializeJsonSymbol(ce, 'NegativeInfinity', options, metadata);
+
+    if (value.isComplexInfinity)
+      return serializeJsonSymbol(ce, 'ComplexInfinity', options, metadata);
 
     if (shorthandAllowed) {
       if (value.isZero) return 0;

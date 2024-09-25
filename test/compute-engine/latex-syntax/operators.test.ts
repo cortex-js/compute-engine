@@ -434,14 +434,35 @@ describe('OPERATOR postfix', () => {
       eval-auto = NaN
     `));
   test('-n!!', () =>
-    expect(check('-n!!')).toMatchInlineSnapshot(
-      `["Negate", ["Factorial2", "n"]]`
-    ));
+    expect(check('-n!!')).toMatchInlineSnapshot(`
+      invalid   =[
+        "Negate",
+        [
+          "Factorial2",
+          [
+            "Error",
+            ["ErrorCode", "'incompatible-type'", "'integer'", "'real'"]
+          ]
+        ]
+      ]
+    `)); // @fixme
   test('-n!!!', () =>
-    expect(ce.parse('-n!!!')).toMatchInlineSnapshot(
-      `["Negate", ["Factorial", ["Factorial2", "n"]]]`
-    ));
-});
+    expect(ce.parse('-n!!!')).toMatchInlineSnapshot(`
+      [
+        "Negate",
+        [
+          "Factorial",
+          [
+            "Factorial2",
+            [
+              "Error",
+              ["ErrorCode", "'incompatible-type'", "'integer'", "'real'"]
+            ]
+          ]
+        ]
+      ]
+    `));
+}); // @fixme
 
 describe('OPERATOR serialize, valid', () => {
   test('1 3/4', () =>

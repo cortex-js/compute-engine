@@ -50,7 +50,9 @@ export function typeToString(type: Type, precedence = 0): string {
     case 'list':
       if (type.dimensions && isSubtype(type.elements, 'number')) {
         // We have a numeric list, possibly vector or matrix.
-        if (type.dimensions.length === 1) {
+        if (type.dimensions === undefined) {
+          if (type.elements === 'number') result = 'tensor';
+        } else if (type.dimensions.length === 1) {
           if (type.elements === 'number') {
             if (type.dimensions[0] < 0) result = 'vector';
             else result = `vector<${type.dimensions[0]}>`;

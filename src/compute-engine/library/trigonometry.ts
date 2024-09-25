@@ -1,10 +1,6 @@
 import { Decimal } from 'decimal.js';
 
-import {
-  IdentifierDefinitions,
-  FunctionDefinition,
-  SemiBoxedExpression,
-} from '../public';
+import { IdentifierDefinitions, FunctionDefinition } from '../public';
 
 import { bignumPreferred } from '../boxed-expression/utils';
 import { checkArity } from '../boxed-expression/validate';
@@ -49,7 +45,7 @@ export const TRIGONOMETRY_LIBRARY: IdentifierDefinitions[] = [
         if (arg.numericValue === null || !arg.isValid)
           return ce._fn('Degrees', ops);
 
-        let fArg = arg.re ?? NaN;
+        let fArg = arg.re;
 
         if (Number.isNaN(fArg)) return arg.mul(ce.Pi).div(180);
 
@@ -114,11 +110,11 @@ export const TRIGONOMETRY_LIBRARY: IdentifierDefinitions[] = [
 
         // See https://en.wikipedia.org/wiki/Argument_(complex_analysis)#Realizations_of_the_function_in_computer_languages
         if (y.isFinite === false && x.isFinite === false) return ce.NaN;
-        if (y.isEqual(0) && x.isEqual(0)) return ce.Zero;
+        if (y.is(0) && x.is(0)) return ce.Zero;
         if (x.isFinite === false) return x.isPositive ? ce.Zero : ce.Pi;
         if (y.isFinite === false)
           return y.isPositive ? ce.Pi.div(2) : ce.Pi.div(-2);
-        if (y.isEqual(0)) return x.isPositive ? ce.Zero : ce.Pi;
+        if (y.is(0)) return x.isPositive ? ce.Zero : ce.Pi;
         return ce.function('Arctan', [y.div(x)]).evaluate();
       },
     },

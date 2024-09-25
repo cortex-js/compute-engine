@@ -100,7 +100,7 @@ class TypeParser {
     const reqArgs: NamedElement[] = [];
     const optArgs: NamedElement[] = [];
     while (true) {
-      let arg = this.parseNamedElement();
+      const arg = this.parseNamedElement();
       if (arg === null) break;
 
       // No whitespace before '?', i.e. `x: number?`
@@ -425,6 +425,14 @@ class TypeParser {
         kind: 'list',
         elements: 'number',
         dimensions: [-1, -1],
+      });
+
+    // `tensor` is equivalent to a list of numbers with any dimensions
+    if (this.match('tensor'))
+      return makeType({
+        kind: 'list',
+        elements: 'number',
+        dimensions: undefined,
       });
 
     // Regular list syntax: `list<number^2x3`

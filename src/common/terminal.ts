@@ -133,8 +133,6 @@ class ColorTerminal extends Terminal {
     const newStyle = style;
     const currentStyle = this.state;
 
-    // if (style.bg === 'bright-blue') debugger;
-
     if (isDefaultStyle(newStyle) && !isDefaultStyle(currentStyle)) {
       // Reset all attributes
       codes.push(0);

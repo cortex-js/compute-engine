@@ -1,12 +1,13 @@
 import { parseType } from '../../common/type/parse';
 import { isSubtype } from '../../common/type/subtype';
-import { CollectionType, ListType } from '../../common/type/types';
+import { ListType } from '../../common/type/types';
 import { isBoxedTensor } from '../boxed-expression/boxed-tensor';
 import { checkArity } from '../boxed-expression/validate';
 import { each, isFiniteIndexableCollection } from '../collection-utils';
 import {
   BoxedExpression,
   IComputeEngine,
+  IdentifierDefinition,
   IdentifierDefinitions,
 } from '../public';
 
@@ -65,7 +66,7 @@ export const LINEAR_ALGEBRA_LIBRARY: IdentifierDefinitions[] = [
 
         return ce.Zero;
       },
-    },
+    } as IdentifierDefinition,
 
     // Corresponds to ArrayReshape in Mathematica
     // and dyadic Shape `⍴` in APL
@@ -123,7 +124,7 @@ export const LINEAR_ALGEBRA_LIBRARY: IdentifierDefinitions[] = [
     // Ex: Transpose([[a, b, c], [1, 2, 3]]) = [[a, 1], [b, 2], [c, 3]]
     Transpose: {
       complexity: 8200,
-      signature: '(matrix, axis1: integer?, axis2: integer?) -> matrix',
+      signature: '(matrix|vector, axis1: integer?, axis2: integer?) -> matrix',
       evaluate: (ops, { engine: ce }) => {
         let op1 = ops[0];
         let axis1 = 1;
@@ -147,7 +148,7 @@ export const LINEAR_ALGEBRA_LIBRARY: IdentifierDefinitions[] = [
 
     ConjugateTranspose: {
       complexity: 8200,
-      signature: '(matrix, axis1: integer?, axis2: integer?) -> matrix',
+      signature: '(tensor, axis1: integer?, axis2: integer?) -> matrix',
       evaluate: (ops) => {
         const op1 = ops[0];
         let axis1 = 1;

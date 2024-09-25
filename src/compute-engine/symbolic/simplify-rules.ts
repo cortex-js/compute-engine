@@ -81,6 +81,7 @@ export const SIMPLIFY_RULES: Rule[] = [
   //
   (x): RuleStep | undefined => {
     if (x.operator !== 'Multiply') return undefined;
+
     // The Multiply function has a 'hold-all' property, so we have to simplify
     // the operands first
     return {
@@ -266,8 +267,7 @@ export const SIMPLIFY_RULES: Rule[] = [
     const ce = expr.engine;
     if (y.isFinite === false && x.isFinite === false)
       return { value: ce.NaN, because: 'arctan2' };
-    if (y.isEqual(0) && x.isEqual(0))
-      return { value: ce.Zero, because: 'arctan2' };
+    if (y.is(0) && x.is(0)) return { value: ce.Zero, because: 'arctan2' };
     if (x.isFinite === false)
       return { value: x.isPositive ? ce.Zero : ce.Pi, because: 'arctan2' };
     if (y.isFinite === false)
@@ -275,7 +275,7 @@ export const SIMPLIFY_RULES: Rule[] = [
         value: y.isPositive ? ce.Pi.div(2) : ce.Pi.div(-2),
         because: 'arctan2',
       };
-    if (y.isEqual(0))
+    if (y.is(0))
       return { value: x.isPositive ? ce.Zero : ce.Pi, because: 'arctan2' };
     return {
       value: ce.function('Arctan', [y.div(x)]).simplify(),
@@ -1356,7 +1356,7 @@ function simplifyRelationalOperator(
 ): RuleStep | undefined {
   if (!isInequality(expr) && !isEquation(expr)) return undefined;
 
-  let originalExpr = expr;
+  const originalExpr = expr;
 
   const ce = expr.engine;
 
@@ -1376,7 +1376,7 @@ function simplifyRelationalOperator(
   console.assert(isRelationalOperator(expr.operator));
   if (expr.nops === 2) {
     // Try f(x) < g(x) -> f(x) - g(x) < 0
-    if (expr.op2.isEqual(0) === false) {
+    if (!expr.op2.is(0)) {
       const alt = factor(
         ce.function(expr.operator, [expr.op1.sub(expr.op2), ce.Zero])
       );

@@ -49,7 +49,7 @@ export function factor(expr: BoxedExpression): BoxedExpression {
   if (isRelationalOperator(h)) {
     let lhs = Product.from(expr.op1);
     let rhs = Product.from(expr.op2);
-    let [coef, common] = commonTerms(lhs, rhs);
+    const [coef, common] = commonTerms(lhs, rhs);
 
     let flip = coef.sgn() === -1;
 
@@ -58,7 +58,7 @@ export function factor(expr: BoxedExpression): BoxedExpression {
       rhs.div(coef);
     }
 
-    if (!common.isEqual(1)) {
+    if (!common.is(1)) {
       // We have some symbolic factor in common ("x", etc...)
       if (common.isPositive) {
         lhs.div(common);
@@ -146,7 +146,7 @@ export function getPiTerm(
   if (expr.operator === 'Power') {
     const [k, t] = getPiTerm(expr.op1);
     const n = expr.op2.re;
-    if (n !== undefined) return [k.pow(n), t.pow(n)];
+    if (!isNaN(n)) return [k.pow(n), t.pow(n)];
   }
 
   if (expr.operator === 'Sqrt') {
@@ -157,8 +157,8 @@ export function getPiTerm(
   if (expr.operator === 'Root') {
     const [k, t] = getPiTerm(expr.ops![0]);
     const n = expr.ops![1].re;
-    if (n !== undefined) return [k.root(n), t.root(n)];
+    if (!isNaN(n)) return [k.root(n), t.root(n)];
   }
 
-  return [ce._numericValue(0), ce._numericValue(0)];
+  return [ce._numericValue(0), ce._numericValue(expr.numericValue ?? 0)];
 }

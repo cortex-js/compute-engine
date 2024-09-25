@@ -11,16 +11,26 @@ describe('Primality Test', () => {
         '-\\left\\lfloor\\cos\\left(\\pi\\cdot\\frac{\\left( n-1\\right)!+1}{ n}\\right)\\right\\rfloor'
       )
     ).toMatchInlineSnapshot(`
-      invalid   =[
+      box       = [
         "Negate",
         [
           "Floor",
           [
-            "Error",
-            ["ErrorCode", "'incompatible-type'", "'real'", "'number'"]
+            "Cos",
+            [
+              "Divide",
+              [
+                "Multiply",
+                "Pi",
+                ["Add", ["Factorial", ["Subtract", "n", 1]], 1]
+              ],
+              "n"
+            ]
           ]
         ]
       ]
+      simplify  = -floor(cos((pi * (n - 1)! + pi) / n))
+      eval-auto = NaN
     `));
   // 	https://en.wikipedia.org/wiki/Wilson%27s_theorem
   // 	https://en.wikipedia.org/wiki/Primality_test#Wilson's_theorem
@@ -164,21 +174,10 @@ describe('Nth PRIME NUMBER', () =>
                 ]
               ],
               [
-                "Tuple",
+                "Triple",
                 "Nothing",
                 2,
-                [
-                  "Floor",
-                  [
-                    "Error",
-                    [
-                      "ErrorCode",
-                      "'incompatible-type'",
-                      "'real'",
-                      "'finite_number'"
-                    ]
-                  ]
-                ]
+                ["Floor", ["Multiply", 1.5, "n", ["Ln", "n"]]]
               ]
             ],
             2

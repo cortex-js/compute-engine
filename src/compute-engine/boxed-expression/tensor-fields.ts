@@ -288,7 +288,7 @@ export class TensorFieldExpression implements TensorField<BoxedExpression> {
       case 'complex128':
       case 'complex64':
         if (typeof v === 'number') return this.ce.complex(v);
-        if (x.im !== undefined) return this.ce.complex(x.re!, x.im);
+        if (!isNaN(x.im)) return this.ce.complex(x.re, x.im);
         return undefined;
       case 'bool':
         return typeof v === 'boolean' ? v : undefined;
@@ -304,15 +304,15 @@ export class TensorFieldExpression implements TensorField<BoxedExpression> {
     return x;
   }
   isZero(x: BoxedExpression): boolean {
-    return x.isEqual(0) ?? false;
+    return x.is(0);
   }
 
   isOne(x: BoxedExpression): boolean {
-    return x.isEqual(1) ?? false;
+    return x.is(1);
   }
 
   equals(lhs: BoxedExpression, rhs: BoxedExpression): boolean {
-    return lhs.isEqual(rhs) === true;
+    return lhs.isSame(rhs) === true;
   }
 
   add(lhs: BoxedExpression, rhs: BoxedExpression): BoxedExpression {
@@ -525,7 +525,7 @@ export function getExpressionDatatype(expr: BoxedExpression): TensorDataType {
       return 'complex128';
 
     case 'finite_integer': {
-      const val = expr.re!;
+      const val = expr.re;
       if (val >= 0 && val <= 255) return 'uint8';
       return 'int32';
     }

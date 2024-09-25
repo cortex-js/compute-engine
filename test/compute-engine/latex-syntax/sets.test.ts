@@ -157,14 +157,26 @@ describe('PARSING SETS', () => {
     expect(parse('\\N^\\complement')).toMatchInlineSnapshot(
       `["Complement", "NonNegativeIntegers"]`
     );
-    expect(parse('\\N \\times \\N')).toMatchInlineSnapshot(
-      `["Multiply", "NonNegativeIntegers", "NonNegativeIntegers"]`
-    );
-    expect(parse('\\N^3')).toMatchInlineSnapshot(
-      `["Power", "NonNegativeIntegers", 3]`
-    );
-    expect(parse('\\N^{n}')).toMatchInlineSnapshot(
-      `["Power", "NonNegativeIntegers", "n"]`
-    );
+    expect(parse('\\N \\times \\N')).toMatchInlineSnapshot(`
+      [
+        "Multiply",
+        ["Error", ["ErrorCode", "'incompatible-type'", "'number'", "'set'"]],
+        ["Error", ["ErrorCode", "'incompatible-type'", "'number'", "'set'"]]
+      ]
+    `);
+    expect(parse('\\N^3')).toMatchInlineSnapshot(`
+      [
+        "Power",
+        ["Error", ["ErrorCode", "'incompatible-type'", "'number'", "'set'"]],
+        3
+      ]
+    `);
+    expect(parse('\\N^{n}')).toMatchInlineSnapshot(`
+      [
+        "Power",
+        ["Error", ["ErrorCode", "'incompatible-type'", "'number'", "'set'"]],
+        "n"
+      ]
+    `);
   });
 });

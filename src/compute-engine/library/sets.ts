@@ -128,9 +128,7 @@ export const SETS_LIBRARY: IdentifierDefinitions = {
         if (rhs.operator === 'Range' || rhs.operator === 'Linspace') {
           const low = rhs.ops![0].re;
           const high = rhs.ops![1].re;
-          if (low !== undefined && high !== undefined)
-            return low < 0 && high < 0;
-          return false;
+          return low < 0 && high < 0;
         }
         return (
           isSubtype(rhs.type, 'set<real>') &&
@@ -155,9 +153,7 @@ export const SETS_LIBRARY: IdentifierDefinitions = {
         if (rhs.operator === 'Range' || rhs.operator === 'Linspace') {
           const low = rhs.ops![0].re;
           const high = rhs.ops![1].re;
-          if (low !== undefined && high !== undefined)
-            return low >= 0 && high >= 0;
-          return false;
+          return low >= 0 && high >= 0;
         }
 
         return (
@@ -181,9 +177,7 @@ export const SETS_LIBRARY: IdentifierDefinitions = {
         if (rhs.operator === 'Range' || rhs.operator === 'Linspace') {
           const low = rhs.ops![0].re;
           const high = rhs.ops![1].re;
-          if (low !== undefined && high !== undefined)
-            return low > 0 && high > 0;
-          return false;
+          return low > 0 && high > 0;
         }
         return (
           isSubtype(rhs.type, 'set<real>') &&
@@ -206,9 +200,7 @@ export const SETS_LIBRARY: IdentifierDefinitions = {
         if (rhs.operator === 'Range') {
           const low = rhs.ops![0].re;
           const high = rhs.ops![1].re;
-          if (low !== undefined && high !== undefined)
-            return low < 0 && high < 0;
-          return false;
+          return low < 0 && high < 0;
         }
 
         return (
@@ -233,9 +225,7 @@ export const SETS_LIBRARY: IdentifierDefinitions = {
         if (rhs.operator === 'Range') {
           const low = rhs.ops![0].re;
           const high = rhs.ops![1].re;
-          if (low !== undefined && high !== undefined)
-            return low <= 0 && high <= 0;
-          return false;
+          return low <= 0 && high <= 0;
         }
         return (
           isSubtype(rhs.type, 'set<integer>') &&
@@ -258,9 +248,7 @@ export const SETS_LIBRARY: IdentifierDefinitions = {
         if (rhs.operator === 'Range') {
           const low = rhs.ops![0].re;
           const high = rhs.ops![1].re;
-          if (low !== undefined && high !== undefined)
-            return low > 0 && high > 0;
-          return false;
+          return low > 0 && high > 0;
         }
         return (
           isSubtype(rhs.type, 'set<integer>') &&
@@ -285,9 +273,7 @@ export const SETS_LIBRARY: IdentifierDefinitions = {
         if (rhs.operator === 'Range') {
           const low = rhs.ops![0].re;
           const high = rhs.ops![1].re;
-          if (low !== undefined && high !== undefined)
-            return low > 0 && high > 0;
-          return false;
+          return low > 0 && high > 0;
         }
         return (
           isSubtype(rhs.type, 'set<integer>') &&
@@ -520,7 +506,7 @@ export const SETS_LIBRARY: IdentifierDefinitions = {
       contains: (expr, x) => {
         const [col, ...values] = expr.ops!;
         return (
-          (col.contains(x) ?? false) && !values.some((val) => val.isEqual(x))
+          (col.contains(x) ?? false) && !values.some((val) => val.isSame(x))
         );
       },
       iterator: (expr) => {
@@ -533,7 +519,7 @@ export const SETS_LIBRARY: IdentifierDefinitions = {
             let result = iter.next();
             while (
               !result.done &&
-              values.some((val) => val.isEqual(result.value))
+              values.some((val) => val.isSame(result.value))
             )
               result = iter.next();
             return result;
@@ -577,7 +563,7 @@ function union(
   const elements: BoxedExpression[] = [];
   for (const op of xs) {
     for (const elem of each(op))
-      if (elements.every((e) => !e.isEqual(elem))) elements.push(elem);
+      if (elements.every((e) => !e.isSame(elem))) elements.push(elem);
   }
 
   if (elements.length === 0) return ce.symbol('EmptySet');
@@ -595,11 +581,11 @@ function intersection(
   for (const op of ops.slice(1)) {
     if (isFiniteIndexableCollection(op)) {
       elements = elements.filter((element) =>
-        [...each(op)].some((op) => element.isEqual(op))
+        [...each(op)].some((op) => element.isSame(op))
       );
     } else {
       // Not a collection, assume it's a collection made of this single element
-      elements = elements.filter((element) => element.isEqual(op));
+      elements = elements.filter((element) => element.isSame(op));
     }
   }
 

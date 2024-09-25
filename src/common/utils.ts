@@ -19,3 +19,16 @@ export function permutations<T>(
 
   return result;
 }
+
+export function hidePrivateProperties(obj: any) {
+  for (const key in obj) {
+    if (key.startsWith('_') && obj.hasOwnProperty(key)) {
+      Object.defineProperty(obj, key, {
+        enumerable: false,
+        configurable: true, // Allows redefinition if necessary
+        writable: true, // Allows modification
+        value: obj[key],
+      });
+    }
+  }
+}

@@ -221,8 +221,8 @@ export function boxFunction(
       if (ops.length === 1) {
         // If single argument, assume it's imaginary
         const op1 = ops[0];
-        if (op1 instanceof _BoxedExpression)
-          return ce.number(ce.complex(0, op1.re ?? 0), options);
+        if (op1 instanceof _BoxedExpression && op1.isNumberLiteral)
+          return ce.number(ce.complex(0, op1.re), options);
 
         const im = machineValue(ops[0] as Expression);
         if (im !== null && im !== 0)
@@ -233,16 +233,15 @@ export function boxFunction(
       if (ops.length === 2) {
         const re =
           ops[0] instanceof _BoxedExpression
-            ? (ops[0].re ?? null)
+            ? ops[0].re
             : machineValue(ops[0] as Expression);
         const im =
           ops[1] instanceof _BoxedExpression
-            ? (ops[1].re ?? null)
+            ? ops[1].re
             : machineValue(ops[1] as Expression);
-        if (im !== null && re !== null) {
+        if (im !== null && re !== null && !isNaN(im) && !isNaN(re)) {
           if (im === 0 && re === 0) return ce.Zero;
-          if (im !== 0)
-            return ce.number(ce._numericValue({ decimal: re, im }), options);
+          if (im !== 0) return ce.number(ce._numericValue({ re, im }), options);
           return box(ce, ops[0], options);
         }
         return box(ce, ops[0], options).add(box(ce, ops[1], options).mul(ce.I));
@@ -359,7 +358,12 @@ export function box(
   //
   // Box a number
   //
-  if (typeof expr === 'number') return ce.number(expr);
+  if (
+    typeof expr === 'number' ||
+    expr instanceof Decimal ||
+    expr instanceof Complex
+  )
+    return ce.number(expr);
 
   //
   // Box a String, a Symbol or a number as a string shorthand
@@ -378,9 +382,7 @@ export function box(
   //
   // Box a MathJSON object literal
   //
-  if (!Array.isArray(expr) && typeof expr === 'object') {
-    // @ts-expect-error TypeScript does not know that `expr` is an MathJSON object
-    const metadata = { latex: expr.latex, wikidata: expr.wikidata };
+  if (typeof expr === 'object') {
     if ('fn' in expr) {
       const [fnName, ...ops] = expr.fn;
       return canonicalForm(
@@ -388,7 +390,7 @@ export function box(
         options.canonical!
       );
     }
-    if ('str' in expr) return new BoxedString(ce, expr.str, metadata);
+    if ('str' in expr) return new BoxedString(ce, expr.str);
     if ('sym' in expr) return ce.symbol(expr.sym, { canonical });
     if ('num' in expr) return ce.number(expr, { canonical });
 
@@ -582,7 +584,7 @@ function makeNumericFunction(
   if (name === 'Ln' || name === 'Log') {
     if (ops.length > 0) {
       // Ln(1) -> 0, Log(1) -> 0
-      if (ops[0].isEqual(1)) return ce.Zero;
+      if (ops[0].is(1)) return ce.Zero;
       // Ln(a) -> Ln(a), Log(a) -> Log(a)
       if (ops.length === 1) return ce._fn(name, ops, metadata);
     }

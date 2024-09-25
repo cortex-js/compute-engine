@@ -1,3 +1,4 @@
+import { cmp } from './boxed-expression/compare';
 import type { BoxedExpression } from './public';
 
 /***
@@ -62,8 +63,9 @@ export function order(
   // Default comparator
   //
   return (a: BoxedExpression, b: BoxedExpression) => {
-    if (a.isLess(b)) return -1;
-    if (a.isEqual(b)) return 0;
+    const c = cmp(a, b);
+    if (c === '=') return 0;
+    if (c === '<' || c === '<=') return -1;
     return 1;
   };
 }

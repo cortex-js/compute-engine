@@ -13,7 +13,7 @@ import { MachineNumericValue } from '../numeric-value/machine-numeric-value';
 // Represent a sum of terms
 export class Terms {
   private engine: IComputeEngine;
-  private terms: { coef: BoxedExpression; term: BoxedExpression }[] = [];
+  private terms: { coef: NumericValue[]; term: BoxedExpression }[] = [];
 
   constructor(ce: IComputeEngine, terms: ReadonlyArray<BoxedExpression>) {
     this.engine = ce;
@@ -29,11 +29,11 @@ export class Terms {
         (term.type === 'imaginary' || term.type === 'complex') &&
         term.isInfinity
       ) {
-        this.terms = [{ term: ce.ComplexInfinity, coef: ce.One }];
+        this.terms = [{ term: ce.ComplexInfinity, coef: [] }];
         return;
       }
       if (term.isNaN || term.symbol === 'Undefined') {
-        this.terms = [{ term: ce.NaN, coef: ce.One }];
+        this.terms = [{ term: ce.NaN, coef: [] }];
         return;
       }
 
@@ -41,21 +41,21 @@ export class Terms {
       if (coef.isPositiveInfinity) posInfinityCount += 1;
       else if (coef.isNegativeInfinity) negInfinityCount += 1;
 
-      if (rest.isEqual(1)) {
+      if (rest.is(1)) {
         if (!coef.isZero) numericValues.push(coef);
       } else this.add(coef, rest);
     }
 
     if (posInfinityCount > 0 && negInfinityCount > 0) {
-      this.terms = [{ term: ce.NaN, coef: ce.One }];
+      this.terms = [{ term: ce.NaN, coef: [] }];
       return;
     }
     if (posInfinityCount > 0) {
-      this.terms = [{ term: ce.PositiveInfinity, coef: ce.One }];
+      this.terms = [{ term: ce.PositiveInfinity, coef: [] }];
       return;
     }
     if (negInfinityCount > 0) {
-      this.terms = [{ term: ce.NegativeInfinity, coef: ce.One }];
+      this.terms = [{ term: ce.NegativeInfinity, coef: [] }];
       return;
     }
     if (numericValues.length === 1) {
@@ -63,25 +63,17 @@ export class Terms {
     } else if (numericValues.length > 0) {
       // We're doing an exact sum, we may have multiple terms: a
       // rational and a radical. We need to sum them separately.
-      const bignum = (x) => ce.bignum(x);
-      const makeExact = (x) => new ExactNumericValue(x, factory, bignum);
-      const factory =
-        ce.precision > MACHINE_PRECISION
-          ? (x) => new BigNumericValue(x, bignum)
-          : (x) => new MachineNumericValue(x, makeExact);
-      ExactNumericValue.sum(numericValues, factory, bignum).forEach((x) =>
-        this.add(x, ce.One)
-      );
+      nvSum(ce, numericValues).forEach((x) => this.add(x, ce.One));
     }
   }
 
   private add(coef: NumericValue, term: BoxedExpression): void {
-    if (term.isEqual(0) || coef.isZero) return;
-    if (term.isEqual(1)) {
+    if (term.is(0) || coef.isZero) return;
+    if (term.is(1)) {
       // We have a numeric value. Keep it in the terms,
       // so that "1+sqrt(3)" remains exact.
       const ce = this.engine;
-      this.terms.push({ coef: ce.One, term: ce.number(coef) });
+      this.terms.push({ coef: [], term: ce.number(coef) });
       return;
     }
 
@@ -101,24 +93,14 @@ export class Terms {
     // Try to find a like term, i.e. if "2x", look for "x"
     const i = this.find(term);
     if (i >= 0) {
-      if (this.terms[i].coef.isNumberLiteral && coef) {
-        const newCoef = coef.add(this.terms[i].coef.numericValue!);
-        if (newCoef.isExact) this.terms[i].coef = this.engine.number(newCoef);
-        else
-          this.terms[i].coef = this.engine.function('Add', [
-            this.terms[i].coef,
-            this.engine.number(coef),
-          ]);
-      } else {
-        this.terms[i].coef = this.engine.function('Add', [
-          this.terms[i].coef,
-          this.engine.number(coef),
-        ]);
-      }
+      // There was an existing term matching: add the coefficients
+      this.terms[i].coef.push(coef);
       return;
     }
-    console.assert(term.numericValue === null || term.isEqual(1));
-    this.terms.push({ coef: this.engine.number(coef), term });
+
+    // This is a new term: just add it
+    console.assert(term.numericValue === null || term.is(1));
+    this.terms.push({ coef: [coef], term });
   }
 
   private find(term: BoxedExpression): number {
@@ -132,19 +114,34 @@ export class Terms {
 
     if (terms.length === 0) return ce.Zero;
 
-    if (terms.length === 1) {
-      const { coef, term } = terms[0];
-      if (coef.isEqual(1)) return term.N();
-      if (coef.isEqual(-1)) return term.N().neg();
+    const rest: BoxedExpression[] = [];
+    const numericValues: NumericValue[] = [];
 
-      return term.N().mul(ce.box(coef.N()));
+    // Gather all the numericValues and the rest
+    for (const { coef, term } of terms) {
+      if (coef.length === 0) {
+        if (term.isNumberLiteral) {
+          if (typeof term.numericValue === 'number')
+            numericValues.push(ce._numericValue(term.numericValue));
+          else numericValues.push(term.numericValue!);
+        } else rest.push(term);
+      } else {
+        const sum = coef.reduce((acc, x) => acc.add(x)).N();
+
+        if (sum.isZero) continue;
+
+        if (sum.eq(1)) rest.push(term.N());
+        else if (sum.eq(-1)) rest.push(term.N().neg());
+        else rest.push(term.N().mul(ce.box(sum)));
+      }
     }
 
-    return canonicalAdd(ce, [
-      ...terms.map(({ coef, term }) =>
-        coef.isEqual(1) ? term : canonicalMultiply(ce, [term, ce.box(coef.N())])
-      ),
-    ]);
+    const sum = nvSumN(ce, numericValues);
+    if (!sum.isZero) {
+      if (rest.length === 0) return ce.box(sum);
+      rest.push(ce.box(sum));
+    }
+    return canonicalAdd(ce, rest);
   }
 
   asExpression(): BoxedExpression {
@@ -154,26 +151,63 @@ export class Terms {
 
     if (terms.length === 0) return ce.Zero;
 
-    if (terms.length === 1) {
-      const { coef, term } = terms[0];
-      if (term.isNaN) return ce.NaN;
-      if (coef.isEqual(0)) return ce.Zero;
-      if (coef.isEqual(1)) return term;
-      if (coef.isEqual(-1)) return term.neg();
-
-      if (term.isEqual(1)) return ce.box(coef);
-      return canonicalMultiply(ce, [term, ce.box(coef)]);
-    }
-
     return canonicalAdd(
       ce,
-      terms.map(({ coef, term }) =>
-        coef.isEqual(0)
-          ? ce.Zero
-          : coef.isEqual(1)
-            ? term
-            : canonicalMultiply(ce, [term, ce.box(coef)])
-      )
+      terms.map(({ coef, term }) => {
+        // Add the coefficients
+        if (coef.length === 0) return term;
+
+        const coefs = nvSum(ce, coef);
+        if (coefs.length === 0) return term;
+        if (coefs.length > 1) {
+          return canonicalMultiply(ce, [
+            canonicalAdd(
+              ce,
+              coefs.map((x) => ce.box(x))
+            ),
+            term,
+          ]);
+        }
+        const sum = coefs[0];
+        if (sum.isNaN) return ce.NaN;
+        if (sum.isZero) return ce.Zero;
+        if (sum.eq(1)) return term;
+        if (sum.eq(-1)) return term.neg();
+        if (term.is(1)) return ce.box(sum);
+
+        return term.mul(ce.box(sum));
+      })
     );
   }
+}
+
+function nvSum(
+  ce: IComputeEngine,
+  numericValues: NumericValue[]
+): NumericValue[] {
+  const bignum = (x) => ce.bignum(x);
+  const makeExact = (x) => new ExactNumericValue(x, factory, bignum);
+  const factory =
+    ce.precision > MACHINE_PRECISION
+      ? (x) => new BigNumericValue(x, bignum)
+      : (x) => new MachineNumericValue(x, makeExact);
+  return ExactNumericValue.sum(numericValues, factory, bignum);
+}
+
+function nvSumN(
+  ce: IComputeEngine,
+  numericValues: NumericValue[]
+): NumericValue {
+  const bignum = (x) => ce.bignum(x);
+  const makeExact = (x) => new ExactNumericValue(x, factory, bignum);
+  const factory =
+    ce.precision > MACHINE_PRECISION
+      ? (x) => new BigNumericValue(x, bignum)
+      : (x) => new MachineNumericValue(x, makeExact);
+  const result = ExactNumericValue.sum(numericValues, factory, bignum);
+
+  if (result.length === 0) return makeExact(0);
+  if (result.length === 1) return result[0].N();
+
+  return result.reduce((acc, x) => acc.add(x).N());
 }
