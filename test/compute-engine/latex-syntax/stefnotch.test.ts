@@ -83,8 +83,12 @@ describe('STEFNOTCH #12', () => {
         "ExponentialE",
         [
           "Error",
-          ["ErrorCode", "'incompatible-domain'", "Numbers", "Tuples"],
-          ["Triple", "ImaginaryUnit", "Pi", "'nope!?\\lparensum'"]
+          [
+            "ErrorCode",
+            "'incompatible-type'",
+            "'number'",
+            "'tuple<finite_imaginary, real, string>'"
+          ]
         ]
       ]
     `);
@@ -101,7 +105,18 @@ describe('STEFNOTCH #13', () => {
         "Q",
         [
           "Function",
-          ["Ceil", ["Divide", 4, ["Square", "epsilonSymbol"]]],
+          [
+            "Ceil",
+            [
+              "Error",
+              [
+                "ErrorCode",
+                "'incompatible-type'",
+                "'real'",
+                "'finite_number'"
+              ]
+            ]
+          ],
           "epsilonSymbol"
         ]
       ]
@@ -109,9 +124,17 @@ describe('STEFNOTCH #13', () => {
   });
 
   test('2/ x_{1,2}=1,2', () => {
-    expect(parse('x_{1,2}=1,2')).toMatchInlineSnapshot(
-      `["Pair", ["Equal", ["At", "x", 1, 2], 1], 2]`
-    );
+    expect(parse('x_{1,2}=1,2')).toMatchInlineSnapshot(`
+      [
+        "Tuple",
+        [
+          "Equal",
+          ["At", "x", 1, ["Error", "'unexpected-argument'", "'2'"]],
+          1
+        ],
+        2
+      ]
+    `);
   }); // @fixme unclear what the right answer is
 
   test('3/  \\{1,2\\}', () => {
@@ -144,16 +167,23 @@ describe('STEFNOTCH #13', () => {
             "Abs",
             [
               "Error",
-              ["ErrorCode", "'incompatible-domain'", "Numbers", "Anything"],
-              ["At", "a", "n"]
+              ["ErrorCode", "'incompatible-type'", "'number'", "'any'"]
             ]
           ],
           ["Divide", 2, ["Sqrt", "n"]]
         ],
         [
-          "Error",
-          ["ErrorCode", "'incompatible-domain'", "Booleans", "Anything"],
-          ["At", "a", ["Equal", ["To", "n", 0], 0]]
+          "At",
+          "a",
+          [
+            "Error",
+            [
+              "ErrorCode",
+              "'incompatible-type'",
+              "'number | string'",
+              "'boolean'"
+            ]
+          ]
         ]
       ]
     `);
@@ -208,8 +238,12 @@ describe('STEFNOTCH #13', () => {
             "Power",
             [
               "Error",
-              ["ErrorCode", "'incompatible-domain'", "Numbers", "Domains"],
-              "ComplexNumbers"
+              [
+                "ErrorCode",
+                "'incompatible-type'",
+                "'number'",
+                "'set<complex>'"
+              ]
             ],
             2
           ]

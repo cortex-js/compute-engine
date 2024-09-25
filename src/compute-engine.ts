@@ -13,6 +13,12 @@ export const version = '{{SDK_VERSION}}';
 import { ComputeEngine } from './compute-engine/compute-engine';
 export { ComputeEngine } from './compute-engine/compute-engine';
 
+export { terminal } from './common/terminal';
+export {
+  highlightCodeSpan,
+  highlightCodeBlock,
+} from './common/syntax-highlighter';
+
 globalThis[Symbol.for('io.cortexjs.compute-engine')] = {
   ComputeEngine: ComputeEngine.prototype.constructor,
   version: '{{SDK_VERSION}}',

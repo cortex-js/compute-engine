@@ -157,7 +157,6 @@ describe('LATEX', () => {
             'string',
             'finite_integer',
           ],
-          '22',
         ],
       ]
     `);
@@ -169,7 +168,7 @@ describe('LATEX', () => {
         [
           Error,
           'unexpected-argument',
-          '\\text{+1}',
+          '+1',
         ],
       ]
     `);
@@ -211,7 +210,6 @@ describe('LATEX', () => {
             'string',
             'real',
           ],
-          '2+\\pi',
         ],
       ]
     `);

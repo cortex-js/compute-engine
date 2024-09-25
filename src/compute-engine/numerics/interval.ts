@@ -33,7 +33,7 @@ export function interval(expr: BoxedExpression): Interval | undefined {
 
     if (!start.isNumberLiteral || !end.isNumberLiteral) return undefined;
 
-    return { start: start.re!, openStart, end: end.re!, openEnd };
+    return { start: start.re, openStart, end: end.re, openEnd };
   }
 
   // Known sets...

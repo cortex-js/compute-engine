@@ -42,12 +42,12 @@ describe('IS_CONSTANT', () => {
   });
 
   it('should return false for non-constant expressions with non-pure function calls', () => {
-    const expression = engine.box(['Random', 1, 10]);
+    const expression = engine.box(['Hold', ['Random', 1, 10]]);
     expect(expression.isConstant).toBe(false);
   });
 
   it('should return false for non-constant expressions with non-pure  function calls', () => {
-    const expression = engine.box(['Add', ['Random', 1, 10], 1]);
+    const expression = engine.box(['Hold', ['Add', ['Random', 1, 10], 1]]);
     expect(expression.isConstant).toBe(false);
   });
 });
@@ -55,109 +55,109 @@ describe('IS_CONSTANT', () => {
 describe('IS_ZERO', () => {
   it('should return true for number literals equal to 0', () => {
     const expression = engine.parse('0');
-    expect(expression.isZero).toBe(true);
+    expect(expression.is(0)).toBe(true);
   });
 
   it('should return false for number literals not equal to 0', () => {
     const expression = engine.parse('5');
-    expect(expression.isZero).toBe(false);
+    expect(expression.is(0)).toBe(false);
   });
 
   it('should return false for constant symbols not equal to 0', () => {
     const expression = engine.parse('\\pi');
-    expect(expression.isZero).toBe(false);
+    expect(expression.is(0)).toBe(false);
   });
 
   it('should return false for constant expressions not equal to 0', () => {
     const expression = engine.parse('5 + 3');
-    expect(expression.isZero).toBe(false);
+    expect(expression.is(0)).toBe(false);
   });
 
   it('should return false for constant symbols not equal to 0', () => {
     const expression = engine.parse('\\pi');
-    expect(expression.isZero).toBe(false);
+    expect(expression.is(0)).toBe(false);
   });
 
   it('should return undefined for non-constant symbols', () => {
     const expression = engine.parse('x');
-    expect(expression.isZero).toBeUndefined();
+    expect(expression.isEqual(0)).toBeUndefined();
   });
 
   it('should return undefined for non-constant expressions', () => {
     const expression = engine.parse('x + 3');
-    expect(expression.isZero).toBeUndefined();
+    expect(expression.isEqual(0)).toBeUndefined();
   });
 
   it('should return false for constant expressions with function calls', () => {
     const expression = engine.parse('\\cos{\\pi}');
-    expect(expression.isZero).toBe(false);
+    expect(expression.isEqual(0)).toBe(false);
   });
 
   it('should return true for cos pi/2', () => {
     const expression = engine.parse('\\cos{\\pi/2}');
-    expect(expression.isZero).toBe(true);
+    expect(expression.isEqual(0)).toBe(true);
   });
 
   it('should return false for non-constant expressions with non-pure function calls not equal to 0', () => {
-    const expression = engine.box(['Random', 1, 10]);
-    expect(expression.isZero).toBeUndefined();
+    const expression = engine.box(['Hold', ['Random', 1, 10]]);
+    expect(expression.isEqual(0)).toBeUndefined();
   });
 
   it('should return false for non-constant expressions with non-pure function calls not equal to 0', () => {
-    const expression = engine.box(['Add', ['Random', 1, 10], 1]);
-    expect(expression.isZero).toBeUndefined();
+    const expression = engine.box(['Hold', ['Add', ['Random', 1, 10], 1]]);
+    expect(expression.isEqual(0)).toBeUndefined();
   });
 });
 
 describe('IS_NOT_ZERO', () => {
   it('should return true for number literals equal to 0', () => {
     const expression = engine.parse('0');
-    expect(expression.isNotZero).toBe(false);
+    expect(expression.isEqual(0) === false).toBe(false);
   });
 
   it('should return true for constant symbols not equal to 0', () => {
     const expression = engine.parse('\\pi');
-    expect(expression.isNotZero).toBe(true);
+    expect(expression.isEqual(0) === false).toBe(true);
   });
 
   it('should return true for number literals not equal to 0', () => {
     const expression = engine.parse('5');
-    expect(expression.isNotZero).toBe(true);
+    expect(expression.isEqual(0) === false).toBe(true);
   });
 
   it('should return undefined for constant expressions not equal to 0', () => {
     const expression = engine.parse('5 + 3');
-    expect(expression.isNotZero).toBe(true);
+    expect(expression.isEqual(0) === false).toBe(true);
   });
 
   it('should return true for constant symbols not equal to 0', () => {
     const expression = engine.parse('\\pi');
-    expect(expression.isNotZero).toBe(true);
+    expect(expression.isEqual(0) === false).toBe(true);
   });
 
   it('should return undefined for non-constant symbols', () => {
     const expression = engine.parse('x');
-    expect(expression.isNotZero).toBeUndefined();
+    expect(expression.isEqual(0)).toBeUndefined();
   });
 
-  it('should return undefined for non-constant expressions', () => {
+  it('should return false for non-constant expressions', () => {
     const expression = engine.parse('x + 3');
-    expect(expression.isNotZero).toBeUndefined();
+    expect(expression.isEqual(0)).toBeUndefined();
   });
 
   it('should return true for constant expressions with function calls', () => {
     const expression = engine.parse('\\cos{\\pi}');
-    expect(expression.isNotZero).toBe(true);
+    expect(expression.isEqual(0)).toBe(false);
   });
 
   it('should return undefined for non-constant expressions with non-pure function calls not equal to 0', () => {
-    const expression = engine.box(['Random', 1, 10]);
-    expect(expression.isNotZero).toBeUndefined();
+    const expression = engine.box(['Hold', ['Random', 1, 10]]);
+    expect(expression.isEqual(0)).toBeUndefined();
   });
 
   it('should return undefined for non-constant expressions with non-pure function calls not equal to 0', () => {
-    const expression = engine.box(['Add', ['Random', 1, 10], 1]);
-    expect(expression.isNotZero).toBeUndefined();
+    const expression = engine.box(['Hold', ['Add', ['Random', 1, 10], 1]]);
+    expect(expression.isEqual(0)).toBeUndefined();
   });
 });
 
@@ -202,18 +202,18 @@ describe('IS_POSITIVE', () => {
     expect(expression.isPositive).toBeUndefined();
   });
 
-  it('should return undefined for constant expressions with function calls', () => {
-    const expression = engine.parse('\\cos{\\pi}');
-    expect(expression.isPositive).toBe(true);
-  });
-
-  it('should return undefined for non-constant expressions with non-pure function calls', () => {
-    const expression = engine.box(['Random', 1, 10]);
+  it('should return undefined for constant expressions with trig functions', () => {
+    const expression = engine.parse('\\cos{\\pi/3}');
     expect(expression.isPositive).toBeUndefined();
   });
 
   it('should return undefined for non-constant expressions with non-pure function calls', () => {
-    const expression = engine.box(['Add', ['Random', 1, 10], 1]);
+    const expression = engine.box(['Hold', ['Random', 1, 10]]);
+    expect(expression.isPositive).toBeUndefined();
+  });
+
+  it('should return undefined for non-constant expressions with non-pure function calls that only returns positive values', () => {
+    const expression = engine.box(['Hold', ['Add', ['Random', 1, 10], 1]]);
     expect(expression.isPositive).toBeUndefined();
   });
 });

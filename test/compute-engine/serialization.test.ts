@@ -24,7 +24,12 @@ describe('JSON PROPERTY', () => {
     const expr = ce.parse('\\frac{\\sqrt{x^2-1}}{2}');
     expect(expr.json).toMatchInlineSnapshot(`
       [
-        Divide,
+        Multiply,
+        [
+          Rational,
+          1,
+          2,
+        ],
         [
           Sqrt,
           [
@@ -37,7 +42,6 @@ describe('JSON PROPERTY', () => {
             -1,
           ],
         ],
-        2,
       ]
     `);
   });
@@ -81,7 +85,12 @@ describe('DEFAULT JSON SERIALIZATION', () => {
     const expr = ce.parse('\\frac{\\sqrt{x^2-1}}{2}');
     expect(expr.toMathJson({})).toMatchInlineSnapshot(`
       [
-        Divide,
+        Multiply,
+        [
+          Rational,
+          1,
+          2,
+        ],
         [
           Sqrt,
           [
@@ -93,7 +102,6 @@ describe('DEFAULT JSON SERIALIZATION', () => {
             1,
           ],
         ],
-        2,
       ]
     `);
   });
@@ -142,7 +150,12 @@ describe('CUSTOM JSON SERIALIZATION', () => {
     const expr = ce.parse('\\frac{\\sqrt{x^2-1}}{2}');
     expect(expr.toMathJson(opts)).toMatchInlineSnapshot(`
       [
-        Divide,
+        Multiply,
+        [
+          Rational,
+          1,
+          2,
+        ],
         [
           Sqrt,
           [
@@ -154,7 +167,6 @@ describe('CUSTOM JSON SERIALIZATION', () => {
             1,
           ],
         ],
-        2,
       ]
     `);
   });

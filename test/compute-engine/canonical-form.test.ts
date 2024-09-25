@@ -64,12 +64,12 @@ describe('CANONICAL FORMS', () => {
   test('\\frac{-101}{10^{\\frac{2}{3}}}', () => {
     expect(check('\\frac{-101}{10^{\\frac{2}{3}}}')).toMatchInlineSnapshot(`
       box       = ["Divide", -101, ["Power", 10, ["Divide", 2, 3]]]
-      canonical = ["Multiply", -101, ["Divide", 1, ["Power", 10, ["Rational", 2, 3]]]]
+      canonical = ["Divide", -101, ["Power", 10, ["Rational", 2, 3]]]
       simplify  = -21.75979036932202893
       eval-auto = -21.75979036932202893
-      eval-mach = -21.75979036932202893
+      eval-mach = -21.759790369322026
       N-auto    = -21.7597903693220255898
-      N-mach    = -21.7597903693220255898
+      N-mach    = -21.75979036932202
     `);
   });
 
@@ -160,7 +160,7 @@ describe('CANONICAL FORMS', () => {
       eval-auto = 10/49sqrt(15)
       eval-mach = 10/49sqrt(15)
       N-auto    = 0.790404764532125894938
-      N-mach    = 0.790404764532125894938
+      N-mach    = 0.790404764532129
     `);
   });
 
@@ -240,8 +240,7 @@ describe('CANONICAL FORMS', () => {
   test('"2\\frac{x}{a}\\frac{y}{b}"', () => {
     expect(check('2\\frac{x}{a}\\frac{y}{b}')).toMatchInlineSnapshot(`
       box       = ["InvisibleOperator", 2, ["Divide", "x", "a"], ["Divide", "y", "b"]]
-      canonical = ["Multiply", 2, ["Divide", "x", "a"], ["Divide", "y", "b"]]
-      simplify  = 2(x * y) / (a * b)
+      canonical = ["Divide", ["Multiply", 2, "x", "y"], ["Multiply", "a", "b"]]
       eval-auto = (2x * y) / (a * b)
     `);
   });
@@ -414,8 +413,8 @@ describe('POLYNOMIAL ORDER', () => {
       simplify  = 14pi * x^3 + x^3
       eval-auto = 14pi * x^3 + x^3
       eval-mach = 14pi * x^3 + x^3
-      N-auto    = 43.9822971502571053384 * x^3 + x^3
-      N-mach    = 43.982297150257104 * x^3 + x^3
+      N-auto    = 44.9822971502571053383 * x^3
+      N-mach    = 44.982297150257104 * x^3
     `);
   });
 

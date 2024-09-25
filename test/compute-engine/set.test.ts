@@ -40,13 +40,13 @@ describe('ELEMENT', () => {
   test('Sublists', () => {
     expect(
       ce.box(['Element', ['List', 2, 3], ['List', 2, 3, 4]]).evaluate()
-    ).toMatchInlineSnapshot(`True`);
+    ).toMatchInlineSnapshot(`False`);
     expect(
       ce.box(['Element', ['List', 3, 2], ['List', 2, 3, 4]]).evaluate()
     ).toMatchInlineSnapshot(`False`);
     expect(
       ce.box(['Element', ['List', 3], ['List', 2, 3, 4]]).evaluate()
-    ).toMatchInlineSnapshot(`True`);
+    ).toMatchInlineSnapshot(`False`);
   });
 
   test('INVALID', () => {
@@ -62,11 +62,23 @@ describe('ELEMENT', () => {
         "Element",
         2,
         "Integers",
-        ["Error", "'unexpected-argument'", "Numbers"]
+        ["Error", "'unexpected-argument'", "'"Numbers"'"]
       ]
     `);
-    expect(ce.box(['Element', 2, 3]).evaluate()).toMatchInlineSnapshot(
-      `["Element", 2, 3]`
-    );
+    expect(ce.box(['Element', 2, 3]).evaluate()).toMatchInlineSnapshot(`
+      [
+        "Element",
+        2,
+        [
+          "Error",
+          [
+            "ErrorCode",
+            "'incompatible-type'",
+            "'collection | string'",
+            "'finite_integer'"
+          ]
+        ]
+      ]
+    `);
   });
 });

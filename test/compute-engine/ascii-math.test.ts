@@ -264,7 +264,7 @@ describe('PRECEDENCE', () => {
     expect(check('1/2+3')).toMatchInlineSnapshot(`3 + 1/2`);
     expect(check('1/(2+3)')).toMatchInlineSnapshot(`1 / (2 + 3)`);
     expect(check('1+(2/3)+4')).toMatchInlineSnapshot(`1 + 4 + 2/3`);
-    expect(check('1+2/(3+4)')).toMatchInlineSnapshot(`1 + 2 * 1 / (3 + 4)`);
+    expect(check('1+2/(3+4)')).toMatchInlineSnapshot(`1 + 2 / (3 + 4)`);
     expect(check('(1+2)/3+4')).toMatchInlineSnapshot(`4 + 1/3 * (1 + 2)`);
     expect(check('1+(2/3)*4')).toMatchInlineSnapshot(`1 + 4 * 2/3`);
   });

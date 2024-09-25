@@ -60,7 +60,11 @@ describe('TRIGONOMETRY constructible values', () => {
         test(`${h}(${arg.toString()}) exact = numeric`, () =>
           expect(fNumeric.isEqual(fExact)).toBeTruthy());
 
-        if (fNumeric.symbol === 'ComplexInfinity') {
+        if (
+          fNumeric.symbol === 'ComplexInfinity' ||
+          (typeof fNumeric.numericValue !== 'number' &&
+            fNumeric.numericValue?.isComplexInfinity)
+        ) {
           test(`${h}(${arg.toString})`, () =>
             expect(Math.abs(jsValue) > 1e6).toBeTruthy());
         } else {

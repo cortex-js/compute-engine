@@ -19,8 +19,6 @@ import { engine, simplify } from '../utils';
 
 const ce = engine;
 
-console.log(NToJson('12345678^3 + \\frac{1}{3}'));
-
 function parseToJson(latex: string): Expression {
   return engine.parse(latex, { canonical: false }).json;
 }
@@ -642,7 +640,7 @@ describe('SIMPLIFICATION divide', () => {
 
   test(`\\frac{5}{\\frac{7}{x}}`, () =>
     expect(simplify('\\frac{5}{\\frac{7}{x}}')).toMatchInlineSnapshot(
-      `["Multiply", ["Rational", 5, 7], ["Divide", 1, "x"]]`
+      `["Multiply", ["Rational", 5, 7], "x"]`
     ));
 
   test(`simplify('\\frac{\\sqrt{15}}{\\sqrt{3}}')`, () =>
@@ -696,7 +694,7 @@ describe('SIMPLIFICATION sqrt', () => {
             15,
           ],
           [
-            Root,
+            Sqrt,
             [
               Add,
               28,
@@ -709,7 +707,6 @@ describe('SIMPLIFICATION sqrt', () => {
                 ],
               ],
             ],
-            2,
           ],
         ],
         [
@@ -720,7 +717,7 @@ describe('SIMPLIFICATION sqrt', () => {
             15,
           ],
           [
-            Root,
+            Sqrt,
             [
               Add,
               4,
@@ -733,7 +730,6 @@ describe('SIMPLIFICATION sqrt', () => {
                 ],
               ],
             ],
-            2,
           ],
         ],
       ]

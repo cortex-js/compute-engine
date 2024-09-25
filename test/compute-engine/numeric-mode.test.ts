@@ -40,10 +40,11 @@ describe('NUMERIC MODE', () => {
   test(`\\frac{\\pi}{4}`, () =>
     expect(check('\\frac{\\pi}{4}')).toMatchInlineSnapshot(`
       box       = ["Divide", "Pi", 4]
-      eval-auto = pi / 4
-      eval-mach = pi / 4
+      canonical = ["Multiply", ["Rational", 1, 4], "Pi"]
+      eval-auto = 1/4 * pi
+      eval-mach = 1/4 * pi
       N-auto    = 0.785398163397448309615
-      N-mach    = 0.7853981633974483
+      N-mach    = 0.785398163397448
     `));
 
   test(`\\frac{12345678901234567890}{23456789012345678901}`, () =>
@@ -60,12 +61,16 @@ describe('NUMERIC MODE', () => {
     expect(check('12345678901234567890^{23456789012345678901}'))
       .toMatchInlineSnapshot(`
       box       = ["Power", {num: "12345678901234567890"}, {num: "23456789012345678901"}]
-      eval-auto = +oo
+      eval-auto = 12345678901234567890^(23456789012345678901)
+      eval-mach = 12345678901234567890^(23456789012345678901)
+      N-auto    = +oo
+      N-mach    = +oo
     `));
 
   test(`\\cos(555555^{-1})`, () =>
     expect(check('\\cos(555555^{-1})')).toMatchInlineSnapshot(`
       box       = ["Cos", ["Divide", 1, 555555]]
+      simplify  = cos(1/555555)
       eval-auto = 0.99999999999837999676
       eval-mach = 0.99999999999838
     `));
@@ -88,6 +93,9 @@ describe('NUMERIC MODE', () => {
       box       = ["Power", "e", ["InvisibleOperator", "i", "Pi"]]
       canonical = ["Exp", ["Multiply", ["Complex", 0, 1], "Pi"]]
       simplify  = -1
+      eval-auto = -1
+      eval-mach = -1
+      N-auto    = (-1 + 1.2246467991473532e-16i)
     `));
 });
 
@@ -109,7 +117,7 @@ describe('NUMERIC MODE bignum 7', () => {
     expect(N('\\sqrt{-1}')).toMatchInlineSnapshot(`["Complex", 0, 1]`));
 
   test(`\\frac{1}{7}`, () =>
-    expect(N('\\frac{1}{7}')).toMatchInlineSnapshot(`0.14285714285714285`));
+    expect(N('\\frac{1}{7}')).toMatchInlineSnapshot(`0.142857142857143`));
 
   test(`\\frac{\\pi}{4}`, () =>
     expect(N('\\frac{\\pi}{4}')).toMatchInlineSnapshot(`0.7853981633974483`));
