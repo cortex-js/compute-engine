@@ -1,4 +1,4 @@
-import { Complex } from 'complex.esm.js';
+import { Complex } from 'complex-esm';
 import Decimal from 'decimal.js';
 
 import type { Expression } from '../../math-json/types';

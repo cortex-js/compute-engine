@@ -1,4 +1,4 @@
-import { Complex } from 'complex.esm.js';
+import { Complex } from 'complex-esm';
 import { Decimal } from 'decimal.js';
 import { Rational, isRational } from './numerics/rationals';
 import type {

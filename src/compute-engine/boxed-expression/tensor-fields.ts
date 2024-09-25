@@ -1,4 +1,4 @@
-import { Complex } from 'complex.esm.js';
+import { Complex } from 'complex-esm';
 import type { BoxedExpression, IComputeEngine } from '../public';
 import { isRelationalOperator } from './utils';
 import { mul } from './arithmetic-multiply';

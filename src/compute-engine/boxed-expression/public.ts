@@ -1,4 +1,4 @@
-import { Complex } from 'complex.esm.js';
+import { Complex } from 'complex-esm';
 import type {
   Expression,
   MathJsonNumber,
