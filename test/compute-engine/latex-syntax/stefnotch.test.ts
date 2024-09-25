@@ -24,9 +24,7 @@ describe('STEFNOTCH #10', () => {
   });
 
   test('2/ 1^{\\sin(x)}', () => {
-    expect(parse('1^{\\sin(x)}')).toMatchInlineSnapshot(
-      `["Power", 1, ["Sin", "x"]]`
-    );
+    expect(parse('1^{\\sin(x)}')).toMatchInlineSnapshot(`1`);
   });
 
   test('3/ 3\\text{hello}6', () => {

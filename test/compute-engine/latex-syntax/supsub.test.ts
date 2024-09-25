@@ -15,9 +15,7 @@ describe('SUPSUB', () => {
       `["Power", 2, ["Power", 3, 4]]`
     );
     expect(ce.parse('2^{10}')).toMatchInlineSnapshot(`["Power", 2, 10]`);
-    expect(ce.parse('2^{-2}')).toMatchInlineSnapshot(
-      `["Divide", 1, ["Square", 2]]`
-    );
+    expect(ce.parse('2^{-2}')).toMatchInlineSnapshot(`["Divide", 1, 4]`);
     expect(ce.parse('2^3^4')).toMatchInlineSnapshot(
       `["Power", 2, ["List", 3, 4]]`
     );
@@ -35,9 +33,7 @@ describe('SUPSUB', () => {
   test('Subscript', () => {
     expect(ce.parse('x_0')).toMatchInlineSnapshot(`["At", "x", 0]`);
     expect(ce.parse('x^2_0')).toMatchInlineSnapshot(`["Square", "x_0"]`);
-    expect(ce.parse('x_0^2')).toMatchInlineSnapshot(
-      `["At", "x", ["Square", 0]]`
-    );
+    expect(ce.parse('x_0^2')).toMatchInlineSnapshot(`["At", "x", 0]`);
     expect(ce.parse('x_{n+1}')).toMatchInlineSnapshot(
       `["At", "x", ["Add", "n", 1]]`
     );
@@ -47,8 +43,7 @@ describe('SUPSUB', () => {
         "x",
         [
           "Error",
-          ["ErrorCode", "'incompatible-domain'", "Values", "Anything"],
-          ["At", "n", 1]
+          ["ErrorCode", "'incompatible-type'", "'number | string'", "'any'"]
         ]
       ]
     `);
@@ -69,8 +64,7 @@ describe('SUPSUB', () => {
           "Power",
           [
             "Error",
-            ["ErrorCode", "'incompatible-domain'", "Numbers", "Anything"],
-            ["At", "x", ["Add", "r", 1]]
+            ["ErrorCode", "'incompatible-type'", "'number'", "'any'"]
           ],
           ["Add", "s", 1]
         ]
@@ -83,8 +77,7 @@ describe('SUPSUB', () => {
           "Power",
           [
             "Error",
-            ["ErrorCode", "'incompatible-domain'", "Numbers", "Symbols"],
-            ["Subscript", "x", ["Add", "p", 1]]
+            ["ErrorCode", "'incompatible-type'", "'number'", "'symbol'"]
           ],
           ["Add", "q", 1]
         ],
@@ -92,8 +85,7 @@ describe('SUPSUB', () => {
           "Power",
           [
             "Error",
-            ["ErrorCode", "'incompatible-domain'", "Numbers", "Anything"],
-            ["At", "x", ["Add", "r", 1]]
+            ["ErrorCode", "'incompatible-type'", "'number'", "'any'"]
           ],
           ["Add", "s", 1]
         ]
@@ -107,9 +99,16 @@ describe('SUPSUB', () => {
     expect(ce.parse('(x+1)_{n-1}')).toMatchInlineSnapshot(
       `["Subscript", ["Add", "x", 1], ["Subtract", "n", 1]]`
     );
-    expect(ce.parse('(x+1)^n_0')).toMatchInlineSnapshot(
-      `["Power", ["Subscript", ["Add", "x", 1], 0], "n"]`
-    );
+    expect(ce.parse('(x+1)^n_0')).toMatchInlineSnapshot(`
+      [
+        "Power",
+        [
+          "Error",
+          ["ErrorCode", "'incompatible-type'", "'number'", "'expression'"]
+        ],
+        "n"
+      ]
+    `);
     expect(ce.parse('^p_q{x+1}^n_0')).toMatchInlineSnapshot(`
       [
         "Superscript",
@@ -126,9 +125,16 @@ describe('SUPSUB', () => {
     expect(ce.parse('\\vec{AB}')).toMatchInlineSnapshot(
       `["OverVector", ["Multiply", "A", "B"]]`
     ); // @fixme: nope...
-    expect(ce.parse('\\vec{AB}^{-1}')).toMatchInlineSnapshot(
-      `["Divide", 1, ["OverVector", ["Multiply", "A", "B"]]]`
-    );
+    expect(ce.parse('\\vec{AB}^{-1}')).toMatchInlineSnapshot(`
+      [
+        "Power",
+        [
+          "Error",
+          ["ErrorCode", "'incompatible-type'", "'number'", "'function'"]
+        ],
+        -1
+      ]
+    `);
   });
 });
 

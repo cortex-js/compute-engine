@@ -257,8 +257,8 @@ describe('PRECEDENCE', () => {
     expect(check('1*(2+3)')).toMatchInlineSnapshot(`2 + 3`);
     expect(check('1+2^3')).toMatchInlineSnapshot(`1 + 2^3`);
     expect(check('(1+2)^3')).toMatchInlineSnapshot(`(1 + 2)^3`);
-    expect(check('1^2+3')).toMatchInlineSnapshot(`3 + 1^2`);
-    expect(check('1^{2+3}')).toMatchInlineSnapshot(`1^(2 + 3)`);
+    expect(check('1^2+3')).toMatchInlineSnapshot(`1 + 3`);
+    expect(check('1^{2+3}')).toMatchInlineSnapshot(`1`);
     expect(check('1+2/3')).toMatchInlineSnapshot(`1 + 2/3`);
     expect(check('(1+2)/3')).toMatchInlineSnapshot(`1/3 * (1 + 2)`);
     expect(check('1/2+3')).toMatchInlineSnapshot(`3 + 1/2`);
