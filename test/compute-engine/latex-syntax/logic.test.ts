@@ -97,7 +97,7 @@ describe('Logic', () => {
         q,
       ]
     `);
-  });
+  }); // @fixme
 
   it('should parse Equivalent', () => {
     expect(ce.parse('p \\Leftrightarrow q').json).toMatchInlineSnapshot(`
@@ -122,7 +122,7 @@ describe('Logic', () => {
         q,
       ]
     `);
-  });
+  }); // @fixme
 
   it('should parse XOR', () => {
     expect(ce.parse('p \\oplus q').json).toMatchInlineSnapshot(`

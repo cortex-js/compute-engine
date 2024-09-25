@@ -47,7 +47,7 @@ describe('D', () => {
     const expr = parse('D(\\sin(\\frac{1}{x}) + \\ln(x^2+2x), x)');
     const result = expr.evaluate();
     expect(result.latex).toMatchInlineSnapshot(
-      `\\frac{2(x+1)}{x^2+2x}-\\frac{\\cos(\\frac{1}{x})}{x^2}`
+      `\\frac{2x+2}{x^2+2x}-\\frac{\\cos(\\frac{1}{x})}{x^2}`
     );
   });
 });

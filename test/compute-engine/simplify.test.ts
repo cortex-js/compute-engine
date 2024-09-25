@@ -190,8 +190,8 @@ const RULE_TEST_CASES: TestCase[] = [
             //
           `,
   ],
-  ['e e^x e^{-x}', 'e'], // up to 👍x^n*x^m -> x^{n+m}; ({ x, n, m }) => (x.isNotZero === true ||             n.add(m).isNegative === true ||             n.mul(m).isPositive === true) &&             (n.isInteger === true ||                 m.isInteger === true ||                 n.add(m).isRational === false ||                 x.isNonNegative === true)
-  ['e^x e^{-x}', 1], // 👍 x^n*x^m -> x^{n+m}; ({ x, n, m }) => (x.isNotZero === true ||             n.add(m).isNegative === true ||             n.mul(m).isPositive === true) &&             (n.isInteger === true ||                 m.isInteger === true ||                 n.add(m).isRational === false ||                 x.isNonNegative === true)
+  ['e e^x e^{-x}', 'e'], // up to 👍x^n*x^m -> x^{n+m}; ({ x, n, m }) => (!x.is(0) ||             n.add(m).isNegative === true ||             n.mul(m).isPositive === true) &&             (n.isInteger === true ||                 m.isInteger === true ||                 n.add(m).isRational === false ||                 x.isNonNegative === true)
+  ['e^x e^{-x}', 1], // 👍 x^n*x^m -> x^{n+m}; ({ x, n, m }) => (x.isEqual(0) === false ||             n.add(m).isNegative === true ||             n.mul(m).isPositive === true) &&             (n.isInteger === true ||                 m.isInteger === true ||                 n.add(m).isRational === false ||                 x.isNonNegative === true)
   ['\\sqrt[4]{16b^{4}}', '2b'],
 
   [
@@ -592,7 +592,7 @@ const RULE_TEST_CASES: TestCase[] = [
   ['x^{-2}*x', '1/x'],
   ['x^{-1/3}*x', 'x^{-1/3}*x'], // 🙁 with all rules: x^(2/3)
   ['\\pi^{-2}*\\pi', '1/\\pi'],
-  ['\\pi^{-0.2}*\\pi', '\\pi^{0.8}'], // 👍 x^n*x -> x^{n+1}; ({ x, n }) => x.isNotZero === true || n.isPositive === true || x.isLess(-1) === true
+  ['\\pi^{-0.2}*\\pi', '\\pi^{0.8}'], // 👍 x^n*x -> x^{n+1}; ({ x, n }) => x.isEqual(0) === false || n.isPositive === true || x.isLess(-1) === true
   ['\\sqrt[3]{x}*x', 'x^{4/3}'],
 
   [
@@ -623,7 +623,7 @@ const RULE_TEST_CASES: TestCase[] = [
   ['x^{-1}/x^3', '1/x^4'],
   ['x/x^{-1}', 'x/x^{-1}'], // 🙁 with all rules: x * x
   ['\\pi / \\pi^{-1}', '\\pi^2'], // 👍 (x) => {         if (x.operator === 'Divide')             return { value: x.op1.div(x.op2), because: 'division' };         if (x.operator === 'Rational' && x.nops === 2)             return { value: x.op1.div(x.op2), because: 'rational' };         return undefined;     }
-  ['\\pi^{0.2}/\\pi^{0.1}', '\\pi^{0.1}'], // up to 👍x^n*x^m -> x^{n+m}; ({ x, n, m }) => (x.isNotZero === true ||             n.add(m).isNegative === true ||             n.mul(m).isPositive === true) &&             (n.isInteger === true ||                 m.isInteger === true ||                 n.add(m).isRational === false ||                 x.isNonNegative === true)
+  ['\\pi^{0.2}/\\pi^{0.1}', '\\pi^{0.1}'], // up to 👍x^n*x^m -> x^{n+m}; ({ x, n, m }) => (x.isEqual(0) === false ||             n.add(m).isNegative === true ||             n.mul(m).isPositive === true) &&             (n.isInteger === true ||                 m.isInteger === true ||                 n.add(m).isRational === false ||                 x.isNonNegative === true)
   ['x^{\\sqrt{2}}/x^3', 'x^{\\sqrt{2}-3}'], // 🙁 x^(sqrt(2)) / x^3
 
   [
@@ -857,7 +857,7 @@ const RULE_TEST_CASES: TestCase[] = [
   🚫 (-x)^n:odd -> -(x^n)
   🚫 (-x)^{n/m} -> x^{n/m}; n:even, m:odd
   🚫 (-x)^{n/m} -> -x^{n/m}; ({ n, m }) => n.isOdd === true && m.isOdd === true
-  🚫 a/b+c/d -> (a*d+b*c)/(b*d); ({ a }) => a.isNotZero === true
+  🚫 a/b+c/d -> (a*d+b*c)/(b*d); ({ a }) => a.isEqual(0) === false
   🚫 \ln(x) + \ln(y) -> \ln(xy)
   🚫 e^{\ln(x)-y} -> x/e^y
   🚫 \ln(e^x/y) -> x-\ln(y)
@@ -877,8 +877,8 @@ const RULE_TEST_CASES: TestCase[] = [
   🚫 |\frac{x}{y}| -> -\frac{x}{|y|}; ({ x }) => x.isNonPositive === true
   🚫 |\frac{x}{y}| -> \frac{|x|}{y}; ({ y }) => y.isNonNegative === true
   🚫 |\frac{x}{y}| -> -\frac{|x|}{y}; ({ y }) => y.isNonPositive === true
-  🚫 \frac{a}{b^{-n}} -> a*b^n; ({ b }) => b.isNotZero === true
-  🚫 \frac{a}{d*b^{-n}} -> \frac{a}{d}*b^n; ({ b }) => b.isNotZero === true
+  🚫 \frac{a}{b^{-n}} -> a*b^n; ({ b }) => b.isEqual(0) === false
+  🚫 \frac{a}{d*b^{-n}} -> \frac{a}{d}*b^n; ({ b }) => b.isEqual(0) === false
   🚫 \infty/x -> \infty; ({ x }) => x.isPositive === true && x.isFinite === true
   🚫 (-\infty)/x -> -\infty; ({ x }) => x.isPositive === true && x.isFinite === true
   🚫 \infty/x -> -\infty; ({ x }) => x.isNegative === true && x.isFinite === true
@@ -894,15 +894,15 @@ const RULE_TEST_CASES: TestCase[] = [
   🚫 \log_c(\infty) -> \infty; ({ c }) => c.isGreater(1) === true
   🚫 \log_\infty(c) -> 0; ({ c }) => c.isPositive === true && c.isOne === false && c.isFinite === true
   🚫 \operatorname{arccoth}(x); ({ x }) => x.isInfinity === true
-  🚫 a/a -> 1; ({ a }) => a.isNotZero === true
-  🚫 1/(1/a) -> a; ({ a }) => a.isNotZero === true
-  🚫 a/(1/b) -> a*b; ({ b }) => b.isNotZero === true
-  🚫 a/(b/c) -> (a*c)/b; ({ c }) => c.isNotZero === true
+  🚫 a/a -> 1; ({ a }) => a.isEqual(0) === false
+  🚫 1/(1/a) -> a; ({ a }) => a.isEqual(0) === false
+  🚫 a/(1/b) -> a*b; ({ b }) => b.isEqual(0) === false
+  🚫 a/(b/c) -> (a*c)/b; ({ c }) => c.isEqual(0) === false
   🚫 x/x^n -> 1/x^{n-1}; ({ x, n }) => x.isNotZero || n.isGreater(1) === true
-  🚫 x^n/x^m -> x^{n+m}; ({ x, n, m }) => (x.isNotZero === true || n.add(m).isNegative === true) &&             (n.isInteger === true ||                 m.isInteger === true ||                 n.sub(m).isRational === false ||                 x.isNonNegative === true)
-  🚫 a/(b/c)^d -> a*(c/b)^d; ({ c }) => c.isNotZero === true
-  🚫 (b/c)^{-d} -> (c/b)^d; ({ c }) => c.isNotZero === true
-  🚫 (b/c)^{-1} -> c/b; ({ c }) => c.isNotZero === true
+  🚫 x^n/x^m -> x^{n+m}; ({ x, n, m }) => (x.isEqual(0) === false || n.add(m).isNegative === true) &&             (n.isInteger === true ||                 m.isInteger === true ||                 n.sub(m).isRational === false ||                 x.isNonNegative === true)
+  🚫 a/(b/c)^d -> a*(c/b)^d; ({ c }) => c.isEqual(0) === false
+  🚫 (b/c)^{-d} -> (c/b)^d; ({ c }) => c.isEqual(0) === false
+  🚫 (b/c)^{-1} -> c/b; ({ c }) => c.isEqual(0) === false
   🚫 (a^n)^m -> a^{m*n}; ({ a, n, m }) => ((n.isInteger === true && m.isInteger === true) ||             a.isNonNegative ||             n.mul(m).isRational === false) &&             (n.isPositive === true || m.isPositive === true)
   🚫 \ln(x^n) -> n*\ln(x); ({ x, n }) => x.isNonNegative || n.isOdd === true || n.isRational === false
   🚫 \ln(x^{n/k}) -> n*\ln(x)/k; ({ x, n }) => x.isNonNegative || n.isOdd === true
@@ -952,7 +952,7 @@ const RULES: Rule[] = [
   {
     match: 'a/b+c/d',
     replace: '(a*d+b*c)/(b*d)',
-    condition: ({ a }) => a.isNotZero === true,
+    condition: ({ a }) => !a.is(0),
   },
 
   //Not Being Run (gives infinity instead of NaN)
@@ -991,7 +991,7 @@ const RULES: Rule[] = [
   {
     match: '\\log_c(x)',
     replace: '\\operatorname{NaN}',
-    condition: ({ c }) => c.isZero === true || c.isOne === true,
+    condition: ({ c }) => c.is(0) || c.is(1),
   },
   '\\log_c(x) + \\log_c(y) -> \\log_c(xy)', //assumes negative arguments are allowed
   '\\log_c(x) - \\log_c(y) -> \\log_c(x/y)',
@@ -1098,12 +1098,12 @@ const RULES: Rule[] = [
   {
     match: '\\frac{a}{b^{-n}}',
     replace: 'a*b^n',
-    condition: ({ b }) => b.isNotZero === true,
+    condition: ({ b }) => !b.is(0),
   }, // doesn't work but {match:'\\frac{a}{b^n}',replace:'a*b^{-n}',condition:ids=>ids._n.isNotZero===true} works
   {
     match: '\\frac{a}{d*b^{-n}}',
     replace: '\\frac{a}{d}*b^n',
-    condition: ({ b }) => b.isNotZero === true,
+    condition: ({ b }) => !b.is(0),
   }, // doesn't work but {match:'\\frac{a}{d*b^n}',replace:'\\frac{a}{d}*b^{-n}',condition:ids=>ids._n.isNotZero===true} works
 
   //Indeterminate Forms Involving Infinity
@@ -1218,7 +1218,7 @@ const RULES: Rule[] = [
     match: '\\log_\\infty(c)',
     replace: '0',
     condition: ({ c }) =>
-      c.isPositive === true && c.isOne === false && c.isFinite === true,
+      c.isPositive === true && !c.is(1) && c.isFinite === true,
   },
 
   //Trig and Infinity
@@ -1311,53 +1311,53 @@ const RULES: Rule[] = [
   //----------- DOMAIN ISSUES -----------
 
   //Division
-  { match: 'a/a', replace: '1', condition: ({ a }) => a.isNotZero === true },
+  // { match: 'a/a', replace: '1', condition: ({ a }) => a.isEqual(0) === false },
   {
     match: '1/(1/a)',
     replace: 'a',
-    condition: ({ a }) => a.isNotZero === true,
+    condition: ({ a }) => !a.is(0),
   },
   {
     match: 'a/(1/b)',
     replace: 'a*b',
-    condition: ({ b }) => b.isNotZero === true,
+    condition: ({ b }) => !b.is(0),
   },
   {
     match: 'a/(b/c)',
     replace: '(a*c)/b',
-    condition: ({ c }) => c.isNotZero === true,
+    condition: ({ c }) => !c.is(0),
   },
   // This rule is not needed because the canonical form of 0/a is 0
-  // { match: '0/a', replace: '0', condition: ({ _a }) => _a.isNotZero === true },
+  // { match: '0/a', replace: '0', condition: ({ _a }) => !_a.is(0) },
 
   //Powers
   // This rule is not needed because the canonical form of x^0 is 1
   // {
   //   match: 'x^0',
   //   replace: '1',
-  //   condition: ({c}) => c.isNotZero === true && ids._x.isFinite === true,
+  //   condition: ({c}) => !c.is(0) && ids._x.isFinite === true,
   // },
   {
     match: 'x/x^n',
     replace: '1/x^{n-1}',
-    condition: ({ x, n }) => x.isNotZero || n.isGreater(1) === true,
+    condition: ({ x, n }) => !x.is(0) || n.isGreater(1) === true,
   },
   {
     match: 'x^n/x',
     replace: '1/x^{1-n}',
-    condition: ({ x, n }) => x.isNotZero || n.isLess(1) === true,
+    condition: ({ x, n }) => !x.is(0) || n.isLess(1) === true,
   },
   {
     match: 'x^n*x',
     replace: 'x^{n+1}',
     condition: ({ x, n }) =>
-      x.isNotZero === true || n.isPositive === true || n.isLess(-1) === true,
+      !x.is(0) || n.isPositive === true || n.isLess(-1) === true,
   },
   {
     match: 'x^n*x^m',
     replace: 'x^{n+m}',
     condition: ({ x, n, m }) =>
-      (x.isNotZero === true ||
+      (!x.is(0) ||
         n.add(m).isNegative === true ||
         n.mul(m).isPositive === true) &&
       (n.isInteger === true ||
@@ -1369,7 +1369,7 @@ const RULES: Rule[] = [
     match: 'x^n/x^m',
     replace: 'x^{n+m}',
     condition: ({ x, n, m }) =>
-      (x.isNotZero === true || n.add(m).isNegative === true) &&
+      (!x.is(0) || n.add(m).isNegative === true) &&
       (n.isInteger === true ||
         m.isInteger === true ||
         n.sub(m).isRational === false ||
@@ -1379,17 +1379,17 @@ const RULES: Rule[] = [
   {
     match: 'a/(b/c)^d',
     replace: 'a*(c/b)^d',
-    condition: ({ c }) => c.isNotZero === true,
+    condition: ({ c }) => !c.is(0),
   },
   {
     match: '(b/c)^{-d}',
     replace: '(c/b)^d',
-    condition: ({ c }) => c.isNotZero === true,
+    condition: ({ c }) => !c.is(0),
   },
   {
     match: '(b/c)^{-1}',
     replace: 'c/b',
-    condition: ({ c }) => c.isNotZero === true,
+    condition: ({ c }) => !c.is(0),
   },
   {
     match: '(a^n)^m',

@@ -2,22 +2,26 @@ import Decimal from 'decimal.js';
 import { NumericValue, NumericValueData } from './public';
 import type { Expression } from '../../math-json/types';
 import { MACHINE_TOLERANCE, SmallInteger } from '../numerics/numeric';
-import { asMachineRational } from '../numerics/rationals';
 import { numberToString } from '../numerics/strings';
 import { numberToExpression } from '../numerics/expression';
+import { NumericType } from '../../common/type/types';
+import { ExactNumericValue } from './exact-numeric-value';
+import { BigNumFactory } from './big-numeric-value';
 
 export class MachineNumericValue extends NumericValue {
+  __brand: 'MachineNumericValue';
+
   decimal: number;
   im: number;
-  _makeExact: (x: number | NumericValueData) => NumericValue;
+
+  bignum: BigNumFactory;
 
   constructor(
     value: number | Decimal | NumericValueData,
-    makeExact: (x: number | NumericValueData) => NumericValue
+    bignum: BigNumFactory
   ) {
     super();
-
-    this._makeExact = makeExact;
+    this.bignum = bignum;
 
     if (typeof value === 'number') {
       this.decimal = value;
@@ -25,29 +29,18 @@ export class MachineNumericValue extends NumericValue {
     } else if (value instanceof Decimal) {
       this.decimal = value.toNumber();
       this.im = 0;
-    } else if (
-      !('decimal' in value) &&
-      !('rational' in value) &&
-      !('radical' in value)
-    ) {
-      this.decimal = 0;
-      this.im = value.im ?? 0;
     } else {
-      let decimal =
-        value.decimal === undefined
-          ? 1
-          : value.decimal instanceof Decimal
-            ? value.decimal.toNumber()
-            : value.decimal;
-
-      if (value.rational !== undefined) {
-        const [n, d] = asMachineRational(value.rational);
-        decimal = (decimal * n) / d;
-      }
-      if (value.radical !== undefined) decimal *= Math.sqrt(value.radical);
+      const decimal =
+        value.re === undefined
+          ? 0
+          : value.re instanceof Decimal
+            ? value.re.toNumber()
+            : value.re;
 
       this.decimal = decimal;
       this.im = value.im ?? 0;
+      // Complex infinity or NaN?
+      if (!isFinite(this.im)) this.decimal = this.im;
     }
 
     // Don't expect im to ever be NaN. If it is, it would need to be handled
@@ -55,10 +48,19 @@ export class MachineNumericValue extends NumericValue {
     console.assert(!isNaN(this.im));
   }
 
-  get type(): 'complex' | 'real' | 'rational' | 'integer' {
-    if (this.im !== 0) return 'complex';
-    if (Number.isInteger(this.decimal)) return 'integer';
-    return 'real';
+  private _makeExact(value: number | bigint): ExactNumericValue {
+    return new ExactNumericValue(value, (x) => this.clone(x), this.bignum);
+  }
+
+  get type(): NumericType {
+    if (this.im !== 0) {
+      if (!Number.isFinite(this.im)) return 'non_finite_number';
+      if (this.decimal === 0) return 'finite_imaginary';
+      return 'finite_complex';
+    }
+    if (!Number.isFinite(this.decimal)) return 'non_finite_number';
+    if (Number.isInteger(this.decimal)) return 'finite_integer';
+    return 'finite_real';
   }
 
   get isExact(): boolean {
@@ -67,7 +69,7 @@ export class MachineNumericValue extends NumericValue {
 
   get asExact(): NumericValue | undefined {
     if (!this.isExact) return undefined;
-    return this._makeExact({ decimal: this.decimal });
+    return this._makeExact(this.decimal);
   }
 
   toJSON(): Expression {
@@ -94,6 +96,8 @@ export class MachineNumericValue extends NumericValue {
       return `${numberToString(this.im)}i`;
     }
 
+    if (this.isComplexInfinity) return '~oo';
+
     let im = '';
     if (this.im === 1) im = '+ i';
     else if (this.im === -1) im = '- i';
@@ -104,7 +108,7 @@ export class MachineNumericValue extends NumericValue {
   }
 
   clone(value: number | Decimal | NumericValueData) {
-    return new MachineNumericValue(value, this._makeExact);
+    return new MachineNumericValue(value, this.bignum);
   }
 
   get re(): number {
@@ -128,17 +132,15 @@ export class MachineNumericValue extends NumericValue {
   }
 
   get isPositiveInfinity(): boolean {
-    return (
-      (!Number.isFinite(this.decimal) && this.decimal > 0) ||
-      this.im === Infinity
-    );
+    return !Number.isFinite(this.decimal) && this.decimal > 0 && this.im === 0;
   }
 
   get isNegativeInfinity(): boolean {
-    return (
-      (!Number.isFinite(this.decimal) && this.decimal < 0) ||
-      this.im === -Infinity
-    );
+    return !Number.isFinite(this.decimal) && this.decimal < 0 && this.im === 0;
+  }
+
+  get isComplexInfinity(): boolean {
+    return !Number.isFinite(this.im) && !Number.isNaN(this.im);
   }
 
   get isZero(): boolean {
@@ -172,7 +174,7 @@ export class MachineNumericValue extends NumericValue {
   neg(): NumericValue {
     if (this.isNaN) return this._makeExact(NaN);
     if (this.isZero) return this;
-    return this.clone({ decimal: -this.decimal, im: -this.im });
+    return this.clone({ re: -this.decimal, im: -this.im });
   }
 
   inv(): NumericValue {
@@ -182,20 +184,21 @@ export class MachineNumericValue extends NumericValue {
     if (this.im === 0) return this.clone(1 / this.decimal);
 
     const d = Math.hypot(this.re, this.im);
-    return this.clone({ decimal: this.decimal / d, im: -this.im / d });
+    return this.clone({ re: this.decimal / d, im: -this.im / d });
   }
 
   add(other: number | NumericValue): NumericValue {
     if (this.isNaN) return this._makeExact(NaN);
     if (typeof other === 'number') {
       if (other === 0) return this;
-      return this.clone({ decimal: this.decimal + other, im: this.im });
+      return this.clone({ re: this.decimal + other, im: this.im });
     }
     if (other.isZero) return this;
-    if (this.isZero) return this.clone(other);
+    if (this.isZero)
+      return this.clone({ re: other.bignumRe ?? other.re, im: other.im });
 
     return this.clone({
-      decimal: this.decimal + other.re,
+      re: this.decimal + other.re,
       im: this.im + other.im,
     });
   }
@@ -215,27 +218,33 @@ export class MachineNumericValue extends NumericValue {
 
     // We need to ensure that non-exact propagates, so clone value in case
     // it was an ExactNumericValue
-    if (this.isOne) return this.clone(other);
-
+    if (this.isOne) {
+      if (typeof other === 'number' || other instanceof Decimal)
+        return this.clone(other);
+      return this.clone({ re: other.bignumRe ?? other.re, im: other.im });
+    }
     if (typeof other === 'number') {
       if (this.im === 0) return this.clone(this.decimal * other);
 
       return this.clone({
-        decimal: this.decimal * other,
+        re: this.decimal * other,
         im: this.im * other,
       });
     }
 
-    if (this.isNegativeOne) return this.clone(other.neg());
+    if (this.isNegativeOne) {
+      const n = other.neg();
+      return this.clone({ re: n.bignumRe ?? n.re, im: n.im });
+    }
     if (other.isOne) return this;
     if (other.isNegativeOne) return this.neg();
-    if (other.isZero) return this.clone(other);
+    if (other.isZero) return this.clone(0);
 
     if (this.im === 0 && other.im === 0)
       return this.clone(this.decimal * other.re);
 
     return this.clone({
-      decimal: this.decimal * other.re - this.im * other.im,
+      re: this.decimal * other.re - this.im * other.im,
       im: this.re * other.im + this.im * other.re,
     });
   }
@@ -246,7 +255,10 @@ export class MachineNumericValue extends NumericValue {
       if (other === 1) return this;
       if (other === -1) return this.neg();
       if (other === 0) return this.clone(NaN);
-      return this.clone({ decimal: this.decimal / other, im: this.im / other });
+      return this.clone({
+        re: this.decimal / other,
+        im: this.im / other,
+      });
     }
 
     if (other.isOne) return this;
@@ -260,7 +272,7 @@ export class MachineNumericValue extends NumericValue {
     const [c, d] = [other.re, other.im];
     const denominator = c * c + d * d;
     return this.clone({
-      decimal: (a * c + b * d) / denominator,
+      re: (a * c + b * d) / denominator,
       im: (b * c - a * d) / denominator,
     });
   }
@@ -310,7 +322,7 @@ export class MachineNumericValue extends NumericValue {
         const zRe = this.pow(re).re;
         const zArg = Math.log(this.decimal) * im;
         return this.clone({
-          decimal: chop(zRe * Math.cos(zArg)),
+          re: chop(zRe * Math.cos(zArg)),
           im: chop(zRe * Math.sin(zArg)),
         });
       }
@@ -350,7 +362,7 @@ export class MachineNumericValue extends NumericValue {
     const newModulus = modulus ** exponent;
     const newArgument = argument ** exponent;
     return this.clone({
-      decimal: newModulus * Math.cos(newArgument),
+      re: newModulus * Math.cos(newArgument),
       im: newModulus * Math.sin(newArgument),
     });
   }
@@ -371,7 +383,7 @@ export class MachineNumericValue extends NumericValue {
     if (this.im === 0) {
       if (this.decimal < 0) {
         if (exponent % 2 === 0) return this.clone(NaN);
-        return this.clone({ decimal: -Math.pow(-this.decimal, 1 / exponent) });
+        return this.clone(-Math.pow(-this.decimal, 1 / exponent));
       }
       return this.clone(Math.pow(this.decimal, 1 / exponent));
     }
@@ -386,7 +398,7 @@ export class MachineNumericValue extends NumericValue {
     const newArgument = argument / exponent;
 
     return this.clone({
-      decimal: newModulus * Math.cos(newArgument),
+      re: newModulus * Math.cos(newArgument),
       im: newModulus * Math.sin(newArgument),
     });
   }
@@ -404,7 +416,7 @@ export class MachineNumericValue extends NumericValue {
 
       const realPart = Math.sqrt((a + modulus) / 2);
       const imaginaryPart = Math.sign(b) * Math.sqrt((modulus - a) / 2);
-      return this.clone({ decimal: realPart, im: imaginaryPart });
+      return this.clone({ re: realPart, im: imaginaryPart });
     }
 
     if (this.decimal > 0) return this.clone(Math.sqrt(this.decimal));
@@ -465,7 +477,7 @@ export class MachineNumericValue extends NumericValue {
         ? Math.log(modulus)
         : Math.log(modulus) / Math.log(base);
 
-    return this.clone({ decimal, im: argument });
+    return this.clone({ re: decimal, im: argument });
   }
 
   exp(): NumericValue {
@@ -478,7 +490,7 @@ export class MachineNumericValue extends NumericValue {
       // exp(a + bi) = exp(a) * (cos(b) + i * sin(b))
       const e = Math.exp(this.decimal);
       return this.clone({
-        decimal: e * Math.cos(this.im),
+        re: e * Math.cos(this.im),
         im: e * Math.sin(this.im),
       });
     }
@@ -504,7 +516,8 @@ export class MachineNumericValue extends NumericValue {
   }
 
   eq(other: number | NumericValue): boolean {
-    if (typeof other === 'number') return chop(this.decimal - other) === 0;
+    if (typeof other === 'number')
+      return this.im === 0 && chop(this.decimal - other) === 0;
     return (
       chop(this.decimal - other.re) === 0 && chop(this.im - other.im) === 0
     );

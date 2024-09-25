@@ -18,28 +18,6 @@ describe('Primality Test', () => {
           [
             "Cos",
             [
-              "Multiply",
-              "Pi",
-              [
-                "Divide",
-                [
-                  "Add",
-                  ["Factorial", ["Delimiter", ["Subtract", "n", 1]]],
-                  1
-                ],
-                "n"
-              ]
-            ]
-          ]
-        ]
-      ]
-      canonical = [
-        "Negate",
-        [
-          "Floor",
-          [
-            "Cos",
-            [
               "Divide",
               [
                 "Multiply",
@@ -52,10 +30,7 @@ describe('Primality Test', () => {
         ]
       ]
       simplify  = -floor(cos((pi * (n - 1)! + pi) / n))
-      eval-auto = -floor(cos((pi * (n - 1)! + pi) / n))
-      eval-mach = -floor(cos((pi * (n - 1)! + pi) / n))
-      N-auto    = -floor(cos((3.14159265358979323846 * (n - 1)! + 3.14159265358979323846) / n))
-      N-mach    = -floor(cos((3.141592653589793 * (n - 1)! + 3.141592653589793) / n))
+      eval-auto = NaN
     `));
   // 	https://en.wikipedia.org/wiki/Wilson%27s_theorem
   // 	https://en.wikipedia.org/wiki/Primality_test#Wilson's_theorem
@@ -124,21 +99,19 @@ describe('Nth PRIME NUMBER', () =>
                                             "Error",
                                             [
                                               "ErrorCode",
-                                              "'incompatible-domain'",
-                                              "Numbers",
-                                              "Anything"
-                                            ],
-                                            ["At", "v", 2]
+                                              "'incompatible-type'",
+                                              "'number'",
+                                              "'any'"
+                                            ]
                                           ],
                                           [
                                             "Error",
                                             [
                                               "ErrorCode",
-                                              "'incompatible-domain'",
-                                              "Numbers",
-                                              "Anything"
-                                            ],
-                                            ["At", "v", 3]
+                                              "'incompatible-type'",
+                                              "'number'",
+                                              "'any'"
+                                            ]
                                           ]
                                         ]
                                       ],
@@ -150,21 +123,19 @@ describe('Nth PRIME NUMBER', () =>
                                             "Error",
                                             [
                                               "ErrorCode",
-                                              "'incompatible-domain'",
-                                              "Numbers",
-                                              "Anything"
-                                            ],
-                                            ["At", "v", 2]
+                                              "'incompatible-type'",
+                                              "'number'",
+                                              "'any'"
+                                            ]
                                           ],
                                           [
                                             "Error",
                                             [
                                               "ErrorCode",
-                                              "'incompatible-domain'",
-                                              "Numbers",
-                                              "Anything"
-                                            ],
-                                            ["At", "v", 3]
+                                              "'incompatible-type'",
+                                              "'number'",
+                                              "'any'"
+                                            ]
                                           ]
                                         ]
                                       ]
@@ -184,11 +155,10 @@ describe('Nth PRIME NUMBER', () =>
                                       "Error",
                                       [
                                         "ErrorCode",
-                                        "'incompatible-domain'",
-                                        "Numbers",
-                                        "Anything"
-                                      ],
-                                      ["At", "v", 2]
+                                        "'incompatible-type'",
+                                        "'number'",
+                                        "'any'"
+                                      ]
                                     ]
                                   ]
                                 ]
@@ -359,7 +329,7 @@ describe('RAMANUJAN FACTORIAL APPROXIMATION', () =>
       ]
       eval-auto = (sqrt(pi) * n^n * root(6)(8n^3 + 4n^2 + n + 1/30)) / e^n
       eval-mach = (sqrt(pi) * n^n * root(6)(8n^3 + 4n^2 + n + 1/30)) / e^n
-      N-auto    = 1.772453850905516 * 0.367879441171442321596^n * n^n * root(6)(8n^3 + 4n^2 + n + 0.0333333333333333333333)
+      N-auto    = 1.7724538509055160273 * 0.367879441171442321596^n * n^n * root(6)(8n^3 + 4n^2 + n + 0.0333333333333333333333)
       N-mach    = 1.7724538509055159 * 0.36787944117144233^n * n^n * root(6)(8n^3 + 4n^2 + n + 0.0333333333333333)
     `)));
 

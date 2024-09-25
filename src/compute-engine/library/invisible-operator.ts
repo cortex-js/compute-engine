@@ -3,10 +3,11 @@ import type { IComputeEngine, BoxedExpression } from '../public';
 import { flatten } from '../boxed-expression/flatten';
 import { isIndexableCollection } from '../collection-utils';
 import { canonicalMultiply } from '../boxed-expression/arithmetic-multiply';
+import { isSubtype } from '../../common/type/subtype';
 
 export function canonicalInvisibleOperator(
-  ce: IComputeEngine,
-  ops: ReadonlyArray<BoxedExpression>
+  ops: ReadonlyArray<BoxedExpression>,
+  { engine: ce }: { engine: IComputeEngine }
 ): BoxedExpression | null {
   if (ops.length === 0) return null;
 
@@ -18,14 +19,11 @@ export function canonicalInvisibleOperator(
     // Is it an implicit addition/mixed fraction, e.g. "3 1/4"
     // Note: the numerators and denominators are limited to 999
     //
-    const lhsNumber = lhs.canonical.re ?? NaN;
+    const lhsNumber = lhs.canonical.re;
     if (Number.isInteger(lhsNumber)) {
       const rhs = ops[1];
       if (rhs.operator === 'Divide' || rhs.operator === 'Rational') {
-        const [n, d] = [
-          rhs.op1.canonical.re ?? NaN,
-          rhs.op2.canonical.re ?? NaN,
-        ];
+        const [n, d] = [rhs.op1.canonical.re, rhs.op2.canonical.re];
         if (
           n > 0 &&
           n <= 1000 &&
@@ -46,8 +44,11 @@ export function canonicalInvisibleOperator(
     // Is it a complex number, i.e. "2i"?
     //
     const rhs = ops[1];
-    if (!isNaN(lhsNumber) && rhs.canonical.symbol === 'ImaginaryUnit')
-      return ce.number(ce.complex(0, lhsNumber));
+    if (!isNaN(lhsNumber)) {
+      const canonicalRhs = rhs.canonical;
+      if (canonicalRhs.re === 0 && canonicalRhs.im === 1)
+        return ce.number(ce.complex(0, lhsNumber));
+    }
 
     //
     // Is it a function application: symbol with a function
@@ -65,7 +66,7 @@ export function canonicalInvisibleOperator(
 
       // No arguments, i.e. `f()`? It's a function call.
       if (rhs.nops === 0) {
-        if (!ce.lookupFunction(lhs.symbol)) ce.declare(lhs.symbol, 'Functions');
+        if (!ce.lookupFunction(lhs.symbol)) ce.declare(lhs.symbol, 'function');
         return ce.box([lhs.symbol]);
       }
 
@@ -76,7 +77,7 @@ export function canonicalInvisibleOperator(
       if (!ce.lookupSymbol(lhs.symbol)) {
         // Still not a symbol (i.e. wasn't used as a symbol in the
         // subexpression), so it's a function call.
-        if (!ce.lookupFunction(lhs.symbol)) ce.declare(lhs.symbol, 'Functions');
+        if (!ce.lookupFunction(lhs.symbol)) ce.declare(lhs.symbol, 'function');
         return ce.function(lhs.symbol, args);
       }
     }
@@ -91,6 +92,12 @@ export function canonicalInvisibleOperator(
       return ce.function('At', [lhs, ...args]);
     }
   }
+
+  // Lift any nested invisible operators
+  // (we do it explicitly here instead of via flatten to avoid
+  //  boxing the arguments)
+  ops = flattenInvisibleOperator(ops);
+
   // Only call flatten here, because it will bind (auto-declare) the arguments
   ops = flatten(ops);
 
@@ -102,8 +109,8 @@ export function canonicalInvisibleOperator(
     ops.every(
       (x) =>
         x.isValid &&
-        (!x.domain ||
-          x.domain.isNumeric ||
+        (x.type === 'unknown' ||
+          isSubtype(x.type, 'number') ||
           (isIndexableCollection(x) && !x.string))
     )
   ) {
@@ -115,4 +122,16 @@ export function canonicalInvisibleOperator(
   // group them as a Tuple
   //
   return ce._fn('Tuple', ops);
+}
+
+function flattenInvisibleOperator(
+  ops: ReadonlyArray<BoxedExpression>
+): BoxedExpression[] {
+  const ys: BoxedExpression[] = [];
+  for (const x of ops) {
+    if (x.operator === 'InvisibleOperator')
+      ys.push(...flattenInvisibleOperator(x.ops!));
+    else ys.push(x);
+  }
+  return ys;
 }

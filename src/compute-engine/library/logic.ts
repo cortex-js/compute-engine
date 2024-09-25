@@ -5,17 +5,9 @@ import {
 } from '../public';
 
 export const LOGIC_LIBRARY: IdentifierDefinitions = {
-  True: { wikidata: 'Q16751793', domain: 'Booleans', constant: true },
-  False: {
-    wikidata: 'Q5432619',
-    domain: 'Booleans',
-    constant: true,
-  },
-  // Maybe: {
-  //   wikidata: 'Q781546',
-  //   domain: 'MaybeBooleans',
-  //   constant: true,
-  // },
+  True: { wikidata: 'Q16751793', type: 'boolean', constant: true },
+  False: { wikidata: 'Q5432619', type: 'boolean', constant: true },
+
   // @todo: specify a `canonical` function that converts boolean
   // expressions into CNF (Conjunctive Normal Form)
   // https://en.wikipedia.org/wiki/Conjunctive_normal_form
@@ -29,10 +21,8 @@ export const LOGIC_LIBRARY: IdentifierDefinitions = {
     commutative: true,
     idempotent: true,
     complexity: 10000,
-    signature: {
-      domain: 'LogicOperators',
-      evaluate: evaluateAnd,
-    },
+    signature: '(boolean, ...boolean) -> boolean',
+    evaluate: evaluateAnd,
   },
   Or: {
     wikidata: 'Q1651704',
@@ -41,10 +31,9 @@ export const LOGIC_LIBRARY: IdentifierDefinitions = {
     commutative: true,
     idempotent: true,
     complexity: 10000,
-    signature: {
-      domain: 'LogicOperators',
-      evaluate: evaluateOr,
-    },
+    signature: '(boolean, ...boolean) -> boolean',
+
+    evaluate: evaluateOr,
   },
   Not: {
     wikidata: 'Q190558',
@@ -52,74 +41,66 @@ export const LOGIC_LIBRARY: IdentifierDefinitions = {
     involution: true,
     complexity: 10100,
     // @todo: this may not be needed, since we also have rules.
-    signature: {
-      domain: 'LogicOperators',
-      evaluate: evaluateNot,
-    },
+    signature: 'boolean -> boolean',
+    evaluate: evaluateNot,
   },
   Equivalent: {
     wikidata: 'Q220433',
     threadable: true,
     complexity: 10200,
-    signature: {
-      domain: 'LogicOperators',
-      canonical: (ce: IComputeEngine, args: BoxedExpression[]) => {
-        const lhs = args[0].symbol;
-        const rhs = args[1].symbol;
-        if (
-          (lhs === 'True' && rhs === 'True') ||
-          (lhs === 'False' && rhs === 'False')
-        )
-          return ce.True;
-        if (
-          (lhs === 'True' && rhs === 'False') ||
-          (lhs === 'False' && rhs === 'True')
-        )
-          return ce.False;
-        return ce._fn('Equivalent', args);
-      },
-      evaluate: evaluateEquivalent,
+    signature: '(boolean, boolean) -> boolean',
+    canonical: (args: BoxedExpression[], { engine: ce }) => {
+      const lhs = args[0].symbol;
+      const rhs = args[1].symbol;
+      if (
+        (lhs === 'True' && rhs === 'True') ||
+        (lhs === 'False' && rhs === 'False')
+      )
+        return ce.True;
+      if (
+        (lhs === 'True' && rhs === 'False') ||
+        (lhs === 'False' && rhs === 'True')
+      )
+        return ce.False;
+      return ce._fn('Equivalent', args);
     },
+    evaluate: evaluateEquivalent,
   },
   Implies: {
     wikidata: 'Q7881229',
     threadable: true,
     complexity: 10200,
-    signature: {
-      domain: 'LogicOperators',
-      evaluate: evaluateImplies,
-    },
+    signature: '(boolean, boolean) -> boolean',
+    evaluate: evaluateImplies,
   },
-  Exists: { signature: { domain: 'Functions' }, hold: 'all' },
-  ExistsUnique: { signature: { domain: 'Functions' }, hold: 'all' },
-  ForAll: { signature: { domain: 'Functions' }, hold: 'all' },
+  Exists: { signature: 'function', hold: true },
+  ExistsUnique: { signature: 'function', hold: true },
+  ForAll: { signature: 'function', hold: true },
 
   KroneckerDelta: {
-    signature: {
-      domain: 'Functions',
-      evaluate: (args, { engine: ce }) => {
-        if (args.length === 1)
-          return args[0].symbol === 'True' ? ce.One : ce.Zero;
+    description: 'Return 1 if the arguments are equal, 0 otherwise',
+    signature: '(value, ...value) -> integer',
+    evaluate: (args, { engine: ce }) => {
+      if (args.length === 1)
+        return args[0].symbol === 'True' ? ce.One : ce.Zero;
 
-        if (args.length === 2)
-          return args[0].isEqual(args[1]) ? ce.One : ce.Zero;
+      if (args.length === 2) return args[0].isEqual(args[1]) ? ce.One : ce.Zero;
 
-        // More than two arguments: they should all be equal
-        for (let i = 1; i < args.length; i++) {
-          if (!args[i].isEqual(args[0])) return ce.Zero;
-        }
-        return ce.One;
-      },
+      // More than two arguments: they should all be equal
+      for (let i = 1; i < args.length; i++) {
+        if (!args[i].isEqual(args[0])) return ce.Zero;
+      }
+      return ce.One;
     },
   },
 
   // Iverson bracket
   Boole: {
-    signature: {
-      domain: 'Functions',
-      evaluate: (args, { engine: ce }) =>
-        args[0].symbol === 'True' ? ce.One : ce.Zero,
-    },
+    description:
+      'Return 1 if the argument is true, 0 otherwise. Also known as the Iverson bracket',
+    signature: 'boolean -> integer',
+    evaluate: (args, { engine: ce }) =>
+      args[0].symbol === 'True' ? ce.One : ce.Zero,
   },
 };
 

@@ -153,11 +153,10 @@ describe('LATEX', () => {
           Error,
           [
             ErrorCode,
-            'incompatible-domain',
-            Strings,
-            PositiveIntegers,
+            'incompatible-type',
+            'string',
+            'finite_integer',
           ],
-          22,
         ],
       ]
     `);
@@ -199,8 +198,20 @@ describe('LATEX', () => {
   });
 
   test('Invalid ParseLatex', () => {
-    expect(
-      ce.box(['Parse', ['Add', 2, 'Pi']]).evaluate().json
-    ).toMatchInlineSnapshot(`Nothing`);
+    expect(ce.box(['Parse', ['Add', 2, 'Pi']]).evaluate().json)
+      .toMatchInlineSnapshot(`
+      [
+        Parse,
+        [
+          Error,
+          [
+            ErrorCode,
+            'incompatible-type',
+            'string',
+            'real',
+          ],
+        ],
+      ]
+    `);
   });
 });

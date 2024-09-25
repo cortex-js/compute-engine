@@ -1,6 +1,6 @@
 import type { BoxedExpression, IdentifierDefinitions } from '../public';
 
-import { checkDomain } from '../boxed-expression/validate';
+import { checkType } from '../boxed-expression/validate';
 
 import { applicable, applicableN1 } from '../function-utils';
 import { monteCarloEstimate } from '../numerics/monte-carlo';
@@ -95,21 +95,15 @@ volumes
     // with values of the order that can be either fractional or negative
     //
     Derivative: {
-      hold: 'all',
       threadable: false,
-      signature: {
-        domain: [
-          'FunctionOf',
-          'Anything',
-          ['OptArg', 'Numbers'], // The order of the derivative
-          'Functions',
-        ],
-        evaluate: (ops) => {
-          // Is it a function name, i.e. ["Derivative", "Sin"]?
-          const op = ops[0].evaluate();
-          const degree = Math.floor(ops[1]?.N().re ?? 1);
-          return derivative(op, degree);
-        },
+
+      hold: true,
+      signature: '(any, order:number?) -> function',
+      evaluate: (ops) => {
+        // Is it a function name, i.e. ["Derivative", "Sin"]?
+        const op = ops[0].evaluate();
+        const degree = Math.floor(ops[1]?.N().re);
+        return derivative(op, isNaN(degree) ? 1 : degree);
       },
     },
 
@@ -125,167 +119,151 @@ volumes
     // This is equivalent to `["Apply", ["Derivative", "Sin"], "x"]`
 
     D: {
-      hold: 'all',
       threadable: false,
-      signature: {
-        domain: [
-          'FunctionOf',
-          'Anything',
-          'Symbols',
-          ['VarArg', 'Symbols'],
-          'Anything',
-        ],
-        canonical: (ce, ops) => {
-          let f = ops[0];
-          if (!f) return null;
 
-          ce.pushScope();
-          const params = ops.slice(1);
-          // const vars: BoxedExpression[] = [];
-          // for (const param of params) {
-          //   let v = param;
-          //   if (v.op === 'ReleaseHold') v = param.op1.evaluate();
-          //   if (!v.symbol) {
-          //     ce.popScope();
-          //     return null;
-          //   }
-          //   ce.declare(v.symbol, ce.Numbers);
-          //   vars.push(ce.box(v.symbol));
-          // }
-          f.bind();
-          f = f.canonical;
-          const result = ce._fn('D', [f, ...params]);
-          ce.popScope();
-          return result;
-        },
-        evaluate: (ops, { engine }) => {
-          const ce = engine;
-          let f: BoxedExpression | undefined = ops[0].canonical;
-          const context = ce.swapScope(f.scope);
-          f = f.evaluate();
-          const params = ops.slice(1);
-          if (params.length === 0) f = undefined;
-          for (const param of params) {
-            if (!param.symbol) {
-              f = undefined;
-              break;
-            }
-            f = differentiate(f!, param.symbol);
-            if (f === undefined) break;
+      hold: true,
+      signature:
+        '(expression, variable:symbol, variables:...symbol) -> expression',
+      canonical: (ops, { engine }) => {
+        const ce = engine;
+        let f = ops[0];
+        if (!f) return null;
+
+        ce.pushScope();
+        const params = ops.slice(1);
+        // const vars: BoxedExpression[] = [];
+        // for (const param of params) {
+        //   let v = param;
+        //   if (v.op === 'ReleaseHold') v = param.op1.evaluate();
+        //   if (!v.symbol) {
+        //     ce.popScope();
+        //     return null;
+        //   }
+        //   ce.declare(v.symbol, ce.Numbers);
+        //   vars.push(ce.box(v.symbol));
+        // }
+        f.bind();
+        f = f.canonical;
+        const result = ce._fn('D', [f, ...params]);
+        ce.popScope();
+        return result;
+      },
+      evaluate: (ops, { engine }) => {
+        const ce = engine;
+        let f: BoxedExpression | undefined = ops[0].canonical;
+        const context = ce.swapScope(f.scope);
+        f = f.evaluate();
+        const params = ops.slice(1);
+        if (params.length === 0) f = undefined;
+        for (const param of params) {
+          if (!param.symbol) {
+            f = undefined;
+            break;
           }
-          ce.swapScope(context);
-          f = f?.canonical;
-          // Avoid recursive evaluation
-          return f?.operator === 'D' ? f : f?.evaluate();
-        },
+          f = differentiate(f!, param.symbol);
+          if (f === undefined) break;
+        }
+        ce.swapScope(context);
+        f = f?.canonical;
+        // Avoid recursive evaluation
+        return f?.operator === 'D' ? f : f?.evaluate();
       },
     },
 
     // Evaluate a numerical approximation of a derivative at point x
     ND: {
-      hold: 'first',
       threadable: false,
-      signature: {
-        domain: ['FunctionOf', 'Anything', 'Numbers', 'Functions'],
-        evaluate: (ops, { engine }) => {
-          const x = ops[1]?.value;
-          if (typeof x !== 'number') return undefined;
+      hold: true,
+      signature: '(function, point:number) -> number',
+      evaluate: (ops, { engine }) => {
+        const x = ops[1]?.canonical.re;
+        if (isNaN(x)) return undefined;
 
-          const f = applicableN1(engine.box(ops[0]));
-          return engine.number(centeredDiff8thOrder(f, x));
-        },
+        const f = applicableN1(engine.box(ops[0]));
+        return engine.number(centeredDiff8thOrder(f, x));
       },
     },
 
     Integrate: {
       wikidata: 'Q80091',
-      hold: 'all',
       threadable: false,
-      signature: {
-        domain: [
-          'FunctionOf',
-          'Functions',
-          ['OptArg', ['Union', 'Tuples', 'Symbols']],
-          // ['Tuple', 'Symbols', ['OptArg', 'Integers'], ['OptArg', 'Integers']],
-          'Numbers',
-        ],
-        canonical: (ce, ops) => {
-          let range = ops[1];
-          let index: BoxedExpression | null = null;
-          let lower: BoxedExpression | null = null;
-          let upper: BoxedExpression | null = null;
-          if (
-            range &&
-            range.operator !== 'Tuple' &&
-            range.operator !== 'Triple' &&
-            range.operator !== 'Pair' &&
-            range.operator !== 'Single'
-          ) {
-            index = range;
-          } else if (range) {
-            // Don't canonicalize the index. Canonicalization has the
-            // side effect of declaring the symbol, here we're using
-            // it to do a local declaration
-            index = range.ops?.[0] ?? null;
-            lower = range.ops?.[1]?.canonical ?? null;
-            upper = range.ops?.[2]?.canonical ?? null;
-          }
-          // The index, if present, should be a symbol
-          if (index && index.operator === 'Hold') index = index.op1;
-          if (index && index.operator === 'ReleaseHold')
-            index = index.op1.evaluate();
-          index ??= ce.Nothing;
-          if (!index.symbol)
-            index = ce.domainError('Symbols', index.domain, index);
 
-          // The range bounds, if present, should be numbers
-          if (lower) lower = checkDomain(ce, lower, ce.Numbers);
-          if (upper) upper = checkDomain(ce, upper, ce.Numbers);
-          if (lower && upper) range = ce.tuple(index, lower, upper);
-          else if (upper) range = ce.tuple(index, ce.NegativeInfinity, upper);
-          else if (lower) range = ce.tuple(index, lower);
-          else range = index;
+      hold: true,
+      signature: '(expression, range:(tuple|symbol|nothing)) -> number',
+      canonical: (ops, { engine }) => {
+        const ce = engine;
+        let range = ops[1];
+        let index: BoxedExpression | null = null;
+        let lower: BoxedExpression | null = null;
+        let upper: BoxedExpression | null = null;
+        if (
+          range &&
+          range.operator !== 'Tuple' &&
+          range.operator !== 'Triple' &&
+          range.operator !== 'Pair' &&
+          range.operator !== 'Single'
+        ) {
+          index = range;
+        } else if (range) {
+          // Don't canonicalize the index. Canonicalization has the
+          // side effect of declaring the symbol, here we're using
+          // it to do a local declaration
+          index = range.ops?.[0] ?? null;
+          lower = range.ops?.[1]?.canonical ?? null;
+          upper = range.ops?.[2]?.canonical ?? null;
+        }
+        // The index, if present, should be a symbol
+        if (index && index.operator === 'Hold') index = index.op1;
+        if (index && index.operator === 'ReleaseHold')
+          index = index.op1.evaluate();
+        index ??= ce.Nothing;
+        if (!index.symbol) index = ce.typeError('symbol', index.type, index);
 
-          let body = ops[0] ?? ce.error('missing');
-          body = body.canonical;
-          if (body.operator === 'Delimiter' && body.op1.operator === 'Sequence')
-            body = body.op1.op1;
+        // The range bounds, if present, should be numbers
+        if (lower && lower.symbol !== 'Nothing')
+          lower = checkType(ce, lower, 'number');
+        if (upper && upper.symbol !== 'Nothing')
+          upper = checkType(ce, upper, 'number');
+        if (lower && upper) range = ce.tuple(index, lower, upper);
+        else if (upper) range = ce.tuple(index, ce.NegativeInfinity, upper);
+        else if (lower) range = ce.tuple(index, lower);
+        else range = index;
 
-          return ce._fn('Integrate', [body, range]);
-          // evaluate: (ce, ops) => {
-          // @todo: implement using Risch Algorithm
-          // },
-          // N: (ce, ops) => {
-          // N(Integrate) is transformed into NIntegrate
-          // }
-        },
+        let body = ops[0] ?? ce.error('missing');
+        body = body.canonical;
+        if (body.operator === 'Delimiter' && body.op1.operator === 'Sequence')
+          body = body.op1.op1;
+
+        return ce._fn('Integrate', [body, range]);
+        // evaluate: (ce, ops) => {
+        // @todo: implement using Risch Algorithm
+        // },
+        // N: (ce, ops) => {
+        // N(Integrate) is transformed into NIntegrate
+        // }
       },
     },
 
     NIntegrate: {
-      hold: 'first',
       threadable: false,
-      signature: {
-        domain: ['FunctionOf', 'Functions', 'Numbers', 'Numbers', 'Numbers'],
-        params: ['Functions', 'Numbers', 'Numbers'],
-        restParam: 'Numbers',
-        evaluate: (ops, { engine }) => {
-          // Switch to machine precision
-          const precision = engine.precision;
-          engine.precision = 'machine';
-          const wasStrict = engine.strict;
-          engine.strict = false;
+      hold: true,
+      signature: '(expression, lower:number, upper:number) -> number',
+      evaluate: (ops, { engine }) => {
+        // Switch to machine precision
+        const precision = engine.precision;
+        engine.precision = 'machine';
+        const wasStrict = engine.strict;
+        engine.strict = false;
 
-          const [a, b] = ops.slice(1).map((op) => op.value);
-          let result: BoxedExpression | undefined = undefined;
-          if (typeof a === 'number' && typeof b === 'number') {
-            const f = applicableN1(ops[0]);
-            result = engine.number(monteCarloEstimate(f, a, b));
-          }
-          engine.precision = precision;
-          engine.strict = wasStrict;
-          return result;
-        },
+        const [a, b] = ops.slice(1).map((op) => op.value);
+        let result: BoxedExpression | undefined = undefined;
+        if (typeof a === 'number' && typeof b === 'number') {
+          const f = applicableN1(ops[0]);
+          result = engine.number(monteCarloEstimate(f, a, b));
+        }
+        engine.precision = precision;
+        engine.strict = wasStrict;
+        return result;
       },
     },
   },
@@ -295,62 +273,48 @@ volumes
     Limit: {
       description: 'Limit of a function',
       complexity: 5000,
-      hold: 'all',
       threadable: false,
-      signature: {
-        domain: [
-          'FunctionOf',
-          'Anything',
-          'Numbers',
-          ['OptArg', 'Numbers'],
-          'Numbers',
-        ],
-        evaluate: (ops, { engine: ce }) => {
-          const [f, x, dir] = ops;
-          const target = x.N().re ?? NaN;
-          if (!isFinite(target)) return undefined;
-          const fn = applicable(f);
-          return ce.number(
-            limit(
-              (x) => {
-                const y = fn([ce.number(x)])?.value;
-                return typeof y === 'number' ? y : Number.NaN;
-              },
-              target,
-              dir ? (dir.re ?? 1) : 1
-            )
-          );
-        },
+
+      hold: true,
+      signature: '(expression, point:number, direction:number?) -> number',
+      evaluate: (ops, { engine: ce }) => {
+        const [f, x, dir] = ops;
+        const target = x.N().re;
+        if (!isFinite(target)) return undefined;
+        const fn = applicable(f);
+        return ce.number(
+          limit(
+            (x) => {
+              const y = fn([ce.number(x)])?.value;
+              return typeof y === 'number' ? y : Number.NaN;
+            },
+            target,
+            dir ? dir.re : 1
+          )
+        );
       },
     },
     NLimit: {
       description: 'Numerical approximation of the limit of a function',
       complexity: 5000,
-      hold: 'all',
       threadable: false,
-      signature: {
-        domain: [
-          'FunctionOf',
-          'Anything',
-          'Numbers',
-          ['OptArg', 'Numbers'],
-          'Numbers',
-        ],
-        evaluate: ([f, x, dir], { engine }) => {
-          const target = x.N().re ?? NaN;
-          if (Number.isNaN(target)) return undefined;
-          const fn = applicable(f);
-          return engine.number(
-            limit(
-              (x) => {
-                const y = fn([engine.number(x)])?.value;
-                return typeof y === 'number' ? y : Number.NaN;
-              },
-              target,
-              dir ? (dir.re ?? 1) : 1
-            )
-          );
-        },
+
+      hold: true,
+      signature: '(expression, point:number, direction:number?) -> number',
+      evaluate: ([f, x, dir], { engine }) => {
+        const target = x.N().re;
+        if (Number.isNaN(target)) return undefined;
+        const fn = applicable(f);
+        return engine.number(
+          limit(
+            (x) => {
+              const y = fn([engine.number(x)])?.value;
+              return typeof y === 'number' ? y : Number.NaN;
+            },
+            target,
+            dir ? dir.re : 1
+          )
+        );
       },
     },
   },

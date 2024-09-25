@@ -15,10 +15,8 @@ engine.assign('f3', (args) => engine.number((args[0]?.value as number) + 1));
 
 // With a declared function, the arguments are checked by the Compute Engine
 engine.declare('f4', {
-  signature: {
-    domain: ['FunctionOf', 'Numbers', 'Numbers'],
-    evaluate: (args) => engine.number((args[0].value as number) + 1),
-  },
+  signature: 'number -> number',
+  evaluate: (args) => engine.number((args[0].value as number) + 1),
 });
 
 // Anonymous parameters
@@ -64,13 +62,16 @@ describe('Anonymous function with missing param', () => {
 describe('Anonymous function with too many params', () => {
   test('Too many params: Function', () =>
     expect(evaluate(['f1', 10, 20])).toMatchInlineSnapshot(`["f1", 10, 20]`));
+
   test('Too many params: Expression', () =>
     expect(evaluate(['f2', 10, 20])).toMatchInlineSnapshot(`["f2", 10, 20]`));
+
   test('Too many params: JS Function', () =>
     expect(evaluate(['f3', 10, 20])).toMatchInlineSnapshot(`11`));
+
   test('Too many params: Declared JS Function: arguments are checked by Compute Engine', () =>
     expect(evaluate(['f4', 10, 20])).toMatchInlineSnapshot(
-      `["f4", 10, ["Error", "'unexpected-argument'", 20]]`
+      `["f4", 10, ["Error", "'unexpected-argument'", "'20'"]]`
     )); // Error is correct
 });
 

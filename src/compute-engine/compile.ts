@@ -3,7 +3,7 @@ import type { MathJsonIdentifier } from '../math-json/types';
 import type { BoxedExpression } from './public';
 
 import { isRelationalOperator } from './boxed-expression/utils';
-import { isCollection, isFiniteIndexableCollection } from './collection-utils';
+import { isFiniteIndexableCollection } from './collection-utils';
 import { normalizeIndexingSet } from './library/utils';
 
 import { monteCarloEstimate } from './numerics/monte-carlo';
@@ -60,35 +60,29 @@ const NATIVE_JS_FUNCTIONS: CompiledFunctions = {
   },
   Arccos: 'Math.acos',
   Arcosh: 'Math.acosh',
-  Arccot: (args, compile) => {
-    const arg = args[0];
-    if (arg === null) throw new Error('Arccot: no argument');
-    return `Math.atan(1 / ${compile(arg)})`;
+  Arccot: ([x], compile) => {
+    if (x === null) throw new Error('Arccot: no argument');
+    return `Math.atan(1 / (${compile(x)}))`;
   },
-  Arccoth: (args, compile) => {
-    const arg = args[0];
-    if (arg === null) throw new Error('Arccoth: no argument');
-    return `Math.atanh(1 / ${compile(arg)})`;
+  Arccoth: ([x], compile) => {
+    if (x === null) throw new Error('Arccoth: no argument');
+    return `Math.atanh(1 / (${compile(x)}))`;
   },
-  Arccsc: (args, compile) => {
-    const arg = args[0];
-    if (arg === null) throw new Error('Arccsc: no argument');
-    return `Math.asin(1 / ${compile(arg)})`;
+  Arccsc: ([x], compile) => {
+    if (x === null) throw new Error('Arccsc: no argument');
+    return `Math.asin(1 / (${compile(x)}))`;
   },
-  Arccsch: (args, compile) => {
-    const arg = args[0];
-    if (arg === null) throw new Error('Arccsch: no argument');
-    return `Math.asinh(1 / ${compile(arg)})`;
+  Arccsch: ([x], compile) => {
+    if (x === null) throw new Error('Arccsch: no argument');
+    return `Math.asinh(1 / (${compile(x)}))`;
   },
-  Arcsec: (args, compile) => {
-    const arg = args[0];
-    if (arg === null) throw new Error('Arccot: no argument');
-    return `Math.acos(1 / ${compile(arg)})`;
+  Arcsec: ([x], compile) => {
+    if (x === null) throw new Error('Arcsec: no argument');
+    return `Math.acos(1 / (${compile(x)}))`;
   },
-  Arcsech: (args, compile) => {
-    const arg = args[0];
-    if (arg === null) throw new Error('Arccot: no argument');
-    return `Math.acosh(1 / ${compile(arg)})`;
+  Arcsech: ([x], compile) => {
+    if (x === null) throw new Error('Arcsech: no argument');
+    return `Math.acosh(1 / (${compile(x)}))`;
   },
 
   Arsin: 'Math.asin',
@@ -100,45 +94,60 @@ const NATIVE_JS_FUNCTIONS: CompiledFunctions = {
   Chop: '_SYS.chop',
   Cos: 'Math.cos',
   Cosh: 'Math.cosh',
-  Cot: (args, compile) => {
-    const arg = args[0];
-    if (arg === null) throw new Error('Cot: no argument');
-    return `Math.cos(${compile(arg)}) / Math.sin(${compile(arg)})`;
+  Cot: ([x], compile) => {
+    if (x === null) throw new Error('Cot: no argument');
+    return inlineExpression('Math.cos(${x}) / Math.sin(${x})', compile(x));
   },
-  Coth: (args, compile) => {
-    const arg = args[0];
-    if (arg === null) throw new Error('Coth: no argument');
-    return `Math.cosh(${compile(arg)}) / Math.sinh(${compile(arg)})`;
+
+  Coth: ([x], compile) => {
+    if (x === null) throw new Error('Coth: no argument');
+    return inlineExpression('(Math.cosh(${x}) / Math.sinh(${x}))', compile(x));
   },
-  Csc: (args, compile) => {
-    const arg = args[0];
-    if (arg === null) throw new Error('Csc: no argument');
-    return `1 / Math.sin(${compile(arg)})`;
+
+  Csc: ([x], compile) => {
+    if (x === null) throw new Error('Csc: no argument');
+    return `1 / Math.sin(${compile(x)})`;
   },
-  Csch: (args, compile) => {
-    const arg = args[0];
-    if (arg === null) throw new Error('Csch: no argument');
-    return `1 / Math.sinh(${compile(arg)})`;
+
+  Csch: ([x], compile) => {
+    if (x === null) throw new Error('Csch: no argument');
+    return `1 / Math.sinh(${compile(x)})`;
   },
+
   Exp: 'Math.exp',
+
   Floor: 'Math.floor',
+
   Gamma: '_SYS.gamma',
+
   GCD: '_SYS.gcd',
+
   // Math.hypot
+
   Integrate: (args, compile, target) => compileIntegrate(args, compile, target),
+
   LCM: '_SYS.lcm',
+
   Limit: (args, compile) =>
     `_SYS.limit(${compile(args[0])}, ${compile(args[1])})`,
+
   Ln: 'Math.log',
+
   List: (args, compile) => `[${args.map((x) => compile(x)).join(', ')}]`,
+
   Log: (args, compile) => {
-    if (args.length === 1) return `Math.log(${compile(args[0])})`;
+    if (args.length === 1) return `Math.log10(${compile(args[0])})`;
     return `(Math.log(${compile(args[0])}) / Math.log(${compile(args[1])}))`;
   },
+
   LogGamma: '_SYS.lngamma',
+
   Lb: 'Math.log2',
+
   Max: 'Math.max',
+
   Min: 'Math.min',
+
   Power: (args, compile) => {
     const arg = args[0];
     if (arg === null) throw new Error('Power: no argument');
@@ -146,10 +155,11 @@ const NATIVE_JS_FUNCTIONS: CompiledFunctions = {
     if (exp === 0.5) return `Math.sqrt(${compile(arg)})`;
     if (exp === 1 / 3) return `Math.cbrt(${compile(arg)})`;
     if (exp === 1) return compile(arg);
-    if (exp === -1) return `1 / (${compile(arg)})`;
-    if (exp === -0.5) return `1 / Math.sqrt(${compile(arg)})`;
+    if (exp === -1) return `(1 / (${compile(arg)}))`;
+    if (exp === -0.5) return `(1 / Math.sqrt(${compile(arg)}))`;
     return `Math.pow(${compile(arg)}, ${compile(args[1])})`;
   },
+
   Range: (args, compile) => {
     // args could either be missing, or not a number
     if (args.length === 0) return '[]';
@@ -185,19 +195,20 @@ const NATIVE_JS_FUNCTIONS: CompiledFunctions = {
     }
     return `Array.from({length: Math.floor((${stop} - ${start}) / ${step}) + 1}, (_, i) => ${start} + i * ${step})`;
   },
-  Root: (args, compile) => {
-    const arg = args[0];
+
+  Root: ([arg, exp], compile) => {
     if (arg === null) throw new Error('Root: no argument');
-    const exp = args[1];
     if (exp === null) return `Math.sqrt(${compile(arg)})`;
-    if (exp.re === 2) return `Math.sqrt(${compile(arg)})`;
-    if (exp.re === 3) return `Math.cbrt(${compile(arg)})`;
-    if (exp.re !== undefined)
-      return `Math.pow(${compile(arg)},  ${1 / exp.re})`;
+    if (exp?.re === 2) return `Math.sqrt(${compile(arg)})`;
+    if (exp?.re === 3) return `Math.cbrt(${compile(arg)})`;
+    if (!isNaN(exp?.re)) return `Math.pow(${compile(arg)},  ${1 / exp.re})`;
     return `Math.pow(${compile(arg)}, 1 / (${compile(exp)}))`;
   },
+
   Random: 'Math.random',
+
   Round: 'Math.round',
+
   Square: (args, compile) => {
     const arg = args[0];
     if (arg === null) throw new Error('Square: no argument');
@@ -222,7 +233,6 @@ const NATIVE_JS_FUNCTIONS: CompiledFunctions = {
   // Factorial: 'factorial',    // TODO: implement
 
   // Hallucinated by Copilot, but interesting ideas...
-  // Root: 'Math.root',
   // Gamma: 'Math.gamma',
   // Erf: 'Math.erf',
   // Erfc: 'Math.erfc',
@@ -235,8 +245,6 @@ const NATIVE_JS_FUNCTIONS: CompiledFunctions = {
   // Binomial: 'Math.binomial',
   // Mod: 'Math.mod',
   // Quotient: 'Math.quotient',
-  // GCD: 'Math.gcd',
-  // LCM: 'Math.lcm',
   // Divisors: 'Math.divisors',
   // IsPrime: 'Math.isPrime',
   // PrimePi: 'Math.primePi',
@@ -250,11 +258,6 @@ const NATIVE_JS_FUNCTIONS: CompiledFunctions = {
   // PreviousPrimePower: 'Math.prevPrimePower',
   // PrimeFactors: 'Math.primeFactors',
   // DivisorSigma: 'Math.divisorSigma',
-  // DivisorSigma0: 'Math.divisorSigma0',
-  // DivisorSigma1: 'Math.divisorSigma1',
-  // DivisorSigma2: 'Math.divisorSigma2',
-  // DivisorSigma3: 'Math.divisorSigma3',
-  // DivisorSigma4: 'Math.divisorSigma4',
   // DivisorCount: 'Math.divisorCount',
   // DivisorSum: 'Math.divisorSum',
   // MoebiusMu: 'Math.moebiusMu',
@@ -271,32 +274,6 @@ const NATIVE_JS_FUNCTIONS: CompiledFunctions = {
   // BellNumber: 'Math.bellNumber',
   // LahS: 'Math.lahS',
   // LahL: 'Math.lahL',
-  // RiemannR: 'Math.riemannR',
-  // RiemannZeta: 'Math.riemannZeta',
-  // RiemannXi: 'Math.riemannXi',
-  // RiemannH: 'Math.riemannH',
-  // RiemannZ: 'Math.riemannZ',
-  // RiemannS: 'Math.riemannS',
-  // RiemannXiZero: 'Math.riemannXiZero',
-  // RiemannZetaZero: 'Math.riemannZetaZero',
-  // RiemannHZero: 'Math.riemannHZero',
-  // RiemannSZero: 'Math.riemannSZero',
-  // RiemannPrimeCount: 'Math.riemannPrimeCount',
-  // RiemannRLog: 'Math.riemannRLog',
-  // RiemannRLogDerivative: 'Math.riemannRLogDerivative',
-  // RiemannRLogZero: 'Math.riemannRLogZero',
-  // RiemannRLogZeroDerivative: 'Math.riemannRLogZeroDerivative',
-  // RiemannRZero: 'Math.riemannRZero',
-  // RiemannRDerivative: 'Math.riemannRDerivative',
-  // RiemannXiZeroDerivative: 'Math.riemannXiZeroDerivative',
-  // RiemannZetaZeroDerivative: 'Math.riemannZetaZeroDerivative',
-  // RiemannHZeroDerivative: 'Math.riemannHZeroDerivative',
-  // RiemannSZeroDerivative: 'Math.riemannSZeroDerivative',
-  // RiemannSZeroDerivative2: 'Math.riemannSZeroDerivative2',
-  // RiemannSZeroDerivative3: 'Math.riemannSZeroDerivative3',
-  // RiemannSZeroDerivative4: 'Math.riemannSZeroDerivative4',
-  // RiemannSZeroDerivative5: 'Math.riemannSZeroDerivative5',
-  // RiemannSZeroDerivative6: 'Math.riemannSZeroDerivative6',
 };
 
 export type CompileTarget = {
@@ -418,7 +395,7 @@ function compileExpr(
   // If they are, we'll treat it as a function call
   //
 
-  if (args.every((x) => !isCollection(x))) {
+  if (args.every((x) => !x.isCollection)) {
     // See https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Operators/Operator_precedence
     // for operator precedence in JavaScript
     const op = target.operators?.(h);
@@ -499,7 +476,7 @@ function compileExpr(
   if (!fn) throw new Error(`Unknown function ${h}`);
   if (typeof fn === 'function') {
     if (args.length === 1 && isFiniteIndexableCollection(args[0])) {
-      const v = rndVar();
+      const v = tempVar();
       return `(${compile(args[0], target)}).map((${v}) => ${fn(
         args[0].engine.box(v),
         (expr) => compile(expr, target)
@@ -511,7 +488,7 @@ function compileExpr(
   if (args === null) return `${fn}()`;
 
   if (args.length === 1 && isFiniteIndexableCollection(args[0])) {
-    const v = rndVar();
+    const v = tempVar();
     return `(${compile(args[0], target)}).map((${v}) => ${fn}(${compile(
       args[0].engine.box(v),
       target
@@ -528,15 +505,8 @@ export function compile(
   prec = 0
 ): JSSource {
   if (expr === undefined) return '';
-  if (!expr.isValid) throw new Error('Invalid expression');
-
-  //
-  // Is it a number?
-  //
-  const f = expr.re;
-  if (f !== undefined) {
-    if (expr.im !== 0) throw new Error('Complex numbers not supported');
-    return target.number(f);
+  if (!expr.isValid) {
+    throw new Error(`Cannot compile invalid expression: "${expr.toString()}"`);
   }
 
   //
@@ -544,6 +514,15 @@ export function compile(
   //
   const s = expr.symbol;
   if (s !== null) return target.var?.(s) ?? s;
+
+  //
+  // Is it a number?
+  //
+  const f = expr.re;
+  if (!isNaN(f)) {
+    if (expr.im !== 0) throw new Error('Complex numbers are not supported');
+    return target.number(f);
+  }
 
   // Is it a string?
   const str = expr.string;
@@ -568,8 +547,8 @@ function compileLoop(
 
   if (!index) {
     // Loop over a collection
-    const indexVar = rndVar();
-    const acc = rndVar();
+    const indexVar = tempVar();
+    const acc = tempVar();
     const col = compile(args[0], target);
     return `${col}.reduce((${acc}, ${indexVar}) => ${acc} ${op} ${indexVar}, ${
       op === '+' ? '0' : '1'
@@ -592,8 +571,8 @@ function compileLoop(
   });
 
   // @todo: don't always need to wrap in an IIFE
-  const indexVar = rndVar();
-  const acc = rndVar();
+  const indexVar = tempVar();
+  const acc = tempVar();
 
   return `(() => {
   let ${acc} = ${op === '+' ? '0' : '1'};
@@ -607,25 +586,45 @@ function compileLoop(
 })()`;
 }
 
-function iife(statements: string[], target: CompileTarget): string {
-  if (statements.length === 0) return '';
-  if (statements.length === 1) return statements[0];
+/**
+ * Return either the inlined body or an IIFE that evaluates the body
+ * depending on the complexity of the expression `x`.
+ *
+ * For example:
+ *
+ * ```javascript
+ * const result1 = iifeExpression(`Math.sin(\${x}) / Math.cos(\${x})`, '12');
+ * console.log(result1); // Outputs: Math.sin(12) / Math.cos(12)
+ *
+ * const result2 = iifeExpression(`Math.sin(\${x}) / Math.cos(\${x})`, 'a + b');
+ * console.log(result2); // Outputs: (() => { const temp_7z1z = a + b; return Math.sin(temp_7z1z) / Math.cos(temp_7z1z); })()
+ * ```
+ *
+ */
 
-  const last = statements.length - 1;
-  statements[last] = `return ${statements[last]}`;
+function inlineExpression(body: string, x: string): string {
+  // Check if `x` is a simple value (like a number or a simple identifier)
+  const isSimple = /^[\p{L}_][\p{L}\p{N}_]*$/u.test(x) || /^[0-9]+$/.test(x);
 
-  return (() => {
-    'foo';
-    return 'bar';
-  })();
-
-  // return `(() => ${statements.join(`;${target.ws('\n')}`)}()`;
+  if (isSimple) {
+    // Inline the body if `x` is simple
+    return new Function('x', `return \`${body}\`;`)(x);
+  } else {
+    // Generate an IIFE if `x` is a complex expression
+    const t = tempVar();
+    return new Function(
+      'x',
+      `return \`(() => { const ${t} = \${x}; return ${body.replace(/\\\${x}/g, t)}; })()\`;`
+    )(x);
+  }
 }
 
-function rndVar(): string {
+function tempVar(): string {
   // Return a random variable name made up of a single underscore
   // followed by some digits and letters
-  return `_${Math.random().toString(36).substring(2)}`;
+  // Note: must skip at least the first two chars, since
+  //`Math.random().toString(36)` will return a string like "0.dg26kZjalw"
+  return `_${Math.random().toString(36).substring(4)}`;
 }
 
 function compileIntegrate(args, _, target: CompileTarget): string {

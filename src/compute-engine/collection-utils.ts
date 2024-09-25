@@ -1,12 +1,22 @@
-import type { BoxedExpression } from './public';
+import type { BoxedExpression, CollectionHandlers } from './public';
 
-export function isCollection(col: BoxedExpression): boolean {
-  if (col.string !== null) return true;
-  if ((col.symbolDefinition?.value?.string ?? null) !== null) return true;
-  const def =
-    col.functionDefinition ?? col.symbolDefinition?.value?.functionDefinition;
-  return def?.iterator !== undefined;
-}
+/** If a collection has fewer than this many elements, eagerly evaluate it.
+ *
+ * For example, evaluate the Union of two sets with 10 elements each will
+ * result in a set with 20 elements.
+ *
+ * If the sum of the sizes of the two sets is greater than `MAX_SIZE_EAGER_COLLECTION`, the result is a Union expression
+ *
+ */
+export const MAX_SIZE_EAGER_COLLECTION = 100;
+
+// export function isCollection(col: BoxedExpression): boolean {
+//   if (col.string !== null) return true;
+//   if ((col.symbolDefinition?.value?.string ?? null) !== null) return true;
+//   const def =
+//     col.functionDefinition ?? col.symbolDefinition?.value?.functionDefinition;
+//   return def?.iterator !== undefined;
+// }
 
 export function isFiniteCollection(col: BoxedExpression): boolean {
   const l = length(col);
@@ -15,11 +25,15 @@ export function isFiniteCollection(col: BoxedExpression): boolean {
 }
 
 export function isIndexableCollection(col: BoxedExpression): boolean {
+  // Is it a string literal?
   if (col.string !== null) return true;
+  // Is it a syumbol with a string value?
   if ((col.symbolDefinition?.value?.string ?? null) !== null) return true;
+
+  // Is it an expression with a at() handler?
   const def =
     col.functionDefinition ?? col.symbolDefinition?.value?.functionDefinition;
-  return def?.at !== undefined;
+  return def?.collection?.at !== undefined;
 }
 
 export function isFiniteIndexableCollection(col: BoxedExpression): boolean {
@@ -28,7 +42,10 @@ export function isFiniteIndexableCollection(col: BoxedExpression): boolean {
   const def =
     col.functionDefinition ?? col.symbolDefinition?.value?.functionDefinition;
   if (!def) return false;
-  return def.at !== undefined && Number.isFinite(def.size?.(col) ?? Infinity);
+  return (
+    def.collection?.at !== undefined &&
+    Number.isFinite(def.collection?.size?.(col) ?? Infinity)
+  );
 }
 
 /**
@@ -90,7 +107,7 @@ export function length(col: BoxedExpression): number | undefined {
 
   const def =
     col.functionDefinition ?? col.symbolDefinition?.value?.functionDefinition;
-  return def?.size?.(col);
+  return def?.collection?.size?.(col);
 }
 
 /**
@@ -105,7 +122,7 @@ export function length(col: BoxedExpression): number | undefined {
  * - "'hello world'"
  *
  */
-function iterator(
+export function iterator(
   expr: BoxedExpression
 ): Iterator<BoxedExpression> | undefined {
   // Is it a function expresson with a definition that includes an iterator?
@@ -116,7 +133,7 @@ function iterator(
 
   // Note that if there is an at() handler, there is always
   // at least a default iterator so we could just check for the at handler
-  if (def?.iterator) return def.iterator(expr);
+  if (def?.collection?.iterator) return def.collection.iterator(expr);
 
   //
   // String iterator
@@ -151,7 +168,7 @@ export function at(
   const def =
     expr.functionDefinition ?? expr.symbolDefinition?.value?.functionDefinition;
 
-  if (def?.at) return def.at(expr, index);
+  if (def?.collection?.at) return def.collection.at(expr, index);
 
   const s = expr.string;
   if (s) {
@@ -160,4 +177,75 @@ export function at(
   }
 
   return undefined;
+}
+
+export function defaultCollectionHandlers(
+  def: undefined | Partial<CollectionHandlers>
+): Partial<CollectionHandlers> | undefined {
+  if (!def) return undefined;
+
+  const result: Partial<CollectionHandlers> = {};
+
+  // A collection should have at least a contains and size handler
+  // If it has any of the other handlers, but not these two, throw
+  // an error.
+  if (!def.contains || !def.size)
+    throw new Error(
+      'A collection must have at least a "contains" and "size" handler'
+    );
+
+  if (def.contains) result.contains = def.contains;
+  if (def.size) result.size = def.size;
+
+  if (def.at) result.at = def.at;
+  if (def.iterator) result.iterator = def.iterator;
+  if (def.keys) result.keys = def.keys;
+  if (def.indexOf) result.indexOf = def.indexOf;
+  if (def.subsetOf) result.subsetOf = def.subsetOf;
+
+  let iterator = result.iterator;
+
+  if (result.at && !iterator) {
+    // Fallback iterator handler.
+    iterator = (expr: BoxedExpression, start = 1, count = -1) => {
+      const at = def.at!;
+      let i = start;
+      return {
+        next() {
+          if (count >= 0 && i >= start + count)
+            return { done: true, value: undefined };
+          const result = at(expr, i);
+          if (result === undefined) return { done: true, value: undefined };
+          i++;
+          return { done: false, value: result };
+        },
+      };
+    };
+    result.iterator = iterator;
+  }
+
+  if (!result.indexOf) {
+    // Fallback indexOf handler.
+    result.indexOf = (expr: BoxedExpression, target: BoxedExpression) => {
+      let i = 1;
+      const iter = iterator!(expr);
+      let result = iter.next();
+      while (!result.done) {
+        if (target.isSame(result.value)) return i;
+        i++;
+        result = iter.next();
+      }
+      return undefined;
+    };
+  }
+
+  return {
+    contains: def.contains,
+    size: def.size,
+    at: def.at,
+    iterator: iterator,
+    keys: def.keys,
+    indexOf: def.indexOf,
+    subsetOf: def.subsetOf,
+  } as CollectionHandlers;
 }

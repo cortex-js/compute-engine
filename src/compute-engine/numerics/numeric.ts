@@ -34,6 +34,9 @@ type IsInteger<N extends number> = `${N}` extends `${string}.${string}`
 
 export type SmallInteger = IsInteger<number>;
 
+/** The largest number of digits of a bigint */
+export const MAX_BIGINT_DIGITS = 1024;
+
 // When doing a calculation via iteration (e.g. to calculate a sum)
 // do not iterate more than this value
 export const MAX_ITERATION = 1000000;

@@ -25,7 +25,7 @@ export const TRIGONOMETRY_LIBRARY: IdentifierDefinitions[] = [
     // Constants
     //
     Pi: {
-      domain: 'RealNumbers',
+      type: 'real',
       constant: true,
       holdUntil: 'N',
       wikidata: 'Q167',
@@ -36,48 +36,46 @@ export const TRIGONOMETRY_LIBRARY: IdentifierDefinitions[] = [
   {
     Degrees: {
       /* = Pi / 180 */
-      signature: {
-        domain: ['FunctionOf', 'Numbers', 'Numbers'],
-        canonical: (ce, ops) => {
-          if (ce.angularUnit === 'deg') return ops[0];
-          if (ops.length !== 1) return ce._fn('Degrees', ops);
-          const arg = ops[0];
-          if (arg.numericValue === null || !arg.isValid)
-            return ce._fn('Degrees', ops);
+      signature: 'real -> real',
+      canonical: (ops, { engine }) => {
+        const ce = engine;
+        if (ce.angularUnit === 'deg') return ops[0];
+        if (ops.length !== 1) return ce._fn('Degrees', ops);
+        const arg = ops[0];
+        if (arg.numericValue === null || !arg.isValid)
+          return ce._fn('Degrees', ops);
 
-          let fArg = arg.re ?? NaN;
+        let fArg = arg.re;
 
-          if (Number.isNaN(fArg)) return arg.mul(ce.Pi).div(180);
+        if (Number.isNaN(fArg)) return arg.mul(ce.Pi).div(180);
 
-          // Constrain fArg to [0, 360]
-          fArg = fArg % 360;
-          if (fArg < 0) fArg += 360;
+        // Constrain fArg to [0, 360]
+        fArg = fArg % 360;
+        if (fArg < 0) fArg += 360;
 
-          // Convert fArg to radians
-          if (Number.isInteger(fArg)) {
-            const fRadians = reducedRational([fArg, 180]);
-            if (fRadians[0] === 0) return ce.Zero;
-            if (fRadians[0] === 1 && fRadians[1] === 1) return ce.Pi;
-            if (fRadians[0] === 1) return ce.Pi.div(fRadians[1]);
-            return ce.number(fRadians).mul(ce.Pi);
-          }
-          return ce.number(fArg).div(180).mul(ce.Pi);
-        },
-        evaluate: (ops, { engine: ce }) => {
-          if (ce.angularUnit === 'deg') return ops[0];
-          return ops[0].mul(ce.Pi.div(180)).evaluate();
-        },
+        // Convert fArg to radians
+        if (Number.isInteger(fArg)) {
+          const fRadians = reducedRational([fArg, 180]);
+          if (fRadians[0] === 0) return ce.Zero;
+          if (fRadians[0] === 1 && fRadians[1] === 1) return ce.Pi;
+          if (fRadians[0] === 1) return ce.Pi.div(fRadians[1]);
+          return ce.number(fRadians).mul(ce.Pi);
+        }
+        return ce.number(fArg).div(180).mul(ce.Pi);
+      },
+      evaluate: (ops, { engine: ce }) => {
+        if (ce.angularUnit === 'deg') return ops[0];
+        return ops[0].mul(ce.Pi.div(180)).evaluate();
       },
     },
 
     // Hypot: sqrt(x*x + y*y)
     Hypot: {
       threadable: true,
-      signature: {
-        domain: ['FunctionOf', 'Numbers', 'Numbers', 'NonNegativeNumbers'],
-        sgn: () => 'non-negative',
-        evaluate: ['Sqrt', ['Add', ['Square', '_1'], ['Square', '_2']]],
-      },
+      signature: '(real, real) -> real',
+      sgn: () => 'non-negative',
+      evaluate: ([x, y], { engine }) =>
+        engine.box(['Sqrt', ['Add', ['Square', x], ['Square', y]]]),
     },
 
     // The definition of other functions may rely on Sin, so it is defined first
@@ -93,35 +91,31 @@ export const TRIGONOMETRY_LIBRARY: IdentifierDefinitions[] = [
       wikidata: 'Q2257242',
       complexity: 5200,
       threadable: true,
-      signature: {
-        domain: ['FunctionOf', 'Numbers', 'RealNumbers'],
-        sgn: ([x]) => trigSign('Arctan', x),
-        evaluate: ([x], { numericApproximation }) =>
-          numericApproximation
-            ? evalTrig('Arctan', x)
-            : (constructibleValues('Arctan', x) ?? evalTrig('Arctan', x)),
-      },
+      signature: 'number -> real',
+      sgn: ([x]) => trigSign('Arctan', x),
+      evaluate: ([x], { numericApproximation }) =>
+        numericApproximation
+          ? evalTrig('Arctan', x)
+          : (constructibleValues('Arctan', x) ?? evalTrig('Arctan', x)),
     },
 
     Arctan2: {
       wikidata: 'Q776598',
       complexity: 5200,
       threadable: true,
-      signature: {
-        domain: ['FunctionOf', 'Numbers', 'Numbers', 'Numbers'],
-        evaluate: ([y, x], { engine: ce, numericApproximation }) => {
-          if (numericApproximation)
-            return apply2(y, x, Math.atan2, (a, b) => Decimal.atan2(a, b));
+      signature: '(y:number, x: number) -> real',
+      evaluate: ([y, x], { engine: ce, numericApproximation }) => {
+        if (numericApproximation)
+          return apply2(y, x, Math.atan2, (a, b) => Decimal.atan2(a, b));
 
-          // See https://en.wikipedia.org/wiki/Argument_(complex_analysis)#Realizations_of_the_function_in_computer_languages
-          if (y.isFinite === false && x.isFinite === false) return ce.NaN;
-          if (y.isZero && x.isZero) return ce.Zero;
-          if (x.isFinite === false) return x.isPositive ? ce.Zero : ce.Pi;
-          if (y.isFinite === false)
-            return y.isPositive ? ce.Pi.div(2) : ce.Pi.div(-2);
-          if (y.isZero) return x.isPositive ? ce.Zero : ce.Pi;
-          return ce.function('Arctan', [y.div(x)]).evaluate();
-        },
+        // See https://en.wikipedia.org/wiki/Argument_(complex_analysis)#Realizations_of_the_function_in_computer_languages
+        if (y.isFinite === false && x.isFinite === false) return ce.NaN;
+        if (y.is(0) && x.is(0)) return ce.Zero;
+        if (x.isFinite === false) return x.isPositive ? ce.Zero : ce.Pi;
+        if (y.isFinite === false)
+          return y.isPositive ? ce.Pi.div(2) : ce.Pi.div(-2);
+        if (y.is(0)) return x.isPositive ? ce.Zero : ce.Pi;
+        return ce.function('Arctan', [y.div(x)]).evaluate();
       },
     },
 
@@ -162,20 +156,18 @@ export const TRIGONOMETRY_LIBRARY: IdentifierDefinitions[] = [
     Haversine: {
       wikidata: 'Q2528380',
       threadable: true,
-      signature: {
-        domain: ['FunctionOf', 'RealNumbers', 'Numbers'],
-        evaluate: ['Divide', ['Subtract', 1, ['Cos', '_1']], 2],
-      },
+      signature: 'real -> number',
+      evaluate: ([z], { engine }) =>
+        engine.box(['Divide', ['Subtract', 1, ['Cos', z]], 2]),
     },
 
     /** = 2 * Arcsin(Sqrt(z)) */
     InverseHaversine: {
       //  Range ['Interval', [['Negate', 'Pi'], 'Pi'],
       threadable: true,
-      signature: {
-        domain: ['FunctionOf', 'RealNumbers', 'RealNumbers'],
-        evaluate: ['Multiply', 2, ['Arcsin', ['Sqrt', '_1']]],
-      },
+      signature: 'real -> real',
+      evaluate: ([x], { engine }) =>
+        engine.box(['Multiply', 2, ['Arcsin', ['Sqrt', x]]]),
     },
   },
   {
@@ -208,17 +200,17 @@ export const TRIGONOMETRY_LIBRARY: IdentifierDefinitions[] = [
     //   outputDomain: ['TupleOf', 'RealNumbers', 'RealNumbers'],
     // },
     InverseFunction: {
-      signature: {
-        domain: ['FunctionOf', 'Functions', 'Functions'],
-        canonical: (ce, ops) => {
-          // The canonical handler is responsible for validating the arguments
-          ops = checkArity(ce, ops, 1);
-          return (
-            processInverseFunction(ce, ops) ?? ce._fn('InverseFunction', ops)
-          );
-        },
-        evaluate: (ops, { engine: ce }) => processInverseFunction(ce, ops),
+      hold: true,
+      signature: '(function) -> function',
+      canonical: (ops, { engine }) => {
+        // The canonical handler is responsible for validating the arguments
+        ops = checkArity(engine, ops, 1);
+        return (
+          processInverseFunction(engine, ops) ??
+          engine._fn('InverseFunction', ops)
+        );
       },
+      evaluate: (ops, { engine: ce }) => processInverseFunction(ce, ops),
     },
   },
 ];
@@ -232,14 +224,12 @@ function trigFunction(
     complexity,
     description,
     threadable: true,
-    signature: {
-      domain: ['FunctionOf', 'Numbers', 'Numbers'],
-      sgn: ([x]) => trigSign(operator, x),
-      evaluate: ([x], { numericApproximation }) => {
-        if (numericApproximation) return evalTrig(operator, x);
-        const a = constructibleValues(operator, x);
-        return a ?? evalTrig(operator, x);
-      },
+    signature: 'number -> number',
+    sgn: ([x]) => trigSign(operator, x),
+    evaluate: ([x], { numericApproximation }) => {
+      if (numericApproximation) return evalTrig(operator, x);
+      const a = constructibleValues(operator, x);
+      return a ?? evalTrig(operator, x);
     },
   };
 }

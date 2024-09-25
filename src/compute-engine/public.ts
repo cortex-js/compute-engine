@@ -13,6 +13,7 @@
  *
  */
 
+import type { OneOf } from '../common/one-of';
 import type {
   FunctionDefinition,
   SemiBoxedExpression,
@@ -31,15 +32,13 @@ export * from './boxed-expression/public';
  * - The first character should be a letter: `/^[a-zA-Z]/`
  * - Functions and symbols exported from a library should start with an uppercase letter `/^[A-Z]/`
  *
- * If a semi boxed expression
  * @category Definitions
  *
  */
 
-export type IdentifierDefinition =
-  | SymbolDefinition
-  | FunctionDefinition
-  | SemiBoxedExpression;
+export type IdentifierDefinition = OneOf<
+  [SymbolDefinition, FunctionDefinition, SemiBoxedExpression]
+>;
 
 /**
  * @category Definitions

@@ -1,127 +1,104 @@
 import {
-  BoxedDomain,
   BoxedExpression,
   EvaluateOptions,
   IComputeEngine,
   IdentifierDefinitions,
 } from '../public';
 import { applicable } from '../function-utils';
-import { widen } from '../boxed-expression/boxed-domain';
-import { each, isCollection } from '../collection-utils';
+import { each } from '../collection-utils';
 import { checkConditions } from '../boxed-expression/rules';
+import { widen } from '../../common/type/utils';
 
 export const CONTROL_STRUCTURES_LIBRARY: IdentifierDefinitions[] = [
   {
     Block: {
-      hold: 'all',
-      signature: {
-        domain: 'Functions',
-        canonical: canonicalBlock,
-        evaluate: evaluateBlock,
-      },
+      hold: true,
+      signature: '(any) -> any',
+      canonical: canonicalBlock,
+      evaluate: evaluateBlock,
     },
 
     // A condition expression tests for one or more conditions of an expression
     // ['Condition', value, "positive"]
     Condition: {
-      hold: 'all',
-      signature: {
-        params: ['Anything', 'Symbols'],
-        result: 'Booleans',
-        evaluate: ([value, conds], { engine }) => {
-          let conditions: string[] = [];
-          if (conds.symbol) {
-            conditions = [conds.symbol];
-          } else if (conds.operator === 'And') {
-            conditions = conds.ops!.map((op) => op.symbol ?? '');
-          }
-          if (checkConditions(value, conditions)) return engine.True;
-          return engine.False;
-        },
+      hold: true,
+      signature: '(value, symbol) -> boolean',
+      evaluate: ([value, conds], { engine }) => {
+        let conditions: string[] = [];
+        if (conds.symbol) {
+          conditions = [conds.symbol];
+        } else if (conds.operator === 'And') {
+          conditions = conds.ops!.map((op) => op.symbol ?? '');
+        }
+        if (checkConditions(value, conditions)) return engine.True;
+        return engine.False;
       },
     },
 
     If: {
-      hold: 'rest', // Evaluate the condition, but no the true/false branches
-      signature: {
-        domain: 'Functions',
-        result: (ce, ops) => {
-          if (ops.length !== 2) return ce.domain('NothingDomain');
-          return widen(ops[0], ops[1]);
-        },
-        evaluate: ([cond, ifTrue, ifFalse], { engine }) => {
-          if (cond && cond.symbol === 'True')
-            return ifTrue?.evaluate() ?? engine.Nothing;
-          return ifFalse?.evaluate() ?? engine.Nothing;
-        },
+      hold: true,
+      signature: '(expression, expression, expression) -> any',
+      type: ([cond, ifTrue, ifFalse]) => widen(ifTrue.type, ifFalse.type),
+      evaluate: ([cond, ifTrue, ifFalse], { engine }) => {
+        cond = cond.evaluate();
+        if (cond && cond.symbol === 'True')
+          return ifTrue?.evaluate() ?? engine.Nothing;
+        return ifFalse?.evaluate() ?? engine.Nothing;
       },
     },
 
     Loop: {
-      hold: 'all', // Do not evaluate anything
-      signature: {
-        domain: 'Functions',
-        evaluate: ([body, collection], { engine: ce }) => {
-          body ??= ce.Nothing;
-          if (body.symbol === 'Nothing') return body;
+      hold: true,
+      signature: '(body:expression, collection:expression) -> any',
+      type: ([body]) => body.type,
+      evaluate: ([body, collection], { engine: ce }) => {
+        body ??= ce.Nothing;
+        if (body.symbol === 'Nothing') return body;
 
-          if (collection && isCollection(collection)) {
-            //
-            // Iterate over the elements of a collection
-            //
-            let result: BoxedExpression | undefined = undefined;
-            const fn = applicable(body);
-            let i = 0;
-
-            for (const x of each(collection)) {
-              result = fn([x]) ?? ce.Nothing;
-              if (result.operator === 'Break') return result.op1;
-              if (result.operator === 'Return') return result;
-              if (i++ > ce.iterationLimit)
-                return ce.error('iteration-limit-exceeded');
-            }
-          }
-
+        if (collection && collection.isCollection) {
           //
-          // No collection: infinite loop
+          // Iterate over the elements of a collection
           //
+          let result: BoxedExpression | undefined = undefined;
+          const fn = applicable(body);
           let i = 0;
-          while (true) {
-            const result = body.evaluate();
+
+          for (const x of each(collection)) {
+            result = fn([x]) ?? ce.Nothing;
             if (result.operator === 'Break') return result.op1;
             if (result.operator === 'Return') return result;
             if (i++ > ce.iterationLimit)
               return ce.error('iteration-limit-exceeded');
           }
-        },
+        }
+
+        //
+        // No collection: infinite loop
+        //
+        let i = 0;
+        while (true) {
+          const result = body.evaluate();
+          if (result.operator === 'Break') return result.op1;
+          if (result.operator === 'Return') return result;
+          if (i++ > ce.iterationLimit)
+            return ce.error('iteration-limit-exceeded');
+        }
       },
     },
 
     Which: {
-      hold: 'all',
-      signature: {
-        domain: 'Functions',
-        result: (ce, ops) => domainWhich(ce, ops),
-        evaluate: (ops, options) => evaluateWhich(ops, options),
+      hold: true,
+      signature: '(...expression) -> any',
+      type: (args) => {
+        if (args.length % 2 !== 0) return 'nothing';
+        return widen(...args.filter((_, i) => i % 2 === 1).map((x) => x.type));
       },
+      evaluate: (ops, options) => evaluateWhich(ops, options),
     },
 
-    FixedPoint: {
-      hold: 'all',
-      signature: {
-        domain: 'Functions',
-        // @todo
-      },
-    },
+    FixedPoint: { hold: true, signature: 'any -> any' },
   },
 ];
-
-function domainWhich(ce: IComputeEngine, args: BoxedDomain[]): BoxedDomain {
-  let dom: BoxedDomain | null | undefined = null;
-  for (let i = 1; i <= args.length - 1; i += 2)
-    dom = widen(dom, args[i].domain);
-  return dom ?? ce.domain('NothingDomain');
-}
 
 function evaluateWhich(
   args: ReadonlyArray<BoxedExpression>,
@@ -177,9 +154,10 @@ function evaluateBlock(
  */
 
 function canonicalBlock(
-  ce: IComputeEngine,
-  ops: ReadonlyArray<BoxedExpression>
+  ops: ReadonlyArray<BoxedExpression>,
+  options: { engine: IComputeEngine }
 ): BoxedExpression | null {
+  const { engine: ce } = options;
   // Empty block?
   if (ops.length === 0) return null;
 

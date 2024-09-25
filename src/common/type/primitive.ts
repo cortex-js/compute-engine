@@ -1,31 +1,56 @@
 import type { PrimitiveType } from './types';
 
-export const PRIMITIVE_TYPES: PrimitiveType[] = [
-  // Numeric types
+export const NUMERIC_TYPES: PrimitiveType[] = [
   'number',
+  'finite_number',
   'complex',
+  'finite_complex',
   'imaginary',
+  'finite_imaginary',
   'real',
+  'finite_real',
   'rational',
+  'finite_rational',
   'integer',
-  // Other value types
-  'value',
+  'finite_integer',
+  'non_finite_number',
+] as const as PrimitiveType[];
+
+export const COLLECTION_TYPES: PrimitiveType[] = [
   'collection',
   'list',
-  'map',
   'set',
   'tuple',
+  'map',
+] as const as PrimitiveType[];
+
+export const SCALAR_TYPES: PrimitiveType[] = [
+  'scalar',
+  ...NUMERIC_TYPES,
   'boolean',
   'string',
-  // Symbolic types
+] as const as PrimitiveType[];
+
+export const VALUE_TYPES: PrimitiveType[] = [
+  'value',
+  ...COLLECTION_TYPES,
+  ...SCALAR_TYPES,
+] as const as PrimitiveType[];
+
+export const EXPRESSION_TYPES: PrimitiveType[] = [
   'expression',
-  'function',
   'symbol',
-  // Other types
+  'function',
+  ...VALUE_TYPES,
+] as const as PrimitiveType[];
+
+export const PRIMITIVE_TYPES: PrimitiveType[] = [
   'any',
   'unknown',
   'nothing',
+  'never',
   'error',
+  ...EXPRESSION_TYPES,
 ] as const as PrimitiveType[];
 
 export function isValidPrimitiveType(s: any): s is PrimitiveType {

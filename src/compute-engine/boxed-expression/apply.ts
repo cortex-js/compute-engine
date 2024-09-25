@@ -15,23 +15,22 @@ export function apply(
   const ce = expr.engine;
 
   let result: number | Complex | Decimal | undefined = undefined;
-  if (expr.im !== 0) result = complexFn?.(ce.complex(expr.re ?? 0, expr.im));
+  if (expr.im !== 0) result = complexFn?.(ce.complex(expr.re, expr.im));
   else {
     const bigRe = expr.bignumRe;
     if (bigRe !== undefined && bignumPreferred(ce) && bigFn)
       result = bigFn(bigRe);
     else {
       const re = expr.re;
-      console.assert(re !== undefined);
-      if (bignumPreferred(ce) && bigFn) result = bigFn(ce.bignum(re!));
-      else result = fn(re!);
+      if (bignumPreferred(ce) && bigFn) result = bigFn(ce.bignum(re));
+      else result = fn(re);
     }
   }
 
   if (result === undefined) return undefined;
   if (result instanceof Complex)
     return ce.number(
-      ce._numericValue({ decimal: ce.chop(result.re), im: ce.chop(result.im) })
+      ce._numericValue({ re: ce.chop(result.re), im: ce.chop(result.im) })
     );
   return ce.number(ce.chop(result));
 }
@@ -47,38 +46,41 @@ export function apply2(
     return undefined;
 
   const ce = expr1.engine;
+
   let result: number | Complex | Decimal | undefined = undefined;
   if (expr1.im !== 0 || expr2.im !== 0) {
     result = complexFn?.(
-      ce.complex(expr1.re ?? 0, expr1.im),
-      ce.complex(expr2.re ?? 0, expr2.im)
+      ce.complex(expr1.re, expr1.im),
+      ce.complex(expr2.re, expr2.im)
     );
   }
 
-  if (bigFn) {
-    const bigRe1 = expr1.bignumRe;
-    const bigRe2 = expr2.bignumRe;
-    if (bigRe1 !== undefined && bigRe2 !== undefined) {
-      if (bignumPreferred(ce) && bigFn) result = bigFn(bigRe1, bigRe2);
-      else result = fn(bigRe1.toNumber(), bigRe2.toNumber());
+  if (result === undefined && bigFn) {
+    let bigRe1 = expr1.bignumRe;
+    let bigRe2 = expr2.bignumRe;
+    if (bigRe1 !== undefined || bigRe2 !== undefined) {
+      bigRe1 ??= ce.bignum(expr1.re);
+      bigRe2 ??= ce.bignum(expr2.re);
+      result = bigFn(bigRe1, bigRe2);
     }
   }
-
-  const re1 = expr1.re;
-  const re2 = expr2.re;
-  if (re1 !== undefined && re2 !== undefined) {
-    if (bignumPreferred(ce) && bigFn)
-      result = bigFn(
-        ce.bignum(expr1.bignumRe ?? re1),
-        ce.bignum(expr2.bignumRe ?? re2)
-      );
-    else result = fn(re1, re2);
+  if (result === undefined) {
+    const re1 = expr1.re;
+    const re2 = expr2.re;
+    if (!isNaN(re1) && !isNaN(re2)) {
+      if (bignumPreferred(ce) && bigFn)
+        result = bigFn(
+          ce.bignum(expr1.bignumRe ?? re1),
+          ce.bignum(expr2.bignumRe ?? re2)
+        );
+      else result = fn(re1, re2);
+    }
   }
 
   if (result === undefined) return undefined;
   if (result instanceof Complex)
     return ce.number(
-      ce._numericValue({ decimal: ce.chop(result.re), im: ce.chop(result.im) })
+      ce._numericValue({ re: ce.chop(result.re), im: ce.chop(result.im) })
     );
   return ce.number(ce.chop(result));
 }

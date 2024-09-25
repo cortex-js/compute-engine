@@ -384,7 +384,7 @@ describe('NON EXACT WILDCARDS', () => {
     const result = match2(['Multiply', '_a', '_x'], ['Divide', '_x', '2']);
     expect(result).toMatchInlineSnapshot(`
       {
-        _a: ["Divide", 1, 2],
+        _a: ["Rational", 1, 2],
         _x: _x,
       }
     `);

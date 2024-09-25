@@ -135,18 +135,10 @@ describe('DELIMITERS', () => {
           Error,
           [
             ErrorCode,
-            'incompatible-domain',
-            Values,
-            [
-              FunctionOf,
-              [
-                VarArg,
-                Anything,
-              ],
-              Anything,
-            ],
+            'incompatible-type',
+            'list | tuple | string',
+            '(...any) -> any',
           ],
-          f,
         ],
         3,
       ]
@@ -158,21 +150,17 @@ describe('DELIMITERS', () => {
           Error,
           [
             ErrorCode,
-            'incompatible-domain',
-            Values,
-            [
-              FunctionOf,
-              [
-                VarArg,
-                Anything,
-              ],
-              Anything,
-            ],
+            'incompatible-type',
+            'list | tuple | string',
+            '(...any) -> any',
           ],
-          f,
         ],
         3,
-        4,
+        [
+          Error,
+          'unexpected-argument',
+          '4',
+        ],
       ]
     `);
     expect(ce.parse('v[3]').json).toMatchInlineSnapshot(`
@@ -187,7 +175,11 @@ describe('DELIMITERS', () => {
         At,
         v,
         3,
-        4,
+        [
+          Error,
+          'unexpected-argument',
+          '4',
+        ],
       ]
     `);
   });

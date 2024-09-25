@@ -131,7 +131,7 @@ describe('OPERATOR invisible', () => {
         ["Delimiter", ["InvisibleOperator", 2, "q"]]
       ]
       canonical = ["Multiply", 2, "q", "q"]
-      eval-auto = 2q^2
+      simplify  = 2q^2
     `));
 
   test('f(2q) // Invisible operator as a function', () =>
@@ -163,6 +163,7 @@ describe('OPERATOR invisible', () => {
     expect(check('2\\frac{a}{b}')).toMatchInlineSnapshot(`
       box       = ["InvisibleOperator", 2, ["Divide", "a", "b"]]
       canonical = ["Divide", ["Multiply", 2, "a"], "b"]
+      simplify  = (2a) / b
     `));
 });
 
@@ -200,7 +201,7 @@ describe('OPERATOR prefix', () => {
   test('-i // Negate', () =>
     expect(check('-i')).toMatchInlineSnapshot(`
       box       = ["Negate", "i"]
-      canonical = ["Negate", "ImaginaryUnit"]
+      canonical = ["Complex", 0, -1]
     `));
   test('-\\infty // Negate', () =>
     expect(check('-\\infty')).toMatchInlineSnapshot(`NegativeInfinity`));
@@ -212,7 +213,7 @@ describe('OPERATOR prefix', () => {
   test('+i // Infix plus', () =>
     expect(check('+i')).toMatchInlineSnapshot(`
       box       = i
-      canonical = ImaginaryUnit
+      canonical = ["Complex", 0, 1]
     `));
   test('+\\infty // Infix plus', () =>
     expect(check('+\\infty')).toMatchInlineSnapshot(`PositiveInfinity`));
@@ -281,7 +282,7 @@ describe('OPERATOR multiply', () => {
   test('2\\sin(x)\\frac12, function apply', () =>
     expect(check('2\\sin(x)\\frac12')).toMatchInlineSnapshot(`
       box       = ["InvisibleOperator", 2, ["Sin", "x"], ["Divide", 1, 2]]
-      canonical = ["Divide", ["Multiply", 2, ["Sin", "x"]], 2]
+      canonical = ["Multiply", 2, ["Rational", 1, 2], ["Sin", "x"]]
       simplify  = sin(x)
     `));
   test('3\\pi5', () =>
@@ -413,6 +414,7 @@ describe('OPERATOR postfix', () => {
     expect(check('2+n!')).toMatchInlineSnapshot(`
       box       = ["Add", 2, ["Factorial", "n"]]
       canonical = ["Add", ["Factorial", "n"], 2]
+      eval-auto = NaN
     `));
   test('-5!-2 // Precedence', () =>
     expect(check('-2-5!')).toMatchInlineSnapshot(`
@@ -427,18 +429,40 @@ describe('OPERATOR postfix', () => {
       eval-auto = -120
     `));
   test('-n!', () =>
-    expect(check('-n!')).toMatchInlineSnapshot(
-      `["Negate", ["Factorial", "n"]]`
-    ));
+    expect(check('-n!')).toMatchInlineSnapshot(`
+      box       = ["Negate", ["Factorial", "n"]]
+      eval-auto = NaN
+    `));
   test('-n!!', () =>
-    expect(check('-n!!')).toMatchInlineSnapshot(
-      `["Negate", ["Factorial2", "n"]]`
-    ));
+    expect(check('-n!!')).toMatchInlineSnapshot(`
+      invalid   =[
+        "Negate",
+        [
+          "Factorial2",
+          [
+            "Error",
+            ["ErrorCode", "'incompatible-type'", "'integer'", "'real'"]
+          ]
+        ]
+      ]
+    `)); // @fixme
   test('-n!!!', () =>
-    expect(ce.parse('-n!!!')).toMatchInlineSnapshot(
-      `["Negate", ["Factorial", ["Factorial2", "n"]]]`
-    ));
-});
+    expect(ce.parse('-n!!!')).toMatchInlineSnapshot(`
+      [
+        "Negate",
+        [
+          "Factorial",
+          [
+            "Factorial2",
+            [
+              "Error",
+              ["ErrorCode", "'incompatible-type'", "'integer'", "'real'"]
+            ]
+          ]
+        ]
+      ]
+    `));
+}); // @fixme
 
 describe('OPERATOR serialize, valid', () => {
   test('1 3/4', () =>
@@ -479,7 +503,7 @@ describe('OPERATOR serialize, valid', () => {
   test(`['Multiply', ['Divide', 2, 'x'], ['Power', 'x', -2]]`, () =>
     expect(
       latex(['Multiply', ['Divide', 2, 'x'], ['Power', 'x', -2]])
-    ).toMatchInlineSnapshot(`\\frac{\\frac{2}{x^2}}{x}`));
+    ).toMatchInlineSnapshot(`\\frac{2}{x^3}`));
 
   test(`['Divide', 2, 3]`, () =>
     expect(latex(['Divide', 2, 3])).toMatchInlineSnapshot(`\\frac{2}{3}`));

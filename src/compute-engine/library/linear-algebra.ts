@@ -1,9 +1,13 @@
+import { parseType } from '../../common/type/parse';
+import { isSubtype } from '../../common/type/subtype';
+import { ListType } from '../../common/type/types';
 import { isBoxedTensor } from '../boxed-expression/boxed-tensor';
 import { checkArity } from '../boxed-expression/validate';
 import { each, isFiniteIndexableCollection } from '../collection-utils';
 import {
   BoxedExpression,
   IComputeEngine,
+  IdentifierDefinition,
   IdentifierDefinitions,
 } from '../public';
 
@@ -11,31 +15,26 @@ export const LINEAR_ALGEBRA_LIBRARY: IdentifierDefinitions[] = [
   {
     Matrix: {
       complexity: 9000,
-      hold: 'all',
-      signature: {
-        params: ['Lists'],
-        optParams: ['Strings', 'Strings'],
-        result: 'Lists',
-        canonical: canonicalMatrix,
-        evaluate: (ops, options) => ops[0].evaluate(options),
-      },
+      hold: true,
+      signature: '(matrix, string?, string?) -> matrix',
+      type: ([matrix]) => matrix.type,
+      canonical: canonicalMatrix,
+      evaluate: (ops, options) => ops[0].evaluate(options),
     },
     // Vector is a specialized collection to represent a column vector.
     // ["Vector", a, b, c] is a shorthand for ["List", ["List", a], ["List", b], ["List", c]]
     Vector: {
       complexity: 9000,
-      hold: 'all',
-      signature: {
-        restParam: 'Anything',
-        result: 'Lists',
-        canonical: (ce, ops) => {
-          return ce._fn('Matrix', [
-            ce.function(
-              'List',
-              ops.map((op) => ce.function('List', [op]))
-            ),
-          ]);
-        },
+      hold: true,
+      signature: '...number -> vector',
+      type: (elements) => parseType(`vector<${elements.length}>`),
+      canonical: (ops, { engine: ce }) => {
+        return ce._fn('Matrix', [
+          ce.function(
+            'List',
+            ops.map((op) => ce.function('List', [op]))
+          ),
+        ]);
       },
     },
   },
@@ -44,15 +43,13 @@ export const LINEAR_ALGEBRA_LIBRARY: IdentifierDefinitions[] = [
     // Corresponds to monadic Shape `⍴` in APL
     Shape: {
       complexity: 8200,
-      signature: {
-        domain: ['FunctionOf', 'Values', 'Tuples'],
-        evaluate: (ops, { engine: ce }) => {
-          const op1 = ops[0];
+      signature: '(value) -> tuple',
+      evaluate: (ops, { engine: ce }) => {
+        const op1 = ops[0];
 
-          if (isBoxedTensor(op1)) return ce.tuple(...op1.tensor.shape);
+        if (isBoxedTensor(op1)) return ce.tuple(...op1.tensor.shape);
 
-          return ce.tuple();
-        },
+        return ce.tuple();
       },
     },
 
@@ -60,39 +57,45 @@ export const LINEAR_ALGEBRA_LIBRARY: IdentifierDefinitions[] = [
       description:
         'The length of the shape of the expression. Note this is not the matrix rank (the number of linearly independent rows or columns in the matrix)',
       complexity: 8200,
-      signature: {
-        domain: ['FunctionOf', 'Values', 'Numbers'],
-        sgn: () => 'positive',
-        evaluate: (ops, { engine: ce }) => {
-          const op1 = ops[0];
+      signature: '(value) -> number',
+      sgn: () => 'positive',
+      evaluate: (ops, { engine: ce }) => {
+        const op1 = ops[0];
 
-          if (isBoxedTensor(op1)) return ce.number(op1.tensor.rank);
+        if (isBoxedTensor(op1)) return ce.number(op1.tensor.rank);
 
-          return ce.Zero;
-        },
+        return ce.Zero;
       },
-    },
+    } as IdentifierDefinition,
 
     // Corresponds to ArrayReshape in Mathematica
     // and dyadic Shape `⍴` in APL
     Reshape: {
       complexity: 8200,
-      signature: {
-        domain: ['FunctionOf', 'Values', 'Tuples', 'Values'],
-        evaluate: (ops, { engine: ce }) => {
-          let op1 = ops[0];
-          const shape = ops[1].ops?.map((op) => op.value as number) ?? [];
+      signature: '(list<number>, tuple) -> value',
+      type: ([value, shape]) => {
+        if (!isSubtype(value.type, 'list')) return 'nothing';
+        const col = value.type as ListType;
+        if (!isSubtype(col.elements, 'number')) return 'nothing';
+        return parseType(
+          `list<number^${shape.ops!.map((x) => x.toString()).join('x')}>`
+        );
+      },
+      evaluate: (ops, { engine: ce }): BoxedExpression | undefined => {
+        let op1 = ops[0];
+        const shape = ops[1].ops?.map((op) => op.value as number) ?? [];
 
-          // If a finite indexable collection, convert to a list
-          // -> BoxedTensor
-          if (!isBoxedTensor(op1) && isFiniteIndexableCollection(op1))
-            op1 = ce.function('List', [...each(op1)]);
+        // If a finite indexable collection, convert to a list
+        // -> BoxedTensor
+        if (!isBoxedTensor(op1) && isFiniteIndexableCollection(op1))
+          op1 = ce.function('List', [...each(op1)]);
 
-          if (isBoxedTensor(op1))
-            return op1.tensor.reshape(...shape).expression;
+        if (isBoxedTensor(op1)) {
+          if (shape.join('x') === op1.tensor.shape.join('x')) return op1;
+          return op1.tensor.reshape(...shape).expression;
+        }
 
-          return undefined;
-        },
+        return undefined;
       },
     },
 
@@ -100,22 +103,20 @@ export const LINEAR_ALGEBRA_LIBRARY: IdentifierDefinitions[] = [
     // Also Enlist `∊``⍋` in APL
     Flatten: {
       complexity: 8200,
-      signature: {
-        domain: ['FunctionOf', 'Values', 'Values'],
-        evaluate: (ops, { engine: ce }) => {
-          const op1 = ops[0];
+      signature: '(value) -> list',
+      evaluate: (ops, { engine: ce }) => {
+        const op1 = ops[0];
 
-          if (isBoxedTensor(op1))
-            return ce.box([
-              'List',
-              ...op1.tensor.flatten().map((x) => ce.box(x)),
-            ]);
+        if (isBoxedTensor(op1))
+          return ce.box([
+            'List',
+            ...op1.tensor.flatten().map((x) => ce.box(x)),
+          ]);
 
-          if (isFiniteIndexableCollection(op1))
-            return ce.function('List', [...each(op1)]);
+        if (isFiniteIndexableCollection(op1))
+          return ce.function('List', [...each(op1)]);
 
-          return undefined;
-        },
+        return undefined;
       },
     },
 
@@ -123,94 +124,79 @@ export const LINEAR_ALGEBRA_LIBRARY: IdentifierDefinitions[] = [
     // Ex: Transpose([[a, b, c], [1, 2, 3]]) = [[a, 1], [b, 2], [c, 3]]
     Transpose: {
       complexity: 8200,
-      signature: {
-        domain: [
-          'FunctionOf',
-          'Values',
-          ['OptArg', 'Numbers', 'Numbers'],
-          'Values',
-        ],
-        evaluate: (ops, { engine: ce }) => {
-          let op1 = ops[0];
-          let axis1 = 1;
-          let axis2 = 2;
-          if (ops.length === 3) {
-            axis1 = ops[1].value as number;
-            axis2 = ops[2].value as number;
-            console.assert(axis1 > 0 && axis2 > 0);
-          }
-          if (axis1 === axis2) return undefined;
-          if (!isBoxedTensor(op1) && isFiniteIndexableCollection(op1))
-            op1 = ce.function('List', [...each(op1)]);
-          if (isBoxedTensor(op1)) {
-            if (axis1 === 1 && axis2 === 2)
-              return op1.tensor.transpose()?.expression;
-            else return op1.tensor.transpose(axis1, axis2)?.expression;
-          }
-          return undefined;
-        },
+      signature: '(matrix|vector, axis1: integer?, axis2: integer?) -> matrix',
+      evaluate: (ops, { engine: ce }) => {
+        let op1 = ops[0];
+        let axis1 = 1;
+        let axis2 = 2;
+        if (ops.length === 3) {
+          axis1 = ops[1].value as number;
+          axis2 = ops[2].value as number;
+          console.assert(axis1 > 0 && axis2 > 0);
+        }
+        if (axis1 === axis2) return undefined;
+        if (!isBoxedTensor(op1) && isFiniteIndexableCollection(op1))
+          op1 = ce.function('List', [...each(op1)]);
+        if (isBoxedTensor(op1)) {
+          if (axis1 === 1 && axis2 === 2)
+            return op1.tensor.transpose()?.expression;
+          else return op1.tensor.transpose(axis1, axis2)?.expression;
+        }
+        return undefined;
       },
     },
 
     ConjugateTranspose: {
       complexity: 8200,
-      signature: {
-        domain: ['FunctionOf', 'Values', 'Values'],
-        evaluate: (ops) => {
-          const op1 = ops[0];
-          let axis1 = 1;
-          let axis2 = 2;
-          if (ops.length === 3) {
-            axis1 = ops[1].value as number;
-            axis2 = ops[2].value as number;
-            console.assert(axis1 > 0 && axis2 > 0);
-          }
-          if (axis1 === axis2) return undefined;
+      signature: '(tensor, axis1: integer?, axis2: integer?) -> matrix',
+      evaluate: (ops) => {
+        const op1 = ops[0];
+        let axis1 = 1;
+        let axis2 = 2;
+        if (ops.length === 3) {
+          axis1 = ops[1].value as number;
+          axis2 = ops[2].value as number;
+          console.assert(axis1 > 0 && axis2 > 0);
+        }
+        if (axis1 === axis2) return undefined;
 
-          if (isBoxedTensor(op1))
-            return op1.tensor.conjugateTranspose(axis1, axis2)?.expression;
+        if (isBoxedTensor(op1))
+          return op1.tensor.conjugateTranspose(axis1, axis2)?.expression;
 
-          return undefined;
-        },
+        return undefined;
       },
     },
 
     Determinant: {
       complexity: 8200,
-      signature: {
-        domain: ['FunctionOf', 'Values', 'Values'],
-        evaluate: (ops) => {
-          const op1 = ops[0];
-          if (isBoxedTensor(op1)) return op1.tensor.determinant();
+      signature: '(matrix) -> number',
+      evaluate: (ops) => {
+        const op1 = ops[0];
+        if (isBoxedTensor(op1)) return op1.tensor.determinant();
 
-          return undefined;
-        },
+        return undefined;
       },
     },
 
     Inverse: {
       complexity: 8200,
-      signature: {
-        domain: ['FunctionOf', 'Values', 'Values'],
-        evaluate: (ops) => {
-          const op1 = ops[0];
-          if (isBoxedTensor(op1)) return op1.tensor.inverse()?.expression;
+      signature: '(matrix) -> matrix',
+      type: ([matrix]) => matrix.type,
+      evaluate: ([matrix]) => {
+        if (isBoxedTensor(matrix)) return matrix.tensor.inverse()?.expression;
 
-          return undefined;
-        },
+        return undefined;
       },
     },
 
     PseudoInverse: {
       complexity: 8200,
-      signature: {
-        domain: ['FunctionOf', 'Values', 'Values'],
-        evaluate: (ops) => {
-          const op1 = ops[0];
-          if (isBoxedTensor(op1)) return op1.tensor.pseudoInverse()?.expression;
+      signature: '(matrix) -> matrix',
+      evaluate: ([matrix]) => {
+        if (isBoxedTensor(matrix))
+          return matrix.tensor.pseudoInverse()?.expression;
 
-          return undefined;
-        },
+        return undefined;
       },
     },
 
@@ -229,15 +215,12 @@ export const LINEAR_ALGEBRA_LIBRARY: IdentifierDefinitions[] = [
 
     AdjugateMatrix: {
       complexity: 8200,
-      signature: {
-        domain: ['FunctionOf', 'Values', 'Values'],
-        evaluate: (ops) => {
-          const op1 = ops[0];
-          if (isBoxedTensor(op1))
-            return op1.tensor.adjugateMatrix()?.expression;
+      signature: '(matrix) -> matrix',
+      evaluate: (ops) => {
+        const op1 = ops[0];
+        if (isBoxedTensor(op1)) return op1.tensor.adjugateMatrix()?.expression;
 
-          return undefined;
-        },
+        return undefined;
       },
     },
 
@@ -256,24 +239,22 @@ export const LINEAR_ALGEBRA_LIBRARY: IdentifierDefinitions[] = [
 
     Trace: {
       complexity: 8200,
-      signature: {
-        domain: ['FunctionOf', 'Values', 'Values'],
-        evaluate: (ops) => {
-          const op1 = ops[0];
-          if (isBoxedTensor(op1)) return op1.tensor.trace();
+      signature: '(matrix) -> number',
+      evaluate: (ops) => {
+        const op1 = ops[0];
+        if (isBoxedTensor(op1)) return op1.tensor.trace();
 
-          return undefined;
-        },
+        return undefined;
       },
     },
   },
 ];
 
 function canonicalMatrix(
-  ce: IComputeEngine,
   ops: BoxedExpression[],
-  operator = 'Matrix'
+  { engine: ce }: { engine: IComputeEngine }
 ): BoxedExpression | null {
+  const operator = 'Matrix';
   if (ops.length === 0) return ce._fn(operator, []);
 
   const body =

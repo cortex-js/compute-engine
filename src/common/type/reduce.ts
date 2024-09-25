@@ -11,6 +11,7 @@ import {
   SetType,
   TupleType,
   FunctionSignature,
+  NegationType,
 } from './types';
 import { isValidPrimitiveType } from './primitive';
 
@@ -38,6 +39,9 @@ export function reduceType(type: Type): Type {
     case 'intersection':
       return reduceIntersectionType(type);
 
+    case 'negation':
+      return reduceNegationType(type);
+
     case 'collection':
       return reduceCollectionType(type);
 
@@ -56,6 +60,12 @@ export function reduceType(type: Type): Type {
     case 'signature':
       return reduceSignatureType(type);
 
+    case 'value':
+      return type;
+
+    case 'reference':
+      return type;
+
     default:
       throw new Error(`Unknown type kind: ${type}`);
   }
@@ -63,8 +73,22 @@ export function reduceType(type: Type): Type {
 
 function decorate(t: Type): Type {
   if (typeof t !== 'object') return t;
-  t.toString = () => typeToString(t);
+
+  Object.defineProperty(t, 'toString', { value: () => typeToString(t) });
+
   return t;
+}
+
+function reduceNegationType(type: NegationType): Type {
+  const reducedType = reduceType(type.type);
+
+  if (reducedType === 'error') return 'error';
+
+  if (reducedType === 'nothing') return 'any';
+
+  if (reducedType === 'any') return 'nothing';
+
+  return decorate({ kind: 'negation', type: reducedType });
 }
 
 function reduceUnionType(type: AlgebraicType): Type {
@@ -72,24 +96,22 @@ function reduceUnionType(type: AlgebraicType): Type {
   const uniqueTypes = new Set(
     type.types.map((t) => typeToString(reduceType(t)))
   );
-  const reducedTypes = Array.from(uniqueTypes).map(parseType);
+  const reducedTypes: Type[] = Array.from(uniqueTypes).map(
+    (x) => parseType(x)!
+  );
 
-  if (reducedTypes.length === 0) {
-    return 'nothing';
-  }
+  if (reducedTypes.length === 0) return 'never';
 
   if (reducedTypes.some((type) => type === 'error')) return 'error';
 
-  if (reducedTypes.length === 1) {
-    return decorate(reducedTypes[0]); // "boolean | boolean" -> "boolean"
-  }
+  if (reducedTypes.length === 1) return decorate(reducedTypes[0]!); // "boolean | boolean" -> "boolean"
 
   return decorate(
     reducedTypes
       .reduce<Type[]>((acc, current) => {
-        if (!acc.some((t) => isSubtype(current, t) || isSubtype(t, current))) {
+        if (!acc.some((t) => isSubtype(current, t) || isSubtype(t, current)))
           acc.push(current);
-        }
+
         return acc;
       }, [])
       .reduce((acc, cur, idx, arr) =>
@@ -103,7 +125,7 @@ function reduceIntersectionType(type: AlgebraicType): Type {
   const uniqueTypes = new Set(
     type.types.map((t) => typeToString(reduceType(t)))
   );
-  const reducedTypes = Array.from(uniqueTypes).map(parseType);
+  const reducedTypes = Array.from(uniqueTypes).map((x) => parseType(x)!);
 
   // If the intersection includes incompatible types, return `nothing`
   const incompatible = reducedTypes.some((t1) =>
@@ -254,7 +276,7 @@ function reduceMapType(type: MapType): Type {
 }
 
 function reduceSignatureType(type: FunctionSignature): Type {
-  let reducedArgs = type.args?.map((arg) => ({
+  const reducedArgs = type.args?.map((arg) => ({
     ...arg,
     type: reduceType(arg.type),
   }));
@@ -268,7 +290,7 @@ function reduceSignatureType(type: FunctionSignature): Type {
         type: reduceType(type.restArg.type),
       }
     : undefined;
-  let reducedResult = reduceType(type.result);
+  const reducedResult = reduceType(type.result);
 
   if (reducedArgs?.some((arg) => arg.type === 'error')) return 'error';
   if (reducedOptArgs?.some((arg) => arg.type === 'error')) return 'error';

@@ -151,19 +151,20 @@ function simplifyExpression(
   }
 
   // Try to simplify, not considering associativity
-  let result = simplifyNonAssociativeFunction(expr, rules, options, steps);
+  const result = simplifyNonCommutativeFunction(expr, rules, options, steps);
   if (result.length > steps.length) return result;
 
-  // If this is an associative function, try variations on the order of the operands
-  if (expr.functionDefinition?.associative === true) {
-    result = simplifyAssociativeFunction(expr, rules, options, steps);
-    if (result.length > steps.length) return result;
-  }
+  // If this is a commutative function, try variations on the order of the operands
+  // if (expr.functionDefinition?.commutative === true) {
+  //   result = simplifyCommutativeFunction(expr, rules, options, steps);
+  //   if (result.length > steps.length) return result;
+  // }
+  // @fixme: should try permutations on rules that are commutative
 
   return steps;
 }
 
-function simplifyNonAssociativeFunction(
+function simplifyNonCommutativeFunction(
   expr: BoxedExpression,
   rules: BoxedRuleSet,
   options: Partial<InternalSimplifyOptions>,
@@ -193,7 +194,7 @@ function simplifyNonAssociativeFunction(
   return [...steps, ...result];
 }
 
-function simplifyAssociativeFunction(
+function simplifyCommutativeFunction(
   expr: BoxedExpression,
   rules: BoxedRuleSet,
   options: SimplifyOptions,
@@ -201,7 +202,7 @@ function simplifyAssociativeFunction(
   seen: BoxedExpression[] = []
 ): RuleSteps {
   if (expr.nops < 3)
-    return simplifyNonAssociativeFunction(expr, rules, options, steps);
+    return simplifyNonCommutativeFunction(expr, rules, options, steps);
 
   const operator = expr.operator;
   const ce = expr.engine;
@@ -221,7 +222,7 @@ function simplifyAssociativeFunction(
       if (seen.some((x) => x.isSame(left))) continue;
 
       seen.push(left);
-      const newSteps = simplifyAssociativeFunction(
+      const newSteps = simplifyCommutativeFunction(
         left,
         rules,
         options,

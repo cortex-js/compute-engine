@@ -82,16 +82,25 @@ export function costFunction(expr: BoxedExpression): number {
   let nameCost = 2;
   if (['Add'].includes(name)) nameCost = 3;
   else if (['Subtract', 'Negate'].includes(name)) nameCost = 4;
-  else if (['Square', 'Sqrt', 'Multiply'].includes(name)) nameCost = 5;
-  else if (['Divide'].includes(name)) nameCost = 6;
-  else if (['Power', 'Root'].includes(name)) nameCost = 7;
-  else if (['Ln', 'Exp', 'Log', 'Lb'].includes(name)) nameCost = 8;
-  else if (['Cos', 'Sin', 'Tan'].includes(name)) nameCost = 9;
-  else nameCost = 10;
+  else if (['Square', 'Sqrt'].includes(name)) nameCost = 5;
+  else if (['Power', 'Root'].includes(name))
+    // We want 2q^2 to be less expensive than 2qq, so we ignore the exponent
+    return costFunction(expr.ops![1]);
+  else if (['Multiply'].includes(name)) nameCost = 7;
+  else if (['Divide'].includes(name)) nameCost = 8;
+  else if (['Ln', 'Exp', 'Log', 'Lb'].includes(name)) nameCost = 9;
+  else if (['Cos', 'Sin', 'Tan'].includes(name)) nameCost = 10;
+  else nameCost = 11;
 
   return (
     nameCost + (expr.ops?.reduce((acc, x) => acc + costFunction(x), 0) ?? 0)
   );
+}
+
+export function leafCount(expr: BoxedExpression): number {
+  if (expr.symbol) return 1;
+  if (expr.isNumberLiteral) return numericCostFunction(expr.numericValue!);
+  return 1 + (expr.ops?.reduce((acc, x) => acc + leafCount(x), 0) ?? 0);
 }
 
 export const DEFAULT_COST_FUNCTION = costFunction;

@@ -33,6 +33,7 @@ import { Product } from './product';
 
 import { order } from './order';
 import { asSmallInteger } from './numerics';
+import { isSubtype } from '../../common/type/subtype';
 
 function _escapeJsonString(s: undefined): undefined;
 function _escapeJsonString(s: string): string;
@@ -65,17 +66,7 @@ function serializeSubtract(
       );
     }
 
-    if (a.type === 'rational') {
-      return serializeJsonFunction(
-        ce,
-        'Subtract',
-        [b, ce.number(v.neg())],
-        options,
-        metadata
-      );
-    }
-
-    if (a.type === 'integer') {
+    if (isSubtype(a.type, 'rational')) {
       return serializeJsonFunction(
         ce,
         'Subtract',
@@ -124,7 +115,7 @@ function serializePrettyJsonFunction(
   }
 
   if (name === 'Multiply' && !exclusions.includes('Negate')) {
-    if (args[0].re === -1) {
+    if (args[0].im === 0 && args[0].re === -1) {
       if (args.length === 2)
         return serializeJsonFunction(ce, 'Negate', [args[1]], options);
       return serializeJsonFunction(
@@ -292,7 +283,7 @@ function serializeJsonFunction(
       if (num0 instanceof Decimal)
         return serializeJsonNumber(ce, num0.neg(), options);
       if (num0 instanceof Complex)
-        return serializeJsonNumber(ce, num0.neg(), options);
+        return serializeJsonNumber(ce, num0!.neg(), options);
       if (isRational(num0)) return serializeJsonNumber(ce, neg(num0), options);
     }
   }
@@ -560,6 +551,9 @@ function serializeJsonNumber(
 
     if (value.isNegativeInfinity)
       return serializeJsonSymbol(ce, 'NegativeInfinity', options, metadata);
+
+    if (value.isComplexInfinity)
+      return serializeJsonSymbol(ce, 'ComplexInfinity', options, metadata);
 
     if (shorthandAllowed) {
       if (value.isZero) return 0;

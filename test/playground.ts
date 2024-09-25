@@ -1,30 +1,26 @@
 import { ComputeEngine } from '../src/compute-engine';
-import { parseType } from '../src/common/type/parse';
-import { Expression } from '../src/math-json';
 
 const ce = new ComputeEngine();
-
 const engine = ce;
 
-console.info(ce.parse('2\\frac{a}{b}').json);
+// 3^{-2} gets calculated because canonicalDivide calls toNumericValue, which
+// does simplify the expression, i.e. "(3x)^2" -> "9x^2". That's a bit
+// inconsistent with, e.g. "3 + 5" which does not get reduced...
+// console.info(ce.parse('\\frac{x}{3^{-2}}').json);
 
-console.info(ce.parse('3 + \\pi').isPositive);
+// n is of type unknown... Shouldn't it be inferred to be 'real'?
+// also, infer may need an argument to indicate if this is a covariant or contravariant inference
+ce.box(['Floor', ['Cos', 'n']])
+  .evaluate()
+  .print();
 
-// 3^{-2} gets calculated in canonicalization. It shouldn't.
-const expr = ce.parse('\\frac{x}{3^{-2}}');
-expr.print();
-expr
-  .simplify({
-    rules: {
-      match: '\\frac{a}{b^{-n}}',
-      replace: 'a*b^n',
-      condition: ({ _b }) => _b.isNotZero === true,
-    }, // doesn't work but {match:'\\frac{a}{b^n}',replace:'a*b^{-n}',,
-  })
-  ?.print();
-
-// in Add.sgn() should check x.isNegative instead of x.sgn, and have Abd.isNegative always return false
-ce.parse('|(1+|a|+2)|').simplify().print();
+ce.costFunction = () => 0;
+console.info(
+  ce
+    .parse('-\\sin(2x) + 2\\sin(x) * \\cos(x)')
+    .simplify({ rules: ['\\sin(2x) -> 2\\sin(x)\\cos(x)'] })
+    .toString() + ' this ran'
+);
 
 ce.parse('||a| + 3|').simplify().print();
 
@@ -223,7 +219,7 @@ console.log(ce.parse('\\sqrt[3]{-2}').simplify().latex);
 
 // Should be equal to 1
 console.log(ce.parse('\\tanh(\\infty)').simplify().json);
-console.log(ce.parse('\\tanh(\\infty)').simplify().isEqual(1));
+console.log(ce.parse('\\tanh(\\infty)').simplify().is(1));
 console.log(ce.parse('\\tanh(\\infty)').simplify().toString());
 
 // y powers should combine
@@ -414,8 +410,8 @@ console.info(xp.simplify().toString());
 
 // For the remainder of theses tests, assume that the symbol `f` represent a
 // function
-ce.assume(['Element', 'f', 'Functions']);
-ce.assume(['Equal', 'one', 1]);
+ce.declare('f', 'function');
+// ce.assume(['Equal', 'one', 1]);
 
 const t1 = ce.parse('\\cos(5\\pi+k)');
 // Canonical should simplify argument to -π/+π range
@@ -473,11 +469,6 @@ console.info(z7.json);
 // Expect: `['Sqrt',  5]`
 console.info(ce.parse('\\sqrt{15}').simplify().latex);
 // Expect_. `\sqrt15` (don't keep decomposed root expanded)
-
-// Report false. Should be true.
-const sig1 = ce.domain(['FunctionOf', 'PositiveIntegers', 'Numbers']);
-const sig2 = ce.domain(['FunctionOf', 'Numbers', 'Numbers']);
-console.info(sig1.isCompatible(sig2));
 
 // Outputs unexpected command, \\left...
 // because there is no matchfix for \\left(\\right.

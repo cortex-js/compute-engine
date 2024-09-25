@@ -194,6 +194,8 @@ describe('PARSING OF NUMBER', () => {
       `9007199254741033sqrt(3)`
     );
 
+    // We expect to get NaN because the radical is too large for this
+    // to be represented as a numeric value
     expect(
       parseVal('9007199254741033\\sqrt{9007199254740997}')
     ).toMatchInlineSnapshot(`NaN`);

@@ -1,6 +1,6 @@
 import type { BoxedExpression, IComputeEngine } from '../public';
+import { add } from './arithmetic-add';
 import { order } from './order';
-import { add } from './terms';
 
 /**
  * Distribute `Negate` (multiply by -1) if expr is a number literal, an
@@ -67,7 +67,7 @@ export function negateProduct(
   for (const arg of args) {
     if (!done && arg.operator === 'Negate') {
       done = true;
-      if (!arg.op1.isOne) result.push(arg.op1);
+      if (!arg.op1.is(1)) result.push(arg.op1);
     } else result.push(arg);
   }
 
@@ -79,7 +79,7 @@ export function negateProduct(
         result.push(arg);
       else {
         done = true;
-        if (!arg.isNegativeOne) result.push(arg.neg());
+        if (!arg.is(-1)) result.push(arg.neg());
       }
     }
   }
@@ -92,7 +92,7 @@ export function negateProduct(
       if (done || arg.numericValue === null || !arg.isNumber) result.push(arg);
       else {
         done = true;
-        if (!arg.isNegativeOne) result.push(arg.neg());
+        if (!arg.is(-1)) result.push(arg.neg());
       }
     }
   }

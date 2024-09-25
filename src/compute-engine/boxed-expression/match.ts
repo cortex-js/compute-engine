@@ -211,7 +211,7 @@ function matchVariations(
 
   if (operator === 'Negate') {
     // 0 -> -x (if x=0)
-    if (expr.isZero)
+    if (expr.is(0))
       return matchOnce(ce.Zero, pattern.op1, substitution, varOptions);
   }
 

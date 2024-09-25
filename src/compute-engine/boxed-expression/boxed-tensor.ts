@@ -5,7 +5,6 @@ import type {
   EvaluateOptions,
   SimplifyOptions,
   Metadata,
-  BoxedDomain,
   BoxedSubstitution,
   PatternMatchOptions,
   BoxedBaseDefinition,
@@ -28,16 +27,16 @@ import { canonical, hashCode, isBoxedExpression } from './utils';
 
 import { AbstractTensor, TensorData, makeTensor } from '../tensor/tensors'; // @fixme
 import { Type } from '../../common/type/types';
+import { parseType } from '../../common/type/parse';
 
 /**
- * A boxed tensor represents an expression that can be
- * represented by a tensor. This could be a vector, matrix
- * or multi-dimensional array.
+ * A boxed tensor represents an expression that can be represented by a tensor.
+ * This could be a vector, matrix or multi-dimensional array.
  *
- * The object can be created either from a tensor or from
- * an expression that can be represented as a tensor.
+ * The object can be created either from a tensor or from an expression that
+ * can be represented as a tensor.
  *
- * The stgructural counterpart (expression if input is tensor, or tensor
+ * The structural counterpart (expression if input is tensor, or tensor
  * if input is expression) is created lazily.
  *
  * @noInheritDoc
@@ -90,7 +89,10 @@ export class BoxedTensor extends _BoxedExpression {
       console.assert(this._operator !== undefined);
       console.assert(this._ops !== undefined);
       const tensorData = expressionAsTensor(this._operator!, this._ops!);
-      if (tensorData === undefined) throw new Error('Invalid tensor');
+      if (tensorData === undefined) {
+        const t2 = expressionAsTensor(this._operator!, this._ops!);
+        throw new Error('Invalid tensor');
+      }
       this._tensor = makeTensor(this.engine, tensorData);
     }
     return this._tensor!;
@@ -241,13 +243,9 @@ export class BoxedTensor extends _BoxedExpression {
     return this.tensor.rank;
   }
 
-  get domain(): BoxedDomain | undefined {
-    if (this._tensor) return this.engine.domain('Lists');
-    return this.structural.domain;
-  }
-
   get type(): Type {
-    return this.isValid ? 'collection' : 'error';
+    // @fixme: more precisely: matrix, vector, etc...
+    return this.isValid ? parseType('list<number>') : 'error';
   }
 
   get json(): Expression {
@@ -256,22 +254,62 @@ export class BoxedTensor extends _BoxedExpression {
     return this.structural.json;
   }
 
-  /** Structural equality */
-  isSame(rhs: BoxedExpression): boolean {
-    if (this === rhs) return true;
-
-    if (rhs instanceof BoxedTensor) return this.tensor.equals(rhs.tensor);
-
-    return this.structural.isSame(rhs);
-  }
-
   /** Mathematical equality */
-  isEqual(rhs: number | BoxedExpression): boolean {
+  isEqual(rhs: number | BoxedExpression): boolean | undefined {
     if (this === rhs) return true;
 
     if (rhs instanceof BoxedTensor) return this.tensor.equals(rhs.tensor);
 
     return this.structural.isEqual(rhs);
+  }
+
+  get isCollection(): boolean {
+    return true;
+  }
+
+  contains(rhs: BoxedExpression): boolean {
+    const data = this.tensor.data;
+
+    const target = this.tensor.field.cast(rhs, this.tensor.dtype);
+    if (typeof target === 'number') return data.includes(target);
+
+    const items = data.map(
+      (x) => this.tensor.field.cast(x, 'expression') ?? rhs.engine.Nothing
+    );
+
+    for (const item of items) if (rhs.isSame(item)) return true;
+    return false;
+  }
+
+  get size(): number {
+    return this.tensor.shape.reduce((a, b) => a * b, 1);
+  }
+
+  each(start?: number, count?: number): Iterator<BoxedExpression, undefined> {
+    const data = this.tensor.data;
+    let index = start ?? 1;
+    count = Math.min(count ?? data.length, data.length);
+
+    if (count <= 0) return { next: () => ({ value: undefined, done: true }) };
+
+    return {
+      next: () => {
+        if (count! > 0) {
+          count!--;
+          return { value: this.engine.box(data[index++ - 1]), done: false };
+        } else {
+          return { value: undefined, done: true };
+        }
+      },
+    };
+  }
+
+  at(_index: number): BoxedExpression | undefined {
+    return undefined;
+  }
+
+  indexOf(_expr: BoxedExpression): number {
+    return -1;
   }
 
   match(

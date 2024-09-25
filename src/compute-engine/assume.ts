@@ -1,13 +1,10 @@
-import { isInequality } from './boxed-expression/utils';
-import { signatureToDomain } from './domain-utils';
-import {
-  AssumeResult,
-  BoxedExpression,
-  DomainExpression,
-  IComputeEngine,
-} from './public';
+import { AssumeResult, BoxedExpression, IComputeEngine } from './public';
+
+import { isSubtype } from '../common/type/subtype';
+import { functionResult } from '../common/type/utils';
 
 import { findUnivariateRoots } from './boxed-expression/solve';
+import { isInequality, domainToType } from './boxed-expression/utils';
 
 /**
  * Add an assumption, in the form of a predicate, for example:
@@ -17,20 +14,20 @@ import { findUnivariateRoots } from './boxed-expression/solve';
  * - `x > 3`
  * - `x + y = 5`
  *
- * Some assumptions are handled separately, specifically, those that can
- * be represented as a symbol definition (equality to an expression,
- * membership to Integers, RealNumbers, etc..., >0, <=0, etc...). The result
- * of these are stored directly in the current scope's symbols dictionary
- * (and an entry for the symbol is created if necessary).
- *
- * New assumptions can 'refine' previous assumptions, that is they are valid
- * if they don't contradict previous assumptions. To set new assumptions
- * that contradict previous ones, you must first `forget` about any symbols
- * in the new assumption.
+ * Assumptions that represent a symbol definition (equality to an expression,
+ * membership to a type, >0, <=0, etc...) are stored directly in the current
+ * scope's symbols dictionary, and an entry for the symbol is created if
+ * necessary.
  *
  * Predicates that involve multiple symbols are simplified (for example
- * `x + y = 5` becomes `x + y - 5 = 0`, then stored in the `assumptions` of the
- * current context).
+ * `x + y = 5` becomes `x + y - 5 = 0`), then stored in the `assumptions`
+ * record of the current context.
+ *
+ * New assumptions can 'refine' previous assumptions, if they don't contradict
+ * previous assumptions.
+ *
+ * To set new assumptions that contradict previous ones, you must first
+ * `forget` about any symbols in the new assumption.
  *
  */
 
@@ -39,22 +36,27 @@ export function assume(proposition: BoxedExpression): AssumeResult {
   if (proposition.operator === 'Equal') return assumeEquality(proposition);
   if (isInequality(proposition)) return assumeInequality(proposition);
 
-  return 'not-a-predicate';
+  throw new Error(
+    'Unsupported assumption. Use `Element`, `Equal` or an inequality'
+  );
 }
 
 function assumeEquality(proposition: BoxedExpression): AssumeResult {
   console.assert(proposition.operator === 'Equal');
   // Four cases:
-  // 1/ proposition contains no unnknows
+  // 1/ proposition contains no unknowns
   //    e.g. `2 + 1 = 3`, `\pi + 1 = \pi`
   //    => evaluate and return
+  //
   // 2/ lhs is a single unknown and `rhs` does not contain `lhs`
   //    e.g. `x = 2`, `x = 2\pi`
   //    => if `lhs` has a definition, set its value to `rhs`, otherwise
   //          declare a new symbol with a value of `rhs`
+  //
   // 3/ proposition contains a single unknown
   //    => solve for the unknown, create new def or set value of the
   //      unknown with the root(s) as value
+  //
   // 4/ proposition contains multiple unknowns
   //    => add (lhs - rhs = 0) to assumptions DB
 
@@ -82,12 +84,14 @@ function assumeEquality(proposition: BoxedExpression): AssumeResult {
     if (!val.isValid) return 'not-a-predicate';
     const def = ce.lookupSymbol(lhs);
     if (!def) {
-      ce.defineSymbol(lhs, { value: val, domain: val.domain });
+      ce.defineSymbol(lhs, { value: val });
       return 'ok';
     }
-    if (def.domain && !val.domain?.isCompatible(def.domain))
-      return 'contradiction';
+    if (def.type && !isSubtype(val.type, def.type))
+      if (!def.inferredType) return 'contradiction';
+
     def.value = val;
+    if (def.inferredType) def.type = val.type;
     return 'ok';
   }
 
@@ -105,12 +109,12 @@ function assumeEquality(proposition: BoxedExpression): AssumeResult {
     const val = sols.length === 1 ? sols[0] : ce.function('List', sols);
     const def = ce.lookupSymbol(lhs);
     if (!def) {
-      ce.defineSymbol(lhs, { value: val, domain: val.domain });
+      ce.defineSymbol(lhs, { value: val });
       return 'ok';
     }
     if (
-      def.domain &&
-      !sols.every((sol) => !sol.domain || val.domain?.isCompatible(sol.domain))
+      def.type &&
+      !sols.every((sol) => !sol.type || isSubtype(val.type, sol.type))
     )
       return 'contradiction';
     def.value = val;
@@ -139,28 +143,34 @@ function assumeInequality(proposition: BoxedExpression): AssumeResult {
   const ce = proposition.engine;
   // Case 1
   if (proposition.op1!.symbol && !hasDef(ce, proposition.op1!.symbol)) {
-    if (proposition.op2.evaluate().isZero) {
+    if (proposition.op2.is(0)) {
       if (proposition.operator === 'Less') {
+        // x < 0
         ce.defineSymbol(proposition.op1.symbol, {
-          domain: ce.domain('NegativeNumbers'),
+          type: 'real',
+          flags: { sgn: 'negative' },
         });
       } else if (proposition.operator === 'LessEqual') {
+        // x <= 0
         ce.defineSymbol(proposition.op1.symbol, {
-          domain: ce.domain('NonPositiveNumbers'),
+          type: 'real',
+          flags: { sgn: 'non-positive' },
         });
       } else if (proposition.operator === 'Greater') {
+        // x > 0
         ce.defineSymbol(proposition.op1.symbol, {
-          domain: ce.domain('PositiveNumbers'),
+          type: 'real',
+          flags: { sgn: 'positive' },
         });
       } else if (proposition.operator === 'GreaterEqual') {
+        // x >= 0
         ce.defineSymbol(proposition.op1.symbol, {
-          domain: ce.domain('NonNegativeNumbers'),
+          type: 'real',
+          flags: { sgn: 'non-negative' },
         });
       }
     } else {
-      ce.defineSymbol(proposition.op1.symbol, {
-        domain: ce.domain('RealNumbers'),
-      });
+      ce.defineSymbol(proposition.op1.symbol, { type: 'real' });
       ce.assumptions.set(proposition, true);
     }
     return 'ok';
@@ -203,7 +213,7 @@ function assumeInequality(proposition: BoxedExpression): AssumeResult {
   // Case 3
   if (unknowns.length === 1) {
     if (!ce.lookupSymbol(unknowns[0]))
-      ce.defineSymbol(unknowns[0], { domain: 'RealNumbers' });
+      ce.defineSymbol(unknowns[0], { type: 'real' });
   }
 
   // Case 3, 4
@@ -232,30 +242,35 @@ function assumeElement(proposition: BoxedExpression): AssumeResult {
   const undefs = undefinedIdentifiers(proposition.op1);
   // Case 1
   if (undefs.length === 1) {
-    const dom = ce.domain(proposition.op2.evaluate().json as DomainExpression);
+    const dom = proposition.op2.evaluate();
     if (!dom.isValid) return 'not-a-predicate';
 
-    ce.declare(undefs[0], dom);
+    const type = domainToType(dom);
+    if (type === 'unknown') {
+      throw new Error(`Invalid domain "${dom.toString()}"`);
+    }
+    ce.declare(undefs[0], type);
     return 'ok';
   }
 
   // Case 2
   if (proposition.op1.symbol && hasDef(ce, proposition.op1.symbol)) {
-    const dom = ce.domain(proposition.op2.evaluate().json as DomainExpression);
-    if (!dom.isValid) return 'not-a-predicate';
+    const domain = proposition.op2.evaluate();
+    if (!domain.isValid) return 'not-a-predicate';
+    const type = domainToType(domain);
 
     if (!ce.context?.ids?.has(proposition.op1.symbol))
-      ce.declare(proposition.op1.symbol, dom);
+      ce.declare(proposition.op1.symbol, domainToType(domain));
 
     const def = ce.lookupSymbol(proposition.op1.symbol);
     if (def) {
-      if (def.domain && !dom.isCompatible(def.domain)) return 'contradiction';
-      def.domain = dom;
+      if (def.type && !isSubtype(type, def.type)) return 'contradiction';
+      def.type = type;
       return 'ok';
     }
     const fdef = ce.lookupFunction(proposition.op1.symbol);
     if (fdef) {
-      if (!dom.isCompatible(signatureToDomain(ce, fdef.signature)))
+      if (!isSubtype(type, functionResult(fdef.signature)!))
         return 'contradiction';
 
       return 'ok';

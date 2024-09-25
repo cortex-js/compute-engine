@@ -29,7 +29,7 @@ export const DEFINITIONS_SETS: LatexDictionary = [
   { name: 'RationalNumbers', latexTrigger: ['\\Q'] },
   { name: 'RealNumbers', latexTrigger: ['\\R'] },
   { latexTrigger: '\\mathbb{R}', parse: 'RealNumbers' },
-  { name: 'TranscendentalNumberss', latexTrigger: '\\R-\\bar\\Q' },
+  { name: 'TranscendentalNumbers', latexTrigger: '\\R-\\bar\\Q' },
   { latexTrigger: '\\R\\backslash\\bar\\Q', parse: 'TranscendentalNumbers' },
 
   // Real numbers < 0

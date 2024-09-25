@@ -27,22 +27,25 @@
 import Decimal from 'decimal.js';
 import { SmallInteger } from '../numerics/numeric';
 import { Rational } from '../numerics/rationals';
+import { NumericType } from '../../common/type/types';
 
 /** The value is equal to `(decimal * rational * sqrt(radical)) + im * i` */
-export interface NumericValueData {
-  decimal?: Decimal | number; // A floating point number (non-integer)
-  rational?: Rational; // A rational number, may not be reduced
-  radical?: number; // A square root of an integer, may not be reduced
+export type ExactNumericValueData = {
+  rational?: Rational; // A rational number, may not be reduced (i.e. 6/8)
+  radical?: number; // A square root of an integer, may not be reduced (i.e. 4)
+};
+
+export type NumericValueData = {
+  re?: Decimal | number; // A floating point number (non-integer)
   im?: number; // The imaginary part of the number
-}
+};
 
 export type NumericValueFactory = (
   data: number | Decimal | NumericValueData
 ) => NumericValue;
 
 export abstract class NumericValue {
-  // Note: complex :> real :> rational :> integer
-  abstract get type(): 'complex' | 'real' | 'rational' | 'integer';
+  abstract get type(): NumericType;
 
   /** True if numeric value is the product of a rational and the square root of an integer.
    *
@@ -84,6 +87,7 @@ export abstract class NumericValue {
   abstract get isNaN(): boolean;
   abstract get isPositiveInfinity(): boolean;
   abstract get isNegativeInfinity(): boolean;
+  abstract get isComplexInfinity(): boolean;
 
   abstract get isZero(): boolean;
   isZeroWithTolerance(_tolerance: number | Decimal): boolean {
@@ -132,7 +136,6 @@ export abstract class NumericValue {
   /** Object.valueOf(): returns a primitive value */
   valueOf(): number | string {
     if (this.im === 0) {
-      console.assert(typeof this.re === 'number');
       return this.bignumRe ? this.bignumRe.toFixed() : this.re;
     }
     return this.N().toString();

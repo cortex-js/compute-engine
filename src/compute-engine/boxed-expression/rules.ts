@@ -9,22 +9,21 @@ import {
   ReplaceOptions,
   BoxedSubstitution,
   RuleConditionFunction,
-  SemiBoxedExpression,
   RuleReplaceFunction,
   RuleFunction,
   RuleSteps,
   RuleStep,
   isRuleStep,
   isBoxedRule,
+  SemiBoxedExpression,
 } from '../public';
 
 import { asLatexString, isInequality, isRelationalOperator } from './utils';
 
 import { Parser } from '../latex-syntax/public';
 
-import { isCollection } from '../collection-utils';
-
 import { isPrime } from '../library/arithmetic';
+import { isSubtype } from '../../common/type/subtype';
 
 // @todo:
 // export function fixPoint(rule: Rule);
@@ -107,6 +106,7 @@ export const ConditionParent = {
   complex: 'number',
   imaginary: 'complex',
   real: 'complex',
+  notreal: 'complex',
   integer: 'real',
   rational: 'real',
   irrational: 'real',
@@ -159,7 +159,7 @@ export const ConditionParent = {
 };
 
 export const CONDITIONS = {
-  boolean: (x: BoxedExpression) => x.domain?.isCompatible('Booleans'), // @fixme: x.type === 'boolean'
+  boolean: (x: BoxedExpression) => x.type === 'boolean',
   string: (x: BoxedExpression) => x.string !== null,
   number: (x: BoxedExpression) => x.isNumberLiteral,
   symbol: (x: BoxedExpression) => x.symbol !== null,
@@ -167,14 +167,18 @@ export const CONDITIONS = {
 
   numeric: (x: BoxedExpression) => {
     const [c, term] = x.toNumericValue();
-    return term.isOne;
+    return term.is(1);
   },
   integer: (x: BoxedExpression) => x.isInteger,
-  real: (x: BoxedExpression) => x.isReal,
-  complex: (x: BoxedExpression) => x.isNumber && x.isFinite,
-  imaginary: (x: BoxedExpression) => x.isImaginary,
   rational: (x: BoxedExpression) => x.isRational,
   irrational: (x: BoxedExpression) => x.isRational === false,
+  real: (x: BoxedExpression) => x.isReal,
+  notreal: (x: BoxedExpression) => !x.isReal,
+
+  // to check pure complex: :complex:notreal
+  complex: (x: BoxedExpression) => isSubtype(x.type, 'complex'),
+  // pure imaginary
+  imaginary: (x: BoxedExpression) => x.type === 'imaginary',
 
   positive: (x: BoxedExpression) => x.isPositive,
   negative: (x: BoxedExpression) => x.isNegative,
@@ -187,22 +191,21 @@ export const CONDITIONS = {
   prime: (x: BoxedExpression) => isPrime(x) === true,
   composite: (x: BoxedExpression) => isPrime(x) === false,
 
-  notzero: (x: BoxedExpression) => x.isNotZero,
-  notone: (x: BoxedExpression) => x.isOne === false,
+  notzero: (x: BoxedExpression) => x.is(0) === false,
+  notone: (x: BoxedExpression) => x.is(1) === false,
 
   finite: (x: BoxedExpression) => x.isFinite,
   infinite: (x: BoxedExpression) => x.isFinite === false,
 
-  constant: (x: BoxedExpression) => x.symbol !== null && x.isConstant,
-  variable: (x: BoxedExpression) =>
-    x.symbol !== null && !x.domain?.isFunction && !x.isConstant,
-  function: (x: BoxedExpression) => x.symbol !== null && x.domain?.isFunction,
+  constant: (x: BoxedExpression) => x.symbolDefinition?.isConstant ?? false,
+  variable: (x: BoxedExpression) => !(x.symbolDefinition?.isConstant ?? true),
+  function: (x: BoxedExpression) => x.symbolDefinition?.isFunction ?? false,
 
   relation: (x: BoxedExpression) => isRelationalOperator(x.operator),
   equation: (x: BoxedExpression) => x.operator === 'Equal',
   inequality: (x: BoxedExpression) => isInequality(x),
 
-  collection: (x: BoxedExpression) => isCollection(x),
+  collection: (x: BoxedExpression) => x.isCollection,
   list: (x: BoxedExpression) => x.operator === 'List',
   set: (x: BoxedExpression) => x.operator === 'Set',
   tuple: (x: BoxedExpression) =>
@@ -308,7 +311,7 @@ function parseModifier(parser: Parser): string | null {
 }
 
 function parserModifiers(parser: Parser): string {
-  let modifiers: string[] = [];
+  const modifiers: string[] = [];
   do {
     const modifier = parseModifier(parser);
     if (!modifier) break;
@@ -706,7 +709,7 @@ export function applyRule(
     const bwc = getWildcards(match);
     if (!awc.every((x) => bwc.includes(x)))
       throw new Error(
-        `Invalid rule "${rule.id}"\n|   Canonical match "${dewildcard(match).toString()}" does not contain all the wildcards of the original match "${dewildcard(originalMatch).toString()}"\n|   This could indicate that the match expression in canonical form is already simplified and this rule may not be necessary`
+        `\n|   Invalid rule "${rule.id}"\n|   The canonical form of ${dewildcard(originalMatch).toString()} is "${dewildcard(match).toString()}" and it does not contain all the wildcards of the original match.\n|   This could indicate that the match expression in canonical form is already simplified and this rule may not be necessary`
       );
   }
 
@@ -739,7 +742,7 @@ export function applyRule(
         return operandsMatched ? { value: expr, because } : null;
     } catch (e) {
       console.error(
-        `Rule ${rule.id}\n|   Error while checking condition\n|    ${e.message}`
+        `\n|   Rule "${rule.id}"\n|   Error while checking condition\n|    ${e.message}`
       );
       return null;
     }

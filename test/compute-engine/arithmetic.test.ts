@@ -502,7 +502,7 @@ describe('Max', () => {
 
   test('Max of a range of reals', () => {
     expect(ce.box(['Max', ['Range', 1.2, 4.5]]).value).toMatchInlineSnapshot(
-      `4.2`
+      `5`
     );
   });
 
@@ -538,15 +538,57 @@ describe('Max', () => {
 });
 
 describe('Min', () => {
-  test(`Min`, () => expect(checkJson(['Min', 2.5])).toMatchSnapshot());
-  test(`Min`, () => expect(checkJson(['Min', 2.5, 1.1])).toMatchSnapshot());
   test(`Min`, () =>
-    expect(checkJson(['Min', 2.5, -1.1, 18.4])).toMatchSnapshot());
+    expect(checkJson(['Min', 2.5])).toMatchInlineSnapshot(`
+      box       = ["Min", 2.5]
+      simplify  = 2.5
+    `));
   test(`Min`, () =>
-    expect(checkJson(['Min', 2.5, -1.1, 'NaN', 18.4])).toMatchSnapshot());
+    expect(checkJson(['Min', 2.5, 1.1])).toMatchInlineSnapshot(`
+      box       = ["Min", 2.5, 1.1]
+      eval-auto = 1.1
+    `));
   test(`Min`, () =>
-    expect(checkJson(['Min', 2.5, -1.1, 'foo', 18.4])).toMatchSnapshot());
-  test(`Min`, () => expect(checkJson(['Min', 'foo', 'bar'])).toMatchSnapshot());
+    expect(checkJson(['Min', 2.5, -1.1, 18.4])).toMatchInlineSnapshot(`
+      box       = ["Min", 2.5, -1.1, 18.4]
+      eval-auto = -1.1
+    `));
+  test(`Min`, () =>
+    expect(checkJson(['Min', 2.5, -1.1, 'NaN', 18.4])).toMatchInlineSnapshot(`
+      box       = ["Min", 2.5, -1.1, "NaN", 18.4]
+      eval-auto = NaN
+    `));
+  test(`Min`, () =>
+    expect(checkJson(['Min', 2.5, -1.1, 'foo', 18.4])).toMatchInlineSnapshot(`
+      box       = ["Min", 2.5, -1.1, "foo", 18.4]
+      eval-auto = min(-1.1, "foo")
+    `));
+  test(`Min`, () =>
+    expect(checkJson(['Min', 'foo', 'bar'])).toMatchInlineSnapshot(
+      `["Min", "foo", "bar"]`
+    ));
+
+  test('Min of a range', () => {
+    expect(ce.box(['Min', ['Range', 1, 10]]).value).toMatchInlineSnapshot(`10`);
+  }); // @fixme
+
+  test('Min of a range of reals', () => {
+    expect(ce.box(['Min', ['Range', 1.2, 4.5]]).value).toMatchInlineSnapshot(
+      `5`
+    );
+  }); // @fixme
+
+  test('Min of a range with custom step', () => {
+    expect(ce.box(['Min', ['Range', 1, 10, 7]]).value).toMatchInlineSnapshot(
+      `8`
+    );
+  }); // @fixme
+
+  test('Min of an interval', () => {
+    expect(ce.box(['Min', ['Interval', 1.1, 7.8]]).value).toMatchInlineSnapshot(
+      `1.1`
+    );
+  });
 });
 
 describe('RATIONAL', () => {

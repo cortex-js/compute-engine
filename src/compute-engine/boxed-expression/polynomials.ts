@@ -1,4 +1,4 @@
-import type { BoxedExpression, SemiBoxedExpression } from '../public';
+import type { BoxedExpression } from '../public';
 import { asSmallInteger } from './numerics';
 
 /**
@@ -60,42 +60,43 @@ export function coefficients(
  * `poly === polynomial(coefficients(poly), getVars(poly))`
  *
  */
-export function polynomial(
-  coefs: UnivariateCoefficients,
-  vars: string
-): SemiBoxedExpression;
-export function polynomial(
-  coefs: MultivariateCoefficients,
-  vars: string[]
-): SemiBoxedExpression;
-export function polynomial(
-  coefs: UnivariateCoefficients | MultivariateCoefficients,
-  vars: string | string[]
-): SemiBoxedExpression {
-  if (typeof vars === 'string') vars = [vars];
-  const terms: SemiBoxedExpression[] = [];
+// export function polynomial(
+//   coefs: UnivariateCoefficients,
+//   vars: string
+// ): BoxedExpression;
+// export function polynomial(
+//   coefs: MultivariateCoefficients,
+//   vars: string[]
+// ): BoxedExpression;
 
-  let degree = 0;
-  for (const coef of coefs) {
-    if (coef === null) continue;
-    if (degree === 0) {
-      // Constant term
-      terms.push(coef[0]);
-    } else if (degree === 1) {
-      const term: BoxedExpression[] = [];
-      for (const [i, v] of vars) {
-        if (coef[i]) {
-        }
-      }
-    } else {
-    }
-    degree += 1;
-  }
+// export function polynomial(
+//   coefs: UnivariateCoefficients | MultivariateCoefficients,
+//   vars: string | string[]
+// ): BoxedExpression {
+//   if (typeof vars === 'string') vars = [vars];
+//   const terms: BoxedExpression[] = [];
 
-  if (terms.length === 0) return 0;
-  if (terms.length === 1) return terms[0];
-  return ['Add', ...terms];
-}
+//   let degree = 0;
+//   for (const coef of coefs) {
+//     if (coef === null) continue;
+//     if (degree === 0) {
+//       // Constant term
+//       terms.push(coef[0]);
+//     } else if (degree === 1) {
+//       const term: BoxedExpression[] = [];
+//       for (const [i, v] of vars) {
+//         if (coef[i]) {
+//         }
+//       }
+//     } else {
+//     }
+//     degree += 1;
+//   }
+
+//   if (terms.length === 0) return 0;
+//   if (terms.length === 1) return terms[0];
+//   return ['Add', ...terms];
+// }
 
 /** If possible, attempt to return a UnivariateCoefficient.
  * If the coefficients really are multivariate, return `null` */
@@ -119,7 +120,7 @@ function getDegree(expr: BoxedExpression | undefined): number {
 
   if (expr.ops) {
     const operator = expr.operator;
-    if (operator === 'Power') return expr.op2.re ?? 0;
+    if (operator === 'Power') return expr.op2.re;
 
     if (operator === 'Multiply') {
       return [...expr.ops].reduce((acc, x) => acc + getDegree(x), 0);

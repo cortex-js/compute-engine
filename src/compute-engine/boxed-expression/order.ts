@@ -1,4 +1,4 @@
-import type { BoxedExpression, SemiBoxedExpression } from './public';
+import type { BoxedExpression } from './public';
 
 import { maxDegree, revlex, totalDegree } from './polynomials';
 import { asRadical } from './arithmetic-power';
@@ -135,7 +135,18 @@ function rank(expr: BoxedExpression): Rank {
   if (typeof expr.numericValue === 'number') {
     return Number.isInteger(expr.numericValue) ? 'integer' : 'real';
   }
-  if (expr.numericValue) return expr.numericValue.type;
+  if (expr.numericValue) {
+    const type = expr.numericValue.type;
+    if (type === 'integer' || type === 'finite_integer') return 'integer';
+    if (type === 'rational' || type === 'finite_rational') return 'rational';
+    if (type === 'real' || type === 'finite_real') return 'real';
+    if (type === 'complex' || type === 'finite_complex') return 'complex';
+    if (type === 'imaginary' || type === 'finite_imaginary') return 'complex';
+    if (type === 'finite_number') return 'complex';
+    if (type === 'non_finite_number') return 'constant';
+    if (type === 'number') return 'real';
+    return 'other';
+  }
 
   // Complex numbers
   if (expr.symbol === 'ImaginaryUnit') return 'complex';
@@ -231,8 +242,8 @@ export function order(a: BoxedExpression, b: BoxedExpression): number {
     let aN = a.numericValue;
     let bN = b.numericValue;
 
-    if (aN === null && a.operator === 'Rational') aN = a.op1.re! / a.op2.re!;
-    if (bN === null && b.operator === 'Rational') bN = b.op1.re! / b.op2.re!;
+    if (aN === null && a.operator === 'Rational') aN = a.op1.re / a.op2.re!;
+    if (bN === null && b.operator === 'Rational') bN = b.op1.re / b.op2.re!;
 
     const af = typeof aN === 'number' ? aN : aN!.re;
     const bf = typeof bN === 'number' ? bN : bN!.re;
@@ -380,7 +391,7 @@ export function sortOperands(
  * to the deglex polynomial ordering
  *
  */
-export function polynomialOrder(expr: BoxedExpression): SemiBoxedExpression {
+export function polynomialOrder(expr: BoxedExpression): BoxedExpression {
   // Empirically, the Total Degree Reverse Lexicographic Order (grevlex)
   // is often the fastest to calculate Gröbner basis. We use it as the
   // default ordering for polynomials.
@@ -390,7 +401,7 @@ export function polynomialOrder(expr: BoxedExpression): SemiBoxedExpression {
 export function lexicographicOrder(
   expr: BoxedExpression,
   vars?: ReadonlyArray<string>
-): SemiBoxedExpression {
+): BoxedExpression {
   // @todo
   vars = vars ?? expr.unknowns;
   return expr;
@@ -399,7 +410,7 @@ export function lexicographicOrder(
 export function degreeLexicographicOrder(
   expr: BoxedExpression,
   vars?: ReadonlyArray<string>
-): SemiBoxedExpression {
+): BoxedExpression {
   // @todo
   vars = vars ?? expr.unknowns;
   return expr;
@@ -408,7 +419,7 @@ export function degreeLexicographicOrder(
 export function degreeReverseLexicographicOrder(
   expr: BoxedExpression,
   vars?: ReadonlyArray<string>
-): SemiBoxedExpression {
+): BoxedExpression {
   // @todo
   vars = vars ?? expr.unknowns;
   return expr;
@@ -417,7 +428,7 @@ export function degreeReverseLexicographicOrder(
 export function eliminationOrder(
   expr: BoxedExpression,
   vars?: ReadonlyArray<string>
-): SemiBoxedExpression {
+): BoxedExpression {
   // @todo
   vars = vars ?? expr.unknowns;
   return expr;

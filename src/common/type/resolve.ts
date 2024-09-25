@@ -1,20 +1,15 @@
+import type { Type, TypeResolver } from './types';
 import { reduceType } from './reduce';
+import { makeType } from './utils';
 import { typeToString } from './serialize';
-import { Type, TypeResolver } from './types';
 
 function error(type: Type, ...message: string[]): never {
   throw new Error(
-    `Type error "${type.toString()}"\n|   ${message.join('\n|   ')}`
+    `\nType error "${typeToString(type)}"\n|   ${message.join('\n|   ')}`
   );
 }
 
-function makeType(type: Type): Type {
-  if (typeof type === 'string') return type;
-  type.toString = () => typeToString(type);
-  return type;
-}
-
-function resolve(type: Type, resolver: TypeResolver): Type {
+function resolve(type: Readonly<Type>, resolver: TypeResolver): Type {
   // Primitive type
   if (typeof type === 'string') return type;
 
@@ -26,12 +21,8 @@ function resolve(type: Type, resolver: TypeResolver): Type {
     return resolved;
   }
 
-  if (type.kind === 'collection') {
-    return {
-      ...type,
-      elements: resolve(type.elements, resolver),
-    };
-  }
+  if (type.kind === 'collection')
+    return { ...type, elements: resolve(type.elements, resolver) };
 
   if (type.kind === 'list') {
     return {

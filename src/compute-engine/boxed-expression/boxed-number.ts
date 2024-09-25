@@ -2,13 +2,11 @@ import { Complex } from 'complex-esm';
 import { Decimal } from 'decimal.js';
 import type {
   BoxedExpression,
-  BoxedDomain,
   IComputeEngine,
   Metadata,
   PatternMatchOptions,
   BoxedSubstitution,
   EvaluateOptions,
-  SemiBoxedExpression,
   BoxedRuleSet,
   ReplaceOptions,
   Rule,
@@ -20,11 +18,9 @@ import type {
 
 import type { Expression, MathJsonNumber } from '../../math-json';
 
-import { inferNumericDomain } from '../domain-utils';
-import { canonicalDivide, div } from './arithmetic-divide';
+import { div } from './arithmetic-divide';
 import { mul } from './arithmetic-multiply';
 
-import { signDiff } from './numerics';
 import {
   canonicalInteger,
   SMALL_INTEGER,
@@ -34,7 +30,11 @@ import { Rational } from '../numerics/rationals';
 import { isInMachineRange } from '../numerics/numeric-bignum';
 import { bigint } from '../numerics/bigint';
 
-import { NumericValue, NumericValueData } from '../numeric-value/public';
+import {
+  ExactNumericValueData,
+  NumericValue,
+  NumericValueData,
+} from '../numeric-value/public';
 import { ExactNumericValue } from '../numeric-value/exact-numeric-value';
 
 import { replace } from './rules';
@@ -43,8 +43,16 @@ import { simplify } from './simplify';
 import { _BoxedExpression } from './abstract-boxed-expression';
 import { hashCode } from './utils';
 import { match } from './match';
-import { add } from './terms';
 import { Type } from '../../common/type/types';
+import { add } from './arithmetic-add';
+import { pow } from './arithmetic-power';
+import { isSubtype } from '../../common/type/subtype';
+import {
+  positiveSign,
+  nonNegativeSign,
+  negativeSign,
+  nonPositiveSign,
+} from './sgn';
 
 /**
  * BoxedNumber
@@ -56,7 +64,6 @@ export class BoxedNumber extends _BoxedExpression {
   // The value of a BoxedNumber is either a small integer or a NumericValue
   protected readonly _value: SmallInteger | NumericValue;
 
-  private _domain: BoxedDomain | undefined;
   private _hash: number | undefined;
 
   /**
@@ -73,7 +80,11 @@ export class BoxedNumber extends _BoxedExpression {
    */
   constructor(
     ce: IComputeEngine,
-    value: SmallInteger | NumericValue | NumericValueData,
+    value:
+      | SmallInteger
+      | NumericValueData
+      | ExactNumericValueData
+      | NumericValue,
     options?: { metadata?: Metadata; canonical?: boolean }
   ) {
     super(ce, options?.metadata);
@@ -128,14 +139,16 @@ export class BoxedNumber extends _BoxedExpression {
     return this._value;
   }
 
-  get re(): number | undefined {
+  get re(): number {
     if (typeof this._value === 'number') return this._value;
     return this._value.re;
   }
-  get im(): number | undefined {
+
+  get im(): number {
     if (typeof this._value === 'number') return 0;
     return this._value.im;
   }
+
   get bignumRe(): Decimal | undefined {
     if (typeof this._value === 'number') return undefined;
     return this._value.bignumRe;
@@ -175,7 +188,7 @@ export class BoxedNumber extends _BoxedExpression {
 
   add(rhs: number | BoxedExpression): BoxedExpression {
     const ce = this.engine;
-    if (this.isZero) return ce.box(rhs);
+    if (this.is(0)) return ce.box(rhs);
     if (typeof rhs === 'number') {
       // @fastpath
       if (rhs === 0) return this;
@@ -197,15 +210,15 @@ export class BoxedNumber extends _BoxedExpression {
   }
 
   mul(rhs: NumericValue | number | BoxedExpression): BoxedExpression {
-    if (this.isOne) return this.engine.box(rhs);
-    if (this.isNegativeOne) return this.engine.box(rhs).neg();
+    if (this.is(1)) return this.engine.box(rhs);
+    if (this.is(-1)) return this.engine.box(rhs).neg();
 
     const ce = this.engine;
 
     // @fastpath
     if (typeof rhs === 'number') {
       if (rhs === 1) return this;
-      if (rhs === 0 || this.isZero) return this.engine.Zero;
+      if (rhs === 0 || this.is(0)) return this.engine.Zero;
       if (rhs === -1) return this.neg();
       return ce.number(
         typeof this._value === 'number'
@@ -218,8 +231,8 @@ export class BoxedNumber extends _BoxedExpression {
       return ce.number(this._value * rhs);
 
     if (rhs instanceof NumericValue) {
-      if (this.isOne) return ce.number(rhs);
-      if (this.isNegativeOne) return ce.number(rhs.neg());
+      if (this.is(1)) return ce.number(rhs);
+      if (this.is(-1)) return ce.number(rhs.neg());
       return ce.number(rhs.mul(this._value));
     }
 
@@ -234,78 +247,7 @@ export class BoxedNumber extends _BoxedExpression {
   }
 
   pow(exp: number | BoxedExpression): BoxedExpression {
-    if (!this.isCanonical) return this.canonical.pow(exp);
-
-    const ce = this.engine;
-    // if (typeof exp === 'number') {
-    //   if (this.isZero) {
-    //     // 0^0 is undefined
-    //     if (exp === 0) return ce.NaN;
-    //     // 0^n, n<0 -> Complex Infinity
-    //     if (exp < 0) return ce.ComplexInfinity;
-    //     // 0^n, n>0 -> 0
-    //     return ce.Zero;
-    //   }
-
-    //   if (exp === 0) return ce.One;
-    //   if (exp === 1) return this;
-    //   // if (exp === -1) return this.inv();
-
-    //   // if (this.isNegative) {
-    //   //   if (exp % 2 === 1) return this.neg().pow(exp).neg();
-    //   //   if (exp % 2 === 0) return this.neg().pow(exp);
-    //   // }
-
-    //   if (exp === Number.POSITIVE_INFINITY) {
-    //     if (this.isGreater(1)) return ce.PositiveInfinity;
-    //     if (this.isPositive && this.isLess(1)) return ce.Zero;
-    //   }
-    //   if (exp === Number.NEGATIVE_INFINITY) {
-    //     if (this.isGreater(1)) return ce.Zero;
-    //     if (this.isPositive && this.isLess(1)) return ce.PositiveInfinity;
-    //   }
-    // } else {
-    //   exp = exp.canonical;
-
-    //   if (this.isZero) {
-    //     if (exp.isZero) return ce.NaN;
-    //     if (exp.isNegative) return ce.ComplexInfinity;
-    //     return ce.Zero;
-    //   }
-
-    //   if (exp.isZero) return ce.One;
-    //   if (exp.isOne) return this;
-    //   // if (exp.isNegativeOne) return this.inv();
-
-    //   if (this.isNegative) {
-    //     // if (exp.isOdd) return this.neg().pow(exp).neg();
-    //     // if (exp.isEven) return this.neg().pow(exp);
-    //   }
-
-    //   if (exp.isInfinity) {
-    //     if (exp.isPositive) {
-    //       if (this.isGreater(1)) return ce.PositiveInfinity;
-    //       if (this.isPositive && this.isLess(1)) return ce.Zero;
-    //     }
-    //     if (exp.isNegative) {
-    //       if (this.isGreater(1)) return ce.Zero;
-    //       if (this.isPositive && this.isLess(1)) return ce.PositiveInfinity;
-    //     }
-    //   }
-    // }
-
-    // const n = typeof exp === 'number' ? exp : exp.re;
-    // if (n !== undefined && Number.isInteger(n)) {
-    //   if (typeof this._value === 'number') {
-    //     const r = this._value ** n;
-    //     if (Number.isInteger(r)) return ce.number(r);
-    //   } else {
-    //     const r = this._value.pow(n);
-    //     if (r.type === 'integer') return ce.number(r);
-    //   }
-    // }
-
-    return ce._fn('Power', [this, ce.box(exp)]);
+    return pow(this, exp, { numericApproximation: false });
   }
 
   root(exp: number | BoxedExpression): BoxedExpression {
@@ -322,10 +264,10 @@ export class BoxedNumber extends _BoxedExpression {
       }
     } else {
       exp = exp.canonical;
-      if (exp.isZero) return this.engine.NaN;
-      if (exp.isOne) return this;
-      if (exp.isNegativeOne) return this.inv();
-      if (exp.isEqual(2)) return this.sqrt();
+      if (exp.is(0)) return this.engine.NaN;
+      if (exp.is(1)) return this;
+      if (exp.is(-1)) return this.inv();
+      if (exp.is(2)) return this.sqrt();
       if (this.isNegative) {
         if (exp.isOdd) return this.neg().root(exp).neg();
         if (exp.isEven) return this.neg().root(exp);
@@ -333,13 +275,13 @@ export class BoxedNumber extends _BoxedExpression {
     }
 
     const n = typeof exp === 'number' ? exp : exp.re;
-    if (n !== undefined && Number.isInteger(n)) {
+    if (Number.isInteger(n)) {
       if (typeof this._value === 'number') {
         const r = this._value ** (1 / n);
         if (Number.isInteger(r)) return this.engine.number(r);
       } else {
         const r = this._value.root(n);
-        if (r.type === 'integer') return this.engine.number(r);
+        if (isSubtype(r.type, 'integer')) return this.engine.number(r);
       }
     }
     return this.engine._fn('Root', [this, this.engine.box(exp)]);
@@ -358,19 +300,19 @@ export class BoxedNumber extends _BoxedExpression {
 
       return this.engine.number(this.engine._numericValue(this._value).sqrt());
     }
-    if (this.isZero || this.isOne) return this;
+    if (this.is(0) || this.is(1)) return this;
 
     return this.engine.number(this._value.sqrt());
   }
 
-  ln(semiBase?: SemiBoxedExpression): BoxedExpression {
+  ln(semiBase?: number | BoxedExpression): BoxedExpression {
     const base = semiBase ? this.engine.box(semiBase) : undefined;
     if (!this.isCanonical) return this.canonical.ln(base);
 
     // Mathematica returns `Log[0]` as `-∞`
-    if (this.isZero) return this.engine.NegativeInfinity;
+    if (this.is(0)) return this.engine.NegativeInfinity;
 
-    if (base && this.isEqual(base)) return this.engine.One;
+    if (base && this.isSame(base)) return this.engine.One;
     if (
       (!base || base.symbol === 'ExponentialE') &&
       this.symbol === 'ExponentialE'
@@ -378,7 +320,7 @@ export class BoxedNumber extends _BoxedExpression {
       return this.engine.One;
 
     const f = this.re;
-    if (f !== undefined && Number.isInteger(f) && f > 0) {
+    if (Number.isInteger(f) && f > 0) {
       const ce = this.engine;
       let [factor, root] = canonicalInteger(f, 3);
       if (factor !== 1)
@@ -388,10 +330,10 @@ export class BoxedNumber extends _BoxedExpression {
         return ce.number(factor).ln(base).mul(2).add(ce.number(root).ln(base));
     }
 
-    if (base && base.type === 'integer') {
+    if (base && isSubtype(base.type, 'integer')) {
       if (typeof this._value === 'number')
-        return this.engine.number(Math.log(this._value) / Math.log(base.re!));
-      return this.engine.number(this._value.ln(base.re!));
+        return this.engine.number(Math.log(this._value) / Math.log(base.re));
+      return this.engine.number(this._value.ln(base.re));
     }
 
     if (base === undefined) {
@@ -403,16 +345,11 @@ export class BoxedNumber extends _BoxedExpression {
     return this.engine._fn('Ln', [this]);
   }
 
-  get domain(): BoxedDomain {
-    this._domain ??= this.engine.domain(inferNumericDomain(this._value));
-    return this._domain;
-  }
-
   get type(): Type {
-    if (typeof this._value === 'number')
-      return Number.isInteger(this._value) ? 'integer' : 'real';
-
-    if (this._value.im !== 0 && this._value.re === 0) return 'imaginary';
+    if (typeof this._value === 'number') {
+      if (!Number.isFinite(this._value)) return 'non_finite_number';
+      return Number.isInteger(this._value) ? 'finite_integer' : 'finite_real';
+    }
 
     return this._value.type;
   }
@@ -431,39 +368,6 @@ export class BoxedNumber extends _BoxedExpression {
     if (s === 0) return 'zero';
     if (s > 0) return 'positive';
     return 'negative';
-  }
-
-  isSame(rhs: BoxedExpression): boolean {
-    if (this === rhs) return true;
-
-    if (!(rhs instanceof BoxedNumber)) return false;
-
-    //
-    // Compare two rational numbers
-    //
-    if (typeof this._value === 'number') {
-      if (typeof rhs._value === 'number') return this._value === rhs._value;
-      return rhs._value.im === 0 && this._value === rhs._value.re;
-    }
-
-    if (typeof rhs._value === 'number')
-      return this._value.im === 0 && this._value.re === rhs._value;
-
-    const ce = this.engine;
-    const rhsV = ce._numericValue(rhs._value);
-
-    return this._value.eq(rhsV);
-  }
-
-  isEqual(rhs: number | BoxedExpression): boolean {
-    // Note: this is not the same as `isSame()`: we want 0.09 and 9/100
-    // to be considered equal.
-    // We also want a number to be equal to an exact expression, so don't
-    // bail if rhs is not a BoxedNumber
-    // Note: signDiff() uses the tolerance of the engine by default
-    if (typeof rhs === 'number') return this.im === 0 && this.re === rhs;
-
-    return this === rhs || signDiff(this, rhs) === 0;
   }
 
   get numerator(): BoxedExpression {
@@ -510,55 +414,12 @@ export class BoxedNumber extends _BoxedExpression {
     return match(this.structural, pattern, options);
   }
 
-  isLess(rhs: number | BoxedExpression): boolean | undefined {
-    if (typeof rhs === 'number') {
-      if (typeof this._value === 'number') return this._value < rhs;
-      return this._value.re < rhs;
-    }
-    const s = signDiff(this, rhs);
-    if (s === undefined) return undefined;
-    return s < 0;
-  }
-
-  isLessEqual(rhs: number | BoxedExpression): boolean | undefined {
-    if (typeof rhs === 'number') {
-      if (typeof this._value === 'number') return this._value <= rhs;
-      return this._value.re <= rhs;
-    }
-    const s = signDiff(this, rhs);
-    if (s === undefined) return undefined;
-    return s <= 0;
-  }
-
-  isGreater(rhs: number | BoxedExpression): boolean | undefined {
-    if (typeof rhs === 'number') {
-      if (typeof this._value === 'number') return this._value > rhs;
-      return this._value.re > rhs;
-    }
-    return rhs.isLessEqual(this);
-  }
-
-  isGreaterEqual(rhs: number | BoxedExpression): boolean | undefined {
-    if (typeof rhs === 'number') {
-      if (typeof this._value === 'number') return this._value >= rhs;
-      return this._value.re >= rhs;
-    }
-    return rhs.isLess(this);
-  }
-
   /** x > 0, same as `isGreater(0)` */
   get isPositive(): boolean | undefined {
     if (typeof this._value === 'number')
       return !Number.isNaN(this._value) && this._value > 0;
 
-    const s = this.sgn;
-    if (s === undefined) return undefined;
-
-    if (s === 'positive') return true;
-    if (['non-positive', 'zero', 'unsigned', 'negative'].includes(s))
-      return false;
-
-    return undefined;
+    return positiveSign(this.sgn);
   }
 
   /** x >= 0, same as `isGreaterEqual(0)` */
@@ -566,12 +427,7 @@ export class BoxedNumber extends _BoxedExpression {
     if (typeof this._value === 'number')
       return !Number.isNaN(this._value) && this._value >= 0;
 
-    const s = this.sgn;
-    if (s === undefined) return undefined;
-
-    if (s === 'positive' || s === 'non-negative') return true;
-    if (['negative', 'zero', 'unsigned'].includes(s)) return false;
-    return undefined;
+    return nonNegativeSign(this.sgn);
   }
 
   /** x < 0, same as `isLess(0)` */
@@ -579,12 +435,7 @@ export class BoxedNumber extends _BoxedExpression {
     if (typeof this._value === 'number')
       return !Number.isNaN(this._value) && this._value < 0;
 
-    const s = this.sgn;
-    if (s === undefined) return undefined;
-    if (s === 'negative') return true;
-    if (['non-negative', 'zero', 'unsigned', 'positive'].includes(s))
-      return false;
-    return undefined;
+    return negativeSign(this.sgn);
   }
 
   /** x <= 0, same as `isLessEqual(0)` */
@@ -592,44 +443,14 @@ export class BoxedNumber extends _BoxedExpression {
     if (typeof this._value === 'number')
       return !Number.isNaN(this._value) && this._value <= 0;
 
-    const s = this.sgn;
-    if (s === undefined) return undefined;
-
-    if (s === 'negative' || s === 'non-positive') return true;
-    if (['positive', 'zero', 'unsigned'].includes(s)) return false;
-
-    return undefined;
-  }
-
-  get isZero(): boolean {
-    if (typeof this._value === 'number') return this._value === 0;
-
-    return this._value.isZero;
-  }
-
-  get isNotZero(): boolean {
-    if (typeof this._value === 'number') return this._value !== 0;
-
-    return !this._value.isZero;
-  }
-
-  get isOne(): boolean {
-    if (typeof this._value === 'number') return this._value === 1;
-
-    return this._value.isOne;
-  }
-
-  get isNegativeOne(): boolean {
-    if (typeof this._value === 'number') return this._value === -1;
-
-    return this._value.isNegativeOne;
+    return nonPositiveSign(this.sgn);
   }
 
   get isOdd(): boolean | undefined {
-    if (this.isOne || this.isNegativeOne) return true;
-    if (this.isZero) return false;
+    if (this.is(1) || this.is(-1)) return true;
+    if (this.is(0)) return false;
 
-    if (!this.isInteger) return false;
+    if (!this.isFinite || !this.isInteger) return undefined;
 
     if (typeof this._value === 'number') return this._value % 2 !== 0;
 
@@ -675,26 +496,28 @@ export class BoxedNumber extends _BoxedExpression {
   get isInteger(): boolean {
     if (typeof this._value === 'number') return Number.isInteger(this._value);
 
-    return this._value.type === 'integer';
+    return isSubtype(this._value.type, 'integer');
   }
 
   get isRational(): boolean {
     if (typeof this._value === 'number') return Number.isInteger(this._value);
-    const t = this._value.type;
     // Every integer is also a rational
-    return t === 'integer' || t === 'rational';
+    return isSubtype(this._value.type, 'rational');
   }
 
   get isReal(): boolean {
     if (typeof this._value === 'number') return true;
     // If it's 'complex', it has an imaginary part, otherwise it's real
     //    complex :> real :> rational :> integer
-    return this._value.type !== 'complex';
+    return isSubtype(this._value.type, 'real');
   }
 
-  get isImaginary(): boolean | undefined {
-    if (typeof this._value === 'number') return false;
-    return this._value.im !== 0;
+  is(rhs: any): boolean {
+    if (typeof rhs === 'number') {
+      if (typeof this._value === 'number') return this._value === rhs;
+      return this._value.eq(rhs);
+    }
+    return false;
   }
 
   get canonical(): BoxedExpression {
@@ -703,7 +526,7 @@ export class BoxedNumber extends _BoxedExpression {
 
   get isStructural(): boolean {
     if (typeof this._value === 'number') return true;
-    if (this.type === 'integer' || this.type === 'rational') return true;
+    if (isSubtype(this.type, 'rational')) return true;
     if (this._value instanceof ExactNumericValue) return false;
     return true;
   }
@@ -790,7 +613,7 @@ export function canonicalNumber(
     if (!value.isFinite() && value.im === 0)
       return value.re > 0 ? +Infinity : -Infinity;
 
-    return ce._numericValue(value);
+    return ce._numericValue({ re: value.re, im: value.im });
   }
 
   if (typeof value === 'object' && 'num' in value) {

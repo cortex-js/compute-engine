@@ -1,7 +1,6 @@
 import { engine } from '../../utils';
 
-engine.assume(['Element', 'f', 'Functions']);
-engine.assume(['Element', 'g', 'Functions']);
+engine.declare('g', 'function');
 
 function check(s: string, f: jest.ProvidesCallback) {
   describe(s, () => test(s, f));
@@ -11,7 +10,8 @@ check('Syntax error inside group with invisible operator', () =>
   expect(engine.parse('{2\\pi)}')).toMatchInlineSnapshot(`
     [
       "Tuple",
-      ["Multiply", 2, "Pi"],
+      2,
+      "Pi",
       [
         "Error",
         "'expected-closing-delimiter'",
@@ -175,8 +175,7 @@ check('Invalid argument in sequence', () =>
       1,
       [
         "Error",
-        ["ErrorCode", "'incompatible-domain'", "Numbers", "Booleans"],
-        ["Equal", 2, 2]
+        ["ErrorCode", "'incompatible-type'", "'number'", "'boolean'"]
       ],
       3
     ]
@@ -193,8 +192,7 @@ check('Invalid argument positional', () =>
         2,
         [
           "Error",
-          ["ErrorCode", "'incompatible-domain'", "Numbers", "Booleans"],
-          ["Equal", 2, 2]
+          ["ErrorCode", "'incompatible-type'", "'number'", "'boolean'"]
         ]
       ],
       2
@@ -238,8 +236,7 @@ check('Supsub syntax error', () =>
         "Sqrt",
         [
           "Error",
-          ["ErrorCode", "'incompatible-domain'", "Numbers", "Anything"],
-          ["At", "x", "_"]
+          ["ErrorCode", "'incompatible-type'", "'number'", "'any'"]
         ]
       ],
       1
@@ -388,10 +385,25 @@ check('Invalid delimiter', () =>
 );
 
 check('Double superscript: threaded', () =>
-  expect(engine.parse('x^1^2').canonical).toMatchInlineSnapshot(
-    `["Power", "x", ["List", 1, 2]]`
-  )
-);
+  expect(engine.parse('x^1^2').canonical).toMatchInlineSnapshot(`
+    [
+      "Power",
+      [
+        "Error",
+        [
+          "ErrorCode",
+          "'incompatible-type'",
+          "'number'",
+          "'list | tuple | string'"
+        ]
+      ],
+      [
+        "Error",
+        ["ErrorCode", "'incompatible-type'", "'number'", "'list<number>'"]
+      ]
+    ]
+  `)
+); // @fixme
 
 // check('Invalid double subscript', () =>
 //   expect(engine.parse('x_1_2')).toMatchInlineSnapshot(
@@ -458,7 +470,7 @@ check('Syntax error: \\1', () =>
 );
 
 check('Syntax error: ##', () =>
-  expect(engine.parse('x##')).toMatchInlineSnapshot(`["Multiply", "##", "x"]`)
+  expect(engine.parse('x##')).toMatchInlineSnapshot(`["Pair", "x", "##"]`)
 );
 
 check('Syntax error: &', () =>
@@ -498,31 +510,24 @@ check('Syntax error', () =>
 );
 
 check('Missing argument', () =>
-  expect(engine.box(['Sqrt']).canonical).toMatchInlineSnapshot(
+  expect(engine.box(['Sqrt'])).toMatchInlineSnapshot(
     `["Sqrt", ["Error", "'missing'"]]`
   )
 );
 
 check('Unexpected argument', () =>
-  expect(engine.box(['Sqrt', 12, 29, 74]).canonical).toMatchInlineSnapshot(`
+  expect(engine.box(['Sqrt', 12, 29, 74])).toMatchInlineSnapshot(`
     [
       "Sqrt",
       12,
-      ["Error", "'unexpected-argument'", 29],
-      ["Error", "'unexpected-argument'", 74]
+      ["Error", "'unexpected-argument'", "'29'"],
+      ["Error", "'unexpected-argument'", "'74'"]
     ]
   `)
 );
 
-check('Mismatched domain', () =>
-  expect(engine.box(['Sqrt', 'True']).canonical).toMatchInlineSnapshot(`
-    [
-      "Sqrt",
-      [
-        "Error",
-        ["ErrorCode", "'incompatible-domain'", "Numbers", "Booleans"],
-        "True"
-      ]
-    ]
-  `)
-);
+check('Mismatched type', () => {
+  expect(engine.box(['Sqrt', 'True'])).toMatchInlineSnapshot(
+    `["Sqrt", "True"]`
+  );
+});

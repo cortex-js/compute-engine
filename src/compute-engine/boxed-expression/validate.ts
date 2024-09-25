@@ -1,16 +1,12 @@
-import type { BoxedExpression } from './public';
+import type { BoxedExpression, BoxedFunctionDefinition } from './public';
 
-import type {
-  IComputeEngine,
-  BoxedDomain,
-  DomainLiteral,
-  Hold,
-} from '../public';
+import type { IComputeEngine } from '../public';
 
 import { each, isFiniteIndexableCollection } from '../collection-utils';
 
 import { flatten } from './flatten';
-import { shouldHold } from './hold';
+import { isSubtype } from '../../common/type/subtype';
+import { Type } from '../../common/type/types';
 
 /**
  * Check that the number of arguments is as expected.
@@ -36,7 +32,7 @@ export function checkArity(
     i += 1;
   }
   while (i < ops.length) {
-    xs.push(ce.error('unexpected-argument', ops[i]));
+    xs.push(ce.error('unexpected-argument', ops[i].toString()));
     i += 1;
   }
   return xs;
@@ -66,12 +62,12 @@ export function checkNumericArgs(
   let count = typeof options === 'number' ? options : options?.count;
   const flattenHead =
     typeof options === 'number' ? undefined : options?.flatten;
+
   ops = flatten(ops, flattenHead);
 
   // @fastpath
   if (!ce.strict) {
-    for (const x of ops)
-      if (!isFiniteIndexableCollection(x)) x.infer(ce.Numbers);
+    for (const x of ops) if (!isFiniteIndexableCollection(x)) x.infer('real');
     return ops;
   }
 
@@ -84,10 +80,16 @@ export function checkNumericArgs(
     const op = ops[i];
     if (i > count - 1) {
       isValid = false;
-      xs.push(ce.error('unexpected-argument', op));
+      xs.push(ce.error('unexpected-argument', op.toString()));
     } else if (op === undefined) {
       isValid = false;
       xs.push(ce.error('missing'));
+    } else if (!op.isValid) {
+      isValid = false;
+      xs.push(op);
+    } else if (op.isNumber) {
+      // The argument is a number literal or a function whose result is a number
+      xs.push(op);
     } else if (
       op.symbol &&
       !ce.lookupSymbol(op.symbol) &&
@@ -95,43 +97,37 @@ export function checkNumericArgs(
     ) {
       // We have an unknown symbol, we'll infer it's a number later
       xs.push(op);
-    } else if (op.isNumber || op.domain?.isNumber) {
-      // The argument is a number literal or a function whose result is a number
-      xs.push(op);
-    } else if (!op.isValid) {
-      isValid = false;
-      xs.push(op);
-    } else if (!op.domain) {
-      // No domain, set. Keep it that way, infer later
+    } else if (op.type === 'unknown') {
+      // Unknown type. Keep it that way, infer later
       xs.push(op);
     } else if (isFiniteIndexableCollection(op)) {
       // The argument is a list. Check that all elements are numbers
       // and infer the domain of the elements
       for (const x of each(op)) {
-        if (!x.isNumber && !x.domain?.isNumber) {
+        if (!x.isNumber) {
           isValid = false;
           break;
         }
       }
-      if (!isValid) xs.push(ce.domainError('Numbers', op.domain, op));
+      if (!isValid) xs.push(ce.typeError('number', op.type, op));
       else xs.push(op);
     } else if (
-      op.symbolDefinition?.inferredDomain &&
-      op.domain.isCompatible(ce.Numbers, 'contravariant')
+      op.symbolDefinition?.inferredType &&
+      isSubtype('number', op.type)
     ) {
-      // There was an inferred domain, and it is contravrariant with Numbers
-      // e.g. "Anything". We'll narrow it down to Number when we infer later.
+      // There was an inferred type, and it is a supertype of "number"
+      // e.g. "any". We'll narrow it down to "numebr" when we infer later.
       xs.push(op);
     } else if (
-      op.functionDefinition?.signature.inferredSignature &&
-      op.domain.isCompatible(ce.Numbers, 'contravariant')
+      op.functionDefinition?.inferredSignature &&
+      isSubtype('number', op.type)
     ) {
-      // There is an inferred signature, and its result is contravariant with Numbers
-      // e.g. "Anything". We'll narrow it down to Number when we infer later.
+      // There is an inferred signature, and it is a supertype of 'number
+      // e.g. "any". We'll narrow it down to "number" when we infer later.
       xs.push(op);
     } else {
       isValid = false;
-      xs.push(ce.domainError('Numbers', op.domain, op));
+      xs.push(ce.typeError('number', op.type, op));
     }
   }
 
@@ -139,8 +135,8 @@ export function checkNumericArgs(
   if (isValid)
     for (const x of xs)
       if (isFiniteIndexableCollection(x))
-        for (const y of each(x)) y.infer(ce.Numbers);
-      else x.infer(ce.Numbers);
+        for (const y of each(x)) y.infer('real');
+      else x.infer('real');
 
   return xs;
 }
@@ -150,18 +146,45 @@ export function checkNumericArgs(
  *
  * Converts the arguments to canonical
  */
-export function checkDomain(
+export function checkType(
   ce: IComputeEngine,
   arg: BoxedExpression | undefined | null,
-  dom: BoxedDomain | DomainLiteral | undefined
+  type: Type | undefined
 ): BoxedExpression {
   if (arg === undefined || arg === null) return ce.error('missing');
-  if (dom === undefined) return ce.error('unexpected-argument', arg);
+  if (type === undefined)
+    return ce.error('unexpected-argument', arg.toString());
+
   arg = arg.canonical;
-  if (arg.operator === 'Sequence') arg = arg.op1;
+
   if (!arg.isValid) return arg;
-  if (!arg.domain || arg.domain.isCompatible(dom)) return arg;
-  return ce.domainError(dom, arg.domain, arg);
+
+  if (isSubtype(arg.type, type)) return arg;
+
+  return ce.typeError(type, arg.type, arg);
+}
+
+export function checkTypes(
+  ce: IComputeEngine,
+  args: ReadonlyArray<BoxedExpression>,
+  types: Type[]
+): ReadonlyArray<BoxedExpression> {
+  // Do a quick check for the common case where everything is as expected.
+  // Avoid allocating arrays and objects
+  if (
+    args.length === types.length &&
+    args.every((x, i) => isSubtype(x.type, types[i]))
+  )
+    return args;
+
+  const xs: BoxedExpression[] = [];
+  for (let i = 0; i <= types.length - 1; i++)
+    xs.push(checkType(ce, args[i], types[i]));
+
+  for (let i = types.length; i <= args.length - 1; i++)
+    xs.push(ce.error('unexpected-argument', args[i].toString()));
+
+  return xs;
 }
 
 /**
@@ -175,30 +198,7 @@ export function checkPure(
   arg = arg.canonical;
   if (!arg.isValid) return arg;
   if (arg.isPure) return arg;
-  return ce.error('expected-pure-expression', arg);
-}
-
-export function checkDomains(
-  ce: IComputeEngine,
-  args: ReadonlyArray<BoxedExpression>,
-  doms: (BoxedDomain | DomainLiteral)[]
-): ReadonlyArray<BoxedExpression> {
-  // Do a quick check for the common case where everything is as expected.
-  // Avoid allocating arrays and objects
-  if (
-    args.length === doms.length &&
-    args.every((x, i) => !x.domain || x.domain.isCompatible(doms[i]))
-  )
-    return args;
-
-  const xs: BoxedExpression[] = [];
-  for (let i = 0; i <= doms.length - 1; i++)
-    xs.push(checkDomain(ce, args[i], doms[i]));
-
-  for (let i = doms.length; i <= args.length - 1; i++)
-    xs.push(ce.error('unexpected-argument', args[i]));
-
-  return xs;
+  return ce.error('expected-pure-expression', arg.toString());
 }
 
 /**
@@ -209,17 +209,16 @@ export function checkDomains(
  * arguments.
  *
  */
-export function adjustArguments(
+export function validateArguments(
   ce: IComputeEngine,
   ops: ReadonlyArray<BoxedExpression>,
-  hold: Hold,
-  threadable: boolean,
-  params: BoxedDomain[],
-  optParams: BoxedDomain[],
-  restParam: BoxedDomain | undefined
+  def: BoxedFunctionDefinition
 ): ReadonlyArray<BoxedExpression> | null {
   // @fastpath
   if (!ce.strict) return null;
+
+  if (typeof def.signature === 'string') return null;
+  if (def.signature.kind !== 'signature') return null;
 
   const result: BoxedExpression[] = [];
   let isValid = true;
@@ -230,6 +229,13 @@ export function adjustArguments(
   // if has a def, check if domains are compatible
   // After that, check the return value, if one is provided
   // If everything is OK, infer the domains of the ops
+
+  const params = def.signature.args?.map((x) => x.type) ?? [];
+  const optParams = def.signature.optArgs?.map((x) => x.type) ?? [];
+  const restParam = def.signature.restArg?.type;
+  const hold = def.hold;
+  const threadable = def.threadable;
+
   let i = 0;
 
   // Iterate over any required parameters
@@ -240,7 +246,7 @@ export function adjustArguments(
       isValid = false;
       continue;
     }
-    if (shouldHold(hold, params.length, i - 1)) {
+    if (hold) {
       result.push(op);
       continue;
     }
@@ -249,9 +255,9 @@ export function adjustArguments(
       isValid = false;
       continue;
     }
-    if (!op.domain) {
-      // An expression without a domain is assumed to be valid,
-      // we'll infer the domain later
+    if (op.type === 'unknown') {
+      // An expression with an unknown type is assumed to be valid,
+      // we'll infer the type later
       result.push(op);
       continue;
     }
@@ -259,24 +265,18 @@ export function adjustArguments(
       result.push(op);
       continue;
     }
-    if (
-      op.symbolDefinition?.inferredDomain &&
-      op.domain.isCompatible(param, 'contravariant')
-    ) {
+    if (op.symbolDefinition?.inferredType && isSubtype(op.type, param)) {
       result.push(op);
       continue;
     }
 
-    if (
-      op.functionDefinition?.signature.inferredSignature &&
-      op.domain.isCompatible(param, 'contravariant')
-    ) {
+    if (op.functionDefinition?.inferredSignature && isSubtype(op.type, param)) {
       result.push(op);
       continue;
     }
 
-    if (!op.domain.isCompatible(param)) {
-      result.push(ce.domainError(param, op.domain, op));
+    if (!isSubtype(op.type, param)) {
+      result.push(ce.typeError(param, op.type, op));
       isValid = false;
       continue;
     }
@@ -290,7 +290,7 @@ export function adjustArguments(
       // No more ops, we're done
       break;
     }
-    if (shouldHold(hold, params.length, i)) {
+    if (hold) {
       result.push(op);
       i += 1;
       continue;
@@ -301,7 +301,7 @@ export function adjustArguments(
       i += 1;
       continue;
     }
-    if (!op.domain) {
+    if (op.type === 'unknown') {
       // An expression without a domain is assumed to be valid,
       // we'll infer the domain later
       result.push(op);
@@ -313,18 +313,15 @@ export function adjustArguments(
       i += 1;
       continue;
     }
-    if (
-      op.symbolDefinition?.inferredDomain &&
-      op.domain.isCompatible(param, 'contravariant')
-    ) {
+    if (op.symbolDefinition?.inferredType && isSubtype(op.type, param)) {
       // There was an inferred domain, and it is contravrariant with Numbers
       // e.g. "Anything". We'll narrow it down to Number when we infer later.
       result.push(op);
       i += 1;
       continue;
     }
-    if (!op.domain.isCompatible(param)) {
-      result.push(ce.domainError(param, op.domain, op));
+    if (!isSubtype(op.type, param)) {
+      result.push(ce.typeError(param, op.type, op));
       isValid = false;
       i += 1;
       continue;
@@ -337,7 +334,7 @@ export function adjustArguments(
   if (restParam) {
     for (const op of ops.slice(i)) {
       i += 1;
-      if (shouldHold(hold, params.length, i - 1)) {
+      if (hold) {
         result.push(op);
         continue;
       }
@@ -346,7 +343,7 @@ export function adjustArguments(
         isValid = false;
         continue;
       }
-      if (!op.domain) {
+      if (op.type === 'unknown') {
         // An expression without a domain is assumed to be valid,
         // we'll infer the domain later
         result.push(op);
@@ -356,17 +353,14 @@ export function adjustArguments(
         result.push(op);
         continue;
       }
-      if (
-        op.symbolDefinition?.inferredDomain &&
-        op.domain.isCompatible(restParam, 'contravariant')
-      ) {
+      if (op.symbolDefinition?.inferredType && isSubtype(op.type, restParam)) {
         // There was an inferred domain, and it is contravrariant with Numbers
         // e.g. "Anything". We'll narrow it down to Number when we infer later.
         result.push(op);
         continue;
       }
-      if (!op.domain.isCompatible(restParam)) {
-        result.push(ce.domainError(restParam, op.domain, op));
+      if (!isSubtype(op.type, restParam)) {
+        result.push(ce.typeError(restParam, op.type, op));
         isValid = false;
         continue;
       }
@@ -377,7 +371,7 @@ export function adjustArguments(
   // Are there any remaining parameters?
   if (i < ops.length) {
     for (const op of ops.slice(i)) {
-      result.push(ce.error('unexpected-argument', op));
+      result.push(ce.error('unexpected-argument', op.toString()));
       isValid = false;
     }
   }
@@ -387,19 +381,20 @@ export function adjustArguments(
   // All arguments are valid, we can infer the domain of the arguments
   i = 0;
   for (const param of params) {
-    if (!shouldHold(hold, params.length, i))
+    if (!hold)
       if (!threadable || !isFiniteIndexableCollection(ops[i]))
         ops[i].infer(param);
     i += 1;
   }
   for (const param of optParams) {
+    if (!ops[i]) break;
     if (!threadable || !isFiniteIndexableCollection(ops[i]))
       ops[i]?.infer(param);
     i += 1;
   }
   if (restParam) {
     for (const op of ops.slice(i)) {
-      if (!shouldHold(hold, params.length, i))
+      if (!hold)
         if (!threadable || !isFiniteIndexableCollection(op))
           op.infer(restParam);
       i += 1;

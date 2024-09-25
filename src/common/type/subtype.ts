@@ -1,4 +1,85 @@
-import type { PrimitiveType, Type, TypeCompatibility } from './types';
+import { parseType } from './parse';
+import {
+  COLLECTION_TYPES,
+  EXPRESSION_TYPES,
+  NUMERIC_TYPES,
+  PRIMITIVE_TYPES,
+  SCALAR_TYPES,
+  VALUE_TYPES,
+} from './primitive';
+import type {
+  PrimitiveType,
+  Type,
+  TypeCompatibility,
+  TypeString,
+} from './types';
+
+const PRIMITIVE_SUBTYPES: Record<PrimitiveType, PrimitiveType[]> = {
+  number: NUMERIC_TYPES,
+  finite_number: [
+    'finite_complex',
+    'finite_imaginary',
+    'finite_real',
+    'finite_integer',
+    'finite_rational',
+  ],
+  non_finite_number: [],
+  complex: [
+    'finite_complex',
+    'finite_imaginary',
+    'finite_real',
+    'finite_rational',
+    'finite_integer',
+    'non_finite_number',
+    'imaginary',
+    'real',
+    'rational',
+    'integer',
+  ],
+  finite_complex: [
+    'finite_imaginary',
+    'finite_real',
+    'finite_rational',
+    'finite_integer',
+  ],
+  imaginary: ['finite_imaginary', 'non_finite_number'],
+  finite_imaginary: [],
+  real: [
+    'finite_real',
+    'finite_rational',
+    'finite_integer',
+    'non_finite_number',
+    'rational',
+    'integer',
+  ],
+  finite_real: ['finite_rational', 'finite_integer'],
+  rational: [
+    'finite_rational',
+    'finite_integer',
+    'integer',
+    'non_finite_number',
+  ],
+  finite_rational: ['finite_integer'],
+  integer: ['finite_integer', 'non_finite_number'],
+  finite_integer: [],
+  any: PRIMITIVE_TYPES,
+  unknown: [],
+  nothing: [],
+  never: [],
+  error: [],
+  value: VALUE_TYPES,
+  scalar: SCALAR_TYPES,
+  collection: COLLECTION_TYPES,
+  list: [],
+  set: [],
+  tuple: [],
+  map: [],
+  function: [],
+  symbol: [],
+  boolean: [],
+  string: [],
+  expression: EXPRESSION_TYPES,
+};
 
 /** Return true if lhs is a subtype of rhs */
 export function isPrimitiveSubtype(
@@ -8,6 +89,9 @@ export function isPrimitiveSubtype(
   // `any` is the top type
   if (rhs === 'any') return true;
 
+  // 'never' is the bottom type
+  if (lhs === 'never') return true;
+
   // 'unknown' is only a subtype of any (not of itself)
   // No type is a subtype of `unknown`
   if (lhs === 'unknown' || rhs === 'unknown') return false;
@@ -15,88 +99,34 @@ export function isPrimitiveSubtype(
   // Identity
   if (lhs === rhs) return true;
 
-  // `number` :> `complex` + NaN + Infinity
-  if (
-    rhs === 'number' &&
-    ['complex', 'imaginary', 'real', 'rational', 'integer'].includes(lhs)
-  )
-    return true;
-
-  // `complex` :> `imaginary` | `real`
-  if (
-    rhs === 'complex' &&
-    ['imaginary', 'real', 'rational', 'integer'].includes(lhs)
-  )
-    return true;
-
-  // `real` :> `rational`
-  if (rhs === 'real' && ['rational', 'integer'].includes(lhs)) return true;
-
-  // `rational` :> `integer`
-  if (rhs === 'rational' && lhs === 'integer') return true;
-
-  // `collection` :>  `tuple`
-  if (rhs === 'collection' && lhs === 'tuple') return true;
-
-  // `value` :> `number` | `collection` | `tuple` | `boolean` | `string`
-  if (
-    rhs === 'value' &&
-    [
-      'number',
-      'complex',
-      'imaginary',
-      'real',
-      'rational',
-      'integer',
-      'map',
-      'collection',
-      'list',
-      'set',
-      'tuple',
-      'boolean',
-      'string',
-    ].includes(lhs)
-  )
-    return true;
-
-  // `expression` := `value` | `function` | `symbol`
-  if (
-    rhs === 'expression' &&
-    [
-      'number',
-      'complex',
-      'imaginary',
-      'real',
-      'rational',
-      'integer',
-      'map',
-      'collection',
-      'list',
-      'set',
-      'tuple',
-      'boolean',
-      'string',
-      'function',
-      'symbol',
-    ].includes(lhs)
-  )
-    return true;
-
-  return false;
+  return PRIMITIVE_SUBTYPES[rhs].includes(lhs);
 }
 
 /** Return true if lhs is a subtype of rhs */
-export function isSubtype(lhs: Type, rhs: Type): boolean {
-  // Every type is a subtype of `any`
+export function isSubtype(
+  lhs: Type | TypeString,
+  rhs: Type | TypeString
+): boolean {
+  // Shortcut: for primitive types
+  if (typeof lhs === 'string' && typeof rhs === 'string' && lhs === rhs)
+    return true;
+
+  if (typeof lhs === 'string') lhs = parseType(lhs);
+  if (typeof rhs === 'string') rhs = parseType(rhs);
+
+  // Every type is a subtype of `any`, the top type
   if (rhs === 'any') return true;
+
+  // `never` is the bottom type, no type is a subtype of `never`
+  if (rhs === 'never') return false;
 
   // No type is a subtype of `error`, even itself
   if (rhs === 'error') return false;
 
-  // No type is a subtype of `nothing` (bottom type), except itself
+  // No type is a subtype of `nothing` (unit type), except itself
   if (rhs === 'nothing') return lhs === 'nothing';
 
-  // Nothing is the bottom type, it is only a subtype of itself
+  // Nothing is the unit type, it is only a subtype of itself
   if (lhs === 'nothing') return false;
 
   // 'unknown' is only a subtype of `any` (not of itself)
@@ -111,19 +141,17 @@ export function isSubtype(lhs: Type, rhs: Type): boolean {
     if (typeof lhs === 'string')
       return isPrimitiveSubtype(lhs as PrimitiveType, rhs as PrimitiveType);
 
-    // A function signature is a subtype of `function` or `expression`
-    if (rhs === 'function' || rhs === 'expression')
-      return lhs.kind === 'signature';
+    if (rhs === 'numeric') return isNumeric(lhs);
 
-    // Subtype of `collection`
-    if (rhs === 'collection')
-      return (
-        lhs.kind === 'collection' ||
-        lhs.kind === 'tuple' ||
-        lhs.kind === 'list' ||
-        lhs.kind === 'set' ||
-        lhs.kind === 'map'
-      );
+    if (rhs === 'function') return isFunction(lhs);
+
+    if (rhs === 'expression') return isExpression(lhs);
+
+    if (rhs === 'scalar') return isScalar(lhs);
+
+    if (rhs === 'value') return isValue(lhs);
+
+    if (rhs === 'collection') return isCollection(lhs);
 
     // A tuple is a subtype of `tuple`
     if (rhs === 'tuple') return lhs.kind === 'tuple';
@@ -187,8 +215,6 @@ export function isSubtype(lhs: Type, rhs: Type): boolean {
   // Handle function signatures
   //
   if (lhs.kind === 'signature' && rhs.kind === 'signature') {
-    if (rhs.hold === true && lhs.hold !== true) return false;
-
     // Check the result match covariantly
     if (!isSubtype(lhs.result, rhs.result)) return false;
 
@@ -229,6 +255,7 @@ export function isSubtype(lhs: Type, rhs: Type): boolean {
   // Handle maps (record types)
   //
   // All the fields in the rhs must be present in the lhs
+  // but there may be additional fields in the lhs (width subtyping)
   //
   if (lhs.kind === 'map' && rhs.kind === 'map') {
     const lhsEntries = Object.entries(lhs.elements);
@@ -241,6 +268,7 @@ export function isSubtype(lhs: Type, rhs: Type): boolean {
       if (lhsIndex === -1) return false;
       const rhsType = value;
       const lhsType = lhsEntries[lhsIndex][1];
+      // Depth subtyping
       if (!isSubtype(lhsType, rhsType)) return false;
     }
     return true;
@@ -273,7 +301,8 @@ export function isSubtype(lhs: Type, rhs: Type): boolean {
     // Check they have the same number of elements
     if (lhs.elements.length !== rhs.elements.length) return false;
 
-    // Check that all the elements match
+    // Check that all the elements match by type
+    // @todo: should we match by name as well?
     for (let i = 0; i < lhs.elements.length; i++) {
       if (!isSubtype(lhs.elements[i].type, rhs.elements[i].type)) {
         return false;
@@ -328,32 +357,42 @@ export function isCompatible(
   return isPrimitiveSubtype(lhs, rhs) && isPrimitiveSubtype(rhs, lhs);
 }
 
-function commonType2(lhs: Type, rhs: Type): Type {
-  if (lhs === rhs) return lhs;
-  if (lhs === 'nothing') return rhs;
-  if (rhs === 'nothing') return lhs;
-  if (lhs === 'any' || rhs === 'any') return 'any';
-  if (isSubtype(lhs, rhs)) return rhs;
-  if (isSubtype(rhs, lhs)) return lhs;
-
-  // Note: the order of the checks is significant
-  if (isSubtype(lhs, 'complex') && isSubtype(rhs, 'complex')) return 'complex';
-  if (isSubtype(lhs, 'number') && isSubtype(rhs, 'number')) return 'number';
-  if (isSubtype(lhs, 'collection') && isSubtype(rhs, 'collection'))
-    return 'collection';
-  if (isSubtype(lhs, 'value') && isSubtype(rhs, 'value')) return 'value';
-  if (isSubtype(lhs, 'expression') && isSubtype(rhs, 'expression'))
-    return 'expression';
-  return 'any';
+function isNumeric(type: Type): boolean {
+  if (typeof type === 'string')
+    return NUMERIC_TYPES.includes(type as PrimitiveType);
+  return false;
 }
 
-/** Return the type that is common to all the types, using a "supertype" (any,
- * value, number, complex, expression) if applicable
- */
-export function commonType(types: Type[]): Type {
-  if (types.length === 0) return 'nothing';
-  if (types.length === 1) return types[0];
+function isScalar(type: Type): boolean {
+  if (isNumeric(type)) return true;
+  if (typeof type === 'string')
+    return SCALAR_TYPES.includes(type as PrimitiveType);
+  return false;
+}
 
-  // Use commonType2 to find the common type of all the types
-  return types.reduce(commonType2);
+function isCollection(type: Type): boolean {
+  if (typeof type === 'string')
+    return COLLECTION_TYPES.includes(type as PrimitiveType);
+  return ['collection', 'list', 'set', 'tuple', 'map'].includes(type.kind);
+}
+
+function isValue(type: Type): boolean {
+  return isScalar(type) || isCollection(type);
+}
+
+function isFunction(type: Type): boolean {
+  return (
+    type === 'function' ||
+    (typeof type !== 'string' && type.kind === 'signature')
+  );
+}
+
+function isExpression(type: Type): boolean {
+  if (
+    typeof type === 'string' &&
+    ['expression', 'symbol', 'function'].includes(type)
+  )
+    return true;
+  if (isValue(type) || isFunction(type)) return true;
+  return false;
 }

@@ -2,7 +2,7 @@ import { Complex } from 'complex-esm';
 import type { BoxedExpression, IComputeEngine } from '../public';
 import { isRelationalOperator } from './utils';
 import { mul } from './arithmetic-multiply';
-import { add } from './terms';
+import { add } from './arithmetic-add';
 
 export type DataTypeMap = {
   float64: number;
@@ -272,9 +272,8 @@ export class TensorFieldExpression implements TensorField<BoxedExpression> {
     | boolean[]
     | string[]
     | BoxedExpression[] {
-    if (Array.isArray(x)) {
-      return x.map((x) => this.cast(x, dtype as any)!);
-    }
+    if (Array.isArray(x)) return x.map((x) => this.cast(x, dtype as any)!);
+
     const v = x.value;
     switch (dtype) {
       case 'float64':
@@ -289,7 +288,7 @@ export class TensorFieldExpression implements TensorField<BoxedExpression> {
       case 'complex128':
       case 'complex64':
         if (typeof v === 'number') return this.ce.complex(v);
-        if (x.im !== undefined) return this.ce.complex(x.re!, x.im);
+        if (!isNaN(x.im)) return this.ce.complex(x.re, x.im);
         return undefined;
       case 'bool':
         return typeof v === 'boolean' ? v : undefined;
@@ -304,17 +303,16 @@ export class TensorFieldExpression implements TensorField<BoxedExpression> {
   expression(x: BoxedExpression): BoxedExpression {
     return x;
   }
-
   isZero(x: BoxedExpression): boolean {
-    return x.isZero ?? false;
+    return x.is(0);
   }
 
   isOne(x: BoxedExpression): boolean {
-    return x.isOne ?? false;
+    return x.is(1);
   }
 
   equals(lhs: BoxedExpression, rhs: BoxedExpression): boolean {
-    return lhs.isEqual(rhs);
+    return lhs.isSame(rhs) === true;
   }
 
   add(lhs: BoxedExpression, rhs: BoxedExpression): BoxedExpression {
@@ -488,12 +486,12 @@ export function getSupertype(
 ): TensorDataType {
   if (t1 === undefined) return t2;
   // Of the two types, return the one which is the most generic, i.e.
-  // the least upper bound (LUB) or supertype
-  // If the two types are incompatible, return undefined
+  // the least upper bound (LUB) or supertype.
+  // If the two types are incompatible, return undefined.
   if (t1 === t2) return t1;
 
-  if (t1 === 'string' || t2 === 'string') return 'expression';
   if (t1 === 'expression' || t2 === 'expression') return 'expression';
+  if (t1 === 'string' || t2 === 'string') return 'expression';
   if (t1 === 'complex128' || t2 === 'complex128') return 'complex128';
   if (t1 === 'complex64' || t2 === 'complex64') return 'complex64';
   if (t1 === 'float64' || t2 === 'float64') return 'float64';
@@ -505,21 +503,29 @@ export function getSupertype(
 }
 
 export function getExpressionDatatype(expr: BoxedExpression): TensorDataType {
-  // Depending on whether the expr is a literal number, a string, etc, set the dtype
-  // appropriately
+  // Depending on whether the expr is a literal number, a string, etc,
+  //set the dtype appropriately
 
   if (isRelationalOperator(expr)) return 'bool';
+
+  if (!expr.isNumberLiteral) return 'expression';
 
   switch (expr.type) {
     case 'real':
     case 'rational':
+    case 'finite_real':
+    case 'finite_rational':
+    case 'integer': // For NaN, Infinity, etc
       return 'float64';
 
     case 'complex':
+    case 'finite_complex':
+    case 'imaginary':
+    case 'finite_imaginary':
       return 'complex128';
 
-    case 'integer': {
-      const val = expr.re!;
+    case 'finite_integer': {
+      const val = expr.re;
       if (val >= 0 && val <= 255) return 'uint8';
       return 'int32';
     }

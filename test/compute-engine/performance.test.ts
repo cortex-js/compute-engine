@@ -96,8 +96,7 @@ function ceBaselineN(numRandos: number[]): number {
   randos = randos.map((n, i) => {
     // Do some arithmetic calculations
     if (i % 2 === 0)
-      if (i % 2 === 0)
-        return n.mul(4).pow(2).div(3).add(n.mul(3).div(2)).add(2).N();
+      return n.mul(4).pow(2).div(3).add(n.mul(3).div(2)).add(2).N();
 
     // Trigonometry, log, exp
     return ce.box(['Add', ['Tan', n], ['Log', ['Abs', n], ['Exp', n]]]).N();

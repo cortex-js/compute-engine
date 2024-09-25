@@ -224,7 +224,7 @@ export class _Parser implements Parser {
   // which would be interpreted as an unexpected command, and the whole `\begin`
   // would be rejected as an unbalanced environment. With `\end{cases}` as a
   // boundary, the parsing of the `|` argument stops as soon as it encounters
-  // the `\end{cases}` and can properly report an unexpected toke on the `|`
+  // the `\end{cases}` and can properly report an unexpected token on the `|`
   // only while correctly interpreting the `\begin{cases}...\end{cases}`
   private _boundaries: { index: number; tokens: LatexToken[] }[] = [];
 
@@ -1404,10 +1404,10 @@ export class _Parser implements Parser {
         this.skipSpace();
         // If still could not match, try another
         if (!this.matchAll(boundary)) {
+          this.index = start;
           if (!this.atEnd) continue;
           // If we're at the end, we may need to backtrack and try again
           // That's the case for `|1+|2|+3|`
-          this.index = start;
           return null;
         }
       }
@@ -1882,6 +1882,8 @@ export class _Parser implements Parser {
       result = 'NegativeInfinity';
     if (result === null && this.matchAll(this._notANumberTokens))
       result = 'NaN';
+    if (result === null && this.matchAll(this._imaginaryUnitTokens))
+      result = 'ImaginaryUnit';
 
     // ParseGenericExpression() has priority. Some generic expressions
     // may include symbols which have not been explicitly defined
