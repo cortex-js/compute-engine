@@ -1,4 +1,4 @@
-// import { expression, latex } from './utils';
+// import { expression, latex } from './utils.ts';
 
 import {
   BoxedExpression,
@@ -6,9 +6,9 @@ import {
   PatternMatchOptions,
   SemiBoxedExpression,
   Substitution,
-} from '../../src/compute-engine';
-import { Expression } from '../../src/math-json/types';
-import { engine, latex } from '../utils';
+} from '../../src/compute-engine.ts';
+import { Expression } from '../../src/math-json/types.ts';
+import { engine, latex } from '../utils.ts';
 
 const ce = engine;
 

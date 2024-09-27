@@ -1,9 +1,9 @@
-import type { Type, NamedElement, PrimitiveType } from './types';
+import type { Type, NamedElement, PrimitiveType } from './types.ts';
 
-import { PRIMITIVE_TYPES } from './primitive';
-import { typeToString } from './serialize';
-import { isValidType, makeType } from './utils';
-import { suggestKeyword } from '../suggest';
+import { PRIMITIVE_TYPES } from './primitive.ts';
+import { typeToString } from './serialize.ts';
+import { isValidType, makeType } from './utils.ts';
+import { suggestKeyword } from '../suggest.ts';
 
 class TypeParser {
   buffer: string;

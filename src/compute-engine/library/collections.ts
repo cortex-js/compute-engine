@@ -3,23 +3,23 @@ import type {
   CollectionHandlers,
   FunctionDefinition,
   IdentifierDefinitions,
-} from '../public';
+} from '../public.ts';
 
-import { checkArity, checkTypes } from '../boxed-expression/validate';
-import { asSmallInteger } from '../boxed-expression/numerics';
+import { checkArity, checkTypes } from '../boxed-expression/validate.ts';
+import { asSmallInteger } from '../boxed-expression/numerics.ts';
 
 import {
   each,
   isFiniteCollection,
   isFiniteIndexableCollection,
-} from '../collection-utils';
-import { applicable } from '../function-utils';
-import { canonical } from '../boxed-expression/utils';
-import { parseType } from '../../common/type/parse';
-import { isSubtype } from '../../common/type/subtype';
-import { Type } from '../../common/type/types';
-import { collectionElementType, widen } from '../../common/type/utils';
-import { interval } from '../numerics/interval';
+} from '../collection-utils.ts';
+import { applicable } from '../function-utils.ts';
+import { canonical } from '../boxed-expression/utils.ts';
+import { parseType } from '../../common/type/parse.ts';
+import { isSubtype } from '../../common/type/subtype.ts';
+import { Type } from '../../common/type/types.ts';
+import { collectionElementType, widen } from '../../common/type/utils.ts';
+import { interval } from '../numerics/interval.ts';
 
 // From NumPy:
 export const DEFAULT_LINSPACE_COUNT = 50;

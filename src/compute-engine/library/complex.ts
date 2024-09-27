@@ -1,4 +1,4 @@
-import { IdentifierDefinitions } from '../public';
+import { IdentifierDefinitions } from '../public.ts';
 
 // complex-cartesian (constructor) = re + i * im
 // complex-polar = abs * exp(i * arg)

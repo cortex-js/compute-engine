@@ -4,10 +4,10 @@ import {
   BoxedRuleSet,
   ComputeEngine,
   Rule,
-} from '../../src/compute-engine';
-import { Fu } from '../../src/compute-engine/boxed-expression/trigonometry.ts';
-import { Expression } from '../../src/math-json/types.ts';
-import { simplify, exprToString } from '../utils';
+} from '../../src/compute-engine.ts';
+import { Fu } from '../../src/compute-engine/boxed-expression/trigonometry.ts.ts';
+import { Expression } from '../../src/math-json/types.ts.ts';
+import { simplify, exprToString } from '../utils.ts';
 
 export const ce = new ComputeEngine();
 
@@ -849,11 +849,11 @@ const RULE_TEST_CASES: TestCase[] = [
 
 /*
   SUMMARY OF UNUSED RULES:
-  
+
      🚫 = rule not used (no test case for this rule)
-  
-  
-  
+
+
+
   🚫 (-x)^n:odd -> -(x^n)
   🚫 (-x)^{n/m} -> x^{n/m}; n:even, m:odd
   🚫 (-x)^{n/m} -> -x^{n/m}; ({ n, m }) => n.isOdd === true && m.isOdd === true

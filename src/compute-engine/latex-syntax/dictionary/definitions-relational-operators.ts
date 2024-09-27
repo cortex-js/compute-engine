@@ -1,4 +1,4 @@
-import { LatexDictionaryEntry, COMPARISON_PRECEDENCE } from '../public';
+import { LatexDictionaryEntry, COMPARISON_PRECEDENCE } from '../public.ts';
 
 export const DEFINITIONS_INEQUALITIES: LatexDictionaryEntry[] = [
   {

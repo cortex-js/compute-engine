@@ -1,4 +1,4 @@
-import { expressionError } from '../../utils';
+import { expressionError } from '../../utils.ts';
 
 describe('POLYNOMIALS', () => {
   test('Univariate', () => {

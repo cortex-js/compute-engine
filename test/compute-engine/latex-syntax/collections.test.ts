@@ -1,4 +1,4 @@
-import { latex, engine as ce } from '../../utils';
+import { latex, engine as ce } from '../../utils.ts';
 
 function parse(s: string) {
   return ce.parse(s);

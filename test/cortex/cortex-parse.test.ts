@@ -1,4 +1,4 @@
-import { validCortex, invalidCortex } from '../utils';
+import { validCortex, invalidCortex } from '../utils.ts';
 
 describe('CORTEX PARSING SHEBANG', () => {
   test('Valid shebang', () => {

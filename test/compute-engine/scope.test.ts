@@ -1,6 +1,6 @@
-import { ComputeEngine } from '../../src/compute-engine/compute-engine';
+import { ComputeEngine } from '../../src/compute-engine/compute-engine.ts';
 
-import { engine } from '../utils';
+import { engine } from '../utils.ts';
 
 const ce: ComputeEngine = engine;
 

@@ -1,4 +1,4 @@
-import { Expression } from '../../../math-json/types';
+import { Expression } from '../../../math-json/types.ts';
 import {
   machineValue,
   mapArgs,
@@ -13,11 +13,11 @@ import {
   unhold,
   symbol,
   dictionaryFrom,
-} from '../../../math-json/utils';
+} from '../../../math-json/utils.ts';
 import {
   isEquationOperator,
   isInequalityOperator,
-} from '../../boxed-expression/utils';
+} from '../../boxed-expression/utils.ts';
 import {
   ADDITION_PRECEDENCE,
   ARROW_PRECEDENCE,
@@ -26,8 +26,8 @@ import {
   Parser,
   Serializer,
   Terminator,
-} from '../public';
-import { joinLatex } from '../tokenizer';
+} from '../public.ts';
+import { joinLatex } from '../tokenizer.ts';
 
 // function isSpacingToken(token: string): boolean {
 //   return (
@@ -892,7 +892,7 @@ export const DEFINITIONS_CORE: LatexDictionary = [
 
 /**
  * Parse content in text mode.
- * 
+ *
  * Text mode can only include a small subset of LaTeX commands:
  * - <{> (groups inside text)
  * - \unicode

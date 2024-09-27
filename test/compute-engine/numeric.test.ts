@@ -1,4 +1,4 @@
-import { checkJson, engine as ce } from '../utils';
+import { checkJson, engine as ce } from '../utils.ts';
 
 function evaluate(s: string) {
   return ce.parse(s).evaluate();

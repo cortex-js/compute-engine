@@ -7,7 +7,7 @@ set -o pipefail  # don't hide errors within pipes
 
 export BASENAME="\033[40m Compute Engine \033[0;0m " # `basename "$0"`
 # export DOT="\033[32m  \033[0m" # Gear
-#  export DOT="\033[32m  \033[0m" # Watch 
+#  export DOT="\033[32m  \033[0m" # Watch
 # export DOT="\033[32m 羽 😀 ⧖⧗⏳⌛️⚙⛭⚙️\033[0;0m" # Hourglass
 export DOT="\033[32m ⚙ \033[0;0m" # Gear
 export CHECK="\033[32m ✔ \033[0;0m"
@@ -76,16 +76,16 @@ printf "$BASENAME$DOT Building TypeScript declaration files (.d.ts)"
 # Even though we only generate declaration file, the target must be set high-enough
 # to prevent tsc from complaining (!)
 if [[ "$TARGETS" == *math-json* ]]; then
-  npx tsc --target "es2020" -d --moduleResolution "node" \
-    --emitDeclarationOnly --outDir ./dist/types ./src/math-json.ts 
+  npx tsc --target "es2020" -d --moduleResolution "node" --allowImportingTsExtensions "true" \
+    --emitDeclarationOnly --outDir ./dist/types ./src/math-json.ts
 fi
 if [[ "$TARGETS" == *compute-engine* ]]; then
-  npx tsc --target "es2020" -d --moduleResolution "node" \
-    --emitDeclarationOnly --outDir ./dist/types ./src/compute-engine.ts 
+  npx tsc --target "es2020" -d --moduleResolution "node" --allowImportingTsExtensions "true" \
+    --emitDeclarationOnly --outDir ./dist/types ./src/compute-engine.ts
 fi
 if [[ "$TARGETS" == *cortex* ]]; then
-  npx tsc --target "es2020" -d --moduleResolution "node" \
-    --emitDeclarationOnly --outDir ./dist/types ./src/cortex.ts 
+  npx tsc --target "es2020" -d --moduleResolution "node" --allowImportingTsExtensions "true" \
+    --emitDeclarationOnly --outDir ./dist/types ./src/cortex.ts
 fi
 echo -e $LINECLEAR$BASENAME$CHECK$DIM" Building TypeScript declaration files$RESET"
 
@@ -101,7 +101,7 @@ printf $BASENAME$DOT$RESET" Making a \033[33m$BUILD\033[0m build"
 node --no-warnings ./scripts/build.mjs
 
 
-if [ "$BUILD" = "production" ]; then    
+if [ "$BUILD" = "production" ]; then
     # Linting
     # printf "$BASENAME$DOT Linting"
     # npm run lint

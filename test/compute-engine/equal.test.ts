@@ -1,4 +1,4 @@
-import { engine as ce } from '../utils';
+import { engine as ce } from '../utils.ts';
 
 const TESTS: [string, string][] = [
   ['1234', '1234.0'],

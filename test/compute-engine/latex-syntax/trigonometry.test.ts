@@ -1,4 +1,4 @@
-import { check } from '../../utils';
+import { check } from '../../utils.ts';
 
 describe('TRIGONOMETRIC FUNCTIONS implicit arguments', () => {
   test(`\\cos x + 1`, () =>

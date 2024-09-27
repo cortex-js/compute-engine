@@ -1,4 +1,4 @@
-import { check } from '../utils';
+import { check } from '../utils.ts';
 
 //
 // Some real math expressions that are awesome...

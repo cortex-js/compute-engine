@@ -1,4 +1,4 @@
-import { engine } from '../utils';
+import { engine } from '../utils.ts';
 
 describe.skip(`POLYNOMIALS`, () => {
   //     #numbers (integers, floats, operators +-*/,)

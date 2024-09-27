@@ -1,24 +1,24 @@
-import { ComputeEngine } from '../../src/compute-engine.ts';
+import { ComputeEngine } from '../../src/compute-engine.ts.ts';
 import {
   add,
   mul,
   Rational,
   reducedRational,
-} from '../../src/compute-engine/numerics/rationals';
+} from '../../src/compute-engine/numerics/rationals.ts';
 
 /**
- * 
+ *
 The constants `a`, `c`, and `m` in the Linear Congruential Generator (LCG) are chosen based on research and practical use in generating pseudo-random numbers. Here’s why those specific values were picked:
 
-1. **Multiplier (`a = 1664525`)**: 
-   - This value is a common choice in LCG implementations and was used in the implementation of the `rand()` function in early versions of the C standard library. 
+1. **Multiplier (`a = 1664525`)**:
+   - This value is a common choice in LCG implementations and was used in the implementation of the `rand()` function in early versions of the C standard library.
    - It is chosen to maximize the period (the length before the sequence of numbers repeats) and to ensure good statistical properties, such as uniform distribution.
 
-2. **Increment (`c = 1013904223`)**: 
-   - This value was also used in many implementations, including the aforementioned `rand()` function. 
+2. **Increment (`c = 1013904223`)**:
+   - This value was also used in many implementations, including the aforementioned `rand()` function.
    - The choice of `c` as an odd number ensures that the generator has a full period (i.e., it can generate all possible values before repeating) when combined with certain values of `a` and `m`.
 
-3. **Modulus (`m = 2 ** 32`)**: 
+3. **Modulus (`m = 2 ** 32`)**:
    - The modulus is typically chosen as a power of 2 because it makes the modulo operation very efficient on binary computers.
    - `2^32` is often used because it matches the word size of 32-bit computers, which was a common architecture when these constants were popularized.
    - The choice of `m` influences the range of generated numbers, and using `2^32` allows the generator to produce 32-bit integers.

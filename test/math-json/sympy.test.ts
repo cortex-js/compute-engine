@@ -1,5 +1,5 @@
-import { parse } from '../../src/math-json/parse-sympy';
-import { serialize } from '../../src/math-json/serialize-sympy';
+import { parse } from '../../src/math-json/parse-sympy.ts';
+import { serialize } from '../../src/math-json/serialize-sympy.ts';
 
 // const k = parse('077e010');
 // console.info('Sympy test: ', k);

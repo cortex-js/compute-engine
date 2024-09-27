@@ -1,5 +1,5 @@
-import type { BoxedExpression } from '../../src/compute-engine/public';
-import { engine } from '../utils';
+import type { BoxedExpression } from '../../src/compute-engine/public.ts';
+import { engine } from '../utils.ts';
 
 function parse(expr: string): BoxedExpression {
   return engine.parse(expr)!;

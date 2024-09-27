@@ -1,5 +1,5 @@
-import { Expression } from '../../../src/math-json/types.ts';
-import { engine as ce, evaluate, latex } from '../../utils';
+import { Expression } from '../../../src/math-json/types.ts.ts';
+import { engine as ce, evaluate, latex } from '../../utils.ts';
 
 describe('SUM parsing', () => {
   test('constant body (number literal)', () => {

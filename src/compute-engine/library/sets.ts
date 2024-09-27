@@ -1,19 +1,19 @@
 // Set operations:
 // https://query.wikidata.org/#PREFIX%20wd%3A%20%3Chttp%3A%2F%2Fwww.wikidata.org%2Fentity%2F%3E%0APREFIX%20wdt%3A%20%3Chttp%3A%2F%2Fwww.wikidata.org%2Fprop%2Fdirect%2F%3E%0A%0ASELECT%20DISTINCT%20%3Fitem%0AWHERE%20%7B%0A%20%20%20%20%3Fitem%20wdt%3AP31%2a%20wd%3AQ1964995%0A%7D%0A
 
-import { isSubtype } from '../../common/type/subtype';
+import { isSubtype } from '../../common/type/subtype.ts';
 import {
   each,
   iterator,
   isFiniteIndexableCollection,
   MAX_SIZE_EAGER_COLLECTION,
-} from '../collection-utils';
+} from '../collection-utils.ts';
 import {
   BoxedExpression,
   IdentifierDefinitions,
   IComputeEngine,
   SymbolDefinition,
-} from '../public';
+} from '../public.ts';
 
 export const SETS_LIBRARY: IdentifierDefinitions = {
   //

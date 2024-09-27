@@ -1,4 +1,4 @@
-import { engine as ce } from '../utils';
+import { engine as ce } from '../utils.ts';
 
 // There are several paths that need to be tested:
 // - expr.json: only use shorthands, no sugaring/prettification, numbers are

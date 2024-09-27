@@ -1,7 +1,7 @@
-import { parseType } from '../../src/common/type/parse';
+import { parseType } from '../../src/common/type/parse.ts';
 
-import { isSubtype } from '../../src/common/type/subtype';
-import { reduceType } from '../../src/common/type/reduce';
+import { isSubtype } from '../../src/common/type/subtype.ts';
+import { reduceType } from '../../src/common/type/reduce.ts';
 
 describe('Type Parser Tests', () => {
   // Positive Test Cases
@@ -305,7 +305,7 @@ describe('Type Parser Tests', () => {
       Invalid type
       |   (x: integer, y: boolean?, z: ...string) -> boolean
       |                            ^
-      |   
+      |
       |   Optional arguments cannot be followed by a rest argument
       "
     `);
@@ -317,7 +317,7 @@ describe('Type Parser Tests', () => {
       Invalid type
       |   foo
       |      ^
-      |   
+      |
       |   Unknown keyword "foo"
       |   Did you mean "any"?
       "
@@ -331,7 +331,7 @@ describe('Type Parser Tests', () => {
       Invalid type
       |   (x: integer, foo) -> boolean
       |                   ^
-      |   
+      |
       |   Unknown keyword "foo"
       |   Did you mean "any"?
       "
@@ -344,7 +344,7 @@ describe('Type Parser Tests', () => {
       Invalid type
       |   set(integer)
       |       ^
-      |   
+      |
       |   Use \`set<type>\` instead of \`set(type)\`.
       |   For example \`set<number>\`
       "
@@ -358,7 +358,7 @@ describe('Type Parser Tests', () => {
       Invalid type
       |   collection(integer)
       |              ^
-      |   
+      |
       |   Use \`collection<type>\` instead of \`collection(type)\`.
       |   For example \`collection<number>\`
       "
@@ -371,7 +371,7 @@ describe('Type Parser Tests', () => {
       Invalid type
       |   map<integer>
       |               ^
-      |   
+      |
       |   Expected a type separated by a \`:\` after the key.
       |   For example \`map<integer>: string>\`
       |   Use backticks for special characters.
@@ -384,9 +384,9 @@ describe('Type Parser Tests', () => {
     expect(() => parseType('integer | ')).toThrowErrorMatchingInlineSnapshot(`
       "
       Invalid type
-      |   integer | 
+      |   integer |
       |             ^
-      |   
+      |
       |   Unexpected end of input
       "
     `);
@@ -399,7 +399,7 @@ describe('Type Parser Tests', () => {
       Invalid type
       |   (integer | boolean
       |   ^
-      |   
+      |
       |   Syntax error. The type was not recognized.
       "
     `);
@@ -412,7 +412,7 @@ describe('Type Parser Tests', () => {
       Invalid type
       |   integer & | boolean
       |             ^
-      |   
+      |
       |   Expected type
       "
     `);
@@ -425,7 +425,7 @@ describe('Type Parser Tests', () => {
       Invalid type
       |   list<integer^2x>
       |                  ^
-      |   
+      |
       |   Expected a positive integer literal or \`?\`.
       |   For example : \`matrix<integer^2x3>\` or \`matrix<integer^?x?>\`
       "
@@ -439,7 +439,7 @@ describe('Type Parser Tests', () => {
       Invalid type
       |   z: ...string -> boolean
       |   ^
-      |   
+      |
       |   Named arguments must be enclosed in parentheses
       "
     `);
@@ -452,7 +452,7 @@ describe('Type Parser Tests', () => {
       Invalid type
       |   z: string -> boolean
       |    ^
-      |   
+      |
       |   Unknown keyword "z"
       |   Did you mean "any"?
       "
@@ -464,9 +464,9 @@ describe('Type Parser Tests', () => {
       .toThrowErrorMatchingInlineSnapshot(`
       "
       Invalid type
-      |   (x: integer) -> 
+      |   (x: integer) ->
       |                   ^
-      |   
+      |
       |   Expected a return type.
       |   Use \`any\` for any type, \`nothing\` for no return value, or \`never\` for a function that never returns
       "
@@ -480,7 +480,7 @@ describe('Type Parser Tests', () => {
       Invalid type
       |   tuple<integer, boolean, >
       |                          ^
-      |   
+      |
       |   Expected a type or unexpected comma
       "
     `);
@@ -494,7 +494,7 @@ describe('Type Parser Tests', () => {
       Invalid type
       |   (x: integer, y: ...boolean, z: ...string) -> boolean
       |                             ^
-      |   
+      |
       |   The rest argument must have a valid type
       "
     `);

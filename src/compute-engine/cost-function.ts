@@ -1,5 +1,5 @@
-import type { BoxedExpression } from './public';
-import type { NumericValue } from './numeric-value/public.js';
+import type { BoxedExpression } from './public.ts';
+import type { NumericValue } from './numeric-value/public.ts';
 
 /**
  * The Cost Function is used to select the simplest between two expressions:

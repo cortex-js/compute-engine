@@ -1,5 +1,5 @@
-import { Buffer } from './buffer';
-import { StyledBlock, StyledSpan } from './styled-text';
+import { Buffer } from './buffer.ts';
+import { StyledBlock, StyledSpan } from './styled-text.ts';
 
 export type CodeTag =
   /** Plain text in default foreground/background color */

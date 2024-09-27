@@ -1,4 +1,4 @@
-import { latex, check, engine } from '../../utils';
+import { latex, check, engine } from '../../utils.ts';
 
 describe('MATCHFIX', () => {
   test('\\lbrack\\rbrack', () =>

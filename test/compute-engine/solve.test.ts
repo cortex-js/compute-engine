@@ -1,4 +1,4 @@
-import { engine } from '../utils';
+import { engine } from '../utils.ts';
 
 function expr(s: string) {
   return engine.parse(s);

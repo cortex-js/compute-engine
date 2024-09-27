@@ -1,4 +1,4 @@
-import { engine } from '../utils';
+import { engine } from '../utils.ts';
 
 describe('TRIGONOMETRY constructible values', () => {
   for (const h of ['Sin', 'Cos', 'Tan', 'Csc', 'Sec', 'Cot']) {

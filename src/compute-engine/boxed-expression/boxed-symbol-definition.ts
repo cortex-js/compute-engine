@@ -9,14 +9,14 @@ import type {
   LatexString,
   Sign,
   CollectionHandlers,
-} from './public';
-import { _BoxedExpression } from './abstract-boxed-expression';
-import { isLatexString, normalizeFlags } from './utils';
-import { Type } from '../../common/type/types';
-import { parseType } from '../../common/type/parse';
-import { isSubtype } from '../../common/type/subtype';
-import { isValidType, widen } from '../../common/type/utils';
-import { defaultCollectionHandlers } from '../collection-utils';
+} from './public.ts';
+import { _BoxedExpression } from './abstract-boxed-expression.ts';
+import { isLatexString, normalizeFlags } from './utils.ts';
+import { Type } from '../../common/type/types.ts';
+import { parseType } from '../../common/type/parse.ts';
+import { isSubtype } from '../../common/type/subtype.ts';
+import { isValidType, widen } from '../../common/type/utils.ts';
+import { defaultCollectionHandlers } from '../collection-utils.ts';
 
 /**
  * ### THEORY OF OPERATIONS

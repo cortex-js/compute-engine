@@ -1,4 +1,4 @@
-import type { PrimitiveType } from './types';
+import type { PrimitiveType } from './types.ts';
 
 export const NUMERIC_TYPES: PrimitiveType[] = [
   'number',

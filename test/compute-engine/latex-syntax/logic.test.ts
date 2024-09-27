@@ -1,4 +1,4 @@
-import { engine as ce } from '../../utils';
+import { engine as ce } from '../../utils.ts';
 
 describe('Logic', () => {
   it('should parse True and False', () => {

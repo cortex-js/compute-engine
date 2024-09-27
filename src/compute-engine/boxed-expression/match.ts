@@ -2,13 +2,13 @@ import type {
   BoxedSubstitution,
   PatternMatchOptions,
   BoxedExpression,
-} from './public';
+} from './public.ts';
 
-import { permutations } from '../../common/utils';
+import { permutations } from '../../common/utils.ts';
 
-import { _BoxedExpression } from './abstract-boxed-expression';
+import { _BoxedExpression } from './abstract-boxed-expression.ts';
 
-import { isWildcard, wildcardName } from './boxed-patterns';
+import { isWildcard, wildcardName } from './boxed-patterns.ts';
 
 function hasWildcards(expr: string | BoxedExpression): boolean {
   if (typeof expr === 'string') return expr.startsWith('_');

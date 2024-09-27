@@ -1,4 +1,4 @@
-import { LatexDictionary, SymbolEntry } from '../public';
+import { LatexDictionary, SymbolEntry } from '../public.ts';
 
 // From mathlab: https://www.mathworks.com/help/symbolic/add-subscripts-superscripts-accents-to-symbolic-variables.html
 // subscript: '_'

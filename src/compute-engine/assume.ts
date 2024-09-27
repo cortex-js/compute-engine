@@ -1,10 +1,10 @@
-import { AssumeResult, BoxedExpression, IComputeEngine } from './public';
+import { AssumeResult, BoxedExpression, IComputeEngine } from './public.ts';
 
-import { isSubtype } from '../common/type/subtype';
-import { functionResult } from '../common/type/utils';
+import { isSubtype } from '../common/type/subtype.ts';
+import { functionResult } from '../common/type/utils.ts';
 
-import { findUnivariateRoots } from './boxed-expression/solve';
-import { isInequality, domainToType } from './boxed-expression/utils';
+import { findUnivariateRoots } from './boxed-expression/solve.ts';
+import { isInequality, domainToType } from './boxed-expression/utils.ts';
 
 /**
  * Add an assumption, in the form of a predicate, for example:

@@ -1,4 +1,4 @@
-import type { BoxedExpression } from '../public';
+import type { BoxedExpression } from '../public.ts';
 
 function distribute2(
   lhs: BoxedExpression,

@@ -1,5 +1,5 @@
-import { Expression } from '../../src/math-json/types.ts';
-import { engine as ce } from '../utils';
+import { Expression } from '../../src/math-json/types.ts.ts';
+import { engine as ce } from '../utils.ts';
 
 const v2_n: Expression = ['List', 7, 11];
 

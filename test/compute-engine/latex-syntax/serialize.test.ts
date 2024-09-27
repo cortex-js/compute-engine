@@ -1,4 +1,4 @@
-import { engine as ce, latex } from '../../utils';
+import { engine as ce, latex } from '../../utils.ts';
 
 describe('LATEX SERIALIZING', () => {
   test('Numbers', () => {

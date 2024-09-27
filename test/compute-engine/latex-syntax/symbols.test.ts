@@ -1,5 +1,5 @@
-import { validateIdentifier } from '../../../src/math-json/identifiers';
-import { engine as ce, exprToString, latex } from '../../utils';
+import { validateIdentifier } from '../../../src/math-json/identifiers.ts';
+import { engine as ce, exprToString, latex } from '../../utils.ts';
 
 function box(expr) {
   return exprToString(ce.box(expr));

@@ -1,4 +1,4 @@
-import { checkJson, engine } from '../utils';
+import { checkJson, engine } from '../utils.ts';
 
 function checkExpand(s: string): string {
   return checkJson(

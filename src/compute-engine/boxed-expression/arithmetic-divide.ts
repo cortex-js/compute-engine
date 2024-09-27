@@ -1,10 +1,10 @@
-import type { BoxedExpression } from '../public';
-import { bigint } from '../numerics/bigint';
+import type { BoxedExpression } from '../public.ts';
+import { bigint } from '../numerics/bigint.ts';
 
-import { asSmallInteger } from './numerics';
-import { canonicalMultiply } from './arithmetic-multiply';
-import { Product } from './product';
-import { isSubtype } from '../../common/type/subtype';
+import { asSmallInteger } from './numerics.ts';
+import { canonicalMultiply } from './arithmetic-multiply.ts';
+import { Product } from './product.ts';
+import { isSubtype } from '../../common/type/subtype.ts';
 
 /**
  * Canonical form of 'Divide' (and 'Rational')

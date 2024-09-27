@@ -1,6 +1,6 @@
-import { BoxedExpression } from '../../src/compute-engine.ts';
-import { Expression } from '../../src/math-json/types.ts';
-import { engine as ce } from '../utils';
+import { BoxedExpression } from '../../src/compute-engine.ts.ts';
+import { Expression } from '../../src/math-json/types.ts.ts';
+import { engine as ce } from '../utils.ts';
 
 describe('BOXING OF NUMBER', () => {
   test('Boxing numbers including whitespace', () => {

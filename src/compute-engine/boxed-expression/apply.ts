@@ -1,9 +1,9 @@
 import { Complex } from 'complex-esm';
 import { Decimal } from 'decimal.js';
 
-import type { BoxedExpression } from '../public';
+import type { BoxedExpression } from '../public.ts';
 
-import { bignumPreferred } from './utils';
+import { bignumPreferred } from './utils.ts';
 
 export function apply(
   expr: BoxedExpression,

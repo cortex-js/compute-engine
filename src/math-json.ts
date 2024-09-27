@@ -14,7 +14,7 @@ export type {
   MathJsonString,
   MathJsonFunction,
   MathJsonIdentifier,
-} from './math-json/types';
+} from './math-json/types.ts';
 
 export {
   isSymbolObject,
@@ -26,6 +26,6 @@ export {
   symbol,
   mapArgs,
   dictionary as getDictionary,
-} from './math-json/utils';
+} from './math-json/utils.ts';
 
 export const version = '{{SDK_VERSION}}';

@@ -1,5 +1,5 @@
-import { Expression } from '../../src/math-json/types';
-import { engine, exprToString } from '../utils';
+import { Expression } from '../../src/math-json/types.ts';
+import { engine, exprToString } from '../utils.ts';
 
 function evaluate(expr: Expression) {
   return exprToString(engine.box(expr)?.evaluate());

@@ -1,5 +1,5 @@
-import { codePointLength, REVERSE_FANCY_UNICODE } from './characters';
-import { Combinator, Parser, DiagnosticMessage, Result } from './parsers';
+import { codePointLength, REVERSE_FANCY_UNICODE } from './characters.ts';
+import { Combinator, Parser, DiagnosticMessage, Result } from './parsers.ts';
 
 // export function normalize(
 //   value: number | string | RegExp | Combinator<string>

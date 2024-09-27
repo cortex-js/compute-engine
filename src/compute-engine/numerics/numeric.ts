@@ -1,5 +1,5 @@
-import { extrapolate } from './richardson';
-import { primeFactors } from './primes';
+import { extrapolate } from './richardson.ts';
+import { primeFactors } from './primes.ts';
 
 // Number of significant digits for Decimal
 // The Decimal implementation groups digits by 7
@@ -138,7 +138,7 @@ export function gcd(a: number, b: number): number {
   while (b !== 0) [a, b] = [b, a % b];
   return a < 0 ? -a : a;
 }
-/* 
+/*
   Consider implementing a Binary GCD algorithm.
   Performance is not necessarily better, so benchmark before adopting.
 

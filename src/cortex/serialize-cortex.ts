@@ -8,30 +8,30 @@ import {
   symbol,
   isNumberObject,
   mapArgs,
-} from '../math-json/utils';
-import { splitGraphemes } from '../common/grapheme-splitter';
+} from '../math-json/utils.ts';
+import { splitGraphemes } from '../common/grapheme-splitter.ts';
 import {
   COMPARISON_PRECEDENCE,
   NumberSerializationFormat,
-} from '../compute-engine/latex-syntax/public';
-import { Expression } from '../math-json/types';
+} from '../compute-engine/latex-syntax/public.ts';
+import { Expression } from '../math-json/types.ts';
 import {
   serializeHexFloat,
   serializeNumber,
-} from '../compute-engine/latex-syntax/serialize-number';
+} from '../compute-engine/latex-syntax/serialize-number.ts';
 import {
   EmptyBlock,
   FormattingOptions,
   Formatter,
   FormattingBlock,
-} from './formatter';
+} from './formatter.ts';
 import {
   DIGITS,
   ESCAPED_CHARS,
   isBreak,
   isInvisible,
-} from '../point-free-parser/characters';
-import { RESERVED_WORDS } from './reserved-words';
+} from '../point-free-parser/characters.ts';
+import { RESERVED_WORDS } from './reserved-words.ts';
 
 export const NUMBER_FORMATTING_OPTIONS: NumberSerializationFormat = {
   positiveInfinity: '+Infinity',

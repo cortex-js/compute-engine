@@ -1,6 +1,6 @@
-import { _BoxedExpression } from './abstract-boxed-expression';
-import type { BoxedSymbol } from './boxed-symbol';
-import type { BoxedExpression } from './public';
+import { _BoxedExpression } from './abstract-boxed-expression.ts';
+import type { BoxedSymbol } from './boxed-symbol.ts';
+import type { BoxedExpression } from './public.ts';
 
 export function isWildcard(expr: BoxedExpression): expr is BoxedSymbol {
   return (

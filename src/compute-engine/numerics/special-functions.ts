@@ -1,5 +1,5 @@
-import type { IComputeEngine } from '../../compute-engine'; // @fixme: circular dependency
-import { BigNum } from './bignum';
+import type { IComputeEngine } from '../../compute-engine.ts'; // @fixme: circular dependency
+import { BigNum } from './bignum.ts';
 
 const gammaG = 7;
 const lanczos_7_c = [
@@ -105,12 +105,12 @@ export function erfc(x: number): number {
 /**
  * An approximation of the gaussian error function, Erf(), using
  * Abramowitz and Stegun approximation.
- * 
+ *
  * Thoughts for future improvements:
  * - https://math.stackexchange.com/questions/321569/approximating-the-error-function-erf-by-analytical-functions
  * - https://en.wikipedia.org/wiki/Error_function#Approximation_with_elementary_functions
 
- * 
+ *
  * References:
  * - NIST: https://dlmf.nist.gov/7.24#i
  */

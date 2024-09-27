@@ -1,9 +1,9 @@
-import type { IComputeEngine, BoxedExpression } from '../public';
+import type { IComputeEngine, BoxedExpression } from '../public.ts';
 
-import { flatten } from '../boxed-expression/flatten';
-import { isIndexableCollection } from '../collection-utils';
-import { canonicalMultiply } from '../boxed-expression/arithmetic-multiply';
-import { isSubtype } from '../../common/type/subtype';
+import { flatten } from '../boxed-expression/flatten.ts';
+import { isIndexableCollection } from '../collection-utils.ts';
+import { canonicalMultiply } from '../boxed-expression/arithmetic-multiply.ts';
+import { isSubtype } from '../../common/type/subtype.ts';
 
 export function canonicalInvisibleOperator(
   ops: ReadonlyArray<BoxedExpression>,

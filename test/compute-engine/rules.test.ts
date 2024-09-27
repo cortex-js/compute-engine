@@ -1,4 +1,4 @@
-import { engine as ce } from '../utils';
+import { engine as ce } from '../utils.ts';
 
 describe('RULES', () => {
   it('should handle rule with match and replace as expressions', () => {

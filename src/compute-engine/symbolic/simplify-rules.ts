@@ -2,18 +2,18 @@ import {
   constructibleValues,
   isConstructible,
   processInverseFunction,
-} from '../boxed-expression/trigonometry';
-import { mul } from '../boxed-expression/arithmetic-multiply';
-import { simplifyLogicFunction } from '../library/logic';
-import { BoxedExpression, Rule, RuleStep } from '../public';
-import { expand } from '../boxed-expression/expand';
+} from '../boxed-expression/trigonometry.ts';
+import { mul } from '../boxed-expression/arithmetic-multiply.ts';
+import { simplifyLogicFunction } from '../library/logic.ts';
+import { BoxedExpression, Rule, RuleStep } from '../public.ts';
+import { expand } from '../boxed-expression/expand.ts';
 import {
   isEquation,
   isInequality,
   isRelationalOperator,
-} from '../boxed-expression/utils';
-import { factor } from '../boxed-expression/factor';
-import { add } from '../boxed-expression/arithmetic-add';
+} from '../boxed-expression/utils.ts';
+import { factor } from '../boxed-expression/factor.ts';
+import { add } from '../boxed-expression/arithmetic-add.ts';
 
 /**
  * @todo: a set to "tidy" an expression. Different from a canonical form, but

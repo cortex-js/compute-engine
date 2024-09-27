@@ -1,65 +1,65 @@
 import { Decimal } from 'decimal.js';
 
-import type { IdentifierDefinitions, Sign } from '../public';
+import type { IdentifierDefinitions, Sign } from '../public.ts';
 
 import {
   checkType,
   checkTypes,
   checkNumericArgs,
-} from '../boxed-expression/validate';
-import { IComputeEngine, BoxedExpression } from '../boxed-expression/public';
-import { bignumPreferred, canonical } from '../boxed-expression/utils';
+} from '../boxed-expression/validate.ts';
+import { IComputeEngine, BoxedExpression } from '../boxed-expression/public.ts';
+import { bignumPreferred, canonical } from '../boxed-expression/utils.ts';
 import {
   asSmallInteger,
   asRational,
   asBignum,
   asBigint,
-} from '../boxed-expression/numerics';
-import { addOrder } from '../boxed-expression/order';
+} from '../boxed-expression/numerics.ts';
+import { addOrder } from '../boxed-expression/order.ts';
 
-import { apply, apply2 } from '../boxed-expression/apply';
-import { flatten } from '../boxed-expression/flatten';
+import { apply, apply2 } from '../boxed-expression/apply.ts';
+import { flatten } from '../boxed-expression/flatten.ts';
 
 import {
   gamma as gammaComplex,
   gammaln as lngammaComplex,
-} from '../numerics/numeric-complex';
+} from '../numerics/numeric-complex.ts';
 import {
   factorial as bigFactorial,
   factorial2 as bigFactorial2,
   gcd as bigGcd,
   lcm as bigLcm,
-} from '../numerics/numeric-bignum';
+} from '../numerics/numeric-bignum.ts';
 import {
   gamma,
   gammaln,
   bigGamma,
   bigGammaln,
-} from '../numerics/special-functions';
-import { factorial, factorial2, gcd, lcm } from '../numerics/numeric';
-import { rationalize } from '../numerics/rationals';
-import { isPrime as isPrimeMachine, isPrimeBigint } from '../numerics/primes';
-import { fromDigits } from '../numerics/strings';
+} from '../numerics/special-functions.ts';
+import { factorial, factorial2, gcd, lcm } from '../numerics/numeric.ts';
+import { rationalize } from '../numerics/rationals.ts';
+import { isPrime as isPrimeMachine, isPrimeBigint } from '../numerics/primes.ts';
+import { fromDigits } from '../numerics/strings.ts';
 
-import { each } from '../collection-utils';
+import { each } from '../collection-utils.ts';
 
 import {
   canonicalAdd,
   add,
   addType,
   addN,
-} from '../boxed-expression/arithmetic-add';
-import { mul, mulN } from '../boxed-expression/arithmetic-multiply';
-import { canonicalDivide } from '../boxed-expression/arithmetic-divide';
-import { canonicalBigop, reduceBigOp } from './utils';
+} from '../boxed-expression/arithmetic-add.ts';
+import { mul, mulN } from '../boxed-expression/arithmetic-multiply.ts';
+import { canonicalDivide } from '../boxed-expression/arithmetic-divide.ts';
+import { canonicalBigop, reduceBigOp } from './utils.ts';
 import {
   canonicalPower,
   canonicalRoot,
   pow,
-} from '../boxed-expression/arithmetic-power';
-import { parseType } from '../../common/type/parse';
-import { isSubtype } from '../../common/type/subtype';
-import { range, rangeLast } from './collections';
+} from '../boxed-expression/arithmetic-power.ts';
+import { parseType } from '../../common/type/parse.ts';
+import { isSubtype } from '../../common/type/subtype.ts';
+import { range, rangeLast } from './collections.ts';
 
 // When processing an arithmetic expression, the following are the core
 // canonical arithmetic operations to account for:

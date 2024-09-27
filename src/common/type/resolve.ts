@@ -1,7 +1,7 @@
-import type { Type, TypeResolver } from './types';
-import { reduceType } from './reduce';
-import { makeType } from './utils';
-import { typeToString } from './serialize';
+import type { Type, TypeResolver } from './types.ts';
+import { reduceType } from './reduce.ts';
+import { makeType } from './utils.ts';
+import { typeToString } from './serialize.ts';
 
 function error(type: Type, ...message: string[]): never {
   throw new Error(

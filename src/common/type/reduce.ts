@@ -1,6 +1,6 @@
-import { parseType } from './parse';
-import { typeToString } from './serialize';
-import { isSubtype } from './subtype';
+import { parseType } from './parse.ts';
+import { typeToString } from './serialize.ts';
+import { isSubtype } from './subtype.ts';
 import {
   Type,
   PrimitiveType,
@@ -12,8 +12,8 @@ import {
   TupleType,
   FunctionSignature,
   NegationType,
-} from './types';
-import { isValidPrimitiveType } from './primitive';
+} from './types.ts';
+import { isValidPrimitiveType } from './primitive.ts';
 
 /**
  * Reduce the input type

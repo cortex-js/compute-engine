@@ -1,4 +1,4 @@
-import { serializeCortex } from '../../src/cortex/serialize-cortex';
+import { serializeCortex } from '../../src/cortex/serialize-cortex.ts';
 
 describe('CORTEX SERIALIZING', () => {
   test('Numbers', () => {

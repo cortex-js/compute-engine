@@ -1,7 +1,7 @@
-import type { BoxedExpression } from '../public';
+import type { BoxedExpression } from '../public.ts';
 
-import { MAX_ITERATION } from '../numerics/numeric';
-import { fromRange, reduceCollection } from './collections';
+import { MAX_ITERATION } from '../numerics/numeric.ts';
+import { fromRange, reduceCollection } from './collections.ts';
 
 export type IndexingSet = {
   index: string | undefined;

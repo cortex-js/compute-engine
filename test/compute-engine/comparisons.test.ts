@@ -1,6 +1,6 @@
-import { ComputeEngine } from '../../src/compute-engine';
-import { Expression } from '../../src/math-json/types';
-import { latex } from '../utils';
+import { ComputeEngine } from '../../src/compute-engine.ts';
+import { Expression } from '../../src/math-json/types.ts';
+import { latex } from '../utils.ts';
 
 export const engine = new ComputeEngine();
 

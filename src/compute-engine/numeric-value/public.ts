@@ -25,9 +25,9 @@
  */
 
 import Decimal from 'decimal.js';
-import { SmallInteger } from '../numerics/numeric';
-import { Rational } from '../numerics/rationals';
-import { NumericType } from '../../common/type/types';
+import { SmallInteger } from '../numerics/numeric.ts';
+import { Rational } from '../numerics/rationals.ts';
+import { NumericType } from '../../common/type/types.ts';
 
 /** The value is equal to `(decimal * rational * sqrt(radical)) + im * i` */
 export type ExactNumericValueData = {

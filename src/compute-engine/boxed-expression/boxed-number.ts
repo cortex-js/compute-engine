@@ -14,45 +14,45 @@ import type {
   CanonicalOptions,
   SimplifyOptions,
   Sign,
-} from '../public';
+} from '../public.ts';
 
-import type { Expression, MathJsonNumber } from '../../math-json';
+import type { Expression, MathJsonNumber } from '../../math-json.ts';
 
-import { div } from './arithmetic-divide';
-import { mul } from './arithmetic-multiply';
+import { div } from './arithmetic-divide.ts';
+import { mul } from './arithmetic-multiply.ts';
 
 import {
   canonicalInteger,
   SMALL_INTEGER,
   SmallInteger,
-} from '../numerics/numeric';
-import { Rational } from '../numerics/rationals';
-import { isInMachineRange } from '../numerics/numeric-bignum';
-import { bigint } from '../numerics/bigint';
+} from '../numerics/numeric.ts';
+import { Rational } from '../numerics/rationals.ts';
+import { isInMachineRange } from '../numerics/numeric-bignum.ts';
+import { bigint } from '../numerics/bigint.ts';
 
 import {
   ExactNumericValueData,
   NumericValue,
   NumericValueData,
-} from '../numeric-value/public';
-import { ExactNumericValue } from '../numeric-value/exact-numeric-value';
+} from '../numeric-value/public.ts';
+import { ExactNumericValue } from '../numeric-value/exact-numeric-value.ts';
 
-import { replace } from './rules';
-import { simplify } from './simplify';
+import { replace } from './rules.ts';
+import { simplify } from './simplify.ts';
 
-import { _BoxedExpression } from './abstract-boxed-expression';
-import { hashCode } from './utils';
-import { match } from './match';
-import { Type } from '../../common/type/types';
-import { add } from './arithmetic-add';
-import { pow } from './arithmetic-power';
-import { isSubtype } from '../../common/type/subtype';
+import { _BoxedExpression } from './abstract-boxed-expression.ts';
+import { hashCode } from './utils.ts';
+import { match } from './match.ts';
+import { Type } from '../../common/type/types.ts';
+import { add } from './arithmetic-add.ts';
+import { pow } from './arithmetic-power.ts';
+import { isSubtype } from '../../common/type/subtype.ts';
 import {
   positiveSign,
   nonNegativeSign,
   negativeSign,
   nonPositiveSign,
-} from './sgn';
+} from './sgn.ts';
 
 /**
  * BoxedNumber

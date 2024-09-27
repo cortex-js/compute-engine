@@ -1,4 +1,4 @@
-import { engine as ce } from '../../utils';
+import { engine as ce } from '../../utils.ts';
 
 describe('WHICH', () => {
   test('Valid forms', () => {

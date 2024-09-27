@@ -1,4 +1,4 @@
-import { BoxedExpression, ComputeEngine } from '../../../src/compute-engine';
+import { BoxedExpression, ComputeEngine } from '../../../src/compute-engine.ts';
 
 export const ce = new ComputeEngine();
 

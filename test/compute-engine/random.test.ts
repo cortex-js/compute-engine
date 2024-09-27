@@ -1,4 +1,4 @@
-import { engine } from '../utils';
+import { engine } from '../utils.ts';
 
 function checkLatexRoundtrip(): string | undefined {
   engine.forget('x');

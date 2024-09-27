@@ -7,7 +7,7 @@
 // Other benchmarks:
 // http://134.155.108.17/cabench/ca-challenge.html
 
-import { ComputeEngine } from '../../../src/compute-engine';
+import { ComputeEngine } from '../../../src/compute-engine.ts';
 
 export const ce = new ComputeEngine();
 

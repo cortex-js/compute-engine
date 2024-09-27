@@ -1,5 +1,5 @@
-import { Expression } from '../../../src/math-json/types.ts';
-import { engine } from '../../utils';
+import { Expression } from '../../../src/math-json/types.ts.ts';
+import { engine } from '../../utils.ts';
 
 function json(latex: string): Expression {
   return engine.parse(latex)?.json ?? '';

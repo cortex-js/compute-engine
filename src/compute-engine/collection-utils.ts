@@ -1,4 +1,4 @@
-import type { BoxedExpression, CollectionHandlers } from './public';
+import type { BoxedExpression, CollectionHandlers } from './public.ts';
 
 /** If a collection has fewer than this many elements, eagerly evaluate it.
  *

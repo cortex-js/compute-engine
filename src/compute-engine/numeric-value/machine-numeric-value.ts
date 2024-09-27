@@ -1,12 +1,12 @@
 import Decimal from 'decimal.js';
-import { NumericValue, NumericValueData } from './public';
-import type { Expression } from '../../math-json/types';
-import { MACHINE_TOLERANCE, SmallInteger } from '../numerics/numeric';
-import { numberToString } from '../numerics/strings';
-import { numberToExpression } from '../numerics/expression';
-import { NumericType } from '../../common/type/types';
-import { ExactNumericValue } from './exact-numeric-value';
-import { BigNumFactory } from './big-numeric-value';
+import { NumericValue, NumericValueData } from './public.ts';
+import type { Expression } from '../../math-json/types.ts';
+import { MACHINE_TOLERANCE, SmallInteger } from '../numerics/numeric.ts';
+import { numberToString } from '../numerics/strings.ts';
+import { numberToExpression } from '../numerics/expression.ts';
+import { NumericType } from '../../common/type/types.ts';
+import { ExactNumericValue } from './exact-numeric-value.ts';
+import { BigNumFactory } from './big-numeric-value.ts';
 
 export class MachineNumericValue extends NumericValue {
   __brand: 'MachineNumericValue';

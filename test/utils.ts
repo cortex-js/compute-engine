@@ -1,9 +1,9 @@
-import { Expression } from '../src/math-json/types';
-import { ParsingDiagnostic } from '../src/point-free-parser/parsers';
-import { ComputeEngine, SemiBoxedExpression } from '../src/compute-engine';
+import { Expression } from '../src/math-json/types.ts';
+import { ParsingDiagnostic } from '../src/point-free-parser/parsers.ts';
+import { ComputeEngine, SemiBoxedExpression } from '../src/compute-engine.ts';
 
-import { parseCortex } from '../src/cortex';
-import { _BoxedExpression } from '../src/compute-engine/boxed-expression/abstract-boxed-expression';
+import { parseCortex } from '../src/cortex.ts';
+import { _BoxedExpression } from '../src/compute-engine/boxed-expression/abstract-boxed-expression.ts';
 
 const MAX_LINE_LENGTH = 72;
 

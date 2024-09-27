@@ -1,4 +1,4 @@
-import { engine, check } from '../utils';
+import { engine, check } from '../utils.ts';
 
 function N(s: string) {
   return engine.parse(s).N();

@@ -1,16 +1,16 @@
 import { Complex } from 'complex-esm';
 import { Decimal } from 'decimal.js';
 
-import type { Expression } from '../../math-json/types';
+import type { Expression } from '../../math-json/types.ts';
 
 import type {
   BoxedExpression,
   IComputeEngine,
   JsonSerializationOptions,
   Metadata,
-} from '../public';
+} from '../public.ts';
 
-import { isInMachineRange } from '../numerics/numeric-bignum';
+import { isInMachineRange } from '../numerics/numeric-bignum.ts';
 import {
   Rational,
   isInteger,
@@ -21,19 +21,19 @@ import {
   machineDenominator,
   machineNumerator,
   neg,
-} from '../numerics/rationals';
-import { numberToString } from '../numerics/strings';
-import { numberToExpression } from '../numerics/expression';
+} from '../numerics/rationals.ts';
+import { numberToString } from '../numerics/strings.ts';
+import { numberToExpression } from '../numerics/expression.ts';
 
-import { NumericValue } from '../numeric-value/public';
-import { ExactNumericValue } from '../numeric-value/exact-numeric-value';
+import { NumericValue } from '../numeric-value/public.ts';
+import { ExactNumericValue } from '../numeric-value/exact-numeric-value.ts';
 
 // eslint-disable-next-line import/no-cycle
-import { Product } from './product';
+import { Product } from './product.ts';
 
-import { order } from './order';
-import { asSmallInteger } from './numerics';
-import { isSubtype } from '../../common/type/subtype';
+import { order } from './order.ts';
+import { asSmallInteger } from './numerics.ts';
+import { isSubtype } from '../../common/type/subtype.ts';
 
 function _escapeJsonString(s: undefined): undefined;
 function _escapeJsonString(s: string): string;

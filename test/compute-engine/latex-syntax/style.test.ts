@@ -1,4 +1,4 @@
-import { check } from '../../utils';
+import { check } from '../../utils.ts';
 
 describe('STYLE - MATH MODE', () => {
   test('\\textcolor', () => {

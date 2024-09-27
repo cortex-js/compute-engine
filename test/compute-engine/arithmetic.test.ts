@@ -1,4 +1,4 @@
-import { check, checkJson, engine } from '../utils';
+import { check, checkJson, engine } from '../utils.ts';
 
 const ce = engine;
 

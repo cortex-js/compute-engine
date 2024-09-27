@@ -1,5 +1,5 @@
-import { Expression } from '../../../src/math-json/types.ts';
-import { engine, exprToString } from '../../utils';
+import { Expression } from '../../../src/math-json/types.ts.ts';
+import { engine, exprToString } from '../../utils.ts';
 
 function check(arg: string | Expression): string {
   const boxed =

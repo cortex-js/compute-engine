@@ -1,4 +1,4 @@
-import { engine as ce } from '../utils';
+import { engine as ce } from '../utils.ts';
 
 function box(expr: any) {
   return ce.box(expr).evaluate().toString();

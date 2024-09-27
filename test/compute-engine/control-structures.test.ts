@@ -1,4 +1,4 @@
-import { engine as ce } from '../utils';
+import { engine as ce } from '../utils.ts';
 describe('CONTROL STRUCTURES', () => {
   describe('Block', () => {
     it('should evaluate a block wiht a single expression', () => {

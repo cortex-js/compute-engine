@@ -3,9 +3,9 @@ import {
   isIdentifierStartProhibited,
   isBreak,
   isLinebreak,
-} from './characters';
-import { Parser, Result } from './parsers';
-import { parseEscapeSequence } from './string-parsers';
+} from './characters.ts';
+import { Parser, Result } from './parsers.ts';
+import { parseEscapeSequence } from './string-parsers.ts';
 
 export function parseIdentifier(parser: Parser): Result<string> {
   const result = parseVerbatimIdentifier(parser);

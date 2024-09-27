@@ -1,5 +1,5 @@
-import type { BoxedExpression } from '../../../src/compute-engine/public';
-import { benchmark, engine } from '../../utils';
+import type { BoxedExpression } from '../../../src/compute-engine/public.ts';
+import { benchmark, engine } from '../../utils.ts';
 
 //
 // Expand Benchmark

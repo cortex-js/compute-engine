@@ -1,4 +1,4 @@
-import { engine } from '../utils';
+import { engine } from '../utils.ts';
 
 describe('IS_CONSTANT', () => {
   it('should return true for number literals', () => {

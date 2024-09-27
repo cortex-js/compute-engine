@@ -1,5 +1,5 @@
-import { ansiFgColor, ansiBgColor, BOLD, BOLD_OFF, DIM } from './ansi-codes';
-import { StyledBlock, StyledSpan } from './styled-text';
+import { ansiFgColor, ansiBgColor, BOLD, BOLD_OFF, DIM } from './ansi-codes.ts';
+import { StyledBlock, StyledSpan } from './styled-text.ts';
 
 type TerminalCapabilities = 'none' | 'basic' | '256' | 'full' | 'css';
 

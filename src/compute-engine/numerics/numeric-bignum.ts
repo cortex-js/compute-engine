@@ -1,4 +1,4 @@
-import { BigNum, IBigNum } from './bignum';
+import { BigNum, IBigNum } from './bignum.ts';
 
 export function gcd(a: BigNum, b: BigNum): BigNum {
   //@todo: https://github.com/Yaffle/bigint-gcd/blob/main/gcd.js

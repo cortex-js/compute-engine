@@ -1,4 +1,4 @@
-import { ComputeEngine } from '../../src/compute-engine';
+import { ComputeEngine } from '../../src/compute-engine.ts';
 
 export const ce = new ComputeEngine();
 

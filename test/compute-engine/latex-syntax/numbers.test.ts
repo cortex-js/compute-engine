@@ -1,5 +1,5 @@
-import { SerializeLatexOptions } from '../../../src/compute-engine/latex-syntax/public.ts';
-import { exprToString, engine as ce } from '../../utils';
+import { SerializeLatexOptions } from '../../../src/compute-engine/latex-syntax/public.ts.ts';
+import { exprToString, engine as ce } from '../../utils.ts';
 
 function parse(s: string) {
   return ce.parse(s);
