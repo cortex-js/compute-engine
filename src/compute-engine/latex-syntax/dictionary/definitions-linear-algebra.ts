@@ -1,8 +1,8 @@
-import { Expression } from '../../../math-json';
-import { stringValue, operands, operand } from '../../../math-json/utils';
-import { LatexDictionary, Parser, Serializer } from '../public';
-import { joinLatex } from '../tokenizer';
-import { DELIMITERS_SHORTHAND } from './definitions-core';
+import { Expression } from '../../../math-json.ts';
+import { stringValue, operands, operand } from '../../../math-json/utils.ts';
+import { LatexDictionary, Parser, Serializer } from '../public.ts';
+import { joinLatex } from '../tokenizer.ts';
+import { DELIMITERS_SHORTHAND } from './definitions-core.ts';
 
 export const DEFINITIONS_LINEAR_ALGEBRA: LatexDictionary = [
   // The first argument is the matrix data.

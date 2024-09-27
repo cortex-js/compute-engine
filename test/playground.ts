@@ -1,7 +1,74 @@
-import { ComputeEngine } from '../src/compute-engine';
+import { BoxedExpression, ComputeEngine } from '../src/compute-engine';
 
 const ce = new ComputeEngine();
 const engine = ce;
+
+function checkAnswer(
+  numbers: number[],
+  target: number,
+  answer: BoxedExpression
+): string {
+  // First check that the value of the expression is correct
+  const value = answer.value;
+  if (value !== target) return `The value ${value} is not what is expected.`;
+
+  // Count each operator
+  let addCount = 0;
+  let multiplyCount = 0;
+  let divideCount = 0;
+  let subtractCount = 0;
+  let otherCount = 0;
+
+  // ... and check that the numbers used are the ones provided
+  let numbersUsed: number[] = [];
+
+  const visit: (node: BoxedExpression) => void = (node) => {
+    if (node.isNumberLiteral) {
+      if (numbersUsed.includes(node.value as number))
+        return 'The answer should not contain any numbers more than once.';
+      if (numbers.includes(node.value as number))
+        numbersUsed.push(node.value as number);
+      else return 'The answer should only contain the numbers provided.';
+    }
+    if (node.symbol) return 'The answer should not contain any symbols.';
+    if (node.operator) {
+      switch (node.operator) {
+        case 'Add':
+          addCount++;
+          break;
+        case 'Multiply':
+          multiplyCount++;
+          break;
+        case 'Divide':
+          divideCount++;
+          break;
+        case 'Subtract':
+          subtractCount++;
+          break;
+        default:
+          otherCount++;
+      }
+      node.ops!.forEach(visit);
+    }
+  };
+
+  visit(answer);
+
+  if (addCount !== 1) return 'The answer should contain exactly one addition.';
+  if (multiplyCount !== 1)
+    return 'The answer should contain exactly one multiplication.';
+  if (divideCount !== 1)
+    return 'The answer should contain exactly one division.';
+  if (subtractCount !== 1)
+    return 'The answer should contain exactly one subtraction.';
+  if (otherCount !== 0)
+    return 'The answer should only contain additions, multiplications, subtractions and divisions.';
+
+  if (numbersUsed.length !== numbers.length)
+    return 'The answer should contain all the numbers provided.';
+
+  return 'correct';
+}
 
 // 3^{-2} gets calculated because canonicalDivide calls toNumericValue, which
 // does simplify the expression, i.e. "(3x)^2" -> "9x^2". That's a bit

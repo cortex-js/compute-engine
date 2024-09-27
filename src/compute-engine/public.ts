@@ -13,14 +13,14 @@
  *
  */
 
-import type { OneOf } from '../common/one-of';
+import type { OneOf } from '../common/one-of.ts';
 import type {
   FunctionDefinition,
   SemiBoxedExpression,
   SymbolDefinition,
-} from './boxed-expression/public';
+} from './boxed-expression/public.ts';
 
-export * from './boxed-expression/public';
+export * from './boxed-expression/public.ts';
 
 /**
  * A table mapping identifiers to their definition.

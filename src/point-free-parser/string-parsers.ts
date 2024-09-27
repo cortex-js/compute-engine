@@ -3,9 +3,9 @@ import {
   HEX_DIGITS,
   isLinebreak,
   isInlineSpace,
-} from './characters';
-import { Parser, Result } from './parsers';
-import { skipInlineSpaces, skipLinebreak } from './whitespace-parsers';
+} from './characters.ts';
+import { Parser, Result } from './parsers.ts';
+import { skipInlineSpaces, skipLinebreak } from './whitespace-parsers.ts';
 
 /** Parse an escape sequence such as `\n` or `\u0041`*/
 export function parseEscapeSequence(parser: Parser): Result<string> {

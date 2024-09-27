@@ -1,11 +1,11 @@
-import type { BoxedExpression, IdentifierDefinitions } from '../public';
+import type { BoxedExpression, IdentifierDefinitions } from '../public.ts';
 
-import { checkType } from '../boxed-expression/validate';
+import { checkType } from '../boxed-expression/validate.ts';
 
-import { applicable, applicableN1 } from '../function-utils';
-import { monteCarloEstimate } from '../numerics/monte-carlo';
-import { centeredDiff8thOrder, limit } from '../numerics/numeric';
-import { derivative, differentiate } from '../symbolic/derivative';
+import { applicable, applicableN1 } from '../function-utils.ts';
+import { monteCarloEstimate } from '../numerics/monte-carlo.ts';
+import { centeredDiff8thOrder, limit } from '../numerics/numeric.ts';
+import { derivative, differentiate } from '../symbolic/derivative.ts';
 
 export const CALCULUS_LIBRARY: IdentifierDefinitions[] = [
   {

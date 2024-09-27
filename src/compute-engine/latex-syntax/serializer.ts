@@ -1,4 +1,4 @@
-import type { Expression } from '../../math-json/types';
+import type { Expression } from '../../math-json/types.ts';
 import {
   nops,
   stringValue,
@@ -9,25 +9,25 @@ import {
   operands,
   isNumberExpression,
   machineValue,
-} from '../../math-json/utils';
+} from '../../math-json/utils.ts';
 
 import {
   LatexString,
   SerializeLatexOptions,
   DelimiterScale,
   ADDITION_PRECEDENCE,
-} from './public';
+} from './public.ts';
 
 import type {
   IndexedLatexDictionary,
   IndexedLatexDictionaryEntry,
-} from './dictionary/definitions';
+} from './dictionary/definitions.ts';
 
-import { countTokens, supsub } from './tokenizer';
-import { serializeNumber } from './serialize-number';
-import { SYMBOLS } from './dictionary/definitions-symbols';
-import { DELIMITERS_SHORTHAND } from './dictionary/definitions-core';
-import { EMOJIS } from '../../math-json/identifiers';
+import { countTokens, supsub } from './tokenizer.ts';
+import { serializeNumber } from './serialize-number.ts';
+import { SYMBOLS } from './dictionary/definitions-symbols.ts';
+import { DELIMITERS_SHORTHAND } from './dictionary/definitions-core.ts';
+import { EMOJIS } from '../../math-json/identifiers.ts';
 
 const ACCENT_MODIFIERS = {
   deg: (s: string) => `${s}\\degree`,

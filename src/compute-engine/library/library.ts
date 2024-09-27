@@ -1,31 +1,31 @@
-import { ARITHMETIC_LIBRARY } from './arithmetic';
-import { CALCULUS_LIBRARY } from './calculus';
-import { COLLECTIONS_LIBRARY } from './collections';
-import { CONTROL_STRUCTURES_LIBRARY } from './control-structures';
-import { COMPLEX_LIBRARY } from './complex';
-import { CORE_LIBRARY } from './core';
-import { LINEAR_ALGEBRA_LIBRARY } from './linear-algebra';
-import { LOGIC_LIBRARY } from './logic';
-import { POLYNOMIALS_LIBRARY } from './polynomials';
-import { RELOP_LIBRARY } from './relational-operator';
-import { SETS_LIBRARY } from './sets';
-import { STATISTICS_LIBRARY } from './statistics';
-import { TRIGONOMETRY_LIBRARY } from './trigonometry';
+import { ARITHMETIC_LIBRARY } from './arithmetic.ts';
+import { CALCULUS_LIBRARY } from './calculus.ts';
+import { COLLECTIONS_LIBRARY } from './collections.ts';
+import { CONTROL_STRUCTURES_LIBRARY } from './control-structures.ts';
+import { COMPLEX_LIBRARY } from './complex.ts';
+import { CORE_LIBRARY } from './core.ts';
+import { LINEAR_ALGEBRA_LIBRARY } from './linear-algebra.ts';
+import { LOGIC_LIBRARY } from './logic.ts';
+import { POLYNOMIALS_LIBRARY } from './polynomials.ts';
+import { RELOP_LIBRARY } from './relational-operator.ts';
+import { SETS_LIBRARY } from './sets.ts';
+import { STATISTICS_LIBRARY } from './statistics.ts';
+import { TRIGONOMETRY_LIBRARY } from './trigonometry.ts';
 
-import { LibraryCategory } from '../latex-syntax/public';
+import { LibraryCategory } from '../latex-syntax/public.ts';
 
-import { IComputeEngine, IdentifierDefinitions } from '../public';
-import { _BoxedSymbolDefinition } from '../boxed-expression/boxed-symbol-definition';
-import { makeFunctionDefinition } from '../boxed-expression/boxed-function-definition';
-import { _BoxedExpression } from '../boxed-expression/abstract-boxed-expression';
+import { IComputeEngine, IdentifierDefinitions } from '../public.ts';
+import { _BoxedSymbolDefinition } from '../boxed-expression/boxed-symbol-definition.ts';
+import { makeFunctionDefinition } from '../boxed-expression/boxed-function-definition.ts';
+import { _BoxedExpression } from '../boxed-expression/abstract-boxed-expression.ts';
 import {
   isValidIdentifier,
   validateIdentifier,
-} from '../../math-json/identifiers';
+} from '../../math-json/identifiers.ts';
 import {
   isFunctionDefinition,
   isSymbolDefinition,
-} from '../boxed-expression/utils';
+} from '../boxed-expression/utils.ts';
 
 export function getStandardLibrary(
   categories: LibraryCategory[] | LibraryCategory | 'all'

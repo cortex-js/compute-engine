@@ -1,13 +1,13 @@
-import type { BoxedExpression, IComputeEngine } from '../public';
-import { getImaginaryFactor } from './utils';
-import { isIndexableCollection } from '../collection-utils';
+import type { BoxedExpression, IComputeEngine } from '../public.ts';
+import { getImaginaryFactor } from './utils.ts';
+import { isIndexableCollection } from '../collection-utils.ts';
 
-import { flatten } from './flatten';
-import { addOrder } from './order';
-import { Terms } from './terms';
-import { Type } from '../../common/type/types';
-import { widen } from '../../common/type/utils';
-import { isSubtype } from '../../common/type/subtype';
+import { flatten } from './flatten.ts';
+import { addOrder } from './order.ts';
+import { Terms } from './terms.ts';
+import { Type } from '../../common/type/types.ts';
+import { widen } from '../../common/type/utils.ts';
+import { isSubtype } from '../../common/type/subtype.ts';
 
 /**
  *

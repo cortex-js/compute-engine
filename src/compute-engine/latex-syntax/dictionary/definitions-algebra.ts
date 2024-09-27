@@ -1,4 +1,4 @@
-import { LatexDictionary } from '../public';
+import { LatexDictionary } from '../public.ts';
 
 export const DEFINITIONS_ALGEBRA: LatexDictionary = [
   {

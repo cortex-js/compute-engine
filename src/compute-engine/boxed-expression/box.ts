@@ -1,4 +1,4 @@
-import Complex from 'complex.js';
+import { Complex } from 'complex-esm';
 import { Decimal } from 'decimal.js';
 import {
   IComputeEngine,
@@ -6,38 +6,38 @@ import {
   BoxedExpression,
   Metadata,
   CanonicalOptions,
-} from './public';
+} from './public.ts';
 
-import { Expression, MathJsonIdentifier } from '../../math-json/types';
-import { machineValue, missingIfEmpty } from '../../math-json/utils';
+import { Expression, MathJsonIdentifier } from '../../math-json/types.ts';
+import { machineValue, missingIfEmpty } from '../../math-json/utils.ts';
 import {
   isValidIdentifier,
   validateIdentifier,
-} from '../../math-json/identifiers';
+} from '../../math-json/identifiers.ts';
 
-import { isOne } from '../numerics/rationals';
-import { asBigint } from './numerics';
-import { bigintValue } from '../numerics/expression';
-import { isInMachineRange } from '../numerics/numeric-bignum';
-import { bigint } from '../numerics/bigint';
+import { isOne } from '../numerics/rationals.ts';
+import { asBigint } from './numerics.ts';
+import { bigintValue } from '../numerics/expression.ts';
+import { isInMachineRange } from '../numerics/numeric-bignum.ts';
+import { bigint } from '../numerics/bigint.ts';
 
-import { canonicalAdd } from './arithmetic-add';
-import { canonicalMultiply } from './arithmetic-multiply';
-import { canonicalDivide } from './arithmetic-divide';
+import { canonicalAdd } from './arithmetic-add.ts';
+import { canonicalMultiply } from './arithmetic-multiply.ts';
+import { canonicalDivide } from './arithmetic-divide.ts';
 
-import { NumericValue } from '../numeric-value/public';
-import { ExactNumericValue } from '../numeric-value/exact-numeric-value';
-import { canonicalPower, canonicalRoot } from './arithmetic-power';
+import { NumericValue } from '../numeric-value/public.ts';
+import { ExactNumericValue } from '../numeric-value/exact-numeric-value.ts';
+import { canonicalPower, canonicalRoot } from './arithmetic-power.ts';
 
-import { _BoxedExpression } from './abstract-boxed-expression';
-import { BoxedFunction } from './boxed-function';
-import { BoxedString } from './boxed-string';
-import { BoxedTensor, expressionTensorInfo } from './boxed-tensor';
-import { canonicalForm } from './canonical';
-import { sortOperands } from './order';
-import { validateArguments, checkNumericArgs } from './validate';
-import { flatten } from './flatten';
-import { canonical, semiCanonical } from './utils';
+import { _BoxedExpression } from './abstract-boxed-expression.ts';
+import { BoxedFunction } from './boxed-function.ts';
+import { BoxedString } from './boxed-string.ts';
+import { BoxedTensor, expressionTensorInfo } from './boxed-tensor.ts';
+import { canonicalForm } from './canonical.ts';
+import { sortOperands } from './order.ts';
+import { validateArguments, checkNumericArgs } from './validate.ts';
+import { flatten } from './flatten.ts';
+import { canonical, semiCanonical } from './utils.ts';
 
 /**
  * ### THEORY OF OPERATIONS
@@ -675,7 +675,9 @@ function fromNumericValue(
   return canonicalAdd(ce, [result, ce.number(ce.complex(0, value.im))]);
 }
 
-export function toBigint(x: SemiBoxedExpression): bigint | null {
+export function toBigint(
+  x: Complex | Decimal | SemiBoxedExpression
+): bigint | null {
   if (typeof x === 'bigint') return x;
   if (typeof x === 'number' && Number.isInteger(x)) return BigInt(x);
 

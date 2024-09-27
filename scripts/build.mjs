@@ -50,6 +50,7 @@ const BUILD_OPTIONS = {
   sourceRoot: '../src',
   sourcesContent: false,
   target: ['es2020'],
+  resolveExtensions: ['.ts', '.js'],
 };
 
 //

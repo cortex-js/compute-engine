@@ -3,12 +3,12 @@ import type {
   BoxedRuleSet,
   RuleSteps,
   SimplifyOptions,
-} from '../public';
+} from '../public.ts';
 
-import { permutations } from '../../common/utils';
+import { permutations } from '../../common/utils.ts';
 
-import { replace } from './rules';
-import { holdMap } from './hold';
+import { replace } from './rules.ts';
+import { holdMap } from './hold.ts';
 
 type InternalSimplifyOptions = SimplifyOptions & {
   useVariations: boolean;

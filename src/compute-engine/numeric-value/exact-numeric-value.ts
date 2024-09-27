@@ -4,7 +4,7 @@ import {
   gcd,
   SMALL_INTEGER,
   SmallInteger,
-} from '../numerics/numeric';
+} from '../numerics/numeric.ts';
 import {
   isOne,
   isZero,
@@ -19,17 +19,17 @@ import {
   mul,
   isMachineRational,
   rationalGcd,
-} from '../numerics/rationals';
+} from '../numerics/rationals.ts';
 import {
   ExactNumericValueData,
   NumericValue,
   NumericValueFactory,
-} from './public';
-import { Expression } from '../../math-json/types';
-import { numberToExpression } from '../numerics/expression';
-import { numberToString } from '../numerics/strings';
-import { BigNumFactory } from './big-numeric-value';
-import { NumericType } from '../../common/type/types';
+} from './public.ts';
+import { Expression } from '../../math-json/types.ts';
+import { numberToExpression } from '../numerics/expression.ts';
+import { numberToString } from '../numerics/strings.ts';
+import { BigNumFactory } from './big-numeric-value.ts';
+import { NumericType } from '../../common/type/types.ts';
 
 /**
  * An ExactNumericValue is the sum of a Gaussian imaginary and the product of

@@ -76,15 +76,15 @@ printf "$BASENAME$DOT Building TypeScript declaration files (.d.ts)"
 # Even though we only generate declaration file, the target must be set high-enough
 # to prevent tsc from complaining (!)
 if [[ "$TARGETS" == *math-json* ]]; then
-  npx tsc --target "es2020" -d --moduleResolution "node" \
-    --emitDeclarationOnly --outDir ./dist/types ./src/math-json.ts 
+  npx tsc --target "es2020" -d --moduleResolution "node" --allowImportingTsExtensions "true" \
+    --emitDeclarationOnly --outDir ./dist/types ./src/math-json.ts
 fi
 if [[ "$TARGETS" == *compute-engine* ]]; then
-  npx tsc --target "es2020" -d --moduleResolution "node" \
+  npx tsc --target "es2020" -d --moduleResolution "node" --allowImportingTsExtensions "true" \
     --emitDeclarationOnly --outDir ./dist/types ./src/compute-engine.ts 
 fi
 if [[ "$TARGETS" == *cortex* ]]; then
-  npx tsc --target "es2020" -d --moduleResolution "node" \
+  npx tsc --target "es2020" -d --moduleResolution "node" --allowImportingTsExtensions "true" \
     --emitDeclarationOnly --outDir ./dist/types ./src/cortex.ts 
 fi
 echo -e $LINECLEAR$BASENAME$CHECK$DIM" Building TypeScript declaration files$RESET"

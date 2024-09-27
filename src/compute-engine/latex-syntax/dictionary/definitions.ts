@@ -1,16 +1,21 @@
-import { Expression } from '../../../math-json/types';
-import { countTokens, joinLatex, tokenize, tokensToString } from '../tokenizer';
-import { DEFINITIONS_ALGEBRA } from './definitions-algebra';
-import { DEFINITIONS_ARITHMETIC } from './definitions-arithmetic';
-import { DEFINITIONS_CORE } from './definitions-core';
-import { DEFINITIONS_INEQUALITIES } from './definitions-relational-operators';
-import { DEFINITIONS_LINEAR_ALGEBRA } from './definitions-linear-algebra';
-import { DEFINITIONS_LOGIC } from './definitions-logic';
-import { DEFINITIONS_OTHERS } from './definitions-other';
-import { DEFINITIONS_TRIGONOMETRY } from './definitions-trigonometry';
-import { DEFINITIONS_SETS } from './definitions-sets';
-import { DEFINITIONS_CALCULUS } from './definitions-calculus';
-import { DEFINITIONS_SYMBOLS } from './definitions-symbols';
+import { Expression } from '../../../math-json/types.ts';
+import {
+  countTokens,
+  joinLatex,
+  tokenize,
+  tokensToString,
+} from '../tokenizer.ts';
+import { DEFINITIONS_ALGEBRA } from './definitions-algebra.ts';
+import { DEFINITIONS_ARITHMETIC } from './definitions-arithmetic.ts';
+import { DEFINITIONS_CORE } from './definitions-core.ts';
+import { DEFINITIONS_INEQUALITIES } from './definitions-relational-operators.ts';
+import { DEFINITIONS_LINEAR_ALGEBRA } from './definitions-linear-algebra.ts';
+import { DEFINITIONS_LOGIC } from './definitions-logic.ts';
+import { DEFINITIONS_OTHERS } from './definitions-other.ts';
+import { DEFINITIONS_TRIGONOMETRY } from './definitions-trigonometry.ts';
+import { DEFINITIONS_SETS } from './definitions-sets.ts';
+import { DEFINITIONS_CALCULUS } from './definitions-calculus.ts';
+import { DEFINITIONS_SYMBOLS } from './definitions-symbols.ts';
 import {
   foldAssociativeOperator,
   operator,
@@ -19,10 +24,10 @@ import {
   nops,
   operand,
   operands,
-} from '../../../math-json/utils';
-import { ErrorSignal, WarningSignal } from '../../../common/signals';
-import { DEFINITIONS_COMPLEX } from './definitions-complex';
-import { DEFINITIONS_STATISTICS } from './definitions-statistics';
+} from '../../../math-json/utils.ts';
+import { ErrorSignal, WarningSignal } from '../../../common/signals.ts';
+import { DEFINITIONS_COMPLEX } from './definitions-complex.ts';
+import { DEFINITIONS_STATISTICS } from './definitions-statistics.ts';
 import {
   Delimiter,
   EnvironmentParseHandler,
@@ -46,8 +51,8 @@ import {
   isPostfixEntry,
   isPrefixEntry,
   isSymbolEntry,
-} from '../public';
-import { isValidIdentifier } from '../../../math-json/identifiers';
+} from '../public.ts';
+import { isValidIdentifier } from '../../../math-json/identifiers.ts';
 
 export type CommonEntry = {
   /** Note: a name is required if a serialize handler is provided */

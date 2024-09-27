@@ -1,30 +1,30 @@
-import type { CanonicalForm, IdentifierDefinitions } from '../public';
+import type { CanonicalForm, IdentifierDefinitions } from '../public.ts';
 
-import { joinLatex } from '../latex-syntax/tokenizer';
+import { joinLatex } from '../latex-syntax/tokenizer.ts';
 
-import { checkType, checkArity } from '../boxed-expression/validate';
-import { canonicalForm } from '../boxed-expression/canonical';
-import type { BoxedExpression } from '../boxed-expression/public';
-import { asSmallInteger } from '../boxed-expression/numerics';
+import { checkType, checkArity } from '../boxed-expression/validate.ts';
+import { canonicalForm } from '../boxed-expression/canonical.ts';
+import type { BoxedExpression } from '../boxed-expression/public.ts';
+import { asSmallInteger } from '../boxed-expression/numerics.ts';
 
-import { apply, canonicalFunctionExpression } from '../function-utils';
+import { apply, canonicalFunctionExpression } from '../function-utils.ts';
 
-import { flatten, flattenSequence } from '../boxed-expression/flatten';
+import { flatten, flattenSequence } from '../boxed-expression/flatten.ts';
 
-import { fromDigits } from '../numerics/strings';
+import { fromDigits } from '../numerics/strings.ts';
 
-import { randomExpression } from './random-expression';
-import { normalizeIndexingSet } from './utils';
-import { canonicalInvisibleOperator } from './invisible-operator';
-import { canonical } from '../boxed-expression/utils';
+import { randomExpression } from './random-expression.ts';
+import { normalizeIndexingSet } from './utils.ts';
+import { canonicalInvisibleOperator } from './invisible-operator.ts';
+import { canonical } from '../boxed-expression/utils.ts';
 import {
   collectionElementType,
   functionResult,
   functionSignature,
   isValidType,
-} from '../../common/type/utils';
-import { parseType } from '../../common/type/parse';
-import { isIndexableCollection } from '../collection-utils';
+} from '../../common/type/utils.ts';
+import { parseType } from '../../common/type/parse.ts';
+import { isIndexableCollection } from '../collection-utils.ts';
 
 //   // := assign 80 // @todo
 // compose (compose(f, g) -> a new function such that compose(f, g)(x) -> f(g(x))

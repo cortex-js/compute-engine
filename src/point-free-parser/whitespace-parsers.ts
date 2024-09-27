@@ -1,5 +1,5 @@
-import { codePointLength, isWhitespace } from './characters';
-import { Parser, Result } from './parsers';
+import { codePointLength, isWhitespace } from './characters.ts';
+import { Parser, Result } from './parsers.ts';
 
 export function skipInlineSpaces(parser: Parser): void {
   let i = parser.offset;

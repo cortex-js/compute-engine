@@ -1,13 +1,13 @@
 import Decimal from 'decimal.js';
-import { NumericValue, NumericValueData } from './public';
-import { ExactNumericValue } from './exact-numeric-value';
-import { isInMachineRange } from '../numerics/numeric-bignum';
-import { Expression } from '../../math-json/types';
-import { MACHINE_TOLERANCE, SmallInteger } from '../numerics/numeric';
-import { numberToExpression } from '../numerics/expression';
-import { numberToString } from '../numerics/strings';
-import { bigint } from '../numerics/bigint';
-import { NumericType } from '../../common/type/types';
+import { NumericValue, NumericValueData } from './public.ts';
+import { ExactNumericValue } from './exact-numeric-value.ts';
+import { isInMachineRange } from '../numerics/numeric-bignum.ts';
+import { Expression } from '../../math-json/types.ts';
+import { MACHINE_TOLERANCE, SmallInteger } from '../numerics/numeric.ts';
+import { numberToExpression } from '../numerics/expression.ts';
+import { numberToString } from '../numerics/strings.ts';
+import { bigint } from '../numerics/bigint.ts';
+import { NumericType } from '../../common/type/types.ts';
 
 export type BigNumFactory = (value: Decimal.Value) => Decimal;
 

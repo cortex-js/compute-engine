@@ -342,11 +342,11 @@
 
   <script defer type="module">
     import { convertLatexToMarkup } from "https://unpkg.com/mathlive/dist/mathlive.min.mjs";
-    import { ComputeEngine, terminal, highlightSyntax } from "../compute-engine.esm.js";
+    import { ComputeEngine } from "../compute-engine.esm.js";
 
-    terminal.display(
-      highlightSyntax(
-        `const foo = 1234`));
+    // terminal.display(
+    //   highlightSyntax(
+    //     `const foo = 1234`));
     //           raw: `
     // let letNumber = 10;
     // const constNumber = 20;

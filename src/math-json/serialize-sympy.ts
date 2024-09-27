@@ -1,5 +1,5 @@
-import { Expression } from './types';
-import { operand, machineValue, symbol, operator, operands } from './utils';
+import { Expression } from './types.ts';
+import { operand, machineValue, symbol, operator, operands } from './utils.ts';
 
 function serializeBaseForm(expr: Expression): string | null {
   if (operator(expr) !== 'BaseForm') return null;

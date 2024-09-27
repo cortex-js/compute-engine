@@ -1,8 +1,8 @@
-import { parseType } from './parse';
-import { PRIMITIVE_TYPES } from './primitive';
-import { typeToString } from './serialize';
-import { isSubtype } from './subtype';
-import { Type, FunctionSignature, TypeString, PrimitiveType } from './types';
+import { parseType } from './parse.ts';
+import { PRIMITIVE_TYPES } from './primitive.ts';
+import { typeToString } from './serialize.ts';
+import { isSubtype } from './subtype.ts';
+import { Type, FunctionSignature, TypeString, PrimitiveType } from './types.ts';
 
 /** Given two types a and b, return the narrowest type common to a and b */
 function narrow2(a: Readonly<Type>, b: Readonly<Type>): Readonly<Type> {

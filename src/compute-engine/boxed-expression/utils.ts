@@ -5,13 +5,13 @@ import type {
   NumericFlags,
   SemiBoxedExpression,
   SymbolDefinition,
-} from './public';
+} from './public.ts';
 
-import { joinLatex } from '../latex-syntax/tokenizer';
-import { DEFINITIONS_INEQUALITIES } from '../latex-syntax/dictionary/definitions-relational-operators';
+import { joinLatex } from '../latex-syntax/tokenizer.ts';
+import { DEFINITIONS_INEQUALITIES } from '../latex-syntax/dictionary/definitions-relational-operators.ts';
 
-import { MACHINE_PRECISION } from '../numerics/numeric';
-import { Type } from '../../common/type/types';
+import { MACHINE_PRECISION } from '../numerics/numeric.ts';
+import { Type } from '../../common/type/types.ts';
 
 export function isBoxedExpression(x: unknown): x is BoxedExpression {
   return typeof x === 'object' && x !== null && 'engine' in x;

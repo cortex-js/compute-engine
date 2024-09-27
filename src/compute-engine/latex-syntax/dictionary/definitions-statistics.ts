@@ -1,5 +1,5 @@
-import { symbol } from '../../../math-json/utils';
-import { LatexDictionary, Parser, Terminator } from '../public';
+import { symbol } from '../../../math-json/utils.ts';
+import { LatexDictionary, Parser, Terminator } from '../public.ts';
 
 export const DEFINITIONS_STATISTICS: LatexDictionary = [
   {

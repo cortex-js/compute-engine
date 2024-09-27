@@ -1,6 +1,6 @@
-import { Expression } from '../../math-json/types';
-import { countLeaves, operator, operands } from '../../math-json/utils';
-import { DelimiterScale } from './public';
+import { Expression } from '../../math-json/types.ts';
+import { countLeaves, operator, operands } from '../../math-json/utils.ts';
+import { DelimiterScale } from './public.ts';
 
 export function getApplyFunctionStyle(
   _expr: Expression,

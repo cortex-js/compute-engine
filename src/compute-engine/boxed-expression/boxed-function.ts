@@ -1,4 +1,4 @@
-import type { Expression } from '../../math-json/types';
+import type { Expression } from '../../math-json/types.ts';
 import type {
   BoxedFunctionDefinition,
   IComputeEngine,
@@ -14,45 +14,45 @@ import type {
   BoxedBaseDefinition,
   Rule,
   CanonicalOptions,
-} from '../public';
+} from '../public.ts';
 
-import type { BoxedExpression, Sign } from './public';
+import type { BoxedExpression, Sign } from './public.ts';
 
-import { findUnivariateRoots } from './solve';
-import { replace } from './rules';
-import { negate } from './negate';
-import { Product } from './product';
-import { simplify } from './simplify';
+import { findUnivariateRoots } from './solve.ts';
+import { replace } from './rules.ts';
+import { negate } from './negate.ts';
+import { Product } from './product.ts';
+import { simplify } from './simplify.ts';
 
-import { asSmallInteger } from './numerics';
+import { asSmallInteger } from './numerics.ts';
 
-import { at, isFiniteIndexableCollection } from '../collection-utils';
+import { at, isFiniteIndexableCollection } from '../collection-utils.ts';
 
-import { canonicalMultiply, mul } from './arithmetic-multiply';
+import { canonicalMultiply, mul } from './arithmetic-multiply.ts';
 
-import { NumericValue } from '../numeric-value/public';
+import { NumericValue } from '../numeric-value/public.ts';
 
-import { _BoxedExpression } from './abstract-boxed-expression';
-import { DEFAULT_COMPLEXITY, sortOperands } from './order';
-import { hashCode, normalizedUnknownsForSolve } from './utils';
-import { match } from './match';
-import { factor } from './factor';
-import { holdMap } from './hold';
-import { Type } from '../../common/type/types';
-import { isSubtype } from '../../common/type/subtype';
-import { div } from './arithmetic-divide';
-import { add } from './arithmetic-add';
-import { pow } from './arithmetic-power';
-import { functionResult, narrow } from '../../common/type/utils';
-import { parseType } from '../../common/type/parse';
+import { _BoxedExpression } from './abstract-boxed-expression.ts';
+import { DEFAULT_COMPLEXITY, sortOperands } from './order.ts';
+import { hashCode, normalizedUnknownsForSolve } from './utils.ts';
+import { match } from './match.ts';
+import { factor } from './factor.ts';
+import { holdMap } from './hold.ts';
+import { Type } from '../../common/type/types.ts';
+import { isSubtype } from '../../common/type/subtype.ts';
+import { div } from './arithmetic-divide.ts';
+import { add } from './arithmetic-add.ts';
+import { pow } from './arithmetic-power.ts';
+import { functionResult, narrow } from '../../common/type/utils.ts';
+import { parseType } from '../../common/type/parse.ts';
 import {
   positiveSign,
   nonNegativeSign,
   negativeSign,
   nonPositiveSign,
   sgn,
-} from './sgn';
-import { cachedValue, CachedValue } from './cache';
+} from './sgn.ts';
+import { cachedValue, CachedValue } from './cache.ts';
 
 /**
  * A boxed function represent an expression that can be

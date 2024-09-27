@@ -1,14 +1,14 @@
-import type { BoxedExpression, IComputeEngine } from '../public';
+import type { BoxedExpression, IComputeEngine } from '../public.ts';
 
-import { canonicalAdd } from './arithmetic-add';
-import { canonicalMultiply } from './arithmetic-multiply';
+import { canonicalAdd } from './arithmetic-add.ts';
+import { canonicalMultiply } from './arithmetic-multiply.ts';
 
-import { MACHINE_PRECISION } from '../numerics/numeric';
+import { MACHINE_PRECISION } from '../numerics/numeric.ts';
 
-import type { NumericValue } from '../numeric-value/public';
-import { ExactNumericValue } from '../numeric-value/exact-numeric-value';
-import { BigNumericValue } from '../numeric-value/big-numeric-value';
-import { MachineNumericValue } from '../numeric-value/machine-numeric-value';
+import type { NumericValue } from '../numeric-value/public.ts';
+import { ExactNumericValue } from '../numeric-value/exact-numeric-value.ts';
+import { BigNumericValue } from '../numeric-value/big-numeric-value.ts';
+import { MachineNumericValue } from '../numeric-value/machine-numeric-value.ts';
 
 // Represent a sum of terms
 export class Terms {

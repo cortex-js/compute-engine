@@ -1,4 +1,4 @@
-import { LatexDictionary, Parser, Serializer } from '../public';
+import { LatexDictionary, Parser, Serializer } from '../public.ts';
 
 import {
   operand,
@@ -10,9 +10,9 @@ import {
   operands,
   isEmptySequence,
   symbol,
-} from '../../../math-json/utils';
-import { Expression, MathJsonIdentifier } from '../../../math-json/types';
-import { joinLatex } from '../tokenizer';
+} from '../../../math-json/utils.ts';
+import { Expression, MathJsonIdentifier } from '../../../math-json/types.ts';
+import { joinLatex } from '../tokenizer.ts';
 
 function parseSingleArg(cmd: string): (parser: Parser) => Expression {
   return (parser) => {

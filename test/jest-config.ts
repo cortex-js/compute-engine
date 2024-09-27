@@ -146,4 +146,4 @@ global.console = new CortexConsole(
   process.stdout,
   process.stderr,
   simpleFormatter
-);
+) as Console;

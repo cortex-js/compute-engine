@@ -4,12 +4,12 @@ import type {
   Metadata,
   PatternMatchOptions,
   BoxedSubstitution,
-} from './public';
+} from './public.ts';
 
-import { _BoxedExpression } from './abstract-boxed-expression';
-import { hashCode, isBoxedExpression } from './utils';
-import { isWildcard, wildcardName } from './boxed-patterns';
-import { Type } from '../../common/type/types';
+import { _BoxedExpression } from './abstract-boxed-expression.ts';
+import { hashCode, isBoxedExpression } from './utils.ts';
+import { isWildcard, wildcardName } from './boxed-patterns.ts';
+import { Type } from '../../common/type/types.ts';
 
 /**
  * BoxedString

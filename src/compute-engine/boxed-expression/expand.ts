@@ -1,12 +1,12 @@
-import type { BoxedExpression, IComputeEngine } from '../public';
+import type { BoxedExpression, IComputeEngine } from '../public.ts';
 
-import { asSmallInteger } from './numerics';
-import { isRelationalOperator } from './utils';
+import { asSmallInteger } from './numerics.ts';
+import { isRelationalOperator } from './utils.ts';
 
-import { mul } from './arithmetic-multiply';
+import { mul } from './arithmetic-multiply.ts';
 
-import { Product } from './product';
-import { add } from './arithmetic-add';
+import { Product } from './product.ts';
+import { add } from './arithmetic-add.ts';
 
 function expandProduct(
   lhs: Readonly<BoxedExpression>,

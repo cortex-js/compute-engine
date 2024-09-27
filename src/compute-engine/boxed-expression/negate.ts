@@ -1,6 +1,6 @@
-import type { BoxedExpression, IComputeEngine } from '../public';
-import { add } from './arithmetic-add';
-import { order } from './order';
+import type { BoxedExpression, IComputeEngine } from '../public.ts';
+import { add } from './arithmetic-add.ts';
+import { order } from './order.ts';
 
 /**
  * Distribute `Negate` (multiply by -1) if expr is a number literal, an
