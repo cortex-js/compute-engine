@@ -9,7 +9,7 @@
 notation interchange format based on JSON.
 
 The Cortex Compute Engine can parse LaTeX to MathJSON, serialize MathJSON to
-LaTeX, format, simplify and evaluate MathJSON expressions.
+LaTeX or MathASCII, format, simplify and evaluate MathJSON expressions.
 
 Reference documentation and guides at
 [cortexjs.io/compute-engine](https://cortexjs.io/compute-engine/).
@@ -23,15 +23,12 @@ $ npm install --save @cortex-js/compute-engine
 ```
 
 ```js
-import { parse, evaluate } from "@cortex-js/compute-engine";
+import { ComputeEngine } from "@cortex-js/compute-engine";
 
-const expr = parse("2^{11}-1 \\in \\P");
+const ce = new ComputeEngine();
 
-console.log(expr);
-// ➔ ["Element", ["Subtract", ["Power", 2, 11] , 1], "PrimeNumber"]
-
-console.log(evaluate(expr));
-// ➔ "False"
+engine.parse("2^{11}-1 \\in \\Z").evaluate().print()
+// ➔ "True"
 ```
 
 ## More
