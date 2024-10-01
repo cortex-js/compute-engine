@@ -38,6 +38,7 @@ import { sortOperands } from './order';
 import { validateArguments, checkNumericArgs } from './validate';
 import { flatten } from './flatten';
 import { canonical, semiCanonical } from './utils';
+import { canonicalNegate } from './negate';
 
 /**
  * ### THEORY OF OPERATIONS
@@ -259,10 +260,10 @@ export function boxFunction(
       if (typeof op1 === 'number') return ce.number(-op1, options);
       if (op1 instanceof Decimal) return ce.number(op1.neg(), options);
       const boxedop1 = ce.box(op1, options);
-      ops = [boxedop1];
       const num = boxedop1.numericValue;
       if (num !== null)
         return ce.number(typeof num === 'number' ? -num : num.neg(), options);
+      ops = [boxedop1];
     }
   }
 
@@ -568,7 +569,7 @@ function makeNumericFunction(
   // (avoid looking up a definition)
   //
   if (name === 'Add') return canonicalAdd(ce, ops);
-  if (name === 'Negate') return ops[0].neg();
+  if (name === 'Negate') return canonicalNegate(ops[0]);
   if (name === 'Multiply') return canonicalMultiply(ce, ops);
   if (name === 'Divide') {
     if (ops.length === 2)

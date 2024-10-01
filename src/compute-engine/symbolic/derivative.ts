@@ -167,7 +167,7 @@ export function differentiate(
 
   // A few easy ones...
   if (expr.string) return undefined;
-  if (expr.numericValue !== null) return expr.engine.Zero;
+  if (expr.isNumberLiteral) return expr.engine.Zero;
   if (expr.symbol === v) return expr.engine.One;
   if (expr.symbol) return expr.engine.Zero;
   if (!expr.operator) return undefined;

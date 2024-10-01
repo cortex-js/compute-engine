@@ -266,28 +266,34 @@ describe('COMMUTATIVE ORDER', () => {
   test(`Canonical form '-2x5z\\sqrt{y}\\frac{3}{4}3\\pi y'`, () => {
     expect(check('-2x5z\\sqrt{y}\\frac{3}{4}3\\pi y')).toMatchInlineSnapshot(`
       box       = [
-        "InvisibleOperator",
-        -2,
-        "x",
-        5,
-        "z",
-        ["Sqrt", "y"],
-        ["Divide", 3, 4],
-        3,
-        "Pi",
-        "y"
+        "Negate",
+        [
+          "InvisibleOperator",
+          2,
+          "x",
+          5,
+          "z",
+          ["Sqrt", "y"],
+          ["Divide", 3, 4],
+          3,
+          "Pi",
+          "y"
+        ]
       ]
       canonical = [
-        "Multiply",
-        -2,
-        3,
-        5,
-        ["Rational", 3, 4],
-        "Pi",
-        "x",
-        "y",
-        "z",
-        ["Sqrt", "y"]
+        "Negate",
+        [
+          "Multiply",
+          2,
+          3,
+          5,
+          ["Rational", 3, 4],
+          "Pi",
+          "x",
+          "y",
+          "z",
+          ["Sqrt", "y"]
+        ]
       ]
       simplify  = -45/2 * pi * x * z * y^(3/2)
       eval-auto = -45/2 * pi * x * z * y^(3/2)

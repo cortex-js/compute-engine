@@ -85,56 +85,59 @@ describe('Nth PRIME NUMBER', () =>
                                 "Add",
                                 1,
                                 [
-                                  "Power",
-                                  0,
+                                  "Negate",
                                   [
-                                    "Abs",
+                                    "Power",
+                                    0,
                                     [
-                                      "Add",
+                                      "Abs",
                                       [
-                                        "Floor",
+                                        "Add",
                                         [
-                                          "Divide",
+                                          "Floor",
                                           [
-                                            "Error",
+                                            "Divide",
                                             [
-                                              "ErrorCode",
-                                              "'incompatible-type'",
-                                              "'number'",
-                                              "'any'"
-                                            ]
-                                          ],
-                                          [
-                                            "Error",
+                                              "Error",
+                                              [
+                                                "ErrorCode",
+                                                "'incompatible-type'",
+                                                "'number'",
+                                                "'any'"
+                                              ]
+                                            ],
                                             [
-                                              "ErrorCode",
-                                              "'incompatible-type'",
-                                              "'number'",
-                                              "'any'"
+                                              "Error",
+                                              [
+                                                "ErrorCode",
+                                                "'incompatible-type'",
+                                                "'number'",
+                                                "'any'"
+                                              ]
                                             ]
                                           ]
-                                        ]
-                                      ],
-                                      [
-                                        "Negate",
+                                        ],
                                         [
-                                          "Divide",
+                                          "Negate",
                                           [
-                                            "Error",
+                                            "Divide",
                                             [
-                                              "ErrorCode",
-                                              "'incompatible-type'",
-                                              "'number'",
-                                              "'any'"
-                                            ]
-                                          ],
-                                          [
-                                            "Error",
+                                              "Error",
+                                              [
+                                                "ErrorCode",
+                                                "'incompatible-type'",
+                                                "'number'",
+                                                "'any'"
+                                              ]
+                                            ],
                                             [
-                                              "ErrorCode",
-                                              "'incompatible-type'",
-                                              "'number'",
-                                              "'any'"
+                                              "Error",
+                                              [
+                                                "ErrorCode",
+                                                "'incompatible-type'",
+                                                "'number'",
+                                                "'any'"
+                                              ]
                                             ]
                                           ]
                                         ]
@@ -199,13 +202,13 @@ describe('Euler Prime Generating Polynomial', () => {
       box       = [
         "Add",
         ["InvisibleOperator", 8, ["Square", "x"]],
-        ["InvisibleOperator", -488, "x"],
+        ["Negate", ["InvisibleOperator", 488, "x"]],
         7243
       ]
       canonical = [
         "Add",
         ["Multiply", 8, ["Square", "x"]],
-        ["Multiply", -488, "x"],
+        ["Negate", ["Multiply", 488, "x"]],
         7243
       ]
     `));
@@ -214,13 +217,13 @@ describe('Euler Prime Generating Polynomial', () => {
       box       = [
         "Add",
         ["InvisibleOperator", 43, ["Square", "x"]],
-        ["InvisibleOperator", -537, "x"],
+        ["Negate", ["InvisibleOperator", 537, "x"]],
         2971
       ]
       canonical = [
         "Add",
         ["Multiply", 43, ["Square", "x"]],
-        ["Multiply", -537, "x"],
+        ["Negate", ["Multiply", 537, "x"]],
         2971
       ]
     `));
@@ -229,20 +232,25 @@ describe('Euler Prime Generating Polynomial', () => {
       box       = [
         "Add",
         ["InvisibleOperator", 36, ["Square", "x"]],
-        ["InvisibleOperator", -810, "x"],
+        ["Negate", ["InvisibleOperator", 810, "x"]],
         2763
       ]
       canonical = [
         "Add",
         ["Multiply", 36, ["Square", "x"]],
-        ["Multiply", -810, "x"],
+        ["Negate", ["Multiply", 810, "x"]],
         2763
       ]
     `));
   test('x in', () =>
     expect(check('x^2 - 79x + 1601')).toMatchInlineSnapshot(`
-      box       = ["Add", ["Square", "x"], ["InvisibleOperator", -79, "x"], 1601]
-      canonical = ["Add", ["Square", "x"], ["Multiply", -79, "x"], 1601]
+      box       = [
+        "Add",
+        ["Square", "x"],
+        ["Negate", ["InvisibleOperator", 79, "x"]],
+        1601
+      ]
+      canonical = ["Add", ["Square", "x"], ["Negate", ["Multiply", 79, "x"]], 1601]
     `));
   test('x in 0..10', () =>
     expect(check('2x^2 + 11')).toMatchInlineSnapshot(`

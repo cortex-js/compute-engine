@@ -139,56 +139,59 @@ describe('PARSING numbers', () => {
                                 "Add",
                                 1,
                                 [
-                                  "Power",
-                                  0,
+                                  "Negate",
                                   [
-                                    "Abs",
+                                    "Power",
+                                    0,
                                     [
-                                      "Add",
+                                      "Abs",
                                       [
-                                        "Floor",
+                                        "Add",
                                         [
-                                          "Divide",
+                                          "Floor",
                                           [
-                                            "Error",
+                                            "Divide",
                                             [
-                                              "ErrorCode",
-                                              "'incompatible-type'",
-                                              "'number'",
-                                              "'any'"
-                                            ]
-                                          ],
-                                          [
-                                            "Error",
+                                              "Error",
+                                              [
+                                                "ErrorCode",
+                                                "'incompatible-type'",
+                                                "'number'",
+                                                "'any'"
+                                              ]
+                                            ],
                                             [
-                                              "ErrorCode",
-                                              "'incompatible-type'",
-                                              "'number'",
-                                              "'any'"
+                                              "Error",
+                                              [
+                                                "ErrorCode",
+                                                "'incompatible-type'",
+                                                "'number'",
+                                                "'any'"
+                                              ]
                                             ]
                                           ]
-                                        ]
-                                      ],
-                                      [
-                                        "Negate",
+                                        ],
                                         [
-                                          "Divide",
+                                          "Negate",
                                           [
-                                            "Error",
+                                            "Divide",
                                             [
-                                              "ErrorCode",
-                                              "'incompatible-type'",
-                                              "'number'",
-                                              "'any'"
-                                            ]
-                                          ],
-                                          [
-                                            "Error",
+                                              "Error",
+                                              [
+                                                "ErrorCode",
+                                                "'incompatible-type'",
+                                                "'number'",
+                                                "'any'"
+                                              ]
+                                            ],
                                             [
-                                              "ErrorCode",
-                                              "'incompatible-type'",
-                                              "'number'",
-                                              "'any'"
+                                              "Error",
+                                              [
+                                                "ErrorCode",
+                                                "'incompatible-type'",
+                                                "'number'",
+                                                "'any'"
+                                              ]
                                             ]
                                           ]
                                         ]

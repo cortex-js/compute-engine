@@ -439,7 +439,7 @@ export abstract class _BoxedExpression implements BoxedExpression {
   }
 
   get isNumberLiteral(): boolean {
-    return this.numericValue !== null;
+    return false;
   }
 
   get isFunctionExpression(): boolean {

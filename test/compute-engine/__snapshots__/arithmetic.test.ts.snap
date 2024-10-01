@@ -65,7 +65,7 @@ exports[`ADD Add ['Add', 4, -1.1] 1`] = `2.9`;
 exports[`ADD Add ['Add'] 1`] = `0`;
 
 exports[`ADD Add \\frac{2}{-3222233}+\\frac{1}{3} 1`] = `
-box       = ["Add", ["Divide", 2, -3222233], ["Divide", 1, 3]]
+box       = ["Add", ["Divide", 2, ["Negate", 3222233]], ["Divide", 1, 3]]
 canonical = ["Subtract", ["Rational", 1, 3], ["Rational", 2, 3222233]]
 simplify  = 3222227/9666699
 eval-auto = 3222227/9666699
@@ -201,7 +201,7 @@ exports[`EXACT EVALUATION Canceled inexact values are ignored 1`] = `
 box       = [
   "Add",
   2.12,
-  -2.12,
+  ["Negate", 2.12],
   ["Divide", 1, 4],
   ["Divide", 1, 4],
   ["Sqrt", 5],
@@ -296,7 +296,7 @@ exports[`EXACT EVALUATION Sqrt: Inexact Fractional part 1`] = `
 box       = ["Sqrt", 5.1]
 simplify  = 2.25831795812724298497
 eval-auto = 2.25831795812724298497
-eval-mach = 2.258317958127243
+eval-mach = 2.25831795812724
 `;
 
 exports[`EXACT EVALUATION Square rationals are grouped together 1`] = `
@@ -800,7 +800,7 @@ canonical = [
 ]
 simplify  = 8.64241621450224752044 * pi
 eval-auto = 8.64241621450224752044 * pi
-eval-mach = 8.64241621450225 * pi
+eval-mach = 8.64241621450222 * pi
 N-auto    = 27.1509512887455715096
 N-mach    = 27.1509512887456
 `;

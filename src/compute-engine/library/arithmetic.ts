@@ -343,7 +343,7 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
             : undefined,
       canonical: (args, { engine }) => {
         const x = args[0];
-        if (x.numericValue !== null && x.isNegative)
+        if (x.isNumberLiteral && x.isNegative)
           return engine._fn('Factorial', [x.neg()]).neg();
         return engine._fn('Factorial', [x]);
       },

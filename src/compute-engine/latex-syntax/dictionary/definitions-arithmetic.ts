@@ -24,6 +24,7 @@ import {
   DIVISION_PRECEDENCE,
   POSTFIX_PRECEDENCE,
   COMPARISON_PRECEDENCE,
+  EXPONENTIATION_PRECEDENCE,
 } from '../public';
 import { joinLatex, supsub } from '../tokenizer';
 
@@ -1007,19 +1008,12 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
     name: 'Negate',
     latexTrigger: ['-'],
     kind: 'prefix',
-    precedence: ADDITION_PRECEDENCE + 2,
+    precedence: EXPONENTIATION_PRECEDENCE + 1,
     parse: (parser, terminator): Expression | null => {
       parser.skipSpace();
-      // Quick check if the next token is a digit, if so, it's a number
-      // not a Negate
-      if (/\d/.test(parser.peek)) return null;
-
-      // If the next token is a number, it's not a Negate, backtrack
-      if (parser.parseNumber() !== null) return null;
-
       const rhs = parser.parseExpression({
         ...terminator,
-        minPrec: ADDITION_PRECEDENCE + 3,
+        minPrec: EXPONENTIATION_PRECEDENCE + 3,
       });
 
       // If we did not see a valid rhs, this may not be a negate, for example
@@ -1115,7 +1109,7 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
     latexTrigger: ['^'],
     kind: 'infix',
     serialize: serializePower,
-    // Parsing is done as a special case in `parseExpression`
+    // Parsing is done as a special case in `parseSupsub`
   },
   {
     latexTrigger: '\\prod',

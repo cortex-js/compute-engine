@@ -258,9 +258,9 @@ describe('DELIMITERS PARSING', () => {
     `);
     expect(check('-(a+b)')).toMatchInlineSnapshot(`
       box       = ["Negate", ["Delimiter", ["Add", "a", "b"]]]
-      canonical = ["Subtract", ["Negate", "a"], "b"]
+      canonical = ["Negate", ["Add", "a", "b"]]
       box-latex = -(a+b)
-      latex     = -a-b
+      latex     = -a+b
     `);
     expect(check('(a+(c+d))')).toMatchInlineSnapshot(`
       box       = ["Delimiter", ["Add", "a", ["Delimiter", ["Add", "c", "d"]]]]

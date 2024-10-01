@@ -109,7 +109,7 @@ function invisibleOperatorForm(expr: BoxedExpression) {
 
 function numberForm(expr: BoxedExpression) {
   // Return the canonical form if a number literal
-  if (expr.numericValue !== null) return expr.canonical;
+  if (expr.isNumberLiteral) return expr.canonical;
 
   // Recursively visit all sub-expressions
   if (expr.ops) return expr.engine._fn(expr.operator, expr.ops.map(numberForm));

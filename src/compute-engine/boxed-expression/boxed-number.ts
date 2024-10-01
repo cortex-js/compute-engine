@@ -139,6 +139,10 @@ export class BoxedNumber extends _BoxedExpression {
     return this._value;
   }
 
+  get isNumberLiteral(): boolean {
+    return true;
+  }
+
   get re(): number {
     if (typeof this._value === 'number') return this._value;
     return this._value.re;
@@ -685,12 +689,9 @@ function canonicalNumberString(
   // Does this look like an integer?
   const n = bigint(s);
   if (n !== null) {
-    if (n >= Number.MIN_SAFE_INTEGER && n <= Number.MAX_SAFE_INTEGER)
-      return Number(n);
+    if (n >= -SMALL_INTEGER && n <= SMALL_INTEGER) return Number(n);
     return ce._numericValue(n);
   }
 
-  // This could be a real in the machine range
-  const b = ce.bignum(s);
-  return isInMachineRange(b) ? b.toNumber() : ce._numericValue(b);
+  return ce._numericValue(ce.bignum(s));
 }

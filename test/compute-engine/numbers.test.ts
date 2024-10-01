@@ -5,9 +5,10 @@ import { engine as ce } from '../utils';
 describe('BOXING OF NUMBER', () => {
   test('Boxing numbers including whitespace', () => {
     expect(
-      ce.box({ num: '\u00091\u000a2\u000b3\u000c4\u000d5 6\u00a07.2' })
-        .numericValue
-    ).toEqual(1234567.2);
+      ce
+        .box({ num: '\u00091\u000a2\u000b3\u000c4\u000d5 6\u00a07.2' })
+        .numericValue?.toString()
+    ).toEqual('1234567.2');
   });
 
   test('Lenient num argument', () => {

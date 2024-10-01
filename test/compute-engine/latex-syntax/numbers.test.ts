@@ -19,14 +19,14 @@ describe('PARSING OF NUMBER', () => {
     expect(parseVal('-1')).toEqual(-1);
     expect(parseVal('1.0')).toEqual(1);
     expect(parseVal('-1.0')).toEqual(-1);
-    expect(parseVal('-12.1234')).toEqual(-12.1234);
-    expect(parseVal('-123 456.123 4')).toEqual(-123456.1234);
+    expect(parseVal('-12.1234')).toEqual('-12.1234');
+    expect(parseVal('-123 456.123 4')).toEqual('-123456.1234');
   });
 
   test('Parsing Exponents', () => {
-    expect(parseVal('-12.1234 e 5')).toEqual(-1212340);
-    expect(parseVal('-12.1234 E 5')).toEqual(-1212340);
-    expect(parseVal('-12.1234e-5')).toEqual(-0.000121234);
+    expect(parseVal('-12.1234 e 5')).toEqual('-1212340');
+    expect(parseVal('-12.1234 E 5')).toEqual('-1212340');
+    expect(parseVal('-12.1234e-5')).toEqual('-0.000121234');
     expect(parseVal('3 \\times 10 ^ 4')).toEqual(30000);
     expect(parse('1.234\\times 10^ { -5678 }')).toMatchInlineSnapshot(
       `1.234e-5678`
@@ -60,7 +60,7 @@ describe('PARSING OF NUMBER', () => {
     );
     // Negative mixed fraction
     expect(parse('-3\\frac14')).toMatchInlineSnapshot(
-      `["Subtract", ["Rational", -1, 4], 3]`
+      `["Negate", ["Add", 3, ["Rational", 1, 4]]]`
     );
     expect(parse('3\\frac14+\\frac12')).toMatchInlineSnapshot(
       `["Add", 3, ["Rational", 1, 4], ["Rational", 1, 2]]`
@@ -162,9 +162,9 @@ describe('PARSING OF NUMBER', () => {
     // Number with exactly three digits after the decimal point
     expect(parseVal('3.423e4')).toEqual(34230);
     // Number with more than three, less than six digits after the decimal point
-    expect(parseVal('3.42334e4')).toEqual(34233.4);
+    expect(parseVal('3.42334e4')).toEqual('34233.4');
     // Number with more than 6 digits after the decimal point
-    expect(parseVal('3.424242334e4')).toEqual(34242.42334);
+    expect(parseVal('3.424242334e4')).toEqual('34242.42334');
   });
 
   test('Complex Numbers', () => {

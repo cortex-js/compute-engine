@@ -184,7 +184,7 @@ describe('ARITHMETIC OPERATORS', () => {
 
   it('should serialize Negate', () => {
     expect(check('(-x)')).toMatchInlineSnapshot(`-x`);
-    expect(check('-(x+y)')).toMatchInlineSnapshot(`-x - y`);
+    expect(check('-(x+y)')).toMatchInlineSnapshot(`-(x + y)`);
     expect(check('-(2^3)')).toMatchInlineSnapshot(`-2^3`);
   });
 

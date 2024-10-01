@@ -143,7 +143,7 @@ export function totalDegree(expr: BoxedExpression): number {
   // e.g. "x"
   if (expr.symbol && !expr.isConstant) return 1;
 
-  if (expr.operator === 'Power' && expr.op2.numericValue !== null) {
+  if (expr.operator === 'Power' && expr.op2.isNumberLiteral) {
     // If the base has no unknowns, the degree is 0, e.g. 2^3
     if (totalDegree(expr.op1) === 0) return 0;
     const deg = asSmallInteger(expr.op2);
@@ -184,7 +184,7 @@ export function maxDegree(expr: BoxedExpression): number {
   // e.g. "x"
   if (expr.symbol && !expr.isConstant) return 1;
 
-  if (expr.operator === 'Power' && expr.op2.numericValue !== null) {
+  if (expr.operator === 'Power' && expr.op2.isNumberLiteral) {
     // If the base has no unknowns, the degree is 0, e.g. 2^3
     if (maxDegree(expr.op1) === 0) return 0;
 

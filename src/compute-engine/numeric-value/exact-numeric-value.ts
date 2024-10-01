@@ -217,7 +217,7 @@ export class ExactNumericValue extends NumericValue {
   }
 
   get numerator(): ExactNumericValue {
-    if (this.rational[1] === 1) return this;
+    if (this.rational[1] == 1) return this;
     return this.clone({
       rational: isMachineRational(this.rational)
         ? [this.rational[0], 1]
@@ -291,11 +291,11 @@ export class ExactNumericValue extends NumericValue {
   }
 
   get isPositiveInfinity(): boolean {
-    return this.rational[0] === Infinity;
+    return this.rational[0] == Infinity;
   }
 
   get isNegativeInfinity(): boolean {
-    return this.rational[0] === -Infinity;
+    return this.rational[0] == -Infinity;
   }
 
   get isComplexInfinity(): boolean {
@@ -481,7 +481,7 @@ export class ExactNumericValue extends NumericValue {
         exponent = { re: exponent.re, im: exponent.im };
       } else {
         if (exponent instanceof ExactNumericValue) {
-          if (exponent.radical === 1 && exponent.rational[0] === 1)
+          if (exponent.radical === 1 && exponent.rational[0] == 1)
             return this.root(exponent.rational[0]);
         }
         exponent = exponent.re;
@@ -616,7 +616,7 @@ export class ExactNumericValue extends NumericValue {
     )
       return this.factory(this.bignumRe).root(exponent);
 
-    if (this.rational[1] === 1) {
+    if (this.rational[1] == 1) {
       const root = Math.pow(this.rational[0] as number, 1 / exponent);
       if (Number.isInteger(root)) return this.clone(root);
     }
@@ -713,7 +713,7 @@ export class ExactNumericValue extends NumericValue {
       return (
         this.radical === 1 &&
         isInteger(this.rational) &&
-        this.rational[0] === other
+        this.rational[0] == other
       );
     if (other instanceof ExactNumericValue) {
       return (

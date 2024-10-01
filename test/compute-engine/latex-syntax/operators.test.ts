@@ -418,14 +418,13 @@ describe('OPERATOR postfix', () => {
     `));
   test('-5!-2 // Precedence', () =>
     expect(check('-2-5!')).toMatchInlineSnapshot(`
-      box       = ["Add", -2, ["Factorial", -5]]
+      box       = ["Add", -2, ["Negate", ["Factorial", 5]]]
       canonical = ["Subtract", ["Negate", ["Factorial", 5]], 2]
       eval-auto = -122
     `));
   test('-5! // Precedence', () =>
     expect(check('-5!')).toMatchInlineSnapshot(`
-      box       = ["Factorial", -5]
-      canonical = ["Negate", ["Factorial", 5]]
+      box       = ["Negate", ["Factorial", 5]]
       eval-auto = -120
     `));
   test('-n!', () =>

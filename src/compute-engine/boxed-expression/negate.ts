@@ -2,6 +2,20 @@ import type { BoxedExpression, IComputeEngine } from '../public';
 import { add } from './arithmetic-add';
 import { order } from './order';
 
+export function canonicalNegate(expr: BoxedExpression): BoxedExpression {
+  // Negate(Negate(x)) -> x
+  let sign = -1;
+  while (expr.operator === 'Negate') {
+    expr = expr.op1;
+    sign = -sign;
+  }
+  if (sign === 1) return expr;
+
+  if (expr.isNumberLiteral) return expr.neg();
+
+  return expr.engine._fn('Negate', [expr]);
+}
+
 /**
  * Distribute `Negate` (multiply by -1) if expr is a number literal, an
  * addition or multiplication or another `Negate`.
@@ -35,9 +49,7 @@ export function negate(expr: BoxedExpression): BoxedExpression {
 
   // Distribute over division
   // Negate(Divide(a, b)) -> Divide(Negate(a), b)
-  if (expr.operator === 'Divide') {
-    return negate(expr.op1).div(expr.op2);
-  }
+  if (expr.operator === 'Divide') return negate(expr.op1).div(expr.op2);
 
   return ce._fn('Negate', [expr]);
 }
