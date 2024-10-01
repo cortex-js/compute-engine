@@ -1,7 +1,7 @@
-import { apply } from '../function-utils.ts';
-import { mul } from '../boxed-expression/arithmetic-multiply.ts';
-import type { BoxedExpression } from '../public.ts';
-import { add } from '../boxed-expression/arithmetic-add.ts';
+import { apply } from '../function-utils';
+import { mul } from '../boxed-expression/arithmetic-multiply';
+import type { BoxedExpression } from '../public';
+import { add } from '../boxed-expression/arithmetic-add';
 
 // See also:
 //

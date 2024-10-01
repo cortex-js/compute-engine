@@ -1,5 +1,5 @@
-import { bigint } from './bigint.ts';
-import { bigPrimeFactors } from './primes.ts';
+import { bigint } from './bigint';
+import { bigPrimeFactors } from './primes';
 
 export function gcd(a: bigint, b: bigint): bigint {
   while (b !== BigInt(0)) [a, b] = [b, a % b];

@@ -1,5 +1,5 @@
-import { isSubtype } from './subtype.ts';
-import type { NamedElement, Type } from './types.ts';
+import { isSubtype } from './subtype';
+import type { NamedElement, Type } from './types';
 
 const NEGATION_PRECEDENCE = 3;
 const UNION_PRECEDENCE = 1;

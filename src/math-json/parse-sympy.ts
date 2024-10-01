@@ -2,8 +2,8 @@
 
 // https://github.com/python/cpython/blob/390459de6db1e68b79c0897cc88c0d562693ec5c/Grammar/python.gram
 
-import { symbol } from '../math-json.ts';
-import { Expression } from './types.ts';
+import { symbol } from '../math-json';
+import { Expression } from './types';
 
 const DIGITS = {
   '0': 0,

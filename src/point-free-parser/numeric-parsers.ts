@@ -1,5 +1,5 @@
-import { DIGITS, HEX_DIGITS } from './characters.ts';
-import { Parser, Result } from './parsers.ts';
+import { DIGITS, HEX_DIGITS } from './characters';
+import { Parser, Result } from './parsers';
 
 // @todo: the numeric parsers should return strings rather than
 // number to better support big numbers

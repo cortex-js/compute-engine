@@ -23,7 +23,7 @@ function checkAnswer(
   let numbersUsed: number[] = [];
 
   const visit: (node: BoxedExpression) => void = (node) => {
-    if (node.isNumberLiteral) {
+    if (node.numericValue !== null) {
       if (numbersUsed.includes(node.value as number))
         return 'The answer should not contain any numbers more than once.';
       if (numbers.includes(node.value as number))

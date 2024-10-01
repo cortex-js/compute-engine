@@ -1,4 +1,4 @@
-import { Expression, MathJsonIdentifier } from '../../math-json.ts';
+import { Expression, MathJsonIdentifier } from '../../math-json';
 
 function oneOf<T = Expression>(xs: T[]): T {
   return xs[Math.floor(Math.random() * xs.length)];

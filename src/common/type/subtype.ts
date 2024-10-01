@@ -1,4 +1,4 @@
-import { parseType } from './parse.ts';
+import { parseType } from './parse';
 import {
   COLLECTION_TYPES,
   EXPRESSION_TYPES,
@@ -6,13 +6,13 @@ import {
   PRIMITIVE_TYPES,
   SCALAR_TYPES,
   VALUE_TYPES,
-} from './primitive.ts';
+} from './primitive';
 import type {
   PrimitiveType,
   Type,
   TypeCompatibility,
   TypeString,
-} from './types.ts';
+} from './types';
 
 const PRIMITIVE_SUBTYPES: Record<PrimitiveType, PrimitiveType[]> = {
   number: NUMERIC_TYPES,

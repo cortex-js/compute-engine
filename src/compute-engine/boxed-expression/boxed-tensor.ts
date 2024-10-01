@@ -1,4 +1,4 @@
-import type { Expression } from '../../math-json/types.ts';
+import type { Expression } from '../../math-json/types';
 import type {
   BoxedExpression,
   IComputeEngine,
@@ -9,7 +9,7 @@ import type {
   PatternMatchOptions,
   BoxedBaseDefinition,
   BoxedFunctionDefinition,
-} from '../public.ts';
+} from '../public';
 
 import {
   DataTypeMap,
@@ -17,17 +17,17 @@ import {
   getExpressionDatatype,
   getSupertype,
   makeTensorField,
-} from './tensor-fields.ts';
+} from './tensor-fields';
 
-import { NumericValue } from '../numeric-value/public.ts';
+import { NumericValue } from '../numeric-value/public';
 
-import { _BoxedExpression } from './abstract-boxed-expression.ts';
-import { isWildcard, wildcardName } from './boxed-patterns.ts';
-import { canonical, hashCode, isBoxedExpression } from './utils.ts';
+import { _BoxedExpression } from './abstract-boxed-expression';
+import { isWildcard, wildcardName } from './boxed-patterns';
+import { canonical, hashCode, isBoxedExpression } from './utils';
 
-import { AbstractTensor, TensorData, makeTensor } from '../tensor/tensors.ts'; // @fixme
-import { Type } from '../../common/type/types.ts';
-import { parseType } from '../../common/type/parse.ts';
+import { AbstractTensor, TensorData, makeTensor } from '../tensor/tensors'; // @fixme
+import { Type } from '../../common/type/types';
+import { parseType } from '../../common/type/parse';
 
 /**
  * A boxed tensor represents an expression that can be represented by a tensor.

@@ -330,7 +330,7 @@ describe('highlight some TypeScript', () => {
     `);
   });
 
-  it('should highlight long code blocl', () => {
+  it('should highlight long code block', () => {
     expect(
       parseCode(`let letNumber = 10;
         const constNumber = 20;

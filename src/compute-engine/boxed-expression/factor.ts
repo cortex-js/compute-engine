@@ -1,13 +1,13 @@
-import type { BoxedExpression } from './public.ts';
+import type { BoxedExpression } from './public';
 
-import { isRelationalOperator } from './utils.ts';
+import { isRelationalOperator } from './utils';
 
-import { Product, commonTerms } from './product.ts';
+import { Product, commonTerms } from './product';
 
-import { NumericValue } from '../numeric-value/public.ts';
+import { NumericValue } from '../numeric-value/public';
 
-import { mul } from './arithmetic-multiply.ts';
-import { add } from './arithmetic-add.ts';
+import { mul } from './arithmetic-multiply';
+import { add } from './arithmetic-add';
 
 /** Combine rational expressions into a single fraction */
 export function together(op: BoxedExpression): BoxedExpression {

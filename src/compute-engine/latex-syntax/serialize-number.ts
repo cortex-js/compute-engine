@@ -1,5 +1,5 @@
-import { Expression } from '../../math-json/types.ts';
-import { NumberFormat, NumberSerializationFormat } from './public.ts';
+import { Expression } from '../../math-json/types';
+import { NumberFormat, NumberSerializationFormat } from './public';
 
 // Some vocabulary:
 // 123.456e78

@@ -1,4 +1,4 @@
-import { BoxedExpression } from '../public.ts';
+import { BoxedExpression } from '../public';
 
 /** An interval is a continuous set of real numbers */
 export type Interval = {

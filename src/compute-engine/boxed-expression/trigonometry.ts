@@ -1,20 +1,15 @@
 import { Complex } from 'complex-esm';
 import Decimal from 'decimal.js';
 
-import type { Expression } from '../../math-json/types.ts';
-import type { LatexString } from '../latex-syntax/public.ts';
+import type { Expression } from '../../math-json/types';
+import type { LatexString } from '../latex-syntax/public';
 
-import type {
-  BoxedExpression,
-  IComputeEngine,
-  RuleStep,
-  Sign,
-} from './public.ts';
+import type { BoxedExpression, IComputeEngine, RuleStep, Sign } from './public';
 
-import { apply } from './apply.ts'; // @fixme
+import { apply } from './apply'; // @fixme
 
-import { asLatexString } from './utils.ts';
-import { getPiTerm } from './factor.ts';
+import { asLatexString } from './utils';
+import { getPiTerm } from './factor';
 
 type ConstructibleTrigValues = [
   [numerator: number, denominator: number],

@@ -1,4 +1,4 @@
-import { Expression } from '../../../math-json/types.ts';
+import { Expression } from '../../../math-json/types';
 import {
   machineValue,
   foldAssociativeOperator,
@@ -13,7 +13,7 @@ import {
   isNumberExpression,
   MISSING,
   getSequence,
-} from '../../../math-json/utils.ts';
+} from '../../../math-json/utils';
 import {
   Serializer,
   Parser,
@@ -24,8 +24,8 @@ import {
   DIVISION_PRECEDENCE,
   POSTFIX_PRECEDENCE,
   COMPARISON_PRECEDENCE,
-} from '../public.ts';
-import { joinLatex, supsub } from '../tokenizer.ts';
+} from '../public';
+import { joinLatex, supsub } from '../tokenizer';
 
 /**
  * If expression is a product, collect all the terms with a

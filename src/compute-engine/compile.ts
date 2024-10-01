@@ -1,14 +1,14 @@
-import type { MathJsonIdentifier } from '../math-json/types.ts';
+import type { MathJsonIdentifier } from '../math-json/types';
 
-import type { BoxedExpression } from './public.ts';
+import type { BoxedExpression } from './public';
 
-import { isRelationalOperator } from './boxed-expression/utils.ts';
-import { isFiniteIndexableCollection } from './collection-utils.ts';
-import { normalizeIndexingSet } from './library/utils.ts';
+import { isRelationalOperator } from './boxed-expression/utils';
+import { isFiniteIndexableCollection } from './collection-utils';
+import { normalizeIndexingSet } from './library/utils';
 
-import { monteCarloEstimate } from './numerics/monte-carlo.ts';
-import { chop, factorial, gcd, lcm, limit } from './numerics/numeric.ts';
-import { gamma, gammaln } from './numerics/special-functions.ts';
+import { monteCarloEstimate } from './numerics/monte-carlo';
+import { chop, factorial, gcd, lcm, limit } from './numerics/numeric';
+import { gamma, gammaln } from './numerics/special-functions';
 
 export type CompiledType = boolean | number | string | object;
 

@@ -1,11 +1,11 @@
 import { Decimal } from 'decimal.js';
-import type { Expression } from '../../math-json/types.ts';
+import type { Expression } from '../../math-json/types';
 import {
   isValidIdentifier,
   validateIdentifier,
-} from '../../math-json/identifiers.ts';
+} from '../../math-json/identifiers';
 
-import type { Type, TypeString } from '../../common/type/types.ts';
+import type { Type, TypeString } from '../../common/type/types';
 
 import type {
   BoxedExpression,
@@ -26,35 +26,35 @@ import type {
   CanonicalOptions,
   BoxedRule,
   Sign,
-} from './public.ts';
+} from './public';
 
-import { mul } from './arithmetic-multiply.ts';
+import { mul } from './arithmetic-multiply';
 
-import { replace } from './rules.ts';
-import { simplify } from './simplify.ts';
-import { negate } from './negate.ts';
+import { replace } from './rules';
+import { simplify } from './simplify';
+import { negate } from './negate';
 
-import { NumericValue } from '../numeric-value/public.ts';
+import { NumericValue } from '../numeric-value/public';
 
-import { match } from './match.ts';
-import { _BoxedSymbolDefinition } from './boxed-symbol-definition.ts';
-import { _BoxedFunctionDefinition } from './boxed-function-definition.ts';
-import { _BoxedExpression } from './abstract-boxed-expression.ts';
-import { hashCode, normalizedUnknownsForSolve } from './utils.ts';
-import { div } from './arithmetic-divide.ts';
-import { pow } from './arithmetic-power.ts';
-import { add } from './arithmetic-add.ts';
-import { parseType } from '../../common/type/parse.ts';
-import { isSubtype } from '../../common/type/subtype.ts';
-import { isSignatureType, narrow } from '../../common/type/utils.ts';
+import { match } from './match';
+import { _BoxedSymbolDefinition } from './boxed-symbol-definition';
+import { _BoxedFunctionDefinition } from './boxed-function-definition';
+import { _BoxedExpression } from './abstract-boxed-expression';
+import { hashCode, normalizedUnknownsForSolve } from './utils';
+import { div } from './arithmetic-divide';
+import { pow } from './arithmetic-power';
+import { add } from './arithmetic-add';
+import { parseType } from '../../common/type/parse';
+import { isSubtype } from '../../common/type/subtype';
+import { isSignatureType, narrow } from '../../common/type/utils';
 import {
   positiveSign,
   nonPositiveSign,
   negativeSign,
   nonNegativeSign,
-} from './sgn.ts';
-import { BigNum } from '../numerics/bignum.ts';
-import type { OneOf } from '../../common/one-of.ts';
+} from './sgn';
+import { BigNum } from '../numerics/bignum';
+import type { OneOf } from '../../common/one-of';
 
 /**
  * BoxedSymbol

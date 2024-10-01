@@ -5,16 +5,16 @@ import {
   Expression,
   MathJsonIdentifier,
   MathJsonNumber,
-} from '../math-json/types.ts';
+} from '../math-json/types';
 
 import type {
   LibraryCategory,
   LatexDictionaryEntry,
   LatexString,
   ParseLatexOptions,
-} from './latex-syntax/public.ts';
+} from './latex-syntax/public';
 
-import { assume } from './assume.ts';
+import { assume } from './assume';
 
 import {
   DEFAULT_PRECISION,
@@ -22,7 +22,7 @@ import {
   MACHINE_TOLERANCE,
   MAX_BIGINT_DIGITS,
   SMALL_INTEGER,
-} from './numerics/numeric.ts';
+} from './numerics/numeric';
 
 import {
   AssumeResult,
@@ -43,88 +43,81 @@ import {
   AssignValue,
   AngularUnit,
   CanonicalOptions,
-} from './public.ts';
+} from './public';
 
-import { box, boxFunction } from './boxed-expression/box.ts';
+import { box, boxFunction } from './boxed-expression/box';
 
 import {
   setIdentifierDefinitions,
   getStandardLibrary,
-} from './library/library.ts';
+} from './library/library';
 
-import { DEFAULT_COST_FUNCTION } from './cost-function.ts';
-import { ExpressionMap } from './boxed-expression/expression-map.ts';
+import { DEFAULT_COST_FUNCTION } from './cost-function';
+import { ExpressionMap } from './boxed-expression/expression-map';
 import {
   asLatexString,
   isFunctionDefinition,
   isLatexString,
   isSymbolDefinition,
-} from './boxed-expression/utils.ts';
-import { boxRules } from './boxed-expression/rules.ts';
-import { BoxedString } from './boxed-expression/boxed-string.ts';
-import {
-  BoxedNumber,
-  canonicalNumber,
-} from './boxed-expression/boxed-number.ts';
-import { _BoxedSymbolDefinition } from './boxed-expression/boxed-symbol-definition.ts';
-import { BoxedFunction } from './boxed-expression/boxed-function.ts';
+} from './boxed-expression/utils';
+import { boxRules } from './boxed-expression/rules';
+import { BoxedString } from './boxed-expression/boxed-string';
+import { BoxedNumber, canonicalNumber } from './boxed-expression/boxed-number';
+import { _BoxedSymbolDefinition } from './boxed-expression/boxed-symbol-definition';
+import { BoxedFunction } from './boxed-expression/boxed-function';
 import {
   BoxedSymbol,
   makeCanonicalSymbol,
-} from './boxed-expression/boxed-symbol.ts';
-import { _BoxedExpression } from './boxed-expression/abstract-boxed-expression.ts';
+} from './boxed-expression/boxed-symbol';
+import { _BoxedExpression } from './boxed-expression/abstract-boxed-expression';
 import {
   makeFunctionDefinition,
   _BoxedFunctionDefinition,
-} from './boxed-expression/boxed-function-definition.ts';
-import {
-  Rational,
-  isMachineRational,
-  isRational,
-} from './numerics/rationals.ts';
-import { applicable, parseFunctionSignature } from './function-utils.ts';
-import { CYAN, INVERSE_RED, RESET, YELLOW } from '../common/ansi-codes.ts';
+} from './boxed-expression/boxed-function-definition';
+import { Rational, isMachineRational, isRational } from './numerics/rationals';
+import { applicable, parseFunctionSignature } from './function-utils';
+import { CYAN, INVERSE_RED, RESET, YELLOW } from '../common/ansi-codes';
 import {
   type IndexedLatexDictionary,
   getLatexDictionary,
   indexLatexDictionary,
-} from './latex-syntax/dictionary/definitions.ts';
-import { parse } from './latex-syntax/parse.ts';
+} from './latex-syntax/dictionary/definitions';
+import { parse } from './latex-syntax/parse';
 import {
   BoxedExpression,
   BoxedRule,
   EvaluateOptions,
   SemiBoxedExpression,
-} from './boxed-expression/public.ts';
+} from './boxed-expression/public';
 
 // To avoid circular dependencies, serializeToJson is forward declared. Type
 // to import it.
-import './boxed-expression/serialize.ts';
-import { SIMPLIFY_RULES } from './symbolic/simplify-rules.ts';
+import './boxed-expression/serialize';
+import { SIMPLIFY_RULES } from './symbolic/simplify-rules';
 import {
   HARMONIZATION_RULES,
   UNIVARIATE_ROOTS,
-} from './boxed-expression/solve.ts';
+} from './boxed-expression/solve';
 import {
   ExactNumericValueData,
   NumericValue,
   NumericValueData,
-} from './numeric-value/public.ts';
-import { ExactNumericValue } from './numeric-value/exact-numeric-value.ts';
-import { BigNumericValue } from './numeric-value/big-numeric-value.ts';
-import { MachineNumericValue } from './numeric-value/machine-numeric-value.ts';
+} from './numeric-value/public';
+import { ExactNumericValue } from './numeric-value/exact-numeric-value';
+import { BigNumericValue } from './numeric-value/big-numeric-value';
+import { MachineNumericValue } from './numeric-value/machine-numeric-value';
 import {
   isValidIdentifier,
   validateIdentifier,
-} from '../math-json/identifiers.ts';
-import { bigint } from './numerics/bigint.ts';
-import { Type, TypeString } from '../common/type/types.ts';
-import { isSubtype } from '../common/type/subtype.ts';
-import { isSignatureType, isValidType } from '../common/type/utils.ts';
-import { parseType } from '../common/type/parse.ts';
-import { hidePrivateProperties } from '../common/utils.ts';
-import { OneOf } from '../common/one-of.ts';
-import { BigNum } from './numerics/bignum.ts';
+} from '../math-json/identifiers';
+import { bigint } from './numerics/bigint';
+import { Type, TypeString } from '../common/type/types';
+import { isSubtype } from '../common/type/subtype';
+import { isSignatureType, isValidType } from '../common/type/utils';
+import { parseType } from '../common/type/parse';
+import { hidePrivateProperties } from '../common/utils';
+import { OneOf } from '../common/one-of';
+import { BigNum } from './numerics/bignum';
 
 /**
  *

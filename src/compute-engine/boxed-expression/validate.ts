@@ -1,12 +1,12 @@
-import type { BoxedExpression, BoxedFunctionDefinition } from './public.ts';
+import type { BoxedExpression, BoxedFunctionDefinition } from './public';
 
-import type { IComputeEngine } from '../public.ts';
+import type { IComputeEngine } from '../public';
 
-import { each, isFiniteIndexableCollection } from '../collection-utils.ts';
+import { each, isFiniteIndexableCollection } from '../collection-utils';
 
-import { flatten } from './flatten.ts';
-import { isSubtype } from '../../common/type/subtype.ts';
-import { Type } from '../../common/type/types.ts';
+import { flatten } from './flatten';
+import { isSubtype } from '../../common/type/subtype';
+import { Type } from '../../common/type/types';
 
 /**
  * Check that the number of arguments is as expected.

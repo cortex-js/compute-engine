@@ -2,7 +2,7 @@ import {
   BoxedExpression,
   IdentifierDefinitions,
   IComputeEngine,
-} from '../public.ts';
+} from '../public';
 
 export const LOGIC_LIBRARY: IdentifierDefinitions = {
   True: { wikidata: 'Q16751793', type: 'boolean', constant: true },

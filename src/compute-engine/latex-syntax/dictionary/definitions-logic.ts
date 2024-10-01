@@ -4,7 +4,7 @@ import {
   Parser,
   Serializer,
   Terminator,
-} from '../public.ts';
+} from '../public';
 import {
   getSequence,
   operator,
@@ -12,9 +12,9 @@ import {
   operand,
   operands,
   symbol,
-} from '../../../math-json/utils.ts';
-import { Expression } from '../../../math-json.ts';
-import { DEFINITIONS_INEQUALITIES } from './definitions-relational-operators.ts';
+} from '../../../math-json/utils';
+import { Expression } from '../../../math-json';
+import { DEFINITIONS_INEQUALITIES } from './definitions-relational-operators';
 
 // See https://en.wikipedia.org/wiki/List_of_logic_symbols
 

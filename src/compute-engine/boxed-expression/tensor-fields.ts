@@ -1,8 +1,8 @@
 import { Complex } from 'complex-esm';
-import type { BoxedExpression, IComputeEngine } from '../public.ts';
-import { isRelationalOperator } from './utils.ts';
-import { mul } from './arithmetic-multiply.ts';
-import { add } from './arithmetic-add.ts';
+import type { BoxedExpression, IComputeEngine } from '../public';
+import { isRelationalOperator } from './utils';
+import { mul } from './arithmetic-multiply';
+import { add } from './arithmetic-add';
 
 export type DataTypeMap = {
   float64: number;

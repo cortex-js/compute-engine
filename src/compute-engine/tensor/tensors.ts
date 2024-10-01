@@ -1,12 +1,12 @@
 import { Complex } from 'complex-esm';
-import type { BoxedExpression, IComputeEngine } from '../public.ts';
+import type { BoxedExpression, IComputeEngine } from '../public';
 import {
   DataTypeMap,
   TensorDataType,
   TensorField,
   getSupertype,
   makeTensorField,
-} from '../boxed-expression/tensor-fields.ts';
+} from '../boxed-expression/tensor-fields';
 
 /**
  * @noInheritDoc

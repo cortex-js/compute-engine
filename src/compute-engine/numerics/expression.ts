@@ -1,7 +1,7 @@
-import type { Expression } from '../../math-json.ts';
-import { isNumberExpression, isNumberObject } from '../../math-json/utils.ts';
-import { bigint } from './bigint.ts';
-import { numberToString } from './strings.ts';
+import type { Expression } from '../../math-json';
+import { isNumberExpression, isNumberObject } from '../../math-json/utils';
+import { bigint } from './bigint';
+import { numberToString } from './strings';
 
 export function bigintValue(
   expr: Expression | null | undefined

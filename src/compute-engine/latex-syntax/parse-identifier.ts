@@ -1,11 +1,11 @@
-import { Expression, MathJsonIdentifier } from '../../math-json.ts';
+import { Expression, MathJsonIdentifier } from '../../math-json';
 import {
   EMOJIS,
   isValidIdentifier,
   validateIdentifier,
-} from '../../math-json/identifiers.ts';
-import { SYMBOLS } from './dictionary/definitions-symbols.ts';
-import { Parser } from './public.ts';
+} from '../../math-json/identifiers';
+import { SYMBOLS } from './dictionary/definitions-symbols';
+import { Parser } from './public';
 
 const IDENTIFIER_PREFIX = {
   // Those are "grouping" prefix that also specify spacing

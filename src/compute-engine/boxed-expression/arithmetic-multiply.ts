@@ -1,16 +1,16 @@
-import type { BoxedExpression, IComputeEngine } from '../public.ts';
+import type { BoxedExpression, IComputeEngine } from '../public';
 
-import { order } from './order.ts';
+import { order } from './order';
 
-import { Product } from './product.ts';
-import { expandProducts } from './expand.ts';
-import { negateProduct } from './negate.ts';
-import { isSubtype } from '../../common/type/subtype.ts';
-import { NumericValue } from '../numeric-value/public.ts';
-import { ExactNumericValue } from '../numeric-value/exact-numeric-value.ts';
-import { isOne } from '../numerics/rationals.ts';
-import { asRational } from './numerics.ts';
-import { SMALL_INTEGER } from '../numerics/numeric.ts';
+import { Product } from './product';
+import { expandProducts } from './expand';
+import { negateProduct } from './negate';
+import { isSubtype } from '../../common/type/subtype';
+import { NumericValue } from '../numeric-value/public';
+import { ExactNumericValue } from '../numeric-value/exact-numeric-value';
+import { isOne } from '../numerics/rationals';
+import { asRational } from './numerics';
+import { SMALL_INTEGER } from '../numerics/numeric';
 
 /**
  * The canonical form of `Multiply`:

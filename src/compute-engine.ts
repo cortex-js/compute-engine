@@ -6,18 +6,18 @@
 // The MathJSON library is also available separately if the whole
 // Compute Engine is not required.
 
-export * from './compute-engine/public.ts';
+export * from './compute-engine/public';
 
 export const version = '{{SDK_VERSION}}';
 
-import { ComputeEngine } from './compute-engine/compute-engine.ts';
-export { ComputeEngine } from './compute-engine/compute-engine.ts';
+import { ComputeEngine } from './compute-engine/compute-engine';
+export { ComputeEngine } from './compute-engine/compute-engine';
 
-export { terminal } from './common/terminal.ts';
+export { terminal } from './common/terminal';
 export {
   highlightCodeSpan,
   highlightCodeBlock,
-} from './common/syntax-highlighter.ts';
+} from './common/syntax-highlighter';
 
 globalThis[Symbol.for('io.cortexjs.compute-engine')] = {
   ComputeEngine: ComputeEngine.prototype.constructor,

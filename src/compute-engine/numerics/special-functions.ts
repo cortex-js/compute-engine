@@ -1,5 +1,5 @@
-import type { IComputeEngine } from '../../compute-engine.ts'; // @fixme: circular dependency
-import { BigNum } from './bignum.ts';
+import type { IComputeEngine } from '../../compute-engine'; // @fixme: circular dependency
+import { BigNum } from './bignum';
 
 const gammaG = 7;
 const lanczos_7_c = [

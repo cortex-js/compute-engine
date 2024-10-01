@@ -1,5 +1,5 @@
-import { Buffer } from './buffer.ts';
-import { parseSpan, renderSpan as renderSpans } from './markdown-span.ts';
+import { Buffer } from './buffer';
+import { parseSpan, renderSpan as renderSpans } from './markdown-span';
 import type {
   TaggedBlock,
   BlockTag,
@@ -11,8 +11,8 @@ import type {
   TaggedParagraph,
   TaggedHeading,
   TaggedBlockQuote,
-} from './markdown-types.ts';
-import { StyledBlock } from './styled-text.ts';
+} from './markdown-types';
+import { StyledBlock } from './styled-text';
 
 // https://devbit-git-course.netlify.app/markdown/#text
 // https://github.github.com/gfm/#insecure-characters

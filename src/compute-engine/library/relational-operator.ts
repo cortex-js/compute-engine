@@ -1,12 +1,12 @@
-import { equalOrder } from '../boxed-expression/order.ts';
-import { isRelationalOperator } from '../boxed-expression/utils.ts';
+import { equalOrder } from '../boxed-expression/order';
+import { isRelationalOperator } from '../boxed-expression/utils';
 import {
   BoxedExpression,
   FunctionDefinition,
   IComputeEngine,
   IdentifierDefinitions,
-} from '../public.ts';
-import { flatten } from '../boxed-expression/flatten.ts';
+} from '../public';
+import { flatten } from '../boxed-expression/flatten';
 
 //   // eq, lt, leq, gt, geq, neq, approx
 //   //     shortLogicalImplies: 52, // ➔

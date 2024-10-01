@@ -1,7 +1,7 @@
-import { each } from '../collection-utils.ts';
-import { erf, erfInv } from '../numerics/special-functions.ts';
-import { IdentifierDefinitions } from '../public.ts';
-import { choose } from '../boxed-expression/expand.ts';
+import { each } from '../collection-utils';
+import { erf, erfInv } from '../numerics/special-functions';
+import { IdentifierDefinitions } from '../public';
+import { choose } from '../boxed-expression/expand';
 
 // Geometric mean:
 // Harmonic mean:

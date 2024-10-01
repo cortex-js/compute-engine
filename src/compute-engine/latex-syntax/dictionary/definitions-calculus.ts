@@ -1,4 +1,4 @@
-import { Expression } from '../../../math-json/types.ts';
+import { Expression } from '../../../math-json/types';
 import {
   operator,
   isEmptySequence,
@@ -7,9 +7,9 @@ import {
   operands,
   subs,
   symbol,
-} from '../../../math-json/utils.ts';
-import { LatexDictionary, Parser, Serializer } from '../public.ts';
-import { joinLatex } from '../tokenizer.ts';
+} from '../../../math-json/utils';
+import { LatexDictionary, Parser, Serializer } from '../public';
+import { joinLatex } from '../tokenizer';
 
 // See https://de.wikipedia.org/wiki/Formelsatz
 // for a discussion of typographical notation in Germany, Russia and France

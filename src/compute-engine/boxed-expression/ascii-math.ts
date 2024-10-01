@@ -1,6 +1,6 @@
-import type { BoxedExpression } from './public.ts';
+import type { BoxedExpression } from './public';
 
-import { isRational } from '../numerics/rationals.ts';
+import { isRational } from '../numerics/rationals';
 
 export type AsciiMathSerializer = (
   expr: BoxedExpression,

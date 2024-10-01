@@ -3,7 +3,7 @@ import type {
   FunctionDefinition,
   BoxedFunctionDefinition,
   RuntimeScope,
-} from '../public.ts';
+} from '../public';
 
 import type {
   BoxedExpression,
@@ -11,13 +11,13 @@ import type {
   CompiledExpression,
   EvaluateOptions,
   Sign,
-} from './public.ts';
+} from './public';
 
-import { applicable } from '../function-utils.ts';
-import { DEFAULT_COMPLEXITY } from './order.ts';
-import { Type } from '../../common/type/types.ts';
-import { parseType } from '../../common/type/parse.ts';
-import { OneOf } from '../../common/one-of.ts';
+import { applicable } from '../function-utils';
+import { DEFAULT_COMPLEXITY } from './order';
+import { Type } from '../../common/type/types';
+import { parseType } from '../../common/type/parse';
+import { OneOf } from '../../common/one-of';
 
 const FUNCTION_DEF_KEYS = new Set([
   // Base

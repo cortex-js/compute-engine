@@ -1,13 +1,13 @@
-import type { BoxedExpression, CanonicalOptions } from '../public.ts';
+import type { BoxedExpression, CanonicalOptions } from '../public';
 
-import { flattenOps } from './flatten.ts';
+import { flattenOps } from './flatten';
 
-import { canonicalAdd } from './arithmetic-add.ts';
-import { canonicalDivide } from './arithmetic-divide.ts';
-import { canonicalMultiply } from './arithmetic-multiply.ts';
-import { canonicalInvisibleOperator } from '../library/invisible-operator.ts';
+import { canonicalAdd } from './arithmetic-add';
+import { canonicalDivide } from './arithmetic-divide';
+import { canonicalMultiply } from './arithmetic-multiply';
+import { canonicalInvisibleOperator } from '../library/invisible-operator';
 
-import { canonicalOrder } from './order.ts';
+import { canonicalOrder } from './order';
 
 export function canonicalForm(
   expr: BoxedExpression,

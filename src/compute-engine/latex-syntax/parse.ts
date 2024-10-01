@@ -2,7 +2,7 @@ import type {
   Expression,
   ExpressionObject,
   MathJsonIdentifier,
-} from '../../math-json/types.ts';
+} from '../../math-json/types';
 import {
   getSequence,
   missingIfEmpty,
@@ -11,7 +11,7 @@ import {
   nops,
   operand,
   isEmptySequence,
-} from '../../math-json/utils.ts';
+} from '../../math-json/utils';
 
 import {
   ParseLatexOptions,
@@ -22,9 +22,9 @@ import {
   MULTIPLICATION_PRECEDENCE,
   SymbolTable,
   SymbolType,
-} from './public.ts';
-import { tokenize, tokensToString } from './tokenizer.ts';
-import { parseIdentifier, parseInvalidIdentifier } from './parse-identifier.ts';
+} from './public';
+import { tokenize, tokensToString } from './tokenizer';
+import { parseIdentifier, parseInvalidIdentifier } from './parse-identifier';
 import type {
   IndexedLatexDictionary,
   IndexedLatexDictionaryEntry,
@@ -36,8 +36,8 @@ import type {
   IndexedFunctionEntry,
   IndexedEnvironmentEntry,
   IndexedMatchfixEntry,
-} from './dictionary/definitions.ts';
-import { SMALL_INTEGER } from '../numerics/numeric.ts';
+} from './dictionary/definitions';
+import { SMALL_INTEGER } from '../numerics/numeric';
 
 /** These delimiters can be used as 'shorthand' delimiters in
  * `openTrigger` and `closeTrigger` for `matchfix` operators.

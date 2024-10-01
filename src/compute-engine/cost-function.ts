@@ -1,4 +1,4 @@
-import type { BoxedExpression } from './public.ts';
+import type { BoxedExpression } from './public';
 import type { NumericValue } from './numeric-value/public.js';
 
 /**

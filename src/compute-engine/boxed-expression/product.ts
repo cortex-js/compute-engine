@@ -1,6 +1,6 @@
-import type { BoxedExpression, IComputeEngine } from '../public.ts';
+import type { BoxedExpression, IComputeEngine } from '../public';
 
-import { order } from './order.ts';
+import { order } from './order';
 import {
   Rational,
   add,
@@ -14,14 +14,14 @@ import {
   rationalGcd,
   reducedRational,
   isZero,
-} from '../numerics/rationals.ts';
-import { asRadical } from './arithmetic-power.ts';
+} from '../numerics/rationals';
+import { asRadical } from './arithmetic-power';
 
-import { flatten } from './flatten.ts';
-import { asRational } from './numerics.ts';
-import { NumericValue } from '../numeric-value/public.ts';
-import { mul } from './arithmetic-multiply.ts';
-import { canonicalDivide } from './arithmetic-divide.ts';
+import { flatten } from './flatten';
+import { asRational } from './numerics';
+import { NumericValue } from '../numeric-value/public';
+import { mul } from './arithmetic-multiply';
+import { canonicalDivide } from './arithmetic-divide';
 
 /**
  * Group terms in a product by common term.

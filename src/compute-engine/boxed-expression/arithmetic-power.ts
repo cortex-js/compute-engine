@@ -1,11 +1,11 @@
-import type { BoxedExpression } from '../public.ts';
-import { asRational } from './numerics.ts';
+import type { BoxedExpression } from '../public';
+import { asRational } from './numerics';
 
-import type { Rational } from '../numerics/rationals.ts';
-import { canonicalAngle } from './trigonometry.ts';
-import { getImaginaryFactor } from './utils.ts';
-import { isSubtype } from '../../common/type/subtype.ts';
-import { apply, apply2 } from './apply.ts';
+import type { Rational } from '../numerics/rationals';
+import { canonicalAngle } from './trigonometry';
+import { getImaginaryFactor } from './utils';
+import { isSubtype } from '../../common/type/subtype';
+import { apply, apply2 } from './apply';
 
 function isSqrt(expr: BoxedExpression): boolean {
   return (

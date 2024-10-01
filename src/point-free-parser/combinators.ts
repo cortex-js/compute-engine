@@ -1,6 +1,6 @@
-// import { REVERSE_FANCY_UNICODE } from './characters.ts';
-import { description, literal } from './core-combinators.ts';
-import { Parser, Result, skipUntilString, Combinator } from './parsers.ts';
+// import { REVERSE_FANCY_UNICODE } from './characters';
+import { description, literal } from './core-combinators';
+import { Parser, Result, skipUntilString, Combinator } from './parsers';
 
 // function any<T>(
 //   seq: Combinator[],

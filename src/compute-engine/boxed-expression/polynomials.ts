@@ -1,5 +1,5 @@
-import type { BoxedExpression } from '../public.ts';
-import { asSmallInteger } from './numerics.ts';
+import type { BoxedExpression } from '../public';
+import { asSmallInteger } from './numerics';
 
 /**
  * Coefficient of a univariate (single variable) polynomial.

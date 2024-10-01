@@ -1,4 +1,4 @@
-import type { Expression } from '../../math-json/types.ts';
+import type { Expression } from '../../math-json/types';
 
 import {
   BoxedExpression,
@@ -16,14 +16,14 @@ import {
   isRuleStep,
   isBoxedRule,
   SemiBoxedExpression,
-} from '../public.ts';
+} from '../public';
 
-import { asLatexString, isInequality, isRelationalOperator } from './utils.ts';
+import { asLatexString, isInequality, isRelationalOperator } from './utils';
 
-import { Parser } from '../latex-syntax/public.ts';
+import { Parser } from '../latex-syntax/public';
 
-import { isPrime } from '../library/arithmetic.ts';
-import { isSubtype } from '../../common/type/subtype.ts';
+import { isPrime } from '../library/arithmetic';
+import { isSubtype } from '../../common/type/subtype';
 
 // @todo:
 // export function fixPoint(rule: Rule);

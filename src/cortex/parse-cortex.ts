@@ -1,11 +1,11 @@
-import { Expression, MathJsonIdentifier } from '../math-json/types.ts';
-import { Origin } from '../common/debug.ts';
+import { Expression, MathJsonIdentifier } from '../math-json/types';
+import { Origin } from '../common/debug';
 import {
   FatalParsingError,
   Parser,
   ParsingDiagnostic,
   Result,
-} from '../point-free-parser/parsers.ts';
+} from '../point-free-parser/parsers';
 import {
   either,
   eof,
@@ -15,30 +15,30 @@ import {
   parseString,
   sequence,
   some,
-} from '../point-free-parser/core-combinators.ts';
+} from '../point-free-parser/core-combinators';
 import {
   between,
   manySeparatedBetween,
   operatorSequence,
-} from '../point-free-parser/combinators.ts';
-import { parseSignedNumber } from '../point-free-parser/numeric-parsers.ts';
-import { parseIdentifier } from '../point-free-parser/identifier-parsers.ts';
+} from '../point-free-parser/combinators';
+import { parseSignedNumber } from '../point-free-parser/numeric-parsers';
+import { parseIdentifier } from '../point-free-parser/identifier-parsers';
 import {
   parseExtendedString,
   parseMultilineString,
   parseSingleLineString,
-} from '../point-free-parser/string-parsers.ts';
-import { Grammar } from '../point-free-parser/grammar.ts';
-// import { parseShebang } from '../fixed-point-parser/whitespace-parsers.ts';
+} from '../point-free-parser/string-parsers';
+import { Grammar } from '../point-free-parser/grammar';
+// import { parseShebang } from '../fixed-point-parser/whitespace-parsers';
 import {
   operand,
   machineValue,
   stringValue,
   isStringObject,
   mapArgs,
-} from '../math-json/utils.ts';
-import { parseWhitespace } from '../point-free-parser/whitespace-parsers.ts';
-import { escapeJsonString } from '../common/json.ts';
+} from '../math-json/utils';
+import { parseWhitespace } from '../point-free-parser/whitespace-parsers';
+import { escapeJsonString } from '../common/json';
 
 // eslint-disable-next-line prefer-const
 const grammar = new Grammar<Expression>();

@@ -1,5 +1,5 @@
-import { SignalOrigin } from './signals.ts';
-import { terminal } from './terminal.ts';
+import { SignalOrigin } from './signals';
+import { terminal } from './terminal';
 const LINEBREAK = /\r\n|[\n\r\u2028\u2029]/;
 
 export class Origin {

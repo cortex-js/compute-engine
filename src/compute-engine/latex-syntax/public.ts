@@ -1,8 +1,8 @@
-import type { Expression, MathJsonIdentifier } from '../../math-json/types.ts';
+import type { Expression, MathJsonIdentifier } from '../../math-json/types';
 import type {
   IndexedLatexDictionary,
   IndexedLatexDictionaryEntry,
-} from './dictionary/definitions.ts';
+} from './dictionary/definitions';
 
 export type SymbolType = 'symbol' | 'function' | 'unknown';
 

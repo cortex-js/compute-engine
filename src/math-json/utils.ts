@@ -5,7 +5,7 @@ import type {
   MathJsonNumber,
   MathJsonString,
   MathJsonSymbol,
-} from './types.ts';
+} from './types';
 
 export const MISSING: Expression = ['Error', "'missing'"];
 

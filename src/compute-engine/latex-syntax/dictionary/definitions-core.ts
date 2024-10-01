@@ -1,4 +1,4 @@
-import { Expression } from '../../../math-json/types.ts';
+import { Expression } from '../../../math-json/types';
 import {
   machineValue,
   mapArgs,
@@ -13,11 +13,11 @@ import {
   unhold,
   symbol,
   dictionaryFrom,
-} from '../../../math-json/utils.ts';
+} from '../../../math-json/utils';
 import {
   isEquationOperator,
   isInequalityOperator,
-} from '../../boxed-expression/utils.ts';
+} from '../../boxed-expression/utils';
 import {
   ADDITION_PRECEDENCE,
   ARROW_PRECEDENCE,
@@ -26,8 +26,8 @@ import {
   Parser,
   Serializer,
   Terminator,
-} from '../public.ts';
-import { joinLatex } from '../tokenizer.ts';
+} from '../public';
+import { joinLatex } from '../tokenizer';
 
 // function isSpacingToken(token: string): boolean {
 //   return (

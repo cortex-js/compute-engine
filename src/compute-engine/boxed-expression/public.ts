@@ -6,25 +6,25 @@ import type {
   MathJsonSymbol,
   MathJsonFunction,
   MathJsonIdentifier,
-} from '../../math-json.ts';
+} from '../../math-json';
 
 import type {
   SerializeLatexOptions,
   LatexDictionaryEntry,
   ParseLatexOptions,
-} from '../latex-syntax/public.ts';
+} from '../latex-syntax/public';
 
-import type { IndexedLatexDictionary } from '../latex-syntax/dictionary/definitions.ts';
-import { Rational } from '../numerics/rationals.ts';
+import type { IndexedLatexDictionary } from '../latex-syntax/dictionary/definitions';
+import { Rational } from '../numerics/rationals';
 import {
   ExactNumericValueData,
   NumericValue,
   NumericValueData,
-} from '../numeric-value/public.ts';
-import { BigNum, IBigNum } from '../numerics/bignum.ts';
-import { Type, TypeString } from '../../common/type/types.ts';
-import { AbstractTensor } from '../tensor/tensors.ts';
-import { OneOf } from '../../common/one-of.ts';
+} from '../numeric-value/public';
+import { BigNum, IBigNum } from '../numerics/bignum';
+import { Type, TypeString } from '../../common/type/types';
+import { AbstractTensor } from '../tensor/tensors';
+import { OneOf } from '../../common/one-of';
 
 /**
  * :::info[THEORY OF OPERATIONS]

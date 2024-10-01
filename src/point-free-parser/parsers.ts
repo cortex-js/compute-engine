@@ -1,4 +1,4 @@
-import { codePointLength, isLinebreak } from './characters.ts';
+import { codePointLength, isLinebreak } from './characters';
 
 export type DiagnosticCode =
   | 'binary-number-expected'

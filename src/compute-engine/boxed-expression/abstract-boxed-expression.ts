@@ -1,6 +1,6 @@
 import { Decimal } from 'decimal.js';
 
-import { Expression, MathJsonIdentifier } from '../../math-json/types.ts';
+import { Expression, MathJsonIdentifier } from '../../math-json/types';
 
 import type {
   BoxedBaseDefinition,
@@ -21,15 +21,15 @@ import type {
   Sign,
   SimplifyOptions,
   Substitution,
-} from './public.ts';
+} from './public';
 
-import type { LatexString } from '../public.ts';
+import type { LatexString } from '../public';
 
-import type { NumericValue } from '../numeric-value/public.ts';
+import type { NumericValue } from '../numeric-value/public';
 
-import type { SmallInteger } from '../numerics/numeric.ts';
+import type { SmallInteger } from '../numerics/numeric';
 
-import { compileToJavascript } from '../compile.ts';
+import { compileToJavascript } from '../compile';
 
 import {
   getApplyFunctionStyle,
@@ -39,11 +39,11 @@ import {
   getNumericSetStyle,
   getPowerStyle,
   getRootStyle,
-} from '../latex-syntax/serializer-style.ts';
-import { serializeLatex } from '../latex-syntax/serializer.ts';
-import type { SerializeLatexOptions } from '../latex-syntax/public.ts';
+} from '../latex-syntax/serializer-style';
+import { serializeLatex } from '../latex-syntax/serializer';
+import type { SerializeLatexOptions } from '../latex-syntax/public';
 
-import { AsciiMathOptions, toAsciiMath } from './ascii-math.ts';
+import { AsciiMathOptions, toAsciiMath } from './ascii-math';
 
 /**
  * _BoxedExpression
@@ -816,7 +816,7 @@ export function getSubexpressions(
 // To avoid circular dependency issues we have to import the following
 // function *after* the class definition
 
-import { serializeJson } from './serialize.ts';
-import { Type } from '../../common/type/types.ts';
-import { cmp, eq, same } from './compare.ts';
-import { AbstractTensor } from '../tensor/tensors.ts';
+import { serializeJson } from './serialize';
+import { Type } from '../../common/type/types';
+import { cmp, eq, same } from './compare';
+import { AbstractTensor } from '../tensor/tensors';

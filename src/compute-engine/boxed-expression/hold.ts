@@ -1,6 +1,6 @@
-import type { BoxedExpression } from './public.ts';
+import type { BoxedExpression } from './public';
 
-import { flattenOps } from './flatten.ts';
+import { flattenOps } from './flatten';
 
 /** Apply the function `f` to each operand of the expression `expr`,
  * account for the 'hold' property of the function definition:

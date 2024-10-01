@@ -1,15 +1,15 @@
-import { parseType } from '../../common/type/parse.ts';
-import { isSubtype } from '../../common/type/subtype.ts';
-import { ListType } from '../../common/type/types.ts';
-import { isBoxedTensor } from '../boxed-expression/boxed-tensor.ts';
-import { checkArity } from '../boxed-expression/validate.ts';
-import { each, isFiniteIndexableCollection } from '../collection-utils.ts';
+import { parseType } from '../../common/type/parse';
+import { isSubtype } from '../../common/type/subtype';
+import { ListType } from '../../common/type/types';
+import { isBoxedTensor } from '../boxed-expression/boxed-tensor';
+import { checkArity } from '../boxed-expression/validate';
+import { each, isFiniteIndexableCollection } from '../collection-utils';
 import {
   BoxedExpression,
   IComputeEngine,
   IdentifierDefinition,
   IdentifierDefinitions,
-} from '../public.ts';
+} from '../public';
 
 export const LINEAR_ALGEBRA_LIBRARY: IdentifierDefinitions[] = [
   {

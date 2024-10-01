@@ -1,7 +1,7 @@
-import type { BoxedExpression } from './public.ts';
+import type { BoxedExpression } from './public';
 
-import { maxDegree, revlex, totalDegree } from './polynomials.ts';
-import { asRadical } from './arithmetic-power.ts';
+import { maxDegree, revlex, totalDegree } from './polynomials';
+import { asRadical } from './arithmetic-power';
 
 export type Order = 'lex' | 'dexlex' | 'grevlex' | 'elim';
 

@@ -1,4 +1,4 @@
-import { ErrorSignal, Signal } from '../common/signals.ts';
+import { ErrorSignal, Signal } from '../common/signals';
 
 export class CortexError {
   signal: ErrorSignal;

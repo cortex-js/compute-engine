@@ -5,16 +5,16 @@ import {
   operand,
   operands,
   stringValue,
-} from '../../../math-json/utils.ts';
-import { joinLatex } from '../tokenizer.ts';
-import { Expression } from '../../../math-json/types.ts';
+} from '../../../math-json/utils';
+import { joinLatex } from '../tokenizer';
+import { Expression } from '../../../math-json/types';
 import {
   LatexDictionary,
   Serializer,
   LatexString,
   Parser,
   COMPARISON_PRECEDENCE,
-} from '../public.ts';
+} from '../public';
 
 export const DEFINITIONS_SETS: LatexDictionary = [
   // Constants

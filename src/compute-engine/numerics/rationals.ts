@@ -1,9 +1,9 @@
-import { canonicalInteger, gcd, lcm, SmallInteger } from './numeric.ts';
+import { canonicalInteger, gcd, lcm, SmallInteger } from './numeric';
 import {
   gcd as bigGcd,
   lcm as bigLcm,
   canonicalInteger as bigCanonicalInteger,
-} from './numeric-bigint.ts';
+} from './numeric-bigint';
 
 /**
  * @category Boxed Expression

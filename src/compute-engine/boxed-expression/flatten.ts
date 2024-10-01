@@ -1,4 +1,4 @@
-import type { BoxedExpression } from '../public.ts';
+import type { BoxedExpression } from '../public';
 
 /**
  *

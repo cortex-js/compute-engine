@@ -1,5 +1,5 @@
-import { NumericValue } from '../numeric-value/public.ts';
-import { BoxedExpression } from './public.ts';
+import { NumericValue } from '../numeric-value/public';
+import { BoxedExpression } from './public';
 
 /**
  * Structural equality of boxed expressions.

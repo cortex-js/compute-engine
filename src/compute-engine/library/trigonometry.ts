@@ -1,19 +1,19 @@
 import { Decimal } from 'decimal.js';
 
-import { IdentifierDefinitions, FunctionDefinition } from '../public.ts';
+import { IdentifierDefinitions, FunctionDefinition } from '../public';
 
-import { bignumPreferred } from '../boxed-expression/utils.ts';
-import { checkArity } from '../boxed-expression/validate.ts';
+import { bignumPreferred } from '../boxed-expression/utils';
+import { checkArity } from '../boxed-expression/validate';
 import {
   constructibleValues,
   evalTrig,
   processInverseFunction,
   trigSign,
-} from '../boxed-expression/trigonometry.ts';
+} from '../boxed-expression/trigonometry';
 
-import { apply2 } from '../boxed-expression/apply.ts';
+import { apply2 } from '../boxed-expression/apply';
 
-import { reducedRational } from '../numerics/rationals.ts';
+import { reducedRational } from '../numerics/rationals';
 
 //
 // Note: Names of trigonometric functions follow ISO 80000 Section 13

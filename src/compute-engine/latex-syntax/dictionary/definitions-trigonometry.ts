@@ -1,11 +1,11 @@
-import { Expression } from '../../../math-json/types.ts';
+import { Expression } from '../../../math-json/types';
 import {
   ExpressionParseHandler,
   LatexDictionary,
   MULTIPLICATION_PRECEDENCE,
   Parser,
   Terminator,
-} from '../public.ts';
+} from '../public';
 
 /**
  * Trigonometric functions have some special conventions that require a

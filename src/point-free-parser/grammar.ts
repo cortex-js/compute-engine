@@ -1,5 +1,5 @@
-import { Combinator, Parser, Result, Rules } from './parsers.ts';
-import { parseShebang } from './whitespace-parsers.ts';
+import { Combinator, Parser, Result, Rules } from './parsers';
+import { parseShebang } from './whitespace-parsers';
 
 export class Grammar<IR> implements Rules {
   private rules: { [name: string]: (Parser) => Result } = {};
