@@ -40,12 +40,12 @@ export type TestCase =
 const CANONICALIZATION_TEST_CASES: TestCase[] = [
   [
     `
-            // Arithmetic operations
-            // - integers and float are simplified
-            // - rational and square root of integers are preserved
-            // (same behavior as Mathematica)
-            //
-          `,
+              // Arithmetic operations
+              // - integers and float are simplified
+              // - rational and square root of integers are preserved
+              // (same behavior as Mathematica)
+              //
+            `,
   ],
   ['-23', -23, 'Integers should stay as is'],
   ['0.3', 0.3, 'Floating point should stay as is'],
@@ -80,20 +80,20 @@ const CANONICALIZATION_TEST_CASES: TestCase[] = [
 
   [
     `
-            //
-            // Numeric literals
-            //
-            `,
+              //
+              // Numeric literals
+              //
+              `,
   ],
   ['\\sqrt3 - 2', '\\sqrt3 - 2', 'Should stay exact'],
   ['\\frac{\\sqrt5+1}{4}', '\\frac{\\sqrt5}{4}+\\frac14', 'Should stay exact'],
 
   [
     `
-            //
-            // Addition and Subtraction
-            //
-          `,
+              //
+              // Addition and Subtraction
+              //
+            `,
   ],
   ['-2+x', 'x-2'],
   ['x-(-1)', 'x+1'],
@@ -101,10 +101,10 @@ const CANONICALIZATION_TEST_CASES: TestCase[] = [
 
   [
     `
-            //
-            // Multiplication
-            //
-          `,
+              //
+              // Multiplication
+              //
+            `,
   ],
   ['1*x', 'x'],
   ['-1*x', '-x'],
@@ -113,30 +113,30 @@ const CANONICALIZATION_TEST_CASES: TestCase[] = [
 
   [
     `
-            //
-            // Combine Like terms
-            //
-          `,
+              //
+              // Combine Like terms
+              //
+            `,
   ],
   ['x+2*x', '3*x'],
   ['2*\\pi * x^2-\\pi * x^2+2*\\pi', '\\pi * x^2+ 2\\pi'],
 
   [
     `
-            //
-            // Power of Fraction in Denominator
-            //
-          `,
+              //
+              // Power of Fraction in Denominator
+              //
+            `,
   ],
   ['x/(y/2)^3', '(8*x)/y^3'],
   ['x/(2/y)^3', 'x/(2/y)^3'],
 
   [
     `
-            //
-            // Double Powers
-            //
-          `,
+              //
+              // Double Powers
+              //
+            `,
   ],
   ['(x^1)^3', 'x^3'],
   ['(x^2)^{-2}', 'x^{-4}'],
@@ -152,10 +152,10 @@ const CANONICALIZATION_TEST_CASES: TestCase[] = [
 
   [
     `
-            //
-            // Ln/Log
-            //
-          `,
+              //
+              // Ln/Log
+              //
+            `,
   ],
   ['\\ln(3)+\\ln(\\frac{1}{3})', 0],
   ['\\frac{\\ln(9)}{\\ln(3)}', 2],
@@ -169,10 +169,10 @@ const CANONICALIZATION_TEST_CASES: TestCase[] = [
 
   [
     `
-            //
-            // Others
-            //
-          `,
+              //
+              // Others
+              //
+            `,
   ],
   ['2\\left(13.1+x\\right)-\\left(26.2+2x\\right)', 0],
   ['\\sqrt{3}(\\sqrt2x + x)', '(\\sqrt3+\\sqrt6)x'],
@@ -185,58 +185,58 @@ const CANONICALIZATION_TEST_CASES: TestCase[] = [
 const RULE_TEST_CASES: TestCase[] = [
   [
     `
-            //
-            // Other simplifications
-            //
-          `,
+              //
+              // Other simplifications
+              //
+            `,
   ],
-  ['e e^x e^{-x}', 'e'], // up to 👍x^n*x^m -> x^{n+m}; ({ x, n, m }) => (!x.is(0) ||             n.add(m).isNegative === true ||             n.mul(m).isPositive === true) &&             (n.isInteger === true ||                 m.isInteger === true ||                 n.add(m).isRational === false ||                 x.isNonNegative === true)
-  ['e^x e^{-x}', 1], // 👍 x^n*x^m -> x^{n+m}; ({ x, n, m }) => (x.isEqual(0) === false ||             n.add(m).isNegative === true ||             n.mul(m).isPositive === true) &&             (n.isInteger === true ||                 m.isInteger === true ||                 n.add(m).isRational === false ||                 x.isNonNegative === true)
-  ['\\sqrt[4]{16b^{4}}', '2b'],
+  ['e e^x e^{-x}', 'e'], // 🙁 e * e^x * e^(-x)
+  ['e^x e^{-x}', 1], // 👍 x^n*x^m -> x^{n+m}; ({ x, n, m }) => (!x.is(0) ||             n.add(m).isNegative === true ||             n.mul(m).isPositive === true) &&             (n.isInteger === true ||                 m.isInteger === true ||                 n.add(m).isRational === false ||                 x.isNonNegative === true)
+  ['\\sqrt[4]{16b^{4}}', '2b'], // 🙁 root(4)(16b^4)
 
   [
     `
-            //
-            // Negative Signs and Powers
-            //
-          `,
+              //
+              // Negative Signs and Powers
+              //
+            `,
   ],
-  ['(-x)^3', '-(x^3)'],
-  ['(-x)^{4/3}', 'x^{4/3}'], // 👍 (-x)^n:even -> x^n
+  ['(-x)^3', '-(x^3)'], // 🙁 (-x)^3
+  ['(-x)^{4/3}', 'x^{4/3}'], // 🙁 (-x)^(4/3)
   ['(-x)^4', 'x^4'],
-  ['(-x)^{3/5}', '-(x^{3/5})'],
+  ['(-x)^{3/5}', '-(x^{3/5})'], // 🙁 (-x)^(3/5)
   ['1/x-1/(x+1)', '1/(x(x+1))'], // 🙁 1 / (x^2 + x)
-  ['\\sqrt[3]{-2}', '-\\sqrt[3]{2}'], // 🙁 NaN
+  ['\\sqrt[3]{-2}', '-\\sqrt[3]{2}'], // 🙁 root(3)(-2)
 
   [
     `
-            //
-            // Common Denominator
-            //
-          `,
+              //
+              // Common Denominator
+              //
+            `,
   ],
   ['3/x-1/x', '2/x'],
   ['1/(x+1)-1/x', '-1/(x(x+1))'], // 🙁 -1 / (x^2 + x)
 
   [
     `
-            //
-            // Distribute
-            //
-          `,
+              //
+              // Distribute
+              //
+            `,
   ],
   ['x*y+(x+1)*y', '2xy+y'],
-  ['(x+1)^2-x^2', '2x+1'],
+  ['(x+1)^2-x^2', '2x+1'], // 🙁 -x^2 + (x + 1)^2
   ['2*(x+h)^2-2*x^2', '4xh+2h^2'], // 🙁 -2x^2 + 2(h + x)^2
 
   [
     `
-            //
-            // Division
-            //
-          `,
+              //
+              // Division
+              //
+            `,
   ],
-  ['x/x', 'x/x'], // 🙁 with all rules: 1
+  ['x/x', 'x/x'],
   ['\\pi/\\pi', 1],
   ['(\\pi+1)/(\\pi+1)', 1],
   ['1/(1/0)', NaN],
@@ -244,7 +244,7 @@ const RULE_TEST_CASES: TestCase[] = [
   ['1/(1/x)', '1/(1/x)'],
   ['y/(1/2)', '2*y'],
   ['x/(1/(-\\pi))', '-\\pi * x'],
-  ['x/(a/\\pi)', '\\pi * x/a'],
+  ['x/(a/\\pi)', '\\pi * x/a'], // 🙁 (pi * x) / a
   ['x/(a/b)', 'x/(a/b)'],
   ['(x/y)/(\\pi/2)', '(2*x)/(\\pi * y)'],
   ['2/3*5/x', '10/(3*x)'],
@@ -257,35 +257,35 @@ const RULE_TEST_CASES: TestCase[] = [
 
   [
     `
-            //
-            // Operations Involving 0
-            //
-          `,
+              //
+              // Operations Involving 0
+              //
+            `,
   ],
   ['0*\\pi', 0],
   ['x-0', 'x'],
   ['\\sin(x)+0', '\\sin(x)'],
   ['0/0', NaN],
   ['2/0', NaN],
-  ['0^\\pi', 0], // 🙁 0^(pi)
-  ['0^{-2}', NaN], // 🙁 +oo
-  ['0^{-\\pi}', NaN], // 🙁 0^(-pi)
-  ['0^0', NaN], // 🙁 1
+  ['0^\\pi', 0],
+  ['0^{-2}', NaN], // 🙁 ~oo
+  ['0^{-\\pi}', NaN], // 🙁 ~oo
+  ['0^0', NaN],
   ['2^0', 1],
   ['\\pi^0', 1],
   ['0/2', 0],
   ['\\sqrt{0}', 0],
-  ['\\sqrt[n]{0}', 0], // 🙁 root(0)(n)
+  ['\\sqrt[n]{0}', 0], // 🙁 root(n)(0)
   ['e^0', 1],
   ['|0|', 0],
   ['-0', 0],
 
   [
     `
-            //
-            // Ln
-            //
-          `,
+              //
+              // Ln
+              //
+            `,
   ],
   ['\\ln(xy)-\\ln(x)', '\\ln(y)'], // 👍 \ln(x) - \ln(y) -> \ln(x/y)
   ['\\ln(y/x)+\\ln(x)', '\\ln(x*y/x)'], // 🙁 ln(y)
@@ -293,15 +293,15 @@ const RULE_TEST_CASES: TestCase[] = [
   ['e^{\\ln(x)-2*x}', 'x*e^{-2*x}'], // 👍 e^{\ln(x)+y} -> x*e^y
   ['e^\\ln(x)', 'x'], // 👍 e^\ln(x) -> x
   ['e^{3\\ln(x)}', 'x^3'], // 👍 e^{\ln(x)*y} -> x^y
-  ['e^{\\ln(x)/3}', 'x^{1/3}'], // 👍 e^{\ln(x)/y} -> x^{1/y}
+  ['e^{\\ln(x)/3}', 'x^{1/3}'], // 👍 e^{\ln(x)*y} -> x^y
   ['\\ln(e^x*y)', 'x+\\ln(y)'], // 👍 \ln(e^x*y) -> x+\ln(y)
 
   [
     `
-            //
-            // log
-            //
-          `,
+              //
+              // log
+              //
+            `,
   ],
   ['\\log_c(xy)-\\log_c(x)', '\\log_c(y)'], // 👍 \log_c(x) - \log_c(y) -> \log_c(x/y)
   ['\\log_c(y/x)+\\log_c(x)', '\\log_c(xy/x)'], // 🙁 log(y, c)
@@ -309,7 +309,7 @@ const RULE_TEST_CASES: TestCase[] = [
   ['c^{\\log_c(x)-2*x}', 'x c^{-2*x}'], // 👍 c^{\log_c(x)+y} -> x*c^y
   ['c^\\log_c(x)', 'x'], // 👍 c^{\log_c(x)} -> x
   ['c^{3\\log_c(x)}', 'x^3'], // 👍 c^{\log_c(x)*y} -> x^y
-  ['c^{\\log_c(x)/3}', 'x^{1/3}'], // 👍 c^{\log_c(x)/y} -> x^{1/y}
+  ['c^{\\log_c(x)/3}', 'x^{1/3}'], // 👍 c^{\log_c(x)*y} -> x^y
   ['\\log_c(c^x*y)', 'x+\\log_c(y)'], // 👍 \log_c(c^x*y) -> x+\log_c(y)
   ['\\log_c(c^x/y)', 'x-\\log_c(y)'], // 👍 \log_c(c^x/y) -> x-\log_c(y)
   ['\\log_c(y/c^x)', '\\log_c(y)-x'], // 👍 \log_c(y/c^x) -> \log_c(y)-x
@@ -321,10 +321,10 @@ const RULE_TEST_CASES: TestCase[] = [
 
   [
     `
-            //
-            // Change of Base
-            //
-          `,
+              //
+              // Change of Base
+              //
+            `,
   ],
   ['\\log_c(a)*\\ln(a)', '\\ln(c)'], // 👍 \log_c(a)*\ln(a) -> \ln(c)
   ['\\log_c(a)/\\log_c(b)', '\\ln(a)/\\ln(b)'], // 👍 \log_c(a)/\log_c(b) -> \ln(a)/\ln(b)
@@ -333,9 +333,9 @@ const RULE_TEST_CASES: TestCase[] = [
 
   [
     `
-            //
-            // Logs and Infinity
-          `,
+              //
+              // Logs and Infinity
+            `,
   ],
   ['\\ln(\\infty)', '\\infty'],
   ['\\log_4(\\infty)', '\\infty'],
@@ -343,10 +343,10 @@ const RULE_TEST_CASES: TestCase[] = [
 
   [
     `
-            //
-            // Absolute Value
-            //
-          `,
+              //
+              // Absolute Value
+              //
+            `,
   ],
   ['|\\pi|', '\\pi'],
   ['|\\infty|', '\\infty'],
@@ -358,15 +358,15 @@ const RULE_TEST_CASES: TestCase[] = [
   ['|\\frac{2}{x}|', '\\frac{2}{|x|}'], // 👍 |\frac{x}{y}| -> \frac{|x|}{|y|}
   ['|x|^4', 'x^4'], // 👍 |x|^n -> x^n; ({ n }) => n.isEven === true
   ['|x^3|', '|x|^3'], // 👍 |x^n| -> |x|^n; ({ n }) => n.isOdd === true || n.isRational === false
-  ['|x|^{4/3}', 'x^{4/3}'], // 👍 |x|^n -> x^n; ({ n }) => n.isEven === true
+  ['|x|^{4/3}', 'x^{4/3}'], // 🙁 |x|^(4/3)
   ['|x^{3/5}|', '|x|^{3/5}'], // 🙁 |x^(3/5)|
 
   [
     `
-            //
-            // Even Functions and Absolute Value
-            //
-          `,
+              //
+              // Even Functions and Absolute Value
+              //
+            `,
   ],
   ['\\cos(|x+2|)', '\\cos(x+2)'], // 👍 \cos(|x|) -> \cos(x)
   ['\\sec(|x+2|)', '\\sec(x+2)'], // 👍 \sec(|x|) -> \sec(x)
@@ -375,10 +375,10 @@ const RULE_TEST_CASES: TestCase[] = [
 
   [
     `
-            //
-            // Odd Functions and Absolute Value
-            //
-          `,
+              //
+              // Odd Functions and Absolute Value
+              //
+            `,
   ],
   ['|\\sin(x)|', '\\sin(|x|)'], // 👍 |\sin(x)| -> \sin(|x|)
   ['|\\tan(x)|', '\\tan(|x|)'], // 👍 |\tan(x)| -> \tan(|x|)
@@ -399,66 +399,66 @@ const RULE_TEST_CASES: TestCase[] = [
 
   [
     `
-            //
-            // Powers and Infinity
-            //
-          `,
+              //
+              // Powers and Infinity
+              //
+            `,
   ],
   ['2^\\infty', '\\infty'],
   ['0.5^\\infty', 0],
-  ['\\pi^\\infty', '\\infty'],
-  ['e^\\infty', '\\infty'],
-  ['\\pi^{-\\infty}', 0],
-  ['e^{-\\infty}', 0],
+  ['\\pi^\\infty', '\\infty'], // 🙁 pi^(+oo)
+  ['e^\\infty', '\\infty'], // 🙁 e^(+oo)
+  ['\\pi^{-\\infty}', 0], // 🙁 pi^(-oo)
+  ['e^{-\\infty}', 0], // 🙁 e^(-oo)
   ['2^{-\\infty}', 0],
   ['(1/2)^{-\\infty}', '\\infty'],
-  ['(-\\infty)^4', '\\infty'],
-  ['(\\infty)^{1.4}', '\\infty'],
-  ['(-\\infty)^{1/3}', '-\\infty'], // 🙁 +oo
+  ['(-\\infty)^4', '\\infty'], // 🙁 (-oo)^4
+  ['(\\infty)^{1.4}', '\\infty'], // 🙁 +oo^(1.4)
+  ['(-\\infty)^{1/3}', '-\\infty'], // 🙁 root(3)(-oo)
   ['(-\\infty)^{-1}', 0],
-  ['(\\infty)^{-2}', 0],
-  ['1^{-\\infty}', NaN],
-  ['1^{\\infty}', NaN],
+  ['(\\infty)^{-2}', 0], // 👍 \infty^a -> 0; ({ a }) => a.isNegative === true
+  ['1^{-\\infty}', NaN], // 🙁 1
+  ['1^{\\infty}', NaN], // 🙁 1
   ['\\infty^0', NaN], // 🙁 1
-  ['\\sqrt[4]{\\infty}', '\\infty'],
+  ['\\sqrt[4]{\\infty}', '\\infty'], // 🙁 root(4)(+oo)
 
   [
     `
-            //
-            // Multiplication and Infinity
-            //
-          `,
+              //
+              // Multiplication and Infinity
+              //
+            `,
   ],
-  ['0*\\infty', NaN],
-  ['0*(-\\infty)', NaN],
+  ['0*\\infty', NaN], // 🙁 +oo
+  ['0*(-\\infty)', NaN], // 🙁 +oo
   ['0.5*\\infty', '\\infty'],
-  ['(-0.5)*(-\\infty)', '\\infty'], // 🙁 -oo
-  ['(-0.5)*\\infty', '-\\infty'],
-  ['\\pi * (-\\infty)', '-\\infty'], // 🙁 +oo
+  ['(-0.5)*(-\\infty)', '\\infty'],
+  ['(-0.5)*\\infty', '-\\infty'], // 🙁 +oo
+  ['\\pi * (-\\infty)', '-\\infty'],
 
   [
     `
-            //
-            // Division and Infinity
-            //
-          `,
+              //
+              // Division and Infinity
+              //
+            `,
   ],
   ['(-\\infty)/\\infty', NaN],
-  ['\\infty/0.5', '\\infty'],
-  ['\\infty/(-2)', '-\\infty'],
-  ['\\infty/0', NaN], // 🙁 +oo
-  ['(-\\infty)/1.7', '-\\infty'],
-  ['(-\\infty)/(1-3)', '\\infty'],
+  ['\\infty/0.5', '\\infty'], // 👍 \infty/x -> \infty; ({ x }) => x.isPositive === true && x.isFinite === true
+  ['\\infty/(-2)', '-\\infty'], // 👍 \infty/x -> -\infty; ({ x }) => x.isNegative === true && x.isFinite === true
+  ['\\infty/0', NaN], // 🙁 ~oo
+  ['(-\\infty)/1.7', '-\\infty'], // 👍 (-\infty)/x -> -\infty; ({ x }) => x.isPositive === true && x.isFinite === true
+  ['(-\\infty)/(1-3)', '\\infty'], // 🙁 1
   ['2/\\infty', 0],
   ['-100/(-\\infty)', 0],
   ['0/\\infty', 0],
 
   [
     `
-            //
-            // Addition and Subtraction and Infinity
-            //
-          `,
+              //
+              // Addition and Subtraction and Infinity
+              //
+            `,
   ],
   ['\\infty-\\infty', NaN],
   ['-\\infty-\\infty', '-\\infty'],
@@ -471,10 +471,10 @@ const RULE_TEST_CASES: TestCase[] = [
 
   [
     `
-            //
-            // Trig and Infinity
-            //
-          `,
+              //
+              // Trig and Infinity
+              //
+            `,
   ],
   ['\\sin(\\infty)', NaN], // 👍 \sin(x) -> \operatorname{NaN}; ({ x }) => x.isInfinity === true
   ['\\cos(\\infty)', NaN], // 👍 \cos(x) -> \operatorname{NaN}; ({ x }) => x.isInfinity === true
@@ -491,17 +491,17 @@ const RULE_TEST_CASES: TestCase[] = [
 
   [
     `
-            //
-            // Inverse Trig and Infinity
-            //
-          `,
+              //
+              // Inverse Trig and Infinity
+              //
+            `,
   ],
   ['\\arcsin(\\infty)', NaN], // 👍 \arcsin(\infty) -> \operatorname{NaN}
   ['\\arccos(\\infty)', NaN], // 👍 \arccos(\infty) -> \operatorname{NaN}
   ['\\arcsin(-\\infty)', NaN], // 👍 \arcsin(-\infty) -> \operatorname{NaN}
   ['\\arccos(-\\infty)', NaN], // 👍 \arccos(-\infty) -> \operatorname{NaN}
   ['\\arctan(\\infty)', '\\frac{\\pi}{2}'], // 👍 \arctan(\infty) -> \frac{\pi}{2}
-  ['\\arctan(-\\infty)', '-\\frac{\\pi}{2}'], // 🙁 -pi / 2
+  ['\\arctan(-\\infty)', '-\\frac{\\pi}{2}'], // 👍 \arctan(-\infty) -> -\frac{\pi}{2}
   ['\\arcctg(\\infty)', 0], // 👍 \arcctg(\infty) -> 0
   ['\\arcctg(-\\infty)', '\\pi'], // 👍 \arcctg(-\infty) -> \pi
   ['\\arcsec(\\infty)', '\\frac{\\pi}{2}'], // 👍 \arcsec(\infty) -> \frac{\pi}{2}
@@ -511,10 +511,10 @@ const RULE_TEST_CASES: TestCase[] = [
 
   [
     `
-            //
-            // Hyperbolic Trig and Infinity
-            //
-          `,
+              //
+              // Hyperbolic Trig and Infinity
+              //
+            `,
   ],
   ['\\sinh(\\infty)', '\\infty'], // 👍 \sinh(\infty) -> \infty
   ['\\sinh(-\\infty)', '-\\infty'], // 👍 \sinh(-\infty) -> -\infty
@@ -531,19 +531,19 @@ const RULE_TEST_CASES: TestCase[] = [
 
   [
     `
-            //
-            // Inverse Hyperbolic Trig and Infinity
-            //
-          `,
+              //
+              // Inverse Hyperbolic Trig and Infinity
+              //
+            `,
   ],
-  ['\\arsinh(\\infty)', '\\infty'], // 👍 \arsinh(\infty) -> \infty
+  ['\\arsinh(\\infty)', '\\infty'],
   ['\\arsinh(-\\infty)', '-\\infty'], // 👍 \arsinh(-\infty) -> -\infty
-  ['\\arcosh(\\infty)', '\\infty'], // 👍 \arcosh(\infty) -> \infty
-  ['\\arcosh(-\\infty)', NaN], // 👍 \arcosh(-\infty) -> \operatorname{NaN}
+  ['\\arcosh(\\infty)', '\\infty'],
+  ['\\arcosh(-\\infty)', NaN],
   ['\\artanh(\\infty)', NaN], // 👍 \artanh(x); ({ x }) => x.isInfinity === true
   ['\\artanh(-\\infty)', NaN], // 👍 \artanh(x); ({ x }) => x.isInfinity === true
-  ['\\operatorname{arcoth}(\\infty)', NaN], // 🙁 0
-  ['\\operatorname{arcoth}(-\\infty)', NaN], // 🙁 pi
+  ['\\operatorname{arcoth}(\\infty)', NaN], // 🙁 Arccot(+oo)
+  ['\\operatorname{arcoth}(-\\infty)', NaN], // 🙁 Arccot(-oo)
   ['\\arsech(\\infty)', NaN], // 👍 \arsech(x); ({ x }) => x.isInfinity === true
   ['\\arsech(-\\infty)', NaN], // 👍 \arsech(x); ({ x }) => x.isInfinity === true
   ['\\arcsch(\\infty)', NaN], // 👍 \arcsch(x); ({ x }) => x.isInfinity === true
@@ -551,31 +551,31 @@ const RULE_TEST_CASES: TestCase[] = [
 
   [
     `
-            //
-            // Negative Exponents and Denominator
-            //
-          `,
+              //
+              // Negative Exponents and Denominator
+              //
+            `,
   ],
-  ['\\frac{2}{\\pi^{-2}}', '2\\pi^2'], // 🙁 2 / pi^(-2)
-  ['\\frac{2}{x\\pi^{-2}}', '\\frac{2}{x} \\pi^2'], // 🙁 2 / (x * pi^(-2))
-  ['(3/\\pi)^{-1}', '\\pi/3'],
-  ['(3/x)^{-1}', '(3/x)^{-1}'], // 🙁 with all rules: x / 3
+  ['\\frac{2}{\\pi^{-2}}', '2\\pi^2'],
+  ['\\frac{2}{x\\pi^{-2}}', '\\frac{2}{x} \\pi^2'], // 🙁 (2pi^2) / x
+  ['(3/\\pi)^{-1}', '\\pi/3'], // 🙁 (3 / pi)^(-1)
+  ['(3/x)^{-1}', '(3/x)^{-1}'],
   ['(x/\\pi)^{-3}', '\\pi^3 / x^3'], // 🙁 (x / pi)^(-3)
   ['(x/y)^{-3}', '(x/y)^{-3}'],
-  ['(x^2/\\pi^3)^{-2}', '\\pi^6/x^4'],
+  ['(x^2/\\pi^3)^{-2}', '\\pi^6/x^4'], // 🙁 (x^2 / pi^3)^(-2)
 
   [
     `
-            //
-            // Powers: Division Involving x
-            //
-          `,
+              //
+              // Powers: Division Involving x
+              //
+            `,
   ],
   ['x/x^3', '1/x^2'],
   ['(2*x)/x^5', '2/x^4'],
   ['x/x^{-2}', 'x/x^{-2}'], // 🙁 with all rules: x^3
   ['x^2/x', 'x^2/x'], // 🙁 with all rules: x
-  ['x^{0.3}/x', '1/x^{0.7}'], // 👍 x^n/x -> 1/x^{1-n}; ({ x, n }) => x.isNotZero || n.isLess(1) === true
+  ['x^{0.3}/x', '1/x^{0.7}'], // 👍 x^n/x -> 1/x^{1-n}; ({ x, n }) => !x.is(0) || n.isLess(1) === true
   ['x^{-3/5}/x', '1/x^{8/5}'],
   ['\\pi^2/\\pi', '\\pi'],
   ['\\pi/\\pi^{-2}', '\\pi^3'],
@@ -583,24 +583,24 @@ const RULE_TEST_CASES: TestCase[] = [
 
   [
     `
-            //
-            // Powers: Multiplication Involving x
-            //
-          `,
+              //
+              // Powers: Multiplication Involving x
+              //
+            `,
   ],
   ['x^3*x', 'x^4'],
   ['x^{-2}*x', '1/x'],
   ['x^{-1/3}*x', 'x^{-1/3}*x'], // 🙁 with all rules: x^(2/3)
   ['\\pi^{-2}*\\pi', '1/\\pi'],
-  ['\\pi^{-0.2}*\\pi', '\\pi^{0.8}'], // 👍 x^n*x -> x^{n+1}; ({ x, n }) => x.isEqual(0) === false || n.isPositive === true || x.isLess(-1) === true
+  ['\\pi^{-0.2}*\\pi', '\\pi^{0.8}'], // 👍 x^n*x -> x^{n+1}; ({ x, n }) => !x.is(0) || n.isPositive === true || n.isLess(-1) === true
   ['\\sqrt[3]{x}*x', 'x^{4/3}'],
 
   [
     `
-            //
-            // Powers: Multiplication of Two Powers
-            //
-          `,
+              //
+              // Powers: Multiplication of Two Powers
+              //
+            `,
   ],
   ['x^2*x^{-3}', '1/x'],
   ['x^2*x^{-1}', 'x^2 x^{-1}'], // 🙁 with all rules: x
@@ -614,110 +614,110 @@ const RULE_TEST_CASES: TestCase[] = [
 
   [
     `
-            //
-            // Powers: Division of Two Powers
-            //
-            `,
+              //
+              // Powers: Division of Two Powers
+              //
+              `,
   ],
   ['x^2/x^3', '1/x'],
   ['x^{-1}/x^3', '1/x^4'],
-  ['x/x^{-1}', 'x/x^{-1}'], // 🙁 with all rules: x * x
-  ['\\pi / \\pi^{-1}', '\\pi^2'], // 👍 (x) => {         if (x.operator === 'Divide')             return { value: x.op1.div(x.op2), because: 'division' };         if (x.operator === 'Rational' && x.nops === 2)             return { value: x.op1.div(x.op2), because: 'rational' };         return undefined;     }
-  ['\\pi^{0.2}/\\pi^{0.1}', '\\pi^{0.1}'], // up to 👍x^n*x^m -> x^{n+m}; ({ x, n, m }) => (x.isEqual(0) === false ||             n.add(m).isNegative === true ||             n.mul(m).isPositive === true) &&             (n.isInteger === true ||                 m.isInteger === true ||                 n.add(m).isRational === false ||                 x.isNonNegative === true)
-  ['x^{\\sqrt{2}}/x^3', 'x^{\\sqrt{2}-3}'], // 🙁 x^(sqrt(2)) / x^3
+  ['x/x^{-1}', 'x/x^{-1}'], // 🙁 with all rules: x^2
+  ['\\pi / \\pi^{-1}', '\\pi^2'],
+  ['\\pi^{0.2}/\\pi^{0.1}', '\\pi^{0.1}'], // 🙁 pi^(0.3)
+  ['x^{\\sqrt{2}}/x^3', 'x^{\\sqrt{2}-3}'], // 🙁 x^(3 + sqrt(2))
 
   [
     `
-            //
-            // Powers and Denominators
-            //
-          `,
+              //
+              // Powers and Denominators
+              //
+            `,
   ],
-  ['x/(\\pi/2)^3', '8x/\\pi^3'],
+  ['x/(\\pi/2)^3', '8x/\\pi^3'], // 🙁 (8x) / pi^3
   ['x/(\\pi/y)^3', 'x/(\\pi/y)^3'],
 
   [
     `
-            //
-            // Powers and Roots
-            //
-          `,
+              //
+              // Powers and Roots
+              //
+            `,
   ],
   ['\\sqrt{x^4}', 'x^2'], // 🙁 sqrt(x^4)
   ['\\sqrt{x^3}', 'x^{3/2}'], // 🙁 sqrt(x^3)
-  ['\\sqrt[3]{x^2}', 'x^{2/3}'],
-  ['\\sqrt[4]{x^6}', 'x^{3/2}'],
+  ['\\sqrt[3]{x^2}', 'x^{2/3}'], // 🙁 root(3)(x^2)
+  ['\\sqrt[4]{x^6}', 'x^{3/2}'], // 🙁 root(4)(x^6)
   ['\\sqrt{x^6}', '|x|^3'], // 🙁 sqrt(x^6)
   ['\\sqrt[4]{x^4}', '|x|'], // 🙁 x
 
   [
     `
-            //
-            // Ln and Powers
-            //
-          `,
+              //
+              // Ln and Powers
+              //
+            `,
   ],
-  ['\\ln(x^3)', '3\\ln(x)'],
-  ['\\ln(x^\\sqrt{2})', '\\sqrt{2} \\ln(x)'],
-  ['\\ln(x^2)', '2 \\ln(|x|)'], // 🙁 2ln(x)
+  ['\\ln(x^3)', '3\\ln(x)'], // 🙁 ln(x^3)
+  ['\\ln(x^\\sqrt{2})', '\\sqrt{2} \\ln(x)'], // 🙁 ln(x^(sqrt(2)))
+  ['\\ln(x^2)', '2 \\ln(|x|)'], // 🙁 ln(x^2)
   ['\\ln(x^{2/3})', '2/3 \\ln(|x|)'], // 🙁 ln(x^(2/3))
   ['\\ln(\\pi^{2/3})', '2/3 \\ln(\\pi)'], // 🙁 ln(pi^(2/3))
   ['\\ln(x^{7/4})', '7/4 \\ln(x)'], // 🙁 ln(x^(7/4))
-  ['\\ln(\\sqrt{x})', '\\ln(x)/2'],
+  ['\\ln(\\sqrt{x})', '\\ln(x)/2'], // 🙁 ln(sqrt(x))
 
   [
     `
-            //
-            // Log and Powers
-            //
-          `,
+              //
+              // Log and Powers
+              //
+            `,
   ],
-  ['\\log_4(x^3)', '3\\log_4(x)'],
-  ['\\log_3(x^\\sqrt{2})', '\\sqrt{2} \\log_3(x)'],
-  ['\\log_4(x^2)', '2\\log_4(|x|)'], // 🙁 2log(x, 4)
+  ['\\log_4(x^3)', '3\\log_4(x)'], // 🙁 log(x^3, 4)
+  ['\\log_3(x^\\sqrt{2})', '\\sqrt{2} \\log_3(x)'], // 🙁 log(x^(sqrt(2)), 3)
+  ['\\log_4(x^2)', '2\\log_4(|x|)'], // 🙁 log(x^2, 4)
   ['\\log_4(x^{2/3})', '2/3 \\log_4(|x|)'], // 🙁 log(x^(2/3), 4)
   ['\\log_4(x^{7/4})', '7/4 \\log_4(x)'], // 🙁 log(x^(7/4), 4)
 
   [
     `
-            //
-            // - signs and powers new
-            //
-          `,
+              //
+              // - signs and powers new
+              //
+            `,
   ],
-  ['(-x)^5', '-x^5'],
-  ['(-x)^{2/3}', '-x^{2/3}'],
-  ['(-x)^{4/3}', 'x^{4/3}'], // 👍 (-x)^n:even -> x^n
+  ['(-x)^5', '-x^5'], // 🙁 (-x)^5
+  ['(-x)^{2/3}', '-x^{2/3}'], // 🙁 (-x)^(2/3)
+  ['(-x)^{4/3}', 'x^{4/3}'], // 🙁 (-x)^(4/3)
 
   [
     `
-            //
-            // ln new
-            //
-          `,
+              //
+              // ln new
+              //
+            `,
   ],
-  ['\\ln((x+1)/e^{2x})', '\\ln(x+1)-2x'],
+  ['\\ln((x+1)/e^{2x})', '\\ln(x+1)-2x'], // 👍 \ln(y/e^x) -> \ln(y)-x
 
   [
     `
-            //
-            // log_c new
-            //
-          `,
+              //
+              // log_c new
+              //
+            `,
   ],
   ['\\log_2(0)', '-\\infty'],
-  ['\\log_1(3)', '\\operatorname{NaN}'], // 👍 \log_c(x) -> \operatorname{NaN}; ({ c }) => c.isZero === true || c.isOne === true
+  ['\\log_1(3)', '\\operatorname{NaN}'], // 👍 \log_c(x) -> \operatorname{NaN}; ({ c }) => c.is(0) || c.is(1)
   ['\\log_{1/2}(0)', '\\infty'], // 🙁 -oo
-  ['\\log_2(x)-\\log_2(xy)', '-\\log_2(y)'], // 🙁 log(x / (x * y), 2)
+  ['\\log_2(x)-\\log_2(xy)', '-\\log_2(y)'], // up to 👍\log_c(x) - \log_c(y) -> \log_c(x/y)
   ['3^{\\log_3(x)+2}', '9x'], // up to 👍c^{\log_c(x)+y} -> x*c^y
   ['\\log_{1/2}(x)', '-\\log_2(x)'], // 🙁 log(x, 1/2)
 
   [
     `
-            //
-            // absolute value new
-            //
-          `,
+              //
+              // absolute value new
+              //
+            `,
   ],
   ['|2|', '2'],
   ['||x|+1|', '|x|+1'], // 🙁 Error("unexpected-delimiter", "|")
@@ -728,63 +728,63 @@ const RULE_TEST_CASES: TestCase[] = [
   ['|2x|-2|x|', '0'],
   ['|2/x|-1/|x|', '1/|x|'], // 🙁 2 * |1 / x| - 1 / |x|
   ['|x||y|-|xy|', '0'], // 🙁 |x| * |y| - |x * y|
-  ['|x|^{4/3}', 'x^{4/3}'], // 👍 |x|^n -> x^n; ({ n }) => n.isEven === true
+  ['|x|^{4/3}', 'x^{4/3}'], // 🙁 |x|^(4/3)
   ['|x^{3/5}|', '|x|^{3/5}'], // 🙁 |x^(3/5)|
 
   [
     `
-            //
-            // hyperbolic trig
-            //
-          `,
+              //
+              // hyperbolic trig
+              //
+            `,
   ],
   ['|\\operatorname{arccoth}(x)|', '\\operatorname{arccoth}(|x|)'], // 👍 |\operatorname{arccoth}(x)| -> \operatorname{arccoth}(|x|)
 
   [
     `
-            //
-            // fractions
-            //
-          `,
+              //
+              // fractions
+              //
+            `,
   ],
   ['(\\pi+1)/(\\pi+1)', '1'],
   ['x/(1/\\pi)', 'x*\\pi'],
   ['x/x^3', '1/x^2'],
   ['x^5/x^7', '1/x^2'],
   ['\\pi^5/\\pi^2', '\\pi^3'],
-  ['(\\pi/e)^{-1}', 'e/\\pi'],
+  ['(\\pi/e)^{-1}', 'e/\\pi'], // 🙁 (pi / e)^(-1)
 
   [
     `
-            //
-            // infinity
-            //
-          `,
+              //
+              // infinity
+              //
+            `,
   ],
-  ['\\infty/2', '\\infty'],
-  ['\\infty/(-2)', '-\\infty'],
-  ['(-\\infty)/2', '-\\infty'],
-  ['(-\\infty)/(-2)', '\\infty'],
+  ['\\infty/2', '\\infty'], // 👍 \infty/x -> \infty; ({ x }) => x.isPositive === true && x.isFinite === true
+  ['\\infty/(-2)', '-\\infty'], // 👍 \infty/x -> -\infty; ({ x }) => x.isNegative === true && x.isFinite === true
+  ['(-\\infty)/2', '-\\infty'], // 👍 (-\infty)/x -> -\infty; ({ x }) => x.isPositive === true && x.isFinite === true
+  ['(-\\infty)/(-2)', '\\infty'], // 👍 (-\infty)/x -> \infty; ({ x }) => x.isNegative === true && x.isFinite === true
   ['\\infty/\\infty', '\\operatorname{NaN}'], // 🙁 1
   ['(1/2)^\\infty', '0'],
-  ['\\infty^{-3}', '0'],
-  ['(-\\infty)^{-5}', '0'],
-  ['e^{-\\infty}', '0'],
+  ['\\infty^{-3}', '0'], // 👍 \infty^a -> 0; ({ a }) => a.isNegative === true
+  ['(-\\infty)^{-5}', '0'], // 👍 (-\infty)^a -> 0; ({ a }) => a.isNegative === true
+  ['e^{-\\infty}', '0'], // 🙁 e^(-oo)
   ['2^{-\\infty}', '0'],
   ['(0.5)^{-\\infty}', '\\infty'],
   ['\\ln(\\infty)', '\\infty'],
   ['\\log_2(\\infty)', '\\infty'],
   ['\\log_{1/5}(\\infty}', '-\\infty'], // 🙁 log(1/5) Error("unexpected-delimiter", "(")
-  ['\\arctan(-\\infty)', '(-\\pi)/2'], // 👍 \arctan(-\infty) -> -\frac{\pi}{2}
+  ['\\arctan(-\\infty)', '(-\\pi)/2'], // up to 👍\arctan(-\infty) -> -\frac{\pi}{2}
   ['\\operatorname{arccoth}(\\infty)', '0'], // 🙁 +oo
-  ['\\operatorname{arccoth}(-\\infty)', '0'], // 🙁 +oo
+  ['\\operatorname{arccoth}(-\\infty)', '0'], // 🙁 -oo
 
   [
     `
-            //
-            // double exponents new
-            //
-          `,
+              //
+              // double exponents new
+              //
+            `,
   ],
   ['(x^2)^3', 'x^6'],
   ['(x^{-2})^{-1}', '(x^{-2})^{-1}'], // 🙁 with all rules: x^2
@@ -793,10 +793,10 @@ const RULE_TEST_CASES: TestCase[] = [
 
   [
     `
-            //
-            // trig new
-            //
-          `,
+              //
+              // trig new
+              //
+            `,
   ],
   ['\\sin(-x)', '-\\sin(x)'], // 👍 \sin(-x) -> -\sin(x)
   ['\\cos(-x)', '\\cos(x)'], // 👍 \cos(-x) -> \cos(x)
@@ -825,10 +825,10 @@ const RULE_TEST_CASES: TestCase[] = [
 
   [
     `
-            //
-            // inverse hyperbolic trig
-            //
-          `,
+              //
+              // inverse hyperbolic trig
+              //
+            `,
   ],
   ['\\arsinh(x)', '\\ln(x+\\sqrt{x^2+1})'], // 🙁 Arsinh(x)
   ['\\arcosh(x)', '\\ln(x+\\sqrt{x^2-1})'], // 🙁 Arcosh(x)
@@ -839,102 +839,100 @@ const RULE_TEST_CASES: TestCase[] = [
 
   [
     `
-            //
-            // inverse trig
-            //
-          `,
+              //
+              // inverse trig
+              //
+            `,
   ],
   ['\\arctan(x/\\sqrt{1-x^2})', '\\arcsin(x)'], // 🙁 arctan(x / sqrt(-x^2 + 1))
 ];
 
 /*
-  SUMMARY OF UNUSED RULES:
-  
-     🚫 = rule not used (no test case for this rule)
-  
-  
-  
-  🚫 (-x)^n:odd -> -(x^n)
-  🚫 (-x)^{n/m} -> x^{n/m}; n:even, m:odd
-  🚫 (-x)^{n/m} -> -x^{n/m}; ({ n, m }) => n.isOdd === true && m.isOdd === true
-  🚫 a/b+c/d -> (a*d+b*c)/(b*d); ({ a }) => a.isEqual(0) === false
-  🚫 \ln(x) + \ln(y) -> \ln(xy)
-  🚫 e^{\ln(x)-y} -> x/e^y
-  🚫 \ln(e^x/y) -> x-\ln(y)
-  🚫 \ln(y/e^x) -> \ln(y)-x
-  🚫 \ln(0) -> \operatorname{NaN}
-  🚫 \log_c(x) + \log_c(y) -> \log_c(xy)
-  🚫 c^{\log_c(x)-y} -> x/c^y
-  🚫 \log_{1/c}(a) -> -\log_c(a)
-  🚫 |x:>=0| -> x
-  🚫 |x:<0| -> -x
-  🚫 |xy| -> x|y|; ({ x }) => x.isNonNegative === true
-  🚫 |xy| -> -x|y|; ({ x }) => x.isNonPositive === true
-  🚫 |xy| -> |x||y|
-  🚫 |x|^{n/m} -> x^{n/m}; ({ n, m }) => n.isEven === true && m.isOdd === true
-  🚫 |x^{n/m}| -> |x|^{n/m}; ({ n, m }) => n.isOdd === true || m.isInteger === true
-  🚫 |\frac{x}{y}| -> \frac{x}{|y|}; ({ x }) => x.isNonNegative === true
-  🚫 |\frac{x}{y}| -> -\frac{x}{|y|}; ({ x }) => x.isNonPositive === true
-  🚫 |\frac{x}{y}| -> \frac{|x|}{y}; ({ y }) => y.isNonNegative === true
-  🚫 |\frac{x}{y}| -> -\frac{|x|}{y}; ({ y }) => y.isNonPositive === true
-  🚫 \frac{a}{b^{-n}} -> a*b^n; ({ b }) => b.isEqual(0) === false
-  🚫 \frac{a}{d*b^{-n}} -> \frac{a}{d}*b^n; ({ b }) => b.isEqual(0) === false
-  🚫 \infty/x -> \infty; ({ x }) => x.isPositive === true && x.isFinite === true
-  🚫 (-\infty)/x -> -\infty; ({ x }) => x.isPositive === true && x.isFinite === true
-  🚫 \infty/x -> -\infty; ({ x }) => x.isNegative === true && x.isFinite === true
-  🚫 (-\infty)/x -> \infty; ({ x }) => x.isNegative === true && x.isFinite === true
-  🚫 x/y -> \operatorname{NaN}; ({ x, y }) => x.isInfinity === true && y.isInfinity === true
-  🚫 a^\infty -> \infty; ({ a }) => a.isGreater(1) === true
-  🚫 a^\infty -> 0; ({ a }) => a.isPositive === true && a.isLess(1) === true
-  🚫 \infty^a -> 0; ({ a }) => a.isNegative === true
-  🚫 (-\infty)^a -> 0; ({ a }) => a.isNegative === true
-  🚫 a^{-\infty} -> 0; ({ a }) => a.isGreater(1) === true
-  🚫 a^{-\infty} -> \infty; ({ a }) => a.isPositive === true && a.isLess(1) === true
-  🚫 \ln(\infty) -> \infty
-  🚫 \log_c(\infty) -> \infty; ({ c }) => c.isGreater(1) === true
-  🚫 \log_\infty(c) -> 0; ({ c }) => c.isPositive === true && c.isOne === false && c.isFinite === true
-  🚫 \operatorname{arccoth}(x); ({ x }) => x.isInfinity === true
-  🚫 a/a -> 1; ({ a }) => a.isEqual(0) === false
-  🚫 1/(1/a) -> a; ({ a }) => a.isEqual(0) === false
-  🚫 a/(1/b) -> a*b; ({ b }) => b.isEqual(0) === false
-  🚫 a/(b/c) -> (a*c)/b; ({ c }) => c.isEqual(0) === false
-  🚫 x/x^n -> 1/x^{n-1}; ({ x, n }) => x.isNotZero || n.isGreater(1) === true
-  🚫 x^n/x^m -> x^{n+m}; ({ x, n, m }) => (x.isEqual(0) === false || n.add(m).isNegative === true) &&             (n.isInteger === true ||                 m.isInteger === true ||                 n.sub(m).isRational === false ||                 x.isNonNegative === true)
-  🚫 a/(b/c)^d -> a*(c/b)^d; ({ c }) => c.isEqual(0) === false
-  🚫 (b/c)^{-d} -> (c/b)^d; ({ c }) => c.isEqual(0) === false
-  🚫 (b/c)^{-1} -> c/b; ({ c }) => c.isEqual(0) === false
-  🚫 (a^n)^m -> a^{m*n}; ({ a, n, m }) => ((n.isInteger === true && m.isInteger === true) ||             a.isNonNegative ||             n.mul(m).isRational === false) &&             (n.isPositive === true || m.isPositive === true)
-  🚫 \ln(x^n) -> n*\ln(x); ({ x, n }) => x.isNonNegative || n.isOdd === true || n.isRational === false
-  🚫 \ln(x^{n/k}) -> n*\ln(x)/k; ({ x, n }) => x.isNonNegative || n.isOdd === true
-  🚫 \ln(x^{n/k}) -> n*\ln(|x|)/k; ({ n, k }) => n.isEven === true && k.isOdd === true
-  🚫 \ln(x^n) -> n*\ln(|x|); ({ n }) => n.isEven === true
-  🚫 \log_c(x^n) -> n*\log_c(x); ({ x, n }) => x.isNonNegative || n.isOdd === true || n.isRational === false
-  🚫 \log_c(x^{n/k}) -> n*\log_c(x)/k; ({ c, n }) => c.isNonNegative || n.isOdd === true
-  🚫 \log_c(x^{n/k}) -> n*\log_c(|x|)/k; ({ n, k }) => n.isEven === true && k.isOdd === true
-  🚫 \log_c(x^n) -> n*\log_c(|x|); ({ n }) => n.isEven === true
-  🚫 \sin(x) * \cos(x) -> \frac{1}{2} \sin(2x)
-  🚫 \sin(x) * \sin(y) -> \frac{1}{2} (\cos(x-y) - \cos(x+y))
-  🚫 \cos(x) * \cos(y) -> \frac{1}{2} (\cos(x-y) + \cos(x+y))
-  🚫 \tan(x) * \cot(x) -> 1
-  🚫 \sin(x)^2 -> \frac{1 - \cos(2x)}{2}
-  🚫 \cos(x)^2 -> \frac{1 + \cos(2x)}{2}
-  🚫 ["Divide",["Sin","__x"],["Cos","__x"]]
-  🚫 ["Divide",["Cos","__x"],["Sin","__x"]]
-  🚫 ["Divide",1,["Cos","__x"]]
-  🚫 ["Divide",1,["Sin","__x"]]
-  🚫 ["Ln",["Add","__x",["Sqrt",["Subtract",["Square","__x"],1]]]]; (sub, ce) => sub.__x.isGreater(ce.One) ?? false
-  🚫 ["Multiply",2,["Arctan2","__x",["Add",1,["Sqrt",["Subtract",1,["Square","__x"]]]]]]
-  🚫 ["Multiply",2,["Ln",["Add","__x",["Sqrt",["Add",["Square","__x"],1]]]]]
-  🚫 ["Multiply","Half",["Ln",["Divide",["Add",1,"__x"],["Subtract",1,"__x"]]]]
-  🚫 ["Divide",["Add",["Exp","__x"],["Exp",["Negate","__x"]]],2]
-  🚫 ["Divide",["Subtract",["Exp","__x"],["Exp",["Negate","__x"]]],2]
-  🚫 ["Ln",["Add","__x",["Sqrt",["Subtract",["Square","__x"],1]]]]; ({ __x }) => __x.isGreater(1) ?? false
-  🚫 ["Multiply",2,["Arctan2","__x",["Add",1,["Sqrt",["Subtract",1,["Square","__x"]]]]]]
-  🚫 ["Multiply",2,["Ln",["Add","__x",["Sqrt",["Add",["Square","__x"],1]]]]]
-  🚫 ["Multiply","Half",["Ln",["Divide",["Add",1,"__x"],["Subtract",1,"__x"]]]]
-  🚫 ["Divide",["Add",["Exp","__x"],["Exp",["Negate","__x"]]],2]
-  🚫 ["Divide",["Subtract",["Exp","__x"],["Exp",["Negate","__x"]]],2]
-  */
+ SUMMARY OF UNUSED RULES:
+ 
+    🚫 = rule not used (no test case for this rule)
+ 
+ 
+ 
+ 🚫 (-x)^n:even -> x^n
+ 🚫 (-x)^n:odd -> -(x^n)
+ 🚫 (-x)^{n/m} -> x^{n/m}; n:even, m:odd
+ 🚫 (-x)^{n/m} -> -x^{n/m}; ({ n, m }) => n.isOdd === true && m.isOdd === true
+ 🚫 a/b+c/d -> (a*d+b*c)/(b*d); ({ a }) => !a.is(0)
+ 🚫 \ln(x) + \ln(y) -> \ln(xy)
+ 🚫 e^{\ln(x)-y} -> x/e^y
+ 🚫 e^{\ln(x)/y} -> x^{1/y}
+ 🚫 \ln(e^x/y) -> x-\ln(y)
+ 🚫 \ln(0) -> \operatorname{NaN}
+ 🚫 \log_c(x) + \log_c(y) -> \log_c(xy)
+ 🚫 c^{\log_c(x)/y} -> x^{1/y}
+ 🚫 c^{\log_c(x)-y} -> x/c^y
+ 🚫 \log_{1/c}(a) -> -\log_c(a)
+ 🚫 |x:>=0| -> x
+ 🚫 |x:<0| -> -x
+ 🚫 |xy| -> x|y|; ({ x }) => x.isNonNegative === true
+ 🚫 |xy| -> -x|y|; ({ x }) => x.isNonPositive === true
+ 🚫 |xy| -> |x||y|
+ 🚫 |x|^{n/m} -> x^{n/m}; ({ n, m }) => n.isEven === true && m.isOdd === true
+ 🚫 |x^{n/m}| -> |x|^{n/m}; ({ n, m }) => n.isOdd === true || m.isInteger === true
+ 🚫 |\frac{x}{y}| -> \frac{x}{|y|}; ({ x }) => x.isNonNegative === true
+ 🚫 |\frac{x}{y}| -> -\frac{x}{|y|}; ({ x }) => x.isNonPositive === true
+ 🚫 |\frac{x}{y}| -> \frac{|x|}{y}; ({ y }) => y.isNonNegative === true
+ 🚫 |\frac{x}{y}| -> -\frac{|x|}{y}; ({ y }) => y.isNonPositive === true
+ 🚫 \frac{a}{b^{-n}} -> a*b^n; ({ b }) => !b.is(0)
+ 🚫 \frac{a}{d*b^{-n}} -> \frac{a}{d}*b^n; ({ b }) => !b.is(0)
+ 🚫 x/y -> \operatorname{NaN}; ({ x, y }) => x.isInfinity === true && y.isInfinity === true
+ 🚫 a^\infty -> \infty; ({ a }) => a.isGreater(1) === true
+ 🚫 a^\infty -> 0; ({ a }) => a.isPositive === true && a.isLess(1) === true
+ 🚫 a^{-\infty} -> 0; ({ a }) => a.isGreater(1) === true
+ 🚫 a^{-\infty} -> \infty; ({ a }) => a.isPositive === true && a.isLess(1) === true
+ 🚫 \ln(\infty) -> \infty
+ 🚫 \log_c(\infty) -> \infty; ({ c }) => c.isGreater(1) === true
+ 🚫 \log_\infty(c) -> 0; ({ c }) => c.isPositive === true && !c.is(1) && c.isFinite === true
+ 🚫 \arsinh(\infty) -> \infty
+ 🚫 \arcosh(\infty) -> \infty
+ 🚫 \arcosh(-\infty) -> \operatorname{NaN}
+ 🚫 \operatorname{arccoth}(x); ({ x }) => x.isInfinity === true
+ 🚫 1/(1/a) -> a; ({ a }) => !a.is(0)
+ 🚫 a/(1/b) -> a*b; ({ b }) => !b.is(0)
+ 🚫 a/(b/c) -> (a*c)/b; ({ c }) => !c.is(0)
+ 🚫 x/x^n -> 1/x^{n-1}; ({ x, n }) => !x.is(0) || n.isGreater(1) === true
+ 🚫 x^n/x^m -> x^{n+m}; ({ x, n, m }) => (!x.is(0) || n.add(m).isNegative === true) &&             (n.isInteger === true ||                 m.isInteger === true ||                 n.sub(m).isRational === false ||                 x.isNonNegative === true)
+ 🚫 a/(b/c)^d -> a*(c/b)^d; ({ c }) => !c.is(0)
+ 🚫 (b/c)^{-d} -> (c/b)^d; ({ c }) => !c.is(0)
+ 🚫 (b/c)^{-1} -> c/b; ({ c }) => !c.is(0)
+ 🚫 (a^n)^m -> a^{m*n}; ({ a, n, m }) => ((n.isInteger === true && m.isInteger === true) ||             a.isNonNegative ||             n.mul(m).isRational === false) &&             (n.isPositive === true || m.isPositive === true)
+ 🚫 \ln(x^n) -> n*\ln(x); ({ x, n }) => x.isNonNegative || n.isOdd === true || n.isRational === false
+ 🚫 \ln(x^{n/k}) -> n*\ln(x)/k; ({ x, n }) => x.isNonNegative || n.isOdd === true
+ 🚫 \ln(x^{n/k}) -> n*\ln(|x|)/k; ({ n, k }) => n.isEven === true && k.isOdd === true
+ 🚫 \ln(x^n) -> n*\ln(|x|); ({ n }) => n.isEven === true
+ 🚫 \log_c(x^n) -> n*\log_c(x); ({ x, n }) => x.isNonNegative || n.isOdd === true || n.isRational === false
+ 🚫 \log_c(x^{n/k}) -> n*\log_c(x)/k; ({ c, n }) => c.isNonNegative || n.isOdd === true
+ 🚫 \log_c(x^{n/k}) -> n*\log_c(|x|)/k; ({ n, k }) => n.isEven === true && k.isOdd === true
+ 🚫 \log_c(x^n) -> n*\log_c(|x|); ({ n }) => n.isEven === true
+ 🚫 \sin(x) * \cos(x) -> \frac{1}{2} \sin(2x)
+ 🚫 \sin(x) * \sin(y) -> \frac{1}{2} (\cos(x-y) - \cos(x+y))
+ 🚫 \cos(x) * \cos(y) -> \frac{1}{2} (\cos(x-y) + \cos(x+y))
+ 🚫 \tan(x) * \cot(x) -> 1
+ 🚫 \sin(x)^2 -> \frac{1 - \cos(2x)}{2}
+ 🚫 \cos(x)^2 -> \frac{1 + \cos(2x)}{2}
+ 🚫 ["Divide",["Sin","__x"],["Cos","__x"]]
+ 🚫 ["Divide",["Cos","__x"],["Sin","__x"]]
+ 🚫 ["Divide",1,["Cos","__x"]]
+ 🚫 ["Divide",1,["Sin","__x"]]
+ 🚫 ["Ln",["Add","__x",["Sqrt",["Subtract",["Square","__x"],1]]]]; (sub, ce) => sub.__x.isGreater(ce.One) ?? false
+ 🚫 ["Multiply",2,["Arctan2","__x",["Add",1,["Sqrt",["Subtract",1,["Square","__x"]]]]]]
+ 🚫 ["Multiply",2,["Ln",["Add","__x",["Sqrt",["Add",["Square","__x"],1]]]]]
+ 🚫 ["Multiply","Half",["Ln",["Divide",["Add",1,"__x"],["Subtract",1,"__x"]]]]
+ 🚫 ["Divide",["Add",["Exp","__x"],["Exp",["Negate","__x"]]],2]
+ 🚫 ["Divide",["Subtract",["Exp","__x"],["Exp",["Negate","__x"]]],2]
+ 🚫 ["Ln",["Add","__x",["Sqrt",["Subtract",["Square","__x"],1]]]]; ({ __x }) => __x.isGreater(1) ?? false
+ 🚫 ["Multiply",2,["Arctan2","__x",["Add",1,["Sqrt",["Subtract",1,["Square","__x"]]]]]]
+ 🚫 ["Multiply",2,["Ln",["Add","__x",["Sqrt",["Add",["Square","__x"],1]]]]]
+ 🚫 ["Multiply","Half",["Ln",["Divide",["Add",1,"__x"],["Subtract",1,"__x"]]]]
+ 🚫 ["Divide",["Add",["Exp","__x"],["Exp",["Negate","__x"]]],2]
+ 🚫 ["Divide",["Subtract",["Exp","__x"],["Exp",["Negate","__x"]]],2]
+ */
 
 const RULES_USED: string[] = [];
 
