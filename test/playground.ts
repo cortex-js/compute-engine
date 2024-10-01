@@ -3,6 +3,18 @@ import { BoxedExpression, ComputeEngine } from '../src/compute-engine';
 const ce = new ComputeEngine();
 const engine = ce;
 
+ce.parse('(x+1)^2').expand().print();
+
+ce.assume(ce.parse('x > 0'));
+console.log(ce.parse('\\sqrt{x^2}').simplify().toLatex());
+
+console.log(ce.parse('12.1234').json);
+console.log(ce.parse('12.1234').numericValue);
+
+console.log(ce.parse('-3\\frac14').json);
+
+console.log(ce.parse('-5^{\\frac12}').json);
+
 function checkAnswer(
   numbers: number[],
   target: number,

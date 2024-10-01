@@ -5,6 +5,12 @@
 - **#194** Correctly handle the precedence of unary negate, for example in
   `-5^{\frac12}` or `-5!`.
 
+### New Features and Improvements
+
+- Added `.expand()` method to boxed expression. This method expands the
+  expression, for example `ce.parse("(x+1)^2").expand()` will return
+  `x^2 + 2x + 1`.
+
 ## 0.26.0 _2024-10-01_
 
 ### Breaking Changes

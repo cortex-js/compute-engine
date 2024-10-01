@@ -679,6 +679,10 @@ export abstract class _BoxedExpression implements BoxedExpression {
     return this;
   }
 
+  expand(): BoxedExpression {
+    return expand(this) ?? this;
+  }
+
   evaluate(_options?: Partial<EvaluateOptions>): BoxedExpression {
     return this.simplify();
   }
@@ -820,3 +824,4 @@ import { serializeJson } from './serialize';
 import { Type } from '../../common/type/types';
 import { cmp, eq, same } from './compare';
 import { AbstractTensor } from '../tensor/tensors';
+import { expand } from './expand';

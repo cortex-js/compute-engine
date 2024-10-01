@@ -1093,6 +1093,12 @@ export interface BoxedExpression {
   simplify(options?: Partial<SimplifyOptions>): BoxedExpression;
 
   /**
+   * Expand the expression: distribute multiplications over additions,
+   * and expand powers.
+   */
+  expand(): BoxedExpression;
+
+  /**
    * Return the value of the canonical form of this expression.
    *
    * A pure expression always return the same value and has no side effects.
