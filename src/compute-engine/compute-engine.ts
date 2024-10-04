@@ -1274,7 +1274,7 @@ export class ComputeEngine implements IComputeEngine {
    */
   declare(
     id: string,
-    def: Type | TypeString | OneOf<[SymbolDefinition, FunctionDefinition]>
+    def: TypeString | OneOf<[Type, SymbolDefinition, FunctionDefinition]>
   ): IComputeEngine;
   declare(identifiers: {
     [id: string]:
@@ -1399,11 +1399,19 @@ export class ComputeEngine implements IComputeEngine {
     {
       const type = parseType(def);
       if (!isValidType(type)) {
+        if (typeof def === 'object' && 'N' in def) {
+          throw Error(
+            [
+              `Invalid argument for "${id}"`,
+              'Use `evaluate` handler instead of `N`',
+            ].join('\n|   ')
+          );
+        }
         throw Error(
           [
             `Invalid argument for "${id}"`,
             def.toString(),
-            `Use a type, a FunctionDefinition or a SymbolDefinition`,
+            `Use a type, a \`FunctionDefinition\` or a \`SymbolDefinition\``,
           ].join('\n|   ')
         );
       }

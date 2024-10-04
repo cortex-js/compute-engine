@@ -2458,7 +2458,7 @@ export type ReplaceOptions = {
 
   /**
    * Indicate if the expression should be canonicalized after the replacement.
-   * If not provided, the expression is canonicalized if the the expression
+   * If not provided, the expression is canonicalized if the expression
    * that matched the pattern is canonical.
    */
   canonical: CanonicalOptions;

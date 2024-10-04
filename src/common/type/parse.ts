@@ -893,6 +893,7 @@ export function parseType(s: string | Type | undefined): Type | undefined;
 export function parseType(s: string | Type | undefined): Type | undefined {
   if (s === undefined) return undefined;
   if (isValidType(s)) return s;
+  if (typeof s !== 'string') return undefined;
 
   // Check if it's a primitive type
   if (PRIMITIVE_TYPES.includes(s as PrimitiveType)) return s as PrimitiveType;

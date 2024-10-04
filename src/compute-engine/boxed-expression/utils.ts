@@ -188,22 +188,22 @@ export function isSymbolDefinition(def: any): def is SymbolDefinition {
 
   if (isBoxedExpression(def)) return false;
 
-  if ('type' in def || 'value' in def || 'constant' in def) {
-    if (typeof def.type === 'function') {
+  if ('value' in def || 'constant' in def) {
+    if ('type' in def && typeof def.type === 'function') {
       throw new Error(
-        'The type field of a symbol definition should be a type string'
+        'The `type` field of a symbol definition should be of type `string`'
       );
     }
 
     if ('signature' in def) {
       throw new Error(
-        'Symbol definition cannot have a signature field. Use a type field instead.'
+        'Symbol definition cannot have a `signature` field. Use a `type` field instead.'
       );
     }
 
     if ('sgn' in def) {
       throw new Error(
-        'Symbol definition cannot have a sgn field. Use a flags field instead.'
+        'Symbol definition cannot have a `sgn` field. Use a `flags.sgn` field instead.'
       );
     }
 
@@ -219,23 +219,21 @@ export function isFunctionDefinition(def: any): def is FunctionDefinition {
   if ('signature' in def || 'complexity' in def) {
     if ('constant' in def) {
       throw new Error(
-        'Function definition cannot have a constant field and symbol definition cannot have a signature field.'
+        'Function definition cannot have a `constant` field and symbol definition cannot have a `signature` field.'
       );
     }
-    if ('type' in def && typeof def.type !== 'function') {
-      throw new Error(
-        'The type field of a function definition should be a function'
-      );
-    }
-    if ('sgn' in def && typeof def.sgn !== 'function') {
-      throw new Error(
-        'The sgn field of a function definition should be a function'
-      );
-    }
-    return true;
   }
-
-  return false;
+  if ('type' in def && typeof def.type !== 'function') {
+    throw new Error(
+      'The `type` field of a function definition should be a function'
+    );
+  }
+  if ('sgn' in def && typeof def.sgn !== 'function') {
+    throw new Error(
+      'The `sgn` field of a function definition should be a function'
+    );
+  }
+  return true;
 }
 
 export function semiCanonical(

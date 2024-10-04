@@ -4,6 +4,8 @@
 
 - **#194** Correctly handle the precedence of unary negate, for example in
   `-5^{\frac12}` or `-5!`.
+- When using a function definition with `ce.declare()`, do not generate a
+  runtime error.
 
 ### New Features and Improvements
 
@@ -45,10 +47,26 @@
 - The "Domain" expression has been deprecated. Use types instead (see below).
 
 - Some `BoxedExpression` properties have been removed:
+
   - Instead of `expr.isZero`, use `expr.is(0)`.
   - Instead of `expr.isNotZero`, use `!expr.is(0)`.
   - Instead of `expr.isOne`, use `expr.is(1)`.
   - Instead of `expr.isNegativeOne`, use `expr.is(-1)`.
+
+- The signature of `ce.declare()` has changed. In particular, the `N` handler
+  has been replaced with `evaluate`.
+
+```ts
+// Before
+ce.declare('Mean', {
+  N: (ce: IComputeEngine): BoxedExpression => {
+    return ce.number(1);
+  },
+});
+
+// Now
+ce.declare('Mean', { evaluate: (ops, { engine }) => ce.number(1) });
+```
 
 ### New Features and Improvements
 

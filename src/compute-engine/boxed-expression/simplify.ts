@@ -150,7 +150,7 @@ function simplifyExpression(
     expr = alt;
   }
 
-  // Try to simplify, not considering associativity
+  // Try to simplify, not considering commutativity
   const result = simplifyNonCommutativeFunction(expr, rules, options, steps);
   if (result.length > steps.length) return result;
 
