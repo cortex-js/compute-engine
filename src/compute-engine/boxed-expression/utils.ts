@@ -223,6 +223,15 @@ export function isFunctionDefinition(def: any): def is FunctionDefinition {
       );
     }
   }
+  if (
+    !('evaluate' in def) &&
+    !('signature' in def) &&
+    !('sgn' in def) &&
+    !('complexity' in def) &&
+    !('canonical' in def)
+  )
+    return false;
+
   if ('type' in def && typeof def.type !== 'function') {
     throw new Error(
       'The `type` field of a function definition should be a function'
