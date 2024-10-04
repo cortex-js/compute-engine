@@ -6,6 +6,7 @@
   `-5^{\frac12}` or `-5!`.
 - When using a function definition with `ce.declare()`, do not generate a
   runtime error.
+- Correctly account for `fractionalDigits` when formatting numbers.
 
 ### New Features and Improvements
 

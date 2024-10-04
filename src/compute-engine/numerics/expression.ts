@@ -32,11 +32,18 @@ export function bigintValue(
 }
 
 /** Output a shorthand if possible */
-export function numberToExpression(num: number | bigint): Expression {
+export function numberToExpression(
+  num: number | bigint,
+  fractionalDigits?: string | number
+): Expression {
   if (typeof num === 'number') {
     if (isNaN(num)) return 'NaN';
     if (!Number.isFinite(num))
       return num < 0 ? 'NegativeInfinity' : 'PositiveInfinity';
+
+    if (typeof fractionalDigits === 'number')
+      return { num: num.toFixed(fractionalDigits) };
+
     return num;
   }
 

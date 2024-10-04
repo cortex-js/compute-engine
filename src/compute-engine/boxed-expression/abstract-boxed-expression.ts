@@ -197,6 +197,8 @@ export abstract class _BoxedExpression implements BoxedExpression {
       }
       if (options.fractionalDigits === 'auto')
         defaultOptions.fractionalDigits = -this.engine.precision; // When negative, indicate that the number of digits should be less than the number of whole digits + this value
+      if (typeof options.fractionalDigits === 'number')
+        defaultOptions.fractionalDigits = options.fractionalDigits;
     }
     const opts: JsonSerializationOptions = {
       ...defaultOptions,
@@ -266,6 +268,8 @@ export abstract class _BoxedExpression implements BoxedExpression {
 
     if (options?.fractionalDigits === 'auto')
       effectiveOptions.fractionalDigits = -this.engine.precision;
+    else effectiveOptions.fractionalDigits = options?.fractionalDigits ?? 'max';
+
     if (
       typeof effectiveOptions.fractionalDigits === 'number' &&
       effectiveOptions.fractionalDigits > this.engine.precision

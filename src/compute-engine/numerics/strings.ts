@@ -130,7 +130,13 @@ export function fromDigits(
   return [value, ''];
 }
 
-export function numberToString(num: number | bigint): string {
+export function numberToString(
+  num: number | bigint,
+  fractionalDigits?: number | string
+): string {
+  if (typeof fractionalDigits === 'number' && typeof num === 'number')
+    return num.toFixed(fractionalDigits);
+
   // Use scientific notation if the exponent is too large or too small
   // Convert the number to a string
   const numStr = num.toString();

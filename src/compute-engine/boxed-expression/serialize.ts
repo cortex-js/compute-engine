@@ -520,6 +520,11 @@ function serializeRepeatingDecimals(
   fractionalPart += lastDigit;
   while (fractionalPart.endsWith('0'))
     fractionalPart = fractionalPart.slice(0, -1);
+
+  if (typeof options.fractionalDigits === 'number') {
+    fractionalPart = fractionalPart.slice(0, options.fractionalDigits);
+  }
+
   if (exponent)
     return `${wholepart}.${fractionalPart}${exponent.toLowerCase()}`;
   return `${wholepart}.${fractionalPart}`;
@@ -753,8 +758,8 @@ function serializeJsonNumber(
       if (metadata.latex !== undefined)
         return { num: value.toString(), latex: metadata.latex };
       return shorthandAllowed
-        ? numberToExpression(value)
-        : { num: numberToString(value) };
+        ? numberToExpression(value, options.fractionalDigits)
+        : { num: numberToString(value, options.fractionalDigits) };
     }
   }
 

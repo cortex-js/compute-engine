@@ -7,6 +7,12 @@ import {
 const ce = new ComputeEngine();
 const engine = ce;
 
+ce.precision = 3;
+let expr = ce.parse('\\pi/2').N();
+console.log(expr.toMathJson({ fractionalDigits: 3 }));
+
+console.log(expr.toLatex({ fractionalDigits: 3 }));
+
 ce.assume(ce.parse('x > 0'));
 console.log(ce.parse('\\sqrt{x^2}').simplify().toLatex());
 console.log(ce.parse('\\sqrt[4]{x^4}').simplify().toLatex());
