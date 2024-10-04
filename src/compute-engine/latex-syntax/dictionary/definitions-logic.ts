@@ -243,6 +243,22 @@ export const DEFINITIONS_LOGIC: LatexDictionary = [
     serialize: '\\exists!',
     parse: parseQuantifier('ExistsUnique'),
   },
+  {
+    name: 'NotForAll',
+    kind: 'prefix',
+    latexTrigger: ['\\lnot', '\\forall'],
+    precedence: 200, // Has to be lower than COMPARISON_PRECEDENCE
+    serialize: '\\lnot\\forall',
+    parse: parseQuantifier('NotForAll'),
+  },
+  {
+    name: 'NotExists',
+    kind: 'prefix',
+    latexTrigger: ['\\lnot', '\\exists'],
+    precedence: 200, // Has to be lower than COMPARISON_PRECEDENCE,
+    serialize: '\\lnot\\exists',
+    parse: parseQuantifier('NotExists'),
+  },
 
   {
     name: 'KroneckerDelta',
@@ -322,7 +338,7 @@ export const DEFINITIONS_LOGIC: LatexDictionary = [
 ];
 
 function parseQuantifier(
-  kind: 'ForAll' | 'Exists' | 'ExistsUnique'
+  kind: 'NotForAll' | 'NotExists' | 'ForAll' | 'Exists' | 'ExistsUnique'
 ): (parser: Parser, terminator: Readonly<Terminator>) => Expression | null {
   return (parser, terminator) => {
     const index = parser.index;
@@ -360,12 +376,8 @@ function parseQuantifier(
         const body = parser.parseExpression(terminator);
         return [kind, id, missingIfEmpty(body)] as Expression;
       }
-      if (parser.match('(')) {
-        const body = parser.parseExpression(terminator);
-        if (!parser.match(')')) return null;
-
-        return [kind, id, missingIfEmpty(body)];
-      }
+      const body = parser.parseEnclosure();
+      if (body) return [kind, id, missingIfEmpty(body)];
     }
 
     //

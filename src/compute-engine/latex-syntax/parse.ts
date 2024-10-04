@@ -1373,7 +1373,7 @@ export class _Parser implements Parser {
    * optionally followed multiple times by a separator and another expression,
    * and finally a closing matching operator.
    */
-  private parseEnclosure(): Expression | null {
+  parseEnclosure(): Expression | null {
     const defs = this.getDefs('matchfix') as Iterable<IndexedMatchfixEntry>;
 
     const start = this.index;

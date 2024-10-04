@@ -1,3 +1,8 @@
+## [Unreleased]
+
+- Correctly account for `fractionalDigits` when formatting numbers.
+- **#191** Correctly handle `\\lnot\\forall` and `\\lnot\\exists`.
+
 ## 0.26.1 _2024-10-04_
 
 ### Issues Resolved
@@ -6,7 +11,6 @@
   `-5^{\frac12}` or `-5!`.
 - When using a function definition with `ce.declare()`, do not generate a
   runtime error.
-- Correctly account for `fractionalDigits` when formatting numbers.
 
 ### New Features and Improvements
 

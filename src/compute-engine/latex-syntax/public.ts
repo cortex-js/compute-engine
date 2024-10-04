@@ -850,6 +850,9 @@ export interface Parser {
    */
   parseOptionalGroup(): Expression | null;
 
+  /** Parse an enclosure (open paren/close paren, etc..) and return the expression inside the enclosure */
+  parseEnclosure(): Expression | null;
+
   /**
    * Some LaTeX commands have arguments that are not interpreted as
    * expressions, but as strings. For example, `\begin{array}{ccc}` (both
