@@ -188,7 +188,7 @@ export function isSymbolDefinition(def: any): def is SymbolDefinition {
 
   if (isBoxedExpression(def)) return false;
 
-  if ('value' in def || 'constant' in def) {
+  if ('value' in def || 'constant' in def || 'inferred' in def) {
     if ('type' in def && typeof def.type === 'function') {
       throw new Error(
         'The `type` field of a symbol definition should be of type `string`'
