@@ -31,9 +31,20 @@ engine.parse("2^{11}-1 \\in \\Z").evaluate().print()
 // ➔ "True"
 ```
 
-## More
+## FAQ
 
-- [Build](BUILD.md) instructions
+**Q:** When is the next release?
+
+MathLive follows a semi-annual release cycle, with major releases typically
+scheduled for June and January. These may be followed by patch releases to
+address any issues that arise shortly after deployment. Additionally, an
+out-of-band release can be made if requested by a sponsor or if a community
+member submits a pull request and requests a release to include their
+contribution.
+
+**Q** How do I build the project?
+
+[Build](BUILD.md) instructions
 
 ## Related Projects
 
