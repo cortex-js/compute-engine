@@ -27,7 +27,7 @@ import { ComputeEngine } from "@cortex-js/compute-engine";
 
 const ce = new ComputeEngine();
 
-engine.parse("2^{11}-1 \\in \\Z").evaluate().print()
+ce.parse("2^{11}-1 \\in \\Z").evaluate().print()
 // ➔ "True"
 ```
 
