@@ -241,7 +241,7 @@ function parseIntegralBodyExpression(
 
 function serializeIntegral(command: string) {
   return (serializer: Serializer, expr: Expression): string => {
-    if (operand(expr, 1) !== null) return command;
+    if (!operand(expr, 1)) return command;
 
     let arg = operand(expr, 2);
     const h = operator(arg);
