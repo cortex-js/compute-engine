@@ -225,11 +225,10 @@ function makeLambda(
     let i = 0;
     for (const param of params) ce.assign(param, args[i++]);
 
-    const result = fn.N() ?? fn.evaluate();
+    const result = fn.evaluate();
     ce.swapScope(context);
 
-    if (!result.isValid) return undefined;
-    return result;
+    return result.isValid ? result : undefined;
   };
 }
 

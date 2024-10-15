@@ -63,9 +63,9 @@ export const TRIGONOMETRY_LIBRARY: IdentifierDefinitions[] = [
         }
         return ce.number(fArg).div(180).mul(ce.Pi);
       },
-      evaluate: (ops, { engine: ce }) => {
-        if (ce.angularUnit === 'deg') return ops[0];
-        return ops[0].mul(ce.Pi.div(180)).evaluate();
+      evaluate: (ops, options) => {
+        if (options.engine.angularUnit === 'deg') return ops[0];
+        return ops[0].mul(options.engine.Pi.div(180)).evaluate(options);
       },
     },
 

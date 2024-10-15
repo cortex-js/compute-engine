@@ -617,17 +617,25 @@ export function evalTrig(
         (x) => x.sinh(),
         (x) => x.sinh()
       );
-    case 'Tan':
-      return applyAngle(
+    case 'Tan': {
+      const result = applyAngle(
         op,
-        Math.tan,
-        (x) =>
-          x
-            .toSignificantDigits(ce.precision + 4)
-            .tan()
-            .toSignificantDigits(ce.precision),
+        (x) => {
+          const y = Math.tan(x);
+          if (y > 1e6 || y < -1e6) return ce.ComplexInfinity;
+          return y;
+        },
+
+        (x) => {
+          const y = x.tan();
+          if (y.greaterThan(1e6) || y.lessThan(-1e6)) return ce.ComplexInfinity;
+          return y;
+        },
         (x) => x.tan()
       );
+
+      return result;
+    }
     case 'Tanh':
       return applyAngle(
         op,
