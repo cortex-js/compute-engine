@@ -2,6 +2,10 @@
 
 - Correctly account for `fractionalDigits` when formatting numbers.
 - **#191** Correctly handle `\\lnot\\forall` and `\\lnot\\exists`.
+- **#206** The square root of 1000000 was canonicalized to 0.
+- **#207** When a square root with a literal base greater than 1e6 was preceded
+  by a non-integer literal number, the literal number was ignored during
+  canonicalization.
 
 ## 0.26.1 _2024-10-04_
 

@@ -72,7 +72,10 @@ export function canonicalMultiply(
         let radical = next.op1.numericValue!;
         if (typeof radical !== 'number') radical = radical.re;
 
-        if (radical >= SMALL_INTEGER) continue;
+        if (radical >= SMALL_INTEGER) {
+          ys.push(x);
+          continue;
+        }
 
         // Is it preceded by a rational?
         if (isSubtype(x.type, 'finite_rational')) {
