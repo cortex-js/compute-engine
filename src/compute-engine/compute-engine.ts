@@ -944,8 +944,7 @@ export class ComputeEngine implements IComputeEngine {
         value.radical !== undefined &&
         (!Number.isInteger(value.radical) || value.radical >= SMALL_INTEGER)
       ) {
-        // @fixme: this may never happen
-        return makeNumericValue(value);
+        throw Error('Unexpected value for radical part:' + value.radical);
       }
 
       // Validate rational part

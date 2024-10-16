@@ -6,6 +6,7 @@ import { canonicalAngle } from './trigonometry';
 import { getImaginaryFactor } from './utils';
 import { isSubtype } from '../../common/type/subtype';
 import { apply, apply2 } from './apply';
+import { SMALL_INTEGER } from '../numerics/numeric';
 
 function isSqrt(expr: BoxedExpression): boolean {
   return (
@@ -70,9 +71,11 @@ export function canonicalRoot(
   if (exp === 1) return a;
   if (exp === 2) {
     if (a.isNumberLiteral && isSubtype(a.type, 'rational')) {
-      const v = a.sqrt();
-      if (typeof v.numericValue === 'number') return v;
-      if (v.numericValue!.isExact) return v;
+      if (a.re < SMALL_INTEGER) {
+        const v = a.sqrt();
+        if (typeof v.numericValue === 'number') return v;
+        if (v.numericValue!.isExact) return v;
+      }
     }
     return ce._fn('Sqrt', [a]);
   }

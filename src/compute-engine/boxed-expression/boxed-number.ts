@@ -297,7 +297,11 @@ export class BoxedNumber extends _BoxedExpression {
       if (this._value === 0 || this._value === 1) return this;
       if (this._value === -1) return this.engine.I;
 
-      if (this._value > 0 && Number.isInteger(this._value))
+      if (
+        this._value > 0 &&
+        Number.isInteger(this._value) &&
+        this._value < SMALL_INTEGER
+      )
         return this.engine.number(
           this.engine._numericValue({ radical: this._value })
         );
