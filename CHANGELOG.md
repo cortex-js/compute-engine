@@ -1,3 +1,7 @@
+## [Unreleased]
+
+- **#202** Fixed serialization of integrals and bigops.
+
 ## 0.26.3 _2024-10-17_
 
 - Correctly account for `fractionalDigits` when formatting numbers.
