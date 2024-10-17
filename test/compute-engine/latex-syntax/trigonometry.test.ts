@@ -26,25 +26,25 @@ describe('TRIGONOMETRIC FUNCTIONS inverse, prime', () => {
     expect(check("\\sin^{-1}'(x)")).toMatchInlineSnapshot(`
       box       = ["Apply", ["Derivative", ["InverseFunction", "Sin"]], "x"]
       canonical = ["Apply", ["Derivative", "Arcsin"], "x"]
-      eval-auto = (1/sqrt(-x^2 + 1))
+      eval-auto = (-x^2 + 1)^(-1/2)
     `));
   test(`\\sin^{-1}''(x)`, () =>
     expect(check("\\sin^{-1}''(x)")).toMatchInlineSnapshot(`
       box       = ["Apply", ["Derivative", ["InverseFunction", "Sin"], 2], "x"]
       canonical = ["Apply", ["Derivative", "Arcsin", 2], "x"]
-      eval-auto = (x * (1/sqrt(-x^2 + 1))) / (-x^2 + 1)
+      eval-auto = x / (-x^2 + 1)^(3/2)
     `));
   test(`\\cos^{-1\\doubleprime}(x)`, () =>
     expect(check('\\cos^{-1\\doubleprime}(x)')).toMatchInlineSnapshot(`
       box       = ["Apply", ["Derivative", ["InverseFunction", "Cos"], 2], "x"]
       canonical = ["Apply", ["Derivative", "Arccos", 2], "x"]
-      eval-auto = -(x * (1/sqrt(-x^2 + 1))) / (-x^2 + 1)
+      eval-auto = -x / (-x^2 + 1)^(3/2)
     `));
   test(`\\cos^{-1}\\doubleprime(x)`, () =>
     expect(check('\\cos^{-1}\\doubleprime(x)')).toMatchInlineSnapshot(`
       box       = ["Apply", ["Derivative", ["InverseFunction", "Cos"], 2], "x"]
       canonical = ["Apply", ["Derivative", "Arccos", 2], "x"]
-      eval-auto = -(x * (1/sqrt(-x^2 + 1))) / (-x^2 + 1)
+      eval-auto = -x / (-x^2 + 1)^(3/2)
     `));
 });
 
@@ -71,6 +71,18 @@ describe('TRIGONOMETRIC FUNCTIONS', () => {
 });
 
 describe('TRIGONOMETRIC DEGREES', () => {
+  // @fixme. Precedence of postfix operator is not correct. Should parse as `\\tan ((90-0.000001)\\degree)`
+  test('\\tan (90-0.000001)\\degree', () =>
+    expect(check('\\tan (90-0.000001)\\degree')).toMatchInlineSnapshot(`
+      box       = ["Degrees", ["Tan", ["Subtract", 90, 0.000001]]]
+      canonical = ["Degrees", ["Tan", ["Add", 90, -0.000001]]]
+      simplify  = Degrees(tan(89.999999))
+      eval-auto = -0.0110844744057936925899 * pi
+      eval-mach = -0.011084474405793623 * pi
+      N-auto    = -0.0348229033621455533306
+      N-mach    = -0.03482290336214534
+    `));
+
   test('\\cos(30\\degree)', () =>
     expect(check('\\cos(30\\degree)')).toMatchInlineSnapshot(`
       box       = ["Cos", ["Degrees", 30]]

@@ -1,88 +1,22 @@
-import {
-  BoxedExpression,
-  ComputeEngine,
-  IComputeEngine,
-} from '../src/compute-engine';
+import { ComputeEngine } from '../src/compute-engine';
 
 const ce = new ComputeEngine();
 const engine = ce;
 
-ce.precision = 3;
-let expr = ce.parse('\\pi/2').N();
-console.log(expr.toMathJson({ fractionalDigits: 3 }));
+console.info(ce.parse('\\tan (90-0.000001)\\degree').json);
 
-console.log(expr.toLatex({ fractionalDigits: 3 }));
+ce.parse('\\tan ((90-.000001)\\degree)').N().print();
+
+const expr1 = ce.parse('\\ln |x|');
+const deriv = ce.box(['D', expr1, 'x']);
+deriv.evaluate().print();
+
+// Should simplify to 2x.
+ce.parse('x+x').simplify().print();
 
 ce.assume(ce.parse('x > 0'));
 console.log(ce.parse('\\sqrt{x^2}').simplify().toLatex());
 console.log(ce.parse('\\sqrt[4]{x^4}').simplify().toLatex());
-
-function checkAnswer(
-  numbers: number[],
-  target: number,
-  answer: BoxedExpression
-): string {
-  // First check that the value of the expression is correct
-  const value = answer.value;
-  if (value !== target) return `The value ${value} is not what is expected.`;
-
-  // Count each operator
-  let addCount = 0;
-  let multiplyCount = 0;
-  let divideCount = 0;
-  let subtractCount = 0;
-  let otherCount = 0;
-
-  // ... and check that the numbers used are the ones provided
-  let numbersUsed: number[] = [];
-
-  const visit: (node: BoxedExpression) => void = (node) => {
-    if (node.numericValue !== null) {
-      if (numbersUsed.includes(node.value as number))
-        return 'The answer should not contain any numbers more than once.';
-      if (numbers.includes(node.value as number))
-        numbersUsed.push(node.value as number);
-      else return 'The answer should only contain the numbers provided.';
-    }
-    if (node.symbol) return 'The answer should not contain any symbols.';
-    if (node.operator) {
-      switch (node.operator) {
-        case 'Add':
-          addCount++;
-          break;
-        case 'Multiply':
-          multiplyCount++;
-          break;
-        case 'Divide':
-          divideCount++;
-          break;
-        case 'Subtract':
-          subtractCount++;
-          break;
-        default:
-          otherCount++;
-      }
-      node.ops!.forEach(visit);
-    }
-  };
-
-  visit(answer);
-
-  if (addCount !== 1) return 'The answer should contain exactly one addition.';
-  if (multiplyCount !== 1)
-    return 'The answer should contain exactly one multiplication.';
-  if (divideCount !== 1)
-    return 'The answer should contain exactly one division.';
-  if (subtractCount !== 1)
-    return 'The answer should contain exactly one subtraction.';
-  if (otherCount !== 0)
-    return 'The answer should only contain additions, multiplications, subtractions and divisions.';
-
-  if (numbersUsed.length !== numbers.length)
-    return 'The answer should contain all the numbers provided.';
-
-  return 'correct';
-}
 
 // 3^{-2} gets calculated because canonicalDivide calls toNumericValue, which
 // does simplify the expression, i.e. "(3x)^2" -> "9x^2". That's a bit
@@ -129,59 +63,6 @@ ce.box([
   .evaluate()
   .print();
 
-// function comparaisonFraction(input: string, goodAnswer: string) {
-//   const saisie = engine.parse(input, { canonical: false })!;
-//   const reponse = engine.parse(goodAnswer, { canonical: false })!;
-
-//   if (saisie.isInteger && !reponse.isInteger)
-//     console.log(false, 'Résultat incorrect car une fraction est attendue.'); // Sous-entendu : Et pas un nombre (sauf si la fraction se réduit à un entier)
-//   else if (saisie.isInteger && reponse.isInteger) console.log(true);
-//   else if (
-//     saisie.operator === 'Divide' ||
-//     (saisie.operator === 'Rational' &&
-//       saisie.op1.re! < reponse.op1.re! &&
-//       reponse.op1.re! % saisie.op1.re! === 0)
-//   )
-//     console.log(true);
-//   else if (
-//     saisie.operator === 'Divide' ||
-//     (saisie.operator === 'Rational' && saisie.op1.re! >= reponse.op1.re!)
-//   ) {
-//     console.log(
-//       false,
-//       'Résultat incorrect car une fraction simplifiée est attendue.'
-//     );
-//     // Sous-entendu : Et pas une fraction égale mais non simplifiée
-//   } else if (
-//     saisie.op1.re! < reponse.op1.re! &&
-//     reponse.op1.re! % saisie.op1.re! !== 0
-//   )
-//     console.log(
-//       false,
-//       "Résultat incorrect car la fraction n'est pas simplifiée comme il se doit."
-//     );
-//   // Sous-entendu : Les numérateurs/dénominateurs ne sont pas multiples entre les deux fractions ou bien la fraction input continent des valeurs décimales
-//   else console.log(false, 'Résultat incorrect car une fraction est attendue.');
-// }
-
-// comparaisonFraction('\\frac{12}{6}', '\\frac{24}{12}'); // -> true
-
-// comparaisonFraction('\\frac{2}{1}', '\\frac{24}{12}'); // -> true
-
-// comparaisonFraction('2', '\\frac{24}{12}'); // -> true
-
-// comparaisonFraction('\\frac{24}{12}', '\\frac{24}{12}'); // -> false Résultat incorrect car une fraction simplifiée est attendue.
-
-// comparaisonFraction('\\frac{240}{120}', '\\frac{24}{12}'); // -> false Résultat incorrect car une fraction simplifiée est attendue.
-
-// comparaisonFraction('\\frac{10}{5}', '\\frac{24}{12}'); // -> false Résultat incorrect car la fraction n'est pas simplifiée comme il se doit.
-
-// comparaisonFraction('\\frac{2.4}{1.2}', '\\frac{24}{12}'); // -> false Résultat incorrect car la fraction n'est pas simplifiée comme il se doit.
-
-// comparaisonFraction('\\frac{6}{8}', '\\frac{60}{80}'); // -> true
-
-// comparaisonFraction('0.75', '\\frac{60}{80}'); // -> false Résultat incorrect car une fraction est attendue.
-
 let expression = ce.parse('|-\\pi|').simplify();
 expression.print();
 console.log(expression.latex);
@@ -216,16 +97,6 @@ expression = ce.parse('|\\arcsinh(x)|').simplify();
 expression.print();
 console.log(expression.latex);
 console.log(expression.json);
-
-const eq1 = '3x + 1 = 0';
-const eq2 = '6x + 2 = 0';
-
-// Convertir les équations en MathJSON
-const mathJson1 = ce.parse(eq1);
-const mathJson2 = ce.parse(eq2);
-
-// Comparer les équations
-const areEqual = mathJson1.isEqual(mathJson2);
 
 // See terms.ts:134. Explore options for shortcircuting when values are 1 or -1,
 // or canonicalMultiply2() for the same.

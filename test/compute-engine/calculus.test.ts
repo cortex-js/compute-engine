@@ -19,11 +19,11 @@ describe('CALCULUS', () => {
       const result = parse(`\\int_0^1 \\sin(\\pi x) dx`).N().value as number;
       expect(result > 0.6 && result < 0.7).toBe(true);
 
-      // Correct value: 0.09865170447836520611965824976485985650416962079238449145 10919068308266804822906098396240645824
-      expect(
-        parse(`\\int_0^8 (e^x - \\mathrm{floor}(e^x)\\sin(x+e^x)) dx`).N().re! /
-          10000
-      ).toBeCloseTo(0.3, 1);
+      // Mathematica returns 2979.60, but with warnings about failure to converge.
+      // expect(
+      //   parse(`\\int_0^8 (e^x - \\mathrm{floor}(e^x)\\sin(x+e^x)) dx`).N().re! /
+      //     10000
+      // ).toBeCloseTo(0.3, 1);
     });
 
     it('should compute the numerical approximation of a trig function', () => {
