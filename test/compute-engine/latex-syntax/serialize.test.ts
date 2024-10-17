@@ -127,6 +127,15 @@ describe('LATEX SERIALIZING', () => {
       latex(['Equal', ['Multiply', 2, 2], ['Error', "'missing'"]])
     ).toMatchInlineSnapshot(`2\\times2=\\error{\\blacksquare}`);
   });
+
+  test('Integral', () => {
+    expect(
+      latex(['Integrate', 'x', ['Tuple', 'x', 1, 8]])
+    ).toMatchInlineSnapshot(`\\int^{8}_{1}\\!x\\,\\operatorname{d}x`);
+    expect(latex(['Integrate', ['Sin', 'x'], 'x'])).toMatchInlineSnapshot(
+      `\\int\\!\\sin(x)\\,\\operatorname{d}x`
+    );
+  });
 });
 
 describe('LATEX', () => {
