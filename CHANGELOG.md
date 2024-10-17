@@ -1,4 +1,4 @@
-## [Unreleased]
+## 0.26.4 _2024-10-17_
 
 - **#201** Identifiers of the form `A_\text{1}` were not parsed correctly.
 - **#202** Fixed serialization of integrals and bigops.
