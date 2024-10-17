@@ -6,7 +6,9 @@
 - **#207** When a square root with a literal base greater than 1e6 was preceded
   by a non-integer literal number, the literal number was ignored during
   canonicalization.
-- Correctly evaluate numeric approximation of roots (i.e. `\\sqrt[3]{125}`.
+- **#208** **#204** Correctly evaluate numeric approximation of roots, e.g.
+  `\\sqrt[3]{125}`.
+- **#205** `1/ln(0)` was incorrectly evaluated to `1`. It now returns `0`.
 
 ## 0.26.1 _2024-10-04_
 

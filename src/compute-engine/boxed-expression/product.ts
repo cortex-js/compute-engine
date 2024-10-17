@@ -126,10 +126,11 @@ export class Product {
         }
 
         if (term.isInfinity) {
-          this.coefficient = this.engine._numericValue(
-            term.isNegative ? -Infinity : Infinity
-          );
-
+          if (isOne(exp)) {
+            this.coefficient = this.engine._numericValue(
+              term.isNegative ? -Infinity : Infinity
+            );
+          } else this.terms.push({ term, exponent: exp });
           return;
         }
 
@@ -346,8 +347,15 @@ export class Product {
     const ce = this.engine;
     const coef = this.coefficient;
     if (coef.isZero) return [ce.Zero, ce.One];
-    if (coef.isPositiveInfinity || coef.isNegativeInfinity)
+    if (coef.isPositiveInfinity || coef.isNegativeInfinity) {
+      if (this.terms.length === 0) {
+        return [
+          coef.isPositiveInfinity ? ce.PositiveInfinity : ce.NegativeInfinity,
+          ce.One,
+        ];
+      }
       return [ce.NaN, ce.NaN];
+    }
 
     // If the coef is -1, temporarily set it to 1
     const isNegativeOne = coef.isNegativeOne;
