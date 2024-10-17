@@ -1,4 +1,4 @@
-## [Unreleased]
+## 0.26.3 _2024-10-17_
 
 - Correctly account for `fractionalDigits` when formatting numbers.
 - **#191** Correctly handle `\\lnot\\forall` and `\\lnot\\exists`.
