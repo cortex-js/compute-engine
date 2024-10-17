@@ -1407,6 +1407,8 @@ function parseAt(...close: string[]): (parser, lhs) => Expression | null {
 
     if (close.length > 0 && !parser.matchAll(close)) return null;
 
+    if (stringValue(rhs) !== null) return null;
+
     if (operator(rhs) === 'Delimiter') rhs = operand(rhs, 1) ?? 'Nothing';
     if (operator(rhs) === 'Sequence') return ['At', lhs, ...operands(rhs)];
     return ['At', lhs, rhs];
