@@ -1318,7 +1318,7 @@ function parseBigOp(name: string, prec: number) {
 
 function serializeBigOp(command: string) {
   return (serializer, expr) => {
-    if (operand(expr, 1) !== null) return command;
+    if (!operand(expr, 1)) return command;
 
     let arg = operand(expr, 2);
     const h = operator(arg);
