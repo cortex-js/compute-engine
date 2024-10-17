@@ -63,8 +63,15 @@ const DERIVATIVES_TABLE = {
   Log: ['Power', ['Multiply', '_', ['Ln', '10']], -1],
   Sqrt: ['Multiply', ['Power', '_', ['Negate', 'Half']], 'Half'],
   Abs: [
-    'Piecewise',
-    ['Tuple', ['Multiply', '_', ['Power', '_', -1]], ['Greater', '_', 0]],
+    'Which',
+    ['Equal', '_', 0],
+    NaN,
+    ['Less', '_', 0],
+    -1,
+    ['Greater', '_', 0],
+    1,
+    'True',
+    ['D', ['Abs', '_'], '_'],
   ],
   // https://proofwiki.org/wiki/Derivative_of_Error_Function
   Erf: [
