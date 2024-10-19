@@ -2630,7 +2630,7 @@ export type FunctionDefinition = BaseDefinition &
     type?: (
       ops: ReadonlyArray<BoxedExpression>,
       options: { engine: IComputeEngine }
-    ) => Type;
+    ) => Type | TypeString | undefined;
 
     /** Return the sign of the function expression.
      *

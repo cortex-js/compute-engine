@@ -511,10 +511,9 @@ function serializePower(
       }
       if (machineValue(operand(exp, 2)) === 2) {
         // It's x^(n/2) -> it's √x^n
-        return `${serializer.serialize(['Sqrt', base])}${supsub(
-          '^',
-          serializer.serialize(operand(exp, 1))
-        )}`;
+        return `${serializer.serialize(['Sqrt', base])}^{${serializer.serialize(
+          operand(exp, 1)
+        )}}`;
       }
     } else if (operator(exp) === 'Power') {
       if (machineValue(operand(exp, 2)) === -1) {
@@ -524,7 +523,16 @@ function serializePower(
       }
     }
   }
-  return serializer.wrapShort(base) + supsub('^', serializer.serialize(exp));
+
+  // For improved typography, serialize 2^2^2 as 2^{2^2} rather than {2^2}^2. Note that 2^2^2 is invalid LaTeX.
+  if (operator(base) === 'Power') {
+    const baseBody = operand(base, 1);
+    const baseExponent = operand(base, 2);
+    return `
+      ${serializer.wrapShort(baseBody)}^{${supsub('^', serializer.wrapShort(baseExponent), serializer.serialize(exp))}}`;
+  }
+
+  return supsub('^', serializer.wrapShort(base), serializer.serialize(exp));
 }
 
 export const DEFINITIONS_ARITHMETIC: LatexDictionary = [

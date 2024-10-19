@@ -349,9 +349,10 @@ export function joinLatex(segments: Iterable<string>): string {
   return result;
 }
 
-export function supsub(c: '_' | '^', x: string): string {
-  if (/^[0-9]$/.test(x)) return `${c}${x}`;
-  return `${c}{${x}}`;
+export function supsub(c: '_' | '^', body: string, x: string): string {
+  if (body.includes(c)) body = `{${body}}`;
+  if (/^[0-9]$/.test(x)) return `${body}${c}${x}`;
+  return `${body}${c}{${x}}`;
 }
 
 export function tokensToString(

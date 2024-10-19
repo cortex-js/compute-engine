@@ -1,3 +1,7 @@
+## [Unreleased]
+
+- Correctly serialize nested superscripts, e.g. `x^{y^z}`.
+
 ## 0.26.4 _2024-10-17_
 
 - **#201** Identifiers of the form `A_\text{1}` were not parsed correctly.

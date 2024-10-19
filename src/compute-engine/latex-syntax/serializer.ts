@@ -486,8 +486,8 @@ function parseIdentifierBody(
     }
 
     // Apply the superscripts and subscripts
-    if (sups.length > 0) body = `${body}${supsub('^', sups.join(','))}`;
-    if (subs.length > 0) body = `${body}${supsub('_', subs.join(','))}`;
+    if (sups.length > 0) body = supsub('^', body, sups.join(','));
+    if (subs.length > 0) body = supsub('_', body, subs.join(','));
   }
 
   for (const style of styles) {
