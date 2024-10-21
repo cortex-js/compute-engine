@@ -248,8 +248,18 @@ export const CORE_LIBRARY: IdentifierDefinitions[] = [
       },
     },
 
+    Unevaluated: {
+      description: 'Prevent an expression from being evaluated',
+      // Unlike Hold, the argume is canonicalized
+      hold: false,
+      signature: 'any -> any',
+      type: ([x]) => x.type,
+      evaluate: ([x]) => x,
+    },
+
     Hold: {
-      description: 'Hold an expression, preventing it from being evaluated',
+      description:
+        'Hold an expression, preventing it from being canonicalized or evaluated',
       hold: true,
       signature: 'any -> any',
       type: ([x]) => {
@@ -259,11 +269,11 @@ export const CORE_LIBRARY: IdentifierDefinitions[] = [
         if (x.ops) return functionSignature(x.type) ?? 'function';
         return 'expression';
       },
-      // By definition, arguments of the canonical expression of
+      // By definition, the argument of the canonical expression of
       // `Hold` are not canonicalized.
-      canonical: (args, { engine: ce }) =>
-        args.length !== 1 ? null : ce.hold(args[0]),
-      evaluate: ([x]) => x,
+      canonical: (args, { engine }) =>
+        args.length !== 1 ? null : engine.hold(args[0]),
+      evaluate: ([x], { engine }) => engine.hold(x),
     },
 
     HorizontalSpacing: {

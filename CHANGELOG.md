@@ -1,6 +1,12 @@
 ## [Unreleased]
 
 - Correctly serialize nested superscripts, e.g. `x^{y^z}`.
+- The result of evaluation a `Hold` expression is now the expression itself.
+- To prevent evaluation of an expression temporarily, use the `Unevaluated`
+  function. The result of evaluating an `Unevaluated` expression is its
+  argument.
+- The type of a `Hold` expression was incorrectly returned as `string`. It now
+  return the type of its argument.
 
 ## 0.26.4 _2024-10-17_
 

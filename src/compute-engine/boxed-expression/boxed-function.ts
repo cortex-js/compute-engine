@@ -1004,36 +1004,6 @@ function type(expr: BoxedExpression): Type | undefined {
   // The value is a function expression
   //
   if (expr.ops) {
-    // If we're a Hold operator, the type is a `function`
-    if (expr.operator === 'Hold') {
-      const [op] = expr.ops!;
-      if (op.symbol) return 'symbol';
-      if (op.string !== undefined) return 'string';
-      if (op.isNumberLiteral) return op.type;
-
-      if (op.isFunctionExpression) {
-        const def = op.functionDefinition;
-        if (def) {
-          const type = def.signature;
-
-          if (typeof type !== 'string' && type.kind === 'signature') {
-            // Compute the result type based on the arguments
-            // Return a signature modified with the computed result type
-            return {
-              ...type,
-              result:
-                parseType(def.type?.(op.ops!, { engine: expr.engine })) ??
-                type.result,
-            };
-          }
-          return type;
-        }
-      }
-
-      // For a Hold function, the default type is 'function'
-      return 'function';
-    }
-
     const def = expr.functionDefinition;
     if (!def) return 'function';
 
