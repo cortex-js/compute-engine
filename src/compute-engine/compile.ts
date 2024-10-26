@@ -1,6 +1,6 @@
 import type { MathJsonIdentifier } from '../math-json/types';
 
-import type { BoxedExpression } from './public';
+import type { BoxedExpression, IComputeEngine } from './public';
 
 import { isRelationalOperator } from './boxed-expression/utils';
 import { isFiniteIndexableCollection } from './collection-utils';
@@ -9,6 +9,19 @@ import { normalizeIndexingSet } from './library/utils';
 import { monteCarloEstimate } from './numerics/monte-carlo';
 import { chop, factorial, gcd, lcm, limit } from './numerics/numeric';
 import { gamma, gammaln } from './numerics/special-functions';
+import {
+  interquartileRange,
+  kurtosis,
+  mean,
+  median,
+  mode,
+  populationStandardDeviation,
+  populationVariance,
+  quartiles,
+  skewness,
+  standardDeviation,
+  variance,
+} from './numerics/statistics';
 
 export type CompiledType = boolean | number | string | object;
 
@@ -145,6 +158,75 @@ const NATIVE_JS_FUNCTIONS: CompiledFunctions = {
   Lb: 'Math.log2',
 
   Max: 'Math.max',
+
+  Mean: (args, compile) => {
+    if (args.length === 0) return 'NaN';
+    if (args.length === 1) return `_SYS.mean(${compile(args[0])})`;
+    return `_SYS.mean([${args.map((x) => compile(x)).join(', ')}])`;
+  },
+
+  Median: (args, compile) => {
+    if (args.length === 0) return 'NaN';
+    if (args.length === 1) return `_SYS.median(${compile(args[0])})`;
+    return `_SYS.median([${args.map((x) => compile(x)).join(', ')}])`;
+  },
+
+  Variance: (args, compile) => {
+    if (args.length === 0) return 'NaN';
+    if (args.length === 1) return `_SYS.variance(${compile(args[0])})`;
+    return `_SYS.variance([${args.map((x) => compile(x)).join(', ')}])`;
+  },
+
+  PopulationVariance: (args, compile) => {
+    if (args.length === 0) return 'NaN';
+    if (args.length === 1)
+      return `_SYS.populationVariance(${compile(args[0])})`;
+    return `_SYS.populationVariance([${args.map((x) => compile(x)).join(', ')}])`;
+  },
+
+  StandardDeviation: (args, compile) => {
+    if (args.length === 0) return 'NaN';
+    if (args.length === 1) return `_SYS.standardDeviation(${compile(args[0])})`;
+    return `_SYS.standardDeviation([${args.map((x) => compile(x)).join(', ')}])`;
+  },
+
+  PopulationStandardDeviation: (args, compile) => {
+    if (args.length === 0) return 'NaN';
+    if (args.length === 1)
+      return `_SYS.populationStandardDeviation(${compile(args[0])})`;
+    return `_SYS.populationStandardDeviation([${args.map((x) => compile(x)).join(', ')}])`;
+  },
+
+  Kurtosis: (args, compile) => {
+    if (args.length === 0) return 'NaN';
+    if (args.length === 1) return `_SYS.kurtosis(${compile(args[0])})`;
+    return `_SYS.kurtosis([${args.map((x) => compile(x)).join(', ')}])`;
+  },
+
+  Skewness: (args, compile) => {
+    if (args.length === 0) return 'NaN';
+    if (args.length === 1) return `_SYS.skewness(${compile(args[0])})`;
+    return `_SYS.skewness([${args.map((x) => compile(x)).join(', ')}])`;
+  },
+
+  Mode: (args, compile) => {
+    if (args.length === 0) return 'NaN';
+    if (args.length === 1) return `_SYS.mode(${compile(args[0])})`;
+    return `_SYS.mode([${args.map((x) => compile(x)).join(', ')}])`;
+  },
+
+  Quartiles: (args, compile) => {
+    if (args.length === 0) return 'NaN';
+    if (args.length === 1) return `_SYS.quartiles(${compile(args[0])})`;
+    return `_SYS.quartiles([${args.map((x) => compile(x)).join(', ')}])`;
+  },
+
+  InterquartileRange: (args, compile) => {
+    if (args.length === 0) return 'NaN';
+    if (args.length === 1)
+      return `_SYS.interquartileRange(${compile(args[0])})`;
+    return `_SYS.interquartileRange([${args.map((x) => compile(x)).join(', ')}])`;
+  },
 
   Min: 'Math.min',
 
@@ -306,6 +388,17 @@ export class ComputeEngineFunction extends Function {
     lcm: lcm,
     lngamma: gammaln,
     limit: limit,
+    mean,
+    median,
+    variance,
+    populationVariance,
+    standardDeviation,
+    populationStandardDeviation,
+    kurtosis,
+    skewness,
+    mode,
+    quartiles,
+    interquartileRange,
   };
   constructor(body: string) {
     super('_SYS', '_', `return ${body}`);
@@ -366,6 +459,7 @@ export function compileToJavascript(
 }
 
 function compileExpr(
+  engine: IComputeEngine,
   h: string,
   args: ReadonlyArray<BoxedExpression>,
   prec: number,
@@ -405,7 +499,9 @@ function compileExpr(
       // We need to chain them
       const result: string[] = [];
       for (let i = 0; i < args.length - 1; i++)
-        result.push(compileExpr(h, [args[i], args[i + 1]], op[1], target));
+        result.push(
+          compileExpr(engine, h, [args[i], args[i + 1]], op[1], target)
+        );
 
       return `(${result.join(') && (')})`;
     }
@@ -475,7 +571,14 @@ function compileExpr(
   const fn = target.functions?.(h);
   if (!fn) throw new Error(`Unknown function ${h}`);
   if (typeof fn === 'function') {
-    if (args.length === 1 && isFiniteIndexableCollection(args[0])) {
+    // Get function definition for h
+    const def = engine.lookupFunction(h);
+
+    if (
+      def?.threadable &&
+      args.length === 1 &&
+      isFiniteIndexableCollection(args[0])
+    ) {
       const v = tempVar();
       return `(${compile(args[0], target)}).map((${v}) => ${fn(
         args[0].engine.box(v),
@@ -529,7 +632,7 @@ export function compile(
   if (str !== null) return target.string(s!);
 
   // It must be a function expression...
-  return compileExpr(expr.operator, expr.ops!, prec, target);
+  return compileExpr(expr.engine, expr.operator, expr.ops!, prec, target);
 }
 
 function compileLoop(

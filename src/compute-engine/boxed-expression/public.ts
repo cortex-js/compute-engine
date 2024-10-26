@@ -1157,7 +1157,7 @@ export interface BoxedExpression {
   compile(
     to?: 'javascript',
     options?: { optimize: ('simplify' | 'evaluate')[] }
-  ): ((args: Record<string, any>) => any | undefined) | undefined;
+  ): ((args?: Record<string, any>) => any | undefined) | undefined;
 
   /**
    * If this is an equation, solve the equation for the variables in vars.

@@ -17,7 +17,6 @@ import type {
   PatternMatchOptions,
   Rule,
   RuntimeScope,
-  SemiBoxedExpression,
   Sign,
   SimplifyOptions,
   Substitution,
