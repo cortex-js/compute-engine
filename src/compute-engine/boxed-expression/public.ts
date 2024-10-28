@@ -25,6 +25,7 @@ import { BigNum, IBigNum } from '../numerics/bignum';
 import { Type, TypeString } from '../../common/type/types';
 import { AbstractTensor } from '../tensor/tensors';
 import { OneOf } from '../../common/one-of';
+import { CompiledType, JSSource } from '../compile';
 
 /**
  * :::info[THEORY OF OPERATIONS]
@@ -1150,14 +1151,20 @@ export interface BoxedExpression {
    *
    * ```javascript
    * const expr = ce.parse('x^2 + y^2');
-   * const f = expr.compile('javascript');
+   * const f = expr.compile();
    * console.log(f({x: 2, y: 3}));
    * ```
    */
-  compile(
-    to?: 'javascript',
-    options?: { optimize: ('simplify' | 'evaluate')[] }
-  ): ((args?: Record<string, any>) => any | undefined) | undefined;
+  compile(options?: {
+    to?: 'javascript';
+    optimize?: ('simplify' | 'evaluate')[];
+    functions?: Record<MathJsonIdentifier, JSSource | ((...any) => any)>;
+    vars?: Record<MathJsonIdentifier, CompiledType>;
+    imports?: unknown[];
+    preamble?: string;
+  }):
+    | ((args?: Record<string, CompiledType>) => CompiledType | undefined)
+    | undefined;
 
   /**
    * If this is an equation, solve the equation for the variables in vars.

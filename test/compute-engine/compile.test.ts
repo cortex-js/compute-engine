@@ -72,6 +72,41 @@ describe('COMPILE', () => {
     });
   });
 
+  describe('Imported Functions', () => {
+    ce.defineFunction('Foo', {
+      signature: 'number -> number',
+      evaluate: ([x]) => ce.box(['Add', x, 1]),
+    });
+
+    it('should compile a function imported inline', () => {
+      const fn = ce.box(['Foo', 3]).compile({
+        functions: { Foo: (x) => x + 1 },
+      })!;
+      expect(fn()).toBe(4);
+    });
+
+    it('should compile a function referenced by name', () => {
+      function foo(x) {
+        return x + 1;
+      }
+      const fn = ce.box(['Foo', 3]).compile({
+        functions: { Foo: foo },
+      })!;
+      expect(fn()).toBe(4);
+    });
+
+    it('should compile a function imported by name', () => {
+      function foo(x) {
+        return x + 1;
+      }
+      const fn = ce.box(['Foo', 3]).compile({
+        functions: { Foo: 'foo' },
+        imports: [foo],
+      })!;
+      expect(fn()).toBe(4);
+    });
+  });
+
   describe('Conditionals / Ifs', () => {
     it('should compile an if statement', () => {
       const expr = ce.box(['If', ['Greater', 'x', 0], 'x', ['Negate', 'x']]);

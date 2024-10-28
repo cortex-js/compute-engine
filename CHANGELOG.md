@@ -47,6 +47,83 @@
 
 - The argument of compiled function is now optional.
 
+- Compiled expressions can now reference external JavaScript functions. For
+  example:
+
+  ```js
+  ce.defineFunction('Foo', {
+    signature: 'number -> number',
+    evaluate: ([x]) => ce.box(['Add', x, 1]),
+  });
+
+  const fn = ce.box(['Foo', 3]).compile({
+    functions: { Foo: (x) => x + 1 },
+  })!;
+
+  console.info(fn());
+  // -> 4
+  ```
+
+  ```js
+  ce.defineFunction('Foo', {
+    signature: 'number -> number',
+    evaluate: ([x]) => ce.box(['Add', x, 1]),
+  });
+
+  function foo(x) {
+    return x + 1;
+  }
+
+  const fn = ce.box(['Foo', 3]).compile({
+    functions: { Foo: foo },
+  })!;
+
+  console.info(fn());
+  // -> 4
+  ```
+
+  Additionally, functions can be implicitly imported (in case they are needed by
+  other JavaScript functions):
+
+  ```js
+  ce.defineFunction('Foo', {
+    signature: 'number -> number',
+    evaluate: ([x]) => ce.box(['Add', x, 1]),
+  });
+
+  function bar(x, y) {
+    return x + y;
+  }
+
+  function foo(x) {
+    return bar(x, 1);
+  }
+
+
+  const fn = ce.box(['Foo', 3]).compile({
+    functions: { Foo: 'foo' },
+    imports: [foo, bar],
+  })!;
+
+  console.info(fn());
+  // -> 4
+  ```
+
+- Compiled expression can now include an arbitrary preamble (JavaScript source)
+  that is executed before the compiled function is executed. This can be used to
+  define additional functions or constants.
+
+  ```js
+  ce.defineFunction('Foo', {
+    signature: 'number -> number',
+    evaluate: ([x]) => ce.box(['Add', x, 1]),
+  });
+
+  const code = ce.box(['Foo', 3]).compile({
+    preamble: "function Foo(x) { return x + 1};",
+  });
+  ```
+
 ## 0.26.4 _2024-10-17_
 
 - **#201** Identifiers of the form `A_\text{1}` were not parsed correctly.

@@ -694,20 +694,28 @@ export abstract class _BoxedExpression implements BoxedExpression {
     return this.evaluate({ numericApproximation: true });
   }
 
-  compile(
-    to = 'javascript',
-    options?: { optimize: ('simplify' | 'evaluate')[] }
-  ): ((args: Record<string, any>) => any | undefined) | undefined {
-    if (to !== 'javascript') return undefined;
+  compile(options?: {
+    to?: 'javascript';
+    optimize?: ('simplify' | 'evaluate')[];
+    functions?: Record<MathJsonIdentifier, string | ((...any) => any)>;
+    vars?: Record<MathJsonIdentifier, string>;
+    imports?: Function[];
+    preamble?: string;
+  }): (args: Record<string, any>) => any | undefined {
+    if (options?.to && options.to !== 'javascript')
+      throw new Error('Unknown target');
     options ??= { optimize: ['simplify'] };
     // eslint-disable-next-line @typescript-eslint/no-this-alias
     let expr = this as BoxedExpression;
-    if (options.optimize.includes('simplify')) expr = expr.simplify();
-    if (options.optimize.includes('evaluate')) expr = expr.evaluate();
-    // try {
-    return compileToJavascript(expr);
-    // } catch (e) {}
-    // return undefined;
+    if (options?.optimize?.includes('simplify')) expr = expr.simplify();
+    if (options?.optimize?.includes('evaluate')) expr = expr.evaluate();
+    return compileToJavascript(
+      expr,
+      options?.functions,
+      options?.vars,
+      options?.imports,
+      options?.preamble
+    );
   }
 
   get isCollection(): boolean {
