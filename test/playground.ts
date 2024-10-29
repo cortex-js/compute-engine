@@ -3,21 +3,12 @@ import { ComputeEngine, FunctionDefinition } from '../src/compute-engine';
 const ce = new ComputeEngine();
 const engine = ce;
 
-ce.defineFunction('Foo', {
-  signature: 'number -> number',
-  evaluate: ([x]) => ce.box(['Add', x, 1]),
-});
-
-function foo(x) {
-  return x + 1;
-}
-
-const fn = ce.box(['Foo', 3]).compile({
-  functions: { Foo: 'foo' },
-  imports: [foo],
-})!;
-
-console.info(fn());
+console.info(
+  ce
+    .parse('x^2 - 1 = 0')
+    .solve('x')
+    ?.map((x) => x.toString())
+);
 
 ce.parse('\\mathrm{PopulationVariance}([7, 2, 11])').evaluate().print();
 
