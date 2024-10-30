@@ -2041,7 +2041,11 @@ export class _Parser implements Parser {
     } else if (typeof expr === 'number') {
       expr = { latex, num: Number(expr).toString() };
     } else if (typeof expr === 'string') {
-      expr = { latex, sym: expr };
+      if (expr.startsWith("'")) {
+        expr = { str: expr };
+      } else {
+        expr = { sym: expr };
+      }
     } else if (typeof expr === 'object' && expr !== null) {
       (expr as ExpressionObject).latex = latex;
     }
