@@ -2042,7 +2042,7 @@ export class _Parser implements Parser {
       expr = { latex, num: Number(expr).toString() };
     } else if (typeof expr === 'string') {
       if (expr.startsWith("'")) {
-        expr = { str: expr };
+        expr = { str: expr.slice(1, -1) };
       } else {
         expr = { sym: expr };
       }
