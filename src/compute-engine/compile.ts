@@ -100,7 +100,7 @@ const NATIVE_JS_FUNCTIONS: CompiledFunctions = {
     return `Math.acosh(1 / (${compile(x)}))`;
   },
 
-  Arsin: 'Math.asin',
+  Arcsin: 'Math.asin',
   Arsinh: 'Math.asinh',
   Arctan: 'Math.atan',
   Artanh: 'Math.atanh',
