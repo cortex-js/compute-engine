@@ -1,7 +1,28 @@
-import { each } from '../collection-utils';
+import { each, isFiniteCollection } from '../collection-utils';
 import { erf, erfInv } from '../numerics/special-functions';
-import { IdentifierDefinitions } from '../public';
+import type { BoxedExpression, IdentifierDefinitions } from '../public';
 import { choose } from '../boxed-expression/expand';
+import { bignumPreferred } from '../private';
+import {
+  bigInterquartileRange,
+  bigKurtosis,
+  bigMean,
+  bigMedian,
+  bigMode,
+  bigPopulationVariance,
+  bigQuartiles,
+  bigSkewness,
+  bigVariance,
+  interquartileRange,
+  kurtosis,
+  mean,
+  median,
+  mode,
+  populationVariance,
+  quartiles,
+  skewness,
+  variance,
+} from '../numerics/statistics';
 
 // Geometric mean:
 // Harmonic mean:
@@ -28,211 +49,148 @@ export const STATISTICS_LIBRARY: IdentifierDefinitions[] = [
     Mean: {
       complexity: 1200,
       threadable: false,
-      signature: 'collection -> number',
-      evaluate: (ops, { engine: ce }) => {
-        // @todo: do bignum version
-        let sum = 0;
-        let count = 0;
-        for (const op of each(ops[0])) {
-          sum += op.re;
-          count++;
-        }
-        if (count === 0) return ce.NaN;
-        return ce.number(sum / count);
-      },
+      signature: '((collection|number)...) -> number',
+      evaluate: (ops, { engine }) =>
+        engine.number(
+          bignumPreferred(engine)
+            ? bigMean(engine.bignum.bind(engine), flattenBigScalars(ops))
+            : mean(flattenScalars(ops))
+        ),
     },
 
     Median: {
       complexity: 1200,
       threadable: false,
-      signature: 'collection -> number',
-      evaluate: (ops, { engine: ce }) => {
-        // @todo: do bignum version
-        const values: number[] = [];
-        for (const op of each(ops[0])) {
-          const v = op.re;
-          if (!Number.isFinite(v)) return ce.NaN;
-          values.push(v);
-        }
-
-        if (values.length === 0) return ce.NaN;
-        values.sort((a, b) => a - b);
-        const mid = Math.floor(values.length / 2);
-
-        if (values.length % 2 === 0)
-          return ce.number((values[mid - 1] + values[mid]) / 2);
-
-        return ce.number(values[mid]);
-      },
+      signature: '((collection|number)...) -> number',
+      evaluate: (ops, { engine }) =>
+        engine.number(
+          bignumPreferred(engine)
+            ? bigMedian(flattenBigScalars(ops))
+            : median(flattenScalars(ops))
+        ),
     },
 
     Variance: {
       complexity: 1200,
       threadable: false,
-      signature: 'collection -> number',
-      evaluate: (ops, { engine: ce }) => {
-        let sum = 0;
-        let sum2 = 0;
-        let count = 0;
-        for (const op of each(ops[0])) {
-          const v = op.re;
-          if (!Number.isFinite(v)) return ce.NaN;
-          sum += v;
-          sum2 += v * v;
-          count++;
-        }
-        if (count === 0) return ce.NaN;
-        return ce.number((sum2 - (sum * sum) / count) / (count - 1));
-      },
+      signature: '((collection|number)...) -> number',
+      evaluate: (ops, { engine }) =>
+        engine.number(
+          bignumPreferred(engine)
+            ? bigVariance(engine.bignum.bind(engine), flattenBigScalars(ops))
+            : variance(flattenScalars(ops))
+        ),
+    },
+
+    PopulationVariance: {
+      complexity: 1200,
+      threadable: false,
+      signature: '((collection|number)...) -> number',
+      evaluate: (ops, { engine }) =>
+        engine.number(
+          bignumPreferred(engine)
+            ? bigPopulationVariance(
+                engine.bignum.bind(engine),
+                flattenBigScalars(ops)
+              )
+            : populationVariance(flattenScalars(ops))
+        ),
     },
 
     StandardDeviation: {
       complexity: 1200,
       threadable: false,
       description: 'Sample Standard Deviation of a collection of numbers.',
-      signature: 'collection -> number',
-      evaluate: (ops, { engine: ce }) => {
-        let sum = 0;
-        let sum2 = 0;
-        let count = 0;
-        for (const op of each(ops[0])) {
-          const v = op.re;
-          if (!Number.isFinite(v)) return ce.NaN;
-          sum += v;
-          sum2 += v * v;
-          count++;
-        }
-        if (count === 0) return ce.NaN;
-        return ce.number(Math.sqrt((sum2 - (sum * sum) / count) / (count - 1)));
-      },
+      signature: '((collection|number)...) -> number',
+      evaluate: (ops, { engine }) =>
+        engine.number(
+          bignumPreferred(engine)
+            ? bigVariance(
+                engine.bignum.bind(engine),
+                flattenBigScalars(ops)
+              ).sqrt()
+            : Math.sqrt(variance(flattenScalars(ops)))
+        ),
+    },
+
+    PopulationStandardDeviation: {
+      complexity: 1200,
+      threadable: false,
+      description: 'Population Standard Deviation of a collection of numbers.',
+      signature: '((collection|number)...) -> number',
+      evaluate: (ops, { engine }) =>
+        engine.number(
+          bignumPreferred(engine)
+            ? bigPopulationVariance(
+                engine.bignum.bind(engine),
+                flattenBigScalars(ops)
+              ).sqrt()
+            : Math.sqrt(populationVariance(flattenScalars(ops)))
+        ),
     },
 
     Kurtosis: {
       complexity: 1200,
       threadable: false,
-      signature: 'collection -> number',
-      evaluate: (ops, { engine: ce }) => {
-        let sum = 0;
-        let sum2 = 0;
-        let sum4 = 0;
-        let count = 0;
-        for (const op of each(ops[0])) {
-          const v = op.re;
-          if (!Number.isFinite(v)) return ce.NaN;
-          sum += v;
-          sum2 += v * v;
-          sum4 += v * v * v * v;
-          count++;
-        }
-        if (count === 0) return ce.NaN;
-        // const m = sum / count;
-        const s2 = (sum2 - (sum * sum) / count) / (count - 1);
-        const s4 = (sum4 - (sum2 * sum2) / count) / (count - 1);
-        return ce.number(((s4 / (s2 * s2) - 3) * (count * (count + 1))) / 6);
-      },
+      signature: '((collection|number)...) -> number',
+      evaluate: (ops, { engine }) =>
+        engine.number(
+          bignumPreferred(engine)
+            ? bigKurtosis(engine.bignum.bind(engine), flattenBigScalars(ops))
+            : kurtosis(flattenScalars(ops))
+        ),
     },
 
     Skewness: {
       complexity: 1200,
       threadable: false,
-      signature: 'collection -> number',
-      evaluate: (ops, { engine: ce }) => {
-        let sum = 0;
-        let sum2 = 0;
-        let sum3 = 0;
-        let count = 0;
-        for (const op of each(ops[0])) {
-          const v = op.re;
-          if (!Number.isFinite(v)) return ce.NaN;
-          sum += v;
-          sum2 += v * v;
-          sum3 += v * v * v;
-          count++;
-        }
-        if (count === 0) return ce.NaN;
-        // const m = sum / count;
-        const s2 = (sum2 - (sum * sum) / count) / (count - 1);
-        const s3 = (sum3 - (sum2 * sum) / count) / (count - 1);
-        return ce.number((s3 / Math.pow(s2, 3 / 2)) * Math.sqrt(count * 1));
-      },
+      signature: '((collection|number)...) -> number',
+      evaluate: (ops, { engine }) =>
+        engine.number(
+          bignumPreferred(engine)
+            ? bigSkewness(engine.bignum.bind(engine), flattenBigScalars(ops))
+            : skewness(flattenScalars(ops))
+        ),
     },
 
     Mode: {
       complexity: 1200,
       threadable: false,
-      signature: 'collection -> number',
-      evaluate: (ops, { engine: ce }) => {
-        const values: number[] = [];
-        for (const op of each(ops[0])) {
-          const v = op.re;
-          if (!Number.isFinite(v)) return ce.NaN;
-          values.push(v);
-        }
-        if (values.length === 0) return ce.NaN;
-        values.sort((a, b) => a - b);
-        const counts: Record<number, number> = {};
-        for (const v of values) {
-          counts[v] = (counts[v] ?? 0) + 1;
-        }
-        let max = 0;
-        let mode = values[0];
-        for (const v of values) {
-          const c = counts[v];
-          if (c > max) {
-            max = c;
-            mode = v;
-          }
-        }
-        return ce.number(mode);
-      },
+      signature: '((collection|number)...) -> number',
+      evaluate: (ops, { engine }) =>
+        engine.number(
+          bignumPreferred(engine)
+            ? bigMode(engine.bignum.bind(engine), flattenBigScalars(ops))
+            : mode(flattenScalars(ops))
+        ),
     },
 
     Quartiles: {
       complexity: 1200,
       threadable: false,
-      signature: 'collection -> tuple<mid:number, lower:number, upper:number>',
-      evaluate: (ops, { engine: ce }) => {
-        const values: number[] = [];
-        for (const op of each(ops[0])) {
-          const v = op.re;
-          if (!Number.isFinite(v)) return ce.tuple(ce.NaN, ce.NaN, ce.NaN);
-          values.push(v);
-        }
-        if (values.length === 0) return ce.tuple(ce.NaN, ce.NaN, ce.NaN);
-        values.sort((a, b) => a - b);
-        const mid = Math.floor(values.length / 2);
-        const lower = values.slice(0, mid);
-        const upper = values.slice(mid + 1);
-        return ce.tuple(
-          ce.number(values[mid]),
-          ce.number(lower[Math.floor(lower.length / 2)]),
-          ce.number(upper[Math.floor(upper.length / 2)])
-        );
+      signature:
+        '((collection|number)...) -> tuple<mid:number, lower:number, upper:number>',
+      evaluate: (ops, { engine }) => {
+        const [mid, lower, upper] = (
+          bignumPreferred(engine)
+            ? bigQuartiles(flattenBigScalars(ops))
+            : quartiles(flattenScalars(ops))
+        ).map((v) => engine.number(v));
+        return engine.tuple(mid, lower, upper);
       },
     },
 
     InterquartileRange: {
       complexity: 1200,
       threadable: false,
-      signature: 'collection -> number',
+      signature: '((collection|number)...) -> number',
 
-      evaluate: (ops, { engine: ce }) => {
-        const values: number[] = [];
-        for (const op of each(ops[0])) {
-          const v = op.re;
-          if (!Number.isFinite(v)) return ce.NaN;
-          values.push(v);
-        }
-        if (values.length === 0) return ce.NaN;
-        values.sort((a, b) => a - b);
-        const mid = Math.floor(values.length / 2);
-        const lower = values.slice(0, mid);
-        const upper = values.slice(mid + 1);
-        return ce.number(
-          upper[Math.floor(upper.length / 2)] -
-            lower[Math.floor(lower.length / 2)]
-        );
-      },
+      evaluate: (ops, { engine }) =>
+        engine.number(
+          bignumPreferred(engine)
+            ? bigInterquartileRange(flattenBigScalars(ops))
+            : interquartileRange(flattenScalars(ops))
+        ),
     },
 
     Erf: {
@@ -266,3 +224,28 @@ export const STATISTICS_LIBRARY: IdentifierDefinitions[] = [
     },
   },
 ];
+
+function* flattenArguments(
+  args: ReadonlyArray<BoxedExpression>
+): Generator<BoxedExpression> {
+  if (args.length === 1 && isFiniteCollection(args[0])) yield* each(args[0]);
+  else {
+    // Go over each argument and yield it if a scalar, otherwise yield its elements
+    for (const arg of args) {
+      if (isFiniteCollection(arg)) {
+        yield* each(arg);
+      } else {
+        yield arg;
+      }
+    }
+  }
+}
+
+function* flattenScalars(args: ReadonlyArray<BoxedExpression>) {
+  for (const op of flattenArguments(args)) yield op.re;
+}
+
+function* flattenBigScalars(args: ReadonlyArray<BoxedExpression>) {
+  for (const op of flattenArguments(args))
+    yield op.bignumRe ?? op.engine.bignum(op.re);
+}

@@ -421,8 +421,6 @@ export function toAsciiMath(
 function joinMul(lhs: string, rhs: string) {
   if (!lhs) return rhs;
   if (!rhs) return lhs;
-  if (lhs === '1') return rhs;
-  if (rhs === '1') return lhs;
 
   if (rhs.startsWith('-')) rhs = `(${rhs})`;
 

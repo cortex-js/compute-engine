@@ -1,12 +1,128 @@
 ## [Unreleased]
 
 - Correctly serialize nested superscripts, e.g. `x^{y^z}`.
+
 - The result of evaluation a `Hold` expression is now the expression itself.
+
 - To prevent evaluation of an expression temporarily, use the `Unevaluated`
   function. The result of evaluating an `Unevaluated` expression is its
   argument.
+
 - The type of a `Hold` expression was incorrectly returned as `string`. It now
-  return the type of its argument.
+  returns the type of its argument.
+
+- The statistics function (`Mean`, `Median`, `Variance`, `StandardDeviation`,
+  `Kurtosis`, `Skewness`, `Mode`, `Quartiles` and `InterQuartileRange`) now
+  accept as argument either a collection or a sequence of values.
+
+  ```js
+  ce.parse("\\mathrm{Mean}([7, 2, 11])").evaluate().print();
+  // -> 20/3
+  ce.parse("\\mathrm{Mean}(7, 2, 11)").evaluate().print();
+  // -> 20/3
+  ```
+
+- The `Variance` and `StandardDeviation` functions now have variants for
+  population statistics, `PopulationVariance` and `PopulationStandardDeviation`.
+  The default is to use sample statistics.
+
+  ```js
+  ce.parse("\\mathrm{PopulationVariance}([7, 2, 11])").evaluate().print();
+  // -> 13.555
+  ce.parse("\\mathrm{Variance}([7, 2, 11])").evaluate().print();
+  // -> 20.333
+  ```
+
+- The statistics function can now be compiled to JavaScript:
+
+  ```js
+  const code = ce.parse("\\mathrm{Mean}(7, 2, 11)").compile();
+  console.log(code());
+  // -> 13.555
+  ```
+
+- The statistics function calculate either using machine numbers or bignums
+  depending on the precision. The precision can be set with the `precision`
+  property of the Compute Engine.
+
+- The argument of compiled function is now optional.
+
+- Compiled expressions can now reference external JavaScript functions. For
+  example:
+
+  ```js
+  ce.defineFunction('Foo', {
+    signature: 'number -> number',
+    evaluate: ([x]) => ce.box(['Add', x, 1]),
+  });
+
+  const fn = ce.box(['Foo', 3]).compile({
+    functions: { Foo: (x) => x + 1 },
+  })!;
+
+  console.info(fn());
+  // -> 4
+  ```
+
+  ```js
+  ce.defineFunction('Foo', {
+    signature: 'number -> number',
+    evaluate: ([x]) => ce.box(['Add', x, 1]),
+  });
+
+  function foo(x) {
+    return x + 1;
+  }
+
+  const fn = ce.box(['Foo', 3]).compile({
+    functions: { Foo: foo },
+  })!;
+
+  console.info(fn());
+  // -> 4
+  ```
+
+  Additionally, functions can be implicitly imported (in case they are needed by
+  other JavaScript functions):
+
+  ```js
+  ce.defineFunction('Foo', {
+    signature: 'number -> number',
+    evaluate: ([x]) => ce.box(['Add', x, 1]),
+  });
+
+  function bar(x, y) {
+    return x + y;
+  }
+
+  function foo(x) {
+    return bar(x, 1);
+  }
+
+
+  const fn = ce.box(['Foo', 3]).compile({
+    functions: { Foo: 'foo' },
+    imports: [foo, bar],
+  })!;
+
+  console.info(fn());
+  // -> 4
+  ```
+
+- Compiled expression can now include an arbitrary preamble (JavaScript source)
+  that is executed before the compiled function is executed. This can be used to
+  define additional functions or constants.
+
+  ```js
+  ce.defineFunction('Foo', {
+    signature: 'number -> number',
+    evaluate: ([x]) => ce.box(['Add', x, 1]),
+  });
+
+  const code = ce.box(['Foo', 3]).compile({
+    preamble: "function Foo(x) { return x + 1};",
+  });
+  ```
 
 ## 0.26.4 _2024-10-17_
 

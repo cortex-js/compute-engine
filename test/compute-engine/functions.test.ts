@@ -102,5 +102,5 @@ describe('Apply', () => {
   test('Function and Hold', () =>
     expect(
       evaluate(['Apply', ['Function', 'x', 'x'], ['Hold', 'x']])
-    ).toMatchInlineSnapshot(`x`));
+    ).toMatchInlineSnapshot(`["Hold", "x"]`));
 });

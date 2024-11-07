@@ -59,6 +59,18 @@ export const UNIVARIATE_ROOTS: Rule[] = [
       !_a.has('_x') && !__b.has('_x') && !_n.is(0),
   },
 
+  {
+    match: ['Add', ['Multiply', '_a', ['Power', '_x', '_n']], '__b'],
+    replace: [
+      'Negate',
+      ['Power', ['Divide', ['Negate', '__b'], '_a'], ['Divide', 1, '_n']],
+    ],
+
+    useVariations: true,
+    condition: ({ _a, __b, _n }) =>
+      !_a.has('_x') && !__b.has('_x') && !_n.is(0) && (_n.isEven ?? false),
+  },
+
   //
   // Quadratic formula
   // ax^2 + bx + c = 0

@@ -837,9 +837,9 @@ export function matchAnyRules(
   const results: BoxedExpression[] = [];
   for (const rule of rules.rules) {
     const r = applyRule(rule, expr, sub, options);
-    if (r === null) continue;
     // Verify that the results are unique
-    if (!results.some((x) => x.isSame(r.value))) results.push(r.value);
+    if (r !== null && !results.some((x) => x.isSame(r.value)))
+      results.push(r.value);
   }
 
   return results;

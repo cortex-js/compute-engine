@@ -1,7 +1,53 @@
-import { ComputeEngine } from '../src/compute-engine';
+import { ComputeEngine, FunctionDefinition } from '../src/compute-engine';
 
 const ce = new ComputeEngine();
 const engine = ce;
+
+console.info(
+  ce
+    .parse('x^2 - 1 = 0')
+    .solve('x')
+    ?.map((x) => x.toString())
+);
+
+ce.parse('\\mathrm{PopulationVariance}([7, 2, 11])').evaluate().print();
+
+ce.parse('\\mathrm{Variance}([7, 2, 11])').evaluate().print();
+
+console.info(ce.parse('{2^3}^4').latex);
+console.info(ce.parse('2^{3^4}').json);
+
+console.info(ce.box(['Power', ['Power', 2, 3], 4]).value);
+console.info(ce.box(['Power', 2, ['Power', 3, 4]]).value);
+
+ce.box(['Add', 1, ['Hold', 2]])
+  .evaluate()
+  .print();
+
+ce.assign('f_a', ['Function', ['Add', 'x', 1], 'x']);
+ce.parse('f_\\text{a}(5)').evaluate().print();
+
+console.info(ce.parse('\\mathrm{x_a}').json);
+console.info(ce.parse('x_\\text{a}').json);
+
+ce.parse('(-1)^{1/3}').evaluate().print();
+
+const originalDef = ce.lookupFunction('Ln')!;
+ce.defineFunction('Ln', {
+  complexity: originalDef.complexity,
+  threadable: originalDef.threadable,
+  signature: originalDef.signature,
+  sgn: originalDef.sgn,
+  evaluate: ([x], options) => {
+    if (x.is(0)) return ce.NaN;
+    return originalDef.evaluate!([x], options);
+  },
+});
+
+// const rules = ['\\ln 0 -> \\mathrm{NaN}'];
+// console.info(ce.parse('\\frac{1}{\\ln(0)}').simplify({ rules }).N().re);
+
+console.info(ce.parse('\\frac{1}{\\ln(0)}').N().re);
 
 console.info(ce.parse('\\tan (90-0.000001)\\degree').json);
 

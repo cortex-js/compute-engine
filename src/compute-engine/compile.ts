@@ -1,6 +1,6 @@
 import type { MathJsonIdentifier } from '../math-json/types';
 
-import type { BoxedExpression } from './public';
+import type { BoxedExpression, IComputeEngine } from './public';
 
 import { isRelationalOperator } from './boxed-expression/utils';
 import { isFiniteIndexableCollection } from './collection-utils';
@@ -9,24 +9,39 @@ import { normalizeIndexingSet } from './library/utils';
 import { monteCarloEstimate } from './numerics/monte-carlo';
 import { chop, factorial, gcd, lcm, limit } from './numerics/numeric';
 import { gamma, gammaln } from './numerics/special-functions';
+import {
+  interquartileRange,
+  kurtosis,
+  mean,
+  median,
+  mode,
+  populationStandardDeviation,
+  populationVariance,
+  quartiles,
+  skewness,
+  standardDeviation,
+  variance,
+} from './numerics/statistics';
 
 export type CompiledType = boolean | number | string | object;
 
-type JSSource = string;
+export type JSSource = string;
 
 export type CompiledOperators = Record<
   MathJsonIdentifier,
   [op: string, prec: number]
 >;
 
+export type CompiledFunction =
+  | string
+  | ((
+      args: ReadonlyArray<BoxedExpression>,
+      compile: (expr: BoxedExpression) => JSSource,
+      target: CompileTarget
+    ) => JSSource);
+
 export type CompiledFunctions = {
-  [id: MathJsonIdentifier]:
-    | string
-    | ((
-        args: ReadonlyArray<BoxedExpression>,
-        compile: (expr: BoxedExpression) => JSSource,
-        target: CompileTarget
-      ) => JSSource);
+  [id: MathJsonIdentifier]: CompiledFunction;
 };
 
 const NATIVE_JS_OPERATORS: CompiledOperators = {
@@ -85,7 +100,7 @@ const NATIVE_JS_FUNCTIONS: CompiledFunctions = {
     return `Math.acosh(1 / (${compile(x)}))`;
   },
 
-  Arsin: 'Math.asin',
+  Arcsin: 'Math.asin',
   Arsinh: 'Math.asinh',
   Arctan: 'Math.atan',
   Artanh: 'Math.atanh',
@@ -145,6 +160,75 @@ const NATIVE_JS_FUNCTIONS: CompiledFunctions = {
   Lb: 'Math.log2',
 
   Max: 'Math.max',
+
+  Mean: (args, compile) => {
+    if (args.length === 0) return 'NaN';
+    if (args.length === 1) return `_SYS.mean(${compile(args[0])})`;
+    return `_SYS.mean([${args.map((x) => compile(x)).join(', ')}])`;
+  },
+
+  Median: (args, compile) => {
+    if (args.length === 0) return 'NaN';
+    if (args.length === 1) return `_SYS.median(${compile(args[0])})`;
+    return `_SYS.median([${args.map((x) => compile(x)).join(', ')}])`;
+  },
+
+  Variance: (args, compile) => {
+    if (args.length === 0) return 'NaN';
+    if (args.length === 1) return `_SYS.variance(${compile(args[0])})`;
+    return `_SYS.variance([${args.map((x) => compile(x)).join(', ')}])`;
+  },
+
+  PopulationVariance: (args, compile) => {
+    if (args.length === 0) return 'NaN';
+    if (args.length === 1)
+      return `_SYS.populationVariance(${compile(args[0])})`;
+    return `_SYS.populationVariance([${args.map((x) => compile(x)).join(', ')}])`;
+  },
+
+  StandardDeviation: (args, compile) => {
+    if (args.length === 0) return 'NaN';
+    if (args.length === 1) return `_SYS.standardDeviation(${compile(args[0])})`;
+    return `_SYS.standardDeviation([${args.map((x) => compile(x)).join(', ')}])`;
+  },
+
+  PopulationStandardDeviation: (args, compile) => {
+    if (args.length === 0) return 'NaN';
+    if (args.length === 1)
+      return `_SYS.populationStandardDeviation(${compile(args[0])})`;
+    return `_SYS.populationStandardDeviation([${args.map((x) => compile(x)).join(', ')}])`;
+  },
+
+  Kurtosis: (args, compile) => {
+    if (args.length === 0) return 'NaN';
+    if (args.length === 1) return `_SYS.kurtosis(${compile(args[0])})`;
+    return `_SYS.kurtosis([${args.map((x) => compile(x)).join(', ')}])`;
+  },
+
+  Skewness: (args, compile) => {
+    if (args.length === 0) return 'NaN';
+    if (args.length === 1) return `_SYS.skewness(${compile(args[0])})`;
+    return `_SYS.skewness([${args.map((x) => compile(x)).join(', ')}])`;
+  },
+
+  Mode: (args, compile) => {
+    if (args.length === 0) return 'NaN';
+    if (args.length === 1) return `_SYS.mode(${compile(args[0])})`;
+    return `_SYS.mode([${args.map((x) => compile(x)).join(', ')}])`;
+  },
+
+  Quartiles: (args, compile) => {
+    if (args.length === 0) return 'NaN';
+    if (args.length === 1) return `_SYS.quartiles(${compile(args[0])})`;
+    return `_SYS.quartiles([${args.map((x) => compile(x)).join(', ')}])`;
+  },
+
+  InterquartileRange: (args, compile) => {
+    if (args.length === 0) return 'NaN';
+    if (args.length === 1)
+      return `_SYS.interquartileRange(${compile(args[0])})`;
+    return `_SYS.interquartileRange([${args.map((x) => compile(x)).join(', ')}])`;
+  },
 
   Min: 'Math.min',
 
@@ -278,13 +362,12 @@ const NATIVE_JS_FUNCTIONS: CompiledFunctions = {
 
 export type CompileTarget = {
   operators?: (op: MathJsonIdentifier) => [op: string, prec: number];
-  functions?: (
-    id: MathJsonIdentifier
-  ) => string | ((...args: CompiledType[]) => string);
+  functions?: (id: MathJsonIdentifier) => CompiledFunction | undefined;
   var: (id: MathJsonIdentifier) => string | undefined;
   string: (str: string) => string;
   number: (n: number) => string;
   ws: (s?: string) => string; // White space
+  preamble: string;
   indent: number;
   // @todo: add context or return compile as an array of statements
   // and let the caller decide how to wrap it in an IIFE.
@@ -306,9 +389,20 @@ export class ComputeEngineFunction extends Function {
     lcm: lcm,
     lngamma: gammaln,
     limit: limit,
+    mean,
+    median,
+    variance,
+    populationVariance,
+    standardDeviation,
+    populationStandardDeviation,
+    kurtosis,
+    skewness,
+    mode,
+    quartiles,
+    interquartileRange,
   };
-  constructor(body: string) {
-    super('_SYS', '_', `return ${body}`);
+  constructor(body: string, preamble = '') {
+    super('_SYS', '_', `${preamble};return ${body}`);
     return new Proxy(this, {
       apply: (target, thisArg, argumentsList) =>
         super.apply(thisArg, [this.sys, ...argumentsList]),
@@ -325,24 +419,60 @@ export class ComputeEngineFunction extends Function {
 export function compileToTarget(
   expr: BoxedExpression,
   target: CompileTarget
-): ((_: Record<string, CompiledType>) => CompiledType) | undefined {
+): (_?: Record<string, CompiledType>) => CompiledType {
   const js = compile(expr, target);
-  // try {
-  return new ComputeEngineFunction(js) as unknown as () => CompiledType;
-  // } catch (e) {
-  //   console.error(`${e}\n${expr.latex}\n${js}`);
-  // }
-  // return undefined;
+  return new ComputeEngineFunction(
+    js,
+    target.preamble
+  ) as unknown as () => CompiledType;
 }
 
 export function compileToJavascript(
-  expr: BoxedExpression
-): ((_: Record<string, CompiledType>) => CompiledType) | undefined {
+  expr: BoxedExpression,
+  functions?: Record<MathJsonIdentifier, JSSource | Function>,
+  vars?: Record<MathJsonIdentifier, JSSource>,
+  imports: unknown[] = [],
+  preamble?: string
+): (_?: Record<string, CompiledType>) => CompiledType {
   const unknowns = expr.unknowns;
+
+  // For any import, turn it into a string
+  let preambleImports = imports
+    .map((x) => {
+      if (typeof x === 'function') return x.toString();
+      throw new Error(`Unsupported import \`${x}\``);
+    })
+    .join('\n');
+
+  // @ts-ignore
+  const namedFunctions: { [k: string]: string } = functions
+    ? Object.fromEntries(
+        Object.entries(functions).filter((k, v) => typeof v !== 'string')
+      )
+    : {};
+
+  if (functions)
+    for (const [k, v] of Object.entries(functions)) {
+      if (typeof v === 'function') {
+        // If a named function, turn it into a string
+        // otherwise, declare it as a constant
+
+        if (isTrulyNamed(v)) {
+          preambleImports += `${v.toString()};\n`;
+          namedFunctions[k] = v.name;
+        } else {
+          preambleImports += `const ${k} = ${v.toString()};\n`;
+          namedFunctions[k] = k;
+        }
+      }
+    }
+
   return compileToTarget(expr, {
     operators: (op) => NATIVE_JS_OPERATORS[op],
-    functions: (id) => NATIVE_JS_FUNCTIONS[id],
+    functions: (id) =>
+      namedFunctions?.[id] ? namedFunctions[id] : NATIVE_JS_FUNCTIONS[id],
     var: (id) => {
+      if (vars && id in vars) return JSON.stringify(vars[id]);
       const result = {
         Pi: 'Math.PI',
         ExponentialE: 'Math.E',
@@ -362,10 +492,12 @@ export function compileToJavascript(
     number: (n) => n.toString(),
     indent: 0,
     ws: (s?: string) => s ?? '',
+    preamble: (preamble ?? '') + preambleImports,
   });
 }
 
 function compileExpr(
+  engine: IComputeEngine,
   h: string,
   args: ReadonlyArray<BoxedExpression>,
   prec: number,
@@ -405,7 +537,9 @@ function compileExpr(
       // We need to chain them
       const result: string[] = [];
       for (let i = 0; i < args.length - 1; i++)
-        result.push(compileExpr(h, [args[i], args[i + 1]], op[1], target));
+        result.push(
+          compileExpr(engine, h, [args[i], args[i + 1]], op[1], target)
+        );
 
       return `(${result.join(') && (')})`;
     }
@@ -473,27 +607,27 @@ function compileExpr(
   }
 
   const fn = target.functions?.(h);
-  if (!fn) throw new Error(`Unknown function ${h}`);
+  if (!fn) throw new Error(`Unknown function \`${h}\``);
   if (typeof fn === 'function') {
-    if (args.length === 1 && isFiniteIndexableCollection(args[0])) {
+    // Get function definition for h
+    const def = engine.lookupFunction(h);
+
+    if (
+      def?.threadable &&
+      args.length === 1 &&
+      isFiniteIndexableCollection(args[0])
+    ) {
       const v = tempVar();
       return `(${compile(args[0], target)}).map((${v}) => ${fn(
-        args[0].engine.box(v),
-        (expr) => compile(expr, target)
+        [args[0].engine.box(v)],
+        (expr) => compile(expr, target),
+        target
       )})`;
     }
     return fn(args, (expr) => compile(expr, target), target);
   }
 
   if (args === null) return `${fn}()`;
-
-  if (args.length === 1 && isFiniteIndexableCollection(args[0])) {
-    const v = tempVar();
-    return `(${compile(args[0], target)}).map((${v}) => ${fn}(${compile(
-      args[0].engine.box(v),
-      target
-    )}))`;
-  }
 
   return `${fn}(${args.map((x) => compile(x, target)).join(', ')})`;
 }
@@ -529,7 +663,7 @@ export function compile(
   if (str !== null) return target.string(s!);
 
   // It must be a function expression...
-  return compileExpr(expr.operator, expr.ops!, prec, target);
+  return compileExpr(expr.engine, expr.operator, expr.ops!, prec, target);
 }
 
 function compileLoop(
@@ -635,4 +769,14 @@ function compileIntegrate(args, _, target: CompileTarget): string {
   });
 
   return `_SYS.integrate((${index}) => (${f}), ${lower}, ${upper})`;
+}
+
+function isTrulyNamed(func: Function): boolean {
+  const source = func.toString();
+
+  // Check if it's an arrow function, which is always anonymous
+  if (source.includes('=>')) return false;
+
+  // Check if the function has a name in `.toString()`
+  return source.startsWith('function ') && source.includes(func.name);
 }
