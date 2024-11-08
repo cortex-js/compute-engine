@@ -56,7 +56,6 @@ import {
   canonicalPower,
   canonicalRoot,
   pow,
-  root,
 } from '../boxed-expression/arithmetic-power';
 import { parseType } from '../../common/type/parse';
 import { isSubtype } from '../../common/type/subtype';
@@ -184,9 +183,9 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
         if (ops.some((x) => x.isReal === false || x.isNaN)) return 'unsigned';
         if (ops.every((x) => x.is(0))) return 'zero';
         if (ops.every((x) => x.isNonNegative))
-          return ops.every((x) => x.isPositive) ? 'positive' : 'non-negative';
+          return ops.some((x) => x.isPositive) ? 'positive' : 'non-negative';
         if (ops.every((x) => x.isNonPositive))
-          return ops.every((x) => x.isNegative) ? 'negative' : 'non-positive';
+          return ops.some((x) => x.isNegative) ? 'negative' : 'non-positive';
         if (ops.every((x) => x.isReal)) return 'real';
         return undefined;
       },
@@ -210,7 +209,8 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
       sgn: ([x]) => {
         if (x.isLessEqual(-1)) return 'negative';
         if (x.isPositive) return 'positive';
-        if ((x.isNegative && x.isGreater(-1)) || x.is(0)) return 'zero';
+        if (x.isNonNegative) return 'non-negative';
+        if (x.isNonPositive && x.isGreater(-1)) return 'zero';
         if (x.isNonPositive) return 'non-positive';
         if (x.isReal == false && x.isNumberLiteral)
           return x.im! > 0 || x.im! <= -1 ? 'unsigned' : numberSgn(x.re); //.re and .im should be more general.
@@ -274,8 +274,8 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
         if (d.is(0) === false && n.is(0)) return 'zero';
         if (d.isPositive) return n.sgn;
         if (d.isNegative) return oppositeSgn(n.sgn);
-        if (n.is(0) && d.isFinite) return 'zero';
-        if (!n.is(0) && !d.is(0)) return 'real-not-zero';
+        if (n.is(0) || (n.isFinite && d.isInfinity)) return 'zero';
+        if (!n.is(0) && !d.is(0)) return 'not-zero';
         return undefined;
       },
 
@@ -404,7 +404,7 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
       sgn: ([x]) => {
         if (x.isNegative) return 'negative';
         if (x.isGreaterEqual(1)) return 'positive';
-        if ((x.isPositive && x.isLess(1)) || x.is(0)) return 'zero';
+        if (x.isNonNegative && x.isLess(1)) return 'zero';
         if (x.isNonNegative) return 'non-negative';
         if (x.isReal == false && x.isNumberLiteral)
           return x.im! < 0 || x.im! >= 1 ? 'unsigned' : numberSgn(x.re); //.re and .im should be more general.
@@ -641,7 +641,6 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
           });
           return sumNeg % 2 === 0 ? 'non-positive' : 'non-negative';
         }
-        if (ops.every((x) => !x.is(0) && x.isReal)) return 'real-not-zero';
         if (ops.every((x) => !x.is(0))) return 'not-zero';
         if (ops.every((x) => x.isReal)) return 'real';
         return undefined;
@@ -830,8 +829,7 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
         const [base, exp] = args;
         return canonicalRoot(base, exp);
       },
-      evaluate: ([x, n], { numericApproximation }) =>
-        root(x, n, { numericApproximation }),
+      evaluate: ([x, n], { numericApproximation }) => x.root(n),
     },
 
     Round: {
@@ -1327,7 +1325,7 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
           return ops.some((x) => x.is(0)) ? 'zero' : 'non-positive';
         if (ops.some((x) => x.isNonNegative)) return 'non-negative';
         if (ops.every((x) => x.isNegative)) return 'negative';
-        if (ops.some((x) => !x.is(0))) return 'real-not-zero';
+        if (ops.some((x) => !x.is(0))) return 'not-zero';
         return undefined;
       },
       evaluate: (xs, { engine }) => evaluateMinMax(engine, xs, 'Max'),
@@ -1348,7 +1346,6 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
           return ops.some((x) => x.is(0)) ? 'zero' : 'non-negative';
         if (ops.some((x) => x.isNonPositive)) return 'non-positive';
         if (ops.every((x) => x.isPositive)) return 'positive';
-        if (ops.some((x) => !x.is(0))) return 'real-not-zero';
         return undefined;
       },
       evaluate: (xs, { engine }) => evaluateMinMax(engine, xs, 'Min'),
@@ -1395,7 +1392,7 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
         if (s === undefined) return undefined;
         if (['positive', 'zero'].includes(s)) return s;
         const n = reduceBigOp(ops[0], ops.slice(1), (acc, x) => acc + 1, 0);
-        if (s === 'real-not-zero' || s === 'negative')
+        if ((ops[0]?.type === 'real' && s === 'not-zero') || s === 'negative')
           return n! % 2 === 0 ? 'positive' : s;
         if (ops[0]?.type === 'imaginary')
           return n! % 2 === 0 ? 'negative' : 'unsigned';
@@ -1497,8 +1494,6 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
           return sgns.some((x) => x === 'negative')
             ? 'negative'
             : 'non-positive';
-        if (sgns.every((x) => x === 'real' || x === 'real-not-zero'))
-          return 'real';
         return undefined;
       },
       canonical: ([body, ...indexes]) => canonicalBigop('Sum', body, indexes),
