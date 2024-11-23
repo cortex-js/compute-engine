@@ -18,6 +18,7 @@ import {
   Serializer,
   Parser,
   LatexDictionary,
+  INVISIBLE_OP_PRECEDENCE,
   MULTIPLICATION_PRECEDENCE,
   ADDITION_PRECEDENCE,
   ARROW_PRECEDENCE,
@@ -1153,7 +1154,7 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
     latexTrigger: ['\\sum'],
     precedence: ADDITION_PRECEDENCE,
     name: 'Sum',
-    parse: parseBigOp('Sum', ADDITION_PRECEDENCE),
+    parse: parseBigOp('Sum', MULTIPLICATION_PRECEDENCE),
     serialize: serializeBigOp('\\sum'),
   },
   {
@@ -1265,7 +1266,7 @@ function getIndexes(
     .filter((x) => x !== undefined);
 }
 
-function parseBigOp(name: string, prec: number) {
+function parseBigOp(name: string, minPrec: number) {
   return (parser: Parser): Expression | null => {
     parser.skipSpace();
 
@@ -1292,7 +1293,7 @@ function parseBigOp(name: string, prec: number) {
     for (const indexinSet of indexes)
       parser.addSymbol(indexinSet.index, 'symbol');
 
-    const fn = parser.parseExpression({ minPrec: prec + 1 });
+    const fn = parser.parseExpression({ minPrec: minPrec });
 
     parser.popSymbolTable();
 
