@@ -27,7 +27,8 @@ export function isFiniteCollection(col: BoxedExpression): boolean {
 export function isIndexableCollection(col: BoxedExpression): boolean {
   // Is it a string literal?
   if (col.string !== null) return true;
-  // Is it a syumbol with a string value?
+
+  // Is it a symbol with a string value?
   if ((col.symbolDefinition?.value?.string ?? null) !== null) return true;
 
   // Is it an expression with a at() handler?

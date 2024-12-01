@@ -1806,9 +1806,9 @@ export class ComputeEngine implements IComputeEngine {
   }
 
   /**
-   * Add a`["Hold"]` wrapper to `expr.
+   * Add a `["Hold"]` wrapper to `expr`.
    */
-  hold(expr: BoxedExpression): BoxedExpression {
+  hold(expr: SemiBoxedExpression): BoxedExpression {
     return this._fn('Hold', [this.box(expr, { canonical: false })]);
   }
 
