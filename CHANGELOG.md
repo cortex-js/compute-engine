@@ -1,4 +1,4 @@
-## [Unreleased]
+## 0.27.0 _2024-12-02_
 
 - **#217** Correctly parse LaTeX expressions that include a command followed by
   a `*` such as `\\pi*2`.
