@@ -104,7 +104,7 @@ export class _BoxedFunctionDefinition implements BoxedFunctionDefinition {
 
   evaluate?: (
     ops: ReadonlyArray<BoxedExpression>,
-    options: EvaluateOptions & { engine: IComputeEngine }
+    options: Partial<EvaluateOptions> & { engine: IComputeEngine }
   ) => BoxedExpression | undefined;
 
   evalDimension?: (

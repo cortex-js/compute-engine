@@ -1713,7 +1713,7 @@ export type BoxedFunctionDefinition = BoxedBaseDefinition &
 
     evaluate?: (
       ops: ReadonlyArray<BoxedExpression>,
-      options: EvaluateOptions & { engine: IComputeEngine }
+      options: Partial<EvaluateOptions> & { engine?: IComputeEngine }
     ) => BoxedExpression | undefined;
 
     evalDimension?: (

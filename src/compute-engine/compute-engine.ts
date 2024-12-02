@@ -1672,7 +1672,7 @@ export class ComputeEngine implements IComputeEngine {
       | BoxedExpression
       | ((
           ops: ReadonlyArray<BoxedExpression>,
-          options: EvaluateOptions & { engine: IComputeEngine }
+          options: Partial<EvaluateOptions> & { engine?: IComputeEngine }
         ) => BoxedExpression | undefined)
   ): void {
     const symDef = this.lookupSymbol(id);
@@ -2211,7 +2211,7 @@ function isFunctionValue(
   value: AssignValue
 ): value is (
   args: ReadonlyArray<BoxedExpression>,
-  options: EvaluateOptions & { engine: IComputeEngine }
+  options: Partial<EvaluateOptions> & { engine?: IComputeEngine }
 ) => BoxedExpression {
   if (typeof value === 'function') return true;
   if (value instanceof _BoxedExpression && isSubtype(value.type, 'function'))
