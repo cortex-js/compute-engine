@@ -1,5 +1,11 @@
 ## [Unreleased]
 
+- **#217** Correctly parse LaTeX expressions that include a command followed by
+  a `*` such as `\\pi*2`.
+
+- **#217** Correctly calculate the angle of trigonometric expressions with an
+  expression containing a reference to `Pi`, for example `\\sin(\\pi^2)`.
+
 - The `Factorial` function will now time out if the argument is too large. The
   timeout is signaled by throwing a `CancellationError`.
 

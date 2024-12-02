@@ -335,7 +335,7 @@ export function appendLatex(src: string, s: string): string {
 
   // If the source end in a LaTeX command,
   // and the appended string begins with a letter
-  if (/\\[a-zA-Z]+\*?$/.test(src) && /[a-zA-Z*]/.test(s[0])) {
+  if (/\\[a-zA-Z]+\*?$/.test(src) && /[a-zA-Z]/.test(s[0])) {
     // Add a space between them
     return src + ' ' + s;
   }

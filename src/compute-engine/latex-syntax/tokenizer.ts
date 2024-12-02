@@ -16,7 +16,7 @@ import { splitGraphemes } from '../../common/grapheme-splitter';
 // '<}>'    : end group
 // '#0'-'#9': argument
 // '#?'     : placeholder
-// '\' + ([a-zA-Z*]+)|([^a-zAz*])  : command
+// '\' + ([a-zA-Z]+)|([^a-zAz])  : command (control word)
 // other (length = 1)   : literal
 //  See: [TeX:289](http://tug.org/texlive/devsrc/Build/source/texk/web2c/tex.web)
 export type Token = string;
@@ -118,14 +118,14 @@ class Tokenizer {
     // Is it a command?
     if (next === '\\') {
       if (!this.end()) {
-        // A command is either a string of letters and asterisks...
-        let command = this.match(/^[a-zA-Z*]+/);
+        // A command is either a string of letters (control word)...
+        let command = this.match(/^[a-zA-Z]+/);
         if (command) {
           // Spaces after a 'control word' are ignored
           // (but not after a 'control symbol' (single char)
           this.match(/^[ \f\n\r\t\v\xA0\u2028\u2029]*/);
         } else {
-          // ... or a single non-letter character
+          // ... or a single non-letter character (control char)
           command = this.get();
           if (command === ' ') {
             // The `\ ` command is equivalent to a single space
@@ -338,7 +338,7 @@ export function joinLatex(segments: Iterable<string>): string {
     if (typeof segment === 'string') {
       // If the segment begins with a char that *could* be in a command
       // name... insert a separator (if one was needed for the previous segment)
-      if (/[a-zA-Z*]/.test(segment[0])) result += sep;
+      if (/[a-zA-Z]/.test(segment[0])) result += sep;
 
       // If the segment ends in a command add a space before the next segment
       if (/\\[a-zA-Z]+\*?$/.test(segment)) sep = ' ';

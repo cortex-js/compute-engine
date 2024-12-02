@@ -370,7 +370,7 @@ export function box(
   // Box a String, a Symbol or a number as a string shorthand
   //
   if (typeof expr === 'string') {
-    // It's a `String` if it bracketed with apostrophes (single quotes)
+    // It's a `String` if it is bracketed with apostrophes (single quotes)
     if (expr.startsWith("'") && expr.endsWith("'"))
       return new BoxedString(ce, expr.slice(1, -1));
 

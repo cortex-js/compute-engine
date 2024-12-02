@@ -864,7 +864,11 @@ export class _Parser implements Parser {
           });
           if (expr !== null) cell.push(expr);
           else {
-            cell.push(['Error', ["'unexpected-token'", peek]]);
+            cell.push([
+              'Error',
+              "'unexpected-token'",
+              { str: tokensToString(peek) },
+            ]);
             this.nextToken();
           }
           this.skipSpace();

@@ -113,7 +113,7 @@ export function getPiTerm(
 
   if (expr.operator === 'Negate') {
     const [k, t] = getPiTerm(expr.ops![0]);
-    return [k.neg(), t];
+    return [k.neg(), t.neg()];
   }
 
   if (expr.operator === 'Add' && expr.nops === 2) {
@@ -143,22 +143,5 @@ export function getPiTerm(
     }
   }
 
-  if (expr.operator === 'Power') {
-    const [k, t] = getPiTerm(expr.op1);
-    const n = expr.op2.re;
-    if (!isNaN(n)) return [k.pow(n), t.pow(n)];
-  }
-
-  if (expr.operator === 'Sqrt') {
-    const [k, t] = getPiTerm(expr.ops![0]);
-    return [k.sqrt(), t.sqrt()];
-  }
-
-  if (expr.operator === 'Root') {
-    const [k, t] = getPiTerm(expr.ops![0]);
-    const n = expr.ops![1].re;
-    if (!isNaN(n)) return [k.root(n), t.root(n)];
-  }
-
-  return [ce._numericValue(0), ce._numericValue(expr.numericValue ?? 0)];
+  return [ce._numericValue(0), ce._numericValue(expr.N().numericValue ?? 0)];
 }

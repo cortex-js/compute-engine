@@ -92,7 +92,6 @@ export class _BoxedSymbolDefinition implements BoxedSymbolDefinition {
   collection?: Partial<CollectionHandlers>;
 
   constructor(ce: IComputeEngine, name: string, def: SymbolDefinition) {
-    if (name === 'RealNumbers') debugger;
     if (!ce.context) throw Error('No context available');
 
     this.name = name;

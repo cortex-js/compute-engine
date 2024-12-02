@@ -3,7 +3,7 @@ import { ComputeEngine, FunctionDefinition } from '../src/compute-engine';
 const ce = new ComputeEngine();
 const engine = ce;
 
-console.info(ce.box(['Intersection', 'Integers', 'RealNumbers']).latex);
+ce.parse('\\sin(\\pi*\\pi)').evaluate().print();
 
 const data = [
   { a: 5, b: 10 },
