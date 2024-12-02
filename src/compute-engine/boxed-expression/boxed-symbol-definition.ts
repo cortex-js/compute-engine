@@ -17,6 +17,7 @@ import { parseType } from '../../common/type/parse';
 import { isSubtype } from '../../common/type/subtype';
 import { isValidType, widen } from '../../common/type/utils';
 import { defaultCollectionHandlers } from '../collection-utils';
+import { typeToString } from '../../common/type/serialize';
 
 /**
  * ### THEORY OF OPERATIONS
@@ -91,6 +92,7 @@ export class _BoxedSymbolDefinition implements BoxedSymbolDefinition {
   collection?: Partial<CollectionHandlers>;
 
   constructor(ce: IComputeEngine, name: string, def: SymbolDefinition) {
+    if (name === 'RealNumbers') debugger;
     if (!ce.context) throw Error('No context available');
 
     this.name = name;
@@ -150,7 +152,7 @@ export class _BoxedSymbolDefinition implements BoxedSymbolDefinition {
           throw new Error(
             [
               `Symbol "${this.name}"`,
-              `The value "${this._value.toString()}" of type "${this._value.type.toString()}" is not compatible with the type "${this._type.toString()}"`,
+              `The value "${this._value.toString()}" of type "${typeToString(this._value.type)}" is not compatible with the type "${typeToString(this._type)}"`,
             ].join('\n|   ')
           );
         }
@@ -227,20 +229,22 @@ export class _BoxedSymbolDefinition implements BoxedSymbolDefinition {
       return;
     }
 
+    // If the type is unknown, we can set it to anything
+    if (this._type === 'unknown') {
+      this._type = type;
+      return;
+    }
+
     // Narrowing is OK
-    if (
-      this._type &&
-      this._type !== 'unknown' &&
-      !isSubtype(type, this._type)
-    ) {
+    if (this._type && !isSubtype(type, this._type)) {
       throw Error(
-        `The type of "${this.name}" cannot be widened from "${this._type.toString()}" to "${type.toString()}"`
+        `The type of "${this.name}" cannot be widened from "${this._type.toString()}" to "${typeToString(type)}"`
       );
     }
 
     if (this._value?.type && !isSubtype(this._value.type, type))
       throw Error(
-        `The type of "${this.name}" cannot be changed to "${type.toString()}" because its value has a type of "${this._value.type.toString()}"`
+        `The type of "${this.name}" cannot be changed to "${typeToString(type)}" because its value has a type of "${typeToString(this._value.type)}"`
       );
 
     this._type = type;

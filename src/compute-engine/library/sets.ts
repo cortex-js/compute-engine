@@ -1,7 +1,10 @@
 // Set operations:
 // https://query.wikidata.org/#PREFIX%20wd%3A%20%3Chttp%3A%2F%2Fwww.wikidata.org%2Fentity%2F%3E%0APREFIX%20wdt%3A%20%3Chttp%3A%2F%2Fwww.wikidata.org%2Fprop%2Fdirect%2F%3E%0A%0ASELECT%20DISTINCT%20%3Fitem%0AWHERE%20%7B%0A%20%20%20%20%3Fitem%20wdt%3AP31%2a%20wd%3AQ1964995%0A%7D%0A
 
+import { parseType } from '../../common/type/parse';
 import { isSubtype } from '../../common/type/subtype';
+import { flatten } from '../boxed-expression/flatten';
+import { validateArguments } from '../boxed-expression/validate';
 import {
   each,
   iterator,
@@ -262,7 +265,7 @@ export const SETS_LIBRARY: IdentifierDefinitions = {
   },
 
   // >= 0
-  NonNegativeInteger: {
+  NonNegativeIntegers: {
     type: 'set<integer>',
     constant: true,
     collection: {
@@ -278,7 +281,49 @@ export const SETS_LIBRARY: IdentifierDefinitions = {
         return (
           isSubtype(rhs.type, 'set<integer>') &&
           rhs.symbolDefinition?.collection?.eltsgn?.(rhs) === 'non-negative' &&
-          (!strict || rhs.symbol !== 'NonNegativeInteger')
+          (!strict ||
+            (rhs.symbol !== 'NonNegativeInteger' &&
+              rhs.symbol !== 'NaturalNumbers'))
+        );
+      },
+      eltsgn: () => 'non-negative',
+      elttype: () => 'integer',
+    },
+  },
+
+  RealNumbers: {
+    type: 'set<real>',
+    constant: true,
+    collection: {
+      contains: (_, x) => isSubtype(x.type, 'real'),
+      size: () => Infinity,
+      subsetOf: (_, rhs, strict) =>
+        isSubtype(rhs.type, 'set<real>') &&
+        (!strict || rhs.symbol !== 'RealNumbers'),
+      eltsgn: () => undefined,
+      elttype: () => 'real',
+    },
+  },
+
+  NaturalNumbers: {
+    type: 'set<integer>',
+    constant: true,
+    collection: {
+      contains: (_, x) =>
+        isSubtype(x.type, 'integer') && x.isNonNegative === true,
+      size: () => Infinity,
+      subsetOf: (_, rhs, strict) => {
+        if (rhs.operator === 'Range') {
+          const low = rhs.ops![0].re;
+          const high = rhs.ops![1].re;
+          return low > 0 && high > 0;
+        }
+        return (
+          isSubtype(rhs.type, 'set<integer>') &&
+          rhs.symbolDefinition?.collection?.eltsgn?.(rhs) === 'non-negative' &&
+          (!strict ||
+            (rhs.symbol !== 'NonNegativeInteger' &&
+              rhs.symbol !== 'NaturalNumbers'))
         );
       },
       eltsgn: () => 'non-negative',
@@ -419,13 +464,16 @@ export const SETS_LIBRARY: IdentifierDefinitions = {
   Intersection: {
     // notation: \cap
     wikidata: 'Q185837',
-    associative: true,
-    commutative: true,
-    involution: true,
     signature: '(set, ...set) -> set',
     canonical: (args, { engine: ce }) => {
       if (args.length === 0) return ce.symbol('EmptySet');
       if (args.length === 1) return ce.symbol('EmptySet');
+      args =
+        validateArguments(
+          ce,
+          flatten(args, 'Intersection'),
+          parseType('(set, ...set) -> set')
+        ) ?? args;
       return ce._fn('Intersection', args);
     },
     evaluate: intersection,
@@ -434,12 +482,15 @@ export const SETS_LIBRARY: IdentifierDefinitions = {
   Union: {
     // Works on set, but can also work on lists
     wikidata: 'Q185359',
-    associative: true,
-    commutative: true,
-    involution: true,
     signature: '(collection, ...collection) -> set',
     canonical: (args, { engine: ce }) => {
       if (args.length === 0) return ce.symbol('EmptySet');
+      args =
+        validateArguments(
+          ce,
+          flatten(args, 'Union'),
+          parseType('(collection, ...collection) -> set')
+        ) ?? args;
       // Even if there is only one argument, we still need to call Union
       // to canonicalize the argument, since it may not be a set (it could
       // be a collection)
@@ -554,7 +605,7 @@ function union(
   { engine: ce }: { engine: IComputeEngine }
 ): BoxedExpression | undefined {
   // ops should be collections. If there are scalars, convert them to singleton sets
-  const xs = ops.map((op) => (op.isCollection ? op : ce._fn('Set', [op])));
+  const xs = ops.map((op) => (op.isCollection ? op : ce.function('Set', [op])));
 
   const totalSize = xs.reduce((acc, op) => acc + (op.size ?? 0), 0);
   if (totalSize > MAX_SIZE_EAGER_COLLECTION) return ce._fn('Union', xs);
@@ -605,19 +656,4 @@ function cartesianProduct(
   { engine: ce }: { engine: IComputeEngine }
 ): BoxedExpression {
   return ce.symbol('EmptySet');
-}
-
-function setEqual(a: BoxedExpression, b: BoxedExpression): boolean {
-  if (a.isCollection && b.isCollection) {
-    if (a.symbol && b.symbol && a.symbol === b.symbol) return true;
-    if (a.size === Infinity && b.size === Infinity) {
-      // If the sets have infinite size, compare their elements
-      // @todo
-    }
-    if (a.size !== b.size) return false;
-    if (a.size === Infinity || b.size === Infinity) return false;
-    for (const elem of each(a)) if (!b.contains(elem)) return false;
-    return true;
-  }
-  return false;
 }

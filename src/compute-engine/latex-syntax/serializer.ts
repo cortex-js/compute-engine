@@ -68,7 +68,7 @@ const STYLE_MODIFIERS = {
 };
 
 export class Serializer {
-  options: SerializeLatexOptions;
+  options: Readonly<SerializeLatexOptions>;
   readonly dictionary: IndexedLatexDictionary;
   level = -1;
   constructor(
@@ -567,17 +567,8 @@ function serializeIdentifier(
 export function serializeLatex(
   expr: Expression | null,
   dict: IndexedLatexDictionary,
-  options: SerializeLatexOptions
+  options: Readonly<SerializeLatexOptions>
 ): string {
-  if (options.invisibleMultiply) {
-    if (
-      !/#1/.test(options.invisibleMultiply) ||
-      !/#2/.test(options.invisibleMultiply)
-    ) {
-      throw Error('Expected 2 arguments (#1 and #2) for invisibleMultiply');
-    }
-  }
-
   const serializer = new Serializer(dict, options);
   return serializer.serialize(expr);
 }

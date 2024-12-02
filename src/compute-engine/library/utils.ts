@@ -189,7 +189,7 @@ export function reduceBigOp<T>(
 ): T | undefined {
   // If the body is a collection, reduce it
   // i.e. Sum({1, 2, 3}) = 6
-  if (body.isCollection) return reduceCollection(body, fn, initial);
+  if (body.isCollection) return reduceCollection(body.evaluate(), fn, initial);
 
   // If there are no indexes, the summation is a constant
   // i.e. Sum(3) = 3

@@ -229,19 +229,9 @@ check('Supsub syntax error', () =>
 );
 
 check('Supsub syntax error', () =>
-  expect(engine.parse('\\sqrt{x__}+1')).toMatchInlineSnapshot(`
-    [
-      "Add",
-      [
-        "Sqrt",
-        [
-          "Error",
-          ["ErrorCode", "'incompatible-type'", "'number'", "'any'"]
-        ]
-      ],
-      1
-    ]
-  `)
+  expect(engine.parse('\\sqrt{x__}+1')).toMatchInlineSnapshot(
+    `["Add", ["Sqrt", ["At", "x", "_"]], 1]`
+  )
 );
 
 check('Supsub syntax error', () =>
@@ -501,7 +491,7 @@ check('Syntax error', () =>
       "Equal",
       "x",
       [
-        "Tuple",
+        "InvisibleOperator",
         2,
         ["Error", "'expected-closing-delimiter'", ["LatexString", "'{'"]]
       ]

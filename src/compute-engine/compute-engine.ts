@@ -18,8 +18,8 @@ import { assume } from './assume';
 
 import {
   DEFAULT_PRECISION,
+  DEFAULT_TOLERANCE,
   MACHINE_PRECISION,
-  MACHINE_TOLERANCE,
   MAX_BIGINT_DIGITS,
   SMALL_INTEGER,
 } from './numerics/numeric';
@@ -118,6 +118,7 @@ import { parseType } from '../common/type/parse';
 import { hidePrivateProperties } from '../common/utils';
 import { OneOf } from '../common/one-of';
 import { BigNum } from './numerics/bignum';
+import { typeToString } from '../common/type/serialize';
 
 /**
  *
@@ -700,12 +701,9 @@ export class ComputeEngine implements IComputeEngine {
    * equal to `a`.
    */
   set tolerance(val: number | 'auto') {
-    if (val === 'auto') {
-      if (this._precision <= MACHINE_PRECISION) val = MACHINE_TOLERANCE;
-      else val = -1;
-    }
+    if (val === 'auto') val = DEFAULT_TOLERANCE;
 
-    if (!Number.isFinite(val) || val <= 0)
+    if (!Number.isFinite(val) || val < 0)
       val = Math.pow(10, -this._precision + 2);
 
     this._tolerance = val;
@@ -1159,9 +1157,8 @@ export class ComputeEngine implements IComputeEngine {
   /** Set the current scope, return the previous scope. */
   swapScope(scope: RuntimeScope | null): RuntimeScope | null {
     const oldScope = this.context;
-    this.context = scope;
-    if (!this.context) debugger;
-    console.assert(this.context);
+    if (scope) this.context = scope;
+
     return oldScope;
   }
 
@@ -1602,6 +1599,11 @@ export class ComputeEngine implements IComputeEngine {
       // as a side effect of canonicalization.
       let expr = this.box(value, { canonical: false });
 
+      if (expr.operator === 'Hold') {
+        this.defineSymbol(id, { value: expr, type: 'unknown' });
+        return this;
+      }
+
       if (expr.operator === 'Function') {
         // If no arguments are specified in the signature, add the 'args'
         expr = this.box([
@@ -1799,10 +1801,10 @@ export class ComputeEngine implements IComputeEngine {
   ): BoxedExpression {
     if (actual)
       return this.error(
-        ['incompatible-type', expected.toString(), actual.toString()],
+        ['incompatible-type', typeToString(expected), typeToString(actual)],
         where
       );
-    return this.error(['incompatible-type', expected.toString()], where);
+    return this.error(['incompatible-type', typeToString(expected)], where);
   }
 
   /**

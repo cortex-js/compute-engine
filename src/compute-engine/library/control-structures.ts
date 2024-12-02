@@ -12,7 +12,7 @@ import { widen } from '../../common/type/utils';
 export const CONTROL_STRUCTURES_LIBRARY: IdentifierDefinitions[] = [
   {
     Block: {
-      hold: true,
+      lazy: true,
       signature: '(any) -> any',
       canonical: canonicalBlock,
       evaluate: evaluateBlock,
@@ -21,7 +21,7 @@ export const CONTROL_STRUCTURES_LIBRARY: IdentifierDefinitions[] = [
     // A condition expression tests for one or more conditions of an expression
     // ['Condition', value, "positive"]
     Condition: {
-      hold: true,
+      lazy: true,
       signature: '(value, symbol) -> boolean',
       evaluate: ([value, conds], { engine }) => {
         let conditions: string[] = [];
@@ -36,7 +36,7 @@ export const CONTROL_STRUCTURES_LIBRARY: IdentifierDefinitions[] = [
     },
 
     If: {
-      hold: true,
+      lazy: true,
       signature: '(expression, expression, expression) -> any',
       type: ([cond, ifTrue, ifFalse]) => widen(ifTrue.type, ifFalse.type),
       evaluate: ([cond, ifTrue, ifFalse], { engine }) => {
@@ -48,7 +48,7 @@ export const CONTROL_STRUCTURES_LIBRARY: IdentifierDefinitions[] = [
     },
 
     Loop: {
-      hold: true,
+      lazy: true,
       signature: '(body:expression, collection:expression) -> any',
       type: ([body]) => body.type,
       evaluate: ([body, collection], { engine: ce }) => {
@@ -87,16 +87,23 @@ export const CONTROL_STRUCTURES_LIBRARY: IdentifierDefinitions[] = [
     },
 
     Which: {
-      hold: true,
-      signature: '(...expression) -> any',
+      lazy: true,
+      signature: '(...expression) -> unknown',
       type: (args) => {
         if (args.length % 2 !== 0) return 'nothing';
         return widen(...args.filter((_, i) => i % 2 === 1).map((x) => x.type));
       },
+      canonical: (args, options) => {
+        if (args.length % 2 !== 0) return options.engine.Nothing;
+        return options.engine._fn(
+          'Which',
+          args.map((x) => x.canonical)
+        );
+      },
       evaluate: (ops, options) => evaluateWhich(ops, options),
     },
 
-    FixedPoint: { hold: true, signature: 'any -> any' },
+    FixedPoint: { lazy: true, signature: 'any -> any' },
   },
 ];
 

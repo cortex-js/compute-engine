@@ -25,11 +25,11 @@ import {
   gammaln as lngammaComplex,
 } from '../numerics/numeric-complex';
 import {
-  factorial as bigFactorial,
   factorial2 as bigFactorial2,
   gcd as bigGcd,
   lcm as bigLcm,
 } from '../numerics/numeric-bignum';
+import { factorial as bigFactorial } from '../numerics/numeric-bigint';
 import {
   gamma,
   gammaln,
@@ -61,6 +61,8 @@ import {
 import { parseType } from '../../common/type/parse';
 import { isSubtype } from '../../common/type/subtype';
 import { range, rangeLast } from './collections';
+import { typeToString } from '../../common/type/serialize';
+import { run } from '../../common/interruptible';
 
 // When processing an arithmetic expression, the following are the core
 // canonical arithmetic operations to account for:
@@ -175,7 +177,7 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
       idempotent: true,
       complexity: 1300,
 
-      hold: true,
+      lazy: true,
 
       signature: '(number, ...number) -> number',
       type: addType,
@@ -328,14 +330,15 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
     },
 
     Factorial: {
-      description: 'Factorial Function',
+      description:
+        'Factorial function: the product of all positive integers less than or equal to n',
       wikidata: 'Q120976',
       threadable: true,
       complexity: 9000,
 
       signature: 'integer -> integer',
 
-      //Assumes that the inside of the factorial is an integer
+      // Assumes that the inside of the factorial is an integer
       sgn: ([x]) =>
         x.isNonNegative
           ? 'positive'
@@ -344,6 +347,7 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
             : undefined,
       canonical: (args, { engine }) => {
         const x = args[0];
+        // We assume that -3! is -(3!) = -6
         if (x.isNumberLiteral && x.isNegative)
           return engine._fn('Factorial', [x.neg()]).neg();
         return engine._fn('Factorial', [x]);
@@ -353,17 +357,20 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
 
         // Is the argument a complex number?
         if (x.im !== 0 && x.im !== undefined)
-          return ce.number(gammaComplex(ce.complex(x.im, x.re).add(1)));
+          return ce.number(gammaComplex(ce.complex(x.re, x.im).add(1)));
 
         // The argument is real...
-        const n = x.re;
-        if (isNaN(n)) return undefined;
+        if (!x.isFinite) return undefined;
 
         // Not a positive integer, use the Gamma function
-        if (n < 0 || !Number.isInteger(n)) return ce.number(gamma(1 + n));
+        if (x.isNegative) return ce.number(gamma(1 + x.re));
 
-        if (!bignumPreferred(ce)) return ce.number(factorial(n));
-        return ce.number(bigFactorial(ce, ce.bignum(n)));
+        return ce.number(
+          run(
+            bigFactorial(BigInt((x.bignumRe ?? x.re).toFixed())),
+            ce.timeLimit * 1000
+          )
+        );
       },
     },
 
@@ -599,7 +606,7 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
       complexity: 2100,
       threadable: true,
 
-      hold: true,
+      lazy: true,
       signature: '(number, ...number) -> number',
       type: (ops) => {
         if (ops.length === 0) return 'finite_integer'; // = 1
@@ -678,7 +685,7 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
       involution: true,
       signature: 'value -> tuple',
       type: ([x]) =>
-        parseType(`tuple(${x.type.toString()}, ${x.type.toString()})`),
+        parseType(`tuple(${typeToString(x.type)}, ${typeToString(x.type)})`),
       evaluate: ([x], { engine }) => engine.tuple(x.abs(), x.abs().neg()),
     },
 
@@ -1219,7 +1226,7 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
       complexity: 1200,
       threadable: true,
 
-      hold: true,
+      lazy: true,
       signature: '(number) -> number | nothing',
       canonical: (ops, { engine }) => {
         // **IMPORTANT**: We want Numerator to work on non-canonical
@@ -1247,7 +1254,7 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
       complexity: 1200,
       threadable: true,
 
-      hold: true,
+      lazy: true,
       signature: '(number) -> number | nothing',
       canonical: (ops, { engine }) => {
         // **IMPORTANT**: We want Denominator to work on non-canonical
@@ -1277,7 +1284,7 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
       complexity: 1200,
       threadable: true,
 
-      hold: true,
+      lazy: true,
       signature: '(number) -> tuple<number, number> | nothing',
       canonical: (ops, { engine }) => {
         // **IMPORTANT**: We want NumeratorDenominator to work on non-canonical
@@ -1381,7 +1388,7 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
       complexity: 1000,
       threadable: false,
 
-      hold: true,
+      lazy: true,
       signature:
         '(collection|function, ...(tuple<symbol>|tuple<symbol, integer>|tuple<symbol, integer, integer>)) -> number',
 
@@ -1460,7 +1467,7 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
       complexity: 1000,
       threadable: false,
 
-      hold: true,
+      lazy: true,
       signature:
         '(collection|function, ...(tuple<symbol>|tuple<symbol, integer>|tuple<symbol, integer, integer>)) -> number',
 

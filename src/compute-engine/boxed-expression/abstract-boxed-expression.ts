@@ -188,6 +188,9 @@ export abstract class _BoxedExpression implements BoxedExpression {
       ) {
         defaultOptions.shorthands = ['function', 'symbol', 'string', 'number'];
       }
+      // if (options.shorthands?.includes('none')) defaultOptions.shorthands = [];
+      if (Array.isArray(options.shorthands))
+        defaultOptions.shorthands = options.shorthands;
       if (
         (typeof options.metadata === 'string' && options.metadata === 'all') ||
         options.metadata?.includes('all')

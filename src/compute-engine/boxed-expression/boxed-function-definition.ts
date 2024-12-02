@@ -15,7 +15,7 @@ import type {
 
 import { applicable } from '../function-utils';
 import { DEFAULT_COMPLEXITY } from './order';
-import { Type } from '../../common/type/types';
+import { Type, TypeString } from '../../common/type/types';
 import { parseType } from '../../common/type/parse';
 import { OneOf } from '../../common/one-of';
 
@@ -26,7 +26,7 @@ const FUNCTION_DEF_KEYS = new Set([
   'url',
 
   // Function Flags
-  'hold',
+  'lazy',
   'threadable',
   'associative',
   'commutative',
@@ -74,7 +74,7 @@ export class _BoxedFunctionDefinition implements BoxedFunctionDefinition {
 
   complexity: number;
 
-  hold: boolean;
+  lazy: boolean;
 
   signature: Type;
   inferredSignature: boolean;
@@ -82,7 +82,7 @@ export class _BoxedFunctionDefinition implements BoxedFunctionDefinition {
   type?: (
     ops: ReadonlyArray<BoxedExpression>,
     options: { engine: IComputeEngine }
-  ) => Type | undefined;
+  ) => Type | TypeString | undefined;
 
   sgn?: (
     ops: ReadonlyArray<BoxedExpression>,
@@ -129,7 +129,7 @@ export class _BoxedFunctionDefinition implements BoxedFunctionDefinition {
         );
     }
 
-    this.hold = def.hold ?? false;
+    this.lazy = def.lazy ?? false;
 
     const idempotent = def.idempotent ?? false;
     const involution = def.involution ?? false;
@@ -149,6 +149,30 @@ export class _BoxedFunctionDefinition implements BoxedFunctionDefinition {
     this.commutativeOrder = def.commutativeOrder;
     this.idempotent = idempotent;
     this.involution = involution;
+
+    if (this.commutativeOrder && !this.commutative)
+      throw new Error(
+        `Function Definition "${name}": the 'commutativeOrder' handler requires the 'commutative' flag`
+      );
+
+    // If the lazy flag is set, the arguments are not canonicalized, so they
+    // cannot be associative, commutative, idempotent, or involution
+    // if (
+    //   def.lazy &&
+    //   (def.associative || def.commutative || def.idempotent || def.involution)
+    // )
+    //   throw new Error(
+    //     `Function Definition "${name}": the 'lazy' flag is incompatible with the 'associative', 'commutative', 'idempotent', and 'involution' flags`
+    //   );
+
+    if (
+      def.canonical &&
+      (def.associative || def.commutative || def.idempotent || def.involution)
+    )
+      throw new Error(
+        `Function Definition "${name}": the 'canonical' handler is incompatible with the 'associative', 'commutative', 'idempotent', and 'involution' flags`
+      );
+
     this.pure = def.pure ?? true;
     this.complexity = def.complexity ?? DEFAULT_COMPLEXITY;
 
@@ -164,7 +188,7 @@ export class _BoxedFunctionDefinition implements BoxedFunctionDefinition {
       | ((
           ops: ReadonlyArray<BoxedExpression>,
           options: { engine: IComputeEngine }
-        ) => Type | undefined)
+        ) => Type | TypeString | undefined)
       | undefined = undefined;
     if (def.type) {
       if (typeof def.type === 'string') parseType(def.type);
@@ -192,6 +216,8 @@ export class _BoxedFunctionDefinition implements BoxedFunctionDefinition {
     this.sgn = def.sgn;
     this.even = def.even;
     this.compile = def.compile;
+    this.eq = def.eq;
+    this.neq = def.neq;
 
     this.collection = def.collection;
   }

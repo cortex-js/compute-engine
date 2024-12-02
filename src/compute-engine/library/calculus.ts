@@ -97,8 +97,11 @@ volumes
     Derivative: {
       threadable: false,
 
-      hold: true,
+      lazy: true,
       signature: '(any, order:number?) -> function',
+      canonical: (ops, { engine }) => {
+        return engine._fn('Derivative', [ops[0].canonical, ...ops.slice(1)]);
+      },
       evaluate: (ops) => {
         // Is it a function name, i.e. ["Derivative", "Sin"]?
         const op = ops[0].evaluate();
@@ -121,7 +124,7 @@ volumes
     D: {
       threadable: false,
 
-      hold: true,
+      lazy: true,
       signature:
         '(expression, variable:symbol, variables:...symbol) -> expression',
       canonical: (ops, { engine }) => {
@@ -173,7 +176,7 @@ volumes
     // Evaluate a numerical approximation of a derivative at point x
     ND: {
       threadable: false,
-      hold: true,
+      lazy: true,
       signature: '(function, point:number) -> number',
       evaluate: (ops, { engine }) => {
         const x = ops[1]?.canonical.re;
@@ -188,7 +191,7 @@ volumes
       wikidata: 'Q80091',
       threadable: false,
 
-      hold: true,
+      lazy: true,
       signature: '(expression, range:(tuple|symbol|nothing)) -> number',
       canonical: (ops, { engine }) => {
         const ce = engine;
@@ -246,7 +249,7 @@ volumes
 
     NIntegrate: {
       threadable: false,
-      hold: true,
+      lazy: true,
       signature: '(expression, lower:number, upper:number) -> number',
       evaluate: (ops, { engine }) => {
         // Switch to machine precision
@@ -275,7 +278,7 @@ volumes
       complexity: 5000,
       threadable: false,
 
-      hold: true,
+      lazy: true,
       signature: '(expression, point:number, direction:number?) -> number',
       evaluate: (ops, { engine: ce }) => {
         const [f, x, dir] = ops;
@@ -299,7 +302,7 @@ volumes
       complexity: 5000,
       threadable: false,
 
-      hold: true,
+      lazy: true,
       signature: '(expression, point:number, direction:number?) -> number',
       evaluate: ([f, x, dir], { engine }) => {
         const target = x.N().re;

@@ -563,7 +563,7 @@ describe('ITERABLE OPERATIONS', () => {
     expect(
       evaluate(['Filter', ['Element', '_', 'Integers'], ['Greater', '_', 10]])
     ).toMatchInlineSnapshot(
-      `["Filter", ["Element", "_", "Integers"], ["Less", 10, "_"]]`
+      `["Filter", ["Element", "_", "Integers"], ["Greater", "_", 10]]`
     )); // @fixme
 
   test('Reduce', () =>
@@ -585,12 +585,12 @@ describe('ITERABLE OPERATIONS', () => {
         "Add",
         ["Error", "'missing'"]
       ]
-    `));
+    `)); // @fixme
 
   test('Zip', () =>
     expect(evaluate(['Zip', list1, list2])).toMatchInlineSnapshot(
       `["Zip", ["List", 100, 4, 2, 62, 34, 16, 8], ["List", 9, 7, 2, 24]]`
-    ));
+    )); // @fixme
 
   test('Join', () =>
     expect(evaluate(['Join', list1, list2])).toMatchInlineSnapshot(`
@@ -611,7 +611,7 @@ describe('ITERABLE OPERATIONS', () => {
         ["List", 9, 7, 2, 24]
       ]
     `));
-});
+}); // @fixme
 
 // describe('NON-ITERABLE OPERATIONS', () => {
 

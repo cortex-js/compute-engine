@@ -1,4 +1,3 @@
-import { equalOrder } from '../boxed-expression/order';
 import { isRelationalOperator } from '../boxed-expression/utils';
 import {
   BoxedExpression,
@@ -7,6 +6,7 @@ import {
   IdentifierDefinitions,
 } from '../public';
 import { flatten } from '../boxed-expression/flatten';
+import { eq } from '../boxed-expression/compare';
 
 //   // eq, lt, leq, gt, geq, neq, approx
 //   //     shortLogicalImplies: 52, // ➔
@@ -38,38 +38,31 @@ export const RELOP_LIBRARY: IdentifierDefinitions = {
 
   IsSame: {
     description: 'Compare two expressions for structural equality',
-    hold: true,
-    commutative: true,
-    commutativeOrder: equalOrder,
+    lazy: true,
     signature: '(any, any) -> boolean',
 
     // Since we want to work on non-canonical expressions,
-    // do nothing to canonicalize the arguments
+    // do nothing to canonicalize the arguments (the lazy flag will prevent
+    // canonicalization of the arguments)
     evaluate: (ops, { engine: ce }) => {
       if (ops.length !== 2) return undefined;
       const [lhs, rhs] = ops;
-      return lhs.isSame(rhs) === true ? ce.True : ce.False;
+      return lhs.isSame(rhs) ? ce.True : ce.False;
     },
   },
 
   Equal: {
-    commutative: true,
-    commutativeOrder: equalOrder,
     complexity: 11000,
     signature: '(any, any) -> boolean',
+
+    lazy: true,
 
     canonical: (args, { engine: ce }) => canonicalRelational(ce, 'Equal', args),
 
     // Comparing two equalities...
     eq: (a, b) => {
       if (a.operator !== b.operator) return false;
-      // Equality is commutative
-      if (
-        (a.op1.isEqual(b.op1) && a.op2.isEqual(b.op2)) ||
-        (a.op1.isEqual(b.op2) && a.op2.isEqual(b.op1))
-      )
-        return true;
-      return false;
+      return a.op1.sub(a.op2).N().isEqual(b.op1.sub(b.op2).N());
     },
 
     evaluate: (ops, { engine: ce }) => {
@@ -78,7 +71,7 @@ export const RELOP_LIBRARY: IdentifierDefinitions = {
       for (const arg of ops) {
         if (!lhs) lhs = arg;
         else {
-          const test = lhs.isEqual(arg);
+          const test = eq(lhs, arg);
           if (test !== true) return ce.False;
         }
       }
@@ -88,8 +81,6 @@ export const RELOP_LIBRARY: IdentifierDefinitions = {
 
   NotEqual: {
     wikidata: 'Q28113351',
-    commutative: true,
-    commutativeOrder: equalOrder,
     complexity: 11000,
 
     signature: '(any, any) -> boolean',

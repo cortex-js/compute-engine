@@ -40,7 +40,10 @@ function exprToStringRecursive(expr: SemiBoxedExpression, start: number) {
 
     for (const key of Object.keys(expr)) {
       if (expr[key] instanceof _BoxedExpression) {
-        elements[key] = exprToStringRecursive(expr[key], start + 2);
+        elements[key] = exprToStringRecursive(
+          expr[key] as SemiBoxedExpression,
+          start + 2
+        );
       } else if (expr[key] === null) {
         elements[key] = 'null';
       } else if (expr[key] === undefined) {

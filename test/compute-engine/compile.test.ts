@@ -111,7 +111,7 @@ describe('COMPILE', () => {
     it('should compile an if statement', () => {
       const expr = ce.box(['If', ['Greater', 'x', 0], 'x', ['Negate', 'x']]);
       expect(expr.compile()?.toString() ?? '').toMatchInlineSnapshot(
-        `((0 < _.x) ? (_.x) : (-_.x))`
+        `((_.x > 0) ? (_.x) : (-_.x))`
       );
     });
 
@@ -123,7 +123,7 @@ describe('COMPILE', () => {
         ['Block', ['Negate', 'x']],
       ]);
       expect(expr.compile()?.toString() ?? '').toMatchInlineSnapshot(
-        `((0 < _.x) ? (_.x) : (-_.x))`
+        `((_.x > 0) ? (_.x) : (-_.x))`
       );
     });
   });

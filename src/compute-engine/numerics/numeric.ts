@@ -13,11 +13,15 @@ export const MACHINE_PRECISION = Math.floor(
 
 // Number of digits at the end of the number that are ignored for sameness
 // evaluation, 7-bit ≈ 2.10721 digits.
-export const MACHINE_TOLERANCE_BITS = 7;
-export const MACHINE_TOLERANCE = Math.pow(
-  2,
-  -(MACHINE_PRECISION_BITS - MACHINE_TOLERANCE_BITS)
-);
+// export const MACHINE_TOLERANCE_BITS = 7;
+// export const MACHINE_TOLERANCE = Math.pow(
+//   2,
+//   -(MACHINE_PRECISION_BITS - MACHINE_TOLERANCE_BITS)
+// );
+
+// Mathematica has a default tolerance of 10^-10
+// Numpy has a default absolute tolerance of 1e-8 (1e-5 for relative)
+export const DEFAULT_TOLERANCE = 1e-10;
 
 // When applying simplifications, only considers integers whose absolute value
 // is less than SMALL_INTEGER. This avoid loss of precision by preventing
@@ -168,6 +172,7 @@ export function lcm(a: number, b: number): number {
 
 export function factorial(n: number): number {
   if (!Number.isInteger(n) || n < 0) return NaN;
+  if (n >= 170) return Infinity;
   let val = 1;
   for (let i = 2; i <= n; i++) val = val * i;
   return val;
@@ -187,7 +192,7 @@ export function factorial2(n: number): number {
   return result;
 }
 
-export function chop(n: number, tolerance = MACHINE_TOLERANCE): 0 | number {
+export function chop(n: number, tolerance = DEFAULT_TOLERANCE): 0 | number {
   if (typeof n === 'number' && Math.abs(n) <= tolerance) return 0;
   return n;
 }

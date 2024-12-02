@@ -639,7 +639,7 @@ export class BoxedSymbol extends _BoxedExpression {
     return simplify(this, options).at(-1)?.value ?? this;
   }
 
-  evaluate(options?: EvaluateOptions): BoxedExpression {
+  evaluate(options?: Partial<EvaluateOptions>): BoxedExpression {
     const def = this.symbolDefinition;
     if (!def) return this;
     const hold = def.holdUntil;

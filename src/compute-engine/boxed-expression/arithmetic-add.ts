@@ -22,7 +22,7 @@ export function canonicalAdd(
   ce: IComputeEngine,
   ops: ReadonlyArray<BoxedExpression>
 ): BoxedExpression {
-  // Make canonical, flatten, and lift nested expressions
+  // Make canonical, flatten, and lift nested expressions (associative)
   ops = flatten(ops, 'Add');
 
   // Remove literal 0

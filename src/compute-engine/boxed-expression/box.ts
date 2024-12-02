@@ -464,15 +464,28 @@ function makeCanonicalFunction(
     });
   }
 
-  let xs: BoxedExpression[];
+  if (def.lazy) {
+    // If we have a lazy function, we don't canonicalize the arguments
+    const xs = ops.map((x) => ce.box(x, { canonical: false }));
+    if (def.canonical) {
+      try {
+        const result = def.canonical(xs, { engine: ce });
+        if (result) return result;
+      } catch (e) {
+        console.error(e.message);
+      }
+      // The canonical handler gave up, return a non-canonical expression
+      return new BoxedFunction(ce, name, xs, { metadata, canonical: false });
+    }
 
-  if (def.hold) {
-    xs = ops.map((x) => {
-      const y = ce.box(x, { canonical: false });
-      if (y.operator === 'ReleaseHold') return y.op1.canonical;
-      return y;
-    });
-  } else xs = ops.map((x) => ce.box(x));
+    return ce._fn(
+      name,
+      validateArguments(ce, xs, def.signature, def.lazy, def.threadable) ?? xs,
+      metadata
+    );
+  }
+
+  const xs = ops.map((x) => ce.box(x));
 
   //
   // 3/ Apply `canonical` handler
@@ -483,7 +496,7 @@ function makeCanonicalFunction(
   //  - applying involution and idempotent to the expression
   //  - flatenning sequences
   //
-  // The arguments have been put in canonical form, as per hold rules.
+  // The arguments have been put in canonical form
   //
   if (def.canonical) {
     try {
@@ -505,7 +518,13 @@ function makeCanonicalFunction(
     def.associative ? name : undefined
   );
 
-  const adjustedArgs = validateArguments(ce, args, def);
+  const adjustedArgs = validateArguments(
+    ce,
+    args,
+    def.signature,
+    def.lazy,
+    def.threadable
+  );
 
   // If we have some adjusted arguments, the arguments did not
   // match the parameters of the signature. We're done.

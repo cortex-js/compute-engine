@@ -30,6 +30,7 @@ import { numberToExpression } from '../numerics/expression';
 import { numberToString } from '../numerics/strings';
 import { BigNumFactory } from './big-numeric-value';
 import { NumericType } from '../../common/type/types';
+import { isSubtype } from '../../common/type/subtype';
 
 /**
  * An ExactNumericValue is the sum of a Gaussian imaginary and the product of
@@ -800,7 +801,7 @@ export class ExactNumericValue extends NumericValue {
           }
         }
       } else {
-        console.assert(value.type === 'integer');
+        console.assert(isSubtype(value.type, 'integer'));
         rationalSum = add(rationalSum, [value.re, 1]);
       }
     }

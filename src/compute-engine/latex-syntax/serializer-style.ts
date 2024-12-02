@@ -1,6 +1,7 @@
 import { Expression } from '../../math-json/types';
 import { countLeaves, operator, operands } from '../../math-json/utils';
 import { DelimiterScale } from './public';
+import { joinLatex } from './tokenizer';
 
 export function getApplyFunctionStyle(
   _expr: Expression,
@@ -105,4 +106,33 @@ export function getNumericSetStyle(
   _level: number
 ): 'compact' | 'regular' | 'interval' | 'set-builder' {
   return 'compact';
+}
+
+// Apply template strings to the expression
+// The template string s is a LaTeX template string with two placeholders: #1 and #2
+// (if the placeholders are omitted, they are assumed to precede and follow the
+// string).
+export function latexTemplate(s: string, lhs: string, rhs: string): string {
+  if (s.indexOf('#1') < 0 && s.indexOf('#2') < 0) s = `#1 ${s} #2`;
+
+  // First, turn the template string s into an array with the placeholders
+  // separate elements. So for `s = '#1 + #2'`, parts = ['#1', ' + ', '#2']
+  const parts = s
+    .split(/(#\d+)/)
+    .filter((x) => x.trim() !== '')
+    .map((x) => x.trim());
+
+  // Replace the placeholders with the actual values
+  return joinLatex(
+    parts.map((x) => {
+      switch (x) {
+        case '#1':
+          return lhs;
+        case '#2':
+          return rhs;
+        default:
+          return x;
+      }
+    })
+  );
 }

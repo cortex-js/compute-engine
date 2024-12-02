@@ -92,9 +92,6 @@ describe('NUMERIC MODE', () => {
       box       = ["Power", "e", ["InvisibleOperator", "i", "Pi"]]
       canonical = ["Exp", ["Multiply", ["Complex", 0, 1], "Pi"]]
       simplify  = -1
-      eval-auto = -1
-      eval-mach = -1
-      N-auto    = (-1 + 1.2246467991473532e-16i)
     `));
 });
 

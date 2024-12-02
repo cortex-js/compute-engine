@@ -200,7 +200,7 @@ export const TRIGONOMETRY_LIBRARY: IdentifierDefinitions[] = [
     //   outputDomain: ['TupleOf', 'RealNumbers', 'RealNumbers'],
     // },
     InverseFunction: {
-      hold: true,
+      lazy: true,
       signature: '(function) -> function',
       canonical: (ops, { engine }) => {
         // The canonical handler is responsible for validating the arguments

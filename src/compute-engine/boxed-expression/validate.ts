@@ -116,7 +116,7 @@ export function checkNumericArgs(
       isSubtype('number', op.type)
     ) {
       // There was an inferred type, and it is a supertype of "number"
-      // e.g. "any". We'll narrow it down to "numebr" when we infer later.
+      // e.g. "any". We'll narrow it down to "number" when we infer later.
       xs.push(op);
     } else if (
       op.functionDefinition?.inferredSignature &&
@@ -124,6 +124,12 @@ export function checkNumericArgs(
     ) {
       // There is an inferred signature, and it is a supertype of 'number
       // e.g. "any". We'll narrow it down to "number" when we infer later.
+      xs.push(op);
+    } else if (
+      op.operator === 'Hold' ||
+      op.symbolDefinition?.value?.operator === 'Hold'
+    ) {
+      // We keep 'Hold' expressions as is
       xs.push(op);
     } else {
       isValid = false;
@@ -212,29 +218,22 @@ export function checkPure(
 export function validateArguments(
   ce: IComputeEngine,
   ops: ReadonlyArray<BoxedExpression>,
-  def: BoxedFunctionDefinition
+  signature: Type,
+  lazy?: boolean,
+  threadable?: boolean
 ): ReadonlyArray<BoxedExpression> | null {
   // @fastpath
   if (!ce.strict) return null;
 
-  if (typeof def.signature === 'string') return null;
-  if (def.signature.kind !== 'signature') return null;
+  if (typeof signature === 'string') return null;
+  if (signature.kind !== 'signature') return null;
 
   const result: BoxedExpression[] = [];
   let isValid = true;
 
-  // @todo: iterate over each ops:
-  // if op is not valid, include it in the result
-  // if op doesn't have a def, assume valid
-  // if has a def, check if domains are compatible
-  // After that, check the return value, if one is provided
-  // If everything is OK, infer the domains of the ops
-
-  const params = def.signature.args?.map((x) => x.type) ?? [];
-  const optParams = def.signature.optArgs?.map((x) => x.type) ?? [];
-  const restParam = def.signature.restArg?.type;
-  const hold = def.hold;
-  const threadable = def.threadable;
+  const params = signature.args?.map((x) => x.type) ?? [];
+  const optParams = signature.optArgs?.map((x) => x.type) ?? [];
+  const restParam = signature.restArg?.type;
 
   let i = 0;
 
@@ -246,7 +245,7 @@ export function validateArguments(
       isValid = false;
       continue;
     }
-    if (hold) {
+    if (lazy) {
       result.push(op);
       continue;
     }
@@ -290,7 +289,7 @@ export function validateArguments(
       // No more ops, we're done
       break;
     }
-    if (hold) {
+    if (lazy) {
       result.push(op);
       i += 1;
       continue;
@@ -334,7 +333,7 @@ export function validateArguments(
   if (restParam) {
     for (const op of ops.slice(i)) {
       i += 1;
-      if (hold) {
+      if (lazy) {
         result.push(op);
         continue;
       }
@@ -378,10 +377,12 @@ export function validateArguments(
 
   if (!isValid) return result;
 
+  //
   // All arguments are valid, we can infer the domain of the arguments
+  //
   i = 0;
   for (const param of params) {
-    if (!hold)
+    if (!lazy)
       if (!threadable || !isFiniteIndexableCollection(ops[i]))
         ops[i].infer(param);
     i += 1;
@@ -394,7 +395,7 @@ export function validateArguments(
   }
   if (restParam) {
     for (const op of ops.slice(i)) {
-      if (!hold)
+      if (!lazy)
         if (!threadable || !isFiniteIndexableCollection(op))
           op.infer(restParam);
       i += 1;

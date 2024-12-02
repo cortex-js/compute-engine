@@ -29,7 +29,7 @@ export function holdMap(
   //
   // Apply the hold as necessary
   //
-  if (def.hold) return xs;
+  if (def.lazy) return xs;
 
   const result: BoxedExpression[] = [];
   for (const x of xs) {

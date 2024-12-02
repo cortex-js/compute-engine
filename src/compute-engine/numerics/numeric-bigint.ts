@@ -38,3 +38,39 @@ export function reducedInteger(n: bigint): bigint | number {
     return Number(n);
   return n;
 }
+
+/**
+ * Computes the factorial of a number as a generator to allow interruptibility.
+ * Yields intermediate values periodically, but these are not intended to be the primary result.
+ *
+ * @param n - The number to compute the factorial of (as a BigInt).
+ * @returns A generator that can be iterated for intermediate values, with the final value returned when the computation completes.
+ */
+export function* factorial(n: bigint): Generator<bigint, bigint> {
+  // No NaN for BigInt, so we return 0 for invalid inputs.
+  if (n < 0) return BigInt(0);
+
+  // Directly return precomputed values for small n
+  if (n < 10)
+    return BigInt([1, 1, 2, 6, 24, 120, 720, 5040, 40320, 362880][Number(n)]);
+
+  // Handle odd numbers by multiplying with the factorial of n-1
+  if (n % BigInt(2) === BigInt(1)) return n * (yield* factorial(n - BigInt(1)));
+
+  let loop = n;
+  let sum = n;
+  let val = n;
+  let counter = 0;
+
+  while (loop > 2) {
+    loop -= BigInt(2); // Process even numbers only
+    sum += loop; // Accumulate the sum of current and previous values
+    val *= sum; // Update the factorial product
+
+    // Yield periodically for interruptibility
+    // (50,000 iterations is about 100ms)
+    if (counter++ % 50000 === 0) yield val;
+  }
+
+  return val; // Final factorial result
+}

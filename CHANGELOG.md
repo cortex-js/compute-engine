@@ -1,8 +1,24 @@
 ## [Unreleased]
 
+- The `Factorial` function will now time out if the argument is too large. The
+  timeout is signaled by throwing a `CancellationError`.
+
+- When specifying `exp.toMathJSON({shorthands:[]})`, i.e., not to use shorthands
+  in the MathJSON, actually avoid using shorthands.
+
+- Correctly use custom multiply, plus, etc. for LaTeX serialization.
+
+- When comparing two numeric values, the tolerance is now used to determine if
+  the values are equal. The tolerance can be set with the `ce.tolerance`
+  property.
+
+- When comparing two expressions with `isEqual()` the values are compared
+  structurally when necessary, or with a stochastic test when the expressions
+  are too complex to compare structurally.
+
 - Correctly serialize nested superscripts, e.g. `x^{y^z}`.
 
-- The result of evaluation a `Hold` expression is now the expression itself.
+- The result of evaluating a `Hold` expression is now the expression itself.
 
 - To prevent evaluation of an expression temporarily, use the `Unevaluated`
   function. The result of evaluating an `Unevaluated` expression is its
@@ -123,6 +139,8 @@
     preamble: "function Foo(x) { return x + 1};",
   });
   ```
+
+- The `hold` function definition flag has been renamed to `lazy`
 
 ## 0.26.4 _2024-10-17_
 

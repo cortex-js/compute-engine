@@ -26,7 +26,7 @@ import { simplify } from './simplify';
 
 import { asSmallInteger } from './numerics';
 
-import { at, isFiniteIndexableCollection } from '../collection-utils';
+import { isFiniteIndexableCollection, zip } from '../collection-utils';
 
 import { canonicalMultiply, mul } from './arithmetic-multiply';
 
@@ -831,16 +831,16 @@ export class BoxedFunction extends _BoxedExpression {
     return simplify(this, options).at(-1)?.value ?? this;
   }
 
-  evaluate(options?: EvaluateOptions): BoxedExpression {
+  evaluate(options?: Partial<EvaluateOptions>): BoxedExpression {
     const computeValue = () => {
       //
       // 1/ Use the canonical form
       //
       if (!this.isValid) return this;
 
-      options ??= { numericApproximation: false };
+      const numericApproximation = options?.numericApproximation ?? false;
 
-      if (options.numericApproximation) {
+      if (numericApproximation) {
         const h = this.operator;
 
         //
@@ -870,25 +870,14 @@ export class BoxedFunction extends _BoxedExpression {
         def?.threadable &&
         this.ops!.some((x) => isFiniteIndexableCollection(x))
       ) {
-        // If one of the arguments is an indexable collection, thread the function
-        // Get the length of the longest sequence
-        const length = Math.max(
-          ...this._ops.map(
-            (x) => x.functionDefinition?.collection?.size?.(x) ?? 0
-          )
-        );
-
-        // Zip
+        const items = zip(this._ops);
+        if (!items) return this.engine.Nothing;
         const results: BoxedExpression[] = [];
-        for (let i = 0; i <= length - 1; i++) {
-          const args = this._ops.map((x) =>
-            isFiniteIndexableCollection(x)
-              ? (at(x, (i % length) + 1) ?? this.engine.Nothing)
-              : x
-          );
-          results.push(this.engine._fn(this.operator, args).evaluate(options));
+        while (true) {
+          const { done, value } = items.next();
+          if (done) break;
+          results.push(this.engine._fn(this.operator, value).evaluate(options));
         }
-
         if (results.length === 0) return this.engine.Nothing;
         if (results.length === 1) return results[0];
         return this.engine._fn('List', results);
@@ -907,7 +896,7 @@ export class BoxedFunction extends _BoxedExpression {
       if (def) {
         const engine = this.engine;
         const context = engine.swapScope(this.scope);
-        result = def.evaluate?.(tail, { ...options, engine });
+        result = def.evaluate?.(tail, { numericApproximation, engine });
         engine.swapScope(context);
       }
 
