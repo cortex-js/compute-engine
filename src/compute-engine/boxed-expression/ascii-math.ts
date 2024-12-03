@@ -318,8 +318,8 @@ function delimiter(
 
   if (!expr) return `${open}${close}`;
 
-  let items: ReadonlyArray<BoxedExpression> = [expr.op1];
-  if (expr.op1.operator === 'Sequence') items = expr.op1.ops!;
+  let items: ReadonlyArray<BoxedExpression> = [expr];
+  if (expr.operator === 'Sequence') items = expr.ops!;
 
   return `${open}${items.map((x) => serialize(x)).join(separator)}${close}`;
 }

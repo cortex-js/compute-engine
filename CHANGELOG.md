@@ -2,6 +2,7 @@
 
 ### Issues Resolved
 
+- Correctly serialize to ASCIIMath `Delimiter` expressions.
 - **#210** Numeric approximation of odd nth roots of negative numbers evaluate
   correctly.
 - When inferring the type of numeric values, infer it to be `number`, not
