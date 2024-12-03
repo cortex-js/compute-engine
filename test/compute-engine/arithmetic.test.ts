@@ -368,14 +368,15 @@ describe('DIVIDE', () => {
 });
 
 describe('POWER', () => {
+  test(`Power with positive real exponent`, () =>
+    expect(ce.box(['Power', 2.5, 1.1]).evaluate()).toMatchSnapshot());
+  test(`Power with negative exponent`, () =>
+    expect(ce.box(['Power', 2.5, -3]).evaluate()).toMatchSnapshot());
+  test(`Power with negative real exponent`, () =>
+    expect(ce.box(['Power', 2.5, -3.2]).evaluate()).toMatchSnapshot());
+
   test(`INVALID Power`, () =>
     expect(ce.box(['Power', 2.5]).evaluate()).toMatchSnapshot());
-  test(`Power`, () =>
-    expect(ce.box(['Power', 2.5, 1.1]).evaluate()).toMatchSnapshot());
-  test(`Power`, () =>
-    expect(ce.box(['Power', 2.5, -3]).evaluate()).toMatchSnapshot());
-  test(`Power`, () =>
-    expect(ce.box(['Power', 2.5, -3.2]).evaluate()).toMatchSnapshot());
   test(`INVALID Power`, () =>
     expect(ce.box(['Power', 2.5, -1.1, 18.4]).evaluate()).toMatchSnapshot());
 });
@@ -398,6 +399,12 @@ describe('ROOT', () => {
     expect(
       ce.box(['Root', { num: '1234567890987654321.123456789' }, 3]).evaluate()
     ).toMatchSnapshot());
+
+  test(`Root of negative number with even exponent`, () =>
+    expect(ce.box(['Root', -2, 2]).N()).toMatchSnapshot());
+
+  test(`Root of negative number with odd exponent`, () =>
+    expect(ce.box(['Root', -2, 3]).N()).toMatchSnapshot());
 });
 
 describe('INVALID ROOT', () => {

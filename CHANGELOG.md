@@ -1,3 +1,10 @@
+## [Unreleased]
+
+### Issues Resolved
+
+- **#210** Numeric approximation of odd nth roots of negative numbers evaluate
+  correctly.
+
 ## 0.27.0 _2024-12-02_
 
 - **#217** Correctly parse LaTeX expressions that include a command followed by
