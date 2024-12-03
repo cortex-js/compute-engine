@@ -141,8 +141,8 @@ export function checkNumericArgs(
   if (isValid)
     for (const x of xs)
       if (isFiniteIndexableCollection(x))
-        for (const y of each(x)) y.infer('real');
-      else x.infer('real');
+        for (const y of each(x)) y.infer('number');
+      else x.infer('number');
 
   return xs;
 }

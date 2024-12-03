@@ -4,6 +4,15 @@
 
 - **#210** Numeric approximation of odd nth roots of negative numbers evaluate
   correctly.
+- When inferring the type of numeric values, infer it to be `number`, not
+  `real`. As a result:
+
+```js
+ce.assign('a', ce.parse('i'));
+ce.parse('a+1').evaluate().print();
+```
+
+now returns `1 + i` instead of throwing an error.
 
 ## 0.27.0 _2024-12-02_
 
