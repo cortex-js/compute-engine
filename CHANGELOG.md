@@ -2,6 +2,8 @@
 
 ### Issues Resolved
 
+- **#219** The `invisibleOperator` canonicalization previously also
+  canonicalized some multiplication.
 - Correctly serialize to ASCIIMath `Delimiter` expressions.
 - **#210** Numeric approximation of odd nth roots of negative numbers evaluate
   correctly.
