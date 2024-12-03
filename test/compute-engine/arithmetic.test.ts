@@ -2,6 +2,8 @@ import { check, checkJson, engine } from '../utils';
 
 const ce = engine;
 
+ce.assign('z', ['Complex', 0, 1]);
+
 describe('CONSTANTS', () => {
   test(`ExponentialE`, () =>
     expect(checkJson(`ExponentialE`)).toMatchSnapshot());
@@ -153,6 +155,10 @@ describe('ADD', () => {
         '\\frac{2}{3}+\\frac{12345678912345678}{987654321987654321}+\\frac{987654321987654321}{12345678912345678}'
       )
     ).toMatchSnapshot());
+
+  test('Add a real to a complex variable', () => {
+    expect(ce.parse('z+5').evaluate()).toMatchSnapshot();
+  });
 });
 
 describe('SUBTRACT', () => {

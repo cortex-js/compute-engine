@@ -26,6 +26,7 @@ import {
 import { parseType } from '../../common/type/parse';
 import { isIndexableCollection } from '../collection-utils';
 import { typeToString } from '../../common/type/serialize';
+import { canonicalMultiply } from '../boxed-expression/arithmetic-multiply';
 
 //   // := assign 80 // @todo
 // compose (compose(f, g) -> a new function such that compose(f, g)(x) -> f(g(x))
@@ -126,7 +127,14 @@ export const CORE_LIBRARY: IdentifierDefinitions[] = [
       signature: '...any -> any',
       // Note: since the canonical form will be a different operator,
       // no need to calculate the result type
-      canonical: canonicalInvisibleOperator,
+      canonical: (x, { engine }) => {
+        // The `canonicalInvisibleOperator` function will return only canonicalization for the invisible operator, not for any operators it may turn into.
+        // This is necessary for `1(2+3)` to be correctly cannonicalized to `2+3`.
+        const y = canonicalInvisibleOperator(x, { engine });
+        if (!y) return engine.Nothing;
+        if (y.operator === 'Multiply') return canonicalMultiply(engine, y.ops!);
+        return y;
+      },
     },
 
     /** See above for a theory of operations */

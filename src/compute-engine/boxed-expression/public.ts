@@ -1038,8 +1038,9 @@ export interface BoxedExpression {
    * If the type of this expression is already known, return `false`.
    *
    * If the type was not set, set it to the inferred type, return `true`
-   * If the type was previously inferred, adjust it by widening it,
-   *    return `true`
+   * If the type was previously inferred, widen it and return `true`.
+   *
+   * If the type cannot be inferred, return `false`.
    *
    * @internal
    */

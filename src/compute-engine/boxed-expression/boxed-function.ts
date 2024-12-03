@@ -43,7 +43,7 @@ import { isSubtype } from '../../common/type/subtype';
 import { div } from './arithmetic-divide';
 import { add } from './arithmetic-add';
 import { pow } from './arithmetic-power';
-import { functionResult, narrow } from '../../common/type/utils';
+import { functionResult, narrow, widen } from '../../common/type/utils';
 import { parseType } from '../../common/type/parse';
 import {
   positiveSign,
@@ -149,14 +149,14 @@ export class BoxedFunction extends _BoxedExpression {
     return h;
   }
 
-  // For function expressions, infer infers the result domain of the function
+  // For function expressions, infer infers the result type of the function
   infer(t: Type): boolean {
     const def = this.functionDefinition;
     if (!def) return false;
 
     if (!def.inferredSignature) return false;
 
-    // If the signature was inferred, refine it bt narrowing the result
+    // If the signature was inferred, refine it by narrowing the result
     if (
       typeof def.signature !== 'string' &&
       def.signature.kind === 'signature'

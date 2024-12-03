@@ -1,9 +1,9 @@
+import { isSubtype } from '../src/common/type/subtype';
+import { narrow, widen } from '../src/common/type/utils';
 import { ComputeEngine, FunctionDefinition } from '../src/compute-engine';
 
 const ce = new ComputeEngine();
 const engine = ce;
-
-ce.parse('\\sin(\\pi*\\pi)').evaluate().print();
 
 const data = [
   { a: 5, b: 10 },

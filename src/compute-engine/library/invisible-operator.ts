@@ -2,7 +2,6 @@ import type { IComputeEngine, BoxedExpression } from '../public';
 
 import { flatten } from '../boxed-expression/flatten';
 import { isIndexableCollection } from '../collection-utils';
-import { canonicalMultiply } from '../boxed-expression/arithmetic-multiply';
 import { isSubtype } from '../../common/type/subtype';
 
 export function canonicalInvisibleOperator(
@@ -114,7 +113,11 @@ export function canonicalInvisibleOperator(
           (isIndexableCollection(x) && !x.string))
     )
   ) {
-    return canonicalMultiply(ce, ops);
+    // Note: we don't want to use canonicalMultiply here, because
+    // invisible operator canonicalization should not affect multiplication,
+    // i.e. `1(2+3)` should not be simplified to `2+3`.
+    //
+    return ce._fn('Multiply', ops);
   }
 
   //

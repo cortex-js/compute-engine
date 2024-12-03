@@ -234,13 +234,6 @@ export class _BoxedSymbolDefinition implements BoxedSymbolDefinition {
       return;
     }
 
-    // Narrowing is OK
-    if (this._type && !isSubtype(type, this._type)) {
-      throw Error(
-        `The type of "${this.name}" cannot be widened from "${this._type.toString()}" to "${typeToString(type)}"`
-      );
-    }
-
     if (this._value?.type && !isSubtype(this._value.type, type))
       throw Error(
         `The type of "${this.name}" cannot be changed to "${typeToString(type)}" because its value has a type of "${typeToString(this._value.type)}"`

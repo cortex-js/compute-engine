@@ -67,7 +67,15 @@ export function checkNumericArgs(
 
   // @fastpath
   if (!ce.strict) {
-    for (const x of ops) if (!isFiniteIndexableCollection(x)) x.infer('real');
+    let inferredType: Type = 'real';
+    // If any of the arguments is a complex number, we'll infer the domain as complex
+    for (const x of ops)
+      if (isSubtype('complex', x.type)) {
+        inferredType = 'number';
+        break;
+      }
+    for (const x of ops)
+      if (!isFiniteIndexableCollection(x)) x.infer(inferredType);
     return ops;
   }
 
@@ -138,11 +146,19 @@ export function checkNumericArgs(
   }
 
   // Only if all arguments are valid, we infer the domain of the arguments
-  if (isValid)
+  if (isValid) {
+    let inferredType: Type = 'real';
+    // If any of the arguments is a complex number, we'll infer the domain as complex
+    for (const x of xs)
+      if (isSubtype('complex', x.type)) {
+        inferredType = 'number';
+        break;
+      }
     for (const x of xs)
       if (isFiniteIndexableCollection(x))
-        for (const y of each(x)) y.infer('number');
-      else x.infer('number');
+        for (const y of each(x)) y.infer(inferredType);
+      else x.infer(inferredType);
+  }
 
   return xs;
 }
