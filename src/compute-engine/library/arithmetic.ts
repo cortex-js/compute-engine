@@ -62,7 +62,7 @@ import { parseType } from '../../common/type/parse';
 import { isSubtype } from '../../common/type/subtype';
 import { range, rangeLast } from './collections';
 import { typeToString } from '../../common/type/serialize';
-import { run } from '../../common/interruptible';
+import { run, runAsync } from '../../common/interruptible';
 
 // When processing an arithmetic expression, the following are the core
 // canonical arithmetic operations to account for:
@@ -368,7 +368,28 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
         return ce.number(
           run(
             bigFactorial(BigInt((x.bignumRe ?? x.re).toFixed())),
-            ce.timeLimit * 1000
+            (ce._deadline ?? Infinity) - Date.now()
+          )
+        );
+      },
+      evaluateAsync: async ([x], { signal }) => {
+        const ce = x.engine;
+
+        // Is the argument a complex number?
+        if (x.im !== 0 && x.im !== undefined)
+          return ce.number(gammaComplex(ce.complex(x.re, x.im).add(1)));
+
+        // The argument is real...
+        if (!x.isFinite) return undefined;
+
+        // Not a positive integer, use the Gamma function
+        if (x.isNegative) return ce.number(gamma(1 + x.re));
+
+        return ce.number(
+          await runAsync(
+            bigFactorial(BigInt((x.bignumRe ?? x.re).toFixed())),
+            (ce._deadline ?? Infinity) - Date.now(),
+            signal
           )
         );
       },

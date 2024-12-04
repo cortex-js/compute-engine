@@ -439,10 +439,6 @@ export class ComputeEngine implements IComputeEngine {
     //
     this.context = {
       assumptions: new ExpressionMap(),
-      timeLimit: 2.0, // execution time limit: 2.0 seconds
-      memoryLimit: 1.0, // memory limit: 1.0 megabyte
-      recursionLimit: 1024,
-      iterationLimit: Number.POSITIVE_INFINITY,
     } as RuntimeScope;
 
     for (const table of ComputeEngine.getStandardLibrary('domains'))
@@ -664,33 +660,39 @@ export class ComputeEngine implements IComputeEngine {
     this.reset();
   }
 
-  /** @experimental */
   get timeLimit(): number {
-    let scope = this.context;
-    while (scope) {
-      if (scope.timeLimit !== undefined) return scope.timeLimit;
-      scope = scope.parentScope ?? null;
-    }
-    return 2.0; // 2s
+    return this._timeLimit;
   }
-  /** @experimental */
+
+  set timeLimit(t: number) {
+    if (t <= 0) t = Number.POSITIVE_INFINITY;
+    this._timeLimit = t;
+  }
+
+  private _timeLimit: number = 2000;
+
+  /** The time after which the time limit has been exceeded */
+  _deadline: number | undefined = undefined;
+
   get iterationLimit(): number {
-    let scope = this.context;
-    while (scope) {
-      if (scope.iterationLimit !== undefined) return scope.iterationLimit;
-      scope = scope.parentScope ?? null;
-    }
-    return 1024;
+    return this._iterationLimit;
   }
-  /** @experimental */
+  set iterationLimit(t: number) {
+    if (t <= 0) t = Number.POSITIVE_INFINITY;
+    this._iterationLimit = t;
+  }
+
+  private _iterationLimit: number = 1024;
+
   get recursionLimit(): number {
-    let scope = this.context;
-    while (scope) {
-      if (scope.recursionLimit !== undefined) return scope.recursionLimit;
-      scope = scope.parentScope ?? null;
-    }
-    return 1024;
+    return this._recursionLimit;
   }
+  set recursionLimit(t: number) {
+    if (t <= 0) t = Number.POSITIVE_INFINITY;
+    this._recursionLimit = t;
+  }
+
+  private _recursionLimit: number = 1024;
 
   get tolerance(): number {
     return this._tolerance;
@@ -1124,10 +1126,6 @@ export class ComputeEngine implements IComputeEngine {
   pushScope(scope?: Partial<Scope>): IComputeEngine {
     if (this.context === null) throw Error('No parent scope available');
     this.context = {
-      timeLimit: this.context.timeLimit,
-      memoryLimit: this.context.memoryLimit,
-      recursionLimit: this.context.recursionLimit,
-      iterationLimit: this.context.iterationLimit,
       ...(scope ?? {}),
       parentScope: this.context,
       // We always copy the current assumptions in the new scope.

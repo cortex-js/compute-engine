@@ -693,6 +693,10 @@ export abstract class _BoxedExpression implements BoxedExpression {
     return this.simplify();
   }
 
+  evaluateAsync(_options?: Partial<EvaluateOptions>): Promise<BoxedExpression> {
+    return Promise.resolve(this.evaluate());
+  }
+
   N(): BoxedExpression {
     return this.evaluate({ numericApproximation: true });
   }

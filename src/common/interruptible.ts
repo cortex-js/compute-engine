@@ -26,7 +26,7 @@ export class CancellationError<T = unknown> extends Error {
 export async function runAsync<T>(
   gen: Generator<T>,
   timeLimitMs: number,
-  signal: AbortSignal
+  signal?: AbortSignal
 ): Promise<T> {
   const startTime = Date.now();
 
@@ -36,7 +36,7 @@ export async function runAsync<T>(
     if (done) return value; // Exit successfully
 
     // Check for abort signal
-    if (signal.aborted)
+    if (signal?.aborted)
       throw new CancellationError({ value, cause: (signal as any).reason });
 
     // Check for time limit

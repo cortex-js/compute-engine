@@ -68,8 +68,9 @@ export function* factorial(n: bigint): Generator<bigint, bigint> {
     val *= sum; // Update the factorial product
 
     // Yield periodically for interruptibility
-    // (50,000 iterations is about 100ms)
-    if (counter++ % 50000 === 0) yield val;
+    counter += 1;
+    if (counter % 50000 === 0 || (counter > 10000 && counter % 500 === 0))
+      yield val;
   }
 
   return val; // Final factorial result

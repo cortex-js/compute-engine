@@ -4,18 +4,78 @@
 
 - **#219** The `invisibleOperator` canonicalization previously also
   canonicalized some multiplication.
-- Correctly serialize to ASCIIMath `Delimiter` expressions.
 - **#210** Numeric approximation of odd nth roots of negative numbers evaluate
   correctly.
-- When inferring the type of numeric values, infer it to be `number`, not
-  `real`. As a result:
+- Correctly serialize to ASCIIMath `Delimiter` expressions.
+- When inferring the type of numeric values do not constrain them to be `real`.
+  As a result:
+
+  ```js
+  ce.assign('a', ce.parse('i'));
+  ce.parse('a+1').evaluate().print();
+  ```
+
+  now returns `1 + i` instead of throwing a type error.
+
+### New Features and Improvements
+
+#### Asynchronous Operations
+
+Some computations can be time-consuming, for example, computing a very large
+factorial. To prevent the browser from freezing, the Compute Engine can now
+perform some operations asynchronously.
+
+To perform an asynchronous operation, use the `expr.evaluateAsync` method. For
+example:
 
 ```js
-ce.assign('a', ce.parse('i'));
-ce.parse('a+1').evaluate().print();
+try {
+  const fact = ce.parse('(70!)!');
+  const factResult = await fact.evaluateAsync();
+  factResult.print();
+} catch (e) {
+  console.error(e);
+}
 ```
 
-now returns `1 + i` instead of throwing an error.
+It is also possible to interrupt an operation, for example by providing a
+pause/cancel button that the user can press. To do so, use an `AbortController`
+object and a `signal`. For example:
+
+```js
+const abort = new AbortController();
+const signal = abort.signal;
+setTimeout(() => abort.abort(), 500);
+try {
+  const fact = ce.parse('(70!)!');
+  const factResult = await fact.evaluateAsync({ signal });
+  factResult.print();
+} catch (e) {
+  console.error(e);
+}
+```
+
+In the example above, we trigger an abort after 500ms.
+
+It is also possible to control how long an operation can run by setting the
+`ce.timeLimit` property with a value in milliseconds. For example:
+
+```js
+ce.timeLimit = 1000;
+try {
+  const fact = ce.parse('(70!)!');
+  fact.evaluateAsync().print();
+} catch (e) {
+  console.error(e);
+}
+```
+
+The time limit applies to either the synchronous or asynchronous evaluation.
+
+The default time limit is 2,000ms (2 seconds).
+
+When an operation is canceled either because of a timeout or an abort, a
+`CancellationError` is thrown.
 
 ## 0.27.0 _2024-12-02_
 

@@ -43,6 +43,7 @@ const FUNCTION_DEF_KEYS = new Set([
 
   'canonical',
   'evaluate',
+  'evaluateAsync',
   'evalDimension',
   'compile',
 
@@ -106,6 +107,11 @@ export class _BoxedFunctionDefinition implements BoxedFunctionDefinition {
     ops: ReadonlyArray<BoxedExpression>,
     options: Partial<EvaluateOptions> & { engine: IComputeEngine }
   ) => BoxedExpression | undefined;
+
+  evaluateAsync?: (
+    ops: ReadonlyArray<BoxedExpression>,
+    options?: Partial<EvaluateOptions> & { engine?: IComputeEngine }
+  ) => Promise<BoxedExpression | undefined>;
 
   evalDimension?: (
     ops: ReadonlyArray<BoxedExpression>,
@@ -211,6 +217,7 @@ export class _BoxedFunctionDefinition implements BoxedFunctionDefinition {
     this.signature = signature;
     this.type = resultType;
     this.evaluate = evaluate;
+    this.evaluateAsync = def.evaluateAsync;
     this.canonical = def.canonical;
     this.evalDimension = def.evalDimension;
     this.sgn = def.sgn;

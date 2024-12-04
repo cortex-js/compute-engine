@@ -1126,6 +1126,14 @@ export interface BoxedExpression {
    */
   evaluate(options?: Partial<EvaluateOptions>): BoxedExpression;
 
+  /** Asynchronous version of `evaluate()`.
+   *
+   * The `options` argument can include a `signal` property, which is an
+   * `AbortSignal` object. If the signal is aborted, a `CancellationError` is thrown.
+   *
+   */
+  evaluateAsync(options?: Partial<EvaluateOptions>): Promise<BoxedExpression>;
+
   /** Return a numeric approximation of the canonical form of this expression.
    *
    * Any necessary calculations, including on decimal numbers (non-integers),
@@ -1717,6 +1725,11 @@ export type BoxedFunctionDefinition = BoxedBaseDefinition &
       options: Partial<EvaluateOptions> & { engine?: IComputeEngine }
     ) => BoxedExpression | undefined;
 
+    evaluateAsync?: (
+      ops: ReadonlyArray<BoxedExpression>,
+      options?: Partial<EvaluateOptions> & { engine?: IComputeEngine }
+    ) => Promise<BoxedExpression | undefined>;
+
     evalDimension?: (
       ops: ReadonlyArray<BoxedExpression>,
       options: { engine: IComputeEngine }
@@ -2014,6 +2027,7 @@ export type SimplifyOptions = {
  */
 export type EvaluateOptions = {
   numericApproximation: boolean; // Default to false
+  signal: AbortSignal;
 };
 
 /**
@@ -2117,16 +2131,32 @@ export interface IComputeEngine extends IBigNum {
   /** Absolute time beyond which evaluation should not proceed
    * @internal
    */
-  deadline?: number;
+  _deadline?: number;
 
+  /** @private */
   generation: number;
 
-  /** @hidden */
-  readonly timeLimit: number;
-  /** @hidden */
-  readonly iterationLimit: number;
-  /** @hidden */
-  readonly recursionLimit: number;
+  /** Throw a `CancellationError` when the duration of an evaluation exceeds
+   * the time limit.
+   *
+   * Time in milliseconds, default 2000 ms = 2 seconds.
+   *
+   */
+  timeLimit: number;
+
+  /** Signal `iteration-limit-exceeded` when the iteration limit
+   * in a loop is exceeded. Default: no limits.
+   *
+   * @experimental
+   */
+  iterationLimit: number;
+
+  /** Signal `recursion-depth-exceeded` when the recursion depth for this
+   * scope is exceeded.
+   *
+   * @experimental
+   */
+  recursionLimit: number;
 
   chop(n: number): number;
   chop(n: BigNum): BigNum | 0;
@@ -2551,37 +2581,7 @@ export type RuntimeIdentifierDefinitions = Map<
  *
  * @category Compute Engine
  */
-export type Scope = {
-  /** Signal `timeout` when the execution time for this scope is exceeded.
-   *
-   * Time in seconds, default 2s.
-   *
-   * @experimental
-   */
-  timeLimit: number;
-
-  /** Signal `out-of-memory` when the memory usage for this scope is exceeded.
-   *
-   * Memory is in Megabytes, default: 1Mb.
-   *
-   * @experimental
-   */
-  memoryLimit: number;
-
-  /** Signal `recursion-depth-exceeded` when the recursion depth for this
-   * scope is exceeded.
-   *
-   * @experimental
-   */
-  recursionLimit: number;
-
-  /** Signal `iteration-limit-exceeded` when the iteration limit
-   * in a loop is exceeded. Default: no limits.
-   *
-   * @experimental
-   */
-  iterationLimit: number;
-};
+export type Scope = {};
 
 /** @category Compute Engine */
 export type RuntimeScope = Scope & {
@@ -2783,6 +2783,15 @@ export type FunctionDefinition = BaseDefinition &
           options: EvaluateOptions & { engine: IComputeEngine }
         ) => BoxedExpression | undefined)
       | BoxedExpression;
+
+    /**
+     * An option asynchronous version of `evaluate`.
+     *
+     */
+    evaluateAsync?: (
+      ops: ReadonlyArray<BoxedExpression>,
+      options: EvaluateOptions & { engine: IComputeEngine }
+    ) => Promise<BoxedExpression | undefined>;
 
     /** Dimensional analysis
      * @experimental

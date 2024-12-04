@@ -37,7 +37,7 @@ import { DEFAULT_COMPLEXITY, sortOperands } from './order';
 import { hashCode, normalizedUnknownsForSolve } from './utils';
 import { match } from './match';
 import { factor } from './factor';
-import { holdMap } from './hold';
+import { holdMap, holdMapAsync } from './hold';
 import { Type } from '../../common/type/types';
 import { isSubtype } from '../../common/type/subtype';
 import { div } from './arithmetic-divide';
@@ -52,7 +52,7 @@ import {
   nonPositiveSign,
   sgn,
 } from './sgn';
-import { cachedValue, CachedValue } from './cache';
+import { cachedValue, CachedValue, cachedValueAsync } from './cache';
 
 /**
  * A boxed function represent an expression that can be
@@ -832,81 +832,18 @@ export class BoxedFunction extends _BoxedExpression {
   }
 
   evaluate(options?: Partial<EvaluateOptions>): BoxedExpression {
-    const computeValue = () => {
-      //
-      // 1/ Use the canonical form
-      //
-      if (!this.isValid) return this;
-
-      const numericApproximation = options?.numericApproximation ?? false;
-
-      if (numericApproximation) {
-        const h = this.operator;
-
-        //
-        // Transform N(Integrate) into NIntegrate(), etc...
-        //
-        if (h === 'Integrate' || h === 'Limit')
-          return this.engine
-            .box(['N', this], { canonical: true })
-            .evaluate(options);
-      }
-      if (!this.isCanonical) {
-        this.engine.pushScope();
-        const canonical = this.canonical;
-        this.engine.popScope();
-        if (!canonical.isCanonical || !canonical.isValid) return this;
-        return canonical.evaluate(options);
-      }
-
-      const def = this.functionDefinition;
-
-      //
-      // 2/ Thread if applicable
-      //
-      // If the function is threadable, iterate
-      //
-      if (
-        def?.threadable &&
-        this.ops!.some((x) => isFiniteIndexableCollection(x))
-      ) {
-        const items = zip(this._ops);
-        if (!items) return this.engine.Nothing;
-        const results: BoxedExpression[] = [];
-        while (true) {
-          const { done, value } = items.next();
-          if (done) break;
-          results.push(this.engine._fn(this.operator, value).evaluate(options));
-        }
-        if (results.length === 0) return this.engine.Nothing;
-        if (results.length === 1) return results[0];
-        return this.engine._fn('List', results);
-      }
-
-      //
-      // 3/ Evaluate the applicable operands
-      //
-      const tail = holdMap(this, (x) => x.evaluate(options));
-
-      let result: BoxedExpression | undefined | null = undefined;
-
-      //
-      // 4/ Call the `evaluate` handler
-      //
-      if (def) {
-        const engine = this.engine;
-        const context = engine.swapScope(this.scope);
-        result = def.evaluate?.(tail, { numericApproximation, engine });
-        engine.swapScope(context);
-      }
-
-      return result ?? this.engine.function(this._name, tail);
-    };
-
     return cachedValue(
       options?.numericApproximation ? this._valueN : this._value,
       this.engine.generation,
-      computeValue
+      withDeadline(this.engine, this._computeValue(options))
+    );
+  }
+
+  evaluateAsync(options?: Partial<EvaluateOptions>): Promise<BoxedExpression> {
+    return cachedValueAsync(
+      options?.numericApproximation ? this._valueN : this._value,
+      this.engine.generation,
+      withDeadlineAsync(this.engine, this._computeValueAsync(options))
     );
   }
 
@@ -981,6 +918,176 @@ export class BoxedFunction extends _BoxedExpression {
       false
     );
   }
+  _computeValue(options?: Partial<EvaluateOptions>): () => BoxedExpression {
+    return () => {
+      if (!this.isValid) return this;
+
+      //
+      // 1/ Use the canonical form
+      //
+
+      const numericApproximation = options?.numericApproximation ?? false;
+
+      //
+      // Transform N(Integrate) into NIntegrate(), etc...
+      //
+      if (numericApproximation) {
+        const h = this.operator;
+        if (h === 'Integrate' || h === 'Limit')
+          return this.engine
+            .box(['N', this], { canonical: true })
+            .evaluate(options);
+      }
+
+      if (!this.isCanonical) {
+        this.engine.pushScope();
+        const canonical = this.canonical;
+        this.engine.popScope();
+        if (!canonical.isCanonical || !canonical.isValid) return this;
+        return canonical.evaluate(options);
+      }
+
+      const def = this.functionDefinition;
+
+      //
+      // 2/ Thread if applicable
+      //
+      if (
+        def?.threadable &&
+        this.ops!.some((x) => isFiniteIndexableCollection(x))
+      ) {
+        const items = zip(this._ops);
+        if (!items) return this.engine.Nothing;
+
+        const results: BoxedExpression[] = [];
+        while (true) {
+          const { done, value } = items.next();
+          if (done) break;
+          results.push(this.engine._fn(this.operator, value).evaluate(options));
+        }
+
+        if (results.length === 0) return this.engine.Nothing;
+        if (results.length === 1) return results[0];
+        return this.engine._fn('List', results);
+      }
+
+      //
+      // 3/ Evaluate the applicable operands
+      //
+      const tail = holdMap(this, (x) => x.evaluate(options));
+
+      //
+      // 4/ Call the `evaluate` handler
+      //
+      if (def) {
+        const engine = this.engine;
+        const context = engine.swapScope(this.scope);
+
+        const evaluateFn = def.evaluate?.(tail, {
+          numericApproximation,
+          engine,
+        });
+
+        engine.swapScope(context);
+
+        return evaluateFn ?? this.engine.function(this._name, tail);
+      }
+
+      return this.engine.function(this._name, tail);
+    };
+  }
+
+  _computeValueAsync(
+    options?: Partial<EvaluateOptions>
+  ): () => Promise<BoxedExpression> {
+    return async () => {
+      //
+      // 1/ Use the canonical form
+      //
+      if (!this.isValid) return this;
+
+      const numericApproximation = options?.numericApproximation ?? false;
+
+      if (numericApproximation) {
+        const h = this.operator;
+
+        //
+        // Transform N(Integrate) into NIntegrate(), etc...
+        //
+        if (h === 'Integrate' || h === 'Limit')
+          this.engine
+            .box(['N', this], { canonical: true })
+            .evaluateAsync(options);
+      }
+      if (!this.isCanonical) {
+        this.engine.pushScope();
+        const canonical = this.canonical;
+        this.engine.popScope();
+        if (!canonical.isCanonical || !canonical.isValid) return this;
+        return canonical.evaluateAsync(options);
+      }
+
+      const def = this.functionDefinition;
+
+      //
+      // 2/ Thread if applicable
+      //
+      if (
+        def?.threadable &&
+        this.ops!.some((x) => isFiniteIndexableCollection(x))
+      ) {
+        const items = zip(this._ops);
+        if (!items) return this.engine.Nothing;
+
+        const results: Promise<BoxedExpression>[] = [];
+        while (true) {
+          const { done, value } = items.next();
+          if (done) break;
+
+          results.push(
+            this.engine._fn(this.operator, value).evaluateAsync(options)
+          );
+        }
+
+        if (results.length === 0) return this.engine.Nothing;
+        if (results.length === 1) return results[0];
+
+        return Promise.all(results).then((resolved) =>
+          this.engine._fn('List', resolved)
+        );
+      }
+
+      //
+      // 3/ Evaluate the applicable operands
+      //
+
+      // Resolve all the operand promises
+      const tail = await holdMapAsync(
+        this,
+        async (x) => await x.evaluateAsync(options)
+      );
+
+      //
+      // 4/ Call the `evaluate` handler
+      //
+      if (def) {
+        const engine = this.engine;
+        const context = engine.swapScope(this.scope);
+
+        const opts = { numericApproximation, engine, signal: options?.signal };
+        const evaluateFn =
+          def.evaluateAsync?.(tail, opts) ?? def.evaluate?.(tail, opts);
+
+        engine.swapScope(context);
+
+        return Promise.resolve(evaluateFn).then(
+          (result) => result ?? this.engine.function(this._name, tail)
+        );
+      }
+
+      return Promise.resolve(this.engine.function(this._name, tail));
+    };
+  }
 }
 
 /** Return the type of the value of the expression */
@@ -1017,4 +1124,39 @@ function type(expr: BoxedExpression): Type | undefined {
   if (expr.tensor) return expr.type;
 
   return undefined;
+}
+
+function withDeadline<T>(engine: IComputeEngine, fn: () => T): () => T {
+  return () => {
+    if (engine._deadline === undefined) {
+      engine._deadline = Date.now() + engine.timeLimit;
+
+      const result: T = fn();
+
+      engine._deadline = undefined;
+
+      return result;
+    }
+
+    return fn();
+  };
+}
+
+function withDeadlineAsync<T>(
+  engine: IComputeEngine,
+  fn: () => Promise<T>
+): () => Promise<T> {
+  return async () => {
+    if (engine._deadline === undefined) {
+      engine._deadline = Date.now() + engine.timeLimit;
+
+      const result: T = await fn();
+
+      engine._deadline = undefined;
+
+      return result;
+    }
+
+    return fn();
+  };
 }
