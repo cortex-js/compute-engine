@@ -56,6 +56,7 @@ import {
   canonicalPower,
   canonicalRoot,
   pow,
+  root,
 } from '../boxed-expression/arithmetic-power';
 import { parseType } from '../../common/type/parse';
 import { isSubtype } from '../../common/type/subtype';
@@ -857,7 +858,8 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
         const [base, exp] = args;
         return canonicalRoot(base, exp);
       },
-      evaluate: ([x, n], { numericApproximation }) => x.root(n),
+      evaluate: ([x, n], { numericApproximation }) =>
+        root(x, n, { numericApproximation }),
     },
 
     Round: {
