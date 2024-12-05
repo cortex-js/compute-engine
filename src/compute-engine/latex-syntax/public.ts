@@ -157,6 +157,7 @@ export const ARROW_PRECEDENCE: Precedence = 270;
 // + - − ¦ |\|| ⊕ ⊖ ⊞ ⊟ |++| ∪ ∨ ⊔ ± ∓ ∔ ∸ ≏ ⊎ ⊻ ⊽ ⋎ ⋓ ⟇ ⧺ ⧻ ⨈ ⨢ ⨣ ⨤ ⨥ ⨦ ⨧ ⨨ ⨩ ⨪ ⨫ ⨬ ⨭ ⨮ ⨹ ⨺ ⩁ ⩂ ⩅ ⩊ ⩌ ⩏ ⩐ ⩒ ⩔ ⩖ ⩗ ⩛ ⩝ ⩡ ⩢ ⩣)
 /** @hidden */
 export const ADDITION_PRECEDENCE: Precedence = 275;
+
 // * / ⌿ ÷ % & · · ⋅ ∘ × |\\| ∩ ∧ ⊗ ⊘ ⊙ ⊚ ⊛ ⊠ ⊡ ⊓ ∗ ∙ ∤ ⅋ ≀ ⊼ ⋄ ⋆ ⋇ ⋉ ⋊ ⋋ ⋌ ⋏ ⋒ ⟑ ⦸ ⦼ ⦾ ⦿ ⧶ ⧷ ⨇ ⨰ ⨱ ⨲ ⨳ ⨴ ⨵ ⨶ ⨷ ⨸ ⨻ ⨼ ⨽ ⩀ ⩃ ⩄ ⩋ ⩍ ⩎ ⩑ ⩓ ⩕ ⩘ ⩚ ⩜ ⩞ ⩟ ⩠ ⫛ ⊍ ▷ ⨝ ⟕ ⟖ ⟗ ⨟
 /** @hidden */
 export const MULTIPLICATION_PRECEDENCE: Precedence = 390;
@@ -164,6 +165,10 @@ export const MULTIPLICATION_PRECEDENCE: Precedence = 390;
 // Rational, Divide
 /** @hidden */
 export const DIVISION_PRECEDENCE: Precedence = 600;
+
+// The invisible (multiplication) operator
+/** @hidden */
+export const INVISIBLE_OP_PRECEDENCE: Precedence = 650;
 
 // Power, Square, Overscript
 /** @hidden */
