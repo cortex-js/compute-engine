@@ -15,7 +15,7 @@ export const LINEAR_ALGEBRA_LIBRARY: IdentifierDefinitions[] = [
   {
     Matrix: {
       complexity: 9000,
-      hold: true,
+      lazy: true,
       signature: '(matrix, string?, string?) -> matrix',
       type: ([matrix]) => matrix.type,
       canonical: canonicalMatrix,
@@ -25,7 +25,7 @@ export const LINEAR_ALGEBRA_LIBRARY: IdentifierDefinitions[] = [
     // ["Vector", a, b, c] is a shorthand for ["List", ["List", a], ["List", b], ["List", c]]
     Vector: {
       complexity: 9000,
-      hold: true,
+      lazy: true,
       signature: '...number -> vector',
       type: (elements) => parseType(`vector<${elements.length}>`),
       canonical: (ops, { engine: ce }) => {

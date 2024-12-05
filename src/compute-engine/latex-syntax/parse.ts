@@ -19,6 +19,7 @@ import {
   Delimiter,
   Terminator,
   Parser,
+  INVISIBLE_OP_PRECEDENCE,
   MULTIPLICATION_PRECEDENCE,
   SymbolTable,
   SymbolType,
@@ -864,7 +865,11 @@ export class _Parser implements Parser {
           });
           if (expr !== null) cell.push(expr);
           else {
-            cell.push(['Error', ["'unexpected-token'", peek]]);
+            cell.push([
+              'Error',
+              "'unexpected-token'",
+              { str: tokensToString(peek) },
+            ]);
             this.nextToken();
           }
           this.skipSpace();
@@ -1356,7 +1361,7 @@ export class _Parser implements Parser {
 
       // No group, but arguments without parentheses are allowed
       // Read a primary
-      const primary = this.parseExpression({ ...until, minPrec: 390 });
+      const primary = this.parseExpression({ ...until, minPrec: MULTIPLICATION_PRECEDENCE });
       return primary === null ? null : [primary];
     }
 
@@ -1987,13 +1992,13 @@ export class _Parser implements Parser {
         this.skipSpace();
 
         let result = this.parseInfixOperator(lhs, until);
-        if (result === null) {
+        if (result === null && until.minPrec <= INVISIBLE_OP_PRECEDENCE) {
           // If any operator, no sequence to apply
           if (this.peekDefinitions('operator').length === 0) {
             // No infix operator, join the expressions with a Sequence
             const rhs = this.parseExpression({
               ...until,
-              minPrec: MULTIPLICATION_PRECEDENCE,
+              minPrec: INVISIBLE_OP_PRECEDENCE+1,
             });
             if (rhs !== null) {
               if (operator(lhs) === 'InvisibleOperator') {

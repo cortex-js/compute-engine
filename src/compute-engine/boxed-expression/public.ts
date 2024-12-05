@@ -1038,8 +1038,9 @@ export interface BoxedExpression {
    * If the type of this expression is already known, return `false`.
    *
    * If the type was not set, set it to the inferred type, return `true`
-   * If the type was previously inferred, adjust it by widening it,
-   *    return `true`
+   * If the type was previously inferred, widen it and return `true`.
+   *
+   * If the type cannot be inferred, return `false`.
    *
    * @internal
    */
@@ -1123,7 +1124,15 @@ export interface BoxedExpression {
    * The result is in canonical form.
    *
    */
-  evaluate(options?: EvaluateOptions): BoxedExpression;
+  evaluate(options?: Partial<EvaluateOptions>): BoxedExpression;
+
+  /** Asynchronous version of `evaluate()`.
+   *
+   * The `options` argument can include a `signal` property, which is an
+   * `AbortSignal` object. If the signal is aborted, a `CancellationError` is thrown.
+   *
+   */
+  evaluateAsync(options?: Partial<EvaluateOptions>): Promise<BoxedExpression>;
 
   /** Return a numeric approximation of the canonical form of this expression.
    *
@@ -1425,6 +1434,9 @@ export interface BoxedBaseDefinition {
    */
   scope: RuntimeScope | undefined;
 
+  /** If this is the definition of a collection, the set of primitive operations
+   * that can be performed on this collection (counting the number of elements,
+   * enumerating it, etc...). */
   collection?: Partial<CollectionHandlers>;
 
   /** When the environment changes, for example the numerical precision,
@@ -1562,7 +1574,14 @@ export type CollectionHandlers = {
  */
 export type FunctionDefinitionFlags = {
   /**
-   * If `true`, the arguments of the functions are held unevaluated.
+   * If `true`, the arguments to this function are not automatically
+   * evaluated. The default is `false` (the arguments are evaluated).
+   *
+   * This can be useful for example for functions that take symbolic
+   * expressions as arguments, such as `D` or `Integrate`.
+   *
+   * This is also useful for functions that take an argument that is
+   * potentially an infinite collection.
    *
    * It will be up to the `evaluate()` handler to evaluate the arguments as
    * needed. This is conveninent to pass symbolic expressions as arguments
@@ -1571,7 +1590,7 @@ export type FunctionDefinitionFlags = {
    * This also applies to the `canonical()` handler.
    *
    */
-  hold: boolean;
+  lazy: boolean;
 
   /**  If `true`, the function is applied element by element to lists, matrices
    * (`["List"]` or `["Tuple"]` expressions) and equations (relational
@@ -1661,17 +1680,33 @@ export type BoxedFunctionDefinition = BoxedBaseDefinition &
   FunctionDefinitionFlags & {
     complexity: number;
 
-    hold: boolean;
-
+    /** If true, the signature was inferred from usage and may be modified
+     * as more information becomes available.
+     */
     inferredSignature: boolean;
 
+    /** The type of the arguments and return value of this function */
     signature: Type;
 
+    /** If present, this handler can be used to more precisely determine the
+     * return type based on the type of the arguments. The arguments themselves
+     * should *not* be evaluated, only their types should be used.
+     */
     type?: (
       ops: ReadonlyArray<BoxedExpression>,
       options: { engine: IComputeEngine }
     ) => Type | TypeString | undefined;
 
+    /** If present, this handler can be used to determine the sign of the
+     *  return value of the function, based on the sign and type of its
+     *  arguments.
+     *
+     * The arguments themselves should *not* be evaluated, only their types and
+     * sign should be used.
+     *
+     * This can be used in some case for example to determine when certain
+     * simplifications are valid.
+     */
     sgn?: (
       ops: ReadonlyArray<BoxedExpression>,
       options: { engine: IComputeEngine }
@@ -1687,8 +1722,13 @@ export type BoxedFunctionDefinition = BoxedBaseDefinition &
 
     evaluate?: (
       ops: ReadonlyArray<BoxedExpression>,
-      options: EvaluateOptions & { engine: IComputeEngine }
+      options: Partial<EvaluateOptions> & { engine?: IComputeEngine }
     ) => BoxedExpression | undefined;
+
+    evaluateAsync?: (
+      ops: ReadonlyArray<BoxedExpression>,
+      options?: Partial<EvaluateOptions> & { engine?: IComputeEngine }
+    ) => Promise<BoxedExpression | undefined>;
 
     evalDimension?: (
       ops: ReadonlyArray<BoxedExpression>,
@@ -1986,7 +2026,8 @@ export type SimplifyOptions = {
  * @category Boxed Expression
  */
 export type EvaluateOptions = {
-  numericApproximation?: boolean; // Default to false
+  numericApproximation: boolean; // Default to false
+  signal: AbortSignal;
 };
 
 /**
@@ -2090,16 +2131,35 @@ export interface IComputeEngine extends IBigNum {
   /** Absolute time beyond which evaluation should not proceed
    * @internal
    */
-  deadline?: number;
+  _deadline?: number;
 
+  /** Time remaining before _deadline */
+  _timeRemaining: number;
+
+  /** @private */
   generation: number;
 
-  /** @hidden */
-  readonly timeLimit: number;
-  /** @hidden */
-  readonly iterationLimit: number;
-  /** @hidden */
-  readonly recursionLimit: number;
+  /** Throw a `CancellationError` when the duration of an evaluation exceeds
+   * the time limit.
+   *
+   * Time in milliseconds, default 2000 ms = 2 seconds.
+   *
+   */
+  timeLimit: number;
+
+  /** Throw `CancellationError` `iteration-limit-exceeded` when the iteration limit
+   * in a loop is exceeded. Default: no limits.
+   *
+   * @experimental
+   */
+  iterationLimit: number;
+
+  /** Signal `recursion-depth-exceeded` when the recursion depth for this
+   * scope is exceeded.
+   *
+   * @experimental
+   */
+  recursionLimit: number;
 
   chop(n: number): number;
   chop(n: BigNum): BigNum | 0;
@@ -2524,37 +2584,7 @@ export type RuntimeIdentifierDefinitions = Map<
  *
  * @category Compute Engine
  */
-export type Scope = {
-  /** Signal `timeout` when the execution time for this scope is exceeded.
-   *
-   * Time in seconds, default 2s.
-   *
-   * @experimental
-   */
-  timeLimit: number;
-
-  /** Signal `out-of-memory` when the memory usage for this scope is exceeded.
-   *
-   * Memory is in Megabytes, default: 1Mb.
-   *
-   * @experimental
-   */
-  memoryLimit: number;
-
-  /** Signal `recursion-depth-exceeded` when the recursion depth for this
-   * scope is exceeded.
-   *
-   * @experimental
-   */
-  recursionLimit: number;
-
-  /** Signal `iteration-limit-exceeded` when the iteration limit
-   * in a loop is exceeded. Default: no limits.
-   *
-   * @experimental
-   */
-  iterationLimit: number;
-};
+export type Scope = {};
 
 /** @category Compute Engine */
 export type RuntimeScope = Scope & {
@@ -2757,6 +2787,15 @@ export type FunctionDefinition = BaseDefinition &
         ) => BoxedExpression | undefined)
       | BoxedExpression;
 
+    /**
+     * An option asynchronous version of `evaluate`.
+     *
+     */
+    evaluateAsync?: (
+      ops: ReadonlyArray<BoxedExpression>,
+      options: EvaluateOptions & { engine: IComputeEngine }
+    ) => Promise<BoxedExpression | undefined>;
+
     /** Dimensional analysis
      * @experimental
      */
@@ -2767,6 +2806,9 @@ export type FunctionDefinition = BaseDefinition &
 
     /** Return a compiled (optimized) expression. */
     compile?: (expr: BoxedExpression) => CompiledExpression;
+
+    eq?: (a: BoxedExpression, b: BoxedExpression) => boolean | undefined;
+    neq?: (a: BoxedExpression, b: BoxedExpression) => boolean | undefined;
 
     collection?: Partial<CollectionHandlers>;
   };

@@ -53,7 +53,105 @@ describe('Nth PRIME NUMBER', () =>
         'p(n):=(\\sum_{v_{1}=2}^{\\operatorname{floor}\\left(1.5*n*\\ln(n)\\right)}(\\operatorname{floor}(\\frac{1}{0^{n-(\\sum_{v_{2}=2}^{v_{1}}((\\prod_{v_{3}=2}^{\\operatorname{floor}(\\sqrt{v_{2}})}(1-0^{\\operatorname{abs}(\\operatorname{floor}(\\frac{v_{2}}{v_{3}})-\\frac{v_{2}}{v_{3}})}))))}+1})))+2'
       )
     ).toMatchInlineSnapshot(`
-      invalid   =[
+      box       = [
+        "Assign",
+        "p",
+        [
+          "Function",
+          [
+            "Add",
+            [
+              "Delimiter",
+              [
+                "Sum",
+                [
+                  "Delimiter",
+                  [
+                    "Floor",
+                    [
+                      "Divide",
+                      1,
+                      [
+                        "Add",
+                        [
+                          "Power",
+                          0,
+                          [
+                            "Subtract",
+                            "n",
+                            [
+                              "Delimiter",
+                              [
+                                "Sum",
+                                [
+                                  "Delimiter",
+                                  [
+                                    "Delimiter",
+                                    [
+                                      "Product",
+                                      [
+                                        "Delimiter",
+                                        [
+                                          "Subtract",
+                                          1,
+                                          [
+                                            "Power",
+                                            0,
+                                            [
+                                              "Abs",
+                                              [
+                                                "Subtract",
+                                                [
+                                                  "Floor",
+                                                  [
+                                                    "Divide",
+                                                    ["At", "v", 2],
+                                                    ["At", "v", 3]
+                                                  ]
+                                                ],
+                                                [
+                                                  "Divide",
+                                                  ["At", "v", 2],
+                                                  ["At", "v", 3]
+                                                ]
+                                              ]
+                                            ]
+                                          ]
+                                        ]
+                                      ],
+                                      [
+                                        "Triple",
+                                        "Nothing",
+                                        2,
+                                        ["Floor", ["Sqrt", ["At", "v", 2]]]
+                                      ]
+                                    ]
+                                  ]
+                                ],
+                                ["Triple", "Nothing", 2, ["At", "v", 1]]
+                              ]
+                            ]
+                          ]
+                        ],
+                        1
+                      ]
+                    ]
+                  ]
+                ],
+                [
+                  "Triple",
+                  "Nothing",
+                  2,
+                  ["Floor", ["Multiply", 1.5, "n", ["Ln", "n"]]]
+                ]
+              ]
+            ],
+            2
+          ],
+          "n"
+        ]
+      ]
+      canonical = [
         "Assign",
         "p",
         [
@@ -73,102 +171,47 @@ describe('Nth PRIME NUMBER', () =>
                       "Power",
                       0,
                       [
-                        "Add",
+                        "Subtract",
                         "n",
                         [
-                          "Negate",
+                          "Sum",
                           [
-                            "Sum",
+                            "Product",
                             [
-                              "Product",
+                              "Subtract",
+                              1,
                               [
-                                "Add",
-                                1,
+                                "Power",
+                                0,
                                 [
-                                  "Negate",
+                                  "Abs",
                                   [
-                                    "Power",
-                                    0,
+                                    "Subtract",
                                     [
-                                      "Abs",
+                                      "Floor",
                                       [
-                                        "Add",
-                                        [
-                                          "Floor",
-                                          [
-                                            "Divide",
-                                            [
-                                              "Error",
-                                              [
-                                                "ErrorCode",
-                                                "'incompatible-type'",
-                                                "'number'",
-                                                "'any'"
-                                              ]
-                                            ],
-                                            [
-                                              "Error",
-                                              [
-                                                "ErrorCode",
-                                                "'incompatible-type'",
-                                                "'number'",
-                                                "'any'"
-                                              ]
-                                            ]
-                                          ]
-                                        ],
-                                        [
-                                          "Negate",
-                                          [
-                                            "Divide",
-                                            [
-                                              "Error",
-                                              [
-                                                "ErrorCode",
-                                                "'incompatible-type'",
-                                                "'number'",
-                                                "'any'"
-                                              ]
-                                            ],
-                                            [
-                                              "Error",
-                                              [
-                                                "ErrorCode",
-                                                "'incompatible-type'",
-                                                "'number'",
-                                                "'any'"
-                                              ]
-                                            ]
-                                          ]
-                                        ]
+                                        "Divide",
+                                        ["At", "v", 2],
+                                        ["At", "v", 3]
                                       ]
-                                    ]
-                                  ]
-                                ]
-                              ],
-                              [
-                                "Tuple",
-                                "Nothing",
-                                2,
-                                [
-                                  "Floor",
-                                  [
-                                    "Sqrt",
+                                    ],
                                     [
-                                      "Error",
-                                      [
-                                        "ErrorCode",
-                                        "'incompatible-type'",
-                                        "'number'",
-                                        "'any'"
-                                      ]
+                                      "Divide",
+                                      ["At", "v", 2],
+                                      ["At", "v", 3]
                                     ]
                                   ]
                                 ]
                               ]
                             ],
-                            ["Triple", "Nothing", 2, ["At", "v", 1]]
-                          ]
+                            [
+                              "Triple",
+                              "Nothing",
+                              2,
+                              ["Floor", ["Sqrt", ["At", "v", 2]]]
+                            ]
+                          ],
+                          ["Triple", "Nothing", 2, ["At", "v", 1]]
                         ]
                       ]
                     ],
@@ -188,6 +231,7 @@ describe('Nth PRIME NUMBER', () =>
           "n"
         ]
       ]
+      eval-auto = (n) |-> {sum^(floor(1.5 * n * ln(n)))(floor(1 / (0^(n - sum^(At(v, 1))(prod^(floor(sqrt(At(v, 2))))(-0^(|-At(v, 2) / At(v, 3) + floor(At(v, 2) / At(v, 3))|) + 1))) + 1))) + 2}
     `);
   }));
 
@@ -202,13 +246,13 @@ describe('Euler Prime Generating Polynomial', () => {
       box       = [
         "Add",
         ["InvisibleOperator", 8, ["Square", "x"]],
-        ["Negate", ["InvisibleOperator", 488, "x"]],
+        ["InvisibleOperator", -488, "x"],
         7243
       ]
       canonical = [
         "Add",
         ["Multiply", 8, ["Square", "x"]],
-        ["Negate", ["Multiply", 488, "x"]],
+        ["Multiply", -488, "x"],
         7243
       ]
     `));
@@ -217,13 +261,13 @@ describe('Euler Prime Generating Polynomial', () => {
       box       = [
         "Add",
         ["InvisibleOperator", 43, ["Square", "x"]],
-        ["Negate", ["InvisibleOperator", 537, "x"]],
+        ["InvisibleOperator", -537, "x"],
         2971
       ]
       canonical = [
         "Add",
         ["Multiply", 43, ["Square", "x"]],
-        ["Negate", ["Multiply", 537, "x"]],
+        ["Multiply", -537, "x"],
         2971
       ]
     `));
@@ -232,25 +276,20 @@ describe('Euler Prime Generating Polynomial', () => {
       box       = [
         "Add",
         ["InvisibleOperator", 36, ["Square", "x"]],
-        ["Negate", ["InvisibleOperator", 810, "x"]],
+        ["InvisibleOperator", -810, "x"],
         2763
       ]
       canonical = [
         "Add",
         ["Multiply", 36, ["Square", "x"]],
-        ["Negate", ["Multiply", 810, "x"]],
+        ["Multiply", -810, "x"],
         2763
       ]
     `));
   test('x in', () =>
     expect(check('x^2 - 79x + 1601')).toMatchInlineSnapshot(`
-      box       = [
-        "Add",
-        ["Square", "x"],
-        ["Negate", ["InvisibleOperator", 79, "x"]],
-        1601
-      ]
-      canonical = ["Add", ["Square", "x"], ["Negate", ["Multiply", 79, "x"]], 1601]
+      box       = ["Add", ["Square", "x"], ["InvisibleOperator", -79, "x"], 1601]
+      canonical = ["Add", ["Square", "x"], ["Multiply", -79, "x"], 1601]
     `));
   test('x in 0..10', () =>
     expect(check('2x^2 + 11')).toMatchInlineSnapshot(`
@@ -290,7 +329,7 @@ describe('⌈e⌉ = ⌊π⌋', () =>
   test('', () =>
     expect(check('⌈e⌉ = ⌊π⌋')).toMatchInlineSnapshot(`
       box       = ["Equal", ["Ceil", "e"], ["Floor", "Pi"]]
-      canonical = ["Equal", ["Floor", "Pi"], ["Ceil", "ExponentialE"]]
+      canonical = ["Equal", ["Ceil", "ExponentialE"], ["Floor", "Pi"]]
       eval-auto = "True"
     `)));
 

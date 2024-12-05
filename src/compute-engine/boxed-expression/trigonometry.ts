@@ -887,6 +887,12 @@ function quadrant(
   return [Math.floor(normalizedTheta / (Math.PI / 2)) + 1, undefined];
 }
 
+/**
+ * Return the angle in the range [0, 2π) that is equivalent to the given angle.
+ *
+ * @param x
+ * @returns
+ */
 export function canonicalAngle(
   x: BoxedExpression | undefined
 ): BoxedExpression | undefined {

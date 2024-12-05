@@ -18,6 +18,7 @@ import {
   Serializer,
   Parser,
   LatexDictionary,
+  INVISIBLE_OP_PRECEDENCE,
   MULTIPLICATION_PRECEDENCE,
   ADDITION_PRECEDENCE,
   ARROW_PRECEDENCE,
@@ -26,6 +27,7 @@ import {
   COMPARISON_PRECEDENCE,
   EXPONENTIATION_PRECEDENCE,
 } from '../public';
+import { latexTemplate } from '../serializer-style';
 import { joinLatex, supsub } from '../tokenizer';
 
 /**
@@ -169,11 +171,13 @@ function serializeAdd(serializer: Serializer, expr: Expression): string {
           rhsValue[1] <= 100
         ) {
           // Don't include the '+' sign, it's a rational, use 'invisible plus'
-          result = joinLatex([
-            serializer.serialize(lhs),
+
+          // Replace #1 and #2
+          result = latexTemplate(
             serializer.options.invisiblePlus,
-            serializer.serialize(rhs),
-          ]);
+            serializer.serialize(lhs),
+            serializer.serialize(rhs)
+          );
 
           serializer.level += 1;
           return result;
@@ -294,9 +298,8 @@ function serializeMultiply(
           term = term.slice(1);
           isNegative = !isNegative;
         }
-        result = !result
-          ? term
-          : joinLatex([result, serializer.options.multiply, term]);
+        if (!result) result = term;
+        else result = latexTemplate(serializer.options.multiply, result, term);
       }
       prevWasNumber = true;
       continue;
@@ -328,9 +331,9 @@ function serializeMultiply(
       // It's a power and the base is a number...
       // add a multiply...
       term = serializer.serialize(arg);
-      result = !result
-        ? term
-        : joinLatex([result, serializer.options.multiply, term]);
+      if (!result) result = term;
+      else result = latexTemplate(serializer.options.multiply, result, term);
+
       prevWasNumber = true;
       continue;
     }
@@ -352,7 +355,7 @@ function serializeMultiply(
       if (prevWasNumber && (h === 'Divide' || h === 'Rational')) {
         // Can't use an invisible multiply if a number
         // multiplied by a fraction
-        result = joinLatex([result, serializer.options.multiply, term]);
+        result = latexTemplate(serializer.options.multiply, result, term);
       }
       // Not first term, use invisible multiply
       else if (!serializer.options.invisibleMultiply) {
@@ -360,11 +363,11 @@ function serializeMultiply(
         // i.e. inserting a space between '\pi' and 'x'
         result = joinLatex([result, term]);
       } else {
-        result = joinLatex([
-          result,
+        result = latexTemplate(
           serializer.options.invisibleMultiply,
-          term,
-        ]);
+          result,
+          term
+        );
       }
     }
     prevWasNumber = false;
@@ -1161,7 +1164,7 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
     latexTrigger: ['\\sum'],
     precedence: ADDITION_PRECEDENCE,
     name: 'Sum',
-    parse: parseBigOp('Sum', ADDITION_PRECEDENCE),
+    parse: parseBigOp('Sum', MULTIPLICATION_PRECEDENCE),
     serialize: serializeBigOp('\\sum'),
   },
   {
@@ -1273,7 +1276,7 @@ function getIndexes(
     .filter((x) => x !== undefined);
 }
 
-function parseBigOp(name: string, prec: number) {
+function parseBigOp(name: string, minPrec: number) {
   return (parser: Parser): Expression | null => {
     parser.skipSpace();
 
@@ -1300,7 +1303,7 @@ function parseBigOp(name: string, prec: number) {
     for (const indexinSet of indexes)
       parser.addSymbol(indexinSet.index, 'symbol');
 
-    const fn = parser.parseExpression({ minPrec: prec + 1 });
+    const fn = parser.parseExpression({ minPrec: minPrec });
 
     parser.popSymbolTable();
 

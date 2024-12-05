@@ -163,13 +163,7 @@ describe('STEFNOTCH #13', () => {
         "Implies",
         [
           "LessEqual",
-          [
-            "Abs",
-            [
-              "Error",
-              ["ErrorCode", "'incompatible-type'", "'number'", "'any'"]
-            ]
-          ],
+          ["Abs", ["At", "a", "n"]],
           ["Divide", 2, ["Sqrt", "n"]]
         ],
         [
@@ -203,7 +197,7 @@ describe('STEFNOTCH #13', () => {
         "Equal",
         "a",
         [
-          "Tuple",
+          "InvisibleOperator",
           [
             "Error",
             "'expected-closing-delimiter'",
@@ -231,23 +225,7 @@ describe('STEFNOTCH #13', () => {
     expect(parse('\\forall x\\in\\C^2:|x|<0')).toMatchInlineSnapshot(`
       [
         "ForAll",
-        [
-          "Element",
-          "x",
-          [
-            "Power",
-            [
-              "Error",
-              [
-                "ErrorCode",
-                "'incompatible-type'",
-                "'number'",
-                "'set<complex>'"
-              ]
-            ],
-            2
-          ]
-        ],
+        ["Element", "x", ["Square", "ComplexNumbers"]],
         ["Less", ["Abs", "x"], 0]
       ]
     `);
@@ -282,7 +260,7 @@ describe('STEFNOTCH #13', () => {
                     "n",
                     [
                       "Limit",
-                      ["Function", ["At", "c", ["Equal", "a", "n"]], "n"],
+                      ["Function", ["At", "c", ["Equal", "n", "a"]], "n"],
                       [
                         "Error",
                         "'unexpected-command'",

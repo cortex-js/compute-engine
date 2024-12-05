@@ -1,8 +1,120 @@
 ## [Unreleased]
 
+### Issues Resolved
+
+- **#219** The `invisibleOperator` canonicalization previously also
+  canonicalized some multiplication.
+- **#218** Improved performance of parsing invisible operators, including fixing
+  some cases where the parsing was incorrect.
+- **#210** Numeric approximation of odd nth roots of negative numbers evaluate
+  correctly.
+- Correctly serialize to ASCIIMath `Delimiter` expressions.
+- When inferring the type of numeric values do not constrain them to be `real`.
+  As a result:
+
+  ```js
+  ce.assign('a', ce.parse('i'));
+  ce.parse('a+1').evaluate().print();
+  ```
+
+  now returns `1 + i` instead of throwing a type error.
+
+### New Features and Improvements
+
+- `isEqual` will now return true/false if the expressions include the same
+  unknowns and are structurally equal after expansion and simplifications. For
+  example:
+
+  ```js
+  console.info(ce.parse('(x+1)^2').isEqual(ce.parse('x^2+2x+1')));
+  // -> true
+  ```
+
+#### Asynchronous Operations
+
+Some computations can be time-consuming, for example, computing a very large
+factorial. To prevent the browser from freezing, the Compute Engine can now
+perform some operations asynchronously.
+
+To perform an asynchronous operation, use the `expr.evaluateAsync` method. For
+example:
+
+```js
+try {
+  const fact = ce.parse('(70!)!');
+  const factResult = await fact.evaluateAsync();
+  factResult.print();
+} catch (e) {
+  console.error(e);
+}
+```
+
+It is also possible to interrupt an operation, for example by providing a
+pause/cancel button that the user can press. To do so, use an `AbortController`
+object and a `signal`. For example:
+
+```js
+const abort = new AbortController();
+const signal = abort.signal;
+setTimeout(() => abort.abort(), 500);
+try {
+  const fact = ce.parse('(70!)!');
+  const factResult = await fact.evaluateAsync({ signal });
+  factResult.print();
+} catch (e) {
+  console.error(e);
+}
+```
+
+In the example above, we trigger an abort after 500ms.
+
+It is also possible to control how long an operation can run by setting the
+`ce.timeLimit` property with a value in milliseconds. For example:
+
+```js
+ce.timeLimit = 1000;
+try {
+  const fact = ce.parse('(70!)!');
+  fact.evaluate().print();
+} catch (e) {
+  console.error(e);
+}
+```
+
+The time limit applies to either the synchronous or asynchronous evaluation.
+
+The default time limit is 2,000ms (2 seconds).
+
+When an operation is canceled either because of a timeout or an abort, a
+`CancellationError` is thrown.
+
+## 0.27.0 _2024-12-02_
+
+- **#217** Correctly parse LaTeX expressions that include a command followed by
+  a `*` such as `\\pi*2`.
+
+- **#217** Correctly calculate the angle of trigonometric expressions with an
+  expression containing a reference to `Pi`, for example `\\sin(\\pi^2)`.
+
+- The `Factorial` function will now time out if the argument is too large. The
+  timeout is signaled by throwing a `CancellationError`.
+
+- When specifying `exp.toMathJSON({shorthands:[]})`, i.e., not to use shorthands
+  in the MathJSON, actually avoid using shorthands.
+
+- Correctly use custom multiply, plus, etc. for LaTeX serialization.
+
+- When comparing two numeric values, the tolerance is now used to determine if
+  the values are equal. The tolerance can be set with the `ce.tolerance`
+  property.
+
+- When comparing two expressions with `isEqual()` the values are compared
+  structurally when necessary, or with a stochastic test when the expressions
+  are too complex to compare structurally.
+
 - Correctly serialize nested superscripts, e.g. `x^{y^z}`.
 
-- The result of evaluation a `Hold` expression is now the expression itself.
+- The result of evaluating a `Hold` expression is now the expression itself.
 
 - To prevent evaluation of an expression temporarily, use the `Unevaluated`
   function. The result of evaluating an `Unevaluated` expression is its
@@ -123,6 +235,8 @@
     preamble: "function Foo(x) { return x + 1};",
   });
   ```
+
+- The `hold` function definition flag has been renamed to `lazy`
 
 ## 0.26.4 _2024-10-17_
 

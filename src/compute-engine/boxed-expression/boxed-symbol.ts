@@ -46,7 +46,7 @@ import { pow } from './arithmetic-power';
 import { add } from './arithmetic-add';
 import { parseType } from '../../common/type/parse';
 import { isSubtype } from '../../common/type/subtype';
-import { isSignatureType, narrow } from '../../common/type/utils';
+import { isSignatureType, widen } from '../../common/type/utils';
 import {
   positiveSign,
   nonPositiveSign,
@@ -409,12 +409,12 @@ export class BoxedSymbol extends _BoxedExpression {
       return true;
     }
 
-    // Narrow the type, if it was previously inferred
+    // Widen the type, if it was previously inferred
     if (
       def instanceof _BoxedSymbolDefinition &&
       (def.inferredType || def.type === 'unknown')
     ) {
-      def.type = narrow(def.type, t);
+      def.type = widen(def.type, t);
       return true;
     }
 
@@ -639,7 +639,7 @@ export class BoxedSymbol extends _BoxedExpression {
     return simplify(this, options).at(-1)?.value ?? this;
   }
 
-  evaluate(options?: EvaluateOptions): BoxedExpression {
+  evaluate(options?: Partial<EvaluateOptions>): BoxedExpression {
     const def = this.symbolDefinition;
     if (!def) return this;
     const hold = def.holdUntil;

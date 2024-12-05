@@ -1,9 +1,7 @@
 import { checkJson, engine } from '../utils';
 
 function checkExpand(s: string): string {
-  return checkJson(
-    engine.box(['Expand', engine.parse(s, { canonical: false })])
-  );
+  return checkJson(engine.box(['Expand', engine.parse(s)]));
 }
 
 describe('EXPAND POWER', () => {
@@ -40,9 +38,9 @@ describe('EXPAND PRODUCT', () => {
       box       = [
         "Expand",
         [
-          "Subtract",
+          "Add",
           ["Multiply", 4, "x", ["Add", ["Multiply", 3, "x"], 2]],
-          ["Multiply", 5, ["Subtract", ["Multiply", 5, "x"], 4]]
+          ["Multiply", -5, ["Subtract", ["Multiply", 5, "x"], 4]]
         ]
       ]
       eval-auto = 12x^2 - 17x + 20

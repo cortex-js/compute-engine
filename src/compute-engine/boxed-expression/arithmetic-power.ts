@@ -337,16 +337,34 @@ export function root(
   { numericApproximation }: { numericApproximation: boolean }
 ): BoxedExpression {
   if (numericApproximation) {
-    if (a.isNumberLiteral && b.isNumberLiteral)
+    if (a.isNumberLiteral && b.isNumberLiteral) {
+      // (-x)^n = (-1)^n x^n
+      const isNegative = a.isNegative;
+      const isEven = b.isEven;
+      if (isNegative) a = a.neg();
+
       return (
         apply2(
           a,
           b,
-          (a, b) => Math.pow(a, 1 / b),
-          (a, b) => a.pow(b.pow(-1)),
-          (a, b) => a.pow(typeof b === 'number' ? 1 / b : b.inverse())
+          (a, b) => {
+            const result = Math.pow(a, 1 / b);
+            if (isNegative && !isEven) return -result;
+            return result;
+          },
+          (a, b) => {
+            const result = a.pow(b.pow(-1));
+            if (isNegative && !isEven) return result.neg();
+            return result;
+          },
+          (a, b) => {
+            const result = a.pow(typeof b === 'number' ? 1 / b : b.inverse());
+            if (isNegative && !isEven) return result.neg();
+            return result;
+          }
         ) ?? root(a, b, { numericApproximation: false })
       );
+    }
   }
 
   if (a.isNumberLiteral && b.isNumberLiteral && b.isInteger) {

@@ -160,23 +160,35 @@ describe('PARSING SETS', () => {
     expect(parse('\\N \\times \\N')).toMatchInlineSnapshot(`
       [
         "Multiply",
-        ["Error", ["ErrorCode", "'incompatible-type'", "'number'", "'set'"]],
-        ["Error", ["ErrorCode", "'incompatible-type'", "'number'", "'set'"]]
+        [
+          "Error",
+          ["ErrorCode", "'incompatible-type'", "'number'", "'set<integer>'"]
+        ],
+        [
+          "Error",
+          ["ErrorCode", "'incompatible-type'", "'number'", "'set<integer>'"]
+        ]
       ]
-    `);
+    `); // @fixme
     expect(parse('\\N^3')).toMatchInlineSnapshot(`
       [
         "Power",
-        ["Error", ["ErrorCode", "'incompatible-type'", "'number'", "'set'"]],
+        [
+          "Error",
+          ["ErrorCode", "'incompatible-type'", "'number'", "'set<integer>'"]
+        ],
         3
       ]
-    `);
+    `); // @fixme
     expect(parse('\\N^{n}')).toMatchInlineSnapshot(`
       [
         "Power",
-        ["Error", ["ErrorCode", "'incompatible-type'", "'number'", "'set'"]],
+        [
+          "Error",
+          ["ErrorCode", "'incompatible-type'", "'number'", "'set<integer>'"]
+        ],
         "n"
       ]
     `);
-  });
+  }); // @fixme
 });

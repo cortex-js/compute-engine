@@ -1,3 +1,4 @@
+import { CancellationError } from '../common/interruptible';
 import type { BoxedExpression, CollectionHandlers } from './public';
 
 /** If a collection has fewer than this many elements, eagerly evaluate it.
@@ -10,14 +11,6 @@ import type { BoxedExpression, CollectionHandlers } from './public';
  */
 export const MAX_SIZE_EAGER_COLLECTION = 100;
 
-// export function isCollection(col: BoxedExpression): boolean {
-//   if (col.string !== null) return true;
-//   if ((col.symbolDefinition?.value?.string ?? null) !== null) return true;
-//   const def =
-//     col.functionDefinition ?? col.symbolDefinition?.value?.functionDefinition;
-//   return def?.iterator !== undefined;
-// }
-
 export function isFiniteCollection(col: BoxedExpression): boolean {
   const l = length(col);
   if (l === undefined) return false;
@@ -25,23 +18,20 @@ export function isFiniteCollection(col: BoxedExpression): boolean {
 }
 
 export function isIndexableCollection(col: BoxedExpression): boolean {
-  // Is it a string literal?
+  col = resolve(col);
+
+  // Is it a string literal or a symbol with a string value?
   if (col.string !== null) return true;
 
-  // Is it a symbol with a string value?
-  if ((col.symbolDefinition?.value?.string ?? null) !== null) return true;
-
-  // Is it an expression with a at() handler?
-  const def =
-    col.functionDefinition ?? col.symbolDefinition?.value?.functionDefinition;
-  return def?.collection?.at !== undefined;
+  // Is it an expression with a at() handler? (or a symbol with a value that has an at() handler)
+  return col.functionDefinition?.collection?.at !== undefined;
 }
 
 export function isFiniteIndexableCollection(col: BoxedExpression): boolean {
+  col = resolve(col);
+
   if (col.string !== null) return true;
-  if ((col.symbolDefinition?.value?.string ?? null) !== null) return true;
-  const def =
-    col.functionDefinition ?? col.symbolDefinition?.value?.functionDefinition;
+  const def = col.functionDefinition;
   if (!def) return false;
   return (
     def.collection?.at !== undefined &&
@@ -87,10 +77,9 @@ export function* each(col: BoxedExpression): Generator<BoxedExpression> {
   while (true) {
     const { done, value } = iter.next();
     if (done) return;
-    if (i++ > limit) {
-      yield col.engine.error('iteration-limit-exceeded');
-      return;
-    }
+    if (i++ > limit)
+      throw new CancellationError({ cause: 'iteration-limit-exceeded' });
+
     yield value;
   }
 }
@@ -103,12 +92,11 @@ export function* each(col: BoxedExpression): Generator<BoxedExpression> {
  * @returns
  */
 export function length(col: BoxedExpression): number | undefined {
-  const s = col.string ?? col.symbolDefinition?.value?.string ?? null;
+  col = resolve(col);
+  const s = col.string;
   if (s !== null) return s.length;
 
-  const def =
-    col.functionDefinition ?? col.symbolDefinition?.value?.functionDefinition;
-  return def?.collection?.size?.(col);
+  return col.functionDefinition?.collection?.size?.(col);
 }
 
 /**
@@ -126,11 +114,11 @@ export function length(col: BoxedExpression): number | undefined {
 export function iterator(
   expr: BoxedExpression
 ): Iterator<BoxedExpression> | undefined {
-  // Is it a function expresson with a definition that includes an iterator?
+  // Is it a function expression with a definition that includes an iterator?
   // e.g. ["Range", 5]
   // or a symbol whose value is a function expression with an iterator?
-  const def =
-    expr.functionDefinition ?? expr.symbolDefinition?.value?.functionDefinition;
+  expr = resolve(expr);
+  const def = expr.functionDefinition;
 
   // Note that if there is an at() handler, there is always
   // at least a default iterator so we could just check for the at handler
@@ -139,7 +127,7 @@ export function iterator(
   //
   // String iterator
   //
-  const s = expr.string ?? expr.symbolDefinition?.value?.string ?? null;
+  const s = expr.string;
   if (s !== null) {
     if (s.length === 0)
       return { next: () => ({ done: true, value: undefined }) };
@@ -155,6 +143,28 @@ export function iterator(
   return undefined;
 }
 
+export function repeat(
+  value: BoxedExpression,
+  count?: number
+): Iterator<BoxedExpression> {
+  if (typeof count === 'number') {
+    if (count < 0) count = 0;
+    return {
+      next() {
+        if (count === 0) return { done: true, value: undefined };
+        count!--;
+        return { done: false, value };
+      },
+    };
+  }
+  // Infinite iterator
+  return {
+    next() {
+      return { done: false, value };
+    },
+  };
+}
+
 /**
  *
  * @param expr
@@ -166,10 +176,10 @@ export function at(
   expr: BoxedExpression,
   index: number
 ): BoxedExpression | undefined {
-  const def =
-    expr.functionDefinition ?? expr.symbolDefinition?.value?.functionDefinition;
+  expr = resolve(expr);
 
-  if (def?.collection?.at) return def.collection.at(expr, index);
+  const def = expr.functionDefinition?.collection;
+  if (def?.at) return def.at(expr, index);
 
   const s = expr.string;
   if (s) {
@@ -249,4 +259,35 @@ export function defaultCollectionHandlers(
     indexOf: def.indexOf,
     subsetOf: def.subsetOf,
   } as CollectionHandlers;
+}
+
+// If expr is a symbol, resolve it to its value
+function resolve(expr: BoxedExpression): BoxedExpression {
+  if (expr.symbolDefinition) {
+    if (expr.symbolDefinition.holdUntil === 'never')
+      return expr.symbolDefinition.value ?? expr;
+  }
+  return expr;
+}
+
+export function zip(
+  items: ReadonlyArray<BoxedExpression>
+): Iterator<BoxedExpression[]> {
+  items = items.map((x) => resolve(x));
+
+  // Get iterators for each item
+  // If an item is not a collection, repeat it
+  const iterators = items.map((x) => iterator(x) ?? repeat(x));
+
+  // Get the length of the shortest collection
+  // const shortest = Math.min(...items.map((x) => length(x) ?? 1));
+
+  // Return an iterator that zips the items
+  return {
+    next() {
+      const values = iterators.map((x) => x.next());
+      if (values.some((x) => x.done)) return { done: true, value: undefined };
+      return { done: false, value: values.map((x) => x.value) };
+    },
+  };
 }

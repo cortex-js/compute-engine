@@ -61,6 +61,7 @@ describe('SOLVING A QUADRATIC EQUATION', () => {
     expect(eqn.solve('x')).toMatchInlineSnapshot(`
       [
         ["Sqrt", 8],
+        ["Negate", ["Sqrt", 8]],
       ]
     `);
   });
@@ -137,7 +138,20 @@ describe('expr.solve()', () => {
   test('should solve an equation with a complex root', () => {
     const e = expr('x^2 + 1 = 0');
     const result = e.solve('x')?.map((x) => x.json);
-    expect(result).toEqual([['Complex', 0, 1]]);
+    expect(result).toMatchInlineSnapshot(`
+      [
+        [
+          Complex,
+          0,
+          1,
+        ],
+        [
+          Complex,
+          0,
+          -1,
+        ],
+      ]
+    `);
   });
 
   test('should **NOT** solve a quasi-quadratic equation', () => {

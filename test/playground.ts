@@ -1,7 +1,44 @@
-import { ComputeEngine, FunctionDefinition } from '../src/compute-engine';
+import { ComputeEngine } from '../src/compute-engine';
 
 const ce = new ComputeEngine();
 const engine = ce;
+
+const data = [
+  { a: 5, b: 10 },
+  { a: 65, b: 2 },
+];
+ce.assign('a', ['List', ...data.map((d) => d.a)]);
+ce.assign('b', ['List', ...data.map((d) => d.b)]);
+const formula = ce.parse('\\mathrm{Sum}(a \\cdot b)');
+
+// const formula = ce.parse('\\sum_{i=1}^n a_{i} \\cdot b_{i}');
+// ce.assign('n', data.length);
+// console.log(ce.parse('n').toString());
+console.log(formula.evaluate().toString());
+
+ce.parse('\\mathrm{x+\\alpha}').print();
+ce.parse('\\mathrm{\\oplus}').print();
+ce.parse('\\mathrm{\\frac{a}{\\oplus\\prime}').print();
+
+ce.parse('\\sin(\\pi^2)').evaluate().print();
+
+// console.info(
+//   JSON.stringify(ce.parse('12+(-2)').toMathJson({ prettify: false }))
+// );
+// console.info(JSON.stringify(ce.parse('12-2').toMathJson({ prettify: false })));
+
+console.log(ce.parse('x').value);
+console.log(ce.parse('x').re);
+
+const localInput = '12+(-2)';
+const expr = engine.parse(localInput, { canonical: false });
+if (expr.operator === 'Add' && expr.op1.valueOf() === 0) {
+}
+
+console.info(JSON.stringify(ce.parse('12+(-2)', { canonical: false }).json));
+console.info(JSON.stringify(ce.parse('12-2', { canonical: false }).json));
+
+ce.box(['Add', 1, { str: 'hello' }]).print();
 
 console.info(
   ce
@@ -53,8 +90,8 @@ console.info(ce.parse('\\tan (90-0.000001)\\degree').json);
 
 ce.parse('\\tan ((90-.000001)\\degree)').N().print();
 
-const expr1 = ce.parse('\\ln |x|');
-const deriv = ce.box(['D', expr1, 'x']);
+const exprln = ce.parse('\\ln |x|');
+const deriv = ce.box(['D', exprln, 'x']);
 deriv.evaluate().print();
 
 // Should simplify to 2x.
