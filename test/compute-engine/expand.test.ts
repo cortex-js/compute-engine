@@ -38,9 +38,9 @@ describe('EXPAND PRODUCT', () => {
       box       = [
         "Expand",
         [
-          "Subtract",
+          "Add",
           ["Multiply", 4, "x", ["Add", ["Multiply", 3, "x"], 2]],
-          ["Multiply", 5, ["Subtract", ["Multiply", 5, "x"], 4]]
+          ["Multiply", -5, ["Subtract", ["Multiply", 5, "x"], 4]]
         ]
       ]
       eval-auto = 12x^2 - 17x + 20

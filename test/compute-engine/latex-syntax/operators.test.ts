@@ -182,7 +182,7 @@ describe('OPERATOR prefix', () => {
     `));
   test('-ab // Negate', () =>
     expect(check('-ab')).toMatchInlineSnapshot(`
-      box       = ["Negate", ["InvisibleOperator", "a", "b"]]
+      box       = ["InvisibleOperator", ["Negate", "a"], "b"]
       canonical = ["Negate", ["Multiply", "a", "b"]]
     `));
   test('-(ab) // Negate', () =>

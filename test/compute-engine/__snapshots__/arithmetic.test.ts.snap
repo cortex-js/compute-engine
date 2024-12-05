@@ -741,16 +741,16 @@ simplify  = -50.6
 
 exports[`MULTIPLY Multiply: All exact 1`] = `
 box       = [
-  "InvisibleOperator",
-  2,
-  ["Multiply", ["Divide", 5, 7], ["Divide", 7, 9]]
+  "Multiply",
+  ["InvisibleOperator", 2, ["Divide", 5, 7]],
+  ["Divide", 7, 9]
 ]
-canonical = ["Multiply", 2, ["Rational", 5, 7], ["Rational", 7, 9]]
-simplify  = 10/9
-eval-auto = 10/9
-eval-mach = 10/9
-N-auto    = 1.11111111111111111111
-N-mach    = 1.11111111111111
+canonical = ["Multiply", ["Rational", 7, 9], ["Add", 2, ["Rational", 5, 7]]]
+simplify  = 19/9
+eval-auto = 19/9
+eval-mach = 19/9
+N-auto    = 2.11111111111111111111
+N-mach    = 2.11111111111111
 `;
 
 exports[`MULTIPLY Multiply: All exact with symbol 1`] = `

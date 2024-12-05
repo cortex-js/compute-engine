@@ -58,9 +58,9 @@ describe('PARSING OF NUMBER', () => {
     expect(parse('3\\frac14')).toMatchInlineSnapshot(
       `["Add", 3, ["Rational", 1, 4]]`
     );
-    // Negative mixed fraction
+    // Negative mixed fraction -> -(3 + 1/4)
     expect(parse('-3\\frac14')).toMatchInlineSnapshot(
-      `["Negate", ["Add", 3, ["Rational", 1, 4]]]`
+      `["Subtract", ["Rational", -1, 4], 3]`
     );
     expect(parse('3\\frac14+\\frac12')).toMatchInlineSnapshot(
       `["Add", 3, ["Rational", 1, 4], ["Rational", 1, 2]]`
