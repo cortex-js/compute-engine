@@ -4,6 +4,8 @@
 
 - **#219** The `invisibleOperator` canonicalization previously also
   canonicalized some multiplication.
+- **#218** Improved performance of parsing invisible operators, including fixing
+  some cases where the parsing was incorrect.
 - **#210** Numeric approximation of odd nth roots of negative numbers evaluate
   correctly.
 - Correctly serialize to ASCIIMath `Delimiter` expressions.
