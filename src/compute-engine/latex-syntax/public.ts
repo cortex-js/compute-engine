@@ -344,7 +344,7 @@ export type BaseEntry = {
  */
 export type DefaultEntry = BaseEntry &
   Trigger & {
-    parse: Expression | ExpressionParseHandler;
+    parse?: Expression | ExpressionParseHandler;
   };
 
 /**
@@ -354,7 +354,7 @@ export type ExpressionEntry = BaseEntry &
   Trigger & {
     kind: 'expression'; // Default entry is "expression"
 
-    parse: Expression | ExpressionParseHandler;
+    parse?: Expression | ExpressionParseHandler;
 
     precedence?: Precedence;
   };

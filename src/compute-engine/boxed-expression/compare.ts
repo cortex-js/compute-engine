@@ -79,7 +79,7 @@ export function eq(
   // We want to compare the **value** of the boxed expressions.
   //
   a = a.N();
-  const b = typeof inputB !== 'number' ? inputB.N() : a.engine.box(inputB);
+  let b = typeof inputB !== 'number' ? inputB.N() : a.engine.box(inputB);
 
   //
   // Do we have at least one function expression?
@@ -106,8 +106,13 @@ export function eq(
       return false;
     }
 
-    // If the expression have some unknowns, we can't prove equality
-    return undefined;
+    // If the expression have some unknowns, we only try to prove equality
+    // if they have the same unknowns and are structurally equal after
+    // expansing and simplification
+    a = a.expand().simplify();
+    b = b.expand().simplify();
+    if (!sameUnknowns(a, b)) return undefined;
+    return same(a, b);
   }
 
   //
@@ -328,4 +333,19 @@ function isZeroWithTolerance(expr: BoxedExpression): boolean {
   const ce = expr.engine;
   if (typeof n === 'number') return ce.chop(n) === 0;
   return n.isZeroWithTolerance(ce.tolerance);
+}
+
+function commonUnknowns(a: BoxedExpression, b: BoxedExpression): string[] {
+  const unknowns = new Set<string>();
+  for (const u of a.unknowns) unknowns.add(u);
+  for (const u of b.unknowns) unknowns.add(u);
+  return Array.from(unknowns);
+}
+
+function sameUnknowns(a: BoxedExpression, b: BoxedExpression): boolean {
+  const ua = a.unknowns;
+  const ub = b.unknowns;
+  if (ua.length !== ub.length) return false;
+  for (const u of ua) if (!ub.includes(u)) return false;
+  return true;
 }

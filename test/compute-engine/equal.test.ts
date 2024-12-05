@@ -19,6 +19,8 @@ const TESTS: [string, string][] = [
   // ['3x + 1 = 0', '6x + 2 = 0'],
   ['2(13.1+x)<(10-5)', '26.2+2x<5'],
   ['x^2 + 2x + 1 = 0', 'x^2 + 2x = -1'],
+  // Same unknowns, structurally equal after expand/simplify
+  ['(x+1)^2', 'x^2+2x+1'],
 ];
 
 describe('a.isEqual(b)', () => {

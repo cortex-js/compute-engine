@@ -19,6 +19,15 @@
 
 ### New Features and Improvements
 
+- `isEqual` will now return true/false if the expressions include the same
+  unknowns and are structurally equal after expansion and simplifications. For
+  example:
+
+  ```js
+  console.info(ce.parse('(x+1)^2').isEqual(ce.parse('x^2+2x+1')));
+  // -> true
+  ```
+
 #### Asynchronous Operations
 
 Some computations can be time-consuming, for example, computing a very large
@@ -64,7 +73,7 @@ It is also possible to control how long an operation can run by setting the
 ce.timeLimit = 1000;
 try {
   const fact = ce.parse('(70!)!');
-  fact.evaluateAsync().print();
+  fact.evaluate().print();
 } catch (e) {
   console.error(e);
 }
