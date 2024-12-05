@@ -103,7 +103,6 @@ volumes
         return engine._fn('Derivative', [ops[0].canonical, ...ops.slice(1)]);
       },
       evaluate: (ops) => {
-        // Is it a function name, i.e. ["Derivative", "Sin"]?
         const op = ops[0].evaluate();
         const degree = Math.floor(ops[1]?.N().re);
         return derivative(op, isNaN(degree) ? 1 : degree);
@@ -177,13 +176,13 @@ volumes
     ND: {
       threadable: false,
       lazy: true,
-      signature: '(function, point:number) -> number',
-      evaluate: (ops, { engine }) => {
-        const x = ops[1]?.canonical.re;
-        if (isNaN(x)) return undefined;
+      signature: '(function, at:number) -> number',
+      evaluate: ([body, x], { engine }) => {
+        const xValue = x?.canonical.N().re;
+        if (isNaN(xValue)) return undefined;
 
-        const f = applicableN1(engine.box(ops[0]));
-        return engine.number(centeredDiff8thOrder(f, x));
+        const f = applicableN1(engine.box(body));
+        return engine.number(centeredDiff8thOrder(f, xValue));
       },
     },
 

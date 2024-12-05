@@ -1,3 +1,4 @@
+import { CancellationError } from '../common/interruptible';
 import type { BoxedExpression, CollectionHandlers } from './public';
 
 /** If a collection has fewer than this many elements, eagerly evaluate it.
@@ -76,10 +77,9 @@ export function* each(col: BoxedExpression): Generator<BoxedExpression> {
   while (true) {
     const { done, value } = iter.next();
     if (done) return;
-    if (i++ > limit) {
-      yield col.engine.error('iteration-limit-exceeded');
-      return;
-    }
+    if (i++ > limit)
+      throw new CancellationError({ cause: 'iteration-limit-exceeded' });
+
     yield value;
   }
 }

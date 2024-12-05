@@ -368,7 +368,7 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
         return ce.number(
           run(
             bigFactorial(BigInt((x.bignumRe ?? x.re).toFixed())),
-            (ce._deadline ?? Infinity) - Date.now()
+            ce._timeRemaining
           )
         );
       },
@@ -1416,55 +1416,7 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
       // The 'body' and 'range' need to be interpreted by canonicalMultiplication(). Don't canonicalize them yet.
       canonical: ([body, ...indexes]) =>
         canonicalBigop('Product', body, indexes),
-      sgn: (ops) => {
-        // Check if the body has a determined sign (i.e. is always positive,
-        // negative or 0)
-        const s = ops[0]?.sgn;
-        if (s === undefined) return undefined;
-        if (['positive', 'zero'].includes(s)) return s;
-        const n = reduceBigOp(ops[0], ops.slice(1), (acc, x) => acc + 1, 0);
-        if (s === 'real-not-zero' || s === 'negative')
-          return n! % 2 === 0 ? 'positive' : s;
-        if (ops[0]?.type === 'imaginary')
-          return n! % 2 === 0 ? 'negative' : 'unsigned';
-        if (s === 'unsigned') return undefined;
 
-        // The sign could not be determined by just looking at the body.
-        // Look at each term
-        let hasZero = false;
-        let hasPossibleZero = false;
-        let hasPossibleInfinity = false;
-        let hasInfinity = false;
-        let sign: Sign | undefined = 'positive';
-        let isUndefined = false;
-
-        // Go over each term, and count the signs of the terms
-        const total = reduceBigOp(
-          ops[0],
-          ops.slice(1),
-          (acc, x) => {
-            if (x.isInfinity) {
-              hasInfinity = true;
-              hasPossibleInfinity = true;
-            } else if (x.isInfinity !== false) hasPossibleInfinity = true;
-            if (x.is(0)) {
-              hasZero = true;
-              hasPossibleZero = true;
-            }
-            if (x.is(0)) hasPossibleZero = true;
-            if (x.isNonPositive) sign = oppositeSgn(sign);
-            else if (x.isNonNegative !== true) isUndefined = true;
-            return acc + 1;
-          },
-          0
-        );
-        if (hasInfinity && hasZero) return 'unsigned';
-        if (isUndefined || (hasPossibleInfinity && hasPossibleZero))
-          return undefined;
-        if (hasPossibleZero)
-          return sign === 'positive' ? 'non-negative' : 'non-positive';
-        return sign;
-      },
       evaluate: (ops, options) => {
         const fn = (acc, x) => {
           x = x.evaluate(options);
@@ -1472,11 +1424,34 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
           return acc.mul(x.numericValue!);
         };
 
-        const result = reduceBigOp(
-          ops[0],
-          ops.slice(1),
-          fn,
-          options.engine._numericValue(1)
+        const result = run(
+          reduceBigOp(
+            ops[0],
+            ops.slice(1),
+            fn,
+            options.engine._numericValue(1)
+          ),
+          options.engine._timeRemaining
+        );
+        return options.engine.number(result ?? NaN);
+      },
+
+      evaluateAsync: async (ops, options) => {
+        const fn = (acc, x) => {
+          x = x.evaluate(options);
+          if (!x.isNumberLiteral) return null;
+          return acc.mul(x.numericValue!);
+        };
+
+        const result = await runAsync(
+          reduceBigOp(
+            ops[0],
+            ops.slice(1),
+            fn,
+            options.engine._numericValue(1)
+          ),
+          options.engine._timeRemaining,
+          options.signal
         );
         return options.engine.number(result ?? NaN);
       },
@@ -1492,56 +1467,39 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
       signature:
         '(collection|function, ...(tuple<symbol>|tuple<symbol, integer>|tuple<symbol, integer, integer>)) -> number',
 
-      sgn: (ops) => {
-        // Check if the body has a determined sign (i.e. is always positive,
-        // negative or 0)
-        const s = ops[0]?.sgn;
-        if (s === undefined) return undefined;
-        if (['positive', 'negative', 'zero'].includes(s)) return s;
-
-        // The sign could not be determined by just looking at the body.
-        // Look at each term
-
-        const sgns: (string | undefined)[] = [];
-
-        // Go over each term, and count the signs of the terms
-        const total = reduceBigOp(
-          ops[0],
-          ops.slice(1),
-          (acc, x) => {
-            sgns.push(x.sgn);
-            return acc + 1;
-          },
-          0
-        );
-        if (sgns.some((x) => [undefined, 'unsigned'].includes(x)))
-          return undefined;
-        if (sgns.every((x) => x === 'zero')) return 'zero';
-        if (sgns.every((x) => x === 'positive' || x === 'non-negative'))
-          return sgns.some((x) => x === 'positive')
-            ? 'positive'
-            : 'non-negative';
-        if (sgns.every((x) => x === 'negative' || x === 'non-negative'))
-          return sgns.some((x) => x === 'negative')
-            ? 'negative'
-            : 'non-positive';
-        if (sgns.every((x) => x === 'real' || x === 'real-not-zero'))
-          return 'real';
-        return undefined;
-      },
       canonical: ([body, ...indexes]) => canonicalBigop('Sum', body, indexes),
       evaluate: (xs, { engine }) =>
         engine.number(
-          reduceBigOp(
-            xs[0],
-            xs.slice(1),
-            (acc, x) => {
-              x = x.evaluate();
-              if (!x.isNumberLiteral) return null;
-              return acc.add(x.numericValue!);
-            },
-            engine._numericValue(0)
-          ) ?? NaN
+          run(
+            reduceBigOp(
+              xs[0],
+              xs.slice(1),
+              (acc, x) => {
+                x = x.evaluate();
+                if (!x.isNumberLiteral) return null;
+                return acc.add(x.numericValue!);
+              },
+              engine._numericValue(0)
+            ) ?? NaN,
+            engine._timeRemaining
+          )
+        ),
+      evaluateAsync: async (xs, { engine, signal }) =>
+        engine.number(
+          await runAsync(
+            reduceBigOp(
+              xs[0],
+              xs.slice(1),
+              (acc, x) => {
+                x = x.evaluate();
+                if (!x.isNumberLiteral) return null;
+                return acc.add(x.numericValue!);
+              },
+              engine._numericValue(0)
+            ) ?? NaN,
+            engine._timeRemaining,
+            signal
+          )
         ),
     },
   },

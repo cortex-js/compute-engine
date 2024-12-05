@@ -674,6 +674,11 @@ export class ComputeEngine implements IComputeEngine {
   /** The time after which the time limit has been exceeded */
   _deadline: number | undefined = undefined;
 
+  get _timeRemaining(): number {
+    if (this.deadline === undefined) return Number.POSITIVE_INFINITY;
+    return this.deadline - Date.now();
+  }
+
   get iterationLimit(): number {
     return this._iterationLimit;
   }

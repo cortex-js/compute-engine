@@ -8,6 +8,7 @@ import { applicable } from '../function-utils';
 import { each } from '../collection-utils';
 import { checkConditions } from '../boxed-expression/rules';
 import { widen } from '../../common/type/utils';
+import { CancellationError, run, runAsync } from '../../common/interruptible';
 
 export const CONTROL_STRUCTURES_LIBRARY: IdentifierDefinitions[] = [
   {
@@ -51,39 +52,10 @@ export const CONTROL_STRUCTURES_LIBRARY: IdentifierDefinitions[] = [
       lazy: true,
       signature: '(body:expression, collection:expression) -> any',
       type: ([body]) => body.type,
-      evaluate: ([body, collection], { engine: ce }) => {
-        body ??= ce.Nothing;
-        if (body.symbol === 'Nothing') return body;
-
-        if (collection && collection.isCollection) {
-          //
-          // Iterate over the elements of a collection
-          //
-          let result: BoxedExpression | undefined = undefined;
-          const fn = applicable(body);
-          let i = 0;
-
-          for (const x of each(collection)) {
-            result = fn([x]) ?? ce.Nothing;
-            if (result.operator === 'Break') return result.op1;
-            if (result.operator === 'Return') return result;
-            if (i++ > ce.iterationLimit)
-              return ce.error('iteration-limit-exceeded');
-          }
-        }
-
-        //
-        // No collection: infinite loop
-        //
-        let i = 0;
-        while (true) {
-          const result = body.evaluate();
-          if (result.operator === 'Break') return result.op1;
-          if (result.operator === 'Return') return result;
-          if (i++ > ce.iterationLimit)
-            return ce.error('iteration-limit-exceeded');
-        }
-      },
+      evaluate: ([body, collection], { engine: ce }) =>
+        run(runLoop(body, collection, ce), ce._timeRemaining),
+      evaluateAsync: async ([body, collection], { engine: ce, signal }) =>
+        runAsync(runLoop(body, collection, ce), ce._timeRemaining, signal),
     },
 
     Which: {
@@ -190,4 +162,47 @@ function invalidateDeclare(expr: BoxedExpression): BoxedExpression {
     return expr.engine._fn(expr.operator, expr.ops.map(invalidateDeclare));
 
   return expr;
+}
+
+function* runLoop(
+  body: BoxedExpression,
+  collection: BoxedExpression,
+  ce: IComputeEngine
+): Generator<BoxedExpression> {
+  body ??= ce.Nothing;
+  if (body.symbol === 'Nothing') return body;
+
+  if (collection?.isCollection) {
+    //
+    // Iterate over the elements of a collection
+    //
+    let result: BoxedExpression | undefined = undefined;
+    const fn = applicable(body);
+    let i = 0;
+
+    for (const x of each(collection)) {
+      result = fn([x]) ?? ce.Nothing;
+      if (result.operator === 'Break') return result.op1;
+      if (result.operator === 'Return') return result;
+      i += 1;
+      if (i % 1000 === 0) yield result;
+      if (i > ce.iterationLimit)
+        throw new CancellationError({ cause: 'iteration-limit-exceeded' });
+    }
+    return result;
+  }
+
+  //
+  // No collection: infinite loop
+  //
+  let i = 0;
+  while (true) {
+    const result = body.evaluate();
+    if (result.operator === 'Break') return result.op1;
+    if (result.operator === 'Return') return result;
+    i += 1;
+    if (i % 1000 === 0) yield result;
+    if (i > ce.iterationLimit)
+      throw new CancellationError({ cause: 'iteration-limit-exceeded' });
+  }
 }

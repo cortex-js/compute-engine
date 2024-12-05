@@ -1240,15 +1240,18 @@ function tally(
  * is returned. Otherwise, the result of the function is used as the new accumulator.
  * If the iteration completes, the final accumulator is returned.
  */
-export function reduceCollection<T>(
+export function* reduceCollection<T>(
   collection: BoxedExpression,
   fn: (acc: T, next: BoxedExpression) => T | null,
   initial: T
-): T | undefined {
+): Generator<T | undefined> {
   let acc = initial;
+  let counter = 0;
   for (const x of each(collection)) {
     const result = fn(acc, x);
     if (result === null) return undefined;
+    counter += 1;
+    if (counter % 1000 === 0) yield acc;
     acc = result;
   }
   return acc;

@@ -2133,6 +2133,9 @@ export interface IComputeEngine extends IBigNum {
    */
   _deadline?: number;
 
+  /** Time remaining before _deadline */
+  _timeRemaining: number;
+
   /** @private */
   generation: number;
 
@@ -2144,7 +2147,7 @@ export interface IComputeEngine extends IBigNum {
    */
   timeLimit: number;
 
-  /** Signal `iteration-limit-exceeded` when the iteration limit
+  /** Throw `CancellationError` `iteration-limit-exceeded` when the iteration limit
    * in a loop is exceeded. Default: no limits.
    *
    * @experimental
