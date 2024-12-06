@@ -21,6 +21,9 @@ import { joinLatex } from '../tokenizer';
  */
 function parseIntegral(command: string, n = 1) {
   return (parser: Parser): Expression | null => {
+    // Skip space or a `\limits` command
+    parser.skipSpace();
+    parser.match('\\limits');
     parser.skipSpace();
 
     // Are there some superscript or subscripts?

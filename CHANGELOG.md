@@ -13,6 +13,8 @@
   non-standard).
 - **#210** Numeric approximation of odd nth roots of negative numbers evaluate
   correctly.
+- **#153** Correctly parse integrals with `\limits`, e.g.
+  `\int\limits_0^1 x^2 \mathrm{d} x`.
 - Correctly serialize to ASCIIMath `Delimiter` expressions.
 - When inferring the type of numeric values do not constrain them to be `real`.
   As a result:

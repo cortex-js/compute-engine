@@ -18,6 +18,7 @@ describe('INTEGRAL', () => {
       `["Equal", ["Add", ["Integrate", ["Sin", "x"], "x"], 1], 2]`
     );
   });
+
   test('simple with mathrm', () => {
     expect(parse('\\int\\sin x dx+1 = 2')).toMatchInlineSnapshot(
       `["Equal", ["Add", ["Integrate", ["Sin", "x"], "x"], 1], 2]`
@@ -64,6 +65,7 @@ describe('INTEGRAL', () => {
       ]
     `);
   });
+
   test('simple with lower and upper bound', () => {
     expect(parse('\\int^\\infty_0\\sin x \\, \\operatorname{d}x+1 = 2'))
       .toMatchInlineSnapshot(`
@@ -91,6 +93,12 @@ describe('INTEGRAL', () => {
         2
       ]
     `));
+
+  test('simple with \\limits', () => {
+    expect(
+      parse('\\int\\limits \\sin x \\operatorname{d}')
+    ).toMatchInlineSnapshot(`["Integrate", ["Sin", "x"], "Nothing"]`);
+  });
 
   test('with dx in frac', () =>
     expect(parse('\\int^\\infty_0\\frac{3xdx}{5} = 2')).toMatchInlineSnapshot(`
