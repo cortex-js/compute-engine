@@ -222,10 +222,12 @@ volumes
         if (!index.symbol) index = ce.typeError('symbol', index.type, index);
 
         // The range bounds, if present, should be numbers
-        if (lower && lower.symbol !== 'Nothing')
-          lower = checkType(ce, lower, 'number');
-        if (upper && upper.symbol !== 'Nothing')
-          upper = checkType(ce, upper, 'number');
+        if (lower && lower.symbol !== 'Nothing') {
+          if (lower.type !== 'unknown') lower = checkType(ce, lower, 'number');
+        }
+        if (upper && upper.symbol !== 'Nothing') {
+          if (upper.type !== 'unknown') upper = checkType(ce, upper, 'number');
+        }
         if (lower && upper) range = ce.tuple(index, lower, upper);
         else if (upper) range = ce.tuple(index, ce.NegativeInfinity, upper);
         else if (lower) range = ce.tuple(index, lower);

@@ -164,7 +164,7 @@ export function checkNumericArgs(
 }
 
 /**
- * Check that an argument is of the expected domain.
+ * Check that an argument is of the expected type.
  *
  * Converts the arguments to canonical
  */

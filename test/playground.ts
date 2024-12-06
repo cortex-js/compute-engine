@@ -3,6 +3,9 @@ import { ComputeEngine } from '../src/compute-engine';
 const ce = new ComputeEngine();
 const engine = ce;
 
+ce.parse('x__+1)').print();
+ce.parse('\\mathrm{speed}_{max}').print();
+
 const data = [
   { a: 5, b: 10 },
   { a: 65, b: 2 },

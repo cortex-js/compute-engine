@@ -23,12 +23,14 @@ import { replace } from './rules';
 import { negate } from './negate';
 import { Product } from './product';
 import { simplify } from './simplify';
+import { canonicalMultiply, mul } from './arithmetic-multiply';
+import { div } from './arithmetic-divide';
+import { add } from './arithmetic-add';
+import { pow } from './arithmetic-power';
 
 import { asSmallInteger } from './numerics';
 
 import { isFiniteIndexableCollection, zip } from '../collection-utils';
-
-import { canonicalMultiply, mul } from './arithmetic-multiply';
 
 import { NumericValue } from '../numeric-value/public';
 
@@ -39,12 +41,9 @@ import { match } from './match';
 import { factor } from './factor';
 import { holdMap, holdMapAsync } from './hold';
 import { Type } from '../../common/type/types';
-import { isSubtype } from '../../common/type/subtype';
-import { div } from './arithmetic-divide';
-import { add } from './arithmetic-add';
-import { pow } from './arithmetic-power';
-import { functionResult, narrow, widen } from '../../common/type/utils';
 import { parseType } from '../../common/type/parse';
+import { isSubtype } from '../../common/type/subtype';
+import { functionResult, narrow } from '../../common/type/utils';
 import {
   positiveSign,
   nonNegativeSign,
@@ -55,11 +54,11 @@ import {
 import { cachedValue, CachedValue, cachedValueAsync } from './cache';
 
 /**
- * A boxed function represent an expression that can be
- * represented by a function call.
+ * A boxed function represent an expression that can be represented by a
+ * function call.
  *
- * It is composed of an operator (the name of the function) and
- * a list of arguments.
+ * It is composed of an operator (the name of the function) and a list of
+ * arguments.
  *
  * It has a definition associated with it, based on the operator.
  * The definition contains the signature of the function, and the
@@ -83,7 +82,7 @@ export class BoxedFunction extends _BoxedExpression {
   // The scope in which this function was defined/boxed
   private _scope: RuntimeScope | null;
 
-  // Note: only canonical expressions have an associated def
+  // Only canonical expressions have an associated def
   _def: BoxedFunctionDefinition | undefined;
 
   private _isPure: boolean;
@@ -149,7 +148,7 @@ export class BoxedFunction extends _BoxedExpression {
     return h;
   }
 
-  // For function expressions, infer infers the result type of the function
+  // For function expressions, `infer()` infers the result type of the function
   infer(t: Type): boolean {
     const def = this.functionDefinition;
     if (!def) return false;
@@ -166,6 +165,8 @@ export class BoxedFunction extends _BoxedExpression {
         result: narrow(def.signature.result, t),
       };
     }
+
+    this.engine.generation += 1;
 
     return true;
   }
@@ -1091,39 +1092,19 @@ export class BoxedFunction extends _BoxedExpression {
 }
 
 /** Return the type of the value of the expression */
-function type(expr: BoxedExpression): Type | undefined {
+function type(expr: BoxedFunction): Type | undefined {
   if (!expr.isValid) return 'error';
+  const def = expr.functionDefinition;
+  if (!def) return 'function';
 
-  // expr = expr.evaluate();
+  let sigResult = functionResult(def.signature) ?? 'unknown';
 
-  //
-  // The value is a function expression
-  //
-  if (expr.ops) {
-    const def = expr.functionDefinition;
-    if (!def) return 'function';
+  // If there is a type handler, call it
+  if (typeof def.type === 'function')
+    sigResult =
+      parseType(def.type(expr.ops!, { engine: expr.engine })) ?? sigResult;
 
-    const sigResult = functionResult(def.signature) ?? 'any';
-
-    // If there is a resultType function, call it
-    if (typeof def.type === 'function')
-      return (
-        parseType(def.type(expr.ops!, { engine: expr.engine })) ?? sigResult
-      );
-
-    return sigResult;
-  }
-
-  //
-  // The value is a symbol or a number literal
-  //
-  if (expr.symbol || expr.isNumberLiteral) return expr.type;
-
-  if (expr.string) return 'string';
-
-  if (expr.tensor) return expr.type;
-
-  return undefined;
+  return sigResult;
 }
 
 function withDeadline<T>(engine: IComputeEngine, fn: () => T): () => T {

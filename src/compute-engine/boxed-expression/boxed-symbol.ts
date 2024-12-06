@@ -389,7 +389,7 @@ export class BoxedSymbol extends _BoxedExpression {
   }
 
   /**
-   * Subsequence inferences will narrow the domain of the symbol.
+   * Subsequent inferences will narrow the domain of the symbol.
    * f: integer -> real, g: real -> real
    * g(x) => x: real
    * f(x) => x: integer narrowed from integer to real

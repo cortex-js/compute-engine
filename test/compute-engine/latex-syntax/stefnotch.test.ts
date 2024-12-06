@@ -113,23 +113,10 @@ describe('STEFNOTCH #13', () => {
   test('2/ x_{1,2}=1,2', () => {
     expect(parse('x_{1,2}=1,2')).toMatchInlineSnapshot(`
       [
-        "Tuple",
+        "Pair",
         [
           "Equal",
-          [
-            "At",
-            [
-              "Error",
-              [
-                "ErrorCode",
-                "'incompatible-type'",
-                "'list | tuple | string'",
-                "'real'"
-              ]
-            ],
-            1,
-            ["Error", "'unexpected-argument'", "'2'"]
-          ],
+          ["Subscript", "x", ["Delimiter", ["Sequence", 1, 2], "','"]],
           1
         ],
         2
@@ -161,24 +148,8 @@ describe('STEFNOTCH #13', () => {
       .toMatchInlineSnapshot(`
       [
         "Implies",
-        [
-          "LessEqual",
-          ["Abs", ["At", "a", "n"]],
-          ["Divide", 2, ["Sqrt", "n"]]
-        ],
-        [
-          "At",
-          "a",
-          [
-            "Error",
-            [
-              "ErrorCode",
-              "'incompatible-type'",
-              "'number | string'",
-              "'boolean'"
-            ]
-          ]
-        ]
+        ["LessEqual", ["Abs", "a_n"], ["Divide", 2, ["Sqrt", "n"]]],
+        ["Equal", ["To", "a_n", 0], 0]
       ]
     `);
   });
@@ -203,19 +174,8 @@ describe('STEFNOTCH #13', () => {
             "'expected-closing-delimiter'",
             ["LatexString", "'{\\displaystyle\\lim_{n\\to\\infty}'"]
           ],
-          [
-            "At",
-            "a",
-            [
-              "InvisibleOperator",
-              "n",
-              [
-                "Error",
-                "'unexpected-closing-delimiter'",
-                ["LatexString", "'}'"]
-              ]
-            ]
-          ]
+          ["Subscript", "a", "n"],
+          ["Error", "'unexpected-closing-delimiter'", ["LatexString", "'}'"]]
         ]
       ]
     `);
@@ -241,36 +201,21 @@ describe('STEFNOTCH #13', () => {
         "ForAll",
         "n",
         [
-          "At",
-          "a",
+          "Implies",
           [
             "LessEqual",
-            "n",
+            ["Subscript", "a", "n"],
+            ["Subscript", "c", "n"],
+            ["Subscript", "b", "n"]
+          ],
+          [
+            "Equal",
             [
-              "At",
-              "c",
-              [
-                "LessEqual",
-                "n",
-                [
-                  "At",
-                  "b",
-                  [
-                    "Implies",
-                    "n",
-                    [
-                      "Limit",
-                      ["Function", ["At", "c", ["Equal", "n", "a"]], "n"],
-                      [
-                        "Error",
-                        "'unexpected-command'",
-                        ["LatexString", "'\\infin'"]
-                      ]
-                    ]
-                  ]
-                ]
-              ]
-            ]
+              "Limit",
+              ["Function", ["Subscript", "c", "n"], "n"],
+              ["Error", "'unexpected-command'", ["LatexString", "'\\infin'"]]
+            ],
+            "a"
           ]
         ]
       ]

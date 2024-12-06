@@ -256,7 +256,7 @@ describe('SYMBOLS', () => {
       expect(parse('\\mathrm{speed_{max}}')).toMatchInlineSnapshot(`speed_max`);
       // An expression, not an identifier:
       expect(parse('\\mathrm{speed}_{max}')).toMatchInlineSnapshot(
-        `["At", "speed", ["Multiply", "a", "m", "x"]]`
+        `["Subscript", "speed", ["InvisibleOperator", "m", "a", "x"]]`
       ); // @fixme
     });
 
@@ -312,21 +312,9 @@ describe('SYMBOLS', () => {
     test('Expressions that should not be interpreted as identifiers with modifiers', () => {
       expect(parse('x^2')).toMatchInlineSnapshot(`["Square", "x"]`);
       expect(parse('a^b')).toMatchInlineSnapshot(`["Power", "a", "b"]`);
-      expect(parse('x_{i+1}')).toMatchInlineSnapshot(`
-        [
-          "At",
-          [
-            "Error",
-            [
-              "ErrorCode",
-              "'incompatible-type'",
-              "'list | tuple | string'",
-              "'real'"
-            ]
-          ],
-          ["Add", 1, ["Complex", 0, 1]]
-        ]
-      `);
+      expect(parse('x_{i+1}')).toMatchInlineSnapshot(
+        `["Subscript", "x", ["Add", 1, "i"]]`
+      );
       expect(parse('\\vec{x}')).toMatchInlineSnapshot(`["OverVector", "x"]`);
       expect(parse('x^\\prime')).toMatchInlineSnapshot(`["Prime", "x"]`);
       expect(parse('\\vec{AB}')).toMatchInlineSnapshot(

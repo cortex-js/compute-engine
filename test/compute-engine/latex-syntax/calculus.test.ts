@@ -132,6 +132,24 @@ describe('INTEGRAL', () => {
       ]
     `)); // @fixme, should error
 
+  test('Non-standard typography (\\cdot and \\differentialD)', () =>
+    expect(parse('S_t=S_0+\\int_{t_i}^{t_e}\\left(G-F\\right)\\cdot dt'))
+      .toMatchInlineSnapshot(`
+      [
+        "Equal",
+        "S_t",
+        [
+          "Add",
+          "S_0",
+          [
+            "Integrate",
+            ["Subtract", "CatalanConstant", "F"],
+            ["Triple", "t", "t_i", "t_e"]
+          ]
+        ]
+      ]
+    `));
+
   test('with dx in addition', () =>
     expect(parse('\\int^\\infty_03x+kxdx = 2')).toMatchInlineSnapshot(`
       [

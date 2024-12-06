@@ -132,9 +132,13 @@ function parseIntegralBody(
   let fn = parser.parseExpression({
     minPrec: 266,
     condition: () => {
+      const start = parser.index;
+      // Skip \cdot (not correct, but used in the wild) and \, (thin space)
+      while (parser.match('\\cdot') || parser.match('\\,')) {}
       if (parser.matchAll(['\\mathrm', '<{>', 'd', '<}>'])) found = true;
       else if (parser.matchAll(['\\operatorname', '<{>', 'd', '<}>']))
         found = true;
+      if (!found) parser.index = start;
       return found;
     },
   });
@@ -145,7 +149,10 @@ function parseIntegralBody(
     fn = parser.parseExpression({
       minPrec: 266,
       condition: () => {
-        if (parser.match('d')) found = true;
+        // Skip \cdot (not correct, but used in the wild) and \, (thin space)
+        while (parser.match('\\cdot') || parser.match('\\,')) {}
+        // \differentialD is not correct typography, but used in the wild
+        if (parser.match('d') || parser.match('\\differentialD')) found = true;
         return found;
       },
     });

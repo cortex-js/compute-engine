@@ -105,14 +105,14 @@ describe('Nth PRIME NUMBER', () =>
                                                   "Floor",
                                                   [
                                                     "Divide",
-                                                    ["At", "v", 2],
-                                                    ["At", "v", 3]
+                                                    ["Subscript", "v", 2],
+                                                    ["Subscript", "v", 3]
                                                   ]
                                                 ],
                                                 [
                                                   "Divide",
-                                                  ["At", "v", 2],
-                                                  ["At", "v", 3]
+                                                  ["Subscript", "v", 2],
+                                                  ["Subscript", "v", 3]
                                                 ]
                                               ]
                                             ]
@@ -123,12 +123,20 @@ describe('Nth PRIME NUMBER', () =>
                                         "Triple",
                                         "Nothing",
                                         2,
-                                        ["Floor", ["Sqrt", ["At", "v", 2]]]
+                                        [
+                                          "Floor",
+                                          ["Sqrt", ["Subscript", "v", 2]]
+                                        ]
                                       ]
                                     ]
                                   ]
                                 ],
-                                ["Triple", "Nothing", 2, ["At", "v", 1]]
+                                [
+                                  "Triple",
+                                  "Nothing",
+                                  2,
+                                  ["Subscript", "v", 1]
+                                ]
                               ]
                             ]
                           ]
@@ -187,19 +195,8 @@ describe('Nth PRIME NUMBER', () =>
                                   "Abs",
                                   [
                                     "Subtract",
-                                    [
-                                      "Floor",
-                                      [
-                                        "Divide",
-                                        ["At", "v", 2],
-                                        ["At", "v", 3]
-                                      ]
-                                    ],
-                                    [
-                                      "Divide",
-                                      ["At", "v", 2],
-                                      ["At", "v", 3]
-                                    ]
+                                    ["Floor", ["Divide", "v_2", "v_3"]],
+                                    ["Divide", "v_2", "v_3"]
                                   ]
                                 ]
                               ]
@@ -208,10 +205,10 @@ describe('Nth PRIME NUMBER', () =>
                               "Triple",
                               "Nothing",
                               2,
-                              ["Floor", ["Sqrt", ["At", "v", 2]]]
+                              ["Floor", ["Sqrt", "v_2"]]
                             ]
                           ],
-                          ["Triple", "Nothing", 2, ["At", "v", 1]]
+                          ["Triple", "Nothing", 2, "v_1"]
                         ]
                       ]
                     ],
@@ -231,7 +228,7 @@ describe('Nth PRIME NUMBER', () =>
           "n"
         ]
       ]
-      eval-auto = (n) |-> {sum^(floor(1.5 * n * ln(n)))(floor(1 / (0^(n - sum^(At(v, 1))(prod^(floor(sqrt(At(v, 2))))(-0^(|-At(v, 2) / At(v, 3) + floor(At(v, 2) / At(v, 3))|) + 1))) + 1))) + 2}
+      eval-auto = (n) |-> {sum^(floor(1.5 * n * ln(n)))(floor(1 / (0^(n - sum^("v_1")(prod^(floor(sqrt("v_2")))(-0^(|-"v_2" / "v_3" + floor("v_2" / "v_3")|) + 1))) + 1))) + 2}
     `);
   }));
 

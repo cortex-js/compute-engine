@@ -6,6 +6,11 @@
   canonicalized some multiplication.
 - **#218** Improved performance of parsing invisible operators, including fixing
   some cases where the parsing was incorrect.
+- **#216** Correctly parse subscripts with a single character, for example
+  `x_1`.
+- **#216** Parse some non-standard integral signs, for example
+  `\int x \cdot \differentialD x` (both the `\cdot` and the `\differentialD` are
+  non-standard).
 - **#210** Numeric approximation of odd nth roots of negative numbers evaluate
   correctly.
 - Correctly serialize to ASCIIMath `Delimiter` expressions.

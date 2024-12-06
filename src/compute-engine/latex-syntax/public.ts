@@ -823,7 +823,7 @@ export interface Parser {
   matchChar(): string | null;
 
   /**
-   * Parse an expression in aLaTeX group enclosed in curly brackets `{}`.
+   * Parse an expression in a LaTeX group enclosed in curly brackets `{}`.
    * These are often used as arguments to LaTeX commands, for example
    * `\frac{1}{2}`.
    *

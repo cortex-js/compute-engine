@@ -223,30 +223,28 @@ check('Invalid postfix operator', () =>
 );
 
 check('Supsub syntax error', () =>
-  expect(engine.parse('x__+1')).toMatchInlineSnapshot(
-    `["At", "x", ["Add", "_", 1]]`
-  )
+  expect(engine.parse('x__+1')).toMatchInlineSnapshot(`["Add", "x__", 1]`)
 );
 
 check('Supsub syntax error', () =>
   expect(engine.parse('\\sqrt{x__}+1')).toMatchInlineSnapshot(
-    `["Add", ["Sqrt", ["At", "x", "_"]], 1]`
+    `["Add", ["Sqrt", "x__"], 1]`
   )
 );
 
 check('Supsub syntax error', () =>
   expect(engine.parse('x_')).toMatchInlineSnapshot(
-    `["Error", "'missing'", ["LatexString", "'_'"]]`
+    `["Subscript", "x", ["Error", "'missing'"]]`
   )
 );
 
 check('Supsub syntax error', () =>
   expect(engine.parse('x_{a')).toMatchInlineSnapshot(`
     [
-      "At",
+      "Subscript",
       "x",
       [
-        "Tuple",
+        "InvisibleOperator",
         "a",
         ["Error", "'expected-closing-delimiter'", ["LatexString", "'{a'"]]
       ]
@@ -375,25 +373,10 @@ check('Invalid delimiter', () =>
 );
 
 check('Double superscript: threaded', () =>
-  expect(engine.parse('x^1^2').canonical).toMatchInlineSnapshot(`
-    [
-      "Power",
-      [
-        "Error",
-        [
-          "ErrorCode",
-          "'incompatible-type'",
-          "'number'",
-          "'list | tuple | string'"
-        ]
-      ],
-      [
-        "Error",
-        ["ErrorCode", "'incompatible-type'", "'number'", "'list<number>'"]
-      ]
-    ]
-  `)
-); // @fixme
+  expect(engine.parse('x^1^2').canonical).toMatchInlineSnapshot(
+    `["Power", "x", ["List", 1, 2]]`
+  )
+);
 
 // check('Invalid double subscript', () =>
 //   expect(engine.parse('x_1_2')).toMatchInlineSnapshot(
@@ -460,7 +443,7 @@ check('Syntax error: \\1', () =>
 );
 
 check('Syntax error: ##', () =>
-  expect(engine.parse('x##')).toMatchInlineSnapshot(`["Pair", "x", "##"]`)
+  expect(engine.parse('x##')).toMatchInlineSnapshot(`["Multiply", "##", "x"]`)
 );
 
 check('Syntax error: &', () =>

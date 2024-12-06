@@ -143,19 +143,8 @@ describe('PARSING numbers', () => {
                                   "Abs",
                                   [
                                     "Subtract",
-                                    [
-                                      "Floor",
-                                      [
-                                        "Divide",
-                                        ["At", "v", 2],
-                                        ["At", "v", 3]
-                                      ]
-                                    ],
-                                    [
-                                      "Divide",
-                                      ["At", "v", 2],
-                                      ["At", "v", 3]
-                                    ]
+                                    ["Floor", ["Divide", "v_2", "v_3"]],
+                                    ["Divide", "v_2", "v_3"]
                                   ]
                                 ]
                               ]
@@ -164,10 +153,10 @@ describe('PARSING numbers', () => {
                               "Triple",
                               "Nothing",
                               2,
-                              ["Floor", ["Sqrt", ["At", "v", 2]]]
+                              ["Floor", ["Sqrt", "v_2"]]
                             ]
                           ],
-                          ["Triple", "Nothing", 2, ["At", "v", 1]]
+                          ["Triple", "Nothing", 2, "v_1"]
                         ]
                       ]
                     ],
