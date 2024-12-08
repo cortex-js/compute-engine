@@ -8,7 +8,11 @@ import {
   CanonicalOptions,
 } from './public';
 
-import { Expression, MathJsonIdentifier } from '../../math-json/types';
+import {
+  Expression,
+  ExpressionObject,
+  MathJsonIdentifier,
+} from '../../math-json/types';
 import { machineValue, missingIfEmpty } from '../../math-json/utils';
 import {
   isValidIdentifier,
@@ -384,16 +388,20 @@ export function box(
   // Box a MathJSON object literal
   //
   if (typeof expr === 'object') {
+    const metadata: Metadata = {
+      latex: (expr as ExpressionObject).latex,
+      wikidata: (expr as ExpressionObject).wikidata,
+    };
     if ('fn' in expr) {
       const [fnName, ...ops] = expr.fn;
       return canonicalForm(
-        boxFunction(ce, fnName, ops, { canonical, structural }),
+        boxFunction(ce, fnName, ops, { canonical, structural, metadata }),
         options.canonical!
       );
     }
-    if ('str' in expr) return new BoxedString(ce, expr.str);
-    if ('sym' in expr) return ce.symbol(expr.sym, { canonical });
-    if ('num' in expr) return ce.number(expr, { canonical });
+    if ('str' in expr) return new BoxedString(ce, expr.str, metadata);
+    if ('sym' in expr) return ce.symbol(expr.sym, { canonical, metadata });
+    if ('num' in expr) return ce.number(expr, { canonical, metadata });
 
     throw new Error(`Unexpected MathJSON object: ${JSON.stringify(expr)}`);
   }

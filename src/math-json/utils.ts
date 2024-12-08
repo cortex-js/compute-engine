@@ -1,5 +1,6 @@
 import type {
   Expression,
+  ExpressionObject,
   MathJsonFunction,
   MathJsonIdentifier,
   MathJsonNumber,
@@ -39,6 +40,15 @@ export function isFunctionObject(
   expr: Expression | null
 ): expr is MathJsonFunction {
   return expr !== null && typeof expr === 'object' && 'fn' in expr;
+}
+
+export function isExpressionObject(
+  expr: Expression | null
+): expr is ExpressionObject {
+  const isObj = expr !== null && typeof expr === 'object';
+  return (
+    isObj && ('fn' in expr || 'num' in expr || 'sym' in expr || 'str' in expr)
+  );
 }
 
 /**  If expr is a string literal, return it.
