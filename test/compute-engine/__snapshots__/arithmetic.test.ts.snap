@@ -287,7 +287,7 @@ N-mach    = 2.23606797749979
 
 exports[`EXACT EVALUATION Sqrt: Exact rational 1`] = `
 box       = ["Sqrt", ["Divide", 5, 7]]
-canonical = ["Multiply", ["Rational", 1, 7], ["Sqrt", 35]]
+canonical = ["Divide", ["Sqrt", 35], 7]
 eval-auto = sqrt(35)/7
 eval-mach = sqrt(35)/7
 N-auto    = 0.845154254728516577511
@@ -1127,7 +1127,7 @@ N-mach    = 2x
 
 exports[`SQRT √(5/7) 1`] = `
 box       = ["Sqrt", ["Rational", 5, 7]]
-canonical = ["Multiply", ["Rational", 1, 7], ["Sqrt", 35]]
+canonical = ["Divide", ["Sqrt", 35], 7]
 eval-auto = sqrt(35)/7
 eval-mach = sqrt(35)/7
 N-auto    = 0.845154254728516577511
