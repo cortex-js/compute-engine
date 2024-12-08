@@ -2,6 +2,8 @@
 
 ### Issues Resolved
 
+- **#211** More consistent canonicalization and serialization of exact numeric
+  values of the form `(a√b)/c`.
 - **#219** The `invisibleOperator` canonicalization previously also
   canonicalized some multiplication.
 - **#218** Improved performance of parsing invisible operators, including fixing
