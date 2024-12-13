@@ -2275,7 +2275,7 @@ export interface IComputeEngine extends IBigNum {
   _fn(
     name: string,
     ops: ReadonlyArray<BoxedExpression>,
-    options?: Metadata & { canonical?: boolean }
+    options?: { canonical?: boolean; metadata?: Metadata }
   ): BoxedExpression;
 
   parse(

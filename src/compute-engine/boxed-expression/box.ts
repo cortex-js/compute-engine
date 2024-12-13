@@ -172,7 +172,7 @@ export function boxFunction(
     return ce._fn(
       name,
       ops.map((x) => ce.box(x, { canonical: false })),
-      options.metadata
+      { metadata: options.metadata }
     );
   }
 
@@ -495,7 +495,7 @@ function makeCanonicalFunction(
     return ce._fn(
       name,
       validateArguments(ce, xs, def.signature, def.lazy, def.threadable) ?? xs,
-      metadata
+      { metadata }
     );
   }
 
@@ -542,7 +542,7 @@ function makeCanonicalFunction(
 
   // If we have some adjusted arguments, the arguments did not
   // match the parameters of the signature. We're done.
-  if (adjustedArgs) return ce._fn(name, adjustedArgs, metadata);
+  if (adjustedArgs) return ce._fn(name, adjustedArgs, { metadata });
 
   //
   // 4/ Apply `idempotent` and `involution`
@@ -552,14 +552,14 @@ function makeCanonicalFunction(
     if (def.involution) return args[0].op1;
 
     // f(f(x)) -> f(x)
-    if (def.idempotent) return ce._fn(name, xs[0].ops!, metadata);
+    if (def.idempotent) return ce._fn(name, xs[0].ops!, { metadata });
   }
 
   //
   // 5/ Sort the operands
   //
 
-  return ce._fn(name, sortOperands(name, args), metadata);
+  return ce._fn(name, sortOperands(name, args), { metadata });
 }
 
 function makeNumericFunction(
@@ -595,7 +595,7 @@ function makeNumericFunction(
 
   // If some of the arguments are not valid, we're done
   // (note: the result is canonical, but not valid)
-  if (!ops.every((x) => x.isValid)) return ce._fn(name, ops, metadata);
+  if (!ops.every((x) => x.isValid)) return ce._fn(name, ops, { metadata });
 
   //
   // Short path for some functions
@@ -620,10 +620,10 @@ function makeNumericFunction(
       // Ln(1) -> 0, Log(1) -> 0
       if (ops[0].is(1)) return ce.Zero;
       // Ln(a) -> Ln(a), Log(a) -> Log(a)
-      if (ops.length === 1) return ce._fn(name, ops, metadata);
+      if (ops.length === 1) return ce._fn(name, ops, { metadata });
     }
     // Ln(a,b) -> Log(a, b)
-    return ce._fn('Log', ops, metadata);
+    return ce._fn('Log', ops, { metadata });
   }
 
   return null;
