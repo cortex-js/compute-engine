@@ -566,59 +566,51 @@ function serializeJsonNumber(
       if (value.isNegativeOne) return -1;
     }
 
-    // We have an exact numeric value, possibly with an imaginary part
+    // We have an exact numeric value
     if (value instanceof ExactNumericValue) {
-      // Calculate the real part
+      // Exact numeric value never have an imaginary part.
+      console.assert(value.im === 0);
 
-      let rational: Expression;
+      // Note: implement same logic as in ExactNumericValue.toJSON()
 
-      if (isInteger(value.rational)) {
-        rational = serializeJsonNumber(ce, value.rational[0], options);
-      } else {
-        rational = [
+      const rationalExpr = (r: Rational) => {
+        if (isInteger(r))
+          return serializeJsonNumber(ce, value.rational[0], options);
+        return [
           'Rational',
           serializeJsonNumber(ce, value.rational[0], options),
           serializeJsonNumber(ce, value.rational[1], options),
-        ];
-      }
+        ] as Expression;
+      };
 
-      if (value.radical === 1) {
-        // No radical
-        if (value.im === 0) return rational;
+      if (value.radical === 1) return rationalExpr(value.rational);
+      // Only have a radical
+      if (isOne(value.rational)) return ['Sqrt', value.radical];
+      if (isNegativeOne(value.rational))
+        return ['Negate', ['Sqrt', value.radical]];
 
-        if (typeof rational === 'number')
-          return ['Complex', rational, value.im];
-        return ['Add', rational, ['Complex', 0, value.im]];
-      }
+      // Have both a radical and a rational
 
-      // If rational was 0, radical would be 1, and we would have returned
-      // a number already
-      console.assert(rational !== 0);
-
-      if (isOne(value.rational)) {
-        if (value.im === 0) return ['Sqrt', value.radical];
-
-        return ['Add', ['Sqrt', value.radical], ['Complex', 0, value.im]];
-      }
-
-      if (isNegativeOne(value.rational)) {
-        if (value.im === 0) return ['Negate', ['Sqrt', value.radical]];
-
+      if (value.rational[0] == 1)
         return [
-          'Add',
-          ['Negate', ['Sqrt', value.radical]],
-          ['Complex', 0, value.im],
+          'Divide',
+          ['Sqrt', value.radical],
+          serializeJsonNumber(ce, value.rational[1], options),
         ];
-      }
-
-      // There is a radical part
-      if (value.im === 0)
-        return ['Multiply', rational, ['Sqrt', value.radical]];
+      if (value.rational[0] == -1)
+        return [
+          'Negate',
+          [
+            'Divide',
+            ['Sqrt', value.radical],
+            serializeJsonNumber(ce, value.rational[1], options),
+          ],
+        ];
 
       return [
-        'Add',
-        ['Multiply', rational, ['Sqrt', value.radical]],
-        ['Complex', 0, value.im],
+        'Multiply',
+        rationalExpr(value.rational),
+        ['Sqrt', value.radical],
       ];
     }
 

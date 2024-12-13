@@ -73,11 +73,11 @@ export const LOGIC_LIBRARY: IdentifierDefinitions = {
     signature: '(boolean, boolean) -> boolean',
     evaluate: evaluateImplies,
   },
-  Exists: { signature: 'function', hold: true },
-  NotExists: { signature: 'function', hold: true },
-  ExistsUnique: { signature: 'function', hold: true },
-  ForAll: { signature: 'function', hold: true },
-  NotForAll: { signature: 'function', hold: true },
+  Exists: { signature: 'function', lazy: true },
+  NotExists: { signature: 'function', lazy: true },
+  ExistsUnique: { signature: 'function', lazy: true },
+  ForAll: { signature: 'function', lazy: true },
+  NotForAll: { signature: 'function', lazy: true },
 
   KroneckerDelta: {
     description: 'Return 1 if the arguments are equal, 0 otherwise',

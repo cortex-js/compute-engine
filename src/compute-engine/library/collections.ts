@@ -20,6 +20,7 @@ import { isSubtype } from '../../common/type/subtype';
 import { Type } from '../../common/type/types';
 import { collectionElementType, widen } from '../../common/type/utils';
 import { interval } from '../numerics/interval';
+import { typeToString } from '../../common/type/serialize';
 
 // From NumPy:
 export const DEFAULT_LINSPACE_COUNT = 50;
@@ -92,8 +93,8 @@ export const COLLECTIONS_LIBRARY: IdentifierDefinitions = {
     collection: {
       ...defaultCollectionHandlers(),
       // A set is not indexable
-      at: (_expr, _index) => undefined,
-      indexOf: (_expr, _target) => undefined,
+      at: undefined,
+      indexOf: undefined,
     },
   } as FunctionDefinition,
 
@@ -105,7 +106,7 @@ export const COLLECTIONS_LIBRARY: IdentifierDefinitions = {
       parseType(
         `tuple<${Object.entries(keyValues(ops))
           .map(([k, v]) =>
-            k ? `${k}: ${v.type.toString()}` : v.type.toString()
+            k ? `${k}: ${typeToString(v.type)}` : typeToString(v.type)
           )
           .join(', ')}>`
       ),
@@ -250,7 +251,7 @@ export const COLLECTIONS_LIBRARY: IdentifierDefinitions = {
     description:
       'A set of real numbers between two endpoints. The endpoints may or may not be included.',
     complexity: 8200,
-    hold: true,
+    lazy: true,
     signature: '(expression, expression) -> set<real>',
     eq: (a: BoxedExpression, b: BoxedExpression) => {
       const intervalA = interval(a);
@@ -474,7 +475,7 @@ export const COLLECTIONS_LIBRARY: IdentifierDefinitions = {
       'If the index is a list, each element of the list is used as an index and the result if a list of the elements.',
     ],
     complexity: 8200,
-    signature: '(value: list|tuple|string, index: number | string) -> any',
+    signature: '(value: list|tuple|string, index: number | string) -> unknown',
 
     evaluate: (ops, { engine: ce }) => {
       // @todo: the implementation does not match the description. Need to think this through...
@@ -643,7 +644,7 @@ export const COLLECTIONS_LIBRARY: IdentifierDefinitions = {
   Ordering: {
     complexity: 8200,
 
-    hold: true,
+    lazy: true,
     signature: '(value: collection, f: function?) -> list<integer>',
     evaluate: (_ops) => {
       // @todo
@@ -654,7 +655,7 @@ export const COLLECTIONS_LIBRARY: IdentifierDefinitions = {
   Sort: {
     complexity: 8200,
 
-    hold: true,
+    lazy: true,
     signature: '(value: collection, f: function?) -> collection',
     type: (ops) => ops[0].type,
     evaluate: (_ops) => {
@@ -680,7 +681,7 @@ export const COLLECTIONS_LIBRARY: IdentifierDefinitions = {
     // @todo: do a lazy version of this (implemented as a collection handler)
     complexity: 8200,
 
-    hold: true,
+    lazy: true,
     signature: '(collection, function) -> collection',
     // @todo: resultType
 
@@ -716,7 +717,7 @@ export const COLLECTIONS_LIBRARY: IdentifierDefinitions = {
 
     complexity: 8200,
 
-    hold: true,
+    lazy: true,
     signature: '(collection, function) -> collection',
     type: (ops) => ops[0].type,
     evaluate: (ops, { engine: ce }) => {
@@ -757,7 +758,7 @@ export const COLLECTIONS_LIBRARY: IdentifierDefinitions = {
     complexity: 8200,
     // @todo: do a lazy version of this (implemented as a collection handler)
 
-    hold: true,
+    lazy: true,
     signature: '(collection, function, initial:value) -> collection',
     // @todo: resultType
     evaluate: (_ops) => {
@@ -770,7 +771,7 @@ export const COLLECTIONS_LIBRARY: IdentifierDefinitions = {
     // @todo: do a lazy version of this (implemented as a collection handler)
     complexity: 8200,
 
-    hold: true,
+    lazy: true,
     signature: '(function, integer, integer?) -> collection',
     evaluate: (ops, { engine: ce }) => {
       // treated as multidimensional indexes
@@ -1239,15 +1240,18 @@ function tally(
  * is returned. Otherwise, the result of the function is used as the new accumulator.
  * If the iteration completes, the final accumulator is returned.
  */
-export function reduceCollection<T>(
+export function* reduceCollection<T>(
   collection: BoxedExpression,
   fn: (acc: T, next: BoxedExpression) => T | null,
   initial: T
-): T | undefined {
+): Generator<T | undefined> {
   let acc = initial;
+  let counter = 0;
   for (const x of each(collection)) {
     const result = fn(acc, x);
     if (result === null) return undefined;
+    counter += 1;
+    if (counter % 1000 === 0) yield acc;
     acc = result;
   }
   return acc;

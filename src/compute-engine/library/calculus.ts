@@ -97,10 +97,12 @@ volumes
     Derivative: {
       threadable: false,
 
-      hold: true,
+      lazy: true,
       signature: '(any, order:number?) -> function',
+      canonical: (ops, { engine }) => {
+        return engine._fn('Derivative', [ops[0].canonical, ...ops.slice(1)]);
+      },
       evaluate: (ops) => {
-        // Is it a function name, i.e. ["Derivative", "Sin"]?
         const op = ops[0].evaluate();
         const degree = Math.floor(ops[1]?.N().re);
         return derivative(op, isNaN(degree) ? 1 : degree);
@@ -121,7 +123,7 @@ volumes
     D: {
       threadable: false,
 
-      hold: true,
+      lazy: true,
       signature:
         '(expression, variable:symbol, variables:...symbol) -> expression',
       canonical: (ops, { engine }) => {
@@ -173,14 +175,14 @@ volumes
     // Evaluate a numerical approximation of a derivative at point x
     ND: {
       threadable: false,
-      hold: true,
-      signature: '(function, point:number) -> number',
-      evaluate: (ops, { engine }) => {
-        const x = ops[1]?.canonical.re;
-        if (isNaN(x)) return undefined;
+      lazy: true,
+      signature: '(function, at:number) -> number',
+      evaluate: ([body, x], { engine }) => {
+        const xValue = x?.canonical.N().re;
+        if (isNaN(xValue)) return undefined;
 
-        const f = applicableN1(engine.box(ops[0]));
-        return engine.number(centeredDiff8thOrder(f, x));
+        const f = applicableN1(engine.box(body));
+        return engine.number(centeredDiff8thOrder(f, xValue));
       },
     },
 
@@ -188,7 +190,7 @@ volumes
       wikidata: 'Q80091',
       threadable: false,
 
-      hold: true,
+      lazy: true,
       signature: '(expression, range:(tuple|symbol|nothing)) -> number',
       canonical: (ops, { engine }) => {
         const ce = engine;
@@ -220,10 +222,12 @@ volumes
         if (!index.symbol) index = ce.typeError('symbol', index.type, index);
 
         // The range bounds, if present, should be numbers
-        if (lower && lower.symbol !== 'Nothing')
-          lower = checkType(ce, lower, 'number');
-        if (upper && upper.symbol !== 'Nothing')
-          upper = checkType(ce, upper, 'number');
+        if (lower && lower.symbol !== 'Nothing') {
+          if (lower.type !== 'unknown') lower = checkType(ce, lower, 'number');
+        }
+        if (upper && upper.symbol !== 'Nothing') {
+          if (upper.type !== 'unknown') upper = checkType(ce, upper, 'number');
+        }
         if (lower && upper) range = ce.tuple(index, lower, upper);
         else if (upper) range = ce.tuple(index, ce.NegativeInfinity, upper);
         else if (lower) range = ce.tuple(index, lower);
@@ -246,7 +250,7 @@ volumes
 
     NIntegrate: {
       threadable: false,
-      hold: true,
+      lazy: true,
       signature: '(expression, lower:number, upper:number) -> number',
       evaluate: (ops, { engine }) => {
         // Switch to machine precision
@@ -275,7 +279,7 @@ volumes
       complexity: 5000,
       threadable: false,
 
-      hold: true,
+      lazy: true,
       signature: '(expression, point:number, direction:number?) -> number',
       evaluate: (ops, { engine: ce }) => {
         const [f, x, dir] = ops;
@@ -299,7 +303,7 @@ volumes
       complexity: 5000,
       threadable: false,
 
-      hold: true,
+      lazy: true,
       signature: '(expression, point:number, direction:number?) -> number',
       evaluate: ([f, x, dir], { engine }) => {
         const target = x.N().re;

@@ -127,102 +127,36 @@ describe('PARSING numbers', () => {
                       "Power",
                       0,
                       [
-                        "Add",
+                        "Subtract",
                         "n",
                         [
-                          "Negate",
+                          "Sum",
                           [
-                            "Sum",
+                            "Product",
                             [
-                              "Product",
+                              "Subtract",
+                              1,
                               [
-                                "Add",
-                                1,
+                                "Power",
+                                0,
                                 [
-                                  "Negate",
+                                  "Abs",
                                   [
-                                    "Power",
-                                    0,
-                                    [
-                                      "Abs",
-                                      [
-                                        "Add",
-                                        [
-                                          "Floor",
-                                          [
-                                            "Divide",
-                                            [
-                                              "Error",
-                                              [
-                                                "ErrorCode",
-                                                "'incompatible-type'",
-                                                "'number'",
-                                                "'any'"
-                                              ]
-                                            ],
-                                            [
-                                              "Error",
-                                              [
-                                                "ErrorCode",
-                                                "'incompatible-type'",
-                                                "'number'",
-                                                "'any'"
-                                              ]
-                                            ]
-                                          ]
-                                        ],
-                                        [
-                                          "Negate",
-                                          [
-                                            "Divide",
-                                            [
-                                              "Error",
-                                              [
-                                                "ErrorCode",
-                                                "'incompatible-type'",
-                                                "'number'",
-                                                "'any'"
-                                              ]
-                                            ],
-                                            [
-                                              "Error",
-                                              [
-                                                "ErrorCode",
-                                                "'incompatible-type'",
-                                                "'number'",
-                                                "'any'"
-                                              ]
-                                            ]
-                                          ]
-                                        ]
-                                      ]
-                                    ]
-                                  ]
-                                ]
-                              ],
-                              [
-                                "Tuple",
-                                "Nothing",
-                                2,
-                                [
-                                  "Floor",
-                                  [
-                                    "Sqrt",
-                                    [
-                                      "Error",
-                                      [
-                                        "ErrorCode",
-                                        "'incompatible-type'",
-                                        "'number'",
-                                        "'any'"
-                                      ]
-                                    ]
+                                    "Subtract",
+                                    ["Floor", ["Divide", "v_2", "v_3"]],
+                                    ["Divide", "v_2", "v_3"]
                                   ]
                                 ]
                               ]
                             ],
-                            ["Triple", "Nothing", 2, ["At", "v", 1]]
-                          ]
+                            [
+                              "Triple",
+                              "Nothing",
+                              2,
+                              ["Floor", ["Sqrt", "v_2"]]
+                            ]
+                          ],
+                          ["Triple", "Nothing", 2, "v_1"]
                         ]
                       ]
                     ],

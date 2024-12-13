@@ -63,7 +63,7 @@ export const SIMPLIFY_RULES: Rule[] = [
   //
   (x): RuleStep | undefined => {
     if (x.operator !== 'Add') return undefined;
-    // The Add function has a 'hold-all' property, so we have to simplify
+    // The Add function has a 'lazy' property, so we have to simplify
     // the operands first
     return {
       value: add(...x.ops!.map((x) => x.canonical.simplify())),
@@ -82,7 +82,7 @@ export const SIMPLIFY_RULES: Rule[] = [
   (x): RuleStep | undefined => {
     if (x.operator !== 'Multiply') return undefined;
 
-    // The Multiply function has a 'hold-all' property, so we have to simplify
+    // The Multiply function has a 'lazy' property, so we have to simplify
     // the operands first
     return {
       value: mul(...x.ops!.map((x) => x.canonical.simplify())),

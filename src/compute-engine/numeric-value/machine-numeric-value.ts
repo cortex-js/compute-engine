@@ -1,7 +1,7 @@
 import Decimal from 'decimal.js';
 import { NumericValue, NumericValueData } from './public';
 import type { Expression } from '../../math-json/types';
-import { MACHINE_TOLERANCE, SmallInteger } from '../numerics/numeric';
+import { DEFAULT_TOLERANCE, SmallInteger } from '../numerics/numeric';
 import { numberToString } from '../numerics/strings';
 import { numberToExpression } from '../numerics/expression';
 import { NumericType } from '../../common/type/types';
@@ -516,8 +516,11 @@ export class MachineNumericValue extends NumericValue {
   }
 
   eq(other: number | NumericValue): boolean {
+    if (this.isNaN) return false;
     if (typeof other === 'number')
       return this.im === 0 && chop(this.decimal - other) === 0;
+    if (other.isNaN) return false;
+    if (!Number.isFinite(this.im)) return !Number.isFinite(other.im);
     return (
       chop(this.decimal - other.re) === 0 && chop(this.im - other.im) === 0
     );
@@ -549,6 +552,6 @@ export class MachineNumericValue extends NumericValue {
 }
 
 function chop(n: number): number {
-  if (Math.abs(n) <= MACHINE_TOLERANCE) return 0;
+  if (Math.abs(n) <= DEFAULT_TOLERANCE) return 0;
   return n;
 }

@@ -7,14 +7,14 @@ export const POLYNOMIALS_LIBRARY: IdentifierDefinitions[] = [
   {
     Expand: {
       description: 'Expand out products and positive integer powers',
-      hold: true,
+      lazy: true,
       signature: '(value)-> value',
       evaluate: ([x]) => expand(x.canonical) ?? x,
     },
     ExpandAll: {
       description:
         'Recursively expand out products and positive integer powers',
-      hold: true,
+      lazy: true,
       signature: '(value)-> value',
       evaluate: ([x]) => expandAll(x) ?? x,
     },
@@ -22,19 +22,19 @@ export const POLYNOMIALS_LIBRARY: IdentifierDefinitions[] = [
       // @todo: extend to factor over the integers: return a ['Multiply', ['Power', a, b], ...]
       description:
         'Factors an algebraic expression into a product of irreducible factors',
-      hold: true,
+      lazy: true,
       signature: '(value)-> value',
       evaluate: ([x]) => factor(x.canonical),
     },
     Together: {
       description: 'Combine rational expressions into a single fraction',
-      hold: true,
+      lazy: true,
       signature: '(value)-> value',
       evaluate: ([x]) => together(x),
     },
     Distribute: {
       description: 'Distribute multiplication over addition',
-      hold: true,
+      lazy: true,
       signature: '(value)-> value',
       evaluate: ([x]) => (!x ? x : distribute(x)),
     },

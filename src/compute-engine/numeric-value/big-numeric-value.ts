@@ -3,7 +3,7 @@ import { NumericValue, NumericValueData } from './public';
 import { ExactNumericValue } from './exact-numeric-value';
 import { isInMachineRange } from '../numerics/numeric-bignum';
 import { Expression } from '../../math-json/types';
-import { MACHINE_TOLERANCE, SmallInteger } from '../numerics/numeric';
+import { DEFAULT_TOLERANCE, SmallInteger } from '../numerics/numeric';
 import { numberToExpression } from '../numerics/expression';
 import { numberToString } from '../numerics/strings';
 import { bigint } from '../numerics/bigint';
@@ -558,8 +558,11 @@ export class BigNumericValue extends NumericValue {
   }
 
   eq(other: number | NumericValue): boolean {
+    if (this.isNaN) return false;
     if (typeof other === 'number')
       return this.im === 0 && this.decimal.eq(other);
+    if (other.isNaN) return false;
+    if (!Number.isFinite(this.im)) return !Number.isFinite(other.im);
     return (
       this.decimal.eq(other.bignumRe ?? other.re) &&
       chop(this.im - other.im) === 0
@@ -616,7 +619,7 @@ function decimalToString(num: Decimal): string {
 }
 
 function chop(n: number): number {
-  if (Math.abs(n) <= MACHINE_TOLERANCE) return 0;
+  if (Math.abs(n) <= DEFAULT_TOLERANCE) return 0;
 
   return n;
 }

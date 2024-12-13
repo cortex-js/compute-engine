@@ -8,6 +8,9 @@ function evaluate(expr: Expression) {
 engine.assign('f1', ['Function', ['Add', 'q', 1], 'q']);
 engine.assign('f2', ['Add', '_', 1]);
 
+engine.assign('h', ['Hold', ['Add', 2, 6]]);
+engine.assign('u', ['Unevaluated', ['Add', 2, 6]]);
+
 // Arguments are not checked by the Compute Engine
 // so we must use caution when accessing them
 
@@ -98,9 +101,38 @@ describe('Apply', () => {
     expect(
       evaluate(['Apply', ['Function', 'x', 'x'], 'x'])
     ).toMatchInlineSnapshot(`x`));
-
   test('Function and Hold', () =>
     expect(
       evaluate(['Apply', ['Function', 'x', 'x'], ['Hold', 'x']])
     ).toMatchInlineSnapshot(`["Hold", "x"]`));
+});
+
+describe('Argument Evaluation', () => {
+  test('Hold expressions are not evaluated', () =>
+    expect(evaluate(['Add', ['Hold', ['Add', 2, 5]], 7])).toMatchInlineSnapshot(
+      `["Add", 7, ["Hold", ["Add", 2, 5]]]`
+    ));
+
+  test('Hold variables are not evaluated', () =>
+    expect(evaluate(['Add', 'h', 7])).toMatchInlineSnapshot(
+      `["Add", 7, ["Hold", ["Add", 2, 6]]]`
+    ));
+
+  test('To evaluate a Hold expressions it must be wrapped in ReleaseHold', () =>
+    expect(
+      evaluate(['Add', ['ReleaseHold', ['Hold', ['Add', 2, 5]]], 7])
+    ).toMatchInlineSnapshot(`14`));
+
+  test('To evaluate a Hold variable it must be wrapped in ReleaseHold', () =>
+    expect(evaluate(['Add', ['ReleaseHold', 'h'], 7])).toMatchInlineSnapshot(
+      `["Add", 7, ["Hold", ["Add", 2, 6]]]`
+    ));
+
+  test('An Unevaluated expression is unwrapped when evaluated', () =>
+    expect(
+      evaluate(['Add', ['Unevaluated', ['Add', 5, 11]], 7])
+    ).toMatchInlineSnapshot(`23`));
+
+  test('An Unevaluated variable is unwrapped when evaluated', () =>
+    expect(evaluate(['Add', 'u', 7])).toMatchInlineSnapshot(`15`));
 });

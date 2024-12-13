@@ -80,6 +80,8 @@ exports[`ADD Add 8+\\sqrt{3} 1`] = `["Add", 8, ["Sqrt", 3]]`;
 
 exports[`ADD Add 8.1+\\sqrt{3} 1`] = `9.832050807568877293527446341505872366942805253810380628055806979451933016908800037081146186757248576`;
 
+exports[`ADD Add a real to a complex variable 1`] = `["Complex", 5, 1]`;
+
 exports[`CONSTANTS CatalanConstant 1`] = `
 box       = CatalanConstant
 eval-auto = "CatalanConstant"
@@ -285,7 +287,7 @@ N-mach    = 2.23606797749979
 
 exports[`EXACT EVALUATION Sqrt: Exact rational 1`] = `
 box       = ["Sqrt", ["Divide", 5, 7]]
-canonical = ["Multiply", ["Rational", 1, 7], ["Sqrt", 35]]
+canonical = ["Divide", ["Sqrt", 35], 7]
 eval-auto = sqrt(35)/7
 eval-mach = sqrt(35)/7
 N-auto    = 0.845154254728516577511
@@ -739,16 +741,16 @@ simplify  = -50.6
 
 exports[`MULTIPLY Multiply: All exact 1`] = `
 box       = [
-  "InvisibleOperator",
-  2,
-  ["Multiply", ["Divide", 5, 7], ["Divide", 7, 9]]
+  "Multiply",
+  ["InvisibleOperator", 2, ["Divide", 5, 7]],
+  ["Divide", 7, 9]
 ]
-canonical = ["Multiply", 2, ["Rational", 5, 7], ["Rational", 7, 9]]
-simplify  = 10/9
-eval-auto = 10/9
-eval-mach = 10/9
-N-auto    = 1.11111111111111111111
-N-mach    = 1.11111111111111
+canonical = ["Multiply", ["Rational", 7, 9], ["Add", 2, ["Rational", 5, 7]]]
+simplify  = 19/9
+eval-auto = 19/9
+eval-mach = 19/9
+N-auto    = 2.11111111111111111111
+N-mach    = 2.11111111111111
 `;
 
 exports[`MULTIPLY Multiply: All exact with symbol 1`] = `
@@ -985,11 +987,11 @@ exports[`POWER INVALID Power 1`] = `["Power", 2.5, ["Error", "'missing'"]]`;
 
 exports[`POWER INVALID Power 2`] = `["Power", 2.5, -1.1, ["Error", "'unexpected-argument'", "'18.4'"]]`;
 
-exports[`POWER Power 1`] = `["Power", 2.5, 1.1]`;
+exports[`POWER Power with negative exponent 1`] = `["Divide", 1, ["Power", 2.5, 3]]`;
 
-exports[`POWER Power 2`] = `["Divide", 1, ["Power", 2.5, 3]]`;
+exports[`POWER Power with negative real exponent 1`] = `["Power", 2.5, -3.2]`;
 
-exports[`POWER Power 3`] = `["Power", 2.5, -3.2]`;
+exports[`POWER Power with positive real exponent 1`] = `["Power", 2.5, 1.1]`;
 
 exports[`RATIONAL Bignum rational 1`] = `
 box       = [
@@ -1088,6 +1090,10 @@ exports[`ROOT Root 1234567890987654321 1`] = `["Root", {num: "123456789098765432
 
 exports[`ROOT Root 1234567890987654321.123456789 1`] = `["Root", "1234567890987654321.123456789", 3]`;
 
+exports[`ROOT Root of negative number with even exponent 1`] = `["Complex", 0, 1.4142135623730951]`;
+
+exports[`ROOT Root of negative number with odd exponent 1`] = `-1.259921049894873164767210607278228350570251464701507980081975112155299676513959483729396562436255094`;
+
 exports[`SQRT INVALID  Sqrt 1`] = `
 invalid   =[
   "Sqrt",
@@ -1121,7 +1127,7 @@ N-mach    = 2x
 
 exports[`SQRT √(5/7) 1`] = `
 box       = ["Sqrt", ["Rational", 5, 7]]
-canonical = ["Multiply", ["Rational", 1, 7], ["Sqrt", 35]]
+canonical = ["Divide", ["Sqrt", 35], 7]
 eval-auto = sqrt(35)/7
 eval-mach = sqrt(35)/7
 N-auto    = 0.845154254728516577511

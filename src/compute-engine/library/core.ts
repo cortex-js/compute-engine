@@ -25,6 +25,8 @@ import {
 } from '../../common/type/utils';
 import { parseType } from '../../common/type/parse';
 import { isIndexableCollection } from '../collection-utils';
+import { typeToString } from '../../common/type/serialize';
+import { canonicalMultiply } from '../boxed-expression/arithmetic-multiply';
 
 //   // := assign 80 // @todo
 // compose (compose(f, g) -> a new function such that compose(f, g)(x) -> f(g(x))
@@ -121,16 +123,23 @@ export const CORE_LIBRARY: IdentifierDefinitions[] = [
      */
     InvisibleOperator: {
       complexity: 9000,
-      hold: true,
+      lazy: true,
       signature: '...any -> any',
       // Note: since the canonical form will be a different operator,
       // no need to calculate the result type
-      canonical: canonicalInvisibleOperator,
+      canonical: (x, { engine }) => {
+        // The `canonicalInvisibleOperator` function will return only canonicalization for the invisible operator, not for any operators it may turn into.
+        // This is necessary for `1(2+3)` to be correctly cannonicalized to `2+3`.
+        const y = canonicalInvisibleOperator(x, { engine });
+        if (!y) return engine.Nothing;
+        if (y.operator === 'Multiply') return canonicalMultiply(engine, y.ops!);
+        return y;
+      },
     },
 
     /** See above for a theory of operations */
     Sequence: {
-      hold: true,
+      lazy: true,
       signature: '...any -> any',
       type: (args) => {
         if (args.length === 0) return 'nothing';
@@ -151,7 +160,7 @@ export const CORE_LIBRARY: IdentifierDefinitions[] = [
       // Use to represent groups of expressions.
       // Named after https://en.wikipedia.org/wiki/Delimiter
       complexity: 9000,
-      hold: true,
+      lazy: true,
       signature: '(any, string?) -> any',
       type: (args) => {
         if (args.length === 0) return 'nothing';
@@ -229,15 +238,16 @@ export const CORE_LIBRARY: IdentifierDefinitions[] = [
        * of the error. If the error occur while parsing a LaTeX string,
        * for example, the argument will be a `Latex` expression.
        */
-      hold: true,
+      lazy: true,
       complexity: 500,
       signature: '((string|expression), expression?) -> nothing',
       // To make a canonical expression, don't canonicalize the args
       canonical: (args, { engine: ce }) => ce._fn('Error', args),
     },
+
     ErrorCode: {
       complexity: 500,
-      hold: true,
+      lazy: true,
       signature: '(string, ...any) -> error',
       canonical: (args, { engine: ce }) => {
         const code = checkType(ce, args[0], 'string').string;
@@ -250,8 +260,8 @@ export const CORE_LIBRARY: IdentifierDefinitions[] = [
 
     Unevaluated: {
       description: 'Prevent an expression from being evaluated',
-      // Unlike Hold, the argume is canonicalized
-      hold: false,
+      // Unlike Hold, the argument is canonicalized
+      lazy: false,
       signature: 'any -> any',
       type: ([x]) => x.type,
       evaluate: ([x]) => x,
@@ -259,21 +269,38 @@ export const CORE_LIBRARY: IdentifierDefinitions[] = [
 
     Hold: {
       description:
-        'Hold an expression, preventing it from being canonicalized or evaluated',
-      hold: true,
-      signature: 'any -> any',
+        'Hold an expression, preventing it from being canonicalized or evaluated until `ReleaseHold` is applied to it',
+      lazy: true,
+      signature: 'any -> unknown',
       type: ([x]) => {
         if (x.symbol) return 'symbol';
         if (x.string) return 'string';
         if (x.isNumberLiteral) return x.type;
-        if (x.ops) return functionSignature(x.type) ?? 'function';
-        return 'expression';
+        if (x.ops) return functionResult(x.type) ?? 'unknown';
+        return 'unknown';
+      },
+      // When comparing hold expressions, consider them equal if their
+      // arguments are structurally equal.
+      eq: (a, b) => {
+        if (b.operator === 'Hold') b = b.ops![0];
+        return a.ops![0].isSame(b);
       },
       // By definition, the argument of the canonical expression of
       // `Hold` are not canonicalized.
       canonical: (args, { engine }) =>
         args.length !== 1 ? null : engine.hold(args[0]),
       evaluate: ([x], { engine }) => engine.hold(x),
+    },
+
+    ReleaseHold: {
+      description: 'Release an expression held by `Hold`',
+      lazy: true,
+      signature: 'any -> any',
+      type: ([x]) => x.type,
+      evaluate: ([x], options) => {
+        if (x.operator === 'Hold') return x.ops![0].evaluate(options);
+        return x.evaluate(options);
+      },
     },
 
     HorizontalSpacing: {
@@ -299,7 +326,7 @@ export const CORE_LIBRARY: IdentifierDefinitions[] = [
     //
     About: {
       description: 'Return information about an expression',
-      hold: true,
+      lazy: true,
       signature: 'any -> string',
       evaluate: ([x], { engine: ce }) => {
         const s = [x.toString()];
@@ -322,9 +349,9 @@ export const CORE_LIBRARY: IdentifierDefinitions[] = [
             s.push('symbol');
             s.push(`value: ${x.evaluate().toString()}`);
           }
-        } else if (x.isNumberLiteral) s.push(x.type.toString());
+        } else if (x.isNumberLiteral) s.push(typeToString(x.type));
         else if (x.ops) {
-          s.push(x.type.toString());
+          s.push(typeToString(x.type));
           s.push(x.isCanonical ? 'canonical' : 'non-canonical');
         } else s.push("Unknown expression's type");
         return ce.string(s.join('\n'));
@@ -333,7 +360,7 @@ export const CORE_LIBRARY: IdentifierDefinitions[] = [
 
     Head: {
       description: 'Return the head of an expression, the name of the operator',
-      hold: true,
+      lazy: true,
       signature: 'any -> symbol',
       canonical: (args, { engine: ce }) => {
         // **IMPORTANT** Head should work on non-canonical expressions
@@ -349,7 +376,7 @@ export const CORE_LIBRARY: IdentifierDefinitions[] = [
     Tail: {
       description:
         'Return the tail of an expression, the operands of the expression',
-      hold: true,
+      lazy: true,
       signature: 'any -> collection',
       canonical: (args, { engine: ce }) => {
         if (args.length !== 1) return null;
@@ -383,7 +410,7 @@ export const CORE_LIBRARY: IdentifierDefinitions[] = [
 
     Assign: {
       description: 'Assign a value to a symbol',
-      hold: true,
+      lazy: true,
       pure: false,
       signature: '(symbol, any) -> any',
       type: ([_symbol, value]) => value.type,
@@ -406,14 +433,14 @@ export const CORE_LIBRARY: IdentifierDefinitions[] = [
 
     Assume: {
       description: 'Assume a type for a symbol',
-      hold: true,
+      lazy: true,
       pure: false,
       signature: 'any -> symbol',
       evaluate: (ops, { engine: ce }) => ce.symbol(ce.assume(ops[0])),
     },
 
     Declare: {
-      hold: true,
+      lazy: true,
       pure: false,
       signature: 'symbol -> any',
       type: ([_symbol, value]) => value.type,
@@ -440,13 +467,13 @@ export const CORE_LIBRARY: IdentifierDefinitions[] = [
 
     /** Return the type of an expression */
     Type: {
-      hold: true,
+      lazy: true,
       signature: 'any -> string',
-      evaluate: ([x], { engine: ce }) => ce.string(x.type.toString()),
+      evaluate: ([x], { engine: ce }) => ce.string(typeToString(x.type)),
     },
 
     Evaluate: {
-      hold: true,
+      lazy: true,
       signature: 'any -> any',
       type: ([x]) => x.type,
       canonical: (ops, { engine: ce }) =>
@@ -456,7 +483,7 @@ export const CORE_LIBRARY: IdentifierDefinitions[] = [
 
     Function: {
       complexity: 9876,
-      hold: true,
+      lazy: true,
       signature: '(any, ...symbol) -> any',
       type: ([body]) => body.type,
       canonical: (args, { engine: ce }) => {
@@ -487,7 +514,7 @@ export const CORE_LIBRARY: IdentifierDefinitions[] = [
     },
 
     Simplify: {
-      hold: true,
+      lazy: true,
       signature: 'any -> expression',
 
       canonical: (ops, { engine: ce }) =>
@@ -502,7 +529,7 @@ export const CORE_LIBRARY: IdentifierDefinitions[] = [
         'Sorting arguments of commutative functions is a weak form of canonicalization that can be useful in some cases, for example to accept "x+1" and "1+x" while rejecting "x+1" and "2x-x+1"',
       ],
       complexity: 8200,
-      hold: true,
+      lazy: true,
       signature: '(any, ...symbol) -> any',
       // Do not canonicalize the arguments, we want to preserve
       // the original form before modifying it
@@ -519,7 +546,7 @@ export const CORE_LIBRARY: IdentifierDefinitions[] = [
 
     N: {
       description: 'Numerically evaluate an expression',
-      hold: true,
+      lazy: true,
       signature: 'any -> any',
       type: ([x]) => x.type,
       canonical: (ops, { engine: ce }) => {
@@ -584,7 +611,7 @@ export const CORE_LIBRARY: IdentifierDefinitions[] = [
 
     // @todo: need review
     Signature: {
-      hold: true,
+      lazy: true,
       signature: 'symbol -> string | nothing',
       evaluate: ([x], { engine: ce }) => {
         if (!x.functionDefinition) return ce.Nothing;
@@ -614,7 +641,7 @@ export const CORE_LIBRARY: IdentifierDefinitions[] = [
       // The last (subscript) argument can include a delimiter that
       // needs to be interpreted. Without the hold, it would get
       // removed during canonicalization.
-      hold: true,
+      lazy: true,
 
       signature: '(collection|string, any) -> any',
       type: ([op1, op2]) => {
@@ -668,7 +695,7 @@ export const CORE_LIBRARY: IdentifierDefinitions[] = [
       description:
         'Construct a new symbol with a name formed by concatenating the arguments',
       threadable: true,
-      hold: true,
+      lazy: true,
       signature: '...any -> any',
       type: (args) => {
         if (args.length === 0) return 'nothing';

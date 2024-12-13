@@ -2,6 +2,8 @@ import { check, checkJson, engine } from '../utils';
 
 const ce = engine;
 
+ce.assign('z', ['Complex', 0, 1]);
+
 describe('CONSTANTS', () => {
   test(`ExponentialE`, () =>
     expect(checkJson(`ExponentialE`)).toMatchSnapshot());
@@ -153,6 +155,10 @@ describe('ADD', () => {
         '\\frac{2}{3}+\\frac{12345678912345678}{987654321987654321}+\\frac{987654321987654321}{12345678912345678}'
       )
     ).toMatchSnapshot());
+
+  test('Add a real to a complex variable', () => {
+    expect(ce.parse('z+5').evaluate()).toMatchSnapshot();
+  });
 });
 
 describe('SUBTRACT', () => {
@@ -368,14 +374,15 @@ describe('DIVIDE', () => {
 });
 
 describe('POWER', () => {
+  test(`Power with positive real exponent`, () =>
+    expect(ce.box(['Power', 2.5, 1.1]).evaluate()).toMatchSnapshot());
+  test(`Power with negative exponent`, () =>
+    expect(ce.box(['Power', 2.5, -3]).evaluate()).toMatchSnapshot());
+  test(`Power with negative real exponent`, () =>
+    expect(ce.box(['Power', 2.5, -3.2]).evaluate()).toMatchSnapshot());
+
   test(`INVALID Power`, () =>
     expect(ce.box(['Power', 2.5]).evaluate()).toMatchSnapshot());
-  test(`Power`, () =>
-    expect(ce.box(['Power', 2.5, 1.1]).evaluate()).toMatchSnapshot());
-  test(`Power`, () =>
-    expect(ce.box(['Power', 2.5, -3]).evaluate()).toMatchSnapshot());
-  test(`Power`, () =>
-    expect(ce.box(['Power', 2.5, -3.2]).evaluate()).toMatchSnapshot());
   test(`INVALID Power`, () =>
     expect(ce.box(['Power', 2.5, -1.1, 18.4]).evaluate()).toMatchSnapshot());
 });
@@ -398,6 +405,12 @@ describe('ROOT', () => {
     expect(
       ce.box(['Root', { num: '1234567890987654321.123456789' }, 3]).evaluate()
     ).toMatchSnapshot());
+
+  test(`Root of negative number with even exponent`, () =>
+    expect(ce.box(['Root', -2, 2]).N()).toMatchSnapshot());
+
+  test(`Root of negative number with odd exponent`, () =>
+    expect(ce.box(['Root', -2, 3]).N()).toMatchSnapshot());
 });
 
 describe('INVALID ROOT', () => {

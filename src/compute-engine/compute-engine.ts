@@ -18,8 +18,8 @@ import { assume } from './assume';
 
 import {
   DEFAULT_PRECISION,
+  DEFAULT_TOLERANCE,
   MACHINE_PRECISION,
-  MACHINE_TOLERANCE,
   MAX_BIGINT_DIGITS,
   SMALL_INTEGER,
 } from './numerics/numeric';
@@ -118,6 +118,7 @@ import { parseType } from '../common/type/parse';
 import { hidePrivateProperties } from '../common/utils';
 import { OneOf } from '../common/one-of';
 import { BigNum } from './numerics/bignum';
+import { typeToString } from '../common/type/serialize';
 
 /**
  *
@@ -438,10 +439,6 @@ export class ComputeEngine implements IComputeEngine {
     //
     this.context = {
       assumptions: new ExpressionMap(),
-      timeLimit: 2.0, // execution time limit: 2.0 seconds
-      memoryLimit: 1.0, // memory limit: 1.0 megabyte
-      recursionLimit: 1024,
-      iterationLimit: Number.POSITIVE_INFINITY,
     } as RuntimeScope;
 
     for (const table of ComputeEngine.getStandardLibrary('domains'))
@@ -663,33 +660,44 @@ export class ComputeEngine implements IComputeEngine {
     this.reset();
   }
 
-  /** @experimental */
   get timeLimit(): number {
-    let scope = this.context;
-    while (scope) {
-      if (scope.timeLimit !== undefined) return scope.timeLimit;
-      scope = scope.parentScope ?? null;
-    }
-    return 2.0; // 2s
+    return this._timeLimit;
   }
-  /** @experimental */
+
+  set timeLimit(t: number) {
+    if (t <= 0) t = Number.POSITIVE_INFINITY;
+    this._timeLimit = t;
+  }
+
+  private _timeLimit: number = 2000;
+
+  /** The time after which the time limit has been exceeded */
+  _deadline: number | undefined = undefined;
+
+  get _timeRemaining(): number {
+    if (this.deadline === undefined) return Number.POSITIVE_INFINITY;
+    return this.deadline - Date.now();
+  }
+
   get iterationLimit(): number {
-    let scope = this.context;
-    while (scope) {
-      if (scope.iterationLimit !== undefined) return scope.iterationLimit;
-      scope = scope.parentScope ?? null;
-    }
-    return 1024;
+    return this._iterationLimit;
   }
-  /** @experimental */
+  set iterationLimit(t: number) {
+    if (t <= 0) t = Number.POSITIVE_INFINITY;
+    this._iterationLimit = t;
+  }
+
+  private _iterationLimit: number = 1024;
+
   get recursionLimit(): number {
-    let scope = this.context;
-    while (scope) {
-      if (scope.recursionLimit !== undefined) return scope.recursionLimit;
-      scope = scope.parentScope ?? null;
-    }
-    return 1024;
+    return this._recursionLimit;
   }
+  set recursionLimit(t: number) {
+    if (t <= 0) t = Number.POSITIVE_INFINITY;
+    this._recursionLimit = t;
+  }
+
+  private _recursionLimit: number = 1024;
 
   get tolerance(): number {
     return this._tolerance;
@@ -700,12 +708,9 @@ export class ComputeEngine implements IComputeEngine {
    * equal to `a`.
    */
   set tolerance(val: number | 'auto') {
-    if (val === 'auto') {
-      if (this._precision <= MACHINE_PRECISION) val = MACHINE_TOLERANCE;
-      else val = -1;
-    }
+    if (val === 'auto') val = DEFAULT_TOLERANCE;
 
-    if (!Number.isFinite(val) || val <= 0)
+    if (!Number.isFinite(val) || val < 0)
       val = Math.pow(10, -this._precision + 2);
 
     this._tolerance = val;
@@ -1126,10 +1131,6 @@ export class ComputeEngine implements IComputeEngine {
   pushScope(scope?: Partial<Scope>): IComputeEngine {
     if (this.context === null) throw Error('No parent scope available');
     this.context = {
-      timeLimit: this.context.timeLimit,
-      memoryLimit: this.context.memoryLimit,
-      recursionLimit: this.context.recursionLimit,
-      iterationLimit: this.context.iterationLimit,
       ...(scope ?? {}),
       parentScope: this.context,
       // We always copy the current assumptions in the new scope.
@@ -1159,9 +1160,8 @@ export class ComputeEngine implements IComputeEngine {
   /** Set the current scope, return the previous scope. */
   swapScope(scope: RuntimeScope | null): RuntimeScope | null {
     const oldScope = this.context;
-    this.context = scope;
-    if (!this.context) debugger;
-    console.assert(this.context);
+    if (scope) this.context = scope;
+
     return oldScope;
   }
 
@@ -1602,6 +1602,11 @@ export class ComputeEngine implements IComputeEngine {
       // as a side effect of canonicalization.
       let expr = this.box(value, { canonical: false });
 
+      if (expr.operator === 'Hold') {
+        this.defineSymbol(id, { value: expr, type: 'unknown' });
+        return this;
+      }
+
       if (expr.operator === 'Function') {
         // If no arguments are specified in the signature, add the 'args'
         expr = this.box([
@@ -1670,7 +1675,7 @@ export class ComputeEngine implements IComputeEngine {
       | BoxedExpression
       | ((
           ops: ReadonlyArray<BoxedExpression>,
-          options: EvaluateOptions & { engine: IComputeEngine }
+          options: Partial<EvaluateOptions> & { engine?: IComputeEngine }
         ) => BoxedExpression | undefined)
   ): void {
     const symDef = this.lookupSymbol(id);
@@ -1799,16 +1804,16 @@ export class ComputeEngine implements IComputeEngine {
   ): BoxedExpression {
     if (actual)
       return this.error(
-        ['incompatible-type', expected.toString(), actual.toString()],
+        ['incompatible-type', typeToString(expected), typeToString(actual)],
         where
       );
-    return this.error(['incompatible-type', expected.toString()], where);
+    return this.error(['incompatible-type', typeToString(expected)], where);
   }
 
   /**
-   * Add a`["Hold"]` wrapper to `expr.
+   * Add a `["Hold"]` wrapper to `expr`.
    */
-  hold(expr: BoxedExpression): BoxedExpression {
+  hold(expr: SemiBoxedExpression): BoxedExpression {
     return this._fn('Hold', [this.box(expr, { canonical: false })]);
   }
 
@@ -2209,7 +2214,7 @@ function isFunctionValue(
   value: AssignValue
 ): value is (
   args: ReadonlyArray<BoxedExpression>,
-  options: EvaluateOptions & { engine: IComputeEngine }
+  options: Partial<EvaluateOptions> & { engine?: IComputeEngine }
 ) => BoxedExpression {
   if (typeof value === 'function') return true;
   if (value instanceof _BoxedExpression && isSubtype(value.type, 'function'))

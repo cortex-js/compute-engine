@@ -566,7 +566,14 @@ export const DEFINITIONS_CORE: LatexDictionary = [
   {
     kind: 'postfix',
     latexTrigger: ['_'],
-    parse: parseAt(),
+    parse: (parser, lhs) => {
+      // @fixme: should check that the lhs is a collection. If not a collection,
+      // return null (or interpret as an identifier).
+
+      // Parse either a group or a single symbol
+      const rhs = parser.parseGroup() ?? parser.parseToken();
+      return ['Subscript', lhs, rhs];
+    },
   },
   {
     name: 'List',
@@ -1396,6 +1403,8 @@ function parseCasesEnvironment(parser: Parser): Expression | null {
 }
 
 function parseAt(...close: string[]): (parser, lhs) => Expression | null {
+  // @todo: if there are no `close` symbols, parse as a subscript: either
+  // a single symbol, or a group.
   return (parser: Parser, lhs: Expression): Expression | null => {
     // If the lhs is a symbol or a List literal...
     if (!symbol(lhs) && operator(lhs) !== 'List') return null;

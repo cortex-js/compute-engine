@@ -43,7 +43,7 @@ export abstract class AbstractTensor<DT extends keyof DataTypeMap>
    * Return a tuple of tensors that have the same dtype.
    * If necessary, one of the two input tensors is upcast.
    *
-   * The shape of the tensors is reshape to a compatible
+   * The shape of the tensors is reshaped to a compatible
    * shape. If the shape is not compatible, `undefined` is returned.
    *
    * @param lhs

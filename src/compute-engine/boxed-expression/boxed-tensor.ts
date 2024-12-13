@@ -322,7 +322,7 @@ export class BoxedTensor extends _BoxedExpression {
     return this.structural.match(pattern, options);
   }
 
-  evaluate(options?: EvaluateOptions): BoxedExpression {
+  evaluate(options?: Partial<EvaluateOptions>): BoxedExpression {
     if (this._tensor) return this;
     return this.structural.evaluate(options);
   }

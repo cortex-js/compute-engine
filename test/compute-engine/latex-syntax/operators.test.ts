@@ -16,7 +16,6 @@ describe('OPERATOR oprel', () => {
   test('x+y=1+1', () =>
     expect(check('x+y=1+1')).toMatchInlineSnapshot(`
       box       = ["Equal", ["Add", "x", "y"], ["Add", 1, 1]]
-      canonical = ["Equal", ["Add", 1, 1], ["Add", "x", "y"]]
       simplify  = x + y === 2
       eval-auto = "False"
     `));
@@ -183,7 +182,7 @@ describe('OPERATOR prefix', () => {
     `));
   test('-ab // Negate', () =>
     expect(check('-ab')).toMatchInlineSnapshot(`
-      box       = ["Negate", ["InvisibleOperator", "a", "b"]]
+      box       = ["InvisibleOperator", ["Negate", "a"], "b"]
       canonical = ["Negate", ["Multiply", "a", "b"]]
     `));
   test('-(ab) // Negate', () =>

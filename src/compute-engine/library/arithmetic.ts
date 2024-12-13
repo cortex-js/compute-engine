@@ -25,11 +25,11 @@ import {
   gammaln as lngammaComplex,
 } from '../numerics/numeric-complex';
 import {
-  factorial as bigFactorial,
   factorial2 as bigFactorial2,
   gcd as bigGcd,
   lcm as bigLcm,
 } from '../numerics/numeric-bignum';
+import { factorial as bigFactorial } from '../numerics/numeric-bigint';
 import {
   gamma,
   gammaln,
@@ -61,6 +61,8 @@ import {
 import { parseType } from '../../common/type/parse';
 import { isSubtype } from '../../common/type/subtype';
 import { range, rangeLast } from './collections';
+import { typeToString } from '../../common/type/serialize';
+import { run, runAsync } from '../../common/interruptible';
 
 // When processing an arithmetic expression, the following are the core
 // canonical arithmetic operations to account for:
@@ -175,7 +177,7 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
       idempotent: true,
       complexity: 1300,
 
-      hold: true,
+      lazy: true,
 
       signature: '(number, ...number) -> number',
       type: addType,
@@ -184,9 +186,9 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
         if (ops.some((x) => x.isReal === false || x.isNaN)) return 'unsigned';
         if (ops.every((x) => x.is(0))) return 'zero';
         if (ops.every((x) => x.isNonNegative))
-          return ops.every((x) => x.isPositive) ? 'positive' : 'non-negative';
+          return ops.some((x) => x.isPositive) ? 'positive' : 'non-negative';
         if (ops.every((x) => x.isNonPositive))
-          return ops.every((x) => x.isNegative) ? 'negative' : 'non-positive';
+          return ops.some((x) => x.isNegative) ? 'negative' : 'non-positive';
         if (ops.every((x) => x.isReal)) return 'real';
         return undefined;
       },
@@ -210,7 +212,8 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
       sgn: ([x]) => {
         if (x.isLessEqual(-1)) return 'negative';
         if (x.isPositive) return 'positive';
-        if ((x.isNegative && x.isGreater(-1)) || x.is(0)) return 'zero';
+        if (x.isNonNegative) return 'non-negative';
+        if (x.isNonPositive && x.isGreater(-1)) return 'zero';
         if (x.isNonPositive) return 'non-positive';
         if (x.isReal == false && x.isNumberLiteral)
           return x.im! > 0 || x.im! <= -1 ? 'unsigned' : numberSgn(x.re); //.re and .im should be more general.
@@ -274,8 +277,8 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
         if (d.is(0) === false && n.is(0)) return 'zero';
         if (d.isPositive) return n.sgn;
         if (d.isNegative) return oppositeSgn(n.sgn);
-        if (n.is(0) && d.isFinite) return 'zero';
-        if (!n.is(0) && !d.is(0)) return 'real-not-zero';
+        if (n.is(0) || (n.isFinite && d.isInfinity)) return 'zero';
+        if (!n.is(0) && !d.is(0)) return 'not-zero';
         return undefined;
       },
 
@@ -328,14 +331,15 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
     },
 
     Factorial: {
-      description: 'Factorial Function',
+      description:
+        'Factorial function: the product of all positive integers less than or equal to n',
       wikidata: 'Q120976',
       threadable: true,
       complexity: 9000,
 
       signature: 'integer -> integer',
 
-      //Assumes that the inside of the factorial is an integer
+      // Assumes that the inside of the factorial is an integer
       sgn: ([x]) =>
         x.isNonNegative
           ? 'positive'
@@ -344,6 +348,7 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
             : undefined,
       canonical: (args, { engine }) => {
         const x = args[0];
+        // We assume that -3! is -(3!) = -6
         if (x.isNumberLiteral && x.isNegative)
           return engine._fn('Factorial', [x.neg()]).neg();
         return engine._fn('Factorial', [x]);
@@ -353,17 +358,41 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
 
         // Is the argument a complex number?
         if (x.im !== 0 && x.im !== undefined)
-          return ce.number(gammaComplex(ce.complex(x.im, x.re).add(1)));
+          return ce.number(gammaComplex(ce.complex(x.re, x.im).add(1)));
 
         // The argument is real...
-        const n = x.re;
-        if (isNaN(n)) return undefined;
+        if (!x.isFinite) return undefined;
 
         // Not a positive integer, use the Gamma function
-        if (n < 0 || !Number.isInteger(n)) return ce.number(gamma(1 + n));
+        if (x.isNegative) return ce.number(gamma(1 + x.re));
 
-        if (!bignumPreferred(ce)) return ce.number(factorial(n));
-        return ce.number(bigFactorial(ce, ce.bignum(n)));
+        return ce.number(
+          run(
+            bigFactorial(BigInt((x.bignumRe ?? x.re).toFixed())),
+            ce._timeRemaining
+          )
+        );
+      },
+      evaluateAsync: async ([x], { signal }) => {
+        const ce = x.engine;
+
+        // Is the argument a complex number?
+        if (x.im !== 0 && x.im !== undefined)
+          return ce.number(gammaComplex(ce.complex(x.re, x.im).add(1)));
+
+        // The argument is real...
+        if (!x.isFinite) return undefined;
+
+        // Not a positive integer, use the Gamma function
+        if (x.isNegative) return ce.number(gamma(1 + x.re));
+
+        return ce.number(
+          await runAsync(
+            bigFactorial(BigInt((x.bignumRe ?? x.re).toFixed())),
+            (ce._deadline ?? Infinity) - Date.now(),
+            signal
+          )
+        );
       },
     },
 
@@ -404,7 +433,7 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
       sgn: ([x]) => {
         if (x.isNegative) return 'negative';
         if (x.isGreaterEqual(1)) return 'positive';
-        if ((x.isPositive && x.isLess(1)) || x.is(0)) return 'zero';
+        if (x.isNonNegative && x.isLess(1)) return 'zero';
         if (x.isNonNegative) return 'non-negative';
         if (x.isReal == false && x.isNumberLiteral)
           return x.im! < 0 || x.im! >= 1 ? 'unsigned' : numberSgn(x.re); //.re and .im should be more general.
@@ -599,7 +628,7 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
       complexity: 2100,
       threadable: true,
 
-      hold: true,
+      lazy: true,
       signature: '(number, ...number) -> number',
       type: (ops) => {
         if (ops.length === 0) return 'finite_integer'; // = 1
@@ -641,7 +670,6 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
           });
           return sumNeg % 2 === 0 ? 'non-positive' : 'non-negative';
         }
-        if (ops.every((x) => !x.is(0) && x.isReal)) return 'real-not-zero';
         if (ops.every((x) => !x.is(0))) return 'not-zero';
         if (ops.every((x) => x.isReal)) return 'real';
         return undefined;
@@ -678,7 +706,7 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
       involution: true,
       signature: 'value -> tuple',
       type: ([x]) =>
-        parseType(`tuple(${x.type.toString()}, ${x.type.toString()})`),
+        parseType(`tuple(${typeToString(x.type)}, ${typeToString(x.type)})`),
       evaluate: ([x], { engine }) => engine.tuple(x.abs(), x.abs().neg()),
     },
 
@@ -1219,7 +1247,7 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
       complexity: 1200,
       threadable: true,
 
-      hold: true,
+      lazy: true,
       signature: '(number) -> number | nothing',
       canonical: (ops, { engine }) => {
         // **IMPORTANT**: We want Numerator to work on non-canonical
@@ -1247,7 +1275,7 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
       complexity: 1200,
       threadable: true,
 
-      hold: true,
+      lazy: true,
       signature: '(number) -> number | nothing',
       canonical: (ops, { engine }) => {
         // **IMPORTANT**: We want Denominator to work on non-canonical
@@ -1277,7 +1305,7 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
       complexity: 1200,
       threadable: true,
 
-      hold: true,
+      lazy: true,
       signature: '(number) -> tuple<number, number> | nothing',
       canonical: (ops, { engine }) => {
         // **IMPORTANT**: We want NumeratorDenominator to work on non-canonical
@@ -1327,7 +1355,7 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
           return ops.some((x) => x.is(0)) ? 'zero' : 'non-positive';
         if (ops.some((x) => x.isNonNegative)) return 'non-negative';
         if (ops.every((x) => x.isNegative)) return 'negative';
-        if (ops.some((x) => !x.is(0))) return 'real-not-zero';
+        if (ops.some((x) => !x.is(0))) return 'not-zero';
         return undefined;
       },
       evaluate: (xs, { engine }) => evaluateMinMax(engine, xs, 'Max'),
@@ -1348,7 +1376,6 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
           return ops.some((x) => x.is(0)) ? 'zero' : 'non-negative';
         if (ops.some((x) => x.isNonPositive)) return 'non-positive';
         if (ops.every((x) => x.isPositive)) return 'positive';
-        if (ops.some((x) => !x.is(0))) return 'real-not-zero';
         return undefined;
       },
       evaluate: (xs, { engine }) => evaluateMinMax(engine, xs, 'Min'),
@@ -1381,62 +1408,14 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
       complexity: 1000,
       threadable: false,
 
-      hold: true,
+      lazy: true,
       signature:
         '(collection|function, ...(tuple<symbol>|tuple<symbol, integer>|tuple<symbol, integer, integer>)) -> number',
 
       // The 'body' and 'range' need to be interpreted by canonicalMultiplication(). Don't canonicalize them yet.
       canonical: ([body, ...indexes]) =>
         canonicalBigop('Product', body, indexes),
-      sgn: (ops) => {
-        // Check if the body has a determined sign (i.e. is always positive,
-        // negative or 0)
-        const s = ops[0]?.sgn;
-        if (s === undefined) return undefined;
-        if (['positive', 'zero'].includes(s)) return s;
-        const n = reduceBigOp(ops[0], ops.slice(1), (acc, x) => acc + 1, 0);
-        if (s === 'real-not-zero' || s === 'negative')
-          return n! % 2 === 0 ? 'positive' : s;
-        if (ops[0]?.type === 'imaginary')
-          return n! % 2 === 0 ? 'negative' : 'unsigned';
-        if (s === 'unsigned') return undefined;
 
-        // The sign could not be determined by just looking at the body.
-        // Look at each term
-        let hasZero = false;
-        let hasPossibleZero = false;
-        let hasPossibleInfinity = false;
-        let hasInfinity = false;
-        let sign: Sign | undefined = 'positive';
-        let isUndefined = false;
-
-        // Go over each term, and count the signs of the terms
-        const total = reduceBigOp(
-          ops[0],
-          ops.slice(1),
-          (acc, x) => {
-            if (x.isInfinity) {
-              hasInfinity = true;
-              hasPossibleInfinity = true;
-            } else if (x.isInfinity !== false) hasPossibleInfinity = true;
-            if (x.is(0)) {
-              hasZero = true;
-              hasPossibleZero = true;
-            }
-            if (x.is(0)) hasPossibleZero = true;
-            if (x.isNonPositive) sign = oppositeSgn(sign);
-            else if (x.isNonNegative !== true) isUndefined = true;
-            return acc + 1;
-          },
-          0
-        );
-        if (hasInfinity && hasZero) return 'unsigned';
-        if (isUndefined || (hasPossibleInfinity && hasPossibleZero))
-          return undefined;
-        if (hasPossibleZero)
-          return sign === 'positive' ? 'non-negative' : 'non-positive';
-        return sign;
-      },
       evaluate: (ops, options) => {
         const fn = (acc, x) => {
           x = x.evaluate(options);
@@ -1444,11 +1423,34 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
           return acc.mul(x.numericValue!);
         };
 
-        const result = reduceBigOp(
-          ops[0],
-          ops.slice(1),
-          fn,
-          options.engine._numericValue(1)
+        const result = run(
+          reduceBigOp(
+            ops[0],
+            ops.slice(1),
+            fn,
+            options.engine._numericValue(1)
+          ),
+          options.engine._timeRemaining
+        );
+        return options.engine.number(result ?? NaN);
+      },
+
+      evaluateAsync: async (ops, options) => {
+        const fn = (acc, x) => {
+          x = x.evaluate(options);
+          if (!x.isNumberLiteral) return null;
+          return acc.mul(x.numericValue!);
+        };
+
+        const result = await runAsync(
+          reduceBigOp(
+            ops[0],
+            ops.slice(1),
+            fn,
+            options.engine._numericValue(1)
+          ),
+          options.engine._timeRemaining,
+          options.signal
         );
         return options.engine.number(result ?? NaN);
       },
@@ -1460,60 +1462,43 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
       complexity: 1000,
       threadable: false,
 
-      hold: true,
+      lazy: true,
       signature:
         '(collection|function, ...(tuple<symbol>|tuple<symbol, integer>|tuple<symbol, integer, integer>)) -> number',
 
-      sgn: (ops) => {
-        // Check if the body has a determined sign (i.e. is always positive,
-        // negative or 0)
-        const s = ops[0]?.sgn;
-        if (s === undefined) return undefined;
-        if (['positive', 'negative', 'zero'].includes(s)) return s;
-
-        // The sign could not be determined by just looking at the body.
-        // Look at each term
-
-        const sgns: (string | undefined)[] = [];
-
-        // Go over each term, and count the signs of the terms
-        const total = reduceBigOp(
-          ops[0],
-          ops.slice(1),
-          (acc, x) => {
-            sgns.push(x.sgn);
-            return acc + 1;
-          },
-          0
-        );
-        if (sgns.some((x) => [undefined, 'unsigned'].includes(x)))
-          return undefined;
-        if (sgns.every((x) => x === 'zero')) return 'zero';
-        if (sgns.every((x) => x === 'positive' || x === 'non-negative'))
-          return sgns.some((x) => x === 'positive')
-            ? 'positive'
-            : 'non-negative';
-        if (sgns.every((x) => x === 'negative' || x === 'non-negative'))
-          return sgns.some((x) => x === 'negative')
-            ? 'negative'
-            : 'non-positive';
-        if (sgns.every((x) => x === 'real' || x === 'real-not-zero'))
-          return 'real';
-        return undefined;
-      },
       canonical: ([body, ...indexes]) => canonicalBigop('Sum', body, indexes),
       evaluate: (xs, { engine }) =>
         engine.number(
-          reduceBigOp(
-            xs[0],
-            xs.slice(1),
-            (acc, x) => {
-              x = x.evaluate();
-              if (!x.isNumberLiteral) return null;
-              return acc.add(x.numericValue!);
-            },
-            engine._numericValue(0)
-          ) ?? NaN
+          run(
+            reduceBigOp(
+              xs[0],
+              xs.slice(1),
+              (acc, x) => {
+                x = x.evaluate();
+                if (!x.isNumberLiteral) return null;
+                return acc.add(x.numericValue!);
+              },
+              engine._numericValue(0)
+            ) ?? NaN,
+            engine._timeRemaining
+          )
+        ),
+      evaluateAsync: async (xs, { engine, signal }) =>
+        engine.number(
+          await runAsync(
+            reduceBigOp(
+              xs[0],
+              xs.slice(1),
+              (acc, x) => {
+                x = x.evaluate();
+                if (!x.isNumberLiteral) return null;
+                return acc.add(x.numericValue!);
+              },
+              engine._numericValue(0)
+            ) ?? NaN,
+            engine._timeRemaining,
+            signal
+          )
         ),
     },
   },

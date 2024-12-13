@@ -121,7 +121,7 @@ describe('SUM parsing', () => {
     expect(ce.parse(`\\sum_{n,m} k_{n,m}`)).toMatchInlineSnapshot(`
       [
         "Sum",
-        ["At", "k", "n", ["Error", "'unexpected-argument'", "'m'"]],
+        ["Subscript", "k", ["Delimiter", ["Sequence", "n", "m"], "','"]],
         ["Single", "n"],
         ["Single", "m"]
       ]
@@ -130,7 +130,7 @@ describe('SUM parsing', () => {
 
   test('INVALID parsing of summation with element in', () => {
     expect(ce.parse(`\\sum_{n \\in \\N}K_n`)).toMatchInlineSnapshot(
-      `["Sum", ["At", "K", "n"]]`
+      `["Sum", "K_n"]`
     );
   });
 

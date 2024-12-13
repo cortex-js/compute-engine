@@ -188,6 +188,9 @@ export abstract class _BoxedExpression implements BoxedExpression {
       ) {
         defaultOptions.shorthands = ['function', 'symbol', 'string', 'number'];
       }
+      // if (options.shorthands?.includes('none')) defaultOptions.shorthands = [];
+      if (Array.isArray(options.shorthands))
+        defaultOptions.shorthands = options.shorthands;
       if (
         (typeof options.metadata === 'string' && options.metadata === 'all') ||
         options.metadata?.includes('all')
@@ -632,7 +635,7 @@ export abstract class _BoxedExpression implements BoxedExpression {
     return undefined;
   }
 
-  infer(t: Type): boolean {
+  infer(_t: Type): boolean {
     return false; // The inference was ignored if false
   }
 
@@ -688,6 +691,10 @@ export abstract class _BoxedExpression implements BoxedExpression {
 
   evaluate(_options?: Partial<EvaluateOptions>): BoxedExpression {
     return this.simplify();
+  }
+
+  evaluateAsync(_options?: Partial<EvaluateOptions>): Promise<BoxedExpression> {
+    return Promise.resolve(this.evaluate());
   }
 
   N(): BoxedExpression {
@@ -832,7 +839,7 @@ export function getSubexpressions(
 // function *after* the class definition
 
 import { serializeJson } from './serialize';
-import { Type } from '../../common/type/types';
+import type { Type } from '../../common/type/types';
 import { cmp, eq, same } from './compare';
 import { AbstractTensor } from '../tensor/tensors';
 import { expand } from './expand';

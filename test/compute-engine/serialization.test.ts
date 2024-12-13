@@ -131,24 +131,21 @@ describe('DEFAULT JSON SERIALIZATION', () => {
 });
 
 describe('CUSTOM JSON SERIALIZATION', () => {
-  const opts = {};
   // Nan, +Infinity, -Infinity are represented as symbols
   test(`Numeric symbols: Nan`, () =>
-    expect(ce.box({ num: 'NaN' }).toMathJson(opts)).toMatchInlineSnapshot(
-      `NaN`
-    ));
+    expect(ce.box({ num: 'NaN' }).toMathJson({})).toMatchInlineSnapshot(`NaN`));
   test(`Numeric symbols: +Infinity`, () =>
-    expect(ce.box({ num: '+infinity' }).toMathJson(opts)).toMatchInlineSnapshot(
+    expect(ce.box({ num: '+infinity' }).toMathJson({})).toMatchInlineSnapshot(
       `PositiveInfinity`
     ));
   test(`Numeric symbols: -Infinity`, () =>
-    expect(ce.box({ num: '-infinity' }).toMathJson(opts)).toMatchInlineSnapshot(
+    expect(ce.box({ num: '-infinity' }).toMathJson({})).toMatchInlineSnapshot(
       `NegativeInfinity`
     ));
 
   test(`No prettification`, () => {
     const expr = ce.parse('\\frac{\\sqrt{x^2-1}}{2}');
-    expect(expr.toMathJson(opts)).toMatchInlineSnapshot(`
+    expect(expr.toMathJson({ prettify: false })).toMatchInlineSnapshot(`
       [
         Multiply,
         [
@@ -159,27 +156,28 @@ describe('CUSTOM JSON SERIALIZATION', () => {
         [
           Sqrt,
           [
-            Subtract,
+            Add,
             [
-              Square,
+              Power,
               x,
+              2,
             ],
-            1,
+            -1,
           ],
         ],
       ]
     `);
   });
 
-  test(`Approximate numbers (precision)`, () => {
+  test(`Approximate numbers (precision), with custom precision`, () => {
     const expr = ce.parse('1.2345678912345678901234');
-    expect(expr.toMathJson(opts)).toMatchInlineSnapshot(
-      `1.2345678912345678901234`
+    expect(expr.toMathJson({ fractionalDigits: 6 })).toMatchInlineSnapshot(
+      `1.234568`
     );
   });
   test(`Approximate numbers (range to infinity)`, () => {
     const expr = ce.parse('1.23456789e400');
-    expect(expr.toMathJson(opts)).toMatchInlineSnapshot(`
+    expect(expr.toMathJson({})).toMatchInlineSnapshot(`
       {
         num: 123456789e+392,
       }
@@ -187,10 +185,73 @@ describe('CUSTOM JSON SERIALIZATION', () => {
   });
   test(`Approximate numbers (range to 0)`, () => {
     const expr = ce.parse('1.23456789e-400');
-    expect(expr.toMathJson(opts)).toMatchInlineSnapshot(`1.23456789e-400`);
+    expect(expr.toMathJson({})).toMatchInlineSnapshot(`1.23456789e-400`);
   });
+
   test(`Approximate numbers (repeating decimal)`, () => {
     const expr = ce.parse('1.(2345)');
-    expect(expr.toMathJson(opts)).toMatchInlineSnapshot(`1.(2345)`);
+    expect(expr.toMathJson({})).toMatchInlineSnapshot(`1.(2345)`);
+  });
+
+  // test(`Custom invisible multiply`, () => {
+  //   const expr = ce.parse('2x');
+  //   expect(expr.toMathJson(opts)).toMatchInlineSnapshot();
+  // });
+
+  test(`No shorthands`, () => {
+    const expr = ce.parse('2x+\\sin(x+1)');
+    expect(expr.toMathJson({ shorthands: [] })).toMatchInlineSnapshot(`
+      {
+        fn: [
+          Add,
+          {
+            fn: [
+              Multiply,
+              {
+                num: 2,
+              },
+              {
+                sym: x,
+              },
+            ],
+          },
+          {
+            fn: [
+              Sin,
+              {
+                fn: [
+                  Add,
+                  {
+                    sym: x,
+                  },
+                  {
+                    num: 1,
+                  },
+                ],
+              },
+            ],
+          },
+        ],
+      }
+    `);
+  });
+
+  test(`No Sqrt`, () => {
+    const expr = ce.parse('\\sqrt{x+1}');
+    expect(expr.toMathJson({ exclude: ['Sqrt'] })).toMatchInlineSnapshot(`
+      [
+        Power,
+        [
+          Add,
+          x,
+          1,
+        ],
+        [
+          Rational,
+          1,
+          2,
+        ],
+      ]
+    `);
   });
 });

@@ -138,6 +138,63 @@ describe('LATEX SERIALIZING', () => {
   });
 });
 
+describe('CUSTOM LATEX SERIALIZING', () => {
+  test('Prettify', () => {
+    const expr = ce.parse('\\frac{a}{b}\\frac{c}{d}');
+    expect(expr.toLatex({ prettify: true })).toMatchInlineSnapshot(
+      `\\frac{ac}{bd}`
+    );
+    expect(expr.toLatex({ prettify: false })).toMatchInlineSnapshot(
+      `\\frac{ac}{bd}`
+    );
+  }); // @fixme
+
+  test('Invisible Multiply', () => {
+    const expr = ce.parse('2x');
+    expect(
+      expr.toLatex({ invisibleMultiply: `#1 \\otimes #2` })
+    ).toMatchInlineSnapshot(`2\\otimes x`);
+    expect(
+      expr.toLatex({ invisibleMultiply: `\\otimes` })
+    ).toMatchInlineSnapshot(`2\\otimes x`);
+  });
+
+  test('Invisible Plus', () => {
+    const expr = ce.parse('2\\frac{1}{2}');
+    expect(
+      expr.toLatex({ invisiblePlus: `#1 \\oplus #2` })
+    ).toMatchInlineSnapshot(`2\\oplus\\frac{1}{2}`);
+    expect(expr.toLatex({ invisiblePlus: `\\oplus` })).toMatchInlineSnapshot(
+      `2\\oplus\\frac{1}{2}`
+    );
+  });
+
+  test('Custom Multiply', () => {
+    const expr = ce.box(3.123e-200);
+    expect(expr.toLatex({ exponentProduct: `\\otimes` })).toMatchInlineSnapshot(
+      `3\\,123\\otimes10^{-203}`
+    );
+
+    // Multiply of two numbers
+    expect(
+      ce.box(['Multiply', 5, 7]).toLatex({ multiply: `\\otimes` })
+    ).toMatchInlineSnapshot(`5\\otimes7`);
+
+    // Multiply of a number and a rational
+    expect(
+      ce
+        .box(['Multiply', 5, ['Rational', 3, 4]])
+        .toLatex({ multiply: `\\otimes` })
+    ).toMatchInlineSnapshot(`\\frac{5\\otimes3}{4}`);
+  });
+
+  test('Numbers', () => {
+    expect(
+      ce.box(1.2345678912345).toLatex({ fractionalDigits: 6 })
+    ).toMatchInlineSnapshot(`1.234\\,567\\ldots`);
+  });
+});
+
 describe('LATEX', () => {
   test('Valid LatexString', () => {
     expect(

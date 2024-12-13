@@ -11,39 +11,6 @@ export function lcm(a: BigNum, b: BigNum): BigNum {
   return a.mul(b).div(gcd(a, b));
 }
 
-export function factorial(ce: IBigNum, n: BigNum): BigNum {
-  if (!n.isInteger() || n.isNegative()) return ce._BIGNUM_NAN;
-  if (n.lessThan(10))
-    return ce.bignum(
-      [1, 1, 2, 6, 24, 120, 720, 5040, 40320, 362880, 3628800][n.toNumber()]
-    );
-
-  if (n.gt(Number.MAX_SAFE_INTEGER)) {
-    let val = ce._BIGNUM_ONE;
-    let i = ce._BIGNUM_TWO;
-    while (i.lessThan(n)) {
-      val = val.mul(i);
-      i = i.add(1);
-    }
-    return val;
-  }
-
-  if (n.modulo(2).eq(1)) {
-    return n.times(factorial(ce, n.minus(1)));
-  }
-
-  let loop = n.toNumber();
-  let sum = n;
-  let val = n;
-
-  while (loop > 2) {
-    loop -= 2;
-    sum = sum.add(loop);
-    val = val.mul(sum);
-  }
-  return val;
-}
-
 export function factorial2(ce: IBigNum, n: BigNum): BigNum {
   if (!n.isInteger() || n.isNegative()) return ce._BIGNUM_NAN;
   if (n.lessThan(1)) return ce._BIGNUM_ONE;

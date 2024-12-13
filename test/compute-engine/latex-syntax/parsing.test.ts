@@ -51,7 +51,7 @@ describe('UNKNOWN COMMANDS', () => {
         [
           "Add",
           [
-            "Tuple",
+            "InvisibleOperator",
             ["Error", "'unexpected-command'", ["LatexString", "'\\foo'"]],
             1,
             ["Add", "x", 1]

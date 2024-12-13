@@ -176,20 +176,19 @@ export function canonicalBigop(
  * - ['Operator', collection]
  *
  * `fn()` is the processing done on each element
- */
-/**
  * Apply the function `fn` to the body of a big operator, according to the
  * indexing sets.
  */
-export function reduceBigOp<T>(
+export function* reduceBigOp<T>(
   body: BoxedExpression,
   indexes: ReadonlyArray<BoxedExpression>,
   fn: (acc: T, x: BoxedExpression) => T | null,
   initial: T
-): T | undefined {
+): Generator<T | undefined> {
   // If the body is a collection, reduce it
   // i.e. Sum({1, 2, 3}) = 6
-  if (body.isCollection) return reduceCollection(body, fn, initial);
+  if (body.isCollection)
+    return yield* reduceCollection(body.evaluate(), fn, initial);
 
   // If there are no indexes, the summation is a constant
   // i.e. Sum(3) = 3
@@ -209,9 +208,12 @@ export function reduceBigOp<T>(
   // Iterate over the cartesian product and evaluate the body
   //
   let result: T | undefined = initial;
+  let counter = 0;
   for (const element of cartesianArray) {
     indexingSets.forEach((x, i) => ce.assign(x.index!, element[i]));
     result = fn(result, body) ?? undefined;
+    counter += 1;
+    if (counter % 1000 === 0) yield result;
     if (result === undefined) break;
   }
 

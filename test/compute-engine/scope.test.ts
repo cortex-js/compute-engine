@@ -24,7 +24,7 @@ describe('SETTING/FORGETTING', () => {
     expect(expr).toMatchInlineSnapshot(`["Subtract", "x1", 1]`);
     expect(expr.evaluate()).toMatchInlineSnapshot(`["Subtract", "x1", 1]`);
 
-    expect(ce.box(`x1`).type).toMatchInlineSnapshot(`finite_integer`);
+    expect(ce.box(`x1`).type).toMatchInlineSnapshot(`real`);
     expect(ce.box(`x1`)).toMatchInlineSnapshot(`x1`);
     expect(ce.box(`x1`).evaluate()).toMatchInlineSnapshot(`x1`);
     expect(ce.box(['Add', 'x1', 5]).evaluate()).toMatchInlineSnapshot(
@@ -61,7 +61,7 @@ describe('SETTING/FORGETTING', () => {
       ]
     `);
 
-    expect(ce.box(`x2`).type).toMatchInlineSnapshot(`finite_integer`);
+    expect(ce.box(`x2`).type).toMatchInlineSnapshot(`real`);
     expect(ce.box(`x2`).json).toMatch('x2');
     expect(ce.box(`x2`).evaluate().json).toMatch('x2');
     expect(ce.box(['Add', 'x2', 5]).evaluate().json).toMatchObject([

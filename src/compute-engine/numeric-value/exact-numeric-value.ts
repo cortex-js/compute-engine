@@ -30,6 +30,7 @@ import { numberToExpression } from '../numerics/expression';
 import { numberToString } from '../numerics/strings';
 import { BigNumFactory } from './big-numeric-value';
 import { NumericType } from '../../common/type/types';
+import { isSubtype } from '../../common/type/subtype';
 
 /**
  * An ExactNumericValue is the sum of a Gaussian imaginary and the product of
@@ -134,7 +135,8 @@ export class ExactNumericValue extends NumericValue {
     if (this.isOne) return 1;
     if (this.isNegativeOne) return -1;
 
-    let re: Expression = 0;
+    // ExactNumericValue are always real
+    // if (this.isComplexInfinity) return 'ComplexInfinity';
 
     const rationalExpr = (r: Rational) => {
       if (isInteger(r)) return numberToExpression(r[0]);
@@ -145,19 +147,32 @@ export class ExactNumericValue extends NumericValue {
       ] as Expression;
     };
 
-    if (!isZero(this.rational)) {
-      // Only have a rational
-      if (this.radical === 1) re = rationalExpr(this.rational);
-      // Only have a radical
-      else if (isOne(this.rational)) re = ['Sqrt', this.radical];
-      else if (isNegativeOne(this.rational))
-        re = ['Negate', ['Sqrt', this.radical]];
-      // Have both a radical and a rational
-      else
-        re = ['Multiply', rationalExpr(this.rational), ['Sqrt', this.radical]];
-    }
+    // Only have a rational
+    if (this.radical === 1) return rationalExpr(this.rational);
 
-    return re;
+    // Only have a radical
+    if (isOne(this.rational)) return ['Sqrt', this.radical];
+    if (isNegativeOne(this.rational)) return ['Negate', ['Sqrt', this.radical]];
+
+    // Have both a radical and a rational
+
+    if (this.rational[0] == 1)
+      return [
+        'Divide',
+        ['Sqrt', this.radical],
+        numberToExpression(this.rational[1]),
+      ];
+    if (this.rational[0] == -1)
+      return [
+        'Negate',
+        [
+          'Divide',
+          ['Sqrt', this.radical],
+          numberToExpression(this.rational[1]),
+        ],
+      ];
+
+    return ['Multiply', rationalExpr(this.rational), ['Sqrt', this.radical]];
   }
 
   clone(value: number | ExactNumericValueData): ExactNumericValue {
@@ -800,7 +815,7 @@ export class ExactNumericValue extends NumericValue {
           }
         }
       } else {
-        console.assert(value.type === 'integer');
+        console.assert(isSubtype(value.type, 'integer'));
         rationalSum = add(rationalSum, [value.re, 1]);
       }
     }

@@ -558,7 +558,7 @@ export class BoxedNumber extends _BoxedExpression {
     return results.at(-1)!.value ?? this;
   }
 
-  evaluate(options?: EvaluateOptions): BoxedExpression {
+  evaluate(options?: Partial<EvaluateOptions>): BoxedExpression {
     if (options?.numericApproximation) return this.N();
     return this;
   }

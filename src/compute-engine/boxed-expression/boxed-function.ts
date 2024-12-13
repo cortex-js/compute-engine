@@ -23,12 +23,14 @@ import { replace } from './rules';
 import { negate } from './negate';
 import { Product } from './product';
 import { simplify } from './simplify';
+import { canonicalMultiply, mul } from './arithmetic-multiply';
+import { div } from './arithmetic-divide';
+import { add } from './arithmetic-add';
+import { pow } from './arithmetic-power';
 
 import { asSmallInteger } from './numerics';
 
-import { at, isFiniteIndexableCollection } from '../collection-utils';
-
-import { canonicalMultiply, mul } from './arithmetic-multiply';
+import { isFiniteIndexableCollection, zip } from '../collection-utils';
 
 import { NumericValue } from '../numeric-value/public';
 
@@ -37,14 +39,11 @@ import { DEFAULT_COMPLEXITY, sortOperands } from './order';
 import { hashCode, normalizedUnknownsForSolve } from './utils';
 import { match } from './match';
 import { factor } from './factor';
-import { holdMap } from './hold';
+import { holdMap, holdMapAsync } from './hold';
 import { Type } from '../../common/type/types';
-import { isSubtype } from '../../common/type/subtype';
-import { div } from './arithmetic-divide';
-import { add } from './arithmetic-add';
-import { pow } from './arithmetic-power';
-import { functionResult, narrow } from '../../common/type/utils';
 import { parseType } from '../../common/type/parse';
+import { isSubtype } from '../../common/type/subtype';
+import { functionResult, narrow } from '../../common/type/utils';
 import {
   positiveSign,
   nonNegativeSign,
@@ -52,14 +51,14 @@ import {
   nonPositiveSign,
   sgn,
 } from './sgn';
-import { cachedValue, CachedValue } from './cache';
+import { cachedValue, CachedValue, cachedValueAsync } from './cache';
 
 /**
- * A boxed function represent an expression that can be
- * represented by a function call.
+ * A boxed function represent an expression that can be represented by a
+ * function call.
  *
- * It is composed of an operator (the name of the function) and
- * a list of arguments.
+ * It is composed of an operator (the name of the function) and a list of
+ * arguments.
  *
  * It has a definition associated with it, based on the operator.
  * The definition contains the signature of the function, and the
@@ -83,7 +82,7 @@ export class BoxedFunction extends _BoxedExpression {
   // The scope in which this function was defined/boxed
   private _scope: RuntimeScope | null;
 
-  // Note: only canonical expressions have an associated def
+  // Only canonical expressions have an associated def
   _def: BoxedFunctionDefinition | undefined;
 
   private _isPure: boolean;
@@ -149,14 +148,14 @@ export class BoxedFunction extends _BoxedExpression {
     return h;
   }
 
-  // For function expressions, infer infers the result domain of the function
+  // For function expressions, `infer()` infers the result type of the function
   infer(t: Type): boolean {
     const def = this.functionDefinition;
     if (!def) return false;
 
     if (!def.inferredSignature) return false;
 
-    // If the signature was inferred, refine it bt narrowing the result
+    // If the signature was inferred, refine it by narrowing the result
     if (
       typeof def.signature !== 'string' &&
       def.signature.kind === 'signature'
@@ -166,6 +165,8 @@ export class BoxedFunction extends _BoxedExpression {
         result: narrow(def.signature.result, t),
       };
     }
+
+    this.engine.generation += 1;
 
     return true;
   }
@@ -831,93 +832,19 @@ export class BoxedFunction extends _BoxedExpression {
     return simplify(this, options).at(-1)?.value ?? this;
   }
 
-  evaluate(options?: EvaluateOptions): BoxedExpression {
-    const computeValue = () => {
-      //
-      // 1/ Use the canonical form
-      //
-      if (!this.isValid) return this;
-
-      options ??= { numericApproximation: false };
-
-      if (options.numericApproximation) {
-        const h = this.operator;
-
-        //
-        // Transform N(Integrate) into NIntegrate(), etc...
-        //
-        if (h === 'Integrate' || h === 'Limit')
-          return this.engine
-            .box(['N', this], { canonical: true })
-            .evaluate(options);
-      }
-      if (!this.isCanonical) {
-        this.engine.pushScope();
-        const canonical = this.canonical;
-        this.engine.popScope();
-        if (!canonical.isCanonical || !canonical.isValid) return this;
-        return canonical.evaluate(options);
-      }
-
-      const def = this.functionDefinition;
-
-      //
-      // 2/ Thread if applicable
-      //
-      // If the function is threadable, iterate
-      //
-      if (
-        def?.threadable &&
-        this.ops!.some((x) => isFiniteIndexableCollection(x))
-      ) {
-        // If one of the arguments is an indexable collection, thread the function
-        // Get the length of the longest sequence
-        const length = Math.max(
-          ...this._ops.map(
-            (x) => x.functionDefinition?.collection?.size?.(x) ?? 0
-          )
-        );
-
-        // Zip
-        const results: BoxedExpression[] = [];
-        for (let i = 0; i <= length - 1; i++) {
-          const args = this._ops.map((x) =>
-            isFiniteIndexableCollection(x)
-              ? (at(x, (i % length) + 1) ?? this.engine.Nothing)
-              : x
-          );
-          results.push(this.engine._fn(this.operator, args).evaluate(options));
-        }
-
-        if (results.length === 0) return this.engine.Nothing;
-        if (results.length === 1) return results[0];
-        return this.engine._fn('List', results);
-      }
-
-      //
-      // 3/ Evaluate the applicable operands
-      //
-      const tail = holdMap(this, (x) => x.evaluate(options));
-
-      let result: BoxedExpression | undefined | null = undefined;
-
-      //
-      // 4/ Call the `evaluate` handler
-      //
-      if (def) {
-        const engine = this.engine;
-        const context = engine.swapScope(this.scope);
-        result = def.evaluate?.(tail, { ...options, engine });
-        engine.swapScope(context);
-      }
-
-      return result ?? this.engine.function(this._name, tail);
-    };
-
+  evaluate(options?: Partial<EvaluateOptions>): BoxedExpression {
     return cachedValue(
       options?.numericApproximation ? this._valueN : this._value,
       this.engine.generation,
-      computeValue
+      withDeadline(this.engine, this._computeValue(options))
+    );
+  }
+
+  evaluateAsync(options?: Partial<EvaluateOptions>): Promise<BoxedExpression> {
+    return cachedValueAsync(
+      options?.numericApproximation ? this._valueN : this._value,
+      this.engine.generation,
+      withDeadlineAsync(this.engine, this._computeValueAsync(options))
     );
   }
 
@@ -992,40 +919,225 @@ export class BoxedFunction extends _BoxedExpression {
       false
     );
   }
+  _computeValue(options?: Partial<EvaluateOptions>): () => BoxedExpression {
+    return () => {
+      if (!this.isValid) return this;
+
+      //
+      // 1/ Use the canonical form
+      //
+
+      const numericApproximation = options?.numericApproximation ?? false;
+
+      //
+      // Transform N(Integrate) into NIntegrate(), etc...
+      //
+      if (numericApproximation) {
+        const h = this.operator;
+        if (h === 'Integrate' || h === 'Limit')
+          return this.engine
+            .box(['N', this], { canonical: true })
+            .evaluate(options);
+      }
+
+      if (!this.isCanonical) {
+        this.engine.pushScope();
+        const canonical = this.canonical;
+        this.engine.popScope();
+        if (!canonical.isCanonical || !canonical.isValid) return this;
+        return canonical.evaluate(options);
+      }
+
+      const def = this.functionDefinition;
+
+      //
+      // 2/ Thread if applicable
+      //
+      if (
+        def?.threadable &&
+        this.ops!.some((x) => isFiniteIndexableCollection(x))
+      ) {
+        const items = zip(this._ops);
+        if (!items) return this.engine.Nothing;
+
+        const results: BoxedExpression[] = [];
+        while (true) {
+          const { done, value } = items.next();
+          if (done) break;
+          results.push(this.engine._fn(this.operator, value).evaluate(options));
+        }
+
+        if (results.length === 0) return this.engine.Nothing;
+        if (results.length === 1) return results[0];
+        return this.engine._fn('List', results);
+      }
+
+      //
+      // 3/ Evaluate the applicable operands
+      //
+      const tail = holdMap(this, (x) => x.evaluate(options));
+
+      //
+      // 4/ Call the `evaluate` handler
+      //
+      if (def) {
+        const engine = this.engine;
+        const context = engine.swapScope(this.scope);
+
+        const evaluateFn = def.evaluate?.(tail, {
+          numericApproximation,
+          engine,
+        });
+
+        engine.swapScope(context);
+
+        return evaluateFn ?? this.engine.function(this._name, tail);
+      }
+
+      return this.engine.function(this._name, tail);
+    };
+  }
+
+  _computeValueAsync(
+    options?: Partial<EvaluateOptions>
+  ): () => Promise<BoxedExpression> {
+    return async () => {
+      //
+      // 1/ Use the canonical form
+      //
+      if (!this.isValid) return this;
+
+      const numericApproximation = options?.numericApproximation ?? false;
+
+      if (numericApproximation) {
+        const h = this.operator;
+
+        //
+        // Transform N(Integrate) into NIntegrate(), etc...
+        //
+        if (h === 'Integrate' || h === 'Limit')
+          this.engine
+            .box(['N', this], { canonical: true })
+            .evaluateAsync(options);
+      }
+      if (!this.isCanonical) {
+        this.engine.pushScope();
+        const canonical = this.canonical;
+        this.engine.popScope();
+        if (!canonical.isCanonical || !canonical.isValid) return this;
+        return canonical.evaluateAsync(options);
+      }
+
+      const def = this.functionDefinition;
+
+      //
+      // 2/ Thread if applicable
+      //
+      if (
+        def?.threadable &&
+        this.ops!.some((x) => isFiniteIndexableCollection(x))
+      ) {
+        const items = zip(this._ops);
+        if (!items) return this.engine.Nothing;
+
+        const results: Promise<BoxedExpression>[] = [];
+        while (true) {
+          const { done, value } = items.next();
+          if (done) break;
+
+          results.push(
+            this.engine._fn(this.operator, value).evaluateAsync(options)
+          );
+        }
+
+        if (results.length === 0) return this.engine.Nothing;
+        if (results.length === 1) return results[0];
+
+        return Promise.all(results).then((resolved) =>
+          this.engine._fn('List', resolved)
+        );
+      }
+
+      //
+      // 3/ Evaluate the applicable operands
+      //
+
+      // Resolve all the operand promises
+      const tail = await holdMapAsync(
+        this,
+        async (x) => await x.evaluateAsync(options)
+      );
+
+      //
+      // 4/ Call the `evaluate` handler
+      //
+      if (def) {
+        const engine = this.engine;
+        const context = engine.swapScope(this.scope);
+
+        const opts = { numericApproximation, engine, signal: options?.signal };
+        const evaluateFn =
+          def.evaluateAsync?.(tail, opts) ?? def.evaluate?.(tail, opts);
+
+        engine.swapScope(context);
+
+        return Promise.resolve(evaluateFn).then(
+          (result) => result ?? this.engine.function(this._name, tail)
+        );
+      }
+
+      return Promise.resolve(this.engine.function(this._name, tail));
+    };
+  }
 }
 
 /** Return the type of the value of the expression */
-function type(expr: BoxedExpression): Type | undefined {
+function type(expr: BoxedFunction): Type | undefined {
   if (!expr.isValid) return 'error';
+  const def = expr.functionDefinition;
+  if (!def) return 'function';
 
-  // expr = expr.evaluate();
+  let sigResult = functionResult(def.signature) ?? 'unknown';
 
-  //
-  // The value is a function expression
-  //
-  if (expr.ops) {
-    const def = expr.functionDefinition;
-    if (!def) return 'function';
+  // If there is a type handler, call it
+  if (typeof def.type === 'function')
+    sigResult =
+      parseType(def.type(expr.ops!, { engine: expr.engine })) ?? sigResult;
 
-    const sigResult = functionResult(def.signature) ?? 'any';
+  return sigResult;
+}
 
-    // If there is a resultType function, call it
-    if (typeof def.type === 'function')
-      return (
-        parseType(def.type(expr.ops!, { engine: expr.engine })) ?? sigResult
-      );
+function withDeadline<T>(engine: IComputeEngine, fn: () => T): () => T {
+  return () => {
+    if (engine._deadline === undefined) {
+      engine._deadline = Date.now() + engine.timeLimit;
 
-    return sigResult;
-  }
+      const result: T = fn();
 
-  //
-  // The value is a symbol or a number literal
-  //
-  if (expr.symbol || expr.isNumberLiteral) return expr.type;
+      engine._deadline = undefined;
 
-  if (expr.string) return 'string';
+      return result;
+    }
 
-  if (expr.tensor) return expr.type;
+    return fn();
+  };
+}
 
-  return undefined;
+function withDeadlineAsync<T>(
+  engine: IComputeEngine,
+  fn: () => Promise<T>
+): () => Promise<T> {
+  return async () => {
+    if (engine._deadline === undefined) {
+      engine._deadline = Date.now() + engine.timeLimit;
+
+      const result: T = await fn();
+
+      engine._deadline = undefined;
+
+      return result;
+    }
+
+    return fn();
+  };
 }
