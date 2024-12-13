@@ -1,4 +1,5 @@
 import type {
+  Attributes,
   Expression,
   ExpressionObject,
   MathJsonFunction,
@@ -49,6 +50,31 @@ export function isExpressionObject(
   return (
     isObj && ('fn' in expr || 'num' in expr || 'sym' in expr || 'str' in expr)
   );
+}
+
+/**
+ * →true if Expression **expr** has *at least one* recognized meta-property key with its
+ * corresponding value non-'undefined'. Naturally, this also entails that *expr* is an
+ * 'ExpressionObject' variant of 'Expression'.
+ *
+ */
+export function hasMetaData(expr: Expression): expr is ExpressionObject {
+  return (
+    isExpressionObject(expr) &&
+    (hasMetaProperty(expr, 'latex') || hasMetaProperty(expr, 'wikidata'))
+  );
+}
+
+/**
+ * Returns true if meta prop. *key* is present in *expr* & this propery's value is also
+ * non-'undefined'.
+ *
+ */
+export function hasMetaProperty<
+  E extends ExpressionObject,
+  K extends keyof Pick<Attributes, 'latex' | 'wikidata'>,
+>(expr: E, key: K): expr is E & { [k in K]: NonNullable<ExpressionObject[K]> } {
+  return expr[key] !== undefined;
 }
 
 /**  If expr is a string literal, return it.

@@ -13,7 +13,11 @@ import {
   ExpressionObject,
   MathJsonIdentifier,
 } from '../../math-json/types';
-import { machineValue, missingIfEmpty } from '../../math-json/utils';
+import {
+  hasMetaData,
+  machineValue,
+  missingIfEmpty,
+} from '../../math-json/utils';
 import {
   isValidIdentifier,
   validateIdentifier,
@@ -388,10 +392,12 @@ export function box(
   // Box a MathJSON object literal
   //
   if (typeof expr === 'object') {
-    const metadata: Metadata = {
-      latex: (expr as ExpressionObject).latex,
-      wikidata: (expr as ExpressionObject).wikidata,
-    };
+    const metadata = hasMetaData(expr as ExpressionObject)
+      ? ({
+          latex: (expr as ExpressionObject).latex,
+          wikidata: (expr as ExpressionObject).wikidata,
+        } satisfies Metadata)
+      : undefined;
     if ('fn' in expr) {
       const [fnName, ...ops] = expr.fn;
       return canonicalForm(

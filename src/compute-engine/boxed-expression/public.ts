@@ -1,5 +1,6 @@
 import { Complex } from 'complex-esm';
 import type {
+  Attributes,
   Expression,
   MathJsonNumber,
   MathJsonString,
@@ -2036,10 +2037,7 @@ export type EvaluateOptions = {
  * @category Boxed Expression
  */
 
-export type Metadata = {
-  latex?: string | undefined;
-  wikidata?: string | undefined;
-};
+export type Metadata = Pick<Attributes, 'latex' | 'wikidata'>;
 
 /**
  * When a unitless value is passed to or returned from a trigonometric function,
