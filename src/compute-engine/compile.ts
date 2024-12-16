@@ -652,8 +652,8 @@ export function compile(
   //
   // Is it a number?
   //
-  const f = expr.re;
-  if (!isNaN(f)) {
+  if (expr.isNumberLiteral) {
+    const f = expr.re;
     if (expr.im !== 0) throw new Error('Complex numbers are not supported');
     return target.number(f);
   }

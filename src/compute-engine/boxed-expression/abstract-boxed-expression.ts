@@ -559,7 +559,7 @@ export abstract class _BoxedExpression implements BoxedExpression {
   }
 
   solve(
-    _vars:
+    _vars?:
       | Iterable<string>
       | string
       | BoxedExpression
@@ -703,7 +703,6 @@ export abstract class _BoxedExpression implements BoxedExpression {
 
   compile(options?: {
     to?: 'javascript';
-    optimize?: ('simplify' | 'evaluate')[];
     functions?: Record<MathJsonIdentifier, string | ((...any) => any)>;
     vars?: Record<MathJsonIdentifier, string>;
     imports?: Function[];
@@ -711,11 +710,9 @@ export abstract class _BoxedExpression implements BoxedExpression {
   }): (args: Record<string, any>) => any | undefined {
     if (options?.to && options.to !== 'javascript')
       throw new Error('Unknown target');
-    options ??= { optimize: ['simplify'] };
+    options ??= {};
     // eslint-disable-next-line @typescript-eslint/no-this-alias
     let expr = this as BoxedExpression;
-    if (options?.optimize?.includes('simplify')) expr = expr.simplify();
-    if (options?.optimize?.includes('evaluate')) expr = expr.evaluate();
     return compileToJavascript(
       expr,
       options?.functions,
