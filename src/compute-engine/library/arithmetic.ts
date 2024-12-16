@@ -163,7 +163,10 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
       type: ([x]) => x.type,
       sgn: ([x]) => {
         if (x.is(0)) return 'zero';
-        return x.isNumberLiteral ? 'positive' : 'non-negative';
+        if (x.isNumberLiteral) {
+          return 'positive';
+        }
+        return x.isNumberLiteral ? 'positive' : 'non-negative'; //|x^2+1| fails
       },
       evaluate: ([x]) => evaluateAbs(x),
     },
@@ -183,13 +186,12 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
       type: addType,
 
       sgn: (ops) => {
-        if (ops.some((x) => x.isReal === false || x.isNaN)) return 'unsigned';
+        if (ops.some((x) => x.isNaN)) return 'unsigned';
         if (ops.every((x) => x.is(0))) return 'zero';
         if (ops.every((x) => x.isNonNegative))
           return ops.some((x) => x.isPositive) ? 'positive' : 'non-negative';
         if (ops.every((x) => x.isNonPositive))
           return ops.some((x) => x.isNegative) ? 'negative' : 'non-positive';
-        if (ops.every((x) => x.isReal)) return 'real';
         return undefined;
       },
 
@@ -273,12 +275,14 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
 
       sgn: (ops) => {
         const [n, d] = [ops[0], ops[1]];
+        const s = d.sgn;
+        const s1 = n.sgn;
         if (d.is(0)) return 'unsigned';
-        if (d.is(0) === false && n.is(0)) return 'zero';
-        if (d.isPositive) return n.sgn;
-        if (d.isNegative) return oppositeSgn(n.sgn);
-        if (n.is(0) || (n.isFinite && d.isInfinity)) return 'zero';
-        if (!n.is(0) && !d.is(0)) return 'not-zero';
+        if (d.isPositive) return s1;
+        if (d.isNegative) return oppositeSgn(s1);
+        if ((n.is(0) && s === 'not-zero') || (n.isFinite && d.isInfinity))
+          return 'zero';
+        if (s1 === 'not-zero' && s === 'not-zero') return 'not-zero';
         return undefined;
       },
 
@@ -653,7 +657,10 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
               : undefined;
         if (
           ops.some((x) => x.isFinite === false || x.isFinite === undefined) &&
-          ops.some((x) => x.is(0) === undefined)
+          ops.some((x) => {
+            const s = x.sgn;
+            s !== 'positive' && s !== 'negative' && s !== 'not-zero';
+          })
         )
           return undefined;
         if (ops.every((x) => x.isPositive || x.isNegative)) {
@@ -670,11 +677,17 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
           });
           return sumNeg % 2 === 0 ? 'non-positive' : 'non-negative';
         }
-        if (ops.every((x) => !x.is(0))) return 'not-zero';
-        if (ops.every((x) => x.isReal)) return 'real';
+        if (
+          ops.every(
+            (x) =>
+              x.sgn === 'not-zero' ||
+              x.sgn === 'positive' ||
+              x.sgn === 'negative'
+          )
+        )
+          return 'not-zero';
         return undefined;
       },
-
       evaluate: (ops, { numericApproximation }) =>
         // Use evaluate i both cases: do not introduce premature rounding errors
         numericApproximation
@@ -756,9 +769,13 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
           return a.sgn;
 
         if (b.numerator.isEven && b.denominator.isOdd) {
-          if (a.isReal) return !a.is(0) ? 'positive' : 'non-negative';
+          if (a.isReal) {
+            let s = a.sgn;
+            return s === 'positive' || s === 'not-zero' || s === 'negative'
+              ? 'positive'
+              : 'non-negative';
+          }
           if (a.type === 'imaginary') return 'negative';
-          return !a.is(0) ? 'not-zero' : undefined; //already accounted for a.is(0)
         }
 
         if (
@@ -847,10 +864,18 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
       sgn: ([x, n]) => {
         // Note: we can't simplify this to a power, then get the sgn of that because this may cause an infinite loop
         if (x.isReal === false || n.isReal === false) return 'unsigned';
-        if (x.is(0)) return n.is(0) ? 'unsigned' : 'zero';
+        if (x.is(0)) {
+          if (n.isNonPositive) {
+            return 'unsigned';
+          }
+          if (n.isPositive) return 'zero';
+        }
         if (x.isPositive === true) return 'positive';
-        if (n.isOdd === true) return 'negative';
-        if (n.isEven === true) return 'unsigned';
+        if (x.isNonNegative === true) return 'non-negative';
+        if (n.isOdd === true || (n.numerator.isOdd && n.denominator.isOdd)) {
+          return x.sgn;
+        }
+        if (x.isNegative && n.isOdd === false) return 'unsigned';
         return undefined;
       },
       canonical: (args, { engine }) => {
@@ -858,8 +883,7 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
         const [base, exp] = args;
         return canonicalRoot(base, exp);
       },
-      evaluate: ([x, n], { numericApproximation }) =>
-        root(x, n, { numericApproximation }),
+      evaluate: ([x, n], { numericApproximation }) => x.root(n),
     },
 
     Round: {
@@ -882,7 +906,6 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
         if (x.isLess(0.5) && x.isGreater(-0.5)) return 'zero';
         if (x.isNonNegative) return 'non-negative';
         if (x.isNonPositive) return 'non-positive';
-        if (x.isReal) return 'real';
         return undefined;
       },
       evaluate: ([x]) =>
@@ -958,7 +981,7 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
         if (x.isPositive) return 'positive';
         if (x.isNegative) return 'unsigned';
         if (x.isNonNegative) return 'non-negative';
-        if (!x.is(0)) return 'not-zero';
+        if (x.sgn === 'not-zero') return 'not-zero';
         return undefined;
       },
       evaluate: ([x], { numericApproximation, engine }) => {
@@ -979,8 +1002,13 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
       signature: 'number -> number',
       sgn: ([x]) => {
         if (x.is(0)) return 'zero';
-        if (x.isReal) return !x.is(0) ? 'positive' : 'non-negative';
-        if (x.type === 'imaginary' || x.type === 'complex') return 'negative';
+        if (x.isReal) {
+          let s = x.sgn;
+          return s === 'not-zero' || s === 'positive' || s === 'negative'
+            ? 'positive'
+            : 'non-negative';
+        }
+        if (x.type === 'imaginary') return 'negative';
         if (x.isReal == false || x.isNaN) return 'unsigned';
         return undefined;
       },
