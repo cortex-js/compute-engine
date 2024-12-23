@@ -12,6 +12,8 @@ import { DEFINITIONS_INEQUALITIES } from '../latex-syntax/dictionary/definitions
 
 import { MACHINE_PRECISION } from '../numerics/numeric';
 import { Type } from '../../common/type/types';
+import { isValidType } from '../../common/type/utils';
+import { isSubtype } from '../../common/type/subtype';
 
 export function isBoxedExpression(x: unknown): x is BoxedExpression {
   return typeof x === 'object' && x !== null && 'engine' in x;
@@ -182,17 +184,26 @@ export function normalizeFlags(
   return result as NumericFlags;
 }
 
-export function isSymbolDefinition(def: any): def is SymbolDefinition {
+export function isSymbolDefinition(def: unknown): def is SymbolDefinition {
   if (def === undefined || def === null || typeof def !== 'object')
     return false;
 
   if (isBoxedExpression(def)) return false;
 
-  if ('value' in def || 'constant' in def || 'inferred' in def) {
-    if ('type' in def && typeof def.type === 'function') {
-      throw new Error(
-        'The `type` field of a symbol definition should be of type `string`'
-      );
+  if (
+    'type' in def ||
+    'value' in def ||
+    'constant' in def ||
+    'inferred' in def
+  ) {
+    if ('type' in def) {
+      if (!isValidType(def.type))
+        throw new Error(`Invalid type: "${def.type}"`);
+      if (isSubtype('function', def.type)) {
+        throw new Error(
+          'The `type` field of a symbol definition should be of type `string`'
+        );
+      }
     }
 
     if ('signature' in def) {
