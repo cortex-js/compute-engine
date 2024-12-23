@@ -1371,8 +1371,10 @@ export class ComputeEngine implements IComputeEngine {
     if (
       typeof def === 'object' &&
       'type' in def &&
-      ((typeof def.type === 'string' && isSubtype(def.type, 'function')) ||
-        (def.type && isValidType(def.type)))
+      !(
+        (typeof def.type === 'string' && isSubtype(def.type, 'function')) ||
+        (def.type && isValidType(def.type))
+      )
     ) {
       throw new Error(
         `Invalid definition for "${id}": use a FunctionDefinition to define a function or use 'ce.declare("${id}", "function")'`
