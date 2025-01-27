@@ -74,7 +74,7 @@ const NATIVE_JS_FUNCTIONS: CompiledFunctions = {
     return `(${args.map((x) => compile(x)).join(' + ')})`;
   },
   Arccos: 'Math.acos',
-  Arcosh: 'Math.acosh',
+  Arccosh: 'Math.acosh',
   Arccot: ([x], compile) => {
     if (x === null) throw new Error('Arccot: no argument');
     return `Math.atan(1 / (${compile(x)}))`;
@@ -101,9 +101,9 @@ const NATIVE_JS_FUNCTIONS: CompiledFunctions = {
   },
 
   Arcsin: 'Math.asin',
-  Arsinh: 'Math.asinh',
+  Arcsinh: 'Math.asinh',
   Arctan: 'Math.atan',
-  Artanh: 'Math.atanh',
+  Arctanh: 'Math.atanh',
   // Math.cbrt
   Ceiling: 'Math.ceil',
   Chop: '_SYS.chop',
@@ -704,17 +704,14 @@ function compileLoop(
     },
   });
 
-  // @todo: don't always need to wrap in an IIFE
-  const indexVar = tempVar();
   const acc = tempVar();
 
   return `(() => {
   let ${acc} = ${op === '+' ? '0' : '1'};
   let ${index} = ${lower};
-  const _fn = () => ${fn};
-  while (${indexVar} <= ${upper}) {
-    ${acc} ${op}= _fn();
-    ${indexVar}++;
+  while (${index} <= ${upper}) {
+    ${acc} ${op}= ${fn};
+    ${index}++;
   }
   return ${acc};
 })()`;
