@@ -8,8 +8,16 @@ import {
   CanonicalOptions,
 } from './public';
 
-import { Expression, MathJsonIdentifier } from '../../math-json/types';
-import { machineValue, missingIfEmpty } from '../../math-json/utils';
+import {
+  Expression,
+  ExpressionObject,
+  MathJsonIdentifier,
+} from '../../math-json/types';
+import {
+  hasMetaData,
+  machineValue,
+  missingIfEmpty,
+} from '../../math-json/utils';
 import {
   isValidIdentifier,
   validateIdentifier,
@@ -164,7 +172,7 @@ export function boxFunction(
     return ce._fn(
       name,
       ops.map((x) => ce.box(x, { canonical: false })),
-      options.metadata
+      { metadata: options.metadata }
     );
   }
 
@@ -384,16 +392,22 @@ export function box(
   // Box a MathJSON object literal
   //
   if (typeof expr === 'object') {
+    const metadata = hasMetaData(expr as ExpressionObject)
+      ? ({
+          latex: (expr as ExpressionObject).latex,
+          wikidata: (expr as ExpressionObject).wikidata,
+        } satisfies Metadata)
+      : undefined;
     if ('fn' in expr) {
       const [fnName, ...ops] = expr.fn;
       return canonicalForm(
-        boxFunction(ce, fnName, ops, { canonical, structural }),
+        boxFunction(ce, fnName, ops, { canonical, structural, metadata }),
         options.canonical!
       );
     }
-    if ('str' in expr) return new BoxedString(ce, expr.str);
-    if ('sym' in expr) return ce.symbol(expr.sym, { canonical });
-    if ('num' in expr) return ce.number(expr, { canonical });
+    if ('str' in expr) return new BoxedString(ce, expr.str, metadata);
+    if ('sym' in expr) return ce.symbol(expr.sym, { canonical, metadata });
+    if ('num' in expr) return ce.number(expr, { canonical, metadata });
 
     throw new Error(`Unexpected MathJSON object: ${JSON.stringify(expr)}`);
   }
@@ -481,7 +495,7 @@ function makeCanonicalFunction(
     return ce._fn(
       name,
       validateArguments(ce, xs, def.signature, def.lazy, def.threadable) ?? xs,
-      metadata
+      { metadata }
     );
   }
 
@@ -528,7 +542,7 @@ function makeCanonicalFunction(
 
   // If we have some adjusted arguments, the arguments did not
   // match the parameters of the signature. We're done.
-  if (adjustedArgs) return ce._fn(name, adjustedArgs, metadata);
+  if (adjustedArgs) return ce._fn(name, adjustedArgs, { metadata });
 
   //
   // 4/ Apply `idempotent` and `involution`
@@ -538,14 +552,14 @@ function makeCanonicalFunction(
     if (def.involution) return args[0].op1;
 
     // f(f(x)) -> f(x)
-    if (def.idempotent) return ce._fn(name, xs[0].ops!, metadata);
+    if (def.idempotent) return ce._fn(name, xs[0].ops!, { metadata });
   }
 
   //
   // 5/ Sort the operands
   //
 
-  return ce._fn(name, sortOperands(name, args), metadata);
+  return ce._fn(name, sortOperands(name, args), { metadata });
 }
 
 function makeNumericFunction(
@@ -581,7 +595,7 @@ function makeNumericFunction(
 
   // If some of the arguments are not valid, we're done
   // (note: the result is canonical, but not valid)
-  if (!ops.every((x) => x.isValid)) return ce._fn(name, ops, metadata);
+  if (!ops.every((x) => x.isValid)) return ce._fn(name, ops, { metadata });
 
   //
   // Short path for some functions
@@ -606,10 +620,10 @@ function makeNumericFunction(
       // Ln(1) -> 0, Log(1) -> 0
       if (ops[0].is(1)) return ce.Zero;
       // Ln(a) -> Ln(a), Log(a) -> Log(a)
-      if (ops.length === 1) return ce._fn(name, ops, metadata);
+      if (ops.length === 1) return ce._fn(name, ops, { metadata });
     }
     // Ln(a,b) -> Log(a, b)
-    return ce._fn('Log', ops, metadata);
+    return ce._fn('Log', ops, { metadata });
   }
 
   return null;

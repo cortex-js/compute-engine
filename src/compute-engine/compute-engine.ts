@@ -1924,7 +1924,7 @@ export class ComputeEngine implements IComputeEngine {
       return this._fn(
         'Rational',
         [this.number(value[0]), this.number(value[1])],
-        { ...metadata, canonical: false }
+        { metadata, canonical: false }
       );
     }
 
@@ -2015,10 +2015,13 @@ export class ComputeEngine implements IComputeEngine {
   _fn(
     name: MathJsonIdentifier,
     ops: ReadonlyArray<BoxedExpression>,
-    options?: Metadata & { canonical?: boolean }
+    options?: { canonical?: boolean; metadata?: Metadata }
   ): BoxedExpression {
     const canonical = options?.canonical ?? true;
-    return new BoxedFunction(this, name, ops, { ...options, canonical });
+    return new BoxedFunction(this, name, ops, {
+      metadata: options?.metadata,
+      canonical,
+    });
   }
 
   /**
