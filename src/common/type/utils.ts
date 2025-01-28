@@ -122,10 +122,11 @@ export function collectionElementType(type: Readonly<Type>): Type | undefined {
   return undefined;
 }
 
-export function isValidType(t: any): t is Readonly<Type> {
-  if (typeof t === 'string')
-    return PRIMITIVE_TYPES.includes(t as PrimitiveType);
-  if (typeof t !== 'object') return false;
+export function isValidType(t: unknown): t is Readonly<Type> {
+  const isObject = typeof t === 'object' && t !== null;
+  if (typeof t === 'string' || (isObject && 'type' in t))
+    return PRIMITIVE_TYPES.includes((isObject ? t.type : t) as PrimitiveType);
+  if (!isObject) return false;
   if (!('kind' in t)) return false;
   return (
     t.kind === 'signature' ||
