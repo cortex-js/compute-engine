@@ -1,3 +1,4 @@
+import { stringValue } from '../../src/math-json/utils';
 import { validCortex, invalidCortex } from '../utils';
 
 describe('CORTEX PARSING SHEBANG', () => {
@@ -24,7 +25,10 @@ describe('CORTEX PARSING SHEBANG', () => {
 describe('CORTEX PARSING DIRECTIVES', () => {
   test('Navigator directive', () => {
     // `navigator` is not available when running in a node environment
-    expect(validCortex('#navigator("userAgent")')).toBe('Nothing');
+    // node v22 added support for the navigator object
+    const ua = validCortex('#navigator("userAgent")');
+    const validUa = ua === 'Undefined' || stringValue(ua)?.startsWith('Node');
+    expect(validUa).toBe(true);
   });
   test('Environment variable directive', () => {
     expect(validCortex('#env("TERM")')).toStrictEqual({
