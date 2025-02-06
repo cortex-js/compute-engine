@@ -440,7 +440,7 @@ export function evalTrig(
           (x) => x.inverse().asin()
         )
       );
-    case 'Arcosh':
+    case 'Arccosh':
       return radiansToAngle(
         apply(
           op,
@@ -449,7 +449,7 @@ export function evalTrig(
           (x) => x.acosh()
         )
       );
-    case 'Arcoth':
+    case 'Arccoth':
       // ln[(1 + x) /(x − 1)] /2
       return radiansToAngle(
         apply(
@@ -460,7 +460,7 @@ export function evalTrig(
         )
       );
 
-    case 'Arcsch':
+    case 'Arccsch':
       // ln[1/x + √(1/x2 + 1)],
       return radiansToAngle(
         apply(
@@ -497,7 +497,7 @@ export function evalTrig(
         )
       );
 
-    case 'Arsech':
+    case 'Arcsech':
       return radiansToAngle(
         apply(
           op,
@@ -507,7 +507,7 @@ export function evalTrig(
         )
       );
 
-    case 'Arsinh':
+    case 'Arcsinh':
       return radiansToAngle(
         apply(
           op,
@@ -527,7 +527,7 @@ export function evalTrig(
         )
       );
 
-    case 'Artanh':
+    case 'Arctanh':
       return radiansToAngle(
         apply(
           op,
@@ -659,22 +659,22 @@ function inverseTrigFuncName(name: string): string | undefined {
     Tan: 'Arctan',
     Sec: 'Arcsec',
     Csc: ' Arccsc',
-    Sinh: 'Arsinh',
-    Cosh: 'Arcosh',
-    Tanh: 'Artanh',
+    Sinh: 'Arcsinh',
+    Cosh: 'Arccosh',
+    Tanh: 'Arctanh',
     Sech: 'Arcsech',
-    Csch: 'Arcsch',
-    Arcosh: 'Cosh',
+    Csch: 'Arccsch',
+    Arccosh: 'Cosh',
     Arccos: 'Cos',
     Arccsc: 'Csc',
-    Arcsch: 'Csch',
+    Arccsch: 'Csch',
     // '??': 'Cot',
     // '??': 'Coth',
     Arcsec: 'Sec',
     Arcsin: 'Sin',
-    Arsinh: 'Sinh',
+    Arcsinh: 'Sinh',
     Arctan: 'Tan',
-    Artanh: 'Tanh',
+    Arctanh: 'Tanh',
   }[name];
 }
 

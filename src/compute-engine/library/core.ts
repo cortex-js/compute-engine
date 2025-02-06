@@ -20,13 +20,12 @@ import { canonical } from '../boxed-expression/utils';
 import {
   collectionElementType,
   functionResult,
-  functionSignature,
   isValidType,
 } from '../../common/type/utils';
 import { parseType } from '../../common/type/parse';
 import { isIndexableCollection } from '../collection-utils';
-import { typeToString } from '../../common/type/serialize';
 import { canonicalMultiply } from '../boxed-expression/arithmetic-multiply';
+import { canonicalDictionary } from './collections';
 
 //   // := assign 80 // @todo
 // compose (compose(f, g) -> a new function such that compose(f, g)(x) -> f(g(x))
@@ -40,7 +39,7 @@ import { canonicalMultiply } from '../boxed-expression/arithmetic-multiply';
 export const CORE_LIBRARY: IdentifierDefinitions[] = [
   {
     // The sole member of the unit type, `nothing`
-    Nothing: { signature: 'nothing' },
+    Nothing: { type: 'nothing' },
   },
 
   //
@@ -251,7 +250,7 @@ export const CORE_LIBRARY: IdentifierDefinitions[] = [
       signature: '(string, ...any) -> error',
       canonical: (args, { engine: ce }) => {
         const code = checkType(ce, args[0], 'string').string;
-        if (code === 'incompatible-domain') {
+        if (code === 'incompatible-type') {
           return ce._fn('ErrorCode', [ce.string(code), args[1], args[2]]);
         }
         return ce._fn('ErrorCode', args);
@@ -276,7 +275,7 @@ export const CORE_LIBRARY: IdentifierDefinitions[] = [
         if (x.symbol) return 'symbol';
         if (x.string) return 'string';
         if (x.isNumberLiteral) return x.type;
-        if (x.ops) return functionResult(x.type) ?? 'unknown';
+        if (x.ops) return functionResult(x.type.type) ?? 'unknown';
         return 'unknown';
       },
       // When comparing hold expressions, consider them equal if their
@@ -314,10 +313,19 @@ export const CORE_LIBRARY: IdentifierDefinitions[] = [
 
     Style: {
       complexity: 9000,
-      signature: '(expression, ...any) -> expression',
+      signature: '(expression, map) -> expression',
+      lazy: true,
       type: ([x]) => x.type,
-      evaluate: ([x]) => x,
-      // @todo: simplify: merge Style(Style(x, s1), s2),  Style(x) -> x in canonical()
+      canonical: ([x, style], { engine: ce }) => {
+        x = x.canonical;
+        style = canonicalDictionary(ce, style);
+
+        // Is the style dictionary empty?
+        if (style.nops === 0) return x;
+
+        return ce._fn('Style', [x, style]);
+      },
+      evaluate: ([x, _style], options) => x.evaluate(options),
     },
   },
   {
@@ -349,9 +357,9 @@ export const CORE_LIBRARY: IdentifierDefinitions[] = [
             s.push('symbol');
             s.push(`value: ${x.evaluate().toString()}`);
           }
-        } else if (x.isNumberLiteral) s.push(typeToString(x.type));
+        } else if (x.isNumberLiteral) s.push(x.type.toString());
         else if (x.ops) {
-          s.push(typeToString(x.type));
+          s.push(x.type.toString());
           s.push(x.isCanonical ? 'canonical' : 'non-canonical');
         } else s.push("Unknown expression's type");
         return ce.string(s.join('\n'));
@@ -400,7 +408,7 @@ export const CORE_LIBRARY: IdentifierDefinitions[] = [
     Apply: {
       description: 'Apply a function to a list of arguments',
       signature: '(name:symbol, arguments:...expression) -> any',
-      type: ([fn]) => functionResult(fn.type) ?? 'any',
+      type: ([fn]) => functionResult(fn.type.type) ?? 'any',
       canonical: (args, { engine: ce }) => {
         if (args[0].symbol) return ce.function(args[0].symbol, args.slice(1));
         return ce._fn('Apply', args);
@@ -421,12 +429,9 @@ export const CORE_LIBRARY: IdentifierDefinitions[] = [
         const op2 = args[1];
         return ce._fn('Assign', [op1.canonical, op2.canonical]);
       },
-      evaluate: (ops, { engine: ce }) => {
-        const op1 = ops[0];
-        const op2 = ops[1];
-        if (!op1.symbol) return ce.Nothing;
+      evaluate: ([op1, op2], { engine: ce }) => {
         const val = op2.evaluate();
-        ce.assign(op1.symbol, val);
+        ce.assign(op1.symbol!, val);
         return val;
       },
     },
@@ -469,7 +474,8 @@ export const CORE_LIBRARY: IdentifierDefinitions[] = [
     Type: {
       lazy: true,
       signature: 'any -> string',
-      evaluate: ([x], { engine: ce }) => ce.string(typeToString(x.type)),
+      evaluate: ([x], { engine: ce }) =>
+        ce.string(x.type.toString() ?? 'unknown'),
     },
 
     Evaluate: {
@@ -484,12 +490,13 @@ export const CORE_LIBRARY: IdentifierDefinitions[] = [
     Function: {
       complexity: 9876,
       lazy: true,
-      signature: '(any, ...symbol) -> any',
-      type: ([body]) => body.type,
+      signature: 'function',
+      type: ([body, ...args]) =>
+        `(${args.map((x) => x.type)}) -> ${body.type.type}`,
       canonical: (args, { engine: ce }) => {
         // When canonicalizing a function expression, we need to
         // create a new scope and declare all the arguments as
-        // variables in that scope.
+        // variables in that scope. @fixme
 
         if (args.length === 0) return ce.Nothing;
 
@@ -505,8 +512,8 @@ export const CORE_LIBRARY: IdentifierDefinitions[] = [
         return ce._fn('Function', [body, ...params]);
       },
       evaluate: (_args) => {
-        // "evaluating" a function expression is not the same
-        // as applying arguments to it.
+        // "evaluating" a function expression is not the same as applying
+        // arguments to it.
         // See `function apply()` for that.
 
         return undefined;
@@ -647,7 +654,7 @@ export const CORE_LIBRARY: IdentifierDefinitions[] = [
       type: ([op1, op2]) => {
         if (op1.string && asSmallInteger(op2) !== null) return 'integer';
         if (op1.isCollection && isIndexableCollection(op1))
-          return collectionElementType(op1.type) ?? 'any';
+          return collectionElementType(op1.type.type) ?? 'any';
         if (op1.symbol) return 'symbol';
         return 'expression';
       },

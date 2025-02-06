@@ -2,7 +2,6 @@
 // https://query.wikidata.org/#PREFIX%20wd%3A%20%3Chttp%3A%2F%2Fwww.wikidata.org%2Fentity%2F%3E%0APREFIX%20wdt%3A%20%3Chttp%3A%2F%2Fwww.wikidata.org%2Fprop%2Fdirect%2F%3E%0A%0ASELECT%20DISTINCT%20%3Fitem%0AWHERE%20%7B%0A%20%20%20%20%3Fitem%20wdt%3AP31%2a%20wd%3AQ1964995%0A%7D%0A
 
 import { parseType } from '../../common/type/parse';
-import { isSubtype } from '../../common/type/subtype';
 import { flatten } from '../boxed-expression/flatten';
 import { validateArguments } from '../boxed-expression/validate';
 import {
@@ -26,7 +25,7 @@ export const SETS_LIBRARY: IdentifierDefinitions = {
     type: 'set',
     constant: true,
     wikidata: 'Q226183',
-    eq: (b) => isSubtype(b.type, 'set') && b.size === 0,
+    eq: (b) => b.type.matches('set') && b.size === 0,
     collection: {
       size: () => 0,
       contains: () => false,
@@ -41,12 +40,12 @@ export const SETS_LIBRARY: IdentifierDefinitions = {
     constant: true,
     collection: {
       size: () => Infinity,
-      contains: (_, x) => isSubtype(x.type, 'number'),
+      contains: (_, x) => x.type.matches('number'),
       subsetOf: (_, rhs, strict) => {
         if (rhs.operator === 'Range' || rhs.operator === 'Linspace')
           return true;
         return (
-          isSubtype(rhs.type, 'set<number>') &&
+          rhs.type.matches('set<number>') &&
           (!strict || rhs.symbol !== 'Numbers')
         );
       },
@@ -56,16 +55,35 @@ export const SETS_LIBRARY: IdentifierDefinitions = {
   },
 
   ComplexNumbers: {
-    type: 'set<complex>',
+    type: 'set<finite_complex>',
     constant: true,
     collection: {
       size: () => Infinity,
-      contains: (_, x) => isSubtype(x.type, 'complex'),
+      contains: (_, x) => x.type.matches('finite_complex'),
       subsetOf: (_, rhs, strict) => {
         if (rhs.operator === 'Range' || rhs.operator === 'Linspace')
           return true;
         return (
-          isSubtype(rhs.type, 'set<complex>') &&
+          rhs.type.matches('set<complex>') &&
+          (!strict || rhs.symbol !== 'ComplexNumbers')
+        );
+      },
+      eltsgn: () => 'unsigned',
+      elttype: () => 'finite_complex',
+    },
+  },
+
+  ExtendedComplexNumbers: {
+    type: 'set<complex>',
+    constant: true,
+    collection: {
+      size: () => Infinity,
+      contains: (_, x) => x.type.matches('complex'),
+      subsetOf: (_, rhs, strict) => {
+        if (rhs.operator === 'Range' || rhs.operator === 'Linspace')
+          return true;
+        return (
+          rhs.type.matches('set<complex>') &&
           (!strict || rhs.symbol !== 'ComplexNumbers')
         );
       },
@@ -79,26 +97,72 @@ export const SETS_LIBRARY: IdentifierDefinitions = {
     constant: true,
     collection: {
       size: () => Infinity,
-      contains: (_, x) => isSubtype(x.type, 'imaginary'),
+      contains: (_, x) => x.type.matches('imaginary'),
       subsetOf: (_, rhs, strict) =>
-        isSubtype(rhs.type, 'set<imaginary>') &&
+        rhs.type.matches('set<imaginary>') &&
         (!strict || rhs.symbol !== 'ImaginaryNumbers'),
       eltsgn: () => 'unsigned',
-      elttype: () => 'complex',
+      elttype: () => 'imaginary',
+    },
+  },
+
+  RealNumbers: {
+    type: 'set<finite_real>',
+    constant: true,
+    collection: {
+      contains: (_, x) => x.type.matches('finite_real'),
+      size: () => Infinity,
+      subsetOf: (_, rhs, strict) =>
+        rhs.type.matches('set<real>') &&
+        (!strict || rhs.symbol !== 'RealNumbers'),
+      eltsgn: () => undefined,
+      elttype: () => 'finite_real',
+    },
+  },
+
+  ExtendedRealNumbers: {
+    type: 'set<real>',
+    constant: true,
+    collection: {
+      contains: (_, x) => x.type.matches('real'),
+      size: () => Infinity,
+      subsetOf: (_, rhs, strict) =>
+        rhs.type.matches('set<real>') &&
+        (!strict || rhs.symbol !== 'ExtendedRealNumbers'),
+      eltsgn: () => undefined,
+      elttype: () => 'real',
     },
   },
 
   Integers: {
-    type: 'set<integer>',
+    type: 'set<finite_integer>',
     constant: true,
     collection: {
-      contains: (_, x) => isSubtype(x.type, 'integer'),
+      contains: (_, x) => x.type.matches('finite_integer'),
       size: () => Infinity,
       subsetOf: (_, rhs, strict) => {
         if (rhs.operator === 'Range') return true;
         return (
-          isSubtype(rhs.type, 'set<integer>') &&
+          rhs.type.matches('set<finite_integer>') &&
           (!strict || rhs.symbol !== 'Integers')
+        );
+      },
+      eltsgn: () => undefined,
+      elttype: () => 'finite_integer',
+    },
+  },
+
+  ExtendedIntegers: {
+    type: 'set<integer>',
+    constant: true,
+    collection: {
+      contains: (_, x) => x.type.matches('integer'),
+      size: () => Infinity,
+      subsetOf: (_, rhs, strict) => {
+        if (rhs.operator === 'Range') return true;
+        return (
+          rhs.type.matches('set<integer>') &&
+          (!strict || rhs.symbol !== 'ExtendedIntegers')
         );
       },
       eltsgn: () => undefined,
@@ -107,14 +171,28 @@ export const SETS_LIBRARY: IdentifierDefinitions = {
   },
 
   RationalNumbers: {
-    type: 'set<rational>',
+    type: 'set<finite_rational>',
     constant: true,
     collection: {
       size: () => Infinity,
-      contains: (_, x) => isSubtype(x.type, 'rational'),
+      contains: (_, x) => x.type.matches('finite_rational'),
       subsetOf: (_, rhs, strict) =>
-        isSubtype(rhs.type, 'set<rational>') &&
+        rhs.type.matches('set<rational>') &&
         (!strict || rhs.symbol !== 'RationalNumbers'),
+      eltsgn: () => undefined,
+      elttype: () => 'finite_rational',
+    },
+  },
+
+  ExtendedRationalNumbers: {
+    type: 'set<rational>',
+    constant: true,
+    collection: {
+      contains: (_, x) => x.type.matches('rational'),
+      size: () => Infinity,
+      subsetOf: (_, rhs, strict) =>
+        rhs.type.matches('set<rational>') &&
+        (!strict || rhs.symbol !== 'ExtendedRationalNumbers'),
       eltsgn: () => undefined,
       elttype: () => 'rational',
     },
@@ -126,7 +204,7 @@ export const SETS_LIBRARY: IdentifierDefinitions = {
     constant: true,
     collection: {
       size: () => Infinity,
-      contains: (_, x) => isSubtype(x.type, 'real') && x.isNegative === true,
+      contains: (_, x) => x.type.matches('real') && x.isNegative === true,
       subsetOf: (_, rhs, strict) => {
         if (rhs.operator === 'Range' || rhs.operator === 'Linspace') {
           const low = rhs.ops![0].re;
@@ -134,7 +212,7 @@ export const SETS_LIBRARY: IdentifierDefinitions = {
           return low < 0 && high < 0;
         }
         return (
-          isSubtype(rhs.type, 'set<real>') &&
+          rhs.type.matches('set<real>') &&
           rhs.symbolDefinition?.collection?.eltsgn?.(rhs) === 'negative' &&
           (!strict || rhs.symbol !== 'NegativeNumbers')
         );
@@ -150,7 +228,7 @@ export const SETS_LIBRARY: IdentifierDefinitions = {
     type: 'set<real>',
     constant: true,
     collection: {
-      contains: (_, x) => isSubtype(x.type, 'real') && x.isNonPositive === true,
+      contains: (_, x) => x.type.matches('real') && x.isNonPositive === true,
       size: () => Infinity,
       subsetOf: (_, rhs, strict) => {
         if (rhs.operator === 'Range' || rhs.operator === 'Linspace') {
@@ -160,7 +238,7 @@ export const SETS_LIBRARY: IdentifierDefinitions = {
         }
 
         return (
-          isSubtype(rhs.type, 'set<real>') &&
+          rhs.type.matches('set<real>') &&
           rhs.symbolDefinition?.collection?.eltsgn?.(rhs) === 'non-positive' &&
           (!strict || rhs.symbol !== 'NonPositiveNumbers')
         );
@@ -170,11 +248,36 @@ export const SETS_LIBRARY: IdentifierDefinitions = {
     },
   },
 
+  // >= 0
+  NonNegativeNumbers: {
+    type: 'set<real>',
+    constant: true,
+    collection: {
+      contains: (_, x) => x.type.matches('real') && x.isNonNegative === true,
+      size: () => Infinity,
+      subsetOf: (_, rhs, strict) => {
+        if (rhs.operator === 'Range' || rhs.operator === 'Linspace') {
+          const low = rhs.ops![0].re;
+          const high = rhs.ops![1].re;
+          return low <= 0 && high <= 0;
+        }
+        return (
+          rhs.type.matches('set<real>') &&
+          rhs.symbolDefinition?.collection?.eltsgn?.(rhs) === 'non-negative' &&
+          (!strict || rhs.symbol !== 'NonNegativeNumbers')
+        );
+      },
+      eltsgn: () => 'non-negative',
+      elttype: () => 'real',
+    },
+  },
+
+  // > 0
   PositiveNumbers: {
     type: 'set<real>',
     constant: true,
     collection: {
-      contains: (_, x) => isSubtype(x.type, 'real') && x.isPositive === true,
+      contains: (_, x) => x.type.matches('real') && x.isPositive === true,
       size: () => Infinity,
       subsetOf: (_, rhs, strict) => {
         if (rhs.operator === 'Range' || rhs.operator === 'Linspace') {
@@ -183,7 +286,7 @@ export const SETS_LIBRARY: IdentifierDefinitions = {
           return low > 0 && high > 0;
         }
         return (
-          isSubtype(rhs.type, 'set<real>') &&
+          rhs.type.matches('set<real>') &&
           rhs.symbolDefinition?.collection?.eltsgn?.(rhs) === 'positive' &&
           (!strict || rhs.symbol !== 'PositiveNumbers')
         );
@@ -193,11 +296,12 @@ export const SETS_LIBRARY: IdentifierDefinitions = {
     },
   },
 
+  // <= -1
   NegativeIntegers: {
     type: 'set<integer>',
     constant: true,
     collection: {
-      contains: (_, x) => isSubtype(x.type, 'integer') && x.isNegative === true,
+      contains: (_, x) => x.type.matches('integer') && x.isNegative === true,
       size: () => Infinity,
       subsetOf: (_, rhs, strict) => {
         if (rhs.operator === 'Range') {
@@ -207,7 +311,7 @@ export const SETS_LIBRARY: IdentifierDefinitions = {
         }
 
         return (
-          isSubtype(rhs.type, 'set<integer>') &&
+          rhs.type.matches('set<integer>') &&
           rhs.symbolDefinition?.collection?.eltsgn?.(rhs) === 'negative' &&
           (!strict || rhs.symbol !== 'NegativeIntegers')
         );
@@ -217,12 +321,12 @@ export const SETS_LIBRARY: IdentifierDefinitions = {
     },
   },
 
+  // <= 0
   NonPositiveIntegers: {
     type: 'set<integer>',
     constant: true,
     collection: {
-      contains: (_, x) =>
-        isSubtype(x.type, 'integer') && x.isNonPositive === true,
+      contains: (_, x) => x.type.matches('integer') && x.isNonPositive === true,
       size: () => Infinity,
       subsetOf: (_, rhs, strict) => {
         if (rhs.operator === 'Range') {
@@ -231,32 +335,9 @@ export const SETS_LIBRARY: IdentifierDefinitions = {
           return low <= 0 && high <= 0;
         }
         return (
-          isSubtype(rhs.type, 'set<integer>') &&
+          rhs.type.matches('set<integer>') &&
           rhs.symbolDefinition?.collection?.eltsgn?.(rhs) === 'non-positive' &&
           (!strict || rhs.symbol !== 'NonPositiveIntegers')
-        );
-      },
-      eltsgn: () => 'non-positive',
-      elttype: () => 'integer',
-    },
-  },
-
-  PositiveIntegers: {
-    type: 'set<integer>',
-    constant: true,
-    collection: {
-      contains: (_, x) => isSubtype(x.type, 'integer') && x.isPositive === true,
-      size: () => Infinity,
-      subsetOf: (_, rhs, strict) => {
-        if (rhs.operator === 'Range') {
-          const low = rhs.ops![0].re;
-          const high = rhs.ops![1].re;
-          return low > 0 && high > 0;
-        }
-        return (
-          isSubtype(rhs.type, 'set<integer>') &&
-          rhs.symbolDefinition?.collection?.eltsgn?.(rhs) === 'positive' &&
-          (!strict || rhs.symbol !== 'PositiveIntegers')
         );
       },
       eltsgn: () => 'non-positive',
@@ -269,8 +350,7 @@ export const SETS_LIBRARY: IdentifierDefinitions = {
     type: 'set<integer>',
     constant: true,
     collection: {
-      contains: (_, x) =>
-        isSubtype(x.type, 'integer') && x.isNonNegative === true,
+      contains: (_, x) => x.type.matches('integer') && x.isNonNegative === true,
       size: () => Infinity,
       subsetOf: (_, rhs, strict) => {
         if (rhs.operator === 'Range') {
@@ -279,11 +359,9 @@ export const SETS_LIBRARY: IdentifierDefinitions = {
           return low > 0 && high > 0;
         }
         return (
-          isSubtype(rhs.type, 'set<integer>') &&
+          rhs.type.matches('set<integer>') &&
           rhs.symbolDefinition?.collection?.eltsgn?.(rhs) === 'non-negative' &&
-          (!strict ||
-            (rhs.symbol !== 'NonNegativeInteger' &&
-              rhs.symbol !== 'NaturalNumbers'))
+          (!strict || rhs.symbol !== 'NonNegativeIntegers')
         );
       },
       eltsgn: () => 'non-negative',
@@ -291,26 +369,12 @@ export const SETS_LIBRARY: IdentifierDefinitions = {
     },
   },
 
-  RealNumbers: {
-    type: 'set<real>',
-    constant: true,
-    collection: {
-      contains: (_, x) => isSubtype(x.type, 'real'),
-      size: () => Infinity,
-      subsetOf: (_, rhs, strict) =>
-        isSubtype(rhs.type, 'set<real>') &&
-        (!strict || rhs.symbol !== 'RealNumbers'),
-      eltsgn: () => undefined,
-      elttype: () => 'real',
-    },
-  },
-
-  NaturalNumbers: {
+  // >= 1
+  PositiveIntegers: {
     type: 'set<integer>',
     constant: true,
     collection: {
-      contains: (_, x) =>
-        isSubtype(x.type, 'integer') && x.isNonNegative === true,
+      contains: (_, x) => x.type.matches('integer') && x.isPositive === true,
       size: () => Infinity,
       subsetOf: (_, rhs, strict) => {
         if (rhs.operator === 'Range') {
@@ -319,14 +383,12 @@ export const SETS_LIBRARY: IdentifierDefinitions = {
           return low > 0 && high > 0;
         }
         return (
-          isSubtype(rhs.type, 'set<integer>') &&
-          rhs.symbolDefinition?.collection?.eltsgn?.(rhs) === 'non-negative' &&
-          (!strict ||
-            (rhs.symbol !== 'NonNegativeInteger' &&
-              rhs.symbol !== 'NaturalNumbers'))
+          rhs.type.matches('set<integer>') &&
+          rhs.symbolDefinition?.collection?.eltsgn?.(rhs) === 'positive' &&
+          (!strict || rhs.symbol !== 'PositiveIntegers')
         );
       },
-      eltsgn: () => 'non-negative',
+      eltsgn: () => 'positive',
       elttype: () => 'integer',
     },
   },

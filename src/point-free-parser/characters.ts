@@ -451,7 +451,7 @@ export const FANCY_UNICODE = new Map<number, string>([
   [0x2147, 'ExponentialE'], // ⅇ
   [0x2102, 'ComplexNumbers'], // ℂ
   [0x211d, 'RealNumbers'], // ℝ
-  [0x2115, 'NaturalNumbers'], // ℕ
+  [0x2115, 'NonNegativeIntegers'], // ℕ
   [0x2124, 'Integers'], // ℤ
   [0x211a, 'RationalNumbers'], // ℚ
 

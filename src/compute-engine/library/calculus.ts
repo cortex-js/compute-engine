@@ -223,10 +223,10 @@ volumes
 
         // The range bounds, if present, should be numbers
         if (lower && lower.symbol !== 'Nothing') {
-          if (lower.type !== 'unknown') lower = checkType(ce, lower, 'number');
+          if (!lower.type.isUnknown) lower = checkType(ce, lower, 'number');
         }
         if (upper && upper.symbol !== 'Nothing') {
-          if (upper.type !== 'unknown') upper = checkType(ce, upper, 'number');
+          if (!upper.type.isUnknown) upper = checkType(ce, upper, 'number');
         }
         if (lower && upper) range = ce.tuple(index, lower, upper);
         else if (upper) range = ce.tuple(index, ce.NegativeInfinity, upper);

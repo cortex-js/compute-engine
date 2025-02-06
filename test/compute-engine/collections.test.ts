@@ -116,7 +116,7 @@ describe('TAKE 1', () => {
             "ErrorCode",
             "'incompatible-type'",
             "'collection | string'",
-            "'finite_real'"
+            "'finite_number'"
           ]
         ],
         1
@@ -133,7 +133,7 @@ describe('TAKE 1', () => {
             "ErrorCode",
             "'incompatible-type'",
             "'collection | string'",
-            "'real'"
+            "'any'"
           ]
         ],
         1
@@ -186,7 +186,7 @@ describe('SLICE (2,3)', () => {
             "ErrorCode",
             "'incompatible-type'",
             "'collection | string'",
-            "'finite_real'"
+            "'finite_number'"
           ]
         ],
         2,
@@ -204,7 +204,7 @@ describe('SLICE (2,3)', () => {
             "ErrorCode",
             "'incompatible-type'",
             "'collection | string'",
-            "'real'"
+            "'any'"
           ]
         ],
         2,
@@ -260,7 +260,7 @@ describe('SLICE -1,1', () => {
             "ErrorCode",
             "'incompatible-type'",
             "'collection | string'",
-            "'finite_real'"
+            "'finite_number'"
           ]
         ],
         -1,
@@ -278,7 +278,7 @@ describe('SLICE -1,1', () => {
             "ErrorCode",
             "'incompatible-type'",
             "'collection | string'",
-            "'real'"
+            "'any'"
           ]
         ],
         -1,
@@ -424,7 +424,7 @@ describe('Drop 2', () => {
             "ErrorCode",
             "'incompatible-type'",
             "'collection | string'",
-            "'finite_real'"
+            "'finite_number'"
           ]
         ],
         2
@@ -441,7 +441,7 @@ describe('Drop 2', () => {
             "ErrorCode",
             "'incompatible-type'",
             "'collection | string'",
-            "'real'"
+            "'any'"
           ]
         ],
         2

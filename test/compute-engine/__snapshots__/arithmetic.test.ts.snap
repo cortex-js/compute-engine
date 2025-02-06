@@ -296,7 +296,6 @@ N-mach    = 0.845154254728518
 
 exports[`EXACT EVALUATION Sqrt: Inexact Fractional part 1`] = `
 box       = ["Sqrt", 5.1]
-simplify  = 2.25831795812724298497
 eval-auto = 2.25831795812724298497
 eval-mach = 2.25831795812724
 `;
@@ -987,7 +986,7 @@ exports[`POWER INVALID Power 1`] = `["Power", 2.5, ["Error", "'missing'"]]`;
 
 exports[`POWER INVALID Power 2`] = `["Power", 2.5, -1.1, ["Error", "'unexpected-argument'", "'18.4'"]]`;
 
-exports[`POWER Power with negative exponent 1`] = `["Divide", 1, ["Power", 2.5, 3]]`;
+exports[`POWER Power with negative exponent 1`] = `0.064`;
 
 exports[`POWER Power with negative real exponent 1`] = `["Power", 2.5, -3.2]`;
 
@@ -1037,13 +1036,8 @@ eval-auto = 5/2
 `;
 
 exports[`RATIONAL Rational approximation 2`] = `
-invalid   =[
-  "Rational",
-  [
-    "Error",
-    ["ErrorCode", "'incompatible-type'", "'real'", "'unknown'"]
-  ]
-]
+box       = ["Rational", "Pi"]
+eval-auto = 80143857/25510582
 `;
 
 exports[`RATIONAL Rational as Divide 1`] = `
@@ -1109,7 +1103,7 @@ exports[`SQRT √ of list 1`] = `[2,1,7.4833147735478827711674974646330986035120
 
 exports[`SQRT √(3+4i) 1`] = `
 box       = ["Sqrt", ["Complex", 3, 4]]
-simplify  = (2 + i)
+eval-auto = (2 + i)
 `;
 
 exports[`SQRT √(3^2) 1`] = `
@@ -1151,14 +1145,12 @@ N-mach    = 13.228756555323
 
 exports[`SQRT √(1000000/49) 1`] = `
 box       = ["Sqrt", ["Rational", 1000000, 49]]
-simplify  = 142.857142857142857143
 eval-auto = 142.857142857142857143
 eval-mach = 142.857142857143
 `;
 
 exports[`SQRT √(1000001/7) 1`] = `
 box       = ["Sqrt", ["Rational", 1000001, 7]]
-simplify  = 377.964661991416486293
 eval-auto = 377.964661991416486293
 eval-mach = 377.964661991417
 `;
@@ -1173,14 +1165,12 @@ box       = [
   ]
 ]
 canonical = ["Sqrt", ["Rational", 137174210, 260630989]]
-simplify  = 0.725476264027701313101
 eval-auto = 0.725476264027701313101
 eval-mach = 0.725476264027701
 `;
 
 exports[`SQRT √(12345670000000000000000000) 1`] = `
 box       = ["Sqrt", {num: "1234567e+19"}]
-simplify  = 3513640562152.02524805
 eval-auto = 3513640562152.02524805
 eval-mach = 3513640562152.03
 `;
@@ -1192,21 +1182,18 @@ canonical = 0
 
 exports[`SQRT √2.5 1`] = `
 box       = ["Sqrt", 2.5]
-simplify  = 1.581138830084189666
 eval-auto = 1.581138830084189666
 eval-mach = 1.58113883008419
 `;
 
 exports[`SQRT √123456789.01234567890 1`] = `
 box       = ["Sqrt", "123456789.0123456789"]
-simplify  = 11111.1110611111109936
 eval-auto = 11111.1110611111109936
 eval-mach = 11111.1110611111
 `;
 
 exports[`SQRT √12345678901234567890 1`] = `
 box       = ["Sqrt", {num: "12345678901234567890"}]
-simplify  = 3513641828.82014425309
 eval-auto = 3513641828.82014425309
 eval-mach = 3513641828.82015
 `;
@@ -1232,8 +1219,5 @@ invalid   =[
 
 exports[`Square Square 1`] = `
 box       = ["Square", 2.5]
-eval-auto = 2.5^2
-eval-mach = 2.5^2
-N-auto    = 6.25
-N-mach    = 6.25
+eval-auto = 6.25
 `;

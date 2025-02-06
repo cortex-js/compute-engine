@@ -8,6 +8,8 @@
 
 export * from './compute-engine/public';
 
+export * from './math-json/types';
+
 export const version = '{{SDK_VERSION}}';
 
 import { ComputeEngine } from './compute-engine/compute-engine';

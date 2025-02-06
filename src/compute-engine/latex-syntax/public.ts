@@ -1,3 +1,4 @@
+import { OneOf } from '../../common/one-of';
 import type { Expression, MathJsonIdentifier } from '../../math-json/types';
 import type {
   IndexedLatexDictionary,
@@ -496,16 +497,19 @@ export type FunctionEntry = BaseEntry &
  * @category Latex Parsing and Serialization
  *
  */
-export type LatexDictionaryEntry =
-  | DefaultEntry
-  | ExpressionEntry
-  | MatchfixEntry
-  | InfixEntry
-  | PostfixEntry
-  | PrefixEntry
-  | SymbolEntry
-  | FunctionEntry
-  | EnvironmentEntry;
+export type LatexDictionaryEntry = OneOf<
+  [
+    | ExpressionEntry
+    | MatchfixEntry
+    | InfixEntry
+    | PostfixEntry
+    | PrefixEntry
+    | SymbolEntry
+    | FunctionEntry
+    | EnvironmentEntry
+    | DefaultEntry,
+  ]
+>;
 
 /** @internal */
 export function isExpressionEntry(
@@ -694,7 +698,7 @@ export type ParseLatexOptions = NumberFormat & {
    * This handler is invoked when the parser encounters an identifier
    * that has not yet been declared.
    *
-   * The `identifier` argument is a (valid identifier)[/math-json/#identifiers].
+   * The `identifier` argument is a [valid identifier](/math-json/#identifiers).
    *
    * The handler can return:
    *

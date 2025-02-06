@@ -66,7 +66,7 @@ function serializeSubtract(
       );
     }
 
-    if (isSubtype(a.type, 'rational')) {
+    if (a.type.matches('rational')) {
       return serializeJsonFunction(
         ce,
         'Subtract',

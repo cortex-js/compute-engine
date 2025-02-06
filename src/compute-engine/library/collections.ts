@@ -2,6 +2,7 @@ import type {
   BoxedExpression,
   CollectionHandlers,
   FunctionDefinition,
+  IComputeEngine,
   IdentifierDefinitions,
 } from '../public';
 
@@ -20,7 +21,8 @@ import { isSubtype } from '../../common/type/subtype';
 import { Type } from '../../common/type/types';
 import { collectionElementType, widen } from '../../common/type/utils';
 import { interval } from '../numerics/interval';
-import { typeToString } from '../../common/type/serialize';
+import { JSON5 } from '../../common/json5';
+import { Expression } from '../../math-json';
 
 // From NumPy:
 export const DEFAULT_LINSPACE_COUNT = 50;
@@ -68,7 +70,8 @@ export const COLLECTIONS_LIBRARY: IdentifierDefinitions = {
     complexity: 8200,
 
     signature: '(...any) -> list',
-    type: (ops) => parseType(`list<${widen(...ops.map((op) => op.type))}>`),
+    type: (ops) =>
+      parseType(`list<${widen(...ops.map((op) => op.type.type))}>`),
     canonical: canonicalList,
     eq: defaultCollectionEq,
     collection: defaultCollectionHandlers(),
@@ -80,7 +83,7 @@ export const COLLECTIONS_LIBRARY: IdentifierDefinitions = {
     complexity: 8200,
 
     signature: '(...any) -> set',
-    type: (ops) => parseType(`set<${widen(...ops.map((op) => op.type))}>`),
+    type: (ops) => parseType(`set<${widen(...ops.map((op) => op.type.type))}>`),
 
     canonical: canonicalSet,
     eq: (a: BoxedExpression, b: BoxedExpression) => {
@@ -101,18 +104,28 @@ export const COLLECTIONS_LIBRARY: IdentifierDefinitions = {
   Dictionary: {
     complexity: 8200,
 
-    signature: '(...any) -> map',
+    signature: '(...(string | tuple<string|symbol, expression>)) -> map',
     type: (ops) =>
       parseType(
         `tuple<${Object.entries(keyValues(ops))
-          .map(([k, v]) =>
-            k ? `${k}: ${typeToString(v.type)}` : typeToString(v.type)
-          )
+          .map(([k, v]) => (k ? `${k}: ${v.type}` : v.type))
           .join(', ')}>`
       ),
 
     canonical: (ops, { engine }) => {
-      const entries = keyValues(ops);
+      const entries: Record<string, BoxedExpression> = {};
+
+      for (const op of ops) {
+        const dict = canonicalDictionary(engine, op);
+        if (dict.operator === 'Dictionary') {
+          for (const entry of dict.ops!) {
+            console.assert(entry.operator === 'Tuple');
+            const [k, v] = entry.ops!;
+            entries[(k.string ?? k.symbol)!] = v;
+          }
+        }
+      }
+
       return engine._fn(
         'Dictionary',
         Object.entries(entries).map(([k, v]) =>
@@ -167,7 +180,7 @@ export const COLLECTIONS_LIBRARY: IdentifierDefinitions = {
       },
 
       contains: (expr, target) => {
-        if (target.type !== 'integer') return false;
+        if (!target.type.matches('integer')) return false;
         const t = target.re;
         const [lower, upper, step] = range(expr);
         if (step === 0) return false;
@@ -365,7 +378,7 @@ export const COLLECTIONS_LIBRARY: IdentifierDefinitions = {
         };
       },
       contains: (expr, target) => {
-        if (!isSubtype(target.type, 'finite_real')) return false;
+        if (!target.type.matches('finite_real')) return false;
         const t = target.re;
         const lower = expr.op1.re;
         const upper = expr.op2.re;
@@ -402,7 +415,7 @@ export const COLLECTIONS_LIBRARY: IdentifierDefinitions = {
   KeyValuePair: {
     description: 'A key/value pair',
     complexity: 8200,
-    signature: '(key: string, value: any) -> tuple<string, any>',
+    signature: '(key: string, value: any) -> tuple<string, unknown>',
     type: ([key, value]) => parseType(`tuple<string, ${value.type}>`),
 
     canonical: (args, { engine }) => {
@@ -508,8 +521,8 @@ export const COLLECTIONS_LIBRARY: IdentifierDefinitions = {
     complexity: 8200,
     signature: '(value: collection|string, count: number) -> list|string',
     type: (ops) => {
-      if (ops[0].type === 'string') return 'string';
-      return parseType(`list<${collectionElementType(ops[0].type)}>`);
+      if (ops[0].type.matches('string')) return 'string';
+      return parseType(`list<${collectionElementType(ops[0].type.type)}>`);
     },
     evaluate: (ops, { engine: ce }) => {
       if (ops.length < 2) return undefined;
@@ -602,8 +615,8 @@ export const COLLECTIONS_LIBRARY: IdentifierDefinitions = {
     signature:
       '(value: collection|string, start: number, end: number) -> list|string',
     type: (ops) => {
-      if (ops[0].type === 'string') return 'string';
-      return parseType(`list<${collectionElementType(ops[0].type)}>`);
+      if (ops[0].type.matches('string')) return 'string';
+      return parseType(`list<${collectionElementType(ops[0].type.type)}>`);
     },
     evaluate: (ops, { engine: ce }) => {
       if (ops.length < 3) return undefined;
@@ -777,12 +790,12 @@ export const COLLECTIONS_LIBRARY: IdentifierDefinitions = {
       // treated as multidimensional indexes
       const fn = applicable(ops[0]);
       if (!fn) return undefined;
-      if (ops.length === 1) return ce.function('List', []);
+      if (ops.length === 1) return ce._fn('List', []);
       const dims = ops.slice(1).map((op) => asSmallInteger(op));
       if (dims.some((d) => d === null || d <= 0)) return undefined;
       if (dims.length === 1) {
         // @fastpath
-        return ce.function(
+        return ce._fn(
           'List',
           Array.from(
             { length: dims[0] ?? 0 },
@@ -818,7 +831,7 @@ export const COLLECTIONS_LIBRARY: IdentifierDefinitions = {
     signature: '(collection) -> tuple<list, list<integer>>',
     type: (ops) =>
       parseType(
-        `tuple<list<${collectionElementType(ops[0].type)}>, list<integer>>`
+        `tuple<list<${collectionElementType(ops[0].type.type)}>, list<integer>>`
       ),
     evaluate: (ops, { engine: ce }) => {
       if (!isFiniteCollection(ops[0])) return undefined;
@@ -833,7 +846,8 @@ export const COLLECTIONS_LIBRARY: IdentifierDefinitions = {
   Unique: {
     complexity: 8200,
     signature: '(collection) -> list',
-    type: (ops) => parseType(`list<${collectionElementType(ops[0].type)}>`),
+    type: (ops) =>
+      parseType(`list<${collectionElementType(ops[0].type.type)}>`),
     evaluate: (ops, { engine: ce }) => {
       if (!isFiniteCollection(ops[0])) return undefined;
       const [values, _counts] = tally(ops[0]!);
@@ -898,10 +912,10 @@ export const COLLECTIONS_LIBRARY: IdentifierDefinitions = {
           values = joinMap(values, op);
           if (!values) return undefined;
         }
-        return ce.function(
+        return ce._fn(
           'Dictionary',
           Object.entries(values).map(([key, value]) =>
-            ce.function('KeyValuePair', [ce.string(key), value])
+            ce._fn('Tuple', [ce.string(key), value])
           )
         );
       }
@@ -1258,8 +1272,8 @@ export function* reduceCollection<T>(
 }
 
 function joinResultType(ops: ReadonlyArray<BoxedExpression>): Type {
-  if (ops.some((op) => op.type === 'map')) return 'map';
-  if (ops.some((op) => op.type === 'set')) return 'set';
+  if (ops.some((op) => op.type.matches('map'))) return 'map';
+  if (ops.some((op) => op.type.matches('set'))) return 'set';
   return 'list';
 }
 
@@ -1413,8 +1427,8 @@ function defaultCollectionHandlers(): CollectionHandlers {
 
     elttype: (expr) => {
       if (expr.nops === 0) return 'unknown';
-      if (expr.nops === 1) return expr.ops![0].type;
-      return widen(...expr.ops!.map((op) => op.type));
+      if (expr.nops === 1) return expr.ops![0].type.type;
+      return widen(...expr.ops!.map((op) => op.type.type));
     },
   };
 }
@@ -1483,4 +1497,82 @@ function defaultCollectionEq(a: BoxedExpression, b: BoxedExpression) {
 
 export function fromRange(start: number, end: number): number[] {
   return Array.from({ length: end - start + 1 }, (_, index) => start + index);
+}
+
+export function canonicalDictionary(
+  engine: IComputeEngine,
+  dict: BoxedExpression
+): BoxedExpression {
+  //
+  // If the expression is a single string surrounded by braces, parse it as
+  // a JSON5 object literal and return a dictionary.
+  //
+  if (
+    dict.string &&
+    dict.string[0] === '{' &&
+    dict.string[dict.string.length - 1] === '}'
+  ) {
+    let obj: any;
+    try {
+      obj = JSON5.parse(dict.string);
+    } catch (e) {
+      return engine._fn('Dictionary', []);
+    }
+    if (typeof obj !== 'object') return engine._fn('Dictionary', []);
+    return engine._fn(
+      'Dictionary',
+      Object.entries(obj).map(([k, v]) =>
+        engine._fn('Tuple', [engine.string(k), engine.box(v as Expression)])
+      )
+    );
+  }
+
+  //
+  // Parse as a tuple
+  //
+  if (
+    dict.operator === 'Tuple' ||
+    dict.operator === 'Pair' ||
+    dict.operator === 'KeyValuePair'
+  ) {
+    const [key, value] = dict.ops!;
+    let k: string;
+    if (key.string) k = key.string;
+    else if (key.symbol) k = key.symbol;
+    else return engine._fn('Dictionary', []);
+
+    return engine._fn('Dictionary', [
+      engine._fn('Tuple', [engine.string(k), value.canonical]),
+    ]);
+  }
+
+  //
+  // Parse as a dictionary expression
+  //
+  if (dict.operator === 'Dictionary') {
+    const result: Record<string, BoxedExpression> = {};
+    for (const pair of dict.ops!) {
+      if (
+        pair.operator === 'KeyValuePair' ||
+        pair.operator === 'Pair' ||
+        pair.operator === 'Tuple'
+      ) {
+        const [key, value] = pair.ops!;
+        let k: string;
+        if (key.string) k = key.string;
+        else if (key.symbol) k = key.symbol;
+        else return engine._fn('Dictionary', []);
+
+        result[k] = value.canonical;
+      }
+    }
+    return engine._fn(
+      'Dictionary',
+      Object.entries(result).map(([k, v]) =>
+        engine._fn('Tuple', [engine.string(k), v])
+      )
+    );
+  }
+
+  return engine._fn('Dictionary', []);
 }

@@ -22,34 +22,51 @@ function parseTrig(op: string): ExpressionParseHandler {
       '\\arctan': 'Arctan',
       '\\arctg': 'Arctan',
       '\\arcctg': 'Arccot',
-      '\\arcsec': 'Arcsec',
-      '\\arccsc': ' Arccsc',
-      '\\arsinh': 'Arsinh',
-      '\\arcosh': 'Arcosh',
-      '\\artanh': 'Artanh',
+      '\\arcsec': 'Arcsec', // Non-standard
+      '\\arccsc': 'Arccsc', // Non-standard
+      '\\arsinh': 'Arsinh', // Non-standard
+      '\\arcosh': 'Arccosh', // Non-standard
+      '\\arccosh': 'Arccosh',
+      '\\artanh': 'Arctanh',
+      '\\arctanh': 'Arctanh',
       '\\arsech': 'Arcsech',
-      '\\arcsch': 'Arcsch',
-      // '\\arg',
-      '\\ch': 'Cosh',
+      '\\arcsech': 'Arcsech',
+      '\\arcsch': 'Arccsch',
+      '\\arccsch': 'Arccsch',
+
+      '\\ch': 'Cosh', // Non-standard
+
       '\\cos': 'Cos',
-      '\\cosec': 'Csc',
+
       '\\cosh': 'Csch',
+
+      '\\cosec': 'Csc', // Non-standard
+
       '\\cot': 'Cot',
-      '\\cotg': 'Cot',
-      '\\coth': 'Coth',
+      '\\cotg': 'Cot', // Non-standard
+      '\\ctg': 'Cot', // Non-standard
+
       '\\csc': 'Csc',
-      '\\csch': 'Csch',
-      '\\ctg': 'Cot',
-      '\\cth': 'Coth',
+
+      '\\csch': 'Csch', // Non-standard
+
+      '\\coth': 'Coth',
+      '\\cth': 'Coth', // Non-standard
+
       '\\sec': 'Sec',
-      '\\sech': 'Sech',
+
+      '\\sech': 'Sech', // Non-standard
+
       '\\sin': 'Sin',
+
       '\\sinh': 'Sinh',
-      '\\sh': 'Sinh',
+      '\\sh': 'Sinh', // Non-standard
+
       '\\tan': 'Tan',
+      '\\tg': 'Tan', // Non-standard
+
       '\\tanh': 'Tanh',
-      '\\tg': 'Tan',
-      '\\th': 'Tanh',
+      '\\th': 'Tanh', // Non-standard
     };
     const operator: Expression = trigCommands[op ?? ''] ?? op ?? '';
 
@@ -111,72 +128,174 @@ export const DEFINITIONS_TRIGONOMETRY: LatexDictionary = [
     parse: parseTrig('Arctan'),
   },
   {
+    // Variant, non-standard command
     latexTrigger: ['\\arctg'],
-
+    parse: parseTrig('Arctan'),
+  },
+  {
+    // Variant, identifier
+    identifierTrigger: 'arctg',
     parse: parseTrig('Arctan'),
   },
   {
     name: 'Arccot',
-    latexTrigger: ['\\arcctg'],
-
+    identifierTrigger: 'arcctg',
     parse: parseTrig('Arccot'),
   },
   {
-    name: 'Arcoth',
-    identifierTrigger: 'arcoth',
-
+    // Variant, non-standard command
+    latexTrigger: ['\\arcctg'],
     parse: parseTrig('Arccot'),
+  },
+  {
+    name: 'Arccoth',
+    identifierTrigger: 'arccoth',
+
+    parse: parseTrig('Arccoth'),
+  },
+  {
+    // Accept variant with `ar-` prefix
+    identifierTrigger: 'arcoth',
+    parse: parseTrig('Arccoth'),
+  },
+  {
+    // Accept as identifier
+    identifierTrigger: 'arccoth',
+    parse: parseTrig('Arccoth'),
+  },
+  {
+    // Accept variant with LaTeX command, even though it's not in ams-math
+    latexTrigger: ['\\arccoth'],
+    parse: parseTrig('Arccoth'),
   },
   {
     name: 'Arcsec',
+    identifierTrigger: 'arcsec',
+
+    parse: parseTrig('Arcsec'),
+  },
+  {
+    // Variant, non-standard command
     latexTrigger: ['\\arcsec'],
 
     parse: parseTrig('Arcsec'),
   },
   {
     name: 'Arccsc',
+    identifierTrigger: 'arccsc',
+
+    parse: parseTrig('Arccsc'),
+  },
+  {
+    // Variant, non-standard command
     latexTrigger: ['\\arccsc'],
 
     parse: parseTrig('Arccsc'),
   },
   {
-    name: 'Arsinh',
+    name: 'Arcsinh',
+    identifierTrigger: 'arcsinh',
+
+    parse: parseTrig('Arcsinh'),
+  },
+  {
+    // Variant with `ar-` prefix, non-standard command
     latexTrigger: ['\\arsinh'],
 
-    parse: parseTrig('Arsinh'),
+    parse: parseTrig('Arcsinh'),
   },
   {
-    name: 'Arcosh',
-    latexTrigger: ['\\arcosh'],
+    // Variant with `arc-` prefix, non-standard command
+    latexTrigger: ['\\arcsinh'],
 
-    parse: parseTrig('Arcosh'),
+    parse: parseTrig('Arcsinh'),
   },
   {
-    name: 'Artanh',
-    latexTrigger: ['\\artanh'],
+    name: 'Arccosh',
+    identifierTrigger: 'arccosh',
 
-    parse: parseTrig('Artanh'),
+    parse: parseTrig('Arccosh'),
   },
   {
-    name: 'Arsech',
+    // Variant, non-standard command
+    latexTrigger: '\\arccosh',
+    parse: parseTrig('Arccosh'),
+  },
+  {
+    // Variant, non-standard command, with `ar-` prefix
+    latexTrigger: '\\arcosh',
+    parse: parseTrig('Arccosh'),
+  },
+  {
+    // Variant, with `ar-` prefix
+    identifierTrigger: 'arcosh',
+    parse: parseTrig('Arccosh'),
+  },
+  {
+    name: 'Arctanh',
+    identifierTrigger: 'arctanh',
+
+    parse: parseTrig('Arctanh'),
+  },
+  {
+    // Variant with `ar-` prefix
+    identifierTrigger: 'artanh',
+
+    parse: parseTrig('Arctanh'),
+  },
+  {
+    // Variant
+    latexTrigger: '\\artanh',
+    parse: parseTrig('Arctanh'),
+  },
+  {
+    // Variant
+    latexTrigger: ['\\arctanh'],
+    parse: parseTrig('Arctanh'),
+  },
+  {
+    // Variant, with `ar-` prefix
+    identifierTrigger: 'artanh',
+    parse: parseTrig('Arctanh'),
+  },
+  {
+    name: 'Arcsech',
+    identifierTrigger: 'arcsech',
+    parse: parseTrig('Arcsech'),
+  },
+  {
+    // Variant with `arc-` prefix
+    latexTrigger: ['\\arcsech'],
+    parse: parseTrig('Arcsech'),
+  },
+  {
+    // Variant with `ar-` prefix
     latexTrigger: ['\\arsech'],
-
-    parse: parseTrig('Arsech'),
+    parse: parseTrig('Arcsech'),
   },
   {
-    name: 'Arcsch',
+    name: 'Arccsch',
+    identifierTrigger: 'arccsch',
+    parse: parseTrig('Arccsch'),
+  },
+  {
+    // Variant, non-standard command
+    latexTrigger: ['\\arccsch'],
+    parse: parseTrig('Arccsch'),
+  },
+  {
+    // Variant, non-standard command, with `ar-` prefix
     latexTrigger: ['\\arcsch'],
-
-    parse: parseTrig('Arcsch'),
-  },
-  {
-    // Rusian hyperbolic cosine
-    latexTrigger: ['\\ch'],
-
-    parse: parseTrig('Cosh'),
+    parse: parseTrig('Arccsch'),
   },
   {
     name: 'Cosec',
+    identifierTrigger: 'cosec',
+
+    parse: parseTrig('Cosec'),
+  },
+  {
+    // Variant with non-standard command
     latexTrigger: ['\\cosec'],
 
     parse: parseTrig('Cosec'),
@@ -188,21 +307,27 @@ export const DEFINITIONS_TRIGONOMETRY: LatexDictionary = [
     parse: parseTrig('Cosh'),
   },
   {
+    // Rusian hyperbolic cosine
+    latexTrigger: ['\\ch'],
+
+    parse: parseTrig('Cosh'),
+  },
+  {
     name: 'Cot',
     latexTrigger: ['\\cot'],
 
     parse: parseTrig('Cot'),
   },
   {
+    // Variant, non-standard command
     latexTrigger: ['\\cotg'],
-
     parse: parseTrig('Cot'),
   },
   {
-    name: 'Coth',
-    latexTrigger: ['\\coth'],
+    // Rusian cotangent
+    latexTrigger: ['\\ctg'],
 
-    parse: parseTrig('Coth'),
+    parse: parseTrig('Cot'),
   },
   {
     name: 'Csc',
@@ -217,15 +342,24 @@ export const DEFINITIONS_TRIGONOMETRY: LatexDictionary = [
     parse: parseTrig('Csch'),
   },
   {
-    // Rusian cotangent
-    latexTrigger: ['\\ctg'],
-
-    parse: parseTrig('Cot'),
+    name: 'Coth',
+    latexTrigger: ['\\coth'],
+    parse: parseTrig('Coth'),
   },
   {
+    // Variant, non-standard command
     latexTrigger: ['\\cth'],
-
-    parse: parseTrig('Cotanh'),
+    parse: parseTrig('Coth'),
+  },
+  {
+    // Variant
+    identifierTrigger: 'cth',
+    parse: parseTrig('Coth'),
+  },
+  {
+    // Variant, non-standard command
+    latexTrigger: ['\\coth'],
+    parse: parseTrig('Coth'),
   },
   {
     name: 'Sec',
@@ -235,8 +369,12 @@ export const DEFINITIONS_TRIGONOMETRY: LatexDictionary = [
   },
   {
     name: 'Sech',
+    identifierTrigger: 'sech',
+    parse: parseTrig('Sech'),
+  },
+  {
+    // Variant, non-standard command
     latexTrigger: ['\\sech'],
-
     parse: parseTrig('Sech'),
   },
   {
@@ -246,6 +384,7 @@ export const DEFINITIONS_TRIGONOMETRY: LatexDictionary = [
     parse: parseTrig('Sinh'),
   },
   {
+    // Russian variant
     latexTrigger: ['\\sh'],
 
     parse: parseTrig('Sinh'),
@@ -257,6 +396,7 @@ export const DEFINITIONS_TRIGONOMETRY: LatexDictionary = [
     parse: parseTrig('Tan'),
   },
   {
+    // Variant, non-standard command
     latexTrigger: ['\\tg'],
 
     parse: parseTrig('Tan'),
@@ -268,6 +408,7 @@ export const DEFINITIONS_TRIGONOMETRY: LatexDictionary = [
     parse: parseTrig('Tanh'),
   },
   {
+    // Variant, non-standard command
     latexTrigger: ['\\th'],
 
     parse: parseTrig('Tanh'),

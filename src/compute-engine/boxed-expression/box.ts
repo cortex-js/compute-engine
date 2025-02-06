@@ -374,7 +374,15 @@ export function box(
     if (expr.startsWith("'") && expr.endsWith("'"))
       return new BoxedString(ce, expr.slice(1, -1));
 
-    if (/^[+-]?[0-9]/.test(expr)) return ce.number(expr);
+    let s = expr;
+    // Remove spaces
+    s = s.replace(/[\u0009-\u000d\u0020\u00a0]/g, '');
+    if (/^[+-]?[0-9]/.test(s)) {
+      const result = ce.number(expr);
+      // If the input only looked like a number, e.g. "2x+1", the result will
+      // be NaN.
+      if (!result.isNaN) return result;
+    }
 
     if (!isValidIdentifier(expr)) return ce.error('invalid-identifier', expr);
     return ce.symbol(expr, { canonical });
@@ -480,7 +488,8 @@ function makeCanonicalFunction(
 
     return ce._fn(
       name,
-      validateArguments(ce, xs, def.signature, def.lazy, def.threadable) ?? xs,
+      validateArguments(ce, xs, def.signature.type, def.lazy, def.threadable) ??
+        xs,
       metadata
     );
   }
@@ -521,7 +530,7 @@ function makeCanonicalFunction(
   const adjustedArgs = validateArguments(
     ce,
     args,
-    def.signature,
+    def.signature.type,
     def.lazy,
     def.threadable
   );

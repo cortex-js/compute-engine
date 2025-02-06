@@ -28,25 +28,30 @@ export async function runAsync<T>(
   timeLimitMs: number,
   signal?: AbortSignal
 ): Promise<T> {
-  const startTime = Date.now();
+  const startTime = performance.now();
 
   while (true) {
-    const { done, value } = gen.next();
+    const chunkStart = performance.now();
+    const chunkDurationMs = 16; // Maximum chunk duration in milliseconds
 
-    if (done) return value; // Exit successfully
+    // Process a chunk of iterations
+    while (performance.now() - chunkStart < chunkDurationMs) {
+      const { done, value } = gen.next();
 
-    // Check for abort signal
-    if (signal?.aborted)
-      throw new CancellationError({ value, cause: (signal as any).reason });
+      if (done) return value; // Exit successfully
 
-    // Check for time limit
-    const elapsedTime = Date.now() - startTime;
-    if (elapsedTime >= timeLimitMs)
-      throw new CancellationError<T>({
-        value,
-        cause: 'timeout',
-        message: `Timeout exceeded (${timeLimitMs}ms)`,
-      });
+      // Check for abort signal within the chunk
+      if (signal?.aborted)
+        throw new CancellationError({ value, cause: (signal as any).reason });
+
+      // Check overall time limit
+      if (performance.now() - startTime >= timeLimitMs)
+        throw new CancellationError({
+          value,
+          cause: 'timeout',
+          message: `Timeout exceeded (${timeLimitMs}ms)`,
+        });
+    }
 
     // Allow event loop to process other tasks
     await new Promise((resolve) => setTimeout(resolve, 0));

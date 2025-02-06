@@ -439,7 +439,7 @@ describe('OPERATOR postfix', () => {
           "Factorial2",
           [
             "Error",
-            ["ErrorCode", "'incompatible-type'", "'integer'", "'real'"]
+            ["ErrorCode", "'incompatible-type'", "'integer'", "'number'"]
           ]
         ]
       ]
@@ -454,7 +454,7 @@ describe('OPERATOR postfix', () => {
             "Factorial2",
             [
               "Error",
-              ["ErrorCode", "'incompatible-type'", "'integer'", "'real'"]
+              ["ErrorCode", "'incompatible-type'", "'integer'", "'number'"]
             ]
           ]
         ]

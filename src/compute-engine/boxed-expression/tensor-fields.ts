@@ -510,7 +510,7 @@ export function getExpressionDatatype(expr: BoxedExpression): TensorDataType {
 
   if (!expr.isNumberLiteral) return 'expression';
 
-  switch (expr.type) {
+  switch (expr.type.type) {
     case 'real':
     case 'rational':
     case 'finite_real':
@@ -521,7 +521,6 @@ export function getExpressionDatatype(expr: BoxedExpression): TensorDataType {
     case 'complex':
     case 'finite_complex':
     case 'imaginary':
-    case 'finite_imaginary':
       return 'complex128';
 
     case 'finite_integer': {

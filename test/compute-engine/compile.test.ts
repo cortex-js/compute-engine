@@ -5,7 +5,7 @@ describe('COMPILE', () => {
     it('should compile (and simplify) a simple expression', () => {
       expect(
         ce.parse('3.45 + \\frac57').compile()?.toString()
-      ).toMatchInlineSnapshot(`4.164285714285715`);
+      ).toMatchInlineSnapshot(`0.7142857142857143 + 3.45`);
     });
 
     it('should compile an expression with a constant', () => {
@@ -17,7 +17,7 @@ describe('COMPILE', () => {
     it('should compile an expression with trig functions', () => {
       expect(
         ce.parse('2 \\cos(\\frac{\\pi}{5})').compile()?.toString()
-      ).toMatchInlineSnapshot(`0.5 + 1.118033988749895`);
+      ).toMatchInlineSnapshot(`2 * Math.cos(0.2 * Math.PI)`);
     });
   });
 

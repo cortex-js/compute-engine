@@ -70,7 +70,7 @@ export function canonicalRoot(
 
   if (exp === 1) return a;
   if (exp === 2) {
-    if (a.isNumberLiteral && isSubtype(a.type, 'rational')) {
+    if (a.isNumberLiteral && a.type.matches('rational')) {
       if (a.re < SMALL_INTEGER) {
         const v = a.sqrt();
         if (typeof v.numericValue === 'number') return v;
@@ -193,8 +193,8 @@ export function pow(
 
     if (x.isInfinity) {
       // If the exponent is pure imaginary, the result is NaN
-      if (exp.type === 'imaginary') return ce.NaN;
-      if (exp.type === 'complex' && !isNaN(exp.re)) {
+      if (exp.type.matches('imaginary')) return ce.NaN;
+      if (exp.type.matches('complex') && !isNaN(exp.re)) {
         if (exp.re > 0) return ce.ComplexInfinity;
         if (exp.re < 0) return ce.Zero;
       }
@@ -310,21 +310,16 @@ export function pow(
 
     const n = x.numericValue!;
     if (typeof n === 'number') {
-      if (Number.isInteger(n))
-        return (
-          apply(
-            x,
-            (x) => Math.pow(x, e as number),
-            (x) => x.pow(e as number),
-            (x) => x.pow(e as number)
-          ) ?? ce._fn('Power', [x, ce.box(exp)])
-        );
+      return (
+        apply(
+          x,
+          (x) => Math.pow(x, e as number),
+          (x) => x.pow(e as number),
+          (x) => x.pow(e as number)
+        ) ?? ce._fn('Power', [x, ce.box(exp)])
+      );
     } else {
-      if (n.isExact) {
-        // @todo the result should always be exact if e is an integer
-        const v = n.asExact!.pow(e!);
-        if (v.isExact) return ce.number(v);
-      }
+      return ce.number(n!.pow(e!));
     }
   }
 

@@ -4,7 +4,7 @@ import {
   operand,
   operator,
   getSequence,
-  dictionary,
+  dictionaryFromExpression,
   stringValue,
   machineValue,
   operands,
@@ -226,60 +226,60 @@ export const DEFINITIONS_OTHERS: LatexDictionary = [
 
   {
     latexTrigger: ['\\displaystyle'],
-    parse: () => 'Nothing',
+    parse: () => 'Nothing', // @todo: parse as ['Style'...]
   },
   {
     latexTrigger: ['\\textstyle'],
-    parse: () => 'Nothing',
+    parse: () => 'Nothing', // @todo: parse as ['Style'...]
   },
   {
     latexTrigger: ['\\scriptstyle'],
-    parse: () => 'Nothing',
+    parse: () => 'Nothing', // @todo: parse as ['Style'...]
   },
   {
     latexTrigger: ['\\scriptscriptstyle'],
-    parse: () => 'Nothing',
+    parse: () => 'Nothing', // @todo: parse as ['Style'...]
   },
 
   {
     latexTrigger: ['\\tiny'],
-    parse: () => 'Nothing',
+    parse: () => 'Nothing', // @todo: parse as ['Style'...]
   },
   {
     latexTrigger: ['\\scriptsize'],
-    parse: () => 'Nothing',
+    parse: () => 'Nothing', // @todo: parse as ['Style'...]
   },
   {
     latexTrigger: ['\\footnotesize'],
-    parse: () => 'Nothing',
+    parse: () => 'Nothing', // @todo: parse as ['Style'...]
   },
   {
     latexTrigger: ['\\small'],
-    parse: () => 'Nothing',
+    parse: () => 'Nothing', // @todo: parse as ['Style'...]
   },
   {
     latexTrigger: ['\\normalsize'],
-    parse: () => 'Nothing',
+    parse: () => 'Nothing', // @todo: parse as ['Style'...]
   },
   {
     latexTrigger: ['\\large'],
-    parse: () => 'Nothing',
+    parse: () => 'Nothing', // @todo: parse as ['Style'...]
   },
   {
     latexTrigger: ['\\Large'],
-    parse: () => 'Nothing',
+    parse: () => 'Nothing', // @todo: parse as ['Style'...]
   },
   {
     latexTrigger: ['\\LARGE'],
-    parse: () => 'Nothing',
+    parse: () => 'Nothing', // @todo: parse as ['Style'...]
   },
   {
     latexTrigger: ['\\huge'],
-    parse: () => 'Nothing',
+    parse: () => 'Nothing', // @todo: parse as ['Style'...]
   },
   {
     latexTrigger: ['\\Huge'],
-    parse: () => 'Nothing',
+    parse: () => 'Nothing', // @todo: parse as ['Style'...]
   },
 
   {
@@ -287,9 +287,12 @@ export const DEFINITIONS_OTHERS: LatexDictionary = [
     serialize: (serializer, expr): string => {
       let result = serializer.serialize(operand(expr, 1));
 
-      const dict = dictionary(operand(expr, 2));
+      const dict = dictionaryFromExpression(operand(expr, 2));
       if (dict === null) return result;
 
+      //
+      // Display: "math style"
+      //
       if (stringValue(dict.display) === 'block')
         result = joinLatex(['{\\displaystyle', result, '}']);
       else if (stringValue(dict.display) === 'inline')
@@ -299,6 +302,9 @@ export const DEFINITIONS_OTHERS: LatexDictionary = [
       else if (stringValue(dict.display) === 'scriptscript')
         result = joinLatex(['{\\scriptscriptstyle', result, '}']);
 
+      //
+      // Font Size
+      //
       const v = machineValue(dict.size);
       if (v !== null && v >= 1 && v <= 10) {
         result = joinLatex([
@@ -319,6 +325,27 @@ export const DEFINITIONS_OTHERS: LatexDictionary = [
           '}',
         ]);
       }
+
+      //
+      // Font family
+      //
+
+      //
+      // Color
+      //
+
+      //
+      // Background Color
+      //
+
+      //
+      // Border
+      //
+
+      //
+      // Annotation
+      //
+
       return result;
     },
   },

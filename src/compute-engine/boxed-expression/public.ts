@@ -26,6 +26,7 @@ import { Type, TypeString } from '../../common/type/types';
 import { AbstractTensor } from '../tensor/tensors';
 import { OneOf } from '../../common/one-of';
 import { CompiledType, JSSource } from '../compile';
+import { BoxedType } from '../../common/type/boxed-type';
 
 /**
  * :::info[THEORY OF OPERATIONS]
@@ -1058,8 +1059,8 @@ export interface BoxedExpression {
    *
    * Reset the cached value associated with this expression.
    *
-   * Use when the environment has changed, for example the numeric mode
-   * or precision, to force the expression to be re-evaluated.
+   * Use when the environment, for example the precision, has changed to
+   * force the expression to be re-evaluated.
    *
    * @internal
    */
@@ -1171,9 +1172,7 @@ export interface BoxedExpression {
     vars?: Record<MathJsonIdentifier, CompiledType>;
     imports?: unknown[];
     preamble?: string;
-  }):
-    | ((args?: Record<string, CompiledType>) => CompiledType | undefined)
-    | undefined;
+  }): (args?: Record<string, CompiledType>) => CompiledType;
 
   /**
    * If this is an equation, solve the equation for the variables in vars.
@@ -1188,7 +1187,7 @@ export interface BoxedExpression {
    *
    */
   solve(
-    vars:
+    vars?:
       | Iterable<string>
       | string
       | BoxedExpression
@@ -1243,9 +1242,9 @@ export interface BoxedExpression {
    * :::
    *
    */
-  get type(): Type;
+  get type(): BoxedType;
 
-  set type(type: Type);
+  set type(type: Type | TypeString | BoxedType);
 
   /** `true` if the value of this expression is a number.
    *
@@ -1686,7 +1685,7 @@ export type BoxedFunctionDefinition = BoxedBaseDefinition &
     inferredSignature: boolean;
 
     /** The type of the arguments and return value of this function */
-    signature: Type;
+    signature: BoxedType;
 
     /** If present, this handler can be used to more precisely determine the
      * return type based on the type of the arguments. The arguments themselves
@@ -1695,7 +1694,7 @@ export type BoxedFunctionDefinition = BoxedBaseDefinition &
     type?: (
       ops: ReadonlyArray<BoxedExpression>,
       options: { engine: IComputeEngine }
-    ) => Type | TypeString | undefined;
+    ) => Type | TypeString | BoxedType | undefined;
 
     /** If present, this handler can be used to determine the sign of the
      *  return value of the function, based on the sign and type of its
@@ -1817,7 +1816,7 @@ export interface BoxedSymbolDefinition
   // cannot be updated.
   inferredType: boolean;
 
-  type: Type;
+  type: BoxedType;
 }
 
 /**
@@ -2075,8 +2074,6 @@ export type AssumeResult =
 export type AssignValue =
   | boolean
   | number
-  | string
-  | LatexString
   | SemiBoxedExpression
   | ((
       args: ReadonlyArray<BoxedExpression>,
@@ -2235,7 +2232,7 @@ export interface IComputeEngine extends IBigNum {
 
   typeError(
     expectedType: Type,
-    actualType: undefined | Type,
+    actualType: undefined | Type | BoxedType,
     where?: SemiBoxedExpression
   ): BoxedExpression;
 
@@ -2243,6 +2240,8 @@ export interface IComputeEngine extends IBigNum {
 
   tuple(...elements: ReadonlyArray<number>): BoxedExpression;
   tuple(...elements: ReadonlyArray<BoxedExpression>): BoxedExpression;
+
+  type(type: Type | TypeString | BoxedType): BoxedType;
 
   rules(
     rules:
@@ -2459,11 +2458,11 @@ export type LatexString = string;
  *    value.
  * - `recursive`: if true, match recursively, otherwise match only the top
  *    level.
- * - `exact`: if true, only match expressions that are structurally identical.
- *    If false, match expressions that are structurally identical or equivalent.
+ * - `useVariations`: if false, only match expressions that are structurally identical.
+ *    If true, match expressions that are structurally identical or equivalent.
  *
- *    For example, when false, `["Add", '_a', 2]` matches `2`, with a value of
- *    `_a` of `0`. If true, the expression does not match. **Default**: `true`
+ *    For example, when true, `["Add", '_a', 2]` matches `2`, with a value of
+ *    `_a` of `0`. If false, the expression does not match. **Default**: `false`
  *
  * @category Pattern Matching
  *
@@ -2667,7 +2666,7 @@ export type FunctionDefinition = BaseDefinition &
     type?: (
       ops: ReadonlyArray<BoxedExpression>,
       options: { engine: IComputeEngine }
-    ) => Type | TypeString | undefined;
+    ) => Type | TypeString | BoxedType | undefined;
 
     /** Return the sign of the function expression.
      *

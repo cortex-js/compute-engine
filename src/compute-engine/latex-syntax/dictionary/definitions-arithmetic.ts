@@ -18,7 +18,6 @@ import {
   Serializer,
   Parser,
   LatexDictionary,
-  INVISIBLE_OP_PRECEDENCE,
   MULTIPLICATION_PRECEDENCE,
   ADDITION_PRECEDENCE,
   ARROW_PRECEDENCE,
@@ -827,8 +826,12 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
   },
   {
     name: 'GCD',
+    latexTrigger: ['\\gcd'], // command from amsmath package
+  },
+  {
     identifierTrigger: 'gcd',
     kind: 'function',
+    parse: 'GCD',
   },
   {
     identifierTrigger: 'GCD',
@@ -1093,7 +1096,7 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
     precedence: ARROW_PRECEDENCE,
     parse: (parser, terminator) => {
       const rhs = parser.parseExpression({ ...terminator, minPrec: 400 });
-      return ['PlusMinus', missingIfEmpty(rhs)] as Expression;
+      return ['PlusMinus', 0, missingIfEmpty(rhs)] as Expression;
     },
   },
   {

@@ -28,11 +28,13 @@
 
   now returns `1 + i` instead of throwing a type error.
 
+- Correctly parse and evaluate unary and binary `\pm` and `\mp` operators.
+
 ### New Features and Improvements
 
-- `isEqual` will now return true/false if the expressions include the same
-  unknowns and are structurally equal after expansion and simplifications. For
-  example:
+- `expr.isEqual()` will now return true/false if the expressions include the
+  same unknowns and are structurally equal after expansion and simplifications.
+  For example:
 
   ```js
   console.info(ce.parse('(x+1)^2').isEqual(ce.parse('x^2+2x+1')));

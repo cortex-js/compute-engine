@@ -46,9 +46,10 @@ export class BigNumericValue extends NumericValue {
   }
 
   get type(): NumericType {
+    if (this.isNaN) return 'number';
+    if (this.isComplexInfinity) return 'complex';
     if (this.im !== 0) {
-      if (!Number.isFinite(this.im)) return 'non_finite_number';
-      if (this.decimal.isZero()) return 'finite_imaginary';
+      if (this.decimal.isZero()) return 'imaginary';
       return 'finite_complex';
     }
     if (!this.decimal.isFinite()) return 'non_finite_number';

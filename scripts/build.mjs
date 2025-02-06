@@ -3,7 +3,7 @@
 
 import * as esbuild from 'esbuild';
 
-import pkg from '../package.json' assert { type: 'json' };
+import pkg from '../package.json' with { type: 'json' };
 const SDK_VERSION = pkg.version || 'v?.?.?';
 
 // UMD wrapper

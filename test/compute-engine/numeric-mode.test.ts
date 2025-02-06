@@ -59,10 +59,7 @@ describe('NUMERIC MODE', () => {
     expect(check('12345678901234567890^{23456789012345678901}'))
       .toMatchInlineSnapshot(`
       box       = ["Power", {num: "12345678901234567890"}, {num: "23456789012345678901"}]
-      eval-auto = 12345678901234567890^(23456789012345678901)
-      eval-mach = 12345678901234567890^(23456789012345678901)
-      N-auto    = +oo
-      N-mach    = +oo
+      eval-auto = +oo
     `));
 
   test(`\\cos(555555^{-1})`, () =>
@@ -91,7 +88,7 @@ describe('NUMERIC MODE', () => {
     expect(check('e^{i\\pi}')).toMatchInlineSnapshot(`
       box       = ["Power", "e", ["InvisibleOperator", "i", "Pi"]]
       canonical = ["Exp", ["Multiply", ["Complex", 0, 1], "Pi"]]
-      simplify  = -1
+      eval-auto = -1
     `));
 });
 

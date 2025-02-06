@@ -188,8 +188,13 @@ export function isSymbolDefinition(def: any): def is SymbolDefinition {
 
   if (isBoxedExpression(def)) return false;
 
-  if ('value' in def || 'constant' in def || 'inferred' in def) {
-    if ('type' in def && typeof def.type === 'function') {
+  if (
+    'value' in def ||
+    'constant' in def ||
+    'inferred' in def ||
+    'type' in def
+  ) {
+    if ('type' in def && typeof def.type !== 'string') {
       throw new Error(
         'The `type` field of a symbol definition should be of type `string`'
       );
@@ -270,8 +275,8 @@ export function canonical(
 }
 
 export function domainToType(expr: BoxedExpression): Type {
-  if (expr.symbol === 'Booleans') return 'boolean';
-  if (expr.symbol === 'Strings') return 'string';
+  // if (expr.symbol === 'Booleans') return 'boolean';
+  // if (expr.symbol === 'Strings') return 'string';
   if (expr.symbol === 'Numbers') return 'number';
   if (expr.symbol === 'ComplexNumbers') return 'complex';
   if (expr.symbol === 'ImaginaryNumbers') return 'imaginary';

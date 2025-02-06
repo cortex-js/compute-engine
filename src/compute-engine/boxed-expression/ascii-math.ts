@@ -366,7 +366,6 @@ export function toAsciiMath(
   //
   const num = expr.numericValue;
   if (num !== null) {
-    const ce = expr.engine;
     if (expr.isNaN) return serializeSymbol('NaN', options);
     if (expr.isFinite === false) {
       if (expr.isNegative !== true && expr.isPositive !== true)

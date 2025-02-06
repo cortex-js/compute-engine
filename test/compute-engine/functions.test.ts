@@ -30,6 +30,46 @@ engine.assign('f8', ['Add', '_', 1]);
 engine.assign('f9', ['Add', '_1', 1]);
 engine.assign('f10', ['Add', ['Divide', '_1', '_2'], '_3']);
 
+engine.declare('fn1', 'function');
+engine.declare('fn2', 'function');
+// Inferring the return type of a function
+engine.box(['Add', ['fn2', 10], 1]).evaluate();
+engine.declare('fn3', 'function');
+// Inferring the arguments of a function
+engine.box(['fn3', 10]).evaluate();
+
+engine.assign('fn4', ['Function', ['Add', 'x', 1], 'x']);
+engine.declare('fn5', {
+  evaluate: (args) => engine.number((args[0].value as number) + 1),
+});
+
+describe('Infer function signature', () => {
+  test('declared function signature', () =>
+    expect(engine.box('fn1').type.toString()).toMatchInlineSnapshot(
+      `(...unknown) -> unknown`
+    ));
+
+  test('inferred function signature (result)', () =>
+    expect(engine.box('fn2').type.toString()).toMatchInlineSnapshot(
+      `(...unknown) -> unknown`
+    ));
+
+  test('inferred function signature (arguments)', () =>
+    expect(engine.box('fn3').type.toString()).toMatchInlineSnapshot(
+      `(...unknown) -> unknown`
+    ));
+
+  test('declared function signature with expression body', () =>
+    expect(engine.box('fn4').type.toString()).toMatchInlineSnapshot(
+      `(any) -> number`
+    ));
+
+  test('declared function signature with JS body', () =>
+    expect(engine.box('fn5').type.toString()).toMatchInlineSnapshot(
+      `(...any) -> any`
+    ));
+});
+
 describe('Infer result domain', () => {
   // By calling add, the result of `f1` is inferred to be a number
   test('Add', () =>
@@ -50,7 +90,7 @@ describe('Anonymous function', () => {
 describe('Anonymous function with missing param', () => {
   test('Missing Param Function', () =>
     expect(evaluate(['f1'])).toMatchInlineSnapshot(
-      `["Function", ["Add", "_1", 1], "_1"]`
+      `["f1", ["Error", "'missing'"]]`
     ));
   test('Missing Param Expression', () =>
     expect(evaluate(['f2'])).toMatchInlineSnapshot(`["f2"]`));
@@ -64,7 +104,9 @@ describe('Anonymous function with missing param', () => {
 
 describe('Anonymous function with too many params', () => {
   test('Too many params: Function', () =>
-    expect(evaluate(['f1', 10, 20])).toMatchInlineSnapshot(`["f1", 10, 20]`));
+    expect(evaluate(['f1', 10, 20])).toMatchInlineSnapshot(
+      `["f1", 10, ["Error", "'unexpected-argument'", "'20'"]]`
+    ));
 
   test('Too many params: Expression', () =>
     expect(evaluate(['f2', 10, 20])).toMatchInlineSnapshot(`["f2", 10, 20]`));
@@ -91,7 +133,9 @@ describe('Anonymous function with anonymous parameters', () => {
 
 describe('currying', () => {
   test('f7 expects two arguments. Only one provided', () =>
-    expect(evaluate(['f10', 5])).toMatchInlineSnapshot(`6`)); // @fixme
+    expect(evaluate(['f10', 5])).toMatchInlineSnapshot(
+      `["f10", 5, ["Error", "'missing'"], ["Error", "'missing'"]]`
+    ));
 });
 
 describe('Apply', () => {

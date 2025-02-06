@@ -10,6 +10,7 @@ import { _BoxedExpression } from './abstract-boxed-expression';
 import { hashCode, isBoxedExpression } from './utils';
 import { isWildcard, wildcardName } from './boxed-patterns';
 import { Type } from '../../common/type/types';
+import { BoxedType } from '../../common/type/boxed-type';
 
 /**
  * BoxedString
@@ -46,8 +47,8 @@ export class BoxedString extends _BoxedExpression {
     return;
   }
 
-  get type(): Type {
-    return 'string';
+  get type(): BoxedType {
+    return new BoxedType('string');
   }
 
   get complexity(): number {

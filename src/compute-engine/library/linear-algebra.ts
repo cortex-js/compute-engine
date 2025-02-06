@@ -74,8 +74,8 @@ export const LINEAR_ALGEBRA_LIBRARY: IdentifierDefinitions[] = [
       complexity: 8200,
       signature: '(list<number>, tuple) -> value',
       type: ([value, shape]) => {
-        if (!isSubtype(value.type, 'list')) return 'nothing';
-        const col = value.type as ListType;
+        if (!value.type.matches('list')) return 'nothing';
+        const col = value.type.type as ListType;
         if (!isSubtype(col.elements, 'number')) return 'nothing';
         return parseType(
           `list<number^${shape.ops!.map((x) => x.toString()).join('x')}>`

@@ -169,7 +169,7 @@ function makeLambda(
   // This is to avoid having the arguments bound to an id in a parent scope
   // with coincidentally the same name as the parameter.
   for (const param of params)
-    ce.declare(param, { inferred: true, type: undefined });
+    ce.declare(param, { inferred: true, type: 'unknown' });
   const fn = body.canonical;
 
   fn.bind();

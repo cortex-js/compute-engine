@@ -101,6 +101,8 @@ function parseIdentifierToken(
     return SYMBOLS[i][0];
   }
 
+  // @fixme: encode other unicode chars as ____UUUU
+
   // Unexpected LaTeX command or \\char or \\unicode?
   return parser.matchChar() ?? parser.nextToken();
 }
@@ -144,6 +146,7 @@ function parseIdentifierBody(parser: Parser): string | null {
 
   while (!parser.atEnd) {
     if (parser.match('\\degree')) id += '_deg';
+    else if (parser.matchAll(['^', '\\circ'])) id += '_deg';
     else if (parser.matchAll(['^', '\\prime'])) id += '_prime';
     else if (parser.matchAll(['^', '<{>', '\\prime', '<}>'])) id += '_prime';
     else if (parser.matchAll(['^', '<{>', '\\doubleprime', '<}>']))

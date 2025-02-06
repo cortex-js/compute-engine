@@ -1,7 +1,7 @@
 import {
   operand,
   nops,
-  dictionary,
+  dictionaryFromExpression,
   operator,
   machineValue,
   stringValue,
@@ -115,7 +115,7 @@ export function serializeCortex(
     }
 
     if (!body) {
-      const dict = dictionary(expr);
+      const dict = dictionaryFromExpression(expr);
       if (dict !== null) {
         const keyValues = Object.keys(dict).map((key) =>
           fmt.line(

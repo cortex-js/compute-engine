@@ -36,24 +36,32 @@ export function interval(expr: BoxedExpression): Interval | undefined {
     return { start: start.re, openStart, end: end.re, openEnd };
   }
 
-  // Known sets...
+  //
+  // Known sets which are also intervals...
+  //
   if (expr.symbol === 'EmptySet')
     return { start: 0, openStart: true, end: 0, openEnd: true };
-  else if (expr.symbol === 'RealNumbers')
+
+  if (expr.symbol === 'RealNumbers')
     return {
       start: -Infinity,
       openStart: false,
       end: Infinity,
       openEnd: false,
     };
-  else if (expr.symbol === 'NegativeNumbers')
+
+  if (expr.symbol === 'NegativeNumbers')
     return { start: -Infinity, openStart: false, end: 0, openEnd: true };
-  else if (expr.symbol === 'NonPositiveNumbers')
+
+  if (expr.symbol === 'NonPositiveNumbers')
     return { start: -Infinity, openStart: false, end: 0, openEnd: false };
-  else if (expr.symbol === 'PositiveNumbers')
+
+  if (expr.symbol === 'PositiveNumbers')
     return { start: 0, openStart: true, end: Infinity, openEnd: false };
-  else if (expr.symbol === 'NonNegativeNumbers')
+
+  if (expr.symbol === 'NonNegativeNumbers')
     return { start: 0, openStart: false, end: Infinity, openEnd: false };
+
   return undefined;
 }
 

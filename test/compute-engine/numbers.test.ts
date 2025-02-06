@@ -77,10 +77,10 @@ describe('PROPERTIES OF NUMBERS', () => {
   test('ComplexInfinity is a non-finite-number', () => {
     expect(checkProps(ce.box('ComplexInfinity'))).toMatchInlineSnapshot(`
       number literal: true
-      type: non_finite_number
-      real: true
-      rational: true
-      integer: true
+      type: complex
+      real: false
+      rational: false
+      integer: false
       positive (>0): false
       negative (<0): false
       nonPositive (<=0): false
@@ -143,7 +143,7 @@ describe('PROPERTIES OF NUMBERS', () => {
   test('NaN is a non-finite-number', () => {
     expect(checkProps(ce.box('NaN'))).toMatchInlineSnapshot(`
       number literal: true
-      type: non_finite_number
+      type: number
       real: true
       rational: false
       integer: false
@@ -165,7 +165,7 @@ describe('PROPERTIES OF NUMBERS', () => {
   test('i is a complex number', () => {
     expect(checkProps(ce.box('i'))).toMatchInlineSnapshot(`
       number literal: true
-      type: finite_imaginary
+      type: imaginary
       real: false
       rational: false
       integer: false
@@ -187,14 +187,14 @@ describe('PROPERTIES OF NUMBERS', () => {
   test('ImaginaryUnit is a complex number', () => {
     expect(checkProps(ce.box('ImaginaryUnit'))).toMatchInlineSnapshot(`
       number literal: false
-      type: unknown
-      real: undefined
-      rational: undefined
-      integer: undefined
-      positive (>0): undefined
-      negative (<0): undefined
-      nonPositive (<=0): undefined
-      nonNegative (>=0): undefined
+      type: imaginary
+      real: false
+      rational: false
+      integer: false
+      positive (>0): false
+      negative (<0): false
+      nonPositive (<=0): false
+      nonNegative (>=0): false
       -1: false
       0: false
       +1: false
@@ -209,7 +209,7 @@ describe('PROPERTIES OF NUMBERS', () => {
   test('Complex(0,1) is a complex number', () => {
     expect(checkProps(ce.box(['Complex', 0, 1]))).toMatchInlineSnapshot(`
       number literal: true
-      type: finite_imaginary
+      type: imaginary
       real: false
       rational: false
       integer: false
@@ -363,14 +363,14 @@ describe('PROPERTIES OF NUMBERS', () => {
   test('Pi is a real number', () => {
     expect(checkProps(ce.symbol('Pi'))).toMatchInlineSnapshot(`
       number literal: false
-      type: unknown
-      real: undefined
-      rational: undefined
-      integer: undefined
-      positive (>0): undefined
-      negative (<0): undefined
-      nonPositive (<=0): undefined
-      nonNegative (>=0): undefined
+      type: finite_real
+      real: true
+      rational: false
+      integer: false
+      positive (>0): true
+      negative (<0): false
+      nonPositive (<=0): false
+      nonNegative (>=0): true
       -1: false
       0: false
       +1: false

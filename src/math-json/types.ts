@@ -1,7 +1,7 @@
 /** @module "math-json" */
 
 /** @category MathJSON */
-export type Attributes = {
+export type MathJsonAttributes = {
   /** A human readable string to annotate this expression, since JSON does not
    * allow comments in its encoding */
   comment?: string;
@@ -97,22 +97,22 @@ export type MathJsonIdentifier = string;
  */
 export type MathJsonNumber = {
   num: 'NaN' | '-Infinity' | '+Infinity' | string;
-} & Attributes;
+} & MathJsonAttributes;
 
 /** @category MathJSON */
 export type MathJsonSymbol = {
   sym: MathJsonIdentifier;
-} & Attributes;
+} & MathJsonAttributes;
 
 /** @category MathJSON */
 export type MathJsonString = {
   str: string;
-} & Attributes;
+} & MathJsonAttributes;
 
 /** @category MathJSON */
 export type MathJsonFunction = {
   fn: [MathJsonIdentifier, ...Expression[]];
-} & Attributes;
+} & MathJsonAttributes;
 
 export type ExpressionObject =
   | MathJsonNumber

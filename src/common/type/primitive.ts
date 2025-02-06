@@ -1,12 +1,12 @@
 import type { PrimitiveType } from './types';
 
+/** All the types representing numeric values */
 export const NUMERIC_TYPES: PrimitiveType[] = [
   'number',
   'finite_number',
   'complex',
   'finite_complex',
   'imaginary',
-  'finite_imaginary',
   'real',
   'finite_real',
   'rational',

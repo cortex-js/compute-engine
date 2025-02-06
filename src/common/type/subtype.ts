@@ -14,43 +14,38 @@ import type {
   TypeString,
 } from './types';
 
+/** For each key, *all* the primitive subtypes of the type corresponding to that key */
 const PRIMITIVE_SUBTYPES: Record<PrimitiveType, PrimitiveType[]> = {
   number: NUMERIC_TYPES,
+  non_finite_number: [], //  PositiveInfinity, NegativeInfinity
   finite_number: [
     'finite_complex',
-    'finite_imaginary',
     'finite_real',
     'finite_integer',
     'finite_rational',
   ],
-  non_finite_number: [],
   complex: [
     'finite_complex',
-    'finite_imaginary',
+    'imaginary',
     'finite_real',
     'finite_rational',
     'finite_integer',
     'non_finite_number',
-    'imaginary',
-    'real',
-    'rational',
-    'integer',
   ],
   finite_complex: [
-    'finite_imaginary',
+    'imaginary',
     'finite_real',
     'finite_rational',
     'finite_integer',
   ],
-  imaginary: ['finite_imaginary', 'non_finite_number'],
-  finite_imaginary: [],
+  imaginary: [], // Pure, finite, imaginary number
   real: [
+    'rational',
+    'integer',
     'finite_real',
     'finite_rational',
     'finite_integer',
     'non_finite_number',
-    'rational',
-    'integer',
   ],
   finite_real: ['finite_rational', 'finite_integer'],
   rational: [
@@ -120,7 +115,7 @@ export function isSubtype(
   // `never` is the bottom type, no type is a subtype of `never`
   if (rhs === 'never') return false;
 
-  // No type is a subtype of `error`, even itself
+  // No type is a subtype of `error`, even itself (@fixme: is this correct?)
   if (rhs === 'error') return false;
 
   // No type is a subtype of `nothing` (unit type), except itself
@@ -129,9 +124,10 @@ export function isSubtype(
   // Nothing is the unit type, it is only a subtype of itself
   if (lhs === 'nothing') return false;
 
-  // 'unknown' is only a subtype of `any` (not of itself)
-  // No type is a subtype of `unknown`
-  if (lhs === 'unknown' || rhs === 'unknown') return false;
+  // Every type is a subtype of `unknown`
+  if (rhs === 'unknown') return true;
+  // 'unknown' is only a subtype of `any` (handled above)
+  if (lhs === 'unknown') return false;
 
   //
   // Handle other subtype of primitive types
@@ -140,6 +136,20 @@ export function isSubtype(
     // Primitive type subtype of another primitive type
     if (typeof lhs === 'string')
       return isPrimitiveSubtype(lhs as PrimitiveType, rhs as PrimitiveType);
+
+    if (lhs.kind === 'value') {
+      if (typeof lhs.value === 'boolean') return rhs === 'boolean';
+      if (typeof lhs.value === 'number') {
+        if (Number.isInteger(lhs.value))
+          return isPrimitiveSubtype('integer', rhs as PrimitiveType);
+        return isPrimitiveSubtype('number', rhs as PrimitiveType);
+      }
+      if (typeof lhs.value === 'boolean')
+        return isPrimitiveSubtype('boolean', rhs as PrimitiveType);
+      if (typeof lhs.value === 'string')
+        return isPrimitiveSubtype('string', rhs as PrimitiveType);
+      return false;
+    }
 
     if (rhs === 'numeric') return isNumeric(lhs);
 
@@ -165,15 +175,23 @@ export function isSubtype(
     // A map is a subtype of `map`
     if (rhs === 'map') return lhs.kind === 'map';
 
-    // A union is a subtype of a type if any of its types is a subtype of the type
-    if (lhs.kind === 'union') return lhs.types.some((t) => isSubtype(t, rhs));
+    // A union is a subtype of a type if all of its types is a subtype of the type
+    if (lhs.kind === 'union') return lhs.types.every((t) => isSubtype(t, rhs));
 
     // Other composite types are not subtypes of primitive types
     return false;
   }
 
   // A type is a subtype of a union if it is a subtype of any of the types in the union
-  if (rhs.kind === 'union') return rhs.types.some((t) => isSubtype(lhs, t));
+  if (rhs.kind === 'union') {
+    if (typeof lhs !== 'string' && lhs.kind === 'union') {
+      // lhs is a union, rhs is a union
+      return lhs.types.every((lhsType) =>
+        rhs.types.some((rhsType) => isSubtype(lhsType, rhsType))
+      );
+    }
+    return rhs.types.some((t) => isSubtype(lhs, t));
+  }
 
   // A primitive type is not a subtype of a composite type (except a union)
   if (typeof lhs === 'string') return false;
@@ -296,21 +314,25 @@ export function isSubtype(
     return false;
   }
 
+  //
   // Handle tuples
+  //
   if (lhs.kind === 'tuple' && rhs.kind === 'tuple') {
     // Check they have the same number of elements
     if (lhs.elements.length !== rhs.elements.length) return false;
 
-    // Check that all the elements match by type
-    // @todo: should we match by name as well?
+    // Check that all the elements match by type and name
     for (let i = 0; i < lhs.elements.length; i++) {
-      if (!isSubtype(lhs.elements[i].type, rhs.elements[i].type)) {
-        return false;
-      }
+      const a = lhs.elements[i];
+      const b = rhs.elements[i];
+      if (!isSubtype(a.type, b.type) || a.name !== b.name) return false;
     }
     return true;
   }
 
+  //
+  // Handle lists
+  //
   if (rhs.kind === 'list' && lhs.kind === 'list') {
     43;
     // Check that the element types match
@@ -339,6 +361,27 @@ export function isSubtype(
     return true;
   }
 
+  if (lhs.kind === 'negation' && rhs.kind === 'negation') {
+    return isSubtype(lhs.type, rhs.type);
+  }
+
+  if (rhs.kind === 'negation') {
+    return !isSubtype(lhs, rhs.type);
+  }
+
+  // Value types (strings, boolean, number)
+  if (rhs.kind === 'value' && lhs.kind === 'value')
+    return rhs.value === lhs.value;
+
+  if (lhs.kind === 'value') {
+    if (typeof lhs.value === 'boolean') return isSubtype('boolean', rhs);
+    if (typeof lhs.value === 'number') {
+      if (Number.isInteger(lhs.value)) return isSubtype('integer', rhs);
+      return isSubtype('real', rhs);
+    }
+    if (typeof lhs.value === 'string') return isSubtype('string', rhs);
+  }
+
   // If no conditions matched, return false
   return false;
 }
@@ -360,6 +403,7 @@ export function isCompatible(
 function isNumeric(type: Type): boolean {
   if (typeof type === 'string')
     return NUMERIC_TYPES.includes(type as PrimitiveType);
+  if (type.kind === 'value') return typeof type.value === 'number';
   return false;
 }
 
@@ -367,6 +411,8 @@ function isScalar(type: Type): boolean {
   if (isNumeric(type)) return true;
   if (typeof type === 'string')
     return SCALAR_TYPES.includes(type as PrimitiveType);
+  if (type.kind === 'value')
+    return ['string', 'boolean', 'number'].includes(typeof type.value);
   return false;
 }
 

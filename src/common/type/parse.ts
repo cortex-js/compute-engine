@@ -2,8 +2,8 @@ import type { Type, NamedElement, PrimitiveType } from './types';
 
 import { PRIMITIVE_TYPES } from './primitive';
 import { typeToString } from './serialize';
-import { isValidType, makeType } from './utils';
-import { suggestKeyword } from '../suggest';
+import { isValidType } from './utils';
+import { fuzzyStringMatch } from '../fuzzy-string-match';
 
 class TypeParser {
   buffer: string;
@@ -14,19 +14,16 @@ class TypeParser {
 
   constructor(
     buffer: string,
-    options: {
-      value: (parser: TypeParser) => any;
-      type: (parser: TypeParser) => string | null;
-    } = {
-      value: () => null,
-      type: () => null,
+    options?: {
+      value?: (parser: TypeParser) => any;
+      type?: (parser: TypeParser) => string | null;
     }
   ) {
     this.buffer = buffer;
     this.pos = 0;
 
-    this._valueParser = options.value;
-    this._typeParser = options.type;
+    this._valueParser = options?.value ?? (() => null);
+    this._typeParser = options?.type ?? (() => null);
   }
 
   error(...messages: string[]): never {
@@ -72,14 +69,14 @@ class TypeParser {
     this.skipWhitespace();
     const value = this._valueParser(this);
     if (value === null) return null;
-    return makeType({ kind: 'value', value });
+    return { kind: 'value', value };
   }
 
   parseTypeReference(): Type | null {
     this.skipWhitespace();
     const ref = this._typeParser(this);
     if (ref === null) return null;
-    return makeType({ kind: 'reference', ref });
+    return { kind: 'reference', ref };
   }
 
   parsePrimitiveType(): Type | null {
@@ -145,17 +142,18 @@ class TypeParser {
       return null;
     }
 
-    // We don't want to parse a type, because it could be a function signature
-    // i.e. `...number -> number` should be parsed as `...(number) -> number`
-    // not `...(number -> number)`
-    let type = this.parsePrimitiveType() ?? this.parsePrimaryGroup();
+    // We don't want to parse a type, because it could be a function signature.
+    // i.e.   `...number -> number` should be parsed
+    // as     `...(number) -> number`
+    // not as `...(number -> number)`
+    let type = this.parsePrimitiveType() ?? this.parseGroup();
 
     if (!type) {
       // We didn't get a type. Check if we had "...name:type" instead...
       if (!name) {
         this.pos = pos;
         if (this.match('...') && this.parseName()) {
-          const type = this.parsePrimitiveType() ?? this.parsePrimaryGroup();
+          const type = this.parsePrimitiveType() ?? this.parseGroup();
           this.pos = pos;
           this.error(
             'The rest argument indicator is placed before the type, not the name',
@@ -184,63 +182,62 @@ class TypeParser {
     let pos = this.pos;
     if (this.match('()')) {
       // Empty argument list is valid
+    } else if (this.match('(')) {
+      // We have a list of arguments in parentheses
+      [args, optArgs, restArg] = this.parseArguments();
+
+      this.skipWhitespace();
+      if (!this.match(')')) {
+        if (restArg) {
+          const el = this.parseNamedElement();
+          if (el) {
+            this.pos = pos;
+            this.error('The rest argument must be the last argument');
+          }
+          this.error('The rest argument must have a valid type');
+        }
+        if (optArgs.length > 0) {
+          const el = this.parseNamedElement();
+          if (el)
+            this.error(
+              'Optional arguments cannot be followed by required arguments'
+            );
+          this.skipWhitespace();
+          pos = this.pos;
+          if (this.match('->')) {
+            this.pos = pos;
+            this.error('Expected ")" to close the argument list');
+          }
+
+          this.error('Expected an argument');
+        }
+        this.pos = pos;
+        return null;
+      }
     } else {
-      if (this.match('(')) {
-        // We have a list of arguments in parentheses
-        [args, optArgs, restArg] = this.parseArguments();
-
-        this.skipWhitespace();
-        if (!this.match(')')) {
-          if (restArg) {
-            const el = this.parseNamedElement();
-            if (el) {
-              this.pos = pos;
-              this.error('The rest argument must be the last argument');
-            }
-            this.error('The rest argument must have a valid type');
-          }
-          if (optArgs.length > 0) {
-            const el = this.parseNamedElement();
-            if (el)
-              this.error(
-                'Optional arguments cannot be followed by required arguments'
-              );
-            this.skipWhitespace();
-            pos = this.pos;
-            if (this.match('->')) {
-              this.pos = pos;
-              this.error('Expected ")" to close the argument list');
-            }
-
-            this.error('Expected an argument');
-          }
-          this.pos = pos;
-          return null;
-        }
-      } else {
-        // We could have a single rest argument without parentheses
-        // e.g. `...number -> number`
-        // We could also have a single argument without parentheses
-        // but this case is handled by `parseNamedElement`
-        restArg = this.parseRestArgument() ?? undefined;
-        if (restArg?.name) {
-          // To avoid ambiguity in, e.g.
-          // `(x:...number -> number) -> number`
-          // `(x:(...number -> number)) -> number`
-          // `((x:...number -> number)) -> number`
-          this.pos = pos;
-          this.error('Named arguments must be enclosed in parentheses');
-        }
-        if (!restArg) {
-          this.pos = pos;
-          return null;
-        }
+      // We could have a single rest argument without parentheses
+      // e.g. `...number -> number`
+      // We could also have a single argument without parentheses
+      // but this case is handled by `parseNamedElement`
+      restArg = this.parseRestArgument() ?? undefined;
+      if (restArg?.name) {
+        // To avoid ambiguity in, e.g.
+        // `(x:...number -> number) -> number`
+        // `(x:(...number -> number)) -> number`
+        // `((x:...number -> number)) -> number`
+        this.pos = pos;
+        this.error('Named arguments must be enclosed in parentheses');
+      }
+      if (!restArg) {
+        this.pos = pos;
+        return null;
       }
     }
 
     // A function signature must be followed by '->'
     this.skipWhitespace();
     if (!this.match('->')) {
+      // It wasn't a signature, backtrack
       this.pos = pos;
       return null;
     }
@@ -255,20 +252,20 @@ class TypeParser {
     if (args.length === 0) args = undefined;
     if (optArgs.length === 0) optArgs = undefined;
 
-    return makeType({
+    return {
       kind: 'signature',
       args,
       optArgs,
       restArg,
       result: returnType,
-    });
+    };
   }
 
-  parseIntegerLiteral(): number | null {
+  parsePositiveIntegerLiteral(): number | null {
     let value = 0;
 
     this.skipWhitespace();
-    while (/[1-9]/.test(this.peek()))
+    while (/[0-9]/.test(this.peek()))
       value = value * 10 + parseInt(this.consume());
 
     if (value === 0) return null;
@@ -276,22 +273,22 @@ class TypeParser {
   }
 
   parseOptionalDimension(): number | null {
-    let dim = this.parseIntegerLiteral();
+    let dim = this.parsePositiveIntegerLiteral();
     if (dim === null && this.match('?')) dim = -1;
     return dim;
   }
 
   parseDimensions(): number[] | undefined {
     // No whitespace before optional "(", i.e. `matrix<integer^(2x3)>]`
+    const pos = this.pos;
     const hasParen = this.match('(');
     const dimensions: number[] = [];
 
     let dim = this.parseOptionalDimension();
-    if (dim === null)
-      this.error(
-        'Expected a positive integer literal.',
-        'For example : `vector<3>]`'
-      );
+    if (dim === null) {
+      this.pos = pos;
+      return undefined;
+    }
     do {
       dimensions.push(dim);
       this.skipWhitespace();
@@ -308,6 +305,7 @@ class TypeParser {
     this.skipWhitespace();
     if (hasParen && !this.match(')'))
       this.error('Expected ")".', 'For example `matrix<integer^(2x3)>`');
+
     return dimensions;
   }
 
@@ -315,34 +313,42 @@ class TypeParser {
     this.skipWhitespace();
 
     // A list has some syntactic shorthands:
-    // - `vector<3>` is equivalent to `vector<number^3>`
-    // - `matrix<2x3>` is equivalent to `matrix<2x3>`
+    // - `vector<3>` is equivalent to `list<number^3>`
+    // - `matrix<2x3>` is equivalent to `list<number^2x3>`
     // - `list` is equivalent to `list<any>`
-    // Note that lists do not have dimensions, i.e. `list<number^2x3>` is invalid
 
-    // `list<<type>>` and `list<<type>^<dimensions>>` and `list<<dimensions>>`
+    // `list<<type>>` or `list<<type>^<dimensions>>` or `list<<dimensions>>`
     if (this.match('list<')) {
-      let type = this.parseType();
+      // We want to parse dimensions first, otherwise `list<3>` would be
+      // interpreted as a list of `3` since `3` is a valid value type.
+      let dimensions = this.parseDimensions();
 
-      let dimensions: number[] | undefined = undefined;
+      // `list<2x3>` is equivalent to `list<any^2x3>`
+      if (dimensions !== undefined) {
+        this.skipWhitespace();
+        if (!this.match('>'))
+          this.error('Expected ">".', 'For example `list<2x3>`');
+        return { kind: 'list', elements: 'any', dimensions };
+      }
+
+      // `list<>` is equivalent to `list<any>`
+
+      let type = this.parseType();
       if (type && this.match('^')) {
+        // We got both a type and dimensions
         dimensions = this.parseDimensions();
         if (dimensions === undefined)
           this.error(
             'Expected dimensions after `^`.',
             'For example `list<number^2x3>`'
           );
-      } else if (!type) {
-        // `list<2x3>` is equivalent to `list<any^2x3>`
-        // `list<>` is equivalent to `list<any>`
-        type = 'any';
-        dimensions = this.parseDimensions();
       }
 
       this.skipWhitespace();
       if (!this.match('>'))
         this.error('Expected ">".', 'For example `list<number>`');
-      return makeType({ kind: 'list', elements: type, dimensions });
+
+      return { kind: 'list', elements: type ?? 'any', dimensions };
     }
 
     if (this.match('list(')) {
@@ -358,7 +364,7 @@ class TypeParser {
 
       let dimensions: number[] | undefined = undefined;
       if (type && this.match('^')) {
-        const size = this.parseIntegerLiteral();
+        const size = this.parsePositiveIntegerLiteral();
         if (size === null)
           this.error(
             'Expected a positive integer literal.',
@@ -374,14 +380,20 @@ class TypeParser {
       this.skipWhitespace();
       if (!this.match('>'))
         this.error('Expected ">"', 'For example `vector<integer>`');
-      return makeType({ kind: 'list', elements: type, dimensions });
+      return { kind: 'list', elements: type, dimensions };
+    }
+
+    if (this.match('vector(')) {
+      this.error(
+        'Use `vector<...>` instead of `vector(...)`.',
+        'For example `vector<3>` or `vector<integer^3>`'
+      );
     }
 
     // `vector` is equivalent to `list<number>`
-    if (this.match('vector'))
-      return makeType({ kind: 'list', elements: 'number' });
+    if (this.match('vector')) return { kind: 'list', elements: 'number' };
 
-    // `matrix(<rows>x<columns>)` and `matrix(<type>^<rows>x<columns>)`
+    // `matrix(<rows>x<columns>)` and `matrix(<type>^(<rows>x<columns>))`
     if (this.match('matrix<')) {
       let type = this.parseType();
 
@@ -402,7 +414,7 @@ class TypeParser {
       if (!this.match('>'))
         this.error('Expected ">".', 'For example `matrix<integer>`');
 
-      return makeType({ kind: 'list', elements: type, dimensions });
+      return { kind: 'list', elements: type, dimensions };
     }
 
     if (this.match('matrix(')) {
@@ -412,30 +424,33 @@ class TypeParser {
       );
     }
 
-    if (this.match('vector(')) {
-      this.error(
-        'Use `vector<...>` instead of `vector(...)`.',
-        'For example `vector<3>` or `vector<integer^3>`'
-      );
-    }
-
     // `matrix` is equivalent to `list<number^?x?>` (two dimensional tensor)
     if (this.match('matrix'))
-      return makeType({
+      return {
         kind: 'list',
         elements: 'number',
         dimensions: [-1, -1],
-      });
+      };
+
+    // `tensor<T>`
+    if (this.match('tensor<')) {
+      let type = this.parseType() ?? 'number';
+
+      if (!this.match('>'))
+        this.error('Expected ">".', 'For example `tensor<number>`');
+
+      return { kind: 'list', elements: type, dimensions: undefined };
+    }
 
     // `tensor` is equivalent to a list of numbers with any dimensions
     if (this.match('tensor'))
-      return makeType({
+      return {
         kind: 'list',
         elements: 'number',
         dimensions: undefined,
-      });
+      };
 
-    // Regular list syntax: `list<number^2x3`
+    // Regular list syntax: `list<number^2x3>`
     if (!this.match('list<')) return null;
 
     const type = this.parseType();
@@ -448,7 +463,7 @@ class TypeParser {
     if (!this.match('>'))
       this.error('Expected ">".', 'For example `list<number^2x3>`');
 
-    return makeType({ kind: 'list', elements: type, dimensions });
+    return { kind: 'list', elements: type, dimensions };
   }
 
   parseName(): string | null {
@@ -598,15 +613,17 @@ class TypeParser {
         'Expected ">".',
         'For example `tuple<number, boolean>` or `tuple<x: integer, y: integer>`'
       );
-    return makeType({ kind: 'tuple', elements });
+    return { kind: 'tuple', elements };
   }
 
-  parsePrimaryGroup(): Type | null {
-    const pos = this.pos;
+  /** Parse a non-optional group, i.e. "(" <type> ")" */
+  parseGroup(): Type | null {
     // A primary can be enclosed in parens, i.e. "(number)".
     // However, a function signature can also be grouped with parens
     // i.e. "(number) -> number"
     // If we don't find the closing paren followed by '->', we backtrack
+
+    const pos = this.pos;
 
     this.skipWhitespace();
     if (!this.match('(')) return null;
@@ -617,18 +634,16 @@ class TypeParser {
       return null;
     }
 
-    this.skipWhitespace();
-
     // We've parsed a type enclosed in parens. If this was a primary we
     // now should have a closing paren not followed by "->".
+    this.skipWhitespace();
     if (this.match(')')) {
       this.skipWhitespace();
       if (!this.match('->')) return type;
     }
 
-    // This was not a primary type, backtracks
+    // This was not a primary type enclosed in parens: backtrack
     this.pos = pos;
-
     return null;
   }
 
@@ -653,7 +668,7 @@ class TypeParser {
     if (!this.match('>'))
       this.error('Expected `>`.', 'For example `set<number>`');
 
-    return makeType({ kind: 'set', elements: type });
+    return { kind: 'set', elements: type };
   }
 
   parseMapElements(): [string, Type][] {
@@ -724,7 +739,7 @@ class TypeParser {
       if (!this.match('>'))
         this.error('Expected a closing `>`.', 'For example `map<key: string>`');
 
-      return makeType({ kind: 'map', elements: Object.fromEntries(entries) });
+      return { kind: 'map', elements: Object.fromEntries(entries) };
     }
 
     // Generic map type
@@ -757,31 +772,30 @@ class TypeParser {
     if (!this.match('>'))
       this.error('Expected ">".', 'For example `collection<number>`');
 
-    return makeType({ kind: 'collection', elements: type });
+    return { kind: 'collection', elements: type };
   }
 
   parsePrimary(): Type | null {
     let result =
+      this.parseGroup() ??
       this.parseNegationType() ??
       this.parseList() ??
       this.parseSet() ??
       this.parseMap() ??
       this.parseCollection() ??
-      this.parseFunctionSignature() ??
       this.parseTuple() ??
       this.parsePrimitiveType() ??
       this.parseValue() ??
-      this.parseTypeReference() ??
-      this.parsePrimaryGroup();
+      this.parseTypeReference();
 
     if (result === null) {
-      // If we've reach this point, we've run into a syntax error
+      // If we've reached this point, we've run into a syntax error
       // Is it a keyword...?
       let keyword = '';
       while (!this.isEOF() && /[a-zA-Z_]/.test(this.peek()))
         keyword += this.consume();
       if (!keyword) return null;
-      const suggest = suggestKeyword(keyword, [
+      const suggest = fuzzyStringMatch(keyword, [
         ...PRIMITIVE_TYPES,
         'vector',
         'matrix',
@@ -818,24 +832,25 @@ class TypeParser {
     if (!this.match('!')) return null;
     const type = this.parsePrimary();
     if (type === null) this.error('Expected type');
-    return makeType({ kind: 'negation', type });
+    return { kind: 'negation', type };
   }
 
   // <intersection_type> ::= <primary_type> (" & " <primary_type>)*
 
   parseIntersectionType(): Type | null {
-    let type = this.parsePrimary();
+    let type = this.parseFunctionSignature() ?? this.parsePrimary();
     if (type === null) return null;
     const types: Type[] = [type];
 
     this.skipWhitespace();
     while (this.match('&')) {
+      this.skipWhitespace();
       type = this.parsePrimary();
       if (type === null) this.error('Expected type');
       types.push(type);
     }
     if (types.length === 1) return types[0];
-    return makeType({ kind: 'intersection', types });
+    return { kind: 'intersection', types };
   }
 
   // <union_type> ::= <intersection_type> <union_type> " | "
@@ -855,27 +870,35 @@ class TypeParser {
     }
 
     if (types.length === 1) return types[0];
-    return makeType({ kind: 'union', types });
+    return { kind: 'union', types };
   }
 
-  // <type> ::= "(" <type> ")"
-  //       | <union_type>
+  // <type> ::=  "(" <type> ")" | <union_type>
   parseType(): Readonly<Type> | null {
     this.skipWhitespace();
     if (this.isEOF()) return null;
+
+    if (this.peek() === '(') {
+      // We're either in a grouped type, or a function signature
+      const signature = this.parseFunctionSignature();
+      if (signature) return signature;
+    }
 
     return this.parseUnionType();
   }
 
   parse(): Readonly<Type> {
-    const type = this.parseType();
-
     const pos = this.pos;
-    if (this.parseNamedElement() !== null) {
+    if (this.parseName() !== null) {
       this.pos = pos;
+      // Named elements are potentially ambiguous with function signatures
+      // i.e. `x: number -> number` could be interpreted as `x: (number -> number)`
+      // or `(x: number) -> number`
+      // To avoid this ambiguity, we require named elements to be enclosed in parentheses
       this.error('Named elements must be enclosed in parentheses');
     }
 
+    const type = this.parseType();
     if (type === null) this.error('Syntax error. The type was not recognized.');
 
     this.skipWhitespace();
@@ -885,6 +908,93 @@ class TypeParser {
 
     return type;
   }
+}
+
+function valueParser(parser: TypeParser): any {
+  const pos = parser.pos;
+
+  parser.skipWhitespace();
+
+  // String value
+  if (/["]/.test(parser.peek())) {
+    const quote = parser.consume();
+    let value = '';
+    while (parser.peek() !== quote) {
+      if (parser.isEOF()) parser.error('Expected closing quote');
+      if (parser.match('\\' + quote)) value += quote;
+      else value += parser.consume();
+    }
+    parser.consume();
+    return value;
+  }
+
+  // Hex value
+  if (parser.match('0x')) {
+    let value = 0;
+    while (/[0-9a-fA-F]/.test(parser.peek()))
+      value = value * 16 + parseInt(parser.consume(), 16);
+    return value;
+  }
+
+  // Binary value
+  if (parser.match('0b')) {
+    let value = 0;
+    while (/[01]/.test(parser.peek()))
+      value = value * 2 + parseInt(parser.consume());
+    return value;
+  }
+
+  // Decimal numeric value
+  if (/[-0-9\.]/.test(parser.peek())) {
+    let value = 0;
+    let sign = 1;
+    if (parser.match('-')) sign = -1;
+
+    if (!/[0-9]/.test(parser.peek())) {
+      parser.pos = pos;
+      return null;
+    }
+
+    while (/[0-9]/.test(parser.peek()))
+      value = value * 10 + parseInt(parser.consume());
+
+    if (parser.match('.')) {
+      let fraction = 0;
+      let scale = 1;
+      while (/[0-9]/.test(parser.peek())) {
+        fraction = fraction * 10 + parseInt(parser.consume());
+        scale *= 10;
+      }
+      value += fraction / scale;
+    }
+
+    if (parser.match('e') || parser.match('E')) {
+      let exponent = 0;
+      let expSign = 1;
+      if (parser.match('+')) expSign = 1;
+      if (parser.match('-')) expSign = -1;
+
+      while (/[0-9]/.test(parser.peek()))
+        exponent = exponent * 10 + parseInt(parser.consume());
+
+      value *= Math.pow(10, expSign * exponent);
+    }
+
+    return sign * value;
+  }
+
+  if (parser.match('true')) return true;
+  if (parser.match('false')) return false;
+
+  if (parser.match('nan')) return NaN;
+
+  if (parser.match('infinity')) return Infinity;
+
+  if (parser.match('-infinity')) return -Infinity;
+
+  parser.pos = pos;
+
+  return null;
 }
 
 export function parseType(s: undefined): undefined;
@@ -899,7 +1009,7 @@ export function parseType(s: string | Type | undefined): Type | undefined {
   if (PRIMITIVE_TYPES.includes(s as PrimitiveType)) return s as PrimitiveType;
 
   // Parse the type string
-  const parser = new TypeParser(s);
+  const parser = new TypeParser(s, { value: valueParser });
   return parser.parse();
 }
 

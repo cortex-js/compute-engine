@@ -66,7 +66,7 @@ export function canonicalMultiply(
       if (
         next.operator === 'Sqrt' &&
         next.op1.isNumberLiteral &&
-        isSubtype(next.op1.type, 'finite_integer')
+        next.op1.type.matches('finite_integer')
       ) {
         // Next is a sqrt of a literal integer
         let radical = next.op1.numericValue!;
@@ -78,7 +78,7 @@ export function canonicalMultiply(
         }
 
         // Is it preceded by a rational?
-        if (isSubtype(x.type, 'finite_rational')) {
+        if (x.type.matches('finite_rational')) {
           const rational = x.numericValue!;
           const [num, den] =
             typeof rational === 'number'

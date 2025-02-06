@@ -500,7 +500,13 @@ check('Unexpected argument', () =>
 );
 
 check('Mismatched type', () => {
-  expect(engine.box(['Sqrt', 'True'])).toMatchInlineSnapshot(
-    `["Sqrt", "True"]`
-  );
+  expect(engine.box(['Sqrt', 'True'])).toMatchInlineSnapshot(`
+    [
+      "Sqrt",
+      [
+        "Error",
+        ["ErrorCode", "'incompatible-type'", "'number'", "'boolean'"]
+      ]
+    ]
+  `);
 });

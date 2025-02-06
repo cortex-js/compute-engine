@@ -79,7 +79,7 @@ export function narrow(...types: Readonly<Type>[]): Type {
  * widen('number', 'expression') => 'expression'
  * widen('number', 'string') => 'any'
  */
-export function widen(...types: Readonly<Type>[]): Type {
+export function widen(...types: Readonly<Type>[]): Readonly<Type> {
   if (types.length === 0) return 'nothing';
   if (types.length === 1) return types[0];
 
@@ -101,7 +101,10 @@ export function functionSignature(type: Readonly<Type>): Type | undefined {
   return undefined;
 }
 
-export function functionResult(type: Readonly<Type>): Type | undefined {
+export function functionResult(
+  type: Readonly<Type> | undefined
+): Type | undefined {
+  if (!type) return undefined;
   if (type === 'function') return 'any';
   if (typeof type === 'string') return undefined;
   if (type.kind === 'signature') return type.result;
@@ -163,7 +166,6 @@ function superType(a: Readonly<Type>, b: Readonly<Type>): Type {
   if (commonSupertype(a, b, 'finite_real')) return 'finite_real';
   if (commonSupertype(a, b, 'real')) return 'real';
 
-  if (commonSupertype(a, b, 'finite_imaginary')) return 'finite_imaginary';
   if (commonSupertype(a, b, 'imaginary')) return 'imaginary';
 
   if (commonSupertype(a, b, 'finite_complex')) return 'finite_complex';
@@ -194,29 +196,4 @@ function commonSupertype(
 ): boolean {
   if (isSubtype(a, ancestor) && isSubtype(b, ancestor)) return true;
   return false;
-}
-
-class _TypeString extends String {
-  constructor(value: string) {
-    super(value);
-  }
-
-  isSubtypeOf(type: string): boolean {
-    return isSubtype(this.toString(), type);
-  }
-}
-
-/**
- * Add a `toString()` method to the type object
- */
-export function makeType(type: Type): Readonly<Type> {
-  // If a primitive type, wrap it in a custom string object
-  if (typeof type === 'string')
-    return Object.freeze(new _TypeString(type)) as any as Readonly<Type>;
-
-  Object.defineProperty(type, 'toString', { value: () => typeToString(type) });
-  Object.defineProperty(type, 'isSubtypeOf', {
-    value: (other: Type) => isSubtype(type, other),
-  });
-  return Object.freeze(type);
 }

@@ -26,12 +26,11 @@ const TRIGONOMETRIC_OPERATORS: { [key: string]: boolean } = {
   Arccot: true,
   Arcsec: true,
   Arccsc: true,
-  Arsinh: true,
-  Arcosh: true,
-  Artanh: true,
-  Arcoth: true,
-  Arcsch: true,
-  Arsech: true,
+  Arcsinh: true,
+  Arccosh: true,
+  Arctanh: true,
+  Arccoth: true,
+  Arccsch: true,
   Arcsech: true,
 };
 
@@ -141,7 +140,7 @@ function rank(expr: BoxedExpression): Rank {
     if (type === 'rational' || type === 'finite_rational') return 'rational';
     if (type === 'real' || type === 'finite_real') return 'real';
     if (type === 'complex' || type === 'finite_complex') return 'complex';
-    if (type === 'imaginary' || type === 'finite_imaginary') return 'complex';
+    if (type === 'imaginary') return 'complex';
     if (type === 'finite_number') return 'complex';
     if (type === 'non_finite_number') return 'constant';
     if (type === 'number') return 'real';

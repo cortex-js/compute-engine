@@ -2,7 +2,6 @@ import type { IComputeEngine, BoxedExpression } from '../public';
 
 import { flatten } from '../boxed-expression/flatten';
 import { isIndexableCollection } from '../collection-utils';
-import { isSubtype } from '../../common/type/subtype';
 
 export function canonicalInvisibleOperator(
   ops: ReadonlyArray<BoxedExpression>,
@@ -18,8 +17,8 @@ export function canonicalInvisibleOperator(
     // Is it an implicit addition/mixed fraction, e.g. "3 1/4"
     // Note: the numerators and denominators are limited to 999
     //
-    const lhsNumber = lhs.canonical.re;
-    if (Number.isInteger(lhsNumber)) {
+    const lhsInteger = asInteger(lhs);
+    if (!Number.isNaN(lhsInteger)) {
       const rhs = ops[1];
       if (rhs.operator === 'Divide' || rhs.operator === 'Rational') {
         const [n, d] = [rhs.op1.canonical.re, rhs.op2.canonical.re];
@@ -32,7 +31,7 @@ export function canonicalInvisibleOperator(
           Number.isInteger(d)
         ) {
           let frac = rhs.canonical;
-          if (lhsNumber < 0) frac = frac.neg();
+          if (lhsInteger < 0) frac = frac.neg();
 
           return ce._fn('Add', [lhs.canonical, frac]);
         }
@@ -43,21 +42,17 @@ export function canonicalInvisibleOperator(
     // Is it a complex number, i.e. "2i"?
     //
     const rhs = ops[1];
-    if (!isNaN(lhsNumber)) {
+    if (!Number.isNaN(lhsInteger)) {
       const canonicalRhs = rhs.canonical;
       if (canonicalRhs.re === 0 && canonicalRhs.im === 1)
-        return ce.number(ce.complex(0, lhsNumber));
+        return ce.number(ce.complex(0, lhsInteger));
     }
 
     //
     // Is it a function application: symbol with a function
     // definition followed by delimiter
     //
-    if (
-      lhs.symbol &&
-      rhs.operator === 'Delimiter' &&
-      !ce.lookupSymbol(lhs.symbol)
-    ) {
+    if (lhs.symbol && rhs.operator === 'Delimiter') {
       // @fixme: should use symbol table to check if it's a function
       // We have encountered something like `f(a+b)`, where `f` is not
       // defined. But it also could be `x(x+1)` where `x` is a number.
@@ -108,8 +103,8 @@ export function canonicalInvisibleOperator(
     ops.every(
       (x) =>
         x.isValid &&
-        (x.type === 'unknown' ||
-          isSubtype(x.type, 'number') ||
+        (x.type.isUnknown ||
+          x.type.matches('number') ||
           (isIndexableCollection(x) && !x.string))
     )
   ) {
@@ -137,4 +132,16 @@ function flattenInvisibleOperator(
     else ys.push(x);
   }
   return ys;
+}
+
+function asInteger(expr: BoxedExpression): number {
+  if (expr.isNumberLiteral) {
+    const n = expr.re;
+    if (Number.isInteger(n)) return n;
+  }
+  if (expr.operator === 'Negate') {
+    const n = asInteger(expr.op1);
+    if (!Number.isNaN(n)) return -n;
+  }
+  return Number.NaN;
 }

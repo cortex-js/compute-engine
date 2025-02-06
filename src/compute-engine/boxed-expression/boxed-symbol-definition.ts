@@ -7,17 +7,16 @@ import type {
   SymbolDefinition,
   NumericFlags,
   LatexString,
-  Sign,
   CollectionHandlers,
+  Sign,
 } from './public';
 import { _BoxedExpression } from './abstract-boxed-expression';
 import { isLatexString, normalizeFlags } from './utils';
-import { Type } from '../../common/type/types';
+import { Type, TypeString } from '../../common/type/types';
 import { parseType } from '../../common/type/parse';
-import { isSubtype } from '../../common/type/subtype';
 import { isValidType, widen } from '../../common/type/utils';
 import { defaultCollectionHandlers } from '../collection-utils';
-import { typeToString } from '../../common/type/serialize';
+import { BoxedType } from '../../common/type/boxed-type';
 
 /**
  * ### THEORY OF OPERATIONS
@@ -69,7 +68,7 @@ export class _BoxedSymbolDefinition implements BoxedSymbolDefinition {
 
   // If `null`, the type is the type of the value
   // Note that _type may be different (broader) than the value's type
-  private _type: Type | undefined | null;
+  private _type: BoxedType | undefined | null;
 
   // If true, the _type is inferred
   inferredType: boolean;
@@ -102,7 +101,7 @@ export class _BoxedSymbolDefinition implements BoxedSymbolDefinition {
   }
 
   get isFunction(): boolean {
-    return isSubtype(this.type, 'function');
+    return this.type.matches('function');
   }
 
   get isConstant(): boolean {
@@ -136,22 +135,22 @@ export class _BoxedSymbolDefinition implements BoxedSymbolDefinition {
       const type = parseType(def?.type);
       if (!isValidType(type)) throw new Error(`Invalid type: "${def.type}"`);
 
-      this._type = type;
-      this.inferredType = false;
+      this._type = new BoxedType(type);
+      this.inferredType = def.inferred ?? false;
     }
 
     if (this._value) {
-      if (!this._type || this._type === 'unknown') {
+      if (!this._type || this._type.isUnknown) {
         // The type is inferred, because the type of the value could be more restrictive than the intended type. For example, the value might be "2" (integer), but the intent is to declare it as a "number".
         this._type = this._value.type;
         this.inferredType = true;
       } else {
         // If the value is not compatible with the type, throw
-        if (!isSubtype(this._value.type, this._type)) {
+        if (!this._value.type.matches(this._type)) {
           throw new Error(
             [
               `Symbol "${this.name}"`,
-              `The value "${this._value.toString()}" of type "${typeToString(this._value.type)}" is not compatible with the type "${typeToString(this._type)}"`,
+              `The value "${this._value.toString()}" of type "${this._value.type}" is not compatible with the type "${this._type}"`,
             ].join('\n|   ')
           );
         }
@@ -192,54 +191,58 @@ export class _BoxedSymbolDefinition implements BoxedSymbolDefinition {
       // If the new value is not compatible with the domain, discard it
       if (this.inferredType) {
         this._value = newVal;
-        this._type = this._type ? widen(this._type, newVal.type) : newVal.type;
+        this._type = this._type
+          ? new BoxedType(widen(this._type.type, newVal.type.type))
+          : newVal.type;
       } else if (
         !this._type ||
-        this.type === 'unknown' ||
+        this.type.isUnknown ||
         !newVal.type ||
-        isSubtype(newVal.type, this._type)
+        newVal.type.matches(this._type)
       )
         this._value = newVal;
       else this._value = undefined;
     } else this._value = undefined;
   }
 
-  get type(): Type {
-    return this._type ?? this._value?.type ?? 'unknown';
+  get type(): BoxedType {
+    return this._type ?? this._value?.type ?? BoxedType.unknown;
   }
 
-  set type(type: Type) {
+  set type(type: Type | TypeString | BoxedType) {
     if (this.constant)
       throw new Error(
         `The type of the constant "${this.name}" cannot be changed`
       );
 
-    if (!this.inferredType && this.type !== 'unknown')
+    if (!this.inferredType && !this.type.isUnknown)
       throw Error(
         `The type of "${this.name}" cannot be changed because it has already been declared`
       );
+
+    if (type instanceof BoxedType) type = type.type;
 
     // Are we resetting the type/value?
     if (type === 'unknown') {
       this._defValue = undefined;
       this._value = undefined;
       this._flags = undefined;
-      this._type = 'unknown';
+      this._type = BoxedType.unknown;
       return;
     }
 
     // If the type is unknown, we can set it to anything
-    if (this._type === 'unknown') {
-      this._type = type;
+    if (this._type?.isUnknown) {
+      this._type = new BoxedType(type);
       return;
     }
 
-    if (this._value?.type && !isSubtype(this._value.type, type))
+    if (this._value?.type && !this._value.type.matches(type))
       throw Error(
-        `The type of "${this.name}" cannot be changed to "${typeToString(type)}" because its value has a type of "${typeToString(this._value.type)}"`
+        `The type of "${this.name}" cannot be changed to "${type}" because its value has a type of "${this._value.type}"`
       );
 
-    this._type = type;
+    this._type = new BoxedType(type);
   }
 
   //

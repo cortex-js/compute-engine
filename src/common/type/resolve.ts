@@ -1,6 +1,5 @@
 import type { Type, TypeResolver } from './types';
 import { reduceType } from './reduce';
-import { makeType } from './utils';
 import { typeToString } from './serialize';
 
 function error(type: Type, ...message: string[]): never {
@@ -74,5 +73,5 @@ function resolve(type: Readonly<Type>, resolver: TypeResolver): Type {
 }
 
 export function resolveType(type: Type, resolver: TypeResolver): Type {
-  return makeType(reduceType(resolve(type, resolver)));
+  return reduceType(resolve(type, resolver));
 }

@@ -119,6 +119,10 @@ import { hidePrivateProperties } from '../common/utils';
 import { OneOf } from '../common/one-of';
 import { BigNum } from './numerics/bignum';
 import { typeToString } from '../common/type/serialize';
+import { BoxedType } from '../common/type/boxed-type';
+
+export type * from '../common/type/types';
+export * from '../common/type/subtype';
 
 /**
  *
@@ -379,9 +383,8 @@ export class ComputeEngine implements IComputeEngine {
    *
    * The order of the dictionaries matter: the definitions from the later ones
    * override the definitions from earlier ones. The first dictionary should
-   * be the `'core'` dictionary which include some basic definitions such
-   * as domains (`Booleans`, `Numbers`, etc...) that are used by later
-   * dictionaries.
+   * be the `'core'` dictionary which include basic definitions that are used
+   * by later dictionaries.
    *
    *
    * @param options.precision Specific how many digits of precision
@@ -466,6 +469,10 @@ export class ComputeEngine implements IComputeEngine {
     this.pushScope();
 
     hidePrivateProperties(this);
+  }
+
+  toString(): string {
+    return '[ComputeEngine]';
   }
 
   get latexDictionary(): Readonly<LatexDictionaryEntry[]> {
@@ -607,12 +614,10 @@ export class ComputeEngine implements IComputeEngine {
   }
 
   /** The precision, or number of significant digits, of numeric
-   * calculations when the numeric mode is `"auto"` or `"bignum"`.
+   * calculations.
    *
    * To make calculations using more digits, at the cost of expanded memory
    * usage and slower computations, set the `precision` higher.
-   *
-   * If the numeric mode is not `"auto"` or `"bignum"`, it is set to `"auto"`.
    *
    * Trigonometric operations are accurate for precision up to 1,000.
    *
@@ -643,7 +648,12 @@ export class ComputeEngine implements IComputeEngine {
   }
 
   /**
-   * The unit used for angles in trigonometric functions.
+   * The unit used for unitless angles in trigonometric functions.
+   *
+   * - `rad`: radian, $2\pi$ radians is a full circle
+   * - `deg`: degree, 360 degrees is a full circle
+   * - `grad`: gradians, 400 gradians is a full circle
+   * - `turn`: turn, 1 turn is a full circle
    *
    * Default is `"rad"` (radians).
    */
@@ -1151,8 +1161,6 @@ export class ComputeEngine implements IComputeEngine {
 
     this.context = this.context.parentScope ?? null;
 
-    if (!this.context) debugger;
-
     console.assert(this.context);
     return this;
   }
@@ -1293,16 +1301,12 @@ export class ComputeEngine implements IComputeEngine {
     arg2?: Type | TypeString | OneOf<[SymbolDefinition, FunctionDefinition]>
   ): IComputeEngine {
     //
-    // If we got an object literal, call `declare` for each entry
+    // If we got an object literal, call `_declare` for each entry
     //
     if (typeof arg1 !== 'string' || arg2 === undefined) {
       for (const [id, def] of Object.entries(arg1)) this.declare(id, def);
       return this;
     }
-
-    //
-    // Declare a single symbol
-    //
 
     // Function signatures are not valid with `ce.declare`, it must
     // be a plain identifier.
@@ -1311,41 +1315,66 @@ export class ComputeEngine implements IComputeEngine {
       // ce.declare("f(x)", ["Add", "x", 1]) is not valid: the second argument
       // should be a type or a definition. Use ce.assign() instead.
       throw Error(
-        `Unexpected arguments with ${arg1}. Use 'ce.assign()' instead to assign a value, or a use a function definition with 'ce.declare()'.`
+        `Unexpected arguments "${arg1}". It should be a plain identifier. Use 'ce.assign()' instead to assign a value, or a use a function definition with 'ce.declare()'.`
       );
     }
 
     // The special id `Nothing` can never be redeclared.
-    // It is also used to indicate that a symbol should be ignored.
+    // It is also used to indicate that a symbol should be ignored,
+    // so it's valid, but it doesn't do anything.
     if (id === 'Nothing') return this;
 
+    // Can't "undeclare" (set to undefined/null) an identifier either
+    if (!arg2) throw Error(`Expected a definition or type for "${id}"`);
+
+    //
+    // Modifying the definition of an identifier?
+    //
     if (this.context?.ids?.get(id)) {
       const def = this.context.ids.get(id)!;
 
       // We're updating the definition of a symbol
       this.generation += 1;
 
+      let isFnDef = false;
+      let isSymDef = false;
+      try {
+        isFnDef = isFunctionDefinition(arg2);
+        isSymDef = isSymbolDefinition(arg2);
+      } catch (err) {
+        // Catch potentially invalid definitions
+        console.error(
+          [`\nInvalid definition for "${id}"`, err.message].join('\n|   ') +
+            '\n'
+        );
+      }
+
       if (def instanceof _BoxedSymbolDefinition && def.inferredType) {
-        // The domain of this symbol was inferred: it can be redeclared
-        // with a different domain
+        // The type of this symbol was inferred: it can be redeclared
+        // with a different type
+
+        if (isFnDef)
+          throw new Error(`Cannot redeclare the symbol "${id}" as a function`);
 
         // Don't replace the def, since other expressions may already be
         // referencing it, but update it.
-        try {
-          if (isSymbolDefinition(arg2)) def.update(arg2);
-          else if (isFunctionDefinition(arg2))
-            throw new Error('Cannot redeclare a symbol as a function');
-          else {
-            // @todo: could check that the new type is compatible
-            def.type = parseType(arg2);
-            def.inferredType = false;
-          }
-        } catch (err) {
-          console.error(
-            [`\nInvalid definition for ${id}`, err.message].join('\n|   ') +
-              '\n'
-          );
+        if (isSymDef) def.update(arg2 as SymbolDefinition);
+        else {
+          // @todo: could check that the new type is compatible
+          def.type = parseType(arg2 as Type | TypeString);
+          def.inferredType = false;
         }
+        return this;
+      }
+
+      if (def instanceof _BoxedFunctionDefinition && def.inferredSignature) {
+        // The domain of this function was inferred: it can be redeclared
+        // with a different domain
+        if (isFnDef) def.update(arg2 as FunctionDefinition);
+        else if (isSymDef)
+          throw new Error(`Cannot redeclare the function "${id}" as a symbol`);
+        else def.update({ signature: parseType(arg2 as TypeString) });
+
         return this;
       }
       // Note: can't redeclare a symbol as other expressions might reference it
@@ -1353,26 +1382,29 @@ export class ComputeEngine implements IComputeEngine {
       // canonical)
       if (def instanceof _BoxedFunctionDefinition)
         throw Error(
-          `The symbol "${id}" has already been declared in the current scope as a function with signature ${def.signature.toString()}.`
+          [
+            `The symbol "${id}" has already been declared in the current scope as a function with signature ${def.signature}.`,
+            `You may use 'ce.assign("${id}", ...)' to assign a new value to this function.`,
+          ].join('\n|   ')
         );
       throw Error(
-        `The symbol "${id}" has already been declared in the current scope.`
+        [
+          `The symbol "${id}" has already been declared in the current scope.`,
+          `You may use 'ce.assign("${id}", ...)' to assign a new value to this symbol.`,
+        ].join('\n|   ')
       );
     }
 
-    // Can't "undeclare" (set to undefined/null) a symbol either
+    //
+    // Declaring a symbol or function with a definition or type
+    //
+
     const def = arg2;
-    if (!def) throw Error(`Expected a definition for ${id}`);
-
-    //
-    // Declaring a symbol or function with a definition
-    //
-
     if (
       typeof def === 'object' &&
       'type' in def &&
       ((typeof def.type === 'string' && isSubtype(def.type, 'function')) ||
-        (def.type && isValidType(def.type)))
+        (def.type && !isValidType(def.type)))
     ) {
       throw new Error(
         `Invalid definition for "${id}": use a FunctionDefinition to define a function or use 'ce.declare("${id}", "function")'`
@@ -1409,18 +1441,18 @@ export class ComputeEngine implements IComputeEngine {
         throw Error(
           [
             `Invalid argument for "${id}"`,
-            def.toString(),
+            JSON.stringify(def),
             `Use a type, a \`FunctionDefinition\` or a \`SymbolDefinition\``,
           ].join('\n|   ')
         );
       }
 
       if (type === 'function') {
-        this.defineFunction(id, { signature: '...any -> any' });
+        this.defineFunction(id, { signature: '...unknown -> unknown' });
       } else if (isSignatureType(type)) {
         this.defineFunction(id, { signature: type });
       } else {
-        if (args) throw Error(`Unexpected arguments with type for "${id}"`);
+        console.assert(!args);
         this.defineSymbol(id, { type });
       }
     }
@@ -1451,7 +1483,7 @@ export class ComputeEngine implements IComputeEngine {
     arg2?: AssignValue
   ): IComputeEngine {
     //
-    // If we got an object literal, call `assign` for each entry
+    // If the first argument is an object literal, call `assign` for each key
     //
     if (typeof arg1 === 'object') {
       console.assert(arg2 === undefined);
@@ -1470,32 +1502,19 @@ export class ComputeEngine implements IComputeEngine {
     if (typeof value === 'boolean') value = value ? this.True : this.False;
 
     //
-    // Is the value a LaTeX string (starts/ends with $ or $$)?
-    // Parse it, as a non-canonical expression.
-    // If we parse it as canonical, any unknowns will be auto-declared.
-    //
-    if (typeof value === 'string') {
-      const latex = value.trim();
-      if (latex.startsWith('$$') && latex.endsWith('$$'))
-        value = this.parse(latex.slice(2, -2), { canonical: false });
-      else if (latex.startsWith('$') && latex.endsWith('$'))
-        value = this.parse(latex.slice(1, -1), { canonical: false });
-      else {
-        // Not a LaTeX string? interpret as a plain string (not a symbol)
-        value = this.string(value);
-      }
-    }
-
-    //
     // 1. The identifier was declared as a symbol in this scope
     //    or a parent scope
     //
     const symDef = this.lookupSymbol(id);
     if (symDef) {
       if (symDef.constant)
-        throw Error(`Cannot assign a value to the constant "${id}"`);
+        throw Error(`Cannot change the value of the constant "${id}"`);
 
-      if (!symDef.inferredType && isFunctionValue(value))
+      if (
+        !symDef.type.isUnknown &&
+        !symDef.inferredType &&
+        isFunctionValue(value)
+      )
         throw Error(`Cannot assign a function to symbol "${id}"`);
 
       // Temporarily remove the def to avoid circular references.
@@ -1583,9 +1602,9 @@ export class ComputeEngine implements IComputeEngine {
     //
     if (
       value instanceof _BoxedExpression &&
-      (value.type === 'function' || isSignatureType(value.type))
+      (value.type.type === 'function' || isSignatureType(value.type.type))
     ) {
-      this.defineFunction(id, { evaluate: value });
+      this.defineFunction(id, { evaluate: value, signature: value.type.type });
       return this;
     }
 
@@ -1614,7 +1633,7 @@ export class ComputeEngine implements IComputeEngine {
           ...expr.ops!,
           ...(args ?? []).map((x) => this.symbol(x)),
         ]);
-        this.defineFunction(id, { evaluate: expr });
+        this.defineFunction(id, { evaluate: expr, signature: expr.type.type });
         return this;
       }
 
@@ -1632,7 +1651,7 @@ export class ComputeEngine implements IComputeEngine {
       if (unknowns.some((x) => /\_[\d]+/.test(x))) {
         // This is a function
         expr = this.box(['Function', expr]);
-        this.defineFunction(id, { evaluate: expr });
+        this.defineFunction(id, { evaluate: expr, signature: expr.type.type });
         return this;
       }
 
@@ -1641,7 +1660,7 @@ export class ComputeEngine implements IComputeEngine {
         this.pushScope();
         expr = this.box(['Function', expr, ...args]);
         this.popScope();
-        this.defineFunction(id, { evaluate: expr });
+        this.defineFunction(id, { evaluate: expr, signature: expr.type.type });
         return this;
       }
 
@@ -1799,12 +1818,12 @@ export class ComputeEngine implements IComputeEngine {
 
   typeError(
     expected: Type,
-    actual: undefined | Type,
+    actual: undefined | Type | BoxedType,
     where?: string
   ): BoxedExpression {
     if (actual)
       return this.error(
-        ['incompatible-type', typeToString(expected), typeToString(actual)],
+        ['incompatible-type', typeToString(expected), actual.toString()],
         where
       );
     return this.error(['incompatible-type', typeToString(expected)], where);
@@ -1833,6 +1852,11 @@ export class ComputeEngine implements IComputeEngine {
       ),
       { canonical: true }
     );
+  }
+
+  type(type: Type | TypeString | BoxedType): BoxedType {
+    if (type instanceof BoxedType) return type;
+    return new BoxedType(type);
   }
 
   string(s: string, metadata?: Metadata): BoxedExpression {
@@ -2217,7 +2241,10 @@ function isFunctionValue(
   options: Partial<EvaluateOptions> & { engine?: IComputeEngine }
 ) => BoxedExpression {
   if (typeof value === 'function') return true;
-  if (value instanceof _BoxedExpression && isSubtype(value.type, 'function'))
+  if (
+    value instanceof _BoxedExpression &&
+    isSubtype(value.type.type, 'function')
+  )
     return true;
 
   return false;

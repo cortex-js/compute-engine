@@ -60,7 +60,7 @@ export function normalizeIndexingSets(
   return ops.map((op) => normalizeIndexingSet(op));
 }
 
-export function indexingSetCartestianProduct(
+export function indexingSetCartesianProduct(
   indexingSets: IndexingSet[]
 ): number[][] {
   console.assert(indexingSets.length > 0, 'Indexing sets must not be empty');
@@ -202,7 +202,10 @@ export function* reduceBigOp<T>(
   const savedScope = ce.swapScope(body.scope);
 
   const indexingSets = normalizeIndexingSets(indexes);
-  const cartesianArray = indexingSetCartestianProduct(indexingSets);
+
+  // @todo: special case when there is only one index
+
+  const cartesianArray = indexingSetCartesianProduct(indexingSets);
 
   //
   // Iterate over the cartesian product and evaluate the body

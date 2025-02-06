@@ -1,4 +1,4 @@
-import type { BoxedExpression, BoxedFunctionDefinition } from './public';
+import type { BoxedExpression } from './public';
 
 import type { IComputeEngine } from '../public';
 
@@ -70,7 +70,7 @@ export function checkNumericArgs(
     let inferredType: Type = 'real';
     // If any of the arguments is a complex number, we'll infer the domain as complex
     for (const x of ops)
-      if (isSubtype('complex', x.type)) {
+      if (isSubtype('complex', x.type.type)) {
         inferredType = 'number';
         break;
       }
@@ -105,7 +105,7 @@ export function checkNumericArgs(
     ) {
       // We have an unknown symbol, we'll infer it's a number later
       xs.push(op);
-    } else if (op.type === 'unknown') {
+    } else if (op.type.isUnknown) {
       // Unknown type. Keep it that way, infer later
       xs.push(op);
     } else if (isFiniteIndexableCollection(op)) {
@@ -121,14 +121,14 @@ export function checkNumericArgs(
       else xs.push(op);
     } else if (
       op.symbolDefinition?.inferredType &&
-      isSubtype('number', op.type)
+      isSubtype('number', op.type.type)
     ) {
       // There was an inferred type, and it is a supertype of "number"
       // e.g. "any". We'll narrow it down to "number" when we infer later.
       xs.push(op);
     } else if (
       op.functionDefinition?.inferredSignature &&
-      isSubtype('number', op.type)
+      isSubtype('number', op.type.type)
     ) {
       // There is an inferred signature, and it is a supertype of 'number
       // e.g. "any". We'll narrow it down to "number" when we infer later.
@@ -150,7 +150,7 @@ export function checkNumericArgs(
     let inferredType: Type = 'real';
     // If any of the arguments is a complex number, we'll infer the domain as complex
     for (const x of xs)
-      if (isSubtype('complex', x.type)) {
+      if (isSubtype('complex', x.type.type)) {
         inferredType = 'number';
         break;
       }
@@ -181,7 +181,7 @@ export function checkType(
 
   if (!arg.isValid) return arg;
 
-  if (isSubtype(arg.type, type)) return arg;
+  if (arg.type.matches(type)) return arg;
 
   return ce.typeError(type, arg.type, arg);
 }
@@ -195,7 +195,7 @@ export function checkTypes(
   // Avoid allocating arrays and objects
   if (
     args.length === types.length &&
-    args.every((x, i) => isSubtype(x.type, types[i]))
+    args.every((x, i) => x.type.matches(types[i]))
   )
     return args;
 
@@ -270,7 +270,7 @@ export function validateArguments(
       isValid = false;
       continue;
     }
-    if (op.type === 'unknown') {
+    if (op.type.isUnknown) {
       // An expression with an unknown type is assumed to be valid,
       // we'll infer the type later
       result.push(op);
@@ -280,17 +280,17 @@ export function validateArguments(
       result.push(op);
       continue;
     }
-    if (op.symbolDefinition?.inferredType && isSubtype(op.type, param)) {
+    if (op.symbolDefinition?.inferredType && op.type.matches(param)) {
       result.push(op);
       continue;
     }
 
-    if (op.functionDefinition?.inferredSignature && isSubtype(op.type, param)) {
+    if (op.functionDefinition?.inferredSignature && op.type.matches(param)) {
       result.push(op);
       continue;
     }
 
-    if (!isSubtype(op.type, param)) {
+    if (!op.type.matches(param)) {
       result.push(ce.typeError(param, op.type, op));
       isValid = false;
       continue;
@@ -316,7 +316,7 @@ export function validateArguments(
       i += 1;
       continue;
     }
-    if (op.type === 'unknown') {
+    if (op.type.isUnknown) {
       // An expression without a domain is assumed to be valid,
       // we'll infer the domain later
       result.push(op);
@@ -328,14 +328,14 @@ export function validateArguments(
       i += 1;
       continue;
     }
-    if (op.symbolDefinition?.inferredType && isSubtype(op.type, param)) {
-      // There was an inferred domain, and it is contravrariant with Numbers
-      // e.g. "Anything". We'll narrow it down to Number when we infer later.
+    if (op.symbolDefinition?.inferredType && op.type.matches(param)) {
+      // There was an inferred type, and it is contravrariant with `number`
+      // e.g. "any". We'll narrow it down to `number` when we infer later.
       result.push(op);
       i += 1;
       continue;
     }
-    if (!isSubtype(op.type, param)) {
+    if (!op.type.matches(param)) {
       result.push(ce.typeError(param, op.type, op));
       isValid = false;
       i += 1;
@@ -358,7 +358,7 @@ export function validateArguments(
         isValid = false;
         continue;
       }
-      if (op.type === 'unknown') {
+      if (op.type.isUnknown) {
         // An expression without a domain is assumed to be valid,
         // we'll infer the domain later
         result.push(op);
@@ -368,13 +368,13 @@ export function validateArguments(
         result.push(op);
         continue;
       }
-      if (op.symbolDefinition?.inferredType && isSubtype(op.type, restParam)) {
-        // There was an inferred domain, and it is contravrariant with Numbers
-        // e.g. "Anything". We'll narrow it down to Number when we infer later.
+      if (op.symbolDefinition?.inferredType && op.type.matches(restParam)) {
+        // There was an inferred type, and it is contravariant with `number`
+        // e.g. "any". We'll narrow it down `number` to  when we infer later.
         result.push(op);
         continue;
       }
-      if (!isSubtype(op.type, restParam)) {
+      if (!op.type.matches(restParam)) {
         result.push(ce.typeError(restParam, op.type, op));
         isValid = false;
         continue;

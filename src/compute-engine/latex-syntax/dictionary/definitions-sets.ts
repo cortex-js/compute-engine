@@ -17,8 +17,11 @@ import {
 } from '../public';
 
 export const DEFINITIONS_SETS: LatexDictionary = [
+  //
   // Constants
-  { name: 'AlgebraicNumbers', latexTrigger: '\\bar\\Q' },
+  //
+  { name: 'AlgebraicNumbers', latexTrigger: '\\overline\\Q' },
+  { latexTrigger: '\\bar\\Q', parse: 'AlgebraicNumbers' },
   { name: 'ComplexNumbers', latexTrigger: ['\\C'] },
   { latexTrigger: '\\mathbb{C}', parse: 'ComplexNumbers' },
   { name: 'ImaginaryNumbers', latexTrigger: ['\\imaginaryI', '\\R'] },
@@ -27,40 +30,69 @@ export const DEFINITIONS_SETS: LatexDictionary = [
   { name: 'Integers', latexTrigger: ['\\Z'] },
   { latexTrigger: '\\mathbb{Z}', parse: 'Integers' },
   { name: 'RationalNumbers', latexTrigger: ['\\Q'] },
+  { latexTrigger: '\\mathbb{Q}', parse: 'RationalNumbers' },
   { name: 'RealNumbers', latexTrigger: ['\\R'] },
   { latexTrigger: '\\mathbb{R}', parse: 'RealNumbers' },
   { name: 'TranscendentalNumbers', latexTrigger: '\\R-\\bar\\Q' },
   { latexTrigger: '\\R\\backslash\\bar\\Q', parse: 'TranscendentalNumbers' },
 
   // Real numbers < 0
-  { name: 'NegativeNumbers', latexTrigger: '\\R^-' },
+  { name: 'NegativeNumbers', latexTrigger: '\\R_{<0}' },
+  { latexTrigger: '\\R^-', parse: 'NegativeNumbers' },
   { latexTrigger: '\\R^{-}', parse: 'NegativeNumbers' },
+  { latexTrigger: '\\R^-', parse: 'NegativeNumbers' },
   { latexTrigger: '\\R_-', parse: 'NegativeNumbers' },
   { latexTrigger: '\\R_{-}', parse: 'NegativeNumbers' },
   { latexTrigger: '\\R^{\\lt}', parse: 'NegativeNumbers' },
+  { latexTrigger: '\\R^{<}', parse: 'NegativeNumbers' },
+  { latexTrigger: '\\R^{\\lt0}', parse: 'NegativeNumbers' },
+  { latexTrigger: '\\R^{<0}', parse: 'NegativeNumbers' },
+
+  // Real numbers <= 0
+  { name: 'NonPositiveNumbers', latexTrigger: '\\R_{\\le0}' },
+  { latexTrigger: '\\R^{\\leq0}', parse: 'NonPositiveNumbers' },
+  { latexTrigger: '\\R^{-0}', parse: 'NonPositiveNumbers' },
+  { latexTrigger: '\\R^{\\leq}', parse: 'NonPositiveNumbers' },
+  { latexTrigger: '\\R^{0-}', parse: 'NonPositiveNumbers' },
 
   // Real numbers > 0
-  { name: 'PositiveNumbers', latexTrigger: '\\R^+' },
+  { name: 'PositiveNumbers', latexTrigger: '\\R_{>0}' },
+  { latexTrigger: '\\R^+', parse: 'PositiveNumbers' },
   { latexTrigger: '\\R^{+}', parse: 'PositiveNumbers' },
   { latexTrigger: '\\R_+', parse: 'PositiveNumbers' },
   { latexTrigger: '\\R_{+}', parse: 'PositiveNumbers' },
   { latexTrigger: '\\R^{\\gt}', parse: 'PositiveNumbers' },
+  { latexTrigger: '\\R^{\\gt 0}', parse: 'PositiveNumbers' },
+  { latexTrigger: '\\R^{>}', parse: 'PositiveNumbers' },
+  { latexTrigger: '\\R^{>0}', parse: 'PositiveNumbers' },
 
-  // Real numbers <= 0
-  { name: 'NonPositiveNumbers', latexTrigger: '\\R^{0-}' },
-  { latexTrigger: '\\R^{-0}', parse: 'NonPositiveNumbers' },
-  { latexTrigger: '\\R^{\\leq}', parse: 'NonPositiveNumbers' },
+  // Real numbers >= 0
+  { name: 'NonNegativeNumbers', latexTrigger: '\\R_{\\geq0}' },
+  { latexTrigger: '\\R^{0+}', parse: 'NonNegativeNumbers' },
+  { latexTrigger: '\\R^{\\geq}', parse: 'NonNegativeNumbers' },
+
+  // Extended Real numbers = \R \cup \{-\infty, +\infty\}
+  { name: 'ExtendedRealNumbers', latexTrigger: '\\overline\\R' },
+  { latexTrigger: '\\bar\\R', parse: 'ExtendedRealNumbers' },
 
   // Integers < 0
-  { name: 'NegativeIntegers', latexTrigger: '\\Z^-' },
+  { name: 'NegativeIntegers', latexTrigger: '\\Z_{<0}' },
+  { latexTrigger: '\\Z_{\\lt0}', parse: 'NegativeIntegers' },
   { latexTrigger: '\\Z^-', parse: 'NegativeIntegers' },
   { latexTrigger: '\\Z^{-}', parse: 'NegativeIntegers' },
   { latexTrigger: '\\Z_-', parse: 'NegativeIntegers' },
   { latexTrigger: '\\Z_{-}', parse: 'NegativeIntegers' },
   { latexTrigger: '\\Z^{\\lt}', parse: 'NegativeIntegers' },
 
+  // Integers <= 0
+  { name: 'NonPositiveIntegers', latexTrigger: '\\Z_{\\le0}' },
+  { latexTrigger: '\\Z_{\\leq0}', parse: 'NonPositiveIntegers' },
+  { latexTrigger: '\\Z_{<0}', parse: 'NonPositiveIntegers' },
+
   // Integers >  0
-  { name: 'PositiveIntegers', latexTrigger: '\\Z^+' },
+  { name: 'PositiveIntegers', latexTrigger: '\\N^*' },
+  { latexTrigger: '\\Z_{>0}', parse: 'PositiveIntegers' },
+  { latexTrigger: '\\Z_{\\gt0}', parse: 'PositiveIntegers' },
   { latexTrigger: '\\Z^{+}', parse: 'PositiveIntegers' },
   { latexTrigger: '\\Z_+', parse: 'PositiveIntegers' },
   { latexTrigger: '\\Z_{+}', parse: 'PositiveIntegers' },
@@ -76,6 +108,8 @@ export const DEFINITIONS_SETS: LatexDictionary = [
   { latexTrigger: '\\N_{1}', parse: 'PositiveIntegers' }, // https://mathvault.ca/hub/higher-math/math-symbols/algebra-symbols/
 
   // Integers >=  0
+  // Note that 0 is included in $\N$, following the convention from
+  // [ISO/IEC 80000](https://en.wikipedia.org/wiki/ISO_80000-2)
   { name: 'NonNegativeIntegers', latexTrigger: ['\\N'] },
   { latexTrigger: '\\Z^{+0}', parse: 'NonNegativeIntegers' },
   { latexTrigger: '\\Z^{\\geq}', parse: 'NonNegativeIntegers' },
@@ -84,6 +118,18 @@ export const DEFINITIONS_SETS: LatexDictionary = [
   { latexTrigger: '\\mathbb{N}', parse: 'NonNegativeIntegers' },
   { latexTrigger: '\\N_0', parse: 'NonNegativeIntegers' },
   { latexTrigger: '\\N_{0}', parse: 'NonNegativeIntegers' },
+
+  // Extended Integers = \Z \cup \{-\infty, +\infty\}
+  { name: 'ExtendedIntegers', latexTrigger: '\\overline\\Z' },
+  { latexTrigger: '\\bar\\Z', parse: 'ExtendedIntegers' },
+
+  // Extended Rationals = \Q \cup \{-\infty, +\infty\}
+  { name: 'ExtendedRationalNumbers', latexTrigger: '\\overline\\Q' },
+  { latexTrigger: '\\bar\\Q', parse: 'ExtendedRationalNumbers' },
+
+  // Extended Complex Numbers = \C \cup \{-\infty, +\infty\}
+  { name: 'ExtendedComplexNumbers', latexTrigger: '\\overline\\C' },
+  { latexTrigger: '\\bar\\C', parse: 'ExtendedComplexNumbers' },
 
   //
   // Set Expressions

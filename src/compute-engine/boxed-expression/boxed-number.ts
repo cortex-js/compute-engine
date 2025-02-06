@@ -53,6 +53,7 @@ import {
   negativeSign,
   nonPositiveSign,
 } from './sgn';
+import { BoxedType } from '../../common/type/boxed-type';
 
 /**
  * BoxedNumber
@@ -338,7 +339,7 @@ export class BoxedNumber extends _BoxedExpression {
         return ce.number(factor).ln(base).mul(2).add(ce.number(root).ln(base));
     }
 
-    if (base && isSubtype(base.type, 'integer')) {
+    if (base && base.isInteger) {
       if (typeof this._value === 'number')
         return this.engine.number(Math.log(this._value) / Math.log(base.re));
       return this.engine.number(this._value.ln(base.re));
@@ -353,13 +354,17 @@ export class BoxedNumber extends _BoxedExpression {
     return this.engine._fn('Ln', [this]);
   }
 
-  get type(): Type {
+  get type(): BoxedType {
     if (typeof this._value === 'number') {
-      if (!Number.isFinite(this._value)) return 'non_finite_number';
-      return Number.isInteger(this._value) ? 'finite_integer' : 'finite_real';
+      if (Number.isNaN(this._value)) return new BoxedType('number');
+      if (!Number.isFinite(this._value))
+        return new BoxedType('non_finite_number');
+      return new BoxedType(
+        Number.isInteger(this._value) ? 'finite_integer' : 'finite_real'
+      );
     }
 
-    return this._value.type;
+    return new BoxedType(this._value.type);
   }
 
   get sgn(): Sign | undefined {
@@ -534,7 +539,7 @@ export class BoxedNumber extends _BoxedExpression {
 
   get isStructural(): boolean {
     if (typeof this._value === 'number') return true;
-    if (isSubtype(this.type, 'rational')) return true;
+    if (this.type.matches('rational')) return true;
     if (this._value instanceof ExactNumericValue) return false;
     return true;
   }
@@ -584,6 +589,8 @@ export function canonicalNumber(
     | NumericValue
     | MathJsonNumber
 ): number | NumericValue {
+  if (value === undefined || value === null) return NaN;
+
   // If the value is already a NumericValue, we're done
   if (value instanceof NumericValue) return value;
 

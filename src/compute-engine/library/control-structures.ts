@@ -39,7 +39,8 @@ export const CONTROL_STRUCTURES_LIBRARY: IdentifierDefinitions[] = [
     If: {
       lazy: true,
       signature: '(expression, expression, expression) -> any',
-      type: ([cond, ifTrue, ifFalse]) => widen(ifTrue.type, ifFalse.type),
+      type: ([cond, ifTrue, ifFalse]) =>
+        widen(ifTrue.type.type, ifFalse.type.type),
       evaluate: ([cond, ifTrue, ifFalse], { engine }) => {
         cond = cond.evaluate();
         if (cond && cond.symbol === 'True')
@@ -63,7 +64,9 @@ export const CONTROL_STRUCTURES_LIBRARY: IdentifierDefinitions[] = [
       signature: '(...expression) -> unknown',
       type: (args) => {
         if (args.length % 2 !== 0) return 'nothing';
-        return widen(...args.filter((_, i) => i % 2 === 1).map((x) => x.type));
+        return widen(
+          ...args.filter((_, i) => i % 2 === 1).map((x) => x.type.type)
+        );
       },
       canonical: (args, options) => {
         if (args.length % 2 !== 0) return options.engine.Nothing;

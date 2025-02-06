@@ -1,8 +1,123 @@
+import { BoxedType } from '../src/common/type/boxed-type';
+import { isSubtype } from '../src/common/type/subtype';
 import { ComputeEngine } from '../src/compute-engine';
 
 const ce = new ComputeEngine();
 const engine = ce;
 
+console.log(
+  ce
+    .parse('x^2 + 200x - 0.000015 = 0')
+    .solve('x')
+    ?.map((x) => x.toString())
+);
+
+// Should be 2x + 3
+ce
+  .box(['Add', ['Multiply', 'a', 'x'], 'b'])
+  ?.replace(
+    [
+      { match: 'a', replace: 2 },
+      { match: 'b', replace: 3 },
+    ],
+    { recursive: true }
+  )
+  ?.print();
+// ➔ 2x + 3
+
+ce.precision = 30;
+console.log(ce.parse('\\pi').N().toString());
+console.log(ce.parse('\\pi').N().json);
+
+console.log(ce.parse('\\pi').N().toMathJson({ fractionalDigits: 30 }));
+
+console.log(ce.parse('3/4').type);
+
+ce.parse('\\sin(x+1)').simplify().print();
+
+console.info(ce.parse('21\\pm1').latex);
+console.info(ce.parse('21\\pm1').evaluate().latex);
+
+ce.parse('|\\operatorname{arccoth}(x)|').print();
+
+ce.declare('e', 'list');
+// Should be parsed as At...
+console.log(ce.parse('\\sum_{p=0}^3x_{p}e_{p}').json);
+
+// console.info(
+//   ce.parse('(p + q)^2 = p^2 + q^2 + 2p * q = (p - q)^2 + 4p * q').json
+// );
+
+// console.info(
+//   ce
+//     .parse('(p + q)^2 = p^2 + q^2 + 2p * q = (p - q)^2 + 4p * q')
+//     .compile()!
+//     .toString()
+// );
+
+// Check this doesn't throw an error
+ce.parse('f()').print();
+ce.parse('f\\left(\\right)').print();
+ce.parse('f(x)').print();
+ce.parse('f\\left(x\\right)').print();
+
+// This should multiply.
+
+ce.parse(
+  String.raw`\begin{pmatrix}2 & 3\\ 4 & 5\end{pmatrix}\times\begin{pmatrix}6 & 2\\ 1 & 3\end{pmatrix}`
+)
+  .evaluate()
+  .print();
+
+// let sub2 = ce
+//   .parse('\\sqrt{x}')
+//   .match(
+//     ce.parse(
+//       '\\mathrm{_a}x + \\mathrm{_c}\\sqrt{\\mathrm{_d}\\mathrm{_x}+\\mathrm{_e}} + \\mathrm{_g}'
+//     ),
+//     {
+//       // .match(ce.parse('\\sqrt{\\operatorname{\\_x}}'), {
+//       substitution: { _x: ce.box('x') },
+//       useVariations: true,
+//     }
+//   );
+
+// Missing variation... @fixme
+let sub2 = ce.parse('0').match(ce.parse('\\mathrm{_a}x'), {
+  // .match(ce.parse('\\sqrt{\\operatorname{\\_x}}'), {
+  substitution: { _x: ce.box('x') },
+  useVariations: true,
+});
+
+// Display the keys of the substitution
+if (sub2) {
+  console.log(
+    Object.entries(sub2)
+      .map(([k, v]) => `${k}:${v}`)
+      .join(', ')
+  );
+}
+
+const eq = ce.parse('2x-\\sqrt{5}\\sqrt{x}');
+
+const match = ce.box([
+  'Add',
+  ['Multiply', '_a', '_x'],
+  ['Multiply', '__b', ['Sqrt', ['Add', ['Multiply', '_c', '_x'], '__d']]],
+  '__g',
+]);
+let sub = eq.match(match, {
+  substitution: { _x: ce.box('x') },
+  useVariations: true,
+});
+console.log(sub);
+
+ce
+  .parse('2x=\\sqrt{5x}')
+  .solve()
+  ?.map((x) => x.print());
+
+ce.parse('\\operatorname{a?#_!}').print();
 ce.parse('x__+1)').print();
 ce.parse('\\mathrm{speed}_{max}').print();
 
@@ -76,7 +191,7 @@ const originalDef = ce.lookupFunction('Ln')!;
 ce.defineFunction('Ln', {
   complexity: originalDef.complexity,
   threadable: originalDef.threadable,
-  signature: originalDef.signature,
+  signature: originalDef.signature.type,
   sgn: originalDef.sgn,
   evaluate: ([x], options) => {
     if (x.is(0)) return ce.NaN;

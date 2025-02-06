@@ -5,6 +5,7 @@ import { functionResult } from '../common/type/utils';
 
 import { findUnivariateRoots } from './boxed-expression/solve';
 import { isInequality, domainToType } from './boxed-expression/utils';
+import { BoxedType } from '../common/type/boxed-type';
 
 /**
  * Add an assumption, in the form of a predicate, for example:
@@ -87,7 +88,7 @@ function assumeEquality(proposition: BoxedExpression): AssumeResult {
       ce.defineSymbol(lhs, { value: val });
       return 'ok';
     }
-    if (def.type && !isSubtype(val.type, def.type))
+    if (def.type && !val.type.matches(def.type))
       if (!def.inferredType) return 'contradiction';
 
     def.value = val;
@@ -114,7 +115,7 @@ function assumeEquality(proposition: BoxedExpression): AssumeResult {
     }
     if (
       def.type &&
-      !sols.every((sol) => !sol.type || isSubtype(val.type, sol.type))
+      !sols.every((sol) => !sol.type || val.type.matches(sol.type))
     )
       return 'contradiction';
     def.value = val;
@@ -229,10 +230,13 @@ function assumeElement(proposition: BoxedExpression): AssumeResult {
   // 1/ lhs is a single free variable with no definition
   //    e.g. `x \in \R`
   //    => define a new var with the specified domain
+  //
   // 2/ lhs is a symbol with a definition
   //    => update domain, if compatible
+  //
   // 3/ lhs is an expression with some free variables with no definition
   //    => add to assumptions DB
+  //
   // 4/ otherwise  (expression)
   //    e.g. `x+2 \in \R`
   //    => evaluate and return result (contradiction or tautology)
@@ -246,9 +250,9 @@ function assumeElement(proposition: BoxedExpression): AssumeResult {
     if (!dom.isValid) return 'not-a-predicate';
 
     const type = domainToType(dom);
-    if (type === 'unknown') {
+    if (type === 'unknown')
       throw new Error(`Invalid domain "${dom.toString()}"`);
-    }
+
     ce.declare(undefs[0], type);
     return 'ok';
   }
@@ -264,13 +268,13 @@ function assumeElement(proposition: BoxedExpression): AssumeResult {
 
     const def = ce.lookupSymbol(proposition.op1.symbol);
     if (def) {
-      if (def.type && !isSubtype(type, def.type)) return 'contradiction';
-      def.type = type;
+      if (def.type && !isSubtype(type, def.type.type)) return 'contradiction';
+      def.type = new BoxedType(type);
       return 'ok';
     }
     const fdef = ce.lookupFunction(proposition.op1.symbol);
     if (fdef) {
-      if (!isSubtype(type, functionResult(fdef.signature)!))
+      if (!isSubtype(type, functionResult(fdef.signature.type)!))
         return 'contradiction';
 
       return 'ok';

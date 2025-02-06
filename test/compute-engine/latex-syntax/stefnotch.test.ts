@@ -85,7 +85,7 @@ describe('STEFNOTCH #12', () => {
             "ErrorCode",
             "'incompatible-type'",
             "'number'",
-            "'tuple<finite_imaginary, real, string>'"
+            "'tuple<imaginary, finite_real, string>'"
           ]
         ]
       ]
@@ -103,7 +103,18 @@ describe('STEFNOTCH #13', () => {
         "Q",
         [
           "Function",
-          ["Ceil", ["Divide", 4, ["Square", "epsilonSymbol"]]],
+          [
+            "Ceil",
+            [
+              "Error",
+              [
+                "ErrorCode",
+                "'incompatible-type'",
+                "'real'",
+                "'finite_number'"
+              ]
+            ]
+          ],
           "epsilonSymbol"
         ]
       ]

@@ -4,6 +4,10 @@ import { Rule } from '../public';
 import { matchAnyRules } from './rules';
 import { expand } from './expand';
 
+//
+// Solve Rules
+//
+
 // https://en.wikipedia.org/wiki/Equation_solving
 
 //
@@ -191,6 +195,34 @@ export const UNIVARIATE_ROOTS: Rule[] = [
     match: ['Add', ['Abs', ['Add', ['Multiply', '__a', '_x'], '__b']], '__c'],
     replace: ['Divide', ['Negate', ['Add', '__b', '__c'], '__a']],
   },
+
+  // ax + c\sqrt{dx + f} + g = 0
+  // plus
+  {
+    match: 'ax + \\mathrm{__b} \\sqrt{cx + \\mathrm{__d}} + \\mathrm{__g}',
+    replace:
+      '\\frac{-(2 a g - \\mathrm{__b}^2 c) + \\sqrt{(2 a \\mathrm{__g} - \\mathrm{__b}^2 c)^2 - 4 a^2(g^2 - b^2 \\mathrm{__d})}}{2 a^2}',
+    useVariations: true,
+    condition: ({ a, __b, c, d, __g }) =>
+      !a.has('_x') &&
+      !__b.has('_x') &&
+      !c.has('_x') &&
+      !d.has('_x') &&
+      !__g.has('_x'),
+  },
+  // minus
+  {
+    match: 'ax + \\mathrm{__b} \\sqrt{cx + \\mathrm{__d}} + \\mathrm{__g}',
+    replace:
+      '\\frac{-(2 a g - \\mathrm{__b}^2 c) - \\sqrt{(2 a \\mathrm{__g} - \\mathrm{__b}^2 c)^2 - 4 a^2(g^2 - b^2 \\mathrm{__d})}}{2 a^2}',
+    useVariations: true,
+    condition: ({ a, __b, c, d, __g }) =>
+      !a.has('_x') &&
+      !__b.has('_x') &&
+      !c.has('_x') &&
+      !d.has('_x') &&
+      !__g.has('_x'),
+  },
 ];
 
 /**
@@ -206,7 +238,8 @@ export function findUnivariateRoots(
   const ce = expr.engine;
 
   if (expr.operator === 'Equal')
-    expr = expr.op1.canonical.sub(expr.op2).simplify();
+    expr = expr.op1.expand().sub(expr.op2.expand()).simplify();
+  else expr = expr.expand().simplify();
 
   const rules = ce.getRuleSet('solve-univariate')!;
 
@@ -237,7 +270,12 @@ export function findUnivariateRoots(
   if (result.length === 0) {
     exprs = exprs.flatMap((expr) => harmonize(expr));
     result = exprs.flatMap((expr) =>
-      matchAnyRules(expr, rules, { _x: ce.symbol(x) })
+      matchAnyRules(
+        expr,
+        rules,
+        { _x: ce.symbol(x) },
+        { useVariations: true, canonical: true }
+      )
     );
   }
 
@@ -247,11 +285,21 @@ export function findUnivariateRoots(
       .filter((x) => x !== null) as BoxedExpression[];
     exprs = exprs.flatMap((expr) => harmonize(expr));
     result = exprs.flatMap((expr) =>
-      matchAnyRules(expr, rules, { _x: ce.symbol(x) })
+      matchAnyRules(
+        expr,
+        rules,
+        { _x: ce.symbol(x) },
+        { useVariations: true, canonical: true }
+      )
     );
   }
 
-  return result.map((x) => x.evaluate().simplify());
+  // Validate the roots
+  return validateRoots(
+    expr,
+    x,
+    result.map((x) => x.evaluate().simplify())
+  );
 }
 
 /** Expr is an equation with an operator of
@@ -280,6 +328,7 @@ export function univariateSolve(
   if (!rhs.is(0)) lhs = ce.box(['Subtract', lhs, rhs]);
 
   const roots = findUnivariateRoots(lhs, x);
+
   if (roots.length === 0) return null;
   return roots;
 }
@@ -382,4 +431,23 @@ function harmonize(expr: BoxedExpression): BoxedExpression[] {
   const ce = expr.engine;
   const rules = ce.getRuleSet('harmonization')!;
   return matchAnyRules(expr, rules, { _x: ce.symbol('_x') });
+}
+
+function validateRoots(
+  expr: BoxedExpression,
+  x: string,
+  roots: ReadonlyArray<BoxedExpression>
+): BoxedExpression[] {
+  return roots.filter((root) => {
+    // Evaluate the expression at the root
+    const value = expr.subs({ [x]: root }).N();
+    if (value === null) return false;
+    if (!value.isValid) return false;
+    if (value.isNaN) return false;
+    if (value.has(x)) return false;
+
+    // Important: we want to use `isEqual()`, not `is(0)` here
+    // The former accounts for tolerance, the latter does not
+    return value.isEqual(0);
+  });
 }

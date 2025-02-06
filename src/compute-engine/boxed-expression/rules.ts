@@ -159,7 +159,7 @@ export const ConditionParent = {
 };
 
 export const CONDITIONS = {
-  boolean: (x: BoxedExpression) => x.type === 'boolean',
+  boolean: (x: BoxedExpression) => x.type.matches('boolean'),
   string: (x: BoxedExpression) => x.string !== null,
   number: (x: BoxedExpression) => x.isNumberLiteral,
   symbol: (x: BoxedExpression) => x.symbol !== null,
@@ -175,10 +175,10 @@ export const CONDITIONS = {
   real: (x: BoxedExpression) => x.isReal,
   notreal: (x: BoxedExpression) => !x.isReal,
 
-  // to check pure complex: :complex:notreal
-  complex: (x: BoxedExpression) => isSubtype(x.type, 'complex'),
-  // pure imaginary
-  imaginary: (x: BoxedExpression) => x.type === 'imaginary',
+  // number with a non-zero imaginary part:
+  complex: (x: BoxedExpression) => x.type.matches('complex'),
+  // number with a zero real part and non-zero imaginary part:
+  imaginary: (x: BoxedExpression) => x.type.matches('imaginary'),
 
   positive: (x: BoxedExpression) => x.isPositive,
   negative: (x: BoxedExpression) => x.isNegative,
@@ -276,10 +276,6 @@ function parseModifier(parser: Parser): string | null {
       '\\neq0': 'notzero',
       '\\neq1': 'notone',
       '!=1': 'notone',
-      '\\in\\Z': 'integer',
-      '\\in\\mathbb{Z}': 'integer',
-      '\\in\\N': 'natural',
-      '\\in\\mathbb{N}': 'natural',
       '\\in\\R': 'real',
       '\\in\\mathbb{R}': 'real',
       '\\in\\C': 'complex',
@@ -292,6 +288,10 @@ function parseModifier(parser: Parser): string | null {
       '\\in\\R^+': 'positive',
       '\\in\\R^-': 'negative',
       '\\in\\R^*': 'real,nonzero',
+      '\\in\\Z': 'integer',
+      '\\in\\mathbb{Z}': 'integer',
+      '\\in\\N': 'integer,nonnegative',
+      '\\in\\mathbb{N}': 'integer,nonnegative',
       '\\in\\N^*': 'integer,positive',
       '\\in\\N_0': 'integer,nonnegative',
       '\\in\\R\\backslash\\Q': 'irrational',

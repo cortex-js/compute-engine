@@ -18,6 +18,7 @@ import { DEFAULT_COMPLEXITY } from './order';
 import { Type, TypeString } from '../../common/type/types';
 import { parseType } from '../../common/type/parse';
 import { OneOf } from '../../common/one-of';
+import { BoxedType } from '../../common/type/boxed-type';
 
 const FUNCTION_DEF_KEYS = new Set([
   // Base
@@ -63,27 +64,27 @@ export class _BoxedFunctionDefinition implements BoxedFunctionDefinition {
   description?: string | string[];
   wikidata?: string;
 
-  threadable: boolean;
-  associative: boolean;
-  commutative: boolean;
+  threadable = false;
+  associative = false;
+  commutative = false;
   commutativeOrder:
     | ((a: BoxedExpression, b: BoxedExpression) => number)
     | undefined;
-  idempotent: boolean;
-  involution: boolean;
-  pure: boolean;
+  idempotent = false;
+  involution = false;
+  pure = true;
 
-  complexity: number;
+  complexity = DEFAULT_COMPLEXITY;
 
-  lazy: boolean;
+  lazy = false;
 
-  signature: Type;
-  inferredSignature: boolean;
+  signature: BoxedType;
+  inferredSignature = true;
 
   type?: (
     ops: ReadonlyArray<BoxedExpression>,
     options: { engine: IComputeEngine }
-  ) => Type | TypeString | undefined;
+  ) => BoxedType | Type | TypeString | undefined;
 
   sgn?: (
     ops: ReadonlyArray<BoxedExpression>,
@@ -125,40 +126,60 @@ export class _BoxedFunctionDefinition implements BoxedFunctionDefinition {
   constructor(ce: IComputeEngine, name: string, def: FunctionDefinition) {
     if (!ce.context) throw Error('No context available');
 
+    this.name = name;
     this.engine = ce;
     this.scope = ce.context;
 
-    for (const key in def) {
-      if (!FUNCTION_DEF_KEYS.has(key))
-        throw new Error(
-          `Function Definition "${name}": unexpected key "${key}"`
-        );
+    if (def.signature) {
+      this.inferredSignature = false;
+      this.signature = new BoxedType(def.signature);
+    } else this.signature = new BoxedType('...any -> any');
+
+    this.update(def);
+  }
+
+  infer(sig: Type): void {
+    const newSig = new BoxedType(sig);
+    if (!newSig.matches(this.signature))
+      throw new Error(
+        `Function Definition "${this.name}": inferred signature "${newSig}" does not match current signature "${this.signature}"`
+      );
+    if (this.inferredSignature) this.signature = newSig;
+  }
+
+  update(def: FunctionDefinition): void {
+    if (this.engine.strict) {
+      for (const key in def) {
+        if (!FUNCTION_DEF_KEYS.has(key))
+          throw new Error(
+            `Function Definition "${this.name}": unexpected key "${key}"`
+          );
+      }
     }
 
-    this.lazy = def.lazy ?? false;
+    this.lazy = def.lazy ?? this.lazy;
 
-    const idempotent = def.idempotent ?? false;
-    const involution = def.involution ?? false;
+    const idempotent = def.idempotent ?? this.idempotent;
+    const involution = def.involution ?? this.involution;
 
     if (idempotent && involution)
       throw new Error(
-        `Function Definition "${name}": the 'idempotent' and 'involution' flags are mutually exclusive`
+        `Function Definition "${this.name}": the 'idempotent' and 'involution' flags are mutually exclusive`
       );
-
-    this.name = name;
-    this.description = def.description;
-    this.wikidata = def.wikidata;
-
-    this.threadable = def.threadable ?? false;
-    this.associative = def.associative ?? false;
-    this.commutative = def.commutative ?? false;
-    this.commutativeOrder = def.commutativeOrder;
     this.idempotent = idempotent;
     this.involution = involution;
 
+    this.description = def.description ?? this.description;
+    this.wikidata = def.wikidata ?? this.wikidata;
+
+    this.threadable = def.threadable ?? this.threadable;
+    this.associative = def.associative ?? this.associative;
+    this.commutative = def.commutative ?? this.commutative;
+    this.commutativeOrder = def.commutativeOrder ?? this.commutativeOrder;
+
     if (this.commutativeOrder && !this.commutative)
       throw new Error(
-        `Function Definition "${name}": the 'commutativeOrder' handler requires the 'commutative' flag`
+        `Function Definition "${this.name}": the 'commutativeOrder' handler requires the 'commutative' flag`
       );
 
     // If the lazy flag is set, the arguments are not canonicalized, so they
@@ -176,34 +197,26 @@ export class _BoxedFunctionDefinition implements BoxedFunctionDefinition {
       (def.associative || def.commutative || def.idempotent || def.involution)
     )
       throw new Error(
-        `Function Definition "${name}": the 'canonical' handler is incompatible with the 'associative', 'commutative', 'idempotent', and 'involution' flags`
+        `Function Definition "${this.name}": the 'canonical' handler is incompatible with the 'associative', 'commutative', 'idempotent', and 'involution' flags`
       );
 
-    this.pure = def.pure ?? true;
-    this.complexity = def.complexity ?? DEFAULT_COMPLEXITY;
-
-    let signature: Type;
-    let inferredSignature = true;
+    this.pure = def.pure ?? this.pure;
+    this.complexity = def.complexity ?? this.complexity;
 
     if (def.signature) {
-      inferredSignature = false;
-      signature = parseType(def.signature);
-    } else signature = parseType('...any -> any');
-
-    let resultType:
-      | ((
-          ops: ReadonlyArray<BoxedExpression>,
-          options: { engine: IComputeEngine }
-        ) => Type | TypeString | undefined)
-      | undefined = undefined;
-    if (def.type) {
-      if (typeof def.type === 'string') parseType(def.type);
-      else resultType = def.type;
+      const oldSig = def.signature;
+      const newSig = new BoxedType(parseType(def.signature));
+      if (oldSig && !newSig.matches(oldSig))
+        throw new Error(
+          `Function Definition "${this.name}": signature "${newSig}" does not match "${oldSig}"`
+        );
+      this.inferredSignature = false;
+      this.signature = newSig;
     }
 
     let evaluate: ((xs) => BoxedExpression | undefined) | undefined = undefined;
     if (def.evaluate && typeof def.evaluate !== 'function') {
-      const boxedFn = ce.box(def.evaluate, { canonical: false });
+      const boxedFn = this.engine.box(def.evaluate, { canonical: false });
       if (!boxedFn.isValid)
         throw Error(`Invalid function ${boxedFn.toString()}`);
       const fn = applicable(boxedFn);
@@ -211,22 +224,20 @@ export class _BoxedFunctionDefinition implements BoxedFunctionDefinition {
       Object.defineProperty(evaluate, 'toString', {
         value: () => boxedFn.toString(),
       }); // For debugging/_printScope
-    } else evaluate = def.evaluate as any;
+    } else evaluate = (def.evaluate as any) ?? this.evaluate;
 
-    this.inferredSignature = inferredSignature;
-    this.signature = signature;
-    this.type = resultType;
+    this.type = def.type ?? this.type;
     this.evaluate = evaluate;
-    this.evaluateAsync = def.evaluateAsync;
-    this.canonical = def.canonical;
-    this.evalDimension = def.evalDimension;
-    this.sgn = def.sgn;
-    this.even = def.even;
-    this.compile = def.compile;
-    this.eq = def.eq;
-    this.neq = def.neq;
+    this.evaluateAsync = def.evaluateAsync ?? this.evaluateAsync;
+    this.canonical = def.canonical ?? this.canonical;
+    this.evalDimension = def.evalDimension ?? this.evalDimension;
+    this.sgn = def.sgn ?? this.sgn;
+    this.even = def.even ?? this.even;
+    this.compile = def.compile ?? this.compile;
+    this.eq = def.eq ?? this.eq;
+    this.neq = def.neq ?? this.neq;
 
-    this.collection = def.collection;
+    this.collection = def.collection ?? this.collection;
   }
 
   reset(): void {
@@ -241,4 +252,10 @@ export function makeFunctionDefinition(
 ): BoxedFunctionDefinition {
   if (def instanceof _BoxedFunctionDefinition) return def;
   return new _BoxedFunctionDefinition(engine, name, def as FunctionDefinition);
+}
+
+export function isBoxedFunctionDefinition(
+  x: any
+): x is BoxedFunctionDefinition {
+  return x instanceof _BoxedFunctionDefinition;
 }

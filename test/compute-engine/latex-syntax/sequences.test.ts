@@ -61,7 +61,7 @@ describe('DELIMITERS SERIALIZING', () => {
       box       = ["Delimiter", ["Sequence", 1, 2, 3]]
       canonical = ["Triple", 1, 2, 3]
       box-latex = (1,2,3)
-      latex     = \\mathrm{Triple}(1, 2, 3)
+      latex     = (1,2,3)
     `));
 
   test('Sequence expression with default parens and comma', () =>
@@ -70,7 +70,7 @@ describe('DELIMITERS SERIALIZING', () => {
       box       = ["Delimiter", ["Sequence", ["Add", 1, 2]]]
       canonical = ["Single", ["Add", 1, 2]]
       box-latex = (1+2)
-      latex     = \\mathrm{Single}(1+2)
+      latex     = (1+2)
     `));
 
   test('Non-collection with default parens and comma', () =>
@@ -95,7 +95,7 @@ describe('DELIMITERS SERIALIZING', () => {
       box       = ["Delimiter", ["Sequence", 1, 2, 3], "'[]'"]
       canonical = ["Triple", 1, 2, 3]
       box-latex = \\lbrack123\\rbrack
-      latex     = \\mathrm{Triple}(1, 2, 3)
+      latex     = (1,2,3)
     `));
 
   test('Sequence with mix of brackets', () =>
@@ -104,7 +104,7 @@ describe('DELIMITERS SERIALIZING', () => {
       box       = ["Delimiter", ["Sequence", 1, 2, 3], "')['"]
       canonical = ["Triple", 1, 2, 3]
       box-latex = )123\\lbrack
-      latex     = \\mathrm{Triple}(1, 2, 3)
+      latex     = (1,2,3)
     `));
 
   test('Sequence with custom separator', () =>
@@ -113,7 +113,7 @@ describe('DELIMITERS SERIALIZING', () => {
       box       = ["Delimiter", ["Sequence", 1, 2, 3], "'(;)'"]
       canonical = ["Triple", 1, 2, 3]
       box-latex = (1;2;3)
-      latex     = \\mathrm{Triple}(1, 2, 3)
+      latex     = (1,2,3)
     `));
 
   test('Sequence with custom Pipe separator', () =>
@@ -122,7 +122,7 @@ describe('DELIMITERS SERIALIZING', () => {
       box       = ["Delimiter", ["Sequence", 1, 2, 3], "'<|>'"]
       canonical = ["Triple", 1, 2, 3]
       box-latex = \\langle1\\mvert2\\mvert3\\rangle
-      latex     = \\mathrm{Triple}(1, 2, 3)
+      latex     = (1,2,3)
     `));
 });
 
@@ -132,7 +132,7 @@ describe('SEQUENCE PARSING', () => {
       box       = ["Delimiter", ["Sequence", 1, 2, 3], "','"]
       canonical = ["Triple", 1, 2, 3]
       box-latex = 1,2,3
-      latex     = \\mathrm{Triple}(1, 2, 3)
+      latex     = (1,2,3)
     `));
 
   test('Sequences with no separators', () =>
@@ -147,7 +147,7 @@ describe('SEQUENCE PARSING', () => {
       box       = ["Delimiter", ["Sequence", 1, 2, 3], "';'"]
       canonical = ["Triple", 1, 2, 3]
       box-latex = 1;2;3
-      latex     = \\mathrm{Triple}(1, 2, 3)
+      latex     = (1,2,3)
     `));
 
   test('Sequences with a mix of colon and semicolon are embedded', () =>
@@ -159,7 +159,7 @@ describe('SEQUENCE PARSING', () => {
       ]
       canonical = ["Tuple", 1, ["Tuple", 2, 3, 4, 5], 6, 7]
       box-latex = 1;2,3,4,5;6;7
-      latex     = \\mathrm{Tuple}(1, \\mathrm{Tuple}(2, 3, 4, 5), 6, 7)
+      latex     = (1,(2,3,4,5),6,7)
     `));
 });
 
@@ -169,7 +169,7 @@ describe('DELIMITERS PARSING', () => {
       box       = ["Delimiter"]
       canonical = ["Tuple"]
       box-latex = ()
-      latex     = \\mathrm{Tuple}()
+      latex     = ()
     `);
 
     expect(check('(1)')).toMatchInlineSnapshot(`
@@ -210,7 +210,7 @@ describe('DELIMITERS PARSING', () => {
       ]
       canonical = ["Pair", ["Add", "x", 1], ["Add", "a", "b"]]
       box-latex = (x+1,a+b)
-      latex     = \\mathrm{Pair}(x+1, a+b)
+      latex     = (x+1,a+b)
     `);
 
     // Multiple nested arguments of a non-function declared identifier
@@ -228,9 +228,9 @@ describe('DELIMITERS PARSING', () => {
           "'(;)'"
         ]
       ]
-      canonical = ["Multiply", "q", ["Pair", ["Triple", 1, 2, 3], ["Triple", 4, 5, 6]]]
+      canonical = ["q", ["Triple", 1, 2, 3], ["Triple", 4, 5, 6]]
       box-latex = q(1,2,3;4,5,6)
-      latex     = q\\mathrm{Pair}(\\mathrm{Triple}(1, 2, 3), \\mathrm{Triple}(4, 5, 6))
+      latex     = q((1,2,3), (4,5,6))
     `);
 
     expect(check('\\lbrack x+1=0, 2x^2+5=1\\rbrack')).toMatchInlineSnapshot(`
@@ -285,7 +285,7 @@ describe('DELIMITERS PARSING', () => {
       box       = ["Delimiter", ["Sequence", "a", "Nothing", "b"], "'(,)'"]
       canonical = ["Triple", "a", "Nothing", "b"]
       box-latex = (a,\\mathrm{Nothing},b)
-      latex     = \\mathrm{Triple}(a, \\mathrm{Nothing}, b)
+      latex     = (a,\\mathrm{Nothing},b)
     `);
   });
 
@@ -294,7 +294,7 @@ describe('DELIMITERS PARSING', () => {
       box       = ["Delimiter", ["Sequence", "a", "b", "c"], "'(,)'"]
       canonical = ["Triple", "a", "b", "c"]
       box-latex = (a,b,c)
-      latex     = \\mathrm{Triple}(a, b, c)
+      latex     = (a,b,c)
     `);
     expect(check('(a, b; c, d, ;; n ,, m)')).toMatchInlineSnapshot(`
       box       = [
@@ -316,7 +316,7 @@ describe('DELIMITERS PARSING', () => {
         ["Triple", "n", "Nothing", "m"]
       ]
       box-latex = (a,b;c,d,\\mathrm{Nothing};\\mathrm{Nothing};n,\\mathrm{Nothing},m)
-      latex     = \\mathrm{Tuple}(\\mathrm{Pair}(a, b), \\mathrm{Triple}(c, d, \\mathrm{Nothing}), \\mathrm{Nothing}, \\mathrm{Triple}(n, \\mathrm{Nothing}, m))
+      latex     = ((a,b),(c,d,\\mathrm{Nothing}),\\mathrm{Nothing},(n,\\mathrm{Nothing},m))
     `);
     expect(check('(a, (b, c))')).toMatchInlineSnapshot(`
       box       = [
@@ -326,7 +326,7 @@ describe('DELIMITERS PARSING', () => {
       ]
       canonical = ["Pair", "a", ["Pair", "b", "c"]]
       box-latex = (a,(b,c))
-      latex     = \\mathrm{Pair}(a, \\mathrm{Pair}(b, c))
+      latex     = (a,(b,c))
     `);
     expect(check('(a, (b; c))')).toMatchInlineSnapshot(`
       box       = [
@@ -336,7 +336,7 @@ describe('DELIMITERS PARSING', () => {
       ]
       canonical = ["Pair", "a", ["Pair", "b", "c"]]
       box-latex = (a,(b;c))
-      latex     = \\mathrm{Pair}(a, \\mathrm{Pair}(b, c))
+      latex     = (a,(b,c))
     `);
   });
   test('Sequences', () => {
@@ -344,28 +344,28 @@ describe('DELIMITERS PARSING', () => {
       box       = ["Delimiter", ["Sequence", "a", "b", "c"], "','"]
       canonical = ["Triple", "a", "b", "c"]
       box-latex = a,b,c
-      latex     = \\mathrm{Triple}(a, b, c)
+      latex     = (a,b,c)
     `);
     // Sequence with missing element
     expect(check('a,, c')).toMatchInlineSnapshot(`
       box       = ["Delimiter", ["Sequence", "a", "Nothing", "c"], "','"]
       canonical = ["Triple", "a", "Nothing", "c"]
       box-latex = a,\\mathrm{Nothing},c
-      latex     = \\mathrm{Triple}(a, \\mathrm{Nothing}, c)
+      latex     = (a,\\mathrm{Nothing},c)
     `);
     // Sequence with missing final element
     expect(check('a,c,')).toMatchInlineSnapshot(`
       box       = ["Delimiter", ["Sequence", "a", "c", "Nothing"], "','"]
       canonical = ["Triple", "a", "c", "Nothing"]
       box-latex = a,c,\\mathrm{Nothing}
-      latex     = \\mathrm{Triple}(a, c, \\mathrm{Nothing})
+      latex     = (a,c,\\mathrm{Nothing})
     `);
     // Sequence with missing initial element
     expect(check(',c,b')).toMatchInlineSnapshot(`
       box       = ["Delimiter", ["Sequence", "Nothing", "c", "b"], "','"]
       canonical = ["Triple", "Nothing", "c", "b"]
       box-latex = \\mathrm{Nothing},c,b
-      latex     = \\mathrm{Triple}(\\mathrm{Nothing}, c, b)
+      latex     = (\\mathrm{Nothing},c,b)
     `);
   });
   test('Subsequences', () => {
@@ -389,7 +389,7 @@ describe('DELIMITERS PARSING', () => {
         ["Pair", "g", "h"]
       ]
       box-latex = a,b;k,l,m;f;g,h
-      latex     = \\mathrm{Tuple}(\\mathrm{Pair}(a, b), \\mathrm{Triple}(k, l, m), f, \\mathrm{Pair}(g, h))
+      latex     = ((a,b),(k,l,m),f,(g,h))
     `);
     expect(check(';;a;')).toMatchInlineSnapshot(`
       [
@@ -427,7 +427,7 @@ describe('SETS, LISTS, TUPLES', () => {
       box       = ["Delimiter", ["Sequence", 1, 2, 3], "'(,)'"]
       canonical = ["Triple", 1, 2, 3]
       box-latex = (1,2,3)
-      latex     = \\mathrm{Triple}(1, 2, 3)
+      latex     = (1,2,3)
     `));
 
   test('Lists can be embedded in other lists', () =>
@@ -442,6 +442,6 @@ describe('SETS, LISTS, TUPLES', () => {
       box       = ["Delimiter", ["Sequence", 1, 2, 3], "'(,)'"]
       canonical = ["Triple", 1, 2, 3]
       box-latex = (1,2,3)
-      latex     = \\mathrm{Triple}(1, 2, 3)
+      latex     = (1,2,3)
     `));
 });

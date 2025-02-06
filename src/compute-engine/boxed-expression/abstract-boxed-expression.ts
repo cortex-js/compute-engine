@@ -28,7 +28,7 @@ import type { NumericValue } from '../numeric-value/public';
 
 import type { SmallInteger } from '../numerics/numeric';
 
-import { compileToJavascript } from '../compile';
+import { CompiledType, compileToJavascript } from '../compile';
 
 import {
   getApplyFunctionStyle,
@@ -363,19 +363,19 @@ export abstract class _BoxedExpression implements BoxedExpression {
   get symbols(): ReadonlyArray<string> {
     const set = new Set<string>();
     getSymbols(this, set);
-    return Array.from(set);
+    return Array.from(set).sort();
   }
 
   get unknowns(): ReadonlyArray<string> {
     const set = new Set<string>();
     getUnknowns(this, set);
-    return Array.from(set);
+    return Array.from(set).sort();
   }
 
   get freeVariables(): ReadonlyArray<string> {
     const set = new Set<string>();
     getFreeVariables(this, set);
-    return Array.from(set);
+    return Array.from(set).sort();
   }
 
   get errors(): ReadonlyArray<BoxedExpression> {
@@ -657,11 +657,11 @@ export abstract class _BoxedExpression implements BoxedExpression {
     throw new Error(`Can't change the value of \\(${this.latex}\\)`);
   }
 
-  get type(): Type {
-    return 'unknown';
+  get type(): BoxedType {
+    return BoxedType.unknown;
   }
 
-  set type(_type: Type) {
+  set type(_type: Type | TypeString | BoxedType) {
     throw new Error(`Can't change the type of \\(${this.latex}\\)`);
   }
 
@@ -707,7 +707,7 @@ export abstract class _BoxedExpression implements BoxedExpression {
     vars?: Record<MathJsonIdentifier, string>;
     imports?: Function[];
     preamble?: string;
-  }): (args: Record<string, any>) => any | undefined {
+  }): (args: Record<string, any>) => CompiledType {
     if (options?.to && options.to !== 'javascript')
       throw new Error('Unknown target');
     options ??= {};
@@ -836,7 +836,8 @@ export function getSubexpressions(
 // function *after* the class definition
 
 import { serializeJson } from './serialize';
-import type { Type } from '../../common/type/types';
+import type { Type, TypeString } from '../../common/type/types';
 import { cmp, eq, same } from './compare';
 import { AbstractTensor } from '../tensor/tensors';
 import { expand } from './expand';
+import { BoxedType } from '../../common/type/boxed-type';

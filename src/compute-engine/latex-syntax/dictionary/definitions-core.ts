@@ -12,7 +12,7 @@ import {
   isEmptySequence,
   unhold,
   symbol,
-  dictionaryFrom,
+  dictionaryFromEntries,
 } from '../../../math-json/utils';
 import {
   isEquationOperator,
@@ -24,6 +24,7 @@ import {
   ASSIGNMENT_PRECEDENCE,
   LatexDictionary,
   Parser,
+  PostfixEntry,
   Serializer,
   Terminator,
 } from '../public';
@@ -429,6 +430,27 @@ export const DEFINITIONS_CORE: LatexDictionary = [
   },
 
   {
+    name: 'Tuple',
+    serialize: (serializer, expr) =>
+      joinLatex(['(', serializeOps(',')(serializer, expr), ')']),
+  },
+  {
+    name: 'Pair',
+    serialize: (serializer, expr) =>
+      joinLatex(['(', serializeOps(',')(serializer, expr), ')']),
+  },
+  {
+    name: 'Triple',
+    serialize: (serializer, expr) =>
+      joinLatex(['(', serializeOps(',')(serializer, expr), ')']),
+  },
+  {
+    name: 'Single',
+    serialize: (serializer, expr) =>
+      joinLatex(['(', serializeOps(',')(serializer, expr), ')']),
+  },
+
+  {
     name: 'Domain',
     serialize: (serializer, expr) => {
       if (operator(expr) === 'Error') return serializer.serialize(expr);
@@ -471,7 +493,7 @@ export const DEFINITIONS_CORE: LatexDictionary = [
           ? stringValue(operand(op1, 1))
           : stringValue(op1);
 
-      if (code === 'incompatible-domain') {
+      if (code === 'incompatible-type') {
         if (symbol(operand(op1, 3)) === 'Undefined') {
           return `\\mathtip{\\error{${where}}}{\\notin ${serializer.serialize(
             operand(op1, 2)
@@ -508,8 +530,7 @@ export const DEFINITIONS_CORE: LatexDictionary = [
         code === 'invalid-identifier' ||
         code === 'unknown-environment' ||
         code === 'unexpected-base' ||
-        code === 'incompatible-domain' ||
-        code === 'invalid-domain'
+        code === 'incompatible-type'
       ) {
         return '';
       }
@@ -566,7 +587,7 @@ export const DEFINITIONS_CORE: LatexDictionary = [
   {
     kind: 'postfix',
     latexTrigger: ['_'],
-    parse: (parser, lhs) => {
+    parse: (parser: Parser, lhs: Expression, until?: Readonly<Terminator>) => {
       // @fixme: should check that the lhs is a collection. If not a collection,
       // return null (or interpret as an identifier).
 
@@ -574,7 +595,7 @@ export const DEFINITIONS_CORE: LatexDictionary = [
       const rhs = parser.parseGroup() ?? parser.parseToken();
       return ['Subscript', lhs, rhs];
     },
-  },
+  } as PostfixEntry,
   {
     name: 'List',
     kind: 'matchfix',
@@ -947,7 +968,7 @@ function parseTextRun(
       if (color !== null) {
         // Stash the current text/runinstyle
         if (runinStyle !== null && text) {
-          runs.push(['Style', text, dictionaryFrom(runinStyle)]);
+          runs.push(['Style', text, dictionaryFromEntries(runinStyle)]);
         } else if (text) {
           runs.push(['String', text]);
         }
@@ -1031,7 +1052,7 @@ function parseTextRun(
 
   // Apply leftovers
   if (runinStyle !== null && text) {
-    runs.push(['Style', `'${text}'`, dictionaryFrom(runinStyle)]);
+    runs.push(['Style', `'${text}'`, dictionaryFromEntries(runinStyle)]);
   } else if (text) {
     runs.push(`'${text}'`);
   }
@@ -1044,7 +1065,7 @@ function parseTextRun(
     else body = ['String', ...runs];
   }
 
-  return style ? ['Style', body, dictionaryFrom(style)] : body;
+  return style ? ['Style', body, dictionaryFromEntries(style)] : body;
 }
 
 function serializeLatexTokens(

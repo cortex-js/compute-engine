@@ -3,13 +3,15 @@ import { parseType } from '../../src/common/type/parse';
 import { isSubtype } from '../../src/common/type/subtype';
 import { reduceType } from '../../src/common/type/reduce';
 
-describe('Type Parser Tests', () => {
+describe('Primitive Type Parser', () => {
   // Positive Test Cases
 
   it('should parse primitive type', () => {
     expect(parseType('integer')).toMatchInlineSnapshot(`"integer"`);
   });
+});
 
+describe('Constructed Type Parser', () => {
   it('should parse union type', () => {
     expect(parseType('integer | boolean')).toMatchInlineSnapshot(`
       {
@@ -52,6 +54,58 @@ describe('Type Parser Tests', () => {
     `);
   });
 
+  it('should parse constructed nested type', () => {
+    expect(
+      parseType(
+        '((x: integer) -> string) & list<boolean> | (number, value) -> collection'
+      )
+    ).toMatchInlineSnapshot(`
+      {
+        "kind": "union",
+        "types": [
+          {
+            "kind": "intersection",
+            "types": [
+              {
+                "args": [
+                  {
+                    "name": "x",
+                    "type": "integer",
+                  },
+                ],
+                "kind": "signature",
+                "optArgs": undefined,
+                "restArg": undefined,
+                "result": "string",
+              },
+              {
+                "dimensions": undefined,
+                "elements": "boolean",
+                "kind": "list",
+              },
+            ],
+          },
+          {
+            "args": [
+              {
+                "type": "number",
+              },
+              {
+                "type": "value",
+              },
+            ],
+            "kind": "signature",
+            "optArgs": undefined,
+            "restArg": undefined,
+            "result": "collection",
+          },
+        ],
+      }
+    `);
+  });
+});
+
+describe('Collection Type Parser', () => {
   it('should parse collection type with dimensions', () => {
     expect(parseType('list<integer^2x3>')).toMatchInlineSnapshot(`
       {
@@ -150,7 +204,7 @@ describe('Type Parser Tests', () => {
     `);
   });
 
-  it('should parse a list function', () => {
+  it('should parse a list expression with another constructed type', () => {
     expect(parseType('list<tuple<x:number, y: boolean>>'))
       .toMatchInlineSnapshot(`
       {
@@ -222,7 +276,9 @@ describe('Type Parser Tests', () => {
       }
     `);
   });
+});
 
+describe('Signature Type Parser Tests', () => {
   it('should parse a function signature with named arguments', () => {
     expect(parseType('(x: integer, y: boolean) -> string'))
       .toMatchInlineSnapshot(`
@@ -284,19 +340,9 @@ describe('Type Parser Tests', () => {
       }
     `);
   });
+});
 
-  it('should parse complex nested type', () => {
-    expect(
-      parseType(
-        '((x: integer) -> string) & list<boolean> | (number, value) -> collection'
-      ).toString()
-    ).toMatchInlineSnapshot(
-      `"(x: integer) -> string & list<boolean> | (number, value) -> collection"`
-    );
-  });
-
-  // Negative Test Cases
-
+describe('Negative Type Parser Tests', () => {
   it('should throw an error for function signature with optional and rest arguments', () => {
     expect(() =>
       parseType('(x: integer, y: boolean?, z: ...string) -> boolean')
@@ -440,7 +486,7 @@ describe('Type Parser Tests', () => {
       |   z: ...string -> boolean
       |   ^
       |   
-      |   Named arguments must be enclosed in parentheses
+      |   Named elements must be enclosed in parentheses
       "
     `);
   });
@@ -451,10 +497,9 @@ describe('Type Parser Tests', () => {
       "
       Invalid type
       |   z: string -> boolean
-      |    ^
+      |   ^
       |   
-      |   Unknown keyword "z"
-      |   Did you mean "any"?
+      |   Named elements must be enclosed in parentheses
       "
     `);
   });
@@ -501,28 +546,28 @@ describe('Type Parser Tests', () => {
   });
 });
 
-describe('isSubtype Tests POSITIVE', () => {
+describe('isSubtype POSITIVE', () => {
   // Positive Test Cases
 
-  it('should return true for equal primitive types', () => {
+  it('should match equal primitive types', () => {
     expect(isSubtype('number', 'number')).toBe(true);
   });
 
-  it('should return true for primitive types that are a subtype', () => {
+  it('should match primitive types that are a subtype', () => {
     expect(isSubtype('integer', 'number')).toBe(true);
   });
 
-  it('should return true for primitive type as part of union', () => {
+  it('should match primitive type as part of union', () => {
     expect(isSubtype('number', parseType('number | boolean'))).toBe(true);
   });
 
-  it('should return true for union type as subtype of another union', () => {
+  it('should match union type as subtype of another union', () => {
     expect(
       isSubtype(parseType('integer | boolean'), parseType('number | boolean'))
     ).toBe(true);
   });
 
-  it('should return true for a complex function signature subtype', () => {
+  it('should match a complex function signature subtype', () => {
     expect(
       isSubtype(
         parseType('(x:number) -> boolean'),
@@ -531,7 +576,16 @@ describe('isSubtype Tests POSITIVE', () => {
     ).toBe(true);
   });
 
-  it('should return true for function signature with optional arguments', () => {
+  it('should match function signature with matching types but different names', () => {
+    expect(
+      isSubtype(
+        parseType('(y:number) -> boolean'),
+        parseType('(x:integer) -> boolean')
+      )
+    ).toBe(true);
+  });
+
+  it('should match function signature with optional arguments', () => {
     expect(
       isSubtype(
         parseType('(x:number, y: number?) -> string'),
@@ -540,13 +594,34 @@ describe('isSubtype Tests POSITIVE', () => {
     ).toBe(true);
   });
 
-  it('should return true for collection type with matching dimensions', () => {
+  it('should match an union of signatures', () => {
+    expect(
+      isSubtype(
+        parseType('((x: integer) -> string) | ((y: number) -> boolean)'),
+        parseType('(x: integer) -> string')
+      )
+    ).toBe(true);
+  });
+
+  it('should match an union of values', () => {});
+
+  it('should match a negation type', () => {
+    expect(isSubtype(parseType('!number'), 'any')).toBe(true);
+  });
+
+  it('should match a matching negation type', () => {
+    expect(isSubtype(parseType('1'), 'integer & !0')).toBe(true);
+  });
+});
+
+describe('isSubtype of collections', () => {
+  it('should match collection type with matching dimensions', () => {
     expect(
       isSubtype(parseType('list<integer^2x3>'), parseType('list<integer^2x3>'))
     ).toBe(true);
   });
 
-  it('should return true for tuple type subtype', () => {
+  it('should match tuple type subtype', () => {
     expect(
       isSubtype(
         parseType('tuple<x:integer, y: boolean>'),
@@ -554,29 +629,24 @@ describe('isSubtype Tests POSITIVE', () => {
       )
     ).toBe(true);
   });
-
-  it('should retrun true for an union of signatures', () => {
-    expect(
-      isSubtype(
-        parseType('(x: integer) -> string | (y: number) -> boolean'),
-        parseType('(x: integer) -> string')
-      )
-    ).toBe(true);
-  });
-
-  it('should return true for a negation type', () => {
-    expect(isSubtype(parseType('!number'), 'any')).toBe(true);
-  });
 });
 
 describe('isSubtype Tests NEGATIVE', () => {
   // Negative Test Cases
 
-  it('should return false for intersection type as subtype', () => {
+  it('should not match a non-matching negation type', () => {
+    expect(isSubtype(parseType('0'), 'integer & !0')).toBe(false);
+  });
+
+  it('should not match a non-matching intersection type', () => {
+    expect(isSubtype(parseType('3.1'), 'integer & !0')).toBe(false);
+  });
+
+  it('should not match intersection type as subtype', () => {
     expect(isSubtype(parseType('integer & real'), 'number')).toBe(false);
   });
 
-  it('should return false for a union as a subtype of an intersection', () => {
+  it('should not match a union as a subtype of an intersection', () => {
     expect(
       isSubtype(
         parseType('integer | boolean'),
@@ -585,7 +655,7 @@ describe('isSubtype Tests NEGATIVE', () => {
     ).toBe(false);
   });
 
-  it('should return false for different primitive types', () => {
+  it('should not match different primitive types', () => {
     expect(isSubtype('number', 'boolean')).toBe(false);
   });
 
@@ -593,25 +663,25 @@ describe('isSubtype Tests NEGATIVE', () => {
     expect(isSubtype('number', parseType('(number & boolean)'))).toBe(false);
   });
 
-  it('should return false for function signature with incompatible result types', () => {
+  it('should not match function signature with incompatible result types', () => {
     expect(
       isSubtype(parseType('integer->boolean'), parseType('integer->string'))
     ).toBe(false);
   });
 
-  it('should return false for incompatible collection types', () => {
+  it('should not match incompatible collection types', () => {
     expect(
       isSubtype(parseType('list<integer^2x3>'), parseType('list<string^2x3>'))
     ).toBe(false);
   });
 
-  it('should return false for collections with mismatched dimensions', () => {
+  it('should not match collections with mismatched dimensions', () => {
     expect(
       isSubtype(parseType('list<integer^2x3>'), parseType('list<integer^3x3>'))
     ).toBe(false);
   });
 
-  it('should return false for collections with mismatched shape', () => {
+  it('should not match collections with mismatched shape', () => {
     expect(
       isSubtype(
         parseType('list<integer^2x3x4>'),
@@ -620,7 +690,7 @@ describe('isSubtype Tests NEGATIVE', () => {
     ).toBe(false);
   });
 
-  it('should return false for tuples with different lengths', () => {
+  it('should not match tuples with different lengths', () => {
     expect(
       isSubtype(
         parseType('tuple<integer, boolean>'),
@@ -629,17 +699,26 @@ describe('isSubtype Tests NEGATIVE', () => {
     ).toBe(false);
   });
 
-  it('should return false for function signature with different argument types', () => {
+  it('should not match function signature with different argument types', () => {
     expect(
       isSubtype(parseType('integer->boolean'), parseType('boolean->boolean'))
     ).toBe(false);
   });
 
-  it('should return false for incompatible tuple element types', () => {
+  it('should not match incompatible tuple element types', () => {
     expect(
       isSubtype(
         parseType('tuple<integer, boolean>'),
         parseType('tuple<string, boolean>')
+      )
+    ).toBe(false);
+  });
+
+  it('should not match tuples with matching types but different names', () => {
+    expect(
+      isSubtype(
+        parseType('tuple<x:integer, y:boolean>'),
+        parseType('tuple<y:integer, x:boolean>')
       )
     ).toBe(false);
   });

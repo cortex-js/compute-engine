@@ -43,7 +43,11 @@ import { holdMap, holdMapAsync } from './hold';
 import { Type } from '../../common/type/types';
 import { parseType } from '../../common/type/parse';
 import { isSubtype } from '../../common/type/subtype';
-import { functionResult, narrow } from '../../common/type/utils';
+import {
+  functionResult,
+  isSignatureType,
+  narrow,
+} from '../../common/type/utils';
 import {
   positiveSign,
   nonNegativeSign,
@@ -52,6 +56,7 @@ import {
   sgn,
 } from './sgn';
 import { cachedValue, CachedValue, cachedValueAsync } from './cache';
+import { BoxedType } from '../../common/type/boxed-type';
 
 /**
  * A boxed function represent an expression that can be represented by a
@@ -104,7 +109,7 @@ export class BoxedFunction extends _BoxedExpression {
     value: null,
     generation: -1,
   };
-  private _type: CachedValue<Type | undefined> = {
+  private _type: CachedValue<BoxedType | undefined> = {
     value: null,
     generation: -1,
   };
@@ -156,14 +161,13 @@ export class BoxedFunction extends _BoxedExpression {
     if (!def.inferredSignature) return false;
 
     // If the signature was inferred, refine it by narrowing the result
-    if (
-      typeof def.signature !== 'string' &&
-      def.signature.kind === 'signature'
-    ) {
-      def.signature = {
-        ...def.signature,
-        result: narrow(def.signature.result, t),
-      };
+    if (def.signature.is('function')) {
+      def.signature = new BoxedType({ kind: 'signature', result: t });
+    } else if (isSignatureType(def.signature.type)) {
+      def.signature = new BoxedType({
+        kind: 'signature',
+        result: narrow(def.signature.type.result, t),
+      });
     }
 
     this.engine.generation += 1;
@@ -490,9 +494,9 @@ export class BoxedFunction extends _BoxedExpression {
   // Not +- Infinity, not NaN
   get isFinite(): boolean | undefined {
     if (this.isNumber !== true) return false;
+    if (this.isNaN || this.isInfinity) return false;
     if (this.isNaN === undefined || this.isInfinity === undefined)
       return undefined;
-    if (this.isNaN || this.isInfinity) return false;
     return true;
   }
 
@@ -759,7 +763,7 @@ export class BoxedFunction extends _BoxedExpression {
     if (this.operator === 'Divide')
       return this.op1.ln(base).sub(this.op2.ln(base));
 
-    if (base && base.type === 'finite_integer') {
+    if (base && base.type.matches('finite_integer')) {
       // ln_10(x) -> log(x)
       if (base.re === 10) return this.engine._fn('Log', [this]);
       // ln_n(x) -> log_n(x)
@@ -790,26 +794,26 @@ export class BoxedFunction extends _BoxedExpression {
   }
 
   get isNumber(): boolean | undefined {
-    const t = this.type;
+    const t = this.type.type;
     if (t === 'unknown') return undefined;
     return isSubtype(t, 'number');
   }
 
   get isInteger(): boolean | undefined {
-    const t = this.type;
+    const t = this.type.type;
     if (t === 'unknown') return undefined;
     return isSubtype(t, 'integer');
   }
 
   get isRational(): boolean | undefined {
-    const t = this.type;
+    const t = this.type.type;
     if (t === 'unknown') return undefined;
     // integers are rationals
     return isSubtype(t, 'rational');
   }
 
   get isReal(): boolean | undefined {
-    const t = this.type;
+    const t = this.type.type;
     if (t === 'unknown') return undefined;
     // rationals and integers are real
     return isSubtype(t, 'real');
@@ -820,12 +824,17 @@ export class BoxedFunction extends _BoxedExpression {
   }
 
   /** The type of the value of the function */
-  get type(): Type {
+  get type(): BoxedType {
     const gen =
       this.isPure && this._ops.every((x) => x.isConstant)
         ? undefined
         : this.engine.generation;
-    return cachedValue(this._type, gen, () => type(this)) ?? 'unknown';
+    return (
+      cachedValue(this._type, gen, () => {
+        const t = type(this);
+        return t ? new BoxedType(t) : undefined;
+      }) ?? BoxedType.unknown
+    );
   }
 
   simplify(options?: Partial<SimplifyOptions>): BoxedExpression {
@@ -853,15 +862,15 @@ export class BoxedFunction extends _BoxedExpression {
   }
 
   solve(
-    vars:
+    vars?:
       | Iterable<string>
       | string
       | BoxedExpression
       | Iterable<BoxedExpression>
   ): null | ReadonlyArray<BoxedExpression> {
-    const varNames = normalizedUnknownsForSolve(vars);
+    const varNames = normalizedUnknownsForSolve(vars ?? this.unknowns);
     if (varNames.length !== 1) return null;
-    return findUnivariateRoots(this.simplify(), varNames[0]);
+    return findUnivariateRoots(this, varNames[0]);
   }
 
   get isCollection(): boolean {
@@ -1094,17 +1103,42 @@ export class BoxedFunction extends _BoxedExpression {
 /** Return the type of the value of the expression */
 function type(expr: BoxedFunction): Type | undefined {
   if (!expr.isValid) return 'error';
+
+  // Is this a 'Function' expression?
+  if (expr.operator === 'Function') {
+    // What is the type of the body of the function?
+    const body = expr.ops[0];
+    const bodyType = body.type;
+    const args = expr.ops.slice(1);
+    return parseType(`(${args.map((x) => 'any').join(', ')}) -> ${bodyType}`);
+  }
+
+  // Is there a definition associated with the operator of the function?
   const def = expr.functionDefinition;
-  if (!def) return 'function';
+  if (def) {
+    const sig =
+      def.signature instanceof BoxedType
+        ? def.signature.type
+        : typeof def.signature === 'string'
+          ? parseType(def.signature)
+          : def.signature;
 
-  let sigResult = functionResult(def.signature) ?? 'unknown';
+    let sigResult = functionResult(sig) ?? 'unknown';
 
-  // If there is a type handler, call it
-  if (typeof def.type === 'function')
-    sigResult =
-      parseType(def.type(expr.ops!, { engine: expr.engine })) ?? sigResult;
+    // If there is a type handler, call it
+    if (typeof def.type === 'function') {
+      const calculatedType = def.type(expr.ops, { engine: expr.engine });
+      if (calculatedType) {
+        if (calculatedType instanceof BoxedType)
+          sigResult = calculatedType.type;
+        else sigResult = parseType(calculatedType) ?? sigResult;
+      }
+    }
 
-  return sigResult;
+    return sigResult;
+  }
+
+  return 'function';
 }
 
 function withDeadline<T>(engine: IComputeEngine, fn: () => T): () => T {

@@ -16,8 +16,21 @@ import { apply2 } from '../boxed-expression/apply';
 import { reducedRational } from '../numerics/rationals';
 
 //
-// Note: Names of trigonometric functions follow ISO 80000 Section 13
+// Note: The name of trigonometric functions follow NIST DLMF
+// - https://dlmf.nist.gov/4.14
+// - https://dlmf.nist.gov/4.37
 //
+// The usage of the `ar-` prefix (instead of `arc-` is controversial:
+// https://en.wikipedia.org/wiki/Talk:Inverse_hyperbolic_functions
+// ISO 80000 and ANSI use `arsinh`, while NIST uses `arcsinh`.
+// The most common usage is `arcsinh`, so we use that here.
+
+// Also worth noting, In NIST (and ANSI) the inverse hyperbolic functions are
+//  defined as:
+// - arcsin z is the principal branch of the inverse sine function
+// - Arcsin z = (-1)^k arcsin (z + k\pi) is the general multivalued inverse
+//   sine function
+// We only have definitions for the principal branches here.
 
 export const TRIGONOMETRY_LIBRARY: IdentifierDefinitions[] = [
   {
@@ -25,7 +38,7 @@ export const TRIGONOMETRY_LIBRARY: IdentifierDefinitions[] = [
     // Constants
     //
     Pi: {
-      type: 'real',
+      type: 'finite_real',
       constant: true,
       holdUntil: 'N',
       wikidata: 'Q167',
@@ -78,8 +91,8 @@ export const TRIGONOMETRY_LIBRARY: IdentifierDefinitions[] = [
         engine.box(['Sqrt', ['Add', ['Square', x], ['Square', y]]]),
     },
 
-    // The definition of other functions may rely on Sin, so it is defined first
-    // in a separate section
+    // The definition of other trig functions may rely on Sin, so it is defined
+    // first in this preliminary section
     Sin: trigFunction('Sin', 5000),
   },
   {
@@ -91,7 +104,7 @@ export const TRIGONOMETRY_LIBRARY: IdentifierDefinitions[] = [
       wikidata: 'Q2257242',
       complexity: 5200,
       threadable: true,
-      signature: 'number -> real',
+      signature: 'number -> finite_real',
       sgn: ([x]) => trigSign('Arctan', x),
       evaluate: ([x], { numericApproximation }) =>
         numericApproximation
@@ -122,6 +135,7 @@ export const TRIGONOMETRY_LIBRARY: IdentifierDefinitions[] = [
     Cos: trigFunction('Cos', 5050),
 
     Tan: trigFunction('Tan', 5100),
+
     /* converts (x, y) -> (radius, angle) */
     // ToPolarCoordinates: {
     //   domain: 'Functions',
@@ -133,14 +147,15 @@ export const TRIGONOMETRY_LIBRARY: IdentifierDefinitions[] = [
   // trigonometric functions above
   //
   {
-    Arcosh: trigFunction('Arcosh', 6200),
+    //Note: we use Arccosh, not Arcosh, as the name of the function
+    Arccosh: trigFunction('Arccosh', 6200),
 
     Arcsin: trigFunction('Arcsin', 5500),
 
-    //Note: Arsinh, not ArCsinh
-    Arsinh: trigFunction('Arsinh', 6100),
+    //Note: we use Arcsinh, not Arsinh, as the name of the function
+    Arcsinh: trigFunction('Arcsinh', 6100),
 
-    Artanh: trigFunction('Artanh', 6300),
+    Arctanh: trigFunction('Arctanh', 6300),
 
     Cosh: trigFunction('Cosh', 6050),
 
@@ -182,13 +197,13 @@ export const TRIGONOMETRY_LIBRARY: IdentifierDefinitions[] = [
 
     Arccot: trigFunction('Arccot', 5650),
 
-    Arcoth: trigFunction('Arcoth', 6350),
+    Arccoth: trigFunction('Arccoth', 6350),
 
-    Arcsch: trigFunction('Arcsch', 6250),
+    Arccsch: trigFunction('Arccsch', 6250),
 
     Arcsec: trigFunction('Arcsec', 5650),
 
-    Arsech: trigFunction('Arsech', 6250),
+    Arcsech: trigFunction('Arcsech', 6250),
 
     Arccsc: trigFunction('Arccsc', 5650),
 
@@ -201,7 +216,7 @@ export const TRIGONOMETRY_LIBRARY: IdentifierDefinitions[] = [
     // },
     InverseFunction: {
       lazy: true,
-      signature: '(function) -> function',
+      signature: 'function -> function',
       canonical: (ops, { engine }) => {
         // The canonical handler is responsible for validating the arguments
         ops = checkArity(engine, ops, 1);

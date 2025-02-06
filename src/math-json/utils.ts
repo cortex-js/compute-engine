@@ -7,6 +7,8 @@ import type {
   MathJsonSymbol,
 } from './types';
 
+import { JSON5 } from '../common/json5';
+
 export const MISSING: Expression = ['Error', "'missing'"];
 
 export function isNumberExpression(
@@ -163,16 +165,48 @@ function keyValuePair(
   return null;
 }
 
-export function dictionary(
+// Parse the expression either as:
+// - a `Dictionary` expression
+// - a `KeyValuePair` or `Tuple` expression
+// - a string literal surrounded by `{` and `}`
+export function dictionaryFromExpression(
   expr: Expression | null
 ): null | Record<string, Expression> {
   if (expr === null) return null;
 
+  // Is it an object literal without any of the reserved keys?
+  if (
+    typeof expr === 'object' &&
+    !('sym' in expr) &&
+    !('num' in expr) &&
+    !('str' in expr) &&
+    !('fn' in expr)
+  ) {
+    return expr as unknown as Record<string, Expression>;
+  }
+
+  // Is it a string literal surrounded by `{` and `}`?
+  // e.g. `"{a: 1, b: 2}"` -> `{a: 1, b: 2}`
+  // (note we use JSON5 syntax, which is more permissive than JSON, and for
+  // example does not require quotes around keys)
+  if (
+    typeof expr === 'string' &&
+    expr[0] === '{' &&
+    expr[expr.length - 1] === '}'
+  ) {
+    try {
+      return JSON5.parse(expr);
+    } catch {
+      return null;
+    }
+  }
+
+  // Is it a KeyValuePair or Tuple expression?
   const kv = keyValuePair(expr);
   if (kv) return { [kv[0]]: kv[1] };
 
-  const h = operator(expr);
-  if (h === 'Dictionary') {
+  // Is it a Dictionary expression?
+  if (operator(expr) === 'Dictionary') {
     const result = {};
     const ops = operands(expr);
     for (let i = 1; i < nops(expr); i++) {
@@ -186,7 +220,9 @@ export function dictionary(
   return null;
 }
 
-export function dictionaryFrom(dict: Record<string, Expression>): Expression {
+export function dictionaryFromEntries(
+  dict: Record<string, Expression>
+): Expression {
   const keys = Object.keys(dict);
   if (keys.length === 0) return ['Dictionary'];
   if (keys.length === 1) return ['Pair', { str: keys[0] }, dict[keys[0]]];
@@ -408,7 +444,7 @@ export function countLeaves(expr: Expression | null): number {
   if (Array.isArray(expr)) return countFunctionLeaves(expr);
   if ('fn' in expr) return countFunctionLeaves(expr.fn);
 
-  const dict = dictionary(expr);
+  const dict = dictionaryFromExpression(expr);
   if (dict) {
     const keys = Object.keys(dict);
     return (

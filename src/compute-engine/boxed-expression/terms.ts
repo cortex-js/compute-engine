@@ -25,10 +25,7 @@ export class Terms {
     // If we added as we go, we would get 0.25.
     const numericValues: NumericValue[] = [];
     for (const term of terms) {
-      if (
-        (term.type === 'imaginary' || term.type === 'complex') &&
-        term.isInfinity
-      ) {
+      if (term.type.is('complex') && term.isInfinity) {
         this.terms = [{ term: ce.ComplexInfinity, coef: [] }];
         return;
       }

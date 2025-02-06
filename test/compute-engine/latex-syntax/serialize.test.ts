@@ -274,7 +274,7 @@ describe('LATEX', () => {
             ErrorCode,
             'incompatible-type',
             'string',
-            'real',
+            'finite_real',
           ],
         ],
       ]

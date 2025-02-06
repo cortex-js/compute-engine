@@ -739,31 +739,23 @@ describe('SYMBOLIC EVALUATION trigonometric functions', () => {
   test(`\\sin\\frac\\pi3 // constructible values`, () =>
     expect(evaluateToJson('\\sin\\frac\\pi3')).toMatchInlineSnapshot(`
       [
-        Multiply,
-        [
-          Rational,
-          1,
-          2,
-        ],
+        Divide,
         [
           Sqrt,
           3,
         ],
+        2,
       ]
     `));
   test(`\\sin(\\frac13\\pi) // constructible values`, () =>
     expect(evaluateToJson('\\sin(\\frac13\\pi)')).toMatchInlineSnapshot(`
       [
-        Multiply,
-        [
-          Rational,
-          1,
-          2,
-        ],
+        Divide,
         [
           Sqrt,
           3,
         ],
+        2,
       ]
     `));
 });

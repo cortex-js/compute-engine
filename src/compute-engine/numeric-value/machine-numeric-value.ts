@@ -53,9 +53,11 @@ export class MachineNumericValue extends NumericValue {
   }
 
   get type(): NumericType {
+    if (this.isNaN) return 'number';
+    if (this.isComplexInfinity) return 'complex';
+
     if (this.im !== 0) {
-      if (!Number.isFinite(this.im)) return 'non_finite_number';
-      if (this.decimal === 0) return 'finite_imaginary';
+      if (this.decimal === 0) return 'imaginary';
       return 'finite_complex';
     }
     if (!Number.isFinite(this.decimal)) return 'non_finite_number';
@@ -351,7 +353,7 @@ export class MachineNumericValue extends NumericValue {
       if (exponent < 0) return this.clone({ im: Infinity }); // Complex/unsigned infinity
     }
 
-    if (exponent < 0) return this.pow(-exponent).inv();
+    if (exponent < 0) return this.clone(1 / this.decimal ** -exponent);
 
     if (this.im === 0) return this.clone(this.decimal ** exponent);
 

@@ -28,6 +28,7 @@ import { canonical, hashCode, isBoxedExpression } from './utils';
 import { AbstractTensor, TensorData, makeTensor } from '../tensor/tensors'; // @fixme
 import { Type } from '../../common/type/types';
 import { parseType } from '../../common/type/parse';
+import { BoxedType } from '../../common/type/boxed-type';
 
 /**
  * A boxed tensor represents an expression that can be represented by a tensor.
@@ -243,9 +244,9 @@ export class BoxedTensor extends _BoxedExpression {
     return this.tensor.rank;
   }
 
-  get type(): Type {
+  get type(): BoxedType {
     // @fixme: more precisely: matrix, vector, etc...
-    return this.isValid ? parseType('list<number>') : 'error';
+    return new BoxedType(this.isValid ? parseType('list<number>') : 'error');
   }
 
   get json(): Expression {

@@ -7,8 +7,8 @@
 // **both** MathJSON and the Compute Engine.
 
 export type {
-  Attributes,
   Expression,
+  MathJsonAttributes,
   MathJsonNumber,
   MathJsonSymbol,
   MathJsonString,
@@ -20,12 +20,12 @@ export {
   isSymbolObject,
   isStringObject,
   isFunctionObject,
-  stringValue as getStringValue,
+  stringValue,
   operator,
   operand,
   symbol,
   mapArgs,
-  dictionary as getDictionary,
+  dictionaryFromExpression,
 } from './math-json/utils';
 
 export const version = '{{SDK_VERSION}}';

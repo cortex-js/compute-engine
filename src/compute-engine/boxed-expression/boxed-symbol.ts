@@ -55,6 +55,7 @@ import {
 } from './sgn';
 import { BigNum } from '../numerics/bignum';
 import type { OneOf } from '../../common/one-of';
+import { BoxedType } from '../../common/type/boxed-type';
 
 /**
  * BoxedSymbol
@@ -212,7 +213,6 @@ export class BoxedSymbol extends _BoxedExpression {
 
   reset(): void {
     this._def?.reset();
-    this._def = undefined;
   }
 
   get isCanonical(): boolean {
@@ -346,7 +346,7 @@ export class BoxedSymbol extends _BoxedExpression {
   }
 
   solve(
-    vars:
+    vars?:
       | Iterable<string>
       | string
       | BoxedExpression
@@ -412,9 +412,9 @@ export class BoxedSymbol extends _BoxedExpression {
     // Widen the type, if it was previously inferred
     if (
       def instanceof _BoxedSymbolDefinition &&
-      (def.inferredType || def.type === 'unknown')
+      (def.inferredType || def.type.isUnknown)
     ) {
-      def.type = widen(def.type, t);
+      def.type = widen(def.type.type, t);
       return true;
     }
 
@@ -476,7 +476,7 @@ export class BoxedSymbol extends _BoxedExpression {
     //
     // Assign the value to the corresponding definition
     //
-    if (v?.type && isSubtype(v.type, 'function')) {
+    if (v?.type.matches('function')) {
       console.assert(!this.engine.lookupSymbol(this._id));
 
       // New function definitions always completely replace an existing one
@@ -504,17 +504,19 @@ export class BoxedSymbol extends _BoxedExpression {
 
   // The type of the value of the symbol.
   // If the symbol is not bound to a definition, the type is 'any'
-  get type(): Type {
+  get type(): BoxedType {
     const def = this._def;
-    if (!def) return 'unknown';
+    if (!def) return BoxedType.unknown;
     if (def instanceof _BoxedSymbolDefinition) return def.type;
     if (def instanceof _BoxedFunctionDefinition) return def.signature;
-    return 'unknown';
+    return BoxedType.unknown;
   }
 
-  set type(t: Type | TypeString) {
+  set type(t: Type | TypeString | BoxedType) {
     // Do nothing if the symbol is not bound
     if (!this._def) return;
+
+    if (t instanceof BoxedType) t = t.type;
 
     if (this._id[0] === '_')
       throw new Error(
@@ -596,27 +598,32 @@ export class BoxedSymbol extends _BoxedExpression {
   }
 
   get isNumber(): boolean | undefined {
+    // Since we infer the type of a symbol to a `number`, we don't need
+    // to check if the type was inferred.
     const t = this.type;
-    if (t === 'unknown') return undefined;
-    return isSubtype(t, 'number');
+    if (t.isUnknown) return undefined;
+    return t.matches('number');
   }
 
   get isInteger(): boolean | undefined {
+    if (this.symbolDefinition?.inferredType) return undefined;
     const t = this.type;
-    if (t === 'unknown') return undefined;
-    return isSubtype(t, 'integer');
+    if (t.isUnknown) return undefined;
+    return t.matches('integer');
   }
 
   get isRational(): boolean | undefined {
+    if (this.symbolDefinition?.inferredType) return undefined;
     const t = this.type;
-    if (t === 'unknown') return undefined;
-    return isSubtype(t, 'rational');
+    if (t.isUnknown) return undefined;
+    return t.matches('rational');
   }
 
   get isReal(): boolean | undefined {
+    if (this.symbolDefinition?.inferredType) return undefined;
     const t = this.type;
-    if (t === 'unknown') return undefined;
-    return isSubtype(t, 'real');
+    if (t.isUnknown) return undefined;
+    return t.matches('real');
   }
 
   get re(): number {
@@ -727,5 +734,8 @@ export function makeCanonicalSymbol(
 ): BoxedExpression {
   const def = ce.lookupSymbol(name);
   if (def?.holdUntil === 'never' && def.value) return def.value;
-  return new BoxedSymbol(ce, name, { canonical: true, def });
+  if (def) return new BoxedSymbol(ce, name, { canonical: true, def });
+  const fnDef = ce.lookupFunction(name);
+  if (fnDef) return new BoxedSymbol(ce, name, { canonical: true, def: fnDef });
+  return new BoxedSymbol(ce, name, { canonical: true });
 }

@@ -8,6 +8,7 @@ import { Terms } from './terms';
 import { Type } from '../../common/type/types';
 import { widen } from '../../common/type/utils';
 import { isSubtype } from '../../common/type/subtype';
+import { BoxedType } from '../../common/type/boxed-type';
 
 /**
  *
@@ -71,10 +72,12 @@ export function canonicalAdd(
   return ce._fn('Add', [...xs].sort(addOrder));
 }
 
-export function addType(args: ReadonlyArray<BoxedExpression>): Type {
+export function addType(
+  args: ReadonlyArray<BoxedExpression>
+): Type | BoxedType {
   if (args.length === 0) return 'finite_integer'; // = 0
   if (args.length === 1) return args[0].type;
-  return widen(...args.map((x) => x.type));
+  return widen(...args.map((x) => x.type.type));
 }
 
 export function add(...xs: ReadonlyArray<BoxedExpression>): BoxedExpression {

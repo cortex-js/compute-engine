@@ -10,6 +10,7 @@ const SET_PRECEDENCE = 6;
 const COLLECTION_PRECEDENCE = 7;
 const TUPLE_PRECEDENCE = 8;
 const SIGNATURE_PRECEDENCE = 9;
+const VALUE_PRECEDENCE = 10;
 
 export function typeToString(type: Type, precedence = 0): string {
   // Primitive types are already strings
@@ -20,7 +21,10 @@ export function typeToString(type: Type, precedence = 0): string {
   switch (type.kind) {
     case 'value':
       // Serialize value types
-      result = type.value.toString();
+      if (typeof type.value === 'string') result = `"${type.value}"`;
+      else if (typeof type.value === 'boolean')
+        result = type.value ? 'true' : 'false';
+      else result = type.value.toString();
       break;
 
     case 'reference':
@@ -51,28 +55,42 @@ export function typeToString(type: Type, precedence = 0): string {
       if (type.dimensions && isSubtype(type.elements, 'number')) {
         // We have a numeric list, possibly vector or matrix.
         if (type.dimensions === undefined) {
+          //
+          // A list of numbers without dimensions is a tensor
+          //
           if (type.elements === 'number') result = 'tensor';
         } else if (type.dimensions.length === 1) {
+          //
+          // A list with one dimension is a vector
+          //
           if (type.elements === 'number') {
             if (type.dimensions[0] < 0) result = 'vector';
             else result = `vector<${type.dimensions[0]}>`;
           } else {
-            if (type.dimensions[0] < 0) result = `vector<${type.elements}>`;
-            else result = `vector<${type.elements}^${type.dimensions[0]}>`;
+            if (type.dimensions[0] < 0)
+              result = `vector<${typeToString(type.elements)}>`;
+            else
+              result = `vector<${typeToString(type.elements)}^${type.dimensions[0]}>`;
           }
         } else if (type.dimensions.length === 2) {
+          //
+          // A list with two dimensions is a matrix
+          //
           const dims = type.dimensions;
           if (type.elements === 'number') {
+            // If the elements are 'number', we can use a simplified syntax
             if (dims[0] < 0 && dims[1] < 0) result = 'matrix';
             else result = `matrix<${dims[0]}x${dims[1]}>`;
           } else {
-            if (dims[0] < 0 && dims[1] < 0) result = `matrix<${type.elements}>`;
-            else result = `matrix<${type.elements}^(${dims[0]}x${dims[1]})>`;
+            if (dims[0] < 0 && dims[1] < 0)
+              result = `matrix<${typeToString(type.elements)}>`;
+            else
+              result = `matrix<${typeToString(type.elements)}^(${dims[0]}x${dims[1]})>`;
           }
         }
       }
       if (!result) {
-        // Serialize collection types
+        // Serialize generic list types
         const dimensions = type.dimensions
           ? type.dimensions.length === 1
             ? `^${type.dimensions[0].toString()}`
@@ -165,6 +183,8 @@ function getPrecedence(kind: string): number {
       return TUPLE_PRECEDENCE;
     case 'signature':
       return SIGNATURE_PRECEDENCE;
+    case 'value':
+      return VALUE_PRECEDENCE;
     default:
       return 0;
   }

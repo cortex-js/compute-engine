@@ -129,12 +129,9 @@ function reduceIntersectionType(type: AlgebraicType): Type {
 
   // If the intersection includes incompatible types, return `nothing`
   const incompatible = reducedTypes.some((t1) =>
-    reducedTypes.some((t2) => {
-      if (t1 !== t2 && !isSubtype(t1, t2) && !isSubtype(t2, t1)) {
-        return true;
-      }
-      return false;
-    })
+    reducedTypes.some(
+      (t2) => t1 !== t2 && !isSubtype(t1, t2) && !isSubtype(t2, t1)
+    )
   );
 
   // e.g., "number & boolean" -> "nothing"

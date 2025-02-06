@@ -30,19 +30,6 @@
  *          `tuple<number, boolean>`, `tuple<x: number, y: boolean>`.
  *       - `map`: a set key-value pairs, e.g. `map<x: number, y: boolean>`.
  *
- * - `number`: any numeric value:
- *    - `finite_number`: <finite_complex> or <finite_imaginary> or
- *       <finite_real> or <finite_rational> or <finite_integer>
- *    - `non_finite_number`: `NaN`, `PositiveInfinity`, `NegativeInfinity` or
- *      `ComplexInfinity`
- *    - `complex` and `finite_complex`: a complex number, with non-zero real
- *       and imaginary parts.
- *    - `imaginary` and `finite_imaginary`: a complex number with a real part
- *       of 0 (pure imaginary).
- *    - `real` and `finite_real`: a complex number with an imaginary part of 0.
- *    - `rational` and `finite_rational`: a pure rational number
- *       (not an integer)
- *    - `integer` and `finite_integer`: a whole number
  *
  *
  */
@@ -66,13 +53,27 @@ export type PrimitiveType =
   | 'never'
   | 'any';
 
+/**
+ * - `number`: any numeric value = `complex` + `real` plus `NaN`
+ * - `complex`: a number with non-zero real and imaginary parts = `finite_complex` plus `ComplexInfinity`
+ * - `finite_complex`: a finite complex number = `imaginary` + `finite_real`
+ * - `imaginary`: a complex number with a real part of 0 (pure imaginary)
+ * - `finite_number`: a finite numeric value = `finite_complex`
+ * - `finite_real`: a finite real number = `finite_rational` + `finite_integer`
+ * - `finite_rational`: a pure rational number
+ * - `finite_integer`: a whole number
+ * - `real`: a complex number with an imaginary part of 0 = `finite_real` + `non_finite_number`
+ * - `non_finite_number`: `PositiveInfinity`, `NegativeInfinity`
+ * - `integer`: a whole number = `finite_integer` + `non_finite_number`
+ * - `rational`: a pure rational number (not an integer) = `finite_rational` + `non_finite_number`
+ *
+ */
 export type NumericType =
   | 'number'
   | 'finite_number'
   | 'complex'
   | 'finite_complex'
   | 'imaginary'
-  | 'finite_imaginary'
   | 'real'
   | 'finite_real'
   | 'rational'
@@ -109,7 +110,7 @@ export type ValueType = {
   value: any;
 };
 
-/** Map is not a collection. It is a set of key/value pairs.
+/** Map is a non-indexable collection of key/value pairs.
  * An element of a map whose type is a subtype of `nothing` is optional.
  * For example, in `{x: number, y: boolean | nothing}` the element `y` is optional.
  */
@@ -130,8 +131,8 @@ export type CollectionType = {
 /**
  * The elements of a list are ordered.
  *
- * All elements of a list have the same type (but it can be a broad type,
- * up to `any`).
+ * All elements of a list have the same type, but it can be a broad type,
+ * up to `any`.
  *
  * The same element can be present in the list more than once.
  *
@@ -187,7 +188,7 @@ export type Type =
  * Types are described using the following BNF grammar:
 
 ```bnf
-<type> ::= <union_type>
+<type> ::= <union_type> | "(" <type> ")"
 
 <union_type> ::= <intersection_type> (" | " <intersection_type>)*
 
@@ -195,12 +196,8 @@ export type Type =
 
 <primary_type> ::=  <primitive>
                 | <tuple_type>
-                | <function_type>
+                | <signature>
                 | <list_type>
-                | <wrapped_primary_type>
-
-<wrapped_primary_type> ::= "(" <primary_type> ")"
-
 
 <primitive> ::= "any" | "unknown" | <value-type> | <symbolic-type> | <numeric-type>
 
@@ -210,9 +207,9 @@ export type Type =
 
 <symbolic-type> ::= "expression" | "function" | "symbol"
 
-<tuple_type> ::= "(" (<name> <type> "," <named_tuple_elements>*) ")"
-            | "(" (<type> "," <unnamed_tuple_elements>*) ")" |
-            | "tuple(" <tuple_elements> ")"
+<tuple_type> ::= "tuple<" (<name> <type> "," <named_tuple_elements>*) ">"
+            | "tuple<" (<type> "," <unnamed_tuple_elements>*) ">" |
+            | "tuple<" <tuple_elements> ">"
 
 <tuple_elements> ::= <unnamed_tuple_elements> | <named_tuple_elements>
 
@@ -220,15 +217,11 @@ export type Type =
 
 <named_tuple_elements> ::= <name> <type> ("," <name> <type>)*
 
-<function_type> ::=  <arguments> " -> " <type>
+<signature> ::=  <arguments> " -> " <type>
 
 <arguments> ::= "()"
             | <argument>
             | "(" <argument-list> ")"
-            | <deferred_evaluation>
-
-<deferred_evaluation> ::= "???" <argument>
-                       | "???" "(" <argument-list> ")"
 
 <argument> ::= <type>
             | <name> <type>
@@ -248,7 +241,7 @@ export type Type =
             | <rest_argument>
 
 
-<list_type> ::= "[" <type> <dimensions>? "]"
+<list_type> ::= "list<" <type> <dimensions>? ">"
 
 <dimensions> ::= "^" <fixed_size>
             | "^(" <multi_dimensional_size> ")"
@@ -257,9 +250,7 @@ export type Type =
 
 <multi_dimensional_size> ::= <positive-integer_literal> "x" <positive-integer_literal> ("x" <positive-integer_literal>)*
 
-<map> ::= "{}"
-            |"{" <map_elements> "}"
-            | "map(" <map_elements> ")"
+<map> ::= "map" | "map<" <map_elements> ">"
 
 <map_elements> ::= <name> <type> ("," <name> <type>)*
 
@@ -275,31 +266,29 @@ export type Type =
 ```
 
 
-Examples of types:
+Examples of types strings:
    "number"    -- a simple type primitive
-
-
    "(number, boolean)" -- a tuple type
    "(x: number, y:boolean)" -- a named tuple/record type. Either all arguments are named, or none are
 
-   "[any]" -- an arbitrary collection type, with no length or element type restrictions
-   "[integer]" -- a collection type where all the elements are integers
-   "[(number, boolean)]" -- a collection of tuples
-   "[(value:number, seen:boolean)]" -- a collection of named tuples
+   "collection<any>" -- an arbitrary collection type, with no length or element type restrictions
+   "collection<integer>" -- a collection type where all the elements are integers
+   "collection<(number, boolean)>" -- a collection of tuples
+   "collection<(value:number, seen:boolean)>" -- a collection of named tuples
    "[boolean]^32" -- a collection type with a fixed size of 32 elements
    "[integer]^(2x3)" -- an integer matrix of 2 columns and 3 rows
    "[integer]^(2x3x4)" -- a tensor of dimensions 2x3x4
 
-   "number -> number" -- a function type with a single argument
-   "(x: number, number) -> number" -- a function type with a named argument
-   "(number, y:number?) -> number" -- a function type with an optional named argument (can have several optional arguments, at the end)
-   "(number, ...number) -> number" -- a function type with a rest argument (can have only one, and no optional arguments if there is a rest argument).
-   "() -> number" -- a function type with an empty argument list
+   "number -> number" -- a signature with a single argument
+   "(x: number, number) -> number" -- a signature with a named argument
+   "(number, y:number?) -> number" -- a signature with an optional named argument (can have several optional arguments, at the end)
+   "(number, ...number) -> number" -- a signature with a rest argument (can have only one, and no optional arguments if there is a rest argument).
+   "() -> number" -- a signature with an empty argument list
 
    "number | boolean" -- a union type
    "(x: number) & (y: number)" -- an intersection type
    "number | ((x: number) & (y: number))" -- a union type with an intersection type
-   "(number -> number) | number" -- a union type with a function type
+   "(number -> number) | number" -- a union type with a signature and a primitive type
 */
 
 export type TypeString = string;

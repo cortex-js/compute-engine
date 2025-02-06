@@ -59,9 +59,7 @@ import {
   root,
 } from '../boxed-expression/arithmetic-power';
 import { parseType } from '../../common/type/parse';
-import { isSubtype } from '../../common/type/subtype';
 import { range, rangeLast } from './collections';
-import { typeToString } from '../../common/type/serialize';
 import { run, runAsync } from '../../common/interruptible';
 
 // When processing an arithmetic expression, the following are the core
@@ -183,7 +181,8 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
       type: addType,
 
       sgn: (ops) => {
-        if (ops.some((x) => x.isReal === false || x.isNaN)) return 'unsigned';
+        if (ops.some((x) => x.isNaN)) return 'nan';
+        if (ops.some((x) => x.isReal === false)) return 'unsigned';
         if (ops.every((x) => x.is(0))) return 'zero';
         if (ops.every((x) => x.isNonNegative))
           return ops.some((x) => x.isPositive) ? 'positive' : 'non-negative';
@@ -264,6 +263,7 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
       signature: '(number, ...number) -> number',
       type: ([num, den]) => {
         if (den.is(1)) return num.type;
+        if (den.isNaN || num.isNaN) return 'number';
         if (den.isFinite === false || num.isFinite === false)
           return 'non_finite_number';
         if (den.isInteger && num.isInteger) return 'finite_rational';
@@ -633,6 +633,7 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
       type: (ops) => {
         if (ops.length === 0) return 'finite_integer'; // = 1
         if (ops.length === 1) return ops[0].type;
+        if (ops.some((x) => x.isNaN)) return 'number';
         if (ops.some((x) => x.isFinite === false)) return 'non_finite_number';
         if (ops.every((x) => x.isInteger)) return 'finite_integer';
         if (ops.every((x) => x.isReal)) return 'finite_real';
@@ -703,11 +704,14 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
       description: 'Plus or Minus',
       wikidata: 'Q120812',
       complexity: 1200,
-      involution: true,
-      signature: 'value -> tuple',
-      type: ([x]) =>
-        parseType(`tuple(${typeToString(x.type)}, ${typeToString(x.type)})`),
-      evaluate: ([x], { engine }) => engine.tuple(x.abs(), x.abs().neg()),
+      signature: '(value, value) -> tuple',
+      canonical: (args, { engine: ce }) => {
+        args = checkNumericArgs(ce, args, 2);
+        if (args.length === 0) return ce.error('missing');
+        return ce._fn('PlusMinus', [args[0], args[1].abs()]);
+      },
+      type: ([x, y]) => parseType(`tuple<${x.type}, ${y.type}>`),
+      evaluate: ([x, y], { engine }) => engine.tuple(x.add(y.neg()), x.add(y)),
     },
 
     Power: {
@@ -716,6 +720,7 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
       complexity: 3500,
       signature: '(number, number) -> number',
       type: ([base, exp]) => {
+        if (base.isNaN || exp.isNaN) return 'number';
         if (!exp.isFinite) return 'non_finite_number';
         if (base.isInteger && exp.isInteger) return 'finite_integer';
         if (base.isRational && exp.isInteger) return 'finite_rational';
@@ -757,7 +762,7 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
 
         if (b.numerator.isEven && b.denominator.isOdd) {
           if (a.isReal) return !a.is(0) ? 'positive' : 'non-negative';
-          if (a.type === 'imaginary') return 'negative';
+          if (a.type.is('imaginary')) return 'negative';
           return !a.is(0) ? 'not-zero' : undefined; //already accounted for a.is(0)
         }
 
@@ -834,6 +839,7 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
 
       signature: '(number, number) -> number',
       type: ([base, exp]) => {
+        if (base.isNaN || exp.isNaN) return 'number';
         if (base.isFinite === false || exp.isFinite === false)
           return 'non_finite_number';
         if (exp.is(0)) return 'finite_integer';
@@ -867,6 +873,7 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
       threadable: true,
       signature: 'number -> integer',
       type: ([x]) => {
+        if (x.isNaN) return 'number';
         if (x.isFinite === false || x.isReal === false)
           return 'non_finite_number';
         return 'finite_integer';
@@ -943,8 +950,9 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
 
       signature: 'number -> number',
       type: ([x]) => {
+        if (x.isNaN) return 'number';
         if (x.isFinite === false) return 'non_finite_number';
-        if (x.isReal) return 'finite_real';
+        if (x.isReal) return 'finite_real'; // @fixme: if x is negative, the type should be complex
         return 'finite_number';
       },
       // @fastpath: canonicalization is done in the function
@@ -980,8 +988,8 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
       sgn: ([x]) => {
         if (x.is(0)) return 'zero';
         if (x.isReal) return !x.is(0) ? 'positive' : 'non-negative';
-        if (x.type === 'imaginary' || x.type === 'complex') return 'negative';
-        if (x.isReal == false || x.isNaN) return 'unsigned';
+        if (x.type.matches('complex')) return 'negative';
+        if (x.isReal === false || x.isNaN) return 'unsigned';
         return undefined;
       },
       canonical: (args, { engine }) => {
@@ -1016,7 +1024,7 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
     // (Add...) that are defined above. This avoid circular references.
     //
     ImaginaryUnit: {
-      type: 'finite_imaginary',
+      type: 'imaginary',
       constant: true,
       holdUntil: 'never',
       wikidata: 'Q193796',
@@ -1024,7 +1032,7 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
     },
 
     i: {
-      type: 'finite_imaginary',
+      type: 'imaginary',
       constant: true,
       holdUntil: 'never',
       value: (engine) => engine.I,
@@ -1050,7 +1058,7 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
     },
 
     ComplexInfinity: {
-      type: 'non_finite_number',
+      type: 'complex',
       constant: true,
       holdUntil: 'never',
       value: (engine) => engine.ComplexInfinity,
@@ -1071,7 +1079,7 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
     },
 
     NaN: {
-      type: 'non_finite_number',
+      type: 'number',
       constant: true,
       holdUntil: 'never',
       value: (engine) => engine.NaN,
@@ -1479,7 +1487,7 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
                 return acc.add(x.numericValue!);
               },
               engine._numericValue(0)
-            ) ?? NaN,
+            ),
             engine._timeRemaining
           )
         ),
@@ -1495,7 +1503,7 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
                 return acc.add(x.numericValue!);
               },
               engine._numericValue(0)
-            ) ?? NaN,
+            ),
             engine._timeRemaining,
             signal
           )
@@ -1540,12 +1548,7 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
           return ce.number(Number.parseInt(op1, 10));
 
         const base = op2.re;
-        if (
-          op2.type !== 'integer' ||
-          !Number.isFinite(base) ||
-          base < 2 ||
-          base > 36
-        )
+        if (!op2.isInteger || !Number.isFinite(base) || base < 2 || base > 36)
           return ce.error(['unexpected-base', base.toString()], op2.toString());
 
         const [value, rest] = fromDigits(op1, op2.string ?? op2.symbol ?? 10);
@@ -1567,8 +1570,7 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
       evaluate: (ops, { engine }) => {
         const ce = engine;
         const op1 = ops[0];
-        if (op1.type !== 'integer')
-          return ce.typeError('integer', op1.type, op1);
+        if (!op1.isInteger) return ce.typeError('integer', op1.type, op1);
 
         const val = op1.re;
         if (!Number.isFinite(val))
@@ -1720,7 +1722,7 @@ function evaluateGcdLcm(
   let result: number | null = null;
   for (const op of ops) {
     if (result === null) {
-      if (isSubtype(op.type, 'integer')) rest.push(op);
+      if (op.isInteger) rest.push(op);
     } else {
       if (!op.isInteger) rest.push(op);
       else result = fn(result, op.re);

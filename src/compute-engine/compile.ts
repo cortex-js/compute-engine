@@ -22,6 +22,14 @@ import {
   standardDeviation,
   variance,
 } from './numerics/statistics';
+import { NumericValue } from './numeric-value/public';
+import {
+  isInteger,
+  isNegativeOne,
+  isOne,
+  Rational,
+} from './numerics/rationals';
+import { numberToString } from './numerics/strings';
 
 export type CompiledType = boolean | number | string | object;
 
@@ -653,9 +661,8 @@ export function compile(
   // Is it a number?
   //
   if (expr.isNumberLiteral) {
-    const f = expr.re;
     if (expr.im !== 0) throw new Error('Complex numbers are not supported');
-    return target.number(f);
+    return target.number(expr.re);
   }
 
   // Is it a string?

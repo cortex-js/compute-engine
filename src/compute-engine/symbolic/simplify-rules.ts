@@ -14,6 +14,8 @@ import {
 } from '../boxed-expression/utils';
 import { factor } from '../boxed-expression/factor';
 import { add } from '../boxed-expression/arithmetic-add';
+import { SMALL_INTEGER } from '../numerics/numeric';
+import { NumericValue } from '../numeric-value/public';
 
 /**
  * @todo: a set to "tidy" an expression. Different from a canonical form, but
@@ -43,7 +45,6 @@ import { add } from '../boxed-expression/arithmetic-add';
  */
 export const SIMPLIFY_RULES: Rule[] = [
   // The Golden Ratio, a constant that can be simplified
-
   '\\varphi -> \\frac{1+\\sqrt{5}}{2}',
 
   simplifyRelationalOperator,
@@ -105,11 +106,43 @@ export const SIMPLIFY_RULES: Rule[] = [
   // Power, Root, Sqrt
   //
   (x): RuleStep | undefined => {
-    if (x.operator === 'Power')
-      return { value: x.op1.pow(x.op2), because: 'power' };
-    if (x.operator === 'Root')
-      return { value: x.op1.root(x.op2), because: 'root' };
-    if (x.operator === 'Sqrt') return { value: x.op1.sqrt(), because: 'sqrt' };
+    if (!x.op1.isNumberLiteral) return undefined;
+
+    if (x.operator === 'Sqrt') {
+      // sqrt(-10) -> i*sqrt(10)
+      if (x.op1.isNegative)
+        return {
+          value: x.engine
+            .box(['Multiply', ['Sqrt', x.op1.neg()], 'ImaginaryUnit'])
+            .simplify(),
+          because: 'sqrt',
+        };
+      const val = x.op1.sqrt();
+      if (isExact(val.numericValue)) return { value: val, because: 'sqrt' };
+      return undefined;
+    }
+
+    const op1 = x.op1;
+    const op2 = x.op2;
+
+    // If not both operands are numbers, we can't simplify
+    if (!op2.isNumberLiteral) return undefined;
+
+    // If they're both small integers, we can simplify
+    if (
+      op1.isInteger &&
+      op2.isInteger &&
+      op1.re < SMALL_INTEGER &&
+      op2.re < SMALL_INTEGER
+    ) {
+      if (x.operator === 'Power')
+        return { value: x.op1.pow(x.op2), because: 'power' };
+      if (x.operator === 'Root') {
+        const val = x.op1.root(x.op2);
+        if (isExact(val.numericValue))
+          return { value: x.op1.root(x.op2), because: 'root' };
+      }
+    }
     return undefined;
   },
 
@@ -283,12 +316,12 @@ export const SIMPLIFY_RULES: Rule[] = [
     };
   },
 
-  '\\arsinh(x) -> \\ln(x+\\sqrt{x^2+1})',
-  '\\arcosh(x) -> \\ln(x+\\sqrt{x^2-1})',
-  '\\artanh(x) -> \\frac{1}{2}\\ln(\\frac{1+x}{1-x})',
-  '\\operatorname{arcoth}(x) -> \\frac{1}{2}\\ln(\\frac{x+1}{x-1})',
-  '\\arsech(x) -> \\ln(\\frac{1+\\sqrt{1-x^2}}{x})',
-  '\\operatorname{arccsch}(x) -> \\ln(\\frac{1}{x} + \\sqrt{\\frac{1}{x^2}+1})',
+  '\\arcsinh(x) -> \\ln(x+\\sqrt{x^2+1})',
+  '\\arccosh(x) -> \\ln(x+\\sqrt{x^2-1})',
+  '\\arctanh(x) -> \\frac{1}{2}\\ln(\\frac{1+x}{1-x})',
+  '\\arccoth(x) -> \\frac{1}{2}\\ln(\\frac{x+1}{x-1})',
+  '\\arcsech(x) -> \\ln(\\frac{1+\\sqrt{1-x^2}}{x})',
+  '\\arccsch(x) -> \\ln(\\frac{1}{x} + \\sqrt{\\frac{1}{x^2}+1})',
 
   //
   // Logic
@@ -880,7 +913,7 @@ export const SIMPLIFY_RULES: Rule[] = [
   //   replace: ['Sin', ['Add', ['Divide', 'Pi', 2], '__x']],
   // },
   {
-    match: ['Arcosh', '__x'],
+    match: ['Arccosh', '__x'],
     replace: [
       'Ln',
       ['Add', '__x', ['Sqrt', ['Subtract', ['Square', '__x'], 1]]],
@@ -900,7 +933,7 @@ export const SIMPLIFY_RULES: Rule[] = [
     ],
   },
   {
-    match: ['Arsinh', '__x'],
+    match: ['Arcsinh', '__x'],
     replace: [
       'Multiply',
       2,
@@ -908,7 +941,7 @@ export const SIMPLIFY_RULES: Rule[] = [
     ],
   },
   {
-    match: ['Artanh', '__x'],
+    match: ['Arctanh', '__x'],
     replace: [
       'Multiply',
       'Half',
@@ -1008,7 +1041,7 @@ export const SIMPLIFY_RULES: Rule[] = [
   //   replace: ['Sin', ['Add', ['Divide', 'Pi', 2], '__x']],
   // },
   {
-    match: ['Arcosh', '__x'],
+    match: ['Arccosh', '__x'],
     replace: [
       'Ln',
       ['Add', '__x', ['Sqrt', ['Subtract', ['Square', '__x'], 1]]],
@@ -1028,7 +1061,7 @@ export const SIMPLIFY_RULES: Rule[] = [
     ],
   },
   {
-    match: ['Arsinh', '__x'],
+    match: ['Arcsinh', '__x'],
     replace: [
       'Multiply',
       2,
@@ -1036,7 +1069,7 @@ export const SIMPLIFY_RULES: Rule[] = [
     ],
   },
   {
-    match: ['Artanh', '__x'],
+    match: ['Arctanh', '__x'],
     replace: [
       'Multiply',
       'Half',
@@ -1410,4 +1443,10 @@ function simplifySystemOfEquations(
     ),
     because: 'simplify-system-of-equations',
   };
+}
+
+function isExact(n: number | NumericValue | null): boolean {
+  if (n === null) return false;
+  if (typeof n === 'number') return Number.isInteger(n);
+  return n.isExact;
 }

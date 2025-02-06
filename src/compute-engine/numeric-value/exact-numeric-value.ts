@@ -109,8 +109,9 @@ export class ExactNumericValue extends NumericValue {
   }
 
   get type(): NumericType {
+    if (this.isNaN) return 'number';
     // a/b√c -> real number (c can't be a perfect square)
-    if (this.isNaN || this.isPositiveInfinity || this.isNegativeInfinity)
+    if (this.isPositiveInfinity || this.isNegativeInfinity)
       return 'non_finite_number';
     if (this.radical !== 1) {
       console.assert(!isZero(this.rational));
