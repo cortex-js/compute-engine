@@ -4,7 +4,6 @@ import { asRational } from './numerics';
 import type { Rational } from '../numerics/rationals';
 import { canonicalAngle } from './trigonometry';
 import { getImaginaryFactor } from './utils';
-import { isSubtype } from '../../common/type/subtype';
 import { apply, apply2 } from './apply';
 import { SMALL_INTEGER } from '../numerics/numeric';
 

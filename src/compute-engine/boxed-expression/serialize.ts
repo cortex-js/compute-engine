@@ -33,7 +33,6 @@ import { Product } from './product';
 
 import { order } from './order';
 import { asSmallInteger } from './numerics';
-import { isSubtype } from '../../common/type/subtype';
 
 function _escapeJsonString(s: undefined): undefined;
 function _escapeJsonString(s: string): string;
