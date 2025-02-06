@@ -1,6 +1,5 @@
 import { parseType } from './parse';
 import { PRIMITIVE_TYPES } from './primitive';
-import { typeToString } from './serialize';
 import { isSubtype } from './subtype';
 import { Type, FunctionSignature, TypeString, PrimitiveType } from './types';
 

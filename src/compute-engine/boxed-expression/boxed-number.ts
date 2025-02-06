@@ -27,7 +27,6 @@ import {
   SmallInteger,
 } from '../numerics/numeric';
 import { Rational } from '../numerics/rationals';
-import { isInMachineRange } from '../numerics/numeric-bignum';
 import { bigint } from '../numerics/bigint';
 
 import {
@@ -43,7 +42,6 @@ import { simplify } from './simplify';
 import { _BoxedExpression } from './abstract-boxed-expression';
 import { hashCode } from './utils';
 import { match } from './match';
-import { Type } from '../../common/type/types';
 import { add } from './arithmetic-add';
 import { pow } from './arithmetic-power';
 import { isSubtype } from '../../common/type/subtype';

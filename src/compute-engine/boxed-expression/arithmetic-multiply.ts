@@ -5,7 +5,6 @@ import { order } from './order';
 import { Product } from './product';
 import { expandProducts } from './expand';
 import { negateProduct } from './negate';
-import { isSubtype } from '../../common/type/subtype';
 import { NumericValue } from '../numeric-value/public';
 import { ExactNumericValue } from '../numeric-value/exact-numeric-value';
 import { isOne } from '../numerics/rationals';
