@@ -712,7 +712,7 @@ export abstract class _BoxedExpression implements BoxedExpression {
       throw new Error('Unknown target');
     options ??= {};
     // eslint-disable-next-line @typescript-eslint/no-this-alias
-    let expr = this as BoxedExpression;
+    const expr = this as BoxedExpression;
     return compileToJavascript(
       expr,
       options?.functions,

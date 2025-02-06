@@ -119,7 +119,7 @@ class JSON5Parser {
     this.index++; // consume opening quote
     let result = '';
     while (!this.isAtEnd()) {
-      let ch = this.currentChar();
+      const ch = this.currentChar();
       if (ch === quote) {
         this.index++; // consume closing quote
         return result;

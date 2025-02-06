@@ -333,7 +333,7 @@ class TypeParser {
 
       // `list<>` is equivalent to `list<any>`
 
-      let type = this.parseType();
+      const type = this.parseType();
       if (type && this.match('^')) {
         // We got both a type and dimensions
         dimensions = this.parseDimensions();
@@ -434,7 +434,7 @@ class TypeParser {
 
     // `tensor<T>`
     if (this.match('tensor<')) {
-      let type = this.parseType() ?? 'number';
+      const type = this.parseType() ?? 'number';
 
       if (!this.match('>'))
         this.error('Expected ">".', 'For example `tensor<number>`');

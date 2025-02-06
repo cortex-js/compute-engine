@@ -1361,7 +1361,10 @@ export class _Parser implements Parser {
 
       // No group, but arguments without parentheses are allowed
       // Read a primary
-      const primary = this.parseExpression({ ...until, minPrec: MULTIPLICATION_PRECEDENCE });
+      const primary = this.parseExpression({
+        ...until,
+        minPrec: MULTIPLICATION_PRECEDENCE,
+      });
       return primary === null ? null : [primary];
     }
 
@@ -1998,7 +2001,7 @@ export class _Parser implements Parser {
             // No infix operator, join the expressions with a Sequence
             const rhs = this.parseExpression({
               ...until,
-              minPrec: INVISIBLE_OP_PRECEDENCE+1,
+              minPrec: INVISIBLE_OP_PRECEDENCE + 1,
             });
             if (rhs !== null) {
               if (operator(lhs) === 'InvisibleOperator') {
