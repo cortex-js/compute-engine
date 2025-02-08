@@ -1,4 +1,4 @@
-import type { BoxedExpression, IComputeEngine } from '../public';
+import type { BoxedExpression } from '../public';
 
 import { order } from './order';
 
@@ -10,6 +10,7 @@ import { ExactNumericValue } from '../numeric-value/exact-numeric-value';
 import { isOne } from '../numerics/rationals';
 import { asRational } from './numerics';
 import { SMALL_INTEGER } from '../numerics/numeric';
+import type { IComputeEngine } from '../types';
 
 /**
  * The canonical form of `Multiply`:

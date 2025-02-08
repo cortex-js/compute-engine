@@ -1,14 +1,10 @@
-import type {
-  BoxedExpression,
-  BoxedRuleSet,
-  RuleSteps,
-  SimplifyOptions,
-} from '../public';
+import type { BoxedExpression, SimplifyOptions } from '../public';
 
 import { permutations } from '../../common/utils';
 
 import { replace } from './rules';
 import { holdMap } from './hold';
+import type { BoxedRuleSet, RuleSteps } from '../types';
 
 type InternalSimplifyOptions = SimplifyOptions & {
   useVariations: boolean;

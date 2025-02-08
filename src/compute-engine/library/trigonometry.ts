@@ -1,6 +1,6 @@
 import { Decimal } from 'decimal.js';
 
-import { IdentifierDefinitions, FunctionDefinition } from '../public';
+import { FunctionDefinition } from '../public';
 
 import { bignumPreferred } from '../boxed-expression/utils';
 import { checkArity } from '../boxed-expression/validate';
@@ -14,6 +14,7 @@ import {
 import { apply2 } from '../boxed-expression/apply';
 
 import { reducedRational } from '../numerics/rationals';
+import type { IdentifierDefinitions } from '../types';
 
 //
 // Note: The name of trigonometric functions follow NIST DLMF

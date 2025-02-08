@@ -1,4 +1,4 @@
-import type { BoxedExpression, IComputeEngine } from '../public';
+import type { BoxedExpression } from '../public';
 import { getImaginaryFactor } from './utils';
 import { isIndexableCollection } from '../collection-utils';
 
@@ -9,6 +9,7 @@ import { Type } from '../../common/type/types';
 import { widen } from '../../common/type/utils';
 import { isSubtype } from '../../common/type/subtype';
 import { BoxedType } from '../../common/type/boxed-type';
+import type { IComputeEngine } from '../types';
 
 /**
  *

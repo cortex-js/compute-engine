@@ -5,12 +5,11 @@ import { ComputeEngine } from '../src/compute-engine';
 const ce = new ComputeEngine();
 const engine = ce;
 
-console.log(
-  ce
-    .parse('x^2 + 200x - 0.000015 = 0')
-    .solve('x')
-    ?.map((x) => x.toString())
-);
+// Should output 1\cdot 10^3
+console.log(engine.parse('1000').toLatex({ notation: 'scientific' }));
+
+// Should return '3^2'
+ce.parse('3\\times3', { canonical: ['Multiply'] });
 
 // Should be 2x + 3
 ce

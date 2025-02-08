@@ -1,5 +1,3 @@
-import type { CanonicalForm, IdentifierDefinitions } from '../public';
-
 import { joinLatex } from '../latex-syntax/tokenizer';
 
 import { checkType, checkArity } from '../boxed-expression/validate';
@@ -26,6 +24,7 @@ import { parseType } from '../../common/type/parse';
 import { isIndexableCollection } from '../collection-utils';
 import { canonicalMultiply } from '../boxed-expression/arithmetic-multiply';
 import { canonicalDictionary } from './collections';
+import type { IdentifierDefinitions, CanonicalForm } from '../types';
 
 //   // := assign 80 // @todo
 // compose (compose(f, g) -> a new function such that compose(f, g)(x) -> f(g(x))

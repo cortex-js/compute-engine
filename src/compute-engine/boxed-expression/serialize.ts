@@ -3,12 +3,7 @@ import { Decimal } from 'decimal.js';
 
 import type { Expression } from '../../math-json/types';
 
-import type {
-  BoxedExpression,
-  IComputeEngine,
-  JsonSerializationOptions,
-  Metadata,
-} from '../public';
+import type { BoxedExpression, JsonSerializationOptions } from '../public';
 
 import { isInMachineRange } from '../numerics/numeric-bignum';
 import {
@@ -33,6 +28,7 @@ import { Product } from './product';
 
 import { order } from './order';
 import { asSmallInteger } from './numerics';
+import type { IComputeEngine, Metadata } from '../types';
 
 function _escapeJsonString(s: undefined): undefined;
 function _escapeJsonString(s: string): string;

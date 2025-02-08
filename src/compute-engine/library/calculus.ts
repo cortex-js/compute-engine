@@ -1,4 +1,4 @@
-import type { BoxedExpression, IdentifierDefinitions } from '../public';
+import type { BoxedExpression } from '../public';
 
 import { checkType } from '../boxed-expression/validate';
 
@@ -6,6 +6,7 @@ import { applicable, applicableN1 } from '../function-utils';
 import { monteCarloEstimate } from '../numerics/monte-carlo';
 import { centeredDiff8thOrder, limit } from '../numerics/numeric';
 import { derivative, differentiate } from '../symbolic/derivative';
+import type { IdentifierDefinitions } from '../types';
 
 export const CALCULUS_LIBRARY: IdentifierDefinitions[] = [
   {

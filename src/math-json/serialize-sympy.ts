@@ -1,4 +1,4 @@
-import { Expression } from './types';
+import type { Expression } from './types';
 import { operand, machineValue, symbol, operator, operands } from './utils';
 
 function serializeBaseForm(expr: Expression): string | null {

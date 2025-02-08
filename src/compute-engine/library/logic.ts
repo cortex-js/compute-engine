@@ -1,8 +1,5 @@
-import {
-  BoxedExpression,
-  IdentifierDefinitions,
-  IComputeEngine,
-} from '../public';
+import { BoxedExpression } from '../public';
+import type { IdentifierDefinitions, IComputeEngine } from '../types';
 
 export const LOGIC_LIBRARY: IdentifierDefinitions = {
   True: { wikidata: 'Q16751793', type: 'boolean', constant: true },

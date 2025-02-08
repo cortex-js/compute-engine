@@ -1,7 +1,12 @@
 import { parseType } from './parse';
 import { PRIMITIVE_TYPES } from './primitive';
 import { isSubtype } from './subtype';
-import { Type, FunctionSignature, TypeString, PrimitiveType } from './types';
+import type {
+  Type,
+  FunctionSignature,
+  TypeString,
+  PrimitiveType,
+} from './types';
 
 /** Given two types a and b, return the narrowest type common to a and b */
 function narrow2(a: Readonly<Type>, b: Readonly<Type>): Readonly<Type> {

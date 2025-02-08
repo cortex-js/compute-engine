@@ -1,5 +1,6 @@
 import { CancellationError } from '../common/interruptible';
-import type { BoxedExpression, CollectionHandlers } from './public';
+import type { BoxedExpression } from './public';
+import type { CollectionHandlers } from './types';
 
 /** If a collection has fewer than this many elements, eagerly evaluate it.
  *

@@ -14,7 +14,6 @@ import { TRIGONOMETRY_LIBRARY } from './trigonometry';
 
 import { LibraryCategory } from '../latex-syntax/public';
 
-import { IComputeEngine, IdentifierDefinitions } from '../public';
 import { _BoxedSymbolDefinition } from '../boxed-expression/boxed-symbol-definition';
 import { makeFunctionDefinition } from '../boxed-expression/boxed-function-definition';
 import { _BoxedExpression } from '../boxed-expression/abstract-boxed-expression';
@@ -26,6 +25,7 @@ import {
   isFunctionDefinition,
   isSymbolDefinition,
 } from '../boxed-expression/utils';
+import type { IdentifierDefinitions, IComputeEngine } from '../types';
 
 export function getStandardLibrary(
   categories: LibraryCategory[] | LibraryCategory | 'all'

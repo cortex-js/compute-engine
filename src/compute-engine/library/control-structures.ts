@@ -1,14 +1,14 @@
-import {
-  BoxedExpression,
-  EvaluateOptions,
-  IComputeEngine,
-  IdentifierDefinitions,
-} from '../public';
+import { BoxedExpression } from '../public';
 import { applicable } from '../function-utils';
 import { each } from '../collection-utils';
 import { checkConditions } from '../boxed-expression/rules';
 import { widen } from '../../common/type/utils';
 import { CancellationError, run, runAsync } from '../../common/interruptible';
+import type {
+  IdentifierDefinitions,
+  EvaluateOptions,
+  IComputeEngine,
+} from '../types';
 
 export const CONTROL_STRUCTURES_LIBRARY: IdentifierDefinitions[] = [
   {

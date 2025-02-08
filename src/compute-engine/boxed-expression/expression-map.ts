@@ -1,4 +1,5 @@
-import type { BoxedExpression, ExpressionMapInterface } from '../public';
+import type { BoxedExpression } from '../public';
+import type { ExpressionMapInterface } from '../types';
 
 export class ExpressionMap<U> implements ExpressionMapInterface<U> {
   readonly _items: Map<BoxedExpression, U>;

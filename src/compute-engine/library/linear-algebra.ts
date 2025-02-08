@@ -4,12 +4,12 @@ import { ListType } from '../../common/type/types';
 import { isBoxedTensor } from '../boxed-expression/boxed-tensor';
 import { checkArity } from '../boxed-expression/validate';
 import { each, isFiniteIndexableCollection } from '../collection-utils';
-import {
-  BoxedExpression,
-  IComputeEngine,
-  IdentifierDefinition,
+import { BoxedExpression } from '../public';
+import type {
   IdentifierDefinitions,
-} from '../public';
+  IdentifierDefinition,
+  IComputeEngine,
+} from '../types';
 
 export const LINEAR_ALGEBRA_LIBRARY: IdentifierDefinitions[] = [
   {

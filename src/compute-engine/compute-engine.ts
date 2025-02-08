@@ -24,26 +24,7 @@ import {
   SMALL_INTEGER,
 } from './numerics/numeric';
 
-import {
-  AssumeResult,
-  BoxedFunctionDefinition,
-  BoxedSymbolDefinition,
-  IComputeEngine,
-  IdentifierDefinitions,
-  ExpressionMapInterface,
-  RuntimeScope,
-  Scope,
-  SymbolDefinition,
-  BoxedRuleSet,
-  Rule,
-  ComputeEngineStats,
-  Metadata,
-  FunctionDefinition,
-  BoxedSubstitution,
-  AssignValue,
-  AngularUnit,
-  CanonicalOptions,
-} from './public';
+import { SymbolDefinition, FunctionDefinition } from './public';
 
 import { box, boxFunction } from './boxed-expression/box';
 
@@ -85,8 +66,6 @@ import {
 import { parse } from './latex-syntax/parse';
 import {
   BoxedExpression,
-  BoxedRule,
-  EvaluateOptions,
   SemiBoxedExpression,
 } from './boxed-expression/public';
 
@@ -120,6 +99,26 @@ import { OneOf } from '../common/one-of';
 import { BigNum } from './numerics/bignum';
 import { typeToString } from '../common/type/serialize';
 import { BoxedType } from '../common/type/boxed-type';
+import type {
+  AngularUnit,
+  AssignValue,
+  AssumeResult,
+  BoxedFunctionDefinition,
+  BoxedRule,
+  BoxedRuleSet,
+  BoxedSubstitution,
+  BoxedSymbolDefinition,
+  CanonicalOptions,
+  ComputeEngineStats,
+  EvaluateOptions,
+  ExpressionMapInterface,
+  IComputeEngine,
+  IdentifierDefinitions,
+  Metadata,
+  Rule,
+  RuntimeScope,
+  Scope,
+} from './types';
 
 export type * from '../common/type/types';
 export * from '../common/type/subtype';

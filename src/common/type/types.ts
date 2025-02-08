@@ -10,14 +10,14 @@
  *
  * - `expression`:
  *    - a symbolic expression, such as `["Add", "x", 1]`
- *    - <value>
+ *    - `<value>`
  *    - `symbol`: a symbol, such as `x`.
  *    - `function`: a function expression
  *      such as `["Function", ["Add", "x", 1], "x"]`.
  *
  * - `value`
  *    - `scalar`
- *      - <number>
+ *      - `<number>`
  *      - `boolean`: a boolean value: `True` or `False`.
  *      - `string`: a string of characters.
  *    - `collection`
@@ -182,114 +182,109 @@ export type Type =
 /**
  * The type of a boxed expression indicates the kind of expression it is and
  * the value it represents.
- * 
+ *
  * The type is represented either by a primitive type (e.g. number, complex, collection, etc.), or a compound type (e.g. tuple, function signature, etc.).
- * 
+ *
  * Types are described using the following BNF grammar:
-
-```bnf
-<type> ::= <union_type> | "(" <type> ")"
-
-<union_type> ::= <intersection_type> (" | " <intersection_type>)*
-
-<intersection_type> ::= <primary_type> (" & " <primary_type>)*
-
-<primary_type> ::=  <primitive>
-                | <tuple_type>
-                | <signature>
-                | <list_type>
-
-<primitive> ::= "any" | "unknown" | <value-type> | <symbolic-type> | <numeric-type>
-
-<numeric-type> ::= "number" | "complex" | "imaginary" | "real" | "rational" | "integer"
-
-<value-type> ::= "value" | <numeric-type> | "collection" | "boolean" | "string"
-
-<symbolic-type> ::= "expression" | "function" | "symbol"
-
-<tuple_type> ::= "tuple<" (<name> <type> "," <named_tuple_elements>*) ">"
-            | "tuple<" (<type> "," <unnamed_tuple_elements>*) ">" |
-            | "tuple<" <tuple_elements> ">"
-
-<tuple_elements> ::= <unnamed_tuple_elements> | <named_tuple_elements>
-
-<unnamed_tuple_elements> ::= <type> ("," <type>)*
-
-<named_tuple_elements> ::= <name> <type> ("," <name> <type>)*
-
-<signature> ::=  <arguments> " -> " <type>
-
-<arguments> ::= "()"
-            | <argument>
-            | "(" <argument-list> ")"
-
-<argument> ::= <type>
-            | <name> <type>
-
-<rest_argument> ::= "..." <type>
-            | <name> "..." <type>
-
-<optional_argument> ::= <argument> "?"
-
-<optional_arguments> ::= <optional_argument> ("," <optional_argument>)*
-
-<required_arguments> ::= <argument> ("," <argument>)*
-
-<argument-list> ::= <required_arguments> ("," <rest_argument>)?
-            | <required_arguments> <optional_arguments>?
-            | <optional_arguments>?
-            | <rest_argument>
-
-
-<list_type> ::= "list<" <type> <dimensions>? ">"
-
-<dimensions> ::= "^" <fixed_size>
-            | "^(" <multi_dimensional_size> ")"
-
-<fixed_size> ::= <positive-integer_literal>
-
-<multi_dimensional_size> ::= <positive-integer_literal> "x" <positive-integer_literal> ("x" <positive-integer_literal>)*
-
-<map> ::= "map" | "map<" <map_elements> ">"
-
-<map_elements> ::= <name> <type> ("," <name> <type>)*
-
-<set> ::= "set<" <type> ">"
-
-<collection ::= "collection<" <type> ">"
-
-<name> ::= <identifier> ":"
-
-<identifier> ::= [a-zA-Z_][a-zA-Z0-9_]*
-
-<positive-integer_literal> ::= [1-9][0-9]*
-```
-
-
-Examples of types strings:
-   "number"    -- a simple type primitive
-   "(number, boolean)" -- a tuple type
-   "(x: number, y:boolean)" -- a named tuple/record type. Either all arguments are named, or none are
-
-   "collection<any>" -- an arbitrary collection type, with no length or element type restrictions
-   "collection<integer>" -- a collection type where all the elements are integers
-   "collection<(number, boolean)>" -- a collection of tuples
-   "collection<(value:number, seen:boolean)>" -- a collection of named tuples
-   "[boolean]^32" -- a collection type with a fixed size of 32 elements
-   "[integer]^(2x3)" -- an integer matrix of 2 columns and 3 rows
-   "[integer]^(2x3x4)" -- a tensor of dimensions 2x3x4
-
-   "number -> number" -- a signature with a single argument
-   "(x: number, number) -> number" -- a signature with a named argument
-   "(number, y:number?) -> number" -- a signature with an optional named argument (can have several optional arguments, at the end)
-   "(number, ...number) -> number" -- a signature with a rest argument (can have only one, and no optional arguments if there is a rest argument).
-   "() -> number" -- a signature with an empty argument list
-
-   "number | boolean" -- a union type
-   "(x: number) & (y: number)" -- an intersection type
-   "number | ((x: number) & (y: number))" -- a union type with an intersection type
-   "(number -> number) | number" -- a union type with a signature and a primitive type
-*/
+ *
+ * ```bnf
+ * <type> ::= <union_type> | "(" <type> ")"
+ *
+ * <union_type> ::= <intersection_type> (" | " <intersection_type>)*
+ *
+ * <intersection_type> ::= <primary_type> (" & " <primary_type>)*
+ *
+ * <primary_type> ::=  <primitive>
+ *                | <tuple_type>
+ *                | <signature>
+ *                | <list_type>
+ *
+ * <primitive> ::= "any" | "unknown" | <value-type> | <symbolic-type> | <numeric-type>
+ *
+ * <numeric-type> ::= "number" | "complex" | "imaginary" | "real" | "rational" | "integer"
+ *
+ * <value-type> ::= "value" | <numeric-type> | "collection" | "boolean" | "string"
+ *
+ * <symbolic-type> ::= "expression" | "function" | "symbol"
+ *
+ * <tuple_type> ::= "tuple<" (<name> <type> "," <named_tuple_elements>*) ">"
+ *            | "tuple<" (<type> "," <unnamed_tuple_elements>*) ">" |
+ *            | "tuple<" <tuple_elements> ">"
+ *
+ * <tuple_elements> ::= <unnamed_tuple_elements> | <named_tuple_elements>
+ *
+ * <unnamed_tuple_elements> ::= <type> ("," <type>)*
+ *
+ * <named_tuple_elements> ::= <name> <type> ("," <name> <type>)*
+ *
+ * <signature> ::=  <arguments> " -> " <type>
+ *
+ * <arguments> ::= "()"
+ *            | <argument>
+ *            | "(" <argument-list> ")"
+ *
+ * <argument> ::= <type>
+ *            | <name> <type>
+ *
+ * <rest_argument> ::= "..." <type>
+ *            | <name> "..." <type>
+ *
+ * <optional_argument> ::= <argument> "?"
+ *
+ * <optional_arguments> ::= <optional_argument> ("," <optional_argument>)*
+ *
+ * <required_arguments> ::= <argument> ("," <argument>)*
+ *
+ * <argument-list> ::= <required_arguments> ("," <rest_argument>)?
+ *            | <required_arguments> <optional_arguments>?
+ *            | <optional_arguments>?
+ *            | <rest_argument>
+ *
+ * <list_type> ::= "list<" <type> <dimensions>? ">"
+ *
+ * <dimensions> ::= "^" <fixed_size>
+ *            | "^(" <multi_dimensional_size> ")"
+ *
+ * <fixed_size> ::= <positive-integer_literal>
+ *
+ * <multi_dimensional_size> ::= <positive-integer_literal> "x" <positive-integer_literal> ("x" <positive-integer_literal>)*
+ *
+ * <map> ::= "map" | "map<" <map_elements> ">"
+ *
+ * <map_elements> ::= <name> <type> ("," <name> <type>)*
+ *
+ * <set> ::= "set<" <type> ">"
+ *
+ * <collection ::= "collection<" <type> ">"
+ *
+ * <name> ::= <identifier> ":"
+ *
+ * <identifier> ::= [a-zA-Z_][a-zA-Z0-9_]*
+ *
+ * <positive-integer_literal> ::= [1-9][0-9]*
+ *```
+ *
+ * Examples of types strings:
+ * - `"number"`    -- a simple type primitive
+ * - `"(number, boolean)"` -- a tuple type
+ * - `"(x: number, y:boolean)"` -- a named tuple/record type. Either all arguments are named, or none are
+ * - `"collection<any>"` -- an arbitrary collection type, with no length or element type restrictions
+ * - `"collection<integer>"` -- a collection type where all the elements are integers
+ * - `"collection<(number, boolean)>"` -- a collection of tuples
+ * - `"collection<(value:number, seen:boolean)>"` -- a collection of named tuples
+ * - `"[boolean]^32"` -- a collection type with a fixed size of 32 elements
+ * - `"[integer]^(2x3)"` -- an integer matrix of 2 columns and 3 rows
+ * - `"[integer]^(2x3x4)"` -- a tensor of dimensions 2x3x4
+ * - `"number -> number"` -- a signature with a single argument
+ * - `"(x: number, number) -> number"` -- a signature with a named argument
+ * - `"(number, y:number?) -> number"` -- a signature with an optional named argument (can have several optional arguments, at the end)
+ * - `"(number, ...number) -> number"` -- a signature with a rest argument (can have only one, and no optional arguments if there is a rest argument).
+ * - `"() -> number"` -- a signature with an empty argument list
+ * - `"number | boolean"` -- a union type
+ * - `"(x: number) & (y: number)"` -- an intersection type
+ * - `"number | ((x: number) & (y: number))"` -- a union type with an intersection type
+ * - `"(number -> number) | number"` -- a union type with a signature and a primitive type
+ */
 
 export type TypeString = string;
 

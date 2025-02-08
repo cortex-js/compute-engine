@@ -58,9 +58,6 @@ export abstract class FormattingBlock {
   }
 }
 
-/**
- * @noInheritDoc
- */
 export class EmptyBlock extends FormattingBlock {
   constructor(fmt: Formatter) {
     super(fmt);
@@ -93,7 +90,6 @@ export class EmptyBlock extends FormattingBlock {
  *      0                          margin
  *                        soft-margin
  *
- * @noInheritDoc
  */
 export class TextBlock extends FormattingBlock {
   s: string;
@@ -134,7 +130,6 @@ export class TextBlock extends FormattingBlock {
  * |
  * |    [--------][-----------][------][----------]*
  * |
- * @noInheritDoc
  */
 export class LineBlock extends FormattingBlock {
   private blocks: FormattingBlock[];
@@ -177,7 +172,6 @@ export class LineBlock extends FormattingBlock {
  *      |    [----4----]
  *      |    *
  *      |
- * @noInheritDoc
  */
 
 export class StackBlock extends FormattingBlock {
@@ -220,7 +214,6 @@ export class StackBlock extends FormattingBlock {
  *      |    [---8----]*             |
  *      |                            |
  *
- * @noInheritDoc
  */
 export class WrapBlock extends FormattingBlock {
   private blocks: FormattingBlock[];
@@ -290,10 +283,6 @@ export class WrapBlock extends FormattingBlock {
 //     return 0;
 //   }
 // }
-
-/**
- * @noInheritDoc
- */
 
 export class ChoiceBlock extends FormattingBlock {
   private blocks: FormattingBlock[];

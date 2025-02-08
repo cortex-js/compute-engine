@@ -1,7 +1,8 @@
-import type { IComputeEngine, BoxedExpression } from '../public';
+import type { BoxedExpression } from '../public';
 
 import { flatten } from '../boxed-expression/flatten';
 import { isIndexableCollection } from '../collection-utils';
+import type { IComputeEngine } from '../types';
 
 export function canonicalInvisibleOperator(
   ops: ReadonlyArray<BoxedExpression>,

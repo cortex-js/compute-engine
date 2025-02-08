@@ -36,7 +36,6 @@ export type DiagnosticMessage = DiagnosticCode | [DiagnosticCode, ...any];
  *
  * This would happen if a `#error` directive is encountered.
  *
- * @noInheritDoc
  */
 export class FatalParsingError extends Error {
   constructor(msg: string) {

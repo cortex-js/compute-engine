@@ -2,18 +2,9 @@ import { Complex } from 'complex-esm';
 import { Decimal } from 'decimal.js';
 import type {
   BoxedExpression,
-  IComputeEngine,
-  Metadata,
   PatternMatchOptions,
-  BoxedSubstitution,
-  EvaluateOptions,
-  BoxedRuleSet,
   ReplaceOptions,
-  Rule,
-  Substitution,
-  CanonicalOptions,
   SimplifyOptions,
-  Sign,
 } from '../public';
 
 import type { Expression, MathJsonNumber } from '../../math-json';
@@ -52,11 +43,21 @@ import {
   nonPositiveSign,
 } from './sgn';
 import { BoxedType } from '../../common/type/boxed-type';
+import type {
+  BoxedRuleSet,
+  BoxedSubstitution,
+  CanonicalOptions,
+  EvaluateOptions,
+  IComputeEngine,
+  Metadata,
+  Rule,
+  Sign,
+  Substitution,
+} from '../types';
 
 /**
  * BoxedNumber
  *
- * @noInheritDoc
  */
 
 export class BoxedNumber extends _BoxedExpression {

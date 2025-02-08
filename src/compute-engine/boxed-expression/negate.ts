@@ -1,4 +1,5 @@
-import type { BoxedExpression, IComputeEngine } from '../public';
+import type { BoxedExpression } from '../public';
+import type { IComputeEngine } from '../types';
 import { add } from './arithmetic-add';
 import { order } from './order';
 

@@ -13,37 +13,27 @@
  *
  */
 
-import type { OneOf } from '../common/one-of';
-import type {
-  FunctionDefinition,
-  SemiBoxedExpression,
-  SymbolDefinition,
-} from './boxed-expression/public';
+export { OneOf } from '../common/one-of';
+
+export {
+  LatexString,
+  SerializeLatexOptions,
+  NumberSerializationFormat,
+  DelimiterScale,
+  NumberFormat,
+} from './latex-syntax/public';
+
+export * from './numerics/bignum';
+export * from './numerics/rationals';
+export { SmallInteger } from './numerics/numeric';
+
+export * from './numeric-value/public';
+
+export * from '../common/type/boxed-type';
+
+export * from './tensor/tensors';
+export * from './boxed-expression/tensor-fields';
+
+export * from './types';
 
 export * from './boxed-expression/public';
-
-/**
- * A table mapping identifiers to their definition.
- *
- * Identifiers should be valid MathJSON identifiers. In addition, the
- * following rules are recommended:
- *
- * - Use only latin letters, digits and `-`: `/[a-zA-Z0-9-]+/`
- * - The first character should be a letter: `/^[a-zA-Z]/`
- * - Functions and symbols exported from a library should start with an uppercase letter `/^[A-Z]/`
- *
- * @category Definitions
- *
- */
-
-export type IdentifierDefinition = OneOf<
-  [SymbolDefinition, FunctionDefinition, SemiBoxedExpression]
->;
-
-/**
- * @category Definitions
- *
- */
-export type IdentifierDefinitions = Readonly<{
-  [id: string]: IdentifierDefinition;
-}>;

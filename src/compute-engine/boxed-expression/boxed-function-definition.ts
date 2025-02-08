@@ -1,17 +1,6 @@
-import type {
-  IComputeEngine,
-  FunctionDefinition,
-  BoxedFunctionDefinition,
-  RuntimeScope,
-} from '../public';
+import type { FunctionDefinition } from '../public';
 
-import type {
-  BoxedExpression,
-  CollectionHandlers,
-  CompiledExpression,
-  EvaluateOptions,
-  Sign,
-} from './public';
+import type { BoxedExpression } from './public';
 
 import { applicable } from '../function-utils';
 import { DEFAULT_COMPLEXITY } from './order';
@@ -19,6 +8,15 @@ import { Type, TypeString } from '../../common/type/types';
 import { parseType } from '../../common/type/parse';
 import { OneOf } from '../../common/one-of';
 import { BoxedType } from '../../common/type/boxed-type';
+import type {
+  BoxedFunctionDefinition,
+  CollectionHandlers,
+  CompiledExpression,
+  EvaluateOptions,
+  IComputeEngine,
+  RuntimeScope,
+  Sign,
+} from '../types';
 
 const FUNCTION_DEF_KEYS = new Set([
   // Base

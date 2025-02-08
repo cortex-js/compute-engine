@@ -1,12 +1,8 @@
 import { isRelationalOperator } from '../boxed-expression/utils';
-import {
-  BoxedExpression,
-  FunctionDefinition,
-  IComputeEngine,
-  IdentifierDefinitions,
-} from '../public';
+import { BoxedExpression, FunctionDefinition } from '../public';
 import { flatten } from '../boxed-expression/flatten';
 import { eq } from '../boxed-expression/compare';
+import type { IdentifierDefinitions, IComputeEngine } from '../types';
 
 //   // eq, lt, leq, gt, geq, neq, approx
 //   //     shortLogicalImplies: 52, // ➔

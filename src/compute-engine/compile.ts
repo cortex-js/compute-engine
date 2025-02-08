@@ -1,6 +1,5 @@
 import type { MathJsonIdentifier } from '../math-json/types';
-
-import type { BoxedExpression, IComputeEngine } from './public';
+import { BoxedExpression } from './boxed-expression/public';
 
 import { isRelationalOperator } from './boxed-expression/utils';
 import { isFiniteIndexableCollection } from './collection-utils';
@@ -22,8 +21,7 @@ import {
   standardDeviation,
   variance,
 } from './numerics/statistics';
-
-export type CompiledType = boolean | number | string | object;
+import type { CompiledType, IComputeEngine } from './types';
 
 export type JSSource = string;
 

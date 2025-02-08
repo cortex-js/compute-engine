@@ -1,22 +1,11 @@
 import type { Expression } from '../../math-json/types';
 import type {
-  BoxedFunctionDefinition,
-  IComputeEngine,
-  BoxedRuleSet,
   SimplifyOptions,
-  Substitution,
   ReplaceOptions,
-  Metadata,
   PatternMatchOptions,
-  RuntimeScope,
-  BoxedSubstitution,
-  EvaluateOptions,
-  BoxedBaseDefinition,
-  Rule,
-  CanonicalOptions,
 } from '../public';
 
-import type { BoxedExpression, Sign } from './public';
+import type { BoxedExpression } from './public';
 
 import { findUnivariateRoots } from './solve';
 import { replace } from './rules';
@@ -57,6 +46,20 @@ import {
 } from './sgn';
 import { cachedValue, CachedValue, cachedValueAsync } from './cache';
 import { BoxedType } from '../../common/type/boxed-type';
+import type {
+  BoxedBaseDefinition,
+  BoxedFunctionDefinition,
+  BoxedRuleSet,
+  BoxedSubstitution,
+  CanonicalOptions,
+  EvaluateOptions,
+  IComputeEngine,
+  Metadata,
+  Rule,
+  RuntimeScope,
+  Sign,
+  Substitution,
+} from '../types';
 
 /**
  * A boxed function represent an expression that can be represented by a
@@ -68,8 +71,6 @@ import { BoxedType } from '../../common/type/boxed-type';
  * It has a definition associated with it, based on the operator.
  * The definition contains the signature of the function, and the
  * implementation of the function.
- *
- * @noInheritDoc
  *
  */
 

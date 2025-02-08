@@ -30,12 +30,11 @@
   "name": "Compute Engine",
   "disableSources": true,
   "disableGit": true,
-  "stripYamlFrontmatter": true,
   "outputFileStrategy": "modules",
   "entryPoints": [
     "./src/compute-engine/public.ts",
-    "./src/math-json/math-json-format.ts",
-    "./src/common/signals.ts"
+    "./src/math-json/types.ts",
+    "./src/common/type/types.ts"
   ],
   "readme": "none",
   "excludeExternals": true,
@@ -45,10 +44,10 @@
   "plugin": [
     "typedoc-plugin-no-inherit",
     "typedoc-plugin-markdown",
-    "./plugins/grok-theme/index.js"
+    "./plugins/grok-theme/index.mjs"
   ],
   "theme": "grok-theme",
-  "namedAnchors": true,
+  "useHTMLAnchors": true,
   "hidePageHeader": true,
   "hidePageTitle": true,
   "hideBreadcrumbs": true,

@@ -1,12 +1,6 @@
 import { Complex } from 'complex-esm';
 import { Decimal } from 'decimal.js';
-import {
-  IComputeEngine,
-  SemiBoxedExpression,
-  BoxedExpression,
-  Metadata,
-  CanonicalOptions,
-} from './public';
+import { SemiBoxedExpression, BoxedExpression } from './public';
 
 import { Expression, MathJsonIdentifier } from '../../math-json/types';
 import { machineValue, missingIfEmpty } from '../../math-json/utils';
@@ -39,6 +33,7 @@ import { validateArguments, checkNumericArgs } from './validate';
 import { flatten } from './flatten';
 import { canonical, semiCanonical } from './utils';
 import { canonicalNegate } from './negate';
+import type { CanonicalOptions, IComputeEngine, Metadata } from '../types';
 
 /**
  * ### THEORY OF OPERATIONS

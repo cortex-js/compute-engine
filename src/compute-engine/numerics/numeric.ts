@@ -36,6 +36,7 @@ type IsInteger<N extends number> = `${N}` extends `${string}.${string}`
     ? never
     : number;
 
+/** A `SmallInteger` is an integer < 1e6  */
 export type SmallInteger = IsInteger<number>;
 
 /** The largest number of digits of a bigint */
@@ -203,9 +204,7 @@ export function chop(n: number, tolerance = DEFAULT_TOLERANCE): 0 | number {
  * The formula for the 8th-order centered difference approximation for the
  * first derivative is given by:
  *
- * \[
- * f'(x) \approx \frac{1}{280h} \left[ -f(x-4h) + \frac{4}{3}f(x-3h) - \frac{1}{5}f(x-2h) + \frac{8}{5}f(x-h) - \frac{8}{5}f(x+h) + \frac{1}{5}f(x+2h) - \frac{4}{3}f(x+3h) + f(x+4h) \right]
- * \]
+ * $$ f'(x) \approx \frac{1}{280h} \left[ -f(x-4h) + \frac{4}{3}f(x-3h) - \frac{1}{5}f(x-2h) + \frac{8}{5}f(x-h) - \frac{8}{5}f(x+h) + \frac{1}{5}f(x+2h) - \frac{4}{3}f(x+3h) + f(x+4h) \right]$$
  *
  * Note: Mathematica uses an 8th order approximation for the first derivative
  *

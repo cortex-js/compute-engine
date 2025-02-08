@@ -1,4 +1,4 @@
-import { AssumeResult, BoxedExpression, IComputeEngine } from './public';
+import { BoxedExpression } from './public';
 
 import { isSubtype } from '../common/type/subtype';
 import { functionResult } from '../common/type/utils';
@@ -6,6 +6,7 @@ import { functionResult } from '../common/type/utils';
 import { findUnivariateRoots } from './boxed-expression/solve';
 import { isInequality, domainToType } from './boxed-expression/utils';
 import { BoxedType } from '../common/type/boxed-type';
+import type { AssumeResult, IComputeEngine } from './types';
 
 /**
  * Add an assumption, in the form of a predicate, for example:

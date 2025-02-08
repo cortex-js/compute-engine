@@ -1,4 +1,4 @@
-import type { BoxedExpression, IComputeEngine } from '../public';
+import type { BoxedExpression } from '../public';
 
 import { canonicalAdd } from './arithmetic-add';
 import { canonicalMultiply } from './arithmetic-multiply';
@@ -9,6 +9,7 @@ import type { NumericValue } from '../numeric-value/public';
 import { ExactNumericValue } from '../numeric-value/exact-numeric-value';
 import { BigNumericValue } from '../numeric-value/big-numeric-value';
 import { MachineNumericValue } from '../numeric-value/machine-numeric-value';
+import type { IComputeEngine } from '../types';
 
 // Represent a sum of terms
 export class Terms {

@@ -1,7 +1,7 @@
 import { factor, together } from '../boxed-expression/factor';
-import { IdentifierDefinitions } from '../public';
 import { distribute } from '../symbolic/distribute';
 import { expand, expandAll } from '../boxed-expression/expand';
+import type { IdentifierDefinitions } from '../types';
 
 export const POLYNOMIALS_LIBRARY: IdentifierDefinitions[] = [
   {

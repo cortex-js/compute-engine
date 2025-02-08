@@ -1,7 +1,7 @@
 import { parseType } from './parse';
 import { typeToString } from './serialize';
 import { isSubtype } from './subtype';
-import {
+import type {
   Type,
   PrimitiveType,
   AlgebraicType,

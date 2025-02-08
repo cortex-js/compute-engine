@@ -1,22 +1,26 @@
 import type {
   BoxedExpression,
-  BoxedSymbolDefinition,
-  IComputeEngine,
-  RuntimeScope,
   SemiBoxedExpression,
   SymbolDefinition,
-  NumericFlags,
-  LatexString,
-  CollectionHandlers,
-  Sign,
 } from './public';
 import { _BoxedExpression } from './abstract-boxed-expression';
 import { isLatexString, normalizeFlags } from './utils';
+
+import { defaultCollectionHandlers } from '../collection-utils';
+import { LatexString } from '../latex-syntax/public';
+
 import { Type, TypeString } from '../../common/type/types';
 import { parseType } from '../../common/type/parse';
 import { isValidType, widen } from '../../common/type/utils';
-import { defaultCollectionHandlers } from '../collection-utils';
 import { BoxedType } from '../../common/type/boxed-type';
+import type {
+  BoxedSymbolDefinition,
+  CollectionHandlers,
+  IComputeEngine,
+  NumericFlags,
+  RuntimeScope,
+  Sign,
+} from '../types';
 
 /**
  * ### THEORY OF OPERATIONS

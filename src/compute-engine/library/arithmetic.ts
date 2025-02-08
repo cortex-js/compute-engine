@@ -1,13 +1,11 @@
 import { Decimal } from 'decimal.js';
 
-import type { IdentifierDefinitions, Sign } from '../public';
-
 import {
   checkType,
   checkTypes,
   checkNumericArgs,
 } from '../boxed-expression/validate';
-import { IComputeEngine, BoxedExpression } from '../boxed-expression/public';
+import { BoxedExpression } from '../boxed-expression/public';
 import { bignumPreferred, canonical } from '../boxed-expression/utils';
 import {
   asSmallInteger,
@@ -36,7 +34,7 @@ import {
   bigGamma,
   bigGammaln,
 } from '../numerics/special-functions';
-import { factorial, factorial2, gcd, lcm } from '../numerics/numeric';
+import { factorial2, gcd, lcm } from '../numerics/numeric';
 import { rationalize } from '../numerics/rationals';
 import { isPrime as isPrimeMachine, isPrimeBigint } from '../numerics/primes';
 import { fromDigits } from '../numerics/strings';
@@ -61,6 +59,7 @@ import {
 import { parseType } from '../../common/type/parse';
 import { range, rangeLast } from './collections';
 import { run, runAsync } from '../../common/interruptible';
+import type { IComputeEngine, IdentifierDefinitions, Sign } from '../types';
 
 // When processing an arithmetic expression, the following are the core
 // canonical arithmetic operations to account for:

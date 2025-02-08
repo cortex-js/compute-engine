@@ -1,4 +1,5 @@
-import type { BoxedExpression, Sign } from './public';
+import type { Sign } from '../types';
+import type { BoxedExpression } from './public';
 
 export function sgn(expr: BoxedExpression): Sign | undefined {
   const ce = expr.engine;

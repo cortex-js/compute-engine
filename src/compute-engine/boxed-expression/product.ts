@@ -1,4 +1,4 @@
-import type { BoxedExpression, IComputeEngine } from '../public';
+import type { BoxedExpression } from '../public';
 
 import { order } from './order';
 import {
@@ -22,6 +22,7 @@ import { asRational } from './numerics';
 import { NumericValue } from '../numeric-value/public';
 import { mul } from './arithmetic-multiply';
 import { canonicalDivide } from './arithmetic-divide';
+import type { IComputeEngine } from '../types';
 
 /**
  * Group terms in a product by common term.

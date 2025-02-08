@@ -10,12 +10,8 @@ import {
   isFiniteIndexableCollection,
   MAX_SIZE_EAGER_COLLECTION,
 } from '../collection-utils';
-import {
-  BoxedExpression,
-  IdentifierDefinitions,
-  IComputeEngine,
-  SymbolDefinition,
-} from '../public';
+import { BoxedExpression, SymbolDefinition } from '../public';
+import type { IdentifierDefinitions, IComputeEngine } from '../types';
 
 export const SETS_LIBRARY: IdentifierDefinitions = {
   //

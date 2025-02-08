@@ -2,17 +2,7 @@ import type { Expression } from '../../math-json/types';
 
 import {
   BoxedExpression,
-  BoxedRule,
-  IComputeEngine,
-  Rule,
-  BoxedRuleSet,
   ReplaceOptions,
-  BoxedSubstitution,
-  RuleConditionFunction,
-  RuleReplaceFunction,
-  RuleFunction,
-  RuleSteps,
-  RuleStep,
   isRuleStep,
   isBoxedRule,
   SemiBoxedExpression,
@@ -23,7 +13,18 @@ import { asLatexString, isInequality, isRelationalOperator } from './utils';
 import { Parser } from '../latex-syntax/public';
 
 import { isPrime } from '../library/arithmetic';
-import { isSubtype } from '../../common/type/subtype';
+import type {
+  BoxedRule,
+  BoxedRuleSet,
+  BoxedSubstitution,
+  IComputeEngine,
+  Rule,
+  RuleConditionFunction,
+  RuleFunction,
+  RuleReplaceFunction,
+  RuleStep,
+  RuleSteps,
+} from '../types';
 
 // @todo:
 // export function fixPoint(rule: Rule);

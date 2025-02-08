@@ -1,21 +1,14 @@
-import type {
-  BoxedExpression,
-  IComputeEngine,
-  Metadata,
-  PatternMatchOptions,
-  BoxedSubstitution,
-} from './public';
+import type { BoxedExpression, PatternMatchOptions } from './public';
 
 import { _BoxedExpression } from './abstract-boxed-expression';
 import { hashCode, isBoxedExpression } from './utils';
 import { isWildcard, wildcardName } from './boxed-patterns';
-import { Type } from '../../common/type/types';
 import { BoxedType } from '../../common/type/boxed-type';
+import type { BoxedSubstitution, IComputeEngine, Metadata } from '../types';
 
 /**
  * BoxedString
  *
- * @noInheritDoc
  */
 
 export class BoxedString extends _BoxedExpression {

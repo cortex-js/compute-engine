@@ -3,32 +3,17 @@ import { Decimal } from 'decimal.js';
 import { Expression, MathJsonIdentifier } from '../../math-json/types';
 
 import type {
-  BoxedBaseDefinition,
   BoxedExpression,
-  BoxedFunctionDefinition,
-  BoxedRuleSet,
-  BoxedSubstitution,
-  BoxedSymbolDefinition,
-  CanonicalOptions,
-  EvaluateOptions,
-  IComputeEngine,
   JsonSerializationOptions,
-  Metadata,
   PatternMatchOptions,
-  Rule,
-  RuntimeScope,
-  Sign,
   SimplifyOptions,
-  Substitution,
 } from './public';
-
-import type { LatexString } from '../public';
 
 import type { NumericValue } from '../numeric-value/public';
 
 import type { SmallInteger } from '../numerics/numeric';
 
-import { CompiledType, compileToJavascript } from '../compile';
+import { compileToJavascript } from '../compile';
 
 import {
   getApplyFunctionStyle,
@@ -40,7 +25,10 @@ import {
   getRootStyle,
 } from '../latex-syntax/serializer-style';
 import { serializeLatex } from '../latex-syntax/serializer';
-import type { SerializeLatexOptions } from '../latex-syntax/public';
+import type {
+  LatexString,
+  SerializeLatexOptions,
+} from '../latex-syntax/public';
 
 import { AsciiMathOptions, toAsciiMath } from './ascii-math';
 
@@ -841,3 +829,19 @@ import { cmp, eq, same } from './compare';
 import { AbstractTensor } from '../tensor/tensors';
 import { expand } from './expand';
 import { BoxedType } from '../../common/type/boxed-type';
+import type {
+  BoxedSubstitution,
+  IComputeEngine,
+  Metadata,
+  RuntimeScope,
+  Substitution,
+  CanonicalOptions,
+  BoxedRuleSet,
+  Rule,
+  BoxedBaseDefinition,
+  BoxedSymbolDefinition,
+  BoxedFunctionDefinition,
+  EvaluateOptions,
+  CompiledType,
+  Sign,
+} from '../types';

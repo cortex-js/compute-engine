@@ -1,333 +1,811 @@
 
-<a name="commonmd"></a>
+<a name="readmemd"></a>
 
-## Error Handling
+## Modules
 
-<a id="runtimesignalcode" name="runtimesignalcode"></a>
+- [common/type/types](#commontypetypesmd)
+- ["compute-engine"](#compute-enginemd)
+- ["math-json"](#math-jsonmd)
 
-### RuntimeSignalCode
+# Common
 
-```ts
-type RuntimeSignalCode: "timeout" | "out-of-memory" | "recursion-depth-exceeded" | "iteration-limit-exceeded";
-```
+## Type
 
-<a id="signalcode" name="signalcode"></a>
 
-### SignalCode
+<a name="commontypetypesmd"></a>
 
-```ts
-type SignalCode: RuntimeSignalCode | 
-  | "invalid-name"
-  | "expected-predicate"
-  | "expected-symbol"
-  | "operator-requires-one-operand"
-  | "postfix-operator-requires-one-operand"
-  | "prefix-operator-requires-one-operand"
-  | "unbalanced-symbols"
-  | "expected-argument"
-  | "unexpected-command"
-  | "cyclic-definition"
-  | "invalid-supersets"
-  | "expected-supersets"
-  | "unknown-domain"
-  | "duplicate-wikidata"
-  | "invalid-dictionary-entry"
-  | "syntax-error";
-```
+<a id="primitivetype" name="primitivetype"></a>
 
-<a id="signalmessage" name="signalmessage"></a>
-
-### SignalMessage
+#### PrimitiveType
 
 ```ts
-type SignalMessage: SignalCode | [SignalCode, ...any[]];
+type PrimitiveType = 
+  | NumericType
+  | "collection"
+  | "list"
+  | "set"
+  | "map"
+  | "tuple"
+  | "value"
+  | "scalar"
+  | "function"
+  | "symbol"
+  | "boolean"
+  | "string"
+  | "expression"
+  | "unknown"
+  | "error"
+  | "nothing"
+  | "never"
+  | "any";
 ```
 
-<a id="signalorigin" name="signalorigin"></a>
+A primitive type is a simple type that represents a concrete value.
 
-### SignalOrigin
+- `any`: the top type
+   - `expression`
+   - `error`: an invalid value, such as `["Error", "missing"]`
+   - `nothing`: the type of the `Nothing` symbol, the unit type
+   - `never`: the bottom type
+   - `unknown`: a value whose type is not known
+
+- `expression`:
+   - a symbolic expression, such as `["Add", "x", 1]`
+   - `<value>`
+   - `symbol`: a symbol, such as `x`.
+   - `function`: a function expression
+     such as `["Function", ["Add", "x", 1], "x"]`.
+
+- `value`
+   - `scalar`
+     - `<number>`
+     - `boolean`: a boolean value: `True` or `False`.
+     - `string`: a string of characters.
+   - `collection`
+      - `list`: a collection of expressions, possibly recursive,
+         with optional dimensions, e.g. `[number]`, `[boolean^32]`,
+         `[number^(2x3)]`. Used to represent a vector, a matrix or a
+         tensor when the type of its elements is a number
+      - `set`: a collection of unique expressions, e.g. `set<string>`.
+      - `tuple`: a fixed-size collection of named or unnamed elements, e.g.
+         `tuple<number, boolean>`, `tuple<x: number, y: boolean>`.
+      - `map`: a set key-value pairs, e.g. `map<x: number, y: boolean>`.
+
+<a id="numerictype" name="numerictype"></a>
+
+#### NumericType
 
 ```ts
-type SignalOrigin: Object;
+type NumericType = 
+  | "number"
+  | "finite_number"
+  | "complex"
+  | "finite_complex"
+  | "imaginary"
+  | "real"
+  | "finite_real"
+  | "rational"
+  | "finite_rational"
+  | "integer"
+  | "finite_integer"
+  | "non_finite_number";
 ```
 
-#### Type declaration
+- `number`: any numeric value = `complex` + `real` plus `NaN`
+- `complex`: a number with non-zero real and imaginary parts = `finite_complex` plus `ComplexInfinity`
+- `finite_complex`: a finite complex number = `imaginary` + `finite_real`
+- `imaginary`: a complex number with a real part of 0 (pure imaginary)
+- `finite_number`: a finite numeric value = `finite_complex`
+- `finite_real`: a finite real number = `finite_rational` + `finite_integer`
+- `finite_rational`: a pure rational number
+- `finite_integer`: a whole number
+- `real`: a complex number with an imaginary part of 0 = `finite_real` + `non_finite_number`
+- `non_finite_number`: `PositiveInfinity`, `NegativeInfinity`
+- `integer`: a whole number = `finite_integer` + `non_finite_number`
+- `rational`: a pure rational number (not an integer) = `finite_rational` + `non_finite_number`
 
-<a id="url" name="url"></a>
+<a id="namedelement" name="namedelement"></a>
+
+#### NamedElement
+
+```ts
+type NamedElement = object;
+```
+
+##### Type declaration
+
+<a id="name"></a>
+
+###### name?
+
+<a id="name" name="name"></a>
 
 <MemberCard>
 
-##### SignalOrigin.url?
+###### NamedElement.name?
 
 ```ts
-optional url: string;
+optional name: string;
 ```
 
 </MemberCard>
 
-<a id="source" name="source"></a>
+<a id="type"></a>
+
+###### type
+
+<a id="type" name="type"></a>
 
 <MemberCard>
 
-##### SignalOrigin.source?
+###### NamedElement.type
 
 ```ts
-optional source: string;
+type: Type;
 ```
 
 </MemberCard>
 
-<a id="offset" name="offset"></a>
+<a id="functionsignature" name="functionsignature"></a>
+
+#### FunctionSignature
+
+```ts
+type FunctionSignature = object;
+```
+
+##### Type declaration
+
+<a id="kind"></a>
+
+###### kind
+
+<a id="kind" name="kind"></a>
 
 <MemberCard>
 
-##### SignalOrigin.offset?
+###### FunctionSignature.kind
 
 ```ts
-optional offset: number;
+kind: "signature";
 ```
 
 </MemberCard>
 
-<a id="line" name="line"></a>
+<a id="args"></a>
+
+###### args?
+
+<a id="args" name="args"></a>
 
 <MemberCard>
 
-##### SignalOrigin.line?
+###### FunctionSignature.args?
 
 ```ts
-optional line: number;
+optional args: NamedElement[];
 ```
 
 </MemberCard>
 
-<a id="column" name="column"></a>
+<a id="optargs"></a>
+
+###### optArgs?
+
+<a id="optargs" name="optargs"></a>
 
 <MemberCard>
 
-##### SignalOrigin.column?
+###### FunctionSignature.optArgs?
 
 ```ts
-optional column: number;
+optional optArgs: NamedElement[];
 ```
 
 </MemberCard>
 
-<a id="around" name="around"></a>
+<a id="restarg"></a>
+
+###### restArg?
+
+<a id="restarg" name="restarg"></a>
 
 <MemberCard>
 
-##### SignalOrigin.around?
+###### FunctionSignature.restArg?
 
 ```ts
-optional around: string;
+optional restArg: NamedElement;
 ```
 
 </MemberCard>
 
-<a id="signal" name="signal"></a>
+<a id="result"></a>
 
-### Signal
+###### result
 
-```ts
-type Signal: Object;
-```
-
-#### Type declaration
-
-<a id="severity" name="severity"></a>
+<a id="result" name="result"></a>
 
 <MemberCard>
 
-##### Signal.severity?
+###### FunctionSignature.result
 
 ```ts
-optional severity: "warning" | "error";
+result: Type;
 ```
 
 </MemberCard>
 
-<a id="message" name="message"></a>
+<a id="algebraictype" name="algebraictype"></a>
+
+#### AlgebraicType
+
+```ts
+type AlgebraicType = object;
+```
+
+##### Type declaration
+
+<a id="kind-1"></a>
+
+###### kind
+
+<a id="kind-1" name="kind-1"></a>
 
 <MemberCard>
 
-##### Signal.message
+###### AlgebraicType.kind
 
 ```ts
-message: SignalMessage;
-```
-
-An error/warning code or, a code with one or more arguments specific to
-the signal code.
-
-</MemberCard>
-
-<a id="head" name="head"></a>
-
-<MemberCard>
-
-##### Signal.head?
-
-```ts
-optional head: string;
-```
-
-If applicable, the head of the function about which the
-signal was raised
-
-</MemberCard>
-
-<a id="origin" name="origin"></a>
-
-<MemberCard>
-
-##### Signal.origin?
-
-```ts
-optional origin: SignalOrigin;
-```
-
-Location where the signal was raised.
-
-</MemberCard>
-
-<a id="errorsignal" name="errorsignal"></a>
-
-### ErrorSignal
-
-```ts
-type ErrorSignal: Signal & Object;
-```
-
-#### Type declaration
-
-<MemberCard>
-
-##### ErrorSignal.severity
-
-```ts
-severity: "error";
+kind: "union" | "intersection";
 ```
 
 </MemberCard>
 
-<a id="warningsignal" name="warningsignal"></a>
+<a id="types"></a>
 
-### WarningSignal
+###### types
 
-```ts
-type WarningSignal: Signal & Object;
-```
-
-#### Type declaration
+<a id="types" name="types"></a>
 
 <MemberCard>
 
-##### WarningSignal.severity
+###### AlgebraicType.types
 
 ```ts
-severity: "warning";
+types: Type[];
 ```
 
 </MemberCard>
 
-<a id="warningsignalhandler" name="warningsignalhandler"></a>
+<a id="negationtype" name="negationtype"></a>
 
-### WarningSignalHandler
-
-```ts
-type WarningSignalHandler: (warnings) => void;
-```
-
-• **warnings**: [`WarningSignal`](#warningsignal)[]
-
-<a id="errorcode" name="errorcode"></a>
-
-### ErrorCode
+#### NegationType
 
 ```ts
-type ErrorCode: 
-  | "expected-argument"
-  | "unexpected-argument"
-  | "expected-operator"
-  | "expected-operand"
-  | "invalid-name"
-  | "invalid-dictionary-entry"
-  | "unknown-symbol"
-  | "unknown-operator"
-  | "unknown-function"
-  | "unknown-command"
-  | "unexpected-command"
-  | "unbalanced-symbols"
-  | "unexpected-superscript"
-  | "unexpected-subscript"
-  | "unexpected-sequence"
-  | "non-associative-operator"
-  | "function-has-too-many-arguments"
-  | "function-has-too-few-arguments"
-  | "operator-requires-one-operand"
-  | "infix-operator-requires-two-operands"
-  | "prefix-operator-requires-one-operand"
-  | "postfix-operator-requires-one-operand"
-  | "associative-function-has-too-few-arguments"
-  | "commutative-function-has-too-few-arguments"
-  | "threadable-function-has-too-few-arguments"
-  | "hold-first-function-has-too-few-arguments"
-  | "hold-rest-function-has-too-few-arguments"
-  | "base-out-of-range"
-  | "syntax-error";
+type NegationType = object;
 ```
 
-The error codes can be used in an `ErrorCode` expression:
+##### Type declaration
 
-       `["ErrorCode", "'syntax-error'", arg1]`
+<a id="kind-2"></a>
 
-It evaluates to a localized, human-readable string.
+###### kind
 
-* `unknown-symbol`: a symbol was encountered which does not have a
-definition.
+<a id="kind-2" name="kind-2"></a>
 
-* `unknown-operator`: a presumed operator was encountered which does not
-have a definition.
+<MemberCard>
 
-* `unknown-function`: a LaTeX command was encountered which does not
-have a definition.
+###### NegationType.kind
 
-* `unexpected-command`: a LaTeX command was encountered when only a string
-was expected
+```ts
+kind: "negation";
+```
 
-* `unexpected-superscript`: a superscript was encountered in an unexpected
-context, or no `powerFunction` was defined. By default, superscript can
-be applied to numbers, symbols or expressions, but not to operators (e.g.
-`2+^34`) or to punctuation.
+</MemberCard>
 
-* `unexpected-subscript`: a subscript was encountered in an unexpected
-context or no 'subscriptFunction` was defined. By default, subscripts
-are not expected on numbers, operators or symbols. Some commands (e.g. `\sum`)
-do expected a subscript.
+<a id="type-1"></a>
 
-* `unexpected-sequence`: some adjacent elements were encountered (for
-example `xy`), but the elements could not be combined. By default, adjacent
-symbols are combined with `Multiply`, but adjacent numbers or adjacent
-operators are not combined.
+###### type
 
-* `expected-argument`: a LaTeX command that requires one or more argument
-was encountered without the required arguments.
+<a id="type-1" name="type-1"></a>
 
-* `expected-operand`: an operator was encountered without its required
-operands.
+<MemberCard>
 
-* `non-associative-operator`: an operator which is not associative was
-encountered in an associative context, for example: `a < b < c` (assuming
-`<` is defined as non-associative)
+###### NegationType.type
 
-* `postfix-operator-requires-one-operand`: a postfix operator which requires
-a single argument was encountered with no arguments or more than one argument
+```ts
+type: Type;
+```
 
-* `prefix-operator-requires-one-operand`: a prefix operator which requires
-a single argument was encountered with no arguments or more than one argument
+</MemberCard>
 
-* `base-out-of-range`:  The base is expected to be between 2 and 36.
+<a id="valuetype" name="valuetype"></a>
+
+#### ValueType
+
+```ts
+type ValueType = object;
+```
+
+##### Type declaration
+
+<a id="kind-3"></a>
+
+###### kind
+
+<a id="kind-3" name="kind-3"></a>
+
+<MemberCard>
+
+###### ValueType.kind
+
+```ts
+kind: "value";
+```
+
+</MemberCard>
+
+<a id="value"></a>
+
+###### value
+
+<a id="value" name="value"></a>
+
+<MemberCard>
+
+###### ValueType.value
+
+```ts
+value: any;
+```
+
+</MemberCard>
+
+<a id="maptype" name="maptype"></a>
+
+#### MapType
+
+```ts
+type MapType = object;
+```
+
+Map is a non-indexable collection of key/value pairs.
+An element of a map whose type is a subtype of `nothing` is optional.
+For example, in `{x: number, y: boolean | nothing}` the element `y` is optional.
+
+##### Type declaration
+
+<a id="kind-4"></a>
+
+###### kind
+
+<a id="kind-4" name="kind-4"></a>
+
+<MemberCard>
+
+###### MapType.kind
+
+```ts
+kind: "map";
+```
+
+</MemberCard>
+
+<a id="elements"></a>
+
+###### elements
+
+<a id="elements" name="elements"></a>
+
+<MemberCard>
+
+###### MapType.elements
+
+```ts
+elements: Record<string, Type>;
+```
+
+</MemberCard>
+
+<a id="collectiontype" name="collectiontype"></a>
+
+#### CollectionType
+
+```ts
+type CollectionType = object;
+```
+
+Collection, List, Set, Tuple and Map are collections.
+
+`CollectionType` is a generic collection of elements of a certain type.
+
+##### Type declaration
+
+<a id="kind-5"></a>
+
+###### kind
+
+<a id="kind-5" name="kind-5"></a>
+
+<MemberCard>
+
+###### CollectionType.kind
+
+```ts
+kind: "collection";
+```
+
+</MemberCard>
+
+<a id="elements-1"></a>
+
+###### elements
+
+<a id="elements-1" name="elements-1"></a>
+
+<MemberCard>
+
+###### CollectionType.elements
+
+```ts
+elements: Type;
+```
+
+</MemberCard>
+
+<a id="listtype" name="listtype"></a>
+
+#### ListType
+
+```ts
+type ListType = object;
+```
+
+The elements of a list are ordered.
+
+All elements of a list have the same type, but it can be a broad type,
+up to `any`.
+
+The same element can be present in the list more than once.
+
+A list can be multi-dimensional. For example, a list of integers with
+dimensions 2x3x4 is a 3D tensor with 2 layers, 3 rows and 4 columns.
+
+##### Type declaration
+
+<a id="kind-6"></a>
+
+###### kind
+
+<a id="kind-6" name="kind-6"></a>
+
+<MemberCard>
+
+###### ListType.kind
+
+```ts
+kind: "list";
+```
+
+</MemberCard>
+
+<a id="elements-2"></a>
+
+###### elements
+
+<a id="elements-2" name="elements-2"></a>
+
+<MemberCard>
+
+###### ListType.elements
+
+```ts
+elements: Type;
+```
+
+</MemberCard>
+
+<a id="dimensions"></a>
+
+###### dimensions?
+
+<a id="dimensions" name="dimensions"></a>
+
+<MemberCard>
+
+###### ListType.dimensions?
+
+```ts
+optional dimensions: number[];
+```
+
+</MemberCard>
+
+<a id="settype" name="settype"></a>
+
+#### SetType
+
+```ts
+type SetType = object;
+```
+
+Each element of a set is unique (is not present in the set more than once).
+The elements of a set are not ordered.
+
+##### Type declaration
+
+<a id="kind-7"></a>
+
+###### kind
+
+<a id="kind-7" name="kind-7"></a>
+
+<MemberCard>
+
+###### SetType.kind
+
+```ts
+kind: "set";
+```
+
+</MemberCard>
+
+<a id="elements-3"></a>
+
+###### elements
+
+<a id="elements-3" name="elements-3"></a>
+
+<MemberCard>
+
+###### SetType.elements
+
+```ts
+elements: Type;
+```
+
+</MemberCard>
+
+<a id="tupletype" name="tupletype"></a>
+
+#### TupleType
+
+```ts
+type TupleType = object;
+```
+
+##### Type declaration
+
+<a id="kind-8"></a>
+
+###### kind
+
+<a id="kind-8" name="kind-8"></a>
+
+<MemberCard>
+
+###### TupleType.kind
+
+```ts
+kind: "tuple";
+```
+
+</MemberCard>
+
+<a id="elements-4"></a>
+
+###### elements
+
+<a id="elements-4" name="elements-4"></a>
+
+<MemberCard>
+
+###### TupleType.elements
+
+```ts
+elements: NamedElement[];
+```
+
+</MemberCard>
+
+<a id="typereference" name="typereference"></a>
+
+#### TypeReference
+
+```ts
+type TypeReference = object;
+```
+
+Nominal typing
+
+##### Type declaration
+
+<a id="kind-9"></a>
+
+###### kind
+
+<a id="kind-9" name="kind-9"></a>
+
+<MemberCard>
+
+###### TypeReference.kind
+
+```ts
+kind: "reference";
+```
+
+</MemberCard>
+
+<a id="ref"></a>
+
+###### ref
+
+<a id="ref" name="ref"></a>
+
+<MemberCard>
+
+###### TypeReference.ref
+
+```ts
+ref: string;
+```
+
+</MemberCard>
+
+<a id="type-2" name="type-2"></a>
+
+#### Type
+
+```ts
+type Type = 
+  | PrimitiveType
+  | AlgebraicType
+  | NegationType
+  | CollectionType
+  | ListType
+  | SetType
+  | MapType
+  | TupleType
+  | FunctionSignature
+  | ValueType
+  | TypeReference;
+```
+
+<a id="typestring" name="typestring"></a>
+
+#### TypeString
+
+```ts
+type TypeString = string;
+```
+
+The type of a boxed expression indicates the kind of expression it is and
+the value it represents.
+
+The type is represented either by a primitive type (e.g. number, complex, collection, etc.), or a compound type (e.g. tuple, function signature, etc.).
+
+Types are described using the following BNF grammar:
+
+```bnf
+<type> ::= <union_type> | "(" <type> ")"
+
+<union_type> ::= <intersection_type> (" | " <intersection_type>)*
+
+<intersection_type> ::= <primary_type> (" & " <primary_type>)*
+
+<primary_type> ::=  <primitive>
+               | <tuple_type>
+               | <signature>
+               | <list_type>
+
+<primitive> ::= "any" | "unknown" | <value-type> | <symbolic-type> | <numeric-type>
+
+<numeric-type> ::= "number" | "complex" | "imaginary" | "real" | "rational" | "integer"
+
+<value-type> ::= "value" | <numeric-type> | "collection" | "boolean" | "string"
+
+<symbolic-type> ::= "expression" | "function" | "symbol"
+
+<tuple_type> ::= "tuple<" (<name> <type> "," <named_tuple_elements>*) ">"
+           | "tuple<" (<type> "," <unnamed_tuple_elements>*) ">" |
+           | "tuple<" <tuple_elements> ">"
+
+<tuple_elements> ::= <unnamed_tuple_elements> | <named_tuple_elements>
+
+<unnamed_tuple_elements> ::= <type> ("," <type>)*
+
+<named_tuple_elements> ::= <name> <type> ("," <name> <type>)*
+
+<signature> ::=  <arguments> " -> " <type>
+
+<arguments> ::= "()"
+           | <argument>
+           | "(" <argument-list> ")"
+
+<argument> ::= <type>
+           | <name> <type>
+
+<rest_argument> ::= "..." <type>
+           | <name> "..." <type>
+
+<optional_argument> ::= <argument> "?"
+
+<optional_arguments> ::= <optional_argument> ("," <optional_argument>)*
+
+<required_arguments> ::= <argument> ("," <argument>)*
+
+<argument-list> ::= <required_arguments> ("," <rest_argument>)?
+           | <required_arguments> <optional_arguments>?
+           | <optional_arguments>?
+           | <rest_argument>
+
+<list_type> ::= "list<" <type> <dimensions>? ">"
+
+<dimensions> ::= "^" <fixed_size>
+           | "^(" <multi_dimensional_size> ")"
+
+<fixed_size> ::= <positive-integer_literal>
+
+<multi_dimensional_size> ::= <positive-integer_literal> "x" <positive-integer_literal> ("x" <positive-integer_literal>)*
+
+<map> ::= "map" | "map<" <map_elements> ">"
+
+<map_elements> ::= <name> <type> ("," <name> <type>)*
+
+<set> ::= "set<" <type> ">"
+
+<collection ::= "collection<" <type> ">"
+
+<name> ::= <identifier> ":"
+
+<identifier> ::= [a-zA-Z_][a-zA-Z0-9_]*
+
+<positive-integer_literal> ::= [1-9][0-9]*
+```
+
+Examples of types strings:
+- `"number"`    -- a simple type primitive
+- `"(number, boolean)"` -- a tuple type
+- `"(x: number, y:boolean)"` -- a named tuple/record type. Either all arguments are named, or none are
+- `"collection<any>"` -- an arbitrary collection type, with no length or element type restrictions
+- `"collection<integer>"` -- a collection type where all the elements are integers
+- `"collection<(number, boolean)>"` -- a collection of tuples
+- `"collection<(value:number, seen:boolean)>"` -- a collection of named tuples
+- `"[boolean]^32"` -- a collection type with a fixed size of 32 elements
+- `"[integer]^(2x3)"` -- an integer matrix of 2 columns and 3 rows
+- `"[integer]^(2x3x4)"` -- a tensor of dimensions 2x3x4
+- `"number -> number"` -- a signature with a single argument
+- `"(x: number, number) -> number"` -- a signature with a named argument
+- `"(number, y:number?) -> number"` -- a signature with an optional named argument (can have several optional arguments, at the end)
+- `"(number, ...number) -> number"` -- a signature with a rest argument (can have only one, and no optional arguments if there is a rest argument).
+- `"() -> number"` -- a signature with an empty argument list
+- `"number | boolean"` -- a union type
+- `"(x: number) & (y: number)"` -- an intersection type
+- `"number | ((x: number) & (y: number))"` -- a union type with an intersection type
+- `"(number -> number) | number"` -- a union type with a signature and a primitive type
+
+<a id="typecompatibility" name="typecompatibility"></a>
+
+#### TypeCompatibility
+
+```ts
+type TypeCompatibility = "covariant" | "contravariant" | "bivariant" | "invariant";
+```
+
+<a id="typeresolver" name="typeresolver"></a>
+
+#### TypeResolver()
+
+```ts
+type TypeResolver = (name) => Type | undefined;
+```
+
+###### name
+
+`string`
+
+[`Type`](#type-2) \| `undefined`
 
 
 <a name="compute-enginemd"></a>
@@ -335,1707 +813,127 @@ a single argument was encountered with no arguments or more than one argument
 The Compute Engine is a symbolic computation engine that can be used to
 manipulate and evaluate mathematical expressions.
 
-Use an instance of [`ComputeEngine`](#computeengine) to create boxed expressions
-with [`ComputeEngine.parse`](#parse) and [`ComputeEngine.box`](#box).
+Use an instance of ComputeEngine to create boxed expressions
+with ComputeEngine.parse and ComputeEngine.box.
 
 Use a [`BoxedExpression`](#boxedexpression) object to manipulate and evaluate
 mathematical expressions.
 
 ## Compute Engine
 
-<a id="computeengine" name="computeengine"></a>
-
-### ComputeEngine
-
-To use the Compute Engine, create a `ComputeEngine` instance:
-
-```js
-ce = new ComputeEngine();
-```
-
-If using a mathfield, use the default Compute Engine instance from the
-`MathfieldElement` class:
-
-```js
-ce = MathfieldElement.computeEngine
-```
-
-Use the instance to create boxed expressions with `ce.parse()` and `ce.box()`.
-
-```js
-const ce = new ComputeEngine();
-
-let expr = ce.parse("e^{i\\pi}");
-console.log(expr.N().latex);
-// ➔ "-1"
-
-expr = ce.box(["Expand", ["Power", ["Add", "a", "b"], 2]]);
-console.log(expr.evaluate().latex);
-// ➔ "a^2 +  2ab + b^2"
-```
-
-<a id="constructors" name="constructors"></a>
-
-<MemberCard>
-
-##### new ComputeEngine()
-
-```ts
-new ComputeEngine(options?): ComputeEngine
-```
-
-Construct a new `ComputeEngine` instance.
-
-Identifier tables define functions and symbols (in `options.ids`).
-If no table is provided the MathJSON Standard Library is used (`ComputeEngine.getStandardLibrary()`)
-
-The LaTeX syntax dictionary is defined in `options.latexDictionary`.
-
-The order of the dictionaries matter: the definitions from the later ones
-override the definitions from earlier ones. The first dictionary should
-be the `'core'` dictionary which include some basic definitions such
-as domains (`Booleans`, `Numbers`, etc...) that are used by later
-dictionaries.
-
-• **options?**
-
-• **options\.numericMode?**: [`NumericMode`](#numericmode-1)
-
-The default mode is `"auto"`. Use `"machine"`
-to perform numeric calculations using 64-bit floats. Use `"bignum"` to
-perform calculations using arbitrary precision floating point numbers.
-Use `"auto"` or `"complex"` to allow calculations on complex numbers.
-
-• **options\.numericPrecision?**: `number`
-
-Specific how many digits of precision
-for the numeric calculations. Default is 100.
-
-• **options\.ids?**: readonly `Readonly`\<`Object`\>[]
-
-• **options\.tolerance?**: `number`
-
-If the absolute value of the difference of two
-numbers is less than `tolerance`, they are considered equal. Used by
-`chop()` as well.
-
-</MemberCard>
-
-<a id="anything" name="anything"></a>
-
-<MemberCard>
-
-##### ComputeEngine.Anything
-
-```ts
-readonly Anything: BoxedDomain;
-```
-
-</MemberCard>
-
-<a id="void" name="void"></a>
-
-<MemberCard>
-
-##### ComputeEngine.Void
-
-```ts
-readonly Void: BoxedDomain;
-```
-
-</MemberCard>
-
-<a id="strings" name="strings"></a>
-
-<MemberCard>
-
-##### ComputeEngine.Strings
-
-```ts
-readonly Strings: BoxedDomain;
-```
-
-</MemberCard>
-
-<a id="booleans" name="booleans"></a>
-
-<MemberCard>
-
-##### ComputeEngine.Booleans
-
-```ts
-readonly Booleans: BoxedDomain;
-```
-
-</MemberCard>
-
-<a id="numbers" name="numbers"></a>
-
-<MemberCard>
-
-##### ComputeEngine.Numbers
-
-```ts
-readonly Numbers: BoxedDomain;
-```
-
-</MemberCard>
-
-<a id="true" name="true"></a>
-
-<MemberCard>
-
-##### ComputeEngine.True
-
-```ts
-readonly True: BoxedExpression;
-```
-
-</MemberCard>
-
-<a id="false" name="false"></a>
-
-<MemberCard>
-
-##### ComputeEngine.False
-
-```ts
-readonly False: BoxedExpression;
-```
-
-</MemberCard>
-
-<a id="pi" name="pi"></a>
-
-<MemberCard>
-
-##### ComputeEngine.Pi
-
-```ts
-readonly Pi: BoxedExpression;
-```
-
-</MemberCard>
-
-<a id="e" name="e"></a>
-
-<MemberCard>
-
-##### ComputeEngine.E
-
-```ts
-readonly E: BoxedExpression;
-```
-
-</MemberCard>
-
-<a id="nothing" name="nothing"></a>
-
-<MemberCard>
-
-##### ComputeEngine.Nothing
-
-```ts
-readonly Nothing: BoxedExpression;
-```
-
-</MemberCard>
-
-<a id="zero" name="zero"></a>
-
-<MemberCard>
-
-##### ComputeEngine.Zero
-
-```ts
-readonly Zero: BoxedExpression;
-```
-
-</MemberCard>
-
-<a id="one" name="one"></a>
-
-<MemberCard>
-
-##### ComputeEngine.One
-
-```ts
-readonly One: BoxedExpression;
-```
-
-</MemberCard>
-
-<a id="half" name="half"></a>
-
-<MemberCard>
-
-##### ComputeEngine.Half
-
-```ts
-readonly Half: BoxedExpression;
-```
-
-</MemberCard>
-
-<a id="negativeone" name="negativeone"></a>
-
-<MemberCard>
-
-##### ComputeEngine.NegativeOne
-
-```ts
-readonly NegativeOne: BoxedExpression;
-```
-
-</MemberCard>
-
-<a id="i" name="i"></a>
-
-<MemberCard>
-
-##### ComputeEngine.I
-
-```ts
-readonly I: BoxedExpression;
-```
-
-</MemberCard>
-
-<a id="nan" name="nan"></a>
-
-<MemberCard>
-
-##### ComputeEngine.NaN
-
-```ts
-readonly NaN: BoxedExpression;
-```
-
-</MemberCard>
-
-<a id="positiveinfinity" name="positiveinfinity"></a>
-
-<MemberCard>
-
-##### ComputeEngine.PositiveInfinity
-
-```ts
-readonly PositiveInfinity: BoxedExpression;
-```
-
-</MemberCard>
-
-<a id="negativeinfinity" name="negativeinfinity"></a>
-
-<MemberCard>
-
-##### ComputeEngine.NegativeInfinity
-
-```ts
-readonly NegativeInfinity: BoxedExpression;
-```
-
-</MemberCard>
-
-<a id="complexinfinity" name="complexinfinity"></a>
-
-<MemberCard>
-
-##### ComputeEngine.ComplexInfinity
-
-```ts
-readonly ComplexInfinity: BoxedExpression;
-```
-
-</MemberCard>
-
-<a id="context" name="context"></a>
-
-<MemberCard>
-
-##### ComputeEngine.context
-
-```ts
-context: RuntimeScope;
-```
-
-The current scope.
-
-A **scope** stores the definition of symbols and assumptions.
-
-Scopes form a stack, and definitions in more recent
-scopes can obscure definitions from older scopes.
-
-The `ce.context` property represents the current scope.
-
-</MemberCard>
-
-<a id="strict" name="strict"></a>
-
-<MemberCard>
-
-##### ComputeEngine.strict
-
-```ts
-strict: boolean;
-```
-
-In strict mode (the default) the Compute Engine performs
-validation of domains and signature and may report errors.
-
-These checks may impact performance
-
-When strict mode is off, results may be incorrect or generate JavaScript
-errors if the input is not valid.
-
-</MemberCard>
-
-<a id="latexdictionary" name="latexdictionary"></a>
-
-<MemberCard>
-
-##### ComputeEngine.latexDictionary
-
-```ts
-get latexDictionary(): readonly LatexDictionaryEntry[]
-```
-
-```ts
-set latexDictionary(dic): void
-```
-
-readonly [`LatexDictionaryEntry`](#latexdictionaryentry)[]
-
-• **dic**: readonly [`LatexDictionaryEntry`](#latexdictionaryentry)[]
-
-</MemberCard>
-
-<a id="precision" name="precision"></a>
-
-<MemberCard>
-
-##### ComputeEngine.precision
-
-```ts
-get precision(): number
-```
-
-```ts
-set precision(p): void
-```
-
-The precision, or number of significant digits, of numeric
-calculations when the numeric mode is `"auto"` or `"bignum"`.
-
-To make calculations using more digits, at the cost of expanded memory
-usage and slower computations, set the `precision` higher.
-
-If the numeric mode is not `"auto"` or `"bignum"`, it is set to `"auto"`.
-
-Trigonometric operations are accurate for precision up to 1,000.
-
-`number`
-
-• **p**: `number` \| `"machine"`
-
-</MemberCard>
-
-<a id="numericmode" name="numericmode"></a>
-
-<MemberCard>
-
-##### ComputeEngine.numericMode
-
-```ts
-get numericMode(): NumericMode
-```
-
-```ts
-set numericMode(f): void
-```
-
-The numeric evaluation mode:
-
-<div className="symbols-table">
-
-| Mode | |
-| :--- | :----- |
-| `"auto"`| Use bignum or complex numbers. |
-| `"machine"` |  **IEEE 754-2008**, 64-bit floating point numbers: 52-bit mantissa, about 15 digits of precision |
-| `"bignum"` | Arbitrary precision floating point numbers, as provided by the "decimal.js" library | 
-| `"complex"` | Complex number represented by two machine numbers, a real and an imaginary part, as provided by the "complex.js" library |
-
-</div>
-
-[`NumericMode`](#numericmode-1)
-
-• **f**: [`NumericMode`](#numericmode-1)
-
-</MemberCard>
-
-<a id="angularunit" name="angularunit"></a>
-
-<MemberCard>
-
-##### ComputeEngine.angularUnit
-
-```ts
-get angularUnit(): AngularUnit
-```
-
-```ts
-set angularUnit(u): void
-```
-
-The unit used for angles in trigonometric functions.
-Default is `"rad"` (radians).
-
-[`AngularUnit`](#angularunit-1)
-
-• **u**: [`AngularUnit`](#angularunit-1)
-
-</MemberCard>
-
-<a id="timelimit" name="timelimit"></a>
-
-<MemberCard>
-
-##### ComputeEngine.timeLimit
-
-```ts
-get timeLimit(): number
-```
-
-`number`
-
-</MemberCard>
-
-<a id="iterationlimit" name="iterationlimit"></a>
-
-<MemberCard>
-
-##### ComputeEngine.iterationLimit
-
-```ts
-get iterationLimit(): number
-```
-
-`number`
-
-</MemberCard>
-
-<a id="recursionlimit" name="recursionlimit"></a>
-
-<MemberCard>
-
-##### ComputeEngine.recursionLimit
-
-```ts
-get recursionLimit(): number
-```
-
-`number`
-
-</MemberCard>
-
-<a id="tolerance" name="tolerance"></a>
-
-<MemberCard>
-
-##### ComputeEngine.tolerance
-
-```ts
-get tolerance(): number
-```
-
-```ts
-set tolerance(val): void
-```
-
-Values smaller than the tolerance are considered to be zero for the
-purpose of comparison, i.e. if `|b - a| <= tolerance`, `b` is considered
-equal to `a`.
-
-`number`
-
-• **val**: `number`
-
-</MemberCard>
-
-<a id="costfunction" name="costfunction"></a>
-
-<MemberCard>
-
-##### ComputeEngine.costFunction
-
-```ts
-get costFunction(): (expr) => number
-```
-
-```ts
-set costFunction(fn): void
-```
-
-The cost function is used to determine the "cost" of an expression. For example, when simplifying an expression, the simplification that results in the lowest cost is chosen.
-
-(`expr`) => `number`
-
-> • **expr**: [`BoxedExpression`](#boxedexpression)
->
-
-• **fn**
-
-</MemberCard>
-
-<a id="assumptions" name="assumptions"></a>
-
-<MemberCard>
-
-##### ComputeEngine.assumptions
-
-```ts
-get assumptions(): ExpressionMapInterface<boolean>
-```
-
-[`ExpressionMapInterface`](#expressionmapinterfaceu)\<`boolean`\>
-
-</MemberCard>
-
-<a id="latexoptions" name="latexoptions"></a>
-
-<MemberCard>
-
-##### ComputeEngine.latexOptions
-
-```ts
-get latexOptions(): NumberFormattingOptions & ParseLatexOptions & SerializeLatexOptions
-```
-
-```ts
-set latexOptions(opts): void
-```
-
-The LaTeX serialization options can be set using the
-[`ComputeEngine.latexOptions`](#latexoptions) property.
-
-[`NumberFormattingOptions`](#numberformattingoptions) & [`ParseLatexOptions`](#parselatexoptions) & [`SerializeLatexOptions`](#serializelatexoptions)
-
-• **opts**: `Partial`\<[`NumberFormattingOptions`](#numberformattingoptions)\> & `Partial`\<[`ParseLatexOptions`](#parselatexoptions)\> & `Partial`\<[`SerializeLatexOptions`](#serializelatexoptions)\>
-
-</MemberCard>
-
-<a id="jsonserializationoptions" name="jsonserializationoptions"></a>
-
-<MemberCard>
-
-##### ComputeEngine.jsonSerializationOptions
-
-```ts
-get jsonSerializationOptions(): Readonly<JsonSerializationOptions>
-```
-
-```ts
-set jsonSerializationOptions(val): void
-```
-
-`Readonly`\<[`JsonSerializationOptions`](#jsonserializationoptions-1)\>
-
-• **val**: `Partial`\<[`JsonSerializationOptions`](#jsonserializationoptions-1)\>
-
-</MemberCard>
-
-<a id="getstandardlibrary" name="getstandardlibrary"></a>
-
-<MemberCard>
-
-##### ComputeEngine.getStandardLibrary()
-
-```ts
-static getStandardLibrary(categories): readonly Readonly<Object>[]
-```
-
-Return identifier tables suitable for the specified categories, or `"all"`
-for all categories (`"arithmetic"`, `"algebra"`, etc...).
-
-An identifier table defines how the symbols and function names in a
-MathJSON expression should be interpreted, i.e. how to evaluate and
-manipulate them.
-
-• **categories**: `"all"` \| [`LibraryCategory`](#librarycategory) \| [`LibraryCategory`](#librarycategory)[]= `'all'`
-
-</MemberCard>
-
-<a id="chop" name="chop"></a>
-
-<MemberCard>
-
-##### ComputeEngine.chop()
-
-###### chop(n)
-
-```ts
-chop(n): number
-```
-
-Replace a number that is close to 0 with the exact integer 0.
-
-How close to 0 the number has to be to be considered 0 is determined by [`tolerance`](#tolerance).
-
-• **n**: `number`
-
-###### chop(n)
-
-```ts
-chop(n): 0 | Decimal
-```
-
-• **n**: `Decimal`
-
-###### chop(n)
-
-```ts
-chop(n): 0 | Complex
-```
-
-• **n**: `Complex`
-
-</MemberCard>
-
-<a id="bignum" name="bignum"></a>
-
-<MemberCard>
-
-##### ComputeEngine.bignum()
-
-```ts
-bignum(a): Decimal
-```
-
-Create an arbitrary precision number. 
-
-The return value is an object with methods to perform arithmetic
-operations:
-- `toNumber()`: convert to a JavaScript `number` with potential loss of precision
-- `add()`
-- `sub()`
-- `neg()` (unary minus)
-- `mul()`
-- `div()`
-- `pow()`
-- `sqrt()` (square root)
-- `cbrt()` (cube root)
-- `exp()`  (e^x)
-- `log()` 
-- `ln()` (natural logarithm)
-- `mod()`
-
-- `abs()`
-- `ceil()`
-- `floor()`
-- `round()`
-
-- `equals()`
-- `gt()`
-- `gte()`
-- `lt()`
-- `lte()`
-
-- `cos()`
-- `sin()`
-- `tanh()`
-- `acos()`
-- `asin()`
-- `atan()`
-- `cosh()`
-- `sinh()`
-- `acosh()`
-- `asinh()`
-- `atanh()`
-
-- `isFinite()`
-- `isInteger()`
-- `isNaN()`
-- `isNegative()`
-- `isPositive()`
-- `isZero()`
-- `sign()` (1, 0 or -1)
-
-• **a**: `bigint` \| `Value`
-
-</MemberCard>
-
-<a id="complex" name="complex"></a>
-
-<MemberCard>
-
-##### ComputeEngine.complex()
-
-```ts
-complex(a, b?): Complex
-```
-
-Create a complex number.
-The return value is an object with methods to perform arithmetic
-operations:
-- `re` (real part, as a JavaScript `number`)
-- `im` (imaginary part, as a JavaScript `number`)
-- `add()`
-- `sub()`
-- `neg()` (unary minus)
-- `mul()`
-- `div()`
-- `pow()`
-- `sqrt()` (square root)
-- `exp()`  (e^x)
-- `log()` 
-- `ln()` (natural logarithm)
-- `mod()`
-
-- `abs()`
-- `ceil()`
-- `floor()`
-- `round()`
-
-- `arg()` the angle of the complex number
-- `inverse()` the inverse of the complex number 1/z
-- `conjugate()` the conjugate of the complex number
-
-- `equals()`
-
-- `cos()`
-- `sin()`
-- `tanh()`
-- `acos()`
-- `asin()`
-- `atan()`
-- `cosh()`
-- `sinh()`
-- `acosh()`
-- `asinh()`
-- `atanh()`
-
-- `isFinite()`
-- `isNaN()`
-- `isZero()`
-- `sign()` (1, 0 or -1)
-
-• **a**: `number` \| `Complex` \| `Decimal`
-
-• **b?**: `number` \| `Decimal`
-
-</MemberCard>
-
-<a id="isbignum" name="isbignum"></a>
-
-<MemberCard>
-
-##### ComputeEngine.isBignum()
-
-```ts
-isBignum(a): a is Decimal
-```
-
-• **a**: `unknown`
-
-</MemberCard>
-
-<a id="iscomplex" name="iscomplex"></a>
-
-<MemberCard>
-
-##### ComputeEngine.isComplex()
-
-```ts
-isComplex(a): a is Complex
-```
-
-• **a**: `unknown`
-
-</MemberCard>
-
-<a id="getlatexdictionary" name="getlatexdictionary"></a>
-
-<MemberCard>
-
-##### ComputeEngine.getLatexDictionary()
-
-```ts
-static getLatexDictionary(domain): readonly object[]
-```
-
-• **domain**: `"all"` \| [`LibraryCategory`](#librarycategory)= `'all'`
-
-</MemberCard>
-
-<a id="lookupsymbol" name="lookupsymbol"></a>
-
-<MemberCard>
-
-##### ComputeEngine.lookupSymbol()
-
-```ts
-lookupSymbol(
-   symbol, 
-   wikidata?, 
-   scope?): BoxedSymbolDefinition
-```
-
-Return a matching symbol definition, starting with the current
-scope and going up the scope chain. Prioritize finding a match by
-wikidata, if provided.
-
-• **symbol**: `string`
-
-• **wikidata?**: `string`
-
-• **scope?**: [`RuntimeScope`](#runtimescope)
-
-</MemberCard>
-
-<a id="lookupfunction" name="lookupfunction"></a>
-
-<MemberCard>
-
-##### ComputeEngine.lookupFunction()
-
-```ts
-lookupFunction(head, scope?): BoxedFunctionDefinition
-```
-
-Return the definition for a function matching this head.
-
-Start looking in the current context, than up the scope chain.
-
-This is a very rough lookup, since it doesn't account for the domain
-of the argument or the codomain. However, it is useful during parsing
-to differentiate between symbols that might represent a function application, e.g. `f` vs `x`.
-
-• **head**: `string` \| [`BoxedExpression`](#boxedexpression)
-
-• **scope?**: [`RuntimeScope`](#runtimescope)
-
-</MemberCard>
-
-<a id="_definesymbol" name="_definesymbol"></a>
-
-<MemberCard>
-
-##### ComputeEngine.\_defineSymbol()
-
-```ts
-_defineSymbol(name, def): BoxedSymbolDefinition
-```
-
-• **name**: `string`
-
-• **def**: [`SymbolDefinition`](#symboldefinition-1)
-
-</MemberCard>
-
-<a id="_definefunction" name="_definefunction"></a>
-
-<MemberCard>
-
-##### ComputeEngine.\_defineFunction()
-
-```ts
-_defineFunction(name, def): BoxedFunctionDefinition
-```
-
-• **name**: `string`
-
-• **def**: [`FunctionDefinition`](#functiondefinition-1)
-
-</MemberCard>
-
-<a id="pushscope" name="pushscope"></a>
-
-<MemberCard>
-
-##### ComputeEngine.pushScope()
-
-```ts
-pushScope(scope?): ComputeEngine
-```
-
-Create a new scope and add it to the top of the scope stack
-
-The `scope` argument can be used to specify custom precision,
-etc... for this scope
-
-• **scope?**: `Partial`\<[`Scope`](#scope-2)\>
-
-</MemberCard>
-
-<a id="popscope" name="popscope"></a>
-
-<MemberCard>
-
-##### ComputeEngine.popScope()
-
-```ts
-popScope(): ComputeEngine
-```
-
-Remove the most recent scope from the scope stack, and set its
- parent scope as current.
-
-</MemberCard>
-
-<a id="swapscope" name="swapscope"></a>
-
-<MemberCard>
-
-##### ComputeEngine.swapScope()
-
-```ts
-swapScope(scope): RuntimeScope
-```
-
-Set the current scope, return the previous scope.
-
-• **scope**: [`RuntimeScope`](#runtimescope)
-
-</MemberCard>
-
-<a id="declare" name="declare"></a>
-
-<MemberCard>
-
-##### ComputeEngine.declare()
-
-###### declare(id, def)
-
-```ts
-declare(id, def): ComputeEngine
-```
-
-Declare an identifier: specify their domain, and other attributes,
-including optionally a value.
-
-Once the domain of an identifier has been declared, it cannot be changed.
-The domain information is used to calculate the canonical form of
-expressions and ensure they are valid. If the domain could be changed
-after the fact, previously valid expressions could become invalid.
-
-Use the `Anyting` domain for a very generic domain.
-
-• **id**: `string`
-
-• **def**: [`BoxedDomain`](#boxeddomain) \| [`SymbolDefinition`](#symboldefinition-1) \| [`FunctionDefinition`](#functiondefinition-1) \| [`DomainExpression`](#domainexpressiont)
-
-###### declare(identifiers)
-
-```ts
-declare(identifiers): ComputeEngine
-```
-
-• **identifiers**
-
-</MemberCard>
-
-<a id="assign" name="assign"></a>
-
-<MemberCard>
-
-##### ComputeEngine.assign()
-
-###### assign(id, value)
-
-```ts
-assign(id, value): ComputeEngine
-```
-
-Assign a value to an identifier in the current scope.
-Use `undefined` to reset the identifier to no value.
-
-The identifier should be a valid MathJSON identifier
-not a LaTeX string.
-
-The identifier can take the form "f(x, y") to create a function
-with two parameters, "x" and "y".
-
-If the id was not previously declared, an automatic declaration
-is done. The domain of the identifier is inferred from the value.
-To more precisely define the domain of the identifier, use `ce.declare()`
-instead, which allows you to specify the domain, value and other
-attributes of the identifier.
-
-• **id**: `string`
-
-• **value**: [`AssignValue`](#assignvalue)
-
-###### assign(ids)
-
-```ts
-assign(ids): ComputeEngine
-```
-
-• **ids**
-
-</MemberCard>
-
-<a id="box" name="box"></a>
-
-<MemberCard>
-
-##### ComputeEngine.box()
-
-```ts
-box(expr, options?): BoxedExpression
-```
-
-Return a boxed expression from a number, string or semiboxed expression.
-Calls `ce.function()`, `ce.number()` or `ce.symbol()` as appropriate.
-
-• **expr**: [`SemiBoxedExpression`](#semiboxedexpression) \| [`number`, `number`]
-
-• **options?**
-
-• **options\.canonical?**: [`CanonicalOptions`](#canonicaloptions)
-
-</MemberCard>
-
-<a id="function" name="function"></a>
-
-<MemberCard>
-
-##### ComputeEngine.function()
-
-```ts
-function(
-   head, 
-   ops, 
-   options?): BoxedExpression
-```
-
-• **head**: `string`
-
-• **ops**: [`SemiBoxedExpression`](#semiboxedexpression)[]
-
-• **options?**
-
-• **options\.metadata?**: [`Metadata`](#metadata)
-
-• **options\.canonical?**: [`CanonicalOptions`](#canonicaloptions)
-
-</MemberCard>
-
-<a id="error" name="error"></a>
-
-<MemberCard>
-
-##### ComputeEngine.error()
-
-```ts
-error(message, where?): BoxedExpression
-```
-
-Shortcut for `this.box(["Error",...])`.
-
-The result is canonical.
-
-• **message**: `string` \| [`string`, `...SemiBoxedExpression[]`]
-
-• **where?**: [`SemiBoxedExpression`](#semiboxedexpression)
-
-</MemberCard>
-
-<a id="domainerror" name="domainerror"></a>
-
-<MemberCard>
-
-##### ComputeEngine.domainError()
-
-```ts
-domainError(
-   expectedDomain, 
-   actualDomain, 
-   where?): BoxedExpression
-```
-
-• **expectedDomain**: [`BoxedDomain`](#boxeddomain) \| [`DomainLiteral`](#domainliteral)
-
-• **actualDomain**: [`BoxedDomain`](#boxeddomain)
-
-• **where?**: [`SemiBoxedExpression`](#semiboxedexpression)
-
-</MemberCard>
-
-<a id="hold" name="hold"></a>
-
-<MemberCard>
-
-##### ComputeEngine.hold()
-
-```ts
-hold(expr): BoxedExpression
-```
-
-Add a`["Hold"]` wrapper to `expr.
-
-• **expr**: [`SemiBoxedExpression`](#semiboxedexpression)
-
-</MemberCard>
-
-<a id="add" name="add"></a>
-
-<MemberCard>
-
-##### ComputeEngine.add()
-
-```ts
-add(...ops): BoxedExpression
-```
-
-Shortcut for `this.box(["Add", ...]).evaluate()`.
-
-• ...**ops**: [`BoxedExpression`](#boxedexpression)[]
-
-</MemberCard>
-
-<a id="neg" name="neg"></a>
-
-<MemberCard>
-
-##### ComputeEngine.neg()
-
-```ts
-neg(expr): BoxedExpression
-```
-
-Shortcut for `this.box(["Negate", expr]).evaluate()`
-
-• **expr**: [`BoxedExpression`](#boxedexpression)
-
-</MemberCard>
-
-<a id="mul" name="mul"></a>
-
-<MemberCard>
-
-##### ComputeEngine.mul()
-
-```ts
-mul(...ops): BoxedExpression
-```
-
-Shortcut for `this.box(["Multiply", ...]).evaluate()`
-
-• ...**ops**: readonly [`BoxedExpression`](#boxedexpression)[]
-
-</MemberCard>
-
-<a id="div" name="div"></a>
-
-<MemberCard>
-
-##### ComputeEngine.div()
-
-```ts
-div(num, denom): BoxedExpression
-```
-
-Shortcut for `this.box(["Divide", num, denom]).evaluate()`
-
-The result is canonical.
-
-• **num**: [`BoxedExpression`](#boxedexpression)
-
-• **denom**: [`BoxedExpression`](#boxedexpression)
-
-</MemberCard>
-
-<a id="sqrt" name="sqrt"></a>
-
-<MemberCard>
-
-##### ComputeEngine.sqrt()
-
-```ts
-sqrt(base): any
-```
-
-Shortcut for `this.box(["Sqrt", base]).evaluate()`
-
-• **base**: [`BoxedExpression`](#boxedexpression)
-
-</MemberCard>
-
-<a id="pow" name="pow"></a>
-
-<MemberCard>
-
-##### ComputeEngine.pow()
-
-```ts
-pow(base, exponent): BoxedExpression
-```
-
-Shortcut for `this.box(["Power", base, exponent]).evaluate()`
-
-• **base**: [`BoxedExpression`](#boxedexpression)
-
-• **exponent**: `number` \| [`BoxedExpression`](#boxedexpression) \| [`Rational`](#rational)
-
-</MemberCard>
-
-<a id="inv" name="inv"></a>
-
-<MemberCard>
-
-##### ComputeEngine.inv()
-
-```ts
-inv(expr): BoxedExpression
-```
-
-Shortcut for `this.box(["Divide", 1, expr]).evaluate()`
-
-• **expr**: [`BoxedExpression`](#boxedexpression)
-
-</MemberCard>
-
-<a id="pair" name="pair"></a>
-
-<MemberCard>
-
-##### ComputeEngine.pair()
-
-```ts
-pair(
-   first, 
-   second, 
-   metadata?): BoxedExpression
-```
-
-Shortcut for `this.box(["Pair", ...])`
-
-The result is canonical.
-
-• **first**: [`BoxedExpression`](#boxedexpression)
-
-• **second**: [`BoxedExpression`](#boxedexpression)
-
-• **metadata?**: [`Metadata`](#metadata)
-
-</MemberCard>
-
-<a id="tuple" name="tuple"></a>
-
-<MemberCard>
-
-##### ComputeEngine.tuple()
-
-###### tuple(elements, metadata)
-
-```ts
-tuple(elements, metadata?): BoxedExpression
-```
-
-Shortcut for `this.box(["Tuple", ...])`
-
-The result is canonical.
-
-• **elements**: `number`[]
-
-• **metadata?**: [`Metadata`](#metadata)
-
-###### tuple(elements, metadata)
-
-```ts
-tuple(elements, metadata?): BoxedExpression
-```
-
-• **elements**: [`BoxedExpression`](#boxedexpression)[]
-
-• **metadata?**: [`Metadata`](#metadata)
-
-</MemberCard>
-
-<a id="array" name="array"></a>
-
-<MemberCard>
-
-##### ComputeEngine.array()
-
-```ts
-array(elements, metadata?): BoxedExpression
-```
-
-• **elements**: [`ArrayValue`](#arrayvalue)[] \| [`ArrayValue`](#arrayvalue)[][]
-
-• **metadata?**: [`Metadata`](#metadata)
-
-</MemberCard>
-
-<a id="string" name="string"></a>
-
-<MemberCard>
-
-##### ComputeEngine.string()
-
-```ts
-string(s, metadata?): BoxedExpression
-```
-
-• **s**: `string`
-
-• **metadata?**: [`Metadata`](#metadata)
-
-</MemberCard>
-
-<a id="symbol" name="symbol"></a>
-
-<MemberCard>
-
-##### ComputeEngine.symbol()
-
-```ts
-symbol(name, options?): BoxedExpression
-```
-
-Return a boxed symbol
-
-• **name**: `string`
-
-• **options?**
-
-• **options\.metadata?**: [`Metadata`](#metadata)
-
-• **options\.canonical?**: [`CanonicalOptions`](#canonicaloptions)
-
-</MemberCard>
-
-<a id="domain" name="domain"></a>
-
-<MemberCard>
-
-##### ComputeEngine.domain()
-
-```ts
-domain(domain, metadata?): BoxedDomain
-```
-
-Return a canonical boxed domain.
-
-If the domain is invalid, may return an `["Error"]` expression
-
-• **domain**: [`BoxedDomain`](#boxeddomain) \| [`DomainExpression`](#domainexpressiont)
-
-• **metadata?**: [`Metadata`](#metadata)
-
-</MemberCard>
-
-<a id="number" name="number"></a>
-
-<MemberCard>
-
-##### ComputeEngine.number()
-
-```ts
-number(value, options?): BoxedExpression
-```
-
-This function tries to avoid creating a boxed number if `num` corresponds
-to a common value for which we have a shared instance (-1, 0, NaN, etc...)
-
-• **value**: 
-  \| `string`
-  \| `number`
-  \| `bigint`
-  \| `Complex`
-  \| `Decimal`
-  \| [`MathJsonNumber`](#mathjsonnumber)
-  \| [`Rational`](#rational)
-
-• **options?**
-
-• **options\.metadata?**: [`Metadata`](#metadata)
-
-• **options\.canonical?**: [`CanonicalOptions`](#canonicaloptions)
-
-</MemberCard>
-
-<a id="rules" name="rules"></a>
-
-<MemberCard>
-
-##### ComputeEngine.rules()
-
-```ts
-rules(rules): BoxedRuleSet
-```
-
-• **rules**: [`Rule`](#rule)[]
-
-</MemberCard>
-
-<a id="parse" name="parse"></a>
-
-<MemberCard>
-
-##### ComputeEngine.parse()
-
-###### parse(latex, options)
-
-```ts
-parse(latex, options?): BoxedExpression
-```
-
-Parse a string of LaTeX and return a corresponding `BoxedExpression`.
-
-The result may not be canonical.
-
-• **latex**: `string`
-
-• **options?**
-
-• **options\.canonical?**: [`CanonicalOptions`](#canonicaloptions)
-
-###### parse(s, options)
-
-```ts
-parse(s, options?): null
-```
-
-• **s**: `null`
-
-• **options?**
-
-• **options\.canonical?**: [`CanonicalOptions`](#canonicaloptions)
-
-###### parse(latex, options)
-
-```ts
-parse(latex, options?): BoxedExpression
-```
-
-• **latex**: `string`
-
-• **options?**
-
-• **options\.canonical?**: [`CanonicalOptions`](#canonicaloptions)
-
-</MemberCard>
-
-<a id="serialize" name="serialize"></a>
-
-<MemberCard>
-
-##### ComputeEngine.serialize()
-
-```ts
-serialize(x, options?): string
-```
-
-Serialize a `BoxedExpression` or a `MathJSON` expression to a LaTeX
-string.
-
-If the `canonical` option is set to `true`, the result will use canonical
-serialization rules (for example (a/b)*(c/d) -> (a*c)/(b*d)).
-If false, avoid any canonicalization (i.e. (a/b)*(c/d) -> (a/b)*(c/d)).
-
-The `canonical` option is true by default.
-
-• **x**: [`Expression`](#expression) \| [`BoxedExpression`](#boxedexpression)
-
-• **options?**
-
-• **options\.canonical?**: `boolean`
-
-</MemberCard>
-
-<a id="rawjson" name="rawjson"></a>
-
-<MemberCard>
-
-##### ComputeEngine.rawJson()
-
-```ts
-rawJson(expr): Expression
-```
-
-• **expr**: [`BoxedExpression`](#boxedexpression)
-
-</MemberCard>
-
-<a id="ask" name="ask"></a>
-
-<MemberCard>
-
-##### ComputeEngine.ask()
-
-```ts
-ask(pattern): BoxedSubstitution[]
-```
-
-Return a list of all the assumptions that match a pattern.
-
-```js
- ce.assume(['Element', 'x', 'PositiveIntegers');
- ce.ask(['Greater', 'x', '_val'])
- //  -> [{'val': 0}]
-```
-
-• **pattern**: [`SemiBoxedExpression`](#semiboxedexpression)
-
-</MemberCard>
-
-<a id="verify" name="verify"></a>
-
-<MemberCard>
-
-##### ComputeEngine.verify()
-
-```ts
-verify(_query): boolean
-```
-
-Answer a query based on the current assumptions.
-
-• **\_query**: [`SemiBoxedExpression`](#semiboxedexpression)
-
-</MemberCard>
-
-<a id="assume" name="assume"></a>
-
-<MemberCard>
-
-##### ComputeEngine.assume()
-
-```ts
-assume(predicate): AssumeResult
-```
-
-Add an assumption.
-
-Note that the assumption is put into canonical form before being added.
-
-Returns:
-- `contradiction` if the new assumption is incompatible with previous
-ones.
-- `tautology` if the new assumption is redundant with previous ones.
-- `ok` if the assumption was successfully added to the assumption set.
-
-• **predicate**: [`SemiBoxedExpression`](#semiboxedexpression)
-
-</MemberCard>
-
-<a id="forget" name="forget"></a>
-
-<MemberCard>
-
-##### ComputeEngine.forget()
-
-```ts
-forget(symbol): void
-```
-
-Remove all assumptions about one or more symbols
-
-• **symbol**: `string` \| `string`[]
-
-</MemberCard>
-
-<a id="numericmode-1" name="numericmode-1"></a>
-
-### NumericMode
-
-```ts
-type NumericMode: "auto" | "machine" | "bignum" | "complex";
-```
-
-The numeric evaluation mode:
-
-<div className="symbols-table">
-
-| Mode | |
-| :--- | :----- |
-| `"auto"`| Use bignum or complex numbers. |
-| `"machine"` |  **IEEE 754-2008**, 64-bit floating point numbers: 52-bit mantissa, about 15 digits of precision |
-| `"bignum"` | Arbitrary precision floating point numbers, as provided by the "decimal.js" library | 
-| `"complex"` | Complex number represented by two machine numbers, a real and an imaginary part, as provided by the "complex.js" library |
-
-</div>
-
-<a id="angularunit-1" name="angularunit-1"></a>
-
-### AngularUnit
-
-```ts
-type AngularUnit: "rad" | "deg" | "grad" | "turn";
-```
-
-When a unitless value is passed to or returned from a trigonometric function,
-the angular unit of the value.
-
-- `rad`: radians, 2π radians is a full circle
-- `deg`: degrees, 360 degrees is a full circle
-- `grad`: gradians, 400 gradians is a full circle
-- `turn`: turns, 1 turn is a full circle
-
-<a id="hold-1" name="hold-1"></a>
-
-### Hold
-
-```ts
-type Hold: 
-  | "none"
-  | "all"
-  | "first"
-  | "rest"
-  | "last"
-  | "most";
-```
-
 <a id="simplifyoptions" name="simplifyoptions"></a>
 
 ### SimplifyOptions
 
 ```ts
-type SimplifyOptions: Object;
+type SimplifyOptions = object;
 ```
 
 Options for `BoxedExpression.simplify()`
 
 #### Type declaration
 
-<a id="recursive" name="recursive"></a>
+<a id="rules"></a>
 
-<MemberCard>
+##### rules?
 
-##### SimplifyOptions.recursive?
-
-```ts
-optional recursive: boolean;
-```
-
-</MemberCard>
-
-<a id="rules-1" name="rules-1"></a>
+<a id="rules" name="rules"></a>
 
 <MemberCard>
 
 ##### SimplifyOptions.rules?
 
 ```ts
-optional rules: BoxedRuleSet;
+optional rules: 
+  | null
+  | Rule
+  | ReadonlyArray<
+  | BoxedRule
+  | Rule>
+  | BoxedRuleSet;
 ```
+
+The set of rules to apply. If `null`, use no rules. If not provided,
+use the default simplification rules.
 
 </MemberCard>
 
-<a id="jsonserializationoptions-1" name="jsonserializationoptions-1"></a>
+<a id="costfunction"></a>
+
+##### costFunction()?
+
+<a id="costfunction" name="costfunction"></a>
+
+<MemberCard>
+
+##### SimplifyOptions.costFunction()?
+
+```ts
+optional costFunction: (expr) => number;
+```
+
+Use this cost function to determine if a simplification is worth it.
+
+If not provided, `ce.costFunction`, the cost function of the engine is
+used.
+
+###### expr
+
+[`BoxedExpression`](#boxedexpression)
+
+`number`
+
+</MemberCard>
+
+<a id="arrayvalue" name="arrayvalue"></a>
+
+### ArrayValue
+
+```ts
+type ArrayValue = 
+  | boolean
+  | number
+  | string
+  | BigNum
+  | BoxedExpression
+  | undefined;
+```
+
+<a id="jsonserializationoptions" name="jsonserializationoptions"></a>
 
 ### JsonSerializationOptions
 
 ```ts
-type JsonSerializationOptions: Object;
+type JsonSerializationOptions = object;
 ```
 
-Options to control the serialization to MathJSON when using `BoxedExpression.json`.
+Options to control the serialization to MathJSON when using `BoxedExpression.toMathJson()`.
 
 #### Type declaration
+
+<a id="prettify"></a>
+
+##### prettify
+
+<a id="prettify" name="prettify"></a>
+
+<MemberCard>
+
+##### JsonSerializationOptions.prettify
+
+```ts
+prettify: boolean;
+```
+
+If true, the serialization applies some transformations to make
+the JSON more readable. For example, `["Power", "x", 2]` is serialized
+as `["Square", "x"]`.
+
+</MemberCard>
+
+<a id="exclude"></a>
+
+##### exclude
 
 <a id="exclude" name="exclude"></a>
 
@@ -2060,6 +958,10 @@ Possible values include `Sqrt`, `Root`, `Square`, `Exp`, `Subtract`,
 
 </MemberCard>
 
+<a id="shorthands"></a>
+
+##### shorthands
+
 <a id="shorthands" name="shorthands"></a>
 
 <MemberCard>
@@ -2067,13 +969,7 @@ Possible values include `Sqrt`, `Root`, `Square`, `Exp`, `Subtract`,
 ##### JsonSerializationOptions.shorthands
 
 ```ts
-shorthands: (
-  | "all"
-  | "number"
-  | "symbol"
-  | "function"
-  | "dictionary"
-  | "string")[];
+shorthands: ("all" | "number" | "symbol" | "function" | "string")[];
 ```
 
 A list of space separated keywords indicating which MathJSON expressions
@@ -2083,7 +979,11 @@ can use a shorthand.
 
 </MemberCard>
 
-<a id="metadata-1" name="metadata-1"></a>
+<a id="metadata"></a>
+
+##### metadata
+
+<a id="metadata" name="metadata"></a>
 
 <MemberCard>
 
@@ -2101,14 +1001,18 @@ is not used.
 
 </MemberCard>
 
-<a id="repeatingdecimals" name="repeatingdecimals"></a>
+<a id="repeatingdecimal"></a>
+
+##### repeatingDecimal
+
+<a id="repeatingdecimal" name="repeatingdecimal"></a>
 
 <MemberCard>
 
-##### JsonSerializationOptions.repeatingDecimals
+##### JsonSerializationOptions.repeatingDecimal
 
 ```ts
-repeatingDecimals: boolean;
+repeatingDecimal: boolean;
 ```
 
 If true, repeating decimals are detected and serialized accordingly
@@ -2120,30 +1024,34 @@ For example:
 
 </MemberCard>
 
-<a id="precision-2" name="precision-2"></a>
+<a id="fractionaldigits"></a>
+
+##### fractionalDigits
+
+<a id="fractionaldigits" name="fractionaldigits"></a>
 
 <MemberCard>
 
-##### JsonSerializationOptions.precision
+##### JsonSerializationOptions.fractionalDigits
 
 ```ts
-precision: "auto" | "max" | number;
+fractionalDigits: "auto" | "max" | number;
 ```
 
-Number literals are serialized with this precision.
-If `"auto"`, the same precision as the compute engine calculations is used
-If `"max"`, all available digits are serialized
+The maximum number of significant digits in serialized numbers.
+- `"max"`: all availabe digits are serialized.
+- `"auto"`: use the same precision as the compute engine.
 
 **Default**: `"auto"`
 
 </MemberCard>
 
-<a id="scope-2" name="scope-2"></a>
+<a id="scope-3" name="scope-3"></a>
 
 ### Scope
 
 ```ts
-type Scope: Object;
+type Scope = object;
 ```
 
 A scope is a set of names in a dictionary that are bound (defined) in
@@ -2159,87 +1067,33 @@ a scope to 'mask' definitions from previous scopes.
 Scopes are lexical (also called a static scope): they are defined based on
 where they are in an expression, they are not determined at runtime.
 
-#### Type declaration
+<a id="angularunit" name="angularunit"></a>
 
-<a id="timelimit-1" name="timelimit-1"></a>
-
-<MemberCard>
-
-##### Scope.timeLimit
-
-`Experimental`
+### AngularUnit
 
 ```ts
-timeLimit: number;
+type AngularUnit = "rad" | "deg" | "grad" | "turn";
 ```
 
-Signal `timeout` when the execution time for this scope is exceeded.
+When a unitless value is passed to or returned from a trigonometric function,
+the angular unit of the value.
 
-Time in seconds, default 2s.
-
-</MemberCard>
-
-<a id="memorylimit" name="memorylimit"></a>
-
-<MemberCard>
-
-##### Scope.memoryLimit
-
-`Experimental`
-
-```ts
-memoryLimit: number;
-```
-
-Signal `out-of-memory` when the memory usage for this scope is exceeded.
-
-Memory is in Megabytes, default: 1Mb.
-
-</MemberCard>
-
-<a id="recursionlimit-1" name="recursionlimit-1"></a>
-
-<MemberCard>
-
-##### Scope.recursionLimit
-
-`Experimental`
-
-```ts
-recursionLimit: number;
-```
-
-Signal `recursion-depth-exceeded` when the recursion depth for this
-scope is exceeded.
-
-</MemberCard>
-
-<a id="iterationlimit-2" name="iterationlimit-2"></a>
-
-<MemberCard>
-
-##### Scope.iterationLimit
-
-`Experimental`
-
-```ts
-iterationLimit: number;
-```
-
-Signal `iteration-limit-exceeded` when the iteration limit
-in a loop is exceeded. Default: no limits.
-
-</MemberCard>
+- `rad`: radians, 2π radians is a full circle
+- `deg`: degrees, 360 degrees is a full circle
+- `grad`: gradians, 400 gradians is a full circle
+- `turn`: turns, 1 turn is a full circle
 
 <a id="runtimescope" name="runtimescope"></a>
 
 ### RuntimeScope
 
 ```ts
-type RuntimeScope: Scope & Object;
+type RuntimeScope = Scope & object;
 ```
 
 #### Type declaration
+
+##### parentScope?
 
 <MemberCard>
 
@@ -2251,6 +1105,8 @@ optional parentScope: RuntimeScope;
 
 </MemberCard>
 
+##### ids?
+
 <MemberCard>
 
 ##### RuntimeScope.ids?
@@ -2261,12 +1117,16 @@ optional ids: RuntimeIdentifierDefinitions;
 
 </MemberCard>
 
+##### assumptions
+
 <MemberCard>
 
 ##### RuntimeScope.assumptions
 
 ```ts
-assumptions: undefined | ExpressionMapInterface<boolean>;
+assumptions: 
+  | undefined
+| ExpressionMapInterface<boolean>;
 ```
 
 </MemberCard>
@@ -2276,491 +1136,15 @@ assumptions: undefined | ExpressionMapInterface<boolean>;
 ### AssignValue
 
 ```ts
-type AssignValue: 
+type AssignValue = 
   | boolean
   | number
-  | string
-  | Decimal
-  | Complex
-  | LatexString
   | SemiBoxedExpression
-  | (ce, args) => BoxedExpression
-  | undefined;
-```
-
-<a id="arrayvalue" name="arrayvalue"></a>
-
-### ArrayValue
-
-```ts
-type ArrayValue: 
-  | boolean
-  | number
-  | string
-  | Decimal
-  | Complex
-  | BoxedExpression
+  | (args, options) => BoxedExpression
   | undefined;
 ```
 
 ## Boxed Expression
-
-<a id="rational" name="rational"></a>
-
-### Rational
-
-```ts
-type Rational: [number, number] | [bigint, bigint];
-```
-
-<a id="metadata" name="metadata"></a>
-
-### Metadata
-
-```ts
-type Metadata: Object;
-```
-
-Metadata that can be associated with a `BoxedExpression`
-
-#### Type declaration
-
-<a id="latex-2" name="latex-2"></a>
-
-<MemberCard>
-
-##### Metadata.latex?
-
-```ts
-optional latex: string;
-```
-
-</MemberCard>
-
-<a id="wikidata-2" name="wikidata-2"></a>
-
-<MemberCard>
-
-##### Metadata.wikidata?
-
-```ts
-optional wikidata: string;
-```
-
-</MemberCard>
-
-<a id="evaluateoptions" name="evaluateoptions"></a>
-
-### EvaluateOptions
-
-```ts
-type EvaluateOptions: Object;
-```
-
-Options for `BoxedExpression.evaluate()`
-
-#### Type declaration
-
-<a id="numericmode-2" name="numericmode-2"></a>
-
-<MemberCard>
-
-##### EvaluateOptions.numericMode?
-
-```ts
-optional numericMode: boolean;
-```
-
-</MemberCard>
-
-<a id="noptions" name="noptions"></a>
-
-### NOptions
-
-```ts
-type NOptions: Object;
-```
-
-Options for `BoxedExpression.N()`
-
-<a id="replaceoptions" name="replaceoptions"></a>
-
-### ReplaceOptions
-
-```ts
-type ReplaceOptions: Object;
-```
-
-#### Type declaration
-
-<a id="recursive-1" name="recursive-1"></a>
-
-<MemberCard>
-
-##### ReplaceOptions.recursive?
-
-```ts
-optional recursive: boolean;
-```
-
-If `true`, apply replacement rules to all sub-expressions.
-If `false`, only consider the top-level expression.
-
-**Default**: `false`
-
-</MemberCard>
-
-<a id="once" name="once"></a>
-
-<MemberCard>
-
-##### ReplaceOptions.once?
-
-```ts
-optional once: boolean;
-```
-
-If `true`, stop after the first rule that matches.
-
-If `false`, apply all the remaining rules even after the first match.
-
-**Default**: `false`
-
-</MemberCard>
-
-<a id="iterationlimit-1" name="iterationlimit-1"></a>
-
-<MemberCard>
-
-##### ReplaceOptions.iterationLimit?
-
-```ts
-optional iterationLimit: number;
-```
-
-If `iterationLimit` > 1, the rules will be repeatedly applied
-until no rules apply, up to `maxIterations` times.
-
-Note that if `once` is true, `maxIterations` has no effect.
-
-**Default**: `1`
-
-</MemberCard>
-
-<a id="substitutiont" name="substitutiont"></a>
-
-### Substitution\<T\>
-
-```ts
-type Substitution<T>: Object;
-```
-
-A substitution describes the values of the wildcards in a pattern so that
-the pattern is equal to a target expression.
-
-A substitution can also be considered a more constrained version of a
-rule whose `lhs` is always a symbol.
-
-#### Type parameters
-
-• **T** = [`SemiBoxedExpression`](#semiboxedexpression)
-
-#### Index signature
-
- \[`symbol`: `string`\]: `T`
-
-<a id="boxedsubstitution" name="boxedsubstitution"></a>
-
-### BoxedSubstitution
-
-```ts
-type BoxedSubstitution: Substitution<BoxedExpression>;
-```
-
-<a id="domaincompatibility" name="domaincompatibility"></a>
-
-### DomainCompatibility
-
-```ts
-type DomainCompatibility: "covariant" | "contravariant" | "bivariant" | "invariant";
-```
-
-Use `contravariant` for the arguments of a function.
-Use `covariant` for the result of a function.
-Use `bivariant` to check the domain matches exactly.
-
-<a id="domainconstructor" name="domainconstructor"></a>
-
-### DomainConstructor
-
-```ts
-type DomainConstructor: 
-  | "FunctionOf"
-  | "ListOf"
-  | "DictionaryOf"
-  | "TupleOf"
-  | "Intersection"
-  | "Union"
-  | "OptArg"
-  | "VarArg"
-  | "Covariant"
-  | "Contravariant"
-  | "Bivariant"
-  | "Invariant";
-```
-
-A domain constructor is the head of a domain expression.
-
-<a id="domainliteral" name="domainliteral"></a>
-
-### DomainLiteral
-
-```ts
-type DomainLiteral: 
-  | "Anything"
-  | "Values"
-  | "Domains"
-  | "Void"
-  | "NothingDomain"
-  | "Booleans"
-  | "Strings"
-  | "Symbols"
-  | "Collections"
-  | "Lists"
-  | "Dictionaries"
-  | "Sequences"
-  | "Tuples"
-  | "Sets"
-  | "Functions"
-  | "Predicates"
-  | "LogicOperators"
-  | "RelationalOperators"
-  | "NumericFunctions"
-  | "RealFunctions"
-  | "Numbers"
-  | "ComplexNumbers"
-  | "ExtendedRealNumbers"
-  | "ImaginaryNumbers"
-  | "Integers"
-  | "Rationals"
-  | "PositiveNumbers"
-  | "PositiveIntegers"
-  | "NegativeNumbers"
-  | "NegativeIntegers"
-  | "NonNegativeNumbers"
-  | "NonNegativeIntegers"
-  | "NonPositiveNumbers"
-  | "NonPositiveIntegers"
-  | "ExtendedComplexNumbers"
-  | "TranscendentalNumbers"
-  | "AlgebraicNumbers"
-  | "RationalNumbers"
-  | "RealNumbers";
-```
-
-<a id="domainexpressiont" name="domainexpressiont"></a>
-
-### DomainExpression\<T\>
-
-```ts
-type DomainExpression<T>: 
-  | DomainLiteral
-  | ["Union", ...DomainExpression<T>[]]
-  | ["Intersection", ...DomainExpression<T>[]]
-  | ["ListOf", DomainExpression<T>]
-  | ["DictionaryOf", DomainExpression<T>]
-  | ["TupleOf", ...DomainExpression<T>[]]
-  | ["OptArg", ...DomainExpression<T>[]]
-  | ["VarArg", DomainExpression<T>]
-  | ["Covariant", DomainExpression<T>]
-  | ["Contravariant", DomainExpression<T>]
-  | ["Bivariant", DomainExpression<T>]
-  | ["Invariant", DomainExpression<T>]
-  | ["FunctionOf", ...DomainExpression<T>[]];
-```
-
-#### Type parameters
-
-• **T** = [`SemiBoxedExpression`](#semiboxedexpression)
-
-<a id="boxeddomain" name="boxeddomain"></a>
-
-### BoxedDomain
-
-#### Extends
-
-- [`BoxedExpression`](#boxedexpression)
-
-<a id="isnumeric" name="isnumeric"></a>
-
-<MemberCard>
-
-##### BoxedDomain.isNumeric
-
-```ts
-readonly isNumeric: boolean;
-```
-
-</MemberCard>
-
-<a id="isfunction" name="isfunction"></a>
-
-<MemberCard>
-
-##### BoxedDomain.isFunction
-
-```ts
-readonly isFunction: boolean;
-```
-
-</MemberCard>
-
-<a id="canonical-1" name="canonical-1"></a>
-
-<MemberCard>
-
-##### BoxedDomain.canonical
-
-```ts
-get canonical(): BoxedDomain
-```
-
-Return the canonical form of this expression.
-
-If this is a function expression, a definition is associated with the
-canonical expression.
-
-When determining the canonical form the following function definition
-flags are applied:
-- `associative`: \\( f(a, f(b), c) \longrightarrow f(a, b, c) \\)
-- `idempotent`: \\( f(f(a)) \longrightarrow f(a) \\)
-- `involution`: \\( f(f(a)) \longrightarrow a \\)
-- `commutative`: sort the arguments.
-
-If this expression is already canonical, the value of canonical is
-`this`.
-
-[`BoxedDomain`](#boxeddomain)
-
-</MemberCard>
-
-<a id="json" name="json"></a>
-
-<MemberCard>
-
-##### BoxedDomain.json
-
-```ts
-get json(): Expression
-```
-
-MathJSON representation of this expression.
-
-:::info[Note]
-Applicable to canonical and non-canonical expressions.
-:::
-
-[`Expression`](#expression)
-
-</MemberCard>
-
-<a id="base" name="base"></a>
-
-<MemberCard>
-
-##### BoxedDomain.base
-
-```ts
-get base(): DomainLiteral
-```
-
-[`DomainLiteral`](#domainliteral)
-
-</MemberCard>
-
-<a id="ctor" name="ctor"></a>
-
-<MemberCard>
-
-##### BoxedDomain.ctor
-
-```ts
-get ctor(): DomainConstructor
-```
-
-[`DomainConstructor`](#domainconstructor)
-
-</MemberCard>
-
-<a id="params" name="params"></a>
-
-<MemberCard>
-
-##### BoxedDomain.params
-
-```ts
-get params(): DomainExpression<SemiBoxedExpression>[]
-```
-
-[`DomainExpression`](#domainexpressiont)\<[`SemiBoxedExpression`](#semiboxedexpression)\>[]
-
-</MemberCard>
-
-<a id="iscompatible" name="iscompatible"></a>
-
-<MemberCard>
-
-##### BoxedDomain.isCompatible()
-
-```ts
-isCompatible(dom, kind?): boolean
-```
-
-True if a valid domain, and compatible with `dom`
-`kind` is '"covariant"' by default, i.e. `this <: dom`
-
-• **dom**: [`BoxedDomain`](#boxeddomain) \| [`DomainLiteral`](#domainliteral)
-
-• **kind?**: [`DomainCompatibility`](#domaincompatibility)
-
-</MemberCard>
-
-<a id="canonicalform" name="canonicalform"></a>
-
-### CanonicalForm
-
-```ts
-type CanonicalForm: 
-  | "InvisibleOperator"
-  | "Number"
-  | "Multiply"
-  | "Add"
-  | "Power"
-  | "Divide"
-  | "Flatten"
-  | "Order";
-```
-
-When provided, canonical forms are used to put an expression in a
-"standard" form.
-
-Each canonical form applies some transformation to an expression. When
-specified as an array, each transformation is done in the order in which
-it was provided.
-
-- `InvisibleOperator`: replace use of the `InvisibleOperator` with
-   another operation, such as multiplication (i.e. `2x` or function
-   application (`f(x)`).
-- `Number`: replace all numeric values with their
-   canonical representation, for example, reduce
-   rationals and replace complex numbers with no imaginary part with a real number.
-- `Multiply`: replace negation with multiplication by -1, remove 1 from multiplications, simplify signs (`-y \times -x` -> `x \times y`), complex numbers are promoted (['Multiply', 2, 'ImaginaryUnit'] -> `["Complex", 0, 2]`)
-- `Add`: replace `Subtract` with `Add`, removes 0 in addition, promote complex numbers (["Add", "a", ["Complex", 0, "b"] -> `["Complex", "a", "b"]`)
-- `Power`: simplify `Power` expression, for example, `x^{-1}` -> `\frac{1}{x}`, `x^0` -> `1`, `x^1` -> `x`, `1^x` -> `1`, `x^{\frac{1}{2}}` -> `\sqrt{x}`, `a^b^c` -> `a^{bc}`...
-- `Divide`: replace with a `Rational` number if numerator and denominator are integers, simplify, e.g. `\frac{x}{1}` -> `x`...
-- `Flatten`: remove any unnecessary `Delimiter` expression, and flatten any associative functions, for example `["Add", ["Add", "a", "b"], "c"]` -> `["Add", "a", "b", "c"]`
-- `Order`: when applicable, sort the arguments in a specific order, for
-   example for addition and multiplication.
 
 <a id="boxedexpression" name="boxedexpression"></a>
 
@@ -2779,220 +1163,8 @@ This convention makes it convenient to manipulate expressions without
 having to check what kind of instance they are before manipulating them.
 :::
 
-To get a boxed expression, use `ce.box()` or `ce.parse()`.
-
-#### Extended by
-
-- [`BoxedDomain`](#boxeddomain)
-
-#### Dictionary Expression
-
-<a id="keys" name="keys"></a>
-
-<MemberCard>
-
-##### BoxedExpression.keys
-
-```ts
-readonly keys: IterableIterator<string>;
-```
-
-The keys of the dictionary.
-
-If this expression not a dictionary, return `null`
-
-</MemberCard>
-
-<a id="keyscount" name="keyscount"></a>
-
-<MemberCard>
-
-##### BoxedExpression.keysCount
-
-```ts
-readonly keysCount: number;
-```
-
-</MemberCard>
-
-<a id="getkey" name="getkey"></a>
-
-<MemberCard>
-
-##### BoxedExpression.getKey()
-
-```ts
-getKey(key): BoxedExpression
-```
-
-If this expression is a dictionary, return the value of the `key` entry.
-
-• **key**: `string`
-
-</MemberCard>
-
-<a id="haskey" name="haskey"></a>
-
-<MemberCard>
-
-##### BoxedExpression.hasKey()
-
-```ts
-hasKey(key): boolean
-```
-
-If this expression is a dictionary, return true if the
- dictionary has a `key` entry.
-
-• **key**: `string`
-
-</MemberCard>
-
-#### Domain Properties
-
-<a id="isnumber" name="isnumber"></a>
-
-<MemberCard>
-
-##### BoxedExpression.isNumber
-
-```ts
-readonly isNumber: boolean;
-```
-
-`true` if the value of this expression is a number.
-
-`isExtendedComplex || isNaN` = `isReal || isImaginary || isInfinity || isNaN`
-
-Note that in a fateful twist of cosmic irony, `NaN` ("Not a Number")
-**is** a number.
-
-</MemberCard>
-
-<a id="isinteger" name="isinteger"></a>
-
-<MemberCard>
-
-##### BoxedExpression.isInteger
-
-```ts
-readonly isInteger: boolean;
-```
-
-The value of this expression is an element of the set ℤ: ...,-2, -1, 0, 1, 2...
-
-</MemberCard>
-
-<a id="isrational" name="isrational"></a>
-
-<MemberCard>
-
-##### BoxedExpression.isRational
-
-```ts
-readonly isRational: boolean;
-```
-
-The value of this expression is an element of the set ℚ, p/q with p ∈ ℕ, q ∈ ℤ ⃰  q >= 1
-
-Note that every integer is also a rational.
-
-</MemberCard>
-
-<a id="isalgebraic" name="isalgebraic"></a>
-
-<MemberCard>
-
-##### BoxedExpression.isAlgebraic
-
-```ts
-readonly isAlgebraic: boolean;
-```
-
-The value of this expression is a number that is the root of a non-zero
-univariate polynomial with rational coefficients.
-
-All integers and rational numbers are algebraic.
-
-Transcendental numbers, such as \\( \pi \\) or \\( e \\) are not algebraic.
-
-</MemberCard>
-
-<a id="isreal" name="isreal"></a>
-
-<MemberCard>
-
-##### BoxedExpression.isReal
-
-```ts
-readonly isReal: boolean;
-```
-
-The value of this expression is real number: finite and not imaginary.
-
-`isFinite && !isImaginary`
-
-</MemberCard>
-
-<a id="isextendedreal" name="isextendedreal"></a>
-
-<MemberCard>
-
-##### BoxedExpression.isExtendedReal
-
-```ts
-readonly isExtendedReal: boolean;
-```
-
-Real or ±Infinity
-
-`isReal || isInfinity`
-
-</MemberCard>
-
-<a id="iscomplex-1" name="iscomplex-1"></a>
-
-<MemberCard>
-
-##### BoxedExpression.isComplex
-
-```ts
-readonly isComplex: boolean;
-```
-
-The value of this expression is a number, but not `NaN` or any Infinity
-
-`isReal || isImaginary`
-
-</MemberCard>
-
-<a id="isextendedcomplex" name="isextendedcomplex"></a>
-
-<MemberCard>
-
-##### BoxedExpression.isExtendedComplex
-
-```ts
-readonly isExtendedComplex: boolean;
-```
-
-`isReal || isImaginary || isInfinity`
-
-</MemberCard>
-
-<a id="isimaginary" name="isimaginary"></a>
-
-<MemberCard>
-
-##### BoxedExpression.isImaginary
-
-```ts
-readonly isImaginary: boolean;
-```
-
-The value of this expression is a number with a imaginary part
-
-</MemberCard>
+To get a boxed expression from a LaTeX string use `ce.parse()`, or to
+get a boxed expression from a MathJSON expression use `ce.box()`.
 
 #### Function Expression
 
@@ -3006,7 +1178,7 @@ The value of this expression is a number with a imaginary part
 readonly ops: readonly BoxedExpression[];
 ```
 
-The list of arguments of the function, its "tail".
+The list of operands of the function.
 
 If the expression is not a function, return `null`.
 
@@ -3047,7 +1219,9 @@ Applicable to canonical and non-canonical expressions.
 readonly op1: BoxedExpression;
 ```
 
-First operand, i.e.`this.ops[0]`
+First operand, i.e.`this.ops[0]`.
+
+If there is no first operand, return the symbol `Nothing`.
 
 :::info[Note]
 Applicable to canonical and non-canonical expressions.
@@ -3067,6 +1241,8 @@ readonly op2: BoxedExpression;
 
 Second operand, i.e.`this.ops[1]`
 
+If there is no second operand, return the symbol `Nothing`.
+
 :::info[Note]
 Applicable to canonical and non-canonical expressions.
 :::
@@ -3085,6 +1261,8 @@ readonly op3: BoxedExpression;
 
 Third operand, i.e. `this.ops[2]`
 
+If there is no third operand, return the symbol `Nothing`.
+
 :::info[Note]
 Applicable to canonical and non-canonical expressions.
 :::
@@ -3093,7 +1271,7 @@ Applicable to canonical and non-canonical expressions.
 
 #### Numeric Expression
 
-<a id="isnan" name="isnan"></a>
+<a id="isnan-1" name="isnan-1"></a>
 
 <MemberCard>
 
@@ -3113,62 +1291,6 @@ number).
 
 </MemberCard>
 
-<a id="iszero" name="iszero"></a>
-
-<MemberCard>
-
-##### BoxedExpression.isZero
-
-```ts
-readonly isZero: boolean;
-```
-
-The numeric value of this expression is 0.
-
-</MemberCard>
-
-<a id="isnotzero" name="isnotzero"></a>
-
-<MemberCard>
-
-##### BoxedExpression.isNotZero
-
-```ts
-readonly isNotZero: boolean;
-```
-
-The numeric value of this expression is not 0.
-
-</MemberCard>
-
-<a id="isone" name="isone"></a>
-
-<MemberCard>
-
-##### BoxedExpression.isOne
-
-```ts
-readonly isOne: boolean;
-```
-
-The numeric value of this expression is not 1.
-
-</MemberCard>
-
-<a id="isnegativeone" name="isnegativeone"></a>
-
-<MemberCard>
-
-##### BoxedExpression.isNegativeOne
-
-```ts
-readonly isNegativeOne: boolean;
-```
-
-The numeric value of this expression is not -1.
-
-</MemberCard>
-
 <a id="isinfinity" name="isinfinity"></a>
 
 <MemberCard>
@@ -3179,7 +1301,7 @@ The numeric value of this expression is not -1.
 readonly isInfinity: boolean;
 ```
 
-The numeric value of this expression is ±Infinity or Complex Infinity
+The numeric value of this expression is `±Infinity` or Complex Infinity
 
 </MemberCard>
 
@@ -3193,7 +1315,8 @@ The numeric value of this expression is ±Infinity or Complex Infinity
 readonly isFinite: boolean;
 ```
 
-This expression is a number, but not ±Infinity and not `NaN`
+This expression is a number, but not `±Infinity`, 'ComplexInfinity` or
+ `NaN`
 
 </MemberCard>
 
@@ -3221,78 +1344,155 @@ readonly isOdd: boolean;
 
 </MemberCard>
 
-<a id="isprime" name="isprime"></a>
-
-<MemberCard>
-
-##### BoxedExpression.isPrime
-
-```ts
-readonly isPrime: boolean;
-```
-
-</MemberCard>
-
-<a id="iscomposite" name="iscomposite"></a>
-
-<MemberCard>
-
-##### BoxedExpression.isComposite
-
-```ts
-readonly isComposite: boolean;
-```
-
-</MemberCard>
-
-<a id="numericvalue" name="numericvalue"></a>
+<a id="numericvalue-1" name="numericvalue-1"></a>
 
 <MemberCard>
 
 ##### BoxedExpression.numericValue
 
 ```ts
-readonly numericValue: number | Complex | Decimal | Rational;
+readonly numericValue: number | NumericValue;
 ```
 
 Return the value of this expression, if a number literal.
 
-Note it is possible for `numericValue` to be `null`, and for `isNotZero`
-to be true. For example, when a symbol has been defined with an assumption.
+Note it is possible for `this.numericValue` to be `null`, and for
+`this.isNotZero` to be true. For example, when a symbol has been
+defined with an assumption.
 
-Conversely, `isNumber` may be true even if `numericValue` is `null`,
-example the symbol `Pi` return true for `isNumber` but `numericValue` is
-`null`. Its value can be accessed with `.value.numericValue`
+Conversely, `this.isNumber` may be true even if `numericValue` is `null`,
+example the symbol `Pi` return `true` for `isNumber` but `numericValue` is
+`null`. Its value can be accessed with `.N().numericValue`.
+
+To check if an expression is a number literal, use `this.isNumberLiteral`.
+If `this.isNumberLiteral` is `true`, `this.numericValue` is not `null`
 
 </MemberCard>
 
-<a id="sgn" name="sgn"></a>
+<a id="isnumberliteral" name="isnumberliteral"></a>
+
+<MemberCard>
+
+##### BoxedExpression.isNumberLiteral
+
+```ts
+readonly isNumberLiteral: boolean;
+```
+
+Return `true` if this expression is a number literal, for example
+`2`, `3.14`, `1/2`, `√2` etc.
+
+This is equivalent to checking if `this.numericValue` is not `null`.
+
+</MemberCard>
+
+<a id="re-1" name="re-1"></a>
+
+<MemberCard>
+
+##### BoxedExpression.re
+
+```ts
+readonly re: number;
+```
+
+If this expression is a number literal or a symbol with a value that
+is a number literal, return the real part of the value.
+
+If the expression is not a number literal, or a symbol with a value
+that is a number literal, return `NaN` (not a number).
+
+</MemberCard>
+
+<a id="im-1" name="im-1"></a>
+
+<MemberCard>
+
+##### BoxedExpression.im
+
+```ts
+readonly im: number;
+```
+
+If this expression is a number literal or a symbol with a value that
+is a number literal, return the imaginary part of the value. If the value
+is a real number, the imaginary part is 0.
+
+If the expression is not a number literal, or a symbol with a value
+that is a number literal, return `NaN` (not a number).
+
+</MemberCard>
+
+<a id="bignumre-1" name="bignumre-1"></a>
+
+<MemberCard>
+
+##### BoxedExpression.bignumRe
+
+```ts
+readonly bignumRe: Decimal;
+```
+
+If this expression is a number literal or a symbol with a value that
+is a number literal, return the real part of the value as a `BigNum`.
+
+If the value is not available as a bignum return `undefined`. That is,
+the value is not upconverted to a bignum.
+
+To get the real value either as a bignum or a number, use
+`this.bignumRe ?? this.re`. When using this pattern, the value is
+returned as a bignum if available, otherwise as a number or NaN if
+the value is not a number literal or a symbol with a value that is a
+number literal.
+
+</MemberCard>
+
+<a id="bignumim-1" name="bignumim-1"></a>
+
+<MemberCard>
+
+##### BoxedExpression.bignumIm
+
+```ts
+readonly bignumIm: Decimal;
+```
+
+If this expression is a number literal, return the imaginary part as a
+`BigNum`.
+
+It may be 0 if the number is real.
+
+If the expression is not a number literal or the value is not available
+as a bignum return `undefined`. That is, the value is not upconverted
+to a bignum.
+
+To get the imaginary value either as a bignum or a number, use
+`this.bignumIm ?? this.im`. When using this pattern, the value is
+returned as a bignum if available, otherwise as a number or NaN if
+the value is not a number literal or a symbol with a value that is a
+number literal.
+
+</MemberCard>
+
+<a id="sgn-1" name="sgn-1"></a>
 
 <MemberCard>
 
 ##### BoxedExpression.sgn
 
 ```ts
-readonly sgn: 0 | 1 | -1;
+readonly sgn: Sign;
 ```
 
-Return the following, depending on the value of this expression:
-
-* `-1` if it is `< 0
-* `0` if it is = 0
-* `+1` if it is >` 0
-* `undefined` this value may be positive, negative or zero. We don't know
-   right now (a symbol with an Integer domain, but no currently assigned
-   value, for example)
-* `null` this value will never be positive, negative or zero (`NaN`,
-    a string or a complex number for example)
+Return the sign of the expression.
 
 Note that complex numbers have no natural ordering,
-so if the value is a complex number, `sgn` is either 0, or `null`
+so if the value is an imaginary number (a complex number with a non-zero
+imaginary part), `this.sgn` will return `unsigned`.
 
 If a symbol, this does take assumptions into account, that is `this.sgn`
-will return `1` if `isPositive` is `true`, even if this expression has
-no value
+will return `positive` if the symbol is assumed to be positive
+(using `ce.assume()`).
 
 </MemberCard>
 
@@ -3370,11 +1570,67 @@ and functions.
 
 </MemberCard>
 
+<a id="tomathjson" name="tomathjson"></a>
+
+<MemberCard>
+
+##### BoxedExpression.toMathJson()
+
+```ts
+toMathJson(options?): Expression
+```
+
+Serialize to a MathJSON expression with specified options
+
+###### options?
+
+`Readonly`\<`Partial`\<[`JsonSerializationOptions`](#jsonserializationoptions)\>\>
+
+[`Expression`](#expression)
+
+</MemberCard>
+
+<a id="tolatex" name="tolatex"></a>
+
+<MemberCard>
+
+##### BoxedExpression.toLatex()
+
+```ts
+toLatex(options?): string
+```
+
+Serialize to a LaTeX string.
+
+Will ignore any LaTeX metadata.
+
+###### options?
+
+`Partial`\<[`SerializeLatexOptions`](#serializelatexoptions)\>
+
+`string`
+
+</MemberCard>
+
+<a id="verbatimlatex" name="verbatimlatex"></a>
+
+<MemberCard>
+
+##### BoxedExpression.verbatimLatex?
+
+```ts
+optional verbatimLatex: string;
+```
+
+</MemberCard>
+
 <a id="iscanonical" name="iscanonical"></a>
 
 <MemberCard>
 
 ##### BoxedExpression.isCanonical
+
+###### Get Signature
 
 ```ts
 get isCanonical(): boolean
@@ -3386,7 +1642,25 @@ If `true`, this expression is in a canonical form.
 
 </MemberCard>
 
-<a id="json-1" name="json-1"></a>
+<a id="isstructural" name="isstructural"></a>
+
+<MemberCard>
+
+##### BoxedExpression.isStructural
+
+###### Get Signature
+
+```ts
+get isStructural(): boolean
+```
+
+If `true`, this expression is in a structural form.
+
+`boolean`
+
+</MemberCard>
+
+<a id="json" name="json"></a>
 
 <MemberCard>
 
@@ -3397,6 +1671,16 @@ readonly json: Expression;
 ```
 
 MathJSON representation of this expression.
+
+This representation always use shorthands when possible. Metadata is not
+included.
+
+Numbers are converted to JavaScript numbers and may lose precision.
+
+The expression is represented exactly and no sugaring is applied. For
+example, `["Power", "x", 2]` is not represented as `["Square", "x"]`.
+
+For more control over the serialization, use `expr.toMathJson()`.
 
 :::info[Note]
 Applicable to canonical and non-canonical expressions.
@@ -3411,19 +1695,64 @@ Applicable to canonical and non-canonical expressions.
 ##### BoxedExpression.scope
 
 ```ts
-readonly scope: RuntimeScope;
+readonly scope: object;
 ```
 
 The scope in which this expression has been defined.
-Is null when the expression is not canonical.
+
+Is `null` when the expression is not canonical.
+
+<a id=""></a>
+
+###### parentScope?
+
+<MemberCard>
+
+###### scope.parentScope?
+
+```ts
+optional parentScope: { parentScope?: ...; ids?: RuntimeIdentifierDefinitions; assumptions: ExpressionMapInterface<boolean>; };
+```
 
 </MemberCard>
 
-<a id="latex-1" name="latex-1"></a>
+<a id=""></a>
+
+###### ids?
+
+<MemberCard>
+
+###### scope.ids?
+
+```ts
+optional ids: RuntimeIdentifierDefinitions;
+```
+
+</MemberCard>
+
+<a id=""></a>
+
+###### assumptions
+
+<MemberCard>
+
+###### scope.assumptions
+
+```ts
+assumptions: ExpressionMapInterface<boolean>;
+```
+
+</MemberCard>
+
+</MemberCard>
+
+<a id="latex" name="latex"></a>
 
 <MemberCard>
 
 ##### BoxedExpression.latex
+
+###### Get Signature
 
 ```ts
 get latex(): string
@@ -3431,31 +1760,16 @@ get latex(): string
 
 LaTeX representation of this expression.
 
-The serialization can be customized with `ComputeEngine.latexOptions`
+If the expression was parsed from LaTeX, the LaTeX representation is
+the same as the input LaTeX.
+
+To customize the serialization, use `expr.toLatex()`.
 
 :::info[Note]
 Applicable to canonical and non-canonical expressions.
 :::
 
 `string`
-
-</MemberCard>
-
-<a id="isnothing" name="isnothing"></a>
-
-<MemberCard>
-
-##### BoxedExpression.isNothing
-
-```ts
-readonly isNothing: boolean;
-```
-
-If this is the `Nothing` symbol, return `true`.
-
-:::info[Note]
-Applicable to canonical and non-canonical expressions.
-:::
 
 </MemberCard>
 
@@ -3466,16 +1780,20 @@ Applicable to canonical and non-canonical expressions.
 ##### BoxedExpression.getSubexpressions()
 
 ```ts
-getSubexpressions(head): readonly BoxedExpression[]
+getSubexpressions(name): readonly BoxedExpression[]
 ```
 
-All the subexpressions matching the head
+All the subexpressions matching the named operator, recursively.
 
 :::info[Note]
 Applicable to canonical and non-canonical expressions.
 :::
 
-• **head**: `string`
+###### name
+
+`string`
+
+readonly [`BoxedExpression`](#boxedexpression)[]
 
 </MemberCard>
 
@@ -3555,7 +1873,10 @@ not a local variable or a parameter of that function.
 readonly errors: readonly BoxedExpression[];
 ```
 
-All the `["Error"]` subexpressions
+All the `["Error"]` subexpressions.
+
+If an expression includes an error, the expression is also an error.
+In that case, the `this.isValid` property is `false`.
 
 :::info[Note]
 Applicable to canonical and non-canonical expressions.
@@ -3563,52 +1884,25 @@ Applicable to canonical and non-canonical expressions.
 
 </MemberCard>
 
-<a id="head" name="head"></a>
+<a id="operator" name="operator"></a>
 
 <MemberCard>
 
-##### BoxedExpression.head
+##### BoxedExpression.operator
 
 ```ts
-readonly head: string | BoxedExpression;
+readonly operator: string;
 ```
 
-All boxed expressions have a head.
+The name of the operator of the expression.
 
-If not a function this can be `Symbol`, `String`, `Number` or `Dictionary`.
+For example, the name of the operator of `["Add", 2, 3]` is `"Add"`.
 
-If the head expression can be represented as a string, it is returned
-as a string.
+A string literal has a `"String"` operator.
 
-:::info[Note]
-Applicable to canonical and non-canonical expressions. The head
-of a non-canonical expression may be different than the head of its
-canonical counterpart. For example the canonical counterpart of `["Divide", 5, 7]` is `["Rational", 5, 5]`.
-:::
+A symbol has a `"Symbol"` operator.
 
-</MemberCard>
-
-<a id="isexact" name="isexact"></a>
-
-<MemberCard>
-
-##### BoxedExpression.isExact
-
-```ts
-readonly isExact: boolean;
-```
-
-An exact value is not further transformed when evaluated. To get an
-approximate evaluation of an exact value, use `.N()`.
-
-Exact numbers are:
-- rationals (including integers)
-- complex numbers with integer real and imaginary parts (Gaussian integers)
-- square root of rationals
-
-Non-exact values includes:
-- numbers with a fractional part
-- complex numbers with a real or imaginary fractional part
+A number has a `"Number"`, `"Real"`, `"Rational"` or `"Integer"` operator.
 
 </MemberCard>
 
@@ -3624,6 +1918,7 @@ readonly isPure: boolean;
 
 If true, the value of the expression never changes and evaluating it has
 no side-effects.
+
 If false, the value of the expression may change, if the
 value of other expression changes or for other reasons.
 
@@ -3648,15 +1943,25 @@ Applicable to canonical and non-canonical expressions.
 readonly isConstant: boolean;
 ```
 
-True if the expression is a constant, that is a symbol with an immutable value
+True if the the value of the expression does not depend on the value of
+any other expression.
+
+For example, a number literal, a symbol with a constant value.
+- `2` is constant
+- `Pi` is constant
+- `["Add", "Pi", 2]` is constant
+- `x` is not constant
+- `["Add", "x", 2]` is not constant
 
 </MemberCard>
 
-<a id="canonical-2" name="canonical-2"></a>
+<a id="canonical" name="canonical"></a>
 
 <MemberCard>
 
 ##### BoxedExpression.canonical
+
+###### Get Signature
 
 ```ts
 get canonical(): BoxedExpression
@@ -3681,6 +1986,33 @@ If this expression is already canonical, the value of canonical is
 
 </MemberCard>
 
+<a id="structural" name="structural"></a>
+
+<MemberCard>
+
+##### BoxedExpression.structural
+
+###### Get Signature
+
+```ts
+get structural(): BoxedExpression
+```
+
+Return the structural form of this expression.
+
+Some expressions, such as rational numbers, are represented with
+a `BoxedExpression` object. In some cases, for example when doing a
+structural comparison of two expressions, it is useful to have a
+structural representation of the expression where the rational numbers
+is represented by a function expression instead.
+
+If there is a structural representation of the expression, return it,
+otherwise return `this`.
+
+[`BoxedExpression`](#boxedexpression)
+
+</MemberCard>
+
 <a id="subs" name="subs"></a>
 
 <MemberCard>
@@ -3694,17 +2026,29 @@ subs(sub, options?): BoxedExpression
 Replace all the symbols in the expression as indicated.
 
 Note the same effect can be achieved with `this.replace()`, but
-using `this.subs()` is more efficient, and simpler.
+using `this.subs()` is more efficient, and simpler, but limited
+to replacing symbols.
+
+The result is bound to the current scope, not to `this.scope`.
+
+If `options.canonical` is not set, the result is canonical if `this`
+is canonical.
 
 :::info[Note]
 Applicable to canonical and non-canonical expressions.
 :::
 
-• **sub**: [`Substitution`](#substitutiont)\<[`SemiBoxedExpression`](#semiboxedexpression)\>
+###### sub
 
-• **options?**
+[`Substitution`](#substitutiont)
 
-• **options\.canonical?**: [`CanonicalOptions`](#canonicaloptions)
+###### options?
+
+###### canonical
+
+[`CanonicalOptions`](#canonicaloptions)
+
+[`BoxedExpression`](#boxedexpression)
 
 </MemberCard>
 
@@ -3718,18 +2062,33 @@ Applicable to canonical and non-canonical expressions.
 map(fn, options?): BoxedExpression
 ```
 
-Recursively replace all the terms in the expression as indicated.
+Recursively replace all the subexpressions in the expression as indicated.
 
-To remove a subexpression, return an empty Sequence expression.
+To remove a subexpression, return an empty `["Sequence"]` expression.
 
 The canonical option is applied to each function subexpression after
 the substitution is applied.
 
-• **fn**
+If no `options.canonical` is set, the result is canonical if `this`
+is canonical.
 
-• **options?**
+**Default**: `{ canonical: this.isCanonical, recursive: true }`
 
-• **options\.canonical?**: [`CanonicalOptions`](#canonicaloptions)
+###### fn
+
+(`expr`) => [`BoxedExpression`](#boxedexpression)
+
+###### options?
+
+###### canonical
+
+[`CanonicalOptions`](#canonicaloptions)
+
+###### recursive
+
+`boolean`
+
+[`BoxedExpression`](#boxedexpression)
 
 </MemberCard>
 
@@ -3743,23 +2102,31 @@ the substitution is applied.
 replace(rules, options?): BoxedExpression
 ```
 
-Transform the expression by applying the rules:
+Transform the expression by applying one or more replacement rules:
 
-If the expression matches the `match` pattern, replace it with
-the `replace` pattern.
+- If the expression matches the `match` pattern and the `condition`
+ predicate is true, replace it with the `replace` pattern.
 
-If no rules apply, return `null`.
+- If no rules apply, return `null`.
 
-See also `subs` for a simple substitution.
+See also `expr.subs()` for a simple substitution of symbols.
+
+If `options.canonical` is not set, the result is canonical if `this`
+is canonical.
 
 :::info[Note]
-Applicable to canonical and non-canonical expressions. If the
-expression is non-canonical, the result is also non-canonical.
+Applicable to canonical and non-canonical expressions.
 :::
 
-• **rules**: [`BoxedRuleSet`](#boxedruleset) \| [`Rule`](#rule) \| [`Rule`](#rule)[]
+###### rules
 
-• **options?**: [`ReplaceOptions`](#replaceoptions)
+[`Rule`](#rule) | [`BoxedRuleSet`](#boxedruleset) | [`Rule`](#rule)[]
+
+###### options?
+
+`Partial`\<[`ReplaceOptions`](#replaceoptions)\>
+
+[`BoxedExpression`](#boxedexpression)
 
 </MemberCard>
 
@@ -3773,17 +2140,71 @@ expression is non-canonical, the result is also non-canonical.
 has(v): boolean
 ```
 
-True if the expression includes a symbol `v` or a function head `v`.
+True if the expression includes a symbol `v` or a function operator `v`.
 
 :::info[Note]
 Applicable to canonical and non-canonical expressions.
 :::
 
-• **v**: `string` \| `string`[]
+###### v
+
+`string` | `string`[]
+
+`boolean`
 
 </MemberCard>
 
-<a id="match-1" name="match-1"></a>
+<a id="numerator-1" name="numerator-1"></a>
+
+<MemberCard>
+
+##### BoxedExpression.numerator
+
+###### Get Signature
+
+```ts
+get numerator(): BoxedExpression
+```
+
+Return this expression expressed as a numerator and denominator.
+
+[`BoxedExpression`](#boxedexpression)
+
+</MemberCard>
+
+<a id="denominator-1" name="denominator-1"></a>
+
+<MemberCard>
+
+##### BoxedExpression.denominator
+
+###### Get Signature
+
+```ts
+get denominator(): BoxedExpression
+```
+
+[`BoxedExpression`](#boxedexpression)
+
+</MemberCard>
+
+<a id="numeratordenominator" name="numeratordenominator"></a>
+
+<MemberCard>
+
+##### BoxedExpression.numeratorDenominator
+
+###### Get Signature
+
+```ts
+get numeratorDenominator(): [BoxedExpression, BoxedExpression]
+```
+
+\[[`BoxedExpression`](#boxedexpression), [`BoxedExpression`](#boxedexpression)\]
+
+</MemberCard>
+
+<a id="match" name="match"></a>
 
 <MemberCard>
 
@@ -3809,13 +2230,245 @@ Read more about [**patterns and rules**](/compute-engine/guides/patterns-and-rul
 Applicable to canonical and non-canonical expressions.
 :::
 
-• **pattern**: [`SemiBoxedExpression`](#semiboxedexpression) \| [`number`, `number`]
+###### pattern
 
-• **options?**: [`PatternMatchOptions`](#patternmatchoptions)
+[`BoxedExpression`](#boxedexpression)
+
+###### options?
+
+[`PatternMatchOptions`](#patternmatchoptions)
+
+[`BoxedSubstitution`](#boxedsubstitution)
 
 </MemberCard>
 
-<a id="shape" name="shape"></a>
+<a id="isfunctionexpression" name="isfunctionexpression"></a>
+
+<MemberCard>
+
+##### BoxedExpression.isFunctionExpression
+
+```ts
+readonly isFunctionExpression: boolean;
+```
+
+Return `true` if this expression is a function expression.
+
+If `true`, `this.ops` is not `null`, and `this.operator` is the name
+of the function.
+
+</MemberCard>
+
+<a id="tonumericvalue" name="tonumericvalue"></a>
+
+<MemberCard>
+
+##### BoxedExpression.toNumericValue()
+
+```ts
+toNumericValue(): [NumericValue, BoxedExpression]
+```
+
+Attempt to factor a numeric coefficient `c` and a `rest` out of a
+canonical expression such that `rest.mul(c)` is equal to `this`.
+
+Attempts to make `rest` a positive value (i.e. pulls out negative sign).
+
+```json
+['Multiply', 2, 'x', 3, 'a']
+   -> [NumericValue(6), ['Multiply', 'x', 'a']]
+
+['Divide', ['Multiply', 2, 'x'], ['Multiply', 3, 'y', 'a']]
+   -> [NumericValue({rational: [2, 3]}), ['Divide', 'x', ['Multiply, 'y', 'a']]]
+```
+
+\[[`NumericValue`](#numericvalue), [`BoxedExpression`](#boxedexpression)\]
+
+</MemberCard>
+
+<a id="neg-4" name="neg-4"></a>
+
+<MemberCard>
+
+##### BoxedExpression.neg()
+
+```ts
+neg(): BoxedExpression
+```
+
+[`BoxedExpression`](#boxedexpression)
+
+</MemberCard>
+
+<a id="inv-1" name="inv-1"></a>
+
+<MemberCard>
+
+##### BoxedExpression.inv()
+
+```ts
+inv(): BoxedExpression
+```
+
+[`BoxedExpression`](#boxedexpression)
+
+</MemberCard>
+
+<a id="abs-1" name="abs-1"></a>
+
+<MemberCard>
+
+##### BoxedExpression.abs()
+
+```ts
+abs(): BoxedExpression
+```
+
+[`BoxedExpression`](#boxedexpression)
+
+</MemberCard>
+
+<a id="add-5" name="add-5"></a>
+
+<MemberCard>
+
+##### BoxedExpression.add()
+
+```ts
+add(rhs): BoxedExpression
+```
+
+###### rhs
+
+`number` | [`BoxedExpression`](#boxedexpression)
+
+[`BoxedExpression`](#boxedexpression)
+
+</MemberCard>
+
+<a id="sub-4" name="sub-4"></a>
+
+<MemberCard>
+
+##### BoxedExpression.sub()
+
+```ts
+sub(rhs): BoxedExpression
+```
+
+###### rhs
+
+[`BoxedExpression`](#boxedexpression)
+
+[`BoxedExpression`](#boxedexpression)
+
+</MemberCard>
+
+<a id="mul-4" name="mul-4"></a>
+
+<MemberCard>
+
+##### BoxedExpression.mul()
+
+```ts
+mul(rhs): BoxedExpression
+```
+
+###### rhs
+
+`number` | [`NumericValue`](#numericvalue) | [`BoxedExpression`](#boxedexpression)
+
+[`BoxedExpression`](#boxedexpression)
+
+</MemberCard>
+
+<a id="div-4" name="div-4"></a>
+
+<MemberCard>
+
+##### BoxedExpression.div()
+
+```ts
+div(rhs): BoxedExpression
+```
+
+###### rhs
+
+`number` | [`BoxedExpression`](#boxedexpression)
+
+[`BoxedExpression`](#boxedexpression)
+
+</MemberCard>
+
+<a id="pow-4" name="pow-4"></a>
+
+<MemberCard>
+
+##### BoxedExpression.pow()
+
+```ts
+pow(exp): BoxedExpression
+```
+
+###### exp
+
+`number` | [`BoxedExpression`](#boxedexpression)
+
+[`BoxedExpression`](#boxedexpression)
+
+</MemberCard>
+
+<a id="root-1" name="root-1"></a>
+
+<MemberCard>
+
+##### BoxedExpression.root()
+
+```ts
+root(exp): BoxedExpression
+```
+
+###### exp
+
+`number` | [`BoxedExpression`](#boxedexpression)
+
+[`BoxedExpression`](#boxedexpression)
+
+</MemberCard>
+
+<a id="sqrt-1" name="sqrt-1"></a>
+
+<MemberCard>
+
+##### BoxedExpression.sqrt()
+
+```ts
+sqrt(): BoxedExpression
+```
+
+[`BoxedExpression`](#boxedexpression)
+
+</MemberCard>
+
+<a id="ln-1" name="ln-1"></a>
+
+<MemberCard>
+
+##### BoxedExpression.ln()
+
+```ts
+ln(base?): BoxedExpression
+```
+
+###### base?
+
+`number` | [`BoxedExpression`](#boxedexpression)
+
+[`BoxedExpression`](#boxedexpression)
+
+</MemberCard>
+
+<a id="shape-1" name="shape-1"></a>
 
 <MemberCard>
 
@@ -3826,13 +2479,16 @@ readonly shape: number[];
 ```
 
 The shape describes the axis of the expression.
+
 When the expression is a scalar (number), the shape is `[]`.
-When the expression is a vector, the shape is `[n]`.
-When the expression is a matrix, the shape is `[n, m]`.
+
+When the expression is a vector of length `n`, the shape is `[n]`.
+
+When the expression is a `n` by `m` matrix, the shape is `[n, m]`.
 
 </MemberCard>
 
-<a id="rank" name="rank"></a>
+<a id="rank-1" name="rank-1"></a>
 
 <MemberCard>
 
@@ -3842,7 +2498,10 @@ When the expression is a matrix, the shape is `[n, m]`.
 readonly rank: number;
 ```
 
-Return 0 for a scalar, 1 for a vector, 2 for a matrix, > 2 for a multidimensional matrix. It's the length of `expr.shape`
+Return 0 for a scalar, 1 for a vector, 2 for a matrix, > 2 for
+a multidimensional matrix.
+
+The rank is equivalent to the length of `expr.shape`
 
 </MemberCard>
 
@@ -3895,7 +2554,7 @@ readonly url: string;
 ```
 
 An optional URL pointing to more information about the symbol or
- function head.
+ function operator.
 
 :::info[Note]
 `undefined` if not a canonical expression.
@@ -3932,8 +2591,8 @@ first in commutative functions
 readonly baseDefinition: BoxedBaseDefinition;
 ```
 
-For symbols and functions, a possible definition associated with the
- expression. `baseDefinition` is the base class of symbol and function
+For symbols and functions, a definition associated with the
+ expression. `this.baseDefinition` is the base class of symbol and function
  definition.
 
 :::info[Note]
@@ -3952,7 +2611,7 @@ For symbols and functions, a possible definition associated with the
 readonly functionDefinition: BoxedFunctionDefinition;
 ```
 
-For functions, a possible definition associated with the expression.
+For functions, a definition associated with the expression.
 
 :::info[Note]
 `undefined` if not a canonical expression or not a function.
@@ -3970,7 +2629,7 @@ For functions, a possible definition associated with the expression.
 readonly symbolDefinition: BoxedSymbolDefinition;
 ```
 
-For symbols, a possible definition associated with the expression.
+For symbols, a definition associated with the expression.
 
 Return `undefined` if not a symbol
 
@@ -3986,26 +2645,46 @@ Return `undefined` if not a symbol
 simplify(options?): BoxedExpression
 ```
 
-Return a simpler form of the canonical form of this expression.
+Return a simpler form of this expression.
 
 A series of rewriting rules are applied repeatedly, until no more rules
 apply.
 
-If a custom `simplify` handler is associated with this function
-definition, it is invoked.
-
 The values assigned to symbols and the assumptions about symbols may be
-used, for example `arg.isInteger` or `arg.isPositive`.
+used, for example `expr.isInteger` or `expr.isPositive`.
 
 No calculations involving decimal numbers (numbers that are not
 integers) are performed but exact calculations may be performed,
 for example:
 
-\\( \sin(\frac\{\pi\}\{4\}) \longrightarrow \frac\{\sqrt\{2}}\{2\} \\).
+$$ \sin(\frac{\pi}{4}) \longrightarrow \frac{\sqrt{2}}{2} $$.
 
-The result is in canonical form.
+The result is canonical.
 
-• **options?**: [`SimplifyOptions`](#simplifyoptions)
+To manipulate symbolically non-canonical expressions, use `expr.replace()`.
+
+###### options?
+
+`Partial`\<[`SimplifyOptions`](#simplifyoptions)\>
+
+[`BoxedExpression`](#boxedexpression)
+
+</MemberCard>
+
+<a id="expand" name="expand"></a>
+
+<MemberCard>
+
+##### BoxedExpression.expand()
+
+```ts
+expand(): BoxedExpression
+```
+
+Expand the expression: distribute multiplications over additions,
+and expand powers.
+
+[`BoxedExpression`](#boxedexpression)
 
 </MemberCard>
 
@@ -4031,28 +2710,55 @@ Evaluating an impure expression may have some side effects, for
 example modifying the `ComputeEngine` environment, such as its set of
 assumptions.
 
-Only exact calculations are performed, no approximate calculations on
-decimal numbers (non-integer numbers). Constants, rational numbers and
-square root of rational numbers are preserved.
+The result may be a rational number or the product of a rational number
+and the square root of an integer.
 
-To perform approximate calculations, use `expr.N()` instead.
+To perform approximate calculations, use `expr.N()` instead,
+or set `options.numericApproximation` to `true`.
 
 The result of `expr.evaluate()` may be the same as `expr.simplify()`.
 
 The result is in canonical form.
 
-• **options?**: [`EvaluateOptions`](#evaluateoptions)
+###### options?
+
+`Partial`\<[`EvaluateOptions`](#evaluateoptions)\>
+
+[`BoxedExpression`](#boxedexpression)
 
 </MemberCard>
 
-<a id="n" name="n"></a>
+<a id="evaluateasync" name="evaluateasync"></a>
+
+<MemberCard>
+
+##### BoxedExpression.evaluateAsync()
+
+```ts
+evaluateAsync(options?): Promise<BoxedExpression>
+```
+
+Asynchronous version of `evaluate()`.
+
+The `options` argument can include a `signal` property, which is an
+`AbortSignal` object. If the signal is aborted, a `CancellationError` is thrown.
+
+###### options?
+
+`Partial`\<[`EvaluateOptions`](#evaluateoptions)\>
+
+`Promise`\<[`BoxedExpression`](#boxedexpression)\>
+
+</MemberCard>
+
+<a id="n-1" name="n-1"></a>
 
 <MemberCard>
 
 ##### BoxedExpression.N()
 
 ```ts
-N(options?): BoxedExpression
+N(): BoxedExpression
 ```
 
 Return a numeric approximation of the canonical form of this expression.
@@ -4060,8 +2766,8 @@ Return a numeric approximation of the canonical form of this expression.
 Any necessary calculations, including on decimal numbers (non-integers),
 are performed.
 
-The calculations are performed according to the `numericMode` and
-`precision` properties of the `ComputeEngine`.
+The calculations are performed according to the
+`precision` property of the `ComputeEngine`.
 
 To only perform exact calculations, use `this.evaluate()` instead.
 
@@ -4070,7 +2776,7 @@ If the function is not numeric, the result of `this.N()` is the same as
 
 The result is in canonical form.
 
-• **options?**: [`NOptions`](#noptions)
+[`BoxedExpression`](#boxedexpression)
 
 </MemberCard>
 
@@ -4081,14 +2787,53 @@ The result is in canonical form.
 ##### BoxedExpression.compile()
 
 ```ts
-compile(to?, options?): (args) => any
+compile(options?): (args?) => CompiledType
 ```
 
-• **to?**: `"javascript"`
+Compile the expression to a JavaScript function.
 
-• **options?**
+The function takes an object as argument, with the keys being the
+symbols in the expression, and returns the value of the expression.
 
-• **options\.optimize?**: (`"simplify"` \| `"evaluate"`)[]
+```javascript
+const expr = ce.parse('x^2 + y^2');
+const f = expr.compile();
+console.log(f({x: 2, y: 3}));
+```
+
+###### options?
+
+###### to
+
+`"javascript"`
+
+###### optimize
+
+(`"evaluate"` \| `"simplify"`)[]
+
+###### functions
+
+`Record`\<`string`, `string` \| (...`any`) => `any`\>
+
+###### vars
+
+`Record`\<`string`, [`CompiledType`](#compiledtype)\>
+
+###### imports
+
+`unknown`[]
+
+###### preamble
+
+`string`
+
+`Function`
+
+###### args?
+
+`Record`\<`string`, [`CompiledType`](#compiledtype)\>
+
+[`CompiledType`](#compiledtype)
 
 </MemberCard>
 
@@ -4099,10 +2844,22 @@ compile(to?, options?): (args) => any
 ##### BoxedExpression.solve()
 
 ```ts
-solve(vars): readonly BoxedExpression[]
+solve(vars?): readonly BoxedExpression[]
 ```
 
-• **vars**: `string` \| `Iterable`\<`string`\> \| [`BoxedExpression`](#boxedexpression) \| `Iterable`\<[`BoxedExpression`](#boxedexpression)\>
+If this is an equation, solve the equation for the variables in vars.
+Otherwise, solve the equation `this = 0` for the variables in vars.
+
+```javascript
+const expr = ce.parse('x^2 + 2*x + 1 = 0');
+console.log(expr.solve('x'));
+```
+
+###### vars?
+
+`string` | `Iterable`\<`string`\> | [`BoxedExpression`](#boxedexpression) | `Iterable`\<[`BoxedExpression`](#boxedexpression)\>
+
+readonly [`BoxedExpression`](#boxedexpression)[]
 
 </MemberCard>
 
@@ -4112,17 +2869,21 @@ solve(vars): readonly BoxedExpression[]
 
 ##### BoxedExpression.value
 
-```ts
-get value(): string | number | boolean | number[]
-```
+###### Get Signature
 
 ```ts
-set value(value): void
+get value(): string | number | boolean | object
 ```
 
 Return a JavaScript primitive representing the value of this expression.
 
 Equivalent to `expr.N().valueOf()`.
+
+`string` \| `number` \| `boolean` \| `object`
+
+```ts
+set value(value): void
+```
 
 Only the value of variables can be changed (symbols that are not
 constants).
@@ -4133,71 +2894,231 @@ Throws a runtime error if a constant.
 If non-canonical, does nothing
 :::
 
-`string` \| `number` \| `boolean` \| `number`[]
+###### Parameters
 
-• **value**: 
-  \| `string`
-  \| `number`
-  \| `boolean`
-  \| `number`[]
-  \| `Complex`
-  \| `Decimal`
-  \| [`BoxedExpression`](#boxedexpression)
-  \| `Object`
-  \| `Object`
+###### value
+
+`string` | `number` | `boolean` | `number`[] | `Decimal` | [`BoxedExpression`](#boxedexpression) | \{
+`re`: `number`;
+`im`: `number`;
+\} | \{
+`num`: `number`;
+`denom`: `number`;
+\}
+
+`void`
 
 </MemberCard>
 
-<a id="domain-1" name="domain-1"></a>
+<a id="type-2" name="type-2"></a>
 
 <MemberCard>
 
-##### BoxedExpression.domain
+##### BoxedExpression.type
+
+###### Get Signature
 
 ```ts
-get domain(): BoxedDomain
+get type(): BoxedType
 ```
+
+The type of the value of this expression.
+
+If a function expression, the type of the value of the function
+(the result type).
+
+If a symbol the type of the value of the symbol.
+
+:::info[Note]
+If not valid, return `"error"`.
+If non-canonical, return `undefined`.
+If the type is not known, return `"unknown"`.
+:::
+
+[`BoxedType`](#boxedtype)
 
 ```ts
-set domain(domain): void
+set type(type): void
 ```
 
-The domain of the value of this expression.
+###### Parameters
 
-If a function expression, the domain  of the value of the function
-(the codomain of the function).
+###### type
 
-If a symbol the domain of the value of the symbol.
+`string` | [`AlgebraicType`](#algebraictype) | [`NegationType`](#negationtype) | [`CollectionType`](#collectiontype) | [`ListType`](#listtype) | [`SetType`](#settype) | [`MapType`](#maptype) | [`TupleType`](#tupletype) | [`FunctionSignature`](#functionsignature) | [`ValueType`](#valuetype) | [`TypeReference`](#typereference) | [`BoxedType`](#boxedtype)
 
-Use `expr.head` to determine if an expression is a symbol or function
-expression.
+`void`
 
-:::info[Note]
-If non-canonical or not valid, return `undefined`.
-:::
+</MemberCard>
 
-Modify the domain of a symbol.
+<a id="iscollection" name="iscollection"></a>
 
-:::info[Note]
-If non-canonical does nothing
-:::
+<MemberCard>
 
-[`BoxedDomain`](#boxeddomain)
+##### BoxedExpression.isCollection
 
-• **domain**: [`BoxedDomain`](#boxeddomain) \| [`DomainExpression`](#domainexpressiont)\<[`SemiBoxedExpression`](#semiboxedexpression)\>
+```ts
+isCollection: boolean;
+```
+
+Return true if the expression is a collection: a list, a vector, a matrix, a map, a tuple, etc...
+
+</MemberCard>
+
+<a id="contains" name="contains"></a>
+
+<MemberCard>
+
+##### BoxedExpression.contains()
+
+```ts
+contains(rhs): boolean
+```
+
+If this is a collection, return true if the `rhs` expression is in the
+collection.
+
+Return `undefined` if the membership cannot be determined.
+
+###### rhs
+
+[`BoxedExpression`](#boxedexpression)
+
+`boolean`
+
+</MemberCard>
+
+<a id="size" name="size"></a>
+
+<MemberCard>
+
+##### BoxedExpression.size
+
+###### Get Signature
+
+```ts
+get size(): number
+```
+
+If this is a collection, return the number of elements in the collection.
+
+If the collection is infinite, return `Infinity`.
+
+`number`
+
+</MemberCard>
+
+<a id="each" name="each"></a>
+
+<MemberCard>
+
+##### BoxedExpression.each()
+
+```ts
+each: (start?, count?) => Iterator<BoxedExpression, undefined>;
+```
+
+If this is a collection, return an iterator over the elements of the collection.
+
+If `start` is not specified, start from the first element.
+
+If `count` is not specified or negative, return all the elements from `start` to the end.
+
+```js
+const expr = ce.parse('[1, 2, 3, 4]');
+for (const e of expr.each()) {
+ console.log(e);
+}
+```
+
+###### start?
+
+`number`
+
+###### count?
+
+`number`
+
+`Iterator`\<[`BoxedExpression`](#boxedexpression), `undefined`\>
+
+</MemberCard>
+
+<a id="at-1" name="at-1"></a>
+
+<MemberCard>
+
+##### BoxedExpression.at()
+
+```ts
+at(index): BoxedExpression
+```
+
+If this is an indexable collection, return the element at the specified
+ index.
+
+If the index is negative, return the element at index `size() + index + 1`.
+
+###### index
+
+`number`
+
+[`BoxedExpression`](#boxedexpression)
+
+</MemberCard>
+
+<a id="get" name="get"></a>
+
+<MemberCard>
+
+##### BoxedExpression.get()
+
+```ts
+get(key): BoxedExpression
+```
+
+If this is a map or a tuple, return the value of the corresponding key.
+
+If `key` is a `BoxedExpression`, it should be a string.
+
+###### key
+
+`string` | [`BoxedExpression`](#boxedexpression)
+
+[`BoxedExpression`](#boxedexpression)
+
+</MemberCard>
+
+<a id="indexof" name="indexof"></a>
+
+<MemberCard>
+
+##### BoxedExpression.indexOf()
+
+```ts
+indexOf(expr): number
+```
+
+If this is an indexable collection, return the index of the first element
+that matches the target expression.
+
+###### expr
+
+[`BoxedExpression`](#boxedexpression)
+
+`number`
 
 </MemberCard>
 
 #### Primitive Methods
 
-<a id="valueof" name="valueof"></a>
+<a id="valueof-2" name="valueof-2"></a>
 
 <MemberCard>
 
 ##### BoxedExpression.valueOf()
 
 ```ts
-valueOf(): string | number | boolean | any[]
+valueOf(): any
 ```
 
 From `Object.valueOf()`, return a primitive value for the expression.
@@ -4209,9 +3130,11 @@ If the expression is a symbol, return the name of the symbol as a `string`.
 
 Otherwise return a JavaScript primitive representation of the expression.
 
+`any`
+
 </MemberCard>
 
-<a id="tostring" name="tostring"></a>
+<a id="tostring-1" name="tostring-1"></a>
 
 <MemberCard>
 
@@ -4223,14 +3146,17 @@ toString(): string
 
 From `Object.toString()`, return a string representation of the
  expression. This string is suitable to be output to the console
-for debugging, for example. To get a LaTeX representation of the
-expression, use `expr.latex`.
+for debugging, for example. It is formatted as a ASCIIMath expression.
+
+To get a LaTeX representation of the expression, use `expr.latex`.
 
 Used when coercing a `BoxedExpression` to a `String`.
 
+`string`
+
 </MemberCard>
 
-<a id="print" name="print"></a>
+<a id="print-1" name="print-1"></a>
 
 <MemberCard>
 
@@ -4242,13 +3168,15 @@ print(): void
 
 Output to the console a string representation of the expression.
 
+`void`
+
 </MemberCard>
 
-<a id="[toprimitive]" name="[toprimitive]"></a>
+<a id="toprimitive-2" name="toprimitive-2"></a>
 
 <MemberCard>
 
-##### BoxedExpression.`[toPrimitive]`()
+##### BoxedExpression.\[toPrimitive\]()
 
 ```ts
 toPrimitive: string | number
@@ -4256,11 +3184,15 @@ toPrimitive: string | number
 
 Similar to`expr.valueOf()` but includes a hint.
 
-• **hint**: `"string"` \| `"number"` \| `"default"`
+###### hint
+
+`"string"` | `"number"` | `"default"`
+
+`string` \| `number`
 
 </MemberCard>
 
-<a id="tojson" name="tojson"></a>
+<a id="tojson-2" name="tojson-2"></a>
 
 <MemberCard>
 
@@ -4274,9 +3206,11 @@ Used by `JSON.stringify()` to serialize this object to JSON.
 
 Method version of `expr.json`.
 
+[`Expression`](#expression)
+
 </MemberCard>
 
-<a id="is" name="is"></a>
+<a id="is-1" name="is-1"></a>
 
 <MemberCard>
 
@@ -4286,9 +3220,15 @@ Method version of `expr.json`.
 is(rhs): boolean
 ```
 
-From `Object.is()`. Equivalent to `BoxedExpression.isSame()`
+Equivalent to `BoxedExpression.isSame()` but the argument can be
+a JavaScript primitive. For example, `expr.is(2)` is equivalent to
+`expr.isSame(ce.number(2))`.
 
-• **rhs**: `unknown`
+###### rhs
+
+`any`
+
+`boolean`
 
 </MemberCard>
 
@@ -4306,13 +3246,19 @@ isSame(rhs): boolean
 
 Structural/symbolic equality (weak equality).
 
-`ce.parse('1+x').isSame(ce.parse('x+1'))` is `false`
+`ce.parse('1+x').isSame(ce.parse('x+1'))` is `false`.
+
+See `expr.isEqual()` for mathematical equality.
 
 :::info[Note]
 Applicable to canonical and non-canonical expressions.
 :::
 
-• **rhs**: [`BoxedExpression`](#boxedexpression)
+###### rhs
+
+[`BoxedExpression`](#boxedexpression)
+
+`boolean`
 
 </MemberCard>
 
@@ -4323,14 +3269,21 @@ Applicable to canonical and non-canonical expressions.
 ##### BoxedExpression.isLess()
 
 ```ts
-isLess(rhs): boolean
+isLess(other): boolean
 ```
 
 If the expressions cannot be compared, return `undefined`
 
 The numeric value of both expressions are compared.
 
-• **rhs**: [`BoxedExpression`](#boxedexpression)
+The expressions are evaluated before being compared, which may be
+expensive.
+
+###### other
+
+`number` | [`BoxedExpression`](#boxedexpression)
+
+`boolean`
 
 </MemberCard>
 
@@ -4341,12 +3294,16 @@ The numeric value of both expressions are compared.
 ##### BoxedExpression.isLessEqual()
 
 ```ts
-isLessEqual(rhs): boolean
+isLessEqual(other): boolean
 ```
 
 The numeric value of both expressions are compared.
 
-• **rhs**: [`BoxedExpression`](#boxedexpression)
+###### other
+
+`number` | [`BoxedExpression`](#boxedexpression)
+
+`boolean`
 
 </MemberCard>
 
@@ -4357,12 +3314,16 @@ The numeric value of both expressions are compared.
 ##### BoxedExpression.isGreater()
 
 ```ts
-isGreater(rhs): boolean
+isGreater(other): boolean
 ```
 
 The numeric value of both expressions are compared.
 
-• **rhs**: [`BoxedExpression`](#boxedexpression)
+###### other
+
+`number` | [`BoxedExpression`](#boxedexpression)
+
+`boolean`
 
 </MemberCard>
 
@@ -4373,12 +3334,16 @@ The numeric value of both expressions are compared.
 ##### BoxedExpression.isGreaterEqual()
 
 ```ts
-isGreaterEqual(rhs): boolean
+isGreaterEqual(other): boolean
 ```
 
 The numeric value of both expressions are compared.
 
-• **rhs**: [`BoxedExpression`](#boxedexpression)
+###### other
+
+`number` | [`BoxedExpression`](#boxedexpression)
+
+`boolean`
 
 </MemberCard>
 
@@ -4389,25 +3354,49 @@ The numeric value of both expressions are compared.
 ##### BoxedExpression.isEqual()
 
 ```ts
-isEqual(rhs): boolean
+isEqual(other): boolean
 ```
 
 Mathematical equality (strong equality), that is the value
-of this expression and of `rhs` are numerically equal.
+of this expression and the value of `other` are numerically equal.
 
-The numeric value of both expressions are compared.
+Both expressions are evaluated and the result is compared numerically.
 
 Numbers whose difference is less than `engine.tolerance` are
 considered equal. This tolerance is set when the `engine.precision` is
 changed to be such that the last two digits are ignored.
 
-• **rhs**: [`BoxedExpression`](#boxedexpression)
+The evaluations may be expensive operations. Other options to consider
+to compare two expressions include:
+- `expr.isSame(other)` for a structural comparison
+- `expr.is(other)` for a comparison of a number literal
+
+**Examples**
+
+```js
+let expr = ce.parse('2 + 2');
+console.log(expr.isEqual(4)); // true
+console.log(expr.isSame(ce.parse(4))); // false
+console.log(expr.is(4)); // false
+
+expr = ce.parse('4');
+console.log(expr.isEqual(4)); // true
+console.log(expr.isSame(ce.parse(4))); // true
+console.log(expr.is(4)); // true (fastest)
+
+```
+
+###### other
+
+`number` | [`BoxedExpression`](#boxedexpression)
+
+`boolean`
 
 </MemberCard>
 
 #### String Expression
 
-<a id="string-1" name="string-1"></a>
+<a id="string" name="string"></a>
 
 <MemberCard>
 
@@ -4428,7 +3417,7 @@ Applicable to canonical and non-canonical expressions.
 
 #### Symbol Expression
 
-<a id="symbol-1" name="symbol-1"></a>
+<a id="symbol" name="symbol"></a>
 
 <MemberCard>
 
@@ -4444,6 +3433,18 @@ Otherwise, return `null`.
 :::info[Note]
 Applicable to canonical and non-canonical expressions.
 :::
+
+</MemberCard>
+
+<a id="tensor" name="tensor"></a>
+
+<MemberCard>
+
+##### BoxedExpression.tensor
+
+```ts
+readonly tensor: AbstractTensor<"expression">;
+```
 
 </MemberCard>
 
@@ -4463,9 +3464,91 @@ expression.
 :::info[Note]
 Applicable to canonical and non-canonical expressions. For
 non-canonical expression, this may indicate a syntax error while parsing
-LaTeX. For canonical expression, this may indicate argument domain
+LaTeX. For canonical expression, this may indicate argument type
 mismatch, or missing or unexpected arguments.
 :::
+
+</MemberCard>
+
+#### Type Properties
+
+<a id="isnumber" name="isnumber"></a>
+
+<MemberCard>
+
+##### BoxedExpression.isNumber
+
+```ts
+readonly isNumber: boolean;
+```
+
+`true` if the value of this expression is a number.
+
+Note that in a fateful twist of cosmic irony, `NaN` ("Not a Number")
+**is** a number.
+
+If `isNumber` is `true`, this indicates that evaluating the expression
+will return a number.
+
+This does not indicate that the expression is a number literal. To check
+if the expression is a number literal, use `expr.isNumberLiteral`.
+
+For example, the expression `["Add", 1, "x"]` is a number if "x" is a
+number and `expr.isNumber` is `true`, but `isNumberLiteral` is `false`.
+
+</MemberCard>
+
+<a id="isinteger" name="isinteger"></a>
+
+<MemberCard>
+
+##### BoxedExpression.isInteger
+
+```ts
+readonly isInteger: boolean;
+```
+
+The value of this expression is an element of the set ℤ: ...,-2, -1, 0, 1, 2...
+
+Note that ±∞ and NaN are not integers.
+
+</MemberCard>
+
+<a id="isrational" name="isrational"></a>
+
+<MemberCard>
+
+##### BoxedExpression.isRational
+
+```ts
+readonly isRational: boolean;
+```
+
+The value of this expression is an element of the set ℚ, p/q with p ∈ ℕ, q ∈ ℤ ⃰  q >= 1
+
+Note that every integer is also a rational.
+
+This is equivalent to `this.type === "rational" || this.type === "integer"`
+
+Note that ±∞ and NaN are not rationals.
+
+</MemberCard>
+
+<a id="isreal" name="isreal"></a>
+
+<MemberCard>
+
+##### BoxedExpression.isReal
+
+```ts
+readonly isReal: boolean;
+```
+
+The value of this expression is a real number.
+
+This is equivalent to `this.type === "rational" || this.type === "integer" || this.type === "real"`
+
+Note that ±∞ and NaN are not real numbers.
 
 </MemberCard>
 
@@ -4474,17 +3557,16 @@ mismatch, or missing or unexpected arguments.
 ### SemiBoxedExpression
 
 ```ts
-type SemiBoxedExpression: 
+type SemiBoxedExpression = 
   | number
+  | bigint
   | string
-  | Decimal
-  | Complex
+  | BigNum
   | MathJsonNumber
   | MathJsonString
   | MathJsonSymbol
   | MathJsonFunction
-  | MathJsonDictionary
-  | SemiBoxedExpression[]
+  | readonly [MathJsonIdentifier, ...SemiBoxedExpression[]]
   | BoxedExpression;
 ```
 
@@ -4494,6 +3576,298 @@ boxed terms.
 This is convenient when creating new expressions from portions
 of an existing `BoxedExpression` while avoiding unboxing and reboxing.
 
+<a id="replaceoptions" name="replaceoptions"></a>
+
+### ReplaceOptions
+
+```ts
+type ReplaceOptions = object;
+```
+
+#### Type declaration
+
+<a id="recursive-1"></a>
+
+##### recursive
+
+<a id="recursive-1" name="recursive-1"></a>
+
+<MemberCard>
+
+##### ReplaceOptions.recursive
+
+```ts
+recursive: boolean;
+```
+
+If `true`, apply replacement rules to all sub-expressions.
+
+If `false`, only consider the top-level expression.
+
+**Default**: `false`
+
+</MemberCard>
+
+<a id="once"></a>
+
+##### once
+
+<a id="once" name="once"></a>
+
+<MemberCard>
+
+##### ReplaceOptions.once
+
+```ts
+once: boolean;
+```
+
+If `true`, stop after the first rule that matches.
+
+If `false`, apply all the remaining rules even after the first match.
+
+**Default**: `false`
+
+</MemberCard>
+
+<a id="usevariations-1"></a>
+
+##### useVariations
+
+<a id="usevariations-1" name="usevariations-1"></a>
+
+<MemberCard>
+
+##### ReplaceOptions.useVariations
+
+```ts
+useVariations: boolean;
+```
+
+If `true` the rule will use some equivalent variations to match.
+
+For example when `useVariations` is true:
+- `x` matches `a + x` with a = 0
+- `x` matches `ax` with a = 1
+- etc...
+
+Setting this to `true` can save time by condensing multiple rules
+into one. This can be particularly useful when describing equations
+solutions. However, it can lead to infinite recursion and should be
+used with caution.
+
+</MemberCard>
+
+<a id="iterationlimit"></a>
+
+##### iterationLimit
+
+<a id="iterationlimit" name="iterationlimit"></a>
+
+<MemberCard>
+
+##### ReplaceOptions.iterationLimit
+
+```ts
+iterationLimit: number;
+```
+
+If `iterationLimit` > 1, the rules will be repeatedly applied
+until no rules apply, up to `maxIterations` times.
+
+Note that if `once` is true, `iterationLimit` has no effect.
+
+**Default**: `1`
+
+</MemberCard>
+
+<a id="canonical-1"></a>
+
+##### canonical
+
+<a id="canonical-1" name="canonical-1"></a>
+
+<MemberCard>
+
+##### ReplaceOptions.canonical
+
+```ts
+canonical: CanonicalOptions;
+```
+
+Indicate if the expression should be canonicalized after the replacement.
+If not provided, the expression is canonicalized if the expression
+that matched the pattern is canonical.
+
+</MemberCard>
+
+<a id="rational-1" name="rational-1"></a>
+
+### Rational
+
+```ts
+type Rational = 
+  | [SmallInteger, SmallInteger]
+  | [bigint, bigint];
+```
+
+<a id="evaluateoptions" name="evaluateoptions"></a>
+
+### EvaluateOptions
+
+```ts
+type EvaluateOptions = object;
+```
+
+Options for `BoxedExpression.evaluate()`
+
+#### Type declaration
+
+<a id="numericapproximation"></a>
+
+##### numericApproximation
+
+<a id="numericapproximation" name="numericapproximation"></a>
+
+<MemberCard>
+
+##### EvaluateOptions.numericApproximation
+
+```ts
+numericApproximation: boolean;
+```
+
+</MemberCard>
+
+<a id="signal"></a>
+
+##### signal
+
+<a id="signal" name="signal"></a>
+
+<MemberCard>
+
+##### EvaluateOptions.signal
+
+```ts
+signal: AbortSignal;
+```
+
+</MemberCard>
+
+<a id="canonicalform" name="canonicalform"></a>
+
+### CanonicalForm
+
+```ts
+type CanonicalForm = 
+  | "InvisibleOperator"
+  | "Number"
+  | "Multiply"
+  | "Add"
+  | "Power"
+  | "Divide"
+  | "Flatten"
+  | "Order";
+```
+
+When provided, canonical forms are used to put an expression in a
+"standard" form.
+
+Each canonical form applies some transformation to an expression. When
+specified as an array, each transformation is done in the order in which
+it was provided.
+
+- `InvisibleOperator`: replace use of the `InvisibleOperator` with
+   another operation, such as multiplication (i.e. `2x` or function
+   application (`f(x)`).
+- `Number`: replace all numeric values with their
+   canonical representation, for example, reduce
+   rationals and replace complex numbers with no imaginary part with a real number.
+- `Multiply`: replace negation with multiplication by -1, remove 1 from multiplications, simplify signs (`-y \times -x` -> `x \times y`), complex numbers are promoted (['Multiply', 2, 'ImaginaryUnit'] -> `["Complex", 0, 2]`)
+- `Add`: replace `Subtract` with `Add`, removes 0 in addition, promote complex numbers (["Add", "a", ["Complex", 0, "b"] -> `["Complex", "a", "b"]`)
+- `Power`: simplify `Power` expression, for example, `x^{-1}` -> `\frac{1}{x}`, `x^0` -> `1`, `x^1` -> `x`, `1^x` -> `1`, `x^{\frac{1}{2}}` -> `\sqrt{x}`, `a^b^c` -> `a^{bc}`...
+- `Divide`: replace with a `Rational` number if numerator and denominator are integers, simplify, e.g. `\frac{x}{1}` -> `x`...
+- `Flatten`: remove any unnecessary `Delimiter` expression, and flatten any associative functions, for example `["Add", ["Add", "a", "b"], "c"]` -> `["Add", "a", "b", "c"]`
+- `Order`: when applicable, sort the arguments in a specific order, for
+   example for addition and multiplication.
+
+<a id="metadata-1" name="metadata-1"></a>
+
+### Metadata
+
+```ts
+type Metadata = object;
+```
+
+Metadata that can be associated with a `BoxedExpression`
+
+#### Type declaration
+
+<a id="latex-1"></a>
+
+##### latex?
+
+<a id="latex-1" name="latex-1"></a>
+
+<MemberCard>
+
+##### Metadata.latex?
+
+```ts
+optional latex: string;
+```
+
+</MemberCard>
+
+<a id="wikidata-4"></a>
+
+##### wikidata?
+
+<a id="wikidata-4" name="wikidata-4"></a>
+
+<MemberCard>
+
+##### Metadata.wikidata?
+
+```ts
+optional wikidata: string;
+```
+
+</MemberCard>
+
+<a id="substitutiont" name="substitutiont"></a>
+
+### Substitution\<T\>
+
+```ts
+type Substitution<T> = object;
+```
+
+A substitution describes the values of the wildcards in a pattern so that
+the pattern is equal to a target expression.
+
+A substitution can also be considered a more constrained version of a
+rule whose `match` is always a symbol.
+
+#### Type Parameters
+
+• **T** = [`SemiBoxedExpression`](#semiboxedexpression)
+
+#### Index Signature
+
+```ts
+[symbol: string]: T
+```
+
+<a id="boxedsubstitution" name="boxedsubstitution"></a>
+
+### BoxedSubstitution
+
+```ts
+type BoxedSubstitution = Substitution<BoxedExpression>;
+```
+
 ## Pattern Matching
 
 <a id="patternmatchoptions" name="patternmatchoptions"></a>
@@ -4501,17 +3875,27 @@ of an existing `BoxedExpression` while avoiding unboxing and reboxing.
 ### PatternMatchOptions
 
 ```ts
-type PatternMatchOptions: Object;
+type PatternMatchOptions = object;
 ```
 
 Control how a pattern is matched to an expression.
 
-- `substitution`: if present, assumes these values for the named wildcards, and ensure that subsequent occurence of the same wildcard have the same value.
-- `recursive`: if true, match recursively, otherwise match only the top level.
-- `numericTolerance`: if present, the tolerance for numeric comparison.
-- `exact`: if true, only match expressions that are structurally identical. If false, match expressions that are structurally identical or equivalent. For example, when false, `["Add", '_a', 2]` matches `2`, with a value of `_a` of `0`. If true, the expression does not match.
+- `substitution`: if present, assumes these values for the named wildcards,
+   and ensure that subsequent occurrence of the same wildcard have the same
+   value.
+- `recursive`: if true, match recursively, otherwise match only the top
+   level.
+- `useVariations`: if false, only match expressions that are structurally identical.
+   If true, match expressions that are structurally identical or equivalent.
+
+   For example, when true, `["Add", '_a', 2]` matches `2`, with a value of
+   `_a` of `0`. If false, the expression does not match. **Default**: `false`
 
 #### Type declaration
+
+<a id="substitution"></a>
+
+##### substitution?
 
 <a id="substitution" name="substitution"></a>
 
@@ -4525,7 +3909,11 @@ optional substitution: BoxedSubstitution;
 
 </MemberCard>
 
-<a id="recursive-2" name="recursive-2"></a>
+<a id="recursive"></a>
+
+##### recursive?
+
+<a id="recursive" name="recursive"></a>
 
 <MemberCard>
 
@@ -4537,84 +3925,177 @@ optional recursive: boolean;
 
 </MemberCard>
 
-<a id="numerictolerance" name="numerictolerance"></a>
+<a id="usevariations"></a>
+
+##### useVariations?
+
+<a id="usevariations" name="usevariations"></a>
 
 <MemberCard>
 
-##### PatternMatchOptions.numericTolerance?
+##### PatternMatchOptions.useVariations?
 
 ```ts
-optional numericTolerance: number;
+optional useVariations: boolean;
 ```
 
 </MemberCard>
-
-<a id="exact" name="exact"></a>
-
-<MemberCard>
-
-##### PatternMatchOptions.exact?
-
-```ts
-optional exact: boolean;
-```
-
-</MemberCard>
-
-<a id="pattern" name="pattern"></a>
-
-### Pattern
-
-```ts
-type Pattern: BoxedExpression;
-```
-
-#### No Inherit Doc
 
 ## Rules
 
-<a id="patternreplacefunction" name="patternreplacefunction"></a>
+<a id="rulereplacefunction" name="rulereplacefunction"></a>
 
-### PatternReplaceFunction
-
-```ts
-type PatternReplaceFunction: (expr, wildcards) => BoxedExpression;
-```
-
-• **expr**: [`BoxedExpression`](#boxedexpression)
-
-• **wildcards**: [`BoxedSubstitution`](#boxedsubstitution)
-
-<a id="patternconditionfunction" name="patternconditionfunction"></a>
-
-### PatternConditionFunction
+### RuleReplaceFunction()
 
 ```ts
-type PatternConditionFunction: (wildcards, ce) => boolean;
+type RuleReplaceFunction = (expr, wildcards) => BoxedExpression | undefined;
 ```
 
-• **wildcards**: [`BoxedSubstitution`](#boxedsubstitution)
+Given an expression and set of wildcards, return a new expression.
 
-• **ce**: `IComputeEngine`
+For example:
+
+```ts
+{
+   match: '_x',
+   replace: (expr, {_x}) => { return ['Add', 1, _x] }
+}
+```
+
+##### expr
+
+[`BoxedExpression`](#boxedexpression)
+
+##### wildcards
+
+[`BoxedSubstitution`](#boxedsubstitution)
+
+[`BoxedExpression`](#boxedexpression) \| `undefined`
+
+<a id="ruleconditionfunction" name="ruleconditionfunction"></a>
+
+### RuleConditionFunction()
+
+```ts
+type RuleConditionFunction = (wildcards, ce) => boolean;
+```
+
+##### wildcards
+
+[`BoxedSubstitution`](#boxedsubstitution)
+
+##### ce
+
+`IComputeEngine`
+
+`boolean`
+
+<a id="rulefunction" name="rulefunction"></a>
+
+### RuleFunction()
+
+```ts
+type RuleFunction = (expr) => 
+  | undefined
+  | BoxedExpression
+  | RuleStep;
+```
+
+##### expr
+
+[`BoxedExpression`](#boxedexpression)
+
+  \| `undefined`
+  \| [`BoxedExpression`](#boxedexpression)
+  \| [`RuleStep`](#rulestep)
+
+<a id="rulestep" name="rulestep"></a>
+
+### RuleStep
+
+```ts
+type RuleStep = object;
+```
+
+#### Type declaration
+
+<a id="value-2"></a>
+
+##### value
+
+<a id="value-2" name="value-2"></a>
+
+<MemberCard>
+
+##### RuleStep.value
+
+```ts
+value: BoxedExpression;
+```
+
+</MemberCard>
+
+<a id="because"></a>
+
+##### because
+
+<a id="because" name="because"></a>
+
+<MemberCard>
+
+##### RuleStep.because
+
+```ts
+because: string;
+```
+
+</MemberCard>
+
+<a id="rulesteps" name="rulesteps"></a>
+
+### RuleSteps
+
+```ts
+type RuleSteps = RuleStep[];
+```
 
 <a id="rule" name="rule"></a>
 
 ### Rule
 
 ```ts
-type Rule: Object;
+type Rule = 
+  | string
+  | RuleFunction
+  | {
+  match:   | LatexString
+     | SemiBoxedExpression
+     | BoxedExpression;
+  replace:   | LatexString
+     | SemiBoxedExpression
+     | RuleReplaceFunction
+     | RuleFunction;
+  condition:   | LatexString
+     | RuleConditionFunction;
+  useVariations: boolean;
+  id: string;
+};
 ```
 
 A rule describes how to modify an expressions that matches a pattern `match`
 into a new expression `replace`.
 
-`x-1` \( \to \) `1-x`
-`(x+1)(x-1)` \( \to \) `x^2-1
+- `x-1` \( \to \) `1-x`
+- `(x+1)(x-1)` \( \to \) `x^2-1
 
-The `match` pattern can be expressed as a LaTeX string or a
-MathJSON expression.
+The patterns can be expressed as LaTeX strings or a MathJSON expressions.
 
-Anonymous wildcards (`_`) will match any
+As a shortcut, a rule can be defined as a LaTeX string: `x-1 -> 1-x`.
+The expression to the left of `->` is the `match` and the expression to the
+right is the `replace`. When using LaTeX strings, single character variables
+are assumed to be wildcards.
+
+When using MathJSON expressions, anonymous wildcards (`_`) will match any
 expression. Named wildcards (`_x`, `_a`, etc...) will match any expression
 and bind the expression to the wildcard name.
 
@@ -4622,127 +4103,109 @@ In addition the sequence wildcard (`__1`, `__a`, etc...) will match
 a sequence of one or more expressions, and bind the sequence to the
 wildcard name.
 
-#### Type declaration
+Sequence wildcards are useful when the number of elements in the sequence
+is not known in advance. For example, in a sum, the number of terms is
+not known in advance. ["Add", 0, `__a`] will match two or more terms and
+the `__a` wildcard will be a sequence of the matchign terms.
 
-<a id="match-2" name="match-2"></a>
+If `exact` is false, the rule will match variants.
 
-<MemberCard>
+For example 'x' will match 'a + x', 'x' will match 'ax', etc...
 
-##### Rule.match
+For simplification rules, you generally want `exact` to be true, but
+to solve equations, you want it to be false. Default to true.
 
-```ts
-match: LatexString | SemiBoxedExpression | Pattern;
-```
-
-</MemberCard>
-
-<a id="replace-1" name="replace-1"></a>
-
-<MemberCard>
-
-##### Rule.replace
-
-```ts
-replace: LatexString | SemiBoxedExpression | PatternReplaceFunction;
-```
-
-</MemberCard>
-
-<a id="condition-1" name="condition-1"></a>
-
-<MemberCard>
-
-##### Rule.condition?
-
-```ts
-optional condition: LatexString | PatternConditionFunction;
-```
-
-</MemberCard>
-
-<a id="priority" name="priority"></a>
-
-<MemberCard>
-
-##### Rule.priority?
-
-```ts
-optional priority: number;
-```
-
-</MemberCard>
-
-<a id="id" name="id"></a>
-
-<MemberCard>
-
-##### Rule.id?
-
-```ts
-optional id: string;
-```
-
-</MemberCard>
+When set to false, infinite recursion is possible.
 
 <a id="boxedrule" name="boxedrule"></a>
 
 ### BoxedRule
 
 ```ts
-type BoxedRule: Object;
+type BoxedRule = object;
 ```
+
+If the `match` property is `undefined`, all expressions match this rule
+and `condition` should also be `undefined`. The `replace` property should
+be a `BoxedExpression` or a `RuleFunction`, and further filtering can be
+done in the `replace` function.
 
 #### Type declaration
 
-<a id="match-3" name="match-3"></a>
+<a id="match-1"></a>
+
+##### match
+
+<a id="match-1" name="match-1"></a>
 
 <MemberCard>
 
 ##### BoxedRule.match
 
 ```ts
-match: Pattern;
+match: undefined | BoxedExpression;
 ```
 
 </MemberCard>
 
-<a id="replace-2" name="replace-2"></a>
+<a id="replace-1"></a>
+
+##### replace
+
+<a id="replace-1" name="replace-1"></a>
 
 <MemberCard>
 
 ##### BoxedRule.replace
 
 ```ts
-replace: BoxedExpression | PatternReplaceFunction;
+replace: 
+  | BoxedExpression
+  | RuleReplaceFunction
+  | RuleFunction;
 ```
 
 </MemberCard>
 
-<a id="condition-2" name="condition-2"></a>
+<a id="condition"></a>
+
+##### condition
+
+<a id="condition" name="condition"></a>
 
 <MemberCard>
 
 ##### BoxedRule.condition
 
 ```ts
-condition: undefined | PatternConditionFunction;
+condition: 
+  | undefined
+  | RuleConditionFunction;
 ```
 
 </MemberCard>
 
-<a id="priority-1" name="priority-1"></a>
+<a id="usevariations-2"></a>
+
+##### useVariations?
+
+<a id="usevariations-2" name="usevariations-2"></a>
 
 <MemberCard>
 
-##### BoxedRule.priority
+##### BoxedRule.useVariations?
 
 ```ts
-priority: number;
+optional useVariations: boolean;
 ```
 
 </MemberCard>
 
-<a id="id-1" name="id-1"></a>
+<a id="id"></a>
+
+##### id?
+
+<a id="id" name="id"></a>
 
 <MemberCard>
 
@@ -4759,14 +4222,38 @@ optional id: string;
 ### BoxedRuleSet
 
 ```ts
-type BoxedRuleSet: ReadonlySet<BoxedRule>;
+type BoxedRuleSet = object;
 ```
+
+To create a BoxedRuleSet use the `ce.rules()` method.
+
+Do not create a `BoxedRuleSet` directly.
+
+#### Type declaration
+
+<a id="rules-1"></a>
+
+##### rules
+
+<a id="rules-1" name="rules-1"></a>
+
+<MemberCard>
+
+##### BoxedRuleSet.rules
+
+```ts
+rules: ReadonlyArray<BoxedRule>;
+```
+
+</MemberCard>
 
 ## Assumptions
 
 <a id="expressionmapinterfaceu" name="expressionmapinterfaceu"></a>
 
 ### ExpressionMapInterface\<U\>
+
+#### Type Parameters
 
 • **U**
 
@@ -4780,11 +4267,15 @@ type BoxedRuleSet: ReadonlySet<BoxedRule>;
 has(expr): boolean
 ```
 
-• **expr**: [`BoxedExpression`](#boxedexpression)
+###### expr
+
+[`BoxedExpression`](#boxedexpression)
+
+`boolean`
 
 </MemberCard>
 
-<a id="get" name="get"></a>
+<a id="get-1" name="get-1"></a>
 
 <MemberCard>
 
@@ -4794,7 +4285,11 @@ has(expr): boolean
 get(expr): U
 ```
 
-• **expr**: [`BoxedExpression`](#boxedexpression)
+###### expr
+
+[`BoxedExpression`](#boxedexpression)
+
+`U`
 
 </MemberCard>
 
@@ -4808,9 +4303,15 @@ get(expr): U
 set(expr, value): void
 ```
 
-• **expr**: [`BoxedExpression`](#boxedexpression)
+###### expr
 
-• **value**: `U`
+[`BoxedExpression`](#boxedexpression)
+
+###### value
+
+`U`
+
+`void`
 
 </MemberCard>
 
@@ -4824,7 +4325,11 @@ set(expr, value): void
 delete(expr): void
 ```
 
-• **expr**: [`BoxedExpression`](#boxedexpression)
+###### expr
+
+[`BoxedExpression`](#boxedexpression)
+
+`void`
 
 </MemberCard>
 
@@ -4838,17 +4343,21 @@ delete(expr): void
 clear(): void
 ```
 
+`void`
+
 </MemberCard>
 
-<a id="[iterator]" name="[iterator]"></a>
+<a id="iterator" name="iterator"></a>
 
 <MemberCard>
 
-##### ExpressionMapInterface.`[iterator]`()
+##### ExpressionMapInterface.\[iterator\]()
 
 ```ts
 iterator: IterableIterator<[BoxedExpression, U]>
 ```
+
+`IterableIterator`\<\[[`BoxedExpression`](#boxedexpression), `U`\]\>
 
 </MemberCard>
 
@@ -4862,6 +4371,8 @@ iterator: IterableIterator<[BoxedExpression, U]>
 entries(): IterableIterator<[BoxedExpression, U]>
 ```
 
+`IterableIterator`\<\[[`BoxedExpression`](#boxedexpression), `U`\]\>
+
 </MemberCard>
 
 <a id="assumeresult" name="assumeresult"></a>
@@ -4869,7 +4380,7 @@ entries(): IterableIterator<[BoxedExpression, U]>
 ### AssumeResult
 
 ```ts
-type AssumeResult: 
+type AssumeResult = 
   | "internal-error"
   | "not-a-predicate"
   | "contradiction"
@@ -4879,85 +4390,660 @@ type AssumeResult:
 
 ## Compiling
 
+<a id="compiledtype" name="compiledtype"></a>
+
+### CompiledType
+
+```ts
+type CompiledType = boolean | number | string | object;
+```
+
 <a id="compiledexpression" name="compiledexpression"></a>
 
 ### CompiledExpression
 
 ```ts
-type CompiledExpression: Object;
+type CompiledExpression = object;
 ```
 
 #### Type declaration
 
-<a id="evaluate-3" name="evaluate-3"></a>
+<a id="evaluate-1"></a>
+
+##### evaluate()?
+
+<a id="evaluate-1" name="evaluate-1"></a>
 
 <MemberCard>
 
-##### CompiledExpression.evaluate?
+##### CompiledExpression.evaluate()?
 
 ```ts
 optional evaluate: (scope) => number | BoxedExpression;
 ```
 
-• **scope**
+###### scope
+
+`number` \| [`BoxedExpression`](#boxedexpression)
 
 </MemberCard>
 
 ## Definitions
 
-<a id="identifierdefinition" name="identifierdefinition"></a>
+<a id="eqhandlers" name="eqhandlers"></a>
 
-### IdentifierDefinition
-
-```ts
-type IdentifierDefinition: SymbolDefinition | FunctionDefinition | SemiBoxedExpression;
-```
-
-A table mapping identifiers to their definition.
-
-Identifiers should be valid MathJSON identifiers. In addition, the
-following rules are recommended:
-
-- Use only latin letters, digits and `-`: `/[a-zA-Z0-9-]+/`
-- The first character should be a letter: `/^[a-zA-Z]/`
-- Functions and symbols exported from a library should start with an uppercase letter `/^[A-Z]/`
-
-If a semi boxed expression
-
-<a id="identifierdefinitions" name="identifierdefinitions"></a>
-
-### IdentifierDefinitions
+### EqHandlers
 
 ```ts
-type IdentifierDefinitions: Readonly<Object>;
+type EqHandlers = object;
 ```
+
+These handlers compare two expressions.
+
+If only one of the handlers is provided, the other is derived from it.
+
+Having both may be useful if comparing non-equality is faster than equality.
 
 #### Type declaration
 
-<a id="runtimeidentifierdefinitions" name="runtimeidentifierdefinitions"></a>
+<a id="eq-2"></a>
 
-### RuntimeIdentifierDefinitions
+##### eq()
+
+<a id="eq-2" name="eq-2"></a>
+
+<MemberCard>
+
+##### EqHandlers.eq()
 
 ```ts
-type RuntimeIdentifierDefinitions: Map<string, BoxedSymbolDefinition | BoxedFunctionDefinition>;
+eq: (a, b) => boolean | undefined;
 ```
 
-The entries have been validated and optimized for faster evaluation.
+###### a
 
-When a new scope is created with `pushScope()` or when creating a new
-engine instance, new instances of this type are created as needed.
+[`BoxedExpression`](#boxedexpression)
+
+###### b
+
+[`BoxedExpression`](#boxedexpression)
+
+`boolean` \| `undefined`
+
+</MemberCard>
+
+<a id="neq-1"></a>
+
+##### neq()
+
+<a id="neq-1" name="neq-1"></a>
+
+<MemberCard>
+
+##### EqHandlers.neq()
+
+```ts
+neq: (a, b) => boolean | undefined;
+```
+
+###### a
+
+[`BoxedExpression`](#boxedexpression)
+
+###### b
+
+[`BoxedExpression`](#boxedexpression)
+
+`boolean` \| `undefined`
+
+</MemberCard>
+
+<a id="hold" name="hold"></a>
+
+### Hold
+
+```ts
+type Hold = "none" | "all" | "first" | "rest" | "last" | "most";
+```
+
+<a id="symboldefinition-1" name="symboldefinition-1"></a>
+
+### SymbolDefinition
+
+```ts
+type SymbolDefinition = BaseDefinition & Partial<SymbolAttributes> & object;
+```
+
+A bound symbol (i.e. one with an associated definition) has either a type
+(e.g. ∀ x ∈ ℝ), a value (x = 5) or both (π: value = 3.14... type = 'real')
+
+#### Type declaration
+
+##### type?
+
+<MemberCard>
+
+##### SymbolDefinition.type?
+
+```ts
+optional type: 
+  | Type
+  | TypeString;
+```
+
+</MemberCard>
+
+##### inferred?
+
+<MemberCard>
+
+##### SymbolDefinition.inferred?
+
+```ts
+optional inferred: boolean;
+```
+
+If true, the type is inferred, and could be adjusted later
+as more information becomes available or if the symbol is explicitly
+declared.
+
+</MemberCard>
+
+##### value?
+
+<MemberCard>
+
+##### SymbolDefinition.value?
+
+```ts
+optional value: 
+  | LatexString
+  | SemiBoxedExpression
+  | (ce) => BoxedExpression | null;
+```
+
+`value` can be a JS function since for some constants, such as
+`Pi`, the actual value depends on the `precision` setting of the
+`ComputeEngine` and possible other environment settings
+
+</MemberCard>
+
+##### flags?
+
+<MemberCard>
+
+##### SymbolDefinition.flags?
+
+```ts
+optional flags: Partial<NumericFlags>;
+```
+
+</MemberCard>
+
+##### eq()?
+
+<MemberCard>
+
+##### SymbolDefinition.eq()?
+
+```ts
+optional eq: (a) => boolean | undefined;
+```
+
+###### a
+
+[`BoxedExpression`](#boxedexpression)
+
+`boolean` \| `undefined`
+
+</MemberCard>
+
+##### neq()?
+
+<MemberCard>
+
+##### SymbolDefinition.neq()?
+
+```ts
+optional neq: (a) => boolean | undefined;
+```
+
+###### a
+
+[`BoxedExpression`](#boxedexpression)
+
+`boolean` \| `undefined`
+
+</MemberCard>
+
+##### cmp()?
+
+<MemberCard>
+
+##### SymbolDefinition.cmp()?
+
+```ts
+optional cmp: (a) => "=" | ">" | "<" | undefined;
+```
+
+###### a
+
+[`BoxedExpression`](#boxedexpression)
+
+`"="` \| `">"` \| `"<"` \| `undefined`
+
+</MemberCard>
+
+##### collection?
+
+<MemberCard>
+
+##### SymbolDefinition.collection?
+
+```ts
+optional collection: Partial<CollectionHandlers>;
+```
+
+</MemberCard>
+
+<a id="functiondefinition-1" name="functiondefinition-1"></a>
+
+### FunctionDefinition
+
+```ts
+type FunctionDefinition = BaseDefinition & Partial<FunctionDefinitionFlags> & object;
+```
+
+Definition record for a function.
+
+#### Type declaration
+
+##### signature?
+
+<MemberCard>
+
+##### FunctionDefinition.signature?
+
+```ts
+optional signature: 
+  | Type
+  | TypeString;
+```
+
+The function signature.
+
+If a `type` handler is provided, the return type of the function should
+be a subtype of the return type in the signature.
+
+</MemberCard>
+
+##### type()?
+
+<MemberCard>
+
+##### FunctionDefinition.type()?
+
+```ts
+optional type: (ops, options) => 
+  | Type
+  | TypeString
+  | BoxedType
+  | undefined;
+```
+
+The actual type of the result based on the arguments.
+
+Should be a subtype of the type indicated in the signature.
+
+Do not evaluate the arguments.
+
+The type of the arguments can be used to determine the type of the
+result.
+
+###### ops
+
+`ReadonlyArray`\<[`BoxedExpression`](#boxedexpression)\>
+
+###### options
+
+###### engine
+
+`IComputeEngine`
+
+  \| [`Type`](#type-2)
+  \| [`TypeString`](#typestring)
+  \| [`BoxedType`](#boxedtype)
+  \| `undefined`
+
+</MemberCard>
+
+##### sgn()?
+
+<MemberCard>
+
+##### FunctionDefinition.sgn()?
+
+```ts
+optional sgn: (ops, options) => Sign | undefined;
+```
+
+Return the sign of the function expression.
+
+If the sign cannot be determined, return `undefined`.
+
+When determining the sign, only literal values and the values of
+symbols, if they are literals, should be considered.
+
+Do not evaluate the arguments.
+
+The type and sign of the arguments can be used to determine the sign.
+
+###### ops
+
+`ReadonlyArray`\<[`BoxedExpression`](#boxedexpression)\>
+
+###### options
+
+###### engine
+
+`IComputeEngine`
+
+[`Sign`](#sign) \| `undefined`
+
+</MemberCard>
+
+##### even()?
+
+<MemberCard>
+
+##### FunctionDefinition.even()?
+
+```ts
+optional even: (ops, options) => boolean | undefined;
+```
+
+Return true of the function expression is even, false if it is odd and
+undefined if it is neither.
+
+###### ops
+
+`ReadonlyArray`\<[`BoxedExpression`](#boxedexpression)\>
+
+###### options
+
+###### engine
+
+`IComputeEngine`
+
+`boolean` \| `undefined`
+
+</MemberCard>
+
+##### complexity?
+
+<MemberCard>
+
+##### FunctionDefinition.complexity?
+
+```ts
+optional complexity: number;
+```
+
+A number used to order arguments.
+
+Argument with higher complexity are placed after arguments with
+lower complexity when ordered canonically in commutative functions.
+
+- Additive functions: 1000-1999
+- Multiplicative functions: 2000-2999
+- Root and power functions: 3000-3999
+- Log functions: 4000-4999
+- Trigonometric functions: 5000-5999
+- Hypertrigonometric functions: 6000-6999
+- Special functions (factorial, Gamma, ...): 7000-7999
+- Collections: 8000-8999
+- Inert and styling:  9000-9999
+- Logic: 10000-10999
+- Relational: 11000-11999
+
+**Default**: 100,000
+
+</MemberCard>
+
+##### canonical()?
+
+<MemberCard>
+
+##### FunctionDefinition.canonical()?
+
+```ts
+optional canonical: (ops, options) => BoxedExpression | null;
+```
+
+Return the canonical form of the expression with the arguments `args`.
+
+The arguments (`args`) may not be in canonical form. If necessary, they
+can be put in canonical form.
+
+This handler should validate the type and number of the arguments.
+
+If a required argument is missing, it should be indicated with a
+`["Error", "'missing"]` expression. If more arguments than expected
+are present, this should be indicated with an
+["Error", "'unexpected-argument'"]` error expression
+
+If the type of an argument is not compatible, it should be indicated
+with an `incompatible-type` error.
+
+`["Sequence"]` expressions are not folded and need to be handled
+ explicitly.
+
+If the function is associative, idempotent or an involution,
+this handler should account for it. Notably, if it is commutative, the
+arguments should be sorted in canonical order.
+
+Values of symbols should not be substituted, unless they have
+a `holdUntil` attribute of `"never"`.
+
+The handler should not consider the value or any assumptions about any
+of the arguments that are symbols or functions (i.e. `arg.isZero`,
+`arg.isInteger`, etc...) since those may change over time.
+
+The result of the handler should be a canonical expression.
+
+If the arguments do not match, they should be replaced with an appropriate
+`["Error"]` expression. If the expression cannot be put in canonical form,
+the handler should return `null`.
+
+###### ops
+
+`ReadonlyArray`\<[`BoxedExpression`](#boxedexpression)\>
+
+###### options
+
+###### engine
+
+`IComputeEngine`
+
+[`BoxedExpression`](#boxedexpression) \| `null`
+
+</MemberCard>
+
+##### evaluate?
+
+<MemberCard>
+
+##### FunctionDefinition.evaluate?
+
+```ts
+optional evaluate: 
+  | (ops, options) => BoxedExpression | undefined
+  | BoxedExpression;
+```
+
+Evaluate a function expression.
+
+The arguments have been evaluated, except the arguments to which a
+`hold` applied.
+
+It is not necessary to further simplify or evaluate the arguments.
+
+If performing numerical calculations and `options.numericalApproximation`
+is `false` return an exact numeric value, for example return a rational
+number or a square root, rather than a floating point approximation.
+Use `ce.number()` to create the numeric value.
+
+When `numericalApproximation` is `false`, return a floating point number:
+- do not reduce rational numbers to decimal (floating point approximation)
+- do not reduce square roots of rational numbers
+
+If the expression cannot be evaluated, due to the values, types, or
+assumptions about its arguments, for example, return `undefined` or
+an `["Error"]` expression.
+
+</MemberCard>
+
+##### evaluateAsync()?
+
+<MemberCard>
+
+##### FunctionDefinition.evaluateAsync()?
+
+```ts
+optional evaluateAsync: (ops, options) => Promise<BoxedExpression | undefined>;
+```
+
+An option asynchronous version of `evaluate`.
+
+###### ops
+
+`ReadonlyArray`\<[`BoxedExpression`](#boxedexpression)\>
+
+###### options
+
+[`EvaluateOptions`](#evaluateoptions) & `object`
+
+`Promise`\<[`BoxedExpression`](#boxedexpression) \| `undefined`\>
+
+</MemberCard>
+
+##### evalDimension()?
+
+<MemberCard>
+
+##### FunctionDefinition.evalDimension()?
+
+```ts
+optional evalDimension: (args, options) => BoxedExpression;
+```
+
+**`Experimental`**
+
+Dimensional analysis
+
+###### args
+
+`ReadonlyArray`\<[`BoxedExpression`](#boxedexpression)\>
+
+###### options
+
+[`EvaluateOptions`](#evaluateoptions) & `object`
+
+[`BoxedExpression`](#boxedexpression)
+
+</MemberCard>
+
+##### compile()?
+
+<MemberCard>
+
+##### FunctionDefinition.compile()?
+
+```ts
+optional compile: (expr) => CompiledExpression;
+```
+
+Return a compiled (optimized) expression.
+
+###### expr
+
+[`BoxedExpression`](#boxedexpression)
+
+[`CompiledExpression`](#compiledexpression)
+
+</MemberCard>
+
+##### eq()?
+
+<MemberCard>
+
+##### FunctionDefinition.eq()?
+
+```ts
+optional eq: (a, b) => boolean | undefined;
+```
+
+###### a
+
+[`BoxedExpression`](#boxedexpression)
+
+###### b
+
+[`BoxedExpression`](#boxedexpression)
+
+`boolean` \| `undefined`
+
+</MemberCard>
+
+##### neq()?
+
+<MemberCard>
+
+##### FunctionDefinition.neq()?
+
+```ts
+optional neq: (a, b) => boolean | undefined;
+```
+
+###### a
+
+[`BoxedExpression`](#boxedexpression)
+
+###### b
+
+[`BoxedExpression`](#boxedexpression)
+
+`boolean` \| `undefined`
+
+</MemberCard>
+
+##### collection?
+
+<MemberCard>
+
+##### FunctionDefinition.collection?
+
+```ts
+optional collection: Partial<CollectionHandlers>;
+```
+
+</MemberCard>
 
 <a id="basedefinition-1" name="basedefinition-1"></a>
 
 ### BaseDefinition
 
 ```ts
-type BaseDefinition: Object;
+type BaseDefinition = object;
 ```
 
 #### Type declaration
 
-<a id="description-2" name="description-2"></a>
+<a id="description-3"></a>
+
+##### description?
+
+<a id="description-3" name="description-3"></a>
 
 <MemberCard>
 
@@ -4971,7 +5057,11 @@ A short (about 1 line) description. May contain Markdown.
 
 </MemberCard>
 
-<a id="url-2" name="url-2"></a>
+<a id="url-3"></a>
+
+##### url?
+
+<a id="url-3" name="url-3"></a>
 
 <MemberCard>
 
@@ -4981,9 +5071,13 @@ A short (about 1 line) description. May contain Markdown.
 optional url: string;
 ```
 
-A URL pointing to more information about this symbol or head.
+A URL pointing to more information about this symbol or operator.
 
 </MemberCard>
+
+<a id="wikidata-3"></a>
+
+##### wikidata?
 
 <a id="wikidata-3" name="wikidata-3"></a>
 
@@ -4999,6 +5093,403 @@ A short string representing an entry in a wikibase.
 
 For example `Q167` is the [wikidata entry](https://www.wikidata.org/wiki/Q167)
 for the `Pi` constant.
+
+</MemberCard>
+
+<a id="identifierdefinition" name="identifierdefinition"></a>
+
+### IdentifierDefinition
+
+```ts
+type IdentifierDefinition = OneOf<[SymbolDefinition, FunctionDefinition, SemiBoxedExpression]>;
+```
+
+A table mapping identifiers to their definition.
+
+Identifiers should be valid MathJSON identifiers. In addition, the
+following rules are recommended:
+
+- Use only latin letters, digits and `-`: `/[a-zA-Z0-9-]+/`
+- The first character should be a letter: `/^[a-zA-Z]/`
+- Functions and symbols exported from a library should start with an uppercase letter `/^[A-Z]/`
+
+<a id="identifierdefinitions" name="identifierdefinitions"></a>
+
+### IdentifierDefinitions
+
+```ts
+type IdentifierDefinitions = Readonly<{}>;
+```
+
+<a id="numericflags" name="numericflags"></a>
+
+### NumericFlags
+
+```ts
+type NumericFlags = object;
+```
+
+When used in a `SymbolDefinition` or `Functiondefinition` these flags
+provide additional information about the value of the symbol or function.
+
+If provided, they will override the value derived from
+the symbol's value.
+
+#### Type declaration
+
+<a id="sgn-3"></a>
+
+##### sgn
+
+<a id="sgn-3" name="sgn-3"></a>
+
+<MemberCard>
+
+##### NumericFlags.sgn
+
+```ts
+sgn: Sign | undefined;
+```
+
+</MemberCard>
+
+<a id="even-1"></a>
+
+##### even
+
+<a id="even-1" name="even-1"></a>
+
+<MemberCard>
+
+##### NumericFlags.even
+
+```ts
+even: boolean | undefined;
+```
+
+</MemberCard>
+
+<a id="odd-1"></a>
+
+##### odd
+
+<a id="odd-1" name="odd-1"></a>
+
+<MemberCard>
+
+##### NumericFlags.odd
+
+```ts
+odd: boolean | undefined;
+```
+
+</MemberCard>
+
+<a id="collectionhandlers" name="collectionhandlers"></a>
+
+### CollectionHandlers
+
+```ts
+type CollectionHandlers = object;
+```
+
+These handlers are the primitive operations that can be performed on
+collections.
+
+There are two types of collections:
+
+- finite collections, such as lists, tuples, sets, matrices, etc...
+ The `size()` handler of finite collections returns the number of elements
+
+- infinite collections, such as sequences, ranges, etc...
+ The `size()` handler of infinite collections returns `Infinity`
+ Infinite collections are not indexable: they have no `at()` handler.
+
+#### Type declaration
+
+#### Definitions
+
+<a id="iterator-1"></a>
+
+###### iterator()
+
+<a id="iterator-1" name="iterator-1"></a>
+
+<MemberCard>
+
+###### CollectionHandlers.iterator()
+
+```ts
+iterator: (collection, start?, count?) => Iterator<BoxedExpression, undefined>;
+```
+
+Return an iterator
+- start is optional and is a 1-based index.
+- if start is not specified, start from index 1
+- count is optional and is the number of elements to return
+- if count is not specified or negative, return all the elements from
+  start to the end
+
+If there is a `keys()` handler, there is no `iterator()` handler.
+
+###### collection
+
+[`BoxedExpression`](#boxedexpression)
+
+###### start?
+
+`number`
+
+###### count?
+
+`number`
+
+`Iterator`\<[`BoxedExpression`](#boxedexpression), `undefined`\>
+
+</MemberCard>
+
+#### Other
+
+<a id="size-1"></a>
+
+###### size()
+
+<a id="size-1" name="size-1"></a>
+
+<MemberCard>
+
+###### CollectionHandlers.size()
+
+```ts
+size: (collection) => number;
+```
+
+Return the number of elements in the collection.
+
+An empty collection has a size of 0.
+
+###### collection
+
+[`BoxedExpression`](#boxedexpression)
+
+`number`
+
+</MemberCard>
+
+<a id="contains-1"></a>
+
+###### contains()
+
+<a id="contains-1" name="contains-1"></a>
+
+<MemberCard>
+
+###### CollectionHandlers.contains()
+
+```ts
+contains: (collection, target) => boolean;
+```
+
+Return `true` if the target
+expression is in the collection, `false` otherwise.
+
+###### collection
+
+[`BoxedExpression`](#boxedexpression)
+
+###### target
+
+[`BoxedExpression`](#boxedexpression)
+
+`boolean`
+
+</MemberCard>
+
+<a id="at-2"></a>
+
+###### at()
+
+<a id="at-2" name="at-2"></a>
+
+<MemberCard>
+
+###### CollectionHandlers.at()
+
+```ts
+at: (collection, index) => undefined | BoxedExpression;
+```
+
+Return the element at the specified index.
+
+The first element is `at(1)`, the last element is `at(-1)`.
+
+If the index is &lt;0, return the element at index `size() + index + 1`.
+
+The index can also be a string for example for maps. The set of valid keys
+is returned by the `keys()` handler.
+
+If the index is invalid, return `undefined`.
+
+###### collection
+
+[`BoxedExpression`](#boxedexpression)
+
+###### index
+
+`number` | `string`
+
+`undefined` \| [`BoxedExpression`](#boxedexpression)
+
+</MemberCard>
+
+<a id="keys"></a>
+
+###### keys()
+
+<a id="keys" name="keys"></a>
+
+<MemberCard>
+
+###### CollectionHandlers.keys()
+
+```ts
+keys: (collection) => undefined | Iterable<string>;
+```
+
+If the collection can be indexed by strings, return the valid values
+for the index.
+
+###### collection
+
+[`BoxedExpression`](#boxedexpression)
+
+`undefined` \| `Iterable`\<`string`\>
+
+</MemberCard>
+
+<a id="indexof-1"></a>
+
+###### indexOf()
+
+<a id="indexof-1" name="indexof-1"></a>
+
+<MemberCard>
+
+###### CollectionHandlers.indexOf()
+
+```ts
+indexOf: (collection, target, from?) => number | undefined;
+```
+
+Return the index of the first element that matches the target expression.
+
+The comparison is done using the `target.isEqual()` method.
+
+If the expression is not found, return `undefined`.
+
+If the expression is found, return the index, 1-based.
+
+Return the index of the first match.
+
+`from` is the starting index for the search. If negative, start from
+the end  and search backwards.
+
+###### collection
+
+[`BoxedExpression`](#boxedexpression)
+
+###### target
+
+[`BoxedExpression`](#boxedexpression)
+
+###### from?
+
+`number`
+
+`number` \| `undefined`
+
+</MemberCard>
+
+<a id="subsetof"></a>
+
+###### subsetOf()
+
+<a id="subsetof" name="subsetof"></a>
+
+<MemberCard>
+
+###### CollectionHandlers.subsetOf()
+
+```ts
+subsetOf: (collection, target, strict) => boolean;
+```
+
+Return `true` if all the elements of `target` are in `expr`.
+Both `expr` and `target` are collections.
+If strict is `true`, the subset must be strict, that is, `expr` must
+have more elements than `target`.
+
+###### collection
+
+[`BoxedExpression`](#boxedexpression)
+
+###### target
+
+[`BoxedExpression`](#boxedexpression)
+
+###### strict
+
+`boolean`
+
+`boolean`
+
+</MemberCard>
+
+<a id="eltsgn"></a>
+
+###### eltsgn()
+
+<a id="eltsgn" name="eltsgn"></a>
+
+<MemberCard>
+
+###### CollectionHandlers.eltsgn()
+
+```ts
+eltsgn: (collection) => Sign | undefined;
+```
+
+Return the sign of all the elements of the collection.
+
+###### collection
+
+[`BoxedExpression`](#boxedexpression)
+
+[`Sign`](#sign) \| `undefined`
+
+</MemberCard>
+
+<a id="elttype"></a>
+
+###### elttype()
+
+<a id="elttype" name="elttype"></a>
+
+<MemberCard>
+
+###### CollectionHandlers.elttype()
+
+```ts
+elttype: (collection) => Type | undefined;
+```
+
+Return the widest type of all the elements in the collection
+
+###### collection
+
+[`BoxedExpression`](#boxedexpression)
+
+[`Type`](#type-2) \| `undefined`
 
 </MemberCard>
 
@@ -5065,12 +5556,70 @@ optional url: string;
 ##### BoxedBaseDefinition.scope
 
 ```ts
-scope: RuntimeScope;
+scope: object;
 ```
 
 The scope this definition belongs to.
 
 This field is usually undefined, but its value is set by `getDefinition()`
+
+<a id=""></a>
+
+###### parentScope?
+
+<MemberCard>
+
+###### scope.parentScope?
+
+```ts
+optional parentScope: { parentScope?: ...; ids?: RuntimeIdentifierDefinitions; assumptions: ExpressionMapInterface<boolean>; };
+```
+
+</MemberCard>
+
+<a id=""></a>
+
+###### ids?
+
+<MemberCard>
+
+###### scope.ids?
+
+```ts
+optional ids: RuntimeIdentifierDefinitions;
+```
+
+</MemberCard>
+
+<a id=""></a>
+
+###### assumptions
+
+<MemberCard>
+
+###### scope.assumptions
+
+```ts
+assumptions: ExpressionMapInterface<boolean>;
+```
+
+</MemberCard>
+
+</MemberCard>
+
+<a id="collection" name="collection"></a>
+
+<MemberCard>
+
+##### BoxedBaseDefinition.collection?
+
+```ts
+optional collection: Partial<CollectionHandlers>;
+```
+
+If this is the definition of a collection, the set of primitive operations
+that can be performed on this collection (counting the number of elements,
+enumerating it, etc...).
 
 </MemberCard>
 
@@ -5081,11 +5630,446 @@ This field is usually undefined, but its value is set by `getDefinition()`
 ##### BoxedBaseDefinition.reset()
 
 ```ts
-reset(): any
+reset(): void
 ```
 
 When the environment changes, for example the numerical precision,
 call `reset()` so that any cached values can be recalculated.
+
+`void`
+
+</MemberCard>
+
+<a id="symbolattributes" name="symbolattributes"></a>
+
+### SymbolAttributes
+
+```ts
+type SymbolAttributes = object;
+```
+
+#### Type declaration
+
+<a id="constant-1"></a>
+
+##### constant
+
+<a id="constant-1" name="constant-1"></a>
+
+<MemberCard>
+
+##### SymbolAttributes.constant
+
+```ts
+constant: boolean;
+```
+
+If `true` the value of the symbol is constant. The value or type of
+symbols with this attribute set to `true` cannot be changed.
+
+If `false`, the symbol is a variable.
+
+**Default**: `false`
+
+</MemberCard>
+
+<a id="holduntil-1"></a>
+
+##### holdUntil
+
+<a id="holduntil-1" name="holduntil-1"></a>
+
+<MemberCard>
+
+##### SymbolAttributes.holdUntil
+
+```ts
+holdUntil: "never" | "evaluate" | "N";
+```
+
+If the symbol has a value, it is held as indicated in the table below.
+A green checkmark indicate that the symbol is substituted.
+
+<div className="symbols-table">
+
+| Operation     | `"never"` | `"evaluate"` | `"N"` |
+| :---          | :-----:   | :----:      | :---:  |
+| `canonical()` |    (X)    |              |       |
+| `evaluate()`  |    (X)    |     (X)      |       |
+| `"N()"`       |    (X)    |     (X)      |  (X)  |
+
+</div>
+
+Some examples:
+- `ImaginaryUnit` has `holdUntil: 'never'`: it is substituted during canonicalization
+- `x` has `holdUntil: 'evaluate'` (variables)
+- `Pi` has `holdUntil: 'N'` (special numeric constant)
+
+**Default:** `evaluate`
+
+</MemberCard>
+
+<a id="boxedsymboldefinition" name="boxedsymboldefinition"></a>
+
+### BoxedSymbolDefinition
+
+#### Extends
+
+- [`BoxedBaseDefinition`](#boxedbasedefinition).[`SymbolAttributes`](#symbolattributes).`Partial`\<[`NumericFlags`](#numericflags)\>
+
+<a id="sgn-2" name="sgn-2"></a>
+
+<MemberCard>
+
+##### BoxedSymbolDefinition.sgn?
+
+```ts
+optional sgn: Sign;
+```
+
+</MemberCard>
+
+<a id="even" name="even"></a>
+
+<MemberCard>
+
+##### BoxedSymbolDefinition.even?
+
+```ts
+optional even: boolean;
+```
+
+</MemberCard>
+
+<a id="odd" name="odd"></a>
+
+<MemberCard>
+
+##### BoxedSymbolDefinition.odd?
+
+```ts
+optional odd: boolean;
+```
+
+</MemberCard>
+
+<a id="name-1" name="name-1"></a>
+
+<MemberCard>
+
+##### BoxedSymbolDefinition.name
+
+```ts
+name: string;
+```
+
+</MemberCard>
+
+<a id="wikidata-2" name="wikidata-2"></a>
+
+<MemberCard>
+
+##### BoxedSymbolDefinition.wikidata?
+
+```ts
+optional wikidata: string;
+```
+
+</MemberCard>
+
+<a id="description-2" name="description-2"></a>
+
+<MemberCard>
+
+##### BoxedSymbolDefinition.description?
+
+```ts
+optional description: string | string[];
+```
+
+</MemberCard>
+
+<a id="url-2" name="url-2"></a>
+
+<MemberCard>
+
+##### BoxedSymbolDefinition.url?
+
+```ts
+optional url: string;
+```
+
+</MemberCard>
+
+<a id="scope-2" name="scope-2"></a>
+
+<MemberCard>
+
+##### BoxedSymbolDefinition.scope
+
+```ts
+scope: object;
+```
+
+The scope this definition belongs to.
+
+This field is usually undefined, but its value is set by `getDefinition()`
+
+<a id=""></a>
+
+###### parentScope?
+
+<MemberCard>
+
+###### scope.parentScope?
+
+```ts
+optional parentScope: { parentScope?: ...; ids?: RuntimeIdentifierDefinitions; assumptions: ExpressionMapInterface<boolean>; };
+```
+
+</MemberCard>
+
+<a id=""></a>
+
+###### ids?
+
+<MemberCard>
+
+###### scope.ids?
+
+```ts
+optional ids: RuntimeIdentifierDefinitions;
+```
+
+</MemberCard>
+
+<a id=""></a>
+
+###### assumptions
+
+<MemberCard>
+
+###### scope.assumptions
+
+```ts
+assumptions: ExpressionMapInterface<boolean>;
+```
+
+</MemberCard>
+
+</MemberCard>
+
+<a id="collection-1" name="collection-1"></a>
+
+<MemberCard>
+
+##### BoxedSymbolDefinition.collection?
+
+```ts
+optional collection: Partial<CollectionHandlers>;
+```
+
+If this is the definition of a collection, the set of primitive operations
+that can be performed on this collection (counting the number of elements,
+enumerating it, etc...).
+
+</MemberCard>
+
+<a id="constant" name="constant"></a>
+
+<MemberCard>
+
+##### BoxedSymbolDefinition.constant
+
+```ts
+constant: boolean;
+```
+
+If `true` the value of the symbol is constant. The value or type of
+symbols with this attribute set to `true` cannot be changed.
+
+If `false`, the symbol is a variable.
+
+**Default**: `false`
+
+</MemberCard>
+
+<a id="holduntil" name="holduntil"></a>
+
+<MemberCard>
+
+##### BoxedSymbolDefinition.holdUntil
+
+```ts
+holdUntil: "never" | "N" | "evaluate";
+```
+
+If the symbol has a value, it is held as indicated in the table below.
+A green checkmark indicate that the symbol is substituted.
+
+<div className="symbols-table">
+
+| Operation     | `"never"` | `"evaluate"` | `"N"` |
+| :---          | :-----:   | :----:      | :---:  |
+| `canonical()` |    (X)    |              |       |
+| `evaluate()`  |    (X)    |     (X)      |       |
+| `"N()"`       |    (X)    |     (X)      |  (X)  |
+
+</div>
+
+Some examples:
+- `ImaginaryUnit` has `holdUntil: 'never'`: it is substituted during canonicalization
+- `x` has `holdUntil: 'evaluate'` (variables)
+- `Pi` has `holdUntil: 'N'` (special numeric constant)
+
+**Default:** `evaluate`
+
+</MemberCard>
+
+<a id="isfunction" name="isfunction"></a>
+
+<MemberCard>
+
+##### BoxedSymbolDefinition.isFunction
+
+```ts
+readonly isFunction: boolean;
+```
+
+</MemberCard>
+
+<a id="isconstant-1" name="isconstant-1"></a>
+
+<MemberCard>
+
+##### BoxedSymbolDefinition.isConstant
+
+```ts
+readonly isConstant: boolean;
+```
+
+</MemberCard>
+
+<a id="eq-1" name="eq-1"></a>
+
+<MemberCard>
+
+##### BoxedSymbolDefinition.eq()?
+
+```ts
+optional eq: (a) => boolean;
+```
+
+###### a
+
+[`BoxedExpression`](#boxedexpression)
+
+`boolean`
+
+</MemberCard>
+
+<a id="neq" name="neq"></a>
+
+<MemberCard>
+
+##### BoxedSymbolDefinition.neq()?
+
+```ts
+optional neq: (a) => boolean;
+```
+
+###### a
+
+[`BoxedExpression`](#boxedexpression)
+
+`boolean`
+
+</MemberCard>
+
+<a id="cmp" name="cmp"></a>
+
+<MemberCard>
+
+##### BoxedSymbolDefinition.cmp()?
+
+```ts
+optional cmp: (a) => "<" | ">" | "=";
+```
+
+###### a
+
+[`BoxedExpression`](#boxedexpression)
+
+`"<"` \| `">"` \| `"="`
+
+</MemberCard>
+
+<a id="inferredtype" name="inferredtype"></a>
+
+<MemberCard>
+
+##### BoxedSymbolDefinition.inferredType
+
+```ts
+inferredType: boolean;
+```
+
+</MemberCard>
+
+<a id="type-3" name="type-3"></a>
+
+<MemberCard>
+
+##### BoxedSymbolDefinition.type
+
+```ts
+type: BoxedType;
+```
+
+</MemberCard>
+
+<a id="value-1" name="value-1"></a>
+
+<MemberCard>
+
+##### BoxedSymbolDefinition.value
+
+###### Get Signature
+
+```ts
+get value(): BoxedExpression
+```
+
+[`BoxedExpression`](#boxedexpression)
+
+```ts
+set value(val): void
+```
+
+###### Parameters
+
+###### val
+
+`number` | [`BoxedExpression`](#boxedexpression)
+
+`void`
+
+</MemberCard>
+
+<a id="reset-1" name="reset-1"></a>
+
+<MemberCard>
+
+##### BoxedSymbolDefinition.reset()
+
+```ts
+reset(): void
+```
+
+When the environment changes, for example the numerical precision,
+call `reset()` so that any cached values can be recalculated.
+
+`void`
 
 </MemberCard>
 
@@ -5094,13 +6078,48 @@ call `reset()` so that any cached values can be recalculated.
 ### FunctionDefinitionFlags
 
 ```ts
-type FunctionDefinitionFlags: Object;
+type FunctionDefinitionFlags = object;
 ```
 
 A function definition can have some flags to indicate specific
 properties of the function.
 
 #### Type declaration
+
+<a id="lazy"></a>
+
+##### lazy
+
+<a id="lazy" name="lazy"></a>
+
+<MemberCard>
+
+##### FunctionDefinitionFlags.lazy
+
+```ts
+lazy: boolean;
+```
+
+If `true`, the arguments to this function are not automatically
+evaluated. The default is `false` (the arguments are evaluated).
+
+This can be useful for example for functions that take symbolic
+expressions as arguments, such as `D` or `Integrate`.
+
+This is also useful for functions that take an argument that is
+potentially an infinite collection.
+
+It will be up to the `evaluate()` handler to evaluate the arguments as
+needed. This is conveninent to pass symbolic expressions as arguments
+to functions without having to explicitly use a `Hold` expression.
+
+This also applies to the `canonical()` handler.
+
+</MemberCard>
+
+<a id="threadable"></a>
+
+##### threadable
 
 <a id="threadable" name="threadable"></a>
 
@@ -5120,6 +6139,10 @@ operators).
 
 </MemberCard>
 
+<a id="associative"></a>
+
+##### associative
+
 <a id="associative" name="associative"></a>
 
 <MemberCard>
@@ -5135,6 +6158,10 @@ If `true`, `["f", ["f", a], b]` simplifies to `["f", a, b]`
 **Default**: `false`
 
 </MemberCard>
+
+<a id="commutative"></a>
+
+##### commutative
 
 <a id="commutative" name="commutative"></a>
 
@@ -5153,6 +6180,32 @@ version of the function will order the arguments.
 
 </MemberCard>
 
+<a id="commutativeorder"></a>
+
+##### commutativeOrder
+
+<a id="commutativeorder" name="commutativeorder"></a>
+
+<MemberCard>
+
+##### FunctionDefinitionFlags.commutativeOrder
+
+```ts
+commutativeOrder: (a, b) => number | undefined;
+```
+
+If `commutative` is `true`, the order of the arguments is determined by
+this function.
+
+If the function is not provided, the arguments are ordered by the
+default order of the arguments.
+
+</MemberCard>
+
+<a id="idempotent"></a>
+
+##### idempotent
+
 <a id="idempotent" name="idempotent"></a>
 
 <MemberCard>
@@ -5169,6 +6222,10 @@ If `true`, `["f", ["f", x]]` simplifies to `["f", x]`.
 
 </MemberCard>
 
+<a id="involution"></a>
+
+##### involution
+
 <a id="involution" name="involution"></a>
 
 <MemberCard>
@@ -5184,6 +6241,10 @@ If `true`, `["f", ["f", x]]` simplifies to `x`.
 **Default**: `false`
 
 </MemberCard>
+
+<a id="pure"></a>
+
+##### pure
 
 <a id="pure" name="pure"></a>
 
@@ -5209,749 +6270,17 @@ This information may be used to cache the value of expressions.
 
 </MemberCard>
 
-<a id="inert" name="inert"></a>
-
-<MemberCard>
-
-##### FunctionDefinitionFlags.inert
-
-```ts
-inert: boolean;
-```
-
-An inert function evaluates directly to one of its argument, typically
-the first one. They may be used to provide formating hints, but do
-not affect simplification or evaluation.
-
-**Default:** false
-
-</MemberCard>
-
-<a id="numeric" name="numeric"></a>
-
-<MemberCard>
-
-##### FunctionDefinitionFlags.numeric
-
-```ts
-numeric: boolean;
-```
-
-All the arguments of a numeric function are numeric,
-and its value is numeric.
-
-</MemberCard>
-
-<a id="functionsignature" name="functionsignature"></a>
-
-### FunctionSignature
-
-```ts
-type FunctionSignature: Object;
-```
-
-#### Type declaration
-
-<a id="domain-3" name="domain-3"></a>
-
-<MemberCard>
-
-##### FunctionSignature.~~domain?~~
-
-```ts
-optional domain: DomainExpression;
-```
-
-The domain of this signature, a domain compatible with the `Functions`
-domain).
-
-###### Deprecated
-
-Use params, optParams, restParam and result instead
-
-</MemberCard>
-
-<a id="params-1" name="params-1"></a>
-
-<MemberCard>
-
-##### FunctionSignature.params?
-
-```ts
-optional params: DomainExpression[];
-```
-
-</MemberCard>
-
-<a id="optparams" name="optparams"></a>
-
-<MemberCard>
-
-##### FunctionSignature.optParams?
-
-```ts
-optional optParams: DomainExpression[];
-```
-
-</MemberCard>
-
-<a id="restparam" name="restparam"></a>
-
-<MemberCard>
-
-##### FunctionSignature.restParam?
-
-```ts
-optional restParam: DomainExpression;
-```
-
-</MemberCard>
-
-<a id="result" name="result"></a>
-
-<MemberCard>
-
-##### FunctionSignature.result?
-
-```ts
-optional result: DomainExpression | (ce, args) => BoxedDomain | null | undefined;
-```
-
-The domain of the result of the function. Either a domain
-expression, or a function that returns a boxed domain.
-
-</MemberCard>
-
-<a id="canonical-3" name="canonical-3"></a>
-
-<MemberCard>
-
-##### FunctionSignature.canonical?
-
-```ts
-optional canonical: (ce, args) => BoxedExpression | null;
-```
-
-Return the canonical form of the expression with the arguments `args`.
-
-The arguments (`args`) may not be in canonical form. If necessary, they
-can be put in canonical form.
-
-This handler should validate the domain and number of the arguments.
-
-If a required argument is missing, it should be indicated with a
-`["Error", "'missing"]` expression. If more arguments than expected
-are present, this should be indicated with an
-["Error", "'unexpected-argument'"]` error expression
-
-If the domain of an argument is not compatible, it should be indicated
-with an `incompatible-domain` error.
-
-`["Sequence"]` expressions are not folded and need to be handled
- explicitly.
-
-If the function is associative, idempotent or an involution,
-this handler should account for it. Notably, if it is commutative, the
-arguments should be sorted in canonical order.
-
-The handler can make transformations based on the value of the arguments
-that are exact and literal (i.e.
-`arg.numericValue !== null && arg.isExact`).
-
-Values of symbols should not be substituted, unless they have
-a `holdUntil` attribute of `"never"`.
-
-The handler should not consider the value or any assumptions about any
-of the arguments that are symbols or functions (i.e. `arg.isZero`,
-`arg.isInteger`, etc...) since those may change over time.
-
-The result of the handler should be a canonical expression.
-
-If the arguments do not match, they should be replaced with an appropriate
-`["Error"]` expression. If the expression cannot be put in canonical form,
-the handler should return `null`.
-
-• **ce**: `IComputeEngine`
-
-• **args**: `ReadonlyArray`\<[`BoxedExpression`](#boxedexpression)\>
-
-</MemberCard>
-
-<a id="simplify-1" name="simplify-1"></a>
-
-<MemberCard>
-
-##### FunctionSignature.simplify?
-
-```ts
-optional simplify: (ce, args) => BoxedExpression | undefined;
-```
-
-Rewrite an expression into a simpler form.
-
-The arguments are in canonical form and have been simplified.
-
-The handler can use the values assigned to symbols and the assumptions
-about symbols, for example with `arg.numericValue`, `arg.isInteger` or
-`arg.isPositive`.
-
-Even though a symbol may not have a value, there may be some information
-about it reflected for example in `this.isZero` or `this.isPrime`.
-
-The handler should not perform approximate numeric calculations, such
-as calculations involving decimal numbers (non-integers). Making exact
-calculations on integers or rationals is OK.
-
-Do not reduce constants with a `holdUntil` attribute of `"N"`
-or `"evaluate"`.
-
-This handler should not have any side-effects: do not modify
-the environment of the `ComputeEngine` instance, do not perform I/O,
-do not do calculations that depend on random values.
-
-If no simplification can be performed due to the values, domains or
-assumptions about its arguments, for example, return `undefined`.
-
-• **ce**: `IComputeEngine`
-
-• **args**: `ReadonlyArray`\<[`BoxedExpression`](#boxedexpression)\>
-
-</MemberCard>
-
-<a id="evaluate-1" name="evaluate-1"></a>
-
-<MemberCard>
-
-##### FunctionSignature.evaluate?
-
-```ts
-optional evaluate: SemiBoxedExpression | (ce, args) => BoxedExpression | undefined;
-```
-
-Evaluate a function expression.
-
-The arguments have been evaluated, except the arguments to which a
-`hold` applied.
-
-It is not necessary to further simplify or evaluate the arguments.
-
-If performing numerical calculations, if all the arguments are exact,
-return an exact expression. If any of the arguments is not exact, that is
-if it is a literal decimal (non-integer) number, return an approximation.
-In this case, the value may be the same as `expr.N()`.
-
-When doing an exact calculation:
-- do not reduce rational numbers to decimal (floating point approximation)
-- do not down convert bignums to machine numbers
-- do not reduce square roots of rational numbers
-- do not reduce constants with a `holdUntil` attribute of `"N"`
-
-If the expression cannot be evaluated, due to the values, domains, or
-assumptions about its arguments, for example, return `undefined` or
-an `["Error"]` expression.
-
-</MemberCard>
-
-<a id="n-1" name="n-1"></a>
-
-<MemberCard>
-
-##### FunctionSignature.N?
-
-```ts
-optional N: (ce, args) => BoxedExpression | undefined;
-```
-
-Evaluate numerically a function expression.
-
-The arguments `args` have been simplified and evaluated, numerically
-if possible, except the arguments to which a `hold` apply.
-
-The arguments may be a combination of numbers, symbolic
-expressions and other expressions.
-
-Perform as many calculations as possible, and return the result.
-
-Return `undefined` if there isn't enough information to perform
-the evaluation, for example one of the arguments is a symbol with
-no value. If the handler returns `undefined`, symbolic evaluation of
-the expression will be returned instead to the caller.
-
-Return `NaN` if there is enough information to  perform the
-evaluation, but a literal argument is out of range or
-not of the expected type.
-
-Use the value of `ce.numericMode` to determine how to perform
-the numeric evaluation.
-
-Note that regardless of the current value of `ce.numericMode`, the
-arguments may be boxed numbers representing machine numbers, bignum
-numbers, complex numbers, rationals or big rationals.
-
-If the numeric mode does not allow complex numbers (the
-`engine.numericMode` is not `"complex"` or `"auto"`) and the result of
-the evaluation would be a complex number, return `NaN` instead.
-
-If `ce.numericMode` is `"bignum"` or `"auto"` the evaluation should
-be done using bignums.
-
-Otherwise, `ce.numericMode` is `"machine", the evaluation should be
-performed using machine numbers.
-
-You may perform any necessary computations, including approximate
-calculations on floating point numbers.
-
-• **ce**: `IComputeEngine`
-
-• **args**: `ReadonlyArray`\<[`BoxedExpression`](#boxedexpression)\>
-
-</MemberCard>
-
-<a id="evaldimension" name="evaldimension"></a>
-
-<MemberCard>
-
-##### FunctionSignature.evalDimension?
-
-`Experimental`
-
-```ts
-optional evalDimension: (ce, args) => BoxedExpression;
-```
-
-`Experimental`
-
-Dimensional analysis
-
-• **ce**: `IComputeEngine`
-
-• **args**: `ReadonlyArray`\<[`BoxedExpression`](#boxedexpression)\>
-
-</MemberCard>
-
-<a id="sgn-1" name="sgn-1"></a>
-
-<MemberCard>
-
-##### FunctionSignature.sgn?
-
-```ts
-optional sgn: (ce, args) => -1 | 0 | 1 | undefined;
-```
-
-Return the sign of the function expression.
-
-• **ce**: `IComputeEngine`
-
-• **args**: `ReadonlyArray`\<[`BoxedExpression`](#boxedexpression)\>
-
-</MemberCard>
-
-<a id="compile-1" name="compile-1"></a>
-
-<MemberCard>
-
-##### FunctionSignature.compile?
-
-```ts
-optional compile: (expr) => CompiledExpression;
-```
-
-Return a compiled (optimized) expression.
-
-• **expr**: [`BoxedExpression`](#boxedexpression)
-
-</MemberCard>
-
-<a id="boxedfunctionsignature" name="boxedfunctionsignature"></a>
-
-### BoxedFunctionSignature
-
-```ts
-type BoxedFunctionSignature: Object;
-```
-
-#### Type declaration
-
-<a id="inferredsignature" name="inferredsignature"></a>
-
-<MemberCard>
-
-##### BoxedFunctionSignature.inferredSignature
-
-```ts
-inferredSignature: boolean;
-```
-
-</MemberCard>
-
-<a id="params-2" name="params-2"></a>
-
-<MemberCard>
-
-##### BoxedFunctionSignature.params
-
-```ts
-params: BoxedDomain[];
-```
-
-</MemberCard>
-
-<a id="optparams-1" name="optparams-1"></a>
-
-<MemberCard>
-
-##### BoxedFunctionSignature.optParams
-
-```ts
-optParams: BoxedDomain[];
-```
-
-</MemberCard>
-
-<a id="restparam-1" name="restparam-1"></a>
-
-<MemberCard>
-
-##### BoxedFunctionSignature.restParam?
-
-```ts
-optional restParam: BoxedDomain;
-```
-
-</MemberCard>
-
-<a id="result-1" name="result-1"></a>
-
-<MemberCard>
-
-##### BoxedFunctionSignature.result
-
-```ts
-result: BoxedDomain | (ce, args) => BoxedDomain | null | undefined;
-```
-
-</MemberCard>
-
-<a id="canonical-4" name="canonical-4"></a>
-
-<MemberCard>
-
-##### BoxedFunctionSignature.canonical?
-
-```ts
-optional canonical: (ce, args) => BoxedExpression | null;
-```
-
-• **ce**: `IComputeEngine`
-
-• **args**: `ReadonlyArray`\<[`BoxedExpression`](#boxedexpression)\>
-
-</MemberCard>
-
-<a id="simplify-2" name="simplify-2"></a>
-
-<MemberCard>
-
-##### BoxedFunctionSignature.simplify?
-
-```ts
-optional simplify: (ce, args) => BoxedExpression | undefined;
-```
-
-• **ce**: `IComputeEngine`
-
-• **args**: `ReadonlyArray`\<[`BoxedExpression`](#boxedexpression)\>
-
-</MemberCard>
-
-<a id="evaluate-2" name="evaluate-2"></a>
-
-<MemberCard>
-
-##### BoxedFunctionSignature.evaluate?
-
-```ts
-optional evaluate: (ce, args) => BoxedExpression | undefined;
-```
-
-• **ce**: `IComputeEngine`
-
-• **args**: `ReadonlyArray`\<[`BoxedExpression`](#boxedexpression)\>
-
-</MemberCard>
-
-<a id="n-2" name="n-2"></a>
-
-<MemberCard>
-
-##### BoxedFunctionSignature.N?
-
-```ts
-optional N: (ce, args) => BoxedExpression | undefined;
-```
-
-• **ce**: `IComputeEngine`
-
-• **args**: `ReadonlyArray`\<[`BoxedExpression`](#boxedexpression)\>
-
-</MemberCard>
-
-<a id="evaldimension-1" name="evaldimension-1"></a>
-
-<MemberCard>
-
-##### BoxedFunctionSignature.evalDimension?
-
-```ts
-optional evalDimension: (ce, args) => BoxedExpression;
-```
-
-• **ce**: `IComputeEngine`
-
-• **args**: `ReadonlyArray`\<[`BoxedExpression`](#boxedexpression)\>
-
-</MemberCard>
-
-<a id="sgn-2" name="sgn-2"></a>
-
-<MemberCard>
-
-##### BoxedFunctionSignature.sgn?
-
-```ts
-optional sgn: (ce, args) => -1 | 0 | 1 | undefined;
-```
-
-• **ce**: `IComputeEngine`
-
-• **args**: `ReadonlyArray`\<[`BoxedExpression`](#boxedexpression)\>
-
-</MemberCard>
-
-<a id="compile-2" name="compile-2"></a>
-
-<MemberCard>
-
-##### BoxedFunctionSignature.compile?
-
-```ts
-optional compile: (expr) => CompiledExpression;
-```
-
-• **expr**: [`BoxedExpression`](#boxedexpression)
-
-</MemberCard>
-
-<a id="collectionhandlers" name="collectionhandlers"></a>
-
-### CollectionHandlers
-
-```ts
-type CollectionHandlers: Object;
-```
-
-The handlers are the primitive operations that can be performed on
-collections.
-
-There are two types of collections:
-- finite collections, such as lists, tuples, sets, matrices, etc...
- The `size()` handler of finite collections returns the number of elements
-- infinite collections, such as sequences, ranges, etc...
- The `size()` handler of infinite collections returns `Infinity`
- Infinite collections are not indexable, they have no `at()` handler.
-
-#### Type declaration
-
-<a id="iterator" name="iterator"></a>
-
-<MemberCard>
-
-##### CollectionHandlers.iterator
-
-```ts
-iterator: (expr, start?, count?) => Iterator<BoxedExpression, undefined>;
-```
-
-Return an iterator
-- start is optional and is a 1-based index.
-- if start is not specified, start from index 1
-- count is optional and is the number of elements to return
-- if count is not specified or negative, return all the elements from start to the endna
-
-If there is a `keys()` handler, there is no `iterator()` handler.
-
-• **expr**: [`BoxedExpression`](#boxedexpression)
-
-• **start?**: `number`
-
-• **count?**: `number`
-
-</MemberCard>
-
-<a id="at" name="at"></a>
-
-<MemberCard>
-
-##### CollectionHandlers.at
-
-```ts
-at: (expr, index) => undefined | BoxedExpression;
-```
-
-Return the element at the specified index.
-The first element is `at(1)`, the last element is `at(-1)`.
-If the index is &lt;0, return the element at index `size() + index + 1`.
-The index can also be a string for example for dictionaries.
-If the index is invalid, return `undefined`.
-
-• **expr**: [`BoxedExpression`](#boxedexpression)
-
-• **index**: `number` \| `string`
-
-</MemberCard>
-
-<a id="size" name="size"></a>
-
-<MemberCard>
-
-##### CollectionHandlers.size
-
-```ts
-size: (expr) => number;
-```
-
-Return the number of elements in the collection.
-An empty collection has a size of 0.
-
-• **expr**: [`BoxedExpression`](#boxedexpression)
-
-</MemberCard>
-
-<a id="keys-1" name="keys-1"></a>
-
-<MemberCard>
-
-##### CollectionHandlers.keys
-
-```ts
-keys: (expr) => undefined | Iterator<string>;
-```
-
-If the collection is indexed by strings, return the valid values
-for the index.
-
-• **expr**: [`BoxedExpression`](#boxedexpression)
-
-</MemberCard>
-
-<a id="indexof" name="indexof"></a>
-
-<MemberCard>
-
-##### CollectionHandlers.indexOf
-
-```ts
-indexOf: (expr, target, from?) => number | string | undefined;
-```
-
-Return the index of the first element that matches the target expression.
-The comparison is done using the `target.isEqual()` method.
-If the expression is not found, return `undefined`.
-If the expression is found, return the index, 1-based.
-If the expression is found multiple times, return the index of the first
-match.
-
-From is the starting index for the search. If negative, start from the end
-and search backwards.
-
-• **expr**: [`BoxedExpression`](#boxedexpression)
-
-• **target**: [`BoxedExpression`](#boxedexpression)
-
-• **from?**: `number`
-
-</MemberCard>
-
-<a id="functiondefinition-1" name="functiondefinition-1"></a>
-
-### FunctionDefinition
-
-```ts
-type FunctionDefinition: BaseDefinition & Partial<CollectionHandlers> & Partial<FunctionDefinitionFlags> & Object;
-```
-
-Definition record for a function.
-
-#### Type declaration
-
-<MemberCard>
-
-##### FunctionDefinition.complexity?
-
-```ts
-optional complexity: number;
-```
-
-A number used to order arguments.
-
-Argument with higher complexity are placed after arguments with lower
-complexity when ordered canonically in commutative functions.
-
-- Additive functions: 1000-1999
-- Multiplicative functions: 2000-2999
-- Root and power functions: 3000-3999
-- Log functions: 4000-4999
-- Trigonometric functions: 5000-5999
-- Hypertrigonometric functions: 6000-6999
-- Special functions (factorial, Gamma, ...): 7000-7999
-- Collections: 8000-8999
-- Inert and styling:  9000-9999
-- Logic: 10000-10999
-- Relational: 11000-11999
-
-**Default**: 100,000
-
-</MemberCard>
-
-<MemberCard>
-
-##### FunctionDefinition.hold?
-
-```ts
-optional hold: Hold;
-```
-
-- `"none"` Each of the arguments is evaluated (default)
-- `"all"` None of the arguments are evaluated and they are passed as is
-- `"first"` The first argument is not evaluated, the others are
-- `"rest"` The first argument is evaluated, the others aren't
-- `"last"`: The last argument is not evaluated, the others are
-- `"most"`: All the arguments are evaluated, except the last one
-
-**Default**: `"none"`
-
-</MemberCard>
-
-<MemberCard>
-
-##### FunctionDefinition.signature
-
-```ts
-signature: FunctionSignature;
-```
-
-</MemberCard>
-
 <a id="boxedfunctiondefinition" name="boxedfunctiondefinition"></a>
 
 ### BoxedFunctionDefinition
 
 ```ts
-type BoxedFunctionDefinition: BoxedBaseDefinition & Partial<CollectionHandlers> & FunctionDefinitionFlags & Object;
+type BoxedFunctionDefinition = BoxedBaseDefinition & FunctionDefinitionFlags & object;
 ```
 
 #### Type declaration
+
+##### complexity
 
 <MemberCard>
 
@@ -5963,1465 +6292,290 @@ complexity: number;
 
 </MemberCard>
 
+##### inferredSignature
+
 <MemberCard>
 
-##### BoxedFunctionDefinition.hold
+##### BoxedFunctionDefinition.inferredSignature
 
 ```ts
-hold: Hold;
+inferredSignature: boolean;
 ```
 
+If true, the signature was inferred from usage and may be modified
+as more information becomes available.
+
 </MemberCard>
+
+##### signature
 
 <MemberCard>
 
 ##### BoxedFunctionDefinition.signature
 
 ```ts
-signature: BoxedFunctionSignature;
+signature: BoxedType;
 ```
+
+The type of the arguments and return value of this function
 
 </MemberCard>
 
-<a id="numericflags" name="numericflags"></a>
-
-### NumericFlags
-
-```ts
-type NumericFlags: Object;
-```
-
-When used in a `SymbolDefinition`, these flags are optional.
-
-If provided, they will override the value derived from
-the symbol's value.
-
-For example, it might be useful to override `algebraic = false`
-for a transcendental number.
-
-#### Type declaration
-
-<a id="number-1" name="number-1"></a>
+##### type()?
 
 <MemberCard>
 
-##### NumericFlags.number
+##### BoxedFunctionDefinition.type()?
 
 ```ts
-number: boolean | undefined;
+optional type: (ops, options) => 
+  | Type
+  | TypeString
+  | BoxedType
+  | undefined;
 ```
+
+If present, this handler can be used to more precisely determine the
+return type based on the type of the arguments. The arguments themselves
+should *not* be evaluated, only their types should be used.
+
+###### ops
+
+`ReadonlyArray`\<[`BoxedExpression`](#boxedexpression)\>
+
+###### options
+
+###### engine
+
+`IComputeEngine`
+
+  \| [`Type`](#type-2)
+  \| [`TypeString`](#typestring)
+  \| [`BoxedType`](#boxedtype)
+  \| `undefined`
 
 </MemberCard>
 
-<a id="integer" name="integer"></a>
+##### sgn()?
 
 <MemberCard>
 
-##### NumericFlags.integer
+##### BoxedFunctionDefinition.sgn()?
 
 ```ts
-integer: boolean | undefined;
+optional sgn: (ops, options) => Sign | undefined;
 ```
+
+If present, this handler can be used to determine the sign of the
+ return value of the function, based on the sign and type of its
+ arguments.
+
+The arguments themselves should *not* be evaluated, only their types and
+sign should be used.
+
+This can be used in some case for example to determine when certain
+simplifications are valid.
+
+###### ops
+
+`ReadonlyArray`\<[`BoxedExpression`](#boxedexpression)\>
+
+###### options
+
+###### engine
+
+`IComputeEngine`
+
+[`Sign`](#sign) \| `undefined`
 
 </MemberCard>
 
-<a id="rational-1" name="rational-1"></a>
+##### eq()?
 
 <MemberCard>
 
-##### NumericFlags.rational
+##### BoxedFunctionDefinition.eq()?
 
 ```ts
-rational: boolean | undefined;
+optional eq: (a, b) => boolean | undefined;
 ```
 
-</MemberCard>
-
-<a id="algebraic" name="algebraic"></a>
-
-<MemberCard>
-
-##### NumericFlags.algebraic
-
-```ts
-algebraic: boolean | undefined;
-```
-
-</MemberCard>
-
-<a id="real" name="real"></a>
-
-<MemberCard>
-
-##### NumericFlags.real
-
-```ts
-real: boolean | undefined;
-```
-
-</MemberCard>
-
-<a id="extendedreal" name="extendedreal"></a>
-
-<MemberCard>
-
-##### NumericFlags.extendedReal
-
-```ts
-extendedReal: boolean | undefined;
-```
-
-</MemberCard>
-
-<a id="complex-1" name="complex-1"></a>
-
-<MemberCard>
-
-##### NumericFlags.complex
-
-```ts
-complex: boolean | undefined;
-```
-
-</MemberCard>
-
-<a id="extendedcomplex" name="extendedcomplex"></a>
-
-<MemberCard>
-
-##### NumericFlags.extendedComplex
-
-```ts
-extendedComplex: boolean | undefined;
-```
-
-</MemberCard>
-
-<a id="imaginary" name="imaginary"></a>
-
-<MemberCard>
-
-##### NumericFlags.imaginary
-
-```ts
-imaginary: boolean | undefined;
-```
-
-</MemberCard>
-
-<a id="positive" name="positive"></a>
-
-<MemberCard>
-
-##### NumericFlags.positive
-
-```ts
-positive: boolean | undefined;
-```
-
-</MemberCard>
-
-<a id="nonpositive" name="nonpositive"></a>
-
-<MemberCard>
-
-##### NumericFlags.nonPositive
-
-```ts
-nonPositive: boolean | undefined;
-```
-
-</MemberCard>
-
-<a id="negative" name="negative"></a>
-
-<MemberCard>
-
-##### NumericFlags.negative
-
-```ts
-negative: boolean | undefined;
-```
-
-</MemberCard>
-
-<a id="nonnegative" name="nonnegative"></a>
-
-<MemberCard>
-
-##### NumericFlags.nonNegative
-
-```ts
-nonNegative: boolean | undefined;
-```
-
-</MemberCard>
-
-<a id="zero-1" name="zero-1"></a>
-
-<MemberCard>
-
-##### NumericFlags.zero
-
-```ts
-zero: boolean | undefined;
-```
-
-</MemberCard>
-
-<a id="notzero" name="notzero"></a>
-
-<MemberCard>
-
-##### NumericFlags.notZero
-
-```ts
-notZero: boolean | undefined;
-```
-
-</MemberCard>
-
-<a id="one-1" name="one-1"></a>
-
-<MemberCard>
-
-##### NumericFlags.one
-
-```ts
-one: boolean | undefined;
-```
-
-</MemberCard>
-
-<a id="negativeone-1" name="negativeone-1"></a>
-
-<MemberCard>
-
-##### NumericFlags.negativeOne
-
-```ts
-negativeOne: boolean | undefined;
-```
-
-</MemberCard>
-
-<a id="infinity" name="infinity"></a>
-
-<MemberCard>
-
-##### NumericFlags.infinity
-
-```ts
-infinity: boolean | undefined;
-```
-
-</MemberCard>
-
-<a id="nan-1" name="nan-1"></a>
-
-<MemberCard>
-
-##### NumericFlags.NaN
-
-```ts
-NaN: boolean | undefined;
-```
-
-</MemberCard>
-
-<a id="finite" name="finite"></a>
-
-<MemberCard>
-
-##### NumericFlags.finite
-
-```ts
-finite: boolean | undefined;
-```
-
-</MemberCard>
-
-<a id="even" name="even"></a>
-
-<MemberCard>
-
-##### NumericFlags.even
-
-```ts
-even: boolean | undefined;
-```
-
-</MemberCard>
-
-<a id="odd" name="odd"></a>
-
-<MemberCard>
-
-##### NumericFlags.odd
-
-```ts
-odd: boolean | undefined;
-```
-
-</MemberCard>
-
-<a id="prime" name="prime"></a>
-
-<MemberCard>
-
-##### NumericFlags.prime
-
-```ts
-prime: boolean | undefined;
-```
-
-</MemberCard>
-
-<a id="composite" name="composite"></a>
-
-<MemberCard>
-
-##### NumericFlags.composite
-
-```ts
-composite: boolean | undefined;
-```
-
-</MemberCard>
-
-<a id="symbolattributes" name="symbolattributes"></a>
-
-### SymbolAttributes
-
-```ts
-type SymbolAttributes: Object;
-```
-
-#### Type declaration
-
-<a id="constant" name="constant"></a>
-
-<MemberCard>
-
-##### SymbolAttributes.constant
-
-```ts
-constant: boolean;
-```
-
-If `true` the value of the symbol is constant. The value or domain of
-symbols with this attribute set to `true` cannot be changed.
-
-If `false`, the symbol is a variable.
-
-**Default**: `false`
-
-</MemberCard>
-
-<a id="holduntil" name="holduntil"></a>
-
-<MemberCard>
-
-##### SymbolAttributes.holdUntil
-
-```ts
-holdUntil: "never" | "simplify" | "evaluate" | "N";
-```
-
-If the symbol has a value, it is held as indicated in the table below.
-A green checkmark indicate that the symbol is substituted.
-
-<div className="symbols-table">
-
-| Operation | `"never"` | `"simplify"` | `"evaluate"` | `"N"` |
-| :--- | :----- |
-| `canonical()`|  (X) | | | |
-| `simplify()` |   (X) | (X) | | |
-| `evaluate()` |   (X) | (X) | (X) | |
-| `"N()"` |  (X) | (X)  |  (X) | (X)  |
-
-</div>
-
-Some examples:
-- `i` has `holdUntil: 'never'`
-- `GoldenRatio` has `holdUntil: 'simplify'` (symbolic constant)
-- `x` has `holdUntil: 'evaluate'` (variables)
-- `Pi` has `holdUntil: 'N'` (special numeric constant)
-
-**Default:** `evaluate`
-
-</MemberCard>
-
-<a id="symboldefinition-1" name="symboldefinition-1"></a>
-
-### SymbolDefinition
-
-```ts
-type SymbolDefinition: BaseDefinition & Partial<SymbolAttributes> & Object;
-```
-
-A bound symbol (i.e. one with an associated definition) has either a domain
-(e.g. ∀ x ∈ ℝ), a value (x = 5) or both (π: value = 3.14... domain = TranscendentalNumbers)
-
-#### Type declaration
-
-<MemberCard>
-
-##### SymbolDefinition.domain?
-
-```ts
-optional domain: DomainLiteral | BoxedDomain;
-```
-
-</MemberCard>
-
-<MemberCard>
-
-##### SymbolDefinition.inferred?
-
-```ts
-optional inferred: boolean;
-```
-
-If true, the domain is inferred, and could be adjusted later
-as more information becomes available or if the symbol is explicitly
-declared.
-
-</MemberCard>
-
-<MemberCard>
-
-##### SymbolDefinition.value?
-
-```ts
-optional value: LatexString | SemiBoxedExpression | (ce) => SemiBoxedExpression | null;
-```
-
-`value` can be a JS function since for some constants, such as
-`Pi`, the actual value depends on the `precision` setting of the
-`ComputeEngine` and possible other environment settings
-
-</MemberCard>
-
-<MemberCard>
-
-##### SymbolDefinition.flags?
-
-```ts
-optional flags: Partial<NumericFlags>;
-```
-
-</MemberCard>
-
-<a id="boxedsymboldefinition" name="boxedsymboldefinition"></a>
-
-### BoxedSymbolDefinition
-
-#### Extends
-
-- [`BoxedBaseDefinition`](#boxedbasedefinition).[`SymbolAttributes`](#symbolattributes).`Partial`\<[`NumericFlags`](#numericflags)\>
-
-<a id="domain-2" name="domain-2"></a>
-
-<MemberCard>
-
-##### BoxedSymbolDefinition.domain
-
-```ts
-domain: BoxedDomain;
-```
-
-</MemberCard>
-
-<a id="inferreddomain" name="inferreddomain"></a>
-
-<MemberCard>
-
-##### BoxedSymbolDefinition.inferredDomain
-
-```ts
-inferredDomain: boolean;
-```
-
-</MemberCard>
-
-<a id="value-1" name="value-1"></a>
-
-<MemberCard>
-
-##### BoxedSymbolDefinition.value
-
-```ts
-get value(): BoxedExpression
-```
-
-```ts
-set value(val): void
-```
+###### a
 
 [`BoxedExpression`](#boxedexpression)
 
-• **val**: [`SemiBoxedExpression`](#semiboxedexpression)
+###### b
+
+[`BoxedExpression`](#boxedexpression)
+
+`boolean` \| `undefined`
 
 </MemberCard>
+
+##### neq()?
+
+<MemberCard>
+
+##### BoxedFunctionDefinition.neq()?
+
+```ts
+optional neq: (a, b) => boolean | undefined;
+```
+
+###### a
+
+[`BoxedExpression`](#boxedexpression)
+
+###### b
+
+[`BoxedExpression`](#boxedexpression)
+
+`boolean` \| `undefined`
+
+</MemberCard>
+
+##### canonical()?
+
+<MemberCard>
+
+##### BoxedFunctionDefinition.canonical()?
+
+```ts
+optional canonical: (ops, options) => BoxedExpression | null;
+```
+
+###### ops
+
+`ReadonlyArray`\<[`BoxedExpression`](#boxedexpression)\>
+
+###### options
+
+###### engine
+
+`IComputeEngine`
+
+[`BoxedExpression`](#boxedexpression) \| `null`
+
+</MemberCard>
+
+##### evaluate()?
+
+<MemberCard>
+
+##### BoxedFunctionDefinition.evaluate()?
+
+```ts
+optional evaluate: (ops, options) => BoxedExpression | undefined;
+```
+
+###### ops
+
+`ReadonlyArray`\<[`BoxedExpression`](#boxedexpression)\>
+
+###### options
+
+`Partial`\<[`EvaluateOptions`](#evaluateoptions)\> & `object`
+
+[`BoxedExpression`](#boxedexpression) \| `undefined`
+
+</MemberCard>
+
+##### evaluateAsync()?
+
+<MemberCard>
+
+##### BoxedFunctionDefinition.evaluateAsync()?
+
+```ts
+optional evaluateAsync: (ops, options?) => Promise<BoxedExpression | undefined>;
+```
+
+###### ops
+
+`ReadonlyArray`\<[`BoxedExpression`](#boxedexpression)\>
+
+###### options?
+
+`Partial`\<[`EvaluateOptions`](#evaluateoptions)\> & `object`
+
+`Promise`\<[`BoxedExpression`](#boxedexpression) \| `undefined`\>
+
+</MemberCard>
+
+##### evalDimension()?
+
+<MemberCard>
+
+##### BoxedFunctionDefinition.evalDimension()?
+
+```ts
+optional evalDimension: (ops, options) => BoxedExpression;
+```
+
+###### ops
+
+`ReadonlyArray`\<[`BoxedExpression`](#boxedexpression)\>
+
+###### options
+
+###### engine
+
+`IComputeEngine`
+
+[`BoxedExpression`](#boxedexpression)
+
+</MemberCard>
+
+##### compile()?
+
+<MemberCard>
+
+##### BoxedFunctionDefinition.compile()?
+
+```ts
+optional compile: (expr) => CompiledExpression;
+```
+
+###### expr
+
+[`BoxedExpression`](#boxedexpression)
+
+[`CompiledExpression`](#compiledexpression)
+
+</MemberCard>
+
+<a id="runtimeidentifierdefinitions" name="runtimeidentifierdefinitions"></a>
+
+### RuntimeIdentifierDefinitions
+
+```ts
+type RuntimeIdentifierDefinitions = Map<string, OneOf<[BoxedSymbolDefinition, BoxedFunctionDefinition]>>;
+```
+
+The entries have been validated and optimized for faster evaluation.
+
+When a new scope is created with `pushScope()` or when creating a new
+engine instance, new instances of this type are created as needed.
 
 ## Latex Parsing and Serialization
 
-<a id="latextoken" name="latextoken"></a>
+<a id="latexstring" name="latexstring"></a>
 
-### LatexToken
+### LatexString
 
 ```ts
-type LatexToken: 
-  | string
-  | "<{>"
-  | "<}>"
-  | "<space>"
-  | "<$>"
-  | "<$$>";
+type LatexString = string;
 ```
 
-A `LatexToken` is a token as returned by `Scanner.peek`.
-
-It can be one of the indicated tokens, or a string that starts with a
-`` for LaTeX commands, or a LaTeX character which includes digits,
-letters and punctuation.
-
-<a id="delimiter" name="delimiter"></a>
-
-### Delimiter
-
-```ts
-type Delimiter: 
-  | ")"
-  | "("
-  | "]"
-  | "["
-  | "{"
-  | "}"
-  | "<"
-  | ">"
-  | "|"
-  | "||"
-  | "\\lceil"
-  | "\\rceil"
-  | "\\lfloor"
-  | "\\rfloor";
-```
-
-Open and close delimiters that can be used with [`MatchfixEntry`](#matchfixentry)
-record to define new LaTeX dictionary entries.
-
-<a id="librarycategory" name="librarycategory"></a>
-
-### LibraryCategory
-
-```ts
-type LibraryCategory: 
-  | "algebra"
-  | "arithmetic"
-  | "calculus"
-  | "collections"
-  | "control-structures"
-  | "combinatorics"
-  | "complex"
-  | "core"
-  | "data-structures"
-  | "dimensions"
-  | "domains"
-  | "linear-algebra"
-  | "logic"
-  | "numeric"
-  | "other"
-  | "physics"
-  | "polynomials"
-  | "relop"
-  | "sets"
-  | "statistics"
-  | "styling"
-  | "symbols"
-  | "trigonometry"
-  | "units";
-```
-
-<a id="precedence" name="precedence"></a>
-
-### Precedence
-
-```ts
-type Precedence: number;
-```
-
-:::info[THEORY OF OPERATIONS]
-
-The precedence of an operator is a number that indicates the order in which
-operators are applied.
-
-For example, in `1 + 2 * 3`, the `*` operator has a **higher** precedence
-than the `+` operator, so it is applied first.
-
-The precedence range from 0 to 1000. The larger the number, the higher the
-precedence, the more "binding" the operator is.
-
-Here are some rough ranges for the precedence:
-
-- 800: prefix and postfix operators: `\lnot` etc...
-   - `POSTFIX_PRECEDENCE` = 810: `!`, `'`
-- 700: some arithmetic operators
-   - `EXPONENTIATION_PRECEDENCE` = 700: `^`
-- 600: some binary operators
-   - `DIVISION_PRECEDENCE` = 600: `\div`
-- 500: not used
-- 400: not used
-- 300: some logic and arithmetic operators:
-       `\land`, `\lor`, `\times`, etc...
-  - `MULTIPLICATION_PRECEDENCE` = 390: `\times`
-- 200: arithmetic operators, inequalities:
-  - `ADDITION_PRECEDENCE` = 275: `+` `-`
-  - `ARROW_PRECEDENCE` = 270: `\to` `\rightarrow`
-  - `ASSIGNMENT_PRECEDENCE` = 260: `:=`
-  - `COMPARISON_PRECEDENCE` = 245: `\lt` `\gt`
-  - 241: `\leq`
-- 100: not used
-- 0: `,`, `;`, etc...
-
-Some constants are defined below for common precedence values.
-
-**Note**: MathML defines
-[some operator precedence](https://www.w3.org/TR/2009/WD-MathML3-20090924/appendixc.html),
-but it has some issues and inconsistencies. However,
-whenever possible we adopted the MathML precedence.
-
-The JavaScript operator precedence is documented
-[here](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Operators/Operator_precedence).
-
-:::
-
-<a id="terminator" name="terminator"></a>
-
-### Terminator
-
-```ts
-type Terminator: Object;
-```
-
-This indicates a condition under which parsing should stop:
-- an operator of a precedence higher than specified has been encountered
-- the last token has been reached
-- or if a condition is provided, the condition returns true;
-
-#### Type declaration
-
-<a id="minprec" name="minprec"></a>
-
-<MemberCard>
-
-##### Terminator.minPrec
-
-```ts
-minPrec: Precedence;
-```
-
-</MemberCard>
-
-<a id="condition" name="condition"></a>
-
-<MemberCard>
-
-##### Terminator.condition?
-
-```ts
-optional condition: (parser) => boolean;
-```
-
-• **parser**: [`Parser`](#parser)
-
-</MemberCard>
-
-<a id="expressionparsehandler" name="expressionparsehandler"></a>
-
-### ExpressionParseHandler
-
-```ts
-type ExpressionParseHandler: (parser, until?) => Expression | null;
-```
-
-Custom parsing handler.
-
-When invoked the scanner points right after the LaTeX fragment that triggered
-this parsing handler.
-
-The scanner should be moved, by calling `scanner.next()` for every consumed
-token.
-
-If it was in an infix or postfix context, `lhs` will represent the
-left-hand side argument. In a prefix or matchfix context, `lhs` is `null`.
-
-In a superfix (^) or subfix (_) context (that is if the first token of the
-trigger is `^` or `_`), lhs is `["Superscript", lhs, rhs]`
-and `["Subscript", lhs, rhs]`, respectively.
-
-The handler should return `null` if the expression could not be parsed
-(didn't match the syntax that was expected). The matching expression
-otherwise.
-
-• **parser**: [`Parser`](#parser)
-
-• **until?**: `Readonly`\<[`Terminator`](#terminator)\>
-
-<a id="prefixparsehandler" name="prefixparsehandler"></a>
-
-### PrefixParseHandler
-
-```ts
-type PrefixParseHandler: (parser, until?) => Expression | null;
-```
-
-• **parser**: [`Parser`](#parser)
-
-• **until?**: `Readonly`\<[`Terminator`](#terminator)\>
-
-<a id="symbolparsehandler" name="symbolparsehandler"></a>
-
-### SymbolParseHandler
-
-```ts
-type SymbolParseHandler: (parser, until?) => Expression | null;
-```
-
-• **parser**: [`Parser`](#parser)
-
-• **until?**: `Readonly`\<[`Terminator`](#terminator)\>
-
-<a id="functionparsehandler" name="functionparsehandler"></a>
-
-### FunctionParseHandler
-
-```ts
-type FunctionParseHandler: (parser, until?) => Expression | null;
-```
-
-• **parser**: [`Parser`](#parser)
-
-• **until?**: `Readonly`\<[`Terminator`](#terminator)\>
-
-<a id="environmentparsehandler" name="environmentparsehandler"></a>
-
-### EnvironmentParseHandler
-
-```ts
-type EnvironmentParseHandler: (parser, until?) => Expression | null;
-```
-
-• **parser**: [`Parser`](#parser)
-
-• **until?**: `Readonly`\<[`Terminator`](#terminator)\>
-
-<a id="postfixparsehandler" name="postfixparsehandler"></a>
-
-### PostfixParseHandler
-
-```ts
-type PostfixParseHandler: (parser, lhs, until?) => Expression | null;
-```
-
-• **parser**: [`Parser`](#parser)
-
-• **lhs**: [`Expression`](#expression)
-
-• **until?**: `Readonly`\<[`Terminator`](#terminator)\>
-
-<a id="infixparsehandler" name="infixparsehandler"></a>
-
-### InfixParseHandler
-
-```ts
-type InfixParseHandler: (parser, lhs, until) => Expression | null;
-```
-
-• **parser**: [`Parser`](#parser)
-
-• **lhs**: [`Expression`](#expression)
-
-• **until**: `Readonly`\<[`Terminator`](#terminator)\>
-
-<a id="matchfixparsehandler" name="matchfixparsehandler"></a>
-
-### MatchfixParseHandler
-
-```ts
-type MatchfixParseHandler: (parser, body) => Expression | null;
-```
-
-• **parser**: [`Parser`](#parser)
-
-• **body**: [`Expression`](#expression)
-
-<a id="latexargumenttype" name="latexargumenttype"></a>
-
-### LatexArgumentType
-
-```ts
-type LatexArgumentType: 
-  | "{expression}"
-  | "[expression]"
-  | "{text}"
-  | "[text]"
-  | "{unit}"
-  | "[unit]"
-  | "{glue}"
-  | "[glue]"
-  | "{string}"
-  | "[string]"
-  | "{color}"
-  | "[color]";
-```
-
-<a id="trigger" name="trigger"></a>
-
-### Trigger
-
-```ts
-type Trigger: Object;
-```
-
-The trigger is the set of tokens that will make this record eligible to
-parse the stream and generate an expression. If the trigger matches,
-the `parse` handler is called, if available.
-
-The trigger can be specified either as a LaTeX string (`latexTrigger`) or
-as an identifier (`identifierTrigger`), which can be wrapped in a LaTeX
-command, for example `\operatorname{mod}` or `\mathbin{gcd}`, with `"gcd"`
- being the `identifierTrigger`.
-
-`matchfix` operators use `openTrigger` and `closeTrigger` instead.
-
-#### Type declaration
-
-<a id="latextrigger" name="latextrigger"></a>
-
-<MemberCard>
-
-##### Trigger.latexTrigger?
-
-```ts
-optional latexTrigger: LatexString | LatexToken[];
-```
-
-</MemberCard>
-
-<a id="identifiertrigger" name="identifiertrigger"></a>
-
-<MemberCard>
-
-##### Trigger.identifierTrigger?
-
-```ts
-optional identifierTrigger: string;
-```
-
-</MemberCard>
-
-<a id="baseentry" name="baseentry"></a>
-
-### BaseEntry
-
-```ts
-type BaseEntry: Object;
-```
-
-Maps a string of LaTeX tokens to a function or symbol and vice-versa.
-
-#### Type declaration
-
-<a id="name-1" name="name-1"></a>
-
-<MemberCard>
-
-##### BaseEntry.name?
-
-```ts
-optional name: string;
-```
-
-Map a MathJSON function or symbol name to this entry.
-
-Each entry should have at least a `name` or a `parse` handler.
-
-An entry with no `name` cannot be serialized: the `name` is used to map
-a MathJSON function or symbol name to the appropriate entry for serializing.
-However, an entry with no `name` can be used to define a synonym (for example
-for the symbol `\varnothing` which is a synonym for `\emptyset`).
-
-If no `parse` handler is provided, only the trigger is used to select this
-entry. Otherwise, if the trigger of the entry matches the current
-token, the `parse` handler is invoked.
-
-</MemberCard>
-
-<a id="serialize-2" name="serialize-2"></a>
-
-<MemberCard>
-
-##### BaseEntry.serialize?
-
-```ts
-optional serialize: LatexString | SerializeHandler;
-```
-
-Transform an expression into a LaTeX string.
-If no `serialize` handler is provided, the `trigger` property is used
-
-</MemberCard>
-
-<a id="defaultentry" name="defaultentry"></a>
-
-### DefaultEntry
-
-```ts
-type DefaultEntry: BaseEntry & Trigger & Object;
-```
-
-#### Type declaration
-
-<MemberCard>
-
-##### DefaultEntry.parse
-
-```ts
-parse: Expression | ExpressionParseHandler;
-```
-
-</MemberCard>
-
-<a id="expressionentry" name="expressionentry"></a>
-
-### ExpressionEntry
-
-```ts
-type ExpressionEntry: BaseEntry & Trigger & Object;
-```
-
-#### Type declaration
-
-<MemberCard>
-
-##### ExpressionEntry.kind
-
-```ts
-kind: "expression";
-```
-
-</MemberCard>
-
-<MemberCard>
-
-##### ExpressionEntry.parse
-
-```ts
-parse: Expression | ExpressionParseHandler;
-```
-
-</MemberCard>
-
-<MemberCard>
-
-##### ExpressionEntry.precedence?
-
-```ts
-optional precedence: Precedence;
-```
-
-</MemberCard>
-
-<a id="matchfixentry" name="matchfixentry"></a>
-
-### MatchfixEntry
-
-```ts
-type MatchfixEntry: BaseEntry & Object;
-```
-
-#### Type declaration
-
-<MemberCard>
-
-##### MatchfixEntry.kind
-
-```ts
-kind: "matchfix";
-```
-
-</MemberCard>
-
-<MemberCard>
-
-##### MatchfixEntry.openTrigger
-
-```ts
-openTrigger: Delimiter | LatexToken[];
-```
-
-If `kind` is `'matchfix'`: the `openTrigger` and `closeTrigger`
-properties are required.
-
-</MemberCard>
-
-<MemberCard>
-
-##### MatchfixEntry.closeTrigger
-
-```ts
-closeTrigger: Delimiter | LatexToken[];
-```
-
-</MemberCard>
-
-<MemberCard>
-
-##### MatchfixEntry.parse?
-
-```ts
-optional parse: MatchfixParseHandler;
-```
-
-When invoked, the parser is pointing after the close delimiter.
-The argument of the handler is the body, i.e. the content between
-the open delimiter and the close delimiter.
-
-</MemberCard>
-
-<a id="infixentry" name="infixentry"></a>
-
-### InfixEntry
-
-```ts
-type InfixEntry: BaseEntry & Trigger & Object;
-```
-
-#### Type declaration
-
-<MemberCard>
-
-##### InfixEntry.kind
-
-```ts
-kind: "infix";
-```
-
-Infix position, with an operand before and an operand after: `a ⊛ b`.
-
-Example: `+`, `\times`.
-
-</MemberCard>
-
-<MemberCard>
-
-##### InfixEntry.associativity?
-
-```ts
-optional associativity: "right" | "left" | "none" | "any";
-```
-
-- **`none`**: a ? b ? c -> syntax error
-- **`any`**: a + b + c -> +(a, b, c)
-- **`left`**: a / b / c -> /(/(a, b), c)
-- **`right`**: a = b = c -> =(a, =(b, c))
-
-- `any`-associative operators have an unlimited number of arguments
-- `left`, `right` or `none` associative operators have two arguments
-
-</MemberCard>
-
-<MemberCard>
-
-##### InfixEntry.precedence?
-
-```ts
-optional precedence: Precedence;
-```
-
-</MemberCard>
-
-<MemberCard>
-
-##### InfixEntry.parse?
-
-```ts
-optional parse: string | InfixParseHandler;
-```
-
-</MemberCard>
-
-<a id="postfixentry" name="postfixentry"></a>
-
-### PostfixEntry
-
-```ts
-type PostfixEntry: BaseEntry & Trigger & Object;
-```
-
-#### Type declaration
-
-<MemberCard>
-
-##### PostfixEntry.kind
-
-```ts
-kind: "postfix";
-```
-
-Postfix position, with an operand before: `a ⊛`
-
-Example: `!`.
-
-</MemberCard>
-
-<MemberCard>
-
-##### PostfixEntry.precedence?
-
-```ts
-optional precedence: Precedence;
-```
-
-</MemberCard>
-
-<MemberCard>
-
-##### PostfixEntry.parse?
-
-```ts
-optional parse: string | PostfixParseHandler;
-```
-
-</MemberCard>
-
-<a id="prefixentry" name="prefixentry"></a>
-
-### PrefixEntry
-
-```ts
-type PrefixEntry: BaseEntry & Trigger & Object;
-```
-
-#### Type declaration
-
-<MemberCard>
-
-##### PrefixEntry.kind
-
-```ts
-kind: "prefix";
-```
-
-Prefix position, with an operand after: `⊛ a`
-
-Example: `-`, `\not`.
-
-</MemberCard>
-
-<MemberCard>
-
-##### PrefixEntry.precedence
-
-```ts
-precedence: Precedence;
-```
-
-</MemberCard>
-
-<MemberCard>
-
-##### PrefixEntry.parse?
-
-```ts
-optional parse: string | PrefixParseHandler;
-```
-
-</MemberCard>
-
-<a id="environmententry" name="environmententry"></a>
-
-### EnvironmentEntry
-
-```ts
-type EnvironmentEntry: BaseEntry & Object;
-```
-
-A LaTeX dictionary entry for an environment, that is a LaTeX
-construct using `\begin{...}...\end{...}`.
-
-#### Type declaration
-
-<MemberCard>
-
-##### EnvironmentEntry.kind
-
-```ts
-kind: "environment";
-```
-
-</MemberCard>
-
-<MemberCard>
-
-##### EnvironmentEntry.parse
-
-```ts
-parse: EnvironmentParseHandler;
-```
-
-</MemberCard>
-
-<MemberCard>
-
-##### EnvironmentEntry.identifierTrigger
-
-```ts
-identifierTrigger: string;
-```
-
-</MemberCard>
-
-<a id="symbolentry" name="symbolentry"></a>
-
-### SymbolEntry
-
-```ts
-type SymbolEntry: BaseEntry & Trigger & Object;
-```
-
-#### Type declaration
-
-<MemberCard>
-
-##### SymbolEntry.kind
-
-```ts
-kind: "symbol";
-```
-
-</MemberCard>
-
-<MemberCard>
-
-##### SymbolEntry.precedence?
-
-```ts
-optional precedence: Precedence;
-```
-
-Used for appropriate wrapping (i.e. when to surround it with parens)
-
-</MemberCard>
-
-<MemberCard>
-
-##### SymbolEntry.parse
-
-```ts
-parse: Expression | SymbolParseHandler;
-```
-
-</MemberCard>
-
-<a id="functionentry" name="functionentry"></a>
-
-### FunctionEntry
-
-```ts
-type FunctionEntry: BaseEntry & Trigger & Object;
-```
-
-A function is an identifier followed by:
-- some postfix operators such as `\prime`
-- an optional list of arguments in an enclosure (parentheses)
-
-For more complex situations, for example implicit arguments or
-inverse functions postfix (i.e. ^\{-1\}), use a custom parse handler with a
-entry of kind `expression`.
-
-#### Type declaration
-
-<MemberCard>
-
-##### FunctionEntry.kind
-
-```ts
-kind: "function";
-```
-
-</MemberCard>
-
-<MemberCard>
-
-##### FunctionEntry.parse?
-
-```ts
-optional parse: Expression | FunctionParseHandler;
-```
-
-</MemberCard>
-
-<a id="latexdictionaryentry" name="latexdictionaryentry"></a>
-
-### LatexDictionaryEntry
-
-```ts
-type LatexDictionaryEntry: 
-  | DefaultEntry
-  | ExpressionEntry
-  | MatchfixEntry
-  | InfixEntry
-  | PostfixEntry
-  | PrefixEntry
-  | SymbolEntry
-  | FunctionEntry
-  | EnvironmentEntry;
-```
-
-A dictionary entry is a record that maps a LaTeX token or string of tokens
-to a MathJSON expression or to a parsing handler.
-
-Set the [`ComputeEngine.latexDictionary`](#latexdictionary) property to an array of
-dictionary entries to define custom LaTeX parsing and serialization.
-
-<a id="parselatexoptions" name="parselatexoptions"></a>
-
-### ParseLatexOptions
-
-```ts
-type ParseLatexOptions: Object;
-```
-
-The LaTeX parsing options can be set using the
-[`ComputeEngine.latexOptions`](#latexoptions) property.
-
-#### Type declaration
-
-<a id="skipspace-1" name="skipspace-1"></a>
-
-<MemberCard>
-
-##### ParseLatexOptions.skipSpace
-
-```ts
-skipSpace: boolean;
-```
-
-If true, ignore space characters in math mode.
-
-**Default**: `true`
-
-</MemberCard>
-
-<a id="parseargumentsofunknownlatexcommands" name="parseargumentsofunknownlatexcommands"></a>
-
-<MemberCard>
-
-##### ParseLatexOptions.parseArgumentsOfUnknownLatexCommands
-
-```ts
-parseArgumentsOfUnknownLatexCommands: boolean;
-```
-
-When an unknown LaTeX command is encountered, attempt to parse
-any arguments it may have.
-
-For example, `\foo{x+1}` would produce `['\foo', ['Add', 'x', 1]]` if
-this property is true, `['LatexSymbols', '\foo', '<{>', 'x', '+', 1, '<{>']`
-otherwise.
-
-</MemberCard>
-
-<a id="parsenumbers" name="parsenumbers"></a>
-
-<MemberCard>
-
-##### ParseLatexOptions.parseNumbers
-
-```ts
-parseNumbers: "auto" | "rational" | "decimal" | "never";
-```
-
-When parsing a decimal number (e.g. `3.1415`):
-
-- `"auto"` or `"decimal"`: if a decimal number parse it as an approximate
-  decimal number with a whole part and a fractional part
-- `"rational"`: if a decimal number, parse it as an exact rational number
-  with a numerator  and a denominator. If not a decimal number, parse
-  it as a regular number.
-- `"never"`: do not parse numbers, instead return each token making up
- the number (minus sign, digits, decimal marker, etc...).
-
-Note: if the number includes repeating digits (e.g. `1.33(333)`),
-it will be parsed as a decimal number even if this setting is `"rational"`.
-
-**Default**: `"auto"`
-
-</MemberCard>
-
-<a id="parseunknownidentifier" name="parseunknownidentifier"></a>
-
-<MemberCard>
-
-##### ParseLatexOptions.parseUnknownIdentifier
-
-```ts
-parseUnknownIdentifier: (identifier, parser) => "symbol" | "function" | "unknown";
-```
-
-This handler is invoked when the parser encounters an identifier
-that does not have a corresponding entry in the dictionary.
-
-The `identifier` argument is a (valid identifier)[/math-json/#identifiers].
-
-The handler can return:
-
-- `"symbol"`: the identifier is a constant or variable name.
-
-- `"function"`: the identifier is a function name. If an apply
-function operator (typically, parentheses) follow, they will be parsed
-as arguments to the function.
-
-- `"unknown"`: the identifier is not recognized.
-
-• **identifier**: `string`
-
-• **parser**: [`Parser`](#parser)
-
-</MemberCard>
-
-<a id="preservelatex" name="preservelatex"></a>
-
-<MemberCard>
-
-##### ParseLatexOptions.preserveLatex
-
-```ts
-preserveLatex: boolean;
-```
-
-If true, the expression will be decorated with the LaTeX
-fragments corresponding to each elements of the expression.
-
-The top-level expression, that is the one returned by `parse()`, will
-include the verbatim LaTeX input that was parsed. The sub-expressions
-may contain a slightly different LaTeX, for example with consecutive spaces
-replaced by one, with comments removed and with some low-level LaTeX
-commands replaced, for example `\egroup` and `\bgroup`.
-
-**Default:** `false`
-
-</MemberCard>
+A LatexString is a regular string of LaTeX, for example:
+`\frac{\pi}{2}`
 
 <a id="delimiterscale" name="delimiterscale"></a>
 
 ### DelimiterScale
 
 ```ts
-type DelimiterScale: "normal" | "scaled" | "big" | "none";
+type DelimiterScale = "normal" | "scaled" | "big" | "none";
 ```
 
 <a id="serializelatexoptions" name="serializelatexoptions"></a>
@@ -7429,15 +6583,30 @@ type DelimiterScale: "normal" | "scaled" | "big" | "none";
 ### SerializeLatexOptions
 
 ```ts
-type SerializeLatexOptions: Object;
+type SerializeLatexOptions = NumberSerializationFormat & object;
 ```
 
-The LaTeX serialization options can be set using the
-[`ComputeEngine.latexOptions`](#latexoptions) property.
+The LaTeX serialization options can used with the `expr.toLatex()` method.
 
 #### Type declaration
 
-<a id="invisiblemultiply" name="invisiblemultiply"></a>
+##### prettify
+
+<MemberCard>
+
+##### SerializeLatexOptions.prettify
+
+```ts
+prettify: boolean;
+```
+
+If true, prettify the LaTeX output.
+
+For example, render `\frac{a}{b}\frac{c}{d}` as `\frac{ac}{bd}`
+
+</MemberCard>
+
+##### invisibleMultiply
 
 <MemberCard>
 
@@ -7449,15 +6618,15 @@ invisibleMultiply: LatexString;
 
 LaTeX string used to render an invisible multiply, e.g. in '2x'.
 
-Leave it empty to join the adjacent terms, i.e. `2x`.
+If empty, both operands are concatenated, i.e. `2x`.
 
-Use `\cdot` to insert a `\cdot` operator between them, i.e. `2\cdot x`.
+Use `\cdot` to insert a `\cdot` operator between them, i.e. `2 \cdot x`.
 
 Empty by default.
 
 </MemberCard>
 
-<a id="invisibleplus" name="invisibleplus"></a>
+##### invisiblePlus
 
 <MemberCard>
 
@@ -7467,7 +6636,7 @@ Empty by default.
 invisiblePlus: LatexString;
 ```
 
-LaTeX string used for an invisible plus with mixed numbers e.g. in '1 3/4'.
+LaTeX string used to render [mixed numbers](https://en.wikipedia.org/wiki/Fraction#Mixed_numbers) e.g. '1 3/4'.
 
 Leave it empty to join the main number and the fraction, i.e. render it
 as `1\frac{3}{4}`.
@@ -7479,7 +6648,7 @@ Empty by default.
 
 </MemberCard>
 
-<a id="multiply" name="multiply"></a>
+##### multiply
 
 <MemberCard>
 
@@ -7489,13 +6658,15 @@ Empty by default.
 multiply: LatexString;
 ```
 
-LaTeX string used for an explicit multiply operator,
+LaTeX string used to render an explicit multiply operator.
+
+For example, `\times`, `\cdot`, etc...
 
 Default: `\times`
 
 </MemberCard>
 
-<a id="missingsymbol" name="missingsymbol"></a>
+##### missingSymbol
 
 <MemberCard>
 
@@ -7505,64 +6676,81 @@ Default: `\times`
 missingSymbol: LatexString;
 ```
 
-When an expression contains the error expression `["Error", "'missing'"]`,
-serialize it with this LaTeX string
+Serialize the expression `["Error", "'missing'"]`,  with this LaTeX string
 
 </MemberCard>
 
-<a id="applyfunctionstyle-1" name="applyfunctionstyle-1"></a>
+##### applyFunctionStyle()
 
 <MemberCard>
 
-##### SerializeLatexOptions.applyFunctionStyle
+##### SerializeLatexOptions.applyFunctionStyle()
 
 ```ts
 applyFunctionStyle: (expr, level) => DelimiterScale;
 ```
 
-• **expr**: [`Expression`](#expression)
+###### expr
 
-• **level**: `number`
+[`Expression`](#expression)
+
+###### level
+
+`number`
+
+[`DelimiterScale`](#delimiterscale)
 
 </MemberCard>
 
-<a id="groupstyle-1" name="groupstyle-1"></a>
+##### groupStyle()
 
 <MemberCard>
 
-##### SerializeLatexOptions.groupStyle
+##### SerializeLatexOptions.groupStyle()
 
 ```ts
 groupStyle: (expr, level) => DelimiterScale;
 ```
 
-• **expr**: [`Expression`](#expression)
+###### expr
 
-• **level**: `number`
+[`Expression`](#expression)
+
+###### level
+
+`number`
+
+[`DelimiterScale`](#delimiterscale)
 
 </MemberCard>
 
-<a id="rootstyle-1" name="rootstyle-1"></a>
+##### rootStyle()
 
 <MemberCard>
 
-##### SerializeLatexOptions.rootStyle
+##### SerializeLatexOptions.rootStyle()
 
 ```ts
 rootStyle: (expr, level) => "radical" | "quotient" | "solidus";
 ```
 
-• **expr**: [`Expression`](#expression)
+###### expr
 
-• **level**: `number`
+[`Expression`](#expression)
+
+###### level
+
+`number`
+
+`"radical"` \| `"quotient"` \| `"solidus"`
 
 </MemberCard>
 
-<a id="fractionstyle-1" name="fractionstyle-1"></a>
+##### fractionStyle()
 
 <MemberCard>
 
-##### SerializeLatexOptions.fractionStyle
+##### SerializeLatexOptions.fractionStyle()
 
 ```ts
 fractionStyle: (expr, level) => 
@@ -7575,90 +6763,3024 @@ fractionStyle: (expr, level) =>
   | "factor";
 ```
 
-• **expr**: [`Expression`](#expression)
+###### expr
 
-• **level**: `number`
+[`Expression`](#expression)
+
+###### level
+
+`number`
+
+  \| `"quotient"`
+  \| `"block-quotient"`
+  \| `"inline-quotient"`
+  \| `"inline-solidus"`
+  \| `"nice-solidus"`
+  \| `"reciprocal"`
+  \| `"factor"`
 
 </MemberCard>
 
-<a id="logicstyle-1" name="logicstyle-1"></a>
+##### logicStyle()
 
 <MemberCard>
 
-##### SerializeLatexOptions.logicStyle
+##### SerializeLatexOptions.logicStyle()
 
 ```ts
 logicStyle: (expr, level) => "word" | "boolean" | "uppercase-word" | "punctuation";
 ```
 
-• **expr**: [`Expression`](#expression)
+###### expr
 
-• **level**: `number`
+[`Expression`](#expression)
+
+###### level
+
+`number`
+
+`"word"` \| `"boolean"` \| `"uppercase-word"` \| `"punctuation"`
 
 </MemberCard>
 
-<a id="powerstyle-1" name="powerstyle-1"></a>
+##### powerStyle()
 
 <MemberCard>
 
-##### SerializeLatexOptions.powerStyle
+##### SerializeLatexOptions.powerStyle()
 
 ```ts
 powerStyle: (expr, level) => "root" | "solidus" | "quotient";
 ```
 
-• **expr**: [`Expression`](#expression)
+###### expr
 
-• **level**: `number`
+[`Expression`](#expression)
+
+###### level
+
+`number`
+
+`"root"` \| `"solidus"` \| `"quotient"`
 
 </MemberCard>
 
-<a id="numericsetstyle-1" name="numericsetstyle-1"></a>
+##### numericSetStyle()
 
 <MemberCard>
 
-##### SerializeLatexOptions.numericSetStyle
+##### SerializeLatexOptions.numericSetStyle()
 
 ```ts
 numericSetStyle: (expr, level) => "compact" | "regular" | "interval" | "set-builder";
 ```
 
-• **expr**: [`Expression`](#expression)
+###### expr
 
-• **level**: `number`
+[`Expression`](#expression)
+
+###### level
+
+`number`
+
+`"compact"` \| `"regular"` \| `"interval"` \| `"set-builder"`
 
 </MemberCard>
 
-<a id="numberformattingoptions" name="numberformattingoptions"></a>
+## Other
 
-### NumberFormattingOptions
+<a id="oneoftypesarray-res-allproperties" name="oneoftypesarray-res-allproperties"></a>
+
+### OneOf\<TypesArray, Res, AllProperties\>
 
 ```ts
-type NumberFormattingOptions: Object;
+type OneOf<TypesArray, Res, AllProperties> = TypesArray extends [infer Head, ...(infer Rem)] ? OneOf<Rem, Res | OnlyFirst<Head, AllProperties>, AllProperties> : Res;
 ```
 
-The options to format numbers can be set using the
-[`ComputeEngine.latexOptions`](#latexoptions) property.
+#### Type Parameters
+
+• **TypesArray** *extends* `any`[]
+
+• **Res** = `never`
+
+• **AllProperties** = `MergeTypes`\<`TypesArray`\>
+
+<a id="boxedtype" name="boxedtype"></a>
+
+### BoxedType
+
+<a id="constructors" name="constructors"></a>
+
+<MemberCard>
+
+##### new BoxedType()
+
+##### new BoxedType()
+
+```ts
+new BoxedType(type): BoxedType
+```
+
+###### type
+
+`string` | [`AlgebraicType`](#algebraictype) | [`NegationType`](#negationtype) | [`CollectionType`](#collectiontype) | [`ListType`](#listtype) | [`SetType`](#settype) | [`MapType`](#maptype) | [`TupleType`](#tupletype) | [`FunctionSignature`](#functionsignature) | [`ValueType`](#valuetype) | [`TypeReference`](#typereference)
+
+[`BoxedType`](#boxedtype)
+
+</MemberCard>
+
+<a id="unknown" name="unknown"></a>
+
+<MemberCard>
+
+##### BoxedType.unknown
+
+```ts
+static unknown: BoxedType;
+```
+
+</MemberCard>
+
+<a id="type" name="type"></a>
+
+<MemberCard>
+
+##### BoxedType.type
+
+```ts
+type: Type;
+```
+
+</MemberCard>
+
+<a id="isunknown" name="isunknown"></a>
+
+<MemberCard>
+
+##### BoxedType.isUnknown
+
+###### Get Signature
+
+```ts
+get isUnknown(): boolean
+```
+
+`boolean`
+
+</MemberCard>
+
+<a id="matches" name="matches"></a>
+
+<MemberCard>
+
+##### BoxedType.matches()
+
+```ts
+matches(other): boolean
+```
+
+###### other
+
+`string` | [`AlgebraicType`](#algebraictype) | [`NegationType`](#negationtype) | [`CollectionType`](#collectiontype) | [`ListType`](#listtype) | [`SetType`](#settype) | [`MapType`](#maptype) | [`TupleType`](#tupletype) | [`FunctionSignature`](#functionsignature) | [`ValueType`](#valuetype) | [`TypeReference`](#typereference) | [`BoxedType`](#boxedtype)
+
+`boolean`
+
+</MemberCard>
+
+<a id="is" name="is"></a>
+
+<MemberCard>
+
+##### BoxedType.is()
+
+```ts
+is(other): boolean
+```
+
+###### other
+
+`string` | [`AlgebraicType`](#algebraictype) | [`NegationType`](#negationtype) | [`CollectionType`](#collectiontype) | [`ListType`](#listtype) | [`SetType`](#settype) | [`MapType`](#maptype) | [`TupleType`](#tupletype) | [`FunctionSignature`](#functionsignature) | [`ValueType`](#valuetype) | [`TypeReference`](#typereference)
+
+`boolean`
+
+</MemberCard>
+
+<a id="tostring" name="tostring"></a>
+
+<MemberCard>
+
+##### BoxedType.toString()
+
+```ts
+toString(): string
+```
+
+`string`
+
+</MemberCard>
+
+<a id="tojson" name="tojson"></a>
+
+<MemberCard>
+
+##### BoxedType.toJSON()
+
+```ts
+toJSON(): string
+```
+
+`string`
+
+</MemberCard>
+
+<a id="toprimitive" name="toprimitive"></a>
+
+<MemberCard>
+
+##### BoxedType.\[toPrimitive\]()
+
+```ts
+toPrimitive: string
+```
+
+###### hint
+
+`string`
+
+`string`
+
+</MemberCard>
+
+<a id="valueof" name="valueof"></a>
+
+<MemberCard>
+
+##### BoxedType.valueOf()
+
+```ts
+valueOf(): string
+```
+
+`string`
+
+</MemberCard>
+
+<a id="isrulestep" name="isrulestep"></a>
+
+<MemberCard>
+
+### isRuleStep()
+
+```ts
+function isRuleStep(x): x is RuleStep
+```
+
+##### x
+
+`any`
+
+`x is RuleStep`
+
+</MemberCard>
+
+<a id="isboxedrule" name="isboxedrule"></a>
+
+<MemberCard>
+
+### isBoxedRule()
+
+```ts
+function isBoxedRule(x): x is BoxedRule
+```
+
+##### x
+
+`any`
+
+`x is BoxedRule`
+
+</MemberCard>
+
+<a id="datatypemap" name="datatypemap"></a>
+
+### DataTypeMap
+
+```ts
+type DataTypeMap = object;
+```
 
 #### Type declaration
 
-<a id="precision-1" name="precision-1"></a>
+<a id="float64"></a>
+
+##### float64
+
+<a id="float64" name="float64"></a>
 
 <MemberCard>
 
-##### NumberFormattingOptions.precision
+##### DataTypeMap.float64
 
 ```ts
-precision: number;
+float64: number;
 ```
 
 </MemberCard>
 
-<a id="positiveinfinity-1" name="positiveinfinity-1"></a>
+<a id="float32"></a>
+
+##### float32
+
+<a id="float32" name="float32"></a>
 
 <MemberCard>
 
-##### NumberFormattingOptions.positiveInfinity
+##### DataTypeMap.float32
+
+```ts
+float32: number;
+```
+
+</MemberCard>
+
+<a id="int32"></a>
+
+##### int32
+
+<a id="int32" name="int32"></a>
+
+<MemberCard>
+
+##### DataTypeMap.int32
+
+```ts
+int32: number;
+```
+
+</MemberCard>
+
+<a id="uint8"></a>
+
+##### uint8
+
+<a id="uint8" name="uint8"></a>
+
+<MemberCard>
+
+##### DataTypeMap.uint8
+
+```ts
+uint8: number;
+```
+
+</MemberCard>
+
+<a id="complex128"></a>
+
+##### complex128
+
+<a id="complex128" name="complex128"></a>
+
+<MemberCard>
+
+##### DataTypeMap.complex128
+
+```ts
+complex128: Complex;
+```
+
+</MemberCard>
+
+<a id="complex64"></a>
+
+##### complex64
+
+<a id="complex64" name="complex64"></a>
+
+<MemberCard>
+
+##### DataTypeMap.complex64
+
+```ts
+complex64: Complex;
+```
+
+</MemberCard>
+
+<a id="bool"></a>
+
+##### bool
+
+<a id="bool" name="bool"></a>
+
+<MemberCard>
+
+##### DataTypeMap.bool
+
+```ts
+bool: boolean;
+```
+
+</MemberCard>
+
+<a id="string-1"></a>
+
+##### string
+
+<a id="string-1" name="string-1"></a>
+
+<MemberCard>
+
+##### DataTypeMap.string
+
+```ts
+string: string;
+```
+
+</MemberCard>
+
+<a id="expression-5"></a>
+
+##### expression
+
+<a id="expression-5" name="expression-5"></a>
+
+<MemberCard>
+
+##### DataTypeMap.expression
+
+```ts
+expression: BoxedExpression;
+```
+
+</MemberCard>
+
+<a id="tensordatatype" name="tensordatatype"></a>
+
+### TensorDataType
+
+```ts
+type TensorDataType = keyof DataTypeMap;
+```
+
+<a id="maketensorfield" name="maketensorfield"></a>
+
+<MemberCard>
+
+### makeTensorField()
+
+```ts
+function makeTensorField<DT>(ce, dtype): TensorField<DataTypeMap[DT]>
+```
+
+• **DT** *extends* keyof [`DataTypeMap`](#datatypemap)
+
+##### ce
+
+`IComputeEngine`
+
+##### dtype
+
+`DT`
+
+[`TensorField`](#tensorfieldt)\<[`DataTypeMap`](#datatypemap)\[`DT`\]\>
+
+</MemberCard>
+
+<a id="tensorfieldt" name="tensorfieldt"></a>
+
+### TensorField\<T\>
+
+#### Type Parameters
+
+• **T** *extends* 
+  \| `number`
+  \| `Complex`
+  \| [`BoxedExpression`](#boxedexpression)
+  \| `boolean`
+  \| `string` = `number`
+
+<a id="one-3" name="one-3"></a>
+
+<MemberCard>
+
+##### TensorField.one
+
+```ts
+readonly one: T;
+```
+
+</MemberCard>
+
+<a id="zero-3" name="zero-3"></a>
+
+<MemberCard>
+
+##### TensorField.zero
+
+```ts
+readonly zero: T;
+```
+
+</MemberCard>
+
+<a id="nan-3" name="nan-3"></a>
+
+<MemberCard>
+
+##### TensorField.nan
+
+```ts
+readonly nan: T;
+```
+
+</MemberCard>
+
+<a id="cast-3" name="cast-3"></a>
+
+<MemberCard>
+
+##### TensorField.cast()
+
+###### cast(x, dtype)
+
+```ts
+cast(x, dtype): number
+```
+
+###### x
+
+`T`
+
+###### dtype
+
+`"float64"`
+
+`number`
+
+###### cast(x, dtype)
+
+```ts
+cast(x, dtype): number
+```
+
+###### x
+
+`T`
+
+###### dtype
+
+`"float32"`
+
+`number`
+
+###### cast(x, dtype)
+
+```ts
+cast(x, dtype): number
+```
+
+###### x
+
+`T`
+
+###### dtype
+
+`"int32"`
+
+`number`
+
+###### cast(x, dtype)
+
+```ts
+cast(x, dtype): number
+```
+
+###### x
+
+`T`
+
+###### dtype
+
+`"uint8"`
+
+`number`
+
+###### cast(x, dtype)
+
+```ts
+cast(x, dtype): any
+```
+
+###### x
+
+`T`
+
+###### dtype
+
+`"complex128"`
+
+`any`
+
+###### cast(x, dtype)
+
+```ts
+cast(x, dtype): any
+```
+
+###### x
+
+`T`
+
+###### dtype
+
+`"complex64"`
+
+`any`
+
+###### cast(x, dtype)
+
+```ts
+cast(x, dtype): boolean
+```
+
+###### x
+
+`T`
+
+###### dtype
+
+`"bool"`
+
+`boolean`
+
+###### cast(x, dtype)
+
+```ts
+cast(x, dtype): string
+```
+
+###### x
+
+`T`
+
+###### dtype
+
+`"string"`
+
+`string`
+
+###### cast(x, dtype)
+
+```ts
+cast(x, dtype): BoxedExpression
+```
+
+###### x
+
+`T`
+
+###### dtype
+
+`"expression"`
+
+[`BoxedExpression`](#boxedexpression)
+
+###### cast(x, dtype)
+
+```ts
+cast(x, dtype): number[]
+```
+
+###### x
+
+`T`[]
+
+###### dtype
+
+`"float64"`
+
+`number`[]
+
+###### cast(x, dtype)
+
+```ts
+cast(x, dtype): number[]
+```
+
+###### x
+
+`T`[]
+
+###### dtype
+
+`"float32"`
+
+`number`[]
+
+###### cast(x, dtype)
+
+```ts
+cast(x, dtype): number[]
+```
+
+###### x
+
+`T`[]
+
+###### dtype
+
+`"int32"`
+
+`number`[]
+
+###### cast(x, dtype)
+
+```ts
+cast(x, dtype): number[]
+```
+
+###### x
+
+`T`[]
+
+###### dtype
+
+`"uint8"`
+
+`number`[]
+
+###### cast(x, dtype)
+
+```ts
+cast(x, dtype): Complex[]
+```
+
+###### x
+
+`T`[]
+
+###### dtype
+
+`"complex128"`
+
+`Complex`[]
+
+###### cast(x, dtype)
+
+```ts
+cast(x, dtype): Complex[]
+```
+
+###### x
+
+`T`[]
+
+###### dtype
+
+`"complex64"`
+
+`Complex`[]
+
+###### cast(x, dtype)
+
+```ts
+cast(x, dtype): boolean[]
+```
+
+###### x
+
+`T`[]
+
+###### dtype
+
+`"bool"`
+
+`boolean`[]
+
+###### cast(x, dtype)
+
+```ts
+cast(x, dtype): string[]
+```
+
+###### x
+
+`T`[]
+
+###### dtype
+
+`"string"`
+
+`string`[]
+
+###### cast(x, dtype)
+
+```ts
+cast(x, dtype): BoxedExpression[]
+```
+
+###### x
+
+`T`[]
+
+###### dtype
+
+`"expression"`
+
+[`BoxedExpression`](#boxedexpression)[]
+
+###### cast(x, dtype)
+
+```ts
+cast(x, dtype): any
+```
+
+###### x
+
+`T` | `T`[]
+
+###### dtype
+
+keyof [`DataTypeMap`](#datatypemap)
+
+`any`
+
+</MemberCard>
+
+<a id="expression-4" name="expression-4"></a>
+
+<MemberCard>
+
+##### TensorField.expression()
+
+```ts
+expression(x): BoxedExpression
+```
+
+###### x
+
+`T`
+
+[`BoxedExpression`](#boxedexpression)
+
+</MemberCard>
+
+<a id="iszero-5" name="iszero-5"></a>
+
+<MemberCard>
+
+##### TensorField.isZero()
+
+```ts
+isZero(x): boolean
+```
+
+###### x
+
+`T`
+
+`boolean`
+
+</MemberCard>
+
+<a id="isone-4" name="isone-4"></a>
+
+<MemberCard>
+
+##### TensorField.isOne()
+
+```ts
+isOne(x): boolean
+```
+
+###### x
+
+`T`
+
+`boolean`
+
+</MemberCard>
+
+<a id="equals-4" name="equals-4"></a>
+
+<MemberCard>
+
+##### TensorField.equals()
+
+```ts
+equals(lhs, rhs): boolean
+```
+
+###### lhs
+
+`T`
+
+###### rhs
+
+`T`
+
+`boolean`
+
+</MemberCard>
+
+<a id="add-6" name="add-6"></a>
+
+<MemberCard>
+
+##### TensorField.add()
+
+```ts
+add(lhs, rhs): T
+```
+
+###### lhs
+
+`T`
+
+###### rhs
+
+`T`
+
+`T`
+
+</MemberCard>
+
+<a id="addn-3" name="addn-3"></a>
+
+<MemberCard>
+
+##### TensorField.addn()
+
+```ts
+addn(...xs): T
+```
+
+###### xs
+
+...`T`[]
+
+`T`
+
+</MemberCard>
+
+<a id="neg-5" name="neg-5"></a>
+
+<MemberCard>
+
+##### TensorField.neg()
+
+```ts
+neg(x): T
+```
+
+###### x
+
+`T`
+
+`T`
+
+</MemberCard>
+
+<a id="sub-5" name="sub-5"></a>
+
+<MemberCard>
+
+##### TensorField.sub()
+
+```ts
+sub(lhs, rhs): T
+```
+
+###### lhs
+
+`T`
+
+###### rhs
+
+`T`
+
+`T`
+
+</MemberCard>
+
+<a id="mul-5" name="mul-5"></a>
+
+<MemberCard>
+
+##### TensorField.mul()
+
+```ts
+mul(lhs, rhs): T
+```
+
+###### lhs
+
+`T`
+
+###### rhs
+
+`T`
+
+`T`
+
+</MemberCard>
+
+<a id="muln-3" name="muln-3"></a>
+
+<MemberCard>
+
+##### TensorField.muln()
+
+```ts
+muln(...xs): T
+```
+
+###### xs
+
+...`T`[]
+
+`T`
+
+</MemberCard>
+
+<a id="div-5" name="div-5"></a>
+
+<MemberCard>
+
+##### TensorField.div()
+
+```ts
+div(lhs, rhs): T
+```
+
+###### lhs
+
+`T`
+
+###### rhs
+
+`T`
+
+`T`
+
+</MemberCard>
+
+<a id="pow-5" name="pow-5"></a>
+
+<MemberCard>
+
+##### TensorField.pow()
+
+```ts
+pow(rhs, n): T
+```
+
+###### rhs
+
+`T`
+
+###### n
+
+`number`
+
+`T`
+
+</MemberCard>
+
+<a id="conjugate-3" name="conjugate-3"></a>
+
+<MemberCard>
+
+##### TensorField.conjugate()
+
+```ts
+conjugate(x): T
+```
+
+###### x
+
+`T`
+
+`T`
+
+</MemberCard>
+
+<a id="tensorfieldnumber" name="tensorfieldnumber"></a>
+
+### TensorFieldNumber
+
+#### Implements
+
+- [`TensorField`](#tensorfieldt)\<`number`\>
+
+<a id="constructors-1" name="constructors-1"></a>
+
+<MemberCard>
+
+##### new TensorFieldNumber()
+
+##### new TensorFieldNumber()
+
+```ts
+new TensorFieldNumber(ce): TensorFieldNumber
+```
+
+###### ce
+
+`IComputeEngine`
+
+[`TensorFieldNumber`](#tensorfieldnumber)
+
+</MemberCard>
+
+<a id="one" name="one"></a>
+
+<MemberCard>
+
+##### TensorFieldNumber.one
+
+```ts
+one: number = 1;
+```
+
+</MemberCard>
+
+<a id="zero" name="zero"></a>
+
+<MemberCard>
+
+##### TensorFieldNumber.zero
+
+```ts
+zero: number = 0;
+```
+
+</MemberCard>
+
+<a id="nan" name="nan"></a>
+
+<MemberCard>
+
+##### TensorFieldNumber.nan
+
+```ts
+nan: number = NaN;
+```
+
+</MemberCard>
+
+<a id="cast" name="cast"></a>
+
+<MemberCard>
+
+##### TensorFieldNumber.cast()
+
+###### cast(x, dtype)
+
+```ts
+cast(x, dtype): number
+```
+
+###### x
+
+`number`
+
+###### dtype
+
+`"float64"`
+
+`number`
+
+###### cast(x, dtype)
+
+```ts
+cast(x, dtype): number
+```
+
+###### x
+
+`number`
+
+###### dtype
+
+`"float32"`
+
+`number`
+
+###### cast(x, dtype)
+
+```ts
+cast(x, dtype): number
+```
+
+###### x
+
+`number`
+
+###### dtype
+
+`"int32"`
+
+`number`
+
+###### cast(x, dtype)
+
+```ts
+cast(x, dtype): number
+```
+
+###### x
+
+`number`
+
+###### dtype
+
+`"uint8"`
+
+`number`
+
+###### cast(x, dtype)
+
+```ts
+cast(x, dtype): any
+```
+
+###### x
+
+`number`
+
+###### dtype
+
+`"complex128"`
+
+`any`
+
+###### cast(x, dtype)
+
+```ts
+cast(x, dtype): any
+```
+
+###### x
+
+`number`
+
+###### dtype
+
+`"complex64"`
+
+`any`
+
+###### cast(x, dtype)
+
+```ts
+cast(x, dtype): boolean
+```
+
+###### x
+
+`number`
+
+###### dtype
+
+`"bool"`
+
+`boolean`
+
+###### cast(x, dtype)
+
+```ts
+cast(x, dtype): string
+```
+
+###### x
+
+`number`
+
+###### dtype
+
+`"string"`
+
+`string`
+
+###### cast(x, dtype)
+
+```ts
+cast(x, dtype): BoxedExpression
+```
+
+###### x
+
+`number`
+
+###### dtype
+
+`"expression"`
+
+[`BoxedExpression`](#boxedexpression)
+
+###### cast(x, dtype)
+
+```ts
+cast(x, dtype): number[]
+```
+
+###### x
+
+`number`[]
+
+###### dtype
+
+`"float64"`
+
+`number`[]
+
+###### cast(x, dtype)
+
+```ts
+cast(x, dtype): number[]
+```
+
+###### x
+
+`number`[]
+
+###### dtype
+
+`"float32"`
+
+`number`[]
+
+###### cast(x, dtype)
+
+```ts
+cast(x, dtype): number[]
+```
+
+###### x
+
+`number`[]
+
+###### dtype
+
+`"int32"`
+
+`number`[]
+
+###### cast(x, dtype)
+
+```ts
+cast(x, dtype): number[]
+```
+
+###### x
+
+`number`[]
+
+###### dtype
+
+`"uint8"`
+
+`number`[]
+
+###### cast(x, dtype)
+
+```ts
+cast(x, dtype): Complex[]
+```
+
+###### x
+
+`number`[]
+
+###### dtype
+
+`"complex128"`
+
+`Complex`[]
+
+###### cast(x, dtype)
+
+```ts
+cast(x, dtype): Complex[]
+```
+
+###### x
+
+`number`[]
+
+###### dtype
+
+`"complex64"`
+
+`Complex`[]
+
+###### cast(x, dtype)
+
+```ts
+cast(x, dtype): boolean[]
+```
+
+###### x
+
+`number`[]
+
+###### dtype
+
+`"bool"`
+
+`boolean`[]
+
+###### cast(x, dtype)
+
+```ts
+cast(x, dtype): string[]
+```
+
+###### x
+
+`number`[]
+
+###### dtype
+
+`"string"`
+
+`string`[]
+
+###### cast(x, dtype)
+
+```ts
+cast(x, dtype): BoxedExpression[]
+```
+
+###### x
+
+`number`[]
+
+###### dtype
+
+`"expression"`
+
+[`BoxedExpression`](#boxedexpression)[]
+
+</MemberCard>
+
+<a id="expression" name="expression"></a>
+
+<MemberCard>
+
+##### TensorFieldNumber.expression()
+
+```ts
+expression(x): BoxedExpression
+```
+
+###### x
+
+`number`
+
+[`BoxedExpression`](#boxedexpression)
+
+</MemberCard>
+
+<a id="iszero" name="iszero"></a>
+
+<MemberCard>
+
+##### TensorFieldNumber.isZero()
+
+```ts
+isZero(x): boolean
+```
+
+###### x
+
+`number`
+
+`boolean`
+
+</MemberCard>
+
+<a id="isone" name="isone"></a>
+
+<MemberCard>
+
+##### TensorFieldNumber.isOne()
+
+```ts
+isOne(x): boolean
+```
+
+###### x
+
+`number`
+
+`boolean`
+
+</MemberCard>
+
+<a id="equals" name="equals"></a>
+
+<MemberCard>
+
+##### TensorFieldNumber.equals()
+
+```ts
+equals(lhs, rhs): boolean
+```
+
+###### lhs
+
+`number`
+
+###### rhs
+
+`number`
+
+`boolean`
+
+</MemberCard>
+
+<a id="add" name="add"></a>
+
+<MemberCard>
+
+##### TensorFieldNumber.add()
+
+```ts
+add(lhs, rhs): number
+```
+
+###### lhs
+
+`number`
+
+###### rhs
+
+`number`
+
+`number`
+
+</MemberCard>
+
+<a id="addn" name="addn"></a>
+
+<MemberCard>
+
+##### TensorFieldNumber.addn()
+
+```ts
+addn(...xs): number
+```
+
+###### xs
+
+...`number`[]
+
+`number`
+
+</MemberCard>
+
+<a id="neg" name="neg"></a>
+
+<MemberCard>
+
+##### TensorFieldNumber.neg()
+
+```ts
+neg(x): number
+```
+
+###### x
+
+`number`
+
+`number`
+
+</MemberCard>
+
+<a id="sub" name="sub"></a>
+
+<MemberCard>
+
+##### TensorFieldNumber.sub()
+
+```ts
+sub(lhs, rhs): number
+```
+
+###### lhs
+
+`number`
+
+###### rhs
+
+`number`
+
+`number`
+
+</MemberCard>
+
+<a id="mul" name="mul"></a>
+
+<MemberCard>
+
+##### TensorFieldNumber.mul()
+
+```ts
+mul(lhs, rhs): number
+```
+
+###### lhs
+
+`number`
+
+###### rhs
+
+`number`
+
+`number`
+
+</MemberCard>
+
+<a id="muln" name="muln"></a>
+
+<MemberCard>
+
+##### TensorFieldNumber.muln()
+
+```ts
+muln(...xs): number
+```
+
+###### xs
+
+...`number`[]
+
+`number`
+
+</MemberCard>
+
+<a id="div" name="div"></a>
+
+<MemberCard>
+
+##### TensorFieldNumber.div()
+
+```ts
+div(lhs, rhs): number
+```
+
+###### lhs
+
+`number`
+
+###### rhs
+
+`number`
+
+`number`
+
+</MemberCard>
+
+<a id="pow" name="pow"></a>
+
+<MemberCard>
+
+##### TensorFieldNumber.pow()
+
+```ts
+pow(lhs, rhs): number
+```
+
+###### lhs
+
+`number`
+
+###### rhs
+
+`number`
+
+`number`
+
+</MemberCard>
+
+<a id="conjugate" name="conjugate"></a>
+
+<MemberCard>
+
+##### TensorFieldNumber.conjugate()
+
+```ts
+conjugate(x): number
+```
+
+###### x
+
+`number`
+
+`number`
+
+</MemberCard>
+
+<a id="tensorfieldexpression" name="tensorfieldexpression"></a>
+
+### TensorFieldExpression
+
+#### Implements
+
+- [`TensorField`](#tensorfieldt)\<[`BoxedExpression`](#boxedexpression)\>
+
+<a id="constructors-2" name="constructors-2"></a>
+
+<MemberCard>
+
+##### new TensorFieldExpression()
+
+##### new TensorFieldExpression()
+
+```ts
+new TensorFieldExpression(ce): TensorFieldExpression
+```
+
+###### ce
+
+`IComputeEngine`
+
+[`TensorFieldExpression`](#tensorfieldexpression)
+
+</MemberCard>
+
+<a id="one-1" name="one-1"></a>
+
+<MemberCard>
+
+##### TensorFieldExpression.one
+
+```ts
+one: BoxedExpression;
+```
+
+</MemberCard>
+
+<a id="zero-1" name="zero-1"></a>
+
+<MemberCard>
+
+##### TensorFieldExpression.zero
+
+```ts
+zero: BoxedExpression;
+```
+
+</MemberCard>
+
+<a id="nan-1" name="nan-1"></a>
+
+<MemberCard>
+
+##### TensorFieldExpression.nan
+
+```ts
+nan: BoxedExpression;
+```
+
+</MemberCard>
+
+<a id="cast-1" name="cast-1"></a>
+
+<MemberCard>
+
+##### TensorFieldExpression.cast()
+
+###### cast(x, dtype)
+
+```ts
+cast(x, dtype): number
+```
+
+###### x
+
+[`BoxedExpression`](#boxedexpression)
+
+###### dtype
+
+`"float64"`
+
+`number`
+
+###### cast(x, dtype)
+
+```ts
+cast(x, dtype): number
+```
+
+###### x
+
+[`BoxedExpression`](#boxedexpression)
+
+###### dtype
+
+`"float32"`
+
+`number`
+
+###### cast(x, dtype)
+
+```ts
+cast(x, dtype): number
+```
+
+###### x
+
+[`BoxedExpression`](#boxedexpression)
+
+###### dtype
+
+`"int32"`
+
+`number`
+
+###### cast(x, dtype)
+
+```ts
+cast(x, dtype): number
+```
+
+###### x
+
+[`BoxedExpression`](#boxedexpression)
+
+###### dtype
+
+`"uint8"`
+
+`number`
+
+###### cast(x, dtype)
+
+```ts
+cast(x, dtype): any
+```
+
+###### x
+
+[`BoxedExpression`](#boxedexpression)
+
+###### dtype
+
+`"complex128"`
+
+`any`
+
+###### cast(x, dtype)
+
+```ts
+cast(x, dtype): any
+```
+
+###### x
+
+[`BoxedExpression`](#boxedexpression)
+
+###### dtype
+
+`"complex64"`
+
+`any`
+
+###### cast(x, dtype)
+
+```ts
+cast(x, dtype): boolean
+```
+
+###### x
+
+[`BoxedExpression`](#boxedexpression)
+
+###### dtype
+
+`"bool"`
+
+`boolean`
+
+###### cast(x, dtype)
+
+```ts
+cast(x, dtype): string
+```
+
+###### x
+
+[`BoxedExpression`](#boxedexpression)
+
+###### dtype
+
+`"string"`
+
+`string`
+
+###### cast(x, dtype)
+
+```ts
+cast(x, dtype): BoxedExpression
+```
+
+###### x
+
+[`BoxedExpression`](#boxedexpression)
+
+###### dtype
+
+`"expression"`
+
+[`BoxedExpression`](#boxedexpression)
+
+###### cast(x, dtype)
+
+```ts
+cast(x, dtype): number[]
+```
+
+###### x
+
+[`BoxedExpression`](#boxedexpression)[]
+
+###### dtype
+
+`"float64"`
+
+`number`[]
+
+###### cast(x, dtype)
+
+```ts
+cast(x, dtype): number[]
+```
+
+###### x
+
+[`BoxedExpression`](#boxedexpression)[]
+
+###### dtype
+
+`"float32"`
+
+`number`[]
+
+###### cast(x, dtype)
+
+```ts
+cast(x, dtype): number[]
+```
+
+###### x
+
+[`BoxedExpression`](#boxedexpression)[]
+
+###### dtype
+
+`"int32"`
+
+`number`[]
+
+###### cast(x, dtype)
+
+```ts
+cast(x, dtype): number[]
+```
+
+###### x
+
+[`BoxedExpression`](#boxedexpression)[]
+
+###### dtype
+
+`"uint8"`
+
+`number`[]
+
+###### cast(x, dtype)
+
+```ts
+cast(x, dtype): Complex[]
+```
+
+###### x
+
+[`BoxedExpression`](#boxedexpression)[]
+
+###### dtype
+
+`"complex128"`
+
+`Complex`[]
+
+###### cast(x, dtype)
+
+```ts
+cast(x, dtype): Complex[]
+```
+
+###### x
+
+[`BoxedExpression`](#boxedexpression)[]
+
+###### dtype
+
+`"complex64"`
+
+`Complex`[]
+
+###### cast(x, dtype)
+
+```ts
+cast(x, dtype): boolean[]
+```
+
+###### x
+
+[`BoxedExpression`](#boxedexpression)[]
+
+###### dtype
+
+`"bool"`
+
+`boolean`[]
+
+###### cast(x, dtype)
+
+```ts
+cast(x, dtype): string[]
+```
+
+###### x
+
+[`BoxedExpression`](#boxedexpression)[]
+
+###### dtype
+
+`"string"`
+
+`string`[]
+
+###### cast(x, dtype)
+
+```ts
+cast(x, dtype): BoxedExpression[]
+```
+
+###### x
+
+[`BoxedExpression`](#boxedexpression)[]
+
+###### dtype
+
+`"expression"`
+
+[`BoxedExpression`](#boxedexpression)[]
+
+</MemberCard>
+
+<a id="expression-1" name="expression-1"></a>
+
+<MemberCard>
+
+##### TensorFieldExpression.expression()
+
+```ts
+expression(x): BoxedExpression
+```
+
+###### x
+
+[`BoxedExpression`](#boxedexpression)
+
+[`BoxedExpression`](#boxedexpression)
+
+</MemberCard>
+
+<a id="iszero-1" name="iszero-1"></a>
+
+<MemberCard>
+
+##### TensorFieldExpression.isZero()
+
+```ts
+isZero(x): boolean
+```
+
+###### x
+
+[`BoxedExpression`](#boxedexpression)
+
+`boolean`
+
+</MemberCard>
+
+<a id="isone-1" name="isone-1"></a>
+
+<MemberCard>
+
+##### TensorFieldExpression.isOne()
+
+```ts
+isOne(x): boolean
+```
+
+###### x
+
+[`BoxedExpression`](#boxedexpression)
+
+`boolean`
+
+</MemberCard>
+
+<a id="equals-1" name="equals-1"></a>
+
+<MemberCard>
+
+##### TensorFieldExpression.equals()
+
+```ts
+equals(lhs, rhs): boolean
+```
+
+###### lhs
+
+[`BoxedExpression`](#boxedexpression)
+
+###### rhs
+
+[`BoxedExpression`](#boxedexpression)
+
+`boolean`
+
+</MemberCard>
+
+<a id="add-1" name="add-1"></a>
+
+<MemberCard>
+
+##### TensorFieldExpression.add()
+
+```ts
+add(lhs, rhs): BoxedExpression
+```
+
+###### lhs
+
+[`BoxedExpression`](#boxedexpression)
+
+###### rhs
+
+[`BoxedExpression`](#boxedexpression)
+
+[`BoxedExpression`](#boxedexpression)
+
+</MemberCard>
+
+<a id="addn-1" name="addn-1"></a>
+
+<MemberCard>
+
+##### TensorFieldExpression.addn()
+
+```ts
+addn(...xs): BoxedExpression
+```
+
+###### xs
+
+...[`BoxedExpression`](#boxedexpression)[]
+
+[`BoxedExpression`](#boxedexpression)
+
+</MemberCard>
+
+<a id="neg-1" name="neg-1"></a>
+
+<MemberCard>
+
+##### TensorFieldExpression.neg()
+
+```ts
+neg(x): BoxedExpression
+```
+
+###### x
+
+[`BoxedExpression`](#boxedexpression)
+
+[`BoxedExpression`](#boxedexpression)
+
+</MemberCard>
+
+<a id="sub-1" name="sub-1"></a>
+
+<MemberCard>
+
+##### TensorFieldExpression.sub()
+
+```ts
+sub(lhs, rhs): BoxedExpression
+```
+
+###### lhs
+
+[`BoxedExpression`](#boxedexpression)
+
+###### rhs
+
+[`BoxedExpression`](#boxedexpression)
+
+[`BoxedExpression`](#boxedexpression)
+
+</MemberCard>
+
+<a id="mul-1" name="mul-1"></a>
+
+<MemberCard>
+
+##### TensorFieldExpression.mul()
+
+```ts
+mul(lhs, rhs): BoxedExpression
+```
+
+###### lhs
+
+[`BoxedExpression`](#boxedexpression)
+
+###### rhs
+
+[`BoxedExpression`](#boxedexpression)
+
+[`BoxedExpression`](#boxedexpression)
+
+</MemberCard>
+
+<a id="muln-1" name="muln-1"></a>
+
+<MemberCard>
+
+##### TensorFieldExpression.muln()
+
+```ts
+muln(...xs): BoxedExpression
+```
+
+###### xs
+
+...[`BoxedExpression`](#boxedexpression)[]
+
+[`BoxedExpression`](#boxedexpression)
+
+</MemberCard>
+
+<a id="div-1" name="div-1"></a>
+
+<MemberCard>
+
+##### TensorFieldExpression.div()
+
+```ts
+div(lhs, rhs): BoxedExpression
+```
+
+###### lhs
+
+[`BoxedExpression`](#boxedexpression)
+
+###### rhs
+
+[`BoxedExpression`](#boxedexpression)
+
+[`BoxedExpression`](#boxedexpression)
+
+</MemberCard>
+
+<a id="pow-1" name="pow-1"></a>
+
+<MemberCard>
+
+##### TensorFieldExpression.pow()
+
+```ts
+pow(lhs, rhs): BoxedExpression
+```
+
+###### lhs
+
+[`BoxedExpression`](#boxedexpression)
+
+###### rhs
+
+`number`
+
+[`BoxedExpression`](#boxedexpression)
+
+</MemberCard>
+
+<a id="conjugate-1" name="conjugate-1"></a>
+
+<MemberCard>
+
+##### TensorFieldExpression.conjugate()
+
+```ts
+conjugate(x): BoxedExpression
+```
+
+###### x
+
+[`BoxedExpression`](#boxedexpression)
+
+[`BoxedExpression`](#boxedexpression)
+
+</MemberCard>
+
+<a id="tensorfieldcomplex" name="tensorfieldcomplex"></a>
+
+### TensorFieldComplex
+
+#### Implements
+
+- [`TensorField`](#tensorfieldt)\<`Complex`\>
+
+<a id="constructors-3" name="constructors-3"></a>
+
+<MemberCard>
+
+##### new TensorFieldComplex()
+
+##### new TensorFieldComplex()
+
+```ts
+new TensorFieldComplex(ce): TensorFieldComplex
+```
+
+###### ce
+
+`IComputeEngine`
+
+[`TensorFieldComplex`](#tensorfieldcomplex)
+
+</MemberCard>
+
+<a id="one-2" name="one-2"></a>
+
+<MemberCard>
+
+##### TensorFieldComplex.one
+
+```ts
+one: Complex;
+```
+
+</MemberCard>
+
+<a id="zero-2" name="zero-2"></a>
+
+<MemberCard>
+
+##### TensorFieldComplex.zero
+
+```ts
+zero: Complex;
+```
+
+</MemberCard>
+
+<a id="nan-2" name="nan-2"></a>
+
+<MemberCard>
+
+##### TensorFieldComplex.nan
+
+```ts
+nan: Complex;
+```
+
+</MemberCard>
+
+<a id="cast-2" name="cast-2"></a>
+
+<MemberCard>
+
+##### TensorFieldComplex.cast()
+
+###### cast(x, dtype)
+
+```ts
+cast(x, dtype): number
+```
+
+###### x
+
+`Complex`
+
+###### dtype
+
+`"float64"`
+
+`number`
+
+###### cast(x, dtype)
+
+```ts
+cast(x, dtype): number
+```
+
+###### x
+
+`Complex`
+
+###### dtype
+
+`"float32"`
+
+`number`
+
+###### cast(x, dtype)
+
+```ts
+cast(x, dtype): number
+```
+
+###### x
+
+`Complex`
+
+###### dtype
+
+`"int32"`
+
+`number`
+
+###### cast(x, dtype)
+
+```ts
+cast(x, dtype): number
+```
+
+###### x
+
+`Complex`
+
+###### dtype
+
+`"uint8"`
+
+`number`
+
+###### cast(x, dtype)
+
+```ts
+cast(x, dtype): any
+```
+
+###### x
+
+`Complex`
+
+###### dtype
+
+`"complex128"`
+
+`any`
+
+###### cast(x, dtype)
+
+```ts
+cast(x, dtype): any
+```
+
+###### x
+
+`Complex`
+
+###### dtype
+
+`"complex64"`
+
+`any`
+
+###### cast(x, dtype)
+
+```ts
+cast(x, dtype): boolean
+```
+
+###### x
+
+`Complex`
+
+###### dtype
+
+`"bool"`
+
+`boolean`
+
+###### cast(x, dtype)
+
+```ts
+cast(x, dtype): string
+```
+
+###### x
+
+`Complex`
+
+###### dtype
+
+`"string"`
+
+`string`
+
+###### cast(x, dtype)
+
+```ts
+cast(x, dtype): BoxedExpression
+```
+
+###### x
+
+`Complex`
+
+###### dtype
+
+`"expression"`
+
+[`BoxedExpression`](#boxedexpression)
+
+###### cast(x, dtype)
+
+```ts
+cast(x, dtype): number[]
+```
+
+###### x
+
+`Complex`[]
+
+###### dtype
+
+`"float64"`
+
+`number`[]
+
+###### cast(x, dtype)
+
+```ts
+cast(x, dtype): number[]
+```
+
+###### x
+
+`Complex`[]
+
+###### dtype
+
+`"float32"`
+
+`number`[]
+
+###### cast(x, dtype)
+
+```ts
+cast(x, dtype): number[]
+```
+
+###### x
+
+`Complex`[]
+
+###### dtype
+
+`"int32"`
+
+`number`[]
+
+###### cast(x, dtype)
+
+```ts
+cast(x, dtype): number[]
+```
+
+###### x
+
+`Complex`[]
+
+###### dtype
+
+`"uint8"`
+
+`number`[]
+
+###### cast(x, dtype)
+
+```ts
+cast(x, dtype): Complex[]
+```
+
+###### x
+
+`Complex`[]
+
+###### dtype
+
+`"complex128"`
+
+`Complex`[]
+
+###### cast(x, dtype)
+
+```ts
+cast(x, dtype): Complex[]
+```
+
+###### x
+
+`Complex`[]
+
+###### dtype
+
+`"complex64"`
+
+`Complex`[]
+
+###### cast(x, dtype)
+
+```ts
+cast(x, dtype): boolean[]
+```
+
+###### x
+
+`Complex`[]
+
+###### dtype
+
+`"bool"`
+
+`boolean`[]
+
+###### cast(x, dtype)
+
+```ts
+cast(x, dtype): string[]
+```
+
+###### x
+
+`Complex`[]
+
+###### dtype
+
+`"string"`
+
+`string`[]
+
+###### cast(x, dtype)
+
+```ts
+cast(x, dtype): BoxedExpression[]
+```
+
+###### x
+
+`Complex`[]
+
+###### dtype
+
+`"expression"`
+
+[`BoxedExpression`](#boxedexpression)[]
+
+</MemberCard>
+
+<a id="expression-2" name="expression-2"></a>
+
+<MemberCard>
+
+##### TensorFieldComplex.expression()
+
+```ts
+expression(z): BoxedExpression
+```
+
+###### z
+
+`Complex`
+
+[`BoxedExpression`](#boxedexpression)
+
+</MemberCard>
+
+<a id="iszero-2" name="iszero-2"></a>
+
+<MemberCard>
+
+##### TensorFieldComplex.isZero()
+
+```ts
+isZero(z): boolean
+```
+
+###### z
+
+`Complex`
+
+`boolean`
+
+</MemberCard>
+
+<a id="isone-2" name="isone-2"></a>
+
+<MemberCard>
+
+##### TensorFieldComplex.isOne()
+
+```ts
+isOne(z): boolean
+```
+
+###### z
+
+`Complex`
+
+`boolean`
+
+</MemberCard>
+
+<a id="equals-2" name="equals-2"></a>
+
+<MemberCard>
+
+##### TensorFieldComplex.equals()
+
+```ts
+equals(lhs, rhs): boolean
+```
+
+###### lhs
+
+`Complex`
+
+###### rhs
+
+`Complex`
+
+`boolean`
+
+</MemberCard>
+
+<a id="add-2" name="add-2"></a>
+
+<MemberCard>
+
+##### TensorFieldComplex.add()
+
+```ts
+add(lhs, rhs): Complex
+```
+
+###### lhs
+
+`Complex`
+
+###### rhs
+
+`Complex`
+
+`Complex`
+
+</MemberCard>
+
+<a id="addn-2" name="addn-2"></a>
+
+<MemberCard>
+
+##### TensorFieldComplex.addn()
+
+```ts
+addn(...xs): Complex
+```
+
+###### xs
+
+...`Complex`[]
+
+`Complex`
+
+</MemberCard>
+
+<a id="neg-2" name="neg-2"></a>
+
+<MemberCard>
+
+##### TensorFieldComplex.neg()
+
+```ts
+neg(z): Complex
+```
+
+###### z
+
+`Complex`
+
+`Complex`
+
+</MemberCard>
+
+<a id="sub-2" name="sub-2"></a>
+
+<MemberCard>
+
+##### TensorFieldComplex.sub()
+
+```ts
+sub(lhs, rhs): Complex
+```
+
+###### lhs
+
+`Complex`
+
+###### rhs
+
+`Complex`
+
+`Complex`
+
+</MemberCard>
+
+<a id="mul-2" name="mul-2"></a>
+
+<MemberCard>
+
+##### TensorFieldComplex.mul()
+
+```ts
+mul(lhs, rhs): Complex
+```
+
+###### lhs
+
+`Complex`
+
+###### rhs
+
+`Complex`
+
+`Complex`
+
+</MemberCard>
+
+<a id="muln-2" name="muln-2"></a>
+
+<MemberCard>
+
+##### TensorFieldComplex.muln()
+
+```ts
+muln(...xs): Complex
+```
+
+###### xs
+
+...`Complex`[]
+
+`Complex`
+
+</MemberCard>
+
+<a id="div-2" name="div-2"></a>
+
+<MemberCard>
+
+##### TensorFieldComplex.div()
+
+```ts
+div(lhs, rhs): Complex
+```
+
+###### lhs
+
+`Complex`
+
+###### rhs
+
+`Complex`
+
+`Complex`
+
+</MemberCard>
+
+<a id="pow-2" name="pow-2"></a>
+
+<MemberCard>
+
+##### TensorFieldComplex.pow()
+
+```ts
+pow(lhs, rhs): Complex
+```
+
+###### lhs
+
+`Complex`
+
+###### rhs
+
+`number`
+
+`Complex`
+
+</MemberCard>
+
+<a id="conjugate-2" name="conjugate-2"></a>
+
+<MemberCard>
+
+##### TensorFieldComplex.conjugate()
+
+```ts
+conjugate(z): Complex
+```
+
+###### z
+
+`Complex`
+
+`Complex`
+
+</MemberCard>
+
+<a id="getsupertype" name="getsupertype"></a>
+
+<MemberCard>
+
+### getSupertype()
+
+```ts
+function getSupertype(t1, t2): TensorDataType
+```
+
+##### t1
+
+keyof [`DataTypeMap`](#datatypemap)
+
+##### t2
+
+keyof [`DataTypeMap`](#datatypemap)
+
+[`TensorDataType`](#tensordatatype)
+
+</MemberCard>
+
+<a id="getexpressiondatatype" name="getexpressiondatatype"></a>
+
+<MemberCard>
+
+### getExpressionDatatype()
+
+```ts
+function getExpressionDatatype(expr): TensorDataType
+```
+
+##### expr
+
+[`BoxedExpression`](#boxedexpression)
+
+[`TensorDataType`](#tensordatatype)
+
+</MemberCard>
+
+<a id="numberformat" name="numberformat"></a>
+
+### NumberFormat
+
+```ts
+type NumberFormat = object;
+```
+
+These options control how numbers are parsed and serialized.
+
+#### Type declaration
+
+<a id="positiveinfinity"></a>
+
+##### positiveInfinity
+
+<a id="positiveinfinity" name="positiveinfinity"></a>
+
+<MemberCard>
+
+##### NumberFormat.positiveInfinity
 
 ```ts
 positiveInfinity: LatexString;
@@ -7666,11 +9788,15 @@ positiveInfinity: LatexString;
 
 </MemberCard>
 
-<a id="negativeinfinity-1" name="negativeinfinity-1"></a>
+<a id="negativeinfinity"></a>
+
+##### negativeInfinity
+
+<a id="negativeinfinity" name="negativeinfinity"></a>
 
 <MemberCard>
 
-##### NumberFormattingOptions.negativeInfinity
+##### NumberFormat.negativeInfinity
 
 ```ts
 negativeInfinity: LatexString;
@@ -7678,11 +9804,15 @@ negativeInfinity: LatexString;
 
 </MemberCard>
 
+<a id="notanumber"></a>
+
+##### notANumber
+
 <a id="notanumber" name="notanumber"></a>
 
 <MemberCard>
 
-##### NumberFormattingOptions.notANumber
+##### NumberFormat.notANumber
 
 ```ts
 notANumber: LatexString;
@@ -7690,139 +9820,15 @@ notANumber: LatexString;
 
 </MemberCard>
 
-<a id="decimalmarker" name="decimalmarker"></a>
+<a id="imaginaryunit"></a>
 
-<MemberCard>
-
-##### NumberFormattingOptions.decimalMarker
-
-```ts
-decimalMarker: LatexString;
-```
-
-A string representing the decimal marker, the string separating
-the whole portion of a number from the fractional portion, i.e.
-the '.' in '3.1415'.
-
-Some countries use a comma rather than a dot. In this case it is
-recommended to use `"{,}"` as the marker: the surrounding brackets ensure
-there is no additional gap after the comma.
-
-**Default**: `"."`
-
-</MemberCard>
-
-<a id="groupseparator" name="groupseparator"></a>
-
-<MemberCard>
-
-##### NumberFormattingOptions.groupSeparator
-
-```ts
-groupSeparator: LatexString;
-```
-
-A string representing the separator between groups of digits,
-used to improve readability of numbers with lots of digits.
-
-If you change it to another value, be aware that this may lead to
-unexpected results. For example, if changing it to `,` the expression
-`\operatorname{Hypot}(1,2)` will parse as `["Hypot", 1.2]` rather than
-`["Hypot", 1, 2]`.
-
-**Default**: `"\\,"` (thin space, 3/18mu) (Resolution 7 of the 1948 CGPM)
-
-</MemberCard>
-
-<a id="exponentproduct" name="exponentproduct"></a>
-
-<MemberCard>
-
-##### NumberFormattingOptions.exponentProduct
-
-```ts
-exponentProduct: LatexString;
-```
-
-</MemberCard>
-
-<a id="beginexponentmarker" name="beginexponentmarker"></a>
-
-<MemberCard>
-
-##### NumberFormattingOptions.beginExponentMarker
-
-```ts
-beginExponentMarker: LatexString;
-```
-
-</MemberCard>
-
-<a id="endexponentmarker" name="endexponentmarker"></a>
-
-<MemberCard>
-
-##### NumberFormattingOptions.endExponentMarker
-
-```ts
-endExponentMarker: LatexString;
-```
-
-</MemberCard>
-
-<a id="notation" name="notation"></a>
-
-<MemberCard>
-
-##### NumberFormattingOptions.notation
-
-```ts
-notation: "engineering" | "auto" | "scientific";
-```
-
-</MemberCard>
-
-<a id="truncationmarker" name="truncationmarker"></a>
-
-<MemberCard>
-
-##### NumberFormattingOptions.truncationMarker
-
-```ts
-truncationMarker: LatexString;
-```
-
-</MemberCard>
-
-<a id="beginrepeatingdigits" name="beginrepeatingdigits"></a>
-
-<MemberCard>
-
-##### NumberFormattingOptions.beginRepeatingDigits
-
-```ts
-beginRepeatingDigits: LatexString;
-```
-
-</MemberCard>
-
-<a id="endrepeatingdigits" name="endrepeatingdigits"></a>
-
-<MemberCard>
-
-##### NumberFormattingOptions.endRepeatingDigits
-
-```ts
-endRepeatingDigits: LatexString;
-```
-
-</MemberCard>
+##### imaginaryUnit
 
 <a id="imaginaryunit" name="imaginaryunit"></a>
 
 <MemberCard>
 
-##### NumberFormattingOptions.imaginaryUnit
+##### NumberFormat.imaginaryUnit
 
 ```ts
 imaginaryUnit: LatexString;
@@ -7830,11 +9836,219 @@ imaginaryUnit: LatexString;
 
 </MemberCard>
 
-<a id="avoidexponentsinrange" name="avoidexponentsinrange"></a>
+<a id="decimalseparator"></a>
+
+##### decimalSeparator
+
+<a id="decimalseparator" name="decimalseparator"></a>
 
 <MemberCard>
 
-##### NumberFormattingOptions.avoidExponentsInRange
+##### NumberFormat.decimalSeparator
+
+```ts
+decimalSeparator: LatexString;
+```
+
+A string representing the decimal separator, the string separating
+the whole portion of a number from the fractional portion, i.e.
+the "." in "3.1415".
+
+Some countries use a comma rather than a dot. In this case it is
+recommended to use `"{,}"` as the separator: the surrounding brackets
+ensure there is no additional gap after the comma.
+
+**Default**: `"."`
+
+</MemberCard>
+
+<a id="digitgroupseparator"></a>
+
+##### digitGroupSeparator
+
+<a id="digitgroupseparator" name="digitgroupseparator"></a>
+
+<MemberCard>
+
+##### NumberFormat.digitGroupSeparator
+
+```ts
+digitGroupSeparator: 
+  | LatexString
+  | [LatexString, LatexString];
+```
+
+A string representing the separator between groups of digits,
+to make numbers with many digits easier to read.
+
+If a single string is provided, it is used to group digits in the
+whole and the fractional part of the number. If two strings are provided,
+the first is used for the whole part and the second for the fractional
+part.
+
+Caution: some values may lead to unexpected results.
+
+For example, if the `digitGroupSeparator` is `,` (comma) the expression
+`\operatorname{Hypot}(1,2)` will parse as `["Hypot", 1.2]` rather than
+`["Hypot", 1, 2]`. You can however use `{,}` which will avoid this issue
+and display with correct spacing.
+
+**Default**: `"\\,"` (thin space, 3/18mu) (Resolution 7 of the 1948 CGPM)
+
+</MemberCard>
+
+<a id="digitgroup"></a>
+
+##### digitGroup
+
+<a id="digitgroup" name="digitgroup"></a>
+
+<MemberCard>
+
+##### NumberFormat.digitGroup
+
+```ts
+digitGroup: "lakh" | number | [number | "lakh", number];
+```
+
+Maximum length of digits between digit group separators.
+
+If a single number is provided, it is used for the whole and the fractional
+part of the number. If two numbers are provided, the first is used for the
+whole part and the second for the fractional part.
+
+If '`"lakh"`' is provided, the number is grouped in groups of 2 digits,
+except for the last group which has 3 digits. For example: `1,00,00,000`.
+
+**Default**: `3`
+
+</MemberCard>
+
+<a id="exponentproduct"></a>
+
+##### exponentProduct
+
+<a id="exponentproduct" name="exponentproduct"></a>
+
+<MemberCard>
+
+##### NumberFormat.exponentProduct
+
+```ts
+exponentProduct: LatexString;
+```
+
+</MemberCard>
+
+<a id="beginexponentmarker"></a>
+
+##### beginExponentMarker
+
+<a id="beginexponentmarker" name="beginexponentmarker"></a>
+
+<MemberCard>
+
+##### NumberFormat.beginExponentMarker
+
+```ts
+beginExponentMarker: LatexString;
+```
+
+</MemberCard>
+
+<a id="endexponentmarker"></a>
+
+##### endExponentMarker
+
+<a id="endexponentmarker" name="endexponentmarker"></a>
+
+<MemberCard>
+
+##### NumberFormat.endExponentMarker
+
+```ts
+endExponentMarker: LatexString;
+```
+
+</MemberCard>
+
+<a id="truncationmarker"></a>
+
+##### truncationMarker
+
+<a id="truncationmarker" name="truncationmarker"></a>
+
+<MemberCard>
+
+##### NumberFormat.truncationMarker
+
+```ts
+truncationMarker: LatexString;
+```
+
+</MemberCard>
+
+<a id="repeatingdecimal-1"></a>
+
+##### repeatingDecimal
+
+<a id="repeatingdecimal-1" name="repeatingdecimal-1"></a>
+
+<MemberCard>
+
+##### NumberFormat.repeatingDecimal
+
+```ts
+repeatingDecimal: "auto" | "vinculum" | "dots" | "parentheses" | "arc" | "none";
+```
+
+</MemberCard>
+
+<a id="numberserializationformat" name="numberserializationformat"></a>
+
+### NumberSerializationFormat
+
+```ts
+type NumberSerializationFormat = NumberFormat & object;
+```
+
+#### Type declaration
+
+##### fractionalDigits
+
+<MemberCard>
+
+##### NumberSerializationFormat.fractionalDigits
+
+```ts
+fractionalDigits: "auto" | "max" | number;
+```
+
+The maximum number of significant digits in serialized numbers.
+- `"max"`: all availabe digits are serialized.
+- `"auto"`: use the same precision as the compute engine.
+
+Default: `"auto"`
+
+</MemberCard>
+
+##### notation
+
+<MemberCard>
+
+##### NumberSerializationFormat.notation
+
+```ts
+notation: "auto" | "engineering" | "scientific";
+```
+
+</MemberCard>
+
+##### avoidExponentsInRange
+
+<MemberCard>
+
+##### NumberSerializationFormat.avoidExponentsInRange
 
 ```ts
 avoidExponentsInRange: undefined | null | [number, number];
@@ -7842,890 +10056,2448 @@ avoidExponentsInRange: undefined | null | [number, number];
 
 </MemberCard>
 
-<a id="serializer" name="serializer"></a>
+<a id="exactnumericvaluedata" name="exactnumericvaluedata"></a>
 
-### Serializer
+### ExactNumericValueData
 
-An instance of `Serializer` is provided to the `serialize` handlers of custom
-LaTeX dictionary entries.
+```ts
+type ExactNumericValueData = object;
+```
 
-<a id="onerror" name="onerror"></a>
+The value is equal to `(decimal * rational * sqrt(radical)) + im * i`
+
+#### Type declaration
+
+<a id="rational"></a>
+
+##### rational?
+
+<a id="rational" name="rational"></a>
 
 <MemberCard>
 
-##### Serializer.onError
+##### ExactNumericValueData.rational?
 
 ```ts
-readonly onError: WarningSignalHandler;
+optional rational: Rational;
 ```
 
 </MemberCard>
 
-<a id="options" name="options"></a>
+<a id="radical"></a>
+
+##### radical?
+
+<a id="radical" name="radical"></a>
 
 <MemberCard>
 
-##### Serializer.options
+##### ExactNumericValueData.radical?
 
 ```ts
-readonly options: Required<SerializeLatexOptions>;
+optional radical: number;
 ```
 
 </MemberCard>
 
-<a id="level" name="level"></a>
+<a id="numericvaluedata" name="numericvaluedata"></a>
+
+### NumericValueData
+
+```ts
+type NumericValueData = object;
+```
+
+#### Type declaration
+
+<a id="re-2"></a>
+
+##### re?
+
+<a id="re-2" name="re-2"></a>
 
 <MemberCard>
 
-##### Serializer.level
+##### NumericValueData.re?
 
 ```ts
-level: number;
-```
-
-"depth" of the expression:
-- 0 for the root
-- 1 for the arguments of the root
-- 2 for the arguments of the arguments of the root
-- etc...
-
-This allows for variation of the LaTeX serialized based
-on the depth of the expression, for example using `\Bigl(`
-for the top level, and `\bigl(` or `(` for others.
-
-</MemberCard>
-
-<a id="canonical" name="canonical"></a>
-
-<MemberCard>
-
-##### Serializer.canonical?
-
-```ts
-optional canonical: boolean;
-```
-
-If true, apply transformations to the expression so the output
-doesn't necessarily match the raw MathJSON, but is more visually pleasing
-and easier to read. If false, output the raw MathJSON.
-
-</MemberCard>
-
-<a id="serialize-1" name="serialize-1"></a>
-
-<MemberCard>
-
-##### Serializer.serialize
-
-```ts
-serialize: (expr) => string;
-```
-
-Output a LaTeX string representing the expression
-
-• **expr**: [`Expression`](#expression)
-
-</MemberCard>
-
-<a id="wrap" name="wrap"></a>
-
-<MemberCard>
-
-##### Serializer.wrap
-
-```ts
-wrap: (expr, prec?) => string;
-```
-
-Add a group fence around the expression if it is
-an operator of precedence less than or equal to `prec`.
-
-• **expr**: [`Expression`](#expression)
-
-• **prec?**: `number`
-
-</MemberCard>
-
-<a id="applyfunctionstyle" name="applyfunctionstyle"></a>
-
-<MemberCard>
-
-##### Serializer.applyFunctionStyle
-
-```ts
-applyFunctionStyle: (expr, level) => DelimiterScale;
-```
-
-Styles
-
-• **expr**: [`Expression`](#expression)
-
-• **level**: `number`
-
-</MemberCard>
-
-<a id="groupstyle" name="groupstyle"></a>
-
-<MemberCard>
-
-##### Serializer.groupStyle
-
-```ts
-groupStyle: (expr, level) => DelimiterScale;
-```
-
-• **expr**: [`Expression`](#expression)
-
-• **level**: `number`
-
-</MemberCard>
-
-<a id="rootstyle" name="rootstyle"></a>
-
-<MemberCard>
-
-##### Serializer.rootStyle
-
-```ts
-rootStyle: (expr, level) => "radical" | "quotient" | "solidus";
-```
-
-• **expr**: [`Expression`](#expression)
-
-• **level**: `number`
-
-</MemberCard>
-
-<a id="fractionstyle" name="fractionstyle"></a>
-
-<MemberCard>
-
-##### Serializer.fractionStyle
-
-```ts
-fractionStyle: (expr, level) => 
-  | "quotient"
-  | "block-quotient"
-  | "inline-quotient"
-  | "inline-solidus"
-  | "nice-solidus"
-  | "reciprocal"
-  | "factor";
-```
-
-• **expr**: [`Expression`](#expression)
-
-• **level**: `number`
-
-</MemberCard>
-
-<a id="logicstyle" name="logicstyle"></a>
-
-<MemberCard>
-
-##### Serializer.logicStyle
-
-```ts
-logicStyle: (expr, level) => "boolean" | "word" | "uppercase-word" | "punctuation";
-```
-
-• **expr**: [`Expression`](#expression)
-
-• **level**: `number`
-
-</MemberCard>
-
-<a id="powerstyle" name="powerstyle"></a>
-
-<MemberCard>
-
-##### Serializer.powerStyle
-
-```ts
-powerStyle: (expr, level) => "quotient" | "solidus" | "root";
-```
-
-• **expr**: [`Expression`](#expression)
-
-• **level**: `number`
-
-</MemberCard>
-
-<a id="numericsetstyle" name="numericsetstyle"></a>
-
-<MemberCard>
-
-##### Serializer.numericSetStyle
-
-```ts
-numericSetStyle: (expr, level) => "interval" | "compact" | "regular" | "set-builder";
-```
-
-• **expr**: [`Expression`](#expression)
-
-• **level**: `number`
-
-</MemberCard>
-
-<a id="wrapstring" name="wrapstring"></a>
-
-<MemberCard>
-
-##### Serializer.wrapString()
-
-```ts
-wrapString(
-   s, 
-   style, 
-   delimiters?): string
-```
-
-Output `s` surrounded by delimiters.
-
-If `delimiters` is not specified, use `()`
-
-• **s**: `string`
-
-• **style**: [`DelimiterScale`](#delimiterscale)
-
-• **delimiters?**: `string`
-
-</MemberCard>
-
-<a id="wraparguments" name="wraparguments"></a>
-
-<MemberCard>
-
-##### Serializer.wrapArguments()
-
-```ts
-wrapArguments(expr): string
-```
-
-A string with the arguments of expr fenced appropriately and separated by
-commas.
-
-• **expr**: [`Expression`](#expression)
-
-</MemberCard>
-
-<a id="wrapshort" name="wrapshort"></a>
-
-<MemberCard>
-
-##### Serializer.wrapShort()
-
-```ts
-wrapShort(expr): string
-```
-
-Add a group fence around the expression if it is
-short (not a function)
-
-• **expr**: [`Expression`](#expression)
-
-</MemberCard>
-
-<a id="serializefunction" name="serializefunction"></a>
-
-<MemberCard>
-
-##### Serializer.serializeFunction()
-
-```ts
-serializeFunction(expr): string
-```
-
-• **expr**: [`Expression`](#expression)
-
-</MemberCard>
-
-<a id="serializesymbol" name="serializesymbol"></a>
-
-<MemberCard>
-
-##### Serializer.serializeSymbol()
-
-```ts
-serializeSymbol(expr): string
-```
-
-• **expr**: [`Expression`](#expression)
-
-</MemberCard>
-
-<a id="serializehandler" name="serializehandler"></a>
-
-### SerializeHandler
-
-```ts
-type SerializeHandler: (serializer, expr) => string;
-```
-
-The `serialize` handler of a custom LaTeX dictionary entry can be
-a function of this type.
-
-• **serializer**: [`Serializer`](#serializer)
-
-• **expr**: [`Expression`](#expression)
-
-<a id="parser" name="parser"></a>
-
-### Parser
-
-An instance of `Parser` is provided to the `parse` handlers of custom
-LaTeX dictionary entries.
-
-<a id="options-1" name="options-1"></a>
-
-<MemberCard>
-
-##### Parser.options
-
-```ts
-readonly options: Required<ParseLatexOptions>;
+optional re: Decimal | number;
 ```
 
 </MemberCard>
 
-<a id="computeengine-1" name="computeengine-1"></a>
+<a id="im-2"></a>
+
+##### im?
+
+<a id="im-2" name="im-2"></a>
 
 <MemberCard>
 
-##### Parser.computeEngine?
+##### NumericValueData.im?
 
 ```ts
-optional readonly computeEngine: IComputeEngine;
+optional im: number;
 ```
 
 </MemberCard>
 
-<a id="index" name="index"></a>
+<a id="numericvaluefactory" name="numericvaluefactory"></a>
+
+### NumericValueFactory()
+
+```ts
+type NumericValueFactory = (data) => NumericValue;
+```
+
+##### data
+
+`number` | `Decimal` | [`NumericValueData`](#numericvaluedata)
+
+[`NumericValue`](#numericvalue)
+
+<a id="numericvalue" name="numericvalue"></a>
+
+### `abstract` NumericValue
+
+<a id="constructors-4" name="constructors-4"></a>
 
 <MemberCard>
 
-##### Parser.index
+##### new NumericValue()
+
+##### new NumericValue()
 
 ```ts
-index: number;
+new NumericValue(): NumericValue
 ```
 
-The index of the current token
+[`NumericValue`](#numericvalue)
 
 </MemberCard>
 
-<a id="atend" name="atend"></a>
+<a id="im" name="im"></a>
 
 <MemberCard>
 
-##### Parser.atEnd
+##### NumericValue.im
 
 ```ts
-readonly atEnd: boolean;
+readonly im: number;
 ```
 
-True if the last token has been reached.
-Consider also `atTerminator()`.
+The imaginary part of this numeric value.
+
+Can be negative, zero or positive.
 
 </MemberCard>
 
-<a id="peek" name="peek"></a>
+<a id="type-1" name="type-1"></a>
 
 <MemberCard>
 
-##### Parser.peek
+##### NumericValue.type
+
+###### Get Signature
 
 ```ts
-readonly peek: string;
+get abstract type(): NumericType
 ```
 
-Return the next token, without advancing the index
+[`NumericType`](#numerictype)
 
 </MemberCard>
 
-<a id="atboundary" name="atboundary"></a>
+<a id="isexact" name="isexact"></a>
 
 <MemberCard>
 
-##### Parser.atBoundary
+##### NumericValue.isExact
+
+###### Get Signature
 
 ```ts
-get atBoundary(): boolean
+get abstract isExact(): boolean
+```
+
+True if numeric value is the product of a rational and the square root of an integer.
+
+This includes: 3/4√5, -2, √2, etc...
+
+But it doesn't include 0.5, 3.141592, etc...
+
+`boolean`
+
+</MemberCard>
+
+<a id="asexact" name="asexact"></a>
+
+<MemberCard>
+
+##### NumericValue.asExact
+
+###### Get Signature
+
+```ts
+get abstract asExact(): NumericValue
+```
+
+If `isExact()`, returns an ExactNumericValue, otherwise returns undefined.
+
+[`NumericValue`](#numericvalue)
+
+</MemberCard>
+
+<a id="re" name="re"></a>
+
+<MemberCard>
+
+##### NumericValue.re
+
+###### Get Signature
+
+```ts
+get abstract re(): number
+```
+
+The real part of this numeric value.
+
+Can be negative, 0 or positive.
+
+`number`
+
+</MemberCard>
+
+<a id="bignumre" name="bignumre"></a>
+
+<MemberCard>
+
+##### NumericValue.bignumRe
+
+###### Get Signature
+
+```ts
+get bignumRe(): Decimal
+```
+
+bignum version of .re, if available
+
+`Decimal`
+
+</MemberCard>
+
+<a id="bignumim" name="bignumim"></a>
+
+<MemberCard>
+
+##### NumericValue.bignumIm
+
+###### Get Signature
+
+```ts
+get bignumIm(): Decimal
+```
+
+`Decimal`
+
+</MemberCard>
+
+<a id="numerator" name="numerator"></a>
+
+<MemberCard>
+
+##### NumericValue.numerator
+
+###### Get Signature
+
+```ts
+get abstract numerator(): NumericValue
+```
+
+[`NumericValue`](#numericvalue)
+
+</MemberCard>
+
+<a id="denominator" name="denominator"></a>
+
+<MemberCard>
+
+##### NumericValue.denominator
+
+###### Get Signature
+
+```ts
+get abstract denominator(): NumericValue
+```
+
+[`NumericValue`](#numericvalue)
+
+</MemberCard>
+
+<a id="isnan" name="isnan"></a>
+
+<MemberCard>
+
+##### NumericValue.isNaN
+
+###### Get Signature
+
+```ts
+get abstract isNaN(): boolean
 ```
 
 `boolean`
 
 </MemberCard>
 
-<a id="atterminator" name="atterminator"></a>
+<a id="ispositiveinfinity" name="ispositiveinfinity"></a>
 
 <MemberCard>
 
-##### Parser.atTerminator()
+##### NumericValue.isPositiveInfinity
+
+###### Get Signature
 
 ```ts
-atTerminator(t): boolean
+get abstract isPositiveInfinity(): boolean
 ```
 
-Return true if the terminator condition is met or if the last token
-has been reached.
-
-• **t**: [`Terminator`](#terminator)
+`boolean`
 
 </MemberCard>
 
-<a id="nexttoken" name="nexttoken"></a>
+<a id="isnegativeinfinity" name="isnegativeinfinity"></a>
 
 <MemberCard>
 
-##### Parser.nextToken()
+##### NumericValue.isNegativeInfinity
+
+###### Get Signature
 
 ```ts
-nextToken(): string
+get abstract isNegativeInfinity(): boolean
 ```
 
-Return the next token and advance the index
+`boolean`
 
 </MemberCard>
 
-<a id="latex" name="latex"></a>
+<a id="iscomplexinfinity" name="iscomplexinfinity"></a>
 
 <MemberCard>
 
-##### Parser.latex()
+##### NumericValue.isComplexInfinity
+
+###### Get Signature
 
 ```ts
-latex(start, end?): string
+get abstract isComplexInfinity(): boolean
 ```
 
-Return a string representation of the expression
-between `start` and `end` (default: the whole expression)
-
-• **start**: `number`
-
-• **end?**: `number`
+`boolean`
 
 </MemberCard>
 
-<a id="error-1" name="error-1"></a>
+<a id="iszero-3" name="iszero-3"></a>
 
 <MemberCard>
 
-##### Parser.error()
+##### NumericValue.isZero
+
+###### Get Signature
 
 ```ts
-error(code, fromToken): Expression
+get abstract isZero(): boolean
 ```
 
-Return an error expression with the specified code and arguments
-
-• **code**: `string` \| [`string`, `...Expression[]`]
-
-• **fromToken**: `number`
+`boolean`
 
 </MemberCard>
 
-<a id="skipspace" name="skipspace"></a>
+<a id="isone-3" name="isone-3"></a>
 
 <MemberCard>
 
-##### Parser.skipSpace()
+##### NumericValue.isOne
+
+###### Get Signature
 
 ```ts
-skipSpace(): boolean
+get abstract isOne(): boolean
 ```
 
-If there are any space, advance the index until a non-space is encountered
+`boolean`
 
 </MemberCard>
 
-<a id="skipvisualspace" name="skipvisualspace"></a>
+<a id="isnegativeone" name="isnegativeone"></a>
 
 <MemberCard>
 
-##### Parser.skipVisualSpace()
+##### NumericValue.isNegativeOne
+
+###### Get Signature
 
 ```ts
-skipVisualSpace(): void
+get abstract isNegativeOne(): boolean
 ```
 
-Skip over "visual space" which
-includes space tokens, empty groups `{}`, and commands such as `\,` and `\!`
+`boolean`
 
 </MemberCard>
 
-<a id="match" name="match"></a>
+<a id="iszerowithtolerance" name="iszerowithtolerance"></a>
 
 <MemberCard>
 
-##### Parser.match()
+##### NumericValue.isZeroWithTolerance()
 
 ```ts
-match(token): boolean
+isZeroWithTolerance(_tolerance): boolean
 ```
 
-If the next token matches the target advance and return true. Otherwise
-return false
+###### \_tolerance
 
-• **token**: `string`
+`number` | `Decimal`
+
+`boolean`
 
 </MemberCard>
 
-<a id="matchall" name="matchall"></a>
+<a id="sgn" name="sgn"></a>
 
 <MemberCard>
 
-##### Parser.matchAll()
+##### NumericValue.sgn()
 
 ```ts
-matchAll(tokens): boolean
+abstract sgn(): -1 | 0 | 1
 ```
 
-Return true if the next tokens match the argument, an array of tokens, or null otherwise
+The sign of complex numbers is undefined
 
-• **tokens**: `string`[]
+`-1` \| `0` \| `1`
 
 </MemberCard>
 
-<a id="matchany" name="matchany"></a>
+<a id="n" name="n"></a>
 
 <MemberCard>
 
-##### Parser.matchAny()
+##### NumericValue.N()
 
 ```ts
-matchAny(tokens): string
+abstract N(): NumericValue
 ```
 
-Return the next token if it matches any of the token in the argument or null otherwise
-
-• **tokens**: `string`[]
+[`NumericValue`](#numericvalue)
 
 </MemberCard>
 
-<a id="matchchar" name="matchchar"></a>
+<a id="neg-3" name="neg-3"></a>
 
 <MemberCard>
 
-##### Parser.matchChar()
+##### NumericValue.neg()
 
 ```ts
-matchChar(): string
+abstract neg(): NumericValue
 ```
 
-If the next token is a character, return it and advance the index
-This includes plain characters (e.g. 'a', '+'...), characters
-defined in hex (^^ and ^^^^), the `\char` and `\unicode` command.
+[`NumericValue`](#numericvalue)
 
 </MemberCard>
 
-<a id="parsegroup" name="parsegroup"></a>
+<a id="inv" name="inv"></a>
 
 <MemberCard>
 
-##### Parser.parseGroup()
+##### NumericValue.inv()
 
 ```ts
-parseGroup(): Expression
+abstract inv(): NumericValue
 ```
 
-Parse an expression in aLaTeX group enclosed in curly brackets `{}`.
-These are often used as arguments to LaTeX commands, for example
-`\frac{1}{2}`.
-
-Return `null` if none was found
-Return `['Sequence']` if an empty group `{}` was found
+[`NumericValue`](#numericvalue)
 
 </MemberCard>
 
-<a id="parsetoken" name="parsetoken"></a>
+<a id="add-3" name="add-3"></a>
 
 <MemberCard>
 
-##### Parser.parseToken()
+##### NumericValue.add()
 
 ```ts
-parseToken(): Expression
+abstract add(other): NumericValue
 ```
 
-Some LaTeX commands (but not all) can accept arguments as single
-tokens (i.e. without braces), for example `^2`, `\sqrt3` or `\frac12`
+###### other
 
-This argument will usually be a single token, but can be a sequence of
-tokens (e.g. `\sqrt\frac12` or `\sqrt\operatorname{speed}`).
+`number` | [`NumericValue`](#numericvalue)
 
-The following tokens are excluded from consideration in order to fail
-early when encountering a likely syntax error, for example `x^(2)`
-instead of `x^{2}`. With `(` in the list of excluded tokens, the
-match will fail and the error can be recovered.
-
-The excluded tokens include `!"#$%&(),/;:?@[]`|~", `\left`, `\bigl`, etc...
+[`NumericValue`](#numericvalue)
 
 </MemberCard>
 
-<a id="parseoptionalgroup" name="parseoptionalgroup"></a>
+<a id="sub-3" name="sub-3"></a>
 
 <MemberCard>
 
-##### Parser.parseOptionalGroup()
+##### NumericValue.sub()
 
 ```ts
-parseOptionalGroup(): Expression
+abstract sub(other): NumericValue
 ```
 
-Parse an expression enclosed in a LaTeX optional group enclosed in square brackets `[]`.
+###### other
 
-Return `null` if none was found.
+[`NumericValue`](#numericvalue)
+
+[`NumericValue`](#numericvalue)
 
 </MemberCard>
 
-<a id="parsestringgroup" name="parsestringgroup"></a>
+<a id="mul-3" name="mul-3"></a>
 
 <MemberCard>
 
-##### Parser.parseStringGroup()
+##### NumericValue.mul()
 
 ```ts
-parseStringGroup(optional?): string
+abstract mul(other): NumericValue
 ```
 
-Some LaTeX commands have arguments that are not interpreted as
-expressions, but as strings. For example, `\begin{array}{ccc}` (both
-`array` and `ccc` are strings), `\color{red}` or `\operatorname{lim sup}`.
+###### other
 
-If the next token is the start of a group (`{`), return the content
-of the group as a string. This may include white space, and it may need
-to be trimmed at the start and end of the string.
+`number` | `Decimal` | [`NumericValue`](#numericvalue)
 
-LaTeX commands are typically not allowed inside a string group (for example,
-`\alpha` would result in an error), but we do not enforce this.
-
-If `optional` is true, this should be an optional group in square brackets
-otherwise it is a regular group in braces.
-
-• **optional?**: `boolean`
+[`NumericValue`](#numericvalue)
 
 </MemberCard>
 
-<a id="parsesymbol" name="parsesymbol"></a>
+<a id="div-3" name="div-3"></a>
 
 <MemberCard>
 
-##### Parser.parseSymbol()
+##### NumericValue.div()
 
 ```ts
-parseSymbol(until?): Expression
+abstract div(other): NumericValue
 ```
 
-A symbol can be:
-- a single-letter identifier: `x`
-- a single LaTeX command: `\pi`
-- a multi-letter identifier: `\operatorname{speed}`
+###### other
 
-• **until?**: `Partial`\<[`Terminator`](#terminator)\>
+`number` | [`NumericValue`](#numericvalue)
+
+[`NumericValue`](#numericvalue)
 
 </MemberCard>
 
-<a id="parsetabular" name="parsetabular"></a>
+<a id="pow-3" name="pow-3"></a>
 
 <MemberCard>
 
-##### Parser.parseTabular()
+##### NumericValue.pow()
 
 ```ts
-parseTabular(): Expression[][]
+abstract pow(n): NumericValue
 ```
 
-Parse an expression in a tabular format, where rows are separated by `\\`
-and columns by `&`.
+###### n
 
-Return rows of sparse columns: empty rows are indicated with `Nothing`,
-and empty cells are also indicated with `Nothing`.
+`number` | [`NumericValue`](#numericvalue) | \{
+`re`: `number`;
+`im`: `number`;
+\}
+
+[`NumericValue`](#numericvalue)
 
 </MemberCard>
 
-<a id="parsearguments" name="parsearguments"></a>
+<a id="root" name="root"></a>
 
 <MemberCard>
 
-##### Parser.parseArguments()
+##### NumericValue.root()
 
 ```ts
-parseArguments(kind?, until?): Expression[]
+abstract root(n): NumericValue
 ```
 
-Parse an argument list, for example: `(12, x+1)` or `\left(x\right)`
+###### n
 
-- 'enclosure' : will look for arguments inside an enclosure
-   (an open/close fence) (**default**)
-- 'implicit': either an expression inside a pair of `()`, or just a primary
-   (i.e. we interpret `\cos x + 1` as `\cos(x) + 1`)
+`number`
 
-Return an array of expressions, one for each argument, or `null` if no
-argument was found.
-
-• **kind?**: `"implicit"` \| `"enclosure"`
-
-• **until?**: [`Terminator`](#terminator)
+[`NumericValue`](#numericvalue)
 
 </MemberCard>
 
-<a id="parsepostfixoperator" name="parsepostfixoperator"></a>
+<a id="sqrt" name="sqrt"></a>
 
 <MemberCard>
 
-##### Parser.parsePostfixOperator()
+##### NumericValue.sqrt()
 
 ```ts
-parsePostfixOperator(lhs, until?): Expression
+abstract sqrt(): NumericValue
 ```
 
-Parse a postfix operator, such as `'` or `!`.
-
-Prefix, infix and matchfix operators are handled by `parseExpression()`
-
-• **lhs**: [`Expression`](#expression)
-
-• **until?**: `Partial`\<[`Terminator`](#terminator)\>
+[`NumericValue`](#numericvalue)
 
 </MemberCard>
 
-<a id="parseexpression" name="parseexpression"></a>
+<a id="gcd" name="gcd"></a>
 
 <MemberCard>
 
-##### Parser.parseExpression()
+##### NumericValue.gcd()
 
 ```ts
-parseExpression(until?): Expression
+abstract gcd(other): NumericValue
 ```
 
-Parse an expression:
+###### other
 
-```
-<expression> ::=
- | <primary> ( <infix-op> <expression> )?
- | <prefix-op> <expression>
+[`NumericValue`](#numericvalue)
 
-<primary> :=
-  (<number> | <symbol> | <function-call> | <matchfix-expr>)
-  (<subsup> | <postfix-operator>)*
-
-<matchfix-expr> :=
-  <matchfix-op-open> <expression> <matchfix-op-close>
-
-<function-call> ::=
-  | <function><matchfix-op-group-open><expression>[',' <expression>]<matchfix-op-group-close>
-```
-
-This is the top-level parsing entry point.
-
-Stop when an operator of precedence less than `until.minPrec`
-or the sequence of tokens `until.tokens` is encountered
-
-`until` is `{ minPrec:0 }` by default.
-
-• **until?**: `Partial`\<[`Terminator`](#terminator)\>
+[`NumericValue`](#numericvalue)
 
 </MemberCard>
 
-<a id="parsenumber" name="parsenumber"></a>
+<a id="abs" name="abs"></a>
 
 <MemberCard>
 
-##### Parser.parseNumber()
+##### NumericValue.abs()
 
 ```ts
-parseNumber(): Expression
+abstract abs(): NumericValue
 ```
 
-Parse a number.
+[`NumericValue`](#numericvalue)
 
 </MemberCard>
 
-<a id="addboundary" name="addboundary"></a>
+<a id="ln" name="ln"></a>
 
 <MemberCard>
 
-##### Parser.addBoundary()
+##### NumericValue.ln()
 
 ```ts
-addBoundary(boundary): void
+abstract ln(base?): NumericValue
 ```
 
-Boundaries are used to detect the end of an expression.
+###### base?
 
-They are used for unusual syntactic constructs, for example
-`\int \sin x dx` where the `dx` is not an argument to the `\sin`
-function, but a boundary of the integral.
+`number`
 
-They are also useful when handling syntax errors and recovery.
-
-For example, `\begin{bmatrix} 1 & 2 { \end{bmatrix}` has an
-extraneous `{`, but the parser will attempt to recover and continue
-parsing when it encounters the `\end{bmatrix}` boundary.
-
-• **boundary**: `string`[]
+[`NumericValue`](#numericvalue)
 
 </MemberCard>
 
-<a id="removeboundary" name="removeboundary"></a>
+<a id="exp" name="exp"></a>
 
 <MemberCard>
 
-##### Parser.removeBoundary()
+##### NumericValue.exp()
 
 ```ts
-removeBoundary(): void
+abstract exp(): NumericValue
 ```
+
+[`NumericValue`](#numericvalue)
 
 </MemberCard>
 
-<a id="matchboundary" name="matchboundary"></a>
+<a id="floor" name="floor"></a>
 
 <MemberCard>
 
-##### Parser.matchBoundary()
+##### NumericValue.floor()
 
 ```ts
-matchBoundary(): boolean
+abstract floor(): NumericValue
 ```
+
+[`NumericValue`](#numericvalue)
 
 </MemberCard>
 
-<a id="boundaryerror" name="boundaryerror"></a>
+<a id="ceil" name="ceil"></a>
 
 <MemberCard>
 
-##### Parser.boundaryError()
+##### NumericValue.ceil()
 
 ```ts
-boundaryError(msg): Expression
+abstract ceil(): NumericValue
 ```
 
-• **msg**: `string` \| [`string`, `...Expression[]`]
+[`NumericValue`](#numericvalue)
 
 </MemberCard>
 
-<a id="latexstring" name="latexstring"></a>
+<a id="round" name="round"></a>
 
-### LatexString
+<MemberCard>
+
+##### NumericValue.round()
 
 ```ts
-type LatexString: string;
+abstract round(): NumericValue
 ```
 
-A LaTeX string starts and end with `$`, for example
-`"$\frac{\pi}{2}$"`.
+[`NumericValue`](#numericvalue)
 
-## Other
+</MemberCard>
+
+<a id="eq" name="eq"></a>
+
+<MemberCard>
+
+##### NumericValue.eq()
+
+```ts
+abstract eq(other): boolean
+```
+
+###### other
+
+`number` | [`NumericValue`](#numericvalue)
+
+`boolean`
+
+</MemberCard>
+
+<a id="lt" name="lt"></a>
+
+<MemberCard>
+
+##### NumericValue.lt()
+
+```ts
+abstract lt(other): boolean
+```
+
+###### other
+
+`number` | [`NumericValue`](#numericvalue)
+
+`boolean`
+
+</MemberCard>
+
+<a id="lte" name="lte"></a>
+
+<MemberCard>
+
+##### NumericValue.lte()
+
+```ts
+abstract lte(other): boolean
+```
+
+###### other
+
+`number` | [`NumericValue`](#numericvalue)
+
+`boolean`
+
+</MemberCard>
+
+<a id="gt" name="gt"></a>
+
+<MemberCard>
+
+##### NumericValue.gt()
+
+```ts
+abstract gt(other): boolean
+```
+
+###### other
+
+`number` | [`NumericValue`](#numericvalue)
+
+`boolean`
+
+</MemberCard>
+
+<a id="gte" name="gte"></a>
+
+<MemberCard>
+
+##### NumericValue.gte()
+
+```ts
+abstract gte(other): boolean
+```
+
+###### other
+
+`number` | [`NumericValue`](#numericvalue)
+
+`boolean`
+
+</MemberCard>
+
+<a id="valueof-1" name="valueof-1"></a>
+
+<MemberCard>
+
+##### NumericValue.valueOf()
+
+```ts
+valueOf(): string | number
+```
+
+Object.valueOf(): returns a primitive value
+
+`string` \| `number`
+
+</MemberCard>
+
+<a id="toprimitive-1" name="toprimitive-1"></a>
+
+<MemberCard>
+
+##### NumericValue.\[toPrimitive\]()
+
+```ts
+toPrimitive: string | number
+```
+
+Object.toPrimitive()
+
+###### hint
+
+`"string"` | `"number"` | `"default"`
+
+`string` \| `number`
+
+</MemberCard>
+
+<a id="tojson-1" name="tojson-1"></a>
+
+<MemberCard>
+
+##### NumericValue.toJSON()
+
+```ts
+toJSON(): any
+```
+
+Object.toJSON
+
+`any`
+
+</MemberCard>
+
+<a id="print" name="print"></a>
+
+<MemberCard>
+
+##### NumericValue.print()
+
+```ts
+print(): void
+```
+
+`void`
+
+</MemberCard>
+
+<a id="bignum-1" name="bignum-1"></a>
+
+### BigNum
+
+```ts
+type BigNum = Decimal;
+```
+
+<a id="ibignum" name="ibignum"></a>
+
+### IBigNum
+
+<a id="_bignum_nan" name="_bignum_nan"></a>
+
+<MemberCard>
+
+##### IBigNum.\_BIGNUM\_NAN
+
+```ts
+readonly _BIGNUM_NAN: Decimal;
+```
+
+</MemberCard>
+
+<a id="_bignum_zero" name="_bignum_zero"></a>
+
+<MemberCard>
+
+##### IBigNum.\_BIGNUM\_ZERO
+
+```ts
+readonly _BIGNUM_ZERO: Decimal;
+```
+
+</MemberCard>
+
+<a id="_bignum_one" name="_bignum_one"></a>
+
+<MemberCard>
+
+##### IBigNum.\_BIGNUM\_ONE
+
+```ts
+readonly _BIGNUM_ONE: Decimal;
+```
+
+</MemberCard>
+
+<a id="_bignum_two" name="_bignum_two"></a>
+
+<MemberCard>
+
+##### IBigNum.\_BIGNUM\_TWO
+
+```ts
+readonly _BIGNUM_TWO: Decimal;
+```
+
+</MemberCard>
+
+<a id="_bignum_half" name="_bignum_half"></a>
+
+<MemberCard>
+
+##### IBigNum.\_BIGNUM\_HALF
+
+```ts
+readonly _BIGNUM_HALF: Decimal;
+```
+
+</MemberCard>
+
+<a id="_bignum_pi" name="_bignum_pi"></a>
+
+<MemberCard>
+
+##### IBigNum.\_BIGNUM\_PI
+
+```ts
+readonly _BIGNUM_PI: Decimal;
+```
+
+</MemberCard>
+
+<a id="_bignum_negative_one" name="_bignum_negative_one"></a>
+
+<MemberCard>
+
+##### IBigNum.\_BIGNUM\_NEGATIVE\_ONE
+
+```ts
+readonly _BIGNUM_NEGATIVE_ONE: Decimal;
+```
+
+</MemberCard>
+
+<a id="bignum" name="bignum"></a>
+
+<MemberCard>
+
+##### IBigNum.bignum()
+
+```ts
+bignum(value): Decimal
+```
+
+###### value
+
+`string` | `number` | `bigint` | `Decimal`
+
+`Decimal`
+
+</MemberCard>
+
+<a id="smallinteger" name="smallinteger"></a>
+
+### SmallInteger
+
+```ts
+type SmallInteger = IsInteger<number>;
+```
+
+A `SmallInteger` is an integer < 1e6
+
+<a id="isrational-1" name="isrational-1"></a>
+
+<MemberCard>
+
+### isRational()
+
+```ts
+function isRational(x): x is Rational
+```
+
+##### x
+
+`any`
+
+`x is Rational`
+
+</MemberCard>
+
+<a id="ismachinerational" name="ismachinerational"></a>
+
+<MemberCard>
+
+### isMachineRational()
+
+```ts
+function isMachineRational(x): x is [number, number]
+```
+
+##### x
+
+`any`
+
+`x is [number, number]`
+
+</MemberCard>
+
+<a id="isbigrational" name="isbigrational"></a>
+
+<MemberCard>
+
+### isBigRational()
+
+```ts
+function isBigRational(x): x is [bigint, bigint]
+```
+
+##### x
+
+`any`
+
+`x is [bigint, bigint]`
+
+</MemberCard>
+
+<a id="iszero-6" name="iszero-6"></a>
+
+<MemberCard>
+
+### isZero()
+
+```ts
+function isZero(x): boolean
+```
+
+##### x
+
+[`Rational`](#rational-1)
+
+`boolean`
+
+</MemberCard>
+
+<a id="ispositive-1" name="ispositive-1"></a>
+
+<MemberCard>
+
+### isPositive()
+
+```ts
+function isPositive(x): boolean
+```
+
+##### x
+
+[`Rational`](#rational-1)
+
+`boolean`
+
+</MemberCard>
+
+<a id="isone-5" name="isone-5"></a>
+
+<MemberCard>
+
+### isOne()
+
+```ts
+function isOne(x): boolean
+```
+
+##### x
+
+[`Rational`](#rational-1)
+
+`boolean`
+
+</MemberCard>
+
+<a id="isnegativeone-1" name="isnegativeone-1"></a>
+
+<MemberCard>
+
+### isNegativeOne()
+
+```ts
+function isNegativeOne(x): boolean
+```
+
+##### x
+
+[`Rational`](#rational-1)
+
+`boolean`
+
+</MemberCard>
+
+<a id="isinteger-1" name="isinteger-1"></a>
+
+<MemberCard>
+
+### isInteger()
+
+```ts
+function isInteger(x): boolean
+```
+
+##### x
+
+[`Rational`](#rational-1)
+
+`boolean`
+
+</MemberCard>
+
+<a id="machinenumerator" name="machinenumerator"></a>
+
+<MemberCard>
+
+### machineNumerator()
+
+```ts
+function machineNumerator(x): number
+```
+
+##### x
+
+[`Rational`](#rational-1)
+
+`number`
+
+</MemberCard>
+
+<a id="machinedenominator" name="machinedenominator"></a>
+
+<MemberCard>
+
+### machineDenominator()
+
+```ts
+function machineDenominator(x): number
+```
+
+##### x
+
+[`Rational`](#rational-1)
+
+`number`
+
+</MemberCard>
+
+<a id="rationalasfloat" name="rationalasfloat"></a>
+
+<MemberCard>
+
+### rationalAsFloat()
+
+```ts
+function rationalAsFloat(x): number
+```
+
+##### x
+
+[`Rational`](#rational-1)
+
+`number`
+
+</MemberCard>
+
+<a id="isneg" name="isneg"></a>
+
+<MemberCard>
+
+### isNeg()
+
+```ts
+function isNeg(x): boolean
+```
+
+##### x
+
+[`Rational`](#rational-1)
+
+`boolean`
+
+</MemberCard>
+
+<a id="div-6" name="div-6"></a>
+
+<MemberCard>
+
+### div()
+
+```ts
+function div(lhs, rhs): Rational
+```
+
+##### lhs
+
+[`Rational`](#rational-1)
+
+##### rhs
+
+[`Rational`](#rational-1)
+
+[`Rational`](#rational-1)
+
+</MemberCard>
+
+<a id="add-7" name="add-7"></a>
+
+<MemberCard>
+
+### add()
+
+```ts
+function add(lhs, rhs): Rational
+```
+
+Add a literal numeric value to a rational.
+If the rational is a bigint, this is a hint to do the calculation in bigint
+(no need to check `bignumPreferred()`).
+
+##### lhs
+
+[`Rational`](#rational-1)
+
+##### rhs
+
+[`Rational`](#rational-1)
+
+[`Rational`](#rational-1)
+
+</MemberCard>
+
+<a id="mul-6" name="mul-6"></a>
+
+<MemberCard>
+
+### mul()
+
+```ts
+function mul(lhs, rhs): Rational
+```
+
+##### lhs
+
+[`Rational`](#rational-1)
+
+##### rhs
+
+[`Rational`](#rational-1)
+
+[`Rational`](#rational-1)
+
+</MemberCard>
+
+<a id="neg-6" name="neg-6"></a>
+
+<MemberCard>
+
+### neg()
+
+#### neg(x)
+
+```ts
+function neg(x): [SmallInteger, SmallInteger]
+```
+
+###### x
+
+\[`number`, `number`\]
+
+\[[`SmallInteger`](#smallinteger), [`SmallInteger`](#smallinteger)\]
+
+#### neg(x)
+
+```ts
+function neg(x): [bigint, bigint]
+```
+
+###### x
+
+\[`bigint`, `bigint`\]
+
+\[`bigint`, `bigint`\]
+
+#### neg(x)
+
+```ts
+function neg(x): Rational
+```
+
+###### x
+
+[`Rational`](#rational-1)
+
+[`Rational`](#rational-1)
+
+</MemberCard>
+
+<a id="inverse-1" name="inverse-1"></a>
+
+<MemberCard>
+
+### inverse()
+
+#### inverse(x)
+
+```ts
+function inverse(x): [SmallInteger, SmallInteger]
+```
+
+###### x
+
+\[`number`, `number`\]
+
+\[[`SmallInteger`](#smallinteger), [`SmallInteger`](#smallinteger)\]
+
+#### inverse(x)
+
+```ts
+function inverse(x): [bigint, bigint]
+```
+
+###### x
+
+\[`bigint`, `bigint`\]
+
+\[`bigint`, `bigint`\]
+
+#### inverse(x)
+
+```ts
+function inverse(x): Rational
+```
+
+###### x
+
+[`Rational`](#rational-1)
+
+[`Rational`](#rational-1)
+
+</MemberCard>
+
+<a id="asmachinerational" name="asmachinerational"></a>
+
+<MemberCard>
+
+### asMachineRational()
+
+```ts
+function asMachineRational(r): [SmallInteger, SmallInteger]
+```
+
+##### r
+
+[`Rational`](#rational-1)
+
+\[[`SmallInteger`](#smallinteger), [`SmallInteger`](#smallinteger)\]
+
+</MemberCard>
+
+<a id="pow-6" name="pow-6"></a>
+
+<MemberCard>
+
+### pow()
+
+```ts
+function pow(r, exp): Rational
+```
+
+##### r
+
+[`Rational`](#rational-1)
+
+##### exp
+
+`number`
+
+[`Rational`](#rational-1)
+
+</MemberCard>
+
+<a id="sqrt-2" name="sqrt-2"></a>
+
+<MemberCard>
+
+### sqrt()
+
+```ts
+function sqrt(r): Rational | undefined
+```
+
+##### r
+
+[`Rational`](#rational-1)
+
+[`Rational`](#rational-1) \| `undefined`
+
+</MemberCard>
+
+<a id="rationalgcd" name="rationalgcd"></a>
+
+<MemberCard>
+
+### rationalGcd()
+
+```ts
+function rationalGcd(lhs, rhs): Rational
+```
+
+##### lhs
+
+[`Rational`](#rational-1)
+
+##### rhs
+
+[`Rational`](#rational-1)
+
+[`Rational`](#rational-1)
+
+</MemberCard>
+
+<a id="reducedrational" name="reducedrational"></a>
+
+<MemberCard>
+
+### reducedRational()
+
+#### reducedRational(r)
+
+```ts
+function reducedRational(r): [SmallInteger, SmallInteger]
+```
+
+###### r
+
+\[`number`, `number`\]
+
+\[[`SmallInteger`](#smallinteger), [`SmallInteger`](#smallinteger)\]
+
+#### reducedRational(r)
+
+```ts
+function reducedRational(r): [bigint, bigint]
+```
+
+###### r
+
+\[`bigint`, `bigint`\]
+
+\[`bigint`, `bigint`\]
+
+#### reducedRational(r)
+
+```ts
+function reducedRational(r): Rational
+```
+
+###### r
+
+[`Rational`](#rational-1)
+
+[`Rational`](#rational-1)
+
+</MemberCard>
+
+<a id="rationalize" name="rationalize"></a>
+
+<MemberCard>
+
+### rationalize()
+
+```ts
+function rationalize(x): [number, number] | number
+```
+
+Return a rational approximation of x
+
+##### x
+
+`number`
+
+\[`number`, `number`\] \| `number`
+
+</MemberCard>
+
+<a id="reducerationalsquareroot" name="reducerationalsquareroot"></a>
+
+<MemberCard>
+
+### reduceRationalSquareRoot()
+
+```ts
+function reduceRationalSquareRoot(n): [Rational, number | bigint]
+```
+
+Return [factor, root] such that factor * sqrt(root) = sqrt(n)
+when factor and root are rationals
+
+##### n
+
+[`Rational`](#rational-1)
+
+\[[`Rational`](#rational-1), `number` \| `bigint`\]
+
+</MemberCard>
+
+<a id="tensordatadt" name="tensordatadt"></a>
+
+### TensorData\<DT\>
+
+#### Type Parameters
+
+• **DT** *extends* keyof [`DataTypeMap`](#datatypemap) = `"float64"`
+
+<a id="dtype-1" name="dtype-1"></a>
+
+<MemberCard>
+
+##### TensorData.dtype
+
+```ts
+dtype: DT;
+```
+
+</MemberCard>
+
+<a id="shape-2" name="shape-2"></a>
+
+<MemberCard>
+
+##### TensorData.shape
+
+```ts
+shape: number[];
+```
+
+</MemberCard>
+
+<a id="data-1" name="data-1"></a>
+
+<MemberCard>
+
+##### TensorData.data
+
+```ts
+data: DataTypeMap[DT][];
+```
+
+</MemberCard>
+
+<a id="nestedarrayt" name="nestedarrayt"></a>
+
+### NestedArray\<T\>
+
+```ts
+type NestedArray<T> = NestedArray_<T>[];
+```
+
+#### Type Parameters
+
+• **T**
+
+<a id="nestedarray_t" name="nestedarray_t"></a>
+
+### NestedArray\_\<T\>
+
+```ts
+type NestedArray_<T> = T | NestedArray_<T>[];
+```
+
+#### Type Parameters
+
+• **T**
+
+<a id="abstracttensordt" name="abstracttensordt"></a>
+
+### `abstract` AbstractTensor\<DT\>
+
+#### Type Parameters
+
+• **DT** *extends* keyof [`DataTypeMap`](#datatypemap)
+
+#### Implements
+
+- [`TensorData`](#tensordatadt)\<`DT`\>
+
+<a id="constructors-5" name="constructors-5"></a>
+
+<MemberCard>
+
+##### new AbstractTensor()
+
+##### new AbstractTensor()
+
+```ts
+new AbstractTensor<DT>(ce, tensorData): AbstractTensor<DT>
+```
+
+###### ce
+
+`IComputeEngine`
+
+###### tensorData
+
+[`TensorData`](#tensordatadt)\<`DT`\>
+
+[`AbstractTensor`](#abstracttensordt)\<`DT`\>
+
+</MemberCard>
+
+<a id="field" name="field"></a>
+
+<MemberCard>
+
+##### AbstractTensor.field
+
+```ts
+readonly field: TensorField<DataTypeMap[DT]>;
+```
+
+</MemberCard>
+
+<a id="shape" name="shape"></a>
+
+<MemberCard>
+
+##### AbstractTensor.shape
+
+```ts
+readonly shape: number[];
+```
+
+</MemberCard>
+
+<a id="rank" name="rank"></a>
+
+<MemberCard>
+
+##### AbstractTensor.rank
+
+```ts
+readonly rank: number;
+```
+
+</MemberCard>
+
+<a id="dtype" name="dtype"></a>
+
+<MemberCard>
+
+##### AbstractTensor.dtype
+
+###### Get Signature
+
+```ts
+get abstract dtype(): DT
+```
+
+`DT`
+
+</MemberCard>
+
+<a id="data" name="data"></a>
+
+<MemberCard>
+
+##### AbstractTensor.data
+
+###### Get Signature
+
+```ts
+get abstract data(): DataTypeMap[DT][]
+```
+
+[`DataTypeMap`](#datatypemap)\[`DT`\][]
+
+</MemberCard>
+
+<a id="expression-3" name="expression-3"></a>
+
+<MemberCard>
+
+##### AbstractTensor.expression
+
+###### Get Signature
+
+```ts
+get expression(): BoxedExpression
+```
+
+[`BoxedExpression`](#boxedexpression)
+
+</MemberCard>
+
+<a id="array" name="array"></a>
+
+<MemberCard>
+
+##### AbstractTensor.array
+
+###### Get Signature
+
+```ts
+get array(): NestedArray<DataTypeMap[DT]>
+```
+
+Like expression(), but return a nested JS array instead
+of a BoxedExpression
+
+[`NestedArray`](#nestedarrayt)\<[`DataTypeMap`](#datatypemap)\[`DT`\]\>
+
+</MemberCard>
+
+<a id="issquare" name="issquare"></a>
+
+<MemberCard>
+
+##### AbstractTensor.isSquare
+
+###### Get Signature
+
+```ts
+get isSquare(): boolean
+```
+
+`boolean`
+
+</MemberCard>
+
+<a id="issymmetric" name="issymmetric"></a>
+
+<MemberCard>
+
+##### AbstractTensor.isSymmetric
+
+###### Get Signature
+
+```ts
+get isSymmetric(): boolean
+```
+
+`boolean`
+
+</MemberCard>
+
+<a id="isskewsymmetric" name="isskewsymmetric"></a>
+
+<MemberCard>
+
+##### AbstractTensor.isSkewSymmetric
+
+###### Get Signature
+
+```ts
+get isSkewSymmetric(): boolean
+```
+
+`boolean`
+
+</MemberCard>
+
+<a id="isuppertriangular" name="isuppertriangular"></a>
+
+<MemberCard>
+
+##### AbstractTensor.isUpperTriangular
+
+###### Get Signature
+
+```ts
+get isUpperTriangular(): boolean
+```
+
+`boolean`
+
+</MemberCard>
+
+<a id="islowertriangular" name="islowertriangular"></a>
+
+<MemberCard>
+
+##### AbstractTensor.isLowerTriangular
+
+###### Get Signature
+
+```ts
+get isLowerTriangular(): boolean
+```
+
+`boolean`
+
+</MemberCard>
+
+<a id="istriangular" name="istriangular"></a>
+
+<MemberCard>
+
+##### AbstractTensor.isTriangular
+
+###### Get Signature
+
+```ts
+get isTriangular(): boolean
+```
+
+`boolean`
+
+</MemberCard>
+
+<a id="isdiagonal" name="isdiagonal"></a>
+
+<MemberCard>
+
+##### AbstractTensor.isDiagonal
+
+###### Get Signature
+
+```ts
+get isDiagonal(): boolean
+```
+
+`boolean`
+
+</MemberCard>
+
+<a id="isidentity" name="isidentity"></a>
+
+<MemberCard>
+
+##### AbstractTensor.isIdentity
+
+###### Get Signature
+
+```ts
+get isIdentity(): boolean
+```
+
+`boolean`
+
+</MemberCard>
+
+<a id="iszero-4" name="iszero-4"></a>
+
+<MemberCard>
+
+##### AbstractTensor.isZero
+
+###### Get Signature
+
+```ts
+get isZero(): boolean
+```
+
+`boolean`
+
+</MemberCard>
+
+<a id="align" name="align"></a>
+
+<MemberCard>
+
+##### AbstractTensor.align()
+
+###### align(lhs, rhs)
+
+```ts
+static align<T1, T2>(lhs, rhs): [AbstractTensor<T1>, AbstractTensor<T1>]
+```
+
+Return a tuple of tensors that have the same dtype.
+If necessary, one of the two input tensors is upcast.
+
+The shape of the tensors is reshaped to a compatible
+shape. If the shape is not compatible, `undefined` is returned.
+
+• **T1** *extends* keyof [`DataTypeMap`](#datatypemap)
+
+• **T2** *extends* keyof [`DataTypeMap`](#datatypemap)
+
+###### lhs
+
+[`AbstractTensor`](#abstracttensordt)\<`T1`\>
+
+###### rhs
+
+[`AbstractTensor`](#abstracttensordt)\<`T2`\>
+
+\[[`AbstractTensor`](#abstracttensordt)\<`T1`\>, [`AbstractTensor`](#abstracttensordt)\<`T1`\>\]
+
+###### align(lhs, rhs)
+
+```ts
+static align<T1, T2>(lhs, rhs): [AbstractTensor<T2>, AbstractTensor<T2>]
+```
+
+Return a tuple of tensors that have the same dtype.
+If necessary, one of the two input tensors is upcast.
+
+The shape of the tensors is reshaped to a compatible
+shape. If the shape is not compatible, `undefined` is returned.
+
+• **T1** *extends* keyof [`DataTypeMap`](#datatypemap)
+
+• **T2** *extends* keyof [`DataTypeMap`](#datatypemap)
+
+###### lhs
+
+[`AbstractTensor`](#abstracttensordt)\<`T1`\>
+
+###### rhs
+
+[`AbstractTensor`](#abstracttensordt)\<`T2`\>
+
+\[[`AbstractTensor`](#abstracttensordt)\<`T2`\>, [`AbstractTensor`](#abstracttensordt)\<`T2`\>\]
+
+</MemberCard>
+
+<a id="broadcast" name="broadcast"></a>
+
+<MemberCard>
+
+##### AbstractTensor.broadcast()
+
+```ts
+static broadcast<T>(
+   fn, 
+   lhs, 
+rhs): AbstractTensor<T>
+```
+
+Apply a function to the elements of two tensors, or to a tensor
+and a scalar.
+
+The tensors are aligned and broadcasted if necessary.
+
+• **T** *extends* keyof [`DataTypeMap`](#datatypemap)
+
+###### fn
+
+(`lhs`, `rhs`) => [`DataTypeMap`](#datatypemap)\[`T`\]
+
+###### lhs
+
+[`AbstractTensor`](#abstracttensordt)\<`T`\>
+
+###### rhs
+
+[`DataTypeMap`](#datatypemap)\[`T`\] | [`AbstractTensor`](#abstracttensordt)\<`T`\>
+
+[`AbstractTensor`](#abstracttensordt)\<`T`\>
+
+</MemberCard>
+
+<a id="at" name="at"></a>
+
+<MemberCard>
+
+##### AbstractTensor.at()
+
+```ts
+at(...indices): DataTypeMap[DT]
+```
+
+The number of indices should match the rank of the tensor.
+
+Note: the indices are 1-based
+Note: the data is broadcast (wraps around) if the indices are out of bounds
+
+LaTeX notation `A\lbracki, j\rbrack` or `A_{i, j}`
+
+###### indices
+
+...`number`[]
+
+[`DataTypeMap`](#datatypemap)\[`DT`\]
+
+</MemberCard>
+
+<a id="diagonal" name="diagonal"></a>
+
+<MemberCard>
+
+##### AbstractTensor.diagonal()
+
+```ts
+diagonal(axis1?, axis2?): DataTypeMap[DT][]
+```
+
+###### axis1?
+
+`number`
+
+###### axis2?
+
+`number`
+
+[`DataTypeMap`](#datatypemap)\[`DT`\][]
+
+</MemberCard>
+
+<a id="trace" name="trace"></a>
+
+<MemberCard>
+
+##### AbstractTensor.trace()
+
+```ts
+trace(axis1?, axis2?): DataTypeMap[DT]
+```
+
+###### axis1?
+
+`number`
+
+###### axis2?
+
+`number`
+
+[`DataTypeMap`](#datatypemap)\[`DT`\]
+
+</MemberCard>
+
+<a id="reshape" name="reshape"></a>
+
+<MemberCard>
+
+##### AbstractTensor.reshape()
+
+```ts
+reshape(...shape): AbstractTensor<DT>
+```
+
+Change the shape of the tensor
+
+The data is reused (and shared) between the two tensors.
+
+###### shape
+
+...`number`[]
+
+[`AbstractTensor`](#abstracttensordt)\<`DT`\>
+
+</MemberCard>
+
+<a id="flatten" name="flatten"></a>
+
+<MemberCard>
+
+##### AbstractTensor.flatten()
+
+```ts
+flatten(): DataTypeMap[DT][]
+```
+
+[`DataTypeMap`](#datatypemap)\[`DT`\][]
+
+</MemberCard>
+
+<a id="upcast" name="upcast"></a>
+
+<MemberCard>
+
+##### AbstractTensor.upcast()
+
+```ts
+upcast<DT>(dtype): AbstractTensor<DT>
+```
+
+• **DT** *extends* keyof [`DataTypeMap`](#datatypemap)
+
+###### dtype
+
+`DT`
+
+[`AbstractTensor`](#abstracttensordt)\<`DT`\>
+
+</MemberCard>
+
+<a id="transpose" name="transpose"></a>
+
+<MemberCard>
+
+##### AbstractTensor.transpose()
+
+###### transpose()
+
+```ts
+transpose(): AbstractTensor<DT>
+```
+
+Transpose the first and second axis
+
+[`AbstractTensor`](#abstracttensordt)\<`DT`\>
+
+###### transpose(axis1, axis2, fn)
+
+```ts
+transpose(
+   axis1, 
+   axis2, 
+fn?): AbstractTensor<DT>
+```
+
+Transpose two axes.
+
+###### axis1
+
+`number`
+
+###### axis2
+
+`number`
+
+###### fn?
+
+(`v`) => [`DataTypeMap`](#datatypemap)\[`DT`\]
+
+[`AbstractTensor`](#abstracttensordt)\<`DT`\>
+
+</MemberCard>
+
+<a id="conjugatetranspose" name="conjugatetranspose"></a>
+
+<MemberCard>
+
+##### AbstractTensor.conjugateTranspose()
+
+```ts
+conjugateTranspose(axis1, axis2): AbstractTensor<DT>
+```
+
+###### axis1
+
+`number`
+
+###### axis2
+
+`number`
+
+[`AbstractTensor`](#abstracttensordt)\<`DT`\>
+
+</MemberCard>
+
+<a id="determinant" name="determinant"></a>
+
+<MemberCard>
+
+##### AbstractTensor.determinant()
+
+```ts
+determinant(): DataTypeMap[DT]
+```
+
+[`DataTypeMap`](#datatypemap)\[`DT`\]
+
+</MemberCard>
+
+<a id="inverse" name="inverse"></a>
+
+<MemberCard>
+
+##### AbstractTensor.inverse()
+
+```ts
+inverse(): AbstractTensor<DT>
+```
+
+[`AbstractTensor`](#abstracttensordt)\<`DT`\>
+
+</MemberCard>
+
+<a id="pseudoinverse" name="pseudoinverse"></a>
+
+<MemberCard>
+
+##### AbstractTensor.pseudoInverse()
+
+```ts
+pseudoInverse(): AbstractTensor<DT>
+```
+
+[`AbstractTensor`](#abstracttensordt)\<`DT`\>
+
+</MemberCard>
+
+<a id="adjugatematrix" name="adjugatematrix"></a>
+
+<MemberCard>
+
+##### AbstractTensor.adjugateMatrix()
+
+```ts
+adjugateMatrix(): AbstractTensor<DT>
+```
+
+[`AbstractTensor`](#abstracttensordt)\<`DT`\>
+
+</MemberCard>
+
+<a id="minor" name="minor"></a>
+
+<MemberCard>
+
+##### AbstractTensor.minor()
+
+```ts
+minor(i, j): DataTypeMap[DT]
+```
+
+###### i
+
+`number`
+
+###### j
+
+`number`
+
+[`DataTypeMap`](#datatypemap)\[`DT`\]
+
+</MemberCard>
+
+<a id="map1" name="map1"></a>
+
+<MemberCard>
+
+##### AbstractTensor.map1()
+
+```ts
+map1(fn, scalar): AbstractTensor<DT>
+```
+
+###### fn
+
+(`lhs`, `rhs`) => [`DataTypeMap`](#datatypemap)\[`DT`\]
+
+###### scalar
+
+[`DataTypeMap`](#datatypemap)\[`DT`\]
+
+[`AbstractTensor`](#abstracttensordt)\<`DT`\>
+
+</MemberCard>
+
+<a id="map2" name="map2"></a>
+
+<MemberCard>
+
+##### AbstractTensor.map2()
+
+```ts
+map2(fn, rhs): AbstractTensor<DT>
+```
+
+###### fn
+
+(`lhs`, `rhs`) => [`DataTypeMap`](#datatypemap)\[`DT`\]
+
+###### rhs
+
+[`AbstractTensor`](#abstracttensordt)\<`DT`\>
+
+[`AbstractTensor`](#abstracttensordt)\<`DT`\>
+
+</MemberCard>
+
+<a id="add-4" name="add-4"></a>
+
+<MemberCard>
+
+##### AbstractTensor.add()
+
+```ts
+add(rhs): AbstractTensor<DT>
+```
+
+###### rhs
+
+[`AbstractTensor`](#abstracttensordt)\<`DT`\> | [`DataTypeMap`](#datatypemap)\[`DT`\]
+
+[`AbstractTensor`](#abstracttensordt)\<`DT`\>
+
+</MemberCard>
+
+<a id="subtract" name="subtract"></a>
+
+<MemberCard>
+
+##### AbstractTensor.subtract()
+
+```ts
+subtract(rhs): AbstractTensor<DT>
+```
+
+###### rhs
+
+[`AbstractTensor`](#abstracttensordt)\<`DT`\> | [`DataTypeMap`](#datatypemap)\[`DT`\]
+
+[`AbstractTensor`](#abstracttensordt)\<`DT`\>
+
+</MemberCard>
+
+<a id="multiply" name="multiply"></a>
+
+<MemberCard>
+
+##### AbstractTensor.multiply()
+
+```ts
+multiply(rhs): AbstractTensor<DT>
+```
+
+###### rhs
+
+[`AbstractTensor`](#abstracttensordt)\<`DT`\> | [`DataTypeMap`](#datatypemap)\[`DT`\]
+
+[`AbstractTensor`](#abstracttensordt)\<`DT`\>
+
+</MemberCard>
+
+<a id="divide" name="divide"></a>
+
+<MemberCard>
+
+##### AbstractTensor.divide()
+
+```ts
+divide(rhs): AbstractTensor<DT>
+```
+
+###### rhs
+
+[`AbstractTensor`](#abstracttensordt)\<`DT`\> | [`DataTypeMap`](#datatypemap)\[`DT`\]
+
+[`AbstractTensor`](#abstracttensordt)\<`DT`\>
+
+</MemberCard>
+
+<a id="power" name="power"></a>
+
+<MemberCard>
+
+##### AbstractTensor.power()
+
+```ts
+power(rhs): AbstractTensor<DT>
+```
+
+###### rhs
+
+[`AbstractTensor`](#abstracttensordt)\<`DT`\> | [`DataTypeMap`](#datatypemap)\[`DT`\]
+
+[`AbstractTensor`](#abstracttensordt)\<`DT`\>
+
+</MemberCard>
+
+<a id="equals-3" name="equals-3"></a>
+
+<MemberCard>
+
+##### AbstractTensor.equals()
+
+```ts
+equals(rhs): boolean
+```
+
+###### rhs
+
+[`AbstractTensor`](#abstracttensordt)\<`DT`\>
+
+`boolean`
+
+</MemberCard>
+
+<a id="maketensor" name="maketensor"></a>
+
+<MemberCard>
+
+### makeTensor()
+
+```ts
+function makeTensor<T>(ce, data): AbstractTensor<T>
+```
+
+• **T** *extends* keyof [`DataTypeMap`](#datatypemap)
+
+##### ce
+
+`IComputeEngine`
+
+##### data
+
+[`TensorData`](#tensordatadt)\<`T`\> | \{
+`operator`: `string`;
+`ops`: [`BoxedExpression`](#boxedexpression)[];
+`dtype`: `T`;
+`shape`: `number`[];
+\}
+
+[`AbstractTensor`](#abstracttensordt)\<`T`\>
+
+</MemberCard>
+
+<a id="sign" name="sign"></a>
+
+### Sign
+
+```ts
+type Sign = 
+  | "zero"
+  | "positive"
+  | "negative"
+  | "non-negative"
+  | "non-positive"
+  | "not-zero"
+  | "real-not-zero"
+  | "real"
+  | "nan"
+  | "positive-infinity"
+  | "negative-infinity"
+  | "complex-infinity"
+  | "unsigned";
+```
 
 <a id="canonicaloptions" name="canonicaloptions"></a>
 
 ### CanonicalOptions
 
 ```ts
-type CanonicalOptions: boolean | CanonicalForm | CanonicalForm[];
+type CanonicalOptions = 
+  | boolean
+  | CanonicalForm
+  | CanonicalForm[];
 ```
 
 
@@ -8733,21 +12505,25 @@ type CanonicalOptions: boolean | CanonicalForm | CanonicalForm[];
 
 ## MathJSON
 
-<a id="attributes" name="attributes"></a>
+<a id="mathjsonattributes" name="mathjsonattributes"></a>
 
-### Attributes
+### MathJsonAttributes
 
 ```ts
-type Attributes: Object;
+type MathJsonAttributes = object;
 ```
 
 #### Type declaration
+
+<a id="comment"></a>
+
+##### comment?
 
 <a id="comment" name="comment"></a>
 
 <MemberCard>
 
-##### Attributes.comment?
+##### MathJsonAttributes.comment?
 
 ```ts
 optional comment: string;
@@ -8758,11 +12534,15 @@ allow comments in its encoding
 
 </MemberCard>
 
+<a id="documentation"></a>
+
+##### documentation?
+
 <a id="documentation" name="documentation"></a>
 
 <MemberCard>
 
-##### Attributes.documentation?
+##### MathJsonAttributes.documentation?
 
 ```ts
 optional documentation: string;
@@ -8772,11 +12552,15 @@ A Markdown-encoded string providing documentation about this expression.
 
 </MemberCard>
 
+<a id="latex"></a>
+
+##### latex?
+
 <a id="latex" name="latex"></a>
 
 <MemberCard>
 
-##### Attributes.latex?
+##### MathJsonAttributes.latex?
 
 ```ts
 optional latex: string;
@@ -8789,11 +12573,15 @@ parentheses in an expression or styling attributes.
 
 </MemberCard>
 
+<a id="wikidata"></a>
+
+##### wikidata?
+
 <a id="wikidata" name="wikidata"></a>
 
 <MemberCard>
 
-##### Attributes.wikidata?
+##### MathJsonAttributes.wikidata?
 
 ```ts
 optional wikidata: string;
@@ -8808,11 +12596,15 @@ For example:
 
 </MemberCard>
 
+<a id="wikibase"></a>
+
+##### wikibase?
+
 <a id="wikibase" name="wikibase"></a>
 
 <MemberCard>
 
-##### Attributes.wikibase?
+##### MathJsonAttributes.wikibase?
 
 ```ts
 optional wikibase: string;
@@ -8827,11 +12619,15 @@ The default value is "https://www.wikidata.org/wiki/"
 
 </MemberCard>
 
+<a id="openmathsymbol"></a>
+
+##### openmathSymbol?
+
 <a id="openmathsymbol" name="openmathsymbol"></a>
 
 <MemberCard>
 
-##### Attributes.openmathSymbol?
+##### MathJsonAttributes.openmathSymbol?
 
 ```ts
 optional openmathSymbol: string;
@@ -8843,11 +12639,15 @@ For example: `arith1/#abs`.
 
 </MemberCard>
 
+<a id="openmathcd"></a>
+
+##### openmathCd?
+
 <a id="openmathcd" name="openmathcd"></a>
 
 <MemberCard>
 
-##### Attributes.openmathCd?
+##### MathJsonAttributes.openmathCd?
 
 ```ts
 optional openmathCd: string;
@@ -8860,11 +12660,15 @@ The default value is "http://www.openmath.org/cd".
 
 </MemberCard>
 
+<a id="sourceurl"></a>
+
+##### sourceUrl?
+
 <a id="sourceurl" name="sourceurl"></a>
 
 <MemberCard>
 
-##### Attributes.sourceUrl?
+##### MathJsonAttributes.sourceUrl?
 
 ```ts
 optional sourceUrl: string;
@@ -8874,11 +12678,15 @@ A URL to the source code from which this expression was generated.
 
 </MemberCard>
 
+<a id="sourcecontent"></a>
+
+##### sourceContent?
+
 <a id="sourcecontent" name="sourcecontent"></a>
 
 <MemberCard>
 
-##### Attributes.sourceContent?
+##### MathJsonAttributes.sourceContent?
 
 ```ts
 optional sourceContent: string;
@@ -8890,11 +12698,15 @@ It could be a LaTeX expression, or some other source language.
 
 </MemberCard>
 
+<a id="sourceoffsets"></a>
+
+##### sourceOffsets?
+
 <a id="sourceoffsets" name="sourceoffsets"></a>
 
 <MemberCard>
 
-##### Attributes.sourceOffsets?
+##### MathJsonAttributes.sourceOffsets?
 
 ```ts
 optional sourceOffsets: [number, number];
@@ -8910,7 +12722,7 @@ expression was generated.
 ### MathJsonIdentifier
 
 ```ts
-type MathJsonIdentifier: string;
+type MathJsonIdentifier = string;
 ```
 
 <a id="mathjsonnumber" name="mathjsonnumber"></a>
@@ -8918,7 +12730,7 @@ type MathJsonIdentifier: string;
 ### MathJsonNumber
 
 ```ts
-type MathJsonNumber: Object & Attributes;
+type MathJsonNumber = object & MathJsonAttributes;
 ```
 
 A MathJSON numeric quantity.
@@ -8946,6 +12758,8 @@ For example:
 
 #### Type declaration
 
+##### num
+
 <MemberCard>
 
 ##### MathJsonNumber.num
@@ -8961,10 +12775,12 @@ num: "NaN" | "-Infinity" | "+Infinity" | string;
 ### MathJsonSymbol
 
 ```ts
-type MathJsonSymbol: Object & Attributes;
+type MathJsonSymbol = object & MathJsonAttributes;
 ```
 
 #### Type declaration
+
+##### sym
 
 <MemberCard>
 
@@ -8981,10 +12797,12 @@ sym: MathJsonIdentifier;
 ### MathJsonString
 
 ```ts
-type MathJsonString: Object & Attributes;
+type MathJsonString = object & MathJsonAttributes;
 ```
 
 #### Type declaration
+
+##### str
 
 <MemberCard>
 
@@ -9001,42 +12819,20 @@ str: string;
 ### MathJsonFunction
 
 ```ts
-type MathJsonFunction: Object & Attributes;
+type MathJsonFunction = object & MathJsonAttributes;
 ```
 
 #### Type declaration
+
+##### fn
 
 <MemberCard>
 
 ##### MathJsonFunction.fn
 
 ```ts
-fn: [MathJsonIdentifier | MathJsonFunction, ...Expression[]];
+fn: [MathJsonIdentifier, ...Expression[]];
 ```
-
-</MemberCard>
-
-<a id="mathjsondictionary" name="mathjsondictionary"></a>
-
-### MathJsonDictionary
-
-```ts
-type MathJsonDictionary: Object & Attributes;
-```
-
-#### Type declaration
-
-<MemberCard>
-
-##### MathJsonDictionary.dict
-
-```ts
-dict: Object;
-```
-
-###### Index signature
-
- \[`key`: `string`\]: [`Expression`](#expression)
 
 </MemberCard>
 
@@ -9045,16 +12841,12 @@ dict: Object;
 ### Expression
 
 ```ts
-type Expression: 
+type Expression = 
+  | ExpressionObject
   | number
   | MathJsonIdentifier
   | string
-  | MathJsonNumber
-  | MathJsonString
-  | MathJsonSymbol
-  | MathJsonFunction
-  | MathJsonDictionary
-  | [MathJsonIdentifier | MathJsonFunction, ...Expression[]];
+  | readonly [MathJsonIdentifier, ...Expression[]];
 ```
 
 A MathJSON expression is a recursive data structure.
@@ -9062,11 +12854,16 @@ A MathJSON expression is a recursive data structure.
 The leaf nodes of an expression are numbers, strings and symbols.
 The dictionary and function nodes can contain expressions themselves.
 
+## Other
 
-<a name="readmemd"></a>
+<a id="expressionobject" name="expressionobject"></a>
 
-## Modules
+### ExpressionObject
 
-- ["common"](%22common%22.md)
-- ["compute-engine"](%22compute-engine%22.md)
-- ["math-json"](%22math-json%22.md)
+```ts
+type ExpressionObject = 
+  | MathJsonNumber
+  | MathJsonString
+  | MathJsonSymbol
+  | MathJsonFunction;
+```

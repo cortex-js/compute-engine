@@ -1,12 +1,11 @@
 import type { BoxedExpression } from './public';
 
-import type { IComputeEngine } from '../public';
-
 import { each, isFiniteIndexableCollection } from '../collection-utils';
 
 import { flatten } from './flatten';
 import { isSubtype } from '../../common/type/subtype';
 import { Type } from '../../common/type/types';
+import type { IComputeEngine } from '../types';
 
 /**
  * Check that the number of arguments is as expected.

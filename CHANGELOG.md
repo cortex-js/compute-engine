@@ -607,10 +607,10 @@ ce.declare('Mean', { evaluate: (ops, { engine }) => ce.number(1) });
   - `algebraic` - algebraic numbers, rational and irrational
   - `transcendental` - transcendental numbers, π, e, ...
 
-  - `positive` - positive real numbers, > 0
-  - `negative` - negative real numbers, < 0
-  - `nonnegative` - nonnegative real numbers, >= 0
-  - `nonpositive` - nonpositive real numbers, <= 0
+  - `positive` - positive real numbers, \> 0
+  - `negative` - negative real numbers, \< 0
+  - `nonnegative` - nonnegative real numbers, \>= 0
+  - `nonpositive` - nonpositive real numbers, \<= 0
 
   - `even` - even integers, 0, 2, 4, 6, ...
   - `odd` - odd integers, 1, 3, 5, 7, ...
@@ -1631,7 +1631,7 @@ They can be iterated, sliced, filtered, mapped, etc...
   it to `false` to prevent some transformations that are done to produce more
   readable LaTeX, but that may not match exactly the MathJSON. For example, by
   default `ce.serialize(["Power", "x", -1])` returns `\frac{1}{x}` while
-  ce.serialize(["Power", "x", -1], {canonical: false}) returns`x^{-1}`.
+  `ce.serialize(["Power", "x", -1], {canonical: false})` returns `x^{-1}`.
 - Improved parsing of delimiters, i.e. `\left(`, `\right]`, etc...
 - Added complex functions `Real`, `Imaginary`, `Arg`, `Conjugate`, `AbsArg`. See
   [Complex](https://cortexjs.io/compute-engine/reference/complex/)

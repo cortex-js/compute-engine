@@ -101,7 +101,7 @@ printf $BASENAME$DOT$RESET" Making a \033[33m$BUILD\033[0m build"
 node --no-warnings ./scripts/build.mjs
 
 
-if [ "$BUILD" = "production" ]; then    
+if [ "$BUILD" = "production" ]; then
     # Linting
     # printf "$BASENAME$DOT Linting"
     # npm run lint
@@ -111,6 +111,9 @@ if [ "$BUILD" = "production" ]; then
     find ./dist -type f \( -name '*.js' -o -name '*.mjs' \) -exec bash -c 'sedi s/{{SDK_VERSION}}/$SDK_VERSION/g {}' \;
     find ./dist -type f -name '*.d.ts' -exec bash -c 'sedi "1s/^/\/\* $SDK_VERSION \*\/$(printf '"'"'\r'"'"')/" {}' \;
     find ./dist -type f -name '*.d.ts' -exec bash -c 'sedi "s/{{SDK_VERSION}}/$SDK_VERSION/" {}' \;
+
+    # Build the docs
+    bash ./scripts/doc.sh
 
 
     # Run test suite

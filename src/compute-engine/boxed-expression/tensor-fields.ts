@@ -1,8 +1,9 @@
 import { Complex } from 'complex-esm';
-import type { BoxedExpression, IComputeEngine } from '../public';
+import type { BoxedExpression } from '../public';
 import { isRelationalOperator } from './utils';
 import { mul } from './arithmetic-multiply';
 import { add } from './arithmetic-add';
+import type { IComputeEngine } from '../types';
 
 export type DataTypeMap = {
   float64: number;

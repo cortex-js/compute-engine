@@ -1,4 +1,4 @@
-import type { BoxedExpression, IComputeEngine } from '../public';
+import type { BoxedExpression } from '../public';
 
 import { asSmallInteger } from './numerics';
 import { isRelationalOperator } from './utils';
@@ -7,6 +7,7 @@ import { mul } from './arithmetic-multiply';
 
 import { Product } from './product';
 import { add } from './arithmetic-add';
+import type { IComputeEngine } from '../types';
 
 function expandProduct(
   lhs: Readonly<BoxedExpression>,

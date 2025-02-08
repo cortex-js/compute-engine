@@ -1,6 +1,6 @@
 import { each, isFiniteCollection } from '../collection-utils';
 import { erf, erfInv } from '../numerics/special-functions';
-import type { BoxedExpression, IdentifierDefinitions } from '../public';
+import type { BoxedExpression } from '../public';
 import { choose } from '../boxed-expression/expand';
 import { bignumPreferred } from '../private';
 import {
@@ -23,6 +23,7 @@ import {
   skewness,
   variance,
 } from '../numerics/statistics';
+import type { IdentifierDefinitions } from '../types';
 
 // Geometric mean:
 // Harmonic mean:

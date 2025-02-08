@@ -1,8 +1,6 @@
 import type {
   BoxedExpression,
   FunctionDefinition,
-  IComputeEngine,
-  NumericFlags,
   SemiBoxedExpression,
   SymbolDefinition,
 } from './public';
@@ -12,6 +10,7 @@ import { DEFINITIONS_INEQUALITIES } from '../latex-syntax/dictionary/definitions
 
 import { MACHINE_PRECISION } from '../numerics/numeric';
 import { Type } from '../../common/type/types';
+import type { IComputeEngine, NumericFlags } from '../types';
 
 export function isBoxedExpression(x: unknown): x is BoxedExpression {
   return typeof x === 'object' && x !== null && 'engine' in x;

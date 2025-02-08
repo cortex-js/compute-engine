@@ -1,14 +1,8 @@
 import type { Expression } from '../../math-json/types';
 import type {
   BoxedExpression,
-  IComputeEngine,
-  EvaluateOptions,
   SimplifyOptions,
-  Metadata,
-  BoxedSubstitution,
   PatternMatchOptions,
-  BoxedBaseDefinition,
-  BoxedFunctionDefinition,
 } from '../public';
 
 import {
@@ -26,9 +20,16 @@ import { isWildcard, wildcardName } from './boxed-patterns';
 import { canonical, hashCode, isBoxedExpression } from './utils';
 
 import { AbstractTensor, TensorData, makeTensor } from '../tensor/tensors'; // @fixme
-import { Type } from '../../common/type/types';
 import { parseType } from '../../common/type/parse';
 import { BoxedType } from '../../common/type/boxed-type';
+import type {
+  IComputeEngine,
+  Metadata,
+  BoxedBaseDefinition,
+  BoxedFunctionDefinition,
+  BoxedSubstitution,
+  EvaluateOptions,
+} from '../types';
 
 /**
  * A boxed tensor represents an expression that can be represented by a tensor.
@@ -39,8 +40,6 @@ import { BoxedType } from '../../common/type/boxed-type';
  *
  * The structural counterpart (expression if input is tensor, or tensor
  * if input is expression) is created lazily.
- *
- * @noInheritDoc
  *
  */
 export class BoxedTensor extends _BoxedExpression {

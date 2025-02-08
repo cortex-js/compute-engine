@@ -1,10 +1,4 @@
-import type {
-  BoxedExpression,
-  CollectionHandlers,
-  FunctionDefinition,
-  IComputeEngine,
-  IdentifierDefinitions,
-} from '../public';
+import type { BoxedExpression, FunctionDefinition } from '../public';
 
 import { checkArity, checkTypes } from '../boxed-expression/validate';
 import { asSmallInteger } from '../boxed-expression/numerics';
@@ -23,6 +17,11 @@ import { collectionElementType, widen } from '../../common/type/utils';
 import { interval } from '../numerics/interval';
 import { JSON5 } from '../../common/json5';
 import { Expression } from '../../math-json';
+import type {
+  CollectionHandlers,
+  IComputeEngine,
+  IdentifierDefinitions,
+} from '../types';
 
 // From NumPy:
 export const DEFAULT_LINSPACE_COUNT = 50;

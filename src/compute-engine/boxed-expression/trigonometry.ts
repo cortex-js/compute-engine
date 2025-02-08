@@ -4,12 +4,13 @@ import Decimal from 'decimal.js';
 import type { Expression } from '../../math-json/types';
 import type { LatexString } from '../latex-syntax/public';
 
-import type { BoxedExpression, IComputeEngine, RuleStep, Sign } from './public';
+import type { BoxedExpression } from './public';
 
 import { apply } from './apply'; // @fixme
 
 import { asLatexString } from './utils';
 import { getPiTerm } from './factor';
+import type { IComputeEngine, RuleStep, Sign } from '../types';
 
 type ConstructibleTrigValues = [
   [numerator: number, denominator: number],

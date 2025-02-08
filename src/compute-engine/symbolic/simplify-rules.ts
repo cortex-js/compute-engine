@@ -5,7 +5,7 @@ import {
 } from '../boxed-expression/trigonometry';
 import { mul } from '../boxed-expression/arithmetic-multiply';
 import { simplifyLogicFunction } from '../library/logic';
-import { BoxedExpression, Rule, RuleStep } from '../public';
+import { BoxedExpression } from '../public';
 import { expand } from '../boxed-expression/expand';
 import {
   isEquation,
@@ -16,6 +16,7 @@ import { factor } from '../boxed-expression/factor';
 import { add } from '../boxed-expression/arithmetic-add';
 import { SMALL_INTEGER } from '../numerics/numeric';
 import { NumericValue } from '../numeric-value/public';
+import type { Rule, RuleStep } from '../types';
 
 /**
  * @todo: a set to "tidy" an expression. Different from a canonical form, but

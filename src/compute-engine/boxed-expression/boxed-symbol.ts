@@ -9,23 +9,9 @@ import type { Type, TypeString } from '../../common/type/types';
 
 import type {
   BoxedExpression,
-  BoxedRuleSet,
-  BoxedSymbolDefinition,
-  IComputeEngine,
-  EvaluateOptions,
-  ReplaceOptions,
   SimplifyOptions,
-  Substitution,
-  Metadata,
   PatternMatchOptions,
-  RuntimeScope,
-  BoxedFunctionDefinition,
-  BoxedBaseDefinition,
-  BoxedSubstitution,
-  Rule,
-  CanonicalOptions,
-  BoxedRule,
-  Sign,
+  ReplaceOptions,
 } from './public';
 
 import { mul } from './arithmetic-multiply';
@@ -45,7 +31,6 @@ import { div } from './arithmetic-divide';
 import { pow } from './arithmetic-power';
 import { add } from './arithmetic-add';
 import { parseType } from '../../common/type/parse';
-import { isSubtype } from '../../common/type/subtype';
 import { isSignatureType, widen } from '../../common/type/utils';
 import {
   positiveSign,
@@ -56,6 +41,22 @@ import {
 import { BigNum } from '../numerics/bignum';
 import type { OneOf } from '../../common/one-of';
 import { BoxedType } from '../../common/type/boxed-type';
+import type {
+  RuntimeScope,
+  BoxedSymbolDefinition,
+  BoxedFunctionDefinition,
+  IComputeEngine,
+  Metadata,
+  CanonicalOptions,
+  BoxedBaseDefinition,
+  BoxedSubstitution,
+  EvaluateOptions,
+  Rule,
+  BoxedRule,
+  BoxedRuleSet,
+  Substitution,
+  Sign,
+} from '../types';
 
 /**
  * BoxedSymbol
@@ -70,7 +71,6 @@ import { BoxedType } from '../../common/type/boxed-type';
  * not a function expression, i.e. `Sin`, not `["Sin", "Pi"]`. This is used
  * for example in `["InverseFunction", "Sin"]`
  *
- * @noInheritDoc
  *
  */
 export class BoxedSymbol extends _BoxedExpression {
@@ -208,7 +208,7 @@ export class BoxedSymbol extends _BoxedExpression {
       type: 'unknown',
       inferred: true,
     });
-    this._id = this._def.name;
+    this._id = this._def?.name ?? this._id;
   }
 
   reset(): void {

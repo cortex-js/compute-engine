@@ -1,4 +1,4 @@
-import type { BoxedExpression, CanonicalOptions } from '../public';
+import type { BoxedExpression } from '../public';
 
 import { flattenOps } from './flatten';
 
@@ -8,6 +8,7 @@ import { canonicalMultiply } from './arithmetic-multiply';
 import { canonicalInvisibleOperator } from '../library/invisible-operator';
 
 import { canonicalOrder } from './order';
+import type { CanonicalOptions } from '../types';
 
 export function canonicalForm(
   expr: BoxedExpression,
