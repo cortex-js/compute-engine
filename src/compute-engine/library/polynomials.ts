@@ -42,6 +42,9 @@ export const POLYNOMIALS_LIBRARY: IdentifierDefinitions[] = [
 ];
 
 //@todo
-//   // degree
-//   // factors
-//   // roots
+// Polynomial([0, 2, 0, 4]:list, x:symbol) -> 2x + 4x^3
+//  -> Dot([0, 2, 0, 4], x^Range(0, 3)) -> 2x + 4x^3
+// CoefficientList(2x + 4x^3, 'x') -> [0, 2, 0, 4]
+// Degree(x) = Length(Coefficients(x)) - 1
+//   Factors
+//   Roots

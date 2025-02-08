@@ -1,14 +1,10 @@
-import { canonicalInteger, gcd, lcm, SmallInteger } from './numeric';
+import { canonicalInteger, gcd, lcm } from './numeric';
 import {
   gcd as bigGcd,
   lcm as bigLcm,
   canonicalInteger as bigCanonicalInteger,
 } from './numeric-bigint';
-
-/**
- * @category Boxed Expression
- */
-export type Rational = [SmallInteger, SmallInteger] | [bigint, bigint];
+import { Rational, SmallInteger } from './types';
 
 export function isRational(x: any | null): x is Rational {
   return x !== null && Array.isArray(x);

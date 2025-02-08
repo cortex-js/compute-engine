@@ -11,7 +11,7 @@ import type {
 
 import type { NumericValue } from '../numeric-value/public';
 
-import type { SmallInteger } from '../numerics/numeric';
+import type { SmallInteger } from '../numerics/types';
 
 import { compileToJavascript } from '../compile';
 

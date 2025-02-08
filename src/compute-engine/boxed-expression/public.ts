@@ -13,7 +13,7 @@ import type {
 } from '../latex-syntax/public';
 
 import { NumericValue } from '../numeric-value/public';
-import { BigNum } from '../numerics/bignum';
+import type { BigNum } from '../numerics/types';
 import { Type, TypeString } from '../../common/type/types';
 import { AbstractTensor } from '../tensor/tensors';
 import { JSSource } from '../compile';
@@ -146,9 +146,9 @@ import type {
 /**
  * :::info[THEORY OF OPERATIONS]
  *
- * The `BoxedExpression` interface includes most of the member functions
- * applicable to any kind of expression, for example `get symbol()` or
- * `get ops()`.
+ * The `BoxedExpression` interface includes the methods and properties
+ * applicable to any kind of expression, for example `expr.symbol` or
+ * `expr.ops`.
  *
  * When a member function is not applicable to this `BoxedExpression`,
  * for example `get symbol()` on a `BoxedNumber`, it returns `null`.
@@ -157,7 +157,7 @@ import type {
  * having to check what kind of instance they are before manipulating them.
  * :::
  *
- * To get a boxed expression from a LaTeX string use `ce.parse()`, or to
+ * To get a boxed expression from a LaTeX string use `ce.parse()`, and to
  * get a boxed expression from a MathJSON expression use `ce.box()`.
  *
  * @category Boxed Expression

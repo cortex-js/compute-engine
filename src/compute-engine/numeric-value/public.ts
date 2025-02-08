@@ -25,8 +25,7 @@
  */
 
 import Decimal from 'decimal.js';
-import { SmallInteger } from '../numerics/numeric';
-import { Rational } from '../numerics/rationals';
+import type { Rational, SmallInteger } from '../numerics/types';
 import { NumericType } from '../../common/type/types';
 
 /** The value is equal to `(decimal * rational * sqrt(radical)) + im * i` */

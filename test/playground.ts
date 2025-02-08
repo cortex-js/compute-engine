@@ -1,5 +1,3 @@
-import { BoxedType } from '../src/common/type/boxed-type';
-import { isSubtype } from '../src/common/type/subtype';
 import { ComputeEngine } from '../src/compute-engine';
 
 const ce = new ComputeEngine();

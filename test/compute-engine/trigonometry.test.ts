@@ -65,7 +65,7 @@ describe('TRIGONOMETRY constructible values', () => {
           (typeof fNumeric.numericValue !== 'number' &&
             fNumeric.numericValue?.isComplexInfinity)
         ) {
-          test(`${h}(${arg.toString})`, () =>
+          test(`${h}(${arg.toString()})`, () =>
             expect(Math.abs(jsValue) > 1e6).toBeTruthy());
         } else {
           let f = fNumeric.re ?? NaN;

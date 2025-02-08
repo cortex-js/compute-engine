@@ -12,12 +12,8 @@ import type { Expression, MathJsonNumber } from '../../math-json';
 import { div } from './arithmetic-divide';
 import { mul } from './arithmetic-multiply';
 
-import {
-  canonicalInteger,
-  SMALL_INTEGER,
-  SmallInteger,
-} from '../numerics/numeric';
-import { Rational } from '../numerics/rationals';
+import { canonicalInteger, SMALL_INTEGER } from '../numerics/numeric';
+import type { Rational, SmallInteger } from '../numerics/types';
 import { bigint } from '../numerics/bigint';
 
 import {

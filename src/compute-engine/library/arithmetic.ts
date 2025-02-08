@@ -364,13 +364,17 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
 
         // Not a positive integer, use the Gamma function
         if (x.isNegative) return ce.number(gamma(1 + x.re));
-
-        return ce.number(
-          run(
-            bigFactorial(BigInt((x.bignumRe ?? x.re).toFixed())),
-            ce._timeRemaining
-          )
-        );
+        try {
+          return ce.number(
+            run(
+              bigFactorial(BigInt((x.bignumRe ?? x.re).toFixed())),
+              ce._timeRemaining
+            )
+          );
+        } catch (e) {
+          // We can get here if the factorial is too large
+          return undefined;
+        }
       },
       evaluateAsync: async ([x], { signal }) => {
         const ce = x.engine;
@@ -385,13 +389,18 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
         // Not a positive integer, use the Gamma function
         if (x.isNegative) return ce.number(gamma(1 + x.re));
 
-        return ce.number(
-          await runAsync(
-            bigFactorial(BigInt((x.bignumRe ?? x.re).toFixed())),
-            (ce._deadline ?? Infinity) - Date.now(),
-            signal
-          )
-        );
+        try {
+          return ce.number(
+            await runAsync(
+              bigFactorial(BigInt((x.bignumRe ?? x.re).toFixed())),
+              (ce._deadline ?? Infinity) - Date.now(),
+              signal
+            )
+          );
+        } catch (e) {
+          // We can get here if the factorial is too large
+          return undefined;
+        }
       },
     },
 

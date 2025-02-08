@@ -1,7 +1,7 @@
 import type { BoxedExpression } from '../public';
 import { asRational } from './numerics';
 
-import type { Rational } from '../numerics/rationals';
+import type { Rational } from '../numerics/types';
 import { canonicalAngle } from './trigonometry';
 import { getImaginaryFactor } from './utils';
 import { apply, apply2 } from './apply';

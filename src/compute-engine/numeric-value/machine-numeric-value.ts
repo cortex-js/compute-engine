@@ -1,7 +1,8 @@
 import Decimal from 'decimal.js';
 import { NumericValue, NumericValueData } from './public';
 import type { Expression } from '../../math-json/types';
-import { DEFAULT_TOLERANCE, SmallInteger } from '../numerics/numeric';
+import type { SmallInteger } from '../numerics/types';
+import { DEFAULT_TOLERANCE } from '../numerics/numeric';
 import { numberToString } from '../numerics/strings';
 import { numberToExpression } from '../numerics/expression';
 import { NumericType } from '../../common/type/types';

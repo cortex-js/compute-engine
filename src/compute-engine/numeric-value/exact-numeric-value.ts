@@ -1,10 +1,7 @@
 import Decimal from 'decimal.js';
-import {
-  canonicalInteger,
-  gcd,
-  SMALL_INTEGER,
-  SmallInteger,
-} from '../numerics/numeric';
+
+import { Rational, SmallInteger } from '../numerics/types';
+import { canonicalInteger, gcd, SMALL_INTEGER } from '../numerics/numeric';
 import {
   isOne,
   isZero,
@@ -15,7 +12,6 @@ import {
   isNegativeOne,
   rationalAsFloat,
   add,
-  Rational,
   mul,
   isMachineRational,
   rationalGcd,
@@ -93,7 +89,7 @@ export class ExactNumericValue extends NumericValue {
     }
 
     let rational: Rational = value.rational
-      ? [...value.rational]
+      ? ([...value.rational] as Rational)
       : ([1, 1] as const);
     if (decimal != 1) {
       if (typeof decimal === 'bigint')

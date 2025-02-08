@@ -16,8 +16,7 @@ import {
 } from './latex-syntax/public';
 import { IndexedLatexDictionary } from './latex-syntax/dictionary/definitions';
 
-import { BigNum, IBigNum } from './numerics/bignum';
-import { Rational } from './numerics/rationals';
+import { BigNum, IBigNum, Rational } from './numerics/types';
 
 import {
   ExactNumericValueData,

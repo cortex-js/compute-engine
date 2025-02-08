@@ -1,6 +1,6 @@
 import Decimal from 'decimal.js';
 
-import type { Rational } from '../numerics/rationals';
+import type { Rational } from '../numerics/types';
 
 import type { BoxedExpression } from './public';
 

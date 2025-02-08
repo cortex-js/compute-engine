@@ -55,7 +55,8 @@ import {
   makeFunctionDefinition,
   _BoxedFunctionDefinition,
 } from './boxed-expression/boxed-function-definition';
-import { Rational, isMachineRational, isRational } from './numerics/rationals';
+import type { Rational } from './numerics/types';
+import { isMachineRational, isRational } from './numerics/rationals';
 import { applicable, parseFunctionSignature } from './function-utils';
 import { CYAN, INVERSE_RED, RESET, YELLOW } from '../common/ansi-codes';
 import {
@@ -96,7 +97,7 @@ import { isSignatureType, isValidType } from '../common/type/utils';
 import { parseType } from '../common/type/parse';
 import { hidePrivateProperties } from '../common/utils';
 import { OneOf } from '../common/one-of';
-import { BigNum } from './numerics/bignum';
+import { BigNum } from './numerics/types';
 import { typeToString } from '../common/type/serialize';
 import { BoxedType } from '../common/type/boxed-type';
 import type {

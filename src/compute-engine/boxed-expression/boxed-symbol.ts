@@ -38,7 +38,7 @@ import {
   negativeSign,
   nonNegativeSign,
 } from './sgn';
-import { BigNum } from '../numerics/bignum';
+import type { BigNum } from '../numerics/types';
 import type { OneOf } from '../../common/one-of';
 import { BoxedType } from '../../common/type/boxed-type';
 import type {

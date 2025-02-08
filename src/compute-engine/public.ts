@@ -23,10 +23,6 @@ export {
   NumberFormat,
 } from './latex-syntax/public';
 
-export * from './numerics/bignum';
-export * from './numerics/rationals';
-export { SmallInteger } from './numerics/numeric';
-
 export * from './numeric-value/public';
 
 export * from '../common/type/boxed-type';
@@ -37,3 +33,5 @@ export * from './boxed-expression/tensor-fields';
 export * from './types';
 
 export * from './boxed-expression/public';
+export * from './numerics/types';
+export * from '../common/one-of';

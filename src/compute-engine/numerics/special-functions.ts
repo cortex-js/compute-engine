@@ -1,5 +1,5 @@
 import type { IComputeEngine } from '../types';
-import { BigNum } from './bignum';
+import type { BigNum } from './types';
 
 const gammaG = 7;
 const lanczos_7_c = [

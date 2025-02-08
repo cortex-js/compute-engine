@@ -1,5 +1,5 @@
 import { BigNumFactory } from '../numeric-value/big-numeric-value';
-import { BigNum } from './bignum';
+import type { BigNum } from './types';
 
 export function mean(values: Iterable<number>): number {
   let sum = 0;

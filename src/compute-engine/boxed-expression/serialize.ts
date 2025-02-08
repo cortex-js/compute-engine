@@ -5,9 +5,9 @@ import type { Expression } from '../../math-json/types';
 
 import type { BoxedExpression, JsonSerializationOptions } from '../public';
 
+import { Rational } from '../numerics/types';
 import { isInMachineRange } from '../numerics/numeric-bignum';
 import {
-  Rational,
   isInteger,
   isMachineRational,
   isNegativeOne,

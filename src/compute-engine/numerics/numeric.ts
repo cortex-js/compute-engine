@@ -30,15 +30,6 @@ export const DEFAULT_TOLERANCE = 1e-10;
 // so that the product of two small integers does not lose precision
 export const SMALL_INTEGER = 1000000;
 
-type IsInteger<N extends number> = `${N}` extends `${string}.${string}`
-  ? never
-  : `${N}` extends `-${string}.${string}`
-    ? never
-    : number;
-
-/** A `SmallInteger` is an integer < 1e6  */
-export type SmallInteger = IsInteger<number>;
-
 /** The largest number of digits of a bigint */
 export const MAX_BIGINT_DIGITS = 1024;
 

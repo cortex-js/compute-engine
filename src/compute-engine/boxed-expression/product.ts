@@ -1,8 +1,8 @@
 import type { BoxedExpression } from '../public';
 
 import { order } from './order';
+import type { Rational } from '../numerics/types';
 import {
-  Rational,
   add,
   mul as rationalMul,
   asMachineRational,
