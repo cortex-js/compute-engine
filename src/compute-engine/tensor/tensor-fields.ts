@@ -1,10 +1,10 @@
 import { Complex } from 'complex-esm';
-import type { BoxedExpression } from '../public';
-import { isRelationalOperator } from './utils';
-import { mul } from './arithmetic-multiply';
-import { add } from './arithmetic-add';
-import type { IComputeEngine } from '../types';
+import { isRelationalOperator } from '../boxed-expression/utils';
+import { mul } from '../boxed-expression/arithmetic-multiply';
+import { add } from '../boxed-expression/arithmetic-add';
+import type { BoxedExpression, IComputeEngine } from '../types';
 
+/** @category Tensors */
 export type DataTypeMap = {
   float64: number;
   float32: number;
@@ -17,8 +17,10 @@ export type DataTypeMap = {
   expression: BoxedExpression;
 };
 
+/** @category Tensors */
 export type TensorDataType = keyof DataTypeMap;
 
+/** @category Tensors */
 export function makeTensorField<DT extends keyof DataTypeMap>(
   ce: IComputeEngine,
   dtype: DT
@@ -42,6 +44,7 @@ export function makeTensorField<DT extends keyof DataTypeMap>(
   throw new Error(`Unknown dtype ${dtype}`);
 }
 
+/** @category Tensors */
 export interface TensorField<
   T extends number | Complex | BoxedExpression | boolean | string = number,
 > {
@@ -102,6 +105,7 @@ export interface TensorField<
   conjugate(x: T): T;
 }
 
+/** @category Tensors */
 export class TensorFieldNumber implements TensorField<number> {
   one = 1;
   zero = 0;
@@ -223,6 +227,7 @@ export class TensorFieldNumber implements TensorField<number> {
   }
 }
 
+/** @category Tensors */
 export class TensorFieldExpression implements TensorField<BoxedExpression> {
   one: BoxedExpression;
   zero: BoxedExpression;
@@ -353,6 +358,7 @@ export class TensorFieldExpression implements TensorField<BoxedExpression> {
   }
 }
 
+/** @category Tensors */
 export class TensorFieldComplex implements TensorField<Complex> {
   one: Complex;
   zero: Complex;
@@ -481,6 +487,10 @@ export class TensorFieldComplex implements TensorField<Complex> {
   }
 }
 
+/**
+ * @category Tensors
+ * @internal
+ */
 export function getSupertype(
   t1: TensorDataType | undefined,
   t2: TensorDataType
@@ -502,6 +512,11 @@ export function getSupertype(
   if (t1 === 'bool' || t2 === 'bool') return 'bool';
   return 'expression';
 }
+
+/**
+ * @category Tensors
+ * @internal
+ */
 
 export function getExpressionDatatype(expr: BoxedExpression): TensorDataType {
   // Depending on whether the expr is a literal number, a string, etc,

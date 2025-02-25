@@ -6,7 +6,9 @@ type IsInteger<N extends number> = `${N}` extends `${string}.${string}`
     ? never
     : number;
 
-/** A `SmallInteger` is an integer < 1e6  */
+/** A `SmallInteger` is an integer < 1e6
+ * @category Numerics
+ */
 export type SmallInteger = IsInteger<number>;
 
 /**
@@ -16,12 +18,14 @@ export type SmallInteger = IsInteger<number>;
  * A rational can either be represented as a pair of small integers or
  * a pair of big integers.
  *
- * @category Boxed Expression
+ * @category Numerics
  */
 export type Rational = [SmallInteger, SmallInteger] | [bigint, bigint];
 
+/** @category Numerics */
 export type BigNum = Decimal;
 
+/** @category Numerics */
 export interface IBigNum {
   readonly _BIGNUM_NAN: BigNum;
   readonly _BIGNUM_ZERO: BigNum;

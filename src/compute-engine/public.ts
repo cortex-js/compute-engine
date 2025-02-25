@@ -1,21 +1,6 @@
-/**
- *
- * The Compute Engine is a symbolic computation engine that can be used to
- * manipulate and evaluate mathematical expressions.
- *
- * Use an instance of {@linkcode ComputeEngine} to create boxed expressions
- * with {@linkcode ComputeEngine.parse} and {@linkcode ComputeEngine.box}.
- *
- * Use a {@linkcode BoxedExpression} object to manipulate and evaluate
- * mathematical expressions.
- *
- * @module "compute-engine"
- *
- */
+export type { OneOf } from '../common/one-of';
 
-export { OneOf } from '../common/one-of';
-
-export {
+export type {
   LatexString,
   SerializeLatexOptions,
   NumberSerializationFormat,
@@ -28,7 +13,7 @@ export * from './numeric-value/public';
 export * from '../common/type/boxed-type';
 
 export * from './tensor/tensors';
-export * from './boxed-expression/tensor-fields';
+export * from './tensor/tensor-fields';
 
 export * from './types';
 

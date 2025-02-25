@@ -6,16 +6,19 @@ import {
   TensorField,
   getSupertype,
   makeTensorField,
-} from '../boxed-expression/tensor-fields';
+} from './tensor-fields';
 import type { IComputeEngine } from '../types';
 
+/** @category Tensors */
 export interface TensorData<DT extends keyof DataTypeMap = 'float64'> {
   dtype: DT;
   shape: number[]; // dimension of each axis
   data: DataTypeMap[DT][]; // flattened data, stored in row-major order
 }
 
+/** @internal */
 export type NestedArray<T> = NestedArray_<T>[];
+/** @internal */
 export type NestedArray_<T> = T | NestedArray_<T>[];
 
 // @todo: See also:
@@ -34,6 +37,7 @@ export type NestedArray_<T> = T | NestedArray_<T>[];
 // Has limited support for operations.
 // - Vector: a column vector (1D tensor) of scalars (numbers, boolean, Complex). Has full support for operations.
 // - Matrix: a matrix (2D tensor) of scalars. Has full support for operations.
+/** @category Tensors */
 export abstract class AbstractTensor<DT extends keyof DataTypeMap>
   implements TensorData<DT>
 {
@@ -753,6 +757,7 @@ class GenericTensor extends AbstractTensor<'expression'> {
   }
 }
 
+/** @category Tensors */
 export function makeTensor<T extends TensorDataType>(
   ce: IComputeEngine,
   data:

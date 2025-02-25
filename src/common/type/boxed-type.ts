@@ -3,6 +3,7 @@ import { isSubtype } from './subtype';
 import { typeToString } from './serialize';
 import { parseType } from './parse';
 
+/** @category Type */
 export class BoxedType {
   static unknown = new BoxedType('unknown');
 

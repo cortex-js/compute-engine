@@ -40,6 +40,9 @@
   "excludeExternals": true,
   "sort": ["source-order"],
 
+  // https://github.com/jonchardy/typedoc-plugin-no-inherit/tree/master
+  "inheritNone": true,
+
   // https://typedoc-plugin-markdown.org/options
   "plugin": [
     "typedoc-plugin-no-inherit",
@@ -53,7 +56,10 @@
   "hideBreadcrumbs": true,
   "excludeGroups": true,
   "useCodeBlocks": true,
+  "expandParameters": false, // Don't include type in function signatures
   "parametersFormat": "list", // table | list
   "propertiesFormat": "list", // table | list
-  "typeDeclarationFormat": "list" // table | list
+  "typeDeclarationFormat": "list", // table | list
+  "expandObjects": true,
+  "includeHierarchySummary": false
 }

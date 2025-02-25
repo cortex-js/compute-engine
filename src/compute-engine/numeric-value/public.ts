@@ -28,21 +28,25 @@ import Decimal from 'decimal.js';
 import type { Rational, SmallInteger } from '../numerics/types';
 import { NumericType } from '../../common/type/types';
 
-/** The value is equal to `(decimal * rational * sqrt(radical)) + im * i` */
+/** The value is equal to `(decimal * rational * sqrt(radical)) + im * i`
+ * @category Numerics */
 export type ExactNumericValueData = {
   rational?: Rational; // A rational number, may not be reduced (i.e. 6/8)
   radical?: number; // A square root of an integer, may not be reduced (i.e. 4)
 };
 
+/** @category Numerics */
 export type NumericValueData = {
   re?: Decimal | number; // A floating point number (non-integer)
   im?: number; // The imaginary part of the number
 };
 
+/** @category Numerics */
 export type NumericValueFactory = (
   data: number | Decimal | NumericValueData
 ) => NumericValue;
 
+/** @category Numerics */
 export abstract class NumericValue {
   abstract get type(): NumericType;
 

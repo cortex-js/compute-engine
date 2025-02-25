@@ -11,7 +11,7 @@ import {
   getExpressionDatatype,
   getSupertype,
   makeTensorField,
-} from './tensor-fields';
+} from '../tensor/tensor-fields';
 
 import { NumericValue } from '../numeric-value/public';
 

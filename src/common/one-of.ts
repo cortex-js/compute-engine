@@ -7,6 +7,7 @@ type MergeTypes<TypesArray extends any[], Res = {}> = TypesArray extends [
   ? MergeTypes<Rem, Res & Head>
   : Res;
 
+/** @internal  */
 export type OneOf<
   TypesArray extends any[],
   Res = never,

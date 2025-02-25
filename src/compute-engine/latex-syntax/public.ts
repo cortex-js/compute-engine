@@ -572,6 +572,7 @@ export type LatexDictionary = ReadonlyArray<Partial<LatexDictionaryEntry>>;
 
 /**
  * These options control how numbers are parsed and serialized.
+ * @category Serialization
  */
 export type NumberFormat = {
   positiveInfinity: LatexString;
@@ -643,6 +644,7 @@ export type NumberFormat = {
     | 'none';
 };
 
+/** @category Serialization */
 export type NumberSerializationFormat = NumberFormat & {
   /**
    * The maximum number of significant digits in serialized numbers.

@@ -33,9 +33,20 @@ rm -rf ./temp-docs
 
 npx typedoc --logLevel Warn
 
-# https://github.com/ozum/concat-md
-npx concat-md --decrease-title-levels --dir-name-as-title ./temp-docs > ./src/api.md
+# Rename directories so they can be ordered in the api.md
+rm ./temp-docs/README.md
+mv ./temp-docs/compute-engine ./temp-docs/01 
+mv ./temp-docs/math-json ./temp-docs/02 
+mv ./temp-docs/common ./temp-docs/03
 
-rm -rf ./temp-docs
+# https://github.com/ozum/concat-md
+npx concat-md --decrease-title-levels --dir-name-as-title --hide-anchor-links ./temp-docs > ./src/api.md
+
+# Remove `# 01`, `# 02`, `# 03` from the api.md
+sed -i '' 's/# 01//g' ./src/api.md
+sed -i '' 's/# 02//g' ./src/api.md
+sed -i '' 's/# 03//g' ./src/api.md
+
+#rm -rf ./temp-docs
 
 echo -e $LINECLEAR$BASENAME$CHECK$DIM" Building api.md"

@@ -1,5 +1,3 @@
-/** @module "math-json" */
-
 /** @category MathJSON */
 export type MathJsonAttributes = {
   /** A human readable string to annotate this expression, since JSON does not
@@ -114,6 +112,9 @@ export type MathJsonFunction = {
   fn: [MathJsonIdentifier, ...Expression[]];
 } & MathJsonAttributes;
 
+/**
+ * @category MathJSON
+ */
 export type ExpressionObject =
   | MathJsonNumber
   | MathJsonString

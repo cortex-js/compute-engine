@@ -28,6 +28,8 @@ import { Type, TypeString } from '../common/type/types';
 import { BoxedType } from '../common/type/boxed-type';
 import { MathJsonNumber } from '../math-json/types';
 
+export { BoxedExpression } from './boxed-expression/public';
+
 /** @category Compiling */
 export type CompiledType = boolean | number | string | object;
 
@@ -71,6 +73,7 @@ export interface ComputeEngineStats {
   highwaterMark: number;
 }
 
+/** @category Numerics */
 export type Sign =
   /** The expression is equal to 0 */
   | 'zero'
@@ -614,6 +617,7 @@ export type CanonicalForm =
   | 'Flatten'
   | 'Order';
 
+/** @category Boxed Expression */
 export type CanonicalOptions = boolean | CanonicalForm | CanonicalForm[];
 
 /**
@@ -634,14 +638,14 @@ export type Metadata = {
  * A substitution can also be considered a more constrained version of a
  * rule whose `match` is always a symbol.
 
-* @category Boxed Expression
+* @category Pattern Matching
  */
 export type Substitution<T = SemiBoxedExpression> = {
   [symbol: string]: T;
 };
 
 /**
- * @category Boxed Expression
+ * @category Pattern Matching
  *
  */
 export type BoxedSubstitution = Substitution<BoxedExpression>;

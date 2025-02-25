@@ -1399,25 +1399,28 @@ export type SemiBoxedExpression =
  *  @category Definitions
  *
  */
-export type EqHandlers = {
+export interface EqHandlers {
   eq: (a: BoxedExpression, b: BoxedExpression) => boolean | undefined;
   neq: (a: BoxedExpression, b: BoxedExpression) => boolean | undefined;
-};
+}
 
 /** @category Definitions */
 export type Hold = 'none' | 'all' | 'first' | 'rest' | 'last' | 'most';
+
+/** @category Rules */
 
 export function isRuleStep(x: any): x is RuleStep {
   return x && typeof x === 'object' && 'because' in x && 'value' in x;
 }
 
+/** @category Rules */
 export function isBoxedRule(x: any): x is BoxedRule {
   return x && typeof x === 'object' && x._tag === 'boxed-rule';
 }
 
 /** Options for `BoxedExpression.simplify()`
  *
- * @category Compute Engine
+ * @category Boxed Expression
  */
 export type SimplifyOptions = {
   /**
@@ -1436,18 +1439,18 @@ export type SimplifyOptions = {
 };
 
 /** @category Compute Engine */
-export type ArrayValue =
-  | boolean
-  | number
-  | string
-  | BigNum
-  | BoxedExpression
-  | undefined;
+// export type ArrayValue =
+//   | boolean
+//   | number
+//   | string
+//   | BigNum
+//   | BoxedExpression
+//   | undefined;
 
 /**
  * Options to control the serialization to MathJSON when using `BoxedExpression.toMathJson()`.
  *
- * @category Compute Engine
+ * @category Serialization
  */
 export type JsonSerializationOptions = {
   /** If true, the serialization applies some transformations to make

@@ -1,5 +1,3 @@
-/** @module "common" */
-
 /** @category Error Handling */
 export type RuntimeSignalCode =
   | 'timeout'
