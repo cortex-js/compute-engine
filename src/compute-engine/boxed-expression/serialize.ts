@@ -3,8 +3,6 @@ import { Decimal } from 'decimal.js';
 
 import type { Expression } from '../../math-json/types';
 
-import type { BoxedExpression, JsonSerializationOptions } from '../public';
-
 import { Rational } from '../numerics/types';
 import { isInMachineRange } from '../numerics/numeric-bignum';
 import {
@@ -20,7 +18,7 @@ import {
 import { numberToString } from '../numerics/strings';
 import { numberToExpression } from '../numerics/expression';
 
-import { NumericValue } from '../numeric-value/public';
+import { NumericValue } from '../numeric-value/types';
 import { ExactNumericValue } from '../numeric-value/exact-numeric-value';
 
 // eslint-disable-next-line import/no-cycle
@@ -28,7 +26,12 @@ import { Product } from './product';
 
 import { order } from './order';
 import { asSmallInteger } from './numerics';
-import type { IComputeEngine, Metadata } from '../types';
+import type {
+  ComputeEngine,
+  Metadata,
+  BoxedExpression,
+  JsonSerializationOptions,
+} from '../global-types';
 
 function _escapeJsonString(s: undefined): undefined;
 function _escapeJsonString(s: string): string;
@@ -43,7 +46,7 @@ function _escapeJsonString(s: string | undefined): string | undefined {
  *
  */
 function serializeSubtract(
-  ce: IComputeEngine,
+  ce: ComputeEngine,
   a: BoxedExpression,
   b: BoxedExpression,
   options: Readonly<JsonSerializationOptions>,
@@ -84,7 +87,7 @@ function serializeSubtract(
  *  it uses `Divide`  instead of `Multiply`/`Power` when applicable.
  */
 function serializePrettyJsonFunction(
-  ce: IComputeEngine,
+  ce: ComputeEngine,
   name: string,
   args: ReadonlyArray<BoxedExpression>,
   options: Readonly<JsonSerializationOptions>,
@@ -258,7 +261,7 @@ function serializePrettyJsonFunction(
 }
 
 function serializeJsonFunction(
-  ce: IComputeEngine,
+  ce: ComputeEngine,
   name: string,
   args: ReadonlyArray<undefined | BoxedExpression>,
   options: Readonly<JsonSerializationOptions>,
@@ -422,7 +425,7 @@ function serializeJsonString(
 }
 
 function serializeJsonSymbol(
-  ce: IComputeEngine,
+  ce: ComputeEngine,
   sym: string,
   options: Readonly<JsonSerializationOptions>,
   metadata?: Metadata
@@ -526,7 +529,7 @@ function serializeRepeatingDecimals(
 }
 
 function serializeJsonNumber(
-  ce: IComputeEngine,
+  ce: ComputeEngine,
   value: number | bigint | NumericValue | Decimal | Complex | Rational,
   options: Readonly<JsonSerializationOptions>,
   metadata?: Metadata
@@ -774,7 +777,7 @@ function serializeJsonNumber(
 }
 
 export function serializeJson(
-  ce: IComputeEngine,
+  ce: ComputeEngine,
   expr: BoxedExpression,
   options: Readonly<JsonSerializationOptions>
 ): Expression {

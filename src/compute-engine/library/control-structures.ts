@@ -1,14 +1,14 @@
-import { BoxedExpression } from '../public';
 import { applicable } from '../function-utils';
 import { each } from '../collection-utils';
 import { checkConditions } from '../boxed-expression/rules';
 import { widen } from '../../common/type/utils';
 import { CancellationError, run, runAsync } from '../../common/interruptible';
 import type {
+  BoxedExpression,
   IdentifierDefinitions,
   EvaluateOptions,
-  IComputeEngine,
-} from '../types';
+  ComputeEngine,
+} from '../global-types';
 
 export const CONTROL_STRUCTURES_LIBRARY: IdentifierDefinitions[] = [
   {
@@ -84,7 +84,7 @@ export const CONTROL_STRUCTURES_LIBRARY: IdentifierDefinitions[] = [
 
 function evaluateWhich(
   args: ReadonlyArray<BoxedExpression>,
-  options: EvaluateOptions & { engine: IComputeEngine }
+  options: EvaluateOptions & { engine: ComputeEngine }
 ): BoxedExpression {
   let i = 0;
   while (i < args.length - 1) {
@@ -137,7 +137,7 @@ function evaluateBlock(
 
 function canonicalBlock(
   ops: ReadonlyArray<BoxedExpression>,
-  options: { engine: IComputeEngine }
+  options: { engine: ComputeEngine }
 ): BoxedExpression | null {
   const { engine: ce } = options;
   // Empty block?
@@ -170,7 +170,7 @@ function invalidateDeclare(expr: BoxedExpression): BoxedExpression {
 function* runLoop(
   body: BoxedExpression,
   collection: BoxedExpression,
-  ce: IComputeEngine
+  ce: ComputeEngine
 ): Generator<BoxedExpression> {
   body ??= ce.Nothing;
   if (body.symbol === 'Nothing') return body;

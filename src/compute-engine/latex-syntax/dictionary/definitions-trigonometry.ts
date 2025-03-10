@@ -5,7 +5,7 @@ import {
   MULTIPLICATION_PRECEDENCE,
   Parser,
   Terminator,
-} from '../public';
+} from '../types';
 
 /**
  * Trigonometric functions have some special conventions that require a

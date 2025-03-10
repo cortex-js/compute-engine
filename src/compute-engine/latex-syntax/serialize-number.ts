@@ -1,5 +1,5 @@
 import { Expression } from '../../math-json/types';
-import { NumberFormat, NumberSerializationFormat } from './public';
+import { NumberFormat, NumberSerializationFormat } from './types';
 
 // Some vocabulary:
 // 123.456e78

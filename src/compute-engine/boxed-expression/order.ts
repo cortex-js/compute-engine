@@ -1,4 +1,4 @@
-import type { BoxedExpression } from './public';
+import type { BoxedExpression } from '../global-types';
 
 import { maxDegree, revlex, totalDegree } from './polynomials';
 import { asRadical } from './arithmetic-power';

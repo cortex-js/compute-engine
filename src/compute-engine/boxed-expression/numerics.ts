@@ -1,14 +1,14 @@
-import Decimal from 'decimal.js';
+import { Decimal } from 'decimal.js';
 
 import type { Rational } from '../numerics/types';
 
-import type { BoxedExpression } from './public';
+import type { BoxedExpression } from '../global-types';
 
-import { SMALL_INTEGER, chop } from '../numerics/numeric';
+import { SMALL_INTEGER } from '../numerics/numeric';
 import { bigint } from '../numerics/bigint';
 
 import { ExactNumericValue } from '../numeric-value/exact-numeric-value';
-import { NumericValue } from '../numeric-value/public';
+import { NumericValue } from '../numeric-value/types';
 
 export function asRational(expr: BoxedExpression): Rational | undefined {
   const num = expr.numericValue;

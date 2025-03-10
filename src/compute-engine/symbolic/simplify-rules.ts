@@ -3,9 +3,9 @@ import {
   isConstructible,
   processInverseFunction,
 } from '../boxed-expression/trigonometry';
-import { mul } from '../boxed-expression/arithmetic-multiply';
+import { mul } from '../boxed-expression/arithmetic-mul-div';
 import { simplifyLogicFunction } from '../library/logic';
-import { BoxedExpression } from '../public';
+import type { BoxedExpression, Rule, RuleStep } from '../global-types';
 import { expand } from '../boxed-expression/expand';
 import {
   isEquation,
@@ -15,8 +15,7 @@ import {
 import { factor } from '../boxed-expression/factor';
 import { add } from '../boxed-expression/arithmetic-add';
 import { SMALL_INTEGER } from '../numerics/numeric';
-import { NumericValue } from '../numeric-value/public';
-import type { Rule, RuleStep } from '../types';
+import { NumericValue } from '../numeric-value/types';
 
 /**
  * @todo: a set to "tidy" an expression. Different from a canonical form, but

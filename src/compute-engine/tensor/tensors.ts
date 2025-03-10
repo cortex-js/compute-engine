@@ -1,20 +1,12 @@
 import { Complex } from 'complex-esm';
-import type { BoxedExpression } from '../public';
+import { TensorField, getSupertype, makeTensorField } from './tensor-fields';
 import {
+  BoxedExpression,
+  ComputeEngine,
   DataTypeMap,
+  TensorData,
   TensorDataType,
-  TensorField,
-  getSupertype,
-  makeTensorField,
-} from './tensor-fields';
-import type { IComputeEngine } from '../types';
-
-/** @category Tensors */
-export interface TensorData<DT extends keyof DataTypeMap = 'float64'> {
-  dtype: DT;
-  shape: number[]; // dimension of each axis
-  data: DataTypeMap[DT][]; // flattened data, stored in row-major order
-}
+} from '../global-types';
 
 /** @internal */
 export type NestedArray<T> = NestedArray_<T>[];
@@ -101,7 +93,12 @@ export abstract class AbstractTensor<DT extends keyof DataTypeMap>
     // Broadcast the data
     const data = lhs_.data.map((v, i) => fn(v, rhs_.data[i]));
 
-    return makeTensor(lhs_.ce, { dtype: lhs_.dtype, shape: lhs_.shape, data });
+    return makeTensor(lhs_.ce, {
+      dtype: lhs_.dtype,
+      shape: lhs_.shape,
+      rank: lhs_.rank,
+      data,
+    });
   }
 
   // The arithmetic operations that can be performed on the
@@ -114,7 +111,7 @@ export abstract class AbstractTensor<DT extends keyof DataTypeMap>
   private readonly _strides: number[];
 
   constructor(
-    private ce: IComputeEngine,
+    private ce: ComputeEngine,
     tensorData: TensorData<DT>
   ) {
     this.shape = tensorData.shape;
@@ -367,6 +364,7 @@ export abstract class AbstractTensor<DT extends keyof DataTypeMap>
     return makeTensor(this.ce, {
       dtype: this.dtype,
       shape,
+      rank: shape.length,
       data: this.data,
     });
   }
@@ -381,6 +379,7 @@ export abstract class AbstractTensor<DT extends keyof DataTypeMap>
     return makeTensor(this.ce, {
       dtype,
       shape: this.shape,
+      rank: this.rank,
       data: data as DataTypeMap[DT][],
     });
   }
@@ -422,6 +421,7 @@ export abstract class AbstractTensor<DT extends keyof DataTypeMap>
     return makeTensor(this.ce, {
       dtype: this.dtype,
       shape: [n, m],
+      rank: 2,
       data: result,
     });
   }
@@ -532,6 +532,7 @@ export abstract class AbstractTensor<DT extends keyof DataTypeMap>
       return makeTensor(this.ce, {
         dtype: this.dtype,
         shape: [n, n],
+        rank: 2,
         data: inverseData,
       });
     }
@@ -598,6 +599,7 @@ export abstract class AbstractTensor<DT extends keyof DataTypeMap>
     return makeTensor(this.ce, {
       dtype: this.dtype,
       shape: [n, n],
+      rank: 2,
       data: inverseData,
     });
   }
@@ -628,6 +630,7 @@ export abstract class AbstractTensor<DT extends keyof DataTypeMap>
     return makeTensor(this.ce, {
       dtype: this.dtype,
       shape: this.shape,
+      rank: this.rank,
       data: this.data.map((v) => fn(v, scalar)),
     });
   }
@@ -640,6 +643,7 @@ export abstract class AbstractTensor<DT extends keyof DataTypeMap>
     return makeTensor(this.ce, {
       dtype: this.dtype,
       shape: this.shape,
+      rank: this.rank,
       data: this.data.map((v, i) => fn(v, rhsData[i])),
     });
   }
@@ -717,7 +721,7 @@ class NumberTensor extends AbstractTensor<'float64'> {
   readonly dtype = 'float64' as const;
   readonly data: number[];
 
-  constructor(ce: IComputeEngine, data: TensorData<'float64'>) {
+  constructor(ce: ComputeEngine, data: TensorData<'float64'>) {
     super(ce, data);
     this.data = data.data as number[];
   }
@@ -731,7 +735,7 @@ class ComplexTensor extends AbstractTensor<'complex128'> {
   readonly dtype = 'complex128' as const;
   readonly data: Complex[];
 
-  constructor(ce: IComputeEngine, data: TensorData<'complex128'>) {
+  constructor(ce: ComputeEngine, data: TensorData<'complex128'>) {
     super(ce, data);
     this.data = data.data as Complex[];
   }
@@ -741,7 +745,7 @@ class BooleanTensor extends AbstractTensor<'bool'> {
   readonly dtype = 'bool' as const;
   readonly data: boolean[];
 
-  constructor(ce: IComputeEngine, data: TensorData<'bool'>) {
+  constructor(ce: ComputeEngine, data: TensorData<'bool'>) {
     super(ce, data);
     this.data = data.data as boolean[];
   }
@@ -751,7 +755,7 @@ class GenericTensor extends AbstractTensor<'expression'> {
   readonly dtype = 'expression' as const;
   readonly data: BoxedExpression[];
 
-  constructor(ce: IComputeEngine, data: TensorData<'expression'>) {
+  constructor(ce: ComputeEngine, data: TensorData<'expression'>) {
     super(ce, data);
     this.data = data.data as BoxedExpression[];
   }
@@ -759,7 +763,7 @@ class GenericTensor extends AbstractTensor<'expression'> {
 
 /** @category Tensors */
 export function makeTensor<T extends TensorDataType>(
-  ce: IComputeEngine,
+  ce: ComputeEngine,
   data:
     | TensorData<T>
     | { operator: string; ops: BoxedExpression[]; dtype: T; shape: number[] }
@@ -794,6 +798,7 @@ export function makeTensor<T extends TensorDataType>(
   ) as AbstractTensor<T>;
 }
 
+export { TensorData };
 // 0 -> scalar
 // 1 -> vector
 // 2 -> 2D matrix

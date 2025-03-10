@@ -1,4 +1,4 @@
-import Decimal from 'decimal.js';
+import { Decimal } from 'decimal.js';
 
 type IsInteger<N extends number> = `${N}` extends `${string}.${string}`
   ? never

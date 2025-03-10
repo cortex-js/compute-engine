@@ -1,6 +1,6 @@
 import { Expression } from '../../../math-json';
 import { stringValue, operands, operand } from '../../../math-json/utils';
-import { LatexDictionary, Parser, Serializer } from '../public';
+import { LatexDictionary, Parser, Serializer } from '../types';
 import { joinLatex } from '../tokenizer';
 import { DELIMITERS_SHORTHAND } from './definitions-core';
 

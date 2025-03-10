@@ -1,5 +1,4 @@
-import type { BoxedExpression } from '../public';
-import type { IComputeEngine } from '../types';
+import type { BoxedExpression, ComputeEngine } from '../global-types';
 import { add } from './arithmetic-add';
 import { order } from './order';
 
@@ -61,7 +60,7 @@ export function negate(expr: BoxedExpression): BoxedExpression {
 // 2/ negative constants over positive ones
 // 3/ `Negate` expressions
 export function negateProduct(
-  ce: IComputeEngine,
+  ce: ComputeEngine,
   args: ReadonlyArray<BoxedExpression>
 ): BoxedExpression {
   if (args.length === 0) return ce.NegativeOne;

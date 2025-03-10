@@ -1,4 +1,4 @@
-import Decimal from 'decimal.js';
+import { Decimal } from 'decimal.js';
 
 import { Rational, SmallInteger } from '../numerics/types';
 import { canonicalInteger, gcd, SMALL_INTEGER } from '../numerics/numeric';
@@ -17,14 +17,14 @@ import {
   rationalGcd,
 } from '../numerics/rationals';
 import {
+  BigNumFactory,
   ExactNumericValueData,
   NumericValue,
   NumericValueFactory,
-} from './public';
+} from './types';
 import { Expression } from '../../math-json/types';
 import { numberToExpression } from '../numerics/expression';
 import { numberToString } from '../numerics/strings';
-import { BigNumFactory } from './big-numeric-value';
 import { NumericType } from '../../common/type/types';
 import { isSubtype } from '../../common/type/subtype';
 

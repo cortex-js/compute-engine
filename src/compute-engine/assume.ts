@@ -1,12 +1,11 @@
-import { BoxedExpression } from './public';
-
 import { isSubtype } from '../common/type/subtype';
 import { functionResult } from '../common/type/utils';
+import { BoxedType } from '../common/type/boxed-type';
+
+import { AssumeResult, BoxedExpression, ComputeEngine } from './global-types';
 
 import { findUnivariateRoots } from './boxed-expression/solve';
 import { isInequality, domainToType } from './boxed-expression/utils';
-import { BoxedType } from '../common/type/boxed-type';
-import type { AssumeResult, IComputeEngine } from './types';
 
 /**
  * Add an assumption, in the form of a predicate, for example:
@@ -296,7 +295,7 @@ function assumeElement(proposition: BoxedExpression): AssumeResult {
   return 'not-a-predicate';
 }
 
-function hasDef(ce: IComputeEngine, s: string): boolean {
+function hasDef(ce: ComputeEngine, s: string): boolean {
   return (ce.lookupSymbol(s) ?? ce.lookupFunction(s)) !== undefined;
 }
 
@@ -304,7 +303,7 @@ function undefinedIdentifiers(expr: BoxedExpression): string[] {
   return expr.symbols.filter((x) => !hasDef(expr.engine, x));
 }
 
-function hasValue(ce: IComputeEngine, s: string): boolean {
+function hasValue(ce: ComputeEngine, s: string): boolean {
   if (ce.lookupFunction(s)) return false;
   return ce.lookupSymbol(s)?.value !== undefined;
 }

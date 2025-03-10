@@ -1,4 +1,4 @@
-import type { BoxedExpression } from '../public';
+import type { BoxedExpression } from '../global-types';
 import { asSmallInteger } from './numerics';
 
 /**

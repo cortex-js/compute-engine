@@ -3,14 +3,16 @@ import type {
   FunctionDefinition,
   SemiBoxedExpression,
   SymbolDefinition,
-} from './public';
+  NumericFlags,
+  ComputeEngine,
+} from '../global-types';
 
 import { joinLatex } from '../latex-syntax/tokenizer';
 import { DEFINITIONS_INEQUALITIES } from '../latex-syntax/dictionary/definitions-relational-operators';
 
 import { MACHINE_PRECISION } from '../numerics/numeric';
 import { Type } from '../../common/type/types';
-import type { IComputeEngine, NumericFlags } from '../types';
+import { NumericValue } from '../types';
 
 export function isBoxedExpression(x: unknown): x is BoxedExpression {
   return typeof x === 'object' && x !== null && 'engine' in x;
@@ -20,7 +22,7 @@ export function isBoxedExpression(x: unknown): x is BoxedExpression {
  * For any numeric result, if `bignumPreferred()` is true, calculate using
  * bignums. If `bignumPreferred()` is false, calculate using machine numbers
  */
-export function bignumPreferred(ce: IComputeEngine): boolean {
+export function bignumPreferred(ce: ComputeEngine): boolean {
   return ce.precision > MACHINE_PRECISION;
 }
 
@@ -250,7 +252,7 @@ export function isFunctionDefinition(def: any): def is FunctionDefinition {
 }
 
 export function semiCanonical(
-  ce: IComputeEngine,
+  ce: ComputeEngine,
   xs: ReadonlyArray<SemiBoxedExpression>
 ): ReadonlyArray<BoxedExpression> {
   if (!xs.every((x) => isBoxedExpression(x))) return xs.map((x) => ce.box(x));
@@ -264,7 +266,7 @@ export function semiCanonical(
 }
 
 export function canonical(
-  ce: IComputeEngine,
+  ce: ComputeEngine,
   xs: ReadonlyArray<SemiBoxedExpression>
 ): ReadonlyArray<BoxedExpression> {
   // Avoid memory allocation if possible
@@ -283,4 +285,89 @@ export function domainToType(expr: BoxedExpression): Type {
   if (expr.symbol === 'RationalNumbers') return 'rational';
   if (expr.symbol === 'Integers') return 'integer';
   return 'unknown';
+}
+
+function angleToRadians(
+  x: BoxedExpression | undefined
+): BoxedExpression | undefined {
+  if (!x) return x;
+  const ce = x.engine;
+  const angularUnit = ce.angularUnit;
+  if (angularUnit === 'rad') return x;
+
+  if (angularUnit === 'deg') x = x.mul(ce.Pi).div(180);
+  if (angularUnit === 'grad') x = x.mul(ce.Pi).div(200);
+  if (angularUnit === 'turn') x = x.mul(ce.Pi).mul(2);
+  return x;
+}
+
+/**
+ * Return the angle in the range [0, 2π) that is equivalent to the given angle.
+ *
+ * @param x
+ * @returns
+ */
+export function canonicalAngle(
+  x: BoxedExpression | undefined
+): BoxedExpression | undefined {
+  if (!x) return x;
+  const theta = angleToRadians(x);
+  if (!theta) return undefined;
+
+  if (theta.N().im !== 0) return theta;
+
+  const ce = theta.engine;
+
+  // Get k, t such that theta = k * π + t
+  const [k, t] = getPiTerm(theta);
+
+  if (k.isZero) return ce.number(t);
+
+  const k2 = ce._numericValue(k.bignumRe ? k.bignumRe.mod(2) : k.re % 2);
+  return ce.number(t.add(ce.Pi.mul(k2).N().numericValue!));
+}
+
+/*
+ * Return k and t such that expr = k * pi + t.
+ * If no pi factor is found, or k or t are not numeric values, return [0, 0].
+ */
+export function getPiTerm(
+  expr: BoxedExpression
+): [k: NumericValue, t: NumericValue] {
+  const ce = expr.engine;
+  if (expr.symbol === 'Pi') return [ce._numericValue(1), ce._numericValue(0)];
+
+  if (expr.operator === 'Negate') {
+    const [k, t] = getPiTerm(expr.ops![0]);
+    return [k.neg(), t.neg()];
+  }
+
+  if (expr.operator === 'Add' && expr.nops === 2) {
+    const [k1, t1] = getPiTerm(expr.op1);
+    const [k2, t2] = getPiTerm(expr.op2);
+    return [k1.add(k2), t1.add(t2)];
+  }
+
+  if (expr.operator === 'Multiply' && expr.nops === 2) {
+    if (expr.op1.isNumberLiteral) {
+      const [k, t] = getPiTerm(expr.op2);
+      const n = expr.op1.numericValue!;
+      return [k.mul(n), t.mul(n)];
+    }
+    if (expr.op2.isNumberLiteral) {
+      const [k, t] = getPiTerm(expr.op1);
+      const n = expr.op2.numericValue!;
+      return [k.mul(n), t.mul(n)];
+    }
+  }
+
+  if (expr.operator === 'Divide') {
+    if (expr.op2.isNumberLiteral) {
+      const [k1, t1] = getPiTerm(expr.op1);
+      const d = expr.op2.numericValue!;
+      return [k1.div(d), t1.div(d)];
+    }
+  }
+
+  return [ce._numericValue(0), ce._numericValue(expr.N().numericValue ?? 0)];
 }

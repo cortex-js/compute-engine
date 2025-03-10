@@ -1,30 +1,25 @@
 import type { Expression } from '../../math-json/types';
 
-import {
-  BoxedExpression,
-  ReplaceOptions,
-  isRuleStep,
-  isBoxedRule,
-  SemiBoxedExpression,
-} from '../public';
-
 import { asLatexString, isInequality, isRelationalOperator } from './utils';
 
-import { Parser } from '../latex-syntax/public';
+import { Parser } from '../latex-syntax/types';
 
 import { isPrime } from '../library/arithmetic';
 import type {
   BoxedRule,
   BoxedRuleSet,
   BoxedSubstitution,
-  IComputeEngine,
+  ComputeEngine,
   Rule,
   RuleConditionFunction,
   RuleFunction,
   RuleReplaceFunction,
   RuleStep,
   RuleSteps,
-} from '../types';
+  BoxedExpression,
+  ReplaceOptions,
+  SemiBoxedExpression,
+} from '../global-types';
 
 // @todo:
 // export function fixPoint(rule: Rule);
@@ -337,7 +332,7 @@ function parseModifierExpression(parser: Parser): string | null {
  or MathJSOn expression
  */
 function parseRulePart(
-  ce: IComputeEngine,
+  ce: ComputeEngine,
   rule?: string | SemiBoxedExpression | RuleReplaceFunction | RuleFunction,
   options?: { canonical?: boolean }
 ): BoxedExpression | undefined {
@@ -362,7 +357,7 @@ function parseRulePart(
  * where `<match>`, `<replace>` and `<condition>` are LaTeX expressions.
  */
 function parseRule(
-  ce: IComputeEngine,
+  ce: ComputeEngine,
   rule: string,
   options?: { canonical?: boolean }
 ): BoxedRule {
@@ -527,7 +522,7 @@ function parseRule(
 }
 
 function boxRule(
-  ce: IComputeEngine,
+  ce: ComputeEngine,
   rule: Rule | BoxedRule,
   options?: { canonical?: boolean }
 ): BoxedRule {
@@ -572,7 +567,7 @@ function boxRule(
 
       // Substitute any unbound vars in the condition to a wildcard,
       // then evaluate the condition
-      condFn = (x: BoxedSubstitution, _ce: IComputeEngine): boolean =>
+      condFn = (x: BoxedSubstitution, _ce: ComputeEngine): boolean =>
         condPattern.subs(x).evaluate()?.symbol === 'True';
     }
   } else {
@@ -643,7 +638,7 @@ function boxRule(
  * Create a boxed rule set from a collection of non-boxed rules
  */
 export function boxRules(
-  ce: IComputeEngine,
+  ce: ComputeEngine,
   rs: Rule | ReadonlyArray<Rule | BoxedRule> | BoxedRuleSet | undefined | null,
   options?: { canonical?: boolean }
 ): BoxedRuleSet {
@@ -873,4 +868,15 @@ function includesWildcards(a: BoxedExpression, b: BoxedExpression): boolean {
   const awc = getWildcards(a);
   const bwc = getWildcards(b);
   return awc.every((x) => bwc.includes(x));
+}
+
+/** @category Rules */
+
+function isRuleStep(x: any): x is RuleStep {
+  return x && typeof x === 'object' && 'because' in x && 'value' in x;
+}
+
+/** @category Rules */
+function isBoxedRule(x: any): x is BoxedRule {
+  return x && typeof x === 'object' && x._tag === 'boxed-rule';
 }

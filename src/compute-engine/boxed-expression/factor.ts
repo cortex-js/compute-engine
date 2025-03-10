@@ -1,12 +1,12 @@
-import type { BoxedExpression } from './public';
+import type { BoxedExpression } from '../global-types';
 
 import { isRelationalOperator } from './utils';
 
 import { Product, commonTerms } from './product';
 
-import { NumericValue } from '../numeric-value/public';
+import { NumericValue } from '../numeric-value/types';
 
-import { mul } from './arithmetic-multiply';
+import { mul } from './arithmetic-mul-div';
 import { add } from './arithmetic-add';
 
 /** Combine rational expressions into a single fraction */
@@ -99,49 +99,4 @@ export function factor(expr: BoxedExpression): BoxedExpression {
   }
 
   return Product.from(together(expr)).asExpression();
-}
-
-/*
- * Return k and t such that expr = k * pi + t.
- * If no pi factor is found, or k or t are not numeric values, return [0, 0].
- */
-export function getPiTerm(
-  expr: BoxedExpression
-): [k: NumericValue, t: NumericValue] {
-  const ce = expr.engine;
-  if (expr.symbol === 'Pi') return [ce._numericValue(1), ce._numericValue(0)];
-
-  if (expr.operator === 'Negate') {
-    const [k, t] = getPiTerm(expr.ops![0]);
-    return [k.neg(), t.neg()];
-  }
-
-  if (expr.operator === 'Add' && expr.nops === 2) {
-    const [k1, t1] = getPiTerm(expr.op1);
-    const [k2, t2] = getPiTerm(expr.op2);
-    return [k1.add(k2), t1.add(t2)];
-  }
-
-  if (expr.operator === 'Multiply' && expr.nops === 2) {
-    if (expr.op1.isNumberLiteral) {
-      const [k, t] = getPiTerm(expr.op2);
-      const n = expr.op1.numericValue!;
-      return [k.mul(n), t.mul(n)];
-    }
-    if (expr.op2.isNumberLiteral) {
-      const [k, t] = getPiTerm(expr.op1);
-      const n = expr.op2.numericValue!;
-      return [k.mul(n), t.mul(n)];
-    }
-  }
-
-  if (expr.operator === 'Divide') {
-    if (expr.op2.isNumberLiteral) {
-      const [k1, t1] = getPiTerm(expr.op1);
-      const d = expr.op2.numericValue!;
-      return [k1.div(d), t1.div(d)];
-    }
-  }
-
-  return [ce._numericValue(0), ce._numericValue(expr.N().numericValue ?? 0)];
 }

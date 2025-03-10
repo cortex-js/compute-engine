@@ -10,8 +10,12 @@ import {
   isFiniteIndexableCollection,
   MAX_SIZE_EAGER_COLLECTION,
 } from '../collection-utils';
-import { BoxedExpression, SymbolDefinition } from '../public';
-import type { IdentifierDefinitions, IComputeEngine } from '../types';
+import type {
+  BoxedExpression,
+  SymbolDefinition,
+  IdentifierDefinitions,
+  ComputeEngine,
+} from '../global-types';
 
 export const SETS_LIBRARY: IdentifierDefinitions = {
   //
@@ -660,7 +664,7 @@ function subset(
 
 function union(
   ops: ReadonlyArray<BoxedExpression>,
-  { engine: ce }: { engine: IComputeEngine }
+  { engine: ce }: { engine: ComputeEngine }
 ): BoxedExpression | undefined {
   // ops should be collections. If there are scalars, convert them to singleton sets
   const xs = ops.map((op) => (op.isCollection ? op : ce.function('Set', [op])));
@@ -681,7 +685,7 @@ function union(
 
 function intersection(
   ops: ReadonlyArray<BoxedExpression>,
-  { engine: ce }: { engine: IComputeEngine }
+  { engine: ce }: { engine: ComputeEngine }
 ): BoxedExpression {
   // @fixme: need to account for eager/lazy collections. See Union
   let elements: BoxedExpression[] = [...(ops[0].ops ?? [])];
@@ -704,14 +708,14 @@ function intersection(
 
 function setMinus(
   _ops: BoxedExpression[],
-  { engine: ce }: { engine: IComputeEngine }
+  { engine: ce }: { engine: ComputeEngine }
 ): BoxedExpression {
   return ce.symbol('EmptySet');
 }
 
 function cartesianProduct(
   _ops: BoxedExpression[],
-  { engine: ce }: { engine: IComputeEngine }
+  { engine: ce }: { engine: ComputeEngine }
 ): BoxedExpression {
   return ce.symbol('EmptySet');
 }

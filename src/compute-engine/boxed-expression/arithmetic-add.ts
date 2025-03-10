@@ -1,4 +1,3 @@
-import type { BoxedExpression } from '../public';
 import { getImaginaryFactor } from './utils';
 import { isIndexableCollection } from '../collection-utils';
 
@@ -9,7 +8,7 @@ import { Type } from '../../common/type/types';
 import { widen } from '../../common/type/utils';
 import { isSubtype } from '../../common/type/subtype';
 import { BoxedType } from '../../common/type/boxed-type';
-import type { IComputeEngine } from '../types';
+import type { BoxedExpression, ComputeEngine } from '../global-types';
 
 /**
  *
@@ -21,7 +20,7 @@ import type { IComputeEngine } from '../types';
  *
  */
 export function canonicalAdd(
-  ce: IComputeEngine,
+  ce: ComputeEngine,
   ops: ReadonlyArray<BoxedExpression>
 ): BoxedExpression {
   // Make canonical, flatten, and lift nested expressions (associative)

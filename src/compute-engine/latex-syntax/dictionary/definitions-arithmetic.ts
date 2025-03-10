@@ -25,7 +25,7 @@ import {
   POSTFIX_PRECEDENCE,
   COMPARISON_PRECEDENCE,
   EXPONENTIATION_PRECEDENCE,
-} from '../public';
+} from '../types';
 import { latexTemplate } from '../serializer-style';
 import { joinLatex, supsub } from '../tokenizer';
 

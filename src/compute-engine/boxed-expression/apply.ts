@@ -1,7 +1,7 @@
 import { Complex } from 'complex-esm';
 import { Decimal } from 'decimal.js';
 
-import type { BoxedExpression } from '../public';
+import type { BoxedExpression } from '../global-types';
 
 import { bignumPreferred } from './utils';
 

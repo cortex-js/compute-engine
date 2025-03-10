@@ -3,17 +3,27 @@ import type {
   SimplifyOptions,
   ReplaceOptions,
   PatternMatchOptions,
-} from '../public';
-
-import type { BoxedExpression } from './public';
+  BoxedExpression,
+  BoxedBaseDefinition,
+  BoxedFunctionDefinition,
+  BoxedRuleSet,
+  BoxedSubstitution,
+  CanonicalOptions,
+  EvaluateOptions,
+  ComputeEngine,
+  Metadata,
+  Rule,
+  RuntimeScope,
+  Sign,
+  Substitution,
+} from '../global-types';
 
 import { findUnivariateRoots } from './solve';
 import { replace } from './rules';
 import { negate } from './negate';
 import { Product } from './product';
 import { simplify } from './simplify';
-import { canonicalMultiply, mul } from './arithmetic-multiply';
-import { div } from './arithmetic-divide';
+import { canonicalMultiply, mul, div } from './arithmetic-mul-div';
 import { add } from './arithmetic-add';
 import { pow } from './arithmetic-power';
 
@@ -21,7 +31,7 @@ import { asSmallInteger } from './numerics';
 
 import { isFiniteIndexableCollection, zip } from '../collection-utils';
 
-import { NumericValue } from '../numeric-value/public';
+import { NumericValue } from '../numeric-value/types';
 
 import { _BoxedExpression } from './abstract-boxed-expression';
 import { DEFAULT_COMPLEXITY, sortOperands } from './order';
@@ -46,20 +56,6 @@ import {
 } from './sgn';
 import { cachedValue, CachedValue, cachedValueAsync } from './cache';
 import { BoxedType } from '../../common/type/boxed-type';
-import type {
-  BoxedBaseDefinition,
-  BoxedFunctionDefinition,
-  BoxedRuleSet,
-  BoxedSubstitution,
-  CanonicalOptions,
-  EvaluateOptions,
-  IComputeEngine,
-  Metadata,
-  Rule,
-  RuntimeScope,
-  Sign,
-  Substitution,
-} from '../types';
 
 /**
  * A boxed function represent an expression that can be represented by a
@@ -116,7 +112,7 @@ export class BoxedFunction extends _BoxedExpression {
   };
 
   constructor(
-    ce: IComputeEngine,
+    ce: ComputeEngine,
     name: string,
     ops: ReadonlyArray<BoxedExpression>,
     options?: {
@@ -1142,7 +1138,7 @@ function type(expr: BoxedFunction): Type | undefined {
   return 'function';
 }
 
-function withDeadline<T>(engine: IComputeEngine, fn: () => T): () => T {
+function withDeadline<T>(engine: ComputeEngine, fn: () => T): () => T {
   return () => {
     if (engine._deadline === undefined) {
       engine._deadline = Date.now() + engine.timeLimit;
@@ -1159,7 +1155,7 @@ function withDeadline<T>(engine: IComputeEngine, fn: () => T): () => T {
 }
 
 function withDeadlineAsync<T>(
-  engine: IComputeEngine,
+  engine: ComputeEngine,
   fn: () => Promise<T>
 ): () => Promise<T> {
   return async () => {

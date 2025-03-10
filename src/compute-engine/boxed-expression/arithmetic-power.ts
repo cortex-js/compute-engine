@@ -1,9 +1,8 @@
-import type { BoxedExpression } from '../public';
+import type { BoxedExpression } from '../global-types';
 import { asRational } from './numerics';
 
 import type { Rational } from '../numerics/types';
-import { canonicalAngle } from './trigonometry';
-import { getImaginaryFactor } from './utils';
+import { canonicalAngle, getImaginaryFactor } from './utils';
 import { apply, apply2 } from './apply';
 import { SMALL_INTEGER } from '../numerics/numeric';
 

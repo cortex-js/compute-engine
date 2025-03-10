@@ -8,7 +8,7 @@ export * from './math-json/types';
 //
 // 1/ Compute Engine
 //
-export { ComputeEngine } from './compute-engine/compute-engine';
+export { ComputeEngine } from './compute-engine';
 
 //
 // 2/ The Cortex language

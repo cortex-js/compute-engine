@@ -13,7 +13,7 @@ import { splitGraphemes } from '../common/grapheme-splitter';
 import {
   COMPARISON_PRECEDENCE,
   NumberSerializationFormat,
-} from '../compute-engine/latex-syntax/public';
+} from '../compute-engine/latex-syntax/types';
 import { Expression } from '../math-json/types';
 import {
   serializeHexFloat,

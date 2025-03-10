@@ -8,7 +8,7 @@ import {
   subs,
   symbol,
 } from '../../../math-json/utils';
-import { LatexDictionary, Parser, Serializer } from '../public';
+import { LatexDictionary, Parser, Serializer } from '../types';
 import { joinLatex } from '../tokenizer';
 
 // See https://de.wikipedia.org/wiki/Formelsatz

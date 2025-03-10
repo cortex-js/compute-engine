@@ -1,5 +1,6 @@
-import { NumericValue } from '../numeric-value/public';
-import { BoxedExpression } from './public';
+import { NumericValue } from '../numeric-value/types';
+import type { BoxedExpression } from '../global-types';
+import { AbstractTensor } from '../tensor/tensors';
 
 /**
  * Structural equality of boxed expressions.
@@ -49,7 +50,9 @@ export function same(a: BoxedExpression, b: BoxedExpression): boolean {
     if (a.rank !== b.rank) return false;
     for (let i = 0; i < a.rank; i++)
       if (a.shape[i] !== b.shape[i]) return false;
-    return a.tensor!.equals(b.tensor!);
+    return (a.tensor! as AbstractTensor<any>).equals(
+      b.tensor! as AbstractTensor<any>
+    );
   }
 
   return false;
@@ -266,7 +269,10 @@ export function cmp(
   //
   if (a.tensor) {
     if (!b.tensor) return undefined;
-    if (a.tensor.equals(b.tensor)) return '=';
+    if (
+      (a.tensor as AbstractTensor<any>).equals(b.tensor as AbstractTensor<any>)
+    )
+      return '=';
     return undefined;
   }
 

@@ -1,4 +1,4 @@
-import type { IComputeEngine } from '../types';
+import type { ComputeEngine } from '../global-types';
 import type { BigNum } from './types';
 
 const gammaG = 7;
@@ -136,7 +136,7 @@ export function erf(x: number): number {
 }
 
 // Spouge approximation (suitable for large arguments)
-export function bigGammaln(ce: IComputeEngine, z: BigNum): BigNum {
+export function bigGammaln(ce: ComputeEngine, z: BigNum): BigNum {
   if (z.isNegative()) return ce._BIGNUM_NAN;
 
   const GAMMA_P_LN = ce.cache<BigNum[]>('gamma-p-ln', () => {
@@ -178,7 +178,7 @@ export function bigGammaln(ce: IComputeEngine, z: BigNum): BigNum {
 }
 
 // From https://github.com/substack/gamma.js/blob/master/index.js
-export function bigGamma(ce: IComputeEngine, z: BigNum): BigNum {
+export function bigGamma(ce: ComputeEngine, z: BigNum): BigNum {
   if (z.lessThan(ce._BIGNUM_HALF)) {
     const pi = ce._BIGNUM_NEGATIVE_ONE.acos();
     return pi.div(

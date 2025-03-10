@@ -16,7 +16,7 @@ import {
   SerializeLatexOptions,
   DelimiterScale,
   ADDITION_PRECEDENCE,
-} from './public';
+} from './types';
 
 import type {
   IndexedLatexDictionary,

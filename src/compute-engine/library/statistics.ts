@@ -1,8 +1,6 @@
 import { each, isFiniteCollection } from '../collection-utils';
 import { erf, erfInv } from '../numerics/special-functions';
-import type { BoxedExpression } from '../public';
 import { choose } from '../boxed-expression/expand';
-import { bignumPreferred } from '../private';
 import {
   bigInterquartileRange,
   bigKurtosis,
@@ -23,7 +21,8 @@ import {
   skewness,
   variance,
 } from '../numerics/statistics';
-import type { IdentifierDefinitions } from '../types';
+import type { BoxedExpression, IdentifierDefinitions } from '../global-types';
+import { bignumPreferred } from '../boxed-expression/utils';
 
 // Geometric mean:
 // Harmonic mean:

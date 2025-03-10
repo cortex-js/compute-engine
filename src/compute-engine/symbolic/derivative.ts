@@ -1,6 +1,6 @@
 import { apply } from '../function-utils';
-import { mul } from '../boxed-expression/arithmetic-multiply';
-import type { BoxedExpression } from '../public';
+import { mul } from '../boxed-expression/arithmetic-mul-div';
+import type { BoxedExpression } from '../global-types';
 import { add } from '../boxed-expression/arithmetic-add';
 
 // See also:

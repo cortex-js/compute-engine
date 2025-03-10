@@ -1,5 +1,3 @@
-import type { BoxedExpression, FunctionDefinition } from '../public';
-
 import { checkArity, checkTypes } from '../boxed-expression/validate';
 import { asSmallInteger } from '../boxed-expression/numerics';
 
@@ -18,10 +16,12 @@ import { interval } from '../numerics/interval';
 import { JSON5 } from '../../common/json5';
 import { Expression } from '../../math-json';
 import type {
+  BoxedExpression,
+  FunctionDefinition,
   CollectionHandlers,
-  IComputeEngine,
+  ComputeEngine,
   IdentifierDefinitions,
-} from '../types';
+} from '../global-types';
 
 // From NumPy:
 export const DEFAULT_LINSPACE_COUNT = 50;
@@ -1499,7 +1499,7 @@ export function fromRange(start: number, end: number): number[] {
 }
 
 export function canonicalDictionary(
-  engine: IComputeEngine,
+  engine: ComputeEngine,
   dict: BoxedExpression
 ): BoxedExpression {
   //

@@ -27,7 +27,7 @@ import {
   PostfixEntry,
   Serializer,
   Terminator,
-} from '../public';
+} from '../types';
 import { joinLatex } from '../tokenizer';
 
 // function isSpacingToken(token: string): boolean {

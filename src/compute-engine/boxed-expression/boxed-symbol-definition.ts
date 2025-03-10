@@ -2,25 +2,23 @@ import type {
   BoxedExpression,
   SemiBoxedExpression,
   SymbolDefinition,
-} from './public';
+  BoxedSymbolDefinition,
+  CollectionHandlers,
+  ComputeEngine,
+  NumericFlags,
+  RuntimeScope,
+  Sign,
+} from '../global-types';
 import { _BoxedExpression } from './abstract-boxed-expression';
 import { isLatexString, normalizeFlags } from './utils';
 
 import { defaultCollectionHandlers } from '../collection-utils';
-import { LatexString } from '../latex-syntax/public';
+import { LatexString } from '../latex-syntax/types';
 
 import { Type, TypeString } from '../../common/type/types';
 import { parseType } from '../../common/type/parse';
 import { isValidType, widen } from '../../common/type/utils';
 import { BoxedType } from '../../common/type/boxed-type';
-import type {
-  BoxedSymbolDefinition,
-  CollectionHandlers,
-  IComputeEngine,
-  NumericFlags,
-  RuntimeScope,
-  Sign,
-} from '../types';
 
 /**
  * ### THEORY OF OPERATIONS
@@ -55,7 +53,7 @@ export class _BoxedSymbolDefinition implements BoxedSymbolDefinition {
   description?: string | string[];
   url?: string;
 
-  private _engine: IComputeEngine;
+  private _engine: ComputeEngine;
   readonly scope: RuntimeScope | undefined;
 
   // The defValue is the value as specified in the original definition.
@@ -64,7 +62,7 @@ export class _BoxedSymbolDefinition implements BoxedSymbolDefinition {
   private _defValue?:
     | LatexString
     | SemiBoxedExpression
-    | ((ce: IComputeEngine) => SemiBoxedExpression | null);
+    | ((ce: ComputeEngine) => SemiBoxedExpression | null);
 
   // If `null`, the value needs to be recalculated from _defValue
   // If `undefined`, the value is not defined (for example, the symbol `True` does not have a value: the symbol itself *is* the value)
@@ -94,7 +92,7 @@ export class _BoxedSymbolDefinition implements BoxedSymbolDefinition {
 
   collection?: Partial<CollectionHandlers>;
 
-  constructor(ce: IComputeEngine, name: string, def: SymbolDefinition) {
+  constructor(ce: ComputeEngine, name: string, def: SymbolDefinition) {
     if (!ce.context) throw Error('No context available');
 
     this.name = name;
@@ -284,12 +282,12 @@ export class _BoxedSymbolDefinition implements BoxedSymbolDefinition {
 }
 
 function dynamicValue(
-  ce: IComputeEngine,
+  ce: ComputeEngine,
   value:
     | undefined
     | LatexString
     | SemiBoxedExpression
-    | ((ce: IComputeEngine) => SemiBoxedExpression | null)
+    | ((ce: ComputeEngine) => SemiBoxedExpression | null)
 ) {
   if (value === undefined) return undefined;
 

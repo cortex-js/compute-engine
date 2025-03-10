@@ -7,13 +7,6 @@ import {
   MathJsonNumber,
 } from '../math-json/types';
 
-import type {
-  LibraryCategory,
-  LatexDictionaryEntry,
-  LatexString,
-  ParseLatexOptions,
-} from './latex-syntax/public';
-
 import { assume } from './assume';
 
 import {
@@ -24,7 +17,30 @@ import {
   SMALL_INTEGER,
 } from './numerics/numeric';
 
-import { SymbolDefinition, FunctionDefinition } from './public';
+import {
+  SymbolDefinition,
+  FunctionDefinition,
+  AngularUnit,
+  AssignValue,
+  AssumeResult,
+  BoxedExpression,
+  BoxedFunctionDefinition,
+  BoxedRule,
+  BoxedRuleSet,
+  BoxedSubstitution,
+  BoxedSymbolDefinition,
+  CanonicalOptions,
+  ComputeEngineStats,
+  EvaluateOptions,
+  ExpressionMapInterface,
+  IdentifierDefinitions,
+  Metadata,
+  Rule,
+  RuntimeScope,
+  Scope,
+  SemiBoxedExpression,
+  ComputeEngine as IComputeEngine,
+} from './global-types';
 
 import { box, boxFunction } from './boxed-expression/box';
 
@@ -55,7 +71,7 @@ import {
   makeFunctionDefinition,
   _BoxedFunctionDefinition,
 } from './boxed-expression/boxed-function-definition';
-import type { Rational } from './numerics/types';
+import type { BigNum, Rational } from './numerics/types';
 import { isMachineRational, isRational } from './numerics/rationals';
 import { applicable, parseFunctionSignature } from './function-utils';
 import { CYAN, INVERSE_RED, RESET, YELLOW } from '../common/ansi-codes';
@@ -65,10 +81,6 @@ import {
   indexLatexDictionary,
 } from './latex-syntax/dictionary/definitions';
 import { parse } from './latex-syntax/parse';
-import {
-  BoxedExpression,
-  SemiBoxedExpression,
-} from './boxed-expression/public';
 
 // To avoid circular dependencies, serializeToJson is forward declared. Type
 // to import it.
@@ -82,7 +94,7 @@ import {
   ExactNumericValueData,
   NumericValue,
   NumericValueData,
-} from './numeric-value/public';
+} from './numeric-value/types';
 import { ExactNumericValue } from './numeric-value/exact-numeric-value';
 import { BigNumericValue } from './numeric-value/big-numeric-value';
 import { MachineNumericValue } from './numeric-value/machine-numeric-value';
@@ -90,39 +102,21 @@ import {
   isValidIdentifier,
   validateIdentifier,
 } from '../math-json/identifiers';
+import type {
+  LatexDictionaryEntry,
+  LatexString,
+  LibraryCategory,
+  ParseLatexOptions,
+} from './latex-syntax/types';
+import type { OneOf } from '../common/one-of';
+import { hidePrivateProperties } from '../common/utils';
 import { bigint } from './numerics/bigint';
 import { Type, TypeString } from '../common/type/types';
-import { isSubtype } from '../common/type/subtype';
 import { isSignatureType, isValidType } from '../common/type/utils';
 import { parseType } from '../common/type/parse';
-import { hidePrivateProperties } from '../common/utils';
-import { OneOf } from '../common/one-of';
-import { BigNum } from './numerics/types';
-import { typeToString } from '../common/type/serialize';
+import { isSubtype } from '../common/type/subtype';
 import { BoxedType } from '../common/type/boxed-type';
-import type {
-  AngularUnit,
-  AssignValue,
-  AssumeResult,
-  BoxedFunctionDefinition,
-  BoxedRule,
-  BoxedRuleSet,
-  BoxedSubstitution,
-  BoxedSymbolDefinition,
-  CanonicalOptions,
-  ComputeEngineStats,
-  EvaluateOptions,
-  ExpressionMapInterface,
-  IComputeEngine,
-  IdentifierDefinitions,
-  Metadata,
-  Rule,
-  RuntimeScope,
-  Scope,
-} from './types';
-
-export type * from '../common/type/types';
-export * from '../common/type/subtype';
+import { typeToString } from '../common/type/serialize';
 
 /**
  *
@@ -441,8 +435,8 @@ export class ComputeEngine implements IComputeEngine {
     // The first, topmost, scope contains additional info
     //
     this.context = {
-      assumptions: new ExpressionMap(),
-    } as RuntimeScope;
+      assumptions: new ExpressionMap<boolean>(),
+    };
 
     for (const table of ComputeEngine.getStandardLibrary('domains'))
       setIdentifierDefinitions(this, table);

@@ -12,7 +12,7 @@ import { SETS_LIBRARY } from './sets';
 import { STATISTICS_LIBRARY } from './statistics';
 import { TRIGONOMETRY_LIBRARY } from './trigonometry';
 
-import { LibraryCategory } from '../latex-syntax/public';
+import { LibraryCategory } from '../latex-syntax/types';
 
 import { _BoxedSymbolDefinition } from '../boxed-expression/boxed-symbol-definition';
 import { makeFunctionDefinition } from '../boxed-expression/boxed-function-definition';
@@ -25,7 +25,7 @@ import {
   isFunctionDefinition,
   isSymbolDefinition,
 } from '../boxed-expression/utils';
-import type { IdentifierDefinitions, IComputeEngine } from '../types';
+import type { IdentifierDefinitions, ComputeEngine } from '../global-types';
 
 export function getStandardLibrary(
   categories: LibraryCategory[] | LibraryCategory | 'all'
@@ -141,7 +141,7 @@ function validateDefinitionName(name: string): string {
  *
  */
 export function setIdentifierDefinitions(
-  engine: IComputeEngine,
+  engine: ComputeEngine,
   table: IdentifierDefinitions
 ): void {
   if (!engine.context) throw Error('No context available');

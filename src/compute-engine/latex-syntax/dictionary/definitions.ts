@@ -1,16 +1,5 @@
-import { Expression } from '../../../math-json/types';
-import { countTokens, joinLatex, tokenize, tokensToString } from '../tokenizer';
-import { DEFINITIONS_ALGEBRA } from './definitions-algebra';
-import { DEFINITIONS_ARITHMETIC } from './definitions-arithmetic';
-import { DEFINITIONS_CORE } from './definitions-core';
-import { DEFINITIONS_INEQUALITIES } from './definitions-relational-operators';
-import { DEFINITIONS_LINEAR_ALGEBRA } from './definitions-linear-algebra';
-import { DEFINITIONS_LOGIC } from './definitions-logic';
-import { DEFINITIONS_OTHERS } from './definitions-other';
-import { DEFINITIONS_TRIGONOMETRY } from './definitions-trigonometry';
-import { DEFINITIONS_SETS } from './definitions-sets';
-import { DEFINITIONS_CALCULUS } from './definitions-calculus';
-import { DEFINITIONS_SYMBOLS } from './definitions-symbols';
+import type { Expression } from '../../../math-json/types';
+import { isValidIdentifier } from '../../../math-json/identifiers';
 import {
   foldAssociativeOperator,
   operator,
@@ -20,9 +9,11 @@ import {
   operand,
   operands,
 } from '../../../math-json/utils';
+
 import { ErrorSignal, WarningSignal } from '../../../common/signals';
-import { DEFINITIONS_COMPLEX } from './definitions-complex';
-import { DEFINITIONS_STATISTICS } from './definitions-statistics';
+
+import { countTokens, joinLatex, tokenize, tokensToString } from '../tokenizer';
+
 import {
   Delimiter,
   EnvironmentParseHandler,
@@ -46,8 +37,21 @@ import {
   isPostfixEntry,
   isPrefixEntry,
   isSymbolEntry,
-} from '../public';
-import { isValidIdentifier } from '../../../math-json/identifiers';
+} from '../types';
+
+import { DEFINITIONS_ALGEBRA } from './definitions-algebra';
+import { DEFINITIONS_ARITHMETIC } from './definitions-arithmetic';
+import { DEFINITIONS_CORE } from './definitions-core';
+import { DEFINITIONS_INEQUALITIES } from './definitions-relational-operators';
+import { DEFINITIONS_LINEAR_ALGEBRA } from './definitions-linear-algebra';
+import { DEFINITIONS_LOGIC } from './definitions-logic';
+import { DEFINITIONS_OTHERS } from './definitions-other';
+import { DEFINITIONS_TRIGONOMETRY } from './definitions-trigonometry';
+import { DEFINITIONS_SETS } from './definitions-sets';
+import { DEFINITIONS_CALCULUS } from './definitions-calculus';
+import { DEFINITIONS_SYMBOLS } from './definitions-symbols';
+import { DEFINITIONS_COMPLEX } from './definitions-complex';
+import { DEFINITIONS_STATISTICS } from './definitions-statistics';
 
 export type CommonEntry = {
   /** Note: a name is required if a serialize handler is provided */

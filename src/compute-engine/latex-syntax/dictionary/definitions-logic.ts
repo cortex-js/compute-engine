@@ -4,7 +4,7 @@ import {
   Parser,
   Serializer,
   Terminator,
-} from '../public';
+} from '../types';
 import {
   getSequence,
   operator,

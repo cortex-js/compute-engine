@@ -1,8 +1,7 @@
-import type { BoxedExpression } from './public';
 import { isInequality } from './utils';
 import { matchAnyRules } from './rules';
 import { expand } from './expand';
-import type { Rule } from '../types';
+import type { BoxedExpression, Rule } from '../global-types';
 
 //
 // Solve Rules

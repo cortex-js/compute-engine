@@ -1,13 +1,11 @@
-import type { BoxedExpression } from '../public';
-
 import { asSmallInteger } from './numerics';
 import { isRelationalOperator } from './utils';
 
-import { mul } from './arithmetic-multiply';
+import { mul } from './arithmetic-mul-div';
+import { add } from './arithmetic-add';
 
 import { Product } from './product';
-import { add } from './arithmetic-add';
-import type { IComputeEngine } from '../types';
+import type { ComputeEngine, BoxedExpression } from '../global-types';
 
 function expandProduct(
   lhs: Readonly<BoxedExpression>,
@@ -54,7 +52,7 @@ function expandProduct(
 }
 
 export function expandProducts(
-  ce: IComputeEngine,
+  ce: ComputeEngine,
   ops: ReadonlyArray<BoxedExpression>
 ): BoxedExpression | null {
   if (ops.length === 0) return null;
@@ -205,7 +203,7 @@ function expandDenominator(expr: BoxedExpression): BoxedExpression | null {
 
 /** Attempt to transform the expression (h, ops) into a sum */
 export function expandFunction(
-  ce: IComputeEngine,
+  ce: ComputeEngine,
   h: string,
   ops: ReadonlyArray<BoxedExpression>
 ): BoxedExpression | null {

@@ -1,11 +1,9 @@
-import type { BoxedExpression } from './public';
-
 import { each, isFiniteIndexableCollection } from '../collection-utils';
 
 import { flatten } from './flatten';
 import { isSubtype } from '../../common/type/subtype';
 import { Type } from '../../common/type/types';
-import type { IComputeEngine } from '../types';
+import type { BoxedExpression, ComputeEngine } from '../global-types';
 
 /**
  * Check that the number of arguments is as expected.
@@ -13,7 +11,7 @@ import type { IComputeEngine } from '../types';
  * Converts the arguments to canonical, and flattens the sequence.
  */
 export function checkArity(
-  ce: IComputeEngine,
+  ce: ComputeEngine,
   ops: ReadonlyArray<BoxedExpression>,
   count: number
 ): ReadonlyArray<BoxedExpression> {
@@ -54,7 +52,7 @@ export function checkArity(
  * Flattens sequence expressions.
  */
 export function checkNumericArgs(
-  ce: IComputeEngine,
+  ce: ComputeEngine,
   ops: ReadonlyArray<BoxedExpression>,
   options?: number | { count?: number; flatten?: string }
 ): ReadonlyArray<BoxedExpression> {
@@ -168,7 +166,7 @@ export function checkNumericArgs(
  * Converts the arguments to canonical
  */
 export function checkType(
-  ce: IComputeEngine,
+  ce: ComputeEngine,
   arg: BoxedExpression | undefined | null,
   type: Type | undefined
 ): BoxedExpression {
@@ -186,7 +184,7 @@ export function checkType(
 }
 
 export function checkTypes(
-  ce: IComputeEngine,
+  ce: ComputeEngine,
   args: ReadonlyArray<BoxedExpression>,
   types: Type[]
 ): ReadonlyArray<BoxedExpression> {
@@ -212,7 +210,7 @@ export function checkTypes(
  * Check that the argument is pure.
  */
 export function checkPure(
-  ce: IComputeEngine,
+  ce: ComputeEngine,
   arg: BoxedExpression | BoxedExpression | undefined | null
 ): BoxedExpression {
   if (arg === undefined || arg === null) return ce.error('missing');
@@ -231,7 +229,7 @@ export function checkPure(
  *
  */
 export function validateArguments(
-  ce: IComputeEngine,
+  ce: ComputeEngine,
   ops: ReadonlyArray<BoxedExpression>,
   signature: Type,
   lazy?: boolean,

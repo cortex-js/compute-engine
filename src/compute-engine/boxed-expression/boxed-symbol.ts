@@ -12,22 +12,35 @@ import type {
   SimplifyOptions,
   PatternMatchOptions,
   ReplaceOptions,
-} from './public';
+  RuntimeScope,
+  BoxedSymbolDefinition,
+  BoxedFunctionDefinition,
+  ComputeEngine,
+  Metadata,
+  CanonicalOptions,
+  BoxedBaseDefinition,
+  BoxedSubstitution,
+  EvaluateOptions,
+  Rule,
+  BoxedRule,
+  BoxedRuleSet,
+  Substitution,
+  Sign,
+} from '../global-types';
 
-import { mul } from './arithmetic-multiply';
+import { mul, div } from './arithmetic-mul-div';
 
 import { replace } from './rules';
 import { simplify } from './simplify';
 import { negate } from './negate';
 
-import { NumericValue } from '../numeric-value/public';
+import { NumericValue } from '../numeric-value/types';
 
 import { match } from './match';
 import { _BoxedSymbolDefinition } from './boxed-symbol-definition';
 import { _BoxedFunctionDefinition } from './boxed-function-definition';
 import { _BoxedExpression } from './abstract-boxed-expression';
 import { hashCode, normalizedUnknownsForSolve } from './utils';
-import { div } from './arithmetic-divide';
 import { pow } from './arithmetic-power';
 import { add } from './arithmetic-add';
 import { parseType } from '../../common/type/parse';
@@ -41,22 +54,6 @@ import {
 import type { BigNum } from '../numerics/types';
 import type { OneOf } from '../../common/one-of';
 import { BoxedType } from '../../common/type/boxed-type';
-import type {
-  RuntimeScope,
-  BoxedSymbolDefinition,
-  BoxedFunctionDefinition,
-  IComputeEngine,
-  Metadata,
-  CanonicalOptions,
-  BoxedBaseDefinition,
-  BoxedSubstitution,
-  EvaluateOptions,
-  Rule,
-  BoxedRule,
-  BoxedRuleSet,
-  Substitution,
-  Sign,
-} from '../types';
 
 /**
  * BoxedSymbol
@@ -97,7 +94,7 @@ export class BoxedSymbol extends _BoxedExpression {
   private _isStructural: boolean = false;
 
   constructor(
-    ce: IComputeEngine,
+    ce: ComputeEngine,
     name: string,
     options?: {
       metadata?: Metadata;
@@ -729,7 +726,7 @@ export class BoxedSymbol extends _BoxedExpression {
 }
 
 export function makeCanonicalSymbol(
-  ce: IComputeEngine,
+  ce: ComputeEngine,
   name: string
 ): BoxedExpression {
   const def = ce.lookupSymbol(name);

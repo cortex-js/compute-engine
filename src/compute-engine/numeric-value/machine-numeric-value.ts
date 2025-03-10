@@ -1,5 +1,5 @@
-import Decimal from 'decimal.js';
-import { NumericValue, NumericValueData } from './public';
+import { Decimal } from 'decimal.js';
+import { BigNumFactory, NumericValue, NumericValueData } from './types';
 import type { Expression } from '../../math-json/types';
 import type { SmallInteger } from '../numerics/types';
 import { DEFAULT_TOLERANCE } from '../numerics/numeric';
@@ -7,7 +7,6 @@ import { numberToString } from '../numerics/strings';
 import { numberToExpression } from '../numerics/expression';
 import { NumericType } from '../../common/type/types';
 import { ExactNumericValue } from './exact-numeric-value';
-import { BigNumFactory } from './big-numeric-value';
 
 export class MachineNumericValue extends NumericValue {
   __brand: 'MachineNumericValue';

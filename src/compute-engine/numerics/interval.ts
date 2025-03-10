@@ -1,4 +1,4 @@
-import { BoxedExpression } from '../public';
+import type { BoxedExpression } from '../global-types';
 
 /** An interval is a continuous set of real numbers */
 export type Interval = {

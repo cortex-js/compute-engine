@@ -1,10 +1,15 @@
-import type { BoxedExpression, PatternMatchOptions } from './public';
+import type {
+  BoxedExpression,
+  PatternMatchOptions,
+  BoxedSubstitution,
+  ComputeEngine,
+  Metadata,
+} from '../global-types';
 
 import { _BoxedExpression } from './abstract-boxed-expression';
 import { hashCode, isBoxedExpression } from './utils';
 import { isWildcard, wildcardName } from './boxed-patterns';
 import { BoxedType } from '../../common/type/boxed-type';
-import type { BoxedSubstitution, IComputeEngine, Metadata } from '../types';
 
 /**
  * BoxedString
@@ -13,7 +18,7 @@ import type { BoxedSubstitution, IComputeEngine, Metadata } from '../types';
 
 export class BoxedString extends _BoxedExpression {
   private readonly _string: string;
-  constructor(ce: IComputeEngine, expr: string, metadata?: Metadata) {
+  constructor(ce: ComputeEngine, expr: string, metadata?: Metadata) {
     super(ce, metadata);
     // Strings are always stored in Unicode NFC canonical order
     // See https://unicode.org/reports/tr15/

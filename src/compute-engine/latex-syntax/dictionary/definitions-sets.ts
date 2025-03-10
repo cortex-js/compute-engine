@@ -14,7 +14,7 @@ import {
   LatexString,
   Parser,
   COMPARISON_PRECEDENCE,
-} from '../public';
+} from '../types';
 
 export const DEFINITIONS_SETS: LatexDictionary = [
   //

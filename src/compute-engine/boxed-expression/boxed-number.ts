@@ -1,16 +1,9 @@
 import { Complex } from 'complex-esm';
 import { Decimal } from 'decimal.js';
-import type {
-  BoxedExpression,
-  PatternMatchOptions,
-  ReplaceOptions,
-  SimplifyOptions,
-} from '../public';
 
 import type { Expression, MathJsonNumber } from '../../math-json';
 
-import { div } from './arithmetic-divide';
-import { mul } from './arithmetic-multiply';
+import { mul, div } from './arithmetic-mul-div';
 
 import { canonicalInteger, SMALL_INTEGER } from '../numerics/numeric';
 import type { Rational, SmallInteger } from '../numerics/types';
@@ -20,7 +13,7 @@ import {
   ExactNumericValueData,
   NumericValue,
   NumericValueData,
-} from '../numeric-value/public';
+} from '../numeric-value/types';
 import { ExactNumericValue } from '../numeric-value/exact-numeric-value';
 
 import { replace } from './rules';
@@ -44,12 +37,16 @@ import type {
   BoxedSubstitution,
   CanonicalOptions,
   EvaluateOptions,
-  IComputeEngine,
+  ComputeEngine,
   Metadata,
   Rule,
   Sign,
   Substitution,
-} from '../types';
+  BoxedExpression,
+  PatternMatchOptions,
+  ReplaceOptions,
+  SimplifyOptions,
+} from '../global-types';
 
 /**
  * BoxedNumber
@@ -75,7 +72,7 @@ export class BoxedNumber extends _BoxedExpression {
    * range
    */
   constructor(
-    ce: IComputeEngine,
+    ce: ComputeEngine,
     value:
       | SmallInteger
       | NumericValueData
@@ -414,7 +411,6 @@ export class BoxedNumber extends _BoxedExpression {
     // for example.
     return replace(this.structural, rules, options).at(-1)?.value ?? null;
   }
-
   match(
     pattern: BoxedExpression,
     options?: PatternMatchOptions
@@ -573,7 +569,7 @@ export class BoxedNumber extends _BoxedExpression {
 }
 
 export function canonicalNumber(
-  ce: IComputeEngine,
+  ce: ComputeEngine,
   value:
     | number
     | bigint
@@ -662,7 +658,7 @@ export function canonicalNumber(
 }
 
 function canonicalNumberString(
-  ce: IComputeEngine,
+  ce: ComputeEngine,
   s: string
 ): number | NumericValue {
   s = s.toLowerCase();

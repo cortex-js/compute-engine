@@ -4,12 +4,12 @@ import { ListType } from '../../common/type/types';
 import { isBoxedTensor } from '../boxed-expression/boxed-tensor';
 import { checkArity } from '../boxed-expression/validate';
 import { each, isFiniteIndexableCollection } from '../collection-utils';
-import { BoxedExpression } from '../public';
-import type {
-  IdentifierDefinitions,
+import {
+  BoxedExpression,
+  ComputeEngine,
   IdentifierDefinition,
-  IComputeEngine,
-} from '../types';
+  IdentifierDefinitions,
+} from '../global-types';
 
 export const LINEAR_ALGEBRA_LIBRARY: IdentifierDefinitions[] = [
   {
@@ -252,7 +252,7 @@ export const LINEAR_ALGEBRA_LIBRARY: IdentifierDefinitions[] = [
 
 function canonicalMatrix(
   ops: BoxedExpression[],
-  { engine: ce }: { engine: IComputeEngine }
+  { engine: ce }: { engine: ComputeEngine }
 ): BoxedExpression | null {
   const operator = 'Matrix';
   if (ops.length === 0) return ce._fn(operator, []);

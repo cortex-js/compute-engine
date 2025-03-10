@@ -1,4 +1,4 @@
-import { OneOf } from '../../common/one-of';
+import type { OneOf } from '../../common/one-of';
 import type { Expression, MathJsonIdentifier } from '../../math-json/types';
 import type {
   IndexedLatexDictionary,

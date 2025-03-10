@@ -24,9 +24,11 @@
  *
  */
 
-import Decimal from 'decimal.js';
+import { Decimal } from 'decimal.js';
 import type { Rational, SmallInteger } from '../numerics/types';
 import { NumericType } from '../../common/type/types';
+
+export type BigNumFactory = (value: Decimal.Value) => Decimal;
 
 /** The value is equal to `(decimal * rational * sqrt(radical)) + im * i`
  * @category Numerics */

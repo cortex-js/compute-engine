@@ -2,14 +2,37 @@ import { Decimal } from 'decimal.js';
 
 import { Expression, MathJsonIdentifier } from '../../math-json/types';
 
+// To avoid circular dependency issues we have to import the following
+// function *after* the class definition
+
+import { serializeJson } from './serialize';
+import type { Type, TypeString } from '../../common/type/types';
+import { cmp, eq, same } from './compare';
+import { expand } from './expand';
+import { BoxedType } from '../../common/type/boxed-type';
 import type {
+  BoxedSubstitution,
+  Metadata,
+  RuntimeScope,
+  Substitution,
+  CanonicalOptions,
+  BoxedRuleSet,
+  Rule,
+  BoxedBaseDefinition,
+  BoxedSymbolDefinition,
+  BoxedFunctionDefinition,
+  EvaluateOptions,
+  CompiledType,
+  Sign,
   BoxedExpression,
   JsonSerializationOptions,
   PatternMatchOptions,
   SimplifyOptions,
-} from './public';
+  TensorData,
+  ComputeEngine,
+} from '../global-types';
 
-import type { NumericValue } from '../numeric-value/public';
+import type { NumericValue } from '../numeric-value/types';
 
 import type { SmallInteger } from '../numerics/types';
 
@@ -25,10 +48,7 @@ import {
   getRootStyle,
 } from '../latex-syntax/serializer-style';
 import { serializeLatex } from '../latex-syntax/serializer';
-import type {
-  LatexString,
-  SerializeLatexOptions,
-} from '../latex-syntax/public';
+import type { LatexString, SerializeLatexOptions } from '../latex-syntax/types';
 
 import { AsciiMathOptions, toAsciiMath } from './ascii-math';
 
@@ -54,14 +74,14 @@ export abstract class _BoxedExpression implements BoxedExpression {
     options?: PatternMatchOptions
   ): BoxedSubstitution | null;
 
-  readonly engine: IComputeEngine;
+  readonly engine: ComputeEngine;
 
   /** Verbatim LaTeX, obtained from a source, i.e. from parsing,
    *  not generated synthetically
    */
   verbatimLatex?: string;
 
-  constructor(ce: IComputeEngine, metadata?: Metadata) {
+  constructor(ce: ComputeEngine, metadata?: Metadata) {
     this.engine = ce;
     if (metadata?.latex !== undefined) this.verbatimLatex = metadata.latex;
   }
@@ -330,7 +350,7 @@ export abstract class _BoxedExpression implements BoxedExpression {
     return null;
   }
 
-  get tensor(): null | AbstractTensor<'expression'> {
+  get tensor(): null | TensorData<'expression'> {
     return null;
   }
 
@@ -693,7 +713,7 @@ export abstract class _BoxedExpression implements BoxedExpression {
     to?: 'javascript';
     functions?: Record<MathJsonIdentifier, string | ((...any) => any)>;
     vars?: Record<MathJsonIdentifier, string>;
-    imports?: Function[];
+    imports?: ((...any) => any)[];
     preamble?: string;
   }): (args: Record<string, any>) => CompiledType {
     if (options?.to && options.to !== 'javascript')
@@ -819,29 +839,3 @@ export function getSubexpressions(
   }
   return result;
 }
-
-// To avoid circular dependency issues we have to import the following
-// function *after* the class definition
-
-import { serializeJson } from './serialize';
-import type { Type, TypeString } from '../../common/type/types';
-import { cmp, eq, same } from './compare';
-import { AbstractTensor } from '../tensor/tensors';
-import { expand } from './expand';
-import { BoxedType } from '../../common/type/boxed-type';
-import type {
-  BoxedSubstitution,
-  IComputeEngine,
-  Metadata,
-  RuntimeScope,
-  Substitution,
-  CanonicalOptions,
-  BoxedRuleSet,
-  Rule,
-  BoxedBaseDefinition,
-  BoxedSymbolDefinition,
-  BoxedFunctionDefinition,
-  EvaluateOptions,
-  CompiledType,
-  Sign,
-} from '../types';

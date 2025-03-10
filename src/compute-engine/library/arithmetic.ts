@@ -5,7 +5,6 @@ import {
   checkTypes,
   checkNumericArgs,
 } from '../boxed-expression/validate';
-import { BoxedExpression } from '../boxed-expression/public';
 import { bignumPreferred, canonical } from '../boxed-expression/utils';
 import {
   asSmallInteger,
@@ -47,8 +46,11 @@ import {
   addType,
   addN,
 } from '../boxed-expression/arithmetic-add';
-import { mul, mulN } from '../boxed-expression/arithmetic-multiply';
-import { canonicalDivide } from '../boxed-expression/arithmetic-divide';
+import {
+  mul,
+  mulN,
+  canonicalDivide,
+} from '../boxed-expression/arithmetic-mul-div';
 import { canonicalBigop, reduceBigOp } from './utils';
 import {
   canonicalPower,
@@ -59,7 +61,12 @@ import {
 import { parseType } from '../../common/type/parse';
 import { range, rangeLast } from './collections';
 import { run, runAsync } from '../../common/interruptible';
-import type { IComputeEngine, IdentifierDefinitions, Sign } from '../types';
+import type {
+  BoxedExpression,
+  ComputeEngine,
+  IdentifierDefinitions,
+  Sign,
+} from '../global-types';
 
 // When processing an arithmetic expression, the following are the core
 // canonical arithmetic operations to account for:
@@ -1672,7 +1679,7 @@ function processMinMaxItem(
 }
 
 function evaluateMinMax(
-  ce: IComputeEngine,
+  ce: ComputeEngine,
   ops: ReadonlyArray<BoxedExpression>,
   mode: 'Min' | 'Max' | 'Supremum' | 'Infimum'
 ): BoxedExpression {

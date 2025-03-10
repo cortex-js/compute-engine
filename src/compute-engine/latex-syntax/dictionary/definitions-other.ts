@@ -1,4 +1,4 @@
-import { LatexDictionary, Parser, Serializer } from '../public';
+import { LatexDictionary, Parser, Serializer } from '../types';
 
 import {
   operand,

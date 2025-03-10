@@ -1,4 +1,4 @@
-import { LatexDictionary } from '../public';
+import { LatexDictionary } from '../types';
 
 export const DEFINITIONS_COMPLEX: LatexDictionary = [
   {

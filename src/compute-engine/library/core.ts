@@ -2,7 +2,6 @@ import { joinLatex } from '../latex-syntax/tokenizer';
 
 import { checkType, checkArity } from '../boxed-expression/validate';
 import { canonicalForm } from '../boxed-expression/canonical';
-import type { BoxedExpression } from '../boxed-expression/public';
 import { asSmallInteger } from '../boxed-expression/numerics';
 
 import { apply, canonicalFunctionExpression } from '../function-utils';
@@ -22,9 +21,13 @@ import {
 } from '../../common/type/utils';
 import { parseType } from '../../common/type/parse';
 import { isIndexableCollection } from '../collection-utils';
-import { canonicalMultiply } from '../boxed-expression/arithmetic-multiply';
+import { canonicalMultiply } from '../boxed-expression/arithmetic-mul-div';
 import { canonicalDictionary } from './collections';
-import type { IdentifierDefinitions, CanonicalForm } from '../types';
+import type {
+  BoxedExpression,
+  IdentifierDefinitions,
+  CanonicalForm,
+} from '../global-types';
 
 //   // := assign 80 // @todo
 // compose (compose(f, g) -> a new function such that compose(f, g)(x) -> f(g(x))

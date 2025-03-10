@@ -1,4 +1,4 @@
-import Decimal from 'decimal.js';
+import { Decimal } from 'decimal.js';
 
 export function bigint(a: Decimal | number | bigint | string): bigint | null {
   if (typeof a === 'bigint') return a;

@@ -5,7 +5,7 @@ import {
   validateIdentifier,
 } from '../../math-json/identifiers';
 import { SYMBOLS } from './dictionary/definitions-symbols';
-import { Parser } from './public';
+import { Parser } from './types';
 
 const IDENTIFIER_PREFIX = {
   // Those are "grouping" prefix that also specify spacing

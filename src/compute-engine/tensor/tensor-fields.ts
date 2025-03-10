@@ -1,28 +1,17 @@
 import { Complex } from 'complex-esm';
 import { isRelationalOperator } from '../boxed-expression/utils';
-import { mul } from '../boxed-expression/arithmetic-multiply';
+import { mul } from '../boxed-expression/arithmetic-mul-div';
 import { add } from '../boxed-expression/arithmetic-add';
-import type { BoxedExpression, IComputeEngine } from '../types';
-
-/** @category Tensors */
-export type DataTypeMap = {
-  float64: number;
-  float32: number;
-  int32: number;
-  uint8: number;
-  complex128: Complex;
-  complex64: Complex;
-  bool: boolean;
-  string: string;
-  expression: BoxedExpression;
-};
-
-/** @category Tensors */
-export type TensorDataType = keyof DataTypeMap;
+import {
+  BoxedExpression,
+  ComputeEngine,
+  DataTypeMap,
+  TensorDataType,
+} from '../global-types';
 
 /** @category Tensors */
 export function makeTensorField<DT extends keyof DataTypeMap>(
-  ce: IComputeEngine,
+  ce: ComputeEngine,
   dtype: DT
 ): TensorField<DataTypeMap[DT]> {
   switch (dtype) {
@@ -111,7 +100,7 @@ export class TensorFieldNumber implements TensorField<number> {
   zero = 0;
   nan = NaN;
 
-  constructor(private ce: IComputeEngine) {}
+  constructor(private ce: ComputeEngine) {}
 
   cast(x: number, dtype: 'float64'): undefined | number;
   cast(x: number, dtype: 'float32'): undefined | number;
@@ -233,9 +222,9 @@ export class TensorFieldExpression implements TensorField<BoxedExpression> {
   zero: BoxedExpression;
   nan: BoxedExpression;
 
-  private ce: IComputeEngine;
+  private ce: ComputeEngine;
 
-  constructor(ce: IComputeEngine) {
+  constructor(ce: ComputeEngine) {
     this.one = ce.One;
     this.zero = ce.Zero;
     this.nan = ce.NaN;
@@ -364,9 +353,9 @@ export class TensorFieldComplex implements TensorField<Complex> {
   zero: Complex;
   nan: Complex;
 
-  private ce: IComputeEngine;
+  private ce: ComputeEngine;
 
-  constructor(ce: IComputeEngine) {
+  constructor(ce: ComputeEngine) {
     this.ce = ce;
     this.one = ce.complex(1);
     this.zero = ce.complex(0);

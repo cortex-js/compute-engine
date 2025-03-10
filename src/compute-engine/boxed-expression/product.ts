@@ -1,5 +1,3 @@
-import type { BoxedExpression } from '../public';
-
 import { order } from './order';
 import type { Rational } from '../numerics/types';
 import {
@@ -19,10 +17,9 @@ import { asRadical } from './arithmetic-power';
 
 import { flatten } from './flatten';
 import { asRational } from './numerics';
-import { NumericValue } from '../numeric-value/public';
-import { mul } from './arithmetic-multiply';
-import { canonicalDivide } from './arithmetic-divide';
-import type { IComputeEngine } from '../types';
+import { NumericValue } from '../numeric-value/types';
+import { mul, canonicalDivide } from './arithmetic-mul-div';
+import type { BoxedExpression, ComputeEngine } from '../global-types';
 
 /**
  * Group terms in a product by common term.
@@ -41,7 +38,7 @@ import type { IComputeEngine } from '../types';
  *
  */
 export class Product {
-  engine: IComputeEngine;
+  engine: ComputeEngine;
 
   // Running literal products (if canonical)
   coefficient: NumericValue;
@@ -60,7 +57,7 @@ export class Product {
   }
 
   constructor(
-    ce: IComputeEngine,
+    ce: ComputeEngine,
     xs?: ReadonlyArray<BoxedExpression>,
     readonly options?: { canonical?: boolean }
   ) {
@@ -468,7 +465,7 @@ function degreeOrder(
 }
 
 function termsAsExpression(
-  ce: IComputeEngine,
+  ce: ComputeEngine,
   terms: { exponent: Rational; terms: ReadonlyArray<BoxedExpression> }[]
 ): BoxedExpression {
   let result = terms.map(({ terms, exponent }) => {

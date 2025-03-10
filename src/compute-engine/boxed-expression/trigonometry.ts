@@ -1,16 +1,19 @@
 import { Complex } from 'complex-esm';
-import Decimal from 'decimal.js';
+import { Decimal } from 'decimal.js';
 
 import type { Expression } from '../../math-json/types';
-import type { LatexString } from '../latex-syntax/public';
-
-import type { BoxedExpression } from './public';
+import type { LatexString } from '../latex-syntax/types';
 
 import { apply } from './apply'; // @fixme
 
-import { asLatexString } from './utils';
-import { getPiTerm } from './factor';
-import type { IComputeEngine, RuleStep, Sign } from '../types';
+import { asLatexString, canonicalAngle } from './utils';
+
+import type {
+  BoxedExpression,
+  ComputeEngine,
+  RuleStep,
+  Sign,
+} from '../global-types';
 
 type ConstructibleTrigValues = [
   [numerator: number, denominator: number],
@@ -375,20 +378,6 @@ function applyAngle(
   return apply(theta, fn, bigFn, complexFn);
 }
 
-function angleToRadians(
-  x: BoxedExpression | undefined
-): BoxedExpression | undefined {
-  if (!x) return x;
-  const ce = x.engine;
-  const angularUnit = ce.angularUnit;
-  if (angularUnit === 'rad') return x;
-
-  if (angularUnit === 'deg') x = x.mul(ce.Pi).div(180);
-  if (angularUnit === 'grad') x = x.mul(ce.Pi).div(200);
-  if (angularUnit === 'turn') x = x.mul(ce.Pi).mul(2);
-  return x;
-}
-
 /** Assuming x in an expression in radians, convert to current angular unit. */
 export function radiansToAngle(
   x: BoxedExpression | undefined
@@ -680,7 +669,7 @@ function inverseTrigFuncName(name: string): string | undefined {
 }
 
 export function processInverseFunction(
-  ce: IComputeEngine,
+  ce: ComputeEngine,
   xs: ReadonlyArray<BoxedExpression>
 ): BoxedExpression | undefined {
   if (xs.length !== 1 || !xs[0].isValid) return undefined;
@@ -698,7 +687,7 @@ function trigFuncParity(name: string): number {
 }
 
 function constructibleValuesInverse(
-  ce: IComputeEngine,
+  ce: ComputeEngine,
   operator: string,
   x: BoxedExpression | undefined,
   specialValues: ConstructibleTrigValues
@@ -886,30 +875,4 @@ function quadrant(
 
   // Use Math.floor to determine the quadrant
   return [Math.floor(normalizedTheta / (Math.PI / 2)) + 1, undefined];
-}
-
-/**
- * Return the angle in the range [0, 2π) that is equivalent to the given angle.
- *
- * @param x
- * @returns
- */
-export function canonicalAngle(
-  x: BoxedExpression | undefined
-): BoxedExpression | undefined {
-  if (!x) return x;
-  const theta = angleToRadians(x);
-  if (!theta) return undefined;
-
-  if (theta.N().im !== 0) return theta;
-
-  const ce = theta.engine;
-
-  // Get k, t such that theta = k * π + t
-  const [k, t] = getPiTerm(theta);
-
-  if (k.isZero) return ce.number(t);
-
-  const k2 = ce._numericValue(k.bignumRe ? k.bignumRe.mod(2) : k.re % 2);
-  return ce.number(t.add(ce.Pi.mul(k2).N().numericValue!));
 }

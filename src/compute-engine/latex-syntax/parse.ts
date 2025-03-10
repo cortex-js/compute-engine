@@ -23,7 +23,7 @@ import {
   MULTIPLICATION_PRECEDENCE,
   SymbolTable,
   SymbolType,
-} from './public';
+} from './types';
 import { tokenize, tokensToString } from './tokenizer';
 import { parseIdentifier, parseInvalidIdentifier } from './parse-identifier';
 import type {

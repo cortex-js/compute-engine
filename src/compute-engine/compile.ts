@@ -1,8 +1,13 @@
 import type { MathJsonIdentifier } from '../math-json/types';
-import { BoxedExpression } from './boxed-expression/public';
 
 import { isRelationalOperator } from './boxed-expression/utils';
 import { isFiniteIndexableCollection } from './collection-utils';
+import {
+  BoxedExpression,
+  CompiledType,
+  ComputeEngine,
+  JSSource,
+} from './global-types';
 import { normalizeIndexingSet } from './library/utils';
 
 import { monteCarloEstimate } from './numerics/monte-carlo';
@@ -21,9 +26,6 @@ import {
   standardDeviation,
   variance,
 } from './numerics/statistics';
-import type { CompiledType, IComputeEngine } from './types';
-
-export type JSSource = string;
 
 export type CompiledOperators = Record<
   MathJsonIdentifier,
@@ -442,7 +444,7 @@ export function compileToJavascript(
     })
     .join('\n');
 
-  // @ts-ignore
+  // @ts-expect-error
   const namedFunctions: { [k: string]: string } = functions
     ? Object.fromEntries(
         Object.entries(functions).filter((k, v) => typeof v !== 'string')
@@ -495,7 +497,7 @@ export function compileToJavascript(
 }
 
 function compileExpr(
-  engine: IComputeEngine,
+  engine: ComputeEngine,
   h: string,
   args: ReadonlyArray<BoxedExpression>,
   prec: number,

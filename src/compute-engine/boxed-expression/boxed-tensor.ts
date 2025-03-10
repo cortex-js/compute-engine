@@ -1,35 +1,34 @@
 import type { Expression } from '../../math-json/types';
-import type {
-  BoxedExpression,
-  SimplifyOptions,
-  PatternMatchOptions,
-} from '../public';
 
 import {
-  DataTypeMap,
-  TensorDataType,
   getExpressionDatatype,
   getSupertype,
   makeTensorField,
 } from '../tensor/tensor-fields';
 
-import { NumericValue } from '../numeric-value/public';
+import { NumericValue } from '../numeric-value/types';
 
 import { _BoxedExpression } from './abstract-boxed-expression';
 import { isWildcard, wildcardName } from './boxed-patterns';
 import { canonical, hashCode, isBoxedExpression } from './utils';
 
-import { AbstractTensor, TensorData, makeTensor } from '../tensor/tensors'; // @fixme
+import { AbstractTensor, makeTensor } from '../tensor/tensors'; // @fixme
 import { parseType } from '../../common/type/parse';
 import { BoxedType } from '../../common/type/boxed-type';
 import type {
-  IComputeEngine,
+  ComputeEngine,
+  TensorDataType,
   Metadata,
   BoxedBaseDefinition,
   BoxedFunctionDefinition,
   BoxedSubstitution,
   EvaluateOptions,
-} from '../types';
+  TensorData,
+  DataTypeMap,
+  BoxedExpression,
+  SimplifyOptions,
+  PatternMatchOptions,
+} from '../global-types';
 
 /**
  * A boxed tensor represents an expression that can be represented by a tensor.
@@ -50,7 +49,7 @@ export class BoxedTensor extends _BoxedExpression {
   private _expression: undefined | BoxedExpression;
 
   constructor(
-    ce: IComputeEngine,
+    ce: ComputeEngine,
     input:
       | {
           op?: string;
@@ -403,5 +402,5 @@ export function expressionAsTensor<T extends TensorDataType = 'expression'>(
   };
   visit(rows);
   if (!isValid) return undefined;
-  return { shape, data, dtype: dtype as T };
+  return { shape, rank: shape.length, data, dtype: dtype as T };
 }

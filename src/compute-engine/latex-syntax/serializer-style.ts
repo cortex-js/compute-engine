@@ -1,6 +1,6 @@
 import { Expression } from '../../math-json/types';
 import { countLeaves, operator, operands } from '../../math-json/utils';
-import { DelimiterScale } from './public';
+import { DelimiterScale } from './types';
 import { joinLatex } from './tokenizer';
 
 export function getApplyFunctionStyle(

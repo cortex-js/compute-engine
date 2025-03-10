@@ -1,8 +1,12 @@
 import { isRelationalOperator } from '../boxed-expression/utils';
-import { BoxedExpression, FunctionDefinition } from '../public';
 import { flatten } from '../boxed-expression/flatten';
 import { eq } from '../boxed-expression/compare';
-import type { IdentifierDefinitions, IComputeEngine } from '../types';
+import type {
+  BoxedExpression,
+  FunctionDefinition,
+  IdentifierDefinitions,
+  ComputeEngine,
+} from '../global-types';
 
 //   // eq, lt, leq, gt, geq, neq, approx
 //   //     shortLogicalImplies: 52, // ➔
@@ -324,7 +328,7 @@ export const RELOP_LIBRARY: IdentifierDefinitions = {
 };
 
 function canonicalRelational(
-  ce: IComputeEngine,
+  ce: ComputeEngine,
   operator: string,
   ops: ReadonlyArray<BoxedExpression>
 ): BoxedExpression {

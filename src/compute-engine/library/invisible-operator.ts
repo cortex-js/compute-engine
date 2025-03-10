@@ -1,12 +1,10 @@
-import type { BoxedExpression } from '../public';
-
 import { flatten } from '../boxed-expression/flatten';
 import { isIndexableCollection } from '../collection-utils';
-import type { IComputeEngine } from '../types';
+import type { BoxedExpression, ComputeEngine } from '../global-types';
 
 export function canonicalInvisibleOperator(
   ops: ReadonlyArray<BoxedExpression>,
-  { engine: ce }: { engine: IComputeEngine }
+  { engine: ce }: { engine: ComputeEngine }
 ): BoxedExpression | null {
   if (ops.length === 0) return null;
 

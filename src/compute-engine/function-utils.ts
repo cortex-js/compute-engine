@@ -1,5 +1,5 @@
 import { cmp } from './boxed-expression/compare';
-import type { BoxedExpression } from './public';
+import type { BoxedExpression } from './global-types';
 
 /***
  * ### THEORY OF OPERATIONS

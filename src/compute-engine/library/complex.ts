@@ -1,7 +1,7 @@
 // complex-cartesian (constructor) = re + i * im
 // complex-polar = abs * exp(i * arg)
 
-import type { IdentifierDefinitions } from '../types';
+import type { IdentifierDefinitions } from '../global-types';
 
 export const COMPLEX_LIBRARY: IdentifierDefinitions[] = [
   {

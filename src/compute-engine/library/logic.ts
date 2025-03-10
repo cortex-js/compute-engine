@@ -1,5 +1,8 @@
-import { BoxedExpression } from '../public';
-import type { IdentifierDefinitions, IComputeEngine } from '../types';
+import type {
+  BoxedExpression,
+  IdentifierDefinitions,
+  ComputeEngine,
+} from '../global-types';
 
 export const LOGIC_LIBRARY: IdentifierDefinitions = {
   True: { wikidata: 'Q16751793', type: 'boolean', constant: true },
@@ -105,7 +108,7 @@ export const LOGIC_LIBRARY: IdentifierDefinitions = {
 
 function evaluateAnd(
   args: ReadonlyArray<BoxedExpression>,
-  { engine: ce }: { engine: IComputeEngine }
+  { engine: ce }: { engine: ComputeEngine }
 ): BoxedExpression | undefined {
   if (args.length === 0) return ce.True;
   const ops: BoxedExpression[] = [];
@@ -139,7 +142,7 @@ function evaluateAnd(
 
 function evaluateOr(
   args: ReadonlyArray<BoxedExpression>,
-  { engine: ce }: { engine: IComputeEngine }
+  { engine: ce }: { engine: ComputeEngine }
 ): BoxedExpression | undefined {
   if (args.length === 0) return ce.True;
   const ops: BoxedExpression[] = [];
@@ -173,7 +176,7 @@ function evaluateOr(
 
 function evaluateNot(
   args: ReadonlyArray<BoxedExpression>,
-  { engine: ce }: { engine: IComputeEngine }
+  { engine: ce }: { engine: ComputeEngine }
 ): BoxedExpression | undefined {
   const op1 = args[0]?.symbol;
   if (op1 === 'True') return ce.False;
@@ -183,7 +186,7 @@ function evaluateNot(
 
 function evaluateEquivalent(
   args: ReadonlyArray<BoxedExpression>,
-  { engine: ce }: { engine: IComputeEngine }
+  { engine: ce }: { engine: ComputeEngine }
 ): BoxedExpression | undefined {
   const lhs = args[0].symbol;
   const rhs = args[1].symbol;
@@ -202,7 +205,7 @@ function evaluateEquivalent(
 
 function evaluateImplies(
   args: ReadonlyArray<BoxedExpression>,
-  { engine: ce }: { engine: IComputeEngine }
+  { engine: ce }: { engine: ComputeEngine }
 ): BoxedExpression | undefined {
   const lhs = args[0].symbol;
   const rhs = args[1].symbol;

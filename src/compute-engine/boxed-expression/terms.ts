@@ -1,22 +1,20 @@
-import type { BoxedExpression } from '../public';
-
 import { canonicalAdd } from './arithmetic-add';
-import { canonicalMultiply } from './arithmetic-multiply';
+import { canonicalMultiply } from './arithmetic-mul-div';
 
 import { MACHINE_PRECISION } from '../numerics/numeric';
 
-import type { NumericValue } from '../numeric-value/public';
+import type { NumericValue } from '../numeric-value/types';
 import { ExactNumericValue } from '../numeric-value/exact-numeric-value';
 import { BigNumericValue } from '../numeric-value/big-numeric-value';
 import { MachineNumericValue } from '../numeric-value/machine-numeric-value';
-import type { IComputeEngine } from '../types';
+import type { BoxedExpression, ComputeEngine } from '../global-types';
 
 // Represent a sum of terms
 export class Terms {
-  private engine: IComputeEngine;
+  private engine: ComputeEngine;
   private terms: { coef: NumericValue[]; term: BoxedExpression }[] = [];
 
-  constructor(ce: IComputeEngine, terms: ReadonlyArray<BoxedExpression>) {
+  constructor(ce: ComputeEngine, terms: ReadonlyArray<BoxedExpression>) {
     this.engine = ce;
     let posInfinityCount = 0;
     let negInfinityCount = 0;
@@ -180,7 +178,7 @@ export class Terms {
 }
 
 function nvSum(
-  ce: IComputeEngine,
+  ce: ComputeEngine,
   numericValues: NumericValue[]
 ): NumericValue[] {
   const bignum = (x) => ce.bignum(x);
@@ -193,7 +191,7 @@ function nvSum(
 }
 
 function nvSumN(
-  ce: IComputeEngine,
+  ce: ComputeEngine,
   numericValues: NumericValue[]
 ): NumericValue {
   const bignum = (x) => ce.bignum(x);

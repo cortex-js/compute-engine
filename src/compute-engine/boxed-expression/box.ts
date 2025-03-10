@@ -1,6 +1,12 @@
 import { Complex } from 'complex-esm';
 import { Decimal } from 'decimal.js';
-import { SemiBoxedExpression, BoxedExpression } from './public';
+import type {
+  SemiBoxedExpression,
+  BoxedExpression,
+  CanonicalOptions,
+  ComputeEngine,
+  Metadata,
+} from '../global-types';
 
 import { Expression, MathJsonIdentifier } from '../../math-json/types';
 import { machineValue, missingIfEmpty } from '../../math-json/utils';
@@ -16,10 +22,9 @@ import { isInMachineRange } from '../numerics/numeric-bignum';
 import { bigint } from '../numerics/bigint';
 
 import { canonicalAdd } from './arithmetic-add';
-import { canonicalMultiply } from './arithmetic-multiply';
-import { canonicalDivide } from './arithmetic-divide';
+import { canonicalMultiply, canonicalDivide } from './arithmetic-mul-div';
 
-import { NumericValue } from '../numeric-value/public';
+import { NumericValue } from '../numeric-value/types';
 import { ExactNumericValue } from '../numeric-value/exact-numeric-value';
 import { canonicalPower, canonicalRoot } from './arithmetic-power';
 
@@ -33,7 +38,6 @@ import { validateArguments, checkNumericArgs } from './validate';
 import { flatten } from './flatten';
 import { canonical, semiCanonical } from './utils';
 import { canonicalNegate } from './negate';
-import type { CanonicalOptions, IComputeEngine, Metadata } from '../types';
 
 /**
  * ### THEORY OF OPERATIONS
@@ -83,7 +87,7 @@ import type { CanonicalOptions, IComputeEngine, Metadata } from '../types';
  */
 
 function boxHold(
-  ce: IComputeEngine,
+  ce: ComputeEngine,
   expr: SemiBoxedExpression | null,
   options: { canonical?: CanonicalOptions }
 ): BoxedExpression {
@@ -120,7 +124,7 @@ function boxHold(
  */
 
 export function boxFunction(
-  ce: IComputeEngine,
+  ce: ComputeEngine,
   name: MathJsonIdentifier,
   ops: readonly SemiBoxedExpression[],
   options?: {
@@ -312,7 +316,7 @@ export function boxFunction(
  */
 
 export function box(
-  ce: IComputeEngine,
+  ce: ComputeEngine,
   expr: null | undefined | NumericValue | SemiBoxedExpression,
   options?: { canonical?: CanonicalOptions; structural?: boolean }
 ): BoxedExpression {
@@ -430,7 +434,7 @@ function asString(expr: SemiBoxedExpression): string | null {
 }
 
 function makeCanonicalFunction(
-  ce: IComputeEngine,
+  ce: ComputeEngine,
   name: string,
   ops: ReadonlyArray<SemiBoxedExpression>,
   metadata?: Metadata
@@ -553,7 +557,7 @@ function makeCanonicalFunction(
 }
 
 function makeNumericFunction(
-  ce: IComputeEngine,
+  ce: ComputeEngine,
   name: MathJsonIdentifier,
   semiOps: ReadonlyArray<SemiBoxedExpression>,
   metadata?: Metadata
@@ -620,7 +624,7 @@ function makeNumericFunction(
 }
 
 function fromNumericValue(
-  ce: IComputeEngine,
+  ce: ComputeEngine,
   value: NumericValue
 ): BoxedExpression {
   if (value.isZero) return ce.Zero;

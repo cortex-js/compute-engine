@@ -1,22 +1,22 @@
-import type { FunctionDefinition } from '../public';
-
-import type { BoxedExpression } from './public';
-
-import { applicable } from '../function-utils';
-import { DEFAULT_COMPLEXITY } from './order';
 import { Type, TypeString } from '../../common/type/types';
 import { parseType } from '../../common/type/parse';
 import { OneOf } from '../../common/one-of';
 import { BoxedType } from '../../common/type/boxed-type';
+
+import { applicable } from '../function-utils';
 import type {
+  FunctionDefinition,
+  BoxedExpression,
   BoxedFunctionDefinition,
   CollectionHandlers,
   CompiledExpression,
   EvaluateOptions,
-  IComputeEngine,
+  ComputeEngine,
   RuntimeScope,
   Sign,
-} from '../types';
+} from '../global-types';
+
+import { DEFAULT_COMPLEXITY } from './order';
 
 const FUNCTION_DEF_KEYS = new Set([
   // Base
@@ -55,7 +55,7 @@ const FUNCTION_DEF_KEYS = new Set([
 ]);
 
 export class _BoxedFunctionDefinition implements BoxedFunctionDefinition {
-  engine: IComputeEngine;
+  engine: ComputeEngine;
   scope: RuntimeScope;
 
   name: string;
@@ -81,12 +81,12 @@ export class _BoxedFunctionDefinition implements BoxedFunctionDefinition {
 
   type?: (
     ops: ReadonlyArray<BoxedExpression>,
-    options: { engine: IComputeEngine }
+    options: { engine: ComputeEngine }
   ) => BoxedType | Type | TypeString | undefined;
 
   sgn?: (
     ops: ReadonlyArray<BoxedExpression>,
-    options: { engine: IComputeEngine }
+    options: { engine: ComputeEngine }
   ) => Sign | undefined;
 
   eq?: (a: BoxedExpression, b: BoxedExpression) => boolean | undefined;
@@ -94,34 +94,34 @@ export class _BoxedFunctionDefinition implements BoxedFunctionDefinition {
 
   even?: (
     ops: ReadonlyArray<BoxedExpression>,
-    options: { engine: IComputeEngine }
+    options: { engine: ComputeEngine }
   ) => boolean | undefined;
 
   canonical?: (
     ops: ReadonlyArray<BoxedExpression>,
-    options: { engine: IComputeEngine }
+    options: { engine: ComputeEngine }
   ) => BoxedExpression | null;
 
   evaluate?: (
     ops: ReadonlyArray<BoxedExpression>,
-    options: Partial<EvaluateOptions> & { engine: IComputeEngine }
+    options: Partial<EvaluateOptions> & { engine: ComputeEngine }
   ) => BoxedExpression | undefined;
 
   evaluateAsync?: (
     ops: ReadonlyArray<BoxedExpression>,
-    options?: Partial<EvaluateOptions> & { engine?: IComputeEngine }
+    options?: Partial<EvaluateOptions> & { engine?: ComputeEngine }
   ) => Promise<BoxedExpression | undefined>;
 
   evalDimension?: (
     ops: ReadonlyArray<BoxedExpression>,
-    options: { engine: IComputeEngine }
+    options: { engine: ComputeEngine }
   ) => BoxedExpression;
 
   compile?: (expr: BoxedExpression) => CompiledExpression;
 
   collection?: Partial<CollectionHandlers>;
 
-  constructor(ce: IComputeEngine, name: string, def: FunctionDefinition) {
+  constructor(ce: ComputeEngine, name: string, def: FunctionDefinition) {
     if (!ce.context) throw Error('No context available');
 
     this.name = name;
@@ -244,7 +244,7 @@ export class _BoxedFunctionDefinition implements BoxedFunctionDefinition {
 }
 
 export function makeFunctionDefinition(
-  engine: IComputeEngine,
+  engine: ComputeEngine,
   name: string,
   def: OneOf<[FunctionDefinition | BoxedFunctionDefinition]>
 ): BoxedFunctionDefinition {
