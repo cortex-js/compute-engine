@@ -224,7 +224,7 @@ export abstract class _BoxedExpression implements BoxedExpression {
   toLatex(options?: Partial<SerializeLatexOptions>): LatexString {
     // We want to use toMathJson(), not .json, so that we have all
     // the digits for numbers, repeated decimals
-    const json = this.toMathJson();
+    const json = this.toMathJson({ prettify: options?.prettify ?? true });
 
     let effectiveOptions: SerializeLatexOptions = {
       imaginaryUnit: '\\imaginaryI',
@@ -249,7 +249,7 @@ export abstract class _BoxedExpression implements BoxedExpression {
       notation: 'auto',
       avoidExponentsInRange: [-7, 20],
 
-      prettify: true,
+      prettify: true, // (overridden subseq. by options)
 
       invisibleMultiply: '', // '\\cdot',
       invisiblePlus: '', // '+',
