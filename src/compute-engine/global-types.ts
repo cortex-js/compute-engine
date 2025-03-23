@@ -26,21 +26,21 @@ import type {
   MathJsonFunction,
   MathJsonIdentifier,
 } from '../math-json';
-import {
+import type {
   LatexDictionaryEntry,
   LatexString,
   ParseLatexOptions,
   SerializeLatexOptions,
 } from './latex-syntax/types';
-import {
+import type {
   ExactNumericValueData,
   NumericValue,
   NumericValueData,
 } from './numeric-value/types';
-import { BigNum, IBigNum, Rational } from './numerics/types';
-import { Type, TypeString } from '../common/type/types';
-import { BoxedType } from '../common/type/boxed-type';
-import { IndexedLatexDictionary } from './latex-syntax/dictionary/definitions';
+import type { BigNum, IBigNum, Rational } from './numerics/types';
+import type { Type, TypeString } from '../common/type/types';
+import type { BoxedType } from '../common/type/boxed-type';
+import type { IndexedLatexDictionary } from './latex-syntax/dictionary/definitions';
 
 /** @category Compiling */
 export type CompiledType = boolean | number | string | object;
@@ -711,13 +711,17 @@ export interface BoxedExpression {
    * Note that if `isNaN` is true, `isNumber` is also true (yes, `NaN` is a
    * number).
    *
+   * If this expression is a symbol, this lookup also causes binding to a definition.
+   *
    * @category Numeric Expression
    *
    */
   readonly isNaN: boolean | undefined;
 
   /**
-   * The numeric value of this expression is `±Infinity` or Complex Infinity
+   * The numeric value of this expression is `±Infinity` or Complex Infinity.
+   *
+   * If this is a symbol, causes it to be bound to a definition.
    *
    * @category Numeric Expression
    */
@@ -901,6 +905,9 @@ export interface BoxedExpression {
    * will return `positive` if the symbol is assumed to be positive
    * (using `ce.assume()`).
    *
+   * For a symbol also, requires that the symbol be bound with its definition (i.e. canonical);
+   * otherwise, will return `undefined`.
+   *
    * @category Numeric Expression
    *
    */
@@ -1010,7 +1017,8 @@ export interface BoxedExpression {
    *  definition.
    *
    * :::info[Note]
-   * `undefined` if not a canonical expression.
+   * For a symbol, always binds - potentially creating - a definition. For `BoxedFunctions`, will
+   * return `undefined` if not canonical.
    * :::
    *
    */
@@ -1028,6 +1036,8 @@ export interface BoxedExpression {
 
   /**
    * For symbols, a definition associated with the expression.
+   *
+   * Bind the expression to a definition, if not already bound.
    *
    * Return `undefined` if not a symbol
    *
@@ -1205,14 +1215,13 @@ export interface BoxedExpression {
   get value(): number | boolean | string | object | undefined;
 
   /**
-   * Only the value of variables can be changed (symbols that are not
-   * constants).
+   * Set the value of this expression (applicable only to `BoxedSymbol`).
    *
-   * Throws a runtime error if a constant.
+   * Will throw a runtime error if either not a BoxedSymbol, or if a symbol expression which is
+   * non-variable/constant.
    *
-   * :::info[Note]
-   * If non-canonical, does nothing
-   * :::
+   * Setting the value of a symbol results in the forgetting of all assumptions about it in the
+   * current scope.
    *
    */
   set value(
@@ -1241,6 +1250,7 @@ export interface BoxedExpression {
    * If not valid, return `"error"`.
    * If non-canonical, return `undefined`.
    * If the type is not known, return `"unknown"`.
+   * If a symbol with a 'function' definition, returns the 'signature' type.
    * :::
    *
    */
@@ -1336,7 +1346,10 @@ export interface BoxedExpression {
   isEqual(other: number | BoxedExpression): boolean | undefined;
 
   /**
-   * Return true if the expression is a collection: a list, a vector, a matrix, a map, a tuple, etc...
+   * Return true if the expression is a collection: a list, a vector, a matrix, a map, a tuple,
+   * etc...
+   *
+   * For symbols, this check involves binding to a definition, if not already canonical.
    */
   isCollection: boolean;
 

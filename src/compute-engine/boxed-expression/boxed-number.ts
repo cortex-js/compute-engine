@@ -364,7 +364,7 @@ export class BoxedNumber extends _BoxedExpression {
 
     let s: number | undefined;
     if (typeof this._value === 'number') {
-      if (Number.isNaN(this._value)) return 'unsigned';
+      if (Number.isNaN(this._value)) return 'nan';
       s = Math.sign(this._value);
     } else s = this._value.sgn();
     // The sign of a complex Numeric Value is `undefined`

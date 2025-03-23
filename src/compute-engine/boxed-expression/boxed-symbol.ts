@@ -50,6 +50,7 @@ import {
   nonPositiveSign,
   negativeSign,
   nonNegativeSign,
+  infinitySgn,
 } from './sgn';
 import type { BigNum } from '../numerics/types';
 import type { OneOf } from '../../common/one-of';
@@ -68,6 +69,28 @@ import { BoxedType } from '../../common/type/boxed-type';
  * not a function expression, i.e. `Sin`, not `["Sin", "Pi"]`. This is used
  * for example in `["InverseFunction", "Sin"]`
  *
+ * BoxedSymbols are bound *lazily* to a definition: unless constructed with either 'canonical =
+ * true' or a definition is explicitly given.
+ *
+ * Various, predicate-based properties & getters for this class either:
+ *
+ * - Trigger the symbol to be bound (if not already). This encompasses those properties that
+ * imply, or rely on accessing the symbol definition - including its value or type. Included are:
+ * 'value', 'isOdd/Even', 're', 'im', or 'isReal/Rational': amongst others.
+ *
+ * - Do not trigger the symbol to be bound, but nevertheless require this to be the case to return
+ * an effective value.
+ * These properties typically return with type `boolean | undefined`, and spans those such as
+ * 'isNaN', 'isInfinity' 'isPositive' & 'isNegative'.
+ *   Notably, this is the case for properties which relate to a *range* of values or 'assumptions'
+ *   about the symbol (e.g. 'is..Positive/Negative'); or in which looking up the value directly is
+ *   not necessary to compute the result (e.g. 'isFinite').
+ *
+ *
+ * Methods which require consultation to a definition value also trigger binding: comparison methods
+ * ('is', 'isSame', 'isEqual', 'isLess'...), 'evaluate' & 'N', and methods pertinent to
+ * 'collection'-valued symbols such as 'contains' & 'subsetOf'.
+ *
  *
  */
 export class BoxedSymbol extends _BoxedExpression {
@@ -75,20 +98,18 @@ export class BoxedSymbol extends _BoxedExpression {
   protected _id: string;
   private _hash: number | undefined;
 
-  // Note: a `BoxedSymbol` is bound lazily to a definition. This is important
-  // during the creation of a scope to avoid circular references.
+  // Note: a `BoxedSymbol` is bound lazily to a definition: unless constructed canonically, or with
+  // a given/explicit definition. This is important during the creation of a scope  to avoid
+  // circular references.
   //
   // This can also happen if a symbol is used before being defined
   // and the engine has no default domain specified. If there
   // is a default domain, a definition is created automatically.
 
-  // `undefined` indicate the symbol has not been bound yet,
-  // `null` indicate that the symbol is not canonical and it should not be
-  // bound.
+  // `undefined` indicates that the symbol has not been bound yet
 
   private _def:
     | OneOf<[BoxedSymbolDefinition, BoxedFunctionDefinition]>
-    | null
     | undefined;
 
   private _isStructural: boolean = false;
@@ -114,6 +135,7 @@ export class BoxedSymbol extends _BoxedExpression {
 
     if (options?.structural) this._isStructural = true;
 
+    //(A symbol having a _scope is indicator of it being canonical)
     if ((options?.canonical ?? true) !== true) this._scope = null;
     else if (this._def) this._scope = ce.context;
     else this.bind();
@@ -165,7 +187,13 @@ export class BoxedSymbol extends _BoxedExpression {
     return ce.lookupSymbol(this._id) ?? ce.lookupFunction(this._id);
   }
 
-  /** This method returns the definition associated with the value of this symbol, or associated with the symbol if it has no value. This is the definition to use with most operations on the symbol. Indeed, "x[2]" is accessing the second element of **the value** of "x".*/
+  /** This method returns the definition associated with the value of this symbol, or associated with
+   * the symbol if it has no value. Used primarily to check, or obtain the value definition for, the
+   * case where this symbol has a 'collection' definition
+   *
+   * This is the definition to use with most operations on the symbol. Indeed, "x[2]" is accessing
+   * the second element of **the value** of "x".
+   */
   private _getDef(): BoxedBaseDefinition | undefined {
     let def: BoxedBaseDefinition | BoxedSymbolDefinition | undefined =
       this.symbolDefinition;
@@ -500,7 +528,7 @@ export class BoxedSymbol extends _BoxedExpression {
   }
 
   // The type of the value of the symbol.
-  // If the symbol is not bound to a definition, the type is 'any'
+  // If the symbol is not bound to a definition, the type is 'unknown'
   get type(): BoxedType {
     const def = this._def;
     if (!def) return BoxedType.unknown;
@@ -555,6 +583,9 @@ export class BoxedSymbol extends _BoxedExpression {
     return match(this, pattern, options);
   }
 
+  /**
+   * **Note**: This check _binds_ the symbol.
+   */
   get isFunction(): boolean | undefined {
     return !!this.functionDefinition;
   }
@@ -567,14 +598,18 @@ export class BoxedSymbol extends _BoxedExpression {
     return this.symbolDefinition?.even;
   }
 
-  get isInfinity(): boolean | undefined {
+  get isFinite(): boolean | undefined {
     const s = this.sgn;
-    return s === 'negative-infinity' || s === 'positive-infinity';
+    if (!s) return undefined;
+    return !(infinitySgn(s) || s === 'nan');
+  }
+
+  get isInfinity(): boolean | undefined {
+    return infinitySgn(this.symbolDefinition?.sgn);
   }
 
   get isNaN(): boolean | undefined {
-    const s = this.sgn;
-    return s === 'nan';
+    return this.symbolDefinition?.sgn === 'nan';
   }
 
   // x > 0
@@ -594,6 +629,12 @@ export class BoxedSymbol extends _BoxedExpression {
     return nonNegativeSign(this.sgn);
   }
 
+  /**
+   *
+   * Checking this does *not bind* the definition if this is symbol.
+   *
+   * @inheritdoc
+   */
   get isNumber(): boolean | undefined {
     // Since we infer the type of a symbol to a `number`, we don't need
     // to check if the type was inferred.

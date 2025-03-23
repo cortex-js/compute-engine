@@ -2175,7 +2175,7 @@ export class ComputeEngine implements IComputeEngine {
     }
   }
 
-  /** Remove all assumptions about one or more symbols */
+  /** Remove all assumptions (in the current scope) about one or more symbols */
   forget(symbol: undefined | string | string[]): void {
     if (!this.context) throw Error('No scope available');
 

@@ -35,6 +35,15 @@ export function sgn(expr: BoxedExpression): Sign | undefined {
   return 'unsigned';
 }
 
+export function infinitySgn(s: Sign | undefined): boolean | undefined {
+  if (s === undefined) return undefined;
+  return (
+    s === 'positive-infinity' ||
+    s === 'negative-infinity' ||
+    s === 'complex-infinity'
+  );
+}
+
 // > 0
 export function positiveSign(s: Sign | undefined): boolean | undefined {
   if (s === undefined) return undefined;
