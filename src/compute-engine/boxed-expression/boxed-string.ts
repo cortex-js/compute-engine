@@ -45,6 +45,10 @@ export class BoxedString extends _BoxedExpression {
     return;
   }
 
+  get constantValue(): string {
+    return this.value as string;
+  }
+
   get type(): BoxedType {
     return new BoxedType('string');
   }

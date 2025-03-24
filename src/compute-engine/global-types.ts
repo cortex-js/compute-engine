@@ -1238,6 +1238,16 @@ export interface BoxedExpression {
   );
 
   /**
+   * Returns the JavaScript primitive value representative of this expression, but only if its value
+   * is a __constant__ one.
+   *
+   * Therefore, returns the same as 'value', but returns `undefined` for non-constant symbols, and
+   * impure functions.
+   *
+   */
+  get constantValue(): number | boolean | string | object | undefined;
+
+  /**
    *
    * The type of the value of this expression.
    *

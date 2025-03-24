@@ -218,6 +218,10 @@ export class BoxedFunction extends _BoxedExpression {
     return this._ops.every((x) => x.isConstant);
   }
 
+  get constantValue(): number | boolean | string | object | undefined {
+    return this.isConstant ? this.value : undefined;
+  }
+
   get json(): Expression {
     return [this._name, ...this.structural.ops!.map((x) => x.json)];
   }
@@ -697,7 +701,6 @@ export class BoxedFunction extends _BoxedExpression {
       const ops = this.ops.map((x) => x.root(exp));
       return mul(...ops);
     }
-
 
     if (this.isNumberLiteral) {
       const v = this.numericValue!;

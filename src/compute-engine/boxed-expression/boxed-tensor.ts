@@ -126,6 +126,10 @@ export class BoxedTensor extends _BoxedExpression {
     );
   }
 
+  get constantValue() {
+    return this.value;
+  }
+
   get isCanonical(): boolean {
     if (this._tensor) return true;
     return this._expression!.isCanonical;

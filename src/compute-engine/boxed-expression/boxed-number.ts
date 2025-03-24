@@ -128,8 +128,28 @@ export class BoxedNumber extends _BoxedExpression {
     return 1;
   }
 
+  /**
+   *
+   * **note**: For BoxedNumbers, returns a number literal if this can be represented in JavaScript
+   * as such (most cases); else returns a string (ComplexInfinity, complex-numbers, for example).
+   *
+   * @inheritdoc
+   *
+   * <!--
+   * (note: overrides parent 'value' - despite identical body - to narrow return-type & add
+   * documenation)
+   * -->
+   */
+  get value(): number | string {
+    return this.N().valueOf();
+  }
+
   get numericValue(): number | NumericValue {
     return this._value;
+  }
+
+  get constantValue(): number {
+    return this.value as number;
   }
 
   get isNumberLiteral(): boolean {
