@@ -681,10 +681,16 @@ export class BoxedFunction extends _BoxedExpression {
       }
     }
 
-    // (√a)^b -> a^(b/2) or √(a^b)
-    if (this.operator === 'Sqrt') {
-      if (e !== undefined) return this.op1.root(e + 2);
-      if (typeof exp !== 'number') return this.op1.root(exp.add(2));
+    // root(sqrt(a), c) -> root(a, 2*c)
+    if (this.operator === 'Sqrt' || this.operator === 'Root') {
+      if (e !== undefined) return this.op1.root(e * 2);
+      if (typeof exp !== 'number') return this.op1.root(exp.mul(2));
+    }
+
+    // root(root(a, b), c) -> root(a, b*c)
+    if (this.operator === 'Root') {
+      const [base, root] = this.ops;
+      return base.root(root.mul(exp));
     }
 
     if (this.operator === 'Multiply') {
@@ -692,10 +698,6 @@ export class BoxedFunction extends _BoxedExpression {
       return mul(...ops);
     }
 
-    if (this.operator === 'Root') {
-      const [base, root] = this.ops;
-      return base.root(root.mul(exp));
-    }
 
     if (this.isNumberLiteral) {
       const v = this.numericValue!;
