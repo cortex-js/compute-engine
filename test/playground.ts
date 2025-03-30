@@ -3,6 +3,8 @@ import { ComputeEngine } from '../src/compute-engine';
 const ce = new ComputeEngine();
 const engine = ce;
 
+ce.parse('\\sin\\pi').N().print();
+
 // Should output 1\cdot 10^3
 console.log(engine.parse('1000').toLatex({ notation: 'scientific' }));
 

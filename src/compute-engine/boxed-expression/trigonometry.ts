@@ -531,11 +531,7 @@ export function evalTrig(
       return applyAngle(
         op,
         Math.cos,
-        (x) =>
-          x
-            .toSignificantDigits(ce.precision + 4)
-            .cos()
-            .toSignificantDigits(ce.precision),
+        (x) => ce.chop(x.cos()),
         (x) => x.cos()
       );
 
@@ -593,11 +589,7 @@ export function evalTrig(
       return applyAngle(
         op,
         Math.sin,
-        (x) =>
-          x
-            .toSignificantDigits(ce.precision + 4)
-            .sin()
-            .toSignificantDigits(ce.precision),
+        (x) => ce.chop(x.sin()),
         (x) => x.sin()
       );
     case 'Sinh':

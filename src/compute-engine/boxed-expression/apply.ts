@@ -29,10 +29,8 @@ export function apply(
 
   if (result === undefined) return undefined;
   if (result instanceof Complex)
-    return ce.number(
-      ce._numericValue({ re: ce.chop(result.re), im: ce.chop(result.im) })
-    );
-  return ce.number(ce.chop(result));
+    return ce.number(ce._numericValue({ re: result.re, im: result.im }));
+  return ce.number(result);
 }
 
 export function apply2(
