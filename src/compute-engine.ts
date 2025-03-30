@@ -8,6 +8,8 @@ export const version = '{{SDK_VERSION}}';
 import { ComputeEngine } from './compute-engine/index';
 export { ComputeEngine } from './compute-engine/index';
 
+export * from './compute-engine/types';
+
 globalThis[Symbol.for('io.cortexjs.compute-engine')] = {
   ComputeEngine: ComputeEngine.prototype.constructor,
   version: '{{SDK_VERSION}}',

@@ -118,6 +118,8 @@ import { isSubtype } from '../common/type/subtype';
 import { BoxedType } from '../common/type/boxed-type';
 import { typeToString } from '../common/type/serialize';
 
+export * from './global-types';
+
 /**
  *
  * To use the Compute Engine, create a `ComputeEngine` instance:

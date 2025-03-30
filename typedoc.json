@@ -32,7 +32,7 @@
   "disableGit": true,
   "outputFileStrategy": "modules",
   "entryPoints": [
-    "./src/compute-engine/public.ts",
+    "./src/compute-engine/types.ts",
     "./src/math-json/types.ts",
     "./src/common/type/types.ts"
   ],
