@@ -1,6 +1,6 @@
 import { Complex } from 'complex-esm';
 import { TensorField, getSupertype, makeTensorField } from './tensor-fields';
-import {
+import type {
   BoxedExpression,
   ComputeEngine,
   DataTypeMap,
