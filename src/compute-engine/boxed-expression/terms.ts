@@ -185,8 +185,8 @@ function nvSum(
   const makeExact = (x) => new ExactNumericValue(x, factory, bignum);
   const factory =
     ce.precision > MACHINE_PRECISION
-      ? (x) => new BigNumericValue(x, bignum)
-      : (x) => new MachineNumericValue(x, makeExact);
+      ? (x) => new BigNumericValue(x, bignum, ce.tolerance)
+      : (x) => new MachineNumericValue(x, makeExact, ce.tolerance);
   return ExactNumericValue.sum(numericValues, factory, bignum);
 }
 
@@ -198,8 +198,8 @@ function nvSumN(
   const makeExact = (x) => new ExactNumericValue(x, factory, bignum);
   const factory =
     ce.precision > MACHINE_PRECISION
-      ? (x) => new BigNumericValue(x, bignum)
-      : (x) => new MachineNumericValue(x, makeExact);
+      ? (x) => new BigNumericValue(x, bignum, ce.tolerance)
+      : (x) => new MachineNumericValue(x, makeExact, ce.tolerance);
   const result = ExactNumericValue.sum(numericValues, factory, bignum);
 
   if (result.length === 0) return makeExact(0);

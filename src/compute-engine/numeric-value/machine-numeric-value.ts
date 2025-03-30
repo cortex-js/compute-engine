@@ -2,7 +2,7 @@ import { Decimal } from 'decimal.js';
 import { BigNumFactory, NumericValue, NumericValueData } from './types';
 import type { Expression } from '../../math-json/types';
 import type { SmallInteger } from '../numerics/types';
-import { DEFAULT_TOLERANCE } from '../numerics/numeric';
+import { chop } from '../numerics/numeric';
 import { numberToString } from '../numerics/strings';
 import { numberToExpression } from '../numerics/expression';
 import { NumericType } from '../../common/type/types';
@@ -16,12 +16,16 @@ export class MachineNumericValue extends NumericValue {
 
   bignum: BigNumFactory;
 
+  tolerance: number;
+
   constructor(
     value: number | Decimal | NumericValueData,
-    bignum: BigNumFactory
+    bignum: BigNumFactory,
+    tolerance: number
   ) {
     super();
     this.bignum = bignum;
+    this.tolerance = tolerance;
 
     if (typeof value === 'number') {
       this.decimal = value;
@@ -110,7 +114,7 @@ export class MachineNumericValue extends NumericValue {
   }
 
   clone(value: number | Decimal | NumericValueData) {
-    return new MachineNumericValue(value, this.bignum);
+    return new MachineNumericValue(value, this.bignum, this.tolerance);
   }
 
   get re(): number {
@@ -324,8 +328,8 @@ export class MachineNumericValue extends NumericValue {
         const zRe = this.pow(re).re;
         const zArg = Math.log(this.decimal) * im;
         return this.clone({
-          re: chop(zRe * Math.cos(zArg)),
-          im: chop(zRe * Math.sin(zArg)),
+          re: chop(zRe * Math.cos(zArg), this.tolerance),
+          im: chop(zRe * Math.sin(zArg), this.tolerance),
         });
       }
     }
@@ -520,11 +524,12 @@ export class MachineNumericValue extends NumericValue {
   eq(other: number | NumericValue): boolean {
     if (this.isNaN) return false;
     if (typeof other === 'number')
-      return this.im === 0 && chop(this.decimal - other) === 0;
+      return this.im === 0 && chop(this.decimal - other, this.tolerance) === 0;
     if (other.isNaN) return false;
     if (!Number.isFinite(this.im)) return !Number.isFinite(other.im);
     return (
-      chop(this.decimal - other.re) === 0 && chop(this.im - other.im) === 0
+      chop(this.decimal - other.re, this.tolerance) === 0 &&
+      chop(this.im - other.im, this.tolerance) === 0
     );
   }
 
@@ -551,9 +556,4 @@ export class MachineNumericValue extends NumericValue {
     if (typeof other === 'number') return this.decimal >= other;
     return this.decimal >= other.re;
   }
-}
-
-function chop(n: number): number {
-  if (Math.abs(n) <= DEFAULT_TOLERANCE) return 0;
-  return n;
 }

@@ -882,8 +882,8 @@ export class ComputeEngine implements IComputeEngine {
     const bignum = (x) => this.bignum(x);
     const makeNumericValue =
       this._precision > MACHINE_PRECISION
-        ? (x) => new BigNumericValue(x, bignum)
-        : (x) => new MachineNumericValue(x, bignum);
+        ? (x) => new BigNumericValue(x, bignum, this.tolerance)
+        : (x) => new MachineNumericValue(x, bignum, this.tolerance);
 
     if (typeof value === 'number') {
       if (Number.isInteger(value))

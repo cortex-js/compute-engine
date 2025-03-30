@@ -4,7 +4,7 @@ import { ExactNumericValue } from './exact-numeric-value';
 import { isInMachineRange } from '../numerics/numeric-bignum';
 import { Expression } from '../../math-json/types';
 import { SmallInteger } from '../numerics/types';
-import { DEFAULT_TOLERANCE } from '../numerics/numeric';
+import { chop } from '../numerics/numeric';
 import { numberToExpression } from '../numerics/expression';
 import { numberToString } from '../numerics/strings';
 import { bigint } from '../numerics/bigint';
@@ -18,12 +18,16 @@ export class BigNumericValue extends NumericValue {
 
   bignum: BigNumFactory;
 
+  tolerance: number;
+
   constructor(
     value: number | Decimal | NumericValueData,
-    bignum: BigNumFactory
+    bignum: BigNumFactory,
+    tolerance: number
   ) {
     super();
     this.bignum = bignum;
+    this.tolerance = tolerance;
 
     if (typeof value === 'number') {
       this.decimal = bignum(value);
@@ -71,13 +75,14 @@ export class BigNumericValue extends NumericValue {
     if (this.isNegativeInfinity) return 'NegativeInfinity';
     if (this.isComplexInfinity) return 'ComplexInfinity';
     if (this.im === 0) {
-      if (isInMachineRange(this.decimal)) return chop(this.decimal.toNumber());
+      if (isInMachineRange(this.decimal))
+        return chop(this.decimal.toNumber(), this.tolerance);
       return { num: decimalToString(this.decimal) };
     }
     if (isInMachineRange(this.decimal))
       return [
         'Complex',
-        numberToExpression(chop(this.decimal.toNumber())),
+        numberToExpression(chop(this.decimal.toNumber(), this.tolerance)),
         numberToExpression(this.im),
       ];
     return [
@@ -110,7 +115,7 @@ export class BigNumericValue extends NumericValue {
   }
 
   clone(value: number | Decimal | NumericValueData) {
-    return new BigNumericValue(value, this.bignum);
+    return new BigNumericValue(value, this.bignum, this.tolerance);
   }
 
   private _makeExact(value: number | bigint): ExactNumericValue {
@@ -118,7 +123,7 @@ export class BigNumericValue extends NumericValue {
   }
 
   get re(): number {
-    return chop(this.decimal.toNumber());
+    return chop(this.decimal.toNumber(), this.tolerance);
   }
 
   get bignumRe(): Decimal {
@@ -251,7 +256,7 @@ export class BigNumericValue extends NumericValue {
 
       return this.clone({
         re: this.decimal.mul(other),
-        im: chop(this.im * other.toNumber()),
+        im: chop(this.im * other.toNumber(), this.tolerance),
       });
     }
 
@@ -352,7 +357,7 @@ export class BigNumericValue extends NumericValue {
         const zArg = this.decimal.ln().mul(im);
         const zIm = this.clone({
           re: zArg.cos(),
-          im: chop(zArg.sin().toNumber()),
+          im: chop(zArg.sin().toNumber(), this.tolerance),
         });
         return zRe.mul(zIm);
       }
@@ -398,7 +403,7 @@ export class BigNumericValue extends NumericValue {
     const newArgument = argument.mul(exponent);
     return this.clone({
       re: newModulus.mul(newArgument.cos()),
-      im: chop(newModulus.mul(newArgument.sin()).toNumber()),
+      im: chop(newModulus.mul(newArgument.sin()).toNumber(), this.tolerance),
     });
   }
 
@@ -435,7 +440,7 @@ export class BigNumericValue extends NumericValue {
     // Return the principal root
     return this.clone({
       re: newModulus.mul(newArgument.cos()),
-      im: chop(newModulus.mul(newArgument.sin()).toNumber()),
+      im: chop(newModulus.mul(newArgument.sin()).toNumber(), this.tolerance),
     });
   }
 
@@ -454,7 +459,8 @@ export class BigNumericValue extends NumericValue {
 
       const realPart = a.add(modulus).div(2).sqrt();
       const imaginaryPart = chop(
-        Math.sign(b) * modulus.sub(a).div(2).sqrt().toNumber()
+        Math.sign(b) * modulus.sub(a).div(2).sqrt().toNumber(),
+        this.tolerance
       );
       return this.clone({ re: realPart, im: imaginaryPart });
     }
@@ -514,7 +520,7 @@ export class BigNumericValue extends NumericValue {
       .mul(a)
       .add(b * b)
       .sqrt();
-    const argument = chop(Decimal.atan2(b, a).toNumber());
+    const argument = chop(Decimal.atan2(b, a).toNumber(), this.tolerance);
 
     if (base === undefined)
       return this.clone({ re: modulus.ln(), im: argument });
@@ -532,8 +538,8 @@ export class BigNumericValue extends NumericValue {
       // exp(a + bi) = exp(a) * (cos(b) + i * sin(b))
       const e = this.decimal.exp();
       return this.clone({
-        re: e.mul(chop(Math.cos(this.im))),
-        im: chop(e.mul(Math.sin(this.im)).toNumber()),
+        re: e.mul(chop(Math.cos(this.im), this.tolerance)),
+        im: chop(e.mul(Math.sin(this.im)).toNumber(), this.tolerance),
       });
     }
     return this.clone(this.decimal.exp());
@@ -565,7 +571,7 @@ export class BigNumericValue extends NumericValue {
     if (!Number.isFinite(this.im)) return !Number.isFinite(other.im);
     return (
       this.decimal.eq(other.bignumRe ?? other.re) &&
-      chop(this.im - other.im) === 0
+      chop(this.im - other.im, this.tolerance) === 0
     );
   }
 
@@ -616,10 +622,4 @@ function decimalToString(num: Decimal): string {
 
   // If the number is not in scientific notation or doesn't meet the criteria, return the original string
   return numStr;
-}
-
-function chop(n: number): number {
-  if (Math.abs(n) <= DEFAULT_TOLERANCE) return 0;
-
-  return n;
 }
