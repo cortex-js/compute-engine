@@ -6,13 +6,7 @@ export * from '../math-json/types';
 export * from '../common/type/boxed-type';
 export * from '../common/type/types';
 
-export type {
-  LatexString,
-  SerializeLatexOptions,
-  NumberSerializationFormat,
-  DelimiterScale,
-  NumberFormat,
-} from './latex-syntax/types';
+export type * from './latex-syntax/types';
 
 export * from './latex-syntax/dictionary/definitions';
 

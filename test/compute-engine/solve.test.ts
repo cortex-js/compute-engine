@@ -147,7 +147,7 @@ describe('expr.solve()', () => {
         ],
         [
           Complex,
-          0,
+          -0,
           -1,
         ],
       ]

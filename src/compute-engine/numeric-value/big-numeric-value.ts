@@ -4,7 +4,6 @@ import { ExactNumericValue } from './exact-numeric-value';
 import { isInMachineRange } from '../numerics/numeric-bignum';
 import { Expression } from '../../math-json/types';
 import { SmallInteger } from '../numerics/types';
-import { DEFAULT_TOLERANCE } from '../numerics/numeric';
 import { numberToExpression } from '../numerics/expression';
 import { numberToString } from '../numerics/strings';
 import { bigint } from '../numerics/bigint';
@@ -71,13 +70,13 @@ export class BigNumericValue extends NumericValue {
     if (this.isNegativeInfinity) return 'NegativeInfinity';
     if (this.isComplexInfinity) return 'ComplexInfinity';
     if (this.im === 0) {
-      if (isInMachineRange(this.decimal)) return chop(this.decimal.toNumber());
+      if (isInMachineRange(this.decimal)) return this.decimal.toNumber();
       return { num: decimalToString(this.decimal) };
     }
     if (isInMachineRange(this.decimal))
       return [
         'Complex',
-        numberToExpression(chop(this.decimal.toNumber())),
+        numberToExpression(this.decimal.toNumber()),
         numberToExpression(this.im),
       ];
     return [
@@ -118,7 +117,7 @@ export class BigNumericValue extends NumericValue {
   }
 
   get re(): number {
-    return chop(this.decimal.toNumber());
+    return this.decimal.toNumber();
   }
 
   get bignumRe(): Decimal {
@@ -251,7 +250,7 @@ export class BigNumericValue extends NumericValue {
 
       return this.clone({
         re: this.decimal.mul(other),
-        im: chop(this.im * other.toNumber()),
+        im: this.im * other.toNumber(),
       });
     }
 
@@ -514,7 +513,7 @@ export class BigNumericValue extends NumericValue {
       .mul(a)
       .add(b * b)
       .sqrt();
-    const argument = chop(Decimal.atan2(b, a).toNumber());
+    const argument = Decimal.atan2(b, a).toNumber();
 
     if (base === undefined)
       return this.clone({ re: modulus.ln(), im: argument });
@@ -564,8 +563,7 @@ export class BigNumericValue extends NumericValue {
     if (other.isNaN) return false;
     if (!Number.isFinite(this.im)) return !Number.isFinite(other.im);
     return (
-      this.decimal.eq(other.bignumRe ?? other.re) &&
-      chop(this.im - other.im) === 0
+      this.decimal.eq(other.bignumRe ?? other.re) && this.im - other.im === 0
     );
   }
 
@@ -618,8 +616,9 @@ function decimalToString(num: Decimal): string {
   return numStr;
 }
 
+/* Use with trig functions to avoid rounding errors.
+   Note that we use 1e14 as the tolerance, as this is applied to a machine 
+   number and is independent of the compute engine tolerance */
 function chop(n: number): number {
-  if (Math.abs(n) <= DEFAULT_TOLERANCE) return 0;
-
-  return n;
+  return Math.abs(n) <= 1e-14 ? 0 : n;
 }

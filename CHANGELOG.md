@@ -1,3 +1,8 @@
+## [Unreleased]
+
+- **#231** During evaluation, some numbers, for example `10e-15` were
+  incorrectly rounded to 0.
+
 ## 0.28.0 _2025-02-06_
 
 ### Issues Resolved
@@ -1995,7 +2000,8 @@ Work around unpckg.com issue with libraries using BigInt.
 
 Read more at
 [Core Reference](https://cortexjs.io/compute-engine/reference/core/) and
-[Arithmetic Reference] (https://cortexjs.io/compute-engine/reference/arithmetic/)
+[Arithmetic Reference]
+(https://cortexjs.io/compute-engine/reference/arithmetic/)
 
 ### Bugs Fixed
 

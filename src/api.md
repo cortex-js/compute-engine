@@ -4114,6 +4114,24 @@ engine instance, new instances of this type are created as needed.
 
 ## Latex Parsing and Serialization
 
+<a id="latextoken" name="latextoken"></a>
+
+<MemberCard>
+
+### LatexToken
+
+```ts
+type LatexToken = string | "<{>" | "<}>" | "<space>" | "<$>" | "<$$>";
+```
+
+A `LatexToken` is a token as returned by `Parser.peek`.
+
+It can be one of the indicated tokens, or a string that starts with a
+`` for LaTeX commands, or a LaTeX character which includes digits,
+letters and punctuation.
+
+</MemberCard>
+
 <a id="latexstring" name="latexstring"></a>
 
 <MemberCard>
@@ -4129,6 +4147,37 @@ A LatexString is a regular string of LaTeX, for example:
 
 </MemberCard>
 
+<a id="delimiter" name="delimiter"></a>
+
+<MemberCard>
+
+### Delimiter
+
+```ts
+type Delimiter = 
+  | ")"
+  | "("
+  | "]"
+  | "["
+  | "{"
+  | "}"
+  | "<"
+  | ">"
+  | "|"
+  | "||"
+  | "\lceil"
+  | "\rceil"
+  | "\lfloor"
+  | "\rfloor"
+  | "\llbracket"
+  | "\rrbracket";
+```
+
+Open and close delimiters that can be used with [`MatchfixEntry`](#matchfixentry)
+record to define new LaTeX dictionary entries.
+
+</MemberCard>
+
 <a id="delimiterscale" name="delimiterscale"></a>
 
 <MemberCard>
@@ -4138,6 +4187,1328 @@ A LatexString is a regular string of LaTeX, for example:
 ```ts
 type DelimiterScale = "normal" | "scaled" | "big" | "none";
 ```
+
+</MemberCard>
+
+<a id="librarycategory" name="librarycategory"></a>
+
+<MemberCard>
+
+### LibraryCategory
+
+```ts
+type LibraryCategory = 
+  | "algebra"
+  | "arithmetic"
+  | "calculus"
+  | "collections"
+  | "control-structures"
+  | "combinatorics"
+  | "complex"
+  | "core"
+  | "data-structures"
+  | "dimensions"
+  | "domains"
+  | "linear-algebra"
+  | "logic"
+  | "numeric"
+  | "other"
+  | "physics"
+  | "polynomials"
+  | "relop"
+  | "sets"
+  | "statistics"
+  | "styling"
+  | "symbols"
+  | "trigonometry"
+  | "units";
+```
+
+</MemberCard>
+
+<a id="precedence" name="precedence"></a>
+
+<MemberCard>
+
+### Precedence
+
+```ts
+type Precedence = number;
+```
+
+:::info[THEORY OF OPERATIONS]
+
+The precedence of an operator is a number that indicates the order in which
+operators are applied.
+
+For example, in `1 + 2 * 3`, the `*` operator has a **higher** precedence
+than the `+` operator, so it is applied first.
+
+The precedence range from 0 to 1000. The larger the number, the higher the
+precedence, the more "binding" the operator is.
+
+Here are some rough ranges for the precedence:
+
+- 800: prefix and postfix operators: `\lnot` etc...
+   - `POSTFIX_PRECEDENCE` = 810: `!`, `'`
+- 700: some arithmetic operators
+   - `EXPONENTIATION_PRECEDENCE` = 700: `^`
+- 600: some binary operators
+   - `DIVISION_PRECEDENCE` = 600: `\div`
+- 500: not used
+- 400: not used
+- 300: some logic and arithmetic operators:
+       `\land`, `\lor`, `\times`, etc...
+  - `MULTIPLICATION_PRECEDENCE` = 390: `\times`
+- 200: arithmetic operators, inequalities:
+  - `ADDITION_PRECEDENCE` = 275: `+` `-`
+  - `ARROW_PRECEDENCE` = 270: `\to` `\rightarrow`
+  - `ASSIGNMENT_PRECEDENCE` = 260: `:=`
+  - `COMPARISON_PRECEDENCE` = 245: `\lt` `\gt`
+  - 241: `\leq`
+- 100: not used
+- 0: `,`, `;`, etc...
+
+Some constants are defined below for common precedence values.
+
+**Note**: MathML defines
+[some operator precedence](https://www.w3.org/TR/2009/WD-MathML3-20090924/appendixc.html),
+but it has some issues and inconsistencies. However,
+whenever possible we adopted the MathML precedence.
+
+The JavaScript operator precedence is documented
+[here](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Operators/Operator_precedence).
+
+:::
+
+</MemberCard>
+
+<a id="terminator" name="terminator"></a>
+
+<MemberCard>
+
+### Terminator
+
+```ts
+type Terminator = {
+  minPrec: Precedence;
+  condition: (parser) => boolean;
+};
+```
+
+This indicates a condition under which parsing should stop:
+- an operator of a precedence higher than specified has been encountered
+- the last token has been reached
+- or if a condition is provided, the condition returns true
+
+</MemberCard>
+
+<a id="expressionparsehandler" name="expressionparsehandler"></a>
+
+<MemberCard>
+
+### ExpressionParseHandler()
+
+```ts
+type ExpressionParseHandler = (parser, until?) => Expression | null;
+```
+
+Custom parsing handler.
+
+When invoked the parser points right after the LaTeX fragment that triggered
+this parsing handler.
+
+The parser should be moved, by calling `parser.nextToken()` for
+every consumed token.
+
+If it was in an infix or postfix context, `lhs` will represent the
+left-hand side argument. In a prefix or matchfix context, `lhs` is `null`.
+
+In a superfix (^) or subfix (_) context (that is if the first token of the
+trigger is `^` or `_`), lhs is `["Superscript", lhs, rhs]`
+and `["Subscript", lhs, rhs]`, respectively.
+
+The handler should return `null` if the expression could not be parsed
+(didn't match the syntax that was expected). The matching expression
+otherwise.
+
+</MemberCard>
+
+<a id="prefixparsehandler" name="prefixparsehandler"></a>
+
+<MemberCard>
+
+### PrefixParseHandler()
+
+```ts
+type PrefixParseHandler = (parser, until?) => Expression | null;
+```
+
+</MemberCard>
+
+<a id="symbolparsehandler" name="symbolparsehandler"></a>
+
+<MemberCard>
+
+### SymbolParseHandler()
+
+```ts
+type SymbolParseHandler = (parser, until?) => Expression | null;
+```
+
+</MemberCard>
+
+<a id="functionparsehandler" name="functionparsehandler"></a>
+
+<MemberCard>
+
+### FunctionParseHandler()
+
+```ts
+type FunctionParseHandler = (parser, until?) => Expression | null;
+```
+
+</MemberCard>
+
+<a id="environmentparsehandler" name="environmentparsehandler"></a>
+
+<MemberCard>
+
+### EnvironmentParseHandler()
+
+```ts
+type EnvironmentParseHandler = (parser, until?) => Expression | null;
+```
+
+</MemberCard>
+
+<a id="postfixparsehandler" name="postfixparsehandler"></a>
+
+<MemberCard>
+
+### PostfixParseHandler()
+
+```ts
+type PostfixParseHandler = (parser, lhs, until?) => Expression | null;
+```
+
+</MemberCard>
+
+<a id="infixparsehandler" name="infixparsehandler"></a>
+
+<MemberCard>
+
+### InfixParseHandler()
+
+```ts
+type InfixParseHandler = (parser, lhs, until) => Expression | null;
+```
+
+</MemberCard>
+
+<a id="matchfixparsehandler" name="matchfixparsehandler"></a>
+
+<MemberCard>
+
+### MatchfixParseHandler()
+
+```ts
+type MatchfixParseHandler = (parser, body) => Expression | null;
+```
+
+</MemberCard>
+
+<a id="latexargumenttype" name="latexargumenttype"></a>
+
+<MemberCard>
+
+### LatexArgumentType
+
+```ts
+type LatexArgumentType = 
+  | "{expression}"
+  | "[expression]"
+  | "{text}"
+  | "[text]"
+  | "{unit}"
+  | "[unit]"
+  | "{glue}"
+  | "[glue]"
+  | "{string}"
+  | "[string]"
+  | "{color}"
+  | "[color]";
+```
+
+</MemberCard>
+
+<a id="trigger" name="trigger"></a>
+
+<MemberCard>
+
+### Trigger
+
+```ts
+type Trigger = {
+  latexTrigger:   | LatexString
+     | LatexToken[];
+  identifierTrigger: MathJsonIdentifier;
+};
+```
+
+A trigger is the set of tokens that will make an entry in the
+LaTeX dictionary eligible to parse the stream and generate an expression.
+If the trigger matches, the `parse` handler is called, if available.
+
+The trigger can be specified either as a LaTeX string (`latexTrigger`) or
+as an identifier (`identifierTrigger`). An identifier match several
+LaTeEx expressions that are equivalent, for example `\operatorname{gcd}` or
+ `\mathbin{gcd}`, match the `"gcd"` identifier
+
+`matchfix` operators use `openTrigger` and `closeTrigger` instead.
+
+</MemberCard>
+
+<a id="baseentry" name="baseentry"></a>
+
+<MemberCard>
+
+### BaseEntry
+
+```ts
+type BaseEntry = {
+  name: MathJsonIdentifier;
+  serialize:   | LatexString
+     | SerializeHandler;
+};
+```
+
+Maps a string of LaTeX tokens to a function or symbol and vice-versa.
+
+<a id="baseentry_name-2" name="baseentry_name-2"></a>
+
+#### BaseEntry.name?
+
+```ts
+optional name: MathJsonIdentifier;
+```
+
+Map a MathJSON identifier to this entry.
+
+Each entry should have at least a `name` or a `parse` handler.
+
+An entry with no `name` cannot be serialized: the `name` is used to map
+a MathJSON function or symbol name to the appropriate entry for
+serializing.
+
+However, an entry with no `name` can be used to define a synonym (for
+example for the symbol `\varnothing` which is a synonym for `\emptyset`).
+
+If no `parse` handler is provided, only the trigger is used to select this
+entry. Otherwise, if the trigger of the entry matches the current
+token, the `parse` handler is invoked.
+
+<a id="baseentry_serialize-2" name="baseentry_serialize-2"></a>
+
+#### BaseEntry.serialize?
+
+```ts
+optional serialize: 
+  | LatexString
+  | SerializeHandler;
+```
+
+Transform an expression into a LaTeX string.
+If no `serialize` handler is provided, the trigger is used.
+
+</MemberCard>
+
+<a id="defaultentry" name="defaultentry"></a>
+
+<MemberCard>
+
+### DefaultEntry
+
+```ts
+type DefaultEntry = BaseEntry & Trigger & {
+  parse:   | Expression
+     | ExpressionParseHandler;
+};
+```
+
+</MemberCard>
+
+<a id="expressionentry" name="expressionentry"></a>
+
+<MemberCard>
+
+### ExpressionEntry
+
+```ts
+type ExpressionEntry = BaseEntry & Trigger & {
+  kind: "expression";
+  parse:   | Expression
+     | ExpressionParseHandler;
+  precedence: Precedence;
+};
+```
+
+</MemberCard>
+
+<a id="matchfixentry" name="matchfixentry"></a>
+
+<MemberCard>
+
+### MatchfixEntry
+
+```ts
+type MatchfixEntry = BaseEntry & {
+  kind: "matchfix";
+  openTrigger: Delimiter | LatexToken[];
+  closeTrigger: Delimiter | LatexToken[];
+  parse: MatchfixParseHandler;
+};
+```
+
+#### MatchfixEntry.openTrigger
+
+```ts
+openTrigger: Delimiter | LatexToken[];
+```
+
+If `kind` is `'matchfix'`: the `openTrigger` and `closeTrigger`
+properties are required.
+
+#### MatchfixEntry.parse?
+
+```ts
+optional parse: MatchfixParseHandler;
+```
+
+When invoked, the parser is pointing after the close delimiter.
+The argument of the handler is the body, i.e. the content between
+the open delimiter and the close delimiter.
+
+</MemberCard>
+
+<a id="infixentry" name="infixentry"></a>
+
+<MemberCard>
+
+### InfixEntry
+
+```ts
+type InfixEntry = BaseEntry & Trigger & {
+  kind: "infix";
+  associativity: "right" | "left" | "none" | "any";
+  precedence: Precedence;
+  parse: string | InfixParseHandler;
+};
+```
+
+#### InfixEntry.kind
+
+```ts
+kind: "infix";
+```
+
+Infix position, with an operand before and an operand after: `a ⊛ b`.
+
+Example: `+`, `\times`.
+
+#### InfixEntry.associativity?
+
+```ts
+optional associativity: "right" | "left" | "none" | "any";
+```
+
+- **`none`**: a ? b ? c -> syntax error
+- **`any`**: a + b + c -> +(a, b, c)
+- **`left`**: a / b / c -> /(/(a, b), c)
+- **`right`**: a = b = c -> =(a, =(b, c))
+
+- `any`-associative operators have an unlimited number of arguments
+- `left`, `right` or `none` associative operators have two arguments
+
+</MemberCard>
+
+<a id="postfixentry" name="postfixentry"></a>
+
+<MemberCard>
+
+### PostfixEntry
+
+```ts
+type PostfixEntry = BaseEntry & Trigger & {
+  kind: "postfix";
+  precedence: Precedence;
+  parse: string | PostfixParseHandler;
+};
+```
+
+#### PostfixEntry.kind
+
+```ts
+kind: "postfix";
+```
+
+Postfix position, with an operand before: `a ⊛`
+
+Example: `!`.
+
+</MemberCard>
+
+<a id="prefixentry" name="prefixentry"></a>
+
+<MemberCard>
+
+### PrefixEntry
+
+```ts
+type PrefixEntry = BaseEntry & Trigger & {
+  kind: "prefix";
+  precedence: Precedence;
+  parse: string | PrefixParseHandler;
+};
+```
+
+#### PrefixEntry.kind
+
+```ts
+kind: "prefix";
+```
+
+Prefix position, with an operand after: `⊛ a`
+
+Example: `-`, `\not`.
+
+</MemberCard>
+
+<a id="environmententry" name="environmententry"></a>
+
+<MemberCard>
+
+### EnvironmentEntry
+
+```ts
+type EnvironmentEntry = BaseEntry & {
+  kind: "environment";
+  parse: EnvironmentParseHandler;
+  identifierTrigger: MathJsonIdentifier;
+};
+```
+
+A LaTeX dictionary entry for an environment, that is a LaTeX
+construct using `\begin{...}...\end{...}`.
+
+</MemberCard>
+
+<a id="symbolentry" name="symbolentry"></a>
+
+<MemberCard>
+
+### SymbolEntry
+
+```ts
+type SymbolEntry = BaseEntry & Trigger & {
+  kind: "symbol";
+  precedence: Precedence;
+  parse:   | Expression
+     | SymbolParseHandler;
+};
+```
+
+#### SymbolEntry.precedence?
+
+```ts
+optional precedence: Precedence;
+```
+
+Used for appropriate wrapping (i.e. when to surround it with parens)
+
+</MemberCard>
+
+<a id="functionentry" name="functionentry"></a>
+
+<MemberCard>
+
+### FunctionEntry
+
+```ts
+type FunctionEntry = BaseEntry & Trigger & {
+  kind: "function";
+  parse:   | Expression
+     | FunctionParseHandler;
+};
+```
+
+A function is an identifier followed by:
+- some postfix operators such as `\prime`
+- an optional list of arguments in an enclosure (parentheses)
+
+For more complex situations, for example implicit arguments or
+inverse functions postfix (i.e. ^{-1}), use a custom parse handler with a
+entry of kind `expression`.
+
+</MemberCard>
+
+<a id="latexdictionaryentry" name="latexdictionaryentry"></a>
+
+<MemberCard>
+
+### LatexDictionaryEntry
+
+```ts
+type LatexDictionaryEntry = OneOf<[
+  | ExpressionEntry
+  | MatchfixEntry
+  | InfixEntry
+  | PostfixEntry
+  | PrefixEntry
+  | SymbolEntry
+  | FunctionEntry
+  | EnvironmentEntry
+| DefaultEntry]>;
+```
+
+A dictionary entry is a record that maps a LaTeX token or string of tokens
+( a trigger) to a MathJSON expression or to a parsing handler.
+
+Set the ComputeEngine.latexDictionary property to an array of
+dictionary entries to define custom LaTeX parsing and serialization.
+
+</MemberCard>
+
+<a id="parselatexoptions" name="parselatexoptions"></a>
+
+<MemberCard>
+
+### ParseLatexOptions
+
+```ts
+type ParseLatexOptions = NumberFormat & {
+  skipSpace: boolean;
+  parseNumbers: "auto" | "rational" | "decimal" | "never";
+  getIdentifierType: (identifier) => SymbolType;
+  parseUnexpectedToken: (lhs, parser) => Expression | null;
+  preserveLatex: boolean;
+};
+```
+
+The LaTeX parsing options can be used with the `ce.parse()` method.
+
+#### ParseLatexOptions.skipSpace
+
+```ts
+skipSpace: boolean;
+```
+
+If true, ignore space characters in math mode.
+
+**Default**: `true`
+
+#### ParseLatexOptions.parseNumbers
+
+```ts
+parseNumbers: "auto" | "rational" | "decimal" | "never";
+```
+
+When parsing a decimal number, e.g. `3.1415`:
+
+- `"auto"` or `"decimal"`: if a decimal number, parse it as an approximate
+  decimal number with a whole part and a fractional part
+- `"rational"`: if a decimal number, parse it as an exact rational number
+  with a numerator  and a denominator. If not a decimal number, parse
+  it as a regular number.
+- `"never"`: do not parse numbers, instead return each token making up
+ the number (minus sign, digits, decimal marker, etc...).
+
+Note: if the number includes repeating digits (e.g. `1.33(333)`),
+it will be parsed as a decimal number even if this setting is `"rational"`.
+
+**Default**: `"auto"`
+
+#### ParseLatexOptions.getIdentifierType()
+
+```ts
+getIdentifierType: (identifier) => SymbolType;
+```
+
+This handler is invoked when the parser encounters an identifier
+that has not yet been declared.
+
+The `identifier` argument is a [valid identifier](#identifiers).
+
+The handler can return:
+
+- `"variable"`: the identifier is a variable
+- `"function"`: the identifier is a function name. If an apply
+function operator (typically, parentheses) follow, they will be parsed
+as arguments to the function.
+
+- `"unknown"`: the identifier is not recognized.
+
+#### ParseLatexOptions.parseUnexpectedToken()
+
+```ts
+parseUnexpectedToken: (lhs, parser) => Expression | null;
+```
+
+This handler is invoked when the parser encounters an unexpected token.
+
+The `lhs` argument is the left-hand side of the token, if any.
+
+The handler can access the unexpected token with `parser.peek`. If
+it is a token that should be recognized, the handler can consume it
+by calling `parser.nextToken()`.
+
+The handler should return an expression or `null` if the token is not
+recognized.
+
+#### ParseLatexOptions.preserveLatex
+
+```ts
+preserveLatex: boolean;
+```
+
+If true, the expression will be decorated with the LaTeX
+fragments corresponding to each elements of the expression.
+
+The top-level expression, that is the one returned by `parse()`, will
+include the verbatim LaTeX input that was parsed. The sub-expressions
+may contain a slightly different LaTeX, for example with consecutive spaces
+replaced by one, with comments removed and with some low-level LaTeX
+commands replaced, for example `\egroup` and `\bgroup`.
+
+**Default:** `false`
+
+</MemberCard>
+
+<a id="parser" name="parser"></a>
+
+### Parser
+
+An instance of `Parser` is provided to the `parse` handlers of custom
+LaTeX dictionary entries.
+
+<a id="parser_options" name="parser_options"></a>
+
+<MemberCard>
+
+##### Parser.options
+
+```ts
+readonly options: Required<ParseLatexOptions>;
+```
+
+</MemberCard>
+
+<a id="parser_index" name="parser_index"></a>
+
+<MemberCard>
+
+##### Parser.index
+
+```ts
+index: number;
+```
+
+The index of the current token
+
+</MemberCard>
+
+<a id="parser_atend" name="parser_atend"></a>
+
+<MemberCard>
+
+##### Parser.atEnd
+
+```ts
+readonly atEnd: boolean;
+```
+
+True if the last token has been reached.
+Consider also `atTerminator()`.
+
+</MemberCard>
+
+<a id="parser_peek" name="parser_peek"></a>
+
+<MemberCard>
+
+##### Parser.peek
+
+```ts
+readonly peek: string;
+```
+
+Return the next token, without advancing the index
+
+</MemberCard>
+
+<a id="parser_atboundary" name="parser_atboundary"></a>
+
+<MemberCard>
+
+##### Parser.atBoundary
+
+</MemberCard>
+
+<a id="parser_getidentifiertype" name="parser_getidentifiertype"></a>
+
+<MemberCard>
+
+##### Parser.getIdentifierType()
+
+```ts
+getIdentifierType(id): SymbolType
+```
+
+####### id
+
+`string`
+
+</MemberCard>
+
+<a id="parser_pushsymboltable" name="parser_pushsymboltable"></a>
+
+<MemberCard>
+
+##### Parser.pushSymbolTable()
+
+```ts
+pushSymbolTable(): void
+```
+
+</MemberCard>
+
+<a id="parser_popsymboltable" name="parser_popsymboltable"></a>
+
+<MemberCard>
+
+##### Parser.popSymbolTable()
+
+```ts
+popSymbolTable(): void
+```
+
+</MemberCard>
+
+<a id="parser_addsymbol" name="parser_addsymbol"></a>
+
+<MemberCard>
+
+##### Parser.addSymbol()
+
+```ts
+addSymbol(id, type): void
+```
+
+####### id
+
+`string`
+
+####### type
+
+[`SymbolType`](#symboltype)
+
+</MemberCard>
+
+<a id="parser_atterminator" name="parser_atterminator"></a>
+
+<MemberCard>
+
+##### Parser.atTerminator()
+
+```ts
+atTerminator(t): boolean
+```
+
+Return true if the terminator condition is met or if the last token
+has been reached.
+
+####### t
+
+[`Terminator`](#terminator)
+
+</MemberCard>
+
+<a id="parser_nexttoken" name="parser_nexttoken"></a>
+
+<MemberCard>
+
+##### Parser.nextToken()
+
+```ts
+nextToken(): string
+```
+
+Return the next token and advance the index
+
+</MemberCard>
+
+<a id="parser_latex-1" name="parser_latex-1"></a>
+
+<MemberCard>
+
+##### Parser.latex()
+
+```ts
+latex(start, end?): string
+```
+
+Return a string representation of the expression
+between `start` and `end` (default: the whole expression)
+
+####### start
+
+`number`
+
+####### end?
+
+`number`
+
+</MemberCard>
+
+<a id="parser_error" name="parser_error"></a>
+
+<MemberCard>
+
+##### Parser.error()
+
+```ts
+error(code, fromToken): Expression
+```
+
+Return an error expression with the specified code and arguments
+
+####### code
+
+`string` | \[`string`, `...Expression[]`\]
+
+####### fromToken
+
+`number`
+
+</MemberCard>
+
+<a id="parser_skipspace" name="parser_skipspace"></a>
+
+<MemberCard>
+
+##### Parser.skipSpace()
+
+```ts
+skipSpace(): boolean
+```
+
+If there are any space, advance the index until a non-space is encountered
+
+</MemberCard>
+
+<a id="parser_skipvisualspace" name="parser_skipvisualspace"></a>
+
+<MemberCard>
+
+##### Parser.skipVisualSpace()
+
+```ts
+skipVisualSpace(): void
+```
+
+Skip over "visual space" which
+includes space tokens, empty groups `{}`, and commands such as `\,` and `\!`
+
+</MemberCard>
+
+<a id="parser_match-1" name="parser_match-1"></a>
+
+<MemberCard>
+
+##### Parser.match()
+
+```ts
+match(token): boolean
+```
+
+If the next token matches the target advance and return true. Otherwise
+return false
+
+####### token
+
+`string`
+
+</MemberCard>
+
+<a id="parser_matchall" name="parser_matchall"></a>
+
+<MemberCard>
+
+##### Parser.matchAll()
+
+```ts
+matchAll(tokens): boolean
+```
+
+Return true if the next tokens match the argument, an array of tokens, or null otherwise
+
+####### tokens
+
+`string`[]
+
+</MemberCard>
+
+<a id="parser_matchany" name="parser_matchany"></a>
+
+<MemberCard>
+
+##### Parser.matchAny()
+
+```ts
+matchAny(tokens): string
+```
+
+Return the next token if it matches any of the token in the argument or null otherwise
+
+####### tokens
+
+`string`[]
+
+</MemberCard>
+
+<a id="parser_matchchar" name="parser_matchchar"></a>
+
+<MemberCard>
+
+##### Parser.matchChar()
+
+```ts
+matchChar(): string
+```
+
+If the next token is a character, return it and advance the index
+This includes plain characters (e.g. 'a', '+'...), characters
+defined in hex (^^ and ^^^^), the `\char` and `\unicode` command.
+
+</MemberCard>
+
+<a id="parser_parsegroup" name="parser_parsegroup"></a>
+
+<MemberCard>
+
+##### Parser.parseGroup()
+
+```ts
+parseGroup(): Expression
+```
+
+Parse an expression in a LaTeX group enclosed in curly brackets `{}`.
+These are often used as arguments to LaTeX commands, for example
+`\frac{1}{2}`.
+
+Return `null` if none was found
+Return `Nothing` if an empty group `{}` was found
+
+</MemberCard>
+
+<a id="parser_parsetoken" name="parser_parsetoken"></a>
+
+<MemberCard>
+
+##### Parser.parseToken()
+
+```ts
+parseToken(): Expression
+```
+
+Some LaTeX commands (but not all) can accept arguments as single
+tokens (i.e. without braces), for example `^2`, `\sqrt3` or `\frac12`
+
+This argument will usually be a single token, but can be a sequence of
+tokens (e.g. `\sqrt\frac12` or `\sqrt\operatorname{speed}`).
+
+The following tokens are excluded from consideration in order to fail
+early when encountering a likely syntax error, for example `x^(2)`
+instead of `x^{2}`. With `(` in the list of excluded tokens, the
+match will fail and the error can be recovered.
+
+The excluded tokens include `!"#$%&(),/;:?@[]`|~", `\left`, `\bigl`, etc...
+
+</MemberCard>
+
+<a id="parser_parseoptionalgroup" name="parser_parseoptionalgroup"></a>
+
+<MemberCard>
+
+##### Parser.parseOptionalGroup()
+
+```ts
+parseOptionalGroup(): Expression
+```
+
+Parse an expression enclosed in a LaTeX optional group enclosed in square brackets `[]`.
+
+Return `null` if none was found.
+
+</MemberCard>
+
+<a id="parser_parseenclosure" name="parser_parseenclosure"></a>
+
+<MemberCard>
+
+##### Parser.parseEnclosure()
+
+```ts
+parseEnclosure(): Expression
+```
+
+Parse an enclosure (open paren/close paren, etc..) and return the expression inside the enclosure
+
+</MemberCard>
+
+<a id="parser_parsestringgroup" name="parser_parsestringgroup"></a>
+
+<MemberCard>
+
+##### Parser.parseStringGroup()
+
+```ts
+parseStringGroup(optional?): string
+```
+
+Some LaTeX commands have arguments that are not interpreted as
+expressions, but as strings. For example, `\begin{array}{ccc}` (both
+`array` and `ccc` are strings), `\color{red}` or `\operatorname{lim sup}`.
+
+If the next token is the start of a group (`{`), return the content
+of the group as a string. This may include white space, and it may need
+to be trimmed at the start and end of the string.
+
+LaTeX commands are typically not allowed inside a string group (for example,
+`\alpha` would result in an error), but we do not enforce this.
+
+If `optional` is true, this should be an optional group in square brackets
+otherwise it is a regular group in braces.
+
+####### optional?
+
+`boolean`
+
+</MemberCard>
+
+<a id="parser_parsesymbol" name="parser_parsesymbol"></a>
+
+<MemberCard>
+
+##### Parser.parseSymbol()
+
+```ts
+parseSymbol(until?): Expression
+```
+
+A symbol can be:
+- a single-letter identifier: `x`
+- a single LaTeX command: `\pi`
+- a multi-letter identifier: `\operatorname{speed}`
+
+####### until?
+
+`Partial`\<[`Terminator`](#terminator)\>
+
+</MemberCard>
+
+<a id="parser_parsetabular" name="parser_parsetabular"></a>
+
+<MemberCard>
+
+##### Parser.parseTabular()
+
+```ts
+parseTabular(): Expression[][]
+```
+
+Parse an expression in a tabular format, where rows are separated by `\\`
+and columns by `&`.
+
+Return rows of sparse columns: empty rows are indicated with `Nothing`,
+and empty cells are also indicated with `Nothing`.
+
+</MemberCard>
+
+<a id="parser_parsearguments" name="parser_parsearguments"></a>
+
+<MemberCard>
+
+##### Parser.parseArguments()
+
+```ts
+parseArguments(kind?, until?): readonly Expression[]
+```
+
+Parse an argument list, for example: `(12, x+1)` or `\left(x\right)`
+
+- 'enclosure' : will look for arguments inside an enclosure
+   (an open/close fence) (**default**)
+- 'implicit': either an expression inside a pair of `()`, or just a primary
+   (i.e. we interpret `\cos x + 1` as `\cos(x) + 1`)
+
+Return an array of expressions, one for each argument, or `null` if no
+argument was found.
+
+####### kind?
+
+`"implicit"` | `"enclosure"`
+
+####### until?
+
+[`Terminator`](#terminator)
+
+</MemberCard>
+
+<a id="parser_parsepostfixoperator" name="parser_parsepostfixoperator"></a>
+
+<MemberCard>
+
+##### Parser.parsePostfixOperator()
+
+```ts
+parsePostfixOperator(lhs, until?): Expression
+```
+
+Parse a postfix operator, such as `'` or `!`.
+
+Prefix, infix and matchfix operators are handled by `parseExpression()`
+
+####### lhs
+
+[`Expression`](#expression)
+
+####### until?
+
+`Partial`\<[`Terminator`](#terminator)\>
+
+</MemberCard>
+
+<a id="parser_parseexpression" name="parser_parseexpression"></a>
+
+<MemberCard>
+
+##### Parser.parseExpression()
+
+```ts
+parseExpression(until?): Expression
+```
+
+Parse an expression:
+
+```
+<expression> ::=
+ | <primary> ( <infix-op> <expression> )?
+ | <prefix-op> <expression>
+
+<primary> :=
+  (<number> | <symbol> | <function-call> | <matchfix-expr>)
+  (<subsup> | <postfix-operator>)*
+
+<matchfix-expr> :=
+  <matchfix-op-open> <expression> <matchfix-op-close>
+
+<function-call> ::=
+  | <function><matchfix-op-group-open><expression>[',' <expression>]<matchfix-op-group-close>
+```
+
+This is the top-level parsing entry point.
+
+Stop when an operator of precedence less than `until.minPrec`
+or the sequence of tokens `until.tokens` is encountered
+
+`until` is `{ minPrec:0 }` by default.
+
+####### until?
+
+`Partial`\<[`Terminator`](#terminator)\>
+
+</MemberCard>
+
+<a id="parser_parsenumber" name="parser_parsenumber"></a>
+
+<MemberCard>
+
+##### Parser.parseNumber()
+
+```ts
+parseNumber(): Expression
+```
+
+Parse a number.
+
+</MemberCard>
+
+<a id="parser_addboundary" name="parser_addboundary"></a>
+
+<MemberCard>
+
+##### Parser.addBoundary()
+
+```ts
+addBoundary(boundary): void
+```
+
+Boundaries are used to detect the end of an expression.
+
+They are used for unusual syntactic constructs, for example
+`\int \sin x dx` where the `dx` is not an argument to the `\sin`
+function, but a boundary of the integral.
+
+They are also useful when handling syntax errors and recovery.
+
+For example, `\begin{bmatrix} 1 & 2 { \end{bmatrix}` has an
+extraneous `{`, but the parser will attempt to recover and continue
+parsing when it encounters the `\end{bmatrix}` boundary.
+
+####### boundary
+
+`string`[]
+
+</MemberCard>
+
+<a id="parser_removeboundary" name="parser_removeboundary"></a>
+
+<MemberCard>
+
+##### Parser.removeBoundary()
+
+```ts
+removeBoundary(): void
+```
+
+</MemberCard>
+
+<a id="parser_matchboundary" name="parser_matchboundary"></a>
+
+<MemberCard>
+
+##### Parser.matchBoundary()
+
+```ts
+matchBoundary(): boolean
+```
+
+</MemberCard>
+
+<a id="parser_boundaryerror" name="parser_boundaryerror"></a>
+
+<MemberCard>
+
+##### Parser.boundaryError()
+
+```ts
+boundaryError(msg): Expression
+```
+
+####### msg
+
+`string` | \[`string`, `...Expression[]`\]
 
 </MemberCard>
 
@@ -4232,6 +5603,299 @@ missingSymbol: LatexString;
 ```
 
 Serialize the expression `["Error", "'missing'"]`,  with this LaTeX string
+
+</MemberCard>
+
+<a id="serializer" name="serializer"></a>
+
+### Serializer
+
+An instance of `Serializer` is provided to the `serialize` handlers of custom
+LaTeX dictionary entries.
+
+<a id="serializer_options-1" name="serializer_options-1"></a>
+
+<MemberCard>
+
+##### Serializer.options
+
+```ts
+readonly options: Required<SerializeLatexOptions>;
+```
+
+</MemberCard>
+
+<a id="serializer_dictionary" name="serializer_dictionary"></a>
+
+<MemberCard>
+
+##### Serializer.dictionary
+
+```ts
+readonly dictionary: IndexedLatexDictionary;
+```
+
+</MemberCard>
+
+<a id="serializer_level" name="serializer_level"></a>
+
+<MemberCard>
+
+##### Serializer.level
+
+```ts
+level: number;
+```
+
+"depth" of the expression:
+- 0 for the root
+- 1 for a subexpression of the root
+- 2 for subexpressions of the subexpressions of the root
+- etc...
+
+This allows the serialized LaTeX to vary depending on the depth of the
+expression.
+
+For example use `\Bigl(` for the top level, and `\bigl(` or `(` for others.
+
+</MemberCard>
+
+<a id="serializer_serialize" name="serializer_serialize"></a>
+
+<MemberCard>
+
+##### Serializer.serialize()
+
+```ts
+serialize: (expr) => string;
+```
+
+Output a LaTeX string representing the expression
+
+</MemberCard>
+
+<a id="serializer_wrap" name="serializer_wrap"></a>
+
+<MemberCard>
+
+##### Serializer.wrap()
+
+```ts
+wrap: (expr, prec?) => string;
+```
+
+Add a group fence around the expression if it is
+an operator of precedence less than or equal to `prec`.
+
+</MemberCard>
+
+<a id="serializer_applyfunctionstyle" name="serializer_applyfunctionstyle"></a>
+
+<MemberCard>
+
+##### Serializer.applyFunctionStyle()
+
+```ts
+applyFunctionStyle: (expr, level) => DelimiterScale;
+```
+
+Styles
+
+</MemberCard>
+
+<a id="serializer_groupstyle" name="serializer_groupstyle"></a>
+
+<MemberCard>
+
+##### Serializer.groupStyle()
+
+```ts
+groupStyle: (expr, level) => DelimiterScale;
+```
+
+</MemberCard>
+
+<a id="serializer_rootstyle" name="serializer_rootstyle"></a>
+
+<MemberCard>
+
+##### Serializer.rootStyle()
+
+```ts
+rootStyle: (expr, level) => "radical" | "quotient" | "solidus";
+```
+
+</MemberCard>
+
+<a id="serializer_fractionstyle" name="serializer_fractionstyle"></a>
+
+<MemberCard>
+
+##### Serializer.fractionStyle()
+
+```ts
+fractionStyle: (expr, level) => 
+  | "quotient"
+  | "block-quotient"
+  | "inline-quotient"
+  | "inline-solidus"
+  | "nice-solidus"
+  | "reciprocal"
+  | "factor";
+```
+
+</MemberCard>
+
+<a id="serializer_logicstyle" name="serializer_logicstyle"></a>
+
+<MemberCard>
+
+##### Serializer.logicStyle()
+
+```ts
+logicStyle: (expr, level) => "boolean" | "word" | "uppercase-word" | "punctuation";
+```
+
+</MemberCard>
+
+<a id="serializer_powerstyle" name="serializer_powerstyle"></a>
+
+<MemberCard>
+
+##### Serializer.powerStyle()
+
+```ts
+powerStyle: (expr, level) => "quotient" | "solidus" | "root";
+```
+
+</MemberCard>
+
+<a id="serializer_numericsetstyle" name="serializer_numericsetstyle"></a>
+
+<MemberCard>
+
+##### Serializer.numericSetStyle()
+
+```ts
+numericSetStyle: (expr, level) => "interval" | "compact" | "regular" | "set-builder";
+```
+
+</MemberCard>
+
+<a id="serializer_serializefunction" name="serializer_serializefunction"></a>
+
+<MemberCard>
+
+##### Serializer.serializeFunction()
+
+```ts
+serializeFunction(expr, def?): string
+```
+
+####### expr
+
+[`Expression`](#expression)
+
+####### def?
+
+[`IndexedLatexDictionaryEntry`](#indexedlatexdictionaryentry)
+
+</MemberCard>
+
+<a id="serializer_serializesymbol" name="serializer_serializesymbol"></a>
+
+<MemberCard>
+
+##### Serializer.serializeSymbol()
+
+```ts
+serializeSymbol(expr): string
+```
+
+####### expr
+
+[`Expression`](#expression)
+
+</MemberCard>
+
+<a id="serializer_wrapstring" name="serializer_wrapstring"></a>
+
+<MemberCard>
+
+##### Serializer.wrapString()
+
+```ts
+wrapString(s, style, delimiters?): string
+```
+
+Output `s` surrounded by delimiters.
+
+If `delimiters` is not specified, use `()`
+
+####### s
+
+`string`
+
+####### style
+
+[`DelimiterScale`](#delimiterscale)
+
+####### delimiters?
+
+`string`
+
+</MemberCard>
+
+<a id="serializer_wraparguments" name="serializer_wraparguments"></a>
+
+<MemberCard>
+
+##### Serializer.wrapArguments()
+
+```ts
+wrapArguments(expr): string
+```
+
+A string with the arguments of expr fenced appropriately and separated by
+commas.
+
+####### expr
+
+[`Expression`](#expression)
+
+</MemberCard>
+
+<a id="serializer_wrapshort" name="serializer_wrapshort"></a>
+
+<MemberCard>
+
+##### Serializer.wrapShort()
+
+```ts
+wrapShort(expr): string
+```
+
+Add a group fence around the expression if it is
+short (not a function)
+
+####### expr
+
+[`Expression`](#expression)
+
+</MemberCard>
+
+<a id="serializehandler" name="serializehandler"></a>
+
+<MemberCard>
+
+### SerializeHandler()
+
+```ts
+type SerializeHandler = (serializer, expr) => string;
+```
+
+The `serialize` handler of a custom LaTeX dictionary entry can be
+a function of this type.
 
 </MemberCard>
 
@@ -5252,24 +6916,24 @@ function indexLatexDictionary(dic, onError): IndexedLatexDictionary
 ##### dic
 
 readonly `Partial`\<`OnlyFirst`\<
-  \| `ExpressionEntry`
-  \| `MatchfixEntry`
-  \| `InfixEntry`
-  \| `PostfixEntry`
-  \| `PrefixEntry`
-  \| `SymbolEntry`
-  \| `FunctionEntry`
-  \| `EnvironmentEntry`
-  \| `DefaultEntry`, \{\} & 
-  \| `ExpressionEntry`
-  \| `MatchfixEntry`
-  \| `InfixEntry`
-  \| `PostfixEntry`
-  \| `PrefixEntry`
-  \| `SymbolEntry`
-  \| `FunctionEntry`
-  \| `EnvironmentEntry`
-  \| `DefaultEntry`\>\>[]
+  \| [`ExpressionEntry`](#expressionentry)
+  \| [`MatchfixEntry`](#matchfixentry)
+  \| [`InfixEntry`](#infixentry)
+  \| [`PostfixEntry`](#postfixentry)
+  \| [`PrefixEntry`](#prefixentry)
+  \| [`SymbolEntry`](#symbolentry)
+  \| [`FunctionEntry`](#functionentry)
+  \| [`EnvironmentEntry`](#environmententry)
+  \| [`DefaultEntry`](#defaultentry), \{\} & 
+  \| [`ExpressionEntry`](#expressionentry)
+  \| [`MatchfixEntry`](#matchfixentry)
+  \| [`InfixEntry`](#infixentry)
+  \| [`PostfixEntry`](#postfixentry)
+  \| [`PrefixEntry`](#prefixentry)
+  \| [`SymbolEntry`](#symbolentry)
+  \| [`FunctionEntry`](#functionentry)
+  \| [`EnvironmentEntry`](#environmententry)
+  \| [`DefaultEntry`](#defaultentry)\>\>[]
 
 ##### onError
 
@@ -5301,7 +6965,34 @@ function getLatexDictionary(category): readonly Readonly<LatexDictionaryEntry>[]
 
 ##### category
 
-`"all"` | `LibraryCategory`
+`"all"` | [`LibraryCategory`](#librarycategory)
+
+</MemberCard>
+
+<a id="symboltype" name="symboltype"></a>
+
+<MemberCard>
+
+### SymbolType
+
+```ts
+type SymbolType = "symbol" | "function" | "unknown";
+```
+
+</MemberCard>
+
+<a id="symboltable" name="symboltable"></a>
+
+<MemberCard>
+
+### SymbolTable
+
+```ts
+type SymbolTable = {
+  parent: SymbolTable | null;
+  ids: {};
+};
+```
 
 </MemberCard>
 
