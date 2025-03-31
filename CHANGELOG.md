@@ -1,4 +1,4 @@
-## [Unreleased]
+## 0.29.1 _2025-03-31_
 
 - **#231** During evaluation, some numbers, for example `10e-15` were
   incorrectly rounded to 0.
