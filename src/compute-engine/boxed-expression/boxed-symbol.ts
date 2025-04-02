@@ -414,10 +414,13 @@ export class BoxedSymbol extends _BoxedExpression {
   }
 
   /**
+   *
    * Subsequent inferences will narrow the domain of the symbol.
    * f: integer -> real, g: real -> real
    * g(x) => x: real
    * f(x) => x: integer narrowed from integer to real
+   *
+   * @inheritdoc
    */
   infer(t: Type): boolean {
     // Call _lookupDef() to *not* auto-bind the symbol
@@ -437,7 +440,8 @@ export class BoxedSymbol extends _BoxedExpression {
     // Widen the type, if it was previously inferred
     if (
       def instanceof _BoxedSymbolDefinition &&
-      (def.inferredType || def.type.isUnknown)
+      (def.inferredType || def.type.isUnknown) &&
+      !def.isConstant //'constant' symbols may still be inferred (i.e. value given but no type)
     ) {
       def.type = widen(def.type.type, t);
       return true;

@@ -1048,12 +1048,24 @@ export interface BoxedExpression {
    *
    * Infer the type of this expression.
    *
-   * If the type of this expression is already known, return `false`.
+   * Effective only for overall BoxedExpression types which are *non-constant* and therefore for
+   * which its value, and thereby type, can potentially vary.
    *
-   * If the type was not set, set it to the inferred type, return `true`
-   * If the type was previously inferred, widen it and return `true`.
+   * For symbols, inference may take place only for undeclared, or previously inferred symbols. For
+   * functions, only to those with an *inferred signature*.
    *
-   * If the type cannot be inferred, return `false`.
+   * For a successful inference, *widens* the type for symbols (including creating a symbol
+   * definition if this is an _undeclared_ boxed-symbol), and for functions, narrows the *(return)
+   * type*. The return result will for this case be `true`.
+   *
+   * (Note that subsequent inferences can be made and will override previous ones if valid)
+   *
+   * If inference is possible but the given type is incompatible with the declared or previously
+   * inferred type, will return `false`.
+   *
+   * For all other cases, such as inference for a constant-valued symbol, or a function already with
+   * a definition, returns `false`.
+   *
    *
    * @internal
    */
