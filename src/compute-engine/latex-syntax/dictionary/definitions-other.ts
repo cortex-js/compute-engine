@@ -386,6 +386,41 @@ export const DEFINITIONS_OTHERS: LatexDictionary = [
     parse: () => ['HorizontalSpacing', 9] as Expression,
   },
   {
+    latexTrigger: ['\\phantom'],
+    parse: (parser) => {
+      parser.parseGroup();
+      return 'Nothing';
+    },
+  },
+  {
+    latexTrigger: ['\\vphantom'],
+    parse: (parser) => {
+      parser.parseGroup();
+      return 'Nothing';
+    },
+  },
+  {
+    latexTrigger: ['\\hphantom'],
+    parse: (parser) => {
+      parser.parseGroup();
+      return 'Nothing';
+    },
+  },
+  {
+    latexTrigger: ['\\placeholder'],
+    parse: (parser) => {
+      parser.parseOptionalGroup();
+      return parser.parseGroup() ?? 'Nothing';
+    },
+  },
+  {
+    latexTrigger: ['\\smash'],
+    parse: (parser) => {
+      parser.parseGroup();
+      return 'Nothing';
+    },
+  },
+  {
     name: 'HorizontalSpacing',
     // The `HorizontalSpacing` function has two forms
     // `["HorizontalSpacing", number]` -> indicate a space of mu units
