@@ -1906,6 +1906,13 @@ export class _Parser implements Parser {
     // better error message, otherwise we would end up with "unexpected
     // token")
 
+    // If we got an empty sequence, ignore it.
+    // This is returned by some purely presentational commands,
+    // for example `\displaystyle`
+
+    if (result !== null && isEmptySequence(result))
+      return this.parsePrimary(until);
+
     //
     // 6. Are there postfix operators ?
     //
@@ -1978,13 +1985,7 @@ export class _Parser implements Parser {
     // 2. Do we have a primary?
     // (if we had a prefix, it consumed the primary following it)
     //
-    if (lhs === null) {
-      lhs = this.parsePrimary(until);
-      // If we got an empty sequence, ignore it.
-      // This is returned by some purely presentational commands,
-      // for example `\displaystyle`
-      if (isEmptySequence(lhs)) lhs = null;
-    }
+    lhs ??= this.parsePrimary(until);
 
     //
     // 3. Are there some infix operators?

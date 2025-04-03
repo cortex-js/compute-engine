@@ -3,6 +3,8 @@
 ### New Features and Improvements
 
 - Added a rule to solve the equation `a^x + b = 0`
+- The LaTeX parser now supports the `\placeholder[]{}`, `\phantom{}`,
+  `\hphantom{}`, `\vphantom{}`, `\mathstrut`, `\strut` and `\smash{}` commands.
 
 ## 0.29.1 _2025-03-31_
 

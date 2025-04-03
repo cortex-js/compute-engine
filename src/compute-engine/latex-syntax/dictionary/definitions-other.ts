@@ -421,6 +421,14 @@ export const DEFINITIONS_OTHERS: LatexDictionary = [
     },
   },
   {
+    latexTrigger: ['\\strut'],
+    parse: (parser) => 'Nothing',
+  },
+  {
+    latexTrigger: ['\\mathstrut'],
+    parse: (parser) => 'Nothing',
+  },
+  {
     name: 'HorizontalSpacing',
     // The `HorizontalSpacing` function has two forms
     // `["HorizontalSpacing", number]` -> indicate a space of mu units
