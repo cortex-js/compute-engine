@@ -193,25 +193,40 @@ export type Terminator = {
 };
 
 /**
- * Custom parsing handler.
+ * **Custom parsing handler.**
  *
- * When invoked the parser points right after the LaTeX fragment that triggered
- * this parsing handler.
+ * When this handler is invoked the parser points right after the LaTeX
+ * fragment that triggered it.
  *
- * The parser should be moved, by calling `parser.nextToken()` for
- * every consumed token.
+ * Tokens can be consumed with `parser.nextToken()` and other parser methods
+ * such as `parser.parseGroup()`, `parser.parseOptionalGroup()`, etc...
  *
  * If it was in an infix or postfix context, `lhs` will represent the
  * left-hand side argument. In a prefix or matchfix context, `lhs` is `null`.
  *
- * In a superfix (^) or subfix (_) context (that is if the first token of the
- * trigger is `^` or `_`), lhs is `["Superscript", lhs, rhs]`
+ * In a superfix (`^`) or subfix (`_`) context (that is if the first token of
+ * the trigger is `^` or `_`), `lhs` is `["Superscript", lhs, rhs]`
  * and `["Subscript", lhs, rhs]`, respectively.
  *
- * The handler should return `null` if the expression could not be parsed
- * (didn't match the syntax that was expected). The matching expression
+ * The handler should return `null` if the tokens could not be parsed
+ * (didn't match the syntax that was expected), or the matching expression
  * otherwise.
  *
+ * If the tokens were parsed but should be ignored, the handler should
+ * return `Nothing`.
+ *
+ * @category Latex Parsing and Serialization
+ */
+export type ParseHandler =
+  | ExpressionParseHandler
+  | SymbolParseHandler
+  | FunctionParseHandler
+  | EnvironmentParseHandler
+  | PostfixParseHandler
+  | InfixParseHandler
+  | MatchfixParseHandler;
+
+/**
  * @category Latex Parsing and Serialization
  */
 export type ExpressionParseHandler = (
