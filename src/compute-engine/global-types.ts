@@ -2516,6 +2516,12 @@ export type Rule =
       condition?: LatexString | RuleConditionFunction;
       useVariations?: boolean; // Default to false
       id?: string; // Optional, for debugging or filtering
+      onBeforeMatch?: (rule: Rule, expr: BoxedExpression) => void;
+      onMatch?: (
+        rule: Rule,
+        expr: BoxedExpression,
+        replace: BoxedExpression | RuleStep
+      ) => void; // For debugging, called when rule matches
     };
 
 /**
@@ -2542,6 +2548,13 @@ export type BoxedRule = {
   // Default to false.
 
   id?: string; // For debugging
+
+  onBeforeMatch?: (rule: Rule, expr: BoxedExpression) => void;
+  onMatch?: (
+    rule: Rule,
+    expr: BoxedExpression,
+    replace: BoxedExpression | RuleStep
+  ) => void; // For debugging, called when rule matches
 };
 
 /**
