@@ -44,63 +44,110 @@ export function infinitySgn(s: Sign | undefined): boolean | undefined {
   );
 }
 
-// > 0
+/**
+ * Sign `s` is > 0.
+ *
+ * :::info[Note]
+ * Returns `undefined` for cases where the given sign is either non-applicable to real numbers
+ * ('nan', 'unsigned', 'complex-infinity') or does not convey enough information (e.g. 'real',
+ * 'not-zero', 'real-not-zero', 'non-negative').
+ * :::
+ *
+ * @param s
+ */
 export function positiveSign(s: Sign | undefined): boolean | undefined {
   if (s === undefined) return undefined;
 
-  if (s === 'positive') return true;
+  if (s === 'positive' || s === 'positive-infinity') return true;
   if (
-    [
-      'non-positive',
-      'zero',
-      'unsigned',
-      'negative',
-      'negative-infinity',
-    ].includes(s)
+    (
+      ['non-positive', 'zero', 'negative', 'negative-infinity'] as Sign[]
+    ).includes(s)
   )
     return false;
 
+  //Case for 'nan', signs for complex numbers ('unsigned', 'complex-infinity'), or sign does not
+  //convey enough info. (e.g. 'real', 'not-zero', 'real-not-zero')
   return undefined;
 }
 
-// >= 0
+/**
+ * Sign `s` is >= 0.
+ *
+ *
+ * **note**: returns *undefined* where sign does not apply to the field of reals, or does not convey
+ * enough information.
+ *
+ * @param s
+ */
 export function nonNegativeSign(s: Sign | undefined): boolean | undefined {
   if (s === undefined) return undefined;
 
-  if (s === 'positive' || s === 'positive-infinity' || s === 'non-negative')
+  if (
+    (
+      ['positive', 'positive-infinity', 'non-negative', 'zero'] as Sign[]
+    ).includes(s)
+  )
     return true;
-  if (['negative', 'negative-infinity', 'zero', 'unsigned'].includes(s))
-    return false;
+  if ((['negative', 'negative-infinity'] as Sign[]).includes(s)) return false;
 
+  //Case for 'nan', complex numbers ('unsigned', 'complex-infinity', maybe 'not-zero'), or sign does not
+  //convey enough info. (e.g. 'non-positive','real', 'real-not-zero')
   return undefined;
 }
 
-// < 0
+/**
+ * Sign `s` is < 0.
+ *
+ * :::info[Note]
+ * Returns `undefined` for cases where the given sign is either non-applicable to real numbers
+ * ('nan', 'unsigned', 'complex-infinity') or does not convey enough information (e.g. 'real',
+ * 'not-zero', 'real-not-zero', 'non-positive').
+ * :::
+ *
+ * @param s
+ */
 export function negativeSign(s: Sign | undefined): boolean | undefined {
   if (s === undefined) return undefined;
 
   if (s === 'negative' || s === 'negative-infinity') return true;
   if (
-    [
-      'non-negative',
-      'zero',
-      'unsigned',
-      'positive',
-      'positive-infinity',
-    ].includes(s)
+    (
+      ['non-negative', 'zero', 'positive', 'positive-infinity'] as Sign[]
+    ).includes(s)
   )
     return false;
 
+  //'nan', 'unsigned','complex-infinity', or not enough info: 'real-not-zero', 'non-positive', etc.
   return undefined;
 }
 
-// <= 0
+/**
+ * Sign `s` is <= 0.
+ *
+ *
+ * **note**: returns *undefined* where sign does not apply to the field of reals, or does not convey
+ * enough information.
+ *
+ * @param s
+ */
 export function nonPositiveSign(s: Sign | undefined): boolean | undefined {
   if (s === undefined) return undefined;
 
-  if (s === 'negative' || s === 'negative-infinity' || s === 'non-positive')
+  if (
+    (
+      [
+        'negative',
+        'negative-infinity',
+        'non-positive',
+        'zero',
+      ] as Sign[] as Sign[]
+    ).includes(s)
+  )
     return true;
-  if (['positive', 'zero', 'unsigned'].includes(s)) return false;
+  //Definitely positive
+  if ((['positive', 'positive-infinity'] as Sign[]).includes(s)) return false;
 
+  //'nan', a complex-number sign, or a sign not conveying sufficient info.
   return undefined;
 }

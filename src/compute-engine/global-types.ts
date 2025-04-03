@@ -719,7 +719,7 @@ export interface BoxedExpression {
   readonly isNaN: boolean | undefined;
 
   /**
-   * The numeric value of this expression is `±Infinity` or Complex Infinity.
+   * The numeric value of this expression is `±Infinity` or ComplexInfinity.
    *
    * If this is a symbol, causes it to be bound to a definition.
    *
@@ -727,7 +727,7 @@ export interface BoxedExpression {
    */
   readonly isInfinity: boolean | undefined;
 
-  /** This expression is a number, but not `±Infinity`, 'ComplexInfinity` or
+  /** This expression is a number, but not `±Infinity`, `ComplexInfinity` or
    *  `NaN`
    *
    * @category Numeric Expression

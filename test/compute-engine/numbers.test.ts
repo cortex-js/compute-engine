@@ -81,10 +81,10 @@ describe('PROPERTIES OF NUMBERS', () => {
       real: false
       rational: false
       integer: false
-      positive (>0): false
-      negative (<0): false
-      nonPositive (<=0): false
-      nonNegative (>=0): false
+      positive (>0): undefined
+      negative (<0): undefined
+      nonPositive (<=0): undefined
+      nonNegative (>=0): undefined
       -1: false
       0: false
       +1: false
@@ -169,10 +169,10 @@ describe('PROPERTIES OF NUMBERS', () => {
       real: false
       rational: false
       integer: false
-      positive (>0): false
-      negative (<0): false
-      nonPositive (<=0): false
-      nonNegative (>=0): false
+      positive (>0): undefined
+      negative (<0): undefined
+      nonPositive (<=0): undefined
+      nonNegative (>=0): undefined
       -1: false
       0: false
       +1: false
@@ -191,10 +191,10 @@ describe('PROPERTIES OF NUMBERS', () => {
       real: false
       rational: false
       integer: false
-      positive (>0): false
-      negative (<0): false
-      nonPositive (<=0): false
-      nonNegative (>=0): false
+      positive (>0): undefined
+      negative (<0): undefined
+      nonPositive (<=0): undefined
+      nonNegative (>=0): undefined
       -1: false
       0: false
       +1: false
@@ -213,10 +213,10 @@ describe('PROPERTIES OF NUMBERS', () => {
       real: false
       rational: false
       integer: false
-      positive (>0): false
-      negative (<0): false
-      nonPositive (<=0): false
-      nonNegative (>=0): false
+      positive (>0): undefined
+      negative (<0): undefined
+      nonPositive (<=0): undefined
+      nonNegative (>=0): undefined
       -1: false
       0: false
       +1: false

@@ -385,11 +385,20 @@ export class BoxedNumber extends _BoxedExpression {
     let s: number | undefined;
     if (typeof this._value === 'number') {
       if (Number.isNaN(this._value)) return 'nan';
+      if (this._value === +Infinity) return 'positive-infinity';
+      if (this._value === -Infinity) return 'negative-infinity';
       s = Math.sign(this._value);
-    } else s = this._value.sgn();
-    // The sign of a complex Numeric Value is `undefined`
-    if (s === undefined) return 'unsigned';
+    } else s = this._value.sgn(); // 'NumericValue'
+
+    // indicates a complex Numeric Value
+    // aside from 'complex-infinity', will be 'unsigned'
+    if (s === undefined) {
+      if ((this._value as NumericValue).isComplexInfinity)
+        return 'complex-infinity';
+      return 'unsigned';
+    }
     if (Number.isNaN(s)) return 'unsigned';
+    //Should leave only the reals
     if (s === 0) return 'zero';
     if (s > 0) return 'positive';
     return 'negative';
