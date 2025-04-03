@@ -127,6 +127,18 @@ export const UNIVARIATE_ROOTS: Rule[] = [
       !__a.has('_x') && !__b.has('_x') && !__c.has('_x'),
   },
 
+  // a^x + b = 0
+  {
+    match: ['Add', ['Power', '__a', '_x'], '__b'],
+    replace: ['Ln', ['Negate', '__b'], '__a'],
+    useVariations: true,
+    condition: ({ __a, __b }) =>
+      !__a.has('_x') &&
+      !__b.has('_x') &&
+      (__a.isPositive ?? false) &&
+      (__b.isNegative ?? false),
+  },
+
   // a * e^(bx) + c = 0
   {
     match: [
@@ -332,6 +344,8 @@ export function univariateSolve(
   return roots;
 }
 
+/** Harmonization rules transform an expr into one or more equivalent
+ * expressions that are easier to solve */
 export const HARMONIZATION_RULES: Rule[] = [
   // |ax + b| + c -> ax+b+c, -ax-b+c
   {
