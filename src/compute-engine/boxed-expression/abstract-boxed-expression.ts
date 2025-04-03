@@ -134,7 +134,7 @@ export abstract class _BoxedExpression implements BoxedExpression {
     if (this.isInfinity) {
       if (this.isPositive) return Infinity;
       if (this.isNegative) return -Infinity;
-      return NaN;
+      return '~oo'; // ComplexInfinity
     }
     if (typeof this.string === 'string') return this.string;
     if (typeof this.symbol === 'string') return this.symbol;

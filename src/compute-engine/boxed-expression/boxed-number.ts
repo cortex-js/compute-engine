@@ -591,7 +591,10 @@ export class BoxedNumber extends _BoxedExpression {
   N(): BoxedExpression {
     const v = this._value;
     if (typeof v === 'number') return this;
+    //NumericValue
     const n = v.N();
+    //Often, 'evaluating' a numeric-value yields the same result, but sometimes may result in a
+    //different representation: e.g. some cases of Exact -> Big
     if (v === n) return this;
     return this.engine.number(n);
   }
