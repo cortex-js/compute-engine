@@ -547,7 +547,7 @@ function boxRule(
     };
 
   // eslint-disable-next-line prefer-const
-  let { match, replace, condition, id } = rule;
+  let { match, replace, condition, id, onMatch, onBeforeMatch } = rule;
 
   if (replace === undefined)
     throw new Error(
@@ -631,6 +631,8 @@ function boxRule(
     condition: condFn,
     useVariations: rule.useVariations,
     id,
+    onMatch,
+    onBeforeMatch,
   };
 }
 
@@ -695,7 +697,7 @@ export function applyRule(
   }
 
   // eslint-disable-next-line prefer-const
-  let { match, replace, condition, id } = rule;
+  let { match, replace, condition, id, onMatch, onBeforeMatch } = rule;
   const because = id ?? '';
 
   if (canonical && match) {
@@ -710,6 +712,9 @@ export function applyRule(
   }
 
   const useVariations = rule.useVariations ?? options?.useVariations ?? false;
+
+  // For debugging
+  onBeforeMatch?.(rule, expr);
 
   const sub = match
     ? expr.match(match, { substitution, ...options, useVariations })
@@ -750,6 +755,9 @@ export function applyRule(
       : replace.subs(sub, { canonical });
 
   if (!result) return null;
+
+  // To aid in debugging, invoke onMatch when the rule matches
+  onMatch?.(rule, expr, result);
 
   if (isRuleStep(result))
     return canonical ? { ...result, value: result.value.canonical } : result;

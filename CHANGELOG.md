@@ -1,3 +1,9 @@
+## [Unreleased]
+
+### New Features and Improvements
+
+- Added a rule to solve the equation `a^x + b = 0`
+
 ## 0.29.1 _2025-03-31_
 
 - **#231** During evaluation, some numbers, for example `10e-15` were
