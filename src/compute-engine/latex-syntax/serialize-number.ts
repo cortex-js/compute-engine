@@ -285,12 +285,10 @@ function serializeScientificNotationNumber(
     wholePart.length,
     options
   );
-  wholePart = insertWholeGroupSeparator(wholePart, options);
-
   if (fractionalPart)
     fractionalPart = options.decimalSeparator + fractionalPart;
 
-  // @todo: does not respect the options.precision option
+  wholePart = insertWholeGroupSeparator(wholePart, options);
 
   if (!expString) return wholePart + fractionalPart;
   if (!fractionalPart) {
