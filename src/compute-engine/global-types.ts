@@ -530,7 +530,7 @@ export interface BoxedExpression {
    * value of other expression changes or for other reasons.
    *
    * If `this.isPure` is `false`, `this.value` is undefined. Call
-   * `this.evaluate()` to determine the value of the expression instead.
+   * `this.evaluate()` (or '*this.N()*') to determine the value of the expression instead.
    *
    * As an example, the `Random` function is not pure.
    *
@@ -541,15 +541,18 @@ export interface BoxedExpression {
   readonly isPure: boolean;
 
   /**
-   * True if the the value of the expression does not depend on the value of
-   * any other expression.
+   * `True` if this expression's value remains constant.
    *
-   * For example, a number literal, a symbol with a constant value.
+   * If *true* and a function, implies that it is *pure*, and also that all of its arguments are
+   * constant.
+   *
+   * Number literals, symbols with constant values, and numeric functions with constant
+   * subexpressions may all be considered *constant*, i.e.:
    * - `2` is constant
    * - `Pi` is constant
    * - `["Add", "Pi", 2]` is constant
-   * - `x` is not constant
-   * - `["Add", "x", 2]` is not constant
+   * - `x` is inconstant: unless declared with a constant value.
+   * - `["Add", "x", 2]` is either constant or inconstant, depending on whether `x` is constant.
    */
   readonly isConstant: boolean;
 
@@ -1222,6 +1225,14 @@ export interface BoxedExpression {
    * Return a JavaScript primitive representing the value of this expression.
    *
    * Equivalent to `expr.N().valueOf()`.
+   *
+   * For functions, will only return non-undefined (i.e., compute the value) if the function is pure.
+   *
+   * For symbols, the current behaviour also considers *non-constant* values, including those weakly
+   * assigned via symbol assumptions.
+   *
+   * **note**: this property is not guaranteed to remain constant, potentially differing across
+   * subsequent calls if a symbol (non-constant), or an *inconstant* pure function.
    *
    */
   get value(): number | boolean | string | object | undefined;

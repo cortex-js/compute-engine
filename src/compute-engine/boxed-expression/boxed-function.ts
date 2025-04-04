@@ -197,10 +197,8 @@ export class BoxedFunction extends _BoxedExpression {
 
   get isPure(): boolean {
     if (this._isPure !== undefined) return this._isPure;
-    if (!this.isCanonical) {
-      this._isPure = false;
-      return false;
-    }
+    if (this.isCanonical === false) return this.canonical.isPure;
+
     let pure = this.functionDefinition?.pure ?? false;
 
     // The function might be pure. Let's check that all its arguments are pure.
@@ -210,9 +208,6 @@ export class BoxedFunction extends _BoxedExpression {
     return pure;
   }
 
-  /** The value of the function is constant if the function is
-   * pure, and all its arguments are constant.
-   */
   get isConstant(): boolean {
     if (!this.isPure) return false;
     return this._ops.every((x) => x.isConstant);
@@ -220,6 +215,15 @@ export class BoxedFunction extends _BoxedExpression {
 
   get constantValue(): number | boolean | string | object | undefined {
     return this.isConstant ? this.value : undefined;
+  }
+
+  /**
+   *
+   * @inheritdoc
+   */
+  get value(): number | boolean | string | object | undefined {
+    if (!this.isPure) return undefined;
+    return this.N().valueOf();
   }
 
   get json(): Expression {
@@ -844,6 +848,9 @@ export class BoxedFunction extends _BoxedExpression {
   }
 
   evaluate(options?: Partial<EvaluateOptions>): BoxedExpression {
+    // If this function is not pure, then bypass caching (i.e. saved as this._value, this._valueN):
+    // since the result potentially could differ for each computation)
+    // if (!this.isPure) return this._computeValue(options)();
     return cachedValue(
       options?.numericApproximation ? this._valueN : this._value,
       this.engine.generation,
