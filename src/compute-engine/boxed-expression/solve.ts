@@ -48,6 +48,18 @@ export const UNIVARIATE_ROOTS: Rule[] = [
     condition: ({ __a, __b }) => !__a.has('_x') && !__b.has('_x'),
   },
 
+  // a^x + b = 0
+  {
+    match: ['Add', ['Power', '__a', '_x'], '__b'],
+    replace: ['Ln', ['Negate', '__b'], '__a'],
+    useVariations: true,
+    condition: ({ __a, __b }) =>
+      !__a.has('_x') &&
+      !__b.has('_x') &&
+      (__a.isPositive ?? false) &&
+      (__b.isNegative ?? false),
+  },
+
   // ax^n + b = 0
   {
     match: ['Add', ['Multiply', '_a', ['Power', '_x', '_n']], '__b'],
