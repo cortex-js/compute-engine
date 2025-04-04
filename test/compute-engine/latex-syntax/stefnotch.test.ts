@@ -6,9 +6,19 @@ function parse(s: string) {
 
 describe('STEFNOTCH #9', () => {
   test('\\int_{\\placeholder{⬚}}^{\\placeholder{⬚}}3x', () => {
-    expect(
-      parse('\\int_{\\placeholder{⬚}}^{\\placeholder{⬚}}3x')
-    ).toMatchInlineSnapshot(`["Integrate", ["Multiply", 3, "x"], "Nothing"]`);
+    expect(parse('\\int_{\\placeholder{⬚}}^{\\placeholder{⬚}}3x'))
+      .toMatchInlineSnapshot(`
+      [
+        "Integrate",
+        ["Multiply", 3, "x"],
+        [
+          "Tuple",
+          "Nothing",
+          ["Error", "'expected-closing-delimiter'", ["LatexString", "'{⬚}'"]],
+          ["Error", "'expected-closing-delimiter'", ["LatexString", "'{⬚}'"]]
+        ]
+      ]
+    `);
   });
 });
 
@@ -18,9 +28,7 @@ describe('STEFNOTCH #10', () => {
       parse(
         '\\displaystyle \\left(\\sin^{-1}\\left(x\\right)\\right)^{\\prime}'
       )
-    ).toMatchInlineSnapshot(
-      `["Error", "'unexpected-delimiter'", ["LatexString", "'\\left('"]]`
-    );
+    ).toMatchInlineSnapshot(`["Derivative", ["Arcsin", "x"]]`);
   });
 
   test('2/ 1^{\\sin(x)}', () => {
@@ -179,14 +187,9 @@ describe('STEFNOTCH #13', () => {
         "Equal",
         "a",
         [
-          "InvisibleOperator",
-          [
-            "Error",
-            "'expected-closing-delimiter'",
-            ["LatexString", "'{\\displaystyle\\lim_{n\\to\\infty}'"]
-          ],
-          ["Subscript", "a", "n"],
-          ["Error", "'unexpected-closing-delimiter'", ["LatexString", "'}'"]]
+          "Limit",
+          ["Function", ["Subscript", "a", "n"], "n"],
+          "PositiveInfinity"
         ]
       ]
     `);

@@ -3,8 +3,21 @@ import { ComputeEngine } from '../src/compute-engine';
 const ce = new ComputeEngine();
 const engine = ce;
 
+console.info(ce.parse('x_{y}\\coloneq z').json);
+console.info(ce.parse('x\\coloneq z_{y}').json);
+
+ce
+  .parse('4^x-2=0')
+  .solve('x')
+  ?.map((x) => x.print());
+
 // Should output 1\cdot 10^3
-console.log(engine.parse('1000').toLatex({ notation: 'scientific' }));
+// @todo is that true for scientific *and* engineering notation
+console.log(
+  engine
+    .parse('1000')
+    .toLatex({ notation: 'scientific', avoidExponentsInRange: null })
+);
 
 // Should return '3^2'
 ce.parse('3\\times3', { canonical: ['Multiply'] });

@@ -1621,7 +1621,7 @@ export type FunctionDefinition = BaseDefinition &
      * be a subtype of the return type in the signature.
      *
      */
-    signature?: Type | TypeString;
+    signature?: Type | TypeString | BoxedType;
 
     /**
      * The actual type of the result based on the arguments.

@@ -130,7 +130,10 @@ export class _BoxedFunctionDefinition implements BoxedFunctionDefinition {
 
     if (def.signature) {
       this.inferredSignature = false;
-      this.signature = new BoxedType(def.signature);
+      this.signature =
+        def.signature instanceof BoxedType
+          ? def.signature
+          : new BoxedType(def.signature);
     } else this.signature = new BoxedType('...any -> any');
 
     this.update(def);
@@ -203,7 +206,10 @@ export class _BoxedFunctionDefinition implements BoxedFunctionDefinition {
 
     if (def.signature) {
       const oldSig = def.signature;
-      const newSig = new BoxedType(parseType(def.signature));
+      const newSig =
+        def.signature instanceof BoxedType
+          ? def.signature
+          : new BoxedType(parseType(def.signature));
       if (oldSig && !newSig.matches(oldSig))
         throw new Error(
           `Function Definition "${this.name}": signature "${newSig}" does not match "${oldSig}"`

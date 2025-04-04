@@ -307,6 +307,7 @@ describe('SERIALIZATION OF NUMBERS', () => {
         exponentProduct: '\\times',
       });
     expect(reformat('0')).toMatchInlineSnapshot(`0`);
+    expect(reformat('1')).toMatchInlineSnapshot(`1`);
     expect(reformat('0.00001')).toMatchInlineSnapshot(`10^{-5}`);
     expect(reformat('0.0123')).toMatchInlineSnapshot(`1.23\\times10^{-2}`);
     expect(reformat('0.001')).toMatchInlineSnapshot(`10^{-3}`);
@@ -328,6 +329,7 @@ describe('SERIALIZATION OF NUMBERS', () => {
     expect(reformat('12420.54\\times10^{7}')).toMatchInlineSnapshot(
       `1.242\\,054\\times10^{11}`
     );
+    expect(reformat('70000')).toMatchInlineSnapshot(`7\\times10^{4}`);
 
     // *NOT* a repeating pattern (fewer digits than precision)
     expect(reformat('1.234234234')).toMatchInlineSnapshot(`1.234\\,234\\,234`);
@@ -341,6 +343,7 @@ describe('SERIALIZATION OF NUMBERS', () => {
         exponentProduct: '\\times',
       });
     expect(reformat('0')).toMatchInlineSnapshot(`0`);
+    expect(reformat('1')).toMatchInlineSnapshot(`1`);
     expect(reformat('0.00001')).toMatchInlineSnapshot(`100\\times10^{-3}`);
     expect(reformat('0.0123')).toMatchInlineSnapshot(`12.3\\times10^{-3}`);
     expect(reformat('0.001')).toMatchInlineSnapshot(`10^{-3}`);
@@ -362,6 +365,7 @@ describe('SERIALIZATION OF NUMBERS', () => {
     expect(reformat('12420.54\\times10^{7}')).toMatchInlineSnapshot(
       `124.205\\,4\\times10^{9}`
     );
+    expect(reformat('70000')).toMatchInlineSnapshot(`70\\times10^{3}`);
 
     // *NOT* a repeating pattern (fewer digits than precision)
     expect(reformat('1.234234234')).toMatchInlineSnapshot(`1.234\\,234\\,234`);

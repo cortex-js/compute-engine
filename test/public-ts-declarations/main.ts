@@ -15,5 +15,17 @@ ce.latexDictionary = [
   },
 ];
 
+const originalSqrtDefinition = ce.lookupFunction('Sqrt')!;
+ce.defineFunction('Sqrt', {
+  complexity: originalSqrtDefinition.complexity,
+  threadable: originalSqrtDefinition.threadable,
+  signature: originalSqrtDefinition.signature,
+  sgn: originalSqrtDefinition.sgn,
+  evaluate: (input, options) => {
+    const result = originalSqrtDefinition.evaluate!(input, options);
+    return result?.isReal ? result : ce.NaN;
+  },
+});
+
 const expr: BoxedExpression = ce.parse('x^2 + 2x + 1');
 console.log(expr.toString());
