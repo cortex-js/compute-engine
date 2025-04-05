@@ -1870,7 +1870,7 @@ export class ComputeEngine implements IComputeEngine {
     // Identifiers such as symbol names should use the Unicode NFC canonical form
     name = name.normalize();
 
-    // These three are not symbols (some of them are not even valid
+    // These few are not symbols (some of them are not even valid
     // identifiers) but they're a common type
     if (name === 'NaN') return this.NaN;
     if (
@@ -1881,6 +1881,7 @@ export class ComputeEngine implements IComputeEngine {
       return this.PositiveInfinity;
     if (name === '-Infinity' || name === 'NegativeInfinity')
       return this.NegativeInfinity;
+    if (name === 'ComplexInfinity') return this.ComplexInfinity;
 
     // `Half` is a synonym for the rational 1/2
     if (name === 'Half') return this.Half;
