@@ -1,4 +1,10 @@
-import { check } from '../utils';
+import { ComputeEngine } from '../../src/compute-engine';
+import { _BoxedExpression } from '../../src/compute-engine/boxed-expression/abstract-boxed-expression';
+import { check, exprToString, engine as TEST_ENGINE } from '../utils';
+import type {
+  CanonicalForm,
+  SemiBoxedExpression,
+} from '../../src/compute-engine/global-types';
 
 describe('CANONICAL FORMS', () => {
   test('-0', () => {
@@ -208,19 +214,6 @@ describe('CANONICAL FORMS', () => {
     `);
   });
 
-  // Negative exponents become fractions
-  test('(2xy)^{-n}"', () => {
-    expect(check('(2xy)^{-n}')).toMatchInlineSnapshot(`
-      box       = [
-        "Power",
-        ["Delimiter", ["InvisibleOperator", 2, "x", "y"]],
-        ["Negate", "n"]
-      ]
-      canonical = ["Power", ["Multiply", 2, "x", "y"], ["Negate", "n"]]
-      eval-auto = 1 / (2^n * x^n * y^n)
-    `);
-  });
-
   test('"2\\times0\\times5\\times4"', () => {
     expect(check('2\\times0\\times5\\times4')).toMatchInlineSnapshot(`
       box       = ["Multiply", 2, 0, 5, 4]
@@ -243,6 +236,350 @@ describe('CANONICAL FORMS', () => {
       canonical = ["Divide", ["Multiply", 2, "x", "y"], ["Multiply", "a", "b"]]
       eval-auto = (2x * y) / (a * b)
     `);
+  });
+
+  describe('Power', () => {
+    const engine = new ComputeEngine();
+    engine.declare('x', { constant: true, value: 0 });
+    engine.declare('y', { constant: true, value: 1 });
+
+    engine.declare('p', { constant: true, value: Infinity });
+    engine.declare('n', { constant: true, value: -Infinity });
+    engine.declare('c', { constant: true, value: -Infinity });
+    const checkPower = (
+      input: string,
+      priorForms: CanonicalForm[] = ['Number']
+    ) => checkForms(input, [...priorForms, 'Power'], engine);
+
+    test('0^x', () => {
+      expect(checkPower('0^0')).toMatchInlineSnapshot(`
+        box        = ["Power", 0, 0]
+        canonForms = NaN
+        canonical  = NaN
+      `);
+      expect(checkPower('0^{1.1}')).toMatchInlineSnapshot(`
+        box        = ["Power", 0, 1.1]
+        canonForms = 0
+        canonical  = 0
+      `);
+      expect(checkPower('0^{-1}')).toMatchInlineSnapshot(`
+        box        = ["Power", 0, -1]
+        canonForms = ComplexInfinity
+        canonical  = ComplexInfinity
+      `);
+      // x === 0
+      expect(checkPower('x^3')).toMatchInlineSnapshot(`
+        box        = ["Power", "x", 3]
+        canonForms = 0
+        canonical  = 0
+      `);
+    });
+
+    test('x^0', () => {
+      expect(checkPower('\\infty^0')).toMatchInlineSnapshot(`
+        box        = ["Power", "PositiveInfinity", 0]
+        canonForms = NaN
+        canonical  = NaN
+      `);
+      expect(checkPower('\\operatorname{NaN}^0')).toMatchInlineSnapshot(`
+        box        = ["Power", "NaN", 0]
+        canonForms = NaN
+        canonical  = NaN
+      `);
+      expect(checkPower('16^x')).toMatchInlineSnapshot(`
+        box        = ["Power", 16, "x"]
+        canonForms = 1
+        canonical  = 1
+      `);
+      expect(checkPower('\\pi^0')).toMatchInlineSnapshot(`
+        box        = ["Power", "Pi", 0]
+        canonForms = 1
+        canonical  = 1
+      `);
+      expect(checkPower('{-2.7243631}^0')).toMatchInlineSnapshot(`
+        box        = ["Power", ["Negate", 2.7243631], 0]
+        canonForms = 1
+        canonical  = 1
+      `);
+    });
+
+    test('1^x', () => {
+      expect(checkPower('1^{\\infty}')).toMatchInlineSnapshot(`
+        box        = ["Power", 1, "PositiveInfinity"]
+        canonForms = NaN
+        canonical  = NaN
+      `);
+      expect(checkPower('1^{0}')).toMatchInlineSnapshot(`
+        box        = ["Power", 1, 0]
+        canonForms = 1
+        canonical  = 1
+      `);
+      expect(checkPower('1^{6}')).toMatchInlineSnapshot(`
+        box        = ["Power", 1, 6]
+        canonForms = 1
+        canonical  = 1
+      `);
+      expect(checkPower('1^{-0.001}')).toMatchInlineSnapshot(`
+        box        = ["Power", 1, ["Negate", 0.001]]
+        canonForms = 1
+        canonical  = 1
+      `);
+    });
+
+    test('x^1', () => {
+      expect(checkPower('0^1')).toMatchInlineSnapshot(`
+        box        = ["Power", 0, 1]
+        canonForms = 0
+        canonical  = 0
+      `);
+      expect(checkPower('1^1')).toMatchInlineSnapshot(`
+        box        = ["Power", 1, 1]
+        canonForms = 1
+        canonical  = 1
+      `);
+      expect(checkPower('\\infty^1')).toMatchInlineSnapshot(`
+        box        = ["Power", "PositiveInfinity", 1]
+        canonForms = PositiveInfinity
+        canonical  = PositiveInfinity
+      `);
+      expect(checkPower('{-a/4}^1')).toMatchInlineSnapshot(`
+        box        = ["Power", ["Divide", ["Negate", "a"], 4], 1]
+        canonForms = ["Divide", ["Negate", "a"], 4]
+        canonical  = ["Multiply", ["Rational", -1, 4], "a"]
+      `);
+      expect(checkPower('{-\\pi}^1')).toMatchInlineSnapshot(`
+        box        = ["Power", ["Negate", "Pi"], 1]
+        canonForms = ["Negate", "Pi"]
+        canonical  = ["Negate", "Pi"]
+      `);
+    });
+
+    test(`x^{-1}`, () => {
+      expect(checkPower('\\infty^{-1}')).toMatchInlineSnapshot(`
+        box        = ["Power", "PositiveInfinity", -1]
+        canonForms = 0
+        canonical  = 0
+      `);
+      expect(checkPower('{-\\infty}^{-1}')).toMatchInlineSnapshot(`
+        box        = ["Power", "NegativeInfinity", -1]
+        canonForms = 0
+        canonical  = 0
+      `);
+      expect(checkPower('1^{-1}')).toMatchInlineSnapshot(`
+        box        = ["Power", 1, -1]
+        canonForms = 1
+        canonical  = 1
+      `);
+      //note:'Rational' in place of a number because 'Number' (or fully canonical) not applied
+      //subsequently
+      expect(checkPower('3^{-1}')).toMatchInlineSnapshot(`
+        box        = ["Power", 3, -1]
+        canonForms = ["Rational", 1, 3]
+        canonical  = ["Rational", 1, 3]
+      `);
+      expect(checkPower('{x * 4}^{-1}')).toMatchInlineSnapshot(`
+        box        = ["Power", ["Multiply", "x", 4], -1]
+        canonForms = ["Divide", 1, ["Multiply", 4, "x"]]
+        canonical  = ["Divide", 1, ["Multiply", 4, "x"]]
+      `);
+    });
+
+    test('x^{oo}', () => {
+      expect(checkPower('0^\\infty')).toMatchInlineSnapshot(`
+        box        = ["Power", 0, "PositiveInfinity"]
+        canonForms = 0
+        canonical  = 0
+      `);
+      expect(checkPower('0.3^\\infty')).toMatchInlineSnapshot(`
+        box        = ["Power", 0.3, "PositiveInfinity"]
+        canonForms = 0
+        canonical  = 0
+      `);
+      expect(checkPower('1^\\infty')).toMatchInlineSnapshot(`
+        box        = ["Power", 1, "PositiveInfinity"]
+        canonForms = NaN
+        canonical  = NaN
+      `);
+      expect(checkPower('{-1}^\\infty')).toMatchInlineSnapshot(`
+        box        = ["Power", -1, "PositiveInfinity"]
+        canonForms = NaN
+        canonical  = NaN
+      `);
+      expect(checkPower('{\\infty}^\\infty')).toMatchInlineSnapshot(`
+        box        = ["Power", "PositiveInfinity", "PositiveInfinity"]
+        canonForms = ComplexInfinity
+        canonical  = ComplexInfinity
+      `);
+      expect(checkPower('{-\\infty}^\\infty')).toMatchInlineSnapshot(`
+        box        = ["Power", "NegativeInfinity", "PositiveInfinity"]
+        canonForms = ComplexInfinity
+        canonical  = ComplexInfinity
+      `);
+      expect(checkPower('6^\\infty')).toMatchInlineSnapshot(`
+        box        = ["Power", 6, "PositiveInfinity"]
+        canonForms = PositiveInfinity
+        canonical  = PositiveInfinity
+      `);
+      expect(checkPower('{-2.46345162}^\\infty')).toMatchInlineSnapshot(`
+        box        = ["Power", ["Negate", 2.46345162], "PositiveInfinity"]
+        canonForms = ComplexInfinity
+        canonical  = ComplexInfinity
+      `);
+
+      //Constant-symbol value cases.: p=PositiveInfinity
+      expect(checkPower('1^{p}')).toMatchInlineSnapshot(`
+        box        = ["Power", 1, "p"]
+        canonForms = NaN
+        canonical  = NaN
+      `);
+    });
+
+    test(`x^{-oo}`, () => {
+      expect(checkPower('0^{-\\infty}')).toMatchInlineSnapshot(`
+        box        = ["Power", 0, "NegativeInfinity"]
+        canonForms = ComplexInfinity
+        canonical  = ComplexInfinity
+      `);
+      expect(checkPower('0.3^{-\\infty}')).toMatchInlineSnapshot(`
+        box        = ["Power", 0.3, "NegativeInfinity"]
+        canonForms = PositiveInfinity
+        canonical  = PositiveInfinity
+      `);
+      expect(checkPower('1^{-\\infty}')).toMatchInlineSnapshot(`
+        box        = ["Power", 1, "NegativeInfinity"]
+        canonForms = NaN
+        canonical  = NaN
+      `);
+      expect(checkPower('{-1}^{-\\infty}')).toMatchInlineSnapshot(`
+        box        = ["Power", -1, "NegativeInfinity"]
+        canonForms = NaN
+        canonical  = NaN
+      `);
+      expect(checkPower('{-\\infty}^{-\\infty}')).toMatchInlineSnapshot(`
+        box        = ["Power", "NegativeInfinity", "NegativeInfinity"]
+        canonForms = 0
+        canonical  = 0
+      `);
+      expect(checkPower('{-{-\\infty}}^{-\\infty}')).toMatchInlineSnapshot(`
+        box        = ["Power", ["Negate", "NegativeInfinity"], "NegativeInfinity"]
+        canonForms = 0
+        canonical  = 0
+      `);
+      expect(checkPower('6^{-\\infty}')).toMatchInlineSnapshot(`
+        box        = ["Power", 6, "NegativeInfinity"]
+        canonForms = 0
+        canonical  = 0
+      `);
+      expect(checkPower('{-\\pi}^{-\\infty}')).toMatchInlineSnapshot(`
+        box        = ["Power", ["Negate", "Pi"], "NegativeInfinity"]
+        canonForms = ["Power", ["Negate", "Pi"], "NegativeInfinity"]
+        canonical  = 0
+      `);
+
+      //Constant-symbol value cases.: n=NegativeInfinity, x=0
+      expect(checkPower('x^{n}')).toMatchInlineSnapshot(`
+        box        = ["Power", "x", "n"]
+        canonForms = ComplexInfinity
+        canonical  = ComplexInfinity
+      `);
+    });
+
+    test(`x^{~oo}`, () => {
+      expect(checkPower('0^{\\operatorname{ComplexInfinity}}'))
+        .toMatchInlineSnapshot(`
+        box        = ["Power", 0, "ComplexInfinity"]
+        canonForms = NaN
+        canonical  = NaN
+      `);
+      expect(checkPower('1^{\\operatorname{ComplexInfinity}}'))
+        .toMatchInlineSnapshot(`
+        box        = ["Power", 1, "ComplexInfinity"]
+        canonForms = NaN
+        canonical  = NaN
+      `);
+      expect(checkPower('-1^{\\operatorname{ComplexInfinity}}'))
+        .toMatchInlineSnapshot(`
+        box        = ["Negate", ["Power", 1, "ComplexInfinity"]]
+        canonForms = NaN
+        canonical  = NaN
+      `);
+      expect(checkPower('\\infty^{\\operatorname{ComplexInfinity}}'))
+        .toMatchInlineSnapshot(`
+        box        = ["Power", "PositiveInfinity", "ComplexInfinity"]
+        canonForms = NaN
+        canonical  = NaN
+      `);
+      expect(checkPower('{-\\infty}^{\\operatorname{ComplexInfinity}}'))
+        .toMatchInlineSnapshot(`
+        box        = ["Power", "NegativeInfinity", "ComplexInfinity"]
+        canonForms = NaN
+        canonical  = NaN
+      `);
+      expect(checkPower('{-\\mathrm{NaN}}^{\\operatorname{ComplexInfinity}}'))
+        .toMatchInlineSnapshot(`
+        box        = ["Power", "NaN", "ComplexInfinity"]
+        canonForms = NaN
+        canonical  = NaN
+      `);
+    });
+
+    test('Infinity^{a + bi}', () => {
+      let check = (input: string) =>
+        checkPower(input, ['InvisibleOperator', 'Number']);
+
+      expect(check('\\infty^i')).toMatchInlineSnapshot(`
+        box        = ["Power", "PositiveInfinity", "i"]
+        canonForms = NaN
+        canonical  = NaN
+      `);
+
+      expect(check('{\\operatorname{ComplexInfinity}}^{-3i}'))
+        .toMatchInlineSnapshot(`
+        box        = ["Power", "ComplexInfinity", ["InvisibleOperator", -3, "i"]]
+        canonForms = NaN
+        canonical  = NaN
+      `);
+
+      //Include 'Add' in order that complex-numbers may be identified for these cases.
+      check = (input: string) =>
+        checkPower(input, ['InvisibleOperator', 'Number', 'Add']);
+
+      expect(check('\\infty^{2 + i}')).toMatchInlineSnapshot(`
+        box        = ["Power", "PositiveInfinity", ["Add", 2, "i"]]
+        canonForms = ComplexInfinity
+        canonical  = ComplexInfinity
+      `);
+
+      expect(check('\\infty^{-1 - 3i}')).toMatchInlineSnapshot(`
+        box        = [
+          "Power",
+          "PositiveInfinity",
+          ["Subtract", ["InvisibleOperator", -3, "i"], 1]
+        ]
+        canonForms = 0
+        canonical  = 0
+      `);
+    });
+
+    test('x^{1/y}', () => {
+      expect(checkPower('a^{1/2}')).toMatchInlineSnapshot(`
+        box        = ["Power", "a", ["Divide", 1, 2]]
+        canonForms = ["Sqrt", "a"]
+        canonical  = ["Sqrt", "a"]
+      `);
+      expect(checkPower('{7\\sqrt{13}}^{0.5}')).toMatchInlineSnapshot(`
+        box        = ["Power", ["InvisibleOperator", 7, ["Sqrt", 13]], 0.5]
+        canonForms = ["Sqrt", ["InvisibleOperator", 7, ["Sqrt", 13]]]
+        canonical  = ["Sqrt", ["Multiply", 7, ["Sqrt", 13]]]
+      `);
+      //note: for the following two cases, 'fully'-canonical transforms 'Divide -> Multiply' (this
+      //being preferred to facilitate further ops.)
+      expect(checkPower('{a/3}^{1/3}')).toMatchInlineSnapshot(`
+        box        = ["Power", ["Divide", "a", 3], ["Divide", 1, 3]]
+        canonForms = ["Root", ["Divide", "a", 3], 3]
+        canonical  = ["Root", ["Multiply", ["Rational", 1, 3], "a"], 3]
+      `);
+    });
   });
 });
 
@@ -510,3 +847,67 @@ describe('POLYNOMIAL ORDER', () => {
 //     );
 //   });
 // });
+
+/**
+ *
+ * Print/check boxed expression variants in a similar way to function 'checkJson', but only prints
+ * for variants 'boxed' (non-canonical), 'canonical', but also 'canonForms' (i.e. partial-canonical).
+ *
+ * Only prints 'canonical' if this differs from 'boxed'.
+ *
+ * @param inExpr
+ * @param forms
+ * @param [engine]
+ * @returns
+ */
+function checkForms(
+  inExpr: string | SemiBoxedExpression,
+  forms: CanonicalForm[],
+  engine?: ComputeEngine
+): string {
+  //Throw, because forms will not apply to an expr. in which 'isCanonical === true' (either
+  //partial,or full canonicalization)
+  if (inExpr instanceof _BoxedExpression && inExpr.isCanonical)
+    throw new Error(
+      "Received an already canonical ('CanonicalForms' or full) expression"
+    );
+
+  //Fall-back on file-scoped engine
+  engine ??= TEST_ENGINE;
+
+  try {
+    const precision = engine.precision;
+    engine.precision = 'auto';
+
+    //Boxed, *non-canonical*
+    const boxed =
+      typeof inExpr === 'string'
+        ? engine.parse(inExpr, { canonical: false })
+        : engine.box(inExpr, { canonical: false });
+
+    const boxedStr = exprToString(boxed);
+
+    if (!boxed.isValid) {
+      engine.precision = precision;
+      return `invalid   =${exprToString(boxed)}`;
+    }
+
+    const partialCanon = engine.box(boxed, { canonical: forms });
+    const partialCanonStr = exprToString(partialCanon);
+
+    const canonical = engine.box(boxed);
+    const canonicalStr = exprToString(canonical);
+
+    // boxed/non-canonical
+    const result: string[] = ['box        = ' + boxedStr];
+
+    result.push('canonForms = ' + partialCanonStr);
+    if (canonicalStr !== boxedStr) result.push('canonical  = ' + canonicalStr);
+
+    engine.precision = precision;
+
+    return result.join('\n');
+  } catch (e) {
+    return e.toString();
+  }
+}

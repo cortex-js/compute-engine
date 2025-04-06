@@ -2414,7 +2414,8 @@ export type RuntimeScope = Scope & {
  *
  * - `InvisibleOperator`: replace use of the `InvisibleOperator` with
  *    another operation, such as multiplication (i.e. `2x` or function
- *    application (`f(x)`).
+ *    application (`f(x)`). Also replaces ['InvisibleOperator', real, imaginary] instances with
+ *    complex (imaginary) numbers.
  * - `Number`: replace all numeric values with their
  *    canonical representation, for example, reduce
  *    rationals and replace complex numbers with no imaginary part with a real number.
@@ -2643,6 +2644,7 @@ export interface ComputeEngine extends IBigNum {
   readonly One: BoxedExpression;
   readonly Half: BoxedExpression;
   readonly NegativeOne: BoxedExpression;
+  /** ImaginaryUnit */
   readonly I: BoxedExpression;
   readonly NaN: BoxedExpression;
   readonly PositiveInfinity: BoxedExpression;

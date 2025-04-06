@@ -2,6 +2,7 @@ import { flattenOps } from './flatten';
 
 import { canonicalAdd } from './arithmetic-add';
 import { canonicalMultiply, canonicalDivide } from './arithmetic-mul-div';
+import { canonicalPower } from './arithmetic-power';
 import { canonicalInvisibleOperator } from '../library/invisible-operator';
 
 import { canonicalOrder } from './order';
@@ -230,14 +231,12 @@ function addForm(expr: BoxedExpression) {
 function powerForm(expr: BoxedExpression) {
   if (!expr.ops) return expr;
 
+  const ops = expr.ops.map((expr) => powerForm(expr));
+
   // If this is a power, canonicalize it
-  if (expr.operator === 'Power')
-    return powerForm(expr.op1).pow(powerForm(expr.op2));
+  if (expr.operator === 'Power') return canonicalPower(ops[0], ops[1]);
 
-  // Recursively visit all sub-expressions
-  if (!expr.ops) return expr;
-
-  return expr.engine._fn(expr.operator, expr.ops.map(powerForm));
+  return expr.engine._fn(expr.operator, ops, { canonical: false });
 }
 
 function divideForm(expr: BoxedExpression) {

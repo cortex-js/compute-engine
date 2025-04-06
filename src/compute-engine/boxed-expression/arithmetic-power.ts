@@ -5,6 +5,7 @@ import type { Rational } from '../numerics/types';
 import { canonicalAngle, getImaginaryFactor } from './utils';
 import { apply, apply2 } from './apply';
 import { SMALL_INTEGER } from '../numerics/numeric';
+import type { NumericType, Type } from '../types';
 
 function isSqrt(expr: BoxedExpression): boolean {
   return (
@@ -31,38 +32,182 @@ export function asRadical(expr: BoxedExpression): Rational | null {
   return null;
 }
 
+/**
+ *
+ * Produce the canonical form of the operands of a Power expression, returning either the operation
+ * result (e.g. 'a^1 -> a'), an alternate expr. representation ('a^{1/2} -> Sqrt(a)'), or an
+ * unchanged 'Power' expression. Operations include:
+ * 
+ * - @todo
+ * 
+ * Both the given base and exponent can either be canonical or non-canonical: with fully
+ * canonicalized args. lending to more simplifications.
+ * 
+ * Returns a canonical expr. is both operands are canonical.
+ 
+ * @export
+ * @param a
+ * @param b
+ * @returns
+ */
 export function canonicalPower(
   a: BoxedExpression,
   b: BoxedExpression
 ): BoxedExpression {
   const ce = a.engine;
-  a = a.canonical;
-  b = b.canonical;
-  if (a.is(0)) {
+
+  const fullyCanonical = a.isCanonical && b.isCanonical;
+  const unchanged = () =>
+    ce._fn('Power', [a, b], { canonical: fullyCanonical });
+
+  // Exclude cases - which may otherwise be valid - of the exponent either: being a function (e.g.
+  // '0 + 0'), a non-constant value (symbols with 'assumed' values, impure functions), or a
+  // non-numeric type (no concern for this).
+  //
+  // @consider:possible exceptions where function-expressions are reasonable :Rational,Half,
+  // Negate... (However, provided that canonicalNumber provided prior, should not be missing anything
+  // here)
+  if (
+    b.isFunctionExpression ||
+    !b.isConstant || //(!notably, should exclude symbol assumptions)
+    !b.type.matches('number' as Type)
+  )
+    return unchanged();
+
+  // 'a' is constant and of type 'number'. Used often.
+  // (note that this could still be a numeric expression, too...)
+  const aIsNum = a.isConstant && a.type.matches('number' as NumericType);
+
+  // Zero as base
+  if (aIsNum && a.is(0)) {
+    if (b.type.matches('imaginary' as NumericType) || b.isNaN) return ce.NaN;
+
     if (b.is(0)) return ce.NaN;
-    if (b.isPositive) return ce.Zero;
-    if (b.isNegative) return ce.ComplexInfinity;
+
+    if (b.isInfinity) {
+      // 0^∞ = 0 (because for all complex numbers z near 0, z^∞ -> 0).
+      if (b.isPositive) return ce.Zero; // 0^∞ = 0
+      // 0^-∞ = ~∞
+      if (b.isNegative) return ce.ComplexInfinity;
+      return ce.NaN; // 0^~∞ = NaN
+    }
+    //(note: these should be applicable only to the reals)
+    if (b.isGreater(0)) return ce.Zero;
+    if (b.isLess(0)) return ce.ComplexInfinity;
+
+    return unchanged(); // No other canonicalization cases with this base
   }
-  if (a.is(1) || b.is(0)) return ce.One;
+
+  // Zero as exponent
+  if (b.is(0)) {
+    if (aIsNum) return a.isFinite ? ce.One : ce.NaN;
+    return unchanged();
+  }
+
+  // One as base
+  // (note: 1^∞ = NaN - Because there are various cases where lim(x(t),t)=1, lim(y(t),t)=∞ (or -∞),
+  // but lim( x(t)^y(t), t) != 1.)
+  if (aIsNum && a.is(1)) return b.isFinite ? ce.One : ce.NaN;
+
+  // One as exponent
   if (b.is(1)) return a;
+
+  // -1 exponent
+  if (b.is(-1)) {
+    if (aIsNum) {
+      // (-∞)^-1 = 0, ∞^-1 = 0  (exclude ~oo)
+      if (a.isInfinity && (a.isNegative || a.isPositive)) return ce.Zero;
+
+      // (-1)^-1 = -1
+      if (a.is(-1)) return ce.NegativeOne;
+
+      // 1^-1 = 1
+      if (a.is(1)) return ce.One;
+    }
+
+    // (note: case of `0^-1 = ~∞` is covered prior...)
+    return a.inv();
+  }
+
+  //Infinity exponents
+  if (b.isInfinity && aIsNum) {
+    // x^oo
+    if (b.isPositive) {
+      // (note: 0^∞ = 0, 1^∞ = NaN, covered prior)
+
+      // (-1)^∞ = NaN
+      // Because of oscillations in the limit.
+      if (a.is(-1)) return ce.NaN;
+
+      //↓note:the case for all infinites.
+      if (a.isInfinity) return ce.ComplexInfinity;
+
+      if (a.isNaN) return ce.NaN;
+
+      //↓numeric-expr. bases included: e.g. '{2+3}^oo'
+      if (a.isReal) {
+        if (a.isGreater(1)) return ce.PositiveInfinity;
+        if (a.isLess(-1)) return ce.ComplexInfinity;
+        // Must be '-1 < a < 1', excluding zero
+        return ce.Zero;
+      }
+
+      return unchanged();
+    }
+
+    // x^-oo
+    if (b.isNegative) {
+      if (a.is(-1)) return ce.NaN;
+      //Same result for all infinity types...
+      if (a.isInfinity) return ce.Zero;
+
+      if (a.isNaN) return ce.NaN;
+
+      if (a.isReal) {
+        if (a.isGreater(0)) return a.isLess(1) ? ce.PositiveInfinity : ce.Zero;
+        // Must be < 0
+        return a.isGreater(-1) ? ce.ComplexInfinity : ce.Zero;
+      }
+      return unchanged();
+    }
+
+    //Must be 'x^ComplexInfinity'
+    // b^~∞ = NaN
+    // Because b^z has no limit as z -> ~∞.
+    return ce.NaN;
+  }
+
+  //'Infinity^Complex'
+  if (a.isInfinity) {
+    // If the exponent is pure imaginary, the result is NaN
+    //(↓fix?:ensure both these cases narrow down to 'b' being a num./symbol literal)
+    if (b.type.matches('imaginary' as NumericType)) return ce.NaN;
+    if (b.type.matches('complex') && !isNaN(b.re)) {
+      if (b.re > 0) return ce.ComplexInfinity;
+      if (b.re < 0) return ce.Zero;
+    }
+  }
+
+  // Fractional exponents
+  //---------------------
   if (b.is(0.5)) return canonicalRoot(a, 2);
-
   const r = asRational(b);
-  if (r !== undefined && r[0] === 1) return canonicalRoot(a, ce.number(r[1]));
 
-  return ce._fn('Power', [a, b]);
+  //1/3, 1/4...
+  if (r !== undefined && r[0] === 1 && r[1] !== 1)
+    return canonicalRoot(a, ce.number(r[1]));
+
+  return unchanged();
 }
 
 export function canonicalRoot(
   a: BoxedExpression,
   b: BoxedExpression | number
 ): BoxedExpression {
-  a = a.canonical;
   const ce = a.engine;
   let exp: number | undefined = undefined;
   if (typeof b === 'number') exp = b;
   else {
-    b = b.canonical;
     if (b.isNumberLiteral && b.im === 0) exp = b.re;
   }
 

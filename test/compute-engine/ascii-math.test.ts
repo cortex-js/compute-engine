@@ -120,9 +120,9 @@ describe('POWERS/ROOTS', () => {
     expect(check('x+(-1)^2')).toMatchInlineSnapshot(`x + (-1)^2`);
   });
   it('should serialize other powers', () => {
-    expect(check('x^{0}')).toMatchInlineSnapshot(`1`);
+    expect(check('x^{0}')).toMatchInlineSnapshot(`x^0`);
     expect(check('x^{1}')).toMatchInlineSnapshot(`x`);
-    expect(check('x^{-1}')).toMatchInlineSnapshot(`x^(-1)`);
+    expect(check('x^{-1}')).toMatchInlineSnapshot(`1 / x`);
     expect(check('x^{1.1}')).toMatchInlineSnapshot(`x^(1.1)`);
     expect(check('x^{\\pi}')).toMatchInlineSnapshot(`x^(pi)`);
     expect(check('x^{a+1}')).toMatchInlineSnapshot(`x^(a + 1)`);
@@ -258,7 +258,7 @@ describe('PRECEDENCE', () => {
     expect(check('1+2^3')).toMatchInlineSnapshot(`1 + 2^3`);
     expect(check('(1+2)^3')).toMatchInlineSnapshot(`(1 + 2)^3`);
     expect(check('1^2+3')).toMatchInlineSnapshot(`1 + 3`);
-    expect(check('1^{2+3}')).toMatchInlineSnapshot(`1`);
+    expect(check('1^{2+3}')).toMatchInlineSnapshot(`1^(2 + 3)`);
     expect(check('1+2/3')).toMatchInlineSnapshot(`1 + 2/3`);
     expect(check('(1+2)/3')).toMatchInlineSnapshot(`1/3 * (1 + 2)`);
     expect(check('1/2+3')).toMatchInlineSnapshot(`3 + 1/2`);

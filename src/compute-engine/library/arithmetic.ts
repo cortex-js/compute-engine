@@ -877,6 +877,7 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
       canonical: (args, { engine }) => {
         args = checkNumericArgs(engine, args, 2);
         const [base, exp] = args;
+        //note: args. are canonicalized prior.
         return canonicalRoot(base, exp);
       },
       evaluate: ([x, n], { numericApproximation }) =>
@@ -1046,6 +1047,7 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
       value: (engine) => engine.I,
     },
 
+    //Alias of 'ImaginaryUnit'
     i: {
       type: 'imaginary',
       constant: true,

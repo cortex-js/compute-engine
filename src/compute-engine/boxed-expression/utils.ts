@@ -5,6 +5,7 @@ import type {
   SymbolDefinition,
   NumericFlags,
   ComputeEngine,
+  Metadata,
 } from '../global-types';
 
 import { joinLatex } from '../latex-syntax/tokenizer';
@@ -44,6 +45,20 @@ export function asLatexString(s: unknown): string | null {
     return asLatexString(joinLatex(s));
   }
   return null;
+}
+
+/**
+ *
+ *
+ * @export
+ * @param expr
+ * @returns
+ */
+export function getMeta(expr: BoxedExpression): Partial<Metadata> {
+  const result: Partial<Metadata> = {};
+  if (expr.verbatimLatex !== undefined) result.latex = expr.verbatimLatex;
+  if (expr.wikidata !== undefined) result.latex = expr.wikidata;
+  return result;
 }
 
 export function hashCode(s: string): number {
