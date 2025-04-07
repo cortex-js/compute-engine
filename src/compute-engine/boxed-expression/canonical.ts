@@ -8,6 +8,7 @@ import { canonicalInvisibleOperator } from '../library/invisible-operator';
 import { canonicalOrder } from './order';
 import { asBigint } from './numerics';
 import type { BoxedExpression, CanonicalOptions } from '../global-types';
+import { isImaginaryUnit } from './utils';
 
 export function canonicalForm(
   expr: BoxedExpression,
@@ -133,6 +134,11 @@ function numberForm(expr: BoxedExpression): BoxedExpression {
   //for explicitness in case things change)
   if (expr.isNumberLiteral) return expr.canonical;
 
+  // Ensure that all representations of the imaginary unit are represented with the BoxedNumber
+  // variant: this makes further simplifications more straightforward.
+  if (isImaginaryUnit(expr)) return expr.engine.I;
+
+  // Only deal with func.-expressions henceforth
   if (!expr.isFunctionExpression) return expr;
 
   const { engine: ce } = expr;
@@ -151,6 +157,8 @@ function numberForm(expr: BoxedExpression): BoxedExpression {
       if (d !== null) return ce.number([n, d]);
     }
     name = 'Divide';
+
+    return ce._fn('Divide', ops, { canonical: false });
   }
 
   //
@@ -189,8 +197,15 @@ function numberForm(expr: BoxedExpression): BoxedExpression {
       return ce.number(
         typeof numericValue === 'number' ? -numericValue : numericValue.neg()
       );
+
+    // @consider: getImaginaryFactor/InvisibleOperator: i.e. account for '-2i', & so on.
+    // Capture -ve Imaginary
+    if (isImaginaryUnit(op1)) {
+      return ce.number(ce.complex(0, -1));
+    }
   }
 
+  // Re-box only if some transformation has applied
   return ops.every((op, index) => op === expr.ops![index])
     ? expr
     : ce._fn(name, ops, { canonical: false });

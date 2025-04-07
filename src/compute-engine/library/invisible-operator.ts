@@ -1,4 +1,5 @@
 import { flatten } from '../boxed-expression/flatten';
+import { isImaginaryUnit } from '../boxed-expression/utils';
 import { isIndexableCollection } from '../collection-utils';
 import type { BoxedExpression, ComputeEngine } from '../global-types';
 
@@ -38,13 +39,11 @@ export function canonicalInvisibleOperator(
     }
 
     //
-    // Is it a complex number, i.e. "2i"?
+    // Is it a complex (imaginary) number, i.e. "2i"?
     //
     const rhs = ops[1];
-    if (!Number.isNaN(lhsInteger)) {
-      const canonicalRhs = rhs.canonical;
-      if (canonicalRhs.re === 0 && canonicalRhs.im === 1)
-        return ce.number(ce.complex(0, lhsInteger));
+    if (!Number.isNaN(lhsInteger) && isImaginaryUnit(rhs)) {
+      return ce.number(ce.complex(0, lhsInteger));
     }
 
     //
