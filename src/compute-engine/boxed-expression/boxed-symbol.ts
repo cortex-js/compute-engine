@@ -531,18 +531,6 @@ export class BoxedSymbol extends _BoxedExpression {
     }
   }
 
-  /**
-   *
-   * :::info[Note]
-   * Will bind this symbol *if* this is a constant.
-   * :::
-   *
-   * @inheritdoc
-   */
-  get constantValue(): number | boolean | string | object | undefined {
-    return this.isConstant ? this.value : undefined;
-  }
-
   // The type of the value of the symbol.
   // If the symbol is not bound to a definition, the type is 'unknown'
   get type(): BoxedType {

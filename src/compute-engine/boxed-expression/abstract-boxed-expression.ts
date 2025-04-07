@@ -661,10 +661,6 @@ export abstract class _BoxedExpression implements BoxedExpression {
     throw new Error(`Can't change the value of \\(${this.latex}\\)`);
   }
 
-  get constantValue(): number | boolean | string | object | undefined {
-    return undefined;
-  }
-
   get type(): BoxedType {
     return BoxedType.unknown;
   }

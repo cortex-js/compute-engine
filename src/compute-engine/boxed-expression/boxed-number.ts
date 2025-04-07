@@ -148,10 +148,6 @@ export class BoxedNumber extends _BoxedExpression {
     return this._value;
   }
 
-  get constantValue(): number {
-    return this.value as number;
-  }
-
   get isNumberLiteral(): boolean {
     return true;
   }
