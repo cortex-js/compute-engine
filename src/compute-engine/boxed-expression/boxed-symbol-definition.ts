@@ -145,7 +145,7 @@ export class _BoxedSymbolDefinition implements BoxedSymbolDefinition {
       if (!this._type || this._type.isUnknown) {
         // The type is inferred, because the type of the value could be more restrictive than the intended type. For example, the value might be "2" (integer), but the intent is to declare it as a "number".
         this._type = this._value.type;
-        this.inferredType = true;
+        this.inferredType = !this.isConstant;
       } else {
         // If the value is not compatible with the type, throw
         if (!this._value.type.matches(this._type)) {
