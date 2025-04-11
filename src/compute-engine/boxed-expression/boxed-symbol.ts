@@ -416,18 +416,22 @@ export class BoxedSymbol extends _BoxedExpression {
   /**
    *
    * Subsequent inferences will narrow the domain of the symbol.
+   * ```
    * f: integer -> real, g: real -> real
    * g(x) => x: real
    * f(x) => x: integer narrowed from integer to real
-   *
+   * ```
    * @inheritdoc
    */
   infer(t: Type): boolean {
     // Call _lookupDef() to *not* auto-bind the symbol
     // which would defeat the purpose of inferring the type
     const def = this._lookupDef();
+
+    //
+    // 1/ If we don't know anything about this symbol yet, create a definition
+    //
     if (!def) {
-      // We don't know anything about this symbol yet, create a definition
       const scope = this.engine.swapScope(this._scope ?? this.engine.context);
       this._def = this.engine.defineSymbol(this._id, {
         type: t,
@@ -437,16 +441,21 @@ export class BoxedSymbol extends _BoxedExpression {
       return true;
     }
 
-    // Widen the type, if it was previously inferred
+    //
+    // 2/ Widen the type, if it was previously inferred
+    //
     if (
       def instanceof _BoxedSymbolDefinition &&
-      (def.inferredType || def.type.isUnknown) &&
-      !def.isConstant //'constant' symbols may still be inferred (i.e. value given but no type)
+      (def.inferredType || def.type.isUnknown)
     ) {
+      // Constants should never be inferred
+      console.assert(!def.isConstant);
+
       def.type = widen(def.type.type, t);
       return true;
     }
 
+    // The type was not modified
     return false;
   }
 
