@@ -62,7 +62,7 @@ import { BoxedType } from '../../common/type/boxed-type';
  * `BoxedFunctionDefinition`.
  *
  * If a `BoxedSymbolDefinition`, it "owns" all the information
- * about the symbol, its value, domain and various attributes.
+ * about the symbol, its value, type and various attributes.
  *
  * If a `BoxedFunctionDefinition`, it it a reference to a function name,
  * not a function expression, i.e. `Sin`, not `["Sin", "Pi"]`. This is used

@@ -3,6 +3,18 @@ import { ComputeEngine } from '../src/compute-engine';
 const ce = new ComputeEngine();
 const engine = ce;
 
+ce.declare('x', { constant: true, value: 2 });
+ce.parse('x + 2'); // -> 'Error: The type of the constant "x" cannot be changed' (takes place at `BoxedSymbol.infer()` as above; this being called from 'checkNumericArgs', as called from 'makeNumericFunction'
+
+const originalSqrtDefinition = ce.lookupFunction('Sqrt')!;
+ce.defineFunction('Sqrt', {
+  ...originalSqrtDefinition,
+  evaluate: (input, options) => {
+    const result = originalSqrtDefinition.evaluate!(input, options);
+    return result?.isReal ? result : ce.NaN;
+  },
+});
+
 console.info(ce.parse('x_{y}\\coloneq z').json);
 console.info(ce.parse('x\\coloneq z_{y}').json);
 
