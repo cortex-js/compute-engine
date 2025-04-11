@@ -108,7 +108,7 @@ if [ "$BUILD" = "production" ]; then
     # echo -e $LINECLEAR$BASENAME$CHECK$DIM" Linting$RESET"
 
     # Stamp the SDK version number
-    find ./dist -type f \( -name '*.js' -o -name '*.mjs' -name '*.cjs'\) -exec bash -c 'sedi s/{{SDK_VERSION}}/$SDK_VERSION/g {}' \;
+    find ./dist -type f \( -name '*.js' -o -name '*.mjs' -o -name '*.cjs' \) -exec bash -c 'sedi s/{{SDK_VERSION}}/$SDK_VERSION/g {}' \;
     find ./dist -type f -name '*.d.ts' -exec bash -c 'sedi "1s/^/\/\* $SDK_VERSION \*\/$(printf '"'"'\r'"'"')/" {}' \;
     find ./dist -type f -name '*.d.ts' -exec bash -c 'sedi "s/{{SDK_VERSION}}/$SDK_VERSION/" {}' \;
 
