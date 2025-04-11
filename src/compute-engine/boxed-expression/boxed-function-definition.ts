@@ -20,6 +20,9 @@ import { DEFAULT_COMPLEXITY } from './order';
 
 const FUNCTION_DEF_KEYS = new Set([
   // Base
+  'engine',
+  'scope',
+  'name',
   'description',
   'wikidata',
   'url',
@@ -34,6 +37,7 @@ const FUNCTION_DEF_KEYS = new Set([
   'involution',
   'pure',
 
+  'inferredSignature',
   'signature',
   'type',
   'sgn',
@@ -60,6 +64,7 @@ export class _BoxedFunctionDefinition implements BoxedFunctionDefinition {
 
   name: string;
   description?: string | string[];
+  url?: string;
   wikidata?: string;
 
   threadable = false;
@@ -158,6 +163,25 @@ export class _BoxedFunctionDefinition implements BoxedFunctionDefinition {
       }
     }
 
+    if ('name' in def) {
+      if (def.name !== this.name)
+        throw new Error(
+          `Function Definition "${this.name}": cannot change name to "${def.name}"`
+        );
+    }
+    if ('engine' in def) {
+      if (def.engine !== this.engine)
+        throw new Error(
+          `Function Definition "${this.name}": cannot change engine`
+        );
+    }
+    if ('scope' in def) {
+      if (def.scope !== this.scope)
+        throw new Error(
+          `Function Definition "${this.name}": cannot change scope`
+        );
+    }
+
     this.lazy = def.lazy ?? this.lazy;
 
     const idempotent = def.idempotent ?? this.idempotent;
@@ -171,6 +195,8 @@ export class _BoxedFunctionDefinition implements BoxedFunctionDefinition {
     this.involution = involution;
 
     this.description = def.description ?? this.description;
+    this.collection = def.collection ?? this.collection;
+    this.url = def.url ?? this.url;
     this.wikidata = def.wikidata ?? this.wikidata;
 
     this.threadable = def.threadable ?? this.threadable;
@@ -214,8 +240,10 @@ export class _BoxedFunctionDefinition implements BoxedFunctionDefinition {
         throw new Error(
           `Function Definition "${this.name}": signature "${newSig}" does not match "${oldSig}"`
         );
-      this.inferredSignature = false;
       this.signature = newSig;
+
+      if ('inferredSignature' in def)
+        this.inferredSignature = def.inferredSignature as boolean;
     }
 
     let evaluate: ((xs) => BoxedExpression | undefined) | undefined = undefined;
