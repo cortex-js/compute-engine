@@ -321,6 +321,8 @@ as per the floating point format standard IEEE-754.
 Note that if `isNaN` is true, `isNumber` is also true (yes, `NaN` is a
 number).
 
+If this expression is a symbol, this lookup also causes binding to a definition.
+
 </MemberCard>
 
 <a id="boxedexpression_isinfinity" name="boxedexpression_isinfinity"></a>
@@ -333,7 +335,9 @@ number).
 readonly isInfinity: boolean;
 ```
 
-The numeric value of this expression is `±Infinity` or Complex Infinity
+The numeric value of this expression is `±Infinity` or ComplexInfinity.
+
+If this is a symbol, causes it to be bound to a definition.
 
 </MemberCard>
 
@@ -347,7 +351,7 @@ The numeric value of this expression is `±Infinity` or Complex Infinity
 readonly isFinite: boolean;
 ```
 
-This expression is a number, but not `±Infinity`, 'ComplexInfinity` or
+This expression is a number, but not `±Infinity`, `ComplexInfinity` or
  `NaN`
 
 </MemberCard>
@@ -525,6 +529,9 @@ imaginary part), `this.sgn` will return `unsigned`.
 If a symbol, this does take assumptions into account, that is `this.sgn`
 will return `positive` if the symbol is assumed to be positive
 (using `ce.assume()`).
+
+For a symbol also, requires that the symbol be bound with its definition (i.e. canonical);
+otherwise, will return `undefined`.
 
 </MemberCard>
 
@@ -895,7 +902,7 @@ If false, the value of the expression may change, if the
 value of other expression changes or for other reasons.
 
 If `this.isPure` is `false`, `this.value` is undefined. Call
-`this.evaluate()` to determine the value of the expression instead.
+`this.evaluate()` (or '*this.N()*') to determine the value of the expression instead.
 
 As an example, the `Random` function is not pure.
 
@@ -915,15 +922,18 @@ Applicable to canonical and non-canonical expressions.
 readonly isConstant: boolean;
 ```
 
-True if the the value of the expression does not depend on the value of
-any other expression.
+`True` if this expression's value remains constant.
 
-For example, a number literal, a symbol with a constant value.
+If *true* and a function, implies that it is *pure*, and also that all of its arguments are
+constant.
+
+Number literals, symbols with constant values, and numeric functions with constant
+subexpressions may all be considered *constant*, i.e.:
 - `2` is constant
 - `Pi` is constant
 - `["Add", "Pi", 2]` is constant
-- `x` is not constant
-- `["Add", "x", 2]` is not constant
+- `x` is inconstant: unless declared with a constant value.
+- `["Add", "x", 2]` is either constant or inconstant, depending on whether `x` is constant.
 
 </MemberCard>
 
@@ -1494,7 +1504,8 @@ For symbols and functions, a definition associated with the
  definition.
 
 :::info[Note]
-`undefined` if not a canonical expression.
+For a symbol, always binds - potentially creating - a definition. For `BoxedFunctions`, will
+return `undefined` if not canonical.
 :::
 
 </MemberCard>
@@ -1528,6 +1539,8 @@ readonly symbolDefinition: BoxedSymbolDefinition;
 ```
 
 For symbols, a definition associated with the expression.
+
+Bind the expression to a definition, if not already bound.
 
 Return `undefined` if not a symbol
 
@@ -1770,14 +1783,21 @@ Return a JavaScript primitive representing the value of this expression.
 
 Equivalent to `expr.N().valueOf()`.
 
-Only the value of variables can be changed (symbols that are not
-constants).
+For functions, will only return non-undefined (i.e., compute the value) if the function is pure.
 
-Throws a runtime error if a constant.
+For symbols, the current behaviour also considers *non-constant* values, including those weakly
+assigned via symbol assumptions.
 
-:::info[Note]
-If non-canonical, does nothing
-:::
+**note**: this property is not guaranteed to remain constant, potentially differing across
+subsequent calls if a symbol (non-constant), or an *inconstant* pure function.
+
+Set the value of this expression (applicable only to `BoxedSymbol`).
+
+Will throw a runtime error if either not a BoxedSymbol, or if a symbol expression which is
+non-variable/constant.
+
+Setting the value of a symbol results in the forgetting of all assumptions about it in the
+current scope.
 
 </MemberCard>
 
@@ -1815,6 +1835,7 @@ If a symbol the type of the value of the symbol.
 If not valid, return `"error"`.
 If non-canonical, return `undefined`.
 If the type is not known, return `"unknown"`.
+If a symbol with a 'function' definition, returns the 'signature' type.
 :::
 
 </MemberCard>
@@ -1829,7 +1850,10 @@ If the type is not known, return `"unknown"`.
 isCollection: boolean;
 ```
 
-Return true if the expression is a collection: a list, a vector, a matrix, a map, a tuple, etc...
+Return true if the expression is a collection: a list, a vector, a matrix, a map, a tuple,
+etc...
+
+For symbols, this check involves binding to a definition, if not already canonical.
 
 </MemberCard>
 
@@ -2571,7 +2595,8 @@ it was provided.
 
 - `InvisibleOperator`: replace use of the `InvisibleOperator` with
    another operation, such as multiplication (i.e. `2x` or function
-   application (`f(x)`).
+   application (`f(x)`). Also replaces ['InvisibleOperator', real, imaginary] instances with
+   complex (imaginary) numbers.
 - `Number`: replace all numeric values with their
    canonical representation, for example, reduce
    rationals and replace complex numbers with no imaginary part with a real number.
@@ -2783,6 +2808,8 @@ type Rule =
      | RuleConditionFunction;
   useVariations: boolean;
   id: string;
+  onBeforeMatch: (rule, expr) => void;
+  onMatch: (rule, expr, replace) => void;
 };
 ```
 
@@ -2838,6 +2865,8 @@ type BoxedRule = {
   condition: undefined | RuleConditionFunction;
   useVariations: boolean;
   id: string;
+  onBeforeMatch: (rule, expr) => void;
+  onMatch: (rule, expr, replace) => void;
 };
 ```
 
@@ -3140,7 +3169,8 @@ optional value:
 ```ts
 type FunctionDefinition = BaseDefinition & Partial<FunctionDefinitionFlags> & {
   signature:   | Type
-     | TypeString;
+     | TypeString
+     | BoxedType;
   type: (ops, options) => 
      | Type
      | TypeString
@@ -3168,7 +3198,8 @@ Definition record for a function.
 ```ts
 optional signature: 
   | Type
-  | TypeString;
+  | TypeString
+  | BoxedType;
 ```
 
 The function signature.
@@ -4303,6 +4334,47 @@ This indicates a condition under which parsing should stop:
 
 </MemberCard>
 
+<a id="parsehandler" name="parsehandler"></a>
+
+<MemberCard>
+
+### ParseHandler
+
+```ts
+type ParseHandler = 
+  | ExpressionParseHandler
+  | SymbolParseHandler
+  | FunctionParseHandler
+  | EnvironmentParseHandler
+  | PostfixParseHandler
+  | InfixParseHandler
+  | MatchfixParseHandler;
+```
+
+**Custom parsing handler.**
+
+When this handler is invoked the parser points right after the LaTeX
+fragment that triggered it.
+
+Tokens can be consumed with `parser.nextToken()` and other parser methods
+such as `parser.parseGroup()`, `parser.parseOptionalGroup()`, etc...
+
+If it was in an infix or postfix context, `lhs` will represent the
+left-hand side argument. In a prefix or matchfix context, `lhs` is `null`.
+
+In a superfix (`^`) or subfix (`_`) context (that is if the first token of
+the trigger is `^` or `_`), `lhs` is `["Superscript", lhs, rhs]`
+and `["Subscript", lhs, rhs]`, respectively.
+
+The handler should return `null` if the tokens could not be parsed
+(didn't match the syntax that was expected), or the matching expression
+otherwise.
+
+If the tokens were parsed but should be ignored, the handler should
+return `Nothing`.
+
+</MemberCard>
+
 <a id="expressionparsehandler" name="expressionparsehandler"></a>
 
 <MemberCard>
@@ -4312,25 +4384,6 @@ This indicates a condition under which parsing should stop:
 ```ts
 type ExpressionParseHandler = (parser, until?) => Expression | null;
 ```
-
-Custom parsing handler.
-
-When invoked the parser points right after the LaTeX fragment that triggered
-this parsing handler.
-
-The parser should be moved, by calling `parser.nextToken()` for
-every consumed token.
-
-If it was in an infix or postfix context, `lhs` will represent the
-left-hand side argument. In a prefix or matchfix context, `lhs` is `null`.
-
-In a superfix (^) or subfix (_) context (that is if the first token of the
-trigger is `^` or `_`), lhs is `["Superscript", lhs, rhs]`
-and `["Subscript", lhs, rhs]`, respectively.
-
-The handler should return `null` if the expression could not be parsed
-(didn't match the syntax that was expected). The matching expression
-otherwise.
 
 </MemberCard>
 
