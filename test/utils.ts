@@ -1,9 +1,10 @@
 import { Expression } from '../src/math-json/types';
 import { ParsingDiagnostic } from '../src/point-free-parser/parsers';
-import { ComputeEngine, SemiBoxedExpression } from '../src/compute-engine';
+import { ComputeEngine } from '../src/compute-engine';
 
 import { parseCortex } from '../src/cortex';
 import { _BoxedExpression } from '../src/compute-engine/boxed-expression/abstract-boxed-expression';
+import type { SemiBoxedExpression } from '../src/compute-engine/global-types';
 
 const MAX_LINE_LENGTH = 72;
 
@@ -23,8 +24,9 @@ function exprToStringRecursive(expr: SemiBoxedExpression, start: number) {
 
   if (expr === null) return 'null';
   if (expr instanceof _BoxedExpression) {
+    const ce = expr.engine === engine ? engine : expr.engine;
     return exprToStringRecursive(
-      engine.box(expr, { canonical: false }).toMathJson(),
+      ce.box(expr, { canonical: false }).toMathJson(),
       start
     );
   }
@@ -97,15 +99,41 @@ export function simplify(latex: string): string {
   return exprToString(engine.parse(latex)?.simplify());
 }
 
-export function checkJson(inExpr: SemiBoxedExpression | null): string {
+type ExprVariant =
+  | 'box'
+  | 'canonical'
+  | 'simplify'
+  | 'eval-auto'
+  | 'eval-mach'
+  | 'N-mach'
+  | 'N-auto';
+
+export function checkJson(
+  inExpr: SemiBoxedExpression | null,
+  variants?: Array<ExprVariant>
+): string {
   if (!inExpr) return 'null';
   try {
-    const precision = engine.precision;
-    engine.precision = 'auto';
+    const ce =
+      inExpr instanceof _BoxedExpression && inExpr.engine === engine
+        ? inExpr.engine
+        : engine;
+    const precision = ce.precision;
+    ce.precision = 'auto';
 
-    const boxed = exprToString(engine.box(inExpr, { canonical: false }));
+    variants ??= [
+      'box',
+      'canonical',
+      'simplify',
+      'eval-auto',
+      'eval-mach',
+      'N-mach',
+      'N-auto',
+    ];
 
-    const expr = engine.box(inExpr);
+    const boxed = exprToString(ce.box(inExpr, { canonical: false }));
+
+    const expr = ce.box(inExpr);
 
     if (!expr.isValid) return `invalid   =${exprToString(expr)}`;
 
@@ -116,11 +144,11 @@ export function checkJson(inExpr: SemiBoxedExpression | null): string {
     const evalAuto = expr.evaluate().toString();
     const numEvalAuto = expr.N().toString();
 
-    engine.precision = 'machine';
+    ce.precision = 'machine';
     const evalMachine = expr.evaluate().toString();
     const numEvalMachine = expr.N().toString();
 
-    engine.precision = precision;
+    ce.precision = precision;
 
     if (
       boxed === canonical &&
@@ -133,23 +161,32 @@ export function checkJson(inExpr: SemiBoxedExpression | null): string {
       return boxed;
     }
 
-    const result = ['box       = ' + boxed];
+    const result: string[] = [];
+    if (variants.includes('box')) result.push('box       = ' + boxed);
 
-    if (canonical !== boxed) result.push('canonical = ' + canonical);
-    if (simplify !== expr.toString()) result.push('simplify  = ' + simplify);
+    if (canonical !== boxed && variants.includes('canonical'))
+      result.push('canonical = ' + canonical);
+
+    if (simplify !== expr.toString() && variants.includes('simplify'))
+      result.push('simplify  = ' + simplify);
 
     if (
-      evalAuto !== simplify ||
-      evalMachine !== evalAuto ||
-      numEvalAuto !== evalAuto
+      (evalAuto !== simplify ||
+        evalMachine !== evalAuto ||
+        numEvalAuto !== evalAuto) &&
+      variants.includes('eval-auto')
     )
       result.push('eval-auto = ' + evalAuto);
 
-    if (evalMachine !== evalAuto || numEvalAuto !== evalAuto)
+    if (
+      evalMachine !== evalAuto ||
+      (numEvalAuto !== evalAuto && variants.includes('eval-mach'))
+    )
       result.push('eval-mach = ' + evalMachine);
 
-    if (numEvalAuto !== evalAuto) result.push('N-auto    = ' + numEvalAuto);
-    if (numEvalMachine !== evalMachine)
+    if (numEvalAuto !== evalAuto && variants.includes('N-auto'))
+      result.push('N-auto    = ' + numEvalAuto);
+    if (numEvalMachine !== evalMachine && variants.includes('N-mach'))
       result.push('N-mach    = ' + numEvalMachine);
 
     return result.join('\n');
@@ -158,8 +195,8 @@ export function checkJson(inExpr: SemiBoxedExpression | null): string {
   }
 }
 
-export function check(latex: string): string {
-  return checkJson(engine.parse(latex, { canonical: false }));
+export function check(latex: string, variants?: Array<ExprVariant>): string {
+  return checkJson(engine.parse(latex, { canonical: false }), variants);
 }
 
 export function latex(expr: Expression | undefined | null): string {

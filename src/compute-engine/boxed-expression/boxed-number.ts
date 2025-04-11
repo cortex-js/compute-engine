@@ -128,6 +128,22 @@ export class BoxedNumber extends _BoxedExpression {
     return 1;
   }
 
+  /**
+   *
+   * **note**: For BoxedNumbers, returns a number literal if this can be represented in JavaScript
+   * as such (most cases); else returns a string (ComplexInfinity, complex-numbers, for example).
+   *
+   * @inheritdoc
+   *
+   * <!--
+   * (note: overrides parent 'value' - despite identical body - to narrow return-type & add
+   * documenation)
+   * -->
+   */
+  get value(): number | string {
+    return this.N().valueOf();
+  }
+
   get numericValue(): number | NumericValue {
     return this._value;
   }
@@ -364,12 +380,21 @@ export class BoxedNumber extends _BoxedExpression {
 
     let s: number | undefined;
     if (typeof this._value === 'number') {
-      if (Number.isNaN(this._value)) return 'unsigned';
+      if (Number.isNaN(this._value)) return 'nan';
+      if (this._value === +Infinity) return 'positive-infinity';
+      if (this._value === -Infinity) return 'negative-infinity';
       s = Math.sign(this._value);
-    } else s = this._value.sgn();
-    // The sign of a complex Numeric Value is `undefined`
-    if (s === undefined) return 'unsigned';
+    } else s = this._value.sgn(); // 'NumericValue'
+
+    // indicates a complex Numeric Value
+    // aside from 'complex-infinity', will be 'unsigned'
+    if (s === undefined) {
+      if ((this._value as NumericValue).isComplexInfinity)
+        return 'complex-infinity';
+      return 'unsigned';
+    }
     if (Number.isNaN(s)) return 'unsigned';
+    //Should leave only the reals
     if (s === 0) return 'zero';
     if (s > 0) return 'positive';
     return 'negative';
@@ -562,7 +587,10 @@ export class BoxedNumber extends _BoxedExpression {
   N(): BoxedExpression {
     const v = this._value;
     if (typeof v === 'number') return this;
+    //NumericValue
     const n = v.N();
+    //Often, 'evaluating' a numeric-value yields the same result, but sometimes may result in a
+    //different representation: e.g. some cases of Exact -> Big
     if (v === n) return this;
     return this.engine.number(n);
   }

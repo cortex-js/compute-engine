@@ -12,8 +12,10 @@ describe('ROOT FUNCTION', () => {
     expect(parse('\\frac{1}{\\sqrt[3]{x}}')).toMatchInlineSnapshot(
       `["Root", "x", -3]`
     );
+    //↓Because as part of canonicalization of 'Divide' which simplifies '1/x', the denominator is
+    //simplified as part of the call to BoxedFunction.inv(): which in-turn calls .root()
     expect(parse('\\frac{1}{\\sqrt[3]{\\sqrt{x}}}')).toMatchInlineSnapshot(
-      `["Divide", 1, "x"]`
+      `["Root", "x", -6]`
     );
   });
 });

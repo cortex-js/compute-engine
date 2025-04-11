@@ -2,10 +2,13 @@ import { flattenOps } from './flatten';
 
 import { canonicalAdd } from './arithmetic-add';
 import { canonicalMultiply, canonicalDivide } from './arithmetic-mul-div';
+import { canonicalPower } from './arithmetic-power';
 import { canonicalInvisibleOperator } from '../library/invisible-operator';
 
 import { canonicalOrder } from './order';
+import { asBigint } from './numerics';
 import type { BoxedExpression, CanonicalOptions } from '../global-types';
+import { isImaginaryUnit } from './utils';
 
 export function canonicalForm(
   expr: BoxedExpression,
@@ -105,13 +108,107 @@ function invisibleOperatorForm(expr: BoxedExpression) {
   return expr.engine._fn(expr.operator, expr.ops.map(invisibleOperatorForm));
 }
 
-function numberForm(expr: BoxedExpression) {
-  // Return the canonical form if a number literal
+/**
+ * Apply the 'Number' form to the expression, _recursively_.
+ *
+ * This involes casting as numbers various (non-BoxedNumber) expression structures, such as:
+ *
+ * This includes :
+ * - Expressions with an operator of `Complex` are converted to a (complex) number
+ *     or a `Add`/`Multiply` expression.
+ *
+ * - An expression with a `Rational` operator is converted to a rational
+ *    number if possible, and to a `Divide` otherwise.
+ *
+ * - A `Negate` function applied to a number literal is converted to a number.
+ *
+ * <!--
+ * (!note: the procedure outlined is a contracted one of that affixed to function 'box')
+ * -->
+ *
+ * @param expr
+ * @returns
+ */
+function numberForm(expr: BoxedExpression): BoxedExpression {
+  //(↓note: this is redundant, since numbers are _always_ boxed as canonical (v27.0), but preserving
+  //for explicitness in case things change)
   if (expr.isNumberLiteral) return expr.canonical;
 
+  // Ensure that all representations of the imaginary unit are represented with the BoxedNumber
+  // variant: this makes further simplifications more straightforward.
+  if (isImaginaryUnit(expr)) return expr.engine.I;
+
+  // Only deal with func.-expressions henceforth
+  if (!expr.isFunctionExpression) return expr;
+
+  const { engine: ce } = expr;
+
   // Recursively visit all sub-expressions
-  if (expr.ops) return expr.engine._fn(expr.operator, expr.ops.map(numberForm));
-  return expr;
+  const ops = expr.ops!.map(numberForm);
+  let { operator: name } = expr;
+
+  //
+  // Rational (as Divide)
+  //
+  if ((name === 'Divide' || name === 'Rational') && ops.length === 2) {
+    const n = asBigint(ops[0]);
+    if (n !== null) {
+      const d = asBigint(ops[1]);
+      if (d !== null) return ce.number([n, d]);
+    }
+    name = 'Divide';
+
+    return ce._fn('Divide', ops, { canonical: false });
+  }
+
+  //
+  // Complex
+  //
+  if (name === 'Complex') {
+    if (ops.length === 1) {
+      // If single argument, assume it's imaginary
+      const op1 = ops[0];
+      if (op1.isNumberLiteral) return ce.number(ce.complex(0, op1.re));
+
+      return op1.mul(ce.I);
+    }
+    if (ops.length === 2) {
+      const re = ops[0].re;
+      const im = ops[1].re;
+      if (im !== null && re !== null && !isNaN(im) && !isNaN(re)) {
+        if (im === 0 && re === 0) return ce.Zero;
+        if (im !== 0) return ce.number(ce._numericValue({ re, im }));
+        return ops[0];
+      }
+      return ops[0].add(ops[1].mul(ce.I));
+    }
+    throw new Error('Expected one or two arguments with Complex expression');
+  }
+
+  //
+  // Negate
+  //
+  // Distribute over literals
+  //
+  if (name === 'Negate' && ops.length === 1) {
+    const op1 = ops[0]!;
+    const { numericValue } = op1;
+    if (numericValue !== null)
+      return ce.number(
+        typeof numericValue === 'number' ? -numericValue : numericValue.neg()
+      );
+
+    // @consider: getImaginaryFactor/InvisibleOperator: i.e. account for '-2i', & so on.
+    // Capture -ve Imaginary
+    if (isImaginaryUnit(op1)) {
+      return ce.number(ce.complex(0, -1));
+    }
+  }
+
+  // Re-box only if some transformation has applied
+  return ops.every((op, index) => op === expr.ops![index])
+    ? expr
+    : ce._fn(name, ops, { canonical: false });
 }
 
 function multiplyForm(expr: BoxedExpression) {
@@ -149,14 +246,12 @@ function addForm(expr: BoxedExpression) {
 function powerForm(expr: BoxedExpression) {
   if (!expr.ops) return expr;
 
+  const ops = expr.ops.map((expr) => powerForm(expr));
+
   // If this is a power, canonicalize it
-  if (expr.operator === 'Power')
-    return powerForm(expr.op1).pow(powerForm(expr.op2));
+  if (expr.operator === 'Power') return canonicalPower(ops[0], ops[1]);
 
-  // Recursively visit all sub-expressions
-  if (!expr.ops) return expr;
-
-  return expr.engine._fn(expr.operator, expr.ops.map(powerForm));
+  return expr.engine._fn(expr.operator, ops, { canonical: false });
 }
 
 function divideForm(expr: BoxedExpression) {

@@ -10,6 +10,7 @@ import { ExactNumericValue } from './exact-numeric-value';
 export class MachineNumericValue extends NumericValue {
   __brand: 'MachineNumericValue';
 
+  // synonymous with 're'; the JavasScript number representation of the 'real' part.
   decimal: number;
   im: number;
 
