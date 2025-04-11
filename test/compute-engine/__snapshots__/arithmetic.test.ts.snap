@@ -335,6 +335,7 @@ N-mach    = [3.00416602394643,7.3890560989306495,54.59815003314423]
 
 exports[`EXP Exp -1 1`] = `
 box       = ["Exp", -1]
+canonical = ["Divide", 1, "ExponentialE"]
 eval-auto = 1 / e
 eval-mach = 1 / e
 N-auto    = 0.367879441171442321596

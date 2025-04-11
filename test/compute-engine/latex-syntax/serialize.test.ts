@@ -145,9 +145,11 @@ describe('CUSTOM LATEX SERIALIZING', () => {
       `\\frac{ac}{bd}`
     );
     expect(expr.toLatex({ prettify: false })).toMatchInlineSnapshot(
-      `\\frac{ac}{bd}`
+      `\\frac{a}{b}\\frac{c}{d}`
     );
-  }); // @fixme
+
+    //@todo: remaining cases
+  });
 
   test('Invisible Multiply', () => {
     const expr = ce.parse('2x');

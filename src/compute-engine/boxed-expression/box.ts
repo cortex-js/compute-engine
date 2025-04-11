@@ -191,17 +191,15 @@ export function boxFunction(
   //
   if (name === 'Number' && ops.length === 1) return box(ce, ops[0], options);
 
-  const canonicalNumber =
-    structural === false &&
-    (options.canonical === true ||
-      options.canonical === 'Number' ||
-      (Array.isArray(options.canonical) &&
-        options.canonical.includes('Number')));
+  const canonicalNumber = structural === false && options.canonical === true;
 
+  // If canonical, handle cases of various expression structures being able to be cast as
+  // BoxedNumbers (some cases of Negate, Rational, Divide, Complex), or 'de-number' some 'borderline
+  // invalid' boxed number-like expressions
+  // (!@note: this procedure is similarly repeated within the 'number' CanonicalForm, but the
+  // numberForm variant more simply applies to fully BoxedExprs., and during partial canonicalization
+  // only)
   if (canonicalNumber) {
-    // If we have a full canonical form or a canonical form for numbers
-    // do some additional simplifications
-
     //
     // Rational (as Divide)
     //

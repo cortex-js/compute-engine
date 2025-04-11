@@ -26,21 +26,21 @@ import type {
   MathJsonFunction,
   MathJsonIdentifier,
 } from '../math-json';
-import {
+import type {
   LatexDictionaryEntry,
   LatexString,
   ParseLatexOptions,
   SerializeLatexOptions,
 } from './latex-syntax/types';
-import {
+import type {
   ExactNumericValueData,
   NumericValue,
   NumericValueData,
 } from './numeric-value/types';
-import { BigNum, IBigNum, Rational } from './numerics/types';
-import { Type, TypeString } from '../common/type/types';
-import { BoxedType } from '../common/type/boxed-type';
-import { IndexedLatexDictionary } from './latex-syntax/dictionary/definitions';
+import type { BigNum, IBigNum, Rational } from './numerics/types';
+import type { Type, TypeString } from '../common/type/types';
+import type { BoxedType } from '../common/type/boxed-type';
+import type { IndexedLatexDictionary } from './latex-syntax/dictionary/definitions';
 
 /** @category Compiling */
 export type CompiledType = boolean | number | string | object;
@@ -530,7 +530,7 @@ export interface BoxedExpression {
    * value of other expression changes or for other reasons.
    *
    * If `this.isPure` is `false`, `this.value` is undefined. Call
-   * `this.evaluate()` to determine the value of the expression instead.
+   * `this.evaluate()` (or '*this.N()*') to determine the value of the expression instead.
    *
    * As an example, the `Random` function is not pure.
    *
@@ -541,15 +541,18 @@ export interface BoxedExpression {
   readonly isPure: boolean;
 
   /**
-   * True if the the value of the expression does not depend on the value of
-   * any other expression.
+   * `True` if this expression's value remains constant.
    *
-   * For example, a number literal, a symbol with a constant value.
+   * If *true* and a function, implies that it is *pure*, and also that all of its arguments are
+   * constant.
+   *
+   * Number literals, symbols with constant values, and numeric functions with constant
+   * subexpressions may all be considered *constant*, i.e.:
    * - `2` is constant
    * - `Pi` is constant
    * - `["Add", "Pi", 2]` is constant
-   * - `x` is not constant
-   * - `["Add", "x", 2]` is not constant
+   * - `x` is inconstant: unless declared with a constant value.
+   * - `["Add", "x", 2]` is either constant or inconstant, depending on whether `x` is constant.
    */
   readonly isConstant: boolean;
 
@@ -711,19 +714,23 @@ export interface BoxedExpression {
    * Note that if `isNaN` is true, `isNumber` is also true (yes, `NaN` is a
    * number).
    *
+   * If this expression is a symbol, this lookup also causes binding to a definition.
+   *
    * @category Numeric Expression
    *
    */
   readonly isNaN: boolean | undefined;
 
   /**
-   * The numeric value of this expression is `±Infinity` or Complex Infinity
+   * The numeric value of this expression is `±Infinity` or ComplexInfinity.
+   *
+   * If this is a symbol, causes it to be bound to a definition.
    *
    * @category Numeric Expression
    */
   readonly isInfinity: boolean | undefined;
 
-  /** This expression is a number, but not `±Infinity`, 'ComplexInfinity` or
+  /** This expression is a number, but not `±Infinity`, `ComplexInfinity` or
    *  `NaN`
    *
    * @category Numeric Expression
@@ -901,6 +908,9 @@ export interface BoxedExpression {
    * will return `positive` if the symbol is assumed to be positive
    * (using `ce.assume()`).
    *
+   * For a symbol also, requires that the symbol be bound with its definition (i.e. canonical);
+   * otherwise, will return `undefined`.
+   *
    * @category Numeric Expression
    *
    */
@@ -1010,7 +1020,8 @@ export interface BoxedExpression {
    *  definition.
    *
    * :::info[Note]
-   * `undefined` if not a canonical expression.
+   * For a symbol, always binds - potentially creating - a definition. For `BoxedFunctions`, will
+   * return `undefined` if not canonical.
    * :::
    *
    */
@@ -1029,6 +1040,8 @@ export interface BoxedExpression {
   /**
    * For symbols, a definition associated with the expression.
    *
+   * Bind the expression to a definition, if not already bound.
+   *
    * Return `undefined` if not a symbol
    *
    */
@@ -1038,12 +1051,24 @@ export interface BoxedExpression {
    *
    * Infer the type of this expression.
    *
-   * If the type of this expression is already known, return `false`.
+   * Effective only for overall BoxedExpression types which are *non-constant* and therefore for
+   * which its value, and thereby type, can potentially vary.
    *
-   * If the type was not set, set it to the inferred type, return `true`
-   * If the type was previously inferred, widen it and return `true`.
+   * For symbols, inference may take place only for undeclared, or previously inferred symbols. For
+   * functions, only to those with an *inferred signature*.
    *
-   * If the type cannot be inferred, return `false`.
+   * For a successful inference, *widens* the type for symbols (including creating a symbol
+   * definition if this is an _undeclared_ boxed-symbol), and for functions, narrows the *(return)
+   * type*. The return result will for this case be `true`.
+   *
+   * (Note that subsequent inferences can be made and will override previous ones if valid)
+   *
+   * If inference is possible but the given type is incompatible with the declared or previously
+   * inferred type, will return `false`.
+   *
+   * For all other cases, such as inference for a constant-valued symbol, or a function already with
+   * a definition, returns `false`.
+   *
    *
    * @internal
    */
@@ -1201,18 +1226,25 @@ export interface BoxedExpression {
    *
    * Equivalent to `expr.N().valueOf()`.
    *
+   * For functions, will only return non-undefined (i.e., compute the value) if the function is pure.
+   *
+   * For symbols, the current behaviour also considers *non-constant* values, including those weakly
+   * assigned via symbol assumptions.
+   *
+   * **note**: this property is not guaranteed to remain constant, potentially differing across
+   * subsequent calls if a symbol (non-constant), or an *inconstant* pure function.
+   *
    */
   get value(): number | boolean | string | object | undefined;
 
   /**
-   * Only the value of variables can be changed (symbols that are not
-   * constants).
+   * Set the value of this expression (applicable only to `BoxedSymbol`).
    *
-   * Throws a runtime error if a constant.
+   * Will throw a runtime error if either not a BoxedSymbol, or if a symbol expression which is
+   * non-variable/constant.
    *
-   * :::info[Note]
-   * If non-canonical, does nothing
-   * :::
+   * Setting the value of a symbol results in the forgetting of all assumptions about it in the
+   * current scope.
    *
    */
   set value(
@@ -1241,6 +1273,7 @@ export interface BoxedExpression {
    * If not valid, return `"error"`.
    * If non-canonical, return `undefined`.
    * If the type is not known, return `"unknown"`.
+   * If a symbol with a 'function' definition, returns the 'signature' type.
    * :::
    *
    */
@@ -1336,7 +1369,10 @@ export interface BoxedExpression {
   isEqual(other: number | BoxedExpression): boolean | undefined;
 
   /**
-   * Return true if the expression is a collection: a list, a vector, a matrix, a map, a tuple, etc...
+   * Return true if the expression is a collection: a list, a vector, a matrix, a map, a tuple,
+   * etc...
+   *
+   * For symbols, this check involves binding to a definition, if not already canonical.
    */
   isCollection: boolean;
 
@@ -2368,7 +2404,8 @@ export type RuntimeScope = Scope & {
  *
  * - `InvisibleOperator`: replace use of the `InvisibleOperator` with
  *    another operation, such as multiplication (i.e. `2x` or function
- *    application (`f(x)`).
+ *    application (`f(x)`). Also replaces ['InvisibleOperator', real, imaginary] instances with
+ *    complex (imaginary) numbers.
  * - `Number`: replace all numeric values with their
  *    canonical representation, for example, reduce
  *    rationals and replace complex numbers with no imaginary part with a real number.
@@ -2597,6 +2634,7 @@ export interface ComputeEngine extends IBigNum {
   readonly One: BoxedExpression;
   readonly Half: BoxedExpression;
   readonly NegativeOne: BoxedExpression;
+  /** ImaginaryUnit */
   readonly I: BoxedExpression;
   readonly NaN: BoxedExpression;
   readonly PositiveInfinity: BoxedExpression;

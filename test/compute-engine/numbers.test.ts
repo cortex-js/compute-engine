@@ -1,5 +1,5 @@
-import { BoxedExpression } from '../../src/compute-engine.ts';
 import { Expression } from '../../src/math-json/types.ts';
+import type { BoxedExpression } from '../../src/compute-engine/global-types.ts';
 import { engine as ce } from '../utils';
 
 describe('BOXING OF NUMBER', () => {
@@ -81,10 +81,10 @@ describe('PROPERTIES OF NUMBERS', () => {
       real: false
       rational: false
       integer: false
-      positive (>0): false
-      negative (<0): false
-      nonPositive (<=0): false
-      nonNegative (>=0): false
+      positive (>0): undefined
+      negative (<0): undefined
+      nonPositive (<=0): undefined
+      nonNegative (>=0): undefined
       -1: false
       0: false
       +1: false
@@ -169,10 +169,10 @@ describe('PROPERTIES OF NUMBERS', () => {
       real: false
       rational: false
       integer: false
-      positive (>0): false
-      negative (<0): false
-      nonPositive (<=0): false
-      nonNegative (>=0): false
+      positive (>0): undefined
+      negative (<0): undefined
+      nonPositive (<=0): undefined
+      nonNegative (>=0): undefined
       -1: false
       0: false
       +1: false
@@ -191,14 +191,14 @@ describe('PROPERTIES OF NUMBERS', () => {
       real: false
       rational: false
       integer: false
-      positive (>0): false
-      negative (<0): false
-      nonPositive (<=0): false
-      nonNegative (>=0): false
+      positive (>0): undefined
+      negative (<0): undefined
+      nonPositive (<=0): undefined
+      nonNegative (>=0): undefined
       -1: false
       0: false
       +1: false
-      finite: undefined
+      finite: true
       infinite: false
       nan: false
       even: undefined
@@ -213,10 +213,10 @@ describe('PROPERTIES OF NUMBERS', () => {
       real: false
       rational: false
       integer: false
-      positive (>0): false
-      negative (<0): false
-      nonPositive (<=0): false
-      nonNegative (>=0): false
+      positive (>0): undefined
+      negative (<0): undefined
+      nonPositive (<=0): undefined
+      nonNegative (>=0): undefined
       -1: false
       0: false
       +1: false
@@ -374,7 +374,7 @@ describe('PROPERTIES OF NUMBERS', () => {
       -1: false
       0: false
       +1: false
-      finite: undefined
+      finite: true
       infinite: false
       nan: false
       even: undefined

@@ -5,6 +5,7 @@ import type {
   SymbolDefinition,
   NumericFlags,
   ComputeEngine,
+  Metadata,
 } from '../global-types';
 
 import { joinLatex } from '../latex-syntax/tokenizer';
@@ -44,6 +45,20 @@ export function asLatexString(s: unknown): string | null {
     return asLatexString(joinLatex(s));
   }
   return null;
+}
+
+/**
+ *
+ *
+ * @export
+ * @param expr
+ * @returns
+ */
+export function getMeta(expr: BoxedExpression): Partial<Metadata> {
+  const result: Partial<Metadata> = {};
+  if (expr.verbatimLatex !== undefined) result.latex = expr.verbatimLatex;
+  if (expr.wikidata !== undefined) result.latex = expr.wikidata;
+  return result;
 }
 
 export function hashCode(s: string): number {
@@ -169,6 +184,29 @@ export function getImaginaryFactor(
   }
 
   return undefined;
+}
+
+/**
+ * `true` if expr is a number with imaginary part 1 and real part 0, or a symbol with a definition
+ * matching this. Does not bind expr if a symbol.
+ *
+ * @export
+ * @param expr
+ * @returns
+ */
+export function isImaginaryUnit(expr: BoxedExpression): boolean {
+  const { engine } = expr;
+  // Shortcut: boxed engine imaginary unit
+  if (expr === engine.I) return true;
+
+  if (expr.isNumberLiteral) return expr.re === 0 && expr.im === 1;
+
+  // !note: use 'isSame' instead of checking identity with 'I', to account for potential,
+  // non-default definition of the imaginary unit
+  if (expr.symbol !== null) return expr.canonical.isSame(engine.I);
+
+  // function/string/...
+  return false;
 }
 
 export function normalizeFlags(
