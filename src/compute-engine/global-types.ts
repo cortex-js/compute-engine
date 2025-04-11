@@ -972,7 +972,7 @@ export interface BoxedExpression {
   //
   // CANONICAL EXPRESSIONS ONLY
   //
-  // The properties/methods below return only `undefined` for non-canonical
+  // The properties/methods below return `undefined` for non-canonical
   // expressions
   //
 
@@ -1020,8 +1020,8 @@ export interface BoxedExpression {
    *  definition.
    *
    * :::info[Note]
-   * For a symbol, always binds - potentially creating - a definition. For `BoxedFunctions`, will
-   * return `undefined` if not canonical.
+   * For a symbol, always binds - potentially creating - a definition. For
+   * `BoxedFunctions`, will be `undefined` if not canonical.
    * :::
    *
    */
@@ -1042,7 +1042,9 @@ export interface BoxedExpression {
    *
    * Bind the expression to a definition, if not already bound.
    *
-   * Return `undefined` if not a symbol
+   * :::info[Note]
+   * `undefined` if not a symbol.
+   * :::
    *
    */
   readonly symbolDefinition: BoxedSymbolDefinition | undefined;
@@ -1051,23 +1053,25 @@ export interface BoxedExpression {
    *
    * Infer the type of this expression.
    *
-   * Effective only for overall BoxedExpression types which are *non-constant* and therefore for
-   * which its value, and thereby type, can potentially vary.
+   * For symbols, inference may take place only for undeclared symbols,
+   * symbols with an `unknown` type, or previously inferred symbols.
    *
-   * For symbols, inference may take place only for undeclared, or previously inferred symbols. For
-   * functions, only to those with an *inferred signature*.
+   * Constant symbols always have a defined type, and will return `false`.
    *
-   * For a successful inference, *widens* the type for symbols (including creating a symbol
-   * definition if this is an _undeclared_ boxed-symbol), and for functions, narrows the *(return)
-   * type*. The return result will for this case be `true`.
+   * For functions, inference only takes place for those with an *inferred
+   * signature*.
    *
-   * (Note that subsequent inferences can be made and will override previous ones if valid)
    *
-   * If inference is possible but the given type is incompatible with the declared or previously
-   * inferred type, will return `false`.
+   * For a successful inference, *widens* the type for symbols (including
+   * creating a symbol definition if this is an _undeclared_ boxed-symbol),
+   * and for functions, narrows the *(return) type*. The return result will be
+   * `true`.
    *
-   * For all other cases, such as inference for a constant-valued symbol, or a function already with
-   * a definition, returns `false`.
+   * Subsequent inferences can be made and will refine previous
+   * ones if valid.
+   *
+   * If inference is possible but the given type is incompatible with the
+   * declared or previously inferred type, will return `false`.
    *
    *
    * @internal
@@ -1651,7 +1655,8 @@ export type SymbolDefinition = BaseDefinition &
 export type FunctionDefinition = BaseDefinition &
   Partial<FunctionDefinitionFlags> & {
     /**
-     * The function signature.
+     * The function signature, describing the type of the arguments and the
+     * return type.
      *
      * If a `type` handler is provided, the return type of the function should
      * be a subtype of the return type in the signature.
@@ -1660,14 +1665,20 @@ export type FunctionDefinition = BaseDefinition &
     signature?: Type | TypeString | BoxedType;
 
     /**
-     * The actual type of the result based on the arguments.
+     * The type of the result (return type) based on the type of
+     * the arguments.
      *
-     * Should be a subtype of the type indicated in the signature.
+     * Should be a subtype of the type indicated by the signature.
      *
+     * For example, if the signature is `(number) -> real`, the type of the
+     * result could be `real` or `integer`, but not `complex`.
+     *
+     * :::info[Note]
      * Do not evaluate the arguments.
      *
-     * The type of the arguments can be used to determine the type of the
-     * result.
+     * However, the type of the arguments can be used to determine the type of
+     * the result.
+     * :::
      *
      */
     type?: (
@@ -1684,7 +1695,8 @@ export type FunctionDefinition = BaseDefinition &
      *
      * Do not evaluate the arguments.
      *
-     * The type and sign of the arguments can be used to determine the sign.
+     * However, the type and sign of the arguments can be used to determine the
+     * sign.
      *
      */
     sgn?: (
@@ -1692,8 +1704,9 @@ export type FunctionDefinition = BaseDefinition &
       options: { engine: ComputeEngine }
     ) => Sign | undefined;
 
-    /** Return true of the function expression is even, false if it is odd and
-     * undefined if it is neither.
+    /** Return `true` if the function expression is even, `false` if it is odd
+     * and `undefined` if it is neither (for example if it is not a number,
+     * or if it is a complex number).
      */
     even?: (
       ops: ReadonlyArray<BoxedExpression>,
@@ -1728,12 +1741,13 @@ export type FunctionDefinition = BaseDefinition &
      * The arguments (`args`) may not be in canonical form. If necessary, they
      * can be put in canonical form.
      *
-     * This handler should validate the type and number of the arguments.
+     * This handler should validate the type and number of the arguments
+     * (arity).
      *
      * If a required argument is missing, it should be indicated with a
      * `["Error", "'missing"]` expression. If more arguments than expected
      * are present, this should be indicated with an
-     * ["Error", "'unexpected-argument'"]` error expression
+     * `["Error", "'unexpected-argument'"]` error expression
      *
      * If the type of an argument is not compatible, it should be indicated
      * with an `incompatible-type` error.
@@ -1755,9 +1769,9 @@ export type FunctionDefinition = BaseDefinition &
      *
      * The result of the handler should be a canonical expression.
      *
-     * If the arguments do not match, they should be replaced with an appropriate
-     * `["Error"]` expression. If the expression cannot be put in canonical form,
-     * the handler should return `null`.
+     * If the arguments do not match, they should be replaced with an
+     * appropriate `["Error"]` expression. If the expression cannot be put in
+     * canonical form, the handler should return `null`.
      *
      */
     canonical?: (
@@ -1768,8 +1782,8 @@ export type FunctionDefinition = BaseDefinition &
     /**
      * Evaluate a function expression.
      *
-     * The arguments have been evaluated, except the arguments to which a
-     * `hold` applied.
+     * When the handler is invoked, the arguments have been evaluated, except
+     * the arguments to which a `hold` applied.
      *
      * It is not necessary to further simplify or evaluate the arguments.
      *
@@ -1778,12 +1792,8 @@ export type FunctionDefinition = BaseDefinition &
      * number or a square root, rather than a floating point approximation.
      * Use `ce.number()` to create the numeric value.
      *
-     * When `numericalApproximation` is `false`, return a floating point number:
-     * - do not reduce rational numbers to decimal (floating point approximation)
-     * - do not reduce square roots of rational numbers
-     *
      * If the expression cannot be evaluated, due to the values, types, or
-     * assumptions about its arguments, for example, return `undefined` or
+     * assumptions about its arguments, return `undefined` or
      * an `["Error"]` expression.
      */
     evaluate?:
@@ -1794,7 +1804,7 @@ export type FunctionDefinition = BaseDefinition &
       | BoxedExpression;
 
     /**
-     * An option asynchronous version of `evaluate`.
+     * An asynchronous version of `evaluate`.
      *
      */
     evaluateAsync?: (
