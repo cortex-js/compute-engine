@@ -61,8 +61,7 @@ export function canonicalPower(
     ce._fn('Power', [a, b], { canonical: fullyCanonical });
 
   // Exclude cases - which may otherwise be valid - of the exponent either: being a function (e.g.
-  // '0 + 0'), a non-constant value (symbols with 'assumed' values, impure functions), or a
-  // non-numeric type (no concern for this).
+  // '0 + 0'), a symbol, or non-numeric expr. type (e.g. string).
   //
   // @consider:possible exceptions where function-expressions are reasonable :Rational,Half,
   // Negate... (However, provided that canonicalNumber provided prior, should not be missing anything
@@ -273,93 +272,12 @@ export function pow(
 
   if (typeof exp !== 'number') exp = exp.canonical;
 
+  // 'canonicalPower' deals with a set of basic operations.
+  // If the result is not 'Power', can assume an op. has taken place
+  const canonicalResult = canonicalPower(x, ce.box(exp));
+  if (canonicalResult.operator !== 'Power') return canonicalResult;
+
   const e = typeof exp === 'number' ? exp : exp.im === 0 ? exp.re : undefined;
-
-  // x^0 = 1
-  if (e === 0) return ce.One;
-  // x^1 = x
-  if (e === 1) return x;
-
-  if (e === -1) {
-    // (-∞)^-1 = 0
-    if (x.isInfinity && x.isNegative) return ce.Zero;
-
-    // (-1)^-1 = -1
-    if (x.is(-1)) return ce.NegativeOne;
-
-    // 0^-1 = ~∞
-    // This is not strictly true, as 0^-1 may be undefined, but is convenient in some contexts where the base is assumed to be positive.
-    if (x.is(0)) return ce.ComplexInfinity;
-
-    // 1^-1 = 1
-    if (x.is(1)) return ce.One;
-
-    // ∞^-1 = 0
-    if (x.isInfinity && x.isPositive) return ce.Zero;
-
-    return x.inv();
-  }
-
-  if (e === Number.POSITIVE_INFINITY) {
-    // 0^∞ = 0
-    // Because for all complex numbers z near 0, z^∞ -> 0.
-    if (x.is(0)) return ce.Zero;
-
-    // 1^∞ = NaN
-    // Because there are various cases where lim(x(t),t)=1, lim(y(t),t)=∞ (or -∞), but lim( x(t)^y(t), t) != 1.
-    if (x.is(1)) return ce.NaN;
-
-    // (-1)^∞ = NaN
-    // Because of oscillations in the limit.
-    if (x.is(-1)) return ce.NaN;
-
-    if (x.isInfinity) {
-      if (x.isPositive) return ce.PositiveInfinity;
-      if (x.isNegative) return ce.NaN;
-    }
-  }
-
-  if (e === Number.NEGATIVE_INFINITY) {
-    if (x.is(-1)) return ce.NaN;
-    if (x.isInfinity) {
-      if (x.isPositive) return ce.Zero;
-      if (x.isNegative) return ce.NegativeInfinity;
-    }
-  }
-
-  if (typeof exp !== 'number') {
-    if (exp.isInfinity && !exp.isPositive && !exp.isNegative) {
-      // b^~∞ = NaN
-      // Because b^z has no limit as z -> ~∞.
-      return ce.NaN;
-    }
-
-    if (x.isInfinity) {
-      // If the exponent is pure imaginary, the result is NaN
-      if (exp.type.matches('imaginary')) return ce.NaN;
-      if (exp.type.matches('complex') && !isNaN(exp.re)) {
-        if (exp.re > 0) return ce.ComplexInfinity;
-        if (exp.re < 0) return ce.Zero;
-      }
-    }
-  }
-
-  //   // if (this.isNegative) {
-  //   //   if (exp % 2 === 1) return this.neg().pow(exp).neg();
-  //   //   if (exp % 2 === 0) return this.neg().pow(exp);
-  //   // }
-
-  if (e === Number.POSITIVE_INFINITY) {
-    if (x.isGreater(1)) return ce.PositiveInfinity;
-    if (x.isPositive && x.isLess(1)) return ce.Zero;
-  }
-  if (e === Number.NEGATIVE_INFINITY) {
-    if (x.isGreater(1)) return ce.Zero;
-    if (x.isPositive && x.isLess(1)) return ce.PositiveInfinity;
-  }
-
-  if (typeof exp !== 'number' && exp.operator === 'Negate')
-    return pow(x, exp.op1, { numericApproximation }).inv();
 
   // @todo: this should be canonicalized to a number, so it should never happen here
   if (x.symbol === 'ComplexInfinity') return ce.NaN;
