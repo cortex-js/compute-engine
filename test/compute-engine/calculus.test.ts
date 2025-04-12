@@ -1,4 +1,4 @@
-import type { BoxedExpression } from '../../src/compute-engine/types';
+import type { BoxedExpression } from '../../src/compute-engine/global-types';
 import { engine } from '../utils';
 
 function parse(expr: string): BoxedExpression {

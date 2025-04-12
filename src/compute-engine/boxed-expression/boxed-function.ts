@@ -681,7 +681,7 @@ export class BoxedFunction extends _BoxedExpression {
     }
 
     // root(sqrt(a), c) -> root(a, 2*c)
-    if (this.operator === 'Sqrt' || this.operator === 'Root') {
+    if (this.operator === 'Sqrt') {
       if (e !== undefined) return this.op1.root(e * 2);
       if (typeof exp !== 'number') return this.op1.root(exp.mul(2));
     }
