@@ -22,6 +22,17 @@ export function canonicalForm(
 
   if (typeof forms === 'string') forms = [forms];
 
+  // Like for full canonicalization, request the canonical form of symbols.
+  // Automatically, this involves the substitution of the symbol with its value, if it is a
+  // constant-flagged symbol, with a 'holdUntil' attribute of 'never'
+  // (@note: the reasoning for carrying this out here is because in some sense, firstly,
+  // 'CanonicalForm' can be regarded as producing a 'canonical' expression, (albeit a 'custom' one;
+  // notably also with the resulting expr. having an 'isCanonical' value of 'true'). Secondly &
+  // following from this, symbol canonicalization (and substitution where appropriate) facilitates
+  // several simplifications which would otherwise not be made: for example 'x^y' where 'y=0', for
+  // canonicalPower.
+  expr = symbolForm(expr);
+
   // Apply each form in turn
   for (const form of forms) {
     switch (form) {
@@ -124,6 +135,14 @@ function invisibleOperatorForm(expr: BoxedExpression) {
  *
  * <!--
  * (!note: the procedure outlined is a contracted one of that affixed to function 'box')
+ *
+ * @wip ?
+ * -As discussed in compute-engine/pull/238, other possible transformations here:
+ *  -Promotion of 'complex-numbers': ['Multiply', 2, 'ImaginaryUnit'] -> 2i)
+ *    -^or even for 'InvisibleOperator',too...
+ *  -Creation of complex: e.g. from `a + ib` or `ai + b` ('Add' instances)
+ *
+ * ^I.e., a cross-selection of ops. from 'Add','Multiply', 'InvisibleOpeator'...
  * -->
  *
  * @param expr
@@ -252,6 +271,21 @@ function powerForm(expr: BoxedExpression) {
   if (expr.operator === 'Power') return canonicalPower(ops[0], ops[1]);
 
   return expr.engine._fn(expr.operator, ops, { canonical: false });
+}
+
+/**
+ * Replace symbols within expr. with canonical variants, *recursively*.
+ *
+ * @param expr
+ * @returns
+ */
+function symbolForm(expr: BoxedExpression): BoxedExpression {
+  if (expr.symbol !== null) return expr.canonical;
+  if (!expr.isFunctionExpression) return expr;
+
+  return expr.engine._fn(expr.operator, expr.ops!.map(symbolForm), {
+    canonical: false,
+  });
 }
 
 function divideForm(expr: BoxedExpression) {

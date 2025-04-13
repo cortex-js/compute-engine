@@ -430,7 +430,7 @@ export class ComputeEngine implements IComputeEngine {
       im: Infinity,
     });
 
-    // Reset the caches/create numeric constants
+    // Reset the caches/create (precision-dependent) numeric constants
     this.reset();
 
     //
@@ -1270,7 +1270,7 @@ export class ComputeEngine implements IComputeEngine {
    * if the type is not known yet. If `unknown`, the type will be inferred
    * based on usage.
    *
-   * An identifier can be redeclared with a different type, but only if
+   * An identifier *can be redeclared* with a different type, but only if
    * the type of the identifier was inferred. If the domain was explicitly
    * set, the identifier cannot be redeclared.
    *
