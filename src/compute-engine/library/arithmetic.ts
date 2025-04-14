@@ -1644,9 +1644,13 @@ function processMinMaxItem(
 
   // A range is discrete, the last element may not be included
   if (item.operator === 'Range') {
-    const r = range(item);
-    const last = rangeLast(r);
-    return [ce.number(Math.max(r[0], last)), []];
+    if (upper) {
+      const r = range(item);
+      const last = rangeLast(r);
+      return [ce.number(Math.max(r[0], last)), []];
+    } else {
+      return [ce.number(range(item)[0]), []];
+    }
   }
 
   if (item.operator === 'Linspace') {
