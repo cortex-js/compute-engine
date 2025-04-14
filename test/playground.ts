@@ -1,7 +1,13 @@
-import { ComputeEngine } from '../src/compute-engine';
+import { ComputeEngine, Expression } from '../src/compute-engine';
 
 const ce = new ComputeEngine();
 const engine = ce;
+
+const list: Expression = ['List', 7, 13, 5, 19, 2, 3, 11];
+engine
+  .box(['Map', list, ['Add', '_', 1]])
+  ?.evaluate()
+  .print();
 
 ce.declare('x', { constant: true, value: 2 });
 ce.parse('x + 2'); // -> 'Error: The type of the constant "x" cannot be changed' (takes place at `BoxedSymbol.infer()` as above; this being called from 'checkNumericArgs', as called from 'makeNumericFunction'

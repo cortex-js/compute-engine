@@ -1,5 +1,12 @@
 ## [Unreleased]
 
+### Breaking Changes
+
+- The `expr.value` property is now equivalent to `expr.valueOf()`. It was
+  previously equivalent to `expr.N().valueOf()`, however the implicit evaluation
+  of the expression produced some unexpected results, for example when the
+  expression was not pure.
+
 ### New Features and Improvements
 
 - Added a rule to solve the equation `a^x + b = 0`

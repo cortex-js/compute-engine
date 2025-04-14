@@ -130,18 +130,19 @@ export class BoxedNumber extends _BoxedExpression {
 
   /**
    *
-   * **note**: For BoxedNumbers, returns a number literal if this can be represented in JavaScript
-   * as such (most cases); else returns a string (ComplexInfinity, complex-numbers, for example).
+   * Return a JavaScript number when possible (most cases); else return a
+   * string representation of the number (ComplexInfinity and complex numbers
+   * for example).
    *
-   * @inheritdoc
+   * When a JavaScript number is returned, it may have fewer digits than the
+   * original number, but it will be a close approximation.
    *
-   * <!--
-   * (note: overrides parent 'value' - despite identical body - to narrow return-type & add
-   * documenation)
-   * -->
+   * @returns {number | string} The value of the number.
    */
-  get value(): number | string {
-    return this.N().valueOf();
+
+  valueOf(): number | string {
+    if (typeof this._value === 'number') return this._value;
+    return this._value.N().valueOf();
   }
 
   get numericValue(): number | NumericValue {
@@ -166,8 +167,10 @@ export class BoxedNumber extends _BoxedExpression {
     if (typeof this._value === 'number') return undefined;
     return this._value.bignumRe;
   }
+
   get bignumIm(): Decimal | undefined {
-    return undefined;
+    if (typeof this._value === 'number') return this.engine._BIGNUM_ZERO;
+    return this.engine.bignum(this._value.im);
   }
 
   neg(): BoxedExpression {
@@ -546,6 +549,11 @@ export class BoxedNumber extends _BoxedExpression {
       if (typeof this._value === 'number') return this._value === rhs;
       return this._value.eq(rhs);
     }
+    if (typeof rhs === 'bigint') {
+      if (typeof this._value === 'number') return bigint(this._value) === rhs;
+      return this._value.eq(this.engine._numericValue(rhs));
+    }
+    // @fixme: we don't handle the case where rhs is a complex number expressed as a string...
     return false;
   }
 

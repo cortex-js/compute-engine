@@ -249,10 +249,11 @@ export class BoxedSymbol extends _BoxedExpression {
   }
 
   is(rhs: any): boolean {
-    if (typeof rhs === 'number')
-      return this.symbolDefinition?.value?.is(rhs) ?? false;
+    if (this._id === 'True') return rhs === true;
+    if (this._id === 'False') return rhs === false;
 
-    return false;
+    // Check if the _value_ of this symbol is equal to the value of rhs
+    return this.symbolDefinition?.value?.is(rhs) ?? false;
   }
 
   get canonical(): BoxedExpression {
@@ -459,15 +460,24 @@ export class BoxedSymbol extends _BoxedExpression {
     return false;
   }
 
-  get value(): number | boolean | string | object | undefined {
-    return this.symbolDefinition?.value?.value;
+  get value(): number | boolean | string | undefined {
+    const v = this.symbolDefinition?.value;
+    if (v === undefined) return undefined;
+    if (v.symbol === 'True') return true;
+    if (v.symbol === 'False') return false;
+    if (v.symbol === 'NaN') return NaN;
+    if (v.symbol === 'ComplexInfinity') return '~oo';
+    if (v.symbol === 'PositiveInfinity') return Infinity;
+    if (v.symbol === 'NegativeInfinity') return -Infinity;
+    if (v.symbol === 'ImaginaryUnit') return 'i';
+    return this.symbolDefinition?.value?.valueOf() ?? undefined;
   }
 
   set value(
     value:
       | boolean
       | string
-      | Decimal
+      | BigNum
       | number[]
       | OneOf<
           [
@@ -477,7 +487,6 @@ export class BoxedSymbol extends _BoxedExpression {
           ]
         >
       | number
-      | object
       | undefined
   ) {
     const ce = this.engine;

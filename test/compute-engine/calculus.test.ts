@@ -1,4 +1,4 @@
-import type { BoxedExpression } from '../../src/compute-engine/public';
+import type { BoxedExpression } from '../../src/compute-engine/types';
 import { engine } from '../utils';
 
 function parse(expr: string): BoxedExpression {
@@ -28,7 +28,7 @@ describe('CALCULUS', () => {
 
     it('should compute the numerical approximation of a trig function', () => {
       const expr = parse('\\mathrm{NIntegrate}(x \\mapsto \\sin x, 0, 1)');
-      const result = expr.value as number;
+      const result = expr.N().value as number;
 
       expect(Math.round(result * 100)).toMatchInlineSnapshot(`46`);
     });

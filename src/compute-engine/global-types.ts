@@ -215,19 +215,21 @@ export interface BoxedExpression {
   /** From `Object.valueOf()`, return a primitive value for the expression.
    *
    * If the expression is a machine number, or bignum or rational that can be
-   * converted to a machine number, return a JavaScript `number`.
+   * converted to a machine number, return a JavaScript `number`. There may
+   * be a loss of precision in this conversion.
    *
-   * If the expression is a symbol, return the name of the symbol as a `string`.
+   * If the expression is `True` or `False`, return `true` or `false`.
    *
-   * Otherwise return a JavaScript primitive representation of the expression.
+   * If the expression is a symbol or function expression return the string
+   * representation of the expression.
    *
    * @category Primitive Methods
    */
-  valueOf(): number | any | string | boolean;
+  valueOf(): number | string | boolean;
 
-  /** From `Object.toString()`, return a string representation of the
-   *  expression. This string is suitable to be output to the console
-   * for debugging, for example. It is formatted as a ASCIIMath expression.
+  /** From `Object.toString()`, return a ASCIIMath representation of the
+   * expression. This string is suitable to be output to the console
+   * for debugging, for example.
    *
    * To get a LaTeX representation of the expression, use `expr.latex`.
    *
@@ -750,16 +752,17 @@ export interface BoxedExpression {
   /**
    * Return the value of this expression, if a number literal.
    *
-   * Note it is possible for `this.numericValue` to be `null`, and for
-   * `this.isNotZero` to be true. For example, when a symbol has been
+   * Note it is possible for `expr.numericValue` to be `null`, and for
+   * `expr.isNotZero` to be true. For example, when a symbol has been
    * defined with an assumption.
    *
-   * Conversely, `this.isNumber` may be true even if `numericValue` is `null`,
-   * example the symbol `Pi` return `true` for `isNumber` but `numericValue` is
-   * `null`. Its value can be accessed with `.N().numericValue`.
+   * Conversely, `expr.isNumber` may be true even if `numericValue` is `null`,
+   * for example the symbol `Pi` return `true` for `isNumber` but
+   * numericValue is `null`. Its value can be accessed with
+   * `expr.N().numericValue`.
    *
-   * To check if an expression is a number literal, use `this.isNumberLiteral`.
-   * If `this.isNumberLiteral` is `true`, `this.numericValue` is not `null`
+   * To check if an expression is a number literal, use `expr.isNumberLiteral`.
+   * If `expr.isNumberLiteral` is `true`, `expr.numericValue` is not `null`.
    *
    * @category Numeric Expression
    *
@@ -770,7 +773,7 @@ export interface BoxedExpression {
    * Return `true` if this expression is a number literal, for example
    * `2`, `3.14`, `1/2`, `√2` etc.
    *
-   * This is equivalent to checking if `this.numericValue` is not `null`.
+   * This is equivalent to checking if `expr.numericValue` is not `null`.
    *
    * @category Numeric Expression
    *
@@ -780,7 +783,7 @@ export interface BoxedExpression {
   /**
    * Return `true` if this expression is a function expression.
    *
-   * If `true`, `this.ops` is not `null`, and `this.operator` is the name
+   * If `true`, `expr.ops` is not `null`, and `expr.operator` is the name
    * of the function.
    */
   readonly isFunctionExpression: boolean;
@@ -789,8 +792,7 @@ export interface BoxedExpression {
    * If this expression is a number literal or a symbol with a value that
    * is a number literal, return the real part of the value.
    *
-   * If the expression is not a number literal, or a symbol with a value
-   * that is a number literal, return `NaN` (not a number).
+   * Otherwise, return `NaN` (not a number).
    *
    * @category Numeric Expression
    */
@@ -801,8 +803,7 @@ export interface BoxedExpression {
    * is a number literal, return the imaginary part of the value. If the value
    * is a real number, the imaginary part is 0.
    *
-   * If the expression is not a number literal, or a symbol with a value
-   * that is a number literal, return `NaN` (not a number).
+   * Otherwise, return `NaN` (not a number).
    *
    * @category Numeric Expression
    */
@@ -816,8 +817,8 @@ export interface BoxedExpression {
    * the value is not upconverted to a bignum.
    *
    * To get the real value either as a bignum or a number, use
-   * `this.bignumRe ?? this.re`. When using this pattern, the value is
-   * returned as a bignum if available, otherwise as a number or NaN if
+   * `expr.bignumRe ?? expr.re`. When using this pattern, the value is
+   * returned as a bignum if available, otherwise as a number or `NaN` if
    * the value is not a number literal or a symbol with a value that is a
    * number literal.
    *
@@ -837,8 +838,8 @@ export interface BoxedExpression {
    * to a bignum.
    *
    * To get the imaginary value either as a bignum or a number, use
-   * `this.bignumIm ?? this.im`. When using this pattern, the value is
-   * returned as a bignum if available, otherwise as a number or NaN if
+   * `expr.bignumIm ?? expr.im`. When using this pattern, the value is
+   * returned as a bignum if available, otherwise as a number or `NaN` if
    * the value is not a number literal or a symbol with a value that is a
    * number literal.
    *
@@ -1226,29 +1227,23 @@ export interface BoxedExpression {
   ): null | ReadonlyArray<BoxedExpression>;
 
   /**
-   * Return a JavaScript primitive representing the value of this expression.
+   * If this expression is a number, a boolean, a string or a symbol with a
+   * value that is a number or a string, return a JavaScript primitive
+   * representing the value of this expression.
    *
-   * Equivalent to `expr.N().valueOf()`.
-   *
-   * For functions, will only return non-undefined (i.e., compute the value) if the function is pure.
-   *
-   * For symbols, the current behaviour also considers *non-constant* values, including those weakly
-   * assigned via symbol assumptions.
-   *
-   * **note**: this property is not guaranteed to remain constant, potentially differing across
-   * subsequent calls if a symbol (non-constant), or an *inconstant* pure function.
+   * Otherwise, return `undefined`.
    *
    */
-  get value(): number | boolean | string | object | undefined;
+  get value(): number | boolean | string | undefined;
 
   /**
-   * Set the value of this expression (applicable only to `BoxedSymbol`).
+   * If the expression is a symbol, set the value of the symbol.
    *
-   * Will throw a runtime error if either not a BoxedSymbol, or if a symbol expression which is
-   * non-variable/constant.
+   * Will throw a runtime error if either not a `BoxedSymbol`, or if a symbol
+   * expression which is non-variable/constant.
    *
-   * Setting the value of a symbol results in the forgetting of all assumptions about it in the
-   * current scope.
+   * Setting the value of a symbol results in the forgetting of all assumptions
+   * about it in the current scope.
    *
    */
   set value(
@@ -1256,10 +1251,14 @@ export interface BoxedExpression {
       | boolean
       | string
       | BigNum
-      | { re: number; im: number }
-      | { num: number; denom: number }
+      | OneOf<
+          [
+            { re: number; im: number },
+            { num: number; denom: number },
+            BoxedExpression,
+          ]
+        >
       | number[]
-      | BoxedExpression
       | number
       | undefined
   );
@@ -1348,9 +1347,10 @@ export interface BoxedExpression {
    * considered equal. This tolerance is set when the `engine.precision` is
    * changed to be such that the last two digits are ignored.
    *
-   * The evaluations may be expensive operations. Other options to consider
+   * Evaluating the expressions may be expensive. Other options to consider
    * to compare two expressions include:
-   * - `expr.isSame(other)` for a structural comparison
+   * - `expr.isSame(other)` for a structural comparison which does not involve
+   *   evaluating the expressions.
    * - `expr.is(other)` for a comparison of a number literal
    *
    * **Examples**

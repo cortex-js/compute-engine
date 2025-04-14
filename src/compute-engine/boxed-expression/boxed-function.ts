@@ -217,15 +217,6 @@ export class BoxedFunction extends _BoxedExpression {
     return this.isConstant ? this.value : undefined;
   }
 
-  /**
-   *
-   * @inheritdoc
-   */
-  get value(): number | boolean | string | object | undefined {
-    if (!this.isPure) return undefined;
-    return this.N().valueOf();
-  }
-
   get json(): Expression {
     return [this._name, ...this.structural.ops!.map((x) => x.json)];
   }

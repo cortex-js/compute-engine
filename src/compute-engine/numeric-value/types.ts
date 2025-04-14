@@ -104,6 +104,7 @@ export abstract class NumericValue {
   /** The sign of complex numbers is undefined */
   abstract sgn(): -1 | 0 | 1 | undefined;
 
+  /** Return a non-exact representation of the numeric value */
   abstract N(): NumericValue;
 
   abstract neg(): NumericValue;
@@ -138,12 +139,13 @@ export abstract class NumericValue {
   // JavaScript Object methods
   //
 
-  /** Object.valueOf(): returns a primitive value */
+  /** Object.valueOf(): returns a primitive value, preferably a JavaScript
+   *  number over a string, even if at the expense of precision */
   valueOf(): number | string {
-    if (this.im === 0) {
-      return this.bignumRe ? this.bignumRe.toFixed() : this.re;
-    }
-    return this.N().toString();
+    if (this.im === 0)
+      return this.bignumRe ? this.bignumRe.toNumber() : this.re;
+
+    return this.toString();
   }
 
   /** Object.toPrimitive() */

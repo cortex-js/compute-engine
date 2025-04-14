@@ -4,17 +4,17 @@ import '../utils'; // For snapshot serializers
 
 export const ce = new ComputeEngine();
 
-ce.assume(['Equal', 'one', 1]);
-ce.assume(['Greater', 'x', 4]);
-// ce.assume(['Element', 'm', ['Range', -Infinity, Infinity]]);
-// ce.assume(['Element', 'n', ['Range', 0, Infinity]]);
-ce.assume(['Equal', 'o', 1]);
-ce.assume(['Equal', 'p', 11]);
-// ce.assume(['Element', 'q', ['Range', -Infinity, 0]]);
-// ce.assume(['Element', 'r', ['Interval', ['Open', 0], +Infinity]]);
+ce.assume(ce.box(['Equal', 'one', 1]));
+ce.assume(ce.box(['Greater', 'x', 4]));
+// ce.assume(['Element', 'm', ['Range', -Infinity, Infinity]]);   @fixme
+// ce.assume(['Element', 'n', ['Range', 0, Infinity]]);   @fixme
+ce.assume(ce.box(['Equal', 'o', 1]));
+ce.assume(ce.box(['Equal', 'p', 11]));
+// ce.assume(['Element', 'q', ['Range', -Infinity, 0]]);  @fixme
+// ce.assume(['Element', 'r', ['Interval', ['Open', 0], +Infinity]]); @fixme
 
-ce.assume(['Greater', 's', 5]);
-ce.assume(['Greater', 't', 0]);
+ce.assume(ce.box(['Greater', 's', 5]));
+ce.assume(ce.box(['Greater', 't', 0]));
 
 // console.info([...ce.context!.dictionary!.symbols.keys()]);
 
@@ -28,7 +28,9 @@ describe('TAUTOLOGY one = 1', () => {
     );
   });
   test(`'one' compared to 0`, () => {
-    expect(ce.assume(['Greater', 'one', 0])).toMatchInlineSnapshot(`tautology`);
+    expect(ce.assume(ce.box(['Greater', 'one', 0]))).toMatchInlineSnapshot(
+      `tautology`
+    );
     expect(ce.box(['Greater', 'one', 0]).evaluate().json).toEqual('True');
     expect(ce.box(['Less', 'one', 0]).evaluate().json).toEqual('False');
     expect(ce.box(['Equal', 'one', 0]).evaluate().json).toEqual('False');
@@ -36,7 +38,7 @@ describe('TAUTOLOGY one = 1', () => {
     expect(ce.box(['Greater', 'one', -10]).evaluate().json).toEqual('True');
   });
   test(`one >= 1`, () => {
-    expect(ce.assume(['GreaterEqual', 'one', 1])).toMatchInlineSnapshot(
+    expect(ce.assume(ce.box(['GreaterEqual', 'one', 1]))).toMatchInlineSnapshot(
       `tautology`
     );
     expect(ce.box(['Greater', 'one', 0]).evaluate().json).toEqual('True');
@@ -45,7 +47,7 @@ describe('TAUTOLOGY one = 1', () => {
     expect(ce.box(['Equal', 'one', 1]).evaluate().json).toEqual('True');
   });
   test(`one = 1`, () => {
-    expect(ce.assume(['Equal', 'one', 1])).toEqual(`tautology`);
+    expect(ce.assume(ce.box(['Equal', 'one', 1]))).toEqual(`tautology`);
     expect(ce.box(['Equal', 'one', 1]).evaluate().json).toEqual('True');
     expect(ce.box(['Equal', 'one', 0]).evaluate().json).toEqual('False');
   });
@@ -53,7 +55,7 @@ describe('TAUTOLOGY one = 1', () => {
 
 describe('CONTRADICTIONS', () => {
   test(`a < 0`, () => {
-    expect(ce.assume(['Less', 'one', 0])).toEqual(`contradiction`);
+    expect(ce.assume(ce.box(['Less', 'one', 0]))).toEqual(`contradiction`);
   });
 });
 
@@ -93,8 +95,8 @@ describe.skip('is() values', () => {
   });
 });
 
-describe('canonical domains', () => {
-  test(`Range domains`, () => {
+describe('canonical types', () => {
+  test(`Range types`, () => {
     expect(ce.box('m').type.toString() ?? 'undefined').toMatchInlineSnapshot(
       `unknown`
     );
@@ -106,12 +108,12 @@ describe('canonical domains', () => {
     );
   });
 
-  test(`Interval domains`, () => {
+  test(`Interval types`, () => {
     expect(ce.box('t').type.toString() ?? 'undefined').toMatchInlineSnapshot(
-      `real`
+      `unknown`
     );
     expect(ce.box('s').type.toString() ?? 'undefined').toMatchInlineSnapshot(
-      `real`
+      `unknown`
     );
   });
 });

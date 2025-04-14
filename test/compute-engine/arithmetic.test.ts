@@ -481,7 +481,9 @@ describe('SQRT', () => {
     ).toMatchSnapshot());
 
   test('√ of list', () => {
-    expect(ce.box(['Sqrt', ['List', 4, 1, 56, 18]]).value).toMatchSnapshot();
+    expect(
+      ce.box(['Sqrt', ['List', 4, 1, 56, 18]]).N().value
+    ).toMatchSnapshot();
   });
 
   test(`INVALID Sqrt`, () =>
@@ -510,42 +512,44 @@ describe('Max', () => {
   test(`Max`, () => expect(checkJson(['Max', 'foo', 'bar'])).toMatchSnapshot());
 
   test('Max of a range', () => {
-    expect(ce.box(['Max', ['Range', 1, 10]]).value).toMatchInlineSnapshot(`10`);
+    expect(ce.box(['Max', ['Range', 1, 10]]).N().value).toMatchInlineSnapshot(
+      `10`
+    );
   });
 
   test('Max of a range of reals', () => {
-    expect(ce.box(['Max', ['Range', 1.2, 4.5]]).value).toMatchInlineSnapshot(
-      `5`
-    );
+    expect(
+      ce.box(['Max', ['Range', 1.2, 4.5]]).N().value
+    ).toMatchInlineSnapshot(`5`);
   });
 
   test('Max of a range with custom step', () => {
-    expect(ce.box(['Max', ['Range', 1, 10, 7]]).value).toMatchInlineSnapshot(
-      `8`
-    );
+    expect(
+      ce.box(['Max', ['Range', 1, 10, 7]]).N().value
+    ).toMatchInlineSnapshot(`8`);
   });
 
   test('Max of an interval', () => {
-    expect(ce.box(['Max', ['Interval', 1.1, 7.8]]).value).toMatchInlineSnapshot(
-      `7.8`
-    );
+    expect(
+      ce.box(['Max', ['Interval', 1.1, 7.8]]).N().value
+    ).toMatchInlineSnapshot(`7.8`);
   });
 
   test('Max of a list', () => {
-    expect(ce.box(['Max', ['List', 4, 1, 56, 18]]).value).toMatchInlineSnapshot(
-      `56`
-    );
+    expect(
+      ce.box(['Max', ['List', 4, 1, 56, 18]]).N().value
+    ).toMatchInlineSnapshot(`56`);
   });
 
   test('Max of a set', () => {
-    expect(ce.box(['Max', ['Set', 4, 1, 56, 18]]).value).toMatchInlineSnapshot(
-      `56`
-    );
+    expect(
+      ce.box(['Max', ['Set', 4, 1, 56, 18]]).N().value
+    ).toMatchInlineSnapshot(`56`);
   });
 
   test('Max of a list with non-comparable', () => {
     expect(
-      ce.box(['Max', ['List', 4, 1, 'bar', 56, 'foo', 18]]).value
+      ce.box(['Max', ['List', 4, 1, 'bar', 56, 'foo', 18]]).N().value
     ).toMatchInlineSnapshot(`max(56, "bar", "foo")`);
   });
 });
@@ -582,25 +586,27 @@ describe('Min', () => {
     ));
 
   test('Min of a range', () => {
-    expect(ce.box(['Min', ['Range', 1, 10]]).value).toMatchInlineSnapshot(`10`);
-  }); // @fixme
+    expect(ce.box(['Min', ['Range', 1, 10]]).N().value).toMatchInlineSnapshot(
+      `1`
+    );
+  });
 
   test('Min of a range of reals', () => {
-    expect(ce.box(['Min', ['Range', 1.2, 4.5]]).value).toMatchInlineSnapshot(
-      `5`
-    );
-  }); // @fixme
+    expect(
+      ce.box(['Min', ['Range', 1.2, 4.5]]).N().value
+    ).toMatchInlineSnapshot(`1`);
+  });
 
   test('Min of a range with custom step', () => {
-    expect(ce.box(['Min', ['Range', 1, 10, 7]]).value).toMatchInlineSnapshot(
-      `8`
-    );
-  }); // @fixme
+    expect(
+      ce.box(['Min', ['Range', 1, 10, 7]]).N().value
+    ).toMatchInlineSnapshot(`1`);
+  });
 
   test('Min of an interval', () => {
-    expect(ce.box(['Min', ['Interval', 1.1, 7.8]]).value).toMatchInlineSnapshot(
-      `1.1`
-    );
+    expect(
+      ce.box(['Min', ['Interval', 1.1, 7.8]]).N().value
+    ).toMatchInlineSnapshot(`1.1`);
   });
 });
 

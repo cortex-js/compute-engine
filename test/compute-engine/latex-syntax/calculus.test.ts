@@ -223,44 +223,52 @@ describe('INTEGRAL', () => {
     expect(
       Math.round(
         10 *
-          (ce.box(['N', ce.parse('\\int^2_0\\frac{3x}{5}dx')]).value! as number)
+          (ce.box(['N', ce.parse('\\int^2_0\\frac{3x}{5}dx')]).evaluate()
+            .value! as number)
       )
     ).toEqual(12));
 
   test('numerically evaluated', () =>
     expect(
-      Math.round(10 * (ce.parse('\\int^2_0\\frac{3x}{5}dx').value! as number))
+      Math.round(
+        10 * (ce.parse('\\int^2_0\\frac{3x}{5}dx').N().value! as number)
+      )
     ).toEqual(12));
 });
 
 describe('LIMIT', () => {
   expect(
-    ce.box(['Limit', ['Function', ['Divide', ['Sin', 'x'], 'x'], 'x'], 0]).value
-  ).toMatchInlineSnapshot(`1`);
-
-  expect(
-    ce.box(['Limit', ['Function', ['Divide', ['Sin', 'x'], 'x'], 'x'], 0]).value
-  ).toMatchInlineSnapshot(`1`);
-
-  expect(
-    ce.box(['NLimit', ['Function', ['Divide', ['Sin', 'x'], 'x'], 'x'], 0])
+    ce.box(['Limit', ['Function', ['Divide', ['Sin', 'x'], 'x'], 'x'], 0]).N()
       .value
   ).toMatchInlineSnapshot(`1`);
 
   expect(
-    ce.box(['NLimit', ['Divide', ['Sin', '_'], '_'], 0]).value
+    ce.box(['Limit', ['Function', ['Divide', ['Sin', 'x'], 'x'], 'x'], 0]).N()
+      .value
+  ).toMatchInlineSnapshot(`1`);
+
+  expect(
+    ce
+      .box(['NLimit', ['Function', ['Divide', ['Sin', 'x'], 'x'], 'x'], 0])
+      .evaluate().value
+  ).toMatchInlineSnapshot(`1`);
+
+  expect(
+    ce.box(['NLimit', ['Divide', ['Sin', '_'], '_'], 0]).evaluate().value
   ).toMatchInlineSnapshot(`1`);
 
   // Should be "1"
   expect(
-    ce.box([
-      'NLimit',
-      ['Function', ['Cos', ['Divide', 1, 'x']], 'x'],
-      'Infinity',
-    ]).value
+    ce
+      .box([
+        'NLimit',
+        ['Function', ['Cos', ['Divide', 1, 'x']], 'x'],
+        'Infinity',
+      ])
+      .evaluate().value
   ).toMatchInlineSnapshot(`1`);
 
   expect(
-    ce.parse('\\lim_{x \\to 0} \\frac{\\sin(x)}{x}').value
+    ce.parse('\\lim_{x \\to 0} \\frac{\\sin(x)}{x}').N().value
   ).toMatchInlineSnapshot(`1`);
 });

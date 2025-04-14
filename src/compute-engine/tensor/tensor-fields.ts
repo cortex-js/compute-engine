@@ -225,7 +225,7 @@ export class TensorFieldExpression implements TensorField<BoxedExpression> {
   private ce: ComputeEngine;
 
   constructor(ce: ComputeEngine) {
-    this.one = ce.One;
+    // this.one = ce.One;
     this.zero = ce.Zero;
     this.nan = ce.NaN;
     this.ce = ce;
@@ -269,26 +269,39 @@ export class TensorFieldExpression implements TensorField<BoxedExpression> {
     | BoxedExpression[] {
     if (Array.isArray(x)) return x.map((x) => this.cast(x, dtype as any)!);
 
-    const v = x.value;
     switch (dtype) {
       case 'float64':
       case 'float32':
-        return typeof v === 'number' ? v : undefined;
+        return x.im === 0 ? x.re : undefined;
+
       case 'int32':
-        return typeof v === 'number' ? Math.round(v) : undefined;
+        return typeof x.re === 'number' ? Math.round(x.re) : undefined;
+
       case 'uint8':
-        if (typeof v !== 'number') return undefined;
-        const i = Math.round(v);
+        if (typeof x.re !== 'number') return undefined;
+        const i = Math.round(x.re);
         return i >= 0 && i <= 255 ? i : undefined;
+
       case 'complex128':
       case 'complex64':
-        if (typeof v === 'number') return this.ce.complex(v);
-        if (!isNaN(x.im)) return this.ce.complex(x.re, x.im);
+        const [re, im] = [x.re, x.im];
+        if (typeof re === 'number' && typeof im === 'number')
+          return this.ce.complex(re, im);
+
+        if (typeof re === 'number') return this.ce.complex(re);
         return undefined;
+
       case 'bool':
-        return typeof v === 'boolean' ? v : undefined;
+        const bool = x.valueOf();
+        return typeof bool === 'boolean' ? bool : undefined;
+
       case 'string':
-        return typeof v === 'string' ? v : undefined;
+        const str = x.valueOf();
+        if (typeof str === 'string') return str;
+        if (typeof str === 'number') return str.toString();
+        if (typeof str === 'boolean') return str.toString();
+        return undefined;
+
       case 'expression':
         return x;
     }
@@ -509,38 +522,41 @@ export function getSupertype(
 
 export function getExpressionDatatype(expr: BoxedExpression): TensorDataType {
   // Depending on whether the expr is a literal number, a string, etc,
-  //set the dtype appropriately
+  // return the appropriate datatype.
 
   if (isRelationalOperator(expr)) return 'bool';
 
-  if (!expr.isNumberLiteral) return 'expression';
+  if (expr.symbol === 'True' || expr.symbol === 'False') return 'bool';
+  if (expr.symbol === 'NaN') return 'float64';
+  if (expr.symbol === 'PositiveInfinity') return 'float64';
+  if (expr.symbol === 'NegativeInfinity') return 'float64';
+  if (expr.symbol === 'ComplexInfinity') return 'complex128';
+  if (expr.symbol === 'ImaginaryUnit') return 'complex128';
 
-  switch (expr.type.type) {
-    case 'real':
-    case 'rational':
-    case 'finite_real':
-    case 'finite_rational':
-    case 'integer': // For NaN, Infinity, etc
-      return 'float64';
+  if (expr.string) return 'string';
 
-    case 'complex':
-    case 'finite_complex':
-    case 'imaginary':
-      return 'complex128';
+  if (expr.isNumberLiteral)
+    switch (expr.type.type) {
+      case 'real':
+      case 'rational':
+      case 'finite_real':
+      case 'finite_rational':
+      case 'integer': // For NaN, Infinity, etc
+        return 'float64';
 
-    case 'finite_integer': {
-      const val = expr.re;
-      if (val >= 0 && val <= 255) return 'uint8';
-      return 'int32';
+      case 'complex':
+      case 'finite_complex':
+      case 'imaginary':
+        return 'complex128';
+
+      case 'finite_integer': {
+        const val = expr.re;
+        if (val >= 0 && val <= 255) return 'uint8';
+        return 'int32';
+      }
+      default:
+        return 'expression';
     }
 
-    case 'boolean':
-      return 'bool';
-
-    case 'string':
-      return 'string';
-
-    default:
-      return 'expression';
-  }
+  return 'expression';
 }

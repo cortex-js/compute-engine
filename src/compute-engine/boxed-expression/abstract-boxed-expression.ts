@@ -125,12 +125,13 @@ export abstract class _BoxedExpression implements BoxedExpression {
    * Primitive values are: boolean, number, bigint, string, null, undefined
    *
    */
-  valueOf(): number | object | string | boolean {
+  valueOf(): number | string | boolean {
     if (this.symbol === 'True') return true;
     if (this.symbol === 'False') return false;
     if (this.symbol === 'NaN') return NaN;
     if (this.symbol === 'PositiveInfinity') return Infinity;
     if (this.symbol === 'NegativeInfinity') return -Infinity;
+    if (this.symbol === 'ComplexInfinity') return '~oo';
     if (this.isInfinity) {
       if (this.isPositive) return Infinity;
       if (this.isNegative) return -Infinity;
@@ -138,7 +139,9 @@ export abstract class _BoxedExpression implements BoxedExpression {
     }
     if (typeof this.string === 'string') return this.string;
     if (typeof this.symbol === 'string') return this.symbol;
-    if (this.im === 0) return this.re;
+
+    // Numeric values are handled in the BoxedNumber class
+
     return this.toString();
   }
 
@@ -312,14 +315,8 @@ export abstract class _BoxedExpression implements BoxedExpression {
 
   is(rhs: any): boolean {
     // If the rhs is a number, the result can only be true if this
-    // is a BoxedNumber
+    // is a BoxedNumber (the BoxedNumber.is() method will handle it)
     if (typeof rhs === 'number' || typeof rhs === 'bigint') return false;
-
-    if (typeof rhs === 'boolean') {
-      if (this.symbol === 'True' && rhs === true) return true;
-      if (this.symbol === 'False' && rhs === false) return true;
-      return false;
-    }
 
     if (rhs === null || rhs === undefined) return false;
 
@@ -651,13 +648,11 @@ export abstract class _BoxedExpression implements BoxedExpression {
     return;
   }
 
-  get value(): number | boolean | string | object | undefined {
-    return this.N().valueOf();
+  get value(): number | boolean | string | undefined {
+    return this.valueOf();
   }
 
-  set value(
-    _value: BoxedExpression | number | boolean | string | number[] | undefined
-  ) {
+  set value(_value: any) {
     throw new Error(`Can't change the value of \\(${this.latex}\\)`);
   }
 
