@@ -743,11 +743,22 @@ export interface BoxedExpression {
   readonly isFinite: boolean | undefined;
 
   /**
+   * If this is a Number or Symbol with a numeric value, and the numeric value is an **integer**,
+   * return a `boolean`. For all other cases, return *undefined*.
+   *
+   * Since this necessitates consultation to this expression's value, triggers *binding* for
+   * symbols.
+   *
    * @category Numeric Expression
    */
   readonly isEven: boolean | undefined;
 
   /**
+   * If this is a Number or Symbol with a numeric value, and the numeric value is an **integer**,
+   * return a `boolean`. For all other cases, return *undefined*.
+   *
+   * *Note* that this triggers *binding* for symbols.
+   *
    * @category Numeric Expression
    */
   readonly isOdd: boolean | undefined;

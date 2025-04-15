@@ -17,16 +17,33 @@ engine.precision = 100; // Some arithmetic test cases assume a precision of at l
 // cases that use it.
 engine.declare('f', 'function');
 
-function exprToStringRecursive(expr: SemiBoxedExpression, start: number) {
+/**
+ * Special printing utility for printing the *MathJson* representation - of either a boxed or
+ * un-boxed expression.
+ *
+ * If a *BoxedExpression*, the **pretty** (prettified) MathJson representation is printed.
+ *
+ * Conveniently - prints on one line if expr. is less than local `MAX_LINE_LENGTH` (e.g. 72).
+ *
+ *
+ *
+ * @param expr
+ * @param start
+ * @returns
+ */
+function exprToStringRecursive(
+  expr: SemiBoxedExpression,
+  start: number
+): string {
   const indent = ' '.repeat(start);
 
   if (start > 50) return indent + '...';
 
   if (expr === null) return 'null';
   if (expr instanceof _BoxedExpression) {
-    const ce = expr.engine === engine ? engine : expr.engine;
+    const ce = expr.engine;
     return exprToStringRecursive(
-      ce.box(expr, { canonical: false }).toMathJson(),
+      ce.box(expr, { canonical: false }).toMathJson({ prettify: true }), // The default is 'prettify: true'
       start
     );
   }
@@ -108,6 +125,24 @@ type ExprVariant =
   | 'N-mach'
   | 'N-auto';
 
+/**
+ * Print various representations of the expression (non-canonical, canonical, various evaluated
+ * forms...), formatted as **prettified** MathJson.
+ *
+ * \**Adjusts the precision*\*. For all representations aside from `eval-mach`, `N-mach`, exprs. are
+ * printed with precision '*auto*' (may vary over time/depending on compute-engine version), else
+ * '*machine*'.
+ *
+ * If the `canonical` variant is the same as `boxed` (non-canonical), or `simplify` equal to
+ * `boxed`, then skip printing these variants.
+ * Similarly, prints the `N-...` & `eval-...`variants only if they sufficiently differ from the
+ * 'simplify' variant, or one-another.
+ *
+ * @export
+ * @param inExpr
+ * @param [variants]
+ * @returns
+ */
 export function checkJson(
   inExpr: SemiBoxedExpression | null,
   variants?: Array<ExprVariant>
@@ -115,9 +150,9 @@ export function checkJson(
   if (!inExpr) return 'null';
   try {
     const ce =
-      inExpr instanceof _BoxedExpression && inExpr.engine === engine
+      inExpr instanceof _BoxedExpression
         ? inExpr.engine
-        : engine;
+        : engine; /* default test engine */
     const precision = ce.precision;
     ce.precision = 'auto';
 
