@@ -100,15 +100,15 @@ describe('MATCHFIX abs and norm', () => {
     expect(check('|(1+|a|+2)|')).toMatchInlineSnapshot(`
       box       = ["Abs", ["Delimiter", ["Add", 1, ["Abs", "a"], 2]]]
       canonical = ["Abs", ["Add", ["Abs", "a"], 1, 2]]
-      simplify  = ||a| + 3|
-    `)); // @fixme: simplify should be |a| + 3
+      simplify  = |a| + 3
+    `));
 
   test('|1+|a|+2|', () =>
     expect(check('|1+|a|+2|')).toMatchInlineSnapshot(`
       box       = ["Abs", ["Add", 1, ["Abs", "a"], 2]]
       canonical = ["Abs", ["Add", ["Abs", "a"], 1, 2]]
-      simplify  = ||a| + 3|
-    `)); // @fixme: simplify should be |a| + 3
+      simplify  = |a| + 3
+    `));
 
   test('||a||', () =>
     expect(check('||a||')).toMatchInlineSnapshot(`["Norm", "a"]`));

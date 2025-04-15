@@ -1915,24 +1915,6 @@ export type Sign =
   /** The expression is not equal to 0 (possibly with an imaginary part) and isPositive, isNegative, isUnsigned are all false or undefined */
   | 'not-zero'
 
-  /** The expression has no imaginary part and a non-zero real part and isPositive and isNegative are false or undefined*/
-  | 'real-not-zero'
-
-  /** The expression has no imaginary part and isNotZero,isPositive,isNegative,isNonNegative,isNonPositive,isZero are either false or undefined*/
-  | 'real'
-
-  /** The expression is NaN */
-  | 'nan'
-
-  /** The expression is +∞ */
-  | 'positive-infinity'
-
-  /** The expression is -∞ */
-  | 'negative-infinity'
-
-  /** The expression is ~∞ */
-  | 'complex-infinity'
-
   /** The expression has an imaginary part or is NaN */
   | 'unsigned';
 
