@@ -1,4 +1,4 @@
-import { ComputeEngine } from '../../src/compute-engine';
+import { ComputeEngine, NumericType } from '../../src/compute-engine';
 import { _BoxedExpression } from '../../src/compute-engine/boxed-expression/abstract-boxed-expression';
 import { check, exprToString, engine as TEST_ENGINE } from '../utils';
 import type {
@@ -504,8 +504,8 @@ describe('CANONICAL FORMS', () => {
       `);
 
       /*
-        * Constant-symbol value cases.
-      */
+       * Constant-symbol value cases.
+       */
       // p === +Infinity (& 'holdUntil: never')
       expect(checkPower('1^{p}')).toMatchInlineSnapshot(`
         box        = ["Power", 1, "p"]
@@ -663,6 +663,212 @@ describe('CANONICAL FORMS', () => {
         box        = ["Power", ["Divide", "a", 3], ["Divide", 1, 3]]
         canonForms = ["Root", ["Divide", "a", 3], 3]
         canonical  = ["Root", ["Multiply", ["Rational", 1, 3], "a"], 3]
+      `);
+    });
+  });
+
+  describe('Number', () => {
+    const ce = TEST_ENGINE;
+    let expr: string | SemiBoxedExpression;
+
+    const nonCanon = (input: string | SemiBoxedExpression) =>
+      typeof input === 'string'
+        ? ce.parse(input, { canonical: false })
+        : ce.box(input, { canonical: false });
+    const checkNumber = (input: string | SemiBoxedExpression) =>
+      checkForms(input, ['Number'], ce);
+    const canonNumber = (input: string | SemiBoxedExpression) =>
+      typeof input === 'string'
+        ? ce.parse(input, { canonical: 'Number' })
+        : ce.box(input, { canonical: 'Number' });
+
+    //*note*: BoxedNumbers may get JSON serialized as ['Rational',...] ('check' outputs JSON): so
+    //need to additionally test for the result 'operator' as 'Number' for desired result.
+    test(`'Rational' or 'Divide' (expr.) -> number (when valid)`, () => {
+      expr = '1/3';
+      //(•see above note: both 'canonForms' & 'canonical' are serialized as 'Rational', but may still
+      //be numbers)
+      expect(checkNumber(expr)).toMatchInlineSnapshot(`
+        box        = ["Divide", 1, 3]
+        canonForms = ["Rational", 1, 3]
+        canonical  = ["Rational", 1, 3]
+      `);
+      expect(canonNumber(expr).operator).toBe('Number');
+
+      expr = '3/7';
+      expect(checkNumber(expr)).toMatchInlineSnapshot(`
+        box        = ["Divide", 3, 7]
+        canonForms = ["Rational", 3, 7]
+        canonical  = ["Rational", 3, 7]
+      `);
+      expect(canonNumber(expr).operator).toBe('Number');
+
+      //(case of direct number serialization (denominator of 1))
+      expr = '2/1';
+      expect(checkNumber(expr)).toMatchInlineSnapshot(`
+        box        = ["Divide", 2, 1]
+        canonForms = 2
+        canonical  = 2
+      `);
+      expect(canonNumber(expr).operator).toBe('Number');
+
+      /*
+       * BigNum (Decimal)
+       */
+      //@note: as of time of writing (CE 0.29.1), the test engine which test-cases in this block use
+      //has a precision set to `100`: so all BigNum/Int digits are output.
+      const bigRational: SemiBoxedExpression = [
+        'Divide',
+        '318982460862894267352492496399',
+        '-358796515092200247647243',
+      ];
+      expect(checkNumber(bigRational)).toMatchInlineSnapshot(`
+        box        = [
+          "Divide",
+          {num: "318982460862894267352492496399"},
+          {num: "-358796515092200247647243"}
+        ]
+        canonForms = [
+          "Rational",
+          {num: "-318982460862894267352492496399"},
+          {num: "358796515092200247647243"}
+        ]
+        canonical  = [
+          "Rational",
+          {num: "-318982460862894267352492496399"},
+          {num: "358796515092200247647243"}
+        ]
+      `);
+      expect(canonNumber(expr).operator).toBe('Number'); // ✔
+
+      /*
+       * Control
+       */
+      expr = '13.19/7.7';
+      expect(checkNumber(expr)).toMatchInlineSnapshot(`
+        box        = ["Divide", 13.19, 7.7]
+        canonForms = ["Divide", 13.19, 7.7]
+      `);
+    });
+
+    test(`'Rational' (expr.) -> Divide (when non-rational)`, () => {
+      expect(checkNumber(['Rational', 1, 'Pi'])).toMatchInlineSnapshot(`
+        box        = ["Rational", 1, "Pi"]
+        canonForms = ["Divide", 1, "Pi"]
+        canonical  = ["Divide", 1, "Pi"]
+      `);
+      expect(checkNumber(['Rational', 7.01, 3])).toMatchInlineSnapshot(`
+        box        = ["Rational", 7.01, 3]
+        canonForms = ["Divide", 7.01, 3]
+        canonical  = ["Divide", 7.01, 3]
+      `);
+      //(↓For full-canonical, additional simplifications applied (hence 'Multiply'))
+      expect(checkNumber(['Rational', 'ExponentialE', 2]))
+        .toMatchInlineSnapshot(`
+        box        = ["Rational", "ExponentialE", 2]
+        canonForms = ["Divide", "ExponentialE", 2]
+        canonical  = ["Multiply", ["Rational", 1, 2], "ExponentialE"]
+      `);
+    });
+
+    // @wip?
+    // -Presently, 'Complex'-operator exprs. are the only ones cast as BoxedNumber for this form.
+    // Later potential candidates include those related which take place in Add/Multiply (see
+    // https://github.com/cortex-js/compute-engine/pull/238#discussion_r2033792056)
+    describe("'Complex' exprs.", () => {
+      //@note: 'check' is not helpful here, since a `['Complex', ...]` expr. is 'pretty'-printed for
+      //each variant: whereas we want to test the 'operator'/type
+      test(`Convert to eqv. BoxedNumbers`, () => {
+        const expComplexNum = (
+          expr: string | SemiBoxedExpression,
+          type?: NumericType
+        ) => {
+          expect(nonCanon(expr).operator).toMatchInlineSnapshot(`Complex`);
+          expect(canonNumber(expr).operator).toBe(`Number`);
+          expect(canonNumber(expr).type.matches(type ?? 'complex')).toBe(true);
+        };
+
+        // Imaginary (only)
+        expr = ['Complex', 1];
+        expComplexNum(expr, 'imaginary');
+
+        expr = ['Complex', ['Rational', 1, 43]];
+        expComplexNum(expr, 'imaginary');
+
+        // finite_complex / complex
+        expr = ['Complex', 3, 4];
+        expComplexNum(expr, 'finite_complex');
+
+        //@fixme
+        //(A present bug: that bignum args. get truncated when canonicalized as a complex-number:
+        //regardless of set precision)
+        //@note: precision is '100' for the engine used here...
+        expr = ['Complex', '22975850700614579948873711', 4]; // bigIntRe
+        expComplexNum(expr, 'finite_complex');
+
+        expr = ['Complex', Infinity, 4]; // bigIntRe
+        expComplexNum(expr, 'complex');
+      });
+
+      test(`Convert to 'Add', when imaginary arg. is non-numeric`, () => {
+        expr = ['Complex', 4, 'x'];
+        expect(checkNumber(expr)).toMatchInlineSnapshot(`
+          box        = ["Complex", 4, "x"]
+          canonForms = ["Add", ["Multiply", ["Complex", 0, 1], "x"], 4]
+          canonical  = ["Add", ["Multiply", ["Complex", 0, 1], "x"], 4]
+        `);
+
+        expr = ['Complex', 1, ['Multiply', 'n', 4]];
+        expect(checkNumber(expr)).toMatchInlineSnapshot(`
+          box        = ["Complex", 1, ["Multiply", "n", 4]]
+          canonForms = ["Add", ["Multiply", ["Complex", 0, 4], "n"], 1]
+          canonical  = ["Add", ["Multiply", ["Complex", 0, 4], "n"], 1]
+        `);
+      });
+    });
+
+    test("Cast 'Negate' wrapped numbers as number exprs. ", () => {
+      expect(checkNumber('-1')).toMatchInlineSnapshot(`
+        box        = -1
+        canonForms = -1
+      `);
+
+      expect(checkNumber('-3.6')).toMatchInlineSnapshot(`
+        box        = ["Negate", 3.6]
+        canonForms = -3.6
+        canonical  = -3.6
+      `);
+
+      expr = ['Negate', ['Complex', 1, 4]];
+      expect(checkNumber(expr)).toMatchInlineSnapshot(`
+        box        = ["Negate", ["Complex", 1, 4]]
+        canonForms = ["Complex", -1, -4]
+        canonical  = ["Complex", -1, -4]
+      `);
+      expect(canonNumber(expr).operator).toBe('Number');
+
+      expr = ['Negate', ['Rational', 9, 16]];
+      expect(checkNumber(expr)).toMatchInlineSnapshot(`
+        box        = ["Negate", ["Rational", 9, 16]]
+        canonForms = ["Rational", -9, 16]
+        canonical  = ["Rational", -9, 16]
+      `);
+      expect(canonNumber(expr).operator).toBe('Number');
+    });
+
+    //(↓Only replaces for the *unit*, including negated...)
+    //@wip?: maybe 'InvisibleOperator' case of '3i' etc. should be covered
+    test(`Replace 'ImaginaryUnit' symbol instances with a number`, () => {
+      expect(checkNumber('i')).toMatchInlineSnapshot(`
+        box        = i
+        canonForms = ["Complex", 0, 1]
+        canonical  = ["Complex", 0, 1]
+      `);
+
+      expect(checkNumber('-i')).toMatchInlineSnapshot(`
+        box        = ["Negate", "i"]
+        canonForms = ["Complex", 0, -1]
+        canonical  = ["Complex", 0, -1]
       `);
     });
   });
@@ -940,6 +1146,12 @@ describe('POLYNOMIAL ORDER', () => {
  *
  * Only prints 'canonical' if this differs from 'boxed'.
  *
+ * <!--
+ * **NOTE**:
+ * -Unlike 'checkJson', does not temporarily set the engine's precision to 'auto' for printing.
+ * (Save oneself some headaches...)
+ * -->
+ *
  * @param inExpr
  * @param forms
  * @param [engine]
@@ -961,9 +1173,6 @@ function checkForms(
   engine ??= TEST_ENGINE;
 
   try {
-    const precision = engine.precision;
-    engine.precision = 'auto';
-
     //Boxed, *non-canonical*
     const boxed =
       typeof inExpr === 'string'
@@ -973,7 +1182,6 @@ function checkForms(
     const boxedStr = exprToString(boxed);
 
     if (!boxed.isValid) {
-      engine.precision = precision;
       return `invalid   =${exprToString(boxed)}`;
     }
 
@@ -988,8 +1196,6 @@ function checkForms(
 
     result.push('canonForms = ' + partialCanonStr);
     if (canonicalStr !== boxedStr) result.push('canonical  = ' + canonicalStr);
-
-    engine.precision = precision;
 
     return result.join('\n');
   } catch (e) {

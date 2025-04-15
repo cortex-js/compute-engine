@@ -451,7 +451,9 @@ export interface BoxedExpression {
    *
    * A symbol has a `"Symbol"` operator.
    *
-   * A number has a `"Number"`, `"Real"`, `"Rational"` or `"Integer"` operator.
+   * A number has a `"Number"`, `"Real"`, `"Rational"` or `"Integer"` operator; amongst some others.
+   * Practically speaking, for fully canonical and valid expressions, all of these are likely to
+   * collapse to `"Number"`.
    *
    */
   readonly operator: string;
