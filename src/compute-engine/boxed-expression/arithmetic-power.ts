@@ -68,17 +68,13 @@ export function canonicalPower(
   // here)
   if (
     b.isFunctionExpression ||
-    !b.isConstant || //(!notably, should exclude symbol assumptions)
+    b.symbol !== null ||
     !b.type.matches('number' as Type)
   )
     return unchanged();
 
-  // 'a' is constant and of type 'number'. Used often.
-  // (note that this could still be a numeric expression, too...)
-  const aIsNum = a.isConstant && a.type.matches('number' as NumericType);
-
   // Zero as base
-  if (aIsNum && a.is(0)) {
+  if (a.isNumberLiteral && a.is(0)) {
     if (b.type.matches('imaginary' as NumericType) || b.isNaN) return ce.NaN;
 
     if (b.is(0)) return ce.NaN;
@@ -97,9 +93,19 @@ export function canonicalPower(
     return unchanged(); // No other canonicalization cases with this base
   }
 
+  // 'a'/base has an associated number value (excludes numeric functions)
+  // (this should at this stage include library-defined symbols such as 'Pi')
+  //@note: include 'Negate', because this could be wrapped around a number-valued symbol, such as
+  //'Pi'...
+  //^there could exist other exceptions: perhaps consider a util. such as 'maybeNumber'?
+  const aIsNum =
+    a.type.matches('number' as NumericType) &&
+    (a.isFunctionExpression === false || a.operator === 'Negate');
+
   // Zero as exponent
   if (b.is(0)) {
-    if (aIsNum) return a.isFinite ? ce.One : ce.NaN;
+    // If 'isFinite' is a boolean, then 'a' has a value.
+    if (aIsNum && a.isFinite !== undefined) return a.isFinite ? ce.One : ce.NaN;
     return unchanged();
   }
 
@@ -109,7 +115,8 @@ export function canonicalPower(
   if (aIsNum && a.is(1)) return b.isFinite ? ce.One : ce.NaN;
 
   // One as exponent
-  if (b.is(1)) return a;
+  // (Permit the base to be a FN-expr. here, too...)
+  if (b.is(1) && a.type.matches('number' as NumericType)) return a;
 
   // -1 exponent
   if (b.is(-1)) {
@@ -176,8 +183,8 @@ export function canonicalPower(
     return ce.NaN;
   }
 
-  //'Infinity^Complex'
-  if (a.isInfinity) {
+  //'AnyInfinity^{~oo}' (i.e. ComplexInfinity)
+  if (a.isNumberLiteral && a.isInfinity) {
     // If the exponent is pure imaginary, the result is NaN
     //(↓fix?:ensure both these cases narrow down to 'b' being a num./symbol literal)
     if (b.type.matches('imaginary' as NumericType)) return ce.NaN;

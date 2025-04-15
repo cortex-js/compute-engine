@@ -240,12 +240,38 @@ describe('CANONICAL FORMS', () => {
 
   describe('Power', () => {
     const engine = new ComputeEngine();
-    engine.declare('x', { constant: true, value: 0 });
-    engine.declare('y', { constant: true, value: 1 });
 
-    engine.declare('p', { constant: true, value: Infinity });
-    engine.declare('n', { constant: true, value: -Infinity });
-    engine.declare('c', { constant: true, value: -Infinity });
+    /*
+     * 'Power'-scoped symbol declarations
+     */
+    //@note: declarations are necessarily marked with 'holdUntil: never' - for these test cases - in
+    //order to permit substitution during (before) application of canonical-forms.
+    //^Necessary because 'a^x' is not a valid simplification (cannot assume that 'x' is bound), but
+    //if x is substituted, then that's fine...
+    engine.declare('x', { constant: true, value: 0, holdUntil: 'never' });
+    engine.declare('y', { constant: true, value: 1, holdUntil: 'never' });
+
+    engine.declare('p', {
+      constant: true,
+      value: Infinity,
+      holdUntil: 'never',
+    });
+    engine.declare('n', {
+      constant: true,
+      value: -Infinity,
+      holdUntil: 'never',
+    });
+    engine.declare('c', {
+      constant: true,
+      value: -Infinity,
+      holdUntil: 'never',
+    });
+
+    //Control-case symbols (holdUntil value of default 'evaluate', and henceforth 'value' not to be
+    //consulted at this stage)
+    engine.declare('j', { constant: true, value: 0 });
+    engine.declare('k', { constant: true, value: 1 });
+
     const checkPower = (
       input: string,
       priorForms: CanonicalForm[] = ['Number']
@@ -267,11 +293,20 @@ describe('CANONICAL FORMS', () => {
         canonForms = ComplexInfinity
         canonical  = ComplexInfinity
       `);
-      // x === 0
+      // x === 0 (simplifies because is substituted beforehand ('holdUntil = never'))
       expect(checkPower('x^3')).toMatchInlineSnapshot(`
         box        = ["Power", "x", 3]
         canonForms = 0
         canonical  = 0
+      `);
+
+      // Control
+      //
+      //'j=0', but should _not_ substitute (i.e. beforehand) & therefore no op. should take place
+      //(its 'holdUntil' property is set to the default 'evaluate')
+      expect(checkPower('j^3')).toMatchInlineSnapshot(`
+        box        = ["Power", "j", 3]
+        canonForms = ["Power", "j", 3]
       `);
     });
 
@@ -286,11 +321,18 @@ describe('CANONICAL FORMS', () => {
         canonForms = NaN
         canonical  = NaN
       `);
+      //↓Only simplifies because 'x' substitutes with its value during partial-canonicalization;
+      //prior to app. of CanonicalForms.
       expect(checkPower('16^x')).toMatchInlineSnapshot(`
         box        = ["Power", 16, "x"]
         canonForms = 1
         canonical  = 1
       `);
+      //!@note: this should be ok to apply, despite 'Pi' being a constant which does *not* have a
+      //!'holdUntil' value set to 'never', because... this is a library/engine-level defined
+      //!constant in which its type/value is always known: even in non-canonical expressions.
+      //I.e., if this were a user-defined constant, this would not be OK, since its value would have
+      //to be referenced.
       expect(checkPower('\\pi^0')).toMatchInlineSnapshot(`
         box        = ["Power", "Pi", 0]
         canonForms = 1
@@ -300,6 +342,15 @@ describe('CANONICAL FORMS', () => {
         box        = ["Power", ["Negate", 2.7243631], 0]
         canonForms = 1
         canonical  = 1
+      `);
+
+      /*
+       * Control-case
+       */
+      //j===0, but is *held*
+      expect(checkPower('2^j')).toMatchInlineSnapshot(`
+        box        = ["Power", 2, "j"]
+        canonForms = ["Power", 2, "j"]
       `);
     });
 
@@ -342,15 +393,41 @@ describe('CANONICAL FORMS', () => {
         canonForms = PositiveInfinity
         canonical  = PositiveInfinity
       `);
-      expect(checkPower('{-a/4}^1')).toMatchInlineSnapshot(`
-        box        = ["Power", ["Divide", ["Negate", "a"], 4], 1]
-        canonForms = ["Divide", ["Negate", "a"], 4]
-        canonical  = ["Multiply", ["Rational", -1, 4], "a"]
+
+      //@note: This correctly simplifies, unlike would be expected of 'x^1' (where x is a
+      //user-declared numeric constant with a default 'holdUntil' value of 'evaluate'), because 'Pi'
+      //is a library-defined constant, consequently always being canonical & bound (and ∴ having a
+      //type/value), even in *non-canonical* exprs.
+      //^!Note that currently, 'x^1' *will simplify* at present, but this would not be considered
+      //correct behaviour (compute-engine/pull/238#discussion_r2034335185). This is because
+      //canonicalization of symbols (including partial-canonicalization) is presently, erroneously,
+      //synonymous with 'binding': permitting its type/value to be determined at this stage.
+      expect(checkPower('{\\pi}^1')).toMatchInlineSnapshot(`
+        box        = ["Power", "Pi", 1]
+        canonForms = Pi
+        canonical  = Pi
       `);
-      expect(checkPower('{-\\pi}^1')).toMatchInlineSnapshot(`
-        box        = ["Power", ["Negate", "Pi"], 1]
-        canonForms = ["Negate", "Pi"]
-        canonical  = ["Negate", "Pi"]
+
+      //↓🙁: cannot be simplified, at least via the route of checking the 'type' of the base/'-\pi',
+      //because is a non-canonical function-expr. (non-bound to 'Power' definition)
+
+      // expect(checkPower('{-\\pi}^1')).toMatchInlineSnapshot(`
+      //   box        = ["Power", "Pi", 1]
+      //   canonForms = Pi
+      //   canonical  = Pi
+      // `);
+
+      /*
+       * Control
+       */
+      //!@note:
+      //Not currently simplified, despite 'j' being an 'integer'-typed constant, because the base is
+      //a non-canonical function and therefore unbound to a definition; consequently with its 'type'
+      //non-determinable.
+      expect(checkPower('{-j/4}^1')).toMatchInlineSnapshot(`
+        box        = ["Power", ["Divide", ["Negate", "j"], 4], 1]
+        canonForms = ["Power", ["Divide", ["Negate", "j"], 4], 1]
+        canonical  = ["Multiply", ["Rational", -1, 4], "j"]
       `);
     });
 
@@ -377,10 +454,10 @@ describe('CANONICAL FORMS', () => {
         canonForms = ["Rational", 1, 3]
         canonical  = ["Rational", 1, 3]
       `);
-      expect(checkPower('{x * 4}^{-1}')).toMatchInlineSnapshot(`
-        box        = ["Power", ["Multiply", "x", 4], -1]
-        canonForms = ["Divide", 1, ["Multiply", 4, "x"]]
-        canonical  = ["Divide", 1, ["Multiply", 4, "x"]]
+      expect(checkPower('{j * 4}^{-1}')).toMatchInlineSnapshot(`
+        box        = ["Power", ["Multiply", "j", 4], -1]
+        canonForms = ["Divide", 1, ["Multiply", 4, "j"]]
+        canonical  = ["Divide", 1, ["Multiply", 4, "j"]]
       `);
     });
 
@@ -426,7 +503,10 @@ describe('CANONICAL FORMS', () => {
         canonical  = ComplexInfinity
       `);
 
-      //Constant-symbol value cases.: p=PositiveInfinity
+      /*
+        * Constant-symbol value cases.
+      */
+      // p === +Infinity (& 'holdUntil: never')
       expect(checkPower('1^{p}')).toMatchInlineSnapshot(`
         box        = ["Power", 1, "p"]
         canonForms = NaN
@@ -470,13 +550,17 @@ describe('CANONICAL FORMS', () => {
         canonForms = 0
         canonical  = 0
       `);
-      expect(checkPower('{-\\pi}^{-\\infty}')).toMatchInlineSnapshot(`
-        box        = ["Power", ["Negate", "Pi"], "NegativeInfinity"]
-        canonForms = ["Power", ["Negate", "Pi"], "NegativeInfinity"]
-        canonical  = 0
-      `);
+      //🙁: cannot be simplified, base/'Negate' is non-canonical and 'type' cannot be determined.
+      // expect(checkPower('{-\\pi}^{-\\infty}')).toMatchInlineSnapshot(`
+      //   box        = ["Power", ["Negate", "Pi"], "NegativeInfinity"]
+      //   canonForms = ["Power", ["Negate", "Pi"], "NegativeInfinity"]
+      //   canonical  = 0
+      // `);
 
-      //Constant-symbol value cases.: n=NegativeInfinity, x=0
+      /*
+       * Constant-valued symbol operands
+       */
+      //x=0, n=NegativeInfinity ('holdUntil: never'),
       expect(checkPower('x^{n}')).toMatchInlineSnapshot(`
         box        = ["Power", "x", "n"]
         canonForms = ComplexInfinity
@@ -541,6 +625,7 @@ describe('CANONICAL FORMS', () => {
       `);
 
       //Include 'Add' in order that complex-numbers may be identified for these cases.
+      //(^note that this may later be included as part of the 'Number' form)
       check = (input: string) =>
         checkPower(input, ['InvisibleOperator', 'Number', 'Add']);
 
