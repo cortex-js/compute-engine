@@ -579,6 +579,13 @@ export interface BoxedExpression {
    * If this expression is already canonical, the value of canonical is
    * `this`.
    *
+   * :::info[Note]
+   * 'Partially' canonical expressions, such as those produced through `CanonicalForm`, also yield
+   * an expression which is marked as 'canonical'. This means that, likewise for partially canonical
+   * expressions, the `canonical` property will return the self-same expression (& 'isCanonical'
+   * will also be true).
+   * :::
+   *
    */
   get canonical(): BoxedExpression;
 
