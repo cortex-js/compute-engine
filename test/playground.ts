@@ -1,7 +1,13 @@
-import { ComputeEngine, Expression } from '../src/compute-engine';
+import { ComputeEngine, Expression, InfixEntry } from '../src/compute-engine';
 
 const ce = new ComputeEngine();
 const engine = ce;
+
+const m = ce.box('m', { canonical: false });
+m.value = 3;
+console.log(m.isReal);
+console.log(m.value);
+console.log(m.isOdd);
 
 const list: Expression = ['List', 7, 13, 5, 19, 2, 3, 11];
 engine

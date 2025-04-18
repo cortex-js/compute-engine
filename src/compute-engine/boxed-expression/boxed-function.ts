@@ -476,15 +476,13 @@ export class BoxedFunction extends _BoxedExpression {
   }
 
   get isNaN(): boolean | undefined {
-    return this.sgn === 'nan';
+    if (!this.isNumber) return false;
+    return undefined; // We don't know until we evaluate
   }
 
   get isInfinity(): boolean | undefined {
-    const s = this.sgn;
-    if (s === 'positive-infinity' || s === 'negative-infinity') return true;
-    if (s === 'complex-infinity') return true;
-    return false;
-    // return this.type === 'number' && !this.isNaN;
+    if (!this.isNumber) return false;
+    return undefined; // We don't know until we evaluate
   }
 
   // Not +- Infinity, not NaN

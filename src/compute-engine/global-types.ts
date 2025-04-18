@@ -86,8 +86,8 @@ export interface TensorData<DT extends keyof DataTypeMap = 'float64'> {
  * applicable to any kind of expression, for example `expr.symbol` or
  * `expr.ops`.
  *
- * When a member function is not applicable to this `BoxedExpression`,
- * for example `get symbol()` on a `BoxedNumber`, it returns `null`.
+ * When a property is not applicable to this `BoxedExpression`,
+ * for example `expr.symbol` on a `BoxedNumber`, its value is `null`.
  *
  * This convention makes it convenient to manipulate expressions without
  * having to check what kind of instance they are before manipulating them.
@@ -101,16 +101,18 @@ export interface TensorData<DT extends keyof DataTypeMap = 'float64'> {
  *
  * ### `ce.box()` and `ce.parse()`
  *
- * Use `ce.box()` or `ce.parse()` to get a canonical expression.
+ * Use `ce.box()` or `ce.parse()`.
+ *
+ * By default, the result of these functions is a canonical expression:
  *    - the arguments are put in canonical form
+ *    - the arguments of commutative functions are sorted
  *    - invisible operators are made explicit
  *    - a limited number of core simplifications are applied,
- *      for example 0 is removed from additions
+ *      for example rationals are reduced
  *    - sequences are flattened: `["Add", 1, ["Sequence", 2, 3]]` is
  *      transformed to `["Add", 1, 2, 3]`
  *    - associative functions are flattened: `["Add", 1, ["Add", 2, 3]]` is
  *      transformed to `["Add", 1, 2, 3]`
- *    - the arguments of commutative functions are sorted
  *    - identifiers are **not** replaced with their values
  *
  * ### Algebraic methods (expr.add(), expr.mul(), etc...)
@@ -121,18 +123,14 @@ export interface TensorData<DT extends keyof DataTypeMap = 'float64'> {
  * API as well.
  *
  *    - the operation is performed on the canonical version of the expression
- *
  *    - the arguments are not evaluated
- *
  *    - the canonical handler (of the corresponding operation) is not called
- *
  *    - some additional simplifications over canonicalization are applied.
  *      For example number literals are combined.
  *      However, the result is exact, and no approximation is made. Use `.N()`
  *      to get an approximate value.
  *      This is equivalent to calling `simplify()` on the expression (but
  *      without simplifying the arguments).
- *
  *    - sequences were already flattened as part of the canonicalization process
  *
  *   For 'add' and 'mul', which take multiple arguments, separate functions
@@ -154,9 +152,9 @@ export interface TensorData<DT extends keyof DataTypeMap = 'float64'> {
  * The arguments are not modified. The expression is not put in canonical
  * form. The canonical handler is *not* called.
  *
- * A canonical flag can be set when calling the function, but it only
- * asserts that the function and its arguments are canonical. The caller
- * is responsible for ensuring that is the case.
+ * A canonical flag can be set when calling this method, but it only
+ * asserts that the function expression and its arguments are canonical. The
+ * caller is responsible for ensuring that is the case.
  *
  *
  * ### `ce.function()`
@@ -166,7 +164,7 @@ export interface TensorData<DT extends keyof DataTypeMap = 'float64'> {
  *
  * The arguments are put in canonical form and the canonical handler is called.
  *
- * For algebraic functions (add, mul, etc..), use the corresponding
+ * For algebraic functions (`add`, `mul`, etc..), use the corresponding
  * canonicalization function, i.e. `canonicalAdd(a, b)` instead of
  * `ce.function('Add', a, b)`.
  *
@@ -183,11 +181,9 @@ export interface TensorData<DT extends keyof DataTypeMap = 'float64'> {
  *    - flattening associative functions
  *    - sort the arguments (if the function is commutative)
  *    - calling `ce._fn()` to create a new function expression
- *    - if the function definition has a hold, they should also put
- *      their arguments in canonical form, if appropriate
  *
  * When the canonical handler is invoked, the arguments have been put in
- * canonical form according to the `hold` flag.
+ * canonical form according unless the `lazy` flag is set to `true`.
  *
  * Some canonical handlers are available as separate functions and can be
  * used directly, for example `canonicalAdd(a, b)` instead of
@@ -205,12 +201,19 @@ export interface BoxedExpression {
   // with a definition).
   //
   //
-  /** The Compute Engine associated with this expression provides
+  /**
+   * The Compute Engine associated with this expression provides
    * a context in which to interpret it, such as definition of symbols
    * and functions.
-   *
    */
   readonly engine: ComputeEngine;
+
+  /**
+   * The lexical scope in which this expression has been defined.
+   *
+   * If the expression is not canonical, it is `null`.
+   */
+  readonly scope: RuntimeScope | null;
 
   /** From `Object.valueOf()`, return a primitive value for the expression.
    *
@@ -218,14 +221,23 @@ export interface BoxedExpression {
    * converted to a machine number, return a JavaScript `number`. There may
    * be a loss of precision in this conversion.
    *
-   * If the expression is `True` or `False`, return `true` or `false`.
+   * If the expression is the symbol `"True"` or the symbol `"False"`,
+   * return `true` or `false`.
    *
-   * If the expression is a symbol or function expression return the string
+   * If the expression is a symbol or function expression return a string
    * representation of the expression.
    *
    * @category Primitive Methods
    */
   valueOf(): number | string | boolean;
+
+  /** Similar to`expr.valueOf()` but includes a hint.
+   *
+   * @category Primitive Methods
+   */
+  [Symbol.toPrimitive](
+    hint: 'number' | 'string' | 'default'
+  ): number | string | null;
 
   /** From `Object.toString()`, return a ASCIIMath representation of the
    * expression. This string is suitable to be output to the console
@@ -238,21 +250,6 @@ export interface BoxedExpression {
    * @category Primitive Methods
    */
   toString(): string;
-
-  /**
-   * Output to the console a string representation of the expression.
-   *
-   * @category Primitive Methods
-   */
-  print(): void;
-
-  /** Similar to`expr.valueOf()` but includes a hint.
-   *
-   * @category Primitive Methods
-   */
-  [Symbol.toPrimitive](
-    hint: 'number' | 'string' | 'default'
-  ): number | string | null;
 
   /** Used by `JSON.stringify()` to serialize this object to JSON.
    *
@@ -270,6 +267,13 @@ export interface BoxedExpression {
    * Will ignore any LaTeX metadata.
    */
   toLatex(options?: Partial<SerializeLatexOptions>): LatexString;
+
+  /**
+   * Output to the console a string representation of the expression.
+   *
+   * @category Primitive Methods
+   */
+  print(): void;
 
   verbatimLatex?: string;
 
@@ -302,13 +306,6 @@ export interface BoxedExpression {
    *
    */
   readonly json: Expression;
-
-  /**
-   * The scope in which this expression has been defined.
-   *
-   * Is `null` when the expression is not canonical.
-   */
-  readonly scope: RuntimeScope | null;
 
   /**
    * Equivalent to `BoxedExpression.isSame()` but the argument can be
@@ -443,6 +440,14 @@ export interface BoxedExpression {
   readonly isValid: boolean;
 
   /**
+   * Return `true` if this expression is a function expression.
+   *
+   * If `true`, `expr.ops` is not `null`, and `expr.operator` is the name
+   * of the function.
+   */
+  readonly isFunctionExpression: boolean;
+
+  /**
    * The name of the operator of the expression.
    *
    * For example, the name of the operator of `["Add", 2, 3]` is `"Add"`.
@@ -524,39 +529,6 @@ export interface BoxedExpression {
    *
    */
   readonly op3: BoxedExpression;
-
-  /** If true, the value of the expression never changes and evaluating it has
-   * no side-effects.
-   *
-   * If false, the value of the expression may change, if the
-   * value of other expression changes or for other reasons.
-   *
-   * If `this.isPure` is `false`, `this.value` is undefined. Call
-   * `this.evaluate()` (or '*this.N()*') to determine the value of the expression instead.
-   *
-   * As an example, the `Random` function is not pure.
-   *
-   * :::info[Note]
-   * Applicable to canonical and non-canonical expressions.
-   * :::
-   */
-  readonly isPure: boolean;
-
-  /**
-   * `True` if this expression's value remains constant.
-   *
-   * If *true* and a function, implies that it is *pure*, and also that all of its arguments are
-   * constant.
-   *
-   * Number literals, symbols with constant values, and numeric functions with constant
-   * subexpressions may all be considered *constant*, i.e.:
-   * - `2` is constant
-   * - `Pi` is constant
-   * - `["Add", "Pi", 2]` is constant
-   * - `x` is inconstant: unless declared with a constant value.
-   * - `["Add", "x", 2]` is either constant or inconstant, depending on whether `x` is constant.
-   */
-  readonly isConstant: boolean;
 
   /**
    * Return the canonical form of this expression.
@@ -678,13 +650,6 @@ export interface BoxedExpression {
   isSame(rhs: BoxedExpression): boolean;
 
   /**
-   * Return this expression expressed as a numerator and denominator.
-   */
-  get numerator(): BoxedExpression;
-  get denominator(): BoxedExpression;
-  get numeratorDenominator(): [BoxedExpression, BoxedExpression];
-
-  /**
    * If this expression matches `pattern`, return a substitution that makes
    * `pattern` equal to `this`. Otherwise return `null`.
    *
@@ -708,46 +673,15 @@ export interface BoxedExpression {
   ): BoxedSubstitution | null;
 
   /**
-   * "Not a Number".
+   * Return `true` if this expression is a number literal, for example
+   * `2`, `3.14`, `1/2`, `√2` etc.
    *
-   * A value representing undefined result of computations, such as `0/0`,
-   * as per the floating point format standard IEEE-754.
-   *
-   * Note that if `isNaN` is true, `isNumber` is also true (yes, `NaN` is a
-   * number).
-   *
-   * If this expression is a symbol, this lookup also causes binding to a definition.
+   * This is equivalent to checking if `expr.numericValue` is not `null`.
    *
    * @category Numeric Expression
    *
    */
-  readonly isNaN: boolean | undefined;
-
-  /**
-   * The numeric value of this expression is `±Infinity` or ComplexInfinity.
-   *
-   * If this is a symbol, causes it to be bound to a definition.
-   *
-   * @category Numeric Expression
-   */
-  readonly isInfinity: boolean | undefined;
-
-  /** This expression is a number, but not `±Infinity`, `ComplexInfinity` or
-   *  `NaN`
-   *
-   * @category Numeric Expression
-   */
-  readonly isFinite: boolean | undefined;
-
-  /**
-   * @category Numeric Expression
-   */
-  readonly isEven: boolean | undefined;
-
-  /**
-   * @category Numeric Expression
-   */
-  readonly isOdd: boolean | undefined;
+  readonly isNumberLiteral: boolean;
 
   /**
    * Return the value of this expression, if a number literal.
@@ -768,25 +702,6 @@ export interface BoxedExpression {
    *
    */
   readonly numericValue: number | NumericValue | null;
-
-  /**
-   * Return `true` if this expression is a number literal, for example
-   * `2`, `3.14`, `1/2`, `√2` etc.
-   *
-   * This is equivalent to checking if `expr.numericValue` is not `null`.
-   *
-   * @category Numeric Expression
-   *
-   */
-  readonly isNumberLiteral: boolean;
-
-  /**
-   * Return `true` if this expression is a function expression.
-   *
-   * If `true`, `expr.ops` is not `null`, and `expr.operator` is the name
-   * of the function.
-   */
-  readonly isFunctionExpression: boolean;
 
   /**
    * If this expression is a number literal or a symbol with a value that
@@ -1050,6 +965,79 @@ export interface BoxedExpression {
    */
   readonly symbolDefinition: BoxedSymbolDefinition | undefined;
 
+  /** If `true`, the value of the expression never changes and evaluating it has
+   * no side-effects.
+   *
+   * If `false`, the value of the expression may change, if the
+   * value of other expression changes or for other reasons.
+   *
+   * If `expr.isPure` is `false`, `expr.value` is undefined. Call
+   * `expr.evaluate()` (or 'expr.N()') to determine the value of the
+   * expression instead.
+   *
+   * As an example, the `Random` function is not pure.
+   *
+   */
+  readonly isPure: boolean;
+
+  /**
+   * `True` if this expression's value remains constant.
+   *
+   * If *true* and a function, implies that it is *pure*, and also that all of its arguments are
+   * constant.
+   *
+   * Number literals, symbols with constant values, and numeric functions with constant
+   * subexpressions may all be considered *constant*, i.e.:
+   * - `2` is constant
+   * - `Pi` is constant
+   * - `["Add", "Pi", 2]` is constant
+   * - `x` is inconstant: unless declared with a constant value.
+   * - `["Add", "x", 2]` is either constant or inconstant, depending on whether `x` is constant.
+   */
+  readonly isConstant: boolean;
+
+  /**
+   * "Not a Number".
+   *
+   * A value representing undefined result of computations, such as `0/0`,
+   * as per the floating point format standard IEEE-754.
+   *
+   * Note that if `isNaN` is true, `isNumber` is also true (yes, `NaN` is a
+   * number).
+   *
+   * If this expression is a symbol, this lookup also causes binding to a definition.
+   *
+   * @category Numeric Expression
+   *
+   */
+  readonly isNaN: boolean | undefined;
+
+  /**
+   * The numeric value of this expression is `±Infinity` or ComplexInfinity.
+   *
+   * If this is a symbol, causes it to be bound to a definition.
+   *
+   * @category Numeric Expression
+   */
+  readonly isInfinity: boolean | undefined;
+
+  /** This expression is a number, but not `±Infinity`, `ComplexInfinity` or
+   *  `NaN`
+   *
+   * @category Numeric Expression
+   */
+  readonly isFinite: boolean | undefined;
+
+  /**
+   * @category Numeric Expression
+   */
+  readonly isEven: boolean | undefined;
+
+  /**
+   * @category Numeric Expression
+   */
+  readonly isOdd: boolean | undefined;
+
   /**
    *
    * Infer the type of this expression.
@@ -1104,6 +1092,21 @@ export interface BoxedExpression {
   // The methods below are automatically applied to the canonical version
   // of the expression
   //
+
+  /**
+   * Return this expression expressed as a numerator.
+   */
+  get numerator(): BoxedExpression;
+
+  /**
+   * Return this expression expressed as a denominator.
+   */
+  get denominator(): BoxedExpression;
+
+  /**
+   * Return this expression expressed as a numerator and denominator.
+   */
+  get numeratorDenominator(): [BoxedExpression, BoxedExpression];
 
   /**
    * Return a simpler form of this expression.
@@ -1783,7 +1786,7 @@ export type FunctionDefinition = BaseDefinition &
      * Evaluate a function expression.
      *
      * When the handler is invoked, the arguments have been evaluated, except
-     * the arguments to which a `hold` applied.
+     * if the `lazy` option is set to `true`.
      *
      * It is not necessary to further simplify or evaluate the arguments.
      *

@@ -166,8 +166,6 @@ export function canonicalDivide(
       canonicalMultiply(ce, [ce.number(c.numerator), t1]),
       canonicalMultiply(ce, [ce.number(c.denominator), t2]),
     ]);
-
-    return canonicalMultiply(ce, [ce.number(c), ce._fn('Divide', [t1, t2])]);
   }
   return ce._fn('Divide', [op1, op2]);
 }
