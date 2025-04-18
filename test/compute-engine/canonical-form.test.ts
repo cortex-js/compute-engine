@@ -665,6 +665,44 @@ describe('CANONICAL FORMS', () => {
         canonical  = ["Root", ["Multiply", ["Rational", 1, 3], "a"], 3]
       `);
     });
+
+    test(`(a^b)^c -> a^(b*c)`, () => {
+      // expect(checkPower('')).toMatchInlineSnapshot();
+      expect(checkPower('{a^3}^4')).toMatchInlineSnapshot(`
+        box        = ["Power", ["Power", "a", 3], 4]
+        canonForms = ["Power", "a", ["Multiply", 3, 4]]
+        canonical  = ["Power", "a", ["Multiply", 3, 4]]
+      `);
+      //note: 'Multiply' args. are ordered in the output JSON: but the result 'Power'
+      //BoxedExpression still has (ordered) operands [b, c].
+      expect(checkPower('{a^{{b^2}^e}}^{0.5*\\pi}')).toMatchInlineSnapshot(`
+        box        = [
+          "Power",
+          ["Power", "a", ["Power", ["Square", "b"], "e"]],
+          ["Multiply", 0.5, "Pi"]
+        ]
+        canonForms = [
+          "Power",
+          "a",
+          [
+            "Multiply",
+            0.5,
+            "Pi",
+            ["Power", "b", ["Multiply", 2, "ExponentialE"]]
+          ]
+        ]
+        canonical  = [
+          "Power",
+          "a",
+          [
+            "Multiply",
+            0.5,
+            "Pi",
+            ["Power", "b", ["Multiply", 2, "ExponentialE"]]
+          ]
+        ]
+      `);
+    });
   });
 
   describe('Number', () => {

@@ -60,8 +60,19 @@ export function canonicalPower(
   const unchanged = () =>
     ce._fn('Power', [a, b], { canonical: fullyCanonical });
 
-  // Exclude cases - which may otherwise be valid - of the exponent either: being a function (e.g.
-  // '0 + 0'), a symbol, or non-numeric expr. type (e.g. string).
+  if (a.operator === 'Power') {
+    const [base, aPow] = a.ops!;
+    return ce._fn('Power', [
+      base,
+      ce.box(['Multiply', aPow, b], {
+        canonical: fullyCanonical || 'Power',
+      }),
+    ]);
+  }
+
+  // Onwards, the focus on operations is where is a *numeric* exponent.
+  // Therefore, exclude cases - which may otherwise be valid - of the exponent either: being a function (e.g.
+  // '0 + 0'), a symbol, or of a non-numeric type.
   //
   // @consider:possible exceptions where function-expressions are reasonable :Rational,Half,
   // Negate... (However, provided that canonicalNumber provided prior, should not be missing anything
@@ -280,7 +291,9 @@ export function pow(
   if (typeof exp !== 'number') exp = exp.canonical;
 
   // 'canonicalPower' deals with a set of basic operations.
-  // If the result is not 'Power', can assume an op. has taken place
+  // If the result is not 'Power', can assume an op. has occurred
+  // In some cases, an op. may apply, but a 'Power' expr. is still the result ('(a^b)^c -> a^(b*c)'
+  // for instance). For these cases, proceed.
   const canonicalResult = canonicalPower(x, ce.box(exp));
   if (canonicalResult.operator !== 'Power') return canonicalResult;
 
