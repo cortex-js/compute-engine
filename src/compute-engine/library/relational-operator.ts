@@ -293,8 +293,8 @@ export const RELOP_LIBRARY: IdentifierDefinitions = {
   NotApproxNotEqual: {
     complexity: 11100,
     signature: '(any, any, ...any) -> boolean',
-    canonical: (args, { engine: ce }) =>
-      ce._fn('Not', [canonicalRelational(ce, 'ApproxNotEqual', args)]),
+    canonical: (args, { engine }) =>
+      engine._fn('Not', [canonicalRelational(engine, 'ApproxNotEqual', args)]),
   },
 
   Precedes: {
@@ -308,22 +308,22 @@ export const RELOP_LIBRARY: IdentifierDefinitions = {
   NotPrecedes: {
     complexity: 11100,
     signature: '(any, any, ...any) -> boolean',
-    canonical: (args, { engine: ce }) =>
-      ce._fn('Not', [canonicalRelational(ce, 'Precedes', args)]),
+    canonical: (args, { engine }) =>
+      engine._fn('Not', [canonicalRelational(engine, 'Precedes', args)]),
   },
 
   Succeeds: {
     signature: '(any, any, ...any) -> boolean',
-    canonical: (args, { engine: ce }) =>
-      canonicalRelational(ce, 'Succeeds', args),
+    canonical: (args, { engine }) =>
+      canonicalRelational(engine, 'Succeeds', args),
     // @todo evaluate: (ce, ...args: BoxedExpression[]) => SemiBoxedExpression {}
   },
 
   NotSucceeds: {
     complexity: 11100,
     signature: '(any, any, ...any) -> boolean',
-    canonical: (args, { engine: ce }) =>
-      ce._fn('Not', [canonicalRelational(ce, 'Succeeds', args)]),
+    canonical: (args, { engine }) =>
+      engine._fn('Not', [canonicalRelational(engine, 'Succeeds', args)]),
   },
 };
 

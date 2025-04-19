@@ -187,12 +187,13 @@ export class BoxedSymbol extends _BoxedExpression {
     return ce.lookupSymbol(this._id) ?? ce.lookupFunction(this._id);
   }
 
-  /** This method returns the definition associated with the value of this symbol, or associated with
-   * the symbol if it has no value. Used primarily to check, or obtain the value definition for, the
-   * case where this symbol has a 'collection' definition
+  /** This method returns the definition associated with the value of this
+   * symbol, or associated with the symbol if it has no value. Used primarily
+   * to check, or obtain the value definition for, the case where this symbol
+   * has a 'collection' definition
    *
-   * This is the definition to use with most operations on the symbol. Indeed, "x[2]" is accessing
-   * the second element of **the value** of "x".
+   * This is the definition to use with most operations on the symbol.
+   * Indeed, "x[2]" is accessing the second element of **the value** of "x".
    */
   private _getDef(): BoxedBaseDefinition | undefined {
     let def: BoxedBaseDefinition | BoxedSymbolDefinition | undefined =
@@ -404,6 +405,7 @@ export class BoxedSymbol extends _BoxedExpression {
 
   get symbolDefinition(): BoxedSymbolDefinition | undefined {
     if (this._def === undefined) this.bind();
+
     return this._def instanceof _BoxedSymbolDefinition ? this._def : undefined;
   }
 
@@ -621,9 +623,11 @@ export class BoxedSymbol extends _BoxedExpression {
   }
 
   get isFinite(): boolean | undefined {
+    if (this.isNaN) return false;
+
     const s = this.sgn;
     if (!s) return undefined;
-    return !(infinitySgn(s) || s === 'nan');
+    return !infinitySgn(s);
   }
 
   get isInfinity(): boolean | undefined {
@@ -631,7 +635,9 @@ export class BoxedSymbol extends _BoxedExpression {
   }
 
   get isNaN(): boolean | undefined {
-    return this.symbolDefinition?.sgn === 'nan';
+    const v = this.symbolDefinition?.value?.isNaN;
+    if (v === undefined) return undefined;
+    return v;
   }
 
   // x > 0
