@@ -1,4 +1,4 @@
-import { ComputeEngine } from '../../src/compute-engine';
+import { ComputeEngine, NumericType } from '../../src/compute-engine';
 import { _BoxedExpression } from '../../src/compute-engine/boxed-expression/abstract-boxed-expression';
 import { check, exprToString, engine as TEST_ENGINE } from '../utils';
 import type {
@@ -240,12 +240,38 @@ describe('CANONICAL FORMS', () => {
 
   describe('Power', () => {
     const engine = new ComputeEngine();
-    engine.declare('x', { constant: true, value: 0 });
-    engine.declare('y', { constant: true, value: 1 });
 
-    engine.declare('p', { constant: true, value: Infinity });
-    engine.declare('n', { constant: true, value: -Infinity });
-    engine.declare('c', { constant: true, value: -Infinity });
+    /*
+     * 'Power'-scoped symbol declarations
+     */
+    //@note: declarations are necessarily marked with 'holdUntil: never' - for these test cases - in
+    //order to permit substitution during (before) application of canonical-forms.
+    //^Necessary because 'a^x' is not a valid simplification (cannot assume that 'x' is bound), but
+    //if x is substituted, then that's fine...
+    engine.declare('x', { constant: true, value: 0, holdUntil: 'never' });
+    engine.declare('y', { constant: true, value: 1, holdUntil: 'never' });
+
+    engine.declare('p', {
+      constant: true,
+      value: Infinity,
+      holdUntil: 'never',
+    });
+    engine.declare('n', {
+      constant: true,
+      value: -Infinity,
+      holdUntil: 'never',
+    });
+    engine.declare('c', {
+      constant: true,
+      value: -Infinity,
+      holdUntil: 'never',
+    });
+
+    //Control-case symbols (holdUntil value of default 'evaluate', and henceforth 'value' not to be
+    //consulted at this stage)
+    engine.declare('j', { constant: true, value: 0 });
+    engine.declare('k', { constant: true, value: 1 });
+
     const checkPower = (
       input: string,
       priorForms: CanonicalForm[] = ['Number']
@@ -267,11 +293,20 @@ describe('CANONICAL FORMS', () => {
         canonForms = ComplexInfinity
         canonical  = ComplexInfinity
       `);
-      // x === 0
+      // x === 0 (simplifies because is substituted beforehand ('holdUntil = never'))
       expect(checkPower('x^3')).toMatchInlineSnapshot(`
         box        = ["Power", "x", 3]
         canonForms = 0
         canonical  = 0
+      `);
+
+      // Control
+      //
+      //'j=0', but should _not_ substitute (i.e. beforehand) & therefore no op. should take place
+      //(its 'holdUntil' property is set to the default 'evaluate')
+      expect(checkPower('j^3')).toMatchInlineSnapshot(`
+        box        = ["Power", "j", 3]
+        canonForms = ["Power", "j", 3]
       `);
     });
 
@@ -286,11 +321,18 @@ describe('CANONICAL FORMS', () => {
         canonForms = NaN
         canonical  = NaN
       `);
+      //↓Only simplifies because 'x' substitutes with its value during partial-canonicalization;
+      //prior to app. of CanonicalForms.
       expect(checkPower('16^x')).toMatchInlineSnapshot(`
         box        = ["Power", 16, "x"]
         canonForms = 1
         canonical  = 1
       `);
+      //!@note: this should be ok to apply, despite 'Pi' being a constant which does *not* have a
+      //!'holdUntil' value set to 'never', because... this is a library/engine-level defined
+      //!constant in which its type/value is always known: even in non-canonical expressions.
+      //I.e., if this were a user-defined constant, this would not be OK, since its value would have
+      //to be referenced.
       expect(checkPower('\\pi^0')).toMatchInlineSnapshot(`
         box        = ["Power", "Pi", 0]
         canonForms = 1
@@ -300,6 +342,15 @@ describe('CANONICAL FORMS', () => {
         box        = ["Power", ["Negate", 2.7243631], 0]
         canonForms = 1
         canonical  = 1
+      `);
+
+      /*
+       * Control-case
+       */
+      //j===0, but is *held*
+      expect(checkPower('2^j')).toMatchInlineSnapshot(`
+        box        = ["Power", 2, "j"]
+        canonForms = ["Power", 2, "j"]
       `);
     });
 
@@ -342,15 +393,41 @@ describe('CANONICAL FORMS', () => {
         canonForms = PositiveInfinity
         canonical  = PositiveInfinity
       `);
-      expect(checkPower('{-a/4}^1')).toMatchInlineSnapshot(`
-        box        = ["Power", ["Divide", ["Negate", "a"], 4], 1]
-        canonForms = ["Divide", ["Negate", "a"], 4]
-        canonical  = ["Multiply", ["Rational", -1, 4], "a"]
+
+      //@note: This correctly simplifies, unlike would be expected of 'x^1' (where x is a
+      //user-declared numeric constant with a default 'holdUntil' value of 'evaluate'), because 'Pi'
+      //is a library-defined constant, consequently always being canonical & bound (and ∴ having a
+      //type/value), even in *non-canonical* exprs.
+      //^!Note that currently, 'x^1' *will simplify* at present, but this would not be considered
+      //correct behaviour (compute-engine/pull/238#discussion_r2034335185). This is because
+      //canonicalization of symbols (including partial-canonicalization) is presently, erroneously,
+      //synonymous with 'binding': permitting its type/value to be determined at this stage.
+      expect(checkPower('{\\pi}^1')).toMatchInlineSnapshot(`
+        box        = ["Power", "Pi", 1]
+        canonForms = Pi
+        canonical  = Pi
       `);
-      expect(checkPower('{-\\pi}^1')).toMatchInlineSnapshot(`
-        box        = ["Power", ["Negate", "Pi"], 1]
-        canonForms = ["Negate", "Pi"]
-        canonical  = ["Negate", "Pi"]
+
+      //↓🙁: cannot be simplified, at least via the route of checking the 'type' of the base/'-\pi',
+      //because is a non-canonical function-expr. (non-bound to 'Power' definition)
+
+      // expect(checkPower('{-\\pi}^1')).toMatchInlineSnapshot(`
+      //   box        = ["Power", "Pi", 1]
+      //   canonForms = Pi
+      //   canonical  = Pi
+      // `);
+
+      /*
+       * Control
+       */
+      //!@note:
+      //Not currently simplified, despite 'j' being an 'integer'-typed constant, because the base is
+      //a non-canonical function and therefore unbound to a definition; consequently with its 'type'
+      //non-determinable.
+      expect(checkPower('{-j/4}^1')).toMatchInlineSnapshot(`
+        box        = ["Power", ["Divide", ["Negate", "j"], 4], 1]
+        canonForms = ["Power", ["Divide", ["Negate", "j"], 4], 1]
+        canonical  = ["Multiply", ["Rational", -1, 4], "j"]
       `);
     });
 
@@ -377,10 +454,10 @@ describe('CANONICAL FORMS', () => {
         canonForms = ["Rational", 1, 3]
         canonical  = ["Rational", 1, 3]
       `);
-      expect(checkPower('{x * 4}^{-1}')).toMatchInlineSnapshot(`
-        box        = ["Power", ["Multiply", "x", 4], -1]
-        canonForms = ["Divide", 1, ["Multiply", 4, "x"]]
-        canonical  = ["Divide", 1, ["Multiply", 4, "x"]]
+      expect(checkPower('{j * 4}^{-1}')).toMatchInlineSnapshot(`
+        box        = ["Power", ["Multiply", "j", 4], -1]
+        canonForms = ["Divide", 1, ["Multiply", 4, "j"]]
+        canonical  = ["Divide", 1, ["Multiply", 4, "j"]]
       `);
     });
 
@@ -426,7 +503,10 @@ describe('CANONICAL FORMS', () => {
         canonical  = ComplexInfinity
       `);
 
-      //Constant-symbol value cases.: p=PositiveInfinity
+      /*
+       * Constant-symbol value cases.
+       */
+      // p === +Infinity (& 'holdUntil: never')
       expect(checkPower('1^{p}')).toMatchInlineSnapshot(`
         box        = ["Power", 1, "p"]
         canonForms = NaN
@@ -470,13 +550,17 @@ describe('CANONICAL FORMS', () => {
         canonForms = 0
         canonical  = 0
       `);
-      expect(checkPower('{-\\pi}^{-\\infty}')).toMatchInlineSnapshot(`
-        box        = ["Power", ["Negate", "Pi"], "NegativeInfinity"]
-        canonForms = ["Power", ["Negate", "Pi"], "NegativeInfinity"]
-        canonical  = 0
-      `);
+      //🙁: cannot be simplified, base/'Negate' is non-canonical and 'type' cannot be determined.
+      // expect(checkPower('{-\\pi}^{-\\infty}')).toMatchInlineSnapshot(`
+      //   box        = ["Power", ["Negate", "Pi"], "NegativeInfinity"]
+      //   canonForms = ["Power", ["Negate", "Pi"], "NegativeInfinity"]
+      //   canonical  = 0
+      // `);
 
-      //Constant-symbol value cases.: n=NegativeInfinity, x=0
+      /*
+       * Constant-valued symbol operands
+       */
+      //x=0, n=NegativeInfinity ('holdUntil: never'),
       expect(checkPower('x^{n}')).toMatchInlineSnapshot(`
         box        = ["Power", "x", "n"]
         canonForms = ComplexInfinity
@@ -541,6 +625,7 @@ describe('CANONICAL FORMS', () => {
       `);
 
       //Include 'Add' in order that complex-numbers may be identified for these cases.
+      //(^note that this may later be included as part of the 'Number' form)
       check = (input: string) =>
         checkPower(input, ['InvisibleOperator', 'Number', 'Add']);
 
@@ -578,6 +663,250 @@ describe('CANONICAL FORMS', () => {
         box        = ["Power", ["Divide", "a", 3], ["Divide", 1, 3]]
         canonForms = ["Root", ["Divide", "a", 3], 3]
         canonical  = ["Root", ["Multiply", ["Rational", 1, 3], "a"], 3]
+      `);
+    });
+
+    test(`(a^b)^c -> a^(b*c)`, () => {
+      // expect(checkPower('')).toMatchInlineSnapshot();
+      expect(checkPower('{a^3}^4')).toMatchInlineSnapshot(`
+        box        = ["Power", ["Power", "a", 3], 4]
+        canonForms = ["Power", "a", ["Multiply", 3, 4]]
+        canonical  = ["Power", "a", ["Multiply", 3, 4]]
+      `);
+      //note: 'Multiply' args. are ordered in the output JSON: but the result 'Power'
+      //BoxedExpression still has (ordered) operands [b, c].
+      expect(checkPower('{a^{{b^2}^e}}^{0.5*\\pi}')).toMatchInlineSnapshot(`
+        box        = [
+          "Power",
+          ["Power", "a", ["Power", ["Square", "b"], "e"]],
+          ["Multiply", 0.5, "Pi"]
+        ]
+        canonForms = [
+          "Power",
+          "a",
+          [
+            "Multiply",
+            0.5,
+            "Pi",
+            ["Power", "b", ["Multiply", 2, "ExponentialE"]]
+          ]
+        ]
+        canonical  = [
+          "Power",
+          "a",
+          [
+            "Multiply",
+            0.5,
+            "Pi",
+            ["Power", "b", ["Multiply", 2, "ExponentialE"]]
+          ]
+        ]
+      `);
+    });
+  });
+
+  describe('Number', () => {
+    const ce = TEST_ENGINE;
+    let expr: string | SemiBoxedExpression;
+
+    const nonCanon = (input: string | SemiBoxedExpression) =>
+      typeof input === 'string'
+        ? ce.parse(input, { canonical: false })
+        : ce.box(input, { canonical: false });
+    const checkNumber = (input: string | SemiBoxedExpression) =>
+      checkForms(input, ['Number'], ce);
+    const canonNumber = (input: string | SemiBoxedExpression) =>
+      typeof input === 'string'
+        ? ce.parse(input, { canonical: 'Number' })
+        : ce.box(input, { canonical: 'Number' });
+
+    //*note*: BoxedNumbers may get JSON serialized as ['Rational',...] ('check' outputs JSON): so
+    //need to additionally test for the result 'operator' as 'Number' for desired result.
+    test(`'Rational' or 'Divide' (expr.) -> number (when valid)`, () => {
+      expr = '1/3';
+      //(•see above note: both 'canonForms' & 'canonical' are serialized as 'Rational', but may still
+      //be numbers)
+      expect(checkNumber(expr)).toMatchInlineSnapshot(`
+        box        = ["Divide", 1, 3]
+        canonForms = ["Rational", 1, 3]
+        canonical  = ["Rational", 1, 3]
+      `);
+      expect(canonNumber(expr).operator).toBe('Number');
+
+      expr = '3/7';
+      expect(checkNumber(expr)).toMatchInlineSnapshot(`
+        box        = ["Divide", 3, 7]
+        canonForms = ["Rational", 3, 7]
+        canonical  = ["Rational", 3, 7]
+      `);
+      expect(canonNumber(expr).operator).toBe('Number');
+
+      //(case of direct number serialization (denominator of 1))
+      expr = '2/1';
+      expect(checkNumber(expr)).toMatchInlineSnapshot(`
+        box        = ["Divide", 2, 1]
+        canonForms = 2
+        canonical  = 2
+      `);
+      expect(canonNumber(expr).operator).toBe('Number');
+
+      /*
+       * BigNum (Decimal)
+       */
+      //@note: as of time of writing (CE 0.29.1), the test engine which test-cases in this block use
+      //has a precision set to `100`: so all BigNum/Int digits are output.
+      const bigRational: SemiBoxedExpression = [
+        'Divide',
+        '318982460862894267352492496399',
+        '-358796515092200247647243',
+      ];
+      expect(checkNumber(bigRational)).toMatchInlineSnapshot(`
+        box        = [
+          "Divide",
+          {num: "318982460862894267352492496399"},
+          {num: "-358796515092200247647243"}
+        ]
+        canonForms = [
+          "Rational",
+          {num: "-318982460862894267352492496399"},
+          {num: "358796515092200247647243"}
+        ]
+        canonical  = [
+          "Rational",
+          {num: "-318982460862894267352492496399"},
+          {num: "358796515092200247647243"}
+        ]
+      `);
+      expect(canonNumber(expr).operator).toBe('Number'); // ✔
+
+      /*
+       * Control
+       */
+      expr = '13.19/7.7';
+      expect(checkNumber(expr)).toMatchInlineSnapshot(`
+        box        = ["Divide", 13.19, 7.7]
+        canonForms = ["Divide", 13.19, 7.7]
+      `);
+    });
+
+    test(`'Rational' (expr.) -> Divide (when non-rational)`, () => {
+      expect(checkNumber(['Rational', 1, 'Pi'])).toMatchInlineSnapshot(`
+        box        = ["Rational", 1, "Pi"]
+        canonForms = ["Divide", 1, "Pi"]
+        canonical  = ["Divide", 1, "Pi"]
+      `);
+      expect(checkNumber(['Rational', 7.01, 3])).toMatchInlineSnapshot(`
+        box        = ["Rational", 7.01, 3]
+        canonForms = ["Divide", 7.01, 3]
+        canonical  = ["Divide", 7.01, 3]
+      `);
+      //(↓For full-canonical, additional simplifications applied (hence 'Multiply'))
+      expect(checkNumber(['Rational', 'ExponentialE', 2]))
+        .toMatchInlineSnapshot(`
+        box        = ["Rational", "ExponentialE", 2]
+        canonForms = ["Divide", "ExponentialE", 2]
+        canonical  = ["Multiply", ["Rational", 1, 2], "ExponentialE"]
+      `);
+    });
+
+    // @wip?
+    // -Presently, 'Complex'-operator exprs. are the only ones cast as BoxedNumber for this form.
+    // Later potential candidates include those related which take place in Add/Multiply (see
+    // https://github.com/cortex-js/compute-engine/pull/238#discussion_r2033792056)
+    describe("'Complex' exprs.", () => {
+      //@note: 'check' is not helpful here, since a `['Complex', ...]` expr. is 'pretty'-printed for
+      //each variant: whereas we want to test the 'operator'/type
+      test(`Convert to eqv. BoxedNumbers`, () => {
+        const expComplexNum = (
+          expr: string | SemiBoxedExpression,
+          type?: NumericType
+        ) => {
+          expect(nonCanon(expr).operator).toMatchInlineSnapshot(`Complex`);
+          expect(canonNumber(expr).operator).toBe(`Number`);
+          expect(canonNumber(expr).type.matches(type ?? 'complex')).toBe(true);
+        };
+
+        // Imaginary (only)
+        expr = ['Complex', 1];
+        expComplexNum(expr, 'imaginary');
+
+        expr = ['Complex', ['Rational', 1, 43]];
+        expComplexNum(expr, 'imaginary');
+
+        // finite_complex / complex
+        expr = ['Complex', 3, 4];
+        expComplexNum(expr, 'finite_complex');
+
+        //@fixme
+        //(A present bug: that bignum args. get truncated when canonicalized as a complex-number:
+        //regardless of set precision)
+        //@note: precision is '100' for the engine used here...
+        expr = ['Complex', '22975850700614579948873711', 4]; // bigIntRe
+        expComplexNum(expr, 'finite_complex');
+
+        expr = ['Complex', Infinity, 4]; // bigIntRe
+        expComplexNum(expr, 'complex');
+      });
+
+      test(`Convert to 'Add', when imaginary arg. is non-numeric`, () => {
+        expr = ['Complex', 4, 'x'];
+        expect(checkNumber(expr)).toMatchInlineSnapshot(`
+          box        = ["Complex", 4, "x"]
+          canonForms = ["Add", ["Multiply", ["Complex", 0, 1], "x"], 4]
+          canonical  = ["Add", ["Multiply", ["Complex", 0, 1], "x"], 4]
+        `);
+
+        expr = ['Complex', 1, ['Multiply', 'n', 4]];
+        expect(checkNumber(expr)).toMatchInlineSnapshot(`
+          box        = ["Complex", 1, ["Multiply", "n", 4]]
+          canonForms = ["Add", ["Multiply", ["Complex", 0, 4], "n"], 1]
+          canonical  = ["Add", ["Multiply", ["Complex", 0, 4], "n"], 1]
+        `);
+      });
+    });
+
+    test("Cast 'Negate' wrapped numbers as number exprs. ", () => {
+      expect(checkNumber('-1')).toMatchInlineSnapshot(`
+        box        = -1
+        canonForms = -1
+      `);
+
+      expect(checkNumber('-3.6')).toMatchInlineSnapshot(`
+        box        = ["Negate", 3.6]
+        canonForms = -3.6
+        canonical  = -3.6
+      `);
+
+      expr = ['Negate', ['Complex', 1, 4]];
+      expect(checkNumber(expr)).toMatchInlineSnapshot(`
+        box        = ["Negate", ["Complex", 1, 4]]
+        canonForms = ["Complex", -1, -4]
+        canonical  = ["Complex", -1, -4]
+      `);
+      expect(canonNumber(expr).operator).toBe('Number');
+
+      expr = ['Negate', ['Rational', 9, 16]];
+      expect(checkNumber(expr)).toMatchInlineSnapshot(`
+        box        = ["Negate", ["Rational", 9, 16]]
+        canonForms = ["Rational", -9, 16]
+        canonical  = ["Rational", -9, 16]
+      `);
+      expect(canonNumber(expr).operator).toBe('Number');
+    });
+
+    //(↓Only replaces for the *unit*, including negated...)
+    //@wip?: maybe 'InvisibleOperator' case of '3i' etc. should be covered
+    test(`Replace 'ImaginaryUnit' symbol instances with a number`, () => {
+      expect(checkNumber('i')).toMatchInlineSnapshot(`
+        box        = i
+        canonForms = ["Complex", 0, 1]
+        canonical  = ["Complex", 0, 1]
+      `);
+
+      expect(checkNumber('-i')).toMatchInlineSnapshot(`
+        box        = ["Negate", "i"]
+        canonForms = ["Complex", 0, -1]
+        canonical  = ["Complex", 0, -1]
       `);
     });
   });
@@ -855,6 +1184,12 @@ describe('POLYNOMIAL ORDER', () => {
  *
  * Only prints 'canonical' if this differs from 'boxed'.
  *
+ * <!--
+ * **NOTE**:
+ * -Unlike 'checkJson', does not temporarily set the engine's precision to 'auto' for printing.
+ * (Save oneself some headaches...)
+ * -->
+ *
  * @param inExpr
  * @param forms
  * @param [engine]
@@ -876,9 +1211,6 @@ function checkForms(
   engine ??= TEST_ENGINE;
 
   try {
-    const precision = engine.precision;
-    engine.precision = 'auto';
-
     //Boxed, *non-canonical*
     const boxed =
       typeof inExpr === 'string'
@@ -888,7 +1220,6 @@ function checkForms(
     const boxedStr = exprToString(boxed);
 
     if (!boxed.isValid) {
-      engine.precision = precision;
       return `invalid   =${exprToString(boxed)}`;
     }
 
@@ -903,8 +1234,6 @@ function checkForms(
 
     result.push('canonForms = ' + partialCanonStr);
     if (canonicalStr !== boxedStr) result.push('canonical  = ' + canonicalStr);
-
-    engine.precision = precision;
 
     return result.join('\n');
   } catch (e) {

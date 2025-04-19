@@ -382,7 +382,13 @@ export function box(
     }
 
     if (!isValidIdentifier(expr)) return ce.error('invalid-identifier', expr);
-    return ce.symbol(expr, { canonical });
+    // Let 'partial' canonicalization fetch the canonical variant of symbols: in order that at
+    // minimum, they may be substituted with associated definition values (when its def. 'holdUntil'
+    // is 'never')
+    // @note: alternatively, this could be signalled by a 'Symbol' CanonicalForm: but this way is
+    // more predicatable, & ensures substitution as per above
+    const canonicalSymbol = canonical || options.canonical !== false;
+    return ce.symbol(expr, { canonical: canonicalSymbol });
   }
 
   //
