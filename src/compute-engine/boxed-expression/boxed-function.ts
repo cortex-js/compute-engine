@@ -13,7 +13,7 @@ import type {
   ComputeEngine,
   Metadata,
   Rule,
-  RuntimeScope,
+  Scope,
   Sign,
   Substitution,
 } from '../global-types';
@@ -82,7 +82,7 @@ export class BoxedFunction extends _BoxedExpression {
   private _canonical: BoxedExpression | undefined;
 
   // The scope in which this function was defined/boxed
-  private _scope: RuntimeScope | null;
+  private _scope: Scope | null;
 
   // Only canonical expressions have an associated def
   _def: BoxedFunctionDefinition | undefined;
@@ -221,7 +221,7 @@ export class BoxedFunction extends _BoxedExpression {
     return [this._name, ...this.structural.ops!.map((x) => x.json)];
   }
 
-  get scope(): RuntimeScope | null {
+  get scope(): Scope | null {
     return this._scope;
   }
 

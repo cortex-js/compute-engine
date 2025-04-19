@@ -213,7 +213,7 @@ export interface BoxedExpression {
    *
    * If the expression is not canonical, it is `null`.
    */
-  readonly scope: RuntimeScope | null;
+  readonly scope: Scope | null;
 
   /** From `Object.valueOf()`, return a primitive value for the expression.
    *
@@ -1230,9 +1230,25 @@ export interface BoxedExpression {
   ): null | ReadonlyArray<BoxedExpression>;
 
   /**
-   * If this expression is a number, a boolean, a string or a symbol with a
-   * value that is a number or a string, return a JavaScript primitive
-   * representing the value of this expression.
+   * If this expression is a literal number or string, or a symbol with a value
+   * that is a number, a string or a boolean, return the value of the
+   * expression as a `BoxedExpression`.
+   */
+  get literalValue(): BoxedExpression | undefined;
+
+  /**
+   * This property is intended to make it easier to work with
+   * Javascript primitives.
+   *
+   * If this expression is:
+   * - a number
+   * - a boolean
+   * - a string
+   * - a tensor (array or matrix) of numbers
+   * - or a symbol with one of the above values
+   *
+   * then return a Javascript primitive value representing the value of this
+   * expression.
    *
    * Otherwise, return `undefined`.
    *
@@ -2051,19 +2067,20 @@ export type CollectionHandlers = {
 export interface BoxedBaseDefinition {
   name: string;
   wikidata?: string;
-  description?: string | string[];
+  description?: string | string[] /** Markdown markup */;
   url?: string;
 
   /**
-   * The scope this definition belongs to.
+   * The lexical scope this definition belongs to.
    *
-   * This field is usually undefined, but its value is set by `getDefinition()`
+   * This field is usually `undefined`, but its value is set by `getDefinition()`
    */
-  scope: RuntimeScope | undefined;
+  scope: Scope | undefined;
 
   /** If this is the definition of a collection, the set of primitive operations
    * that can be performed on this collection (counting the number of elements,
-   * enumerating it, etc...). */
+   * enumerating it, etc...).
+   */
   collection?: Partial<CollectionHandlers>;
 
   /** When the environment changes, for example the numerical precision,
@@ -2128,32 +2145,42 @@ export interface BoxedSymbolDefinition
   neq?: (a: BoxedExpression) => boolean | undefined;
   cmp?: (a: BoxedExpression) => '=' | '>' | '<' | undefined;
 
-  // True if the type has been inferred: while a type is inferred,
-  // it can be updated as more information becomes available.
-  // A type that is not inferred, but has been set explicitly,
-  // cannot be updated.
+  /**
+   * True if the type has been inferred. An inferred type can be updated as
+   * more information becomes available.
+   *
+   * A type that is not inferred, but has been set explicitly, cannot be updated.
+   */
   inferredType: boolean;
 
   type: BoxedType;
 }
 
 /**
- * A scope is a set of names in a dictionary that are bound (defined) in
- * a MathJSON expression.
+ * A frame is a table mapping identifiers to boxed expressions.
  *
- * Scopes are arranged in a stack structure. When an expression that defined
- * a new scope is evaluated, the new scope is added to the scope stack.
- * Outside of the expression, the scope is removed from the scope stack.
+ * Frames are arranged in a stack structure. When a new frame is created,
+ * it is pushed on the top of the stack.
  *
- * The scope stack is used to resolve symbols, and it is possible for
- * a scope to 'mask' definitions from previous scopes.
+ * A new frame is created when a function is called or when a function
+ * expression that needs to track its own local variables is evaluated.
  *
- * Scopes are lexical (also called a static scope): they are defined based on
- * where they are in an expression, they are not determined at runtime.
+ * For example, the `Sum` function creates a new frame to track the local
+ * variable used as the index of the sum.
+ *
+ * The frame stack is used to resolve the value of symbols.
+ *
+ * When a recursive function is called, a new frame is created for each
+ * recursive call.
+ *
+ * In contrast, the lexical scope is used to resolve the metadata about
+ * symbols, such as their type, whether they are constant, etc... A new
+ * scope is not created for recursive calls, since the metadata
+ * does not change, only the values of the symbols change.
  *
  * @category Compute Engine
  */
-export type Scope = Record<string, any>;
+export type Frame = Record<string, BoxedExpression | undefined>;
 
 /** Options for `BoxedExpression.evaluate()`
  *
@@ -2326,14 +2353,15 @@ export type BoxedFunctionDefinition = BoxedBaseDefinition &
   };
 
 /**
- * The entries have been validated and optimized for faster evaluation.
+ *
+ * This table maps identifiers to their definitions.
  *
  * When a new scope is created with `pushScope()` or when creating a new
  * engine instance, new instances of this type are created as needed.
  *
  * @category Definitions
  */
-export type RuntimeIdentifierDefinitions = Map<
+export type ScopeIdentifiers = Map<
   string,
   OneOf<[BoxedSymbolDefinition, BoxedFunctionDefinition]>
 >;
@@ -2370,11 +2398,27 @@ export type AssumeResult =
  */
 export type AngularUnit = 'rad' | 'deg' | 'grad' | 'turn';
 
-/** @category Compute Engine */
-export type RuntimeScope = Scope & {
-  parentScope?: RuntimeScope;
+/**
+ * A lexical scope includes a table mapping identifiers to their
+ * definitions and a set of assumptions.
+ *
+ * The current scope is `expr.context` and is used to resolve
+ * information about identifiers, such as their type, flags, etc...
+ *
+ * A new scope is created when a new lexical context is entered, for example
+ * for the body of a function or a `for` loop.
+ *
+ * The lexical scope does not track the execution context of the
+ * expression. The execution context is tracked by the `Frame` stack.
+ * The values of the identifiers are stored in the `Frame` stack, except
+ * for constant symbols, which are stored in the lexical scope.
+ *
+ * @category Compute Engine
+ */
+export type Scope = {
+  parentScope?: Scope;
 
-  ids?: RuntimeIdentifierDefinitions;
+  ids?: ScopeIdentifiers;
 
   assumptions: undefined | ExpressionMapInterface<boolean>;
 
@@ -2651,8 +2695,13 @@ export interface ComputeEngine extends IBigNum {
   /** @internal */
   readonly _BIGNUM_NEGATIVE_ONE: BigNum;
 
-  /** The current scope */
-  context: RuntimeScope | null;
+  /** The current lexical scope */
+  context: Scope | null;
+
+  /** The runtime frames, keeping track of the values of local variables and
+   *  arguments
+   */
+  frames: Frame[];
 
   /** Absolute time beyond which evaluation should not proceed
    * @internal
@@ -2821,19 +2870,35 @@ export interface ComputeEngine extends IBigNum {
     options?: Partial<ParseLatexOptions> & { canonical?: CanonicalOptions }
   ): BoxedExpression | null;
 
-  pushScope(scope?: Partial<Scope>): ComputeEngine;
-
-  popScope(): ComputeEngine;
-
-  swapScope(scope: RuntimeScope | null): RuntimeScope | null;
-
+  pushScope(): void;
+  popScope(): void;
+  swapScope(scope: Scope | null): Scope | null;
   resetContext(): void;
+
+  /** @internal */
+  pushFrame(frame: Frame, name?: string): void;
+  /** @internal */
+  popFrame(): void;
+
+  /**
+   * Use `ce.box(name)` instead
+   * @internal */
+  getSymbolValue(name: string): BoxedExpression | undefined;
+  /**
+   * Use `ce.assign(name, value)` instead.
+   * @internal */
+  setSymbolValue(
+    name: string,
+    value: BoxedExpression | boolean | number | undefined
+  ): void;
+
+  trace: ReadonlyArray<string>;
 
   defineSymbol(name: string, def: SymbolDefinition): BoxedSymbolDefinition;
   lookupSymbol(
     name: string,
     wikidata?: string,
-    scope?: RuntimeScope
+    scope?: Scope
   ): undefined | BoxedSymbolDefinition;
 
   defineFunction(
@@ -2842,7 +2907,7 @@ export interface ComputeEngine extends IBigNum {
   ): BoxedFunctionDefinition;
   lookupFunction(
     name: string,
-    scope?: RuntimeScope | null
+    scope?: Scope | null
   ): undefined | BoxedFunctionDefinition;
 
   assign(ids: { [id: string]: AssignValue }): ComputeEngine;

@@ -36,8 +36,8 @@ import {
   IdentifierDefinitions,
   Metadata,
   Rule,
-  RuntimeScope,
   Scope,
+  Frame,
   SemiBoxedExpression,
   ComputeEngine as IComputeEngine,
 } from './global-types';
@@ -269,7 +269,7 @@ export class ComputeEngine implements IComputeEngine {
   };
 
   /**
-   * The current scope.
+   * The current lexical scope.
    *
    * A **scope** stores the definition of symbols and assumptions.
    *
@@ -279,7 +279,28 @@ export class ComputeEngine implements IComputeEngine {
    * The `ce.context` property represents the current scope.
    *
    */
-  context: RuntimeScope | null;
+  context: Scope | null;
+
+  /**
+   * The stack of frames.
+   *
+   * A **frame** maps a symbol to a value.
+   *
+   */
+  frames: Frame[] = [];
+
+  /** Return a list of the function calls to the current frame */
+  get trace(): ReadonlyArray<string> {
+    return [...this._callStack];
+  }
+
+  /**
+   *
+   * The stack of function calls.
+   *
+   * @internal
+   */
+  _callStack: string[] = [];
 
   /**
    * Generation.
@@ -996,7 +1017,7 @@ export class ComputeEngine implements IComputeEngine {
   lookupSymbol(
     symbol: string,
     wikidata?: string,
-    scope?: RuntimeScope
+    scope?: Scope
   ): undefined | BoxedSymbolDefinition {
     // @fastpath
     if (!this.strict) {
@@ -1048,7 +1069,7 @@ export class ComputeEngine implements IComputeEngine {
    */
   lookupFunction(
     name: MathJsonIdentifier,
-    scope?: RuntimeScope | null
+    scope?: Scope | null
   ): undefined | BoxedFunctionDefinition {
     if (typeof name !== 'string') return undefined;
 
@@ -1162,7 +1183,7 @@ export class ComputeEngine implements IComputeEngine {
   }
 
   /** Set the current scope, return the previous scope. */
-  swapScope(scope: RuntimeScope | null): RuntimeScope | null {
+  swapScope(scope: Scope | null): Scope | null {
     const oldScope = this.context;
     if (scope) this.context = scope;
 
@@ -1172,9 +1193,9 @@ export class ComputeEngine implements IComputeEngine {
   /** @internal */
   _printScope(
     options?: { details?: boolean; maxDepth?: number },
-    scope?: RuntimeScope | null,
+    scope?: Scope | null,
     depth = 0
-  ): RuntimeScope | null {
+  ): Scope | null {
     options ??= { details: false, maxDepth: 1 };
     scope ??= this.context;
     if (!scope) return null;
@@ -1255,6 +1276,58 @@ export class ComputeEngine implements IComputeEngine {
         def.canonical = undefined;
       }
     }
+  }
+
+  pushFrame(frame: Frame, name?: string): void {
+    this.frames.push(frame);
+    if (name) this._callStack.push(name);
+    else this._callStack.push('anonymous');
+  }
+
+  popFrame(): void {
+    this.frames.pop();
+    this._callStack.pop();
+  }
+
+  /**
+   * Use `ce.box(name)` instead
+   * @internal */
+  getSymbolValue(id: string): BoxedExpression | undefined {
+    // Iterate over all the frames, starting with the most recent
+    // and going back to the root frame
+    const l = this.frames.length - 1;
+    if (l < 0) return undefined;
+    for (let j = l; j >= 0; j--) {
+      const frame = this.frames[j];
+      if (id in frame) return frame[id];
+    }
+    return undefined;
+  }
+
+  /**
+   * For internal use. Use `ce.assign(name, value)` instead.
+   * @internal */
+  setSymbolValue(
+    id: string,
+    value: BoxedExpression | boolean | number | undefined
+  ): void {
+    // Iterate over all the frames, starting with the most recent
+    // and going back to the root frame
+    const l = this.frames.length - 1;
+    if (l < 0) throw new Error(`Unknown symbol "${id}"`);
+    for (let j = l; j >= 0; j--) {
+      const frame = this.frames[j];
+      if (id in frame) {
+        if (typeof value === 'number') frame[id] = this.number(value);
+        else if (typeof value === 'boolean')
+          frame[id] = value ? this.True : this.False;
+        else frame[id] = value;
+        return;
+      }
+    }
+
+    // If we reach here, the symbol is not defined in any frame
+    throw new Error(`Unknown symbol "${id}"`);
   }
 
   /**

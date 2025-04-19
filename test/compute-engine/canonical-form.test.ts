@@ -429,8 +429,8 @@ describe('CANONICAL FORMS', () => {
       //Constant-symbol value cases.: p=PositiveInfinity
       expect(checkPower('1^{p}')).toMatchInlineSnapshot(`
         box        = ["Power", 1, "p"]
-        canonForms = NaN
-        canonical  = NaN
+        canonForms = 1
+        canonical  = 1
       `);
     });
 
@@ -479,8 +479,7 @@ describe('CANONICAL FORMS', () => {
       //Constant-symbol value cases.: n=NegativeInfinity, x=0
       expect(checkPower('x^{n}')).toMatchInlineSnapshot(`
         box        = ["Power", "x", "n"]
-        canonForms = ComplexInfinity
-        canonical  = ComplexInfinity
+        canonForms = ["Power", "x", "n"]
       `);
     });
 

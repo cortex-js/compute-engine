@@ -12,7 +12,7 @@ import type {
   CompiledExpression,
   EvaluateOptions,
   ComputeEngine,
-  RuntimeScope,
+  Scope,
   Sign,
 } from '../global-types';
 
@@ -60,7 +60,7 @@ const FUNCTION_DEF_KEYS = new Set([
 
 export class _BoxedFunctionDefinition implements BoxedFunctionDefinition {
   engine: ComputeEngine;
-  scope: RuntimeScope;
+  scope: Scope;
 
   name: string;
   description?: string | string[];

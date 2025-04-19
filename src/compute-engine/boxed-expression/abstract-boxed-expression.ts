@@ -13,7 +13,7 @@ import { BoxedType } from '../../common/type/boxed-type';
 import type {
   BoxedSubstitution,
   Metadata,
-  RuntimeScope,
+  Scope,
   Substitution,
   CanonicalOptions,
   BoxedRuleSet,
@@ -309,7 +309,7 @@ export abstract class _BoxedExpression implements BoxedExpression {
     return [this.engine._numericValue(1), this];
   }
 
-  get scope(): RuntimeScope | null {
+  get scope(): Scope | null {
     return null;
   }
 
@@ -646,6 +646,10 @@ export abstract class _BoxedExpression implements BoxedExpression {
 
   reset(): void {
     return;
+  }
+
+  get literalValue(): BoxedExpression | undefined {
+    return undefined;
   }
 
   get value(): number | boolean | string | undefined {

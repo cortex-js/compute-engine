@@ -6,7 +6,7 @@ import type {
   CollectionHandlers,
   ComputeEngine,
   NumericFlags,
-  RuntimeScope,
+  Scope,
   Sign,
 } from '../global-types';
 import { _BoxedExpression } from './abstract-boxed-expression';
@@ -54,7 +54,7 @@ export class _BoxedSymbolDefinition implements BoxedSymbolDefinition {
   url?: string;
 
   private _engine: ComputeEngine;
-  readonly scope: RuntimeScope | undefined;
+  readonly scope: Scope | undefined;
 
   // The defValue is the value as specified in the original definition.
   // It is used to update the actual value when the environment changes,

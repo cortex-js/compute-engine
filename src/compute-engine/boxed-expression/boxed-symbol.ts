@@ -12,7 +12,7 @@ import type {
   SimplifyOptions,
   PatternMatchOptions,
   ReplaceOptions,
-  RuntimeScope,
+  Scope,
   BoxedSymbolDefinition,
   BoxedFunctionDefinition,
   ComputeEngine,
@@ -94,7 +94,7 @@ import { BoxedType } from '../../common/type/boxed-type';
  *
  */
 export class BoxedSymbol extends _BoxedExpression {
-  private _scope: RuntimeScope | null;
+  private _scope: Scope | null;
   protected _id: string;
   private _hash: number | undefined;
 
@@ -166,7 +166,7 @@ export class BoxedSymbol extends _BoxedExpression {
     });
   }
 
-  get scope(): RuntimeScope | null {
+  get scope(): Scope | null {
     return this._scope;
   }
 
@@ -460,6 +460,24 @@ export class BoxedSymbol extends _BoxedExpression {
 
     // The type was not modified
     return false;
+  }
+
+  get literalValue(): BoxedExpression | undefined {
+    const def = this.symbolDefinition;
+    const v = def?.value;
+
+    // @todo: should check the frames to get the value...
+
+    if (v === undefined) return undefined;
+    // if (v.symbol === 'True') return this.engine.True;
+    // if (v.symbol === 'False') return this.engine.False;
+    // if (v.symbol === 'ImaginaryUnit') return this.engine.I;
+    // if (v.symbol === 'NaN') return this.engine.NaN;
+    // if (v.symbol === 'ComplexInfinity') return this.engine.ComplexInfinity;
+    // if (v.symbol === 'PositiveInfinity') return this.engine.PositiveInfinity;
+    // if (v.symbol === 'NegativeInfinity') return this.engine.NegativeInfinity;
+
+    return v;
   }
 
   get value(): number | boolean | string | undefined {
