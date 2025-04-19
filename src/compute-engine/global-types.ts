@@ -718,15 +718,6 @@ export interface BoxedExpression {
   ): BoxedSubstitution | null;
 
   /**
-   * Return `true` if this expression is a number literal, for example
-   * `2`, `3.14`, `1/2`, `√2` etc.
-   *
-   * This is equivalent to checking if `expr.numericValue` is not `null`.
-   *
-   * @category Numeric Expression
-   *
-   */
-  readonly isFinite: boolean | undefined;
 
   /**
    * If this is a Number or Symbol with a numeric value, and the numeric value is an **integer**,
@@ -1031,37 +1022,6 @@ export interface BoxedExpression {
    */
   readonly symbolDefinition: BoxedSymbolDefinition | undefined;
 
-  /** If `true`, the value of the expression never changes and evaluating it has
-   * no side-effects.
-   *
-   * If `false`, the value of the expression may change, if the
-   * value of other expression changes or for other reasons.
-   *
-   * If `expr.isPure` is `false`, `expr.value` is undefined. Call
-   * `expr.evaluate()` (or 'expr.N()') to determine the value of the
-   * expression instead.
-   *
-   * As an example, the `Random` function is not pure.
-   *
-   */
-  readonly isPure: boolean;
-
-  /**
-   * `True` if this expression's value remains constant.
-   *
-   * If *true* and a function, implies that it is *pure*, and also that all of its arguments are
-   * constant.
-   *
-   * Number literals, symbols with constant values, and numeric functions with constant
-   * subexpressions may all be considered *constant*, i.e.:
-   * - `2` is constant
-   * - `Pi` is constant
-   * - `["Add", "Pi", 2]` is constant
-   * - `x` is inconstant: unless declared with a constant value.
-   * - `["Add", "x", 2]` is either constant or inconstant, depending on whether `x` is constant.
-   */
-  readonly isConstant: boolean;
-
   /**
    * "Not a Number".
    *
@@ -1093,16 +1053,6 @@ export interface BoxedExpression {
    * @category Numeric Expression
    */
   readonly isFinite: boolean | undefined;
-
-  /**
-   * @category Numeric Expression
-   */
-  readonly isEven: boolean | undefined;
-
-  /**
-   * @category Numeric Expression
-   */
-  readonly isOdd: boolean | undefined;
 
   /**
    *
