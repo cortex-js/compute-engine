@@ -456,7 +456,9 @@ export interface BoxedExpression {
    *
    * A symbol has a `"Symbol"` operator.
    *
-   * A number has a `"Number"`, `"Real"`, `"Rational"` or `"Integer"` operator.
+   * A number has a `"Number"`, `"Real"`, `"Rational"` or `"Integer"` operator; amongst some others.
+   * Practically speaking, for fully canonical and valid expressions, all of these are likely to
+   * collapse to `"Number"`.
    *
    */
   readonly operator: string;
@@ -530,6 +532,42 @@ export interface BoxedExpression {
    */
   readonly op3: BoxedExpression;
 
+  /** If *true*, the value of the expression never changes (provided the state of the engine does not
+   * change), and evaluating it has no side-effects.
+   *
+   * If *false*, the value of the expression may differ for each request to it (see `evaluate()` or `N().valueOf()`).
+   *
+   * As an example, the `Random` function is not pure.
+   *
+   * A requirement for the definition of a pure function is that all of its arguments are pure too.
+   * Said differently, if this is a function, it must be a pure function *expression*, too.
+   *
+   * This expression being pure (and a function) does not guarantee that the returned value will be
+   * the same every time (i.e. that it is constant). To guarantee this, also check that `isConstant
+   * === true`.
+   *
+   * :::info[Note]
+   * Applicable to canonical and non-canonical expressions.
+   * :::
+   */
+  readonly isPure: boolean;
+
+  /**
+   * `True` if this expression's value remains constant.
+   *
+   * If *true* and a function, implies that it is *pure*, and also that all of its arguments are
+   * constant.
+   *
+   * Number literals, symbols with constant values, and numeric functions with constant
+   * subexpressions may all be considered *constant*, i.e.:
+   * - `2` is constant
+   * - `Pi` is constant
+   * - `["Add", "Pi", 2]` is constant
+   * - `x` is inconstant: unless declared with a constant flag.
+   * - `["Add", "x", 2]` is either constant or inconstant, depending on whether `x` is constant.
+   */
+  readonly isConstant: boolean;
+
   /**
    * Return the canonical form of this expression.
    *
@@ -545,6 +583,13 @@ export interface BoxedExpression {
    *
    * If this expression is already canonical, the value of canonical is
    * `this`.
+   *
+   * :::info[Note]
+   * 'Partially' canonical expressions, such as those produced through `CanonicalForm`, also yield
+   * an expression which is marked as 'canonical'. This means that, likewise for partially canonical
+   * expressions, the `canonical` property will return the self-same expression (& 'isCanonical'
+   * will also be true).
+   * :::
    *
    */
   get canonical(): BoxedExpression;
@@ -681,7 +726,28 @@ export interface BoxedExpression {
    * @category Numeric Expression
    *
    */
-  readonly isNumberLiteral: boolean;
+  readonly isFinite: boolean | undefined;
+
+  /**
+   * If this is a Number or Symbol with a numeric value, and the numeric value is an **integer**,
+   * return a `boolean`. For all other cases, return *undefined*.
+   *
+   * Since this necessitates consultation to this expression's value, triggers *binding* for
+   * symbols.
+   *
+   * @category Numeric Expression
+   */
+  readonly isEven: boolean | undefined;
+
+  /**
+   * If this is a Number or Symbol with a numeric value, and the numeric value is an **integer**,
+   * return a `boolean`. For all other cases, return *undefined*.
+   *
+   * *Note* that this triggers *binding* for symbols.
+   *
+   * @category Numeric Expression
+   */
+  readonly isOdd: boolean | undefined;
 
   /**
    * Return the value of this expression, if a number literal.
@@ -1139,23 +1205,18 @@ export interface BoxedExpression {
   /**
    * Return the value of the canonical form of this expression.
    *
-   * A pure expression always return the same value and has no side effects.
+   * A pure expression always returns the same value (provided that it remains constant / values of
+   * sub-expressions or symbols do not change), and has no side effects.
    * If `expr.isPure` is `true`, `expr.value` and `expr.evaluate()` are
    * synonyms.
    *
-   * For an impure expression, `expr.value` is undefined.
-   *
-   * Evaluating an impure expression may have some side effects, for
-   * example modifying the `ComputeEngine` environment, such as its set of
-   * assumptions.
-   *
-   * The result may be a rational number or the product of a rational number
-   * and the square root of an integer.
+   * Evaluating an impure expression may return a varying value, and may have some side effects such
+   * adjusting symbol assumptions.
    *
    * To perform approximate calculations, use `expr.N()` instead,
-   * or set `options.numericApproximation` to `true`.
+   * or call with `options.numericApproximation` to `true`.
    *
-   * The result of `expr.evaluate()` may be the same as `expr.simplify()`.
+   * It is possible that the result of `expr.evaluate()` may be the same as `expr.simplify()`.
    *
    * The result is in canonical form.
    *
@@ -1251,6 +1312,12 @@ export interface BoxedExpression {
    * expression.
    *
    * Otherwise, return `undefined`.
+   *
+   * :::info[Note]
+   * The expression's value may depend on the current state of the engine. For instance, if a
+   * non-constant symbol, the value is subject to change via value assignments and assumptions about
+   * its value. Also, for both numbers and symbols: the *representation* of the value may depend on
+   * the current engine precision.
    *
    */
   get value(): number | boolean | string | undefined;

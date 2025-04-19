@@ -110,7 +110,6 @@ export class _BoxedSymbolDefinition implements BoxedSymbolDefinition {
     return this.constant;
   }
 
-  /** The symbol was previously inferred, but now it has a declaration. Update the def accordingly (we can't replace defs, as other expressions may be referencing them) */
   update(def: SymbolDefinition): void {
     if (def.wikidata) this.wikidata = def.wikidata;
     if (def.description) this.description = def.description;

@@ -1,5 +1,11 @@
 ## [Unreleased]
 
+### ? ? ?
+
+- More consistency with BoxedSymbol properties causing symbol-binding: e.g.
+  `isFinite` and `isInfinity` cause binding, in a similar way to `isOdd`,
+  `isEven`.
+
 ### Breaking Changes
 
 - The `expr.value` property is now equivalent to `expr.valueOf()`. It was
@@ -7,11 +13,46 @@
   of the expression produced some unexpected results, for example when the
   expression was not pure.
 
+- `BoxedExpr.sgn` now returns _undefined_ for complex numbers, or symbols with a
+  complex-number value.
+
+-
+
 ### New Features and Improvements
 
 - Added a rule to solve the equation `a^x + b = 0`
 - The LaTeX parser now supports the `\placeholder[]{}`, `\phantom{}`,
   `\hphantom{}`, `\vphantom{}`, `\mathstrut`, `\strut` and `\smash{}` commands.
+
+- The range of recognized sign values, i.e. as returned from
+  `BoxedExpression.sgn` has been simplified (e.g. '...-infinity' and 'nan' have
+  been removed)
+
+- The Power canonical-form is less aggressive - only carrying-out ops. as listed
+  in doc. - is much more careful in its consideration of operand types &
+  values... (for example, typically, exponents are required to be _numbers_:
+  e.g. `x^1` will simplify, but `x^y` (where y===0), or `x^{1+0}`, will not)
+
+### Issues Resolved
+
+- Ensure expression LaTeX serialization is based on MathJSON generated with
+  matching 'pretty' formatting (or not), therefore resulting in LaTeX with less
+  prettification, where `prettify == false` (#daef87f)
+
+- Symbols declare with a `constant` flag are now not marked as 'inferred'
+
+- Some BoxedSymbols properties now more consistently return 'undefined', instead
+  of a 'boolean' (i.e. because the symbol is non-bound)
+
+- Some `expr.root()` computations
+
+- Canonical-forms
+  - Fixes the `Number` form
+  - Forms (at least, 'Number', 'Power') do not mistakenly _fully_ canonicalize
+    operands
+  - This (partial canonicalization) now substitutes symbols (constants) with a
+    `holdUntil` value of _never_ during/prior-to canonicalization (i.e. just
+    like for full canonicalization)
 
 ## 0.29.1 _2025-03-31_
 
