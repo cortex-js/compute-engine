@@ -509,8 +509,8 @@ describe('CANONICAL FORMS', () => {
       // p === +Infinity (& 'holdUntil: never')
       expect(checkPower('1^{p}')).toMatchInlineSnapshot(`
         box        = ["Power", 1, "p"]
-        canonForms = 1
-        canonical  = 1
+        canonForms = NaN
+        canonical  = NaN
       `);
     });
 
@@ -563,7 +563,8 @@ describe('CANONICAL FORMS', () => {
       //x=0, n=NegativeInfinity ('holdUntil: never'),
       expect(checkPower('x^{n}')).toMatchInlineSnapshot(`
         box        = ["Power", "x", "n"]
-        canonForms = ["Power", "x", "n"]
+        canonForms = ComplexInfinity
+        canonical  = ComplexInfinity
       `);
     });
 
