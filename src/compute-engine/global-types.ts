@@ -1063,6 +1063,10 @@ export interface BoxedExpression {
    *
    * :::info[Note]
    * Applicable to canonical and non-canonical expressions.
+   * 
+   * If this is a function, an empty substitution is given, and the computed value of `canonical`
+   * does not differ from that of this expr.: then a call this method is analagous to requesting a
+   * *clone*.
    * :::
    *
    */

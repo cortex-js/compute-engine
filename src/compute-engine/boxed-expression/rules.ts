@@ -703,6 +703,8 @@ export function applyRule(
       return subExpr.value;
     });
 
+    // At least one operand (directly or recursively) matched: but continue onwards to match against
+    // the top-level expr., test against any 'condition', et cetera.
     if (operandsMatched)
       expr = expr.engine.function(expr.operator, newOps, { canonical });
   }
@@ -728,7 +730,7 @@ export function applyRule(
   onBeforeMatch?.(rule, expr);
 
   const sub = match
-    ? expr.match(match, { substitution, ...options, useVariations })
+    ? expr.match(match, { substitution, useVariations, recursive: false })
     : {};
 
   // If the `expr` does not match the pattern, the rule doesn't apply
@@ -762,6 +764,7 @@ export function applyRule(
     }
   }
 
+  //@note: '.subs()' acts like an expr. 'clone' here (in case of an empty substitution)
   const result =
     typeof replace === 'function'
       ? replace(expr, sub)
