@@ -1,5 +1,6 @@
 import type { Expression } from '../../math-json/types';
 
+import { _BoxedExpression } from './abstract-boxed-expression';
 import type {
   BoxedRule,
   BoxedRuleSet,
@@ -353,7 +354,10 @@ function parseRulePart(
     );
     return expr;
   }
-  return ce.box(rule, { canonical: options?.canonical ?? false });
+  const canonical =
+    options?.canonical ??
+    (rule instanceof _BoxedExpression ? rule.isCanonical : false);
+  return ce.box(rule, { canonical });
 }
 
 /** A rule can be expressed as a string of the form
@@ -689,8 +693,7 @@ export function applyRule(
   substitution: BoxedSubstitution,
   options?: Readonly<Partial<ReplaceOptions>>
 ): RuleStep | null {
-  const canonical =
-    options?.canonical ?? (expr.isCanonical || expr.isStructural);
+  let canonical = options?.canonical ?? (expr.isCanonical || expr.isStructural);
 
   let operandsMatched = false;
 
@@ -705,8 +708,18 @@ export function applyRule(
 
     // At least one operand (directly or recursively) matched: but continue onwards to match against
     // the top-level expr., test against any 'condition', et cetera.
-    if (operandsMatched)
+    if (operandsMatched) {
+      // If new/replaced operands are all canonical, and options do not explicitly specify canonical
+      // status, then should be safe to mark as fully-canonical
+      if (
+        !canonical &&
+        options?.canonical === undefined &&
+        newOps.every((x) => x.isCanonical)
+      )
+        canonical = true;
+
       expr = expr.engine.function(expr.operator, newOps, { canonical });
+    }
   }
 
   // eslint-disable-next-line prefer-const
@@ -715,12 +728,11 @@ export function applyRule(
 
   if (canonical && match) {
     const awc = getWildcards(match);
-    const originalMatch = match;
-    match = match.canonical;
-    const bwc = getWildcards(match);
+    const canonicalMatch = match.canonical;
+    const bwc = getWildcards(canonicalMatch);
     if (!awc.every((x) => bwc.includes(x)))
       throw new Error(
-        `\n|   Invalid rule "${rule.id}"\n|   The canonical form of ${dewildcard(originalMatch).toString()} is "${dewildcard(match).toString()}" and it does not contain all the wildcards of the original match.\n|   This could indicate that the match expression in canonical form is already simplified and this rule may not be necessary`
+        `\n|   Invalid rule "${rule.id}"\n|   The canonical form of ${dewildcard(canonicalMatch).toString()} is "${dewildcard(match).toString()}" and it does not contain all the wildcards of the original match.\n|   This could indicate that the match expression in canonical form is already simplified and this rule may not be necessary`
       );
   }
 
@@ -764,6 +776,15 @@ export function applyRule(
     }
   }
 
+  // Have a (direct) match: in this case, consider the canonical-status of the replacement, too.
+  if (
+    !canonical &&
+    options?.canonical === undefined &&
+    replace instanceof _BoxedExpression &&
+    replace.isCanonical
+  )
+    canonical = true;
+
   //@note: '.subs()' acts like an expr. 'clone' here (in case of an empty substitution)
   const result =
     typeof replace === 'function'
@@ -778,6 +799,8 @@ export function applyRule(
   if (isRuleStep(result))
     return canonical ? { ...result, value: result.value.canonical } : result;
 
+  // (Need to request the canonical variant to account for case of a custom replace: which may not
+  // have returned canonical.)
   return { value: canonical ? result.canonical : result, because };
 }
 
@@ -786,7 +809,7 @@ export function applyRule(
  * and the set of rules that were applied.
  *
  * The `replace` function can be used to apply a rule to a non-canonical
- * expression. @fixme: account for options.canonical
+ * expression.
  *
  */
 export function replace(

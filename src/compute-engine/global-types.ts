@@ -1063,7 +1063,7 @@ export interface BoxedExpression {
    *
    * :::info[Note]
    * Applicable to canonical and non-canonical expressions.
-   * 
+   *
    * If this is a function, an empty substitution is given, and the computed value of `canonical`
    * does not differ from that of this expr.: then a call this method is analagous to requesting a
    * *clone*.
@@ -1107,8 +1107,18 @@ export interface BoxedExpression {
    *
    * See also `expr.subs()` for a simple substitution of symbols.
    *
-   * If `options.canonical` is not set, the result is canonical if `this`
-   * is canonical.
+   * Procedure for the determining the canonical-status of the input expression and replacements:
+   *
+   * - If `options.canonical` is set, the *entire expr.* is canonicalized to this degree: whether
+   * the replacement occurs at the top-level, or within/recursively.
+   *
+   * - If otherwise, the *direct replacement will be canonical* if either the 'replaced' expression
+   * is canonical, or the given replacement (- is a BoxedExpression and -) is canonical.
+   * Notably also, if this replacement takes place recursively (not at the top-level), then exprs.
+   * containing the replaced expr. will still however have their (previous) canonical-status
+   * *preserved*... unless this expr. was previously non-canonical, and *replacements have resulted
+   * in canonical operands*. In this case, an expr. meeting this criteria will be updated to
+   * canonical status. (Canonicalization is opportunistic here, in other words).
    *
    * :::info[Note]
    * Applicable to canonical and non-canonical expressions.
