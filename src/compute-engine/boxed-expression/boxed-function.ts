@@ -5,7 +5,7 @@ import type {
   PatternMatchOptions,
   BoxedExpression,
   BoxedBaseDefinition,
-  BoxedFunctionDefinition,
+  BoxedOperatorDefinition,
   BoxedRuleSet,
   BoxedSubstitution,
   CanonicalOptions,
@@ -13,10 +13,26 @@ import type {
   ComputeEngine,
   Metadata,
   Rule,
-  Scope,
   Sign,
   Substitution,
+  BoxedDefinition,
+  EvalContext,
+  Scope,
+  BoxedValueDefinition,
 } from '../global-types';
+
+import { isFiniteIndexedCollection, zip } from '../collection-utils';
+import { Type } from '../../common/type/types';
+import { BoxedType } from '../../common/type/boxed-type';
+import { parseType } from '../../common/type/parse';
+import { isSubtype } from '../../common/type/subtype';
+import {
+  functionResult,
+  isSignatureType,
+  narrow,
+  widen,
+} from '../../common/type/utils';
+import { NumericValue } from '../numeric-value/types';
 
 import { findUnivariateRoots } from './solve';
 import { replace } from './rules';
@@ -26,27 +42,18 @@ import { simplify } from './simplify';
 import { canonicalMultiply, mul, div } from './arithmetic-mul-div';
 import { add } from './arithmetic-add';
 import { pow } from './arithmetic-power';
-
 import { asSmallInteger } from './numerics';
-
-import { isFiniteIndexableCollection, zip } from '../collection-utils';
-
-import { NumericValue } from '../numeric-value/types';
-
 import { _BoxedExpression } from './abstract-boxed-expression';
 import { DEFAULT_COMPLEXITY, sortOperands } from './order';
-import { hashCode, normalizedUnknownsForSolve } from './utils';
+import {
+  hashCode,
+  isOperatorDef,
+  isValueDef,
+  normalizedUnknownsForSolve,
+} from './utils';
 import { match } from './match';
 import { factor } from './factor';
 import { holdMap, holdMapAsync } from './hold';
-import { Type } from '../../common/type/types';
-import { parseType } from '../../common/type/parse';
-import { isSubtype } from '../../common/type/subtype';
-import {
-  functionResult,
-  isSignatureType,
-  narrow,
-} from '../../common/type/utils';
 import {
   positiveSign,
   nonNegativeSign,
@@ -54,38 +61,46 @@ import {
   nonPositiveSign,
   sgn,
 } from './sgn';
-import { cachedValue, CachedValue, cachedValueAsync } from './cache';
-import { BoxedType } from '../../common/type/boxed-type';
+import { cachedValue, CachedValue } from './cache';
+import { apply, lookup } from '../function-utils';
+
+/** When `materialization` is true, display 10 items if the collection is
+ * infinite, otherwise 5 from the head and 5 from the tail
+ */
+const DEFAULT_MATERIALIZATION: [number, number] = [5, 5] as const;
 
 /**
- * A boxed function represent an expression that can be represented by a
- * function call.
+ * A boxed function expression represent an expression composed of an operator
+ * (the name of the function) and a list of arguments. For example:
+ * `["Add", 1, 2]` is a function expression with the operator "Add" and two
+ * arguments 1 and 2.
  *
- * It is composed of an operator (the name of the function) and a list of
- * arguments.
+ * If canonical, it has a definition associated with it, based on the operator.
  *
- * It has a definition associated with it, based on the operator.
- * The definition contains the signature of the function, and the
- * implementation of the function.
+ * The definition contains its signature and its evaluation handler.
  *
  */
 
 export class BoxedFunction extends _BoxedExpression {
-  // The name of the function
-  private readonly _name: string;
+  // The operator of the function expression
+  private readonly _operator: string;
 
-  // The operands of the function
+  // The operands of the function expression
   private readonly _ops: ReadonlyArray<BoxedExpression>;
 
-  // The canonical representation of this expression.
-  // If this expression is not canonical, this property is undefined.
-  private _canonical: BoxedExpression | undefined;
+  // Only canonical expressions have an associated def (are bound)
+  // If `null`, the expression is not bound, if `undefined`, the expression
+  // is bound but no definition was found.
+  private _def: BoxedDefinition | undefined | null;
 
-  // The scope in which this function was defined/boxed
-  private _scope: Scope | null;
+  /** @todo: wrong. If the function is scoped (has its own lexical scope), the captured eval context. This includes the lexical scope for this expression
+   */
+  private _capturedContext: ReadonlyArray<EvalContext> | undefined;
 
-  // Only canonical expressions have an associated def
-  _def: BoxedFunctionDefinition | undefined;
+  /** If the operator is scoped, the local scope associated with
+   * the function expression
+   */
+  private _localScope: Scope | undefined;
 
   private _isPure: boolean;
 
@@ -113,73 +128,73 @@ export class BoxedFunction extends _BoxedExpression {
 
   constructor(
     ce: ComputeEngine,
-    name: string,
+    operator: string,
     ops: ReadonlyArray<BoxedExpression>,
     options?: {
       metadata?: Metadata;
       canonical?: boolean;
       structural?: boolean;
+      scope?: Scope;
     }
   ) {
     super(ce, options?.metadata);
 
-    this._name = name;
+    this._operator = operator;
     this._ops = ops;
+    this._localScope = options?.scope;
+
     this._isStructural = options?.structural ?? false;
-
-    if (options?.canonical) this._canonical = this;
     if (options?.canonical || this._isStructural) this.bind();
-
-    ce._register(this);
   }
 
-  //
-  // NON-CANONICAL OR CANONICAL OPERATIONS
-  //
-  // Those operations/properties can be applied to a canonical or
-  // non-canonical expression
-  //
   get hash(): number {
     if (this._hash !== undefined) return this._hash;
 
     let h = 0;
     for (const op of this._ops) h = ((h << 1) ^ op.hash) | 0;
 
-    h = (h ^ hashCode(this._name)) | 0;
+    h = (h ^ hashCode(this._operator)) | 0;
     this._hash = h;
     return h;
   }
 
-  // For function expressions, `infer()` infers the result type of the function
-  infer(t: Type): boolean {
-    const def = this.functionDefinition;
-    if (!def) return false;
-
-    if (!def.inferredSignature) return false;
+  /**
+   * For function expressions, `infer()` infers the result type of the function
+   * based on the provided type and inference mode.
+   */
+  infer(t: Type, inferenceMode?: 'narrow' | 'widen'): boolean {
+    const def = this.operatorDefinition;
+    if (!def || !def.inferredSignature) return false;
 
     // If the signature was inferred, refine it by narrowing the result
     if (def.signature.is('function')) {
-      def.signature = new BoxedType({ kind: 'signature', result: t });
+      def.signature = new BoxedType(
+        { kind: 'signature', result: t },
+        this.engine._typeResolver
+      );
     } else if (isSignatureType(def.signature.type)) {
-      def.signature = new BoxedType({
-        kind: 'signature',
-        result: narrow(def.signature.type.result, t),
-      });
+      def.signature = new BoxedType(
+        {
+          kind: 'signature',
+          result:
+            inferenceMode === 'narrow'
+              ? narrow(def.signature.type.result, t)
+              : widen(def.signature.type.result, t),
+        },
+        this.engine._typeResolver
+      );
     }
 
-    this.engine.generation += 1;
+    this.engine._generation += 1;
 
     return true;
   }
 
   bind(): void {
-    // Unbind
-    this._def = undefined;
-
-    this._scope = this.engine.context;
-
-    this._def = this.engine.lookupFunction(this._name);
-    for (const op of this._ops) op.bind();
+    this._def = lookup(
+      this._operator,
+      this._localScope ?? this.engine.context.lexicalScope
+    );
   }
 
   reset(): void {
@@ -187,21 +202,21 @@ export class BoxedFunction extends _BoxedExpression {
     // this._def = null;
   }
 
-  get isCanonical(): boolean {
-    return this._canonical === this;
+  get value(): BoxedExpression | undefined {
+    return undefined;
   }
 
-  set isCanonical(val: boolean) {
-    this._canonical = val ? this : undefined;
+  get isCanonical(): boolean {
+    return this._def !== undefined && this._def !== null;
   }
 
   get isPure(): boolean {
     if (this._isPure !== undefined) return this._isPure;
-    if (this.isCanonical === false) return this.canonical.isPure;
 
-    let pure = this.functionDefinition?.pure ?? false;
+    let pure = this.operatorDefinition?.pure ?? false;
 
-    // The function might be pure. Let's check that all its arguments are pure.
+    // The function expression might be pure. Let's check that all its
+    // arguments are pure.
     if (pure) pure = this._ops.every((x) => x.isPure);
 
     this._isPure = pure;
@@ -209,8 +224,7 @@ export class BoxedFunction extends _BoxedExpression {
   }
 
   get isConstant(): boolean {
-    if (!this.isPure) return false;
-    return this._ops.every((x) => x.isConstant);
+    return this.isPure && this._ops.every((x) => x.isConstant);
   }
 
   get constantValue(): number | boolean | string | object | undefined {
@@ -218,15 +232,11 @@ export class BoxedFunction extends _BoxedExpression {
   }
 
   get json(): Expression {
-    return [this._name, ...this.structural.ops!.map((x) => x.json)];
-  }
-
-  get scope(): Scope | null {
-    return this._scope;
+    return [this._operator, ...this.structural.ops!.map((x) => x.json)];
   }
 
   get operator(): string {
-    return this._name;
+    return this._operator;
   }
 
   get ops(): ReadonlyArray<BoxedExpression> {
@@ -247,23 +257,30 @@ export class BoxedFunction extends _BoxedExpression {
     return this._ops[2] ?? this.engine.Nothing;
   }
 
+  get isScoped(): boolean {
+    return this._localScope !== undefined;
+  }
+  get localScope(): Scope | undefined {
+    return this._localScope;
+  }
+
   get isValid(): boolean {
-    if (this._name === 'Error') return false;
+    if (this._operator === 'Error') return false;
 
     return this._ops.every((x) => x?.isValid);
   }
 
+  /** Note: if the expression is not canonical, this will return a canonical
+   * version of the expression in the current lexical scope.
+   */
   get canonical(): BoxedExpression {
-    this._canonical ??= this.isValid
-      ? this.engine.function(this._name, this._ops)
-      : this;
-
-    return this._canonical;
+    if (this.isCanonical || !this.isValid) return this;
+    return this.engine.function(this._operator, this._ops);
   }
 
   get structural(): BoxedExpression {
     if (this.isStructural) return this;
-    const def = this.functionDefinition;
+    const def = this.operatorDefinition;
     if (def?.associative || def?.commutative) {
       // Flatten the arguments if they are the same as the operator
       const xs: BoxedExpression[] = this.ops.map((x) => x.structural);
@@ -276,8 +293,8 @@ export class BoxedFunction extends _BoxedExpression {
         }
       }
       return this.engine.function(
-        this._name,
-        this.isValid ? sortOperands(this._name, ys) : ys,
+        this._operator,
+        this.isValid ? sortOperands(this._operator, ys) : ys,
         {
           canonical: false,
           structural: true,
@@ -285,7 +302,7 @@ export class BoxedFunction extends _BoxedExpression {
       );
     }
     return this.engine.function(
-      this._name,
+      this._operator,
       this.ops.map((x) => x.structural),
       { canonical: false, structural: true }
     );
@@ -426,18 +443,25 @@ export class BoxedFunction extends _BoxedExpression {
     return [ce._numericValue(1), expr];
   }
 
-  // Note: the resulting expression is bound to the current scope, not
-  // the scope of the original expression.
+  /**
+   * Note: the result is bound to the current scope, not the scope of the
+   * original expression.
+   * <!-- This may or may not be desirable -->
+   */
   subs(
     sub: Substitution,
     options?: { canonical?: CanonicalOptions }
   ): BoxedExpression {
+    options ??= { canonical: undefined };
+    if (options.canonical === undefined)
+      options = { canonical: this.isCanonical };
+
     const ops = this._ops.map((x) => x.subs(sub, options));
 
     if (!ops.every((x) => x.isValid))
-      return this.engine.function(this._name, ops, { canonical: false });
+      return this.engine.function(this._operator, ops, { canonical: false });
 
-    return this.engine.function(this._name, ops, options);
+    return this.engine.function(this._operator, ops, options);
   }
 
   replace(
@@ -457,8 +481,8 @@ export class BoxedFunction extends _BoxedExpression {
   has(v: string | string[]): boolean {
     // Does the operator name match?
     if (typeof v === 'string') {
-      if (this._name === v) return true;
-    } else if (v.includes(this._name)) return true;
+      if (this._operator === v) return true;
+    } else if (v.includes(this._operator)) return true;
 
     // Do any of the operands match?
     return this._ops.some((x) => x.has(v));
@@ -468,7 +492,7 @@ export class BoxedFunction extends _BoxedExpression {
     const gen =
       this.isPure && this._ops.every((x) => x.isConstant)
         ? undefined
-        : this.engine.generation;
+        : this.engine._generation;
     return cachedValue(this._sgn, gen, () => {
       if (!this.isValid || this.isNumber !== true) return undefined;
       return sgn(this);
@@ -533,7 +557,7 @@ export class BoxedFunction extends _BoxedExpression {
   }
 
   get numeratorDenominator(): [BoxedExpression, BoxedExpression] {
-    if (!this.isCanonical) return this.canonical.numeratorDenominator;
+    if (!this.isCanonical) return [this, this.engine.One];
     if (this.isNumber !== true)
       return [this.engine.Nothing, this.engine.Nothing];
 
@@ -585,11 +609,12 @@ export class BoxedFunction extends _BoxedExpression {
   //
 
   neg(): BoxedExpression {
-    return negate(this.canonical);
+    if (!this.isCanonical) throw new Error('Not canonical');
+    return negate(this);
   }
 
   inv(): BoxedExpression {
-    if (!this.isCanonical) return this.canonical.inv();
+    if (!this.isCanonical) throw new Error('Not canonical');
     if (this.isOne) return this;
     if (this.isNegativeOne) return this;
 
@@ -609,11 +634,11 @@ export class BoxedFunction extends _BoxedExpression {
     if (this.operator === 'Rational') return this.op2.div(this.op1);
     if (this.operator === 'Negate') return this.op1.inv().neg();
 
-    return this.engine._fn('Divide', [this.engine.One, this.canonical]);
+    return this.engine._fn('Divide', [this.engine.One, this]);
   }
 
   abs(): BoxedExpression {
-    if (!this.isCanonical) return this.canonical.abs();
+    if (!this.isCanonical) throw new Error('Not canonical');
     if (this.operator === 'Abs' || this.operator === 'Negate') return this;
     if (this.isNonNegative) return this;
     if (this.isNonPositive) return this.neg();
@@ -622,24 +647,27 @@ export class BoxedFunction extends _BoxedExpression {
 
   add(rhs: number | BoxedExpression): BoxedExpression {
     if (rhs === 0) return this;
-    return add(this.canonical, this.engine.box(rhs));
+    if (!this.isCanonical) throw new Error('Not canonical');
+    return add(this, this.engine.box(rhs));
   }
 
   mul(rhs: NumericValue | number | BoxedExpression): BoxedExpression {
+    if (!this.isCanonical) throw new Error('Not canonical');
     if (rhs === 0) return this.engine.Zero;
     if (rhs === 1) return this;
     if (rhs === -1) return this.neg();
 
     if (rhs instanceof NumericValue) {
       if (rhs.isZero) return this.engine.Zero;
-      if (rhs.isOne) return this.canonical;
+      if (rhs.isOne) return this;
       if (rhs.isNegativeOne) return this.neg();
     }
 
-    return mul(this.canonical, this.engine.box(rhs));
+    return mul(this, this.engine.box(rhs));
   }
 
   div(rhs: number | BoxedExpression): BoxedExpression {
+    if (!this.isCanonical) throw new Error('Not canonical');
     return div(this, rhs);
   }
 
@@ -648,9 +676,8 @@ export class BoxedFunction extends _BoxedExpression {
   }
 
   root(exp: number | BoxedExpression): BoxedExpression {
-    if (!this.isCanonical) return this.canonical.root(exp);
-
-    if (typeof exp !== 'number') exp = exp.canonical;
+    if (!this.isCanonical || (typeof exp !== 'number' && !exp.isCanonical))
+      throw new Error('Not canonical');
 
     const e = typeof exp === 'number' ? exp : exp.im === 0 ? exp.re : undefined;
 
@@ -724,7 +751,7 @@ export class BoxedFunction extends _BoxedExpression {
 
   ln(semiBase?: number | BoxedExpression): BoxedExpression {
     const base = semiBase ? this.engine.box(semiBase) : undefined;
-    if (!this.isCanonical) return this.canonical.ln(base);
+    if (!this.isCanonical) throw new Error('Not canonical');
 
     // Mathematica returns `Log[0]` as `-∞`
     if (this.is(0)) return this.engine.NegativeInfinity;
@@ -767,51 +794,48 @@ export class BoxedFunction extends _BoxedExpression {
     return this.engine._fn('Ln', [this]);
   }
 
-  //
-  // CANONICAL OPERATIONS
-  //
-  // These operations apply only to canonical expressions
-  //
-
   get complexity(): number | undefined {
     // Since the canonical and non-canonical version of the expression
     // may have different heads, not applicable to non-canonical expressions.
     if (!this.isCanonical) return undefined;
-    return this.functionDefinition?.complexity ?? DEFAULT_COMPLEXITY;
+    return this.operatorDefinition?.complexity ?? DEFAULT_COMPLEXITY;
   }
 
   get baseDefinition(): BoxedBaseDefinition | undefined {
-    return this._def;
+    if (!this._def) return undefined;
+    return isOperatorDef(this._def) ? this._def.operator : this._def.value;
   }
 
-  get functionDefinition(): BoxedFunctionDefinition | undefined {
-    return this._def;
+  get operatorDefinition(): BoxedOperatorDefinition | undefined {
+    if (!this._def) return undefined;
+    return isOperatorDef(this._def) ? this._def.operator : undefined;
+  }
+
+  get valueDefinition(): BoxedValueDefinition | undefined {
+    if (!this._def) return undefined;
+    return isValueDef(this._def) ? this._def.value : undefined;
   }
 
   get isNumber(): boolean | undefined {
-    const t = this.type.type;
-    if (t === 'unknown') return undefined;
-    return isSubtype(t, 'number');
+    if (this.type.isUnknown) return undefined;
+    return isSubtype(this.type.type, 'number');
   }
 
   get isInteger(): boolean | undefined {
-    const t = this.type.type;
-    if (t === 'unknown') return undefined;
-    return isSubtype(t, 'integer');
+    if (this.type.isUnknown) return undefined;
+    return isSubtype(this.type.type, 'integer');
   }
 
   get isRational(): boolean | undefined {
-    const t = this.type.type;
-    if (t === 'unknown') return undefined;
+    if (this.type.isUnknown) return undefined;
     // integers are rationals
-    return isSubtype(t, 'rational');
+    return isSubtype(this.type.type, 'rational');
   }
 
   get isReal(): boolean | undefined {
-    const t = this.type.type;
-    if (t === 'unknown') return undefined;
+    if (this.type.isUnknown) return undefined;
     // rationals and integers are real
-    return isSubtype(t, 'real');
+    return isSubtype(this.type.type, 'real');
   }
 
   get isFunctionExpression(): boolean {
@@ -823,12 +847,13 @@ export class BoxedFunction extends _BoxedExpression {
     const gen =
       this.isPure && this._ops.every((x) => x.isConstant)
         ? undefined
-        : this.engine.generation;
+        : this.engine._generation;
     return (
-      cachedValue(this._type, gen, () => {
-        const t = type(this);
-        return t ? new BoxedType(t) : undefined;
-      }) ?? BoxedType.unknown
+      cachedValue(
+        this._type,
+        gen,
+        () => new BoxedType(type(this), this.engine._typeResolver)
+      ) ?? BoxedType.unknown
     );
   }
 
@@ -837,22 +862,11 @@ export class BoxedFunction extends _BoxedExpression {
   }
 
   evaluate(options?: Partial<EvaluateOptions>): BoxedExpression {
-    // If this function is not pure, then bypass caching (i.e. saved as this._value, this._valueN):
-    // since the result potentially could differ for each computation)
-    // if (!this.isPure) return this._computeValue(options)();
-    return cachedValue(
-      options?.numericApproximation ? this._valueN : this._value,
-      this.engine.generation,
-      withDeadline(this.engine, this._computeValue(options))
-    );
+    return withDeadline(this.engine, this._computeValue(options))();
   }
 
   evaluateAsync(options?: Partial<EvaluateOptions>): Promise<BoxedExpression> {
-    return cachedValueAsync(
-      options?.numericApproximation ? this._valueN : this._value,
-      this.engine.generation,
-      withDeadlineAsync(this.engine, this._computeValueAsync(options))
-    );
+    return withDeadlineAsync(this.engine, this._computeValueAsync(options))();
   }
 
   N(): BoxedExpression {
@@ -872,97 +886,133 @@ export class BoxedFunction extends _BoxedExpression {
   }
 
   get isCollection(): boolean {
-    const def = this.functionDefinition;
+    if (!this.isValid) return false;
+    const def = this.baseDefinition?.collection;
+
+    // A collection has at least a count handler and an iterator
+    console.assert(
+      !def || (def.count !== undefined && def.iterator !== undefined)
+    );
+
+    return def !== undefined;
+  }
+
+  get isIndexedCollection(): boolean {
+    if (!this.isValid) return false;
+    const def = this.baseDefinition?.collection;
+
+    // If there is no `at` handler, it is definitely not indexed
+    if (!def?.at) return false;
+
+    // If there is an `at` handler, it _may_ be indexed.
+    // We check the actual result type, e.g. Map has an at handler
+    // (to access its keys), but can be indexed or not, depending on the
+    // input collection
+
+    return this.type.matches('indexed_collection');
+  }
+
+  get isLazyCollection(): boolean {
+    if (!this.isValid) return false;
+    const def = this.baseDefinition?.collection;
     if (!def) return false;
-    // A collection has at least a contains handler or a size handler
-    return (
-      def.collection?.contains !== undefined ||
-      def.collection?.size !== undefined
-    );
+    return def?.isLazy?.(this) ?? false;
   }
 
-  contains(rhs: BoxedExpression): boolean {
-    return this.functionDefinition?.collection?.contains?.(this, rhs) ?? false;
+  xcontains(rhs: BoxedExpression): boolean | undefined {
+    return this.baseDefinition?.collection?.contains?.(this, rhs);
   }
 
-  get size(): number {
-    return this.functionDefinition?.collection?.size?.(this) ?? 0;
+  get xsize(): number | undefined {
+    return this.operatorDefinition?.collection?.count?.(this);
   }
 
-  each(start?: number, count?: number): Iterator<BoxedExpression, undefined> {
-    const iter = this.functionDefinition?.collection?.iterator?.(
-      this,
-      start,
-      count
-    );
-    if (!iter)
-      return {
-        next() {
-          return { done: true, value: undefined };
-        },
-      };
-    return iter;
+  get isEmptyCollection(): boolean | undefined {
+    if (!this.isCollection) return undefined;
+    return this.operatorDefinition?.collection?.isEmpty?.(this);
+  }
+
+  get isFiniteCollection(): boolean | undefined {
+    if (!this.isCollection) return undefined;
+    return this.operatorDefinition?.collection?.isFinite?.(this);
+  }
+
+  each(): Generator<BoxedExpression> {
+    const iter = this.operatorDefinition?.collection?.iterator?.(this);
+
+    // Return an empty generator if no iterator is defined
+    if (!iter) return (function* () {})();
+
+    return (function* () {
+      let result = iter.next();
+      let i = 0;
+      while (!result.done) {
+        i += 1;
+        //     if (i++ > limit)
+        //       throw new CancellationError({ cause: 'iteration-limit-exceeded' });
+        yield result.value;
+        result = iter.next();
+      }
+    })();
   }
 
   at(index: number): BoxedExpression | undefined {
-    return this.functionDefinition?.collection?.at?.(this, index);
+    return this.operatorDefinition?.collection?.at?.(this, index);
   }
 
   get(index: BoxedExpression | string): BoxedExpression | undefined {
     if (typeof index === 'string')
-      return this.functionDefinition?.collection?.at?.(this, index);
+      return this.operatorDefinition?.collection?.at?.(this, index);
 
     if (!index.string) return undefined;
-    return this.functionDefinition?.collection?.at?.(this, index.string);
+    return this.operatorDefinition?.collection?.at?.(this, index.string);
   }
 
-  indexOf(expr: BoxedExpression): number {
-    return this.functionDefinition?.collection?.indexOf?.(this, expr) ?? -1;
+  indexWhere(
+    predicate: (element: BoxedExpression) => boolean
+  ): number | undefined {
+    if (this.operatorDefinition?.collection?.indexWhere)
+      return this.operatorDefinition.collection.indexWhere(this, predicate);
+    if (!this.isIndexedCollection) return undefined;
+    if (!this.isFiniteCollection) return undefined;
+    let i = 0;
+    for (const x of this.each()) {
+      if (predicate(x)) return i;
+      i += 1;
+    }
+    return undefined;
   }
 
   subsetOf(rhs: BoxedExpression, strict: boolean): boolean {
     return (
-      this.functionDefinition?.collection?.subsetOf?.(this, rhs, strict) ??
+      this.operatorDefinition?.collection?.subsetOf?.(this, rhs, strict) ??
       false
     );
   }
+
   _computeValue(options?: Partial<EvaluateOptions>): () => BoxedExpression {
     return () => {
-      if (!this.isValid) return this;
-
-      //
-      // 1/ Use the canonical form
-      //
+      if (!this.isValid || !this._def) return this;
 
       const numericApproximation = options?.numericApproximation ?? false;
 
-      //
-      // Transform N(Integrate) into NIntegrate(), etc...
-      //
-      if (numericApproximation) {
-        const h = this.operator;
-        if (h === 'Integrate' || h === 'Limit')
-          return this.engine
-            .box(['N', this], { canonical: true })
-            .evaluate(options);
-      }
-
-      if (!this.isCanonical) {
-        this.engine.pushScope();
-        const canonical = this.canonical;
-        this.engine.popScope();
-        if (!canonical.isCanonical || !canonical.isValid) return this;
-        return canonical.evaluate(options);
-      }
-
-      const def = this.functionDefinition;
+      const materialization = options?.materialization ?? false;
 
       //
-      // 2/ Thread if applicable
+      // 1/ Check if the operator is a function literal
+      //
+
+      if (isValueDef(this._def))
+        return applyFunctionLiteral(this, this._def.value, options);
+
+      const def = this._def.operator;
+
+      //
+      // 2/ Broadcast if applicable
       //
       if (
-        def?.threadable &&
-        this.ops!.some((x) => isFiniteIndexableCollection(x))
+        def.broadcastable &&
+        this.ops!.some((x) => isFiniteIndexedCollection(x))
       ) {
         const items = zip(this._ops);
         if (!items) return this.engine.Nothing;
@@ -980,28 +1030,47 @@ export class BoxedFunction extends _BoxedExpression {
       }
 
       //
-      // 3/ Evaluate the applicable operands
+      // 3/ Handle evaluation of lazy collections
+      //
+      if (materialization !== false && !def.evaluate && this.isLazyCollection)
+        return materialize(this, def, options);
+
+      //
+      // 4/ Evaluate the applicable operands in the current scope
       //
       const tail = holdMap(this, (x) => x.evaluate(options));
 
       //
-      // 4/ Call the `evaluate` handler
+      // 5/ Create a scope if needed
       //
-      if (def) {
-        const engine = this.engine;
-        const context = engine.swapScope(this.scope);
+      const isScoped = this._localScope !== undefined || options?.withArguments;
 
-        const evaluateFn = def.evaluate?.(tail, {
-          numericApproximation,
-          engine,
-        });
-
-        engine.swapScope(context);
-
-        return evaluateFn ?? this.engine.function(this._name, tail);
+      if (isScoped) {
+        this.engine._pushEvalContext(
+          this._localScope ?? {
+            parent: this.engine.context?.lexicalScope,
+            bindings: new Map(),
+          }
+        );
+        // Set the named arguments as local variables
+        if (options?.withArguments) {
+          for (const [k, v] of Object.entries(options.withArguments))
+            this.engine.context.values[k] = v;
+        }
       }
 
-      return this.engine.function(this._name, tail);
+      //
+      // 6/ Call the `evaluate` handler
+      //
+      const evalResult = def.evaluate?.(tail, {
+        numericApproximation,
+        engine: this.engine,
+        materialization: materialization,
+      });
+      if (isScoped) this.engine._popEvalContext();
+
+      // Fallback to a symbolic result if we could not evaluate
+      return evalResult ?? this.engine.function(this._operator, tail);
     };
   }
 
@@ -1009,40 +1078,25 @@ export class BoxedFunction extends _BoxedExpression {
     options?: Partial<EvaluateOptions>
   ): () => Promise<BoxedExpression> {
     return async () => {
-      //
-      // 1/ Use the canonical form
-      //
-      if (!this.isValid) return this;
+      if (!this.isValid || !this._def) return this;
 
       const numericApproximation = options?.numericApproximation ?? false;
 
-      if (numericApproximation) {
-        const h = this.operator;
+      //
+      // 1/ Check if the operator is a function literal
+      //
 
-        //
-        // Transform N(Integrate) into NIntegrate(), etc...
-        //
-        if (h === 'Integrate' || h === 'Limit')
-          this.engine
-            .box(['N', this], { canonical: true })
-            .evaluateAsync(options);
-      }
-      if (!this.isCanonical) {
-        this.engine.pushScope();
-        const canonical = this.canonical;
-        this.engine.popScope();
-        if (!canonical.isCanonical || !canonical.isValid) return this;
-        return canonical.evaluateAsync(options);
-      }
+      if (isValueDef(this._def))
+        return applyFunctionLiteral(this, this._def.value, options);
 
-      const def = this.functionDefinition;
+      const def = this._def.operator;
 
       //
-      // 2/ Thread if applicable
+      // 2/ Broadcast if applicable
       //
       if (
-        def?.threadable &&
-        this.ops!.some((x) => isFiniteIndexableCollection(x))
+        def?.broadcastable &&
+        this.ops!.some((x) => isFiniteIndexedCollection(x))
       ) {
         const items = zip(this._ops);
         if (!items) return this.engine.Nothing;
@@ -1075,31 +1129,50 @@ export class BoxedFunction extends _BoxedExpression {
         async (x) => await x.evaluateAsync(options)
       );
 
+      // 4/ Create a scope if needed
       //
-      // 4/ Call the `evaluate` handler
-      //
-      if (def) {
-        const engine = this.engine;
-        const context = engine.swapScope(this.scope);
+      const isScoped = this._localScope !== undefined || options?.withArguments;
 
-        const opts = { numericApproximation, engine, signal: options?.signal };
-        const evaluateFn =
-          def.evaluateAsync?.(tail, opts) ?? def.evaluate?.(tail, opts);
-
-        engine.swapScope(context);
-
-        return Promise.resolve(evaluateFn).then(
-          (result) => result ?? this.engine.function(this._name, tail)
+      if (isScoped) {
+        this.engine._pushEvalContext(
+          this._localScope ?? {
+            parent: this.engine.context?.lexicalScope,
+            bindings: new Map(),
+          }
         );
+        // Set the named arguments as local variables
+        if (options?.withArguments) {
+          for (const [k, v] of Object.entries(options.withArguments))
+            this.engine.context.values[k] = v;
+        }
       }
 
-      return Promise.resolve(this.engine.function(this._name, tail));
+      //
+      // 5/ Call the `evaluate` handler
+      //
+      const engine = this.engine;
+
+      const opts = {
+        numericApproximation,
+        engine,
+        signal: options?.signal,
+        eager: options?.materialization,
+      };
+      const evaluateFn =
+        def.evaluateAsync?.(tail, opts) ?? def.evaluate?.(tail, opts);
+
+      if (isScoped) this.engine._popEvalContext();
+
+      return Promise.resolve(evaluateFn).then(
+        (result) => result ?? engine.function(this._operator, tail)
+      );
     };
   }
 }
 
-/** Return the type of the value of the expression */
-function type(expr: BoxedFunction): Type | undefined {
+/** Return the type of the value of the expression, without actually
+ * evaluating it */
+function type(expr: BoxedFunction): Type {
   if (!expr.isValid) return 'error';
 
   // Is this a 'Function' expression?
@@ -1108,17 +1181,20 @@ function type(expr: BoxedFunction): Type | undefined {
     const body = expr.ops[0];
     const bodyType = body.type;
     const args = expr.ops.slice(1);
-    return parseType(`(${args.map((x) => 'any').join(', ')}) -> ${bodyType}`);
+    return parseType(
+      `(${args.map((_) => 'unknown').join(', ')}) -> ${bodyType}`,
+      expr.engine._typeResolver
+    );
   }
 
   // Is there a definition associated with the operator of the function?
-  const def = expr.functionDefinition;
+  const def = expr.operatorDefinition;
   if (def) {
     const sig =
       def.signature instanceof BoxedType
         ? def.signature.type
         : typeof def.signature === 'string'
-          ? parseType(def.signature)
+          ? parseType(def.signature, expr.engine._typeResolver)
           : def.signature;
 
     let sigResult = functionResult(sig) ?? 'unknown';
@@ -1129,14 +1205,24 @@ function type(expr: BoxedFunction): Type | undefined {
       if (calculatedType) {
         if (calculatedType instanceof BoxedType)
           sigResult = calculatedType.type;
-        else sigResult = parseType(calculatedType) ?? sigResult;
+        else
+          sigResult =
+            parseType(calculatedType, expr.engine._typeResolver) ?? sigResult;
       }
     }
 
     return sigResult;
   }
 
-  return 'function';
+  // Is this a function literal?
+  // e.g. f := (x) -> x + 1
+  if (expr.valueDefinition)
+    return functionResult(expr.valueDefinition.type.type) ?? 'unknown';
+
+  // We want to return the result of evaluating the function, so since
+  // we don't know (somehow?) we return 'unknown', not 'function', which
+  // is the type of the function itself, not of its result.
+  return 'unknown';
 }
 
 function withDeadline<T>(engine: ComputeEngine, fn: () => T): () => T {
@@ -1172,4 +1258,135 @@ function withDeadlineAsync<T>(
 
     return fn();
   };
+}
+
+function applyFunctionLiteral(
+  expr: BoxedFunction,
+  def: BoxedValueDefinition,
+  options?: Partial<EvaluateOptions>
+): BoxedExpression {
+  const value = def.isConstant
+    ? def.value
+    : expr.engine._getSymbolValue(expr.operator);
+
+  if (value && !value.type.matches('function')) {
+    if (!value.isValid) return expr;
+    return expr.engine.typeError('function', value.type, value.toString());
+  }
+
+  const ops = expr.ops.map((x) => x.evaluate(options));
+  if (!value || value.type.isUnknown)
+    return expr.engine.function(expr.operator, ops);
+
+  // The value is a function literal. Apply the arguments to it
+  return apply(value, ops);
+}
+
+/**  Eagerly evaluate xs by iterating over its elements.
+ *
+ * If eager is true, evaluate DEFAULT_MATERIALIZATION elements.
+ *
+ * If eager is a number, evaluate that many elements, half in the head and
+ * half in the tail.
+ *
+ * If eager is a tuple [head, tail], evaluate that many elements in the head and
+ * that many elements in the tail.
+ */
+function materialize(
+  expr: BoxedFunction,
+  def: BoxedOperatorDefinition,
+  options?: Partial<EvaluateOptions>
+): BoxedExpression {
+  if (!expr.isValid || options?.materialization === false) return expr;
+
+  let materialization = options?.materialization ?? false;
+  if (typeof materialization === 'boolean')
+    materialization = DEFAULT_MATERIALIZATION;
+
+  const isIndexed = expr.isIndexedCollection;
+  const isFinite = expr.isFiniteCollection;
+
+  const xs: BoxedExpression[] = [];
+
+  if (!expr.isEmptyCollection) {
+    if (!isIndexed || !isFinite) {
+      //
+      // If we're not indexed, or not finite, we can only materialize the head
+      //
+      const last =
+        typeof materialization === 'number'
+          ? materialization
+          : materialization[0];
+      const iter = expr.each();
+      for (const x of iter) {
+        if (xs.length === last) {
+          // If we have more elements, add a ContinuationPlaceholder
+          if (!iter.next().done)
+            xs.push(expr.engine.symbol('ContinuationPlaceholder'));
+          break;
+        }
+        xs.push(x.evaluate(options));
+      }
+    } else {
+      //
+      // We are indexed and finite, so we can materialize the head and tail
+      //
+      const [headSize, tailSize]: [number, number] =
+        typeof materialization === 'number'
+          ? [
+              Math.ceil(materialization / 2),
+              materialization - Math.ceil(materialization / 2),
+            ]
+          : materialization;
+
+      // Materialize the head
+      let i = 1;
+      const iter = expr.each();
+      for (const x of iter) {
+        xs.push(x.evaluate(options));
+        i += 1;
+        if (i > headSize) break;
+      }
+
+      const count = expr.xsize;
+      if (count === undefined || count <= headSize) {
+        // If the collection is smaller than the head, we don't need to evaluate the tail
+        if (count === undefined || xs.length < count)
+          xs.push(expr.engine.symbol('ContinuationPlaceholder'));
+      } else {
+        // Materialize the tail
+        // Ensure tail doesn't overlap with head and add ContinuationPlaceholder if needed
+        const tailStartIndex = Math.max(headSize + 1, count - tailSize + 1);
+
+        // Add ContinuationPlaceholder if there's a gap between head and tail
+        if (count > headSize + tailSize) {
+          xs.push(expr.engine.symbol('ContinuationPlaceholder'));
+        }
+
+        i = tailStartIndex;
+        while (i <= count) {
+          const x = expr.at(i);
+          if (!x) break;
+          xs.push(x.evaluate(options));
+          i += 1;
+        }
+      }
+    }
+  }
+
+  //
+  // Convert to a List, Set or Dictionary depending on the type of
+  // the collection.
+  //
+
+  const elttype = def.collection?.elttype?.(expr);
+  if (elttype && isSubtype(elttype, 'tuple<string, any>')) {
+    // If the collection is a collection of key-value pairs,
+    // we convert it to a Dictionary
+    return expr.engine.function('Dictionary', xs);
+  }
+
+  if (isIndexed) return expr.engine._fn('List', xs);
+
+  return expr.engine.function('Set', [...xs]);
 }

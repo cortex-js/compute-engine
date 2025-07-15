@@ -12,7 +12,7 @@
  *    - a symbolic expression, such as `["Add", "x", 1]`
  *    - `<value>`
  *    - `symbol`: a symbol, such as `x`.
- *    - `function`: a function expression
+ *    - `function`: a function literal
  *      such as `["Function", ["Add", "x", 1], "x"]`.
  *
  * - `value`
@@ -21,24 +21,32 @@
  *      - `boolean`: a boolean value: `True` or `False`.
  *      - `string`: a string of characters.
  *    - `collection`
- *       - `list`: a collection of expressions, possibly recursive,
- *          with optional dimensions, e.g. `[number]`, `[boolean^32]`,
- *          `[number^(2x3)]`. Used to represent a vector, a matrix or a
- *          tensor when the type of its elements is a number
  *       - `set`: a collection of unique expressions, e.g. `set<string>`.
- *       - `tuple`: a fixed-size collection of named or unnamed elements, e.g.
- *          `tuple<number, boolean>`, `tuple<x: number, y: boolean>`.
- *       - `map`: a set key-value pairs, e.g. `map<x: number, y: boolean>`.
+ *       - `record`: a collection of specific key-value pairs,
+ *          e.g. `record<x: number, y: boolean>`.
+ *       - `dictionary`: a collection of arbitrary key-value pairs
+ *          e.g. `dictionary<string, number>`.
+ *       - `indexed_collection`: collections whose elements can be accessed
+ *             by a numeric index
+ *          - `list`: a collection of expressions, possibly recursive,
+ *              with optional dimensions, e.g. `[number]`, `[boolean^32]`,
+ *              `[number^(2x3)]`. Used to represent a vector, a matrix or a
+ *              tensor when the type of its elements is a number
+ *           - `tuple`: a fixed-size collection of named or unnamed elements,
+ *              e.g. `tuple<number, boolean>`, `tuple<x: number, y: boolean>`.
  *
  *
  *
  */
 export type PrimitiveType =
-  | NumericType
+  | NumericPrimitiveType
   | 'collection'
+  | 'indexed_collection'
   | 'list'
   | 'set'
-  | 'map'
+  | 'dictionary'
+  | 'record'
+  | 'dictionary'
   | 'tuple'
   | 'value'
   | 'scalar'
@@ -68,7 +76,7 @@ export type PrimitiveType =
  * - `rational`: a pure rational number (not an integer) = `finite_rational` + `non_finite_number`
  *
  */
-export type NumericType =
+export type NumericPrimitiveType =
   | 'number'
   | 'finite_number'
   | 'complex'
@@ -91,7 +99,8 @@ export type FunctionSignature = {
   kind: 'signature';
   args?: NamedElement[];
   optArgs?: NamedElement[];
-  restArg?: NamedElement;
+  variadicArg?: NamedElement;
+  variadicMin?: 0 | 1; // If variadicArg is present, this indicates whether it can be empty or not
   result: Type;
 };
 
@@ -110,26 +119,45 @@ export type ValueType = {
   value: any;
 };
 
-/** Map is a non-indexable collection of key/value pairs.
- * An element of a map whose type is a subtype of `nothing` is optional.
- * For example, in `{x: number, y: boolean | nothing}` the element `y` is optional.
+/** A record is a collection of key-value pairs.
+ *
+ * The keys are strings. The set of keys is fixed.
+ *
+ * For a record type to be a subtype of another record type, it must have a
+ * subset of the keys, and all their types must match (width subtyping).
+ *
  */
-export type MapType = {
-  kind: 'map';
+export type RecordType = {
+  kind: 'record';
   elements: Record<string, Type>;
 };
 
-/** Collection, List, Set, Tuple and Map are collections.
+/** A dictionary is a collection of key-value pairs.
  *
+ * The keys are strings. The set of keys is also not defined as part of the
+ * type and can be modified at runtime.
+ *
+ * A dictionary is suitable for use as cache or data storage.
+ */
+export type DictionaryType = {
+  kind: 'dictionary';
+  values: Type;
+};
+
+/**
  * `CollectionType` is a generic collection of elements of a certain type.
+ *
+ * - Indexed collections: List, Tuple
+ * - Non-indexed: Set, Record, Dictionary
+ *
  */
 export type CollectionType = {
-  kind: 'collection';
+  kind: 'collection' | 'indexed_collection';
   elements: Type;
 };
 
 /**
- * The elements of a list are ordered.
+ * The elements of a list can be accessed by their one-based index.
  *
  * All elements of a list have the same type, but it can be a broad type,
  * up to `any`.
@@ -146,15 +174,34 @@ export type ListType = {
   dimensions?: number[];
 };
 
+export type SymbolType = {
+  kind: 'symbol';
+  name: string;
+};
+
+export type ExpressionType = {
+  kind: 'expression';
+  operator: string;
+};
+
+export type NumericType = {
+  kind: 'numeric';
+  type: NumericPrimitiveType;
+  lower?: number;
+  upper?: number;
+};
+
 /** Each element of a set is unique (is not present in the set more than once).
- * The elements of a set are not ordered.
+ * The elements of a set are not indexed.
  */
 export type SetType = {
   kind: 'set';
   elements: Type;
 };
 
-/* The elements of a tuple are ordered and may be named or unnamed */
+/** The elements of a tuple are indexed and may be named or unnamed.
+ * If one element is named, all elements must be named.
+ */
 export type TupleType = {
   kind: 'tuple';
   elements: NamedElement[];
@@ -163,7 +210,9 @@ export type TupleType = {
 /** Nominal typing */
 export type TypeReference = {
   kind: 'reference';
-  ref: string;
+  name: string;
+  alias: boolean;
+  def: Type | undefined;
 };
 
 export type Type =
@@ -173,8 +222,13 @@ export type Type =
   | CollectionType
   | ListType
   | SetType
-  | MapType
+  | RecordType
+  | DictionaryType
   | TupleType
+  | SymbolType
+  | ExpressionType
+  | NumericType
+  | NumericPrimitiveType
   | FunctionSignature
   | ValueType
   | TypeReference;
@@ -278,7 +332,7 @@ export type Type =
  * - `"number -> number"` -- a signature with a single argument
  * - `"(x: number, number) -> number"` -- a signature with a named argument
  * - `"(number, y:number?) -> number"` -- a signature with an optional named argument (can have several optional arguments, at the end)
- * - `"(number, ...number) -> number"` -- a signature with a rest argument (can have only one, and no optional arguments if there is a rest argument).
+ * - `"(number, number+) -> number"` -- a signature with a rest argument (can have only one, and no optional arguments if there is a rest argument).
  * - `"() -> number"` -- a signature with an empty argument list
  * - `"number | boolean"` -- a union type
  * - `"(x: number) & (y: number)"` -- an intersection type
@@ -294,12 +348,20 @@ export type TypeCompatibility =
   | 'bivariant' // A <: B and A :>B, A := B
   | 'invariant'; // Neither A <: B, nor A :> B
 
-export type TypeResolver = (name: string) => Type | undefined;
+/** A type resolver should return a definition for a given type name.
+ */
+export type TypeResolver = {
+  /** Return a list of all type names that are defined in the resolver. This is
+   * used to display error messages when a type is not found. */
+  get names(): string[];
+  forward: (name: string) => TypeReference | undefined;
+  resolve: (name: string) => TypeReference | undefined;
+};
 
-/* Future considerations:
- * - Add support for generics (e.g. `List<T>`), i.e. parametric polymorphism,
- * - Add support for type constraints (e.g. `T extends number`),
- * - Add support for type aliases
+/**
+ * ### Future considerations:
+ * - Add support for generics (e.g. `list<T>`), i.e. parametric polymorphism,
+ * - Add support for type constraints (e.g. `list<T: number>` or list<T> where T: number),
  * - Add support for type variants (e.g. a la Rust enums)
  *     Maybe something like
  *      `variant<Square, Circle>` or

@@ -20,9 +20,9 @@ describe('BASE FORM', () => {
         [
           ErrorCode,
           'unexpected-digit',
-          'c',
+          c,
         ],
-        '12c3',
+        '"12c3"',
       ]
     `);
   });
@@ -34,9 +34,9 @@ describe('BASE FORM', () => {
         [
           ErrorCode,
           'unexpected-digit',
-          'x',
+          x,
         ],
-        '1x2gc3',
+        '"1x2gc3"',
       ]
     `);
   });
@@ -49,7 +49,7 @@ describe('BASE FORM', () => {
     expect(json('\\text{a1b23}_{37}')).toMatchInlineSnapshot(`
       [
         Baseform,
-        'a1b23',
+        a1b23,
         [
           Error,
           [

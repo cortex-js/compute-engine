@@ -1,11 +1,11 @@
-import { asSmallInteger } from './numerics';
-import { isRelationalOperator } from './utils';
+import type { ComputeEngine, BoxedExpression } from '../global-types';
 
+import { isRelationalOperator } from '../latex-syntax/utils';
+
+import { asSmallInteger } from './numerics';
 import { mul } from './arithmetic-mul-div';
 import { add } from './arithmetic-add';
-
 import { Product } from './product';
-import type { ComputeEngine, BoxedExpression } from '../global-types';
 
 function expandProduct(
   lhs: Readonly<BoxedExpression>,
@@ -285,10 +285,7 @@ export function expand(
 export function expandAll(expr: BoxedExpression): BoxedExpression | null {
   if (!expr.operator || !expr.ops) return null;
 
-  const ce = expr.engine;
-  const ops = expr.ops.map((x) =>
-    x.ops ? (expandFunction(ce, x.operator, x.ops) ?? x) : x
-  );
+  const ops = expr.ops.map((x) => expandAll(x) ?? x);
 
   const result = expr.engine.function(expr.operator, ops);
   return expand(result) ?? result;

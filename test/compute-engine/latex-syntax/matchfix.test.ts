@@ -56,34 +56,34 @@ describe('MATCHFIX synonyms', () => {
 
   test('(a, b, c)', () =>
     expect(check(`(a, b, c)`)).toMatchInlineSnapshot(`
-      box       = ["Delimiter", ["Sequence", "a", "b", "c"], "'(,)'"]
+      box       = ["Delimiter", ["Sequence", "a", "b", "c"], "(,)"]
       canonical = ["Triple", "a", "b", "c"]
     `));
 
   test('\\left(a, b, c\\right)', () =>
     expect(check(`\\left(a, b, c\\right)`)).toMatchInlineSnapshot(`
-      box       = ["Delimiter", ["Sequence", "a", "b", "c"], "'(,)'"]
+      box       = ["Delimiter", ["Sequence", "a", "b", "c"], "(,)"]
       canonical = ["Triple", "a", "b", "c"]
     `));
   test('\\bigl(a, b, c\\bigr)', () =>
     expect(check(`\\bigl(a, b, c\\bigr)`)).toMatchInlineSnapshot(`
-      box       = ["Delimiter", ["Sequence", "a", "b", "c"], "'(,)'"]
+      box       = ["Delimiter", ["Sequence", "a", "b", "c"], "(,)"]
       canonical = ["Triple", "a", "b", "c"]
     `));
   test('\\big(a, b, c\\big)', () =>
     expect(check(`\\big(a, b, c\\big)`)).toMatchInlineSnapshot(`
-      box       = ["Delimiter", ["Sequence", "a", "b", "c"], "'(,)'"]
+      box       = ["Delimiter", ["Sequence", "a", "b", "c"], "(,)"]
       canonical = ["Triple", "a", "b", "c"]
     `));
   test('\\lparen a, b, c\\rparen', () =>
     expect(check(`\\lparen a, b, c\\rparen`)).toMatchInlineSnapshot(`
-      box       = ["Delimiter", ["Sequence", "a", "b", "c"], "'(,)'"]
+      box       = ["Delimiter", ["Sequence", "a", "b", "c"], "(,)"]
       canonical = ["Triple", "a", "b", "c"]
     `));
   test('\\left\\lparen a, b, c\\right\\rparen', () =>
     expect(check(`\\left\\lparen a, b, c\\right\\rparen`))
       .toMatchInlineSnapshot(`
-      box       = ["Delimiter", ["Sequence", "a", "b", "c"], "'(,)'"]
+      box       = ["Delimiter", ["Sequence", "a", "b", "c"], "(,)"]
       canonical = ["Triple", "a", "b", "c"]
     `));
 });
@@ -113,38 +113,31 @@ describe('MATCHFIX abs and norm', () => {
   test('||a||', () =>
     expect(check('||a||')).toMatchInlineSnapshot(`["Norm", "a"]`));
   test('||a||+|b|', () =>
-    expect(check('||a||+|b|')).toMatchInlineSnapshot(`
-      invalid   =[
-        "Add",
-        [
-          "Error",
-          ["ErrorCode", "'incompatible-type'", "'number'", "'function'"]
-        ],
-        ["Abs", "b"]
-      ]
-    `));
-}); // @fixme: should parse as ["Add", ["Norm", "a"], ["Abs", "b"]]
+    expect(check('||a||+|b|')).toMatchInlineSnapshot(
+      `["Add", ["Norm", "a"], ["Abs", "b"]]`
+    ));
+});
 
 describe('MATCHFIX invalid', () => {
   test('( // missing closing fence', () =>
     expect(check('(')).toMatchInlineSnapshot(
-      `invalid   =["Error", "'unexpected-delimiter'", ["LatexString", "'('"]]`
+      `invalid   =["Error", "unexpected-delimiter", ["LatexString", "("]]`
     ));
   test(') // missing opening fence', () => {
     expect(check(')')).toMatchInlineSnapshot(
-      `invalid   =["Error", "'unexpected-delimiter'", ["LatexString", "')'"]]`
+      `invalid   =["Error", "unexpected-delimiter", ["LatexString", ")"]]`
     );
   });
 
   test('-( // missing closing fence', () => {
     expect(engine.parse('-(')).toMatchInlineSnapshot(
-      `["Negate", ["Error", "'missing'", ["LatexString", "'-'"]]]`
+      `["Negate", ["Error", "'missing'", ["LatexString", "-"]]]`
     );
   });
 
   test('(3+x // missing closing fence', () => {
     expect(engine.parse('(3+x')).toMatchInlineSnapshot(
-      `["Error", "'unexpected-delimiter'", ["LatexString", "'('"]]`
+      `["Error", "unexpected-delimiter", ["LatexString", "("]]`
     );
   });
 });

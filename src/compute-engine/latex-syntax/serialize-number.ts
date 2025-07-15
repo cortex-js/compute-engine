@@ -134,9 +134,15 @@ export function serializeNumber(
 
   num = num.toLowerCase().replace(/[\u0009-\u000d\u0020\u00a0]/g, '');
 
-  if (num === 'infinity' || num === '+infinity')
+  if (
+    num === 'infinity' ||
+    num === '+infinity' ||
+    num === 'oo' ||
+    num === '+oo'
+  )
     return options.positiveInfinity;
-  else if (num === '-infinity') return options.negativeInfinity;
+  else if (num === '-infinity' || num === '-oo')
+    return options.negativeInfinity;
   else if (num === 'nan') return options.notANumber;
 
   if (!/^[-+\.]?[0-9]/.test(num)) return '';

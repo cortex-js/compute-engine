@@ -24,7 +24,7 @@ export type TestCase =
   | [
       input: Expression | string,
       expected: Expression | string,
-      comment?: string
+      comment?: string,
     ]
   | [heading: string];
 
@@ -907,29 +907,50 @@ const RULE_TEST_CASES: TestCase[] = [
  SUMMARY OF UNUSED RULES:
  
     🚫 = rule not used (no test case for this rule)
- 🚫 |xy| -> -x|y|; ({ x }) => x.isNonPositive === true (hard to come with example)
+ 
+ 
+ 
+ 🚫 \sqrt[n:>0]{0}->0
+ 🚫 \sqrt[n:<0]{0}->\operatorname{NaN}
+ 🚫 \ln(y/e^x) -> \ln(y)-x
+ 🚫 |xy| -> -x|y|; ({ x }) => x.isNonPositive === true
+ 🚫 |x|^{n:even}->x^n
+ 🚫 |x^{n:even}|->x^n
+ 🚫 \infty/x -> \infty; ({ x }) => x.isPositive === true && x.isFinite === true
+ 🚫 (-\infty)/x -> -\infty; ({ x }) => x.isPositive === true && x.isFinite === true
+ 🚫 \infty/x -> -\infty; ({ x }) => x.isNegative === true && x.isFinite === true
+ 🚫 (-\infty)/x -> \infty; ({ x }) => x.isNegative === true && x.isFinite === true
+ 🚫 \infty^a -> 0; ({ a }) => a.isNegative === true
+ 🚫 \infty^a -> \infty; ({ a }) => a.isPositive === true
+ 🚫 (-\infty)^a -> 0; ({ a }) => a.isNegative === true
  🚫 \sin(x) * \cos(x) -> \frac{1}{2} \sin(2x)
  🚫 \sin(x) * \sin(y) -> \frac{1}{2} (\cos(x-y) - \cos(x+y))
  🚫 \cos(x) * \cos(y) -> \frac{1}{2} (\cos(x-y) + \cos(x+y))
  🚫 \tan(x) * \cot(x) -> 1
+ 🚫 \sin(x)^2 + \cos(x)^2 -> 1
+ 🚫 1-\sin(x)^2->\cos(x)^2
+ 🚫 \sin(x)^2-1->-\cos(x)^2
+ 🚫 1-\cos(x)^2->\sin(x)^2
+ 🚫 \cos(x)^2-1->-\sin(x)^2
+ 🚫 \tan^2(x)+1->\sec^2(x)
+ 🚫 \cot^2(x)+1->\csc^2(x)
+ 🚫 \sec^2(x)-1->\tan^2(x)
+ 🚫 \csc^2(x)-1->\cot^2(x)
+ 🚫 -\sec^2(x)+1->-\tan^2(x)
+ 🚫 -\csc^2(x)+1->-\cot^2(x)
+ 🚫 a\sin(x)^2+a\cos(x)^2->a
+ 🚫 a-a\cos(x)^2->a\sin(x)^2
+ 🚫 a-a\sin(x)^2->a\cos(x)^2
+ 🚫 a\sec(x)^2-a->a\tan(x)^2
+ 🚫 a+a\tan(x)^2->a\sec(x)^2
+ 🚫 a\csc(x)^2-a->a\cot(x)^2
+ 🚫 a+a\cot(x)^2->a\csc(x)^2
  🚫 \sin(x)^2 -> \frac{1 - \cos(2x)}{2}
  🚫 \cos(x)^2 -> \frac{1 + \cos(2x)}{2}
- 🚫 ["Divide",["Sin","__x"],["Cos","__x"]]
- 🚫 ["Divide",["Cos","__x"],["Sin","__x"]]
- 🚫 ["Divide",1,["Cos","__x"]]
- 🚫 ["Divide",1,["Sin","__x"]]
- 🚫 ["Ln",["Add","__x",["Sqrt",["Subtract",["Square","__x"],1]]]]; (sub, ce) => sub.__x.isGreater(ce.One) ?? false
- 🚫 ["Multiply",2,["Arctan2","__x",["Add",1,["Sqrt",["Subtract",1,["Square","__x"]]]]]]
- 🚫 ["Multiply",2,["Ln",["Add","__x",["Sqrt",["Add",["Square","__x"],1]]]]]
- 🚫 ["Multiply","Half",["Ln",["Divide",["Add",1,"__x"],["Subtract",1,"__x"]]]]
- 🚫 ["Divide",["Add",["Exp","__x"],["Exp",["Negate","__x"]]],2]
- 🚫 ["Divide",["Subtract",["Exp","__x"],["Exp",["Negate","__x"]]],2]
- 🚫 ["Ln",["Add","__x",["Sqrt",["Subtract",["Square","__x"],1]]]]; ({ __x }) => __x.isGreater(1) ?? false
- 🚫 ["Multiply",2,["Arctan2","__x",["Add",1,["Sqrt",["Subtract",1,["Square","__x"]]]]]]
- 🚫 ["Multiply",2,["Ln",["Add","__x",["Sqrt",["Add",["Square","__x"],1]]]]]
- 🚫 ["Multiply","Half",["Ln",["Divide",["Add",1,"__x"],["Subtract",1,"__x"]]]]
- 🚫 ["Divide",["Add",["Exp","__x"],["Exp",["Negate","__x"]]],2]
- 🚫 ["Divide",["Subtract",["Exp","__x"],["Exp",["Negate","__x"]]],2]
+ 🚫 \tan(x)->\sin(x)/\cos(x)
+ 🚫 \cot(x)->\cos(x)/\sin(x)
+ 🚫 \sec(x)->1/\cos(x)
+ 🚫 \csc(x)->1/\sin(x)
  */
 
 const RULES_USED: string[] = [];
@@ -1521,40 +1542,35 @@ const RULES: Rule[] = [
 // -> 1
 
 describe('SIMPLIFY', () => {
-  console.info('\n\nconst CANONICALIZATION_TEST_CASES: TestCase[] = [\n');
-
-  for (const test of CANONICALIZATION_TEST_CASES) runTestCase(test);
-
-  console.info('\n];\n\n');
-
-  console.info('const RULE_TEST_CASES: TestCase[] = [\n\n');
-
-  const rules = ce.rules([
-    ...ce.getRuleSet('standard-simplification')!.rules,
-    ...RULES,
-  ]);
-  for (const test of RULE_TEST_CASES) {
-    try {
-      runTestCase(test, rules);
-    } catch (e) {
-      console.error(`${test}\n${e.message}\n`);
-    }
-  }
-  console.info('\n];\n\n');
-
+  // console.info('\n\nconst CANONICALIZATION_TEST_CASES: TestCase[] = [\n');
+  // for (const test of CANONICALIZATION_TEST_CASES) runTestCase(test);
+  // console.info('\n];\n\n');
+  // console.info('const RULE_TEST_CASES: TestCase[] = [\n\n');
+  // const rules = ce.rules([
+  //   ...ce.getRuleSet('standard-simplification')!.rules,
+  //   ...RULES,
+  // ]);
+  // for (const test of RULE_TEST_CASES) {
+  //   try {
+  //     runTestCase(test, rules);
+  //   } catch (e) {
+  //     console.error(`${test}\n${e.message}\n`);
+  //   }
+  // }
+  // console.info('\n];\n\n');
   // Display status of rules...
-  console.info(
-    '\n\n\n/*\nSUMMARY OF UNUSED RULES:\n\n   🚫 = rule not used (no test case for this rule)\n\n\n'
-  );
+  // console.info(
+  //   '\n\n\n/*\nSUMMARY OF UNUSED RULES:\n\n   🚫 = rule not used (no test case for this rule)\n\n\n'
+  // );
   // console.info(
   //   '\n\n\n/*\nSUMMARY OF RULE USAGE:\n\n   ✅ = used (a test case used this rule), 🚫 = not used (no test case for this rule)\n\n\n'
   // );
-  for (const rule of ce.rules(RULES).rules) {
-    if (!RULES_USED.includes(ruleName(rule) ?? 'no rule'))
-      console.info('🚫 ' + ruleName(rule));
-    // else console.info('✅ ' + ruleName(rule));
-  }
-  console.info('*/\n\n\n');
+  // for (const rule of ce.rules(RULES).rules) {
+  //   if (!RULES_USED.includes(ruleName(rule) ?? 'no rule'))
+  //     console.info('🚫 ' + ruleName(rule));
+  //   // else console.info('✅ ' + ruleName(rule));
+  // }
+  // console.info('*/\n\n\n');
 });
 
 describe('SIMPLIFY', () => {
@@ -1711,7 +1727,6 @@ function tryRules(
     const sa = a.simplify({ rules: rule });
     if (sa.isSame(b)) {
       const id = ruleName(rule) ?? 'no rule';
-      if (id.startsWith('\\varphi')) debugger;
       if (!RULES_USED.includes(id)) RULES_USED.push(id);
 
       return '👍 ' + id;
@@ -1727,7 +1742,6 @@ function tryRules(
     if (sa.isSame(b)) {
       const id = ruleName(rules.at(-1)) ?? 'no rules';
       if (!RULES_USED.includes(id)) RULES_USED.push(id);
-      if (id.startsWith('\\varphi')) debugger;
       return 'up to 👍' + id;
     }
     rules.push(allRules.rules[i]);

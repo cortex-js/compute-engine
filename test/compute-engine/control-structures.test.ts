@@ -1,13 +1,13 @@
 import { engine as ce } from '../utils';
 describe('CONTROL STRUCTURES', () => {
   describe('Block', () => {
-    it('should evaluate a block wiht a single expression', () => {
+    it('should evaluate a block with a single expression', () => {
       const expr = ce.box(['Block', ['Multiply', 10, 2]]);
       const result = expr.evaluate();
       expect(result.latex).toMatchInlineSnapshot(`20`);
     });
 
-    it('should evaluate a block wiht multiple expressions', () => {
+    it('should evaluate a block with multiple expressions', () => {
       const expr = ce.box(['Block', ['Add', 13, 15], ['Multiply', 10, 2]]);
       const result = expr.evaluate();
       expect(result.latex).toMatchInlineSnapshot(`20`);

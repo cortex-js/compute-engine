@@ -12,11 +12,7 @@ check('Syntax error inside group with invisible operator', () =>
       "Tuple",
       2,
       "Pi",
-      [
-        "Error",
-        "'expected-closing-delimiter'",
-        ["LatexString", "'{2\\pi)}'"]
-      ]
+      ["Error", "expected-closing-delimiter", ["LatexString", "{2\\pi)}"]]
     ]
   `)
 );
@@ -27,13 +23,13 @@ check('Valid empty group', () =>
 
 check('Invalid open delimiter', () =>
   expect(engine.parse(')+1')).toMatchInlineSnapshot(
-    `["Error", "'unexpected-delimiter'", ["LatexString", "')'"]]`
+    `["Error", "unexpected-delimiter", ["LatexString", ")"]]`
   )
 );
 
 check('Unknown symbol', () =>
   expect(engine.parse('\\oops')).toMatchInlineSnapshot(
-    `["Error", "'unexpected-command'", ["LatexString", "'\\oops'"]]`
+    `["Error", "unexpected-command", ["LatexString", "\\oops"]]`
   )
 );
 
@@ -42,7 +38,7 @@ check('Unknown symbol in argument list', () =>
     [
       "Add",
       1,
-      ["Error", "'unexpected-command'", ["LatexString", "'\\oops'"]],
+      ["Error", "unexpected-command", ["LatexString", "\\oops"]],
       2
     ]
   `)
@@ -55,7 +51,7 @@ check('Unknown command with arguments', () =>
       1,
       [
         "Tuple",
-        ["Error", "'unexpected-command'", ["LatexString", "'\\oops'"]],
+        ["Error", "unexpected-command", ["LatexString", "\\oops"]],
         "b",
         "a",
         "r"
@@ -72,8 +68,8 @@ check('Unknown environment', () =>
       1,
       [
         "Error",
-        ["ErrorCode", "'unknown-environment'", "'oops'"],
-        ["LatexString", "'\\begin{oops}\\end{oops}'"]
+        ["ErrorCode", "unknown-environment", "'oops'"],
+        ["LatexString", "\\begin{oops}\\end{oops}"]
       ],
       2
     ]
@@ -85,11 +81,7 @@ check('Unbalanced environment by name', () =>
     [
       "Add",
       1,
-      [
-        "Error",
-        "'unbalanced-environment'",
-        ["LatexString", "'\\end{oops}+2'"]
-      ]
+      ["Error", "unbalanced-environment", ["LatexString", "\\end{oops}+2"]]
     ]
   `)
 );
@@ -101,7 +93,7 @@ check('Unbalanced environment, \\end without \\begin', () =>
       1,
       [
         "Tuple",
-        ["Error", "'unexpected-command'", ["LatexString", "'\\end'"]],
+        ["Error", "unexpected-command", ["LatexString", "\\end"]],
         "c",
         "a",
         "s",
@@ -115,7 +107,7 @@ check('Unbalanced environment, \\end without \\begin', () =>
 
 check('Unbalanced environment, \\begin without \\end', () =>
   expect(engine.parse('\\begin{cases}1+2')).toMatchInlineSnapshot(
-    `["Error", "'unbalanced-environment'", ["LatexString", "'1+2'"]]`
+    `["Error", "unbalanced-environment", ["LatexString", "1+2"]]`
   )
 );
 
@@ -124,7 +116,7 @@ check('Environment without name', () =>
     [
       "Add",
       1,
-      ["Error", "'expected-environment-name'", ["LatexString", "'\\begin'"]],
+      ["Error", "expected-environment-name", ["LatexString", "\\begin"]],
       2
     ]
   `)
@@ -159,11 +151,7 @@ check('Missing argument with \\placeholder parser', () =>
     [
       "Sequence",
       1,
-      [
-        "Error",
-        "'unexpected-operator'",
-        ["LatexString", "'+\\placeholder'"]
-      ]
+      ["Error", "unexpected-operator", ["LatexString", "+\\placeholder"]]
     ]
   `)
 );
@@ -175,7 +163,7 @@ check('Invalid argument in sequence', () =>
       1,
       [
         "Error",
-        ["ErrorCode", "'incompatible-type'", "'number'", "'boolean'"]
+        ["ErrorCode", "incompatible-type", "'number'", "'boolean'"]
       ],
       3
     ]
@@ -192,7 +180,7 @@ check('Invalid argument positional', () =>
         2,
         [
           "Error",
-          ["ErrorCode", "'incompatible-type'", "'number'", "'boolean'"]
+          ["ErrorCode", "incompatible-type", "'number'", "'boolean'"]
         ]
       ],
       2
@@ -204,7 +192,7 @@ check('Invalid infix operator', () =>
   expect(engine.parse('\\times 3')).toMatchInlineSnapshot(`
     [
       "Tuple",
-      ["Error", "'unexpected-command'", ["LatexString", "'\\times'"]],
+      ["Error", "unexpected-command", ["LatexString", "\\times"]],
       3
     ]
   `)
@@ -218,7 +206,7 @@ check('Invalid prefix operator', () =>
 
 check('Invalid postfix operator', () =>
   expect(engine.parse('! 3')).toMatchInlineSnapshot(
-    `["Factorial", ["Error", "'missing'", ["LatexString", "'!'"]]]`
+    `["Factorial", ["Error", "'missing'", ["LatexString", "!"]]]`
   )
 );
 
@@ -246,7 +234,7 @@ check('Supsub syntax error', () =>
       [
         "InvisibleOperator",
         "a",
-        ["Error", "'expected-closing-delimiter'", ["LatexString", "'{a'"]]
+        ["Error", "expected-closing-delimiter", ["LatexString", "{a"]]
       ]
     ]
   `)
@@ -265,7 +253,7 @@ check('Too many infix commands', () =>
 
 check('Command in string', () =>
   expect(engine.parse('1\\text{hello \\alpha}')).toMatchInlineSnapshot(
-    `["Pair", 1, "'hello \\alpha'"]`
+    `["Pair", 1, "hello \\alpha"]`
   )
 );
 
@@ -280,7 +268,7 @@ check('VALID function application', () =>
 );
 
 check(
-  'VALID function application of unknown identifier with empty argument list',
+  'VALID function application of unknown symbol with empty argument list',
   () => expect(engine.parse('g\\left(\\right)')).toMatchInlineSnapshot(`["g"]`)
 );
 
@@ -317,9 +305,9 @@ check('Invalid delimiter: expected closing', () =>
       [
         "InvisibleOperator",
         1,
-        ["Error", "'unexpected-command'", ["LatexString", "'\\left'"]]
+        ["Error", "unexpected-command", ["LatexString", "\\left"]]
       ],
-      ["Error", "'unexpected-delimiter'", ["LatexString", "'('"]]
+      ["Error", "unexpected-delimiter", ["LatexString", "("]]
     ]
   `)
 );
@@ -329,7 +317,7 @@ check('Invalid delimiter: expected closing', () =>
     [
       "Sequence",
       1,
-      ["Error", "'unexpected-delimiter'", ["LatexString", "'('"]]
+      ["Error", "unexpected-delimiter", ["LatexString", "("]]
     ]
   `)
 );
@@ -339,7 +327,7 @@ check('Invalid delimiter: expected opening', () =>
     [
       "Sequence",
       1,
-      ["Error", "'unexpected-delimiter'", ["LatexString", "')'"]]
+      ["Error", "unexpected-delimiter", ["LatexString", ")"]]
     ]
   `)
 );
@@ -351,9 +339,9 @@ check('Invalid delimiter: expected opening', () =>
       [
         "InvisibleOperator",
         1,
-        ["Error", "'unexpected-command'", ["LatexString", "'\\right'"]]
+        ["Error", "unexpected-command", ["LatexString", "\\right"]]
       ],
-      ["Error", "'unexpected-delimiter'", ["LatexString", "')'"]]
+      ["Error", "unexpected-delimiter", ["LatexString", ")"]]
     ]
   `)
 );
@@ -363,10 +351,10 @@ check('Invalid delimiter', () =>
     [
       "Tuple",
       1,
-      ["Error", "'unexpected-command'", ["LatexString", "'\\left'"]],
+      ["Error", "unexpected-command", ["LatexString", "\\left"]],
       "alpha",
       2,
-      ["Error", "'unexpected-command'", ["LatexString", "'\\right'"]],
+      ["Error", "unexpected-command", ["LatexString", "\\right"]],
       "alpha"
     ]
   `)
@@ -392,7 +380,7 @@ check('Expected closing delimiter', () =>
       [
         "Tuple",
         2,
-        ["Error", "'expected-closing-delimiter'", ["LatexString", "'{2'"]]
+        ["Error", "expected-closing-delimiter", ["LatexString", "{2"]]
       ]
     ]
   `)
@@ -405,7 +393,7 @@ check('Unexpected closing delimiter', () =>
       [
         "Tuple",
         ["Rational", 1, 2],
-        ["Error", "'unexpected-closing-delimiter'", ["LatexString", "'}'"]]
+        ["Error", "unexpected-closing-delimiter", ["LatexString", "}"]]
       ],
       1
     ]
@@ -413,47 +401,31 @@ check('Unexpected closing delimiter', () =>
 );
 
 check('Syntax error: @', () =>
-  expect(engine.parse('x@2')).toMatchInlineSnapshot(`
-    [
-      "Sequence",
-      "x",
-      ["Error", ["ErrorCode", "'unexpected-token'", "'@'"]]
-    ]
-  `)
+  expect(engine.parse('x@2')).toMatchInlineSnapshot(
+    `["Sequence", "x", ["Error", ["ErrorCode", "unexpected-token", "@"]]]`
+  )
 );
 
 check('Syntax error: \\', () =>
-  expect(engine.parse('x\\')).toMatchInlineSnapshot(`
-    [
-      "Tuple",
-      "x",
-      ["Error", "'unexpected-command'", ["LatexString", "'\\'"]]
-    ]
-  `)
+  expect(engine.parse('x\\')).toMatchInlineSnapshot(
+    `["Tuple", "x", ["Error", "unexpected-command", ["LatexString", "\\"]]]`
+  )
 );
 
 check('Syntax error: \\1', () =>
-  expect(engine.parse('x\\1')).toMatchInlineSnapshot(`
-    [
-      "Tuple",
-      "x",
-      ["Error", "'unexpected-command'", ["LatexString", "'\\1'"]]
-    ]
-  `)
+  expect(engine.parse('x\\1')).toMatchInlineSnapshot(
+    `["Tuple", "x", ["Error", "unexpected-command", ["LatexString", "\\1"]]]`
+  )
 );
 
 check('Syntax error: ##', () =>
-  expect(engine.parse('x##')).toMatchInlineSnapshot(`["Multiply", "##", "x"]`)
+  expect(engine.parse('x##')).toMatchInlineSnapshot(`["Pair", "x", "##"]`)
 );
 
 check('Syntax error: &', () =>
-  expect(engine.parse('x&2')).toMatchInlineSnapshot(`
-    [
-      "Sequence",
-      "x",
-      ["Error", ["ErrorCode", "'unexpected-token'", "'&'"]]
-    ]
-  `)
+  expect(engine.parse('x&2')).toMatchInlineSnapshot(
+    `["Sequence", "x", ["Error", ["ErrorCode", "unexpected-token", "&"]]]`
+  )
 );
 
 check('VALID comment', () =>
@@ -476,7 +448,7 @@ check('Syntax error', () =>
       [
         "InvisibleOperator",
         2,
-        ["Error", "'expected-closing-delimiter'", ["LatexString", "'{'"]]
+        ["Error", "expected-closing-delimiter", ["LatexString", "{"]]
       ]
     ]
   `)
@@ -493,8 +465,8 @@ check('Unexpected argument', () =>
     [
       "Sqrt",
       12,
-      ["Error", "'unexpected-argument'", "'29'"],
-      ["Error", "'unexpected-argument'", "'74'"]
+      ["Error", "unexpected-argument", "'29'"],
+      ["Error", "unexpected-argument", "'74'"]
     ]
   `)
 );
@@ -505,7 +477,7 @@ check('Mismatched type', () => {
       "Sqrt",
       [
         "Error",
-        ["ErrorCode", "'incompatible-type'", "'number'", "'boolean'"]
+        ["ErrorCode", "incompatible-type", "'number'", "'boolean'"]
       ]
     ]
   `);

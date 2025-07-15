@@ -17,7 +17,7 @@ describe('ADVANCED PARSING', () => {
   // expected
   test('\\frac{x}{} y', () =>
     expect(parse('\\frac{x}{} \\text{ cm}')).toMatchInlineSnapshot(
-      `["Tuple", ["Divide", "x", ["Error", "'missing'"]], "' cm'"]`
+      `["Tuple", ["Divide", "x", ["Error", "'missing'"]], " cm"]`
     ));
 });
 
@@ -31,17 +31,13 @@ describe('FUNCTIONS', () => {
 describe('UNKNOWN COMMANDS', () => {
   test('Parse', () => {
     expect(parse('\\foo')).toMatchInlineSnapshot(
-      `["Error", "'unexpected-command'", ["LatexString", "'\\foo'"]]`
+      `["Error", "unexpected-command", ["LatexString", "\\foo"]]`
     );
     expect(parse('x=\\foo+1')).toMatchInlineSnapshot(`
       [
         "Equal",
         "x",
-        [
-          "Add",
-          ["Error", "'unexpected-command'", ["LatexString", "'\\foo'"]],
-          1
-        ]
+        ["Add", ["Error", "unexpected-command", ["LatexString", "\\foo"]], 1]
       ]
     `);
     expect(parse('x=\\foo   {1}  {x+1}+1')).toMatchInlineSnapshot(`
@@ -52,7 +48,7 @@ describe('UNKNOWN COMMANDS', () => {
           "Add",
           [
             "InvisibleOperator",
-            ["Error", "'unexpected-command'", ["LatexString", "'\\foo'"]],
+            ["Error", "unexpected-command", ["LatexString", "\\foo"]],
             1,
             ["Add", "x", 1]
           ],

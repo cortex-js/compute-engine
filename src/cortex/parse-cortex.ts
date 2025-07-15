@@ -1,4 +1,4 @@
-import { Expression, MathJsonIdentifier } from '../math-json/types';
+import { Expression, MathJsonSymbol } from '../math-json/types';
 import { Origin } from '../common/debug';
 import {
   FatalParsingError,
@@ -63,7 +63,7 @@ function exprOrigin(
   if (!Array.isArray(offsets)) offsets = offsets.range;
   if (Array.isArray(expr))
     return {
-      fn: expr as [MathJsonIdentifier, ...Expression[]],
+      fn: expr as [MathJsonSymbol, ...Expression[]],
       sourceOffsets: offsets,
     };
 

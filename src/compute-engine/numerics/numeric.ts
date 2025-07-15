@@ -243,3 +243,77 @@ export function limit(f: (x: number) => number, x: number, dir = 1): number {
   const [val, _err] = extrapolate(f, x, { step: dir > 0 ? 1 : -1 });
   return val;
 }
+
+export function* cantorEnumerateRationals(): Generator<[number, number]> {
+  yield [0, 1];
+
+  for (let s = 1; ; s++) {
+    // s = sum of numerator + denominator
+    for (let n = 0; n <= s; n++) {
+      const d = s - n;
+      if (d === 0) continue;
+
+      // Reduce fraction by skipping if not coprime
+      if (gcd(n, d) !== 1) continue;
+
+      yield [n, d];
+      yield [-n, d];
+    }
+  }
+}
+
+export function* cantorEnumeratePositiveRationals(): Generator<
+  [number, number]
+> {
+  yield [0, 1];
+
+  for (let s = 1; ; s++) {
+    // s = sum of numerator + denominator
+    for (let n = 0; n <= s; n++) {
+      const d = s - n;
+      if (d === 0) continue;
+
+      // Reduce fraction by skipping if not coprime
+      if (gcd(n, d) !== 1) continue;
+
+      yield [n, d];
+    }
+  }
+}
+
+export function* cantorEnumerateComplexNumbers(): Generator<[number, number]> {
+  yield [0, 0];
+
+  for (let s = 1; ; s++) {
+    for (let na = 0; na <= s; na++) {
+      const da = s - na;
+      if (da === 0 || gcd(na, da) !== 1) continue;
+      const a = na / da;
+
+      for (let nb = 0; nb <= s; nb++) {
+        const db = s - nb;
+        if (db === 0 || gcd(nb, db) !== 1) continue;
+        const b = nb / db;
+
+        // Yield all sign combinations
+        yield [a, b];
+        yield [-a, b];
+        yield [a, -b];
+        yield [-a, -b];
+      }
+    }
+  }
+}
+
+export function* cantorEnumerateIntegers(): Generator<number> {
+  yield 0;
+
+  for (let n = 1; ; n++) {
+    yield n;
+    yield -n;
+  }
+}
+
+export function* cantorEnumerateNaturalNumbers(): Generator<number> {
+  for (let n = 0; ; n++) yield n;
+}

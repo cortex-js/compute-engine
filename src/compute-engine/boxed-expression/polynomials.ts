@@ -115,7 +115,7 @@ function getDegree(expr: BoxedExpression | undefined): number {
   if (expr === undefined) return 0;
 
   if (expr.symbol) {
-    return (expr.symbolDefinition?.constant ?? false) ? 0 : 1;
+    return (expr.valueDefinition?.isConstant ?? false) ? 0 : 1;
   }
 
   if (expr.ops) {

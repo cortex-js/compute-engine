@@ -87,8 +87,8 @@ describe('LATEX SERIALIZING', () => {
     expect(ce.parse('\\foo[0]{1}{2}')).toMatchInlineSnapshot(`
       [
         "Sequence",
-        ["Error", "'unexpected-command'", ["LatexString", "'\\foo'"]],
-        ["At", ["Error", "'missing'", ["LatexString", "'['"]]]
+        ["Error", "unexpected-command", ["LatexString", "\\foo"]],
+        ["Error", "unexpected-operator", ["LatexString", "["]]
       ]
     `);
   });
@@ -131,9 +131,9 @@ describe('LATEX SERIALIZING', () => {
   test('Integral', () => {
     expect(
       latex(['Integrate', 'x', ['Tuple', 'x', 1, 8]])
-    ).toMatchInlineSnapshot(`\\int^{8}_{1}\\!x\\,\\operatorname{d}x`);
+    ).toMatchInlineSnapshot(`\\int_{1}^{8}\\!x\\, \\mathrm{d}x`);
     expect(latex(['Integrate', ['Sin', 'x'], 'x'])).toMatchInlineSnapshot(
-      `\\int\\!\\sin(x)\\,\\operatorname{d}x`
+      `\\int\\!\\sin(x)\\, \\mathrm{d}x`
     );
   });
 });
@@ -210,7 +210,7 @@ describe('LATEX', () => {
         LatexString,
         [
           Error,
-          'missing',
+          missing,
         ],
       ]
     `);
@@ -222,8 +222,8 @@ describe('LATEX', () => {
           [
             ErrorCode,
             'incompatible-type',
-            'string',
-            'finite_integer',
+            string,
+            finite_integer,
           ],
         ],
       ]
@@ -236,7 +236,7 @@ describe('LATEX', () => {
         [
           Error,
           'unexpected-argument',
-          '+1',
+          '"+1"',
         ],
       ]
     `);
@@ -248,7 +248,7 @@ describe('LATEX', () => {
         Parse,
         [
           Error,
-          'missing',
+          missing,
         ],
       ]
     `);
@@ -275,8 +275,8 @@ describe('LATEX', () => {
           [
             ErrorCode,
             'incompatible-type',
-            'string',
-            'finite_real',
+            string,
+            finite_real,
           ],
         ],
       ]

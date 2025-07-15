@@ -6,20 +6,24 @@ import type {
   CanonicalOptions,
   ComputeEngine,
   Metadata,
+  Scope,
 } from '../global-types';
 
-import { Expression, MathJsonIdentifier } from '../../math-json/types';
-import { machineValue, missingIfEmpty } from '../../math-json/utils';
+import { Expression, MathJsonSymbol } from '../../math-json/types';
 import {
-  isValidIdentifier,
-  validateIdentifier,
-} from '../../math-json/identifiers';
+  machineValue,
+  matchesNumber,
+  matchesString,
+  matchesSymbol,
+  missingIfEmpty,
+  stringValue,
+  symbol,
+} from '../../math-json/utils';
+import { isValidSymbol, validateSymbol } from '../../math-json/symbols';
 
 import { isOne } from '../numerics/rationals';
 import { asBigint } from './numerics';
-import { bigintValue } from '../numerics/expression';
 import { isInMachineRange } from '../numerics/numeric-bignum';
-import { bigint } from '../numerics/bigint';
 
 import { canonicalAdd } from './arithmetic-add';
 import { canonicalMultiply, canonicalDivide } from './arithmetic-mul-div';
@@ -32,12 +36,15 @@ import { _BoxedExpression } from './abstract-boxed-expression';
 import { BoxedFunction } from './boxed-function';
 import { BoxedString } from './boxed-string';
 import { BoxedTensor, expressionTensorInfo } from './boxed-tensor';
+import { BoxedDictionary } from './boxed-dictionary';
 import { canonicalForm } from './canonical';
 import { sortOperands } from './order';
 import { validateArguments, checkNumericArgs } from './validate';
 import { flatten } from './flatten';
-import { canonical, semiCanonical } from './utils';
+import { isValueDef } from './utils';
 import { canonicalNegate } from './negate';
+import { canonical } from './canonical-utils';
+// Dynamic import to avoid circular dependency
 
 /**
  * ### THEORY OF OPERATIONS
@@ -102,7 +109,8 @@ function boxHold(
     return new BoxedFunction(
       ce,
       fnName,
-      ops.map((x) => boxHold(ce, x, options))
+      ops.map((x) => boxHold(ce, x, options)),
+      { canonical: false }
     );
   }
   if (typeof expr === 'object') {
@@ -125,20 +133,21 @@ function boxHold(
 
 export function boxFunction(
   ce: ComputeEngine,
-  name: MathJsonIdentifier,
+  name: MathJsonSymbol,
   ops: readonly SemiBoxedExpression[],
   options?: {
     metadata?: Metadata;
     canonical?: CanonicalOptions;
     structural?: boolean;
+    scope?: Scope;
   }
 ): BoxedExpression {
   options = options ? { ...options } : {};
   if (!('canonical' in options)) options.canonical = true;
 
-  if (!isValidIdentifier(name)) {
+  if (!isValidSymbol(name)) {
     throw new Error(
-      `Unexpected function name: "${name}" (not a valid identifier: ${validateIdentifier(name)})`
+      `Unexpected operator: "${name}" is not a valid symbol: ${validateSymbol(name)}`
     );
   }
 
@@ -160,30 +169,12 @@ export function boxFunction(
   // Error
   //
   if (name === 'Error' || name === 'ErrorCode') {
-    return ce._fn(
+    return new BoxedFunction(
+      ce,
       name,
       ops.map((x) => ce.box(x, { canonical: false })),
-      options.metadata
+      { metadata: options?.metadata, canonical: true }
     );
-  }
-
-  //
-  // String
-  //
-  if (name === 'String') {
-    if (ops.length === 0) return new BoxedString(ce, '', options.metadata);
-    return new BoxedString(
-      ce,
-      ops.map((x) => asString(x) ?? '').join(''),
-      options.metadata
-    );
-  }
-
-  //
-  // Symbol
-  //
-  if (name === 'Symbol' && ops.length > 0) {
-    return ce.symbol(ops.map((x) => asString(x) ?? '').join(''), options);
   }
 
   //
@@ -193,20 +184,20 @@ export function boxFunction(
 
   const canonicalNumber = structural === false && options.canonical === true;
 
-  // If canonical, handle cases of various expression structures being able to be cast as
-  // BoxedNumbers (some cases of Negate, Rational, Divide, Complex), or 'de-number' some 'borderline
-  // invalid' boxed number-like expressions
-  // (!@note: this procedure is similarly repeated within the 'number' CanonicalForm, but the
-  // numberForm variant more simply applies to fully BoxedExprs., and during partial canonicalization
-  // only)
+  // If canonical, handle cases of various expression structures being able to
+  // be cast as BoxedNumbers (some cases of Negate, Rational, Divide, Complex),
+  // or 'de-number' some 'borderline invalid' boxed number-like expressions
+  // (!@note: this procedure is similarly repeated within the 'number'
+  //  CanonicalForm, but the numberForm variant more simply applies to fully
+  // BoxedExprs., and during partial canonicalization only)
   if (canonicalNumber) {
     //
     // Rational (as Divide)
     //
     if ((name === 'Divide' || name === 'Rational') && ops.length === 2) {
-      const n = toBigint(ops[0]);
+      const n = asBigint(ops[0]);
       if (n !== null) {
-        const d = toBigint(ops[1]);
+        const d = asBigint(ops[1]);
         if (d !== null) return ce.number([n, d], options);
       }
       name = 'Divide';
@@ -265,7 +256,13 @@ export function boxFunction(
   }
 
   if (options.canonical === true)
-    return makeCanonicalFunction(ce, name, ops, options.metadata);
+    return makeCanonicalFunction(
+      ce,
+      name,
+      ops,
+      options.metadata,
+      options.scope
+    );
 
   return canonicalForm(
     new BoxedFunction(
@@ -275,15 +272,18 @@ export function boxFunction(
         box(ce, x, {
           canonical: options.canonical,
           structural,
+          scope: options.scope,
         })
       ),
       {
         metadata: options.metadata,
         canonical: false,
         structural,
+        scope: options.scope,
       }
     ),
-    options.canonical ?? false
+    options.canonical ?? false,
+    options.scope
   );
 }
 
@@ -316,14 +316,18 @@ export function boxFunction(
 export function box(
   ce: ComputeEngine,
   expr: null | undefined | NumericValue | SemiBoxedExpression,
-  options?: { canonical?: CanonicalOptions; structural?: boolean }
+  options?: {
+    canonical?: CanonicalOptions;
+    structural?: boolean;
+    scope?: Scope;
+  }
 ): BoxedExpression {
   if (expr === null || expr === undefined) return ce.error('missing');
 
   if (expr instanceof NumericValue) return fromNumericValue(ce, expr);
 
   if (expr instanceof _BoxedExpression)
-    return canonicalForm(expr, options?.canonical ?? true);
+    return canonicalForm(expr, options?.canonical ?? true, options?.scope);
 
   options = options ? { ...options } : {};
   if (!('canonical' in options)) options.canonical = true;
@@ -341,15 +345,17 @@ export function box(
   if (Array.isArray(expr)) {
     if (typeof expr[0] !== 'string')
       throw new Error(
-        `The first element of an array should be a string (the function name): ${JSON.stringify(expr)}`
+        `The first element of an array should be a string (the function name): ${JSON.stringify(expr, undefined, 4)}`
       );
 
     return canonicalForm(
       boxFunction(ce, expr[0], expr.slice(1) as SemiBoxedExpression[], {
         canonical,
         structural,
+        scope: options?.scope,
       }),
-      options.canonical!
+      options?.canonical ?? true,
+      options?.scope
     );
   }
 
@@ -367,28 +373,24 @@ export function box(
   // Box a String, a Symbol or a number as a string shorthand
   //
   if (typeof expr === 'string') {
-    // It's a `String` if it is bracketed with apostrophes (single quotes)
-    if (expr.startsWith("'") && expr.endsWith("'"))
-      return new BoxedString(ce, expr.slice(1, -1));
-
-    let s = expr;
-    // Remove spaces
-    s = s.replace(/[\u0009-\u000d\u0020\u00a0]/g, '');
-    if (/^[+-]?[0-9]/.test(s)) {
-      const result = ce.number(expr);
-      // If the input only looked like a number, e.g. "2x+1", the result will
-      // be NaN.
-      if (!result.isNaN) return result;
+    // Is it a symbol?
+    if (matchesSymbol(expr)) {
+      const sym = symbol(expr);
+      if (!sym || !isValidSymbol(sym)) return ce.error('invalid-symbol', expr);
+      // Let 'partial' canonicalization fetch the canonical variant of symbols: in order that at
+      // minimum, they may be substituted with associated definition values (when its def. 'holdUntil'
+      // is 'never')
+      // @note: alternatively, this could be signalled by a 'Symbol' CanonicalForm: but this way is
+      // more predictable, & ensures substitution as per above
+      const canonicalSymbol = canonical || options.canonical !== false;
+      return ce.symbol(sym, { canonical: canonicalSymbol });
     }
 
-    if (!isValidIdentifier(expr)) return ce.error('invalid-identifier', expr);
-    // Let 'partial' canonicalization fetch the canonical variant of symbols: in order that at
-    // minimum, they may be substituted with associated definition values (when its def. 'holdUntil'
-    // is 'never')
-    // @note: alternatively, this could be signalled by a 'Symbol' CanonicalForm: but this way is
-    // more predicatable, & ensures substitution as per above
-    const canonicalSymbol = canonical || options.canonical !== false;
-    return ce.symbol(expr, { canonical: canonicalSymbol });
+    if (matchesNumber(expr)) return ce.number(expr);
+
+    // Must be a string...
+    console.assert(matchesString(expr));
+    return new BoxedString(ce, stringValue(expr)!);
   }
 
   //
@@ -399,102 +401,135 @@ export function box(
       const [fnName, ...ops] = expr.fn;
       return canonicalForm(
         boxFunction(ce, fnName, ops, { canonical, structural }),
-        options.canonical!
+        options.canonical!,
+        options.scope
       );
     }
     if ('str' in expr) return new BoxedString(ce, expr.str);
     if ('sym' in expr) return ce.symbol(expr.sym, { canonical });
     if ('num' in expr) return ce.number(expr, { canonical });
+    if ('dict' in expr) {
+      return new BoxedDictionary(ce, expr.dict, { canonical });
+    }
 
-    throw new Error(`Unexpected MathJSON object: ${JSON.stringify(expr)}`);
+    throw new Error(
+      `Unexpected MathJSON object: ${JSON.stringify(expr, undefined, 4)}`
+    );
   }
 
   return ce.symbol('Undefined');
-}
-
-function asString(expr: SemiBoxedExpression): string | null {
-  if (typeof expr === 'string') return expr;
-  if (expr instanceof _BoxedExpression) {
-    return expr.string ?? expr.symbol ?? expr.toString();
-  }
-
-  if (typeof expr === 'object') {
-    if ('str' in expr) return expr.str;
-    if (
-      'fn' in expr &&
-      expr.fn[0] === 'String' &&
-      typeof expr.fn[1] === 'string'
-    )
-      // @todo: that's incorrect. That argument would be a string bracketed by quotes
-      return expr.fn[1];
-  }
-
-  if (Array.isArray(expr)) {
-    // @todo: that's incorrect. That argument would be a string bracketed by quotes
-    if (expr[0] === 'String' && typeof expr[1] === 'string') return expr[1];
-  }
-
-  return null;
 }
 
 function makeCanonicalFunction(
   ce: ComputeEngine,
   name: string,
   ops: ReadonlyArray<SemiBoxedExpression>,
-  metadata?: Metadata
+  metadata: Metadata | undefined,
+  scope: Scope | undefined
 ): BoxedExpression {
-  const result = makeNumericFunction(ce, name, ops, metadata);
+  let result = makeNumericFunction(ce, name, ops, metadata, scope);
   if (result) return result;
 
   //
   // Do we have a vector/matrix/tensor?
   // It has to have a compatible shape: i.e. all elements on an axis have
-  // the same shape.
+  // the same shape, and all elements of the same type.
   //
   if (name === 'List') {
-    // @todo: note: we could have a special canonical form for tensors
-    // @fixme: don't box the arguments: they may be lists themselves...
-    const boxedOps = ops.map((x) => ce.box(x));
-    const { shape, dtype } = expressionTensorInfo('List', boxedOps) ?? {};
+    // We don't canonicalize it, in case it's a List (we want to detect lists of lists)
+    const boxedOps = ops.map((x) => ce.box(x, { canonical: false }));
+    const tensorInfo = expressionTensorInfo('List', boxedOps);
 
-    if (dtype && shape)
-      return new BoxedTensor(ce, { op: 'List', ops: boxedOps });
+    if (tensorInfo && tensorInfo.dtype) {
+      return new BoxedTensor(
+        ce,
+        {
+          ops: canonical(ce, boxedOps, scope),
+          shape: tensorInfo.shape,
+          dtype: tensorInfo.dtype,
+        },
+        { metadata }
+      );
+    }
 
-    return ce._fn('List', boxedOps);
+    return new BoxedFunction(ce, 'List', canonical(ce, boxedOps, scope), {
+      canonical: true,
+    });
+  }
+
+  if (name === 'Dictionary') {
+    const boxedOps = ops.map((x) => ce.box(x, { canonical: false }));
+    return new BoxedDictionary(ce, ce._fn('Dictionary', boxedOps), {
+      canonical: true,
+    });
   }
 
   //
   // Didn't match a short path, look for a definition
   //
-  const def = ce.lookupFunction(name);
+  const def = ce.lookupDefinition(name);
   if (!def) {
     // No def. This is for example `["f", 2]` where "f" is not declared.
-    return new BoxedFunction(ce, name, flatten(canonical(ce, ops)), {
+    ce.declare(name, { type: 'function', inferred: true });
+    return new BoxedFunction(ce, name, flatten(semiCanonical(ce, ops)), {
       metadata,
       canonical: true,
     });
   }
 
-  if (def.lazy) {
+  if (isValueDef(def)) {
+    // The symbol is declared, but as a value.
+    // We construct the function expression and will check its value
+    // is a function literal when evaluating it.
+    return new BoxedFunction(ce, name, flatten(semiCanonical(ce, ops)), {
+      metadata,
+      canonical: true,
+    });
+  }
+
+  const opDef = def.operator;
+
+  // If the operator has a local scope, create it now (unless we were given one,
+  // for example one might have been create to record the arguments of a
+  // function, but not for a Block expression)
+  scope ??= opDef.scoped
+    ? {
+        parent: ce.context.lexicalScope,
+        bindings: new Map(),
+      }
+    : undefined;
+
+  if (opDef.lazy) {
     // If we have a lazy function, we don't canonicalize the arguments
     const xs = ops.map((x) => ce.box(x, { canonical: false }));
-    if (def.canonical) {
+    if (opDef.canonical) {
       try {
-        const result = def.canonical(xs, { engine: ce });
+        result = opDef.canonical(xs, { engine: ce, scope });
         if (result) return result;
       } catch (e) {
         console.error(e.message);
       }
       // The canonical handler gave up, return a non-canonical expression
-      return new BoxedFunction(ce, name, xs, { metadata, canonical: false });
+      result = new BoxedFunction(ce, name, xs, {
+        metadata,
+        canonical: false,
+      });
+      return result;
     }
 
-    return ce._fn(
+    result = new BoxedFunction(
+      ce,
       name,
-      validateArguments(ce, xs, def.signature.type, def.lazy, def.threadable) ??
+      validateArguments(
+        ce,
         xs,
-      metadata
+        opDef.signature.type,
+        opDef.lazy,
+        opDef.broadcastable
+      ) ?? xs,
+      { metadata, canonical: true, scope }
     );
+    return result;
   }
 
   const xs = ops.map((x) => ce.box(x));
@@ -510,15 +545,21 @@ function makeCanonicalFunction(
   //
   // The arguments have been put in canonical form
   //
-  if (def.canonical) {
+  if (opDef.canonical) {
     try {
-      const result = def.canonical(xs, { engine: ce });
+      const result = opDef.canonical(xs, { engine: ce, scope });
       if (result) return result;
     } catch (e) {
       console.error(e.message);
     }
+
     // The canonical handler gave up, return a non-canonical expression
-    return new BoxedFunction(ce, name, xs, { metadata, canonical: false });
+    const result = new BoxedFunction(ce, name, xs, {
+      metadata,
+      canonical: false,
+    });
+
+    return result;
   }
 
   //
@@ -527,73 +568,91 @@ function makeCanonicalFunction(
   //
   const args: BoxedExpression[] = flatten(
     xs,
-    def.associative ? name : undefined
+    opDef.associative ? name : undefined
   );
 
   const adjustedArgs = validateArguments(
     ce,
     args,
-    def.signature.type,
-    def.lazy,
-    def.threadable
+    opDef.signature.type,
+    opDef.lazy,
+    opDef.broadcastable
   );
 
   // If we have some adjusted arguments, the arguments did not
   // match the parameters of the signature. We're done.
-  if (adjustedArgs) return ce._fn(name, adjustedArgs, metadata);
+  if (adjustedArgs) {
+    return new BoxedFunction(ce, name, adjustedArgs, {
+      metadata,
+      canonical: true,
+      scope,
+    });
+  }
 
   //
   // 4/ Apply `idempotent` and `involution`
   //
   if (args.length === 1 && args[0].operator === name) {
     // f(f(x)) -> x
-    if (def.involution) return args[0].op1;
+    if (opDef.involution) return args[0].op1;
 
     // f(f(x)) -> f(x)
-    if (def.idempotent) return ce._fn(name, xs[0].ops!, metadata);
+    if (opDef.idempotent)
+      return new BoxedFunction(ce, name, xs[0].ops!, {
+        metadata,
+        canonical: true,
+        scope,
+      });
   }
 
   //
   // 5/ Sort the operands
   //
 
-  return ce._fn(name, sortOperands(name, args), metadata);
+  return new BoxedFunction(ce, name, sortOperands(name, args), {
+    metadata,
+    canonical: true,
+    scope,
+  });
 }
 
 function makeNumericFunction(
   ce: ComputeEngine,
-  name: MathJsonIdentifier,
+  name: MathJsonSymbol,
   semiOps: ReadonlyArray<SemiBoxedExpression>,
-  metadata?: Metadata
+  metadata?: Metadata,
+  scope?: Scope
 ): BoxedExpression | null {
-  // @todo: is it really necessary to accept semiboxed expressions?
   let ops: ReadonlyArray<BoxedExpression> = [];
   if (name === 'Add' || name === 'Multiply')
-    ops = checkNumericArgs(ce, semiCanonical(ce, semiOps), { flatten: name });
+    ops = checkNumericArgs(ce, semiCanonical(ce, semiOps, scope), {
+      flatten: name,
+    });
   else if (
     name === 'Negate' ||
     name === 'Square' ||
     name === 'Sqrt' ||
     name === 'Exp'
   )
-    ops = checkNumericArgs(ce, semiCanonical(ce, semiOps), 1);
+    ops = checkNumericArgs(ce, semiCanonical(ce, semiOps, scope), 1);
   else if (name === 'Ln' || name === 'Log') {
-    ops = checkNumericArgs(ce, semiCanonical(ce, semiOps));
+    ops = checkNumericArgs(ce, semiCanonical(ce, semiOps, scope));
     if (ops.length === 0) ops = [ce.error('missing')];
   } else if (name === 'Power' || name === 'Root')
-    ops = checkNumericArgs(ce, semiCanonical(ce, semiOps), 2);
+    ops = checkNumericArgs(ce, semiCanonical(ce, semiOps, scope), 2);
   else if (name === 'Divide') {
     // Note: Divide can have more than one argument, i.e.
     // Divide(a, b, c) = a / b / c
     // But it needs at least two arguments
-    ops = checkNumericArgs(ce, semiCanonical(ce, semiOps));
+    ops = checkNumericArgs(ce, semiCanonical(ce, semiOps, scope));
     if (ops.length === 0) ops = [ce.error('missing'), ce.error('missing')];
     if (ops.length === 1) ops = [ops[0], ce.error('missing')];
   } else return null;
 
   // If some of the arguments are not valid, we're done
   // (note: the result is canonical, but not valid)
-  if (!ops.every((x) => x.isValid)) return ce._fn(name, ops, metadata);
+  if (!ops.every((x) => x.isValid))
+    return new BoxedFunction(ce, name, ops, { metadata, canonical: true });
 
   //
   // Short path for some functions
@@ -618,10 +677,11 @@ function makeNumericFunction(
       // Ln(1) -> 0, Log(1) -> 0
       if (ops[0].is(1)) return ce.Zero;
       // Ln(a) -> Ln(a), Log(a) -> Log(a)
-      if (ops.length === 1) return ce._fn(name, ops, metadata);
+      if (ops.length === 1)
+        return new BoxedFunction(ce, name, ops, { metadata, canonical: true });
     }
     // Ln(a,b) -> Log(a, b)
-    return ce._fn('Log', ops, metadata);
+    return new BoxedFunction(ce, 'Log', ops, { metadata, canonical: true });
   }
 
   return null;
@@ -707,20 +767,14 @@ function fromNumericValue(
   return canonicalAdd(ce, [result, ce.number(ce.complex(0, value.im))]);
 }
 
-export function toBigint(
-  x: Complex | Decimal | SemiBoxedExpression
-): bigint | null {
-  if (typeof x === 'bigint') return x;
-  if (typeof x === 'number' && Number.isInteger(x)) return BigInt(x);
+export function semiCanonical(
+  ce: ComputeEngine,
+  xs: ReadonlyArray<SemiBoxedExpression>,
+  scope?: Scope
+): ReadonlyArray<BoxedExpression> {
+  // Avoid memory allocation if possible
+  if (xs.every((x) => x instanceof _BoxedExpression && x.isCanonical))
+    return xs as ReadonlyArray<BoxedExpression>;
 
-  if (x instanceof _BoxedExpression) return asBigint(x);
-
-  if (x instanceof Decimal || typeof x === 'string') return bigint(x);
-
-  if (x instanceof Complex) {
-    if (x.im === 0) return bigint(x.re);
-    return null;
-  }
-
-  return bigintValue(x as Expression);
+  return xs.map((x) => ce.box(x, { scope }));
 }

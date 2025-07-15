@@ -3,99 +3,59 @@ import type { Expression } from '../../src/math-json/types';
 
 export const engine = new ComputeEngine();
 
-// const lhs = [
-//   -7,
-//   -5,
-//   -1.3,
-//   -1,
-//   0,
-//   0.12,
-//   1,
-//   2,
-//   2.1,
-//   5,
-//   7,
-//   { num: '7.12d' },
-//   { num: '-7.12d' },
-//   ['Complex', -2, -3],
-//   ['Complex', 7, 0],
-//   '+Infinity',
-//   '-Infinity',
-//   'ComplexInfinity',
-//   'ImaginaryUnit',
-//   'NaN',
-//   'Pi',
-//   'Half',
-//   ['Divide', 5, 7],
-//   ['Divide', 25, 35],
-//   ['Divide', 19, 11],
-//   ['Divide', -5, 7],
-//   ['Divide', -25, 35],
-//   ['Divide', -19, 11],
-//   'True',
-//   'False',
-//   'Maybe',
-// ];
-
-// const rhs = [
-//   'Number',
-//   'ExtendedComplexNumber',
-//   'ExtendedRealNumber',
-//   'ComplexNumber',
-//   'ImaginaryNumber',
-//   'RealNumber',
-//   'TranscendentalNumber',
-//   'AlgebraicNumber',
-//   'RationalNumber',
-//   'Integers',
-
-//   'Boolean',
-//   'MaybeBooleans',
-
-//   ['Range', 2, 5],
-//   ['Range', 0, +Infinity],
-//   ['Range', -Infinity, 0],
-//   ['Range', -5, 5],
-
-//   ['Interval', 2, 5],
-//   ['Interval', 0, +Infinity],
-//   ['Interval', -Infinity, 0],
-//   ['Interval', -5, 5],
-//   ['Interval', 2, ['Open', 5]],
-//   ['Interval', ['Open'], ['Open', 5]],
-//   ['Interval', 0, +Infinity],
-//   ['Interval', -Infinity, 0],
-//   ['Interval', -5, 5],
-// ];
-
-const tests: Expression[] = [
-  ['Equal', 0, 0],
-  ['Equal', 5, 5],
-  ['Equal', -7, -7],
-
-  ['Less', -7, -7],
-  ['LessEqual', -7, -7],
-  ['Greater', -7, -7],
-  ['GreaterEqual', -7, -7],
-
-  ['NotEqual', -7, -7],
-  ['Not', ['Equal', -7, -7]],
-  ['Not', ['NotEqual', -7, -7]],
-
-  // ['And'],
-  // ['Or',
-
-  ['Element', -1, 'Integers'],
-  ['Element', 0, 'Integers'],
-  ['Element', 5, 'Integers'],
-  ['Element', 0.12, 'Integers'],
-  ['Element', { num: '7d' }, 'Integers'],
-  // ['Element', , 'Integers'],
+const tests: [Expression, Expression | number | bigint | boolean, boolean][] = [
+  [1, 1, true],
+  [1, 1n, true],
+  [1, 2, false],
+  [1, false, false],
+  [1, 1.0, true],
+  [1, 1.0000000000000001, true],
+  [1, 1.0000000000000002, false],
+  ['one', 1, true],
+  ['one', 'one', true],
+  ['one', 'zero', false],
+  ['one', 1n, true],
+  ['one', 2, false],
+  ['zero', 0, true],
+  ['zero', 0n, true],
+  ['zero', 1, false],
+  ['x', 1, false],
+  ['boolean', true, true],
+  ['boolean', false, false],
+  ['boolean', 1, false],
+  ['string', "'hello'", true],
+  ['string', "'world'", false],
+  ['string', 1, false],
+  ['undeclared', 1, false],
+  ['nan', NaN, true],
+  ['nan', 1, false],
+  [['Divide', 84, 2], 42, true],
+  [['Divide', 'x', 2], 42, false],
+  ['nan', 'nan', true],
 ];
 
-describe.skip('is()', () => {
+describe('is()', () => {
+  beforeAll(() => {
+    engine.declare('x', 'real');
+    engine.assign('one', 1);
+    engine.assign('zero', 0);
+    engine.assign('boolean', true);
+    engine.assign('string', "'hello'");
+    engine.assign('nan', NaN);
+    engine.assign('infinity', Infinity);
+  });
+
   // https://jestjs.io/docs/next/api#testeachtablename-fn-timeout
-  test.each(tests)('is("%p")', (prop) => {
-    // expect(engine.is(prop)).toMatchSnapshot();
+  test.each(tests)('is("%p")', (a, b, expected) => {
+    const expr = engine.box(a);
+    if (
+      typeof b === 'number' ||
+      typeof b === 'bigint' ||
+      typeof b === 'boolean'
+    ) {
+      expect(expr.is(b)).toBe(expected);
+    } else {
+      expect(expr.is(engine.box(b))).toBe(expected);
+    }
   });
 });

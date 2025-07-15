@@ -1,20 +1,22 @@
-import { Decimal } from 'decimal.js';
-import type { Expression } from '../../math-json/types';
-import {
-  isValidIdentifier,
-  validateIdentifier,
-} from '../../math-json/identifiers';
+import type { Expression, MathJsonSymbol } from '../../math-json/types';
+import { isValidSymbol, validateSymbol } from '../../math-json/symbols';
 
 import type { Type, TypeString } from '../../common/type/types';
+import { isSignatureType, widen, narrow } from '../../common/type/utils';
+import type { OneOf } from '../../common/one-of';
+import { BoxedType } from '../../common/type/boxed-type';
+import { parseType } from '../../common/type/parse';
+
+import type { BigNum } from '../numerics/types';
+import { NumericValue } from '../numeric-value/types';
 
 import type {
   BoxedExpression,
   SimplifyOptions,
   PatternMatchOptions,
   ReplaceOptions,
-  Scope,
-  BoxedSymbolDefinition,
-  BoxedFunctionDefinition,
+  BoxedValueDefinition,
+  BoxedOperatorDefinition,
   ComputeEngine,
   Metadata,
   CanonicalOptions,
@@ -26,6 +28,8 @@ import type {
   BoxedRuleSet,
   Substitution,
   Sign,
+  BoxedDefinition,
+  CollectionHandlers,
 } from '../global-types';
 
 import { mul, div } from './arithmetic-mul-div';
@@ -34,119 +38,88 @@ import { replace } from './rules';
 import { simplify } from './simplify';
 import { negate } from './negate';
 
-import { NumericValue } from '../numeric-value/types';
-
 import { match } from './match';
-import { _BoxedSymbolDefinition } from './boxed-symbol-definition';
-import { _BoxedFunctionDefinition } from './boxed-function-definition';
 import { _BoxedExpression } from './abstract-boxed-expression';
-import { hashCode, normalizedUnknownsForSolve } from './utils';
+import {
+  hashCode,
+  isOperatorDef,
+  isValueDef,
+  normalizedUnknownsForSolve,
+} from './utils';
 import { pow } from './arithmetic-power';
 import { add } from './arithmetic-add';
-import { parseType } from '../../common/type/parse';
-import { isSignatureType, widen } from '../../common/type/utils';
 import {
   positiveSign,
   nonPositiveSign,
   negativeSign,
   nonNegativeSign,
-  infinitySgn,
 } from './sgn';
-import type { BigNum } from '../numerics/types';
-import type { OneOf } from '../../common/one-of';
-import { BoxedType } from '../../common/type/boxed-type';
+import { matchesSymbol } from '../../math-json/utils';
 
 /**
- * BoxedSymbol
+ * ### BoxedSymbol
  *
- * A boxed symbol is a reference to a `BoxedSymbolDefinition` or a
- * `BoxedFunctionDefinition`.
+ * A boxed symbol is a reference to a `BoxedDefinition`.
  *
- * If a `BoxedSymbolDefinition`, it "owns" all the information
- * about the symbol, its value, type and various attributes.
+ * A `BoxedDefinition` "owns" all the information about a symbol, its
+ * type and various attributes (is it a constant?, etc...).
  *
- * If a `BoxedFunctionDefinition`, it it a reference to a function name,
- * not a function expression, i.e. `Sin`, not `["Sin", "Pi"]`. This is used
- * for example in `["InverseFunction", "Sin"]`
+ * Boxed symbols are bound to a definition during construction if they
+ * are canonical.
  *
- * BoxedSymbols are bound *lazily* to a definition: unless constructed with either 'canonical =
- * true' or a definition is explicitly given.
+ * If a symbol is not canonical (and thus not bound to a definition),
+ * some properties and methods will return `undefined`, for example
+ * `isInteger`, `isRational`, `isReal`, etc...
  *
- * Various, predicate-based properties & getters for this class either:
+ * There is a single value definition for each symbol but the value of a
+ * symbol can be different in different evaluation contexts, for example
+ * a local variable during a recursion.
  *
- * - Trigger the symbol to be bound (if not already). This encompasses those properties that
- * imply, or rely on accessing the symbol definition - including its value or type. Included are:
- * 'value', 'isOdd/Even', 're', 'im', or 'isReal/Rational': amongst others.
+ * The value of a symbol is tracked in the evaluation context and
+ * not in the value definition.
  *
- * - Do not trigger the symbol to be bound, but nevertheless require this to be the case to return
- * an effective value.
- * These properties typically return with type `boolean | undefined`, and spans those such as
- * 'isNaN', 'isInfinity' 'isPositive' & 'isNegative'.
- *   Notably, this is the case for properties which relate to a *range* of values or 'assumptions'
- *   about the symbol (e.g. 'is..Positive/Negative'); or in which looking up the value directly is
- *   not necessary to compute the result (e.g. 'isFinite').
- *
- *
- * Methods which require consultation to a definition value also trigger binding: comparison methods
- * ('is', 'isSame', 'isEqual', 'isLess'...), 'evaluate' & 'N', and methods pertinent to
- * 'collection'-valued symbols such as 'contains' & 'subsetOf'.
- *
+ * The `value` property of a boxed symbol is the value of the symbol
+ * in the current evaluation context. It is `undefined` if the symbol
+ * is not bound to a definition or if the value is not known (a bound
+ * symbol may have no value).
  *
  */
 export class BoxedSymbol extends _BoxedExpression {
-  private _scope: Scope | null;
-  protected _id: string;
   private _hash: number | undefined;
 
-  // Note: a `BoxedSymbol` is bound lazily to a definition: unless constructed canonically, or with
-  // a given/explicit definition. This is important during the creation of a scope  to avoid
-  // circular references.
-  //
-  // This can also happen if a symbol is used before being defined
-  // and the engine has no default domain specified. If there
-  // is a default domain, a definition is created automatically.
+  /** The name of the symbol */
+  protected _id: MathJsonSymbol;
 
-  // `undefined` indicates that the symbol has not been bound yet
+  /**
+   * The definition of the symbol, if the symbol is bound/canonical.
+   */
+  private readonly _def: BoxedDefinition | undefined;
 
-  private _def:
-    | OneOf<[BoxedSymbolDefinition, BoxedFunctionDefinition]>
-    | undefined;
-
-  private _isStructural: boolean = false;
-
+  /** Note: to indicate that the symbol should be canonical, pass a def. */
   constructor(
     ce: ComputeEngine,
-    name: string,
+    name: MathJsonSymbol,
     options?: {
       metadata?: Metadata;
-      canonical?: CanonicalOptions;
-      structural?: boolean;
-      def?: OneOf<[BoxedSymbolDefinition, BoxedFunctionDefinition]>;
+      def?: BoxedDefinition;
     }
   ) {
     super(ce, options?.metadata);
 
     console.assert(
-      isValidIdentifier(name),
-      `Invalid symbol "${name}": ${validateIdentifier(name)}`
+      isValidSymbol(name),
+      `Invalid symbol "${name}": ${validateSymbol(name)}`
     );
     this._id = name;
-    this._def = options?.def ?? undefined; // Mark the def as not cached if not provided
-
-    if (options?.structural) this._isStructural = true;
-
-    //(A symbol having a _scope is indicator of it being canonical)
-    if ((options?.canonical ?? true) !== true) this._scope = null;
-    else if (this._def) this._scope = ce.context;
-    else this.bind();
+    this._def = options?.def;
   }
 
   get json(): Expression {
-    return this._id;
+    return matchesSymbol(this._id) ? this._id : { sym: this._id };
   }
 
   get hash(): number {
-    if (this._hash === undefined) this._hash = hashCode(this._id);
+    this._hash ??= hashCode(this._id);
     return this._hash;
   }
 
@@ -154,114 +127,47 @@ export class BoxedSymbol extends _BoxedExpression {
     return true;
   }
 
-  get isStructural(): boolean {
-    return this._isStructural;
-  }
-
-  get structural(): BoxedExpression {
-    if (this.isStructural) return this;
-    return new BoxedSymbol(this.engine, this._id, {
-      structural: true,
-      def: this._def ?? undefined,
-    });
-  }
-
-  get scope(): Scope | null {
-    return this._scope;
-  }
-
   get isConstant(): boolean {
-    // Don't use `.symbolDefinition` as this has a side effect of creating
-    // a def, which is not desirable whn we're just doing a test.
-    const def = this._def ?? this.engine.lookupSymbol(this._id, this.wikidata);
-
-    return !(def instanceof _BoxedSymbolDefinition) || def.constant;
+    const def = this._def;
+    return (isValueDef(def) && def?.value.isConstant) ?? false;
   }
 
-  private _lookupDef():
-    | OneOf<[BoxedSymbolDefinition, BoxedFunctionDefinition]>
-    | undefined {
-    //  Prefer a symbol definition over a function definition
-    // (since symbols can be redefined)
-    const ce = this.engine;
-    return ce.lookupSymbol(this._id) ?? ce.lookupFunction(this._id);
-  }
+  bind(): void {}
 
-  /** This method returns the definition associated with the value of this
-   * symbol, or associated with the symbol if it has no value. Used primarily
-   * to check, or obtain the value definition for, the case where this symbol
-   * has a 'collection' definition
-   *
-   * This is the definition to use with most operations on the symbol.
-   * Indeed, "x[2]" is accessing the second element of **the value** of "x".
-   */
-  private _getDef(): BoxedBaseDefinition | undefined {
-    let def: BoxedBaseDefinition | BoxedSymbolDefinition | undefined =
-      this.symbolDefinition;
-    if (!def) return undefined;
-
-    // If there is a def, check if the value associated with
-    // the def is an expression that has a def.
-    // For example, it could be `x = List(1, 2, 3)`
-    const val = 'value' in def ? def.value : undefined;
-    if (val && val !== this) def = val.baseDefinition ?? def;
-
-    return def;
-  }
-
-  /**
-   * Associate a definition with this symbol
-   */
-  bind(): void {
-    this._scope = this.engine.context;
-
-    //
-    // 1. Get a definition for this
-    //
-    const def = this._lookupDef();
-
-    if (def) {
-      this._def = def;
-      return;
-    }
-
-    //
-    // 2. Auto-binding
-    //
-
-    // No definition, create one
-    this._def = this.engine.defineSymbol(this._id, {
-      type: 'unknown',
-      inferred: true,
-    });
-    this._id = this._def?.name ?? this._id;
-  }
-
-  reset(): void {
-    this._def?.reset();
-  }
+  reset(): void {}
 
   get isCanonical(): boolean {
-    return this._scope !== null;
+    return this._def !== undefined;
   }
   set isCanonical(val: boolean) {
-    this._scope = val ? this.engine.context : null;
-    this._def = undefined;
-  }
-
-  is(rhs: any): boolean {
-    if (this._id === 'True') return rhs === true;
-    if (this._id === 'False') return rhs === false;
-
-    // Check if the _value_ of this symbol is equal to the value of rhs
-    return this.symbolDefinition?.value?.is(rhs) ?? false;
+    throw new Error(
+      'Setting the isCanonical property is not allowed. Use the canonical() method instead.'
+    );
   }
 
   get canonical(): BoxedExpression {
-    // If a scope has been provided, this symbol is canonical
-    if (this._scope) return this;
+    // The symbol is canonical if it has a definition
+    if (this._def) return this;
+
     // Return a new canonical symbol, scoped in the current context
-    return this.engine.box(this._id);
+    return this.engine.symbol(this._id);
+  }
+
+  is(other: any): boolean {
+    // Shortcuts
+    if (other === true)
+      return this.symbol === 'True' || this.value?.symbol === 'True';
+    if (other === false)
+      return this.symbol === 'False' || this.value?.symbol === 'False';
+
+    if (other instanceof _BoxedExpression && other.symbol)
+      return this.symbol === other.symbol;
+
+    // Check if the _value_ of this symbol is equal to the value of other
+    return (
+      this.value?.is(other instanceof _BoxedExpression ? other.value : other) ??
+      false
+    );
   }
 
   toNumericValue(): [NumericValue, BoxedExpression] {
@@ -301,19 +207,19 @@ export class BoxedSymbol extends _BoxedExpression {
 
   add(rhs: number | BoxedExpression): BoxedExpression {
     if (rhs === 0) return this;
-    return add(this.canonical, this.engine.box(rhs));
+    return add(this, this.engine.box(rhs));
   }
 
   mul(rhs: NumericValue | number | BoxedExpression): BoxedExpression {
     if (rhs === 1) return this;
     if (rhs === -1) return this.neg();
-    if (rhs === 0) return this.engine.Zero;
+    if (rhs === 0 && !this.isNaN) return this.engine.Zero;
     if (rhs instanceof NumericValue) {
       if (rhs.isOne) return this;
       if (rhs.isNegativeOne) return this.neg();
-      if (rhs.isZero) return this.engine.Zero;
+      if (rhs.isZero && !this.isNaN) return this.engine.Zero;
     }
-    return mul(this.canonical, this.engine.box(rhs));
+    return mul(this, this.engine.box(rhs));
   }
 
   div(rhs: number | BoxedExpression): BoxedExpression {
@@ -325,10 +231,6 @@ export class BoxedSymbol extends _BoxedExpression {
   }
 
   root(n: number | BoxedExpression): BoxedExpression {
-    if (!this.isCanonical) return this.canonical.root(n);
-
-    if (typeof n !== 'number') n = n.canonical;
-
     const e = typeof n === 'number' ? n : n.im === 0 ? n.re : undefined;
 
     const ce = this.engine;
@@ -353,7 +255,6 @@ export class BoxedSymbol extends _BoxedExpression {
 
   ln(semiBase?: number | BoxedExpression): BoxedExpression {
     const base = semiBase ? this.engine.box(semiBase) : undefined;
-    if (!this.isCanonical) return this.canonical.ln(base);
 
     // Mathematica returns `Log[0]` as `-∞`
     if (this.is(0)) return this.engine.NegativeInfinity;
@@ -389,72 +290,86 @@ export class BoxedSymbol extends _BoxedExpression {
     return 7;
   }
 
-  get operator(): string {
+  get operator(): MathJsonSymbol {
     return 'Symbol';
   }
 
-  get symbol(): string {
+  get symbol(): MathJsonSymbol {
     return this._id;
   }
 
-  //  A base definition is the base class of both symbol and function definition
+  //  A base definition is the base class of both value and operator definition
   get baseDefinition(): BoxedBaseDefinition | undefined {
-    if (this._def === undefined) this.bind();
-    return this._def ?? undefined;
+    return this.valueDefinition ?? this.operatorDefinition;
   }
 
-  get symbolDefinition(): BoxedSymbolDefinition | undefined {
-    if (this._def === undefined) this.bind();
-
-    return this._def instanceof _BoxedSymbolDefinition ? this._def : undefined;
+  get valueDefinition(): BoxedValueDefinition | undefined {
+    if (isValueDef(this._def)) return this._def.value;
+    return undefined;
   }
 
-  get functionDefinition(): BoxedFunctionDefinition | undefined {
-    if (this._def === undefined) this.bind();
-    return this._def instanceof _BoxedFunctionDefinition
-      ? this._def
-      : undefined;
+  get operatorDefinition(): BoxedOperatorDefinition | undefined {
+    if (isOperatorDef(this._def)) return this._def.operator;
+    return undefined;
   }
 
   /**
    *
-   * Subsequent inferences will narrow the domain of the symbol.
+   * Assuming the symbol is used as an argument, subsequent inferences will
+   * narrow the domain of the symbol:
+   *
    * ```
-   * f: integer -> real, g: real -> real
-   * g(x) => x: real
-   * f(x) => x: integer narrowed from integer to real
+   * f: real -> number, g: integer -> number
+   * f(x) => x: inferred to real
+   * g(x) => x: narrowed to integer
    * ```
+   *
+   * If the symbol is used as a return value, its domain should be widened:
+   *
+   * ```
+   * f: number -> integer, g: number -> real
+   * x = f(2) => x: inferred to integer
+   * x = g(2) => x: widened to real
+   * ```
+   *
+   * Arguments accumulate constraints and narrow.
+   * Return values accumulate possibilities and widen.
+   *
    * @inheritdoc
    */
-  infer(t: Type): boolean {
-    // Call _lookupDef() to *not* auto-bind the symbol
-    // which would defeat the purpose of inferring the type
-    const def = this._lookupDef();
+  infer(t: Type, inferenceMode: 'narrow' | 'widen' = 'narrow'): boolean {
+    if (!this._def) return false;
 
-    //
-    // 1/ If we don't know anything about this symbol yet, create a definition
-    //
-    if (!def) {
-      const scope = this.engine.swapScope(this._scope ?? this.engine.context);
-      this._def = this.engine.defineSymbol(this._id, {
-        type: t,
-        inferred: true,
-      });
-      this.engine.swapScope(scope);
-      return true;
+    const def = this._def;
+    if (isValueDef(def)) {
+      if (def.value.inferredType || def.value.type.isUnknown) {
+        // Constants should never be inferred
+        console.assert(!def.value.isConstant);
+
+        def.value.type = this.engine.type(
+          inferenceMode === 'widen'
+            ? widen(def.value.type.type, t)
+            : narrow(def.value.type.type, t)
+        );
+        return true;
+      }
+      return false;
     }
 
-    //
-    // 2/ Widen the type, if it was previously inferred
-    //
-    if (
-      def instanceof _BoxedSymbolDefinition &&
-      (def.inferredType || def.type.isUnknown)
-    ) {
-      // Constants should never be inferred
-      console.assert(!def.isConstant);
-
-      def.type = widen(def.type.type, t);
+    if (isOperatorDef(def)) {
+      const newType = this.engine.type(
+        inferenceMode === 'widen'
+          ? widen(def.operator.signature.type, t)
+          : narrow(def.operator.signature.type, t)
+      );
+      if (newType.matches('function')) {
+        // The function signature was modified
+        def.operator.signature = newType;
+        return true;
+      }
+      // The type is no longer a function, use a value definition
+      delete (def as any).operator;
+      (def as any).value = { value: { type: newType } };
       return true;
     }
 
@@ -462,35 +377,24 @@ export class BoxedSymbol extends _BoxedExpression {
     return false;
   }
 
-  get literalValue(): BoxedExpression | undefined {
-    const def = this.symbolDefinition;
-    const v = def?.value;
+  /** Return the value of the symbol, undefined if an operator or not bound */
+  get _value(): BoxedExpression | undefined {
+    if (!this._def || isOperatorDef(this._def)) return undefined;
 
-    // @todo: should check the frames to get the value...
+    // If the symbol is a constant, the definition has the value
+    if (this._def.value.isConstant) return this._def.value.value;
 
-    if (v === undefined) return undefined;
-    // if (v.symbol === 'True') return this.engine.True;
-    // if (v.symbol === 'False') return this.engine.False;
-    // if (v.symbol === 'ImaginaryUnit') return this.engine.I;
-    // if (v.symbol === 'NaN') return this.engine.NaN;
-    // if (v.symbol === 'ComplexInfinity') return this.engine.ComplexInfinity;
-    // if (v.symbol === 'PositiveInfinity') return this.engine.PositiveInfinity;
-    // if (v.symbol === 'NegativeInfinity') return this.engine.NegativeInfinity;
-
-    return v;
+    // Lookup the value in the current evaluation context
+    return this.engine._getSymbolValue(this._id);
   }
 
-  get value(): number | boolean | string | undefined {
-    const v = this.symbolDefinition?.value;
-    if (v === undefined) return undefined;
-    if (v.symbol === 'True') return true;
-    if (v.symbol === 'False') return false;
-    if (v.symbol === 'NaN') return NaN;
-    if (v.symbol === 'ComplexInfinity') return '~oo';
-    if (v.symbol === 'PositiveInfinity') return Infinity;
-    if (v.symbol === 'NegativeInfinity') return -Infinity;
-    if (v.symbol === 'ImaginaryUnit') return 'i';
-    return this.symbolDefinition?.value?.valueOf() ?? undefined;
+  get value(): BoxedExpression | undefined {
+    // If the definition is an operator definition, return a special value
+    // @todo:  not clear this is something useful... Could return a hash of the operator, and keep a map of hash to their definitions...
+    if (isOperatorDef(this._def))
+      return this.engine._fn('Operator', [this.engine.string(this._id)]);
+
+    return this._value;
   }
 
   set value(
@@ -509,10 +413,13 @@ export class BoxedSymbol extends _BoxedExpression {
       | number
       | undefined
   ) {
+    if (!this._def)
+      throw new Error(`Cannot set value of non-canonical ${this._id}`);
+
     const ce = this.engine;
 
     //
-    // Clear assumptions  about this symbol
+    // Clear assumptions about this symbol
     //
     ce.forget(this._id);
 
@@ -536,7 +443,7 @@ export class BoxedSymbol extends _BoxedExpression {
     }
 
     if (value !== undefined) {
-      const boxedValue = ce.box(value as Decimal | BoxedExpression);
+      const boxedValue = ce.box(value as BoxedExpression);
       v = boxedValue.evaluate();
     }
 
@@ -544,76 +451,80 @@ export class BoxedSymbol extends _BoxedExpression {
     // Assign the value to the corresponding definition
     //
     if (v?.type.matches('function')) {
-      console.assert(!this.engine.lookupSymbol(this._id));
-
-      // New function definitions always completely replace an existing one
-      this._def = ce.defineFunction(this._id, {
-        signature: v.type.toString(),
+      // New operator definitions always completely replace an existing one
+      // @ts-expect-error
+      delete this._def.value;
+      // @ts-expect-error
+      this._def.operator = {
+        signature: v.type,
         evaluate: v, // Evaluate as a lambda
-      });
+      };
       return;
     }
 
-    const def = this.engine.lookupSymbol(this._id);
+    if (isValueDef(this._def) && this._def.value.isConstant)
+      throw new Error(
+        `The value of the constant "${this._id}" cannot be changed`
+      );
 
-    if (def && def instanceof _BoxedSymbolDefinition) {
-      // We are already bound to a symbol definition, update it
-      // (this may throw if the definition is readonly)
-      def.value = v;
-    } else {
-      // Create a new symbol definition
-      this._def = ce.defineSymbol(this._id, {
-        value: v,
-        type: v?.type.toString(),
-      });
-    }
+    ce._setSymbolValue(this._id, v);
   }
 
-  // The type of the value of the symbol.
-  // If the symbol is not bound to a definition, the type is 'unknown'
+  /**
+   * The type of the symbol.
+   *
+   * Note that the type of the value of the symbol may be more specific.'
+   * For example, a symbol could have a type of 'number' but the value
+   * could be 'integer'.
+   *
+   * If the symbol is not canonical (not bound to a definition), the type is
+   * 'unknown'
+   */
   get type(): BoxedType {
     const def = this._def;
-    if (!def) return BoxedType.unknown;
-    if (def instanceof _BoxedSymbolDefinition) return def.type;
-    if (def instanceof _BoxedFunctionDefinition) return def.signature;
+    if (isValueDef(def)) return def.value.type;
+    if (isOperatorDef(def)) return def.operator.signature;
     return BoxedType.unknown;
   }
 
   set type(t: Type | TypeString | BoxedType) {
-    // Do nothing if the symbol is not bound
-    if (!this._def) return;
-
-    if (t instanceof BoxedType) t = t.type;
+    if (!this._def)
+      throw new Error(`Cannot set type of non-canonical symbol "${this._id}"`);
 
     if (this._id[0] === '_')
       throw new Error(
         `The type of the wildcard "${this._id}" cannot be changed`
       );
 
+    // Clear assumptions about this symbol
+    this.engine.forget(this._id);
+
+    if (typeof t === 'string') t = parseType(t);
+    else if (t instanceof BoxedType) t = t.type;
+
     if (t === 'function' || isSignatureType(t)) {
-      this.engine.forget(this._id);
-      this._def = this.engine.defineFunction(this._id, {
-        signature: t.toString(),
-      });
-    } else if (this._def instanceof _BoxedSymbolDefinition) {
-      // Setting the domain will also update the flags
-      this._def.type = typeof t === 'string' ? parseType(t) : t;
+      if (isOperatorDef(this._def)) {
+        // We are changing the signature of a function
+        // @ts-expect-error
+        this._def.operator.signature = t;
+      } else {
+        // We are changing a symbol to a function
+        delete (this._def as any).value;
+        (this._def as any).operator = { signature: t };
+      }
     } else {
-      // Symbol was not bound to a definition, bind it in the current scope
-      this.engine.forget(this._id);
-      this._def = this.engine.defineSymbol(this._id, { type: t.toString() });
+      if (isOperatorDef(this._def)) {
+        // We are changing a function to a symbol
+        delete (this._def as any).operator;
+        (this._def as any).value = { type: t };
+      } else {
+        // We are changing the type of a symbol
+        (this._def as any).value.type = t;
+      }
     }
   }
 
-  // The sign of the value of the symbol
-  get sgn(): Sign | undefined {
-    const def = this._def;
-    if (!def || !(def instanceof _BoxedSymbolDefinition)) return undefined;
-
-    return def.sgn;
-  }
-
-  has(x: string | string[]): boolean {
+  has(x: MathJsonSymbol | MathJsonSymbol[]): boolean {
     if (typeof x === 'string') return this._id === x;
     return x.includes(this._id);
   }
@@ -625,37 +536,29 @@ export class BoxedSymbol extends _BoxedExpression {
     return match(this, pattern, options);
   }
 
-  /**
-   * **Note**: This check _binds_ the symbol.
-   */
-  get isFunction(): boolean | undefined {
-    return !!this.functionDefinition;
+  // The sign of the value of the symbol
+  get sgn(): Sign | undefined {
+    return this.value?.sgn;
   }
 
   get isOdd(): boolean | undefined {
-    return this.symbolDefinition?.odd;
+    return this.value?.isOdd;
   }
 
   get isEven(): boolean | undefined {
-    return this.symbolDefinition?.even;
+    return this.value?.isEven;
   }
 
   get isFinite(): boolean | undefined {
-    if (this.isNaN) return false;
-
-    const s = this.sgn;
-    if (!s) return undefined;
-    return !infinitySgn(s);
+    return this.value?.isFinite;
   }
 
   get isInfinity(): boolean | undefined {
-    return infinitySgn(this.symbolDefinition?.sgn);
+    return this.value?.isInfinity;
   }
 
   get isNaN(): boolean | undefined {
-    const v = this.symbolDefinition?.value?.isNaN;
-    if (v === undefined) return undefined;
-    return v;
+    return this.value?.isNaN;
   }
 
   // x > 0
@@ -675,55 +578,50 @@ export class BoxedSymbol extends _BoxedExpression {
     return nonNegativeSign(this.sgn);
   }
 
-  /**
-   *
-   * Checking this does *not bind* the definition if this is symbol.
-   *
-   * @inheritdoc
-   */
+  get isFunction(): boolean | undefined {
+    const t = this.type;
+    if (t.isUnknown) return undefined;
+    return this.type.matches('function');
+  }
+
   get isNumber(): boolean | undefined {
-    // Since we infer the type of a symbol to a `number`, we don't need
-    // to check if the type was inferred.
     const t = this.type;
     if (t.isUnknown) return undefined;
     return t.matches('number');
   }
 
   get isInteger(): boolean | undefined {
-    if (this.symbolDefinition?.inferredType) return undefined;
     const t = this.type;
     if (t.isUnknown) return undefined;
     return t.matches('integer');
   }
 
   get isRational(): boolean | undefined {
-    if (this.symbolDefinition?.inferredType) return undefined;
     const t = this.type;
     if (t.isUnknown) return undefined;
     return t.matches('rational');
   }
 
   get isReal(): boolean | undefined {
-    if (this.symbolDefinition?.inferredType) return undefined;
     const t = this.type;
     if (t.isUnknown) return undefined;
     return t.matches('real');
   }
 
   get re(): number {
-    return this.symbolDefinition?.value?.re ?? NaN;
+    return this.value?.re ?? NaN;
   }
 
   get im(): number {
-    return this.symbolDefinition?.value?.im ?? NaN;
+    return this.value?.im ?? NaN;
   }
 
   get bignumRe(): BigNum | undefined {
-    return this.symbolDefinition?.value?.bignumRe;
+    return this.value?.bignumRe;
   }
 
   get bignumIm(): BigNum | undefined {
-    return this.symbolDefinition?.value?.bignumIm;
+    return this.value?.bignumIm;
   }
 
   simplify(options?: Partial<SimplifyOptions>): BoxedExpression {
@@ -731,22 +629,33 @@ export class BoxedSymbol extends _BoxedExpression {
   }
 
   evaluate(options?: Partial<EvaluateOptions>): BoxedExpression {
-    const def = this.symbolDefinition;
+    const def = this.valueDefinition;
     if (!def) return this;
     const hold = def.holdUntil;
 
-    if (options?.numericApproximation) {
-      if (hold === 'never' || hold === 'evaluate' || hold === 'N')
-        return def.value?.N() ?? this;
-    } else {
-      if (hold === 'never' || hold === 'evaluate')
+    if (def.isConstant) {
+      if (options?.numericApproximation) {
+        if (hold === 'never' || hold === 'evaluate' || hold === 'N')
+          return def.value?.N() ?? this;
+      } else if (hold === 'never' || hold === 'evaluate')
         return def.value?.evaluate(options) ?? this;
+    } else {
+      if (
+        hold === 'never' ||
+        hold === 'evaluate' ||
+        (hold === 'N' && options?.numericApproximation)
+      ) {
+        let expr = this.engine._getSymbolValue(this._id) ?? this;
+        if (expr.operator === 'Unevaluated')
+          expr = expr.evaluate(options) ?? this;
+        return expr;
+      }
     }
     return this;
   }
 
   N(): BoxedExpression {
-    const def = this.symbolDefinition;
+    const def = this.valueDefinition;
     if (def && def.holdUntil === 'never') return this;
     return def?.value?.N() ?? this;
   }
@@ -768,58 +677,99 @@ export class BoxedSymbol extends _BoxedExpression {
     return this.engine.box(sub[this._id], { canonical });
   }
 
+  get _asCollection(): CollectionHandlers | undefined {
+    if (isValueDef(this._def)) return this._def.value.collection;
+    return undefined;
+  }
+
   get isCollection(): boolean {
-    return this._getDef()?.collection?.contains !== undefined;
+    return (
+      this._asCollection?.iterator !== undefined ||
+      (this._value?.isCollection ?? false)
+    );
   }
 
-  contains(rhs: BoxedExpression): boolean {
-    return this._getDef()?.collection?.contains?.(this, rhs) ?? false;
+  get isIndexedCollection(): boolean {
+    return (
+      this._asCollection?.at !== undefined ||
+      (this._value?.isIndexedCollection ?? false)
+    );
   }
 
-  get size(): number {
-    return this._getDef()?.collection?.size?.(this) ?? 0;
+  get isLazyCollection(): boolean {
+    return (
+      this._asCollection?.isLazy?.(this._value ?? this) ??
+      this._value?.isLazyCollection ??
+      false
+    );
   }
 
-  each(start?: number, count?: number): Iterator<BoxedExpression, undefined> {
-    const iter = this._getDef()?.collection?.iterator?.(this, start, count);
-    if (!iter)
-      return {
-        next() {
-          return { done: true, value: undefined };
-        },
-      };
-    return iter;
+  xcontains(rhs: BoxedExpression): boolean | undefined {
+    return (
+      this._asCollection?.contains?.(this._value ?? this, rhs) ??
+      this._value?.xcontains?.(rhs)
+    );
+  }
+
+  get xsize(): number {
+    return (
+      this._asCollection?.count(this._value ?? this) ?? this._value?.xsize ?? 0
+    );
+  }
+
+  get isEmptyCollection(): boolean {
+    return (
+      this._asCollection?.isEmpty?.(this._value ?? this) ??
+      this._value?.isEmptyCollection ??
+      this.xsize === 0
+    );
+  }
+
+  get isFiniteCollection(): boolean | undefined {
+    return (
+      this._asCollection?.isFinite?.(this._value ?? this) ??
+      this._value?.isFiniteCollection ??
+      isFinite(this.xsize)
+    );
+  }
+
+  each(): Generator<BoxedExpression> {
+    const iter = this._asCollection?.iterator?.(this._value ?? this);
+    if (iter)
+      return (function* () {
+        let result = iter.next();
+        while (!result.done) {
+          yield result.value;
+          result = iter.next();
+        }
+      })();
+    return this._value?.each() ?? (function* () {})();
   }
 
   at(index: number): BoxedExpression | undefined {
-    return this._getDef()?.collection?.at?.(this, index);
+    return (
+      this._asCollection?.at?.(this._value ?? this, index) ??
+      this._value?.at?.(index)
+    );
   }
 
   get(index: BoxedExpression | string): BoxedExpression | undefined {
-    if (typeof index === 'string')
-      return this.baseDefinition?.collection?.at?.(this, index);
-
-    if (!index.string) return undefined;
-    return this.symbolDefinition?.collection?.at?.(this, index.string);
+    return this._value?.get?.(index);
   }
 
-  indexOf(expr: BoxedExpression): number {
-    return this._getDef()?.collection?.indexOf?.(this, expr) ?? -1;
+  indexWhere(
+    predicate: (element: BoxedExpression) => boolean
+  ): number | undefined {
+    if (this._asCollection?.indexWhere)
+      return this._asCollection.indexWhere(this._value ?? this, predicate);
+    return this._value?.indexWhere(predicate);
   }
 
   subsetOf(rhs: BoxedExpression, strict: boolean): boolean {
-    return this._getDef()?.collection?.subsetOf?.(this, rhs, strict) ?? false;
+    return (
+      this._asCollection?.subsetOf?.(this._value ?? this, rhs, strict) ??
+      this._value?.subsetOf?.(rhs, strict) ??
+      false
+    );
   }
-}
-
-export function makeCanonicalSymbol(
-  ce: ComputeEngine,
-  name: string
-): BoxedExpression {
-  const def = ce.lookupSymbol(name);
-  if (def?.holdUntil === 'never' && def.value) return def.value;
-  if (def) return new BoxedSymbol(ce, name, { canonical: true, def });
-  const fnDef = ce.lookupFunction(name);
-  if (fnDef) return new BoxedSymbol(ce, name, { canonical: true, def: fnDef });
-  return new BoxedSymbol(ce, name, { canonical: true });
 }

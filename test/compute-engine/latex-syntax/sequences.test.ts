@@ -92,7 +92,7 @@ describe('DELIMITERS SERIALIZING', () => {
   test('Sequence with square brackets', () =>
     expect(check(['Delimiter', ['Sequence', 1, 2, 3], "'[]'"]))
       .toMatchInlineSnapshot(`
-      box       = ["Delimiter", ["Sequence", 1, 2, 3], "'[]'"]
+      box       = ["Delimiter", ["Sequence", 1, 2, 3], "[]"]
       canonical = ["Triple", 1, 2, 3]
       box-latex = \\lbrack123\\rbrack
       latex     = (1,2,3)
@@ -101,7 +101,7 @@ describe('DELIMITERS SERIALIZING', () => {
   test('Sequence with mix of brackets', () =>
     expect(check(['Delimiter', ['Sequence', 1, 2, 3], "')['"]))
       .toMatchInlineSnapshot(`
-      box       = ["Delimiter", ["Sequence", 1, 2, 3], "')['"]
+      box       = ["Delimiter", ["Sequence", 1, 2, 3], ")["]
       canonical = ["Triple", 1, 2, 3]
       box-latex = )123\\lbrack
       latex     = (1,2,3)
@@ -110,7 +110,7 @@ describe('DELIMITERS SERIALIZING', () => {
   test('Sequence with custom separator', () =>
     expect(check(['Delimiter', ['Sequence', 1, 2, 3], "'(;)'"]))
       .toMatchInlineSnapshot(`
-      box       = ["Delimiter", ["Sequence", 1, 2, 3], "'(;)'"]
+      box       = ["Delimiter", ["Sequence", 1, 2, 3], "(;)"]
       canonical = ["Triple", 1, 2, 3]
       box-latex = (1;2;3)
       latex     = (1,2,3)
@@ -119,7 +119,7 @@ describe('DELIMITERS SERIALIZING', () => {
   test('Sequence with custom Pipe separator', () =>
     expect(check(['Delimiter', ['Sequence', 1, 2, 3], "'<|>'"]))
       .toMatchInlineSnapshot(`
-      box       = ["Delimiter", ["Sequence", 1, 2, 3], "'<|>'"]
+      box       = ["Delimiter", ["Sequence", 1, 2, 3], "<|>"]
       canonical = ["Triple", 1, 2, 3]
       box-latex = \\langle1\\mvert2\\mvert3\\rangle
       latex     = (1,2,3)
@@ -129,7 +129,7 @@ describe('DELIMITERS SERIALIZING', () => {
 describe('SEQUENCE PARSING', () => {
   test('Simple sequences can be comma separated', () =>
     expect(check('1, 2, 3')).toMatchInlineSnapshot(`
-      box       = ["Delimiter", ["Sequence", 1, 2, 3], "','"]
+      box       = ["Delimiter", ["Sequence", 1, 2, 3], ","]
       canonical = ["Triple", 1, 2, 3]
       box-latex = 1,2,3
       latex     = (1,2,3)
@@ -144,7 +144,7 @@ describe('SEQUENCE PARSING', () => {
 
   test('Sequences can be semicolon separated', () =>
     expect(check('1; 2; 3')).toMatchInlineSnapshot(`
-      box       = ["Delimiter", ["Sequence", 1, 2, 3], "';'"]
+      box       = ["Delimiter", ["Sequence", 1, 2, 3], ";"]
       canonical = ["Triple", 1, 2, 3]
       box-latex = 1;2;3
       latex     = (1,2,3)
@@ -154,8 +154,8 @@ describe('SEQUENCE PARSING', () => {
     expect(check('1; 2, 3, 4, 5; 6; 7')).toMatchInlineSnapshot(`
       box       = [
         "Delimiter",
-        ["Sequence", 1, ["Delimiter", ["Sequence", 2, 3, 4, 5], "','"], 6, 7],
-        "';'"
+        ["Sequence", 1, ["Delimiter", ["Sequence", 2, 3, 4, 5], ","], 6, 7],
+        ";"
       ]
       canonical = ["Tuple", 1, ["Tuple", 2, 3, 4, 5], 6, 7]
       box-latex = 1;2,3,4,5;6;7
@@ -203,17 +203,13 @@ describe('DELIMITERS PARSING', () => {
 
     // Expressions as element of the sequence
     expect(check('(x+1, a+b)')).toMatchInlineSnapshot(`
-      box       = [
-        "Delimiter",
-        ["Sequence", ["Add", "x", 1], ["Add", "a", "b"]],
-        "'(,)'"
-      ]
+      box       = ["Delimiter", ["Sequence", ["Add", "x", 1], ["Add", "a", "b"]], "(,)"]
       canonical = ["Pair", ["Add", "x", 1], ["Add", "a", "b"]]
       box-latex = (x+1,a+b)
       latex     = (x+1,a+b)
     `);
 
-    // Multiple nested arguments of a non-function declared identifier
+    // Multiple nested arguments of a non-function declared symbol
     expect(check('q(1, 2,3; 4, 5, 6)')).toMatchInlineSnapshot(`
       box       = [
         "InvisibleOperator",
@@ -222,10 +218,10 @@ describe('DELIMITERS PARSING', () => {
           "Delimiter",
           [
             "Sequence",
-            ["Delimiter", ["Sequence", 1, 2, 3], "','"],
-            ["Delimiter", ["Sequence", 4, 5, 6], "','"]
+            ["Delimiter", ["Sequence", 1, 2, 3], ","],
+            ["Delimiter", ["Sequence", 4, 5, 6], ","]
           ],
-          "'(;)'"
+          "(;)"
         ]
       ]
       canonical = ["q", ["Triple", 1, 2, 3], ["Triple", 4, 5, 6]]
@@ -282,7 +278,7 @@ describe('DELIMITERS PARSING', () => {
     `);
     // Sequence with empty element
     expect(check('(a,,b)')).toMatchInlineSnapshot(`
-      box       = ["Delimiter", ["Sequence", "a", "Nothing", "b"], "'(,)'"]
+      box       = ["Delimiter", ["Sequence", "a", "Nothing", "b"], "(,)"]
       canonical = ["Triple", "a", "Nothing", "b"]
       box-latex = (a,\\mathrm{Nothing},b)
       latex     = (a,\\mathrm{Nothing},b)
@@ -291,7 +287,7 @@ describe('DELIMITERS PARSING', () => {
 
   test('Groups', () => {
     expect(check('(a, b, c)')).toMatchInlineSnapshot(`
-      box       = ["Delimiter", ["Sequence", "a", "b", "c"], "'(,)'"]
+      box       = ["Delimiter", ["Sequence", "a", "b", "c"], "(,)"]
       canonical = ["Triple", "a", "b", "c"]
       box-latex = (a,b,c)
       latex     = (a,b,c)
@@ -301,12 +297,12 @@ describe('DELIMITERS PARSING', () => {
         "Delimiter",
         [
           "Sequence",
-          ["Delimiter", ["Sequence", "a", "b"], "','"],
-          ["Delimiter", ["Sequence", "c", "d", "Nothing"], "','"],
+          ["Delimiter", ["Sequence", "a", "b"], ","],
+          ["Delimiter", ["Sequence", "c", "d", "Nothing"], ","],
           "Nothing",
-          ["Delimiter", ["Sequence", "n", "Nothing", "m"], "','"]
+          ["Delimiter", ["Sequence", "n", "Nothing", "m"], ","]
         ],
-        "'(;)'"
+        "(;)"
       ]
       canonical = [
         "Tuple",
@@ -321,8 +317,8 @@ describe('DELIMITERS PARSING', () => {
     expect(check('(a, (b, c))')).toMatchInlineSnapshot(`
       box       = [
         "Delimiter",
-        ["Sequence", "a", ["Delimiter", ["Sequence", "b", "c"], "'(,)'"]],
-        "'(,)'"
+        ["Sequence", "a", ["Delimiter", ["Sequence", "b", "c"], "(,)"]],
+        "(,)"
       ]
       canonical = ["Pair", "a", ["Pair", "b", "c"]]
       box-latex = (a,(b,c))
@@ -331,8 +327,8 @@ describe('DELIMITERS PARSING', () => {
     expect(check('(a, (b; c))')).toMatchInlineSnapshot(`
       box       = [
         "Delimiter",
-        ["Sequence", "a", ["Delimiter", ["Sequence", "b", "c"], "'(;)'"]],
-        "'(,)'"
+        ["Sequence", "a", ["Delimiter", ["Sequence", "b", "c"], "(;)"]],
+        "(,)"
       ]
       canonical = ["Pair", "a", ["Pair", "b", "c"]]
       box-latex = (a,(b;c))
@@ -341,28 +337,28 @@ describe('DELIMITERS PARSING', () => {
   });
   test('Sequences', () => {
     expect(check('a, b, c')).toMatchInlineSnapshot(`
-      box       = ["Delimiter", ["Sequence", "a", "b", "c"], "','"]
+      box       = ["Delimiter", ["Sequence", "a", "b", "c"], ","]
       canonical = ["Triple", "a", "b", "c"]
       box-latex = a,b,c
       latex     = (a,b,c)
     `);
     // Sequence with missing element
     expect(check('a,, c')).toMatchInlineSnapshot(`
-      box       = ["Delimiter", ["Sequence", "a", "Nothing", "c"], "','"]
+      box       = ["Delimiter", ["Sequence", "a", "Nothing", "c"], ","]
       canonical = ["Triple", "a", "Nothing", "c"]
       box-latex = a,\\mathrm{Nothing},c
       latex     = (a,\\mathrm{Nothing},c)
     `);
     // Sequence with missing final element
     expect(check('a,c,')).toMatchInlineSnapshot(`
-      box       = ["Delimiter", ["Sequence", "a", "c", "Nothing"], "','"]
+      box       = ["Delimiter", ["Sequence", "a", "c", "Nothing"], ","]
       canonical = ["Triple", "a", "c", "Nothing"]
       box-latex = a,c,\\mathrm{Nothing}
       latex     = (a,c,\\mathrm{Nothing})
     `);
     // Sequence with missing initial element
     expect(check(',c,b')).toMatchInlineSnapshot(`
-      box       = ["Delimiter", ["Sequence", "Nothing", "c", "b"], "','"]
+      box       = ["Delimiter", ["Sequence", "Nothing", "c", "b"], ","]
       canonical = ["Triple", "Nothing", "c", "b"]
       box-latex = \\mathrm{Nothing},c,b
       latex     = (\\mathrm{Nothing},c,b)
@@ -374,12 +370,12 @@ describe('DELIMITERS PARSING', () => {
         "Delimiter",
         [
           "Sequence",
-          ["Delimiter", ["Sequence", "a", "b"], "','"],
-          ["Delimiter", ["Sequence", "k", "l", "m"], "','"],
+          ["Delimiter", ["Sequence", "a", "b"], ","],
+          ["Delimiter", ["Sequence", "k", "l", "m"], ","],
           "f",
-          ["Delimiter", ["Sequence", "g", "h"], "','"]
+          ["Delimiter", ["Sequence", "g", "h"], ","]
         ],
-        "';'"
+        ";"
       ]
       canonical = [
         "Tuple",
@@ -396,12 +392,12 @@ describe('DELIMITERS PARSING', () => {
         "Delimiter",
         [
           "Sequence",
-          ["Error", "'missing'", ["LatexString", "';'"]],
+          ["Error", "'missing'", ["LatexString", ";"]],
           "Nothing",
           "a",
           "Nothing"
         ],
-        "';'"
+        ";"
       ]
       box-latex = \\error{\\blacksquare};\\mathrm{Nothing};a;\\mathrm{Nothing}
       latex     = \\error{\\blacksquare};\\mathrm{Nothing};a;\\mathrm{Nothing}
@@ -424,7 +420,7 @@ describe('SETS, LISTS, TUPLES', () => {
     `));
   test('Lists can be enclosed in extensible parenthesis', () =>
     expect(check('\\left(1, 2, 3\\right)')).toMatchInlineSnapshot(`
-      box       = ["Delimiter", ["Sequence", 1, 2, 3], "'(,)'"]
+      box       = ["Delimiter", ["Sequence", 1, 2, 3], "(,)"]
       canonical = ["Triple", 1, 2, 3]
       box-latex = (1,2,3)
       latex     = (1,2,3)
@@ -439,7 +435,7 @@ describe('SETS, LISTS, TUPLES', () => {
 
   test('Tuples can be enclosed in parenthesis', () =>
     expect(check('(1, 2, 3)')).toMatchInlineSnapshot(`
-      box       = ["Delimiter", ["Sequence", 1, 2, 3], "'(,)'"]
+      box       = ["Delimiter", ["Sequence", 1, 2, 3], "(,)"]
       canonical = ["Triple", 1, 2, 3]
       box-latex = (1,2,3)
       latex     = (1,2,3)

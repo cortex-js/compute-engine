@@ -1,5 +1,17 @@
 // Jest Snapshot v1, https://goo.gl/fbAQLP
 
+exports[` 1`] = `
+box       = ["Max", 2.5, -1.1, "NaN", 18.4]
+eval-auto = 18.4
+`;
+
+exports[` 2`] = `
+box       = ["Max", 2.5, -1.1, "foo", 18.4]
+eval-auto = max(18.4, "foo")
+`;
+
+exports[` 3`] = `["Max", "foo", "bar"]`;
+
 exports[`ADD Add  1`] = `
 box       = [
   "Add",
@@ -319,18 +331,16 @@ N-mach    = 23.140692632779263
 
 exports[`EXP Exp ['Complex', 1.1, 1.1] 1`] = `
 box       = ["Exp", ["Complex", 1.1, 1.1]]
-eval-auto = e^(1.1 + 1.1i)
-eval-mach = e^(1.1 + 1.1i)
+eval-auto = (1.36267805658060030032 + 2.677334871387559i)
+eval-mach = (1.3626780565806 + 2.6773348713875595i)
 N-auto    = (1.3626780565806003 + 2.67733487138756i)
 N-mach    = (1.3626780565806003 + 2.67733487138756i)
 `;
 
 exports[`EXP Exp ['List', 1.1, 2, 4] 1`] = `
 box       = ["Exp", ["List", 1.1, 2, 4]]
-eval-auto = [e^(1.1),e^2,e^4]
-eval-mach = [e^(1.1),e^2,e^4]
-N-auto    = [3.00416602394643311206,7.38905609893065022723,54.5981500331442390781]
-N-mach    = [3.00416602394643,7.3890560989306495,54.59815003314423]
+eval-auto = [3.00416602394643311206,7.38905609893065022723,54.5981500331442390781]
+eval-mach = [3.004166023946433,7.3890560989306495,54.59815003314423]
 `;
 
 exports[`EXP Exp -1 1`] = `
@@ -358,9 +368,8 @@ N-mach    = 2.718281828459045
 
 exports[`EXP Exp 1.1 1`] = `
 box       = ["Exp", 1.1]
-eval-auto = e^(1.1)
-eval-mach = e^(1.1)
-N-auto    = 3.00416602394643311206
+eval-auto = 3.00416602394643311206
+eval-mach = 3.004166023946433
 N-mach    = 3.00416602394643
 `;
 
@@ -369,10 +378,7 @@ exports[`INVALID LOG Ln 1`] = `invalid   =["Ln", ["Error", "'missing'"]]`;
 exports[`INVALID LOG Ln with string argument 1`] = `
 invalid   =[
   "Ln",
-  [
-    "Error",
-    ["ErrorCode", "'incompatible-type'", "'number'", "'string'"]
-  ]
+  ["Error", ["ErrorCode", "incompatible-type", "'number'", "'string'"]]
 ]
 `;
 
@@ -385,20 +391,20 @@ eval-mach = 0.792481250360578
 N-auto    = 0.792481250360578090727
 `;
 
-exports[`INVALID NEGATE INVALID Negate 1`] = `["Negate", 2.5, ["Error", "'unexpected-argument'", "'1.1'"]]`;
+exports[`INVALID NEGATE INVALID Negate 1`] = `["Negate", 2.5, ["Error", "unexpected-argument", "'1.1'"]]`;
 
 exports[`INVALID NEGATE INVALID Negate 2`] = `
 [
   "Negate",
   2.5,
-  ["Error", "'unexpected-argument'", "'-1.1'"],
-  ["Error", "'unexpected-argument'", "'18.4'"]
+  ["Error", "unexpected-argument", "'-1.1'"],
+  ["Error", "unexpected-argument", "'18.4'"]
 ]
 `;
 
 exports[`INVALID ROOT Too few args 1`] = `["Root", 2.5, ["Error", "'missing'"]]`;
 
-exports[`INVALID ROOT Too many args 1`] = `["Root", 2.5, -1.1, ["Error", "'unexpected-argument'", "'18.4'"]]`;
+exports[`INVALID ROOT Too many args 1`] = `["Root", 2.5, -1.1, ["Error", "unexpected-argument", "'18.4'"]]`;
 
 exports[`LB Lb 'Pi' 1`] = `
 box       = ["Lb", "Pi"]
@@ -555,7 +561,7 @@ eval-mach = 0.0953101798043249
 N-mach    = 0.09531017980432493
 `;
 
-exports[`LOG(a,b) LOG(a,b) Log 'Pi', 5 1`] = `
+exports[`LOG(a,b) Log 'Pi', 5 1`] = `
 box       = ["Log", "Pi", 5]
 eval-auto = log(pi, 5)
 eval-mach = log(pi, 5)
@@ -563,7 +569,7 @@ N-auto    = 0.711260668712668955331
 N-mach    = 0.711260668712669
 `;
 
-exports[`LOG(a,b) LOG(a,b) Log ['Complex', 1.1, 1.1], 5 1`] = `
+exports[`LOG(a,b) Log ['Complex', 1.1, 1.1], 5 1`] = `
 box       = ["Log", ["Complex", 1.1, 1.1], 5]
 simplify  = (0.274557823368281573137 + 0.7853981633974483i)
 eval-auto = (0.274557823368281573137 + 0.7853981633974483i)
@@ -572,22 +578,22 @@ N-auto    = (0.2745578233682816 + 0.48799531645779287i)
 N-mach    = (0.2745578233682816 + 0.48799531645779287i)
 `;
 
-exports[`LOG(a,b) LOG(a,b) Log -1, 5 1`] = `
+exports[`LOG(a,b) Log -1, 5 1`] = `
 box       = ["Log", -1, 5]
 simplify  = NaN
 `;
 
-exports[`LOG(a,b) LOG(a,b) Log 0, 5 1`] = `
+exports[`LOG(a,b) Log 0, 5 1`] = `
 box       = ["Log", 0, 5]
 simplify  = -oo
 `;
 
-exports[`LOG(a,b) LOG(a,b) Log 1, 5 1`] = `
+exports[`LOG(a,b) Log 1, 5 1`] = `
 box       = ["Log", 1, 5]
 canonical = 0
 `;
 
-exports[`LOG(a,b) LOG(a,b) Log 1.1, 5 1`] = `
+exports[`LOG(a,b) Log 1.1, 5 1`] = `
 box       = ["Log", 1.1, 5]
 simplify  = 0.0592195443315850221291
 eval-auto = 0.0592195443315850221291
@@ -881,32 +887,20 @@ canonical = ["Multiply", 0, 2, 3.1, "x"]
 simplify  = 0
 `;
 
-exports[`Max Max 1`] = `
+exports[`Min/Max Max 1`] = `
 box       = ["Max", 2.5]
 simplify  = 2.5
 `;
 
-exports[`Max Max 2`] = `
+exports[`Min/Max Max 2`] = `
 box       = ["Max", 2.5, 1.1]
 eval-auto = 2.5
 `;
 
-exports[`Max Max 3`] = `
+exports[`Min/Max Max 3`] = `
 box       = ["Max", 2.5, -1.1, 18.4]
 eval-auto = 18.4
 `;
-
-exports[`Max Max 4`] = `
-box       = ["Max", 2.5, -1.1, "NaN", 18.4]
-eval-auto = 18.4
-`;
-
-exports[`Max Max 5`] = `
-box       = ["Max", 2.5, -1.1, "foo", 18.4]
-eval-auto = max(18.4, "foo")
-`;
-
-exports[`Max Max 6`] = `["Max", "foo", "bar"]`;
 
 exports[`NEGATE -(+Infinity) 1`] = `NegativeInfinity`;
 
@@ -981,11 +975,14 @@ box       = ["Negate", "1234567890987654321.123456789"]
 canonical = -1234567890987654321.123456789
 `;
 
-exports[`NEGATE -NaN 1`] = `NaN`;
+exports[`NEGATE -NaN 1`] = `
+box       = ["Negate", "NaN"]
+canonical = NaN
+`;
 
 exports[`POWER INVALID Power 1`] = `["Power", 2.5, ["Error", "'missing'"]]`;
 
-exports[`POWER INVALID Power 2`] = `["Power", 2.5, -1.1, ["Error", "'unexpected-argument'", "'18.4'"]]`;
+exports[`POWER INVALID Power 2`] = `["Power", 2.5, -1.1, ["Error", "unexpected-argument", "'18.4'"]]`;
 
 exports[`POWER Power with negative exponent 1`] = `0.064`;
 
@@ -1011,17 +1008,17 @@ invalid   =[
   "Rational",
   [
     "Error",
-    ["ErrorCode", "'incompatible-type'", "'integer'", "'finite_real'"]
+    ["ErrorCode", "incompatible-type", "'integer'", "'finite_real'"]
   ],
   [
     "Error",
-    ["ErrorCode", "'incompatible-type'", "'integer'", "'finite_real'"]
+    ["ErrorCode", "incompatible-type", "'integer'", "'finite_real'"]
   ],
-  ["Error", "'unexpected-argument'", "'18.4'"]
+  ["Error", "unexpected-argument", "'18.4'"]
 ]
 `;
 
-exports[`RATIONAL INVALID Rational 2`] = `invalid   =["Rational", 2, 3, ["Error", "'unexpected-argument'", "'5'"]]`;
+exports[`RATIONAL INVALID Rational 2`] = `invalid   =["Rational", 2, 3, ["Error", "unexpected-argument", "'5'"]]`;
 
 exports[`RATIONAL Rational 1`] = `
 box       = ["Rational", 3, 4]
@@ -1093,12 +1090,12 @@ exports[`SQRT INVALID  Sqrt 1`] = `
 invalid   =[
   "Sqrt",
   2.5,
-  ["Error", "'unexpected-argument'", "'-1.1'"],
-  ["Error", "'unexpected-argument'", "'18.4'"]
+  ["Error", "unexpected-argument", "'-1.1'"],
+  ["Error", "unexpected-argument", "'18.4'"]
 ]
 `;
 
-exports[`SQRT INVALID Sqrt 1`] = `invalid   =["Sqrt", 2.5, ["Error", "'unexpected-argument'", "'1.1'"]]`;
+exports[`SQRT INVALID Sqrt 1`] = `invalid   =["Sqrt", 2.5, ["Error", "unexpected-argument", "'1.1'"]]`;
 
 exports[`SQRT √ of list 1`] = `[2,1,7.483314773547882771167497464633098603512039615557453892607490934640070312613878055953619790388759144,4.242640687119285146405066172629094235709015626130844219530039213972197435386321116551162602982924719]`;
 
@@ -1207,14 +1204,14 @@ exports[`SUBTRACT Subtract with multiple arguments 1`] = `-14.8`;
 
 exports[`SUBTRACT Subtract with single argument 1`] = `2.5`;
 
-exports[`Square INVALID Square 1`] = `invalid   =["Square", 2.5, ["Error", "'unexpected-argument'", "'1.1'"]]`;
+exports[`Square INVALID Square 1`] = `invalid   =["Square", 2.5, ["Error", "unexpected-argument", "'1.1'"]]`;
 
 exports[`Square INVALID Square 2`] = `
 invalid   =[
   "Square",
   2.5,
-  ["Error", "'unexpected-argument'", "'-1.1'"],
-  ["Error", "'unexpected-argument'", "'18.4'"]
+  ["Error", "unexpected-argument", "'-1.1'"],
+  ["Error", "unexpected-argument", "'18.4'"]
 ]
 `;
 

@@ -69,12 +69,12 @@ export function eq(
   inputB: number | BoxedExpression
 ): boolean | undefined {
   // We want to give a chance to the eq handler of the functions first
-  if (a.functionDefinition?.eq) {
-    const cmp = a.functionDefinition.eq(a, a.engine.box(inputB));
+  if (a.operatorDefinition?.eq) {
+    const cmp = a.operatorDefinition.eq(a, a.engine.box(inputB));
     if (cmp !== undefined) return cmp;
   }
-  if (typeof inputB !== 'number' && inputB.functionDefinition?.eq) {
-    const cmp = inputB.functionDefinition.eq(inputB, a);
+  if (typeof inputB !== 'number' && inputB.operatorDefinition?.eq) {
+    const cmp = inputB.operatorDefinition.eq(inputB, a);
     if (cmp !== undefined) return cmp;
   }
 
@@ -92,9 +92,9 @@ export function eq(
   //
   if (a.ops || b.ops) {
     // If the function has a special handler for equality, use it
-    let cmp = a.functionDefinition?.eq?.(a, b);
+    let cmp = a.operatorDefinition?.eq?.(a, b);
     if (cmp !== undefined) return cmp;
-    cmp = b.functionDefinition?.eq?.(b, a);
+    cmp = b.operatorDefinition?.eq?.(b, a);
     if (cmp !== undefined) return cmp;
 
     // If the expressions are structurally identical, they are equal
@@ -122,11 +122,11 @@ export function eq(
   // A symbol may have special comparison handlers
   //
   if (a.symbol) {
-    const cmp = a.symbolDefinition?.eq?.(b);
+    const cmp = a.valueDefinition?.eq?.(b);
     if (cmp !== undefined) return cmp;
   }
   if (b.symbol) {
-    const cmp = b.symbolDefinition?.eq?.(a);
+    const cmp = b.valueDefinition?.eq?.(a);
     if (cmp !== undefined) return cmp;
   }
   if (a.symbol && b.symbol) return a.symbol === b.symbol;
@@ -176,8 +176,8 @@ export function cmp(
         const s = a.sgn;
         if (s === undefined) return undefined;
         if (s === 'zero') return '=';
-        if (s === 'positive' || s === 'positive-infinity') return '>';
-        if (s === 'negative' || s === 'negative-infinity') return '<';
+        if (s === 'positive') return '>';
+        if (s === 'negative') return '<';
         if (s === 'non-negative') return '>=';
         if (s === 'non-positive') return '<=';
         return undefined;
@@ -219,7 +219,7 @@ export function cmp(
   //
   if (a.ops || b.ops) {
     // If the function has a special handler for equality, use it
-    const cmp = a.functionDefinition?.eq?.(a, b);
+    const cmp = a.operatorDefinition?.eq?.(a, b);
     if (cmp !== undefined) return '=';
 
     // Subtract the two expressions
@@ -248,9 +248,9 @@ export function cmp(
     if (a.symbol === b.symbol) return '=';
 
     // Symbols may have special comparision handlers
-    const cmp = a.symbolDefinition?.cmp?.(b);
+    const cmp = a.valueDefinition?.cmp?.(b);
     if (cmp) return cmp;
-    const eq = a.symbolDefinition?.eq?.(b);
+    const eq = a.valueDefinition?.eq?.(b);
     if (eq === true) return '=';
     return undefined;
   }

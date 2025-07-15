@@ -6,7 +6,7 @@ import type { LatexString } from '../latex-syntax/types';
 
 import { apply } from './apply'; // @fixme
 
-import { asLatexString, canonicalAngle } from './utils';
+import { canonicalAngle } from './utils';
 
 import type {
   BoxedExpression,
@@ -14,6 +14,7 @@ import type {
   RuleStep,
   Sign,
 } from '../global-types';
+import { asLatexString } from '../latex-syntax/utils';
 
 type ConstructibleTrigValues = [
   [numerator: number, denominator: number],
@@ -666,9 +667,11 @@ export function processInverseFunction(
 ): BoxedExpression | undefined {
   if (xs.length !== 1 || !xs[0].isValid) return undefined;
   const expr = xs[0];
+  if (expr.operator === 'InverseFunction') return expr.op1.canonical;
+
   const name = expr.symbol;
   if (typeof name !== 'string') return undefined;
-  if (name === 'InverseFunction') return expr.op1;
+
   const newHead = inverseTrigFuncName(name);
   return newHead ? ce.symbol(newHead) : undefined;
 }
@@ -698,7 +701,7 @@ function constructibleValuesInverse(
     [match_arg: BoxedExpression, match_arg_N: number],
     angle: [numerator: number, denominator: number],
   ][];
-  const specialInverseValues = ce.cache<ConstructibleTrigValuesInverse>(
+  const specialInverseValues = ce._cache<ConstructibleTrigValuesInverse>(
     'constructible-inverse-trigonometric-values-' + operator,
     () => {
       const cache: ConstructibleTrigValuesInverse = [];
@@ -791,7 +794,7 @@ export function constructibleValues(
   //
   // Create the cache of special values
   //
-  const specialValues = ce.cache<ConstructibleTrigValues>(
+  const specialValues = ce._cache<ConstructibleTrigValues>(
     'constructible-trigonometric-values',
     () => {
       return CONSTRUCTIBLE_VALUES.map(([val, results]) => [

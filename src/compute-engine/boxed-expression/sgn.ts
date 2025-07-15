@@ -4,6 +4,7 @@ export function sgn(expr: BoxedExpression): Sign | undefined {
   const ce = expr.engine;
 
   // If we have a hold expression, we don't know the sign
+  // @todo: or one could argue that the sign is 'unsigned'
   if (expr.operator === 'Hold') return undefined;
 
   let s: Sign | undefined = undefined;
@@ -12,36 +13,19 @@ export function sgn(expr: BoxedExpression): Sign | undefined {
   // The expression is a function expression
   //
   if (expr.ops) {
-    const def = expr.functionDefinition;
-    if (def?.sgn) {
-      const context = ce.swapScope(expr.scope);
-      s = def.sgn(expr.ops, { engine: ce });
-      ce.swapScope(context);
-    }
+    const def = expr.operatorDefinition;
+    if (def?.sgn) s = def.sgn(expr.ops, { engine: ce });
+
     return s;
   }
 
   //
-  // A symbol
+  // A symbol or a number literal
   //
-  if (expr.symbol) return expr.symbolDefinition?.sgn;
-
-  //
-  // A number
-  //
-  if (expr.isNumberLiteral) return expr.sgn;
+  if (expr.symbol || expr.isNumberLiteral) return expr.sgn;
 
   // A string, or a tensor
   return 'unsigned';
-}
-
-export function infinitySgn(s: Sign | undefined): boolean | undefined {
-  if (s === undefined) return undefined;
-  return (
-    s === 'positive-infinity' ||
-    s === 'negative-infinity' ||
-    s === 'complex-infinity'
-  );
 }
 
 /**
@@ -58,12 +42,8 @@ export function infinitySgn(s: Sign | undefined): boolean | undefined {
 export function positiveSign(s: Sign | undefined): boolean | undefined {
   if (s === undefined) return undefined;
 
-  if (s === 'positive' || s === 'positive-infinity') return true;
-  if (
-    (
-      ['non-positive', 'zero', 'negative', 'negative-infinity'] as Sign[]
-    ).includes(s)
-  )
+  if (s === 'positive') return true;
+  if ((['non-positive', 'zero', 'negative'] as Sign[]).includes(s))
     return false;
 
   //Case for 'nan', signs for complex numbers ('unsigned', 'complex-infinity'), or sign does not
@@ -89,7 +69,7 @@ export function nonNegativeSign(s: Sign | undefined): boolean | undefined {
     ).includes(s)
   )
     return true;
-  if ((['negative', 'negative-infinity'] as Sign[]).includes(s)) return false;
+  if (s === 'negative') return false;
 
   //Case for 'nan', complex numbers ('unsigned', 'complex-infinity', maybe 'not-zero'), or sign does not
   //convey enough info. (e.g. 'non-positive','real', 'real-not-zero')
@@ -110,12 +90,8 @@ export function nonNegativeSign(s: Sign | undefined): boolean | undefined {
 export function negativeSign(s: Sign | undefined): boolean | undefined {
   if (s === undefined) return undefined;
 
-  if (s === 'negative' || s === 'negative-infinity') return true;
-  if (
-    (
-      ['non-negative', 'zero', 'positive', 'positive-infinity'] as Sign[]
-    ).includes(s)
-  )
+  if (s === 'negative') return true;
+  if ((['non-negative', 'zero', 'positive'] as Sign[]).includes(s))
     return false;
 
   //'nan', 'unsigned','complex-infinity', or not enough info: 'real-not-zero', 'non-positive', etc.
@@ -134,16 +110,7 @@ export function negativeSign(s: Sign | undefined): boolean | undefined {
 export function nonPositiveSign(s: Sign | undefined): boolean | undefined {
   if (s === undefined) return undefined;
 
-  if (
-    (
-      [
-        'negative',
-        'negative-infinity',
-        'non-positive',
-        'zero',
-      ] as Sign[] as Sign[]
-    ).includes(s)
-  )
+  if ((['negative', 'non-positive', 'zero'] as Sign[] as Sign[]).includes(s))
     return true;
   //Definitely positive
   if ((['positive', 'positive-infinity'] as Sign[]).includes(s)) return false;

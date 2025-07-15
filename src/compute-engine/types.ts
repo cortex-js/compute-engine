@@ -8,13 +8,13 @@ export * from '../common/type/types';
 
 export type * from './latex-syntax/types';
 
-export * from './latex-syntax/dictionary/definitions';
+// export * from './latex-syntax/dictionary/definitions';
 
 export * from './numerics/types';
 
 export * from './numeric-value/types';
 
-export * from './tensor/tensors';
-export * from './tensor/tensor-fields';
+// export * from './tensor/tensors';
+// export * from './tensor/tensor-fields';
 
 export * from './global-types';

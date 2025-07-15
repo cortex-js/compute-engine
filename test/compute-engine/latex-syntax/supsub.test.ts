@@ -55,7 +55,7 @@ describe('SUPSUB', () => {
           "Power",
           [
             "Error",
-            ["ErrorCode", "'incompatible-type'", "'number'", "'symbol'"]
+            ["ErrorCode", "incompatible-type", "'number'", "'symbol'"]
           ],
           ["Add", "s", 1]
         ]
@@ -68,7 +68,7 @@ describe('SUPSUB', () => {
           "Power",
           [
             "Error",
-            ["ErrorCode", "'incompatible-type'", "'number'", "'symbol'"]
+            ["ErrorCode", "incompatible-type", "'number'", "'symbol'"]
           ],
           ["Add", "q", 1]
         ],
@@ -76,7 +76,7 @@ describe('SUPSUB', () => {
           "Power",
           [
             "Error",
-            ["ErrorCode", "'incompatible-type'", "'number'", "'symbol'"]
+            ["ErrorCode", "incompatible-type", "'number'", "'symbol'"]
           ],
           ["Add", "s", 1]
         ]
@@ -95,7 +95,7 @@ describe('SUPSUB', () => {
         "Power",
         [
           "Error",
-          ["ErrorCode", "'incompatible-type'", "'number'", "'expression'"]
+          ["ErrorCode", "incompatible-type", "'number'", "'expression'"]
         ],
         "n"
       ]
@@ -103,12 +103,12 @@ describe('SUPSUB', () => {
     expect(ce.parse('^p_q{x+1}^n_0')).toMatchInlineSnapshot(`
       [
         "Superscript",
-        ["Error", "'missing'", ["LatexString", "'^'"]],
+        ["Error", "'missing'", ["LatexString", "^"]],
         ["Error", "'missing'"]
       ]
     `); // @fixme: nope...
     expect(ce.parse('^{12}_{34}(x+1)^n_0')).toMatchInlineSnapshot(
-      `["Superscript", ["Error", "'missing'", ["LatexString", "'^'"]], 12]`
+      `["Superscript", ["Error", "'missing'", ["LatexString", "^"]], 12]`
     ); // @fixme: nope...
   });
   test('Accents', () => {
@@ -116,16 +116,9 @@ describe('SUPSUB', () => {
     expect(ce.parse('\\vec{AB}')).toMatchInlineSnapshot(
       `["OverVector", ["Multiply", "A", "B"]]`
     ); // @fixme: nope...
-    expect(ce.parse('\\vec{AB}^{-1}')).toMatchInlineSnapshot(`
-      [
-        "Power",
-        [
-          "Error",
-          ["ErrorCode", "'incompatible-type'", "'number'", "'function'"]
-        ],
-        -1
-      ]
-    `);
+    expect(ce.parse('\\vec{AB}^{-1}')).toMatchInlineSnapshot(
+      `["Divide", 1, ["OverVector", ["Multiply", "A", "B"]]]`
+    );
   });
 });
 

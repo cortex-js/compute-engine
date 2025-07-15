@@ -15,10 +15,6 @@ import {
   dictionaryFromEntries,
 } from '../../../math-json/utils';
 import {
-  isEquationOperator,
-  isInequalityOperator,
-} from '../../boxed-expression/utils';
-import {
   ADDITION_PRECEDENCE,
   ARROW_PRECEDENCE,
   ASSIGNMENT_PRECEDENCE,
@@ -29,6 +25,7 @@ import {
   Terminator,
 } from '../types';
 import { joinLatex } from '../tokenizer';
+import { isEquationOperator, isInequalityOperator } from '../utils';
 
 // function isSpacingToken(token: string): boolean {
 //   return (
@@ -136,6 +133,10 @@ export const DEFINITIONS_CORE: LatexDictionary = [
     },
   },
 
+  { name: 'ContinuationPlaceholder', latexTrigger: ['\\dots'] },
+  { latexTrigger: ['\\ldots'], parse: 'ContinuationPlaceholder' },
+  { latexTrigger: ['.', '.', '.'], parse: 'ContinuationPlaceholder' },
+
   //
   // Functions
   //
@@ -201,7 +202,7 @@ export const DEFINITIONS_CORE: LatexDictionary = [
   {
     name: 'Apply',
     kind: 'function',
-    identifierTrigger: 'apply',
+    symbolTrigger: 'apply',
     serialize: (serializer: Serializer, expr: Expression): string => {
       const lhs = operand(expr, 1); // The function body
 
@@ -272,6 +273,36 @@ export const DEFINITIONS_CORE: LatexDictionary = [
     parse: (parser: Parser, lhs: Expression) => {
       const rhs = parser.parseExpression({ minPrec: 21 }) ?? 'Nothing';
       return ['Apply', rhs, lhs];
+    },
+  },
+
+  {
+    name: 'EvaluateAt',
+    openTrigger: '.',
+    closeTrigger: '|',
+
+    kind: 'matchfix',
+    serialize: (serializer: Serializer, expr: Expression): string => {
+      const fn = operand(expr, 1);
+      if (!fn) return '';
+      const args = operands(expr).slice(1);
+
+      if (operator(fn) === 'Function') {
+        const parameters = operands(fn).slice(1);
+        let body = operand(fn, 1);
+        if (operator(body) === 'Block' && nops(body) === 1)
+          body = operand(body, 1);
+        if (parameters.length > 0) {
+          return `\\left.\\left(${serializer.serialize(body)}\\right)\\right|_{${parameters
+            .map(
+              (x, i) =>
+                `${serializer.serialize(x)}=${serializer.serialize(args[i])}`
+            )
+            .join(', ')}}`;
+        }
+      }
+
+      return `\\left.\\left(${serializer.serialize(fn)}\\right)\\right|_{${args.map((x) => serializer.serialize(x)).join(', ')}}`;
     },
   },
 
@@ -527,7 +558,7 @@ export const DEFINITIONS_CORE: LatexDictionary = [
         code === 'unexpected-command' ||
         code === 'unexpected-operator' ||
         code === 'unexpected-token' ||
-        code === 'invalid-identifier' ||
+        code === 'invalid-symbol' ||
         code === 'unknown-environment' ||
         code === 'unexpected-base' ||
         code === 'incompatible-type'
@@ -589,7 +620,7 @@ export const DEFINITIONS_CORE: LatexDictionary = [
     latexTrigger: ['_'],
     parse: (parser: Parser, lhs: Expression, until?: Readonly<Terminator>) => {
       // @fixme: should check that the lhs is a collection. If not a collection,
-      // return null (or interpret as an identifier).
+      // return null (or interpret as a symbol).
 
       // Parse either a group or a single symbol
       const rhs = parser.parseGroup() ?? parser.parseToken();
@@ -645,6 +676,7 @@ export const DEFINITIONS_CORE: LatexDictionary = [
     name: 'Range',
     latexTrigger: ['.', '.'],
     kind: 'infix',
+    // associativity: 'left',
     precedence: 800,
     parse: parseRange,
     serialize: (serializer: Serializer, expr: Expression): string => {
@@ -824,7 +856,7 @@ export const DEFINITIONS_CORE: LatexDictionary = [
     kind: 'postfix',
     parse: (parser: Parser, lhs, until) => {
       const sym = symbol(lhs);
-      if (!sym || parser.getIdentifierType(sym) !== 'function') return null;
+      if (!sym || !parser.getSymbolType(sym).matches('function')) return null;
 
       parser.addBoundary([')']);
       const expr = parser.parseExpression(until);
@@ -844,7 +876,7 @@ export const DEFINITIONS_CORE: LatexDictionary = [
       // If the lhs is a function, return the inverse function
       // i.e. f^{-1} -> InverseFunction(f)
       const sym = symbol(lhs);
-      if (!sym || parser.getIdentifierType(sym) !== 'function') return null;
+      if (!sym || !parser.getSymbolType(sym).matches('function')) return null;
 
       // There may be additional postfixes, i.e. \prime, \doubleprime,
       // \tripleprime in the superscript. Account for them.
@@ -887,7 +919,7 @@ export const DEFINITIONS_CORE: LatexDictionary = [
   {
     kind: 'environment',
     name: 'Which',
-    identifierTrigger: 'cases',
+    symbolTrigger: 'cases',
     parse: parseCasesEnvironment,
     serialize: (serialize: Serializer, expr: Expression): string => {
       const rows: string[] = [];
@@ -905,18 +937,15 @@ export const DEFINITIONS_CORE: LatexDictionary = [
   },
   {
     kind: 'environment',
-    identifierTrigger: 'dcases',
+    symbolTrigger: 'dcases',
     parse: parseCasesEnvironment,
   },
   {
     kind: 'environment',
-    identifierTrigger: 'rcases',
+    symbolTrigger: 'rcases',
     parse: parseCasesEnvironment,
   },
 ];
-
-// ["Style", expr, dic] where dic: {"color": "#fff", "font-size": "2em" }
-// ["HtmlData", expr, dic]
 
 /**
  * Parse content in text mode.
@@ -956,23 +985,58 @@ function parseTextRun(
   let text = '';
   let runinStyle: { [key: string]: string } | null = null;
 
+  const flush = () => {
+    if (runinStyle !== null && text) {
+      runs.push(['Annotated', `'${text}'`, dictionaryFromEntries(runinStyle)]);
+    } else if (text) {
+      runs.push(`'${text}'`);
+    }
+    text = '';
+    runinStyle = null;
+  };
+
   while (!parser.atEnd && !parser.match('<}>')) {
     if (parser.peek === '<{>') {
+      flush();
       runs.push(parseTextRun(parser));
-    } else if (parser.match('\\textbf') && parser.match('<{>')) {
-      runs.push(parseTextRun(parser, { 'font-weight': 'bold' }));
-      // @todo! other text styles...
+    } else if (parser.match('\\textbf')) {
+      flush();
+      runs.push(parseTextRun(parser, { fontWeight: 'bold' }));
+    } else if (parser.match('\\textmd')) {
+      flush();
+      runs.push(parseTextRun(parser, { fontStyle: 'normal' }));
+    } else if (parser.match('\\textup')) {
+      flush();
+      runs.push(parseTextRun(parser, { fontStyle: 'normal' }));
+    } else if (parser.match('\\textsl')) {
+      flush();
+      runs.push(parseTextRun(parser, { fontStyle: 'italic' }));
+    } else if (parser.match('\\textit')) {
+      flush();
+      runs.push(parseTextRun(parser, { fontStyle: 'italic' }));
+    } else if (parser.match('\\texttt')) {
+      flush();
+      runs.push(parseTextRun(parser, { fontFamily: 'monospace' }));
+    } else if (parser.match('\\textsf')) {
+      flush();
+      runs.push(parseTextRun(parser, { fontFamily: 'sans-serif' }));
+    } else if (parser.match('\\textcolor')) {
+      // Run-in style with color
+      const pos = parser.index;
+      const color = parser.parseStringGroup();
+      const body = parser.parseExpression();
+      if (color !== null && body !== null) {
+        runs.push(['Annotated', body, { dict: { color } }]);
+      } else {
+        // We had an opening `\textcolor` but no closing `}`
+        parser.index = pos;
+        text += '\\textcolor';
+      }
     } else if (parser.match('\\color')) {
       // Run-in style
       const color = parser.parseStringGroup();
       if (color !== null) {
-        // Stash the current text/runinstyle
-        if (runinStyle !== null && text) {
-          runs.push(['Style', text, dictionaryFromEntries(runinStyle)]);
-        } else if (text) {
-          runs.push(['String', text]);
-        }
-        text = '';
+        flush();
         runinStyle = { color };
       }
     } else if (parser.match('<space>')) {
@@ -984,6 +1048,8 @@ function parseTextRun(
       if (parser.match('<$>')) {
         runs.push(expr);
       } else {
+        // We had an opening `$` but no closing `$`
+        // Restore the index and add a dollar sign
         text += '$';
         parser.index = index;
       }
@@ -994,11 +1060,13 @@ function parseTextRun(
       if (parser.match('<$$>')) {
         runs.push(expr);
       } else {
+        // We had an opening `$$` but no closing `$$`
         text += '$$';
         parser.index = index;
       }
     } else {
-      const c = parser.matchChar() ?? parser.nextToken();
+      // Note that parseChar() will handle ^^, ^^^^, \unicode, \char
+      const c = parser.parseChar() ?? parser.nextToken();
       text +=
         {
           '\\enskip': '\u2002', //  en space
@@ -1051,21 +1119,17 @@ function parseTextRun(
   }
 
   // Apply leftovers
-  if (runinStyle !== null && text) {
-    runs.push(['Style', `'${text}'`, dictionaryFromEntries(runinStyle)]);
-  } else if (text) {
-    runs.push(`'${text}'`);
-  }
+  flush();
 
   let body: Expression;
   if (runs.length === 1) body = runs[0];
   else {
     if (runs.every((x) => stringValue(x) !== null))
       body = "'" + runs.map((x) => stringValue(x)).join() + "'";
-    else body = ['String', ...runs];
+    else body = ['Text', ...runs];
   }
 
-  return style ? ['Style', body, dictionaryFromEntries(style)] : body;
+  return style ? ['Annotated', body, dictionaryFromEntries(style)] : body;
 }
 
 function serializeLatexTokens(
@@ -1141,7 +1205,7 @@ function parsePrime(
   // i.e. f' -> Derivative(f)
 
   const sym = symbol(lhs);
-  if ((sym && parser.getIdentifierType(sym) === 'function') || operator(lhs)) {
+  if ((sym && parser.getSymbolType(sym).matches('function')) || operator(lhs)) {
     if (order === 1) return ['Derivative', lhs];
     return ['Derivative', lhs, order];
   }
@@ -1273,25 +1337,13 @@ function parseRange(parser: Parser, lhs: Expression | null): Expression | null {
   // This was `1..`. Don't know what to do with it. Bail.
   if (second === null) return null;
 
-  // Is there a `..` after the second expression?
-  if (parser.matchAll(['.', '.'])) {
-    // It's a range with a step, i.e. "1..3..10"
-    const end = parser.parseExpression({ minPrec: 270 });
-    // If we get `1..3..` we don't know what to do with it. Bail.
-    if (end === null) return null;
-
-    // The step is the difference between the second and first values
-    // Are they both numbers?
-    const lhsValue = machineValue(lhs);
-    const secondValue = machineValue(second);
-    if (lhsValue !== null && secondValue !== null) {
-      // If we get `2..2..3`, bail.
-      if (secondValue <= lhsValue) return null;
-      // If the step is 1, we don't need to include it
-      if (secondValue - lhsValue === 1) return ['Range', lhs, end];
-      return ['Range', lhs, end, secondValue - lhsValue];
-    }
-    return ['Range', lhs, end, ['Subtract', second, lhs]];
+  // If we have 1..2..3, we have a range with a step, and second returned
+  // ["Range", 2, 3]
+  if (operator(second) === 'Range') {
+    const step = operand(second, 1);
+    const end = operand(second, 2);
+    if (step && end) return ['Range', lhs, end, ['Subtract', step, lhs]];
+    return null;
   }
 
   return ['Range', lhs, second];
@@ -1334,12 +1386,15 @@ export function latexToDelimiterShorthand(s: string): string | undefined {
 }
 
 function parseAssign(parser: Parser, lhs: Expression): Expression | null {
-  // Do we have an assignment of the form `f(x) := ...`?
+  //
+  // 1/ f(x,y) := ...
+  //
   if (
     operator(lhs) === 'InvisibleOperator' &&
     nops(lhs) === 2 &&
     operator(operand(lhs, 2)) === 'Delimiter'
   ) {
+    // We have an assignment of the form `f(x,y) := ...`
     const fn = symbol(operand(lhs, 1));
     if (!fn) return null;
 
@@ -1354,10 +1409,42 @@ function parseAssign(parser: Parser, lhs: Expression): Expression | null {
     return ['Assign', fn, ['Function', rhs, ...(args ?? [])]];
   }
 
+  //
+  // 2/ f_n := ...
+  //
+  if (operator(lhs) === 'Subscript' && symbol(operand(lhs, 1))) {
+    // We have an assignment of the form `f_n := ...`
+    const fn = symbol(operand(lhs, 1));
+    if (!fn) return null;
+
+    const rhs = parser.parseExpression({ minPrec: 0 });
+    if (rhs === null) return null;
+
+    const sub = operand(lhs, 2);
+    //
+    // 2.1 // f_\mathrm{max} := ...
+    //
+    if (stringValue(sub) !== null) {
+      return ['Assign', lhs, rhs];
+    }
+
+    if (symbol(sub)) {
+      //
+      // 2.2 // f_n := ...
+      //
+      return ['Assign', fn, ['Function', rhs, sub!]];
+    }
+
+    return ['Assign', lhs, rhs];
+  }
+
   // If this is a previously defined function, the lhs might be a
-  // function application...
+  // function application, i.e. `f(x) := ...`
   const fn = operator(lhs);
   if (fn) {
+    if (fn === 'Subscript' || fn === 'Superscript') {
+      // We have f_n := or f^n := ...
+    }
     const args = operands(lhs);
     const rhs = parser.parseExpression({ minPrec: 0 });
     if (rhs === null) return null;

@@ -69,9 +69,9 @@ describe('CORTEX SERIALIZING COMMENTS', () => {
         comment: 'This is a multi-line-comment\nThis is the second line.',
       })
     ).toMatchInlineSnapshot(`
-        "/* This is a multi-line-comment
-        This is the second line. */Pi * x"
-      `);
+      "/* This is a multi-line-comment
+      This is the second line. */Pi * x"
+    `);
     expect(
       serializeCortex({
         fn: ['Add', 21, 20, 1],
@@ -158,46 +158,46 @@ describe('CORTEX SERIALIZING SYMBOLS', () => {
   });
 
   test('Escaped Symbols', () => {
-    expect(serializeCortex('a\u0000b')).toMatch('`a\\0b`'); // Include a null char
-    expect(serializeCortex('a\tb')).toMatch('`a\\tb`'); // Include a tab
-    expect(serializeCortex('a\nb')).toMatch('`a\\nb`'); // Include a linebreak
-    expect(serializeCortex('a\u0003b')).toMatch('`a\\u0003b`'); // Include a ETX (END OF TEXT)
-    expect(serializeCortex('a\u007fb')).toMatch('`a\\u007fb`'); // Include a delete char
+    expect(serializeCortex('`a\u0000b`')).toMatch('`a\\0b`'); // Include a null char
+    expect(serializeCortex('`a\tb`')).toMatch('`a\\tb`'); // Include a tab
+    expect(serializeCortex('`a\nb`')).toMatch('`a\\nb`'); // Include a linebreak
+    expect(serializeCortex('`a\u0003b`')).toMatch('`a\\u0003b`'); // Include a ETX (END OF TEXT)
+    expect(serializeCortex('`a\u007fb`')).toMatch('`a\\u007fb`'); // Include a delete char
   });
 
   test('Verbatim symbols', () => {
     // Reserved word
     expect(serializeCortex('new')).toMatch('`new`');
     // Contain a syntax character
-    expect(serializeCortex('x+y')).toMatch('`x+y`');
+    expect(serializeCortex('`x+y`')).toMatch('`x+y`');
     // Start with a Syntax character
-    expect(serializeCortex('\\sin')).toMatch('`\\\\sin`');
-    expect(serializeCortex('~f')).toMatch('`~f`');
-    expect(serializeCortex('`')).toMatch('```');
+    expect(serializeCortex('`\\sin`')).toMatch('`\\\\sin`');
+    expect(serializeCortex('`~f`')).toMatch('`~f`');
+    expect(serializeCortex('```')).toMatch('```');
 
     // Contains a non-letter/non-digit
-    expect(serializeCortex('a+b')).toMatch('`a+b`');
-    expect(serializeCortex('a;b')).toMatch('`a;b`');
+    expect(serializeCortex('`a+b`')).toMatch('`a+b`');
+    expect(serializeCortex('`a;b`')).toMatch('`a;b`');
 
-    expect(serializeCortex('a b')).toMatch('`a b`'); // Includes a space
-    expect(serializeCortex('a\nb')).toMatch('`a\\nb`');
+    expect(serializeCortex('`a b`')).toMatch('`a b`'); // Includes a space
+    expect(serializeCortex('`a\nb`')).toMatch('`a\\nb`');
   });
 
   test('Invalid Symbols', () => {
     // Contain a SPACE
-    expect(serializeCortex('a b')).toMatchInlineSnapshot(`"\`a b\`"`);
+    expect(serializeCortex('`a b`')).toMatchInlineSnapshot(`"\`a b\`"`);
     // Contain a reverse solidus
-    expect(serializeCortex('a\\b')).toMatchInlineSnapshot(`"\`a\\\\b\`"`);
+    expect(serializeCortex('`a\\b`')).toMatchInlineSnapshot(`"\`a\\\\b\`"`);
     // First char is a dollar
-    expect(serializeCortex('$a')).toMatchInlineSnapshot(`"\`$a\`"`);
+    expect(serializeCortex('`$a`')).toMatchInlineSnapshot(`"\`$a\`"`);
     // First char is a left square bracket
-    expect(serializeCortex('[a')).toMatchInlineSnapshot(`"\`[a\`"`);
+    expect(serializeCortex('`[a`')).toMatchInlineSnapshot(`"\`[a\`"`);
     // First char is a right square bracket
-    expect(serializeCortex(']a')).toMatchInlineSnapshot(`"\`]a\`"`);
+    expect(serializeCortex('`]a`')).toMatchInlineSnapshot(`"\`]a\`"`);
     // Start with a digit
-    expect(serializeCortex('12x')).toMatch('12');
+    expect(serializeCortex('`12x`')).toMatch('12');
     // Start with a `+`
-    expect(serializeCortex('+x')).toMatch('');
+    expect(serializeCortex('`+x`')).toMatch('');
   });
 });
 

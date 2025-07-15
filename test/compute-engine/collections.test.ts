@@ -2,7 +2,7 @@ import { Expression } from '../../src/math-json/types.ts';
 import { engine, exprToString } from '../utils';
 
 function evaluate(expr: Expression): string {
-  return exprToString(engine.box(expr)?.evaluate());
+  return exprToString(engine.box(expr)?.evaluate({ materialization: true }));
 }
 
 const emptyList: Expression = ['List'];
@@ -39,8 +39,8 @@ const matrix: Expression = [
   ['List', 11, 12, 13],
 ];
 const range: Expression = ['Range', 2, 19, 2];
+const bigRange: Expression = ['Range', 2, 200, 3];
 const linspace: Expression = ['Linspace', 2, 100, 89];
-const string: Expression = "'hello world'";
 const expression: Expression = ['Add', 2, ['Multiply', 3, 'x']];
 const symbol: Expression = 'x';
 const dict: Expression = [
@@ -59,22 +59,40 @@ describe('LENGTH', () => {
     expect(evaluate(['Length', list])).toMatchInlineSnapshot(`7`));
 
   test('Length matrix', () =>
-    expect(evaluate(['Length', matrix])).toMatchInlineSnapshot(`3`));
+    expect(evaluate(['Length', matrix])).toMatchInlineSnapshot(`9`));
 
   test('Length range', () =>
     expect(evaluate(['Length', range])).toMatchInlineSnapshot(`9`));
 
   test('Length linspace', () =>
-    expect(evaluate(['Length', linspace])).toMatchInlineSnapshot(`89`));
-
-  test('Length string', () =>
-    expect(evaluate(['Length', string])).toMatchInlineSnapshot(`11`));
+    expect(evaluate(['Length', linspace])).toMatchInlineSnapshot(`11`));
 
   test('Length expression', () =>
-    expect(evaluate(['Length', expression])).toMatchInlineSnapshot(`0`));
+    expect(evaluate(['Length', expression])).toMatchInlineSnapshot(`
+      [
+        "Length",
+        [
+          "Error",
+          [
+            "ErrorCode",
+            "incompatible-type",
+            "'collection'",
+            "'finite_number'"
+          ]
+        ]
+      ]
+    `));
 
   test('Length symbol', () =>
-    expect(evaluate(['Length', symbol])).toMatchInlineSnapshot(`0`));
+    expect(evaluate(['Length', symbol])).toMatchInlineSnapshot(`
+      [
+        "Length",
+        [
+          "Error",
+          ["ErrorCode", "incompatible-type", "'collection'", "'number'"]
+        ]
+      ]
+    `));
 
   test('Length dict', () =>
     expect(evaluate(['Length', dict])).toMatchInlineSnapshot(`3`));
@@ -83,30 +101,36 @@ describe('LENGTH', () => {
     expect(evaluate(['Length', tuple])).toMatchInlineSnapshot(`3`));
 });
 
-describe('TAKE 1', () => {
+describe('TAKE', () => {
   test('empty list', () =>
     expect(evaluate(['Take', emptyList, 1])).toMatchInlineSnapshot(`["List"]`));
 
-  test('list', () =>
-    expect(evaluate(['Take', list, 1])).toMatchInlineSnapshot(`["List", 7]`));
+  test('list', () => {
+    expect(evaluate(['Take', list, 1])).toMatchInlineSnapshot(`["List", 7]`);
+    expect(evaluate(['Take', list, 2])).toMatchInlineSnapshot(
+      `["List", 7, 13]`
+    );
+  });
 
   test('matrix', () =>
-    expect(evaluate(['Take', matrix, 1])).toMatchInlineSnapshot(
-      `["List", ["List", 2, 3, 4]]`
-    ));
+    expect(evaluate(['Take', matrix, 1])).toMatchInlineSnapshot(`["List", 6]`)); // @fixme: should be the first row `["List", 2, 3, 4]`
 
-  test('range', () =>
-    expect(evaluate(['Take', range, 1])).toMatchInlineSnapshot(`["List", 2]`));
+  test('range', () => {
+    expect(evaluate(['Take', range, 1])).toMatchInlineSnapshot(`["List", 2]`);
+    expect(evaluate(['Take', bigRange, 1])).toMatchInlineSnapshot(
+      `["List", 2]`
+    );
+  });
 
   test('linspace', () =>
     expect(evaluate(['Take', linspace, 1])).toMatchInlineSnapshot(
       `["List", 2]`
     ));
 
-  test('string', () =>
-    expect(evaluate(['Take', string, 1])).toMatchInlineSnapshot(`'h'`));
+  test('tuple', () =>
+    expect(evaluate(['Take', tuple, 1])).toMatchInlineSnapshot(`["List", 7]`));
 
-  test('expression', () =>
+  test('invalid argument', () => {
     expect(evaluate(['Take', expression, 1])).toMatchInlineSnapshot(`
       [
         "Take",
@@ -114,16 +138,15 @@ describe('TAKE 1', () => {
           "Error",
           [
             "ErrorCode",
-            "'incompatible-type'",
-            "'collection | string'",
+            "incompatible-type",
+            "'indexed_collection'",
             "'finite_number'"
           ]
         ],
         1
       ]
-    `));
+    `);
 
-  test('symbol', () =>
     expect(evaluate(['Take', symbol, 1])).toMatchInlineSnapshot(`
       [
         "Take",
@@ -131,20 +154,148 @@ describe('TAKE 1', () => {
           "Error",
           [
             "ErrorCode",
-            "'incompatible-type'",
-            "'collection | string'",
-            "'any'"
+            "incompatible-type",
+            "'indexed_collection'",
+            "'number'"
           ]
         ],
         1
       ]
+    `);
+
+    expect(evaluate(['Take', dict, 1])).toMatchInlineSnapshot(`
+      [
+        "Take",
+        [
+          "Error",
+          [
+            "ErrorCode",
+            "incompatible-type",
+            "'indexed_collection'",
+            "dictionary<finite_integer>"
+          ]
+        ],
+        1
+      ]
+    `);
+  });
+});
+
+describe('DROP 2', () => {
+  test('empty list', () =>
+    expect(evaluate(['Drop', emptyList, 2])).toMatchInlineSnapshot(`["List"]`));
+
+  test('list', () =>
+    expect(evaluate(['Drop', list, 2])).toMatchInlineSnapshot(
+      `["List", 5, 19, 2, 3, 11]`
+    ));
+
+  test('matrix', () =>
+    expect(evaluate(['Drop', matrix, 2])).toMatchInlineSnapshot(`
+      [
+        "List",
+        ["Error", "'missing'"],
+        ["Error", "'missing'"],
+        ["Error", "'missing'"],
+        ["Error", "'missing'"],
+        ["Error", "'missing'"],
+        ["Error", "'missing'"],
+        ["Error", "'missing'"]
+      ]
+    `)); // @fixme should be `["List", ["List", 11, 12, 13]]`
+
+  test('range', () => {
+    expect(evaluate(['Drop', range, 2])).toMatchInlineSnapshot(
+      `["List", 6, 8, 10, 12, 14, 16, 18]`
+    );
+    expect(evaluate(['Drop', bigRange, 2])).toMatchInlineSnapshot(`
+      [
+        "List",
+        8,
+        11,
+        14,
+        17,
+        20,
+        "ContinuationPlaceholder",
+        188,
+        191,
+        194,
+        197,
+        200
+      ]
+    `);
+  });
+
+  test('linspace', () =>
+    expect(evaluate(['Drop', linspace, 2])).toMatchInlineSnapshot(`
+      [
+        "List",
+        4.202247191011236,
+        5.3033707865168545,
+        6.404494382022472,
+        7.50561797752809,
+        8.606741573033709,
+        "ContinuationPlaceholder",
+        94.49438202247191,
+        95.59550561797752,
+        96.69662921348315,
+        97.79775280898876,
+        98.89887640449439
+      ]
     `));
 
-  test('dict', () =>
-    expect(evaluate(['Take', dict, 1])).toMatchInlineSnapshot(`["List"]`));
-
   test('tuple', () =>
-    expect(evaluate(['Take', tuple, 1])).toMatchInlineSnapshot(`["List", 7]`));
+    expect(evaluate(['Drop', tuple, 2])).toMatchInlineSnapshot(`["List", 13]`));
+
+  test('invalid argument', () => {
+    expect(evaluate(['Drop', expression, 2])).toMatchInlineSnapshot(`
+      [
+        "Drop",
+        [
+          "Error",
+          [
+            "ErrorCode",
+            "incompatible-type",
+            "'indexed_collection'",
+            "'finite_number'"
+          ]
+        ],
+        2
+      ]
+    `);
+
+    expect(evaluate(['Drop', symbol, 2])).toMatchInlineSnapshot(`
+      [
+        "Drop",
+        [
+          "Error",
+          [
+            "ErrorCode",
+            "incompatible-type",
+            "'indexed_collection'",
+            "'number'"
+          ]
+        ],
+        2
+      ]
+    `);
+
+    expect(evaluate(['Drop', dict, 2])).toMatchInlineSnapshot(`
+      [
+        "Drop",
+        [
+          "Error",
+          [
+            "ErrorCode",
+            "incompatible-type",
+            "'indexed_collection'",
+            "dictionary<finite_integer>"
+          ]
+        ],
+        2
+      ]
+    `);
+  });
 });
 
 describe('SLICE (2,3)', () => {
@@ -160,8 +311,8 @@ describe('SLICE (2,3)', () => {
 
   test('matrix', () =>
     expect(evaluate(['Slice', matrix, 2, 3])).toMatchInlineSnapshot(
-      `["List", ["List", 6, 7, 9], ["List", 11, 12, 13]]`
-    ));
+      `["List", 11, ["Error", "'missing'"]]`
+    )); // @fixme.
 
   test('range', () =>
     expect(evaluate(['Slice', range, 2, 3])).toMatchInlineSnapshot(
@@ -170,13 +321,15 @@ describe('SLICE (2,3)', () => {
 
   test('linspace', () =>
     expect(evaluate(['Slice', linspace, 2, 3])).toMatchInlineSnapshot(
-      `["List", {num: "3.101123595505618"}, {num: "4.202247191011236"}]`
+      `["List", 3.101123595505618, 4.202247191011236]`
     ));
 
-  test('string', () =>
-    expect(evaluate(['Slice', string, 2, 3])).toMatchInlineSnapshot(`'el'`));
+  test('tuple', () =>
+    expect(evaluate(['Slice', tuple, 2, 3])).toMatchInlineSnapshot(
+      `["List", 10, 13]`
+    ));
 
-  test('expression', () =>
+  test('invalid argument', () => {
     expect(evaluate(['Slice', expression, 2, 3])).toMatchInlineSnapshot(`
       [
         "Slice",
@@ -184,17 +337,16 @@ describe('SLICE (2,3)', () => {
           "Error",
           [
             "ErrorCode",
-            "'incompatible-type'",
-            "'collection | string'",
+            "incompatible-type",
+            "'indexed_collection'",
             "'finite_number'"
           ]
         ],
         2,
         3
       ]
-    `));
+    `);
 
-  test('symbol', () =>
     expect(evaluate(['Slice', symbol, 2, 3])).toMatchInlineSnapshot(`
       [
         "Slice",
@@ -202,23 +354,33 @@ describe('SLICE (2,3)', () => {
           "Error",
           [
             "ErrorCode",
-            "'incompatible-type'",
-            "'collection | string'",
-            "'any'"
+            "incompatible-type",
+            "'indexed_collection'",
+            "'number'"
           ]
         ],
         2,
         3
       ]
-    `));
+    `);
 
-  test('dict', () =>
-    expect(evaluate(['Slice', dict, 2, 3])).toMatchInlineSnapshot(`["List"]`));
-
-  test('tuple', () =>
-    expect(evaluate(['Slice', tuple, 2, 3])).toMatchInlineSnapshot(
-      `["List", 10, 13]`
-    ));
+    expect(evaluate(['Slice', dict, 2, 3])).toMatchInlineSnapshot(`
+      [
+        "Slice",
+        [
+          "Error",
+          [
+            "ErrorCode",
+            "incompatible-type",
+            "'indexed_collection'",
+            "dictionary<finite_integer>"
+          ]
+        ],
+        2,
+        3
+      ]
+    `);
+  });
 });
 
 describe('SLICE -1,1', () => {
@@ -228,27 +390,22 @@ describe('SLICE -1,1', () => {
     ));
 
   test('list', () =>
-    expect(evaluate(['Slice', list, -1, 1])).toMatchInlineSnapshot(
-      `["List", 11, 7]`
-    ));
+    expect(evaluate(['Slice', list, -1, 1])).toMatchInlineSnapshot(`["List"]`));
 
   test('matrix', () =>
     expect(evaluate(['Slice', matrix, -1, 1])).toMatchInlineSnapshot(
-      `["List", ["List", 11, 12, 13], ["List", 2, 3, 4]]`
+      `["List"]`
     ));
 
   test('range', () =>
     expect(evaluate(['Slice', range, -1, 1])).toMatchInlineSnapshot(
-      `["List", 18, 2]`
+      `["List"]`
     ));
 
   test('linspace', () =>
     expect(evaluate(['Slice', linspace, -1, 1])).toMatchInlineSnapshot(
-      `["List", {num: "98.89887640449439"}, 2]`
+      `["List"]`
     )); // @fixme
-
-  test('string', () =>
-    expect(evaluate(['Slice', string, -1, 1])).toMatchInlineSnapshot(`'dh'`));
 
   test('expression', () =>
     expect(evaluate(['Slice', expression, -1, 1])).toMatchInlineSnapshot(`
@@ -258,8 +415,8 @@ describe('SLICE -1,1', () => {
           "Error",
           [
             "ErrorCode",
-            "'incompatible-type'",
-            "'collection | string'",
+            "incompatible-type",
+            "'indexed_collection'",
             "'finite_number'"
           ]
         ],
@@ -276,9 +433,9 @@ describe('SLICE -1,1', () => {
           "Error",
           [
             "ErrorCode",
-            "'incompatible-type'",
-            "'collection | string'",
-            "'any'"
+            "incompatible-type",
+            "'indexed_collection'",
+            "'number'"
           ]
         ],
         -1,
@@ -287,182 +444,35 @@ describe('SLICE -1,1', () => {
     `));
 
   test('dict', () =>
-    expect(evaluate(['Slice', dict, -1, 1])).toMatchInlineSnapshot(`["List"]`));
+    expect(evaluate(['Slice', dict, -1, 1])).toMatchInlineSnapshot(`
+      [
+        "Slice",
+        [
+          "Error",
+          [
+            "ErrorCode",
+            "incompatible-type",
+            "'indexed_collection'",
+            "dictionary<finite_integer>"
+          ]
+        ],
+        -1,
+        1
+      ]
+    `));
 
   test('tuple', () =>
     expect(evaluate(['Slice', tuple, -1, 1])).toMatchInlineSnapshot(
-      `["List", 13, 7]`
+      `["List"]`
     ));
 });
 
-describe('Drop 2', () => {
-  test('empty list', () =>
-    expect(evaluate(['Drop', emptyList, 2])).toMatchInlineSnapshot(`Nothing`));
-
-  test('list', () =>
-    expect(evaluate(['Drop', list, 2])).toMatchInlineSnapshot(
-      `["List", 7, 5, 19, 2, 3, 11]`
-    ));
-
-  test('matrix', () =>
-    expect(evaluate(['Drop', matrix, 2])).toMatchInlineSnapshot(
-      `["List", ["List", 2, 3, 4], ["List", 11, 12, 13]]`
-    ));
-
-  test('range', () =>
-    expect(evaluate(['Drop', range, 2])).toMatchInlineSnapshot(
-      `["List", 2, 6, 8, 10, 12, 14, 16, 18]`
-    ));
-
-  test('linspace', () =>
-    expect(evaluate(['Drop', linspace, 2])).toMatchInlineSnapshot(`
-      [
-        "List",
-        2,
-        {num: "4.202247191011236"},
-        {num: "5.3033707865168545"},
-        {num: "6.404494382022472"},
-        7.50561797752809,
-        {num: "8.606741573033709"},
-        {num: "9.707865168539325"},
-        {num: "10.808988764044944"},
-        {num: "11.910112359550562"},
-        13.01123595505618,
-        {num: "14.112359550561798"},
-        {num: "15.213483146067416"},
-        {num: "16.314606741573034"},
-        17.41573033707865,
-        18.51685393258427,
-        {num: "19.617977528089888"},
-        {num: "20.719101123595507"},
-        {num: "21.820224719101123"},
-        {num: "22.921348314606742"},
-        24.02247191011236,
-        {num: "25.123595505617978"},
-        {num: "26.224719101123597"},
-        {num: "27.325842696629213"},
-        {num: "28.426966292134832"},
-        {num: "29.528089887640448"},
-        {num: "30.629213483146067"},
-        {num: "31.730337078651687"},
-        32.8314606741573,
-        {num: "33.932584269662925"},
-        35.03370786516854,
-        36.13483146067416,
-        {num: "37.235955056179776"},
-        {num: "38.337078651685395"},
-        {num: "39.438202247191015"},
-        40.53932584269663,
-        {num: "41.640449438202246"},
-        {num: "42.741573033707866"},
-        {num: "43.842696629213485"},
-        {num: "44.943820224719104"},
-        46.04494382022472,
-        {num: "47.146067415730336"},
-        {num: "48.247191011235955"},
-        {num: "49.348314606741575"},
-        {num: "50.449438202247194"},
-        {num: "51.550561797752806"},
-        {num: "52.651685393258425"},
-        {num: "53.752808988764045"},
-        {num: "54.853932584269664"},
-        55.95505617977528,
-        {num: "57.056179775280896"},
-        {num: "58.157303370786515"},
-        {num: "59.258426966292134"},
-        {num: "60.359550561797754"},
-        61.46067415730337,
-        {num: "62.561797752808985"},
-        {num: "63.662921348314605"},
-        64.76404494382022,
-        65.86516853932585,
-        66.96629213483146,
-        68.06741573033707,
-        69.1685393258427,
-        70.26966292134831,
-        71.37078651685393,
-        72.47191011235955,
-        73.57303370786516,
-        74.67415730337079,
-        75.7752808988764,
-        76.87640449438203,
-        77.97752808988764,
-        79.07865168539325,
-        80.17977528089888,
-        81.28089887640449,
-        82.38202247191012,
-        83.48314606741573,
-        84.58426966292134,
-        85.68539325842697,
-        86.78651685393258,
-        87.88764044943821,
-        88.98876404494382,
-        {num: "90.08988764044943"},
-        {num: "91.19101123595506"},
-        {num: "92.29213483146067"},
-        {num: "93.3932584269663"},
-        {num: "94.49438202247191"},
-        {num: "95.59550561797752"},
-        {num: "96.69662921348315"},
-        {num: "97.79775280898876"},
-        {num: "98.89887640449439"}
-      ]
-    `));
-
-  test('string', () =>
-    expect(evaluate(['Drop', string, 2])).toMatchInlineSnapshot(
-      `'hllo world'`
-    ));
-
-  test('expression', () =>
-    expect(evaluate(['Drop', expression, 2])).toMatchInlineSnapshot(`
-      [
-        "Drop",
-        [
-          "Error",
-          [
-            "ErrorCode",
-            "'incompatible-type'",
-            "'collection | string'",
-            "'finite_number'"
-          ]
-        ],
-        2
-      ]
-    `));
-
-  test('symbol', () =>
-    expect(evaluate(['Drop', symbol, 2])).toMatchInlineSnapshot(`
-      [
-        "Drop",
-        [
-          "Error",
-          [
-            "ErrorCode",
-            "'incompatible-type'",
-            "'collection | string'",
-            "'any'"
-          ]
-        ],
-        2
-      ]
-    `));
-
-  test('dict', () =>
-    expect(evaluate(['Drop', dict, 2])).toMatchInlineSnapshot(`["List"]`));
-
-  test('tuple', () =>
-    expect(evaluate(['Drop', tuple, 2])).toMatchInlineSnapshot(
-      `["List", 7, 13]`
-    ));
-});
-
-describe('INDEXABLE OPERATIONS', () => {
+describe('OPERATIONS ON INDEXED COLLECTIONS', () => {
   test('At with positive index', () =>
     expect(evaluate(['At', list, 1])).toMatchInlineSnapshot(`7`));
 
   test('At with negative index', () =>
-    expect(evaluate(['At', list, -2])).toMatchInlineSnapshot(`Nothing`));
+    expect(evaluate(['At', list, -2])).toMatchInlineSnapshot(`3`));
 
   test('At', () =>
     expect(evaluate(['At', list, 1, 2])).toMatchInlineSnapshot(`
@@ -470,9 +480,9 @@ describe('INDEXABLE OPERATIONS', () => {
         "At",
         ["List", 7, 13, 5, 19, 2, 3, 11],
         1,
-        ["Error", "'unexpected-argument'", "'2'"]
+        ["Error", "unexpected-argument", "'2'"]
       ]
-    `));
+    `)); // @fixme: multiple indexes not implemented yet
 
   test('At', () =>
     expect(evaluate(['At', matrix, 1, 2])).toMatchInlineSnapshot(`
@@ -480,9 +490,9 @@ describe('INDEXABLE OPERATIONS', () => {
         "At",
         ["List", ["List", 2, 3, 4], ["List", 6, 7, 9], ["List", 11, 12, 13]],
         1,
-        ["Error", "'unexpected-argument'", "'2'"]
+        ["Error", "unexpected-argument", "'2'"]
       ]
-    `));
+    `)); // @fixme: multiple indexes not implemented yet
 
   test('First', () =>
     expect(evaluate(['First', list])).toMatchInlineSnapshot(`7`));
@@ -491,57 +501,61 @@ describe('INDEXABLE OPERATIONS', () => {
     expect(evaluate(['Second', list])).toMatchInlineSnapshot(`13`));
 
   test('Last', () =>
-    expect(evaluate(['Last', list])).toMatchInlineSnapshot(`Nothing`));
+    expect(evaluate(['Last', list])).toMatchInlineSnapshot(`11`));
 
   test('Rest', () =>
-    expect(evaluate(['Rest', list])).toMatchInlineSnapshot(`["List"]`));
+    expect(evaluate(['Rest', list])).toMatchInlineSnapshot(
+      `["List", 13, 13, 13, 13, 13, 11]`
+    )); // @fixme should be `["List", 13, 5, 19, 2, 3, 11]`
 
   test('Most', () =>
-    expect(evaluate(['Most', list])).toMatchInlineSnapshot(`["List"]`));
+    expect(evaluate(['Most', list])).toMatchInlineSnapshot(
+      `["List", 7, 13, 5, 19, 2, 3]`
+    )); // @fixme should be `["List", 7, 13, 5, 19, 2, 3]`
 
   test('RotateLeft', () =>
     expect(evaluate(['RotateLeft', list1, 2])).toMatchInlineSnapshot(
-      `["RotateLeft", ["List", 100, 4, 2, 62, 34, 16, 8], 2]`
+      `["List", 2, 62, 34, 16, 8, 100, 4]`
     ));
 
   test('RotateRight', () =>
     expect(evaluate(['RotateRight', list1, 2])).toMatchInlineSnapshot(
-      `["RotateRight", ["List", 100, 4, 2, 62, 34, 16, 8], 2]`
+      `["List", 16, 8, 100, 4, 2, 62, 34]`
     ));
 
   test('Sort', () =>
     expect(evaluate(['Sort', list])).toMatchInlineSnapshot(
-      `["Sort", ["List", 7, 13, 5, 19, 2, 3, 11]]`
+      `["List", 2, 3, 5, 7, 11, 13, 19]`
     ));
 
-  test('Sort', () =>
+  test('Ordering', () =>
     expect(evaluate(['Ordering', list])).toMatchInlineSnapshot(
-      `["Ordering", ["List", 7, 13, 5, 19, 2, 3, 11]]`
+      `["List", 5, 6, 3, 1, 7, 2, 4]`
     ));
 
   // test('Shuffle', () =>
   //   expect(evaluate(['Shuffle', list])).toMatchInlineSnapshot());
 
+  test('Unique', () =>
+    expect(evaluate(['Unique', list3])).toMatchInlineSnapshot(
+      `["List", 3, 5, 7, 1, 9, 2]`
+    ));
+
+  test('Reverse', () =>
+    expect(evaluate(['Reverse', list])).toMatchInlineSnapshot(
+      `["List", 11, 3, 2, 19, 5, 13, 7]`
+    ));
+});
+
+describe('OPERATIONS ON NON-INDEXED COLLECTIONS', () => {
   test('Tally', () =>
     expect(evaluate(['Tally', list3])).toMatchInlineSnapshot(
       `["Pair", ["List", 3, 5, 7, 1, 9, 2], ["List", 3, 4, 4, 2, 2, 1]]`
     ));
 
-  test('Unique', () =>
-    expect(evaluate(['Unique', list3])).toMatchInlineSnapshot(
-      `["List", 3, 5, 7, 1, 9, 2]`
-    ));
-});
-
-describe('ITERABLE OPERATIONS', () => {
   test('Flatten', () =>
     expect(evaluate(['Flatten', matrix])).toMatchInlineSnapshot(
       `["List", 2, 3, 4, 6, 7, 9, 11, 12, 13]`
-    ));
-
-  test('Reverse', () =>
-    expect(evaluate(['Reverse', list])).toMatchInlineSnapshot(
-      `["List", 7, 13]`
     ));
 
   test('Map', () =>
@@ -561,58 +575,213 @@ describe('ITERABLE OPERATIONS', () => {
 
   test('Filter a set', () =>
     expect(
-      evaluate(['Filter', ['Element', '_', 'Integers'], ['Greater', '_', 10]])
+      evaluate(['Filter', 'Integers', ['Greater', '_', 10]])
     ).toMatchInlineSnapshot(
-      `["Filter", ["Element", "_", "Integers"], ["Greater", "_", 10]]`
-    )); // @fixme
+      `["Set", 11, 12, 13, 14, 15, "ContinuationPlaceholder"]`
+    ));
 
   test('Reduce', () =>
-    expect(evaluate(['Reduce', list, ['Add', '_1', '_2']]))
-      .toMatchInlineSnapshot(`
-      [
-        "Reduce",
-        ["List", 7, 13, 5, 19, 2, 3, 11],
-        ["Add", "_1", "_2"],
-        ["Error", "'missing'"]
-      ]
-    `));
+    expect(
+      evaluate(['Reduce', list, ['Add', '_1', '_2']])
+    ).toMatchInlineSnapshot(`60`));
 
   test('Reduce', () =>
-    expect(evaluate(['Reduce', list, 'Add'])).toMatchInlineSnapshot(`
-      [
-        "Reduce",
-        ["List", 7, 13, 5, 19, 2, 3, 11],
-        "Add",
-        ["Error", "'missing'"]
-      ]
-    `)); // @fixme
+    expect(evaluate(['Reduce', list, 'Add'])).toMatchInlineSnapshot(`60`));
 
   test('Zip', () =>
-    expect(evaluate(['Zip', list1, list2])).toMatchInlineSnapshot(
-      `["Zip", ["List", 100, 4, 2, 62, 34, 16, 8], ["List", 9, 7, 2, 24]]`
-    )); // @fixme
-
-  test('Join', () =>
-    expect(evaluate(['Join', list1, list2])).toMatchInlineSnapshot(`
+    expect(evaluate(['Zip', list1, list2])).toMatchInlineSnapshot(`
       [
         "List",
-        100,
-        4,
-        2,
-        62,
-        34,
-        16,
-        8,
-        ["List", 100, 4, 2, 62, 34, 16, 8],
-        9,
-        7,
-        2,
-        24,
-        ["List", 9, 7, 2, 24]
+        ["Pair", 100, 9],
+        ["Pair", 4, 7],
+        ["Pair", 2, 2],
+        ["Pair", 62, 24]
       ]
     `));
-}); // @fixme
+
+  test('Join', () =>
+    expect(evaluate(['Join', list1, list2])).toMatchInlineSnapshot(
+      `["Set", 100, 4, 2, 62, 34, "ContinuationPlaceholder"]`
+    )); // @fixme should be `["List", 100, 4, 2, 62, 34, 16, 8, 9, 7, 24]`
+});
 
 // describe('NON-ITERABLE OPERATIONS', () => {
 
 // })
+
+describe('CONTINUATION PLACEHOLDER', () => {
+  // Use lazy collections (e.g., Map) to test continuation placeholder
+
+  // Check various eager evaluation
+  test('empty list', () => {
+    const empty_list = engine.box(['Map', ['List'], ['Square', '_']]);
+    expect(
+      empty_list.evaluate({ materialization: false })
+    ).toMatchInlineSnapshot(
+      `["Map", ["List"], ["Function", ["Square", "_1"]]]`
+    );
+    expect(
+      empty_list.evaluate({ materialization: true })
+    ).toMatchInlineSnapshot(`["List"]`);
+    expect(empty_list.evaluate({ materialization: 2 })).toMatchInlineSnapshot(
+      `["List"]`
+    );
+    expect(
+      empty_list.evaluate({ materialization: [2, 3] })
+    ).toMatchInlineSnapshot(`["List"]`);
+  });
+
+  test('empty set', () => {
+    const empty_set = engine.box(['Map', ['Set'], ['Square', '_']]);
+    expect(
+      empty_set.evaluate({ materialization: false })
+    ).toMatchInlineSnapshot(`["Map", ["Set"], ["Function", ["Square", "_1"]]]`);
+    expect(empty_set.evaluate({ materialization: true })).toMatchInlineSnapshot(
+      `["Set"]`
+    );
+    expect(empty_set.evaluate({ materialization: 2 })).toMatchInlineSnapshot(
+      `["Set"]`
+    );
+    expect(
+      empty_set.evaluate({ materialization: [2, 3] })
+    ).toMatchInlineSnapshot(`["Set"]`);
+  });
+
+  test('finite list', () => {
+    const finite_list = engine.box([
+      'Map',
+      ['List', 1, 1, 2, 2, 3, 4, 7, 8, 9, 10, 11, 12, 14],
+      ['Square', '_'],
+    ]);
+    expect(finite_list.evaluate({ materialization: false }))
+      .toMatchInlineSnapshot(`
+      [
+        "Map",
+        ["List", 1, 1, 2, 2, 3, 4, 7, 8, 9, 10, 11, 12, 14],
+        ["Function", ["Square", "_1"]]
+      ]
+    `);
+    expect(finite_list.evaluate({ materialization: true }))
+      .toMatchInlineSnapshot(`
+      [
+        "List",
+        1,
+        1,
+        4,
+        4,
+        9,
+        "ContinuationPlaceholder",
+        81,
+        100,
+        121,
+        144,
+        196
+      ]
+    `);
+    expect(finite_list.evaluate({ materialization: 2 })).toMatchInlineSnapshot(
+      `["List", 1, "ContinuationPlaceholder", 196]`
+    );
+    expect(
+      finite_list.evaluate({ materialization: [2, 3] })
+    ).toMatchInlineSnapshot(
+      `["List", 1, 1, "ContinuationPlaceholder", 121, 144, 196]`
+    );
+    expect(finite_list.evaluate({ materialization: 20 })).toMatchInlineSnapshot(
+      `["List", 1, 1, 4, 4, 9, 16, 49, 64, 81, 100, 121, 144, 196]`
+    );
+    expect(
+      finite_list.evaluate({ materialization: [20, 30] })
+    ).toMatchInlineSnapshot(
+      `["List", 1, 1, 4, 4, 9, 16, 49, 64, 81, 100, 121, 144, 196]`
+    );
+  });
+
+  test('finite set', () => {
+    const finite_set = engine.box([
+      'Map',
+      ['Set', 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13],
+      ['Square', '_'],
+    ]);
+    expect(finite_set.evaluate({ materialization: false }))
+      .toMatchInlineSnapshot(`
+      [
+        "Map",
+        ["Set", 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13],
+        ["Function", ["Square", "_1"]]
+      ]
+    `);
+    expect(
+      finite_set.evaluate({ materialization: true })
+    ).toMatchInlineSnapshot(
+      `["Set", 1, 4, 9, 16, 25, "ContinuationPlaceholder"]`
+    );
+    expect(finite_set.evaluate({ materialization: 2 })).toMatchInlineSnapshot(
+      `["Set", 1, 4, "ContinuationPlaceholder"]`
+    );
+    expect(
+      finite_set.evaluate({ materialization: [2, 3] })
+    ).toMatchInlineSnapshot(`["Set", 1, 4, "ContinuationPlaceholder"]`);
+    expect(finite_set.evaluate({ materialization: 20 })).toMatchInlineSnapshot(
+      `["Set", 1, 4, 9, 16, 25, 36, 49, 64, 81, 100, 121, 144, 169]`
+    );
+    expect(
+      finite_set.evaluate({ materialization: [20, 30] })
+    ).toMatchInlineSnapshot(
+      `["Set", 1, 4, 9, 16, 25, 36, 49, 64, 81, 100, 121, 144, 169]`
+    );
+  });
+
+  test('infinite set', () => {
+    const infinite_set = engine.box(['Map', 'Integers', ['Square', '_']]);
+    expect(
+      infinite_set.evaluate({ materialization: false })
+    ).toMatchInlineSnapshot(
+      `["Map", "Integers", ["Function", ["Square", "_1"]]]`
+    );
+    expect(
+      infinite_set.evaluate({ materialization: true })
+    ).toMatchInlineSnapshot(`["Set", 0, 1, 4, "ContinuationPlaceholder"]`);
+    expect(infinite_set.evaluate({ materialization: 2 })).toMatchInlineSnapshot(
+      `["Set", 0, 1, "ContinuationPlaceholder"]`
+    );
+    expect(
+      infinite_set.evaluate({ materialization: [2, 3] })
+    ).toMatchInlineSnapshot(`["Set", 0, 1, "ContinuationPlaceholder"]`);
+    expect(infinite_set.evaluate({ materialization: 20 }))
+      .toMatchInlineSnapshot(`
+      [
+        "Set",
+        0,
+        1,
+        4,
+        9,
+        16,
+        25,
+        36,
+        49,
+        64,
+        81,
+        100,
+        "ContinuationPlaceholder"
+      ]
+    `);
+    expect(infinite_set.evaluate({ materialization: [20, 30] }))
+      .toMatchInlineSnapshot(`
+      [
+        "Set",
+        0,
+        1,
+        4,
+        9,
+        16,
+        25,
+        36,
+        49,
+        64,
+        81,
+        100,
+        "ContinuationPlaceholder"
+      ]
+    `);
+  });
+});

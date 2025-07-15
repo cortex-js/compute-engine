@@ -1,15 +1,14 @@
 import type { OneOf } from '../../common/one-of';
-import type { Expression, MathJsonIdentifier } from '../../math-json/types';
+import type { Expression, MathJsonSymbol } from '../../math-json/types';
+import { BoxedType, Type, TypeString } from '../types';
 import type {
   IndexedLatexDictionary,
   IndexedLatexDictionaryEntry,
 } from './dictionary/definitions';
 
-export type SymbolType = 'symbol' | 'function' | 'unknown';
-
 export type SymbolTable = {
   parent: SymbolTable | null;
-  ids: { [id: MathJsonIdentifier]: SymbolType };
+  ids: { [id: MathJsonSymbol]: BoxedType };
 };
 
 /**
@@ -37,6 +36,7 @@ export type LatexString = string;
  * @category Latex Parsing and Serialization
  */
 export type Delimiter =
+  | '.'
   | ')'
   | '('
   | ']'
@@ -74,6 +74,7 @@ export type LibraryCategory =
   | 'domains'
   | 'linear-algebra'
   | 'logic'
+  | 'number-theory'
   | 'numeric'
   | 'other'
   | 'physics'
@@ -315,9 +316,9 @@ export type LatexArgumentType =
  * If the trigger matches, the `parse` handler is called, if available.
  *
  * The trigger can be specified either as a LaTeX string (`latexTrigger`) or
- * as an identifier (`identifierTrigger`). An identifier match several
- * LaTeEx expressions that are equivalent, for example `\operatorname{gcd}` or
- *  `\mathbin{gcd}`, match the `"gcd"` identifier
+ * as an symbol (`symbolTrigger`). A symbol match several
+ * LaTeX expressions that are equivalent, for example `\operatorname{gcd}` or
+ *  `\mathbin{gcd}`, match the `"gcd"` symbol
  *
  * `matchfix` operators use `openTrigger` and `closeTrigger` instead.
  *
@@ -326,7 +327,7 @@ export type LatexArgumentType =
 
 export type Trigger = {
   latexTrigger?: LatexString | LatexToken[];
-  identifierTrigger?: MathJsonIdentifier;
+  symbolTrigger?: MathJsonSymbol;
 };
 
 /**
@@ -336,7 +337,7 @@ export type Trigger = {
 
 export type BaseEntry = {
   /**
-   * Map a MathJSON identifier to this entry.
+   * Map a MathJSON symbol to this entry.
    *
    * Each entry should have at least a `name` or a `parse` handler.
    *
@@ -351,7 +352,7 @@ export type BaseEntry = {
    * entry. Otherwise, if the trigger of the entry matches the current
    * token, the `parse` handler is invoked.
    */
-  name?: MathJsonIdentifier;
+  name?: MathJsonSymbol;
 
   /**
    * Transform an expression into a LaTeX string.
@@ -469,7 +470,7 @@ export type PrefixEntry = BaseEntry &
 export type EnvironmentEntry = BaseEntry & {
   kind: 'environment';
   parse: EnvironmentParseHandler;
-  identifierTrigger: MathJsonIdentifier;
+  symbolTrigger: MathJsonSymbol;
 };
 
 /**
@@ -486,7 +487,7 @@ export type SymbolEntry = BaseEntry &
   };
 
 /**
- * A function is an identifier followed by:
+ * A function is a symbol followed by:
  * - some postfix operators such as `\prime`
  * - an optional list of arguments in an enclosure (parentheses)
  *
@@ -712,21 +713,13 @@ export type ParseLatexOptions = NumberFormat & {
   parseNumbers: 'auto' | 'rational' | 'decimal' | 'never';
 
   /**
-   * This handler is invoked when the parser encounters an identifier
+   * This handler is invoked when the parser encounters a
    * that has not yet been declared.
    *
-   * The `identifier` argument is a [valid identifier](/math-json/#identifiers).
+   * The `symbol` argument is a [valid symbol](/math-json/#symbols).
    *
-   * The handler can return:
-   *
-   * - `"variable"`: the identifier is a variable
-   * - `"function"`: the identifier is a function name. If an apply
-   * function operator (typically, parentheses) follow, they will be parsed
-   * as arguments to the function.
-   *
-   * - `"unknown"`: the identifier is not recognized.
    */
-  getIdentifierType: (identifier: MathJsonIdentifier) => SymbolType;
+  getSymbolType: (symbol: MathJsonSymbol) => BoxedType;
 
   /** This handler is invoked when the parser encounters an unexpected token.
    *
@@ -777,13 +770,13 @@ export type ParseLatexOptions = NumberFormat & {
 export interface Parser {
   readonly options: Required<ParseLatexOptions>;
 
-  getIdentifierType(id: MathJsonIdentifier): SymbolType;
+  getSymbolType(id: MathJsonSymbol): BoxedType;
 
   pushSymbolTable(): void;
 
   popSymbolTable(): void;
 
-  addSymbol(id: MathJsonIdentifier, type: SymbolType): void;
+  addSymbol(id: MathJsonSymbol, type: BoxedType | TypeString): void;
 
   /** The index of the current token */
   index: number;
@@ -841,7 +834,7 @@ export interface Parser {
    * This includes plain characters (e.g. 'a', '+'...), characters
    * defined in hex (^^ and ^^^^), the `\char` and `\unicode` command.
    */
-  matchChar(): string | null;
+  parseChar(): string | null;
 
   /**
    * Parse an expression in a LaTeX group enclosed in curly brackets `{}`.
@@ -898,9 +891,9 @@ export interface Parser {
 
   /**
    * A symbol can be:
-   * - a single-letter identifier: `x`
+   * - a single-letter symbol: `x`
    * - a single LaTeX command: `\pi`
-   * - a multi-letter identifier: `\operatorname{speed}`
+   * - a multi-letter symbol: `\operatorname{speed}`
    */
   parseSymbol(until?: Partial<Terminator>): Expression | null;
 
@@ -1009,6 +1002,20 @@ export type SerializeLatexOptions = NumberSerializationFormat & {
    *
    */
   prettify: boolean;
+
+  /**
+   * Controls the materialization of the lazy collections.
+   *
+   * - If `true`, lazy collections are materialized, i.e. it is rendered as a
+   *   LaTeX expression with all its elements.
+   * - If `false`, the expression is not materialized, i.e. it is
+   *   rendered as a LaTeX command with its arguments.
+   * - If a number is provided, it is the maximum number of elements
+   *   that will be materialized.
+   * - If a pair of numbers is provided, it is the number of elements
+   *   of the head and the tail that will be materialized, respectively.
+   */
+  materialization: boolean | number | [number, number];
 
   /**
    * LaTeX string used to render an invisible multiply, e.g. in '2x'.

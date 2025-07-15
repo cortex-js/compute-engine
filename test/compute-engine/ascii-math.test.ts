@@ -270,13 +270,15 @@ describe('PRECEDENCE', () => {
   });
 
   it('should correctly put parentheses with relational operators', () => {
-    expect(check('(a < b) <= c')).toMatchInlineSnapshot(`(a < b) <= c`);
-    expect(check('a < (b <= c)')).toMatchInlineSnapshot(`a < (b <= c)`);
+    expect(check('(a < b) <= c')).toMatchInlineSnapshot(`b <= c && a < b`);
+    expect(check('a < (b <= c)')).toMatchInlineSnapshot(`a < c && b <= c`);
 
     expect(check('(a < b) <= (c > d)')).toMatchInlineSnapshot(
-      `(a < b) <= (d < c)`
+      `b <= c && a < b && d < c`
     );
-    expect(check('a < (b <= c) > d')).toMatchInlineSnapshot(`a < d < (b <= c)`);
+    expect(check('a < (b <= c) > d')).toMatchInlineSnapshot(
+      `a < (d < c && b <= c)`
+    );
   });
 });
 
@@ -302,18 +304,18 @@ describe('FUNCTIONS', () => {
   });
 
   it('should correctly serialize function expressions', () => {
-    expect(check(['Function'])).toMatchInlineSnapshot(`"Nothing"`);
-    expect(check(['Function', 1])).toMatchInlineSnapshot(`1`);
-    expect(check(['Function', '_'])).toMatchInlineSnapshot(`("_1") |-> {"_1"}`);
+    expect(check(['Function'])).toMatchInlineSnapshot(`() |-> "Nothing"`);
+    expect(check(['Function', 1])).toMatchInlineSnapshot(`() |-> 1`);
+    expect(check(['Function', '_'])).toMatchInlineSnapshot(`() |-> _`);
 
-    expect(check(['Function', 'x', 'x'])).toMatchInlineSnapshot(`(x) |-> {x}`);
+    expect(check(['Function', 'x', 'x'])).toMatchInlineSnapshot(`(x) |-> x`);
 
     expect(check(['Function', ['Add', 'x', 1], 'x'])).toMatchInlineSnapshot(
-      `(x) |-> {x + 1}`
+      `(x) |-> x + 1`
     );
 
     expect(
       check(['Function', ['Add', 'x', 'y'], 'x', 'y'])
-    ).toMatchInlineSnapshot(`(x, y) |-> {x + y}`);
+    ).toMatchInlineSnapshot(`(x, y) |-> x + y`);
   });
 });

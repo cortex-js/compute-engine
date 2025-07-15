@@ -1,39 +1,62 @@
+import { parseType } from '../src/common/type/parse';
+import { isSubtype } from '../src/common/type/subtype';
+import { functionResult } from '../src/common/type/utils';
 import { ComputeEngine, Expression, InfixEntry } from '../src/compute-engine';
+import { parseCortex } from '../src/cortex';
 
 const ce = new ComputeEngine();
 const engine = ce;
+// ce.latexDictionary = [
+//   ...ce.latexDictionary,
+//   {
+//     kind: 'postfix',
+//     precedence: 810,
+//     latexTrigger: ['['],
+//     parse: (parser, lhs) => {
+//       const body = parser.parseExpression();
+//       if (!body || !parser.match(']')) return null;
+//       return ['InvisibleOperator', lhs, body];
+//     },
+//   },
+//   {
+//     kind: 'matchfix',
+//     openTrigger: '[',
+//     closeTrigger: ']',
+//     parse: (_, body) => ['Delimiter', body],
+//   },
+// ];
 
-const m = ce.box('m', { canonical: false });
-m.value = 3;
-console.log(m.isReal);
-console.log(m.value);
-console.log(m.isOdd);
+// console.log(ce.parse('2[3.141592654]').evaluate().json);
 
-const list: Expression = ['List', 7, 13, 5, 19, 2, 3, 11];
+console.log(ce.parse('x = \\textcolor{red}{y + 1} - z').json);
+
+console.log(ce.parse(`\\sum_{n=0,m=4}^{4,8}{n+m}`).json);
+
+// See parseTextRun
+const styledText = ce.parse('x \\textcolor{red}{=} y');
+console.log(styledText.json);
+
+// const rho = ce.box(['List', ['List', 0.5, 0.5], ['List', 0.5, 0.5]]);
+// const U = ce.parse(
+//   '\\begin{pmatrix}e^{-\\frac{i\\pi}{32}} & 0\\\\0 & e^{-\\frac{i\\pi}{32}}\\end{pmatrix}'
+// );
+// console.log(ce.box(['Transpose', U]).evaluate().toString());
+
+// console.log(
+//   ce
+//     .box(['Multiply', U, rho, ['Transpose', U]])
+//     .evaluate()
+//     .toString()
+// );
+
+const doubleInt = ce.parse(`\\int_0^1 \\int_0^1 (x+y) dx dy`);
+console.log(doubleInt.json);
+doubleInt.N().print();
+
 engine
-  .box(['Map', list, ['Add', '_', 1]])
-  ?.evaluate()
+  .box(['N', engine.parse('\\int^2_0\\frac{3x}{5}dx')])
+  .evaluate()
   .print();
-
-ce.declare('x', { constant: true, value: 2 });
-ce.parse('x + 2'); // -> 'Error: The type of the constant "x" cannot be changed' (takes place at `BoxedSymbol.infer()` as above; this being called from 'checkNumericArgs', as called from 'makeNumericFunction'
-
-const originalSqrtDefinition = ce.lookupFunction('Sqrt')!;
-ce.defineFunction('Sqrt', {
-  ...originalSqrtDefinition,
-  evaluate: (input, options) => {
-    const result = originalSqrtDefinition.evaluate!(input, options);
-    return result?.isReal ? result : ce.NaN;
-  },
-});
-
-console.info(ce.parse('x_{y}\\coloneq z').json);
-console.info(ce.parse('x\\coloneq z_{y}').json);
-
-ce
-  .parse('4^x-2=0')
-  .solve('x')
-  ?.map((x) => x.print());
 
 // Should output 1\cdot 10^3
 // @todo is that true for scientific *and* engineering notation
@@ -43,12 +66,21 @@ console.log(
     .toLatex({ notation: 'scientific', avoidExponentsInRange: null })
 );
 
+ce.parse(`\\int_0^1 x dx`).N().print();
+
+ce.parse(
+  `\\int_0^1 \\sech^2 (10(x − 0.2)) + \\sech^4 (100(x − 0.4)) + \\sech^6 (1000(x − 0.6)) dx`
+)
+  .N()
+  .print();
+
+ce.parse('D(\\sin(x), x)').evaluate().print();
+
 // Should return '3^2'
 ce.parse('3\\times3', { canonical: ['Multiply'] });
 
 // Should be 2x + 3
-ce
-  .box(['Add', ['Multiply', 'a', 'x'], 'b'])
+ce.box(['Add', ['Multiply', 'a', 'x'], 'b'])
   ?.replace(
     [
       { match: 'a', replace: 2 },
@@ -69,8 +101,8 @@ console.log(ce.parse('3/4').type);
 
 ce.parse('\\sin(x+1)').simplify().print();
 
-console.info(ce.parse('21\\pm1').latex);
-console.info(ce.parse('21\\pm1').evaluate().latex);
+console.info(ce.parse('21\\pm1').json);
+console.info(ce.parse('21\\pm1').evaluate().json);
 
 ce.parse('|\\operatorname{arccoth}(x)|').print();
 
@@ -146,8 +178,7 @@ let sub = eq.match(match, {
 });
 console.log(sub);
 
-ce
-  .parse('2x=\\sqrt{5x}')
+ce.parse('2x=\\sqrt{5x}')
   .solve()
   ?.map((x) => x.print());
 
@@ -220,18 +251,6 @@ console.info(ce.parse('\\mathrm{x_a}').json);
 console.info(ce.parse('x_\\text{a}').json);
 
 ce.parse('(-1)^{1/3}').evaluate().print();
-
-const originalDef = ce.lookupFunction('Ln')!;
-ce.defineFunction('Ln', {
-  complexity: originalDef.complexity,
-  threadable: originalDef.threadable,
-  signature: originalDef.signature.type,
-  sgn: originalDef.sgn,
-  evaluate: ([x], options) => {
-    if (x.is(0)) return ce.NaN;
-    return originalDef.evaluate!([x], options);
-  },
-});
 
 // const rules = ['\\ln 0 -> \\mathrm{NaN}'];
 // console.info(ce.parse('\\frac{1}{\\ln(0)}').simplify({ rules }).N().re);
@@ -600,6 +619,12 @@ console.info(xp.simplify().toString());
 ce.declare('f', 'function');
 // ce.assume(['Equal', 'one', 1]);
 
+const l1 = ce.function('List', [1, 2, 3, 4, 5]);
+const l2 = ce.box(['Filter', l1, ['IsOdd', '_']]);
+console.info(l2.evaluate().toString());
+console.info(ce.function('List', [l2]).toString());
+console.info(ce.function('List', [l2]).evaluate().toString());
+
 const t1 = ce.parse('\\cos(5\\pi+k)');
 // Canonical should simplify argument to -π/+π range
 console.info(t1.toString());
@@ -727,7 +752,7 @@ console.info(ce.parse('0^{|\\frac{2}{0^x+1}|}').json);
 // -> ["Boole", ["LessThan", x, 0]]
 
 console.info(ce.parse('0^{|\\frac{2}{0^{4-x}+1}|}').json);
-// -> ["Boole", ["GreaterThan", x, 4]]
+// -> ["Boole", ["Greater", x, 4]]
 
 console.info(ce.parse('0^{|\\frac{2}{0^{x-4}+1}|}').json);
 // -> ["Boole", ["LessThan", x, 4]]

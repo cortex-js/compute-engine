@@ -24,7 +24,6 @@ module.exports = {
       'ts-jest',
       {
         useESM: true,
-        isolatedModules: true,
         tsconfig: {
           allowJs: true,
           module: 'system',

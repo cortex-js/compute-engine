@@ -1,13 +1,14 @@
-import type { MathJsonIdentifier } from '../math-json/types';
+import type { MathJsonSymbol } from '../math-json/types';
 
-import { isRelationalOperator } from './boxed-expression/utils';
-import { isFiniteIndexableCollection } from './collection-utils';
+import { isOperatorDef } from './boxed-expression/utils';
+import { isFiniteIndexedCollection } from './collection-utils';
 import {
   BoxedExpression,
   CompiledType,
   ComputeEngine,
   JSSource,
 } from './global-types';
+import { isRelationalOperator } from './latex-syntax/utils';
 import { normalizeIndexingSet } from './library/utils';
 
 import { monteCarloEstimate } from './numerics/monte-carlo';
@@ -28,7 +29,7 @@ import {
 } from './numerics/statistics';
 
 export type CompiledOperators = Record<
-  MathJsonIdentifier,
+  MathJsonSymbol,
   [op: string, prec: number]
 >;
 
@@ -41,7 +42,7 @@ export type CompiledFunction =
     ) => JSSource);
 
 export type CompiledFunctions = {
-  [id: MathJsonIdentifier]: CompiledFunction;
+  [id: MathJsonSymbol]: CompiledFunction;
 };
 
 const NATIVE_JS_OPERATORS: CompiledOperators = {
@@ -361,9 +362,9 @@ const NATIVE_JS_FUNCTIONS: CompiledFunctions = {
 };
 
 export type CompileTarget = {
-  operators?: (op: MathJsonIdentifier) => [op: string, prec: number];
-  functions?: (id: MathJsonIdentifier) => CompiledFunction | undefined;
-  var: (id: MathJsonIdentifier) => string | undefined;
+  operators?: (op: MathJsonSymbol) => [op: string, prec: number] | undefined;
+  functions?: (id: MathJsonSymbol) => CompiledFunction | undefined;
+  var: (id: MathJsonSymbol) => string | undefined;
   string: (str: string) => string;
   number: (n: number) => string;
   ws: (s?: string) => string; // White space
@@ -380,12 +381,12 @@ export type CompileTarget = {
 /** This is an extension of the Function class that allows us to pass
  * a custom scope for "global" functions. */
 export class ComputeEngineFunction extends Function {
-  private sys = {
+  SYS = {
     chop: chop,
     factorial: factorial,
     gamma: gamma,
     gcd: gcd,
-    integrate: (f, a, b) => monteCarloEstimate(f, a, b, 10e6),
+    integrate: (f, a, b) => monteCarloEstimate(f, a, b, 10e6).estimate,
     lcm: lcm,
     lngamma: gammaln,
     limit: limit,
@@ -402,14 +403,58 @@ export class ComputeEngineFunction extends Function {
     interquartileRange,
   };
   constructor(body: string, preamble = '') {
-    super('_SYS', '_', `${preamble};return ${body}`);
+    super(
+      '_SYS',
+      '_',
+      preamble ? `${preamble};return ${body}` : `return ${body}`
+    );
     return new Proxy(this, {
       apply: (target, thisArg, argumentsList) =>
-        super.apply(thisArg, [this.sys, ...argumentsList]),
+        super.apply(thisArg, [this.SYS, ...argumentsList]),
       get: (target, prop) => {
         // Expose the `toString` method so that the JavaScript source can be
         // inspected
         if (prop === 'toString') return (): string => body;
+        if (prop === 'isCompiled') return true;
+        return target[prop];
+      },
+    });
+  }
+}
+
+export class ComputeEngineFunctionLiteral extends Function {
+  SYS = {
+    chop: chop,
+    factorial: factorial,
+    gamma: gamma,
+    gcd: gcd,
+    integrate: (f, a, b) => monteCarloEstimate(f, a, b, 10e6).estimate,
+    lcm: lcm,
+    lngamma: gammaln,
+    limit: limit,
+    mean,
+    median,
+    variance,
+    populationVariance,
+    standardDeviation,
+    populationStandardDeviation,
+    kurtosis,
+    skewness,
+    mode,
+    quartiles,
+    interquartileRange,
+  };
+  constructor(body: string, args: string[]) {
+    super('_SYS', ...args, `return ${body}`);
+    return new Proxy(this, {
+      apply: (target, thisArg, argumentsList) =>
+        super.apply(thisArg, [this.SYS, ...argumentsList]),
+      get: (target, prop) => {
+        // Expose the `toString` method so that the JavaScript source can be
+        // inspected
+        if (prop === 'toString')
+          return (): string => `(${args.join(', ')}) => ${body}`;
+        if (prop === 'isCompiled') return true;
         return target[prop];
       },
     });
@@ -419,21 +464,45 @@ export class ComputeEngineFunction extends Function {
 export function compileToTarget(
   expr: BoxedExpression,
   target: CompileTarget
-): (_?: Record<string, CompiledType>) => CompiledType {
+  // ): (_?: Record<string, CompiledType>) => CompiledType {
+): ((...args: any[]) => any) & { isCompiled: true } {
+  if (expr.operator === 'Function') {
+    const args = expr.ops!;
+    const params = args.slice(1).map((x) => x.symbol ?? '_');
+    const body = compile(args[0].canonical, {
+      ...target,
+      var: (id) => (params.includes(id) ? id : target.var(id)),
+    });
+    return new ComputeEngineFunctionLiteral(body, params) as unknown as ((
+      ...args: any[]
+    ) => any) & { isCompiled: true };
+  }
+
+  if (expr.symbol) {
+    const op = target.operators?.(expr.symbol);
+    if (op) {
+      // We're compiling "Add" or "Multiply" or "Divide"...
+      return new ComputeEngineFunctionLiteral(`a ${op[0]} b`, [
+        'a',
+        'b',
+      ]) as unknown as ((...args: any[]) => any) & { isCompiled: true };
+    }
+    // @todo: we should handle a symbol whose value is a function...
+  }
+
   const js = compile(expr, target);
-  return new ComputeEngineFunction(
-    js,
-    target.preamble
-  ) as unknown as () => CompiledType;
+  return new ComputeEngineFunction(js, target.preamble) as unknown as ((
+    ...args: any[]
+  ) => any) & { isCompiled: true };
 }
 
-export function compileToJavascript(
+export function compileToJavaScript(
   expr: BoxedExpression,
-  functions?: Record<MathJsonIdentifier, JSSource | Function>,
-  vars?: Record<MathJsonIdentifier, JSSource>,
+  functions?: Record<MathJsonSymbol, JSSource | Function>,
+  vars?: Record<MathJsonSymbol, JSSource>,
   imports: unknown[] = [],
   preamble?: string
-): (_?: Record<string, CompiledType>) => CompiledType {
+): ((...args: any[]) => any) & { isCompiled: true } {
   const unknowns = expr.unknowns;
 
   // For any import, turn it into a string
@@ -607,15 +676,16 @@ function compileExpr(
   }
 
   const fn = target.functions?.(h);
-  if (!fn) throw new Error(`Unknown function \`${h}\``);
+  if (!fn) throw new Error(`Unknown operator \`${h}\``);
   if (typeof fn === 'function') {
-    // Get function definition for h
-    const def = engine.lookupFunction(h);
+    // Get operator definition for h
+    const def = engine.lookupDefinition(h);
 
     if (
-      def?.threadable &&
+      isOperatorDef(def) &&
+      def.operator.broadcastable &&
       args.length === 1 &&
-      isFiniteIndexableCollection(args[0])
+      isFiniteIndexedCollection(args[0])
     ) {
       const v = tempVar();
       return `(${compile(args[0], target)}).map((${v}) => ${fn(
@@ -647,7 +717,14 @@ export function compile(
   // Is it a symbol?
   //
   const s = expr.symbol;
-  if (s !== null) return target.var?.(s) ?? s;
+  if (s !== null) {
+    const op = target.operators?.(s);
+    if (op !== undefined) {
+      // We're compiling something like "Add"
+      return `(a,b) => a ${op[0]} b`;
+    }
+    return target.var?.(s) ?? s;
+  }
 
   //
   // Is it a number?
@@ -733,7 +810,7 @@ function compileLoop(
  */
 
 function inlineExpression(body: string, x: string): string {
-  // Check if `x` is a simple value (like a number or a simple identifier)
+  // Check if `x` is a simple value (like a number or a simple symbol)
   const isSimple = /^[\p{L}_][\p{L}\p{N}_]*$/u.test(x) || /^[0-9]+$/.test(x);
 
   if (isSimple) {

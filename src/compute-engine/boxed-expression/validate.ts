@@ -1,9 +1,11 @@
-import { each, isFiniteIndexableCollection } from '../collection-utils';
+import { isFiniteIndexedCollection } from '../collection-utils';
 
 import { flatten } from './flatten';
 import { isSubtype } from '../../common/type/subtype';
 import { Type } from '../../common/type/types';
-import type { BoxedExpression, ComputeEngine } from '../global-types';
+import type { BoxedExpression, ComputeEngine, Scope } from '../global-types';
+import { fuzzyStringMatch } from '../../common/fuzzy-string-match';
+import { isOperatorDef, isValueDef } from './utils';
 
 /**
  * Check that the number of arguments is as expected.
@@ -65,14 +67,15 @@ export function checkNumericArgs(
   // @fastpath
   if (!ce.strict) {
     let inferredType: Type = 'real';
-    // If any of the arguments is a complex number, we'll infer the domain as complex
+    // If any of the arguments is a complex or imaginary number,
+    // we'll infer the type as number
     for (const x of ops)
       if (isSubtype('complex', x.type.type)) {
         inferredType = 'number';
         break;
       }
     for (const x of ops)
-      if (!isFiniteIndexableCollection(x)) x.infer(inferredType);
+      if (!isFiniteIndexedCollection(x)) x.infer(inferredType);
     return ops;
   }
 
@@ -95,20 +98,16 @@ export function checkNumericArgs(
     } else if (op.isNumber) {
       // The argument is a number literal or a function whose result is a number
       xs.push(op);
-    } else if (
-      op.symbol &&
-      !ce.lookupSymbol(op.symbol) &&
-      !ce.lookupFunction(op.symbol)
-    ) {
+    } else if (op.symbol && !ce.lookupDefinition(op.symbol)) {
       // We have an unknown symbol, we'll infer it's a number later
       xs.push(op);
     } else if (op.type.isUnknown) {
       // Unknown type. Keep it that way, infer later
       xs.push(op);
-    } else if (isFiniteIndexableCollection(op)) {
+    } else if (isFiniteIndexedCollection(op)) {
       // The argument is a list. Check that all elements are numbers
-      // and infer the domain of the elements
-      for (const x of each(op)) {
+      // and infer the type of the elements
+      for (const x of op.each()) {
         if (!x.isNumber) {
           isValid = false;
           break;
@@ -117,14 +116,14 @@ export function checkNumericArgs(
       if (!isValid) xs.push(ce.typeError('number', op.type, op));
       else xs.push(op);
     } else if (
-      op.symbolDefinition?.inferredType &&
+      op.valueDefinition?.inferredType &&
       isSubtype('number', op.type.type)
     ) {
       // There was an inferred type, and it is a supertype of "number"
       // e.g. "any". We'll narrow it down to "number" when we infer later.
       xs.push(op);
     } else if (
-      op.functionDefinition?.inferredSignature &&
+      op.operatorDefinition?.inferredSignature &&
       isSubtype('number', op.type.type)
     ) {
       // There is an inferred signature, and it is a supertype of 'number
@@ -132,7 +131,7 @@ export function checkNumericArgs(
       xs.push(op);
     } else if (
       op.operator === 'Hold' ||
-      op.symbolDefinition?.value?.operator === 'Hold'
+      op.valueDefinition?.value?.operator === 'Hold'
     ) {
       // We keep 'Hold' expressions as is
       xs.push(op);
@@ -142,18 +141,18 @@ export function checkNumericArgs(
     }
   }
 
-  // Only if all arguments are valid, we infer the domain of the arguments
+  // Only if all arguments are valid, we infer the type of the arguments
   if (isValid) {
     let inferredType: Type = 'real';
-    // If any of the arguments is a complex number, we'll infer the domain as complex
+    // If any of the arguments is a complex number, we'll infer the type as `number`
     for (const x of xs)
       if (isSubtype('complex', x.type.type)) {
         inferredType = 'number';
         break;
       }
     for (const x of xs)
-      if (isFiniteIndexableCollection(x))
-        for (const y of each(x)) y.infer(inferredType);
+      if (isFiniteIndexedCollection(x))
+        for (const y of x.each()) y.infer(inferredType);
       else x.infer(inferredType);
   }
 
@@ -246,7 +245,8 @@ export function validateArguments(
 
   const params = signature.args?.map((x) => x.type) ?? [];
   const optParams = signature.optArgs?.map((x) => x.type) ?? [];
-  const restParam = signature.restArg?.type;
+  const varParam = signature.variadicArg?.type;
+  const varParamCount = signature.variadicMin ?? 0;
 
   let i = 0;
 
@@ -273,16 +273,16 @@ export function validateArguments(
       result.push(op);
       continue;
     }
-    if (threadable && isFiniteIndexableCollection(op)) {
+    if (threadable && isFiniteIndexedCollection(op)) {
       result.push(op);
       continue;
     }
-    if (op.symbolDefinition?.inferredType && op.type.matches(param)) {
+    if (op.valueDefinition?.inferredType && op.type.matches(param)) {
       result.push(op);
       continue;
     }
 
-    if (op.functionDefinition?.inferredSignature && op.type.matches(param)) {
+    if (op.operatorDefinition?.inferredSignature && op.type.matches(param)) {
       result.push(op);
       continue;
     }
@@ -314,19 +314,19 @@ export function validateArguments(
       continue;
     }
     if (op.type.isUnknown) {
-      // An expression without a domain is assumed to be valid,
-      // we'll infer the domain later
+      // An expression with an unknown assumed to be valid,
+      // we'll infer the type later
       result.push(op);
       i += 1;
       continue;
     }
-    if (threadable && isFiniteIndexableCollection(op)) {
+    if (threadable && isFiniteIndexedCollection(op)) {
       result.push(op);
       i += 1;
       continue;
     }
-    if (op.symbolDefinition?.inferredType && op.type.matches(param)) {
-      // There was an inferred type, and it is contravrariant with `number`
+    if (op.valueDefinition?.inferredType && op.type.matches(param)) {
+      // There was an inferred type, and it is contravariant with `number`
       // e.g. "any". We'll narrow it down to `number` when we infer later.
       result.push(op);
       i += 1;
@@ -343,9 +343,11 @@ export function validateArguments(
   }
 
   // Iterate over any remaining ops
-  if (restParam) {
+  if (varParam) {
+    let additionalParam = 0;
     for (const op of ops.slice(i)) {
       i += 1;
+      additionalParam += 1;
       if (lazy) {
         result.push(op);
         continue;
@@ -356,27 +358,32 @@ export function validateArguments(
         continue;
       }
       if (op.type.isUnknown) {
-        // An expression without a domain is assumed to be valid,
-        // we'll infer the domain later
+        // An expression without a type is assumed to be valid,
+        // we'll infer the type later
         result.push(op);
         continue;
       }
-      if (threadable && isFiniteIndexableCollection(op)) {
+      if (threadable && isFiniteIndexedCollection(op)) {
         result.push(op);
         continue;
       }
-      if (op.symbolDefinition?.inferredType && op.type.matches(restParam)) {
+      if (op.valueDefinition?.inferredType && op.type.matches(varParam)) {
         // There was an inferred type, and it is contravariant with `number`
         // e.g. "any". We'll narrow it down `number` to  when we infer later.
         result.push(op);
         continue;
       }
-      if (!op.type.matches(restParam)) {
-        result.push(ce.typeError(restParam, op.type, op));
+      if (!op.type.matches(varParam)) {
+        result.push(ce.typeError(varParam, op.type, op));
         isValid = false;
         continue;
       }
       result.push(op);
+    }
+    if (additionalParam < varParamCount) {
+      // We didn't get enough parameters for the variadic argument
+      result.push(ce.error('missing'));
+      isValid = false;
     }
   }
 
@@ -396,23 +403,102 @@ export function validateArguments(
   i = 0;
   for (const param of params) {
     if (!lazy)
-      if (!threadable || !isFiniteIndexableCollection(ops[i]))
+      if (!threadable || !isFiniteIndexedCollection(ops[i]))
         ops[i].infer(param);
     i += 1;
   }
   for (const param of optParams) {
     if (!ops[i]) break;
-    if (!threadable || !isFiniteIndexableCollection(ops[i]))
-      ops[i]?.infer(param);
+    if (!threadable || !isFiniteIndexedCollection(ops[i])) ops[i]?.infer(param);
     i += 1;
   }
-  if (restParam) {
+  if (varParam) {
     for (const op of ops.slice(i)) {
       if (!lazy)
-        if (!threadable || !isFiniteIndexableCollection(op))
-          op.infer(restParam);
+        if (!threadable || !isFiniteIndexedCollection(op)) op.infer(varParam);
       i += 1;
     }
   }
   return null;
+}
+
+/** Recursively examine the symbols and operators and for any
+ * that don't have a definition, suggest an alternative name.
+ */
+function spellcheckSymbols(expr: BoxedExpression): Record<string, string> {
+  let suggestions: Record<string, string> = {};
+  const knownSymbols = getSymbolNames(expr.engine);
+  const knownOperators = getOperatorNames(expr.engine);
+
+  if (
+    expr.symbol &&
+    !suggestions[expr.symbol] &&
+    !expr.symbol.startsWith('_')
+  ) {
+    if (!knownSymbols.includes(expr.symbol)) {
+      const match = fuzzyStringMatch(expr.symbol, knownSymbols);
+      if (match) suggestions[expr.symbol] = match;
+    }
+  } else if (
+    expr.ops &&
+    !suggestions[expr.operator] &&
+    !expr.operator.startsWith('_')
+  ) {
+    const operator = expr.operator;
+    if (!knownOperators.includes(operator)) {
+      const match = fuzzyStringMatch(operator, knownOperators);
+      if (match) suggestions[operator] = match;
+    }
+    for (const op of expr.ops)
+      suggestions = { ...suggestions, ...spellcheckSymbols(op) };
+  }
+
+  return suggestions;
+}
+
+function getOperatorNames(ce: ComputeEngine): string[] {
+  const names: string[] = [];
+  let currentScope: Scope | null = ce.context.lexicalScope;
+  while (currentScope) {
+    for (const key of currentScope.bindings.keys()) {
+      const def = currentScope.bindings.get(key);
+      if (isOperatorDef(def)) names.push(key);
+    }
+
+    currentScope = currentScope.parent;
+  }
+
+  return names;
+}
+
+/** Get the list of all known symbols in the current scope */
+function getSymbolNames(ce: ComputeEngine): string[] {
+  const names: string[] = [];
+  let currentScope: Scope | null = ce.context.lexicalScope;
+  while (currentScope) {
+    for (const key of currentScope.bindings.keys()) {
+      const def = currentScope.bindings.get(key);
+      if (isValueDef(def)) names.push(key);
+    }
+
+    currentScope = currentScope.parent;
+  }
+
+  return names;
+}
+
+export function spellCheckMessage(expr: BoxedExpression): string {
+  const suggestions = spellcheckSymbols(expr);
+  if (Object.keys(suggestions).length === 0) return '';
+
+  if (Object.keys(suggestions).length === 1) {
+    const [symbol, suggestion] = Object.entries(suggestions)[0];
+    return `Unknown symbol "${symbol}". Did you mean "${suggestion}"?`;
+  }
+
+  const lines: string[] = [];
+  for (const [symbol, suggestion] of Object.entries(suggestions)) {
+    lines.push(`- "${symbol}" -> "${suggestion}"?`);
+  }
+  return `Unknown symbols found:\n${lines.join('\n')}`;
 }

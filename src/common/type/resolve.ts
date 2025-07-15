@@ -13,14 +13,14 @@ function resolve(type: Readonly<Type>, resolver: TypeResolver): Type {
   if (typeof type === 'string') return type;
 
   if (type.kind === 'reference') {
-    const resolved = resolver(type.ref);
+    const resolved = resolver.resolve(type.name);
     if (resolved === undefined)
-      error(type, `Type reference ${type.ref} not found`);
+      error(type, `Type reference ${type.name} not found`);
 
     return resolved;
   }
 
-  if (type.kind === 'collection')
+  if (type.kind === 'collection' || type.kind === 'indexed_collection')
     return { ...type, elements: resolve(type.elements, resolver) };
 
   if (type.kind === 'list') {
@@ -34,12 +34,19 @@ function resolve(type: Readonly<Type>, resolver: TypeResolver): Type {
   if (type.kind === 'set')
     return { ...type, elements: resolve(type.elements, resolver) };
 
-  if (type.kind === 'map') {
+  if (type.kind === 'record') {
     const elements: Record<string, Type> = {};
     for (const key in type.elements)
       elements[key] = resolve(type.elements[key], resolver);
 
-    return { kind: 'map', elements };
+    return { kind: 'record', elements };
+  }
+
+  if (type.kind === 'dictionary') {
+    return {
+      kind: 'dictionary',
+      values: resolve(type.values, resolver),
+    };
   }
 
   if (type.kind === 'tuple') {
@@ -60,18 +67,19 @@ function resolve(type: Readonly<Type>, resolver: TypeResolver): Type {
       ...param,
       type: resolve(param.type, resolver),
     }));
-    const restArg = type.restArg
-      ? { ...type.restArg, type: resolve(type.restArg.type, resolver) }
+    const varArg = type.variadicArg
+      ? { ...type.variadicArg, type: resolve(type.variadicArg.type, resolver) }
       : undefined;
 
     const result = resolve(type.result, resolver);
 
-    return { ...type, args, optArgs, restArg, result };
+    return { ...type, args, optArgs, variadicArg: varArg, result };
   }
 
   return type;
 }
 
-export function resolveType(type: Type, resolver: TypeResolver): Type {
+export function resolveType(type: Type, resolver?: TypeResolver): Type {
+  if (!resolver) return type;
   return reduceType(resolve(type, resolver));
 }

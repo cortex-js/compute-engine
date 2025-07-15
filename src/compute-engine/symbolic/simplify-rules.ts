@@ -7,15 +7,15 @@ import { mul } from '../boxed-expression/arithmetic-mul-div';
 import { simplifyLogicFunction } from '../library/logic';
 import type { BoxedExpression, Rule, RuleStep } from '../global-types';
 import { expand } from '../boxed-expression/expand';
-import {
-  isEquation,
-  isInequality,
-  isRelationalOperator,
-} from '../boxed-expression/utils';
 import { factor } from '../boxed-expression/factor';
 import { add } from '../boxed-expression/arithmetic-add';
 import { SMALL_INTEGER } from '../numerics/numeric';
 import { NumericValue } from '../numeric-value/types';
+import {
+  isEquationOperator,
+  isInequalityOperator,
+  isRelationalOperator,
+} from '../latex-syntax/utils';
 
 /**
  * @todo: a set to "tidy" an expression. Different from a canonical form, but
@@ -1387,7 +1387,8 @@ export const SIMPLIFY_RULES: Rule[] = [
 function simplifyRelationalOperator(
   expr: BoxedExpression
 ): RuleStep | undefined {
-  if (!isInequality(expr) && !isEquation(expr)) return undefined;
+  const h = expr.operator;
+  if (!isInequalityOperator(h) && !isEquationOperator(h)) return undefined;
 
   const originalExpr = expr;
 
@@ -1429,7 +1430,11 @@ function simplifySystemOfEquations(
   if (expr.operator !== 'List') return undefined;
 
   // Check if every element is an equation or inequality
-  if (!expr.ops!.every((x) => isEquation(x) || isInequality(x)))
+  if (
+    !expr.ops!.every(
+      (x) => isEquationOperator(x.operator) || isInequalityOperator(x.operator)
+    )
+  )
     return undefined;
 
   // The result is a list of simplified equations and inequalities

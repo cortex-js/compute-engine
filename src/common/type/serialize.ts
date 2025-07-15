@@ -5,12 +5,13 @@ const NEGATION_PRECEDENCE = 3;
 const UNION_PRECEDENCE = 1;
 const INTERSECTION_PRECEDENCE = 2;
 const LIST_PRECEDENCE = 4;
-const MAP_PRECEDENCE = 5;
-const SET_PRECEDENCE = 6;
-const COLLECTION_PRECEDENCE = 7;
-const TUPLE_PRECEDENCE = 8;
-const SIGNATURE_PRECEDENCE = 9;
-const VALUE_PRECEDENCE = 10;
+const RECORD_PRECEDENCE = 5;
+const DICTIONARY_PRECEDENCE = 6;
+const SET_PRECEDENCE = 7;
+const COLLECTION_PRECEDENCE = 8;
+const TUPLE_PRECEDENCE = 9;
+const SIGNATURE_PRECEDENCE = 10;
+const VALUE_PRECEDENCE = 11;
 
 export function typeToString(type: Type, precedence = 0): string {
   // Primitive types are already strings
@@ -29,7 +30,7 @@ export function typeToString(type: Type, precedence = 0): string {
 
     case 'reference':
       // Serialize reference types
-      result = type.ref;
+      result = type.name;
       break;
 
     case 'negation':
@@ -49,6 +50,26 @@ export function typeToString(type: Type, precedence = 0): string {
       result = type.types
         .map((t) => typeToString(t, INTERSECTION_PRECEDENCE))
         .join(' & ');
+      break;
+
+    case 'expression':
+      result = `expression<${symbolName(type.operator)}>`;
+      break;
+
+    case 'symbol':
+      result = `symbol<${symbolName(type.name)}>`;
+      break;
+
+    case 'numeric':
+      if (Number.isFinite(type.lower) && Number.isFinite(type.upper)) {
+        result = `${type.type}<${type.lower}..${type.upper}>`;
+      } else if (Number.isFinite(type.lower)) {
+        result = `${type.type}<${type.lower}..>`;
+      } else if (Number.isFinite(type.upper)) {
+        result = `${type.type}<..${type.upper}>`;
+      } else {
+        result = `${type.type}`;
+      }
       break;
 
     case 'list':
@@ -100,22 +121,28 @@ export function typeToString(type: Type, precedence = 0): string {
       }
       break;
 
-    case 'map':
+    case 'record':
       // Serialize record types
       const elements = Object.entries(type.elements)
         .map(([key, value]) => `${key}: ${typeToString(value)}`)
         .join(', ');
-      result = `map<${elements}>`;
+      result = `record<${elements}>`;
+      break;
+
+    case 'dictionary':
+      result = `dictionary<${typeToString(type.values)}>`;
       break;
 
     case 'set':
-      // Serialize set types
       result = `set<${typeToString(type.elements)}>`;
       break;
 
     case 'collection':
-      // Serialize collection types
       result = `collection<${typeToString(type.elements)}>`;
+      break;
+
+    case 'indexed_collection':
+      result = `indexed_collection<${typeToString(type.elements)}>`;
       break;
 
     case 'tuple':
@@ -141,8 +168,12 @@ export function typeToString(type: Type, precedence = 0): string {
       const optArgs = type.optArgs
         ? type.optArgs.map((arg) => namedElement(arg) + '?').join(', ')
         : '';
-      const restArg = type.restArg ? `...${namedElement(type.restArg)}` : '';
-      const argsList = [args, optArgs, restArg].filter((s) => s).join(', ');
+      const varArg = type.variadicArg
+        ? type.variadicMin === 0
+          ? `${namedElement(type.variadicArg)}*`
+          : `${namedElement(type.variadicArg)}+`
+        : '';
+      const argsList = [args, optArgs, varArg].filter((s) => s).join(', ');
       result = `(${argsList}) -> ${typeToString(type.result)}`;
       break;
 
@@ -163,6 +194,14 @@ function namedElement(el: NamedElement): string {
   return typeToString(el.type);
 }
 
+function symbolName(name: string): string {
+  // If the name is a basic identifier, return it as is
+  if (/^[a-zA-Z_][a-zA-Z0-9_]*$/.test(name)) return name;
+
+  // Otherwise, return the name in backticks
+  return `\`${name}\``;
+}
+
 function getPrecedence(kind: string): number {
   switch (kind) {
     case 'negation':
@@ -173,11 +212,14 @@ function getPrecedence(kind: string): number {
       return INTERSECTION_PRECEDENCE;
     case 'list':
       return LIST_PRECEDENCE;
-    case 'map':
-      return MAP_PRECEDENCE;
+    case 'record':
+      return RECORD_PRECEDENCE;
+    case 'dictionary':
+      return DICTIONARY_PRECEDENCE;
     case 'set':
       return SET_PRECEDENCE;
     case 'collection':
+    case 'indexed_collection':
       return COLLECTION_PRECEDENCE;
     case 'tuple':
       return TUPLE_PRECEDENCE;

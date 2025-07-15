@@ -2,7 +2,6 @@
 
 import {
   BoxedExpression,
-  Pattern,
   PatternMatchOptions,
   SemiBoxedExpression,
   Substitution,
@@ -13,7 +12,7 @@ import { engine, latex } from '../utils';
 const ce = engine;
 
 function match(
-  pattern: Pattern | SemiBoxedExpression,
+  pattern: SemiBoxedExpression,
   expr: BoxedExpression | Expression,
   options?: PatternMatchOptions
 ): Substitution | null {

@@ -52,8 +52,8 @@ describe('LIST PARSING', () => {
 
 describe('LIST SERIALIZATION', () => {
   test('Empty list', () =>
-    expect(latex('\\lbrack\\rbrack')).toMatchInlineSnapshot(
-      `\\error{\\text{\\lbrack\\rbrack}}`
+    expect(latex(['List'])).toMatchInlineSnapshot(
+      `\\bigl\\lbrack \\bigr\\rbrack`
     ));
 });
 
@@ -63,34 +63,20 @@ describe('RANGE', () => {
   });
 
   test('simple range with step', () => {
-    expect(parse('1..3..5')).toMatchInlineSnapshot(`
-      [
-        "Range",
-        1,
-        [
-          "Error",
-          [
-            "ErrorCode",
-            "'incompatible-type'",
-            "'number'",
-            "'collection<integer>'"
-          ]
-        ]
-      ]
-    `);
-  }); // @fixme
+    expect(parse('1..3..5')).toMatchInlineSnapshot(`["Range", 1, 5, 2]`);
+  });
 
   test('range with expressions', () => {
     expect(parse('n+1..n+10')).toMatchInlineSnapshot(
       `["Add", "n", ["Range", 1, ["Add", "n", 10]]]`
     );
-  });
+  }); // @fixme
 
   test('range with expressions with multiplication', () => {
     expect(parse('2n..3n')).toMatchInlineSnapshot(
       `["Multiply", 2, ["Range", "n", ["Multiply", 3, "n"]]]`
     );
-  });
+  }); // @fixme
 
   test('range with expressions with addition and multiplication', () => {
     expect(parse('(2n + 1)..(3n + 10)')).toMatchInlineSnapshot(`
@@ -106,7 +92,7 @@ describe('RANGE', () => {
     expect(parse('x = n+1..n+10')).toMatchInlineSnapshot(
       `["Equal", "x", ["Add", "n", ["Range", 1, ["Add", "n", 10]]]]`
     );
-  });
+  }); // @fixme
 
   test('range with assignment', () => {
     expect(parse('x := 5..13')).toMatchInlineSnapshot(

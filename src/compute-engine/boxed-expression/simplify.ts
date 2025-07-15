@@ -209,7 +209,7 @@ function simplifyCommutativeFunction(
   // If the function is commutative, we will try all permutations
   // of the arguments
   const ps =
-    expr.functionDefinition?.commutative === true
+    expr.operatorDefinition?.commutative === true
       ? permutations(expr.ops!)
       : [expr.ops!];
 

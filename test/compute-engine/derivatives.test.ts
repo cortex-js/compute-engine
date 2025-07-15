@@ -1,4 +1,4 @@
-import type { BoxedExpression } from '../../src/compute-engine/public';
+import type { BoxedExpression } from '../../src/compute-engine/global-types';
 import { engine } from '../utils';
 
 function parse(expr: string): BoxedExpression {
@@ -76,7 +76,7 @@ describe('ND', () => {
     const result = expr.N();
     expect(result.json).toMatchInlineSnapshot(`
       {
-        num: 14.000000000000009,
+        num: 14.000000000000007,
       }
     `);
   });
@@ -86,7 +86,7 @@ describe('ND', () => {
     const result = expr.N();
     expect(result.json).toMatchInlineSnapshot(`
       {
-        num: 23.090702573188704,
+        num: 23.090702573188732,
       }
     `);
   });

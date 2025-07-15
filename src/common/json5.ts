@@ -117,12 +117,12 @@ class JSON5Parser {
       throw this.error(`String should start with a quote, got '${quote}'`);
     }
     this.index++; // consume opening quote
-    let result = '';
+    const result: string[] = [];
     while (!this.isAtEnd()) {
       const ch = this.currentChar();
       if (ch === quote) {
         this.index++; // consume closing quote
-        return result;
+        return result.join('');
       }
       if (ch === '\\') {
         this.index++; // consume backslash
@@ -132,53 +132,73 @@ class JSON5Parser {
         const esc = this.currentChar();
         switch (esc) {
           case 'b':
-            result += '\b';
+            result.push('\b');
             break;
           case 'f':
-            result += '\f';
+            result.push('\f');
             break;
           case 'n':
-            result += '\n';
+            result.push('\n');
             break;
           case 'r':
-            result += '\r';
+            result.push('\r');
             break;
           case 't':
-            result += '\t';
+            result.push('\t');
             break;
           case 'v':
-            result += '\v';
+            result.push('\v');
             break;
           case '\\':
-            result += '\\';
+            result.push('\\');
             break;
           case "'":
-            result += "'";
+            result.push("'");
             break;
           case '"':
-            result += '"';
+            result.push('"');
             break;
           case '0':
-            result += '\0';
+            result.push('\0');
             break;
           case 'u': {
-            // Unicode escape sequence: exactly 4 hex digits
             this.index++; // consume 'u'
             const hex = this.text.substr(this.index, 4);
             if (!/^[0-9a-fA-F]{4}$/.test(hex)) {
               throw this.error(`Invalid Unicode escape sequence: \\u${hex}`);
             }
-            result += String.fromCharCode(parseInt(hex, 16));
-            this.index += 3; // already consumed one digit by switch's index++ later
+            const codeUnit = parseInt(hex, 16);
+            this.index += 3; // already incremented once after reading esc
+            if (codeUnit >= 0xd800 && codeUnit <= 0xdbff) {
+              // Possible high surrogate, check for following low surrogate
+              if (
+                this.text[this.index + 1] === '\\' &&
+                this.text[this.index + 2] === 'u'
+              ) {
+                const lowHex = this.text.substr(this.index + 3, 4);
+                if (/^[0-9a-fA-F]{4}$/.test(lowHex)) {
+                  const lowUnit = parseInt(lowHex, 16);
+                  if (lowUnit >= 0xdc00 && lowUnit <= 0xdfff) {
+                    const fullCodePoint =
+                      ((codeUnit - 0xd800) << 10) +
+                      (lowUnit - 0xdc00) +
+                      0x10000;
+                    result.push(String.fromCodePoint(fullCodePoint));
+                    this.index += 6; // consume \uXXXX
+                    break;
+                  }
+                }
+              }
+            }
+            result.push(String.fromCharCode(codeUnit));
             break;
           }
           default:
-            // Allow arbitrary escaped character (or throw error to be stricter)
-            result += esc;
+            throw this.error(`Invalid escape sequence: \\${esc}`);
         }
-        this.index++; // move past escape character (or after unicode sequence)
+        this.index++; // move past escape character or sequence
       } else {
-        result += ch;
+        result.push(ch);
         this.index++;
       }
     }

@@ -1,42 +1,46 @@
 import { factor, together } from '../boxed-expression/factor';
 import { distribute } from '../symbolic/distribute';
 import { expand, expandAll } from '../boxed-expression/expand';
-import type { IdentifierDefinitions } from '../global-types';
+import type { SymbolDefinitions } from '../global-types';
 
-export const POLYNOMIALS_LIBRARY: IdentifierDefinitions[] = [
+export const POLYNOMIALS_LIBRARY: SymbolDefinitions[] = [
   {
     Expand: {
       description: 'Expand out products and positive integer powers',
       lazy: true,
       signature: '(value)-> value',
-      evaluate: ([x]) => expand(x.canonical) ?? x,
+      evaluate: ([x]) => expand(x.canonical) ?? x.canonical,
     },
+
     ExpandAll: {
       description:
         'Recursively expand out products and positive integer powers',
       lazy: true,
       signature: '(value)-> value',
-      evaluate: ([x]) => expandAll(x) ?? x,
+      evaluate: ([x]) => expandAll(x.canonical) ?? x.canonical,
     },
+
     Factor: {
       // @todo: extend to factor over the integers: return a ['Multiply', ['Power', a, b], ...]
       description:
         'Factors an algebraic expression into a product of irreducible factors',
       lazy: true,
       signature: '(value)-> value',
-      evaluate: ([x]) => factor(x.canonical),
+      evaluate: ([x]) => factor(x.canonical) ?? x.canonical,
     },
+
     Together: {
       description: 'Combine rational expressions into a single fraction',
       lazy: true,
       signature: '(value)-> value',
-      evaluate: ([x]) => together(x),
+      evaluate: ([x]) => together(x.canonical),
     },
+
     Distribute: {
       description: 'Distribute multiplication over addition',
       lazy: true,
       signature: '(value)-> value',
-      evaluate: ([x]) => (!x ? x : distribute(x)),
+      evaluate: ([x]) => (!x ? x : distribute(x.canonical)),
     },
   },
 ];

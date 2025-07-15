@@ -366,7 +366,7 @@ export class Result<IR = any> {
   }
 }
 
-export function skipUntil(parser: Parser, value: number): number {
+function skipUntil(parser: Parser, value: number): number {
   let i = parser.offset;
   while (i < parser.length) {
     const c = parser.get(i);

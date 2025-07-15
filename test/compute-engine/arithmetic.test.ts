@@ -355,7 +355,7 @@ describe('MULTIPLY', () => {
       check(
         '1.1\\times 2\\times 5\\times\\frac{5}{7}\\times\\frac{7}{9}\\times\\sqrt{2}\\times\\pi'
       )
-    ).toMatchSnapshot()); // @fixme eval-big should be same or bettern than evaluate
+    ).toMatchSnapshot()); // @fixme eval-big should be same or better than evaluate
 });
 
 describe('DIVIDE', () => {
@@ -482,7 +482,10 @@ describe('SQRT', () => {
 
   test('√ of list', () => {
     expect(
-      ce.box(['Sqrt', ['List', 4, 1, 56, 18]]).N().value
+      ce
+        .box(['Sqrt', ['List', 4, 1, 56, 18]])
+        .N()
+        .toString()
     ).toMatchSnapshot();
   });
 
@@ -500,114 +503,81 @@ describe('Square', () => {
     expect(checkJson(['Square', 2.5, -1.1, 18.4])).toMatchSnapshot());
 });
 
-describe('Max', () => {
-  test(`Max`, () => expect(checkJson(['Max', 2.5])).toMatchSnapshot());
-  test(`Max`, () => expect(checkJson(['Max', 2.5, 1.1])).toMatchSnapshot());
-  test(`Max`, () =>
-    expect(checkJson(['Max', 2.5, -1.1, 18.4])).toMatchSnapshot());
-  test(`Max`, () =>
-    expect(checkJson(['Max', 2.5, -1.1, 'NaN', 18.4])).toMatchSnapshot());
-  test(`Max`, () =>
-    expect(checkJson(['Max', 2.5, -1.1, 'foo', 18.4])).toMatchSnapshot());
-  test(`Max`, () => expect(checkJson(['Max', 'foo', 'bar'])).toMatchSnapshot());
-
-  test('Max of a range', () => {
-    expect(ce.box(['Max', ['Range', 1, 10]]).N().value).toMatchInlineSnapshot(
-      `10`
-    );
+describe('Min/Max', () => {
+  test(`Max`, () => {
+    expect(checkJson(['Max', 2.5])).toMatchSnapshot();
+    expect(checkJson(['Max', 2.5, 1.1])).toMatchSnapshot();
+    expect(checkJson(['Max', 2.5, -1.1, 18.4])).toMatchSnapshot();
   });
+  expect(checkJson(['Max', 2.5, -1.1, 'NaN', 18.4])).toMatchSnapshot();
+  expect(checkJson(['Max', 2.5, -1.1, 'foo', 18.4])).toMatchSnapshot();
+  expect(checkJson(['Max', 'foo', 'bar'])).toMatchSnapshot();
 
-  test('Max of a range of reals', () => {
-    expect(
-      ce.box(['Max', ['Range', 1.2, 4.5]]).N().value
-    ).toMatchInlineSnapshot(`5`);
-  });
+  expect(ce.box(['Max', ['Range', 1, 10]]).N().value).toMatchInlineSnapshot(
+    `10`
+  );
 
-  test('Max of a range with custom step', () => {
-    expect(
-      ce.box(['Max', ['Range', 1, 10, 7]]).N().value
-    ).toMatchInlineSnapshot(`8`);
-  });
+  expect(ce.box(['Max', ['Range', 1.2, 4.5]]).N().value).toMatchInlineSnapshot(
+    `5`
+  );
 
-  test('Max of an interval', () => {
-    expect(
-      ce.box(['Max', ['Interval', 1.1, 7.8]]).N().value
-    ).toMatchInlineSnapshot(`7.8`);
-  });
+  expect(ce.box(['Max', ['Range', 1, 10, 7]]).N().value).toMatchInlineSnapshot(
+    `8`
+  );
+  expect(
+    ce.box(['Max', ['Interval', 1.1, 7.8]]).N().value
+  ).toMatchInlineSnapshot(`7.8`);
+  expect(
+    ce.box(['Max', ['List', 4, 1, 56, 18]]).N().value
+  ).toMatchInlineSnapshot(`56`);
+  expect(
+    ce.box(['Max', ['Set', 4, 1, 56, 18]]).N().value
+  ).toMatchInlineSnapshot(`56`);
 
-  test('Max of a list', () => {
-    expect(
-      ce.box(['Max', ['List', 4, 1, 56, 18]]).N().value
-    ).toMatchInlineSnapshot(`56`);
-  });
-
-  test('Max of a set', () => {
-    expect(
-      ce.box(['Max', ['Set', 4, 1, 56, 18]]).N().value
-    ).toMatchInlineSnapshot(`56`);
-  });
-
-  test('Max of a list with non-comparable', () => {
-    expect(
-      ce.box(['Max', ['List', 4, 1, 'bar', 56, 'foo', 18]]).N().value
-    ).toMatchInlineSnapshot(`max(56, "bar", "foo")`);
-  });
-});
-
-describe('Min', () => {
+  expect(
+    ce
+      .box(['Max', ['List', 4, 1, 'bar', 56, 'foo', 18]])
+      .N()
+      .toString()
+  ).toMatchInlineSnapshot(`max(56, "bar", "foo")`);
   test(`Min`, () =>
     expect(checkJson(['Min', 2.5])).toMatchInlineSnapshot(`
       box       = ["Min", 2.5]
       simplify  = 2.5
     `));
-  test(`Min`, () =>
-    expect(checkJson(['Min', 2.5, 1.1])).toMatchInlineSnapshot(`
+  expect(checkJson(['Min', 2.5, 1.1])).toMatchInlineSnapshot(`
       box       = ["Min", 2.5, 1.1]
       eval-auto = 1.1
-    `));
-  test(`Min`, () =>
-    expect(checkJson(['Min', 2.5, -1.1, 18.4])).toMatchInlineSnapshot(`
+    `);
+  expect(checkJson(['Min', 2.5, -1.1, 18.4])).toMatchInlineSnapshot(`
       box       = ["Min", 2.5, -1.1, 18.4]
       eval-auto = -1.1
-    `));
-  test(`Min`, () =>
-    expect(checkJson(['Min', 2.5, -1.1, 'NaN', 18.4])).toMatchInlineSnapshot(`
+    `);
+  expect(checkJson(['Min', 2.5, -1.1, 'NaN', 18.4])).toMatchInlineSnapshot(`
       box       = ["Min", 2.5, -1.1, "NaN", 18.4]
       eval-auto = NaN
-    `));
-  test(`Min`, () =>
-    expect(checkJson(['Min', 2.5, -1.1, 'foo', 18.4])).toMatchInlineSnapshot(`
+    `);
+  expect(checkJson(['Min', 2.5, -1.1, 'foo', 18.4])).toMatchInlineSnapshot(`
       box       = ["Min", 2.5, -1.1, "foo", 18.4]
       eval-auto = min(-1.1, "foo")
-    `));
-  test(`Min`, () =>
-    expect(checkJson(['Min', 'foo', 'bar'])).toMatchInlineSnapshot(
-      `["Min", "foo", "bar"]`
-    ));
+    `);
+  expect(checkJson(['Min', 'foo', 'bar'])).toMatchInlineSnapshot(
+    `["Min", "foo", "bar"]`
+  );
 
-  test('Min of a range', () => {
-    expect(ce.box(['Min', ['Range', 1, 10]]).N().value).toMatchInlineSnapshot(
-      `1`
-    );
-  });
+  expect(ce.box(['Min', ['Range', 1, 10]]).N().value).toMatchInlineSnapshot(
+    `1`
+  );
 
-  test('Min of a range of reals', () => {
-    expect(
-      ce.box(['Min', ['Range', 1.2, 4.5]]).N().value
-    ).toMatchInlineSnapshot(`1`);
-  });
-
-  test('Min of a range with custom step', () => {
-    expect(
-      ce.box(['Min', ['Range', 1, 10, 7]]).N().value
-    ).toMatchInlineSnapshot(`1`);
-  });
-
-  test('Min of an interval', () => {
-    expect(
-      ce.box(['Min', ['Interval', 1.1, 7.8]]).N().value
-    ).toMatchInlineSnapshot(`1.1`);
-  });
+  expect(ce.box(['Min', ['Range', 1.2, 4.5]]).N().value).toMatchInlineSnapshot(
+    `1`
+  );
+  expect(ce.box(['Min', ['Range', 1, 10, 7]]).N().value).toMatchInlineSnapshot(
+    `1`
+  );
+  expect(
+    ce.box(['Min', ['Interval', 1.1, 7.8]]).N().value
+  ).toMatchInlineSnapshot(`1.1`);
 });
 
 describe('RATIONAL', () => {
@@ -679,18 +649,15 @@ describe('LG', () => {
 });
 
 describe('LOG(a,b)', () => {
-  describe('LOG(a,b)', () => {
-    test(`Log 1.1, 5`, () =>
-      expect(checkJson(['Log', 1.1, 5])).toMatchSnapshot());
-    test(`Log 1, 5`, () => expect(checkJson(['Log', 1, 5])).toMatchSnapshot());
-    test(`Log 0, 5`, () => expect(checkJson(['Log', 0, 5])).toMatchSnapshot());
-    test(`Log -1, 5`, () =>
-      expect(checkJson(['Log', -1, 5])).toMatchSnapshot());
-    test(`Log 'Pi', 5`, () =>
-      expect(checkJson(['Log', 'Pi', 5])).toMatchSnapshot());
-    test(`Log ['Complex', 1.1, 1.1], 5`, () =>
-      expect(checkJson(['Log', ['Complex', 1.1, 1.1], 5])).toMatchSnapshot());
-  });
+  test(`Log 1.1, 5`, () =>
+    expect(checkJson(['Log', 1.1, 5])).toMatchSnapshot());
+  test(`Log 1, 5`, () => expect(checkJson(['Log', 1, 5])).toMatchSnapshot());
+  test(`Log 0, 5`, () => expect(checkJson(['Log', 0, 5])).toMatchSnapshot());
+  test(`Log -1, 5`, () => expect(checkJson(['Log', -1, 5])).toMatchSnapshot());
+  test(`Log 'Pi', 5`, () =>
+    expect(checkJson(['Log', 'Pi', 5])).toMatchSnapshot());
+  test(`Log ['Complex', 1.1, 1.1], 5`, () =>
+    expect(checkJson(['Log', ['Complex', 1.1, 1.1], 5])).toMatchSnapshot());
 });
 
 describe('INVALID LOG', () => {
@@ -717,7 +684,7 @@ describe('SUM', () => {
   it('should compute the sum of a function over a closed interval', () =>
     expect(
       ce
-        .box(['Sum', ['Divide', 1, 'x'], ['Tuple', ['Hold', 'x'], 1, 10]])
+        .box(['Sum', ['Divide', 1, 'x'], ['Tuple', 'x', 1, 10]])
         .evaluate()
         .toString()
     ).toMatchInlineSnapshot(`7381/2520`));
@@ -753,25 +720,24 @@ describe('SUM', () => {
 });
 
 describe('GCD/LCM', () => {
-  it('should compute the GCD of two integers', () =>
+  it('should compute the GCD of two integers', () => {
     expect(ce.box(['GCD', 60, 12]).evaluate().toString()).toMatchInlineSnapshot(
       `12`
-    ));
+    );
 
-  it('should compute the GCD of two integers', () =>
     expect(ce.box(['GCD', 10, 15]).evaluate().toString()).toMatchInlineSnapshot(
       `5`
-    ));
+    );
+  });
 
-  it('should compute the LCM of two integers', () =>
+  it('should compute the LCM of two integers', () => {
     expect(ce.box(['LCM', 60, 12]).evaluate().toString()).toMatchInlineSnapshot(
       `60`
-    ));
-
-  it('should compute the LCM of two integers', () =>
+    );
     expect(ce.box(['LCM', 10, 15]).evaluate().toString()).toMatchInlineSnapshot(
       `30`
-    ));
+    );
+  });
 
   it('should compute the GCD of some integers and other stuff', () =>
     expect(

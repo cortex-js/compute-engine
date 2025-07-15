@@ -1,21 +1,21 @@
 import { symbol } from '../../../math-json/utils';
-import { LatexDictionary, Parser, Terminator } from '../types';
+import type { LatexDictionary, Parser, Terminator } from '../types';
 
 export const DEFINITIONS_STATISTICS: LatexDictionary = [
   {
     name: 'Mean',
     kind: 'function',
-    identifierTrigger: 'mean',
+    symbolTrigger: 'mean',
   },
   {
     name: 'Median',
     kind: 'function',
-    identifierTrigger: 'median',
+    symbolTrigger: 'median',
   },
   {
     name: 'StandarDeviation',
     kind: 'function',
-    identifierTrigger: 'stddev',
+    symbolTrigger: 'stddev',
   },
   {
     latexTrigger: ['\\bar'],

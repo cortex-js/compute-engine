@@ -1,15 +1,15 @@
 // complex-cartesian (constructor) = re + i * im
 // complex-polar = abs * exp(i * arg)
 
-import type { IdentifierDefinitions } from '../global-types';
+import type { SymbolDefinitions } from '../global-types';
 
-export const COMPLEX_LIBRARY: IdentifierDefinitions[] = [
+export const COMPLEX_LIBRARY: SymbolDefinitions[] = [
   {
     Real: {
       // @todo: could be extended to return an expression, i.e. ["Real", ["Add", "x", ["Complex", 0, 5]]] -> "x". Not for any operator, but at least for Add, Multiply, Negate, etc.
-      threadable: true,
+      broadcastable: true,
       complexity: 1200,
-      signature: 'number -> real',
+      signature: '(number) -> real',
       sgn: ([op]) => {
         const re = op.re;
         if (isNaN(re)) return undefined;
@@ -24,9 +24,9 @@ export const COMPLEX_LIBRARY: IdentifierDefinitions[] = [
       },
     },
     Imaginary: {
-      threadable: true,
+      broadcastable: true,
       complexity: 1200,
-      signature: 'number -> real',
+      signature: '(number) -> real',
       sgn: ([op]) => {
         const im = op.im;
         if (isNaN(im)) return undefined;
@@ -41,9 +41,9 @@ export const COMPLEX_LIBRARY: IdentifierDefinitions[] = [
       },
     },
     Argument: {
-      threadable: true,
+      broadcastable: true,
       complexity: 1200,
-      signature: 'number -> real',
+      signature: '(number) -> real',
       evaluate: (ops, { engine: ce }) => {
         const op = ops[0].numericValue;
         if (op === null) return undefined;
@@ -56,9 +56,9 @@ export const COMPLEX_LIBRARY: IdentifierDefinitions[] = [
     // For Abs (magnitude) see src/compute-engine/library/processAbs
 
     AbsArg: {
-      threadable: true,
+      broadcastable: true,
       complexity: 1200,
-      signature: 'number -> tuple<real, real>',
+      signature: '(number) -> tuple<real, real>',
       evaluate: (ops, { engine: ce }) => {
         if (ops[0].numericValue === null) return undefined;
         return ce.tuple(
@@ -69,9 +69,9 @@ export const COMPLEX_LIBRARY: IdentifierDefinitions[] = [
     },
 
     Conjugate: {
-      threadable: true,
+      broadcastable: true,
       complexity: 1200,
-      signature: 'number -> number',
+      signature: '(number) -> number',
       type: ([z]) => z.type,
       sgn: ([z]) => z.sgn,
       evaluate: (ops, { engine: ce }) => {
@@ -83,7 +83,7 @@ export const COMPLEX_LIBRARY: IdentifierDefinitions[] = [
     },
 
     ComplexRoots: {
-      threadable: true,
+      broadcastable: true,
       complexity: 1200,
       signature: '(number, number) -> list<number>',
       evaluate: (ops, { engine: ce }) => {

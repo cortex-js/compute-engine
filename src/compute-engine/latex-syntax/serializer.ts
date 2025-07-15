@@ -27,7 +27,7 @@ import { countTokens, supsub } from './tokenizer';
 import { serializeNumber } from './serialize-number';
 import { SYMBOLS } from './dictionary/definitions-symbols';
 import { DELIMITERS_SHORTHAND } from './dictionary/definitions-core';
-import { EMOJIS } from '../../math-json/identifiers';
+import { EMOJIS } from '../../math-json/symbols';
 
 const ACCENT_MODIFIERS = {
   deg: (s: string) => `${s}\\degree`,
@@ -121,7 +121,7 @@ export class Serializer {
 
   /**
    * If this is a "short" expression, wrap it.
-   * Do not wrap identifiers, positive numbers or functions.
+   * Do not wrap symbols, positive numbers or functions.
    *
    * This is called by the serializer for power and division (i.e. "(a+1)/b")
    *
@@ -201,12 +201,10 @@ export class Serializer {
     if (def?.kind === 'function') {
       // It's a function, but it doesn't have arguments.
       // For example `"Cos"`.
-      // Print the trigger as an identifier
-      return serializeIdentifier(symbol(expr) ?? '') ?? '';
+      // Print the trigger as an symbol
+      return serializeSymbol(symbol(expr) ?? '') ?? '';
     }
-    return (
-      def?.serialize?.(this, expr) ?? serializeIdentifier(symbol(expr)) ?? ''
-    );
+    return def?.serialize?.(this, expr) ?? serializeSymbol(symbol(expr)) ?? '';
   }
 
   serializeFunction(
@@ -219,10 +217,10 @@ export class Serializer {
     if (def?.serialize) return def.serialize(this, expr);
 
     // It's a function without a serializer.
-    // It may have come from `getIdentifierType()`
+    // It may have come from `getSymbolType()`
     // Serialize the arguments as function arguments
     const h = operator(expr);
-    return serializeIdentifier(h, 'auto') + this.wrapArguments(expr);
+    return serializeSymbol(h, 'auto') + this.wrapArguments(expr);
   }
 
   serialize(expr: Expression | null | undefined): LatexString {
@@ -273,7 +271,9 @@ export class Serializer {
         // `{num: 'not a number'}`
         // `{foo: 'not an expression}`
 
-        throw Error(`Syntax error ${expr ? JSON.stringify(expr) : ''}`);
+        throw Error(
+          `Syntax error ${expr ? JSON.stringify(expr, undefined, 4) : ''}`
+        );
       })();
       this.level -= 1;
       return result ?? '';
@@ -406,7 +406,7 @@ function specialName(s: string): [result: string, rest: string] {
   return [prefix, s.substring(prefix.length)];
 }
 
-/** Extract the body of the identifier, and the modifiers
+/** Extract the body of the symbol, and the modifiers
  * (accents and styles)
  */
 function parseModifiers(
@@ -438,7 +438,7 @@ function parseModifiers(
   return [body, accent, styles, rest];
 }
 
-function parseIdentifierBody(
+function parseSymbolBody(
   s: string,
   topLevel = true,
   style: 'operator' | 'italic' | 'upright' | 'auto' | 'none' = 'auto'
@@ -465,19 +465,11 @@ function parseIdentifierBody(
 
     while (rest.length > 0) {
       if (rest.startsWith('__')) {
-        const [sup, rest2] = parseIdentifierBody(
-          rest.substring(2),
-          false,
-          'none'
-        );
+        const [sup, rest2] = parseSymbolBody(rest.substring(2), false, 'none');
         sups.push(sup);
         rest = rest2;
       } else if (rest.startsWith('_')) {
-        const [sub, rest2] = parseIdentifierBody(
-          rest.substring(1),
-          false,
-          'none'
-        );
+        const [sub, rest2] = parseSymbolBody(rest.substring(1), false, 'none');
         subs.push(sub);
         rest = rest2;
       } else {
@@ -539,26 +531,26 @@ function parseIdentifierBody(
  * in `\mathrm{...}` if it has more than one character and no other style
  * is specified.
  */
-function serializeIdentifier(
+function serializeSymbol(
   s: string | null,
   style: 'operator' | 'italic' | 'upright' | 'none' | 'auto' = 'auto'
 ): string | null {
   if (s === null) return null;
 
-  // If the identifier contains emojis, skip the wrapping
+  // If the symbol contains emojis, skip the wrapping
   if (EMOJIS.test(s)) return s;
 
-  // If the identifier starts with one or more underscore,
+  // If the symbol starts with one or more underscore,
   // it's a wildcard symbol and always wrapped with \operatorname{...}.
   const m = s.match(/^(_+)(.*)/);
   if (m) {
-    const [body, rest] = parseIdentifierBody(m[2], true, 'none');
+    const [body, rest] = parseSymbolBody(m[2], true, 'none');
     return `\\operatorname{${'\\_'.repeat(m[1].length) + body + rest}}`;
   }
 
-  const [body, rest] = parseIdentifierBody(s, true, style);
+  const [body, rest] = parseSymbolBody(s, true, style);
 
-  // We couldn't parse the identifier, so just wrap it in \operatorname{...}
+  // We couldn't parse the symbol, so just wrap it in \operatorname{...}
   if (rest.length > 0) return `\\operatorname{${s}}`;
 
   return body;

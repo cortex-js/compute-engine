@@ -12,10 +12,7 @@ import {
 import { apply2 } from '../boxed-expression/apply';
 
 import { reducedRational } from '../numerics/rationals';
-import type {
-  FunctionDefinition,
-  IdentifierDefinitions,
-} from '../global-types';
+import type { OperatorDefinition, SymbolDefinitions } from '../global-types';
 
 //
 // Note: The name of trigonometric functions follow NIST DLMF
@@ -34,14 +31,14 @@ import type {
 //   sine function
 // We only have definitions for the principal branches here.
 
-export const TRIGONOMETRY_LIBRARY: IdentifierDefinitions[] = [
+export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
   {
     //
     // Constants
     //
     Pi: {
       type: 'finite_real',
-      constant: true,
+      isConstant: true,
       holdUntil: 'N',
       wikidata: 'Q167',
       value: (engine) =>
@@ -51,7 +48,7 @@ export const TRIGONOMETRY_LIBRARY: IdentifierDefinitions[] = [
   {
     Degrees: {
       /* = Pi / 180 */
-      signature: 'real -> real',
+      signature: '(real) -> real',
       canonical: (ops, { engine }) => {
         const ce = engine;
         if (ce.angularUnit === 'deg') return ops[0];
@@ -86,7 +83,7 @@ export const TRIGONOMETRY_LIBRARY: IdentifierDefinitions[] = [
 
     // Hypot: sqrt(x*x + y*y)
     Hypot: {
-      threadable: true,
+      broadcastable: true,
       signature: '(real, real) -> real',
       sgn: () => 'non-negative',
       evaluate: ([x, y], { engine }) =>
@@ -105,8 +102,8 @@ export const TRIGONOMETRY_LIBRARY: IdentifierDefinitions[] = [
     Arctan: {
       wikidata: 'Q2257242',
       complexity: 5200,
-      threadable: true,
-      signature: 'number -> finite_real',
+      broadcastable: true,
+      signature: '(number) -> finite_real',
       sgn: ([x]) => trigSign('Arctan', x),
       evaluate: ([x], { numericApproximation }) =>
         numericApproximation
@@ -117,7 +114,7 @@ export const TRIGONOMETRY_LIBRARY: IdentifierDefinitions[] = [
     Arctan2: {
       wikidata: 'Q776598',
       complexity: 5200,
-      threadable: true,
+      broadcastable: true,
       signature: '(y:number, x: number) -> real',
       evaluate: ([y, x], { engine: ce, numericApproximation }) => {
         if (numericApproximation)
@@ -172,8 +169,8 @@ export const TRIGONOMETRY_LIBRARY: IdentifierDefinitions[] = [
     /** = sin(z/2)^2 = (1 - cos z) / 2*/
     Haversine: {
       wikidata: 'Q2528380',
-      threadable: true,
-      signature: 'real -> number',
+      broadcastable: true,
+      signature: '(real) -> number',
       evaluate: ([z], { engine }) =>
         engine.box(['Divide', ['Subtract', 1, ['Cos', z]], 2]),
     },
@@ -181,8 +178,8 @@ export const TRIGONOMETRY_LIBRARY: IdentifierDefinitions[] = [
     /** = 2 * Arcsin(Sqrt(z)) */
     InverseHaversine: {
       //  Range ['Interval', [['Negate', 'Pi'], 'Pi'],
-      threadable: true,
-      signature: 'real -> real',
+      broadcastable: true,
+      signature: '(real) -> real',
       evaluate: ([x], { engine }) =>
         engine.box(['Multiply', 2, ['Arcsin', ['Sqrt', x]]]),
     },
@@ -218,7 +215,7 @@ export const TRIGONOMETRY_LIBRARY: IdentifierDefinitions[] = [
     // },
     InverseFunction: {
       lazy: true,
-      signature: 'function -> function',
+      signature: '(function) -> function',
       canonical: (ops, { engine }) => {
         // The canonical handler is responsible for validating the arguments
         ops = checkArity(engine, ops, 1);
@@ -236,12 +233,12 @@ function trigFunction(
   operator: string,
   complexity: number,
   description?: string
-): FunctionDefinition {
+): OperatorDefinition {
   return {
     complexity,
     description,
-    threadable: true,
-    signature: 'number -> number',
+    broadcastable: true,
+    signature: '(number) -> number',
     sgn: ([x]) => trigSign(operator, x),
     evaluate: ([x], { numericApproximation }) => {
       if (numericApproximation) return evalTrig(operator, x);

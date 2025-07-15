@@ -1,46 +1,65 @@
 import type {
   Expression,
-  MathJsonFunction,
-  MathJsonIdentifier,
-  MathJsonNumber,
-  MathJsonString,
+  MathJsonFunctionObject,
+  MathJsonSymbolObject,
+  MathJsonNumberObject,
+  MathJsonStringObject,
   MathJsonSymbol,
+  MathJsonDictionaryObject,
 } from './types';
-
-import { JSON5 } from '../common/json5';
 
 export const MISSING: Expression = ['Error', "'missing'"];
 
 export function isNumberExpression(
   expr: Expression | null
-): expr is number | string | MathJsonNumber {
+): expr is number | string | MathJsonNumberObject {
   if (typeof expr === 'number' || isNumberObject(expr)) return true;
-  if (typeof expr === 'string' && /^[+-]?[0-9\.]/.test(expr)) return true;
+  if (typeof expr === 'string' && matchesNumber(expr)) return true;
   return false;
 }
 
 export function isNumberObject(
   expr: Expression | null
-): expr is MathJsonNumber {
+): expr is MathJsonNumberObject {
   return expr !== null && typeof expr === 'object' && 'num' in expr;
 }
 
 export function isSymbolObject(
   expr: Expression | null
-): expr is MathJsonSymbol {
+): expr is MathJsonSymbolObject {
   return expr !== null && typeof expr === 'object' && 'sym' in expr;
 }
 
 export function isStringObject(
   expr: Expression | null
-): expr is MathJsonString {
+): expr is MathJsonStringObject {
   return expr !== null && typeof expr === 'object' && 'str' in expr;
+}
+
+export function isDictionaryObject(
+  expr: Expression | null
+): expr is MathJsonDictionaryObject {
+  return (
+    expr !== null &&
+    typeof expr === 'object' &&
+    'dict' in expr &&
+    typeof expr.dict === 'object' &&
+    !Array.isArray(expr.dict) &&
+    expr.dict !== null
+  );
 }
 
 export function isFunctionObject(
   expr: Expression | null
-): expr is MathJsonFunction {
-  return expr !== null && typeof expr === 'object' && 'fn' in expr;
+): expr is MathJsonFunctionObject {
+  return (
+    expr !== null &&
+    typeof expr === 'object' &&
+    'fn' in expr &&
+    Array.isArray(expr.fn) &&
+    expr.fn.length > 0 &&
+    typeof expr.fn[0] === 'string'
+  );
 }
 
 /**  If expr is a string literal, return it.
@@ -54,9 +73,10 @@ export function stringValue(
   if (expr === null || expr === undefined) return null;
   if (typeof expr === 'object' && 'str' in expr) return expr.str;
   if (typeof expr !== 'string') return null;
-  if (expr.length < 2) return null;
-  if (expr.at(0) !== "'" || expr.at(-1) !== "'") return null;
-  return expr.substring(1, expr.length - 1);
+  if (expr.length >= 2 && expr.at(0) === "'" && expr.at(-1) === "'")
+    return expr.substring(1, expr.length - 1);
+  if (matchesNumber(expr) || matchesSymbol(expr)) return null;
+  return expr;
 }
 
 export function stripText(
@@ -76,16 +96,14 @@ export function stripText(
 }
 
 /**
- * The operator of a function is an identifier
+ * The operator of a function is symbol.
  *
  * Return an empty string if the expression is not a function.
  *
  * Examples:
  * * `["Negate", 5]`  -> `"Negate"`
  */
-export function operator(
-  expr: Expression | null | undefined
-): MathJsonIdentifier {
+export function operator(expr: Expression | null | undefined): MathJsonSymbol {
   if (Array.isArray(expr)) return expr[0];
 
   if (expr === null || expr === undefined) return '';
@@ -134,21 +152,17 @@ export function unhold(expr: Expression | null): Expression | null {
 }
 
 export function symbol(expr: Expression | null | undefined): string | null {
-  if (typeof expr === 'string') {
-    // Is it a number?
-    if (/^[+-]?[0-9\.]/.test(expr)) return null;
-    // Is it a string literal?
-    if (expr.length >= 2 && expr[0] === "'" && expr[expr.length - 1] === "'")
-      return null;
+  // Is it a symbol shorthand?
+  if (typeof expr === 'string' && matchesSymbol(expr)) {
+    if (expr.length >= 2 && expr.at(0) === '`' && expr.at(-1) === '`')
+      return expr.slice(1, -1);
     return expr;
   }
 
   if (expr === null || expr === undefined) return null;
 
-  const s = isSymbolObject(expr) ? expr.sym : expr;
-  if (typeof s !== 'string') return null;
-
-  return s;
+  if (isSymbolObject(expr)) return expr.sym;
+  return null;
 }
 
 function keyValuePair(
@@ -168,42 +182,16 @@ function keyValuePair(
 // Parse the expression either as:
 // - a `Dictionary` expression
 // - a `KeyValuePair` or `Tuple` expression
-// - a string literal surrounded by `{` and `}`
 export function dictionaryFromExpression(
   expr: Expression | null
-): null | Record<string, Expression> {
+): null | MathJsonDictionaryObject {
   if (expr === null) return null;
 
-  // Is it an object literal without any of the reserved keys?
-  if (
-    typeof expr === 'object' &&
-    !('sym' in expr) &&
-    !('num' in expr) &&
-    !('str' in expr) &&
-    !('fn' in expr)
-  ) {
-    return expr as unknown as Record<string, Expression>;
-  }
-
-  // Is it a string literal surrounded by `{` and `}`?
-  // e.g. `"{a: 1, b: 2}"` -> `{a: 1, b: 2}`
-  // (note we use JSON5 syntax, which is more permissive than JSON, and for
-  // example does not require quotes around keys)
-  if (
-    typeof expr === 'string' &&
-    expr[0] === '{' &&
-    expr[expr.length - 1] === '}'
-  ) {
-    try {
-      return JSON5.parse(expr);
-    } catch {
-      return null;
-    }
-  }
+  if (isDictionaryObject(expr)) return expr as MathJsonDictionaryObject;
 
   // Is it a KeyValuePair or Tuple expression?
   const kv = keyValuePair(expr);
-  if (kv) return { [kv[0]]: kv[1] };
+  if (kv) return { [kv[0]]: kv[1] } as unknown as MathJsonDictionaryObject;
 
   // Is it a Dictionary expression?
   if (operator(expr) === 'Dictionary') {
@@ -214,7 +202,7 @@ export function dictionaryFromExpression(
       if (kv) result[kv[0]] = kv[1];
     }
 
-    return result;
+    return result as unknown as MathJsonDictionaryObject;
   }
 
   return null;
@@ -223,24 +211,18 @@ export function dictionaryFromExpression(
 export function dictionaryFromEntries(
   dict: Record<string, Expression>
 ): Expression {
-  const keys = Object.keys(dict);
-  if (keys.length === 0) return ['Dictionary'];
-  if (keys.length === 1) return ['Pair', { str: keys[0] }, dict[keys[0]]];
-
-  const entries: Expression[] = [];
-  for (const key of keys) entries.push(['Pair', { str: key }, dict[key]]);
-  return ['Dictionary', ...entries];
+  return { dict } as MathJsonDictionaryObject;
 }
 
-function machineValueOfString(s: string): number | null {
+function machineValueOfString(s: string): number {
   s = s
     .toLowerCase()
     .replace(/[nd]$/, '')
     .replace(/[\u0009-\u000d\u0020\u00a0]/g, '');
 
   if (s === 'nan') return NaN;
-  if (s === 'infinity' || s === '+infinity') return Infinity;
-  if (s === '-infinity') return -Infinity;
+  if (/^(infinity|\+infinity|oo|\+oo)$/i.test(s)) return Infinity;
+  if (/^(-infinity|-oo)$/.test(s)) return -Infinity;
 
   // Are there some repeating decimals?
   if (/\([0-9]+\)/.test(s)) {
@@ -262,7 +244,8 @@ export function machineValue(
 ): number | null {
   if (typeof expr === 'number') return expr;
 
-  if (typeof expr === 'string') return machineValueOfString(expr);
+  if (typeof expr === 'string' && matchesNumber(expr))
+    return machineValueOfString(expr);
 
   // Strictly, expr.num should be a string, but we allow it to be a number
   if (expr !== undefined && isNumberObject(expr)) return machineValue(expr.num);
@@ -337,6 +320,9 @@ export function rationalValue(
   return null;
 }
 
+/**
+ * Apply a substitution to an expression.
+ */
 export function subs(
   expr: Expression,
   s: { [symbol: string]: Expression }
@@ -347,7 +333,7 @@ export function subs(
   const h = operator(expr);
   if (h)
     return [
-      subs(h, s) as MathJsonIdentifier,
+      subs(h, s) as MathJsonSymbol,
       ...operands(expr).map((x) => subs(x, s)),
     ];
 
@@ -455,4 +441,28 @@ export function countLeaves(expr: Expression | null): number {
   }
 
   return 0;
+}
+
+/** True if the string matches the expected pattern for a number */
+export function matchesNumber(s: string): boolean {
+  return (
+    /^(nan|oo|\+oo|-oo|infinity|\+infinity|-infinity)$/i.test(s) ||
+    /^[+-]?(0|[1-9][0-9]*)(\.[0-9]+)?(\([0-9]+\))?([eE][+-]?[0-9]+)?$/.test(s)
+  );
+}
+
+/** True if the string matches the expected pattern for a symbol */
+export function matchesSymbol(s: string): boolean {
+  return (
+    /^[a-zA-Z_][a-zA-Z0-9_]*$/.test(s) ||
+    (s.length >= 2 && s[0] === '`' && s[s.length - 1] === '`')
+  );
+}
+
+export function matchesString(s: string): boolean {
+  if (s.length >= 2 && s[0] === "'" && s[s.length - 1] === "'") {
+    return true;
+  }
+
+  return !matchesNumber(s) && !matchesSymbol(s);
 }

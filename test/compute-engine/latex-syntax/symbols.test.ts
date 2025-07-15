@@ -1,8 +1,8 @@
-import { validateIdentifier } from '../../../src/math-json/identifiers';
+import { validateSymbol } from '../../../src/math-json/symbols';
 import { engine as ce, exprToString, latex } from '../../utils';
 
-function box(expr) {
-  return exprToString(ce.box(expr));
+function symbol(expr) {
+  return exprToString(ce.symbol(expr));
 }
 
 function parse(s) {
@@ -17,20 +17,20 @@ function parse(s) {
 // }
 
 describe('SYMBOLS', () => {
-  describe('validateIdentifier()', () => {
-    test('Valid identifiers', () => {
-      expect(validateIdentifier('x')).toEqual('valid');
-      expect(validateIdentifier('ab')).toEqual('valid');
-      expect(validateIdentifier('θ')).toEqual('valid');
-      expect(validateIdentifier('ϑ')).toEqual('valid');
-      expect(validateIdentifier('_')).toEqual('valid');
-      expect(validateIdentifier('_a')).toEqual('valid');
-      expect(validateIdentifier('o_o')).toEqual('valid');
-      expect(validateIdentifier('café')).toEqual('valid');
+  describe('validateSymbol()', () => {
+    test('Valid symbols', () => {
+      expect(validateSymbol('x')).toEqual('valid');
+      expect(validateSymbol('ab')).toEqual('valid');
+      expect(validateSymbol('θ')).toEqual('valid');
+      expect(validateSymbol('ϑ')).toEqual('valid');
+      expect(validateSymbol('_')).toEqual('valid');
+      expect(validateSymbol('_a')).toEqual('valid');
+      expect(validateSymbol('o_o')).toEqual('valid');
+      expect(validateSymbol('café')).toEqual('valid');
 
-      // Catalan interpunct is valid in an identifier and not
+      // Catalan interpunct is valid in a symbol and not
       // considered punctuation (also used in French for "écriture inclusive")
-      expect(validateIdentifier('col·lecció')).toEqual('valid');
+      expect(validateSymbol('col·lecció')).toEqual('valid');
 
       // Oh boy. "8" is an emoji. Specifically, it has the emoji property
       // "Emoji" and the emoji property "Emoji_Component" (EC), but
@@ -39,16 +39,16 @@ describe('SYMBOLS', () => {
       // This is because the emoji 8️⃣ (8 keycap) is a sequence of two
       // code points: 8 (base), U+FE0F (variation selector-16) and
       // U+20E3 (combining enclosing keycap).
-      expect(validateIdentifier('a8')).toEqual('valid');
-      expect(validateIdentifier('8️⃣')).toEqual('valid');
-      expect(validateIdentifier('a8️⃣')).toEqual('unexpected-mixed-emoji');
+      expect(validateSymbol('a8')).toEqual('valid');
+      expect(validateSymbol('8️⃣')).toEqual('valid');
+      expect(validateSymbol('a8️⃣')).toEqual('unexpected-mixed-emoji');
 
       // Emoji with skin tone and ZWJ
       // Man            U+1F468
       // Skin1-2        U+1F3FB
       // ZWJ            U+200D
       // Microphone     U+1F3A4
-      expect(validateIdentifier('👨🏻‍🎤')).toEqual('valid');
+      expect(validateSymbol('👨🏻‍🎤')).toEqual('valid');
 
       // Some emojis are displayed by default as black and white
       // characters. For example, 🕶 U+1F576 (xD83D xDD76) has the emoji
@@ -63,18 +63,18 @@ describe('SYMBOLS', () => {
       // The specific sequence 😎🤏😳🕶🤏 was found in the wild.
 
       // Sequence of emojis with presentation and non-presentation
-      expect(validateIdentifier('😎🤏😳🕶🤏')).toEqual('valid');
+      expect(validateSymbol('😎🤏😳🕶🤏')).toEqual('valid');
 
       // Sequence of emojis with presentation and VS-16
       // VS-16 U+FE0F
-      expect(validateIdentifier('😎🤏😳🕶\uFE0F🤏')).toEqual('valid');
+      expect(validateSymbol('😎🤏😳🕶\uFE0F🤏')).toEqual('valid');
 
       // UN flag.
       // First way to encode flags: as a sequence of two regional
       // indicator symbols
       //
       // 🇺 U+1F1FA 🇳 U+1F1F3
-      expect(validateIdentifier('🇺🇳')).toEqual('valid');
+      expect(validateSymbol('🇺🇳')).toEqual('valid');
 
       // England flag
       // Second way of encoding flags: as a flag emoji followed by
@@ -82,171 +82,191 @@ describe('SYMBOLS', () => {
       // The England flag uses the tags "gbeng":
       //
       //  U+1F3F4 U+E0067 U+E0062 U+E0065 U+E006E U+E0067 U+E007F
-      expect(validateIdentifier('🏴󠁧󠁢󠁥󠁮󠁧󠁿')).toEqual('valid');
+      expect(validateSymbol('🏴󠁧󠁢󠁥󠁮󠁧󠁿')).toEqual('valid');
 
       // Same thing with the CA flag, but it is rarely displayed correctly
       //
       // 🏴 U+1F3F4 󠁵u U+E0075 󠁳s U+E0073 c󠁣 U+E0063 a 󠁡 U+E0061 cancel 󠁿 U+E007F
-      expect(validateIdentifier('🏴󠁵󠁳󠁣󠁡󠁿')).toEqual('valid');
+      expect(validateSymbol('🏴󠁵󠁳󠁣󠁡󠁿')).toEqual('valid');
 
       // Rainbow flag.
       // Third way to encode flags, as a sequence of various emojis combined.
       //
       // 🏳 U+1F3F3 ️ VS-16 U+FE0F ‍ ZWJ U+200D 🌈 U+1F308
-      expect(validateIdentifier('🏳️‍🌈')).toEqual('valid');
+      expect(validateSymbol('🏳️‍🌈')).toEqual('valid');
 
       // Checkered flag.
       // Fourth way to encode flags, as a standalone emoji
       // U+1F3C1
-      expect(validateIdentifier('🏁')).toEqual('valid');
+      expect(validateSymbol('🏁')).toEqual('valid');
 
       // Flag (regional indicator) and non-flag mixed
-      expect(validateIdentifier('👨🏻‍🎤🇺🇸')).toEqual('valid');
+      expect(validateSymbol('👨🏻‍🎤🇺🇸')).toEqual('valid');
 
       // Non latin letters
-      expect(validateIdentifier('半径')).toEqual('valid');
-      expect(validateIdentifier('半径8546')).toEqual('valid');
+      expect(validateSymbol('半径')).toEqual('valid');
+      expect(validateSymbol('半径8546')).toEqual('valid');
       // Not recommended, but valid: script combos
-      expect(validateIdentifier('半径circle')).toEqual('valid');
+      expect(validateSymbol('半径circle')).toEqual('valid');
       // Caution: make sure the string is NFC-normalized (see below):
       // '\u5dc\u5b0\u5d4\u5b7\u5d2\u5d1\u5b4\u5bc\u5d9\u5dc'
-      expect(validateIdentifier('לְהַגבִּיל')).toEqual('valid');
+      expect(validateSymbol('לְהַגבִּיל')).toEqual('valid');
     });
     test('Not a string', () => {
-      expect(validateIdentifier(42)).toEqual('not-a-string');
+      expect(validateSymbol(42)).toEqual('not-a-string');
     });
     test('Empty string', () => {
-      expect(validateIdentifier('')).toEqual('empty-string');
+      expect(validateSymbol('')).toEqual('empty-string');
     });
     test('Expected NFC', () => {
-      expect(validateIdentifier('cafe\u0301')).toEqual('expected-nfc');
+      expect(validateSymbol('cafe\u0301')).toEqual('expected-nfc');
 
       //Not normalized: לְהַגבִּיל = '\u05dc\u05b0\u05d4\u05b7\u05d2\u05d1\u05bc\u05b4\u05d9\u05dc'
       // Normalized: '\u05dc\u05b0\u05d4\u05b7\u05d2\u05d1\u05b4\u05bc\u05d9\u05dc'
       expect(
-        validateIdentifier(
+        validateSymbol(
           '\u05dc\u05b0\u05d4\u05b7\u05d2\u05d1\u05bc\u05b4\u05d9\u05dc'
         )
       ).toEqual('expected-nfc');
     });
     test('Mixed Emoji', () => {
-      expect(validateIdentifier('not😀')).toEqual('unexpected-mixed-emoji');
+      expect(validateSymbol('not😀')).toEqual('unexpected-mixed-emoji');
       // Flag with non-emoji
-      expect(validateIdentifier('USA🇺🇸')).toEqual('unexpected-mixed-emoji');
+      expect(validateSymbol('USA🇺🇸')).toEqual('unexpected-mixed-emoji');
     });
     test('Bidi marker', () => {
       // Note: bidi markers are stripped when parsing LaTeX
-      expect(validateIdentifier('מְהִירוּת\u200E')).toEqual(
+      expect(validateSymbol('מְהִירוּת\u200E')).toEqual(
         'unexpected-bidi-marker'
       );
     });
     test('Unexpected script', () => {
-      expect(validateIdentifier('𓀀')).toEqual('unexpected-script');
+      expect(validateSymbol('𓀀')).toEqual('unexpected-script');
     });
     test('Invalid first char', () => {
-      expect(validateIdentifier('+')).toEqual('invalid-first-char');
-      expect(validateIdentifier('$x')).toEqual('invalid-first-char');
+      expect(validateSymbol('+')).toEqual('invalid-first-char');
+      expect(validateSymbol('$x')).toEqual('invalid-first-char');
     });
     test('Invalid char', () => {
-      expect(validateIdentifier('a.b')).toEqual('invalid-char');
+      expect(validateSymbol('a.b')).toEqual('invalid-char');
     });
   });
 
   describe('BOXING', () => {
-    test('simple identifiers', () => {
-      expect(box('x')).toEqual(`x`);
+    test('simple symbols', () => {
+      expect(symbol('x')).toEqual(`x`);
     });
-    test('multi letter identifier', () => {
-      expect(box('ab')).toEqual('ab');
+    test('multi letter symbol', () => {
+      expect(symbol('ab')).toEqual('ab');
     });
-    test('multi letter identifier with digits', () => {
-      expect(box('a8')).toEqual(`a8`);
+    test('multi letter symbol with digits', () => {
+      expect(symbol('a8')).toEqual(`a8`);
     });
     test('greek letters and symbols', () => {
-      expect(box('θ')).toEqual(`θ`);
+      expect(symbol('θ')).toEqual('`θ`');
       // `vartheta` or THETA SYMBOL (as Unicode calls it) is a variant
       // of the theta letter which is used in math, not written greek
       // Both are valid.
-      expect(box('ϑ')).toEqual(`ϑ`);
+      expect(symbol('ϑ')).toEqual('`ϑ`');
     });
     test('underline', () => {
-      expect(box('_')).toEqual(`_`);
-      expect(box('__')).toEqual(`__`);
-      expect(box('_a')).toEqual(`_a`);
-      expect(box('o_o')).toEqual(`o_o`);
+      expect(symbol('_')).toEqual('_');
+      expect(symbol('__')).toEqual('__');
+      expect(symbol('_a')).toEqual('_a');
+      expect(symbol('o_o')).toEqual('o_o');
     });
     test('extended latin', () => {
-      expect(box('café')).toEqual(`café`);
-      expect(box('col·lecció')).toEqual(`col·lecció`);
+      expect(symbol('café')).toEqual('`café`');
+      expect(symbol('col·lecció')).toEqual('`col·lecció`');
     });
     test('emojis', () => {
-      expect(box('😎🤏😳🕶🤏')).toEqual(`😎🤏😳🕶🤏`);
+      expect(symbol('😎🤏😳🕶🤏')).toEqual('`😎🤏😳🕶🤏`');
       // emoji with ZWJ and skin tone
-      expect(box('👨🏻‍🎤')).toEqual(`👨🏻‍🎤`);
+      expect(symbol('👨🏻‍🎤')).toEqual('`👨🏻‍🎤`');
     });
     test('non-latin scripts', () => {
-      expect(box('半径')).toEqual(`半径`);
-      expect(box('半径8546')).toEqual(`半径8546`);
-      expect(box('半径circle')).toEqual(`半径circle`);
-      expect(box('לְהַגבִּיל')).toEqual('לְהַגבִּיל');
+      expect(symbol('半径')).toEqual('`半径`');
+      expect(symbol('半径8546')).toEqual('`半径8546`');
+      expect(symbol('半径circle')).toEqual('`半径circle`');
+      expect(symbol('לְהַגבִּיל')).toEqual(`\`לְהַגבִּיל\``);
     });
   });
 
   describe('BOXING ERRORS', () => {
     test('Math operators are not valid symbols', () => {
-      expect(box('+')).toMatchInlineSnapshot(
-        `["Error", "'invalid-identifier'", "'+'"]`
+      expect(symbol('+')).toMatchInlineSnapshot(
+        `["Error", ["ErrorCode", "invalid-symbol", "invalid-first-char"], "+"]`
       );
-      expect(box('=')).toMatchInlineSnapshot(
-        `["Error", "'invalid-identifier'", "'='"]`
+      expect(symbol('=')).toMatchInlineSnapshot(
+        `["Error", ["ErrorCode", "invalid-symbol", "invalid-first-char"], "="]`
       );
     });
 
     test('LaTeX commands are not valid symbols', () => {
-      expect(box('\\alpha')).toMatchInlineSnapshot(
-        `["Error", "'invalid-identifier'", "'\\alpha'"]`
-      );
+      expect(symbol('\\alpha')).toMatchInlineSnapshot(`
+        [
+          "Error",
+          ["ErrorCode", "invalid-symbol", "invalid-first-char"],
+          "\\alpha"
+        ]
+      `);
     });
 
     test('Braile symbols are not valid symbols', () => {
-      expect(box('⠋')).toMatchInlineSnapshot(
-        `["Error", "'invalid-identifier'", "'⠋'"]`
+      expect(symbol('⠋')).toMatchInlineSnapshot(
+        `["Error", ["ErrorCode", "invalid-symbol", "unexpected-script"], "⠋"]`
       );
     });
 
     // U+13000, D80C DC00
     test('Egyptians Hieroglyphs are not valid symbols', () => {
-      expect(box('𓀀')).toMatchInlineSnapshot(
-        `["Error", "'invalid-identifier'", "'𓀀'"]`
+      expect(symbol('𓀀')).toMatchInlineSnapshot(
+        `["Error", ["ErrorCode", "invalid-symbol", "unexpected-script"], "𓀀"]`
       );
     });
 
     test('Symbols should not include LTR or RTL marks', () => {
-      expect(box('מְהִירוּת‎')).toMatchInlineSnapshot(
-        `["Error", "'invalid-identifier'", "'מְהִירוּת‎'"]`
-      );
-      expect(box('‎מְהִירוּת')).toMatchInlineSnapshot(
-        `["Error", "'invalid-identifier'", "'‎מְהִירוּת'"]`
-      );
+      expect(symbol('מְהִירוּת‎')).toMatchInlineSnapshot(`
+        [
+          "Error",
+          ["ErrorCode", "invalid-symbol", "unexpected-bidi-marker"],
+          "מְהִירוּת‎"
+        ]
+      `);
+      expect(symbol('‎מְהִירוּת')).toMatchInlineSnapshot(`
+        [
+          "Error",
+          ["ErrorCode", "invalid-symbol", "unexpected-bidi-marker"],
+          "‎מְהִירוּת"
+        ]
+      `);
     });
     test('Symbols should not mix emojis and non-emojis', () => {
-      expect(box('👨🏻‍🎤DavidBowie')).toMatchInlineSnapshot(
-        `["Error", "'invalid-identifier'", "'👨🏻‍🎤DavidBowie'"]`
-      );
-      expect(box('DavidBowie👨🏻‍🎤')).toMatchInlineSnapshot(
-        `["Error", "'invalid-identifier'", "'DavidBowie👨🏻‍🎤'"]`
-      );
+      expect(symbol('👨🏻‍🎤DavidBowie')).toMatchInlineSnapshot(`
+        [
+          "Error",
+          ["ErrorCode", "invalid-symbol", "unexpected-mixed-emoji"],
+          "👨🏻‍🎤DavidBowie"
+        ]
+      `);
+      expect(symbol('DavidBowie👨🏻‍🎤')).toMatchInlineSnapshot(`
+        [
+          "Error",
+          ["ErrorCode", "invalid-symbol", "unexpected-mixed-emoji"],
+          "DavidBowie👨🏻‍🎤"
+        ]
+      `);
     });
   });
 
   describe('PARSING', () => {
-    test('single letter identifiers', () => {
+    test('single letter symbol', () => {
       expect(parse('x')).toMatchInlineSnapshot(`x`);
       expect(parse('\\mathit{x}')).toMatchInlineSnapshot(`x_italic`);
       expect(parse('\\mathrm{x}')).toMatchInlineSnapshot(`x_upright`);
     });
-    test('multi letter identifier', () => {
-      // Multi-letter identifiers are upright by default
+    test('multi letter symbol', () => {
+      // Multi-letter symbols are upright by default
       expect(parse('\\mathrm{ab}')).toMatchInlineSnapshot(`ab`);
       expect(parse('\\operatorname{ab}')).toMatchInlineSnapshot(`ab`);
       expect(parse('\\mathit{ab}')).toMatchInlineSnapshot(`ab_italic`);
@@ -254,13 +274,13 @@ describe('SYMBOLS', () => {
 
     test('multiletter with subscript', () => {
       expect(parse('\\mathrm{speed_{max}}')).toMatchInlineSnapshot(`speed_max`);
-      // An expression, not an identifier:
+      // An expression, not a symbol
       expect(parse('\\mathrm{speed}_{max}')).toMatchInlineSnapshot(
         `["Subscript", "speed", ["InvisibleOperator", "m", "a", "x"]]`
       ); // @fixme
     });
 
-    test('multi letter identifier with digits', () => {
+    test('multi letter symbol with digits', () => {
       expect(parse('\\mathrm{a8}')).toMatchInlineSnapshot(`a8`);
     });
     test('greek letters and symbols', () => {
@@ -279,9 +299,23 @@ describe('SYMBOLS', () => {
     });
     test('emojis', () => {
       // Sequence of emojis do not need to be wrapped...
-      expect(parse('🥤+🍔🍟=3')).toMatchInlineSnapshot(
-        `["Equal", ["Add", "🍔🍟", "🥤"], 3]`
-      );
+      expect(parse('🥤+🍔🍟=3')).toMatchInlineSnapshot(`
+        [
+          "Equal",
+          [
+            "Add",
+            [
+              "Error",
+              ["ErrorCode", "incompatible-type", "'number'", "'string'"]
+            ],
+            [
+              "Error",
+              ["ErrorCode", "incompatible-type", "'number'", "'string'"]
+            ]
+          ],
+          3
+        ]
+      `);
       // ... but optionally they can be.
       expect(parse('\\operatorname{😎🤏😳🕶🤏}')).toMatchInlineSnapshot(
         `😎🤏😳🕶🤏`
@@ -301,7 +335,7 @@ describe('SYMBOLS', () => {
       expect(parse('\\operatorname{לְהַגבִּיל}')).toMatchInlineSnapshot(
         `לְהַגבִּיל`
       );
-      // Bidi markers are OK outside of identifiers (they are ignored, though,
+      // Bidi markers are OK outside of symbols (they are ignored, though,
       // since they are not applicable to the math layout algorithm)
       expect(parse('\\operatorname{לְהַגבִּיל}\u200e')).toMatchInlineSnapshot(
         `לְהַגבִּיל`
@@ -309,11 +343,11 @@ describe('SYMBOLS', () => {
     });
   });
   describe('PARSING SYMBOLS WITH MODIFIERS', () => {
-    test('Expressions that should not be interpreted as identifiers with modifiers', () => {
+    test('Expressions that should not be interpreted as symbols with modifiers', () => {
       expect(parse('x^2')).toMatchInlineSnapshot(`["Square", "x"]`);
       expect(parse('a^b')).toMatchInlineSnapshot(`["Power", "a", "b"]`);
       expect(parse('x_{i+1}')).toMatchInlineSnapshot(
-        `["Subscript", "x", ["Add", 1, "i"]]`
+        `["Subscript", "x", ["Add", "i", 1]]`
       );
       expect(parse('\\vec{x}')).toMatchInlineSnapshot(`["OverVector", "x"]`);
       expect(parse('x^\\prime')).toMatchInlineSnapshot(`["Prime", "x"]`);
@@ -322,7 +356,7 @@ describe('SYMBOLS', () => {
       );
     });
 
-    test('Identifiers without modifiers', () => {
+    test('Symbols without modifiers', () => {
       expect(parse('x')).toMatchInlineSnapshot(`x`);
       expect(parse('\\mathit{x}')).toMatchInlineSnapshot(`x_italic`);
       expect(parse('\\mathrm{x}')).toMatchInlineSnapshot(`x_upright`);
@@ -337,7 +371,7 @@ describe('SYMBOLS', () => {
       expect(parse('\\mathrm{לְהַגבִּיל}')).toMatchInlineSnapshot(`לְהַגבִּיל`);
     });
 
-    test('Identifiers with single modifiers', () => {
+    test('Symbols with single modifiers', () => {
       expect(parse('\\mathfrak{X}')).toMatchInlineSnapshot(`X_fraktur`);
       expect(parse('\\mathbf{x}')).toMatchInlineSnapshot(`x_bold`);
 
@@ -345,7 +379,7 @@ describe('SYMBOLS', () => {
       expect(parse('\\mathbb{1}')).toMatchInlineSnapshot(`one_doublestruck`);
     });
 
-    test('Identifiers with multiple modifiers', () => {
+    test('Symbols with multiple modifiers', () => {
       expect(parse('\\mathrm{\\vec{x}^\\prime}')).toMatchInlineSnapshot(
         `x_vec_prime`
       );
@@ -364,7 +398,7 @@ describe('SYMBOLS', () => {
       );
     });
 
-    test('Identifiers with common names', () => {
+    test('Symbols with common names', () => {
       expect(parse('\\mathrm{x^+}')).toMatchInlineSnapshot(`x__plus`);
     });
   });
@@ -374,8 +408,8 @@ describe('SYMBOLS', () => {
       expect(parse('\\mathrm{=}')).toMatchInlineSnapshot(`
         [
           "Error",
-          ["ErrorCode", "'invalid-identifier'", "'invalid-first-char'"],
-          ["LatexString", "'\\mathrm{=}'"]
+          ["ErrorCode", "invalid-symbol", "invalid-first-char"],
+          ["LatexString", "\\mathrm{=}"]
         ]
       `);
     });
@@ -383,8 +417,8 @@ describe('SYMBOLS', () => {
       expect(parse('\\mathrm{\\char"280B}')).toMatchInlineSnapshot(`
         [
           "Error",
-          ["ErrorCode", "'invalid-identifier'", "'unexpected-script'"],
-          ["LatexString", "'\\mathrm{\\char"280B}'"]
+          ["ErrorCode", "invalid-symbol", "unexpected-script"],
+          ["LatexString", "\\mathrm{\\char"280B}"]
         ]
       `);
     });
@@ -392,8 +426,8 @@ describe('SYMBOLS', () => {
       expect(parse('\\mathrm{\\char"13000}')).toMatchInlineSnapshot(`
         [
           "Error",
-          ["ErrorCode", "'invalid-identifier'", "'unexpected-script'"],
-          ["LatexString", "'\\mathrm{\\char"13000}'"]
+          ["ErrorCode", "invalid-symbol", "unexpected-script"],
+          ["LatexString", "\\mathrm{\\char"13000}"]
         ]
       `);
     });
@@ -407,15 +441,15 @@ describe('SYMBOLS', () => {
       expect(parse('\\mathrm{👨🏻‍🎤DavidBowie}')).toMatchInlineSnapshot(`
         [
           "Error",
-          ["ErrorCode", "'invalid-identifier'", "'unexpected-mixed-emoji'"],
-          ["LatexString", "'\\mathrm{👨🏻‍🎤DavDavidBowie}'"]
+          ["ErrorCode", "invalid-symbol", "unexpected-mixed-emoji"],
+          ["LatexString", "\\mathrm{👨🏻‍🎤DavDavidBowie}"]
         ]
       `);
       expect(parse('\\mathrm{DavidBowie👨🏻‍🎤}')).toMatchInlineSnapshot(`
         [
           "Error",
-          ["ErrorCode", "'invalid-identifier'", "'unexpected-mixed-emoji'"],
-          ["LatexString", "'\\mathrm{DavidBowie👨🏻‍🎤}}'"]
+          ["ErrorCode", "invalid-symbol", "unexpected-mixed-emoji"],
+          ["LatexString", "\\mathrm{DavidBowie👨🏻‍🎤}}"]
         ]
       `);
     });
@@ -432,80 +466,80 @@ describe('SYMBOLS', () => {
       expect(latex('_0')).toEqual(`\\operatorname{\\_0}`);
       expect(latex('_abc')).toEqual(`\\operatorname{\\_abc}`);
       expect(latex('o_o')).toEqual(`\\mathrm{o_{o}}`); // single char uses mathrm rather than operatorname
-      expect(latex('café')).toEqual(`\\mathrm{café}`);
-      // Catalan interpunct (·) is valid in an identifier
-      expect(latex('col·lecció')).toEqual(`\\mathrm{col·lecció}`);
-      expect(latex('😎🤏😳🕶🤏')).toEqual('😎🤏😳🕶🤏');
-      expect(latex('👨🏻‍🎤')).toEqual('👨🏻‍🎤');
-      expect(latex('半径')).toEqual(`\\mathrm{半径}`);
+      expect(latex('`café`')).toEqual(`\\mathrm{café}`);
+      // Catalan interpunct (·) is valid in a symbol
+      expect(latex('`col·lecció`')).toEqual(`\\mathrm{col·lecció}`);
+      expect(latex('`😎🤏😳🕶🤏`')).toEqual('😎🤏😳🕶🤏');
+      expect(latex('`👨🏻‍🎤`')).toEqual('👨🏻‍🎤');
+      expect(latex('`半径`')).toEqual(`\\mathrm{半径}`);
     });
 
     test('single modifier', () => {
-      expect(latex('x_deg')).toEqual(`\\mathrm{x\\degree}`);
-      expect(latex('x_prime')).toEqual(`\\mathrm{x^{\\prime}}`);
-      expect(latex('x_dprime')).toEqual(`\\mathrm{x^{\\doubleprime}}`);
-      expect(latex('x_ring')).toEqual(`\\mathrm{\\mathring{x}}`);
-      expect(latex('x_hat')).toEqual(`\\mathrm{\\hat{x}}`);
-      expect(latex('x_tilde')).toEqual(`\\mathrm{\\tilde{x}}`);
-      expect(latex('x_vec')).toEqual(`\\mathrm{\\vec{x}}`);
-      expect(latex('x_bar')).toEqual(`\\mathrm{\\overline{x}}`);
-      expect(latex('x_underbar')).toEqual(`\\mathrm{\\underline{x}}`);
-      expect(latex('x_dot')).toEqual(`\\mathrm{\\dot{x}}`);
-      expect(latex('x_ddot')).toEqual(`\\mathrm{\\ddot{x}}`);
-      expect(latex('x_tdot')).toEqual(`\\mathrm{\\dddot{x}}`);
-      expect(latex('x_qdot')).toEqual(`\\mathrm{\\ddddot{x}}`);
-      expect(latex('a_acute')).toEqual(`\\mathrm{\\acute{a}}`);
-      expect(latex('a_grave')).toEqual(`\\mathrm{\\grave{a}}`);
-      expect(latex('a_breve')).toEqual(`\\mathrm{\\breve{a}}`);
-      expect(latex('a_check')).toEqual(`\\mathrm{\\check{a}}`);
-      expect(latex('x_upright')).toEqual(`\\mathrm{x}`);
-      expect(latex('x_italic')).toEqual(`\\mathit{x}`);
-      expect(latex('x_bold')).toEqual(`\\mathbf{x}`);
-      expect(latex('x_script')).toEqual(`\\mathscr{x}`);
-      expect(latex('x_fraktur')).toEqual(`\\mathfrak{x}`);
-      expect(latex('x_doublestruck')).toEqual(`\\mathbb{x}`);
-      expect(latex('x_blackboard')).toEqual(`\\mathbb{x}`);
-      expect(latex('x_bold_talic')).toEqual(`\\mathbf{x_{talic}}`);
-      expect(latex('x_calligraphic')).toEqual(`\\mathcal{x}`);
-      expect(latex('x_script_old')).toEqual(`\\mathscr{x_{old}}`);
-      expect(latex('x_calligraphic_bold')).toEqual(`\\mathbf{\\mathcal{x}}`);
-      expect(latex('x_gothic_bold')).toEqual(`\\mathbf{\\mathfrak{x}}`);
-      expect(latex('x_fraktur_bold')).toEqual(`\\mathbf{\\mathfrak{x}}`);
-      expect(latex('x_sansserif')).toEqual(`\\mathsf{x}`);
-      expect(latex('x_sansserif_bold')).toEqual(`\\mathbf{\\mathsf{x}}`);
-      expect(latex('x_sansserif_italic')).toEqual(`\\mathit{\\mathsf{x}}`);
-      expect(latex('x_monospace')).toEqual(`\\mathtt{x}`);
-      expect(latex('one_blackboard')).toEqual(`\\mathbb{1}`);
+      expect(latex('`x_deg`')).toEqual(`\\mathrm{x\\degree}`);
+      expect(latex('`x_prime`')).toEqual(`\\mathrm{x^{\\prime}}`);
+      expect(latex('`x_dprime`')).toEqual(`\\mathrm{x^{\\doubleprime}}`);
+      expect(latex('`x_ring`')).toEqual(`\\mathrm{\\mathring{x}}`);
+      expect(latex('`x_hat`')).toEqual(`\\mathrm{\\hat{x}}`);
+      expect(latex('`x_tilde`')).toEqual(`\\mathrm{\\tilde{x}}`);
+      expect(latex('`x_vec`')).toEqual(`\\mathrm{\\vec{x}}`);
+      expect(latex('`x_bar`')).toEqual(`\\mathrm{\\overline{x}}`);
+      expect(latex('`x_underbar`')).toEqual(`\\mathrm{\\underline{x}}`);
+      expect(latex('`x_dot`')).toEqual(`\\mathrm{\\dot{x}}`);
+      expect(latex('`x_ddot`')).toEqual(`\\mathrm{\\ddot{x}}`);
+      expect(latex('`x_tdot`')).toEqual(`\\mathrm{\\dddot{x}}`);
+      expect(latex('`x_qdot`')).toEqual(`\\mathrm{\\ddddot{x}}`);
+      expect(latex('`a_acute`')).toEqual(`\\mathrm{\\acute{a}}`);
+      expect(latex('`a_grave`')).toEqual(`\\mathrm{\\grave{a}}`);
+      expect(latex('`a_breve`')).toEqual(`\\mathrm{\\breve{a}}`);
+      expect(latex('`a_check`')).toEqual(`\\mathrm{\\check{a}}`);
+      expect(latex('`x_upright`')).toEqual(`\\mathrm{x}`);
+      expect(latex('`x_italic`')).toEqual(`\\mathit{x}`);
+      expect(latex('`x_bold`')).toEqual(`\\mathbf{x}`);
+      expect(latex('`x_script`')).toEqual(`\\mathscr{x}`);
+      expect(latex('`x_fraktur`')).toEqual(`\\mathfrak{x}`);
+      expect(latex('`x_doublestruck`')).toEqual(`\\mathbb{x}`);
+      expect(latex('`x_blackboard`')).toEqual(`\\mathbb{x}`);
+      expect(latex('`x_bold_talic`')).toEqual(`\\mathbf{x_{talic}}`);
+      expect(latex('`x_calligraphic`')).toEqual(`\\mathcal{x}`);
+      expect(latex('`x_script_old`')).toEqual(`\\mathscr{x_{old}}`);
+      expect(latex('`x_calligraphic_bold`')).toEqual(`\\mathbf{\\mathcal{x}}`);
+      expect(latex('`x_gothic_bold`')).toEqual(`\\mathbf{\\mathfrak{x}}`);
+      expect(latex('`x_fraktur_bold`')).toEqual(`\\mathbf{\\mathfrak{x}}`);
+      expect(latex('`x_sansserif`')).toEqual(`\\mathsf{x}`);
+      expect(latex('`x_sansserif_bold`')).toEqual(`\\mathbf{\\mathsf{x}}`);
+      expect(latex('`x_sansserif_italic`')).toEqual(`\\mathit{\\mathsf{x}}`);
+      expect(latex('`x_monospace`')).toEqual(`\\mathtt{x}`);
+      expect(latex('`one_blackboard`')).toEqual(`\\mathbb{1}`);
     });
 
     test('multiple modifiers', () => {
-      expect(latex('x_hat_vec')).toEqual(`\\mathrm{\\vec{\\hat{x}}}`);
-      expect(latex('x_vec_hat')).toEqual(`\\mathrm{\\hat{\\vec{x}}}`);
-      expect(latex('x_hat_vec_calligraphic')).toEqual(
+      expect(latex('`x_hat_vec`')).toEqual(`\\mathrm{\\vec{\\hat{x}}}`);
+      expect(latex('`x_vec_hat`')).toEqual(`\\mathrm{\\hat{\\vec{x}}}`);
+      expect(latex('`x_hat_vec_calligraphic`')).toEqual(
         `\\mathcal{\\vec{\\hat{x}}}`
       );
-      expect(latex('x_calligraphic_hat_vec')).toEqual(
+      expect(latex('`x_calligraphic_hat_vec`')).toEqual(
         `\\mathcal{x_{\\vec{hat}}}`
       );
-      expect(latex('x_bold_italic')).toEqual(`\\mathit{\\mathbf{x}}`);
-      expect(latex('x_calligraphic_bold')).toEqual(`\\mathbf{\\mathcal{x}}`);
-      expect(latex('x_vec_bold_I_fraktur')).toEqual(
+      expect(latex('`x_bold_italic`')).toEqual(`\\mathit{\\mathbf{x}}`);
+      expect(latex('`x_calligraphic_bold`')).toEqual(`\\mathbf{\\mathcal{x}}`);
+      expect(latex('`x_vec_bold_I_fraktur`')).toEqual(
         `\\mathbf{\\vec{x}_{\\mathfrak{I}}}`
       );
     });
 
     test('multiletters and non-latin scripts with modifiers and subscripts', () => {
-      expect(latex('speed_bold')).toEqual(`\\mathbf{speed}`);
-      expect(latex('radius_moon')).toEqual(`\\mathrm{radius_{moon}}`);
-      expect(latex('半径_bold')).toEqual(`\\mathbf{半径}`);
-      expect(latex('半径_earth')).toEqual(`\\mathrm{半径_{earth}}`);
+      expect(latex('`speed_bold`')).toEqual(`\\mathbf{speed}`);
+      expect(latex('`radius_moon`')).toEqual(`\\mathrm{radius_{moon}}`);
+      expect(latex('`半径_bold`')).toEqual(`\\mathbf{半径}`);
+      expect(latex('`半径_earth`')).toEqual(`\\mathrm{半径_{earth}}`);
     });
 
     test('superscripts and subscripts', () => {
-      expect(latex('speed_max')).toEqual(`\\mathrm{speed_{max}}`);
-      expect(latex('speed_light_max')).toEqual(`\\mathrm{speed_{light,max}}`);
-      expect(latex('mass__earth')).toEqual(`\\mathrm{mass^{earth}}`);
-      expect(latex('radius__moon_min')).toEqual(
+      expect(latex('`speed_max`')).toEqual(`\\mathrm{speed_{max}}`);
+      expect(latex('`speed_light_max`')).toEqual(`\\mathrm{speed_{light,max}}`);
+      expect(latex('`mass__earth`')).toEqual(`\\mathrm{mass^{earth}}`);
+      expect(latex('`radius__moon_min`')).toEqual(
         `\\mathrm{radius^{moon}_{min}}`
       );
     });
@@ -513,7 +547,7 @@ describe('SYMBOLS', () => {
     test('numeric modifiers', () => {
       expect(latex('x0')).toEqual(`\\mathrm{x_0}`);
       expect(latex('x123')).toEqual(`\\mathrm{x_{123}}`);
-      expect(latex('mu_123')).toEqual(`\\mathrm{\\mu_{123}}`);
+      expect(latex('`mu_123`')).toEqual(`\\mathrm{\\mu_{123}}`);
     });
 
     test('special names', () => {
@@ -521,20 +555,20 @@ describe('SYMBOLS', () => {
       expect(latex('deltagamma')).toMatchInlineSnapshot(`\\mathrm{deltagamma}`);
       expect(latex('Alpha')).toEqual(`\\Alpha`);
       expect(latex('aleph')).toEqual(`\\aleph`);
-      expect(latex('aleph__plus')).toMatchInlineSnapshot(
+      expect(latex('`aleph__plus`')).toMatchInlineSnapshot(
         `\\mathrm{\\aleph^{+}}`
       );
-      expect(latex('x_alpha')).toEqual(`\\mathrm{x_{\\alpha}}`);
-      expect(latex('alpha_gamma')).toEqual(`\\mathrm{\\alpha_{\\gamma}}`);
-      expect(latex('alpha_gamma_delta')).toEqual(
+      expect(latex('`x_alpha`')).toEqual(`\\mathrm{x_{\\alpha}}`);
+      expect(latex('`alpha_gamma`')).toEqual(`\\mathrm{\\alpha_{\\gamma}}`);
+      expect(latex('`alpha_gamma_delta`')).toEqual(
         `\\mathrm{\\alpha_{\\gamma,\\delta}}`
       );
-      expect(latex('beta_bold')).toEqual(`\\mathbf{\\beta}`);
-      expect(latex('beta_calligraphic')).toMatchInlineSnapshot(
+      expect(latex('`beta_bold`')).toEqual(`\\mathbf{\\beta}`);
+      expect(latex('`beta_calligraphic`')).toMatchInlineSnapshot(
         `\\mathcal{\\beta}`
       );
-      expect(latex('x_plus')).toEqual(`\\mathrm{x_{+}}`);
-      expect(latex('R_blackboard__0__plus')).toEqual(`\\mathbb{R^{0,+}}`);
+      expect(latex('`x_plus`')).toEqual(`\\mathrm{x_{+}}`);
+      expect(latex('`R_blackboard__0__plus`')).toEqual(`\\mathbb{R^{0,+}}`);
     });
   });
 });

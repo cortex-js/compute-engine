@@ -1,42 +1,38 @@
 import { Decimal } from 'decimal.js';
 
-import { Expression, MathJsonIdentifier } from '../../math-json/types';
+import type { Expression, MathJsonSymbol } from '../../math-json/types';
 
 // To avoid circular dependency issues we have to import the following
 // function *after* the class definition
 
-import { serializeJson } from './serialize';
 import type { Type, TypeString } from '../../common/type/types';
-import { cmp, eq, same } from './compare';
-import { expand } from './expand';
 import { BoxedType } from '../../common/type/boxed-type';
+
 import type {
   BoxedSubstitution,
   Metadata,
-  Scope,
   Substitution,
   CanonicalOptions,
   BoxedRuleSet,
   Rule,
   BoxedBaseDefinition,
-  BoxedSymbolDefinition,
-  BoxedFunctionDefinition,
+  BoxedValueDefinition,
+  BoxedOperatorDefinition,
   EvaluateOptions,
-  CompiledType,
   Sign,
   BoxedExpression,
   JsonSerializationOptions,
   PatternMatchOptions,
   SimplifyOptions,
-  TensorData,
   ComputeEngine,
+  Scope,
+  Tensor,
 } from '../global-types';
 
 import type { NumericValue } from '../numeric-value/types';
-
 import type { SmallInteger } from '../numerics/types';
-
-import { compileToJavascript } from '../compile';
+import { compileToJavaScript } from '../compile';
+import { applicableN1 } from '../function-utils';
 
 import {
   getApplyFunctionStyle,
@@ -50,24 +46,22 @@ import {
 import { serializeLatex } from '../latex-syntax/serializer';
 import type { LatexString, SerializeLatexOptions } from '../latex-syntax/types';
 
-import { AsciiMathOptions, toAsciiMath } from './ascii-math';
+import { toAsciiMath } from './ascii-math';
+import { serializeJson } from './serialize';
+import { cmp, eq, same } from './compare';
+import { expand } from './expand';
+import { CancellationError } from '../../common/interruptible';
 
 /**
  * _BoxedExpression
+ *
+ * @internal
  */
 
 export abstract class _BoxedExpression implements BoxedExpression {
   abstract readonly hash: number;
   abstract readonly json: Expression;
-  abstract readonly operator: string;
-
-  /** @deprecated */
-  get head(): string {
-    return this.operator;
-  }
-
-  abstract get isCanonical(): boolean;
-  abstract set isCanonical(_val: boolean);
+  abstract isCanonical: boolean;
 
   abstract match(
     pattern: BoxedExpression,
@@ -79,43 +73,11 @@ export abstract class _BoxedExpression implements BoxedExpression {
   /** Verbatim LaTeX, obtained from a source, i.e. from parsing,
    *  not generated synthetically
    */
-  verbatimLatex?: string;
+  readonly verbatimLatex?: string;
 
   constructor(ce: ComputeEngine, metadata?: Metadata) {
     this.engine = ce;
     if (metadata?.latex !== undefined) this.verbatimLatex = metadata.latex;
-  }
-
-  isSame(rhs: BoxedExpression): boolean {
-    return same(this, rhs);
-  }
-
-  isEqual(rhs: number | BoxedExpression): boolean | undefined {
-    return eq(this, rhs);
-  }
-
-  isLess(_rhs: number | BoxedExpression): boolean | undefined {
-    const c = cmp(this, _rhs);
-    if (c === undefined) return undefined;
-    return c === '<';
-  }
-
-  isLessEqual(_rhs: number | BoxedExpression): boolean | undefined {
-    const c = cmp(this, _rhs);
-    if (c === undefined) return undefined;
-    return c === '<=' || c === '<' || c === '=';
-  }
-
-  isGreater(_rhs: number | BoxedExpression): boolean | undefined {
-    const c = cmp(this, _rhs);
-    if (c === undefined) return undefined;
-    return c === '>';
-  }
-
-  isGreaterEqual(_rhs: number | BoxedExpression): boolean | undefined {
-    const c = cmp(this, _rhs);
-    if (c === undefined) return undefined;
-    return c === '>=' || c === '>' || c === '=';
   }
 
   /**
@@ -125,39 +87,36 @@ export abstract class _BoxedExpression implements BoxedExpression {
    * Primitive values are: boolean, number, bigint, string, null, undefined
    *
    */
-  valueOf(): number | string | boolean {
-    if (this.symbol === 'True') return true;
-    if (this.symbol === 'False') return false;
-    if (this.symbol === 'NaN') return NaN;
-    if (this.symbol === 'PositiveInfinity') return Infinity;
-    if (this.symbol === 'NegativeInfinity') return -Infinity;
-    if (this.symbol === 'ComplexInfinity') return '~oo';
-    if (this.isInfinity) {
-      if (this.isPositive) return Infinity;
-      if (this.isNegative) return -Infinity;
-      return '~oo'; // ComplexInfinity
+  valueOf(): number | number[] | number[][] | number[][][] | string | boolean {
+    try {
+      if (this.symbol === 'True') return true;
+      if (this.symbol === 'False') return false;
+      if (this.symbol === 'NaN') return NaN;
+      if (this.symbol === 'PositiveInfinity') return Infinity;
+      if (this.symbol === 'NegativeInfinity') return -Infinity;
+      if (this.symbol === 'ComplexInfinity') return '~oo';
+      if (this.isInfinity) {
+        if (this.isPositive) return Infinity;
+        if (this.isNegative) return -Infinity;
+        return '~oo'; // ComplexInfinity
+      }
+      if (typeof this.string === 'string') return this.string;
+      if (typeof this.symbol === 'string')
+        return this.value?.valueOf() ?? this.symbol;
+
+      // Numeric values are handled in the BoxedNumber class
+
+      return toAsciiMath(this);
+    } catch (e) {
+      // Because `valueOf()` can be called by the debugger, we want to
+      // be extra robust.
+      if (e instanceof CancellationError) {
+        const msg = e.message ?? '<canceled>';
+        return e.cause ? `${msg}: ${e.cause}` : `${msg}`;
+      }
+      if (e.message) return e.message;
+      return '<error>';
     }
-    if (typeof this.string === 'string') return this.string;
-    if (typeof this.symbol === 'string') return this.symbol;
-
-    // Numeric values are handled in the BoxedNumber class
-
-    return this.toString();
-  }
-
-  toAsciiMath(options: Partial<AsciiMathOptions> = {}): string {
-    return toAsciiMath(this, options);
-  }
-
-  /** Object.toString() */
-  toString(): string {
-    return toAsciiMath(this);
-  }
-
-  print(): void {
-    // Make sure the console.log is not removed by minification
-    const log = console['info'];
-    log?.(this.toString());
   }
 
   [Symbol.toPrimitive](
@@ -168,6 +127,122 @@ export abstract class _BoxedExpression implements BoxedExpression {
       return typeof v === 'number' ? v : null;
     }
     return this.toString();
+  }
+
+  /** Object.toString() */
+  toString(): string {
+    try {
+      // If this is a lazy collection, we need to force evaluation
+      if (this.isLazyCollection) {
+        const materialized = this.evaluate({ materialization: true });
+        if (!materialized.isLazyCollection) return toAsciiMath(materialized);
+      }
+
+      return toAsciiMath(this);
+    } catch (e) {
+      // Because `toString()` can be called by the debugger, we want to
+      // be extra robust.
+      if (e instanceof CancellationError) {
+        const msg = e.message ?? '<canceled>';
+        return e.cause ? `${msg}: ${e.cause}` : `${msg}`;
+      }
+      if (e.message) return e.message;
+      return '<error>';
+    }
+  }
+
+  toLatex(options?: Partial<SerializeLatexOptions>): LatexString {
+    // If this is a finite lazy collection, we force evaluation
+    if (this.isLazyCollection) {
+      const materialized = this.evaluate({
+        materialization: options?.materialization ?? true,
+      });
+      if (!materialized.isLazyCollection) return materialized.toLatex(options);
+    }
+
+    // We want to use toMathJson(), not .json, so that we have all
+    // the digits for numbers, repeated decimals
+    const json = this.toMathJson({ prettify: options?.prettify ?? true });
+
+    let effectiveOptions: SerializeLatexOptions = {
+      imaginaryUnit: '\\imaginaryI',
+
+      positiveInfinity: '\\infty',
+      negativeInfinity: '-\\infty',
+      notANumber: '\\operatorname{NaN}',
+
+      decimalSeparator: this.engine.decimalSeparator,
+      digitGroupSeparator: '\\,', // for thousands, etc...
+      exponentProduct: '\\cdot',
+      beginExponentMarker: '10^{', // could be 'e'
+      endExponentMarker: '}',
+
+      digitGroup: 3,
+
+      truncationMarker: '\\ldots',
+
+      repeatingDecimal: 'vinculum',
+
+      fractionalDigits: 'max',
+      notation: 'auto',
+      avoidExponentsInRange: [-7, 20],
+
+      prettify: true, // (overridden subseq. by options)
+      materialization: false,
+
+      invisibleMultiply: '', // '\\cdot',
+      invisiblePlus: '', // '+',
+      // invisibleApply: '',
+
+      multiply: '\\times',
+
+      missingSymbol: '\\blacksquare',
+
+      // openGroup: '(',
+      // closeGroup: ')',
+      // divide: '\\frac{#1}{#2}',
+      // subtract: '#1-#2',
+      // add: '#1+#2',
+      // negate: '-#1',
+      // squareRoot: '\\sqrt{#1}',
+      // nthRoot: '\\sqrt[#2]{#1}',
+      applyFunctionStyle: getApplyFunctionStyle,
+      groupStyle: getGroupStyle,
+      rootStyle: getRootStyle,
+      fractionStyle: getFractionStyle,
+      logicStyle: getLogicStyle,
+      powerStyle: getPowerStyle,
+      numericSetStyle: getNumericSetStyle,
+    };
+
+    if (options?.fractionalDigits === 'auto')
+      effectiveOptions.fractionalDigits = -this.engine.precision;
+    else effectiveOptions.fractionalDigits = options?.fractionalDigits ?? 'max';
+
+    if (
+      typeof effectiveOptions.fractionalDigits === 'number' &&
+      effectiveOptions.fractionalDigits > this.engine.precision
+    )
+      effectiveOptions.fractionalDigits = this.engine.precision;
+
+    effectiveOptions = {
+      ...effectiveOptions,
+      ...(options ?? {}),
+      fractionalDigits: effectiveOptions.fractionalDigits,
+    };
+
+    if (!effectiveOptions.prettify && this.verbatimLatex)
+      return this.verbatimLatex;
+
+    return serializeLatex(
+      json,
+      this.engine._indexedLatexDictionary,
+      effectiveOptions
+    );
+  }
+
+  get latex(): LatexString {
+    return this.toLatex();
   }
 
   /** Called by `JSON.stringify()` when serializing to json.
@@ -224,103 +299,14 @@ export abstract class _BoxedExpression implements BoxedExpression {
     return serializeJson(this.engine, this, opts);
   }
 
-  toLatex(options?: Partial<SerializeLatexOptions>): LatexString {
-    // We want to use toMathJson(), not .json, so that we have all
-    // the digits for numbers, repeated decimals
-    const json = this.toMathJson({ prettify: options?.prettify ?? true });
-
-    let effectiveOptions: SerializeLatexOptions = {
-      imaginaryUnit: '\\imaginaryI',
-
-      positiveInfinity: '\\infty',
-      negativeInfinity: '-\\infty',
-      notANumber: '\\operatorname{NaN}',
-
-      decimalSeparator: this.engine.decimalSeparator,
-      digitGroupSeparator: '\\,', // for thousands, etc...
-      exponentProduct: '\\cdot',
-      beginExponentMarker: '10^{', // could be 'e'
-      endExponentMarker: '}',
-
-      digitGroup: 3,
-
-      truncationMarker: '\\ldots',
-
-      repeatingDecimal: 'vinculum',
-
-      fractionalDigits: 'max',
-      notation: 'auto',
-      avoidExponentsInRange: [-7, 20],
-
-      prettify: true, // (overridden subseq. by options)
-
-      invisibleMultiply: '', // '\\cdot',
-      invisiblePlus: '', // '+',
-      // invisibleApply: '',
-
-      multiply: '\\times',
-
-      missingSymbol: '\\blacksquare',
-
-      // openGroup: '(',
-      // closeGroup: ')',
-      // divide: '\\frac{#1}{#2}',
-      // subtract: '#1-#2',
-      // add: '#1+#2',
-      // negate: '-#1',
-      // squareRoot: '\\sqrt{#1}',
-      // nthRoot: '\\sqrt[#2]{#1}',
-      applyFunctionStyle: getApplyFunctionStyle,
-      groupStyle: getGroupStyle,
-      rootStyle: getRootStyle,
-      fractionStyle: getFractionStyle,
-      logicStyle: getLogicStyle,
-      powerStyle: getPowerStyle,
-      numericSetStyle: getNumericSetStyle,
-    };
-
-    if (options?.fractionalDigits === 'auto')
-      effectiveOptions.fractionalDigits = -this.engine.precision;
-    else effectiveOptions.fractionalDigits = options?.fractionalDigits ?? 'max';
-
-    if (
-      typeof effectiveOptions.fractionalDigits === 'number' &&
-      effectiveOptions.fractionalDigits > this.engine.precision
-    )
-      effectiveOptions.fractionalDigits = this.engine.precision;
-
-    effectiveOptions = {
-      ...effectiveOptions,
-      ...(options ?? {}),
-      fractionalDigits: effectiveOptions.fractionalDigits,
-    };
-
-    if (!effectiveOptions.prettify && this.verbatimLatex)
-      return this.verbatimLatex;
-
-    return serializeLatex(
-      json,
-      this.engine.indexedLatexDictionary,
-      effectiveOptions
-    );
+  print(): void {
+    // Make sure the console.log is not removed by minification
+    const log = console['info'];
+    log?.(this.toString());
   }
 
-  toNumericValue(): [NumericValue, BoxedExpression] {
-    return [this.engine._numericValue(1), this];
-  }
-
-  get scope(): Scope | null {
-    return null;
-  }
-
-  is(rhs: any): boolean {
-    // If the rhs is a number, the result can only be true if this
-    // is a BoxedNumber (the BoxedNumber.is() method will handle it)
-    if (typeof rhs === 'number' || typeof rhs === 'bigint') return false;
-
-    if (rhs === null || rhs === undefined) return false;
-
-    return same(this, this.engine.box(rhs));
+  get isStructural(): boolean {
+    return true;
   }
 
   get canonical(): BoxedExpression {
@@ -329,83 +315,6 @@ export abstract class _BoxedExpression implements BoxedExpression {
 
   get structural(): BoxedExpression {
     return this;
-  }
-
-  get isStructural(): boolean {
-    return true;
-  }
-
-  get latex(): LatexString {
-    return this.toLatex();
-  }
-
-  set latex(val: LatexString) {
-    this.verbatimLatex = val;
-  }
-
-  get symbol(): string | null {
-    return null;
-  }
-
-  get tensor(): null | TensorData<'expression'> {
-    return null;
-  }
-
-  get string(): string | null {
-    return null;
-  }
-
-  getSubexpressions(
-    operator: MathJsonIdentifier
-  ): ReadonlyArray<BoxedExpression> {
-    return getSubexpressions(this, operator);
-  }
-
-  get subexpressions(): ReadonlyArray<BoxedExpression> {
-    return this.getSubexpressions('');
-  }
-
-  get symbols(): ReadonlyArray<string> {
-    const set = new Set<string>();
-    getSymbols(this, set);
-    return Array.from(set).sort();
-  }
-
-  get unknowns(): ReadonlyArray<string> {
-    const set = new Set<string>();
-    getUnknowns(this, set);
-    return Array.from(set).sort();
-  }
-
-  get freeVariables(): ReadonlyArray<string> {
-    const set = new Set<string>();
-    getFreeVariables(this, set);
-    return Array.from(set).sort();
-  }
-
-  get errors(): ReadonlyArray<BoxedExpression> {
-    return this.getSubexpressions('Error');
-  }
-
-  // Only return non-null for functions
-  get ops(): null | ReadonlyArray<BoxedExpression> {
-    return null;
-  }
-
-  get nops(): SmallInteger {
-    return 0;
-  }
-
-  get op1(): BoxedExpression {
-    return this.engine.Nothing;
-  }
-
-  get op2(): BoxedExpression {
-    return this.engine.Nothing;
-  }
-
-  get op3(): BoxedExpression {
-    return this.engine.Nothing;
   }
 
   get isValid(): boolean {
@@ -420,17 +329,16 @@ export abstract class _BoxedExpression implements BoxedExpression {
     return true;
   }
 
-  get isNaN(): boolean | undefined {
-    return undefined;
+  get isNumberLiteral(): boolean {
+    return false;
   }
 
-  get isInfinity(): boolean | undefined {
-    return undefined;
+  get numericValue(): number | NumericValue | null {
+    return null;
   }
 
-  // Not +- Infinity, not NaN
-  get isFinite(): boolean | undefined {
-    return undefined;
+  toNumericValue(): [NumericValue, BoxedExpression] {
+    return [this.engine._numericValue(1), this];
   }
 
   get isEven(): boolean | undefined {
@@ -439,18 +347,6 @@ export abstract class _BoxedExpression implements BoxedExpression {
 
   get isOdd(): boolean | undefined {
     return undefined;
-  }
-
-  get numericValue(): number | NumericValue | null {
-    return null;
-  }
-
-  get isNumberLiteral(): boolean {
-    return false;
-  }
-
-  get isFunctionExpression(): boolean {
-    return false;
   }
 
   get re(): number {
@@ -469,16 +365,28 @@ export abstract class _BoxedExpression implements BoxedExpression {
     return undefined;
   }
 
-  get numerator(): BoxedExpression {
-    return this;
+  get sgn(): Sign | undefined {
+    return undefined;
   }
 
-  get denominator(): BoxedExpression {
-    return this.engine.One;
+  // x > 0
+  get isPositive(): boolean | undefined {
+    return undefined;
   }
 
-  get numeratorDenominator(): [BoxedExpression, BoxedExpression] {
-    return [this, this.engine.One];
+  // x >= 0
+  get isNonNegative(): boolean | undefined {
+    return undefined;
+  }
+
+  // x < 0
+  get isNegative(): boolean | undefined {
+    return undefined;
+  }
+
+  // x <= 0
+  get isNonPositive(): boolean | undefined {
+    return undefined;
   }
 
   //
@@ -528,7 +436,148 @@ export abstract class _BoxedExpression implements BoxedExpression {
     return this.engine.NaN;
   }
 
-  get sgn(): Sign | undefined {
+  get numerator(): BoxedExpression {
+    return this;
+  }
+
+  get denominator(): BoxedExpression {
+    return this.engine.One;
+  }
+
+  get numeratorDenominator(): [BoxedExpression, BoxedExpression] {
+    return [this, this.engine.One];
+  }
+
+  is(other: BoxedExpression | number | bigint | boolean | string): boolean {
+    // If the other is a number, the result can only be true if this
+    // is a BoxedNumber (the BoxedNumber.is() method will handle it)
+    if (typeof other === 'number' || typeof other === 'bigint') return false;
+
+    if (other === null || other === undefined) return false;
+
+    if (typeof other === 'boolean') {
+      if (other === true) return this.value?.symbol === 'True';
+      if (other === false) return this.value?.symbol === 'False';
+      return false;
+    }
+
+    if (typeof other === 'string') return this.value?.string === other;
+
+    return same(this, this.engine.box(other));
+  }
+
+  isSame(other: BoxedExpression): boolean {
+    return same(this, other);
+  }
+
+  isEqual(other: number | BoxedExpression): boolean | undefined {
+    return eq(this, other);
+  }
+
+  isLess(other: number | BoxedExpression): boolean | undefined {
+    const c = cmp(this, other);
+    if (c === undefined) return undefined;
+    return c === '<';
+  }
+
+  isLessEqual(other: number | BoxedExpression): boolean | undefined {
+    const c = cmp(this, other);
+    if (c === undefined) return undefined;
+    return c === '<=' || c === '<' || c === '=';
+  }
+
+  isGreater(other: number | BoxedExpression): boolean | undefined {
+    const c = cmp(this, other);
+    if (c === undefined) return undefined;
+    return c === '>';
+  }
+
+  isGreaterEqual(other: number | BoxedExpression): boolean | undefined {
+    const c = cmp(this, other);
+    if (c === undefined) return undefined;
+    return c === '>=' || c === '>' || c === '=';
+  }
+
+  get symbol(): string | null {
+    return null;
+  }
+
+  get tensor(): null | Tensor<any> {
+    return null;
+  }
+
+  get string(): string | null {
+    return null;
+  }
+
+  getSubexpressions(operator: MathJsonSymbol): ReadonlyArray<BoxedExpression> {
+    return getSubexpressions(this, operator);
+  }
+
+  get subexpressions(): ReadonlyArray<BoxedExpression> {
+    return this.getSubexpressions('');
+  }
+
+  get symbols(): ReadonlyArray<string> {
+    const set = new Set<string>();
+    getSymbols(this, set);
+    return Array.from(set).sort();
+  }
+
+  get unknowns(): ReadonlyArray<string> {
+    const set = new Set<string>();
+    getUnknowns(this, set);
+    return Array.from(set).sort();
+  }
+
+  get errors(): ReadonlyArray<BoxedExpression> {
+    return this.getSubexpressions('Error');
+  }
+
+  get isFunctionExpression(): boolean {
+    return false;
+  }
+
+  // Only return non-null for functions
+  get ops(): null | ReadonlyArray<BoxedExpression> {
+    return null;
+  }
+
+  get isScoped(): boolean {
+    return false;
+  }
+  get localScope(): Scope | undefined {
+    return undefined;
+  }
+
+  abstract readonly operator: string;
+
+  get nops(): SmallInteger {
+    return 0;
+  }
+
+  get op1(): BoxedExpression {
+    return this.engine.Nothing;
+  }
+
+  get op2(): BoxedExpression {
+    return this.engine.Nothing;
+  }
+
+  get op3(): BoxedExpression {
+    return this.engine.Nothing;
+  }
+
+  get isNaN(): boolean | undefined {
+    return undefined;
+  }
+
+  get isInfinity(): boolean | undefined {
+    return undefined;
+  }
+
+  // Not +- Infinity, not NaN
+  get isFinite(): boolean | undefined {
     return undefined;
   }
 
@@ -577,32 +626,6 @@ export abstract class _BoxedExpression implements BoxedExpression {
     return false;
   }
 
-  // x > 0
-  get isPositive(): boolean | undefined {
-    return undefined;
-  }
-
-  // x >= 0
-  get isNonNegative(): boolean | undefined {
-    return undefined;
-  }
-
-  // x < 0
-  get isNegative(): boolean | undefined {
-    return undefined;
-  }
-
-  // x <= 0
-  get isNonPositive(): boolean | undefined {
-    return undefined;
-  }
-
-  //
-  //
-  //
-  //
-  //
-
   get description(): string[] | undefined {
     if (!this.baseDefinition) return undefined;
     if (!this.baseDefinition.description) return undefined;
@@ -628,15 +651,15 @@ export abstract class _BoxedExpression implements BoxedExpression {
     return undefined;
   }
 
-  get symbolDefinition(): BoxedSymbolDefinition | undefined {
+  get valueDefinition(): BoxedValueDefinition | undefined {
     return undefined;
   }
 
-  get functionDefinition(): BoxedFunctionDefinition | undefined {
+  get operatorDefinition(): BoxedOperatorDefinition | undefined {
     return undefined;
   }
 
-  infer(_t: Type): boolean {
+  infer(t: Type, inferenceMode?: 'narrow' | 'widen'): boolean {
     return false; // The inference was ignored if false
   }
 
@@ -648,16 +671,12 @@ export abstract class _BoxedExpression implements BoxedExpression {
     return;
   }
 
-  get literalValue(): BoxedExpression | undefined {
+  get value(): BoxedExpression | undefined {
     return undefined;
   }
 
-  get value(): number | boolean | string | undefined {
-    return this.valueOf();
-  }
-
   set value(_value: any) {
-    throw new Error(`Can't change the value of \\(${this.latex}\\)`);
+    throw new Error(`Can't change the value of \\(${this.toString()}\\)`);
   }
 
   get type(): BoxedType {
@@ -665,7 +684,7 @@ export abstract class _BoxedExpression implements BoxedExpression {
   }
 
   set type(_type: Type | TypeString | BoxedType) {
-    throw new Error(`Can't change the type of \\(${this.latex}\\)`);
+    throw new Error(`Can't change the type of \\(${this.toString()}\\)`);
   }
 
   get isNumber(): boolean | undefined {
@@ -706,47 +725,74 @@ export abstract class _BoxedExpression implements BoxedExpression {
 
   compile(options?: {
     to?: 'javascript';
-    functions?: Record<MathJsonIdentifier, string | ((...any) => any)>;
-    vars?: Record<MathJsonIdentifier, string>;
+    functions?: Record<MathJsonSymbol, string | ((...any) => any)>;
+    vars?: Record<MathJsonSymbol, string>;
     imports?: ((...any) => any)[];
     preamble?: string;
-  }): (args: Record<string, any>) => CompiledType {
-    if (options?.to && options.to !== 'javascript')
-      throw new Error('Unknown target');
-    options ??= {};
-    // eslint-disable-next-line @typescript-eslint/no-this-alias
-    const expr = this as BoxedExpression;
-    return compileToJavascript(
-      expr,
-      options?.functions,
-      options?.vars,
-      options?.imports,
-      options?.preamble
-    );
+    fallback?: boolean;
+  }): ((...args: any[]) => any) & { isCompiled?: boolean } {
+    try {
+      if (options?.to && options.to !== 'javascript')
+        throw new Error(`Unexpected compilation target "${options.to}"`);
+
+      options ??= {};
+
+      // eslint-disable-next-line @typescript-eslint/no-this-alias
+      const expr = this as BoxedExpression;
+      return compileToJavaScript(
+        expr,
+        options.functions,
+        options.vars,
+        options.imports,
+        options.preamble
+      );
+    } catch (e) {
+      // @fixme: the fallback needs to handle multiple arguments
+      if (options?.fallback ?? true) return applicableN1(this);
+      throw e;
+    }
   }
 
   get isCollection(): boolean {
     return false;
   }
 
-  contains(_rhs: BoxedExpression): boolean {
+  get isIndexedCollection(): boolean {
     return false;
   }
 
-  subsetOf(_target: BoxedExpression, _strict: boolean): boolean {
+  get isLazyCollection(): boolean {
     return false;
   }
 
-  get size(): number {
-    return 0;
+  xcontains(_rhs: BoxedExpression): boolean | undefined {
+    return undefined;
   }
 
-  each(_start?: number, _count?: number): Iterator<BoxedExpression, undefined> {
-    return {
-      next() {
-        return { done: true, value: undefined };
-      },
-    };
+  subsetOf(_target: BoxedExpression, _strict: boolean): boolean | undefined {
+    return undefined;
+  }
+
+  get xsize(): number | undefined {
+    return undefined;
+  }
+
+  get isEmptyCollection(): boolean | undefined {
+    if (!this.isCollection) return undefined;
+    const count = this.xsize;
+    if (count === undefined) return undefined;
+    return count === 0;
+  }
+
+  get isFiniteCollection(): boolean | undefined {
+    if (!this.isCollection) return undefined;
+    const count = this.xsize;
+    if (count === undefined) return undefined;
+    return Number.isFinite(count);
+  }
+
+  each(): Generator<BoxedExpression> {
+    return (function* () {})();
   }
 
   at(_index: number): BoxedExpression | undefined {
@@ -757,39 +803,29 @@ export abstract class _BoxedExpression implements BoxedExpression {
     return undefined;
   }
 
-  indexOf(_expr: BoxedExpression): number {
-    return -1;
+  indexWhere(
+    _predicate: (element: BoxedExpression) => boolean
+  ): number | undefined {
+    return undefined;
   }
+}
+
+export function getSubexpressions(
+  expr: BoxedExpression,
+  name: MathJsonSymbol
+): ReadonlyArray<BoxedExpression> {
+  const result = !name || expr.operator === name ? [expr] : [];
+  if (expr.ops) {
+    for (const op of expr.ops) result.push(...getSubexpressions(op, name));
+  }
+  return result;
 }
 
 /**
- * Return the free variables (non local variable) in the expression,
- * recursively.
- *
- * A free variable is an identifier that is not an argument to a function,
- * or a local variable.
+ * Return the symbols in the expression, recursively. This does not include
+ * the symbols used as operator names, e.g. `Add`, `Sin`, etc...
  *
  */
-function getFreeVariables(expr: BoxedExpression, result: Set<string>): void {
-  // @todo: need to check for '["Block"]' which may contain ["Declare"] expressions and exclude those
-
-  if (expr.operator === 'Block') {
-  }
-
-  if (expr.symbol) {
-    const def = expr.engine.lookupSymbol(expr.symbol);
-    if (def && def.value !== undefined) return;
-
-    const fnDef = expr.engine.lookupFunction(expr.symbol);
-    if (fnDef && fnDef.evaluate) return;
-
-    result.add(expr.symbol);
-    return;
-  }
-
-  if (expr.ops) for (const op of expr.ops) getFreeVariables(op, result);
-}
-
 function getSymbols(expr: BoxedExpression, result: Set<string>): void {
   if (expr.symbol) {
     result.add(expr.symbol);
@@ -802,8 +838,7 @@ function getSymbols(expr: BoxedExpression, result: Set<string>): void {
 /**
  * Return the unknowns in the expression, recursively.
  *
- * An unknown is an identifier (symbol or function) that is not bound
- * to a value.
+ * An unknown is symbol that is not bound to a value.
  *
  */
 function getUnknowns(expr: BoxedExpression, result: Set<string>): void {
@@ -811,26 +846,14 @@ function getUnknowns(expr: BoxedExpression, result: Set<string>): void {
     const s = expr.symbol;
     if (s === 'Unknown' || s === 'Undefined' || s === 'Nothing') return;
 
-    const def = expr.engine.lookupSymbol(s);
-    if (def && def.value !== undefined) return;
+    if (expr.valueDefinition?.isConstant) return;
 
-    const fnDef = expr.engine.lookupFunction(s);
-    if (fnDef && fnDef.evaluate) return;
+    if (expr.operatorDefinition) return;
 
-    result.add(s);
+    const value = expr.engine._getSymbolValue(s);
+    if (value === undefined) result.add(s);
     return;
   }
 
   if (expr.ops) for (const op of expr.ops) getUnknowns(op, result);
-}
-
-export function getSubexpressions(
-  expr: BoxedExpression,
-  name: MathJsonIdentifier
-): ReadonlyArray<BoxedExpression> {
-  const result = !name || expr.operator === name ? [expr] : [];
-  if (expr.ops) {
-    for (const op of expr.ops) result.push(...getSubexpressions(op, name));
-  }
-  return result;
 }

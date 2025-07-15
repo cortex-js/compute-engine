@@ -51,16 +51,16 @@ function isRecommendedScripts(text: string): boolean {
 }
 
 /**
- * Return true if the string is a valid identifier.
+ * Return true if the string is a valid symbol.
  *
- * Check for identifiers matching a profile of [Unicode UAX31](https://unicode.org/reports/tr31/)
+ * Check for symbols matching a profile of [Unicode UAX31](https://unicode.org/reports/tr31/)
  *
- * See https://cortexjs.io/math-json/#identifiers for a full definition of the
+ * See https://cortexjs.io/math-json/#symbols for a full definition of the
  * profile.
  */
 
-export function isValidIdentifier(s: string): boolean {
-  // Quick check for simple identifiers
+export function isValidSymbol(s: string): boolean {
+  // Quick check for simple symbols
   if (/^[a-zA-Z_][a-zA-Z0-9_]*$/.test(s)) return true;
 
   // Is it an emoji, with possibly a ZWJ sequence, as in 👨🏻‍🎤,
@@ -71,7 +71,7 @@ export function isValidIdentifier(s: string): boolean {
   // Only consider recommended scripts
   if (!isRecommendedScripts(s)) return false;
 
-  // Non-ASCII identifiers
+  // Non-ASCII symbols
   return /^[\p{XIDS}_]\p{XIDC}*$/u.test(s);
 }
 
@@ -83,16 +83,16 @@ const FLAG_SEQUENCE = '\\p{RI}\\p{RI}';
 
 const TAG_MOD = `(?:[\\u{E0020}-\\u{E007E}]+\\u{E007F})`;
 const EMOJI_MOD = `(?:\\p{EMod}|${VS16}${KEYCAP}?|${TAG_MOD})`;
-const EMOJI_NOT_IDENTIFIER = `(?:(?=\\P{XIDC})\\p{Emoji})`;
-const ZWJ_ELEMENT = `(?:${EMOJI_NOT_IDENTIFIER}${EMOJI_MOD}*|\\p{Emoji}${EMOJI_MOD}+|${FLAG_SEQUENCE})`;
+const EMOJI_NOT_SYMBOL = `(?:(?=\\P{XIDC})\\p{Emoji})`;
+const ZWJ_ELEMENT = `(?:${EMOJI_NOT_SYMBOL}${EMOJI_MOD}*|\\p{Emoji}${EMOJI_MOD}+|${FLAG_SEQUENCE})`;
 const POSSIBLE_EMOJI = `(?:${ZWJ_ELEMENT})(${ZWJ}${ZWJ_ELEMENT})*`;
 const SOME_EMOJI = new RegExp(`(?:${POSSIBLE_EMOJI})+`, 'u');
 export const EMOJIS = new RegExp(`^(?:${POSSIBLE_EMOJI})+$`, 'u');
 
-// Examine the string and return a string indicating if it's a valid identifier,
+// Examine the string and return a string indicating if it's a valid symbol,
 // and if not, why not.
-// Useful for debugging. In production, use `isValidIdentifier()` instead.
-export function validateIdentifier(
+// Useful for debugging. In production, use `isValidSymbol()` instead.
+export function validateSymbol(
   s: unknown
 ):
   | 'valid'
@@ -130,9 +130,9 @@ export function validateIdentifier(
   // Does the string contain scripts that are not recommended?
   if (!isRecommendedScripts(s)) return 'unexpected-script';
 
-  // It's a supported script, but is it a valid identifier?
-  if (!isValidIdentifier(s)) {
-    if (!isValidIdentifier(s[0])) return 'invalid-first-char';
+  // It's a supported script, but is it a valid symbol?
+  if (!isValidSymbol(s)) {
+    if (!isValidSymbol(s[0])) return 'invalid-first-char';
     return 'invalid-char';
   }
 

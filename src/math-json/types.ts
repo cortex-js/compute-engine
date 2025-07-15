@@ -1,4 +1,8 @@
-/** @category MathJSON */
+/**
+ * The following properties can be added to any MathJSON expression
+ * to provide additional information about the expression.
+ *
+ * @category MathJSON */
 export type MathJsonAttributes = {
   /** A human readable string to annotate this expression, since JSON does not
    * allow comments in its encoding */
@@ -66,7 +70,7 @@ export type MathJsonAttributes = {
 };
 
 /** @category MathJSON */
-export type MathJsonIdentifier = string;
+export type MathJsonSymbol = string;
 
 /**
  * A MathJSON numeric quantity.
@@ -80,7 +84,7 @@ export type MathJsonIdentifier = string;
  * - an optional exponent part (a `e` or `E` exponent marker followed by an
  *   optional `-` minus sign, followed by a string of digits)
  *
- * It can also consist of the value `NaN`, `-Infinity` and `+Infinity` to
+ * It can also consist of the string `NaN`, `-Infinity` or `+Infinity` to
  * represent these respective values.
  *
  * A MathJSON number may contain more digits or an exponent with a greater
@@ -93,33 +97,39 @@ export type MathJsonIdentifier = string;
  * - `123456789123456789.123(4567)e999`
  * @category MathJSON
  */
-export type MathJsonNumber = {
+export type MathJsonNumberObject = {
   num: 'NaN' | '-Infinity' | '+Infinity' | string;
 } & MathJsonAttributes;
 
 /** @category MathJSON */
-export type MathJsonSymbol = {
-  sym: MathJsonIdentifier;
+export type MathJsonSymbolObject = {
+  sym: MathJsonSymbol;
 } & MathJsonAttributes;
 
 /** @category MathJSON */
-export type MathJsonString = {
+export type MathJsonStringObject = {
   str: string;
 } & MathJsonAttributes;
 
 /** @category MathJSON */
-export type MathJsonFunction = {
-  fn: [MathJsonIdentifier, ...Expression[]];
+export type MathJsonFunctionObject = {
+  fn: [MathJsonSymbol, ...Expression[]];
+} & MathJsonAttributes;
+
+/** @category MathJSON */
+export type MathJsonDictionaryObject = {
+  dict: Record<string, Expression>;
 } & MathJsonAttributes;
 
 /**
  * @category MathJSON
  */
 export type ExpressionObject =
-  | MathJsonNumber
-  | MathJsonString
-  | MathJsonSymbol
-  | MathJsonFunction;
+  | MathJsonNumberObject
+  | MathJsonStringObject
+  | MathJsonSymbolObject
+  | MathJsonFunctionObject
+  | MathJsonDictionaryObject;
 /**
  * A MathJSON expression is a recursive data structure.
  *
@@ -133,8 +143,8 @@ export type Expression =
   // Shortcut for MathJsonNumber in the JavaScript 64-bit float range.
   | number
   // Shortcut for a MathJsonSymbol
-  | MathJsonIdentifier
+  | MathJsonSymbol
   // Shortcut for a string or a number
   | string
   // Shortcut for a function
-  | readonly [MathJsonIdentifier, ...Expression[]];
+  | readonly [MathJsonSymbol, ...Expression[]];

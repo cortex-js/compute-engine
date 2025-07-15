@@ -1,4 +1,4 @@
-import {
+import type {
   InfixEntry,
   LatexDictionary,
   Parser,
@@ -127,17 +127,17 @@ export const DEFINITIONS_LOGIC: LatexDictionary = [
   // Functions
   {
     kind: 'function',
-    identifierTrigger: 'and',
+    symbolTrigger: 'and',
     parse: 'And',
   },
   {
     kind: 'function',
-    identifierTrigger: 'or',
+    symbolTrigger: 'or',
     parse: 'Or',
   },
   {
     kind: 'function',
-    identifierTrigger: 'not',
+    symbolTrigger: 'not',
     parse: 'Not',
   },
   // Relations
@@ -359,12 +359,12 @@ function parseQuantifier(
     // - <quantifier-expression> ::=  <quantifier> <condition> '(' <condition> ')'
 
     //
-    // 1. First, we check for a standalone identifier, that is an identifier
+    // 1. First, we check for a standalone symbol, that is a symbol
     //    followed by a comma, a vertical bar or a parenthesis
     //
 
-    const id = parser.parseSymbol(terminator);
-    if (id) {
+    const symbol = parser.parseSymbol(terminator);
+    if (symbol) {
       parser.skipSpace();
       if (
         parser.match(',') ||
@@ -374,14 +374,14 @@ function parseQuantifier(
         parser.match('\\colon')
       ) {
         const body = parser.parseExpression(terminator);
-        return [kind, id, missingIfEmpty(body)] as Expression;
+        return [kind, symbol, missingIfEmpty(body)] as Expression;
       }
       const body = parser.parseEnclosure();
-      if (body) return [kind, id, missingIfEmpty(body)];
+      if (body) return [kind, symbol, missingIfEmpty(body)];
     }
 
     //
-    // 2. If we didn't find a standalone identifier, we look for a condition
+    // 2. If we didn't find a standalone symbol, we look for a condition
     //
     parser.index = index;
     const condition = parser.parseExpression(terminator);

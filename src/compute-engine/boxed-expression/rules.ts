@@ -1,10 +1,5 @@
 import type { Expression } from '../../math-json/types';
 
-import { asLatexString, isInequality, isRelationalOperator } from './utils';
-
-import { Parser } from '../latex-syntax/types';
-
-import { isPrime } from '../library/arithmetic';
 import type {
   BoxedRule,
   BoxedRuleSet,
@@ -21,6 +16,15 @@ import type {
   SemiBoxedExpression,
 } from '../global-types';
 
+import {
+  asLatexString,
+  isInequalityOperator,
+  isRelationalOperator,
+} from '../latex-syntax/utils';
+
+import { Parser } from '../latex-syntax/types';
+
+import { isPrime } from '../library/arithmetic';
 // @todo:
 // export function fixPoint(rule: Rule);
 // export function chain(rules: RuleSet);
@@ -193,13 +197,13 @@ export const CONDITIONS = {
   finite: (x: BoxedExpression) => x.isFinite,
   infinite: (x: BoxedExpression) => x.isFinite === false,
 
-  constant: (x: BoxedExpression) => x.symbolDefinition?.isConstant ?? false,
-  variable: (x: BoxedExpression) => !(x.symbolDefinition?.isConstant ?? true),
-  function: (x: BoxedExpression) => x.symbolDefinition?.isFunction ?? false,
+  constant: (x: BoxedExpression) => x.valueDefinition?.isConstant ?? false,
+  variable: (x: BoxedExpression) => !(x.valueDefinition?.isConstant ?? true),
+  function: (x: BoxedExpression) => x.operatorDefinition !== undefined,
 
   relation: (x: BoxedExpression) => isRelationalOperator(x.operator),
   equation: (x: BoxedExpression) => x.operator === 'Equal',
-  inequality: (x: BoxedExpression) => isInequality(x),
+  inequality: (x: BoxedExpression) => isInequalityOperator(x.operator),
 
   collection: (x: BoxedExpression) => x.isCollection,
   list: (x: BoxedExpression) => x.operator === 'List',
@@ -329,7 +333,7 @@ function parseModifierExpression(parser: Parser): string | null {
 }
 
 /* Return an expression for a match/replace part of a rule if a LaTeX string
- or MathJSOn expression
+ or MathJSON expression
  */
 function parseRulePart(
   ce: ComputeEngine,
@@ -353,7 +357,7 @@ function parseRulePart(
 }
 
 /** A rule can be expressed as a string of the form
- * "<match> -> <replace>; <condition>"
+ * `<match> -> <replace>; <condition>`
  * where `<match>`, `<replace>` and `<condition>` are LaTeX expressions.
  */
 function parseRule(
@@ -384,13 +388,13 @@ function parseRule(
   // mapping to wildcard sequence, wildcard optional sequence
   const previousDictionary = ce.latexDictionary;
 
-  // A mapping from an identifier to a wildcard
+  // A mapping from a symbol to a wildcard
   const wildcards: Record<string, string> = {};
 
-  // A mapping from an identifier to a condition
+  // A mapping from a symbol to a condition
   const wildcardConditions: Record<string, string> = {};
 
-  // Add wildcard entries for all lowercase letters, execpt
+  // Add wildcard entries for all lowercase letters, except
   // for e (natural number), d (differential) and i (imaginary unit)
   ce.latexDictionary = [
     ...previousDictionary,
@@ -483,7 +487,8 @@ function parseRule(
       },
     },
   ];
-  const expr = ce.parse(rule, { canonical: options?.canonical ?? false });
+  const canonical = options?.canonical ?? false;
+  const expr = ce.parse(rule);
   ce.latexDictionary = previousDictionary;
 
   if (!expr.isValid || expr.operator !== 'Rule')
@@ -491,7 +496,12 @@ function parseRule(
       `Invalid rule "${rule}"\n|   ${dewildcard(expr).toString()}\n|   A rule should be of the form:\n|   <match> -> <replace>; <condition>`
     );
 
-  const [match, replace, condition] = expr.ops!;
+  let [match, replace, condition] = expr.ops!;
+
+  if (canonical) {
+    match = match.canonical;
+    replace = replace.canonical;
+  }
 
   // Check that all the wildcards in the replace also appear in the match
   if (!includesWildcards(replace, match))
@@ -515,7 +525,7 @@ function parseRule(
 
     // Evaluate the condition as a predicate
     condFn = (sub: BoxedSubstitution): boolean =>
-      condition.subs(sub).evaluate()?.symbol === 'True';
+      condition.subs(sub).canonical.evaluate()?.symbol === 'True';
   }
 
   return boxRule(ce, { match, replace, condition: condFn, id: rule }, options);
@@ -551,7 +561,7 @@ function boxRule(
 
   if (replace === undefined)
     throw new Error(
-      `Invalid rule "${id ?? JSON.stringify(rule)}"\n|   A rule must include at least a replace property`
+      `Invalid rule "${id ?? JSON.stringify(rule, undefined, 4)}"\n|   A rule must include at least a replace property`
     );
 
   // Normalize the condition to a function
@@ -573,25 +583,26 @@ function boxRule(
   } else {
     if (condition !== undefined && typeof condition !== 'function')
       throw new Error(
-        `Invalid rule ${id ?? JSON.stringify(rule)}\n|   condition is not a valid function`
+        `Invalid rule ${id ?? JSON.stringify(rule, undefined, 4)}\n|   condition is not a valid function`
       );
     condFn = condition;
   }
 
   if (typeof match === 'function') {
     throw new Error(
-      `Invalid rule ${id ?? JSON.stringify(rule)}\n|   match is not a valid expression.\n|   Use a replace function instead to validate and replace the expression`
+      `Invalid rule ${id ?? JSON.stringify(rule, undefined, 4)}\n|   match is not a valid expression.\n|   Use a replace function instead to validate and replace the expression`
     );
   }
 
+  ce.pushScope();
   const matchExpr = parseRulePart(ce, match, options);
-
   const replaceExpr = parseRulePart(ce, replace, options);
+  ce.popScope();
 
   // Make up an id if none is provided
   if (!id) {
     if (typeof match === 'string') id = match;
-    else id = JSON.stringify(match);
+    else id = JSON.stringify(match, undefined, 4);
 
     if (replace) {
       id += ' -> ';
@@ -599,7 +610,7 @@ function boxRule(
       if (typeof replace === 'string') id += replace;
       else if (typeof replace === 'function')
         id += replace?.toString().replace(/\n/g, ' ');
-      else id = JSON.stringify(replace);
+      else id = JSON.stringify(replace, undefined, 4);
     }
 
     if (typeof condition === 'string') id += `; ${condition}`;
@@ -615,13 +626,13 @@ function boxRule(
 
   if (replaceExpr && !replaceExpr.isValid) {
     throw new Error(
-      `Invalid rule ${id ?? JSON.stringify(rule)}\n|   The replace expression is not valid: ${replaceExpr?.toString()}`
+      `Invalid rule ${id ?? JSON.stringify(rule, undefined, 4)}\n|   The replace expression is not valid: ${replaceExpr?.toString()}`
     );
   }
 
   if (!replaceExpr && typeof replace !== 'function')
     throw new Error(
-      `Invalid rule ${id ?? JSON.stringify(rule)}\n|   The replace expression could not be parsed`
+      `Invalid rule ${id ?? JSON.stringify(rule, undefined, 4)}\n|   The replace expression could not be parsed`
     );
 
   return {
@@ -657,7 +668,7 @@ export function boxRules(
     } catch (e) {
       // There was a problem with a rule, skip it and continue
       throw new Error(
-        `\n${e.message}\n|   Skipping rule ${JSON.stringify(rule)}\n\n`
+        `\n${e.message}\n|   Skipping rule ${JSON.stringify(rule, undefined, 4)}\n\n`
       );
     }
   }
@@ -726,11 +737,13 @@ export function applyRule(
   // If the condition doesn't match, the rule doesn't apply
   if (typeof condition === 'function') {
     // The substitution includes wildcards. Transform wildcards to their
-    // corresponding values
-    // So if sub = {_a: 2, _b: 3}, then the substitution will be {a: 2, b: 3}
+    // corresponding values.
+    // So if `sub = {_a: 2, _b: 3}`, then the substitution will be
+    // `{a: 2, b: 3, _a: 2, _b: 3}`
 
-    // Because some subtitution  may be sequence wilcards (e.g. ...x)
+    // Because some substitution may be sequence wildcards (e.g. ...x)
     // or optional sequence wildcards (e.g. ...x?) we keep them in the substitution as well
+    // @todo: shouldn't this check that the subs start with _?
     const conditionSub = {
       ...Object.fromEntries(
         Object.entries(sub).map(([k, v]) => [k.slice(1), v])
@@ -841,6 +854,7 @@ export function matchAnyRules(
   const results: BoxedExpression[] = [];
   for (const rule of rules.rules) {
     const r = applyRule(rule, expr, sub, options);
+
     // Verify that the results are unique
     if (r !== null && !results.some((x) => x.isSame(r.value)))
       results.push(r.value);

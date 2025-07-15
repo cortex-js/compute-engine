@@ -1,26 +1,134 @@
 ## [Unreleased]
 
-### ? ? ?
-
-- More consistency with BoxedSymbol properties causing symbol-binding: e.g.
-  `isFinite` and `isInfinity` cause binding, in a similar way to `isOdd`,
-  `isEven`.
-
 ### Breaking Changes
 
-- The `expr.value` property is now equivalent to `expr.valueOf()`. It was
-  previously equivalent to `expr.N().valueOf()`, however the implicit evaluation
-  of the expression produced some unexpected results, for example when the
-  expression was not pure.
+- The `expr.value` property reflects the value of the expression if it is a
+  number literal or a symbol with a literal value. If you previously used the
+  `expr.value` property to get the value of an expression, you should now use
+  the `expr.N().valueOf()` method instead. The `valueOf()` method is suitable
+  for interoperability with JavaScript, but it may result in a loss of precision
+  for numbers with more than 15 digits.
 
 - `BoxedExpr.sgn` now returns _undefined_ for complex numbers, or symbols with a
   complex-number value.
 
--
+- The `ce.assign()` method previously accepted
+  `ce.assign("f(x, y)", ce.parse("x+y"))`. This is now deprecated. Use
+  `ce.assign("f", ce.parse("(x, y) \\mapsto x+y")` instead.
+
+- It was previously possible to invoke `expr.evaluate()` or `expr.N()` on a
+  non-canonical expression. This will now return the expression itself.
+
+  To evaluate a non-canonical expression, use `expr.canonical.evaluate()` or
+  `expr.canonical.N()`.
+
+  That's also the case for the methods `numeratorDenominator()`, `numerator()`,
+  and `denominator()`.
+
+  In addition, invoking the methods `inv()`, `abs()`, `add()`, `mul()`, `div()`,
+  `pow()`, `root()`, `ln()` will throw an error if the expression is not
+  canonical.
 
 ### New Features and Improvements
 
+- Collections now support lazy materialization. This means that the elements of
+  some collection are not computed until they are needed. This can significantly
+  improve performance when working with large collections, and allow working
+  with infinite collections. For example:
+
+  ```js
+  ce.box(['Map', 'Integers', 'Square']).evaluate().print();
+  // -> [0, 1, 4, 9, 16, ...]
+  ```
+
+  Materialization can be controlled with the `materialization` option of the
+  `evaluate()` method. Lazy collections are materialized by default when
+  converted to a string or LaTeX, or when assigned to a variable.
+
+- The bindings of symbols and function expressions is now consistently done
+  during canonicalization.
+
+- It was previously not possible to change the type of an identifier from a
+  function to a value or vice versa. This is now possible.
+
+- **Antiderivatives** are now computed symbolically:
+
+```js
+ce.parse(`\\int_0^1 \\sin(\\pi x) dx`).evaluate().print();
+// -> 2 / pi
+ce.parse(`\\int \\sin(\\pi x) dx`).evaluate().print();
+// -> -cos(pi * x) / pi
+```
+
+Requesting a numeric approximation of the integral will use a Monte Carlo
+method:
+
+```js
+ce.parse(`\\int_0^1 \\sin(\\pi x) dx`).N().print();
+// -> 0.6366
+```
+
+- Numeric approximations of integrals is several order of magnitude faster.
+
+- Added **Number Theory** functions: `Totient`, `Sigma0`, `Sigma1`,
+  `SigmaMinus1`, `IsPerfect`, `Eulerian`, `Stirling`, `NPartition`,
+  `IsTriangular`, `IsSquare`, `IsOctahedral`, `IsCenteredSquare`, `IsHappy`,
+  `IsAbundant`.
+
+- Added **Combinatorics** functions: `Choose`, `Fibonacci`, `Binomial`,
+  `CartesianProduct`, `PowerSet`, `Permutations`, `Combinations`, `Multinomial`,
+  `Subfactorial` and `BellNumber`.
+
+- The `symbol` type can be refined to match a specific symbol. For example
+  `symbol<True>`. The type `expression` can be refined to match expressions with
+  a specific operator, for example `expression<Add>` is a type that matches
+  expressions with the `Add` operator. The numeric types can be refined with a
+  lower and upper bound. For example `integer<0..10>` is a type that matches
+  integers between 0 and 10. The type `real<1..>` matches real numbers greater
+  than 1 and `rational<..0>` matches non-positive rational numbers.
+
+- Numeric types can now be constrained with a lower and upper bound. For
+  example, `real<0..10>` is a type that matches real numbers between 0 and 10.
+  The type `integer<1..>` matches integers greater than or equal to 1.
+
+- Collections that can be indexed (`list`, `tuple`) are now a subtype of
+  `indexed_collection`.
+
+- The `map` type has been replaced with `dictionary` for collections of
+  arbitrary key-value pairs and `record` for collections of structured key-value
+  pairs.
+
+- Support for structural typing has been added. To define a structural type, use
+  `ce.declareType()` with the `alias` flag, for example:
+
+  ```js
+  ce.declareType(
+    "point", "tuple<x: integer, y: integer>",
+    { alias: true }
+  );
+  ```
+
+- Recursive types are now supported by using the `type` keyword to forward
+  reference types. For example, to define a type for a binary tree:
+
+  ```js
+  ce.declareType(
+    "binary_tree",
+    "tuple<value: integer, left: type binary_tree?, right: type binary_tree?>",
+  );
+  ```
+
+- The syntax for variadic arguments has changeed. To indicate a variadic
+  argument, use a `+` or `*` after the type, for example:
+
+  ```js
+  ce.declare('f', '(number+) -> number');
+  ```
+
+  Use `+` for a non-empty list of arguments and `*` for a possibly empty list.
+
 - Added a rule to solve the equation `a^x + b = 0`
+
 - The LaTeX parser now supports the `\placeholder[]{}`, `\phantom{}`,
   `\hphantom{}`, `\vphantom{}`, `\mathstrut`, `\strut` and `\smash{}` commands.
 
@@ -31,27 +139,27 @@
 - The Power canonical-form is less aggressive - only carrying-out ops. as listed
   in doc. - is much more careful in its consideration of operand types &
   values... (for example, typically, exponents are required to be _numbers_:
-  e.g. `x^1` will simplify, but `x^y` (where y===0), or `x^{1+0}`, will not)
+  e.g. `x^1` will simplify, but `x^y` (where `y===0`), or `x^{1+0}`, will not)
 
 ### Issues Resolved
 
 - Ensure expression LaTeX serialization is based on MathJSON generated with
-  matching 'pretty' formatting (or not), therefore resulting in LaTeX with less
-  prettification, where `prettify == false` (#daef87f)
+  matching "pretty" formatting (or not), therefore resulting in LaTeX with less
+  prettification, where `prettify === false` (#daef87f)
 
-- Symbols declare with a `constant` flag are now not marked as 'inferred'
+- Symbols declare with a `constant` flag are now not marked as "inferred"
 
-- Some BoxedSymbols properties now more consistently return 'undefined', instead
-  of a 'boolean' (i.e. because the symbol is non-bound)
+- Some `BoxedSymbols` properties now more consistently return `undefined`,
+  instead of a `boolean` (i.e. because the symbol is non-bound)
 
 - Some `expr.root()` computations
 
 - Canonical-forms
   - Fixes the `Number` form
-  - Forms (at least, 'Number', 'Power') do not mistakenly _fully_ canonicalize
+  - Forms (at least, `Number`, `Power`) do not mistakenly _fully_ canonicalize
     operands
   - This (partial canonicalization) now substitutes symbols (constants) with a
-    `holdUntil` value of _never_ during/prior-to canonicalization (i.e. just
+    `holdUntil` value of `"never"` during/prior-to canonicalization (i.e. just
     like for full canonicalization)
 
 ## 0.29.1 _2025-03-31_
@@ -376,7 +484,6 @@ When an operation is canceled either because of a timeout or an abort, a
 - The "Domain" expression has been deprecated. Use types instead (see below).
 
 - Some `BoxedExpression` properties have been removed:
-
   - Instead of `expr.isZero`, use `expr.is(0)`.
   - Instead of `expr.isNotZero`, use `!expr.is(0)`.
   - Instead of `expr.isOne`, use `expr.is(1)`.
@@ -483,7 +590,6 @@ ce.declare('Mean', { evaluate: (ops, { engine }) => ce.number(1) });
   ```
 
   The sets of numbers are defined as follows:
-
   - `number` - any number, real or complex, including NaN and infinity
   - `non_finite_number` - NaN or infinity
   - `real`
@@ -559,7 +665,6 @@ ce.declare('Mean', { evaluate: (ops, { engine }) => ce.number(1) });
   ```
 
   There are also additional convenience methods on boxed expressions:
-
   - `expr.isCollection`
   - `expr.contains(element)`
   - `expr.size`
@@ -589,13 +694,11 @@ ce.declare('Mean', { evaluate: (ops, { engine }) => ce.number(1) });
   functions. This made the code complicated and error prone.
 
   A `NumericValue` is made of:
-
   - an imaginary part, represented as a fixed-precision number
   - a real part, represented either as a fixed or arbitrary precision number or
     as the product of a rational number and the square root of an integer.
 
   For example:
-
   - 234.567
   - 1/2
   - 3√5
@@ -650,7 +753,6 @@ ce.declare('Mean', { evaluate: (ops, { engine }) => ce.number(1) });
 
   The condition is indicated as a subscript of the wildcard. The condition can
   be one of:
-
   - `boolean` - a boolean value, True or False
   - `string` - a string of characters
   - `number` - a number literal
@@ -708,7 +810,6 @@ ce.declare('Mean', { evaluate: (ops, { engine }) => ce.number(1) });
   - `scalar` - not a tensor or list
 
   or one of the following expressions:
-
   - `>0'` -> `positive`,
   - `\gt0'` -> `positive`,
   - `<0'` -> `negative`,
@@ -781,7 +882,6 @@ ce.declare('Mean', { evaluate: (ops, { engine }) => ce.number(1) });
   `ce.tolerance` property or in the Compute Engine constructor.
 
 - Boxed expressions have some additional properties:
-
   - `expr.isNumberLiteral` - true if the expression is a number literal.This is
     equivalent to checking if `expr.numericValue` is not `null`.
   - `expr.re` - the real part of the expression, if it is a number literal,
@@ -801,7 +901,6 @@ ce.declare('Mean', { evaluate: (ops, { engine }) => ce.number(1) });
     return true if the expression is greater than 1.
 
 - Added LaTeX syntax to index collections. If `a` is a collection:
-
   - `a[i]` is parsed as `["At", "a", "i"]`.
   - `a[i,j]` is parsed as `["At", "a", "i", "j"]`.
   - `a_i` is parsed as `["At", "a", "i"]`.
@@ -1033,7 +1132,7 @@ the `ce.rule()` function.
   consistent and simpler.
 
 - The name of some number formatting options has changed. The number formatting
-  options are an optional argument of `ce.parse()` and `ce.toLatex()`. See the  
+  options are an optional argument of `ce.parse()` and `ce.toLatex()`. See the
   `NumberFormat` and `NumberSerializationFormat` types.
 
 - The values +infinity, -infinity and NaN are now represented preferably with
@@ -1049,7 +1148,6 @@ the `ce.rule()` function.
 
 - When serializing to LaTeX, the output can be "prettified". This involves
   modifying the LaTeX output to make it more pleasant to read, for example:
-
   - `a+\\frac{-b}{c}` -> `a-\\frac{b}{c}`
   - `a\\times b^{-1}` -> `\\frac{a}{b}`
   - `\\frac{a}{b}\\frac{c}{d}` -> `\\frac{a\\cdot c}{b\\cdot d}`
@@ -1203,7 +1301,6 @@ the `ce.rule()` function.
   The syntax to describe rules has changed. The syntax for a rule was previously
   a tuple `[lhs, rhs, {condition} ]`. The new syntax is an object with the
   properties `match`, `replace` and `condition`. For example:
-
   - previous syntax: `[["Add", "_x", "_x"], ["Multiply", 2, "_x"]]`
   - new syntax: `{match: ["Add", "_x", "_x"], replace: ["Multiply", 2, "_x"]}`
 
@@ -1421,7 +1518,6 @@ return type.
 - The functions `Sum`, `Product`, `Min`, `Max`, and the statistics functions
   (`Mean`, `Median`, `Variance`, etc...) now handle collection arguments:
   collections:
-
   - `["Range"]`, `["Interval"]`, `["Linspace"]` expressions
   - `["List"]` or `["Set"]` expressions
   - `["Tuple"]`, `["Pair"]`, `["Pair"]`, `["Triple"]` expressions
@@ -1610,7 +1706,6 @@ ce.box(["Block", ["Assign", "c", 5], ["Multiply", "c", 2]]).evaluate().json;
 #### Functions
 
 - Functions can now be defined:
-
   - using `ce.assign()` or `ce.declare()`
   - evaluating LaTeX: `(x, y) \mapsto x^2 + y^2`
   - evaluating MathJSON:
@@ -1709,7 +1804,7 @@ They can be iterated, sliced, filtered, mapped, etc...
 ### Breaking Changes
 
 - The entries in the LaTeX syntax dictionary can now have LaTeX triggers
-  (`latexTrigger`) or triggers based on identifiers (`identifierTrigger`). The
+  (`latexTrigger`) or triggers based on identifiers (`symbolTrigger`). The
   former replaces the `trigger` property. The latter is new. An entry with a
   `triggerIdentifier` of `average` will match `\operatorname{average}`,
   `\mathrm{average}` and other variants.
@@ -1720,7 +1815,6 @@ They can be iterated, sliced, filtered, mapped, etc...
 ### Improvements
 
 - Added more functions and symbols supported by `expr.compile()`:
-
   - `Factorial` postfix operator `5!`
   - `Gamma` function `\Gamma(2)`
   - `LogGamma` function `\operatorname{LogGamma}(2)`
@@ -1752,7 +1846,6 @@ They can be iterated, sliced, filtered, mapped, etc...
 - When parsing LaTeX, multiple arguments are properly handled, e.g. `f(x, y)`
 
 - Add LaTeX syntax for logical operators:
-
   - `And`: `\land`, `\operatorname{and}` (infix or function)
   - `Or`: `\lor`, `\operatorname{or}` (infix or function)
   - `Not`: `\lnot`, `\operatorname{not}` (prefix or function)
@@ -1767,7 +1860,6 @@ They can be iterated, sliced, filtered, mapped, etc...
   that both forms will be recognized.
 
 - Extended the LaTeX dictionary with:
-
   - `floor`
   - `ceil`
   - `round`
@@ -1944,7 +2036,6 @@ Work around unpckg.com issue with libraries using BigInt.
   - `\sqrt{\frac{49}{25}}` -> `\frac{7}{5}`
 - Addition and multiplication provide more consistent results for `evaluate()`
   and `N()`. Evaluate returns an exact result when possible.
-
   - EXACT
     - 2 + 5 -> 7
     - 2 + 5/7 -> 19/7
@@ -2255,3 +2346,7 @@ console.log(expr.isEqual(ce.box(2)));
 ### Improvements
 
 - In LaTeX, parse `\operatorname{foo}` as the MathJSON symbol `"foo"`.
+
+```
+
+```

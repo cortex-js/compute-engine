@@ -1,12 +1,20 @@
 import type {
   BoxedExpression,
-  IdentifierDefinitions,
+  SymbolDefinitions,
   ComputeEngine,
 } from '../global-types';
 
-export const LOGIC_LIBRARY: IdentifierDefinitions = {
-  True: { wikidata: 'Q16751793', type: 'boolean', constant: true },
-  False: { wikidata: 'Q5432619', type: 'boolean', constant: true },
+export const LOGIC_LIBRARY: SymbolDefinitions = {
+  True: {
+    wikidata: 'Q16751793',
+    type: 'boolean',
+    isConstant: true,
+  },
+  False: {
+    wikidata: 'Q5432619',
+    type: 'boolean',
+    isConstant: true,
+  },
 
   // @todo: specify a `canonical` function that converts boolean
   // expressions into CNF (Conjunctive Normal Form)
@@ -16,37 +24,37 @@ export const LOGIC_LIBRARY: IdentifierDefinitions = {
   // See also: https://en.wikipedia.org/wiki/Prenex_normal_form
   And: {
     wikidata: 'Q191081',
-    threadable: true,
+    broadcastable: true,
     associative: true,
     commutative: true,
     idempotent: true,
     complexity: 10000,
-    signature: '(boolean, ...boolean) -> boolean',
+    signature: '(boolean+) -> boolean',
     evaluate: evaluateAnd,
   },
   Or: {
     wikidata: 'Q1651704',
-    threadable: true,
+    broadcastable: true,
     associative: true,
     commutative: true,
     idempotent: true,
     complexity: 10000,
-    signature: '(boolean, ...boolean) -> boolean',
+    signature: '(boolean+) -> boolean',
 
     evaluate: evaluateOr,
   },
   Not: {
     wikidata: 'Q190558',
-    threadable: true,
+    broadcastable: true,
     involution: true,
     complexity: 10100,
     // @todo: this may not be needed, since we also have rules.
-    signature: 'boolean -> boolean',
+    signature: '(boolean) -> boolean',
     evaluate: evaluateNot,
   },
   Equivalent: {
     wikidata: 'Q220433',
-    threadable: true,
+    broadcastable: true,
     complexity: 10200,
     signature: '(boolean, boolean) -> boolean',
     canonical: (args: BoxedExpression[], { engine: ce }) => {
@@ -68,7 +76,7 @@ export const LOGIC_LIBRARY: IdentifierDefinitions = {
   },
   Implies: {
     wikidata: 'Q7881229',
-    threadable: true,
+    broadcastable: true,
     complexity: 10200,
     signature: '(boolean, boolean) -> boolean',
     evaluate: evaluateImplies,
@@ -81,7 +89,7 @@ export const LOGIC_LIBRARY: IdentifierDefinitions = {
 
   KroneckerDelta: {
     description: 'Return 1 if the arguments are equal, 0 otherwise',
-    signature: '(value, ...value) -> integer',
+    signature: '(value+) -> integer',
     evaluate: (args, { engine: ce }) => {
       if (args.length === 1)
         return args[0].symbol === 'True' ? ce.One : ce.Zero;
@@ -100,7 +108,7 @@ export const LOGIC_LIBRARY: IdentifierDefinitions = {
   Boole: {
     description:
       'Return 1 if the argument is true, 0 otherwise. Also known as the Iverson bracket',
-    signature: 'boolean -> integer',
+    signature: '(boolean) -> integer',
     evaluate: (args, { engine: ce }) =>
       args[0].symbol === 'True' ? ce.One : ce.Zero,
   },

@@ -3,16 +3,20 @@ import {
   COLLECTION_TYPES,
   EXPRESSION_TYPES,
   NUMERIC_TYPES,
+  INDEXED_COLLECTION_TYPES,
   PRIMITIVE_TYPES,
   SCALAR_TYPES,
   VALUE_TYPES,
 } from './primitive';
+import { typeToString } from './serialize';
 import type {
+  NumericPrimitiveType,
   PrimitiveType,
   Type,
   TypeCompatibility,
   TypeString,
 } from './types';
+import { widen } from './utils';
 
 /** For each key, *all* the primitive subtypes of the type corresponding to that key */
 const PRIMITIVE_SUBTYPES: Record<PrimitiveType, PrimitiveType[]> = {
@@ -65,10 +69,12 @@ const PRIMITIVE_SUBTYPES: Record<PrimitiveType, PrimitiveType[]> = {
   value: VALUE_TYPES,
   scalar: SCALAR_TYPES,
   collection: COLLECTION_TYPES,
+  indexed_collection: INDEXED_COLLECTION_TYPES,
   list: [],
   set: [],
   tuple: [],
-  map: [],
+  record: [],
+  dictionary: [],
   function: [],
   symbol: [],
   boolean: [],
@@ -102,10 +108,6 @@ export function isSubtype(
   lhs: Type | TypeString,
   rhs: Type | TypeString
 ): boolean {
-  // Shortcut: for primitive types
-  if (typeof lhs === 'string' && typeof rhs === 'string' && lhs === rhs)
-    return true;
-
   if (typeof lhs === 'string') lhs = parseType(lhs);
   if (typeof rhs === 'string') rhs = parseType(rhs);
 
@@ -115,8 +117,8 @@ export function isSubtype(
   // `never` is the bottom type, no type is a subtype of `never`
   if (rhs === 'never') return false;
 
-  // No type is a subtype of `error`, even itself (@fixme: is this correct?)
-  if (rhs === 'error') return false;
+  // No type is a subtype of `error`, except itself
+  if (rhs === 'error') return lhs === 'error';
 
   // No type is a subtype of `nothing` (unit type), except itself
   if (rhs === 'nothing') return lhs === 'nothing';
@@ -151,15 +153,38 @@ export function isSubtype(
       return false;
     }
 
-    if (rhs === 'numeric') return isNumeric(lhs);
+    // A union is a subtype of a type if all of its types is a subtype of the type
+    if (lhs.kind === 'union') return lhs.types.every((t) => isSubtype(t, rhs));
 
-    if (rhs === 'function') return isFunction(lhs);
+    // An intersection is a subtype of a type if any of its types is a subtype of the type
+    if (lhs.kind === 'intersection') {
+      return lhs.types.some((t) => isSubtype(t, rhs));
+    }
+
+    if (lhs.kind === 'negation') {
+      // A negation is a subtype of a type if the negated type is not a subtype of the type
+      return !isSubtype(lhs.type, rhs);
+    }
+
+    if (lhs.kind === 'numeric') {
+      if (!isSubtype(lhs.type, rhs)) return false;
+      // The bounds always match, since the bounds of the rhs are -∞ and +∞
+      return true;
+    }
+
+    if (rhs === 'number') return isNumeric(lhs);
+
+    if (rhs === 'symbol') return isSymbol(lhs);
 
     if (rhs === 'expression') return isExpression(lhs);
+
+    if (rhs === 'function') return isFunction(lhs);
 
     if (rhs === 'scalar') return isScalar(lhs);
 
     if (rhs === 'value') return isValue(lhs);
+
+    if (rhs === 'indexed_collection') return isIndexedCollection(lhs);
 
     if (rhs === 'collection') return isCollection(lhs);
 
@@ -172,11 +197,11 @@ export function isSubtype(
     // A set is a subtype of `set`
     if (rhs === 'set') return lhs.kind === 'set';
 
-    // A map is a subtype of `map`
-    if (rhs === 'map') return lhs.kind === 'map';
+    // A record is a subtype of `record`
+    if (rhs === 'record') return lhs.kind === 'record';
 
-    // A union is a subtype of a type if all of its types is a subtype of the type
-    if (lhs.kind === 'union') return lhs.types.every((t) => isSubtype(t, rhs));
+    // A dictionary is a subtype of `dictionary`
+    if (rhs === 'dictionary') return lhs.kind === 'dictionary';
 
     // Other composite types are not subtypes of primitive types
     return false;
@@ -193,16 +218,33 @@ export function isSubtype(
     return rhs.types.some((t) => isSubtype(lhs, t));
   }
 
+  //
+  // Handle expressions
+  //
+  if (rhs.kind === 'expression') {
+    if (lhs === 'symbol') return true;
+    if (typeof lhs === 'string') return false;
+    if (lhs.kind === 'expression') {
+      if (rhs.operator === 'Symbol') return isSymbol(lhs);
+      return lhs.operator === rhs.operator;
+    }
+    if (lhs.kind === 'symbol') return true;
+  }
+
   // A primitive type is not a subtype of a composite type (except a union)
   if (typeof lhs === 'string') return false;
 
   //
   // Handle type references
   //
-  // Note: our type system is a nominal type system, not a structural type system
+  // Note: we support both nominal and structural subtyping
   //
-  if (lhs.kind === 'reference' && rhs.kind === 'reference') {
-    return lhs.ref === rhs.ref;
+  if (rhs.kind === 'reference') {
+    if (lhs.kind === 'reference') return lhs.name === rhs.name;
+    if (rhs.alias === true && rhs.def) {
+      // The rhs is a structural type, so we need to check if the lhs is a subtype of the rhs definition
+      return isSubtype(lhs, rhs.def);
+    }
   }
 
   //
@@ -236,82 +278,150 @@ export function isSubtype(
     // Check the result match covariantly
     if (!isSubtype(lhs.result, rhs.result)) return false;
 
-    // Check all the required arguments match contravariantly
-    if (rhs.args) {
-      if (!lhs.args) return false;
-      if (lhs.args.length !== rhs.args.length) return false;
-      for (let i = 0; i < lhs.args.length; i++) {
-        if (!isSubtype(rhs.args[i].type, lhs.args[i].type)) return false;
-      }
-    } else if (lhs.args) {
-      return false;
-    }
+    if (lhs.optArgs || lhs.variadicArg) {
+      //
+      // If lhs has optional or variadic arguments, rhs must have them as well
+      //
 
-    // Check all the optional arguments match contravariantly
-    if (rhs.optArgs) {
-      if (!lhs.optArgs) return false;
-      if (lhs.optArgs.length !== rhs.optArgs.length) return false;
-      for (let i = 0; i < lhs.optArgs.length; i++) {
-        if (!isSubtype(rhs.optArgs[i].type, lhs.optArgs[i].type)) return false;
+      // Check all the required arguments match contravariantly
+      if (rhs.args) {
+        if (!lhs.args) return false;
+        if (lhs.args.length !== rhs.args.length) return false;
+        for (let i = 0; i < rhs.args.length; i++) {
+          if (!isSubtype(rhs.args[i].type, lhs.args[i].type)) return false;
+        }
+      } else if (lhs.args) {
+        return false;
       }
-    } else if (lhs.optArgs) {
-      return false;
-    }
 
-    // Check the rest argument match contravariantly
-    if (rhs.restArg) {
-      if (!lhs.restArg) return false;
-      if (!isSubtype(rhs.restArg.type, lhs.restArg.type)) return false;
-    } else if (lhs.restArg) {
-      return false;
+      // Check all the optional arguments match contravariantly
+      if (rhs.optArgs) {
+        if (!lhs.optArgs) return false;
+        if (lhs.optArgs.length !== rhs.optArgs.length) return false;
+        for (let i = 0; i < lhs.optArgs.length; i++) {
+          if (!isSubtype(rhs.optArgs[i].type, lhs.optArgs[i].type))
+            return false;
+        }
+      } else if (lhs.optArgs) {
+        return false;
+      }
+
+      // Check the rest argument match contravariantly
+      if (rhs.variadicArg) {
+        if (!lhs.variadicArg) return false;
+        if (lhs.variadicMin != rhs.variadicMin) return false;
+        if (!isSubtype(rhs.variadicArg.type, lhs.variadicArg.type))
+          return false;
+      } else if (lhs.variadicArg) {
+        return false;
+      }
+    } else {
+      //
+      // lhs did not have optional or variadic arguments, so check the arguments that lhs does have against both the required and optional arguments of rhs
+      //
+      if (rhs.args && !lhs.args) {
+        // If rhs has required arguments, lhs must have them as well
+        return false;
+      }
+
+      let i = 0;
+      if (rhs.args) {
+        // If lhs doesn't have enough arguments, it is not a subtype
+        if (lhs.args!.length < rhs.args.length) return false;
+        // Check all the required arguments match contravariantly
+        while (i < rhs.args!.length) {
+          if (!isSubtype(rhs.args[i].type, lhs.args![i].type)) return false;
+          i += 1;
+        }
+      }
+      if (rhs.optArgs) {
+        if (i >= lhs.args!.length) return true;
+        // Check all the optional arguments match contravariantly
+        for (let j = 0; j < rhs.optArgs.length; j++) {
+          if (!isSubtype(rhs.optArgs[j].type, lhs.args![i].type)) return false;
+          i += 1;
+          if (i >= lhs.args!.length) return true;
+        }
+      }
+      if (rhs.variadicArg) {
+        if (i >= lhs.args!.length && rhs.variadicMin === 0) return true;
+        // Check the remaining arguments match the variadic argument contravariantly
+        if (rhs.variadicMin! > 0 && i + rhs.variadicMin! > lhs.args!.length)
+          return false;
+        while (i < lhs.args!.length) {
+          if (!isSubtype(rhs.variadicArg.type, lhs.args![i].type)) return false;
+          i += 1;
+        }
+      }
     }
 
     return true;
   }
 
   //
-  // Handle maps (record types)
+  // Handle Record Type
   //
   // All the fields in the rhs must be present in the lhs
   // but there may be additional fields in the lhs (width subtyping)
   //
-  if (lhs.kind === 'map' && rhs.kind === 'map') {
-    const lhsEntries = Object.entries(lhs.elements);
-    const rhsEntries = Object.entries(rhs.elements);
-    for (let i = 0; i < rhsEntries.length; i++) {
-      const [key, value] = rhsEntries[i];
-
-      // Find corresponding key in lhs
-      const lhsIndex = lhsEntries.findIndex((entry) => entry[0] === key);
-      if (lhsIndex === -1) return false;
-      const rhsType = value;
-      const lhsType = lhsEntries[lhsIndex][1];
+  if (lhs.kind === 'record' && rhs.kind === 'record') {
+    for (const key of Object.keys(rhs.elements)) {
+      if (!(key in lhs.elements)) return false;
       // Depth subtyping
-      if (!isSubtype(lhsType, rhsType)) return false;
+      if (!isSubtype(lhs.elements[key], rhs.elements[key])) return false;
     }
     return true;
+  }
+
+  //
+  // Handle dictionaries
+  //
+
+  if (lhs.kind === 'dictionary' && rhs.kind === 'dictionary') {
+    // Check that the type of values match
+    return isSubtype(lhs.values, rhs.values);
   }
 
   //
   // Handle collections
   //
-  if (rhs.kind === 'collection') {
-    if (
-      lhs.kind === 'collection' ||
-      lhs.kind === 'list' ||
-      lhs.kind === 'set'
-    ) {
-      // Check that the element types match
-      if (!isSubtype(lhs.elements, rhs.elements)) return false;
-      return true;
-    }
+  if (rhs.kind === 'indexed_collection') {
+    if (lhs.kind === 'indexed_collection')
+      return isSubtype(lhs.elements, rhs.elements);
+
+    if (lhs.kind === 'list') return isSubtype(lhs.elements, rhs.elements);
+
     if (lhs.kind === 'tuple') {
       // A tuple is a subtype of a collection if all its elements are subtypes of the collection elements
-      return lhs.elements.every((element) =>
-        isSubtype(element.type, rhs.elements)
-      );
+      return lhs.elements.every((x) => isSubtype(x.type, rhs.elements));
     }
     return false;
+  }
+
+  if (rhs.kind === 'collection') {
+    if (lhs.kind === 'collection' || lhs.kind === 'indexed_collection')
+      return isSubtype(lhs.elements, rhs.elements);
+
+    if (lhs.kind === 'list') return isSubtype(lhs.elements, rhs.elements);
+
+    if (lhs.kind === 'tuple')
+      return lhs.elements.every((x) => isSubtype(x.type, rhs.elements));
+
+    if (lhs.kind === 'set') return isSubtype(lhs.elements, rhs.elements);
+
+    if (lhs.kind === 'dictionary')
+      return isSubtype(
+        parseType(`tuple<string, ${typeToString(lhs.values)}>`),
+        rhs.elements
+      );
+
+    if (lhs.kind === 'record')
+      return isSubtype(
+        parseType(
+          `tuple<$string, ${typeToString(widen(...Object.values(lhs.elements)))}>`
+        ),
+        rhs.elements
+      );
   }
 
   //
@@ -352,6 +462,25 @@ export function isSubtype(
       }
     }
 
+    return true;
+  }
+
+  //
+  // Handle symbols
+  //
+  if (lhs.kind === 'symbol' && rhs.kind === 'symbol') {
+    return lhs.name === rhs.name;
+  }
+
+  //
+  // Handle numeric subsets
+  //
+  if (lhs.kind === 'numeric' && rhs.kind === 'numeric') {
+    // Check that the types match
+    if (!isSubtype(lhs.type, rhs.type)) return false;
+    // Check that the bounds match
+    if ((lhs.lower ?? -Infinity) < (rhs.lower ?? -Infinity)) return false;
+    if ((lhs.upper ?? Infinity) > (rhs.upper ?? Infinity)) return false;
     return true;
   }
 
@@ -402,8 +531,9 @@ export function isCompatible(
 
 function isNumeric(type: Type): boolean {
   if (typeof type === 'string')
-    return NUMERIC_TYPES.includes(type as PrimitiveType);
+    return NUMERIC_TYPES.includes(type as NumericPrimitiveType);
   if (type.kind === 'value') return typeof type.value === 'number';
+  if (type.kind === 'numeric') return true;
   return false;
 }
 
@@ -417,9 +547,15 @@ function isScalar(type: Type): boolean {
 }
 
 function isCollection(type: Type): boolean {
+  if (isIndexedCollection(type)) return true;
   if (typeof type === 'string')
     return COLLECTION_TYPES.includes(type as PrimitiveType);
-  return ['collection', 'list', 'set', 'tuple', 'map'].includes(type.kind);
+  return ['collection', 'set', 'record', 'dictionary'].includes(type.kind);
+}
+
+function isIndexedCollection(type: Type): boolean {
+  if (typeof type === 'string') return false;
+  return ['indexed_collection', 'list', 'tuple'].includes(type.kind);
 }
 
 function isValue(type: Type): boolean {
@@ -439,6 +575,16 @@ function isExpression(type: Type): boolean {
     ['expression', 'symbol', 'function'].includes(type)
   )
     return true;
-  if (isValue(type) || isFunction(type)) return true;
+  if (isValue(type) || isFunction(type) || isSymbol(type)) return true;
+  if (typeof type === 'string') return false;
+  if (type.kind === 'expression') return true;
+  return false;
+}
+
+function isSymbol(type: Type): boolean {
+  if (type === 'symbol') return true;
+  if (typeof type === 'string') return false;
+  if (type.kind === 'symbol') return true;
+  if (type.kind === 'expression') return type.operator === 'Symbol';
   return false;
 }

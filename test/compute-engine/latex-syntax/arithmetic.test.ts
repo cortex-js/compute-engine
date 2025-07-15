@@ -3,35 +3,47 @@ import { engine as ce, evaluate, latex } from '../../utils';
 
 describe('SUM parsing', () => {
   test('constant body (number literal)', () => {
-    expect(ce.parse(`\\sum 3`)).toMatchInlineSnapshot(`["Sum", 3]`);
+    expect(ce.parse(`\\sum 3`)).toMatchInlineSnapshot(`["Reduce", 3, "Add"]`);
   });
 
   test('constant body (symbol)', () => {
-    expect(ce.parse(`\\sum \\pi`)).toMatchInlineSnapshot(`["Sum", "Pi"]`);
+    expect(ce.parse(`\\sum \\pi`)).toMatchInlineSnapshot(
+      `["Reduce", "Pi", "Add"]`
+    );
   });
 
   test('constant body (expression)', () => {
     expect(ce.parse(`\\sum (1+\\pi)`)).toMatchInlineSnapshot(
-      `["Sum", ["Add", 1, "Pi"]]`
+      `["Reduce", ["Delimiter", ["Add", 1, "Pi"]], "Add"]`
     );
   });
 
   test('index with no lower or upper bounds', () => {
     expect(ce.parse(`\\sum_{k} (1+k)`)).toMatchInlineSnapshot(
-      `["Sum", ["Add", "k", 1], ["Single", "k"]]`
+      `["Sum", ["Add", "k", 1], ["Limits", "k", "Nothing", "Nothing"]]`
     );
   });
 
   test('indexes with no lower or upper bounds', () => {
-    expect(ce.parse(`\\sum_{k,j} (j+k)`)).toMatchInlineSnapshot(
-      `["Sum", ["Add", "j", "k"], ["Single", "k"], ["Single", "j"]]`
-    );
+    expect(ce.parse(`\\sum_{k,j} (j+k)`)).toMatchInlineSnapshot(`
+      [
+        "Sum",
+        ["Add", "j", "k"],
+        ["Limits", "k", "Nothing", "Nothing"],
+        ["Limits", "j", "Nothing", "Nothing"]
+      ]
+    `);
   });
 
   test('indexes with no upper bounds', () => {
-    expect(ce.parse(`\\sum_{k=1,j=2} (j+k)`)).toMatchInlineSnapshot(
-      `["Sum", ["Add", "j", "k"], ["Pair", "k", 1], ["Pair", "j", 2]]`
-    );
+    expect(ce.parse(`\\sum_{k=1,j=2} (j+k)`)).toMatchInlineSnapshot(`
+      [
+        "Sum",
+        ["Add", "j", "k"],
+        ["Limits", "k", "Nothing", 1],
+        ["Limits", "j", "Nothing", 2]
+      ]
+    `);
   });
 
   test('indexes with lower and upper bounds', () => {
@@ -40,8 +52,8 @@ describe('SUM parsing', () => {
       [
         "Sum",
         ["Add", "j", "k"],
-        ["Triple", "k", 1, 3],
-        ["Triple", "j", 2, 4]
+        ["Limits", "k", 1, 3],
+        ["Limits", "j", 2, 4]
       ]
     `);
   });
@@ -52,16 +64,29 @@ describe('SUM parsing', () => {
       [
         "Sum",
         ["Add", "j", "k"],
-        ["Triple", "k", ["Add", "a", ["Power", 2, 3]], ["Square", 3]],
-        ["Triple", "j", ["Add", 2, ["Square", 3]], "b"]
+        ["Limits", "k", ["Add", "a", ["Power", 2, 3]], ["Square", 3]],
+        [
+          "Limits",
+          "j",
+          ["Add", 2, ["Square", 3]],
+          [
+            "Error",
+            ["ErrorCode", "incompatible-type", "'number'", "'unknown'"]
+          ]
+        ]
       ]
     `);
   });
 
   test('indexes with lower and missing upper bounds', () => {
-    expect(ce.parse(`\\sum_{k = 1, j = 2}^{3} (j+k)`)).toMatchInlineSnapshot(
-      `["Sum", ["Add", "j", "k"], ["Triple", "k", 1, 3], ["Pair", "j", 2]]`
-    );
+    expect(ce.parse(`\\sum_{k = 1, j = 2}^{3} (j+k)`)).toMatchInlineSnapshot(`
+      [
+        "Sum",
+        ["Add", "j", "k"],
+        ["Limits", "k", 1, 3],
+        ["Limits", "j", "Nothing", 2]
+      ]
+    `);
   });
 
   test('INVALID indexes with lower and extra upper bounds', () => {
@@ -70,27 +95,27 @@ describe('SUM parsing', () => {
       [
         "Sum",
         ["Add", "j", "k"],
-        ["Triple", "k", 1, 3],
-        ["Triple", "j", 2, 4]
+        ["Limits", "k", 1, 3],
+        ["Limits", "j", 2, 4]
       ]
     `);
   });
 
   test('i is a valid index (not imaginary unit)', () => {
     expect(ce.parse(`\\sum_{i=0}^{10}\\frac{i}{2}`)).toMatchInlineSnapshot(
-      `["Sum", ["Multiply", ["Rational", 1, 2], "i"], ["Triple", "i", 0, 10]]`
+      `["Sum", ["Multiply", ["Rational", 1, 2], "i"], ["Limits", "i", 0, 10]]`
     );
   });
 
   test('sum of a collection', () => {
     expect(
       ce.parse(`\\sum \\lbrack 1, 2, 3, 4, 5\\rbrack`)
-    ).toMatchInlineSnapshot(`["Sum", ["List", 1, 2, 3, 4, 5]]`);
+    ).toMatchInlineSnapshot(`["Reduce", ["List", 1, 2, 3, 4, 5], "Add"]`);
   });
 
   test('single range index', () => {
     expect(ce.parse(`\\sum_{n=0..10}n`)).toMatchInlineSnapshot(
-      `["Sum", "n", ["Triple", "n", 0, 10]]`
+      `["Sum", "n", ["Limits", "n", 0, 10]]`
     );
   });
 
@@ -99,31 +124,36 @@ describe('SUM parsing', () => {
       [
         "Sum",
         ["Add", "m", "n"],
-        ["Triple", "n", 0, 10],
-        ["Triple", "m", 1, 7]
+        ["Limits", "n", 0, 10],
+        ["Limits", "m", 1, 7]
       ]
     `);
   });
 
   test('single range index with step', () => {
     expect(ce.parse(`\\sum_{n=0..2..10}n`)).toMatchInlineSnapshot(
-      `["Sum", "n", ["Triple", "n", 0, ["Range", 2, 10]]]`
+      `["Sum", "n", ["Limits", "n", 0, 10]]`
     );
   });
 
   test('INVALID mix of range and equation', () => {
-    expect(ce.parse(`\\sum_{n=0..10, m=1}^{2}(n+m)`)).toMatchInlineSnapshot(
-      `["Sum", ["Add", "m", "n"], ["Triple", "n", 0, 10], ["Pair", "m", 1]]`
-    );
+    expect(ce.parse(`\\sum_{n=0..10, m=1}^{2}(n+m)`)).toMatchInlineSnapshot(`
+      [
+        "Sum",
+        ["Add", "m", "n"],
+        ["Limits", "n", 0, 10],
+        ["Limits", "m", "Nothing", 1]
+      ]
+    `);
   });
 
   test('double indexed collection index', () => {
     expect(ce.parse(`\\sum_{n,m} k_{n,m}`)).toMatchInlineSnapshot(`
       [
         "Sum",
-        ["Subscript", "k", ["Delimiter", ["Sequence", "n", "m"], "','"]],
-        ["Single", "n"],
-        ["Single", "m"]
+        ["Subscript", "k", ["Delimiter", ["Sequence", "n", "m"], ","]],
+        ["Limits", "n", "Nothing", "Nothing"],
+        ["Limits", "m", "Nothing", "Nothing"]
       ]
     `);
   }); // @fixme
@@ -142,7 +172,7 @@ describe('SUM parsing', () => {
 
   test('INVALID parsing of multi indexed summation with and equal and non-equal boxed expression', () => {
     expect(ce.parse(`\\sum_{n = 6; d \\in D} K`)).toMatchInlineSnapshot(
-      `["Sum", "K", ["Pair", "n", 6]]`
+      `["Sum", "K", ["Limits", "n", "Nothing", 6]]`
     );
   });
 
@@ -154,7 +184,7 @@ describe('SUM parsing', () => {
 });
 
 describe('SUM evaluation', () => {
-  test('testing evaluating layers of summaitons', () => {
+  test('testing evaluating layers of summations', () => {
     expect(evaluate(`\\sum_{n=0,m=4}^{4,8}{n+m}`)).toMatchInlineSnapshot(`200`);
   });
 

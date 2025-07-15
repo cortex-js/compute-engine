@@ -22,7 +22,7 @@ export function parseEscapeSequence(parser: Parser): Result<string> {
     return result.success(String.fromCodePoint(replacement));
   }
 
-  // Is i a Unicode escape sequence: "\u0041", "\u{0041}"
+  // Is it a Unicode escape sequence: "\u0041", "\u{0041}"
   let i = start + 1;
   const escapeChar = parser.get(i++);
 

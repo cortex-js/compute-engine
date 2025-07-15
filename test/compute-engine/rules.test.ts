@@ -56,14 +56,14 @@ describe('INVALID RULES', () => {
     const rule = '\\pi + a';
     expect(() => expr.replace(rule)).toThrowErrorMatchingInlineSnapshot(`
 
-                  Invalid rule "\\pi + a"
-                  |   pi + a
-                  |   A rule should be of the form:
-                  |   <match> -> <replace>; <condition>
-                  |   Skipping rule "\\\\pi + a"
+            Invalid rule "\\pi + a"
+            |   a + pi
+            |   A rule should be of the form:
+            |   <match> -> <replace>; <condition>
+            |   Skipping rule "\\\\pi + a"
 
 
-            `);
+        `);
   });
 
   it('should handle shorthand rule with incorrect wildcards replace', () => {
@@ -71,12 +71,12 @@ describe('INVALID RULES', () => {
     const rule = '\\pi + a -> b';
     expect(() => expr.replace(rule)).toThrowErrorMatchingInlineSnapshot(`
 
-            Invalid rule "\\pi + a -> b"
-            |   The replace expression contains wildcards not present in the match expression
-            |   Skipping rule "\\\\pi + a -> b"
+      Invalid rule "\\pi + a -> b"
+      |   The replace expression contains wildcards not present in the match expression
+      |   Skipping rule "\\\\pi + a -> b"
 
 
-        `);
+    `);
   });
 
   it('should handle redundant rules with simplify', () => {

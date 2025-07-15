@@ -1,13 +1,9 @@
-import { Expression, MathJsonIdentifier } from '../../math-json';
-import {
-  EMOJIS,
-  isValidIdentifier,
-  validateIdentifier,
-} from '../../math-json/identifiers';
+import { Expression, MathJsonSymbol } from '../../math-json';
+import { EMOJIS, isValidSymbol, validateSymbol } from '../../math-json/symbols';
 import { SYMBOLS } from './dictionary/definitions-symbols';
 import { Parser } from './types';
 
-const IDENTIFIER_PREFIX = {
+const SYMBOL_PREFIX = {
   // Those are "grouping" prefix that also specify spacing
   // around the symbol. We ignore the spacing, though.
   '\\mathord': '',
@@ -19,14 +15,14 @@ const IDENTIFIER_PREFIX = {
   '\\mathpunct': '',
   '\\mathinner': '',
 
-  // This is the preferred way to specify an identifier
-  // it defines both spacing and font. By default, identifiers
-  // are wrapper with `\\operatorname{}`.
+  // This is the preferred way to specify a symbol
+  // it defines both spacing and font. By default, symbols
+  // are wrapped with `\\operatorname{}`.
   '\\operatorname': '',
 
-  // These styling commands are used to change the font of an identifier
-  // They may be problematic, as adjacent identifiers may be merged
-  // into a single identifier when used in editors, such a MathLive.
+  // These styling commands are used to change the font of a symbol
+  // They may be problematic, as adjacent symbols may be merged
+  // into a single symbol when used in editors, such a MathLive.
   // For example `\mathrm{speed}\mathrm{sound}` can be confused with `\mathrm{speedsound}`
   '\\mathrm': '_upright',
   '\\mathit': '_italic',
@@ -39,8 +35,8 @@ const IDENTIFIER_PREFIX = {
   '\\mathbb': '_doublestruck',
 };
 
-// These commands can be used inside the body of an identifier.
-const IDENTIFIER_MODIFIER = {
+// These commands can be used inside the body of a symbol.
+const SYMBOL_MODIFIER = {
   '\\mathring': '_ring',
   '\\hat': '_hat',
   '\\tilde': '_tilde',
@@ -57,7 +53,7 @@ const IDENTIFIER_MODIFIER = {
   '\\check': '_check',
 };
 
-function parseIdentifierToken(
+function parseSymbolToken(
   parser: Parser,
   options: { toplevel: boolean }
 ): string | null {
@@ -104,38 +100,38 @@ function parseIdentifierToken(
   // @fixme: encode other unicode chars as ____UUUU
 
   // Unexpected LaTeX command or \\char or \\unicode?
-  return parser.matchChar() ?? parser.nextToken();
+  return parser.parseChar() ?? parser.nextToken();
 }
 
-// The body of an identifier is a sequence of tokens contained
+// The body of a symbol is a sequence of tokens contained
 // inside a prefix such as `\mathrm{}`.
 // It can include a string of tokens (characters and commands)
 // and a list of modifiers (superscript, subscript, etc.)
 // and can be wrapped in a prefix (e.g. `\mathbb{}`).
-function parseIdentifierBody(parser: Parser): string | null {
-  let id = matchPrefixedIdentifier(parser);
+function parseSymbolBody(parser: Parser): string | null {
+  let id = matchPrefixedSymbol(parser);
 
-  const prefix = IDENTIFIER_MODIFIER[parser.peek] ?? null;
+  const prefix = SYMBOL_MODIFIER[parser.peek] ?? null;
 
   if (prefix) {
     parser.nextToken();
     if (!parser.match('<{>')) return null;
 
-    const body = parseIdentifierBody(parser);
+    const body = parseSymbolBody(parser);
     if (body === null || !parser.match('<}>')) return null;
 
     id = `${body}${prefix}`;
   }
 
   //
-  // If not an identifier, could be a sequence of tokens
+  // If not a symbol, could be a sequence of tokens
   //
   if (id === null) {
     id = '';
     while (!parser.atEnd) {
       const token = parser.peek;
       if (token === '<}>' || token === '_' || token === '^') break;
-      const next = parseIdentifierToken(parser, { toplevel: false });
+      const next = parseSymbolToken(parser, { toplevel: false });
       if (next === null) return null;
       id += next;
     }
@@ -161,12 +157,12 @@ function parseIdentifierBody(parser: Parser): string | null {
   while (!parser.atEnd) {
     if (parser.match('_')) {
       const hasBrace = parser.match('<{>');
-      const sub = parseIdentifierBody(parser);
+      const sub = parseSymbolBody(parser);
       if ((hasBrace && !parser.match('<}>')) || sub === null) return null;
       subs.push(sub);
     } else if (parser.match('^')) {
       const hasBrace = parser.match('<{>');
-      const sup = parseIdentifierBody(parser);
+      const sup = parseSymbolBody(parser);
       if ((hasBrace && !parser.match('<}>')) || sup === null) return null;
       sups.push(sup);
     } else break;
@@ -179,27 +175,27 @@ function parseIdentifierBody(parser: Parser): string | null {
 }
 
 /**
- * Match a prefix identifier.
+ * Match a prefix symbol.
  *
  * It can be:
- * - a multi-letter identifier: `\operatorname{speed}`
+ * - a multi-letter symbol: `\operatorname{speed}`
  *  (`\operatorname` specified both the spacing around the symbol and the font)
- * - a multi-prefix identifier: `\mathbin{\mathsf{U}}`
+ * - a multi-prefix symbol: `\mathbin{\mathsf{U}}`
  *  (`\mathbin` specifies the spacing around the symbol,
  *  `\mathsf` specifies the font)
- * - an identifier with modifiers as subscripts/superscript: `\mathrm{\alpha_{12}}` or `\mathit{speed\unicode{"2012}of\unicode{"2012}sound}`
+ * - a symbol with modifiers as subscripts/superscript: `\mathrm{\alpha_{12}}` or `\mathit{speed\unicode{"2012}of\unicode{"2012}sound}`
  */
-function matchPrefixedIdentifier(parser: Parser): string | null {
+function matchPrefixedSymbol(parser: Parser): string | null {
   //
-  // Is it a prefix identifier, e.g. `\\mathrm{abc}`?
+  // Is it a prefix symbol, e.g. `\\mathrm{abc}`?
   //
-  const prefix = IDENTIFIER_PREFIX[parser.peek] ?? null;
+  const prefix = SYMBOL_PREFIX[parser.peek] ?? null;
 
   if (prefix === null) return null;
 
   parser.nextToken();
   if (parser.match('<{>')) {
-    // If the identifier starts with a digit,
+    // If the symbol starts with a digit,
     // convert it to a string, e.g. `\mathbb{1}` -> `one_blackboard`
     let body = '';
     const digit =
@@ -220,34 +216,31 @@ function matchPrefixedIdentifier(parser: Parser): string | null {
       parser.nextToken();
     }
 
-    body += parseIdentifierBody(parser);
+    body += parseSymbolBody(parser);
     if (body === null || !parser.match('<}>')) return null;
-    // Multi-character identifiers do not need a prefix
+    // Multi-character symbols do not need a prefix
     // if they are upright (that's their default presentation)
     if (prefix === '_upright' && body.length > 1) return body;
     return body + prefix;
   }
 
   //
-  // Not a prefixed identifier
+  // Not a prefixed symbol
   //
   return null;
 }
 
-/** For error handling, if we have a identifier prefix, assume
- * the identifier is invalid (it would have been captured by
- * `matchIdentifier()` otherwise) and return an error expression */
-export function parseInvalidIdentifier(parser: Parser): Expression | null {
+/** For error handling, if we have a symbol prefix, assume
+ * the symbol is invalid (it would have been captured by
+ * `matchSymbol()` otherwise) and return an error expression */
+export function parseInvalidSymbol(parser: Parser): Expression | null {
   const start = parser.index;
-  const id = matchPrefixedIdentifier(parser);
-  if (id === null || isValidIdentifier(id)) return null;
+  const id = matchPrefixedSymbol(parser);
+  if (id === null || isValidSymbol(id)) return null;
 
-  return parser.error(
-    ['invalid-identifier', { str: validateIdentifier(id) }],
-    start
-  );
+  return parser.error(['invalid-symbol', { str: validateSymbol(id) }], start);
 
-  // const prefix = IDENTIFIER_PREFIX[parser.peek] ?? null;
+  // const prefix =SYMBOL_PREFIX[parser.peek] ?? null;
   // if (prefix === null) return null;
 
   // const start = parser.index;
@@ -262,15 +255,15 @@ export function parseInvalidIdentifier(parser: Parser): Expression | null {
   //   parser.match('<}>');
   // }
   // const s = parser.latex(start, parser.index);
-  // if (isValidIdentifier(s)) {
+  // if (isValidSymbo(s)) {
   //   this.index = start;
   //   return null;
   // }
-  // return parser.error(['invalid-identifier', validateIdentifier(s)], start);
+  // return parser.error(['invalid-symbol', validateSymbol(s)], start);
 }
 
 /**
- * Match an identifier.
+ * Match a symbol.
  *
  * It can be:
  * - a sequence of emojis: `👍🏻👍🏻👍🏻`
@@ -283,17 +276,17 @@ export function parseInvalidIdentifier(parser: Parser): Expression | null {
  *    - `\mathrm{\alpha_{12}}` or
  *    - `\mathit{speed\unicode{"2012}of\unicode{"2012}sound}`
  */
-export function parseIdentifier(parser: Parser): MathJsonIdentifier | null {
+export function parseSymbol(parser: Parser): MathJsonSymbol | null {
   //
-  // Shortcut: Is it a single-letter identifier?
+  // Shortcut: Is it a single-letter symbol?
   //
   if (/^[a-zA-Z]$/.test(parser.peek) || /^\p{XIDS}$/u.test(parser.peek))
     return parser.nextToken();
 
   //
-  // Is it a prefixed, identifier?
+  // Is it a prefixed symbol?
   //
-  let id = matchPrefixedIdentifier(parser);
+  let id = matchPrefixedSymbol(parser);
 
   //
   // Is it a sequence of emojis? (they don't need to be wrapped)
@@ -306,19 +299,19 @@ export function parseIdentifier(parser: Parser): MathJsonIdentifier | null {
   }
 
   //
-  // Is it a single-token identifier?
+  // Is it a single-token symbol?
   // (other than a letter, it could be a command, e.g. \alpha)
   //
   const index = parser.index;
-  id ??= parseIdentifierToken(parser, { toplevel: true });
+  id ??= parseSymbolToken(parser, { toplevel: true });
 
   if (id) {
     id = id.normalize();
-    if (isValidIdentifier(id)) return id;
+    if (isValidSymbol(id)) return id;
   }
 
   //
-  // Not a valid identifier
+  // Not a valid symbol
   //
   parser.index = index;
   return null;

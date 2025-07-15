@@ -8,6 +8,8 @@ import {
   symbol,
   isNumberObject,
   mapArgs,
+  matchesNumber,
+  matchesString,
 } from '../math-json/utils';
 import { splitGraphemes } from '../common/grapheme-splitter';
 import {
@@ -87,9 +89,10 @@ export function serializeCortex(
   function serializeExpression(expr: Expression | null): FormattingBlock {
     if (expr === null) return new EmptyBlock(this);
     // Is this a string literal?
-    const s = stringValue(expr);
-    if (s !== null) return serializeString(s);
-
+    if (typeof expr === 'string' && matchesString(expr)) {
+      const s = stringValue(expr);
+      if (s !== null) return serializeString(s);
+    }
     const comment = serializeComment(expr);
     let body: FormattingBlock | undefined;
     const h = operator(expr);
@@ -107,8 +110,8 @@ export function serializeCortex(
     if (
       !body &&
       (typeof expr === 'number' ||
-        typeof expr === 'string' ||
-        isNumberObject(expr))
+        isNumberObject(expr) ||
+        (typeof expr === 'string' && matchesNumber(expr)))
     ) {
       const num = serializeNumber(expr, NUMBER_FORMATTING_OPTIONS);
       if (num) body = fmt.text(num);

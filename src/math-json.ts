@@ -9,11 +9,12 @@
 export type {
   Expression,
   MathJsonAttributes,
-  MathJsonNumber,
+  MathJsonNumberObject,
+  MathJsonSymbolObject,
+  MathJsonStringObject,
+  MathJsonFunctionObject,
+  MathJsonDictionaryObject,
   MathJsonSymbol,
-  MathJsonString,
-  MathJsonFunction,
-  MathJsonIdentifier,
 } from './math-json/types';
 
 export {

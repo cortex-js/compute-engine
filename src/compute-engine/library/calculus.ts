@@ -1,13 +1,18 @@
-import type { BoxedExpression, IdentifierDefinitions } from '../global-types';
+import type { BoxedExpression, SymbolDefinitions } from '../global-types';
 
 import { checkType } from '../boxed-expression/validate';
 
-import { applicable, applicableN1 } from '../function-utils';
+import {
+  canonicalFunctionLiteral,
+  canonicalFunctionLiteralArguments,
+} from '../function-utils';
 import { monteCarloEstimate } from '../numerics/monte-carlo';
 import { centeredDiff8thOrder, limit } from '../numerics/numeric';
 import { derivative, differentiate } from '../symbolic/derivative';
+import { antiderivative } from '../symbolic/antiderivative';
+import { canonicalLimits, canonicalLimitsSequence } from './utils';
 
-export const CALCULUS_LIBRARY: IdentifierDefinitions[] = [
+export const CALCULUS_LIBRARY: SymbolDefinitions[] = [
   {
     /* @todo
     ## Definite Integral
@@ -95,12 +100,16 @@ volumes
     // with values of the order that can be either fractional or negative
     //
     Derivative: {
-      threadable: false,
+      broadcastable: false,
 
       lazy: true,
-      signature: '(any, order:number?) -> function',
+      signature: '(function, order:number?) -> function',
       canonical: (ops, { engine }) => {
-        return engine._fn('Derivative', [ops[0].canonical, ...ops.slice(1)]);
+        const fn = canonicalFunctionLiteral(ops[0].canonical);
+        if (!fn) return null;
+        if (!ops[1]) return engine._fn('Derivative', [fn]);
+        const order = checkType(engine, ops[1]?.canonical, 'number');
+        return engine._fn('Derivative', [fn, order]);
       },
       evaluate: (ops) => {
         const op = ops[0].evaluate();
@@ -121,39 +130,20 @@ volumes
     // This is equivalent to `["Apply", ["Derivative", "Sin"], "x"]`
 
     D: {
-      threadable: false,
+      broadcastable: false,
 
+      scoped: true,
       lazy: true,
       signature:
-        '(expression, variable:symbol, variables:...symbol) -> expression',
-      canonical: (ops, { engine }) => {
-        const ce = engine;
-        let f = ops[0];
+        '(expression, variable:symbol, variables:symbol+) -> expression',
+      canonical: (ops, { engine: ce, scope }) => {
+        const f = canonicalFunctionLiteralArguments(ce, ops);
         if (!f) return null;
 
-        ce.pushScope();
-        const params = ops.slice(1);
-        // const vars: BoxedExpression[] = [];
-        // for (const param of params) {
-        //   let v = param;
-        //   if (v.op === 'ReleaseHold') v = param.op1.evaluate();
-        //   if (!v.symbol) {
-        //     ce.popScope();
-        //     return null;
-        //   }
-        //   ce.declare(v.symbol, ce.Numbers);
-        //   vars.push(ce.box(v.symbol));
-        // }
-        f.bind();
-        f = f.canonical;
-        const result = ce._fn('D', [f, ...params]);
-        ce.popScope();
-        return result;
+        return ce._fn('D', [f, ...ops!.slice(1)], { scope });
       },
       evaluate: (ops, { engine }) => {
-        const ce = engine;
         let f: BoxedExpression | undefined = ops[0].canonical;
-        const context = ce.swapScope(f.scope);
         f = f.evaluate();
         const params = ops.slice(1);
         if (params.length === 0) f = undefined;
@@ -162,10 +152,10 @@ volumes
             f = undefined;
             break;
           }
+          if (f && f.operator === 'Function') f = f.op1;
           f = differentiate(f!, param.symbol);
           if (f === undefined) break;
         }
-        ce.swapScope(context);
         f = f?.canonical;
         // Avoid recursive evaluation
         return f?.operator === 'D' ? f : f?.evaluate();
@@ -174,101 +164,141 @@ volumes
 
     // Evaluate a numerical approximation of a derivative at point x
     ND: {
-      threadable: false,
+      broadcastable: false,
       lazy: true,
       signature: '(function, at:number) -> number',
+      canonical: (ops, { engine }) => {
+        const fn = canonicalFunctionLiteral(ops[0]);
+        if (!fn) return null;
+        const x = checkType(engine, ops[1]?.canonical, 'number');
+        return engine._fn('ND', [fn, x]);
+      },
       evaluate: ([body, x], { engine }) => {
-        const xValue = x?.canonical.N().re;
+        const xValue = x.N().re;
         if (isNaN(xValue)) return undefined;
 
-        const f = applicableN1(engine.box(body));
-        return engine.number(centeredDiff8thOrder(f, xValue));
+        return engine.number(centeredDiff8thOrder(body.compile(), xValue));
       },
     },
 
     Integrate: {
       wikidata: 'Q80091',
-      threadable: false,
+      broadcastable: false,
 
       lazy: true,
-      signature: '(expression, range:(tuple|symbol|nothing)) -> number',
-      canonical: (ops, { engine }) => {
-        const ce = engine;
-        let range = ops[1];
-        let index: BoxedExpression | null = null;
-        let lower: BoxedExpression | null = null;
-        let upper: BoxedExpression | null = null;
-        if (
-          range &&
-          range.operator !== 'Tuple' &&
-          range.operator !== 'Triple' &&
-          range.operator !== 'Pair' &&
-          range.operator !== 'Single'
-        ) {
-          index = range;
-        } else if (range) {
-          // Don't canonicalize the index. Canonicalization has the
-          // side effect of declaring the symbol, here we're using
-          // it to do a local declaration
-          index = range.ops?.[0] ?? null;
-          lower = range.ops?.[1]?.canonical ?? null;
-          upper = range.ops?.[2]?.canonical ?? null;
-        }
-        // The index, if present, should be a symbol
-        if (index && index.operator === 'Hold') index = index.op1;
-        if (index && index.operator === 'ReleaseHold')
-          index = index.op1.evaluate();
-        index ??= ce.Nothing;
-        if (!index.symbol) index = ce.typeError('symbol', index.type, index);
+      signature: '(function, limits+) -> number',
+      canonical: (ops, { engine: ce }) => {
+        if (!ops[0]) return null;
 
-        // The range bounds, if present, should be numbers
-        if (lower && lower.symbol !== 'Nothing') {
-          if (!lower.type.isUnknown) lower = checkType(ce, lower, 'number');
-        }
-        if (upper && upper.symbol !== 'Nothing') {
-          if (!upper.type.isUnknown) upper = checkType(ce, upper, 'number');
-        }
-        if (lower && upper) range = ce.tuple(index, lower, upper);
-        else if (upper) range = ce.tuple(index, ce.NegativeInfinity, upper);
-        else if (lower) range = ce.tuple(index, lower);
-        else range = index;
+        const f = canonicalFunctionLiteral(ops[0]);
+        if (!f) return null;
 
-        let body = ops[0] ?? ce.error('missing');
-        body = body.canonical;
-        if (body.operator === 'Delimiter' && body.op1.operator === 'Sequence')
-          body = body.op1.op1;
+        const limits = canonicalLimitsSequence(ops.slice(1), { engine: ce });
+        return ce._fn('Integrate', [f, ...limits]);
+      },
 
-        return ce._fn('Integrate', [body, range]);
-        // evaluate: (ce, ops) => {
-        // @todo: implement using Risch Algorithm
-        // },
-        // N: (ce, ops) => {
-        // N(Integrate) is transformed into NIntegrate
-        // }
+      evaluate: (ops, { engine: ce, numericApproximation }) => {
+        if (numericApproximation) {
+          // If a numeric approximation is requested, equivalent to NIntegrate
+          const f = ops[0];
+          const firstLimit = ops[1];
+          const [lower, upper] = [firstLimit.op2.N().re, firstLimit.op3.N().re];
+          if (isNaN(lower) || isNaN(upper)) return undefined;
+          const jsf = f.compile();
+          const mce = monteCarloEstimate(
+            jsf,
+            lower,
+            upper,
+            jsf.isCompiled ? 1e7 : 1e4
+          );
+          return ce.box([
+            'PlusMinus',
+            ce.number(mce.estimate),
+            ce.number(mce.error),
+          ]);
+        }
+
+        let expr = ops[0];
+        const argNames = expr.ops?.slice(1)?.map((x) => x.symbol) ?? [];
+
+        const limitsSequence = ops.slice(1);
+
+        // Indefinite integral?
+        if (limitsSequence.length === 0) {
+          return undefined;
+        }
+
+        for (let i = limitsSequence.length - 1; i >= 0; i--) {
+          const [varExpr, lower, upper] = limitsSequence[i].ops!;
+          let variable = varExpr.symbol;
+
+          // Default variable name if missing
+          if ((!variable || variable === 'Nothing') && i < argNames.length)
+            variable = argNames[i];
+          if (!variable) variable = 'x';
+
+          const antideriv = antiderivative(expr, variable);
+
+          if (antideriv.operator !== 'Integrate') {
+            const fAntideriv = antideriv; // ce.box(['Function', antideriv.op1, variable]);
+            if (lower.symbol === 'Nothing' && upper.symbol === 'Nothing') {
+              expr = fAntideriv;
+            } else {
+              const F = ce.box(['Function', antideriv, variable]);
+              expr = ce.box(['EvaluateAt', F, lower, upper]);
+            }
+          } else {
+            if (lower.symbol === 'Nothing' && upper.symbol === 'Nothing') {
+              expr = antideriv;
+            } else {
+              const F = ce.box(['Function', antideriv, variable]);
+              expr = ce.box(['EvaluateAt', F, lower, upper]);
+            }
+          }
+        }
+        if (expr.operator !== 'Integrate')
+          return expr.evaluate({ numericApproximation });
+        return expr;
       },
     },
 
     NIntegrate: {
-      threadable: false,
+      broadcastable: false,
       lazy: true,
-      signature: '(expression, lower:number, upper:number) -> number',
-      evaluate: (ops, { engine }) => {
-        // Switch to machine precision
-        const precision = engine.precision;
-        engine.precision = 'machine';
-        const wasStrict = engine.strict;
-        engine.strict = false;
-
-        const [a, b] = ops.slice(1).map((op) => op.value);
-        let result: BoxedExpression | undefined = undefined;
-        if (typeof a === 'number' && typeof b === 'number') {
-          const f = applicableN1(ops[0]);
-          result = engine.number(monteCarloEstimate(f, a, b));
-        }
-        engine.precision = precision;
-        engine.strict = wasStrict;
-        return result;
+      signature: '(function, limits:(tuple|symbol)?) -> number',
+      canonical: (ops, { engine }) => {
+        const [body, lower, upper] = ops;
+        const fn = canonicalFunctionLiteral(body);
+        // @todo: normalizeIndexingSet() ?
+        if (!fn) return null;
+        if (!lower || !upper) return null;
+        return engine._fn('NIntegrate', [fn, lower.canonical, upper.canonical]);
       },
+      evaluate: ([f, a, b], { engine }) => {
+        const [lower, upper] = [a.N().re, b.N().re];
+        if (isNaN(lower) || isNaN(upper)) return undefined;
+        const jsf = f.compile();
+        return engine.number(
+          monteCarloEstimate(jsf, lower, upper, jsf.isCompiled ? 1e7 : 1e4)
+            .estimate
+        );
+      },
+    },
+
+    // This is used to represent the indexing set/limits (i.e.
+    // an index, lower and upper bounds) of a function
+    // (not to be confused with Limit, which calculates the limit of a
+    // function at a point)
+    // It is a convenient function that prevents the first argument (the index)
+    // from being canonicalized
+    Limits: {
+      description: 'Limits of a function',
+      complexity: 5000,
+      broadcastable: false,
+
+      lazy: true,
+      signature: '(index:symbol, lower:number, upper:number) -> tuple',
+      canonical: (ops, { engine }) => canonicalLimits(ops, { engine }) ?? null,
     },
   },
 
@@ -277,48 +307,44 @@ volumes
     Limit: {
       description: 'Limit of a function',
       complexity: 5000,
-      threadable: false,
+      broadcastable: false,
 
       lazy: true,
-      signature: '(expression, point:number, direction:number?) -> number',
-      evaluate: (ops, { engine: ce }) => {
-        const [f, x, dir] = ops;
-        const target = x.N().re;
-        if (!isFinite(target)) return undefined;
-        const fn = applicable(f);
-        return ce.number(
-          limit(
-            (x) => {
-              const y = fn([ce.number(x)])?.value;
-              return typeof y === 'number' ? y : Number.NaN;
-            },
-            target,
-            dir ? dir.re : 1
-          )
-        );
+      signature: '(function, point:number, direction:number?) -> number',
+      canonical: ([f, x, dir], { engine }) => {
+        const fn = canonicalFunctionLiteral(f);
+        if (!fn || !x) return null;
+        if (dir === undefined) return engine._fn('Limit', [fn, x.canonical]);
+        return engine._fn('Limit', [fn, x.canonical, dir.canonical]);
+      },
+      evaluate: ([f, x, dir], { engine, numericApproximation }) => {
+        if (numericApproximation) {
+          const target = x.N().re;
+          if (Number.isNaN(target)) return undefined;
+          const fn = f.compile();
+          return engine.number(limit(fn, target, dir ? dir.re : 1));
+        }
+        return undefined;
       },
     },
     NLimit: {
       description: 'Numerical approximation of the limit of a function',
       complexity: 5000,
-      threadable: false,
+      broadcastable: false,
 
       lazy: true,
-      signature: '(expression, point:number, direction:number?) -> number',
+      signature: '(function, point:number, direction:number?) -> number',
+      canonical: ([f, x, dir], { engine }) => {
+        const fn = canonicalFunctionLiteral(f);
+        if (!fn || !x) return null;
+        if (dir === undefined) return engine._fn('NLimit', [fn, x.canonical]);
+        return engine._fn('NLimit', [fn, x.canonical, dir.canonical]);
+      },
       evaluate: ([f, x, dir], { engine }) => {
         const target = x.N().re;
         if (Number.isNaN(target)) return undefined;
-        const fn = applicable(f);
-        return engine.number(
-          limit(
-            (x) => {
-              const y = fn([engine.number(x)])?.value;
-              return typeof y === 'number' ? y : Number.NaN;
-            },
-            target,
-            dir ? dir.re : 1
-          )
-        );
+        const fn = f.compile();
+        return engine.number(limit(fn, target, dir ? dir.re : 1));
       },
     },
   },

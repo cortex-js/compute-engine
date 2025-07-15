@@ -15,15 +15,12 @@ ce.latexDictionary = [
   },
 ];
 
-const originalSqrtDefinition = ce.lookupFunction('Sqrt')!;
-ce.defineFunction('Sqrt', {
-  complexity: originalSqrtDefinition.complexity,
-  threadable: originalSqrtDefinition.threadable,
-  signature: originalSqrtDefinition.signature,
-  sgn: originalSqrtDefinition.sgn,
-  evaluate: (input, options) => {
-    const result = originalSqrtDefinition.evaluate!(input, options);
-    return result?.isReal ? result : ce.NaN;
+const originalDef = ce.box('Ln').operatorDefinition!;
+ce.declare('Ln', {
+  ...originalDef,
+  evaluate: ([x], options) => {
+    if (x.is(0)) return ce.NaN;
+    return originalDef.evaluate!([x], options);
   },
 });
 

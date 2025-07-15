@@ -1,5 +1,5 @@
 import type { Expression } from '../../../math-json/types';
-import { isValidIdentifier } from '../../../math-json/identifiers';
+import { isValidSymbol } from '../../../math-json/symbols';
 import {
   foldAssociativeOperator,
   operator,
@@ -59,11 +59,11 @@ export type CommonEntry = {
 
   serialize?: SerializeHandler;
 
-  /** Note: not all kinds have a `latexTrigger` or `identifierTrigger`.
+  /** Note: not all kinds have a `latexTrigger` or `symbolTrigger`.
    * For example, matchfix operators use `openTrigger`/`closeTrigger`
    */
   latexTrigger?: LatexString;
-  identifierTrigger?: string;
+  symbolTrigger?: string;
 };
 
 export type IndexedSymbolEntry = CommonEntry & {
@@ -197,7 +197,7 @@ export type IndexedLatexDictionaryEntry =
   | IndexedEnvironmentEntry;
 
 export type IndexedLatexDictionary = {
-  // Mapping from  MathJSON identifiers to dictionary entry
+  // Mapping from  MathJSON symbols to dictionary entry
   ids: Map<string, IndexedLatexDictionaryEntry>;
 
   // Maximum number of tokens ahead of the current one that need to be
@@ -292,10 +292,10 @@ function addEntry(
 
   //
   // 3. Update the name index
-  //    This is an index of MathJSON identifiers to dictionary entries
+  //    This is an index of MathJSON symbols to dictionary entries
   //
   // Note: makeIndexedEntry() already checked that the name is a
-  // valid identifier
+  // valid symbol
   if (indexedEntry.name !== undefined) {
     // Names must be unique
     if (result.ids.has(indexedEntry.name)) {
@@ -304,7 +304,7 @@ function addEntry(
         message: [
           'invalid-dictionary-entry',
           indexedEntry.name,
-          'Duplicate definition. The name (MathJSON identifier) must be unique, but triggers can be shared by multiple definitions.',
+          'Duplicate definition. The name (MathJSON symbol) must be unique, but triggers can be shared by multiple definitions.',
         ],
       });
     }
@@ -331,7 +331,7 @@ export function indexLatexDictionary(
 /** Normalize a dictionary entry
  * - Ensure it has a kind property
  * - Ensure if it has a serialize property, it is a function, and it has a name
- *   property as a valid identifier
+ *   property as a valid symbol
  */
 function makeIndexedEntry(
   entry: LatexDictionaryEntry,
@@ -353,19 +353,19 @@ function makeIndexedEntry(
     else tokensTrigger = entry.latexTrigger as LatexToken[];
   }
   let idTrigger: string | null = null;
-  if ('identifierTrigger' in entry) {
-    idTrigger = entry.identifierTrigger as string;
+  if ('symbolTrigger' in entry) {
+    idTrigger = entry.symbolTrigger as string;
   }
 
   if (tokensTrigger !== null)
     result.latexTrigger = tokensToString(tokensTrigger);
-  if (idTrigger !== null) result.identifierTrigger = idTrigger;
+  if (idTrigger !== null) result.symbolTrigger = idTrigger;
 
   //
   // Make a default serialize handler if none is provided
   //
   if (entry.name) {
-    // Note: the validity of the identifier has been checked
+    // Note: the validity of the symbol has been checked
     // in isValidEntry()
     result.name = entry.name;
 
@@ -449,7 +449,7 @@ function makeSerializeHandler(
   if (kind === 'environment') {
     // @todo: should do a serializeTabular(). op(expr,1) is likely to be
     // a matrix (List of List).
-    const envName = entry['identifierTrigger'] ?? entry.name ?? 'unknown';
+    const envName = entry['symbolTrigger'] ?? entry.name ?? 'unknown';
     return (serializer, expr) =>
       joinLatex([
         `\\begin{${envName}}`,
@@ -481,7 +481,7 @@ function makeSerializeHandler(
   if (latex === undefined && latexTrigger) latex = tokensToString(latexTrigger);
 
   //
-  // We have a LaTeX version of the identifier
+  // We have a LaTeX version of the symbol
   //
   if (latex) {
     if (kind === 'postfix')
@@ -518,7 +518,7 @@ function makeSerializeHandler(
   }
 
   //
-  // We do not have a LaTeX version of the identifier. Use a string identifier
+  // We do not have a LaTeX version of the symbol. Use a string symbol
   //
   const id = idTrigger ?? entry.name ?? 'unknown';
   if (kind === 'postfix')
@@ -733,7 +733,7 @@ function isValidEntry(
   let subject =
     entry.name ??
     entry['latexTrigger'] ??
-    entry['identifierTrigger'] ??
+    entry['symbolTrigger'] ??
     entry['openTrigger'];
   if (!subject) {
     try {
@@ -750,7 +750,7 @@ function isValidEntry(
       message: [
         'invalid-dictionary-entry',
         subject,
-        `The 'trigger' property is deprecated. Use 'latexTrigger' or 'identifierTrigger' instead`,
+        `The 'trigger' property is deprecated. Use 'latexTrigger' or 'symbolTrigger' instead`,
       ],
     });
   }
@@ -790,28 +790,28 @@ function isValidEntry(
     return false;
   }
 
-  // Check that the identifierTrigger is a valid identifier is present
+  // Check that the symbolTrigger is a valid symbol is present
   if (
-    'identifierTrigger' in entry &&
+    'symbolTrigger' in entry &&
     (!('kind' in entry) || entry.kind !== 'environment')
   ) {
     if (
-      typeof entry.identifierTrigger !== 'string' ||
-      !isValidIdentifier(entry.identifierTrigger)
+      typeof entry.symbolTrigger !== 'string' ||
+      !isValidSymbol(entry.symbolTrigger)
     ) {
       onError({
         severity: 'warning',
         message: [
           'invalid-dictionary-entry',
           subject,
-          `The 'identifierTrigger' property must be a valid identifier`,
+          `The 'symbolTrigger' property must be a valid symbol`,
         ],
       });
     }
   }
 
   //
-  // Check that the name identifier is valid if present
+  // Check that the name symbol is valid if present
   //
   if ('name' in entry) {
     if (typeof entry.name !== 'string') {
@@ -824,13 +824,13 @@ function isValidEntry(
             `The 'name' property must be a string`,
           ],
         });
-    } else if (!isValidIdentifier(entry.name)) {
+    } else if (!isValidSymbol(entry.name)) {
       onError({
         severity: 'warning',
         message: [
           'invalid-dictionary-entry',
           entry.name,
-          `The 'name' property must be a valid identifier`,
+          `The 'name' property must be a valid symbol`,
         ],
       });
     }
@@ -840,13 +840,13 @@ function isValidEntry(
   // Checks specific to `matchfix`
   //
   if (isMatchfixEntry(entry)) {
-    if ('latexTrigger' in entry || 'identifierTrigger' in isPrefixEntry) {
+    if ('latexTrigger' in entry || 'symbolTrigger' in isPrefixEntry) {
       onError({
         severity: 'warning',
         message: [
           'invalid-dictionary-entry',
           subject,
-          `'matchfix' operators use a 'openTrigger' and 'closeTrigger' instead of a 'latexTrigger' or 'identifierTrigger'. `,
+          `'matchfix' operators use a 'openTrigger' and 'closeTrigger' instead of a 'latexTrigger' or 'symbolTrigger'. `,
         ],
       });
       return false;
@@ -932,7 +932,7 @@ function isValidEntry(
   }
 
   if (!isMatchfixEntry(entry) && !isEnvironmentEntry(entry)) {
-    if (!entry.latexTrigger && !entry.identifierTrigger && !entry.name) {
+    if (!entry.latexTrigger && !entry.symbolTrigger && !entry.name) {
       // A trigger OR a name is required (except for matchfix and environment)
       // The trigger maps LaTeX -> json
       // The name maps json -> LaTeX
@@ -941,7 +941,7 @@ function isValidEntry(
         message: [
           'invalid-dictionary-entry',
           subject,
-          `Expected a 'name', a 'latexTrigger' or a 'identifierTrigger'`,
+          `Expected a 'name', a 'latexTrigger' or a 'symbolTrigger'`,
         ],
       });
       return false;

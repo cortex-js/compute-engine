@@ -7,6 +7,7 @@ import type {
 import { permutations } from '../../common/utils';
 
 import { isWildcard, wildcardName } from './boxed-patterns';
+import { isOperatorDef } from './utils';
 
 function hasWildcards(expr: string | BoxedExpression): boolean {
   if (typeof expr === 'string') return expr.startsWith('_');
@@ -127,8 +128,7 @@ function matchOnce(
       //
       // 2. Both operator names match
       //
-      const def = ce.lookupFunction(operator);
-      result = def?.commutative
+      result = pattern.operatorDefinition!.commutative
         ? matchPermutation(expr, pattern, substitution, options)
         : matchArguments(expr, pattern.ops, substitution, options);
     }
@@ -370,9 +370,9 @@ function matchArguments(
           if (ops.length === 0) return null;
           value = ops.shift()!;
         } else {
-          const def = ce.lookupFunction(expr.operator);
+          const def = ce.lookupDefinition(expr.operator);
           const args = ops.splice(0, j - 1);
-          if (def?.associative) {
+          if (def && isOperatorDef(def) && def.operator.associative) {
             value = ce.function(expr.operator, args, { canonical: false });
           } else {
             value = ce.function('Sequence', args, { canonical: false });

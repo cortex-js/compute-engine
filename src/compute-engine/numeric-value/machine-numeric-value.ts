@@ -4,7 +4,7 @@ import type { Expression } from '../../math-json/types';
 import type { SmallInteger } from '../numerics/types';
 import { numberToString } from '../numerics/strings';
 import { numberToExpression } from '../numerics/expression';
-import { NumericType } from '../../common/type/types';
+import { NumericPrimitiveType } from '../../common/type/types';
 import { ExactNumericValue } from './exact-numeric-value';
 
 export class MachineNumericValue extends NumericValue {
@@ -12,7 +12,6 @@ export class MachineNumericValue extends NumericValue {
 
   // synonymous with 're'; the JavasScript number representation of the 'real' part.
   decimal: number;
-  im: number;
 
   bignum: BigNumFactory;
 
@@ -52,7 +51,7 @@ export class MachineNumericValue extends NumericValue {
     return new ExactNumericValue(value, (x) => this.clone(x), this.bignum);
   }
 
-  get type(): NumericType {
+  get type(): NumericPrimitiveType {
     if (this.isNaN) return 'number';
     if (this.isComplexInfinity) return 'complex';
 

@@ -1,16 +1,17 @@
+import { isSubtype } from '../../common/type/subtype';
+
 import type { BoxedExpression, ComputeEngine } from '../global-types';
+import { ExactNumericValue } from '../numeric-value/exact-numeric-value';
+import { SMALL_INTEGER } from '../numerics/numeric';
+import { isOne } from '../numerics/rationals';
 import { bigint } from '../numerics/bigint';
 
 import { asRational, asSmallInteger } from './numerics';
 import { Product } from './product';
-import { isSubtype } from '../../common/type/subtype';
-import { ExactNumericValue } from '../numeric-value/exact-numeric-value';
-import { SMALL_INTEGER } from '../numerics/numeric';
-import { isOne } from '../numerics/rationals';
-import { NumericValue } from '../types';
 import { expandProducts } from './expand';
 import { negateProduct } from './negate';
 import { order } from './order';
+import { NumericValue } from '../numeric-value/types';
 
 /**
  * Canonical form of 'Divide' (and 'Rational')
@@ -262,7 +263,7 @@ export function div(
 
 /**
  * The canonical form of `Multiply`:
- * - removes `1` anb `-1`
+ * - removes `1` and `-1`
  * - simplifies the signs:
  *    - i.e. `-y \times -x` -> `x \times y`
  *    - `2 \times -x` -> `-2 \times x`

@@ -2,11 +2,153 @@ import { isSubtype } from '../common/type/subtype';
 import { functionResult } from '../common/type/utils';
 import { BoxedType } from '../common/type/boxed-type';
 
-import { AssumeResult, BoxedExpression, ComputeEngine } from './global-types';
+import {
+  AssumeResult,
+  Assumption,
+  BoxedExpression,
+  ComputeEngine,
+} from './global-types';
 
 import { findUnivariateRoots } from './boxed-expression/solve';
-import { isInequality, domainToType } from './boxed-expression/utils';
+import {
+  domainToType,
+  isValueDef,
+  isOperatorDef,
+} from './boxed-expression/utils';
+import { MathJsonSymbol } from '../math-json';
+import { isInequalityOperator } from './latex-syntax/utils';
 
+/**
+ * An assumption is a predicate that is added to the current context.
+ *
+ * The predicate can take the form of:
+ * - `x = 5` implies that `x` is a number
+ * - `x ∈ ℕ`
+ * - `x > 3`  implies that `x ∈ ℕ`
+ * - `x ∈ {0, 2, 5}`
+ * - `x ≠ 0`
+ *
+ * In general, the predicate is about the value and the type of a symbol.
+ *
+ */
+class _Assumption implements Assumption {
+  _type: BoxedType | undefined;
+
+  _excludedValue: BoxedExpression | undefined;
+  _includedValue: BoxedExpression | undefined;
+
+  _minValue: BoxedExpression | undefined;
+  _maxValue: BoxedExpression | undefined;
+  _minOpen: boolean;
+  _maxOpen: boolean;
+
+  constructor(x: string, predicate: BoxedExpression) {
+    this._type = undefined;
+    this._excludedValue = undefined;
+    this._includedValue = undefined;
+    this._minValue = undefined;
+    this._maxValue = undefined;
+    this._minOpen = false;
+    this._maxOpen = false;
+  }
+
+  toExpression(ce: ComputeEngine, x: MathJsonSymbol): BoxedExpression {
+    return ce.Nothing;
+  }
+
+  // > 0
+  get isPositive() {
+    if (this._minValue === undefined) return undefined;
+    if (this._minValue.is(0)) return !this._minOpen;
+    return this._minValue.isPositive;
+  }
+
+  // Same as <0
+  get isNegative() {
+    if (this._maxValue === undefined) return undefined;
+    if (this._maxValue.is(0)) return this._maxOpen;
+    return this._maxValue.isNegative;
+  }
+
+  // The value of this expression is >= 0
+  get isNonNegative() {
+    if (this._minValue === undefined) return undefined;
+    if (this._minValue.is(0)) return this._minOpen;
+    return this._minValue.isNonNegative;
+  }
+  // >=0
+  get isNonPositive() {
+    if (this._maxValue === undefined) return undefined;
+    if (this._maxValue.is(0)) return this._maxOpen;
+    return this._maxValue.isNonPositive;
+  }
+  get isZero() {
+    return undefined;
+  }
+
+  get isNumber() {
+    if (this._type === undefined) return undefined;
+    return this._type.matches('number');
+  }
+  get isInteger() {
+    if (this._type === undefined) return undefined;
+    return this._type.matches('integer');
+  }
+  get isRational() {
+    if (this._type === undefined) return undefined;
+    return this._type.matches('rational');
+  }
+  get isReal() {
+    if (this._type === undefined) return undefined;
+    return this._type.matches('real');
+  }
+  get isComplex() {
+    if (this._type === undefined) return undefined;
+    return this._type.matches('complex');
+  }
+  get isImaginary() {
+    if (this._type === undefined) return undefined;
+    return this._type.matches('imaginary');
+  }
+
+  get isFinite() {
+    return undefined;
+  }
+  get isInfinite() {
+    return undefined;
+  }
+  get isNaN() {
+    return undefined;
+  }
+
+  matches(type: BoxedType): boolean | undefined {
+    if (this._type === undefined) return undefined;
+    if (typeof type === 'string') return this._type.matches(type);
+    return this._type.matches(type);
+  }
+
+  isGreater(other: BoxedExpression): boolean | undefined {
+    const result = this.isLess(other);
+    if (result === undefined) return undefined;
+    return !result;
+  }
+  isLess(other: BoxedExpression): boolean | undefined {
+    return undefined;
+  }
+  isGreaterEqual(other: BoxedExpression): boolean | undefined {
+    const result = this.isLessEqual(other);
+    if (result === undefined) return undefined;
+    return !result;
+  }
+  isLessEqual(other: BoxedExpression): boolean | undefined {
+    const result = this.isLess(other);
+    if (result === undefined) return this.isEqual(other);
+    return result;
+  }
+  isEqual(other: BoxedExpression): boolean | undefined {
+    return undefined;
+  }
+}
 /**
  * Add an assumption, in the form of a predicate, for example:
  *
@@ -15,7 +157,7 @@ import { isInequality, domainToType } from './boxed-expression/utils';
  * - `x > 3`
  * - `x + y = 5`
  *
- * Assumptions that represent a symbol definition (equality to an expression,
+ * Assumptions that represent a value definition (equality to an expression,
  * membership to a type, >0, <=0, etc...) are stored directly in the current
  * scope's symbols dictionary, and an entry for the symbol is created if
  * necessary.
@@ -35,7 +177,8 @@ import { isInequality, domainToType } from './boxed-expression/utils';
 export function assume(proposition: BoxedExpression): AssumeResult {
   if (proposition.operator === 'Element') return assumeElement(proposition);
   if (proposition.operator === 'Equal') return assumeEquality(proposition);
-  if (isInequality(proposition)) return assumeInequality(proposition);
+  if (isInequalityOperator(proposition.operator))
+    return assumeInequality(proposition);
 
   throw new Error(
     'Unsupported assumption. Use `Element`, `Equal` or an inequality'
@@ -83,16 +226,16 @@ function assumeEquality(proposition: BoxedExpression): AssumeResult {
   if (lhs && !hasValue(ce, lhs) && !proposition.op2.has(lhs)) {
     const val = proposition.op2.evaluate();
     if (!val.isValid) return 'not-a-predicate';
-    const def = ce.lookupSymbol(lhs);
-    if (!def) {
-      ce.defineSymbol(lhs, { value: val });
+    const def = ce.lookupDefinition(lhs);
+    if (!def || !isValueDef(def)) {
+      ce.declare(lhs, { value: val });
       return 'ok';
     }
-    if (def.type && !val.type.matches(def.type))
-      if (!def.inferredType) return 'contradiction';
+    if (def.value.type && !val.type.matches(def.value.type))
+      if (!def.value.inferredType) return 'contradiction';
 
-    def.value = val;
-    if (def.inferredType) def.type = val.type;
+    // def.symbol.value = val;
+    // if (def.symbol.inferredType) def.symbol.type = val.type;
     return 'ok';
   }
 
@@ -101,28 +244,28 @@ function assumeEquality(proposition: BoxedExpression): AssumeResult {
     const lhs = unknowns[0];
     const sols = findUnivariateRoots(proposition, lhs);
     if (sols.length === 0) {
-      ce.assumptions.set(
+      ce.context.assumptions.set(
         ce.function('Equal', [proposition.op1.sub(proposition.op2), 0]),
         true
       );
     }
 
     const val = sols.length === 1 ? sols[0] : ce.function('List', sols);
-    const def = ce.lookupSymbol(lhs);
-    if (!def) {
-      ce.defineSymbol(lhs, { value: val });
+    const def = ce.lookupDefinition(lhs);
+    if (!def || !isValueDef(def)) {
+      ce.declare(lhs, { value: val });
       return 'ok';
     }
     if (
-      def.type &&
+      def.value.type &&
       !sols.every((sol) => !sol.type || val.type.matches(sol.type))
     )
       return 'contradiction';
-    def.value = val;
+    // def.symbol.value = val;
     return 'ok';
   }
 
-  ce.assumptions.set(proposition, true);
+  ce.context.assumptions.set(proposition, true);
   return 'ok';
 }
 
@@ -143,40 +286,40 @@ function assumeInequality(proposition: BoxedExpression): AssumeResult {
 
   const ce = proposition.engine;
   // Case 1
-  if (proposition.op1!.symbol && !hasDef(ce, proposition.op1!.symbol)) {
-    if (proposition.op2.is(0)) {
-      if (proposition.operator === 'Less') {
-        // x < 0
-        ce.defineSymbol(proposition.op1.symbol, {
-          type: 'real',
-          flags: { sgn: 'negative' },
-        });
-      } else if (proposition.operator === 'LessEqual') {
-        // x <= 0
-        ce.defineSymbol(proposition.op1.symbol, {
-          type: 'real',
-          flags: { sgn: 'non-positive' },
-        });
-      } else if (proposition.operator === 'Greater') {
-        // x > 0
-        ce.defineSymbol(proposition.op1.symbol, {
-          type: 'real',
-          flags: { sgn: 'positive' },
-        });
-      } else if (proposition.operator === 'GreaterEqual') {
-        // x >= 0
-        ce.defineSymbol(proposition.op1.symbol, {
-          type: 'real',
-          flags: { sgn: 'non-negative' },
-        });
-      }
-    } else {
-      ce.defineSymbol(proposition.op1.symbol, { type: 'real' });
-      ce.assumptions.set(proposition, true);
-    }
-    return 'ok';
-  }
-  // @todo: handle if proposition.op1 *has* a def (and no value)
+  // if (proposition.op1!.symbol && !hasDef(ce, proposition.op1!.symbol)) {
+  //   if (proposition.op2.is(0)) {
+  //     if (proposition.operator === 'Less') {
+  //       // x < 0
+  //       ce.defineSymbol(proposition.op1.symbol, {
+  //         type: 'real',
+  //         flags: { sgn: 'negative' },
+  //       });
+  //     } else if (proposition.operator === 'LessEqual') {
+  //       // x <= 0
+  //       ce.defineSymbol(proposition.op1.symbol, {
+  //         type: 'real',
+  //         flags: { sgn: 'non-positive' },
+  //       });
+  //     } else if (proposition.operator === 'Greater') {
+  //       // x > 0
+  //       ce.defineSymbol(proposition.op1.symbol, {
+  //         type: 'real',
+  //         flags: { sgn: 'positive' },
+  //       });
+  //     } else if (proposition.operator === 'GreaterEqual') {
+  //       // x >= 0
+  //       ce.defineSymbol(proposition.op1.symbol, {
+  //         type: 'real',
+  //         flags: { sgn: 'non-negative' },
+  //       });
+  //     }
+  //   } else {
+  //     ce.defineSymbol(proposition.op1.symbol, { type: 'real' });
+  //     ce.context.assumptions.set(proposition, true);
+  //   }
+  //   return 'ok';
+  // }
+  // // @todo: handle if proposition.op1 *has* a def (and no value)
 
   // Normalize to Less, LessEqual
   let op = '';
@@ -213,13 +356,13 @@ function assumeInequality(proposition: BoxedExpression): AssumeResult {
 
   // Case 3
   if (unknowns.length === 1) {
-    if (!ce.lookupSymbol(unknowns[0]))
-      ce.defineSymbol(unknowns[0], { type: 'real' });
+    if (!ce.lookupDefinition(unknowns[0]))
+      ce.declare(unknowns[0], { type: 'real' });
   }
 
   // Case 3, 4
   console.assert(result.operator === 'Less' || result.operator === 'LessEqual');
-  ce.assumptions.set(result, true);
+  ce.context.assumptions.set(result, true);
   return 'ok';
 }
 
@@ -263,18 +406,18 @@ function assumeElement(proposition: BoxedExpression): AssumeResult {
     if (!domain.isValid) return 'not-a-predicate';
     const type = domainToType(domain);
 
-    if (!ce.context?.ids?.has(proposition.op1.symbol))
+    if (!ce.context?.lexicalScope?.bindings.has(proposition.op1.symbol))
       ce.declare(proposition.op1.symbol, domainToType(domain));
 
-    const def = ce.lookupSymbol(proposition.op1.symbol);
-    if (def) {
-      if (def.type && !isSubtype(type, def.type.type)) return 'contradiction';
-      def.type = new BoxedType(type);
+    const def = ce.lookupDefinition(proposition.op1.symbol);
+    if (isValueDef(def)) {
+      if (def.value.type && !isSubtype(type, def.value.type.type))
+        return 'contradiction';
+      def.value.type = new BoxedType(type, ce._typeResolver);
       return 'ok';
     }
-    const fdef = ce.lookupFunction(proposition.op1.symbol);
-    if (fdef) {
-      if (!isSubtype(type, functionResult(fdef.signature.type)!))
+    if (isOperatorDef(def)) {
+      if (!isSubtype(type, functionResult(def.operator.signature.type)!))
         return 'contradiction';
 
       return 'ok';
@@ -284,7 +427,7 @@ function assumeElement(proposition: BoxedExpression): AssumeResult {
 
   // Case 3
   if (undefs.length > 0) {
-    ce.assumptions.set(proposition, true);
+    ce.context.assumptions.set(proposition, true);
     return 'ok';
   }
 
@@ -296,7 +439,7 @@ function assumeElement(proposition: BoxedExpression): AssumeResult {
 }
 
 function hasDef(ce: ComputeEngine, s: string): boolean {
-  return (ce.lookupSymbol(s) ?? ce.lookupFunction(s)) !== undefined;
+  return ce.lookupDefinition(s) !== undefined;
 }
 
 function undefinedIdentifiers(expr: BoxedExpression): string[] {
@@ -304,6 +447,11 @@ function undefinedIdentifiers(expr: BoxedExpression): string[] {
 }
 
 function hasValue(ce: ComputeEngine, s: string): boolean {
-  if (ce.lookupFunction(s)) return false;
-  return ce.lookupSymbol(s)?.value !== undefined;
+  const def = ce.lookupDefinition(s);
+  if (!def) return false;
+
+  if (isValueDef(def) && def.value.isConstant) return true;
+
+  if (ce._getSymbolValue(s) !== undefined) return true;
+  return false;
 }

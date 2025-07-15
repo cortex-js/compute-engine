@@ -49,7 +49,7 @@ const BUILD_OPTIONS = {
   sourcemap: false,
   sourceRoot: '../src',
   sourcesContent: false,
-  target: ['es2020'],
+  target: ['es2022'],
   resolveExtensions: ['.ts', '.js'],
 };
 
@@ -66,7 +66,7 @@ esbuild.build({
 esbuild.build({
   ...BUILD_OPTIONS,
   entryPoints: ['./src/compute-engine.ts'],
-  outfile: './dist/compute-engine.cjs',
+  outfile: './dist/compute-engine.umd.js',
   format: 'iife',
   ...COMPUTE_ENGINE_UMD_OPTIONS,
   globalName: 'ComputeEngine',
@@ -82,7 +82,7 @@ esbuild.build({
 esbuild.build({
   ...BUILD_OPTIONS,
   entryPoints: ['./src/math-json.ts'],
-  outfile: './dist/math-json.cjs',
+  outfile: './dist/math-json.umd.js',
   format: 'iife',
   ...MATH_JSON_UMD_OPTIONS,
   globalName: 'MathJson',
@@ -107,7 +107,7 @@ esbuild.build({
   pure: ['console.assert', 'console.log'],
   minify: true,
   entryPoints: ['./src/compute-engine.ts'],
-  outfile: './dist/compute-engine.min.cjs',
+  outfile: './dist/compute-engine.min.umd.js',
   format: 'iife',
   ...COMPUTE_ENGINE_UMD_OPTIONS,
   globalName: 'ComputeEngine',
@@ -128,7 +128,7 @@ esbuild.build({
   pure: ['console.assert', 'console.log'],
   minify: true,
   entryPoints: ['./src/math-json.ts'],
-  outfile: './dist/math-json.min.cjs',
+  outfile: './dist/math-json.min.umd.js',
   format: 'iife',
   ...MATH_JSON_UMD_OPTIONS,
   globalName: 'MathJson',

@@ -3,15 +3,15 @@ import { isSubtype } from '../../common/type/subtype';
 import { ListType } from '../../common/type/types';
 import { isBoxedTensor } from '../boxed-expression/boxed-tensor';
 import { checkArity } from '../boxed-expression/validate';
-import { each, isFiniteIndexableCollection } from '../collection-utils';
+import { isFiniteIndexedCollection } from '../collection-utils';
 import {
   BoxedExpression,
   ComputeEngine,
-  IdentifierDefinition,
-  IdentifierDefinitions,
+  SymbolDefinitions,
+  Sign,
 } from '../global-types';
 
-export const LINEAR_ALGEBRA_LIBRARY: IdentifierDefinitions[] = [
+export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
   {
     Matrix: {
       complexity: 9000,
@@ -26,8 +26,12 @@ export const LINEAR_ALGEBRA_LIBRARY: IdentifierDefinitions[] = [
     Vector: {
       complexity: 9000,
       lazy: true,
-      signature: '...number -> vector',
-      type: (elements) => parseType(`vector<${elements.length}>`),
+      signature: '(number+) -> vector',
+      type: (elements) =>
+        parseType(
+          `vector<${elements.length}>`,
+          elements[0].engine._typeResolver
+        ),
       canonical: (ops, { engine: ce }) => {
         return ce._fn('Matrix', [
           ce.function(
@@ -44,13 +48,7 @@ export const LINEAR_ALGEBRA_LIBRARY: IdentifierDefinitions[] = [
     Shape: {
       complexity: 8200,
       signature: '(value) -> tuple',
-      evaluate: (ops, { engine: ce }) => {
-        const op1 = ops[0];
-
-        if (isBoxedTensor(op1)) return ce.tuple(...op1.tensor.shape);
-
-        return ce.tuple();
-      },
+      evaluate: ([xs], { engine: ce }) => ce.tuple(...xs.shape),
     },
 
     Rank: {
@@ -58,15 +56,9 @@ export const LINEAR_ALGEBRA_LIBRARY: IdentifierDefinitions[] = [
         'The length of the shape of the expression. Note this is not the matrix rank (the number of linearly independent rows or columns in the matrix)',
       complexity: 8200,
       signature: '(value) -> number',
-      sgn: () => 'positive',
-      evaluate: (ops, { engine: ce }) => {
-        const op1 = ops[0];
-
-        if (isBoxedTensor(op1)) return ce.number(op1.tensor.rank);
-
-        return ce.Zero;
-      },
-    } as IdentifierDefinition,
+      sgn: (): Sign => 'positive',
+      evaluate: ([xs], { engine: ce }) => ce.number(xs.rank),
+    },
 
     // Corresponds to ArrayReshape in Mathematica
     // and dyadic Shape `⍴` in APL
@@ -83,15 +75,15 @@ export const LINEAR_ALGEBRA_LIBRARY: IdentifierDefinitions[] = [
       },
       evaluate: (ops, { engine: ce }): BoxedExpression | undefined => {
         let op1 = ops[0];
-        const shape = ops[1].ops?.map((op) => op.value as number) ?? [];
+        const shape = ops[1].ops?.map((op) => op.re) ?? [];
 
         // If a finite indexable collection, convert to a list
         // -> BoxedTensor
-        if (!isBoxedTensor(op1) && isFiniteIndexableCollection(op1))
-          op1 = ce.function('List', [...each(op1)]);
+        if (!isBoxedTensor(op1) && isFiniteIndexedCollection(op1))
+          op1 = ce.function('List', [...op1.each()]);
 
         if (isBoxedTensor(op1)) {
-          if (shape.join('x') === op1.tensor.shape.join('x')) return op1;
+          if (shape.join('x') === op1.shape.join('x')) return op1;
           return op1.tensor.reshape(...shape).expression;
         }
 
@@ -113,8 +105,8 @@ export const LINEAR_ALGEBRA_LIBRARY: IdentifierDefinitions[] = [
             ...op1.tensor.flatten().map((x) => ce.box(x)),
           ]);
 
-        if (isFiniteIndexableCollection(op1))
-          return ce.function('List', [...each(op1)]);
+        if (isFiniteIndexedCollection(op1))
+          return ce.function('List', [...op1.each()]);
 
         return undefined;
       },
@@ -130,13 +122,13 @@ export const LINEAR_ALGEBRA_LIBRARY: IdentifierDefinitions[] = [
         let axis1 = 1;
         let axis2 = 2;
         if (ops.length === 3) {
-          axis1 = ops[1].value as number;
-          axis2 = ops[2].value as number;
+          axis1 = ops[1].re;
+          axis2 = ops[2].re;
           console.assert(axis1 > 0 && axis2 > 0);
         }
         if (axis1 === axis2) return undefined;
-        if (!isBoxedTensor(op1) && isFiniteIndexableCollection(op1))
-          op1 = ce.function('List', [...each(op1)]);
+        if (!isBoxedTensor(op1) && isFiniteIndexedCollection(op1))
+          op1 = ce.function('List', [...op1.each()]);
         if (isBoxedTensor(op1)) {
           if (axis1 === 1 && axis2 === 2)
             return op1.tensor.transpose()?.expression;
@@ -154,8 +146,8 @@ export const LINEAR_ALGEBRA_LIBRARY: IdentifierDefinitions[] = [
         let axis1 = 1;
         let axis2 = 2;
         if (ops.length === 3) {
-          axis1 = ops[1].value as number;
-          axis2 = ops[2].value as number;
+          axis1 = ops[1].re;
+          axis2 = ops[2].re;
           console.assert(axis1 > 0 && axis2 > 0);
         }
         if (axis1 === axis2) return undefined;

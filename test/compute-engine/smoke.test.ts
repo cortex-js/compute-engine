@@ -113,65 +113,84 @@ describe('PARSING numbers', () => {
         [
           "Function",
           [
-            "Add",
+            "Block",
             [
-              "Sum",
+              "Add",
               [
-                "Floor",
+                "Sum",
                 [
-                  "Divide",
-                  1,
+                  "Floor",
                   [
-                    "Add",
+                    "Divide",
+                    1,
                     [
-                      "Power",
-                      0,
+                      "Add",
                       [
-                        "Subtract",
-                        "n",
+                        "Power",
+                        0,
                         [
-                          "Sum",
+                          "Add",
+                          "n",
                           [
-                            "Product",
+                            "Negate",
                             [
-                              "Subtract",
-                              1,
+                              "Sum",
                               [
-                                "Power",
-                                0,
+                                "Product",
                                 [
-                                  "Abs",
+                                  "Subtract",
+                                  1,
                                   [
-                                    "Subtract",
-                                    ["Floor", ["Divide", "v_2", "v_3"]],
-                                    ["Divide", "v_2", "v_3"]
+                                    "Power",
+                                    0,
+                                    [
+                                      "Abs",
+                                      [
+                                        "Subtract",
+                                        ["Floor", ["Divide", "v_2", "v_3"]],
+                                        ["Divide", "v_2", "v_3"]
+                                      ]
+                                    ]
+                                  ]
+                                ],
+                                [
+                                  "Limits",
+                                  "Nothing",
+                                  2,
+                                  ["Floor", ["Sqrt", "v_2"]]
+                                ]
+                              ],
+                              [
+                                "Limits",
+                                "Nothing",
+                                2,
+                                [
+                                  "Error",
+                                  [
+                                    "ErrorCode",
+                                    "incompatible-type",
+                                    "'number'",
+                                    "'unknown'"
                                   ]
                                 ]
                               ]
-                            ],
-                            [
-                              "Triple",
-                              "Nothing",
-                              2,
-                              ["Floor", ["Sqrt", "v_2"]]
                             ]
-                          ],
-                          ["Triple", "Nothing", 2, "v_1"]
+                          ]
                         ]
-                      ]
-                    ],
-                    1
+                      ],
+                      1
+                    ]
                   ]
+                ],
+                [
+                  "Limits",
+                  "Nothing",
+                  2,
+                  ["Floor", ["Multiply", 1.5, "n", ["Ln", "n"]]]
                 ]
               ],
-              [
-                "Triple",
-                "Nothing",
-                2,
-                ["Floor", ["Multiply", 1.5, "n", ["Ln", "n"]]]
-              ]
-            ],
-            2
+              2
+            ]
           ],
           "n"
         ]
@@ -180,7 +199,7 @@ describe('PARSING numbers', () => {
 });
 
 describe('PARSING symbols', () => {
-  test('x', () => expect(ce.parse('x')).toMatchInlineSnapshot('x'));
+  test('x', () => expect(ce.parse('x')).toMatchInlineSnapshot(`x`));
   test('\\pi', () => expect(ce.parse('\\pi')).toMatchInlineSnapshot('Pi'));
   test('3\\pi', () => {
     expect(ce.parse('3\\pi')).toMatchInlineSnapshot(`["Multiply", 3, "Pi"]`);

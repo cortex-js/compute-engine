@@ -1,12 +1,13 @@
-import { isRelationalOperator } from '../boxed-expression/utils';
-import { flatten } from '../boxed-expression/flatten';
-import { eq } from '../boxed-expression/compare';
 import type {
   BoxedExpression,
-  FunctionDefinition,
-  IdentifierDefinitions,
+  OperatorDefinition,
+  SymbolDefinitions,
   ComputeEngine,
 } from '../global-types';
+
+import { isRelationalOperator } from '../latex-syntax/utils';
+import { flatten } from '../boxed-expression/flatten';
+import { eq } from '../boxed-expression/compare';
 
 //   // eq, lt, leq, gt, geq, neq, approx
 //   //     shortLogicalImplies: 52, // ➔
@@ -18,7 +19,7 @@ import type {
 //   // greater-than: Q47035128  243
 //   // less-than: Q52834024 245
 
-export const RELOP_LIBRARY: IdentifierDefinitions = {
+export const RELOP_LIBRARY: SymbolDefinitions = {
   Congruent: {
     description: 'Indicate that two expressions are congruent modulo a number',
     complexity: 11000,
@@ -77,7 +78,7 @@ export const RELOP_LIBRARY: IdentifierDefinitions = {
       }
       return ce.True;
     },
-  } as FunctionDefinition,
+  } as OperatorDefinition,
 
   NotEqual: {
     wikidata: 'Q28113351',
@@ -111,11 +112,11 @@ export const RELOP_LIBRARY: IdentifierDefinitions = {
       }
       return ce.True;
     },
-  } as FunctionDefinition,
+  } as OperatorDefinition,
 
   Less: {
     complexity: 11000,
-    signature: '(any, any, ...any) -> boolean',
+    signature: '(any, any+) -> boolean',
 
     canonical: (ops, { engine: ce }) => canonicalRelational(ce, 'Less', ops),
 
@@ -142,32 +143,32 @@ export const RELOP_LIBRARY: IdentifierDefinitions = {
       }
       return ce.True;
     },
-  } as FunctionDefinition,
+  } as OperatorDefinition,
 
   NotLess: {
     complexity: 11000,
-    signature: '(any, any, ...any) -> boolean',
+    signature: '(any, any+) -> boolean',
     canonical: (ops, { engine: ce }) =>
       ce._fn('Not', [canonicalRelational(ce, 'Less', ops)]),
   },
 
   Greater: {
     complexity: 11000,
-    signature: '(any, any, ...any) -> boolean',
+    signature: '(any, any+) -> boolean',
     canonical: (ops, { engine: ce }) =>
       canonicalRelational(ce, 'Less', [...ops].reverse()),
   },
 
   NotGreater: {
     complexity: 11000,
-    signature: '(any, any, ...any) -> boolean',
+    signature: '(any, any+) -> boolean',
     canonical: (args, { engine: ce }) =>
       ce._fn('Not', [ce._fn('Greater', args)]),
   },
 
   LessEqual: {
     complexity: 11000,
-    signature: '(any, any, ...any) -> boolean',
+    signature: '(any, any+) -> boolean',
 
     canonical: (ops, { engine: ce }) =>
       canonicalRelational(ce, 'LessEqual', ops),
@@ -195,18 +196,18 @@ export const RELOP_LIBRARY: IdentifierDefinitions = {
       }
       return ce.True;
     },
-  } as FunctionDefinition,
+  } as OperatorDefinition,
 
   NotLessNotEqual: {
     complexity: 11000,
-    signature: '(any, any, ...any) -> boolean',
+    signature: '(any, any+) -> boolean',
     canonical: (ops, { engine: ce }) =>
       ce._fn('Not', [canonicalRelational(ce, 'LessEqual', ops)]),
   },
 
   GreaterEqual: {
     complexity: 11000,
-    signature: '(any, any, ...any) -> boolean',
+    signature: '(any, any+) -> boolean',
 
     canonical: (args, { engine: ce }) =>
       canonicalRelational(ce, 'LessEqual', [...args].reverse()),
@@ -214,14 +215,14 @@ export const RELOP_LIBRARY: IdentifierDefinitions = {
 
   NotGreaterNotEqual: {
     complexity: 11000,
-    signature: '(any, any, ...any) -> boolean',
+    signature: '(any, any+) -> boolean',
     canonical: (args, { engine: ce }) =>
       ce._fn('Not', [canonicalRelational(ce, 'GreaterEqual', args)]),
   },
 
   TildeFullEqual: {
     description: 'Indicate isomorphism, congruence and homotopic equivalence',
-    signature: '(any, any, ...any) -> boolean',
+    signature: '(any, any+) -> boolean',
 
     canonical: (args, { engine: ce }) =>
       canonicalRelational(ce, 'TildeFullEqual', args),
@@ -230,7 +231,7 @@ export const RELOP_LIBRARY: IdentifierDefinitions = {
 
   NotTildeFullEqual: {
     complexity: 11100,
-    signature: '(any, any, ...any) -> boolean',
+    signature: '(any, any+) -> boolean',
 
     canonical: (args, { engine: ce }) =>
       ce._fn('Not', [canonicalRelational(ce, 'TildeFullEqual', args)]),
@@ -239,7 +240,7 @@ export const RELOP_LIBRARY: IdentifierDefinitions = {
   TildeEqual: {
     description: 'Approximately or asymptotically equal',
     complexity: 11000,
-    signature: '(any, any, ...any) -> boolean',
+    signature: '(any, any+) -> boolean',
     canonical: (args, { engine: ce }) =>
       canonicalRelational(ce, 'TildeEqual', args),
     // @todo evaluate: (ce, ...args: BoxedExpression[]) => SemiBoxedExpression {}
@@ -247,7 +248,7 @@ export const RELOP_LIBRARY: IdentifierDefinitions = {
 
   NotTildeEqual: {
     complexity: 11100,
-    signature: '(any, any, ...any) -> boolean',
+    signature: '(any, any+) -> boolean',
 
     canonical: (args, { engine: ce }) =>
       ce._fn('Not', [canonicalRelational(ce, 'TildeEqual', args)]),
@@ -255,7 +256,7 @@ export const RELOP_LIBRARY: IdentifierDefinitions = {
 
   Approx: {
     complexity: 11100,
-    signature: '(any, any, ...any) -> boolean',
+    signature: '(any, any+) -> boolean',
     canonical: (args, { engine: ce }) =>
       canonicalRelational(ce, 'Approx', args),
     // @todo evaluate: (ce, ...args: BoxedExpression[]) => SemiBoxedExpression {}
@@ -263,14 +264,14 @@ export const RELOP_LIBRARY: IdentifierDefinitions = {
 
   NotApprox: {
     complexity: 11100,
-    signature: '(any, any, ...any) -> boolean',
+    signature: '(any, any+) -> boolean',
     canonical: (args, { engine: ce }) =>
       ce._fn('Not', [canonicalRelational(ce, 'Approx', args)]),
   },
 
   ApproxEqual: {
     complexity: 11100,
-    signature: '(any, any, ...any) -> boolean',
+    signature: '(any, any+) -> boolean',
     canonical: (args, { engine: ce }) =>
       canonicalRelational(ce, 'ApproxEqual', args),
     // @todo evaluate: (ce, ...args: BoxedExpression[]) => SemiBoxedExpression {}
@@ -284,7 +285,7 @@ export const RELOP_LIBRARY: IdentifierDefinitions = {
 
   ApproxNotEqual: {
     complexity: 11100,
-    signature: '(any, any, ...any) -> boolean',
+    signature: '(any, any+) -> boolean',
     canonical: (args, { engine: ce }) =>
       canonicalRelational(ce, 'ApproxNotEqual', args),
     // @todo evaluate: (ce, ...args: BoxedExpression[]) => SemiBoxedExpression {}
@@ -292,14 +293,14 @@ export const RELOP_LIBRARY: IdentifierDefinitions = {
 
   NotApproxNotEqual: {
     complexity: 11100,
-    signature: '(any, any, ...any) -> boolean',
+    signature: '(any, any+) -> boolean',
     canonical: (args, { engine }) =>
       engine._fn('Not', [canonicalRelational(engine, 'ApproxNotEqual', args)]),
   },
 
   Precedes: {
     complexity: 11100,
-    signature: '(any, any, ...any) -> boolean',
+    signature: '(any, any+) -> boolean',
     canonical: (args, { engine: ce }) =>
       canonicalRelational(ce, 'Precedes', args),
     // @todo evaluate: (ce, ...args: BoxedExpression[]) => SemiBoxedExpression {}
@@ -307,13 +308,13 @@ export const RELOP_LIBRARY: IdentifierDefinitions = {
 
   NotPrecedes: {
     complexity: 11100,
-    signature: '(any, any, ...any) -> boolean',
+    signature: '(any, any+) -> boolean',
     canonical: (args, { engine }) =>
       engine._fn('Not', [canonicalRelational(engine, 'Precedes', args)]),
   },
 
   Succeeds: {
-    signature: '(any, any, ...any) -> boolean',
+    signature: '(any, any+) -> boolean',
     canonical: (args, { engine }) =>
       canonicalRelational(engine, 'Succeeds', args),
     // @todo evaluate: (ce, ...args: BoxedExpression[]) => SemiBoxedExpression {}
@@ -321,7 +322,7 @@ export const RELOP_LIBRARY: IdentifierDefinitions = {
 
   NotSucceeds: {
     complexity: 11100,
-    signature: '(any, any, ...any) -> boolean',
+    signature: '(any, any+) -> boolean',
     canonical: (args, { engine }) =>
       engine._fn('Not', [canonicalRelational(engine, 'Succeeds', args)]),
   },
@@ -338,7 +339,7 @@ function canonicalRelational(
   const newOps: BoxedExpression[] = [];
   // Separate any nested relational operators
   for (const op of ops) {
-    if (isRelationalOperator(op)) {
+    if (isRelationalOperator(op.operator)) {
       nestedRelational.push(op);
       newOps.push(op.ops![op.ops!.length - 1]);
     } else newOps.push(op);

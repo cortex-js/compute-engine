@@ -1,11 +1,11 @@
-import { Expression, MathJsonIdentifier } from '../../math-json';
+import { Expression, MathJsonSymbol } from '../../math-json';
 
 function oneOf<T = Expression>(xs: T[]): T {
   return xs[Math.floor(Math.random() * xs.length)];
 }
 
 function randomExpressionWithHead(
-  operator: MathJsonIdentifier,
+  operator: MathJsonSymbol,
   level: number
 ): Expression {
   if (operator === 'Add' || operator === 'Multiply') {

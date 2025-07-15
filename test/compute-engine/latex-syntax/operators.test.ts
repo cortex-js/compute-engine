@@ -203,7 +203,10 @@ describe('OPERATOR prefix', () => {
       canonical = ["Complex", 0, -1]
     `));
   test('-\\infty // Negate', () =>
-    expect(check('-\\infty')).toMatchInlineSnapshot(`NegativeInfinity`));
+    expect(check('-\\infty')).toMatchInlineSnapshot(`
+      box       = ["Negate", "PositiveInfinity"]
+      canonical = NegativeInfinity
+    `));
 
   test('+1 // Infix plus', () =>
     expect(check('+1')).toMatchInlineSnapshot(`1`));
@@ -221,14 +224,14 @@ describe('OPERATOR prefix', () => {
 describe('OPERATOR infix', () => {
   test('- // Invalid negate', () =>
     expect(check('-')).toMatchInlineSnapshot(
-      `invalid   =["Negate", ["Error", "'missing'", ["LatexString", "'-'"]]]`
+      `invalid   =["Negate", ["Error", "'missing'", ["LatexString", "-"]]]`
     ));
   test('1- // Invalid subtract', () =>
     expect(check('1-')).toMatchInlineSnapshot(`
       invalid   =[
         "Sequence",
         1,
-        ["Negate", ["Error", "'missing'", ["LatexString", "'-'"]]]
+        ["Negate", ["Error", "'missing'", ["LatexString", "-"]]]
       ]
     `));
 
@@ -439,7 +442,7 @@ describe('OPERATOR postfix', () => {
           "Factorial2",
           [
             "Error",
-            ["ErrorCode", "'incompatible-type'", "'integer'", "'number'"]
+            ["ErrorCode", "incompatible-type", "'integer'", "'number'"]
           ]
         ]
       ]
@@ -454,7 +457,7 @@ describe('OPERATOR postfix', () => {
             "Factorial2",
             [
               "Error",
-              ["ErrorCode", "'incompatible-type'", "'integer'", "'number'"]
+              ["ErrorCode", "incompatible-type", "'integer'", "'number'"]
             ]
           ]
         ]

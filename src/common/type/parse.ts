@@ -1,4 +1,11 @@
-import type { Type, NamedElement, PrimitiveType } from './types';
+import type {
+  Type,
+  NamedElement,
+  TypeReference,
+  TypeResolver,
+  TypeString,
+  NumericPrimitiveType,
+} from './types';
 
 import { PRIMITIVE_TYPES } from './primitive';
 import { typeToString } from './serialize';
@@ -10,25 +17,31 @@ class TypeParser {
   pos: number;
 
   _valueParser: (parser: TypeParser) => any;
-  _typeParser: (parser: TypeParser) => string | null;
+  _typeResolver: TypeResolver;
 
   constructor(
     buffer: string,
     options?: {
-      value?: (parser: TypeParser) => any;
-      type?: (parser: TypeParser) => string | null;
+      valueParser?: (parser: TypeParser) => any;
+      typeResolver?: TypeResolver;
     }
   ) {
     this.buffer = buffer;
     this.pos = 0;
 
-    this._valueParser = options?.value ?? (() => null);
-    this._typeParser = options?.type ?? (() => null);
+    this._valueParser = options?.valueParser ?? (() => null);
+    this._typeResolver = options?.typeResolver ?? {
+      forward: () => undefined,
+      resolve: () => undefined,
+      get names() {
+        return [];
+      },
+    };
   }
 
-  error(...messages: string[]): never {
+  error(...messages: (string | undefined)[]): never {
     throw new Error(
-      `\nInvalid type\n|   ${this.buffer}\n|   ${' '.repeat(this.pos)}^\n|   \n|   ${messages.join('\n|   ')}\n`
+      `\nInvalid type\n|   ${this.buffer}\n|   ${' '.repeat(this.pos)}^\n|   \n|   ${messages.filter((x) => x !== undefined).join('\n|   ')}\n`
     );
   }
 
@@ -40,6 +53,7 @@ class TypeParser {
     return this.buffer[this.pos++];
   }
 
+  /** Check if the upcoming tokens match s, return false if not, consume otherwise */
   match(s: string): boolean {
     if (s.length === 1 && this.buffer[this.pos] === s) {
       this.pos++;
@@ -55,6 +69,14 @@ class TypeParser {
     return false;
   }
 
+  /** If the next token don't match `>`, error */
+  expectClosingBracket(): void {
+    this.skipWhitespace();
+    if (!this.match('>')) {
+      this.error('Expected ">".');
+    }
+  }
+
   /** If a white space is allowed, call before `consume()` or `match()` */
   skipWhitespace(): void {
     while (this.pos < this.buffer.length && /\s/.test(this.buffer[this.pos]))
@@ -66,17 +88,36 @@ class TypeParser {
   }
 
   parseValue(): Type | null {
+    const start = this.pos;
     this.skipWhitespace();
     const value = this._valueParser(this);
-    if (value === null) return null;
-    return { kind: 'value', value };
+    if (value !== null) return { kind: 'value', value };
+    this.pos = start;
+    return null;
   }
 
-  parseTypeReference(): Type | null {
+  parseTypeReference(): TypeReference | null {
+    const start = this.pos;
     this.skipWhitespace();
-    const ref = this._typeParser(this);
-    if (ref === null) return null;
-    return { kind: 'reference', ref };
+
+    // If we have `type json_array`, the `json_array` type is a forward
+    // reference that may not have a placeholder declaration yet.
+    const forwardType = this.match('type');
+    this.skipWhitespace();
+
+    const name = this.parseIdentifier();
+    if (name !== null) {
+      const result = this._typeResolver.resolve(name);
+      if (result) return result;
+
+      // If we had a forward reference, let the type resolver know about it
+      if (forwardType) {
+        const result = this._typeResolver.forward(name);
+        if (result) return result;
+      }
+    }
+    this.pos = start;
+    return null;
   }
 
   parsePrimitiveType(): Type | null {
@@ -88,150 +129,108 @@ class TypeParser {
     return null;
   }
 
-  // Arguments are `name: type` or `type` separated by commas
+  /**
+   * Arguments are `name: type` or `type` separated by commas.
+   * Arguments can be optional, i.e. `name: type?` or `type?`.
+   * Variadic arguments are `name: type+`, `type+`, `name: type*` or `type*`.
+   */
   parseArguments(): [
     required: NamedElement[],
     optional: NamedElement[],
-    restArg: NamedElement | undefined,
+    variadic: NamedElement | undefined,
+    variadicMin: 0 | 1 | undefined,
   ] {
     const reqArgs: NamedElement[] = [];
     const optArgs: NamedElement[] = [];
+    let variadicMin: 0 | 1 | undefined = undefined;
+    let varArg: NamedElement | undefined = undefined;
+
+    let pos = this.pos;
+
     while (true) {
       const arg = this.parseNamedElement();
-      if (arg === null) break;
+      if (arg === null) {
+        // We've encountered something that is not a valid argument
+        // It should be a closing parenthesis
+        this.skipWhitespace();
+        if (this.peek() === ')') break;
+
+        this.pos = pos;
+        this.skipWhitespace();
+        if (this.match(',')) {
+          // We have a comma, but we couldn't figure out the next argument
+          this.error('Expected a valid argument after ","');
+        }
+
+        break;
+      }
 
       // No whitespace before '?', i.e. `x: number?`
-      if (this.match('?')) optArgs.push(arg);
-      else {
+      if (this.match('?')) {
+        if (variadicMin !== undefined)
+          this.error(
+            'Optional arguments cannot be used with variadic arguments'
+          );
+        optArgs.push(arg);
+      } else if (this.match('*')) {
+        if (optArgs.length > 0)
+          this.error(
+            'Variadic arguments cannot be used with optional arguments'
+          );
+        if (variadicMin !== undefined)
+          this.error('There can be only one variadic argument');
+        variadicMin = 0;
+        varArg = arg;
+      } else if (this.match('+')) {
+        if (optArgs.length > 0)
+          this.error(
+            'Variadic arguments cannot be used with optional arguments'
+          );
+        if (variadicMin !== undefined)
+          this.error('There can be only one variadic argument');
+        variadicMin = 1;
+        varArg = arg;
+      } else {
+        // This is a non-optional argument, check that we don't have any optional or variadic arguments
         if (optArgs.length > 0)
           this.error('Optional arguments must come after required arguments');
+        if (variadicMin !== undefined)
+          this.error('Variadic arguments must come last');
 
         reqArgs.push(arg);
       }
       this.skipWhitespace();
+      pos = this.pos;
       if (!this.match(',')) break;
-    }
-
-    // Rest argument?
-    const restPos = this.pos;
-    const restArg = this.parseRestArgument() ?? undefined;
-
-    if (restArg && optArgs.length > 0) {
-      this.pos = restPos;
-      this.error('Optional arguments cannot be followed by a rest argument');
     }
 
     const duplicate = checkDuplicateNames([
       ...reqArgs,
       ...optArgs,
-      ...(restArg ? [restArg] : []),
+      ...(varArg ? [varArg] : []),
     ]);
     if (duplicate) this.error(`Duplicate argument name "${duplicate}"`);
 
-    return [reqArgs, optArgs, restArg];
-  }
-
-  // Rest argument is `name: ...type` or `...type`
-  parseRestArgument(): NamedElement | null {
-    const pos = this.pos;
-    const name = this.parseName();
-
-    this.skipWhitespace();
-    if (!this.match('...')) {
-      this.pos = pos;
-      return null;
-    }
-
-    // We don't want to parse a type, because it could be a function signature.
-    // i.e.   `...number -> number` should be parsed
-    // as     `...(number) -> number`
-    // not as `...(number -> number)`
-    let type = this.parsePrimitiveType() ?? this.parseGroup();
-
-    if (!type) {
-      // We didn't get a type. Check if we had "...name:type" instead...
-      if (!name) {
-        this.pos = pos;
-        if (this.match('...') && this.parseName()) {
-          const type = this.parsePrimitiveType() ?? this.parseGroup();
-          this.pos = pos;
-          this.error(
-            'The rest argument indicator is placed before the type, not the name',
-            `Use "${name}: ...${type ? typeToString(type) : 'number'}"`
-          );
-        }
-      }
-    }
-
-    this.skipWhitespace();
-    if (this.match(':'))
-      this.error('Unexpected ":" after rest argument. Use "x: ...number"');
-
-    // `rest:...` is valid equivalent to `rest:...any`
-    type ??= 'any';
-
-    return name ? { name, type } : { type };
+    return [reqArgs, optArgs, varArg, variadicMin];
   }
 
   parseFunctionSignature(): Type | null {
     let args: NamedElement[] | undefined = [];
     let optArgs: NamedElement[] | undefined = [];
-    let restArg: NamedElement | undefined = undefined;
+    let variadicArg: NamedElement | undefined = undefined;
+    let variadicMin: 0 | 1 | undefined = undefined;
 
     this.skipWhitespace();
-    let pos = this.pos;
+    const pos = this.pos;
     if (this.match('()')) {
       // Empty argument list is valid
     } else if (this.match('(')) {
       // We have a list of arguments in parentheses
-      [args, optArgs, restArg] = this.parseArguments();
+      [args, optArgs, variadicArg, variadicMin] = this.parseArguments();
 
       this.skipWhitespace();
-      if (!this.match(')')) {
-        if (restArg) {
-          const el = this.parseNamedElement();
-          if (el) {
-            this.pos = pos;
-            this.error('The rest argument must be the last argument');
-          }
-          this.error('The rest argument must have a valid type');
-        }
-        if (optArgs.length > 0) {
-          const el = this.parseNamedElement();
-          if (el)
-            this.error(
-              'Optional arguments cannot be followed by required arguments'
-            );
-          this.skipWhitespace();
-          pos = this.pos;
-          if (this.match('->')) {
-            this.pos = pos;
-            this.error('Expected ")" to close the argument list');
-          }
-
-          this.error('Expected an argument');
-        }
-        this.pos = pos;
-        return null;
-      }
-    } else {
-      // We could have a single rest argument without parentheses
-      // e.g. `...number -> number`
-      // We could also have a single argument without parentheses
-      // but this case is handled by `parseNamedElement`
-      restArg = this.parseRestArgument() ?? undefined;
-      if (restArg?.name) {
-        // To avoid ambiguity in, e.g.
-        // `(x:...number -> number) -> number`
-        // `(x:(...number -> number)) -> number`
-        // `((x:...number -> number)) -> number`
-        this.pos = pos;
-        this.error('Named arguments must be enclosed in parentheses');
-      }
-      if (!restArg) {
-        this.pos = pos;
-        return null;
-      }
+      if (!this.match(')'))
+        this.error('Expected a closing parenthesis `)` after arguments.');
     }
 
     // A function signature must be followed by '->'
@@ -242,21 +241,45 @@ class TypeParser {
       return null;
     }
 
+    this.skipWhitespace();
+
+    if (this.isEOF())
+      this.error(
+        'Expected a return type after `->`.',
+        'Use `any` for any type or `nothing` for no return value, or `never` for a function that never returns'
+      );
+
     const returnType = this.parseType();
     if (returnType === null)
       this.error(
-        'Expected a return type.',
-        'Use `any` for any type, `nothing` for no return value, or `never` for a function that never returns'
+        'Expected a return type after `->`.',
+        'Use `any` for any type or `nothing` for no return value, or `never` for a function that never returns',
+        this.parseUnexpectedToken()
       );
 
     if (args.length === 0) args = undefined;
     if (optArgs.length === 0) optArgs = undefined;
 
+    if (!optArgs && !variadicArg)
+      return { kind: 'signature', args, result: returnType };
+
+    if (!optArgs && variadicArg) {
+      return {
+        kind: 'signature',
+        args,
+        variadicArg,
+        variadicMin,
+        result: returnType,
+      };
+    }
+
+    // Variadic args, no optional args
     return {
       kind: 'signature',
       args,
       optArgs,
-      restArg,
+      variadicArg,
+      variadicMin,
       result: returnType,
     };
   }
@@ -320,20 +343,18 @@ class TypeParser {
     // `list<<type>>` or `list<<type>^<dimensions>>` or `list<<dimensions>>`
     if (this.match('list<')) {
       // We want to parse dimensions first, otherwise `list<3>` would be
-      // interpreted as a list of `3` since `3` is a valid value type.
+      // interpreted as a list of `3` since `3` is a valid literal type.
       let dimensions = this.parseDimensions();
 
       // `list<2x3>` is equivalent to `list<any^2x3>`
       if (dimensions !== undefined) {
-        this.skipWhitespace();
-        if (!this.match('>'))
-          this.error('Expected ">".', 'For example `list<2x3>`');
+        this.expectClosingBracket();
         return { kind: 'list', elements: 'any', dimensions };
       }
 
       // `list<>` is equivalent to `list<any>`
 
-      const type = this.parseType();
+      const type = this.parseTypeMaybe();
       if (type && this.match('^')) {
         // We got both a type and dimensions
         dimensions = this.parseDimensions();
@@ -344,9 +365,15 @@ class TypeParser {
           );
       }
 
-      this.skipWhitespace();
-      if (!this.match('>'))
-        this.error('Expected ">".', 'For example `list<number>`');
+      if (!type) {
+        this.error(
+          'Expected a type after `list<`.',
+          'Use `list<any>` for a list of any type',
+          'For example `list<number>` or `list<string>`'
+        );
+      }
+
+      this.expectClosingBracket();
 
       return { kind: 'list', elements: type ?? 'any', dimensions };
     }
@@ -377,9 +404,8 @@ class TypeParser {
         dimensions = this.parseDimensions();
       }
 
-      this.skipWhitespace();
-      if (!this.match('>'))
-        this.error('Expected ">"', 'For example `vector<integer>`');
+      this.expectClosingBracket();
+
       return { kind: 'list', elements: type, dimensions };
     }
 
@@ -411,8 +437,7 @@ class TypeParser {
         dimensions = this.parseDimensions();
       }
 
-      if (!this.match('>'))
-        this.error('Expected ">".', 'For example `matrix<integer>`');
+      this.expectClosingBracket();
 
       return { kind: 'list', elements: type, dimensions };
     }
@@ -436,8 +461,7 @@ class TypeParser {
     if (this.match('tensor<')) {
       const type = this.parseType() ?? 'number';
 
-      if (!this.match('>'))
-        this.error('Expected ">".', 'For example `tensor<number>`');
+      this.expectClosingBracket();
 
       return { kind: 'list', elements: type, dimensions: undefined };
     }
@@ -453,43 +477,45 @@ class TypeParser {
     // Regular list syntax: `list<number^2x3>`
     if (!this.match('list<')) return null;
 
-    const type = this.parseType();
+    const type = this.parseTypeMaybe();
     if (type === null)
       this.error('Expected a type. Use "[any]" for a collection of any type');
 
     const dimensions = this.match('^') ? this.parseDimensions() : undefined;
 
-    this.skipWhitespace();
-    if (!this.match('>'))
-      this.error('Expected ">".', 'For example `list<number^2x3>`');
+    this.expectClosingBracket();
 
     return { kind: 'list', elements: type, dimensions };
   }
 
+  /**
+   * Parse the name of a named element, i.e. an identifier followed by a colon.
+   * Does special error handling for optional qualifiers.
+   * */
   parseName(): string | null {
     const pos = this.pos;
     this.skipWhitespace();
     if (this.isEOF()) return null;
 
-    if (!/[a-zA-Z_]/.test(this.peek())) return null;
+    let name = this.parseVerbatimString();
 
-    let name = '';
-    while (!this.isEOF() && /[a-zA-Z0-9_]/.test(this.peek()))
-      name += this.consume();
+    if (name === null) {
+      if (!/[a-zA-Z_]/.test(this.peek())) return null;
+
+      name = '';
+      while (!this.isEOF() && /[a-zA-Z0-9_]/.test(this.peek()))
+        name += this.consume();
+    }
 
     this.skipWhitespace();
 
     if (!this.match(':')) {
       if (this.match('?:')) {
-        const type = this.parseType();
-        if (type)
-          this.error(
-            'Optional qualifier must come after the type',
-            `Use "${name}: ${typeToString(type)}?"`
-          );
+        // The input is `name?:`, which is invalid
+        const type = this.parseTypeMaybe();
         this.error(
           'Optional qualifier must come after the type',
-          `Use "${name}: number?"`
+          `Use "${name}: ${type ? typeToString(type) : 'number'}?"`
         );
       }
 
@@ -500,33 +526,53 @@ class TypeParser {
     return name;
   }
 
-  parseKey(): string | null {
+  parseVerbatimString(): string | null {
     this.skipWhitespace();
     if (this.isEOF()) return null;
 
-    let key = '';
+    let str = '';
 
-    // Is this a verbatim key (i.e. surrounded by backticks)?
+    // Is this a verbatim string (i.e. surrounded by backticks)?
     if (this.match('`')) {
-      // @todo incorporate escape sequences from Epsil
-      while (this.peek() !== '`') {
+      while (!this.match('`')) {
         if (this.isEOF()) this.error('Expected closing backtick');
         // Escaped backtick?
-        if (this.match('\\`')) key += '`';
-        else key += this.consume();
+        // @todo incorporate escape sequences from Epsil (see parseEscapeSequence() in string-parser.ts)
+        if (this.match('\\`')) str += '`';
+        else if (this.match('\\\\')) str += '\\';
+        else str += this.consume();
       }
 
-      return key;
+      return str;
     }
 
-    // If not a verbatim key, scan until whitespace or ':'
-    while (!this.isEOF() && !/[:\s]/.test(this.peek())) key += this.consume();
-    return key;
+    return null;
+  }
+
+  /**
+   * A general purpose identifier, used for expresion<>, symbol<>, type references, record keys, etc.
+   *
+   * Not used for arguments (they have special error handling with `parseName()`).
+   */
+  parseIdentifier(): string | null {
+    let name = this.parseVerbatimString();
+    if (name !== null) return name;
+
+    if (/[0-9_]/.test(this.peek())) return null;
+
+    name = '';
+
+    // If not a verbatim key, scan while alpha-numeric, '_'
+    while (!this.isEOF() && /[a-zA-Z0-9_]/.test(this.peek()))
+      name += this.consume();
+    return name.length === 0 ? null : name;
   }
 
   /** Parse:
    * - "<identifier>: <type>"
    * - "<type>"
+   *
+   * Does not parse variadic arguments, i.e. `type+` or `name: type+`.
    */
   parseNamedElement(): NamedElement | null {
     const pos = this.pos;
@@ -534,28 +580,13 @@ class TypeParser {
     if (name !== null) {
       const type = this.parseType();
       if (type === null) {
-        // We had a valid name, i.e. "x:", but an invalid type
-        // i.e. "x: foo". But, "x: ...number" is valid
-        this.skipWhitespace();
-        if (this.match('...')) {
-          this.pos = pos;
-          return null;
-        }
-
-        this.pos = pos;
-        this.error(`Expected a valid type after "${name}:"`);
+        this.error(
+          `Expected a valid type after "${name}:"`,
+          this.parseUnexpectedToken()
+        );
       }
 
       this.skipWhitespace();
-      if (this.match('->')) {
-        // Avoid ambiguity in, e.g.
-        // `x: number -> number`
-        // `(x:number) -> number`
-        // `x:(number -> number)`
-
-        this.pos = pos;
-        this.error('Single named argument must be enclosed in parentheses');
-      }
 
       return { name, type };
     }
@@ -574,6 +605,9 @@ class TypeParser {
     let pos = this.pos;
     let type = this.parseNamedElement();
     if (type === null) return [];
+
+    const expectNamedElements = type.name !== undefined;
+
     while (true) {
       elements.push(type);
       this.skipWhitespace();
@@ -584,10 +618,21 @@ class TypeParser {
         this.pos = pos;
         this.error('Expected a type or unexpected comma');
       }
+      if (expectNamedElements && !type.name) {
+        this.pos = pos;
+        this.error(
+          'All tuple elements should be named, or none.',
+          "Previous elements were named, but this one isn't."
+        );
+      }
+      if (!expectNamedElements && type.name) {
+        this.pos = pos;
+        this.error(
+          'All tuple elements should be named, or none.',
+          'Previous elements were not named, but this one is.'
+        );
+      }
     }
-
-    const duplicate = checkDuplicateNames(elements);
-    if (duplicate) this.error(`Duplicate tuple named element "${duplicate}"`);
 
     return elements;
   }
@@ -607,12 +652,8 @@ class TypeParser {
 
     const elements = this.parseTupleElements();
 
-    this.skipWhitespace();
-    if (!this.match('>'))
-      this.error(
-        'Expected ">".',
-        'For example `tuple<number, boolean>` or `tuple<x: integer, y: integer>`'
-      );
+    this.expectClosingBracket();
+
     return { kind: 'tuple', elements };
   }
 
@@ -651,53 +692,50 @@ class TypeParser {
     this.skipWhitespace();
     if (!this.match('set<')) {
       if (this.match('set(')) {
-        this.error(
-          'Use `set<type>` instead of `set(type)`.',
-          'For example `set<number>`'
-        );
+        const type = this.parseTypeMaybe() ?? 'number';
+        this.error(`Use \`set<${type}>\` instead of \`set(${type})\`.`);
       }
       if (this.match('set')) return 'set';
       return null;
     }
 
-    const type = this.parseType();
+    const type = this.parseTypeMaybe();
     if (type === null)
       this.error('Expected a type.', 'Use `set<number>` for a set of numbers');
 
-    this.skipWhitespace();
-    if (!this.match('>'))
-      this.error('Expected `>`.', 'For example `set<number>`');
+    this.expectClosingBracket();
 
     return { kind: 'set', elements: type };
   }
 
-  parseMapElements(): [string, Type][] {
+  parseRecordKeyValue(): [string, Type][] {
     const entries: [string, Type][] = [];
 
     while (true) {
-      const key = this.parseKey();
+      const key = this.parseIdentifier();
       if (key === null)
         this.error(
           'Expected a name for the key.',
-          'For example `map<key: string>`.',
+          'For example `record<key: string>`.',
           'Use backticks for special characters.',
-          'For example `map<`key with space`: string>`'
+          'For example `record<\`duración\`: number>`'
         );
 
       this.skipWhitespace();
-      if (!this.match(':'))
+      if (!this.match(':')) {
         this.error(
           'Expected a type separated by a `:` after the key.',
-          `For example \`map<${key}: string>\``,
+          `For example \`record<${formatKey(key)}: string>\``,
           'Use backticks for special characters.',
-          'For example `map<`key with space`: string>`'
+          'For example `record<\`duración\`: string>`'
         );
+      }
 
-      const value = this.parseType();
+      const value = this.parseTypeMaybe();
       if (value === null)
         this.error(
           'Expected a type for the value. Use `any` for any type.',
-          `For example \`map<${key}: any>.\``
+          `For example \`record<${formatKey(key)}: any>.\``
         );
 
       entries.push([key, value]);
@@ -714,42 +752,90 @@ class TypeParser {
         entries.slice(index + 1).some(([k]) => k === key)
       )?.[0];
       this.error(
-        `Duplicate map key "${duplicate}"`,
-        'Keys in a map must be unique.'
+        `Duplicate record key "${duplicate}"`,
+        'Keys in a record must be unique.'
       );
     }
 
     return entries;
   }
 
-  parseMap(): Type | null {
+  parseRecord(): Type | null {
     this.skipWhitespace();
 
-    if (this.match('map(')) {
-      this.error(
-        'Use `map<key: type>` instead of `map(key: type)".',
-        'For example `map<key: string>`'
-      );
-    }
-
-    if (this.match('map<')) {
-      const entries = this.parseMapElements();
+    if (this.match('record<')) {
+      // Assume we have a `record<key: type, ...>`
+      const entries = this.parseRecordKeyValue();
 
       this.skipWhitespace();
-      if (!this.match('>'))
-        this.error('Expected a closing `>`.', 'For example `map<key: string>`');
+      if (!this.match('>')) {
+        const lastEntry = entries[entries.length - 1] ?? ['key', 'number'];
+        if (this.match('?'))
+          this.error(
+            'Unexpected token "?".',
+            `To indicate an optional key, use a specific type, for example \`record<${formatKey(lastEntry[0])}: ${lastEntry[1]} | nothing>\``
+          );
 
-      return { kind: 'map', elements: Object.fromEntries(entries) };
+        this.error(
+          'Expected a closing `>`.',
+          `For example \`record<${formatKey(lastEntry[0])}: ${lastEntry[1]}>\``
+        );
+      }
+
+      return { kind: 'record', elements: Object.fromEntries(entries) };
     }
 
-    // Generic map type
-    if (this.match('map')) return 'map';
+    // Generic record type
+    if (this.match('record')) return 'record';
+
+    return null;
+  }
+
+  // A dictionary type, e.g. `dictionary<T>` where T is the type of the values
+  parseDictionary(): Type | null {
+    if (this.match('dictionary<')) {
+      this.skipWhitespace();
+
+      const values = this.parseType();
+      if (values === null) this.error('Expected a type.');
+
+      this.skipWhitespace();
+      if (this.match(',')) {
+        this.error(
+          'Dictionary types cannot have keys, only values.',
+          'For example `dictionary<string>`'
+        );
+      }
+
+      this.expectClosingBracket();
+
+      return { kind: 'dictionary', values };
+    }
+
+    // Generic dictionary type
+    if (this.match('dictionary')) return 'dictionary';
+
     return null;
   }
 
   // A generic collection type, e.g. `collection<number>`
   parseCollection(): Type | null {
     this.skipWhitespace();
+
+    if (this.match('indexed_collection<')) {
+      const type = this.parseType();
+      if (type === null)
+        this.error(
+          'Expected a type.',
+          'Use `indexed_collection<number>` for an indexed collection of numbers'
+        );
+      this.expectClosingBracket();
+
+      return { kind: 'indexed_collection', elements: type };
+    }
+
+    if (this.match('indexed_collection')) return 'indexed_collection';
+
     if (!this.match('collection<')) {
       if (this.match('collection(')) {
         this.error(
@@ -768,86 +854,205 @@ class TypeParser {
         'Use `collection<number>` for a collection of numbers'
       );
 
-    this.skipWhitespace();
-    if (!this.match('>'))
-      this.error('Expected ">".', 'For example `collection<number>`');
+    this.expectClosingBracket();
 
     return { kind: 'collection', elements: type };
   }
 
-  parsePrimary(): Type | null {
-    let result =
-      this.parseGroup() ??
-      this.parseNegationType() ??
-      this.parseList() ??
-      this.parseSet() ??
-      this.parseMap() ??
-      this.parseCollection() ??
-      this.parseTuple() ??
-      this.parsePrimitiveType() ??
-      this.parseValue() ??
-      this.parseTypeReference();
+  parseExpression(): Type | null {
+    if (!this.match('expression<')) return null;
+    const operator = this.parseIdentifier();
 
+    if (operator === null)
+      this.error(
+        'Expected the name of the operator for the expression.',
+        'For example `expression<Multiply>`.',
+        'Use backticks for special characters.',
+        'For example `expression<\`半径\`>`'
+      );
+
+    this.expectClosingBracket();
+
+    return { kind: 'expression', operator };
+  }
+
+  parseSymbol(): Type | null {
+    if (!this.match('symbol<')) return null;
+
+    const name = this.parseIdentifier();
+
+    if (name === null)
+      this.error(
+        'Expected a name for the symbol.',
+        'For example `symbol<True>`.',
+        'Use backticks for special characters.',
+        'For example `symbol<\`半径\`>`'
+      );
+
+    this.expectClosingBracket();
+
+    return { kind: 'symbol', name };
+  }
+
+  /** Parse a constructed numeric type with a range */
+  parseNumericType(): Type | null {
+    const parseLowerBound = (parser: TypeParser): number | undefined => {
+      parser.skipWhitespace();
+      if (parser.match('..')) return -Infinity;
+
+      const v = valueParser(parser);
+      if (typeof v !== 'number') parser.error('Expected a number');
+      parser.skipWhitespace();
+      if (parser.match('..')) return v;
+      parser.error(
+        'Expected ".." after lower bound',
+        'For example `integer<-oo..10>` or `integer<0..10>`'
+      );
+    };
+
+    const parseUpperBound = (parser: TypeParser): number | undefined => {
+      parser.skipWhitespace();
+      if (parser.match('>')) return undefined;
+      const v = valueParser(parser);
+      if (typeof v !== 'number') parser.error('Expected a number');
+      parser.expectClosingBracket();
+      return v;
+    };
+
+    for (const t of [
+      'real',
+      'finite_real',
+      'rational',
+      'finite_rational',
+      'integer',
+      'finite_integer',
+    ] as NumericPrimitiveType[]) {
+      if (!this.match(t + '<')) continue;
+
+      const lower = parseLowerBound(this) ?? -Infinity;
+      const upper = parseUpperBound(this) ?? Infinity;
+
+      if (Number.isNaN(lower) || Number.isNaN(upper))
+        this.error(
+          'Invalid numeric type',
+          'Lower and upper bounds must be valid numbers'
+        );
+
+      if (lower === -Infinity && upper === Infinity) return t;
+
+      if (lower > upper)
+        this.error(
+          `Invalid range: ${lower}..${upper}`,
+          'The lower bound must be less than the upper bound'
+        );
+
+      return { kind: 'numeric', type: t, lower, upper };
+    }
+    return null;
+  }
+
+  parseStringType(): Type | null {
+    if (this.match('string')) return 'string';
+    return null;
+  }
+
+  parsePrimary(): Type {
+    const result = this.parseMaybePrimary();
     if (result === null) {
       // If we've reached this point, we've run into a syntax error
-      // Is it a keyword...?
-      let keyword = '';
-      while (!this.isEOF() && /[a-zA-Z_]/.test(this.peek()))
-        keyword += this.consume();
-      if (!keyword) return null;
-      const suggest = fuzzyStringMatch(keyword, [
-        ...PRIMITIVE_TYPES,
-        'vector',
-        'matrix',
-      ]);
-      if (suggest)
-        this.error(
-          `Unknown keyword "${keyword}"`,
-          `Did you mean "${suggest}"?`
-        );
-      return null;
-    }
-    this.skipWhitespace();
+      // Try to guess what the problem might be...
+      const pos = this.pos;
+      // Was it some missing parens with a function signature?
+      const name = this.parseNamedElement();
+      if (name !== null) {
+        // Skip potential optional qualifiers
+        this.match('?');
+        this.match('*');
+        this.match('+');
 
-    // If we're followed by a '->', this is a function signature without parens
-    // e.g. "number -> number"
-    if (this.match('->')) {
-      const returnType = this.parseType();
-      if (returnType === null)
-        this.error(
-          'Expected return type',
-          'Use `any` for any type, `nothing` for no return value or `never` for a function that never returns'
-        );
-      result = {
-        kind: 'signature',
-        args: [{ type: result }],
-        result: returnType,
-      };
+        this.skipWhitespace();
+        if (this.match('->') || this.match(',')) {
+          this.error(
+            'Function arguments must be enclosed in parentheses',
+            'For example `(x: number) -> number`'
+          );
+        }
+        if (this.match(')')) {
+          this.error('An opening parenthesis seems to be missing');
+        }
+      }
+
+      this.pos = pos;
+      // Is it a value?
+      const value = valueParser(this);
+      if (value !== null) this.error('Unexpected value');
+
+      this.pos = pos;
+      this.error(`Unexpected token"`, this.parseUnexpectedToken());
     }
 
     return result;
   }
 
+  parseUnexpectedToken(): string | undefined {
+    const pos = this.pos;
+    let result: string | undefined = undefined;
+    let token = '';
+    while (!this.isEOF() && /[a-zA-Z0-9_]/.test(this.peek()))
+      token += this.consume();
+    if (!token) return undefined;
+
+    let suggest: string | null = null;
+
+    if (token === 'map') suggest = 'dictionary';
+
+    suggest ??= fuzzyStringMatch(token, [
+      ...this._typeResolver.names,
+      ...PRIMITIVE_TYPES,
+      'vector',
+      'matrix',
+    ]);
+    if (suggest) result = `Did you mean "${suggest}"?`;
+    this.pos = pos;
+    return result;
+  }
+
+  parseMaybePrimary(): Type | null {
+    return (
+      this.parseGroup() ??
+      this.parseNegationType() ??
+      this.parseCollection() ??
+      this.parseList() ??
+      this.parseSet() ??
+      this.parseDictionary() ??
+      this.parseRecord() ??
+      this.parseTuple() ??
+      this.parseExpression() ??
+      this.parseSymbol() ??
+      this.parseNumericType() ??
+      this.parseStringType() ??
+      this.parsePrimitiveType() ??
+      this.parseValue() ??
+      this.parseTypeReference()
+    );
+  }
+
   parseNegationType(): Type | null {
     if (!this.match('!')) return null;
-    const type = this.parsePrimary();
-    if (type === null) this.error('Expected type');
-    return { kind: 'negation', type };
+    return { kind: 'negation', type: this.parsePrimary() };
   }
 
   // <intersection_type> ::= <primary_type> (" & " <primary_type>)*
 
   parseIntersectionType(): Type | null {
-    let type = this.parseFunctionSignature() ?? this.parsePrimary();
+    const type = this.parseFunctionSignature() ?? this.parseMaybePrimary();
     if (type === null) return null;
     const types: Type[] = [type];
 
     this.skipWhitespace();
     while (this.match('&')) {
       this.skipWhitespace();
-      type = this.parsePrimary();
-      if (type === null) this.error('Expected type');
-      types.push(type);
+      types.push(this.parsePrimary());
     }
     if (types.length === 1) return types[0];
     return { kind: 'intersection', types };
@@ -887,21 +1092,50 @@ class TypeParser {
     return this.parseUnionType();
   }
 
+  /** Parse a type, but return null if there's a problem instead
+   * of throwing.
+   */
+  parseTypeMaybe(): Readonly<Type> | null {
+    try {
+      return this.parseType();
+    } catch (e) {
+      console.log(e);
+    }
+    return null;
+  }
+
   parse(): Readonly<Type> {
-    const pos = this.pos;
-    if (this.parseName() !== null) {
-      this.pos = pos;
-      // Named elements are potentially ambiguous with function signatures
-      // i.e. `x: number -> number` could be interpreted as `x: (number -> number)`
-      // or `(x: number) -> number`
-      // To avoid this ambiguity, we require named elements to be enclosed in parentheses
-      this.error('Named elements must be enclosed in parentheses');
+    const type = this.parseType();
+    if (type === null) {
+      // Is it an identifier followed by a colon?
+      const name = this.parseIdentifier();
+      if (name !== null) {
+        this.skipWhitespace();
+        if (this.match(':')) {
+          this.error(
+            'Function signatures must be enclosed in parentheses',
+            'For example `(x: number) -> number`'
+          );
+        }
+      }
+      this.error('Syntax error. The type was not recognized.');
     }
 
-    const type = this.parseType();
-    if (type === null) this.error('Syntax error. The type was not recognized.');
-
     this.skipWhitespace();
+
+    if (
+      this.match('->') ||
+      this.match('?') ||
+      this.match('*') ||
+      this.match('+')
+    ) {
+      // This might be a single argument function signature
+      // string+ -> string
+      this.error(
+        'Function signatures must be enclosed in parentheses',
+        'For example `(x: number) -> number`'
+      );
+    }
 
     if (!this.isEOF())
       this.error('Unexpected character. Could be some mismatched parentheses.');
@@ -949,6 +1183,7 @@ function valueParser(parser: TypeParser): any {
     let value = 0;
     let sign = 1;
     if (parser.match('-')) sign = -1;
+    if (parser.match('+')) sign = 1;
 
     if (!/[0-9]/.test(parser.peek())) {
       parser.pos = pos;
@@ -958,7 +1193,16 @@ function valueParser(parser: TypeParser): any {
     while (/[0-9]/.test(parser.peek()))
       value = value * 10 + parseInt(parser.consume());
 
-    if (parser.match('.')) {
+    // We want to match a digit after '.', but not '..'
+    if (parser.peek() === '.') {
+      const pos = parser.pos;
+      parser.consume();
+
+      if (!/[0-9]/.test(parser.peek())) {
+        parser.pos = pos;
+        return sign * value;
+      }
+
       let fraction = 0;
       let scale = 1;
       while (/[0-9]/.test(parser.peek())) {
@@ -988,28 +1232,46 @@ function valueParser(parser: TypeParser): any {
 
   if (parser.match('nan')) return NaN;
 
-  if (parser.match('infinity')) return Infinity;
+  if (
+    parser.match('infinity') ||
+    parser.match('+infinity') ||
+    parser.match('oo') ||
+    parser.match('∞') ||
+    parser.match('+oo') ||
+    parser.match('+∞')
+  )
+    return Infinity;
 
-  if (parser.match('-infinity')) return -Infinity;
+  if (parser.match('-infinity') || parser.match('-oo') || parser.match('-∞'))
+    return -Infinity;
+
+  if (parser.match('nan')) return NaN;
 
   parser.pos = pos;
 
   return null;
 }
 
-export function parseType(s: undefined): undefined;
-export function parseType(s: string | Type): Type;
-export function parseType(s: string | Type | undefined): Type | undefined;
-export function parseType(s: string | Type | undefined): Type | undefined {
+export function parseType(s: undefined, typeResolver?: TypeResolver): undefined;
+export function parseType(
+  s: TypeString | Type,
+  typeResolver?: TypeResolver
+): Type;
+export function parseType(
+  s: TypeString | Type | undefined,
+  typeResolver?: TypeResolver
+): Type | undefined;
+export function parseType(
+  s: TypeString | Type | undefined,
+  typeResolver?: TypeResolver
+): Type | undefined {
   if (s === undefined) return undefined;
+  // Check if it's a primitive type or already a Type object
   if (isValidType(s)) return s;
-  if (typeof s !== 'string') return undefined;
-
-  // Check if it's a primitive type
-  if (PRIMITIVE_TYPES.includes(s as PrimitiveType)) return s as PrimitiveType;
 
   // Parse the type string
-  const parser = new TypeParser(s, { value: valueParser });
+  if (typeof s !== 'string') return undefined;
+  const parser = new TypeParser(s, { valueParser, typeResolver });
   return parser.parse();
 }
 
@@ -1024,4 +1286,12 @@ function checkDuplicateNames(elements: NamedElement[]): string {
   }
 
   return '';
+}
+
+function formatKey(key: string): string {
+  // If the key includes non-alphanumeric characters, we need to use backticks
+  if (/[^a-zA-Z0-9_]/.test(key)) {
+    return '`' + key.replace(/`/g, '\\`') + '`';
+  }
+  return key;
 }

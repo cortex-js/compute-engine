@@ -25,7 +25,7 @@ import {
 import { Expression } from '../../math-json/types';
 import { numberToExpression } from '../numerics/expression';
 import { numberToString } from '../numerics/strings';
-import { NumericType } from '../../common/type/types';
+import { NumericPrimitiveType } from '../../common/type/types';
 import { isSubtype } from '../../common/type/subtype';
 
 /**
@@ -104,7 +104,7 @@ export class ExactNumericValue extends NumericValue {
     this.normalize();
   }
 
-  get type(): NumericType {
+  get type(): NumericPrimitiveType {
     if (this.isNaN) return 'number';
     // a/b√c -> real number (c can't be a perfect square)
     if (this.isPositiveInfinity || this.isNegativeInfinity)

@@ -1,11 +1,11 @@
+import type { NumericPrimitiveType, Type } from '../../common/type/types';
 import type { BoxedExpression } from '../global-types';
-import { asRational } from './numerics';
-
+import { SMALL_INTEGER } from '../numerics/numeric';
 import type { Rational } from '../numerics/types';
+
+import { asRational } from './numerics';
 import { canonicalAngle, getImaginaryFactor } from './utils';
 import { apply, apply2 } from './apply';
-import { SMALL_INTEGER } from '../numerics/numeric';
-import type { NumericType, Type } from '../types';
 
 function isSqrt(expr: BoxedExpression): boolean {
   return (
@@ -86,7 +86,8 @@ export function canonicalPower(
 
   // Zero as base
   if (a.isNumberLiteral && a.is(0)) {
-    if (b.type.matches('imaginary' as NumericType) || b.isNaN) return ce.NaN;
+    if (b.type.matches('imaginary' as NumericPrimitiveType) || b.isNaN)
+      return ce.NaN;
 
     if (b.is(0)) return ce.NaN;
 
@@ -106,11 +107,12 @@ export function canonicalPower(
 
   // 'a'/base has an associated number value (excludes numeric functions)
   // (this should at this stage include library-defined symbols such as 'Pi')
-  //@note: include 'Negate', because this could be wrapped around a number-valued symbol, such as
-  //'Pi'...
-  //^there could exist other exceptions: perhaps consider a util. such as 'maybeNumber'?
+  // @note: include 'Negate', because this could be wrapped around a
+  // number-valued symbol, such as 'Pi'...
+  // ^there could exist other exceptions: perhaps consider a util. such as
+  //  'maybeNumber'?
   const aIsNum =
-    a.type.matches('number' as NumericType) &&
+    a.type.matches('number' as NumericPrimitiveType) &&
     (a.isFunctionExpression === false || a.operator === 'Negate');
 
   // Zero as exponent
@@ -127,7 +129,7 @@ export function canonicalPower(
 
   // One as exponent
   // (Permit the base to be a FN-expr. here, too...)
-  if (b.is(1) && a.type.matches('number' as NumericType)) return a;
+  if (b.is(1) && a.type.matches('number' as NumericPrimitiveType)) return a;
 
   // -1 exponent
   if (b.is(-1)) {
@@ -143,6 +145,8 @@ export function canonicalPower(
     }
 
     // (note: case of `0^-1 = ~∞` is covered prior...)
+    if (!a.isCanonical)
+      return ce._fn('Power', [a, ce.number(-1)], { canonical: false });
     return a.inv();
   }
 
@@ -198,7 +202,7 @@ export function canonicalPower(
   if (a.isNumberLiteral && a.isInfinity) {
     // If the exponent is pure imaginary, the result is NaN
     //(↓fix?:ensure both these cases narrow down to 'b' being a num./symbol literal)
-    if (b.type.matches('imaginary' as NumericType)) return ce.NaN;
+    if (b.type.matches('imaginary')) return ce.NaN;
     if (b.type.matches('complex') && !isNaN(b.re)) {
       if (b.re > 0) return ce.ComplexInfinity;
       if (b.re < 0) return ce.Zero;
@@ -207,12 +211,17 @@ export function canonicalPower(
 
   // Fractional exponents
   //---------------------
-  if (b.is(0.5)) return canonicalRoot(a, 2);
+  if (b.is(0.5))
+    return a.isCanonical
+      ? canonicalRoot(a, 2)
+      : ce._fn('Sqrt', [a], { canonical: false });
   const r = asRational(b);
 
   //1/3, 1/4...
   if (r !== undefined && r[0] === 1 && r[1] !== 1)
-    return canonicalRoot(a, ce.number(r[1]));
+    return a.isCanonical
+      ? canonicalRoot(a, ce.number(r[1]))
+      : ce._fn('Root', [a, ce.number(r[1])], { canonical: false });
 
   return unchanged();
 }
@@ -237,10 +246,12 @@ export function canonicalRoot(
         if (v.numericValue!.isExact) return v;
       }
     }
-    return ce._fn('Sqrt', [a]);
+    return ce._fn('Sqrt', [a], { canonical: a.isCanonical });
   }
 
-  return ce._fn('Root', [a, typeof b === 'number' ? ce.number(b) : b]);
+  return ce._fn('Root', [a, typeof b === 'number' ? ce.number(b) : b], {
+    canonical: a.isCanonical && (typeof b === 'number' || b.isCanonical),
+  });
 }
 
 /**
@@ -257,7 +268,8 @@ export function pow(
   exp: number | BoxedExpression,
   { numericApproximation }: { numericApproximation: boolean }
 ): BoxedExpression {
-  if (!x.isCanonical) return x.canonical.pow(exp);
+  if (!x.isCanonical || (typeof exp !== 'number' && !exp.isCanonical))
+    return x.engine._fn('Power', [x, x.engine.box(exp)], { canonical: false });
 
   //
   // If a numeric approximation is requested, we try to evaluate the expression
@@ -318,7 +330,7 @@ export function pow(
         //   // Return simplify angle
         //   return ce._fn('Power', [ce.E, radiansToAngle(theta)!.mul(ce.I)]);
       }
-    } else if (numericApproximation) {
+    } else {
       if (typeof exp === 'number') {
         return ce.number(ce._numericValue(ce.E.N().numericValue!).pow(exp));
       } else if (exp.isNumberLiteral) {
@@ -412,6 +424,9 @@ export function root(
   b: BoxedExpression,
   { numericApproximation }: { numericApproximation: boolean }
 ): BoxedExpression {
+  if (!a.isCanonical || !b.isCanonical)
+    return a.engine._fn('Root', [a, b], { canonical: false });
+
   if (numericApproximation) {
     if (a.isNumberLiteral && b.isNumberLiteral) {
       // (-x)^n = (-1)^n x^n

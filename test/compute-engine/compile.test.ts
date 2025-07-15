@@ -24,7 +24,7 @@ describe('COMPILE', () => {
   describe('Blocks', () => {
     it('should compile a simple block', () => {
       const expr = ce.box(['Block', ['Multiply', 10, 2]]);
-      expect(expr.compile()?.toString() ?? '').toMatchInlineSnapshot(`10 * 2`);
+      expect(expr.compile()?.toString() ?? '').toMatchInlineSnapshot(`2 * 10`);
     });
 
     it('should compile a block with two statements', () => {
@@ -32,7 +32,7 @@ describe('COMPILE', () => {
       expect(expr.compile()?.toString() ?? '').toMatchInlineSnapshot(`
         (() => {
         13 + 15;
-        return 10 * 2
+        return 2 * 10
         })()
       `);
     });
@@ -48,7 +48,7 @@ describe('COMPILE', () => {
         (() => {
         let x;
         x = 4.1;
-        return x * _.n
+        return _.n * x
         })()
       `);
     });
@@ -66,15 +66,15 @@ describe('COMPILE', () => {
         let x;
         x = 4.1;
         return x + 1;
-        return x * 2
+        return 2 * x
         })()
       `);
     });
   });
 
   describe('Imported Functions', () => {
-    ce.defineFunction('Foo', {
-      signature: 'number -> number',
+    ce.declare('Foo', {
+      signature: '(number) -> number',
       evaluate: ([x]) => ce.box(['Add', x, 1]),
     });
 
@@ -111,7 +111,7 @@ describe('COMPILE', () => {
     it('should compile an if statement', () => {
       const expr = ce.box(['If', ['Greater', 'x', 0], 'x', ['Negate', 'x']]);
       expect(expr.compile()?.toString() ?? '').toMatchInlineSnapshot(
-        `((_.x > 0) ? (_.x) : (-_.x))`
+        `((0 < _.x) ? (_.x) : (-_.x))`
       );
     });
 
@@ -123,7 +123,7 @@ describe('COMPILE', () => {
         ['Block', ['Negate', 'x']],
       ]);
       expect(expr.compile()?.toString() ?? '').toMatchInlineSnapshot(
-        `((_.x > 0) ? (_.x) : (-_.x))`
+        `((0 < _.x) ? (_.x) : (-_.x))`
       );
     });
   });

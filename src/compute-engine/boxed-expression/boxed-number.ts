@@ -1,7 +1,7 @@
 import { Complex } from 'complex-esm';
 import { Decimal } from 'decimal.js';
 
-import type { Expression, MathJsonNumber } from '../../math-json';
+import type { Expression, MathJsonNumberObject } from '../../math-json';
 
 import { mul, div } from './arithmetic-mul-div';
 
@@ -78,7 +78,7 @@ export class BoxedNumber extends _BoxedExpression {
       | NumericValueData
       | ExactNumericValueData
       | NumericValue,
-    options?: { metadata?: Metadata; canonical?: boolean }
+    options?: { metadata?: Metadata }
   ) {
     super(ce, options?.metadata);
     if (value instanceof NumericValue || typeof value === 'number')
@@ -88,13 +88,14 @@ export class BoxedNumber extends _BoxedExpression {
 
   get hash(): number {
     this._hash ??= hashCode(this._value.toString());
-    console.info('hash BoxedNumber ', this._hash);
+    // console.info('hash BoxedNumber ', this._hash);
     return this._hash;
   }
 
   get json(): Expression {
     // Note: the `.json` property outputs a "default" serialization
-    // which does not attempt to capture all the information in the expression.
+    // which does not attempt to capture all the information in the
+    // expression.
     // In particular for numbers, it may output a numeric approximation of
     // the number that can be represented as a JSON number, rather than
     // the exact value.
@@ -183,14 +184,15 @@ export class BoxedNumber extends _BoxedExpression {
   }
 
   inv(): BoxedExpression {
-    if (this.value === 1 || this.value === -1) return this;
     if (typeof this._value === 'number') {
+      if (Math.abs(this._value) === 1) return this;
       if (!Number.isInteger(this._value))
         return this.engine.number(1 / this._value);
       return this.engine.number(
         this.engine._numericValue({ rational: [1, this._value] })
       );
     }
+    if (Math.abs(this.re) === 1 && this.im === 0) return this;
     return this.engine.number(this._value.inv());
   }
 
@@ -222,7 +224,7 @@ export class BoxedNumber extends _BoxedExpression {
 
       return ce.number(this._value.add(rhs.numericValue));
     }
-    return add(this.canonical, rhs.canonical);
+    return add(this, rhs.canonical);
   }
 
   mul(rhs: NumericValue | number | BoxedExpression): BoxedExpression {
@@ -267,8 +269,6 @@ export class BoxedNumber extends _BoxedExpression {
   }
 
   root(exp: number | BoxedExpression): BoxedExpression {
-    if (!this.isCanonical) return this.canonical.root(exp);
-
     if (typeof exp === 'number') {
       if (exp === 0) return this.engine.NaN;
       if (exp === 1) return this;
@@ -327,7 +327,6 @@ export class BoxedNumber extends _BoxedExpression {
 
   ln(semiBase?: number | BoxedExpression): BoxedExpression {
     const base = semiBase ? this.engine.box(semiBase) : undefined;
-    if (!this.isCanonical) return this.canonical.ln(base);
 
     // Mathematica returns `Log[0]` as `-∞`
     if (this.is(0)) return this.engine.NegativeInfinity;
@@ -365,34 +364,35 @@ export class BoxedNumber extends _BoxedExpression {
     return this.engine._fn('Ln', [this]);
   }
 
+  get value(): BoxedExpression {
+    return this;
+  }
+
   get type(): BoxedType {
     if (typeof this._value === 'number') {
-      if (Number.isNaN(this._value)) return new BoxedType('number');
-      if (!Number.isFinite(this._value))
-        return new BoxedType('non_finite_number');
-      return new BoxedType(
-        Number.isInteger(this._value) ? 'finite_integer' : 'finite_real'
-      );
+      if (Number.isNaN(this._value)) return BoxedType.number;
+      if (!Number.isFinite(this._value)) return BoxedType.non_finite_number;
+      return Number.isInteger(this._value)
+        ? BoxedType.finite_integer
+        : BoxedType.finite_real;
     }
 
-    return new BoxedType(this._value.type);
+    return new BoxedType(this._value.type, this.engine._typeResolver);
   }
 
   get sgn(): Sign | undefined {
     if (this._value === 0) return 'zero';
 
     let s: number | undefined;
-    if (typeof this._value === 'number') {
-      s = Math.sign(this._value);
-    } else s = this._value.sgn(); // 'NumericValue'
+    if (typeof this._value === 'number') s = Math.sign(this._value);
+    else s = this._value.sgn();
 
-    // indicates a complex Numeric Value
-    // aside from 'complex-infinity', will be 'unsigned'
-    if (s === undefined) {
-      return 'unsigned';
-    }
+    // If undefined, it's a complex number. Return 'unsigned'
+    if (s === undefined) return 'unsigned';
+
     if (Number.isNaN(s)) return 'unsigned';
-    //Should leave only the reals
+
+    // It's a real number
     if (s === 0) return 'zero';
     if (s > 0) return 'positive';
     return 'negative';
@@ -422,6 +422,9 @@ export class BoxedNumber extends _BoxedExpression {
     options?: { canonical?: CanonicalOptions }
   ): BoxedExpression {
     if (this.isStructural) return this;
+    // Apply the substition to the structural version of the number.
+    // For example, `3/4` will be replaced by
+    // ["Rational", 3, 4].subs({ "Rational": "Divide" }) -> ["Divide", 3, 4]
     return this.structural.subs(sub, options);
   }
 
@@ -539,17 +542,22 @@ export class BoxedNumber extends _BoxedExpression {
     return isSubtype(this._value.type, 'real');
   }
 
-  is(rhs: any): boolean {
-    if (typeof rhs === 'number') {
-      if (typeof this._value === 'number') return this._value === rhs;
-      return this._value.eq(rhs);
+  is(other: BoxedExpression | number | bigint | boolean): boolean {
+    if (typeof other === 'number') {
+      // We want to be able to compare NaN with NaN, so we have to use
+      // Object.is() instead of === (which return false for NaN === NaN)
+      if (typeof this._value === 'number') return Object.is(this._value, other);
+
+      if (this._value.isNaN) return Object.is(other, NaN);
+
+      return this._value.eq(other);
     }
-    if (typeof rhs === 'bigint') {
-      if (typeof this._value === 'number') return bigint(this._value) === rhs;
-      return this._value.eq(this.engine._numericValue(rhs));
+    if (typeof other === 'bigint') {
+      if (typeof this._value === 'number') return bigint(this._value) === other;
+      return this._value.eq(this.engine._numericValue(other));
     }
-    // @fixme: we don't handle the case where rhs is a complex number expressed as a string...
-    return false;
+    if (typeof other === 'boolean') return false;
+    return this.isSame(other);
   }
 
   get canonical(): BoxedExpression {
@@ -577,7 +585,7 @@ export class BoxedNumber extends _BoxedExpression {
   }
 
   simplify(options?: Partial<SimplifyOptions>): BoxedExpression {
-    const results = simplify(this.canonical.structural, options);
+    const results = simplify(this.structural, options);
 
     return results.at(-1)!.value ?? this;
   }
@@ -590,10 +598,10 @@ export class BoxedNumber extends _BoxedExpression {
   N(): BoxedExpression {
     const v = this._value;
     if (typeof v === 'number') return this;
-    //NumericValue
+    // NumericValue
     const n = v.N();
-    //Often, 'evaluating' a numeric-value yields the same result, but sometimes may result in a
-    //different representation: e.g. some cases of Exact -> Big
+    // Often, 'evaluating' a numeric-value yields the same result, but sometimes may result in a
+    // different representation: e.g. some cases of Exact -> Big
     if (v === n) return this;
     return this.engine.number(n);
   }
@@ -609,7 +617,7 @@ export function canonicalNumber(
     | Complex
     | Rational
     | NumericValue
-    | MathJsonNumber
+    | MathJsonNumberObject
 ): number | NumericValue {
   if (value === undefined || value === null) return NaN;
 
@@ -703,8 +711,9 @@ function canonicalNumberString(
 
   // Special case some common values to share boxed instances
   if (s === 'nan') return NaN;
-  if (s === 'infinity' || s === '+infinity') return Number.POSITIVE_INFINITY;
-  if (s === '-infinity') return Number.NEGATIVE_INFINITY;
+  if (s === 'infinity' || s === '+infinity' || s === 'oo' || s === '+oo')
+    return Number.POSITIVE_INFINITY;
+  if (s === '-infinity' || s === '-oo') return Number.NEGATIVE_INFINITY;
   if (s === '0') return 0;
   if (s === '1') return 1;
   if (s === '-1') return -1;

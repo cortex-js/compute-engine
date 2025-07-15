@@ -1,17 +1,15 @@
 import { Complex } from 'complex-esm';
-import { TensorField, getSupertype, makeTensorField } from './tensor-fields';
+import { getSupertype, makeTensorField } from './tensor-fields';
 import type {
   BoxedExpression,
   ComputeEngine,
   DataTypeMap,
   TensorData,
   TensorDataType,
+  NestedArray,
+  Tensor,
+  TensorField,
 } from '../global-types';
-
-/** @internal */
-export type NestedArray<T> = NestedArray_<T>[];
-/** @internal */
-export type NestedArray_<T> = T | NestedArray_<T>[];
 
 // @todo: See also:
 // - https://github.com/scalanlp/breeze/wiki/Linear-Algebra-Cheat-Sheet
@@ -31,7 +29,7 @@ export type NestedArray_<T> = T | NestedArray_<T>[];
 // - Matrix: a matrix (2D tensor) of scalars. Has full support for operations.
 /** @category Tensors */
 export abstract class AbstractTensor<DT extends keyof DataTypeMap>
-  implements TensorData<DT>
+  implements Tensor<DT>
 {
   /**
    * Return a tuple of tensors that have the same dtype.
@@ -96,7 +94,6 @@ export abstract class AbstractTensor<DT extends keyof DataTypeMap>
     return makeTensor(lhs_.ce, {
       dtype: lhs_.dtype,
       shape: lhs_.shape,
-      rank: lhs_.rank,
       data,
     });
   }
@@ -141,21 +138,17 @@ export abstract class AbstractTensor<DT extends keyof DataTypeMap>
       if (indices.length === rank - 1) {
         // Base case: vector
         const idx = index(indices);
-        const result = this.ce._fn(
+        return this.ce._fn(
           'List',
           data.slice(idx, idx + shape[rank - 1]).map((x) => expression(x))
         );
-        result.isCanonical = result.ops!.every((x) => x.isCanonical);
-        return result;
       } else {
         // Recursive case: tensor
         const list: BoxedExpression[] = [];
-        for (let i = 0; i <= shape[indices.length] - 1; i++)
-          list.push(fill([...indices, i + 1]));
+        for (let i = 1; i <= shape[indices.length]; i++)
+          list.push(fill([...indices, i]));
 
-        const result = this.ce._fn('List', list);
-        result.isCanonical = result.ops!.every((x) => x.isCanonical);
-        return result;
+        return this.ce._fn('List', list);
       }
     };
     return fill([]);
@@ -364,8 +357,33 @@ export abstract class AbstractTensor<DT extends keyof DataTypeMap>
     return makeTensor(this.ce, {
       dtype: this.dtype,
       shape,
-      rank: shape.length,
       data: this.data,
+    });
+  }
+
+  slice(index: number): AbstractTensor<DT> {
+    if (index < 0) index = this.shape[0] + index + 1;
+
+    if (this.rank === 0) return this;
+
+    if (this.rank === 1) {
+      const value = this.data[index - 1];
+      return makeTensor(this.ce, {
+        dtype: this.dtype,
+        shape: [],
+        data: [value],
+      });
+    }
+
+    const size = this.shape[1];
+    const stride = this._strides[0];
+    const start = index * stride;
+    const end = start + stride;
+
+    return makeTensor(this.ce, {
+      dtype: this.dtype,
+      shape: this.shape.slice(1),
+      data: this.data.slice(start, end),
     });
   }
 
@@ -379,7 +397,6 @@ export abstract class AbstractTensor<DT extends keyof DataTypeMap>
     return makeTensor(this.ce, {
       dtype,
       shape: this.shape,
-      rank: this.rank,
       data: data as DataTypeMap[DT][],
     });
   }
@@ -421,7 +438,6 @@ export abstract class AbstractTensor<DT extends keyof DataTypeMap>
     return makeTensor(this.ce, {
       dtype: this.dtype,
       shape: [n, m],
-      rank: 2,
       data: result,
     });
   }
@@ -532,7 +548,6 @@ export abstract class AbstractTensor<DT extends keyof DataTypeMap>
       return makeTensor(this.ce, {
         dtype: this.dtype,
         shape: [n, n],
-        rank: 2,
         data: inverseData,
       });
     }
@@ -599,7 +614,6 @@ export abstract class AbstractTensor<DT extends keyof DataTypeMap>
     return makeTensor(this.ce, {
       dtype: this.dtype,
       shape: [n, n],
-      rank: 2,
       data: inverseData,
     });
   }
@@ -630,7 +644,6 @@ export abstract class AbstractTensor<DT extends keyof DataTypeMap>
     return makeTensor(this.ce, {
       dtype: this.dtype,
       shape: this.shape,
-      rank: this.rank,
       data: this.data.map((v) => fn(v, scalar)),
     });
   }
@@ -643,7 +656,6 @@ export abstract class AbstractTensor<DT extends keyof DataTypeMap>
     return makeTensor(this.ce, {
       dtype: this.dtype,
       shape: this.shape,
-      rank: this.rank,
       data: this.data.map((v, i) => fn(v, rhsData[i])),
     });
   }
@@ -764,9 +776,7 @@ class GenericTensor extends AbstractTensor<'expression'> {
 /** @category Tensors */
 export function makeTensor<T extends TensorDataType>(
   ce: ComputeEngine,
-  data:
-    | TensorData<T>
-    | { operator: string; ops: BoxedExpression[]; dtype: T; shape: number[] }
+  data: TensorData<T>
 ): AbstractTensor<T> {
   const dtype: T = data.dtype;
   if (
@@ -798,7 +808,6 @@ export function makeTensor<T extends TensorDataType>(
   ) as AbstractTensor<T>;
 }
 
-export { TensorData };
 // 0 -> scalar
 // 1 -> vector
 // 2 -> 2D matrix

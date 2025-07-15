@@ -130,10 +130,8 @@ const DERIVATIVES_TABLE = {
 
 /**
  *
- * @param fn The function to differentiate, a `["Function"]` expression or
- * an identifier for a function name.
+ * @param fn The function to differentiate, a function literal.
  *
- * @param degrees
  * @returns a function expression representing the derivative of `fn` with
  * respect to the variables in `degrees`.
  */
@@ -144,13 +142,13 @@ export function derivative(
   if (order === 0) return fn;
   const ce = fn.engine;
   let v = '_';
-  if (fn.symbol && fn.functionDefinition) {
+  if (fn.symbol && fn.operatorDefinition) {
     // We have, e.g. fn = 'Sin"
     fn = apply(ce.symbol(fn.symbol), [ce.symbol('_')]);
   }
   if (fn.operator === 'Function') {
     // We have, e.g. fn = ['Function', ['Sin', 'x'], 'x']
-    v = fn.ops![1].symbol ?? '_';
+    v = fn.ops![1]?.symbol ?? '_';
     fn = fn.ops![0];
   }
   let result: BoxedExpression | undefined = fn;

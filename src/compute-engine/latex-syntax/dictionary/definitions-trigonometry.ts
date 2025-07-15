@@ -133,13 +133,13 @@ export const DEFINITIONS_TRIGONOMETRY: LatexDictionary = [
     parse: parseTrig('Arctan'),
   },
   {
-    // Variant, identifier
-    identifierTrigger: 'arctg',
+    // Variant, symbol
+    symbolTrigger: 'arctg',
     parse: parseTrig('Arctan'),
   },
   {
     name: 'Arccot',
-    identifierTrigger: 'arcctg',
+    symbolTrigger: 'arcctg',
     parse: parseTrig('Arccot'),
   },
   {
@@ -149,18 +149,18 @@ export const DEFINITIONS_TRIGONOMETRY: LatexDictionary = [
   },
   {
     name: 'Arccoth',
-    identifierTrigger: 'arccoth',
+    symbolTrigger: 'arccoth',
 
     parse: parseTrig('Arccoth'),
   },
   {
     // Accept variant with `ar-` prefix
-    identifierTrigger: 'arcoth',
+    symbolTrigger: 'arcoth',
     parse: parseTrig('Arccoth'),
   },
   {
-    // Accept as identifier
-    identifierTrigger: 'arccoth',
+    // Accept as symbol
+    symbolTrigger: 'arccoth',
     parse: parseTrig('Arccoth'),
   },
   {
@@ -170,7 +170,7 @@ export const DEFINITIONS_TRIGONOMETRY: LatexDictionary = [
   },
   {
     name: 'Arcsec',
-    identifierTrigger: 'arcsec',
+    symbolTrigger: 'arcsec',
 
     parse: parseTrig('Arcsec'),
   },
@@ -182,7 +182,7 @@ export const DEFINITIONS_TRIGONOMETRY: LatexDictionary = [
   },
   {
     name: 'Arccsc',
-    identifierTrigger: 'arccsc',
+    symbolTrigger: 'arccsc',
 
     parse: parseTrig('Arccsc'),
   },
@@ -194,7 +194,7 @@ export const DEFINITIONS_TRIGONOMETRY: LatexDictionary = [
   },
   {
     name: 'Arcsinh',
-    identifierTrigger: 'arcsinh',
+    symbolTrigger: 'arcsinh',
 
     parse: parseTrig('Arcsinh'),
   },
@@ -212,7 +212,7 @@ export const DEFINITIONS_TRIGONOMETRY: LatexDictionary = [
   },
   {
     name: 'Arccosh',
-    identifierTrigger: 'arccosh',
+    symbolTrigger: 'arccosh',
 
     parse: parseTrig('Arccosh'),
   },
@@ -228,18 +228,18 @@ export const DEFINITIONS_TRIGONOMETRY: LatexDictionary = [
   },
   {
     // Variant, with `ar-` prefix
-    identifierTrigger: 'arcosh',
+    symbolTrigger: 'arcosh',
     parse: parseTrig('Arccosh'),
   },
   {
     name: 'Arctanh',
-    identifierTrigger: 'arctanh',
+    symbolTrigger: 'arctanh',
 
     parse: parseTrig('Arctanh'),
   },
   {
     // Variant with `ar-` prefix
-    identifierTrigger: 'artanh',
+    symbolTrigger: 'artanh',
 
     parse: parseTrig('Arctanh'),
   },
@@ -255,12 +255,12 @@ export const DEFINITIONS_TRIGONOMETRY: LatexDictionary = [
   },
   {
     // Variant, with `ar-` prefix
-    identifierTrigger: 'artanh',
+    symbolTrigger: 'artanh',
     parse: parseTrig('Arctanh'),
   },
   {
     name: 'Arcsech',
-    identifierTrigger: 'arcsech',
+    symbolTrigger: 'arcsech',
     parse: parseTrig('Arcsech'),
   },
   {
@@ -275,7 +275,7 @@ export const DEFINITIONS_TRIGONOMETRY: LatexDictionary = [
   },
   {
     name: 'Arccsch',
-    identifierTrigger: 'arccsch',
+    symbolTrigger: 'arccsch',
     parse: parseTrig('Arccsch'),
   },
   {
@@ -290,7 +290,7 @@ export const DEFINITIONS_TRIGONOMETRY: LatexDictionary = [
   },
   {
     name: 'Cosec',
-    identifierTrigger: 'cosec',
+    symbolTrigger: 'cosec',
 
     parse: parseTrig('Cosec'),
   },
@@ -353,7 +353,7 @@ export const DEFINITIONS_TRIGONOMETRY: LatexDictionary = [
   },
   {
     // Variant
-    identifierTrigger: 'cth',
+    symbolTrigger: 'cth',
     parse: parseTrig('Coth'),
   },
   {
@@ -369,7 +369,7 @@ export const DEFINITIONS_TRIGONOMETRY: LatexDictionary = [
   },
   {
     name: 'Sech',
-    identifierTrigger: 'sech',
+    symbolTrigger: 'sech',
     parse: parseTrig('Sech'),
   },
   {

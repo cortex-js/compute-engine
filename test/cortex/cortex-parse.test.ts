@@ -473,7 +473,7 @@ describe('CORTEX PARSING SINGLE-LINE STRINGS', () => {
       str: 'hello a world',
     });
     expect(validCortex('"hello \\u{1F30D}"')).toStrictEqual({
-      str: 'hello 🌍',
+      str: 'hello \\ud83c\\udf0d',
     });
     expect(validCortex('"hello \\\\ world"')).toStrictEqual({
       str: 'hello \\\\ world',
@@ -713,7 +713,7 @@ describe('CORTEX PARSING MULTILINE STRINGS', () => {
     });
 
     expect(validCortex('"""\nhello\n \\u{1F30D}\n"""')).toStrictEqual({
-      str: 'hello\\n 🌍',
+      str: 'hello\\n \\ud83c\\udf0d',
     });
 
     expect(validCortex('"""\n   hello\n   world\n   """')).toStrictEqual({

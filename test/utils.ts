@@ -356,7 +356,6 @@ export function benchmark(
   fn: () => void,
   expected?: { time: number; mem: number; exprs: number }
 ) {
-  const startHighwatermark = engine.stats.highwaterMark;
   const startMem = process.memoryUsage().heapUsed;
   const start = globalThis.performance.now();
 
@@ -364,42 +363,18 @@ export function benchmark(
 
   const end = globalThis.performance.now();
   const endMem = process.memoryUsage().heapUsed;
-  const stats = engine.stats;
 
   const delta = {
     time: end - start,
     mem: endMem - startMem,
-    exprs: stats.highwaterMark - startHighwatermark,
   };
   if (!expected) {
-    console.log(
-      'mem:',
-      delta.mem,
-      ', time:',
-      delta.time.toFixed(2),
-      ', exprs:',
-      delta.exprs
-    );
+    console.log('mem:', delta.mem, ', time:', delta.time.toFixed(2));
     return 1000;
   }
 
-  if (stats['_dupeSymbols'])
-    console.log(
-      'Dupe symbols\n',
-      stats['_dupeSymbols'].map(([k, v]) => '  ' + k + ': ' + v).join('\n')
-    );
-
-  if (stats['_popularExpressions'])
-    console.log(
-      'Popular expressions\n',
-      stats['_popularExpressions']
-        .map(([k, v]) => '  ' + k + ': ' + v)
-        .join('\n')
-    );
-
   // Memory is not a reliable measurement because of unpredictable GC
-  const variance =
-    Math.max(delta.time / expected.time, delta.exprs / expected.exprs) - 1;
+  const variance = delta.time / expected.time - 1;
 
   if (true || Math.abs(variance) > 0.1) {
     console.error(
@@ -411,9 +386,6 @@ export function benchmark(
         `\n    time ${emoji(delta.time, expected.time)}`,
       `${timeToString(delta.time)} (${timeToString(expected.time)} ${Number(
         (100 * delta.time) / expected.time
-      ).toFixed(2)}%)` + `\n   exprs ${emoji(delta.exprs, expected.exprs)}`,
-      `${delta.exprs} (${expected.exprs} ${Number(
-        (100 * delta.exprs) / expected.exprs
       ).toFixed(2)}%)`
     );
   }

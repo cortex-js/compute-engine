@@ -1,4 +1,4 @@
-import { LatexDictionary, Parser, Serializer } from '../types';
+import type { LatexDictionary, Parser, Serializer } from '../types';
 
 import {
   operand,
@@ -11,7 +11,7 @@ import {
   isEmptySequence,
   symbol,
 } from '../../../math-json/utils';
-import { Expression, MathJsonIdentifier } from '../../../math-json/types';
+import { Expression, MathJsonSymbol } from '../../../math-json/types';
 import { joinLatex } from '../tokenizer';
 
 function parseSingleArg(cmd: string): (parser: Parser) => Expression {
@@ -126,7 +126,7 @@ export const DEFINITIONS_OTHERS: LatexDictionary = [
       let rhs = parser.parseGroup() ?? 'Nothing';
       if (!isEmptySequence(rhs)) {
         const args = parser.parseArguments() ?? ['Nothing'];
-        rhs = [rhs as MathJsonIdentifier, ...args];
+        rhs = [rhs as MathJsonSymbol, ...args];
       }
       return ['PartialDerivative', rhs, sub, sup] as Expression;
     },
@@ -225,65 +225,81 @@ export const DEFINITIONS_OTHERS: LatexDictionary = [
   },
 
   {
+    latexTrigger: ['\\textcolor'],
+    parse: (parser: Parser): Expression => {
+      const pos = parser.index;
+      const color = parser.parseStringGroup();
+      const body = parser.parseGroup();
+      if (color !== null) {
+        if (body !== null) return ['Annotated', body, { dict: { color } }];
+        return 'Nothing';
+      }
+      // We had an opening `\textcolor` but no closing `}`
+      // We return the `\textcolor` command as a string
+      parser.index = pos;
+      return 'Nothing';
+    },
+  },
+  {
     latexTrigger: ['\\displaystyle'],
-    parse: () => 'Nothing', // @todo: parse as ['Style'...]
+    parse: () => 'Nothing', // @todo: parse as ['Annotated'...]
   },
   {
     latexTrigger: ['\\textstyle'],
-    parse: () => 'Nothing', // @todo: parse as ['Style'...]
+    parse: () => 'Nothing', // @todo: parse as ['Annotated'...]
   },
   {
     latexTrigger: ['\\scriptstyle'],
-    parse: () => 'Nothing', // @todo: parse as ['Style'...]
+    parse: () => 'Nothing', // @todo: parse as ['Annotated'...]
   },
   {
     latexTrigger: ['\\scriptscriptstyle'],
-    parse: () => 'Nothing', // @todo: parse as ['Style'...]
+    parse: () => 'Nothing', // @todo: parse as ['Annotated'...]
   },
 
   {
     latexTrigger: ['\\tiny'],
-    parse: () => 'Nothing', // @todo: parse as ['Style'...]
+    parse: () => 'Nothing', // @todo: parse as ['Annotated'...]
   },
   {
     latexTrigger: ['\\scriptsize'],
-    parse: () => 'Nothing', // @todo: parse as ['Style'...]
+    parse: () => 'Nothing', // @todo: parse as ['Annotated'...]
   },
   {
     latexTrigger: ['\\footnotesize'],
-    parse: () => 'Nothing', // @todo: parse as ['Style'...]
+    parse: () => 'Nothing', // @todo: parse as ['Annotated'...]
   },
   {
     latexTrigger: ['\\small'],
-    parse: () => 'Nothing', // @todo: parse as ['Style'...]
+    parse: () => 'Nothing', // @todo: parse as ['Annotated'...]
   },
   {
     latexTrigger: ['\\normalsize'],
-    parse: () => 'Nothing', // @todo: parse as ['Style'...]
+    parse: () => 'Nothing', // @todo: parse as ['Annotated'...]
   },
   {
     latexTrigger: ['\\large'],
-    parse: () => 'Nothing', // @todo: parse as ['Style'...]
+    parse: () => 'Nothing', // @todo: parse as ['Annotated'...]
   },
   {
     latexTrigger: ['\\Large'],
-    parse: () => 'Nothing', // @todo: parse as ['Style'...]
+    parse: () => 'Nothing', // @todo: parse as ['Annotated'...]
   },
   {
     latexTrigger: ['\\LARGE'],
-    parse: () => 'Nothing', // @todo: parse as ['Style'...]
+    parse: () => 'Nothing', // @todo: parse as ['Annotated'...]
   },
   {
     latexTrigger: ['\\huge'],
-    parse: () => 'Nothing', // @todo: parse as ['Style'...]
+    parse: () => 'Nothing', // @todo: parse as ['Annotated'...]
   },
   {
     latexTrigger: ['\\Huge'],
-    parse: () => 'Nothing', // @todo: parse as ['Style'...]
+    parse: () => 'Nothing', // @todo: parse as ['Annotated'...]
   },
 
   {
-    name: 'Style',
+    name: 'Annotated',
     serialize: (serializer, expr): string => {
       let result = serializer.serialize(operand(expr, 1));
 
@@ -293,19 +309,15 @@ export const DEFINITIONS_OTHERS: LatexDictionary = [
       //
       // Display: "math style"
       //
-      if (stringValue(dict.display) === 'block')
+      if (stringValue(dict.dict.mathStyle) === 'normal')
         result = joinLatex(['{\\displaystyle', result, '}']);
-      else if (stringValue(dict.display) === 'inline')
+      else if (stringValue(dict.dict.mathStyle) === 'compact')
         result = joinLatex(['{\\textstyle', result, '}']);
-      else if (stringValue(dict.display) === 'script')
-        result = joinLatex(['{\\scriptstyle', result, '}']);
-      else if (stringValue(dict.display) === 'scriptscript')
-        result = joinLatex(['{\\scriptscriptstyle', result, '}']);
 
       //
       // Font Size
       //
-      const v = machineValue(dict.size);
+      const v = machineValue(dict.dict.size);
       if (v !== null && v >= 1 && v <= 10) {
         result = joinLatex([
           '{',

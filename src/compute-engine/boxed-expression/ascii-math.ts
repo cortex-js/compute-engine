@@ -27,6 +27,7 @@ const SYMBOLS = {
   Pi: 'pi',
   ExponentialE: 'e',
   ImaginaryUnit: 'i',
+  ContinuationPlaceholder: '...',
 
   // Greek letters are valid symbols (i.e. don't need to be quoted)
   alpha: 'alpha',
@@ -228,10 +229,40 @@ const FUNCTIONS: Record<
   Max: 'max',
   Min: 'min',
 
+  PlusMinus: (expr, serialize) => {
+    const [lhs, rhs] = expr.ops ?? [];
+    if (!rhs) return serialize(lhs);
+    if (lhs && rhs) {
+      const lhs_ = serialize(lhs);
+      const rhs_ = serialize(rhs);
+      return `${lhs_} ± ${rhs_}`;
+    }
+    if (lhs) return `± ${serialize(lhs)}`;
+    if (rhs) return `± ${serialize(rhs)}`;
+    return '0';
+  },
+
   Sum: (expr: BoxedExpression, serialize) => bigOp(expr, 'sum', serialize),
   Product: (expr: BoxedExpression, serialize) => bigOp(expr, 'prod', serialize),
   Integrate: (expr: BoxedExpression, serialize) =>
     bigOp(expr, 'int', serialize),
+  Limit: (expr: BoxedExpression, serialize) => {
+    const [fn, val] = expr.ops ?? [];
+
+    if (fn?.operator === 'Function') {
+      const args = fn.ops?.slice(2) ?? [];
+      const body = fn.op1 ?? fn;
+      let arg: BoxedExpression | null = null;
+      if (args.length === 1) arg = args[0];
+      return arg
+        ? `lim_(${serialize(arg)} -> ${serialize(val)}) ${serialize(body)}`
+        : `lim_(${serialize(val)}) ${serialize(body)}`;
+    } else if (fn?.symbol) {
+      return `lim_(x -> ${serialize(val)}) ${serialize(fn)}(x)`;
+    }
+
+    return `lim`;
+  },
 
   // Note: use ops[0], not op1 because op1 is "Nothing" when empty, and
   // we need to correctly handle `["Delimiter"]`
@@ -253,11 +284,43 @@ const FUNCTIONS: Record<
   Tuple: (expr: BoxedExpression, serialize) =>
     `(${expr.ops!.map((x) => serialize(x)).join(', ')})`,
 
-  Function: (expr: BoxedExpression, serialize) =>
-    `(${expr
-      .ops!.slice(1)
-      .map((x) => serialize(x))
-      .join(', ')}) |-> {${serialize(expr.op1)}}`,
+  Block: (expr: BoxedExpression, serialize) => {
+    if (expr.nops === 0) return '{}';
+    if (expr.nops === 1) return `{${serialize(expr.op1)}}`;
+    return `{    ${expr.ops!.map((x) => serialize(x)).join(';\n     ')}\n    }`;
+  },
+
+  EvaluateAt: (expr: BoxedExpression, serialize) => {
+    // Output f|_(...)
+    const f = expr.op1;
+    const args = expr.ops!.slice(1);
+    if (args.length === 0) return serialize(f);
+    if (args.length === 1) return `(${serialize(f)})|_(${serialize(args[0])})`;
+    if (args.length === 2)
+      return `(${serialize(f)})|_(${serialize(args[0])})^(${serialize(args[1])})`;
+    return `(${serialize(f)})|_(${args.map((x) => serialize(x)).join(', ')})`;
+  },
+
+  Function: (expr: BoxedExpression, serialize) => {
+    const args = expr.ops!.slice(1);
+
+    const serializedArgs = () => args.map((x) => serialize(x)).join(', ');
+
+    if (expr.op1.operator === 'Block') {
+      if (expr.op1.nops === 0) return `(${serializedArgs()}) |-> {}`;
+      if (expr.op1.nops === 1) {
+        if (args.length === 1 && args[0].symbol === '_1') {
+          // If there is a single argument and it's _1, we can use _ instead
+          return `(_) |-> ${serialize(expr.op1.op1.subs({ _1: '_' }))}`;
+        }
+        return `(${serializedArgs()}) |-> ${serialize(expr.op1.op1)}`;
+      }
+      return `(${serializedArgs()}) |-> {\n    ${expr.op1
+        .ops!.map((x) => serialize(x))
+        .join(';\n     ')}\n}`;
+    }
+    return `(${serializedArgs()}) |-> ${serialize(expr.op1)}`;
+  },
 
   Domain: (expr: BoxedExpression) => JSON.stringify(expr.json),
   Error: (expr: BoxedExpression, serialize) => {
@@ -278,22 +341,76 @@ function bigOp(
   expr: BoxedExpression,
   op: string,
   serialize: AsciiMathSerializer
-) {
-  const op2 = expr.op2;
-  let index: BoxedExpression | null = op2?.op1;
-  let start: BoxedExpression | null = op2?.op2;
-  let end: BoxedExpression | null = op2?.op3;
-  if (index.symbol === 'Nothing') index = null;
-  if (start.symbol === 'Nothing') start = null;
-  if (end.symbol === 'Nothing') end = null;
+): string {
+  const [fn, ...limits] = expr.ops ?? [];
+
+  const indexes: BoxedExpression[] = [];
+  let body: string;
+
+  let args: ReadonlyArray<BoxedExpression> = [];
+
+  if (fn?.operator === 'Function') {
+    args = fn.ops!.slice(1) ?? [];
+    const b = fn.op1 ?? fn;
+    if (b.operator === 'Block') body = serialize(b.op1 ?? b);
+    else body = serialize(b);
+  } else if (fn?.symbol) {
+    args = [];
+    body = serialize(fn);
+  } else {
+    return 'int()';
+  }
 
   let result = op;
 
-  if (index && start) result += `_(${serialize(index)}=${serialize(start)})`;
+  for (const limit of limits) {
+    if (
+      !['Range', 'Tuple', 'Pair', 'Single', 'Limits'].includes(limit.operator)
+    )
+      continue;
+    if (limit.nops === 0) continue;
+    if (limit.nops === 2) {
+      if (limit.op1.symbol) {
+        // ["Integrate", ["Tuple", "x", 1]]
+        if (limit.op1.symbol !== 'Nothing') indexes.push(limit.op1);
+        if (limit.op2.symbol !== 'Nothing') {
+          if (op === 'int') result += `_${wrap(serialize(limit.op2))}`;
+          else
+            result += '_' + wrap(`${limit.op1.symbol}=${serialize(limit.op2)}`);
+        }
+      } else {
+        // ["Integrate", ["Tuple", 1, 2]]
+        if (limit.op1.symbol !== 'Nothing')
+          result += `_${wrap(serialize(limit.op1))}`;
+        if (limit.op2.symbol !== 'Nothing')
+          result += `^${wrap(serialize(limit.op2))}`;
+      }
+    } else if (limit.nops === 3) {
+      let index = '';
+      if (limit.op1.symbol !== 'Nothing') {
+        indexes.push(limit.op1);
+        index = limit.op1.symbol ?? '';
+      }
+      const start = limit.op2.symbol !== 'Nothing' ? limit.op2 : null;
+      const end = limit.op3.symbol !== 'Nothing' ? limit.op3 : null;
 
-  if (end) result += `^${wrap(serialize(end))}`;
+      if (start) {
+        if (op === 'int' || !index) result += `_${wrap(serialize(start))}`;
+        else result += '_' + wrap(`${index}=${serialize(start)}`);
+      } else if (op !== 'int') {
+        result += `_${wrap(serialize(limit.op1))}`;
+      }
+      if (end) result += `^${wrap(serialize(end))}`;
+    }
+  }
 
-  return result + wrap(serialize(expr.op1));
+  if (op === 'int') {
+    result += wrap(body + args.map((x) => ` d${serialize(x)}`).join(' '));
+  } else {
+    result += wrap(body);
+  }
+
+  return result;
 }
 
 function delimiter(
@@ -339,6 +456,12 @@ function serializeSymbol(
   // Is there a default definition for this symbol?
   if (SYMBOLS[symbol]) return SYMBOLS[symbol];
 
+  // Don't quote wildcards
+  if (symbol.startsWith('_')) return symbol;
+
+  if (FUNCTIONS[symbol] && typeof FUNCTIONS[symbol] === 'string')
+    return FUNCTIONS[symbol];
+
   // Otherwise, quote the symbol if it's not a single character
   return symbol.length === 1 ? symbol : `"${symbol}"`;
 }
@@ -348,6 +471,9 @@ export function toAsciiMath(
   options: Partial<AsciiMathOptions> = {},
   precedence = 0
 ): string {
+  if (expr === undefined) return '[undefined]';
+  if (expr === null) return '[null]';
+
   //
   // A symbol?
   //
@@ -359,7 +485,9 @@ export function toAsciiMath(
   //
   // A string ?
   //
-  if (expr.string) return expr.string;
+  if (expr.string) {
+    return `"${expr.string.replace(/"/g, '\\"')}"`;
+  }
 
   //
   // A number ?
@@ -421,10 +549,7 @@ function joinMul(lhs: string, rhs: string) {
   if (!lhs) return rhs;
   if (!rhs) return lhs;
 
-  if (rhs.startsWith('-')) rhs = `(${rhs})`;
-
-  if (lhs === '-1') return `-${rhs}`;
-  if (rhs === '-1') return `-${lhs}`;
+  if (rhs.startsWith('-') || rhs.startsWith('+')) rhs = `(${rhs})`;
 
   // Is it a sequence of digits (integer) followed by a non-digit?
   // e.g. 2x, 3y, 4z, etc.
@@ -435,8 +560,7 @@ function joinMul(lhs: string, rhs: string) {
 function joinAdd(lhs: string, rhs: string) {
   if (!lhs) return rhs;
   if (!rhs) return lhs;
-  if (lhs === '0') return rhs;
-  if (rhs === '0') return lhs;
   if (rhs.startsWith('-')) return `${lhs} - ${rhs.substring(1)}`;
+  if (rhs.startsWith('+')) return `${lhs} + ${rhs.substring(1)}`;
   return `${lhs} + ${rhs}`;
 }

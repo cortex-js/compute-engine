@@ -40,7 +40,7 @@ export const DEFINITIONS_LINEAR_ALGEBRA: LatexDictionary = [
 
   {
     kind: 'environment',
-    identifierTrigger: 'pmatrix',
+    symbolTrigger: 'pmatrix',
     parse: (parser: Parser) => {
       const columns = parseColumnFormat(parser);
       const [operator, cells] = parseCells(parser);
@@ -56,7 +56,7 @@ export const DEFINITIONS_LINEAR_ALGEBRA: LatexDictionary = [
 
   {
     kind: 'environment',
-    identifierTrigger: 'bmatrix',
+    symbolTrigger: 'bmatrix',
     parse: (parser: Parser) => {
       const columns = parseColumnFormat(parser);
       const [operator, cells] = parseCells(parser);
@@ -70,7 +70,7 @@ export const DEFINITIONS_LINEAR_ALGEBRA: LatexDictionary = [
 
   {
     kind: 'environment',
-    identifierTrigger: 'Bmatrix',
+    symbolTrigger: 'Bmatrix',
     parse: (parser: Parser) => {
       const columns = parseColumnFormat(parser);
       const [operator, cells] = parseCells(parser);
@@ -84,7 +84,7 @@ export const DEFINITIONS_LINEAR_ALGEBRA: LatexDictionary = [
 
   {
     kind: 'environment',
-    identifierTrigger: 'vmatrix',
+    symbolTrigger: 'vmatrix',
     parse: (parser: Parser) => {
       const columns = parseColumnFormat(parser);
       const [operator, cells] = parseCells(parser);
@@ -98,7 +98,7 @@ export const DEFINITIONS_LINEAR_ALGEBRA: LatexDictionary = [
 
   {
     kind: 'environment',
-    identifierTrigger: 'Vmatrix',
+    symbolTrigger: 'Vmatrix',
     parse: (parser: Parser) => {
       const columns = parseColumnFormat(parser);
       const [operator, cells] = parseCells(parser);
@@ -112,7 +112,7 @@ export const DEFINITIONS_LINEAR_ALGEBRA: LatexDictionary = [
 
   {
     kind: 'environment',
-    identifierTrigger: 'smallmatrix',
+    symbolTrigger: 'smallmatrix',
     parse: (parser: Parser) => {
       const columns = parseColumnFormat(parser);
       const [operator, cells] = parseCells(parser);
@@ -126,7 +126,7 @@ export const DEFINITIONS_LINEAR_ALGEBRA: LatexDictionary = [
 
   {
     kind: 'environment',
-    identifierTrigger: 'array',
+    symbolTrigger: 'array',
     parse: (parser: Parser) => {
       const columns = parseColumnFormat(parser, false);
       const [operator, cells] = parseCells(parser);
@@ -140,7 +140,7 @@ export const DEFINITIONS_LINEAR_ALGEBRA: LatexDictionary = [
 
   {
     kind: 'environment',
-    identifierTrigger: 'matrix',
+    symbolTrigger: 'matrix',
     parse: (parser: Parser) => {
       const columns = parseColumnFormat(parser);
       const [operator, cells] = parseCells(parser);
@@ -153,7 +153,7 @@ export const DEFINITIONS_LINEAR_ALGEBRA: LatexDictionary = [
   },
   {
     kind: 'environment',
-    identifierTrigger: 'matrix*',
+    symbolTrigger: 'matrix*',
     parse: (parser: Parser) => {
       const columns = parseColumnFormat(parser);
       const [operator, cells] = parseCells(parser);
@@ -224,13 +224,13 @@ export const DEFINITIONS_LINEAR_ALGEBRA: LatexDictionary = [
   {
     name: 'Trace',
     kind: 'function',
-    identifierTrigger: 'tr',
+    symbolTrigger: 'tr',
   },
 
   {
     name: 'Determinant',
     kind: 'function',
-    identifierTrigger: 'det',
+    symbolTrigger: 'det',
   },
 ];
 

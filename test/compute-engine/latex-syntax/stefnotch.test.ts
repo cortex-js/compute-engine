@@ -10,12 +10,12 @@ describe('STEFNOTCH #9', () => {
       .toMatchInlineSnapshot(`
       [
         "Integrate",
-        ["Multiply", 3, "x"],
+        ["Function", ["Multiply", 3, "x"], "x"],
         [
-          "Tuple",
+          "Limits",
           "Nothing",
-          ["Error", "'expected-closing-delimiter'", ["LatexString", "'{⬚}'"]],
-          ["Error", "'expected-closing-delimiter'", ["LatexString", "'{⬚}'"]]
+          ["Error", "expected-closing-delimiter", ["LatexString", "{⬚}"]],
+          ["Error", "expected-closing-delimiter", ["LatexString", "{⬚}"]]
         ]
       ]
     `);
@@ -28,7 +28,9 @@ describe('STEFNOTCH #10', () => {
       parse(
         '\\displaystyle \\left(\\sin^{-1}\\left(x\\right)\\right)^{\\prime}'
       )
-    ).toMatchInlineSnapshot(`["Derivative", ["Arcsin", "x"]]`);
+    ).toMatchInlineSnapshot(
+      `["Derivative", ["Function", ["Arcsin", "x"], "x"]]`
+    );
   });
 
   test('2/ 1^{\\sin(x)}', () => {
@@ -47,7 +49,7 @@ describe('STEFNOTCH #10', () => {
     expect(parse('\\color{red}3')).toMatchInlineSnapshot(`
       [
         "Tuple",
-        ["Error", "'unexpected-command'", ["LatexString", "'\\color'"]],
+        ["Error", "unexpected-command", ["LatexString", "\\color"]],
         "r",
         "ExponentialE",
         "d",
@@ -61,13 +63,9 @@ describe('STEFNOTCH #10', () => {
   });
 
   test('6/ f:[a,b]\\to R', () => {
-    expect(parse('f:[a,b]\\to R ')).toMatchInlineSnapshot(`
-      [
-        "Sequence",
-        "f",
-        ["Error", ["ErrorCode", "'unexpected-token'", "':'"]]
-      ]
-    `);
+    expect(parse('f:[a,b]\\to R ')).toMatchInlineSnapshot(
+      `["Sequence", "f", ["Error", ["ErrorCode", "unexpected-token", ":"]]]`
+    );
   });
 
   test('7/ \\lim_{n\\to\\infty}3', () => {
@@ -93,9 +91,9 @@ describe('STEFNOTCH #12', () => {
           "Error",
           [
             "ErrorCode",
-            "'incompatible-type'",
+            "incompatible-type",
             "'number'",
-            "'tuple<imaginary, finite_real, string>'"
+            "tuple<imaginary, finite_real, string>"
           ]
         ]
       ]
@@ -114,14 +112,17 @@ describe('STEFNOTCH #13', () => {
         [
           "Function",
           [
-            "Ceil",
+            "Block",
             [
-              "Error",
+              "Ceil",
               [
-                "ErrorCode",
-                "'incompatible-type'",
-                "'real'",
-                "'finite_number'"
+                "Error",
+                [
+                  "ErrorCode",
+                  "incompatible-type",
+                  "'real'",
+                  "'finite_number'"
+                ]
               ]
             ]
           ],
@@ -137,7 +138,7 @@ describe('STEFNOTCH #13', () => {
         "Pair",
         [
           "Equal",
-          ["Subscript", "x", ["Delimiter", ["Sequence", 1, 2], "','"]],
+          ["Subscript", "x", ["Delimiter", ["Sequence", 1, 2], ","]],
           1
         ],
         2
@@ -183,18 +184,11 @@ describe('STEFNOTCH #13', () => {
   });
 
   test('8/ a={displaystyle lim_{n\\toinfin}a_n}', () => {
-    expect(parse('a={\\displaystyle \\lim_{n\\to \\infty}a_n}'))
-      .toMatchInlineSnapshot(`
-      [
-        "Equal",
-        "a",
-        [
-          "Limit",
-          ["Function", ["Subscript", "a", "n"], "n"],
-          "PositiveInfinity"
-        ]
-      ]
-    `);
+    expect(
+      parse('a={\\displaystyle \\lim_{n\\to \\infty}a_n}')
+    ).toMatchInlineSnapshot(
+      `["Equal", "a", ["Limit", ["Function", "a_n", "n"], "PositiveInfinity"]]`
+    );
   });
 
   test('9/  \\forall x\\in\\C^2:|x|<0', () => {
@@ -229,7 +223,7 @@ describe('STEFNOTCH #13', () => {
             [
               "Limit",
               ["Function", ["Subscript", "c", "n"], "n"],
-              ["Error", "'unexpected-command'", ["LatexString", "'\\infin'"]]
+              ["Error", "unexpected-command", ["LatexString", "\\infin"]]
             ],
             "a"
           ]

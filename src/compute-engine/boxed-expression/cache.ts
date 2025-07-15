@@ -9,10 +9,10 @@ export function cachedValue<T>(
   generation: number | undefined,
   fn: () => T
 ): T {
-  if (v.generation === undefined || v.generation === generation) {
-    if (v.value === null) v.value = fn();
-    return v.value;
-  }
+  // if (v.generation === undefined || v.generation === generation) {
+  //   if (v.value === null) v.value = fn();
+  //   return v.value;
+  // }
 
   // If the generation is different, we need to update the value
   v.generation = generation;
@@ -25,10 +25,10 @@ export async function cachedValueAsync<T>(
   generation: number | undefined,
   fn: () => Promise<T>
 ): Promise<T> {
-  if (v.generation === undefined || v.generation === generation) {
-    if (v.value === null) v.value = await fn();
-    return v.value;
-  }
+  // if (v.generation === undefined || v.generation === generation) {
+  //   if (v.value === null) v.value = await fn();
+  //   return v.value;
+  // }
 
   // If the generation is different, we need to update the value
   v.generation = generation;

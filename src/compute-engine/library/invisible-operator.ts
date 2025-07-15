@@ -1,6 +1,5 @@
 import { flatten } from '../boxed-expression/flatten';
-import { isImaginaryUnit } from '../boxed-expression/utils';
-import { isIndexableCollection } from '../collection-utils';
+import { isImaginaryUnit, isOperatorDef } from '../boxed-expression/utils';
 import type { BoxedExpression, ComputeEngine } from '../global-types';
 
 export function canonicalInvisibleOperator(
@@ -51,14 +50,31 @@ export function canonicalInvisibleOperator(
     // definition followed by delimiter
     //
     if (lhs.symbol && rhs.operator === 'Delimiter') {
-      // @fixme: should use symbol table to check if it's a function
       // We have encountered something like `f(a+b)`, where `f` is not
       // defined. But it also could be `x(x+1)` where `x` is a number.
       // So, start with boxing the arguments and see if it makes sense.
 
-      // No arguments, i.e. `f()`? It's a function call.
+      // No arguments, i.e. `f()`? It's definitely a function call.
       if (rhs.nops === 0) {
-        if (!ce.lookupFunction(lhs.symbol)) ce.declare(lhs.symbol, 'function');
+        const def = ce.lookupDefinition(lhs.symbol);
+        if (def) {
+          if (isOperatorDef(def)) {
+            // It's a known operator, all good (the canonicalization
+            // will check the arity)
+            return ce.box([lhs.symbol]);
+          }
+
+          if (def.value.type.isUnknown) {
+            lhs.infer('function');
+            return ce.box([lhs.symbol]);
+          }
+
+          if (def.value.type.matches('function')) return ce.box([lhs.symbol]);
+
+          // Uh. Oh. It's a symbol with a value that is not a function.
+          return ce.typeError('function', def.value.type, lhs);
+        }
+        ce.declare(lhs.symbol, 'function');
         return ce.box([lhs.symbol]);
       }
 
@@ -66,10 +82,10 @@ export function canonicalInvisibleOperator(
       // i.e. `x(x+1)`.
       let args = rhs.op1.operator === 'Sequence' ? rhs.op1.ops! : [rhs.op1];
       args = flatten(args);
-      if (!ce.lookupSymbol(lhs.symbol)) {
+      if (!ce.lookupDefinition(lhs.symbol)) {
         // Still not a symbol (i.e. wasn't used as a symbol in the
         // subexpression), so it's a function call.
-        if (!ce.lookupFunction(lhs.symbol)) ce.declare(lhs.symbol, 'function');
+        ce.declare(lhs.symbol, 'function');
         return ce.function(lhs.symbol, args);
       }
     }
@@ -103,7 +119,7 @@ export function canonicalInvisibleOperator(
         x.isValid &&
         (x.type.isUnknown ||
           x.type.matches('number') ||
-          (isIndexableCollection(x) && !x.string))
+          (x.isIndexedCollection && !x.string))
     )
   ) {
     // Note: we don't want to use canonicalMultiply here, because

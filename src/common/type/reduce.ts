@@ -7,11 +7,12 @@ import type {
   AlgebraicType,
   CollectionType,
   ListType,
-  MapType,
   SetType,
   TupleType,
   FunctionSignature,
   NegationType,
+  DictionaryType,
+  RecordType,
 } from './types';
 import { isValidPrimitiveType } from './primitive';
 
@@ -43,7 +44,8 @@ export function reduceType(type: Type): Type {
       return reduceNegationType(type);
 
     case 'collection':
-      return reduceCollectionType(type);
+    case 'indexed_collection':
+      return reduceCollectionType(type.kind, type);
 
     case 'list':
       return reduceListType(type);
@@ -54,8 +56,11 @@ export function reduceType(type: Type): Type {
     case 'tuple':
       return reduceTupleType(type);
 
-    case 'map':
-      return reduceMapType(type);
+    case 'record':
+      return reduceRecordType(type);
+
+    case 'dictionary':
+      return reduceDictionaryType(type);
 
     case 'signature':
       return reduceSignatureType(type);
@@ -82,8 +87,6 @@ function decorate(t: Type): Type {
 function reduceNegationType(type: NegationType): Type {
   const reducedType = reduceType(type.type);
 
-  if (reducedType === 'error') return 'error';
-
   if (reducedType === 'nothing') return 'any';
 
   if (reducedType === 'any') return 'nothing';
@@ -92,7 +95,6 @@ function reduceNegationType(type: NegationType): Type {
 }
 
 function reduceUnionType(type: AlgebraicType): Type {
-  // Reduce union types
   const uniqueTypes = new Set(
     type.types.map((t) => typeToString(reduceType(t)))
   );
@@ -164,17 +166,19 @@ function reduceIntersectionType(type: AlgebraicType): Type {
   });
 }
 
-function reduceCollectionType(type: CollectionType): Type {
+function reduceCollectionType(
+  kind: 'collection' | 'indexed_collection',
+  type: CollectionType
+): Type {
   const reducedType = reduceType(type.elements);
 
   if (reducedType === 'error') return 'error';
 
   // A collection of `nothing` is an empty collection
-  if (reducedType === 'nothing')
-    return decorate({ kind: 'collection', elements: 'nothing' });
+  if (reducedType === 'nothing') return decorate({ kind, elements: 'nothing' });
 
   // A collection of `any` is a collection
-  if (reducedType === 'any') return 'collection';
+  if (reducedType === 'any') return kind;
 
   return decorate({
     ...type,
@@ -249,27 +253,37 @@ function reduceTupleType(type: TupleType): Type {
   });
 }
 
-function reduceMapType(type: MapType): Type {
+function reduceRecordType(type: RecordType): Type {
   let reducedElements: Record<string, Type> = {};
-  for (const [key, value] of Object.entries(type.elements)) {
+  for (const [key, value] of Object.entries(type.elements))
     reducedElements[key] = reduceType(value);
-  }
 
   if (Object.values(reducedElements).some((type) => type === 'error'))
     return 'error';
 
-  // If the type of any key is 'nothing', remove it from the map
+  // If the type of any key is 'nothing', remove it from the record
   reducedElements = Object.fromEntries(
     Object.entries(reducedElements).filter(([_, value]) => value !== 'nothing')
   );
 
-  // An empty map is `map`
-  if (Object.keys(reducedElements).length === 0) return 'map';
+  // An empty record is `record`
+  if (Object.keys(reducedElements).length === 0) return 'record';
 
   return decorate({
     ...type,
     elements: reducedElements,
   });
+}
+
+function reduceDictionaryType(type: DictionaryType): Type {
+  // We have a `dictionary<V>`
+
+  const reducedValues = reduceType(type.values);
+  if (reducedValues === 'error') return 'error';
+  if (reducedValues === 'nothing') return 'error';
+  if (reducedValues === 'any' || reducedValues === 'unknown') return 'any';
+
+  return decorate({ kind: 'dictionary', values: reducedValues });
 }
 
 function reduceSignatureType(type: FunctionSignature): Type {
@@ -281,30 +295,31 @@ function reduceSignatureType(type: FunctionSignature): Type {
     ...arg,
     type: reduceType(arg.type),
   }));
-  let reducedRestArg = type.restArg
+  let reducedVarArg = type.variadicArg
     ? {
-        ...type.restArg,
-        type: reduceType(type.restArg.type),
+        ...type.variadicArg,
+        type: reduceType(type.variadicArg.type),
       }
     : undefined;
   const reducedResult = reduceType(type.result);
 
   if (reducedArgs?.some((arg) => arg.type === 'error')) return 'error';
   if (reducedOptArgs?.some((arg) => arg.type === 'error')) return 'error';
-  if (reducedRestArg?.type === 'error') return 'error';
+  if (reducedVarArg?.type === 'error') return 'error';
   if (reducedResult === 'error') return 'error';
 
   reducedOptArgs = reducedOptArgs?.filter((arg) => arg.type !== 'nothing');
 
   if (reducedArgs?.length === 0) reducedOptArgs = undefined;
   if (reducedOptArgs?.length === 0) reducedOptArgs = undefined;
-  if (reducedRestArg?.type === 'nothing') reducedRestArg = undefined;
+  if (reducedVarArg?.type === 'nothing') reducedVarArg = undefined;
 
   return decorate({
     ...type,
     args: reducedArgs,
     optArgs: reducedOptArgs,
-    restArg: reducedRestArg,
+    variadicArg: reducedVarArg,
+    variadicMin: reducedVarArg ? type.variadicMin : undefined,
     result: reducedResult,
   });
 }

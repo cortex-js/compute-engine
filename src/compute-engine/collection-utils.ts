@@ -1,4 +1,4 @@
-import { CancellationError } from '../common/interruptible';
+import { widen } from '../common/type/utils';
 import { BoxedExpression, CollectionHandlers } from './global-types';
 
 /** If a collection has fewer than this many elements, eagerly evaluate it.
@@ -6,141 +6,14 @@ import { BoxedExpression, CollectionHandlers } from './global-types';
  * For example, evaluate the Union of two sets with 10 elements each will
  * result in a set with 20 elements.
  *
- * If the sum of the sizes of the two sets is greater than `MAX_SIZE_EAGER_COLLECTION`, the result is a Union expression
+ * If the sum of the sizes of the two sets is greater than
+ * `MAX_SIZE_EAGER_COLLECTION`, the result is a Union expression
  *
  */
 export const MAX_SIZE_EAGER_COLLECTION = 100;
 
-export function isFiniteCollection(col: BoxedExpression): boolean {
-  const l = length(col);
-  if (l === undefined) return false;
-  return Number.isFinite(l);
-}
-
-export function isIndexableCollection(col: BoxedExpression): boolean {
-  col = resolve(col);
-
-  // Is it a string literal or a symbol with a string value?
-  if (col.string !== null) return true;
-
-  // Is it an expression with a at() handler? (or a symbol with a value that has an at() handler)
-  return col.functionDefinition?.collection?.at !== undefined;
-}
-
-export function isFiniteIndexableCollection(col: BoxedExpression): boolean {
-  col = resolve(col);
-
-  if (col.string !== null) return true;
-  const def = col.functionDefinition;
-  if (!def) return false;
-  return (
-    def.collection?.at !== undefined &&
-    Number.isFinite(def.collection?.size?.(col) ?? Infinity)
-  );
-}
-
-/**
- *
- * Iterate over all the elements of a collection. If not a collection,
- * return the expression.
- *
- * The `col` argument is either a collection literal, or a symbol
- * whose value is a collection literal.
- *
- * Even infinite collections are iterable. Use `isFiniteCollection()`
- * to check if the collection is finite.
- *
- * The collection can have one of the following forms:
- * - `["Range"]`, `["Interval"]`, `["Linspace"]` expressions
- * - `["List"]` and `["Set"]` expressions
- * - `["Tuple"]`, `["Pair"]`, `["Pair"]`, `["Triple"]` expressions
- * - `["Sequence"]` expressions
- * ... and more
- *
- * In general, `each` is easier to use than `iterator`, but they do the same
- * thing.
- *
- * @param col - A potential collection
- *
- * @returns
- */
-export function* each(col: BoxedExpression): Generator<BoxedExpression> {
-  const iter = iterator(col);
-  if (!iter) {
-    yield col;
-    return;
-  }
-
-  // We've got an iterator, iterate over it
-  const limit = col.engine.iterationLimit;
-  let i = 0;
-  while (true) {
-    const { done, value } = iter.next();
-    if (done) return;
-    if (i++ > limit)
-      throw new CancellationError({ cause: 'iteration-limit-exceeded' });
-
-    yield value;
-  }
-}
-
-/**
- *
- * The `col` argument is either a collection literal, or a symbol
- * whose value is a collection literal.
- *
- * @returns
- */
-export function length(col: BoxedExpression): number | undefined {
-  col = resolve(col);
-  const s = col.string;
-  if (s !== null) return s.length;
-
-  return col.functionDefinition?.collection?.size?.(col);
-}
-
-/**
- * From an expression, create an iterator that can be used
- * to enumerate values.
- *
- * `expr` should be a collection expression, or a string, or a symbol whose
- * value is a collection expression or a string.
- *
- * - ["Range", 5]
- * - ["List", 1, 2, 3]
- * - "'hello world'"
- *
- */
-export function iterator(
-  expr: BoxedExpression
-): Iterator<BoxedExpression> | undefined {
-  // Is it a function expression with a definition that includes an iterator?
-  // e.g. ["Range", 5]
-  // or a symbol whose value is a function expression with an iterator?
-  expr = resolve(expr);
-  const def = expr.functionDefinition;
-
-  // Note that if there is an at() handler, there is always
-  // at least a default iterator so we could just check for the at handler
-  if (def?.collection?.iterator) return def.collection.iterator(expr);
-
-  //
-  // String iterator
-  //
-  const s = expr.string;
-  if (s !== null) {
-    if (s.length === 0)
-      return { next: () => ({ done: true, value: undefined }) };
-    let i = 0;
-    return {
-      next: () => ({
-        value: expr.engine.string(s.charAt(i++)),
-        done: i > s.length,
-      }),
-    };
-  }
-
-  return undefined;
+export function isFiniteIndexedCollection(col: BoxedExpression): boolean {
+  return (col.isFiniteCollection ?? false) && col.isIndexedCollection;
 }
 
 export function repeat(
@@ -166,128 +39,247 @@ export function repeat(
 }
 
 /**
+ * Zips together multiple collections into a single iterator.
  *
- * @param expr
- * @param index 1-based index
- * @returns
+ * Example:
+ * ```typescript
+ * const a = ce.box(['List', 1, 2, 3]);
+ * const b = ce.box(['List', 4, 5, 6]);
+ * const zipped = zip([a, b]);
+ * for (const [x, y] of zipped) {
+ *   console.log(x, y); // 1 4, 2 5, 3 6
+ * }
+ * ```
  */
+export function zip(
+  items: ReadonlyArray<BoxedExpression>
+): Iterator<BoxedExpression[]> {
+  if (items.length === 0) {
+    return {
+      next() {
+        return { done: true, value: undefined };
+      },
+    };
+  }
 
-export function at(
+  if (items.length === 1) {
+    const item = items[0];
+    const iter = item.each();
+    if (!iter) {
+      // Return the value, then be done
+      let done = false;
+      return {
+        next() {
+          if (done) return { done, value: undefined };
+          done = true;
+          return { done: false, value: [item] };
+        },
+      };
+    }
+    return {
+      next() {
+        const next = iter.next();
+        if (next.done) return { done: true, value: undefined };
+        return { done: false, value: [next.value] };
+      },
+    };
+  }
+
+  // Get the length of the shortest collection
+  const shortest = Math.min(
+    ...items.map((x) => (x.isCollection ? (x.xsize ?? 1) : Infinity))
+  );
+
+  // If the shortest collection is empty, return an empty iterator
+  if (shortest === 0) {
+    return {
+      next() {
+        return { done: true, value: undefined };
+      },
+    };
+  }
+
+  // Get iterators for each item
+  // If an item is not a collection, repeat it
+  const iterators = items.map((x) => (x.isCollection ? x.each() : repeat(x)));
+  let count = 0;
+
+  // Return an iterator that zips the items
+  return {
+    next() {
+      if (count >= shortest) {
+        return { done: true, value: undefined };
+      }
+      const values = iterators.map((x) => x.next());
+      count += 1;
+      return { done: false, value: values.map((x) => x.value!) };
+    },
+  };
+}
+
+function collectionSubset(
+  a: BoxedExpression,
+  b: BoxedExpression,
+  strict: boolean
+): boolean | undefined {
+  if (a.isFiniteCollection !== true || b.isFiniteCollection !== true)
+    return undefined;
+
+  // All elements of a must be in b
+  for (const x of a.each()) if (b.xcontains(x) !== true) return false;
+
+  // A strict subset (a ⊂ b) must have at least one element that is not in b
+  if (strict) {
+    // a must not be equal to b, therefore their size must be different
+    const aSize = a.xsize;
+    if (aSize === undefined) return false;
+    const bSize = b.xsize;
+    if (bSize === undefined) return false;
+    if (aSize === bSize) return false;
+  }
+  return true;
+}
+
+function basicCollectionIndexWhere(
   expr: BoxedExpression,
-  index: number
-): BoxedExpression | undefined {
-  expr = resolve(expr);
+  predicate: (element: BoxedExpression) => boolean
+): number | undefined {
+  for (let i = 0; i !== expr.nops; i += 1)
+    if (predicate(expr.ops![i]!)) return i + 1;
 
-  const def = expr.functionDefinition?.collection;
-  if (def?.at) return def.at(expr, index);
+  return undefined;
+}
 
-  const s = expr.string;
-  if (s) {
-    if (index < 1) return expr.engine.string(s.charAt(s.length + index));
-    return expr.engine.string(s.charAt(index - 1));
+function collectionIndexWhere(
+  expr: BoxedExpression,
+  predicate: (element: BoxedExpression) => boolean
+): number | undefined {
+  if (expr.isIndexedCollection !== true) return undefined;
+
+  let i = 1;
+  let op = expr.at(i);
+  while (op !== undefined) {
+    if (predicate(op)) return i;
+    i += 1;
+    op = expr.at(i);
   }
 
   return undefined;
 }
 
-export function defaultCollectionHandlers(
-  def: undefined | Partial<CollectionHandlers>
-): Partial<CollectionHandlers> | undefined {
-  if (!def) return undefined;
+function collectionContains(
+  expr: BoxedExpression,
+  target: BoxedExpression
+): boolean | undefined {
+  if (expr.isFiniteCollection !== true) return undefined;
 
-  const result: Partial<CollectionHandlers> = {};
+  // For indexed collections, we can use the indexWhere method
+  if (expr.isIndexedCollection)
+    return expr.indexWhere((x) => x.isSame(target)) !== undefined;
 
-  // A collection should have at least a contains and size handler
-  // If it has any of the other handlers, but not these two, throw
-  // an error.
-  if (!def.contains || !def.size)
-    throw new Error(
-      'A collection must have at least a "contains" and "size" handler'
-    );
+  // For non-indexed collections, we check if the element is in the collection
+  for (const x of expr.each()) if (x.isSame(target)) return true;
 
-  if (def.contains) result.contains = def.contains;
-  if (def.size) result.size = def.size;
+  return false;
+}
 
-  if (def.at) result.at = def.at;
-  if (def.iterator) result.iterator = def.iterator;
-  if (def.keys) result.keys = def.keys;
-  if (def.indexOf) result.indexOf = def.indexOf;
-  if (def.subsetOf) result.subsetOf = def.subsetOf;
+/**
+ * Default collection handlers suitable for collections that store their
+ * elements as operands.
+ *
+ * This is the case for List, Tuple, etc.
+ */
+export function basicIndexedCollectionHandlers(): CollectionHandlers {
+  return {
+    isLazy: (_expr) => false,
 
-  let iterator = result.iterator;
+    count: (expr) => expr.nops,
 
-  if (result.at && !iterator) {
-    // Fallback iterator handler.
-    iterator = (expr: BoxedExpression, start = 1, count = -1) => {
-      const at = def.at!;
-      let i = start;
+    isEmpty: (expr) => expr.nops === 0,
+
+    isFinite: (_expr) => true,
+
+    contains: (expr, target) => expr.ops!.some((x) => x.isSame(target)),
+
+    iterator: (expr) => {
+      let index = 1;
+      const last = expr.nops;
+
       return {
-        next() {
-          if (count >= 0 && i >= start + count)
-            return { done: true, value: undefined };
-          const result = at(expr, i);
-          if (result === undefined) return { done: true, value: undefined };
-          i++;
-          return { done: false, value: result };
+        next: () => {
+          if (index === last + 1) return { value: undefined, done: true };
+          index += 1;
+          return { value: expr.ops![index - 1 - 1], done: false };
         },
       };
-    };
-    result.iterator = iterator;
-  }
+    },
 
-  if (!result.indexOf) {
-    // Fallback indexOf handler.
-    result.indexOf = (expr: BoxedExpression, target: BoxedExpression) => {
-      let i = 1;
-      const iter = iterator!(expr);
-      let result = iter.next();
-      while (!result.done) {
-        if (target.isSame(result.value)) return i;
-        i++;
-        result = iter.next();
-      }
-      return undefined;
-    };
-  }
+    subsetOf: collectionSubset,
 
-  return {
-    contains: def.contains,
-    size: def.size,
-    at: def.at,
-    iterator: iterator,
-    keys: def.keys,
-    indexOf: def.indexOf,
-    subsetOf: def.subsetOf,
-  } as CollectionHandlers;
-}
+    at: (
+      expr: BoxedExpression,
+      index: number | string
+    ): undefined | BoxedExpression => {
+      if (typeof index !== 'number') return undefined;
+      if (index < 0) index = expr.nops + index + 1;
+      if (index < 1 || index > expr.nops) return undefined;
+      return expr.ops![index - 1];
+    },
 
-// If expr is a symbol, resolve it to its value
-function resolve(expr: BoxedExpression): BoxedExpression {
-  if (expr.symbolDefinition) {
-    if (expr.symbolDefinition.holdUntil === 'never')
-      return expr.symbolDefinition.value ?? expr;
-  }
-  return expr;
-}
+    indexWhere: basicCollectionIndexWhere,
 
-export function zip(
-  items: ReadonlyArray<BoxedExpression>
-): Iterator<BoxedExpression[]> {
-  items = items.map((x) => resolve(x));
+    eltsgn: (_expr) => undefined,
 
-  // Get iterators for each item
-  // If an item is not a collection, repeat it
-  const iterators = items.map((x) => iterator(x) ?? repeat(x));
-
-  // Get the length of the shortest collection
-  // const shortest = Math.min(...items.map((x) => length(x) ?? 1));
-
-  // Return an iterator that zips the items
-  return {
-    next() {
-      const values = iterators.map((x) => x.next());
-      if (values.some((x) => x.done)) return { done: true, value: undefined };
-      return { done: false, value: values.map((x) => x.value) };
+    elttype: (expr) => {
+      if (expr.nops === 0) return 'unknown';
+      if (expr.nops === 1) return expr.ops![0].type.type;
+      return widen(...expr.ops!.map((op) => op.type.type));
     },
   };
+}
+
+export function defaultCollectionHandlers(
+  def: undefined | CollectionHandlers
+): CollectionHandlers | undefined {
+  if (!def) return undefined;
+
+  if (!def.count || !def.iterator)
+    throw new Error(
+      'A collection must have at least an "iterator" and a "count" handler'
+    );
+
+  if (def.indexWhere && def.at === undefined) {
+    throw new Error(
+      'A collection with an "indexWhere" handler must also have an "at" handler'
+    );
+  }
+
+  const result: CollectionHandlers = {
+    iterator: def.iterator,
+    count: def.count,
+    contains: def.contains ?? collectionContains,
+    isEmpty:
+      def.isEmpty ??
+      ((expr) => {
+        const count = def.count(expr);
+        if (count === undefined) return undefined;
+        return def.count(expr) === 0;
+      }),
+    isFinite:
+      def.isFinite ??
+      ((expr) => {
+        const count = def.count(expr);
+        if (count === undefined) return undefined;
+        return Number.isFinite(count);
+      }),
+    subsetOf: def.subsetOf ?? collectionSubset,
+  };
+  if (def.isLazy) result.isLazy = def.isLazy;
+  if (def.eltsgn) result.eltsgn = def.eltsgn;
+  if (def.elttype) result.elttype = def.elttype;
+  if (def.at) {
+    result.at = def.at;
+    result.indexWhere = def.indexWhere ?? collectionIndexWhere;
+  }
+  return result;
 }

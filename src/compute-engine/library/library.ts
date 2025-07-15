@@ -2,10 +2,12 @@ import { ARITHMETIC_LIBRARY } from './arithmetic';
 import { CALCULUS_LIBRARY } from './calculus';
 import { COLLECTIONS_LIBRARY } from './collections';
 import { CONTROL_STRUCTURES_LIBRARY } from './control-structures';
+import { COMBINATORICS_LIBRARY } from './combinatorics';
 import { COMPLEX_LIBRARY } from './complex';
 import { CORE_LIBRARY } from './core';
 import { LINEAR_ALGEBRA_LIBRARY } from './linear-algebra';
 import { LOGIC_LIBRARY } from './logic';
+import { NUMBER_THEORY_LIBRARY } from './number-theory';
 import { POLYNOMIALS_LIBRARY } from './polynomials';
 import { RELOP_LIBRARY } from './relational-operator';
 import { SETS_LIBRARY } from './sets';
@@ -14,22 +16,16 @@ import { TRIGONOMETRY_LIBRARY } from './trigonometry';
 
 import { LibraryCategory } from '../latex-syntax/types';
 
-import { _BoxedSymbolDefinition } from '../boxed-expression/boxed-symbol-definition';
-import { makeFunctionDefinition } from '../boxed-expression/boxed-function-definition';
+import { _BoxedValueDefinition } from '../boxed-expression/boxed-value-definition';
 import { _BoxedExpression } from '../boxed-expression/abstract-boxed-expression';
-import {
-  isValidIdentifier,
-  validateIdentifier,
-} from '../../math-json/identifiers';
-import {
-  isFunctionDefinition,
-  isSymbolDefinition,
-} from '../boxed-expression/utils';
-import type { IdentifierDefinitions, ComputeEngine } from '../global-types';
+import { isValidSymbol, validateSymbol } from '../../math-json/symbols';
+import { isValidOperatorDef, isValidValueDef } from '../boxed-expression/utils';
+import type { SymbolDefinitions, ComputeEngine } from '../global-types';
+import { _BoxedOperatorDefinition } from '../boxed-expression/boxed-operator-definition';
 
 export function getStandardLibrary(
   categories: LibraryCategory[] | LibraryCategory | 'all'
-): readonly IdentifierDefinitions[] {
+): readonly SymbolDefinitions[] {
   if (categories === 'all') {
     // **Note** the order of the libraries is significant:
     // earlier libraries cannot reference definitions in later libraries.
@@ -49,6 +45,7 @@ export function getStandardLibrary(
       'polynomials',
 
       'combinatorics',
+      'number-theory',
       'linear-algebra',
 
       'statistics',
@@ -59,7 +56,7 @@ export function getStandardLibrary(
       'other',
     ]);
   } else if (typeof categories === 'string') categories = [categories];
-  const result: IdentifierDefinitions[] = [];
+  const result: SymbolDefinitions[] = [];
   for (const category of categories) {
     const dict = LIBRARIES[category];
     if (!dict) throw Error(`Unknown library category ${category}`);
@@ -70,9 +67,7 @@ export function getStandardLibrary(
 }
 
 export const LIBRARIES: {
-  [category in LibraryCategory]?:
-    | IdentifierDefinitions
-    | IdentifierDefinitions[];
+  [category in LibraryCategory]?: SymbolDefinitions | SymbolDefinitions[];
 } = {
   'algebra': [],
   // 'algebra': [
@@ -94,7 +89,7 @@ export const LIBRARIES: {
   'arithmetic': [...ARITHMETIC_LIBRARY, ...COMPLEX_LIBRARY],
   'calculus': CALCULUS_LIBRARY,
   'collections': [SETS_LIBRARY, COLLECTIONS_LIBRARY],
-  'combinatorics': [], // @todo fibonacci, binomial, etc...
+  'combinatorics': COMBINATORICS_LIBRARY,
   'control-structures': CONTROL_STRUCTURES_LIBRARY,
   'core': CORE_LIBRARY,
   'dimensions': [], // @todo // volume, speed, area
@@ -102,6 +97,7 @@ export const LIBRARIES: {
   // 'domains': getDomainsDictionary(),
   'linear-algebra': LINEAR_ALGEBRA_LIBRARY,
   'logic': LOGIC_LIBRARY,
+  'number-theory': NUMBER_THEORY_LIBRARY,
   'numeric': [], // @todo   // 'numeric': [
 
   'other': [],
@@ -110,7 +106,7 @@ export const LIBRARIES: {
   'physics': {
     Mu0: {
       description: 'Vaccum permeability',
-      constant: true,
+      isConstant: true,
       wikidata: 'Q1515261',
       type: 'real',
       value: 1.25663706212e-6,
@@ -124,10 +120,8 @@ export const LIBRARIES: {
 
 function validateDefinitionName(name: string): string {
   name = name.normalize();
-  if (isValidIdentifier(name)) return name;
-  throw new Error(
-    `Invalid definition name "${name}": ${validateIdentifier(name)}`
-  ); // @todo: cause
+  if (isValidSymbol(name)) return name;
+  throw new Error(`Invalid definition name "${name}": ${validateSymbol(name)}`); // @todo: cause
 }
 
 /**
@@ -140,16 +134,11 @@ function validateDefinitionName(name: string): string {
  * or function name that has not yet been added to the symbol table.
  *
  */
-export function setIdentifierDefinitions(
+export function setSymbolDefinitions(
   engine: ComputeEngine,
-  table: IdentifierDefinitions
+  table: SymbolDefinitions
 ): void {
-  if (!engine.context) throw Error('No context available');
-
-  // If this is the first symbol table, setup the context
-  engine.context.ids ??= new Map();
-
-  const idTable = engine.context.ids;
+  const bindings = engine.context.lexicalScope.bindings;
 
   if (!engine.strict) {
     // @fastpath @todo
@@ -162,70 +151,61 @@ export function setIdentifierDefinitions(
   for (let [name, entry] of Object.entries(table)) {
     try {
       name = validateDefinitionName(name);
-      if (isFunctionDefinition(entry)) {
+      if (isValidOperatorDef(entry)) {
         try {
-          const def = makeFunctionDefinition(engine, name, entry);
-
-          if (idTable.has(name))
+          if (bindings.has(name))
             throw new Error(
-              `Duplicate function definition:\n${JSON.stringify(
-                idTable.get(name)!
-              )}\n${JSON.stringify(entry)}`
+              `Duplicate operator definition: "${name}"\n${JSON.stringify(
+                bindings.get(name)!,
+                undefined,
+                4
+              )}\n`
             );
 
-          idTable.set(name, def);
+          bindings.set(name, {
+            operator: new _BoxedOperatorDefinition(engine, name, entry),
+          });
         } catch (e) {
           console.error(
             [
-              `\nError in function definition`,
-              '',
-              JSON.stringify(entry),
+              `\nError in operator definition`,
+              JSON.stringify(entry, undefined, 4),
               '',
               e.message,
             ].join('\n|   ') + '\n'
           );
         }
-      } else if (isSymbolDefinition(entry)) {
+      } else if (isValidValueDef(entry)) {
         try {
-          const def = new _BoxedSymbolDefinition(engine, name, entry);
+          if (bindings.has(name))
+            throw new Error(`The symbol "${name}" is already defined`);
 
-          if (engine.strict && entry.wikidata) {
-            for (const [_, d] of idTable) {
-              if (d.wikidata === entry.wikidata)
-                throw new Error(
-                  `Duplicate entries with wikidata "${entry.wikidata}": "${name}" and "${d.name}"`
-                );
-            }
-          }
-
-          if (idTable.has(name))
-            throw new Error(`The symbol is already defined`);
-
-          idTable.set(name, def);
+          bindings.set(name, {
+            value: new _BoxedValueDefinition(engine, name, entry),
+          });
         } catch (e) {
           console.error(
             [
-              `\nError in symbol definition of "${name}"`,
+              `\nError in value definition of "${name}"`,
               '',
-              JSON.stringify(entry),
+              JSON.stringify(entry, undefined, 4),
               '',
               e.message,
             ].join('\n|   ')
           );
         }
       } else {
-        const def = new _BoxedSymbolDefinition(engine, name, {
+        const def = new _BoxedValueDefinition(engine, name, {
           value: engine.box(entry as any),
         });
-        console.assert(def);
-        idTable.set(name, def);
+        bindings.set(name, { value: def });
       }
     } catch (e) {
       console.error(
         [
           `\nError in definition of "${name}"`,
           '',
-          JSON.stringify(entry),
+          JSON.stringify(entry, undefined, 4),
           '',
           e.message,
         ].join('\n|   ') + '\n'

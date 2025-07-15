@@ -32,6 +32,8 @@ import type {
   BoxedExpression,
   JsonSerializationOptions,
 } from '../global-types';
+import { isOperatorDef } from './utils';
+import { matchesNumber, matchesSymbol } from '../../math-json/utils';
 
 function _escapeJsonString(s: undefined): undefined;
 function _escapeJsonString(s: string): string;
@@ -257,6 +259,44 @@ function serializePrettyJsonFunction(
       return serializeJsonFunction(ce, 'Triple', args, options, metadata);
   }
 
+  if (name === 'Function' && args.length > 0) {
+    if (args[0].operator === 'Block') {
+      const block = args[0];
+      if (block.nops === 1) {
+        const params = args.slice(1);
+        if (params.every((x) => /_\d?/.test(x.symbol!))) {
+          if (block.op1.ops?.every((x, i) => x.symbol === params[i]?.symbol)) {
+            // [`["Function", ["Block", ["Add", "_1", "_2"]], "_1", "_2"]`] -> `["Function", "Add"]`
+            return serializeJsonFunction(
+              ce,
+              'Function',
+              [ce.symbol(block.op1.operator, { canonical: false })],
+              options,
+              metadata
+            );
+          }
+
+          // [`["Function", ["Block", ["Add", "_1", 2]], "_1"]`] -> `["Function", ["Add", "_1", 2]]`
+
+          return serializeJsonFunction(
+            ce,
+            'Function',
+            [block.op1],
+            options,
+            metadata
+          );
+        }
+        return serializeJsonFunction(
+          ce,
+          'Function',
+          [block.op1, ...args.slice(1)],
+          options,
+          metadata
+        );
+      }
+    }
+  }
+
   return serializeJsonFunction(ce, name, args, options, metadata);
 }
 
@@ -420,7 +460,11 @@ function serializeJsonString(
   options: Readonly<JsonSerializationOptions>
 ): Expression {
   s = _escapeJsonString(s);
-  if (options.shorthands.includes('string')) return `'${s}'`;
+  if (options.shorthands.includes('string')) {
+    // Does it need to be quoted?
+    if (matchesNumber(s) || matchesSymbol(s)) return `'${s}'`;
+    return s;
+  }
   return { str: s };
 }
 
@@ -444,9 +488,14 @@ function serializeJsonSymbol(
 
   if (options.metadata.includes('wikidata')) {
     if (metadata.wikidata === undefined) {
-      const wikidata = ce.lookupSymbol(sym)?.wikidata;
-      if (wikidata !== undefined)
-        metadata.wikidata = _escapeJsonString(wikidata);
+      const def = ce.lookupDefinition(sym);
+      if (def) {
+        const wikidata = isOperatorDef(def)
+          ? def.operator.wikidata
+          : def.value.wikidata;
+        if (wikidata !== undefined)
+          metadata.wikidata = _escapeJsonString(wikidata);
+      }
     }
   } else metadata.wikidata = undefined;
 
@@ -456,8 +505,12 @@ function serializeJsonSymbol(
     metadata.latex === undefined &&
     metadata.wikidata === undefined &&
     options.shorthands.includes('symbol')
-  )
-    return sym;
+  ) {
+    // If a shorthand symbol, return it.
+    if (matchesSymbol(sym)) return sym;
+    // Otherwise, bracket it
+    return `\`${sym}\``;
+  }
 
   if (metadata.latex !== undefined && metadata.wikidata !== undefined)
     return { sym, latex: metadata.latex, wikidata: metadata.wikidata };
@@ -781,9 +834,7 @@ export function serializeJson(
   expr: BoxedExpression,
   options: Readonly<JsonSerializationOptions>
 ): Expression {
-  // Accessing the wikidata could have a side effect of binding the symbol
-  // We want to avoid that.
-  const wikidata = expr.scope ? expr.wikidata : undefined;
+  const wikidata = expr.wikidata;
 
   // Is it a number literal?
   if (expr.numericValue !== null)

@@ -32,7 +32,7 @@ describe('ROOT FUNCTION (INVALID FORMS)', () => {
       [
         "Sequence",
         ["Sqrt", 5],
-        ["At", ["Error", "'missing'", ["LatexString", "'['"]]]
+        ["Error", "unexpected-operator", ["LatexString", "["]]
       ]
     `);
   });

@@ -1,5 +1,4 @@
 import { getImaginaryFactor } from './utils';
-import { isIndexableCollection } from '../collection-utils';
 
 import { flatten } from './flatten';
 import { addOrder } from './order';
@@ -30,7 +29,7 @@ export function canonicalAdd(
   ops = ops.filter((x) => x.numericValue === null || !x.is(0));
 
   if (ops.length === 0) return ce.Zero;
-  if (ops.length === 1 && !isIndexableCollection(ops[0])) return ops[0];
+  if (ops.length === 1 && !ops[0].isIndexedCollection) return ops[0];
 
   // Iterate over the terms and check if any are complex numbers
   // (a real number followed by an imaginary number)

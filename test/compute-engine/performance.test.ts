@@ -2,7 +2,6 @@ import { ComputeEngine } from '../../src/compute-engine.ts';
 import {
   add,
   mul,
-  Rational,
   reducedRational,
 } from '../../src/compute-engine/numerics/rationals';
 
@@ -141,24 +140,24 @@ function perfTestRationals() {
   bigrandos = randos.map((n) => BigInt(n));
 
   let start = globalThis.performance.now();
-  let r: Rational = [1, 1];
-  for (let i = 0; i < N; i++) {
-    const a: Rational = reducedRational([randos[i], randos[i + 1]]);
-    const b: Rational = reducedRational([randos[i + 2], randos[i + 3]]);
-    r = reducedRational(mul(add(r, a), b));
-  }
+  // let r: Rational = [1, 1];
+  // for (let i = 0; i < N; i++) {
+  //   const a: Rational = reducedRational([randos[i], randos[i + 1]]);
+  //   const b: Rational = reducedRational([randos[i + 2], randos[i + 3]]);
+  //   r = reducedRational(mul(add(r, a), b));
+  // }
 
   timing = Math.floor((globalThis.performance.now() - start) / 10);
 
   const reduceNumber = timing;
 
-  start = globalThis.performance.now();
-  let r2: Rational = [1n, 1n];
-  for (let i = 0; i < N; i++) {
-    const a: Rational = reducedRational([bigrandos[i], bigrandos[i + 1]]);
-    const b: Rational = reducedRational([bigrandos[i + 2], bigrandos[i + 3]]);
-    r2 = reducedRational(mul(add(r, a), b));
-  }
+  // start = globalThis.performance.now();
+  // let r2: Rational = [1n, 1n];
+  // for (let i = 0; i < N; i++) {
+  //   const a: Rational = reducedRational([bigrandos[i], bigrandos[i + 1]]);
+  //   const b: Rational = reducedRational([bigrandos[i + 2], bigrandos[i + 3]]);
+  //   r2 = reducedRational(mul(add(r, a), b));
+  // }
 
   timing = Math.floor((globalThis.performance.now() - start) / 10);
 

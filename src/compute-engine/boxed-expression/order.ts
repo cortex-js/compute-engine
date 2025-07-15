@@ -2,6 +2,7 @@ import type { BoxedExpression } from '../global-types';
 
 import { maxDegree, revlex, totalDegree } from './polynomials';
 import { asRadical } from './arithmetic-power';
+import { isOperatorDef } from './utils';
 
 export type Order = 'lex' | 'dexlex' | 'grevlex' | 'elim';
 
@@ -323,8 +324,8 @@ export function order(a: BoxedExpression, b: BoxedExpression): number {
     if (a.operator == b.operator && a.nops === 1 && b.nops === 1) {
       return order(a.op1, b.op1);
     }
-    const aComplexity = a.functionDefinition?.complexity ?? DEFAULT_COMPLEXITY;
-    const bComplexity = b.functionDefinition?.complexity ?? DEFAULT_COMPLEXITY;
+    const aComplexity = a.operatorDefinition?.complexity ?? DEFAULT_COMPLEXITY;
+    const bComplexity = b.operatorDefinition?.complexity ?? DEFAULT_COMPLEXITY;
     if (aComplexity === bComplexity) {
       if (a.operator === b.operator) return getLeafCount(a) - getLeafCount(b);
 
@@ -374,13 +375,14 @@ export function sortOperands(
   if (operator === 'Add') return [...xs].sort(addOrder);
   if (operator === 'Multiply') return [...xs].sort(order);
 
-  const def = ce.lookupFunction(operator);
-  if (!def) return xs;
+  const def = ce.lookupDefinition(operator);
+  if (!def || !isOperatorDef(def)) return xs;
 
-  const isCommutative = def.commutative;
+  const isCommutative = def.operator.commutative;
   if (!isCommutative) return xs;
 
-  if (def.commutativeOrder) return [...xs].sort(def.commutativeOrder);
+  if (def.operator.commutativeOrder)
+    return [...xs].sort(def.operator.commutativeOrder);
 
   return [...xs].sort(order);
 }

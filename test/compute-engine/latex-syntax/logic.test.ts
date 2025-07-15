@@ -238,7 +238,7 @@ describe('Logic', () => {
           Factorial,
           [
             Error,
-            'missing',
+            missing,
             [
               LatexString,
               '!',

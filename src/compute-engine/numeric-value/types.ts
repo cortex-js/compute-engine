@@ -26,7 +26,7 @@
 
 import { Decimal } from 'decimal.js';
 import type { Rational, SmallInteger } from '../numerics/types';
-import { NumericType } from '../../common/type/types';
+import { NumericPrimitiveType } from '../../common/type/types';
 
 export type BigNumFactory = (value: Decimal.Value) => Decimal;
 
@@ -50,7 +50,7 @@ export type NumericValueFactory = (
 
 /** @category Numerics */
 export abstract class NumericValue {
-  abstract get type(): NumericType;
+  abstract get type(): NumericPrimitiveType;
 
   /** True if numeric value is the product of a rational and the square root of an integer.
    *
@@ -80,7 +80,7 @@ export abstract class NumericValue {
    *
    * Can be negative, zero or positive.
    */
-  readonly im: number;
+  im: number;
 
   get bignumIm(): Decimal | undefined {
     return undefined;

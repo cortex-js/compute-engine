@@ -1,36 +1,40 @@
-import { flattenOps } from './flatten';
+import type { BoxedExpression, CanonicalOptions, Scope } from '../global-types';
 
+import { canonicalInvisibleOperator } from '../library/invisible-operator';
+
+import { flattenOps } from './flatten';
 import { canonicalAdd } from './arithmetic-add';
 import { canonicalMultiply, canonicalDivide } from './arithmetic-mul-div';
 import { canonicalPower } from './arithmetic-power';
-import { canonicalInvisibleOperator } from '../library/invisible-operator';
-
 import { canonicalOrder } from './order';
 import { asBigint } from './numerics';
-import type { BoxedExpression, CanonicalOptions } from '../global-types';
-import { isImaginaryUnit } from './utils';
+import { isOperatorDef, isImaginaryUnit } from './utils';
 
 export function canonicalForm(
   expr: BoxedExpression,
-  forms: CanonicalOptions
+  forms: CanonicalOptions,
+  scope?: Scope
 ): BoxedExpression {
   // No canonical form?
   if (forms === false) return expr;
 
   // Full canonical form?
-  if (forms === true) return expr.canonical;
+  if (forms === true) return expr.engine._inScope(scope, () => expr.canonical);
 
   if (typeof forms === 'string') forms = [forms];
 
   // Like for full canonicalization, request the canonical form of symbols.
-  // Automatically, this involves the substitution of the symbol with its value, if it is a
-  // constant-flagged symbol, with a 'holdUntil' attribute of 'never'
-  // (@note: the reasoning for carrying this out here is because in some sense, firstly,
-  // 'CanonicalForm' can be regarded as producing a 'canonical' expression, (albeit a 'custom' one;
-  // notably also with the resulting expr. having an 'isCanonical' value of 'true'). Secondly &
-  // following from this, symbol canonicalization (and substitution where appropriate) facilitates
-  // several simplifications which would otherwise not be made: for example 'x^y' where 'y=0', for
-  // canonicalPower.
+  // Automatically, this involves the substitution of the symbol with its
+  // value, if it is a constant-flagged symbol, with a 'holdUntil' attribute of
+  // 'never'
+  // (@note: the reasoning for carrying this out here is because:
+  // 1/ 'CanonicalForm' can be regarded as producing a 'canonical'
+  // expression, (albeit a 'custom' one) but with the resulting expr.
+  // having an 'isCanonical' value of 'true'
+  // 2/ Symbol canonicalization (and substitution where appropriate)
+  // facilitates several simplifications which would otherwise not be made:
+  // for example 'x^y' where 'y=0', for canonicalPower.
+
   expr = symbolForm(expr);
 
   // Apply each form in turn
@@ -92,8 +96,8 @@ function flattenForm(expr: BoxedExpression) {
 
   let isAssociative = expr.operator === 'Add' || expr.operator === 'Multiply';
   if (!isAssociative) {
-    const def = ce.lookupFunction(expr.operator);
-    if (def?.associative) isAssociative = true;
+    const def = ce.lookupDefinition(expr.operator);
+    if (isOperatorDef(def) && def.operator.associative) isAssociative = true;
   }
 
   if (isAssociative)
@@ -120,18 +124,20 @@ function invisibleOperatorForm(expr: BoxedExpression) {
 }
 
 /**
- * Apply the 'Number' form to the expression, _recursively_.
+ * Apply the 'Number' form to the expression, _recursively_, in the case
+ * where a **partial** canonicalization is requested. The result is not
+ * canonical.
  *
- * This involes casting as numbers various (non-BoxedNumber) expression structures, such as:
+ * This involes casting as numbers various (non-BoxedNumber) expression
+ * structures, such as:
  *
- * This includes :
- * - Expressions with an operator of `Complex` are converted to a (complex) number
- *     or a `Add`/`Multiply` expression.
+ * - Expressions with a `Complex` operator are converted to a (complex)
+ *   number or a `Add`/`Multiply` expression.
  *
- * - An expression with a `Rational` operator is converted to a rational
+ * - Expressions with a `Rational` operator are converted to a rational
  *    number if possible, and to a `Divide` otherwise.
  *
- * - A `Negate` function applied to a number literal is converted to a number.
+ * - A `Negate` operator applied to a number literal is converted to a number.
  *
  * <!--
  * (!note: the procedure outlined is a contracted one of that affixed to function 'box')
@@ -142,22 +148,21 @@ function invisibleOperatorForm(expr: BoxedExpression) {
  *    -^or even for 'InvisibleOperator',too...
  *  -Creation of complex: e.g. from `a + ib` or `ai + b` ('Add' instances)
  *
- * ^I.e., a cross-selection of ops. from 'Add','Multiply', 'InvisibleOpeator'...
+ * ^I.e., a cross-selection of ops. from 'Add','Multiply', 'InvisibleOperator'...
  * -->
  *
- * @param expr
- * @returns
  */
 function numberForm(expr: BoxedExpression): BoxedExpression {
   //(↓note: this is redundant, since numbers are _always_ boxed as canonical (v27.0), but preserving
   //for explicitness in case things change)
   if (expr.isNumberLiteral) return expr.canonical;
 
-  // Ensure that all representations of the imaginary unit are represented with the BoxedNumber
-  // variant: this makes further simplifications more straightforward.
+  // Ensure that all representations of the imaginary unit are represented
+  // with the BoxedNumber variant: this makes further simplifications more
+  // straightforward.
   if (isImaginaryUnit(expr)) return expr.engine.I;
 
-  // Only deal with func.-expressions henceforth
+  // Only deal with function expressions henceforth
   if (!expr.isFunctionExpression) return expr;
 
   const { engine: ce } = expr;
@@ -185,11 +190,12 @@ function numberForm(expr: BoxedExpression): BoxedExpression {
   //
   if (name === 'Complex') {
     if (ops.length === 1) {
-      // If single argument, assume it's imaginary
+      // If single argument, assume it's imaginary, i.e.
+      // `["Complex", 2]` -> `2i`
       const op1 = ops[0];
       if (op1.isNumberLiteral) return ce.number(ce.complex(0, op1.re));
 
-      return op1.mul(ce.I);
+      return ce._fn('Multiply', [op1, ce.I], { canonical: false });
     }
     if (ops.length === 2) {
       const re = ops[0].re;
@@ -199,9 +205,13 @@ function numberForm(expr: BoxedExpression): BoxedExpression {
         if (im !== 0) return ce.number(ce._numericValue({ re, im }));
         return ops[0];
       }
-      return ops[0].add(ops[1].mul(ce.I));
+      return ce._fn(
+        'Add',
+        [ops[0], ce._fn('Multiply', [ops[1], ce.I], { canonical: false })],
+        { canonical: false }
+      );
     }
-    throw new Error('Expected one or two arguments with Complex expression');
+    throw new Error('Expected one or two arguments with `Complex` expression');
   }
 
   //
@@ -219,9 +229,7 @@ function numberForm(expr: BoxedExpression): BoxedExpression {
 
     // @consider: getImaginaryFactor/InvisibleOperator: i.e. account for '-2i', & so on.
     // Capture -ve Imaginary
-    if (isImaginaryUnit(op1)) {
-      return ce.number(ce.complex(0, -1));
-    }
+    if (isImaginaryUnit(op1)) return ce.number(ce.complex(0, -1));
   }
 
   // Re-box only if some transformation has applied

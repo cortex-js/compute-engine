@@ -31,7 +31,7 @@ export function fuzzyStringMatch(
   invalidWord: string,
   validWords: string[]
 ): string | null {
-  const threshold = 3;
+  const threshold = 7;
   let bestMatch: string | null = null;
   let minDistance = Infinity;
   const invalidLength = invalidWord.length;

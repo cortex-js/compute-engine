@@ -12,14 +12,14 @@ describe('basic', () => {
     expect(parse('\\frac{')).toMatchInlineSnapshot(`
       [
         "Divide",
-        ["Error", "'expected-closing-delimiter'", ["LatexString", "'{'"]],
+        ["Error", "expected-closing-delimiter", ["LatexString", "{"]],
         ["Error", "'missing'"]
       ]
     `);
     expect(parse('\\frac{{')).toMatchInlineSnapshot(`
       [
         "Divide",
-        ["Error", "'expected-closing-delimiter'", ["LatexString", "'{'"]],
+        ["Error", "expected-closing-delimiter", ["LatexString", "{"]],
         ["Error", "'missing'"]
       ]
     `);
@@ -27,14 +27,14 @@ describe('basic', () => {
       [
         "Tuple",
         ["Divide", ["Error", "'missing'"], ["Error", "'missing'"]],
-        ["Error", "'unexpected-closing-delimiter'", ["LatexString", "'}'"]]
+        ["Error", "unexpected-closing-delimiter", ["LatexString", "}"]]
       ]
     `);
     expect(parse('\\frac{1}}')).toMatchInlineSnapshot(`
       [
         "Tuple",
         ["Divide", 1, ["Error", "'missing'"]],
-        ["Error", "'unexpected-closing-delimiter'", ["LatexString", "'}'"]]
+        ["Error", "unexpected-closing-delimiter", ["LatexString", "}"]]
       ]
     `);
     expect(parse('\\frac{1}{2')).toMatchInlineSnapshot(`
@@ -44,7 +44,7 @@ describe('basic', () => {
         [
           "Tuple",
           2,
-          ["Error", "'expected-closing-delimiter'", ["LatexString", "'{2'"]]
+          ["Error", "expected-closing-delimiter", ["LatexString", "{2"]]
         ]
       ]
     `);
@@ -60,23 +60,19 @@ describe('basic', () => {
   });
 
   test('Semantic Errors', () => {
-    expect(parse('1+')).toMatchInlineSnapshot(`
-      [
-        "Sequence",
-        1,
-        ["Error", "'unexpected-operator'", ["LatexString", "'+'"]]
-      ]
-    `);
+    expect(parse('1+')).toMatchInlineSnapshot(
+      `["Sequence", 1, ["Error", "unexpected-operator", ["LatexString", "+"]]]`
+    );
     expect(parse('1\\times')).toMatchInlineSnapshot(
       `["Multiply", 1, ["Error", "'missing'"]]`
     );
     expect(parse('\\times')).toMatchInlineSnapshot(
-      `["Error", "'unexpected-command'", ["LatexString", "'\\times'"]]`
+      `["Error", "unexpected-command", ["LatexString", "\\times"]]`
     );
     expect(parse('\\times3')).toMatchInlineSnapshot(`
       [
         "Tuple",
-        ["Error", "'unexpected-command'", ["LatexString", "'\\times'"]],
+        ["Error", "unexpected-command", ["LatexString", "\\times"]],
         3
       ]
     `);
@@ -94,7 +90,7 @@ describe('basic', () => {
     );
 
     expect(parse('=x')).toMatchInlineSnapshot(
-      `["Equal", ["Error", "'missing'", ["LatexString", "'='"]], "x"]`
+      `["Equal", ["Error", "'missing'", ["LatexString", "="]], "x"]`
     );
   });
 

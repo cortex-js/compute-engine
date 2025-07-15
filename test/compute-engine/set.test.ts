@@ -9,23 +9,8 @@ describe('ELEMENT', () => {
       `True`
     );
     expect(ce.box(['Element', 2, 'Booleans']).evaluate()).toMatchInlineSnapshot(
-      `False`
+      `["Element", 2, "Booleans"]`
     );
-  });
-
-  test(`strings`, () => {
-    expect(
-      ce.box(['Element', { str: 'wor' }, { str: 'Hello world' }]).evaluate()
-    ).toMatchInlineSnapshot(`True`);
-    expect(
-      ce.box(['Element', { str: 'cat' }, { str: 'Hello world' }]).evaluate()
-    ).toMatchInlineSnapshot(`False`);
-    expect(
-      ce.box(['Element', { str: 'wa' }, { str: 'Hello world' }]).evaluate()
-    ).toMatchInlineSnapshot(`False`);
-    expect(
-      ce.box(['Element', { str: 'rld' }, { str: 'Hello world' }]).evaluate()
-    ).toMatchInlineSnapshot(`True`);
   });
 
   test('List', () => {
@@ -62,7 +47,7 @@ describe('ELEMENT', () => {
         "Element",
         2,
         "Integers",
-        ["Error", "'unexpected-argument'", "'"Numbers"'"]
+        ["Error", "unexpected-argument", ""Numbers""]
       ]
     `);
     expect(ce.box(['Element', 2, 3]).evaluate()).toMatchInlineSnapshot(`
@@ -73,8 +58,8 @@ describe('ELEMENT', () => {
           "Error",
           [
             "ErrorCode",
-            "'incompatible-type'",
-            "'collection | string'",
+            "incompatible-type",
+            "'collection'",
             "'finite_integer'"
           ]
         ]

@@ -43,36 +43,49 @@ const JSON_ESCAPE_CHARS = {
  *
  */
 export function escapeJsonString(s: string): string {
-  if (!/[\u0000-\u001f\"\/\\]/.test(s)) return s;
-
-  let result = '';
-  for (const c of s) result += JSON_ESCAPE_CHARS[c.codePointAt(0)!] ?? c;
-  return result;
+  const result: string[] = [];
+  for (const codePoint of Array.from(s)) {
+    if (codePoint === undefined) break;
+    const code = codePoint.codePointAt(0)!;
+    if (JSON_ESCAPE_CHARS[code]) {
+      result.push(JSON_ESCAPE_CHARS[code]);
+    } else if (code > 0xffff) {
+      const high = Math.floor((code - 0x10000) / 0x400) + 0xd800;
+      const low = ((code - 0x10000) % 0x400) + 0xdc00;
+      result.push(`\\u${high.toString(16).padStart(4, '0')}`);
+      result.push(`\\u${low.toString(16).padStart(4, '0')}`);
+    } else if (code < 0x20) {
+      result.push(`\\u${code.toString(16).padStart(4, '0')}`);
+    } else {
+      result.push(codePoint);
+    }
+  }
+  return result.join('');
 }
 
 export function unescapeJsonString(s: string | any): string {
   if (typeof s !== 'string') return s;
   if (!/[\\]/.test(s)) return s;
 
-  let result = '';
+  const result: string[] = [];
   for (let i = 0; i < s.length; i++) {
     const c = s[i];
-    if (c !== '\\') result = result + c;
+    if (c !== '\\') result.push(c);
     else {
-      const cNext = c[++i];
+      const cNext = s[++i];
       if (cNext === 'u') {
         if (i + 4 >= s.length) return s;
         const code = c[i + 1] + c[i + 2] + c[i + 3] + c[i + 4];
         i += 4;
-        result = result + String.fromCharCode(Number.parseInt(code, 16));
-      } else if (cNext === 'b') result = result + '\u0008';
-      else if (cNext === 't') result = result + '\u0009';
-      else if (cNext === 'n') result = result + '\u000a';
-      else if (cNext === 'f') result = result + '\u000c';
-      else if (cNext === 'r') result = result + '\u000d';
-      else if (cNext === '"') result = result + '"';
-      else if (cNext === '\\') result = result + '\\';
+        result.push(String.fromCharCode(Number.parseInt(code, 16)));
+      } else if (cNext === 'b') result.push('\u0008');
+      else if (cNext === 't') result.push('\u0009');
+      else if (cNext === 'n') result.push('\u000a');
+      else if (cNext === 'f') result.push('\u000c');
+      else if (cNext === 'r') result.push('\u000d');
+      else if (cNext === '"') result.push('"');
+      else if (cNext === '\\') result.push('\\');
     }
   }
-  return result;
+  return result.join('');
 }

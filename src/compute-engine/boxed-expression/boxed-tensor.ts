@@ -1,26 +1,11 @@
 import type { Expression } from '../../math-json/types';
 
-import {
-  getExpressionDatatype,
-  getSupertype,
-  makeTensorField,
-} from '../tensor/tensor-fields';
-
-import { NumericValue } from '../numeric-value/types';
-
-import { _BoxedExpression } from './abstract-boxed-expression';
-import { isWildcard, wildcardName } from './boxed-patterns';
-import { canonical, hashCode, isBoxedExpression } from './utils';
-
-import { AbstractTensor, makeTensor } from '../tensor/tensors'; // @fixme
-import { parseType } from '../../common/type/parse';
-import { BoxedType } from '../../common/type/boxed-type';
 import type {
   ComputeEngine,
   TensorDataType,
   Metadata,
   BoxedBaseDefinition,
-  BoxedFunctionDefinition,
+  BoxedOperatorDefinition,
   BoxedSubstitution,
   EvaluateOptions,
   TensorData,
@@ -28,7 +13,24 @@ import type {
   BoxedExpression,
   SimplifyOptions,
   PatternMatchOptions,
+  Tensor,
 } from '../global-types';
+
+import { parseType } from '../../common/type/parse';
+import { BoxedType } from '../../common/type/boxed-type';
+
+import {
+  getExpressionDatatype,
+  getSupertype,
+  makeTensorField,
+} from '../tensor/tensor-fields';
+import { AbstractTensor, makeTensor } from '../tensor/tensors'; // @fixme
+
+import { NumericValue } from '../numeric-value/types';
+
+import { _BoxedExpression } from './abstract-boxed-expression';
+import { isWildcard, wildcardName } from './boxed-patterns';
+import { hashCode, isBoxedExpression } from './utils';
 
 /**
  * A boxed tensor represents an expression that can be represented by a tensor.
@@ -41,38 +43,31 @@ import type {
  * if input is expression) is created lazily.
  *
  */
-export class BoxedTensor extends _BoxedExpression {
-  private _tensor: undefined | AbstractTensor<'expression'>;
+export class BoxedTensor<T extends TensorDataType> extends _BoxedExpression {
+  private _tensor: AbstractTensor<T>;
 
-  private readonly _operator?: string;
-  private readonly _ops?: ReadonlyArray<BoxedExpression>;
-  private _expression: undefined | BoxedExpression;
+  private _expression?: BoxedExpression;
 
   constructor(
     ce: ComputeEngine,
-    input:
-      | {
-          op?: string;
-          ops: ReadonlyArray<BoxedExpression>;
-        }
-      | AbstractTensor<'expression'>,
-    readonly options?: { metadata?: Metadata; canonical?: boolean }
+    readonly input: {
+      ops: ReadonlyArray<BoxedExpression>;
+      shape: number[];
+      dtype: T;
+    },
+    readonly options?: { metadata?: Metadata }
   ) {
     super(ce, options?.metadata);
 
-    if (input instanceof AbstractTensor) {
-      this._tensor = input;
-    } else {
-      const isCanonical = options?.canonical ?? true;
-      this._operator = input.op ?? 'List';
-      this._ops = isCanonical ? canonical(ce, input.ops) : input.ops;
-
-      this._expression = ce._fn(this._operator, this._ops, {
-        canonical: isCanonical,
-      });
-    }
-
-    ce._register(this);
+    const tensorData = expressionAsTensor<T>(
+      ce,
+      'List',
+      input.ops,
+      input.shape,
+      input.dtype
+    );
+    if (!tensorData) throw new Error('Invalid tensor');
+    this._tensor = makeTensor(ce, tensorData);
   }
 
   get structural(): BoxedExpression {
@@ -83,33 +78,17 @@ export class BoxedTensor extends _BoxedExpression {
   }
 
   /** Create the tensor on demand */
-  get tensor(): AbstractTensor<'expression'> {
-    if (this._tensor === undefined) {
-      console.assert(this._operator !== undefined);
-      console.assert(this._ops !== undefined);
-      const tensorData = expressionAsTensor(this._operator!, this._ops!);
-      if (tensorData === undefined) {
-        const t2 = expressionAsTensor(this._operator!, this._ops!);
-        throw new Error('Invalid tensor');
-      }
-      this._tensor = makeTensor(this.engine, tensorData);
-    }
-    return this._tensor!;
+  get tensor(): Tensor<T> {
+    return this._tensor;
   }
 
   get baseDefinition(): BoxedBaseDefinition | undefined {
     return this.structural.baseDefinition;
   }
 
-  get functionDefinition(): BoxedFunctionDefinition | undefined {
-    return this.structural.functionDefinition;
+  get operatorDefinition(): BoxedOperatorDefinition | undefined {
+    return this.structural.operatorDefinition;
   }
-
-  bind(): void {
-    this.structural.bind();
-  }
-
-  reset(): void {}
 
   get hash(): number {
     const h = hashCode('BoxedTensor');
@@ -118,12 +97,7 @@ export class BoxedTensor extends _BoxedExpression {
   }
 
   get canonical(): BoxedExpression {
-    if (this.isCanonical) return this;
-    return new BoxedTensor(
-      this.engine,
-      { op: this._operator, ops: this._ops! },
-      { canonical: true }
-    );
+    return this;
   }
 
   get isCanonical(): boolean {
@@ -131,9 +105,9 @@ export class BoxedTensor extends _BoxedExpression {
     return this._expression!.isCanonical;
   }
 
-  set isCanonical(val: boolean) {
-    if (!this._tensor) this.structural.isCanonical = val;
-  }
+  // set isCanonical(val: boolean) {
+  //   if (!this._tensor) this.structural.isCanonical = val;
+  // }
 
   get isPure(): boolean {
     if (this._tensor) return true;
@@ -150,7 +124,7 @@ export class BoxedTensor extends _BoxedExpression {
   }
 
   get operator(): string {
-    return this._tensor ? 'List' : this._operator!;
+    return 'List';
   }
 
   get nops(): number {
@@ -239,7 +213,10 @@ export class BoxedTensor extends _BoxedExpression {
   }
 
   get rank(): number {
-    return this.tensor.rank;
+    try {
+      return this.tensor.rank;
+    } catch (e) {}
+    return 0;
   }
 
   get type(): BoxedType {
@@ -266,49 +243,87 @@ export class BoxedTensor extends _BoxedExpression {
     return true;
   }
 
-  contains(rhs: BoxedExpression): boolean {
-    const data = this.tensor.data;
-
-    const target = this.tensor.field.cast(rhs, this.tensor.dtype);
-    if (typeof target === 'number') return data.includes(target);
-
-    const items = data.map(
-      (x) => this.tensor.field.cast(x, 'expression') ?? rhs.engine.Nothing
-    );
-
-    for (const item of items) if (rhs.isSame(item)) return true;
-    return false;
+  get isIndexedCollection(): boolean {
+    return true;
   }
 
-  get size(): number {
+  xcontains(other: BoxedExpression): boolean | undefined {
+    if (['float64', 'float32', 'int32', 'uint8'].includes(this.tensor.dtype)) {
+      type ElementType<T extends Tensor<any>> = T['dtype'];
+      type DataType = DataTypeMap[ElementType<typeof this.tensor>];
+      const data = this.tensor.data as DataType[];
+      return data.includes(other.re as DataType);
+    }
+    return this.tensor.data.some((x) =>
+      other.isSame(
+        this.tensor.field.cast(x, 'expression') ?? other.engine.Nothing
+      )
+    );
+  }
+
+  get xsize(): number {
     return this.tensor.shape.reduce((a, b) => a * b, 1);
   }
 
-  each(start?: number, count?: number): Iterator<BoxedExpression, undefined> {
-    const data = this.tensor.data;
-    let index = start ?? 1;
-    count = Math.min(count ?? data.length, data.length);
+  each(): Generator<BoxedExpression> {
+    const shape = this.tensor.shape;
+    const rank = this.tensor.rank;
 
-    if (count <= 0) return { next: () => ({ value: undefined, done: true }) };
+    // Scalar tensor: yield itself
+    if (rank === 0) {
+      return (function* (self: BoxedTensor<any>) {
+        yield self;
+      })(this);
+    }
 
-    return {
-      next: () => {
-        if (count! > 0) {
-          count!--;
-          return { value: this.engine.box(data[index++ - 1]), done: false };
-        } else {
-          return { value: undefined, done: true };
+    const count = shape[0];
+
+    if (rank === 1) {
+      return (function* (self: BoxedTensor<any>) {
+        // 1D tensor: yield each element as boxed expression
+        for (let i = 1; i <= count; i += 1) {
+          // 0-based index for .data
+          const data = self.tensor.data;
+          const idx = i - 1;
+          if (idx >= 0 && idx < data.length) {
+            yield self.engine.box(data[idx]);
+          }
         }
-      },
-    };
+      })(this);
+    }
+
+    // Higher rank tensor: yield slices along the first axis
+    return (function* (self: BoxedTensor<any>) {
+      for (let i = 1; i <= count; i += 1) {
+        // slice(i - 1) returns a tensor of rank-1 less
+        const row = self.tensor.slice(i - 1);
+        yield new BoxedTensor(self.engine, {
+          ops: row.expression.ops!,
+          shape: row.shape,
+          dtype: row.dtype,
+        });
+      }
+    })(this);
   }
 
-  at(_index: number): BoxedExpression | undefined {
+  at(index: number): BoxedExpression | undefined {
+    // Return the nth row of the tensor
+    const row = this.tensor.slice(index);
+    if (row.rank === 0) {
+      // Scalar tensor: return itself
+      return this.engine.box(row.data[0]);
+    } else if (row.rank === 1) {
+      // 1D tensor: return the boxed expression of the element
+      return this.engine.box(row.data[0]);
+    } else if (row.rank > 1) {
+      // Higher rank tensor: return a new boxed tensor
+      return new BoxedTensor(this.engine, {
+        ops: row.expression.ops!,
+        shape: row.shape,
+        dtype: row.dtype,
+      });
+    }
     return undefined;
-  }
-
-  indexOf(_expr: BoxedExpression): number {
-    return -1;
   }
 
   match(
@@ -322,22 +337,22 @@ export class BoxedTensor extends _BoxedExpression {
   }
 
   evaluate(options?: Partial<EvaluateOptions>): BoxedExpression {
-    if (this._tensor) return this;
+    if (this._tensor && this._tensor.dtype !== 'expression') return this;
     return this.structural.evaluate(options);
   }
 
   simplify(options?: Partial<SimplifyOptions>): BoxedExpression {
-    if (this._tensor) return this;
+    if (this._tensor && this._tensor.dtype !== 'expression') return this;
     return this.structural.simplify(options);
   }
 
   N(): BoxedExpression {
-    if (this._tensor) return this;
+    if (this._tensor && this._tensor.dtype !== 'expression') return this;
     return this.structural.N();
   }
 }
 
-export function isBoxedTensor(val: unknown): val is BoxedTensor {
+export function isBoxedTensor(val: unknown): val is BoxedTensor<any> {
   return val instanceof BoxedTensor;
 }
 
@@ -347,7 +362,7 @@ export function expressionTensorInfo(
 ):
   | {
       shape: number[];
-      dtype: TensorDataType | undefined;
+      dtype: TensorDataType;
     }
   | undefined {
   let dtype: TensorDataType | undefined = undefined;
@@ -355,41 +370,74 @@ export function expressionTensorInfo(
   let valid = true;
 
   const visit = (t: ReadonlyArray<BoxedExpression>, axis = 0) => {
-    if (t.length === 0) return;
-    if (t.length > 1 && shape[axis] !== undefined)
-      valid = valid && shape[axis] === t.length;
-    else shape[axis] = Math.max(shape[axis] ?? 0, t.length);
+    if (!valid) return;
+    const len = t.length;
+    if (len === 0) return;
 
+    // 1. shape check
+    if (shape[axis] === undefined) {
+      shape[axis] = len;
+    } else if (shape[axis] !== len) {
+      valid = false;
+      return;
+    }
+
+    // 2. classify items
+    let nestedCount = 0;
     for (const item of t) {
-      if (item.operator === operator) visit(item.ops!, axis + 1);
-      else dtype = getSupertype(dtype, getExpressionDatatype(item));
+      if (item.operator === operator) nestedCount++;
+    }
+    const leafCount = len - nestedCount;
 
-      if (!valid) return;
+    // 3. mixed leaf + nested → invalid
+    if (nestedCount > 0 && leafCount > 0) {
+      valid = false;
+      return;
+    }
+
+    // 4a. all nested → recurse
+    if (nestedCount === len) {
+      for (const item of t) {
+        visit(item.ops!, axis + 1);
+        if (!valid) return;
+      }
+    }
+    // 4b. all leaves → accumulate dtype
+    else {
+      for (const item of t) {
+        dtype = getSupertype(dtype, getExpressionDatatype(item));
+      }
     }
   };
 
   visit(rows);
-
-  return valid ? { shape, dtype } : undefined;
+  return valid ? { shape, dtype: dtype! } : undefined;
 }
 
-export function expressionAsTensor<T extends TensorDataType = 'expression'>(
+function expressionAsTensor<T extends TensorDataType = 'expression'>(
+  ce: ComputeEngine,
   operator: string,
-  rows: ReadonlyArray<BoxedExpression>
+  rows: ReadonlyArray<BoxedExpression>,
+  shape: number[],
+  dtype: T
 ): TensorData<T> | undefined {
-  const { shape, dtype } = expressionTensorInfo(operator, rows) ?? {
-    shape: [],
-    dtype: undefined,
-  };
-  if (dtype === undefined) return undefined;
-
   let isValid = true;
   const data: DataTypeMap[T][] = [];
-  const f = makeTensorField(rows[0].engine, 'expression');
+  const f = makeTensorField(ce, 'expression');
   const cast = f.cast.bind(f);
-  const visit = (t: ReadonlyArray<BoxedExpression>) => {
+  const visit = (t: ReadonlyArray<BoxedExpression>, axis = 0) => {
+    if (t.length === 0) return;
+
+    if (shape[axis] === undefined) {
+      shape[axis] = t.length;
+    } else if (shape[axis] !== t.length) {
+      isValid = false;
+      return;
+    }
+
     for (const item of t) {
-      if (item.operator === operator) visit(item.ops!);
+      if (!isValid) return;
+      if (item.operator === operator) visit(item.ops!, axis + 1);
       else {
         const v = cast(item, dtype);
         if (v === undefined) {

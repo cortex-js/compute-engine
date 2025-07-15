@@ -1,5 +1,4 @@
 import { Complex } from 'complex-esm';
-import { isRelationalOperator } from '../boxed-expression/utils';
 import { mul } from '../boxed-expression/arithmetic-mul-div';
 import { add } from '../boxed-expression/arithmetic-add';
 import {
@@ -7,6 +6,7 @@ import {
   ComputeEngine,
   DataTypeMap,
   TensorDataType,
+  TensorField,
 } from '../global-types';
 
 /** @category Tensors */
@@ -24,74 +24,16 @@ export function makeTensorField<DT extends keyof DataTypeMap>(
     case 'complex64':
       return new TensorFieldComplex(ce) as any as TensorField<DataTypeMap[DT]>;
     case 'bool':
-    case 'string':
+    // case 'string':
     case 'expression':
       return new TensorFieldExpression(ce) as any as TensorField<
         DataTypeMap[DT]
       >;
+    case undefined:
+      return new TensorFieldNumber(ce) as any as TensorField<DataTypeMap[DT]>;
   }
+
   throw new Error(`Unknown dtype ${dtype}`);
-}
-
-/** @category Tensors */
-export interface TensorField<
-  T extends number | Complex | BoxedExpression | boolean | string = number,
-> {
-  readonly one: T;
-  readonly zero: T;
-  readonly nan: T;
-
-  cast(x: T, dtype: 'float64'): undefined | number;
-  cast(x: T, dtype: 'float32'): undefined | number;
-  cast(x: T, dtype: 'int32'): undefined | number;
-  cast(x: T, dtype: 'uint8'): undefined | number;
-  cast(x: T, dtype: 'complex128'): undefined | Complex;
-  cast(x: T, dtype: 'complex64'): undefined | Complex;
-  cast(x: T, dtype: 'bool'): undefined | boolean;
-  cast(x: T, dtype: 'string'): undefined | string;
-  cast(x: T, dtype: 'expression'): undefined | BoxedExpression;
-  cast(x: T[], dtype: 'float64'): undefined | number[];
-  cast(x: T[], dtype: 'float32'): undefined | number[];
-  cast(x: T[], dtype: 'int32'): undefined | number[];
-  cast(x: T[], dtype: 'uint8'): undefined | number[];
-  cast(x: T[], dtype: 'complex128'): undefined | Complex[];
-  cast(x: T[], dtype: 'complex64'): undefined | Complex[];
-  cast(x: T[], dtype: 'bool'): undefined | boolean[];
-  cast(x: T[], dtype: 'string'): undefined | string[];
-  cast(x: T[], dtype: 'expression'): undefined | BoxedExpression[];
-  cast(
-    x: T | T[],
-    dtype: TensorDataType
-  ):
-    | undefined
-    | Complex
-    | number
-    | boolean
-    | string
-    | BoxedExpression
-    | Complex[]
-    | number[]
-    | boolean[]
-    | string[]
-    | BoxedExpression[];
-
-  // Synonym for `cast(x, 'expression')`
-  expression(x: T): BoxedExpression;
-
-  isZero(x: T): boolean;
-  isOne(x: T): boolean;
-
-  equals(lhs: T, rhs: T): boolean;
-
-  add(lhs: T, rhs: T): T;
-  addn(...xs: T[]): T;
-  neg(x: T): T;
-  sub(lhs: T, rhs: T): T;
-  mul(lhs: T, rhs: T): T;
-  muln(...xs: T[]): T;
-  div(lhs: T, rhs: T): T;
-  pow(rhs: T, n: number): T;
-  conjugate(x: T): T;
 }
 
 /** @category Tensors */
@@ -109,7 +51,7 @@ export class TensorFieldNumber implements TensorField<number> {
   cast(x: number, dtype: 'complex128'): undefined | Complex;
   cast(x: number, dtype: 'complex64'): undefined | Complex;
   cast(x: number, dtype: 'bool'): undefined | boolean;
-  cast(x: number, dtype: 'string'): undefined | string;
+  // cast(x: number, dtype: 'string'): undefined | string;
   cast(x: number, dtype: 'expression'): undefined | BoxedExpression;
   cast(x: number[], dtype: 'float64'): undefined | number[];
   cast(x: number[], dtype: 'float32'): undefined | number[];
@@ -118,7 +60,7 @@ export class TensorFieldNumber implements TensorField<number> {
   cast(x: number[], dtype: 'complex128'): undefined | Complex[];
   cast(x: number[], dtype: 'complex64'): undefined | Complex[];
   cast(x: number[], dtype: 'bool'): undefined | boolean[];
-  cast(x: number[], dtype: 'string'): undefined | string[];
+  // cast(x: number[], dtype: 'string'): undefined | string[];
   cast(x: number[], dtype: 'expression'): undefined | BoxedExpression[];
   cast(
     x: number | number[],
@@ -128,12 +70,12 @@ export class TensorFieldNumber implements TensorField<number> {
     | Complex
     | number
     | boolean
-    | string
+    // | string
     | BoxedExpression
     | Complex[]
     | number[]
     | boolean[]
-    | string[]
+    // | string[]
     | BoxedExpression[] {
     const ce = this.ce;
     switch (dtype) {
@@ -153,10 +95,10 @@ export class TensorFieldNumber implements TensorField<number> {
           : x === 0
             ? false
             : true;
-      case 'string':
-        return Array.isArray(x)
-          ? x.map((x) => Number(x).toString())
-          : Number(x).toString();
+      // case 'string':
+      //   return Array.isArray(x)
+      //     ? x.map((x) => Number(x).toString())
+      //     : Number(x).toString();
       case 'expression':
         return Array.isArray(x) ? x.map((x) => ce.number(x)) : ce.number(x);
     }
@@ -238,7 +180,7 @@ export class TensorFieldExpression implements TensorField<BoxedExpression> {
   cast(x: BoxedExpression, dtype: 'complex128'): undefined | Complex;
   cast(x: BoxedExpression, dtype: 'complex64'): undefined | Complex;
   cast(x: BoxedExpression, dtype: 'bool'): undefined | boolean;
-  cast(x: BoxedExpression, dtype: 'string'): undefined | string;
+  // cast(x: BoxedExpression, dtype: 'string'): undefined | string;
   cast(x: BoxedExpression, dtype: 'expression'): undefined | BoxedExpression;
   cast(x: BoxedExpression[], dtype: 'float64'): undefined | number[];
   cast(x: BoxedExpression[], dtype: 'float32'): undefined | number[];
@@ -247,7 +189,7 @@ export class TensorFieldExpression implements TensorField<BoxedExpression> {
   cast(x: BoxedExpression[], dtype: 'complex128'): undefined | Complex[];
   cast(x: BoxedExpression[], dtype: 'complex64'): undefined | Complex[];
   cast(x: BoxedExpression[], dtype: 'bool'): undefined | boolean[];
-  cast(x: BoxedExpression[], dtype: 'string'): undefined | string[];
+  // cast(x: BoxedExpression[], dtype: 'string'): undefined | string[];
   cast(
     x: BoxedExpression[],
     dtype: 'expression'
@@ -260,12 +202,12 @@ export class TensorFieldExpression implements TensorField<BoxedExpression> {
     | Complex
     | number
     | boolean
-    | string
+    // | string
     | BoxedExpression
     | Complex[]
     | number[]
     | boolean[]
-    | string[]
+    // | string[]
     | BoxedExpression[] {
     if (Array.isArray(x)) return x.map((x) => this.cast(x, dtype as any)!);
 
@@ -295,12 +237,12 @@ export class TensorFieldExpression implements TensorField<BoxedExpression> {
         const bool = x.valueOf();
         return typeof bool === 'boolean' ? bool : undefined;
 
-      case 'string':
-        const str = x.valueOf();
-        if (typeof str === 'string') return str;
-        if (typeof str === 'number') return str.toString();
-        if (typeof str === 'boolean') return str.toString();
-        return undefined;
+      // case 'string':
+      //   const str = x.valueOf();
+      //   if (typeof str === 'string') return str;
+      //   if (typeof str === 'number') return str.toString();
+      //   if (typeof str === 'boolean') return str.toString();
+      //   return undefined;
 
       case 'expression':
         return x;
@@ -382,7 +324,7 @@ export class TensorFieldComplex implements TensorField<Complex> {
   cast(x: Complex, dtype: 'complex128'): undefined | Complex;
   cast(x: Complex, dtype: 'complex64'): undefined | Complex;
   cast(x: Complex, dtype: 'bool'): undefined | boolean;
-  cast(x: Complex, dtype: 'string'): undefined | string;
+  // cast(x: Complex, dtype: 'string'): undefined | string;
   cast(x: Complex, dtype: 'expression'): undefined | BoxedExpression;
   cast(x: Complex[], dtype: 'float64'): undefined | number[];
   cast(x: Complex[], dtype: 'float32'): undefined | number[];
@@ -391,7 +333,7 @@ export class TensorFieldComplex implements TensorField<Complex> {
   cast(x: Complex[], dtype: 'complex128'): undefined | Complex[];
   cast(x: Complex[], dtype: 'complex64'): undefined | Complex[];
   cast(x: Complex[], dtype: 'bool'): undefined | boolean[];
-  cast(x: Complex[], dtype: 'string'): undefined | string[];
+  // cast(x: Complex[], dtype: 'string'): undefined | string[];
   cast(x: Complex[], dtype: 'expression'): undefined | BoxedExpression[];
   cast(
     x: Complex | Complex[],
@@ -401,12 +343,12 @@ export class TensorFieldComplex implements TensorField<Complex> {
     | Complex
     | number
     | boolean
-    | string
+    // | string
     | BoxedExpression
     | Complex[]
     | number[]
     | boolean[]
-    | string[]
+    // | string[]
     | BoxedExpression[] {
     if (Array.isArray(x)) {
       return x.map((x) => this.cast(x, dtype as any)!);
@@ -428,8 +370,8 @@ export class TensorFieldComplex implements TensorField<Complex> {
         return x;
       case 'bool':
         return x.im === 0 && x.re === 0 ? false : true;
-      case 'string':
-        return x.toString();
+      // case 'string':
+      //   return x.toString();
       case 'expression':
         return this.ce.number(x);
     }
@@ -504,7 +446,7 @@ export function getSupertype(
   if (t1 === t2) return t1;
 
   if (t1 === 'expression' || t2 === 'expression') return 'expression';
-  if (t1 === 'string' || t2 === 'string') return 'expression';
+  // if (t1 === 'string' || t2 === 'string') return 'expression';
   if (t1 === 'complex128' || t2 === 'complex128') return 'complex128';
   if (t1 === 'complex64' || t2 === 'complex64') return 'complex64';
   if (t1 === 'float64' || t2 === 'float64') return 'float64';
@@ -516,6 +458,9 @@ export function getSupertype(
 }
 
 /**
+ * If the expression is a literal number, return the datatype of the
+ * number (or boolean). Otherwise, return the `expression`.
+ *
  * @category Tensors
  * @internal
  */
@@ -524,16 +469,12 @@ export function getExpressionDatatype(expr: BoxedExpression): TensorDataType {
   // Depending on whether the expr is a literal number, a string, etc,
   // return the appropriate datatype.
 
-  if (isRelationalOperator(expr)) return 'bool';
-
   if (expr.symbol === 'True' || expr.symbol === 'False') return 'bool';
   if (expr.symbol === 'NaN') return 'float64';
   if (expr.symbol === 'PositiveInfinity') return 'float64';
   if (expr.symbol === 'NegativeInfinity') return 'float64';
   if (expr.symbol === 'ComplexInfinity') return 'complex128';
   if (expr.symbol === 'ImaginaryUnit') return 'complex128';
-
-  if (expr.string) return 'string';
 
   if (expr.isNumberLiteral)
     switch (expr.type.type) {

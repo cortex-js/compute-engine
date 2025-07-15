@@ -539,7 +539,7 @@ function serializePower(
 
 export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
   // Constants
-  { name: 'CatalanConstant', identifierTrigger: 'G' },
+  { name: 'CatalanConstant', symbolTrigger: 'G' },
   { name: 'GoldenRatio', latexTrigger: '\\varphi' },
   { name: 'EulerGamma', latexTrigger: '\\gamma' },
   {
@@ -622,7 +622,7 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
   },
   {
     kind: 'function',
-    identifierTrigger: 'exp',
+    symbolTrigger: 'exp',
     parse: 'Exp',
   },
   {
@@ -661,7 +661,7 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
     parse: (_parser, body) => (isEmptySequence(body) ? null : ['Abs', body]),
   },
   {
-    identifierTrigger: 'abs',
+    symbolTrigger: 'abs',
     kind: 'function',
     parse: 'Abs',
   },
@@ -707,11 +707,11 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
     parse: (_parser, body) => (isEmptySequence(body) ? null : ['Ceil', body]),
   },
   {
-    identifierTrigger: 'ceil',
+    symbolTrigger: 'ceil',
     kind: 'function',
     parse: 'Ceil',
   },
-  { name: 'Chop', identifierTrigger: 'chop', kind: 'function', parse: 'Chop' },
+  { name: 'Chop', symbolTrigger: 'chop', kind: 'function', parse: 'Chop' },
   {
     name: 'Complex',
     precedence: ADDITION_PRECEDENCE - 1, // One less than precedence of `Add`: used for correct wrapping
@@ -816,7 +816,7 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
     parse: (_parser, body) => (isEmptySequence(body) ? null : ['Floor', body]),
   },
   {
-    identifierTrigger: 'floor',
+    symbolTrigger: 'floor',
     kind: 'function',
     parse: 'Floor',
   },
@@ -829,12 +829,12 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
     latexTrigger: ['\\gcd'], // command from amsmath package
   },
   {
-    identifierTrigger: 'gcd',
+    symbolTrigger: 'gcd',
     kind: 'function',
     parse: 'GCD',
   },
   {
-    identifierTrigger: 'GCD',
+    symbolTrigger: 'GCD',
     kind: 'function',
     parse: 'GCD',
   },
@@ -887,16 +887,16 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
 
   {
     name: 'LCM',
-    identifierTrigger: 'lcm',
+    symbolTrigger: 'lcm',
     kind: 'function',
   },
   {
-    identifierTrigger: 'LCM',
+    symbolTrigger: 'LCM',
     kind: 'function',
     parse: 'LCM',
   },
-  { identifierTrigger: 'max', kind: 'function', parse: 'Max' },
-  { identifierTrigger: 'min', kind: 'function', parse: 'Min' },
+  { symbolTrigger: 'max', kind: 'function', parse: 'Max' },
+  { symbolTrigger: 'min', kind: 'function', parse: 'Min' },
   { name: 'Max', latexTrigger: '\\max', kind: 'function' },
   { name: 'Min', latexTrigger: '\\min', kind: 'function' },
   { name: 'Supremum', latexTrigger: '\\sup', kind: 'function' },
@@ -958,7 +958,9 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
         ...terminator,
         minPrec: MULTIPLICATION_PRECEDENCE + 2,
       });
-      if (rhs === null) return ['Multiply', lhs, MISSING];
+      // Because \cdot can be used in other contexts, we do a soft failure
+      // (for example, it's used as a separator in \int)
+      if (rhs === null) return null;
 
       return foldAssociativeOperator('Multiply', lhs, rhs);
     },
@@ -1129,7 +1131,7 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
     latexTrigger: '\\prod',
     precedence: MULTIPLICATION_PRECEDENCE,
     name: 'Product',
-    parse: parseBigOp('Product', MULTIPLICATION_PRECEDENCE),
+    parse: parseBigOp('Product', 'Multiply', MULTIPLICATION_PRECEDENCE),
     serialize: serializeBigOp('\\prod'),
   },
 
@@ -1149,12 +1151,31 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
     },
   },
   {
+    name: 'Reduce',
+    serialize: (serializer: Serializer, expr: Expression): string => {
+      const collection = operand(expr, 1);
+      if (!collection) return '';
+
+      const f = operand(expr, 2);
+      if (symbol(f) === 'Add') {
+        // This is a reduce over a collection -> \sum
+        return `\\sum ${serializer.serialize(collection)}`;
+      } else if (symbol(f) === 'Multiply') {
+        // This is a reduce over a collection -> \prod
+        return `\\prod ${serializer.serialize(collection)}`;
+      }
+
+      // This is a reduce over a collection -> \operatorname{Reduce}
+      return `\\operatorname{Reduce}\\left(${serializer.serialize(collection)}, ${serializer.serialize(operand(expr, 2))}\\right)`;
+    },
+  },
+  {
     name: 'Root',
     serialize: serializePower,
   },
   {
     name: 'Round',
-    identifierTrigger: 'round',
+    symbolTrigger: 'round',
     kind: 'function',
   },
   {
@@ -1167,13 +1188,13 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
     latexTrigger: ['\\sum'],
     precedence: ADDITION_PRECEDENCE,
     name: 'Sum',
-    parse: parseBigOp('Sum', MULTIPLICATION_PRECEDENCE),
+    parse: parseBigOp('Sum', 'Add', MULTIPLICATION_PRECEDENCE),
     serialize: serializeBigOp('\\sum'),
   },
   {
     name: 'Sign',
     // As per ISO 80000-2, "signum" is 'sgn'
-    identifierTrigger: 'sgn',
+    symbolTrigger: 'sgn',
     kind: 'function',
   },
   {
@@ -1279,7 +1300,7 @@ function getIndexes(
     .filter((x) => x !== undefined);
 }
 
-function parseBigOp(name: string, minPrec: number) {
+function parseBigOp(name: string, reduceOp: string, minPrec: number) {
   return (parser: Parser): Expression | null => {
     parser.skipSpace();
 
@@ -1294,6 +1315,13 @@ function parseBigOp(name: string, minPrec: number) {
       else if (parser.match('^'))
         sup = parser.parseGroup() ?? parser.parseToken();
       parser.skipSpace();
+    }
+
+    // If there are no sup/sub, this could be a bigop over a collection, i.e.
+    // \sum \{ 1, 2, 3 \}
+    if (!sup && !sub) {
+      const collection = parser.parseExpression({ minPrec: minPrec });
+      if (collection) return ['Reduce', collection, reduceOp];
     }
 
     const indexes = getIndexes(sub, sup);

@@ -1,7 +1,7 @@
-import type { PrimitiveType } from './types';
+import type { NumericPrimitiveType, PrimitiveType } from './types';
 
 /** All the types representing numeric values */
-export const NUMERIC_TYPES: PrimitiveType[] = [
+export const NUMERIC_TYPES: NumericPrimitiveType[] = [
   'number',
   'finite_number',
   'complex',
@@ -14,14 +14,20 @@ export const NUMERIC_TYPES: PrimitiveType[] = [
   'integer',
   'finite_integer',
   'non_finite_number',
-] as const as PrimitiveType[];
+] as const as NumericPrimitiveType[];
+
+export const INDEXED_COLLECTION_TYPES: PrimitiveType[] = [
+  'indexed_collection',
+  'list',
+  'tuple',
+];
 
 export const COLLECTION_TYPES: PrimitiveType[] = [
+  ...INDEXED_COLLECTION_TYPES,
   'collection',
-  'list',
   'set',
-  'tuple',
-  'map',
+  'record',
+  'dictionary',
 ] as const as PrimitiveType[];
 
 export const SCALAR_TYPES: PrimitiveType[] = [

@@ -79,9 +79,6 @@ abstract class Terminal {
  * A terminal with no color support.
  */
 class TextTerminal extends Terminal {
-  width: number | undefined;
-  indent: number;
-
   renderSpan(span: StyledSpan): string {
     let content =
       typeof span.content === 'string'

@@ -6,16 +6,17 @@
     "esModuleInterop": true,
     "experimentalDecorators": false,
     "incremental": true,
-    "lib": ["es2020", "dom", "dom.iterable", "scripthost"],
-    "module": "es2020",
-    "target": "es2020",
+    "lib": ["es2022", "dom", "dom.iterable", "scripthost"],
+    "module": "es2022",
+    "target": "es2022",
     "moduleResolution": "node",
     // "newLine": "lf",
     "noImplicitAny": false,
     "noLib": false,
     "removeComments": false,
     "sourceMap": true,
-    "strictNullChecks": true
+    "strictNullChecks": true,
+    "isolatedModules": true
     // "isolatedDeclarations": true
   },
   "include": ["src/**/*"]

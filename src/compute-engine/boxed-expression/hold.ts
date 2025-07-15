@@ -3,7 +3,7 @@ import type { BoxedExpression } from '../global-types';
 import { flattenOps } from './flatten';
 
 /** Apply the function `f` to each operand of the expression `expr`,
- * account for the 'lazy' property of the function definition:
+ * account for the 'lazy' property of the operator definition:
  *
  * Account for `Hold`, `ReleaseHold`, `Sequence`, `Symbol` and `Nothing`.
  *
@@ -17,11 +17,11 @@ export function holdMap(
 
   let xs = expr.ops;
 
-  const def = expr.functionDefinition;
+  const def = expr.operatorDefinition;
 
   if (!def || xs.length === 0) return xs;
 
-  const associativeHead = def?.associative ? def.name : '';
+  const associativeHead = def?.associative ? expr.operator : '';
 
   // f(a, f(b, c), d) -> f(a, b, c, d)
   xs = flattenOps(xs, associativeHead);
@@ -54,11 +54,11 @@ export async function holdMapAsync(
 
   let xs = expr.ops;
 
-  const def = expr.functionDefinition;
+  const def = expr.operatorDefinition;
 
   if (!def || xs.length === 0) return xs;
 
-  const associativeHead = def?.associative ? def.name : '';
+  const associativeHead = def?.associative ? expr.operator : '';
 
   // f(a, f(b, c), d) -> f(a, b, c, d)
   xs = flattenOps(xs, associativeHead);

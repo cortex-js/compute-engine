@@ -25,8 +25,7 @@ export function bigintValue(
     .replace(/[\u0009-\u000d\u0020\u00a0]/g, '');
 
   if (s === 'nan') return null;
-  if (s === 'infinity' || s === '+infinity') return null;
-  if (s === '-infinity') return null;
+  if (/^(infinity|\+infinity|oo|\+oo|-infinity|-oo)$/.test(s)) return null;
 
   return bigint(s);
 }

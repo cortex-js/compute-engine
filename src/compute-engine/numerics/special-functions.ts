@@ -139,7 +139,7 @@ export function erf(x: number): number {
 export function bigGammaln(ce: ComputeEngine, z: BigNum): BigNum {
   if (z.isNegative()) return ce._BIGNUM_NAN;
 
-  const GAMMA_P_LN = ce.cache<BigNum[]>('gamma-p-ln', () => {
+  const GAMMA_P_LN = ce._cache<BigNum[]>('gamma-p-ln', () => {
     return [
       '0.99999999999999709182',
       '57.156235665862923517',
@@ -164,7 +164,7 @@ export function bigGammaln(ce: ComputeEngine, z: BigNum): BigNum {
     x = x.add(GAMMA_P_LN[i].div(z.add(i)));
   }
 
-  const GAMMA_G_LN = ce.cache('gamma-g-ln', () => ce.bignum(607).div(128));
+  const GAMMA_G_LN = ce._cache('gamma-g-ln', () => ce.bignum(607).div(128));
 
   const t = z.add(GAMMA_G_LN).add(ce._BIGNUM_HALF);
   return ce._BIGNUM_NEGATIVE_ONE
@@ -195,7 +195,7 @@ export function bigGamma(ce: ComputeEngine, z: BigNum): BigNum {
 
   // coefficients for gamma=7, kmax=8  Lanczos method
   // Source: GSL/specfunc/gamma.c
-  const LANCZOS_7_C = ce.cache<BigNum[]>('lanczos-7-c', () => {
+  const LANCZOS_7_C = ce._cache<BigNum[]>('lanczos-7-c', () => {
     return [
       '0.99999999999980993227684700473478',
       '676.520368121885098567009190444019',

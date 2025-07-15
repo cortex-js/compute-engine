@@ -1,4 +1,5 @@
-import type { BoxedExpression } from '../global-types';
+import { checkType } from '../boxed-expression/validate';
+import type { BoxedExpression, ComputeEngine, Scope } from '../global-types';
 
 import { MAX_ITERATION } from '../numerics/numeric';
 import { fromRange, reduceCollection } from './collections';
@@ -29,7 +30,7 @@ export type IndexingSet = {
 export function normalizeIndexingSet(
   indexingSet: BoxedExpression
 ): IndexingSet {
-  console.assert(indexingSet?.operator === 'Tuple');
+  console.assert(indexingSet?.operator === 'Limits');
 
   let lower = 1;
   let upper = lower + MAX_ITERATION;
@@ -112,6 +113,122 @@ export function cartesianProduct(
   return array1.flatMap((item1) => array2.map((item2) => [item1, item2]));
 }
 
+/** Given a sequence of arguments, return an array of Limits:
+ *
+ * - ["Range", 1, 10] -> ["Limits", "Unknown", 1, 10]
+ * - 1, 10 -> ["Limits", "Nothing", 1, 10]
+ * - [Tuple, "x", 1, 10] -> ["Limits", "x", 1, 10]
+ *
+ */
+export function canonicalLimitsSequence(
+  ops: ReadonlyArray<BoxedExpression>,
+  options: { engine: ComputeEngine }
+): BoxedExpression[] {
+  const ce = options.engine;
+  const result: BoxedExpression[] = [];
+  for (let i = 0; i < ops.length; i++) {
+    const op = ops[i];
+    if (op.operator === 'Range') {
+      // ["Range", 1, 10]
+      result.push(
+        canonicalLimits([ce.Nothing, op.op1, op.op2], options) ??
+          ce.error('missing')
+      );
+    } else if (
+      op.operator &&
+      ['Limits', 'Tuple', 'Triple', 'Pair', 'Single', 'Hold'].includes(
+        op.operator
+      )
+    ) {
+      // ["Tuple", "n", 1, 10]
+      // ["Limits", "n", 1, 10]
+      // ["Hold", "x"]
+      result.push(canonicalLimits(op.ops!, options) ?? ce.error('missing'));
+    } else if (op.symbol) {
+      // "x" or "1, 10"
+      if (ops[i + 1]?.isNumberLiteral) {
+        if (ops[i + 2]?.isNumberLiteral) {
+          // "n", 1, 10
+          result.push(
+            canonicalLimits([op, ops[i + 1], ops[i + 2]], options) ??
+              ce.error('missing')
+          );
+          i += 2;
+        } else {
+          // "n", 10
+          result.push(
+            canonicalLimits([op, ops[i + 1]], options) ?? ce.error('missing')
+          );
+          i += 1;
+        }
+      } else {
+        // "x"
+        result.push(canonicalLimits([op], options) ?? ce.error('missing'));
+      }
+    }
+  }
+
+  return result;
+}
+
+export function canonicalLimits(
+  ops: ReadonlyArray<BoxedExpression>,
+  { engine: ce }: { engine: ComputeEngine }
+): BoxedExpression | null {
+  if (ops.length === 1) {
+    // ["Limits", "n"]
+    // ["Limits", ["Hold", "n"]]
+    // ["Limits", "10"] --> ???
+    const op = ops[0];
+    if (op.symbol) return ce._fn('Limits', [op, ce.Nothing, ce.Nothing]);
+    if (op.operator === 'Hold') return canonicalLimits(op.ops!, { engine: ce });
+
+    // We didn't find a symbol, so we can't create a Limits expression
+    return ce._fn('Limits', [ce.typeError('symbol', undefined, op)]);
+  } else if (ops.length > 1) {
+    let index: BoxedExpression = ce.Nothing;
+    let lower: BoxedExpression | null = ce.Nothing;
+    let upper: BoxedExpression | null = ops[1].canonical;
+    if (ops.length === 2) {
+      // ["Limits", "n", 10]
+      // ["Limits", ["Hold", "n"], 10]]
+      // ["Limits", 0, 10]
+      if (ops[0].operator === 'Hold') {
+        index = ops[0].op1;
+        upper = ops[1].canonical;
+      } else if (ops[0].symbol) {
+        index = ops[0];
+        upper = ops[1].canonical;
+      } else {
+        index = ce.Nothing;
+        lower = ops[0].canonical;
+        upper = ops[1].canonical;
+      }
+    } else if (ops.length === 3) {
+      index = ops[0] ?? ce.Nothing;
+      lower = ops[1]?.canonical ?? ce.Nothing;
+      upper = ops[2]?.canonical ?? ce.Nothing;
+    }
+    if (index.operator === 'Hold') index = index.op1;
+
+    if (!index.symbol) index = ce.typeError('symbol', index.type, index);
+    if (lower.symbol !== 'Nothing') lower = checkType(ce, lower, 'number');
+    if (upper.symbol !== 'Nothing') upper = checkType(ce, upper, 'number');
+
+    return ce._fn('Limits', [index, lower, upper]);
+  }
+  return null;
+}
+
+/** Return a limit/indexing set in canonical form as a `Limits` expression
+ * with:
+ * - `index` (a symbol), `Nothing` if none is present
+ * - `lower` (a number), `Nothing` if none is present
+ * - `upper` (a number), `Nothing` if none is present
+ *
+ * Assume we are in the context of a big operator
+ * (i.e. `pushScope()` has been called)
+ */
 export function canonicalIndexingSet(
   expr: BoxedExpression
 ): BoxedExpression | undefined {
@@ -138,34 +255,40 @@ export function canonicalIndexingSet(
   if (index.symbol && index.symbol !== 'Nothing')
     ce.declare(index.symbol, 'integer');
 
-  if (upper && lower) return ce.tuple(index, lower, upper);
-  if (upper) return ce.tuple(index, ce.One, upper);
-  if (lower) return ce.tuple(index, lower);
-  return ce.tuple(index);
+  if (upper && lower) return ce.function('Limits', [index, lower, upper]);
+  if (upper) return ce.function('Limits', [index, ce.One, upper]);
+  if (lower) return ce.function('Limits', [index, lower]);
+  return ce.function('Limits', [index]);
 }
 
 export function canonicalBigop(
-  operator: string,
+  bigOp: string,
   body: BoxedExpression,
-  indexingSets: BoxedExpression[]
+  indexingSets: BoxedExpression[],
+  scope: Scope | undefined
 ): BoxedExpression | null {
   const ce = body.engine;
 
   // Sum is a scoped function (to declare the indexes)
-  ce.pushScope();
-
-  body ??= ce.error('missing');
+  ce.pushScope(scope);
 
   // Note: we need to canonicalize the indexes before canonicalizing the body
-  // since we need the index to be declared before we can bind it
+  // since we need the indexes to be declared before we can bind them
   const indexes = indexingSets
     .map((x) => canonicalIndexingSet(x))
-    .filter((x) => x !== undefined);
+    .filter((x) => x ?? ce.error('missing')) as BoxedExpression[];
 
-  const result = ce._fn(operator, [body.canonical, ...indexes]);
+  body = body?.canonical ?? ce.error('missing');
 
   ce.popScope();
-  return result;
+
+  if (body.isCollection) {
+    if (bigOp === 'Sum') return ce.box(['Reduce', body, 'Add', 0]);
+
+    return ce.box(['Reduce', body, 'Multiply', 1]);
+  }
+
+  return ce._fn(bigOp, [body, ...indexes], { scope });
 }
 
 /**
@@ -199,7 +322,6 @@ export function* reduceBigOp<T>(
   // Create a cartesian product of the indexing sets.
   //
   const ce = body.engine;
-  const savedScope = ce.swapScope(body.scope);
 
   const indexingSets = normalizeIndexingSets(indexes);
 
@@ -219,18 +341,6 @@ export function* reduceBigOp<T>(
     if (counter % 1000 === 0) yield result;
     if (result === undefined) break;
   }
-
-  // Unassign indexes once done because if left assigned to an integer value,
-  // in double summations the .evaluate will assume the inner index
-  // value = upper for example in the following code:
-  // \\sum_{n=0}^{4}\\sum_{m=4}^{8}{n+m}`
-  // If the indexes aren't unassigned, once the first pass is done,
-  // every following pass will assume m is 8 for the m=4->8 iterations
-  for (const indexingSet of indexingSets)
-    ce.assign(indexingSet.index!, undefined);
-
-  // Return to the original scope
-  ce.swapScope(savedScope);
 
   return result ?? undefined;
 }

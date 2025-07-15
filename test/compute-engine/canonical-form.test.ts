@@ -6,6 +6,20 @@ import type {
   SemiBoxedExpression,
 } from '../../src/compute-engine/global-types';
 
+describe('CANONICAL FORM RESTRICTIONS', () => {
+  // Some operations are not allowed in non-canonical form
+  test("Can't set value of non-canonical", () => {
+    expect(() => {
+      TEST_ENGINE.box('m', { canonical: false }).value = 1;
+    }).toThrow();
+  });
+  test('Non-canonical expressions evaluate to themselves', () => {
+    expect(
+      TEST_ENGINE.parse('2 + 3', { canonical: false }).evaluate().toString()
+    ).toEqual('2 + 3');
+  });
+});
+
 describe('CANONICAL FORMS', () => {
   test('-0', () => {
     expect(check('-0')).toMatchInlineSnapshot(`0`);
@@ -248,29 +262,29 @@ describe('CANONICAL FORMS', () => {
     //order to permit substitution during (before) application of canonical-forms.
     //^Necessary because 'a^x' is not a valid simplification (cannot assume that 'x' is bound), but
     //if x is substituted, then that's fine...
-    engine.declare('x', { constant: true, value: 0, holdUntil: 'never' });
-    engine.declare('y', { constant: true, value: 1, holdUntil: 'never' });
+    engine.declare('x', { isConstant: true, value: 0, holdUntil: 'never' });
+    engine.declare('y', { isConstant: true, value: 1, holdUntil: 'never' });
 
     engine.declare('p', {
-      constant: true,
+      isConstant: true,
       value: Infinity,
       holdUntil: 'never',
     });
     engine.declare('n', {
-      constant: true,
+      isConstant: true,
       value: -Infinity,
       holdUntil: 'never',
     });
     engine.declare('c', {
-      constant: true,
+      isConstant: true,
       value: -Infinity,
       holdUntil: 'never',
     });
 
     //Control-case symbols (holdUntil value of default 'evaluate', and henceforth 'value' not to be
     //consulted at this stage)
-    engine.declare('j', { constant: true, value: 0 });
-    engine.declare('k', { constant: true, value: 1 });
+    engine.declare('j', { isConstant: true, value: 0 });
+    engine.declare('k', { isConstant: true, value: 1 });
 
     const checkPower = (
       input: string,
@@ -438,7 +452,7 @@ describe('CANONICAL FORMS', () => {
         canonical  = 0
       `);
       expect(checkPower('{-\\infty}^{-1}')).toMatchInlineSnapshot(`
-        box        = ["Power", "NegativeInfinity", -1]
+        box        = ["Power", ["Negate", "PositiveInfinity"], -1]
         canonForms = 0
         canonical  = 0
       `);
@@ -456,7 +470,7 @@ describe('CANONICAL FORMS', () => {
       `);
       expect(checkPower('{j * 4}^{-1}')).toMatchInlineSnapshot(`
         box        = ["Power", ["Multiply", "j", 4], -1]
-        canonForms = ["Divide", 1, ["Multiply", 4, "j"]]
+        canonForms = ["Power", ["Multiply", "j", 4], -1]
         canonical  = ["Divide", 1, ["Multiply", 4, "j"]]
       `);
     });
@@ -488,7 +502,7 @@ describe('CANONICAL FORMS', () => {
         canonical  = ComplexInfinity
       `);
       expect(checkPower('{-\\infty}^\\infty')).toMatchInlineSnapshot(`
-        box        = ["Power", "NegativeInfinity", "PositiveInfinity"]
+        box        = ["Power", ["Negate", "PositiveInfinity"], "PositiveInfinity"]
         canonForms = ComplexInfinity
         canonical  = ComplexInfinity
       `);
@@ -516,37 +530,45 @@ describe('CANONICAL FORMS', () => {
 
     test(`x^{-oo}`, () => {
       expect(checkPower('0^{-\\infty}')).toMatchInlineSnapshot(`
-        box        = ["Power", 0, "NegativeInfinity"]
+        box        = ["Power", 0, ["Negate", "PositiveInfinity"]]
         canonForms = ComplexInfinity
         canonical  = ComplexInfinity
       `);
       expect(checkPower('0.3^{-\\infty}')).toMatchInlineSnapshot(`
-        box        = ["Power", 0.3, "NegativeInfinity"]
+        box        = ["Power", 0.3, ["Negate", "PositiveInfinity"]]
         canonForms = PositiveInfinity
         canonical  = PositiveInfinity
       `);
       expect(checkPower('1^{-\\infty}')).toMatchInlineSnapshot(`
-        box        = ["Power", 1, "NegativeInfinity"]
+        box        = ["Power", 1, ["Negate", "PositiveInfinity"]]
         canonForms = NaN
         canonical  = NaN
       `);
       expect(checkPower('{-1}^{-\\infty}')).toMatchInlineSnapshot(`
-        box        = ["Power", -1, "NegativeInfinity"]
+        box        = ["Power", -1, ["Negate", "PositiveInfinity"]]
         canonForms = NaN
         canonical  = NaN
       `);
       expect(checkPower('{-\\infty}^{-\\infty}')).toMatchInlineSnapshot(`
-        box        = ["Power", "NegativeInfinity", "NegativeInfinity"]
+        box        = [
+          "Power",
+          ["Negate", "PositiveInfinity"],
+          ["Negate", "PositiveInfinity"]
+        ]
         canonForms = 0
         canonical  = 0
       `);
       expect(checkPower('{-{-\\infty}}^{-\\infty}')).toMatchInlineSnapshot(`
-        box        = ["Power", ["Negate", "NegativeInfinity"], "NegativeInfinity"]
+        box        = [
+          "Power",
+          ["Negate", ["Negate", "PositiveInfinity"]],
+          ["Negate", "PositiveInfinity"]
+        ]
         canonForms = 0
         canonical  = 0
       `);
       expect(checkPower('6^{-\\infty}')).toMatchInlineSnapshot(`
-        box        = ["Power", 6, "NegativeInfinity"]
+        box        = ["Power", 6, ["Negate", "PositiveInfinity"]]
         canonForms = 0
         canonical  = 0
       `);
@@ -595,13 +617,13 @@ describe('CANONICAL FORMS', () => {
       `);
       expect(checkPower('{-\\infty}^{\\operatorname{ComplexInfinity}}'))
         .toMatchInlineSnapshot(`
-        box        = ["Power", "NegativeInfinity", "ComplexInfinity"]
+        box        = ["Power", ["Negate", "PositiveInfinity"], "ComplexInfinity"]
         canonForms = NaN
         canonical  = NaN
       `);
       expect(checkPower('{-\\mathrm{NaN}}^{\\operatorname{ComplexInfinity}}'))
         .toMatchInlineSnapshot(`
-        box        = ["Power", "NaN", "ComplexInfinity"]
+        box        = ["Power", ["Negate", "NaN"], "ComplexInfinity"]
         canonForms = NaN
         canonical  = NaN
       `);
@@ -686,9 +708,8 @@ describe('CANONICAL FORMS', () => {
           "a",
           [
             "Multiply",
-            0.5,
-            "Pi",
-            ["Power", "b", ["Multiply", 2, "ExponentialE"]]
+            ["Power", "b", ["Multiply", 2, "ExponentialE"]],
+            ["Multiply", 0.5, "Pi"]
           ]
         ]
         canonical  = [
@@ -852,14 +873,14 @@ describe('CANONICAL FORMS', () => {
         expr = ['Complex', 4, 'x'];
         expect(checkNumber(expr)).toMatchInlineSnapshot(`
           box        = ["Complex", 4, "x"]
-          canonForms = ["Add", ["Multiply", ["Complex", 0, 1], "x"], 4]
+          canonForms = ["Add", 4, ["Multiply", "x", ["Complex", 0, 1]]]
           canonical  = ["Add", ["Multiply", ["Complex", 0, 1], "x"], 4]
         `);
 
         expr = ['Complex', 1, ['Multiply', 'n', 4]];
         expect(checkNumber(expr)).toMatchInlineSnapshot(`
           box        = ["Complex", 1, ["Multiply", "n", 4]]
-          canonForms = ["Add", ["Multiply", ["Complex", 0, 4], "n"], 1]
+          canonForms = ["Add", 1, ["Multiply", ["Multiply", "n", 4], ["Complex", 0, 1]]]
           canonical  = ["Add", ["Multiply", ["Complex", 0, 4], "n"], 1]
         `);
       });

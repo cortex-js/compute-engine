@@ -61,7 +61,9 @@ describe('Postfix operators: prime', () => {
 
 describe('Anonymous functions, no arg', () => {
   test('no args with parens', () =>
-    expect(parse('()\\mapsto 2')).toMatchInlineSnapshot(`2`));
+    expect(parse('()\\mapsto 2')).toMatchInlineSnapshot(
+      `["Function", 2, "Nothing"]`
+    ));
 });
 
 describe('Anonymous functions, single arg', () => {
@@ -82,12 +84,12 @@ describe('Anonymous functions, single arg', () => {
 describe('Anonymous functions, anon params arg', () => {
   test('Single arg no delims', () =>
     expect(parse('()\\mapsto \\_')).toMatchInlineSnapshot(
-      `["Function", "_1", "_1"]`
+      `["Function", "_", "Nothing"]`
     ));
   test('Multiple arg', () =>
     expect(
       parse('()\\mapsto \\_ + \\operatorname{\\_2}')
-    ).toMatchInlineSnapshot(`["Function", ["Add", "_1", "_2"], "_1", "_2"]`));
+    ).toMatchInlineSnapshot(`["Function", ["Add", "_", "_2"], "Nothing"]`));
 });
 
 describe('Anonymous functions, multiple args', () => {

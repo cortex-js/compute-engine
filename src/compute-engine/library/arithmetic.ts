@@ -5,12 +5,13 @@ import {
   checkTypes,
   checkNumericArgs,
 } from '../boxed-expression/validate';
-import { bignumPreferred, canonical } from '../boxed-expression/utils';
+import { bignumPreferred } from '../boxed-expression/utils';
 import {
   asSmallInteger,
   asRational,
   asBignum,
   asBigint,
+  toInteger,
 } from '../boxed-expression/numerics';
 import { addOrder } from '../boxed-expression/order';
 
@@ -38,8 +39,6 @@ import { rationalize } from '../numerics/rationals';
 import { isPrime as isPrimeMachine, isPrimeBigint } from '../numerics/primes';
 import { fromDigits } from '../numerics/strings';
 
-import { each } from '../collection-utils';
-
 import {
   canonicalAdd,
   add,
@@ -64,9 +63,10 @@ import { run, runAsync } from '../../common/interruptible';
 import type {
   BoxedExpression,
   ComputeEngine,
-  IdentifierDefinitions,
+  SymbolDefinitions,
   Sign,
 } from '../global-types';
+import { canonical } from '../boxed-expression/canonical-utils';
 
 // When processing an arithmetic expression, the following are the core
 // canonical arithmetic operations to account for:
@@ -152,17 +152,17 @@ function lnSign(x: BoxedExpression): Sign | undefined {
   return undefined;
 }
 
-export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
+export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
   {
     //
     // Functions
     //
     Abs: {
       wikidata: 'Q3317982', // magnitude 'Q120812 (for reals)
-      threadable: true,
+      broadcastable: true,
       idempotent: true,
       complexity: 1200,
-      signature: 'number -> number',
+      signature: '(number) -> number',
 
       type: ([x]) => x.type,
       sgn: ([x]) => {
@@ -178,13 +178,13 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
       associative: true,
       commutative: true,
       commutativeOrder: addOrder,
-      threadable: true,
+      broadcastable: true,
       idempotent: true,
       complexity: 1300,
 
       lazy: true,
 
-      signature: '(number, ...number) -> number',
+      signature: '(number+) -> number',
       type: addType,
 
       sgn: (ops) => {
@@ -211,8 +211,8 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
     Ceil: {
       description: 'Rounds a number up to the next largest integer',
       complexity: 1250,
-      threadable: true,
-      signature: 'real -> integer',
+      broadcastable: true,
+      signature: '(real) -> integer',
       sgn: ([x]) => {
         if (x.isLessEqual(-1)) return 'negative';
         if (x.isPositive) return 'positive';
@@ -234,11 +234,11 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
 
     Chop: {
       associative: true,
-      threadable: true,
+      broadcastable: true,
       idempotent: true,
       complexity: 1200,
 
-      signature: 'number -> number',
+      signature: '(number) -> number',
       type: ([x]) => x.type,
       evaluate: (ops) => {
         const op = ops[0];
@@ -261,11 +261,11 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
     Divide: {
       wikidata: 'Q1226939',
       complexity: 2500,
-      threadable: true,
+      broadcastable: true,
 
       // - if numer product of numbers, or denom product of numbers,
       // i.e. √2x/2 -> 0.707x, 2/√2x -> 1.4142x
-      signature: '(number, ...number) -> number',
+      signature: '(number, number+) -> number',
       type: ([num, den]) => {
         if (den.is(1)) return num.type;
         if (den.isNaN || num.isNaN) return 'number';
@@ -306,10 +306,10 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
 
     Exp: {
       wikidata: 'Q168698',
-      threadable: true,
+      broadcastable: true,
       complexity: 3500,
 
-      signature: 'number -> number',
+      signature: '(number) -> number',
       // Because it gets canonicalized to Power, the sgn handler is not called
       // sgn: ([x]) => {
       //   if (
@@ -340,10 +340,10 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
       description:
         'Factorial function: the product of all positive integers less than or equal to n',
       wikidata: 'Q120976',
-      threadable: true,
+      broadcastable: true,
       complexity: 9000,
 
-      signature: 'integer -> integer',
+      signature: '(integer) -> integer',
 
       // Assumes that the inside of the factorial is an integer
       sgn: ([x]) =>
@@ -414,9 +414,9 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
     Factorial2: {
       description: 'Double Factorial Function',
       complexity: 9000,
-      threadable: true,
+      broadcastable: true,
 
-      signature: 'integer -> integer',
+      signature: '(integer) -> integer',
       sgn: (
         [x] //Assumes that the inside of the factorial is an integer
       ) =>
@@ -429,7 +429,7 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
         // 2^{\frac{n}{2}+\frac{1}{4}(1-\cos(\pi n))}\pi^{\frac{1}{4}(\cos(\pi n)-1)}\Gamma\left(\frac{n}{2}+1\right)
 
         const x = ops[0];
-        const n = asSmallInteger(x);
+        const n = toInteger(x);
         if (n === null) return undefined;
         const ce = x.engine;
         if (bignumPreferred(ce))
@@ -442,9 +442,9 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
     Floor: {
       wikidata: 'Q56860783',
       complexity: 1250,
-      threadable: true,
+      broadcastable: true,
 
-      signature: 'number -> integer',
+      signature: '(number) -> integer',
       sgn: ([x]) => {
         if (x.isNegative) return 'negative';
         if (x.isGreaterEqual(1)) return 'positive';
@@ -466,8 +466,8 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
     Gamma: {
       wikidata: 'Q190573',
       complexity: 8000,
-      threadable: true,
-      signature: 'number -> number',
+      broadcastable: true,
+      signature: '(number) -> number',
 
       sgn: ([x]) => (x.isPositive ? 'positive' : x.is(0) ? 'zero' : undefined),
       evaluate: ([x], { numericApproximation, engine }) =>
@@ -483,8 +483,8 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
 
     GammaLn: {
       complexity: 8000,
-      threadable: true,
-      signature: 'number -> number',
+      broadcastable: true,
+      signature: '(number) -> number',
 
       evaluate: (ops, { numericApproximation, engine }) =>
         numericApproximation
@@ -501,7 +501,7 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
       description: 'Natural Logarithm',
       wikidata: 'Q204037',
       complexity: 4000,
-      threadable: true,
+      broadcastable: true,
 
       signature: '(number, base: number?) -> number',
       sgn: ([x]) => lnSign(x),
@@ -533,7 +533,7 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
       description: 'Log(z, b = 10) = Logarithm of base b',
       wikidata: 'Q11197',
       complexity: 4100,
-      threadable: true,
+      broadcastable: true,
 
       signature: '(number, base: number?) -> number',
 
@@ -583,9 +583,9 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
       description: 'Base-2 Logarithm',
       wikidata: 'Q581168',
       complexity: 4100,
-      threadable: true,
+      broadcastable: true,
 
-      signature: '(number, base: number?) -> number',
+      signature: '(number) -> number',
       sgn: ([x]) => lnSign(x),
       canonical: ([x], { engine }) => engine._fn('Log', [x, engine.number(2)]),
     },
@@ -594,8 +594,8 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
       description: 'Base-10 Logarithm',
       wikidata: 'Q966582',
       complexity: 4100,
-      threadable: true,
-      signature: 'number -> number',
+      broadcastable: true,
+      signature: '(number) -> number',
       sgn: ([x]) => lnSign(x),
       canonical: ([x], { engine }) => engine._fn('Log', [x]),
     },
@@ -604,7 +604,7 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
       description: 'Modulo',
       wikidata: 'Q1799665',
       complexity: 2500,
-      threadable: true,
+      broadcastable: true,
 
       signature: '(number, number) -> number',
       sgn: (ops) => {
@@ -641,10 +641,10 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
       commutative: true,
       idempotent: true,
       complexity: 2100,
-      threadable: true,
+      broadcastable: true,
 
       lazy: true,
-      signature: '(number, ...number) -> number',
+      signature: '(number*) -> number',
       type: (ops) => {
         if (ops.length === 0) return 'finite_integer'; // = 1
         if (ops.length === 1) return ops[0].type;
@@ -711,8 +711,8 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
       description: 'Additive Inverse',
       wikidata: 'Q715358',
       complexity: 2000,
-      threadable: true,
-      signature: 'number -> number',
+      broadcastable: true,
+      signature: '(number) -> number',
       type: ([x]) => x.type,
       sgn: ([x]) => oppositeSgn(x.sgn),
       canonical: (args, { engine }) => {
@@ -740,7 +740,7 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
 
     Power: {
       wikidata: 'Q33456',
-      threadable: true,
+      broadcastable: true,
       complexity: 3500,
       signature: '(number, number) -> number',
       type: ([base, exp]) => {
@@ -786,7 +786,7 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
 
         if (b.numerator.isEven && b.denominator.isOdd) {
           if (a.isReal) {
-            let s = a.sgn;
+            const s = a.sgn;
             return s === 'positive' || s === 'not-zero' || s === 'negative'
               ? 'positive'
               : 'non-negative';
@@ -864,7 +864,7 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
 
     Root: {
       complexity: 3200,
-      threadable: true,
+      broadcastable: true,
 
       signature: '(number, number) -> number',
       type: ([base, exp]) => {
@@ -908,8 +908,8 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
 
     Round: {
       complexity: 1250,
-      threadable: true,
-      signature: 'number -> integer',
+      broadcastable: true,
+      signature: '(number) -> integer',
       type: ([x]) => {
         if (x.isNaN) return 'number';
         if (x.isFinite === false || x.isReal === false)
@@ -940,8 +940,8 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
 
     Sign: {
       complexity: 1200,
-      threadable: true,
-      signature: 'number -> integer',
+      broadcastable: true,
+      signature: '(number) -> integer',
       sgn: ([x]) => x.sgn,
       evaluate: ([x], { engine }) => {
         if (x.is(0)) return engine.Zero;
@@ -983,13 +983,13 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
       description: 'Square Root',
       wikidata: 'Q134237',
       complexity: 3000,
-      threadable: true,
+      broadcastable: true,
 
-      signature: 'number -> number',
+      signature: '(number) -> number',
       type: ([x]) => {
         if (x.isNaN) return 'number';
         if (x.isFinite === false) return 'non_finite_number';
-        if (x.isReal) return 'finite_real'; // @fixme: if x is negative, the type should be complex
+        if (x.isReal) return x.isNegative ? 'complex' : 'finite_real';
         return 'finite_number';
       },
       // @fastpath: canonicalization is done in the function
@@ -1020,12 +1020,12 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
     Square: {
       wikidata: 'Q3075175',
       complexity: 3100,
-      threadable: true,
-      signature: 'number -> number',
+      broadcastable: true,
+      signature: '(number) -> number',
       sgn: ([x]) => {
         if (x.is(0)) return 'zero';
         if (x.isReal) {
-          let s = x.sgn;
+          const s = x.sgn;
           return s === 'not-zero' || s === 'positive' || s === 'negative'
             ? 'positive'
             : 'non-negative';
@@ -1045,10 +1045,10 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
     Subtract: {
       wikidata: 'Q40754',
       complexity: 1350,
-      threadable: true,
+      broadcastable: true,
       // We accept from 1 to n arguments (see https://github.com/cortex-js/compute-engine/issues/171)
       // left-associative: a - b - c -> (a - b) - c
-      signature: '(number, ...number) -> number',
+      signature: '(number+) -> number',
       canonical: (args, { engine }) => {
         args = checkNumericArgs(engine, args);
         if (args.length === 0) return engine.error('missing');
@@ -1067,16 +1067,16 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
     //
     ImaginaryUnit: {
       type: 'imaginary',
-      constant: true,
+      isConstant: true,
       holdUntil: 'never',
       wikidata: 'Q193796',
       value: (engine) => engine.I,
     },
 
-    //Alias of 'ImaginaryUnit'
+    // Alias of 'ImaginaryUnit'
     i: {
       type: 'imaginary',
-      constant: true,
+      isConstant: true,
       holdUntil: 'never',
       value: (engine) => engine.I,
     },
@@ -1084,7 +1084,7 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
     ExponentialE: {
       type: 'finite_real',
       wikidata: 'Q82435',
-      constant: true,
+      isConstant: true,
       holdUntil: 'N',
 
       value: (engine) =>
@@ -1095,37 +1095,44 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
 
     e: {
       type: 'finite_real',
-      constant: true,
+      isConstant: true,
       holdUntil: 'never',
       value: 'ExponentialE',
     },
 
     ComplexInfinity: {
       type: 'complex',
-      constant: true,
+      isConstant: true,
       holdUntil: 'never',
       value: (engine) => engine.ComplexInfinity,
     },
 
     PositiveInfinity: {
       type: 'non_finite_number',
-      constant: true,
+      isConstant: true,
       holdUntil: 'never',
       value: +Infinity,
     },
 
     NegativeInfinity: {
       type: 'non_finite_number',
-      constant: true,
+      isConstant: true,
       holdUntil: 'never',
       value: -Infinity,
     },
 
     NaN: {
       type: 'number',
-      constant: true,
+      isConstant: true,
       holdUntil: 'never',
       value: (engine) => engine.NaN,
+    },
+
+    ContinuationPlaceholder: {
+      description:
+        'This symbol indicates that some elements in a collection have been omitted, for example in a long list of numbers, or in an infinite set',
+      type: 'unknown',
+      isConstant: true,
     },
 
     MachineEpsilon: {
@@ -1138,26 +1145,26 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
        */
       type: 'finite_real',
       holdUntil: 'N',
-      constant: true,
+      isConstant: true,
       value: { num: Number.EPSILON.toString() },
     },
     Half: {
       type: 'finite_rational',
-      constant: true,
+      isConstant: true,
       holdUntil: 'never',
       value: ['Rational', 1, 2],
     },
     GoldenRatio: {
       type: 'finite_real', // Golden ratio is an algebraic number
       wikidata: 'Q41690',
-      constant: true,
+      isConstant: true,
       holdUntil: 'N',
       value: ['Divide', ['Add', 1, ['Sqrt', 5]], 2],
     },
     CatalanConstant: {
       type: 'finite_real',
       wikidata: 'Q855282',
-      constant: true,
+      isConstant: true,
       holdUntil: 'N',
       value: {
         // From http://www.fullbooks.com/Miscellaneous-Mathematical-Constants1.html
@@ -1189,7 +1196,7 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
       type: 'finite_real',
       wikidata: 'Q273023',
       holdUntil: 'N',
-      constant: true,
+      isConstant: true,
       value: {
         num: `0.57721566490153286060651209008240243104215933593992359880576723488486772677766
           467093694706329174674951463144724980708248096050401448654283622417399764492353
@@ -1208,10 +1215,10 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
 
   {
     PreIncrement: {
-      signature: 'number -> number',
+      signature: '(number) -> number',
     },
     PreDecrement: {
-      signature: 'number -> number',
+      signature: '(number) -> number',
     },
   },
 
@@ -1224,7 +1231,7 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
       description: '`IsPrime(n)` returns `True` if `n` is a prime number',
       wikidata: 'Q49008',
       complexity: 1200,
-      threadable: true,
+      broadcastable: true,
       signature: '(number) -> boolean',
       evaluate: ([n], { engine }) => {
         const result = isPrime(n);
@@ -1236,7 +1243,7 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
       description:
         '`IsComposite(n)` returns `True` if `n` is not a prime number',
       complexity: 1200,
-      threadable: true,
+      broadcastable: true,
       signature: '(number) -> boolean',
       canonical: (ops, { engine }) => engine.box(['Not', ['IsPrime', ...ops]]),
     },
@@ -1244,7 +1251,7 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
     IsOdd: {
       description: '`IsOdd(n)` returns `True` if `n` is an odd number',
       complexity: 1200,
-      threadable: true,
+      broadcastable: true,
       signature: '(number) -> boolean',
       evaluate: (ops, { engine }) => {
         let fail = false;
@@ -1261,13 +1268,13 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
           return false;
         });
         if (fail) return undefined;
-        return engine.symbol(result ? 'False' : 'True');
+        return engine.symbol(result ? 'True' : 'False');
       },
     },
-    isEven: {
-      description: 'Odd Number',
+    IsEven: {
+      description: 'Even Number',
       complexity: 1200,
-      threadable: true,
+      broadcastable: true,
       signature: '(number) -> boolean',
       canonical: (ops, { engine }) => engine.box(['Not', ['IsOdd', ...ops]]),
     },
@@ -1277,18 +1284,18 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
     GCD: {
       description: 'Greatest Common Divisor',
       complexity: 1200,
-      threadable: false, // The function take a variable number of arguments,
+      broadcastable: false, // The function take a variable number of arguments,
       // including collections
-      signature: '(...any) -> integer',
+      signature: '(any*) -> integer',
       sgn: () => 'positive',
       evaluate: (xs) => evaluateGcdLcm(xs, 'GCD'),
     },
     LCM: {
       description: 'Least Common Multiple',
       complexity: 1200,
-      threadable: false, // The function take a variable number of arguments,
+      broadcastable: false, // The function take a variable number of arguments,
       // including collections
-      signature: '(...any) -> integer',
+      signature: '(any*) -> integer',
       sgn: () => 'positive',
       evaluate: (xs) => evaluateGcdLcm(xs, 'LCM'),
     },
@@ -1296,14 +1303,14 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
     Numerator: {
       description: 'Numerator of an expression',
       complexity: 1200,
-      threadable: true,
+      broadcastable: true,
 
       lazy: true,
       signature: '(number) -> number | nothing',
       canonical: (ops, { engine }) => {
         // **IMPORTANT**: We want Numerator to work on non-canonical
         // expressions, so that you can determine if a user input is
-        // reductible, for example.
+        // reducible, for example.
         if (ops.length === 0) return engine.Nothing;
         const op = ops[0];
         if (op.operator === 'Rational' || op.operator === 'Divide')
@@ -1324,7 +1331,7 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
     Denominator: {
       description: 'Denominator of an expression',
       complexity: 1200,
-      threadable: true,
+      broadcastable: true,
 
       lazy: true,
       signature: '(number) -> number | nothing',
@@ -1354,7 +1361,7 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
     NumeratorDenominator: {
       description: 'Sequence of Numerator and Denominator of an expression',
       complexity: 1200,
-      threadable: true,
+      broadcastable: true,
 
       lazy: true,
       signature: '(number) -> tuple<number, number> | nothing',
@@ -1394,9 +1401,9 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
     Max: {
       description: 'Maximum of two or more numbers',
       complexity: 1200,
-      threadable: false, // The function take a variable number of arguments,
+      broadcastable: false, // The function take a variable number of arguments,
       // including collections
-      signature: '(...value) -> number | list',
+      signature: '(value*) -> number | list',
       sgn: (ops) => {
         if (ops.some((x) => x.isReal == false || x.isNaN)) return 'unsigned';
         if (ops.some((x) => x.isReal == false || x.isNaN !== false))
@@ -1415,9 +1422,9 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
     Min: {
       description: 'Minimum of two or more numbers',
       complexity: 1200,
-      threadable: false, // The function take a variable number of arguments,
+      broadcastable: false, // The function take a variable number of arguments,
       // including collections
-      signature: '(...value) -> number | list',
+      signature: '(value+) -> number | list',
       sgn: (ops) => {
         if (ops.some((x) => x.isReal == false || x.isNaN)) return 'unsigned';
         if (ops.some((x) => x.isReal == false || x.isNaN !== false))
@@ -1435,20 +1442,20 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
     Supremum: {
       description: 'Like Max, but defined for open sets',
       complexity: 1200,
-      threadable: false, // The function take a variable number of arguments,
+      broadcastable: false, // The function take a variable number of arguments,
       // including collections
 
-      signature: '(...value) -> number | list',
+      signature: '(value*) -> number | list',
       evaluate: (xs, { engine }) => evaluateMinMax(engine, xs, 'Supremum'),
     },
 
     Infimum: {
       description: 'Like Min, but defined for open sets',
       complexity: 1200,
-      threadable: false, // The function take a variable number of arguments,
+      broadcastable: false, // The function take a variable number of arguments,
       // including collections
 
-      signature: '(...value) -> number | list',
+      signature: '(value*) -> number | list',
       evaluate: (xs, { engine }) => evaluateMinMax(engine, xs, 'Infimum'),
     },
 
@@ -1457,21 +1464,20 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
         '`Product(f, a, b)` computes the product of `f` from `a` to `b`',
       wikidata: 'Q901718',
       complexity: 1000,
-      threadable: false,
+      broadcastable: false,
 
+      scoped: true,
       lazy: true,
       signature:
-        '(collection|function, ...(tuple<symbol>|tuple<symbol, integer>|tuple<symbol, integer, integer>)) -> number',
+        '((number+) -> number, (tuple<integer>|tuple<integer, integer>)+) -> number',
 
-      // The 'body' and 'range' need to be interpreted by canonicalMultiplication(). Don't canonicalize them yet.
-      canonical: ([body, ...indexes]) =>
-        canonicalBigop('Product', body, indexes),
+      canonical: ([body, ...bounds], { scope }) =>
+        canonicalBigop('Product', body, bounds, scope),
 
       evaluate: (ops, options) => {
         const fn = (acc, x) => {
           x = x.evaluate(options);
-          if (!x.isNumberLiteral) return null;
-          return acc.mul(x.numericValue!);
+          return x.isNumberLiteral ? acc.mul(x.numericValue!) : null;
         };
 
         const result = run(
@@ -1508,32 +1514,34 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
     },
 
     Sum: {
-      description: '`Sum(f, a, b)` computes the sum of `f` from `a` to `b`',
+      description: '`Sum(f, [a, b])` computes the sum of `f` from `a` to `b`',
       wikidata: 'Q218005',
       complexity: 1000,
-      threadable: false,
+      broadcastable: false,
 
+      scoped: true,
       lazy: true,
-      signature:
-        '(collection|function, ...(tuple<symbol>|tuple<symbol, integer>|tuple<symbol, integer, integer>)) -> number',
+      signature: '((number) -> number, bounds:tuple+) -> number',
 
-      canonical: ([body, ...indexes]) => canonicalBigop('Sum', body, indexes),
-      evaluate: (xs, { engine }) =>
+      canonical: ([body, ...bounds], { scope }) =>
+        canonicalBigop('Sum', body, bounds, scope),
+
+      evaluate: ([fn, ...indexes], { engine }) =>
         engine.number(
           run(
             reduceBigOp(
-              xs[0],
-              xs.slice(1),
+              fn,
+              indexes,
               (acc, x) => {
                 x = x.evaluate();
-                if (!x.isNumberLiteral) return null;
-                return acc.add(x.numericValue!);
+                return x.isNumberLiteral ? acc.add(x.numericValue!) : null;
               },
               engine._numericValue(0)
             ),
             engine._timeRemaining
           )
         ),
+
       evaluateAsync: async (xs, { engine, signal }) =>
         engine.number(
           await runAsync(
@@ -1551,92 +1559,6 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
             signal
           )
         ),
-    },
-  },
-
-  //
-  // Formatting and string processing
-  //
-  {
-    BaseForm: {
-      description: '`BaseForm(expr, base=10)`',
-      complexity: 9000,
-      signature: '(number, (string|integer)?) -> string | nothing',
-      type: ([x]) => (x === undefined ? 'nothing' : x.type),
-      evaluate: ([x]) => x,
-    },
-
-    FromDigits: {
-      description: `\`FromDigits(s, base=10)\` \
-      return an integer representation of the string \`s\` in base \`base\`.`,
-      // @todo could accept `0xcafe`, `0b01010` or `(deadbeef)_16` as string formats
-      // @todo could accept "roman"... as base
-      // @todo could accept optional third parameter as the (padded) length of the output
-
-      signature: '(string, (string|integer)?) -> integer',
-
-      evaluate: (ops, { engine }) => {
-        let op1 = ops[0]?.string;
-        const ce = engine;
-        if (!op1) return ce.typeError('string', ops[0]?.type, ops[0]);
-
-        op1 = op1.trim();
-
-        if (op1.startsWith('0x')) return ce.number(parseInt(op1.slice(2), 16));
-
-        if (op1.startsWith('0b')) return ce.number(parseInt(op1.slice(2), 2));
-
-        const op2 = ops[1] ?? ce.Nothing;
-        if (op2.symbol === 'Nothing')
-          return ce.number(Number.parseInt(op1, 10));
-
-        const base = op2.re;
-        if (!op2.isInteger || !Number.isFinite(base) || base < 2 || base > 36)
-          return ce.error(['unexpected-base', base.toString()], op2.toString());
-
-        const [value, rest] = fromDigits(op1, op2.string ?? op2.symbol ?? 10);
-
-        if (rest) return ce.error(['unexpected-digit', rest[0]], rest);
-
-        return ce.number(value);
-      },
-    },
-
-    IntegerString: {
-      description: `\`IntegerString(n, base=10)\` \
-      return a string representation of the integer \`n\` in base \`base\`.`,
-      // @todo could accept `0xcafe`, `0b01010` or `(deadbeef)_16` as string formats
-      // @todo could accept "roman"... as base
-      // @todo could accept optional third parameter as the (padded) length of the output
-      threadable: true,
-      signature: '(integer, integer?) -> string',
-      evaluate: (ops, { engine }) => {
-        const ce = engine;
-        const op1 = ops[0];
-        if (!op1.isInteger) return ce.typeError('integer', op1.type, op1);
-
-        const val = op1.re;
-        if (!Number.isFinite(val))
-          return ce.typeError('integer', op1.type, op1);
-
-        const op2 = ops[1] ?? ce.Nothing;
-        if (op2.symbol === 'Nothing') {
-          if (op1.bignumRe !== undefined)
-            return ce.string(op1.bignumRe.abs().toString());
-          return ce.string(Math.abs(val).toString());
-        }
-
-        const base = asSmallInteger(op2);
-        if (base === null) return ce.typeError('integer', op2.type, op2);
-
-        if (base < 2 || base > 36)
-          return ce.error(
-            ['out-of-range', '2', '36', base.toString()],
-            op2.toString()
-          );
-
-        return ce.string(Math.abs(val).toString(base));
-      },
     },
   },
 ];
@@ -1689,7 +1611,7 @@ function processMinMaxItem(
   if (item.isCollection) {
     let result: BoxedExpression | undefined = undefined;
     const rest: BoxedExpression[] = [];
-    for (const op of each(item)) {
+    for (const op of item.each()) {
       const [val, others] = processMinMaxItem(op, mode);
       if (val) {
         if (!result) result = val;
@@ -1716,6 +1638,9 @@ function evaluateMinMax(
   mode: 'Min' | 'Max' | 'Supremum' | 'Infimum'
 ): BoxedExpression {
   const upper = mode === 'Max' || mode === 'Supremum';
+
+  ops = flatten(ops);
+
   if (ops.length === 0)
     return upper ? ce.NegativeInfinity : ce.PositiveInfinity;
 
@@ -1787,7 +1712,7 @@ export function isPrime(expr: BoxedExpression): boolean | undefined {
   const value = expr.numericValue;
   if (value === null) return undefined;
 
-  const n = asSmallInteger(expr);
+  const n = toInteger(expr);
   if (n !== null) return isPrimeMachine(n);
   const b = asBigint(expr);
   if (b !== null) return isPrimeBigint(b);

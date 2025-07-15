@@ -1,5 +1,6 @@
 import { parseType } from './parse';
 import { PRIMITIVE_TYPES } from './primitive';
+import { typeToString } from './serialize';
 import { isSubtype } from './subtype';
 import type {
   Type,
@@ -67,7 +68,7 @@ export function narrow(...types: Readonly<Type>[]): Type {
   if (types.length === 0) return 'nothing';
   if (types.length === 1) return types[0];
 
-  return types.reduce(narrow2);
+  return types.reduce((a, b) => narrow2(a, b));
 }
 
 /**
@@ -87,7 +88,7 @@ export function widen(...types: Readonly<Type>[]): Readonly<Type> {
   if (types.length === 0) return 'nothing';
   if (types.length === 1) return types[0];
 
-  return types.reduce(widen2);
+  return types.reduce((a, b) => widen2(a, b));
 }
 
 export function isSignatureType(
@@ -98,7 +99,7 @@ export function isSignatureType(
 }
 
 export function functionSignature(type: Readonly<Type>): Type | undefined {
-  if (type === 'function') return parseType('...any -> any');
+  if (type === 'function') return parseType('(any*) -> unknown');
   if (typeof type === 'string') return undefined;
 
   if (type.kind === 'signature') return type;
@@ -117,16 +118,37 @@ export function functionResult(
 
 export function collectionElementType(type: Readonly<Type>): Type | undefined {
   if (type === 'collection') return 'any';
+  if (type === 'indexed_collection') return 'any';
+  if (type === 'list') return 'any';
+  if (type === 'set') return 'any';
+  if (type === 'tuple') return 'any';
+  if (type === 'dictionary') return 'any';
+  if (type === 'record') return 'any';
   if (typeof type === 'string') return undefined;
-  if (type.kind === 'collection') return type.elements;
+
+  if (type.kind === 'collection' || type.kind === 'indexed_collection')
+    return type.elements;
+
   if (type.kind === 'list') return type.elements;
-  if (type.kind === 'map')
-    return parseType(
-      `tuple<string, ${widen(...Object.values(type.elements))}>`
-    );
+
   if (type.kind === 'set') return type.elements;
+
   if (type.kind === 'tuple') return widen(...type.elements.map((x) => x.type));
+
+  if (type.kind === 'dictionary')
+    return parseType(`tuple<string, ${type.values}>`);
+
+  if (type.kind === 'record') {
+    return parseType(
+      `tuple<string, ${typeToString(widen(...Object.values(type.elements)))}>`
+    );
+  }
+
   return undefined;
+}
+
+export function isValidTypeName(name: string): boolean {
+  return /^[a-zA-Z_][a-zA-Z0-9_]*$/.test(name);
 }
 
 export function isValidType(t: any): t is Readonly<Type> {
@@ -141,10 +163,12 @@ export function isValidType(t: any): t is Readonly<Type> {
     t.kind === 'negation' ||
     t.kind === 'tuple' ||
     t.kind === 'list' ||
-    t.kind === 'map' ||
+    t.kind === 'record' ||
+    t.kind === 'dictionary' ||
     t.kind === 'set' ||
     t.kind === 'function' ||
     t.kind === 'collection' ||
+    t.kind === 'indexed_collection' ||
     t.kind === 'reference'
   );
 }
@@ -179,9 +203,11 @@ function superType(a: Readonly<Type>, b: Readonly<Type>): Type {
   if (commonSupertype(a, b, 'number')) return 'number';
 
   if (commonSupertype(a, b, 'list')) return 'list';
-  if (commonSupertype(a, b, 'map')) return 'map';
+  if (commonSupertype(a, b, 'record')) return 'record';
+  if (commonSupertype(a, b, 'dictionary')) return 'dictionary';
   if (commonSupertype(a, b, 'set')) return 'set';
   if (commonSupertype(a, b, 'tuple')) return 'tuple';
+  if (commonSupertype(a, b, 'indexed_collection')) return 'indexed_collection';
   if (commonSupertype(a, b, 'collection')) return 'collection';
 
   if (commonSupertype(a, b, 'scalar')) return 'scalar';

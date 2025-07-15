@@ -1,14 +1,18 @@
+import { Complex } from 'complex-esm';
 import { Decimal } from 'decimal.js';
 
 import type { Rational } from '../numerics/types';
 
-import type { BoxedExpression } from '../global-types';
+import type { BoxedExpression, SemiBoxedExpression } from '../global-types';
+import { isBoxedExpression } from './utils';
 
 import { SMALL_INTEGER } from '../numerics/numeric';
 import { bigint } from '../numerics/bigint';
 
 import { ExactNumericValue } from '../numeric-value/exact-numeric-value';
 import { NumericValue } from '../numeric-value/types';
+import { bigintValue } from '../numerics/expression';
+import { Expression } from '../types';
 
 export function asRational(expr: BoxedExpression): Rational | undefined {
   const num = expr.numericValue;
@@ -45,24 +49,41 @@ export function asRational(expr: BoxedExpression): Rational | undefined {
   return undefined;
 }
 
-export function asBigint(expr: BoxedExpression | undefined): bigint | null {
-  if (expr === undefined || expr === null) return null;
-  const num = expr.numericValue;
-  if (num === null) return null;
+export function asBigint(
+  x: Complex | Decimal | SemiBoxedExpression | undefined
+): bigint | null {
+  if (x === undefined || x === null) return null;
 
-  if (typeof num === 'number') {
-    if (Number.isInteger(num)) return BigInt(num);
+  if (typeof x === 'bigint') return x;
+  if (typeof x === 'number' && Number.isInteger(x)) return BigInt(x);
+
+  if (isBoxedExpression(x)) {
+    const num = x.numericValue;
+    if (num === null) return null;
+
+    if (typeof num === 'number') {
+      if (Number.isInteger(num)) return BigInt(num);
+      return null;
+    }
+
+    if (num.im !== 0) return null;
+
+    const n = num.bignumRe;
+    if (n?.isInteger()) return bigint(n);
+
+    if (!Number.isInteger(num.re)) return null;
+
+    return BigInt(num.re);
+  }
+
+  if (x instanceof Decimal || typeof x === 'string') return bigint(x);
+
+  if (x instanceof Complex) {
+    if (x.im === 0) return bigint(x.re);
     return null;
   }
 
-  if (num.im !== 0) return null;
-
-  const n = num.bignumRe;
-  if (n?.isInteger()) return bigint(n);
-
-  if (!Number.isInteger(num.re)) return null;
-
-  return BigInt(num.re);
+  return bigintValue(x as Expression);
 }
 
 export function asBignum(expr: BoxedExpression | undefined): Decimal | null {
@@ -79,6 +100,14 @@ export function asBignum(expr: BoxedExpression | undefined): Decimal | null {
   return expr.engine.bignum(re);
 }
 
+/**
+ * Validate if the expression is a small integer.
+ * A small integer is an integer between -SMALL_INTEGER and SMALL_INTEGER (inclusive).
+ * Returns null if the expression is not a small integer.
+ *
+ * Unlike `toInteger()` this functions fails if the expression is not an
+ * integer. `toInteger()` will round the value to the nearest integer.
+ */
 export function asSmallInteger(
   expr: number | BoxedExpression | undefined
 ): number | null {
@@ -107,4 +136,41 @@ export function asSmallInteger(
   if (Number.isInteger(n) && n >= -SMALL_INTEGER && n <= SMALL_INTEGER)
     return Number(n);
   return null;
+}
+
+/**
+ * Convert a boxed expression to an integer.
+ * Returns null if the expression cannot be converted to an integer.
+ * If the expression is a complex number, only the real part is considered.
+ * If the real part is not an integer, it is rounded to the nearest integer.
+ *
+ * Unlike `asSmallInteger()`, this function does not check if the integer is
+ * within the range of -SMALL_INTEGER to SMALL_INTEGER, and it rounds the
+ * value to the nearest integer if it is a number.
+ *
+ */
+export function toInteger(expr: BoxedExpression | undefined): number | null {
+  const num = expr?.numericValue ?? undefined;
+  if (num === undefined) return null;
+
+  return Math.round(typeof num === 'number' ? num : num.re);
+}
+
+/** Convert a boxed expression to a bigint.
+ * Returns null if the expression cannot be converted to a bigint.
+ * If the expression is a complex number, only the real part is considered.
+ * If the real part is not an integer, it is rounded to the nearest integer.
+ */
+export function toBigint(expr: BoxedExpression | undefined): bigint | null {
+  if (expr === undefined || expr === null) return null;
+
+  const num = expr.numericValue;
+  if (num === null) return null;
+
+  if (typeof num === 'number') return BigInt(Math.round(num));
+
+  const n = num.bignumRe ?? num.re;
+  if (typeof n === 'number') return BigInt(Math.round(n));
+
+  return bigint(n.round());
 }

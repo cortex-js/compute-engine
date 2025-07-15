@@ -1,52 +1,67 @@
 // Set operations:
 // https://query.wikidata.org/#PREFIX%20wd%3A%20%3Chttp%3A%2F%2Fwww.wikidata.org%2Fentity%2F%3E%0APREFIX%20wdt%3A%20%3Chttp%3A%2F%2Fwww.wikidata.org%2Fprop%2Fdirect%2F%3E%0A%0ASELECT%20DISTINCT%20%3Fitem%0AWHERE%20%7B%0A%20%20%20%20%3Fitem%20wdt%3AP31%2a%20wd%3AQ1964995%0A%7D%0A
 
+import { BoxedType } from '../../common/type/boxed-type';
 import { parseType } from '../../common/type/parse';
 import { flatten } from '../boxed-expression/flatten';
 import { validateArguments } from '../boxed-expression/validate';
 import {
-  each,
-  iterator,
-  isFiniteIndexableCollection,
+  isFiniteIndexedCollection,
   MAX_SIZE_EAGER_COLLECTION,
 } from '../collection-utils';
 import type {
   BoxedExpression,
-  SymbolDefinition,
-  IdentifierDefinitions,
+  SymbolDefinitions,
   ComputeEngine,
 } from '../global-types';
+import {
+  cantorEnumerateComplexNumbers,
+  cantorEnumerateIntegers,
+  cantorEnumeratePositiveRationals,
+  cantorEnumerateRationals,
+} from '../numerics/numeric';
 
-export const SETS_LIBRARY: IdentifierDefinitions = {
+export const SETS_LIBRARY: SymbolDefinitions = {
   //
   // Constants
   //
   EmptySet: {
     type: 'set',
-    constant: true,
+    isConstant: true,
     wikidata: 'Q226183',
-    eq: (b) => b.type.matches('set') && b.size === 0,
+    description: 'The empty set, a set containing no elements.',
+    eq: (b) => b.type.matches('set') && b.xsize === 0,
     collection: {
-      size: () => 0,
+      iterator: () => ({
+        next: () => ({ value: undefined, done: true }),
+      }),
+      count: () => 0,
+      isEmpty: () => true,
+      isFinite: () => true,
       contains: () => false,
       subsetOf: () => true,
       eltsgn: () => undefined,
       elttype: () => 'never',
     },
-  } as SymbolDefinition,
+  },
 
   Numbers: {
     type: 'set<number>',
-    constant: true,
+    isConstant: true,
+    description: 'The set of all numbers.',
     collection: {
-      size: () => Infinity,
+      iterator: complexIterator,
+      count: () => Infinity,
+      isEmpty: () => false,
+      isFinite: () => false,
+
       contains: (_, x) => x.type.matches('number'),
-      subsetOf: (_, rhs, strict) => {
-        if (rhs.operator === 'Range' || rhs.operator === 'Linspace')
+      subsetOf: (_, other, strict) => {
+        if (other.operator === 'Range' || other.operator === 'Linspace')
           return true;
         return (
-          rhs.type.matches('set<number>') &&
-          (!strict || rhs.symbol !== 'Numbers')
+          other.type.matches(BoxedType.setNumber) &&
+          (!strict || other.symbol !== 'Numbers')
         );
       },
       eltsgn: () => 'unsigned',
@@ -56,15 +71,19 @@ export const SETS_LIBRARY: IdentifierDefinitions = {
 
   ComplexNumbers: {
     type: 'set<finite_complex>',
-    constant: true,
+    isConstant: true,
+    description: 'The set of all finite complex numbers.',
     collection: {
-      size: () => Infinity,
+      iterator: complexIterator,
+      count: () => Infinity,
+      isEmpty: () => false,
+      isFinite: () => false,
       contains: (_, x) => x.type.matches('finite_complex'),
       subsetOf: (_, rhs, strict) => {
         if (rhs.operator === 'Range' || rhs.operator === 'Linspace')
           return true;
         return (
-          rhs.type.matches('set<complex>') &&
+          rhs.type.matches(BoxedType.setComplex) &&
           (!strict || rhs.symbol !== 'ComplexNumbers')
         );
       },
@@ -75,15 +94,19 @@ export const SETS_LIBRARY: IdentifierDefinitions = {
 
   ExtendedComplexNumbers: {
     type: 'set<complex>',
-    constant: true,
+    isConstant: true,
+    description: 'The set of all complex numbers, including infinities.',
     collection: {
-      size: () => Infinity,
+      iterator: complexIterator,
+      count: () => Infinity,
+      isEmpty: () => false,
+      isFinite: () => false,
       contains: (_, x) => x.type.matches('complex'),
       subsetOf: (_, rhs, strict) => {
         if (rhs.operator === 'Range' || rhs.operator === 'Linspace')
           return true;
         return (
-          rhs.type.matches('set<complex>') &&
+          rhs.type.matches(BoxedType.setComplex) &&
           (!strict || rhs.symbol !== 'ComplexNumbers')
         );
       },
@@ -94,12 +117,16 @@ export const SETS_LIBRARY: IdentifierDefinitions = {
 
   ImaginaryNumbers: {
     type: 'set<imaginary>',
-    constant: true,
+    isConstant: true,
+    description: 'The set of all imaginary numbers.',
     collection: {
-      size: () => Infinity,
-      contains: (_, x) => x.type.matches('imaginary'),
+      iterator: imaginaryIterator,
+      count: () => Infinity,
+      isEmpty: () => false,
+      isFinite: () => false,
+      contains: (_, x) => x.type.matches(BoxedType.setImaginary),
       subsetOf: (_, rhs, strict) =>
-        rhs.type.matches('set<imaginary>') &&
+        rhs.type.matches(BoxedType.setImaginary) &&
         (!strict || rhs.symbol !== 'ImaginaryNumbers'),
       eltsgn: () => 'unsigned',
       elttype: () => 'imaginary',
@@ -108,12 +135,16 @@ export const SETS_LIBRARY: IdentifierDefinitions = {
 
   RealNumbers: {
     type: 'set<finite_real>',
-    constant: true,
+    isConstant: true,
+    description: 'The set of all finite real numbers.',
     collection: {
+      iterator: (self) => rationalIterator(self),
       contains: (_, x) => x.type.matches('finite_real'),
-      size: () => Infinity,
+      count: () => Infinity,
+      isEmpty: () => false,
+      isFinite: () => false,
       subsetOf: (_, rhs, strict) =>
-        rhs.type.matches('set<real>') &&
+        rhs.type.matches(BoxedType.setReal) &&
         (!strict || rhs.symbol !== 'RealNumbers'),
       eltsgn: () => undefined,
       elttype: () => 'finite_real',
@@ -122,12 +153,16 @@ export const SETS_LIBRARY: IdentifierDefinitions = {
 
   ExtendedRealNumbers: {
     type: 'set<real>',
-    constant: true,
+    isConstant: true,
+    description: 'The set of all real numbers, including infinities.',
     collection: {
+      iterator: (self) => rationalIterator(self),
       contains: (_, x) => x.type.matches('real'),
-      size: () => Infinity,
+      count: () => Infinity,
+      isEmpty: () => false,
+      isFinite: () => false,
       subsetOf: (_, rhs, strict) =>
-        rhs.type.matches('set<real>') &&
+        rhs.type.matches(BoxedType.setReal) &&
         (!strict || rhs.symbol !== 'ExtendedRealNumbers'),
       eltsgn: () => undefined,
       elttype: () => 'real',
@@ -136,14 +171,18 @@ export const SETS_LIBRARY: IdentifierDefinitions = {
 
   Integers: {
     type: 'set<finite_integer>',
-    constant: true,
+    isConstant: true,
+    description: 'The set of all finite integers.',
     collection: {
+      iterator: integerIterator,
       contains: (_, x) => x.type.matches('finite_integer'),
-      size: () => Infinity,
+      count: () => Infinity,
+      isEmpty: () => false,
+      isFinite: () => false,
       subsetOf: (_, rhs, strict) => {
         if (rhs.operator === 'Range') return true;
         return (
-          rhs.type.matches('set<finite_integer>') &&
+          rhs.type.matches(BoxedType.setFiniteInteger) &&
           (!strict || rhs.symbol !== 'Integers')
         );
       },
@@ -154,14 +193,18 @@ export const SETS_LIBRARY: IdentifierDefinitions = {
 
   ExtendedIntegers: {
     type: 'set<integer>',
-    constant: true,
+    isConstant: true,
+    description: 'The set of all integers, including infinities.',
     collection: {
+      iterator: integerIterator,
       contains: (_, x) => x.type.matches('integer'),
-      size: () => Infinity,
+      count: () => Infinity,
+      isEmpty: () => false,
+      isFinite: () => false,
       subsetOf: (_, rhs, strict) => {
         if (rhs.operator === 'Range') return true;
         return (
-          rhs.type.matches('set<integer>') &&
+          rhs.type.matches(BoxedType.setInteger) &&
           (!strict || rhs.symbol !== 'ExtendedIntegers')
         );
       },
@@ -172,12 +215,16 @@ export const SETS_LIBRARY: IdentifierDefinitions = {
 
   RationalNumbers: {
     type: 'set<finite_rational>',
-    constant: true,
+    isConstant: true,
+    description: 'The set of all finite rational numbers.',
     collection: {
-      size: () => Infinity,
+      iterator: (self) => rationalIterator(self),
+      count: () => Infinity,
+      isEmpty: () => false,
+      isFinite: () => false,
       contains: (_, x) => x.type.matches('finite_rational'),
       subsetOf: (_, rhs, strict) =>
-        rhs.type.matches('set<rational>') &&
+        rhs.type.matches(BoxedType.setRational) &&
         (!strict || rhs.symbol !== 'RationalNumbers'),
       eltsgn: () => undefined,
       elttype: () => 'finite_rational',
@@ -186,12 +233,16 @@ export const SETS_LIBRARY: IdentifierDefinitions = {
 
   ExtendedRationalNumbers: {
     type: 'set<rational>',
-    constant: true,
+    isConstant: true,
+    description: 'The set of all rational numbers, including infinities.',
     collection: {
+      iterator: (self) => rationalIterator(self),
       contains: (_, x) => x.type.matches('rational'),
-      size: () => Infinity,
+      count: () => Infinity,
+      isEmpty: () => false,
+      isFinite: () => false,
       subsetOf: (_, rhs, strict) =>
-        rhs.type.matches('set<rational>') &&
+        rhs.type.matches(BoxedType.setRational) &&
         (!strict || rhs.symbol !== 'ExtendedRationalNumbers'),
       eltsgn: () => undefined,
       elttype: () => 'rational',
@@ -201,9 +252,12 @@ export const SETS_LIBRARY: IdentifierDefinitions = {
   // < 0
   NegativeNumbers: {
     type: 'set<real>',
-    constant: true,
+    isConstant: true,
+    description: 'The set of all negative real numbers.',
     collection: {
-      size: () => Infinity,
+      iterator: (self) =>
+        rationalIterator(self, { sign: '-', includeZero: false }),
+      count: () => Infinity,
       contains: (_, x) => x.type.matches('real') && x.isNegative === true,
       subsetOf: (_, rhs, strict) => {
         if (rhs.operator === 'Range' || rhs.operator === 'Linspace') {
@@ -212,8 +266,8 @@ export const SETS_LIBRARY: IdentifierDefinitions = {
           return low < 0 && high < 0;
         }
         return (
-          rhs.type.matches('set<real>') &&
-          rhs.symbolDefinition?.collection?.eltsgn?.(rhs) === 'negative' &&
+          rhs.type.matches(BoxedType.setReal) &&
+          rhs.baseDefinition?.collection?.eltsgn?.(rhs) === 'negative' &&
           (!strict || rhs.symbol !== 'NegativeNumbers')
         );
       },
@@ -226,10 +280,15 @@ export const SETS_LIBRARY: IdentifierDefinitions = {
   // <= 0
   NonPositiveNumbers: {
     type: 'set<real>',
-    constant: true,
+    isConstant: true,
+    description: 'The set of all non-positive real numbers.',
     collection: {
+      iterator: (self) =>
+        rationalIterator(self, { sign: '-', includeZero: true }),
       contains: (_, x) => x.type.matches('real') && x.isNonPositive === true,
-      size: () => Infinity,
+      count: () => Infinity,
+      isEmpty: () => false,
+      isFinite: () => false,
       subsetOf: (_, rhs, strict) => {
         if (rhs.operator === 'Range' || rhs.operator === 'Linspace') {
           const low = rhs.ops![0].re;
@@ -238,8 +297,8 @@ export const SETS_LIBRARY: IdentifierDefinitions = {
         }
 
         return (
-          rhs.type.matches('set<real>') &&
-          rhs.symbolDefinition?.collection?.eltsgn?.(rhs) === 'non-positive' &&
+          rhs.type.matches(BoxedType.setReal) &&
+          rhs.baseDefinition?.collection?.eltsgn?.(rhs) === 'non-positive' &&
           (!strict || rhs.symbol !== 'NonPositiveNumbers')
         );
       },
@@ -251,10 +310,15 @@ export const SETS_LIBRARY: IdentifierDefinitions = {
   // >= 0
   NonNegativeNumbers: {
     type: 'set<real>',
-    constant: true,
+    isConstant: true,
+    description: 'The set of all non-negative real numbers.',
     collection: {
+      iterator: (self) =>
+        rationalIterator(self, { sign: '+', includeZero: true }),
       contains: (_, x) => x.type.matches('real') && x.isNonNegative === true,
-      size: () => Infinity,
+      count: () => Infinity,
+      isEmpty: () => false,
+      isFinite: () => false,
       subsetOf: (_, rhs, strict) => {
         if (rhs.operator === 'Range' || rhs.operator === 'Linspace') {
           const low = rhs.ops![0].re;
@@ -262,8 +326,8 @@ export const SETS_LIBRARY: IdentifierDefinitions = {
           return low <= 0 && high <= 0;
         }
         return (
-          rhs.type.matches('set<real>') &&
-          rhs.symbolDefinition?.collection?.eltsgn?.(rhs) === 'non-negative' &&
+          rhs.type.matches(BoxedType.setReal) &&
+          rhs.baseDefinition?.collection?.eltsgn?.(rhs) === 'non-negative' &&
           (!strict || rhs.symbol !== 'NonNegativeNumbers')
         );
       },
@@ -275,10 +339,13 @@ export const SETS_LIBRARY: IdentifierDefinitions = {
   // > 0
   PositiveNumbers: {
     type: 'set<real>',
-    constant: true,
+    isConstant: true,
+    description: 'The set of all positive real numbers.',
     collection: {
+      iterator: (self) =>
+        rationalIterator(self, { sign: '+', includeZero: false }),
       contains: (_, x) => x.type.matches('real') && x.isPositive === true,
-      size: () => Infinity,
+      count: () => Infinity,
       subsetOf: (_, rhs, strict) => {
         if (rhs.operator === 'Range' || rhs.operator === 'Linspace') {
           const low = rhs.ops![0].re;
@@ -286,8 +353,8 @@ export const SETS_LIBRARY: IdentifierDefinitions = {
           return low > 0 && high > 0;
         }
         return (
-          rhs.type.matches('set<real>') &&
-          rhs.symbolDefinition?.collection?.eltsgn?.(rhs) === 'positive' &&
+          rhs.type.matches(BoxedType.setReal) &&
+          rhs.baseDefinition?.collection?.eltsgn?.(rhs) === 'positive' &&
           (!strict || rhs.symbol !== 'PositiveNumbers')
         );
       },
@@ -299,10 +366,14 @@ export const SETS_LIBRARY: IdentifierDefinitions = {
   // <= -1
   NegativeIntegers: {
     type: 'set<integer>',
-    constant: true,
+    isConstant: true,
+    description: 'The set of all negative integers.',
     collection: {
+      iterator: (self) => integerRangeIterator(self.engine, -1, -1),
       contains: (_, x) => x.type.matches('integer') && x.isNegative === true,
-      size: () => Infinity,
+      count: () => Infinity,
+      isEmpty: () => false,
+      isFinite: () => false,
       subsetOf: (_, rhs, strict) => {
         if (rhs.operator === 'Range') {
           const low = rhs.ops![0].re;
@@ -311,8 +382,8 @@ export const SETS_LIBRARY: IdentifierDefinitions = {
         }
 
         return (
-          rhs.type.matches('set<integer>') &&
-          rhs.symbolDefinition?.collection?.eltsgn?.(rhs) === 'negative' &&
+          rhs.type.matches(BoxedType.setInteger) &&
+          rhs.baseDefinition?.collection?.eltsgn?.(rhs) === 'negative' &&
           (!strict || rhs.symbol !== 'NegativeIntegers')
         );
       },
@@ -324,10 +395,14 @@ export const SETS_LIBRARY: IdentifierDefinitions = {
   // <= 0
   NonPositiveIntegers: {
     type: 'set<integer>',
-    constant: true,
+    isConstant: true,
+    description: 'The set of all non-positive integers.',
     collection: {
+      iterator: (self) => integerRangeIterator(self.engine, 0, -1),
       contains: (_, x) => x.type.matches('integer') && x.isNonPositive === true,
-      size: () => Infinity,
+      count: () => Infinity,
+      isEmpty: () => false,
+      isFinite: () => false,
       subsetOf: (_, rhs, strict) => {
         if (rhs.operator === 'Range') {
           const low = rhs.ops![0].re;
@@ -335,8 +410,8 @@ export const SETS_LIBRARY: IdentifierDefinitions = {
           return low <= 0 && high <= 0;
         }
         return (
-          rhs.type.matches('set<integer>') &&
-          rhs.symbolDefinition?.collection?.eltsgn?.(rhs) === 'non-positive' &&
+          rhs.type.matches(BoxedType.setInteger) &&
+          rhs.baseDefinition?.collection?.eltsgn?.(rhs) === 'non-positive' &&
           (!strict || rhs.symbol !== 'NonPositiveIntegers')
         );
       },
@@ -348,10 +423,14 @@ export const SETS_LIBRARY: IdentifierDefinitions = {
   // >= 0
   NonNegativeIntegers: {
     type: 'set<integer>',
-    constant: true,
+    isConstant: true,
+    description: 'The set of all non-negative integers.',
     collection: {
+      iterator: (self) => integerRangeIterator(self.engine, 0, 1),
       contains: (_, x) => x.type.matches('integer') && x.isNonNegative === true,
-      size: () => Infinity,
+      count: () => Infinity,
+      isEmpty: () => false,
+      isFinite: () => false,
       subsetOf: (_, rhs, strict) => {
         if (rhs.operator === 'Range') {
           const low = rhs.ops![0].re;
@@ -359,8 +438,8 @@ export const SETS_LIBRARY: IdentifierDefinitions = {
           return low > 0 && high > 0;
         }
         return (
-          rhs.type.matches('set<integer>') &&
-          rhs.symbolDefinition?.collection?.eltsgn?.(rhs) === 'non-negative' &&
+          rhs.type.matches(BoxedType.setInteger) &&
+          rhs.baseDefinition?.collection?.eltsgn?.(rhs) === 'non-negative' &&
           (!strict || rhs.symbol !== 'NonNegativeIntegers')
         );
       },
@@ -372,10 +451,14 @@ export const SETS_LIBRARY: IdentifierDefinitions = {
   // >= 1
   PositiveIntegers: {
     type: 'set<integer>',
-    constant: true,
+    isConstant: true,
+    description: 'The set of all positive integers.',
     collection: {
+      iterator: (self) => integerRangeIterator(self.engine, 1, 1),
       contains: (_, x) => x.type.matches('integer') && x.isPositive === true,
-      size: () => Infinity,
+      count: () => Infinity,
+      isEmpty: () => false,
+      isFinite: () => false,
       subsetOf: (_, rhs, strict) => {
         if (rhs.operator === 'Range') {
           const low = rhs.ops![0].re;
@@ -383,8 +466,8 @@ export const SETS_LIBRARY: IdentifierDefinitions = {
           return low > 0 && high > 0;
         }
         return (
-          rhs.type.matches('set<integer>') &&
-          rhs.symbolDefinition?.collection?.eltsgn?.(rhs) === 'positive' &&
+          rhs.type.matches(BoxedType.setInteger) &&
+          rhs.baseDefinition?.collection?.eltsgn?.(rhs) === 'positive' &&
           (!strict || rhs.symbol !== 'PositiveIntegers')
         );
       },
@@ -398,9 +481,10 @@ export const SETS_LIBRARY: IdentifierDefinitions = {
   //
   Element: {
     complexity: 11200,
-    signature: '(value, collection|string) -> boolean',
+    signature: '(value, collection) -> boolean',
+    description: 'Test whether a value is an element of a collection.',
     evaluate: ([value, collection], { engine: ce }) => {
-      const result = collection.contains(value);
+      const result = collection.xcontains(value);
       if (result === true) return ce.True;
       if (result === false) return ce.False;
       return undefined;
@@ -409,9 +493,10 @@ export const SETS_LIBRARY: IdentifierDefinitions = {
 
   NotElement: {
     complexity: 11200,
-    signature: '(value, collection|string) -> boolean',
+    signature: '(value, collection) -> boolean',
+    description: 'Test whether a value is not an element of a collection.',
     evaluate: ([value, collection], { engine: ce }) => {
-      const result = collection.contains(value);
+      const result = collection.xcontains(value);
       if (result === true) return ce.False;
       if (result === false) return ce.True;
       return undefined;
@@ -421,6 +506,8 @@ export const SETS_LIBRARY: IdentifierDefinitions = {
   Subset: {
     complexity: 11200,
     signature: '(lhs:collection, rhs: collection) -> boolean',
+    description:
+      'Test whether the first collection is a strict subset of the second.',
     evaluate: ([lhs, rhs], { engine: ce }) => {
       const result = subset(lhs, rhs);
       if (result === true) return ce.True;
@@ -432,6 +519,8 @@ export const SETS_LIBRARY: IdentifierDefinitions = {
   SubsetEqual: {
     complexity: 11200,
     signature: '(lhs:collection, rhs: collection) -> boolean',
+    description:
+      'Test whether the first collection is a subset (possibly equal) of the second.',
     evaluate: ([lhs, rhs], { engine: ce }) => {
       const result = subset(lhs, rhs, false);
       if (result === true) return ce.True;
@@ -443,6 +532,8 @@ export const SETS_LIBRARY: IdentifierDefinitions = {
   NotSubset: {
     complexity: 11200,
     signature: '(lhs:collection, rhs: collection) -> boolean',
+    description:
+      'Test whether the first collection is not a strict subset of the second.',
     evaluate: ([lhs, rhs], { engine: ce }) => {
       const result = subset(lhs, rhs);
       if (result === true) return ce.False;
@@ -454,6 +545,8 @@ export const SETS_LIBRARY: IdentifierDefinitions = {
   Superset: {
     complexity: 11200,
     signature: '(lhs:collection, rhs: collection) -> boolean',
+    description:
+      'Test whether the first collection is a strict superset of the second.',
     evaluate: ([lhs, rhs], { engine: ce }) => {
       const result = subset(rhs, lhs); // reversed
       if (result === true) return ce.True;
@@ -465,6 +558,8 @@ export const SETS_LIBRARY: IdentifierDefinitions = {
   SupersetEqual: {
     complexity: 11200,
     signature: '(lhs:collection, rhs: collection) -> boolean',
+    description:
+      'Test whether the first collection is a superset (possibly equal) of the second.',
     evaluate: ([lhs, rhs], { engine: ce }) => {
       const result = subset(rhs, lhs, true); // reversed
       if (result === true) return ce.True;
@@ -476,6 +571,8 @@ export const SETS_LIBRARY: IdentifierDefinitions = {
   NotSuperset: {
     complexity: 11200,
     signature: '(lhs:collection, rhs: collection) -> boolean',
+    description:
+      'Test whether the first collection is not a strict superset of the second.',
     evaluate: ([lhs, rhs], { engine: ce }) => {
       const result = subset(rhs, lhs); // reversed
       if (result === true) return ce.False;
@@ -487,6 +584,8 @@ export const SETS_LIBRARY: IdentifierDefinitions = {
   NotSupersetEqual: {
     complexity: 11200,
     signature: '(lhs:collection, rhs: collection) -> boolean',
+    description:
+      'Test whether the first collection is not a superset (possibly equal) of the second.',
     evaluate: ([lhs, rhs], { engine: ce }) => {
       const result = subset(rhs, lhs, true); // reversed
       if (result === true) return ce.False;
@@ -507,26 +606,35 @@ export const SETS_LIBRARY: IdentifierDefinitions = {
   // Functions
   //
 
-  CartesianProduct: {
-    // Aka the product set, the set direct product or cross product
-    // Notation: \times
-    wikidata: 'Q173740',
-    signature: '(set, ...set) -> set',
-    // evaluate: cartesianProduct, // @todo
-  },
-
   Complement: {
     // Return the elements of the first argument that are not in any of
     // the subsequent sets
     wikidata: 'Q242767',
-    signature: '(set, ...set) -> set',
-    //     evaluate: (ops, { engine: ce }) => { // @todo
+    signature: '(set+) -> set',
+    description:
+      'Return the elements of the first set that are not in any of the subsequent sets.',
+    collection: {
+      contains: (expr, x) => {
+        const [col, ...others] = expr.ops!;
+        return (
+          (col.xcontains(x) ?? false) &&
+          others.every((set) => !set.xcontains(x))
+        );
+      },
+      count: (expr) =>
+        countMatchingElements(expr, (elem) =>
+          expr.ops!.slice(1).every((set) => !set.xcontains(elem))
+        ),
+
+      iterator: complementIterator,
+    },
   },
 
   Intersection: {
     // notation: \cap
     wikidata: 'Q185837',
-    signature: '(set, ...set) -> set',
+    signature: '(set+) -> set',
+    description: 'Return the intersection of two or more sets.',
     canonical: (args, { engine: ce }) => {
       if (args.length === 0) return ce.symbol('EmptySet');
       if (args.length === 1) return ce.symbol('EmptySet');
@@ -534,24 +642,33 @@ export const SETS_LIBRARY: IdentifierDefinitions = {
         validateArguments(
           ce,
           flatten(args, 'Intersection'),
-          parseType('(set, ...set) -> set')
+          parseType('(set+) -> set')
         ) ?? args;
       return ce._fn('Intersection', args);
     },
     evaluate: intersection,
+    collection: {
+      contains: containsAll,
+      count: (expr) =>
+        countMatchingElements(expr, (elem) =>
+          expr.ops!.slice(1).every((op) => op.xcontains(elem))
+        ),
+      iterator: intersectionIterator,
+    },
   },
 
   Union: {
     // Works on set, but can also work on lists
     wikidata: 'Q185359',
-    signature: '(collection, ...collection) -> set',
+    signature: '(collection+) -> set',
+    description: 'Return the union of two or more collections as a set.',
     canonical: (args, { engine: ce }) => {
       if (args.length === 0) return ce.symbol('EmptySet');
       args =
         validateArguments(
           ce,
           flatten(args, 'Union'),
-          parseType('(collection, ...collection) -> set')
+          parseType('(collection+) -> set')
         ) ?? args;
       // Even if there is only one argument, we still need to call Union
       // to canonicalize the argument, since it may not be a set (it could
@@ -564,90 +681,62 @@ export const SETS_LIBRARY: IdentifierDefinitions = {
     // that is a union of collections with more than MAX_SIZE_EAGER_COLLECTION
     // elements. Otherwise, when we evaluated the union, we got a set literal.
     collection: {
-      contains: (col, x) => col.ops!.some((op) => op.contains(x)),
-      size: (col) => {
-        // If any of the collections is infinite, the union is infinite
-        if (col.ops!.some((op) => op.size === Infinity)) return Infinity;
-
-        // Count the unique elements in the union
-        const seen: BoxedExpression[] = [];
-        let count = 0;
-        for (const op of col.ops!) {
-          for (const elem of each(op)) {
-            if (seen.every((e) => !e.contains(elem))) count += 1;
-          }
-          seen.push(op);
-        }
-
-        return count;
-      },
-
-      iterator: (col) => {
-        const seen: BoxedExpression[] = [];
-        let current = 0;
-        let iter = iterator(col.ops![current]);
-        if (!iter) return { next: () => ({ value: undefined, done: true }) };
-
-        return {
-          next: () => {
-            let found = false;
-            let iterResult;
-            do {
-              iterResult = iter!.next();
-              if (iterResult.done) {
-                seen.push(col.ops![current]);
-                current += 1;
-                if (current === col.ops!.length)
-                  return { value: undefined, done: true };
-                iter = iterator(col.ops![current])!;
-                if (!iter) return { value: undefined, done: true };
-              }
-              found = seen.every((e) => !e.contains(iterResult!.value));
-            } while (!found);
-            return { value: iterResult!.value, done: false };
-          },
-        };
-      },
+      contains: (col, x) => col.ops!.some((op) => op.xcontains(x)),
+      count: (col) =>
+        countMatchingUnion(col, (elem, seen) =>
+          seen.every((e) => !e.xcontains(elem))
+        ),
+      isEmpty: (col) => col.ops!.every((op) => op.isEmptyCollection),
+      isFinite: (col) => col.ops!.every((op) => op.isFiniteCollection),
+      iterator: unionIterator,
     },
   },
 
   SetMinus: {
     wikidata: 'Q18192442',
-    signature: '(set, ...value) -> set',
+    signature: '(set, value*) -> set',
+    description:
+      'Return the set difference between the first set and subsequent values.',
     evaluate: setMinus,
     collection: {
       contains: (expr, x) => {
         const [col, ...values] = expr.ops!;
         return (
-          (col.contains(x) ?? false) && !values.some((val) => val.isSame(x))
+          (col.xcontains(x) ?? false) && !values.some((val) => val.isSame(x))
         );
       },
-      iterator: (expr) => {
-        const [col, ...values] = expr.ops!;
-        // Iterate over the values of col, but skip the values that are in values
-        const iter = iterator(col);
-        if (!iter) return { next: () => ({ value: undefined, done: true }) };
-        return {
-          next() {
-            let result = iter.next();
-            while (
-              !result.done &&
-              values.some((val) => val.isSame(result.value))
-            )
-              result = iter.next();
-            return result;
-          },
-        };
-      },
+      count: (expr) =>
+        countMatchingElements(expr, (elem) => {
+          const [col, ...values] = expr.ops!;
+          return !values.some((val) => val.isSame(elem));
+        }),
+      iterator: setMinusIterator,
     },
   },
-
   SymmetricDifference: {
     // symmetric difference = disjunctive union  (circled minus)
     /* = Union(Complement(a, b), Complement(b, a) */
     /* Corresponds to XOR in boolean logic */
     wikidata: 'Q1147242',
     signature: '(set, set) -> set',
+    description:
+      'Return the symmetric difference of two sets (elements in either set but not both).',
+    collection: {
+      contains: (expr, x) => {
+        const [a, b] = expr.ops!;
+        const inA = a.xcontains(x) ?? false;
+        const inB = b.xcontains(x) ?? false;
+        return (inA && !inB) || (!inA && inB);
+      },
+      count: (expr) =>
+        countMatchingElements(expr, (elem) => {
+          const [a, b] = expr.ops!;
+          const inA = a.xcontains(elem) ?? false;
+          const inB = b.xcontains(elem) ?? false;
+          return (inA && !inB) || (!inA && inB);
+        }),
+      iterator: symmetricDifferenceIterator,
+    },
   },
 };
 
@@ -657,8 +746,7 @@ function subset(
   strict = true
 ): boolean {
   if (!lhs.isCollection || !rhs.isCollection) return false;
-  if (lhs.symbolDefinition?.collection?.subsetOf?.(lhs, rhs, strict))
-    return true;
+  if (lhs.baseDefinition?.collection?.subsetOf?.(lhs, rhs, strict)) return true;
   return false;
 }
 
@@ -669,14 +757,15 @@ function union(
   // ops should be collections. If there are scalars, convert them to singleton sets
   const xs = ops.map((op) => (op.isCollection ? op : ce.function('Set', [op])));
 
-  const totalSize = xs.reduce((acc, op) => acc + (op.size ?? 0), 0);
+  const totalSize = xs.reduce((acc, op) => acc + (op.xsize ?? 0), 0);
   if (totalSize > MAX_SIZE_EAGER_COLLECTION) return ce._fn('Union', xs);
 
   // Keep only unique elements
   const elements: BoxedExpression[] = [];
   for (const op of xs) {
-    for (const elem of each(op))
+    for (const elem of op.each()) {
       if (elements.every((e) => !e.isSame(elem))) elements.push(elem);
+    }
   }
 
   if (elements.length === 0) return ce.symbol('EmptySet');
@@ -692,9 +781,9 @@ function intersection(
 
   // Remove elements that are not in all the other sets
   for (const op of ops.slice(1)) {
-    if (isFiniteIndexableCollection(op)) {
+    if (isFiniteIndexedCollection(op)) {
       elements = elements.filter((element) =>
-        [...each(op)].some((op) => element.isSame(op))
+        [...op.each()].some((op) => element.isSame(op))
       );
     } else {
       // Not a collection, assume it's a collection made of this single element
@@ -718,4 +807,169 @@ function cartesianProduct(
   { engine: ce }: { engine: ComputeEngine }
 ): BoxedExpression {
   return ce.symbol('EmptySet');
+}
+
+function imaginaryIterator(
+  self: BoxedExpression
+): Iterator<BoxedExpression, undefined, any> {
+  const iterator = cantorEnumerateRationals();
+  return {
+    next: (): IteratorResult<BoxedExpression, undefined> => {
+      const { value, done } = iterator.next();
+      if (done) return { value: undefined, done: true };
+      const [n, d] = value;
+      return {
+        value: self.engine.number({ re: 0, im: n / d }),
+        done: false,
+      };
+    },
+  };
+}
+
+function complexIterator(
+  self: BoxedExpression
+): Iterator<BoxedExpression, undefined, any> {
+  const iterator = cantorEnumerateComplexNumbers();
+  return {
+    next: (): IteratorResult<BoxedExpression, undefined> => {
+      const { value, done } = iterator.next();
+      if (done) return { value: undefined, done: true };
+      const [re, im] = value;
+      return { value: self.engine.number({ re, im }), done: false };
+    },
+  };
+}
+
+function* rationalIterator(
+  self: BoxedExpression,
+  options?: { sign?: '+' | '-' | '+-'; includeZero?: boolean }
+): Generator<BoxedExpression> {
+  const signOpt = options?.sign ?? '+-';
+  const includeZero = options?.includeZero ?? true;
+
+  const iterator =
+    signOpt === '+-'
+      ? cantorEnumerateRationals()
+      : cantorEnumeratePositiveRationals();
+
+  if (!includeZero) iterator.next();
+
+  for (const value of iterator) {
+    if (signOpt === '+-') {
+      yield self.engine.number(value);
+    } else {
+      const sign = signOpt === '-' ? -1 : 1;
+      const [n, d] = value;
+      yield self.engine.number([sign * n, d]);
+    }
+  }
+}
+
+function* integerIterator(self: BoxedExpression): Generator<BoxedExpression> {
+  for (const n of cantorEnumerateIntegers()) yield self.engine.number(n);
+}
+
+function* integerRangeIterator(
+  ce: ComputeEngine,
+  start: number,
+  step: number
+): Generator<BoxedExpression> {
+  let n = start;
+  while (true) {
+    yield ce.number(n);
+    n += step;
+  }
+}
+
+function* unionIterator(
+  col: BoxedExpression
+): Generator<BoxedExpression, undefined, any> {
+  const seen: BoxedExpression[] = [];
+  for (const op of col.ops!) {
+    for (const elem of op.each()) {
+      if (seen.every((e) => !e.xcontains(elem))) {
+        yield elem;
+      }
+    }
+    seen.push(op);
+  }
+}
+
+function* setMinusIterator(
+  expr: BoxedExpression
+): Generator<BoxedExpression, undefined, any> {
+  const [col, ...values] = expr.ops!;
+  for (const elem of col.each()) {
+    if (!values.some((val) => val.isSame(elem))) {
+      yield elem;
+    }
+  }
+}
+function* complementIterator(
+  expr: BoxedExpression
+): Generator<BoxedExpression, undefined, any> {
+  const [col, ...others] = expr.ops!;
+  for (const elem of col.each()) {
+    if (others.every((set) => !set.xcontains(elem))) {
+      yield elem;
+    }
+  }
+}
+
+function* intersectionIterator(
+  expr: BoxedExpression
+): Generator<BoxedExpression, undefined, any> {
+  for (const elem of expr.ops![0].each()) {
+    if (expr.ops!.slice(1).every((op) => op.xcontains(elem))) {
+      yield elem;
+    }
+  }
+}
+function* symmetricDifferenceIterator(
+  expr: BoxedExpression
+): Generator<BoxedExpression, undefined, any> {
+  const [a, b] = expr.ops!;
+  for (const elem of a.each()) {
+    if (!(b.xcontains(elem) ?? false)) {
+      yield elem;
+    }
+  }
+  for (const elem of b.each()) {
+    if (!(a.xcontains(elem) ?? false)) {
+      yield elem;
+    }
+  }
+}
+
+// Helpers for efficient counting of set elements
+function countMatchingElements(
+  expr: BoxedExpression,
+  filter: (elem: BoxedExpression) => boolean
+): number {
+  if (expr.ops!.some((op) => op.xsize === Infinity)) return Infinity;
+  let count = 0;
+  for (const elem of expr.ops![0].each()) {
+    if (filter(elem)) count += 1;
+  }
+  return count;
+}
+
+function countMatchingUnion(
+  expr: BoxedExpression,
+  isUnique: (elem: BoxedExpression, seen: BoxedExpression[]) => boolean
+): number {
+  if (expr.ops!.some((op) => op.xsize === Infinity)) return Infinity;
+  const seen: BoxedExpression[] = [];
+  let count = 0;
+  for (const op of expr.ops!) {
+    for (const elem of op.each()) {
+      if (isUnique(elem, seen)) count += 1;
+    }
+    seen.push(op);
+  }
+  return count;
+}
+
+function containsAll(expr: BoxedExpression, x: BoxedExpression): boolean {
+  return expr.ops!.every((op) => op.xcontains(x) ?? false);
 }

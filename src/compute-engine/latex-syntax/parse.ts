@@ -1,7 +1,7 @@
 import type {
   Expression,
   ExpressionObject,
-  MathJsonIdentifier,
+  MathJsonSymbol,
 } from '../../math-json/types';
 import {
   getSequence,
@@ -11,6 +11,10 @@ import {
   nops,
   operand,
   isEmptySequence,
+  matchesSymbol,
+  stringValue,
+  matchesString,
+  matchesNumber,
 } from '../../math-json/utils';
 
 import {
@@ -22,10 +26,9 @@ import {
   INVISIBLE_OP_PRECEDENCE,
   MULTIPLICATION_PRECEDENCE,
   SymbolTable,
-  SymbolType,
 } from './types';
 import { tokenize, tokensToString } from './tokenizer';
-import { parseIdentifier, parseInvalidIdentifier } from './parse-identifier';
+import { parseSymbol, parseInvalidSymbol } from './parse-symbol';
 import type {
   IndexedLatexDictionary,
   IndexedLatexDictionaryEntry,
@@ -39,6 +42,8 @@ import type {
   IndexedMatchfixEntry,
 } from './dictionary/definitions';
 import { SMALL_INTEGER } from '../numerics/numeric';
+import { BoxedType } from '../../common/type/boxed-type';
+import { TypeString } from '../types';
 
 /** These delimiters can be used as 'shorthand' delimiters in
  * `openTrigger` and `closeTrigger` for `matchfix` operators.
@@ -147,7 +152,7 @@ const CLOSE_DELIMITER = {
  * a function to interpret the expression as a function application.
  *
  * The parser uses the current state of the compute engine, and any
- * identifier that may have been declared, to determine the correct
+ * symbol that may have been declared, to determine the correct
  * interpretation.
  *
  * Some constructs declare variables or functions while parsing. For example,
@@ -155,9 +160,9 @@ const CLOSE_DELIMITER = {
  *
  * The parser keeps track of the parsing state with a stack of symbol tables.
  *
- * In addition, the handler `getIdentifierType()` is called when the parser
- * encounters an unknown identifier. This handler can be used to declare the
- * identifier, or to return `unknown` if the identifier is not known.
+ * In addition, the handler `getSymbolType()` is called when the parser
+ * encounters an unknown symbol. This handler can be used to declare the
+ * symbol, or to return `unknown` if the symbol is not known.
  *
  * Some functions affect the state of the parser:
  * - `Declare`, `Assign` modify the symbol table
@@ -184,8 +189,9 @@ export class _Parser implements Parser {
     this.symbolTable = this.symbolTable.parent ?? this.symbolTable;
   }
 
-  addSymbol(id: string, type: SymbolType): void {
-    if (id in this.symbolTable.ids && this.symbolTable.ids[id] !== type)
+  addSymbol(id: string, type: BoxedType | TypeString): void {
+    if (typeof type === 'string') type = new BoxedType(type);
+    if (id in this.symbolTable.ids && this.symbolTable.ids[id].is(type.type))
       throw new Error(`Symbol ${id} already declared as a different type`);
     this.symbolTable.ids[id] = type;
   }
@@ -275,8 +281,8 @@ export class _Parser implements Parser {
     this._imaginaryUnitTokens = tokenize(this.options.imaginaryUnit);
   }
 
-  getIdentifierType(id: MathJsonIdentifier): SymbolType {
-    // Check if the identifier is in the symbol table
+  getSymbolType(id: MathJsonSymbol): BoxedType {
+    // Check if the symbol is in the symbol table
     // (which means it has been encountered as part of the current parsing)
     let table: SymbolTable | null = this.symbolTable;
     while (table) {
@@ -284,11 +290,10 @@ export class _Parser implements Parser {
       table = table.parent;
     }
 
-    // Is the identifier known in the compute engine current scope?
-    if (this.options.getIdentifierType)
-      return this.options.getIdentifierType(id);
+    // Is the symbol known in the compute engine current scope?
+    if (this.options.getSymbolType) return this.options.getSymbolType(id);
 
-    return 'unknown';
+    return BoxedType.unknown;
   }
 
   get peek(): LatexToken {
@@ -451,11 +456,11 @@ export class _Parser implements Parser {
     }
 
     //
-    // Filter the definitions that match with a complex LaTeX identifier
+    // Filter the definitions that match with a complex LaTeX symbol
     //
     for (const def of defs) {
-      if (def.identifierTrigger) {
-        const n = parseComplexId(this, def.identifierTrigger);
+      if (def.symbolTrigger) {
+        const n = parseComplexId(this, def.symbolTrigger);
         if (n > 0) result.push([def, n]);
       }
     }
@@ -563,7 +568,7 @@ export class _Parser implements Parser {
    * > (radix 16, preceded by "), an alphabetic constant (preceded by `), or
    * > an internal variable.
    */
-  matchLatexNumber(isInteger = true): null | number {
+  parseLatexNumber(isInteger = true): null | number {
     let negative = false;
     let token = this.peek;
     while (token === '<space>' || token === '+' || token === '-') {
@@ -641,7 +646,7 @@ export class _Parser implements Parser {
   // Match a LaTeX char, which can be a char literal, or a Unicode codepoint
   // in hexadecimal or decimal notation  with the `\char` or `\unicode` command,
   // or the `^` character repeated twice followed by a hexadecimal codepoint.
-  matchChar(): string | null {
+  parseChar(): string | null {
     const index = this.index;
     let caretCount = 0;
     while (this.match('^')) caretCount += 1;
@@ -675,7 +680,7 @@ export class _Parser implements Parser {
       if (digits.length === caretCount)
         return String.fromCodePoint(Number.parseInt(digits, 16));
     } else if (this.match('\\char')) {
-      let codepoint = Math.floor(this.matchLatexNumber() ?? Number.NaN);
+      let codepoint = Math.floor(this.parseLatexNumber() ?? Number.NaN);
       if (
         !Number.isFinite(codepoint) ||
         codepoint < 0 ||
@@ -687,7 +692,7 @@ export class _Parser implements Parser {
     } else if (this.match('\\unicode')) {
       this.skipSpaceTokens();
       if (this.match('<{>')) {
-        const codepoint = this.matchLatexNumber();
+        const codepoint = this.parseLatexNumber();
 
         if (
           this.match('<}>') &&
@@ -698,7 +703,7 @@ export class _Parser implements Parser {
           return String.fromCodePoint(codepoint);
         }
       } else {
-        const codepoint = this.matchLatexNumber();
+        const codepoint = this.parseLatexNumber();
 
         if (codepoint !== null && codepoint >= 0 && codepoint <= 0x10ffff)
           return String.fromCodePoint(codepoint);
@@ -886,7 +891,7 @@ export class _Parser implements Parser {
     return result;
   }
 
-  /** Match a string used as a LaTeX identifier, for example an environment
+  /** Match a string used as a LaTeX symbol, for example an environment
    * name.
    * Not suitable for general purpose text, e.g. argument of a `\text{}
    * command. See `matchChar()` instead.
@@ -951,7 +956,7 @@ export class _Parser implements Parser {
     this.addBoundary(['\\end', '<{>', ...name.split(''), '<}>']);
 
     for (const def of this.getDefs('environment') as IndexedEnvironmentEntry[])
-      if (def.identifierTrigger === name) {
+      if (def.symbolTrigger === name) {
         const expr = def.parse(this, until);
 
         this.skipSpace();
@@ -1458,7 +1463,7 @@ export class _Parser implements Parser {
   }
 
   /**
-   * A function is an identifier followed by postfix operators
+   * A function is an symbol followed by postfix operators
    * (`\prime`...) and some arguments.
    */
 
@@ -1485,11 +1490,11 @@ export class _Parser implements Parser {
     }
 
     //
-    // No known function definition matched.
+    // No known operator definition matched.
     //
     if (fn === null) {
       this.index = start;
-      fn = parseIdentifier(this);
+      fn = parseSymbol(this);
       if (!this.isFunctionOperator(fn)) {
         this.index = start;
         return null;
@@ -1505,8 +1510,7 @@ export class _Parser implements Parser {
       fn = pf;
     } while (true);
 
-    // If fn is a function identifier (i.e. not a symbol), it may be followed
-    // by an argument list
+    // If fn is a function symbol, it may be followed by an argument list
 
     const args = this.parseArguments('enclosure', until);
 
@@ -1525,7 +1529,7 @@ export class _Parser implements Parser {
     //
     for (const [def, tokenCount] of this.peekDefinitions('symbol')) {
       this.index = start + tokenCount;
-      // @todo: should capture symbol, and check it is not in use as a symbol,  function, or inferred (calling getIdentifierType() or somethinglike it (getIdentifierType() may aggressively return 'symbol'...)). Maybe not during parsing, but canonicalization
+      // @todo: should capture symbol, and check it is not in use as a symbol,  function, or inferred (calling getSymbolType() or somethinglike it (getSymbolType() may aggressively return 'symbol'...)). Maybe not during parsing, but canonicalization
       if (typeof def.parse === 'function') {
         const result = def.parse(this, until);
         if (result !== null) return result;
@@ -1537,10 +1541,10 @@ export class _Parser implements Parser {
     // in a custom parser)
     this.index = start;
 
-    const id = parseIdentifier(this);
-    if (id !== null && this.getIdentifierType(id) === 'symbol') return id;
+    const id = parseSymbol(this);
+    if (id !== null && !this.getSymbolType(id).matches('error')) return id;
 
-    // This was an identifier, but not a valid symbol. Backtrack
+    // This was a symbol, but not a valid symbol. Backtrack
     this.index = start;
     return null;
   }
@@ -1719,7 +1723,6 @@ export class _Parser implements Parser {
           const result = def.parse(this, this.error('missing', start));
           if (result !== null) return result;
         }
-        if (def.name) return [def.name, this.error('missing', start)];
         return this.error('unexpected-operator', start);
       }
 
@@ -1761,11 +1764,11 @@ export class _Parser implements Parser {
 
     const index = this.index;
 
-    let id = parseInvalidIdentifier(this);
+    let id = parseInvalidSymbol(this);
     if (id !== null) return id;
-    id = parseIdentifier(this);
+    id = parseSymbol(this);
     if (id !== null)
-      return this.error(['unexpected-identifier', { str: id }], index);
+      return this.error(['unexpected-symbol', { str: id }], index);
 
     const command = this.peek;
     if (!command) return this.error('syntax-error', start);
@@ -1900,9 +1903,9 @@ export class _Parser implements Parser {
       this.parseGenericExpression(until) ??
       this.parseFunction(until) ??
       this.parseSymbol(until) ??
-      parseInvalidIdentifier(this);
+      parseInvalidSymbol(this);
 
-    // We're parsing invalid identifier explicitly so we can get a
+    // We're parsing invalid symbols explicitly so we can get a
     // better error message, otherwise we would end up with "unexpected
     // token")
 
@@ -2076,14 +2079,14 @@ export class _Parser implements Parser {
       : ['Error', msg];
   }
 
-  private isFunctionOperator(id: MathJsonIdentifier | null): boolean {
+  private isFunctionOperator(id: MathJsonSymbol | null): boolean {
     if (id === null) return false;
 
-    // Is this a valid function identifier?
-    if (this.getIdentifierType(id) === 'function') return true;
+    // Is this a valid function symbol?
+    if (this.getSymbolType(id).matches('function')) return true;
 
     // This doesn't look like the expression could be the name of a function:
-    // it's a number, a string, a symbol identifier or something else.
+    // it's a number, a string, a symbol or something else.
     return false;
   }
 
@@ -2113,7 +2116,7 @@ export class _Parser implements Parser {
 function parseComplexId(parser: Parser, id: string): number {
   const start = parser.index;
 
-  const candidate = parseIdentifier(parser)?.trim();
+  const candidate = parseSymbol(parser)?.trim();
   if (candidate === null) return 0;
 
   const result = candidate !== id ? 0 : parser.index - start;
@@ -2195,17 +2198,18 @@ export function parse(
   expr ??= 'Nothing';
 
   if (options.preserveLatex) {
-    if (Array.isArray(expr)) expr = { latex, fn: expr } as Expression;
-    else if (typeof expr === 'number')
-      expr = { latex, num: Number(expr).toString() };
-    else if (
-      typeof expr === 'string' &&
-      expr.startsWith("'") &&
-      expr.endsWith("'")
-    )
-      expr = { latex, str: expr.slice(1, -1) };
-    else if (typeof expr === 'string') expr = { latex, sym: expr };
-    else if (typeof expr === 'object' && expr !== null)
+    if (Array.isArray(expr)) return { latex, fn: expr } as Expression;
+
+    if (typeof expr === 'number')
+      return { latex, num: Number(expr).toString() };
+
+    if (typeof expr === 'string') {
+      if (matchesString(expr)) return { latex, str: stringValue(expr)! };
+      if (matchesSymbol(expr)) return { latex, sym: expr };
+      if (matchesNumber(expr)) return { latex, num: expr };
+    }
+
+    if (typeof expr === 'object' && expr !== null)
       (expr as ExpressionObject).latex = latex;
   }
 

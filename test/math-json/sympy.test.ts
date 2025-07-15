@@ -130,10 +130,10 @@ describe('Sympy serializing numbers', () => {
     expect(serialize({ num: '1234.567' })).toMatchInlineSnapshot(`"1234.567"`);
   });
   test('', () => {
-    expect(serialize({ num: '.123' })).toMatchInlineSnapshot(`"0.123"`);
+    expect(serialize({ num: '0.123' })).toMatchInlineSnapshot(`"0.123"`);
   });
   test('', () => {
-    expect(serialize({ num: '-1234.e-45' })).toMatchInlineSnapshot(
+    expect(serialize({ num: '-1234e-45' })).toMatchInlineSnapshot(
       `"-1.234e-42"`
     );
   });

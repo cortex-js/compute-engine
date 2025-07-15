@@ -7,13 +7,12 @@ import { SmallInteger } from '../numerics/types';
 import { numberToExpression } from '../numerics/expression';
 import { numberToString } from '../numerics/strings';
 import { bigint } from '../numerics/bigint';
-import { NumericType } from '../../common/type/types';
+import { NumericPrimitiveType } from '../../common/type/types';
 
 export class BigNumericValue extends NumericValue {
   __brand: 'BigNumericValue';
 
   decimal: Decimal;
-  im: number;
 
   bignum: BigNumFactory;
 
@@ -43,7 +42,7 @@ export class BigNumericValue extends NumericValue {
     console.assert(this.decimal.isNaN() === isNaN(this.im));
   }
 
-  get type(): NumericType {
+  get type(): NumericPrimitiveType {
     if (this.isNaN) return 'number';
     if (this.isComplexInfinity) return 'complex';
     if (this.im !== 0) {
