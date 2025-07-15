@@ -15,10 +15,18 @@ type AngularUnit = "rad" | "deg" | "grad" | "turn";
 When a unitless value is passed to or returned from a trigonometric function,
 the angular unit of the value.
 
-- `rad`: radians, 2π radians is a full circle
-- `deg`: degrees, 360 degrees is a full circle
-- `grad`: gradians, 400 gradians is a full circle
-- `turn`: turns, 1 turn is a full circle
+| Angular Unit | Description |
+|:--------------|:-------------|
+| `rad` | radians, 2π radians is a full circle |
+| `deg` | degrees, 360 degrees is a full circle |
+| `grad` | gradians, 400 gradians is a full circle |
+| `turn` | turns, 1 turn is a full circle |
+
+To change the angular unit used by the Compute Engine, use:
+
+```js
+ce.angularUnit = 'deg';
+```
 
 </MemberCard>
 
@@ -37,6 +45,10 @@ type AssignValue =
   | (args, options) => BoxedExpression
   | undefined;
 ```
+
+The argument of `ce.assign()` is a value that can be assigned to a variable.
+It can be a primitive value, a boxed expression, or a function that
+takes a list of arguments and returns a boxed expression.
 
 </MemberCard>
 
@@ -717,6 +729,8 @@ toLatex(options?): string
 
 Serialize to a LaTeX string.
 
+Note that lazy collections are eagerly evaluated.
+
 Will ignore any LaTeX metadata.
 
 ####### options?
@@ -737,6 +751,8 @@ If the expression was parsed from LaTeX, the LaTeX representation is
 the same as the input LaTeX.
 
 To customize the serialization, use `expr.toLatex()`.
+
+Note that lazy collections are eagerly evaluated.
 
 :::info[Note]
 Applicable to canonical and non-canonical expressions.
@@ -784,6 +800,8 @@ example, `["Power", "x", 2]` is not represented as `["Square", "x"]`.
 
 For more control over the serialization, use `expr.toMathJson()`.
 
+Note that lazy collections are *not* eagerly evaluated.
+
 :::info[Note]
 Applicable to canonical and non-canonical expressions.
 :::
@@ -801,6 +819,8 @@ print(): void
 ```
 
 Output to the console a string representation of the expression.
+
+Note that lazy collections are eagerly evaluated when printed.
 
 </MemberCard>
 
@@ -1012,6 +1032,14 @@ getSubexpressions(operator): readonly BoxedExpression[]
 
 All the subexpressions matching the named operator, recursively.
 
+Example:
+
+```js
+const expr = ce.parse('a + b * c + d');
+const subexpressions = expr.getSubexpressions('Add');
+// -> `[['Add', 'a', 'b'], ['Add', 'c', 'd']]`
+```
+
 :::info[Note]
 Applicable to canonical and non-canonical expressions.
 :::
@@ -1034,6 +1062,14 @@ readonly subexpressions: readonly BoxedExpression[];
 
 All the subexpressions in this expression, recursively
 
+Example:
+
+```js
+const expr = ce.parse('a + b * c + d');
+const subexpressions = expr.subexpressions;
+// -> `[['Add', 'a', 'b'], ['Add', 'c', 'd'], 'a', 'b', 'c', 'd']`
+```
+
 :::info[Note]
 Applicable to canonical and non-canonical expressions.
 :::
@@ -1051,6 +1087,12 @@ readonly symbols: readonly string[];
 ```
 
 All the symbols in the expression, recursively
+
+```js
+const expr = ce.parse('a + b * c + d');
+const symbols = expr.symbols;
+// -> ['a', 'b', 'c', 'd']
+```
 
 :::info[Note]
 Applicable to canonical and non-canonical expressions.
@@ -1768,7 +1810,9 @@ The result is in canonical form.
 ##### BoxedExpression.compile()
 
 ```ts
-compile(options?): (args?) => CompiledType
+compile(options?): (...args) => any & {
+  isCompiled: boolean;
+}
 ```
 
 Compile the expression to a JavaScript function.
@@ -1780,7 +1824,24 @@ symbols in the expression, and returns the value of the expression.
 const expr = ce.parse("x^2 + y^2");
 const f = expr.compile();
 console.log(f({x: 2, y: 3}));
+// -> 13
 ```
+
+If the expression is a function literal, the function takes the
+arguments of the function as arguments, and returns the value of the
+expression.
+
+```javascript
+const expr = ce.parse("(x) \mapsto 2x");
+const f = expr.compile();
+console.log(f(42));
+// -> 84
+```
+
+If the expression cannot be compiled, a JS function is returned that
+falls back to the interpreting the expression, unless the
+`options.fallback` is set to `false`. If it is set to `false`, the
+function will throw an error if it cannot be compiled.
 
 ####### options?
 
@@ -1803,6 +1864,10 @@ console.log(f({x: 2, y: 3}));
 ####### preamble
 
 `string`
+
+####### fallback
+
+`boolean`
 
 </MemberCard>
 
@@ -1901,41 +1966,64 @@ about it in the current scope.
 isCollection: boolean;
 ```
 
-Return true if the expression is a collection: a list, a vector, a matrix, a map, a tuple,
-etc...
+Is `true` if the expression is a collection.
+
+When `isCollection` is `true`, the expression:
+
+- has an `each()` method that returns a generator over the elements
+  of the collection.
+- has a `size` property that returns the number of elements in the
+  collection.
+- has a `contains(other)` method that returns `true` if the `other`
+  expression is in the collection.
 
 </MemberCard>
 
-<a id="boxedexpression_contains" name="boxedexpression_contains"></a>
+<a id="boxedexpression_isindexedcollection" name="boxedexpression_isindexedcollection"></a>
 
 <MemberCard>
 
-##### BoxedExpression.contains()
+##### BoxedExpression.isIndexedCollection
 
 ```ts
-contains(rhs): boolean
+isIndexedCollection: boolean;
 ```
 
-If this is a collection, return true if the `rhs` expression is in the
-collection.
+Is `true` if this is an indexed collection, such as a list, a vector,
+a matrix, a tuple, etc...
 
-Return `undefined` if the membership cannot be determined.
+The elements of an indexed collection can be accessed by a one-based
+index.
 
-####### rhs
-
-[`BoxedExpression`](#boxedexpression)
+When `isIndexedCollection` is `true`, the expression:
+- has an `each()`, `size()` and `contains(rhs)` methods
+   as for a collection.
+- has an `at(index: number)` method that returns the element at the
+   specified index.
+- has an `indexWhere(predicate: (element: BoxedExpression) => boolean)`
+   method that returns the index of the first element that matches the
+   predicate.
 
 </MemberCard>
 
-<a id="boxedexpression_size" name="boxedexpression_size"></a>
+<a id="boxedexpression_islazycollection" name="boxedexpression_islazycollection"></a>
 
 <MemberCard>
 
-##### BoxedExpression.size
+##### BoxedExpression.isLazyCollection
 
-If this is a collection, return the number of elements in the collection.
+```ts
+isLazyCollection: boolean;
+```
 
-If the collection is infinite, return `Infinity`.
+False if not a collection, or if the elements of the collection
+are not computed lazily.
+
+The elements of a lazy collection are computed on demand, when
+iterating over the collection using `each()`.
+
+Use `ListFrom` and related functions to create eager collections from
+lazy collections.
 
 </MemberCard>
 
@@ -1946,14 +2034,11 @@ If the collection is infinite, return `Infinity`.
 ##### BoxedExpression.each()
 
 ```ts
-each: (start?, count?) => Iterator<BoxedExpression, undefined>;
+each(): Generator<BoxedExpression>
 ```
 
-If this is a collection, return an iterator over the elements of the collection.
-
-If `start` is not specified, start from the first element.
-
-If `count` is not specified or negative, return all the elements from `start` to the end.
+If this is a collection, return an iterator over the elements of the
+collection.
 
 ```js
 const expr = ce.parse('[1, 2, 3, 4]');
@@ -1961,6 +2046,100 @@ for (const e of expr.each()) {
  console.log(e);
 }
 ```
+
+</MemberCard>
+
+<a id="boxedexpression_xcontains" name="boxedexpression_xcontains"></a>
+
+<MemberCard>
+
+##### BoxedExpression.xcontains()
+
+```ts
+xcontains(rhs): boolean
+```
+
+If this is a collection, return true if the `rhs` expression is in the
+collection.
+
+Return `undefined` if the membership cannot be determined without
+iterating over the collection.
+
+####### rhs
+
+[`BoxedExpression`](#boxedexpression)
+
+</MemberCard>
+
+<a id="boxedexpression_subsetof" name="boxedexpression_subsetof"></a>
+
+<MemberCard>
+
+##### BoxedExpression.subsetOf()
+
+```ts
+subsetOf(other, strict): boolean
+```
+
+Check if this collection is a subset of another collection.
+
+####### other
+
+[`BoxedExpression`](#boxedexpression)
+
+The other collection to check against.
+
+####### strict
+
+`boolean`
+
+If true, the subset relation is strict (i.e., proper subset).
+
+</MemberCard>
+
+<a id="boxedexpression_xsize" name="boxedexpression_xsize"></a>
+
+<MemberCard>
+
+##### BoxedExpression.xsize
+
+If this is a collection, return the number of elements in the collection.
+
+If the collection is infinite, return `Infinity`.
+
+If the number of elements cannot be determined, return `undefined`, for
+example, if the collection is lazy and not finite and the size cannot
+be determined without iterating over the collection.
+
+</MemberCard>
+
+<a id="boxedexpression_isfinitecollection" name="boxedexpression_isfinitecollection"></a>
+
+<MemberCard>
+
+##### BoxedExpression.isFiniteCollection
+
+```ts
+isFiniteCollection: boolean;
+```
+
+If this is a finite collection, return true.
+
+</MemberCard>
+
+<a id="boxedexpression_isemptycollection" name="boxedexpression_isemptycollection"></a>
+
+<MemberCard>
+
+##### BoxedExpression.isEmptyCollection
+
+```ts
+isEmptyCollection: boolean;
+```
+
+If this is an empty collection, return true.
+
+An empty collection has a size of 0.
 
 </MemberCard>
 
@@ -1974,10 +2153,12 @@ for (const e of expr.each()) {
 at(index): BoxedExpression
 ```
 
-If this is an indexable collection, return the element at the specified
- index.
+If this is an indexed collection, return the element at the specified
+ index. The first element is at index 1.
 
 If the index is negative, return the element at index `size() + index + 1`.
+
+The last element is at index -1.
 
 ####### index
 
@@ -1995,7 +2176,8 @@ If the index is negative, return the element at index `size() + index + 1`.
 get(key): BoxedExpression
 ```
 
-If this is a map or a tuple, return the value of the corresponding key.
+If this is a keyed collection (map, record, tuple), return the value of
+the corresponding key.
 
 If `key` is a `BoxedExpression`, it should be a string.
 
@@ -2005,22 +2187,22 @@ If `key` is a `BoxedExpression`, it should be a string.
 
 </MemberCard>
 
-<a id="boxedexpression_indexof" name="boxedexpression_indexof"></a>
+<a id="boxedexpression_indexwhere" name="boxedexpression_indexwhere"></a>
 
 <MemberCard>
 
-##### BoxedExpression.indexOf()
+##### BoxedExpression.indexWhere()
 
 ```ts
-indexOf(expr): number
+indexWhere(predicate): number
 ```
 
-If this is an indexable collection, return the index of the first element
-that matches the target expression.
+If this is an indexed collection, return the index of the first element
+that matches the predicate.
 
-####### expr
+####### predicate
 
-[`BoxedExpression`](#boxedexpression)
+(`element`) => `boolean`
 
 </MemberCard>
 
@@ -2099,6 +2281,8 @@ Based on `Object.toString()`.
 
 To get a LaTeX representation of the expression, use `expr.latex`.
 
+Note that lazy collections are eagerly evaluated.
+
 Used when coercing a `BoxedExpression` to a `String`.
 
 </MemberCard>
@@ -2118,6 +2302,8 @@ Used by `JSON.stringify()` to serialize this object to JSON.
 Method version of `expr.json`.
 
 Based on `Object.toJSON()`.
+
+Note that lazy collections are *not* eagerly evaluated.
 
 </MemberCard>
 
@@ -2423,8 +2609,12 @@ set type(type:
   | CollectionType
   | ListType
   | SetType
-  | MapType
+  | RecordType
+  | DictionaryType
   | TupleType
+  | SymbolType
+  | ExpressionType
+  | NumericType
   | FunctionSignature
   | ValueType
   | TypeReference
@@ -2543,6 +2733,7 @@ type SemiBoxedExpression =
   | MathJsonStringObject
   | MathJsonSymbolObject
   | MathJsonFunctionObject
+  | MathJsonDictionaryObject
   | readonly [MathJsonSymbol, ...SemiBoxedExpression[]]
   | BoxedExpression;
 ```
@@ -2628,7 +2819,7 @@ iterationLimit: number;
 ```
 
 If `iterationLimit` > 1, the rules will be repeatedly applied
-until no rules apply, up to `maxIterations` times.
+until no rules apply, up to `iterationLimit` times.
 
 Note that if `once` is true, `iterationLimit` has no effect.
 
@@ -2762,12 +2953,47 @@ type CanonicalOptions =
 ```ts
 type EvaluateOptions = {
   numericApproximation: boolean;
+  materialization: boolean | number | [number, number];
   signal: AbortSignal;
   withArguments: Record<MathJsonSymbol, BoxedExpression>;
 };
 ```
 
 Options for `BoxedExpression.evaluate()`
+
+<a id="evaluateoptions_numericapproximation" name="evaluateoptions_numericapproximation"></a>
+
+#### EvaluateOptions.numericApproximation
+
+```ts
+numericApproximation: boolean;
+```
+
+If `true`, the evaluation will return a numeric approximation
+of the expression, if possible.
+If `false`, the evaluation will return an exact value, if possible.
+Defaults to `false`.
+
+<a id="evaluateoptions_materialization" name="evaluateoptions_materialization"></a>
+
+#### EvaluateOptions.materialization
+
+```ts
+materialization: boolean | number | [number, number];
+```
+
+If `false`, and the result of the expression is a lazy collection,
+the collection will not be evaluated and will remain lazy.
+
+If `true` and the expression is a finite lazy collection,
+the collection will be evaluated and returned as a non-lazy collection.
+
+If an integer, the collection will be evaluated up to that many elements.
+
+If a pair of integers `[n,m]`, and the collection is finite, the first `n`
+elements will be evaluated, and the last `m` elements will be evaluated.
+
+Defaults to `false`.
 
 </MemberCard>
 
@@ -3167,7 +3393,7 @@ isImaginary: boolean;
 
 </MemberCard>
 
-<a id="assumption_isfinite-1" name="assumption_isfinite-1"></a>
+<a id="assumption_isfinite-2" name="assumption_isfinite-2"></a>
 
 <MemberCard>
 
@@ -3227,7 +3453,7 @@ matches(t): boolean
 
 ####### t
 
-`string` | [`BoxedType`](#boxedtype)
+[`BoxedType`](#boxedtype)
 
 </MemberCard>
 
@@ -3335,7 +3561,7 @@ toExpression(ce, x): BoxedExpression
 
 ### ExpressionMapInterface\<U\>
 
-<a id="expressionmapinterfaceu_has-1" name="expressionmapinterfaceu_has-1"></a>
+<a id="expressionmapinterfaceu_has-2" name="expressionmapinterfaceu_has-2"></a>
 
 <MemberCard>
 
@@ -3351,7 +3577,7 @@ has(expr): boolean
 
 </MemberCard>
 
-<a id="expressionmapinterfaceu_get-1" name="expressionmapinterfaceu_get-1"></a>
+<a id="expressionmapinterfaceu_get-2" name="expressionmapinterfaceu_get-2"></a>
 
 <MemberCard>
 
@@ -3415,7 +3641,7 @@ clear(): void
 
 </MemberCard>
 
-<a id="expressionmapinterfaceu_iterator" name="expressionmapinterfaceu_iterator"></a>
+<a id="expressionmapinterfaceu_iterator-1" name="expressionmapinterfaceu_iterator-1"></a>
 
 <MemberCard>
 
@@ -3427,7 +3653,7 @@ iterator: IterableIterator<[BoxedExpression, U]>
 
 </MemberCard>
 
-<a id="expressionmapinterfaceu_entries" name="expressionmapinterfaceu_entries"></a>
+<a id="expressionmapinterfaceu_entries-1" name="expressionmapinterfaceu_entries-1"></a>
 
 <MemberCard>
 
@@ -3563,7 +3789,7 @@ type ValueDefinition = BaseDefinition & {
   eq: (a) => boolean | undefined;
   neq: (a) => boolean | undefined;
   cmp: (a) => "=" | ">" | "<" | undefined;
-  collection: Partial<CollectionHandlers>;
+  collection: CollectionHandlers;
 };
 ```
 
@@ -3623,10 +3849,10 @@ type OperatorDefinition = Partial<BaseDefinition> & Partial<OperatorDefinitionFl
      | BoxedExpression;
   evaluateAsync: (ops, options) => Promise<BoxedExpression | undefined>;
   evalDimension: (args, options) => BoxedExpression;
-  compile: (expr) => CompiledExpression;
+  xcompile: (expr) => CompiledExpression;
   eq: (a, b) => boolean | undefined;
   neq: (a, b) => boolean | undefined;
-  collection: Partial<CollectionHandlers>;
+  collection: CollectionHandlers;
 };
 ```
 
@@ -3841,10 +4067,10 @@ optional evalDimension: (args, options) => BoxedExpression;
 
 Dimensional analysis
 
-#### OperatorDefinition.compile()?
+#### OperatorDefinition.xcompile()?
 
 ```ts
-optional compile: (expr) => CompiledExpression;
+optional xcompile: (expr) => CompiledExpression;
 ```
 
 Return a compiled (optimized) expression.
@@ -3872,6 +4098,23 @@ If a string, a short description, about one line long.
 Otherwise, a list of strings, each string a paragraph.
 
 May contain Markdown.
+
+</MemberCard>
+
+<a id="basedefinition-1_examples" name="basedefinition-1_examples"></a>
+
+<MemberCard>
+
+##### BaseDefinition.examples
+
+```ts
+examples: string | string[];
+```
+
+A list of examples of how to use this symbol or operator.
+
+Each example is a string, which can be a MathJSON expression or LaTeX, bracketed by `$` signs.
+For example, `["Add", 1, 2]` or `$\\sin(\\pi/4)$`.
 
 </MemberCard>
 
@@ -3953,6 +4196,212 @@ type SymbolDefinitions = Readonly<{}>;
 
 </MemberCard>
 
+<a id="basecollectionhandlers" name="basecollectionhandlers"></a>
+
+### BaseCollectionHandlers
+
+These handlers are the primitive operations that can be performed on
+all collections, indexed or not.
+
+#### Definitions
+
+<a id="basecollectionhandlers_iterator" name="basecollectionhandlers_iterator"></a>
+
+<MemberCard>
+
+##### BaseCollectionHandlers.iterator()
+
+```ts
+iterator: (collection) => Iterator<BoxedExpression, undefined>;
+```
+
+Return an iterator that iterates over the elements of the collection.
+
+The order in which the elements are returned is not defined. Requesting
+two iterators on the same collection may return the elements in a
+different order.
+
+</MemberCard>
+
+#### Other
+
+<a id="basecollectionhandlers_count" name="basecollectionhandlers_count"></a>
+
+<MemberCard>
+
+##### BaseCollectionHandlers.count()
+
+```ts
+count: (collection) => number;
+```
+
+Return the number of elements in the collection.
+
+An empty collection has a count of 0.
+
+</MemberCard>
+
+<a id="basecollectionhandlers_isempty" name="basecollectionhandlers_isempty"></a>
+
+<MemberCard>
+
+##### BaseCollectionHandlers.isEmpty()?
+
+```ts
+optional isEmpty: (collection) => boolean;
+```
+
+Optional flag to quickly check if the collection is empty, without having to count exactly how may elements it has (useful for lazy evaluation).
+
+</MemberCard>
+
+<a id="basecollectionhandlers_isfinite-1" name="basecollectionhandlers_isfinite-1"></a>
+
+<MemberCard>
+
+##### BaseCollectionHandlers.isFinite()?
+
+```ts
+optional isFinite: (collection) => boolean;
+```
+
+Optional flag to quickly check if the collection is finite, without having to count exactly how many elements it has (useful for lazy evaluation).
+
+</MemberCard>
+
+<a id="basecollectionhandlers_islazy" name="basecollectionhandlers_islazy"></a>
+
+<MemberCard>
+
+##### BaseCollectionHandlers.isLazy()?
+
+```ts
+optional isLazy: (collection) => boolean;
+```
+
+Return `true` if the collection is lazy, `false` otherwise.
+If the collection is lazy, it means that the elements are not
+computed until they are needed, for example when iterating over the
+collection.
+
+Default: `true`
+
+</MemberCard>
+
+<a id="basecollectionhandlers_contains" name="basecollectionhandlers_contains"></a>
+
+<MemberCard>
+
+##### BaseCollectionHandlers.contains()?
+
+```ts
+optional contains: (collection, target) => boolean;
+```
+
+Return `true` if the target expression is in the collection,
+`false` otherwise.
+
+Return `undefined` if the membership cannot be determined.
+
+</MemberCard>
+
+<a id="basecollectionhandlers_subsetof-1" name="basecollectionhandlers_subsetof-1"></a>
+
+<MemberCard>
+
+##### BaseCollectionHandlers.subsetOf()?
+
+```ts
+optional subsetOf: (collection, other, strict) => boolean;
+```
+
+Return `true` if all the elements of `other` are in `collection`.
+Both `collection` and `other` are collections.
+
+If strict is `true`, the subset must be strict, that is, `collection` must
+have more elements than `other`.
+
+Return `undefined` if the subset relation cannot be determined.
+
+</MemberCard>
+
+<a id="basecollectionhandlers_eltsgn" name="basecollectionhandlers_eltsgn"></a>
+
+<MemberCard>
+
+##### BaseCollectionHandlers.eltsgn()?
+
+```ts
+optional eltsgn: (collection) => Sign;
+```
+
+Return the sign of all the elements of the collection.
+
+</MemberCard>
+
+<a id="basecollectionhandlers_elttype" name="basecollectionhandlers_elttype"></a>
+
+<MemberCard>
+
+##### BaseCollectionHandlers.elttype()?
+
+```ts
+optional elttype: (collection) => Type;
+```
+
+Return the widest type of all the elements in the collection
+
+</MemberCard>
+
+<a id="indexedcollectionhandlers" name="indexedcollectionhandlers"></a>
+
+### IndexedCollectionHandlers
+
+These additional collection handlers are applicable to indexed
+collections only.
+
+The elements of an indexed collection can be accessed by index, and
+the order of the elements is defined.
+
+<a id="indexedcollectionhandlers_at-2" name="indexedcollectionhandlers_at-2"></a>
+
+<MemberCard>
+
+##### IndexedCollectionHandlers.at()
+
+```ts
+at: (collection, index) => BoxedExpression;
+```
+
+Return the element at the specified index.
+
+The first element is `at(1)`, the last element is `at(-1)`.
+
+If the index is &lt;0, return the element at index `count() + index + 1`.
+
+The index can also be a string for example for records. The set of valid
+keys is returned by the `keys()` handler.
+
+If the index is invalid, return `undefined`.
+
+</MemberCard>
+
+<a id="indexedcollectionhandlers_indexwhere-1" name="indexedcollectionhandlers_indexwhere-1"></a>
+
+<MemberCard>
+
+##### IndexedCollectionHandlers.indexWhere()
+
+```ts
+indexWhere: (collection, predicate) => number;
+```
+
+Return the index of the first element that matches the predicate.
+
+If no element matches the predicate, return `undefined`.
+
+</MemberCard>
+
 <a id="collectionhandlers" name="collectionhandlers"></a>
 
 <MemberCard>
@@ -3960,158 +4409,43 @@ type SymbolDefinitions = Readonly<{}>;
 ### CollectionHandlers
 
 ```ts
-type CollectionHandlers = {
-  size: (collection) => number;
-  contains: (collection, target) => boolean;
-  iterator: (collection, start?, count?) => Iterator<BoxedExpression, undefined>;
-  at: (collection, index) => undefined | BoxedExpression;
-  keys: (collection) => undefined | Iterable<string>;
-  indexOf: (collection, target, from?) => number | undefined;
-  subsetOf: (collection, target, strict) => boolean;
-  eltsgn: (collection) => Sign | undefined;
-  elttype: (collection) => Type | undefined;
+type CollectionHandlers = BaseCollectionHandlers & Partial<IndexedCollectionHandlers>;
+```
+
+The collection handlers are the primitive operations that can be
+performed on collections, such as lists, sets, tuples, etc...
+
+</MemberCard>
+
+<a id="taggedvaluedefinition" name="taggedvaluedefinition"></a>
+
+<MemberCard>
+
+### TaggedValueDefinition
+
+```ts
+type TaggedValueDefinition = {
+  value: BoxedValueDefinition;
 };
 ```
 
-These handlers are the primitive operations that can be performed on
-collections.
+The definition for a value, represented as a tagged object literal.
 
-There are two types of collections:
+</MemberCard>
 
-- finite collections, such as lists, tuples, sets, matrices, etc...
- The `size()` handler of finite collections returns the number of elements
+<a id="taggedoperatordefinition" name="taggedoperatordefinition"></a>
 
-- infinite collections, such as sequences, ranges, etc...
- The `size()` handler of infinite collections returns `Infinity`
- Infinite collections are not indexable: they have no `at()` handler.
+<MemberCard>
 
-#### Definitions
-
-<a id="collectionhandlers_iterator-1" name="collectionhandlers_iterator-1"></a>
-
-##### CollectionHandlers.iterator()
+### TaggedOperatorDefinition
 
 ```ts
-iterator: (collection, start?, count?) => Iterator<BoxedExpression, undefined>;
+type TaggedOperatorDefinition = {
+  operator: BoxedOperatorDefinition;
+};
 ```
 
-Return an iterator
-- start is optional and is a 1-based index.
-- if start is not specified, start from index 1
-- count is optional and is the number of elements to return
-- if count is not specified or negative, return all the elements from
-  start to the end
-
-If there is a `keys()` handler, there is no `iterator()` handler.
-
-#### Other
-
-<a id="collectionhandlers_size-1" name="collectionhandlers_size-1"></a>
-
-##### CollectionHandlers.size()
-
-```ts
-size: (collection) => number;
-```
-
-Return the number of elements in the collection.
-
-An empty collection has a size of 0.
-
-<a id="collectionhandlers_contains-1" name="collectionhandlers_contains-1"></a>
-
-##### CollectionHandlers.contains()
-
-```ts
-contains: (collection, target) => boolean;
-```
-
-Return `true` if the target
-expression is in the collection, `false` otherwise.
-
-<a id="collectionhandlers_at-2" name="collectionhandlers_at-2"></a>
-
-##### CollectionHandlers.at()
-
-```ts
-at: (collection, index) => undefined | BoxedExpression;
-```
-
-Return the element at the specified index.
-
-The first element is `at(1)`, the last element is `at(-1)`.
-
-If the index is &lt;0, return the element at index `size() + index + 1`.
-
-The index can also be a string for example for maps. The set of valid keys
-is returned by the `keys()` handler.
-
-If the index is invalid, return `undefined`.
-
-<a id="collectionhandlers_keys" name="collectionhandlers_keys"></a>
-
-##### CollectionHandlers.keys()
-
-```ts
-keys: (collection) => undefined | Iterable<string>;
-```
-
-If the collection can be indexed by strings, return the valid values
-for the index.
-
-<a id="collectionhandlers_indexof-1" name="collectionhandlers_indexof-1"></a>
-
-##### CollectionHandlers.indexOf()
-
-```ts
-indexOf: (collection, target, from?) => number | undefined;
-```
-
-Return the index of the first element that matches the target expression.
-
-The comparison is done using the `target.isEqual()` method.
-
-If the expression is not found, return `undefined`.
-
-If the expression is found, return the index, 1-based.
-
-Return the index of the first match.
-
-`from` is the starting index for the search. If negative, start from
-the end  and search backwards.
-
-<a id="collectionhandlers_subsetof" name="collectionhandlers_subsetof"></a>
-
-##### CollectionHandlers.subsetOf()
-
-```ts
-subsetOf: (collection, target, strict) => boolean;
-```
-
-Return `true` if all theelements of `target` are in `expr`.
-Both `expr` and `target` are collections.
-If strict is `true`, the subset must be strict, that is, `expr` must
-have more elements than `target`.
-
-<a id="collectionhandlers_eltsgn" name="collectionhandlers_eltsgn"></a>
-
-##### CollectionHandlers.eltsgn()
-
-```ts
-eltsgn: (collection) => Sign | undefined;
-```
-
-Return the sign of all the elements of the collection.
-
-<a id="collectionhandlers_elttype" name="collectionhandlers_elttype"></a>
-
-##### CollectionHandlers.elttype()
-
-```ts
-elttype: (collection) => Type | undefined;
-```
-
-Return the widest type of all the elements in the collection
+The definition for an operator, represented as a tagged object literal.
 
 </MemberCard>
 
@@ -4127,7 +4461,7 @@ type BoxedDefinition =
   | TaggedOperatorDefinition;
 ```
 
-A boxed definition can be either a value or an operator.
+A definition can be either a value or an operator.
 
 It is collected in a tagged object literal, instead of being a simple union
 type, so that the type of the definition can be changed while keeping
@@ -4155,7 +4489,7 @@ references to the definition in bound expressions.
 ##### BoxedBaseDefinition.collection?
 
 ```ts
-optional collection: Partial<CollectionHandlers>;
+optional collection: CollectionHandlers;
 ```
 
 If this is the definition of a collection, the set of primitive operations
@@ -4511,8 +4845,12 @@ optional type: (ops, options) =>
   | CollectionType
   | ListType
   | SetType
-  | MapType
+  | RecordType
+  | DictionaryType
   | TupleType
+  | SymbolType
+  | ExpressionType
+  | NumericType
   | FunctionSignature
   | ValueType
   | TypeReference
@@ -4641,6 +4979,7 @@ optional compile: (expr) => CompiledExpression;
 type Scope = {
   parent: Scope | null;
   bindings: Map<string, BoxedDefinition>;
+  types: Record<string, TypeReference>;
 };
 ```
 
@@ -4700,6 +5039,7 @@ A LatexString is a regular string of LaTeX, for example:
 
 ```ts
 type Delimiter = 
+  | "."
   | ")"
   | "("
   | "]"
@@ -4756,6 +5096,7 @@ type LibraryCategory =
   | "domains"
   | "linear-algebra"
   | "logic"
+  | "number-theory"
   | "numeric"
   | "other"
   | "physics"
@@ -5734,14 +6075,14 @@ Return the next token if it matches any of the token in the argument or null oth
 
 </MemberCard>
 
-<a id="parser_matchchar" name="parser_matchchar"></a>
+<a id="parser_parsechar" name="parser_parsechar"></a>
 
 <MemberCard>
 
-##### Parser.matchChar()
+##### Parser.parseChar()
 
 ```ts
-matchChar(): string
+parseChar(): string
 ```
 
 If the next token is a character, return it and advance the index
@@ -6079,6 +6420,7 @@ boundaryError(msg): Expression
 ```ts
 type SerializeLatexOptions = NumberSerializationFormat & {
   prettify: boolean;
+  materialization: boolean | number | [number, number];
   invisibleMultiply: LatexString;
   invisiblePlus: LatexString;
   multiply: LatexString;
@@ -6111,6 +6453,23 @@ prettify: boolean;
 If true, prettify the LaTeX output.
 
 For example, render `\frac{a}{b}\frac{c}{d}` as `\frac{ac}{bd}`
+
+#### SerializeLatexOptions.materialization
+
+```ts
+materialization: boolean | number | [number, number];
+```
+
+Controls the materialization of the lazy collections.
+
+- If `true`, lazy collections are materialized, i.e. it is rendered as a
+  LaTeX expression with all its elements.
+- If `false`, the expression is not materialized, i.e. it is
+  rendered as a LaTeX command with its arguments.
+- If a number is provided, it is the maximum number of elements
+  that will be materialized.
+- If a pair of numbers is provided, it is the number of elements
+  of the head and the tail that will be materialized, respectively.
 
 #### SerializeLatexOptions.invisibleMultiply
 
@@ -6183,7 +6542,7 @@ readonly options: Required<SerializeLatexOptions>;
 
 </MemberCard>
 
-<a id="serializer_dictionary" name="serializer_dictionary"></a>
+<a id="serializer_dictionary-1" name="serializer_dictionary-1"></a>
 
 <MemberCard>
 
@@ -7248,31 +7607,66 @@ bignum(value): Decimal
 
 ## Other
 
-<a id="taggedvaluedefinition" name="taggedvaluedefinition"></a>
+<a id="dictionaryinterface" name="dictionaryinterface"></a>
+
+### DictionaryInterface
+
+Interface for dictionary-like structures.
+Use `isDictionary()` to check if an expression is a dictionary.
+
+<a id="dictionaryinterface_keys" name="dictionaryinterface_keys"></a>
 
 <MemberCard>
 
-### TaggedValueDefinition
-
-```ts
-type TaggedValueDefinition = {
-  value: BoxedValueDefinition;
-};
-```
+##### DictionaryInterface.keys
 
 </MemberCard>
 
-<a id="taggedoperatordefinition" name="taggedoperatordefinition"></a>
+<a id="dictionaryinterface_entries" name="dictionaryinterface_entries"></a>
 
 <MemberCard>
 
-### TaggedOperatorDefinition
+##### DictionaryInterface.entries
+
+</MemberCard>
+
+<a id="dictionaryinterface_values" name="dictionaryinterface_values"></a>
+
+<MemberCard>
+
+##### DictionaryInterface.values
+
+</MemberCard>
+
+<a id="dictionaryinterface_get-1" name="dictionaryinterface_get-1"></a>
+
+<MemberCard>
+
+##### DictionaryInterface.get()
 
 ```ts
-type TaggedOperatorDefinition = {
-  operator: BoxedOperatorDefinition;
-};
+get(key): BoxedExpression
 ```
+
+####### key
+
+`string`
+
+</MemberCard>
+
+<a id="dictionaryinterface_has-1" name="dictionaryinterface_has-1"></a>
+
+<MemberCard>
+
+##### DictionaryInterface.has()
+
+```ts
+has(key): boolean
+```
+
+####### key
+
+`string`
 
 </MemberCard>
 
@@ -8420,6 +8814,22 @@ reshape(...shape): Tensor<DT>
 
 </MemberCard>
 
+<a id="tensordt_slice" name="tensordt_slice"></a>
+
+<MemberCard>
+
+##### Tensor.slice()
+
+```ts
+slice(index): Tensor<DT>
+```
+
+####### index
+
+`number`
+
+</MemberCard>
+
 <a id="tensordt_flatten" name="tensordt_flatten"></a>
 
 <MemberCard>
@@ -8705,12 +9115,16 @@ equals(other): boolean
 ##### new BoxedType()
 
 ```ts
-new BoxedType(type): BoxedType
+new BoxedType(type, typeResolver?): BoxedType
 ```
 
 ####### type
 
-`string` | [`AlgebraicType`](#algebraictype) | [`NegationType`](#negationtype) | [`CollectionType`](#collectiontype) | [`ListType`](#listtype) | [`SetType`](#settype) | [`MapType`](#maptype) | [`TupleType`](#tupletype) | [`FunctionSignature`](#functionsignature) | [`ValueType`](#valuetype) | [`TypeReference`](#typereference)
+`string` | [`AlgebraicType`](#algebraictype) | [`NegationType`](#negationtype) | [`CollectionType`](#collectiontype) | [`ListType`](#listtype) | [`SetType`](#settype) | [`RecordType`](#recordtype) | [`DictionaryType`](#dictionarytype) | [`TupleType`](#tupletype) | [`SymbolType`](#symboltype) | [`ExpressionType`](#expressiontype) | [`NumericType`](#numerictype) | [`FunctionSignature`](#functionsignature) | [`ValueType`](#valuetype) | [`TypeReference`](#typereference)
+
+####### typeResolver?
+
+[`TypeResolver`](#typeresolver)
 
 </MemberCard>
 
@@ -8798,6 +9212,102 @@ static string: BoxedType;
 
 </MemberCard>
 
+<a id="boxedtype_dictionary" name="boxedtype_dictionary"></a>
+
+<MemberCard>
+
+##### BoxedType.dictionary
+
+```ts
+static dictionary: BoxedType;
+```
+
+</MemberCard>
+
+<a id="boxedtype_setnumber" name="boxedtype_setnumber"></a>
+
+<MemberCard>
+
+##### BoxedType.setNumber
+
+```ts
+static setNumber: BoxedType;
+```
+
+</MemberCard>
+
+<a id="boxedtype_setcomplex" name="boxedtype_setcomplex"></a>
+
+<MemberCard>
+
+##### BoxedType.setComplex
+
+```ts
+static setComplex: BoxedType;
+```
+
+</MemberCard>
+
+<a id="boxedtype_setimaginary" name="boxedtype_setimaginary"></a>
+
+<MemberCard>
+
+##### BoxedType.setImaginary
+
+```ts
+static setImaginary: BoxedType;
+```
+
+</MemberCard>
+
+<a id="boxedtype_setreal" name="boxedtype_setreal"></a>
+
+<MemberCard>
+
+##### BoxedType.setReal
+
+```ts
+static setReal: BoxedType;
+```
+
+</MemberCard>
+
+<a id="boxedtype_setrational" name="boxedtype_setrational"></a>
+
+<MemberCard>
+
+##### BoxedType.setRational
+
+```ts
+static setRational: BoxedType;
+```
+
+</MemberCard>
+
+<a id="boxedtype_setfiniteinteger" name="boxedtype_setfiniteinteger"></a>
+
+<MemberCard>
+
+##### BoxedType.setFiniteInteger
+
+```ts
+static setFiniteInteger: BoxedType;
+```
+
+</MemberCard>
+
+<a id="boxedtype_setinteger" name="boxedtype_setinteger"></a>
+
+<MemberCard>
+
+##### BoxedType.setInteger
+
+```ts
+static setInteger: BoxedType;
+```
+
+</MemberCard>
+
 <a id="boxedtype_type" name="boxedtype_type"></a>
 
 <MemberCard>
@@ -8818,6 +9328,42 @@ type: Type;
 
 </MemberCard>
 
+<a id="boxedtype_widen" name="boxedtype_widen"></a>
+
+<MemberCard>
+
+##### BoxedType.widen()
+
+```ts
+static widen(...types): BoxedType
+```
+
+####### types
+
+...readonly (
+  \| [`Type`](#type-3)
+  \| [`BoxedType`](#boxedtype))[]
+
+</MemberCard>
+
+<a id="boxedtype_narrow" name="boxedtype_narrow"></a>
+
+<MemberCard>
+
+##### BoxedType.narrow()
+
+```ts
+static narrow(...types): BoxedType
+```
+
+####### types
+
+...readonly (
+  \| [`Type`](#type-3)
+  \| [`BoxedType`](#boxedtype))[]
+
+</MemberCard>
+
 <a id="boxedtype_matches" name="boxedtype_matches"></a>
 
 <MemberCard>
@@ -8830,7 +9376,7 @@ matches(other): boolean
 
 ####### other
 
-`string` | [`AlgebraicType`](#algebraictype) | [`NegationType`](#negationtype) | [`CollectionType`](#collectiontype) | [`ListType`](#listtype) | [`SetType`](#settype) | [`MapType`](#maptype) | [`TupleType`](#tupletype) | [`FunctionSignature`](#functionsignature) | [`ValueType`](#valuetype) | [`TypeReference`](#typereference) | [`BoxedType`](#boxedtype)
+[`Type`](#type-3) | [`BoxedType`](#boxedtype)
 
 </MemberCard>
 
@@ -8846,7 +9392,7 @@ is(other): boolean
 
 ####### other
 
-`string` | [`AlgebraicType`](#algebraictype) | [`NegationType`](#negationtype) | [`CollectionType`](#collectiontype) | [`ListType`](#listtype) | [`SetType`](#settype) | [`MapType`](#maptype) | [`TupleType`](#tupletype) | [`FunctionSignature`](#functionsignature) | [`ValueType`](#valuetype) | [`TypeReference`](#typereference)
+[`Type`](#type-3)
 
 </MemberCard>
 
@@ -8926,6 +9472,9 @@ type MathJsonAttributes = {
   sourceOffsets: [number, number];
 };
 ```
+
+The following properties can be added to any MathJSON expression
+to provide additional information about the expression.
 
 <a id="mathjsonattributes_comment" name="mathjsonattributes_comment"></a>
 
@@ -9086,7 +9635,7 @@ The `num` string is made of:
 - an optional exponent part (a `e` or `E` exponent marker followed by an
   optional `-` minus sign, followed by a string of digits)
 
-It can also consist of the value `NaN`, `-Infinity` and `+Infinity` to
+It can also consist of the string `NaN`, `-Infinity` or `+Infinity` to
 represent these respective values.
 
 A MathJSON number may contain more digits or an exponent with a greater
@@ -9142,6 +9691,20 @@ type MathJsonFunctionObject = {
 
 </MemberCard>
 
+<a id="mathjsondictionaryobject" name="mathjsondictionaryobject"></a>
+
+<MemberCard>
+
+### MathJsonDictionaryObject
+
+```ts
+type MathJsonDictionaryObject = {
+  dict: Record<string, Expression>;
+ } & MathJsonAttributes;
+```
+
+</MemberCard>
+
 <a id="expressionobject" name="expressionobject"></a>
 
 <MemberCard>
@@ -9153,7 +9716,8 @@ type ExpressionObject =
   | MathJsonNumberObject
   | MathJsonStringObject
   | MathJsonSymbolObject
-  | MathJsonFunctionObject;
+  | MathJsonFunctionObject
+  | MathJsonDictionaryObject;
 ```
 
 </MemberCard>
@@ -9192,11 +9756,14 @@ The dictionary and function nodes can contain expressions themselves.
 
 ```ts
 type PrimitiveType = 
-  | NumericType
+  | NumericPrimitiveType
   | "collection"
+  | "indexed_collection"
   | "list"
   | "set"
-  | "map"
+  | "dictionary"
+  | "record"
+  | "dictionary"
   | "tuple"
   | "value"
   | "scalar"
@@ -9234,25 +9801,30 @@ A primitive type is a simple type that represents a concrete value.
      - `boolean`: a boolean value: `True` or `False`.
      - `string`: a string of characters.
    - `collection`
-      - `list`: a collection of expressions, possibly recursive,
-         with optional dimensions, e.g. `[number]`, `[boolean^32]`,
-         `[number^(2x3)]`. Used to represent a vector, a matrix or a
-         tensor when the type of its elements is a number
       - `set`: a collection of unique expressions, e.g. `set<string>`.
-      - `tuple`: a fixed-size collection of named or unnamed elements, e.g.
-         `tuple<number, boolean>`, `tuple<x: number, y: boolean>`.
-      - `map`: a set key-value pairs, e.g. `map<x: number, y: boolean>`.
+      - `record`: a collection of specific key-value pairs,
+         e.g. `record<x: number, y: boolean>`.
+      - `dictionary`: a collection of arbitrary key-value pairs
+         e.g. `dictionary<string, number>`.
+      - `indexed_collection`: collections whose elements can be accessed
+            by a numeric index
+         - `list`: a collection of expressions, possibly recursive,
+             with optional dimensions, e.g. `[number]`, `[boolean^32]`,
+             `[number^(2x3)]`. Used to represent a vector, a matrix or a
+             tensor when the type of its elements is a number
+          - `tuple`: a fixed-size collection of named or unnamed elements,
+             e.g. `tuple<number, boolean>`, `tuple<x: number, y: boolean>`.
 
 </MemberCard>
 
-<a id="numerictype" name="numerictype"></a>
+<a id="numericprimitivetype" name="numericprimitivetype"></a>
 
 <MemberCard>
 
-### NumericType
+### NumericPrimitiveType
 
 ```ts
-type NumericType = 
+type NumericPrimitiveType = 
   | "number"
   | "finite_number"
   | "complex"
@@ -9308,7 +9880,8 @@ type FunctionSignature = {
   kind: "signature";
   args: NamedElement[];
   optArgs: NamedElement[];
-  restArg: NamedElement;
+  variadicArg: NamedElement;
+  variadicMin: 0 | 1;
   result: Type;
 };
 ```
@@ -9360,22 +9933,47 @@ type ValueType = {
 
 </MemberCard>
 
-<a id="maptype" name="maptype"></a>
+<a id="recordtype" name="recordtype"></a>
 
 <MemberCard>
 
-### MapType
+### RecordType
 
 ```ts
-type MapType = {
-  kind: "map";
+type RecordType = {
+  kind: "record";
   elements: Record<string, Type>;
 };
 ```
 
-Map is a non-indexable collection of key/value pairs.
-An element of a map whose type is a subtype of `nothing` is optional.
-For example, in `{x: number, y: boolean | nothing}` the element `y` is optional.
+A record is a collection of key-value pairs.
+
+The keys are strings. The set of keys is fixed.
+
+For a record type to be a subtype of another record type, it must have a
+subset of the keys, and all their types must match (width subtyping).
+
+</MemberCard>
+
+<a id="dictionarytype" name="dictionarytype"></a>
+
+<MemberCard>
+
+### DictionaryType
+
+```ts
+type DictionaryType = {
+  kind: "dictionary";
+  values: Type;
+};
+```
+
+A dictionary is a collection of key-value pairs.
+
+The keys are strings. The set of keys is also not defined as part of the
+type and can be modified at runtime.
+
+A dictionary is suitable for use as cache or data storage.
 
 </MemberCard>
 
@@ -9387,14 +9985,15 @@ For example, in `{x: number, y: boolean | nothing}` the element `y` is optional.
 
 ```ts
 type CollectionType = {
-  kind: "collection";
+  kind: "collection" | "indexed_collection";
   elements: Type;
 };
 ```
 
-Collection, List, Set, Tuple and Map are collections.
-
 `CollectionType` is a generic collection of elements of a certain type.
+
+- Indexed collections: List, Tuple
+- Non-indexed: Set, Record, Dictionary
 
 </MemberCard>
 
@@ -9412,7 +10011,7 @@ type ListType = {
 };
 ```
 
-The elements of a list are ordered.
+The elements of a list can be accessed by their one-based index.
 
 All elements of a list have the same type, but it can be a broad type,
 up to `any`.
@@ -9421,6 +10020,53 @@ The same element can be present in the list more than once.
 
 A list can be multi-dimensional. For example, a list of integers with
 dimensions 2x3x4 is a 3D tensor with 2 layers, 3 rows and 4 columns.
+
+</MemberCard>
+
+<a id="symboltype" name="symboltype"></a>
+
+<MemberCard>
+
+### SymbolType
+
+```ts
+type SymbolType = {
+  kind: "symbol";
+  name: string;
+};
+```
+
+</MemberCard>
+
+<a id="expressiontype" name="expressiontype"></a>
+
+<MemberCard>
+
+### ExpressionType
+
+```ts
+type ExpressionType = {
+  kind: "expression";
+  operator: string;
+};
+```
+
+</MemberCard>
+
+<a id="numerictype" name="numerictype"></a>
+
+<MemberCard>
+
+### NumericType
+
+```ts
+type NumericType = {
+  kind: "numeric";
+  type: NumericPrimitiveType;
+  lower: number;
+  upper: number;
+};
+```
 
 </MemberCard>
 
@@ -9438,7 +10084,7 @@ type SetType = {
 ```
 
 Each element of a set is unique (is not present in the set more than once).
-The elements of a set are not ordered.
+The elements of a set are not indexed.
 
 </MemberCard>
 
@@ -9455,6 +10101,9 @@ type TupleType = {
 };
 ```
 
+The elements of a tuple are indexed and may be named or unnamed.
+If one element is named, all elements must be named.
+
 </MemberCard>
 
 <a id="typereference" name="typereference"></a>
@@ -9466,7 +10115,9 @@ type TupleType = {
 ```ts
 type TypeReference = {
   kind: "reference";
-  ref: string;
+  name: string;
+  alias: boolean;
+  def: Type | undefined;
 };
 ```
 
@@ -9474,7 +10125,7 @@ Nominal typing
 
 </MemberCard>
 
-<a id="type-2" name="type-2"></a>
+<a id="type-3" name="type-3"></a>
 
 <MemberCard>
 
@@ -9488,8 +10139,13 @@ type Type =
   | CollectionType
   | ListType
   | SetType
-  | MapType
+  | RecordType
+  | DictionaryType
   | TupleType
+  | SymbolType
+  | ExpressionType
+  | NumericType
+  | NumericPrimitiveType
   | FunctionSignature
   | ValueType
   | TypeReference;
@@ -9605,7 +10261,7 @@ Examples of types strings:
 - `"number -> number"` -- a signature with a single argument
 - `"(x: number, number) -> number"` -- a signature with a named argument
 - `"(number, y:number?) -> number"` -- a signature with an optional named argument (can have several optional arguments, at the end)
-- `"(number, ...number) -> number"` -- a signature with a rest argument (can have only one, and no optional arguments if there is a rest argument).
+- `"(number, number+) -> number"` -- a signature with a rest argument (can have only one, and no optional arguments if there is a rest argument).
 - `"() -> number"` -- a signature with an empty argument list
 - `"number | boolean"` -- a union type
 - `"(x: number) & (y: number)"` -- an intersection type
@@ -9630,10 +10286,16 @@ type TypeCompatibility = "covariant" | "contravariant" | "bivariant" | "invarian
 
 <MemberCard>
 
-### TypeResolver()
+### TypeResolver
 
 ```ts
-type TypeResolver = (name) => Type | undefined;
+type TypeResolver = {
+  get names: string[];
+  forward: (name) => TypeReference | undefined;
+  resolve: (name) => TypeReference | undefined;
+};
 ```
+
+A type resolver should return a definition for a given type name.
 
 </MemberCard>

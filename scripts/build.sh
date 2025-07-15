@@ -107,13 +107,6 @@ if [ "$BUILD" = "production" ]; then
     # npm run lint
     # echo -e $LINECLEAR$BASENAME$CHECK$DIM" Linting$RESET"
 
-# Also produce a .js version, some CDN (jsdelivr) report the wrong MIME type
-# for .cjs files, so we need to produce a .js version
-    cp ./dist/compute-engine.cjs ./dist/compute-engine.js
-    cp ./dist/compute-engine.min.cjs ./dist/compute-engine.min.js
-    cp ./dist/math-json.cjs ./dist/math-json.js
-    cp ./dist/math-json.min.cjs ./dist/math-json.min.js
-
     # Stamp the SDK version number
     find ./dist -type f \( -name '*.js' -o -name '*.mjs' -o -name '*.cjs' -o -name '*.js' \) -exec bash -c 'sedi s/{{SDK_VERSION}}/$SDK_VERSION/g {}' \;
     find ./dist -type f -name '*.d.ts' -exec bash -c 'sedi "1s/^/\/\* $SDK_VERSION \*\/$(printf '"'"'\r'"'"')/" {}' \;
