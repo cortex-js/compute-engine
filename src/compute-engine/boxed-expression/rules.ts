@@ -419,7 +419,7 @@ function parseRule(
 
         // Check for conditions
         const conditions = parseModifierExpression(parser);
-        if (conditions === null) return null;
+        if (conditions === null) return `${prefix}${id}`;
 
         if (!wildcardConditions[id]) wildcardConditions[id] = conditions;
         else wildcardConditions[id] += ',' + conditions;
