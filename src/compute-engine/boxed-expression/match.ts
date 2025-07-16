@@ -339,39 +339,41 @@ function matchArguments(
 
     if (argName !== null) {
       if (argName.startsWith('__')) {
-        // Match 0 or more expressions (__) or 1 or more (___)
-        let j = 0; // Index in subject
+        // Match 1 or more expressions (__) or 0 or more (___)
+        /** Qty. of operands consumed (of those remaining to be matched). */
+        let j = 0;
         if (patterns[i + 1] === undefined) {
           // No more args in the pattern after, go till the end
-          j = ops.length + 1;
+          j = ops.length;
         } else {
-          // Capture till the next matching arg in the pattern
+          // Capture til' the first matching arg. of the next pattern
           let found = false;
+          const nextPat = patterns[i + 1];
           while (!found && j < ops.length) {
-            found =
-              matchOnce(ops[j], patterns[i + 1], result, options) !== null;
-            j += 1;
+            found = matchOnce(ops[j], nextPat, result, options) !== null;
+            if (!found) j += 1;
           }
-          if (!found && argName.startsWith('___')) return null;
+          // The next pattern does not match against any of the remaining ops.. Unless the next
+          // match is optional, then can assume no overall match.
+          if (!found && !wildcardName(nextPat)?.startsWith('___')) return null;
         }
-
-        // Unless we had a optional wildcard (matching 0 or more), we must have
-        // found at least one match
-        if (!argName.startsWith('___') && j <= 1) return null;
 
         // Determine the value to return for the wildcard
         let value: BoxedExpression;
-        if (j <= 1) {
+        if (j < 1) {
+          // A standard/non-optional Sequence Wildcard with no match...
+          if (!argName.startsWith('___') && j < 1) return null;
+          // Otherwise must be an optional-sequence match: this is permitted.
           if (expr.operator === 'Add') value = ce.Zero;
           else if (expr.operator === 'Multiply') value = ce.One;
           else value = ce.Nothing;
-        } else if (j === 2) {
-          // Capturing a single element
-          if (ops.length === 0) return null;
+        } else if (j === 1) {
+          // Capturing a single element/operand
           value = ops.shift()!;
         } else {
+          // >1 operands captured
           const def = ce.lookupDefinition(expr.operator);
-          const args = ops.splice(0, j - 1);
+          const args = ops.splice(0, j);
           if (def && isOperatorDef(def) && def.operator.associative) {
             value = ce.function(expr.operator, args, { canonical: false });
           } else {
