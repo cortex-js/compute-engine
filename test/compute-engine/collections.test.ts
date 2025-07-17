@@ -45,10 +45,13 @@ const expression: Expression = ['Add', 2, ['Multiply', 3, 'x']];
 const symbol: Expression = 'x';
 const dict: Expression = [
   'Dictionary',
-  ['Tuple', 'x', 1],
-  ['Tuple', 'y', 2],
-  ['Tuple', 'z', 3],
+  ['Tuple', { str: 'x' }, 1],
+  ['Tuple', { str: 'y' }, 2],
+  ['Tuple', { str: 'z' }, 3],
 ];
+
+const dictShorthand: Expression = { dict: { x: 1, y: 2, z: 3 } };
+
 const tuple: Expression = ['Tuple', 7, 10, 13];
 
 describe('COUNT', () => {
@@ -94,8 +97,10 @@ describe('COUNT', () => {
       ]
     `));
 
-  test('Count dict', () =>
-    expect(evaluate(['Count', dict])).toMatchInlineSnapshot(`3`));
+  test('Count dict', () => {
+    expect(evaluate(['Count', dict])).toMatchInlineSnapshot(`3`);
+    expect(evaluate(['Count', dictShorthand])).toMatchInlineSnapshot(`3`);
+  });
 
   test('Count tuple', () =>
     expect(evaluate(['Count', tuple])).toMatchInlineSnapshot(`3`));
@@ -164,6 +169,22 @@ describe('TAKE', () => {
     `);
 
     expect(evaluate(['Take', dict, 1])).toMatchInlineSnapshot(`
+      [
+        "Take",
+        [
+          "Error",
+          [
+            "ErrorCode",
+            "incompatible-type",
+            "'indexed_collection'",
+            "dictionary<finite_integer>"
+          ]
+        ],
+        1
+      ]
+    `);
+
+    expect(evaluate(['Take', dictShorthand, 1])).toMatchInlineSnapshot(`
       [
         "Take",
         [
