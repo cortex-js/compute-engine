@@ -31,7 +31,7 @@ import type {
 
 import type { NumericValue } from '../numeric-value/types';
 import type { SmallInteger } from '../numerics/types';
-import { compileToJavaScript } from '../compile';
+import { JavaScriptTarget } from '../compilation/javascript-target';
 import { applicableN1 } from '../function-utils';
 
 import {
@@ -724,7 +724,7 @@ export abstract class _BoxedExpression implements BoxedExpression {
   }
 
   compile(options?: {
-    to?: 'javascript';
+    to?: 'javascript' | 'wgsl' | 'python' | 'webassembly';
     functions?: Record<MathJsonSymbol, string | ((...any) => any)>;
     vars?: Record<MathJsonSymbol, string>;
     imports?: ((...any) => any)[];
@@ -732,20 +732,23 @@ export abstract class _BoxedExpression implements BoxedExpression {
     fallback?: boolean;
   }): ((...args: any[]) => any) & { isCompiled?: boolean } {
     try {
-      if (options?.to && options.to !== 'javascript')
-        throw new Error(`Unexpected compilation target "${options.to}"`);
-
-      options ??= {};
-
+      const target = options?.to ?? 'javascript';
+      
       // eslint-disable-next-line @typescript-eslint/no-this-alias
       const expr = this as BoxedExpression;
-      return compileToJavaScript(
-        expr,
-        options.functions,
-        options.vars,
-        options.imports,
-        options.preamble
-      );
+      
+      // For now, only JavaScript is implemented
+      if (target !== 'javascript') {
+        throw new Error(`Compilation target "${target}" is not yet implemented. Available targets: javascript`);
+      }
+      
+      const jsTarget = new JavaScriptTarget();
+      return jsTarget.compileToExecutable(expr, {
+        functions: options?.functions,
+        vars: options?.vars,
+        imports: options?.imports,
+        preamble: options?.preamble,
+      });
     } catch (e) {
       // @fixme: the fallback needs to handle multiple arguments
       if (options?.fallback ?? true) return applicableN1(this);

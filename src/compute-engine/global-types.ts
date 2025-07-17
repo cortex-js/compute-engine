@@ -1494,9 +1494,9 @@ export interface BoxedExpression {
    *
    */
   compile(options?: {
-    to?: 'javascript';
+    to?: 'javascript' | 'wgsl' | 'python' | 'webassembly';
     functions?: Record<MathJsonSymbol, JSSource | ((...any) => any)>;
-    vars?: Record<MathJsonSymbol, CompiledType>;
+    vars?: Record<MathJsonSymbol, JSSource>;
     imports?: ((...any) => any)[];
     preamble?: string;
     fallback?: boolean;
