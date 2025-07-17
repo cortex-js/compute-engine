@@ -195,14 +195,16 @@ export function dictionaryFromExpression(
 
   // Is it a Dictionary expression?
   if (operator(expr) === 'Dictionary') {
-    const result = {};
+    const dict = {};
     const ops = operands(expr);
     for (let i = 1; i < nops(expr); i++) {
       const kv = keyValuePair(ops[i]);
-      if (kv) result[kv[0]] = kv[1];
+      if (kv) {
+        dict[kv[0]] = expressionToJsValue(kv[1]) ?? 'Nothing';
+      }
     }
 
-    return result as unknown as MathJsonDictionaryObject;
+    return { dict } as unknown as MathJsonDictionaryObject;
   }
 
   return null;
@@ -211,7 +213,13 @@ export function dictionaryFromExpression(
 export function dictionaryFromEntries(
   dict: Record<string, Expression>
 ): Expression {
-  return { dict } as MathJsonDictionaryObject;
+  const entries: Record<string, unknown> = Object.fromEntries(
+    Object.entries(dict).map(([k, v]) => [
+      k,
+      jsValueToExpression(v) ?? 'Nothing',
+    ])
+  );
+  return { dict: entries } as MathJsonDictionaryObject;
 }
 
 function machineValueOfString(s: string): number {
@@ -465,4 +473,57 @@ export function matchesString(s: string): boolean {
   }
 
   return !matchesNumber(s) && !matchesSymbol(s);
+}
+
+function jsValueToExpression(v: any): Expression | null {
+  if (typeof v === 'string') {
+    return { str: v };
+  } else if (typeof v === 'number') {
+    return { num: v.toString() };
+  } else if (typeof v === 'boolean') {
+    return v ? 'True' : 'False';
+  } else if (Array.isArray(v)) {
+    return ['List', ...v.map((x) => jsValueToExpression(x) ?? 'Nothing')];
+  } else if (v === null) {
+    return null;
+  } else if (typeof v === 'object') {
+    const dict: Record<string, Expression> = {};
+    for (const key in v) {
+      dict[key] = jsValueToExpression(v[key]) ?? 'Nothing';
+    }
+    return { dict };
+  }
+  if (
+    isFunctionObject(v) ||
+    isSymbolObject(v) ||
+    isNumberObject(v) ||
+    isStringObject(v) ||
+    isDictionaryObject(v)
+  ) {
+    return v as Expression;
+  }
+  return null;
+}
+
+function expressionToJsValue(expr: Expression | null | undefined): any {
+  if (expr === null || expr === undefined) return null;
+  if (isStringObject(expr)) return expr.str;
+  if (isNumberObject(expr)) return parseFloat(expr.num);
+  if (isSymbolObject(expr)) return expr.sym;
+
+  if (typeof expr === 'string' || typeof expr === 'number') return expr;
+
+  if (Array.isArray(expr)) {
+    return expr.map((x) => expressionToJsValue(x));
+  }
+
+  if (isDictionaryObject(expr)) {
+    const result: Record<string, any> = {};
+    for (const key in expr.dict) {
+      result[key] = expressionToJsValue(expr.dict[key]);
+    }
+    return result;
+  }
+
+  return null;
 }

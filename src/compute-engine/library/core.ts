@@ -974,9 +974,12 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
         }
 
         if (fmt === 'unicode-scalars') {
+          const cp = toInteger(value);
+          if (cp !== null) return engine.string(String.fromCodePoint(cp));
+
           if (!value.isIndexedCollection) {
             return engine.typeError(
-              parseType('indexed_collection<integer>'),
+              parseType('indexed_collection<integer>|integer'),
               value.type
             );
           }
@@ -992,7 +995,7 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
     },
 
     Utf8: {
-      description: 'A collection of utf-8 code units from a string.',
+      description: 'A collection of UTF-8 code units from a string.',
       signature: '(string) -> list<integer>',
       evaluate: ([str], { engine }) => {
         if (!str.string) return undefined;
@@ -1006,7 +1009,7 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
     },
 
     Utf16: {
-      description: 'A collection of utf-16 code units from a string.',
+      description: 'A collection of UTF-16 code units from a string.',
       signature: '(string) -> list<integer>',
       evaluate: ([str], { engine }) => {
         if (!str.string) return undefined;
@@ -1025,7 +1028,7 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
 
     UnicodeScalars: {
       description:
-        'A collection of Unicode scalars from a string, same as utf-32',
+        'A collection of Unicode scalars from a string, same as UTF-32',
       signature: '(string) -> list<integer>',
       evaluate: ([str], { engine }) => {
         if (!str.string) return undefined;

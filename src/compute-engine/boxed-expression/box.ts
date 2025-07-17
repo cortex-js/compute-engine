@@ -11,11 +11,14 @@ import type {
 
 import { Expression, MathJsonSymbol } from '../../math-json/types';
 import {
+  dictionaryFromExpression,
   machineValue,
   matchesNumber,
   matchesString,
   matchesSymbol,
   missingIfEmpty,
+  operands,
+  operator,
   stringValue,
   symbol,
 } from '../../math-json/utils';
@@ -409,7 +412,9 @@ export function box(
     if ('sym' in expr) return ce.symbol(expr.sym, { canonical });
     if ('num' in expr) return ce.number(expr, { canonical });
     if ('dict' in expr) {
-      return new BoxedDictionary(ce, expr.dict, { canonical });
+      return new BoxedDictionary(ce, dictionaryFromExpression(expr)!.dict, {
+        canonical,
+      });
     }
 
     throw new Error(
@@ -458,8 +463,39 @@ function makeCanonicalFunction(
   }
 
   if (name === 'Dictionary') {
-    const boxedOps = ops.map((x) => ce.box(x, { canonical: false }));
-    return new BoxedDictionary(ce, ce._fn('Dictionary', boxedOps), {
+    const entries: [string, BoxedExpression][] = ops.map((x) => {
+      if (x instanceof _BoxedExpression) {
+        const operator = x.operator;
+        if (
+          operator === 'KeyValuePair' ||
+          operator === 'Tuple' ||
+          operator === 'Pair'
+        ) {
+          const [key, value] = x.ops!;
+          return [
+            ce.box(key).string!,
+            dictionaryValueToBoxedExpression(ce, value)!,
+          ];
+        } else
+          throw new Error(
+            `Unexpected operator: ${operator}. Expected KeyValuePair, Tuple or Pair`
+          );
+      } else {
+        const h = operator(x as Expression);
+        if (h === 'KeyValuePair' || h === 'Tuple' || h === 'Pair') {
+          const [k, v] = operands(x as Expression);
+          const key = stringValue(k);
+          if (!key)
+            throw new Error(
+              `Invalid key: ${JSON.stringify(k)}. Expected a string.`
+            );
+          return [key, ce.box(v ?? 'Nothing')];
+        }
+      }
+      return ['undefined', ce.Nothing];
+    });
+
+    return new BoxedDictionary(ce, Object.fromEntries(entries), {
       canonical: true,
     });
   }
@@ -777,4 +813,31 @@ export function semiCanonical(
     return xs as ReadonlyArray<BoxedExpression>;
 
   return xs.map((x) => ce.box(x, { scope }));
+}
+
+function dictionaryValueToBoxedExpression(
+  ce: ComputeEngine,
+  value: SemiBoxedExpression | null | undefined
+): BoxedExpression {
+  if (value === null || value === undefined) return ce.Nothing;
+  if (value instanceof _BoxedExpression) return value;
+  if (typeof value === 'string') return ce.string(value);
+  if (typeof value === 'number') return ce.number(value);
+  if (typeof value === 'boolean') return value ? ce.True : ce.False;
+
+  if (Array.isArray(value)) {
+    return ce.function(
+      'List',
+      value.map((x) => dictionaryValueToBoxedExpression(ce, x))
+    );
+  }
+  if (typeof value === 'object') {
+    if ('num' in value) return ce.number(value.num);
+    if ('str' in value) return ce.string(value.str);
+    if ('sym' in value) return ce.symbol(value.sym);
+    if ('fn' in value) return ce.box(value);
+    if ('dict' in value)
+      return new BoxedDictionary(ce, dictionaryFromExpression(value)!.dict);
+  }
+  return ce.Nothing;
 }
