@@ -51,26 +51,26 @@ const dict: Expression = [
 ];
 const tuple: Expression = ['Tuple', 7, 10, 13];
 
-describe('LENGTH', () => {
-  test('Length empty list', () =>
-    expect(evaluate(['Length', emptyList])).toEqual('0'));
+describe('COUNT', () => {
+  test('Count empty list', () =>
+    expect(evaluate(['Count', emptyList])).toEqual('0'));
 
-  test('Length list', () =>
-    expect(evaluate(['Length', list])).toMatchInlineSnapshot(`7`));
+  test('Count list', () =>
+    expect(evaluate(['Count', list])).toMatchInlineSnapshot(`7`));
 
-  test('Length matrix', () =>
-    expect(evaluate(['Length', matrix])).toMatchInlineSnapshot(`9`));
+  test('Count matrix', () =>
+    expect(evaluate(['Count', matrix])).toMatchInlineSnapshot(`9`));
 
-  test('Length range', () =>
-    expect(evaluate(['Length', range])).toMatchInlineSnapshot(`9`));
+  test('Count range', () =>
+    expect(evaluate(['Count', range])).toMatchInlineSnapshot(`9`));
 
-  test('Length linspace', () =>
-    expect(evaluate(['Length', linspace])).toMatchInlineSnapshot(`11`));
+  test('Count linspace', () =>
+    expect(evaluate(['Count', linspace])).toMatchInlineSnapshot(`11`));
 
-  test('Length expression', () =>
-    expect(evaluate(['Length', expression])).toMatchInlineSnapshot(`
+  test('Count expression', () =>
+    expect(evaluate(['Count', expression])).toMatchInlineSnapshot(`
       [
-        "Length",
+        "Count",
         [
           "Error",
           [
@@ -83,10 +83,10 @@ describe('LENGTH', () => {
       ]
     `));
 
-  test('Length symbol', () =>
-    expect(evaluate(['Length', symbol])).toMatchInlineSnapshot(`
+  test('Count symbol', () =>
+    expect(evaluate(['Count', symbol])).toMatchInlineSnapshot(`
       [
-        "Length",
+        "Count",
         [
           "Error",
           ["ErrorCode", "incompatible-type", "'collection'", "'number'"]
@@ -94,11 +94,11 @@ describe('LENGTH', () => {
       ]
     `));
 
-  test('Length dict', () =>
-    expect(evaluate(['Length', dict])).toMatchInlineSnapshot(`3`));
+  test('Count dict', () =>
+    expect(evaluate(['Count', dict])).toMatchInlineSnapshot(`3`));
 
-  test('Length tuple', () =>
-    expect(evaluate(['Length', tuple])).toMatchInlineSnapshot(`3`));
+  test('Count tuple', () =>
+    expect(evaluate(['Count', tuple])).toMatchInlineSnapshot(`3`));
 });
 
 describe('TAKE', () => {

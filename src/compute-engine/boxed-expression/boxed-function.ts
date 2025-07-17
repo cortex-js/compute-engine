@@ -919,11 +919,11 @@ export class BoxedFunction extends _BoxedExpression {
     return def?.isLazy?.(this) ?? false;
   }
 
-  xcontains(rhs: BoxedExpression): boolean | undefined {
+  contains(rhs: BoxedExpression): boolean | undefined {
     return this.baseDefinition?.collection?.contains?.(this, rhs);
   }
 
-  get xsize(): number | undefined {
+  get count(): number | undefined {
     return this.operatorDefinition?.collection?.count?.(this);
   }
 
@@ -1348,7 +1348,7 @@ function materialize(
         if (i > headSize) break;
       }
 
-      const count = expr.xsize;
+      const count = expr.count;
       if (count === undefined || count <= headSize) {
         // If the collection is smaller than the head, we don't need to evaluate the tail
         if (count === undefined || xs.length < count)

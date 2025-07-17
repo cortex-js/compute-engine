@@ -261,7 +261,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
 
         let i = 1;
         for (const x of target.each()) {
-          if (!expr.xcontains(x)) return false;
+          if (!expr.contains(x)) return false;
           if (!expr.at(i)?.isSame(x)) return false;
           i++;
         }
@@ -476,23 +476,25 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
 
   Contains: {
     description:
-      'Return True if the collection contains the given value, False otherwise.',
+      'Return True if the collection contains the given element, False otherwise.',
     complexity: 8200,
-    signature: '(collection, any) -> boolean',
+    signature: '(collection, element: any) -> boolean',
     evaluate: ([xs, value], { engine: ce }) => {
-      return xs.xcontains(value) ? ce.True : ce.False;
+      return xs.contains(value) ? ce.True : ce.False;
     },
   },
 
-  Length: {
+  Count: {
+    description: ['Return the number of elements in the collection.'],
     complexity: 8200,
     signature: '(collection) -> integer',
     evaluate: ([xs], { engine }) =>
-      xs.isEmptyCollection ? engine.Zero : engine.number(xs.xsize),
+      xs.isEmptyCollection ? engine.Zero : engine.number(xs.count),
     sgn: ([xs]) => (xs.isEmptyCollection ? 'zero' : 'positive'),
   },
 
   IsEmpty: {
+    description: ['Return True if the collection is empty, False otherwise.'],
     complexity: 8200,
     signature: '(collection) -> boolean',
     evaluate: ([xs], { engine: ce }) =>
@@ -552,7 +554,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     },
     collection: {
       isLazy: (_expr) => true,
-      count: (expr) => expr.op1.xsize,
+      count: (expr) => expr.op1.count,
       isEmpty: (expr) => expr.op1.isEmptyCollection,
       isFinite: (expr) => expr.op1.isFiniteCollection,
       iterator: (expr) => {
@@ -606,7 +608,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       contains: (expr, target) => {
         // True if target is in the collection and the predicate returns True
         // for that target.
-        if (!expr.xcontains(target)) return false;
+        if (!expr.contains(target)) return false;
         const f = applicable(expr.op2);
         return f([target])?.symbol === 'True';
       },
@@ -768,14 +770,14 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       count: (expr) => {
         let total = 0;
         for (const op of expr.ops!) {
-          const count = op.xsize;
+          const count = op.count;
           if (count === undefined) return undefined;
           if (!Number.isFinite(count)) return Infinity;
           total += count;
         }
         return total;
       },
-      contains: (expr, target) => expr.ops!.some((op) => op.xcontains(target)),
+      contains: (expr, target) => expr.ops!.some((op) => op.contains(target)),
       iterator: (expr) => {
         const iters = expr.ops!.map((op) => op.each());
         let index = 0;
@@ -852,7 +854,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         if (xs.isEmptyCollection) return true;
         if (xs.isFiniteCollection === false) return false;
         const n = Math.max(0, toInteger(op2) ?? 0);
-        const count = xs.xsize;
+        const count = xs.count;
         if (count === undefined) return undefined;
         if (!Number.isFinite(n)) return false;
         return Math.min(count, n) === 0;
@@ -890,7 +892,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       isLazy: (_expr) => true,
       count: (expr) => {
         const [xs, n] = expr.ops!;
-        const count = xs.xsize;
+        const count = xs.count;
         if (count === undefined) return undefined;
         if (!Number.isFinite(count)) return Infinity;
         if (xs.isEmptyCollection) return 0;
@@ -961,13 +963,13 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     collection: {
       isLazy: (_expr) => true,
       count: (expr) => {
-        const count = expr.op1.xsize;
+        const count = expr.op1.count;
         if (count === undefined) return undefined;
         return Math.max(0, count - 1);
       },
       isEmpty: (expr) => {
         if (expr.op1.isEmptyCollection) return true;
-        const count = expr.op1.xsize;
+        const count = expr.op1.count;
         if (count === undefined) return undefined;
         return count <= 1;
       },
@@ -1004,18 +1006,18 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     collection: {
       isLazy: (_expr) => true,
       count: (expr) => {
-        const count = expr.op1.xsize;
+        const count = expr.op1.count;
         if (count === undefined) return undefined;
         return Math.max(0, count - 1);
       },
       isFinite: (expr) => expr.op1.isFiniteCollection,
       isEmpty: (expr) => {
-        const count = expr.op1.xsize;
+        const count = expr.op1.count;
         if (count === undefined) return undefined;
         return count <= 1;
       },
       iterator: (expr) => {
-        const l = expr.op1.xsize;
+        const l = expr.op1.count;
         if (l === undefined || l <= 1)
           return { next: () => ({ value: undefined, done: true }) };
 
@@ -1034,7 +1036,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         index: number | string
       ): undefined | BoxedExpression => {
         if (typeof index !== 'number') return undefined;
-        const l = expr.op1.xsize;
+        const l = expr.op1.count;
         if (l === undefined) return undefined;
         if (index < 1) index = l + 1 + index;
         if (index < 1 || index > l - 1) return undefined;
@@ -1056,7 +1058,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       isLazy: (_expr) => true,
       count: (expr) => {
         const start = toInteger(expr.op2) ?? 1;
-        const count = expr.op1.xsize;
+        const count = expr.op1.count;
         if (count === undefined) return undefined;
         const end = toInteger(expr.op3) ?? count;
         if (start < 1) return Math.max(0, end + start - 1);
@@ -1068,7 +1070,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         index: number | string
       ): undefined | BoxedExpression => {
         if (typeof index !== 'number') return undefined;
-        const count = expr.op1.xsize;
+        const count = expr.op1.count;
         if (count === undefined) return undefined;
         let start = toInteger(expr.op2) ?? 1;
         if (start < 1) start = count + 1 + start; // Convert negative index to positive
@@ -1081,7 +1083,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       },
       iterator: (expr) => {
         let start = toInteger(expr.op2) ?? 1;
-        const count = expr.op1.xsize;
+        const count = expr.op1.count;
         if (count === undefined)
           return { next: () => ({ value: undefined, done: true }) };
         if (start < 1) start = count + 1 + start; // Convert negative index to positive
@@ -1115,10 +1117,10 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     type: ([xs]) => xs.type,
     collection: {
       isLazy: (_expr) => true,
-      count: (expr) => expr.op1.xsize,
+      count: (expr) => expr.op1.count,
       isEmpty: (expr) => expr.op1.isEmptyCollection,
       isFinite: (expr) => expr.op1.isFiniteCollection,
-      contains: (expr, target) => expr.op1.xcontains(target) ?? false,
+      contains: (expr, target) => expr.op1.contains(target) ?? false,
       iterator: (expr) => {
         let index = -1;
         return {
@@ -1147,12 +1149,12 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     signature: '(indexed_collection, integer?) -> indexed_collection',
     collection: {
       isLazy: (_expr) => true,
-      count: (expr) => expr.op1.xsize,
+      count: (expr) => expr.op1.count,
       isEmpty: (expr) => expr.op1.isEmptyCollection,
       isFinite: (expr) => expr.op1.isFiniteCollection,
-      contains: (expr, target) => expr.op1.xcontains(target) ?? false,
+      contains: (expr, target) => expr.op1.contains(target) ?? false,
       iterator: (expr) => {
-        const l = expr.op1.xsize;
+        const l = expr.op1.count;
         if (l === undefined || l <= 0)
           return { next: () => ({ value: undefined, done: true }) };
         let n = toInteger(expr.op2) ?? 1;
@@ -1176,7 +1178,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         index: number | string
       ): undefined | BoxedExpression => {
         if (typeof index !== 'number') return undefined;
-        const l = expr.op1.xsize;
+        const l = expr.op1.count;
         if (l === undefined || l <= 0) return undefined;
         if (index < 1) index = l + 1 + index;
         if (index < 1 || index > l) return undefined;
@@ -1195,10 +1197,10 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     signature: '(indexed_collection, integer?) -> indexed_collection',
     collection: {
       isLazy: (_expr) => true,
-      count: (expr) => expr.op1.xsize,
-      contains: (expr, target) => expr.op1.xcontains(target) ?? false,
+      count: (expr) => expr.op1.count,
+      contains: (expr, target) => expr.op1.contains(target) ?? false,
       iterator: (expr) => {
-        const l = expr.op1.xsize;
+        const l = expr.op1.count;
         if (l === undefined || l <= 0)
           return { next: () => ({ value: undefined, done: true }) };
         let n = toInteger(expr.op2) ?? 1;
@@ -1222,7 +1224,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         index: number | string
       ): undefined | BoxedExpression => {
         if (typeof index !== 'number') return undefined;
-        const l = expr.op1.xsize;
+        const l = expr.op1.count;
         if (l === undefined || l <= 0) return undefined;
         if (index < 1) index = l + 1 + index;
         if (index < 1 || index > l) return undefined;
@@ -1709,10 +1711,10 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       count: () => Infinity,
       isEmpty: (expr) => expr.isEmptyCollection,
       isFinite: (expr) => !expr.isEmptyCollection,
-      contains: (expr, target) => expr.op1.xcontains(target) ?? false,
+      contains: (expr, target) => expr.op1.contains(target) ?? false,
       iterator: (expr) => {
         let index = 1;
-        const l = expr.op1.xsize;
+        const l = expr.op1.count;
         if (l === undefined || l === 0)
           return { next: () => ({ value: undefined, done: true }) };
         return {
@@ -1727,7 +1729,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       },
       at: (expr, index) => {
         if (typeof index !== 'number' || index < 1) return undefined;
-        const l = expr.op1.xsize;
+        const l = expr.op1.count;
         if (l === undefined || l === 0) return undefined;
         const i = ((index - 1) % l) + 1; // 1-based index
         return expr.op1.at(i);
@@ -2431,7 +2433,7 @@ export function sortedIndices(
         return 1;
       };
 
-  const l = expr.xsize;
+  const l = expr.count;
   if (l === undefined || !Number.isFinite(l) || l < 1) return undefined;
 
   const indices = Array.from({ length: l }, (_, i) => i + 1);
@@ -2513,7 +2515,7 @@ function takeIterator(expr: BoxedExpression): Iterator<BoxedExpression> {
 
 function takeCount(expr: BoxedExpression): number | undefined {
   const [xs, op2] = expr.ops!;
-  const count = xs.xsize;
+  const count = xs.count;
   if (count === undefined) return undefined;
   const n = Math.max(0, toInteger(op2) ?? 0);
   if (!Number.isFinite(n)) return Infinity;
@@ -2522,7 +2524,7 @@ function takeCount(expr: BoxedExpression): number | undefined {
 
 function dropCount(expr: BoxedExpression): number | undefined {
   const [xs, op2] = expr.ops!;
-  const count = xs.xsize;
+  const count = xs.count;
   if (count === undefined) return undefined;
   const n = Math.max(0, toInteger(op2) ?? 0);
   if (!Number.isFinite(n)) return Infinity;
@@ -2530,7 +2532,7 @@ function dropCount(expr: BoxedExpression): number | undefined {
 }
 
 function zipCount(expr: BoxedExpression): number | undefined {
-  const counts = expr.ops!.map((x) => x.xsize);
+  const counts = expr.ops!.map((x) => x.count);
   if (counts.some((c) => c === undefined)) return undefined;
   if (counts.some((c) => !Number.isFinite(c))) return Infinity;
   if (counts.length === 0) return 0;

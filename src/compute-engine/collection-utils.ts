@@ -87,7 +87,7 @@ export function zip(
 
   // Get the length of the shortest collection
   const shortest = Math.min(
-    ...items.map((x) => (x.isCollection ? (x.xsize ?? 1) : Infinity))
+    ...items.map((x) => (x.isCollection ? (x.count ?? 1) : Infinity))
   );
 
   // If the shortest collection is empty, return an empty iterator
@@ -126,14 +126,14 @@ function collectionSubset(
     return undefined;
 
   // All elements of a must be in b
-  for (const x of a.each()) if (b.xcontains(x) !== true) return false;
+  for (const x of a.each()) if (b.contains(x) !== true) return false;
 
   // A strict subset (a ⊂ b) must have at least one element that is not in b
   if (strict) {
     // a must not be equal to b, therefore their size must be different
-    const aSize = a.xsize;
+    const aSize = a.count;
     if (aSize === undefined) return false;
-    const bSize = b.xsize;
+    const bSize = b.count;
     if (bSize === undefined) return false;
     if (aSize === bSize) return false;
   }

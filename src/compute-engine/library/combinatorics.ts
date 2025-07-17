@@ -72,11 +72,11 @@ export const COMBINATORICS_LIBRARY: SymbolDefinitions[] = [
           const factors = expr.ops!;
           if (!x.isCollection || x.ops!.length !== factors.length) return false;
           return factors.every(
-            (factor, i) => factor.xcontains(x.ops![i]) ?? false
+            (factor, i) => factor.contains(x.ops![i]) ?? false
           );
         },
         count: (expr) => {
-          const sizes = expr.ops!.map((op) => op.xsize);
+          const sizes = expr.ops!.map((op) => op.count);
           if (sizes.includes(Infinity)) return Infinity;
           return sizes.reduce((a, b) => a! * b!, 1);
         },
@@ -92,13 +92,13 @@ export const COMBINATORICS_LIBRARY: SymbolDefinitions[] = [
         contains: (expr, x) => {
           const base = expr.ops![0];
           if (!x.isCollection) return false;
-          return x.ops!.every((elem) => base.xcontains(elem) ?? false);
+          return x.ops!.every((elem) => base.contains(elem) ?? false);
         },
         count: (expr) => {
           const xs = expr.ops![0];
           if (xs.isEmptyCollection) return 1; // Power set of empty set is {{}}
           if (xs.isFiniteCollection === false) return Infinity;
-          return 2 ** xs.xsize!;
+          return 2 ** xs.count!;
         },
         iterator: powerSetIterator,
       },

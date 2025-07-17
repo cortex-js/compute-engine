@@ -1,3 +1,11 @@
+## [Unreleased]
+
+### Breaking Changes
+
+- The `[Length]` function has been renamed to `[Count]`.
+- The `xsize` property of collections has been renamed to `count`.
+- The `xcontains()` method of collections has been renamed to `contains()`.
+
 ## 0.30.2 _2025-07-15_
 
 ### Breaking Changes

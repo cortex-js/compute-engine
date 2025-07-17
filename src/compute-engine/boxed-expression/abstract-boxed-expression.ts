@@ -733,15 +733,17 @@ export abstract class _BoxedExpression implements BoxedExpression {
   }): ((...args: any[]) => any) & { isCompiled?: boolean } {
     try {
       const target = options?.to ?? 'javascript';
-      
+
       // eslint-disable-next-line @typescript-eslint/no-this-alias
       const expr = this as BoxedExpression;
-      
+
       // For now, only JavaScript is implemented
       if (target !== 'javascript') {
-        throw new Error(`Compilation target "${target}" is not yet implemented. Available targets: javascript`);
+        throw new Error(
+          `Compilation target "${target}" is not yet implemented. Available targets: javascript`
+        );
       }
-      
+
       const jsTarget = new JavaScriptTarget();
       return jsTarget.compileToExecutable(expr, {
         functions: options?.functions,
@@ -768,7 +770,7 @@ export abstract class _BoxedExpression implements BoxedExpression {
     return false;
   }
 
-  xcontains(_rhs: BoxedExpression): boolean | undefined {
+  contains(_rhs: BoxedExpression): boolean | undefined {
     return undefined;
   }
 
@@ -776,20 +778,20 @@ export abstract class _BoxedExpression implements BoxedExpression {
     return undefined;
   }
 
-  get xsize(): number | undefined {
+  get count(): number | undefined {
     return undefined;
   }
 
   get isEmptyCollection(): boolean | undefined {
     if (!this.isCollection) return undefined;
-    const count = this.xsize;
+    const count = this.count;
     if (count === undefined) return undefined;
     return count === 0;
   }
 
   get isFiniteCollection(): boolean | undefined {
     if (!this.isCollection) return undefined;
-    const count = this.xsize;
+    const count = this.count;
     if (count === undefined) return undefined;
     return Number.isFinite(count);
   }

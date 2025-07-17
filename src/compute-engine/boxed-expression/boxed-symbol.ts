@@ -704,16 +704,16 @@ export class BoxedSymbol extends _BoxedExpression {
     );
   }
 
-  xcontains(rhs: BoxedExpression): boolean | undefined {
+  contains(rhs: BoxedExpression): boolean | undefined {
     return (
       this._asCollection?.contains?.(this._value ?? this, rhs) ??
-      this._value?.xcontains?.(rhs)
+      this._value?.contains?.(rhs)
     );
   }
 
-  get xsize(): number {
+  get count(): number {
     return (
-      this._asCollection?.count(this._value ?? this) ?? this._value?.xsize ?? 0
+      this._asCollection?.count(this._value ?? this) ?? this._value?.count ?? 0
     );
   }
 
@@ -721,7 +721,7 @@ export class BoxedSymbol extends _BoxedExpression {
     return (
       this._asCollection?.isEmpty?.(this._value ?? this) ??
       this._value?.isEmptyCollection ??
-      this.xsize === 0
+      this.count === 0
     );
   }
 
@@ -729,7 +729,7 @@ export class BoxedSymbol extends _BoxedExpression {
     return (
       this._asCollection?.isFinite?.(this._value ?? this) ??
       this._value?.isFiniteCollection ??
-      isFinite(this.xsize)
+      isFinite(this.count)
     );
   }
 

@@ -1737,7 +1737,7 @@ export interface BoxedExpression {
    * Return `undefined` if the membership cannot be determined without
    * iterating over the collection.
    */
-  xcontains(rhs: BoxedExpression): boolean | undefined;
+  contains(rhs: BoxedExpression): boolean | undefined;
 
   /**
    * Check if this collection is a subset of another collection.
@@ -1757,7 +1757,7 @@ export interface BoxedExpression {
    * be determined without iterating over the collection.
    *
    */
-  get xsize(): number | undefined;
+  get count(): number | undefined;
 
   /** If this is a finite collection, return true. */
   isFiniteCollection: boolean | undefined;

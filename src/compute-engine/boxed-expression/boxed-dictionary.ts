@@ -42,7 +42,10 @@ export class BoxedDictionary
     if (keyValues instanceof _BoxedExpression) {
       this._initFromExpression(keyValues, options);
     } else {
-      this._initFromRecord(keyValues as Record<string, SemiBoxedExpression>, options);
+      this._initFromRecord(
+        keyValues as Record<string, SemiBoxedExpression>,
+        options
+      );
     }
   }
 
@@ -179,11 +182,11 @@ export class BoxedDictionary
     return false;
   }
 
-  xcontains(_rhs: BoxedExpression): boolean | undefined {
+  contains(_rhs: BoxedExpression): boolean | undefined {
     return undefined;
   }
 
-  get xsize(): number | undefined {
+  get count(): number | undefined {
     return Object.keys(this._keyValues).length;
   }
 

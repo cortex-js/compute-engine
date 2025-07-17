@@ -30,7 +30,7 @@ export const SETS_LIBRARY: SymbolDefinitions = {
     isConstant: true,
     wikidata: 'Q226183',
     description: 'The empty set, a set containing no elements.',
-    eq: (b) => b.type.matches('set') && b.xsize === 0,
+    eq: (b) => b.type.matches('set') && b.isEmptyCollection,
     collection: {
       iterator: () => ({
         next: () => ({ value: undefined, done: true }),
@@ -484,7 +484,7 @@ export const SETS_LIBRARY: SymbolDefinitions = {
     signature: '(value, collection) -> boolean',
     description: 'Test whether a value is an element of a collection.',
     evaluate: ([value, collection], { engine: ce }) => {
-      const result = collection.xcontains(value);
+      const result = collection.contains(value);
       if (result === true) return ce.True;
       if (result === false) return ce.False;
       return undefined;
@@ -496,7 +496,7 @@ export const SETS_LIBRARY: SymbolDefinitions = {
     signature: '(value, collection) -> boolean',
     description: 'Test whether a value is not an element of a collection.',
     evaluate: ([value, collection], { engine: ce }) => {
-      const result = collection.xcontains(value);
+      const result = collection.contains(value);
       if (result === true) return ce.False;
       if (result === false) return ce.True;
       return undefined;
@@ -617,13 +617,12 @@ export const SETS_LIBRARY: SymbolDefinitions = {
       contains: (expr, x) => {
         const [col, ...others] = expr.ops!;
         return (
-          (col.xcontains(x) ?? false) &&
-          others.every((set) => !set.xcontains(x))
+          (col.contains(x) ?? false) && others.every((set) => !set.contains(x))
         );
       },
       count: (expr) =>
         countMatchingElements(expr, (elem) =>
-          expr.ops!.slice(1).every((set) => !set.xcontains(elem))
+          expr.ops!.slice(1).every((set) => !set.contains(elem))
         ),
 
       iterator: complementIterator,
@@ -651,7 +650,7 @@ export const SETS_LIBRARY: SymbolDefinitions = {
       contains: containsAll,
       count: (expr) =>
         countMatchingElements(expr, (elem) =>
-          expr.ops!.slice(1).every((op) => op.xcontains(elem))
+          expr.ops!.slice(1).every((op) => op.contains(elem))
         ),
       iterator: intersectionIterator,
     },
@@ -681,10 +680,10 @@ export const SETS_LIBRARY: SymbolDefinitions = {
     // that is a union of collections with more than MAX_SIZE_EAGER_COLLECTION
     // elements. Otherwise, when we evaluated the union, we got a set literal.
     collection: {
-      contains: (col, x) => col.ops!.some((op) => op.xcontains(x)),
+      contains: (col, x) => col.ops!.some((op) => op.contains(x)),
       count: (col) =>
         countMatchingUnion(col, (elem, seen) =>
-          seen.every((e) => !e.xcontains(elem))
+          seen.every((e) => !e.contains(elem))
         ),
       isEmpty: (col) => col.ops!.every((op) => op.isEmptyCollection),
       isFinite: (col) => col.ops!.every((op) => op.isFiniteCollection),
@@ -702,7 +701,7 @@ export const SETS_LIBRARY: SymbolDefinitions = {
       contains: (expr, x) => {
         const [col, ...values] = expr.ops!;
         return (
-          (col.xcontains(x) ?? false) && !values.some((val) => val.isSame(x))
+          (col.contains(x) ?? false) && !values.some((val) => val.isSame(x))
         );
       },
       count: (expr) =>
@@ -724,15 +723,15 @@ export const SETS_LIBRARY: SymbolDefinitions = {
     collection: {
       contains: (expr, x) => {
         const [a, b] = expr.ops!;
-        const inA = a.xcontains(x) ?? false;
-        const inB = b.xcontains(x) ?? false;
+        const inA = a.contains(x) ?? false;
+        const inB = b.contains(x) ?? false;
         return (inA && !inB) || (!inA && inB);
       },
       count: (expr) =>
         countMatchingElements(expr, (elem) => {
           const [a, b] = expr.ops!;
-          const inA = a.xcontains(elem) ?? false;
-          const inB = b.xcontains(elem) ?? false;
+          const inA = a.contains(elem) ?? false;
+          const inB = b.contains(elem) ?? false;
           return (inA && !inB) || (!inA && inB);
         }),
       iterator: symmetricDifferenceIterator,
@@ -757,7 +756,7 @@ function union(
   // ops should be collections. If there are scalars, convert them to singleton sets
   const xs = ops.map((op) => (op.isCollection ? op : ce.function('Set', [op])));
 
-  const totalSize = xs.reduce((acc, op) => acc + (op.xsize ?? 0), 0);
+  const totalSize = xs.reduce((acc, op) => acc + (op.count ?? 0), 0);
   if (totalSize > MAX_SIZE_EAGER_COLLECTION) return ce._fn('Union', xs);
 
   // Keep only unique elements
@@ -887,7 +886,7 @@ function* unionIterator(
   const seen: BoxedExpression[] = [];
   for (const op of col.ops!) {
     for (const elem of op.each()) {
-      if (seen.every((e) => !e.xcontains(elem))) {
+      if (seen.every((e) => !e.contains(elem))) {
         yield elem;
       }
     }
@@ -910,7 +909,7 @@ function* complementIterator(
 ): Generator<BoxedExpression, undefined, any> {
   const [col, ...others] = expr.ops!;
   for (const elem of col.each()) {
-    if (others.every((set) => !set.xcontains(elem))) {
+    if (others.every((set) => !set.contains(elem))) {
       yield elem;
     }
   }
@@ -920,7 +919,7 @@ function* intersectionIterator(
   expr: BoxedExpression
 ): Generator<BoxedExpression, undefined, any> {
   for (const elem of expr.ops![0].each()) {
-    if (expr.ops!.slice(1).every((op) => op.xcontains(elem))) {
+    if (expr.ops!.slice(1).every((op) => op.contains(elem))) {
       yield elem;
     }
   }
@@ -930,12 +929,12 @@ function* symmetricDifferenceIterator(
 ): Generator<BoxedExpression, undefined, any> {
   const [a, b] = expr.ops!;
   for (const elem of a.each()) {
-    if (!(b.xcontains(elem) ?? false)) {
+    if (!(b.contains(elem) ?? false)) {
       yield elem;
     }
   }
   for (const elem of b.each()) {
-    if (!(a.xcontains(elem) ?? false)) {
+    if (!(a.contains(elem) ?? false)) {
       yield elem;
     }
   }
@@ -946,7 +945,7 @@ function countMatchingElements(
   expr: BoxedExpression,
   filter: (elem: BoxedExpression) => boolean
 ): number {
-  if (expr.ops!.some((op) => op.xsize === Infinity)) return Infinity;
+  if (expr.ops!.some((op) => op.count === Infinity)) return Infinity;
   let count = 0;
   for (const elem of expr.ops![0].each()) {
     if (filter(elem)) count += 1;
@@ -958,7 +957,7 @@ function countMatchingUnion(
   expr: BoxedExpression,
   isUnique: (elem: BoxedExpression, seen: BoxedExpression[]) => boolean
 ): number {
-  if (expr.ops!.some((op) => op.xsize === Infinity)) return Infinity;
+  if (expr.ops!.some((op) => op.count === Infinity)) return Infinity;
   const seen: BoxedExpression[] = [];
   let count = 0;
   for (const op of expr.ops!) {
@@ -971,5 +970,5 @@ function countMatchingUnion(
 }
 
 function containsAll(expr: BoxedExpression, x: BoxedExpression): boolean {
-  return expr.ops!.every((op) => op.xcontains(x) ?? false);
+  return expr.ops!.every((op) => op.contains(x) ?? false);
 }

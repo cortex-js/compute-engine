@@ -247,7 +247,7 @@ export class BoxedTensor<T extends TensorDataType> extends _BoxedExpression {
     return true;
   }
 
-  xcontains(other: BoxedExpression): boolean | undefined {
+  contains(other: BoxedExpression): boolean | undefined {
     if (['float64', 'float32', 'int32', 'uint8'].includes(this.tensor.dtype)) {
       type ElementType<T extends Tensor<any>> = T['dtype'];
       type DataType = DataTypeMap[ElementType<typeof this.tensor>];
@@ -261,7 +261,7 @@ export class BoxedTensor<T extends TensorDataType> extends _BoxedExpression {
     );
   }
 
-  get xsize(): number {
+  get count(): number {
     return this.tensor.shape.reduce((a, b) => a * b, 1);
   }
 
