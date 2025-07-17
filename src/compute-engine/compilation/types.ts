@@ -38,28 +38,28 @@ export type CompiledFunctions = {
 export interface CompileTarget {
   /** Get operator representation for the target language */
   operators?: (op: MathJsonSymbol) => [op: string, prec: number] | undefined;
-  
+
   /** Get function implementation for the target language */
   functions?: (id: MathJsonSymbol) => CompiledFunction | undefined;
-  
+
   /** Get variable representation for the target language */
   var: (id: MathJsonSymbol) => string | undefined;
-  
+
   /** Format string literals for the target language */
   string: (str: string) => string;
-  
+
   /** Format numeric literals for the target language */
   number: (n: number) => string;
-  
+
   /** Format whitespace for the target language */
   ws: (s?: string) => string;
-  
+
   /** Code to be inserted at the beginning of the compiled output */
   preamble: string;
-  
+
   /** Current indentation level */
   indent: number;
-  
+
   /** Target language identifier (for debugging/logging) */
   language?: string;
 }
@@ -70,13 +70,13 @@ export interface CompileTarget {
 export interface LanguageTarget {
   /** Get the default operators for this language */
   getOperators(): CompiledOperators;
-  
+
   /** Get the default functions for this language */
   getFunctions(): CompiledFunctions;
-  
+
   /** Create a CompileTarget for this language */
   createTarget(options?: Partial<CompileTarget>): CompileTarget;
-  
+
   /** Compile an expression to executable code in this language */
   compileToExecutable(
     expr: BoxedExpression,
@@ -90,13 +90,13 @@ export interface LanguageTarget {
 export interface CompilationOptions {
   /** Custom function implementations */
   functions?: Record<MathJsonSymbol, TargetSource | Function>;
-  
+
   /** Variable bindings */
   vars?: Record<MathJsonSymbol, TargetSource>;
-  
+
   /** Additional imports/libraries to include */
   imports?: unknown[];
-  
+
   /** Additional preamble code */
   preamble?: string;
 }
@@ -107,10 +107,10 @@ export interface CompilationOptions {
 export interface CompiledExecutable {
   /** Execute the compiled code */
   (...args: any[]): any;
-  
+
   /** Get the source code */
   toString(): string;
-  
+
   /** Flag indicating this is a compiled expression */
   isCompiled: true;
 }
