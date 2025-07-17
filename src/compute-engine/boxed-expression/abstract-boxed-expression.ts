@@ -259,7 +259,7 @@ export abstract class _BoxedExpression implements BoxedExpression {
   ): Expression {
     const defaultOptions: JsonSerializationOptions = {
       exclude: [],
-      shorthands: ['function', 'symbol', 'string', 'number'],
+      shorthands: ['function', 'symbol', 'string', 'number', 'dictionary'],
       metadata: [],
       fractionalDigits: 'max',
       repeatingDecimal: true,
@@ -272,7 +272,13 @@ export abstract class _BoxedExpression implements BoxedExpression {
           options.shorthands === 'all') ||
         options.shorthands?.includes('all')
       ) {
-        defaultOptions.shorthands = ['function', 'symbol', 'string', 'number'];
+        defaultOptions.shorthands = [
+          'function',
+          'symbol',
+          'string',
+          'number',
+          'dictionary',
+        ];
       }
       // if (options.shorthands?.includes('none')) defaultOptions.shorthands = [];
       if (Array.isArray(options.shorthands))

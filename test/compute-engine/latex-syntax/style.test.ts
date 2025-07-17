@@ -9,11 +9,7 @@ describe('STYLE - MATH MODE', () => {
         "x",
         [
           "Subtract",
-          [
-            "Annotated",
-            ["Add", "y", 1],
-            ["Dictionary", {dict: {color: "red"}}]
-          ],
+          ["Annotated", ["Add", "y", 1], {dict: {color: "red"}}],
           "z"
         ]
       ]
@@ -53,7 +49,7 @@ describe('STYLE - TEXT MODE', () => {
               ["Error", "unexpected-closing-delimiter", ["LatexString", "}"]],
               "b"
             ],
-            ["Dictionary", {dict: {color: "red"}}]
+            {dict: {color: "red"}}
           ],
           " black "
         ]
@@ -68,8 +64,8 @@ describe('STYLE - TEXT MODE', () => {
         [
           "Text",
           " black ",
-          ["Annotated", "'RED'", ["Dictionary", {dict: {color: "red"}}]],
-          ["Annotated", "'BLUE'", ["Dictionary", {dict: {color: "blue"}}]]
+          ["Annotated", "'RED'", {dict: {color: "red"}}],
+          ["Annotated", "'BLUE'", {dict: {color: "blue"}}]
         ],
         "b"
       ]
@@ -79,8 +75,8 @@ describe('STYLE - TEXT MODE', () => {
         [
           "Text",
           " black ",
-          ["Annotated", "'RED'", ["Dictionary", {dict: {color: "red"}}]],
-          ["Annotated", "'BLUE'", ["Dictionary", {dict: {color: "blue"}}]]
+          ["Annotated", "'RED'", {dict: {color: "red"}}],
+          ["Annotated", "'BLUE'", {dict: {color: "blue"}}]
         ],
         "b"
       ]
@@ -108,7 +104,7 @@ describe('STYLE - TEXT MODE', () => {
               ["Error", "unexpected-closing-delimiter", ["LatexString", "}"]],
               "b"
             ],
-            ["Dictionary", {dict: {color: "red"}}]
+            {dict: {color: "red"}}
           ],
           " black "
         ]
@@ -123,13 +119,9 @@ describe('STYLE - TEXT MODE', () => {
       invalid   =[
         "Text",
         " abc ",
-        ["Annotated", " b ", ["Dictionary", {dict: {color: "blue"}}]],
-        ["Annotated", " y ", ["Dictionary", {dict: {color: "yellow"}}]],
-        [
-          "Text",
-          "y ",
-          ["Annotated", " g", ["Dictionary", {dict: {color: "green"}}]]
-        ],
+        ["Annotated", " b ", {dict: {color: "blue"}}],
+        ["Annotated", " y ", {dict: {color: "yellow"}}],
+        ["Text", "y ", ["Annotated", " g", {dict: {color: "green"}}]],
         [
           "Annotated",
           [
@@ -138,7 +130,7 @@ describe('STYLE - TEXT MODE', () => {
             "g",
             ["Error", "unexpected-closing-delimiter", ["LatexString", "}"]]
           ],
-          ["Dictionary", {dict: {color: "red"}}]
+          {dict: {color: "red"}}
         ],
         " "
       ]

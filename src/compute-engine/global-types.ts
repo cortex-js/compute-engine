@@ -1876,7 +1876,14 @@ export type JsonSerializationOptions = {
    *
    * **Default**: `["all"]`
    */
-  shorthands: ('all' | 'number' | 'symbol' | 'function' | 'string')[];
+  shorthands: (
+    | 'all'
+    | 'number'
+    | 'symbol'
+    | 'function'
+    | 'string'
+    | 'dictionary'
+  )[];
 
   /** A list of space separated keywords indicating which metadata should be
    * included in the MathJSON. If metadata is included, shorthand notation

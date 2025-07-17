@@ -117,8 +117,16 @@ export type MathJsonFunctionObject = {
 } & MathJsonAttributes;
 
 /** @category MathJSON */
+export type DictionaryValue =
+  | boolean
+  | number
+  | string
+  | ExpressionObject
+  | ReadonlyArray<DictionaryValue>;
+
+/** @category MathJSON */
 export type MathJsonDictionaryObject = {
-  dict: Record<string, Expression>;
+  dict: Record<string, DictionaryValue>;
 } & MathJsonAttributes;
 
 /**

@@ -6,6 +6,7 @@ import type {
   MathJsonStringObject,
   MathJsonSymbol,
   MathJsonDictionaryObject,
+  DictionaryValue,
 } from './types';
 
 export const MISSING: Expression = ['Error', "'missing'"];
@@ -200,7 +201,7 @@ export function dictionaryFromExpression(
     for (let i = 1; i < nops(expr); i++) {
       const kv = keyValuePair(ops[i]);
       if (kv) {
-        dict[kv[0]] = expressionToJsValue(kv[1]) ?? 'Nothing';
+        dict[kv[0]] = expressionToDictionaryValue(kv[1]) ?? 'Nothing';
       }
     }
 
@@ -505,7 +506,9 @@ function jsValueToExpression(v: any): Expression | null {
   return null;
 }
 
-function expressionToJsValue(expr: Expression | null | undefined): any {
+function expressionToDictionaryValue(
+  expr: Expression | null | undefined
+): DictionaryValue | null {
   if (expr === null || expr === undefined) return null;
   if (isStringObject(expr)) return expr.str;
   if (isNumberObject(expr)) return parseFloat(expr.num);
@@ -513,17 +516,7 @@ function expressionToJsValue(expr: Expression | null | undefined): any {
 
   if (typeof expr === 'string' || typeof expr === 'number') return expr;
 
-  if (Array.isArray(expr)) {
-    return expr.map((x) => expressionToJsValue(x));
-  }
+  if (Array.isArray(expr)) return { fn: expr } as MathJsonFunctionObject;
 
-  if (isDictionaryObject(expr)) {
-    const result: Record<string, any> = {};
-    for (const key in expr.dict) {
-      result[key] = expressionToJsValue(expr.dict[key]);
-    }
-    return result;
-  }
-
-  return null;
+  return expr;
 }

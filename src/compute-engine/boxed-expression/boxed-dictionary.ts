@@ -4,15 +4,15 @@ import type {
   BoxedSubstitution,
   ComputeEngine,
   Metadata,
-  SemiBoxedExpression,
   DictionaryInterface,
+  JsonSerializationOptions,
 } from '../global-types';
 
 import { _BoxedExpression } from './abstract-boxed-expression';
 import { hashCode } from './utils';
 import { isWildcard, wildcardName } from './boxed-patterns';
 import { BoxedType } from '../../common/type/boxed-type';
-import { Expression } from '../../math-json/types';
+import { DictionaryValue, Expression } from '../../math-json/types';
 import { widen } from '../../common/type/utils';
 
 /**
@@ -28,9 +28,10 @@ export class BoxedDictionary
   private readonly _keyValues: Record<string, BoxedExpression> = {};
   private _type: BoxedType | undefined;
 
+  /** The input to the constructor is either a ["Dictionary", ["KeyValuePair", ..., ...], ...] expression or a record of key-value pairs */
   constructor(
     ce: ComputeEngine,
-    keyValues: Record<string, SemiBoxedExpression> | BoxedExpression,
+    keyValues: Record<string, DictionaryValue> | BoxedExpression,
     options?: {
       metadata?: Metadata;
       canonical?: boolean;
@@ -38,19 +39,18 @@ export class BoxedDictionary
   ) {
     super(ce, options?.metadata);
 
-    // Handle different input types for canonical form support
     if (keyValues instanceof _BoxedExpression) {
       this._initFromExpression(keyValues, options);
     } else {
       this._initFromRecord(
-        keyValues as Record<string, SemiBoxedExpression>,
+        keyValues as Record<string, DictionaryValue>,
         options
       );
     }
   }
 
   private _initFromRecord(
-    keyValues: Record<string, SemiBoxedExpression>,
+    keyValues: Record<string, DictionaryValue>,
     options?: { canonical?: boolean }
   ) {
     for (const key in keyValues) {
@@ -61,11 +61,11 @@ export class BoxedDictionary
       }
       if (key.length === 0)
         throw new Error('Dictionary keys must not be empty strings');
-      if (keyValues[key] instanceof _BoxedExpression) {
-        this._keyValues[key] = keyValues[key];
-      } else {
-        this._keyValues[key] = this.engine.box(keyValues[key], options);
-      }
+      this._keyValues[key] = dictionaryValueToBoxedExpression(
+        this.engine,
+        keyValues[key],
+        options
+      );
     }
   }
 
@@ -124,14 +124,28 @@ export class BoxedDictionary
   }
 
   get json(): Expression {
-    return [
-      'Dictionary',
-      {
-        dict: Object.fromEntries(
-          Object.entries(this._keyValues).map(([k, v]) => [k, v.json])
-        ),
-      },
-    ];
+    return {
+      dict: Object.fromEntries(
+        Object.entries(this._keyValues).map(([k, v]) => [
+          k,
+          boxedExpressionToDictionaryValue(v),
+        ])
+      ),
+    };
+  }
+
+  toMathJson(options: Readonly<JsonSerializationOptions>): Expression {
+    if (options.shorthands.includes('dictionary')) {
+      const result = this.json;
+      return result;
+    }
+    if (this.isEmptyCollection) return { dict: {} };
+
+    const result: Record<string, Expression> = {};
+    for (const [key, value] of this.entries)
+      result[key] = value.toMathJson(options);
+
+    return { dict: result };
   }
 
   get hash(): number {
@@ -251,4 +265,48 @@ export class BoxedDictionary
     }
     return result;
   }
+}
+
+function boxedExpressionToDictionaryValue(
+  value: BoxedExpression
+): DictionaryValue {
+  if (value.string) return value.string;
+  if (value.symbol === 'True') return true;
+  if (value.symbol === 'False') return false;
+  if (value.symbol) return { sym: value.symbol };
+
+  if (value.numericValue !== null && value.type.matches('real'))
+    return value.re;
+
+  if (value.operator === 'List')
+    return value.ops!.map(boxedExpressionToDictionaryValue);
+
+  return value.toMathJson({ shorthands: [] });
+}
+
+function dictionaryValueToBoxedExpression(
+  ce: ComputeEngine,
+  value: DictionaryValue | null | undefined,
+  options?: { canonical?: boolean }
+): BoxedExpression {
+  if (value === null || value === undefined) return ce.Nothing;
+  if (value instanceof _BoxedExpression) return value;
+  if (typeof value === 'string') return ce.string(value);
+  if (typeof value === 'number') return ce.number(value, options);
+  if (typeof value === 'boolean') return value ? ce.True : ce.False;
+
+  if (Array.isArray(value)) {
+    return ce.function(
+      'List',
+      value.map((x) => dictionaryValueToBoxedExpression(ce, x, options))
+    );
+  }
+  if (typeof value === 'object') {
+    if ('num' in value) return ce.number(value.num, options);
+    if ('str' in value) return ce.string(value.str);
+    if ('sym' in value) return ce.symbol(value.sym, options);
+    if ('fn' in value) return ce.box(value, options);
+    if ('dict' in value) return new BoxedDictionary(ce, value.dict, options);
+  }
+  return ce.Nothing;
 }

@@ -5,6 +5,8 @@
 - The `[Length]` function has been renamed to `[Count]`.
 - The `xsize` property of collections has been renamed to `count`.
 - The `xcontains()` method of collections has been renamed to `contains()`.
+- Handling of dictionaries (`["Dictionary"] expressions and `{dict:...}`
+  shorthand) has been improved. shorthand) has been improved.
 
 ## 0.30.2 _2025-07-15_
 

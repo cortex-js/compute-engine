@@ -845,6 +845,9 @@ export function serializeJson(
   // Is it a tensor?
   if (expr.rank > 0) return expr.json;
 
+  // Is it a dictionary?
+  if (expr.type.matches('dictionary')) return expr.toMathJson(options);
+
   // Is it a string?
   if (expr.string !== null) return serializeJsonString(expr.string, options);
 
