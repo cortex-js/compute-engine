@@ -6,7 +6,7 @@ import type {
 
 import { permutations } from '../../common/utils';
 
-import { isWildcard, wildcardName } from './boxed-patterns';
+import { isWildcard, wildcardName, wildcardType } from './boxed-patterns';
 import { isOperatorDef } from './utils';
 
 function hasWildcards(expr: string | BoxedExpression): boolean {
@@ -306,7 +306,33 @@ function matchPermutation(
   options: PatternMatchOptions
 ): BoxedSubstitution | null {
   console.assert(expr.operator === pattern.operator);
-  const patterns = permutations<BoxedExpression>(pattern.ops!);
+
+  // Avoid redundant permutations:
+  // This condition ensures various wildcard sub-permutations - namely a sequence followed by
+  // another sequence or universal, are skipped.
+  // ›Consequently, a pattern such as `['Add', 1, 2, '__a', 4, '__b', 7, '_']`, notably with only 3
+  // non-optional wildcards, yields only *2040* permutations, in contrast to *5040* (i.e. 7!).
+  //!@todo:
+  // - Further optimizations certainly possible here...: consider sub-sequences of expressions with
+  // same values (particularly number/symbol literals). At an extreme, consider ['Add', 1, 1, 1,
+  // 1, 1]. Such a check would reduce permutations from 120 to 1.
+  // - ^Another, may be the req. of a matching qty. of operands (with expr.), in the case of no
+  // sequence wildcards in pattern.
+  const cond = (
+    xs: ReadonlyArray<BoxedExpression> /* , generated: Set<string> */
+  ) =>
+    !xs.some(
+      (x, index) =>
+        isWildcard(x) &&
+        wildcardType(x) === 'Sequence' &&
+        xs[index + 1] &&
+        isWildcard(xs[index + 1]) &&
+        (wildcardType(xs[index + 1]) === 'Wildcard' ||
+          wildcardType(xs[index + 1]) === 'Sequence')
+    );
+
+  const patterns = permutations(pattern.ops!, cond);
+
   for (const pat of patterns) {
     const result = matchArguments(expr, pat, substitution, options);
     if (result !== null) return result;
