@@ -43,13 +43,12 @@
   "exports": {
     ".": {
       "types": "./dist/types/compute-engine.d.ts",
-      "browser": "./dist/compute-engine.min.umd.js",
       "import": "./dist/compute-engine.min.esm.js",
       "require": "./dist/compute-engine.min.umd.js",
       "default": "./dist/compute-engine.min.esm.js"
     }
   },
-  "main": "./dist/compute-engine.min.umd.js",
+  "main": "./dist/compute-engine.min.esm.js",
   "module": "./dist/compute-engine.min.esm.js",
   "browser": "./dist/compute-engine.min.umd.js",
   "unpkg": "./dist/compute-engine.min.umd.js",
