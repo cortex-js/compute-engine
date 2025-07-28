@@ -355,11 +355,11 @@ describe('Signature Type Parser Tests', () => {
   it('should throw parsing a function signature with variadic arguments and no parens', () => {
     expect(() => parseType('string+ -> boolean'))
       .toThrowErrorMatchingInlineSnapshot(`
-      "
+      "Failed to parse type "string+ -> boolean": 
       Invalid type
       |   string+ -> boolean
-      |          ^
-      |   
+      |         ^
+      |
       |   Function signatures must be enclosed in parentheses
       |   For example \`(x: number) -> number\`
       "
@@ -368,11 +368,11 @@ describe('Signature Type Parser Tests', () => {
   it('should throw function signature with single argument and no parens', () => {
     expect(() => parseType('string -> boolean'))
       .toThrowErrorMatchingInlineSnapshot(`
-      "
+      "Failed to parse type "string -> boolean": 
       Invalid type
       |   string -> boolean
-      |            ^
-      |   
+      |          ^
+      |
       |   Function signatures must be enclosed in parentheses
       |   For example \`(x: number) -> number\`
       "
@@ -384,25 +384,23 @@ describe('Negative Type Parser Tests', () => {
   it('should throw an error for tuple expression with some named elements, but not all named elements', () => {
     expect(() => parseType('tuple<integer, second: boolean>'))
       .toThrowErrorMatchingInlineSnapshot(`
-      "
+      "Failed to parse type "tuple<integer, second: boolean>": 
       Invalid type
       |   tuple<integer, second: boolean>
-      |                 ^
-      |   
-      |   All tuple elements should be named, or none.
-      |   Previous elements were not named, but this one is.
+      |                                 ^
+      |
+      |   All tuple elements should be named, or none. Previous elements were not named, but this one is.
       "
     `);
 
     expect(() => parseType('tuple<first: integer, boolean>'))
       .toThrowErrorMatchingInlineSnapshot(`
-      "
+      "Failed to parse type "tuple<first: integer, boolean>": 
       Invalid type
       |   tuple<first: integer, boolean>
-      |                        ^
-      |   
-      |   All tuple elements should be named, or none.
-      |   Previous elements were named, but this one isn't.
+      |                                ^
+      |
+      |   All tuple elements should be named, or none. Previous elements were named, but this one isn't.
       "
     `);
   });
@@ -410,11 +408,11 @@ describe('Negative Type Parser Tests', () => {
   it('should throw an error for function signature with optional and variadic arguments', () => {
     expect(() => parseType('(x: integer, y: boolean?, z: string*) -> boolean'))
       .toThrowErrorMatchingInlineSnapshot(`
-      "
+      "Failed to parse type "(x: integer, y: boolean?, z: string*) -> boolean": 
       Invalid type
       |   (x: integer, y: boolean?, z: string*) -> boolean
-      |                                       ^
-      |   
+      |                                                   ^
+      |
       |   Variadic arguments cannot be used with optional arguments
       "
     `);
@@ -422,11 +420,12 @@ describe('Negative Type Parser Tests', () => {
 
   it('should throw an error for unknown or misspelled primitive types', () => {
     expect(() => parseType('foo')).toThrowErrorMatchingInlineSnapshot(`
-      "
+      "Failed to parse type "foo": 
       Invalid type
       |   foo
-      |      ^
-      |   
+      |   ^
+      |
+      |   Unknown type "foo"
       |   Syntax error. The type was not recognized.
       "
     `);
@@ -435,23 +434,24 @@ describe('Negative Type Parser Tests', () => {
   it('should throw an error for unknown or misspelled primitive types in a function signature', () => {
     expect(() => parseType('(x: integer, foo) -> boolean'))
       .toThrowErrorMatchingInlineSnapshot(`
-      "
+      "Failed to parse type "(x: integer, foo) -> boolean": 
       Invalid type
       |   (x: integer, foo) -> boolean
-      |               ^
-      |   
-      |   Expected a valid argument after ","
+      |                ^
+      |
+      |   Unknown type "foo"
+      |   Syntax error. The type was not recognized.
       "
     `);
   });
 
   it('should throw an error for invalid set syntax', () => {
     expect(() => parseType('set(integer)')).toThrowErrorMatchingInlineSnapshot(`
-      "
+      "Failed to parse type "set(integer)": 
       Invalid type
       |   set(integer)
-      |              ^
-      |   
+      |      ^
+      |
       |   Use \`set<integer>\` instead of \`set(integer)\`.
       "
     `);
@@ -460,11 +460,11 @@ describe('Negative Type Parser Tests', () => {
   it('should throw an error for invalid collection syntax', () => {
     expect(() => parseType('collection(integer)'))
       .toThrowErrorMatchingInlineSnapshot(`
-      "
+      "Failed to parse type "collection(integer)": 
       Invalid type
       |   collection(integer)
-      |              ^
-      |   
+      |             ^
+      |
       |   Use \`collection<type>\` instead of \`collection(type)\`.
       |   For example \`collection<number>\`
       "
@@ -473,12 +473,12 @@ describe('Negative Type Parser Tests', () => {
 
   it('should throw an error for invalid type syntax', () => {
     expect(() => parseType('integer | ')).toThrowErrorMatchingInlineSnapshot(`
-      "
+      "Failed to parse type "integer | ": 
       Invalid type
       |   integer | 
       |             ^
-      |   
-      |   Unexpected end of input
+      |
+      |   Expected type after |
       "
     `);
   });
@@ -486,12 +486,12 @@ describe('Negative Type Parser Tests', () => {
   it('should throw an error for mismatched parentheses', () => {
     expect(() => parseType('(integer | boolean'))
       .toThrowErrorMatchingInlineSnapshot(`
-      "
+      "Failed to parse type "(integer | boolean": 
       Invalid type
       |   (integer | boolean
       |                     ^
-      |   
-      |   Expected a closing parenthesis \`)\` after arguments.
+      |
+      |   Expected ), got EOF
       "
     `);
   });
@@ -499,12 +499,12 @@ describe('Negative Type Parser Tests', () => {
   it('should throw an error for invalid union and intersection combination', () => {
     expect(() => parseType('integer & | boolean'))
       .toThrowErrorMatchingInlineSnapshot(`
-      "
+      "Failed to parse type "integer & | boolean": 
       Invalid type
       |   integer & | boolean
       |             ^
-      |   
-      |   Unexpected token"
+      |
+      |   Expected type after &
       "
     `);
   });
@@ -512,13 +512,12 @@ describe('Negative Type Parser Tests', () => {
   it('should throw an error for invalid collection dimension syntax', () => {
     expect(() => parseType('list<integer^2x>'))
       .toThrowErrorMatchingInlineSnapshot(`
-      "
+      "Failed to parse type "list<integer^2x>": 
       Invalid type
       |   list<integer^2x>
-      |                  ^
-      |   
-      |   Expected a positive integer literal or \`?\`.
-      |   For example : \`matrix<integer^2x3>\` or \`matrix<integer^?x?>\`
+      |                 ^
+      |
+      |   Expected a positive integer literal or \`?\` after x. For example: \`2x3\` or \`2x?\`
       "
     `);
   });
@@ -526,13 +525,13 @@ describe('Negative Type Parser Tests', () => {
   it('should throw an error for function signature with named variadic arguments and no parens', () => {
     expect(() => parseType('z: string* -> boolean'))
       .toThrowErrorMatchingInlineSnapshot(`
-      "
+      "Failed to parse type "z: string* -> boolean": 
       Invalid type
       |   z: string* -> boolean
-      |     ^
-      |   
+      |   ^
+      |
       |   Function signatures must be enclosed in parentheses
-      |   For example \`(x: number) -> number\`
+      |   For example \`(z: string*) -> boolean\`
       "
     `);
   });
@@ -540,13 +539,13 @@ describe('Negative Type Parser Tests', () => {
   it('should throw an error for function signature with named argument and no parens', () => {
     expect(() => parseType('z: string -> boolean'))
       .toThrowErrorMatchingInlineSnapshot(`
-      "
+      "Failed to parse type "z: string -> boolean": 
       Invalid type
       |   z: string -> boolean
-      |     ^
-      |   
+      |   ^
+      |
       |   Function signatures must be enclosed in parentheses
-      |   For example \`(x: number) -> number\`
+      |   For example \`(z: string*) -> boolean\`
       "
     `);
   });
@@ -554,13 +553,12 @@ describe('Negative Type Parser Tests', () => {
   it('should throw an error for missing function return type', () => {
     expect(() => parseType('(x: integer) -> '))
       .toThrowErrorMatchingInlineSnapshot(`
-      "
+      "Failed to parse type "(x: integer) -> ": 
       Invalid type
       |   (x: integer) -> 
       |                   ^
-      |   
-      |   Expected a return type after \`->\`.
-      |   Use \`any\` for any type or \`nothing\` for no return value, or \`never\` for a function that never returns
+      |
+      |   Expected return type after ->
       "
     `);
   });
@@ -568,12 +566,12 @@ describe('Negative Type Parser Tests', () => {
   it('should throw an error for invalid tuple syntax', () => {
     expect(() => parseType('tuple<integer, boolean, >'))
       .toThrowErrorMatchingInlineSnapshot(`
-      "
+      "Failed to parse type "tuple<integer, boolean, >": 
       Invalid type
       |   tuple<integer, boolean, >
-      |                          ^
-      |   
-      |   Expected a type or unexpected comma
+      |                           ^
+      |
+      |   Expected tuple element
       "
     `);
   });
@@ -581,11 +579,11 @@ describe('Negative Type Parser Tests', () => {
   it('should throw an error for invalid function signature with multiple variadic arguments', () => {
     expect(() => parseType('(x: integer, y: string*, z: string*) -> boolean'))
       .toThrowErrorMatchingInlineSnapshot(`
-      "
+      "Failed to parse type "(x: integer, y: string*, z: string*) -> boolean": 
       Invalid type
       |   (x: integer, y: string*, z: string*) -> boolean
-      |                                      ^
-      |   
+      |                                                  ^
+      |
       |   There can be only one variadic argument
       "
     `);

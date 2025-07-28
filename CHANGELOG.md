@@ -6,7 +6,12 @@
 - The `xsize` property of collections has been renamed to `count`.
 - The `xcontains()` method of collections has been renamed to `contains()`.
 - Handling of dictionaries (`["Dictionary"] expressions and `{dict:...}`
-  shorthand) has been improved. shorthand) has been improved.
+  shorthand) has been improved.
+
+## New Features and Improvements
+
+- Refactored the type parser to use a modular architecture. This allows for
+  better extensibility and maintainability of the type system.
 
 ## 0.30.2 _2025-07-15_
 

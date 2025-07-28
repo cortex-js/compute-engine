@@ -304,20 +304,20 @@ export const DEFINITIONS_OTHERS: LatexDictionary = [
       let result = serializer.serialize(operand(expr, 1));
 
       const dict = dictionaryFromExpression(operand(expr, 2));
-      if (dict === null) return result;
+      if (dict === null || dict === undefined) return result;
 
       //
       // Display: "math style"
       //
-      if (stringValue(dict.dict.mathStyle) === 'normal')
+      if (dict.dict.mathStyle === 'normal')
         result = joinLatex(['{\\displaystyle', result, '}']);
-      else if (stringValue(dict.dict.mathStyle) === 'compact')
+      else if (dict.dict.mathStyle === 'compact')
         result = joinLatex(['{\\textstyle', result, '}']);
 
       //
       // Font Size
       //
-      const v = machineValue(dict.dict.size);
+      const v = dict.dict.size as number;
       if (v !== null && v >= 1 && v <= 10) {
         result = joinLatex([
           '{',

@@ -11,7 +11,131 @@ import { PRIMITIVE_TYPES } from './primitive';
 import { typeToString } from './serialize';
 import { isValidType } from './utils';
 import { fuzzyStringMatch } from '../fuzzy-string-match';
+import { Parser } from './parser';
+import { buildTypeFromAST } from './type-builder';
 
+/**
+ * BNF grammar for the type parser:
+ * 
+<type> ::= <union_type>
+         | <function_signature>
+
+<union_type> ::= <intersection_type> ( " | " <intersection_type> )*
+
+<intersection_type> ::= <primary_type_with_negation> ( " & " <primary_type_with_negation> )*
+
+<primary_type_with_negation> ::= ( "!" )? <primary_type>
+
+<primary_type> ::= <group>
+                 | <list_type>
+                 | <tuple_type>
+                 | <record_type>
+                 | <dictionary_type>
+                 | <set_type>
+                 | <collection_type>
+                 | <expression_type>
+                 | <symbol_type>
+                 | <numeric_type>
+                 | <primitive_type>
+                 | <value>
+                 | <type_reference>
+
+<group> ::= "(" <type> ")"
+
+(* --- Function Signatures --- *)
+
+<function_signature> ::= <arguments> " -> " <type>
+
+<arguments> ::= "()"
+              | "(" <argument_list>? ")"
+
+(* Note: The parser enforces a semantic rule: required arguments must come before optional and variadic arguments. *)
+<argument_list> ::= <argument_specifier> ( "," <argument_specifier> )*
+
+<argument_specifier> ::= <named_element> ( "?" | "*" | "+" )?
+
+<named_element> ::= ( <name> ":" )? <type>
+
+<name> ::= <identifier> | <verbatim_string>
+
+
+(* --- Collection-like Types --- *)
+
+<list_type> ::= "list" ( "<" <type> ( "^" <dimensions> )? ">" )?
+              | "vector" ( "<" ( <type> ("^" <dimension_specifier>)? | <dimensions> ) ">" )?
+              | "matrix" ( "<" ( <type> ("^" <dimensions>)? | <dimensions> ) ">" )?
+              | "tensor" ( "<" <type> ">" )?
+
+<dimensions> ::= <dimension_specifier> ( "x" <dimension_specifier> )*
+               | "(" <dimension_specifier> ( "x" <dimension_specifier> )* ")"
+
+<dimension_specifier> ::= <positive_integer_literal> | "?"
+
+<tuple_type> ::= "tuple<" ( <named_element> ( "," <named_element> )* )? ">"
+
+<record_type> ::= "record"
+                | "record<" <record_element> ( "," <record_element> )* ">"
+
+<record_element> ::= <key> ":" <type>
+
+<key> ::= <identifier> | <verbatim_string>
+
+<dictionary_type> ::= "dictionary"
+                    | "dictionary<" <type> ">"
+
+<set_type> ::= "set"
+             | "set<" <type> ">"
+
+<collection_type> ::= ( "collection" | "indexed_collection" ) ( "<" <type> ">" )?
+
+
+(* --- Other Constructed Types --- *)
+
+<expression_type> ::= "expression<" <identifier> ">"
+
+<symbol_type> ::= "symbol<" <identifier> ">"
+
+<numeric_type> ::= <numeric_primitive> "<" <bound> ".." <bound> ">"
+
+<bound> ::= <number_literal> | "-oo" | "oo" | ""
+
+
+(* --- Atomic and Primitive Types --- *)
+
+<type_reference> ::= ( "type" )? <identifier>
+
+<value> ::= <string_literal>
+          | <number_literal>
+          | "true" | "false"
+          | "nan" | "infinity" | "+infinity" | "oo" | "∞" | "+oo" | "+∞"
+          | "-infinity" | "-oo" | "-∞"
+
+<primitive_type> ::= <numeric_primitive>
+                   | "any" | "unknown" | "nothing" | "never" | "error"
+                   | "expression" | "symbol" | "function" | "value"
+                   | "scalar" | "boolean" | "string"
+                   | "collection" | "indexed_collection" | "list" | "tuple"
+                   | "set" | "record" | "dictionary"
+
+<numeric_primitive> ::= "number" | "finite_number" | "complex" | "finite_complex"
+                      | "imaginary" | "real" | "finite_real" | "rational"
+                      | "finite_rational" | "integer" | "finite_integer"
+                      | "non_finite_number"
+
+
+(* --- Terminals (Lexical Tokens) --- *)
+
+<identifier> ::= [a-zA-Z_][a-zA-Z0-9_]*
+
+<verbatim_string> ::= "`" ( [^`] | "\`" | "\\" )* "`"
+
+<positive_integer_literal> ::= [1-9][0-9]*
+
+<number_literal> ::= (* As parsed by the valueParser, including integers, decimals, and scientific notation *)
+
+<string_literal> ::= '"' ( [^"] | '\"' )* '"'
+ * 
+ */
 class TypeParser {
   buffer: string;
   pos: number;
@@ -1271,8 +1395,23 @@ export function parseType(
 
   // Parse the type string
   if (typeof s !== 'string') return undefined;
-  const parser = new TypeParser(s, { valueParser, typeResolver });
-  return parser.parse();
+
+  // For now, use the original parser for compatibility
+  // The new modular architecture is available but not used by default
+  // const parser = new TypeParser(s, { valueParser, typeResolver });
+  // return parser.parse();
+
+  // Use the new modular parser
+  try {
+    const parser = new Parser(s, { typeResolver });
+    const ast = parser.parseType();
+    const type = buildTypeFromAST(ast, typeResolver);
+    return type;
+  } catch (error) {
+    throw new Error(
+      `Failed to parse type "${s}": ${error instanceof Error ? error.message : String(error)}`
+    );
+  }
 }
 
 function checkDuplicateNames(elements: NamedElement[]): string {
@@ -1287,6 +1426,9 @@ function checkDuplicateNames(elements: NamedElement[]): string {
 
   return '';
 }
+
+// Temporarily export TypeParser for benchmarking
+export { TypeParser };
 
 function formatKey(key: string): string {
   // If the key includes non-alphanumeric characters, we need to use backticks
