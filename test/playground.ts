@@ -6,6 +6,9 @@ import { parseCortex } from '../src/cortex';
 
 const ce = new ComputeEngine();
 const engine = ce;
+
+console.log(ce.box(1 / 7000000).toLatex({ notation: 'auto' }));
+
 // ce.latexDictionary = [
 //   ...ce.latexDictionary,
 //   {

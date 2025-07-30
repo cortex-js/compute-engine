@@ -9,6 +9,7 @@ import {
   ArrayType,
   UnionType,
   IntersectionType,
+  i18n,
 } from 'typedoc';
 
 import { MarkdownTheme, MarkdownThemeContext } from 'typedoc-plugin-markdown';
@@ -157,7 +158,11 @@ class GrokThemeRenderContext extends MarkdownThemeContext {
             } else {
               if (model.groups?.length) {
                 model.groups.forEach((group, i) => {
-                  if (group.allChildrenHaveOwnDocument()) {
+                  if (
+                    group.children.every((child) =>
+                      this.router.hasOwnDocument(child)
+                    )
+                  ) {
                     md.push(heading(options.headingLevel, group.title));
                     md.push(this.partials.groupIndex(group));
                   } else {
@@ -192,6 +197,7 @@ class GrokThemeRenderContext extends MarkdownThemeContext {
        * i.e. all the methods, all the properties, etc...
        *
        * From src/theme/context/partials/container.groups.ts
+       * (https://github.com/typedoc2md/typedoc-plugin-markdown/blob/main/packages/typedoc-plugin-markdown/src/theme/context/partials/container.groups.ts)
        *
        */
       groups: (model, options) => {
@@ -202,16 +208,16 @@ class GrokThemeRenderContext extends MarkdownThemeContext {
 
         model.groups?.forEach((group) => {
           if (
-            group.title === this.i18n.kind_plural_module() ||
-            group.allChildrenHaveOwnDocument()
+            group.title === i18n.kind_plural_module() ||
+            group.children.every((child) => this.router.hasOwnDocument(child))
           ) {
             const isPackages =
               this.options.getValue('entryPointStrategy') === 'packages' &&
               this.getPackagesCount() > 1 &&
-              group.title === this.i18n.kind_plural_module() &&
+              group.title === i18n.kind_plural_module() &&
               model.kind === ReflectionKind.Project;
             // if (isPackages) {
-            //   md.push(heading(options.headingLevel, this.i18n.theme_packages()));
+            //   md.push(heading(options.headingLevel, i18n.theme_packages()));
             // } else {
             //   md.push(heading(options.headingLevel, group.title));
             // }
@@ -268,6 +274,7 @@ class GrokThemeRenderContext extends MarkdownThemeContext {
                 md.push(
                   this.partials.propertiesTable(group.children, {
                     isEventProps,
+                    kind: options.kind,
                   })
                 );
               } else if (isEnumGroup && this.helpers.useTableFormat('enums')) {
@@ -404,7 +411,7 @@ class GrokThemeRenderContext extends MarkdownThemeContext {
                 // md.push(
                 //     heading(
                 //       opts.headingLevel,
-                //       this.i18n.theme_type_declaration(),
+                //       i18n.theme_type_declaration(),
                 //     ),
                 // ); @custom
 
@@ -427,9 +434,7 @@ class GrokThemeRenderContext extends MarkdownThemeContext {
           md.push(
             heading(
               opts.headingLevel,
-              this.internationalization.kindPluralString(
-                ReflectionKind.TypeParameter
-              )
+              ReflectionKind.pluralString(ReflectionKind.TypeParameter)
             )
           );
           if (this.helpers.useTableFormat('parameters')) {
@@ -443,7 +448,7 @@ class GrokThemeRenderContext extends MarkdownThemeContext {
           if (model.type instanceof UnionType) {
             if (this.helpers.hasUsefulTypeDetails(model.type)) {
               md.push(
-                heading(opts.headingLevel, this.i18n.theme_type_declaration())
+                heading(opts.headingLevel, i18n.theme_type_declaration())
               );
 
               model.type.types.forEach((type) => {
@@ -471,7 +476,7 @@ class GrokThemeRenderContext extends MarkdownThemeContext {
             // // "### Type Declaration"
             // if (useHeading) {
             //   md.push(
-            //     heading(opts.headingLevel, this.i18n.theme_type_declaration()),
+            //     heading(opts.headingLevel, i18n.theme_type_declaration()),
             //   );
             // }
             if (model.type && this.helpers.hasUsefulTypeDetails(model.type))
@@ -539,7 +544,7 @@ class GrokThemeRenderContext extends MarkdownThemeContext {
       signatureReturns: (model, options) => {
         const md = [];
         const typeDeclaration = model.type?.declaration;
-        // md.push(heading(options.headingLevel, this.i18n.theme_returns()));
+        // md.push(heading(options.headingLevel, i18n.theme_returns()));
         if (typeDeclaration?.signatures) {
           md.push(backTicks('Function'));
         } else {
@@ -623,7 +628,7 @@ class GrokThemeRenderContext extends MarkdownThemeContext {
 
         // @custom
         // if (model.implementedTypes?.length) {
-        //   md.push(heading(options.headingLevel, this.i18n.theme_implements()));
+        //   md.push(heading(options.headingLevel, i18n.theme_implements()));
         //   md.push(
         //     unorderedList(
         //       model.implementedTypes.map((implementedType) =>
@@ -635,14 +640,12 @@ class GrokThemeRenderContext extends MarkdownThemeContext {
 
         if (model.kind === ReflectionKind.Class && model.categories?.length) {
           model.groups
-            ?.filter(
-              (group) => group.title === this.i18n.kind_plural_constructor()
-            )
+            ?.filter((group) => group.title === i18n.kind_plural_constructor())
             .forEach((group) => {
               // md.push(
               //   heading(
               //     options.headingLevel,
-              //     this.i18n.kind_plural_constructor(),
+              //     i18n.kind_plural_constructor(),
               //   ),
               // );
               group.children.forEach((child) => {
@@ -666,7 +669,7 @@ class GrokThemeRenderContext extends MarkdownThemeContext {
         }
 
         if (model.indexSignatures?.length) {
-          md.push(heading(options.headingLevel, this.i18n.theme_indexable()));
+          md.push(heading(options.headingLevel, i18n.theme_indexable()));
           model.indexSignatures.forEach((indexSignature) => {
             md.push(this.partials.indexSignature(indexSignature));
           });
@@ -1168,7 +1171,7 @@ class GrokThemeRenderContext extends MarkdownThemeContext {
         const md = []; // ['***typeDeclarationContainer'];
 
         if (typeDeclaration?.indexSignatures?.length) {
-          md.push(heading(opts.headingLevel, this.i18n.kind_index_signature()));
+          md.push(heading(opts.headingLevel, i18n.kind_index_signature()));
           typeDeclaration?.indexSignatures?.forEach((indexSignature) => {
             md.push(this.partials.indexSignature(indexSignature));
           });
