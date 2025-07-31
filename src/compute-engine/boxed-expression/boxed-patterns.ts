@@ -11,6 +11,14 @@ export function isWildcard(expr: BoxedExpression): expr is BoxedSymbol {
   );
 }
 
+/**
+ * Return the string representing this wildcard, including any optional (one-character) name, or
+ * `null` if not a wildcard expression.
+ *
+ * @export
+ * @param expr
+ * @returns
+ */
 export function wildcardName(expr: BoxedExpression): string | null {
   if (expr.symbol?.startsWith('_')) return expr.symbol;
 
@@ -31,7 +39,9 @@ export function wildcardName(expr: BoxedExpression): string | null {
 /**
  *
  * <!--
- * @todo: Utilize (e.g. ./match.ts)
+ * @todo:
+ * - Utilize moreso (e.g. ./match.ts)
+ * - 'Wildcard' -> 'Universal', for clarity...?
  * -->
  *
  * @export

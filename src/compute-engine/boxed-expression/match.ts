@@ -20,6 +20,20 @@ function hasWildcards(expr: string | BoxedExpression): boolean {
   return false;
 }
 
+/**
+ * Return a new substitution based on arg. `substitution`, but with wildcard (of value *expr*)
+ * added.
+ * Returns given *substitution* unchanged if wildcard is a unnamed, or is already present in
+ * substitution.
+ *
+ * Returns `null` in cases either of attempting to an existing wildcard/substitution with a
+ * different value, or if the given *expr* is, or contains, a wildcard expression.
+ *
+ * @param wildcard
+ * @param expr
+ * @param substitution
+ * @returns
+ */
 function captureWildcard(
   wildcard: string,
   expr: BoxedExpression,
@@ -128,6 +142,10 @@ function matchOnce(
       //
       // 2. Both operator names match
       //
+      //?Arguably, matching permutations should be skipped, in the case of pattern being constituted
+      //by either (1) at least one optional-sequence wildcard, or 2) two or more sequence wildcards (optional or otherwise).
+      //^In both of these cases, the implication, it can be argued, is that their is requirement
+      //that operands should pertain to a *specific* permutation.
       result = pattern.operatorDefinition!.commutative
         ? matchPermutation(expr, pattern, substitution, options)
         : matchArguments(expr, pattern.ops, substitution, options);
@@ -299,6 +317,29 @@ function matchVariations(
   return null;
 }
 
+/**
+ *
+ * Try all needed permutations of the operands of a pattern expression, against the operands of a
+ * match target. Assumes that *expr* and *pattern* have the same operator.
+ *
+ * <!--
+ * !@fix?:
+ * - Permutations based on operands of pattern [only] do not match in some scenarios where the
+ * pattern should arguably otherwise return a valid match: specifically in cases involving patterns
+ * with seq.-wildcards. For instance:
+ *   -^A basic example is `['Add', 1, 2, 3, 'x', 5]` matched against pattern `['Add', 1, '__a']`.
+ *   Assuming the input is canonicalized, the resultant expr. against which the pattern is matched
+ *   is `['Add', 'x', 1, 2, 3, 5]`: which cannot be matched against any pattern permutation... (this
+ *   should be expected to be a valid match: with expr. expected to be commutative & therefore
+ *   operands validly taking on any arrangement, canonical-form aside).
+ * -->
+ *
+ * @param expr
+ * @param pattern
+ * @param substitution
+ * @param options
+ * @returns
+ */
 function matchPermutation(
   expr: BoxedExpression,
   pattern: BoxedExpression,
@@ -309,12 +350,12 @@ function matchPermutation(
 
   // Avoid redundant permutations:
   // This condition ensures various wildcard sub-permutations - namely a sequence followed by
-  // another sequence or universal, are skipped.
+  // another sequence, are skipped.
   // ›Consequently, a pattern such as `['Add', 1, 2, '__a', 4, '__b', 7, '_']`, notably with only 3
   // non-optional wildcards, yields only *2040* permutations, in contrast to *5040* (i.e. 7!).
   //!@todo:
   // - Further optimizations certainly possible here...: consider sub-sequences of expressions with
-  // same values (particularly number/symbol literals). At an extreme, consider ['Add', 1, 1, 1,
+  // same values (particularly number/symbol literals : Consider ['Add', 1, 1, 1,
   // 1, 1]. Such a check would reduce permutations from 120 to 1.
   // - ^Another, may be the req. of a matching qty. of operands (with expr.), in the case of no
   // sequence wildcards in pattern.
@@ -327,8 +368,7 @@ function matchPermutation(
         wildcardType(x) === 'Sequence' &&
         xs[index + 1] &&
         isWildcard(xs[index + 1]) &&
-        (wildcardType(xs[index + 1]) === 'Wildcard' ||
-          wildcardType(xs[index + 1]) === 'Sequence')
+        wildcardType(xs[index + 1]) === 'Sequence'
     );
 
   const patterns = permutations(pattern.ops!, cond);
@@ -340,6 +380,17 @@ function matchPermutation(
   return null;
 }
 
+/**
+ * Match a list of patterns against operands of expression, appending wildcards (named) to
+ * *substitution* (along the way). If a successful match, returns the new substitution (or the same
+ * if no named wildcard), or *null* for no match.
+ *
+ * @param expr
+ * @param patterns
+ * @param substitution
+ * @param options
+ * @returns
+ */
 function matchArguments(
   expr: BoxedExpression,
   patterns: ReadonlyArray<BoxedExpression>,
@@ -352,82 +403,217 @@ function matchArguments(
   }
 
   const ce = patterns[0].engine;
-  let result: BoxedSubstitution | null = { ...substitution };
 
   // We're going to consume the ops array, so make a copy
   const ops = [...expr.ops!];
 
-  let i = 0; // Index in pattern
+  return matchRemaining(patterns, substitution);
 
-  while (i < patterns.length) {
-    const pat = patterns[i];
-    const argName = wildcardName(pat);
+  /*
+   * Local f().
+   */
+  /**
+   * Match a list of patterns against *remaining* (locally scoped) `ops` and consume this list along
+   * the way, whilst appending to `substitution`. If a complete/successful match, return this new
+   * substitution; else return `null`.
+   *
+   * @note: calls recursively (permutations) for sequence wildcards
+   *
+   * @param patterns
+   * @param substitution
+   * @returns
+   */
+  function matchRemaining(
+    patterns: ReadonlyArray<BoxedExpression>,
+    substitution: BoxedSubstitution
+  ): BoxedSubstitution | null {
+    let result: BoxedSubstitution | null = { ...substitution };
 
-    if (argName !== null) {
-      if (argName.startsWith('__')) {
-        // Match 1 or more expressions (__) or 0 or more (___)
-        /** Qty. of operands consumed (of those remaining to be matched). */
-        let j = 0;
-        if (patterns[i + 1] === undefined) {
-          // No more args in the pattern after, go till the end
-          j = ops.length;
-        } else {
-          // Capture til' the first matching arg. of the next pattern
-          let found = false;
-          const nextPat = patterns[i + 1];
-          while (!found && j < ops.length) {
-            found = matchOnce(ops[j], nextPat, result, options) !== null;
-            if (!found) j += 1;
-          }
-          // The next pattern does not match against any of the remaining ops.. Unless the next
-          // match is optional, then can assume no overall match.
-          if (!found && !wildcardName(nextPat)?.startsWith('___')) return null;
-        }
+    let i = 0; // Index in pattern
 
-        // Determine the value to return for the wildcard
-        let value: BoxedExpression;
-        if (j < 1) {
-          // A standard/non-optional Sequence Wildcard with no match...
-          if (!argName.startsWith('___') && j < 1) return null;
-          // Otherwise must be an optional-sequence match: this is permitted.
-          if (expr.operator === 'Add') value = ce.Zero;
-          else if (expr.operator === 'Multiply') value = ce.One;
-          else value = ce.Nothing;
-        } else if (j === 1) {
-          // Capturing a single element/operand
-          value = ops.shift()!;
-        } else {
-          // >1 operands captured
-          const def = ce.lookupDefinition(expr.operator);
-          const args = ops.splice(0, j);
-          if (def && isOperatorDef(def) && def.operator.associative) {
-            value = ce.function(expr.operator, args, { canonical: false });
+    while (i < patterns.length) {
+      const pat = patterns[i];
+      const argName = wildcardName(pat);
+
+      if (argName !== null) {
+        if (argName.startsWith('__')) {
+          // Match 1 or more expressions (__) or 0 or more (___)
+          const nextPattern = patterns[i + 1];
+
+          const isOptionalSeq = argName.startsWith('___');
+
+          if (nextPattern === undefined) {
+            // No more args in the pattern after, go till the end
+            if (ops.length === 0 && !isOptionalSeq) return null;
+            result = captureWildcard(argName, captureOps(ops.length), result);
           } else {
-            value = ce.function('Sequence', args, { canonical: false });
+            /** Total qty. of operands to be consumed by this sequence (of those remaining).
+             * If a non-optional sequence, minimum must be 1.
+             */
+            let j = isOptionalSeq ? 0 : 1;
+
+            // The next pattern should not be another required sequence wildcard
+            // (^@todo?: validate beforehand; should never be permitted?)
+            console.assert(
+              !(
+                isWildcard(nextPattern) &&
+                wildcardType(nextPattern) === 'Sequence'
+              )
+            );
+
+            // The next 'applicable' pattern.
+            // If this sequence is qualified by one, or more optional-sequence wildcards, then these
+            // should effectively be 'merged' with this sequence, and hence be marked as capturing
+            // '0' operands. In this case, skip over these, arriving at the next applicable pattern,
+            // and capture the optional wildcards subsequently.
+            let nextAppPattern = nextPattern;
+            let nextAppPatternIndex = i + 1;
+
+            while (
+              isWildcard(nextAppPattern) &&
+              wildcardType(nextAppPattern) === 'OptionalSequence'
+            ) {
+              if (!patterns[nextAppPatternIndex + 1]) break;
+              // @note: if pattern has been validated prior, the next should never be a '_'
+              // (universal) or '__' (regular sequence) wildcard
+              nextAppPattern = patterns[++nextAppPatternIndex];
+            }
+
+            // Set to `true` if there is at least one op. (remaining to be consumed) which matches
+            // the next pattern.
+            let found = false;
+            while (!found && j < ops.length) {
+              found =
+                matchOnce(ops[j], nextAppPattern, result, options) !== null;
+              if (!found) j += 1;
+            }
+
+            // The next pattern does not match against any of the remaining ops.
+            if (!found) {
+              // If not an optional-seq., can assume no overall match.
+              if (!isOptionalSeq) return null;
+              // Capture a 0-length match wildcard
+              //(?Never?Must indicate being at end of ops. at this point...?)
+              result = captureWildcard(argName, captureOps(0), result);
+            } else {
+              // If have encountered optional-sequences following this sequence wildcard, capture
+              // these (i.e. as corresponding to 0 operands)
+              if (nextAppPattern !== nextPattern) {
+                // Index of pattern which is an optional-sequence Wildcard:
+                let wildcardIndex = i + 1;
+                while (wildcardIndex < nextAppPatternIndex) {
+                  result = captureWildcard(
+                    wildcardName(patterns[wildcardIndex++])!,
+                    captureOps(0),
+                    result!
+                  );
+                }
+              }
+
+              // A sequence wildcard has matched up until the *first* operand that the next (valid) pattern matches.
+              // First try matching remaining ops. against remaining patterns with the sequence
+              // only capturing the operands leading up to this...
+              // Otherwise, continue to see if the next pattern matches (even) further ahead: and
+              // allow this sequence wildcard to capture even more operands.
+              // (^Necessary, for instance, if considering a pattern such as '...a + _n + b' matched
+              // against '3 + 4 + x + b'...: the sequence will have initially captured just '3', but
+              // this will result in a final overall no-match. In this case. allow the sequence to
+              // capture '3 + 4' (finally permitting a 'total' match)
+              while (j <= ops.length) {
+                // Attempt the match of remaining patterns against remaining ops. after considering
+                // the total capture by this seq.-wildcard for this iteration.
+                const capturedOps = ops.slice(0, j);
+
+                result = matchRemaining(
+                  patterns.slice(nextAppPatternIndex),
+                  captureWildcard(argName, captureOps(j), result!) ?? result!
+                );
+
+                // A complete overall match with this sequence capturing 'j' operands.
+                if (result) break;
+
+                // No match: reset the potential modified ops. array
+                ops.unshift(...capturedOps);
+
+                j++;
+                if (j >= ops.length) break;
+
+                // If the next pattern matches yet another/subsequent operand, move to the next
+                // iteration and try to match remaining patterns.
+                if (!matchOnce(ops[j - 1], nextAppPattern, result!, options))
+                  break;
+              }
+
+              // If successful, have matched til' the end: else, the result will be 'null'
+              return result;
+            }
           }
+          /*
+           * End of seq. wildcard matching
+           */
+        } else if (argName.startsWith('_')) {
+          // Match a single expression
+          if (ops.length === 0) return null;
+          result = captureWildcard(argName, ops.shift()!, result);
+        } else {
+          result = matchOnce(ops.shift()!, pat, result, options);
         }
-        result = captureWildcard(argName, value, result);
-      } else if (argName.startsWith('_')) {
-        // Match a single expression
-        if (ops.length === 0) return null;
-        result = captureWildcard(argName, ops.shift()!, result);
+        /*
+         * ↓Must be *non-wildcard*
+         */
       } else {
-        result = matchOnce(ops.shift()!, pat, result, options);
+        const arg = ops.shift();
+        if (!arg) return null;
+        result = matchOnce(arg, pat, result, options);
       }
-    } else {
-      const arg = ops.shift();
-      if (!arg) return null;
-      result = matchOnce(arg, pat, result, options);
+
+      if (result === null) return null;
+      i += 1;
     }
+    // If there are some arguments left in the subject that were not matched, it's
+    // not a match
+    if (ops.length > 0) return null;
 
-    if (result === null) return null;
-    i += 1;
+    return result;
+
+    /*
+     * Local f.
+     */
+    /**
+     *
+     * Capture *qty* of remaining expessions/operands from the beginning of `ops` & return an an
+     * appropriate expression, considering the containing expression operator.
+     *
+     * (Assumes that, given a `qty` of 0, the match *must* have been from an optional
+     * sequence-wildcard match.)
+     *
+     * @param qty
+     * @returns
+     */
+    function captureOps(qty: number): BoxedExpression {
+      let value: BoxedExpression;
+      if (qty < 1) {
+        // Otherwise must be an optional-sequence match: this is permitted.
+        if (expr.operator === 'Add') value = ce.Zero;
+        else if (expr.operator === 'Multiply') value = ce.One;
+        else value = ce.Nothing;
+      } else if (qty === 1) {
+        // Capturing a single element/operand
+        value = ops.shift()!;
+      } else {
+        // >1 operands captured
+        const def = ce.lookupDefinition(expr.operator);
+        const args = ops.splice(0, qty);
+        if (def && isOperatorDef(def) && def.operator.associative) {
+          value = ce.function(expr.operator, args, { canonical: false });
+        } else {
+          value = ce.function('Sequence', args, { canonical: false });
+        }
+      }
+
+      return value;
+    }
   }
-  // If there are some arguments left in the subject that were not matched, it's
-  // not a match
-  if (ops.length > 0) return null;
-
-  return result;
 }
 
 /**
@@ -438,6 +624,13 @@ function matchArguments(
  * transform the pattern to become the subject.
  *
  * If the expression does not match the pattern, it returns `null`.
+ *
+ * <!--
+ * @consider?
+ * - pattern 'validation' (not quite the right term in this context) here? In a similar way to the
+ * check/condition supplied in 'matchPermutation()'? (i.e. inspect for redundant sequences of
+ * wildcard combinations).
+ * -->
  *
  */
 export function match(

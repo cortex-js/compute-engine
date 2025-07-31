@@ -1,4 +1,4 @@
-
+# 01
 
 ## Compute Engine
 
@@ -1273,6 +1273,10 @@ is canonical.
 
 :::info[Note]
 Applicable to canonical and non-canonical expressions.
+
+If this is a function, an empty substitution is given, and the computed value of `canonical`
+does not differ from that of this expr.: then a call this method is analagous to requesting a
+*clone*.
 :::
 
 ####### sub
@@ -1344,11 +1348,24 @@ Transform the expression by applying one or more replacement rules:
 
 See also `expr.subs()` for a simple substitution of symbols.
 
-If `options.canonical` is not set, the result is canonical if `this`
-is canonical.
+Procedure for the determining the canonical-status of the input expression and replacements:
+
+- If `options.canonical` is set, the *entire expr.* is canonicalized to this degree: whether
+the replacement occurs at the top-level, or within/recursively.
+
+- If otherwise, the *direct replacement will be canonical* if either the 'replaced' expression
+is canonical, or the given replacement (- is a BoxedExpression and -) is canonical.
+Notably also, if this replacement takes place recursively (not at the top-level), then exprs.
+containing the replaced expr. will still however have their (previous) canonical-status
+*preserved*... unless this expr. was previously non-canonical, and *replacements have resulted
+in canonical operands*. In this case, an expr. meeting this criteria will be updated to
+canonical status. (Canonicalization is opportunistic here, in other words).
 
 :::info[Note]
 Applicable to canonical and non-canonical expressions.
+
+To specify a match for single symbol (non wildcard), it must be boxed (e.g. `{ match:
+ce.box('x'), ... }`), but it is suggested to use method *'subs()'* for this.
 :::
 
 ####### rules
@@ -2647,9 +2664,9 @@ type PatternMatchOptions = {
 
 Control how a pattern is matched to an expression.
 
-- `substitution`: if present, assumes these values for the named wildcards,
-   and ensure that subsequent occurrence of the same wildcard have the same
-   value.
+- `substitution`: if present, assumes these values for a subset of
+   named wildcards, and ensure that subsequent occurrence of the same
+   wildcard have the same value.
 - `recursive`: if true, match recursively, otherwise match only the top
    level.
 - `useVariations`: if false, only match expressions that are structurally identical.
@@ -2784,18 +2801,22 @@ type Rule =
 };
 ```
 
-A rule describes how to modify an expressions that matches a pattern `match`
+A rule describes how to modify an expression that matches a pattern `match`
 into a new expression `replace`.
 
 - `x-1` \( \to \) `1-x`
 - `(x+1)(x-1)` \( \to \) `x^2-1
 
-The patterns can be expressed as LaTeX strings or a MathJSON expressions.
+The patterns can be expressed as LaTeX strings or `SemiBoxedExpression`'s.
+Alternatively, match/replace logic may be specified by a `RuleFunction`, allowing both custom
+logic/conditions for the match, and either a *BoxedExpression* (or `RuleStep` if being
+descriptive) for the replacement.
 
 As a shortcut, a rule can be defined as a LaTeX string: `x-1 -> 1-x`.
 The expression to the left of `->` is the `match` and the expression to the
 right is the `replace`. When using LaTeX strings, single character variables
-are assumed to be wildcards.
+are assumed to be wildcards. The rule LHS ('match') and RHS ('replace') may also be supplied
+separately: in this case following the same rules.
 
 When using MathJSON expressions, anonymous wildcards (`_`) will match any
 expression. Named wildcards (`_x`, `_a`, etc...) will match any expression
@@ -8042,7 +8063,7 @@ valueOf(): string
 
 </MemberCard>
 
-
+# 02
 
 ## MathJSON
 
@@ -8213,7 +8234,7 @@ The dictionary and function nodes can contain expressions themselves.
 
 </MemberCard>
 
-
+# 03
 
 ## Type
 

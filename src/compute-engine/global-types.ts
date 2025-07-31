@@ -1122,6 +1122,9 @@ export interface BoxedExpression {
    *
    * :::info[Note]
    * Applicable to canonical and non-canonical expressions.
+   * 
+   * To specify a match for single symbol (non wildcard), it must be boxed (e.g. `{ match:
+   * ce.box('x'), ... }`), but it is suggested to use method *'subs()'* for this.
    * :::
    */
   replace(
@@ -1929,9 +1932,9 @@ export type JsonSerializationOptions = {
 /**
  * Control how a pattern is matched to an expression.
  *
- * - `substitution`: if present, assumes these values for the named wildcards,
- *    and ensure that subsequent occurrence of the same wildcard have the same
- *    value.
+ * - `substitution`: if present, assumes these values for a subset of
+ *    named wildcards, and ensure that subsequent occurrence of the same
+ *    wildcard have the same value.
  * - `recursive`: if true, match recursively, otherwise match only the top
  *    level.
  * - `useVariations`: if false, only match expressions that are structurally identical.
@@ -2953,18 +2956,22 @@ export type RuleStep = {
 export type RuleSteps = RuleStep[];
 
 /**
- * A rule describes how to modify an expressions that matches a pattern `match`
+ * A rule describes how to modify an expression that matches a pattern `match`
  * into a new expression `replace`.
  *
  * - `x-1` \( \to \) `1-x`
  * - `(x+1)(x-1)` \( \to \) `x^2-1
  *
- * The patterns can be expressed as LaTeX strings or a MathJSON expressions.
+ * The patterns can be expressed as LaTeX strings or `SemiBoxedExpression`'s.
+ * Alternatively, match/replace logic may be specified by a `RuleFunction`, allowing both custom
+ * logic/conditions for the match, and either a *BoxedExpression* (or `RuleStep` if being
+ * descriptive) for the replacement.
  *
  * As a shortcut, a rule can be defined as a LaTeX string: `x-1 -> 1-x`.
  * The expression to the left of `->` is the `match` and the expression to the
  * right is the `replace`. When using LaTeX strings, single character variables
- * are assumed to be wildcards.
+ * are assumed to be wildcards. The rule LHS ('match') and RHS ('replace') may also be supplied
+ * separately: in this case following the same rules.
  *
  * When using MathJSON expressions, anonymous wildcards (`_`) will match any
  * expression. Named wildcards (`_x`, `_a`, etc...) will match any expression
