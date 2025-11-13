@@ -43,6 +43,26 @@ describe('INDEFINITE INTEGRATION', () => {
     expect(evaluate('\\int 2\\pi f(x) dx')).toMatchInlineSnapshot(
       `int((2, pi, f(x)) dx)`
     ));
+
+  test('x sin x', () =>
+    expect(evaluate('\\int x \\sin(x) \\, dx')).toMatchInlineSnapshot(
+      `-x * cos(x) + sin(x)`
+    ));
+
+  test('constant times x', () =>
+    expect(evaluate('\\int 2x dx')).toMatchInlineSnapshot(
+      `x^2`
+    ));
+
+  test('constant times x squared', () =>
+    expect(evaluate('\\int 3x^2 dx')).toMatchInlineSnapshot(
+      `x^3`
+    ));
+
+  test('constant times sin', () =>
+    expect(evaluate('\\int 2\\sin x dx')).toMatchInlineSnapshot(
+      `-2cos(x)`
+    ));
 });
 
 /** These resolve symbolically the integrals, then applies the limits. */

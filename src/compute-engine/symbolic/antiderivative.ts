@@ -4,6 +4,7 @@ import { mul } from '../boxed-expression/arithmetic-mul-div';
 import { add } from '../boxed-expression/arithmetic-add';
 import { matchAnyRules } from '../boxed-expression/rules';
 import { expandAll } from '../boxed-expression/expand';
+import { differentiate } from './derivative';
 
 //  @todo: implement using Risch Algorithm
 
@@ -621,14 +622,60 @@ export function antiderivative(
   if (fn.operator === 'Negate') return antiderivative(fn.op1, index).neg();
 
   if (fn.operator === 'Multiply') {
-    const terms = fn.ops!.map((op, i) => {
-      const otherTerms = fn.ops!.slice();
-      otherTerms.splice(i, 1);
-      const otherProduct = mul(...otherTerms);
-      const gPrime = antiderivative(op, index);
-      return gPrime.mul(otherProduct);
-    });
-    return add(...(terms as BoxedExpression[])).evaluate();
+    // If the product contains only one factor that depends on the variable,
+    // we can factor out the constant terms and integrate that single factor.
+    // Otherwise fall back to returning an unevaluated integral.
+    const ops = fn.ops!;
+    const constOps = ops.filter((op) => !op.has(index));
+    const varOps = ops.filter((op) => op.has(index));
+
+    // If more than one factor depends on the variable attempt
+    // a simple integration-by-parts when there are exactly two factors
+    // and one of them is a polynomial in the variable (like x or x^n).
+    if (varOps.length !== 1) {
+      if (ops.length === 2) {
+        const [a, b] = ops;
+        const isPoly = (op: BoxedExpression) =>
+          op.symbol === index ||
+          (op.operator === 'Power' &&
+            op.op1.symbol === index &&
+            op.op2.isNumberLiteral);
+
+        let u: BoxedExpression | undefined;
+        let dv: BoxedExpression | undefined;
+        if (isPoly(a) && !isPoly(b)) {
+          u = a;
+          dv = b;
+        } else if (!isPoly(a) && isPoly(b)) {
+          u = b;
+          dv = a;
+        }
+
+        if (u && dv) {
+          // v = \int dv
+          const v = antiderivative(dv, index);
+          if (v.operator === 'Integrate') return integrate(fn, index);
+
+          // du = d(u)/dx
+          const du = differentiate(u, index);
+          if (!du) return integrate(fn, index);
+
+          // result = uv - \int vdu
+          const integrand = mul(v, du).evaluate();
+          const inner = antiderivative(integrand, index);
+          if (inner.operator === 'Integrate') return integrate(fn, index);
+
+          return u.mul(v).sub(inner).evaluate();
+        }
+      }
+      return integrate(fn, index);
+    }
+
+    // Multiply the constant factors together (or use 1 if none)
+    const constProduct = constOps.length ? mul(...constOps) : ce.One;
+    const inner = varOps[0];
+    const innerAntideriv = antiderivative(inner, index);
+    return constProduct.mul(innerAntideriv).evaluate();
   }
 
   if (fn.operator === 'Divide') {
