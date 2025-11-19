@@ -1358,48 +1358,86 @@ function parseBigOp(name: string, reduceOp: string, minPrec: number) {
   };
 }
 
+const INDEXING_SET_HEADS = new Set([
+  'Tuple',
+  'Triple',
+  'Pair',
+  'Single',
+  'Limits',
+]);
+
+function sanitizeLimitOperand(
+  expr: Expression | null | undefined
+): Expression | null {
+  if (expr === null || expr === undefined) return null;
+  if (symbol(expr) === 'Nothing') return null;
+  return expr;
+}
+
+function collectIndexingSets(expr: Expression): Expression[] {
+  const result: Expression[] = [];
+  const args = operands(expr);
+  if (args.length <= 1) return result;
+  for (const candidate of args.slice(1)) {
+    const head = operator(candidate);
+    if (head && INDEXING_SET_HEADS.has(head)) {
+      result.push(candidate);
+      continue;
+    }
+    break;
+  }
+  return result;
+}
+
+function serializeIndexingSet(
+  serializer: Serializer,
+  indexingSet: Expression
+): { sub?: string; sup?: string } {
+  let indexExpr = operand(indexingSet, 1);
+  if (indexExpr !== null && operator(indexExpr) === 'Hold')
+    indexExpr = operand(indexExpr, 1);
+
+  const lowerExpr = sanitizeLimitOperand(operand(indexingSet, 2));
+  const upperExpr = sanitizeLimitOperand(operand(indexingSet, 3));
+
+  const result: { sub?: string; sup?: string } = {};
+  const indexName = indexExpr ? symbol(indexExpr) : null;
+  const hasIndex = indexName !== null && indexName !== 'Nothing';
+  const indexLatex =
+    hasIndex && indexExpr ? serializer.serialize(indexExpr) : undefined;
+
+  if (hasIndex && lowerExpr !== null && indexLatex)
+    result.sub = `${indexLatex}=${serializer.serialize(lowerExpr)}`;
+  else if (hasIndex && indexLatex) result.sub = indexLatex;
+  else if (lowerExpr !== null) result.sub = serializer.serialize(lowerExpr);
+
+  if (upperExpr !== null) result.sup = serializer.serialize(upperExpr);
+
+  return result;
+}
+
 function serializeBigOp(command: string) {
-  return (serializer, expr) => {
-    if (!operand(expr, 1)) return command;
+  return (serializer: Serializer, expr: Expression): string => {
+    const body = operand(expr, 1);
+    if (!body) return command;
 
-    let arg = operand(expr, 2);
-    const h = operator(arg);
-    if (h !== 'Tuple' && h !== 'Triple' && h !== 'Pair' && h !== 'Single')
-      arg = null;
-
-    let index = operand(arg, 1);
-    if (index !== null && operator(index) === 'Hold') index = operand(index, 1);
-
-    const fn = operand(expr, 1);
-
-    if (arg !== null && arg !== undefined) {
-      if (operand(expr, 2) !== null)
-        return joinLatex([command, serializer.serialize(fn)]);
-      return joinLatex([
-        command,
-        '_{',
-        serializer.serialize(operand(expr, 2)),
-        '}',
-        serializer.serialize(fn),
-      ]);
+    const indexingSets = collectIndexingSets(expr);
+    let decoratedCommand = command;
+    if (indexingSets.length > 0) {
+      const subs: string[] = [];
+      const sups: string[] = [];
+      for (const set of indexingSets) {
+        const parts = serializeIndexingSet(serializer, set);
+        if (parts.sub) subs.push(parts.sub);
+        if (parts.sup) sups.push(parts.sup);
+      }
+      if (subs.length > 0)
+        decoratedCommand = supsub('_', decoratedCommand, subs.join(', '));
+      if (sups.length > 0)
+        decoratedCommand = supsub('^', decoratedCommand, sups.join(', '));
     }
 
-    const lower = operand(arg, 2);
-
-    let sub: string[] = [];
-    if (index && symbol(index) !== 'Nothing' && lower)
-      sub = [serializer.serialize(index), '=', serializer.serialize(lower)];
-    else if (index && symbol(index) !== 'Nothing')
-      sub = [serializer.serialize(index)];
-    else if (lower !== null) sub = [serializer.serialize(lower)];
-
-    if (sub.length > 0) sub = ['_{', ...sub, '}'];
-
-    let sup: string[] = [];
-    if (operand(arg, 3) !== null)
-      sup = ['^{', serializer.serialize(operand(arg, 3)), '}'];
-
-    return joinLatex([command, ...sup, ...sub, serializer.serialize(fn)]);
+    return joinLatex([decoratedCommand, serializer.serialize(body)]);
   };
 }
 
