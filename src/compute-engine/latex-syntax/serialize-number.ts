@@ -227,9 +227,27 @@ function serializeScientificNotationNumber(
       if (!fraction) fraction = '';
       while (whole.startsWith('0')) whole = whole.substring(1);
       if (!whole) {
-        // .123 -> 0.123e+0
-        // .0123 -> 0.0123e+0
-        valString = sign + '0.' + fraction + 'e+0';
+        // Normalize: move first non-zero digit to whole part
+        // Count leading zeros in fraction to calculate negative exponent
+        let leadingZeros = 0;
+        while (leadingZeros < fraction.length && fraction[leadingZeros] === '0')
+          leadingZeros++;
+
+        if (leadingZeros >= fraction.length) {
+          // All zeros - the number is 0
+          valString = sign + '0e+0';
+        } else {
+          // .0123 -> 1.23e-2 (leadingZeros=1, exponent = -(leadingZeros+1) = -2)
+          const firstNonZero = fraction[leadingZeros];
+          const restOfFraction = fraction.slice(leadingZeros + 1);
+          const exponent = -(leadingZeros + 1);
+          valString =
+            sign +
+            firstNonZero +
+            (restOfFraction ? '.' + restOfFraction : '') +
+            'e' +
+            exponent;
+        }
       } else {
         // 1.234  -> 1.234e+0
         // 12.345 -> 1.2345e+1
