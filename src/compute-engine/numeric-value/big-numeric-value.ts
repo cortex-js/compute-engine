@@ -193,10 +193,33 @@ export class BigNumericValue extends NumericValue {
     return this.clone({ re: this.decimal.neg(), im: -this.im });
   }
 
-  inv(): BigNumericValue {
+  inv(): NumericValue {
     if (this.isOne) return this;
     if (this.isNegativeOne) return this;
-    if (this.im === 0) return this.clone(this.decimal.pow(-1));
+    if (this.im === 0) {
+      // Check if this is a terminating decimal that can be represented as an exact rational
+      // A decimal with exponent e < 0 can be represented as significand / 10^|e|
+      // e.g., 0.03 (which is 3e-2) becomes 3/100, and its inverse is 100/3
+      const d = this.decimal;
+      if (d.e < 0) {
+        const absExp = -d.e;
+        // Get the significand by shifting the decimal point
+        const significandDecimal = d.times(Decimal.pow(10, absExp));
+        if (significandDecimal.isInteger() && absExp <= 15) {
+          const numerator = bigint(significandDecimal.toString());
+          if (numerator !== null) {
+            const denominator = BigInt(10) ** BigInt(absExp);
+            // inv(numerator/denominator) = denominator/numerator
+            return new ExactNumericValue(
+              { rational: [denominator, numerator] },
+              (x) => new BigNumericValue(x, this.bignum),
+              this.bignum
+            );
+          }
+        }
+      }
+      return this.clone(this.decimal.pow(-1));
+    }
 
     const d = Math.hypot(this.re, this.im);
     const bigD = this.decimal
@@ -616,7 +639,7 @@ function decimalToString(num: Decimal): string {
 }
 
 /* Use with trig functions to avoid rounding errors.
-   Note that we use 1e14 as the tolerance, as this is applied to a machine 
+   Note that we use 1e14 as the tolerance, as this is applied to a machine
    number and is independent of the compute engine tolerance */
 function chop(n: number): number {
   return Math.abs(n) <= 1e-14 ? 0 : n;

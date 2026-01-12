@@ -262,6 +262,11 @@ describe('PARSING OF NUMBER', () => {
       `{num: "9007199254741033"}`
     );
   });
+
+  test('Division with small ints', () => {
+    expect(ce.parse('3 / 3e-2').evaluate().json).toEqual(100);
+    expect(ce.parse('3 / 0.03').evaluate().json).toEqual(100);
+  });
 });
 
 describe('SERIALIZATION OF NUMBERS', () => {
