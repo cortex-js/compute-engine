@@ -331,15 +331,17 @@ function serializeAutoNotationNumber(
 
   const avoid = options.avoidExponentsInRange;
 
-  if (exp !== 0 && avoid && exp >= avoid[0] && exp <= avoid[1]) {
-    // We want to avoid an exponent, so we'll pad the whole part
-    // with zeros and adjust the exponent
-    [wholePart, fractionalPart] = toDecimalNumber(
-      wholePart,
-      fractionalPart,
-      exp
-    );
-    exp = 0;
+  if (exp !== 0 && avoid) {
+    if (exp >= avoid[0] && exp <= avoid[1]) {
+      // We want to avoid an exponent, so we'll pad the whole part
+      // with zeros and adjust the exponent
+      [wholePart, fractionalPart] = toDecimalNumber(
+        wholePart,
+        fractionalPart,
+        exp
+      );
+      exp = 0;
+    }
   }
 
   const exponent = formatExponent(exp.toString(), options);
