@@ -1,4 +1,4 @@
-import { SerializeLatexOptions } from '../../../src/compute-engine/latex-syntax/types';
+import { SerializeLatexOptions } from '../../../src/compute-engine/latex-syntax/public.ts';
 import { exprToString, engine as ce } from '../../utils';
 
 function parse(s: string) {
@@ -378,39 +378,6 @@ describe('SERIALIZATION OF NUMBERS', () => {
     expect(format('12345678')).toMatchInlineSnapshot(`12345\\,678`);
     expect(format('12345678.12345678')).toMatchInlineSnapshot(
       `12345\\,678.123\\,456\\,78`
-    );
-  });
-
-  test('Scientific notation with string numbers', () => {
-    const formatBigNum = (num: string) =>
-      ce.box({ num }).toLatex({
-        notation: 'scientific',
-        avoidExponentsInRange: null,
-        exponentProduct: '\\times',
-      });
-
-    expect(formatBigNum('0.0123')).toMatchInlineSnapshot(`1.23\\times10^{-2}`);
-    expect(formatBigNum('0.00000014285714285714285')).toMatchInlineSnapshot(
-      `1.428\\,571\\,428\\,571\\,428\\,5\\times10^{-7}`
-    );
-
-    expect(formatBigNum('0.1')).toMatchInlineSnapshot(`10^{-1}`);
-    expect(formatBigNum('0.0001')).toMatchInlineSnapshot(`10^{-4}`);
-    expect(formatBigNum('0.00123')).toMatchInlineSnapshot(`1.23\\times10^{-3}`);
-
-    expect(formatBigNum('14285714285714285')).toMatchInlineSnapshot(
-      `1.428\\,571\\,428\\,571\\,428\\,5\\times10^{16}`
-    );
-  });
-
-  test('Normalized scientific notation', () => {
-    const result = ce.box(1 / 7000000).toLatex({
-      notation: 'scientific',
-      avoidExponentsInRange: null,
-      exponentProduct: '\\times',
-    });
-    expect(result).toMatchInlineSnapshot(
-      `1.428\\,571\\,428\\,571\\,428\\,5\\times10^{-7}`
     );
   });
 

@@ -3,6 +3,8 @@ import { engine as ce } from '../../utils';
 
 const m4: Expression = ['List', ['List', 1, 2], ['List', 3, 4]];
 
+const v1 = ['Vector', 5, 7, 0, -1];
+
 describe('Parsing environments', () => {
   it('should parse a pmatrix', () => {
     const result = ce.parse('\\begin{pmatrix} a & b \\\\ c & d \\end{pmatrix}');
