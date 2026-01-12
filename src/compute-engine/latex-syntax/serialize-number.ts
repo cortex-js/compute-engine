@@ -329,28 +329,17 @@ function serializeAutoNotationNumber(
     fractionalPart = m[2];
   }
 
-  // If we have some fractional digits *and* an exponent, we need to
-  // adjust the whole part to include the fractional part.
-  // 1.23e4 -> 123e2
-  if (exp !== 0 && fractionalPart) {
-    wholePart += fractionalPart;
-    exp -= fractionalPart.length;
-    fractionalPart = '';
-  }
-
-  // Check if the exponent is in a range to be avoided
   const avoid = options.avoidExponentsInRange;
-  if (exp !== 0 && avoid) {
-    if (exp >= avoid[0] && exp <= avoid[1]) {
-      // We want to avoid an exponent, so we'll padd the whole part
-      // with zeros and adjust the exponent
-      [wholePart, fractionalPart] = toDecimalNumber(
-        wholePart,
-        fractionalPart,
-        exp
-      );
-      exp = 0;
-    }
+
+  if (exp !== 0 && avoid && exp >= avoid[0] && exp <= avoid[1]) {
+    // We want to avoid an exponent, so we'll pad the whole part
+    // with zeros and adjust the exponent
+    [wholePart, fractionalPart] = toDecimalNumber(
+      wholePart,
+      fractionalPart,
+      exp
+    );
+    exp = 0;
   }
 
   const exponent = formatExponent(exp.toString(), options);

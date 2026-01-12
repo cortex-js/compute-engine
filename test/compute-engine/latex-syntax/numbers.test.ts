@@ -381,6 +381,28 @@ describe('SERIALIZATION OF NUMBERS', () => {
     );
   });
 
+  test('auto notation within avoidExponentsInRange', () => {
+    // This is inside `avoidExponentsInRange`, so
+    // we expect a decimal number.
+    const result = ce.box(1 / 7000000).toLatex({
+      notation: 'auto',
+    });
+    expect(result).toMatchInlineSnapshot(
+      `0.000\\,000\\,142\\,857\\,142\\,857\\,142\\,85`
+    );
+  });
+
+  test('auto notation outside avoidExponentsInRange', () => {
+    // This is outside `avoidExponentsInRange`, so
+    // we expect a number in normalized scientific notation.
+    const result = ce.box(1 / 70000000).toLatex({
+      notation: 'auto',
+    });
+    expect(result).toMatchInlineSnapshot(
+      `1.428\\,571\\,428\\,571\\,428\\,6\\cdot10^{-8}`
+    );
+  });
+
   test('Number with repeating pattern', () => {
     const format = (num: string, p: string) =>
       ce.box({ num }).toLatex({
