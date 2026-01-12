@@ -330,7 +330,6 @@ function serializeAutoNotationNumber(
   }
 
   const avoid = options.avoidExponentsInRange;
-
   if (exp !== 0 && avoid) {
     if (exp >= avoid[0] && exp <= avoid[1]) {
       // We want to avoid an exponent, so we'll pad the whole part
