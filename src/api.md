@@ -6686,7 +6686,7 @@ These options control how numbers are parsed and serialized.
 ```ts
 type NumberSerializationFormat = NumberFormat & {
   fractionalDigits: "auto" | "max" | number;
-  notation: "auto" | "engineering" | "scientific";
+  notation: "auto" | "engineering" | "scientific" | "adaptiveScientific";
   avoidExponentsInRange: undefined | null | [number, number];
 };
 ```

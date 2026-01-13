@@ -120,16 +120,30 @@ export function serializeNumber(
     else if (Number.isNaN(num)) return options.notANumber;
 
     let result: string | undefined = undefined;
-    if (options.notation === 'engineering')
+    if (options.notation === 'engineering') {
       result = serializeScientificNotationNumber(
         num.toExponential(),
-        options,
+        { ...options, denormalizeScientificNotation: true },
         3
       );
-    else if (options.notation === 'scientific')
-      result = serializeScientificNotationNumber(num.toExponential(), options);
-
-    return result ?? serializeAutoNotationNumber(num.toString(), options);
+    } else if (options.notation === 'scientific') {
+      result = serializeScientificNotationNumber(num.toExponential(), {
+        ...options,
+        denormalizeScientificNotation: false,
+      });
+    } else if (options.notation === 'adaptiveScientific') {
+      result = serializeScientificNotationNumber(num.toExponential(), {
+        ...options,
+        denormalizeScientificNotation: false,
+      });
+    }
+    return (
+      result ??
+      serializeAutoNotationNumber(num.toString(), {
+        ...options,
+        denormalizeScientificNotation: true,
+      })
+    );
   }
 
   num = num.toLowerCase().replace(/[\u0009-\u000d\u0020\u00a0]/g, '');
@@ -171,12 +185,32 @@ export function serializeNumber(
   else if (num[0] === '.') num = '0' + num;
 
   let result: string | undefined = undefined;
-  if (options.notation === 'engineering')
-    result = serializeScientificNotationNumber(num, options, 3);
-  else if (options.notation === 'scientific')
-    result = serializeScientificNotationNumber(num, options);
+  if (options.notation === 'engineering') {
+    result = serializeScientificNotationNumber(
+      num,
+      { ...options, denormalizeScientificNotation: false },
+      3
+    );
+  } else if (options.notation === 'scientific') {
+    result = serializeScientificNotationNumber(num, {
+      ...options,
+      denormalizeScientificNotation: false,
+    });
+  } else if (options.notation === 'adaptiveScientific') {
+    result = serializeAutoNotationNumber(num, {
+      ...options,
+      denormalizeScientificNotation: false,
+    });
+  }
 
-  return sign + (result ?? serializeAutoNotationNumber(num, options));
+  return (
+    sign +
+    (result ??
+      serializeAutoNotationNumber(num, {
+        ...options,
+        denormalizeScientificNotation: true,
+      }))
+  );
 }
 
 /**
@@ -190,7 +224,9 @@ export function serializeNumber(
  */
 function serializeScientificNotationNumber(
   valString: string,
-  options: NumberSerializationFormat,
+  options: NumberSerializationFormat & {
+    denormalizeScientificNotation: boolean;
+  },
   expMultiple = 1
 ): string | undefined {
   // For '7' returns '7e+0'
@@ -306,7 +342,9 @@ function serializeScientificNotationNumber(
 
 function serializeAutoNotationNumber(
   valString: string,
-  options: NumberSerializationFormat
+  options: NumberSerializationFormat & {
+    denormalizeScientificNotation: boolean;
+  }
 ): string {
   let m = valString.match(/^(.*)[e|E]([-+]?[0-9]+)$/i);
   // if valString === '-1234567.89e-123'
@@ -329,17 +367,28 @@ function serializeAutoNotationNumber(
     fractionalPart = m[2];
   }
 
+  // If we have some fractional digits *and* an exponent, we need to
+  // adjust the whole part to include the fractional part.
+  // 1.23e4 -> 123e2
+  if (exp !== 0 && fractionalPart) {
+    wholePart += fractionalPart;
+    exp -= fractionalPart.length;
+    fractionalPart = '';
+  }
+
   const avoid = options.avoidExponentsInRange;
   if (exp !== 0 && avoid) {
     if (exp >= avoid[0] && exp <= avoid[1]) {
       // We want to avoid an exponent, so we'll pad the whole part
       // with zeros and adjust the exponent
+      console.log('avoid b4', wholePart, fractionalPart, exp);
       [wholePart, fractionalPart] = toDecimalNumber(
         wholePart,
         fractionalPart,
         exp
       );
       exp = 0;
+      console.log('avoid', wholePart, fractionalPart, exp);
     }
   }
 

@@ -381,22 +381,54 @@ describe('SERIALIZATION OF NUMBERS', () => {
     );
   });
 
+  test('scientific notation within avoidExponentsInRange', () => {
+    const result = ce.box(1 / 7000000).toLatex({
+      notation: 'scientific',
+    });
+    expect(result).toMatchInlineSnapshot(
+      `14\\,285\\,714\\,285\\,714\\,285\\cdot10^{-23}`
+    );
+  });
+
+  test('scientific notation outside avoidExponentsInRange', () => {
+    const result = ce.box(1 / 70000000).toLatex({
+      notation: 'scientific',
+    });
+    expect(result).toMatchInlineSnapshot(
+      `1.428\\,571\\,428\\,571\\,428\\,6\\cdot10^{-8}`
+    );
+  });
+
   test('auto notation within avoidExponentsInRange', () => {
-    // This is inside `avoidExponentsInRange`, so
-    // we expect a decimal number.
     const result = ce.box(1 / 7000000).toLatex({
       notation: 'auto',
     });
     expect(result).toMatchInlineSnapshot(
-      `0.000\\,000\\,142\\,857\\,142\\,857\\,142\\,85`
+      `14\\,285\\,714\\,285\\,714\\,285\\cdot10^{-23}`
     );
   });
 
   test('auto notation outside avoidExponentsInRange', () => {
-    // This is outside `avoidExponentsInRange`, so
-    // we expect a number in normalized scientific notation.
     const result = ce.box(1 / 70000000).toLatex({
       notation: 'auto',
+    });
+    expect(result).toMatchInlineSnapshot(
+      `14\\,285\\,714\\,285\\,714\\,286\\cdot10^{-24}`
+    );
+  });
+
+  test('adaptiveScientific notation within avoidExponentsInRange', () => {
+    const result = ce.box(1 / 7000000).toLatex({
+      notation: 'adaptiveScientific',
+    });
+    expect(result).toMatchInlineSnapshot(
+      `14\\,285\\,714\\,285\\,714\\,285\\cdot10^{-23}`
+    );
+  });
+
+  test('adaptiveScientific notation outside avoidExponentsInRange', () => {
+    const result = ce.box(1 / 70000000).toLatex({
+      notation: 'adaptiveScientific',
     });
     expect(result).toMatchInlineSnapshot(
       `1.428\\,571\\,428\\,571\\,428\\,6\\cdot10^{-8}`
