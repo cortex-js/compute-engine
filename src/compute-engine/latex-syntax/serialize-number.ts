@@ -123,28 +123,18 @@ export function serializeNumber(
     if (options.notation === 'engineering') {
       result = serializeScientificNotationNumber(
         num.toExponential(),
-        { ...options, denormalizeScientificNotation: true },
+        options,
         3
       );
     } else if (options.notation === 'scientific') {
       result = serializeScientificNotationNumber(num.toExponential(), {
         ...options,
         avoidExponentsInRange: null, // Scientific notation should always use exponents
-        denormalizeScientificNotation: false,
       });
     } else if (options.notation === 'adaptiveScientific') {
-      result = serializeScientificNotationNumber(num.toExponential(), {
-        ...options,
-        denormalizeScientificNotation: false,
-      });
+      result = serializeScientificNotationNumber(num.toExponential(), options);
     }
-    return (
-      result ??
-      serializeAutoNotationNumber(num.toString(), {
-        ...options,
-        denormalizeScientificNotation: true,
-      })
-    );
+    return result ?? serializeAutoNotationNumber(num.toString(), options);
   }
 
   num = num.toLowerCase().replace(/[\u0009-\u000d\u0020\u00a0]/g, '');
@@ -187,22 +177,11 @@ export function serializeNumber(
 
   let result: string | undefined = undefined;
   if (options.notation === 'engineering') {
-    result = serializeScientificNotationNumber(
-      num,
-      { ...options, denormalizeScientificNotation: true },
-      3
-    );
+    result = serializeScientificNotationNumber(num, options, 3);
   } else if (options.notation === 'scientific') {
-    result = serializeScientificNotationNumber(num, {
-      ...options,
-      avoidExponentsInRange: null, // Scientific notation should always use exponents
-      denormalizeScientificNotation: false,
-    });
+    result = serializeScientificNotationNumber(num, options);
   } else if (options.notation === 'adaptiveScientific') {
-    result = serializeAutoNotationNumber(num, {
-      ...options,
-      denormalizeScientificNotation: false,
-    });
+    result = serializeAutoNotationNumber(num, options);
   }
 
   return (
@@ -210,7 +189,6 @@ export function serializeNumber(
     (result ??
       serializeAutoNotationNumber(num, {
         ...options,
-        denormalizeScientificNotation: true,
       }))
   );
 }
@@ -226,9 +204,7 @@ export function serializeNumber(
  */
 function serializeScientificNotationNumber(
   valString: string,
-  options: NumberSerializationFormat & {
-    denormalizeScientificNotation: boolean;
-  },
+  options: NumberSerializationFormat,
   expMultiple = 1
 ): string | undefined {
   // For '7' returns '7e+0'
@@ -344,9 +320,7 @@ function serializeScientificNotationNumber(
 
 function serializeAutoNotationNumber(
   valString: string,
-  options: NumberSerializationFormat & {
-    denormalizeScientificNotation: boolean;
-  }
+  options: NumberSerializationFormat
 ): string {
   let m = valString.match(/^(.*)[e|E]([-+]?[0-9]+)$/i);
   // if valString === '-1234567.89e-123'
