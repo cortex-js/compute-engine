@@ -129,6 +129,7 @@ export function serializeNumber(
     } else if (options.notation === 'scientific') {
       result = serializeScientificNotationNumber(num.toExponential(), {
         ...options,
+        avoidExponentsInRange: null, // Scientific notation should always use exponents
         denormalizeScientificNotation: false,
       });
     } else if (options.notation === 'adaptiveScientific') {
@@ -188,12 +189,13 @@ export function serializeNumber(
   if (options.notation === 'engineering') {
     result = serializeScientificNotationNumber(
       num,
-      { ...options, denormalizeScientificNotation: false },
+      { ...options, denormalizeScientificNotation: true },
       3
     );
   } else if (options.notation === 'scientific') {
     result = serializeScientificNotationNumber(num, {
       ...options,
+      avoidExponentsInRange: null, // Scientific notation should always use exponents
       denormalizeScientificNotation: false,
     });
   } else if (options.notation === 'adaptiveScientific') {
@@ -353,8 +355,10 @@ function serializeAutoNotationNumber(
 
   // Is there is an exponent...
   let exp = 0;
+  let originalExp = 0; // Save the original exponent for avoid range check
   if (m?.[1] && m[2]) {
     exp = parseInt(m[2]);
+    originalExp = exp;
     valString = m[1];
   }
 
@@ -378,17 +382,16 @@ function serializeAutoNotationNumber(
 
   const avoid = options.avoidExponentsInRange;
   if (exp !== 0 && avoid) {
-    if (exp >= avoid[0] && exp <= avoid[1]) {
+    // Use the original exponent (before fractional part adjustment) for the avoid check
+    if (originalExp >= avoid[0] && originalExp <= avoid[1]) {
       // We want to avoid an exponent, so we'll pad the whole part
       // with zeros and adjust the exponent
-      console.log('avoid b4', wholePart, fractionalPart, exp);
       [wholePart, fractionalPart] = toDecimalNumber(
         wholePart,
         fractionalPart,
         exp
       );
       exp = 0;
-      console.log('avoid', wholePart, fractionalPart, exp);
     }
   }
 

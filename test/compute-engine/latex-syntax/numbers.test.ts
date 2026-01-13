@@ -386,7 +386,7 @@ describe('SERIALIZATION OF NUMBERS', () => {
       notation: 'scientific',
     });
     expect(result).toMatchInlineSnapshot(
-      `14\\,285\\,714\\,285\\,714\\,285\\cdot10^{-23}`
+      `1.428\\,571\\,428\\,571\\,428\\,5\\cdot10^{-7}`
     );
   });
 
@@ -404,7 +404,7 @@ describe('SERIALIZATION OF NUMBERS', () => {
       notation: 'auto',
     });
     expect(result).toMatchInlineSnapshot(
-      `14\\,285\\,714\\,285\\,714\\,285\\cdot10^{-23}`
+      `0.000\\,000\\,142\\,857\\,142\\,857\\,142\\,85`
     );
   });
 
@@ -422,7 +422,7 @@ describe('SERIALIZATION OF NUMBERS', () => {
       notation: 'adaptiveScientific',
     });
     expect(result).toMatchInlineSnapshot(
-      `14\\,285\\,714\\,285\\,714\\,285\\cdot10^{-23}`
+      `0.000\\,000\\,142\\,857\\,142\\,857\\,142\\,85`
     );
   });
 
