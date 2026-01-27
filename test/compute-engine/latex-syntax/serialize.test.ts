@@ -136,6 +136,15 @@ describe('LATEX SERIALIZING', () => {
       `\\int\\!\\sin(x)\\, \\mathrm{d}x`
     );
   });
+
+  test('Big operators', () => {
+    expect(ce.parse('\\sum_{k=0}^{100}k').toLatex()).toMatchInlineSnapshot(
+      `\\sum_{k=0}^{100}k`
+    );
+    expect(ce.parse('\\prod_{i=1}^{n}i').toLatex()).toMatchInlineSnapshot(
+      `\\prod_{i=1}^{n}i`
+    );
+  });
 });
 
 describe('CUSTOM LATEX SERIALIZING', () => {

@@ -237,6 +237,24 @@ export function canonicalIndexingSet(
   let upper: BoxedExpression | null = null;
   let lower: BoxedExpression | null = null;
 
+  // If this is already a canonical Limits expression, return it (after
+  // canonicalizing its operands) so re-canonicalization paths (like `subs`)
+  // preserve the bounds.
+  if (expr.operator === 'Limits') {
+    const canonicalIndex = expr.op1.canonical;
+    const canonicalLower = expr.op2?.canonical ?? ce.Nothing;
+    const canonicalUpper = expr.op3?.canonical ?? ce.Nothing;
+    if (!canonicalIndex.symbol)
+      return ce.function('Limits', [
+        ce.typeError('symbol', undefined, canonicalIndex),
+      ]);
+    return ce.function('Limits', [
+      canonicalIndex,
+      canonicalLower,
+      canonicalUpper,
+    ]);
+  }
+
   if (
     expr.operator === 'Tuple' ||
     expr.operator === 'Triple' ||
@@ -274,9 +292,9 @@ export function canonicalBigop(
 
   // Note: we need to canonicalize the indexes before canonicalizing the body
   // since we need the indexes to be declared before we can bind them
-  const indexes = indexingSets
-    .map((x) => canonicalIndexingSet(x))
-    .filter((x) => x ?? ce.error('missing')) as BoxedExpression[];
+  const indexes = indexingSets.map(
+    (x) => canonicalIndexingSet(x) ?? ce.error('missing')
+  );
 
   body = body?.canonical ?? ce.error('missing');
 
