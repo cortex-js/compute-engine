@@ -6,7 +6,11 @@ import { matchAnyRules } from '../boxed-expression/rules';
 import { expandAll } from '../boxed-expression/expand';
 import { differentiate } from './derivative';
 import { findUnivariateRoots } from '../boxed-expression/solve';
-import { cancelCommonFactors } from '../boxed-expression/polynomials';
+import {
+  cancelCommonFactors,
+  polynomialDegree,
+  polynomialDivide,
+} from '../boxed-expression/polynomials';
 
 //  @todo: implement using Risch Algorithm
 
@@ -1225,6 +1229,25 @@ export function antiderivative(
       return antiderivative(cancelled, index);
     }
 
+    // Case A: If deg(numerator) >= deg(denominator), divide first
+    // ∫ P(x)/Q(x) dx where deg(P) >= deg(Q) becomes ∫ (quotient + remainder/Q) dx
+    const numDeg = polynomialDegree(fn.op1, index);
+    const denDeg = polynomialDegree(fn.op2, index);
+    if (numDeg >= 0 && denDeg >= 0 && numDeg >= denDeg) {
+      const divResult = polynomialDivide(fn.op1, fn.op2, index);
+      if (divResult) {
+        const [quotient, remainder] = divResult;
+        // ∫ P/Q dx = ∫ quotient dx + ∫ remainder/Q dx
+        const quotientIntegral = antiderivative(quotient, index);
+        if (!remainder.is(0)) {
+          const remainderFraction = remainder.div(fn.op2);
+          const remainderIntegral = antiderivative(remainderFraction, index);
+          return add(quotientIntegral, remainderIntegral);
+        }
+        return quotientIntegral;
+      }
+    }
+
     if (!fn.op2.has(index)) {
       // ∫ f(x)/c dx = (1/c) * ∫f(x) dx
       const antideriv = antiderivative(fn.op1, index);
@@ -1238,9 +1261,9 @@ export function antiderivative(
     if (!fn.op1.has(index) && fn.op2.symbol === index) {
       return ce.box(['Multiply', fn.op1, ['Ln', ['Abs', index]]]);
     }
-    // Handle ∫ 1/(1+x²) dx = arctan(x)
-    // Canonical form: ['Divide', 1, ['Add', ['Power', 'x', 2], 1]]
-    if (fn.op1.is(1) && fn.op2.operator === 'Add' && fn.op2.nops === 2) {
+    // Handle ∫ c/(1+x²) dx = c * arctan(x)
+    // Canonical form: ['Divide', c, ['Add', ['Power', 'x', 2], 1]]
+    if (!fn.op1.has(index) && fn.op2.operator === 'Add' && fn.op2.nops === 2) {
       const addOps = fn.op2.ops!;
       // Check for x² + 1 form
       const powerTerm = addOps.find(
@@ -1249,7 +1272,11 @@ export function antiderivative(
       );
       const oneTerm = addOps.find((op) => op.is(1));
       if (powerTerm && oneTerm) {
-        return ce.box(['Arctan', index]);
+        const arctan = ce.box(['Arctan', index]);
+        if (fn.op1.is(1)) {
+          return arctan;
+        }
+        return fn.op1.mul(arctan);
       }
     }
     // Handle ∫ 1/(ax+b) dx = (1/a) * ln|ax+b|
@@ -1273,6 +1300,34 @@ export function antiderivative(
           return fn.op1.mul(result);
         }
         return result;
+      }
+    }
+
+    // Case B: Handle ∫ c/(ax+b)^n dx for n > 1 (repeated linear roots)
+    // ∫ 1/(ax+b)^n dx = -1/(a(n-1)(ax+b)^(n-1))
+    if (fn.op1.is(1) || !fn.op1.has(index)) {
+      const denom = fn.op2;
+      if (denom.operator === 'Power') {
+        const base = denom.op1;
+        const exp = denom.op2;
+        const n = exp.re;
+        // Check if exponent is a positive integer > 1
+        if (n !== null && Number.isInteger(n) && n > 1) {
+          const linearCoeffs = getLinearCoefficients(base, index);
+          if (linearCoeffs) {
+            const { a } = linearCoeffs;
+            // ∫ 1/(ax+b)^n dx = -1/(a(n-1)(ax+b)^(n-1))
+            // = -1/(a(n-1)) * (ax+b)^(-(n-1))
+            const newExp = ce.number(-(n - 1));
+            const coeff = ce.One.div(a.mul(ce.number(n - 1))).neg();
+            let result = coeff.mul(ce.box(['Power', base, newExp]));
+            // If numerator is not 1, multiply
+            if (!fn.op1.is(1)) {
+              result = fn.op1.mul(result);
+            }
+            return result.simplify();
+          }
+        }
       }
     }
 
@@ -1401,6 +1456,23 @@ export function antiderivative(
           ['Power', index, ['Add', exponent, 1]],
           ['Add', exponent, 1],
         ]);
+      }
+    }
+
+    // ∫(ax+b)^n dx where n is a negative integer (repeated linear roots)
+    // ∫(ax+b)^(-n) dx = (ax+b)^(-n+1) / (a(-n+1)) for n > 1
+    const exponent = fn.op2;
+    const n = exponent.re;
+    if (n !== null && Number.isInteger(n) && n < -1) {
+      const base = fn.op1;
+      const linearCoeffs = getLinearCoefficients(base, index);
+      if (linearCoeffs) {
+        const { a } = linearCoeffs;
+        // New exponent is n+1 (which is negative but closer to 0)
+        const newExp = ce.number(n + 1);
+        const coeff = ce.One.div(a.mul(newExp));
+        const result = coeff.mul(ce.box(['Power', base, newExp]));
+        return result.simplify();
       }
     }
   }

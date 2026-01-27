@@ -182,6 +182,28 @@ describe('INDEFINITE INTEGRATION', () => {
     expect(evaluate('\\int \\frac{x+1}{x^2+3x+2} dx')).toMatchInlineSnapshot(
       `ln(|x + 2|)`
     ));
+
+  // Repeated linear roots
+  test('1/(x-1)^2 (repeated linear root)', () =>
+    expect(evaluate('\\int \\frac{1}{(x-1)^2} dx')).toMatchInlineSnapshot(
+      `-1 / (x - 1)`
+    ));
+
+  test('1/(x-1)^3 (higher power repeated)', () =>
+    expect(evaluate('\\int \\frac{1}{(x-1)^3} dx')).toMatchInlineSnapshot(
+      `1 / (-2(x - 1)^2)`
+    ));
+
+  // Polynomial division before integration
+  test('x^2/(x^2+1) (polynomial division)', () =>
+    expect(evaluate('\\int \\frac{x^2}{x^2+1} dx')).toMatchInlineSnapshot(
+      `x - arctan(x)`
+    ));
+
+  test('x^3/(x+1) (polynomial division)', () =>
+    expect(evaluate('\\int \\frac{x^3}{x+1} dx')).toMatchInlineSnapshot(
+      `1/3 * x^3 - 1/2 * x^2 + x - ln(|x + 1|)`
+    ));
 });
 
 /** These resolve symbolically the integrals, then applies the limits. */

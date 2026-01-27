@@ -40,9 +40,8 @@ function hasSymbolicTranscendental(expr: BoxedExpression): boolean {
 function simplifyDerivative(expr: BoxedExpression): BoxedExpression {
   if (hasSymbolicTranscendental(expr)) {
     // Just return canonical form without simplification to preserve
-    // symbolic transcendentals like ln(2).
-    // Note: simplify() has a bug that returns NaN for expressions
-    // like ['Multiply', ['Power', 2, 'x'], ['Ln', 2]] (see TODO #10)
+    // symbolic transcendentals like ln(2). Using simplify() would
+    // convert ln(2) to its numeric value 0.693...
     return expr.canonical;
   }
   return expr.simplify();
@@ -291,12 +290,12 @@ export function differentiate(
     if (!baseHasV && expHasV) {
       // Only exponent depends on v: d/dx a^g(x) = a^g(x) * ln(a) * g'(x)
       // Use ce._fn('Ln', ...) instead of base.ln() to keep ln symbolic
-      // Use ce._fn('Multiply', ...) instead of .mul() to avoid the NaN bug
-      // in Product.mul() when multiplying by ln(constant) (see TODO #10)
+      // (base.ln() evaluates to a numeric value).
+      // Use ce._fn('Multiply', ...) instead of .mul() to preserve symbolic form
+      // (.mul() evaluates Ln to numeric).
       const gPrime =
         differentiate(exponent, v) ?? ce._fn('D', [exponent, ce.symbol(v)]);
       const lnBase = ce._fn('Ln', [base]);
-      // Construct the multiply expression directly to avoid Product.mul() NaN bug
       const terms = [expr, lnBase];
       if (!gPrime.is(1)) terms.push(gPrime);
       const result =
@@ -310,6 +309,7 @@ export function differentiate(
     const fPrime = differentiate(f, v) ?? ce._fn('D', [f, ce.symbol(v)]);
     const gPrime = differentiate(g, v) ?? ce._fn('D', [g, ce.symbol(v)]);
     // Use ce._fn('Ln', ...) instead of f.ln() to keep ln symbolic
+    // (f.ln() evaluates to a numeric value when f is a constant).
     const lnF = ce._fn('Ln', [f]);
     const term1 = gPrime.mul(lnF);
     const term2 = g.mul(fPrime).div(f);
