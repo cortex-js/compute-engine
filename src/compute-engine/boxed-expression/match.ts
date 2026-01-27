@@ -805,13 +805,15 @@ function matchArguments(
               if (nextAppPattern !== nextPattern) {
                 // Index of pattern which is an optional-sequence Wildcard:
                 let wildcardIndex = i + 1;
-                while (wildcardIndex < nextAppPatternIndex) {
+                while (wildcardIndex < nextAppPatternIndex && result !== null) {
                   result = captureWildcard(
                     wildcardName(patterns[wildcardIndex++])!,
                     captureOps(0),
-                    result!
+                    result
                   );
                 }
+                // If capturing optional sequences failed, no match
+                if (result === null) return null;
               }
 
               // A sequence wildcard has matched up until the *first* operand that the next (valid) pattern matches.
@@ -823,6 +825,10 @@ function matchArguments(
               // against '3 + 4 + x + b'...: the sequence will have initially captured just '3', but
               // this will result in a final overall no-match. In this case. allow the sequence to
               // capture '3 + 4' (finally permitting a 'total' match)
+              // Save the substitution before entering the loop, so we can use it
+              // for pattern matching checks even after matchRemaining returns null
+              const savedSubstitution = result!;
+
               while (j <= ops.length) {
                 // Attempt the match of remaining patterns against remaining ops. after considering
                 // the total capture by this seq.-wildcard for this iteration.
@@ -830,7 +836,8 @@ function matchArguments(
 
                 result = matchRemaining(
                   patterns.slice(nextAppPatternIndex),
-                  captureWildcard(argName, captureOps(j), result!) ?? result!
+                  captureWildcard(argName, captureOps(j), savedSubstitution) ??
+                    savedSubstitution
                 );
 
                 // A complete overall match with this sequence capturing 'j' operands.
@@ -844,7 +851,10 @@ function matchArguments(
 
                 // If the next pattern matches yet another/subsequent operand, move to the next
                 // iteration and try to match remaining patterns.
-                if (!matchOnce(ops[j - 1], nextAppPattern, result!, options))
+                // Use savedSubstitution since result may be null from the failed matchRemaining
+                if (
+                  !matchOnce(ops[j - 1], nextAppPattern, savedSubstitution, options)
+                )
                   break;
               }
 
