@@ -6,7 +6,7 @@ import type {
 
 import { permutations } from '../../common/utils';
 
-import { isWildcard, wildcardName, wildcardType, validatePattern } from './boxed-patterns';
+import { isWildcard, wildcardName, wildcardType } from './boxed-patterns';
 import { isOperatorDef } from './utils';
 
 function hasWildcards(expr: string | BoxedExpression): boolean {
@@ -349,7 +349,12 @@ function matchPermutation(
   const hasAnchor = patternOps.some((op) => !isWildcard(op));
 
   if (hasSequenceWildcard && hasAnchor) {
-    const result = matchCommutativeWithAnchors(expr, pattern, substitution, options);
+    const result = matchCommutativeWithAnchors(
+      expr,
+      pattern,
+      substitution,
+      options
+    );
     if (result !== null) return result;
   }
 
@@ -463,9 +468,7 @@ function matchCommutativeWithAnchors(
   const maxAllowed =
     anchors.length +
     universalWildcards.length +
-    (sequenceWildcards.length + optionalSeqWildcards.length > 0
-      ? Infinity
-      : 0);
+    (sequenceWildcards.length + optionalSeqWildcards.length > 0 ? Infinity : 0);
 
   if (exprOps.length < minNeeded) return null;
   if (
@@ -527,7 +530,7 @@ function matchCommutativeWithAnchors(
     remainingOps: BoxedExpression[],
     sub: BoxedSubstitution
   ): BoxedSubstitution | null {
-    let result: BoxedSubstitution | null = sub;
+    const result: BoxedSubstitution | null = sub;
 
     // Calculate minimum required elements
     const neededForUniversal = universalWildcards.length;
@@ -567,7 +570,11 @@ function matchCommutativeWithAnchors(
         if (newSub !== null) {
           const newRemaining = [...remaining];
           newRemaining.splice(i, 1);
-          const result = tryAssignWildcards(restWildcards, newRemaining, newSub);
+          const result = tryAssignWildcards(
+            restWildcards,
+            newRemaining,
+            newSub
+          );
           if (result !== null) return result;
         }
       }
@@ -588,8 +595,14 @@ function matchCommutativeWithAnchors(
           const capturedExpr = wrapCaptured(captured);
           const newSub = captureWildcard(wcName, capturedExpr, sub);
           if (newSub !== null) {
-            const newRemaining = remaining.filter((_, i) => !indices.includes(i));
-            const result = tryAssignWildcards(restWildcards, newRemaining, newSub);
+            const newRemaining = remaining.filter(
+              (_, i) => !indices.includes(i)
+            );
+            const result = tryAssignWildcards(
+              restWildcards,
+              newRemaining,
+              newSub
+            );
             if (result !== null) return result;
           }
         }
@@ -604,9 +617,11 @@ function matchCommutativeWithAnchors(
       if (count === 0) {
         // Capture identity element
         const identity =
-          expr.operator === 'Add' ? ce.Zero :
-          expr.operator === 'Multiply' ? ce.One :
-          ce.Nothing;
+          expr.operator === 'Add'
+            ? ce.Zero
+            : expr.operator === 'Multiply'
+              ? ce.One
+              : ce.Nothing;
         const newSub = captureWildcard(wcName, identity, sub);
         if (newSub !== null) {
           const result = tryAssignWildcards(restWildcards, remaining, newSub);
@@ -619,8 +634,14 @@ function matchCommutativeWithAnchors(
           const capturedExpr = wrapCaptured(captured);
           const newSub = captureWildcard(wcName, capturedExpr, sub);
           if (newSub !== null) {
-            const newRemaining = remaining.filter((_, i) => !indices.includes(i));
-            const result = tryAssignWildcards(restWildcards, newRemaining, newSub);
+            const newRemaining = remaining.filter(
+              (_, i) => !indices.includes(i)
+            );
+            const result = tryAssignWildcards(
+              restWildcards,
+              newRemaining,
+              newSub
+            );
             if (result !== null) return result;
           }
         }
@@ -853,7 +874,12 @@ function matchArguments(
                 // iteration and try to match remaining patterns.
                 // Use savedSubstitution since result may be null from the failed matchRemaining
                 if (
-                  !matchOnce(ops[j - 1], nextAppPattern, savedSubstitution, options)
+                  !matchOnce(
+                    ops[j - 1],
+                    nextAppPattern,
+                    savedSubstitution,
+                    options
+                  )
                 )
                   break;
               }

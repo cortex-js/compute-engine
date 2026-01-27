@@ -281,7 +281,8 @@ export function differentiate(
 
     if (baseHasV && !expHasV) {
       // Only base depends on v: d/dx f(x)^n = n * f(x)^(n-1) * f'(x)
-      const fPrime = differentiate(base, v) ?? ce._fn('D', [base, ce.symbol(v)]);
+      const fPrime =
+        differentiate(base, v) ?? ce._fn('D', [base, ce.symbol(v)]);
       return simplifyDerivative(
         exponent.mul(base.pow(exponent.add(ce.NegativeOne))).mul(fPrime)
       );

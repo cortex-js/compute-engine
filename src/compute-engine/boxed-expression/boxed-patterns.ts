@@ -117,7 +117,6 @@ export function wildcardName(expr: BoxedExpression): string | null {
 export function wildcardType(
   expr: BoxedExpression | string
 ): 'Wildcard' | 'Sequence' | 'OptionalSequence' | null {
-
   if (typeof expr === 'string') {
     if (expr.startsWith('_')) {
       if (expr.startsWith('__')) {
@@ -171,7 +170,8 @@ export function validatePattern(pattern: BoxedExpression): void {
     if (!isWildcard(current)) continue;
 
     const currentType = wildcardType(current);
-    if (currentType !== 'Sequence' && currentType !== 'OptionalSequence') continue;
+    if (currentType !== 'Sequence' && currentType !== 'OptionalSequence')
+      continue;
 
     if (!isWildcard(next)) continue;
 
@@ -179,11 +179,13 @@ export function validatePattern(pattern: BoxedExpression): void {
     // Only flag consecutive multi-element wildcards (Sequence or OptionalSequence)
     // Universal Wildcard (_) is allowed as it provides an anchor point
     if (nextType === 'Sequence' || nextType === 'OptionalSequence') {
-      const currentDesc = currentType === 'Sequence' ? 'sequence' : 'optional sequence';
-      const nextDesc = nextType === 'Sequence' ? 'sequence' : 'optional sequence';
+      const currentDesc =
+        currentType === 'Sequence' ? 'sequence' : 'optional sequence';
+      const nextDesc =
+        nextType === 'Sequence' ? 'sequence' : 'optional sequence';
       throw new Error(
         `Invalid pattern: ${currentDesc} wildcard '${wildcardName(current)}' ` +
-        `cannot be followed by ${nextDesc} wildcard '${wildcardName(next)}'`
+          `cannot be followed by ${nextDesc} wildcard '${wildcardName(next)}'`
       );
     }
   }

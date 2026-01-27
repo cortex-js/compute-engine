@@ -428,7 +428,9 @@ function parseFraction(parser: Parser): Expression | null {
   // Accept forms like: `\frac{d}{dx} f`, `\frac{\mathrm{d}}{dx} f`
   const numerSym = symbol(numer);
   const isDifferential =
-    numerSym === 'd' || numerSym === 'd_upright' || numerSym === 'differentialD';
+    numerSym === 'd' ||
+    numerSym === 'd_upright' ||
+    numerSym === 'differentialD';
 
   if (isDifferential) {
     // Extract variable(s) from the denominator. Typical forms:

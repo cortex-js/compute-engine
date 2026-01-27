@@ -225,14 +225,14 @@ export function checkPure(
  *
  * Otherwise return a list of expressions indicating the mismatched
  * arguments.
- * 
+ *
  * <!--
  * @todo?:
  * - Some permutations of operands should perhaps always be treated as invalid. Consider:
  *   - A sequence wildcard (non-optional, i.e. '__') followed by either a universal wildcard ('_'),
  *   or another non-optional sequence wildcard. (note that an optional sequence wildcard is
  *   unproblematic here.)
- * 
+ *
  * -->
  *
  */

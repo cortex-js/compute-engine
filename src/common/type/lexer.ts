@@ -363,18 +363,12 @@ export class Lexer {
 
     // String literals
     if (char === '"' || char === "'") {
-      return this.createToken(
-        'STRING_LITERAL',
-        this.readStringLiteral()
-      );
+      return this.createToken('STRING_LITERAL', this.readStringLiteral());
     }
 
     // Verbatim strings
     if (char === '`') {
-      return this.createToken(
-        'VERBATIM_STRING',
-        this.readVerbatimString()
-      );
+      return this.createToken('VERBATIM_STRING', this.readVerbatimString());
     }
 
     // Numbers

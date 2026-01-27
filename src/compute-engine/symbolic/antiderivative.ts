@@ -347,7 +347,7 @@ function tryLinearSubstitution(
     // Check for ax + b form
     const terms = inner.ops!;
     let linearTerm: BoxedExpression | null = null;
-    let constantTerms: BoxedExpression[] = [];
+    const constantTerms: BoxedExpression[] = [];
 
     for (const term of terms) {
       if (!term.has(index)) {
@@ -1236,9 +1236,7 @@ export function antiderivative(
       // Check for x² + 1 form
       const powerTerm = addOps.find(
         (op) =>
-          op.operator === 'Power' &&
-          op.op1.symbol === index &&
-          op.op2.is(2)
+          op.operator === 'Power' && op.op1.symbol === index && op.op2.is(2)
       );
       const oneTerm = addOps.find((op) => op.is(1));
       if (powerTerm && oneTerm) {
@@ -1292,7 +1290,7 @@ export function antiderivative(
           // Use partial fraction decomposition
           // For 1/((x-r1)(x-r2)...(x-rn)), each coefficient Ai = 1/∏(ri-rj) for j≠i
           // Then ∫1/((x-r1)...(x-rn)) dx = Σ Ai * ln|x-ri|
-          let resultTerms: BoxedExpression[] = [];
+          const resultTerms: BoxedExpression[] = [];
 
           for (let i = 0; i < roots.length; i++) {
             // Compute coefficient Ai using cover-up method

@@ -733,10 +733,7 @@ export class Parser {
   }
 
   private parseTupleType(): TupleTypeNode | undefined {
-    if (
-      this.current.type === 'IDENTIFIER' &&
-      this.current.value === 'tuple'
-    ) {
+    if (this.current.type === 'IDENTIFIER' && this.current.value === 'tuple') {
       // Look ahead to see if this is a generic tuple type
       const nextToken = this.lexer.peekToken();
       if (nextToken.type !== '<') {
@@ -791,10 +788,7 @@ export class Parser {
   }
 
   private parseRecordType(): RecordTypeNode | undefined {
-    if (
-      this.current.type === 'IDENTIFIER' &&
-      this.current.value === 'record'
-    ) {
+    if (this.current.type === 'IDENTIFIER' && this.current.value === 'record') {
       this.advance(); // consume 'record'
 
       const entries: RecordEntryNode[] = [];
@@ -867,10 +861,7 @@ export class Parser {
   }
 
   private parseSetType(): SetTypeNode | undefined {
-    if (
-      this.current.type === 'IDENTIFIER' &&
-      this.current.value === 'set'
-    ) {
+    if (this.current.type === 'IDENTIFIER' && this.current.value === 'set') {
       this.advance();
 
       let elementType: TypeNode = this.createNode<PrimitiveTypeNode>(
@@ -949,10 +940,7 @@ export class Parser {
   }
 
   private parseSymbolType(): SymbolTypeNode | undefined {
-    if (
-      this.current.type === 'IDENTIFIER' &&
-      this.current.value === 'symbol'
-    ) {
+    if (this.current.type === 'IDENTIFIER' && this.current.value === 'symbol') {
       // Look ahead to see if this is a generic symbol type
       const nextToken = this.lexer.peekToken();
       if (nextToken.type !== '<') {
@@ -1067,8 +1055,7 @@ export class Parser {
 
   private parseTypeReference(): TypeReferenceNode | undefined {
     const isForward =
-      this.current.type === 'IDENTIFIER' &&
-      this.current.value === 'type';
+      this.current.type === 'IDENTIFIER' && this.current.value === 'type';
     if (isForward) {
       this.advance();
     }
