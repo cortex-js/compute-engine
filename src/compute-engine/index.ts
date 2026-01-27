@@ -107,6 +107,7 @@ import {
   updateDef,
 } from './boxed-expression/utils';
 import { boxRules } from './boxed-expression/rules';
+import { validatePattern } from './boxed-expression/boxed-patterns';
 import { BoxedString } from './boxed-expression/boxed-string';
 import { BoxedNumber, canonicalNumber } from './boxed-expression/boxed-number';
 import { _BoxedValueDefinition } from './boxed-expression/boxed-value-definition';
@@ -130,6 +131,8 @@ import { canonicalFunctionLiteral, lookup } from './function-utils';
 import { assume } from './assume';
 
 export * from './global-types';
+
+export { validatePattern };
 
 /**
  *
