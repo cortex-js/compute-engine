@@ -313,5 +313,9 @@ export function differentiate(
   if (expr.nops > 1) return ce._fn('D', [expr, ce.symbol(v)]);
   const g = expr.ops![0];
   const gPrime = differentiate(g, v) ?? ce._fn('D', [g, ce.symbol(v)]);
-  return apply(ce.box(h), [g]).mul(gPrime);
+  // Substitute the argument into the derivative formula
+  // We use subs() instead of apply() to avoid evaluating the expression,
+  // which would convert symbolic transcendentals like ln(10) to numeric values.
+  const derivFormula = ce.box(h).subs({ _: g });
+  return simplifyDerivative(derivFormula.mul(gPrime));
 }
