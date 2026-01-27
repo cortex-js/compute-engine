@@ -182,8 +182,9 @@ export function reducedRational(r: [bigint, bigint]): [bigint, bigint];
 export function reducedRational(r: Rational): Rational;
 export function reducedRational(r: Rational): Rational {
   if (isMachineRational(r)) {
-    if (r[0] === 1 || r[1] === 1) return r;
+    // Normalize negative denominator first (before early return)
     if (r[1] < 0) r = [-r[0], -r[1]];
+    if (r[0] === 1 || r[1] === 1) return r;
     if (!Number.isFinite(r[1])) return [0, 1];
     const g = gcd(r[0], r[1]);
     //  If the gcd is 0, return the rational unchanged

@@ -164,12 +164,12 @@ describe('INDEFINITE INTEGRATION', () => {
 
   test('1/(x^2-1) (partial fractions)', () =>
     expect(evaluate('\\int \\frac{1}{x^2-1} dx')).toMatchInlineSnapshot(
-      `1/-2 * ln(|x + 1|) + 1/2 * ln(|x - 1|)`
+      `-1/2 * ln(|x + 1|) + 1/2 * ln(|x - 1|)`
     ));
 
   test('1/(x^2-4) (partial fractions)', () =>
     expect(evaluate('\\int \\frac{1}{x^2-4} dx')).toMatchInlineSnapshot(
-      `1/-4 * ln(|x + 2|) + 1/4 * ln(|x - 2|)`
+      `-1/4 * ln(|x + 2|) + 1/4 * ln(|x - 2|)`
     ));
 
   test('1/(x^2+3x+2) (partial fractions)', () =>
@@ -191,7 +191,7 @@ describe('INDEFINITE INTEGRATION', () => {
 
   test('1/(x-1)^3 (higher power repeated)', () =>
     expect(evaluate('\\int \\frac{1}{(x-1)^3} dx')).toMatchInlineSnapshot(
-      `1 / (-2(x - 1)^2)`
+      `-1 / (2(x - 1)^2)`
     ));
 
   // Polynomial division before integration
