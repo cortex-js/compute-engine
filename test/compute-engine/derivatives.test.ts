@@ -84,6 +84,21 @@ describe('Hyperbolic derivatives', () => {
   });
 });
 
+describe('Symbolic output for exponential derivatives', () => {
+  it('should compute d/dx 2^x = ln(2) * 2^x symbolically', () => {
+    const expr = parse('D(2^x, x)');
+    const result = expr.evaluate();
+    // Should return ln(2) * 2^x, not 0.693... * 2^x
+    expect(result.toString()).toMatchInlineSnapshot(`2^x * ln(2)`);
+  });
+
+  it('should compute d/dx 3^x = ln(3) * 3^x symbolically', () => {
+    const expr = parse('D(3^x, x)');
+    const result = expr.evaluate();
+    expect(result.toString()).toMatchInlineSnapshot(`3^x * ln(3)`);
+  });
+});
+
 describe('Power rule edge cases', () => {
   it('should compute d/dx x^x = x^x * (ln(x) + 1)', () => {
     const expr = parse('D(x^x, x)');

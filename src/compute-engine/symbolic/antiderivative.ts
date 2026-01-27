@@ -70,7 +70,7 @@ function liatePriority(expr: BoxedExpression, index: string): number {
  * doesn't apply or leads to a more complex integral.
  */
 function tryIntegrationByParts(
-  factors: BoxedExpression[],
+  factors: ReadonlyArray<BoxedExpression>,
   index: string,
   depth: number = 0
 ): BoxedExpression | null {

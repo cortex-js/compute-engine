@@ -428,7 +428,8 @@ export class BoxedFunction extends _BoxedExpression {
     //
     if (expr.operator === 'Log' || expr.operator === 'Ln') {
       let base = expr.op2.re;
-      if (isNaN(base) && expr.operator === 'Log') base = 10;
+      // For Ln, use natural log base (e); for Log, default to base 10
+      if (isNaN(base)) base = expr.operator === 'Ln' ? Math.E : 10;
 
       const [coef, rest] = expr.op1.toNumericValue();
       if (coef.isOne) return [coef, this];

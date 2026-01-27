@@ -187,7 +187,11 @@ volumes
         }
         f = f?.canonical;
         // Avoid recursive evaluation
-        return f?.operator === 'D' ? f : f?.evaluate();
+        if (f?.operator === 'D') return f;
+        // If the result contains symbolic transcendentals (like ln(2)),
+        // return it without full evaluation to preserve the symbolic form
+        if (f && hasSymbolicTranscendental(f)) return f;
+        return f?.evaluate();
       },
     },
 

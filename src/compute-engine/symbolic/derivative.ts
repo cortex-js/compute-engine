@@ -3,6 +3,51 @@ import { mul } from '../boxed-expression/arithmetic-mul-div';
 import type { BoxedExpression } from '../global-types';
 import { add } from '../boxed-expression/arithmetic-add';
 
+/**
+ * Check if an expression contains symbolic transcendental functions of constants
+ * (like ln(2), sin(1), etc.) that should not be evaluated numerically.
+ */
+function hasSymbolicTranscendental(expr: BoxedExpression): boolean {
+  const op = expr.operator;
+  // Transcendental functions applied to numeric constants
+  const transcendentals = [
+    'Ln',
+    'Log',
+    'Log2',
+    'Log10',
+    'Sin',
+    'Cos',
+    'Tan',
+    'Exp',
+  ];
+  if (transcendentals.includes(op) && expr.op1?.isConstant) {
+    return true;
+  }
+  // Recursively check sub-expressions
+  if (expr.ops) {
+    for (const child of expr.ops) {
+      if (hasSymbolicTranscendental(child)) return true;
+    }
+  }
+  return false;
+}
+
+/**
+ * Simplify a derivative result, preserving symbolic transcendental constants.
+ * If the expression contains symbolic transcendentals like ln(2), return it
+ * without full evaluation to avoid numeric conversion.
+ */
+function simplifyDerivative(expr: BoxedExpression): BoxedExpression {
+  if (hasSymbolicTranscendental(expr)) {
+    // Just return canonical form without simplification to preserve
+    // symbolic transcendentals like ln(2).
+    // Note: simplify() has a bug that returns NaN for expressions
+    // like ['Multiply', ['Power', 2, 'x'], ['Ln', 2]] (see TODO #10)
+    return expr.canonical;
+  }
+  return expr.simplify();
+}
+
 // See also:
 //
 // - Table of 113 common integrals (antiderivative tables):
@@ -190,11 +235,24 @@ export function differentiate(
     return ce._fn('D', [expr.op1!, ce.symbol(v)]).neg();
   }
 
+  // Block - just differentiate the content
+  if (expr.operator === 'Block') {
+    return differentiate(expr.op1, v);
+  }
+
+  // D - evaluate the derivative first, then differentiate the result
+  if (expr.operator === 'D') {
+    const evaluated = expr.evaluate();
+    // Avoid infinite recursion if D doesn't simplify
+    if (evaluated.operator === 'D') return undefined;
+    return differentiate(evaluated, v);
+  }
+
   // Sum rule
   if (expr.operator === 'Add') {
     const terms = expr.ops!.map((op) => differentiate(op, v));
     if (terms.some((term) => term === undefined)) return undefined;
-    return add(...(terms as BoxedExpression[])).evaluate();
+    return simplifyDerivative(add(...(terms as BoxedExpression[])));
   }
 
   // Product rule
@@ -207,7 +265,7 @@ export function differentiate(
       return gPrime.mul(otherProduct);
     });
     if (terms.some((term) => term === undefined)) return undefined;
-    return add(...(terms as BoxedExpression[])).evaluate();
+    return simplifyDerivative(add(...(terms as BoxedExpression[])));
   }
 
   // Power rule
@@ -224,17 +282,25 @@ export function differentiate(
     if (baseHasV && !expHasV) {
       // Only base depends on v: d/dx f(x)^n = n * f(x)^(n-1) * f'(x)
       const fPrime = differentiate(base, v) ?? ce._fn('D', [base, ce.symbol(v)]);
-      return exponent
-        .mul(base.pow(exponent.add(ce.NegativeOne)))
-        .mul(fPrime)
-        .evaluate();
+      return simplifyDerivative(
+        exponent.mul(base.pow(exponent.add(ce.NegativeOne))).mul(fPrime)
+      );
     }
 
     if (!baseHasV && expHasV) {
       // Only exponent depends on v: d/dx a^g(x) = a^g(x) * ln(a) * g'(x)
+      // Use ce._fn('Ln', ...) instead of base.ln() to keep ln symbolic
+      // Use ce._fn('Multiply', ...) instead of .mul() to avoid the NaN bug
+      // in Product.mul() when multiplying by ln(constant) (see TODO #10)
       const gPrime =
         differentiate(exponent, v) ?? ce._fn('D', [exponent, ce.symbol(v)]);
-      return expr.mul(base.ln()).mul(gPrime).evaluate();
+      const lnBase = ce._fn('Ln', [base]);
+      // Construct the multiply expression directly to avoid Product.mul() NaN bug
+      const terms = [expr, lnBase];
+      if (!gPrime.is(1)) terms.push(gPrime);
+      const result =
+        terms.length === 1 ? terms[0] : ce._fn('Multiply', terms).canonical;
+      return simplifyDerivative(result);
     }
 
     // Both depend on v: d/dx f(x)^g(x) = f(x)^g(x) * (g'(x) * ln(f(x)) + g(x) * f'(x) / f(x))
@@ -242,9 +308,11 @@ export function differentiate(
     const g = exponent;
     const fPrime = differentiate(f, v) ?? ce._fn('D', [f, ce.symbol(v)]);
     const gPrime = differentiate(g, v) ?? ce._fn('D', [g, ce.symbol(v)]);
-    const term1 = gPrime.mul(f.ln());
+    // Use ce._fn('Ln', ...) instead of f.ln() to keep ln symbolic
+    const lnF = ce._fn('Ln', [f]);
+    const term1 = gPrime.mul(lnF);
     const term2 = g.mul(fPrime).div(f);
-    return expr.mul(term1.add(term2)).evaluate();
+    return simplifyDerivative(expr.mul(term1.add(term2)));
   }
 
   // Quotient rule
@@ -254,11 +322,9 @@ export function differentiate(
       differentiate(numerator, v) ?? ce._fn('D', [numerator, ce.symbol(v)]);
     const hPrime =
       differentiate(denominator, v) ?? ce._fn('D', [denominator, ce.symbol(v)]);
-    return gPrime
-      .mul(denominator)
-      .sub(hPrime.mul(numerator))
-      .div(denominator.pow(2))
-      .evaluate();
+    return simplifyDerivative(
+      gPrime.mul(denominator).sub(hPrime.mul(numerator)).div(denominator.pow(2))
+    );
   }
 
   const h = DERIVATIVES_TABLE[expr.operator];
