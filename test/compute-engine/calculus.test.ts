@@ -9,6 +9,28 @@ function N(expr: string): number {
   return result.re;
 }
 
+describe('DERIVATION', () => {
+  test('basic derivative', () =>
+    expect(evaluate('\\frac{d}{dx} x^2')).toMatchInlineSnapshot(
+      `2x`
+    ));
+
+  test('partial derivative', () =>
+    expect(evaluate('\\frac{d}{dx} tx^2')).toMatchInlineSnapshot(
+      `2t * x`
+    ));
+
+  test('to constant', () =>
+    expect(evaluate('\\frac{d}{dx} 3x')).toMatchInlineSnapshot(
+      `3`
+    ));
+
+  test('no variable', () =>
+    expect(evaluate('\\frac{d}{dx} 3t')).toMatchInlineSnapshot(
+      `0`
+    ));
+});
+
 describe('INDEFINITE INTEGRATION', () => {
   test('basic integration', () =>
     expect(evaluate('\\int x^2 dx')).toMatchInlineSnapshot(`1/3 * x^3`));
