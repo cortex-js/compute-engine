@@ -148,6 +148,21 @@ describe('INDEFINITE INTEGRATION', () => {
       `1/2 * x * sqrt(-x^2 + 4) + 2arcsin(1/2 * x)`
     ));
 
+  test('sqrt(9-x^2) (trig substitution with a=3)', () =>
+    expect(evaluate('\\int \\sqrt{9-x^2} dx')).toMatchInlineSnapshot(
+      `1/2 * x * sqrt(-x^2 + 9) + 9/2 * arcsin(1/3 * x)`
+    ));
+
+  test('sqrt(x^2+4) (trig substitution with a=2)', () =>
+    expect(evaluate('\\int \\sqrt{x^2+4} dx')).toMatchInlineSnapshot(
+      `1/2 * x * sqrt(x^2 + 4) + 2arsinh(1/2 * x)`
+    ));
+
+  test('sqrt(x^2-4) (trig substitution with a=2)', () =>
+    expect(evaluate('\\int \\sqrt{x^2-4} dx')).toMatchInlineSnapshot(
+      `1/2 * x * sqrt(x^2 - 4) - 2arcosh(1/2 * x)`
+    ));
+
   // Integration by parts tests
   test('x*e^x (integration by parts)', () =>
     expect(evaluate('\\int x e^x dx')).toMatchInlineSnapshot(`x * e^x - e^x`));

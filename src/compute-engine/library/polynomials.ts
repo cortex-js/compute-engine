@@ -52,7 +52,8 @@ export const POLYNOMIALS_LIBRARY: SymbolDefinitions[] = [
 
     PolynomialDegree: {
       description:
-        'Return the degree of a polynomial with respect to a variable',
+        'Return the degree of a polynomial with respect to a variable. ' +
+        'Example: PolynomialDegree(x³ + 2x + 1, x) → 3',
       lazy: true,
       signature: '(value, symbol) -> integer',
       evaluate: ([poly, varExpr]) => {
@@ -66,7 +67,8 @@ export const POLYNOMIALS_LIBRARY: SymbolDefinitions[] = [
 
     CoefficientList: {
       description:
-        'Return the list of coefficients of a polynomial, from lowest to highest degree',
+        'Return the list of coefficients of a polynomial, from lowest to highest degree. ' +
+        'Example: CoefficientList(x³ + 2x + 1, x) → [1, 2, 0, 1]',
       lazy: true,
       signature: '(value, symbol) -> list<value>',
       evaluate: ([poly, varExpr]) => {
@@ -81,7 +83,8 @@ export const POLYNOMIALS_LIBRARY: SymbolDefinitions[] = [
 
     PolynomialQuotient: {
       description:
-        'Return the quotient of polynomial division of dividend by divisor',
+        'Return the quotient of polynomial division of dividend by divisor. ' +
+        'Example: PolynomialQuotient(x³ - 1, x - 1, x) → x² + x + 1',
       lazy: true,
       signature: '(dividend: value, divisor: value, variable: symbol) -> value',
       evaluate: ([dividend, divisor, varExpr]) => {
@@ -99,7 +102,8 @@ export const POLYNOMIALS_LIBRARY: SymbolDefinitions[] = [
 
     PolynomialRemainder: {
       description:
-        'Return the remainder of polynomial division of dividend by divisor',
+        'Return the remainder of polynomial division of dividend by divisor. ' +
+        'Example: PolynomialRemainder(x³ + 2x + 1, x + 1, x) → -2',
       lazy: true,
       signature: '(dividend: value, divisor: value, variable: symbol) -> value',
       evaluate: ([dividend, divisor, varExpr]) => {
@@ -116,7 +120,9 @@ export const POLYNOMIALS_LIBRARY: SymbolDefinitions[] = [
     },
 
     PolynomialGCD: {
-      description: 'Return the greatest common divisor of two polynomials',
+      description:
+        'Return the greatest common divisor of two polynomials. ' +
+        'Example: PolynomialGCD(x² - 1, x - 1, x) → x - 1',
       lazy: true,
       signature: '(a: value, b: value, variable: symbol) -> value',
       evaluate: ([a, b, varExpr]) => {
@@ -129,7 +135,8 @@ export const POLYNOMIALS_LIBRARY: SymbolDefinitions[] = [
 
     Cancel: {
       description:
-        'Cancel common polynomial factors in the numerator and denominator of a rational expression',
+        'Cancel common polynomial factors in the numerator and denominator of a rational expression. ' +
+        'Example: Cancel((x² - 1)/(x - 1), x) → x + 1',
       lazy: true,
       signature: '(value, symbol) -> value',
       evaluate: ([expr, varExpr]) => {
