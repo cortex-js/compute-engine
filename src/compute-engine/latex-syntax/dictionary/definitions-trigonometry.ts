@@ -24,15 +24,20 @@ function parseTrig(op: string): ExpressionParseHandler {
       '\\arcctg': 'Arccot',
       '\\arcsec': 'Arcsec', // Non-standard
       '\\arccsc': 'Arccsc', // Non-standard
-      '\\arsinh': 'Arsinh', // Non-standard
-      '\\arcosh': 'Arccosh', // Non-standard
-      '\\arccosh': 'Arccosh',
-      '\\artanh': 'Arctanh',
-      '\\arctanh': 'Arctanh',
-      '\\arsech': 'Arcsech',
-      '\\arcsech': 'Arcsech',
-      '\\arcsch': 'Arccsch',
-      '\\arccsch': 'Arccsch',
+      // Inverse hyperbolic functions use ISO 80000-2 standard names (ar- prefix)
+      // We accept both ar- (standard) and arc- (common) spellings
+      '\\arsinh': 'Arsinh',
+      '\\arcsinh': 'Arsinh',
+      '\\arcosh': 'Arcosh',
+      '\\arccosh': 'Arcosh',
+      '\\artanh': 'Artanh',
+      '\\arctanh': 'Artanh',
+      '\\arsech': 'Arsech',
+      '\\arcsech': 'Arsech',
+      '\\arcsch': 'Arcsch',
+      '\\arccsch': 'Arcsch',
+      '\\arcoth': 'Arcoth',
+      '\\arccoth': 'Arcoth',
 
       '\\ch': 'Cosh', // Non-standard
 
@@ -148,25 +153,24 @@ export const DEFINITIONS_TRIGONOMETRY: LatexDictionary = [
     parse: parseTrig('Arccot'),
   },
   {
-    name: 'Arccoth',
-    symbolTrigger: 'arccoth',
-
-    parse: parseTrig('Arccoth'),
-  },
-  {
-    // Accept variant with `ar-` prefix
+    name: 'Arcoth',
     symbolTrigger: 'arcoth',
-    parse: parseTrig('Arccoth'),
+    parse: parseTrig('Arcoth'),
   },
   {
-    // Accept as symbol
+    // Accept variant with `arc-` prefix
     symbolTrigger: 'arccoth',
-    parse: parseTrig('Arccoth'),
+    parse: parseTrig('Arcoth'),
   },
   {
-    // Accept variant with LaTeX command, even though it's not in ams-math
+    // Accept variant with LaTeX command
+    latexTrigger: ['\\arcoth'],
+    parse: parseTrig('Arcoth'),
+  },
+  {
+    // Accept variant with `arc-` prefix LaTeX command
     latexTrigger: ['\\arccoth'],
-    parse: parseTrig('Arccoth'),
+    parse: parseTrig('Arcoth'),
   },
   {
     name: 'Arcsec',
@@ -193,100 +197,104 @@ export const DEFINITIONS_TRIGONOMETRY: LatexDictionary = [
     parse: parseTrig('Arccsc'),
   },
   {
-    name: 'Arcsinh',
+    name: 'Arsinh',
+    symbolTrigger: 'arsinh',
+    parse: parseTrig('Arsinh'),
+  },
+  {
+    // Accept variant with `arc-` prefix
     symbolTrigger: 'arcsinh',
-
-    parse: parseTrig('Arcsinh'),
+    parse: parseTrig('Arsinh'),
   },
   {
-    // Variant with `ar-` prefix, non-standard command
+    // LaTeX command with `ar-` prefix (ISO standard)
     latexTrigger: ['\\arsinh'],
-
-    parse: parseTrig('Arcsinh'),
+    parse: parseTrig('Arsinh'),
   },
   {
-    // Variant with `arc-` prefix, non-standard command
+    // LaTeX command with `arc-` prefix (common variant)
     latexTrigger: ['\\arcsinh'],
-
-    parse: parseTrig('Arcsinh'),
+    parse: parseTrig('Arsinh'),
   },
   {
-    name: 'Arccosh',
-    symbolTrigger: 'arccosh',
-
-    parse: parseTrig('Arccosh'),
-  },
-  {
-    // Variant, non-standard command
-    latexTrigger: '\\arccosh',
-    parse: parseTrig('Arccosh'),
-  },
-  {
-    // Variant, non-standard command, with `ar-` prefix
-    latexTrigger: '\\arcosh',
-    parse: parseTrig('Arccosh'),
-  },
-  {
-    // Variant, with `ar-` prefix
+    name: 'Arcosh',
     symbolTrigger: 'arcosh',
-    parse: parseTrig('Arccosh'),
+    parse: parseTrig('Arcosh'),
   },
   {
-    name: 'Arctanh',
+    // Accept variant with `arc-` prefix
+    symbolTrigger: 'arccosh',
+    parse: parseTrig('Arcosh'),
+  },
+  {
+    // LaTeX command with `ar-` prefix (ISO standard)
+    latexTrigger: '\\arcosh',
+    parse: parseTrig('Arcosh'),
+  },
+  {
+    // LaTeX command with `arc-` prefix (common variant)
+    latexTrigger: '\\arccosh',
+    parse: parseTrig('Arcosh'),
+  },
+  {
+    name: 'Artanh',
+    symbolTrigger: 'artanh',
+    parse: parseTrig('Artanh'),
+  },
+  {
+    // Accept variant with `arc-` prefix
     symbolTrigger: 'arctanh',
-
-    parse: parseTrig('Arctanh'),
+    parse: parseTrig('Artanh'),
   },
   {
-    // Variant with `ar-` prefix
-    symbolTrigger: 'artanh',
-
-    parse: parseTrig('Arctanh'),
-  },
-  {
-    // Variant
+    // LaTeX command with `ar-` prefix (ISO standard)
     latexTrigger: '\\artanh',
-    parse: parseTrig('Arctanh'),
+    parse: parseTrig('Artanh'),
   },
   {
-    // Variant
+    // LaTeX command with `arc-` prefix (common variant)
     latexTrigger: ['\\arctanh'],
-    parse: parseTrig('Arctanh'),
+    parse: parseTrig('Artanh'),
   },
   {
-    // Variant, with `ar-` prefix
-    symbolTrigger: 'artanh',
-    parse: parseTrig('Arctanh'),
+    name: 'Arsech',
+    symbolTrigger: 'arsech',
+    parse: parseTrig('Arsech'),
   },
   {
-    name: 'Arcsech',
+    // Accept variant with `arc-` prefix
     symbolTrigger: 'arcsech',
-    parse: parseTrig('Arcsech'),
+    parse: parseTrig('Arsech'),
   },
   {
-    // Variant with `arc-` prefix
-    latexTrigger: ['\\arcsech'],
-    parse: parseTrig('Arcsech'),
-  },
-  {
-    // Variant with `ar-` prefix
+    // LaTeX command with `ar-` prefix (ISO standard)
     latexTrigger: ['\\arsech'],
-    parse: parseTrig('Arcsech'),
+    parse: parseTrig('Arsech'),
   },
   {
-    name: 'Arccsch',
+    // LaTeX command with `arc-` prefix (common variant)
+    latexTrigger: ['\\arcsech'],
+    parse: parseTrig('Arsech'),
+  },
+  {
+    name: 'Arcsch',
+    symbolTrigger: 'arcsch',
+    parse: parseTrig('Arcsch'),
+  },
+  {
+    // Accept variant with `arc-` prefix
     symbolTrigger: 'arccsch',
-    parse: parseTrig('Arccsch'),
+    parse: parseTrig('Arcsch'),
   },
   {
-    // Variant, non-standard command
-    latexTrigger: ['\\arccsch'],
-    parse: parseTrig('Arccsch'),
-  },
-  {
-    // Variant, non-standard command, with `ar-` prefix
+    // LaTeX command with `ar-` prefix (ISO standard)
     latexTrigger: ['\\arcsch'],
-    parse: parseTrig('Arccsch'),
+    parse: parseTrig('Arcsch'),
+  },
+  {
+    // LaTeX command with `arc-` prefix (common variant)
+    latexTrigger: ['\\arccsch'],
+    parse: parseTrig('Arcsch'),
   },
   {
     name: 'Cosec',

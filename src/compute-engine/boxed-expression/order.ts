@@ -27,12 +27,12 @@ const TRIGONOMETRIC_OPERATORS: { [key: string]: boolean } = {
   Arccot: true,
   Arcsec: true,
   Arccsc: true,
-  Arcsinh: true,
-  Arccosh: true,
-  Arctanh: true,
-  Arccoth: true,
-  Arccsch: true,
-  Arcsech: true,
+  Arsinh: true,
+  Arcosh: true,
+  Artanh: true,
+  Arcoth: true,
+  Arcsch: true,
+  Arsech: true,
 };
 
 function isTrigonometricFunction(operator: any): boolean {

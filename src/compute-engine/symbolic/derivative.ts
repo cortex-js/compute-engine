@@ -60,11 +60,11 @@ const DERIVATIVES_TABLE = {
   // d/dx csch(x) = -coth(x)*csch(x)
   Csch: ['Negate', ['Multiply', ['Coth', '_'], ['Csch', '_']]],
   Coth: ['Negate', ['Power', ['Csch', '_'], 2]],
-  Arcsinh: ['Power', ['Add', ['Power', '_', 2], 1], ['Negate', 'Half']],
-  Arccosh: ['Power', ['Subtract', ['Power', '_', 2], 1], ['Negate', 'Half']],
-  Arctanh: ['Power', ['Subtract', 1, ['Power', '_', 2]], -1],
-  // d/dx arcsech(x) = -1 / (x * sqrt(1 - x^2))
-  Arcsech: [
+  Arsinh: ['Power', ['Add', ['Power', '_', 2], 1], ['Negate', 'Half']],
+  Arcosh: ['Power', ['Subtract', ['Power', '_', 2], 1], ['Negate', 'Half']],
+  Artanh: ['Power', ['Subtract', 1, ['Power', '_', 2]], -1],
+  // d/dx arsech(x) = -1 / (x * sqrt(1 - x^2))
+  Arsech: [
     'Negate',
     [
       'Divide',
@@ -72,8 +72,8 @@ const DERIVATIVES_TABLE = {
       ['Multiply', '_', ['Sqrt', ['Subtract', 1, ['Power', '_', 2]]]],
     ],
   ],
-  // d/dx arccsch(x) = -1 / (|x| * sqrt(1 + x^2))
-  Arccsch: [
+  // d/dx arcsch(x) = -1 / (|x| * sqrt(1 + x^2))
+  Arcsch: [
     'Negate',
     [
       'Divide',
@@ -81,7 +81,7 @@ const DERIVATIVES_TABLE = {
       ['Multiply', ['Abs', '_'], ['Sqrt', ['Add', 1, ['Power', '_', 2]]]],
     ],
   ],
-  Arccoth: ['Negate', ['Power', ['Subtract', 1, ['Power', '_', 2]], -1]],
+  Arcoth: ['Negate', ['Power', ['Subtract', 1, ['Power', '_', 2]], -1]],
   // Exp: ['Exp', '_'],   // Gets canonicalized to Power
   Ln: ['Divide', 1, '_'],
   Log: ['Power', ['Multiply', '_', ['Ln', '10']], -1],

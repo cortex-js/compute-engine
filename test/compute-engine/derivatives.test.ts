@@ -120,6 +120,161 @@ describe('Power rule edge cases', () => {
   });
 });
 
+// Comprehensive tests for all DERIVATIVES_TABLE entries
+describe('Trigonometric derivatives', () => {
+  it('d/dx sin(x) = cos(x)', () => {
+    expect(parse('D(\\sin(x), x)').evaluate().toString()).toMatchInlineSnapshot(
+      `cos(x)`
+    );
+  });
+
+  it('d/dx cos(x) = -sin(x)', () => {
+    expect(parse('D(\\cos(x), x)').evaluate().toString()).toMatchInlineSnapshot(
+      `-sin(x)`
+    );
+  });
+
+  it('d/dx tan(x) = sec(x)^2', () => {
+    expect(parse('D(\\tan(x), x)').evaluate().toString()).toMatchInlineSnapshot(
+      `sec(x)^2`
+    );
+  });
+
+  it('d/dx sec(x) = tan(x)*sec(x)', () => {
+    expect(parse('D(\\sec(x), x)').evaluate().toString()).toMatchInlineSnapshot(
+      `tan(x) * sec(x)`
+    );
+  });
+
+  it('d/dx csc(x) = -cot(x)*csc(x)', () => {
+    expect(parse('D(\\csc(x), x)').evaluate().toString()).toMatchInlineSnapshot(
+      `-(csc(x) * Cot(x))`
+    );
+  });
+
+  it('d/dx cot(x) = -csc(x)^2', () => {
+    expect(parse('D(\\cot(x), x)').evaluate().toString()).toMatchInlineSnapshot(
+      `-csc(x)^2`
+    );
+  });
+});
+
+describe('Inverse trigonometric derivatives', () => {
+  it('d/dx arcsin(x) = 1/sqrt(1-x^2)', () => {
+    expect(
+      parse('D(\\arcsin(x), x)').evaluate().toString()
+    ).toMatchInlineSnapshot(`(-x^2 + 1)^(-1/2)`);
+  });
+
+  it('d/dx arccos(x) = -1/sqrt(1-x^2)', () => {
+    expect(
+      parse('D(\\arccos(x), x)').evaluate().toString()
+    ).toMatchInlineSnapshot(`-(-x^2 + 1)^(-1/2)`);
+  });
+
+  it('d/dx arctan(x) = 1/(1+x^2)', () => {
+    expect(
+      parse('D(\\arctan(x), x)').evaluate().toString()
+    ).toMatchInlineSnapshot(`1 / (x^2 + 1)`);
+  });
+
+  it('d/dx arccot(x) = -1/(1+x^2)', () => {
+    expect(
+      parse('D(\\arcctg(x), x)').evaluate().toString()
+    ).toMatchInlineSnapshot(`-1 / (x^2 + 1)`);
+  });
+});
+
+describe('Hyperbolic function derivatives', () => {
+  it('d/dx sinh(x) = cosh(x)', () => {
+    expect(
+      parse('D(\\sinh(x), x)').evaluate().toString()
+    ).toMatchInlineSnapshot(`cosh(x)`);
+  });
+
+  it('d/dx cosh(x) = sinh(x)', () => {
+    expect(
+      parse('D(\\cosh(x), x)').evaluate().toString()
+    ).toMatchInlineSnapshot(`sinh(x)`);
+  });
+
+  it('d/dx tanh(x) = sech(x)^2', () => {
+    expect(
+      parse('D(\\tanh(x), x)').evaluate().toString()
+    ).toMatchInlineSnapshot(`sech(x)^2`);
+  });
+
+  it('d/dx coth(x) = -csch(x)^2', () => {
+    expect(
+      parse('D(\\coth(x), x)').evaluate().toString()
+    ).toMatchInlineSnapshot(`-csch(x)^2`);
+  });
+});
+
+describe('Inverse hyperbolic derivatives', () => {
+  it('d/dx arsinh(x) = 1/sqrt(x^2+1)', () => {
+    expect(
+      parse('D(\\arsinh(x), x)').evaluate().toString()
+    ).toMatchInlineSnapshot(`(x^2 + 1)^(-1/2)`);
+  });
+
+  it('d/dx arcosh(x) = 1/sqrt(x^2-1)', () => {
+    expect(
+      parse('D(\\arcosh(x), x)').evaluate().toString()
+    ).toMatchInlineSnapshot(`(x^2 - 1)^(-1/2)`);
+  });
+
+  it('d/dx artanh(x) = 1/(1-x^2)', () => {
+    expect(
+      parse('D(\\artanh(x), x)').evaluate().toString()
+    ).toMatchInlineSnapshot(`1 / (-x^2 + 1)`);
+  });
+
+  it('d/dx arcoth(x) = -1/(1-x^2)', () => {
+    expect(
+      parse('D(\\arcoth(x), x)').evaluate().toString()
+    ).toMatchInlineSnapshot(`-1 / (-x^2 + 1)`);
+  });
+
+  it('d/dx arsech(x) = -1/(x*sqrt(1-x^2))', () => {
+    expect(
+      parse('D(\\arsech(x), x)').evaluate().toString()
+    ).toMatchInlineSnapshot(`-1 / (x * sqrt(-x^2 + 1))`);
+  });
+
+  it('d/dx arcsch(x) = -1/(|x|*sqrt(1+x^2))', () => {
+    expect(
+      parse('D(\\arcsch(x), x)').evaluate().toString()
+    ).toMatchInlineSnapshot(`-1 / (|x| * sqrt(x^2 + 1))`);
+  });
+});
+
+describe('Logarithmic and exponential derivatives', () => {
+  it('d/dx ln(x) = 1/x', () => {
+    expect(parse('D(\\ln(x), x)').evaluate().toString()).toMatchInlineSnapshot(
+      `1 / x`
+    );
+  });
+
+  it('d/dx log(x) = 1/(x*ln(10))', () => {
+    expect(parse('D(\\log(x), x)').evaluate().toString()).toMatchInlineSnapshot(
+      `1 / (x * ln(10))`
+    );
+  });
+
+  it('d/dx sqrt(x) = 1/(2*sqrt(x))', () => {
+    expect(
+      parse('D(\\sqrt{x}, x)').evaluate().toString()
+    ).toMatchInlineSnapshot(`1 / (2sqrt(x))`);
+  });
+
+  it('d/dx e^x = e^x', () => {
+    expect(parse('D(e^x, x)').evaluate().toString()).toMatchInlineSnapshot(
+      `e^x`
+    );
+  });
+});
+
 describe('ND', () => {
   it('should compute the numerical approximation of the derivative of a polynomial', () => {
     const expr = parse('\\mathrm{ND}(x \\mapsto x^3 + 2x - 4, 2)');

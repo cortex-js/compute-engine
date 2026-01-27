@@ -58,35 +58,35 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions = {
     return `(${args.map((x) => compile(x)).join(' + ')})`;
   },
   Arccos: 'Math.acos',
-  Arccosh: 'Math.acosh',
+  Arcosh: 'Math.acosh',
   Arccot: ([x], compile) => {
     if (x === null) throw new Error('Arccot: no argument');
     return `Math.atan(1 / (${compile(x)}))`;
   },
-  Arccoth: ([x], compile) => {
-    if (x === null) throw new Error('Arccoth: no argument');
+  Arcoth: ([x], compile) => {
+    if (x === null) throw new Error('Arcoth: no argument');
     return `Math.atanh(1 / (${compile(x)}))`;
   },
   Arccsc: ([x], compile) => {
     if (x === null) throw new Error('Arccsc: no argument');
     return `Math.asin(1 / (${compile(x)}))`;
   },
-  Arccsch: ([x], compile) => {
-    if (x === null) throw new Error('Arccsch: no argument');
+  Arcsch: ([x], compile) => {
+    if (x === null) throw new Error('Arcsch: no argument');
     return `Math.asinh(1 / (${compile(x)}))`;
   },
   Arcsec: ([x], compile) => {
     if (x === null) throw new Error('Arcsec: no argument');
     return `Math.acos(1 / (${compile(x)}))`;
   },
-  Arcsech: ([x], compile) => {
-    if (x === null) throw new Error('Arcsech: no argument');
+  Arsech: ([x], compile) => {
+    if (x === null) throw new Error('Arsech: no argument');
     return `Math.acosh(1 / (${compile(x)}))`;
   },
   Arcsin: 'Math.asin',
-  Arcsinh: 'Math.asinh',
+  Arsinh: 'Math.asinh',
   Arctan: 'Math.atan',
-  Arctanh: 'Math.atanh',
+  Artanh: 'Math.atanh',
   Ceiling: 'Math.ceil',
   Chop: '_SYS.chop',
   Cos: 'Math.cos',

@@ -111,6 +111,22 @@ describe('INDEFINITE INTEGRATION', () => {
       `arcsin(x)`
     ));
 
+  // Inverse hyperbolic producing integrals
+  test('1/sqrt(x^2+1) -> arsinh', () =>
+    expect(evaluate('\\int \\frac{1}{\\sqrt{x^2+1}} dx')).toMatchInlineSnapshot(
+      `Arsinh(x)`
+    ));
+
+  test('1/sqrt(x^2-1) -> arcosh', () =>
+    expect(evaluate('\\int \\frac{1}{\\sqrt{x^2-1}} dx')).toMatchInlineSnapshot(
+      `Arcosh(x)`
+    ));
+
+  test('1/(x*sqrt(x^2-1)) -> arcsec', () =>
+    expect(
+      evaluate('\\int \\frac{1}{x\\sqrt{x^2-1}} dx')
+    ).toMatchInlineSnapshot(`Arcsec(x)`));
+
   // Integration by parts tests
   test('x*e^x (integration by parts)', () =>
     expect(evaluate('\\int x e^x dx')).toMatchInlineSnapshot(`x * e^x - e^x`));

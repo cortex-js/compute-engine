@@ -146,15 +146,17 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
   // trigonometric functions above
   //
   {
-    //Note: we use Arccosh, not Arcosh, as the name of the function
-    Arccosh: trigFunction('Arccosh', 6200),
+    // Note: we use the ISO 80000-2 standard names for inverse hyperbolic
+    // functions: Arsinh, Arcosh, Artanh, etc. (not Arcsinh, Arccosh, Arctanh)
+    // The "ar" prefix stands for "area", which is mathematically correct
+    // since these functions relate to areas on a hyperbola, not arc lengths.
+    Arcosh: trigFunction('Arcosh', 6200),
 
     Arcsin: trigFunction('Arcsin', 5500),
 
-    //Note: we use Arcsinh, not Arsinh, as the name of the function
-    Arcsinh: trigFunction('Arcsinh', 6100),
+    Arsinh: trigFunction('Arsinh', 6100),
 
-    Arctanh: trigFunction('Arctanh', 6300),
+    Artanh: trigFunction('Artanh', 6300),
 
     Cosh: trigFunction('Cosh', 6050),
 
@@ -196,13 +198,13 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
 
     Arccot: trigFunction('Arccot', 5650),
 
-    Arccoth: trigFunction('Arccoth', 6350),
+    Arcoth: trigFunction('Arcoth', 6350),
 
-    Arccsch: trigFunction('Arccsch', 6250),
+    Arcsch: trigFunction('Arcsch', 6250),
 
     Arcsec: trigFunction('Arcsec', 5650),
 
-    Arcsech: trigFunction('Arcsech', 6250),
+    Arsech: trigFunction('Arsech', 6250),
 
     Arccsc: trigFunction('Arccsc', 5650),
 

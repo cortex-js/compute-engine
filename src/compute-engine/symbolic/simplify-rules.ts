@@ -913,7 +913,7 @@ export const SIMPLIFY_RULES: Rule[] = [
   //   replace: ['Sin', ['Add', ['Divide', 'Pi', 2], '__x']],
   // },
   {
-    match: ['Arccosh', '__x'],
+    match: ['Arcosh', '__x'],
     replace: [
       'Ln',
       ['Add', '__x', ['Sqrt', ['Subtract', ['Square', '__x'], 1]]],
@@ -933,7 +933,7 @@ export const SIMPLIFY_RULES: Rule[] = [
     ],
   },
   {
-    match: ['Arcsinh', '__x'],
+    match: ['Arsinh', '__x'],
     replace: [
       'Multiply',
       2,
@@ -941,7 +941,7 @@ export const SIMPLIFY_RULES: Rule[] = [
     ],
   },
   {
-    match: ['Arctanh', '__x'],
+    match: ['Artanh', '__x'],
     replace: [
       'Multiply',
       'Half',
@@ -1041,7 +1041,7 @@ export const SIMPLIFY_RULES: Rule[] = [
   //   replace: ['Sin', ['Add', ['Divide', 'Pi', 2], '__x']],
   // },
   {
-    match: ['Arccosh', '__x'],
+    match: ['Arcosh', '__x'],
     replace: [
       'Ln',
       ['Add', '__x', ['Sqrt', ['Subtract', ['Square', '__x'], 1]]],
@@ -1061,7 +1061,7 @@ export const SIMPLIFY_RULES: Rule[] = [
     ],
   },
   {
-    match: ['Arcsinh', '__x'],
+    match: ['Arsinh', '__x'],
     replace: [
       'Multiply',
       2,
@@ -1069,7 +1069,7 @@ export const SIMPLIFY_RULES: Rule[] = [
     ],
   },
   {
-    match: ['Arctanh', '__x'],
+    match: ['Artanh', '__x'],
     replace: [
       'Multiply',
       'Half',

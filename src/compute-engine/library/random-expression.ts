@@ -31,7 +31,7 @@ function randomExpressionWithHead(
 
 function randomTrig(): Expression {
   return [
-    oneOf(['Cos', 'Sin', 'Tan', 'Sinh', 'Arccos', 'Arcsinh']),
+    oneOf(['Cos', 'Sin', 'Tan', 'Sinh', 'Arccos', 'Arsinh']),
     oneOf([
       'Pi',
       '-1',
