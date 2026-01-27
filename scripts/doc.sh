@@ -16,6 +16,12 @@ export LINECLEAR="\033[1G\033[2K" # position to column 1; erase whole line
 export DIM="\033[0;2m"
 export RESET="\033[0;0m"
 
+# Note on the `sed` command:
+# On Linux, the -i switch can be used without an extension argument
+# On macOS, the -i switch must be followed by an extension argument (which can be empty)
+sedi () {
+    sed --version >/dev/null 2>&1 && sed -i -- "$@" || sed -i '' "$@"
+}
 
 printf $BASENAME$DOT$RESET" Building api.md"
 
@@ -43,9 +49,9 @@ mv ./temp-docs/common ./temp-docs/03
 npx concat-md --decrease-title-levels --dir-name-as-title --hide-anchor-links ./temp-docs > ./src/api.md
 
 # Remove `# 01`, `# 02`, `# 03` from the api.md
-sed -i '' 's/# 01//g' ./src/api.md
-sed -i '' 's/# 02//g' ./src/api.md
-sed -i '' 's/# 03//g' ./src/api.md
+sedi 's/# 01//g' ./src/api.md
+sedi 's/# 02//g' ./src/api.md
+sedi 's/# 03//g' ./src/api.md
 
 #rm -rf ./temp-docs
 

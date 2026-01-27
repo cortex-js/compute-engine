@@ -31,8 +31,8 @@ describe('CORTEX PARSING DIRECTIVES', () => {
     expect(validUa).toBe(true);
   });
   test('Environment variable directive', () => {
-    expect(validCortex('#env("TERM")')).toStrictEqual({
-      str: process.env['TERM'],
+    expect(validCortex('#env("HOME")')).toStrictEqual({
+      str: process.env['HOME'],
     });
   });
   test('Warning directive', () => {
