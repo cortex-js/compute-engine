@@ -39,7 +39,21 @@
   capital letters while others like `csc` were lowercase. All trig functions now
   consistently serialize in lowercase (e.g., `cot(x)` instead of `Cot(x)`).
 
+- **Compilation**: Fixed compilation of `Sum` and `Product` expressions.
+
+- **Sum/Product**: Fixed `sum` and `prod` library functions to correctly handle
+  substitution of index variables.
+
+- **Scientific Notation**: Fixed normalization of scientific notation for
+  fractional values (e.g., numbers less than 1).
+
 ## New Features and Improvements
+
+- **Number Serialization**: Added `adaptiveScientific` notation mode. When
+  serializing numbers to LaTeX, this mode uses scientific notation but avoids
+  exponents within a configurable range (controlled by `avoidExponentsInRange`).
+  This provides a balance between readability and precision for numbers across
+  different orders of magnitude.
 
 - Refactored the type parser to use a modular architecture. This allows for
   better extensibility and maintainability of the type system.
