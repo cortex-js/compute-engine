@@ -639,6 +639,51 @@ export function antiderivative(
     return integrate(fn, index);
   }
 
+  // Handle basic functions: e^x, sin(x), cos(x), ln(x), x^n
+  if (fn.operator === 'Exp' && fn.op1.symbol === index) {
+    // ∫e^x dx = e^x
+    return fn;
+  }
+
+  if (fn.operator === 'Sin' && fn.op1.symbol === index) {
+    // ∫sin(x) dx = -cos(x)
+    return ce.box(['Negate', ['Cos', index]]);
+  }
+
+  if (fn.operator === 'Cos' && fn.op1.symbol === index) {
+    // ∫cos(x) dx = sin(x)
+    return ce.box(['Sin', index]);
+  }
+
+  if (fn.operator === 'Ln' && fn.op1.symbol === index) {
+    // ∫ln(x) dx = x*ln(x) - x
+    return ce.box(['Subtract', ['Multiply', index, ['Ln', index]], index]);
+  }
+
+  if (fn.operator === 'Power') {
+    // ∫e^x dx = e^x (e^x is parsed as ['Power', 'ExponentialE', 'x'])
+    if (fn.op1.symbol === 'ExponentialE' && fn.op2.symbol === index) {
+      return fn;
+    }
+
+    // ∫x^n dx
+    if (fn.op1.symbol === index) {
+      const exponent = fn.op2;
+      if (exponent.isNumberLiteral) {
+        if (exponent.is(-1)) {
+          // ∫1/x dx = ln|x|
+          return ce.box(['Ln', ['Abs', index]]);
+        }
+        // ∫x^n dx = x^(n+1)/(n+1)
+        return ce.box([
+          'Divide',
+          ['Power', index, ['Add', exponent, 1]],
+          ['Add', exponent, 1],
+        ]);
+      }
+    }
+  }
+
   // Apply a pattern matching rule...
   const rules = ce.rules(INTEGRATION_RULES);
   const xfn = (expandAll(fn) ?? fn).subs(
