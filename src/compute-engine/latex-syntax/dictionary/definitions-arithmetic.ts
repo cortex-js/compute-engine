@@ -425,103 +425,37 @@ function parseFraction(parser: Parser): Expression | null {
   }
 
   // Handle ordinary (Leibniz) derivative notation: \frac{d}{dx} f
-  // Accept forms like: `\frac{d}{dx} f`, `\frac{\mathrm{d}}{dx} f`,
-  // and grouped tokens like `\frac{d}{dx}` where denom is a Sequence ['d', 'x']
-  // or Multiply where one operand is a differential operator.
-  try {
-    const symNumer = symbol(numer);
-    const isDifferentialNumer =
-      symNumer === 'd' ||
-      symNumer === 'd_upright' ||
-      symNumer === 'differentialD';
-
-    if (!isDifferentialNumer) {
-      // Also detect sequences like ['Sequence', 'd'] or ['Sequence', ...]
-      if (operator(numer) === 'Sequence') {
-        const ops = operands(numer);
-        for (const op of ops) {
-          const s = symbol(op);
-          if (s === 'd' || s === 'd_upright' || s === 'differentialD') {
-            // consider it a differential numerator
-            // mark isDifferentialNumer true by setting symNumer
-            // (we don't reassign const, so just proceed)
-            // fallback to treat as differential
-            // break out and handle below
-            // We'll treat existence of any 'd' token as a match
-            // by setting isDifferentialNumer via side-effect variable isDifferentialNumer
-          }
-        }
-      }
-    }
-
-    // If the numerator is a plain 'd' differential operator:
-    if (isDifferentialNumer || operator(numer) === 'Sequence') {
-      // Extract variable(s) from the denominator. Typical forms:
-      // - 'dx' -> Sequence ['d','x']
-      // - ['Sequence','d','x']
-      // - ['Multiply', 'd', 'x']
-      const vars: Expression[] = [];
-      const collectVar = (expr: Expression | null) => {
-        if (!expr) return;
-        const s = symbol(expr);
-        if (s && s !== 'd' && s !== 'd_upright' && s !== 'differentialD') {
-          vars.push(expr);
-          return;
-        }
-        // If it's a sequence/multiply, inspect operands
-        const h = operator(expr);
-        if (h === 'Sequence' || h === 'Multiply' || h === 'InvisibleOperator') {
-          for (const op of operands(expr)) collectVar(op);
-        }
-      };
-
-      collectVar(denom);
-
-      // If we didn't find vars in denom, try denom as a single symbol token like 'x' or 'dx' where 'dx' may be parsed as a single symbol whose last char is the variable
-      if (vars.length === 0) {
-        const s = symbol(denom);
-        if (s && s.length > 1 && s[0] === 'd') {
-          // take the remainder as variable name, e.g. 'dx' -> 'x'
-          vars.push(s.slice(1));
-        }
-      }
-
-      if (vars.length > 0) {
-        // If numerator contained an explicit function (rare), reuse it, otherwise parse the following expression as the function to differentiate
-        let fnExpr = operand(numer, 1);
-        if (fnExpr === null || fnExpr === undefined)
-          fnExpr = missingIfEmpty(parser.parseExpression());
-
-        // If multiple vars, return a list, otherwise single var
-        const varExpr: Expression | null =
-          vars.length > 1 ? ['List', ...vars] : vars[0];
-        return ['D', fnExpr, varExpr];
-      }
-    }
-  } catch (e) {
-    // Defensive: any parsing error should fall through to default Divide
-  }
-
-  // Handle Leibniz notation for ordinary derivatives using 'd', e.g.
-  // \frac{d}{dx} f(x)  -> D(f(x), x)
-  // \frac{d^2}{dx^2} f(x) -> D(f(x), x, x)  (higher orders handled by caller)
+  // Accept forms like: `\frac{d}{dx} f`, `\frac{\mathrm{d}}{dx} f`
   const numerSym = symbol(numer);
-  if (numerSym === 'd' || numerSym === 'd_upright') {
-    // Attempt to extract the variable(s) from the denominator.
+  const isDifferential =
+    numerSym === 'd' || numerSym === 'd_upright' || numerSym === 'differentialD';
+
+  if (isDifferential) {
+    // Extract variable(s) from the denominator. Typical forms:
+    // - 'dx' (single symbol)
+    // - ['Sequence', 'd', 'x']
+    // - ['Multiply', 'd', 'x']
     const vars: Expression[] = [];
 
-    if (operator(denom) === 'Multiply' || operator(denom) === 'Sequence') {
-      const args = operands(denom);
-      for (let i = 0; i < args.length; i++) {
-        const a = args[i];
-        const s = symbol(a);
-        if (s === 'd' || s === 'd_upright') {
-          const v = args[i + 1];
-          if (v) vars.push(v);
-        }
+    const collectVars = (expr: Expression | null) => {
+      if (!expr) return;
+      const s = symbol(expr);
+      // If it's a symbol that's not a differential operator, it's a variable
+      if (s && s !== 'd' && s !== 'd_upright' && s !== 'differentialD') {
+        vars.push(expr);
+        return;
       }
-    } else {
-      // denom could be a single symbol like 'dx'
+      // If it's a sequence/multiply/invisible operator, inspect operands
+      const h = operator(expr);
+      if (h === 'Sequence' || h === 'Multiply' || h === 'InvisibleOperator') {
+        for (const op of operands(expr)) collectVars(op);
+      }
+    };
+
+    collectVars(denom);
+
+    // If no vars found, try parsing denom as 'dx' -> 'x'
+    if (vars.length === 0) {
       const denomSym = symbol(denom);
       if (denomSym && denomSym.length > 1 && denomSym[0] === 'd') {
         vars.push(denomSym.slice(1));
@@ -529,10 +463,9 @@ function parseFraction(parser: Parser): Expression | null {
     }
 
     if (vars.length > 0) {
-      let fn = operand(numer, 1);
-      if (fn === null || fn === undefined)
-        fn = missingIfEmpty(parser.parseExpression());
-      if (vars.length > 1) vars.unshift('List');
+      // Parse the expression to differentiate
+      const fn = missingIfEmpty(parser.parseExpression());
+      // D expects variables as separate arguments: ['D', f, x] or ['D', f, x, y]
       return ['D', fn, ...vars];
     }
   }
