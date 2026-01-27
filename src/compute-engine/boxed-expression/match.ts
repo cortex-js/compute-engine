@@ -6,7 +6,7 @@ import type {
 
 import { permutations } from '../../common/utils';
 
-import { isWildcard, wildcardName, wildcardType } from './boxed-patterns';
+import { isWildcard, wildcardName, wildcardType, validatePattern } from './boxed-patterns';
 import { isOperatorDef } from './utils';
 
 function hasWildcards(expr: string | BoxedExpression): boolean {
@@ -142,13 +142,12 @@ function matchOnce(
       //
       // 2. Both operator names match
       //
-      //?Arguably, matching permutations should be skipped, in the case of pattern being constituted
-      //by either (1) at least one optional-sequence wildcard, or 2) two or more sequence wildcards (optional or otherwise).
-      //^In both of these cases, the implication, it can be argued, is that their is requirement
-      //that operands should pertain to a *specific* permutation.
-      result = pattern.operatorDefinition!.commutative
-        ? matchPermutation(expr, pattern, substitution, options)
-        : matchArguments(expr, pattern.ops, substitution, options);
+      // For commutative operators, try permutations unless matchPermutations is false
+      const matchPerms = options.matchPermutations ?? true;
+      result =
+        pattern.operatorDefinition!.commutative && matchPerms
+          ? matchPermutation(expr, pattern, substitution, options)
+          : matchArguments(expr, pattern.ops, substitution, options);
     }
 
     if (result === null && useVariations) {
@@ -359,17 +358,26 @@ function matchPermutation(
   // 1, 1]. Such a check would reduce permutations from 120 to 1.
   // - ^Another, may be the req. of a matching qty. of operands (with expr.), in the case of no
   // sequence wildcards in pattern.
+  // Filter out invalid permutations with consecutive multi-element wildcards:
+  // - Sequence followed by Sequence or OptionalSequence
+  // - OptionalSequence followed by Sequence or OptionalSequence
+  // Note: Sequence/OptionalSequence followed by universal Wildcard (_) is VALID
+  // because the single-element wildcard provides an anchor point.
   const cond = (
     xs: ReadonlyArray<BoxedExpression> /* , generated: Set<string> */
   ) =>
-    !xs.some(
-      (x, index) =>
-        isWildcard(x) &&
-        wildcardType(x) === 'Sequence' &&
-        xs[index + 1] &&
-        isWildcard(xs[index + 1]) &&
-        wildcardType(xs[index + 1]) === 'Sequence'
-    );
+    !xs.some((x, index) => {
+      if (!isWildcard(x)) return false;
+      const xType = wildcardType(x);
+      if (xType !== 'Sequence' && xType !== 'OptionalSequence') return false;
+
+      const next = xs[index + 1];
+      if (!next || !isWildcard(next)) return false;
+
+      const nextType = wildcardType(next);
+      // Only exclude consecutive multi-element wildcards
+      return nextType === 'Sequence' || nextType === 'OptionalSequence';
+    });
 
   const patterns = permutations(pattern.ops!, cond);
 
@@ -640,12 +648,17 @@ export function match(
 ): BoxedSubstitution | null {
   pattern = pattern.structural;
 
+  // Note: Pattern validation is available via validatePattern() for explicit checks,
+  // but not called here because canonicalization may reorder operands, making valid
+  // patterns appear invalid. The permutation filter handles ambiguous cases during matching.
+
   // Default options
   const useVariations = options?.useVariations ?? false;
   const opts = {
     recursive: options?.recursive ?? false,
     useVariations,
     acceptVariants: useVariations,
+    matchPermutations: options?.matchPermutations ?? true,
   };
   const substitution = options?.substitution ?? {};
 

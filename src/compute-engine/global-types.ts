@@ -1122,9 +1122,10 @@ export interface BoxedExpression {
    *
    * :::info[Note]
    * Applicable to canonical and non-canonical expressions.
-   * 
-   * To specify a match for single symbol (non wildcard), it must be boxed (e.g. `{ match:
-   * ce.box('x'), ... }`), but it is suggested to use method *'subs()'* for this.
+   *
+   * To match a specific symbol (not a wildcard pattern), the `match` must be
+   * a `BoxedExpression` (e.g., `{ match: ce.box('x'), replace: ... }`).
+   * For simple symbol substitution, consider using `subs()` instead.
    * :::
    */
   replace(
@@ -1950,6 +1951,15 @@ export type PatternMatchOptions = {
   substitution?: BoxedSubstitution;
   recursive?: boolean;
   useVariations?: boolean;
+  /**
+   * If `true` (default), for commutative operators, try all permutations of
+   * the pattern operands to find a match.
+   *
+   * If `false`, only match in the exact order given. This can be useful
+   * when the pattern order is significant or for performance optimization
+   * with large patterns.
+   */
+  matchPermutations?: boolean;
 };
 
 /**

@@ -533,68 +533,6 @@ const INTEGRATION_RULES: Rule[] = [
   },
 ];
 
-function lnRule(expr: BoxedExpression, variable: string): BoxedExpression {
-  const ce = expr.engine;
-  if (expr.op1.symbol !== variable) return integrate(expr, variable);
-  return ce.box([
-    'Subtract',
-    ['Multiply', variable, ['Ln', variable]],
-    variable,
-  ]);
-}
-
-function powerRule(expr: BoxedExpression, variable: string): BoxedExpression {
-  const ce = expr.engine;
-  if (expr.op1.symbol !== variable) return integrate(expr, variable);
-  const exponent = expr.op2;
-  if (exponent.isNumberLiteral) {
-    if (exponent.is(-1)) return ce.box(['Ln', ['Abs', variable]]);
-
-    return ce.box([
-      'Divide',
-      ['Power', variable, ['Add', exponent, 1]],
-      ['Add', exponent, 1],
-    ]);
-  }
-  return integrate(expr, variable);
-}
-
-function sinRule(expr: BoxedExpression, variable: string): BoxedExpression {
-  const ce = expr.engine;
-  if (expr.op1.symbol !== variable) return integrate(expr, variable);
-  return ce.box(['Negate', ['Cos', variable]]);
-}
-function cosRule(expr: BoxedExpression, variable: string): BoxedExpression {
-  const ce = expr.engine;
-  if (expr.op1.symbol !== variable) return integrate(expr, variable);
-  return ce.box(['Sin', variable]);
-}
-function expRule(expr: BoxedExpression, variable: string): BoxedExpression {
-  const ce = expr.engine;
-  if (expr.op1.symbol !== variable) return integrate(expr, variable);
-  return ce.box(['Exp', variable]);
-}
-function tanRule(expr: BoxedExpression, variable: string): BoxedExpression {
-  const ce = expr.engine;
-  if (expr.op1.symbol !== variable) return integrate(expr, variable);
-  return ce.box(['Negate', ['Ln', ['Abs', ['Cos', variable]]]]);
-}
-
-function secRule(expr: BoxedExpression, variable: string): BoxedExpression {
-  const ce = expr.engine;
-  if (expr.op1.symbol !== variable) return integrate(expr, variable);
-  return ce.box(['Ln', ['Abs', ['Add', ['Sec', variable], ['Tan', variable]]]]);
-}
-
-function cscRule(expr: BoxedExpression, variable: string): BoxedExpression {
-  const ce = expr.engine;
-  if (expr.op1.symbol !== variable) return integrate(expr, variable);
-  return ce.box([
-    'Negate',
-    ['Ln', ['Abs', ['Add', ['Csc', variable], ['Cot', variable]]]],
-  ]);
-}
-
 /** Calculate the antiderivative of fn, as an expression (not a function) */
 export function antiderivative(
   fn: BoxedExpression,

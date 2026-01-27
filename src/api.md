@@ -1,4 +1,4 @@
-# 01
+
 
 ## Compute Engine
 
@@ -1364,8 +1364,9 @@ canonical status. (Canonicalization is opportunistic here, in other words).
 :::info[Note]
 Applicable to canonical and non-canonical expressions.
 
-To specify a match for single symbol (non wildcard), it must be boxed (e.g. `{ match:
-ce.box('x'), ... }`), but it is suggested to use method *'subs()'* for this.
+To match a specific symbol (not a wildcard pattern), the `match` must be
+a `BoxedExpression` (e.g., `{ match: ce.box('x'), replace: ... }`).
+For simple symbol substitution, consider using `subs()` instead.
 :::
 
 ####### rules
@@ -2659,6 +2660,7 @@ type PatternMatchOptions = {
   substitution: BoxedSubstitution;
   recursive: boolean;
   useVariations: boolean;
+  matchPermutations: boolean;
 };
 ```
 
@@ -6724,45 +6726,6 @@ The maximum number of significant digits in serialized numbers.
 
 Default: `"auto"`
 
-#### NumberSerializationFormat.notation
-
-```ts
-notation: "auto" | "engineering" | "scientific" | "adaptiveScientific";
-```
-
-Controls how numbers with exponents are formatted:
-
-- `"auto"`: Display as decimal when possible, use exponent notation otherwise
-- `"scientific"`: Always use normalized scientific notation (mantissa between 1 and 10)
-- `"engineering"`: Use engineering notation (exponent is a multiple of 3)
-- `"adaptiveScientific"`: Like `"auto"` within the avoid range, but use normalized scientific notation outside
-
-Default: `"auto"`
-
-#### NumberSerializationFormat.avoidExponentsInRange
-
-```ts
-avoidExponentsInRange: undefined | null | [number, number];
-```
-
-Specifies a range of exponents where decimal notation is preferred over exponent notation.
-For example, `[-7, 20]` means exponents from -7 to 20 will be displayed as decimals when possible.
-
-Default: `[-7, 20]`
-
-#### Notation Behavior Summary
-
-The table below shows how each notation mode behaves when the exponent is inside or outside the `avoidExponentsInRange`:
-
-| Notation | Exponent in Avoid Range | Exponent Outside Avoid Range |
-|----------|-------------------------|------------------------------|
-| `"auto"` | Decimal (e.g., `0.000000142857`) | Exponent, not normalized (e.g., `14285714×10^{-24}`) |
-| `"scientific"` | Scientific notation (e.g., `1.428×10^{-7}`) | Scientific notation (e.g., `1.428×10^{-8}`) |
-| `"engineering"` | Decimal or engineering | Engineering notation (exponent multiple of 3) |
-| `"adaptiveScientific"` | Decimal (e.g., `0.000000142857`) | Scientific notation (e.g., `1.428×10^{-8}`) |
-
-Note: `"scientific"` notation ignores `avoidExponentsInRange` and always produces normalized scientific notation.
-
 </MemberCard>
 
 ## Tensors
@@ -8102,7 +8065,7 @@ valueOf(): string
 
 </MemberCard>
 
-# 02
+
 
 ## MathJSON
 
@@ -8273,7 +8236,7 @@ The dictionary and function nodes can contain expressions themselves.
 
 </MemberCard>
 
-# 03
+
 
 ## Type
 

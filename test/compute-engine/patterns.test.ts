@@ -5,6 +5,7 @@ import {
   Substitution,
 } from '../../src/compute-engine';
 import { _BoxedExpression } from '../../src/compute-engine/boxed-expression/abstract-boxed-expression';
+import { validatePattern } from '../../src/compute-engine/boxed-expression/boxed-patterns';
 import { Expression } from '../../src/math-json/types';
 import { engine, latex } from '../utils';
 
@@ -993,6 +994,141 @@ describe('NON EXACT WILDCARDS', () => {
         ___b: 1,
         _a: 1,
         _b: 0,
+      }
+    `);
+  });
+});
+
+describe('PATTERN VALIDATION', () => {
+  // Test validatePattern directly with non-canonical patterns
+  // (canonical forms may reorder operands for commutative operators)
+  const validate = (pattern: Expression) => {
+    const boxedPattern = ce.box(pattern, { canonical: false });
+    validatePattern(boxedPattern);
+  };
+
+  // INVALID: Consecutive multi-element wildcards (no delimiter to separate them)
+  test('rejects consecutive sequence wildcards', () => {
+    expect(() => validate(['Add', '__a', '__b'])).toThrow(
+      /sequence wildcard.*cannot be followed by.*sequence wildcard/
+    );
+  });
+
+  test('rejects optional sequence followed by sequence wildcard', () => {
+    expect(() => validate(['Add', '___a', '__b'])).toThrow(
+      /optional sequence wildcard.*cannot be followed by.*sequence wildcard/
+    );
+  });
+
+  test('rejects sequence wildcard followed by optional sequence wildcard', () => {
+    expect(() => validate(['Add', '__a', '___b'])).toThrow(
+      /sequence wildcard.*cannot be followed by.*optional sequence wildcard/
+    );
+  });
+
+  test('rejects consecutive optional sequence wildcards', () => {
+    expect(() => validate(['Add', '___a', '___b'])).toThrow(
+      /optional sequence wildcard.*cannot be followed by.*optional sequence wildcard/
+    );
+  });
+
+  // VALID: Universal wildcard (_) provides an anchor point
+  test('allows sequence wildcard followed by universal wildcard', () => {
+    expect(() => validate(['Add', '__a', '_b'])).not.toThrow();
+  });
+
+  test('allows optional sequence followed by universal wildcard', () => {
+    expect(() => validate(['Add', '___a', '_b'])).not.toThrow();
+  });
+
+  test('allows sequence wildcard followed by literal', () => {
+    expect(() => validate(['Add', '__a', 1])).not.toThrow();
+  });
+
+  // VALID: Multi-element wildcards separated by non-wildcard elements
+  test('allows optional sequences with delimiters between them', () => {
+    expect(() => validate(['Multiply', '___u', 'q', 'r', 's', '___v'])).not.toThrow();
+  });
+
+  test('validates nested patterns', () => {
+    expect(() => validate(['Add', 1, ['Multiply', '__a', '__b']])).toThrow(
+      /sequence wildcard.*cannot be followed by.*sequence wildcard/
+    );
+  });
+
+  test('allows valid patterns with multiple universal wildcards', () => {
+    expect(() => validate(['Add', '_a', '_b'])).not.toThrow();
+  });
+});
+
+describe('matchPermutations option', () => {
+  // Helper to match with non-canonical expressions to test permutation behavior
+  const matchNonCanonical = (
+    pattern: Expression,
+    expr: Expression,
+    options?: PatternMatchOptions
+  ) => {
+    const boxedPattern = ce.box(pattern, { canonical: false });
+    const boxedExpr = ce.box(expr, { canonical: false });
+    return boxedExpr.match(boxedPattern, { useVariations: true, ...options });
+  };
+
+  test('default behavior tries permutations for commutative operators', () => {
+    // Add is commutative, so pattern [Add, 1, _a] should match [Add, x, 1]
+    // via permutation to find _a = x
+    const result = matchNonCanonical(['Add', 1, '_a'], ['Add', 'x', 1]);
+    expect(result).toMatchInlineSnapshot(`
+      {
+        _a: x,
+      }
+    `);
+  });
+
+  test('matchPermutations: true explicitly allows permutation matching', () => {
+    const result = matchNonCanonical(['Add', 1, '_a'], ['Add', 'x', 1], {
+      matchPermutations: true,
+    });
+    expect(result).toMatchInlineSnapshot(`
+      {
+        _a: x,
+      }
+    `);
+  });
+
+  test('matchPermutations: false disables permutation matching', () => {
+    // Without permutations, pattern [Add, 1, _a] won't match [Add, x, 1]
+    // because position 0 is 1 in pattern but x in expression
+    const result = matchNonCanonical(['Add', 1, '_a'], ['Add', 'x', 1], {
+      matchPermutations: false,
+    });
+    expect(result).toBeNull();
+  });
+
+  test('matchPermutations: false still matches exact order', () => {
+    // Even without permutations, exact order should match
+    const result = matchNonCanonical(['Add', 1, '_a'], ['Add', 1, 'x'], {
+      matchPermutations: false,
+    });
+    expect(result).toMatchInlineSnapshot(`
+      {
+        _a: x,
+      }
+    `);
+  });
+
+  test('matchPermutations does not affect non-commutative operators', () => {
+    // Subtract is not commutative, so permutations should never be tried
+    // regardless of the option value
+    const withPerms = matchNonCanonical(['Subtract', 1, '_a'], ['Subtract', 1, 'x'], {
+      matchPermutations: true,
+    });
+    const withoutPerms = matchNonCanonical(['Subtract', 1, '_a'], ['Subtract', 1, 'x'], {
+      matchPermutations: false,
+    });
+    expect(withPerms).toEqual(withoutPerms);
+    expect(withPerms).toMatchInlineSnapshot(`
+      {
+        _a: x,
       }
     `);
   });

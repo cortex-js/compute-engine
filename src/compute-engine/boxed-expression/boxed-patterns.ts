@@ -55,8 +55,8 @@ export function wildcardType(
   if (typeof expr === 'string') {
     if (expr.startsWith('_')) {
       if (expr.startsWith('__')) {
-        if (expr.startsWith('___')) return 'Sequence';
-        return 'OptionalSequence';
+        if (expr.startsWith('___')) return 'OptionalSequence';
+        return 'Sequence';
       }
       return 'Wildcard';
     }
@@ -77,4 +77,53 @@ export function wildcardType(
   }
 
   return null;
+}
+
+/**
+ * Validate a pattern for invalid wildcard combinations.
+ *
+ * Throws an error if the pattern contains consecutive multi-element wildcards:
+ * - Sequence (`__`) followed by Sequence (`__`) or OptionalSequence (`___`)
+ * - OptionalSequence (`___`) followed by Sequence (`__`) or OptionalSequence (`___`)
+ *
+ * These patterns are ambiguous because there's no delimiter to determine where
+ * one sequence ends and the next begins.
+ *
+ * Sequence or OptionalSequence followed by universal Wildcard (`_`) is allowed
+ * because the single-element wildcard provides an anchor point.
+ *
+ * @param pattern - The pattern to validate
+ * @throws Error if the pattern contains invalid wildcard combinations
+ */
+export function validatePattern(pattern: BoxedExpression): void {
+  if (!pattern.ops) return;
+
+  for (let i = 0; i < pattern.ops.length - 1; i++) {
+    const current = pattern.ops[i];
+    const next = pattern.ops[i + 1];
+
+    if (!isWildcard(current)) continue;
+
+    const currentType = wildcardType(current);
+    if (currentType !== 'Sequence' && currentType !== 'OptionalSequence') continue;
+
+    if (!isWildcard(next)) continue;
+
+    const nextType = wildcardType(next);
+    // Only flag consecutive multi-element wildcards (Sequence or OptionalSequence)
+    // Universal Wildcard (_) is allowed as it provides an anchor point
+    if (nextType === 'Sequence' || nextType === 'OptionalSequence') {
+      const currentDesc = currentType === 'Sequence' ? 'sequence' : 'optional sequence';
+      const nextDesc = nextType === 'Sequence' ? 'sequence' : 'optional sequence';
+      throw new Error(
+        `Invalid pattern: ${currentDesc} wildcard '${wildcardName(current)}' ` +
+        `cannot be followed by ${nextDesc} wildcard '${wildcardName(next)}'`
+      );
+    }
+  }
+
+  // Recursively validate nested patterns
+  for (const op of pattern.ops) {
+    validatePattern(op);
+  }
 }
