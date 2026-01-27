@@ -7,7 +7,27 @@ import { parseCortex } from '../src/cortex';
 const ce = new ComputeEngine();
 const engine = ce;
 
-console.log(ce.box(1 / 7000000).toLatex({ notation: 'auto' }));
+console.log(
+  ce.parse('3 / 0.03', { parseNumbers: 'rational' }).evaluate().latex
+);
+
+console.log(
+  ce.box(1 / 7000000).toLatex({
+    notation: 'engineering',
+  })
+);
+
+console.log(
+  ce.box(1 / 70000000).toLatex({
+    notation: 'engineering',
+  })
+);
+
+console.log(
+  ce
+    .box(1 / 7000000)
+    .toLatex({ notation: 'scientific', avoidExponentsInRange: null })
+);
 
 // ce.latexDictionary = [
 //   ...ce.latexDictionary,
