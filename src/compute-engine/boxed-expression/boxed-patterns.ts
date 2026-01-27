@@ -11,6 +11,14 @@ export function isWildcard(expr: BoxedExpression): expr is BoxedSymbol {
   );
 }
 
+/**
+ * Return the string representing this wildcard, including any optional (one-character) name, or
+ * `null` if not a wildcard expression.
+ *
+ * @export
+ * @param expr
+ * @returns
+ */
 export function wildcardName(expr: BoxedExpression): string | null {
   if (expr.symbol?.startsWith('_')) return expr.symbol;
 
@@ -24,6 +32,49 @@ export function wildcardName(expr: BoxedExpression): string | null {
   if (expr.operator === 'Wildcard') return '_';
   if (expr.operator === 'WildcardSequence') return '__';
   if (expr.operator === 'WildcardOptionalSequence') return '___';
+
+  return null;
+}
+
+/**
+ *
+ * <!--
+ * @todo:
+ * - Utilize moreso (e.g. ./match.ts)
+ * - 'Wildcard' -> 'Universal', for clarity...?
+ * -->
+ *
+ * @export
+ * @param expr
+ * @returns
+ */
+export function wildcardType(
+  expr: BoxedExpression | string
+): 'Wildcard' | 'Sequence' | 'OptionalSequence' | null {
+
+  if (typeof expr === 'string') {
+    if (expr.startsWith('_')) {
+      if (expr.startsWith('__')) {
+        if (expr.startsWith('___')) return 'Sequence';
+        return 'OptionalSequence';
+      }
+      return 'Wildcard';
+    }
+    return null;
+  }
+
+  if (expr.symbol !== null) {
+    const symbol = expr.symbol!;
+    if (!symbol.startsWith('_')) return null;
+    if (!symbol.startsWith('__')) return 'Wildcard';
+    return symbol.startsWith('___') ? 'OptionalSequence' : 'Sequence';
+  }
+
+  if (expr.isFunctionExpression) {
+    if (expr.operator === 'Wildcard') return 'Wildcard';
+    if (expr.operator === 'WildcardSequence') return 'Sequence';
+    if (expr.operator === 'WildcardOptionalSequence') return 'OptionalSequence';
+  }
 
   return null;
 }
