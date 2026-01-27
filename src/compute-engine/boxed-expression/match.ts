@@ -321,17 +321,9 @@ function matchVariations(
  * Try all needed permutations of the operands of a pattern expression, against the operands of a
  * match target. Assumes that *expr* and *pattern* have the same operator.
  *
- * <!--
- * !@fix?:
- * - Permutations based on operands of pattern [only] do not match in some scenarios where the
- * pattern should arguably otherwise return a valid match: specifically in cases involving patterns
- * with seq.-wildcards. For instance:
- *   -^A basic example is `['Add', 1, 2, 3, 'x', 5]` matched against pattern `['Add', 1, '__a']`.
- *   Assuming the input is canonicalized, the resultant expr. against which the pattern is matched
- *   is `['Add', 'x', 1, 2, 3, 5]`: which cannot be matched against any pattern permutation... (this
- *   should be expected to be a valid match: with expr. expected to be commutative & therefore
- *   operands validly taking on any arrangement, canonical-form aside).
- * -->
+ * For patterns containing sequence wildcards (__) with anchor elements (non-wildcards),
+ * uses anchor-based matching: anchors match against specific expression elements,
+ * and sequence wildcards capture ALL remaining elements.
  *
  * @param expr
  * @param pattern
@@ -347,17 +339,21 @@ function matchPermutation(
 ): BoxedSubstitution | null {
   console.assert(expr.operator === pattern.operator);
 
-  // Avoid redundant permutations:
-  // This condition ensures various wildcard sub-permutations - namely a sequence followed by
-  // another sequence, are skipped.
-  // ›Consequently, a pattern such as `['Add', 1, 2, '__a', 4, '__b', 7, '_']`, notably with only 3
-  // non-optional wildcards, yields only *2040* permutations, in contrast to *5040* (i.e. 7!).
-  //!@todo:
-  // - Further optimizations certainly possible here...: consider sub-sequences of expressions with
-  // same values (particularly number/symbol literals : Consider ['Add', 1, 1, 1,
-  // 1, 1]. Such a check would reduce permutations from 120 to 1.
-  // - ^Another, may be the req. of a matching qty. of operands (with expr.), in the case of no
-  // sequence wildcards in pattern.
+  const patternOps = pattern.ops!;
+
+  // Check if we have sequence wildcards with anchors - use anchor-based matching
+  const hasSequenceWildcard = patternOps.some((op) => {
+    const wType = wildcardType(op);
+    return wType === 'Sequence' || wType === 'OptionalSequence';
+  });
+  const hasAnchor = patternOps.some((op) => !isWildcard(op));
+
+  if (hasSequenceWildcard && hasAnchor) {
+    const result = matchCommutativeWithAnchors(expr, pattern, substitution, options);
+    if (result !== null) return result;
+  }
+
+  // Fall back to permutation-based matching
   // Filter out invalid permutations with consecutive multi-element wildcards:
   // - Sequence followed by Sequence or OptionalSequence
   // - OptionalSequence followed by Sequence or OptionalSequence
@@ -379,13 +375,232 @@ function matchPermutation(
       return nextType === 'Sequence' || nextType === 'OptionalSequence';
     });
 
-  const patterns = permutations(pattern.ops!, cond);
+  const patterns = permutations(patternOps, cond);
 
   for (const pat of patterns) {
     const result = matchArguments(expr, pat, substitution, options);
     if (result !== null) return result;
   }
   return null;
+}
+
+/**
+ * Match pattern operands against expression operands using anchor-based matching.
+ *
+ * For commutative operators with sequence wildcards and anchors (non-wildcard elements),
+ * this allows anchors to match anywhere in the expression, with ALL remaining elements
+ * captured by sequence wildcards.
+ *
+ * This solves the case where permuting pattern operands alone isn't sufficient:
+ * Pattern: ['Add', 1, '__a'] matching Expression: ['Add', 'x', 1, 2, 3, 5]
+ * - Anchor `1` matches position 1 in the expression
+ * - Sequence `__a` captures all remaining: ['x', 2, 3, 5] → ['Add', 'x', 2, 3, 5]
+ */
+function matchCommutativeWithAnchors(
+  expr: BoxedExpression,
+  pattern: BoxedExpression,
+  substitution: BoxedSubstitution,
+  options: PatternMatchOptions
+): BoxedSubstitution | null {
+  const ce = expr.engine;
+  const patternOps = pattern.ops!;
+  const exprOps = [...expr.ops!];
+
+  // Categorize pattern operands
+  const anchors: BoxedExpression[] = [];
+  const universalWildcards: BoxedExpression[] = [];
+  const sequenceWildcards: BoxedExpression[] = [];
+  const optionalSeqWildcards: BoxedExpression[] = [];
+
+  for (const op of patternOps) {
+    const wType = wildcardType(op);
+    if (wType === null) {
+      anchors.push(op);
+    } else if (wType === 'Wildcard') {
+      universalWildcards.push(op);
+    } else if (wType === 'Sequence') {
+      sequenceWildcards.push(op);
+    } else {
+      // OptionalSequence
+      optionalSeqWildcards.push(op);
+    }
+  }
+
+  // Try to match anchors against expression elements using backtracking
+  return tryMatchAnchors(0, exprOps, substitution);
+
+  function tryMatchAnchors(
+    anchorIndex: number,
+    remainingOps: BoxedExpression[],
+    sub: BoxedSubstitution
+  ): BoxedSubstitution | null {
+    // All anchors matched - now assign remaining ops to wildcards
+    if (anchorIndex >= anchors.length) {
+      return assignWildcards(remainingOps, sub);
+    }
+
+    const anchor = anchors[anchorIndex];
+
+    // Find all positions where this anchor matches
+    for (let i = 0; i < remainingOps.length; i++) {
+      const matchResult = matchOnce(remainingOps[i], anchor, sub, options);
+      if (matchResult !== null) {
+        // Remove this element and try matching remaining anchors
+        const newRemaining = [...remainingOps];
+        newRemaining.splice(i, 1);
+        const finalResult = tryMatchAnchors(anchorIndex + 1, newRemaining, matchResult);
+        if (finalResult !== null) return finalResult;
+      }
+    }
+
+    return null; // No position worked for this anchor
+  }
+
+  function assignWildcards(
+    remainingOps: BoxedExpression[],
+    sub: BoxedSubstitution
+  ): BoxedSubstitution | null {
+    let result: BoxedSubstitution | null = sub;
+
+    // Calculate minimum required elements
+    const neededForUniversal = universalWildcards.length;
+    const minNeededForSequence = sequenceWildcards.length; // Each needs at least 1
+
+    const totalNeeded = neededForUniversal + minNeededForSequence;
+
+    if (remainingOps.length < totalNeeded) return null;
+
+    // For multiple wildcards, we need to try different assignments
+    // Use recursive backtracking to assign elements to wildcards
+    return tryAssignWildcards(
+      [...universalWildcards, ...sequenceWildcards, ...optionalSeqWildcards],
+      remainingOps,
+      result
+    );
+  }
+
+  function tryAssignWildcards(
+    wildcards: BoxedExpression[],
+    remaining: BoxedExpression[],
+    sub: BoxedSubstitution
+  ): BoxedSubstitution | null {
+    if (wildcards.length === 0) {
+      // All wildcards assigned - remaining must be empty
+      return remaining.length === 0 ? sub : null;
+    }
+
+    const [wc, ...restWildcards] = wildcards;
+    const wcType = wildcardType(wc);
+    const wcName = wildcardName(wc)!;
+
+    if (wcType === 'Wildcard') {
+      // Universal wildcard - try each remaining element
+      for (let i = 0; i < remaining.length; i++) {
+        const newSub = captureWildcard(wcName, remaining[i], sub);
+        if (newSub !== null) {
+          const newRemaining = [...remaining];
+          newRemaining.splice(i, 1);
+          const result = tryAssignWildcards(restWildcards, newRemaining, newSub);
+          if (result !== null) return result;
+        }
+      }
+      return null;
+    }
+
+    if (wcType === 'Sequence') {
+      // Sequence wildcard needs at least 1 element
+      // Try capturing different numbers of elements (greedy: start with all)
+      const minCapture = 1;
+      const maxCapture = remaining.length - countMinNeeded(restWildcards);
+
+      for (let count = maxCapture; count >= minCapture; count--) {
+        // Try capturing 'count' elements from any positions
+        const combinations = getCombinations(remaining.length, count);
+        for (const indices of combinations) {
+          const captured = indices.map((i) => remaining[i]);
+          const capturedExpr = wrapCaptured(captured);
+          const newSub = captureWildcard(wcName, capturedExpr, sub);
+          if (newSub !== null) {
+            const newRemaining = remaining.filter((_, i) => !indices.includes(i));
+            const result = tryAssignWildcards(restWildcards, newRemaining, newSub);
+            if (result !== null) return result;
+          }
+        }
+      }
+      return null;
+    }
+
+    // OptionalSequence - can capture 0 or more elements
+    const maxCapture = remaining.length - countMinNeeded(restWildcards);
+
+    for (let count = maxCapture; count >= 0; count--) {
+      if (count === 0) {
+        // Capture identity element
+        const identity =
+          expr.operator === 'Add' ? ce.Zero :
+          expr.operator === 'Multiply' ? ce.One :
+          ce.Nothing;
+        const newSub = captureWildcard(wcName, identity, sub);
+        if (newSub !== null) {
+          const result = tryAssignWildcards(restWildcards, remaining, newSub);
+          if (result !== null) return result;
+        }
+      } else {
+        const combinations = getCombinations(remaining.length, count);
+        for (const indices of combinations) {
+          const captured = indices.map((i) => remaining[i]);
+          const capturedExpr = wrapCaptured(captured);
+          const newSub = captureWildcard(wcName, capturedExpr, sub);
+          if (newSub !== null) {
+            const newRemaining = remaining.filter((_, i) => !indices.includes(i));
+            const result = tryAssignWildcards(restWildcards, newRemaining, newSub);
+            if (result !== null) return result;
+          }
+        }
+      }
+    }
+    return null;
+  }
+
+  function countMinNeeded(wildcards: BoxedExpression[]): number {
+    return wildcards.reduce((sum, wc) => {
+      const wType = wildcardType(wc);
+      if (wType === 'Wildcard') return sum + 1;
+      if (wType === 'Sequence') return sum + 1;
+      return sum; // OptionalSequence needs 0
+    }, 0);
+  }
+
+  function wrapCaptured(captured: BoxedExpression[]): BoxedExpression {
+    if (captured.length === 1) return captured[0];
+    // For associative operators, wrap in the same operator
+    const def = ce.lookupDefinition(expr.operator);
+    if (def && isOperatorDef(def) && def.operator.associative) {
+      return ce.function(expr.operator, captured, { canonical: false });
+    }
+    return ce.function('Sequence', captured, { canonical: false });
+  }
+
+  function getCombinations(n: number, k: number): number[][] {
+    // Generate all combinations of k indices from 0..n-1
+    const result: number[][] = [];
+    const combo: number[] = [];
+
+    function backtrack(start: number) {
+      if (combo.length === k) {
+        result.push([...combo]);
+        return;
+      }
+      for (let i = start; i < n; i++) {
+        combo.push(i);
+        backtrack(i + 1);
+        combo.pop();
+      }
+    }
+
+    backtrack(0);
+    return result;
+  }
 }
 
 /**

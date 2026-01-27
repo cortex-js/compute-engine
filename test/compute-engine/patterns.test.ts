@@ -290,18 +290,12 @@ describe('PATTERNS  MATCH - Sequence wildcards', () => {
          * >1 Operand
          *
          */
-        // !@fix:
-        // Does not match...
-        // (further cases throughout sequence-wildcard matching are present, too. See instances of
-        // '@fix: (commutative matching)')
-        // !The canonicalized expr. (['Add', 'x', 1, 2, 3, 5]) neither matches against pattern
-        // permuation ['Add', 1, '__a'] or ['Add', '__a', 1].
-        // (In other words, using permutations of patterns here is not sufficient to match what
-        // would otherwise be considered a valid match: given the context of commutativity.)
-
-        // expect(match(pattern, ['Add', 1, 2, 3, 'x', 5])).toMatchInlineSnapshot(
-        //   `null`
-        // );
+        // Anchor-based matching: anchor `1` matches, __a captures all remaining elements
+        expect(match(pattern, ['Add', 1, 2, 3, 'x', 5])).toMatchInlineSnapshot(`
+          {
+            __a: ["Add", "x", 2, 3, 5],
+          }
+        `);
 
         /*
          * Function-expression operand/s
@@ -317,10 +311,12 @@ describe('PATTERNS  MATCH - Sequence wildcards', () => {
         /*
          * Operand permutations
          */
-        // !@fix: (commutative matching)
-        // expect(match(pattern, ['Add', 'x', 1, 3, 'y'])).toMatchInlineSnapshot(
-        //   `null`
-        // );
+        // Anchor-based matching: anchor `1` matches, __a captures remaining [x, 3, y]
+        expect(match(pattern, ['Add', 'x', 1, 3, 'y'])).toMatchInlineSnapshot(`
+          {
+            __a: ["Add", "x", "y", 3],
+          }
+        `);
 
         expect(match(pattern, ['Add', ['Square', 'x'], 1]))
           .toMatchInlineSnapshot(`
@@ -340,10 +336,15 @@ describe('PATTERNS  MATCH - Sequence wildcards', () => {
           }
         `);
 
-        // !@fix: (commutative matching)
-        // expect(
-        //   match(pattern, ['Multiply', 2, ['Sqrt', 'x'], ['Sqrt', 'x']])
-        // ).toMatchInlineSnapshot(`null`);
+        // Anchor-based matching: anchor ['Sqrt', 'x'] matches one occurrence,
+        // __m captures remaining [2, ['Sqrt', 'x']]
+        expect(
+          match(pattern, ['Multiply', 2, ['Sqrt', 'x'], ['Sqrt', 'x']])
+        ).toMatchInlineSnapshot(`
+          {
+            __m: ["Multiply", 2, ["Sqrt", "x"]],
+          }
+        `);
 
         // Match by commutative-permutation
         expect(match(pattern, ['Multiply', ['Sqrt', 'x'], ['Add', 2, 3]]))
@@ -434,22 +435,17 @@ describe('PATTERNS  MATCH - Sequence wildcards', () => {
 
         expect(match(pattern, ['Add', 1, 2])).toMatchInlineSnapshot(`{}`);
 
-        // !@fix: (commutative matching; see prior cases)
-        // expect(match(pattern, ['Add', 1, 2, 3, 'x', 5])).toMatchInlineSnapshot(
-        //   `null`
-        // );
+        // Anchor-based matching with unnamed wildcard
+        expect(match(pattern, ['Add', 1, 2, 3, 'x', 5])).toMatchInlineSnapshot(`{}`);
 
-        // !@fix: (commutative matching; see prior cases)
-        // expect(match(pattern, ['Add', 'x', 1, 3, 'y'])).toMatchInlineSnapshot(
-        //   `null`
-        // );
+        expect(match(pattern, ['Add', 'x', 1, 3, 'y'])).toMatchInlineSnapshot(`{}`);
 
         pattern = ['Multiply', '__', ['Sqrt', 'x']];
 
-        // !@fix: (commutative matching; see prior cases)
-        // expect(
-        //   match(pattern, ['Multiply', 2, ['Sqrt', 'x'], ['Sqrt', 'x']])
-        // ).toMatchInlineSnapshot(`null`);
+        // Anchor-based matching: ['Sqrt', 'x'] is anchor, __ captures the rest
+        expect(
+          match(pattern, ['Multiply', 2, ['Sqrt', 'x'], ['Sqrt', 'x']])
+        ).toMatchInlineSnapshot(`{}`);
 
         pattern = ['Subtract', '__', 'y', '_'];
 
