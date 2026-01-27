@@ -94,3 +94,37 @@ describe('INVALID RULES', () => {
     `);
   });
 });
+
+describe('matchPermutations option', () => {
+  it('default behavior tries permutations for commutative operators', () => {
+    // Use non-canonical expression to test permutation matching
+    const expr = ce.box(['Add', 'x', 1], { canonical: false });
+    const rule = { match: ['Add', 1, '_a'], replace: ['Multiply', 2, '_a'] };
+    // Should match via permutation: pattern [1, _a] matches expr [x, 1]
+    expect(expr.replace(rule)).toMatchInlineSnapshot(`["Multiply", 2, "x"]`);
+  });
+
+  it('matchPermutations: true explicitly allows permutation matching', () => {
+    const expr = ce.box(['Add', 'x', 1], { canonical: false });
+    const rule = { match: ['Add', 1, '_a'], replace: ['Multiply', 2, '_a'] };
+    expect(expr.replace(rule, { matchPermutations: true })).toMatchInlineSnapshot(
+      `["Multiply", 2, "x"]`
+    );
+  });
+
+  it('matchPermutations: false disables permutation matching', () => {
+    const expr = ce.box(['Add', 'x', 1], { canonical: false });
+    const rule = { match: ['Add', 1, '_a'], replace: ['Multiply', 2, '_a'] };
+    // Without permutations, [1, _a] won't match [x, 1] since positions differ
+    expect(expr.replace(rule, { matchPermutations: false })).toBeNull();
+  });
+
+  it('matchPermutations: false still matches exact order', () => {
+    const expr = ce.box(['Add', 1, 'x'], { canonical: false });
+    const rule = { match: ['Add', 1, '_a'], replace: ['Multiply', 2, '_a'] };
+    // Exact order matches even without permutations
+    expect(expr.replace(rule, { matchPermutations: false })).toMatchInlineSnapshot(
+      `["Multiply", 2, "x"]`
+    );
+  });
+});

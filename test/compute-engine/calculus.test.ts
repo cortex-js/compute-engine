@@ -65,6 +65,37 @@ describe('INDEFINITE INTEGRATION', () => {
     expect(evaluate('\\int 2\\pi f(x) dx')).toMatchInlineSnapshot(
       `int((2, pi, f(x)) dx)`
     ));
+
+  // Additional edge cases
+  test('cos', () =>
+    expect(evaluate('\\int \\cos x dx')).toMatchInlineSnapshot(`sin(x)`));
+
+  test('constant', () =>
+    expect(evaluate('\\int 5 dx')).toMatchInlineSnapshot(`5x`));
+
+  test('linear function', () =>
+    expect(evaluate('\\int x dx')).toMatchInlineSnapshot(`1/2 * x^2`));
+
+  test('polynomial (simple)', () =>
+    expect(evaluate('\\int (x^3 + x^2 + x) dx')).toMatchInlineSnapshot(
+      `1/4 * x^4 + 1/3 * x^3 + 1/2 * x^2`
+    ));
+
+  // @todo: These don't work due to various limitations:
+  // - 1/x and x^{-1}: canonicalize to Divide, but rules expect Power form
+  // - constant factors (3x, 2x^2): bug causes incorrect coefficients
+  // - exponential base a (2^x): not implemented
+  test.skip('1/x (reciprocal)', () =>
+    expect(evaluate('\\int \\frac{1}{x} dx')).toMatchInlineSnapshot(`ln(x)`));
+
+  test.skip('x^{-1} (negative one power)', () =>
+    expect(evaluate('\\int x^{-1} dx')).toMatchInlineSnapshot(`ln(x)`));
+
+  test.skip('linear function with coefficient', () =>
+    expect(evaluate('\\int 3x dx')).toMatchInlineSnapshot(`3/2 * x^2`));
+
+  test.skip('exponential base a', () =>
+    expect(evaluate('\\int 2^x dx')).toMatchInlineSnapshot(`2^x / ln(|2|)`));
 });
 
 /** These resolve symbolically the integrals, then applies the limits. */

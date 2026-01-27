@@ -737,12 +737,18 @@ export function applyRule(
   }
 
   const useVariations = rule.useVariations ?? options?.useVariations ?? false;
+  const matchPermutations = options?.matchPermutations ?? true;
 
   // For debugging
   onBeforeMatch?.(rule, expr);
 
   const sub = match
-    ? expr.match(match, { substitution, useVariations, recursive: false })
+    ? expr.match(match, {
+        substitution,
+        useVariations,
+        recursive: false,
+        matchPermutations,
+      })
     : {};
 
   // If the `expr` does not match the pattern, the rule doesn't apply

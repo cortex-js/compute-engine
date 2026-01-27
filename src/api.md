@@ -2539,6 +2539,7 @@ type ReplaceOptions = {
   recursive: boolean;
   once: boolean;
   useVariations: boolean;
+  matchPermutations: boolean;
   iterationLimit: number;
   canonical: CanonicalOptions;
 };
@@ -2666,6 +2667,20 @@ type PatternMatchOptions = {
 
 Control how a pattern is matched to an expression.
 
+### Wildcards
+
+Patterns can include wildcards to match parts of expressions:
+
+- **Universal (`_` or `_name`)**: Matches exactly one element
+- **Sequence (`__` or `__name`)**: Matches one or more elements
+- **Optional Sequence (`___` or `___name`)**: Matches zero or more elements
+
+Named wildcards capture values in the returned substitution:
+- `['Add', '_a', 1].match(['Add', 'x', 1])` → `{_a: 'x'}`
+- `['Add', '__a'].match(['Add', 1, 2, 3])` → `{__a: [1, 2, 3]}`
+
+### Options
+
 - `substitution`: if present, assumes these values for a subset of
    named wildcards, and ensure that subsequent occurrence of the same
    wildcard have the same value.
@@ -2673,9 +2688,10 @@ Control how a pattern is matched to an expression.
    level.
 - `useVariations`: if false, only match expressions that are structurally identical.
    If true, match expressions that are structurally identical or equivalent.
-
-   For example, when true, `["Add", '_a', 2]` matches `2`, with a value of
-   `_a` of `0`. If false, the expression does not match. **Default**: `false`
+   For example, when true, `["Add", '_a', 2]` matches `2`, with `_a = 0`.
+   **Default**: `false`
+- `matchPermutations`: if true (default), for commutative operators, try all
+   permutations of pattern operands. If false, match exact order only.
 
 </MemberCard>
 
