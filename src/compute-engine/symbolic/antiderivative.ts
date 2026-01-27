@@ -6,6 +6,7 @@ import { matchAnyRules } from '../boxed-expression/rules';
 import { expandAll } from '../boxed-expression/expand';
 import { differentiate } from './derivative';
 import { findUnivariateRoots } from '../boxed-expression/solve';
+import { cancelCommonFactors } from '../boxed-expression/polynomials';
 
 //  @todo: implement using Risch Algorithm
 
@@ -1216,6 +1217,14 @@ export function antiderivative(
   }
 
   if (fn.operator === 'Divide') {
+    // First try to cancel common factors in the numerator and denominator
+    // This helps with cases like ∫ (x+1)/(x²+3x+2) dx where (x+1) cancels
+    const cancelled = cancelCommonFactors(fn, index);
+    if (!cancelled.isSame(fn)) {
+      // If cancellation changed the expression, integrate the simplified form
+      return antiderivative(cancelled, index);
+    }
+
     if (!fn.op2.has(index)) {
       // ∫ f(x)/c dx = (1/c) * ∫f(x) dx
       const antideriv = antiderivative(fn.op1, index);

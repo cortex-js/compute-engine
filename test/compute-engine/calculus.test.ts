@@ -176,6 +176,12 @@ describe('INDEFINITE INTEGRATION', () => {
     expect(evaluate('\\int \\frac{1}{x^2+3x+2} dx')).toMatchInlineSnapshot(
       `-ln(|x + 2|) + ln(|x + 1|)`
     ));
+
+  // Test common factor cancellation before integration
+  test('(x+1)/(x^2+3x+2) (factor cancellation)', () =>
+    expect(evaluate('\\int \\frac{x+1}{x^2+3x+2} dx')).toMatchInlineSnapshot(
+      `ln(|x + 2|)`
+    ));
 });
 
 /** These resolve symbolically the integrals, then applies the limits. */
