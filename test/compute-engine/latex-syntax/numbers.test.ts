@@ -381,6 +381,60 @@ describe('SERIALIZATION OF NUMBERS', () => {
     );
   });
 
+  test('scientific notation within avoidExponentsInRange', () => {
+    const result = ce.box(1 / 7000000).toLatex({
+      notation: 'scientific',
+    });
+    expect(result).toMatchInlineSnapshot(
+      `1.428\\,571\\,428\\,571\\,428\\,5\\cdot10^{-7}`
+    );
+  });
+
+  test('scientific notation outside avoidExponentsInRange', () => {
+    const result = ce.box(1 / 70000000).toLatex({
+      notation: 'scientific',
+    });
+    expect(result).toMatchInlineSnapshot(
+      `1.428\\,571\\,428\\,571\\,428\\,6\\cdot10^{-8}`
+    );
+  });
+
+  test('auto notation within avoidExponentsInRange', () => {
+    const result = ce.box(1 / 7000000).toLatex({
+      notation: 'auto',
+    });
+    expect(result).toMatchInlineSnapshot(
+      `0.000\\,000\\,142\\,857\\,142\\,857\\,142\\,85`
+    );
+  });
+
+  test('auto notation outside avoidExponentsInRange', () => {
+    const result = ce.box(1 / 70000000).toLatex({
+      notation: 'auto',
+    });
+    expect(result).toMatchInlineSnapshot(
+      `14\\,285\\,714\\,285\\,714\\,286\\cdot10^{-24}`
+    );
+  });
+
+  test('adaptiveScientific notation within avoidExponentsInRange', () => {
+    const result = ce.box(1 / 7000000).toLatex({
+      notation: 'adaptiveScientific',
+    });
+    expect(result).toMatchInlineSnapshot(
+      `0.000\\,000\\,142\\,857\\,142\\,857\\,142\\,85`
+    );
+  });
+
+  test('adaptiveScientific notation outside avoidExponentsInRange', () => {
+    const result = ce.box(1 / 70000000).toLatex({
+      notation: 'adaptiveScientific',
+    });
+    expect(result).toMatchInlineSnapshot(
+      `1.428\\,571\\,428\\,571\\,428\\,6\\cdot10^{-8}`
+    );
+  });
+
   test('Number with repeating pattern', () => {
     const format = (num: string, p: string) =>
       ce.box({ num }).toLatex({
