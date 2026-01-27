@@ -1147,6 +1147,106 @@ function getLinearCoefficients(
   return { a, b };
 }
 
+/**
+ * Extract coefficients from a quadratic expression ax² + bx + c.
+ * Returns null if the expression is not quadratic in the given variable.
+ */
+function getQuadraticCoefficients(
+  expr: BoxedExpression,
+  index: string
+): { a: BoxedExpression; b: BoxedExpression; c: BoxedExpression } | null {
+  const ce = expr.engine;
+
+  // Must be an Add expression (or equivalent)
+  if (expr.operator !== 'Add') {
+    // Check if it's just x² or c*x²
+    if (expr.operator === 'Power' && expr.op1.symbol === index && expr.op2.is(2)) {
+      return { a: ce.One, b: ce.Zero, c: ce.Zero };
+    }
+    if (expr.operator === 'Multiply') {
+      const factors = expr.ops!;
+      const powerFactor = factors.find(
+        (f) => f.operator === 'Power' && f.op1.symbol === index && f.op2.is(2)
+      );
+      if (powerFactor) {
+        const constFactors = factors.filter((f) => f !== powerFactor);
+        const coeff =
+          constFactors.length === 0
+            ? ce.One
+            : constFactors.length === 1
+              ? constFactors[0]
+              : ce.box(['Multiply', ...constFactors]);
+        if (!coeff.has(index)) {
+          return { a: coeff, b: ce.Zero, c: ce.Zero };
+        }
+      }
+    }
+    return null;
+  }
+
+  const ops = expr.ops!;
+  let a: BoxedExpression = ce.Zero; // coefficient of x²
+  let b: BoxedExpression = ce.Zero; // coefficient of x
+  let c: BoxedExpression = ce.Zero; // constant term
+
+  for (const op of ops) {
+    if (!op.has(index)) {
+      // Constant term
+      c = c.add(op);
+    } else if (op.symbol === index) {
+      // Just x (coefficient 1 for linear term)
+      b = b.add(ce.One);
+    } else if (op.operator === 'Power' && op.op1.symbol === index && op.op2.is(2)) {
+      // x² term
+      a = a.add(ce.One);
+    } else if (op.operator === 'Multiply') {
+      const factors = op.ops!;
+      // Check for c*x² form
+      const powerFactor = factors.find(
+        (f) => f.operator === 'Power' && f.op1.symbol === index && f.op2.is(2)
+      );
+      if (powerFactor) {
+        const constFactors = factors.filter((f) => f !== powerFactor);
+        if (constFactors.every((f) => !f.has(index))) {
+          const coeff =
+            constFactors.length === 0
+              ? ce.One
+              : constFactors.length === 1
+                ? constFactors[0]
+                : ce.box(['Multiply', ...constFactors]);
+          a = a.add(coeff);
+          continue;
+        }
+      }
+      // Check for c*x form (linear term)
+      const varFactor = factors.find((f) => f.symbol === index);
+      if (varFactor) {
+        const constFactors = factors.filter((f) => f.symbol !== index);
+        if (constFactors.every((f) => !f.has(index))) {
+          const coeff =
+            constFactors.length === 0
+              ? ce.One
+              : constFactors.length === 1
+                ? constFactors[0]
+                : ce.box(['Multiply', ...constFactors]);
+          b = b.add(coeff);
+          continue;
+        }
+      }
+      // Not a valid quadratic term
+      return null;
+    } else {
+      // Not a quadratic expression
+      return null;
+    }
+  }
+
+  // Must have non-zero x² coefficient to be quadratic
+  if (a.is(0)) return null;
+
+  return { a: a.simplify(), b: b.simplify(), c: c.simplify() };
+}
+
 /** Calculate the antiderivative of fn, as an expression (not a function) */
 export function antiderivative(
   fn: BoxedExpression,
@@ -1279,6 +1379,26 @@ export function antiderivative(
         return fn.op1.mul(arctan);
       }
     }
+
+    // Case D: Recognize ∫ f'(x)/f(x) dx = ln|f(x)|
+    // Check if numerator is a constant multiple of the derivative of denominator
+    if (fn.op1.has(index)) {
+      const denomDeriv = differentiate(fn.op2, index);
+      if (denomDeriv && !denomDeriv.is(0)) {
+        // Check if numerator = c * denomDeriv for some constant c
+        // numerator / denomDeriv should be a constant (no variable)
+        const ratio = fn.op1.div(denomDeriv).simplify();
+        if (!ratio.has(index)) {
+          // ∫ c*f'(x)/f(x) dx = c*ln|f(x)|
+          const lnExpr = ce.box(['Ln', ['Abs', fn.op2]]);
+          if (ratio.is(1)) {
+            return lnExpr;
+          }
+          return ratio.mul(lnExpr);
+        }
+      }
+    }
+
     // Handle ∫ 1/(ax+b) dx = (1/a) * ln|ax+b|
     // Check if denominator is a linear function of x
     if (fn.op1.is(1) || !fn.op1.has(index)) {
@@ -1327,6 +1447,40 @@ export function antiderivative(
             }
             return result.simplify();
           }
+        }
+      }
+    }
+
+    // Case C: Completing the square for irreducible quadratics
+    // ∫ 1/(ax² + bx + c) dx where discriminant b²-4ac < 0
+    // Result: (2/√(4ac-b²)) * arctan((2ax+b)/√(4ac-b²))
+    if (fn.op1.is(1) || !fn.op1.has(index)) {
+      const quadCoeffs = getQuadraticCoefficients(fn.op2, index);
+      if (quadCoeffs) {
+        const { a, b, c } = quadCoeffs;
+        // Calculate discriminant: b² - 4ac
+        const discriminant = b.mul(b).sub(ce.number(4).mul(a).mul(c)).simplify();
+        const discValue = discriminant.N().re;
+
+        // If discriminant < 0, the quadratic is irreducible (no real roots)
+        if (discValue !== null && discValue < 0) {
+          // 4ac - b² > 0
+          const fourAcMinusB2 = ce.number(4).mul(a).mul(c).sub(b.mul(b)).simplify();
+          // √(4ac - b²)
+          const sqrtDisc = ce.box(['Sqrt', fourAcMinusB2]).simplify();
+          // 2ax + b
+          const innerExpr = ce.number(2).mul(a).mul(ce.symbol(index)).add(b).simplify();
+          // arctan((2ax+b)/√(4ac-b²))
+          const arctanArg = innerExpr.div(sqrtDisc).simplify();
+          const arctanExpr = ce.box(['Arctan', arctanArg]);
+          // (2/√(4ac-b²)) * arctan(...)
+          let result = ce.number(2).div(sqrtDisc).mul(arctanExpr).simplify();
+
+          // If numerator is not 1, multiply
+          if (!fn.op1.is(1)) {
+            result = fn.op1.mul(result);
+          }
+          return result;
         }
       }
     }
