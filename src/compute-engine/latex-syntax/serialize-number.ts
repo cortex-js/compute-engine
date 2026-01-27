@@ -181,7 +181,7 @@ export function serializeNumber(
   } else if (options.notation === 'scientific') {
     result = serializeScientificNotationNumber(num, options);
   } else if (options.notation === 'adaptiveScientific') {
-    result = serializeAutoNotationNumber(num, options);
+    result = serializeScientificNotationNumber(num, options);
   }
 
   return (
@@ -241,9 +241,26 @@ function serializeScientificNotationNumber(
       if (!fraction) fraction = '';
       while (whole.startsWith('0')) whole = whole.substring(1);
       if (!whole) {
-        // .123 -> 0.123e+0
-        // .0123 -> 0.0123e+0
-        valString = sign + '0.' + fraction + 'e+0';
+        // Need to normalize: .123 -> 1.23e-1, .00123 -> 1.23e-3
+        let leadingZeros = 0;
+        while (fraction[leadingZeros] === '0') leadingZeros++;
+
+        if (leadingZeros === fraction.length) {
+          // All zeros, the number is 0
+          valString = sign + '0e+0';
+        } else {
+          // Remove leading zeros and normalize
+          const significand = fraction.slice(leadingZeros);
+          const firstDigit = significand[0];
+          const restDigits = significand.slice(1);
+          const exponent = -(leadingZeros + 1);
+
+          if (restDigits) {
+            valString = sign + firstDigit + '.' + restDigits + 'e' + exponent;
+          } else {
+            valString = sign + firstDigit + 'e' + exponent;
+          }
+        }
       } else {
         // 1.234  -> 1.234e+0
         // 12.345 -> 1.2345e+1
