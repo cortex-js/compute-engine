@@ -39,6 +39,14 @@
   capital letters while others like `csc` were lowercase. All trig functions now
   consistently serialize in lowercase (e.g., `cot(x)` instead of `Cot(x)`).
 
+- **Serialization**: Improved display of inverse trig derivatives and similar
+  expressions:
+  - Negative exponents like `x^(-1/2)` now display as `1/sqrt(x)` in both LaTeX
+    and ASCII-math output
+  - Term ordering in additions now puts positive terms before negative terms,
+    so `-x^2 + 1` displays as `1 - x^2`
+  - `d/dx arcsin(x)` now displays as `1/sqrt(1-x^2)` instead of `(-x^2+1)^(-1/2)`
+
 - **Compilation**: Fixed compilation of `Sum` and `Product` expressions.
 
 - **Sum/Product**: Fixed `sum` and `prod` library functions to correctly handle

@@ -163,13 +163,13 @@ describe('Inverse trigonometric derivatives', () => {
   it('d/dx arcsin(x) = 1/sqrt(1-x^2)', () => {
     expect(
       parse('D(\\arcsin(x), x)').evaluate().toString()
-    ).toMatchInlineSnapshot(`(-x^2 + 1)^(-1/2)`);
+    ).toMatchInlineSnapshot(`1 / sqrt(1 - x^2)`);
   });
 
   it('d/dx arccos(x) = -1/sqrt(1-x^2)', () => {
     expect(
       parse('D(\\arccos(x), x)').evaluate().toString()
-    ).toMatchInlineSnapshot(`-(-x^2 + 1)^(-1/2)`);
+    ).toMatchInlineSnapshot(`-1 / sqrt(1 - x^2)`);
   });
 
   it('d/dx arctan(x) = 1/(1+x^2)', () => {
@@ -215,31 +215,31 @@ describe('Inverse hyperbolic derivatives', () => {
   it('d/dx arsinh(x) = 1/sqrt(x^2+1)', () => {
     expect(
       parse('D(\\arsinh(x), x)').evaluate().toString()
-    ).toMatchInlineSnapshot(`(x^2 + 1)^(-1/2)`);
+    ).toMatchInlineSnapshot(`1 / sqrt(x^2 + 1)`);
   });
 
   it('d/dx arcosh(x) = 1/sqrt(x^2-1)', () => {
     expect(
       parse('D(\\arcosh(x), x)').evaluate().toString()
-    ).toMatchInlineSnapshot(`(x^2 - 1)^(-1/2)`);
+    ).toMatchInlineSnapshot(`1 / sqrt(x^2 - 1)`);
   });
 
   it('d/dx artanh(x) = 1/(1-x^2)', () => {
     expect(
       parse('D(\\artanh(x), x)').evaluate().toString()
-    ).toMatchInlineSnapshot(`1 / (-x^2 + 1)`);
+    ).toMatchInlineSnapshot(`1 / (1 - x^2)`);
   });
 
   it('d/dx arcoth(x) = -1/(1-x^2)', () => {
     expect(
       parse('D(\\arcoth(x), x)').evaluate().toString()
-    ).toMatchInlineSnapshot(`-1 / (-x^2 + 1)`);
+    ).toMatchInlineSnapshot(`-1 / (1 - x^2)`);
   });
 
   it('d/dx arsech(x) = -1/(x*sqrt(1-x^2))', () => {
     expect(
       parse('D(\\arsech(x), x)').evaluate().toString()
-    ).toMatchInlineSnapshot(`-1 / (x * sqrt(-x^2 + 1))`);
+    ).toMatchInlineSnapshot(`-1 / (x * sqrt(1 - x^2))`);
   });
 
   it('d/dx arcsch(x) = -1/(|x|*sqrt(1+x^2))', () => {

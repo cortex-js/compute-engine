@@ -11,24 +11,16 @@ function N(expr: string): number {
 
 describe('DERIVATION', () => {
   test('basic derivative', () =>
-    expect(evaluate('\\frac{d}{dx} x^2')).toMatchInlineSnapshot(
-      `2x`
-    ));
+    expect(evaluate('\\frac{d}{dx} x^2')).toMatchInlineSnapshot(`2x`));
 
   test('partial derivative', () =>
-    expect(evaluate('\\frac{d}{dx} tx^2')).toMatchInlineSnapshot(
-      `2t * x`
-    ));
+    expect(evaluate('\\frac{d}{dx} tx^2')).toMatchInlineSnapshot(`2t * x`));
 
   test('to constant', () =>
-    expect(evaluate('\\frac{d}{dx} 3x')).toMatchInlineSnapshot(
-      `3`
-    ));
+    expect(evaluate('\\frac{d}{dx} 3x')).toMatchInlineSnapshot(`3`));
 
   test('no variable', () =>
-    expect(evaluate('\\frac{d}{dx} 3t')).toMatchInlineSnapshot(
-      `0`
-    ));
+    expect(evaluate('\\frac{d}{dx} 3t')).toMatchInlineSnapshot(`0`));
 });
 
 describe('INDEFINITE INTEGRATION', () => {
@@ -130,7 +122,7 @@ describe('INDEFINITE INTEGRATION', () => {
   // Trigonometric substitution tests
   test('sqrt(1-x^2) (trig substitution)', () =>
     expect(evaluate('\\int \\sqrt{1-x^2} dx')).toMatchInlineSnapshot(
-      `1/2 * x * sqrt(-x^2 + 1) + 1/2 * arcsin(x)`
+      `1/2 * x * sqrt(1 - x^2) + 1/2 * arcsin(x)`
     ));
 
   test('sqrt(1+x^2) (trig substitution)', () =>
@@ -145,12 +137,12 @@ describe('INDEFINITE INTEGRATION', () => {
 
   test('sqrt(4-x^2) (trig substitution with a=2)', () =>
     expect(evaluate('\\int \\sqrt{4-x^2} dx')).toMatchInlineSnapshot(
-      `1/2 * x * sqrt(-x^2 + 4) + 2arcsin(1/2 * x)`
+      `1/2 * x * sqrt(4 - x^2) + 2arcsin(1/2 * x)`
     ));
 
   test('sqrt(9-x^2) (trig substitution with a=3)', () =>
     expect(evaluate('\\int \\sqrt{9-x^2} dx')).toMatchInlineSnapshot(
-      `1/2 * x * sqrt(-x^2 + 9) + 9/2 * arcsin(1/3 * x)`
+      `1/2 * x * sqrt(9 - x^2) + 9/2 * arcsin(1/3 * x)`
     ));
 
   test('sqrt(x^2+4) (trig substitution with a=2)', () =>
@@ -204,9 +196,7 @@ describe('INDEFINITE INTEGRATION', () => {
     ));
 
   test('e^(2x) (linear substitution)', () =>
-    expect(evaluate('\\int e^{2x} dx')).toMatchInlineSnapshot(
-      `1/2 * e^(2x)`
-    ));
+    expect(evaluate('\\int e^{2x} dx')).toMatchInlineSnapshot(`1/2 * e^(2x)`));
 
   // Partial fraction tests
   test('1/(x-1) (simple linear denominator)', () =>

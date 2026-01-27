@@ -107,7 +107,7 @@ describe('expr.solve()', () => {
     const result = e.solve('x')?.map((x) => x.toString());
     expect(result).toMatchInlineSnapshot(`
       [
-        -y + 1,
+        1 - y,
       ]
     `);
   });

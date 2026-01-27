@@ -177,8 +177,8 @@ describe('ARITHMETIC OPERATORS', () => {
     expect(check('1 + (-2-3i)')).toMatchInlineSnapshot(`1 + (-2 - 3i)`);
     expect(check('\\pi + (-2-3i)')).toMatchInlineSnapshot(`(-2 - 3i) + pi`);
     expect(check('x + (-2-3i)')).toMatchInlineSnapshot(`x + (-2 - 3i)`);
-    expect(check('1+(-x)')).toMatchInlineSnapshot(`-x + 1`);
-    expect(check('(-x)-1')).toMatchInlineSnapshot(`-x - 1`);
+    expect(check('1+(-x)')).toMatchInlineSnapshot(`1 - x`);
+    expect(check('(-x)-1')).toMatchInlineSnapshot(`-1 - x`);
     expect(check('(-y)+(-x)-1')).toMatchInlineSnapshot(`-x - y - 1`);
   });
 

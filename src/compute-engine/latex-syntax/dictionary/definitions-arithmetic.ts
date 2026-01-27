@@ -554,12 +554,23 @@ function serializePower(
     } else if (val2 < 0) {
       return serializer.serialize(['Divide', '1', ['Power', base, -val2]]);
     } else if (operator(exp) === 'Divide' || operator(exp) === 'Rational') {
-      if (machineValue(operand(exp, 1)) === 1) {
+      const num = machineValue(operand(exp, 1));
+      const denom = machineValue(operand(exp, 2));
+      if (num === 1) {
         // It's x^{1/n} -> it's a root
         const style = serializer.rootStyle(expr, serializer.level);
         return serializeRoot(serializer, style, base, operand(exp, 2));
       }
-      if (machineValue(operand(exp, 2)) === 2) {
+      if (num === -1) {
+        // It's x^{-1/n} -> it's 1/root(x, n)
+        if (denom === 2) {
+          // x^{-1/2} -> 1/sqrt(x)
+          return serializer.serialize(['Divide', '1', ['Sqrt', base]]);
+        }
+        // x^{-1/n} -> 1/root(x, n)
+        return serializer.serialize(['Divide', '1', ['Root', base, denom]]);
+      }
+      if (denom === 2) {
         // It's x^(n/2) -> it's √x^n
         return `${serializer.serialize(['Sqrt', base])}^{${serializer.serialize(
           operand(exp, 1)

@@ -41,7 +41,11 @@ export function getFractionStyle(
     const [op1, op2] = operands(expr);
     const [n, d] = [countLeaves(op1), countLeaves(op2)];
     if (d <= 2 && n > 5) return 'factor';
-    if (n <= 2 && d > 5) return 'reciprocal';
+    // Prefer quotient over reciprocal when denominator is Sqrt/Root
+    // so that 1/sqrt(x) displays as \frac{1}{\sqrt{x}} not \sqrt{x}^{-1}
+    const denomOp = operator(op2);
+    if (n <= 2 && d > 5 && denomOp !== 'Sqrt' && denomOp !== 'Root')
+      return 'reciprocal';
   }
   return 'quotient';
 }
