@@ -155,6 +155,27 @@ describe('INDEFINITE INTEGRATION', () => {
     expect(evaluate('\\int e^{2x} dx')).toMatchInlineSnapshot(
       `1/2 * e^(2x)`
     ));
+
+  // Partial fraction tests
+  test('1/(x-1) (simple linear denominator)', () =>
+    expect(evaluate('\\int \\frac{1}{x-1} dx')).toMatchInlineSnapshot(
+      `ln(|x - 1|)`
+    ));
+
+  test('1/(x^2-1) (partial fractions)', () =>
+    expect(evaluate('\\int \\frac{1}{x^2-1} dx')).toMatchInlineSnapshot(
+      `1/-2 * ln(|x + 1|) + 1/2 * ln(|x - 1|)`
+    ));
+
+  test('1/(x^2-4) (partial fractions)', () =>
+    expect(evaluate('\\int \\frac{1}{x^2-4} dx')).toMatchInlineSnapshot(
+      `1/-4 * ln(|x + 2|) + 1/4 * ln(|x - 2|)`
+    ));
+
+  test('1/(x^2+3x+2) (partial fractions)', () =>
+    expect(evaluate('\\int \\frac{1}{x^2+3x+2} dx')).toMatchInlineSnapshot(
+      `-ln(|x + 2|) + ln(|x + 1|)`
+    ));
 });
 
 /** These resolve symbolically the integrals, then applies the limits. */

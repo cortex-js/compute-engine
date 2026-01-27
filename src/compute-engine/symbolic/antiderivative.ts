@@ -5,6 +5,7 @@ import { add } from '../boxed-expression/arithmetic-add';
 import { matchAnyRules } from '../boxed-expression/rules';
 import { expandAll } from '../boxed-expression/expand';
 import { differentiate } from './derivative';
+import { findUnivariateRoots } from '../boxed-expression/solve';
 
 //  @todo: implement using Risch Algorithm
 
@@ -475,6 +476,13 @@ const INTEGRATION_RULES: Rule[] = [
     condition: filter,
   },
 
+  // (x+b)^{-1} -> \ln|x + b| (coefficient of x is implicitly 1)
+  {
+    match: ['Power', ['Add', '_x', '__b'], -1],
+    replace: ['Ln', ['Abs', ['Add', '_x', '__b']]],
+    condition: (sub) => filter(sub) && sub._x.symbol !== null,
+  },
+
   // 1/(ax + b) -> \ln(ax + b) / a
   {
     match: ['Divide', 1, ['Add', ['Multiply', '_a', '_x'], '__b']],
@@ -484,6 +492,13 @@ const INTEGRATION_RULES: Rule[] = [
       '_a',
     ],
     condition: filter,
+  },
+
+  // 1/(x + b) -> \ln|x + b| (coefficient of x is implicitly 1)
+  {
+    match: ['Divide', 1, ['Add', '_x', '__b']],
+    replace: ['Ln', ['Abs', ['Add', '_x', '__b']]],
+    condition: (sub) => filter(sub) && sub._x.symbol !== null,
   },
 
   // \ln(ax + b) -> (ax + b) \ln(ax + b) - ax - b
@@ -1069,6 +1084,64 @@ const INTEGRATION_RULES: Rule[] = [
   },
 ];
 
+/**
+ * Check if an expression is a linear function of the variable (ax + b form).
+ * Returns the coefficients { a, b } if it is, null otherwise.
+ */
+function getLinearCoefficients(
+  expr: BoxedExpression,
+  index: string
+): { a: BoxedExpression; b: BoxedExpression } | null {
+  const ce = expr.engine;
+
+  // Just the variable: x -> a=1, b=0
+  if (expr.symbol === index) {
+    return { a: ce.One, b: ce.Zero };
+  }
+
+  // Must be an Add expression
+  if (expr.operator !== 'Add') return null;
+
+  const ops = expr.ops!;
+  let a: BoxedExpression | null = null;
+  let b: BoxedExpression = ce.Zero;
+
+  for (const op of ops) {
+    if (!op.has(index)) {
+      // Constant term
+      b = b.add(op);
+    } else if (op.symbol === index) {
+      // Just x (coefficient 1)
+      a = a ? a.add(ce.One) : ce.One;
+    } else if (op.operator === 'Multiply') {
+      // Check for c*x form
+      const factors = op.ops!;
+      const varFactor = factors.find((f) => f.symbol === index);
+      if (varFactor) {
+        const constFactors = factors.filter((f) => f.symbol !== index);
+        if (constFactors.every((f) => !f.has(index))) {
+          const coeff =
+            constFactors.length === 1 ? constFactors[0] : mul(...constFactors);
+          a = a ? a.add(coeff) : coeff;
+        } else {
+          // Not a linear term
+          return null;
+        }
+      } else {
+        // Variable appears in non-linear way
+        return null;
+      }
+    } else {
+      // Not a linear term (e.g., x^2, sin(x), etc.)
+      return null;
+    }
+  }
+
+  if (a === null) return null; // No variable term found
+
+  return { a, b };
+}
+
 /** Calculate the antiderivative of fn, as an expression (not a function) */
 export function antiderivative(
   fn: BoxedExpression,
@@ -1172,6 +1245,87 @@ export function antiderivative(
         return ce.box(['Arctan', index]);
       }
     }
+    // Handle ∫ 1/(ax+b) dx = (1/a) * ln|ax+b|
+    // Check if denominator is a linear function of x
+    if (fn.op1.is(1) || !fn.op1.has(index)) {
+      const linearCoeffs = getLinearCoefficients(fn.op2, index);
+      if (linearCoeffs) {
+        const { a, b } = linearCoeffs;
+        // ∫ 1/(ax+b) dx = (1/a) * ln|ax+b|
+        const lnExpr = ce.box(['Ln', ['Abs', fn.op2]]);
+        if (a.is(1)) {
+          // If numerator is not 1, multiply
+          if (!fn.op1.is(1)) {
+            return fn.op1.mul(lnExpr);
+          }
+          return lnExpr;
+        }
+        // Divide by a
+        const result = lnExpr.div(a);
+        if (!fn.op1.is(1)) {
+          return fn.op1.mul(result);
+        }
+        return result;
+      }
+    }
+
+    // Handle partial fractions for ∫ c/(polynomial) dx
+    // where polynomial has distinct linear roots
+    if (fn.op1.is(1) || !fn.op1.has(index)) {
+      const numerator = fn.op1;
+      const denominator = fn.op2;
+
+      // Try to find roots of the denominator
+      const roots = findUnivariateRoots(denominator, index);
+
+      if (roots.length >= 2) {
+        // Check that all roots are distinct and numeric
+        const numericRoots = roots.map((r) => r.N().re);
+        const allDistinct = numericRoots.every(
+          (r, i) =>
+            r !== null &&
+            isFinite(r) &&
+            numericRoots.every((r2, j) => i === j || Math.abs(r - r2) > 1e-10)
+        );
+
+        if (allDistinct) {
+          // Use partial fraction decomposition
+          // For 1/((x-r1)(x-r2)...(x-rn)), each coefficient Ai = 1/∏(ri-rj) for j≠i
+          // Then ∫1/((x-r1)...(x-rn)) dx = Σ Ai * ln|x-ri|
+          let resultTerms: BoxedExpression[] = [];
+
+          for (let i = 0; i < roots.length; i++) {
+            // Compute coefficient Ai using cover-up method
+            // Ai = 1 / product of (ri - rj) for all j != i
+            let productOfDiffs = ce.One;
+            for (let j = 0; j < roots.length; j++) {
+              if (i !== j) {
+                productOfDiffs = productOfDiffs.mul(roots[i].sub(roots[j]));
+              }
+            }
+            const coefficient = ce.One.div(productOfDiffs);
+
+            // The partial fraction term integrates to coefficient * ln|x - ri|
+            const lnTerm = ce.box([
+              'Ln',
+              ['Abs', ['Add', ce.symbol(index), roots[i].neg()]],
+            ]);
+            resultTerms.push(coefficient.mul(lnTerm));
+          }
+
+          // Sum all partial fraction integrals
+          let result = add(...resultTerms);
+
+          // If numerator is not 1, multiply
+          if (!numerator.is(1)) {
+            result = numerator.mul(result);
+          }
+
+          return result.simplify();
+        }
+      }
+    }
+
     return integrate(fn, index);
   }
 
