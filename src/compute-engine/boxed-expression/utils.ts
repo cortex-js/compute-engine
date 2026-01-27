@@ -21,6 +21,11 @@ import { _BoxedExpression } from './abstract-boxed-expression';
 /**
  * Check if an expression contains symbolic transcendental functions of constants
  * (like ln(2), sin(1), etc.) that should not be evaluated numerically.
+ *
+ * This excludes transcendentals that simplify to exact values, such as:
+ * - ln(e) -> 1
+ * - sin(0) -> 0
+ * - cos(0) -> 1
  */
 export function hasSymbolicTranscendental(expr: BoxedExpression): boolean {
   const op = expr.operator;
@@ -36,6 +41,15 @@ export function hasSymbolicTranscendental(expr: BoxedExpression): boolean {
     'Exp',
   ];
   if (transcendentals.includes(op) && expr.op1?.isConstant) {
+    // Check if this transcendental simplifies to an exact rational value
+    // (e.g., ln(e) = 1, sin(0) = 0). If so, it's not truly a
+    // "symbolic transcendental" that needs to be preserved.
+    const simplified = expr.simplify();
+    // If the simplified result is exact (integer or rational),
+    // it doesn't need symbolic preservation
+    if (simplified.isRational) {
+      return false;
+    }
     return true;
   }
   // Recursively check sub-expressions
