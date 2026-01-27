@@ -1485,11 +1485,125 @@ export function antiderivative(
       }
     }
 
+    // Case E: Irreducible quadratic powers ∫ 1/(x²+a²)^n dx
+    // Reduction formula: ∫ 1/(x²+a²)^n dx = x/(2a²(n-1)(x²+a²)^(n-1)) + (2n-3)/(2a²(n-1)) * ∫ 1/(x²+a²)^(n-1) dx
+    if (fn.op1.is(1) || !fn.op1.has(index)) {
+      const denom = fn.op2;
+      if (denom.operator === 'Power') {
+        const base = denom.op1;
+        const exp = denom.op2;
+        const n = exp.re;
+        // Check if exponent is a positive integer > 1
+        if (n !== null && Number.isInteger(n) && n > 1) {
+          // Check if base is x² + a² form (irreducible quadratic with b=0)
+          const quadCoeffs = getQuadraticCoefficients(base, index);
+          if (quadCoeffs && quadCoeffs.b.is(0) && quadCoeffs.a.is(1)) {
+            const a2 = quadCoeffs.c; // a² value
+            const x = ce.symbol(index);
+
+            // First term: x / (2a²(n-1)(x²+a²)^(n-1))
+            const newPower = ce.box(['Power', base, ce.number(n - 1)]);
+            const coeff1 = ce.One.div(ce.number(2).mul(a2).mul(ce.number(n - 1)));
+            const term1 = coeff1.mul(x).div(newPower);
+
+            // Second term coefficient: (2n-3) / (2a²(n-1))
+            const coeff2 = ce.number(2 * n - 3).div(ce.number(2).mul(a2).mul(ce.number(n - 1)));
+
+            // Recursive integral: ∫ 1/(x²+a²)^(n-1) dx
+            const lowerPowerExpr = n === 2
+              ? ce.One.div(base)
+              : ce.One.div(ce.box(['Power', base, ce.number(n - 1)]));
+            const recursiveIntegral = antiderivative(lowerPowerExpr, index);
+
+            let result = add(term1, coeff2.mul(recursiveIntegral)).simplify();
+
+            // If numerator is not 1, multiply
+            if (!fn.op1.is(1)) {
+              result = fn.op1.mul(result);
+            }
+            return result;
+          }
+        }
+      }
+    }
+
     // Handle partial fractions for ∫ c/(polynomial) dx
     // where polynomial has distinct linear roots
     if (fn.op1.is(1) || !fn.op1.has(index)) {
       const numerator = fn.op1;
       const denominator = fn.op2;
+
+      // Case F: Check if denominator is already in factored form (Multiply of linear and quadratic)
+      // Handle ∫ 1/((x-r)(x²+bx+c)) dx where quadratic is irreducible
+      if (denominator.operator === 'Multiply' && denominator.nops === 2) {
+        const factors = denominator.ops!;
+        let linearFactor: BoxedExpression | null = null;
+        let quadFactor: BoxedExpression | null = null;
+        let linearRoot: BoxedExpression | null = null;
+
+        for (const factor of factors) {
+          const linCoeffs = getLinearCoefficients(factor, index);
+          if (linCoeffs && linCoeffs.a.is(1)) {
+            linearFactor = factor;
+            linearRoot = linCoeffs.b.neg(); // x - r means root is r = -b
+            continue;
+          }
+          const quadCoeffs = getQuadraticCoefficients(factor, index);
+          if (quadCoeffs && quadCoeffs.a.is(1)) {
+            // Check if irreducible (discriminant < 0)
+            const disc = quadCoeffs.b.mul(quadCoeffs.b).sub(ce.number(4).mul(quadCoeffs.c)).simplify();
+            const discValue = disc.N().re;
+            if (discValue !== null && discValue < 0) {
+              quadFactor = factor;
+            }
+          }
+        }
+
+        if (linearFactor && quadFactor && linearRoot) {
+          const quadCoeffs = getQuadraticCoefficients(quadFactor, index)!;
+          const { b: qb, c: qc } = quadCoeffs;
+          const r = linearRoot;
+
+          // Partial fractions: 1/((x-r)(x²+bx+c)) = A/(x-r) + (Bx+C)/(x²+bx+c)
+          // A = 1/(r²+br+c)
+          const quadAtR = r.mul(r).add(qb.mul(r)).add(qc).simplify();
+          const A = ce.One.div(quadAtR);
+
+          // B = -A, C = -A(b+r)
+          const B = A.neg();
+          const bPlusR = qb.add(r).simplify();
+          const C = A.neg().mul(bPlusR);
+
+          // Integral terms:
+          // 1. A * ln|x-r|
+          const term1 = A.mul(ce.box(['Ln', ['Abs', linearFactor]]));
+
+          // 2. (Bx+C)/(x²+bx+c) splits into:
+          //    B/2 * (2x+b)/(x²+bx+c) + (C - Bb/2)/(x²+bx+c)
+          // First part: derivative pattern → B/2 * ln|x²+bx+c|
+          const BHalf = B.div(ce.number(2));
+          const term2 = BHalf.mul(ce.box(['Ln', ['Abs', quadFactor]]));
+
+          // Second part: (C - Bb/2)/(x²+bx+c) → completing the square
+          const CMinusBbHalf = C.sub(B.mul(qb).div(ce.number(2))).simplify();
+          // ∫ k/(x²+bx+c) dx = k * (2/√(4c-b²)) * arctan((2x+b)/√(4c-b²))
+          const fourCMinusB2 = ce.number(4).mul(qc).sub(qb.mul(qb)).simplify();
+          const sqrtDisc = ce.box(['Sqrt', fourCMinusB2]).simplify();
+          const innerExpr = ce.number(2).mul(ce.symbol(index)).add(qb).simplify();
+          const arctanArg = innerExpr.div(sqrtDisc).simplify();
+          const arctanCoeff = ce.number(2).div(sqrtDisc).simplify();
+          const term3 = CMinusBbHalf.mul(arctanCoeff).mul(ce.box(['Arctan', arctanArg]));
+
+          let result = add(term1, term2, term3).simplify();
+
+          // If numerator is not 1, multiply
+          if (!numerator.is(1)) {
+            result = numerator.mul(result);
+          }
+
+          return result;
+        }
+      }
 
       // Try to find roots of the denominator
       const roots = findUnivariateRoots(denominator, index);
@@ -1538,6 +1652,69 @@ export function antiderivative(
           }
 
           return result.simplify();
+        }
+      }
+
+      // Case F: Mixed partial fractions - one real root and one irreducible quadratic
+      // ∫ 1/((x-r)(x²+bx+c)) dx where x²+bx+c has no real roots
+      if (roots.length === 1) {
+        const r = roots[0];
+        // Check if denominator / (x-r) gives an irreducible quadratic
+        const linearFactor = ce.symbol(index).sub(r);
+        const quotient = polynomialDivide(denominator, linearFactor, index);
+        if (quotient) {
+          const [quad, remainder] = quotient;
+          if (remainder.is(0)) {
+            const quadCoeffs = getQuadraticCoefficients(quad, index);
+            if (quadCoeffs) {
+              const { a: qa, b: qb, c: qc } = quadCoeffs;
+              // Check if quadratic is irreducible (discriminant < 0)
+              const discriminant = qb.mul(qb).sub(ce.number(4).mul(qa).mul(qc)).simplify();
+              const discValue = discriminant.N().re;
+
+              if (discValue !== null && discValue < 0 && qa.is(1)) {
+                // Partial fractions: 1/((x-r)(x²+bx+c)) = A/(x-r) + (Bx+C)/(x²+bx+c)
+                // A = 1/(r²+br+c)
+                const rVal = r;
+                const quadAtR = rVal.mul(rVal).add(qb.mul(rVal)).add(qc).simplify();
+                const A = ce.One.div(quadAtR);
+
+                // B = -A, C = -A(b+r)
+                const B = A.neg();
+                const bPlusR = qb.add(rVal).simplify();
+                const C = A.neg().mul(bPlusR);
+
+                // Integral terms:
+                // 1. A * ln|x-r|
+                const term1 = A.mul(ce.box(['Ln', ['Abs', linearFactor]]));
+
+                // 2. (Bx+C)/(x²+bx+c) splits into:
+                //    B/2 * (2x+b)/(x²+bx+c) + (C - Bb/2)/(x²+bx+c)
+                // First part: derivative pattern → B/2 * ln|x²+bx+c|
+                const BHalf = B.div(ce.number(2));
+                const term2 = BHalf.mul(ce.box(['Ln', ['Abs', quad]]));
+
+                // Second part: (C - Bb/2)/(x²+bx+c) → completing the square
+                const CMinusBbHalf = C.sub(B.mul(qb).div(ce.number(2))).simplify();
+                // ∫ k/(x²+bx+c) dx = k * (2/√(4c-b²)) * arctan((2x+b)/√(4c-b²))
+                const fourCMinusB2 = ce.number(4).mul(qc).sub(qb.mul(qb)).simplify();
+                const sqrtDisc = ce.box(['Sqrt', fourCMinusB2]).simplify();
+                const innerExpr = ce.number(2).mul(ce.symbol(index)).add(qb).simplify();
+                const arctanArg = innerExpr.div(sqrtDisc).simplify();
+                const arctanCoeff = ce.number(2).div(sqrtDisc).simplify();
+                const term3 = CMinusBbHalf.mul(arctanCoeff).mul(ce.box(['Arctan', arctanArg]));
+
+                let result = add(term1, term2, term3).simplify();
+
+                // If numerator is not 1, multiply
+                if (!numerator.is(1)) {
+                  result = numerator.mul(result);
+                }
+
+                return result;
+              }
+            }
+          }
         }
       }
     }
@@ -1627,6 +1804,32 @@ export function antiderivative(
         const coeff = ce.One.div(a.mul(newExp));
         const result = coeff.mul(ce.box(['Power', base, newExp]));
         return result.simplify();
+      }
+
+      // Case E: ∫(x²+a²)^(-n) dx where n > 1 (irreducible quadratic powers)
+      // Reduction formula: ∫ 1/(x²+a²)^n dx = x/(2a²(n-1)(x²+a²)^(n-1)) + (2n-3)/(2a²(n-1)) * ∫ 1/(x²+a²)^(n-1) dx
+      const quadCoeffs = getQuadraticCoefficients(base, index);
+      if (quadCoeffs && quadCoeffs.b.is(0) && quadCoeffs.a.is(1)) {
+        const a2 = quadCoeffs.c; // a² value
+        const absN = -n; // Positive exponent value
+        const x = ce.symbol(index);
+
+        // First term: x / (2a²(n-1)(x²+a²)^(n-1))
+        const newPower = ce.box(['Power', base, ce.number(n + 1)]); // (x²+a²)^(-(n-1))
+        const coeff1 = ce.One.div(ce.number(2).mul(a2).mul(ce.number(absN - 1)));
+        const term1 = coeff1.mul(x).mul(newPower);
+
+        // Second term coefficient: (2n-3) / (2a²(n-1))
+        const coeff2 = ce
+          .number(2 * absN - 3)
+          .div(ce.number(2).mul(a2).mul(ce.number(absN - 1)));
+
+        // Recursive integral: ∫ (x²+a²)^(-(n-1)) dx
+        const lowerPowerExpr = ce.box(['Power', base, ce.number(n + 1)]);
+        const recursiveIntegral = antiderivative(lowerPowerExpr, index);
+
+        const result = add(term1, coeff2.mul(recursiveIntegral)).simplify();
+        return result;
       }
     }
   }

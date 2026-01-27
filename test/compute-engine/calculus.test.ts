@@ -194,6 +194,40 @@ describe('INDEFINITE INTEGRATION', () => {
       `-1 / (2(x - 1)^2)`
     ));
 
+  // Derivative pattern recognition (u-substitution)
+  test('x/(x^2+1) (derivative pattern)', () =>
+    expect(evaluate('\\int \\frac{x}{x^2+1} dx')).toMatchInlineSnapshot(
+      `1/2 * ln(|x^2 + 1|)`
+    ));
+
+  test('(2x+1)/(x^2+x+1) (derivative pattern)', () =>
+    expect(evaluate('\\int \\frac{2x+1}{x^2+x+1} dx')).toMatchInlineSnapshot(
+      `ln(|x^2 + x + 1|)`
+    ));
+
+  // Completing the square (irreducible quadratics)
+  test('1/(x^2+2x+2) (completing square)', () =>
+    expect(evaluate('\\int \\frac{1}{x^2+2x+2} dx')).toMatchInlineSnapshot(
+      `arctan(x + 1)`
+    ));
+
+  test('1/(x^2+x+1) (completing square)', () =>
+    expect(evaluate('\\int \\frac{1}{x^2+x+1} dx')).toMatchInlineSnapshot(
+      `2/3sqrt(3) * arctan(2/3sqrt(3) * x + sqrt(3)/3)`
+    ));
+
+  // Irreducible quadratic powers (reduction formula)
+  test('1/(x^2+1)^2 (quadratic power)', () =>
+    expect(evaluate('\\int \\frac{1}{(x^2+1)^2} dx')).toMatchInlineSnapshot(
+      `x / (2x^2 + 2) + 1/2 * arctan(x)`
+    ));
+
+  // Mixed partial fractions (linear + irreducible quadratic)
+  test('1/((x-1)(x^2+1)) (mixed partial fractions)', () =>
+    expect(evaluate('\\int \\frac{1}{(x-1)(x^2+1)} dx')).toMatchInlineSnapshot(
+      `-1/2 * arctan(x) - 1/4 * ln(|x^2 + 1|) + 1/2 * ln(|x - 1|)`
+    ));
+
   // Polynomial division before integration
   test('x^2/(x^2+1) (polynomial division)', () =>
     expect(evaluate('\\int \\frac{x^2}{x^2+1} dx')).toMatchInlineSnapshot(
