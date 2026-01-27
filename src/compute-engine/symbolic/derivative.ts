@@ -39,23 +39,31 @@ const DERIVATIVES_TABLE = {
   Sinh: ['Cosh', '_'],
   Cosh: ['Sinh', '_'],
   Tanh: ['Power', ['Sech', '_'], 2],
-  Sech: ['Multiply', ['Tanh', '_'], 'Sech'],
-  Csch: ['Multiply', ['Coth', '_'], 'Csch'],
+  // d/dx sech(x) = -tanh(x)*sech(x)
+  Sech: ['Negate', ['Multiply', ['Tanh', '_'], ['Sech', '_']]],
+  // d/dx csch(x) = -coth(x)*csch(x)
+  Csch: ['Negate', ['Multiply', ['Coth', '_'], ['Csch', '_']]],
   Coth: ['Negate', ['Power', ['Csch', '_'], 2]],
   Arcsinh: ['Power', ['Add', ['Power', '_', 2], 1], ['Negate', 'Half']],
   Arccosh: ['Power', ['Subtract', ['Power', '_', 2], 1], ['Negate', 'Half']],
   Arctanh: ['Power', ['Subtract', 1, ['Power', '_', 2]], -1],
+  // d/dx arcsech(x) = -1 / (x * sqrt(1 - x^2))
   Arcsech: [
     'Negate',
     [
-      'Power',
-      ['Multiply', '2', 'Subtract', ['Power', '_', 2]],
-      ['Negate', 'Half'],
+      'Divide',
+      1,
+      ['Multiply', '_', ['Sqrt', ['Subtract', 1, ['Power', '_', 2]]]],
     ],
   ],
+  // d/dx arccsch(x) = -1 / (|x| * sqrt(1 + x^2))
   Arccsch: [
     'Negate',
-    ['Power', ['Multiply', '2', 'Add', ['Power', '_', 2]], ['Negate', 'Half']],
+    [
+      'Divide',
+      1,
+      ['Multiply', ['Abs', '_'], ['Sqrt', ['Add', 1, ['Power', '_', 2]]]],
+    ],
   ],
   Arccoth: ['Negate', ['Power', ['Subtract', 1, ['Power', '_', 2]], -1]],
   // Exp: ['Exp', '_'],   // Gets canonicalized to Power
@@ -205,22 +213,38 @@ export function differentiate(
   // Power rule
   if (expr.operator === 'Power') {
     const [base, exponent] = expr.ops!;
-    if (base.symbol === v) {
-      // Derivative Power Rule
-      // d/dx x^n = n * x^(n-1)
+    const baseHasV = base.has(v);
+    const expHasV = exponent.has(v);
 
-      return exponent.mul(base.pow(exponent.add(ce.NegativeOne))).evaluate();
+    if (!baseHasV && !expHasV) {
+      // Neither depends on v - derivative is 0
+      return ce.Zero;
     }
 
-    // Generalized case:
-    // d/dx f(x)^g(x) = f(x)^g(x) * (g'(x) * ln(f(x)) + g(x) * f'(x) / f(x))
+    if (baseHasV && !expHasV) {
+      // Only base depends on v: d/dx f(x)^n = n * f(x)^(n-1) * f'(x)
+      const fPrime = differentiate(base, v) ?? ce._fn('D', [base, ce.symbol(v)]);
+      return exponent
+        .mul(base.pow(exponent.add(ce.NegativeOne)))
+        .mul(fPrime)
+        .evaluate();
+    }
+
+    if (!baseHasV && expHasV) {
+      // Only exponent depends on v: d/dx a^g(x) = a^g(x) * ln(a) * g'(x)
+      const gPrime =
+        differentiate(exponent, v) ?? ce._fn('D', [exponent, ce.symbol(v)]);
+      return expr.mul(base.ln()).mul(gPrime).evaluate();
+    }
+
+    // Both depend on v: d/dx f(x)^g(x) = f(x)^g(x) * (g'(x) * ln(f(x)) + g(x) * f'(x) / f(x))
     const f = base;
     const g = exponent;
     const fPrime = differentiate(f, v) ?? ce._fn('D', [f, ce.symbol(v)]);
     const gPrime = differentiate(g, v) ?? ce._fn('D', [g, ce.symbol(v)]);
     const term1 = gPrime.mul(f.ln());
-    const term3 = g.mul(fPrime).div(f);
-    return expr.mul(term1.add(term3)).evaluate();
+    const term2 = g.mul(fPrime).div(f);
+    return expr.mul(term1.add(term2)).evaluate();
   }
 
   // Quotient rule

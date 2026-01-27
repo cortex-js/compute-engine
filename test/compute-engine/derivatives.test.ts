@@ -70,6 +70,41 @@ describe('Derivative', () => {
   });
 });
 
+describe('Hyperbolic derivatives', () => {
+  it('should compute d/dx sech(x) = -tanh(x)*sech(x)', () => {
+    const expr = parse('D(\\sech(x), x)');
+    const result = expr.evaluate();
+    expect(result.toString()).toMatchInlineSnapshot(`-(tanh(x) * sech(x))`);
+  });
+
+  it('should compute d/dx csch(x) = -coth(x)*csch(x)', () => {
+    const expr = parse('D(\\csch(x), x)');
+    const result = expr.evaluate();
+    expect(result.toString()).toMatchInlineSnapshot(`-(csch(x) * coth(x))`);
+  });
+});
+
+describe('Power rule edge cases', () => {
+  it('should compute d/dx x^x = x^x * (ln(x) + 1)', () => {
+    const expr = parse('D(x^x, x)');
+    const result = expr.evaluate();
+    // x^x * (1 + ln(x)) = x^x + ln(x) * x^x
+    expect(result.toString()).toMatchInlineSnapshot(`x^x + ln(x) * x^x`);
+  });
+
+  it('should compute d/dx (x^2)^3 = 6x^5', () => {
+    const expr = parse('D((x^2)^3, x)');
+    const result = expr.evaluate();
+    expect(result.toString()).toMatchInlineSnapshot(`6x^5`);
+  });
+
+  it('should compute d/dx (2x)^3 = 24x^2', () => {
+    const expr = parse('D((2x)^3, x)');
+    const result = expr.evaluate();
+    expect(result.toString()).toMatchInlineSnapshot(`24x^2`);
+  });
+});
+
 describe('ND', () => {
   it('should compute the numerical approximation of the derivative of a polynomial', () => {
     const expr = parse('\\mathrm{ND}(x \\mapsto x^3 + 2x - 4, 2)');
