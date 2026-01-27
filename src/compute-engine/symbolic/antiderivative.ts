@@ -48,11 +48,11 @@ const INTEGRATION_RULES: Rule[] = [
     condition: (sub) => filter(sub) && sub._a.isNumberLiteral,
   },
 
-  // a^x -> \frac{a^x}{\ln(a)}
+  // a^x -> \frac{a^x}{\ln(a)} where a is a constant (doesn't contain x)
   {
-    match: ['Power', '__a', '_x'],
-    replace: ['Divide', ['Power', '__a', '_x'], ['Ln', ['Abs', '__a']]],
-    condition: (sub) => filter(sub) && sub._x.isNumberLiteral,
+    match: ['Power', '_a', '_x'],
+    replace: ['Divide', ['Power', '_a', '_x'], ['Ln', '_a']],
+    condition: (sub) => filter(sub) && !sub._a.has('_x'),
   },
 
   // (ax+b)^{-1} -> \ln(ax + b) / a
@@ -559,20 +559,51 @@ export function antiderivative(
   if (fn.operator === 'Negate') return antiderivative(fn.op1, index).neg();
 
   if (fn.operator === 'Multiply') {
-    const terms = fn.ops!.map((op, i) => {
-      const otherTerms = fn.ops!.slice();
-      otherTerms.splice(i, 1);
-      const otherProduct = mul(...otherTerms);
-      const gPrime = antiderivative(op, index);
-      return gPrime.mul(otherProduct);
-    });
-    return add(...(terms as BoxedExpression[])).evaluate();
+    // Separate constant factors from variable factors
+    const constantFactors: BoxedExpression[] = [];
+    const variableFactors: BoxedExpression[] = [];
+
+    for (const op of fn.ops!) {
+      if (!op.has(index)) {
+        constantFactors.push(op);
+      } else {
+        variableFactors.push(op);
+      }
+    }
+
+    // If we have constant factors, pull them out: ∫ c*f(x) dx = c * ∫f(x) dx
+    if (constantFactors.length > 0) {
+      const constantProduct = mul(...constantFactors);
+      if (variableFactors.length === 0) {
+        // All constants: ∫ c dx = cx
+        return constantProduct.mul(ce.symbol(index));
+      }
+      const variableProduct =
+        variableFactors.length === 1
+          ? variableFactors[0]
+          : mul(...variableFactors);
+      const antideriv = antiderivative(variableProduct, index);
+      return constantProduct.mul(antideriv).evaluate();
+    }
+
+    // No constant factors - all terms contain the variable
+    // For products of variable terms, we'd need integration by parts or
+    // other techniques. For now, fall through to rule-based matching.
   }
 
   if (fn.operator === 'Divide') {
     if (!fn.op2.has(index)) {
+      // ∫ f(x)/c dx = (1/c) * ∫f(x) dx
       const antideriv = antiderivative(fn.op1, index);
       return fn.engine.box(['Divide', antideriv, fn.op2]);
+    }
+    // Handle ∫ 1/x dx = ln|x|
+    if (fn.op1.is(1) && fn.op2.symbol === index) {
+      return ce.box(['Ln', ['Abs', index]]);
+    }
+    // Handle ∫ c/x dx = c * ln|x|
+    if (!fn.op1.has(index) && fn.op2.symbol === index) {
+      return ce.box(['Multiply', fn.op1, ['Ln', ['Abs', index]]]);
     }
     return integrate(fn, index);
   }
