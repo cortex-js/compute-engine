@@ -426,18 +426,10 @@ export class BoxedFunction extends _BoxedExpression {
     //
     // Log/Ln
     //
-    if (expr.operator === 'Log' || expr.operator === 'Ln') {
-      let base = expr.op2.re;
-      // For Ln, use natural log base (e); for Log, default to base 10
-      if (isNaN(base)) base = expr.operator === 'Ln' ? Math.E : 10;
-
-      const [coef, rest] = expr.op1.toNumericValue();
-      if (coef.isOne) return [coef, this];
-      return ce
-        .box(coef.ln(base))
-        .add(ce.function(expr.operator, [rest, expr.op2]))
-        .toNumericValue();
-    }
+    // Logarithms don't have numeric coefficients to extract.
+    // Keep them symbolic - don't evaluate or expand.
+    if (expr.operator === 'Log' || expr.operator === 'Ln')
+      return [ce._numericValue(1), this];
 
     // @todo:  could consider others: Exp, trig functions
 

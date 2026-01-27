@@ -291,16 +291,10 @@ export function differentiate(
       // Only exponent depends on v: d/dx a^g(x) = a^g(x) * ln(a) * g'(x)
       // Use ce._fn('Ln', ...) instead of base.ln() to keep ln symbolic
       // (base.ln() evaluates to a numeric value).
-      // Use ce._fn('Multiply', ...) instead of .mul() to preserve symbolic form
-      // (.mul() evaluates Ln to numeric).
       const gPrime =
         differentiate(exponent, v) ?? ce._fn('D', [exponent, ce.symbol(v)]);
       const lnBase = ce._fn('Ln', [base]);
-      const terms = [expr, lnBase];
-      if (!gPrime.is(1)) terms.push(gPrime);
-      const result =
-        terms.length === 1 ? terms[0] : ce._fn('Multiply', terms).canonical;
-      return simplifyDerivative(result);
+      return simplifyDerivative(expr.mul(lnBase).mul(gPrime));
     }
 
     // Both depend on v: d/dx f(x)^g(x) = f(x)^g(x) * (g'(x) * ln(f(x)) + g(x) * f'(x) / f(x))
