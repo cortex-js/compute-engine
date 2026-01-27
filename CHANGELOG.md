@@ -2361,7 +2361,3 @@ console.log(expr.isEqual(ce.box(2)));
 ### Improvements
 
 - In LaTeX, parse `\operatorname{foo}` as the MathJSON symbol `"foo"`.
-
-```
-
-```
