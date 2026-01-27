@@ -670,7 +670,7 @@ export type NumberSerializationFormat = NumberFormat & {
    * Default: `"auto"`
    */
   fractionalDigits: 'auto' | 'max' | number;
-  notation: 'auto' | 'engineering' | 'scientific'; // @todo: add | 'percent'
+  notation: 'auto' | 'engineering' | 'scientific' | 'adaptiveScientific'; // @todo: add | 'percent'
   avoidExponentsInRange:
     | undefined
     | null

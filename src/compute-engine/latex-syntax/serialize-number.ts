@@ -120,15 +120,20 @@ export function serializeNumber(
     else if (Number.isNaN(num)) return options.notANumber;
 
     let result: string | undefined = undefined;
-    if (options.notation === 'engineering')
+    if (options.notation === 'engineering') {
       result = serializeScientificNotationNumber(
         num.toExponential(),
         options,
         3
       );
-    else if (options.notation === 'scientific')
+    } else if (options.notation === 'scientific') {
+      result = serializeScientificNotationNumber(num.toExponential(), {
+        ...options,
+        avoidExponentsInRange: null, // Scientific notation should always use exponents
+      });
+    } else if (options.notation === 'adaptiveScientific') {
       result = serializeScientificNotationNumber(num.toExponential(), options);
-
+    }
     return result ?? serializeAutoNotationNumber(num.toString(), options);
   }
 
@@ -171,12 +176,21 @@ export function serializeNumber(
   else if (num[0] === '.') num = '0' + num;
 
   let result: string | undefined = undefined;
-  if (options.notation === 'engineering')
+  if (options.notation === 'engineering') {
     result = serializeScientificNotationNumber(num, options, 3);
-  else if (options.notation === 'scientific')
+  } else if (options.notation === 'scientific') {
     result = serializeScientificNotationNumber(num, options);
+  } else if (options.notation === 'adaptiveScientific') {
+    result = serializeAutoNotationNumber(num, options);
+  }
 
-  return sign + (result ?? serializeAutoNotationNumber(num, options));
+  return (
+    sign +
+    (result ??
+      serializeAutoNotationNumber(num, {
+        ...options,
+      }))
+  );
 }
 
 /**
@@ -315,8 +329,10 @@ function serializeAutoNotationNumber(
 
   // Is there is an exponent...
   let exp = 0;
+  let originalExp = 0; // Save the original exponent for avoid range check
   if (m?.[1] && m[2]) {
     exp = parseInt(m[2]);
+    originalExp = exp;
     valString = m[1];
   }
 
@@ -338,10 +354,10 @@ function serializeAutoNotationNumber(
     fractionalPart = '';
   }
 
-  // Check if the exponent is in a range to be avoided
   const avoid = options.avoidExponentsInRange;
   if (exp !== 0 && avoid) {
-    if (exp >= avoid[0] && exp <= avoid[1]) {
+    // Use the original exponent (before fractional part adjustment) for the avoid check
+    if (originalExp >= avoid[0] && originalExp <= avoid[1]) {
       // We want to avoid an exponent, so we'll pad the whole part
       // with zeros and adjust the exponent
       [wholePart, fractionalPart] = toDecimalNumber(
