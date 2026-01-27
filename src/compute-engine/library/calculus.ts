@@ -12,6 +12,35 @@ import { derivative, differentiate } from '../symbolic/derivative';
 import { antiderivative } from '../symbolic/antiderivative';
 import { canonicalLimits, canonicalLimitsSequence } from './utils';
 
+/**
+ * Check if an expression contains symbolic transcendental functions of constants
+ * (like ln(2), sin(1), etc.) that should not be evaluated numerically.
+ */
+function hasSymbolicTranscendental(expr: BoxedExpression): boolean {
+  const op = expr.operator;
+  // Transcendental functions applied to numeric constants
+  const transcendentals = [
+    'Ln',
+    'Log',
+    'Log2',
+    'Log10',
+    'Sin',
+    'Cos',
+    'Tan',
+    'Exp',
+  ];
+  if (transcendentals.includes(op) && expr.op1?.isConstant) {
+    return true;
+  }
+  // Recursively check sub-expressions
+  if (expr.ops) {
+    for (const child of expr.ops) {
+      if (hasSymbolicTranscendental(child)) return true;
+    }
+  }
+  return false;
+}
+
 export const CALCULUS_LIBRARY: SymbolDefinitions[] = [
   {
     /* @todo
@@ -228,6 +257,7 @@ volumes
           return undefined;
         }
 
+        let isIndefinite = true;
         for (let i = limitsSequence.length - 1; i >= 0; i--) {
           const [varExpr, lower, upper] = limitsSequence[i].ops!;
           let variable = varExpr.symbol;
@@ -244,6 +274,7 @@ volumes
             if (lower.symbol === 'Nothing' && upper.symbol === 'Nothing') {
               expr = fAntideriv;
             } else {
+              isIndefinite = false;
               const F = ce.box(['Function', antideriv, variable]);
               expr = ce.box(['EvaluateAt', F, lower, upper]);
             }
@@ -251,13 +282,22 @@ volumes
             if (lower.symbol === 'Nothing' && upper.symbol === 'Nothing') {
               expr = antideriv;
             } else {
+              isIndefinite = false;
               const F = ce.box(['Function', antideriv, variable]);
               expr = ce.box(['EvaluateAt', F, lower, upper]);
             }
           }
         }
-        if (expr.operator !== 'Integrate')
+        if (expr.operator !== 'Integrate') {
+          // For indefinite integrals with symbolic transcendental constants
+          // (like ln(2)), don't call evaluate/simplify as it would convert
+          // them to numeric values. Otherwise, simplify for cleaner output.
+          if (isIndefinite) {
+            if (hasSymbolicTranscendental(expr)) return expr;
+            return expr.simplify();
+          }
           return expr.evaluate({ numericApproximation });
+        }
         return expr;
       },
     },

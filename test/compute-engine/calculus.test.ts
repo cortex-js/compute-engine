@@ -91,9 +91,7 @@ describe('INDEFINITE INTEGRATION', () => {
     expect(evaluate('\\int 3x dx')).toMatchInlineSnapshot(`3/2 * x^2`));
 
   test('exponential base a', () =>
-    expect(evaluate('\\int 2^x dx')).toMatchInlineSnapshot(
-      `1.442695040888963426960659505534575535567482856042211903579535363595630580176111451674827877621175638 * 2^x`
-    ));
+    expect(evaluate('\\int 2^x dx')).toMatchInlineSnapshot(`2^x / ln(2)`));
 
   // Trig squared integrals
   test('sec^2(x)', () =>
