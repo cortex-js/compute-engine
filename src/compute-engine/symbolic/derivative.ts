@@ -2,35 +2,7 @@ import { apply } from '../function-utils';
 import { mul } from '../boxed-expression/arithmetic-mul-div';
 import type { BoxedExpression } from '../global-types';
 import { add } from '../boxed-expression/arithmetic-add';
-
-/**
- * Check if an expression contains symbolic transcendental functions of constants
- * (like ln(2), sin(1), etc.) that should not be evaluated numerically.
- */
-function hasSymbolicTranscendental(expr: BoxedExpression): boolean {
-  const op = expr.operator;
-  // Transcendental functions applied to numeric constants
-  const transcendentals = [
-    'Ln',
-    'Log',
-    'Log2',
-    'Log10',
-    'Sin',
-    'Cos',
-    'Tan',
-    'Exp',
-  ];
-  if (transcendentals.includes(op) && expr.op1?.isConstant) {
-    return true;
-  }
-  // Recursively check sub-expressions
-  if (expr.ops) {
-    for (const child of expr.ops) {
-      if (hasSymbolicTranscendental(child)) return true;
-    }
-  }
-  return false;
-}
+import { hasSymbolicTranscendental } from '../boxed-expression/utils';
 
 /**
  * Simplify a derivative result, preserving symbolic transcendental constants.

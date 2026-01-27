@@ -1,6 +1,7 @@
 import type { BoxedExpression, SymbolDefinitions } from '../global-types';
 
 import { checkType } from '../boxed-expression/validate';
+import { hasSymbolicTranscendental } from '../boxed-expression/utils';
 
 import {
   canonicalFunctionLiteral,
@@ -11,35 +12,6 @@ import { centeredDiff8thOrder, limit } from '../numerics/numeric';
 import { derivative, differentiate } from '../symbolic/derivative';
 import { antiderivative } from '../symbolic/antiderivative';
 import { canonicalLimits, canonicalLimitsSequence } from './utils';
-
-/**
- * Check if an expression contains symbolic transcendental functions of constants
- * (like ln(2), sin(1), etc.) that should not be evaluated numerically.
- */
-function hasSymbolicTranscendental(expr: BoxedExpression): boolean {
-  const op = expr.operator;
-  // Transcendental functions applied to numeric constants
-  const transcendentals = [
-    'Ln',
-    'Log',
-    'Log2',
-    'Log10',
-    'Sin',
-    'Cos',
-    'Tan',
-    'Exp',
-  ];
-  if (transcendentals.includes(op) && expr.op1?.isConstant) {
-    return true;
-  }
-  // Recursively check sub-expressions
-  if (expr.ops) {
-    for (const child of expr.ops) {
-      if (hasSymbolicTranscendental(child)) return true;
-    }
-  }
-  return false;
-}
 
 export const CALCULUS_LIBRARY: SymbolDefinitions[] = [
   {
