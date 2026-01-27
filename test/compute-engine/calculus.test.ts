@@ -94,6 +94,69 @@ describe('INDEFINITE INTEGRATION', () => {
     expect(evaluate('\\int 2^x dx')).toMatchInlineSnapshot(
       `1.442695040888963426960659505534575535567482856042211903579535363595630580176111451674827877621175638 * 2^x`
     ));
+
+  // Trig squared integrals
+  test('sec^2(x)', () =>
+    expect(evaluate('\\int \\sec^2 x dx')).toMatchInlineSnapshot(`tan(x)`));
+
+  test('csc^2(x)', () =>
+    expect(evaluate('\\int \\csc^2 x dx')).toMatchInlineSnapshot(`-Cot(x)`));
+
+  // Inverse trig producing integrals
+  test('1/(1+x^2) -> arctan', () =>
+    expect(evaluate('\\int \\frac{1}{1+x^2} dx')).toMatchInlineSnapshot(
+      `arctan(x)`
+    ));
+
+  test('1/sqrt(1-x^2) -> arcsin', () =>
+    expect(evaluate('\\int \\frac{1}{\\sqrt{1-x^2}} dx')).toMatchInlineSnapshot(
+      `arcsin(x)`
+    ));
+
+  // Integration by parts tests
+  test('x*e^x (integration by parts)', () =>
+    expect(evaluate('\\int x e^x dx')).toMatchInlineSnapshot(`x * e^x - e^x`));
+
+  test('x*sin(x) (integration by parts)', () =>
+    expect(evaluate('\\int x \\sin x dx')).toMatchInlineSnapshot(
+      `-x * cos(x) + sin(x)`
+    ));
+
+  test('x*cos(x) (integration by parts)', () =>
+    expect(evaluate('\\int x \\cos x dx')).toMatchInlineSnapshot(
+      `x * sin(x) + cos(x)`
+    ));
+
+  test('ln(x) (integration by parts with dv=1)', () =>
+    expect(evaluate('\\int \\ln x dx')).toMatchInlineSnapshot(
+      `-x + x * ln(x)`
+    ));
+
+  // U-substitution tests (chain rule recognition)
+  test('sin(x^2)*2x (u-substitution)', () =>
+    expect(evaluate('\\int \\sin(x^2) \\cdot 2x dx')).toMatchInlineSnapshot(
+      `-cos(x^2)`
+    ));
+
+  test('e^(x^2)*x (u-substitution with constant factor)', () =>
+    expect(evaluate('\\int e^{x^2} x dx')).toMatchInlineSnapshot(
+      `1/2 * e^(x^2)`
+    ));
+
+  test('cos(x^2)*x (u-substitution with constant factor)', () =>
+    expect(evaluate('\\int \\cos(x^2) x dx')).toMatchInlineSnapshot(
+      `1/2 * sin(x^2)`
+    ));
+
+  test('cos(3x) (linear substitution)', () =>
+    expect(evaluate('\\int \\cos(3x) dx')).toMatchInlineSnapshot(
+      `1/3 * sin(3x)`
+    ));
+
+  test('e^(2x) (linear substitution)', () =>
+    expect(evaluate('\\int e^{2x} dx')).toMatchInlineSnapshot(
+      `1/2 * e^(2x)`
+    ));
 });
 
 /** These resolve symbolically the integrals, then applies the limits. */
