@@ -396,6 +396,37 @@ function matchPermutation(
  * - Anchor `1` matches position 1 in the expression
  * - Sequence `__a` captures all remaining: ['x', 2, 3, 5] → ['Add', 'x', 2, 3, 5]
  */
+// Maximum number of combinations to try before giving up (prevents exponential blowup)
+const MAX_COMBINATIONS = 1000;
+
+/**
+ * Calculate anchor specificity for ordering.
+ * Higher specificity = more constrained = should match first.
+ * - Number literals: highest specificity (exact match)
+ * - Symbols: high specificity
+ * - Simple functions: medium specificity
+ * - Complex expressions: lower specificity
+ */
+function anchorSpecificity(anchor: BoxedExpression): number {
+  if (anchor.isNumberLiteral) return 100;
+  if (anchor.symbol) return 80;
+  if (anchor.string !== undefined) return 90;
+  // Functions - specificity based on depth/complexity
+  if (anchor.operator) {
+    // More operands = more specific
+    const opCount = anchor.nops ?? 0;
+    // Count non-wildcard children for extra specificity
+    let nonWildcardChildren = 0;
+    if (anchor.ops) {
+      for (const op of anchor.ops) {
+        if (wildcardType(op) === null) nonWildcardChildren++;
+      }
+    }
+    return 50 + opCount + nonWildcardChildren * 5;
+  }
+  return 0;
+}
+
 function matchCommutativeWithAnchors(
   expr: BoxedExpression,
   pattern: BoxedExpression,
@@ -426,6 +457,30 @@ function matchCommutativeWithAnchors(
     }
   }
 
+  // Early termination: check if we have enough elements
+  const minNeeded =
+    anchors.length + universalWildcards.length + sequenceWildcards.length;
+  const maxAllowed =
+    anchors.length +
+    universalWildcards.length +
+    (sequenceWildcards.length + optionalSeqWildcards.length > 0
+      ? Infinity
+      : 0);
+
+  if (exprOps.length < minNeeded) return null;
+  if (
+    sequenceWildcards.length === 0 &&
+    optionalSeqWildcards.length === 0 &&
+    exprOps.length > maxAllowed
+  )
+    return null;
+
+  // Sort anchors by specificity (most specific first)
+  // This reduces backtracking by pruning impossible branches early
+  const sortedAnchors = [...anchors].sort(
+    (a, b) => anchorSpecificity(b) - anchorSpecificity(a)
+  );
+
   // Try to match anchors against expression elements using backtracking
   return tryMatchAnchors(0, exprOps, substitution);
 
@@ -435,11 +490,19 @@ function matchCommutativeWithAnchors(
     sub: BoxedSubstitution
   ): BoxedSubstitution | null {
     // All anchors matched - now assign remaining ops to wildcards
-    if (anchorIndex >= anchors.length) {
+    if (anchorIndex >= sortedAnchors.length) {
       return assignWildcards(remainingOps, sub);
     }
 
-    const anchor = anchors[anchorIndex];
+    // Early pruning: check if we have enough remaining elements
+    const anchorsLeft = sortedAnchors.length - anchorIndex;
+    const minWildcardNeeds =
+      universalWildcards.length + sequenceWildcards.length;
+    if (remainingOps.length < anchorsLeft + minWildcardNeeds) {
+      return null;
+    }
+
+    const anchor = sortedAnchors[anchorIndex];
 
     // Find all positions where this anchor matches
     for (let i = 0; i < remainingOps.length; i++) {
@@ -448,7 +511,11 @@ function matchCommutativeWithAnchors(
         // Remove this element and try matching remaining anchors
         const newRemaining = [...remainingOps];
         newRemaining.splice(i, 1);
-        const finalResult = tryMatchAnchors(anchorIndex + 1, newRemaining, matchResult);
+        const finalResult = tryMatchAnchors(
+          anchorIndex + 1,
+          newRemaining,
+          matchResult
+        );
         if (finalResult !== null) return finalResult;
       }
     }
@@ -582,11 +649,25 @@ function matchCommutativeWithAnchors(
   }
 
   function getCombinations(n: number, k: number): number[][] {
+    // Early check: if combinations would exceed limit, return empty
+    // C(n,k) = n! / (k! * (n-k)!)
+    // Use approximation to avoid computing large factorials
+    if (n > 20 && k > 2 && k < n - 2) {
+      // For large n and moderate k, combinations grow fast
+      // Approximate: if n > 15 and k > 3, check more carefully
+      let approxCount = 1;
+      for (let i = 0; i < Math.min(k, n - k); i++) {
+        approxCount = (approxCount * (n - i)) / (i + 1);
+        if (approxCount > MAX_COMBINATIONS) return [];
+      }
+    }
+
     // Generate all combinations of k indices from 0..n-1
     const result: number[][] = [];
     const combo: number[] = [];
 
     function backtrack(start: number) {
+      if (result.length >= MAX_COMBINATIONS) return; // Stop if limit reached
       if (combo.length === k) {
         result.push([...combo]);
         return;
