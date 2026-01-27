@@ -761,7 +761,7 @@ const INTEGRATION_RULES: Rule[] = [
   },
   // \arcsinh(ax + b) -> \frac{1}{a} \ln(ax + b + \sqrt{(ax + b)^2 + 1})
   {
-    match: ['Arcsinh', ['Add', ['Multiply', '_a', '_x'], '__b']],
+    match: ['Arsinh', ['Add', ['Multiply', '_a', '_x'], '__b']],
     replace: [
       'Divide',
       [
@@ -781,7 +781,7 @@ const INTEGRATION_RULES: Rule[] = [
   },
   // \arccosh(ax + b) -> \frac{1}{a} \ln(ax + b + \sqrt{(ax + b)^2 - 1})
   {
-    match: ['Arccosh', ['Add', ['Multiply', '_a', '_x'], '__b']],
+    match: ['Arcosh', ['Add', ['Multiply', '_a', '_x'], '__b']],
     replace: [
       'Divide',
       [
@@ -805,7 +805,7 @@ const INTEGRATION_RULES: Rule[] = [
   },
   // \arctanh(ax + b) -> \frac{1}{2a} \ln(\frac{1 + ax + b}{1 - ax - b})
   {
-    match: ['Arctanh', ['Add', ['Multiply', '_a', '_x'], '__b']],
+    match: ['Artanh', ['Add', ['Multiply', '_a', '_x'], '__b']],
     replace: [
       'Divide',
       [
@@ -822,7 +822,7 @@ const INTEGRATION_RULES: Rule[] = [
   },
   // \arcsech(ax + b) -> -\frac{1}{a} \ln(ax + b + \sqrt{(ax + b)^2 - 1})
   {
-    match: ['Arcsech', ['Add', ['Multiply', '_a', '_x'], '__b']],
+    match: ['Arsech', ['Add', ['Multiply', '_a', '_x'], '__b']],
     replace: [
       'Divide',
       [
@@ -849,7 +849,7 @@ const INTEGRATION_RULES: Rule[] = [
   },
   // \arccsch(ax + b) -> -\frac{1}{a} \ln(ax + b + \sqrt{(ax + b)^2 + 1})
   {
-    match: ['Arccsch', ['Add', ['Multiply', '_a', '_x'], '__b']],
+    match: ['Arcsch', ['Add', ['Multiply', '_a', '_x'], '__b']],
     replace: [
       'Divide',
       [
@@ -876,7 +876,7 @@ const INTEGRATION_RULES: Rule[] = [
   },
   // \arccoth(ax + b) -> \frac{1}{2a} \ln(\frac{ax + b + 1}{ax + b - 1})
   {
-    match: ['Arccoth', ['Add', ['Multiply', '_a', '_x'], '__b']],
+    match: ['Arcoth', ['Add', ['Multiply', '_a', '_x'], '__b']],
     replace: [
       'Divide',
       [
@@ -893,7 +893,7 @@ const INTEGRATION_RULES: Rule[] = [
   },
   // \arccsch(ax + b) -> -\frac{1}{a} \ln(ax + b + \sqrt{(ax + b)^2 + 1})
   {
-    match: ['Arccsch', ['Add', ['Multiply', '_a', '_x'], '__b']],
+    match: ['Arcsch', ['Add', ['Multiply', '_a', '_x'], '__b']],
     replace: [
       'Divide',
       [
@@ -920,7 +920,7 @@ const INTEGRATION_RULES: Rule[] = [
   },
   // \arccoth(ax + b) -> -\frac{1}{a} \ln(ax + b + \sqrt{(ax + b)^2 - 1})
   {
-    match: ['Arccoth', ['Add', ['Multiply', '_a', '_x'], '__b']],
+    match: ['Arcoth', ['Add', ['Multiply', '_a', '_x'], '__b']],
     replace: [
       'Divide',
       [
@@ -1380,6 +1380,29 @@ export function antiderivative(
       }
     }
 
+    // Handle ∫ 1/(x·√(x²-1)) dx = arcsec(x)
+    // Canonical form: ['Divide', 1, ['Multiply', 'x', ['Sqrt', ['Add', ['Power', 'x', 2], -1]]]]
+    if (fn.op1.is(1) && fn.op2.operator === 'Multiply' && fn.op2.nops === 2) {
+      const mulOps = fn.op2.ops!;
+      const xTerm = mulOps.find((op) => op.symbol === index);
+      const sqrtTerm = mulOps.find((op) => op.operator === 'Sqrt');
+      if (xTerm && sqrtTerm) {
+        const sqrtInner = sqrtTerm.op1;
+        // Check if sqrt inner is x² - 1: ['Add', ['Power', 'x', 2], -1]
+        if (sqrtInner.operator === 'Add' && sqrtInner.nops === 2) {
+          const innerOps = sqrtInner.ops!;
+          const powerTerm = innerOps.find(
+            (op) =>
+              op.operator === 'Power' && op.op1.symbol === index && op.op2.is(2)
+          );
+          const negOneTerm = innerOps.find((op) => op.is(-1));
+          if (powerTerm && negOneTerm) {
+            return ce.box(['Arcsec', index]);
+          }
+        }
+      }
+    }
+
     // Case D: Recognize ∫ f'(x)/f(x) dx = ln|f(x)|
     // Check if numerator is a constant multiple of the derivative of denominator
     if (fn.op1.has(index)) {
@@ -1741,6 +1764,109 @@ export function antiderivative(
         );
         if (oneTerm && negPowerTerm) {
           return ce.box(['Arcsin', index]);
+        }
+
+        // Check for x²+1 form: ['Add', ['Power', 'x', 2], 1]
+        // ∫ 1/√(x²+1) dx = arcsinh(x)
+        const powerTerm = addOps.find(
+          (op) =>
+            op.operator === 'Power' &&
+            op.op1.symbol === index &&
+            op.op2.is(2)
+        );
+        if (oneTerm && powerTerm) {
+          return ce.box(['Arsinh', index]);
+        }
+
+        // Check for x²-1 form: ['Add', ['Power', 'x', 2], -1]
+        // ∫ 1/√(x²-1) dx = arccosh(x)  (for x > 1)
+        const negOneTerm = addOps.find((op) => op.is(-1));
+        if (negOneTerm && powerTerm) {
+          return ce.box(['Arcosh', index]);
+        }
+      }
+    }
+
+    // Trigonometric substitution patterns for direct √(...) integrals
+    // These handle ∫√(a² ± x²) dx and ∫√(x² - a²) dx
+    if (inner.operator === 'Add' && inner.nops === 2) {
+      const addOps = inner.ops!;
+
+      // Find x² term
+      const x2Term = addOps.find(
+        (op) =>
+          op.operator === 'Power' && op.op1.symbol === index && op.op2.is(2)
+      );
+      // Find -x² term (for a² - x² patterns)
+      const negX2Term = addOps.find(
+        (op) =>
+          op.operator === 'Negate' &&
+          op.op1.operator === 'Power' &&
+          op.op1.op1.symbol === index &&
+          op.op1.op2.is(2)
+      );
+
+      if (x2Term || negX2Term) {
+        // Get the constant term (a² or -a²)
+        const constTerm = addOps.find(
+          (op) => op !== x2Term && op !== negX2Term
+        );
+        if (constTerm && !constTerm.has(index)) {
+          const constVal = constTerm.N().re;
+
+          if (negX2Term && constVal !== null && constVal > 0) {
+            // Pattern: √(a² - x²) where constTerm = a²
+            // ∫√(a² - x²) dx = (1/2)(x√(a²-x²) + a²·arcsin(x/a))
+            // For a = 1: (1/2)(x√(1-x²) + arcsin(x))
+            const a2 = constTerm;
+            const a = ce.box(['Sqrt', a2]).simplify();
+            const sqrtExpr = fn; // √(a² - x²)
+            // Result: (1/2) * (x * sqrt + a² * arcsin(x/a))
+            const xTimesRoot = ce.box(['Multiply', index, sqrtExpr]);
+            const arcsinPart = a.is(1)
+              ? ce.box(['Arcsin', index])
+              : ce.box(['Arcsin', ['Divide', index, a]]);
+            const a2ArcsinPart = a2.mul(arcsinPart);
+            return ce.box([
+              'Multiply',
+              ['Rational', 1, 2],
+              ['Add', xTimesRoot, a2ArcsinPart],
+            ]);
+          } else if (x2Term && constVal !== null && constVal > 0) {
+            // Pattern: √(x² + a²) where constTerm = a²
+            // ∫√(x² + a²) dx = (1/2)(x√(x²+a²) + a²·arcsinh(x/a))
+            // For a = 1: (1/2)(x√(1+x²) + arcsinh(x))
+            const a2 = constTerm;
+            const a = ce.box(['Sqrt', a2]).simplify();
+            const sqrtExpr = fn; // √(x² + a²)
+            const xTimesRoot = ce.box(['Multiply', index, sqrtExpr]);
+            const arcsinhPart = a.is(1)
+              ? ce.box(['Arsinh', index])
+              : ce.box(['Arsinh', ['Divide', index, a]]);
+            const a2ArcsinhPart = a2.mul(arcsinhPart);
+            return ce.box([
+              'Multiply',
+              ['Rational', 1, 2],
+              ['Add', xTimesRoot, a2ArcsinhPart],
+            ]);
+          } else if (x2Term && constVal !== null && constVal < 0) {
+            // Pattern: √(x² - a²) where constTerm = -a²
+            // ∫√(x² - a²) dx = (1/2)(x√(x²-a²) - a²·arccosh(x/a))
+            // For a = 1: (1/2)(x√(x²-1) - arccosh(x))
+            const a2 = constTerm.neg(); // Convert -a² to a²
+            const a = ce.box(['Sqrt', a2]).simplify();
+            const sqrtExpr = fn; // √(x² - a²)
+            const xTimesRoot = ce.box(['Multiply', index, sqrtExpr]);
+            const arccoshPart = a.is(1)
+              ? ce.box(['Arcosh', index])
+              : ce.box(['Arcosh', ['Divide', index, a]]);
+            const a2ArccoshPart = a2.mul(arccoshPart);
+            return ce.box([
+              'Multiply',
+              ['Rational', 1, 2],
+              ['Subtract', xTimesRoot, a2ArccoshPart],
+            ]);
+          }
         }
       }
     }

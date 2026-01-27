@@ -98,7 +98,7 @@ describe('INDEFINITE INTEGRATION', () => {
     expect(evaluate('\\int \\sec^2 x dx')).toMatchInlineSnapshot(`tan(x)`));
 
   test('csc^2(x)', () =>
-    expect(evaluate('\\int \\csc^2 x dx')).toMatchInlineSnapshot(`-Cot(x)`));
+    expect(evaluate('\\int \\csc^2 x dx')).toMatchInlineSnapshot(`-cot(x)`));
 
   // Inverse trig producing integrals
   test('1/(1+x^2) -> arctan', () =>
@@ -114,18 +114,39 @@ describe('INDEFINITE INTEGRATION', () => {
   // Inverse hyperbolic producing integrals
   test('1/sqrt(x^2+1) -> arsinh', () =>
     expect(evaluate('\\int \\frac{1}{\\sqrt{x^2+1}} dx')).toMatchInlineSnapshot(
-      `Arsinh(x)`
+      `arsinh(x)`
     ));
 
   test('1/sqrt(x^2-1) -> arcosh', () =>
     expect(evaluate('\\int \\frac{1}{\\sqrt{x^2-1}} dx')).toMatchInlineSnapshot(
-      `Arcosh(x)`
+      `arcosh(x)`
     ));
 
   test('1/(x*sqrt(x^2-1)) -> arcsec', () =>
     expect(
       evaluate('\\int \\frac{1}{x\\sqrt{x^2-1}} dx')
-    ).toMatchInlineSnapshot(`Arcsec(x)`));
+    ).toMatchInlineSnapshot(`arcsec(x)`));
+
+  // Trigonometric substitution tests
+  test('sqrt(1-x^2) (trig substitution)', () =>
+    expect(evaluate('\\int \\sqrt{1-x^2} dx')).toMatchInlineSnapshot(
+      `1/2 * x * sqrt(-x^2 + 1) + 1/2 * arcsin(x)`
+    ));
+
+  test('sqrt(1+x^2) (trig substitution)', () =>
+    expect(evaluate('\\int \\sqrt{1+x^2} dx')).toMatchInlineSnapshot(
+      `1/2 * (x * sqrt(x^2 + 1) + arsinh(x))`
+    ));
+
+  test('sqrt(x^2-1) (trig substitution)', () =>
+    expect(evaluate('\\int \\sqrt{x^2-1} dx')).toMatchInlineSnapshot(
+      `1/2 * x * sqrt(x^2 - 1) - 1/2 * arcosh(x)`
+    ));
+
+  test('sqrt(4-x^2) (trig substitution with a=2)', () =>
+    expect(evaluate('\\int \\sqrt{4-x^2} dx')).toMatchInlineSnapshot(
+      `1/2 * x * sqrt(-x^2 + 4) + 2arcsin(1/2 * x)`
+    ));
 
   // Integration by parts tests
   test('x*e^x (integration by parts)', () =>

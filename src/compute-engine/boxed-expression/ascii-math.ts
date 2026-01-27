@@ -187,20 +187,37 @@ const FUNCTIONS: Record<
 > = {
   Abs: (expr: BoxedExpression, serialize) => `|${serialize(expr.op1)}|`,
 
+  // Trigonometric functions
   Sin: 'sin',
   Cos: 'cos',
   Tan: 'tan',
   Sec: 'sec',
   Csc: 'csc',
+  Cot: 'cot',
+
+  // Inverse trigonometric functions
   Arcsin: 'arcsin',
   Arccos: 'arccos',
   Arctan: 'arctan',
+  Arcsec: 'arcsec',
+  Arccsc: 'arccsc',
+  Arccot: 'arccot',
+
+  // Hyperbolic functions
   Sinh: 'sinh',
   Cosh: 'cosh',
   Tanh: 'tanh',
   Sech: 'sech',
   Csch: 'csch',
   Coth: 'coth',
+
+  // Inverse hyperbolic functions (ISO 80000-2 standard names)
+  Arsinh: 'arsinh',
+  Arcosh: 'arcosh',
+  Artanh: 'artanh',
+  Arsech: 'arsech',
+  Arcsch: 'arcsch',
+  Arcoth: 'arcoth',
 
   Ceil: 'ceil', // also: (expr, serialize) => `|~${serialize(expr.op1)}~|`,
   Exp: 'exp',

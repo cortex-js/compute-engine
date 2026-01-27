@@ -34,6 +34,11 @@
   multiplying expressions containing `Ln` or `Log` would evaluate the logarithm
   to its numeric value.
 
+- **Serialization**: Fixed case inconsistency in `toString()` output for
+  trigonometric functions. Some functions like `Cot` were being serialized with
+  capital letters while others like `csc` were lowercase. All trig functions now
+  consistently serialize in lowercase (e.g., `cot(x)` instead of `Cot(x)`).
+
 ## New Features and Improvements
 
 - Refactored the type parser to use a modular architecture. This allows for
@@ -66,6 +71,8 @@
   - **Inverse hyperbolic**: Added `∫ 1/√(x²+1) dx = arcsinh(x)` and
     `∫ 1/√(x²-1) dx = arccosh(x)`
   - **Arcsec pattern**: Added `∫ 1/(x·√(x²-1)) dx = arcsec(x)`
+  - **Trigonometric substitution**: Added support for `∫√(a²-x²) dx`,
+    `∫√(x²+a²) dx`, and `∫√(x²-a²) dx` using trig/hyperbolic substitution
 
 ## 0.30.2 _2025-07-15_
 

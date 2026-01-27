@@ -148,7 +148,7 @@ describe('Trigonometric derivatives', () => {
 
   it('d/dx csc(x) = -cot(x)*csc(x)', () => {
     expect(parse('D(\\csc(x), x)').evaluate().toString()).toMatchInlineSnapshot(
-      `-(csc(x) * Cot(x))`
+      `-(csc(x) * cot(x))`
     );
   });
 
