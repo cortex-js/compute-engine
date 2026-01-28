@@ -248,6 +248,202 @@ describe('Logic', () => {
       ]
     `);
   });
+
+  // Complete quantified expressions with body
+  it('should parse ForAll with comma separator', () => {
+    expect(ce.parse('\\forall x, x>0').json).toMatchInlineSnapshot(`
+      [
+        ForAll,
+        x,
+        [
+          Greater,
+          x,
+          0,
+        ],
+      ]
+    `);
+  });
+
+  it('should parse ForAll with various separators', () => {
+    // With \mid separator
+    expect(ce.parse('\\forall x \\mid x>0').json).toMatchInlineSnapshot(`
+      [
+        ForAll,
+        x,
+        [
+          Greater,
+          x,
+          0,
+        ],
+      ]
+    `);
+    // With dot separator
+    expect(ce.parse('\\forall x. x>0').json).toMatchInlineSnapshot(`
+      [
+        ForAll,
+        x,
+        [
+          Greater,
+          x,
+          0,
+        ],
+      ]
+    `);
+    // With colon separator
+    expect(ce.parse('\\forall x: x>0').json).toMatchInlineSnapshot(`
+      [
+        ForAll,
+        x,
+        [
+          Greater,
+          x,
+          0,
+        ],
+      ]
+    `);
+    // With parentheses
+    expect(ce.parse('\\forall x (x>0)').json).toMatchInlineSnapshot(`
+      [
+        ForAll,
+        x,
+        [
+          Delimiter,
+          [
+            Greater,
+            x,
+            0,
+          ],
+        ],
+      ]
+    `);
+  });
+
+  it('should parse ForAll with set membership', () => {
+    expect(ce.parse('\\forall x \\in S, P(x)').json).toMatchInlineSnapshot(`
+      [
+        ForAll,
+        [
+          Element,
+          x,
+          S,
+        ],
+        [
+          InvisibleOperator,
+          P,
+          [
+            Delimiter,
+            x,
+          ],
+        ],
+      ]
+    `);
+  });
+
+  it('should parse Exists with body', () => {
+    expect(ce.parse('\\exists x, x>0').json).toMatchInlineSnapshot(`
+      [
+        Exists,
+        x,
+        [
+          Greater,
+          x,
+          0,
+        ],
+      ]
+    `);
+  });
+
+  it('should parse ExistsUnique with body', () => {
+    expect(ce.parse('\\exists! x, x=0').json).toMatchInlineSnapshot(`
+      [
+        ExistsUnique,
+        x,
+        [
+          Equal,
+          x,
+          0,
+        ],
+      ]
+    `);
+  });
+
+  it('should parse NotForAll with body', () => {
+    expect(ce.parse('\\lnot\\forall x, x>0').json).toMatchInlineSnapshot(`
+      [
+        NotForAll,
+        x,
+        [
+          Greater,
+          x,
+          0,
+        ],
+      ]
+    `);
+  });
+
+  it('should parse NotExists with body', () => {
+    expect(ce.parse('\\lnot\\exists x, x>0').json).toMatchInlineSnapshot(`
+      [
+        NotExists,
+        x,
+        [
+          Greater,
+          x,
+          0,
+        ],
+      ]
+    `);
+  });
+
+  // Serialization tests
+  it('should serialize ForAll', () => {
+    expect(ce.box(['ForAll', 'x', ['Greater', 'x', 0]]).latex).toBe(
+      '\\forall x, x\\gt0'
+    );
+  });
+
+  it('should serialize Exists', () => {
+    expect(ce.box(['Exists', 'x', ['Greater', 'x', 0]]).latex).toBe(
+      '\\exists x, x\\gt0'
+    );
+  });
+
+  it('should serialize ExistsUnique', () => {
+    expect(ce.box(['ExistsUnique', 'x', ['Equal', 'x', 0]]).latex).toBe(
+      '\\exists! x, x=0'
+    );
+  });
+
+  it('should serialize NotForAll', () => {
+    expect(ce.box(['NotForAll', 'x', ['Greater', 'x', 0]]).latex).toBe(
+      '\\lnot\\forall x, x\\gt0'
+    );
+  });
+
+  it('should serialize NotExists', () => {
+    expect(ce.box(['NotExists', 'x', ['Greater', 'x', 0]]).latex).toBe(
+      '\\lnot\\exists x, x\\gt0'
+    );
+  });
+
+  // Round-trip tests
+  it('should round-trip ForAll expressions', () => {
+    const expr1 = ce.parse('\\forall x, x>y');
+    const expr2 = ce.parse(expr1.latex);
+    expect(expr2.json).toEqual(expr1.json);
+  });
+
+  it('should round-trip Exists expressions', () => {
+    const expr1 = ce.parse('\\exists x, x>0');
+    const expr2 = ce.parse(expr1.latex);
+    expect(expr2.json).toEqual(expr1.json);
+  });
+
+  it('should round-trip ExistsUnique expressions', () => {
+    const expr1 = ce.parse('\\exists! n, n=0');
+    const expr2 = ce.parse(expr1.latex);
+    expect(expr2.json).toEqual(expr1.json);
+  });
 });
 
 describe('Kronecker Delta', () => {
