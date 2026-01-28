@@ -57,6 +57,13 @@
 
 - **LaTeX Parsing**: Fixed `\cosh` incorrectly mapping to `Csch` instead of `Cosh`.
 
+- **([#242](https://github.com/cortex-js/compute-engine/issues/242))
+  Solve**: Fixed `solve()` returning an empty array for equations with variables
+  in the numerator of a fraction. For example, `F = 3g/h` solved for `g` now
+  correctly returns `Fh/3` instead of an empty array. The solver now clears
+  denominators before applying solve rules, enabling it to handle expressions
+  like `a + bx/c = 0`.
+
 - **([#255](https://github.com/cortex-js/compute-engine/issues/255))
   LaTeX Parsing**: Fixed multi-letter subscripts like `A_{CD}` causing
   "incompatible-type" errors in arithmetic operations. Multi-letter subscripts

@@ -236,6 +236,41 @@ export const UNIVARIATE_ROOTS: Rule[] = [
 ];
 
 /**
+ * Clear denominators from an Add expression by multiplying through by the LCM
+ * of all denominators. For example, `F - 3x/h` becomes `F*h - 3x`.
+ *
+ * This transformation preserves the roots of the equation (assuming denominators
+ * are non-zero) and allows the solve rules to match expressions that would
+ * otherwise have nested Divide operators.
+ */
+function clearDenominators(expr: BoxedExpression): BoxedExpression {
+  if (expr.operator !== 'Add') return expr;
+
+  const ops = expr.ops;
+  if (!ops || ops.length === 0) return expr;
+
+  // Collect all non-trivial denominators
+  const denominators = ops
+    .map((op) => op.denominator)
+    .filter((d) => !d.is(1));
+
+  if (denominators.length === 0) return expr;
+
+  // Compute the product of all denominators as a simplified LCM
+  // (This is a conservative approach - a true LCM would be more efficient
+  // but requires factoring which may not simplify for symbolic expressions)
+  let lcm = denominators[0];
+  for (let i = 1; i < denominators.length; i++) {
+    // Only multiply if denominator is different to avoid unnecessary complexity
+    if (!lcm.has(denominators[i].symbol ?? '') && !denominators[i].is(lcm))
+      lcm = lcm.mul(denominators[i]);
+  }
+
+  // Multiply the entire expression by the LCM and simplify
+  return expr.mul(lcm).simplify();
+}
+
+/**
  * Expression is a function of a single variable (`x`) or an Equality
  *
  * Return the roots of that variable
@@ -250,6 +285,9 @@ export function findUnivariateRoots(
   if (expr.operator === 'Equal')
     expr = expr.op1.expand().sub(expr.op2.expand()).simplify();
   else expr = expr.expand().simplify();
+
+  // Clear denominators to enable matching of expressions like F - 3x/h = 0
+  expr = clearDenominators(expr);
 
   const rules = ce.getRuleSet('solve-univariate')!;
 
