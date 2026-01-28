@@ -10,7 +10,9 @@ After cloning the repo:
 | `npm run`         |                                                                            |
 | ----------------- | -------------------------------------------------------------------------- |
 | `clean`           | Delete output directories (`/build`, `/dist`)                              |
-| `build [dev]`     | Make a development build in `/build`                                       |
+| `clean`           | Delete output directories (`/build`, `/dist`)                              |
+| `typecheck`       | Run TypeScript type checking on the source files                           |
+| `lint`            | Run ESLint and Prettier to check and fix code style issues                 |
 | `build watch`     | Make a development build in `/build` and watch for changes until ctrl-C    |
 | `build prod`      | Make a production build in `/dist`                                         |
 | `test [coverage]` | Run all the tests and generate code coverage data in `/coverage` directory |
