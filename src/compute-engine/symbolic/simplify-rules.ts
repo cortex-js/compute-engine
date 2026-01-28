@@ -609,6 +609,34 @@ export const SIMPLIFY_RULES: Rule[] = [
         ]);
         return { value: result, because: 'weighted squared binomial sum' };
       }
+
+      // Weighted cubed binomial sum: Sum(k^3 * C(n,k), [k, 0, n]) → n²(n+3) * 2^(n-3)
+      let hasIndexCubed = false;
+      binomialN = null;
+      hasBinomial = false;
+
+      for (const op of body.ops) {
+        if (op.operator === 'Power' && op.op1?.symbol === index && op.op2?.is(3)) {
+          hasIndexCubed = true;
+        } else if (
+          op.operator === 'Binomial' &&
+          op.op2?.symbol === index
+        ) {
+          hasBinomial = true;
+          binomialN = op.op1 ?? null;
+        }
+      }
+
+      if (hasIndexCubed && hasBinomial && binomialN && upper.isSame(binomialN) && body.ops.length === 2) {
+        // n²(n+3) * 2^(n-3)
+        const n = binomialN;
+        const result = ce.function('Multiply', [
+          ce.function('Power', [n, ce.number(2)]),
+          n.add(ce.number(3)),
+          ce.function('Power', [ce.number(2), n.sub(ce.number(3))]),
+        ]);
+        return { value: result, because: 'weighted cubed binomial sum' };
+      }
     }
 
     // Partial fractions / telescoping: Sum(1/(k*(k+1)), [k, 1, n]) → n/(n+1)
