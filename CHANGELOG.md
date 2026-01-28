@@ -55,6 +55,12 @@
   unaffected. Also added support for `\lcm` as a LaTeX command (in addition to
   the existing `\operatorname{lcm}`).
 
+- **([#223](https://github.com/cortex-js/compute-engine/issues/223))
+  Serialization**: Fixed scientific/engineering LaTeX serialization dropping
+  the leading coefficient for exact powers of ten. For example, `1000` now
+  serializes to `1\cdot10^{3}` (or `1\times10^{3}` depending on
+  `exponentProduct`) instead of `10^{3}`.
+
 - **LaTeX Parsing**: Fixed `\cosh` incorrectly mapping to `Csch` instead of `Cosh`.
 
 - **([#242](https://github.com/cortex-js/compute-engine/issues/242))

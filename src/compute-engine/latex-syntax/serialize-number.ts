@@ -328,10 +328,6 @@ function serializeScientificNotationNumber(
   wholePart = insertWholeGroupSeparator(wholePart, options);
 
   if (!expString) return wholePart + fractionalPart;
-  if (!fractionalPart) {
-    if (wholePart === '1') return expString;
-    if (wholePart === '-1') return '-' + expString;
-  }
   return wholePart + fractionalPart + options.exponentProduct + expString;
 }
 
