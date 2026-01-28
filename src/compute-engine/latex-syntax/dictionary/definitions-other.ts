@@ -42,7 +42,7 @@ export const DEFINITIONS_OTHERS: LatexDictionary = [
     parse: (_parser, lhs) => {
       // If lhs is not a symbol, ignore it, i.e. "5++"
       if (symbol(lhs) === null) return null;
-      return ['Decrement', lhs];
+      return ['Increment', lhs] as Expression;
     },
   },
   {
@@ -53,7 +53,7 @@ export const DEFINITIONS_OTHERS: LatexDictionary = [
     parse: (_parser, lhs) => {
       // If lhs is not a symbol, ignore it, i.e. "5--"
       if (symbol(lhs) === null) return null;
-      return ['Decrement', lhs];
+      return ['Decrement', lhs] as Expression;
     },
   },
   {

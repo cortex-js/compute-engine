@@ -147,7 +147,7 @@ export const DEFINITIONS_CORE: LatexDictionary = [
     latexTrigger: ['\\mapsto'],
     kind: 'infix',
     precedence: ARROW_PRECEDENCE, // MathML rightwards arrow
-    parse: (parser: Parser, lhs: Expression) => {
+    parse: (parser: Parser, lhs: Expression, _until) => {
       let params: string[] = [];
       if (operator(lhs) === 'Delimiter') lhs = operand(lhs, 1) ?? 'Nothing';
       if (operator(lhs) === 'Sequence') {
@@ -165,7 +165,7 @@ export const DEFINITIONS_CORE: LatexDictionary = [
       if (operator(rhs) === 'Delimiter') rhs = operand(rhs, 1) ?? 'Nothing';
       if (operator(rhs) === 'Sequence') rhs = ['Block', ...operands(rhs)];
 
-      return ['Function', rhs, ...params];
+      return ['Function', rhs, ...params] as Expression;
     },
     serialize: (serializer: Serializer, expr: Expression): string => {
       const args = operands(expr);
@@ -270,9 +270,9 @@ export const DEFINITIONS_CORE: LatexDictionary = [
     latexTrigger: '\\rhd',
     kind: 'infix',
     precedence: 20,
-    parse: (parser: Parser, lhs: Expression) => {
+    parse: (parser: Parser, lhs: Expression, _until) => {
       const rhs = parser.parseExpression({ minPrec: 21 }) ?? 'Nothing';
-      return ['Apply', rhs, lhs];
+      return ['Apply', rhs, lhs] as Expression;
     },
   },
 
@@ -773,20 +773,20 @@ export const DEFINITIONS_CORE: LatexDictionary = [
   {
     latexTrigger: ['^', '*'],
     kind: 'postfix',
-    parse: (_parser, lhs) => ['Superstar', lhs],
+    parse: (_parser, lhs) => ['Superstar', lhs] as Expression,
   },
   // { name: 'Superstar', latexTrigger: ['^', '\\star'], kind: 'postfix' },
   {
     latexTrigger: ['_', '*'],
     kind: 'postfix',
-    parse: (_parser, lhs) => ['Substar', lhs],
+    parse: (_parser, lhs) => ['Substar', lhs] as Expression,
   },
   { name: 'Substar', latexTrigger: ['_', '\\star'], kind: 'postfix' },
   { name: 'Superdagger', latexTrigger: ['^', '\\dagger'], kind: 'postfix' },
   {
     latexTrigger: ['^', '\\dag'],
     kind: 'postfix',
-    parse: (_parser, lhs) => ['Superdagger', lhs],
+    parse: (_parser, lhs) => ['Superdagger', lhs] as Expression,
   },
   {
     name: 'Prime',
@@ -889,11 +889,12 @@ export const DEFINITIONS_CORE: LatexDictionary = [
         else if (parser.match('\\tripleprime')) primeCount += 3;
         else return null;
       }
-      if (primeCount === 1) return ['Derivative', ['InverseFunction', lhs]];
+      if (primeCount === 1)
+        return ['Derivative', ['InverseFunction', lhs]] as Expression;
       if (primeCount > 0)
-        return ['Derivative', ['InverseFunction', lhs], primeCount];
+        return ['Derivative', ['InverseFunction', lhs], primeCount] as Expression;
 
-      return ['InverseFunction', lhs];
+      return ['InverseFunction', lhs] as Expression;
     },
     serialize: (serializer, expr) =>
       serializer.serialize(operand(expr, 1)) + '^{-1}',

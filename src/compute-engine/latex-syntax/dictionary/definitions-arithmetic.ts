@@ -606,7 +606,7 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
     latexTrigger: ['\\degree'],
     kind: 'postfix',
     precedence: 880,
-    parse: (_parser, lhs) => ['Degrees', lhs],
+    parse: (_parser, lhs) => ['Degrees', lhs] as Expression,
     serialize: (serializer: Serializer, expr: Expression): string => {
       return joinLatex([serializer.serialize(operand(expr, 1)), '\\degree']);
     },
@@ -615,24 +615,24 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
     latexTrigger: ['\\degree'],
     kind: 'postfix',
     precedence: 880,
-    parse: (_parser, lhs) => ['Degrees', lhs],
+    parse: (_parser, lhs) => ['Degrees', lhs] as Expression,
   },
   {
     latexTrigger: ['^', '<{>', '\\circ', '<}>'],
     kind: 'postfix',
-    parse: (_parser, lhs) => ['Degrees', lhs],
+    parse: (_parser, lhs) => ['Degrees', lhs] as Expression,
   },
 
   {
     latexTrigger: ['^', '\\circ'],
     kind: 'postfix',
-    parse: (_parser, lhs) => ['Degrees', lhs],
+    parse: (_parser, lhs) => ['Degrees', lhs] as Expression,
   },
   {
     latexTrigger: ['°'],
     kind: 'postfix',
     precedence: 880,
-    parse: (_parser, lhs) => ['Degrees', lhs],
+    parse: (_parser, lhs) => ['Degrees', lhs] as Expression,
   },
 
   {
@@ -711,13 +711,15 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
     kind: 'matchfix',
     openTrigger: '|',
     closeTrigger: '|',
-    parse: (_parser, body) => (isEmptySequence(body) ? null : ['Abs', body]),
+    parse: (_parser, body) =>
+      isEmptySequence(body) ? null : (['Abs', body] as Expression),
   },
   {
     kind: 'matchfix',
     openTrigger: ['\\vert'],
     closeTrigger: ['\\vert'],
-    parse: (_parser, body) => (isEmptySequence(body) ? null : ['Abs', body]),
+    parse: (_parser, body) =>
+      isEmptySequence(body) ? null : (['Abs', body] as Expression),
   },
   {
     symbolTrigger: 'abs',
@@ -757,13 +759,15 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
     kind: 'matchfix',
     openTrigger: '\\lceil',
     closeTrigger: '\\rceil',
-    parse: (_parser, body) => (isEmptySequence(body) ? null : ['Ceil', body]),
+    parse: (_parser, body) =>
+      isEmptySequence(body) ? null : (['Ceil', body] as Expression),
   },
   {
     kind: 'matchfix',
     openTrigger: ['\u2308'], // ⌈ U+2308 LEFT CEILING
     closeTrigger: ['\u2309'], // ⌉ U+2309 RIGHT CEILING
-    parse: (_parser, body) => (isEmptySequence(body) ? null : ['Ceil', body]),
+    parse: (_parser, body) =>
+      isEmptySequence(body) ? null : (['Ceil', body] as Expression),
   },
   {
     symbolTrigger: 'ceil',
@@ -866,13 +870,15 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
     kind: 'matchfix',
     openTrigger: '\\lfloor',
     closeTrigger: '\\rfloor',
-    parse: (_parser, body) => (isEmptySequence(body) ? null : ['Floor', body]),
+    parse: (_parser, body) =>
+      isEmptySequence(body) ? null : (['Floor', body] as Expression),
   },
   {
     kind: 'matchfix',
     openTrigger: ['\u230a'], // ⌊ U+230A LEFT FLOOR
     closeTrigger: ['\u230b'], // ⌋ U+230B RIGHT FLOOR
-    parse: (_parser, body) => (isEmptySequence(body) ? null : ['Floor', body]),
+    parse: (_parser, body) =>
+      isEmptySequence(body) ? null : (['Floor', body] as Expression),
   },
   {
     symbolTrigger: 'floor',
@@ -1121,7 +1127,8 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
     kind: 'matchfix',
     openTrigger: '||',
     closeTrigger: '||',
-    parse: (_parser, expr) => (isEmptySequence(expr) ? null : ['Norm', expr]),
+    parse: (_parser, expr) =>
+      isEmptySequence(expr) ? null : (['Norm', expr] as Expression),
   },
   {
     //   /** If the argument is a vector */
@@ -1130,7 +1137,8 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
     kind: 'matchfix',
     openTrigger: ['\\left', '\\Vert'],
     closeTrigger: ['\\right', '\\Vert'],
-    parse: (_parser, expr) => (isEmptySequence(expr) ? null : ['Norm', expr]),
+    parse: (_parser, expr) =>
+      isEmptySequence(expr) ? null : (['Norm', expr] as Expression),
   },
   {
     name: 'PlusMinus',

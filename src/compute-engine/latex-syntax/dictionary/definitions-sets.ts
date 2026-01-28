@@ -163,7 +163,7 @@ export const DEFINITIONS_SETS: LatexDictionary = [
     latexTrigger: ['^', '\\complement'],
     kind: 'postfix',
     parse: (_parser, lhs) => {
-      return ['Complement', lhs];
+      return ['Complement', lhs] as Expression;
     },
 
     // precedence: 240,

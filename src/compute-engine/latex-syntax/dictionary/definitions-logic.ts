@@ -320,7 +320,7 @@ export const DEFINITIONS_LOGIC: LatexDictionary = [
       const h = operator(body);
       if (!h) return null;
       if (!DEFINITIONS_INEQUALITIES.some((x) => x.name === h)) return null;
-      return ['Boole', body];
+      return ['Boole', body] as Expression;
     },
   },
 
@@ -332,7 +332,7 @@ export const DEFINITIONS_LOGIC: LatexDictionary = [
       const h = operator(body);
       if (!h) return null;
       if (!DEFINITIONS_INEQUALITIES.some((x) => x.name === h)) return null;
-      return ['Boole', body];
+      return ['Boole', body] as Expression;
     },
   },
 ];

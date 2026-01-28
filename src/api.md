@@ -2697,7 +2697,7 @@ Named wildcards capture values in the returned substitution:
 
 <MemberCard>
 
-### Substitution\<T\>
+### Substitution
 
 ```ts
 type Substitution<T> = {};
@@ -3147,7 +3147,7 @@ toExpression(ce, x): BoxedExpression
 
 </MemberCard>
 
-### ExpressionMapInterface\<U\>
+### ExpressionMapInterface
 
 <MemberCard>
 
@@ -6779,7 +6779,7 @@ The type of the cells in a tensor.
 
 </MemberCard>
 
-### TensorData\<DT\>
+### TensorData
 
 A record representing the type, shape and data of a tensor.
 
@@ -6827,7 +6827,7 @@ data: DataTypeMap[DT][];
 
 </MemberCard>
 
-### TensorField\<T\>
+### TensorField
 
 <MemberCard>
 
@@ -7309,7 +7309,7 @@ conjugate(x): T
 
 </MemberCard>
 
-### Tensor\<DT\>
+### Tensor
 
 #### Extends
 
