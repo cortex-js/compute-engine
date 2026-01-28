@@ -184,6 +184,46 @@ function matchOnce(
       }
     }
 
+    // Special case: Match Divide(1, x) against a Power pattern
+    // This handles cases like x^-1 which is canonicalized as 1/x
+    if (
+      operator === 'Power' &&
+      expr.operator === 'Divide' &&
+      expr.op1.is(1)
+    ) {
+      // Create a synthetic Power expression: Power(x, -1)
+      const powerExpr = ce.function(
+        'Power',
+        [expr.op2, ce.number(-1)],
+        { canonical: false, structural: true }
+      );
+      const result = matchArguments(
+        powerExpr,
+        pattern.ops,
+        substitution,
+        options
+      );
+      if (result !== null) return result;
+    }
+
+    // Special case: Match Root(x, n) against a Power pattern
+    // This handles cases like x^(1/3) which is canonicalized as Root(x, 3)
+    if (operator === 'Power' && expr.operator === 'Root') {
+      // Create a synthetic Power expression: Power(x, 1/n)
+      const powerExpr = ce.function(
+        'Power',
+        [expr.op1, ce.box(['Divide', 1, expr.op2], { canonical: false })],
+        { canonical: false, structural: true }
+      );
+      const result = matchArguments(
+        powerExpr,
+        pattern.ops,
+        substitution,
+        options
+      );
+      if (result !== null) return result;
+    }
+
     if (operator.startsWith('_')) {
       //
       // 1. The pattern operator is a wildcard
@@ -1032,6 +1072,13 @@ function matchArguments(
  * - **BoxedNumber rationals**: Numeric rationals like `['Rational', 3, 2]`
  *   which become `BoxedNumber` values will match `Divide` or `Rational`
  *   patterns by extracting the numerator and denominator.
+ *
+ * - **Power/Divide**: Expressions like `['Power', 'x', -1]` which are
+ *   canonicalized to `['Divide', 1, 'x']` will match a `Power` pattern,
+ *   returning `{_base: x, _exp: -1}`.
+ *
+ * - **Power/Root**: Expressions like `['Root', 'x', 3]` (cube root) will
+ *   match a `Power` pattern, returning `{_base: x, _exp: ['Divide', 1, 3]}`.
  *
  * <!--
  * @consider?

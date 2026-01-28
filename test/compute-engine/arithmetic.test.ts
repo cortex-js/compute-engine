@@ -717,6 +717,52 @@ describe('SUM', () => {
         .evaluate()
         .toString()
     ).toMatchInlineSnapshot(`4840`));
+
+  // Regression tests for issue #252: Sum with free variables
+  it('should handle sum with free variable (issue #252)', () =>
+    expect(
+      ce.parse('\\sum_{n=1}^{10}(x)').evaluate().toString()
+    ).toMatchInlineSnapshot(`10x`));
+
+  it('should handle sum with mixed index and free variable (issue #252)', () =>
+    expect(
+      ce.parse('\\sum_{n=1}^{10}(n \\cdot x)').evaluate().toString()
+    ).toMatchInlineSnapshot(`55x`));
+
+  it('should handle sum with addition of index and free variable (issue #252)', () =>
+    expect(
+      ce
+        .parse('\\sum_{n=1}^{3}(n + x)')
+        .evaluate()
+        .simplify()
+        .toString()
+    ).toMatchInlineSnapshot(`3x + 6`));
+});
+
+describe('PRODUCT', () => {
+  it('should compute the product of a collection', () =>
+    expect(
+      ce.box(['Product', ['Range', 1, 5]]).evaluate().toString()
+    ).toMatchInlineSnapshot(`120`));
+
+  it('should compute the product of a function over an interval', () =>
+    expect(
+      ce
+        .box(['Product', 'n', ['Tuple', 'n', 1, 5]])
+        .evaluate()
+        .toString()
+    ).toMatchInlineSnapshot(`120`));
+
+  // Regression tests for issue #252: Product with free variables
+  it('should handle product with free variable (issue #252)', () =>
+    expect(
+      ce.parse('\\prod_{n=1}^{5}(x)').evaluate().toString()
+    ).toMatchInlineSnapshot(`x^5`));
+
+  it('should handle product with mixed index and free variable (issue #252)', () =>
+    expect(
+      ce.parse('\\prod_{n=1}^{3}(n \\cdot x)').evaluate().toString()
+    ).toMatchInlineSnapshot(`6x^3`));
 });
 
 describe('GCD/LCM', () => {

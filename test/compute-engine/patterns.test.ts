@@ -1067,6 +1067,63 @@ describe('RATIONAL PATTERN MATCHING', () => {
   });
 });
 
+// Power pattern matching with canonicalized forms
+describe('POWER PATTERN MATCHING', () => {
+  it('should match Power(x, -1) which becomes Divide(1, x)', () => {
+    // Power(x, -1) is canonicalized to Divide(1, x)
+    const result = match(['Power', '_base', '_exp'], ['Power', 'x', -1]);
+    expect(result).toMatchInlineSnapshot(`
+      {
+        _base: x,
+        _exp: -1,
+      }
+    `);
+  });
+
+  it('should match Root(x, 3) against Power pattern', () => {
+    // Power(x, 1/3) is canonicalized to Root(x, 3)
+    // Root(x, 3) should match Power pattern as Power(x, 1/3)
+    const result = match(['Power', '_base', '_exp'], ['Root', 'x', 3]);
+    expect(result).toMatchInlineSnapshot(`
+      {
+        _base: x,
+        _exp: ["Divide", 1, 3],
+      }
+    `);
+  });
+
+  it('should match Power(x, -2) directly', () => {
+    // Power(x, -2) stays as Power(x, -2)
+    const result = match(['Power', '_base', '_exp'], ['Power', 'x', -2]);
+    expect(result).toMatchInlineSnapshot(`
+      {
+        _base: x,
+        _exp: -2,
+      }
+    `);
+  });
+
+  it('should match Sqrt(x) against Sqrt pattern', () => {
+    // Sqrt stays as Sqrt
+    const result = match(['Sqrt', '_x'], ['Sqrt', 'x']);
+    expect(result).toMatchInlineSnapshot(`
+      {
+        _x: x,
+      }
+    `);
+  });
+
+  it('should match Power(x, 1/2) which becomes Sqrt(x)', () => {
+    // Power(x, 1/2) is canonicalized to Sqrt(x)
+    const result = match(['Sqrt', '_x'], ['Power', 'x', ['Rational', 1, 2]]);
+    expect(result).toMatchInlineSnapshot(`
+      {
+        _x: x,
+      }
+    `);
+  });
+});
+
 describe('PATTERN VALIDATION', () => {
   // Test validatePattern directly with non-canonical patterns
   // (canonical forms may reorder operands for commutative operators)
