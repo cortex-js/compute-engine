@@ -842,6 +842,35 @@ describe('SUM', () => {
       ce.parse('\\sum_{n=0}^{4}(2 + 3*n)').evaluate().toString()
     ).toMatchInlineSnapshot(`40`);
   });
+
+  // Alternating linear series
+  it('should simplify alternating linear series', () => {
+    expect(
+      ce.parse('\\sum_{n=0}^{b}((-1)^n * n)').simplify().toString()
+    ).toMatchInlineSnapshot(`floor(1/2 * b + 1/2) * (-1)^b`);
+  });
+
+  it('should evaluate alternating linear series', () => {
+    // 0 - 1 + 2 - 3 + 4 = 2
+    expect(
+      ce.parse('\\sum_{n=0}^{4}((-1)^n * n)').evaluate().toString()
+    ).toMatchInlineSnapshot(`2`);
+  });
+
+  // General bounds for triangular number
+  it('should simplify sum with general lower bound', () => {
+    // 'a' already declared above
+    expect(
+      ce.parse('\\sum_{n=a}^{b}(n)').simplify().toString()
+    ).toMatchInlineSnapshot(`1/2 * (-a^2 + b^2 + a + b)`);
+  });
+
+  it('should evaluate sum with numeric lower bound', () => {
+    // 3 + 4 + 5 + 6 + 7 = 25
+    expect(
+      ce.parse('\\sum_{n=3}^{7}(n)').simplify().toString()
+    ).toMatchInlineSnapshot(`25`);
+  });
 });
 
 describe('PRODUCT', () => {
@@ -892,6 +921,33 @@ describe('PRODUCT', () => {
     expect(
       ce.parse('\\prod_{n=1}^{b}(x \\cdot n)').simplify().toString()
     ).toMatchInlineSnapshot(`b! * x^b`);
+  });
+
+  // Double factorial formulas
+  it('should simplify odd double factorial prod(2n-1)', () => {
+    expect(
+      ce.parse('\\prod_{n=1}^{b}(2n-1)').simplify().toString()
+    ).toMatchInlineSnapshot(`Factorial2(2b - 1)`);
+  });
+
+  it('should evaluate odd double factorial', () => {
+    // 1 * 3 * 5 = 15
+    expect(
+      ce.parse('\\prod_{n=1}^{3}(2n-1)').simplify().toString()
+    ).toMatchInlineSnapshot(`Factorial2(5)`);
+  });
+
+  it('should simplify even double factorial prod(2n)', () => {
+    expect(
+      ce.parse('\\prod_{n=1}^{b}(2n)').simplify().toString()
+    ).toMatchInlineSnapshot(`b! * 2^b`);
+  });
+
+  it('should evaluate even double factorial', () => {
+    // 2 * 4 * 6 = 48
+    expect(
+      ce.parse('\\prod_{n=1}^{3}(2n)').evaluate().toString()
+    ).toMatchInlineSnapshot(`48`);
   });
 
   // Edge cases

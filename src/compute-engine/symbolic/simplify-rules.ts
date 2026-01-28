@@ -323,10 +323,13 @@ export const SIMPLIFY_RULES: Rule[] = [
       };
     }
 
-    // If body is just the index: Sum(n, [n, 1, b]) → b * (b + 1) / 2
-    if (body.symbol === index && lower.is(1)) {
-      // Triangular number formula
-      const result = upper.mul(upper.add(ce.One)).div(2);
+    // If body is just the index: Sum(n, [n, a, b]) → (b(b+1) - (a-1)a) / 2
+    if (body.symbol === index) {
+      // General formula: sum from a to b = sum from 1 to b - sum from 1 to (a-1)
+      // = b(b+1)/2 - (a-1)a/2 = (b(b+1) - a(a-1)) / 2
+      const a = lower;
+      const b = upper;
+      const result = b.mul(b.add(ce.One)).sub(a.mul(a.sub(ce.One))).div(2);
       return { value: result.simplify(), because: 'triangular number' };
     }
 
@@ -368,6 +371,35 @@ export const SIMPLIFY_RULES: Rule[] = [
       // (1 + (-1)^b) / 2 = 1 if b even, 0 if b odd
       const result = ce.One.add(ce.number(-1).pow(b)).div(2);
       return { value: result, because: 'alternating unit series' };
+    }
+
+    // Alternating linear series: Sum((-1)^n * n, [n, 0, b]) → (-1)^b * floor((b+1)/2)
+    if (body.operator === 'Multiply' && body.ops && lower.is(0)) {
+      // Check for (-1)^n * n pattern
+      let hasAlternating = false;
+      let hasIndex = false;
+      for (const op of body.ops) {
+        if (
+          op.operator === 'Power' &&
+          op.op1?.is(-1) &&
+          op.op2?.symbol === index
+        ) {
+          hasAlternating = true;
+        } else if (op.symbol === index) {
+          hasIndex = true;
+        }
+      }
+      if (hasAlternating && hasIndex && body.ops.length === 2) {
+        const b = upper;
+        // (-1)^b * floor((b+1)/2)
+        const result = ce.function('Multiply', [
+          ce.function('Power', [ce.number(-1), b]),
+          ce.function('Floor', [
+            ce.function('Divide', [ce.function('Add', [b, ce.One]), ce.number(2)]),
+          ]),
+        ]);
+        return { value: result, because: 'alternating linear series' };
+      }
     }
 
     // Arithmetic progression: Sum(a + d*n, [n, 0, b]) → (b+1)*a + d*b*(b+1)/2
@@ -547,6 +579,73 @@ export const SIMPLIFY_RULES: Rule[] = [
         value: ce.function('Factorial', [upper]),
         because: 'factorial',
       };
+    }
+
+    // Double factorial (odd): Product(2n-1, [n, 1, b]) → (2b-1)!!
+    if (
+      body.operator === 'Add' &&
+      body.ops?.length === 2 &&
+      lower.is(1)
+    ) {
+      // Check for 2n - 1 pattern
+      const [op1, op2] = body.ops;
+      let hasLinearTerm = false;
+      let coefficient = 0;
+      let constantTerm = 0;
+
+      for (const op of body.ops) {
+        if (op.isNumberLiteral && typeof op.numericValue === 'number') {
+          constantTerm = op.numericValue;
+        } else if (
+          op.operator === 'Multiply' &&
+          op.ops?.length === 2
+        ) {
+          const [a, b] = op.ops;
+          if (a.isNumberLiteral && typeof a.numericValue === 'number' && b.symbol === index) {
+            coefficient = a.numericValue;
+            hasLinearTerm = true;
+          } else if (b.isNumberLiteral && typeof b.numericValue === 'number' && a.symbol === index) {
+            coefficient = b.numericValue;
+            hasLinearTerm = true;
+          }
+        }
+      }
+
+      // Product(2n-1, [n, 1, b]) → (2b-1)!!
+      if (hasLinearTerm && coefficient === 2 && constantTerm === -1) {
+        const b = upper;
+        const result = ce.function('Factorial2', [
+          ce.function('Subtract', [
+            ce.function('Multiply', [ce.number(2), b]),
+            ce.One,
+          ]),
+        ]);
+        return { value: result, because: 'odd double factorial' };
+      }
+
+      // Product(2n+1, [n, 0, b]) → (2b+1)!! (starting from 0)
+      // This gives 1 * 3 * 5 * ... * (2b+1) = (2b+1)!!
+    }
+
+    // Double factorial (even): Product(2n, [n, 1, b]) → 2^b * b!
+    if (
+      body.operator === 'Multiply' &&
+      body.ops?.length === 2 &&
+      lower.is(1)
+    ) {
+      const [op1, op2] = body.ops;
+      // Check for 2 * n or n * 2 pattern
+      if (
+        (op1.is(2) && op2.symbol === index) ||
+        (op2.is(2) && op1.symbol === index)
+      ) {
+        const b = upper;
+        const result = ce.function('Multiply', [
+          ce.function('Power', [ce.number(2), b]),
+          ce.function('Factorial', [b]),
+        ]);
+        return { value: result, because: 'even double factorial' };
+      }
     }
 
     // Factor out constants: Product(c * f(n), [n, a, b]) → c^(b-a+1) * Product(f(n), [n, a, b])
