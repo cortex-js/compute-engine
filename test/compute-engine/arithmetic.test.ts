@@ -980,6 +980,35 @@ describe('SUM', () => {
       ce.box(['Sum', ['Multiply', ['Power', 'k', 2], ['Binomial', 4, 'k']], ['Tuple', 'k', 0, 4]]).evaluate()?.toString()
     ).toMatchInlineSnapshot(`80`);
   });
+
+  // Weighted cubed binomial sum: Sum(k^3 * C(n,k), [k, 0, n]) = n²(n+3) * 2^(n-3)
+  it('should simplify weighted cubed binomial sum', () => {
+    expect(
+      ce.box(['Sum', ['Multiply', ['Power', 'k', 3], ['Binomial', 'b', 'k']], ['Tuple', 'k', 0, 'b']]).simplify().toString()
+    ).toMatchInlineSnapshot(`(b + 3) * b^2 * 2^(b - 3)`);
+  });
+
+  it('should evaluate weighted cubed binomial sum', () => {
+    // 0 + 1*4 + 8*6 + 27*4 + 64*1 = 0 + 4 + 48 + 108 + 64 = 224 = 16*7*2
+    expect(
+      ce.box(['Sum', ['Multiply', ['Power', 'k', 3], ['Binomial', 4, 'k']], ['Tuple', 'k', 0, 4]]).evaluate()?.toString()
+    ).toMatchInlineSnapshot(`224`);
+  });
+
+  // General arithmetic progression: Sum(a + d*n, [n, m, b])
+  it('should simplify arithmetic progression with non-zero lower bound', () => {
+    // Sum(3n+5, [n, 1, b]) = (b)(5 + 3(1+b)/2) = 3b(b+1)/2 + 5b
+    expect(
+      ce.parse('\\sum_{n=1}^{b}(3n + 5)').simplify().toString()
+    ).toMatchInlineSnapshot(`3/2 * b * (b + 1) + 5b`);
+  });
+
+  it('should evaluate arithmetic progression with non-zero lower bound', () => {
+    // 8 + 11 + 14 + 17 = 50
+    expect(
+      ce.parse('\\sum_{n=1}^{4}(3n + 5)').evaluate().toString()
+    ).toMatchInlineSnapshot(`50`);
+  });
 });
 
 describe('PRODUCT', () => {
@@ -1018,6 +1047,33 @@ describe('PRODUCT', () => {
     expect(
       ce.parse('\\prod_{n=1}^{b}(n)').simplify().toString()
     ).toMatchInlineSnapshot(`b!`);
+  });
+
+  // Shifted factorial: Product(n+c, [n, 1, b]) = (b+c)!/c!
+  it('should simplify product with index shift (n+1)', () => {
+    expect(
+      ce.parse('\\prod_{n=1}^{b}(n+1)').simplify().toString()
+    ).toMatchInlineSnapshot(`(b + 1)! / 1!`);
+  });
+
+  it('should evaluate product with index shift (n+1)', () => {
+    // 2*3*4*5 = 120
+    expect(
+      ce.parse('\\prod_{n=1}^{4}(n+1)').evaluate().toString()
+    ).toMatchInlineSnapshot(`120`);
+  });
+
+  it('should simplify product with larger index shift (n+3)', () => {
+    expect(
+      ce.parse('\\prod_{n=1}^{b}(n+3)').simplify().toString()
+    ).toMatchInlineSnapshot(`(b + 3)! / 3!`);
+  });
+
+  it('should evaluate product with larger index shift (n+3)', () => {
+    // 4*5*6*7 = 840
+    expect(
+      ce.parse('\\prod_{n=1}^{4}(n+3)').evaluate().toString()
+    ).toMatchInlineSnapshot(`840`);
   });
 
   it('should factor out constant from product', () => {

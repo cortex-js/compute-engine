@@ -471,20 +471,42 @@ export const SIMPLIFY_RULES: Rule[] = [
         }
       }
 
-      if (constant !== null && coefficient !== null && lower.is(0)) {
-        // Sum from n=0 to b of (a + d*n) = (b+1)*(a + d*b/2)
-        // Use ce.function to keep factored form for lower cost
+      if (constant !== null && coefficient !== null) {
+        // General arithmetic progression: Sum(a + d*n, [n, m, b])
+        // = (b - m + 1) * (a + d*(m + b)/2)
+        // = number of terms * average value
+        const m = lower;
         const b = upper;
-        const bPlus1 = ce.function('Add', [b, ce.One]);
-        const inner = ce.function('Add', [
-          constant,
-          ce.function('Divide', [
-            ce.function('Multiply', [coefficient, b]),
+
+        if (lower.is(0)) {
+          // Simpler case: Sum from n=0 to b of (a + d*n) = (b+1)*(a + d*b/2)
+          const bPlus1 = ce.function('Add', [b, ce.One]);
+          const inner = ce.function('Add', [
+            constant,
+            ce.function('Divide', [
+              ce.function('Multiply', [coefficient, b]),
+              ce.number(2),
+            ]),
+          ]);
+          const result = ce.function('Multiply', [bPlus1, inner]);
+          return { value: result, because: 'arithmetic progression' };
+        } else {
+          // General case: Sum from n=m to b of (a + d*n) = (b-m+1)*(a + d*(m+b)/2)
+          const numTerms = ce.function('Add', [
+            ce.function('Subtract', [b, m]),
+            ce.One,
+          ]);
+          const avgIndex = ce.function('Divide', [
+            ce.function('Add', [m, b]),
             ce.number(2),
-          ]),
-        ]);
-        const result = ce.function('Multiply', [bPlus1, inner]);
-        return { value: result, because: 'arithmetic progression' };
+          ]);
+          const avgValue = ce.function('Add', [
+            constant,
+            ce.function('Multiply', [coefficient, avgIndex]),
+          ]);
+          const result = ce.function('Multiply', [numTerms, avgValue]);
+          return { value: result, because: 'arithmetic progression' };
+        }
       }
     }
 
@@ -807,6 +829,33 @@ export const SIMPLIFY_RULES: Rule[] = [
         value: ce.function('Factorial', [upper]),
         because: 'factorial',
       };
+    }
+
+    // Product with index shift: Product(n+c, [n, 1, b]) → (b+c)!/c!
+    // Pattern: Add with index and constant
+    if (body.operator === 'Add' && body.ops?.length === 2 && lower.is(1)) {
+      const [op1, op2] = body.ops;
+      let indexTerm: BoxedExpression | null = null;
+      let constTerm: BoxedExpression | null = null;
+
+      if (op1.symbol === index && !new Set(op2.unknowns).has(index)) {
+        indexTerm = op1;
+        constTerm = op2;
+      } else if (op2.symbol === index && !new Set(op1.unknowns).has(index)) {
+        indexTerm = op2;
+        constTerm = op1;
+      }
+
+      if (indexTerm && constTerm) {
+        // Product(n+c, [n, 1, b]) = (b+c)! / c!
+        const b = upper;
+        const c = constTerm;
+        const result = ce.function('Divide', [
+          ce.function('Factorial', [ce.function('Add', [b, c])]),
+          ce.function('Factorial', [c]),
+        ]);
+        return { value: result, because: 'shifted factorial' };
+      }
     }
 
     // Double factorial (odd): Product(2n-1, [n, 1, b]) → (2b-1)!!
