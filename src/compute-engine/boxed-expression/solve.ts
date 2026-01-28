@@ -53,6 +53,15 @@ export const UNIVARIATE_ROOTS: Rule[] = [
     condition: filter,
   },
 
+  // -ax + b = 0  =>  x = b/a
+  // This handles cases where the coefficient is negative and represented as Negate(Multiply(...))
+  {
+    match: ['Add', ['Negate', ['Multiply', '_x', '__a']], '__b'],
+    replace: ['Divide', '__b', '__a'],
+    useVariations: true,
+    condition: filter,
+  },
+
   // ax^n + b = 0
   {
     match: ['Add', ['Multiply', '_a', ['Power', '_x', '_n']], '__b'],
@@ -225,6 +234,23 @@ export const UNIVARIATE_ROOTS: Rule[] = [
     useVariations: true,
     condition: filter,
   },
+  // ax + b\sqrt{x} + g = 0
+  // plus
+  {
+    match: 'ax + \\mathrm{__b} \\sqrt{x} + \\mathrm{___g}',
+    replace:
+      '\\left(\\frac{-\\mathrm{__b} + \\sqrt{\\mathrm{__b}^2 - 4 a \\mathrm{___g}}}{2 a}\\right)^2',
+    useVariations: true,
+    condition: filter,
+  },
+  // minus
+  {
+    match: 'ax + \\mathrm{__b} \\sqrt{x} + \\mathrm{___g}',
+    replace:
+      '\\left(\\frac{-\\mathrm{__b} - \\sqrt{\\mathrm{__b}^2 - 4 a \\mathrm{___g}}}{2 a}\\right)^2',
+    useVariations: true,
+    condition: filter,
+  },
   // minus
   {
     match: 'ax + \\mathrm{__b} \\sqrt{cx + \\mathrm{__d}} + \\mathrm{__g}',
@@ -242,8 +268,14 @@ export const UNIVARIATE_ROOTS: Rule[] = [
  * This transformation preserves the roots of the equation (assuming denominators
  * are non-zero) and allows the solve rules to match expressions that would
  * otherwise have nested Divide operators.
+ *
+ * Also handles the case where the variable is in the denominator (e.g., `a/x - b`
+ * becomes `a - bx` after multiplying by x).
  */
-function clearDenominators(expr: BoxedExpression): BoxedExpression {
+function clearDenominators(
+  expr: BoxedExpression,
+  variable?: string
+): BoxedExpression {
   if (expr.operator !== 'Add') return expr;
 
   const ops = expr.ops;
@@ -256,14 +288,36 @@ function clearDenominators(expr: BoxedExpression): BoxedExpression {
 
   if (denominators.length === 0) return expr;
 
-  // Compute the product of all denominators as a simplified LCM
-  // (This is a conservative approach - a true LCM would be more efficient
-  // but requires factoring which may not simplify for symbolic expressions)
-  let lcm = denominators[0];
-  for (let i = 1; i < denominators.length; i++) {
-    // Only multiply if denominator is different to avoid unnecessary complexity
-    if (!lcm.has(denominators[i].symbol ?? '') && !denominators[i].is(lcm))
-      lcm = lcm.mul(denominators[i]);
+  // Build LCM by collecting unique denominator factors
+  // This avoids multiplying by the same factor twice
+  const lcmFactors: BoxedExpression[] = [];
+
+  for (const denom of denominators) {
+    // Check if this denominator (or an equivalent) is already in our factors
+    let isDuplicate = false;
+    for (const existing of lcmFactors) {
+      // Check if they're the same expression
+      if (denom.isSame(existing)) {
+        isDuplicate = true;
+        break;
+      }
+      // Check if one is a symbol and the other contains it (partial match)
+      // This handles cases like h and h appearing multiple times
+      if (denom.symbol && existing.symbol && denom.symbol === existing.symbol) {
+        isDuplicate = true;
+        break;
+      }
+    }
+
+    if (!isDuplicate) {
+      lcmFactors.push(denom);
+    }
+  }
+
+  // Compute the LCM as the product of unique factors
+  let lcm = lcmFactors[0];
+  for (let i = 1; i < lcmFactors.length; i++) {
+    lcm = lcm.mul(lcmFactors[i]);
   }
 
   // Multiply the entire expression by the LCM and simplify

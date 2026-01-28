@@ -81,6 +81,11 @@
   denominators before applying solve rules, enabling it to handle expressions
   like `a + bx/c = 0`.
 
+- **([#220](https://github.com/cortex-js/compute-engine/issues/220))
+  Solve**: Fixed `solve()` returning an empty array for equations involving
+  square roots of the unknown, e.g. `2x = \sqrt{5x}`. The solver now handles
+  equations that include `\sqrt{x}` terms.
+
 - **([#255](https://github.com/cortex-js/compute-engine/issues/255))
   LaTeX Parsing**: Fixed multi-letter subscripts like `A_{CD}` causing
   "incompatible-type" errors in arithmetic operations. Multi-letter subscripts

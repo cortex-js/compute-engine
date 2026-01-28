@@ -135,6 +135,17 @@ describe('expr.solve()', () => {
     `);
   });
 
+  test('should solve an equation with a sqrt(x) term (issue #220)', () => {
+    const e = expr('2x = \\sqrt{5x}');
+    const result = e.solve('x')?.map((x) => x.toString());
+    expect(result).toMatchInlineSnapshot(`
+      [
+        5/4,
+        0,
+      ]
+    `);
+  });
+
   test('should solve an equation with a complex root', () => {
     const e = expr('x^2 + 1 = 0');
     const result = e.solve('x')?.map((x) => x.json);
@@ -250,8 +261,7 @@ describe('SOLVING EQUATIONS WITH FRACTIONS (#242)', () => {
     expect(result).toEqual([6]);
   });
 
-  // This test will be enabled after implementing variable-in-denominator solving
-  test.skip('should solve a/x = b for x (variable in denominator)', () => {
+  test('should solve a/x = b for x (variable in denominator)', () => {
     const e = expr('a/x = b');
     const result = e.solve('x')?.map((x) => x.toString());
     expect(result).toMatchInlineSnapshot(`
