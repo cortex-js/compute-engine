@@ -74,6 +74,58 @@ describe('Logic', () => {
     `);
   });
 
+  // https://github.com/cortex-js/compute-engine/issues/243
+  it('should parse Or with comparisons correctly (issue #243)', () => {
+    // Comparisons should bind tighter than logic operators
+    expect(ce.parse('x = 1 \\vee x = 2').json).toMatchInlineSnapshot(`
+      [
+        Or,
+        [
+          Equal,
+          x,
+          1,
+        ],
+        [
+          Equal,
+          x,
+          2,
+        ],
+      ]
+    `);
+
+    expect(ce.parse('x = 1 \\lor y = 2').json).toMatchInlineSnapshot(`
+      [
+        Or,
+        [
+          Equal,
+          x,
+          1,
+        ],
+        [
+          Equal,
+          y,
+          2,
+        ],
+      ]
+    `);
+
+    expect(ce.parse('a < 1 \\land b > 2').json).toMatchInlineSnapshot(`
+      [
+        And,
+        [
+          Less,
+          a,
+          1,
+        ],
+        [
+          Less,
+          2,
+          b,
+        ],
+      ]
+    `);
+  });
+
   it('should parse Implies', () => {
     expect(ce.parse('p \\Rightarrow q').json).toMatchInlineSnapshot(`
       [

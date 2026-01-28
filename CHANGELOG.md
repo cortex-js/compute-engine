@@ -2,6 +2,12 @@
 
 ### Bug Fixes
 
+- **([#243](https://github.com/cortex-js/compute-engine/issues/243))
+  LaTeX Parsing**: Fixed logic operator precedence causing expressions like
+  `x = 1 \vee x = 2` to be parsed incorrectly as `x = (1 ∨ x) = 2` instead of
+  `(x = 1) ∨ (x = 2)`. Comparison operators (`=`, `<`, `>`, etc.) now correctly
+  bind tighter than logic operators (`\land`, `\lor`, `\veebar`, etc.).
+
 - **([#258](https://github.com/cortex-js/compute-engine/issues/258))
   Pattern Matching**: Fixed `BoxedExpression.match()` returning `null` when
   matching patterns against canonicalized expressions. Several cases are now
@@ -47,6 +53,9 @@
   - Sum of squares: `\sum_{n=1}^{b}(n^2)` simplifies to `b(b+1)(2b+1)/6`
   - Product of constant: `\prod_{n=1}^{b}(x)` simplifies to `x^b`
   - Factorial: `\prod_{n=1}^{b}(n)` simplifies to `b!`
+  - Factor out constants: `\sum_{n=1}^{b}(c \cdot f(n))` simplifies to
+    `c \cdot \sum_{n=1}^{b}(f(n))`, and similarly for products where the
+    constant is raised to the power of the iteration count
 
 - **([#257](https://github.com/cortex-js/compute-engine/issues/257))
   LaTeX Parsing**: Fixed `\gcd` command not parsing function arguments correctly.

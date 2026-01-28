@@ -58,42 +58,45 @@ export const DEFINITIONS_LOGIC: LatexDictionary = [
   },
 
   // Operators
+  // Logic operators have lower precedence than comparisons (245)
+  // so that `x = 1 \lor x = 2` parses as `(x = 1) \lor (x = 2)`
+  // See https://github.com/cortex-js/compute-engine/issues/243
   {
     name: 'And',
     kind: 'infix',
     latexTrigger: ['\\land'],
-    precedence: 317,
+    precedence: 235,
     // serialize: '\\land',
   },
-  { kind: 'infix', latexTrigger: ['\\wedge'], parse: 'And', precedence: 317 },
-  { kind: 'infix', latexTrigger: '\\&', parse: 'And', precedence: 317 },
+  { kind: 'infix', latexTrigger: ['\\wedge'], parse: 'And', precedence: 235 },
+  { kind: 'infix', latexTrigger: '\\&', parse: 'And', precedence: 235 },
   {
     kind: 'infix',
     latexTrigger: '\\operatorname{and}',
     parse: 'And',
-    precedence: 317,
+    precedence: 235,
   },
 
   {
     name: 'Or',
     kind: 'infix',
     latexTrigger: ['\\lor'],
-    precedence: 310,
+    precedence: 230,
   },
-  { kind: 'infix', latexTrigger: ['\\vee'], parse: 'Or', precedence: 310 },
-  { kind: 'infix', latexTrigger: '\\parallel', parse: 'Or', precedence: 310 },
+  { kind: 'infix', latexTrigger: ['\\vee'], parse: 'Or', precedence: 230 },
+  { kind: 'infix', latexTrigger: '\\parallel', parse: 'Or', precedence: 230 },
   {
     kind: 'infix',
     latexTrigger: '\\operatorname{or}',
     parse: 'Or',
-    precedence: 310,
+    precedence: 230,
   },
 
   {
     name: 'Xor',
     kind: 'infix',
     latexTrigger: ['\\veebar'],
-    precedence: 315,
+    precedence: 232,
   },
   // Possible alt: \oplus ⊕ U+2295
 
@@ -114,14 +117,14 @@ export const DEFINITIONS_LOGIC: LatexDictionary = [
     name: 'Nand',
     kind: 'infix',
     latexTrigger: ['\\barwedge'],
-    precedence: 315,
+    precedence: 232,
     // serialize: '\\mid',
   },
   {
     name: 'Nor',
     kind: 'infix',
     latexTrigger: ['\u22BD'], // bar vee
-    precedence: 315,
+    precedence: 232,
     // serialize: '\\downarrow',
   },
   // Functions

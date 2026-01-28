@@ -110,15 +110,19 @@ export type LibraryCategory =
  *    - `DIVISION_PRECEDENCE` = 600: `\div`
  * - 500: not used
  * - 400: not used
- * - 300: some logic and arithmetic operators:
- *        `\land`, `\lor`, `\times`, etc...
+ * - 300: some arithmetic operators:
  *   - `MULTIPLICATION_PRECEDENCE` = 390: `\times`
- * - 200: arithmetic operators, inequalities:
+ * - 200: arithmetic operators, inequalities, logic operators:
  *   - `ADDITION_PRECEDENCE` = 275: `+` `-`
  *   - `ARROW_PRECEDENCE` = 270: `\to` `\rightarrow`
  *   - `ASSIGNMENT_PRECEDENCE` = 260: `:=`
- *   - `COMPARISON_PRECEDENCE` = 245: `\lt` `\gt`
+ *   - `COMPARISON_PRECEDENCE` = 245: `\lt` `\gt` `=`
  *   - 241: `\leq`
+ *   - 235: `\land` (And)
+ *   - 232: `\veebar` (Xor), `\barwedge` (Nand), `\u22BD` (Nor)
+ *   - 230: `\lor` (Or)
+ *   - 220: `\implies` (Implies)
+ *   - 219: `\iff` (Equivalent)
  * - 100: not used
  * - 0: `,`, `;`, etc...
  *
