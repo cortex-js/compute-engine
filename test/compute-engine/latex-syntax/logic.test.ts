@@ -126,6 +126,237 @@ describe('Logic', () => {
     `);
   });
 
+  it('should parse complex nested logic expressions', () => {
+    // AND binds tighter than OR: a = b ∧ c = d ∨ g = f → ((a = b) ∧ (c = d)) ∨ (g = f)
+    // Note: using 'g' instead of 'e' since 'e' is parsed as ExponentialE
+    expect(ce.parse('a = b \\land c = d \\lor g = f').json).toMatchInlineSnapshot(`
+      [
+        Or,
+        [
+          And,
+          [
+            Equal,
+            a,
+            b,
+          ],
+          [
+            Equal,
+            c,
+            d,
+          ],
+        ],
+        [
+          Equal,
+          g,
+          f,
+        ],
+      ]
+    `);
+
+    // OR binds tighter than implies: a ∨ b → c parses as (a ∨ b) → c
+    expect(ce.parse('a \\lor b \\implies c').json).toMatchInlineSnapshot(`
+      [
+        Implies,
+        [
+          Or,
+          a,
+          b,
+        ],
+        c,
+      ]
+    `);
+
+    // Chained implications are right-associative: a → b → c parses as a → (b → c)
+    expect(ce.parse('a \\implies b \\implies c').json).toMatchInlineSnapshot(`
+      [
+        Implies,
+        a,
+        [
+          Implies,
+          b,
+          c,
+        ],
+      ]
+    `);
+
+    // Comparison with implication: x < 1 → y > 2
+    expect(ce.parse('x < 1 \\implies y > 2').json).toMatchInlineSnapshot(`
+      [
+        Implies,
+        [
+          Less,
+          x,
+          1,
+        ],
+        [
+          Less,
+          2,
+          y,
+        ],
+      ]
+    `);
+  });
+
+  it('should parse Not with comparisons and logic operators', () => {
+    // \lnot has high precedence (880), so it only applies to the next symbol
+    // \lnot x = 1 \lor y = 2 parses as ((\lnot x) = 1) \lor (y = 2)
+    expect(ce.parse('\\lnot x = 1 \\lor y = 2').json).toMatchInlineSnapshot(`
+      [
+        Or,
+        [
+          Equal,
+          y,
+          2,
+        ],
+        [
+          Equal,
+          [
+            Not,
+            x,
+          ],
+          1,
+        ],
+      ]
+    `);
+
+    // To negate a comparison, use parentheses: \lnot(x = 1)
+    expect(ce.parse('\\lnot(x = 1) \\lor y = 2').json).toMatchInlineSnapshot(`
+      [
+        Or,
+        [
+          Not,
+          [
+            Equal,
+            x,
+            1,
+          ],
+        ],
+        [
+          Equal,
+          y,
+          2,
+        ],
+      ]
+    `);
+
+    // Double negation is simplified during canonicalization
+    expect(ce.parse('\\lnot \\lnot p').json).toMatchInlineSnapshot(`p`);
+
+    // Not with And (using parentheses)
+    expect(ce.parse('\\lnot (a \\land b)').json).toMatchInlineSnapshot(`
+      [
+        Not,
+        [
+          And,
+          a,
+          b,
+        ],
+      ]
+    `);
+  });
+
+  it('should parse equivalence with logic operators', () => {
+    // Equivalence binds looser than Or
+    expect(ce.parse('a \\lor b \\iff c \\lor d').json).toMatchInlineSnapshot(`
+      [
+        Equivalent,
+        [
+          Or,
+          a,
+          b,
+        ],
+        [
+          Or,
+          c,
+          d,
+        ],
+      ]
+    `);
+
+    // Equivalence with And
+    expect(ce.parse('a \\land b \\iff c \\land d').json).toMatchInlineSnapshot(`
+      [
+        Equivalent,
+        [
+          And,
+          a,
+          b,
+        ],
+        [
+          And,
+          c,
+          d,
+        ],
+      ]
+    `);
+  });
+
+  it('should parse mixed comparisons and logic', () => {
+    // Multiple comparisons with multiple logic operators
+    expect(ce.parse('x = 1 \\land y = 2 \\land z = 3').json).toMatchInlineSnapshot(`
+      [
+        And,
+        [
+          Equal,
+          x,
+          1,
+        ],
+        [
+          Equal,
+          y,
+          2,
+        ],
+        [
+          Equal,
+          z,
+          3,
+        ],
+      ]
+    `);
+
+    // Inequality chain with Or
+    expect(ce.parse('x < 0 \\lor x > 10').json).toMatchInlineSnapshot(`
+      [
+        Or,
+        [
+          Less,
+          x,
+          0,
+        ],
+        [
+          Less,
+          10,
+          x,
+        ],
+      ]
+    `);
+
+    // Complex: (a ≤ b) ∧ (b ≤ c) → (a ≤ c)
+    expect(ce.parse('a \\leq b \\land b \\leq c \\implies a \\leq c').json).toMatchInlineSnapshot(`
+      [
+        Implies,
+        [
+          And,
+          [
+            LessEqual,
+            a,
+            b,
+          ],
+          [
+            LessEqual,
+            b,
+            c,
+          ],
+        ],
+        [
+          LessEqual,
+          a,
+          c,
+        ],
+      ]
+    `);
+  });
+
   it('should parse Implies', () => {
     expect(ce.parse('p \\Rightarrow q').json).toMatchInlineSnapshot(`
       [

@@ -769,6 +769,31 @@ describe('SUM', () => {
       ce.parse('\\sum_{n=1}^{b}(x \\cdot n)').simplify().toString()
     ).toMatchInlineSnapshot(`1/2 * x * (b^2 + b)`);
   });
+
+  it('should simplify sum of cubes', () => {
+    expect(
+      ce.parse('\\sum_{n=1}^{b}(n^3)').simplify().toString()
+    ).toMatchInlineSnapshot(`1/4 * (b^2 + b)^2`);
+  });
+
+  it('should simplify geometric series starting at 0', () => {
+    ce.declare('r', 'real');
+    expect(
+      ce.parse('\\sum_{n=0}^{b}(r^n)').simplify().toString()
+    ).toMatchInlineSnapshot(`(1 - r^(b + 1)) / (1 - r)`);
+  });
+
+  it('should simplify geometric series starting at 1', () => {
+    expect(
+      ce.parse('\\sum_{n=1}^{b}(r^n)').simplify().toString()
+    ).toMatchInlineSnapshot(`(r - r^(b + 1)) / (1 - r)`);
+  });
+
+  it('should evaluate geometric series numerically', () => {
+    expect(
+      ce.parse('\\sum_{n=0}^{5}(2^n)').simplify().toString()
+    ).toMatchInlineSnapshot(`63`);
+  });
 });
 
 describe('PRODUCT', () => {
