@@ -42,12 +42,12 @@ describe('D', () => {
     expect(result.latex).toMatchInlineSnapshot(`\\cos(x)`);
   });
 
-  // \frac{2x+2}{x^2+2x}-\frac{\cos(\frac{1}{x})}{x^2}
+  // \frac{2}{x+2}+(2)(x^2+2x)^{-1}-\frac{\cos(\frac{1}{x})}{x^2}
   it('should compute a complex partial derivative', () => {
     const expr = parse('D(\\sin(\\frac{1}{x}) + \\ln(x^2+2x), x)');
     const result = expr.evaluate();
     expect(result.latex).toMatchInlineSnapshot(
-      `\\frac{2x+2}{x^2+2x}-\\frac{\\cos(\\frac{1}{x})}{x^2}`
+      `\\frac{2}{x+2}+(2)(x^2+2x)^{-1}-\\frac{\\cos(\\frac{1}{x})}{x^2}`
     );
   });
 });

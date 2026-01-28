@@ -52,6 +52,27 @@ export const SIMPLIFY_RULES: Rule[] = [
 
   simplifySystemOfEquations,
 
+  //
+  // Cancel common polynomial factors in Divide expressions
+  // e.g., (x² - 1)/(x - 1) → x + 1
+  // Must run before expand to preserve polynomial structure
+  //
+  (x): RuleStep | undefined => {
+    if (x.operator !== 'Divide') return undefined;
+
+    // Get unknowns from the expression - only handle univariate case
+    const unknowns = x.unknowns;
+    if (unknowns.length !== 1) return undefined;
+
+    const variable = unknowns[0];
+    const result = cancelCommonFactors(x, variable);
+
+    // Only return if cancellation actually changed something
+    if (result.isSame(x)) return undefined;
+
+    return { value: result, because: 'cancel common polynomial factors' };
+  },
+
   // Try to expand the expression:
   // x*(y+z) -> x*y + x*z
   // { replace: (x) => expand(x) ?? undefined, id: 'expand' },
@@ -101,26 +122,6 @@ export const SIMPLIFY_RULES: Rule[] = [
     if (x.operator === 'Rational' && x.nops === 2)
       return { value: x.op1.div(x.op2), because: 'rational' };
     return undefined;
-  },
-
-  //
-  // Cancel common polynomial factors in Divide expressions
-  // e.g., (x² - 1)/(x - 1) → x + 1
-  //
-  (x): RuleStep | undefined => {
-    if (x.operator !== 'Divide') return undefined;
-
-    // Get unknowns from the expression - only handle univariate case
-    const unknowns = x.unknowns;
-    if (unknowns.length !== 1) return undefined;
-
-    const variable = unknowns[0];
-    const result = cancelCommonFactors(x, variable);
-
-    // Only return if cancellation actually changed something
-    if (result.isSame(x)) return undefined;
-
-    return { value: result, because: 'cancel common polynomial factors' };
   },
 
   //
