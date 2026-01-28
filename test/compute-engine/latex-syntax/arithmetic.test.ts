@@ -231,6 +231,40 @@ describe('PRODUCT', () => {
   });
 });
 
+describe('GCD/LCM parsing', () => {
+  test('\\gcd with \\left( \\right) delimiters', () => {
+    expect(ce.parse('\\gcd\\left(24,37\\right)')).toMatchInlineSnapshot(
+      `["GCD", 24, 37]`
+    );
+  });
+
+  test('\\gcd with regular parentheses', () => {
+    expect(ce.parse('\\gcd(24,37)')).toMatchInlineSnapshot(`["GCD", 24, 37]`);
+  });
+
+  test('\\operatorname{gcd}', () => {
+    expect(ce.parse('\\operatorname{gcd}(24,37)')).toMatchInlineSnapshot(
+      `["GCD", 24, 37]`
+    );
+  });
+
+  test('\\lcm with \\left( \\right) delimiters', () => {
+    expect(ce.parse('\\lcm\\left(24,37\\right)')).toMatchInlineSnapshot(
+      `["LCM", 24, 37]`
+    );
+  });
+
+  test('\\lcm with regular parentheses', () => {
+    expect(ce.parse('\\lcm(24,37)')).toMatchInlineSnapshot(`["LCM", 24, 37]`);
+  });
+
+  test('\\operatorname{lcm}', () => {
+    expect(ce.parse('\\operatorname{lcm}(24,37)')).toMatchInlineSnapshot(
+      `["LCM", 24, 37]`
+    );
+  });
+});
+
 describe('POWER', () => {
   test('Power Invalid forms', () => {
     expect(latex(['Power'])).toMatchInlineSnapshot(

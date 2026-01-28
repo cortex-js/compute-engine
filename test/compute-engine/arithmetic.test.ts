@@ -3,6 +3,7 @@ import { check, checkJson, engine } from '../utils';
 const ce = engine;
 
 ce.assign('z', ['Complex', 0, 1]);
+ce.declare('b', 'integer'); // Used in Sum/Product simplification tests
 
 describe('CONSTANTS', () => {
   test(`ExponentialE`, () =>
@@ -737,6 +738,25 @@ describe('SUM', () => {
         .simplify()
         .toString()
     ).toMatchInlineSnapshot(`3x + 6`));
+
+  // Simplification of Sum with symbolic bounds
+  it('should simplify sum of constant with symbolic bounds', () => {
+    expect(
+      ce.parse('\\sum_{n=1}^{b}(x)').simplify().toString()
+    ).toMatchInlineSnapshot(`b * x`);
+  });
+
+  it('should simplify sum of index (triangular number)', () => {
+    expect(
+      ce.parse('\\sum_{n=1}^{b}(n)').simplify().toString()
+    ).toMatchInlineSnapshot(`1/2 * (b^2 + b)`);
+  });
+
+  it('should simplify sum of index squared', () => {
+    expect(
+      ce.parse('\\sum_{n=1}^{b}(n^2)').simplify().toString()
+    ).toMatchInlineSnapshot(`1/3 * b^3 + 1/2 * b^2 + 1/6 * b`);
+  });
 });
 
 describe('PRODUCT', () => {
@@ -763,6 +783,19 @@ describe('PRODUCT', () => {
     expect(
       ce.parse('\\prod_{n=1}^{3}(n \\cdot x)').evaluate().toString()
     ).toMatchInlineSnapshot(`6x^3`));
+
+  // Simplification of Product with symbolic bounds
+  it('should simplify product of constant with symbolic bounds', () => {
+    expect(
+      ce.parse('\\prod_{n=1}^{b}(x)').simplify().toString()
+    ).toMatchInlineSnapshot(`x^b`);
+  });
+
+  it('should simplify product of index (factorial)', () => {
+    expect(
+      ce.parse('\\prod_{n=1}^{b}(n)').simplify().toString()
+    ).toMatchInlineSnapshot(`b!`);
+  });
 });
 
 describe('GCD/LCM', () => {

@@ -262,11 +262,91 @@ export const SIMPLIFY_RULES: Rule[] = [
     };
   },
   //
-  // Product, Sum
+  // Sum simplification
   //
   (x): RuleStep | undefined => {
-    if (x.operator === 'Max') {
+    if (x.operator !== 'Sum') return undefined;
+
+    const body = x.op1;
+    const limits = x.op2;
+    if (!body || !limits || limits.operator !== 'Limits') return undefined;
+
+    const index = limits.op1?.symbol;
+    const lower = limits.op2;
+    const upper = limits.op3;
+    if (!index || !lower || !upper) return undefined;
+
+    const ce = x.engine;
+    const bodyUnknowns = new Set(body.unknowns);
+
+    // If body doesn't depend on index: Sum(c, [n, a, b]) → (b - a + 1) * c
+    if (!bodyUnknowns.has(index)) {
+      const count = upper.sub(lower).add(ce.One).simplify();
+      return {
+        value: count.mul(body.simplify()),
+        because: 'sum of constant',
+      };
     }
+
+    // If body is just the index: Sum(n, [n, 1, b]) → b * (b + 1) / 2
+    if (body.symbol === index && lower.is(1)) {
+      // Triangular number formula
+      const result = upper.mul(upper.add(ce.One)).div(2);
+      return { value: result.simplify(), because: 'triangular number' };
+    }
+
+    // If body is index squared: Sum(n^2, [n, 1, b]) → b(b+1)(2b+1)/6
+    if (
+      body.operator === 'Power' &&
+      body.op1?.symbol === index &&
+      body.op2?.is(2) &&
+      lower.is(1)
+    ) {
+      // Sum of squares formula: b(b+1)(2b+1)/6
+      // Note: Don't simplify() here as the expanded form is more expensive
+      const b = upper;
+      const result = b.mul(b.add(ce.One)).mul(b.mul(2).add(ce.One)).div(6);
+      return { value: result, because: 'sum of squares' };
+    }
+
+    return undefined;
+  },
+
+  //
+  // Product simplification
+  //
+  (x): RuleStep | undefined => {
+    if (x.operator !== 'Product') return undefined;
+
+    const body = x.op1;
+    const limits = x.op2;
+    if (!body || !limits || limits.operator !== 'Limits') return undefined;
+
+    const index = limits.op1?.symbol;
+    const lower = limits.op2;
+    const upper = limits.op3;
+    if (!index || !lower || !upper) return undefined;
+
+    const ce = x.engine;
+    const bodyUnknowns = new Set(body.unknowns);
+
+    // If body doesn't depend on index: Product(c, [n, a, b]) → c^(b - a + 1)
+    if (!bodyUnknowns.has(index)) {
+      const count = upper.sub(lower).add(ce.One).simplify();
+      return {
+        value: body.simplify().pow(count),
+        because: 'product of constant',
+      };
+    }
+
+    // If body is just the index: Product(n, [n, 1, b]) → b!
+    if (body.symbol === index && lower.is(1)) {
+      return {
+        value: ce.function('Factorial', [upper]),
+        because: 'factorial',
+      };
+    }
+
     return undefined;
   },
 

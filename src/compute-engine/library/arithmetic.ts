@@ -1484,7 +1484,8 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
           ),
           options.engine._timeRemaining
         );
-        return result ?? options.engine.NaN;
+        // Evaluate the accumulated result to combine numeric factors
+        return result?.evaluate() ?? options.engine.NaN;
       },
 
       evaluateAsync: async (ops, options) => {
@@ -1498,7 +1499,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
           options.engine._timeRemaining,
           options.signal
         );
-        return result ?? options.engine.NaN;
+        return result?.evaluate() ?? options.engine.NaN;
       },
     },
 
@@ -1525,7 +1526,9 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
           ),
           engine._timeRemaining
         );
-        return result ?? engine.NaN;
+        // Evaluate the accumulated result to combine numeric terms
+        // e.g., 3x + 1 + 2 + 3 → 3x + 6
+        return result?.evaluate() ?? engine.NaN;
       },
 
       evaluateAsync: async (xs, { engine, signal }) => {
@@ -1539,7 +1542,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
           engine._timeRemaining,
           signal
         );
-        return result ?? engine.NaN;
+        return result?.evaluate() ?? engine.NaN;
       },
     },
   },
