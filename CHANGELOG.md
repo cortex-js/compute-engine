@@ -5,7 +5,7 @@
 - The `[Length]` function has been renamed to `[Count]`.
 - The `xsize` property of collections has been renamed to `count`.
 - The `xcontains()` method of collections has been renamed to `contains()`.
-- Handling of dictionaries (`["Dictionary"] expressions and `{dict:...}`
+- Handling of dictionaries (`["Dictionary"]` expressions and `\{dict:...\}`
   shorthand) has been improved.
 - **Inverse hyperbolic functions** have been renamed to follow the ISO 80000-2
   standard: `Arcsinh` → `Arsinh`, `Arccosh` → `Arcosh`, `Arctanh` → `Artanh`,
@@ -53,10 +53,11 @@
   expressions:
   - Negative exponents like `x^(-1/2)` now display as `1/sqrt(x)` in both LaTeX
     and ASCII-math output
-  - When a sum starts with a negative term and contains a positive constant,
-    the constant is moved to the front (e.g., `-x^2 + 1` displays as `1 - x^2`)
+  - When a sum starts with a negative term and contains a positive constant, the
+    constant is moved to the front (e.g., `-x^2 + 1` displays as `1 - x^2`)
     while preserving polynomial ordering (e.g., `x^2 - x + 3` stays unchanged)
-  - `d/dx arcsin(x)` now displays as `1/sqrt(1-x^2)` instead of `(-x^2+1)^(-1/2)`
+  - `d/dx arcsin(x)` now displays as `1/sqrt(1-x^2)` instead of
+    `(-x^2+1)^(-1/2)`
 
 - **Compilation**: Fixed compilation of `Sum` and `Product` expressions.
 
@@ -66,7 +67,7 @@
 - **Scientific Notation**: Fixed normalization of scientific notation for
   fractional values (e.g., numbers less than 1).
 
-## New Features and Improvements
+### New Features and Improvements
 
 - **Number Serialization**: Added `adaptiveScientific` notation mode. When
   serializing numbers to LaTeX, this mode uses scientific notation but avoids
@@ -86,7 +87,8 @@
   - `PolynomialDegree(expr, var)` - Get the degree of a polynomial
   - `CoefficientList(expr, var)` - Get the list of coefficients
   - `PolynomialQuotient(dividend, divisor, var)` - Polynomial division quotient
-  - `PolynomialRemainder(dividend, divisor, var)` - Polynomial division remainder
+  - `PolynomialRemainder(dividend, divisor, var)` - Polynomial division
+    remainder
   - `PolynomialGCD(a, b, var)` - Greatest common divisor of polynomials
   - `Cancel(expr, var)` - Cancel common factors in rational expressions
 
@@ -100,7 +102,8 @@
     now yield `arctan(x+1)`
   - **Reduction formulas**: `∫ 1/(x²+1)² dx` now works using reduction formulas
   - **Mixed partial fractions**: `∫ 1/((x-1)(x²+1)) dx` now decomposes correctly
-  - **Factor cancellation**: `∫ (x+1)/(x²+3x+2) dx` simplifies before integrating
+  - **Factor cancellation**: `∫ (x+1)/(x²+3x+2) dx` simplifies before
+    integrating
   - **Inverse hyperbolic**: Added `∫ 1/√(x²+1) dx = arcsinh(x)` and
     `∫ 1/√(x²-1) dx = arccosh(x)`
   - **Arcsec pattern**: Added `∫ 1/(x·√(x²-1)) dx = arcsec(x)`
