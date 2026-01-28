@@ -85,6 +85,30 @@
     predicate/function applications without requiring explicit declaration.
     This enables natural FOL syntax like `\forall x. P(x) \rightarrow Q(x)`
     to work out of the box.
+  - **Quantifier evaluation over finite domains**: Quantifiers (`ForAll`,
+    `Exists`, `ExistsUnique`, `NotForAll`, `NotExists`) now evaluate to boolean
+    values when the bound variable is constrained to a finite set. For example:
+    ```typescript
+    ce.box(['ForAll', ['Element', 'x', ['Set', 1, 2, 3]], ['Greater', 'x', 0]]).evaluate()
+    // Returns True (all values in {1,2,3} are > 0)
+    ce.box(['Exists', ['Element', 'x', ['Set', 1, 2, 3]], ['Greater', 'x', 2]]).evaluate()
+    // Returns True (3 > 2)
+    ce.box(['ExistsUnique', ['Element', 'x', ['Set', 1, 2, 3]], ['Equal', 'x', 2]]).evaluate()
+    // Returns True (only one element equals 2)
+    ```
+    Supports `Set`, `List`, `Range`, and integer `Interval` domains up to 1000
+    elements.
+  - **CNF/DNF conversion**: New `ToCNF` and `ToDNF` functions convert boolean
+    expressions to Conjunctive Normal Form and Disjunctive Normal Form
+    respectively:
+    ```typescript
+    ce.box(['ToCNF', ['Or', ['And', 'A', 'B'], 'C']]).evaluate()
+    // Returns (A ∨ C) ∧ (B ∨ C)
+    ce.box(['ToDNF', ['And', ['Or', 'A', 'B'], 'C']]).evaluate()
+    // Returns (A ∧ C) ∨ (B ∧ C)
+    ```
+    Handles `And`, `Or`, `Not`, `Implies`, `Equivalent`, and `Xor` operators
+    using De Morgan's laws and distribution.
 
 - **Polynomial Simplification**: The `simplify()` function now automatically
   cancels common polynomial factors in univariate rational expressions. For

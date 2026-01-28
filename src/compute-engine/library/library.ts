@@ -6,7 +6,7 @@ import { COMBINATORICS_LIBRARY } from './combinatorics';
 import { COMPLEX_LIBRARY } from './complex';
 import { CORE_LIBRARY } from './core';
 import { LINEAR_ALGEBRA_LIBRARY } from './linear-algebra';
-import { LOGIC_LIBRARY } from './logic';
+import { LOGIC_LIBRARY, LOGIC_FUNCTION_LIBRARY } from './logic';
 import { NUMBER_THEORY_LIBRARY } from './number-theory';
 import { POLYNOMIALS_LIBRARY } from './polynomials';
 import { RELOP_LIBRARY } from './relational-operator';
@@ -96,7 +96,7 @@ export const LIBRARIES: {
   'domains': [],
   // 'domains': getDomainsDictionary(),
   'linear-algebra': LINEAR_ALGEBRA_LIBRARY,
-  'logic': LOGIC_LIBRARY,
+  'logic': [LOGIC_LIBRARY, LOGIC_FUNCTION_LIBRARY],
   'number-theory': NUMBER_THEORY_LIBRARY,
   'numeric': [], // @todo   // 'numeric': [
 
