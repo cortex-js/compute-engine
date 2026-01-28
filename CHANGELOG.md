@@ -55,6 +55,13 @@
 
 ### Improvements
 
+- **Polynomial Simplification**: The `simplify()` function now automatically
+  cancels common polynomial factors in univariate rational expressions. For
+  example, `(x² - 1)/(x - 1)` simplifies to `x + 1`, `(x³ - x)/(x² - 1)`
+  simplifies to `x`, and `(x + 1)/(x² + 3x + 2)` simplifies to `1/(x + 2)`.
+  Previously, this required explicitly calling the `Cancel` function with a
+  variable argument.
+
 - **Sum/Product Simplification**: Added simplification rules for `Sum` and
   `Product` expressions with symbolic bounds:
   - Constant body: `\sum_{n=1}^{b}(x)` simplifies to `b * x`
