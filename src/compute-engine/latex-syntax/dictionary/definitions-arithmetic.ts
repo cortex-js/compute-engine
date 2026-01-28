@@ -892,6 +892,7 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
   {
     name: 'GCD',
     latexTrigger: ['\\gcd'], // command from amsmath package
+    kind: 'function',
   },
   {
     symbolTrigger: 'gcd',

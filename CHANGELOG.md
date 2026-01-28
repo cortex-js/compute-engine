@@ -29,6 +29,12 @@
   `Sum` and `Product` expressions with non-trivial bodies (e.g., `Multiply`)
   which were incorrectly displayed as `int()`.
 
+- **([#257](https://github.com/cortex-js/compute-engine/issues/257))
+  LaTeX Parsing**: Fixed `\gcd` command not parsing function arguments correctly.
+  Previously `\gcd\left(24,37\right)` would parse as `["Tuple", "GCD", ["Tuple", 24, 37]]`
+  instead of the expected `["GCD", 24, 37]`. The `\operatorname{gcd}` form was
+  unaffected.
+
 ## 0.31.0 _2026-01-27_
 
 ### Breaking Changes
