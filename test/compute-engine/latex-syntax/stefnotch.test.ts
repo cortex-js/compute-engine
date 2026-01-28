@@ -194,6 +194,9 @@ describe('STEFNOTCH #13', () => {
     `);
   });
 
+  // Note: With tight quantifier scope (issue #263), \implies is now outside
+  // the ForAll scope, matching standard FOL conventions where
+  // \forall n: P(n) \implies Q(n) parses as (\forall n: P(n)) \implies Q(n)
   test('10/ \\forall n\\colon a_n\\le c_n\\le b_n\\implies\\lim_{n\\to\\infin}c_n=a', () => {
     expect(
       parse(
@@ -201,25 +204,25 @@ describe('STEFNOTCH #13', () => {
       )
     ).toMatchInlineSnapshot(`
       [
-        "ForAll",
-        "n",
+        "Implies",
         [
-          "Implies",
+          "ForAll",
+          "n",
           [
             "LessEqual",
             ["Subscript", "a", "n"],
             ["Subscript", "c", "n"],
             ["Subscript", "b", "n"]
-          ],
-          [
-            "Equal",
-            [
-              "Limit",
-              ["Function", ["Subscript", "c", "n"], "n"],
-              ["Error", "unexpected-command", ["LatexString", "\\infin"]]
-            ],
-            "a"
           ]
+        ],
+        [
+          "Equal",
+          [
+            "Limit",
+            ["Function", ["Subscript", "c", "n"], "n"],
+            ["Error", "unexpected-command", ["LatexString", "\\infin"]]
+          ],
+          "a"
         ]
       ]
     `);

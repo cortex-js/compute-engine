@@ -392,7 +392,28 @@ function parseQuantifier(
         parser.match(':') ||
         parser.match('\\colon')
       ) {
-        const body = parser.parseExpression(terminator);
+        // Use tight binding: parse body but stop at logical connectives
+        // and arrows (→, ⇒, ∧, ∨, etc.)
+        // This follows standard FOL convention where quantifier scope
+        // extends only to the immediately following well-formed formula.
+        // We use a condition function because arrows have higher precedence
+        // than comparisons in this system, but we want to include comparisons
+        // while excluding arrows/implications.
+        const body = parser.parseExpression({
+          ...terminator,
+          condition: (p) =>
+            p.peek === '\\to' ||
+            p.peek === '\\rightarrow' ||
+            p.peek === '\\implies' ||
+            p.peek === '\\Rightarrow' ||
+            p.peek === '\\iff' ||
+            p.peek === '\\Leftrightarrow' ||
+            p.peek === '\\land' ||
+            p.peek === '\\wedge' ||
+            p.peek === '\\lor' ||
+            p.peek === '\\vee' ||
+            (terminator.condition?.(p) ?? false),
+        });
         return [kind, symbol, missingIfEmpty(body)] as Expression;
       }
       const body = parser.parseEnclosure();
@@ -409,10 +430,26 @@ function parseQuantifier(
     // Either a separator or a parenthesis
     parser.skipSpace();
     if (parser.matchAny([',', '\\mid', ':', '\\colon'])) {
-      const body = parser.parseExpression(terminator);
+      // Use tight binding for quantifier body - stop at logic operators
+      const body = parser.parseExpression({
+        ...terminator,
+        condition: (p) =>
+          p.peek === '\\to' ||
+          p.peek === '\\rightarrow' ||
+          p.peek === '\\implies' ||
+          p.peek === '\\Rightarrow' ||
+          p.peek === '\\iff' ||
+          p.peek === '\\Leftrightarrow' ||
+          p.peek === '\\land' ||
+          p.peek === '\\wedge' ||
+          p.peek === '\\lor' ||
+          p.peek === '\\vee' ||
+          (terminator.condition?.(p) ?? false),
+      });
       return [kind, condition, missingIfEmpty(body)] as Expression;
     }
     if (parser.match('(')) {
+      // Parenthesized body - parse normally within the parens
       const body = parser.parseExpression(terminator);
       if (!parser.match(')')) return null;
       return [kind, condition, missingIfEmpty(body)] as Expression;

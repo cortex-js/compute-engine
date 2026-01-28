@@ -2,6 +2,19 @@
 
 ### Bug Fixes
 
+- **([#263](https://github.com/cortex-js/compute-engine/issues/263))
+  Quantifier Scope**: Fixed quantifier scope in First-Order Logic expressions.
+  Previously, `\forall x.P(x)\rightarrow Q(x)` was parsed with the implication
+  inside the quantifier scope: `["ForAll", "x", ["To", P(x), Q(x)]]`. Now it
+  correctly follows standard FOL conventions where the quantifier binds only
+  the immediately following formula: `["To", ["ForAll", "x", P(x)], Q(x)]`.
+  This applies to all quantifiers (`ForAll`, `Exists`, `ExistsUnique`,
+  `NotForAll`, `NotExists`) and all logical connectives (`\rightarrow`, `\to`,
+  `\implies`, `\land`, `\lor`, `\iff`). Use explicit parentheses for wider
+  scope: `\forall x.(P(x)\rightarrow Q(x))`. Also fixed quantifier type
+  signatures to properly return `boolean`, enabling correct type checking
+  when quantified expressions are used as arguments to logical operators.
+
 - **([#243](https://github.com/cortex-js/compute-engine/issues/243))
   LaTeX Parsing**: Fixed logic operator precedence causing expressions like
   `x = 1 \vee x = 2` to be parsed incorrectly as `x = (1 ∨ x) = 2` instead of
@@ -78,8 +91,11 @@
   - Partial fractions (telescoping): `\sum_{k=1}^{n}(1/(k(k+1)))` simplifies to `n/(n+1)`
   - Partial fractions (telescoping): `\sum_{k=2}^{n}(1/(k(k-1)))` simplifies to `(n-1)/n`
   - Weighted squared binomial sum: `\sum_{k=0}^{n}(k^2 * C(n,k))` simplifies to `n(n+1) * 2^(n-2)`
+  - Weighted cubed binomial sum: `\sum_{k=0}^{n}(k^3 * C(n,k))` simplifies to `n²(n+3) * 2^(n-3)`
+  - Arithmetic progression (general bounds): `\sum_{n=m}^{b}(a + d*n)` simplifies to `(b-m+1)(a + d(m+b)/2)`
   - Product of constant: `\prod_{n=1}^{b}(x)` simplifies to `x^b`
   - Factorial: `\prod_{n=1}^{b}(n)` simplifies to `b!`
+  - Shifted factorial: `\prod_{n=1}^{b}(n+c)` simplifies to `(b+c)!/c!`
   - Odd double factorial: `\prod_{n=1}^{b}(2n-1)` simplifies to `(2b-1)!!`
   - Even double factorial: `\prod_{n=1}^{b}(2n)` simplifies to `2^b * b!`
   - Rising factorial (Pochhammer): `\prod_{k=0}^{n-1}(x+k)` simplifies to `(x)_n`

@@ -81,11 +81,12 @@ export const LOGIC_LIBRARY: SymbolDefinitions = {
     signature: '(boolean, boolean) -> boolean',
     evaluate: evaluateImplies,
   },
-  Exists: { signature: 'function', lazy: true },
-  NotExists: { signature: 'function', lazy: true },
-  ExistsUnique: { signature: 'function', lazy: true },
-  ForAll: { signature: 'function', lazy: true },
-  NotForAll: { signature: 'function', lazy: true },
+  // Quantifiers return boolean values (they are propositions)
+  Exists: { signature: '(symbol, boolean) -> boolean', lazy: true },
+  NotExists: { signature: '(symbol, boolean) -> boolean', lazy: true },
+  ExistsUnique: { signature: '(symbol, boolean) -> boolean', lazy: true },
+  ForAll: { signature: '(symbol, boolean) -> boolean', lazy: true },
+  NotForAll: { signature: '(symbol, boolean) -> boolean', lazy: true },
 
   KroneckerDelta: {
     description: 'Return 1 if the arguments are equal, 0 otherwise',
