@@ -2,6 +2,11 @@
 
 ### Bug Fixes
 
+- **([#168](https://github.com/cortex-js/compute-engine/issues/168))
+  Absolute Value**: Fixed parsing of nested absolute value expressions that
+  start with a double bar (e.g. `||3-5|-4|`), which previously produced an
+  invalid structure instead of evaluating correctly.
+
 - **([#244](https://github.com/cortex-js/compute-engine/issues/244))
   Serialization**: Fixed LaTeX and ASCIIMath serialization ambiguity for
   negative bases and negated powers. Powers now render `(-2)^2` (instead of

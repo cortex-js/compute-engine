@@ -1405,7 +1405,30 @@ export class _Parser implements Parser {
       this.skipSpace();
       let body = this.parseExpression();
       this.skipSpace();
-      if (!this.matchBoundary()) {
+      const boundary = this._boundaries[this._boundaries.length - 1]?.tokens;
+      const matchedBoundary = this.matchBoundary();
+      const sameTrigger =
+        (typeof def.openTrigger === 'string' &&
+          typeof def.closeTrigger === 'string' &&
+          def.openTrigger === def.closeTrigger) ||
+        (Array.isArray(def.openTrigger) &&
+          Array.isArray(def.closeTrigger) &&
+          def.openTrigger.length === def.closeTrigger.length &&
+          def.openTrigger.every((tok, i) => tok === def.closeTrigger[i]));
+      if (matchedBoundary && isEmptySequence(body) && sameTrigger && boundary) {
+        // If the open/close delimiter are identical and the body is empty,
+        // we may have consumed an inner delimiter (e.g. "||3-5|-4|").
+        // Retry parsing without the boundary and look for the closing delimiter.
+        this.index = bodyStart;
+        this.skipSpace();
+        body = this.parseExpression();
+        this.skipSpace();
+        if (!this.matchAll(boundary)) {
+          this.index = start;
+          if (!this.atEnd) continue;
+          return null;
+        }
+      } else if (!matchedBoundary) {
         // We couldn't parse the body up to the closing delimiter.
         // This could be a case where the boundary of the enclosure is
         // ambiguous, i.e. `|(a+|b|+c)|`. Attempt to parse without the boundary

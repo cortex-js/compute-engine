@@ -110,6 +110,12 @@ describe('MATCHFIX abs and norm', () => {
       simplify  = |a| + 3
     `));
 
+  test('||3-5|-4|', () => {
+    const expr = engine.parse('||3-5|-4|');
+    expect(expr.isValid).toBe(true);
+    expect(expr.evaluate().toString()).toBe('2');
+  });
+
   test('||a||', () =>
     expect(check('||a||')).toMatchInlineSnapshot(`["Norm", "a"]`));
   test('||a||+|b|', () =>
