@@ -43,7 +43,7 @@ function parseTrig(op: string): ExpressionParseHandler {
 
       '\\cos': 'Cos',
 
-      '\\cosh': 'Csch',
+      '\\cosh': 'Cosh',
 
       '\\cosec': 'Csc', // Non-standard
 

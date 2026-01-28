@@ -953,8 +953,13 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
 
   {
     name: 'LCM',
+    latexTrigger: ['\\lcm'],
+    kind: 'function',
+  },
+  {
     symbolTrigger: 'lcm',
     kind: 'function',
+    parse: 'LCM',
   },
   {
     symbolTrigger: 'LCM',

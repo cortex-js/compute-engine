@@ -33,6 +33,25 @@
   LaTeX Parsing**: Fixed `\gcd` command not parsing function arguments correctly.
   Previously `\gcd\left(24,37\right)` would parse as `["Tuple", "GCD", ["Tuple", 24, 37]]`
   instead of the expected `["GCD", 24, 37]`. The `\operatorname{gcd}` form was
+  unaffected. Also added support for `\lcm` as a LaTeX command (in addition to
+  the existing `\operatorname{lcm}`).
+
+- **LaTeX Parsing**: Fixed `\cosh` incorrectly mapping to `Csch` instead of `Cosh`.
+
+### Improvements
+
+- **Sum/Product Simplification**: Added simplification rules for `Sum` and
+  `Product` expressions with symbolic bounds:
+  - Constant body: `\sum_{n=1}^{b}(x)` simplifies to `b * x`
+  - Triangular numbers: `\sum_{n=1}^{b}(n)` simplifies to `b(b+1)/2`
+  - Sum of squares: `\sum_{n=1}^{b}(n^2)` simplifies to `b(b+1)(2b+1)/6`
+  - Product of constant: `\prod_{n=1}^{b}(x)` simplifies to `x^b`
+  - Factorial: `\prod_{n=1}^{b}(n)` simplifies to `b!`
+
+- **([#257](https://github.com/cortex-js/compute-engine/issues/257))
+  LaTeX Parsing**: Fixed `\gcd` command not parsing function arguments correctly.
+  Previously `\gcd\left(24,37\right)` would parse as `["Tuple", "GCD", ["Tuple", 24, 37]]`
+  instead of the expected `["GCD", 24, 37]`. The `\operatorname{gcd}` form was
   unaffected.
 
 ## 0.31.0 _2026-01-27_
