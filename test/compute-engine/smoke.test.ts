@@ -113,84 +113,65 @@ describe('PARSING numbers', () => {
         [
           "Function",
           [
-            "Block",
+            "Add",
             [
-              "Add",
+              "Sum",
               [
-                "Sum",
+                "Floor",
                 [
-                  "Floor",
+                  "Divide",
+                  1,
                   [
-                    "Divide",
-                    1,
+                    "Add",
                     [
-                      "Add",
+                      "Power",
+                      0,
                       [
-                        "Power",
-                        0,
+                        "Subtract",
+                        "n",
                         [
-                          "Add",
-                          "n",
+                          "Sum",
                           [
-                            "Negate",
+                            "Product",
                             [
-                              "Sum",
+                              "Subtract",
+                              1,
                               [
-                                "Product",
+                                "Power",
+                                0,
                                 [
-                                  "Subtract",
-                                  1,
+                                  "Abs",
                                   [
-                                    "Power",
-                                    0,
-                                    [
-                                      "Abs",
-                                      [
-                                        "Subtract",
-                                        ["Floor", ["Divide", "v_2", "v_3"]],
-                                        ["Divide", "v_2", "v_3"]
-                                      ]
-                                    ]
-                                  ]
-                                ],
-                                [
-                                  "Limits",
-                                  "Nothing",
-                                  2,
-                                  ["Floor", ["Sqrt", "v_2"]]
-                                ]
-                              ],
-                              [
-                                "Limits",
-                                "Nothing",
-                                2,
-                                [
-                                  "Error",
-                                  [
-                                    "ErrorCode",
-                                    "incompatible-type",
-                                    "'number'",
-                                    "'unknown'"
+                                    "Subtract",
+                                    ["Floor", ["Divide", "v_2", "v_3"]],
+                                    ["Divide", "v_2", "v_3"]
                                   ]
                                 ]
                               ]
+                            ],
+                            [
+                              "Limits",
+                              "Nothing",
+                              2,
+                              ["Floor", ["Sqrt", "v_2"]]
                             ]
-                          ]
+                          ],
+                          ["Limits", "Nothing", 2, "v_1"]
                         ]
-                      ],
-                      1
-                    ]
+                      ]
+                    ],
+                    1
                   ]
-                ],
-                [
-                  "Limits",
-                  "Nothing",
-                  2,
-                  ["Floor", ["Multiply", 1.5, "n", ["Ln", "n"]]]
                 ]
               ],
-              2
-            ]
+              [
+                "Limits",
+                "Nothing",
+                2,
+                ["Floor", ["Multiply", 1.5, "n", ["Ln", "n"]]]
+              ]
+            ],
+            2
           ],
           "n"
         ]

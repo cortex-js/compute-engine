@@ -65,15 +65,7 @@ describe('SUM parsing', () => {
         "Sum",
         ["Add", "j", "k"],
         ["Limits", "k", ["Add", "a", ["Power", 2, 3]], ["Square", 3]],
-        [
-          "Limits",
-          "j",
-          ["Add", 2, ["Square", 3]],
-          [
-            "Error",
-            ["ErrorCode", "incompatible-type", "'number'", "'unknown'"]
-          ]
-        ]
+        ["Limits", "j", ["Add", 2, ["Square", 3]], "b"]
       ]
     `);
   });

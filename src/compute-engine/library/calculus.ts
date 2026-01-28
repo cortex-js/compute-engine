@@ -313,7 +313,7 @@ volumes
       broadcastable: false,
 
       lazy: true,
-      signature: '(index:symbol, lower:number, upper:number) -> tuple',
+      signature: '(index:symbol, lower:value, upper:value) -> tuple',
       canonical: (ops, { engine }) => canonicalLimits(ops, { engine }) ?? null,
     },
   },

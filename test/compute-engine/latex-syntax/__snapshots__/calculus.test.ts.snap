@@ -67,45 +67,24 @@ int^(1)(sin(x) dx)
 `;
 
 exports[`EXOTIC INTEGRALS \\iiint 1`] = `
-\\int\\int\\int_{\\mathtip{\\error{\\blacksquare}}{\\in \\text{unknown}\\notin \\text{number}}}\\!f(x, y, z)\\, \\mathrm{d}x \\mathrm{d}y \\mathrm{d}z
-int_(Error(ErrorCode("incompatible-type", "number", "unknown")))(f(x, y, z) dx  dy  dz)
+\\int\\int\\int_{V}\\!f(x, y, z)\\, \\mathrm{d}x \\mathrm{d}y \\mathrm{d}z
+int_(V)(f(x, y, z) dx  dy  dz)
 [
   "Integrate",
   ["Function", ["f", "x", "y", "z"], "x", "y", "z"],
-  [
-    "Limits",
-    "x",
-    [
-      "Error",
-      ["ErrorCode", "incompatible-type", "'number'", "'unknown'"]
-    ],
-    "Nothing"
-  ],
+  ["Limits", "x", "V", "Nothing"],
   ["Limits", "y", "Nothing", "Nothing"],
   ["Limits", "z", "Nothing", "Nothing"]
 ]
 `;
 
 exports[`EXOTIC INTEGRALS \\iint 1`] = `
-\\int\\int_{\\mathtip{\\error{\\blacksquare}}{\\in \\text{(expression, variable: symbol, variables: symbol+) -> expression}\\notin \\text{number}}}\\!f(x, y)\\, \\mathrm{d}x \\mathrm{d}y
-int_(Error(ErrorCode("incompatible-type", "number", "(expression, variable: symbol, variables: symbol+) -> expression")))(f(x, y) dx  dy)
+\\int\\int_{D}\\!f(x, y)\\, \\mathrm{d}x \\mathrm{d}y
+int_(D)(f(x, y) dx  dy)
 [
   "Integrate",
   ["Function", ["f", "x", "y"], "x", "y"],
-  [
-    "Limits",
-    "x",
-    [
-      "Error",
-      [
-        "ErrorCode",
-        "incompatible-type",
-        "'number'",
-        "(expression, variable: symbol, variables: symbol+) -> expression"
-      ]
-    ],
-    "Nothing"
-  ],
+  ["Limits", "x", "D", "Nothing"],
   ["Limits", "y", "Nothing", "Nothing"]
 ]
 `;
@@ -523,8 +502,8 @@ int_(1)^(2)(int_(0)^(1)(int_(3)^(4)(x^2 + y^2 + z^2 dx  dy  dz) dx  dy  dz) dx  
 `;
 
 exports[`REAL WORLD INTEGRALS Integral with non standard typesetting 1`] = `
-\\mathrm{S_{t}}=\\mathrm{S_0}+\\int_{\\mathtip{\\error{\\blacksquare}}{\\in \\text{unknown}\\notin \\text{number}}}^{\\mathtip{\\error{\\blacksquare}}{\\in \\text{unknown}\\notin \\text{number}}}\\!G-F\\, \\mathrm{d}t
-"S_t" === "S_0" + int_(Error(ErrorCode("incompatible-type", "number", "unknown")))^(Error(ErrorCode("incompatible-type", "number", "unknown")))(-F + "CatalanConstant" dF)
+\\mathrm{S_{t}}=\\mathrm{S_0}+\\int_{\\mathrm{t_{i}}}^{\\mathrm{t_{e}}}\\!G-F\\, \\mathrm{d}t
+"S_t" === "S_0" + int_("t_i")^("t_e")(-F + "CatalanConstant" dF)
 [
   "Equal",
   "S_t",
@@ -534,18 +513,7 @@ exports[`REAL WORLD INTEGRALS Integral with non standard typesetting 1`] = `
     [
       "Integrate",
       ["Function", ["Subtract", "CatalanConstant", "F"], "F"],
-      [
-        "Limits",
-        "t",
-        [
-          "Error",
-          ["ErrorCode", "incompatible-type", "'number'", "'unknown'"]
-        ],
-        [
-          "Error",
-          ["ErrorCode", "incompatible-type", "'number'", "'unknown'"]
-        ]
-      ]
+      ["Limits", "t", "t_i", "t_e"]
     ]
   ]
 ]

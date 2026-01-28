@@ -1,4 +1,3 @@
-import { checkType } from '../boxed-expression/validate';
 import type { BoxedExpression, ComputeEngine, Scope } from '../global-types';
 
 import { MAX_ITERATION } from '../numerics/numeric';
@@ -212,8 +211,6 @@ export function canonicalLimits(
     if (index.operator === 'Hold') index = index.op1;
 
     if (!index.symbol) index = ce.typeError('symbol', index.type, index);
-    if (lower.symbol !== 'Nothing') lower = checkType(ce, lower, 'number');
-    if (upper.symbol !== 'Nothing') upper = checkType(ce, upper, 'number');
 
     return ce._fn('Limits', [index, lower, upper]);
   }
