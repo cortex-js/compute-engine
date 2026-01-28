@@ -1475,41 +1475,30 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         canonicalBigop('Product', body, bounds, scope),
 
       evaluate: (ops, options) => {
-        const fn = (acc, x) => {
-          x = x.evaluate(options);
-          return x.isNumberLiteral ? acc.mul(x.numericValue!) : null;
-        };
-
         const result = run(
           reduceBigOp(
             ops[0],
             ops.slice(1),
-            fn,
-            options.engine._numericValue(1)
+            (acc: BoxedExpression, x) => acc.mul(x.evaluate(options)),
+            options.engine.One
           ),
           options.engine._timeRemaining
         );
-        return options.engine.number(result ?? NaN);
+        return result ?? options.engine.NaN;
       },
 
       evaluateAsync: async (ops, options) => {
-        const fn = (acc, x) => {
-          x = x.evaluate(options);
-          if (!x.isNumberLiteral) return null;
-          return acc.mul(x.numericValue!);
-        };
-
         const result = await runAsync(
           reduceBigOp(
             ops[0],
             ops.slice(1),
-            fn,
-            options.engine._numericValue(1)
+            (acc: BoxedExpression, x) => acc.mul(x.evaluate(options)),
+            options.engine.One
           ),
           options.engine._timeRemaining,
           options.signal
         );
-        return options.engine.number(result ?? NaN);
+        return result ?? options.engine.NaN;
       },
     },
 
@@ -1526,39 +1515,32 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       canonical: ([body, ...bounds], { scope }) =>
         canonicalBigop('Sum', body, bounds, scope),
 
-      evaluate: ([fn, ...indexes], { engine }) =>
-        engine.number(
-          run(
-            reduceBigOp(
-              fn,
-              indexes,
-              (acc, x) => {
-                x = x.evaluate();
-                return x.isNumberLiteral ? acc.add(x.numericValue!) : null;
-              },
-              engine._numericValue(0)
-            ),
-            engine._timeRemaining
-          )
-        ),
+      evaluate: ([body, ...indexes], { engine }) => {
+        const result = run(
+          reduceBigOp(
+            body,
+            indexes,
+            (acc: BoxedExpression, x) => acc.add(x.evaluate()),
+            engine.Zero
+          ),
+          engine._timeRemaining
+        );
+        return result ?? engine.NaN;
+      },
 
-      evaluateAsync: async (xs, { engine, signal }) =>
-        engine.number(
-          await runAsync(
-            reduceBigOp(
-              xs[0],
-              xs.slice(1),
-              (acc, x) => {
-                x = x.evaluate();
-                if (!x.isNumberLiteral) return null;
-                return acc.add(x.numericValue!);
-              },
-              engine._numericValue(0)
-            ),
-            engine._timeRemaining,
-            signal
-          )
-        ),
+      evaluateAsync: async (xs, { engine, signal }) => {
+        const result = await runAsync(
+          reduceBigOp(
+            xs[0],
+            xs.slice(1),
+            (acc: BoxedExpression, x) => acc.add(x.evaluate()),
+            engine.Zero
+          ),
+          engine._timeRemaining,
+          signal
+        );
+        return result ?? engine.NaN;
+      },
     },
   },
 ];

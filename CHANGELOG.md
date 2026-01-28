@@ -17,6 +17,13 @@
   `\forall x, x>y`). The body of the quantified expression is now correctly
   serialized.
 
+- **([#252](https://github.com/cortex-js/compute-engine/issues/252))
+  Sum/Product**: Fixed `Sum` and `Product` returning `NaN` when the body
+  contains free variables (variables not bound by the index). For example,
+  `\sum_{n=1}^{10}(x)` now correctly evaluates to `10x` instead of `NaN`, and
+  `\prod_{n=1}^{5}(x)` evaluates to `x^5`. Mixed expressions like
+  `\sum_{n=1}^{10}(n \cdot x)` now return `55x`.
+
 ## 0.31.0 _2026-01-27_
 
 ### Breaking Changes
