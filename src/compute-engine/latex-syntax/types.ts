@@ -97,37 +97,53 @@ export type LibraryCategory =
  * For example, in `1 + 2 * 3`, the `*` operator has a **higher** precedence
  * than the `+` operator, so it is applied first.
  *
- * The precedence range from 0 to 1000. The larger the number, the higher the
+ * The precedence ranges from 0 to 1000. The larger the number, the higher the
  * precedence, the more "binding" the operator is.
  *
- * Here are some rough ranges for the precedence:
+ * ## Operator Precedence Table
  *
- * - 800: prefix and postfix operators: `\lnot` etc...
- *    - `POSTFIX_PRECEDENCE` = 810: `!`, `'`
- * - 700: some arithmetic operators
- *    - `EXPONENTIATION_PRECEDENCE` = 700: `^`
- * - 600: some binary operators
- *    - `DIVISION_PRECEDENCE` = 600: `\div`
- * - 500: not used
- * - 400: not used
- * - 300: some arithmetic operators:
- *   - `MULTIPLICATION_PRECEDENCE` = 390: `\times`
- * - 200: arithmetic operators, inequalities, logic operators:
- *   - `ADDITION_PRECEDENCE` = 275: `+` `-`
- *   - `ARROW_PRECEDENCE` = 270: `\to` `\rightarrow`
- *   - `ASSIGNMENT_PRECEDENCE` = 260: `:=`
- *   - `COMPARISON_PRECEDENCE` = 245: `\lt` `\gt` `=`
- *   - 241: `\leq`
- *   - 235: `\land` (And)
- *   - 232: `\veebar` (Xor), `\barwedge` (Nand), `\u22BD` (Nor)
- *   - 230: `\lor` (Or)
- *   - 220: `\implies` (Implies)
- *   - 219: `\iff` (Equivalent)
- * - 100: not used
- * - 0: `,`, `;`, etc...
+ * | Precedence | Operators | Description |
+ * |------------|-----------|-------------|
+ * | **880** | `\lnot` `\neg` `++` `--` `+` `-` (prefix) | Prefix/postfix unary |
+ * | **810** | `!` `'` `!!` `'''` | Factorial, prime (postfix) |
+ * | **800** | `_` (subscript) | Subscript |
+ * | **780** | `\degree` `\prime` | Degree, prime symbols |
+ * | **740** | `\%` | Percent |
+ * | **720** | `\/` (inline division) | Inline division |
+ * | **700** | `^` `\overset` `\underset` | Exponentiation, over/underscript |
+ * | **650** | (invisible multiply) `\cdot` | Implicit multiplication |
+ * | **600** | `\div` `\frac` | Division |
+ * | **390** | `\times` `*` `/` | Multiplication |
+ * | **350** | `\cup` `\cap` | Set union/intersection |
+ * | **275** | `+` `-` (infix) | Addition, subtraction |
+ * | **270** | `\to` `\rightarrow` `\mapsto` | Arrows |
+ * | **265** | `\setminus` `\smallsetminus` `:` (range) | Set difference, range |
+ * | **260** | `:=` | Assignment |
+ * | **255** | `\ne` | Not equal |
+ * | **250** | `\not\approxeq` | Not approximately equal |
+ * | **247** | `\approx` | Approximately |
+ * | **245-246** | `=` `<` `>` `\lt` `\gt` `\nless` `\ngtr` | Equality, comparison |
+ * | **241-244** | `\le` `\leq` `\ge` `\geq` `>=` | Less/greater or equal |
+ * | **240** | `\in` `\notin` `\subset` `\supset` ... | Set membership/relations |
+ * | **235** | `\land` `\wedge` `\&` | Logical AND |
+ * | **232** | `\veebar` `\barwedge` (Xor, Nand, Nor) | Logical XOR, NAND, NOR |
+ * | **230** | `\lor` `\vee` `\parallel` | Logical OR |
+ * | **220** | `\implies` `\Rightarrow` `\vdash` `\models` | Implication, entailment |
+ * | **219** | `\iff` `\Leftrightarrow` `\equiv` | Equivalence |
+ * | **200** | `\forall` `\exists` `\exists!` | Quantifiers |
+ * | **160** | `\mid` `\vert` (set builder) | Set builder notation |
+ * | **19-20** | `,` `;` `\ldots` | Sequence separators |
+ *
+ * ## Key Relationships
+ *
+ * - **Comparisons bind tighter than logic**: `x = 1 \lor y = 2` parses as
+ *   `(x = 1) \lor (y = 2)`, not `x = (1 \lor y) = 2`
+ * - **AND binds tighter than OR**: `a \land b \lor c` parses as
+ *   `(a \land b) \lor c`
+ * - **Logic operators bind tighter than implication**: `a \lor b \implies c`
+ *   parses as `(a \lor b) \implies c`
  *
  * Some constants are defined below for common precedence values.
- *
  *
  * **Note**: MathML defines
  * [some operator precedence](https://www.w3.org/TR/2009/WD-MathML3-20090924/appendixc.html),
