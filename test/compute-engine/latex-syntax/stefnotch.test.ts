@@ -133,18 +133,11 @@ describe('STEFNOTCH #13', () => {
   });
 
   test('2/ x_{1,2}=1,2', () => {
-    expect(parse('x_{1,2}=1,2')).toMatchInlineSnapshot(`
-      [
-        "Pair",
-        [
-          "Equal",
-          ["Subscript", "x", ["Delimiter", ["Sequence", 1, 2], ","]],
-          1
-        ],
-        2
-      ]
-    `);
-  }); // @fixme unclear what the right answer is
+    // Delimiter is stripped from subscript expressions
+    expect(parse('x_{1,2}=1,2')).toMatchInlineSnapshot(
+      `["Pair", ["Equal", ["Subscript", "x", ["Sequence", 1, 2]], 1], 2]`
+    );
+  });
 
   test('3/  \\{1,2\\}', () => {
     expect(parse('\\{1,2\\}')).toMatchInlineSnapshot(`["Set", 1, 2]`);

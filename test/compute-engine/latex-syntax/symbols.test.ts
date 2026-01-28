@@ -287,9 +287,9 @@ describe('SYMBOLS', () => {
 
     test('subscript serialization roundtrip', () => {
       // Compound symbols with subscripts should serialize back correctly
-      expect(engine.parse('A_{max}').latex).toMatch(/A_\{?max\}?/);
-      expect(engine.parse('T_{max}').latex).toMatch(/T_\{?max\}?/);
-      expect(engine.parse('x_{ij}').latex).toMatch(/x_\{?ij\}?/);
+      expect(ce.parse('A_{max}').latex).toMatch(/A_\{?max\}?/);
+      expect(ce.parse('T_{max}').latex).toMatch(/T_\{?max\}?/);
+      expect(ce.parse('x_{ij}').latex).toMatch(/x_\{?ij\}?/);
     });
 
     test('multi letter symbol with digits', () => {

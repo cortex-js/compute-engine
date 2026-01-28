@@ -148,15 +148,16 @@ describe('SUM parsing', () => {
   });
 
   test('double indexed collection index', () => {
+    // Delimiter is stripped from subscript expressions
     expect(ce.parse(`\\sum_{n,m} k_{n,m}`)).toMatchInlineSnapshot(`
       [
         "Sum",
-        ["Subscript", "k", ["Delimiter", ["Sequence", "n", "m"], ","]],
+        ["Subscript", "k", ["Sequence", "n", "m"]],
         ["Limits", "n", "Nothing", "Nothing"],
         ["Limits", "m", "Nothing", "Nothing"]
       ]
     `);
-  }); // @fixme
+  });
 
   test('INVALID parsing of summation with element in', () => {
     expect(ce.parse(`\\sum_{n \\in \\N}K_n`)).toMatchInlineSnapshot(
