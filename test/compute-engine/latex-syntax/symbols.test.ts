@@ -274,10 +274,16 @@ describe('SYMBOLS', () => {
 
     test('multiletter with subscript', () => {
       expect(parse('\\mathrm{speed_{max}}')).toMatchInlineSnapshot(`speed_max`);
-      // An expression, not a symbol
-      expect(parse('\\mathrm{speed}_{max}')).toMatchInlineSnapshot(
-        `["Subscript", "speed", ["InvisibleOperator", "m", "a", "x"]]`
-      ); // @fixme
+      // Multi-letter subscript without delimiter becomes compound symbol
+      expect(parse('\\mathrm{speed}_{max}')).toMatchInlineSnapshot(`speed_max`);
+      // With parentheses, it remains an expression
+      expect(parse('\\mathrm{speed}_{(max)}')).toMatchInlineSnapshot(`
+        [
+          "Subscript",
+          "speed",
+          ["Delimiter", ["InvisibleOperator", "m", "a", "x"]]
+        ]
+      `);
     });
 
     test('multi letter symbol with digits', () => {

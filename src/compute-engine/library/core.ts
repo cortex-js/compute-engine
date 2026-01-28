@@ -763,6 +763,19 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
             op2.string ?? op2.symbol ?? asSmallInteger(op2)?.toString();
 
           if (sub) return ce.symbol(op1.symbol + '_' + sub);
+
+          // If subscript is an InvisibleOperator of symbols/numbers (not wrapped
+          // in a Delimiter), concatenate them to form a compound symbol name.
+          // e.g., `A_{CD}` -> `A_CD`, `x_{ij}` -> `x_ij`, `T_{max}` -> `T_max`
+          // Use parentheses for expressions: `A_{(CD)}` remains as subscript expression.
+          if (op2.operator === 'InvisibleOperator' && op2.ops) {
+            const parts = op2.ops.map(
+              (x) => x.symbol ?? asSmallInteger(x)?.toString()
+            );
+            if (parts.every((p) => p !== undefined && p !== null)) {
+              return ce.symbol(op1.symbol + '_' + parts.join(''));
+            }
+          }
         }
 
         if (op2.operator === 'Sequence')

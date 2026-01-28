@@ -44,6 +44,14 @@
 
 - **LaTeX Parsing**: Fixed `\cosh` incorrectly mapping to `Csch` instead of `Cosh`.
 
+- **([#255](https://github.com/cortex-js/compute-engine/issues/255))
+  LaTeX Parsing**: Fixed multi-letter subscripts like `A_{CD}` causing
+  "incompatible-type" errors in arithmetic operations. Multi-letter subscripts
+  without parentheses are now interpreted as compound symbol names (e.g.,
+  `A_{CD}` → `A_CD`, `x_{ij}` → `x_ij`, `T_{max}` → `T_max`). Use parentheses
+  for expression subscripts: `A_{(CD)}` remains as a `Subscript` expression
+  where `CD` represents implicit multiplication.
+
 ### Improvements
 
 - **Sum/Product Simplification**: Added simplification rules for `Sum` and
