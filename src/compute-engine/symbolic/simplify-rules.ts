@@ -309,6 +309,38 @@ export const SIMPLIFY_RULES: Rule[] = [
       return { value: result, because: 'sum of squares' };
     }
 
+    // Factor out constants: Sum(c * f(n), [n, a, b]) → c * Sum(f(n), [n, a, b])
+    if (body.operator === 'Multiply' && body.ops) {
+      const constantFactors: BoxedExpression[] = [];
+      const indexFactors: BoxedExpression[] = [];
+
+      for (const factor of body.ops) {
+        const factorUnknowns = new Set(factor.unknowns);
+        if (factorUnknowns.has(index)) {
+          indexFactors.push(factor);
+        } else {
+          constantFactors.push(factor);
+        }
+      }
+
+      // Only factor out if there are both constant and index-dependent factors
+      if (constantFactors.length > 0 && indexFactors.length > 0) {
+        const constant =
+          constantFactors.length === 1
+            ? constantFactors[0]
+            : ce.function('Multiply', constantFactors);
+        const indexPart =
+          indexFactors.length === 1
+            ? indexFactors[0]
+            : ce.function('Multiply', indexFactors);
+        const newSum = ce.function('Sum', [indexPart, limits]);
+        return {
+          value: constant.mul(newSum),
+          because: 'factor out constant from sum',
+        };
+      }
+    }
+
     return undefined;
   },
 
@@ -345,6 +377,39 @@ export const SIMPLIFY_RULES: Rule[] = [
         value: ce.function('Factorial', [upper]),
         because: 'factorial',
       };
+    }
+
+    // Factor out constants: Product(c * f(n), [n, a, b]) → c^(b-a+1) * Product(f(n), [n, a, b])
+    if (body.operator === 'Multiply' && body.ops) {
+      const constantFactors: BoxedExpression[] = [];
+      const indexFactors: BoxedExpression[] = [];
+
+      for (const factor of body.ops) {
+        const factorUnknowns = new Set(factor.unknowns);
+        if (factorUnknowns.has(index)) {
+          indexFactors.push(factor);
+        } else {
+          constantFactors.push(factor);
+        }
+      }
+
+      // Only factor out if there are both constant and index-dependent factors
+      if (constantFactors.length > 0 && indexFactors.length > 0) {
+        const constant =
+          constantFactors.length === 1
+            ? constantFactors[0]
+            : ce.function('Multiply', constantFactors);
+        const indexPart =
+          indexFactors.length === 1
+            ? indexFactors[0]
+            : ce.function('Multiply', indexFactors);
+        const count = upper.sub(lower).add(ce.One).simplify();
+        const newProduct = ce.function('Product', [indexPart, limits]);
+        return {
+          value: constant.pow(count).mul(newProduct),
+          because: 'factor out constant from product',
+        };
+      }
     }
 
     return undefined;

@@ -757,6 +757,18 @@ describe('SUM', () => {
       ce.parse('\\sum_{n=1}^{b}(n^2)').simplify().toString()
     ).toMatchInlineSnapshot(`1/3 * b^3 + 1/2 * b^2 + 1/6 * b`);
   });
+
+  it('should factor out constant from sum', () => {
+    expect(
+      ce.parse('\\sum_{n=1}^{b}(3n)').simplify().toString()
+    ).toMatchInlineSnapshot(`3/2 * (b^2 + b)`);
+  });
+
+  it('should factor out symbolic constant from sum', () => {
+    expect(
+      ce.parse('\\sum_{n=1}^{b}(x \\cdot n)').simplify().toString()
+    ).toMatchInlineSnapshot(`1/2 * x * (b^2 + b)`);
+  });
 });
 
 describe('PRODUCT', () => {
@@ -795,6 +807,18 @@ describe('PRODUCT', () => {
     expect(
       ce.parse('\\prod_{n=1}^{b}(n)').simplify().toString()
     ).toMatchInlineSnapshot(`b!`);
+  });
+
+  it('should factor out constant from product', () => {
+    expect(
+      ce.parse('\\prod_{n=1}^{b}(3n)').simplify().toString()
+    ).toMatchInlineSnapshot(`b! * 3^b`);
+  });
+
+  it('should factor out symbolic constant from product', () => {
+    expect(
+      ce.parse('\\prod_{n=1}^{b}(x \\cdot n)').simplify().toString()
+    ).toMatchInlineSnapshot(`b! * x^b`);
   });
 });
 
