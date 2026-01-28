@@ -65,13 +65,18 @@
   - Alternating unit series: `\sum_{n=0}^{b}((-1)^n)` simplifies to `(1+(-1)^b)/2`
   - Alternating linear series: `\sum_{n=0}^{b}((-1)^n * n)` simplifies to `(-1)^b * floor((b+1)/2)`
   - Arithmetic progression: `\sum_{n=0}^{b}(a + d*n)` simplifies to `(b+1)(a + db/2)`
+  - Sum of binomial coefficients: `\sum_{k=0}^{n}C(n,k)` simplifies to `2^n`
   - Product of constant: `\prod_{n=1}^{b}(x)` simplifies to `x^b`
   - Factorial: `\prod_{n=1}^{b}(n)` simplifies to `b!`
   - Odd double factorial: `\prod_{n=1}^{b}(2n-1)` simplifies to `(2b-1)!!`
   - Even double factorial: `\prod_{n=1}^{b}(2n)` simplifies to `2^b * b!`
+  - Rising factorial (Pochhammer): `\prod_{k=0}^{n-1}(x+k)` simplifies to `(x)_n`
+  - Falling factorial: `\prod_{k=0}^{n-1}(x-k)` simplifies to `x!/(x-n)!`
   - Factor out constants: `\sum_{n=1}^{b}(c \cdot f(n))` simplifies to
     `c \cdot \sum_{n=1}^{b}(f(n))`, and similarly for products where the
     constant is raised to the power of the iteration count
+  - Nested sums/products: inner sums/products are simplified first, enabling
+    cascading simplification
   - Edge cases: empty ranges (upper < lower) return identity elements (0 for
     Sum, 1 for Product), and single-iteration ranges substitute the bound value
 

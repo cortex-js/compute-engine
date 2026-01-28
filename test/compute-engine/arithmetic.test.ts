@@ -871,6 +871,28 @@ describe('SUM', () => {
       ce.parse('\\sum_{n=3}^{7}(n)').simplify().toString()
     ).toMatchInlineSnapshot(`25`);
   });
+
+  // Sum of binomial coefficients
+  it('should simplify sum of binomial coefficients', () => {
+    expect(
+      ce.box(['Sum', ['Binomial', 'b', 'k'], ['Limits', 'k', 0, 'b']]).simplify().toString()
+    ).toMatchInlineSnapshot(`2^b`);
+  });
+
+  it('should evaluate sum of binomial coefficients', () => {
+    // C(5,0) + C(5,1) + ... + C(5,5) = 32
+    expect(
+      ce.box(['Sum', ['Binomial', 5, 'k'], ['Limits', 'k', 0, 5]]).evaluate()?.toString()
+    ).toMatchInlineSnapshot(`32`);
+  });
+
+  // Nested sum simplification
+  it('should simplify nested sums', () => {
+    // sum_{k=1}^{n} sum_{j=1}^{k} 1 = sum_{k=1}^{n} k = n(n+1)/2
+    expect(
+      ce.parse('\\sum_{k=1}^{b}\\sum_{j=1}^{k}(1)').simplify().toString()
+    ).toMatchInlineSnapshot(`1/2 * (b^2 + b)`);
+  });
 });
 
 describe('PRODUCT', () => {
@@ -948,6 +970,34 @@ describe('PRODUCT', () => {
     expect(
       ce.parse('\\prod_{n=1}^{3}(2n)').evaluate().toString()
     ).toMatchInlineSnapshot(`48`);
+  });
+
+  // Rising factorial (Pochhammer)
+  it('should simplify rising factorial to Pochhammer', () => {
+    expect(
+      ce.box(['Product', ['Add', 'x', 'k'], ['Limits', 'k', 0, ['Subtract', 'b', 1]]]).simplify().toString()
+    ).toMatchInlineSnapshot(`Pochhammer(x, b)`);
+  });
+
+  it('should evaluate rising factorial', () => {
+    // (3)_4 = 3*4*5*6 = 360
+    expect(
+      ce.box(['Product', ['Add', 3, 'k'], ['Limits', 'k', 0, 3]]).evaluate()?.toString()
+    ).toMatchInlineSnapshot(`360`);
+  });
+
+  // Falling factorial
+  it('should simplify falling factorial', () => {
+    expect(
+      ce.box(['Product', ['Subtract', 'x', 'k'], ['Limits', 'k', 0, ['Subtract', 'b', 1]]]).simplify().toString()
+    ).toMatchInlineSnapshot(`x! / (-b + x)!`);
+  });
+
+  it('should evaluate falling factorial', () => {
+    // 5 falling 3 = 5*4*3 = 60
+    expect(
+      ce.box(['Product', ['Subtract', 5, 'k'], ['Limits', 'k', 0, 2]]).evaluate()?.toString()
+    ).toMatchInlineSnapshot(`60`);
   });
 
   // Edge cases

@@ -16,6 +16,7 @@ import {
   isInequalityOperator,
   isRelationalOperator,
 } from '../latex-syntax/utils';
+import { cancelCommonFactors } from '../boxed-expression/polynomials';
 
 /**
  * @todo: a set to "tidy" an expression. Different from a canonical form, but
@@ -100,6 +101,26 @@ export const SIMPLIFY_RULES: Rule[] = [
     if (x.operator === 'Rational' && x.nops === 2)
       return { value: x.op1.div(x.op2), because: 'rational' };
     return undefined;
+  },
+
+  //
+  // Cancel common polynomial factors in Divide expressions
+  // e.g., (x² - 1)/(x - 1) → x + 1
+  //
+  (x): RuleStep | undefined => {
+    if (x.operator !== 'Divide') return undefined;
+
+    // Get unknowns from the expression - only handle univariate case
+    const unknowns = x.unknowns;
+    if (unknowns.length !== 1) return undefined;
+
+    const variable = unknowns[0];
+    const result = cancelCommonFactors(x, variable);
+
+    // Only return if cancellation actually changed something
+    if (result.isSame(x)) return undefined;
+
+    return { value: result, because: 'cancel common polynomial factors' };
   },
 
   //
@@ -267,7 +288,7 @@ export const SIMPLIFY_RULES: Rule[] = [
   (x): RuleStep | undefined => {
     if (x.operator !== 'Sum') return undefined;
 
-    const body = x.op1;
+    let body = x.op1;
     const limits = x.op2;
     if (!body || !limits || limits.operator !== 'Limits') return undefined;
 
@@ -277,6 +298,15 @@ export const SIMPLIFY_RULES: Rule[] = [
     if (!index || !lower || !upper) return undefined;
 
     const ce = x.engine;
+
+    // Simplify nested Sum/Product in the body first
+    if (body.operator === 'Sum' || body.operator === 'Product') {
+      const simplifiedBody = body.simplify();
+      if (!simplifiedBody.isSame(body)) {
+        const newSum = ce.function('Sum', [simplifiedBody, limits]);
+        return { value: newSum, because: 'simplified nested sum/product' };
+      }
+    }
 
     // Handle numeric bounds edge cases
     if (lower.isNumberLiteral && upper.isNumberLiteral) {
@@ -476,6 +506,20 @@ export const SIMPLIFY_RULES: Rule[] = [
       }
     }
 
+    // Sum of binomial coefficients: Sum(C(n,k), [k, 0, n]) → 2^n
+    if (
+      body.operator === 'Binomial' &&
+      lower.is(0) &&
+      body.op2?.symbol === index
+    ) {
+      const n = body.op1;
+      // Check if upper bound equals n (the first argument of Binomial)
+      if (n && upper.isSame(n)) {
+        const result = ce.function('Power', [ce.number(2), n]);
+        return { value: result, because: 'sum of binomial coefficients' };
+      }
+    }
+
     // Factor out constants: Sum(c * f(n), [n, a, b]) → c * Sum(f(n), [n, a, b])
     if (body.operator === 'Multiply' && body.ops) {
       const constantFactors: BoxedExpression[] = [];
@@ -517,7 +561,7 @@ export const SIMPLIFY_RULES: Rule[] = [
   (x): RuleStep | undefined => {
     if (x.operator !== 'Product') return undefined;
 
-    const body = x.op1;
+    let body = x.op1;
     const limits = x.op2;
     if (!body || !limits || limits.operator !== 'Limits') return undefined;
 
@@ -527,6 +571,15 @@ export const SIMPLIFY_RULES: Rule[] = [
     if (!index || !lower || !upper) return undefined;
 
     const ce = x.engine;
+
+    // Simplify nested Sum/Product in the body first
+    if (body.operator === 'Sum' || body.operator === 'Product') {
+      const simplifiedBody = body.simplify();
+      if (!simplifiedBody.isSame(body)) {
+        const newProduct = ce.function('Product', [simplifiedBody, limits]);
+        return { value: newProduct, because: 'simplified nested sum/product' };
+      }
+    }
 
     // Handle numeric bounds edge cases
     if (lower.isNumberLiteral && upper.isNumberLiteral) {
@@ -645,6 +698,65 @@ export const SIMPLIFY_RULES: Rule[] = [
           ce.function('Factorial', [b]),
         ]);
         return { value: result, because: 'even double factorial' };
+      }
+    }
+
+    // Rising factorial (Pochhammer): Product(x+k, [k, 0, n-1]) → Pochhammer(x, n)
+    // Pattern: body is Add with x (constant wrt index) and index
+    if (body.operator === 'Add' && body.ops?.length === 2 && lower.is(0)) {
+      let base: BoxedExpression | null = null;
+      let hasIndex = false;
+
+      for (const op of body.ops) {
+        if (op.symbol === index) {
+          hasIndex = true;
+        } else if (!new Set(op.unknowns).has(index)) {
+          base = op;
+        }
+      }
+
+      // Check if upper bound is n-1 form (i.e., there's an n such that upper = n - 1)
+      if (hasIndex && base) {
+        const n = upper.add(ce.One).simplify();
+        const result = ce.function('Pochhammer', [base, n]);
+        return { value: result, because: 'rising factorial (Pochhammer)' };
+      }
+    }
+
+    // Falling factorial: Product(x-k, [k, 0, n-1]) → x! / (x-n)!
+    // Pattern: body is Subtract or Add with negative index
+    if (lower.is(0)) {
+      let base: BoxedExpression | null = null;
+      let hasNegIndex = false;
+
+      if (body.operator === 'Subtract' && body.ops?.length === 2) {
+        const [op1, op2] = body.ops;
+        if (op2.symbol === index && !new Set(op1.unknowns).has(index)) {
+          base = op1;
+          hasNegIndex = true;
+        }
+      } else if (body.operator === 'Add' && body.ops?.length === 2) {
+        // Check for x + (-k) form
+        for (const op of body.ops) {
+          if (
+            op.operator === 'Negate' &&
+            op.op1?.symbol === index
+          ) {
+            hasNegIndex = true;
+          } else if (!new Set(op.unknowns).has(index)) {
+            base = op;
+          }
+        }
+      }
+
+      if (hasNegIndex && base) {
+        const n = upper.add(ce.One).simplify();
+        // x! / (x-n)!
+        const result = ce.function('Divide', [
+          ce.function('Factorial', [base]),
+          ce.function('Factorial', [base.sub(n)]),
+        ]);
+        return { value: result, because: 'falling factorial' };
       }
     }
 
