@@ -309,6 +309,43 @@ export const SIMPLIFY_RULES: Rule[] = [
       return { value: result, because: 'sum of squares' };
     }
 
+    // If body is index cubed: Sum(n^3, [n, 1, b]) → [b(b+1)/2]^2
+    if (
+      body.operator === 'Power' &&
+      body.op1?.symbol === index &&
+      body.op2?.is(3) &&
+      lower.is(1)
+    ) {
+      // Sum of cubes formula: [b(b+1)/2]^2 = b^2(b+1)^2/4
+      const b = upper;
+      const triangular = b.mul(b.add(ce.One)).div(2);
+      return { value: triangular.pow(2), because: 'sum of cubes' };
+    }
+
+    // Geometric series: Sum(r^n, [n, 0, b]) → (1 - r^(b+1)) / (1 - r)
+    // Also handles: Sum(r^n, [n, 1, b]) → r * (1 - r^b) / (1 - r)
+    if (
+      body.operator === 'Power' &&
+      body.op2?.symbol === index &&
+      !new Set(body.op1?.unknowns ?? []).has(index)
+    ) {
+      const r = body.op1!;
+      const b = upper;
+
+      if (lower.is(0)) {
+        // Sum from n=0 to b of r^n = (1 - r^(b+1)) / (1 - r)
+        const numerator = ce.One.sub(r.pow(b.add(ce.One)));
+        const denominator = ce.One.sub(r);
+        return { value: numerator.div(denominator), because: 'geometric series' };
+      } else if (lower.is(1)) {
+        // Sum from n=1 to b of r^n = (r - r^(b+1)) / (1 - r)
+        // Note: This form is more compact than r*(1-r^b)/(1-r)
+        const numerator = r.sub(r.pow(b.add(ce.One)));
+        const denominator = ce.One.sub(r);
+        return { value: numerator.div(denominator), because: 'geometric series' };
+      }
+    }
+
     // Factor out constants: Sum(c * f(n), [n, a, b]) → c * Sum(f(n), [n, a, b])
     if (body.operator === 'Multiply' && body.ops) {
       const constantFactors: BoxedExpression[] = [];

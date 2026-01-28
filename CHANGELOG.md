@@ -51,6 +51,8 @@
   - Constant body: `\sum_{n=1}^{b}(x)` simplifies to `b * x`
   - Triangular numbers: `\sum_{n=1}^{b}(n)` simplifies to `b(b+1)/2`
   - Sum of squares: `\sum_{n=1}^{b}(n^2)` simplifies to `b(b+1)(2b+1)/6`
+  - Sum of cubes: `\sum_{n=1}^{b}(n^3)` simplifies to `[b(b+1)/2]^2`
+  - Geometric series: `\sum_{n=0}^{b}(r^n)` simplifies to `(1-r^(b+1))/(1-r)`
   - Product of constant: `\prod_{n=1}^{b}(x)` simplifies to `x^b`
   - Factorial: `\prod_{n=1}^{b}(n)` simplifies to `b!`
   - Factor out constants: `\sum_{n=1}^{b}(c \cdot f(n))` simplifies to
