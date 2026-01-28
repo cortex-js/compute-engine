@@ -357,6 +357,69 @@ export const SIMPLIFY_RULES: Rule[] = [
       return { value: triangular.pow(2), because: 'sum of cubes' };
     }
 
+    // Alternating unit series: Sum((-1)^n, [n, 0, b]) → (1 + (-1)^b) / 2
+    if (
+      body.operator === 'Power' &&
+      body.op1?.is(-1) &&
+      body.op2?.symbol === index &&
+      lower.is(0)
+    ) {
+      const b = upper;
+      // (1 + (-1)^b) / 2 = 1 if b even, 0 if b odd
+      const result = ce.One.add(ce.number(-1).pow(b)).div(2);
+      return { value: result, because: 'alternating unit series' };
+    }
+
+    // Arithmetic progression: Sum(a + d*n, [n, 0, b]) → (b+1)*a + d*b*(b+1)/2
+    // Detect pattern: Add with constant and index-linear term
+    if (body.operator === 'Add' && body.ops) {
+      let constant: BoxedExpression | null = null;
+      let coefficient: BoxedExpression | null = null;
+
+      for (const term of body.ops) {
+        const termUnknowns = new Set(term.unknowns);
+        if (!termUnknowns.has(index)) {
+          // Constant term
+          constant = constant ? constant.add(term) : term;
+        } else if (term.symbol === index) {
+          // Just the index variable (coefficient = 1)
+          coefficient = coefficient ? coefficient.add(ce.One) : ce.One;
+        } else if (
+          term.operator === 'Multiply' &&
+          term.ops?.some((op) => op.symbol === index)
+        ) {
+          // c * n form - extract coefficient
+          const coef = term.ops!.filter((op) => op.symbol !== index);
+          if (coef.length === term.ops!.length - 1) {
+            const c =
+              coef.length === 1 ? coef[0] : ce.function('Multiply', coef);
+            coefficient = coefficient ? coefficient.add(c) : c;
+          }
+        } else {
+          // More complex term - can't simplify as arithmetic progression
+          constant = null;
+          coefficient = null;
+          break;
+        }
+      }
+
+      if (constant !== null && coefficient !== null && lower.is(0)) {
+        // Sum from n=0 to b of (a + d*n) = (b+1)*(a + d*b/2)
+        // Use ce.function to keep factored form for lower cost
+        const b = upper;
+        const bPlus1 = ce.function('Add', [b, ce.One]);
+        const inner = ce.function('Add', [
+          constant,
+          ce.function('Divide', [
+            ce.function('Multiply', [coefficient, b]),
+            ce.number(2),
+          ]),
+        ]);
+        const result = ce.function('Multiply', [bPlus1, inner]);
+        return { value: result, because: 'arithmetic progression' };
+      }
+    }
+
     // Geometric series: Sum(r^n, [n, 0, b]) → (1 - r^(b+1)) / (1 - r)
     // Also handles: Sum(r^n, [n, 1, b]) → r * (1 - r^b) / (1 - r)
     if (

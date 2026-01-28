@@ -807,6 +807,41 @@ describe('SUM', () => {
       ce.parse('\\sum_{n=5}^{5}(n^2)').simplify().toString()
     ).toMatchInlineSnapshot(`5^2`);
   });
+
+  // Alternating unit series
+  it('should simplify alternating unit series', () => {
+    expect(
+      ce.parse('\\sum_{n=0}^{b}((-1)^n)').simplify().toString()
+    ).toMatchInlineSnapshot(`1/2 * (-1)^b + 1/2`);
+  });
+
+  it('should evaluate alternating unit series (even upper bound)', () => {
+    expect(
+      ce.parse('\\sum_{n=0}^{4}((-1)^n)').evaluate().toString()
+    ).toMatchInlineSnapshot(`1`);
+  });
+
+  it('should evaluate alternating unit series (odd upper bound)', () => {
+    expect(
+      ce.parse('\\sum_{n=0}^{5}((-1)^n)').evaluate().toString()
+    ).toMatchInlineSnapshot(`0`);
+  });
+
+  // Arithmetic progression
+  it('should simplify arithmetic progression', () => {
+    ce.declare('a', 'real');
+    ce.declare('d', 'real');
+    expect(
+      ce.parse('\\sum_{n=0}^{b}(a + d*n)').simplify().toString()
+    ).toMatchInlineSnapshot(`(b + 1) * (1/2 * b * d + a)`);
+  });
+
+  it('should evaluate arithmetic progression numerically', () => {
+    // 2 + 5 + 8 + 11 + 14 = 40
+    expect(
+      ce.parse('\\sum_{n=0}^{4}(2 + 3*n)').evaluate().toString()
+    ).toMatchInlineSnapshot(`40`);
+  });
 });
 
 describe('PRODUCT', () => {
