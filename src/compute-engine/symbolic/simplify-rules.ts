@@ -277,11 +277,46 @@ export const SIMPLIFY_RULES: Rule[] = [
     if (!index || !lower || !upper) return undefined;
 
     const ce = x.engine;
+
+    // Handle numeric bounds edge cases
+    if (lower.isNumberLiteral && upper.isNumberLiteral) {
+      const lowerVal = lower.numericValue;
+      const upperVal = upper.numericValue;
+      if (
+        typeof lowerVal === 'number' &&
+        typeof upperVal === 'number' &&
+        Number.isInteger(lowerVal) &&
+        Number.isInteger(upperVal)
+      ) {
+        // Empty range: upper < lower → return 0 (identity for addition)
+        if (upperVal < lowerVal) {
+          return { value: ce.Zero, because: 'empty sum' };
+        }
+        // Single iteration: upper == lower → substitute and return body
+        if (upperVal === lowerVal) {
+          return {
+            value: body.subs({ [index]: lower }).simplify(),
+            because: 'single term sum',
+          };
+        }
+      }
+    }
+
     const bodyUnknowns = new Set(body.unknowns);
 
     // If body doesn't depend on index: Sum(c, [n, a, b]) → (b - a + 1) * c
     if (!bodyUnknowns.has(index)) {
       const count = upper.sub(lower).add(ce.One).simplify();
+      // Check for empty range with symbolic bounds
+      if (count.isNumberLiteral && count.numericValue !== null) {
+        const countVal =
+          typeof count.numericValue === 'number'
+            ? count.numericValue
+            : count.numericValue.re;
+        if (countVal <= 0) {
+          return { value: ce.Zero, because: 'empty sum' };
+        }
+      }
       return {
         value: count.mul(body.simplify()),
         because: 'sum of constant',
@@ -397,11 +432,46 @@ export const SIMPLIFY_RULES: Rule[] = [
     if (!index || !lower || !upper) return undefined;
 
     const ce = x.engine;
+
+    // Handle numeric bounds edge cases
+    if (lower.isNumberLiteral && upper.isNumberLiteral) {
+      const lowerVal = lower.numericValue;
+      const upperVal = upper.numericValue;
+      if (
+        typeof lowerVal === 'number' &&
+        typeof upperVal === 'number' &&
+        Number.isInteger(lowerVal) &&
+        Number.isInteger(upperVal)
+      ) {
+        // Empty range: upper < lower → return 1 (identity for multiplication)
+        if (upperVal < lowerVal) {
+          return { value: ce.One, because: 'empty product' };
+        }
+        // Single iteration: upper == lower → substitute and return body
+        if (upperVal === lowerVal) {
+          return {
+            value: body.subs({ [index]: lower }).simplify(),
+            because: 'single term product',
+          };
+        }
+      }
+    }
+
     const bodyUnknowns = new Set(body.unknowns);
 
     // If body doesn't depend on index: Product(c, [n, a, b]) → c^(b - a + 1)
     if (!bodyUnknowns.has(index)) {
       const count = upper.sub(lower).add(ce.One).simplify();
+      // Check for empty range with symbolic bounds
+      if (count.isNumberLiteral && count.numericValue !== null) {
+        const countVal =
+          typeof count.numericValue === 'number'
+            ? count.numericValue
+            : count.numericValue.re;
+        if (countVal <= 0) {
+          return { value: ce.One, because: 'empty product' };
+        }
+      }
       return {
         value: body.simplify().pow(count),
         because: 'product of constant',

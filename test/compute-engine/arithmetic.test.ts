@@ -794,6 +794,19 @@ describe('SUM', () => {
       ce.parse('\\sum_{n=0}^{5}(2^n)').simplify().toString()
     ).toMatchInlineSnapshot(`63`);
   });
+
+  // Edge cases
+  it('should return 0 for empty sum range', () => {
+    expect(
+      ce.parse('\\sum_{n=5}^{1}(n)').simplify().toString()
+    ).toMatchInlineSnapshot(`0`);
+  });
+
+  it('should return body value for single iteration sum', () => {
+    expect(
+      ce.parse('\\sum_{n=5}^{5}(n^2)').simplify().toString()
+    ).toMatchInlineSnapshot(`5^2`);
+  });
 });
 
 describe('PRODUCT', () => {
@@ -844,6 +857,19 @@ describe('PRODUCT', () => {
     expect(
       ce.parse('\\prod_{n=1}^{b}(x \\cdot n)').simplify().toString()
     ).toMatchInlineSnapshot(`b! * x^b`);
+  });
+
+  // Edge cases
+  it('should return 1 for empty product range', () => {
+    expect(
+      ce.parse('\\prod_{n=5}^{1}(n)').simplify().toString()
+    ).toMatchInlineSnapshot(`1`);
+  });
+
+  it('should return body value for single iteration product', () => {
+    expect(
+      ce.parse('\\prod_{n=5}^{5}(2n)').simplify().toString()
+    ).toMatchInlineSnapshot(`10`);
   });
 });
 

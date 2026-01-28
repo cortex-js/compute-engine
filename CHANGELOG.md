@@ -58,6 +58,8 @@
   - Factor out constants: `\sum_{n=1}^{b}(c \cdot f(n))` simplifies to
     `c \cdot \sum_{n=1}^{b}(f(n))`, and similarly for products where the
     constant is raised to the power of the iteration count
+  - Edge cases: empty ranges (upper < lower) return identity elements (0 for
+    Sum, 1 for Product), and single-iteration ranges substitute the bound value
 
 - **([#257](https://github.com/cortex-js/compute-engine/issues/257))
   LaTeX Parsing**: Fixed `\gcd` command not parsing function arguments correctly.
