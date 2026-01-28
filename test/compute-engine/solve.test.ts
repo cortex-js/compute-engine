@@ -172,4 +172,45 @@ describe('expr.solve()', () => {
   //   const result = expr([e1, e2]).solve(['x', 'y']);
   //   expect(result).toEqual(expr('x = 0, y = 3'));
   // });
+
+  // Regression test for #261: solve() should work for variables regardless of
+  // lexical ordering. When canonicalized, variables are sorted alphabetically
+  // (e.g., b+2a becomes 2a+b), but solve() should still find solutions for any variable.
+  test('should solve for variable that comes lexically after another unknown (#261)', () => {
+    const e = expr('b + 2a = 3');
+    // Solve for 'b' (which comes after 'a' alphabetically)
+    const resultB = e.solve('b')?.map((x) => x.toString());
+    expect(resultB).toMatchInlineSnapshot(`
+      [
+        -2a + 3,
+      ]
+    `);
+    // Solve for 'a' should also work
+    const resultA = e.solve('a')?.map((x) => x.toString());
+    expect(resultA).toMatchInlineSnapshot(`
+      [
+        -1/2 * b + 3/2,
+      ]
+    `);
+  });
+
+  test('should solve for any variable in multi-variable equation (#261)', () => {
+    const e = expr('z + 2y + 3x = 10');
+    // All variables should be solvable regardless of their position
+    expect(e.solve('x')?.map((x) => x.toString())).toMatchInlineSnapshot(`
+      [
+        -2/3 * y - 1/3 * z + 10/3,
+      ]
+    `);
+    expect(e.solve('y')?.map((x) => x.toString())).toMatchInlineSnapshot(`
+      [
+        -3/2 * x - 1/2 * z + 5,
+      ]
+    `);
+    expect(e.solve('z')?.map((x) => x.toString())).toMatchInlineSnapshot(`
+      [
+        -3x - 2y + 10,
+      ]
+    `);
+  });
 });

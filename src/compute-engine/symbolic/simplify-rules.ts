@@ -659,6 +659,83 @@ export const SIMPLIFY_RULES: Rule[] = [
         ]);
         return { value: result, because: 'weighted cubed binomial sum' };
       }
+
+      // Alternating weighted binomial: Sum((-1)^k * k * C(n,k), [k, 0, n]) → 0 for n >= 2
+      let hasAltTerm = false;
+      let hasIndexTerm = false;
+      binomialN = null;
+      hasBinomial = false;
+
+      for (const op of body.ops) {
+        if (op.operator === 'Power' && op.op1?.is(-1) && op.op2?.symbol === index) {
+          hasAltTerm = true;
+        } else if (op.symbol === index) {
+          hasIndexTerm = true;
+        } else if (op.operator === 'Binomial' && op.op2?.symbol === index) {
+          hasBinomial = true;
+          binomialN = op.op1 ?? null;
+        }
+      }
+
+      if (hasAltTerm && hasIndexTerm && hasBinomial && binomialN && upper.isSame(binomialN) && body.ops.length === 3) {
+        // For n >= 2, sum = 0
+        return { value: ce.Zero, because: 'alternating weighted binomial sum' };
+      }
+    }
+
+    // Sum of binomial coefficient squares: Sum(C(n,k)^2, [k, 0, n]) → C(2n, n)
+    if (
+      body.operator === 'Power' &&
+      body.op1?.operator === 'Binomial' &&
+      body.op2?.is(2) &&
+      lower.is(0)
+    ) {
+      const binomial = body.op1;
+      const n = binomial.op1;
+      const k = binomial.op2;
+      if (n && k?.symbol === index && upper.isSame(n)) {
+        // C(2n, n)
+        const result = ce.function('Binomial', [
+          ce.function('Multiply', [ce.number(2), n]),
+          n,
+        ]);
+        return { value: result, because: 'sum of binomial squares' };
+      }
+    }
+
+    // Sum of k*(k+1): Sum(k*(k+1), [k, 1, n]) → n(n+1)(n+2)/3
+    if (
+      body.operator === 'Multiply' &&
+      body.ops?.length === 2 &&
+      lower.is(1)
+    ) {
+      const [op1, op2] = body.ops;
+      // Check for k * (k+1) pattern
+      const isKTimesKPlus1 =
+        (op1.symbol === index &&
+          op2.operator === 'Add' &&
+          op2.ops?.length === 2 &&
+          op2.ops.some((o) => o.symbol === index) &&
+          op2.ops.some((o) => o.is(1))) ||
+        (op2.symbol === index &&
+          op1.operator === 'Add' &&
+          op1.ops?.length === 2 &&
+          op1.ops.some((o) => o.symbol === index) &&
+          op1.ops.some((o) => o.is(1)));
+
+      if (isKTimesKPlus1) {
+        // n(n+1)(n+2)/3
+        const n = upper;
+        const result = ce.function('Divide', [
+          ce.function('Multiply', [
+            n,
+            ce.function('Add', [n, ce.One]),
+            ce.function('Add', [n, ce.number(2)]),
+          ]),
+          ce.number(3),
+        ]);
+        return { value: result, because: 'sum of k*(k+1)' };
+      }
     }
 
     // Partial fractions / telescoping: Sum(1/(k*(k+1)), [k, 1, n]) → n/(n+1)
@@ -855,6 +932,74 @@ export const SIMPLIFY_RULES: Rule[] = [
           ce.function('Factorial', [c]),
         ]);
         return { value: result, because: 'shifted factorial' };
+      }
+    }
+
+    // Telescoping product: Product((k+1)/k, [k, 1, n]) → n+1
+    if (
+      body.operator === 'Divide' &&
+      lower.is(1)
+    ) {
+      const num = body.op1;
+      const denom = body.op2;
+      // Check for (k+1)/k pattern
+      if (
+        denom?.symbol === index &&
+        num?.operator === 'Add' &&
+        num.ops?.length === 2 &&
+        num.ops.some((o) => o.symbol === index) &&
+        num.ops.some((o) => o.is(1))
+      ) {
+        // Result is n + 1
+        return { value: upper.add(ce.One), because: 'telescoping product' };
+      }
+    }
+
+    // Product(1 - 1/k^2, [k, 2, n]) → (n+1)/(2n)
+    // Canonical form is: Add(1, Negate(Power(k, -2))) = 1 + (-k^(-2))
+    if (body.operator === 'Add' && body.ops?.length === 2 && lower.is(2)) {
+      let hasOne = false;
+      let hasNegInvSq = false;
+
+      for (const op of body.ops) {
+        if (op.is(1)) {
+          hasOne = true;
+        } else if (
+          op.operator === 'Negate' &&
+          op.op1?.operator === 'Power' &&
+          op.op1.op1?.symbol === index &&
+          op.op1.op2?.is(-2)
+        ) {
+          hasNegInvSq = true;
+        } else if (
+          op.operator === 'Power' &&
+          op.op1?.symbol === index &&
+          op.op2?.is(-2)
+        ) {
+          // Could also be -k^(-2) represented as Power with negative coefficient
+          // Check if it's negated via Multiply
+        } else if (
+          op.operator === 'Multiply' &&
+          op.ops?.some((o) => o.is(-1)) &&
+          op.ops?.some(
+            (o) =>
+              o.operator === 'Power' &&
+              o.op1?.symbol === index &&
+              o.op2?.is(-2)
+          )
+        ) {
+          hasNegInvSq = true;
+        }
+      }
+
+      if (hasOne && hasNegInvSq) {
+        // (n+1)/(2n)
+        const n = upper;
+        const result = ce.function('Divide', [
+          ce.function('Add', [n, ce.One]),
+          ce.function('Multiply', [ce.number(2), n]),
+        ]);
+        return { value: result, because: 'Wallis-like product' };
       }
     }
 

@@ -92,6 +92,9 @@
   - Partial fractions (telescoping): `\sum_{k=2}^{n}(1/(k(k-1)))` simplifies to `(n-1)/n`
   - Weighted squared binomial sum: `\sum_{k=0}^{n}(k^2 * C(n,k))` simplifies to `n(n+1) * 2^(n-2)`
   - Weighted cubed binomial sum: `\sum_{k=0}^{n}(k^3 * C(n,k))` simplifies to `n²(n+3) * 2^(n-3)`
+  - Alternating weighted binomial sum: `\sum_{k=0}^{n}((-1)^k * k * C(n,k))` simplifies to `0` (n ≥ 2)
+  - Sum of binomial squares: `\sum_{k=0}^{n}(C(n,k)^2)` simplifies to `C(2n, n)`
+  - Sum of consecutive products: `\sum_{k=1}^{n}(k(k+1))` simplifies to `n(n+1)(n+2)/3`
   - Arithmetic progression (general bounds): `\sum_{n=m}^{b}(a + d*n)` simplifies to `(b-m+1)(a + d(m+b)/2)`
   - Product of constant: `\prod_{n=1}^{b}(x)` simplifies to `x^b`
   - Factorial: `\prod_{n=1}^{b}(n)` simplifies to `b!`
@@ -100,6 +103,8 @@
   - Even double factorial: `\prod_{n=1}^{b}(2n)` simplifies to `2^b * b!`
   - Rising factorial (Pochhammer): `\prod_{k=0}^{n-1}(x+k)` simplifies to `(x)_n`
   - Falling factorial: `\prod_{k=0}^{n-1}(x-k)` simplifies to `x!/(x-n)!`
+  - Telescoping product: `\prod_{k=1}^{n}((k+1)/k)` simplifies to `n+1`
+  - Wallis-like product: `\prod_{k=2}^{n}(1 - 1/k^2)` simplifies to `(n+1)/(2n)`
   - Factor out constants: `\sum_{n=1}^{b}(c \cdot f(n))` simplifies to
     `c \cdot \sum_{n=1}^{b}(f(n))`, and similarly for products where the
     constant is raised to the power of the iteration count
