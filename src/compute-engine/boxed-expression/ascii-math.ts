@@ -385,11 +385,12 @@ function bigOp(
     const b = fn.op1 ?? fn;
     if (b.operator === 'Block') body = serialize(b.op1 ?? b);
     else body = serialize(b);
-  } else if (fn?.symbol) {
+  } else if (fn) {
+    // Handle symbols and general expressions (e.g., Multiply, Add)
     args = [];
     body = serialize(fn);
   } else {
-    return 'int()';
+    return `${op}()`;
   }
 
   let result = op;

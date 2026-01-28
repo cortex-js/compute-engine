@@ -319,3 +319,39 @@ describe('FUNCTIONS', () => {
     ).toMatchInlineSnapshot(`(x, y) |-> x + y`);
   });
 });
+
+describe('BIG OPERATORS', () => {
+  it('should serialize Sum with symbol body', () => {
+    expect(check('\\sum_{n=1}^{10}(n)')).toMatchInlineSnapshot(
+      `sum_(n=1)^(10)(n)`
+    );
+  });
+
+  it('should serialize Sum with expression body', () => {
+    expect(check('\\sum_{n=1}^{10}(n \\cdot x)')).toMatchInlineSnapshot(
+      `sum_(n=1)^(10)(n * x)`
+    );
+  });
+
+  it('should serialize Sum with free variable only', () => {
+    expect(check('\\sum_{n=1}^{10}(x)')).toMatchInlineSnapshot(
+      `sum_(n=1)^(10)(x)`
+    );
+  });
+
+  it('should serialize Product with symbol body', () => {
+    expect(check('\\prod_{n=1}^{5}(n)')).toMatchInlineSnapshot(
+      `prod_(n=1)^(5)(n)`
+    );
+  });
+
+  it('should serialize Product with expression body', () => {
+    expect(check('\\prod_{n=1}^{5}(n \\cdot x)')).toMatchInlineSnapshot(
+      `prod_(n=1)^(5)(n * x)`
+    );
+  });
+
+  it('should serialize Integrate with expression body', () => {
+    expect(check('\\int x^2 \\, dx')).toMatchInlineSnapshot(`int(x^2 dx)`);
+  });
+});
