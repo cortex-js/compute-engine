@@ -308,9 +308,9 @@ describe('SERIALIZATION OF NUMBERS', () => {
       });
     expect(reformat('0')).toMatchInlineSnapshot(`0`);
     expect(reformat('1')).toMatchInlineSnapshot(`1`);
-    expect(reformat('0.00001')).toMatchInlineSnapshot(`10^{-5}`);
+    expect(reformat('0.00001')).toMatchInlineSnapshot(`1\\times10^{-5}`);
     expect(reformat('0.0123')).toMatchInlineSnapshot(`1.23\\times10^{-2}`);
-    expect(reformat('0.001')).toMatchInlineSnapshot(`10^{-3}`);
+    expect(reformat('0.001')).toMatchInlineSnapshot(`1\\times10^{-3}`);
     expect(reformat('0.123')).toMatchInlineSnapshot(`1.23\\times10^{-1}`);
     expect(reformat('5')).toMatchInlineSnapshot(`5`);
     expect(reformat('5.1234')).toMatchInlineSnapshot(`5.123\\,4`);
@@ -346,7 +346,7 @@ describe('SERIALIZATION OF NUMBERS', () => {
     expect(reformat('1')).toMatchInlineSnapshot(`1`);
     expect(reformat('0.00001')).toMatchInlineSnapshot(`100\\times10^{-3}`);
     expect(reformat('0.0123')).toMatchInlineSnapshot(`12.3\\times10^{-3}`);
-    expect(reformat('0.001')).toMatchInlineSnapshot(`10^{-3}`);
+    expect(reformat('0.001')).toMatchInlineSnapshot(`1\\times10^{-3}`);
     expect(reformat('0.123')).toMatchInlineSnapshot(`123\\times10^{-3}`);
     expect(reformat('5')).toMatchInlineSnapshot(`5`);
     expect(reformat('5.1234')).toMatchInlineSnapshot(`5.123\\,4`);

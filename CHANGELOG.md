@@ -2,6 +2,12 @@
 
 ### Bug Fixes
 
+- **([#244](https://github.com/cortex-js/compute-engine/issues/244))
+  Serialization**: Fixed LaTeX and ASCIIMath serialization ambiguity for
+  negative bases and negated powers. Powers now render `(-2)^2` (instead of
+  `-2^2`) when the base is negative, and negated powers now render as `-(2^2)`
+  rather than `-2^2`.
+
 - **([#263](https://github.com/cortex-js/compute-engine/issues/263))
   Quantifier Scope**: Fixed quantifier scope in First-Order Logic expressions.
   Previously, `\forall x.P(x)\rightarrow Q(x)` was parsed with the implication

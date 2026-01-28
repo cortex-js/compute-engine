@@ -117,6 +117,7 @@ describe('POWERS/ROOTS', () => {
     expect(check('2^2')).toMatchInlineSnapshot(`2^2`);
     expect(check('(x+1)^2')).toMatchInlineSnapshot(`(x + 1)^2`);
     expect(check('(-1)^2')).toMatchInlineSnapshot(`(-1)^2`);
+    expect(check('(-2)^2')).toMatchInlineSnapshot(`(-2)^2`);
     expect(check('x+(-1)^2')).toMatchInlineSnapshot(`x + (-1)^2`);
   });
   it('should serialize other powers', () => {
@@ -185,7 +186,8 @@ describe('ARITHMETIC OPERATORS', () => {
   it('should serialize Negate', () => {
     expect(check('(-x)')).toMatchInlineSnapshot(`-x`);
     expect(check('-(x+y)')).toMatchInlineSnapshot(`-(x + y)`);
-    expect(check('-(2^3)')).toMatchInlineSnapshot(`-2^3`);
+    expect(check('-(2^3)')).toMatchInlineSnapshot(`-(2^3)`);
+    expect(check('-(2^2)')).toMatchInlineSnapshot(`-(2^2)`);
   });
 
   it('should serialize Multiply', () => {

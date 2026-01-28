@@ -113,7 +113,8 @@ const OPERATORS: Record<
       const base = serialize(expr.op1, 14);
       // Always wrap the base in parentheses if power to avoid ambiguity,
       // i.e. -3^2 -> -(3^2)
-      if (base === 'Power') return `-(${base})`;
+      const op = expr.op1?.operator;
+      if (op === 'Power' || op === 'Square') return `-(${base})`;
       return `-${base}`;
     },
     14,
