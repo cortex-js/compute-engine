@@ -995,6 +995,78 @@ describe('NON EXACT WILDCARDS', () => {
   });
 });
 
+// GitHub Issue #258: BoxedExpression.match() with a Rational pattern
+describe('RATIONAL PATTERN MATCHING', () => {
+  it('should match Rational(3, 2) with Rational pattern', () => {
+    // Rational with two integers becomes a BoxedNumber
+    const result = match(['Rational', '_num', '_den'], ['Rational', 3, 2]);
+    expect(result).toMatchInlineSnapshot(`
+      {
+        _den: 2,
+        _num: 3,
+      }
+    `);
+  });
+
+  it('should match Rational(x, 2) with Rational pattern', () => {
+    // Rational with symbolic numerator is canonicalized as Multiply(x, Rational(1, 2))
+    const result = match(['Rational', '_num', '_den'], ['Rational', 'x', 2]);
+    expect(result).toMatchInlineSnapshot(`
+      {
+        _den: 2,
+        _num: x,
+      }
+    `);
+  });
+
+  it('should match Rational(x, 9) with Rational pattern', () => {
+    // Rational(x, Power(3, 2)) is canonicalized as Multiply(x, Rational(1, 9))
+    const result = match(
+      ['Rational', '_num', '_den'],
+      ['Rational', 'x', ['Power', 3, 2]]
+    );
+    expect(result).toMatchInlineSnapshot(`
+      {
+        _den: 9,
+        _num: x,
+      }
+    `);
+  });
+
+  it('should match Rational(3, y) with Rational pattern', () => {
+    // Rational with symbolic denominator becomes Divide(3, y)
+    const result = match(['Rational', '_num', '_den'], ['Rational', 3, 'y']);
+    expect(result).toMatchInlineSnapshot(`
+      {
+        _den: y,
+        _num: 3,
+      }
+    `);
+  });
+
+  it('should match Rational(x, y) with Rational pattern', () => {
+    // Rational with two symbols becomes Divide(x, y)
+    const result = match(['Rational', '_num', '_den'], ['Rational', 'x', 'y']);
+    expect(result).toMatchInlineSnapshot(`
+      {
+        _den: y,
+        _num: x,
+      }
+    `);
+  });
+
+  it('should match Divide pattern against Multiply with reciprocal', () => {
+    // x/2 is canonicalized as Multiply(Rational(1, 2), x)
+    const result = match(['Divide', '_num', '_den'], ['Rational', 'x', 2]);
+    expect(result).toMatchInlineSnapshot(`
+      {
+        _den: 2,
+        _num: x,
+      }
+    `);
+  });
+});
+
 describe('PATTERN VALIDATION', () => {
   // Test validatePattern directly with non-canonical patterns
   // (canonical forms may reorder operands for commutative operators)

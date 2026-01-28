@@ -131,6 +131,59 @@ function matchOnce(
 
     const operator = pattern.operator;
 
+    // Special case: Match a BoxedNumber rational against a Divide pattern
+    // This allows patterns like ['Divide', '_num', '_den'] to match rationals like 3/2
+    if (
+      operator === 'Divide' &&
+      expr.numericValue !== null &&
+      !expr.denominator.is(1)
+    ) {
+      // Create a synthetic Divide expression to match against
+      const divideExpr = ce.function(
+        'Divide',
+        [expr.numerator, expr.denominator],
+        { canonical: false, structural: true }
+      );
+      return matchArguments(divideExpr, pattern.ops, substitution, options);
+    }
+
+    // Special case: Match Multiply(Rational(1, n), x) against a Divide pattern
+    // This handles cases like x/2 which is canonicalized as x * (1/2)
+    if (operator === 'Divide' && expr.operator === 'Multiply') {
+      const ops = expr.ops!;
+      for (let i = 0; i < ops.length; i++) {
+        const op = ops[i];
+
+        // Check if op is a rational number with numerator 1 (i.e., 1/n form)
+        if (
+          op.numericValue !== null &&
+          op.numerator.is(1) &&
+          !op.denominator.is(1)
+        ) {
+          // Collect all other operands
+          const others = ops.filter((_, j) => j !== i);
+          const numerator =
+            others.length === 1
+              ? others[0]
+              : ce.function('Multiply', others, { canonical: false });
+
+          // Create a synthetic Divide expression to match against
+          const divideExpr = ce.function(
+            'Divide',
+            [numerator, op.denominator],
+            { canonical: false, structural: true }
+          );
+          const result = matchArguments(
+            divideExpr,
+            pattern.ops,
+            substitution,
+            options
+          );
+          if (result !== null) return result;
+        }
+      }
+    }
+
     if (operator.startsWith('_')) {
       //
       // 1. The pattern operator is a wildcard

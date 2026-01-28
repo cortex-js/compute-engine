@@ -2,6 +2,14 @@
 
 ### Bug Fixes
 
+- **([#258](https://github.com/cortex-js/compute-engine/issues/258))
+  Pattern Matching**: Fixed `BoxedExpression.match()` returning `null` when
+  matching a `Rational` pattern against expressions like `['Rational', 'x', 2]`.
+  The issue occurred because symbolic rationals with numeric denominators are
+  canonicalized to `Multiply` expressions (e.g., `x * 1/2`), which didn't match
+  `Divide` or `Rational` patterns. The pattern matching now correctly recognizes
+  these forms.
+
 - **([#264](https://github.com/cortex-js/compute-engine/issues/264))
   Serialization**: Fixed LaTeX serialization of quantified expressions
   (`ForAll`, `Exists`, `ExistsUnique`, `NotForAll`, `NotExists`). Previously,
