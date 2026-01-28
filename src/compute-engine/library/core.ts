@@ -781,7 +781,12 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
         if (op2.operator === 'Sequence')
           ce._fn('Subscript', [op1, ce._fn('List', op2.ops!)]);
 
-        return ce._fn('Subscript', [op1, op2]);
+        // Unwrap Delimiter (parentheses) from the subscript expression
+        // e.g., `A_{(n+1)}` -> `["Subscript", "A", ["Add", "n", 1]]`
+        let sub = op2;
+        if (op2.operator === 'Delimiter' && op2.op1) sub = op2.op1.canonical;
+
+        return ce._fn('Subscript', [op1, sub]);
       },
     },
 
