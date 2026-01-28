@@ -25,7 +25,9 @@
   contains free variables (variables not bound by the index). For example,
   `\sum_{n=1}^{10}(x)` now correctly evaluates to `10x` instead of `NaN`, and
   `\prod_{n=1}^{5}(x)` evaluates to `x^5`. Mixed expressions like
-  `\sum_{n=1}^{10}(n \cdot x)` now return `55x`.
+  `\sum_{n=1}^{10}(n \cdot x)` now return `55x`. Also fixed `toString()` for
+  `Sum` and `Product` expressions with non-trivial bodies (e.g., `Multiply`)
+  which were incorrectly displayed as `int()`.
 
 ## 0.31.0 _2026-01-27_
 
