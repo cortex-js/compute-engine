@@ -224,7 +224,7 @@ export const DEFINITIONS_LOGIC: LatexDictionary = [
     kind: 'prefix',
     latexTrigger: ['\\forall'],
     precedence: 200, // Has to be lower than COMPARISON_PRECEDENCE
-    serialize: '\\forall',
+    serialize: serializeQuantifier('\\forall'),
     parse: parseQuantifier('ForAll'),
   },
   {
@@ -232,7 +232,7 @@ export const DEFINITIONS_LOGIC: LatexDictionary = [
     kind: 'prefix',
     latexTrigger: ['\\exists'],
     precedence: 200, // Has to be lower than COMPARISON_PRECEDENCE,
-    serialize: '\\exists',
+    serialize: serializeQuantifier('\\exists'),
     parse: parseQuantifier('Exists'),
   },
   {
@@ -240,7 +240,7 @@ export const DEFINITIONS_LOGIC: LatexDictionary = [
     kind: 'prefix',
     latexTrigger: ['\\exists', '!'],
     precedence: 200, // Has to be lower than COMPARISON_PRECEDENCE,
-    serialize: '\\exists!',
+    serialize: serializeQuantifier('\\exists!'),
     parse: parseQuantifier('ExistsUnique'),
   },
   {
@@ -248,7 +248,7 @@ export const DEFINITIONS_LOGIC: LatexDictionary = [
     kind: 'prefix',
     latexTrigger: ['\\lnot', '\\forall'],
     precedence: 200, // Has to be lower than COMPARISON_PRECEDENCE
-    serialize: '\\lnot\\forall',
+    serialize: serializeQuantifier('\\lnot\\forall'),
     parse: parseQuantifier('NotForAll'),
   },
   {
@@ -256,7 +256,7 @@ export const DEFINITIONS_LOGIC: LatexDictionary = [
     kind: 'prefix',
     latexTrigger: ['\\lnot', '\\exists'],
     precedence: 200, // Has to be lower than COMPARISON_PRECEDENCE,
-    serialize: '\\lnot\\exists',
+    serialize: serializeQuantifier('\\lnot\\exists'),
     parse: parseQuantifier('NotExists'),
   },
 
@@ -336,6 +336,22 @@ export const DEFINITIONS_LOGIC: LatexDictionary = [
     },
   },
 ];
+
+function serializeQuantifier(
+  quantifierSymbol: string
+): (serializer: Serializer, expr: Expression) => string {
+  return (serializer, expr) => {
+    const args = operands(expr);
+    if (args.length === 0) return quantifierSymbol;
+    if (args.length === 1)
+      return `${quantifierSymbol} ${serializer.serialize(args[0])}`;
+
+    // args[0] is the bound variable/condition, args[1] is the body
+    const boundVar = serializer.serialize(args[0]);
+    const body = serializer.serialize(args[1]);
+    return `${quantifierSymbol} ${boundVar}, ${body}`;
+  };
+}
 
 function parseQuantifier(
   kind: 'NotForAll' | 'NotExists' | 'ForAll' | 'Exists' | 'ExistsUnique'

@@ -1,3 +1,14 @@
+## [Unreleased]
+
+### Bug Fixes
+
+- **([#264](https://github.com/cortex-js/compute-engine/issues/264))
+  Serialization**: Fixed LaTeX serialization of quantified expressions
+  (`ForAll`, `Exists`, `ExistsUnique`, `NotForAll`, `NotExists`). Previously,
+  only the quantifier symbol was output (e.g., `\forall x` instead of
+  `\forall x, x>y`). The body of the quantified expression is now correctly
+  serialized.
+
 ## 0.31.0 _2026-01-27_
 
 ### Breaking Changes
