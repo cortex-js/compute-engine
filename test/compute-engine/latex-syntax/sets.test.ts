@@ -137,3 +137,161 @@ describe('SERIALIZING SETS', () => {
 //     `);
 //   }); // @fixme
 // });
+
+describe('SET OPERATOR PRECEDENCE WITH LOGIC', () => {
+  // Set membership operators should bind tighter than logic operators
+  // Precedence: \in (240) > \land (235) > \lor (230)
+
+  it('should parse set membership with Or', () => {
+    // x ∈ A ∨ y ∈ B → (x ∈ A) ∨ (y ∈ B)
+    expect(parse('x \\in A \\lor y \\in B').json).toMatchInlineSnapshot(`
+      [
+        Or,
+        [
+          Element,
+          x,
+          A,
+        ],
+        [
+          Element,
+          y,
+          B,
+        ],
+      ]
+    `);
+  });
+
+  it('should parse set membership with And', () => {
+    // x ∈ A ∧ y ∈ B → (x ∈ A) ∧ (y ∈ B)
+    expect(parse('x \\in A \\land y \\in B').json).toMatchInlineSnapshot(`
+      [
+        And,
+        [
+          Element,
+          x,
+          A,
+        ],
+        [
+          Element,
+          y,
+          B,
+        ],
+      ]
+    `);
+  });
+
+  it('should parse subset with Or', () => {
+    // P ⊂ Q ∨ R ⊂ S → (P ⊂ Q) ∨ (R ⊂ S)
+    expect(parse('P \\subset Q \\lor R \\subset S').json).toMatchInlineSnapshot(`
+      [
+        Or,
+        [
+          Subset,
+          P,
+          Q,
+        ],
+        [
+          Subset,
+          R,
+          S,
+        ],
+      ]
+    `);
+  });
+
+  it('should parse subset with And', () => {
+    // P ⊂ Q ∧ R ⊂ S → (P ⊂ Q) ∧ (R ⊂ S)
+    expect(parse('P \\subset Q \\land R \\subset S').json).toMatchInlineSnapshot(`
+      [
+        And,
+        [
+          Subset,
+          P,
+          Q,
+        ],
+        [
+          Subset,
+          R,
+          S,
+        ],
+      ]
+    `);
+  });
+
+  it('should parse set membership with implies', () => {
+    // x ∈ A → y ∈ B
+    expect(parse('x \\in A \\implies y \\in B').json).toMatchInlineSnapshot(`
+      [
+        Implies,
+        [
+          Element,
+          x,
+          A,
+        ],
+        [
+          Element,
+          y,
+          B,
+        ],
+      ]
+    `);
+  });
+
+  it('should parse union/intersection with equality', () => {
+    // A ∪ B = C → (A ∪ B) = C
+    expect(parse('A \\cup B = C').json).toMatchInlineSnapshot(`
+      [
+        Equal,
+        [
+          Union,
+          A,
+          B,
+        ],
+        C,
+      ]
+    `);
+
+    // A ∩ B = C → (A ∩ B) = C
+    // Note: using X, Y, Z to avoid special symbols like N (NonNegativeIntegers)
+    expect(parse('X \\cap Y = Z').json).toMatchInlineSnapshot(`
+      [
+        Equal,
+        [
+          Intersection,
+          X,
+          Y,
+        ],
+        Z,
+      ]
+    `);
+  });
+
+  it('should parse element of union/intersection', () => {
+    // x ∈ A ∪ B → x ∈ (A ∪ B)
+    expect(parse('x \\in A \\cup B').json).toMatchInlineSnapshot(`
+      [
+        Element,
+        x,
+        [
+          Union,
+          A,
+          B,
+        ],
+      ]
+    `);
+  });
+
+  it('should round-trip set expressions with logic', () => {
+    const tests = [
+      'x\\in A\\lor y\\in B',
+      'x\\in A\\land y\\in B',
+      'P\\subset Q\\lor R\\subset S',
+    ];
+
+    for (const latex of tests) {
+      const expr1 = parse(latex);
+      const expr2 = parse(expr1.latex);
+      expect(expr2.json).toEqual(expr1.json);
+    }
+  });
+});

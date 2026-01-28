@@ -727,6 +727,24 @@ describe('Logic', () => {
     const expr2 = ce.parse(expr1.latex);
     expect(expr2.json).toEqual(expr1.json);
   });
+
+  // Round-trip tests for logic operators with comparisons
+  it('should round-trip logic expressions with comparisons', () => {
+    const tests = [
+      'x=1\\lor x=2',
+      'x=1\\land y=2',
+      'a\\lt1\\lor b\\gt2',
+      'p\\implies q',
+      'p\\iff q',
+      'a\\land b\\lor c',
+    ];
+
+    for (const latex of tests) {
+      const expr1 = ce.parse(latex);
+      const expr2 = ce.parse(expr1.latex);
+      expect(expr2.json).toEqual(expr1.json);
+    }
+  });
 });
 
 describe('Kronecker Delta', () => {
