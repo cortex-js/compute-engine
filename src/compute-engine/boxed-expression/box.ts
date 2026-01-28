@@ -9,8 +9,13 @@ import type {
   Scope,
 } from '../global-types';
 
-import { Expression, MathJsonSymbol } from '../../math-json/types';
 import {
+  Expression,
+  ExpressionObject,
+  MathJsonSymbol,
+} from '../../math-json/types';
+import {
+  hasMetaData,
   machineValue,
   matchesNumber,
   matchesString,
@@ -397,17 +402,25 @@ export function box(
   // Box a MathJSON object literal
   //
   if (typeof expr === 'object') {
+    // Extract metadata (latex, wikidata) from the MathJSON object if present
+    const metadata = hasMetaData(expr as ExpressionObject)
+      ? {
+          latex: (expr as ExpressionObject & { latex?: string }).latex,
+          wikidata: (expr as ExpressionObject & { wikidata?: string }).wikidata,
+        }
+      : undefined;
+
     if ('fn' in expr) {
       const [fnName, ...ops] = expr.fn;
       return canonicalForm(
-        boxFunction(ce, fnName, ops, { canonical, structural }),
+        boxFunction(ce, fnName, ops, { canonical, structural, metadata }),
         options.canonical!,
         options.scope
       );
     }
-    if ('str' in expr) return new BoxedString(ce, expr.str);
-    if ('sym' in expr) return ce.symbol(expr.sym, { canonical });
-    if ('num' in expr) return ce.number(expr, { canonical });
+    if ('str' in expr) return new BoxedString(ce, expr.str, metadata);
+    if ('sym' in expr) return ce.symbol(expr.sym, { canonical, metadata });
+    if ('num' in expr) return ce.number(expr, { canonical, metadata });
     if ('dict' in expr)
       return new BoxedDictionary(ce, expr.dict, { canonical });
 

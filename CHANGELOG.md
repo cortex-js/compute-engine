@@ -16,6 +16,16 @@
 
 ### Bug Fixes
 
+- **Metadata Preservation**: Fixed `verbatimLatex` not being preserved when
+  parsing with `preserveLatex: true`. The original LaTeX source is now correctly
+  stored on parsed expressions (when using non-canonical mode). Also fixed
+  metadata (`latex`, `wikidata`) being lost when boxing MathJSON objects that
+  contain these attributes.
+
+- **String Parsing**: Fixed parsing of `\text{...}` with `preserveLatex: true`
+  which was incorrectly returning an "invalid-symbol" error instead of a string
+  expression.
+
 - **Derivatives**: `d/dx e^x` now correctly simplifies to `e^x` instead of
   `ln(e) * e^x`. The `hasSymbolicTranscendental()` function now recognizes that
   transcendentals which simplify to exact rational values (like `ln(e) = 1`)
@@ -43,8 +53,9 @@
   expressions:
   - Negative exponents like `x^(-1/2)` now display as `1/sqrt(x)` in both LaTeX
     and ASCII-math output
-  - Term ordering in additions now puts positive terms before negative terms,
-    so `-x^2 + 1` displays as `1 - x^2`
+  - When a sum starts with a negative term and contains a positive constant,
+    the constant is moved to the front (e.g., `-x^2 + 1` displays as `1 - x^2`)
+    while preserving polynomial ordering (e.g., `x^2 - x + 3` stays unchanged)
   - `d/dx arcsin(x)` now displays as `1/sqrt(1-x^2)` instead of `(-x^2+1)^(-1/2)`
 
 - **Compilation**: Fixed compilation of `Sum` and `Product` expressions.

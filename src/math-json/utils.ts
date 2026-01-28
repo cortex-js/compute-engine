@@ -1,5 +1,7 @@
 import type {
   Expression,
+  ExpressionObject,
+  MathJsonAttributes,
   MathJsonFunctionObject,
   MathJsonSymbolObject,
   MathJsonNumberObject,
@@ -60,6 +62,30 @@ export function isFunctionObject(
     Array.isArray(expr.fn) &&
     expr.fn.length > 0 &&
     typeof expr.fn[0] === 'string'
+  );
+}
+
+export function isExpressionObject(
+  expr: Expression | null
+): expr is ExpressionObject {
+  return (
+    expr !== null &&
+    typeof expr === 'object' &&
+    ('fn' in expr || 'num' in expr || 'sym' in expr || 'str' in expr)
+  );
+}
+
+/**
+ * Returns true if `expr` has at least one recognized metadata property
+ * (`latex` or `wikidata`) with a non-undefined value.
+ */
+export function hasMetaData(
+  expr: Expression | null
+): expr is ExpressionObject & Partial<MathJsonAttributes> {
+  return (
+    isExpressionObject(expr) &&
+    ((expr as MathJsonAttributes).latex !== undefined ||
+      (expr as MathJsonAttributes).wikidata !== undefined)
   );
 }
 

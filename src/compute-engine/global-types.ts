@@ -3326,7 +3326,7 @@ export interface ComputeEngine extends IBigNum {
 
   symbol(
     sym: string,
-    options?: { canonical?: CanonicalOptions }
+    options?: { canonical?: CanonicalOptions; metadata?: Metadata }
   ): BoxedExpression;
 
   string(s: string, metadata?: Metadata): BoxedExpression;

@@ -2053,7 +2053,13 @@ export class _Parser implements Parser {
     } else if (typeof expr === 'number') {
       expr = { latex, num: Number(expr).toString() };
     } else if (typeof expr === 'string') {
-      expr = { latex, sym: expr };
+      // Check if it's a string literal (starts with ')
+      if (expr.startsWith("'")) {
+        // String literal: remove the surrounding quotes
+        expr = { latex, str: expr.slice(1, -1) };
+      } else {
+        expr = { latex, sym: expr };
+      }
     } else if (typeof expr === 'object' && expr !== null) {
       (expr as ExpressionObject).latex = latex;
     }

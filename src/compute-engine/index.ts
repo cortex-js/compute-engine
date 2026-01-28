@@ -1720,9 +1720,10 @@ export class ComputeEngine implements IComputeEngine {
   /** Create a boxed symbol */
   symbol(
     name: string,
-    options?: { canonical?: CanonicalOptions }
+    options?: { canonical?: CanonicalOptions; metadata?: Metadata }
   ): BoxedExpression {
     const canonical = options?.canonical ?? true;
+    const metadata = options?.metadata;
 
     // Symbols should use the Unicode NFC canonical form
     name = name.normalize();
@@ -1736,7 +1737,7 @@ export class ComputeEngine implements IComputeEngine {
     if (this.strict && !isValidSymbol(name))
       return this.error(['invalid-symbol', validateSymbol(name)], name);
 
-    if (!canonical) return new BoxedSymbol(this, name);
+    if (!canonical) return new BoxedSymbol(this, name, { metadata });
 
     const result = this._commonSymbols[name];
     if (result) return result;
@@ -1747,11 +1748,11 @@ export class ComputeEngine implements IComputeEngine {
     if (isValueDef(def) && def.value.holdUntil === 'never')
       return def.value.value ?? this.Nothing;
 
-    if (def) return new BoxedSymbol(this, name, { def });
+    if (def) return new BoxedSymbol(this, name, { metadata, def });
 
     // There was no definition for this name, so we create a new one
     def = this._declareSymbolValue(name, { type: 'unknown', inferred: true });
-    return new BoxedSymbol(this, name, { def });
+    return new BoxedSymbol(this, name, { metadata, def });
   }
 
   /**
