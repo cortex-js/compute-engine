@@ -28,9 +28,9 @@ import type {
 // - Vector: a column vector (1D tensor) of scalars (numbers, boolean, Complex). Has full support for operations.
 // - Matrix: a matrix (2D tensor) of scalars. Has full support for operations.
 /** @category Tensors */
-export abstract class AbstractTensor<DT extends keyof DataTypeMap>
-  implements Tensor<DT>
-{
+export abstract class AbstractTensor<
+  DT extends keyof DataTypeMap,
+> implements Tensor<DT> {
   /**
    * Return a tuple of tensors that have the same dtype.
    * If necessary, one of the two input tensors is upcast.

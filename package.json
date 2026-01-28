@@ -6,12 +6,13 @@
     "clean": "bash ./scripts/clean.sh",
     "coverage": "bash ./scripts/test.sh coverage",
     "dist": "bash ./scripts/build.sh production; bash ./scripts/test.sh",
-    "lint": "eslint --fix src/",
     "prepare": "bash ./scripts/build.sh production",
     "start": "bash ./scripts/start.sh",
     "snapshot": "bash ./scripts/test.sh snapshot",
     "version": "bash ./scripts/version.sh",
-    "test": "bash ./scripts/test.sh"
+    "test": "bash ./scripts/test.sh",
+    "lint": "eslint src --ext .ts --fix && prettier --write 'src/**/*.{ts,js,css,md}'",
+    "typecheck": "tsc --target es2022 -d --moduleResolution node --allowImportingTsExtensions true --emitDeclarationOnly --outDir /tmp/typecheck ./src/compute-engine.ts"
   },
   "name": "@cortex-js/compute-engine",
   "description": "Symbolic computing and numeric evaluations for JavaScript and Node.js",

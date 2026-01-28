@@ -892,7 +892,11 @@ export const DEFINITIONS_CORE: LatexDictionary = [
       if (primeCount === 1)
         return ['Derivative', ['InverseFunction', lhs]] as Expression;
       if (primeCount > 0)
-        return ['Derivative', ['InverseFunction', lhs], primeCount] as Expression;
+        return [
+          'Derivative',
+          ['InverseFunction', lhs],
+          primeCount,
+        ] as Expression;
 
       return ['InverseFunction', lhs] as Expression;
     },
