@@ -356,11 +356,32 @@ function serializeQuantifier(
   };
 }
 
+// Condition function for tight quantifier binding - stops at logical connectives
+function tightBindingCondition(
+  p: Parser,
+  terminator: Readonly<Terminator>
+): boolean {
+  return (
+    p.peek === '\\to' ||
+    p.peek === '\\rightarrow' ||
+    p.peek === '\\implies' ||
+    p.peek === '\\Rightarrow' ||
+    p.peek === '\\iff' ||
+    p.peek === '\\Leftrightarrow' ||
+    p.peek === '\\land' ||
+    p.peek === '\\wedge' ||
+    p.peek === '\\lor' ||
+    p.peek === '\\vee' ||
+    (terminator.condition?.(p) ?? false)
+  );
+}
+
 function parseQuantifier(
   kind: 'NotForAll' | 'NotExists' | 'ForAll' | 'Exists' | 'ExistsUnique'
 ): (parser: Parser, terminator: Readonly<Terminator>) => Expression | null {
   return (parser, terminator) => {
     const index = parser.index;
+    const useTightBinding = parser.options.quantifierScope !== 'loose';
 
     // There are several acceptable forms:
     // - \forall x, x>0
@@ -392,28 +413,13 @@ function parseQuantifier(
         parser.match(':') ||
         parser.match('\\colon')
       ) {
-        // Use tight binding: parse body but stop at logical connectives
-        // and arrows (→, ⇒, ∧, ∨, etc.)
-        // This follows standard FOL convention where quantifier scope
+        // Parse body with optional tight binding (stops at logical connectives)
+        // Tight binding follows standard FOL convention where quantifier scope
         // extends only to the immediately following well-formed formula.
-        // We use a condition function because arrows have higher precedence
-        // than comparisons in this system, but we want to include comparisons
-        // while excluding arrows/implications.
-        const body = parser.parseExpression({
-          ...terminator,
-          condition: (p) =>
-            p.peek === '\\to' ||
-            p.peek === '\\rightarrow' ||
-            p.peek === '\\implies' ||
-            p.peek === '\\Rightarrow' ||
-            p.peek === '\\iff' ||
-            p.peek === '\\Leftrightarrow' ||
-            p.peek === '\\land' ||
-            p.peek === '\\wedge' ||
-            p.peek === '\\lor' ||
-            p.peek === '\\vee' ||
-            (terminator.condition?.(p) ?? false),
-        });
+        const bodyTerminator = useTightBinding
+          ? { ...terminator, condition: (p: Parser) => tightBindingCondition(p, terminator) }
+          : terminator;
+        const body = parser.parseExpression(bodyTerminator);
         return [kind, symbol, missingIfEmpty(body)] as Expression;
       }
       const body = parser.parseEnclosure();
@@ -430,22 +436,11 @@ function parseQuantifier(
     // Either a separator or a parenthesis
     parser.skipSpace();
     if (parser.matchAny([',', '\\mid', ':', '\\colon'])) {
-      // Use tight binding for quantifier body - stop at logic operators
-      const body = parser.parseExpression({
-        ...terminator,
-        condition: (p) =>
-          p.peek === '\\to' ||
-          p.peek === '\\rightarrow' ||
-          p.peek === '\\implies' ||
-          p.peek === '\\Rightarrow' ||
-          p.peek === '\\iff' ||
-          p.peek === '\\Leftrightarrow' ||
-          p.peek === '\\land' ||
-          p.peek === '\\wedge' ||
-          p.peek === '\\lor' ||
-          p.peek === '\\vee' ||
-          (terminator.condition?.(p) ?? false),
-      });
+      // Parse body with optional tight binding
+      const bodyTerminator = useTightBinding
+        ? { ...terminator, condition: (p: Parser) => tightBindingCondition(p, terminator) }
+        : terminator;
+      const body = parser.parseExpression(bodyTerminator);
       return [kind, condition, missingIfEmpty(body)] as Expression;
     }
     if (parser.match('(')) {

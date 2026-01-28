@@ -1946,6 +1946,7 @@ export class ComputeEngine implements IComputeEngine {
       },
       parseUnexpectedToken: (_lhs, _parser) => null,
       preserveLatex: false,
+      quantifierScope: 'tight',
     };
 
     const result = parse(

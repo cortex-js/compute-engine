@@ -1009,6 +1009,47 @@ describe('SUM', () => {
       ce.parse('\\sum_{n=1}^{4}(3n + 5)').evaluate().toString()
     ).toMatchInlineSnapshot(`50`);
   });
+
+  // Alternating weighted binomial: Sum((-1)^k * k * C(n,k)) = 0 for n >= 2
+  it('should simplify alternating weighted binomial sum to 0', () => {
+    expect(
+      ce.box(['Sum', ['Multiply', ['Power', -1, 'k'], 'k', ['Binomial', 'b', 'k']], ['Tuple', 'k', 0, 'b']]).simplify().toString()
+    ).toMatchInlineSnapshot(`0`);
+  });
+
+  it('should evaluate alternating weighted binomial sum', () => {
+    expect(
+      ce.box(['Sum', ['Multiply', ['Power', -1, 'k'], 'k', ['Binomial', 4, 'k']], ['Tuple', 'k', 0, 4]]).evaluate()?.toString()
+    ).toMatchInlineSnapshot(`0`);
+  });
+
+  // Sum of binomial squares: Sum(C(n,k)^2) = C(2n, n)
+  it('should simplify sum of binomial squares', () => {
+    expect(
+      ce.box(['Sum', ['Power', ['Binomial', 'b', 'k'], 2], ['Tuple', 'k', 0, 'b']]).simplify().toString()
+    ).toMatchInlineSnapshot(`Binomial(2b, b)`);
+  });
+
+  it('should evaluate sum of binomial squares', () => {
+    // C(8,4) = 70
+    expect(
+      ce.box(['Sum', ['Power', ['Binomial', 4, 'k'], 2], ['Tuple', 'k', 0, 4]]).evaluate()?.toString()
+    ).toMatchInlineSnapshot(`70`);
+  });
+
+  // Sum of k*(k+1): n(n+1)(n+2)/3
+  it('should simplify sum of k*(k+1)', () => {
+    expect(
+      ce.box(['Sum', ['Multiply', 'k', ['Add', 'k', 1]], ['Tuple', 'k', 1, 'b']]).simplify().toString()
+    ).toMatchInlineSnapshot(`1/3 * b^3 + b^2 + 2/3 * b`);
+  });
+
+  it('should evaluate sum of k*(k+1)', () => {
+    // 4*5*6/3 = 40
+    expect(
+      ce.box(['Sum', ['Multiply', 'k', ['Add', 'k', 1]], ['Tuple', 'k', 1, 4]]).evaluate()?.toString()
+    ).toMatchInlineSnapshot(`40`);
+  });
 });
 
 describe('PRODUCT', () => {
@@ -1154,6 +1195,34 @@ describe('PRODUCT', () => {
     expect(
       ce.parse('\\prod_{n=5}^{5}(2n)').simplify().toString()
     ).toMatchInlineSnapshot(`10`);
+  });
+
+  // Telescoping product: Product((k+1)/k) = b+1
+  it('should simplify telescoping product (k+1)/k', () => {
+    expect(
+      ce.parse('\\prod_{k=1}^{b}\\frac{k+1}{k}').simplify().toString()
+    ).toMatchInlineSnapshot(`b + 1`);
+  });
+
+  it('should evaluate telescoping product (k+1)/k', () => {
+    // (2/1)*(3/2)*(4/3)*(5/4) = 5
+    expect(
+      ce.parse('\\prod_{k=1}^{4}\\frac{k+1}{k}').evaluate().toString()
+    ).toMatchInlineSnapshot(`5`);
+  });
+
+  // Wallis-like product: Product(1 - 1/k^2) = (b+1)/(2b) = 1/(2b) + 1/2
+  it('should simplify Wallis-like product 1 - 1/k^2', () => {
+    expect(
+      ce.parse('\\prod_{k=2}^{b}(1 - \\frac{1}{k^2})').simplify().toString()
+    ).toMatchInlineSnapshot(`1 / (2b) + 1/2`);
+  });
+
+  it('should evaluate Wallis-like product 1 - 1/k^2', () => {
+    // (1-1/4)*(1-1/9)*(1-1/16) = (3/4)*(8/9)*(15/16) = 5/8 = 0.625
+    expect(
+      ce.parse('\\prod_{k=2}^{4}(1 - \\frac{1}{k^2})').evaluate().toString()
+    ).toMatchInlineSnapshot(`0.625`);
   });
 });
 

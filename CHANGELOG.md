@@ -68,6 +68,24 @@
 
 ### Improvements
 
+- **([#263](https://github.com/cortex-js/compute-engine/issues/263))
+  First-Order Logic**: Added several improvements for working with First-Order
+  Logic expressions:
+  - **Configurable quantifier scope**: New `quantifierScope` parsing option
+    controls how quantifier scope is determined. Use `"tight"` (default) for
+    standard FOL conventions where quantifiers bind only the immediately
+    following formula, or `"loose"` for scope extending to the end of the
+    expression.
+    ```typescript
+    ce.parse('\\forall x. P(x)', { quantifierScope: 'tight' })  // default
+    ce.parse('\\forall x. P(x)', { quantifierScope: 'loose' })
+    ```
+  - **Automatic predicate inference**: Single uppercase letters followed by
+    parentheses (e.g., `P(x)`, `Q(a,b)`) are now automatically recognized as
+    predicate/function applications without requiring explicit declaration.
+    This enables natural FOL syntax like `\forall x. P(x) \rightarrow Q(x)`
+    to work out of the box.
+
 - **Polynomial Simplification**: The `simplify()` function now automatically
   cancels common polynomial factors in univariate rational expressions. For
   example, `(x² - 1)/(x - 1)` simplifies to `x + 1`, `(x³ - x)/(x² - 1)`

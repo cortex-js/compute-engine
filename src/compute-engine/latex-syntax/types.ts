@@ -770,6 +770,32 @@ export type ParseLatexOptions = NumberFormat & {
    * **Default:** `false`
    */
   preserveLatex: boolean;
+
+  /**
+   * Controls how quantifier scope is determined when parsing expressions
+   * like `\forall x. P(x) \rightarrow Q(x)`.
+   *
+   * - `"tight"`: The quantifier binds only to the immediately following
+   *   well-formed formula, stopping at logical connectives (`\rightarrow`,
+   *   `\implies`, `\land`, `\lor`, etc.). This follows standard First-Order
+   *   Logic conventions. Use explicit parentheses for wider scope:
+   *   `\forall x. (P(x) \rightarrow Q(x))`.
+   *
+   * - `"loose"`: The quantifier scope extends to the end of the expression
+   *   or until a lower-precedence operator is encountered.
+   *
+   * **Default:** `"tight"`
+   *
+   * @example
+   * // With "tight" (default):
+   * // \forall x. P(x) \rightarrow Q(x)
+   * // parses as: (∀x. P(x)) → Q(x)
+   *
+   * // With "loose":
+   * // \forall x. P(x) \rightarrow Q(x)
+   * // parses as: ∀x. (P(x) → Q(x))
+   */
+  quantifierScope: 'tight' | 'loose';
 };
 
 /**

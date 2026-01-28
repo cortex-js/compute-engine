@@ -601,6 +601,8 @@ describe('Logic', () => {
     `);
   });
 
+  // Note: P(x) is automatically inferred as function application (predicate)
+  // because P is a single uppercase letter followed by parentheses
   it('should parse ForAll with set membership', () => {
     expect(ce.parse('\\forall x \\in S, P(x)').json).toMatchInlineSnapshot(`
       [
@@ -611,12 +613,8 @@ describe('Logic', () => {
           S,
         ],
         [
-          InvisibleOperator,
           P,
-          [
-            Delimiter,
-            x,
-          ],
+          x,
         ],
       ]
     `);

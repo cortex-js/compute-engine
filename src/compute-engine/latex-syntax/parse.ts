@@ -1496,8 +1496,13 @@ export class _Parser implements Parser {
       this.index = start;
       fn = parseSymbol(this);
       if (!this.isFunctionOperator(fn)) {
-        this.index = start;
-        return null;
+        // Check if this looks like a predicate: single uppercase letter
+        // followed by parentheses (e.g., P(x), Q(a,b))
+        // This enables automatic inference of predicates in FOL contexts
+        if (!this.looksLikePredicate(fn)) {
+          this.index = start;
+          return null;
+        }
       }
     }
 
@@ -2094,6 +2099,25 @@ export class _Parser implements Parser {
     // This doesn't look like the expression could be the name of a function:
     // it's a number, a string, a symbol or something else.
     return false;
+  }
+
+  /**
+   * Check if a symbol looks like a predicate in First-Order Logic.
+   * A predicate is typically a single uppercase letter (P, Q, R, etc.)
+   * followed by parentheses containing arguments.
+   *
+   * This enables automatic inference of predicates without explicit declaration,
+   * so `\forall x. P(x)` works without having to declare `P` as a function.
+   */
+  private looksLikePredicate(id: MathJsonSymbol | null): boolean {
+    if (id === null || typeof id !== 'string') return false;
+
+    // Must be a single uppercase letter
+    if (!/^[A-Z]$/.test(id)) return false;
+
+    // Must be followed by an opening parenthesis or \left(
+    this.skipSpace();
+    return this.peek === '(' || this.peek === '\\left';
   }
 
   /** Return all defs of the specified kind.

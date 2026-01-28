@@ -4943,6 +4943,7 @@ type ParseLatexOptions = NumberFormat & {
   getSymbolType: (symbol) => BoxedType;
   parseUnexpectedToken: (lhs, parser) => Expression | null;
   preserveLatex: boolean;
+  quantifierScope: "tight" | "loose";
 };
 ```
 
@@ -5023,6 +5024,38 @@ replaced by one, with comments removed and with some low-level LaTeX
 commands replaced, for example `\egroup` and `\bgroup`.
 
 **Default:** `false`
+
+#### ParseLatexOptions.quantifierScope
+
+```ts
+quantifierScope: "tight" | "loose";
+```
+
+Controls how quantifier scope is determined when parsing expressions
+like `\forall x. P(x) \rightarrow Q(x)`.
+
+- `"tight"`: The quantifier binds only to the immediately following
+  well-formed formula, stopping at logical connectives (`\rightarrow`,
+  `\implies`, `\land`, `\lor`, etc.). This follows standard First-Order
+  Logic conventions. Use explicit parentheses for wider scope:
+  `\forall x. (P(x) \rightarrow Q(x))`.
+
+- `"loose"`: The quantifier scope extends to the end of the expression
+  or until a lower-precedence operator is encountered.
+
+**Default:** `"tight"`
+
+##### Example
+
+```ts
+// With "tight" (default):
+// \forall x. P(x) \rightarrow Q(x)
+// parses as: (∀x. P(x)) → Q(x)
+
+// With "loose":
+// \forall x. P(x) \rightarrow Q(x)
+// parses as: ∀x. (P(x) → Q(x))
+```
 
 </MemberCard>
 
