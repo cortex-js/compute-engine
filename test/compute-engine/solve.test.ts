@@ -214,3 +214,60 @@ describe('expr.solve()', () => {
     `);
   });
 });
+
+// Regression tests for #242: solve() should work for equations with variables
+// in the numerator of fractions (e.g., F = 3g/h solving for g)
+describe('SOLVING EQUATIONS WITH FRACTIONS (#242)', () => {
+  test('should solve F = 3g/h for g', () => {
+    const e = expr('F = 3g/h');
+    const result = e.solve('g')?.map((x) => x.toString());
+    expect(result).toMatchInlineSnapshot(`
+      [
+        1/3 * F * h,
+      ]
+    `);
+  });
+
+  test('should solve x/2 + 3 = 0 for x', () => {
+    const e = expr('x/2 + 3 = 0');
+    const result = e.solve('x')?.map((x) => x.json);
+    expect(result).toEqual([-6]);
+  });
+
+  test('should solve a/b + c*g/d = 0 for g', () => {
+    const e = expr('a/b + c*g/d = 0');
+    const result = e.solve('g')?.map((x) => x.toString());
+    expect(result).toMatchInlineSnapshot(`
+      [
+        -(a * d) / (b * c),
+      ]
+    `);
+  });
+
+  test('should solve equation with multiple fractional terms', () => {
+    const e = expr('x/2 + x/3 = 5');
+    const result = e.solve('x')?.map((x) => x.json);
+    expect(result).toEqual([6]);
+  });
+
+  // This test will be enabled after implementing variable-in-denominator solving
+  test.skip('should solve a/x = b for x (variable in denominator)', () => {
+    const e = expr('a/x = b');
+    const result = e.solve('x')?.map((x) => x.toString());
+    expect(result).toMatchInlineSnapshot(`
+      [
+        a / b,
+      ]
+    `);
+  });
+
+  test('should solve 1/(x+1) = 2 for x', () => {
+    const e = expr('1/(x+1) = 2');
+    const result = e.solve('x')?.map((x) => x.toString());
+    expect(result).toMatchInlineSnapshot(`
+      [
+        -1/2,
+      ]
+    `);
+  });
+});
