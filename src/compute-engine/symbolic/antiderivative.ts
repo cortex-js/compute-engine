@@ -1160,7 +1160,11 @@ function getQuadraticCoefficients(
   // Must be an Add expression (or equivalent)
   if (expr.operator !== 'Add') {
     // Check if it's just x² or c*x²
-    if (expr.operator === 'Power' && expr.op1.symbol === index && expr.op2.is(2)) {
+    if (
+      expr.operator === 'Power' &&
+      expr.op1.symbol === index &&
+      expr.op2.is(2)
+    ) {
       return { a: ce.One, b: ce.Zero, c: ce.Zero };
     }
     if (expr.operator === 'Multiply') {
@@ -1196,7 +1200,11 @@ function getQuadraticCoefficients(
     } else if (op.symbol === index) {
       // Just x (coefficient 1 for linear term)
       b = b.add(ce.One);
-    } else if (op.operator === 'Power' && op.op1.symbol === index && op.op2.is(2)) {
+    } else if (
+      op.operator === 'Power' &&
+      op.op1.symbol === index &&
+      op.op2.is(2)
+    ) {
       // x² term
       a = a.add(ce.One);
     } else if (op.operator === 'Multiply') {
@@ -1482,17 +1490,30 @@ export function antiderivative(
       if (quadCoeffs) {
         const { a, b, c } = quadCoeffs;
         // Calculate discriminant: b² - 4ac
-        const discriminant = b.mul(b).sub(ce.number(4).mul(a).mul(c)).simplify();
+        const discriminant = b
+          .mul(b)
+          .sub(ce.number(4).mul(a).mul(c))
+          .simplify();
         const discValue = discriminant.N().re;
 
         // If discriminant < 0, the quadratic is irreducible (no real roots)
         if (discValue !== null && discValue < 0) {
           // 4ac - b² > 0
-          const fourAcMinusB2 = ce.number(4).mul(a).mul(c).sub(b.mul(b)).simplify();
+          const fourAcMinusB2 = ce
+            .number(4)
+            .mul(a)
+            .mul(c)
+            .sub(b.mul(b))
+            .simplify();
           // √(4ac - b²)
           const sqrtDisc = ce.box(['Sqrt', fourAcMinusB2]).simplify();
           // 2ax + b
-          const innerExpr = ce.number(2).mul(a).mul(ce.symbol(index)).add(b).simplify();
+          const innerExpr = ce
+            .number(2)
+            .mul(a)
+            .mul(ce.symbol(index))
+            .add(b)
+            .simplify();
           // arctan((2ax+b)/√(4ac-b²))
           const arctanArg = innerExpr.div(sqrtDisc).simplify();
           const arctanExpr = ce.box(['Arctan', arctanArg]);
@@ -1526,16 +1547,27 @@ export function antiderivative(
 
             // First term: x / (2a²(n-1)(x²+a²)^(n-1))
             const newPower = ce.box(['Power', base, ce.number(n - 1)]);
-            const coeff1 = ce.One.div(ce.number(2).mul(a2).mul(ce.number(n - 1)));
+            const coeff1 = ce.One.div(
+              ce
+                .number(2)
+                .mul(a2)
+                .mul(ce.number(n - 1))
+            );
             const term1 = coeff1.mul(x).div(newPower);
 
             // Second term coefficient: (2n-3) / (2a²(n-1))
-            const coeff2 = ce.number(2 * n - 3).div(ce.number(2).mul(a2).mul(ce.number(n - 1)));
+            const coeff2 = ce.number(2 * n - 3).div(
+              ce
+                .number(2)
+                .mul(a2)
+                .mul(ce.number(n - 1))
+            );
 
             // Recursive integral: ∫ 1/(x²+a²)^(n-1) dx
-            const lowerPowerExpr = n === 2
-              ? ce.One.div(base)
-              : ce.One.div(ce.box(['Power', base, ce.number(n - 1)]));
+            const lowerPowerExpr =
+              n === 2
+                ? ce.One.div(base)
+                : ce.One.div(ce.box(['Power', base, ce.number(n - 1)]));
             const recursiveIntegral = antiderivative(lowerPowerExpr, index);
 
             let result = add(term1, coeff2.mul(recursiveIntegral)).simplify();
@@ -1574,7 +1606,10 @@ export function antiderivative(
           const quadCoeffs = getQuadraticCoefficients(factor, index);
           if (quadCoeffs && quadCoeffs.a.is(1)) {
             // Check if irreducible (discriminant < 0)
-            const disc = quadCoeffs.b.mul(quadCoeffs.b).sub(ce.number(4).mul(quadCoeffs.c)).simplify();
+            const disc = quadCoeffs.b
+              .mul(quadCoeffs.b)
+              .sub(ce.number(4).mul(quadCoeffs.c))
+              .simplify();
             const discValue = disc.N().re;
             if (discValue !== null && discValue < 0) {
               quadFactor = factor;
@@ -1612,10 +1647,16 @@ export function antiderivative(
           // ∫ k/(x²+bx+c) dx = k * (2/√(4c-b²)) * arctan((2x+b)/√(4c-b²))
           const fourCMinusB2 = ce.number(4).mul(qc).sub(qb.mul(qb)).simplify();
           const sqrtDisc = ce.box(['Sqrt', fourCMinusB2]).simplify();
-          const innerExpr = ce.number(2).mul(ce.symbol(index)).add(qb).simplify();
+          const innerExpr = ce
+            .number(2)
+            .mul(ce.symbol(index))
+            .add(qb)
+            .simplify();
           const arctanArg = innerExpr.div(sqrtDisc).simplify();
           const arctanCoeff = ce.number(2).div(sqrtDisc).simplify();
-          const term3 = CMinusBbHalf.mul(arctanCoeff).mul(ce.box(['Arctan', arctanArg]));
+          const term3 = CMinusBbHalf.mul(arctanCoeff).mul(
+            ce.box(['Arctan', arctanArg])
+          );
 
           let result = add(term1, term2, term3).simplify();
 
@@ -1692,14 +1733,21 @@ export function antiderivative(
             if (quadCoeffs) {
               const { a: qa, b: qb, c: qc } = quadCoeffs;
               // Check if quadratic is irreducible (discriminant < 0)
-              const discriminant = qb.mul(qb).sub(ce.number(4).mul(qa).mul(qc)).simplify();
+              const discriminant = qb
+                .mul(qb)
+                .sub(ce.number(4).mul(qa).mul(qc))
+                .simplify();
               const discValue = discriminant.N().re;
 
               if (discValue !== null && discValue < 0 && qa.is(1)) {
                 // Partial fractions: 1/((x-r)(x²+bx+c)) = A/(x-r) + (Bx+C)/(x²+bx+c)
                 // A = 1/(r²+br+c)
                 const rVal = r;
-                const quadAtR = rVal.mul(rVal).add(qb.mul(rVal)).add(qc).simplify();
+                const quadAtR = rVal
+                  .mul(rVal)
+                  .add(qb.mul(rVal))
+                  .add(qc)
+                  .simplify();
                 const A = ce.One.div(quadAtR);
 
                 // B = -A, C = -A(b+r)
@@ -1718,14 +1766,26 @@ export function antiderivative(
                 const term2 = BHalf.mul(ce.box(['Ln', ['Abs', quad]]));
 
                 // Second part: (C - Bb/2)/(x²+bx+c) → completing the square
-                const CMinusBbHalf = C.sub(B.mul(qb).div(ce.number(2))).simplify();
+                const CMinusBbHalf = C.sub(
+                  B.mul(qb).div(ce.number(2))
+                ).simplify();
                 // ∫ k/(x²+bx+c) dx = k * (2/√(4c-b²)) * arctan((2x+b)/√(4c-b²))
-                const fourCMinusB2 = ce.number(4).mul(qc).sub(qb.mul(qb)).simplify();
+                const fourCMinusB2 = ce
+                  .number(4)
+                  .mul(qc)
+                  .sub(qb.mul(qb))
+                  .simplify();
                 const sqrtDisc = ce.box(['Sqrt', fourCMinusB2]).simplify();
-                const innerExpr = ce.number(2).mul(ce.symbol(index)).add(qb).simplify();
+                const innerExpr = ce
+                  .number(2)
+                  .mul(ce.symbol(index))
+                  .add(qb)
+                  .simplify();
                 const arctanArg = innerExpr.div(sqrtDisc).simplify();
                 const arctanCoeff = ce.number(2).div(sqrtDisc).simplify();
-                const term3 = CMinusBbHalf.mul(arctanCoeff).mul(ce.box(['Arctan', arctanArg]));
+                const term3 = CMinusBbHalf.mul(arctanCoeff).mul(
+                  ce.box(['Arctan', arctanArg])
+                );
 
                 let result = add(term1, term2, term3).simplify();
 
@@ -1770,9 +1830,7 @@ export function antiderivative(
         // ∫ 1/√(x²+1) dx = arcsinh(x)
         const powerTerm = addOps.find(
           (op) =>
-            op.operator === 'Power' &&
-            op.op1.symbol === index &&
-            op.op2.is(2)
+            op.operator === 'Power' && op.op1.symbol === index && op.op2.is(2)
         );
         if (oneTerm && powerTerm) {
           return ce.box(['Arsinh', index]);
@@ -1942,13 +2000,21 @@ export function antiderivative(
 
         // First term: x / (2a²(n-1)(x²+a²)^(n-1))
         const newPower = ce.box(['Power', base, ce.number(n + 1)]); // (x²+a²)^(-(n-1))
-        const coeff1 = ce.One.div(ce.number(2).mul(a2).mul(ce.number(absN - 1)));
+        const coeff1 = ce.One.div(
+          ce
+            .number(2)
+            .mul(a2)
+            .mul(ce.number(absN - 1))
+        );
         const term1 = coeff1.mul(x).mul(newPower);
 
         // Second term coefficient: (2n-3) / (2a²(n-1))
-        const coeff2 = ce
-          .number(2 * absN - 3)
-          .div(ce.number(2).mul(a2).mul(ce.number(absN - 1)));
+        const coeff2 = ce.number(2 * absN - 3).div(
+          ce
+            .number(2)
+            .mul(a2)
+            .mul(ce.number(absN - 1))
+        );
 
         // Recursive integral: ∫ (x²+a²)^(-(n-1)) dx
         const lowerPowerExpr = ce.box(['Power', base, ce.number(n + 1)]);
