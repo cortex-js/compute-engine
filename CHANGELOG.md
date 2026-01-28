@@ -76,6 +76,8 @@
   - Alternating binomial sum: `\sum_{k=0}^{n}((-1)^k * C(n,k))` simplifies to `0`
   - Weighted binomial sum: `\sum_{k=0}^{n}(k * C(n,k))` simplifies to `n * 2^(n-1)`
   - Partial fractions (telescoping): `\sum_{k=1}^{n}(1/(k(k+1)))` simplifies to `n/(n+1)`
+  - Partial fractions (telescoping): `\sum_{k=2}^{n}(1/(k(k-1)))` simplifies to `(n-1)/n`
+  - Weighted squared binomial sum: `\sum_{k=0}^{n}(k^2 * C(n,k))` simplifies to `n(n+1) * 2^(n-2)`
   - Product of constant: `\prod_{n=1}^{b}(x)` simplifies to `x^b`
   - Factorial: `\prod_{n=1}^{b}(n)` simplifies to `b!`
   - Odd double factorial: `\prod_{n=1}^{b}(2n-1)` simplifies to `(2b-1)!!`

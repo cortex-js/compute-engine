@@ -391,6 +391,11 @@ export const SIMPLIFY_RULES: Rule[] = [
       return { value: triangular.pow(2), because: 'sum of cubes' };
     }
 
+    // Note: Sum of fourth powers and fifth powers formulas are not included
+    // because their closed-form expressions are more expensive than the Sum
+    // expression itself (cost ratio > 1.2), so they don't pass the simplify
+    // cost threshold. They can still be evaluated numerically.
+
     // Alternating unit series: Sum((-1)^n, [n, 0, b]) → (1 + (-1)^b) / 2
     if (
       body.operator === 'Power' &&
@@ -576,37 +581,88 @@ export const SIMPLIFY_RULES: Rule[] = [
         ]);
         return { value: result, because: 'weighted binomial sum' };
       }
+
+      // Weighted squared binomial sum: Sum(k^2 * C(n,k), [k, 0, n]) → n(n+1) * 2^(n-2)
+      let hasIndexSquared = false;
+      binomialN = null;
+      hasBinomial = false;
+
+      for (const op of body.ops) {
+        if (op.operator === 'Power' && op.op1?.symbol === index && op.op2?.is(2)) {
+          hasIndexSquared = true;
+        } else if (
+          op.operator === 'Binomial' &&
+          op.op2?.symbol === index
+        ) {
+          hasBinomial = true;
+          binomialN = op.op1 ?? null;
+        }
+      }
+
+      if (hasIndexSquared && hasBinomial && binomialN && upper.isSame(binomialN) && body.ops.length === 2) {
+        // n(n+1) * 2^(n-2)
+        const n = binomialN;
+        const result = ce.function('Multiply', [
+          n,
+          n.add(ce.One),
+          ce.function('Power', [ce.number(2), n.sub(ce.number(2))]),
+        ]);
+        return { value: result, because: 'weighted squared binomial sum' };
+      }
     }
 
     // Partial fractions / telescoping: Sum(1/(k*(k+1)), [k, 1, n]) → n/(n+1)
-    // Pattern: Divide with 1 over Multiply(k, k+1)
+    // Pattern: Divide with 1 over Multiply(k, k+1) or k*(k-1)
     if (
       body.operator === 'Divide' &&
       body.op1?.is(1) &&
-      body.op2?.operator === 'Multiply' &&
-      lower.is(1)
+      body.op2?.operator === 'Multiply'
     ) {
       const denom = body.op2;
       if (denom.ops?.length === 2) {
         const [d1, d2] = denom.ops;
-        // Check for k * (k+1) pattern
-        const isKTimesKPlus1 =
-          (d1.symbol === index &&
-            d2.operator === 'Add' &&
-            d2.ops?.length === 2 &&
-            d2.ops.some((op) => op.symbol === index) &&
-            d2.ops.some((op) => op.is(1))) ||
-          (d2.symbol === index &&
-            d1.operator === 'Add' &&
-            d1.ops?.length === 2 &&
-            d1.ops.some((op) => op.symbol === index) &&
-            d1.ops.some((op) => op.is(1)));
+        // Check for k * (k+1) pattern with lower=1
+        if (lower.is(1)) {
+          const isKTimesKPlus1 =
+            (d1.symbol === index &&
+              d2.operator === 'Add' &&
+              d2.ops?.length === 2 &&
+              d2.ops.some((op) => op.symbol === index) &&
+              d2.ops.some((op) => op.is(1))) ||
+            (d2.symbol === index &&
+              d1.operator === 'Add' &&
+              d1.ops?.length === 2 &&
+              d1.ops.some((op) => op.symbol === index) &&
+              d1.ops.some((op) => op.is(1)));
 
-        if (isKTimesKPlus1) {
-          // n / (n + 1)
-          const n = upper;
-          const result = n.div(n.add(ce.One));
-          return { value: result, because: 'partial fractions (telescoping)' };
+          if (isKTimesKPlus1) {
+            // n / (n + 1)
+            const n = upper;
+            const result = n.div(n.add(ce.One));
+            return { value: result, because: 'partial fractions (telescoping)' };
+          }
+        }
+
+        // Check for k * (k-1) pattern with lower=2: Sum(1/(k*(k-1)), [k, 2, n]) → (n-1)/n
+        if (lower.is(2)) {
+          const isKTimesKMinus1 =
+            (d1.symbol === index &&
+              d2.operator === 'Add' &&
+              d2.ops?.length === 2 &&
+              d2.ops.some((op) => op.symbol === index) &&
+              d2.ops.some((op) => op.is(-1))) ||
+            (d2.symbol === index &&
+              d1.operator === 'Add' &&
+              d1.ops?.length === 2 &&
+              d1.ops.some((op) => op.symbol === index) &&
+              d1.ops.some((op) => op.is(-1)));
+
+          if (isKTimesKMinus1) {
+            // (n - 1) / n
+            const n = upper;
+            const result = n.sub(ce.One).div(n);
+            return { value: result, because: 'partial fractions (telescoping k*(k-1))' };
+          }
         }
       }
     }

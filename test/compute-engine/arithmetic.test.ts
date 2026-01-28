@@ -935,6 +935,51 @@ describe('SUM', () => {
       ce.box(['Sum', ['Divide', 1, ['Multiply', 'k', ['Add', 'k', 1]]], ['Tuple', 'k', 1, 4]]).evaluate()?.toString()
     ).toMatchInlineSnapshot(`4/5`);
   });
+
+  // Partial fractions / telescoping with k*(k-1): Sum(1/(k*(k-1)), [k, 2, n]) = (n-1)/n
+  it('should simplify partial fractions 1/(k*(k-1))', () => {
+    expect(
+      ce.box(['Sum', ['Divide', 1, ['Multiply', 'k', ['Add', 'k', -1]]], ['Tuple', 'k', 2, 'b']]).simplify().toString()
+    ).toMatchInlineSnapshot(`-1 / b + 1`);
+  });
+
+  it('should evaluate partial fractions 1/(k*(k-1))', () => {
+    // 1/(2*1) + 1/(3*2) + 1/(4*3) + 1/(5*4) = 1/2 + 1/6 + 1/12 + 1/20 = 4/5
+    expect(
+      ce.box(['Sum', ['Divide', 1, ['Multiply', 'k', ['Add', 'k', -1]]], ['Tuple', 'k', 2, 5]]).evaluate()?.toString()
+    ).toMatchInlineSnapshot(`4/5`);
+  });
+
+  // Note: Sum of fourth and fifth powers don't simplify because their
+  // closed-form expressions are more expensive than the Sum expression
+  // (cost ratio > 1.2). They can still be evaluated numerically.
+  it('should evaluate sum of fourth powers numerically', () => {
+    // 1^4 + 2^4 + 3^4 + 4^4 = 1 + 16 + 81 + 256 = 354
+    expect(
+      ce.parse('\\sum_{n=1}^{4}(n^4)').evaluate().toString()
+    ).toMatchInlineSnapshot(`354`);
+  });
+
+  it('should evaluate sum of fifth powers numerically', () => {
+    // 1^5 + 2^5 + 3^5 + 4^5 = 1 + 32 + 243 + 1024 = 1300
+    expect(
+      ce.parse('\\sum_{n=1}^{4}(n^5)').evaluate().toString()
+    ).toMatchInlineSnapshot(`1300`);
+  });
+
+  // Weighted squared binomial sum: Sum(k^2 * C(n,k), [k, 0, n]) = n(n+1) * 2^(n-2)
+  it('should simplify weighted squared binomial sum', () => {
+    expect(
+      ce.box(['Sum', ['Multiply', ['Power', 'k', 2], ['Binomial', 'b', 'k']], ['Tuple', 'k', 0, 'b']]).simplify().toString()
+    ).toMatchInlineSnapshot(`b * (b + 1) * 2^(b - 2)`);
+  });
+
+  it('should evaluate weighted squared binomial sum', () => {
+    // 0^2*C(4,0) + 1^2*C(4,1) + 2^2*C(4,2) + 3^2*C(4,3) + 4^2*C(4,4) = 0 + 4 + 24 + 36 + 16 = 80 = 4*5*2^2
+    expect(
+      ce.box(['Sum', ['Multiply', ['Power', 'k', 2], ['Binomial', 4, 'k']], ['Tuple', 'k', 0, 4]]).evaluate()?.toString()
+    ).toMatchInlineSnapshot(`80`);
+  });
 });
 
 describe('PRODUCT', () => {
