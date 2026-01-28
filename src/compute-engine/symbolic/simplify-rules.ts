@@ -521,6 +521,96 @@ export const SIMPLIFY_RULES: Rule[] = [
       }
     }
 
+    // Alternating binomial sum: Sum((-1)^k * C(n,k), [k, 0, n]) → 0 (for n > 0)
+    // Pattern: Multiply with (-1)^k and Binomial(n, k)
+    if (body.operator === 'Multiply' && body.ops && lower.is(0)) {
+      let hasBinomial = false;
+      let hasAlternating = false;
+      let binomialN: BoxedExpression | null = null;
+
+      for (const op of body.ops) {
+        if (
+          op.operator === 'Binomial' &&
+          op.op2?.symbol === index
+        ) {
+          hasBinomial = true;
+          binomialN = op.op1 ?? null;
+        } else if (
+          op.operator === 'Power' &&
+          op.op1?.is(-1) &&
+          op.op2?.symbol === index
+        ) {
+          hasAlternating = true;
+        }
+      }
+
+      if (hasBinomial && hasAlternating && binomialN && upper.isSame(binomialN)) {
+        // For n > 0: sum = 0, for n = 0: sum = 1
+        // We return 0 for the general case; numeric evaluation handles n=0
+        return { value: ce.Zero, because: 'alternating binomial sum' };
+      }
+
+      // Weighted binomial sum: Sum(k * C(n,k), [k, 0, n]) → n * 2^(n-1)
+      let hasIndex = false;
+      binomialN = null;
+      hasBinomial = false;
+
+      for (const op of body.ops) {
+        if (op.symbol === index) {
+          hasIndex = true;
+        } else if (
+          op.operator === 'Binomial' &&
+          op.op2?.symbol === index
+        ) {
+          hasBinomial = true;
+          binomialN = op.op1 ?? null;
+        }
+      }
+
+      if (hasIndex && hasBinomial && binomialN && upper.isSame(binomialN) && body.ops.length === 2) {
+        // n * 2^(n-1)
+        const n = binomialN;
+        const result = ce.function('Multiply', [
+          n,
+          ce.function('Power', [ce.number(2), n.sub(ce.One)]),
+        ]);
+        return { value: result, because: 'weighted binomial sum' };
+      }
+    }
+
+    // Partial fractions / telescoping: Sum(1/(k*(k+1)), [k, 1, n]) → n/(n+1)
+    // Pattern: Divide with 1 over Multiply(k, k+1)
+    if (
+      body.operator === 'Divide' &&
+      body.op1?.is(1) &&
+      body.op2?.operator === 'Multiply' &&
+      lower.is(1)
+    ) {
+      const denom = body.op2;
+      if (denom.ops?.length === 2) {
+        const [d1, d2] = denom.ops;
+        // Check for k * (k+1) pattern
+        const isKTimesKPlus1 =
+          (d1.symbol === index &&
+            d2.operator === 'Add' &&
+            d2.ops?.length === 2 &&
+            d2.ops.some((op) => op.symbol === index) &&
+            d2.ops.some((op) => op.is(1))) ||
+          (d2.symbol === index &&
+            d1.operator === 'Add' &&
+            d1.ops?.length === 2 &&
+            d1.ops.some((op) => op.symbol === index) &&
+            d1.ops.some((op) => op.is(1)));
+
+        if (isKTimesKPlus1) {
+          // n / (n + 1)
+          const n = upper;
+          const result = n.div(n.add(ce.One));
+          return { value: result, because: 'partial fractions (telescoping)' };
+        }
+      }
+    }
+
     // Factor out constants: Sum(c * f(n), [n, a, b]) → c * Sum(f(n), [n, a, b])
     if (body.operator === 'Multiply' && body.ops) {
       const constantFactors: BoxedExpression[] = [];

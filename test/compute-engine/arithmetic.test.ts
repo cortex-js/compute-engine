@@ -893,6 +893,48 @@ describe('SUM', () => {
       ce.parse('\\sum_{k=1}^{b}\\sum_{j=1}^{k}(1)').simplify().toString()
     ).toMatchInlineSnapshot(`1/2 * (b^2 + b)`);
   });
+
+  // Alternating binomial sum: Sum((-1)^k * C(n,k), [k, 0, n]) = 0
+  it('should simplify alternating binomial sum to 0', () => {
+    expect(
+      ce.box(['Sum', ['Multiply', ['Power', -1, 'k'], ['Binomial', 'b', 'k']], ['Tuple', 'k', 0, 'b']]).simplify().toString()
+    ).toMatchInlineSnapshot(`0`);
+  });
+
+  it('should evaluate alternating binomial sum', () => {
+    // (-1)^0 * C(4,0) + (-1)^1 * C(4,1) + ... + (-1)^4 * C(4,4) = 1 - 4 + 6 - 4 + 1 = 0
+    expect(
+      ce.box(['Sum', ['Multiply', ['Power', -1, 'k'], ['Binomial', 4, 'k']], ['Tuple', 'k', 0, 4]]).evaluate()?.toString()
+    ).toMatchInlineSnapshot(`0`);
+  });
+
+  // Weighted binomial sum: Sum(k * C(n,k), [k, 0, n]) = n * 2^(n-1)
+  it('should simplify weighted binomial sum', () => {
+    expect(
+      ce.box(['Sum', ['Multiply', 'k', ['Binomial', 'b', 'k']], ['Tuple', 'k', 0, 'b']]).simplify().toString()
+    ).toMatchInlineSnapshot(`b * 2^(b - 1)`);
+  });
+
+  it('should evaluate weighted binomial sum', () => {
+    // 0*C(4,0) + 1*C(4,1) + 2*C(4,2) + 3*C(4,3) + 4*C(4,4) = 0 + 4 + 12 + 12 + 4 = 32 = 4 * 2^3
+    expect(
+      ce.box(['Sum', ['Multiply', 'k', ['Binomial', 4, 'k']], ['Tuple', 'k', 0, 4]]).evaluate()?.toString()
+    ).toMatchInlineSnapshot(`32`);
+  });
+
+  // Partial fractions / telescoping: Sum(1/(k*(k+1)), [k, 1, n]) = n/(n+1)
+  it('should simplify partial fractions (telescoping sum)', () => {
+    expect(
+      ce.box(['Sum', ['Divide', 1, ['Multiply', 'k', ['Add', 'k', 1]]], ['Tuple', 'k', 1, 'b']]).simplify().toString()
+    ).toMatchInlineSnapshot(`b / (b + 1)`);
+  });
+
+  it('should evaluate partial fractions (telescoping sum)', () => {
+    // 1/(1*2) + 1/(2*3) + 1/(3*4) + 1/(4*5) = 1/2 + 1/6 + 1/12 + 1/20 = 4/5
+    expect(
+      ce.box(['Sum', ['Divide', 1, ['Multiply', 'k', ['Add', 'k', 1]]], ['Tuple', 'k', 1, 4]]).evaluate()?.toString()
+    ).toMatchInlineSnapshot(`4/5`);
+  });
 });
 
 describe('PRODUCT', () => {
