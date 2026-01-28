@@ -1018,6 +1018,21 @@ function matchArguments(
  *
  * If the expression does not match the pattern, it returns `null`.
  *
+ * ## Canonicalization-Aware Matching
+ *
+ * The matching handles expressions that have been canonicalized to different
+ * but mathematically equivalent forms:
+ *
+ * - **Rational/Divide**: A `Rational` pattern is treated as equivalent to
+ *   `Divide`. Expressions like `['Rational', 'x', 2]` which are canonicalized
+ *   to `['Multiply', ['Rational', 1, 2], 'x']` (i.e., `x * 1/2`) will still
+ *   match a `['Divide', '_num', '_den']` or `['Rational', '_num', '_den']`
+ *   pattern, returning `{_num: x, _den: 2}`.
+ *
+ * - **BoxedNumber rationals**: Numeric rationals like `['Rational', 3, 2]`
+ *   which become `BoxedNumber` values will match `Divide` or `Rational`
+ *   patterns by extracting the numerator and denominator.
+ *
  * <!--
  * @consider?
  * - pattern 'validation' (not quite the right term in this context) here? In a similar way to the
