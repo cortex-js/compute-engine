@@ -212,6 +212,16 @@
   lower precedence (230-235) than comparison operators (245) and set relations
   (240), so compound propositions parse correctly without requiring parentheses.
 
+- **([#156](https://github.com/cortex-js/compute-engine/issues/156)) Logical
+  Connective Arrows**: Added support for lowercase arrow notation in logical
+  expressions:
+  - `\rightarrow` now parses as `Implies` (previously parsed as `To` for
+    set/function mapping)
+  - `\leftrightarrow` now parses as `Equivalent` (previously produced an
+    "unexpected-command" error)
+  - The uppercase variants `\Rightarrow` and `\Leftrightarrow` continue to work
+  - `\to` remains available for function/set mapping notation (e.g., `f: A \to B`)
+
 - **Simplification Rules**: Added and fixed several simplification rules:
   - `x + x` now correctly simplifies to `2x` (term combination)
   - `e^x * e^{-x}` now correctly simplifies to `1` (exponential inverse)

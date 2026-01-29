@@ -159,6 +159,13 @@ export const DEFINITIONS_LOGIC: LatexDictionary = [
     associativity: 'right',
     parse: 'Implies',
   },
+  {
+    latexTrigger: ['\\rightarrow'],
+    kind: 'infix',
+    precedence: 220,
+    associativity: 'right',
+    parse: 'Implies',
+  },
 
   {
     name: 'Equivalent', // MathML: identical to, Mathematica: Congruent
@@ -169,6 +176,13 @@ export const DEFINITIONS_LOGIC: LatexDictionary = [
   },
   {
     latexTrigger: ['\\Leftrightarrow'],
+    kind: 'infix',
+    associativity: 'right',
+    precedence: 219,
+    parse: 'Equivalent',
+  },
+  {
+    latexTrigger: ['\\leftrightarrow'],
     kind: 'infix',
     associativity: 'right',
     precedence: 219,
