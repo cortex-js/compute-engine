@@ -151,28 +151,107 @@ describe('SUM parsing', () => {
     `);
   });
 
-  test('INVALID parsing of summation with element in', () => {
-    expect(ce.parse(`\\sum_{n \\in \\N}K_n`)).toMatchInlineSnapshot(
-      `["Sum", "K_n"]`
+  test('parsing of summation with element in set', () => {
+    expect(ce.parse(`\\sum_{n \\in \\{1,2,3\\}}n`)).toMatchInlineSnapshot(
+      `["Sum", "n", ["Element", "n", ["Set", 1, 2, 3]]]`
     );
   });
 
-  test('INVALID parsing of multi indexed summation with different index variables', () => {
-    expect(ce.parse(`\\sum_{n \\in N; d \\in D} K`)).toMatchInlineSnapshot(
-      `["Sum", "K"]`
+  test('parsing of summation with element in symbol', () => {
+    expect(ce.parse(`\\sum_{n \\in S}K_n`)).toMatchInlineSnapshot(
+      `["Sum", "K_n", ["Element", "n", "S"]]`
     );
   });
 
-  test('INVALID parsing of multi indexed summation with and equal and non-equal boxed expression', () => {
-    expect(ce.parse(`\\sum_{n = 6; d \\in D} K`)).toMatchInlineSnapshot(
-      `["Sum", "K", ["Limits", "n", "Nothing", 6]]`
+  test('parsing of summation with element in List', () => {
+    // [1,5] is parsed as a List, not a Range
+    expect(ce.parse(`\\sum_{n \\in [1,5]}n`)).toMatchInlineSnapshot(
+      `["Sum", "n", ["Element", "n", ["List", 1, 5]]]`
     );
   });
 
-  test('INVALID testing parsing of multi indexed summation with non-equal boxed expressions', () => {
-    expect(ce.parse(`\\sum_{d \\in D, d != V} K`)).toMatchInlineSnapshot(
-      `["Sum", "K"]`
-    );
+  test('multi indexed summation with semicolon separator parses Element', () => {
+    // Semicolon separated Element expressions are now parsed
+    // (though N and D are not recognized as sets, they show errors)
+    expect(ce.parse(`\\sum_{n \\in N; d \\in D} K`)).toMatchInlineSnapshot(`
+      [
+        "Sum",
+        "K",
+        [
+          "Element",
+          "n",
+          [
+            "Error",
+            [
+              "ErrorCode",
+              "incompatible-type",
+              "'collection'",
+              "(any) -> unknown"
+            ]
+          ]
+        ],
+        [
+          "Element",
+          "d",
+          [
+            "Error",
+            [
+              "ErrorCode",
+              "incompatible-type",
+              "'collection'",
+              "(expression, variable: symbol, variables: symbol+) -> expression"
+            ]
+          ]
+        ]
+      ]
+    `);
+  });
+
+  test('multi indexed summation with mixed syntax parses Element', () => {
+    // Mixed syntax now parses the Element expression
+    expect(ce.parse(`\\sum_{n = 6; d \\in D} K`)).toMatchInlineSnapshot(`
+      [
+        "Sum",
+        "K",
+        ["Limits", "n", "Nothing", 6],
+        [
+          "Element",
+          "d",
+          [
+            "Error",
+            [
+              "ErrorCode",
+              "incompatible-type",
+              "'collection'",
+              "(expression, variable: symbol, variables: symbol+) -> expression"
+            ]
+          ]
+        ]
+      ]
+    `);
+  });
+
+  test('UNSUPPORTED summation with inequality constraint', () => {
+    // Inequality constraints like d != V are not currently supported
+    expect(ce.parse(`\\sum_{d \\in D, d != V} K`)).toMatchInlineSnapshot(`
+      [
+        "Sum",
+        "K",
+        [
+          "Element",
+          "d",
+          [
+            "Error",
+            [
+              "ErrorCode",
+              "incompatible-type",
+              "'collection'",
+              "(expression, variable: symbol, variables: symbol+) -> expression"
+            ]
+          ]
+        ]
+      ]
+    `);
   });
 });
 
@@ -191,6 +270,61 @@ describe('SUM evaluation', () => {
     expect(
       evaluate(`\\sum_{n=0}^{4}(\\sum_{m=4}^{8}(\\sum_{l=0}^{2}{n+m})+n)`)
     ).toMatchInlineSnapshot(`610`);
+  });
+});
+
+describe('SUM with Element indexing set', () => {
+  test('sum over finite set', () => {
+    expect(evaluate(`\\sum_{n \\in \\{1,2,3\\}}n`)).toMatchInlineSnapshot(`6`);
+  });
+
+  test('sum of squares over finite set', () => {
+    expect(
+      evaluate(`\\sum_{n \\in \\{1,2,3\\}}n^2`)
+    ).toMatchInlineSnapshot(`14`);
+  });
+
+  test('sum over List', () => {
+    // [1,5] parses as a List, not Range - evaluates to 1+5=6
+    expect(evaluate(`\\sum_{n \\in [1,5]}n`)).toMatchInlineSnapshot(`6`);
+  });
+
+  test('sum over Range via box', () => {
+    // Use box() to create a proper Range-based Sum
+    const expr = ce.box(['Sum', 'n', ['Element', 'n', ['Range', 1, 5]]]);
+    expect(expr.evaluate().json).toBe(15);
+  });
+
+  test('product over finite set', () => {
+    expect(
+      evaluate(`\\prod_{k \\in \\{1,2,3,4\\}}k`)
+    ).toMatchInlineSnapshot(`24`);
+  });
+
+  test('serialization of Sum with Element', () => {
+    const expr = ce.box(['Sum', 'n', ['Element', 'n', ['Set', 1, 2, 3]]]);
+    expect(expr.latex).toMatchInlineSnapshot(
+      `\\sum_{n\\in \\lbrace1, 2, 3\\rbrace}n`
+    );
+  });
+
+  test('serialization of Product with Element', () => {
+    const expr = ce.box([
+      'Product',
+      'k',
+      ['Element', 'k', ['Set', 1, 2, 3, 4]],
+    ]);
+    expect(expr.latex).toMatchInlineSnapshot(
+      `\\prod_{k\\in \\lbrace1, 2, 3, 4\\rbrace}k`
+    );
+  });
+
+  test('round-trip parse -> latex -> parse', () => {
+    const original = `\\sum_{n \\in \\{1,2,3\\}} n`;
+    const parsed = ce.parse(original);
+    const latex = parsed.latex;
+    const reparsed = ce.parse(latex);
+    expect(reparsed.json).toEqual(parsed.json);
   });
 });
 

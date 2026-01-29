@@ -2,6 +2,7 @@ import type { BoxedExpression, ComputeEngine, Scope } from '../global-types';
 
 import { MAX_ITERATION } from '../numerics/numeric';
 import { fromRange, reduceCollection } from './collections';
+import { extractFiniteDomain } from './logic-analysis';
 
 export type IndexingSet = {
   index: string | undefined;
@@ -223,6 +224,8 @@ export function canonicalLimits(
  * - `lower` (a number), `Nothing` if none is present
  * - `upper` (a number), `Nothing` if none is present
  *
+ * Or, for Element expressions, preserve them in canonical form.
+ *
  * Assume we are in the context of a big operator
  * (i.e. `pushScope()` has been called)
  */
@@ -233,6 +236,16 @@ export function canonicalIndexingSet(
   let index: BoxedExpression;
   let upper: BoxedExpression | null = null;
   let lower: BoxedExpression | null = null;
+
+  // Handle Element expressions - preserve them in canonical form
+  // e.g., ["Element", "n", ["Set", 1, 2, 3]]
+  if (expr.operator === 'Element') {
+    const indexExpr = expr.op1;
+    const collection = expr.op2;
+    if (!indexExpr?.symbol) return undefined;
+    if (indexExpr.symbol !== 'Nothing') ce.declare(indexExpr.symbol, 'integer');
+    return ce.function('Element', [indexExpr.canonical, collection.canonical]);
+  }
 
   // If this is already a canonical Limits expression, return it (after
   // canonicalizing its operands) so re-canonicalization paths (like `subs`)
@@ -310,6 +323,7 @@ export function canonicalBigop(
  * Process an expression of the form
  * - ['Operator', body, ['Tuple', index1, lower, upper]]
  * - ['Operator', body, ['Tuple', index1, lower, upper], ['Tuple', index2, lower, upper], ...]
+ * - ['Operator', body, ['Element', index, collection]]
  * - ['Operator', body]
  * - ['Operator', collection]
  *
@@ -332,12 +346,19 @@ export function* reduceBigOp<T>(
   // i.e. Sum(3) = 3
   if (indexes.length === 0) return fn(initial, body) ?? undefined;
 
-  //
-  // We have one or more indexing sets, i.e. `["Tuple", index, lower, upper]`
-  // Create a cartesian product of the indexing sets.
-  //
   const ce = body.engine;
 
+  // Check for Element-based indexing sets
+  const elementSets = indexes.filter((x) => x.operator === 'Element');
+  if (elementSets.length > 0) {
+    // Handle Element-based indexing sets using extractFiniteDomain
+    return yield* reduceElementIndexingSets(body, indexes, fn, initial);
+  }
+
+  //
+  // We have one or more Limits indexing sets, i.e. `["Limits", index, lower, upper]`
+  // Create a cartesian product of the indexing sets.
+  //
   const indexingSets = normalizeIndexingSets(indexes);
 
   // @todo: special case when there is only one index
@@ -355,6 +376,88 @@ export function* reduceBigOp<T>(
     counter += 1;
     if (counter % 1000 === 0) yield result;
     if (result === undefined) break;
+  }
+
+  return result ?? undefined;
+}
+
+/**
+ * Handle Element-based indexing sets by extracting finite domains
+ * and iterating over their values.
+ */
+function* reduceElementIndexingSets<T>(
+  body: BoxedExpression,
+  indexes: ReadonlyArray<BoxedExpression>,
+  fn: (acc: T, x: BoxedExpression) => T | null,
+  initial: T
+): Generator<T | undefined> {
+  const ce = body.engine;
+
+  // Separate Element and Limits indexing sets
+  const elementDomains: Array<{ variable: string; values: BoxedExpression[] }> =
+    [];
+  const limitsSets: IndexingSet[] = [];
+
+  for (const idx of indexes) {
+    if (idx.operator === 'Element') {
+      const domain = extractFiniteDomain(idx, ce);
+      if (!domain) {
+        // Can't evaluate infinite/unknown domain - return undefined
+        return undefined;
+      }
+      elementDomains.push(domain);
+    } else {
+      limitsSets.push(normalizeIndexingSet(idx));
+    }
+  }
+
+  // If we have mixed Element and Limits sets, we need to handle both
+  if (limitsSets.length > 0) {
+    // Mixed case: combine Element domains with Limits ranges
+    // Convert Limits to a similar format
+    for (const limits of limitsSets) {
+      const values: BoxedExpression[] = [];
+      for (let i = limits.lower; i <= limits.upper; i++) {
+        values.push(ce.number(i));
+      }
+      elementDomains.push({ variable: limits.index!, values });
+    }
+  }
+
+  // Generate Cartesian product indices
+  const indices = elementDomains.map(() => 0);
+  const lengths = elementDomains.map((d) => d.values.length);
+
+  // Check for empty domains
+  if (lengths.some((l) => l === 0)) return initial;
+
+  let result: T | undefined = initial;
+  let counter = 0;
+
+  while (true) {
+    // Apply current combination of assignments
+    for (let i = 0; i < elementDomains.length; i++) {
+      ce.assign(
+        elementDomains[i].variable,
+        elementDomains[i].values[indices[i]]
+      );
+    }
+
+    // Evaluate and accumulate
+    result = fn(result, body) ?? undefined;
+    counter++;
+    if (counter % 1000 === 0) yield result;
+    if (result === undefined) break;
+
+    // Move to next combination
+    let dim = elementDomains.length - 1;
+    while (dim >= 0) {
+      indices[dim]++;
+      if (indices[dim] < lengths[dim]) break;
+      indices[dim] = 0;
+      dim--;
+    }
+    if (dim < 0) break; // Exhausted all combinations
   }
 
   return result ?? undefined;

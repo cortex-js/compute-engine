@@ -1335,6 +1335,7 @@ function getIndexAssignment(
       index: string;
       lower?: Expression;
       upper?: Expression;
+      element?: Expression;
     }
   | undefined {
   if (expr === null) return undefined;
@@ -1364,6 +1365,13 @@ function getIndexAssignment(
     return { index, lower, upper };
   }
 
+  // Handle Element expressions: ["Element", "n", "N"]
+  // e.g., `n \in N` in the subscript
+  if (operator(expr) === 'Element') {
+    const index = symbol(operand(expr, 1)) ?? 'Nothing';
+    return { index, element: expr };
+  }
+
   return undefined;
 }
 
@@ -1374,6 +1382,7 @@ function getIndexes(
   index: string;
   lower?: Expression;
   upper?: Expression;
+  element?: Expression;
 }[] {
   if (isEmptySequence(sub)) sub = null;
   if (isEmptySequence(sup)) sup = null;
@@ -1435,13 +1444,19 @@ function parseBigOp(name: string, reduceOp: string, minPrec: number) {
     if (fn === null) return [name];
 
     //
-    // Turn the indexing sets into a sequence of tuples
+    // Turn the indexing sets into a sequence of tuples or Element expressions
     //
     const indexingSetArguments: Expression[] = [];
-    for (const indexinSet of indexes) {
-      const lower = indexinSet.lower;
-      const upper = indexinSet.upper;
-      const index = indexinSet.index ?? 'Nothing';
+    for (const indexingSet of indexes) {
+      // Handle Element expressions: preserve them directly
+      if (indexingSet.element) {
+        indexingSetArguments.push(indexingSet.element);
+        continue;
+      }
+      // Handle traditional range-based indexing sets
+      const lower = indexingSet.lower;
+      const upper = indexingSet.upper;
+      const index = indexingSet.index ?? 'Nothing';
       if (upper !== null && upper !== undefined)
         indexingSetArguments.push(['Tuple', index, lower ?? 1, upper]);
       else if (lower !== null && lower !== undefined)
@@ -1458,6 +1473,7 @@ const INDEXING_SET_HEADS = new Set([
   'Pair',
   'Single',
   'Limits',
+  'Element',
 ]);
 
 function sanitizeLimitOperand(
@@ -1487,6 +1503,14 @@ function serializeIndexingSet(
   serializer: Serializer,
   indexingSet: Expression
 ): { sub?: string; sup?: string } {
+  // Handle Element expressions: ["Element", "n", "N"]
+  // Serialize as `n\in N`
+  if (operator(indexingSet) === 'Element') {
+    const indexLatex = serializer.serialize(operand(indexingSet, 1));
+    const collectionLatex = serializer.serialize(operand(indexingSet, 2));
+    return { sub: `${indexLatex}\\in ${collectionLatex}` };
+  }
+
   let indexExpr = operand(indexingSet, 1);
   if (indexExpr !== null && operator(indexExpr) === 'Hold')
     indexExpr = operand(indexExpr, 1);
