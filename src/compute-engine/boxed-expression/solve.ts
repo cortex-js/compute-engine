@@ -225,37 +225,110 @@ export const UNIVARIATE_ROOTS: Rule[] = [
     condition: filter,
   },
 
-  // ax + c\sqrt{dx + f} + g = 0
-  // plus
+  //
+  // Square root equations: ax + b√x + c = 0
+  // Using substitution u = √x, this becomes au² + bu + c = 0
+  // Solving: u = (-b ± √(b² - 4ac)) / 2a
+  // Then x = u² = ((-b ± √(b² - 4ac)) / 2a)²
+  //
+
+  // ax + b√x + c = 0 (plus root)
   {
-    match: 'ax + \\mathrm{__b} \\sqrt{cx + \\mathrm{__d}} + \\mathrm{__g}',
-    replace:
-      '\\frac{-(2 a g - \\mathrm{__b}^2 c) + \\sqrt{(2 a \\mathrm{__g} - \\mathrm{__b}^2 c)^2 - 4 a^2(g^2 - b^2 \\mathrm{__d})}}{2 a^2}',
+    match: ['Add', ['Multiply', '_x', '__a'], ['Multiply', '__b', ['Sqrt', '_x']], '___c'],
+    replace: [
+      'Power',
+      [
+        'Divide',
+        ['Add', ['Negate', '__b'], ['Sqrt', ['Subtract', ['Square', '__b'], ['Multiply', 4, '__a', '___c']]]],
+        ['Multiply', 2, '__a'],
+      ],
+      2,
+    ],
     useVariations: true,
     condition: filter,
   },
-  // ax + b\sqrt{x} + g = 0
-  // plus
+
+  // ax + b√x + c = 0 (minus root)
   {
-    match: 'ax + \\mathrm{__b} \\sqrt{x} + \\mathrm{___g}',
-    replace:
-      '\\left(\\frac{-\\mathrm{__b} + \\sqrt{\\mathrm{__b}^2 - 4 a \\mathrm{___g}}}{2 a}\\right)^2',
+    match: ['Add', ['Multiply', '_x', '__a'], ['Multiply', '__b', ['Sqrt', '_x']], '___c'],
+    replace: [
+      'Power',
+      [
+        'Divide',
+        ['Subtract', ['Negate', '__b'], ['Sqrt', ['Subtract', ['Square', '__b'], ['Multiply', 4, '__a', '___c']]]],
+        ['Multiply', 2, '__a'],
+      ],
+      2,
+    ],
     useVariations: true,
     condition: filter,
   },
-  // minus
+
+  // Handle negated coefficient: ax - b√x + c = 0
+  // This handles the Negate(Multiply(...)) pattern
   {
-    match: 'ax + \\mathrm{__b} \\sqrt{x} + \\mathrm{___g}',
-    replace:
-      '\\left(\\frac{-\\mathrm{__b} - \\sqrt{\\mathrm{__b}^2 - 4 a \\mathrm{___g}}}{2 a}\\right)^2',
+    match: ['Add', ['Multiply', '_x', '__a'], ['Negate', ['Multiply', '__b', ['Sqrt', '_x']]], '___c'],
+    replace: [
+      'Power',
+      [
+        'Divide',
+        ['Add', '__b', ['Sqrt', ['Add', ['Square', '__b'], ['Multiply', 4, '__a', '___c']]]],
+        ['Multiply', 2, '__a'],
+      ],
+      2,
+    ],
     useVariations: true,
     condition: filter,
   },
-  // minus
+
+  // ax - b√x + c = 0 (minus root)
   {
-    match: 'ax + \\mathrm{__b} \\sqrt{cx + \\mathrm{__d}} + \\mathrm{__g}',
-    replace:
-      '\\frac{-(2 a g - \\mathrm{__b}^2 c) - \\sqrt{(2 a \\mathrm{__g} - \\mathrm{__b}^2 c)^2 - 4 a^2(g^2 - b^2 \\mathrm{__d})}}{2 a^2}',
+    match: ['Add', ['Multiply', '_x', '__a'], ['Negate', ['Multiply', '__b', ['Sqrt', '_x']]], '___c'],
+    replace: [
+      'Power',
+      [
+        'Divide',
+        ['Subtract', '__b', ['Sqrt', ['Add', ['Square', '__b'], ['Multiply', 4, '__a', '___c']]]],
+        ['Multiply', 2, '__a'],
+      ],
+      2,
+    ],
+    useVariations: true,
+    condition: filter,
+  },
+
+  //
+  // Additional solve rules
+  //
+
+  // a√x + b = 0  =>  x = (b/a)² (only valid when -b/a ≥ 0)
+  {
+    match: ['Add', ['Multiply', '__a', ['Sqrt', '_x']], '__b'],
+    replace: ['Square', ['Divide', ['Negate', '__b'], '__a']],
+    useVariations: true,
+    condition: (sub) => {
+      if (!filter(sub)) return false;
+      // Check that -b/a >= 0 for the solution to be valid
+      const a = sub.__a;
+      const b = sub.__b;
+      if (!a || !b) return false;
+      const ratio = b.div(a);
+      return ratio.isNonPositive ?? true; // Allow if we can't determine sign
+    },
+  },
+
+  // a·ln(x) + b = 0  =>  x = e^(-b/a)
+  {
+    match: ['Add', ['Multiply', '__a', ['Ln', '_x']], '__b'],
+    replace: ['Exp', ['Divide', ['Negate', '__b'], '__a']],
+    useVariations: true,
+    condition: filter,
+  },
+
+  // ln(x) + b = 0  =>  x = e^(-b)
+  {
+    match: ['Add', ['Ln', '_x'], '__b'],
+    replace: ['Exp', ['Negate', '__b']],
     useVariations: true,
     condition: filter,
   },

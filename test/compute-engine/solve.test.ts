@@ -135,8 +135,7 @@ describe('expr.solve()', () => {
     `);
   });
 
-  // TODO: The sqrt rules need to handle negative coefficients (Negate wrapper)
-  test.skip('should solve an equation with a sqrt(x) term (issue #220)', () => {
+  test('should solve an equation with a sqrt(x) term (issue #220)', () => {
     const e = expr('2x = \\sqrt{5x}');
     const result = e.solve('x')?.map((x) => x.toString());
     expect(result).toMatchInlineSnapshot(`
@@ -280,5 +279,43 @@ describe('SOLVING EQUATIONS WITH FRACTIONS (#242)', () => {
         -1/2,
       ]
     `);
+  });
+});
+
+// Tests for sqrt and ln equations
+describe('SOLVING SQRT AND LN EQUATIONS', () => {
+  test('should solve x + 2sqrt(x) - 3 = 0', () => {
+    const e = expr('x + 2\\sqrt{x} - 3 = 0');
+    const result = e.solve('x')?.map((x) => x.json);
+    expect(result).toEqual([1]);
+  });
+
+  test('should solve sqrt(x) = 3', () => {
+    const e = expr('\\sqrt{x} = 3');
+    const result = e.solve('x')?.map((x) => x.json);
+    expect(result).toEqual([9]);
+  });
+
+  test('should return empty for 2sqrt(x) + 4 = 0 (no real solution)', () => {
+    const e = expr('2\\sqrt{x} + 4 = 0');
+    const result = e.solve('x');
+    expect(result).toEqual([]);
+  });
+
+  test('should solve ln(x) = 1', () => {
+    const e = expr('\\ln(x) = 1');
+    const result = e.solve('x')?.map((x) => x.toString());
+    expect(result).toMatchInlineSnapshot(`
+      [
+        e,
+      ]
+    `);
+  });
+
+  test('should solve 3ln(x) - 6 = 0', () => {
+    const e = expr('3\\ln(x) - 6 = 0');
+    const result = e.solve('x')?.map((x) => x.N().toString());
+    // Result is e^2 ≈ 7.389
+    expect(result?.[0]).toMatch(/^7\.389/);
   });
 });

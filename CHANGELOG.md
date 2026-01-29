@@ -115,7 +115,9 @@
 - **([#220](https://github.com/cortex-js/compute-engine/issues/220))
   Solve**: Fixed `solve()` returning an empty array for equations involving
   square roots of the unknown, e.g. `2x = \sqrt{5x}`. The solver now handles
-  equations that include `\sqrt{x}` terms.
+  equations of the form `ax + b√x + c = 0` using quadratic substitution. Also
+  added support for solving logarithmic equations like `a·ln(x) + b = 0` which
+  returns `x = e^(-b/a)`.
 
 - **([#255](https://github.com/cortex-js/compute-engine/issues/255))
   LaTeX Parsing**: Fixed multi-letter subscripts like `A_{CD}` causing
