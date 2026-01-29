@@ -112,8 +112,8 @@ if [ "$BUILD" = "production" ]; then
     find ./dist -type f -name '*.d.ts' -exec bash -c 'sedi "1s/^/\/\* $SDK_VERSION \*\/$(printf '"'"'\r'"'"')/" {}' \;
     find ./dist -type f -name '*.d.ts' -exec bash -c 'sedi "s/{{SDK_VERSION}}/$SDK_VERSION/" {}' \;
 
-    # Build the docs
-    bash ./scripts/doc.sh
+    # Build the docs (non-fatal - continue even if it fails)
+    bash ./scripts/doc.sh || true
 
 
     # Run test suite
