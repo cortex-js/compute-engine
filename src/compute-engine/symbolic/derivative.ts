@@ -88,6 +88,10 @@ const DERIVATIVES_TABLE = {
   Sqrt: ['Multiply', ['Power', '_', ['Negate', 'Half']], 'Half'],
   // d/dx |x| = x/|x| = sign(x) for x ≠ 0 (undefined at x = 0)
   Abs: ['Sign', '_'],
+  // Step functions: derivative is 0 almost everywhere (undefined at discontinuities)
+  Floor: 0,
+  Ceil: 0,
+  Round: 0,
   // https://proofwiki.org/wiki/Derivative_of_Error_Function
   Erf: [
     'Multiply',
@@ -286,7 +290,7 @@ export function differentiate(
   }
 
   const h = DERIVATIVES_TABLE[expr.operator];
-  if (!h) {
+  if (h === undefined) {
     if (expr.nops > 1) return undefined;
 
     // If we don't know how to differentiate this function, assume it's a

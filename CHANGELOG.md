@@ -15,6 +15,11 @@
   `denom` (a `number | null`) was incorrectly passed where an `Expression` was
   expected. Now correctly uses `operand(exp, 2)` to get the expression form.
 
+- **Step Function Derivatives**: Fixed `D(floor(x), x)`, `D(ceil(x), x)`, and
+  `D(round(x), x)` causing infinite recursion. These step functions now correctly
+  return 0 (the derivative is 0 almost everywhere). Also fixed a bug where
+  derivative formulas that evaluate to 0 weren't recognized due to a falsy check.
+
 - **([#168](https://github.com/cortex-js/compute-engine/issues/168))
   Absolute Value**: Fixed parsing of nested absolute value expressions that
   start with a double bar (e.g. `||3-5|-4|`), which previously produced an
