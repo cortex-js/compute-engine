@@ -720,3 +720,115 @@ describe('Diagonal', () => {
     );
   });
 });
+
+describe('IdentityMatrix', () => {
+  it('should create a 2×2 identity matrix', () => {
+    const result = ce.box(['IdentityMatrix', 2]).evaluate();
+    expect(result.toString()).toMatchInlineSnapshot(`[[1,0],[0,1]]`);
+  });
+
+  it('should create a 3×3 identity matrix', () => {
+    const result = ce.box(['IdentityMatrix', 3]).evaluate();
+    expect(result.toString()).toMatchInlineSnapshot(
+      `[[1,0,0],[0,1,0],[0,0,1]]`
+    );
+  });
+
+  it('should create a 4×4 identity matrix', () => {
+    const result = ce.box(['IdentityMatrix', 4]).evaluate();
+    expect(result.toString()).toMatchInlineSnapshot(
+      `[[1,0,0,0],[0,1,0,0],[0,0,1,0],[0,0,0,1]]`
+    );
+  });
+
+  it('should create a 1×1 identity matrix', () => {
+    const result = ce.box(['IdentityMatrix', 1]).evaluate();
+    expect(result.toString()).toMatchInlineSnapshot(`[[1]]`);
+  });
+
+  it('should return error for non-positive integer', () => {
+    const result = ce.box(['IdentityMatrix', 0]).evaluate();
+    expect(result.toString()).toMatchInlineSnapshot(
+      `Error("expected-positive-integer", "0")`
+    );
+  });
+
+  it('should return error for negative integer', () => {
+    const result = ce.box(['IdentityMatrix', -2]).evaluate();
+    expect(result.toString()).toMatchInlineSnapshot(
+      `Error("expected-positive-integer", "-2")`
+    );
+  });
+
+  it('should return error for non-integer', () => {
+    const result = ce.box(['IdentityMatrix', 2.5]).evaluate();
+    // Type signature validation catches this before evaluate runs
+    expect(result.toString()).toMatchInlineSnapshot(
+      `IdentityMatrix(Error(ErrorCode("incompatible-type", "integer", "finite_real")))`
+    );
+  });
+});
+
+describe('ZeroMatrix', () => {
+  it('should create a 2×2 zero matrix', () => {
+    const result = ce.box(['ZeroMatrix', 2]).evaluate();
+    expect(result.toString()).toMatchInlineSnapshot(`[[0,0],[0,0]]`);
+  });
+
+  it('should create a 3×3 zero matrix', () => {
+    const result = ce.box(['ZeroMatrix', 3]).evaluate();
+    expect(result.toString()).toMatchInlineSnapshot(
+      `[[0,0,0],[0,0,0],[0,0,0]]`
+    );
+  });
+
+  it('should create a 2×3 zero matrix', () => {
+    const result = ce.box(['ZeroMatrix', 2, 3]).evaluate();
+    expect(result.toString()).toMatchInlineSnapshot(`[[0,0,0],[0,0,0]]`);
+  });
+
+  it('should create a 3×2 zero matrix', () => {
+    const result = ce.box(['ZeroMatrix', 3, 2]).evaluate();
+    expect(result.toString()).toMatchInlineSnapshot(`[[0,0],[0,0],[0,0]]`);
+  });
+
+  it('should return error for non-positive integer', () => {
+    const result = ce.box(['ZeroMatrix', 0]).evaluate();
+    expect(result.toString()).toMatchInlineSnapshot(
+      `Error("expected-positive-integer", "0")`
+    );
+  });
+});
+
+describe('OnesMatrix', () => {
+  it('should create a 2×2 ones matrix', () => {
+    const result = ce.box(['OnesMatrix', 2]).evaluate();
+    expect(result.toString()).toMatchInlineSnapshot(`[[1,1],[1,1]]`);
+  });
+
+  it('should create a 3×3 ones matrix', () => {
+    const result = ce.box(['OnesMatrix', 3]).evaluate();
+    expect(result.toString()).toMatchInlineSnapshot(
+      `[[1,1,1],[1,1,1],[1,1,1]]`
+    );
+  });
+
+  it('should create a 2×4 ones matrix', () => {
+    const result = ce.box(['OnesMatrix', 2, 4]).evaluate();
+    expect(result.toString()).toMatchInlineSnapshot(`[[1,1,1,1],[1,1,1,1]]`);
+  });
+
+  it('should create a 4×2 ones matrix', () => {
+    const result = ce.box(['OnesMatrix', 4, 2]).evaluate();
+    expect(result.toString()).toMatchInlineSnapshot(
+      `[[1,1],[1,1],[1,1],[1,1]]`
+    );
+  });
+
+  it('should return error for non-positive integer', () => {
+    const result = ce.box(['OnesMatrix', -1]).evaluate();
+    expect(result.toString()).toMatchInlineSnapshot(
+      `Error("expected-positive-integer", "-1")`
+    );
+  });
+});

@@ -499,6 +499,93 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
         return undefined;
       },
     },
+
+    // Creates an n×n identity matrix
+    IdentityMatrix: {
+      complexity: 8100,
+      signature: '(integer) -> matrix',
+      evaluate: (ops, { engine: ce }): BoxedExpression | undefined => {
+        const nExpr = ops[0].evaluate();
+        const n = nExpr.re;
+
+        if (n === undefined || !Number.isInteger(n) || n < 1)
+          return ce.error('expected-positive-integer', nExpr.toString());
+
+        const rows: BoxedExpression[] = [];
+        for (let i = 0; i < n; i++) {
+          const row: BoxedExpression[] = [];
+          for (let j = 0; j < n; j++) {
+            row.push(i === j ? ce.One : ce.Zero);
+          }
+          rows.push(ce.box(['List', ...row]));
+        }
+        return ce.box(['List', ...rows]);
+      },
+    },
+
+    // Creates an m×n matrix of zeros
+    ZeroMatrix: {
+      complexity: 8100,
+      signature: '(integer, integer?) -> matrix',
+      evaluate: (ops, { engine: ce }): BoxedExpression | undefined => {
+        const mExpr = ops[0].evaluate();
+        const m = mExpr.re;
+
+        if (m === undefined || !Number.isInteger(m) || m < 1)
+          return ce.error('expected-positive-integer', mExpr.toString());
+
+        // If only one argument, create m×m matrix
+        let n = m;
+        if (ops.length > 1) {
+          const nExpr = ops[1].evaluate();
+          n = nExpr.re ?? m;
+          if (!Number.isInteger(n) || n < 1)
+            return ce.error('expected-positive-integer', nExpr.toString());
+        }
+
+        const rows: BoxedExpression[] = [];
+        for (let i = 0; i < m; i++) {
+          const row: BoxedExpression[] = [];
+          for (let j = 0; j < n; j++) {
+            row.push(ce.Zero);
+          }
+          rows.push(ce.box(['List', ...row]));
+        }
+        return ce.box(['List', ...rows]);
+      },
+    },
+
+    // Creates an m×n matrix of ones
+    OnesMatrix: {
+      complexity: 8100,
+      signature: '(integer, integer?) -> matrix',
+      evaluate: (ops, { engine: ce }): BoxedExpression | undefined => {
+        const mExpr = ops[0].evaluate();
+        const m = mExpr.re;
+
+        if (m === undefined || !Number.isInteger(m) || m < 1)
+          return ce.error('expected-positive-integer', mExpr.toString());
+
+        // If only one argument, create m×m matrix
+        let n = m;
+        if (ops.length > 1) {
+          const nExpr = ops[1].evaluate();
+          n = nExpr.re ?? m;
+          if (!Number.isInteger(n) || n < 1)
+            return ce.error('expected-positive-integer', nExpr.toString());
+        }
+
+        const rows: BoxedExpression[] = [];
+        for (let i = 0; i < m; i++) {
+          const row: BoxedExpression[] = [];
+          for (let j = 0; j < n; j++) {
+            row.push(ce.One);
+          }
+          rows.push(ce.box(['List', ...row]));
+        }
+        return ce.box(['List', ...rows]);
+      },
+    },
   },
 ];
 

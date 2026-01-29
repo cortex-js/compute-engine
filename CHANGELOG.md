@@ -90,6 +90,12 @@
     - Symbolic support: `[[a,b],[c,d]] + [[1,2],[3,4]]` evaluates correctly
     - Proper dimension validation with `incompatible-dimensions` errors
 
+  - **Matrix Construction Functions**: Added convenience functions for creating
+    common matrices:
+    - `IdentityMatrix(n)`: Creates an n×n identity matrix
+    - `ZeroMatrix(m, n?)`: Creates an m×n matrix of zeros (square if n omitted)
+    - `OnesMatrix(m, n?)`: Creates an m×n matrix of ones (square if n omitted)
+
   - **Diagonal function**: Now fully implemented with bidirectional behavior:
     - Vector → Matrix: Creates a diagonal matrix from a vector
       (`Diagonal([1,2,3])` → 3×3 diagonal matrix)
