@@ -50,6 +50,16 @@
   - `1 + cot²(x)` → `csc²(x)` and `csc²(x) - 1` → `cot²(x)`
   - `a·sin²(x) + a·cos²(x)` → `a` (with coefficient)
 
+- **Trigonometric Equation Solving**: The `solve()` method now handles basic
+  trigonometric equations:
+  - `sin(x) = a` → `x = arcsin(a)` and `x = π - arcsin(a)` (two solutions)
+  - `cos(x) = a` → `x = arccos(a)` and `x = -arccos(a)` (two solutions)
+  - `tan(x) = a` → `x = arctan(a)` (one solution per period)
+  - `cot(x) = a` → `x = arccot(a)`
+  - Supports coefficient form: `a·sin(x) + b = 0`
+  - Domain validation: returns no solutions when |a| > 1 for sin/cos
+  - Automatic deduplication of equivalent solutions (e.g., `cos(x) = 1` → single solution `0`)
+
 - **([#133](https://github.com/cortex-js/compute-engine/issues/133)) Element-based
   Indexing Sets for Sum/Product**: Added support for `\in` notation in summation
   and product subscripts:

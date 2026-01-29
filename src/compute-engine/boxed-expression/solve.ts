@@ -332,6 +332,187 @@ export const UNIVARIATE_ROOTS: Rule[] = [
     useVariations: true,
     condition: filter,
   },
+
+  //
+  // Trigonometric equations
+  //
+  // Note: These return principal values only. For general solutions,
+  // add 2πn for sin/cos or πn for tan (where n ∈ ℤ).
+  //
+
+  // a·sin(x) + b = 0  =>  x = arcsin(-b/a)
+  // Valid when -1 ≤ -b/a ≤ 1
+  {
+    match: ['Add', ['Multiply', '__a', ['Sin', '_x']], '__b'],
+    replace: ['Arcsin', ['Divide', ['Negate', '__b'], '__a']],
+    useVariations: true,
+    condition: (sub) => {
+      if (!filter(sub)) return false;
+      // Check that -b/a is in [-1, 1] for real solutions
+      const a = sub.__a;
+      const b = sub.__b;
+      if (!a || a.is(0)) return false;
+      const ratio = b.div(a).neg();
+      const val = ratio.numericValue;
+      if (val === null) return true; // Allow symbolic ratios
+      if (typeof val === 'number') return Math.abs(val) <= 1;
+      return true;
+    },
+  },
+
+  // Second solution for sin: x = π - arcsin(-b/a)
+  {
+    match: ['Add', ['Multiply', '__a', ['Sin', '_x']], '__b'],
+    replace: ['Subtract', 'Pi', ['Arcsin', ['Divide', ['Negate', '__b'], '__a']]],
+    useVariations: true,
+    condition: (sub) => {
+      if (!filter(sub)) return false;
+      const a = sub.__a;
+      const b = sub.__b;
+      if (!a || a.is(0)) return false;
+      const ratio = b.div(a).neg();
+      const val = ratio.numericValue;
+      if (val === null) return true;
+      if (typeof val === 'number') return Math.abs(val) <= 1;
+      return true;
+    },
+  },
+
+  // sin(x) + b = 0  =>  x = arcsin(-b)  (when a = 1)
+  {
+    match: ['Add', ['Sin', '_x'], '__b'],
+    replace: ['Arcsin', ['Negate', '__b']],
+    useVariations: true,
+    condition: (sub) => {
+      if (!filter(sub)) return false;
+      const b = sub.__b;
+      const val = b.numericValue;
+      if (val === null) return true;
+      if (typeof val === 'number') return Math.abs(val) <= 1;
+      return true;
+    },
+  },
+
+  // Second solution for sin(x) + b = 0: x = π - arcsin(-b)
+  {
+    match: ['Add', ['Sin', '_x'], '__b'],
+    replace: ['Subtract', 'Pi', ['Arcsin', ['Negate', '__b']]],
+    useVariations: true,
+    condition: (sub) => {
+      if (!filter(sub)) return false;
+      const b = sub.__b;
+      const val = b.numericValue;
+      if (val === null) return true;
+      if (typeof val === 'number') return Math.abs(val) <= 1;
+      return true;
+    },
+  },
+
+  // a·cos(x) + b = 0  =>  x = arccos(-b/a)
+  // Valid when -1 ≤ -b/a ≤ 1
+  {
+    match: ['Add', ['Multiply', '__a', ['Cos', '_x']], '__b'],
+    replace: ['Arccos', ['Divide', ['Negate', '__b'], '__a']],
+    useVariations: true,
+    condition: (sub) => {
+      if (!filter(sub)) return false;
+      const a = sub.__a;
+      const b = sub.__b;
+      if (!a || a.is(0)) return false;
+      const ratio = b.div(a).neg();
+      const val = ratio.numericValue;
+      if (val === null) return true;
+      if (typeof val === 'number') return Math.abs(val) <= 1;
+      return true;
+    },
+  },
+
+  // Second solution for cos: x = -arccos(-b/a)  (since cos(-x) = cos(x))
+  {
+    match: ['Add', ['Multiply', '__a', ['Cos', '_x']], '__b'],
+    replace: ['Negate', ['Arccos', ['Divide', ['Negate', '__b'], '__a']]],
+    useVariations: true,
+    condition: (sub) => {
+      if (!filter(sub)) return false;
+      const a = sub.__a;
+      const b = sub.__b;
+      if (!a || a.is(0)) return false;
+      const ratio = b.div(a).neg();
+      const val = ratio.numericValue;
+      if (val === null) return true;
+      if (typeof val === 'number') return Math.abs(val) <= 1;
+      return true;
+    },
+  },
+
+  // cos(x) + b = 0  =>  x = arccos(-b)  (when a = 1)
+  {
+    match: ['Add', ['Cos', '_x'], '__b'],
+    replace: ['Arccos', ['Negate', '__b']],
+    useVariations: true,
+    condition: (sub) => {
+      if (!filter(sub)) return false;
+      const b = sub.__b;
+      const val = b.numericValue;
+      if (val === null) return true;
+      if (typeof val === 'number') return Math.abs(val) <= 1;
+      return true;
+    },
+  },
+
+  // Second solution for cos(x) + b = 0: x = -arccos(-b)
+  {
+    match: ['Add', ['Cos', '_x'], '__b'],
+    replace: ['Negate', ['Arccos', ['Negate', '__b']]],
+    useVariations: true,
+    condition: (sub) => {
+      if (!filter(sub)) return false;
+      const b = sub.__b;
+      const val = b.numericValue;
+      if (val === null) return true;
+      if (typeof val === 'number') return Math.abs(val) <= 1;
+      return true;
+    },
+  },
+
+  // a·tan(x) + b = 0  =>  x = arctan(-b/a)
+  // Tan has no domain restriction for the ratio
+  {
+    match: ['Add', ['Multiply', '__a', ['Tan', '_x']], '__b'],
+    replace: ['Arctan', ['Divide', ['Negate', '__b'], '__a']],
+    useVariations: true,
+    condition: (sub) => {
+      if (!filter(sub)) return false;
+      return !sub.__a.is(0);
+    },
+  },
+
+  // tan(x) + b = 0  =>  x = arctan(-b)  (when a = 1)
+  {
+    match: ['Add', ['Tan', '_x'], '__b'],
+    replace: ['Arctan', ['Negate', '__b']],
+    useVariations: true,
+    condition: filter,
+  },
+
+  // a·cot(x) + b = 0  =>  x = arccot(-b/a)
+  {
+    match: ['Add', ['Multiply', '__a', ['Cot', '_x']], '__b'],
+    replace: ['Arccot', ['Divide', ['Negate', '__b'], '__a']],
+    useVariations: true,
+    condition: (sub) => {
+      if (!filter(sub)) return false;
+      return !sub.__a.is(0);
+    },
+  },
+
+  // cot(x) + b = 0  =>  x = arccot(-b)
+  {
+    match: ['Add', ['Cot', '_x'], '__b'],
+    replace: ['Arccot', ['Negate', '__b']],
+    useVariations: true,
+    condition: filter,
+  },
 ];
 
 /**
@@ -626,7 +807,7 @@ function validateRoots(
   x: string,
   roots: ReadonlyArray<BoxedExpression>
 ): BoxedExpression[] {
-  return roots.filter((root) => {
+  const validRoots = roots.filter((root) => {
     // Evaluate the expression at the root
     const value = expr.subs({ [x]: root }).canonical.evaluate();
     if (value === null) return false;
@@ -638,4 +819,15 @@ function validateRoots(
     // The former accounts for tolerance, the latter does not
     return value.isEqual(0);
   });
+
+  // Deduplicate roots (e.g., arccos(1) and -arccos(1) both equal 0)
+  const uniqueRoots: BoxedExpression[] = [];
+  for (const root of validRoots) {
+    const isDuplicate = uniqueRoots.some(
+      (existing) => existing.isSame(root) || existing.isEqual(root)
+    );
+    if (!isDuplicate) uniqueRoots.push(root);
+  }
+
+  return uniqueRoots;
 }

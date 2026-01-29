@@ -319,3 +319,96 @@ describe('SOLVING SQRT AND LN EQUATIONS', () => {
     expect(result?.[0]).toMatch(/^7\.389/);
   });
 });
+
+// Tests for trigonometric equations
+describe('SOLVING TRIGONOMETRIC EQUATIONS', () => {
+  test('should solve sin(x) = 0', () => {
+    const e = expr('\\sin(x) = 0');
+    const result = e.solve('x')?.map((x) => x.json);
+    // Principal solutions: 0 and π
+    expect(result).toMatchInlineSnapshot(`
+      [
+        0,
+        Pi,
+      ]
+    `);
+  });
+
+  test('should solve sin(x) = 1/2', () => {
+    const e = expr('\\sin(x) = 1/2');
+    const result = e.solve('x')?.map((x) => x.N().json);
+    // Principal solutions: π/6 ≈ 0.5236 and 5π/6 ≈ 2.618
+    expect(result?.length).toBe(2);
+    expect((result?.[0] as { num: string }).num).toMatch(/^0\.523/);
+  });
+
+  test('should solve cos(x) = 0', () => {
+    const e = expr('\\cos(x) = 0');
+    const result = e.solve('x')?.map((x) => x.N().json);
+    // Principal solutions: π/2 ≈ 1.571 and -π/2 ≈ -1.571
+    expect(result?.length).toBe(2);
+    expect((result?.[0] as { num: string }).num).toMatch(/^1\.570/);
+  });
+
+  test('should solve cos(x) = 1', () => {
+    const e = expr('\\cos(x) = 1');
+    const result = e.solve('x')?.map((x) => x.json);
+    // Principal solution: 0 (deduplicated from arccos(1) and -arccos(1))
+    expect(result).toMatchInlineSnapshot(`
+      [
+        0,
+      ]
+    `);
+  });
+
+  test('should solve tan(x) = 1', () => {
+    const e = expr('\\tan(x) = 1');
+    const result = e.solve('x')?.map((x) => x.N().json);
+    // Principal solution: π/4 ≈ 0.7854
+    expect(result?.length).toBe(1);
+    expect((result?.[0] as { num: string }).num).toMatch(/^0\.785/);
+  });
+
+  test('should solve tan(x) = 0', () => {
+    const e = expr('\\tan(x) = 0');
+    const result = e.solve('x')?.map((x) => x.json);
+    // Principal solution: 0
+    expect(result).toMatchInlineSnapshot(`
+      [
+        0,
+      ]
+    `);
+  });
+
+  test('should solve 2sin(x) - 1 = 0', () => {
+    const e = expr('2\\sin(x) - 1 = 0');
+    const result = e.solve('x')?.map((x) => x.N().json);
+    // Same as sin(x) = 1/2
+    expect(result?.length).toBe(2);
+    expect((result?.[0] as { num: string }).num).toMatch(/^0\.523/);
+  });
+
+  test('should solve 3cos(x) + 3 = 0', () => {
+    const e = expr('3\\cos(x) + 3 = 0');
+    const result = e.solve('x')?.map((x) => x.N().json);
+    // cos(x) = -1, solution: π ≈ 3.1416 and -π
+    expect(result?.length).toBe(2);
+    // Check one is π and one is -π
+    const values = result?.map((r) => parseFloat((r as { num: string }).num));
+    expect(values?.some((v) => Math.abs(v - Math.PI) < 0.001)).toBe(true);
+  });
+
+  test('should return empty for sin(x) = 2 (no real solution)', () => {
+    const e = expr('\\sin(x) = 2');
+    const result = e.solve('x');
+    // sin(x) can only be in [-1, 1]
+    expect(result).toEqual([]);
+  });
+
+  test('should return empty for cos(x) = -2 (no real solution)', () => {
+    const e = expr('\\cos(x) = -2');
+    const result = e.solve('x');
+    // cos(x) can only be in [-1, 1]
+    expect(result).toEqual([]);
+  });
+});
