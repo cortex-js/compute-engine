@@ -20,6 +20,18 @@
   return 0 (the derivative is 0 almost everywhere). Also fixed a bug where
   derivative formulas that evaluate to 0 weren't recognized due to a falsy check.
 
+- **Inverse Trig Integrals**: Fixed incorrect integration formulas for `arcsin`,
+  `arccos`, and `arctan`. The previous formulas were completely wrong. Correct:
+  - `∫ arcsin(x) dx = x·arcsin(x) + √(1-x²)`
+  - `∫ arccos(x) dx = x·arccos(x) - √(1-x²)`
+  - `∫ arctan(x) dx = x·arctan(x) - (1/2)·ln(1+x²)`
+
+- **Erfc Derivative**: Fixed incorrect derivative formula for `erfc(x)`. Now
+  correctly returns `-2/√π · e^(-x²)` (the negative of the `erf` derivative).
+
+- **LogGamma Derivative**: Added derivative rule for `LogGamma(x)` which returns
+  `Digamma(x)` (the digamma/psi function).
+
 - **([#168](https://github.com/cortex-js/compute-engine/issues/168))
   Absolute Value**: Fixed parsing of nested absolute value expressions that
   start with a double bar (e.g. `||3-5|-4|`), which previously produced an
@@ -94,10 +106,11 @@
 
 - **([#242](https://github.com/cortex-js/compute-engine/issues/242))
   Solve**: Fixed `solve()` returning an empty array for equations with variables
-  in the numerator of a fraction. For example, `F = 3g/h` solved for `g` now
-  correctly returns `Fh/3` instead of an empty array. The solver now clears
-  denominators before applying solve rules, enabling it to handle expressions
-  like `a + bx/c = 0`.
+  in fractions. For example, `F = 3g/h` solved for `g` now correctly returns
+  `Fh/3` instead of an empty array. The solver now clears denominators before
+  applying solve rules, enabling it to handle expressions like `a + bx/c = 0`.
+  Also added support for solving equations where the variable is in the
+  denominator (e.g., `a/x = b` now returns `x = a/b`).
 
 - **([#220](https://github.com/cortex-js/compute-engine/issues/220))
   Solve**: Fixed `solve()` returning an empty array for equations involving

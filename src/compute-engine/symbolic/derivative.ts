@@ -121,12 +121,13 @@ const DERIVATIVES_TABLE = {
     ],
     ['Beta', '_'],
   ],
+  // d/dx erfc(x) = -d/dx erf(x) = -2/√π * e^(-x²)
   Erfc: [
-    'Multiply',
-    ['Negate', ['Erfc', '_']],
-    ['Exp', ['Negate', ['Power', '_', 2]]],
-    ['Power', '_', -1],
+    'Negate',
+    ['Multiply', ['Divide', 2, ['Sqrt', 'Pi']], ['Exp', ['Negate', ['Square', '_']]]],
   ],
+  // d/dx ln(Γ(x)) = ψ(x) (digamma function)
+  LogGamma: ['Digamma', '_'],
   LambertW: [
     'Multiply',
     ['Power', '_', -1],

@@ -945,40 +945,46 @@ const INTEGRATION_RULES: Rule[] = [
     ],
     condition: filter,
   },
-  // \arctan(ax + b) -> \frac{1}{a} \ln(\sec(ax + b) + \tan(ax + b))
+  // \arctan(ax + b) -> (1/a) * [(ax+b)*arctan(ax+b) - (1/2)*ln(1+(ax+b)^2)]
   {
     match: ['Arctan', ['Add', ['Multiply', '_a', '_x'], '__b']],
     replace: [
       'Divide',
       [
-        'Ln',
+        'Subtract',
         [
-          'Add',
-          ['Sec', ['Add', ['Multiply', '_a', '_x'], '__b']],
-          ['Tan', ['Add', ['Multiply', '_a', '_x'], '__b']],
+          'Multiply',
+          ['Add', ['Multiply', '_a', '_x'], '__b'],
+          ['Arctan', ['Add', ['Multiply', '_a', '_x'], '__b']],
+        ],
+        [
+          'Multiply',
+          ['Rational', 1, 2],
+          ['Ln', ['Add', 1, ['Power', ['Add', ['Multiply', '_a', '_x'], '__b'], 2]]],
         ],
       ],
       '_a',
     ],
     condition: filter,
   },
-  // \arccos(ax + b) -> \frac{1}{a} \ln(ax + b + \sqrt{(ax + b)^2 - 1})
+  // \arccos(ax + b) -> (1/a) * [(ax+b)*arccos(ax+b) - sqrt(1-(ax+b)^2)]
   {
     match: ['Arccos', ['Add', ['Multiply', '_a', '_x'], '__b']],
     replace: [
       'Divide',
       [
-        'Ln',
+        'Subtract',
         [
-          'Add',
+          'Multiply',
           ['Add', ['Multiply', '_a', '_x'], '__b'],
+          ['Arccos', ['Add', ['Multiply', '_a', '_x'], '__b']],
+        ],
+        [
+          'Sqrt',
           [
-            'Sqrt',
-            [
-              'Subtract',
-              ['Power', ['Add', ['Multiply', '_a', '_x'], '__b'], 2],
-              1,
-            ],
+            'Subtract',
+            1,
+            ['Power', ['Add', ['Multiply', '_a', '_x'], '__b'], 2],
           ],
         ],
       ],
@@ -986,23 +992,24 @@ const INTEGRATION_RULES: Rule[] = [
     ],
     condition: filter,
   },
-  // \arcsin(ax + b) -> \frac{1}{a} \ln(ax + b + \sqrt{1 - (ax + b)^2})
+  // \arcsin(ax + b) -> (1/a) * [(ax+b)*arcsin(ax+b) + sqrt(1-(ax+b)^2)]
   {
     match: ['Arcsin', ['Add', ['Multiply', '_a', '_x'], '__b']],
     replace: [
       'Divide',
       [
-        'Ln',
+        'Add',
         [
-          'Add',
+          'Multiply',
           ['Add', ['Multiply', '_a', '_x'], '__b'],
+          ['Arcsin', ['Add', ['Multiply', '_a', '_x'], '__b']],
+        ],
+        [
+          'Sqrt',
           [
-            'Sqrt',
-            [
-              'Subtract',
-              1,
-              ['Power', ['Add', ['Multiply', '_a', '_x'], '__b'], 2],
-            ],
+            'Subtract',
+            1,
+            ['Power', ['Add', ['Multiply', '_a', '_x'], '__b'], 2],
           ],
         ],
       ],

@@ -154,7 +154,7 @@ describe('Trigonometric derivatives', () => {
 
   it('d/dx cot(x) = -csc(x)^2', () => {
     expect(parse('D(\\cot(x), x)').evaluate().toString()).toMatchInlineSnapshot(
-      `-csc(x)^2`
+      `-(csc(x)^2)`
     );
   });
 });
@@ -169,7 +169,7 @@ describe('Inverse trigonometric derivatives', () => {
   it('d/dx arccos(x) = -1/sqrt(1-x^2)', () => {
     expect(
       parse('D(\\arccos(x), x)').evaluate().toString()
-    ).toMatchInlineSnapshot(`-1 / sqrt(1 - x^2)`);
+    ).toMatchInlineSnapshot(`-(1 / sqrt(1 - x^2))`);
   });
 
   it('d/dx arctan(x) = 1/(1+x^2)', () => {
@@ -207,7 +207,7 @@ describe('Hyperbolic function derivatives', () => {
   it('d/dx coth(x) = -csch(x)^2', () => {
     expect(
       parse('D(\\coth(x), x)').evaluate().toString()
-    ).toMatchInlineSnapshot(`-csch(x)^2`);
+    ).toMatchInlineSnapshot(`-(csch(x)^2)`);
   });
 });
 
@@ -271,6 +271,32 @@ describe('Logarithmic and exponential derivatives', () => {
   it('d/dx e^x = e^x', () => {
     expect(parse('D(e^x, x)').evaluate().toString()).toMatchInlineSnapshot(
       `e^x`
+    );
+  });
+});
+
+describe('Step function derivatives', () => {
+  it('d/dx floor(x) = 0', () => {
+    expect(
+      parse('D(\\lfloor x \\rfloor, x)').evaluate().toString()
+    ).toMatchInlineSnapshot(`0`);
+  });
+
+  it('d/dx ceil(x) = 0', () => {
+    expect(
+      parse('D(\\lceil x \\rceil, x)').evaluate().toString()
+    ).toMatchInlineSnapshot(`0`);
+  });
+
+  it('d/dx |x| = sign(x)', () => {
+    expect(parse('D(|x|, x)').evaluate().toString()).toMatchInlineSnapshot(
+      `Sign(x)`
+    );
+  });
+
+  it('d/dx |2x+1| = 2*sign(2x+1)', () => {
+    expect(parse('D(|2x+1|, x)').evaluate().toString()).toMatchInlineSnapshot(
+      `2Sign(2x + 1)`
     );
   });
 });
