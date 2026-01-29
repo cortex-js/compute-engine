@@ -91,11 +91,19 @@
     - `["Interval", ["Open", 0], 5]` → iterates 1, 2, 3, 4, 5 (excludes 0)
     - `["Interval", 1, ["Open", 6]]` → iterates 1, 2, 3, 4, 5 (excludes 6)
 
+  - **Infinite series with Element notation**: Known infinite integer sets are
+    converted to their equivalent Limits form and iterated (capped at 1,000,000):
+    - `NonNegativeIntegers` (ℕ₀) → iterates from 0, like `\sum_{n=0}^{\infty}`
+    - `PositiveIntegers` (ℤ⁺) → iterates from 1, like `\sum_{n=1}^{\infty}`
+    - Convergent series produce numeric approximations:
+      `\sum_{n \in \Z^+} \frac{1}{n^2}` → `≈1.6449` (close to π²/6)
+
   - **Non-enumerable domains stay symbolic**: When the domain cannot be enumerated
-    (unknown symbol, infinite set, or symbolic bounds), the expression now stays
-    symbolic instead of returning NaN:
+    (unknown symbol, non-iterable infinite set, or symbolic bounds), the expression
+    stays symbolic instead of returning NaN:
     - `\sum_{n \in S} n` with unknown `S` → stays as `["Sum", "n", ["Element", "n", "S"]]`
-    - `\sum_{n \in \N} n` with infinite set → stays symbolic
+    - `\sum_{n \in \Z} n` → stays symbolic (bidirectional, can't forward iterate)
+    - `\sum_{x \in \R} f(x)` → stays symbolic (non-countable)
     - `\sum_{n \in [1,a]} n` with symbolic bound → stays symbolic
     - Previously these would all return `NaN` with no explanation
 

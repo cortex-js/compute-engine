@@ -402,14 +402,12 @@ describe('EL-5: Non-enumerable domains stay symbolic', () => {
     expect(result.isNaN).not.toBe(true);
   });
 
-  test('sum over NonNegativeIntegers (infinite set) stays symbolic', () => {
-    const expr = ce.box(['Sum', 'n', ['Element', 'n', 'NonNegativeIntegers']]);
-    const result = expr.evaluate();
-    expect(result.operator).toBe('Sum');
-    expect(result.isNaN).not.toBe(true);
-  });
+  // EL-4: NonNegativeIntegers and PositiveIntegers can be converted to Limits
+  // and will iterate (capped at MAX_ITERATION), so they evaluate to numbers
+  // Other infinite sets (Integers, Reals) that can't be iterated stay symbolic
 
   test('sum over Integers (infinite set) stays symbolic', () => {
+    // Integers is bidirectional, cannot be converted to forward iteration
     const expr = ce.box(['Sum', 'n', ['Element', 'n', 'Integers']]);
     const result = expr.evaluate();
     expect(result.operator).toBe('Sum');
@@ -417,20 +415,18 @@ describe('EL-5: Non-enumerable domains stay symbolic', () => {
   });
 
   test('sum over Reals (infinite set) stays symbolic', () => {
+    // Reals is non-countable, cannot be iterated
     const expr = ce.box(['Sum', 'x', ['Element', 'x', 'Reals']]);
     const result = expr.evaluate();
     expect(result.operator).toBe('Sum');
     expect(result.isNaN).not.toBe(true);
   });
 
-  test('product over PositiveIntegers (infinite set) stays symbolic', () => {
-    const expr = ce.box([
-      'Product',
-      'k',
-      ['Element', 'k', 'PositiveIntegers'],
-    ]);
+  test('sum over NegativeIntegers (infinite set) stays symbolic', () => {
+    // NegativeIntegers goes in the negative direction, can't be forward iterated
+    const expr = ce.box(['Sum', 'n', ['Element', 'n', 'NegativeIntegers']]);
     const result = expr.evaluate();
-    expect(result.operator).toBe('Product');
+    expect(result.operator).toBe('Sum');
     expect(result.isNaN).not.toBe(true);
   });
 
@@ -449,6 +445,54 @@ describe('EL-5: Non-enumerable domains stay symbolic', () => {
     expect(result.operator).toBe('Sum');
     expect(result.isNaN).not.toBe(true);
   });
+});
+
+describe('EL-4: Infinite series with Element notation', () => {
+  // EL-4: NonNegativeIntegers and PositiveIntegers are converted to Limits form
+  // and iterated (capped at MAX_ITERATION), behaving like traditional bounds notation
+
+  test('sum over NonNegativeIntegers evaluates (converges to partial sum)', () => {
+    // Sum n from 0 to MAX_ITERATION - should give a numeric result (triangular number approximation)
+    // Note: This test verifies the behavior change, not the exact value
+    const expr = ce.box(['Sum', 'n', ['Element', 'n', 'NonNegativeIntegers']]);
+    const result = expr.evaluate();
+    // Should be a Number, not remain as Sum
+    expect(result.isNumber).toBe(true);
+    expect(result.operator).not.toBe('Sum');
+    expect(result.isNaN).not.toBe(true);
+  }, 15000); // Allow 15 seconds for iteration
+
+  test('product over PositiveIntegers evaluates (converges to partial product)', () => {
+    // Product k from 1 to MAX_ITERATION - should give a numeric result
+    const expr = ce.box([
+      'Product',
+      'k',
+      ['Element', 'k', 'PositiveIntegers'],
+    ]);
+    const result = expr.evaluate();
+    // Should be a Number, not remain as Product
+    expect(result.isNumber).toBe(true);
+    expect(result.operator).not.toBe('Product');
+    expect(result.isNaN).not.toBe(true);
+  }, 15000); // Allow 15 seconds for iteration
+
+  test('convergent series over NonNegativeIntegers gives reasonable approximation', () => {
+    // Sum 1/n^2 from 1 to infinity approaches π²/6 ≈ 1.6449
+    // Using PositiveIntegers to avoid division by zero
+    const expr = ce.box([
+      'Sum',
+      ['Power', 'n', -2],
+      ['Element', 'n', 'PositiveIntegers'],
+    ]);
+    const result = expr.evaluate();
+    expect(result.isNumber).toBe(true);
+    // Should be close to π²/6 ≈ 1.6449
+    // .re gives us the numeric value as a number
+    const value = result.re;
+    expect(typeof value).toBe('number');
+    expect(value).toBeGreaterThan(1.6);
+    expect(value).toBeLessThan(1.7);
+  }, 30000); // Allow 30 seconds for this computation
 });
 
 describe('PRODUCT', () => {

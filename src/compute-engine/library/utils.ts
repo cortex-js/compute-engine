@@ -4,6 +4,34 @@ import { MAX_ITERATION } from '../numerics/numeric';
 import { fromRange, reduceCollection } from './collections';
 import { extractFiniteDomainWithReason, ExtractDomainResult } from './logic-analysis';
 
+/**
+ * EL-4: Convert known infinite integer sets to their equivalent Limits bounds.
+ * Returns undefined if the set cannot be converted to a Limits form.
+ *
+ * Mappings:
+ * - NonNegativeIntegers (ℕ₀) → [0, ∞)
+ * - PositiveIntegers (ℤ⁺) → [1, ∞)
+ * - NegativeIntegers (ℤ⁻) → Not supported (would need negative direction)
+ * - Integers (ℤ) → Not supported (bidirectional)
+ * - Other sets (Reals, Complexes, etc.) → Not supported (non-integer)
+ */
+export function convertInfiniteSetToLimits(
+  domainSymbol: string
+): { lower: number; upper: number; isFinite: false } | undefined {
+  switch (domainSymbol) {
+    case 'NonNegativeIntegers':
+      // ℕ₀ = {0, 1, 2, 3, ...}
+      return { lower: 0, upper: MAX_ITERATION, isFinite: false };
+    case 'PositiveIntegers':
+      // ℤ⁺ = {1, 2, 3, ...}
+      return { lower: 1, upper: 1 + MAX_ITERATION, isFinite: false };
+    default:
+      // NegativeIntegers, Integers, Reals, Complexes, etc. cannot be
+      // converted to a simple forward iteration
+      return undefined;
+  }
+}
+
 export type IndexingSet = {
   index: string | undefined;
   lower: number;
@@ -476,6 +504,23 @@ function* reduceElementIndexingSets<T>(
       }
 
       if (domainResult.status === 'non-enumerable') {
+        // EL-4: Check if this is a known infinite integer set that can be
+        // converted to Limits form for iteration
+        if (
+          domainResult.reason === 'infinite-domain' &&
+          domainResult.domain?.symbol
+        ) {
+          const limits = convertInfiniteSetToLimits(domainResult.domain.symbol);
+          if (limits) {
+            // Convert to Limits and continue with iteration
+            limitsSets.push({
+              index: domainResult.variable,
+              ...limits,
+            });
+            continue; // Process next index, don't return early
+          }
+        }
+
         // Domain exists but cannot be enumerated - keep expression symbolic
         if (returnReason) {
           return {
