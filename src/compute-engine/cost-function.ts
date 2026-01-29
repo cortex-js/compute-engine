@@ -82,10 +82,15 @@ export function costFunction(expr: BoxedExpression): number {
   let nameCost = 2;
   if (['Add'].includes(name)) nameCost = 3;
   else if (['Subtract', 'Negate'].includes(name)) nameCost = 4;
-  else if (['Square', 'Sqrt'].includes(name)) nameCost = 5;
-  else if (['Power', 'Root'].includes(name))
+  else if (['Square', 'Sqrt', 'Abs'].includes(name)) nameCost = 5;
+  else if (name === 'Power')
     // We want 2q^2 to be less expensive than 2qq, so we ignore the exponent
     return costFunction(expr.ops![1]);
+  else if (name === 'Root') {
+    // Root(x^n, n) should have comparable cost to |x|
+    // Use a base cost similar to Sqrt
+    nameCost = 5;
+  }
   else if (['Multiply'].includes(name)) {
     // We want 2x to be less expensive than x + x, so if the first operand
     // is a small number coefficient, treat it as cheaper

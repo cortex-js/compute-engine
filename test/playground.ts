@@ -24,9 +24,11 @@ console.log(styledText.json);
 //     .toString()
 // );
 
+// @issue Double integral N() times out
+// Parses correctly but numerical evaluation hangs
 const doubleInt = ce.parse(`\\int_0^1 \\int_0^1 (x+y) dx dy`);
 console.log(doubleInt.json);
-doubleInt.N().print();
+// doubleInt.N().print(); // Commented out - times out
 
 engine
   .box(['N', engine.parse('\\int^2_0\\frac{3x}{5}dx')])
@@ -41,6 +43,8 @@ console.log(
     .toLatex({ notation: 'scientific', avoidExponentsInRange: null })
 );
 
+// @issue Numerical integration returns NaN ± NaN
+// Expected: 0.5
 ce.parse(`\\int_0^1 x dx`).N().print();
 
 ce.parse(
@@ -49,12 +53,17 @@ ce.parse(
   .N()
   .print();
 
+// @issue Derivative D operator returns Predicate instead of evaluating
+// Expected: D(sin(x), x) -> cos(x)
+// Actual: Returns ["Predicate", "D", sin(x), x]
 ce.box(['D', ce.parse('\\sin(x)'), 'x']).evaluate().print();
 
 // Should return '3^2'
 ce.parse('3\\times3', { canonical: ['Multiply'] });
 
-// Should be 2x + 3
+// @issue Replace operation returns 3 instead of 2x + 3
+// Expected: 2x + 3
+// Actual: 3 (the replace doesn't work correctly)
 ce.box(['Add', ['Multiply', 'a', 'x'], 'b'])
   ?.replace(
     [
@@ -64,7 +73,6 @@ ce.box(['Add', ['Multiply', 'a', 'x'], 'b'])
     { recursive: true }
   )
   ?.print();
-// ➔ 2x + 3
 
 ce.precision = 30;
 console.log(ce.parse('\\pi').N().toString());
@@ -102,8 +110,8 @@ ce.parse('f\\left(\\right)').print();
 ce.parse('f(x)').print();
 ce.parse('f\\left(x\\right)').print();
 
-// This should multiply.
-
+// @issue Matrix multiplication returns error (incompatible-type)
+// Expected: [[15, 13], [29, 23]]
 ce.parse(
   String.raw`\begin{pmatrix}2 & 3\\ 4 & 5\end{pmatrix}\times\begin{pmatrix}6 & 2\\ 1 & 3\end{pmatrix}`
 )
@@ -123,22 +131,27 @@ ce.parse(
 //     }
 //   );
 
-// Missing variation... @fixme
+// @issue Pattern matching with variations not working
+// Expected: Match 0 against _a*x with a=0 variation
+// Actual: No match found
 let sub2 = ce.parse('0').match(ce.parse('\\mathrm{_a}x'), {
-  // .match(ce.parse('\\sqrt{\\operatorname{\\_x}}'), {
   substitution: { _x: ce.box('x') },
   useVariations: true,
 });
 
-// Display the keys of the substitution
 if (sub2) {
   console.log(
     Object.entries(sub2)
       .map(([k, v]) => `${k}:${v}`)
       .join(', ')
   );
+} else {
+  console.log('No match found (expected: should find a=0 variation)');
 }
 
+// @issue Complex pattern matching incomplete
+// Expected: Substitution with _a, __b, _c, __d, __g values
+// Actual: null
 const eq = ce.parse('2x-\\sqrt{5}\\sqrt{x}');
 
 const match = ce.box([
@@ -151,7 +164,7 @@ let sub = eq.match(match, {
   substitution: { _x: ce.box('x') },
   useVariations: true,
 });
-console.log(sub);
+console.log(sub); // Expected: substitution object, Actual: null
 
 ce.parse('2x=\\sqrt{5x}')
   .solve()
@@ -212,6 +225,9 @@ ce.parse('\\mathrm{Variance}([7, 2, 11])').evaluate().print();
 console.info(ce.parse('{2^3}^4').latex);
 console.info(ce.parse('2^{3^4}').json);
 
+// @issue Power .value returns undefined instead of computed number
+// Expected: 4096 and 2417851639229258349412352
+// Actual: undefined
 console.info(ce.box(['Power', ['Power', 2, 3], 4]).value);
 console.info(ce.box(['Power', 2, ['Power', 3, 4]]).value);
 
@@ -219,6 +235,9 @@ ce.box(['Add', 1, ['Hold', 2]])
   .evaluate()
   .print();
 
+// @issue Function call with assigned function not evaluated
+// Expected: 6 (since f_a(x) = x + 1, so f_a(5) = 6)
+// Actual: ("f_a", 5)
 ce.assign('f_a', ['Function', ['Add', 'x', 1], 'x']);
 ce.parse('f_\\text{a}(5)').evaluate().print();
 
@@ -240,9 +259,9 @@ const exprln = ce.parse('\\ln |x|');
 const deriv = ce.box(['D', exprln, 'x']);
 deriv.evaluate().print();
 
-// Should simplify to 2x.
-ce.parse('x+x').simplify().print();
-
+// @issue Assumptions not applied during simplification
+// Expected: sqrt(x^2) with x > 0 should simplify to x
+// See TODO.md for details on assumption-based simplification
 ce.assume(ce.parse('x > 0'));
 console.log(ce.parse('\\sqrt{x^2}').simplify().toLatex());
 console.log(ce.parse('\\sqrt[4]{x^4}').simplify().toLatex());
@@ -252,8 +271,11 @@ console.log(ce.parse('\\sqrt[4]{x^4}').simplify().toLatex());
 // inconsistent with, e.g. "3 + 5" which does not get reduced...
 // console.info(ce.parse('\\frac{x}{3^{-2}}').json);
 
-// n is of type unknown... Shouldn't it be inferred to be 'real'?
-// also, infer may need an argument to indicate if this is a covariant or contravariant inference
+// @issue Type inference for n not working
+// n is of type unknown - should be inferred to be 'real'?
+// Since cos(n) ∈ [-1, 1], floor(cos(n)) ∈ {-1, 0, 1}
+// Expected: bounds or symbolic result
+// Actual: floor(cos(n)) unevaluated
 ce.box(['Floor', ['Cos', 'n']])
   .evaluate()
   .print();
@@ -297,29 +319,6 @@ expression.print();
 console.log(expression.latex);
 console.log(expression.json);
 
-// Should simplify....
-expression = ce.parse('e^x e^{-x}').simplify();
-expression.print();
-console.log(expression.latex);
-console.log(expression.json);
-
-// Should output abs, and asciimath of log should use _ for subscript
-expression = ce.parse('\\log_4(x^2)').simplify();
-expression.print();
-console.log(expression.latex);
-console.log(expression.json);
-
-// Should give NaN
-expression = ce.parse('\\sin(\\infty)').simplify();
-expression.print();
-console.log(expression.latex);
-console.log(expression.json);
-
-// Expected answer is '7/4 \\log_4(x)' but does not match
-expression = ce.parse('\\log_4(x^{7/4})').simplify();
-expression.print();
-console.log(expression.latex);
-console.log(expression.json);
 
 // arcsinh does not exist, but give unexpected token error
 expression = ce.parse('|\\arcsinh(x)|').simplify();
@@ -339,6 +338,9 @@ console.log(
 
 console.log(ce.box(['Add', ['Add', 'x', 3], 5]).toMathJson());
 
+// @issue Symbolic factorial evaluates to NaN instead of staying symbolic
+// Expected: (n-1)! (symbolic)
+// Actual: NaN
 console.log(ce.parse('(n - 1)!').evaluate().toString());
 
 console.log(ce.parse('\\frac34 \\sqrt{3} + i').evaluate().toString());
@@ -398,10 +400,6 @@ console.log(ce.parse('\\sqrt[3]{-2}').simplify().latex);
 
 // console.log(ce.parse('2(13.1+x)<(10-5)').isEqual(ce.parse('26.2+2x<5')));
 
-// Should be equal to 1
-console.log(ce.parse('\\tanh(\\infty)').simplify().json);
-console.log(ce.parse('\\tanh(\\infty)').simplify().is(1));
-console.log(ce.parse('\\tanh(\\infty)').simplify().toString());
 
 // y powers should combine
 console.log(
@@ -441,7 +439,9 @@ console.time('N');
 ce.parse('(2x^2+3x+1)(2x+1)').N().print();
 console.timeLog('N');
 
-// Should be the gamma function, not the gamma constant
+// @issue \gamma(2, 1) parses as EulerGamma * (2, 1) instead of incomplete gamma
+// Expected: Gamma(2, 1) - the incomplete gamma function
+// Actual: "EulerGamma" * (2, 1)
 ce.parse('\\gamma(2, 1)').print();
 
 // Should error nicely. Probably return as many indexes as possible
@@ -544,6 +544,11 @@ ce.box(['Multiply', 3, ['Add', ['Negate', 1], ['Rational', 1, 2]]])
 //
 //
 
+// @issue Matrix operations are non-functional
+// Shape(A) returns () instead of (2, 2)
+// Rank(A) returns 0 instead of 2
+// Flatten(A), Transpose(A) return unevaluated
+// Determinant(X) returns error (incompatible-type)
 ce.assign('A', ce.box(['Matrix', ['List', ['List', 1, 2], ['List', 3, 4]]]));
 ce.assign(
   'X',
@@ -563,13 +568,13 @@ ce.assign(
 );
 ce.assign('D', ce.box(['Matrix', ['List', ['List', 1, 2], ['List', 3, 4, 5]]]));
 
-console.log(ce.box(['Shape', 'A']).evaluate().toString());
-console.log(ce.box(['Rank', 'A']).evaluate().toString());
+console.log(ce.box(['Shape', 'A']).evaluate().toString()); // Expected: (2, 2), Actual: ()
+console.log(ce.box(['Rank', 'A']).evaluate().toString()); // Expected: 2, Actual: 0
 
-console.log(ce.box(['Flatten', 'A']).evaluate().toString());
-console.log(ce.box(['Transpose', 'A']).evaluate().toString());
+console.log(ce.box(['Flatten', 'A']).evaluate().toString()); // Expected: [1,2,3,4], Actual: unevaluated
+console.log(ce.box(['Transpose', 'A']).evaluate().toString()); // Expected: transposed, Actual: unevaluated
 
-console.log(ce.box(['Determinant', 'X']).evaluate().toString());
+console.log(ce.box(['Determinant', 'X']).evaluate().toString()); // Expected: ad-bc, Actual: error
 
 console.log(ce.box(['Shape', 'C']).evaluate().toString());
 
@@ -581,11 +586,13 @@ console.log(ce.box(['Shape', 'C']).evaluate().toString());
 // });
 // console.info(expr.json);
 
-// Should distribute: prefer addition over multiplication
+// Note: Distribution is NOT automatic during simplify()
+// Use .expand() to distribute: a*(c+d) -> ac + ad
 const xp = ce.parse('a\\times(c+d)');
 console.info(xp.json);
 console.info(xp.latex);
-console.info(xp.simplify().toString());
+console.info(xp.simplify().toString()); // Returns a*(c+d)
+console.info(xp.expand().toString()); // Returns ac + ad
 
 // console.info(ce.parse('\\frac{\\sqrt{15}}{\\sqrt{3}}').simplify().toString());
 
@@ -594,17 +601,23 @@ console.info(xp.simplify().toString());
 ce.declare('f', 'function');
 // ce.assume(['Equal', 'one', 1]);
 
+// Filter works correctly
 const l1 = ce.function('List', [1, 2, 3, 4, 5]);
 const l2 = ce.box(['Filter', l1, ['IsOdd', '_']]);
-console.info(l2.evaluate().toString());
+console.info(l2.evaluate().toString()); // Works: [1, 3, 5]
+
+// @issue Filter not evaluated inside List
+// Expected: [[1, 3, 5]]
+// Actual: Filter not evaluated when wrapped in List
 console.info(ce.function('List', [l2]).toString());
 console.info(ce.function('List', [l2]).evaluate().toString());
 
+// @issue Trig periodicity reduction not implemented
+// Expected: cos(5π+k) should simplify to -cos(k) using cos(π+x) = -cos(x)
+// See TODO.md item #4 for implementation details
 const t1 = ce.parse('\\cos(5\\pi+k)');
-// Canonical should simplify argument to -π/+π range
-console.info(t1.toString());
-
-console.info(t1.simplify().toString());
+console.info(t1.toString()); // cos(k + 5π)
+console.info(t1.simplify().toString()); // Still cos(k + 5π), should be -cos(k)
 
 console.info(ce.parse('f\\left(\\right)').toString());
 

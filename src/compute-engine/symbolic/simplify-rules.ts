@@ -435,6 +435,47 @@ export const SIMPLIFY_RULES: Rule[] = [
   },
 
   //
+  // Root Simplification Rules
+  //
+  // sqrt(x^2) -> |x| (general case)
+  {
+    match: ['Sqrt', ['Power', '_x', 2]],
+    replace: ['Abs', '_x'],
+  },
+  // sqrt(x^2) -> x when x is non-negative
+  {
+    match: ['Sqrt', ['Power', '_x', 2]],
+    replace: '_x',
+    condition: (ids) => ids._x.isNonNegative === true,
+  },
+  // sqrt(x^{2n}) -> |x|^n for positive integer n
+  {
+    match: ['Sqrt', ['Power', '_x', '_n']],
+    replace: ['Power', ['Abs', '_x'], ['Divide', '_n', 2]],
+    condition: (ids) => ids._n.isEven === true && ids._n.isPositive === true,
+  },
+  // Root(x^n, n) -> |x| when n is even (using function replacement)
+  (x): RuleStep | undefined => {
+    if (x.operator !== 'Root') return undefined;
+    const arg = x.op1;
+    const rootIndex = x.op2;
+    if (arg?.operator !== 'Power') return undefined;
+    const base = arg.op1;
+    const exponent = arg.op2;
+    // Check if exponent equals root index
+    if (!exponent.is(rootIndex)) return undefined;
+    // Even root: return |x|
+    if (rootIndex.isEven === true) {
+      return { value: x.engine.function('Abs', [base]), because: 'root(x^n, n) where n even' };
+    }
+    // Odd root or x >= 0: return x
+    if (rootIndex.isOdd === true || base.isNonNegative === true) {
+      return { value: base, because: 'root(x^n, n) where n odd' };
+    }
+    return undefined;
+  },
+
+  //
   // Power Combination Rules
   //
   // x^n * x^m -> x^{n+m} (combine powers with same base)
@@ -442,21 +483,24 @@ export const SIMPLIFY_RULES: Rule[] = [
     match: ['Multiply', ['Power', '_x', '_n'], ['Power', '_x', '_m']],
     replace: ['Power', '_x', ['Add', '_n', '_m']],
     condition: (ids) =>
-      // Base must be non-zero or sum of exponents must be non-negative
-      ids._x.isNotZero === true ||
+      // Base must be non-zero (positive or negative) or sum of exponents must be non-negative
+      ids._x.isPositive === true ||
+      ids._x.isNegative === true ||
       ids._n.add(ids._m).isNonNegative === true,
   },
   // x * x^n -> x^{n+1} (special case when first power is implicit 1)
   {
     match: ['Multiply', '_x', ['Power', '_x', '_n']],
     replace: ['Power', '_x', ['Add', '_n', 1]],
-    condition: (ids) => ids._x.isNotZero === true,
+    condition: (ids) =>
+      ids._x.isPositive === true || ids._x.isNegative === true,
   },
   // x^n * x -> x^{n+1} (special case when second power is implicit 1)
   {
     match: ['Multiply', ['Power', '_x', '_n'], '_x'],
     replace: ['Power', '_x', ['Add', '_n', 1]],
-    condition: (ids) => ids._x.isNotZero === true,
+    condition: (ids) =>
+      ids._x.isPositive === true || ids._x.isNegative === true,
   },
 
   //

@@ -492,19 +492,39 @@ function parseRule(
     },
   ];
   const canonical = options?.canonical ?? false;
+
+  // Push a clean scope that only inherits from the system scope (index 0),
+  // not from the global scope or user-defined scopes. This prevents user-defined
+  // symbols (like `x` used as a function name in `x(y+z)`) from interfering with
+  // rule parsing. The system scope contains all built-in definitions.
+  const systemScope = ce.contextStack[0]?.lexicalScope;
+  if (systemScope) {
+    ce.pushScope({ parent: systemScope, bindings: new Map() });
+  }
+
   const expr = ce.parse(rule);
+
   ce.latexDictionary = previousDictionary;
 
-  if (!expr.isValid || expr.operator !== 'Rule')
+  if (!expr.isValid || expr.operator !== 'Rule') {
+    if (systemScope) {
+      ce.popScope();
+    }
     throw new Error(
       `Invalid rule "${rule}"\n|   ${dewildcard(expr).toString()}\n|   A rule should be of the form:\n|   <match> -> <replace>; <condition>`
     );
+  }
 
   let [match, replace, condition] = expr.ops!;
 
   if (canonical) {
     match = match.canonical;
     replace = replace.canonical;
+  }
+
+  // Pop the clean scope AFTER canonicalization to avoid pollution
+  if (systemScope) {
+    ce.popScope();
   }
 
   // Check that all the wildcards in the replace also appear in the match
@@ -598,7 +618,16 @@ function boxRule(
     );
   }
 
-  ce.pushScope();
+  // Push a clean scope that only inherits from the system scope (index 0),
+  // not from the global scope or user-defined scopes. This prevents user-defined
+  // symbols (like `x` used as a function name in `x(y+z)`) from interfering with
+  // rule parsing. The system scope contains all built-in definitions.
+  const systemScope = ce.contextStack[0]?.lexicalScope;
+  if (systemScope) {
+    ce.pushScope({ parent: systemScope, bindings: new Map() });
+  } else {
+    ce.pushScope();
+  }
   const matchExpr = parseRulePart(ce, match, options);
   const replaceExpr = parseRulePart(ce, replace, options);
   ce.popScope();
