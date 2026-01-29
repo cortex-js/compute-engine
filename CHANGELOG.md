@@ -80,6 +80,17 @@
   - **Range support**: Works with `Range` expressions via `ce.box()`:
     `["Sum", "n", ["Element", "n", ["Range", 1, 5]]]` → `15`
 
+  - **Bracket notation as Range**: Two-element integer lists in bracket notation
+    `[a,b]` are now treated as Range(a,b) when used in Element context:
+    - `\sum_{n \in [1,5]} n` → `15` (iterates 1, 2, 3, 4, 5)
+    - Previously returned `6` (treated as List with just elements 1 and 5)
+
+  - **Interval support**: `Interval` expressions work with Element-based indexing,
+    including support for `Open` and `Closed` boundary markers:
+    - `["Interval", 1, 5]` → iterates integers 1, 2, 3, 4, 5 (closed bounds)
+    - `["Interval", ["Open", 0], 5]` → iterates 1, 2, 3, 4, 5 (excludes 0)
+    - `["Interval", 1, ["Open", 6]]` → iterates 1, 2, 3, 4, 5 (excludes 6)
+
 - **Linear Algebra Enhancements**: Improved tensor and matrix operations with
   better scalar handling, new functionality, and clearer error messages:
 

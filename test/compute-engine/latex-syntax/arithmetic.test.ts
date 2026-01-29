@@ -164,7 +164,8 @@ describe('SUM parsing', () => {
   });
 
   test('parsing of summation with element in List', () => {
-    // [1,5] is parsed as a List, not a Range
+    // [1,5] is parsed as a List (parsing unchanged), but evaluated as Range
+    // See EL-1: 2-element integer Lists are treated as Range in Element context
     expect(ce.parse(`\\sum_{n \\in [1,5]}n`)).toMatchInlineSnapshot(
       `["Sum", "n", ["Element", "n", ["List", 1, 5]]]`
     );
@@ -284,9 +285,15 @@ describe('SUM with Element indexing set', () => {
     ).toMatchInlineSnapshot(`14`);
   });
 
-  test('sum over List', () => {
-    // [1,5] parses as a List, not Range - evaluates to 1+5=6
-    expect(evaluate(`\\sum_{n \\in [1,5]}n`)).toMatchInlineSnapshot(`6`);
+  test('sum over List bracket notation', () => {
+    // EL-1: [1,5] is now treated as Range(1,5) in Element context
+    // so \sum_{n \in [1,5]}n = 1+2+3+4+5 = 15
+    expect(evaluate(`\\sum_{n \\in [1,5]}n`)).toMatchInlineSnapshot(`15`);
+  });
+
+  test('sum over List bracket notation with formula', () => {
+    // [1,4] treated as Range(1,4), sum of squares: 1+4+9+16 = 30
+    expect(evaluate(`\\sum_{n \\in [1,4]}n^2`)).toMatchInlineSnapshot(`30`);
   });
 
   test('sum over Range via box', () => {
@@ -325,6 +332,53 @@ describe('SUM with Element indexing set', () => {
     const latex = parsed.latex;
     const reparsed = ce.parse(latex);
     expect(reparsed.json).toEqual(parsed.json);
+  });
+
+  // EL-6: Interval support with Open/Closed boundaries
+  test('sum over closed Interval via box', () => {
+    // Closed interval [1, 5] → iterates 1, 2, 3, 4, 5
+    const expr = ce.box(['Sum', 'n', ['Element', 'n', ['Interval', 1, 5]]]);
+    expect(expr.evaluate().json).toBe(15);
+  });
+
+  test('sum over half-open Interval (open start) via box', () => {
+    // Interval (0, 5] → iterates 1, 2, 3, 4, 5
+    const expr = ce.box([
+      'Sum',
+      'n',
+      ['Element', 'n', ['Interval', ['Open', 0], 5]],
+    ]);
+    expect(expr.evaluate().json).toBe(15);
+  });
+
+  test('sum over half-open Interval (open end) via box', () => {
+    // Interval [1, 6) → iterates 1, 2, 3, 4, 5
+    const expr = ce.box([
+      'Sum',
+      'n',
+      ['Element', 'n', ['Interval', 1, ['Open', 6]]],
+    ]);
+    expect(expr.evaluate().json).toBe(15);
+  });
+
+  test('sum over open Interval via box', () => {
+    // Interval (0, 6) → iterates 1, 2, 3, 4, 5
+    const expr = ce.box([
+      'Sum',
+      'n',
+      ['Element', 'n', ['Interval', ['Open', 0], ['Open', 6]]],
+    ]);
+    expect(expr.evaluate().json).toBe(15);
+  });
+
+  test('product over Interval via box', () => {
+    // Interval [1, 4] → iterates 1, 2, 3, 4
+    const expr = ce.box([
+      'Product',
+      'k',
+      ['Element', 'k', ['Interval', 1, 4]],
+    ]);
+    expect(expr.evaluate().json).toBe(24); // 1*2*3*4 = 24
   });
 });
 

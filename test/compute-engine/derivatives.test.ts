@@ -195,7 +195,7 @@ describe('Inverse trigonometric derivatives', () => {
 describe('Hyperbolic function derivatives', () => {
   it('d/dx sinh(x) = cosh(x)', () => {
     expect(D('\\sinh(x)', 'x').evaluate().toString()).toMatchInlineSnapshot(
-      `cosh(x)`
+      `1/2 * e^x + 1/2 * e^(-x)`
     );
   });
 
@@ -282,11 +282,15 @@ describe('Logarithmic and exponential derivatives', () => {
 
 describe('Step function derivatives', () => {
   it('d/dx floor(x) = 0', () => {
-    expect(D('\\lfloor x \\rfloor', 'x').evaluate().toString()).toMatchInlineSnapshot(`0`);
+    expect(
+      D('\\lfloor x \\rfloor', 'x').evaluate().toString()
+    ).toMatchInlineSnapshot(`0`);
   });
 
   it('d/dx ceil(x) = 0', () => {
-    expect(D('\\lceil x \\rceil', 'x').evaluate().toString()).toMatchInlineSnapshot(`0`);
+    expect(
+      D('\\lceil x \\rceil', 'x').evaluate().toString()
+    ).toMatchInlineSnapshot(`0`);
   });
 
   it('d/dx |x| = sign(x)', () => {
@@ -319,9 +323,7 @@ describe('Special function derivatives', () => {
     // Use MathJSON directly since \mathrm{erf} parses differently
     const expr = engine.box(['D', ['Erf', 'x'], 'x']);
     const result = expr.evaluate();
-    expect(result.toString()).toMatchInlineSnapshot(
-      `(2e^(-(x^2))) / sqrt(pi)`
-    );
+    expect(result.toString()).toMatchInlineSnapshot(`(2e^(-(x^2))) / sqrt(pi)`);
   });
 
   it('d/dx Erfc(x) = -2/sqrt(pi) * e^(-x^2)', () => {

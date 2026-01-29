@@ -36,6 +36,23 @@ export function extractFiniteDomain(
   if (domain.operator === 'Set' || domain.operator === 'List') {
     const values = domain.ops;
     if (values && values.length <= 1000) {
+      // EL-1: Special case for 2-element Lists with integer values
+      // Treat [a, b] as Range(a, b) in Element context for Sum/Product
+      // e.g., ["Element", "n", ["List", 1, 5]] iterates 1, 2, 3, 4, 5
+      if (domain.operator === 'List' && values.length === 2) {
+        const start = asSmallInteger(values[0]);
+        const end = asSmallInteger(values[1]);
+        if (start !== null && end !== null) {
+          const count = end - start + 1;
+          if (count > 0 && count <= 1000) {
+            const rangeValues: BoxedExpression[] = [];
+            for (let i = start; i <= end; i++) {
+              rangeValues.push(ce.number(i));
+            }
+            return { variable, values: rangeValues };
+          }
+        }
+      }
       return { variable, values: [...values] };
     }
     return null;
@@ -65,11 +82,38 @@ export function extractFiniteDomain(
   }
 
   // Handle finite integer Interval: ["Interval", start, end]
+  // EL-6: Support Open/Closed boundary wrappers
+  // e.g., ["Interval", ["Open", 0], 5] → iterates 1, 2, 3, 4, 5
+  // e.g., ["Interval", 1, ["Open", 6]] → iterates 1, 2, 3, 4, 5
   if (domain.operator === 'Interval') {
-    const start = asSmallInteger(domain.op1);
-    const end = asSmallInteger(domain.op2);
+    let op1 = domain.op1;
+    let op2 = domain.op2;
+    let openStart = false;
+    let openEnd = false;
+
+    // Unwrap Open/Closed boundary markers
+    if (op1?.operator === 'Open') {
+      openStart = true;
+      op1 = op1.op1;
+    } else if (op1?.operator === 'Closed') {
+      op1 = op1.op1;
+    }
+
+    if (op2?.operator === 'Open') {
+      openEnd = true;
+      op2 = op2.op1;
+    } else if (op2?.operator === 'Closed') {
+      op2 = op2.op1;
+    }
+
+    let start = asSmallInteger(op1);
+    let end = asSmallInteger(op2);
 
     if (start !== null && end !== null) {
+      // Adjust bounds for open intervals (integers only)
+      if (openStart) start += 1;
+      if (openEnd) end -= 1;
+
       const count = end - start + 1;
       if (count > 0 && count <= 1000) {
         const values: BoxedExpression[] = [];

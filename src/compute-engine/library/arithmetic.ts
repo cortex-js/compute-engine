@@ -184,7 +184,8 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
 
       lazy: true,
 
-      signature: '(number+) -> number',
+      // Accept numbers, vectors, and matrices for element-wise addition
+      signature: '(value+) -> value',
       type: addType,
 
       sgn: (ops) => {
