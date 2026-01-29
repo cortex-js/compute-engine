@@ -297,13 +297,13 @@ class GrokThemeRenderContext extends MarkdownThemeContext {
 
       constructor: (model, options) => {
         const md = [];
-        printStackTrace('constructor ' + model.name);
+        // printStackTrace('constructor ' + model.name);
         md.push(`<MemberCard>`);
         const memberName = `new ${model.parent.name}()`;
         md.push(heading(options.headingLevel, memberName));
 
         model.signatures?.forEach((signature) => {
-          console.log('constructor ' + signature.name, signature.kind);
+          // console.log('constructor ' + signature.name, signature.kind);
           md.push(
             this.partials.signature(signature, {
               headingLevel: options.headingLevel + 1,
