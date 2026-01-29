@@ -213,13 +213,16 @@
   (240), so compound propositions parse correctly without requiring parentheses.
 
 - **([#156](https://github.com/cortex-js/compute-engine/issues/156)) Logical
-  Connective Arrows**: Added support for lowercase arrow notation in logical
+  Connective Arrows**: Added support for additional arrow notation in logical
   expressions:
   - `\rightarrow` now parses as `Implies` (previously parsed as `To` for
     set/function mapping)
   - `\leftrightarrow` now parses as `Equivalent` (previously produced an
     "unexpected-command" error)
-  - The uppercase variants `\Rightarrow` and `\Leftrightarrow` continue to work
+  - Long arrow variants now supported: `\Longrightarrow`, `\longrightarrow` →
+    `Implies`; `\Longleftrightarrow`, `\longleftrightarrow` → `Equivalent`
+  - The existing variants `\Rightarrow`, `\Leftrightarrow`, `\implies`, `\iff`
+    continue to work
   - `\to` remains available for function/set mapping notation (e.g., `f: A \to B`)
 
 - **Simplification Rules**: Added and fixed several simplification rules:

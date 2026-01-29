@@ -421,6 +421,51 @@ describe('Logic', () => {
     `);
   }); // @fixme
 
+  // https://github.com/cortex-js/compute-engine/issues/156
+  it('should parse lowercase arrow as Implies', () => {
+    // \rightarrow should parse as Implies (not To)
+    expect(ce.parse('p \\rightarrow q').json).toMatchInlineSnapshot(`
+      [
+        Implies,
+        p,
+        q,
+      ]
+    `);
+    // With comparisons
+    expect(ce.parse('1=1 \\rightarrow 4>5').json).toMatchInlineSnapshot(`
+      [
+        Implies,
+        [
+          Equal,
+          1,
+          1,
+        ],
+        [
+          Less,
+          5,
+          4,
+        ],
+      ]
+    `);
+  });
+
+  it('should parse long arrow variants as Implies', () => {
+    expect(ce.parse('p \\Longrightarrow q').json).toMatchInlineSnapshot(`
+      [
+        Implies,
+        p,
+        q,
+      ]
+    `);
+    expect(ce.parse('p \\longrightarrow q').json).toMatchInlineSnapshot(`
+      [
+        Implies,
+        p,
+        q,
+      ]
+    `);
+  });
+
   it('should parse Equivalent', () => {
     expect(ce.parse('p \\Leftrightarrow q').json).toMatchInlineSnapshot(`
       [
@@ -445,6 +490,51 @@ describe('Logic', () => {
       ]
     `);
   }); // @fixme
+
+  // https://github.com/cortex-js/compute-engine/issues/156
+  it('should parse lowercase arrow as Equivalent', () => {
+    // \leftrightarrow should parse as Equivalent
+    expect(ce.parse('p \\leftrightarrow q').json).toMatchInlineSnapshot(`
+      [
+        Equivalent,
+        p,
+        q,
+      ]
+    `);
+    // With comparisons
+    expect(ce.parse('1=1 \\leftrightarrow 4>5').json).toMatchInlineSnapshot(`
+      [
+        Equivalent,
+        [
+          Equal,
+          1,
+          1,
+        ],
+        [
+          Less,
+          5,
+          4,
+        ],
+      ]
+    `);
+  });
+
+  it('should parse long arrow variants as Equivalent', () => {
+    expect(ce.parse('p \\Longleftrightarrow q').json).toMatchInlineSnapshot(`
+      [
+        Equivalent,
+        p,
+        q,
+      ]
+    `);
+    expect(ce.parse('p \\longleftrightarrow q').json).toMatchInlineSnapshot(`
+      [
+        Equivalent,
+        p,
+        q,
+      ]
+    `);
+  });
 
   it('should parse XOR', () => {
     expect(ce.parse('p \\oplus q').json).toMatchInlineSnapshot(`

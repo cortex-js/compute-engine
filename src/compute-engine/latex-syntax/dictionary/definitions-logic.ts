@@ -17,6 +17,32 @@ import { Expression } from '../../../math-json';
 import { DEFINITIONS_INEQUALITIES } from './definitions-relational-operators';
 
 // See https://en.wikipedia.org/wiki/List_of_logic_symbols
+//
+// ## Operator Precedence (higher number = binds tighter)
+//
+// The precedence hierarchy ensures expressions parse naturally:
+//
+// | Precedence | Operators                          | Example                           |
+// |------------|------------------------------------|------------------------------------|
+// | 880        | Not (¬, \lnot, \neg)               | ¬p binds only to p                |
+// | 270        | To (→ for function mapping)        | f: A → B                          |
+// | 245        | Comparisons (=, <, >, ≤, ≥, ≠)     | x = 1                             |
+// | 240        | Set relations (⊂, ⊆, ∈, etc.)      | x ∈ S                             |
+// | 235        | And (∧, \land, \wedge)             | p ∧ q                             |
+// | 232        | Xor, Nand, Nor                     | p ⊕ q                             |
+// | 230        | Or (∨, \lor, \vee)                 | p ∨ q                             |
+// | 220        | Implies (→, ⇒, \implies)           | p → q                             |
+// | 219        | Equivalent (↔, ⇔, \iff)            | p ↔ q                             |
+// | 200        | Quantifiers (∀, ∃)                 | ∀x, P(x)                          |
+//
+// This means:
+// - `x = 1 ∨ y = 2` parses as `(x = 1) ∨ (y = 2)` (comparisons bind tighter than Or)
+// - `p ∧ q ∨ r` parses as `(p ∧ q) ∨ r` (And binds tighter than Or)
+// - `p ∨ q → r` parses as `(p ∨ q) → r` (Or binds tighter than Implies)
+// - `¬p ∧ q` parses as `(¬p) ∧ q` (Not only applies to immediately following atom)
+//
+// To negate a compound expression, use parentheses: `¬(p ∧ q)`
+//
 
 export const DEFINITIONS_LOGIC: LatexDictionary = [
   // Constants
@@ -166,6 +192,20 @@ export const DEFINITIONS_LOGIC: LatexDictionary = [
     associativity: 'right',
     parse: 'Implies',
   },
+  {
+    latexTrigger: ['\\Longrightarrow'],
+    kind: 'infix',
+    precedence: 220,
+    associativity: 'right',
+    parse: 'Implies',
+  },
+  {
+    latexTrigger: ['\\longrightarrow'],
+    kind: 'infix',
+    precedence: 220,
+    associativity: 'right',
+    parse: 'Implies',
+  },
 
   {
     name: 'Equivalent', // MathML: identical to, Mathematica: Congruent
@@ -183,6 +223,20 @@ export const DEFINITIONS_LOGIC: LatexDictionary = [
   },
   {
     latexTrigger: ['\\leftrightarrow'],
+    kind: 'infix',
+    associativity: 'right',
+    precedence: 219,
+    parse: 'Equivalent',
+  },
+  {
+    latexTrigger: ['\\Longleftrightarrow'],
+    kind: 'infix',
+    associativity: 'right',
+    precedence: 219,
+    parse: 'Equivalent',
+  },
+  {
+    latexTrigger: ['\\longleftrightarrow'],
     kind: 'infix',
     associativity: 'right',
     precedence: 219,
@@ -447,7 +501,10 @@ function parseQuantifier(
         // Tight binding follows standard FOL convention where quantifier scope
         // extends only to the immediately following well-formed formula.
         const bodyTerminator = useTightBinding
-          ? { ...terminator, condition: (p: Parser) => tightBindingCondition(p, terminator) }
+          ? {
+              ...terminator,
+              condition: (p: Parser) => tightBindingCondition(p, terminator),
+            }
           : terminator;
         // Enter quantifier scope so predicates are recognized
         parser.enterQuantifierScope();
@@ -474,7 +531,10 @@ function parseQuantifier(
     if (parser.matchAny([',', '\\mid', ':', '\\colon'])) {
       // Parse body with optional tight binding
       const bodyTerminator = useTightBinding
-        ? { ...terminator, condition: (p: Parser) => tightBindingCondition(p, terminator) }
+        ? {
+            ...terminator,
+            condition: (p: Parser) => tightBindingCondition(p, terminator),
+          }
         : terminator;
       // Enter quantifier scope so predicates are recognized
       parser.enterQuantifierScope();
