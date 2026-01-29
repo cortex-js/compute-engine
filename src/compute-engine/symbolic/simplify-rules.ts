@@ -351,6 +351,155 @@ export const SIMPLIFY_RULES: Rule[] = [
   //
   simplifyLogicFunction,
 
+  //
+  // Trig and Infinity
+  //
+  {
+    match: '\\sin(x)',
+    replace: '\\operatorname{NaN}',
+    condition: (id) => id._x.isInfinity === true,
+  },
+  {
+    match: '\\cos(x)',
+    replace: '\\operatorname{NaN}',
+    condition: (id) => id._x.isInfinity === true,
+  },
+  {
+    match: '\\tan(x)',
+    replace: '\\operatorname{NaN}',
+    condition: (id) => id._x.isInfinity === true,
+  },
+  {
+    match: '\\cot(x)',
+    replace: '\\operatorname{NaN}',
+    condition: (id) => id._x.isInfinity === true,
+  },
+  {
+    match: '\\sec(x)',
+    replace: '\\operatorname{NaN}',
+    condition: (id) => id._x.isInfinity === true,
+  },
+  {
+    match: '\\csc(x)',
+    replace: '\\operatorname{NaN}',
+    condition: (id) => id._x.isInfinity === true,
+  },
+
+  //
+  // Hyperbolic Trig and Infinity
+  //
+  {
+    match: '\\sinh(x)',
+    replace: '\\infty',
+    condition: (id) => id._x.isInfinity === true && id._x.isPositive === true,
+  },
+  {
+    match: '\\sinh(x)',
+    replace: '-\\infty',
+    condition: (id) => id._x.isInfinity === true && id._x.isNegative === true,
+  },
+  {
+    match: '\\cosh(x)',
+    replace: '\\infty',
+    condition: (id) => id._x.isInfinity === true,
+  },
+  {
+    match: '\\tanh(x)',
+    replace: '1',
+    condition: (id) => id._x.isInfinity === true && id._x.isPositive === true,
+  },
+  {
+    match: '\\tanh(x)',
+    replace: '-1',
+    condition: (id) => id._x.isInfinity === true && id._x.isNegative === true,
+  },
+  {
+    match: '\\coth(x)',
+    replace: '1',
+    condition: (id) => id._x.isInfinity === true && id._x.isPositive === true,
+  },
+  {
+    match: '\\coth(x)',
+    replace: '-1',
+    condition: (id) => id._x.isInfinity === true && id._x.isNegative === true,
+  },
+  {
+    match: '\\sech(x)',
+    replace: '0',
+    condition: (id) => id._x.isInfinity === true,
+  },
+  {
+    match: '\\csch(x)',
+    replace: '0',
+    condition: (id) => id._x.isInfinity === true,
+  },
+
+  //
+  // Power Combination Rules
+  //
+  // x^n * x^m -> x^{n+m} (combine powers with same base)
+  {
+    match: ['Multiply', ['Power', '_x', '_n'], ['Power', '_x', '_m']],
+    replace: ['Power', '_x', ['Add', '_n', '_m']],
+    condition: (ids) =>
+      // Base must be non-zero or sum of exponents must be non-negative
+      ids._x.isNotZero === true ||
+      ids._n.add(ids._m).isNonNegative === true,
+  },
+  // x * x^n -> x^{n+1} (special case when first power is implicit 1)
+  {
+    match: ['Multiply', '_x', ['Power', '_x', '_n']],
+    replace: ['Power', '_x', ['Add', '_n', 1]],
+    condition: (ids) => ids._x.isNotZero === true,
+  },
+  // x^n * x -> x^{n+1} (special case when second power is implicit 1)
+  {
+    match: ['Multiply', ['Power', '_x', '_n'], '_x'],
+    replace: ['Power', '_x', ['Add', '_n', 1]],
+    condition: (ids) => ids._x.isNotZero === true,
+  },
+
+  //
+  // Logarithm Power Rules
+  //
+  // ln(x^n) -> n*ln(x) when x is non-negative or n is odd
+  {
+    match: '\\ln(x^n)',
+    replace: 'n*\\ln(x)',
+    condition: (ids) =>
+      ids._x.isNonNegative === true ||
+      ids._n.isOdd === true ||
+      ids._n.isRational === false,
+  },
+  // ln(x^n) -> n*ln(|x|) when n is even
+  {
+    match: '\\ln(x^n)',
+    replace: 'n*\\ln(|x|)',
+    condition: (ids) => ids._n.isEven === true,
+  },
+  // log_c(x^n) -> n*log_c(x) when x is non-negative or n is odd
+  {
+    match: '\\log_c(x^n)',
+    replace: 'n*\\log_c(x)',
+    condition: (ids) =>
+      ids._x.isNonNegative === true ||
+      ids._n.isOdd === true ||
+      ids._n.isRational === false,
+  },
+  // log_c(x^n) -> n*log_c(|x|) when n is even
+  {
+    match: '\\log_c(x^n)',
+    replace: 'n*\\log_c(|x|)',
+    condition: (ids) => ids._n.isEven === true,
+  },
+  // log_c(x^{n/k}) -> n*log_c(x)/k when x is non-negative or n is odd
+  {
+    match: '\\log_c(x^{n/k})',
+    replace: '(n/k)*\\log_c(x)',
+    condition: (ids) =>
+      ids._x.isNonNegative === true || ids._n.isOdd === true,
+  },
+
   /*
   //NEW (doesn't work b/c keeps - sign)
   {
