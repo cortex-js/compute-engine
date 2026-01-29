@@ -220,8 +220,17 @@ export class BoxedTensor<T extends TensorDataType> extends _BoxedExpression {
   }
 
   get type(): BoxedType {
-    // @fixme: more precisely: matrix, vector, etc...
-    return new BoxedType(this.isValid ? parseType('list<number>') : 'error');
+    if (!this.isValid) return new BoxedType('error');
+
+    const shape = this.shape;
+    if (shape.length === 0) {
+      // Scalar - should not happen for BoxedTensor
+      return new BoxedType('number');
+    }
+
+    // Build type string with dimensions: list<number^2x3> or list<number^5>
+    const dims = shape.join('x');
+    return new BoxedType(`list<number^${dims}>`);
   }
 
   get json(): Expression {

@@ -74,7 +74,7 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
         );
       },
       evaluate: (ops, { engine: ce }): BoxedExpression | undefined => {
-        let op1 = ops[0];
+        let op1 = ops[0].evaluate();
         const shape = ops[1].ops?.map((op) => op.re) ?? [];
 
         // If a finite indexable collection, convert to a list
@@ -97,7 +97,7 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
       complexity: 8200,
       signature: '(value) -> list',
       evaluate: (ops, { engine: ce }) => {
-        const op1 = ops[0];
+        let op1 = ops[0].evaluate();
 
         if (isBoxedTensor(op1))
           return ce.box([
@@ -118,7 +118,7 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
       complexity: 8200,
       signature: '(matrix|vector, axis1: integer?, axis2: integer?) -> matrix',
       evaluate: (ops, { engine: ce }) => {
-        let op1 = ops[0];
+        let op1 = ops[0].evaluate();
         let axis1 = 1;
         let axis2 = 2;
         if (ops.length === 3) {
@@ -142,7 +142,7 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
       complexity: 8200,
       signature: '(tensor, axis1: integer?, axis2: integer?) -> matrix',
       evaluate: (ops) => {
-        const op1 = ops[0];
+        const op1 = ops[0].evaluate();
         let axis1 = 1;
         let axis2 = 2;
         if (ops.length === 3) {
@@ -163,7 +163,7 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
       complexity: 8200,
       signature: '(matrix) -> number',
       evaluate: (ops) => {
-        const op1 = ops[0];
+        const op1 = ops[0].evaluate();
         if (isBoxedTensor(op1)) return op1.tensor.determinant();
 
         return undefined;
@@ -175,7 +175,8 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
       signature: '(matrix) -> matrix',
       type: ([matrix]) => matrix.type,
       evaluate: ([matrix]) => {
-        if (isBoxedTensor(matrix)) return matrix.tensor.inverse()?.expression;
+        const op1 = matrix.evaluate();
+        if (isBoxedTensor(op1)) return op1.tensor.inverse()?.expression;
 
         return undefined;
       },
@@ -185,8 +186,8 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
       complexity: 8200,
       signature: '(matrix) -> matrix',
       evaluate: ([matrix]) => {
-        if (isBoxedTensor(matrix))
-          return matrix.tensor.pseudoInverse()?.expression;
+        const op1 = matrix.evaluate();
+        if (isBoxedTensor(op1)) return op1.tensor.pseudoInverse()?.expression;
 
         return undefined;
       },
@@ -209,7 +210,7 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
       complexity: 8200,
       signature: '(matrix) -> matrix',
       evaluate: (ops) => {
-        const op1 = ops[0];
+        const op1 = ops[0].evaluate();
         if (isBoxedTensor(op1)) return op1.tensor.adjugateMatrix()?.expression;
 
         return undefined;
@@ -233,7 +234,7 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
       complexity: 8200,
       signature: '(matrix) -> number',
       evaluate: (ops) => {
-        const op1 = ops[0];
+        const op1 = ops[0].evaluate();
         if (isBoxedTensor(op1)) return op1.tensor.trace();
 
         return undefined;

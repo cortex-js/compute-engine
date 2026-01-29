@@ -2,6 +2,15 @@
 
 ### Bug Fixes
 
+- **Matrix Operations Type Validation**: Fixed matrix operations (`Shape`, `Rank`,
+  `Flatten`, `Transpose`, `Determinant`, `Inverse`, `Trace`, etc.) returning
+  incorrect results or failing with type errors. The root cause was a type
+  mismatch: function signatures expected `matrix` type (a 2D list with dimensions),
+  but `BoxedTensor.type` returned `list<number>` without dimensions. Now
+  `BoxedTensor`, `BoxedFunction`, and `BoxedSymbol` correctly derive `shape` and
+  `rank` from their type's dimensions. Additionally, linear algebra functions now
+  properly evaluate their operands before checking if they are tensors.
+
 - **Numerical Integration**: Fixed `\int_0^1 \sin(x) dx` returning `NaN` when
   evaluated numerically with `.N()`. The integrand was already wrapped in a
   `Function` expression by the canonical form, but the numerical evaluation code

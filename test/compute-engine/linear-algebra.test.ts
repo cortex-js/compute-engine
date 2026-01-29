@@ -118,28 +118,28 @@ describe('Matrix addition', () => {
   it('should add a scalar to a matrix', () => {
     const result = ce.box(['Add', sq2_n, 10]).evaluate();
     expect(result.toString()).toMatchInlineSnapshot(
-      `Error(ErrorCode("incompatible-type", "number", "list<number>")) + 10`
+      `Error(ErrorCode("incompatible-type", "number", "matrix<2x2>")) + 10`
     ); // @fixme: should not return error
   });
 
   it('should add two matrixes', () => {
     const result = ce.box(['Add', sq2_n, sq2_n2]).evaluate();
     expect(result.toString()).toMatchInlineSnapshot(
-      `Error(ErrorCode("incompatible-type", "number", "list<number>")) + Error(ErrorCode("incompatible-type", "number", "list<number>"))`
+      `Error(ErrorCode("incompatible-type", "number", "matrix<2x2>")) + Error(ErrorCode("incompatible-type", "number", "matrix<2x2>"))`
     ); // @fixme: should not return error
   });
 
   it('should handle adding two matrixes of different dimension', () => {
     const result = ce.box(['Add', m23_n, sq2_n2]).evaluate();
     expect(result.toString()).toMatchInlineSnapshot(
-      `Error(ErrorCode("incompatible-type", "number", "list<number>")) + Error(ErrorCode("incompatible-type", "number", "list<number>"))`
+      `Error(ErrorCode("incompatible-type", "number", "matrix<2x3>")) + Error(ErrorCode("incompatible-type", "number", "matrix<2x2>"))`
     ); // @fixme: should not return error
   });
 
   it('should add two matrixes and a scalar', () => {
     const result = ce.box(['Add', sq2_n, 10, sq2_n2]).evaluate();
     expect(result.toString()).toMatchInlineSnapshot(
-      `Error(ErrorCode("incompatible-type", "number", "list<number>")) + 10 + Error(ErrorCode("incompatible-type", "number", "list<number>"))`
+      `Error(ErrorCode("incompatible-type", "number", "matrix<2x2>")) + 10 + Error(ErrorCode("incompatible-type", "number", "matrix<2x2>"))`
     ); // @fixme: should not return error
   });
 });
@@ -284,29 +284,25 @@ describe('Determinant', () => {
 
   it('should calculate the determinant of a numeric matrix', () => {
     const result = ce.box(['Determinant', sq2_n]).evaluate();
-    expect(result.toString()).toMatchInlineSnapshot(
-      `Determinant(Error(ErrorCode("incompatible-type", "matrix", "list<number>")))`
-    );
+    expect(result.toString()).toMatchInlineSnapshot(`-2`);
   });
 
   it('should calculate the determinant of a matrix with unknowns', () => {
     const result = ce.box(['Determinant', sq2_x]).evaluate();
-    expect(result.toString()).toMatchInlineSnapshot(
-      `Determinant(Error(ErrorCode("incompatible-type", "matrix", "list<number>")))`
-    );
+    expect(result.toString()).toMatchInlineSnapshot(`-b * c + a * d`);
   });
 
   it('should calculate the determinant of a numeric tensor', () => {
     const result = ce.box(['Determinant', t234_n]).evaluate();
     expect(result.toString()).toMatchInlineSnapshot(
-      `Determinant(Error(ErrorCode("incompatible-type", "matrix", "list<number>")))`
+      `Determinant(Error(ErrorCode("incompatible-type", "matrix", "list<number^(2x3x4)>")))`
     );
   }); // @fixme fails
 
   it('should calculate the determinant of a tensor with unknowns', () => {
     const result = ce.box(['Determinant', t234_x]).evaluate();
     expect(result.toString()).toMatchInlineSnapshot(
-      `Determinant(Error(ErrorCode("incompatible-type", "matrix", "list<number>")))`
+      `Determinant(Error(ErrorCode("incompatible-type", "matrix", "list<number^(3x4x2)>")))`
     );
   });
 });
@@ -328,29 +324,25 @@ describe('Trace', () => {
 
   it('should calculate the trace of a numeric matrix', () => {
     const result = ce.box(['Trace', sq2_n]).evaluate();
-    expect(result.toString()).toMatchInlineSnapshot(
-      `Trace(Error(ErrorCode("incompatible-type", "matrix", "list<number>")))`
-    );
+    expect(result.toString()).toMatchInlineSnapshot(`5`);
   });
 
   it('should calculate the trace of a matrix with unknowns', () => {
     const result = ce.box(['Trace', sq2_x]).evaluate();
-    expect(result.toString()).toMatchInlineSnapshot(
-      `Trace(Error(ErrorCode("incompatible-type", "matrix", "list<number>")))`
-    );
+    expect(result.toString()).toMatchInlineSnapshot(`a + d`);
   });
 
   it('should calculate the trace of a numeric tensor', () => {
     const result = ce.box(['Trace', t234_n]).evaluate();
     expect(result.toString()).toMatchInlineSnapshot(
-      `Trace(Error(ErrorCode("incompatible-type", "matrix", "list<number>")))`
+      `Trace(Error(ErrorCode("incompatible-type", "matrix", "list<number^(2x3x4)>")))`
     );
   }); // @fixme fails, should be sum of matrixes on diagonal
 
   it('should calculate the trace of a numeric tensor', () => {
     const result = ce.box(['Trace', t234_x]).evaluate();
     expect(result.toString()).toMatchInlineSnapshot(
-      `Trace(Error(ErrorCode("incompatible-type", "matrix", "list<number>")))`
+      `Trace(Error(ErrorCode("incompatible-type", "matrix", "list<number^(3x4x2)>")))`
     );
   });
 }); // @fixme fails
@@ -457,29 +449,27 @@ describe('Inverse', () => {
 
   it('should calculate the inverse of a numeric matrix', () => {
     const result = ce.box(['Inverse', sq2_n]).evaluate();
-    expect(result.toString()).toMatchInlineSnapshot(
-      `Inverse(Error(ErrorCode("incompatible-type", "matrix", "list<number>")))`
-    );
+    expect(result.toString()).toMatchInlineSnapshot(`[[-2,1],[1.5,-0.5]]`);
   });
 
   it('should calculate the inverse of a matrix with unknowns', () => {
     const result = ce.box(['Inverse', sq2_x]).evaluate();
     expect(result.toString()).toMatchInlineSnapshot(
-      `Inverse(Error(ErrorCode("incompatible-type", "matrix", "list<number>")))`
+      `[[d / (-b * c + a * d),-b / (-b * c + a * d)],[-c / (-b * c + a * d),a / (-b * c + a * d)]]`
     );
   });
 
   it('should calculate the inverse of a numeric tensor', () => {
     const result = ce.box(['Inverse', t234_n]).evaluate();
     expect(result.toString()).toMatchInlineSnapshot(
-      `Inverse(Error(ErrorCode("incompatible-type", "matrix", "list<number>")))`
+      `Inverse(Error(ErrorCode("incompatible-type", "matrix", "list<number^(2x3x4)>")))`
     );
   }); // @fixme 'expected-square-matrix'
 
   it('should calculate the inverse of a numeric tensor', () => {
     const result = ce.box(['Inverse', t234_x]).evaluate();
     expect(result.toString()).toMatchInlineSnapshot(
-      `Inverse(Error(ErrorCode("incompatible-type", "matrix", "list<number>")))`
+      `Inverse(Error(ErrorCode("incompatible-type", "matrix", "list<number^(3x4x2)>")))`
     );
   });
 }); // @fixme `expected-square-matrix`
@@ -502,28 +492,28 @@ describe('PseudoInverse', () => {
   it('should calculate the pseudo inverse of a numeric matrix', () => {
     const result = ce.box(['PseudoInverse', sq2_n]).evaluate();
     expect(result.toString()).toMatchInlineSnapshot(
-      `PseudoInverse(Error(ErrorCode("incompatible-type", "matrix", "list<number>")))`
+      `PseudoInverse([[1,2],[3,4]])`
     );
   }); // @fixme
 
   it('should calculate the pseudo inverse of a matrix with unknowns', () => {
     const result = ce.box(['PseudoInverse', sq2_x]).evaluate();
     expect(result.toString()).toMatchInlineSnapshot(
-      `PseudoInverse(Error(ErrorCode("incompatible-type", "matrix", "list<number>")))`
+      `PseudoInverse([[a,b],[c,d]])`
     );
   }); // @fixme
 
   it('should calculate the pseudo inverse of a numeric tensor', () => {
     const result = ce.box(['PseudoInverse', t234_n]).evaluate();
     expect(result.toString()).toMatchInlineSnapshot(
-      `PseudoInverse(Error(ErrorCode("incompatible-type", "matrix", "list<number>")))`
+      `PseudoInverse(Error(ErrorCode("incompatible-type", "matrix", "list<number^(2x3x4)>")))`
     );
   }); // @fixme
 
   it('should calculate the pseudo inverse of a numeric tensor', () => {
     const result = ce.box(['PseudoInverse', t234_x]).evaluate();
     expect(result.toString()).toMatchInlineSnapshot(
-      `PseudoInverse(Error(ErrorCode("incompatible-type", "matrix", "list<number>")))`
+      `PseudoInverse(Error(ErrorCode("incompatible-type", "matrix", "list<number^(3x4x2)>")))`
     );
   });
 }); // @fixme

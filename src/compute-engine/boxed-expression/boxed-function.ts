@@ -850,6 +850,19 @@ export class BoxedFunction extends _BoxedExpression {
     );
   }
 
+  /** The shape of the tensor (dimensions), derived from the type */
+  get shape(): number[] {
+    const t = this.type.type;
+    if (typeof t === 'object' && t.kind === 'list' && t.dimensions)
+      return t.dimensions;
+    return [];
+  }
+
+  /** The rank of the tensor (number of dimensions), derived from the type */
+  get rank(): number {
+    return this.shape.length;
+  }
+
   simplify(options?: Partial<SimplifyOptions>): BoxedExpression {
     return simplify(this, options).at(-1)?.value ?? this;
   }

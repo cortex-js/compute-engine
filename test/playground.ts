@@ -105,8 +105,9 @@ ce.parse('f\\left(\\right)').print();
 ce.parse('f(x)').print();
 ce.parse('f\\left(x\\right)').print();
 
-// @issue Matrix multiplication returns error (incompatible-type)
-// Expected: [[15, 13], [29, 23]]
+// @issue Matrix multiplication not supported by Multiply operator
+// The \times operator maps to Multiply which expects numbers, not matrices
+// Expected: [[15, 13], [29, 23]] (if matrix multiplication were supported)
 ce.parse(
   String.raw`\begin{pmatrix}2 & 3\\ 4 & 5\end{pmatrix}\times\begin{pmatrix}6 & 2\\ 1 & 3\end{pmatrix}`
 )
@@ -528,39 +529,14 @@ ce.box(['Multiply', 3, ['Add', ['Negate', 1], ['Rational', 1, 2]]])
 //
 //
 
-// @issue Matrix operations are non-functional
-// Shape(A) returns () instead of (2, 2)
-// Rank(A) returns 0 instead of 2
-// Flatten(A), Transpose(A) return unevaluated
-// Determinant(X) returns error (incompatible-type)
-ce.assign('A', ce.box(['Matrix', ['List', ['List', 1, 2], ['List', 3, 4]]]));
+// @issue Symbolic matrix assignment bug
+// ce.assign() for symbolic matrices doesn't store the value correctly
+// X.value becomes Operator("X") instead of the matrix
 ce.assign(
   'X',
   ce.box(['Matrix', ['List', ['List', 'a', 'b'], ['List', 'c', 'd']]])
 );
-ce.assign('B', ce.box(['Matrix', ['List', ['List', 5, 6], ['List', 7, 8]]]));
-ce.assign(
-  'C',
-  ce.box([
-    'Matrix',
-    [
-      'List',
-      ['List', ['List', -1, -2, -3], ['List', -4, -5, -6]],
-      ['List', ['List', -7, -8, -9], ['List', -10, -11, -12]],
-    ],
-  ])
-);
-ce.assign('D', ce.box(['Matrix', ['List', ['List', 1, 2], ['List', 3, 4, 5]]]));
-
-console.log(ce.box(['Shape', 'A']).evaluate().toString()); // Expected: (2, 2), Actual: ()
-console.log(ce.box(['Rank', 'A']).evaluate().toString()); // Expected: 2, Actual: 0
-
-console.log(ce.box(['Flatten', 'A']).evaluate().toString()); // Expected: [1,2,3,4], Actual: unevaluated
-console.log(ce.box(['Transpose', 'A']).evaluate().toString()); // Expected: transposed, Actual: unevaluated
-
 console.log(ce.box(['Determinant', 'X']).evaluate().toString()); // Expected: ad-bc, Actual: error
-
-console.log(ce.box(['Shape', 'C']).evaluate().toString());
 
 // const expr = ce.parse('x^{}');
 // console.info(expr.json);
