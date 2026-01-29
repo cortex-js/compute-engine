@@ -33,6 +33,26 @@
   - `d/dx FresnelS(x)`, `d/dx FresnelC(x)`
   - `d/dx LogGamma(x) = Digamma(x)`
 
+- **([#133](https://github.com/cortex-js/compute-engine/issues/133)) Element-based
+  Indexing Sets for Sum/Product**: Added support for `\in` notation in summation
+  and product subscripts:
+
+  - **Parsing**: `\sum_{n \in \{1,2,3\}} n` now correctly parses to
+    `["Sum", "n", ["Element", "n", ["Set", 1, 2, 3]]]` instead of silently
+    dropping the constraint.
+
+  - **Evaluation**: Sums and products over finite sets, lists, and ranges are
+    now evaluated correctly:
+    - `\sum_{n \in \{1,2,3\}} n` → `6`
+    - `\sum_{n \in \{1,2,3\}} n^2` → `14`
+    - `\prod_{k \in \{1,2,3,4\}} k` → `24`
+
+  - **Serialization**: Element-based indexing sets serialize back to LaTeX with
+    proper `\in` notation: `\sum_{n\in \{1, 2, 3\}}n`
+
+  - **Range support**: Works with `Range` expressions via `ce.box()`:
+    `["Sum", "n", ["Element", "n", ["Range", 1, 5]]]` → `15`
+
 - **Linear Algebra Enhancements**: Improved tensor and matrix operations with
   better scalar handling, new functionality, and clearer error messages:
 
