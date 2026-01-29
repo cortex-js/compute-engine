@@ -12,25 +12,42 @@ import {
  */
 
 /**
+ * Result of extracting a finite domain from an Element expression.
+ * - `status: 'success'` - Domain was successfully extracted
+ * - `status: 'non-enumerable'` - Domain exists but cannot be enumerated (e.g., infinite set, unknown symbol)
+ * - `status: 'error'` - Invalid Element expression (missing variable, malformed domain)
+ */
+export type ExtractDomainResult =
+  | { status: 'success'; variable: string; values: BoxedExpression[] }
+  | { status: 'non-enumerable'; variable: string; domain: BoxedExpression; reason: string }
+  | { status: 'error'; reason: string };
+
+/**
  * Extract the finite domain from a quantifier's condition.
  * Supports:
  * - ["Element", "x", ["Set", 1, 2, 3]] → [1, 2, 3]
  * - ["Element", "x", ["Range", 1, 5]] → [1, 2, 3, 4, 5]
  * - ["Element", "x", ["Interval", 1, 5]] → [1, 2, 3, 4, 5] (integers only)
- * Returns null if the domain is not finite or not recognized.
+ * Returns detailed result indicating success, non-enumerable domain, or error.
  */
-export function extractFiniteDomain(
+export function extractFiniteDomainWithReason(
   condition: BoxedExpression,
   ce: ComputeEngine
-): { variable: string; values: BoxedExpression[] } | null {
+): ExtractDomainResult {
   // Check for ["Element", var, set] pattern
-  if (condition.operator !== 'Element') return null;
+  if (condition.operator !== 'Element') {
+    return { status: 'error', reason: 'expected-element-expression' };
+  }
 
   const variable = condition.op1?.symbol;
-  if (!variable) return null;
+  if (!variable) {
+    return { status: 'error', reason: 'expected-index-variable' };
+  }
 
   const domain = condition.op2;
-  if (!domain) return null;
+  if (!domain) {
+    return { status: 'error', reason: 'expected-domain' };
+  }
 
   // Handle explicit sets: ["Set", 1, 2, 3]
   if (domain.operator === 'Set' || domain.operator === 'List') {
@@ -49,13 +66,19 @@ export function extractFiniteDomain(
             for (let i = start; i <= end; i++) {
               rangeValues.push(ce.number(i));
             }
-            return { variable, values: rangeValues };
+            return { status: 'success', variable, values: rangeValues };
+          }
+          if (count > 1000) {
+            return { status: 'non-enumerable', variable, domain, reason: 'domain-too-large' };
           }
         }
       }
-      return { variable, values: [...values] };
+      return { status: 'success', variable, values: [...values] };
     }
-    return null;
+    if (values && values.length > 1000) {
+      return { status: 'non-enumerable', variable, domain, reason: 'domain-too-large' };
+    }
+    return { status: 'error', reason: 'empty-domain' };
   }
 
   // Handle Range: ["Range", start, end] or ["Range", start, end, step]
@@ -75,10 +98,14 @@ export function extractFiniteDomain(
         for (let i = start; step > 0 ? i <= end : i >= end; i += step) {
           values.push(ce.number(i));
         }
-        return { variable, values };
+        return { status: 'success', variable, values };
+      }
+      if (count > 1000) {
+        return { status: 'non-enumerable', variable, domain, reason: 'domain-too-large' };
       }
     }
-    return null;
+    // Range with non-integer or symbolic bounds
+    return { status: 'non-enumerable', variable, domain, reason: 'non-integer-bounds' };
   }
 
   // Handle finite integer Interval: ["Interval", start, end]
@@ -120,12 +147,52 @@ export function extractFiniteDomain(
         for (let i = start; i <= end; i++) {
           values.push(ce.number(i));
         }
-        return { variable, values };
+        return { status: 'success', variable, values };
+      }
+      if (count > 1000) {
+        return { status: 'non-enumerable', variable, domain, reason: 'domain-too-large' };
       }
     }
-    return null;
+    // Interval with non-integer or symbolic bounds
+    return { status: 'non-enumerable', variable, domain, reason: 'non-integer-bounds' };
   }
 
+  // Check for known infinite sets (e.g., NonNegativeIntegers, Integers, Reals, etc.)
+  if (domain.symbol) {
+    const knownInfiniteSets = [
+      'Integers', 'NonNegativeIntegers', 'PositiveIntegers', 'NegativeIntegers',
+      'Rationals', 'Reals', 'PositiveReals', 'NonNegativeReals', 'NegativeReals',
+      'NonPositiveReals', 'ExtendedReals', 'Complexes', 'ImaginaryNumbers',
+      'Numbers', 'ExtendedComplexes', 'AlgebraicNumbers', 'TranscendentalNumbers',
+    ];
+    if (knownInfiniteSets.includes(domain.symbol)) {
+      return { status: 'non-enumerable', variable, domain, reason: 'infinite-domain' };
+    }
+    // Unknown symbol - could be a finite set, but we can't determine
+    return { status: 'non-enumerable', variable, domain, reason: 'unknown-domain' };
+  }
+
+  // Unknown domain structure
+  return { status: 'non-enumerable', variable, domain, reason: 'unrecognized-domain-type' };
+}
+
+/**
+ * Extract the finite domain from a quantifier's condition.
+ * Supports:
+ * - ["Element", "x", ["Set", 1, 2, 3]] → [1, 2, 3]
+ * - ["Element", "x", ["Range", 1, 5]] → [1, 2, 3, 4, 5]
+ * - ["Element", "x", ["Interval", 1, 5]] → [1, 2, 3, 4, 5] (integers only)
+ * Returns null if the domain is not finite or not recognized.
+ * @deprecated Use extractFiniteDomainWithReason for better error handling
+ */
+export function extractFiniteDomain(
+  condition: BoxedExpression,
+  ce: ComputeEngine
+): { variable: string; values: BoxedExpression[] } | null {
+  const result = extractFiniteDomainWithReason(condition, ce);
+  if (result.status === 'success') {
+    return { variable: result.variable, values: result.values };
+  }
   return null;
 }
 

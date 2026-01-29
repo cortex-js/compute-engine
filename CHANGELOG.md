@@ -91,6 +91,14 @@
     - `["Interval", ["Open", 0], 5]` → iterates 1, 2, 3, 4, 5 (excludes 0)
     - `["Interval", 1, ["Open", 6]]` → iterates 1, 2, 3, 4, 5 (excludes 6)
 
+  - **Non-enumerable domains stay symbolic**: When the domain cannot be enumerated
+    (unknown symbol, infinite set, or symbolic bounds), the expression now stays
+    symbolic instead of returning NaN:
+    - `\sum_{n \in S} n` with unknown `S` → stays as `["Sum", "n", ["Element", "n", "S"]]`
+    - `\sum_{n \in \N} n` with infinite set → stays symbolic
+    - `\sum_{n \in [1,a]} n` with symbolic bound → stays symbolic
+    - Previously these would all return `NaN` with no explanation
+
 - **Linear Algebra Enhancements**: Improved tensor and matrix operations with
   better scalar handling, new functionality, and clearer error messages:
 
@@ -116,6 +124,14 @@
     - `IdentityMatrix(n)`: Creates an n×n identity matrix
     - `ZeroMatrix(m, n?)`: Creates an m×n matrix of zeros (square if n omitted)
     - `OnesMatrix(m, n?)`: Creates an m×n matrix of ones (square if n omitted)
+
+  - **Matrix and Vector Norms**: Added `Norm` function for computing various
+    norms:
+    - **Vector norms**: L1 (sum of absolute values), L2 (Euclidean, default),
+      L-infinity (max absolute value), and general Lp norms
+    - **Matrix norms**: Frobenius (default, sqrt of sum of squared elements),
+      L1 (max column sum), L-infinity (max row sum)
+    - Scalar norms return the absolute value
 
   - **Diagonal function**: Now fully implemented with bidirectional behavior:
     - Vector → Matrix: Creates a diagonal matrix from a vector

@@ -50,7 +50,7 @@ import {
   mulN,
   canonicalDivide,
 } from '../boxed-expression/arithmetic-mul-div';
-import { canonicalBigop, reduceBigOp } from './utils';
+import { canonicalBigop, reduceBigOp, NON_ENUMERABLE_DOMAIN } from './utils';
 import {
   canonicalPower,
   canonicalRoot,
@@ -1516,31 +1516,41 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         canonicalBigop('Product', body, bounds, scope),
 
       evaluate: (ops, options) => {
+        const ce = options.engine;
         const result = run(
           reduceBigOp(
             ops[0],
             ops.slice(1),
             (acc: BoxedExpression, x) => acc.mul(x.evaluate(options)),
-            options.engine.One
+            ce.One
           ),
-          options.engine._timeRemaining
+          ce._timeRemaining
         );
+        // If domain is non-enumerable, keep expression unevaluated (symbolic)
+        if (result === NON_ENUMERABLE_DOMAIN) {
+          return undefined; // Return undefined to keep expression symbolic
+        }
         // Evaluate the accumulated result to combine numeric factors
-        return result?.evaluate() ?? options.engine.NaN;
+        return result?.evaluate() ?? ce.NaN;
       },
 
       evaluateAsync: async (ops, options) => {
+        const ce = options.engine;
         const result = await runAsync(
           reduceBigOp(
             ops[0],
             ops.slice(1),
             (acc: BoxedExpression, x) => acc.mul(x.evaluate(options)),
-            options.engine.One
+            ce.One
           ),
-          options.engine._timeRemaining,
+          ce._timeRemaining,
           options.signal
         );
-        return result?.evaluate() ?? options.engine.NaN;
+        // If domain is non-enumerable, keep expression unevaluated (symbolic)
+        if (result === NON_ENUMERABLE_DOMAIN) {
+          return undefined; // Return undefined to keep expression symbolic
+        }
+        return result?.evaluate() ?? ce.NaN;
       },
     },
 
@@ -1567,6 +1577,10 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
           ),
           engine._timeRemaining
         );
+        // If domain is non-enumerable, keep expression unevaluated (symbolic)
+        if (result === NON_ENUMERABLE_DOMAIN) {
+          return undefined; // Return undefined to keep expression symbolic
+        }
         // Evaluate the accumulated result to combine numeric terms
         // e.g., 3x + 1 + 2 + 3 → 3x + 6
         return result?.evaluate() ?? engine.NaN;
@@ -1583,6 +1597,10 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
           engine._timeRemaining,
           signal
         );
+        // If domain is non-enumerable, keep expression unevaluated (symbolic)
+        if (result === NON_ENUMERABLE_DOMAIN) {
+          return undefined; // Return undefined to keep expression symbolic
+        }
         return result?.evaluate() ?? engine.NaN;
       },
     },

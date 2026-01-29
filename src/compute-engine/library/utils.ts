@@ -2,7 +2,7 @@ import type { BoxedExpression, ComputeEngine, Scope } from '../global-types';
 
 import { MAX_ITERATION } from '../numerics/numeric';
 import { fromRange, reduceCollection } from './collections';
-import { extractFiniteDomain } from './logic-analysis';
+import { extractFiniteDomainWithReason, ExtractDomainResult } from './logic-analysis';
 
 export type IndexingSet = {
   index: string | undefined;
@@ -320,6 +320,22 @@ export function canonicalBigop(
 }
 
 /**
+ * A special symbol used to signal that a BigOp could not be evaluated
+ * because the domain is non-enumerable (e.g., infinite set, unknown symbol).
+ * When this is returned, the Sum/Product should keep the expression symbolic
+ * rather than returning NaN.
+ */
+export const NON_ENUMERABLE_DOMAIN = Symbol('non-enumerable-domain');
+
+/**
+ * Result type for reduceBigOp that includes reason for failure
+ */
+export type BigOpResult<T> =
+  | { status: 'success'; value: T }
+  | { status: 'non-enumerable'; reason: string; domain?: BoxedExpression }
+  | { status: 'error'; reason: string };
+
+/**
  * Process an expression of the form
  * - ['Operator', body, ['Tuple', index1, lower, upper]]
  * - ['Operator', body, ['Tuple', index1, lower, upper], ['Tuple', index2, lower, upper], ...]
@@ -330,13 +346,16 @@ export function canonicalBigop(
  * `fn()` is the processing done on each element
  * Apply the function `fn` to the body of a big operator, according to the
  * indexing sets.
+ *
+ * Returns either the reduced value, or `typeof NON_ENUMERABLE_DOMAIN` if the
+ * domain cannot be enumerated (in which case the expression should remain symbolic).
  */
 export function* reduceBigOp<T>(
   body: BoxedExpression,
   indexes: ReadonlyArray<BoxedExpression>,
   fn: (acc: T, x: BoxedExpression) => T | null,
   initial: T
-): Generator<T | undefined> {
+): Generator<T | typeof NON_ENUMERABLE_DOMAIN | undefined> {
   // If the body is a collection, reduce it
   // i.e. Sum({1, 2, 3}) = 6
   if (body.isCollection)
@@ -351,8 +370,39 @@ export function* reduceBigOp<T>(
   // Check for Element-based indexing sets
   const elementSets = indexes.filter((x) => x.operator === 'Element');
   if (elementSets.length > 0) {
-    // Handle Element-based indexing sets using extractFiniteDomain
-    return yield* reduceElementIndexingSets(body, indexes, fn, initial);
+    // Handle Element-based indexing sets using extractFiniteDomainWithReason
+    // Use the internal generator that returns detailed results
+    const gen = reduceElementIndexingSets(body, indexes, fn, initial, true);
+
+    // Properly iterate the generator to capture both yielded values and the return value
+    let iterResult = gen.next();
+    while (!iterResult.done) {
+      const result = iterResult.value;
+      // Yield intermediate results for progress tracking (skip object results)
+      if (result !== undefined && typeof result !== 'object') {
+        yield result;
+      }
+      iterResult = gen.next();
+    }
+
+    // The final return value is in iterResult.value when done is true
+    const finalResult = iterResult.value;
+
+    // Check the final result type
+    if (finalResult && typeof finalResult === 'object' && 'status' in finalResult) {
+      const typedResult = finalResult as ReduceElementResult<T>;
+      if (typedResult.status === 'success') {
+        return typedResult.value;
+      }
+      if (typedResult.status === 'non-enumerable') {
+        // Signal that the domain is non-enumerable
+        return NON_ENUMERABLE_DOMAIN;
+      }
+      // Error case - return undefined (will become NaN)
+      return undefined;
+    }
+
+    return finalResult as T | undefined;
   }
 
   //
@@ -382,15 +432,30 @@ export function* reduceBigOp<T>(
 }
 
 /**
+ * Result type for reduceElementIndexingSets to distinguish between
+ * successful evaluation, non-enumerable domains (keep symbolic), and errors.
+ */
+export type ReduceElementResult<T> =
+  | { status: 'success'; value: T }
+  | { status: 'non-enumerable'; reason: string; domain?: BoxedExpression }
+  | { status: 'error'; reason: string };
+
+/**
  * Handle Element-based indexing sets by extracting finite domains
  * and iterating over their values.
+ *
+ * Returns a detailed result to distinguish between:
+ * - Success: domain was enumerated and reduced
+ * - Non-enumerable: domain is valid but cannot be enumerated (keep expression symbolic)
+ * - Error: invalid indexing expression
  */
 function* reduceElementIndexingSets<T>(
   body: BoxedExpression,
   indexes: ReadonlyArray<BoxedExpression>,
   fn: (acc: T, x: BoxedExpression) => T | null,
-  initial: T
-): Generator<T | undefined> {
+  initial: T,
+  returnReason = false
+): Generator<T | ReduceElementResult<T> | undefined> {
   const ce = body.engine;
 
   // Separate Element and Limits indexing sets
@@ -400,12 +465,33 @@ function* reduceElementIndexingSets<T>(
 
   for (const idx of indexes) {
     if (idx.operator === 'Element') {
-      const domain = extractFiniteDomain(idx, ce);
-      if (!domain) {
-        // Can't evaluate infinite/unknown domain - return undefined
+      const domainResult = extractFiniteDomainWithReason(idx, ce);
+
+      if (domainResult.status === 'error') {
+        // Invalid indexing expression - return error
+        if (returnReason) {
+          return { status: 'error', reason: domainResult.reason } as ReduceElementResult<T>;
+        }
         return undefined;
       }
-      elementDomains.push(domain);
+
+      if (domainResult.status === 'non-enumerable') {
+        // Domain exists but cannot be enumerated - keep expression symbolic
+        if (returnReason) {
+          return {
+            status: 'non-enumerable',
+            reason: domainResult.reason,
+            domain: domainResult.domain,
+          } as ReduceElementResult<T>;
+        }
+        return undefined;
+      }
+
+      // Success - domain was extracted
+      elementDomains.push({
+        variable: domainResult.variable,
+        values: domainResult.values,
+      });
     } else {
       limitsSets.push(normalizeIndexingSet(idx));
     }
@@ -429,7 +515,12 @@ function* reduceElementIndexingSets<T>(
   const lengths = elementDomains.map((d) => d.values.length);
 
   // Check for empty domains
-  if (lengths.some((l) => l === 0)) return initial;
+  if (lengths.some((l) => l === 0)) {
+    if (returnReason) {
+      return { status: 'success', value: initial } as ReduceElementResult<T>;
+    }
+    return initial;
+  }
 
   let result: T | undefined = initial;
   let counter = 0;
@@ -460,5 +551,8 @@ function* reduceElementIndexingSets<T>(
     if (dim < 0) break; // Exhausted all combinations
   }
 
+  if (returnReason) {
+    return { status: 'success', value: result as T } as ReduceElementResult<T>;
+  }
   return result ?? undefined;
 }

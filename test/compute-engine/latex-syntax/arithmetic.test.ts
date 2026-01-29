@@ -382,6 +382,75 @@ describe('SUM with Element indexing set', () => {
   });
 });
 
+describe('EL-5: Non-enumerable domains stay symbolic', () => {
+  // EL-5: When the domain cannot be enumerated, the expression should
+  // remain symbolic instead of returning NaN
+
+  test('sum over unknown symbol stays symbolic', () => {
+    // S is an unknown symbol, could be a finite set but we can't determine
+    const expr = ce.box(['Sum', 'n', ['Element', 'n', 'S']]);
+    const result = expr.evaluate();
+    // Should stay symbolic, not become NaN
+    expect(result.operator).toBe('Sum');
+    expect(result.isNaN).not.toBe(true);
+  });
+
+  test('product over unknown symbol stays symbolic', () => {
+    const expr = ce.box(['Product', 'k', ['Element', 'k', 'T']]);
+    const result = expr.evaluate();
+    expect(result.operator).toBe('Product');
+    expect(result.isNaN).not.toBe(true);
+  });
+
+  test('sum over NonNegativeIntegers (infinite set) stays symbolic', () => {
+    const expr = ce.box(['Sum', 'n', ['Element', 'n', 'NonNegativeIntegers']]);
+    const result = expr.evaluate();
+    expect(result.operator).toBe('Sum');
+    expect(result.isNaN).not.toBe(true);
+  });
+
+  test('sum over Integers (infinite set) stays symbolic', () => {
+    const expr = ce.box(['Sum', 'n', ['Element', 'n', 'Integers']]);
+    const result = expr.evaluate();
+    expect(result.operator).toBe('Sum');
+    expect(result.isNaN).not.toBe(true);
+  });
+
+  test('sum over Reals (infinite set) stays symbolic', () => {
+    const expr = ce.box(['Sum', 'x', ['Element', 'x', 'Reals']]);
+    const result = expr.evaluate();
+    expect(result.operator).toBe('Sum');
+    expect(result.isNaN).not.toBe(true);
+  });
+
+  test('product over PositiveIntegers (infinite set) stays symbolic', () => {
+    const expr = ce.box([
+      'Product',
+      'k',
+      ['Element', 'k', 'PositiveIntegers'],
+    ]);
+    const result = expr.evaluate();
+    expect(result.operator).toBe('Product');
+    expect(result.isNaN).not.toBe(true);
+  });
+
+  test('sum over symbolic Range stays symbolic', () => {
+    // Range with symbolic bounds cannot be enumerated
+    const expr = ce.box(['Sum', 'n', ['Element', 'n', ['Range', 1, 'a']]]);
+    const result = expr.evaluate();
+    expect(result.operator).toBe('Sum');
+    expect(result.isNaN).not.toBe(true);
+  });
+
+  test('sum over symbolic Interval stays symbolic', () => {
+    // Interval with symbolic bounds cannot be enumerated
+    const expr = ce.box(['Sum', 'n', ['Element', 'n', ['Interval', 0, 'b']]]);
+    const result = expr.evaluate();
+    expect(result.operator).toBe('Sum');
+    expect(result.isNaN).not.toBe(true);
+  });
+});
+
 describe('PRODUCT', () => {
   test('k is an Integer (as the index) and used a a Number (in the fraction)', () => {
     expect(evaluate(`\\prod_{k=1}^{10}\\frac{k}{2}`)).toMatchInlineSnapshot(
