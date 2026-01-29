@@ -100,27 +100,8 @@ const DERIVATIVES_TABLE = {
   ],
   // https://proofwiki.org/wiki/Derivative_of_Gamma_Function
   // https://en.wikipedia.org/wiki/Gamma_function
+  // d/dx Γ(x) = Γ(x)·ψ(x) where ψ is the digamma function
   Gamma: ['Multiply', ['Gamma', '_'], ['Digamma', '_']],
-  Digamma: [
-    'Add',
-    ['Multiply', ['Digamma', '_'], ['Gamma', '_']],
-    ['Multiply', ['Power', '_', -1], ['Gamma', '_']],
-  ],
-  Zeta: ['Multiply', ['Multiply', -1, ['Zeta', '_']], ['Digamma', '_']],
-  PolyGamma: [
-    'Add',
-    ['Multiply', ['PolyGamma', '_'], ['Gamma', '_']],
-    ['Multiply', ['Power', '_', -1], ['Gamma', '_']],
-  ],
-  Beta: [
-    'Multiply',
-    [
-      'Add',
-      ['Multiply', ['Beta', '_'], ['Digamma', '_']],
-      ['Multiply', ['Power', '_', -1], ['Beta', '_']],
-    ],
-    ['Beta', '_'],
-  ],
   // d/dx erfc(x) = -d/dx erf(x) = -2/√π * e^(-x²)
   Erfc: [
     'Negate',
@@ -128,24 +109,27 @@ const DERIVATIVES_TABLE = {
   ],
   // d/dx ln(Γ(x)) = ψ(x) (digamma function)
   LogGamma: ['Digamma', '_'],
-  LambertW: [
+  // Note: LambertW derivative d/dx W(x) = W(x)/(x·(1+W(x))) is mathematically correct
+  // but omitted because LambertW lacks a type signature, causing type errors.
+  //
+  // d/dx S(x) = sin(πx²/2) where S is the Fresnel sine integral
+  FresnelS: ['Sin', ['Multiply', ['Divide', 'Pi', 2], ['Square', '_']]],
+  // d/dx C(x) = cos(πx²/2) where C is the Fresnel cosine integral
+  FresnelC: ['Cos', ['Multiply', ['Divide', 'Pi', 2], ['Square', '_']]],
+  // d/dx erfi(x) = (2/√π)·e^(x²) where erfi is the imaginary error function
+  Erfi: [
     'Multiply',
-    ['Power', '_', -1],
-    [
-      'Multiply',
-      ['Add', '_', ['LambertW', '_']],
-      ['Add', ['LambertW', '_'], 1],
-    ],
+    ['Divide', 2, ['Sqrt', 'Pi']],
+    ['Exp', ['Square', '_']],
   ],
-  AiryAi: ['Multiply', ['AiryAi', '_'], ['AiryBi', '_']],
-  AiryBi: ['Multiply', ['AiryAi', '_'], ['AiryBi', '_']],
-  BesselJ: ['Multiply', ['BesselJ', '_'], ['BesselY', '_']],
-  BesselY: ['Multiply', ['BesselJ', '_'], ['BesselY', '_']],
-  BesselI: ['Multiply', ['BesselI', '_'], ['BesselK', '_']],
-  BesselK: ['Multiply', ['BesselI', '_'], ['BesselK', '_']],
-  FresnelS: ['Multiply', ['FresnelS', '_'], ['FresnelC', '_']],
-  FresnelC: ['Multiply', ['FresnelS', '_'], ['FresnelC', '_']],
-  Erfi: ['Multiply', ['Erfi', '_'], ['Erf', '_']],
+  // Note: Bessel functions (BesselJ, BesselY, BesselI, BesselK) and Airy functions
+  // (AiryAi, AiryBi) have been omitted because their derivatives involve functions
+  // of different orders or related derivative functions that are not in the standard
+  // function set. For example, d/dx J_n(x) = (J_{n-1}(x) - J_{n+1}(x))/2.
+  //
+  // Similarly, Zeta, Digamma, PolyGamma, and Beta derivatives are omitted because
+  // they either don't have simple closed forms or involve additional functions not
+  // in the standard set (trigamma function, etc.).
 };
 
 /**
