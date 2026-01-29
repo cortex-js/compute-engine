@@ -325,7 +325,11 @@ function extractFiniteDomain(
   if (domain.operator === 'Range') {
     const start = asSmallInteger(domain.op1);
     const end = asSmallInteger(domain.op2);
-    const step = domain.op3 ? asSmallInteger(domain.op3) : 1;
+    // op3 may be Nothing (a symbol) when not specified, so check ops length
+    const step =
+      domain.ops && domain.ops.length >= 3
+        ? asSmallInteger(domain.op3)
+        : 1;
 
     if (start !== null && end !== null && step !== null && step !== 0) {
       const count = Math.floor((end - start) / step) + 1;
@@ -362,8 +366,165 @@ function extractFiniteDomain(
 }
 
 /**
+ * Check if an expression contains a reference to a specific variable.
+ */
+function bodyContainsVariable(expr: BoxedExpression, variable: string): boolean {
+  if (expr.symbol === variable) return true;
+  if (expr.ops) {
+    for (const op of expr.ops) {
+      if (bodyContainsVariable(op, variable)) return true;
+    }
+  }
+  return false;
+}
+
+/**
+ * For nested quantifiers like ∀x∈S. ∀y∈T. P(x,y), collect the inner domains.
+ * Returns an array of {variable, values} for nested ForAll/Exists with finite domains.
+ */
+function collectNestedDomains(
+  body: BoxedExpression,
+  ce: ComputeEngine
+): { variable: string; values: BoxedExpression[] }[] {
+  const canonicalBody = body.canonical;
+  const op = canonicalBody.operator;
+
+  // Only collect from same quantifier type (ForAll or Exists)
+  if (op !== 'ForAll' && op !== 'Exists') return [];
+
+  const condition = canonicalBody.op1;
+  const innerBody = canonicalBody.op2;
+
+  if (!condition || !innerBody) return [];
+
+  const domain = extractFiniteDomain(condition, ce);
+  if (!domain) return [];
+
+  // Recursively collect from inner body
+  const innerDomains = collectNestedDomains(innerBody, ce);
+
+  return [{ variable: domain.variable, values: domain.values }, ...innerDomains];
+}
+
+/**
+ * Get the innermost body of nested quantifiers.
+ */
+function getInnermostBody(body: BoxedExpression): BoxedExpression {
+  const canonicalBody = body.canonical;
+  const op = canonicalBody.operator;
+
+  if (op === 'ForAll' || op === 'Exists') {
+    const innerBody = canonicalBody.op2;
+    if (innerBody) return getInnermostBody(innerBody);
+  }
+
+  return canonicalBody;
+}
+
+/**
+ * Evaluate ForAll over a Cartesian product of domains.
+ * Returns True if the predicate holds for all combinations.
+ */
+function evaluateForAllCartesian(
+  domains: { variable: string; values: BoxedExpression[] }[],
+  body: BoxedExpression,
+  ce: ComputeEngine
+): BoxedExpression | undefined {
+  // Generate Cartesian product indices
+  const indices = domains.map(() => 0);
+  const lengths = domains.map((d) => d.values.length);
+
+  // Check for empty domains
+  if (lengths.some((l) => l === 0)) return ce.True;
+
+  while (true) {
+    // Build substitution map for current combination
+    const subs: Record<string, BoxedExpression> = {};
+    for (let i = 0; i < domains.length; i++) {
+      subs[domains[i].variable] = domains[i].values[indices[i]];
+    }
+
+    // Evaluate body with this combination
+    const substituted = body.subs(subs).canonical;
+    const result = substituted.evaluate();
+
+    if (result.symbol === 'False') {
+      return ce.False; // Found a counterexample
+    }
+    if (result.symbol !== 'True') {
+      return undefined; // Can't determine
+    }
+
+    // Move to next combination
+    let dim = domains.length - 1;
+    while (dim >= 0) {
+      indices[dim]++;
+      if (indices[dim] < lengths[dim]) break;
+      indices[dim] = 0;
+      dim--;
+    }
+    if (dim < 0) break; // Exhausted all combinations
+  }
+
+  return ce.True;
+}
+
+/**
+ * Evaluate Exists over a Cartesian product of domains.
+ * Returns True if the predicate holds for at least one combination.
+ */
+function evaluateExistsCartesian(
+  domains: { variable: string; values: BoxedExpression[] }[],
+  body: BoxedExpression,
+  ce: ComputeEngine
+): BoxedExpression | undefined {
+  // Generate Cartesian product indices
+  const indices = domains.map(() => 0);
+  const lengths = domains.map((d) => d.values.length);
+
+  // Check for empty domains
+  if (lengths.some((l) => l === 0)) return ce.False;
+
+  while (true) {
+    // Build substitution map for current combination
+    const subs: Record<string, BoxedExpression> = {};
+    for (let i = 0; i < domains.length; i++) {
+      subs[domains[i].variable] = domains[i].values[indices[i]];
+    }
+
+    // Evaluate body with this combination
+    const substituted = body.subs(subs).canonical;
+    const result = substituted.evaluate();
+
+    if (result.symbol === 'True') {
+      return ce.True; // Found a witness
+    }
+
+    // Move to next combination
+    let dim = domains.length - 1;
+    while (dim >= 0) {
+      indices[dim]++;
+      if (indices[dim] < lengths[dim]) break;
+      indices[dim] = 0;
+      dim--;
+    }
+    if (dim < 0) break; // Exhausted all combinations
+  }
+
+  return ce.False;
+}
+
+/**
  * Evaluate ForAll over a finite domain.
  * ∀x∈S. P(x) is true iff P(x) is true for all x in S.
+ *
+ * Symbolic simplifications:
+ * - ∀x. True → True
+ * - ∀x. False → False
+ * - ∀x. P (where P doesn't contain x) → P
+ *
+ * Nested quantifiers:
+ * - ∀x∈S. ∀y∈T. P(x,y) evaluates over the Cartesian product S × T
  */
 function evaluateForAll(
   args: ReadonlyArray<BoxedExpression>,
@@ -374,15 +535,35 @@ function evaluateForAll(
   const condition = args[0];
   const body = args[1];
 
+  // Symbolic simplification: check if body is constant (doesn't depend on the variable)
+  const canonicalBody = body.canonical;
+  if (canonicalBody.symbol === 'True') return ce.True;
+  if (canonicalBody.symbol === 'False') return ce.False;
+
+  // Check if body doesn't contain the quantified variable
+  const variable = condition.symbol ?? condition.op1?.symbol;
+  if (variable && !bodyContainsVariable(canonicalBody, variable)) {
+    // Body doesn't depend on x, so ∀x. P ≡ P
+    return canonicalBody.evaluate();
+  }
+
   // Try to extract a finite domain from the condition
   const domain = extractFiniteDomain(condition, ce);
 
   if (domain) {
-    // Evaluate body for each value in the domain using substitution
+    // Check for nested quantifiers - collect all domains for Cartesian product
+    const nestedDomains = collectNestedDomains(body, ce);
+    if (nestedDomains.length > 0) {
+      // Evaluate over Cartesian product of all domains
+      return evaluateForAllCartesian(
+        [{ variable: domain.variable, values: domain.values }, ...nestedDomains],
+        getInnermostBody(body),
+        ce
+      );
+    }
+
+    // Single quantifier - evaluate body for each value in the domain
     for (const value of domain.values) {
-      // Substitute the variable with the value, canonicalize, then evaluate
-      // Note: body may be non-canonical due to lazy evaluation, so we need
-      // to canonicalize the substituted expression before evaluation
       const substituted = body.subs({ [domain.variable]: value }).canonical;
       const result = substituted.evaluate();
 
@@ -397,9 +578,8 @@ function evaluateForAll(
     return ce.True; // All values satisfied the predicate
   }
 
-  // No finite domain - check for simple symbolic cases
-  // If body is already True or False, return it
-  const bodyEval = body.canonical.evaluate();
+  // No finite domain - try evaluating the body
+  const bodyEval = canonicalBody.evaluate();
   if (bodyEval.symbol === 'True') return ce.True;
   if (bodyEval.symbol === 'False') return ce.False;
 
@@ -409,6 +589,14 @@ function evaluateForAll(
 /**
  * Evaluate Exists over a finite domain.
  * ∃x∈S. P(x) is true iff P(x) is true for at least one x in S.
+ *
+ * Symbolic simplifications:
+ * - ∃x. True → True
+ * - ∃x. False → False
+ * - ∃x. P (where P doesn't contain x) → P
+ *
+ * Nested quantifiers:
+ * - ∃x∈S. ∃y∈T. P(x,y) evaluates over the Cartesian product S × T
  */
 function evaluateExists(
   args: ReadonlyArray<BoxedExpression>,
@@ -419,15 +607,35 @@ function evaluateExists(
   const condition = args[0];
   const body = args[1];
 
+  // Symbolic simplification: check if body is constant (doesn't depend on the variable)
+  const canonicalBody = body.canonical;
+  if (canonicalBody.symbol === 'True') return ce.True;
+  if (canonicalBody.symbol === 'False') return ce.False;
+
+  // Check if body doesn't contain the quantified variable
+  const variable = condition.symbol ?? condition.op1?.symbol;
+  if (variable && !bodyContainsVariable(canonicalBody, variable)) {
+    // Body doesn't depend on x, so ∃x. P ≡ P
+    return canonicalBody.evaluate();
+  }
+
   // Try to extract a finite domain from the condition
   const domain = extractFiniteDomain(condition, ce);
 
   if (domain) {
-    // Evaluate body for each value in the domain using substitution
+    // Check for nested quantifiers - collect all domains for Cartesian product
+    const nestedDomains = collectNestedDomains(body, ce);
+    if (nestedDomains.length > 0) {
+      // Evaluate over Cartesian product of all domains
+      return evaluateExistsCartesian(
+        [{ variable: domain.variable, values: domain.values }, ...nestedDomains],
+        getInnermostBody(body),
+        ce
+      );
+    }
+
+    // Single quantifier - evaluate body for each value in the domain
     for (const value of domain.values) {
-      // Substitute the variable with the value, canonicalize, then evaluate
-      // Note: body may be non-canonical due to lazy evaluation, so we need
-      // to canonicalize the substituted expression before evaluation
       const substituted = body.subs({ [domain.variable]: value }).canonical;
       const result = substituted.evaluate();
 
@@ -438,8 +646,8 @@ function evaluateExists(
     return ce.False; // No value satisfied the predicate
   }
 
-  // No finite domain - check for simple symbolic cases
-  const bodyEval = body.canonical.evaluate();
+  // No finite domain - try evaluating the body
+  const bodyEval = canonicalBody.evaluate();
   if (bodyEval.symbol === 'True') return ce.True;
   if (bodyEval.symbol === 'False') return ce.False;
 

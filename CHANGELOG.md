@@ -157,7 +157,14 @@
     // Returns True (only one element equals 2)
     ```
     Supports `Set`, `List`, `Range`, and integer `Interval` domains up to 1000
-    elements.
+    elements. Nested quantifiers are evaluated over the Cartesian product of
+    their domains.
+  - **Symbolic simplification for quantifiers**: Quantifiers now simplify
+    automatically in special cases:
+    - `∀x. True` → `True`, `∀x. False` → `False`
+    - `∃x. True` → `True`, `∃x. False` → `False`
+    - `∀x. P` → `P` (when P doesn't contain x)
+    - `∃x. P` → `P` (when P doesn't contain x)
   - **CNF/DNF conversion**: New `ToCNF` and `ToDNF` functions convert boolean
     expressions to Conjunctive Normal Form and Disjunctive Normal Form
     respectively:
