@@ -909,7 +909,7 @@ export const DEFINITIONS_CORE: LatexDictionary = [
     // @todo: Leibniz notation: {% latex " \\frac{d^n}{dx^n} f(x)" %}
     // @todo: Euler modified notation: This notation is used by Mathematica. The Euler notation uses `D` instead of
     // `\partial`: `\partial_{x} f`,  `\partial_{x,y} f`
-    // @todo: Newton notation: `\dot{v}` -> first derivative relative to time t `\ddot{v}` -> second derivative relative to time t
+    // Newton notation (\dot{v}, \ddot{v}) is implemented below
 
     serialize: (serializer: Serializer, expr: Expression): string => {
       const degree = machineValue(operand(expr, 2)) ?? 1;
@@ -921,6 +921,100 @@ export const DEFINITIONS_CORE: LatexDictionary = [
       return base + '^{(' + serializer.serialize(operand(expr, 2)) + ')}';
     },
   },
+
+  // Newton notation for time derivatives: \dot{x}, \ddot{x}, etc.
+  {
+    name: 'NewtonDerivative1',
+    latexTrigger: ['\\dot'],
+    kind: 'prefix',
+    precedence: 740,
+    parse: (parser: Parser): Expression | null => {
+      const body = parser.parseGroup();
+      if (body === null) return null;
+      const t = parser.options.timeDerivativeVariable;
+      return ['D', body, t] as Expression;
+    },
+  },
+  {
+    name: 'NewtonDerivative2',
+    latexTrigger: ['\\ddot'],
+    kind: 'prefix',
+    precedence: 740,
+    parse: (parser: Parser): Expression | null => {
+      const body = parser.parseGroup();
+      if (body === null) return null;
+      const t = parser.options.timeDerivativeVariable;
+      return ['D', ['D', body, t], t] as Expression;
+    },
+  },
+  {
+    name: 'NewtonDerivative3',
+    latexTrigger: ['\\dddot'],
+    kind: 'prefix',
+    precedence: 740,
+    parse: (parser: Parser): Expression | null => {
+      const body = parser.parseGroup();
+      if (body === null) return null;
+      const t = parser.options.timeDerivativeVariable;
+      return ['D', ['D', ['D', body, t], t], t] as Expression;
+    },
+  },
+  {
+    name: 'NewtonDerivative4',
+    latexTrigger: ['\\ddddot'],
+    kind: 'prefix',
+    precedence: 740,
+    parse: (parser: Parser): Expression | null => {
+      const body = parser.parseGroup();
+      if (body === null) return null;
+      const t = parser.options.timeDerivativeVariable;
+      return ['D', ['D', ['D', ['D', body, t], t], t], t] as Expression;
+    },
+  },
+
+  // Euler notation for derivatives: D_x f, D^2_x f, D_x^2 f
+  // Uses latexTrigger to intercept before symbol parsing combines D with subscript
+  {
+    name: 'EulerDerivative',
+    latexTrigger: ['D'],
+    kind: 'expression',
+    parse: (parser: Parser): Expression | null => {
+      let degree = 1;
+      let variable: Expression | null = null;
+
+      // Parse subscript and superscript in either order (D_x^2 or D^2_x)
+      let done = false;
+      while (!done) {
+        if (parser.match('_')) {
+          // Parse the subscript (variable)
+          variable = parser.parseGroup() ?? parser.parseToken();
+          if (!variable) return null;
+        } else if (parser.match('^')) {
+          // Parse the superscript (degree)
+          const degExpr = parser.parseGroup() ?? parser.parseToken();
+          degree = machineValue(degExpr) ?? 1;
+        } else {
+          done = true;
+        }
+      }
+
+      // Only trigger if we have a subscript (to distinguish from D as a variable)
+      if (!variable) return null;
+
+      // Parse the function/expression to differentiate
+      parser.skipSpace();
+      const fn = parser.parseExpression({ minPrec: 740 });
+      if (!fn) return null;
+
+      // Build nested D for the degree
+      let result: Expression = fn;
+      for (let i = 0; i < degree; i++) {
+        result = ['D', result, variable] as Expression;
+      }
+      return result;
+    },
+  },
+
   {
     kind: 'environment',
     name: 'Which',
@@ -1199,6 +1293,14 @@ function parsePrime(
   lhs: Expression,
   order: number
 ): Expression | null {
+  // Accumulate additional prime marks (e.g., f''' -> order 3)
+  while (!parser.atEnd) {
+    if (parser.match("'") || parser.match('\\prime')) order++;
+    else if (parser.match('\\doubleprime')) order += 2;
+    else if (parser.match('\\tripleprime')) order += 3;
+    else break;
+  }
+
   // If the lhs is a Prime/Derivative, increase the derivation order
   const lhsh = operator(lhs);
   if (lhsh === 'Derivative' || lhsh === 'Prime') {
@@ -1211,6 +1313,31 @@ function parsePrime(
 
   const sym = symbol(lhs);
   if ((sym && parser.getSymbolType(sym).matches('function')) || operator(lhs)) {
+    // Check if followed by arguments - if so, use D notation
+    // e.g., f'(x) -> ["D", ["f", "x"], "x"]
+    parser.skipSpace();
+    const args = parser.parseArguments('enclosure');
+
+    if (args && args.length > 0) {
+      // Infer differentiation variable from first argument (if it's a symbol)
+      const firstArg = args[0];
+      const variable = symbol(firstArg) ?? 'x';
+
+      // Build function call: f(x, y, ...) -> ['f', x, y, ...]
+      const fnCall =
+        typeof lhs === 'string'
+          ? ([lhs, ...args] as Expression)
+          : (['Apply', lhs, ...args] as Expression);
+
+      // Wrap with nested D for the order
+      let result: Expression = fnCall;
+      for (let i = 0; i < order; i++) {
+        result = ['D', result, variable] as Expression;
+      }
+      return result;
+    }
+
+    // No arguments - return Derivative as before
     if (order === 1) return ['Derivative', lhs];
     return ['Derivative', lhs, order];
   }

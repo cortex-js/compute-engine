@@ -796,6 +796,16 @@ export type ParseLatexOptions = NumberFormat & {
    * // parses as: ∀x. (P(x) → Q(x))
    */
   quantifierScope: 'tight' | 'loose';
+
+  /**
+   * The variable used for time derivatives in Newton notation
+   * (`\dot{x}`, `\ddot{x}`, etc.).
+   *
+   * When parsing `\dot{x}`, it will be interpreted as `["D", "x", timeDerivativeVariable]`.
+   *
+   * **Default:** `"t"`
+   */
+  timeDerivativeVariable: string;
 };
 
 /**

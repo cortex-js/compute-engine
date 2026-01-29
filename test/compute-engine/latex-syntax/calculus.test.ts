@@ -159,3 +159,60 @@ describe('LIMIT', () => {
   Limit,Function,f,x,x,PositiveInfinity
 `);
 });
+
+describe('NEWTON DOT NOTATION', () => {
+  test('First derivative \\dot{x}', () =>
+    expect(parse('\\dot{x}')).toMatchSnapshot());
+
+  test('Second derivative \\ddot{x}', () =>
+    expect(parse('\\ddot{x}')).toMatchSnapshot());
+
+  test('Third derivative \\dddot{y}', () =>
+    expect(parse('\\dddot{y}')).toMatchSnapshot());
+
+  test('Fourth derivative \\ddddot{z}', () =>
+    expect(parse('\\ddddot{z}')).toMatchSnapshot());
+
+  test('Dot notation with expression', () =>
+    expect(parse('\\dot{x} + \\ddot{x}')).toMatchSnapshot());
+});
+
+describe('LAGRANGE PRIME NOTATION WITH ARGUMENTS', () => {
+  test("f'(x) - single prime with argument", () =>
+    expect(parse("f'(x)")).toMatchSnapshot());
+
+  test("f''(x) - double prime with argument", () =>
+    expect(parse("f''(x)")).toMatchSnapshot());
+
+  test("f'''(x) - triple prime with argument", () =>
+    expect(parse("f'''(x)")).toMatchSnapshot());
+
+  test("g'(t) - different variable", () =>
+    expect(parse("g'(t)")).toMatchSnapshot());
+
+  test("f'(x, y) - multiple arguments uses first as variable", () =>
+    expect(parse("f'(x, y)")).toMatchSnapshot());
+
+  test("f' without arguments - returns Derivative", () =>
+    expect(parse("f'")).toMatchSnapshot());
+
+  test("\\sin'(x) - known function with prime", () =>
+    expect(parse("\\sin'(x)")).toMatchSnapshot());
+});
+
+describe('EULER DERIVATIVE NOTATION', () => {
+  test('D_x f - first derivative', () =>
+    expect(parse('D_x f')).toMatchSnapshot());
+
+  test('D_t x - different variable', () =>
+    expect(parse('D_t x')).toMatchSnapshot());
+
+  test('D^2_x f - second derivative', () =>
+    expect(parse('D^2_x f')).toMatchSnapshot());
+
+  test('D_x (x^2 + 1) - derivative of expression', () =>
+    expect(parse('D_x (x^2 + 1)')).toMatchSnapshot());
+
+  test('D without subscript - should parse as symbol', () =>
+    expect(parse('D')).toMatchSnapshot());
+});

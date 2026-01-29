@@ -1,5 +1,23 @@
 ## [Unreleased]
 
+### Features
+
+- **([#163](https://github.com/cortex-js/compute-engine/issues/163)) Additional
+  Derivative Notations**: Added support for parsing multiple derivative notations
+  beyond Leibniz notation:
+
+  - **Newton's dot notation** for time derivatives: `\dot{x}` → `["D", "x", "t"]`,
+    `\ddot{x}` for second derivative, `\dddot{x}` and `\ddddot{x}` for higher orders.
+    The time variable is configurable via the new `timeDerivativeVariable` parser
+    option (default: `"t"`).
+
+  - **Lagrange prime notation with arguments**: `f'(x)` now parses to
+    `["D", ["f", "x"], "x"]`, inferring the differentiation variable from the
+    function argument. Works for `f''(x)`, `f'''(x)`, etc. for higher derivatives.
+
+  - **Euler's subscript notation**: `D_x f` → `["D", "f", "x"]` and
+    `D^2_x f` or `D_x^2 f` for second derivatives.
+
 ### Bug Fixes
 
 - **Matrix Operations Type Validation**: Fixed matrix operations (`Shape`, `Rank`,
