@@ -11,6 +11,14 @@
   rule parsing uses a clean scope that inherits only from the system scope
   (containing built-in definitions), not from user-polluted scopes.
 
+- **([#156](https://github.com/cortex-js/compute-engine/issues/156)) Logical
+  Operator Precedence**: Fixed parsing of logical operators `\vee` (Or) and
+  `\wedge` (And) with relational operators. Previously, expressions like
+  `3=4\vee 7=8` were incorrectly parsed with the wrong precedence. Now correctly
+  parses as `["Or", ["Equal", 3, 4], ["Equal", 7, 8]]`. Logical operators have
+  lower precedence (230-235) than comparison operators (245) and set relations
+  (240), so compound propositions parse correctly without requiring parentheses.
+
 - **Simplification Rules**: Added and fixed several simplification rules:
   - `x + x` now correctly simplifies to `2x` (term combination)
   - `e^x * e^{-x}` now correctly simplifies to `1` (exponential inverse)
