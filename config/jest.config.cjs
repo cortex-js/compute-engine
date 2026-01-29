@@ -3,6 +3,7 @@ module.exports = {
   verbose: true,
   preset: 'ts-jest',
   testEnvironment: 'node',
+  maxWorkers: 6, // Optimized for M3 (8-core: 4P + 4E) based on benchmarking
   collectCoverageFrom: ['src/**/*.ts', '!<rootDir>/node_modules/'],
   coverageReporters: ['lcov'],
   coverageDirectory: '../coverage',
