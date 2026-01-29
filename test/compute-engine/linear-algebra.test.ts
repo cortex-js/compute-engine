@@ -832,3 +832,150 @@ describe('OnesMatrix', () => {
     );
   });
 });
+
+describe('Norm', () => {
+  // Scalar norm (absolute value)
+  it('should compute the norm of a scalar', () => {
+    const result = ce.box(['Norm', 5]).evaluate();
+    expect(result.toString()).toMatchInlineSnapshot(`5`);
+  });
+
+  it('should compute the norm of a negative scalar', () => {
+    const result = ce.box(['Norm', -7]).evaluate();
+    expect(result.toString()).toMatchInlineSnapshot(`7`);
+  });
+
+  // Vector L2 norm (default)
+  it('should compute the L2 norm of a vector (3-4-5 triangle)', () => {
+    // √(3² + 4²) = √(9 + 16) = √25 = 5
+    const result = ce.box(['Norm', ['List', 3, 4]]).evaluate();
+    expect(result.toString()).toMatchInlineSnapshot(`5`);
+  });
+
+  it('should compute the L2 norm of a vector with negatives', () => {
+    // √(3² + (-4)²) = 5
+    const result = ce.box(['Norm', ['List', 3, -4]]).evaluate();
+    expect(result.toString()).toMatchInlineSnapshot(`5`);
+  });
+
+  it('should compute the L2 norm of a 3D vector', () => {
+    // √(1² + 2² + 2²) = √(1 + 4 + 4) = √9 = 3
+    const result = ce.box(['Norm', ['List', 1, 2, 2]]).evaluate();
+    expect(result.toString()).toMatchInlineSnapshot(`3`);
+  });
+
+  // Vector L1 norm
+  it('should compute the L1 norm of a vector', () => {
+    // |3| + |-4| = 3 + 4 = 7
+    const result = ce.box(['Norm', ['List', 3, -4], 1]).evaluate();
+    expect(result.toString()).toMatchInlineSnapshot(`7`);
+  });
+
+  it('should compute the L1 norm of a longer vector', () => {
+    // |1| + |-2| + |3| + |-4| = 1 + 2 + 3 + 4 = 10
+    const result = ce.box(['Norm', ['List', 1, -2, 3, -4], 1]).evaluate();
+    expect(result.toString()).toMatchInlineSnapshot(`10`);
+  });
+
+  // Vector L∞ norm (max absolute value)
+  it('should compute the L-infinity norm of a vector', () => {
+    // max(|3|, |-4|) = 4
+    const result = ce
+      .box(['Norm', ['List', 3, -4], 'Infinity'])
+      .evaluate();
+    expect(result.toString()).toMatchInlineSnapshot(`4`);
+  });
+
+  it('should compute the L-infinity norm with string', () => {
+    // max(|1|, |-5|, |3|) = 5
+    const result = ce
+      .box(['Norm', ['List', 1, -5, 3], { str: 'Infinity' }])
+      .evaluate();
+    expect(result.toString()).toMatchInlineSnapshot(`5`);
+  });
+
+  // Vector Lp norm (general)
+  it('should compute the L3 norm of a vector', () => {
+    // (|3|³ + |4|³)^(1/3) = (27 + 64)^(1/3) = 91^(1/3) ≈ 4.498
+    const result = ce.box(['Norm', ['List', 3, 4], 3]).evaluate();
+    expect(result.re).toBeCloseTo(4.4979, 3);
+  });
+
+  it('should compute the L4 norm of a vector', () => {
+    // (|2|⁴ + |2|⁴)^(1/4) = (16 + 16)^(1/4) = 32^(1/4) ≈ 2.378
+    const result = ce.box(['Norm', ['List', 2, 2], 4]).evaluate();
+    expect(result.re).toBeCloseTo(2.3784, 3);
+  });
+
+  // Matrix Frobenius norm (default)
+  it('should compute the Frobenius norm of a matrix', () => {
+    // √(1² + 2² + 3² + 4²) = √(1 + 4 + 9 + 16) = √30 ≈ 5.477
+    const result = ce.box(['Norm', sq2_n]).evaluate();
+    expect(result.re).toBeCloseTo(5.4772, 3);
+  });
+
+  it('should compute the Frobenius norm of a non-square matrix', () => {
+    // √(1² + 2² + 3² + 4² + 5² + 6²) = √(1+4+9+16+25+36) = √91 ≈ 9.539
+    const result = ce.box(['Norm', m23_n]).evaluate();
+    expect(result.re).toBeCloseTo(9.5394, 3);
+  });
+
+  it('should compute the Frobenius norm with explicit type', () => {
+    const result = ce
+      .box(['Norm', sq2_n, { str: 'Frobenius' }])
+      .evaluate();
+    expect(result.re).toBeCloseTo(5.4772, 3);
+  });
+
+  // Matrix L1 norm (max column sum)
+  it('should compute the L1 norm of a matrix', () => {
+    // [[1, 2], [3, 4]]
+    // Column sums: |1| + |3| = 4, |2| + |4| = 6
+    // max = 6
+    const result = ce.box(['Norm', sq2_n, 1]).evaluate();
+    expect(result.toString()).toMatchInlineSnapshot(`6`);
+  });
+
+  it('should compute the L1 norm of a matrix with negatives', () => {
+    // [[1, -2], [-3, 4]]
+    // Column sums: |1| + |-3| = 4, |-2| + |4| = 6
+    // max = 6
+    const result = ce
+      .box(['Norm', ['List', ['List', 1, -2], ['List', -3, 4]], 1])
+      .evaluate();
+    expect(result.toString()).toMatchInlineSnapshot(`6`);
+  });
+
+  // Matrix L∞ norm (max row sum)
+  it('should compute the L-infinity norm of a matrix', () => {
+    // [[1, 2], [3, 4]]
+    // Row sums: |1| + |2| = 3, |3| + |4| = 7
+    // max = 7
+    const result = ce
+      .box(['Norm', sq2_n, { str: 'Infinity' }])
+      .evaluate();
+    expect(result.toString()).toMatchInlineSnapshot(`7`);
+  });
+
+  it('should compute the L-infinity norm of a non-square matrix', () => {
+    // [[1, 2, 3], [4, 5, 6]]
+    // Row sums: 1 + 2 + 3 = 6, 4 + 5 + 6 = 15
+    // max = 15
+    const result = ce
+      .box(['Norm', m23_n, { str: 'Infinity' }])
+      .evaluate();
+    expect(result.toString()).toMatchInlineSnapshot(`15`);
+  });
+
+  // Zero vector
+  it('should compute the norm of a zero vector', () => {
+    const result = ce.box(['Norm', ['List', 0, 0, 0]]).evaluate();
+    expect(result.toString()).toMatchInlineSnapshot(`0`);
+  });
+
+  // Single element vector
+  it('should compute the norm of a single element vector', () => {
+    const result = ce.box(['Norm', ['List', -5]]).evaluate();
+    expect(result.toString()).toMatchInlineSnapshot(`5`);
+  });
+});

@@ -586,6 +586,166 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
         return ce.box(['List', ...rows]);
       },
     },
+
+    // Computes vector and matrix norms
+    // For vectors:
+    //   - L2 (Euclidean, default): √(Σ|xi|²)
+    //   - L1: Σ|xi|
+    //   - L∞ (max): max(|xi|)
+    //   - Lp: (Σ|xi|^p)^(1/p)
+    // For matrices:
+    //   - Frobenius (default): √(ΣΣ|aij|²)
+    Norm: {
+      complexity: 8200,
+      signature: '(value, number|string?) -> number',
+      evaluate: (ops, { engine: ce }): BoxedExpression | undefined => {
+        const x = ops[0].evaluate();
+        const normTypeExpr = ops.length > 1 ? ops[1].evaluate() : undefined;
+
+        // Scalar: |x| (absolute value)
+        if (x.isNumber) {
+          return ce.box(['Abs', x]).evaluate();
+        }
+
+        if (!isBoxedTensor(x)) return undefined;
+
+        const shape = x.shape;
+
+        // Determine norm type
+        let normType: number | string = 2; // Default to L2/Frobenius
+        if (normTypeExpr) {
+          if (
+            normTypeExpr.string === 'Infinity' ||
+            normTypeExpr.symbol === 'Infinity' ||
+            normTypeExpr.re === Infinity
+          ) {
+            normType = 'infinity';
+          } else if (normTypeExpr.string === 'Frobenius') {
+            normType = 'frobenius';
+          } else if (normTypeExpr.re !== undefined) {
+            normType = normTypeExpr.re;
+          }
+        }
+
+        // Vector norm (rank 1)
+        if (shape.length === 1) {
+          const elements: BoxedExpression[] = [];
+          const n = shape[0];
+          for (let i = 0; i < n; i++) {
+            const val = x.tensor.at(i + 1);
+            elements.push(val !== undefined ? ce.box(val) : ce.Zero);
+          }
+
+          if (normType === 1) {
+            // L1 norm: sum of absolute values
+            let sum: BoxedExpression = ce.Zero;
+            for (const el of elements) {
+              sum = sum.add(ce.box(['Abs', el]).evaluate());
+            }
+            return sum.evaluate();
+          }
+
+          if (normType === 2) {
+            // L2 norm: sqrt of sum of squares
+            let sumSq: BoxedExpression = ce.Zero;
+            for (const el of elements) {
+              const absEl = ce.box(['Abs', el]).evaluate();
+              sumSq = sumSq.add(absEl.mul(absEl));
+            }
+            return ce.box(['Sqrt', sumSq]).evaluate();
+          }
+
+          if (normType === 'infinity') {
+            // L∞ norm: max absolute value
+            let maxVal: BoxedExpression = ce.Zero;
+            for (const el of elements) {
+              const absEl = ce.box(['Abs', el]).evaluate();
+              // Compare: use numeric comparison
+              const absNum = absEl.re ?? 0;
+              const maxNum = maxVal.re ?? 0;
+              if (absNum > maxNum) {
+                maxVal = absEl;
+              }
+            }
+            return maxVal;
+          }
+
+          // General Lp norm: (Σ|xi|^p)^(1/p)
+          if (typeof normType === 'number' && normType > 0) {
+            const p = normType;
+            let sumPow: BoxedExpression = ce.Zero;
+            for (const el of elements) {
+              const absEl = ce.box(['Abs', el]).evaluate();
+              sumPow = sumPow.add(ce.box(['Power', absEl, p]).evaluate());
+            }
+            // Use Root for integer p values, Power for non-integer
+            // Use .N() to get numeric result for non-perfect roots
+            if (Number.isInteger(p)) {
+              return ce.box(['Root', sumPow, p]).N();
+            }
+            return ce.box(['Power', sumPow, ce.box(['Divide', 1, p])]).N();
+          }
+
+          return undefined;
+        }
+
+        // Matrix norm (rank 2)
+        if (shape.length === 2) {
+          const [m, n] = shape;
+
+          // Frobenius norm (default for matrices): √(ΣΣ|aij|²)
+          if (normType === 2 || normType === 'frobenius') {
+            let sumSq: BoxedExpression = ce.Zero;
+            for (let i = 0; i < m; i++) {
+              for (let j = 0; j < n; j++) {
+                const val = x.tensor.at(i + 1, j + 1);
+                const el = val !== undefined ? ce.box(val) : ce.Zero;
+                const absEl = ce.box(['Abs', el]).evaluate();
+                sumSq = sumSq.add(absEl.mul(absEl));
+              }
+            }
+            return ce.box(['Sqrt', sumSq]).evaluate();
+          }
+
+          // L1 (max column sum of absolute values)
+          if (normType === 1) {
+            let maxColSum = 0;
+            for (let j = 0; j < n; j++) {
+              let colSum = 0;
+              for (let i = 0; i < m; i++) {
+                const val = x.tensor.at(i + 1, j + 1);
+                const el = val !== undefined ? ce.box(val) : ce.Zero;
+                const absEl = ce.box(['Abs', el]).evaluate();
+                colSum += absEl.re ?? 0;
+              }
+              if (colSum > maxColSum) maxColSum = colSum;
+            }
+            return ce.number(maxColSum);
+          }
+
+          // L∞ (max row sum of absolute values)
+          if (normType === 'infinity') {
+            let maxRowSum = 0;
+            for (let i = 0; i < m; i++) {
+              let rowSum = 0;
+              for (let j = 0; j < n; j++) {
+                const val = x.tensor.at(i + 1, j + 1);
+                const el = val !== undefined ? ce.box(val) : ce.Zero;
+                const absEl = ce.box(['Abs', el]).evaluate();
+                rowSum += absEl.re ?? 0;
+              }
+              if (rowSum > maxRowSum) maxRowSum = rowSum;
+            }
+            return ce.number(maxRowSum);
+          }
+
+          return undefined;
+        }
+
+        // Higher-rank tensors: not supported yet
+        return undefined;
+      },
+    },
   },
 ];
 
