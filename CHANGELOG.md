@@ -32,6 +32,13 @@
 - **LogGamma Derivative**: Added derivative rule for `LogGamma(x)` which returns
   `Digamma(x)` (the digamma/psi function).
 
+- **Polynomial Degree Detection**: Fixed `polynomialDegree()` returning 0 for
+  expressions like `e^x` or `e^(-x^2)` when it should return -1 (not a polynomial).
+  When the base of a power is constant but the exponent depends on the variable,
+  this is not a polynomial. This bug caused infinite recursion in simplification
+  when simplifying expressions containing exponentials, such as the derivative
+  of `erf(x)` which is `(2/√π)·e^(-x²)`.
+
 - **([#168](https://github.com/cortex-js/compute-engine/issues/168))
   Absolute Value**: Fixed parsing of nested absolute value expressions that
   start with a double bar (e.g. `||3-5|-4|`), which previously produced an
@@ -178,6 +185,13 @@
     ```
     Handles `And`, `Or`, `Not`, `Implies`, `Equivalent`, and `Xor` operators
     using De Morgan's laws and distribution.
+  - **Boolean operator evaluation**: Added evaluation support for `Xor`, `Nand`,
+    and `Nor` operators with `True`/`False` arguments:
+    ```typescript
+    ce.box(['Xor', 'True', 'False']).evaluate()   // Returns True
+    ce.box(['Nand', 'True', 'True']).evaluate()   // Returns False
+    ce.box(['Nor', 'False', 'False']).evaluate()  // Returns True
+    ```
 
 - **Polynomial Simplification**: The `simplify()` function now automatically
   cancels common polynomial factors in univariate rational expressions. For

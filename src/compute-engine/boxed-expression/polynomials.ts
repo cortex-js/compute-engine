@@ -284,7 +284,11 @@ export function polynomialDegree(
   if (op === 'Power') {
     const baseDeg = polynomialDegree(expr.op1, variable);
     if (baseDeg < 0) return -1;
-    if (baseDeg === 0) return 0; // Constant base
+    if (baseDeg === 0) {
+      // Base doesn't depend on variable, but exponent might (e.g., e^x)
+      if (expr.op2.has(variable)) return -1;
+      return 0;
+    }
 
     // Exponent must be a non-negative integer
     const exp = asSmallInteger(expr.op2);
