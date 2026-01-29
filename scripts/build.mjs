@@ -54,82 +54,84 @@ const BUILD_OPTIONS = {
 };
 
 //
-// Build the library
+// Build all variants in parallel for maximum performance
 //
-esbuild.build({
-  ...BUILD_OPTIONS,
-  entryPoints: ['./src/compute-engine.ts'],
-  outfile: './dist/compute-engine.esm.js',
-  format: 'esm',
-});
+await Promise.all([
+  // Build the library (non-minified)
+  esbuild.build({
+    ...BUILD_OPTIONS,
+    entryPoints: ['./src/compute-engine.ts'],
+    outfile: './dist/compute-engine.esm.js',
+    format: 'esm',
+  }),
 
-esbuild.build({
-  ...BUILD_OPTIONS,
-  entryPoints: ['./src/compute-engine.ts'],
-  outfile: './dist/compute-engine.umd.js',
-  format: 'iife',
-  ...COMPUTE_ENGINE_UMD_OPTIONS,
-  globalName: 'ComputeEngine',
-});
+  esbuild.build({
+    ...BUILD_OPTIONS,
+    entryPoints: ['./src/compute-engine.ts'],
+    outfile: './dist/compute-engine.umd.js',
+    format: 'iife',
+    ...COMPUTE_ENGINE_UMD_OPTIONS,
+    globalName: 'ComputeEngine',
+  }),
 
-esbuild.build({
-  ...BUILD_OPTIONS,
-  entryPoints: ['./src/math-json.ts'],
-  outfile: './dist/math-json.esm.js',
-  format: 'esm',
-});
+  esbuild.build({
+    ...BUILD_OPTIONS,
+    entryPoints: ['./src/math-json.ts'],
+    outfile: './dist/math-json.esm.js',
+    format: 'esm',
+  }),
 
-esbuild.build({
-  ...BUILD_OPTIONS,
-  entryPoints: ['./src/math-json.ts'],
-  outfile: './dist/math-json.umd.js',
-  format: 'iife',
-  ...MATH_JSON_UMD_OPTIONS,
-  globalName: 'MathJson',
-});
+  esbuild.build({
+    ...BUILD_OPTIONS,
+    entryPoints: ['./src/math-json.ts'],
+    outfile: './dist/math-json.umd.js',
+    format: 'iife',
+    ...MATH_JSON_UMD_OPTIONS,
+    globalName: 'MathJson',
+  }),
 
-//
-// Build the minified library
-//
-esbuild.build({
-  ...BUILD_OPTIONS,
-  drop: ['debugger'],
-  pure: ['console.assert', 'console.log'],
-  minify: true,
-  entryPoints: ['./src/compute-engine.ts'],
-  outfile: './dist/compute-engine.min.esm.js',
-  format: 'esm',
-});
+  // Build the minified library
+  esbuild.build({
+    ...BUILD_OPTIONS,
+    drop: ['debugger'],
+    pure: ['console.assert', 'console.log'],
+    minify: true,
+    entryPoints: ['./src/compute-engine.ts'],
+    outfile: './dist/compute-engine.min.esm.js',
+    format: 'esm',
+  }),
 
-esbuild.build({
-  ...BUILD_OPTIONS,
-  drop: ['debugger'],
-  pure: ['console.assert', 'console.log'],
-  minify: true,
-  entryPoints: ['./src/compute-engine.ts'],
-  outfile: './dist/compute-engine.min.umd.js',
-  format: 'iife',
-  ...COMPUTE_ENGINE_UMD_OPTIONS,
-  globalName: 'ComputeEngine',
-});
+  esbuild.build({
+    ...BUILD_OPTIONS,
+    drop: ['debugger'],
+    pure: ['console.assert', 'console.log'],
+    minify: true,
+    entryPoints: ['./src/compute-engine.ts'],
+    outfile: './dist/compute-engine.min.umd.js',
+    format: 'iife',
+    ...COMPUTE_ENGINE_UMD_OPTIONS,
+    globalName: 'ComputeEngine',
+  }),
 
-esbuild.build({
-  ...BUILD_OPTIONS,
-  drop: ['debugger'],
-  pure: ['console.assert', 'console.log'],
-  entryPoints: ['./src/math-json.ts'],
-  outfile: './dist/math-json.min.esm.js',
-  format: 'esm',
-});
+  esbuild.build({
+    ...BUILD_OPTIONS,
+    drop: ['debugger'],
+    pure: ['console.assert', 'console.log'],
+    minify: true,
+    entryPoints: ['./src/math-json.ts'],
+    outfile: './dist/math-json.min.esm.js',
+    format: 'esm',
+  }),
 
-esbuild.build({
-  ...BUILD_OPTIONS,
-  drop: ['debugger'],
-  pure: ['console.assert', 'console.log'],
-  minify: true,
-  entryPoints: ['./src/math-json.ts'],
-  outfile: './dist/math-json.min.umd.js',
-  format: 'iife',
-  ...MATH_JSON_UMD_OPTIONS,
-  globalName: 'MathJson',
-});
+  esbuild.build({
+    ...BUILD_OPTIONS,
+    drop: ['debugger'],
+    pure: ['console.assert', 'console.log'],
+    minify: true,
+    entryPoints: ['./src/math-json.ts'],
+    outfile: './dist/math-json.min.umd.js',
+    format: 'iife',
+    ...MATH_JSON_UMD_OPTIONS,
+    globalName: 'MathJson',
+  }),
+]);

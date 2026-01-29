@@ -6,6 +6,7 @@
     "esModuleInterop": true,
     "experimentalDecorators": false,
     "incremental": true,
+    "tsBuildInfoFile": "./.tsbuildinfo", // Cache for incremental builds
     "lib": ["es2022", "dom", "dom.iterable", "scripthost"],
     "module": "es2022",
     "target": "es2022",
@@ -16,7 +17,8 @@
     "removeComments": false,
     "sourceMap": true,
     "strictNullChecks": true,
-    "isolatedModules": true
+    "isolatedModules": true,
+    "skipLibCheck": true // Skip type checking of declaration files (faster)
     // "isolatedDeclarations": true
   },
   "include": ["src/**/*"]
