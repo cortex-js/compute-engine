@@ -188,7 +188,8 @@ export const SIMPLIFY_RULES: Rule[] = [
     const ce = x.engine;
     if (s === undefined) return undefined;
     if (s === 'positive') return { value: ce.One, because: 'sign positive' };
-    if (s === 'negative') return { value: ce.One, because: 'sign negative' };
+    if (s === 'negative')
+      return { value: ce.NegativeOne, because: 'sign negative' };
     if (s === 'zero') return { value: ce.Zero, because: 'sign zero' };
     if (s === 'unsigned') return { value: ce.NaN, because: 'sign unsinged' };
     return undefined;

@@ -86,17 +86,8 @@ const DERIVATIVES_TABLE = {
   Ln: ['Divide', 1, '_'],
   Log: ['Power', ['Multiply', '_', ['Ln', '10']], -1],
   Sqrt: ['Multiply', ['Power', '_', ['Negate', 'Half']], 'Half'],
-  Abs: [
-    'Which',
-    ['Equal', '_', 0],
-    NaN,
-    ['Less', '_', 0],
-    -1,
-    ['Greater', '_', 0],
-    1,
-    'True',
-    ['D', ['Abs', '_'], '_'],
-  ],
+  // d/dx |x| = x/|x| = sign(x) for x ≠ 0 (undefined at x = 0)
+  Abs: ['Sign', '_'],
   // https://proofwiki.org/wiki/Derivative_of_Error_Function
   Erf: [
     'Multiply',

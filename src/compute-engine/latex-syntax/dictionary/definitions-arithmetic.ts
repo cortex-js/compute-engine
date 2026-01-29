@@ -568,7 +568,11 @@ function serializePower(
           return serializer.serialize(['Divide', '1', ['Sqrt', base]]);
         }
         // x^{-1/n} -> 1/root(x, n)
-        return serializer.serialize(['Divide', '1', ['Root', base, denom]]);
+        return serializer.serialize([
+          'Divide',
+          '1',
+          ['Root', base, operand(exp, 2)],
+        ]);
       }
       if (denom === 2) {
         // It's x^(n/2) -> it's √x^n
@@ -585,15 +589,24 @@ function serializePower(
     }
   }
 
+  const wrapNegativeBase = (latex: string): string =>
+    latex.startsWith('-') ? serializer.wrapString(latex, 'normal') : latex;
+
   // For improved typography, serialize 2^2^2 as 2^{2^2} rather than {2^2}^2. Note that 2^2^2 is invalid LaTeX.
   if (operator(base) === 'Power') {
     const baseBody = operand(base, 1);
     const baseExponent = operand(base, 2);
+    const baseBodyLatex = wrapNegativeBase(serializer.wrapShort(baseBody));
+    const baseExponentLatex = serializer.wrapShort(baseExponent);
     return `
-      ${serializer.wrapShort(baseBody)}^{${supsub('^', serializer.wrapShort(baseExponent), serializer.serialize(exp))}}`;
+      ${baseBodyLatex}^{${supsub('^', baseExponentLatex, serializer.serialize(exp))}}`;
   }
 
-  return supsub('^', serializer.wrapShort(base), serializer.serialize(exp));
+  return supsub(
+    '^',
+    wrapNegativeBase(serializer.wrapShort(base)),
+    serializer.serialize(exp)
+  );
 }
 
 export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
@@ -1254,8 +1267,12 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
   {
     name: 'Square',
     precedence: 720,
-    serialize: (serializer, expr) =>
-      serializer.wrapShort(operand(expr, 1)) + '^2',
+    serialize: (serializer, expr) => {
+      const base = serializer.wrapShort(operand(expr, 1));
+      const wrapped =
+        base.startsWith('-') ? serializer.wrapString(base, 'normal') : base;
+      return wrapped + '^2';
+    },
   },
   {
     latexTrigger: ['\\sum'],

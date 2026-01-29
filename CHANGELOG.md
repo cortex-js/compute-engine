@@ -2,6 +2,19 @@
 
 ### Bug Fixes
 
+- **Sign Simplification**: Fixed `Sign(x).simplify()` returning `1` instead of
+  `-1` when `x` is negative. The simplification rule incorrectly returned
+  `ce.One` for both positive and negative cases.
+
+- **Abs Derivative**: Fixed `d/dx |x|` returning an error when evaluated with
+  a variable that has an assigned value. The derivative formula now uses
+  `Sign(x)` instead of a complex `Which` expression that couldn't be evaluated
+  symbolically.
+
+- **LaTeX Serialization**: Fixed TypeScript error in power serialization where
+  `denom` (a `number | null`) was incorrectly passed where an `Expression` was
+  expected. Now correctly uses `operand(exp, 2)` to get the expression form.
+
 - **([#168](https://github.com/cortex-js/compute-engine/issues/168))
   Absolute Value**: Fixed parsing of nested absolute value expressions that
   start with a double bar (e.g. `||3-5|-4|`), which previously produced an
