@@ -86,7 +86,38 @@ export function costFunction(expr: BoxedExpression): number {
   else if (['Power', 'Root'].includes(name))
     // We want 2q^2 to be less expensive than 2qq, so we ignore the exponent
     return costFunction(expr.ops![1]);
-  else if (['Multiply'].includes(name)) nameCost = 7;
+  else if (['Multiply'].includes(name)) {
+    // We want 2x to be less expensive than x + x, so if the first operand
+    // is a small number coefficient, treat it as cheaper
+    const ops = expr.ops ?? [];
+    if (ops.length === 2 && ops[0].isNumberLiteral) {
+      const coef = ops[0].numericValue;
+      // Check if it's a small integer or rational (handles both number and NumericValue types)
+      let isSmallCoef = false;
+      if (typeof coef === 'number') {
+        isSmallCoef = Number.isInteger(coef) && Math.abs(coef) <= 10;
+      } else if (coef) {
+        // Accept small integers or any finite rational as coefficient
+        const type = coef.type;
+        if (type === 'finite_integer' && Math.abs(coef.re) <= 10) {
+          isSmallCoef = true;
+        } else if (type === 'finite_rational') {
+          isSmallCoef = true;
+        }
+      }
+      if (isSmallCoef) {
+        // Treat coefficient multiplication as equivalent to Add
+        // Special case: n*ln(x) or n*log(x) should be very cheap (preferred form)
+        const secondOp = ops[1].operator;
+        if (['Ln', 'Log', 'Lb'].includes(secondOp)) {
+          // n*ln(x) is the standard form for log(x^n), make it cheaper
+          return 2 + costFunction(ops[1]);
+        }
+        return 3 + costFunction(ops[1]);
+      }
+    }
+    nameCost = 7;
+  }
   else if (['Divide'].includes(name)) nameCost = 8;
   else if (['Ln', 'Exp', 'Log', 'Lb'].includes(name)) nameCost = 9;
   else if (['Cos', 'Sin', 'Tan'].includes(name)) nameCost = 10;
