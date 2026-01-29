@@ -74,6 +74,45 @@ describe('Logic', () => {
     `);
   });
 
+  // https://github.com/cortex-js/compute-engine/issues/156
+  it('should parse logical operators with correct precedence (issue #156)', () => {
+    // Logical operators should have lower precedence than relational operators
+    // so expressions like `3=4\vee 7=8` parse as `(3=4) \vee (7=8)`
+    expect(ce.parse('3=4\\vee 7=8').json).toMatchInlineSnapshot(`
+      [
+        Or,
+        [
+          Equal,
+          3,
+          4,
+        ],
+        [
+          Equal,
+          7,
+          8,
+        ],
+      ]
+    `);
+
+    // Set relations with logical And
+    expect(ce.parse('A\\subseteq B\\wedge\\emptyset\\subset B').json)
+      .toMatchInlineSnapshot(`
+      [
+        And,
+        [
+          SubsetEqual,
+          A,
+          B,
+        ],
+        [
+          Subset,
+          EmptySet,
+          B,
+        ],
+      ]
+    `);
+  });
+
   // https://github.com/cortex-js/compute-engine/issues/243
   it('should parse Or with comparisons correctly (issue #243)', () => {
     // Comparisons should bind tighter than logic operators
