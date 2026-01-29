@@ -24,6 +24,16 @@ export function simplify(
   // Check we are not recursing infinitely
   if (hasSeen(expr)) return steps!;
 
+  // Additional safety: limit maximum simplification steps to prevent stack overflow
+  // This catches cases where .simplify() is called recursively in new contexts
+  const MAX_SIMPLIFY_STEPS = 1000;
+  if (steps && steps.length >= MAX_SIMPLIFY_STEPS) {
+    console.warn(
+      `Simplification exceeded ${MAX_SIMPLIFY_STEPS} steps, stopping to prevent infinite recursion`
+    );
+    return steps;
+  }
+
   if (!steps) steps = [{ value: expr, because: 'initial' }];
 
   //

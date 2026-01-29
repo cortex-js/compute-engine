@@ -534,6 +534,7 @@ export function polynomialDivide(
     if (remainder[i].is(0)) continue;
 
     // Compute the quotient term coefficient
+    // Note: .simplify() on coefficients is safe as they're typically numbers/simple expressions
     const quotientCoef = remainder[i].div(leadingDivisor).simplify();
     quotientCoeffs[i - divisorDeg] = quotientCoef;
 
@@ -549,6 +550,8 @@ export function polynomialDivide(
   const quotient = fromCoefficients(quotientCoeffs, variable);
   const remainderPoly = fromCoefficients(remainder, variable);
 
+  // IMPORTANT: Don't call .simplify() on the result to avoid infinite recursion
+  // when called from within simplification rules (e.g., polynomial cancellation)
   return [quotient, remainderPoly];
 }
 
@@ -629,6 +632,7 @@ function makeMonic(poly: BoxedExpression, variable: string): BoxedExpression {
   if (!leadingCoef || leadingCoef.is(1)) return poly;
 
   // Divide all coefficients by leading coefficient
+  // Note: .simplify() on coefficients is safe as they're typically numbers/simple expressions
   const monicCoeffs = coeffs.map((c) => c.div(leadingCoef!).simplify());
   return fromCoefficients(monicCoeffs, variable);
 }
