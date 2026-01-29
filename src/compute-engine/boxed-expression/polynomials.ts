@@ -549,7 +549,7 @@ export function polynomialDivide(
   const quotient = fromCoefficients(quotientCoeffs, variable);
   const remainderPoly = fromCoefficients(remainder, variable);
 
-  return [quotient.simplify(), remainderPoly.simplify()];
+  return [quotient, remainderPoly];
 }
 
 /**
