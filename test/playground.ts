@@ -1,55 +1,7 @@
-import { parseType } from '../src/common/type/parse';
-import { isSubtype } from '../src/common/type/subtype';
-import { functionResult } from '../src/common/type/utils';
 import { ComputeEngine, Expression, InfixEntry } from '../src/compute-engine';
-import { parseCortex } from '../src/cortex';
 
 const ce = new ComputeEngine();
 const engine = ce;
-
-console.log(
-  ce.parse('3 / 0.03', { parseNumbers: 'rational' }).evaluate().latex
-);
-
-console.log(
-  ce.box(1 / 7000000).toLatex({
-    notation: 'engineering',
-  })
-);
-
-console.log(
-  ce.box(1 / 70000000).toLatex({
-    notation: 'engineering',
-  })
-);
-
-console.log(
-  ce
-    .box(1 / 7000000)
-    .toLatex({ notation: 'scientific', avoidExponentsInRange: null })
-);
-
-// ce.latexDictionary = [
-//   ...ce.latexDictionary,
-//   {
-//     kind: 'postfix',
-//     precedence: 810,
-//     latexTrigger: ['['],
-//     parse: (parser, lhs) => {
-//       const body = parser.parseExpression();
-//       if (!body || !parser.match(']')) return null;
-//       return ['InvisibleOperator', lhs, body];
-//     },
-//   },
-//   {
-//     kind: 'matchfix',
-//     openTrigger: '[',
-//     closeTrigger: ']',
-//     parse: (_, body) => ['Delimiter', body],
-//   },
-// ];
-
-// console.log(ce.parse('2[3.141592654]').evaluate().json);
 
 console.log(ce.parse('x = \\textcolor{red}{y + 1} - z').json);
 
@@ -97,7 +49,7 @@ ce.parse(
   .N()
   .print();
 
-ce.parse('D(\\sin(x), x)').evaluate().print();
+ce.box(['D', ce.parse('\\sin(x)'), 'x']).evaluate().print();
 
 // Should return '3^2'
 ce.parse('3\\times3', { canonical: ['Multiply'] });
