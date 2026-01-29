@@ -27,6 +27,11 @@
   "excludePrivate": true,
   "excludeProtected": true,
   "excludeReferences": true,
+  "validation": {
+    "notExported": false,
+    "invalidLink": true,
+    "notDocumented": false
+  },
   "name": "Compute Engine",
   "disableSources": true,
   "disableGit": true,

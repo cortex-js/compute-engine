@@ -4927,7 +4927,7 @@ type LatexDictionaryEntry = OneOf<[
 A dictionary entry is a record that maps a LaTeX token or string of tokens
 ( a trigger) to a MathJSON expression or to a parsing handler.
 
-Set the ComputeEngine.latexDictionary property to an array of
+Set the `ComputeEngine.latexDictionary` property to an array of
 dictionary entries to define custom LaTeX parsing and serialization.
 
 </MemberCard>

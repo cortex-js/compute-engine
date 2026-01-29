@@ -186,6 +186,7 @@ export function isIndexedEnvironmentEntry(
   return 'kind' in entry && entry.kind === 'environment';
 }
 
+/** @internal */
 export type IndexedLatexDictionaryEntry =
   | IndexedExpressionEntry
   | IndexedFunctionEntry
@@ -196,6 +197,7 @@ export type IndexedLatexDictionaryEntry =
   | IndexedPostfixEntry
   | IndexedEnvironmentEntry;
 
+/** @internal */
 export type IndexedLatexDictionary = {
   // Mapping from  MathJSON symbols to dictionary entry
   ids: Map<string, IndexedLatexDictionaryEntry>;

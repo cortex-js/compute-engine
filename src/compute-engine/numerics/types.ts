@@ -1,5 +1,6 @@
 import { Decimal } from 'decimal.js';
 
+/** @internal */
 type IsInteger<N extends number> = `${N}` extends `${string}.${string}`
   ? never
   : `${N}` extends `-${string}.${string}`

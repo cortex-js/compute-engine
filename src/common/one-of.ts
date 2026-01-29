@@ -18,4 +18,5 @@ export type OneOf<
 
 type SimpleOneOf<F, S> = OnlyFirst<F, S> | OnlyFirst<S, F>;
 
+/** @internal */
 type OnlyFirst<F, S> = F & { [Key in keyof Omit<S, keyof F>]?: never };
