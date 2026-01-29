@@ -49,55 +49,75 @@ export function canonicalInvisibleOperator(
     // Is it a function application: symbol with a function
     // definition followed by delimiter
     //
-    if (lhs.symbol && rhs.operator === 'Delimiter') {
+    // Note: lhs might be a Subscript (e.g., f_\text{a}) which canonicalizes
+    // to a symbol (f_a). Canonicalize first to handle this case.
+    const lhsCanon = lhs.canonical;
+    if (lhsCanon.symbol && rhs.operator === 'Delimiter') {
       // We have encountered something like `f(a+b)`, where `f` is not
       // defined. But it also could be `x(x+1)` where `x` is a number.
       // So, start with boxing the arguments and see if it makes sense.
 
       // No arguments, i.e. `f()`? It's definitely a function call.
       if (rhs.nops === 0) {
-        const def = ce.lookupDefinition(lhs.symbol);
+        const def = ce.lookupDefinition(lhsCanon.symbol);
         if (def) {
           if (isOperatorDef(def)) {
             // It's a known operator, all good (the canonicalization
             // will check the arity)
-            return ce.box([lhs.symbol]);
+            return ce.box([lhsCanon.symbol]);
           }
 
           if (def.value.type.isUnknown) {
-            lhs.infer('function');
-            return ce.box([lhs.symbol]);
+            lhsCanon.infer('function');
+            return ce.box([lhsCanon.symbol]);
           }
 
-          if (def.value.type.matches('function')) return ce.box([lhs.symbol]);
+          if (def.value.type.matches('function'))
+            return ce.box([lhsCanon.symbol]);
 
           // Uh. Oh. It's a symbol with a value that is not a function.
-          return ce.typeError('function', def.value.type, lhs);
+          return ce.typeError('function', def.value.type, lhsCanon);
         }
-        ce.declare(lhs.symbol, 'function');
-        return ce.box([lhs.symbol]);
+        ce.declare(lhsCanon.symbol, 'function');
+        return ce.box([lhsCanon.symbol]);
       }
 
-      // Parse the arguments first, in case they reference lhs.symbol
+      // Parse the arguments first, in case they reference lhsCanon.symbol
       // i.e. `x(x+1)`.
       let args = rhs.op1.operator === 'Sequence' ? rhs.op1.ops! : [rhs.op1];
       args = flatten(args);
-      if (!ce.lookupDefinition(lhs.symbol)) {
-        // Still not a symbol (i.e. wasn't used as a symbol in the
-        // subexpression), so it's a function call.
-        ce.declare(lhs.symbol, 'function');
-        return ce.function(lhs.symbol, args);
+
+      const def = ce.lookupDefinition(lhsCanon.symbol);
+      if (!def) {
+        // Symbol not defined, so it's a function call - declare and return
+        ce.declare(lhsCanon.symbol, 'function');
+        return ce.function(lhsCanon.symbol, args);
       }
+
+      // Symbol is defined - check if it's a function or has unknown type
+      // (unknown type means it was auto-declared and should be treated as function)
+      if (isOperatorDef(def) || def.value?.type?.matches('function')) {
+        return ce.function(lhsCanon.symbol, args);
+      }
+
+      if (def.value?.type?.isUnknown) {
+        // Type is unknown - infer as function and return function call
+        lhsCanon.infer('function');
+        return ce.function(lhsCanon.symbol, args);
+      }
+
+      // Symbol is defined but not as a function - fall through to check
+      // if it might be multiplication (e.g., x(x+1) where x is a number)
     }
 
     // Is is an index operation, i.e. "v[1,2]"?
     if (
-      lhs.symbol &&
+      lhsCanon.symbol &&
       rhs.operator === 'Delimiter' &&
       (rhs.op2.string === '[,]' || rhs.op2.string === '[;]')
     ) {
       const args = rhs.op1.operator === 'Sequence' ? rhs.op1.ops! : [rhs.op1];
-      return ce.function('At', [lhs, ...args]);
+      return ce.function('At', [lhsCanon, ...args]);
     }
   }
 

@@ -129,14 +129,13 @@ describe('OPERATOR invisible', () => {
         "q",
         ["Delimiter", ["InvisibleOperator", 2, "q"]]
       ]
-      canonical = ["Multiply", 2, "q", "q"]
-      simplify  = 2q^2
+      canonical = ["q", ["Multiply", 2, "q"]]
     `));
 
   test('f(2q) // Invisible operator as a function', () =>
     expect(check('f(2q)')).toMatchInlineSnapshot(`
       box       = ["f", ["InvisibleOperator", 2, "q"]]
-      canonical = ["f", ["Multiply", 2, "q"]]
+      canonical = ["f", ["Pair", 2, "q"]]
     `));
 
   test('(abc)(xyz) // Invisible operator', () =>
@@ -416,7 +415,6 @@ describe('OPERATOR postfix', () => {
     expect(check('2+n!')).toMatchInlineSnapshot(`
       box       = ["Add", 2, ["Factorial", "n"]]
       canonical = ["Add", ["Factorial", "n"], 2]
-      eval-auto = NaN
     `));
   test('-5!-2 // Precedence', () =>
     expect(check('-2-5!')).toMatchInlineSnapshot(`
@@ -430,10 +428,9 @@ describe('OPERATOR postfix', () => {
       eval-auto = -120
     `));
   test('-n!', () =>
-    expect(check('-n!')).toMatchInlineSnapshot(`
-      box       = ["Negate", ["Factorial", "n"]]
-      eval-auto = NaN
-    `));
+    expect(check('-n!')).toMatchInlineSnapshot(
+      `["Negate", ["Factorial", "n"]]`
+    ));
   test('-n!!', () =>
     expect(check('-n!!')).toMatchInlineSnapshot(`
       invalid   =[

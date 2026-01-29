@@ -216,7 +216,18 @@ volumes
           const firstLimit = ops[1];
           const [lower, upper] = [firstLimit.op2.N().re, firstLimit.op3.N().re];
           if (isNaN(lower) || isNaN(upper)) return undefined;
-          const jsf = f.compile();
+
+          // Get the integration variable from the limits
+          const variable = firstLimit.op1.symbol ?? 'x';
+
+          // Compile the integrand as a function.
+          // If it's already a Function expression, compile directly.
+          // Otherwise wrap it in a Function to compile correctly for numerical eval.
+          // This converts e.g. 'x' to ['Function', 'x', 'x'] -> (x) => x
+          const fnExpr =
+            f.operator === 'Function' ? f : ce.box(['Function', f, variable]);
+          const jsf = fnExpr.compile();
+
           const mce = monteCarloEstimate(
             jsf,
             lower,

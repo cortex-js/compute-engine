@@ -362,6 +362,9 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       evaluate: ([x]) => {
         const ce = x.engine;
 
+        // If argument is symbolic (not a number literal), keep unevaluated
+        if (!x.isNumberLiteral) return undefined;
+
         // Is the argument a complex number?
         if (x.im !== 0 && x.im !== undefined)
           return ce.number(gammaComplex(ce.complex(x.re, x.im).add(1)));
@@ -385,6 +388,9 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       },
       evaluateAsync: async ([x], { signal }) => {
         const ce = x.engine;
+
+        // If argument is symbolic (not a number literal), keep unevaluated
+        if (!x.isNumberLiteral) return undefined;
 
         // Is the argument a complex number?
         if (x.im !== 0 && x.im !== undefined)

@@ -43,10 +43,6 @@ console.log(
     .toLatex({ notation: 'scientific', avoidExponentsInRange: null })
 );
 
-// @issue Numerical integration returns NaN ± NaN
-// Expected: 0.5
-ce.parse(`\\int_0^1 x dx`).N().print();
-
 ce.parse(
   `\\int_0^1 \\sech^2 (10(x − 0.2)) + \\sech^4 (100(x − 0.4)) + \\sech^6 (1000(x − 0.6)) dx`
 )
@@ -234,12 +230,6 @@ ce.box(['Add', 1, ['Hold', 2]])
   .evaluate()
   .print();
 
-// @issue Function call with assigned function not evaluated
-// Expected: 6 (since f_a(x) = x + 1, so f_a(5) = 6)
-// Actual: ("f_a", 5)
-ce.assign('f_a', ['Function', ['Add', 'x', 1], 'x']);
-ce.parse('f_\\text{a}(5)').evaluate().print();
-
 console.info(ce.parse('\\mathrm{x_a}').json);
 console.info(ce.parse('x_\\text{a}').json);
 
@@ -336,11 +326,6 @@ console.log(
 );
 
 console.log(ce.box(['Add', ['Add', 'x', 3], 5]).toMathJson());
-
-// @issue Symbolic factorial evaluates to NaN instead of staying symbolic
-// Expected: (n-1)! (symbolic)
-// Actual: NaN
-console.log(ce.parse('(n - 1)!').evaluate().toString());
 
 console.log(ce.parse('\\frac34 \\sqrt{3} + i').evaluate().toString());
 

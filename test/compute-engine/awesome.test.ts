@@ -52,7 +52,10 @@ describe('Primality Test', () => {
         ]
       ]
       simplify  = -floor(cos((pi * (n - 1)! + pi) / n))
-      eval-auto = NaN
+      eval-auto = -floor(cos((pi * (n - 1)! + pi) / n))
+      eval-mach = -floor(cos((pi * (n - 1)! + pi) / n))
+      N-auto    = -floor(cos((3.14159265358979323846 * (n - 1)! + 3.14159265358979323846) / n))
+      N-mach    = -floor(cos((3.141592653589793 * (n - 1)! + 3.141592653589793) / n))
     `));
   // 	https://en.wikipedia.org/wiki/Wilson%27s_theorem
   // 	https://en.wikipedia.org/wiki/Primality_test#Wilson's_theorem

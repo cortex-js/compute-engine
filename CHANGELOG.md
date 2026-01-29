@@ -2,6 +2,24 @@
 
 ### Bug Fixes
 
+- **Numerical Integration**: Fixed `\int_0^1 \sin(x) dx` returning `NaN` when
+  evaluated numerically with `.N()`. The integrand was already wrapped in a
+  `Function` expression by the canonical form, but the numerical evaluation code
+  was wrapping it again, creating a nested function that returned a function
+  instead of a number. Now correctly checks if the integrand is already a
+  `Function` before wrapping.
+
+- **Subscript Function Calls**: Fixed parsing of function calls with subscripted
+  names like `f_\text{a}(5)`. Previously, this was incorrectly parsed as a
+  `Tuple` instead of a function call because `Subscript` expressions weren't
+  being canonicalized before the function call check. Now correctly recognizes
+  that `f_a(5)` is a function call when the subscript canonicalizes to a symbol.
+
+- **Symbolic Factorial**: Fixed `(n-1)!` incorrectly evaluating to `NaN` instead
+  of staying symbolic. The factorial `evaluate` function was attempting numeric
+  computation on symbolic arguments. Now correctly returns `undefined` (keeping
+  the expression symbolic) when the argument is not a number literal.
+
 - **([#130](https://github.com/cortex-js/compute-engine/issues/130)) Prefix/Postfix
   Operator LaTeX Serialization**: Fixed incorrect LaTeX output for prefix operators
   (like `Negate`) and postfix operators (like `Factorial`) when applied to
