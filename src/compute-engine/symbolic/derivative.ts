@@ -219,6 +219,24 @@ export function differentiate(
     return simplifyDerivative(add(...(terms as BoxedExpression[])));
   }
 
+  // Root rule: Root(base, n) = base^(1/n)
+  // d/dx Root(base, n) = d/dx base^(1/n) = (1/n) * base^((1/n) - 1) * d/dx base
+  if (expr.operator === 'Root') {
+    const [base, n] = expr.ops!;
+    if (!base.has(v)) return ce.Zero;
+
+    // Compute derivative using the power rule
+    // d/dx base^(1/n) = (1/n) * base^((1/n) - 1) * base'
+    const exponent = ce.One.div(n);  // 1/n
+    const basePrime = differentiate(base, v) ?? ce._fn('D', [base, ce.symbol(v)]);
+    const newExponent = exponent.sub(ce.One);  // (1/n) - 1 = (1-n)/n
+
+    // Create Power expression directly without canonicalization to avoid Root conversion
+    const power = ce._fn('Power', [base, newExponent], { canonical: false });
+
+    return simplifyDerivative(exponent.mul(power).mul(basePrime));
+  }
+
   // Power rule
   if (expr.operator === 'Power') {
     const [base, exponent] = expr.ops!;

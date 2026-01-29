@@ -825,3 +825,183 @@ describe('Iverson Bracket', () => {
     `);
   });
 });
+
+describe('Predicate', () => {
+  // Serialization tests
+  it('should serialize Predicate with one argument', () => {
+    expect(ce.box(['Predicate', 'P', 'x']).latex).toBe('P(x)');
+  });
+
+  it('should serialize Predicate with multiple arguments', () => {
+    expect(ce.box(['Predicate', 'Q', 'a', 'b']).latex).toBe('Q(a, b)');
+    expect(ce.box(['Predicate', 'R', 'x', 'y', 'z']).latex).toBe('R(x, y, z)');
+  });
+
+  // Round-trip tests: parse -> serialize -> parse should give same result
+  it('should round-trip predicates inside ForAll', () => {
+    const expr1 = ce.parse('\\forall x, P(x)');
+    // Verify it contains Predicate
+    expect(expr1.json).toMatchInlineSnapshot(`
+      [
+        ForAll,
+        x,
+        [
+          Predicate,
+          P,
+          x,
+        ],
+      ]
+    `);
+    // Serialize and re-parse
+    const latex = expr1.latex;
+    const expr2 = ce.parse(latex);
+    expect(expr2.json).toEqual(expr1.json);
+  });
+
+  it('should round-trip predicates inside Exists', () => {
+    const expr1 = ce.parse('\\exists x, Q(x, y)');
+    expect(expr1.json).toMatchInlineSnapshot(`
+      [
+        Exists,
+        x,
+        [
+          Predicate,
+          Q,
+          x,
+          y,
+        ],
+      ]
+    `);
+    const expr2 = ce.parse(expr1.latex);
+    expect(expr2.json).toEqual(expr1.json);
+  });
+
+  it('should round-trip nested quantifiers with predicates', () => {
+    const expr1 = ce.parse('\\forall x, \\exists y, R(x, y)');
+    expect(expr1.json).toMatchInlineSnapshot(`
+      [
+        ForAll,
+        x,
+        [
+          Exists,
+          y,
+          [
+            Predicate,
+            R,
+            x,
+            y,
+          ],
+        ],
+      ]
+    `);
+    const expr2 = ce.parse(expr1.latex);
+    expect(expr2.json).toEqual(expr1.json);
+  });
+
+  // Type inference tests
+  it('should infer boolean type for Predicate', () => {
+    const pred = ce.box(['Predicate', 'P', 'x']);
+    expect(pred.type.toString()).toBe('boolean');
+  });
+
+  it('should allow Predicate in boolean contexts', () => {
+    // Predicate should work as argument to And, Or, Not, etc.
+    const expr1 = ce.box(['And', ['Predicate', 'P', 'x'], ['Predicate', 'Q', 'x']]);
+    expect(expr1.type.toString()).toBe('boolean');
+
+    const expr2 = ce.box(['Not', ['Predicate', 'P', 'x']]);
+    expect(expr2.type.toString()).toBe('boolean');
+
+    const expr3 = ce.box(['Implies', ['Predicate', 'P', 'x'], ['Predicate', 'Q', 'x']]);
+    expect(expr3.type.toString()).toBe('boolean');
+  });
+
+  // D(f, x) should parse as Predicate, not derivative
+  it('should parse D(f, x) as Predicate, not derivative', () => {
+    // Outside quantifier scope - D is special-cased to always be Predicate
+    expect(ce.parse('D(f, x)').json).toMatchInlineSnapshot(`
+      [
+        Predicate,
+        D,
+        f,
+        x,
+      ]
+    `);
+
+    // Inside quantifier scope
+    expect(ce.parse('\\forall x, D(x)').json).toMatchInlineSnapshot(`
+      [
+        ForAll,
+        x,
+        [
+          Predicate,
+          D,
+          x,
+        ],
+      ]
+    `);
+  });
+
+  // Predicates outside quantifier scope should be regular function applications
+  it('should parse predicates outside quantifier scope as function applications', () => {
+    // P(x) outside quantifier scope is a regular function application
+    expect(ce.parse('P(x)').json).toMatchInlineSnapshot(`
+      [
+        P,
+        x,
+      ]
+    `);
+    expect(ce.parse('Q(a, b)').json).toMatchInlineSnapshot(`
+      [
+        Q,
+        a,
+        b,
+      ]
+    `);
+  });
+});
+
+describe('Single-letter library functions', () => {
+  // N is a library function for numeric evaluation, but N(x) in LaTeX
+  // is not standard math notation. Like D, N is excluded from automatic
+  // function recognition so it can be used as a variable.
+  it('should parse N(x) as Predicate, not as numeric function', () => {
+    // N(x) should NOT be parsed as the numeric evaluation function
+    // Instead, it's parsed as a Predicate (like D)
+    const expr = ce.parse('N(\\pi)');
+    expect(expr.json).toMatchInlineSnapshot(`
+      [
+        Predicate,
+        N,
+        Pi,
+      ]
+    `);
+  });
+
+  it('should allow N function via MathJSON', () => {
+    // N function can be constructed directly in MathJSON
+    const expr = ce.box(['N', 'Pi']);
+    expect(expr.operator).toBe('N');
+    expect(expr.op1?.symbol).toBe('Pi');
+
+    // Direct .N() on Pi gives numeric value (preferred way to get numeric values)
+    const piNumeric = ce.box('Pi').N();
+    expect(piNumeric.numericValue).not.toBeNull();
+  });
+
+  // e and i are constants, not functions
+  it('should parse e as Euler constant', () => {
+    expect(ce.parse('e').json).toMatchInlineSnapshot(`ExponentialE`);
+  });
+
+  it('should parse i as imaginary unit', () => {
+    // i is canonicalized to Complex representation
+    expect(ce.parse('i').json).toMatchInlineSnapshot(`
+      [
+        Complex,
+        0,
+        1,
+      ]
+    `);
+  });
+});

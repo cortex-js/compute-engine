@@ -21,6 +21,25 @@ describe('DERIVATION', () => {
 
   test('no variable', () =>
     expect(evaluate('\\frac{d}{dx} 3t')).toMatchInlineSnapshot(`0`));
+
+  // Issue #230: Root operator should be differentiated correctly
+  test('cube root derivative', () =>
+    expect(evaluate('\\frac{d}{dx} \\sqrt[3]{x}')).toMatchInlineSnapshot(
+      `(3x^(2/3))^-1`
+    ));
+
+  test('fifth root derivative', () =>
+    expect(evaluate('\\frac{d}{dx} \\sqrt[5]{x}')).toMatchInlineSnapshot(
+      `(5x^(4/5))^-1`
+    ));
+
+  test('root with chain rule', () =>
+    expect(evaluate('\\frac{d}{dx} \\sqrt[3]{x^2 + 1}')).toMatchInlineSnapshot(
+      `(2x) / (3(x^2 + 1)^(2/3))`
+    ));
+
+  test('root of constant', () =>
+    expect(evaluate('\\frac{d}{dx} \\sqrt[3]{5}')).toMatchInlineSnapshot(`0`));
 });
 
 describe('INDEFINITE INTEGRATION', () => {

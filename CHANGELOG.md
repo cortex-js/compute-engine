@@ -2,6 +2,14 @@
 
 ### Bug Fixes
 
+- **([#230](https://github.com/cortex-js/compute-engine/issues/230))
+  Root Derivatives**: Fixed the `D` operator not differentiating expressions
+  containing the `Root` operator (n-th roots). Previously, `D(Root(x, 3), x)`
+  (derivative of ∛x) would return an unevaluated derivative expression instead
+  of computing the result. Now correctly returns `1/(3x^(2/3))`, equivalent to
+  the expected `(1/3)·x^(-2/3)`. The fix adds a special case in the `differentiate`
+  function to handle `Root(base, n)` by applying the power rule with exponent `1/n`.
+
 - **Sign Simplification**: Fixed `Sign(x).simplify()` returning `1` instead of
   `-1` when `x` is negative. The simplification rule incorrectly returned
   `ce.One` for both positive and negative cases.
