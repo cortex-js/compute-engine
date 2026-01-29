@@ -486,13 +486,15 @@ function makeSerializeHandler(
   // We have a LaTeX version of the symbol
   //
   if (latex) {
+    const prec = entry['precedence'] ?? 10000;
+
     if (kind === 'postfix')
       return (serializer, expr) =>
-        joinLatex([serializer.serialize(operand(expr, 1)), latex!]);
+        joinLatex([serializer.wrap(operand(expr, 1), prec), latex!]);
 
     if (kind === 'prefix')
       return (serializer, expr) =>
-        joinLatex([latex!, serializer.serialize(operand(expr, 1))]);
+        joinLatex([latex!, serializer.wrap(operand(expr, 1), prec)]);
 
     if (kind === 'infix') {
       return (serializer, expr) => {
@@ -523,10 +525,12 @@ function makeSerializeHandler(
   // We do not have a LaTeX version of the symbol. Use a string symbol
   //
   const id = idTrigger ?? entry.name ?? 'unknown';
+  const prec = entry['precedence'] ?? 10000;
+
   if (kind === 'postfix')
     return (serializer, expr) =>
       joinLatex([
-        serializer.serialize(operand(expr, 1)),
+        serializer.wrap(operand(expr, 1), prec),
         serializer.serializeSymbol(id),
       ]);
 
@@ -534,15 +538,15 @@ function makeSerializeHandler(
     return (serializer, expr) =>
       joinLatex([
         serializer.serializeSymbol(id),
-        serializer.serialize(operand(expr, 1)),
+        serializer.wrap(operand(expr, 1), prec),
       ]);
 
   if (kind === 'infix')
     return (serializer, expr) =>
       joinLatex([
-        serializer.serialize(operand(expr, 1)),
+        serializer.wrap(operand(expr, 1), prec + 1),
         serializer.serializeSymbol(id),
-        serializer.serialize(operand(expr, 2)),
+        serializer.wrap(operand(expr, 2), prec + 1),
       ]);
 
   // Function, symbol or expression. Depends on the actual shape of the

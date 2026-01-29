@@ -43,14 +43,14 @@ describe('DERIVATION', () => {
 
   // Edge cases for Root derivatives
   test('root with product rule', () =>
-    expect(
-      evaluate('\\frac{d}{dx} x \\sqrt[3]{x}')
-    ).toMatchInlineSnapshot(`4/3 * root(3)(x)`));
+    expect(evaluate('\\frac{d}{dx} x \\sqrt[3]{x}')).toMatchInlineSnapshot(
+      `4/3 * root(3)(x)`
+    ));
 
   test('root in denominator', () =>
-    expect(evaluate('\\frac{d}{dx} \\frac{1}{\\sqrt[3]{x}}')).toMatchInlineSnapshot(
-      `-1 / (3x^(4/3))`
-    ));
+    expect(
+      evaluate('\\frac{d}{dx} \\frac{1}{\\sqrt[3]{x}}')
+    ).toMatchInlineSnapshot(`-1 / (3x^(4/3))`));
 
   test('second derivative of root', () =>
     expect(
@@ -172,7 +172,7 @@ describe('INDEFINITE INTEGRATION', () => {
 
   test('sqrt(1+x^2) (trig substitution)', () =>
     expect(evaluate('\\int \\sqrt{1+x^2} dx')).toMatchInlineSnapshot(
-      `1/2 * (x * sqrt(x^2 + 1) + arsinh(x))`
+      `1/2 * x * sqrt(x^2 + 1) + 1/2 * arsinh(x)`
     ));
 
   test('sqrt(x^2-1) (trig substitution)', () =>

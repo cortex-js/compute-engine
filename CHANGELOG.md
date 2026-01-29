@@ -2,6 +2,16 @@
 
 ### Bug Fixes
 
+- **([#130](https://github.com/cortex-js/compute-engine/issues/130)) Prefix/Postfix
+  Operator LaTeX Serialization**: Fixed incorrect LaTeX output for prefix operators
+  (like `Negate`) and postfix operators (like `Factorial`) when applied to
+  expressions with lower precedence. Previously, `Negate(Add(a, b))` incorrectly
+  serialized as `-a+b` instead of `-(a+b)`, causing round-trip failures where
+  parsing the output produced a mathematically different expression. Similarly,
+  `Factorial(Add(a, b))` now correctly serializes as `(a+b)!` instead of `a+b!`.
+  The fix ensures operands are wrapped in parentheses when their precedence is
+  lower than the operator's precedence.
+
 - **Rules Cache Isolation**: Fixed rules cache building failing with "Invalid
   rule" errors when user expressions had previously polluted the global scope.
   For example, parsing `x(y+z)` would add `x` as a symbol with function type to

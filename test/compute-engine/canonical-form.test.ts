@@ -248,7 +248,7 @@ describe('CANONICAL FORMS', () => {
     expect(check('2\\frac{x}{a}\\frac{y}{b}')).toMatchInlineSnapshot(`
       box       = ["InvisibleOperator", 2, ["Divide", "x", "a"], ["Divide", "y", "b"]]
       canonical = ["Divide", ["Multiply", 2, "x", "y"], ["Multiply", "a", "b"]]
-      eval-auto = (2x * y) / (a * b)
+      simplify  = (2x * y) / (a * b)
     `);
   });
 

@@ -53,9 +53,8 @@ ce.parse(
   .N()
   .print();
 
-// @issue Derivative D operator returns Predicate instead of evaluating
-// Expected: D(sin(x), x) -> cos(x)
-// Actual: Returns ["Predicate", "D", sin(x), x]
+// Note: In LaTeX, "D" is parsed as a user symbol, not the derivative operator.
+// Use ce.box(['D', ...]) directly for derivatives, or \frac{d}{dx} notation.
 ce.box(['D', ce.parse('\\sin(x)'), 'x']).evaluate().print();
 
 // Should return '3^2'
@@ -614,7 +613,7 @@ console.info(ce.function('List', [l2]).evaluate().toString());
 
 // @issue Trig periodicity reduction not implemented
 // Expected: cos(5π+k) should simplify to -cos(k) using cos(π+x) = -cos(x)
-// See TODO.md item #4 for implementation details
+// See TODO.md item #9 for implementation details
 const t1 = ce.parse('\\cos(5\\pi+k)');
 console.info(t1.toString()); // cos(k + 5π)
 console.info(t1.simplify().toString()); // Still cos(k + 5π), should be -cos(k)

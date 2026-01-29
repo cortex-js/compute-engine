@@ -732,11 +732,7 @@ describe('SUM', () => {
 
   it('should handle sum with addition of index and free variable (issue #252)', () =>
     expect(
-      ce
-        .parse('\\sum_{n=1}^{3}(n + x)')
-        .evaluate()
-        .simplify()
-        .toString()
+      ce.parse('\\sum_{n=1}^{3}(n + x)').evaluate().simplify().toString()
     ).toMatchInlineSnapshot(`3x + 6`));
 
   // Simplification of Sum with symbolic bounds
@@ -875,14 +871,20 @@ describe('SUM', () => {
   // Sum of binomial coefficients
   it('should simplify sum of binomial coefficients', () => {
     expect(
-      ce.box(['Sum', ['Binomial', 'b', 'k'], ['Limits', 'k', 0, 'b']]).simplify().toString()
+      ce
+        .box(['Sum', ['Binomial', 'b', 'k'], ['Limits', 'k', 0, 'b']])
+        .simplify()
+        .toString()
     ).toMatchInlineSnapshot(`2^b`);
   });
 
   it('should evaluate sum of binomial coefficients', () => {
     // C(5,0) + C(5,1) + ... + C(5,5) = 32
     expect(
-      ce.box(['Sum', ['Binomial', 5, 'k'], ['Limits', 'k', 0, 5]]).evaluate()?.toString()
+      ce
+        .box(['Sum', ['Binomial', 5, 'k'], ['Limits', 'k', 0, 5]])
+        .evaluate()
+        ?.toString()
     ).toMatchInlineSnapshot(`32`);
   });
 
@@ -897,56 +899,112 @@ describe('SUM', () => {
   // Alternating binomial sum: Sum((-1)^k * C(n,k), [k, 0, n]) = 0
   it('should simplify alternating binomial sum to 0', () => {
     expect(
-      ce.box(['Sum', ['Multiply', ['Power', -1, 'k'], ['Binomial', 'b', 'k']], ['Tuple', 'k', 0, 'b']]).simplify().toString()
+      ce
+        .box([
+          'Sum',
+          ['Multiply', ['Power', -1, 'k'], ['Binomial', 'b', 'k']],
+          ['Tuple', 'k', 0, 'b'],
+        ])
+        .simplify()
+        .toString()
     ).toMatchInlineSnapshot(`0`);
   });
 
   it('should evaluate alternating binomial sum', () => {
     // (-1)^0 * C(4,0) + (-1)^1 * C(4,1) + ... + (-1)^4 * C(4,4) = 1 - 4 + 6 - 4 + 1 = 0
     expect(
-      ce.box(['Sum', ['Multiply', ['Power', -1, 'k'], ['Binomial', 4, 'k']], ['Tuple', 'k', 0, 4]]).evaluate()?.toString()
+      ce
+        .box([
+          'Sum',
+          ['Multiply', ['Power', -1, 'k'], ['Binomial', 4, 'k']],
+          ['Tuple', 'k', 0, 4],
+        ])
+        .evaluate()
+        ?.toString()
     ).toMatchInlineSnapshot(`0`);
   });
 
   // Weighted binomial sum: Sum(k * C(n,k), [k, 0, n]) = n * 2^(n-1)
   it('should simplify weighted binomial sum', () => {
     expect(
-      ce.box(['Sum', ['Multiply', 'k', ['Binomial', 'b', 'k']], ['Tuple', 'k', 0, 'b']]).simplify().toString()
+      ce
+        .box([
+          'Sum',
+          ['Multiply', 'k', ['Binomial', 'b', 'k']],
+          ['Tuple', 'k', 0, 'b'],
+        ])
+        .simplify()
+        .toString()
     ).toMatchInlineSnapshot(`b * 2^(b - 1)`);
   });
 
   it('should evaluate weighted binomial sum', () => {
     // 0*C(4,0) + 1*C(4,1) + 2*C(4,2) + 3*C(4,3) + 4*C(4,4) = 0 + 4 + 12 + 12 + 4 = 32 = 4 * 2^3
     expect(
-      ce.box(['Sum', ['Multiply', 'k', ['Binomial', 4, 'k']], ['Tuple', 'k', 0, 4]]).evaluate()?.toString()
+      ce
+        .box([
+          'Sum',
+          ['Multiply', 'k', ['Binomial', 4, 'k']],
+          ['Tuple', 'k', 0, 4],
+        ])
+        .evaluate()
+        ?.toString()
     ).toMatchInlineSnapshot(`32`);
   });
 
   // Partial fractions / telescoping: Sum(1/(k*(k+1)), [k, 1, n]) = n/(n+1)
   it('should simplify partial fractions (telescoping sum)', () => {
     expect(
-      ce.box(['Sum', ['Divide', 1, ['Multiply', 'k', ['Add', 'k', 1]]], ['Tuple', 'k', 1, 'b']]).simplify().toString()
+      ce
+        .box([
+          'Sum',
+          ['Divide', 1, ['Multiply', 'k', ['Add', 'k', 1]]],
+          ['Tuple', 'k', 1, 'b'],
+        ])
+        .simplify()
+        .toString()
     ).toMatchInlineSnapshot(`b / (b + 1)`);
   });
 
   it('should evaluate partial fractions (telescoping sum)', () => {
     // 1/(1*2) + 1/(2*3) + 1/(3*4) + 1/(4*5) = 1/2 + 1/6 + 1/12 + 1/20 = 4/5
     expect(
-      ce.box(['Sum', ['Divide', 1, ['Multiply', 'k', ['Add', 'k', 1]]], ['Tuple', 'k', 1, 4]]).evaluate()?.toString()
+      ce
+        .box([
+          'Sum',
+          ['Divide', 1, ['Multiply', 'k', ['Add', 'k', 1]]],
+          ['Tuple', 'k', 1, 4],
+        ])
+        .evaluate()
+        ?.toString()
     ).toMatchInlineSnapshot(`4/5`);
   });
 
   // Partial fractions / telescoping with k*(k-1): Sum(1/(k*(k-1)), [k, 2, n]) = (n-1)/n
   it('should simplify partial fractions 1/(k*(k-1))', () => {
     expect(
-      ce.box(['Sum', ['Divide', 1, ['Multiply', 'k', ['Add', 'k', -1]]], ['Tuple', 'k', 2, 'b']]).simplify().toString()
+      ce
+        .box([
+          'Sum',
+          ['Divide', 1, ['Multiply', 'k', ['Add', 'k', -1]]],
+          ['Tuple', 'k', 2, 'b'],
+        ])
+        .simplify()
+        .toString()
     ).toMatchInlineSnapshot(`-1 / b + 1`);
   });
 
   it('should evaluate partial fractions 1/(k*(k-1))', () => {
     // 1/(2*1) + 1/(3*2) + 1/(4*3) + 1/(5*4) = 1/2 + 1/6 + 1/12 + 1/20 = 4/5
     expect(
-      ce.box(['Sum', ['Divide', 1, ['Multiply', 'k', ['Add', 'k', -1]]], ['Tuple', 'k', 2, 5]]).evaluate()?.toString()
+      ce
+        .box([
+          'Sum',
+          ['Divide', 1, ['Multiply', 'k', ['Add', 'k', -1]]],
+          ['Tuple', 'k', 2, 5],
+        ])
+        .evaluate()
+        ?.toString()
     ).toMatchInlineSnapshot(`4/5`);
   });
 
@@ -970,28 +1028,56 @@ describe('SUM', () => {
   // Weighted squared binomial sum: Sum(k^2 * C(n,k), [k, 0, n]) = n(n+1) * 2^(n-2)
   it('should simplify weighted squared binomial sum', () => {
     expect(
-      ce.box(['Sum', ['Multiply', ['Power', 'k', 2], ['Binomial', 'b', 'k']], ['Tuple', 'k', 0, 'b']]).simplify().toString()
+      ce
+        .box([
+          'Sum',
+          ['Multiply', ['Power', 'k', 2], ['Binomial', 'b', 'k']],
+          ['Tuple', 'k', 0, 'b'],
+        ])
+        .simplify()
+        .toString()
     ).toMatchInlineSnapshot(`b * (b + 1) * 2^(b - 2)`);
   });
 
   it('should evaluate weighted squared binomial sum', () => {
     // 0^2*C(4,0) + 1^2*C(4,1) + 2^2*C(4,2) + 3^2*C(4,3) + 4^2*C(4,4) = 0 + 4 + 24 + 36 + 16 = 80 = 4*5*2^2
     expect(
-      ce.box(['Sum', ['Multiply', ['Power', 'k', 2], ['Binomial', 4, 'k']], ['Tuple', 'k', 0, 4]]).evaluate()?.toString()
+      ce
+        .box([
+          'Sum',
+          ['Multiply', ['Power', 'k', 2], ['Binomial', 4, 'k']],
+          ['Tuple', 'k', 0, 4],
+        ])
+        .evaluate()
+        ?.toString()
     ).toMatchInlineSnapshot(`80`);
   });
 
   // Weighted cubed binomial sum: Sum(k^3 * C(n,k), [k, 0, n]) = n²(n+3) * 2^(n-3)
   it('should simplify weighted cubed binomial sum', () => {
     expect(
-      ce.box(['Sum', ['Multiply', ['Power', 'k', 3], ['Binomial', 'b', 'k']], ['Tuple', 'k', 0, 'b']]).simplify().toString()
+      ce
+        .box([
+          'Sum',
+          ['Multiply', ['Power', 'k', 3], ['Binomial', 'b', 'k']],
+          ['Tuple', 'k', 0, 'b'],
+        ])
+        .simplify()
+        .toString()
     ).toMatchInlineSnapshot(`(b + 3) * b^2 * 2^(b - 3)`);
   });
 
   it('should evaluate weighted cubed binomial sum', () => {
     // 0 + 1*4 + 8*6 + 27*4 + 64*1 = 0 + 4 + 48 + 108 + 64 = 224 = 16*7*2
     expect(
-      ce.box(['Sum', ['Multiply', ['Power', 'k', 3], ['Binomial', 4, 'k']], ['Tuple', 'k', 0, 4]]).evaluate()?.toString()
+      ce
+        .box([
+          'Sum',
+          ['Multiply', ['Power', 'k', 3], ['Binomial', 4, 'k']],
+          ['Tuple', 'k', 0, 4],
+        ])
+        .evaluate()
+        ?.toString()
     ).toMatchInlineSnapshot(`224`);
   });
 
@@ -1000,7 +1086,7 @@ describe('SUM', () => {
     // Sum(3n+5, [n, 1, b]) = (b)(5 + 3(1+b)/2) = 3b(b+1)/2 + 5b
     expect(
       ce.parse('\\sum_{n=1}^{b}(3n + 5)').simplify().toString()
-    ).toMatchInlineSnapshot(`3/2 * b * (b + 1) + 5b`);
+    ).toMatchInlineSnapshot(`3/2 * b^2 + 13/2 * b`);
   });
 
   it('should evaluate arithmetic progression with non-zero lower bound', () => {
@@ -1013,41 +1099,75 @@ describe('SUM', () => {
   // Alternating weighted binomial: Sum((-1)^k * k * C(n,k)) = 0 for n >= 2
   it('should simplify alternating weighted binomial sum to 0', () => {
     expect(
-      ce.box(['Sum', ['Multiply', ['Power', -1, 'k'], 'k', ['Binomial', 'b', 'k']], ['Tuple', 'k', 0, 'b']]).simplify().toString()
+      ce
+        .box([
+          'Sum',
+          ['Multiply', ['Power', -1, 'k'], 'k', ['Binomial', 'b', 'k']],
+          ['Tuple', 'k', 0, 'b'],
+        ])
+        .simplify()
+        .toString()
     ).toMatchInlineSnapshot(`0`);
   });
 
   it('should evaluate alternating weighted binomial sum', () => {
     expect(
-      ce.box(['Sum', ['Multiply', ['Power', -1, 'k'], 'k', ['Binomial', 4, 'k']], ['Tuple', 'k', 0, 4]]).evaluate()?.toString()
+      ce
+        .box([
+          'Sum',
+          ['Multiply', ['Power', -1, 'k'], 'k', ['Binomial', 4, 'k']],
+          ['Tuple', 'k', 0, 4],
+        ])
+        .evaluate()
+        ?.toString()
     ).toMatchInlineSnapshot(`0`);
   });
 
   // Sum of binomial squares: Sum(C(n,k)^2) = C(2n, n)
   it('should simplify sum of binomial squares', () => {
     expect(
-      ce.box(['Sum', ['Power', ['Binomial', 'b', 'k'], 2], ['Tuple', 'k', 0, 'b']]).simplify().toString()
+      ce
+        .box([
+          'Sum',
+          ['Power', ['Binomial', 'b', 'k'], 2],
+          ['Tuple', 'k', 0, 'b'],
+        ])
+        .simplify()
+        .toString()
     ).toMatchInlineSnapshot(`Binomial(2b, b)`);
   });
 
   it('should evaluate sum of binomial squares', () => {
     // C(8,4) = 70
     expect(
-      ce.box(['Sum', ['Power', ['Binomial', 4, 'k'], 2], ['Tuple', 'k', 0, 4]]).evaluate()?.toString()
+      ce
+        .box(['Sum', ['Power', ['Binomial', 4, 'k'], 2], ['Tuple', 'k', 0, 4]])
+        .evaluate()
+        ?.toString()
     ).toMatchInlineSnapshot(`70`);
   });
 
   // Sum of k*(k+1): n(n+1)(n+2)/3
   it('should simplify sum of k*(k+1)', () => {
     expect(
-      ce.box(['Sum', ['Multiply', 'k', ['Add', 'k', 1]], ['Tuple', 'k', 1, 'b']]).simplify().toString()
+      ce
+        .box([
+          'Sum',
+          ['Multiply', 'k', ['Add', 'k', 1]],
+          ['Tuple', 'k', 1, 'b'],
+        ])
+        .simplify()
+        .toString()
     ).toMatchInlineSnapshot(`1/3 * b^3 + b^2 + 2/3 * b`);
   });
 
   it('should evaluate sum of k*(k+1)', () => {
     // 4*5*6/3 = 40
     expect(
-      ce.box(['Sum', ['Multiply', 'k', ['Add', 'k', 1]], ['Tuple', 'k', 1, 4]]).evaluate()?.toString()
+      ce
+        .box(['Sum', ['Multiply', 'k', ['Add', 'k', 1]], ['Tuple', 'k', 1, 4]])
+        .evaluate()
+        ?.toString()
     ).toMatchInlineSnapshot(`40`);
   });
 });
@@ -1055,7 +1175,10 @@ describe('SUM', () => {
 describe('PRODUCT', () => {
   it('should compute the product of a collection', () =>
     expect(
-      ce.box(['Product', ['Range', 1, 5]]).evaluate().toString()
+      ce
+        .box(['Product', ['Range', 1, 5]])
+        .evaluate()
+        .toString()
     ).toMatchInlineSnapshot(`120`));
 
   it('should compute the product of a function over an interval', () =>
@@ -1159,28 +1282,48 @@ describe('PRODUCT', () => {
   // Rising factorial (Pochhammer)
   it('should simplify rising factorial to Pochhammer', () => {
     expect(
-      ce.box(['Product', ['Add', 'x', 'k'], ['Limits', 'k', 0, ['Subtract', 'b', 1]]]).simplify().toString()
+      ce
+        .box([
+          'Product',
+          ['Add', 'x', 'k'],
+          ['Limits', 'k', 0, ['Subtract', 'b', 1]],
+        ])
+        .simplify()
+        .toString()
     ).toMatchInlineSnapshot(`Pochhammer(x, b)`);
   });
 
   it('should evaluate rising factorial', () => {
     // (3)_4 = 3*4*5*6 = 360
     expect(
-      ce.box(['Product', ['Add', 3, 'k'], ['Limits', 'k', 0, 3]]).evaluate()?.toString()
+      ce
+        .box(['Product', ['Add', 3, 'k'], ['Limits', 'k', 0, 3]])
+        .evaluate()
+        ?.toString()
     ).toMatchInlineSnapshot(`360`);
   });
 
   // Falling factorial
   it('should simplify falling factorial', () => {
     expect(
-      ce.box(['Product', ['Subtract', 'x', 'k'], ['Limits', 'k', 0, ['Subtract', 'b', 1]]]).simplify().toString()
+      ce
+        .box([
+          'Product',
+          ['Subtract', 'x', 'k'],
+          ['Limits', 'k', 0, ['Subtract', 'b', 1]],
+        ])
+        .simplify()
+        .toString()
     ).toMatchInlineSnapshot(`x! / (-b + x)!`);
   });
 
   it('should evaluate falling factorial', () => {
     // 5 falling 3 = 5*4*3 = 60
     expect(
-      ce.box(['Product', ['Subtract', 5, 'k'], ['Limits', 'k', 0, 2]]).evaluate()?.toString()
+      ce
+        .box(['Product', ['Subtract', 5, 'k'], ['Limits', 'k', 0, 2]])
+        .evaluate()
+        ?.toString()
     ).toMatchInlineSnapshot(`60`);
   });
 
