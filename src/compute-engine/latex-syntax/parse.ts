@@ -196,6 +196,22 @@ export class _Parser implements Parser {
     this.symbolTable.ids[id] = type;
   }
 
+  // Track whether we're inside a quantifier body (ForAll, Exists, etc.)
+  // When true, single uppercase letters followed by () are parsed as predicates
+  private _quantifierScopeDepth = 0;
+
+  get inQuantifierScope(): boolean {
+    return this._quantifierScopeDepth > 0;
+  }
+
+  enterQuantifierScope(): void {
+    this._quantifierScopeDepth++;
+  }
+
+  exitQuantifierScope(): void {
+    if (this._quantifierScopeDepth > 0) this._quantifierScopeDepth--;
+  }
+
   get index(): number {
     return this._index;
   }
@@ -1515,6 +1531,7 @@ export class _Parser implements Parser {
     //
     // No known operator definition matched.
     //
+    let isPredicate = false;
     if (fn === null) {
       this.index = start;
       fn = parseSymbol(this);
@@ -1526,6 +1543,7 @@ export class _Parser implements Parser {
           this.index = start;
           return null;
         }
+        isPredicate = true;
       }
     }
 
@@ -1543,6 +1561,16 @@ export class _Parser implements Parser {
     const args = this.parseArguments('enclosure', until);
 
     if (args === null) return fn;
+
+    // Predicates are wrapped in ["Predicate", name, ...args] to distinguish
+    // them from function applications. This is done:
+    // 1. Inside quantifier scopes (ForAll, Exists, etc.)
+    // 2. For "D" specifically, since D(f, x) is not standard derivative notation
+    //    and would otherwise conflict with the D derivative function in MathJSON
+    if (isPredicate && typeof fn === 'string') {
+      if (this.inQuantifierScope || fn === 'D')
+        return ['Predicate', fn, ...args];
+    }
 
     return typeof fn === 'string' ? [fn, ...args] : ['Apply', fn!, ...args];
   }
@@ -2115,6 +2143,13 @@ export class _Parser implements Parser {
 
   private isFunctionOperator(id: MathJsonSymbol | null): boolean {
     if (id === null) return false;
+
+    // "D" is defined as the derivative function in the library, but "D(f, x)"
+    // is not standard mathematical notation for derivatives. The derivative
+    // should be written using Leibniz notation (\frac{d}{dx}f) or Lagrange
+    // notation (f'). Exclude "D" so it can be used as a regular variable
+    // (e.g., integration domain in \iint_D) or as a predicate in FOL.
+    if (id === 'D') return false;
 
     // Is this a valid function symbol?
     if (this.getSymbolType(id).matches('function')) return true;

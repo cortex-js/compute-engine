@@ -20,6 +20,11 @@
   return 0 (the derivative is 0 almost everywhere). Also fixed a bug where
   derivative formulas that evaluate to 0 weren't recognized due to a falsy check.
 
+- **Ceil Type Signature**: Fixed `Ceil` function signature from `(real) -> integer`
+  to `(number) -> integer` to match `Floor`. This resolves "incompatible-type" errors
+  when computing derivatives of ceiling expressions or using `Ceil` in contexts
+  expecting a general number type.
+
 - **Inverse Trig Integrals**: Fixed incorrect integration formulas for `arcsin`,
   `arccos`, and `arctan`. The previous formulas were completely wrong. Correct:
   - `∫ arcsin(x) dx = x·arcsin(x) + √(1-x²)`
@@ -229,6 +234,24 @@
     ce.box(['TruthTable', ['And', 'A', 'B']]).evaluate()
     // Returns [["A","B","Result"],["False","False","False"],...]
     ```
+  - **Explicit `Predicate` function**: Added a new `Predicate` function to
+    explicitly represent predicate applications in First-Order Logic. Inside
+    quantifier scopes (`\forall`, `\exists`, etc.), single uppercase letters
+    followed by parentheses are now parsed as `["Predicate", "P", "x"]` instead
+    of `["P", "x"]`. This distinguishes predicates from regular function
+    applications and avoids naming conflicts with library functions.
+    ```typescript
+    ce.parse('\\forall x. P(x)').json
+    // Returns ["ForAll", "x", ["Predicate", "P", "x"]]
+    ```
+    Outside quantifier scopes, `P(x)` is still parsed as `["P", "x"]` to
+    maintain backward compatibility with function definitions like `Q(x) := ...`.
+  - **`D(f, x)` no longer maps to derivative**: The LaTeX notation `D(f, x)` is
+    not standard mathematical notation for derivatives and previously caused
+    confusion with the `D` derivative function in MathJSON. Now `D(f, x)` in
+    LaTeX parses as `["Predicate", "D", "f", "x"]` instead of the derivative.
+    Use Leibniz notation (`\frac{d}{dx}f`) for derivatives in LaTeX, or
+    construct the derivative directly in MathJSON: `["D", expr, "x"]`.
 
 - **Polynomial Simplification**: The `simplify()` function now automatically
   cancels common polynomial factors in univariate rational expressions. For

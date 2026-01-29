@@ -824,6 +824,15 @@ export interface Parser {
 
   addSymbol(id: MathJsonSymbol, type: BoxedType | TypeString): void;
 
+  /** True if currently parsing inside a quantifier body (ForAll, Exists, etc.) */
+  readonly inQuantifierScope: boolean;
+
+  /** Enter a quantifier scope for parsing the body of ForAll, Exists, etc. */
+  enterQuantifierScope(): void;
+
+  /** Exit the current quantifier scope */
+  exitQuantifierScope(): void;
+
   /** The index of the current token */
   index: number;
 

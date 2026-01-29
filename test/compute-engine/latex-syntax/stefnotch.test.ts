@@ -111,21 +111,7 @@ describe('STEFNOTCH #13', () => {
         "Q",
         [
           "Function",
-          [
-            "Block",
-            [
-              "Ceil",
-              [
-                "Error",
-                [
-                  "ErrorCode",
-                  "incompatible-type",
-                  "'real'",
-                  "'finite_number'"
-                ]
-              ]
-            ]
-          ],
+          ["Ceil", ["Divide", 4, ["Square", "epsilonSymbol"]]],
           "epsilonSymbol"
         ]
       ]

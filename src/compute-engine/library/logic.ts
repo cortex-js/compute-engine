@@ -179,6 +179,26 @@ export const LOGIC_LIBRARY: SymbolDefinitions = {
     },
   },
 
+  // Predicate application in First-Order Logic.
+  // ["Predicate", "P", "x"] represents the predicate P applied to x.
+  // This is semantically different from a function application: predicates
+  // return boolean values and are used in logical formulas.
+  // In LaTeX, P(x) inside a quantifier context parses to ["Predicate", "P", "x"].
+  Predicate: {
+    description: 'Apply a predicate to arguments, returning a boolean',
+    signature: '(symbol, value+) -> boolean',
+    lazy: true,
+    // Predicates remain symbolic unless explicitly defined
+    evaluate: (args, { engine }) => {
+      if (args.length === 0) return undefined;
+      const pred = args[0];
+      if (!pred.symbol) return undefined;
+      // Could check if the predicate has a definition and evaluate it
+      // For now, predicates remain symbolic
+      return undefined;
+    },
+  },
+
   KroneckerDelta: {
     description: 'Return 1 if the arguments are equal, 0 otherwise',
     signature: '(value+) -> integer',

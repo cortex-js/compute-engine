@@ -338,6 +338,22 @@ export const DEFINITIONS_LOGIC: LatexDictionary = [
       return ['Boole', body] as Expression;
     },
   },
+
+  // Predicate application in First-Order Logic.
+  // ["Predicate", "P", "x", "y"] serializes to "P(x, y)"
+  {
+    name: 'Predicate',
+    serialize: (serializer: Serializer, expr: Expression): string => {
+      const args = operands(expr);
+      if (args.length === 0) return '';
+      const pred = args[0];
+      const predStr =
+        typeof pred === 'string' ? pred : serializer.serialize(pred);
+      if (args.length === 1) return predStr;
+      const argStrs = args.slice(1).map((arg) => serializer.serialize(arg));
+      return `${predStr}(${argStrs.join(', ')})`;
+    },
+  },
 ];
 
 function serializeQuantifier(
@@ -419,10 +435,16 @@ function parseQuantifier(
         const bodyTerminator = useTightBinding
           ? { ...terminator, condition: (p: Parser) => tightBindingCondition(p, terminator) }
           : terminator;
+        // Enter quantifier scope so predicates are recognized
+        parser.enterQuantifierScope();
         const body = parser.parseExpression(bodyTerminator);
+        parser.exitQuantifierScope();
         return [kind, symbol, missingIfEmpty(body)] as Expression;
       }
+      // Enter quantifier scope so predicates are recognized
+      parser.enterQuantifierScope();
       const body = parser.parseEnclosure();
+      parser.exitQuantifierScope();
       if (body) return [kind, symbol, missingIfEmpty(body)];
     }
 
@@ -440,12 +462,18 @@ function parseQuantifier(
       const bodyTerminator = useTightBinding
         ? { ...terminator, condition: (p: Parser) => tightBindingCondition(p, terminator) }
         : terminator;
+      // Enter quantifier scope so predicates are recognized
+      parser.enterQuantifierScope();
       const body = parser.parseExpression(bodyTerminator);
+      parser.exitQuantifierScope();
       return [kind, condition, missingIfEmpty(body)] as Expression;
     }
     if (parser.match('(')) {
       // Parenthesized body - parse normally within the parens
+      // Enter quantifier scope so predicates are recognized
+      parser.enterQuantifierScope();
       const body = parser.parseExpression(terminator);
+      parser.exitQuantifierScope();
       if (!parser.match(')')) return null;
       return [kind, condition, missingIfEmpty(body)] as Expression;
     }

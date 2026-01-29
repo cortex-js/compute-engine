@@ -212,7 +212,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       description: 'Rounds a number up to the next largest integer',
       complexity: 1250,
       broadcastable: true,
-      signature: '(real) -> integer',
+      signature: '(number) -> integer',
       sgn: ([x]) => {
         if (x.isLessEqual(-1)) return 'negative';
         if (x.isPositive) return 'positive';
