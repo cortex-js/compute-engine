@@ -231,8 +231,8 @@ export function differentiate(
     const basePrime = differentiate(base, v) ?? ce._fn('D', [base, ce.symbol(v)]);
     const newExponent = exponent.sub(ce.One);  // (1/n) - 1 = (1-n)/n
 
-    // Create Power expression directly without canonicalization to avoid Root conversion
-    const power = ce._fn('Power', [base, newExponent], { canonical: false });
+    // Create Power expression as structural (bound but not canonicalized) to avoid Root conversion
+    const power = ce.function('Power', [base, newExponent], { structural: true });
 
     return simplifyDerivative(exponent.mul(power).mul(basePrime));
   }

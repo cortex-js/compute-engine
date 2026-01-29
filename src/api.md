@@ -5076,6 +5076,18 @@ readonly options: Required<ParseLatexOptions>;
 
 <MemberCard>
 
+##### Parser.inQuantifierScope
+
+```ts
+readonly inQuantifierScope: boolean;
+```
+
+True if currently parsing inside a quantifier body (ForAll, Exists, etc.)
+
+</MemberCard>
+
+<MemberCard>
+
 ##### Parser.index
 
 ```ts
@@ -5166,6 +5178,30 @@ addSymbol(id, type): void
 ####### type
 
 `string` | [`BoxedType`](#boxedtype)
+
+</MemberCard>
+
+<MemberCard>
+
+##### Parser.enterQuantifierScope()
+
+```ts
+enterQuantifierScope(): void
+```
+
+Enter a quantifier scope for parsing the body of ForAll, Exists, etc.
+
+</MemberCard>
+
+<MemberCard>
+
+##### Parser.exitQuantifierScope()
+
+```ts
+exitQuantifierScope(): void
+```
+
+Exit the current quantifier scope
 
 </MemberCard>
 

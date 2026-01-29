@@ -278,10 +278,65 @@ export function parseInvalidSymbol(parser: Parser): Expression | null {
  */
 export function parseSymbol(parser: Parser): MathJsonSymbol | null {
   //
-  // Shortcut: Is it a single-letter symbol?
+  // Is it a single-letter symbol (possibly with subscript)?
   //
-  if (/^[a-zA-Z]$/.test(parser.peek) || /^\p{XIDS}$/u.test(parser.peek))
-    return parser.nextToken();
+  if (/^[a-zA-Z]$/.test(parser.peek) || /^\p{XIDS}$/u.test(parser.peek)) {
+    let id = parser.nextToken();
+
+    // Check if followed by subscript(s) - if so, include them in the symbol name
+    // This ensures 'i_A' is parsed as a single symbol 'i_A', not as a subscript
+    // applied to 'i' (which would turn 'i' into ImaginaryUnit first)
+    // However, complex subscripts should remain as Subscript expressions:
+    // - {n,m} (comma indicates multi-index)
+    // - {n+1} (operators indicate an expression)
+    // - {(n+1)} (parentheses indicate an expression)
+    while (!parser.atEnd) {
+      const currentPeek = parser.peek;
+      if (currentPeek !== '_') break;
+
+      const underscoreIndex = parser.index;
+      parser.nextToken(); // consume '_'
+      const hasBrace = parser.match('<{>');
+      if (hasBrace) {
+        // Braced subscript: only include in symbol name if it contains
+        // only simple tokens (letters, digits, and nested subscripts).
+        // If it starts with '(' or contains operators, it's an expression.
+        const firstToken = parser.peek;
+        if (firstToken === '(' || firstToken === '\\lparen' || firstToken === '\\left') {
+          // Starts with parenthesis - it's an expression, not a symbol
+          parser.index = underscoreIndex;
+          break;
+        }
+
+        const sub = parseSymbolBody(parser);
+        // Check for indicators that this is an expression, not a simple symbol:
+        // - null result
+        // - contains comma (multi-index)
+        // - contains operators (converted to 'plus', 'minus', etc. by parseSymbolBody)
+        // - doesn't end with closing brace
+        const hasOperators = sub !== null && /plus|minus|times|ast/.test(sub);
+        if (sub === null || sub.includes(',') || hasOperators || parser.peek !== '<}>') {
+          parser.index = underscoreIndex;
+          break;
+        }
+        parser.match('<}>');
+        id += '_' + sub;
+      } else {
+        // Unbraced subscript: only accept a single letter or digit
+        const subToken = parser.peek;
+        if (/^[a-zA-Z0-9]$/.test(subToken) || /^\p{XIDS}$/u.test(subToken)) {
+          parser.nextToken();
+          id += '_' + subToken;
+        } else {
+          // Not a valid subscript token, backtrack the '_'
+          parser.index = underscoreIndex;
+          break;
+        }
+      }
+    }
+
+    return id;
+  }
 
   //
   // Is it a prefixed symbol?

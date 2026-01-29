@@ -1565,10 +1565,11 @@ export class _Parser implements Parser {
     // Predicates are wrapped in ["Predicate", name, ...args] to distinguish
     // them from function applications. This is done:
     // 1. Inside quantifier scopes (ForAll, Exists, etc.)
-    // 2. For "D" specifically, since D(f, x) is not standard derivative notation
-    //    and would otherwise conflict with the D derivative function in MathJSON
+    // 2. For "D" and "N" specifically, since D(f, x) and N(x) are not standard
+    //    math notation (D is derivative in MathJSON, N is numeric evaluation)
+    //    and could conflict with these library functions
     if (isPredicate && typeof fn === 'string') {
-      if (this.inQuantifierScope || fn === 'D')
+      if (this.inQuantifierScope || fn === 'D' || fn === 'N')
         return ['Predicate', fn, ...args];
     }
 
@@ -1619,6 +1620,7 @@ export class _Parser implements Parser {
   private parseSupsub(lhs: Expression): Expression | null {
     if (this.atEnd) return lhs;
     console.assert(lhs !== null);
+
 
     const index = this.index;
     this.skipSpace();
@@ -2149,7 +2151,13 @@ export class _Parser implements Parser {
     // should be written using Leibniz notation (\frac{d}{dx}f) or Lagrange
     // notation (f'). Exclude "D" so it can be used as a regular variable
     // (e.g., integration domain in \iint_D) or as a predicate in FOL.
-    if (id === 'D') return false;
+    //
+    // "N" is defined as the numeric evaluation function in the library, but
+    // "N(x)" is CAS-specific notation, not standard math notation. Exclude "N"
+    // so it can be used as a regular variable (e.g., "for all N in Naturals").
+    // Users can call .N() method for numeric evaluation, or use \operatorname{N}
+    // if they need the function in LaTeX.
+    if (id === 'D' || id === 'N') return false;
 
     // Is this a valid function symbol?
     if (this.getSymbolType(id).matches('function')) return true;

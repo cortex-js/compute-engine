@@ -149,14 +149,9 @@ describe('PARSING numbers', () => {
                                 ]
                               ]
                             ],
-                            [
-                              "Limits",
-                              "Nothing",
-                              2,
-                              ["Floor", ["Sqrt", "v_2"]]
-                            ]
+                            ["Limits", "v_3", 2, ["Floor", ["Sqrt", "v_2"]]]
                           ],
-                          ["Limits", "Nothing", 2, "v_1"]
+                          ["Limits", "v_2", 2, "v_1"]
                         ]
                       ]
                     ],
@@ -166,7 +161,7 @@ describe('PARSING numbers', () => {
               ],
               [
                 "Limits",
-                "Nothing",
+                "v_1",
                 2,
                 ["Floor", ["Multiply", 1.5, "n", ["Ln", "n"]]]
               ]

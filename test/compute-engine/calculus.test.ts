@@ -25,12 +25,12 @@ describe('DERIVATION', () => {
   // Issue #230: Root operator should be differentiated correctly
   test('cube root derivative', () =>
     expect(evaluate('\\frac{d}{dx} \\sqrt[3]{x}')).toMatchInlineSnapshot(
-      `(3x^(2/3))^-1`
+      `1 / (3x^(2/3))`
     ));
 
   test('fifth root derivative', () =>
     expect(evaluate('\\frac{d}{dx} \\sqrt[5]{x}')).toMatchInlineSnapshot(
-      `(5x^(4/5))^-1`
+      `1 / (5x^(4/5))`
     ));
 
   test('root with chain rule', () =>
@@ -40,6 +40,32 @@ describe('DERIVATION', () => {
 
   test('root of constant', () =>
     expect(evaluate('\\frac{d}{dx} \\sqrt[3]{5}')).toMatchInlineSnapshot(`0`));
+
+  // Edge cases for Root derivatives
+  test('root with product rule', () =>
+    expect(
+      evaluate('\\frac{d}{dx} x \\sqrt[3]{x}')
+    ).toMatchInlineSnapshot(`4/3 * root(3)(x)`));
+
+  test('root in denominator', () =>
+    expect(evaluate('\\frac{d}{dx} \\frac{1}{\\sqrt[3]{x}}')).toMatchInlineSnapshot(
+      `-1 / (3x^(4/3))`
+    ));
+
+  test('second derivative of root', () =>
+    expect(
+      evaluate('\\frac{d}{dx} \\frac{d}{dx} \\sqrt[3]{x}')
+    ).toMatchInlineSnapshot(`-2 / (9x^(5/3))`));
+
+  test('root with polynomial', () =>
+    expect(
+      evaluate('\\frac{d}{dx} \\sqrt[4]{x^3 - 2x + 1}')
+    ).toMatchInlineSnapshot(`(3x^2 - 2) / (4(x^3 - 2x + 1)^(3/4))`));
+
+  test('nested roots', () =>
+    expect(
+      evaluate('\\frac{d}{dx} \\sqrt{\\sqrt[3]{x}}')
+    ).toMatchInlineSnapshot(`1 / (6x^(5/6))`));
 });
 
 describe('INDEFINITE INTEGRATION', () => {

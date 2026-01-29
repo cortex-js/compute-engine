@@ -191,21 +191,12 @@ describe('STEFNOTCH #13', () => {
     ).toMatchInlineSnapshot(`
       [
         "Implies",
-        [
-          "ForAll",
-          "n",
-          [
-            "LessEqual",
-            ["Subscript", "a", "n"],
-            ["Subscript", "c", "n"],
-            ["Subscript", "b", "n"]
-          ]
-        ],
+        ["ForAll", "n", ["LessEqual", "a_n", "c_n", "b_n"]],
         [
           "Equal",
           [
             "Limit",
-            ["Function", ["Subscript", "c", "n"], "n"],
+            ["Function", "c_n", "n"],
             ["Error", "unexpected-command", ["LatexString", "\\infin"]]
           ],
           "a"

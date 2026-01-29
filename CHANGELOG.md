@@ -2,6 +2,15 @@
 
 ### Bug Fixes
 
+- **([#256](https://github.com/cortex-js/compute-engine/issues/256))
+  Subscript Symbol Parsing**: Fixed parsing of single-letter symbols with
+  subscripts. Previously, `i_A` was incorrectly parsed as
+  `["Subscript", ["Complex", 0, 1], "A"]` because `i` was recognized as the
+  imaginary unit before the subscript was processed. Now `i_A` correctly parses
+  as the symbol `i_A`. This applies to all single-letter symbols including
+  constants like `e` and `i`. Complex subscripts containing operators (`n+1`),
+  commas (`n,m`), or parentheses (`(n+1)`) still produce `Subscript` expressions.
+
 - **([#230](https://github.com/cortex-js/compute-engine/issues/230))
   Root Derivatives**: Fixed the `D` operator not differentiating expressions
   containing the `Root` operator (n-th roots). Previously, `D(Root(x, 3), x)`
@@ -260,6 +269,12 @@
     LaTeX parses as `["Predicate", "D", "f", "x"]` instead of the derivative.
     Use Leibniz notation (`\frac{d}{dx}f`) for derivatives in LaTeX, or
     construct the derivative directly in MathJSON: `["D", expr, "x"]`.
+  - **`N(x)` no longer maps to numeric evaluation**: Similarly, `N(x)` in LaTeX
+    is CAS-specific notation, not standard math notation. Now `N(x)` parses as
+    `["Predicate", "N", "x"]` instead of the numeric evaluation function. This
+    allows `N` to be used as a variable (e.g., "for all N in Naturals"). Use
+    the `.N()` method for numeric evaluation, or construct it directly in
+    MathJSON: `["N", expr]`.
 
 - **Polynomial Simplification**: The `simplify()` function now automatically
   cancels common polynomial factors in univariate rational expressions. For
