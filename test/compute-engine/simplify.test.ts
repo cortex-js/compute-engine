@@ -24,7 +24,7 @@ export type TestCase =
   | [
       input: Expression | string,
       expected: Expression | string,
-      comment?: string,
+      comment?: string
     ]
   | [heading: string];
 
@@ -1603,6 +1603,31 @@ describe('SIMPLIFY', () => {
     ));
 });
 
+describe('POLYNOMIAL DIVISION REGRESSION', () => {
+  // Regression test for infinite recursion bug in polynomial cancellation
+  // Bug: simplify rule called cancelCommonFactors -> polynomialGCD ->
+  // polynomialDivide -> .simplify() -> infinite loop
+  test('Division with single variable should not stack overflow', () =>
+    expect(simplify('\\frac{n}{\\pi}')).toMatchInlineSnapshot(
+      `["Divide", "n", "Pi"]`
+    ));
+
+  test('Division with variable and constant denominator', () =>
+    expect(simplify('\\frac{x}{5}')).toMatchInlineSnapshot(
+      `["Multiply", ["Rational", 1, 5], "x"]`
+    ));
+
+  // Test that actual polynomial cancellation still works
+  test('Cancel common polynomial factors (x-1)', () =>
+    expect(simplify('\\frac{(x-1)(x+2)}{(x-1)(x+3)}')).toMatchInlineSnapshot(`
+      [
+        "Divide",
+        ["Add", ["Square", "x"], "x", -2],
+        ["Add", ["Square", "x"], ["Multiply", 2, "x"], -3]
+      ]
+    `));
+});
+
 describe('RELATIONAL OPERATORS', () => {
   // Simplify common coefficient
   test(`2a < 4b`, () =>
@@ -1620,6 +1645,57 @@ describe('RELATIONAL OPERATORS', () => {
     expect(simplify('2a < 4ab')).toMatchInlineSnapshot(
       `["Less", "a", ["Multiply", 2, "a", "b"]]`
     ));
+});
+
+describe('TRIGONOMETRIC PERIODICITY REDUCTION', () => {
+  // Test sin periodicity (period 2π)
+  test('sin(5π + k) = -sin(k)', () =>
+    expect(simplify('\\sin(5\\pi + k)')).toMatchInlineSnapshot(
+      `["Negate", ["Sin", "k"]]`
+    ));
+
+  test('sin(4π + k) = sin(k)', () =>
+    expect(simplify('\\sin(4\\pi + k)')).toMatchInlineSnapshot(`["Sin", "k"]`));
+
+  test('sin(3π + k) = -sin(k)', () =>
+    expect(simplify('\\sin(3\\pi + k)')).toMatchInlineSnapshot(
+      `["Negate", ["Sin", "k"]]`
+    ));
+
+  // Test cos periodicity (period 2π)
+  test('cos(5π + k) = -cos(k)', () =>
+    expect(simplify('\\cos(5\\pi + k)')).toMatchInlineSnapshot(
+      `["Negate", ["Cos", "k"]]`
+    ));
+
+  test('cos(4π + k) = cos(k)', () =>
+    expect(simplify('\\cos(4\\pi + k)')).toMatchInlineSnapshot(`["Cos", "k"]`));
+
+  test('cos(2π + k) = cos(k)', () =>
+    expect(simplify('\\cos(2\\pi + k)')).toMatchInlineSnapshot(`["Cos", "k"]`));
+
+  // Test tan periodicity (period π)
+  test('tan(3π + k) = tan(k)', () =>
+    expect(simplify('\\tan(3\\pi + k)')).toMatchInlineSnapshot(`["Tan", "k"]`));
+
+  test('tan(2π + k) = tan(k)', () =>
+    expect(simplify('\\tan(2\\pi + k)')).toMatchInlineSnapshot(`["Tan", "k"]`));
+
+  test('tan(π + k) = tan(k)', () =>
+    expect(simplify('\\tan(\\pi + k)')).toMatchInlineSnapshot(`["Tan", "k"]`));
+
+  // Test cot periodicity (period π)
+  test('cot(3π + k) = cot(k)', () =>
+    expect(simplify('\\cot(3\\pi + k)')).toMatchInlineSnapshot(`["Cot", "k"]`));
+
+  // Test with negative multiples of π
+  test('sin(-3π + k) = -sin(k)', () =>
+    expect(simplify('\\sin(-3\\pi + k)')).toMatchInlineSnapshot(
+      `["Negate", ["Sin", "k"]]`
+    ));
+
+  test('cos(-4π + k) = cos(k)', () =>
+    expect(simplify('\\cos(-4\\pi + k)')).toMatchInlineSnapshot(`["Cos", "k"]`));
 });
 
 //

@@ -33,6 +33,14 @@
   - `d/dx FresnelS(x)`, `d/dx FresnelC(x)`
   - `d/dx LogGamma(x) = Digamma(x)`
 
+- **Trigonometric Periodicity Reduction**: Trigonometric functions now simplify
+  arguments containing integer multiples of π:
+  - `sin(5π + k)` → `-sin(k)` (period 2π, with sign change for odd multiples)
+  - `cos(4π + k)` → `cos(k)` (period 2π)
+  - `tan(3π + k)` → `tan(k)` (period π)
+  - Works for all six trig functions: sin, cos, tan, cot, sec, csc
+  - Handles both positive and negative multiples of π
+
 - **([#133](https://github.com/cortex-js/compute-engine/issues/133)) Element-based
   Indexing Sets for Sum/Product**: Added support for `\in` notation in summation
   and product subscripts:

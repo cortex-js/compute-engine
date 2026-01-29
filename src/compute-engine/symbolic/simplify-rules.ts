@@ -174,6 +174,10 @@ export const SIMPLIFY_RULES: Rule[] = [
   // e.g., (x² - 1)/(x - 1) → x + 1
   // Must run before expand to preserve polynomial structure
   //
+  // IMPORTANT: cancelCommonFactors must not call .simplify() on its result
+  // to avoid infinite recursion (this rule would trigger again, creating
+  // an infinite loop). See polynomials.ts for implementation details.
+  //
   (x): RuleStep | undefined => {
     if (x.operator !== 'Divide') return undefined;
 
@@ -1189,6 +1193,7 @@ export const SIMPLIFY_RULES: Rule[] = [
     replace: 'n*\\log_c(|x|)',
     condition: (ids) => ids._n.isEven === true,
   },
+  */
 
   // -------- TRIGONOMETRIC --------
   '\\sin(-x) -> -\\sin(x)',
@@ -1214,27 +1219,33 @@ export const SIMPLIFY_RULES: Rule[] = [
   // sin(nπ + x) and cos(nπ + x) where n is an integer
   {
     match: ['Sin', '_arg'],
-    replace: (sub, ce) => reduceTrigPeriodicity('Sin', sub._arg, ce),
+    replace: (expr, wildcards) =>
+      reduceTrigPeriodicity('Sin', wildcards._arg!, expr.engine),
   },
   {
     match: ['Cos', '_arg'],
-    replace: (sub, ce) => reduceTrigPeriodicity('Cos', sub._arg, ce),
+    replace: (expr, wildcards) =>
+      reduceTrigPeriodicity('Cos', wildcards._arg!, expr.engine),
   },
   {
     match: ['Tan', '_arg'],
-    replace: (sub, ce) => reduceTrigPeriodicity('Tan', sub._arg, ce),
+    replace: (expr, wildcards) =>
+      reduceTrigPeriodicity('Tan', wildcards._arg!, expr.engine),
   },
   {
     match: ['Cot', '_arg'],
-    replace: (sub, ce) => reduceTrigPeriodicity('Cot', sub._arg, ce),
+    replace: (expr, wildcards) =>
+      reduceTrigPeriodicity('Cot', wildcards._arg!, expr.engine),
   },
   {
     match: ['Sec', '_arg'],
-    replace: (sub, ce) => reduceTrigPeriodicity('Sec', sub._arg, ce),
+    replace: (expr, wildcards) =>
+      reduceTrigPeriodicity('Sec', wildcards._arg!, expr.engine),
   },
   {
     match: ['Csc', '_arg'],
-    replace: (sub, ce) => reduceTrigPeriodicity('Csc', sub._arg, ce),
+    replace: (expr, wildcards) =>
+      reduceTrigPeriodicity('Csc', wildcards._arg!, expr.engine),
   },
 
   '\\sin(\\frac{\\pi}{2} - x) -> \\cos(x)',
@@ -1250,22 +1261,26 @@ export const SIMPLIFY_RULES: Rule[] = [
   // '\\sin(x)^2 + \\cos(x)^2 -> 1',
   '\\sin(x)^2 -> \\frac{1 - \\cos(2x)}{2}',
   '\\cos(x)^2 -> \\frac{1 + \\cos(2x)}{2}',
-  {
-    match: ['Tan', '__x'],
-    replace: ['Divide', ['Sin', '__x'], ['Cos', '__x']],
-  },
-  {
-    match: ['Cot', '__x'],
-    replace: ['Divide', ['Cos', '__x'], ['Sin', '__x']],
-  },
-  {
-    match: ['Sec', '__x'],
-    replace: ['Divide', 1, ['Cos', '__x']],
-  },
-  {
-    match: ['Csc', '__x'],
-    replace: ['Divide', 1, ['Sin', '__x']],
-  },
+  // Note: Unconditional tan/cot/sec/csc -> sin/cos conversions are disabled
+  // because they often make expressions more complex (e.g., tan(x) -> sin(x)/cos(x)
+  // increases cost from 11 to 30). This interferes with other simplifications
+  // like periodicity reduction. If needed, use a dedicated rule set for conversion.
+  // {
+  //   match: ['Tan', '__x'],
+  //   replace: ['Divide', ['Sin', '__x'], ['Cos', '__x']],
+  // },
+  // {
+  //   match: ['Cot', '__x'],
+  //   replace: ['Divide', ['Cos', '__x'], ['Sin', '__x']],
+  // },
+  // {
+  //   match: ['Sec', '__x'],
+  //   replace: ['Divide', 1, ['Cos', '__x']],
+  // },
+  // {
+  //   match: ['Csc', '__x'],
+  //   replace: ['Divide', 1, ['Sin', '__x']],
+  // },
   // {
   //   match: ['Cos', '__x'],
   //   replace: ['Sin', ['Add', ['Divide', 'Pi', 2], '__x']],
@@ -1446,7 +1461,6 @@ export const SIMPLIFY_RULES: Rule[] = [
       2,
     ],
   },
-  */
 ];
 //  [
 //   // `Subtract`
