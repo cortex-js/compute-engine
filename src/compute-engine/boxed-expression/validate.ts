@@ -6,6 +6,7 @@ import { Type } from '../../common/type/types';
 import type { BoxedExpression, ComputeEngine, Scope } from '../global-types';
 import { fuzzyStringMatch } from '../../common/fuzzy-string-match';
 import { isOperatorDef, isValueDef } from './utils';
+import { isBoxedTensor } from './boxed-tensor';
 
 /**
  * Check that the number of arguments is as expected.
@@ -103,6 +104,11 @@ export function checkNumericArgs(
       xs.push(op);
     } else if (op.type.isUnknown) {
       // Unknown type. Keep it that way, infer later
+      xs.push(op);
+    } else if (isBoxedTensor(op)) {
+      // The argument is a tensor (matrix or vector). Accept it for tensor
+      // operations like element-wise addition. Tensor-specific validation
+      // (shape compatibility, etc.) happens in the evaluate function.
       xs.push(op);
     } else if (isFiniteIndexedCollection(op)) {
       // The argument is a list. Check that all elements are numbers

@@ -1,4 +1,4 @@
-import { Expression } from '../../src/math-json/types.ts';
+import { Expression } from '../../src/math-json/types';
 import { engine as ce } from '../utils';
 
 const v2_n: Expression = ['List', 7, 11];
@@ -118,34 +118,57 @@ describe('Tensor Properties', () => {
 });
 
 describe('Matrix addition', () => {
-  // Note: Matrix addition is not yet implemented in arithmetic.ts
-  // These tests document current behavior (type errors)
   it('should add a scalar to a matrix', () => {
+    // Scalar + Matrix: broadcast scalar to all elements
+    // [[1, 2], [3, 4]] + 10 = [[11, 12], [13, 14]]
     const result = ce.box(['Add', sq2_n, 10]).evaluate();
-    expect(result.toString()).toMatchInlineSnapshot(
-      `Error(ErrorCode("incompatible-type", "number", "matrix<2x2>")) + 10`
-    ); // TODO: implement matrix arithmetic
+    expect(result.toString()).toMatchInlineSnapshot(`[[11,12],[13,14]]`);
   });
 
-  it('should add two matrixes', () => {
+  it('should add two matrices', () => {
+    // [[1, 2], [3, 4]] + [[5, 6], [7, 8]] = [[6, 8], [10, 12]]
     const result = ce.box(['Add', sq2_n, sq2_n2]).evaluate();
-    expect(result.toString()).toMatchInlineSnapshot(
-      `Error(ErrorCode("incompatible-type", "number", "matrix<2x2>")) + Error(ErrorCode("incompatible-type", "number", "matrix<2x2>"))`
-    ); // TODO: implement matrix arithmetic
+    expect(result.toString()).toMatchInlineSnapshot(`[[6,8],[10,12]]`);
   });
 
-  it('should handle adding two matrixes of different dimension', () => {
+  it('should handle adding two matrices of different dimension', () => {
+    // 2×3 + 2×2 → incompatible dimensions error
     const result = ce.box(['Add', m23_n, sq2_n2]).evaluate();
     expect(result.toString()).toMatchInlineSnapshot(
-      `Error(ErrorCode("incompatible-type", "number", "matrix<2x3>")) + Error(ErrorCode("incompatible-type", "number", "matrix<2x2>"))`
-    ); // TODO: implement matrix arithmetic
+      `Error("incompatible-dimensions", "2x2 vs 2x3")`
+    );
   });
 
-  it('should add two matrixes and a scalar', () => {
+  it('should add two matrices and a scalar', () => {
+    // [[1, 2], [3, 4]] + 10 + [[5, 6], [7, 8]] = [[16, 18], [20, 22]]
     const result = ce.box(['Add', sq2_n, 10, sq2_n2]).evaluate();
+    expect(result.toString()).toMatchInlineSnapshot(`[[16,18],[20,22]]`);
+  });
+
+  it('should add vectors element-wise', () => {
+    // [7, 11] + [5, 6] = [12, 17]
+    const result = ce.box(['Add', v2_n, ['List', 5, 6]]).evaluate();
+    expect(result.toString()).toMatchInlineSnapshot(`[12,17]`);
+  });
+
+  it('should add scalar to vector', () => {
+    // [7, 11] + 3 = [10, 14]
+    const result = ce.box(['Add', v2_n, 3]).evaluate();
+    expect(result.toString()).toMatchInlineSnapshot(`[10,14]`);
+  });
+
+  it('should handle symbolic matrix addition', () => {
+    // [[a, b], [c, d]] + [[1, 2], [3, 4]]
+    const result = ce.box(['Add', sq2_x, sq2_n]).evaluate();
     expect(result.toString()).toMatchInlineSnapshot(
-      `Error(ErrorCode("incompatible-type", "number", "matrix<2x2>")) + 10 + Error(ErrorCode("incompatible-type", "number", "matrix<2x2>"))`
-    ); // TODO: implement matrix arithmetic
+      `[[a + 1,b + 2],[c + 3,d + 4]]`
+    );
+  });
+
+  it('should handle multiple matrix addition', () => {
+    // [[1, 2], [3, 4]] + [[1, 2], [3, 4]] + [[1, 2], [3, 4]] = [[3, 6], [9, 12]]
+    const result = ce.box(['Add', sq2_n, sq2_n, sq2_n]).evaluate();
+    expect(result.toString()).toMatchInlineSnapshot(`[[3,6],[9,12]]`);
   });
 });
 

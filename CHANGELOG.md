@@ -72,6 +72,15 @@
     - Proper dimension validation with `incompatible-dimensions` errors
     - LaTeX serialization using `\cdot` notation
 
+  - **Matrix Addition and Scalar Broadcasting**: `Add` now supports element-wise
+    operations on tensors (matrices and vectors):
+    - Matrix + Matrix: Element-wise addition (shapes must match)
+    - Scalar + Matrix: Broadcasts scalar to all elements
+    - Vector + Vector: Element-wise addition
+    - Scalar + Vector: Broadcasts scalar to all elements
+    - Symbolic support: `[[a,b],[c,d]] + [[1,2],[3,4]]` evaluates correctly
+    - Proper dimension validation with `incompatible-dimensions` errors
+
   - **Diagonal function**: Now fully implemented with bidirectional behavior:
     - Vector → Matrix: Creates a diagonal matrix from a vector
       (`Diagonal([1,2,3])` → 3×3 diagonal matrix)

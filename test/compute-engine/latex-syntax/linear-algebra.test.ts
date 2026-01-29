@@ -1,4 +1,4 @@
-import { Expression } from '../../../src/math-json.ts';
+import { Expression } from '../../../src/math-json';
 import { engine as ce } from '../../utils';
 
 const m4: Expression = ['List', ['List', 1, 2], ['List', 3, 4]];

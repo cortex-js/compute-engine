@@ -22,6 +22,7 @@ import type {
 } from '../global-types';
 
 import { isFiniteIndexedCollection, zip } from '../collection-utils';
+import { isBoxedTensor } from './boxed-tensor';
 import { Type } from '../../common/type/types';
 import { BoxedType } from '../../common/type/boxed-type';
 import { parseType } from '../../common/type/parse';
@@ -1015,10 +1016,16 @@ export class BoxedFunction extends _BoxedExpression {
 
       //
       // 2/ Broadcast if applicable
+      // Skip broadcasting for Add/Multiply with tensors - they have their own
+      // element-wise handling in addTensors/mulTensors
       //
+      const hasTensors = this.ops!.some((x) => isBoxedTensor(x));
+      const skipBroadcastForTensors =
+        hasTensors && (this.operator === 'Add' || this.operator === 'Multiply');
       if (
         def.broadcastable &&
-        this.ops!.some((x) => isFiniteIndexedCollection(x))
+        this.ops!.some((x) => isFiniteIndexedCollection(x)) &&
+        !skipBroadcastForTensors
       ) {
         const items = zip(this._ops);
         if (!items) return this.engine.Nothing;
@@ -1099,10 +1106,16 @@ export class BoxedFunction extends _BoxedExpression {
 
       //
       // 2/ Broadcast if applicable
+      // Skip broadcasting for Add/Multiply with tensors - they have their own
+      // element-wise handling
       //
+      const hasTensors = this.ops!.some((x) => isBoxedTensor(x));
+      const skipBroadcastForTensors =
+        hasTensors && (this.operator === 'Add' || this.operator === 'Multiply');
       if (
         def?.broadcastable &&
-        this.ops!.some((x) => isFiniteIndexedCollection(x))
+        this.ops!.some((x) => isFiniteIndexedCollection(x)) &&
+        !skipBroadcastForTensors
       ) {
         const items = zip(this._ops);
         if (!items) return this.engine.Nothing;

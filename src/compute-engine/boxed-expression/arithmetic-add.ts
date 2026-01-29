@@ -8,6 +8,7 @@ import { widen } from '../../common/type/utils';
 import { isSubtype } from '../../common/type/subtype';
 import { BoxedType } from '../../common/type/boxed-type';
 import type { BoxedExpression, ComputeEngine } from '../global-types';
+import { isBoxedTensor } from './boxed-tensor';
 
 /**
  *
@@ -82,13 +83,117 @@ export function addType(
 export function add(...xs: ReadonlyArray<BoxedExpression>): BoxedExpression {
   console.assert(xs.length > 0);
   if (!xs.every((x) => x.isValid)) return xs[0].engine._fn('Add', xs);
+
+  // Check if any operands are tensors
+  const hasTensors = xs.some((x) => isBoxedTensor(x));
+  if (hasTensors) return addTensors(xs[0].engine, xs);
+
   return new Terms(xs[0].engine, xs).asExpression();
 }
 
 export function addN(...xs: ReadonlyArray<BoxedExpression>): BoxedExpression {
   console.assert(xs.length > 0);
   if (!xs.every((x) => x.isValid)) return xs[0].engine._fn('Add', xs);
+
+  // Check if any operands are tensors
+  const hasTensors = xs.some((x) => isBoxedTensor(x));
+  if (hasTensors) {
+    // Evaluate tensors numerically
+    xs = xs.map((x) => (isBoxedTensor(x) ? x.evaluate() : x.N()));
+    return addTensors(xs[0].engine, xs);
+  }
+
   // Don't N() the number literals (fractions) to avoid losing precision
   xs = xs.map((x) => (x.isNumberLiteral ? x.evaluate() : x.N()));
   return new Terms(xs[0].engine, xs).N();
+}
+
+/**
+ * Add tensors element-wise, with scalar broadcasting support.
+ * - Tensor + Tensor: element-wise addition (shapes must match)
+ * - Scalar + Tensor: broadcast scalar to all elements
+ */
+function addTensors(
+  ce: ComputeEngine,
+  ops: ReadonlyArray<BoxedExpression>
+): BoxedExpression {
+  // Separate tensors and scalars
+  const tensors: BoxedExpression[] = [];
+  const scalars: BoxedExpression[] = [];
+
+  for (const op of ops) {
+    const evaluated = op.evaluate();
+    if (isBoxedTensor(evaluated)) {
+      tensors.push(evaluated);
+    } else {
+      scalars.push(evaluated);
+    }
+  }
+
+  // If no tensors after evaluation, fall back to regular addition
+  if (tensors.length === 0) {
+    return new Terms(ce, scalars).asExpression();
+  }
+
+  // Get the reference shape from the first tensor
+  const referenceShape = tensors[0].shape;
+
+  // Validate all tensors have the same shape
+  for (let i = 1; i < tensors.length; i++) {
+    const shape = tensors[i].shape;
+    if (
+      shape.length !== referenceShape.length ||
+      !shape.every((dim, j) => dim === referenceShape[j])
+    ) {
+      return ce.error(
+        'incompatible-dimensions',
+        `${referenceShape.join('x')} vs ${shape.join('x')}`
+      );
+    }
+  }
+
+  // Compute scalar sum (to add to each element)
+  let scalarSum: BoxedExpression = ce.Zero;
+  for (const s of scalars) {
+    scalarSum = scalarSum.add(s);
+  }
+
+  // For vectors (rank 1)
+  if (referenceShape.length === 1) {
+    const n = referenceShape[0];
+    const result: BoxedExpression[] = [];
+    for (let i = 0; i < n; i++) {
+      let sum = scalarSum;
+      for (const tensor of tensors) {
+        // tensor.tensor.at() uses 1-based indexing for vectors
+        const val = tensor.tensor.at(i + 1) ?? ce.Zero;
+        sum = sum.add(ce.box(val));
+      }
+      result.push(sum.evaluate());
+    }
+    return ce.box(['List', ...result]);
+  }
+
+  // For matrices (rank 2)
+  if (referenceShape.length === 2) {
+    const [m, n] = referenceShape;
+    const rows: BoxedExpression[] = [];
+    for (let i = 0; i < m; i++) {
+      const row: BoxedExpression[] = [];
+      for (let j = 0; j < n; j++) {
+        let sum = scalarSum;
+        for (const tensor of tensors) {
+          // tensor.tensor.at(row, col) uses 1-based indexing
+          const val = tensor.tensor.at(i + 1, j + 1) ?? ce.Zero;
+          sum = sum.add(ce.box(val));
+        }
+        row.push(sum.evaluate());
+      }
+      rows.push(ce.box(['List', ...row]));
+    }
+    return ce.box(['List', ...rows]);
+  }
+
+  // For higher-rank tensors, return unevaluated for now
+  return ce._fn('Add', [...ops]);
 }
