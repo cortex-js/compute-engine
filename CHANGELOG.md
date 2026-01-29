@@ -197,14 +197,37 @@
     ce.box(['ToDNF', ['And', ['Or', 'A', 'B'], 'C']]).evaluate()
     // Returns (A ∧ C) ∨ (B ∧ C)
     ```
-    Handles `And`, `Or`, `Not`, `Implies`, `Equivalent`, and `Xor` operators
-    using De Morgan's laws and distribution.
+    Handles `And`, `Or`, `Not`, `Implies`, `Equivalent`, `Xor`, `Nand`, and `Nor`
+    operators using De Morgan's laws and distribution.
   - **Boolean operator evaluation**: Added evaluation support for `Xor`, `Nand`,
     and `Nor` operators with `True`/`False` arguments:
     ```typescript
     ce.box(['Xor', 'True', 'False']).evaluate()   // Returns True
     ce.box(['Nand', 'True', 'True']).evaluate()   // Returns False
     ce.box(['Nor', 'False', 'False']).evaluate()  // Returns True
+    ```
+  - **N-ary boolean operators**: `Xor`, `Nand`, and `Nor` now support any number
+    of arguments:
+    - `Xor(a, b, c, ...)` returns true when an odd number of arguments are true
+    - `Nand(a, b, c, ...)` returns the negation of `And(a, b, c, ...)`
+    - `Nor(a, b, c, ...)` returns the negation of `Or(a, b, c, ...)`
+  - **Satisfiability checking**: New `IsSatisfiable` function checks if a boolean
+    expression can be made true with some assignment of variables:
+    ```typescript
+    ce.box(['IsSatisfiable', ['And', 'A', ['Not', 'A']]]).evaluate()  // False
+    ce.box(['IsSatisfiable', ['Or', 'A', 'B']]).evaluate()            // True
+    ```
+  - **Tautology checking**: New `IsTautology` function checks if a boolean
+    expression is true for all possible variable assignments:
+    ```typescript
+    ce.box(['IsTautology', ['Or', 'A', ['Not', 'A']]]).evaluate()     // True
+    ce.box(['IsTautology', ['And', 'A', 'B']]).evaluate()             // False
+    ```
+  - **Truth table generation**: New `TruthTable` function generates a complete
+    truth table for a boolean expression:
+    ```typescript
+    ce.box(['TruthTable', ['And', 'A', 'B']]).evaluate()
+    // Returns [["A","B","Result"],["False","False","False"],...]
     ```
 
 - **Polynomial Simplification**: The `simplify()` function now automatically

@@ -83,12 +83,13 @@ export const LOGIC_LIBRARY: SymbolDefinitions = {
     evaluate: evaluateImplies,
   },
   Xor: {
-    description: 'Exclusive or: true when exactly one operand is true',
+    description: 'Exclusive or: true when an odd number of operands are true',
     wikidata: 'Q498186',
     broadcastable: true,
+    associative: true,
     commutative: true,
     complexity: 10200,
-    signature: '(boolean, boolean) -> boolean',
+    signature: '(boolean+) -> boolean',
     evaluate: evaluateXor,
   },
   Nand: {
@@ -97,7 +98,7 @@ export const LOGIC_LIBRARY: SymbolDefinitions = {
     broadcastable: true,
     commutative: true,
     complexity: 10200,
-    signature: '(boolean, boolean) -> boolean',
+    signature: '(boolean+) -> boolean',
     evaluate: evaluateNand,
   },
   Nor: {
@@ -106,7 +107,7 @@ export const LOGIC_LIBRARY: SymbolDefinitions = {
     broadcastable: true,
     commutative: true,
     complexity: 10200,
-    signature: '(boolean, boolean) -> boolean',
+    signature: '(boolean+) -> boolean',
     evaluate: evaluateNor,
   },
   // Quantifiers return boolean values (they are propositions)
@@ -299,19 +300,39 @@ function evaluateXor(
   args: ReadonlyArray<BoxedExpression>,
   { engine: ce }: { engine: ComputeEngine }
 ): BoxedExpression | undefined {
-  const lhs = args[0].symbol;
-  const rhs = args[1].symbol;
-  // XOR is true when exactly one operand is true
-  if (
-    (lhs === 'True' && rhs === 'False') ||
-    (lhs === 'False' && rhs === 'True')
-  )
-    return ce.True;
-  if (
-    (lhs === 'True' && rhs === 'True') ||
-    (lhs === 'False' && rhs === 'False')
-  )
-    return ce.False;
+  // N-ary XOR is true when an odd number of operands are true
+  // (equivalent to parity check)
+  if (args.length === 0) return ce.False;
+
+  let trueCount = 0;
+  const unknowns: BoxedExpression[] = [];
+
+  for (const arg of args) {
+    if (arg.symbol === 'True') {
+      trueCount++;
+    } else if (arg.symbol === 'False') {
+      // False doesn't change parity
+    } else {
+      unknowns.push(arg);
+    }
+  }
+
+  // If all arguments are known, return the result
+  if (unknowns.length === 0) {
+    return trueCount % 2 === 1 ? ce.True : ce.False;
+  }
+
+  // Partial evaluation: XOR with known True values flips the result
+  // XOR(True, x) = NOT(x), XOR(False, x) = x
+  if (unknowns.length === 1 && trueCount % 2 === 1) {
+    // Odd number of Trues with one unknown = NOT(unknown)
+    return ce._fn('Not', [unknowns[0]]);
+  }
+  if (unknowns.length === 1 && trueCount % 2 === 0) {
+    // Even number of Trues with one unknown = unknown
+    return unknowns[0];
+  }
+
   return undefined;
 }
 
@@ -319,16 +340,26 @@ function evaluateNand(
   args: ReadonlyArray<BoxedExpression>,
   { engine: ce }: { engine: ComputeEngine }
 ): BoxedExpression | undefined {
-  // NAND is the negation of AND
-  const lhs = args[0].symbol;
-  const rhs = args[1].symbol;
-  if (lhs === 'True' && rhs === 'True') return ce.False;
-  if (
-    (lhs === 'True' && rhs === 'False') ||
-    (lhs === 'False' && rhs === 'True') ||
-    (lhs === 'False' && rhs === 'False')
-  )
-    return ce.True;
+  // N-ary NAND is the negation of AND
+  // NAND(a, b, c, ...) = NOT(AND(a, b, c, ...))
+  if (args.length === 0) return ce.False; // NOT(True) = False
+
+  // If any argument is False, AND is False, so NAND is True
+  for (const arg of args) {
+    if (arg.symbol === 'False') return ce.True;
+  }
+
+  // Check if all are True
+  let allTrue = true;
+  for (const arg of args) {
+    if (arg.symbol !== 'True') {
+      allTrue = false;
+      break;
+    }
+  }
+
+  if (allTrue) return ce.False; // NOT(True) = False
+
   return undefined;
 }
 
@@ -336,16 +367,26 @@ function evaluateNor(
   args: ReadonlyArray<BoxedExpression>,
   { engine: ce }: { engine: ComputeEngine }
 ): BoxedExpression | undefined {
-  // NOR is the negation of OR
-  const lhs = args[0].symbol;
-  const rhs = args[1].symbol;
-  if (lhs === 'False' && rhs === 'False') return ce.True;
-  if (
-    (lhs === 'True' && rhs === 'True') ||
-    (lhs === 'True' && rhs === 'False') ||
-    (lhs === 'False' && rhs === 'True')
-  )
-    return ce.False;
+  // N-ary NOR is the negation of OR
+  // NOR(a, b, c, ...) = NOT(OR(a, b, c, ...))
+  if (args.length === 0) return ce.True; // NOT(False) = True
+
+  // If any argument is True, OR is True, so NOR is False
+  for (const arg of args) {
+    if (arg.symbol === 'True') return ce.False;
+  }
+
+  // Check if all are False
+  let allFalse = true;
+  for (const arg of args) {
+    if (arg.symbol !== 'False') {
+      allFalse = false;
+      break;
+    }
+  }
+
+  if (allFalse) return ce.True; // NOT(False) = True
+
   return undefined;
 }
 
@@ -812,6 +853,52 @@ export const LOGIC_FUNCTION_LIBRARY: SymbolDefinitions = {
       return toDNF(expr.evaluate(), ce);
     },
   },
+
+  /**
+   * Check if a boolean expression is satisfiable.
+   * Returns True if there exists an assignment of truth values to variables
+   * that makes the expression true.
+   */
+  IsSatisfiable: {
+    signature: '(boolean) -> boolean',
+    evaluate: ([expr], { engine: ce }) => {
+      if (!expr) return undefined;
+      return isSatisfiable(expr, ce);
+    },
+  },
+
+  /**
+   * Check if a boolean expression is a tautology.
+   * Returns True if the expression is true for all possible assignments
+   * of truth values to variables.
+   */
+  IsTautology: {
+    signature: '(boolean) -> boolean',
+    evaluate: ([expr], { engine: ce }) => {
+      if (!expr) return undefined;
+      return isTautology(expr, ce);
+    },
+  },
+
+  /**
+   * Generate a truth table for a boolean expression.
+   * Returns a List of Lists, where each inner list contains the variable
+   * assignments followed by the result.
+   *
+   * Example: TruthTable(["And", "A", "B"]) returns:
+   * [["List", "A", "B", "Result"],
+   *  ["List", False, False, False],
+   *  ["List", False, True, False],
+   *  ["List", True, False, False],
+   *  ["List", True, True, True]]
+   */
+  TruthTable: {
+    signature: '(boolean) -> list',
+    evaluate: ([expr], { engine: ce }) => {
+      if (!expr) return undefined;
+      return generateTruthTable(expr, ce);
+    },
+  },
 };
 
 /**
@@ -874,6 +961,34 @@ function toNNF(expr: BoxedExpression, ce: ComputeEngine): BoxedExpression {
       );
     }
 
+    // Negation of Xor: ¬(A ⊕ B) ≡ A ↔ B ≡ (A ∧ B) ∨ (¬A ∧ ¬B)
+    if (innerOp === 'Xor') {
+      const ops = inner.ops!;
+      if (ops.length === 2) {
+        const a = ops[0];
+        const b = ops[1];
+        return toNNF(
+          ce._fn('Or', [
+            ce._fn('And', [a, b]),
+            ce._fn('And', [ce._fn('Not', [a]), ce._fn('Not', [b])]),
+          ]),
+          ce
+        );
+      }
+      // For n-ary Xor negation, first convert Xor to binary, then negate
+      return toNNF(ce._fn('Not', [toNNF(inner, ce)]), ce);
+    }
+
+    // Negation of Nand: ¬NAND(A, B) ≡ A ∧ B
+    if (innerOp === 'Nand') {
+      return toNNF(ce._fn('And', inner.ops!), ce);
+    }
+
+    // Negation of Nor: ¬NOR(A, B) ≡ A ∨ B
+    if (innerOp === 'Nor') {
+      return toNNF(ce._fn('Or', inner.ops!), ce);
+    }
+
     // Literal: ¬x stays as is
     return expr;
   }
@@ -899,16 +1014,42 @@ function toNNF(expr: BoxedExpression, ce: ComputeEngine): BoxedExpression {
   }
 
   // Handle Xor: A ⊕ B ≡ (A ∨ B) ∧ (¬A ∨ ¬B)
+  // For n-ary Xor, we process pairwise
   if (op === 'Xor') {
-    const a = expr.op1;
-    const b = expr.op2;
-    return toNNF(
-      ce._fn('And', [
-        ce._fn('Or', [a, b]),
-        ce._fn('Or', [ce._fn('Not', [a]), ce._fn('Not', [b])]),
-      ]),
-      ce
-    );
+    const ops = expr.ops!;
+    if (ops.length === 2) {
+      const a = ops[0];
+      const b = ops[1];
+      return toNNF(
+        ce._fn('And', [
+          ce._fn('Or', [a, b]),
+          ce._fn('Or', [ce._fn('Not', [a]), ce._fn('Not', [b])]),
+        ]),
+        ce
+      );
+    }
+    // For n-ary Xor, reduce: Xor(a, b, c) = Xor(Xor(a, b), c)
+    if (ops.length > 2) {
+      const first = ce._fn('Xor', [ops[0], ops[1]]);
+      const rest = ops.slice(2);
+      return toNNF(ce._fn('Xor', [first, ...rest]), ce);
+    }
+    if (ops.length === 1) return toNNF(ops[0], ce);
+    return ce.False; // Empty Xor
+  }
+
+  // Handle Nand: NAND(A, B) ≡ ¬(A ∧ B) ≡ ¬A ∨ ¬B
+  if (op === 'Nand') {
+    const ops = expr.ops!;
+    // NAND(a, b, c, ...) = NOT(AND(a, b, c, ...))
+    return toNNF(ce._fn('Not', [ce._fn('And', ops)]), ce);
+  }
+
+  // Handle Nor: NOR(A, B) ≡ ¬(A ∨ B) ≡ ¬A ∧ ¬B
+  if (op === 'Nor') {
+    const ops = expr.ops!;
+    // NOR(a, b, c, ...) = NOT(OR(a, b, c, ...))
+    return toNNF(ce._fn('Not', [ce._fn('Or', ops)]), ce);
   }
 
   // Recursively process And/Or
@@ -1058,4 +1199,182 @@ function toDNF(expr: BoxedExpression, ce: ComputeEngine): BoxedExpression {
 
   // Simplify the result
   return dnf.simplify();
+}
+
+//
+// Satisfiability, Tautology, and Truth Table Functions
+//
+
+/**
+ * Extract all propositional variables from a boolean expression.
+ * Returns a sorted array of unique variable names.
+ */
+function extractVariables(expr: BoxedExpression): string[] {
+  const variables = new Set<string>();
+
+  function visit(e: BoxedExpression) {
+    // Skip True/False constants
+    if (e.symbol === 'True' || e.symbol === 'False') return;
+
+    // If it's a symbol (variable), add it
+    // Note: BoxedSymbol has operator === 'Symbol'
+    if (e.symbol && e.operator === 'Symbol') {
+      variables.add(e.symbol);
+      return;
+    }
+
+    // Recursively process operands
+    if (e.ops) {
+      for (const op of e.ops) {
+        visit(op);
+      }
+    }
+  }
+
+  visit(expr);
+  return Array.from(variables).sort();
+}
+
+/**
+ * Evaluate a boolean expression with a given truth assignment.
+ * Returns True, False, or undefined if the expression cannot be evaluated.
+ */
+function evaluateWithAssignment(
+  expr: BoxedExpression,
+  assignment: Record<string, boolean>,
+  ce: ComputeEngine
+): BoxedExpression {
+  // Build substitution map
+  const subs: Record<string, BoxedExpression> = {};
+  for (const [variable, value] of Object.entries(assignment)) {
+    subs[variable] = value ? ce.True : ce.False;
+  }
+
+  // Substitute and evaluate
+  const substituted = expr.subs(subs).canonical;
+  return substituted.evaluate();
+}
+
+/**
+ * Generate all possible truth assignments for a list of variables.
+ * Each assignment is a Record mapping variable names to boolean values.
+ */
+function* generateAssignments(
+  variables: string[]
+): Generator<Record<string, boolean>> {
+  const n = variables.length;
+  const total = 1 << n; // 2^n combinations
+
+  for (let i = 0; i < total; i++) {
+    const assignment: Record<string, boolean> = {};
+    for (let j = 0; j < n; j++) {
+      // Use bit j of i to determine the value
+      assignment[variables[j]] = ((i >> (n - 1 - j)) & 1) === 1;
+    }
+    yield assignment;
+  }
+}
+
+/**
+ * Check if a boolean expression is satisfiable.
+ * Returns True if there exists an assignment that makes the expression true.
+ */
+function isSatisfiable(
+  expr: BoxedExpression,
+  ce: ComputeEngine
+): BoxedExpression {
+  const variables = extractVariables(expr);
+
+  // Handle constant expressions
+  if (variables.length === 0) {
+    const result = expr.evaluate();
+    return result.symbol === 'True' ? ce.True : ce.False;
+  }
+
+  // Limit the number of variables to prevent explosion (2^n combinations)
+  if (variables.length > 20) {
+    // Too many variables, return undefined
+    return ce._fn('IsSatisfiable', [expr]);
+  }
+
+  // Try all possible assignments
+  for (const assignment of generateAssignments(variables)) {
+    const result = evaluateWithAssignment(expr, assignment, ce);
+    if (result.symbol === 'True') {
+      return ce.True;
+    }
+  }
+
+  return ce.False;
+}
+
+/**
+ * Check if a boolean expression is a tautology.
+ * Returns True if the expression is true for all possible assignments.
+ */
+function isTautology(
+  expr: BoxedExpression,
+  ce: ComputeEngine
+): BoxedExpression {
+  const variables = extractVariables(expr);
+
+  // Handle constant expressions
+  if (variables.length === 0) {
+    const result = expr.evaluate();
+    return result.symbol === 'True' ? ce.True : ce.False;
+  }
+
+  // Limit the number of variables to prevent explosion
+  if (variables.length > 20) {
+    // Too many variables, return undefined
+    return ce._fn('IsTautology', [expr]);
+  }
+
+  // Check all possible assignments
+  for (const assignment of generateAssignments(variables)) {
+    const result = evaluateWithAssignment(expr, assignment, ce);
+    if (result.symbol !== 'True') {
+      return ce.False;
+    }
+  }
+
+  return ce.True;
+}
+
+/**
+ * Generate a truth table for a boolean expression.
+ * Returns a List of Lists with headers and rows.
+ */
+function generateTruthTable(
+  expr: BoxedExpression,
+  ce: ComputeEngine
+): BoxedExpression {
+  const variables = extractVariables(expr);
+
+  // Limit the number of variables to prevent explosion
+  if (variables.length > 10) {
+    // Too many rows to generate
+    return ce._fn('TruthTable', [expr]);
+  }
+
+  const rows: BoxedExpression[] = [];
+
+  // Header row: variable names + "Result"
+  const header = ce._fn('List', [
+    ...variables.map((v) => ce.string(v)),
+    ce.string('Result'),
+  ]);
+  rows.push(header);
+
+  // Generate all rows
+  for (const assignment of generateAssignments(variables)) {
+    const result = evaluateWithAssignment(expr, assignment, ce);
+    const row = ce._fn('List', [
+      ...variables.map((v) => (assignment[v] ? ce.True : ce.False)),
+      result,
+    ]);
+    rows.push(row);
+  }
+
+  return ce._fn('List', rows);
 }

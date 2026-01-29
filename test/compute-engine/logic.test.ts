@@ -68,6 +68,57 @@ describe('Logic', () => {
     expect(box(['Nor', 'False', 'True'])).toMatchInlineSnapshot(`"False"`);
     expect(box(['Nor', 'False', 'False'])).toMatchInlineSnapshot(`"True"`);
   });
+
+  // N-ary operator tests
+  it('should evaluate n-ary Xor (parity)', () => {
+    // XOR with 3 arguments: true when odd number are true
+    expect(box(['Xor', 'True', 'True', 'True'])).toMatchInlineSnapshot(
+      `"True"`
+    );
+    expect(box(['Xor', 'True', 'True', 'False'])).toMatchInlineSnapshot(
+      `"False"`
+    );
+    expect(box(['Xor', 'True', 'False', 'False'])).toMatchInlineSnapshot(
+      `"True"`
+    );
+    expect(box(['Xor', 'False', 'False', 'False'])).toMatchInlineSnapshot(
+      `"False"`
+    );
+  });
+
+  it('should evaluate n-ary Nand', () => {
+    // NAND is NOT(AND(...))
+    expect(box(['Nand', 'True', 'True', 'True'])).toMatchInlineSnapshot(
+      `"False"`
+    );
+    expect(box(['Nand', 'True', 'True', 'False'])).toMatchInlineSnapshot(
+      `"True"`
+    );
+    expect(box(['Nand', 'False', 'False', 'False'])).toMatchInlineSnapshot(
+      `"True"`
+    );
+  });
+
+  it('should evaluate n-ary Nor', () => {
+    // NOR is NOT(OR(...))
+    expect(box(['Nor', 'False', 'False', 'False'])).toMatchInlineSnapshot(
+      `"True"`
+    );
+    expect(box(['Nor', 'True', 'False', 'False'])).toMatchInlineSnapshot(
+      `"False"`
+    );
+    expect(box(['Nor', 'True', 'True', 'True'])).toMatchInlineSnapshot(
+      `"False"`
+    );
+  });
+
+  // Partial evaluation tests
+  it('should partially evaluate Xor with symbolic arguments', () => {
+    // XOR(True, x) = NOT(x)
+    expect(box(['Xor', 'True', 'A'])).toMatchInlineSnapshot(`!A`);
+    // XOR(False, x) = x
+    expect(box(['Xor', 'False', 'A'])).toMatchInlineSnapshot(`A`);
+  });
 });
 
 describe('Kronecker Delta', () => {
@@ -320,5 +371,151 @@ describe('CNF/DNF Conversion', () => {
     expect(box(['ToCNF', 'False'])).toMatchInlineSnapshot(`"False"`);
     expect(box(['ToDNF', 'True'])).toMatchInlineSnapshot(`"True"`);
     expect(box(['ToDNF', 'False'])).toMatchInlineSnapshot(`"False"`);
+  });
+
+  it('should handle Nand', () => {
+    // NAND(A, B) ≡ ¬(A ∧ B) ≡ ¬A ∨ ¬B in CNF
+    expect(box(['ToCNF', ['Nand', 'A', 'B']])).toMatchInlineSnapshot(
+      `!A || !B`
+    );
+    // In DNF it's the same (already in DNF form)
+    expect(box(['ToDNF', ['Nand', 'A', 'B']])).toMatchInlineSnapshot(
+      `!A || !B`
+    );
+  });
+
+  it('should handle Nor', () => {
+    // NOR(A, B) ≡ ¬(A ∨ B) ≡ ¬A ∧ ¬B in CNF
+    expect(box(['ToCNF', ['Nor', 'A', 'B']])).toMatchInlineSnapshot(
+      `!A && !B`
+    );
+    // In DNF it's the same (already in DNF form)
+    expect(box(['ToDNF', ['Nor', 'A', 'B']])).toMatchInlineSnapshot(
+      `!A && !B`
+    );
+  });
+
+  it('should handle n-ary operators in CNF/DNF', () => {
+    // n-ary XOR - order of clauses may vary (AND is commutative)
+    expect(box(['ToCNF', ['Xor', 'A', 'B', 'C']])).toMatchInlineSnapshot(
+      `(A || B || C) && (C || !A || !B) && (A || !B || !C) && (B || !A || !C)`
+    );
+    // n-ary NAND
+    expect(box(['ToCNF', ['Nand', 'A', 'B', 'C']])).toMatchInlineSnapshot(
+      `!A || !B || !C`
+    );
+    // n-ary NOR
+    expect(box(['ToCNF', ['Nor', 'A', 'B', 'C']])).toMatchInlineSnapshot(
+      `!A && !B && !C`
+    );
+  });
+});
+
+describe('Satisfiability and Tautology', () => {
+  it('should check satisfiability of simple expressions', () => {
+    // True is satisfiable
+    expect(box(['IsSatisfiable', 'True'])).toMatchInlineSnapshot(`"True"`);
+    // False is not satisfiable
+    expect(box(['IsSatisfiable', 'False'])).toMatchInlineSnapshot(`"False"`);
+    // A single variable is satisfiable (can be True)
+    expect(box(['IsSatisfiable', 'A'])).toMatchInlineSnapshot(`"True"`);
+    // A AND NOT(A) is not satisfiable (contradiction)
+    expect(
+      box(['IsSatisfiable', ['And', 'A', ['Not', 'A']]])
+    ).toMatchInlineSnapshot(`"False"`);
+    // A OR NOT(A) is satisfiable (tautology)
+    expect(
+      box(['IsSatisfiable', ['Or', 'A', ['Not', 'A']]])
+    ).toMatchInlineSnapshot(`"True"`);
+  });
+
+  it('should check satisfiability of complex expressions', () => {
+    // (A AND B) is satisfiable
+    expect(box(['IsSatisfiable', ['And', 'A', 'B']])).toMatchInlineSnapshot(
+      `"True"`
+    );
+    // (A AND B AND NOT(A)) is not satisfiable
+    expect(
+      box(['IsSatisfiable', ['And', 'A', 'B', ['Not', 'A']]])
+    ).toMatchInlineSnapshot(`"False"`);
+  });
+
+  it('should check if expressions are tautologies', () => {
+    // True is a tautology
+    expect(box(['IsTautology', 'True'])).toMatchInlineSnapshot(`"True"`);
+    // False is not a tautology
+    expect(box(['IsTautology', 'False'])).toMatchInlineSnapshot(`"False"`);
+    // A single variable is not a tautology
+    expect(box(['IsTautology', 'A'])).toMatchInlineSnapshot(`"False"`);
+    // A OR NOT(A) is a tautology (law of excluded middle)
+    expect(
+      box(['IsTautology', ['Or', 'A', ['Not', 'A']]])
+    ).toMatchInlineSnapshot(`"True"`);
+    // A AND NOT(A) is not a tautology
+    expect(
+      box(['IsTautology', ['And', 'A', ['Not', 'A']]])
+    ).toMatchInlineSnapshot(`"False"`);
+  });
+
+  it('should verify logical laws', () => {
+    // Double negation: NOT(NOT(A)) ↔ A
+    expect(
+      box(['IsTautology', ['Equivalent', ['Not', ['Not', 'A']], 'A']])
+    ).toMatchInlineSnapshot(`"True"`);
+    // De Morgan: NOT(A AND B) ↔ (NOT(A) OR NOT(B))
+    expect(
+      box([
+        'IsTautology',
+        [
+          'Equivalent',
+          ['Not', ['And', 'A', 'B']],
+          ['Or', ['Not', 'A'], ['Not', 'B']],
+        ],
+      ])
+    ).toMatchInlineSnapshot(`"True"`);
+    // Modus Ponens: ((A → B) AND A) → B
+    expect(
+      box([
+        'IsTautology',
+        ['Implies', ['And', ['Implies', 'A', 'B'], 'A'], 'B'],
+      ])
+    ).toMatchInlineSnapshot(`"True"`);
+  });
+});
+
+describe('Truth Table Generation', () => {
+  it('should generate truth table for simple expressions', () => {
+    const result = ce.box(['TruthTable', 'A']).evaluate();
+    expect(result.toString()).toMatchInlineSnapshot(
+      `[["A","Result"],["False","False"],["True","True"]]`
+    );
+  });
+
+  it('should generate truth table for And', () => {
+    const result = ce.box(['TruthTable', ['And', 'A', 'B']]).evaluate();
+    expect(result.toString()).toMatchInlineSnapshot(
+      `[["A","B","Result"],["False","False","False"],["False","True","False"],["True","False","False"],["True","True","True"]]`
+    );
+  });
+
+  it('should generate truth table for Or', () => {
+    const result = ce.box(['TruthTable', ['Or', 'A', 'B']]).evaluate();
+    expect(result.toString()).toMatchInlineSnapshot(
+      `[["A","B","Result"],["False","False","False"],["False","True","True"],["True","False","True"],["True","True","True"]]`
+    );
+  });
+
+  it('should generate truth table for Xor', () => {
+    const result = ce.box(['TruthTable', ['Xor', 'A', 'B']]).evaluate();
+    expect(result.toString()).toMatchInlineSnapshot(
+      `[["A","B","Result"],["False","False","False"],["False","True","True"],["True","False","True"],["True","True","False"]]`
+    );
+  });
+
+  it('should generate truth table for Implies', () => {
+    const result = ce.box(['TruthTable', ['Implies', 'A', 'B']]).evaluate();
+    expect(result.toString()).toMatchInlineSnapshot(
+      `[["A","B","Result"],["False","False","True"],["False","True","True"],["True","False","False"],["True","True","True"]]`
+    );
   });
 });
