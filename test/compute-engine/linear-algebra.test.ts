@@ -149,6 +149,126 @@ describe('Matrix addition', () => {
   });
 });
 
+describe('MatrixMultiply', () => {
+  // Matrix × Matrix
+  it('should multiply two square numeric matrices', () => {
+    // [[1, 2], [3, 4]] × [[5, 6], [7, 8]] = [[19, 22], [43, 50]]
+    const result = ce.box(['MatrixMultiply', sq2_n, sq2_n2]).evaluate();
+    expect(result.toString()).toMatchInlineSnapshot(`[[19,22],[43,50]]`);
+  });
+
+  it('should multiply two square matrices with unknowns', () => {
+    // [[a, b], [c, d]] × [[5, 6], [7, 8]]
+    const result = ce.box(['MatrixMultiply', sq2_x, sq2_n2]).evaluate();
+    expect(result.toString()).toMatchInlineSnapshot(
+      `[[5a + 7b,6a + 8b],[5c + 7d,6c + 8d]]`
+    );
+  });
+
+  it('should multiply 2x3 matrix by 3x2 matrix', () => {
+    // [[1, 2, 3], [4, 5, 6]] × [[7, 8], [9, 10], [11, 12]] = [[58, 64], [139, 154]]
+    const m32: Expression = [
+      'List',
+      ['List', 7, 8],
+      ['List', 9, 10],
+      ['List', 11, 12],
+    ];
+    const result = ce.box(['MatrixMultiply', m23_n, m32]).evaluate();
+    expect(result.toString()).toMatchInlineSnapshot(`[[58,64],[139,154]]`);
+  });
+
+  it('should return error for incompatible matrix dimensions', () => {
+    // [[1, 2], [3, 4]] × [[1, 2, 3], [4, 5, 6]] - dimensions incompatible (2 vs 2 is OK)
+    // Let's try sq2_n (2×2) × m23_n (2×3) - should work!
+    const result = ce.box(['MatrixMultiply', sq2_n, m23_n]).evaluate();
+    expect(result.toString()).toMatchInlineSnapshot(`[[9,12,15],[19,26,33]]`);
+  });
+
+  it('should return error for truly incompatible dimensions', () => {
+    // m23_n (2×3) × sq2_n (2×2) - 3 ≠ 2, should fail
+    const result = ce.box(['MatrixMultiply', m23_n, sq2_n]).evaluate();
+    expect(result.toString()).toMatchInlineSnapshot(
+      `Error("incompatible-dimensions", "3 vs 2")`
+    );
+  });
+
+  // Matrix × Vector
+  it('should multiply matrix by vector', () => {
+    // [[1, 2], [3, 4]] × [7, 11] = [1*7+2*11, 3*7+4*11] = [29, 65]
+    const result = ce.box(['MatrixMultiply', sq2_n, v2_n]).evaluate();
+    expect(result.toString()).toMatchInlineSnapshot(`[29,65]`);
+  });
+
+  it('should multiply 2x3 matrix by 3-vector', () => {
+    // [[1, 2, 3], [4, 5, 6]] × [1, 2, 3] = [14, 32]
+    const v3: Expression = ['List', 1, 2, 3];
+    const result = ce.box(['MatrixMultiply', m23_n, v3]).evaluate();
+    expect(result.toString()).toMatchInlineSnapshot(`[14,32]`);
+  });
+
+  it('should return error for matrix × incompatible vector', () => {
+    // sq2_n (2×2) × v7_n (7) - 2 ≠ 7, should fail
+    const result = ce.box(['MatrixMultiply', sq2_n, v7_n]).evaluate();
+    expect(result.toString()).toMatchInlineSnapshot(
+      `Error("incompatible-dimensions", "2 vs 7")`
+    );
+  });
+
+  // Vector × Matrix
+  it('should multiply vector by matrix', () => {
+    // [7, 11] × [[1, 2], [3, 4]] = [7*1+11*3, 7*2+11*4] = [40, 58]
+    const result = ce.box(['MatrixMultiply', v2_n, sq2_n]).evaluate();
+    expect(result.toString()).toMatchInlineSnapshot(`[40,58]`);
+  });
+
+  it('should multiply 2-vector by 2x3 matrix', () => {
+    // [1, 2] × [[1, 2, 3], [4, 5, 6]] = [9, 12, 15]
+    const v2: Expression = ['List', 1, 2];
+    const result = ce.box(['MatrixMultiply', v2, m23_n]).evaluate();
+    expect(result.toString()).toMatchInlineSnapshot(`[9,12,15]`);
+  });
+
+  // Vector × Vector (dot product)
+  it('should compute dot product of two vectors', () => {
+    // [7, 11] · [7, 11] = 49 + 121 = 170
+    const result = ce.box(['MatrixMultiply', v2_n, v2_n]).evaluate();
+    expect(result.toString()).toMatchInlineSnapshot(`170`);
+  });
+
+  it('should compute dot product of two longer vectors', () => {
+    // Using first 3 elements of v7_n for simplicity
+    const v3a: Expression = ['List', 1, 2, 3];
+    const v3b: Expression = ['List', 4, 5, 6];
+    // 1*4 + 2*5 + 3*6 = 4 + 10 + 18 = 32
+    const result = ce.box(['MatrixMultiply', v3a, v3b]).evaluate();
+    expect(result.toString()).toMatchInlineSnapshot(`32`);
+  });
+
+  it('should return error for incompatible vector lengths in dot product', () => {
+    const v3: Expression = ['List', 1, 2, 3];
+    const result = ce.box(['MatrixMultiply', v2_n, v3]).evaluate();
+    expect(result.toString()).toMatchInlineSnapshot(
+      `Error("incompatible-dimensions", "2 vs 3")`
+    );
+  });
+
+  // Symbolic operations
+  it('should handle symbolic matrix multiplication', () => {
+    // [[a, b], [c, d]] × [[a, b], [c, d]]
+    const result = ce.box(['MatrixMultiply', sq2_x, sq2_x]).evaluate();
+    expect(result.toString()).toMatchInlineSnapshot(
+      `[[a^2 + b * c,a * b + b * d],[a * c + c * d,d^2 + b * c]]`
+    );
+  });
+
+  // Identity matrix property
+  it('should preserve matrix when multiplied by identity', () => {
+    const identity: Expression = ['List', ['List', 1, 0], ['List', 0, 1]];
+    const result = ce.box(['MatrixMultiply', sq2_n, identity]).evaluate();
+    expect(result.toString()).toMatchInlineSnapshot(`[[1,2],[3,4]]`);
+  });
+});
+
 describe('Flatten', () => {
   it('should flatten a scalar', () => {
     const result = ce.box(['Flatten', 42]).evaluate();

@@ -36,6 +36,14 @@
 - **Linear Algebra Enhancements**: Improved tensor and matrix operations with
   better scalar handling, new functionality, and clearer error messages:
 
+  - **Matrix Multiplication**: Added `MatrixMultiply` function supporting:
+    - Matrix × Matrix: `A (m×n) × B (n×p) → result (m×p)`
+    - Matrix × Vector: `A (m×n) × v (n) → result (m)`
+    - Vector × Matrix: `v (m) × B (m×n) → result (n)`
+    - Vector × Vector (dot product): `v1 (n) · v2 (n) → scalar`
+    - Proper dimension validation with `incompatible-dimensions` errors
+    - LaTeX serialization using `\cdot` notation
+
   - **Diagonal function**: Now fully implemented with bidirectional behavior:
     - Vector → Matrix: Creates a diagonal matrix from a vector
       (`Diagonal([1,2,3])` → 3×3 diagonal matrix)

@@ -338,6 +338,118 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
       },
     },
 
+    // Matrix multiplication: A (m×n) × B (n×p) → result (m×p)
+    // Handles matrix × matrix, matrix × vector, vector × matrix
+    MatrixMultiply: {
+      complexity: 8300,
+      signature: '(matrix|vector, matrix|vector) -> matrix|vector',
+      evaluate: (ops, { engine: ce }): BoxedExpression | undefined => {
+        const A = ops[0].evaluate();
+        const B = ops[1].evaluate();
+
+        // Both operands must be tensors
+        if (!isBoxedTensor(A) || !isBoxedTensor(B)) return undefined;
+
+        const shapeA = A.shape;
+        const shapeB = B.shape;
+
+        // Handle vector × vector (inner product / dot product)
+        if (shapeA.length === 1 && shapeB.length === 1) {
+          if (shapeA[0] !== shapeB[0])
+            return ce.error(
+              'incompatible-dimensions',
+              `${shapeA[0]} vs ${shapeB[0]}`
+            );
+
+          // Dot product: sum of element-wise products
+          const n = shapeA[0];
+          let sum: BoxedExpression = ce.Zero;
+          for (let i = 0; i < n; i++) {
+            const aVal = A.tensor.at(i + 1) ?? ce.Zero;
+            const bVal = B.tensor.at(i + 1) ?? ce.Zero;
+            sum = sum.add(ce.box(aVal).mul(ce.box(bVal)));
+          }
+          return sum.evaluate();
+        }
+
+        // Handle matrix × vector: A (m×n) × v (n) → result (m)
+        if (shapeA.length === 2 && shapeB.length === 1) {
+          const [m, n] = shapeA;
+          if (n !== shapeB[0])
+            return ce.error(
+              'incompatible-dimensions',
+              `${n} vs ${shapeB[0]}`
+            );
+
+          const result: BoxedExpression[] = [];
+          for (let i = 0; i < m; i++) {
+            let sum: BoxedExpression = ce.Zero;
+            for (let k = 0; k < n; k++) {
+              const aVal = A.tensor.at(i + 1, k + 1) ?? ce.Zero;
+              const bVal = B.tensor.at(k + 1) ?? ce.Zero;
+              sum = sum.add(ce.box(aVal).mul(ce.box(bVal)));
+            }
+            result.push(sum.evaluate());
+          }
+          return ce.box(['List', ...result]);
+        }
+
+        // Handle vector × matrix: v (m) × B (m×n) → result (n)
+        // Treat vector as 1×m row vector
+        if (shapeA.length === 1 && shapeB.length === 2) {
+          const [m, n] = shapeB;
+          if (shapeA[0] !== m)
+            return ce.error(
+              'incompatible-dimensions',
+              `${shapeA[0]} vs ${m}`
+            );
+
+          const result: BoxedExpression[] = [];
+          for (let j = 0; j < n; j++) {
+            let sum: BoxedExpression = ce.Zero;
+            for (let k = 0; k < m; k++) {
+              const aVal = A.tensor.at(k + 1) ?? ce.Zero;
+              const bVal = B.tensor.at(k + 1, j + 1) ?? ce.Zero;
+              sum = sum.add(ce.box(aVal).mul(ce.box(bVal)));
+            }
+            result.push(sum.evaluate());
+          }
+          return ce.box(['List', ...result]);
+        }
+
+        // Handle matrix × matrix: A (m×n) × B (n×p) → result (m×p)
+        if (shapeA.length === 2 && shapeB.length === 2) {
+          const [m, n1] = shapeA;
+          const [n2, p] = shapeB;
+          if (n1 !== n2)
+            return ce.error(
+              'incompatible-dimensions',
+              `${n1} vs ${n2}`
+            );
+
+          const n = n1;
+          const rows: BoxedExpression[] = [];
+          for (let i = 0; i < m; i++) {
+            const row: BoxedExpression[] = [];
+            for (let j = 0; j < p; j++) {
+              let sum: BoxedExpression = ce.Zero;
+              for (let k = 0; k < n; k++) {
+                const aVal = A.tensor.at(i + 1, k + 1) ?? ce.Zero;
+                const bVal = B.tensor.at(k + 1, j + 1) ?? ce.Zero;
+                sum = sum.add(ce.box(aVal).mul(ce.box(bVal)));
+              }
+              row.push(sum.evaluate());
+            }
+            rows.push(ce.box(['List', ...row]));
+          }
+          return ce.box(['List', ...rows]);
+        }
+
+        // Unsupported tensor ranks
+        return undefined;
+      },
+    },
+
     // Diagonal can be used to:
     // 1. Create a diagonal matrix from a vector
     // 2. Extract the diagonal from a matrix as a vector

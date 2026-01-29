@@ -232,6 +232,16 @@ export const DEFINITIONS_LINEAR_ALGEBRA: LatexDictionary = [
     kind: 'function',
     symbolTrigger: 'det',
   },
+
+  // MatrixMultiply serializes as multiplication with \cdot
+  {
+    name: 'MatrixMultiply',
+    serialize: (serializer: Serializer, expr: Expression): string => {
+      const lhs = serializer.serialize(operand(expr, 1));
+      const rhs = serializer.serialize(operand(expr, 2));
+      return `${lhs} \\cdot ${rhs}`;
+    },
+  },
 ];
 
 function parseCells(

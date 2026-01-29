@@ -19,6 +19,121 @@ import {
 import { cancelCommonFactors } from '../boxed-expression/polynomials';
 import { simplifySum } from './simplify-sum';
 import { simplifyProduct } from './simplify-product';
+import type { ComputeEngine } from '../global-types';
+
+/**
+ * Reduce trigonometric functions by their periodicity.
+ *
+ * For sin/cos/sec/csc (period 2π): reduce coefficient of π modulo 2
+ * For tan/cot (period π): reduce coefficient of π modulo 1 (just remove integer multiples)
+ *
+ * Example: cos(5π + k) → -cos(k) because 5 mod 2 = 1, and cos(π + x) = -cos(x)
+ */
+function reduceTrigPeriodicity(
+  fn: 'Sin' | 'Cos' | 'Tan' | 'Cot' | 'Sec' | 'Csc',
+  arg: BoxedExpression,
+  ce: ComputeEngine
+): BoxedExpression | null {
+  // Only handle Add expressions
+  if (arg.operator !== 'Add' || !arg.ops) return null;
+
+  const terms = arg.ops;
+
+  // Find a term that is a multiple of π
+  let piCoeff: number | null = null;
+  let piTermIndex = -1;
+
+  for (let i = 0; i < terms.length; i++) {
+    const term = terms[i];
+
+    // Check for plain Pi
+    if (term.symbol === 'Pi') {
+      piCoeff = 1;
+      piTermIndex = i;
+      break;
+    }
+
+    // Check for n * Pi or Pi * n
+    if (term.operator === 'Multiply' && term.ops) {
+      const termOps = term.ops;
+      // Look for Pi among the factors
+      const piIndex = termOps.findIndex((op) => op.symbol === 'Pi');
+      if (piIndex >= 0) {
+        // Get the coefficient (product of all other factors)
+        const otherFactors = termOps.filter((_, idx) => idx !== piIndex);
+        if (otherFactors.length === 1) {
+          const n = otherFactors[0].numericValue;
+          if (typeof n === 'number' && Number.isInteger(n)) {
+            piCoeff = n;
+            piTermIndex = i;
+            break;
+          }
+        } else if (otherFactors.length === 0) {
+          // Just Pi in a Multiply (shouldn't happen but handle it)
+          piCoeff = 1;
+          piTermIndex = i;
+          break;
+        }
+      }
+    }
+
+    // Check for Negate(Pi) = -Pi
+    if (term.operator === 'Negate' && term.op1?.symbol === 'Pi') {
+      piCoeff = -1;
+      piTermIndex = i;
+      break;
+    }
+  }
+
+  // No multiple of π found
+  if (piCoeff === null || piTermIndex < 0) return null;
+
+  // Determine the period and calculate the reduced coefficient
+  const period = fn === 'Tan' || fn === 'Cot' ? 1 : 2;
+
+  // Reduce coefficient modulo period
+  // JavaScript % can give negative results, so we normalize
+  let reduced = piCoeff % period;
+  if (reduced < 0) reduced += period;
+
+  // If reduced is 0, the multiple of π has no effect - just remove the π term
+  // If reduced is 1 (for period 2), we have a half-period shift
+
+  // Build the remaining argument (without the π term)
+  const remainingTerms = terms.filter((_, idx) => idx !== piTermIndex);
+
+  // Add back the reduced π coefficient if non-zero
+  if (reduced !== 0) {
+    if (reduced === 1) {
+      remainingTerms.push(ce.Pi);
+    } else {
+      remainingTerms.push(ce.box(['Multiply', reduced, 'Pi']));
+    }
+  }
+
+  // If nothing changed (same coefficient), return null to avoid infinite loop
+  if (reduced === piCoeff % period && reduced === piCoeff) return null;
+
+  // Build the new argument
+  let newArg: BoxedExpression;
+  if (remainingTerms.length === 0) {
+    newArg = ce.Zero;
+  } else if (remainingTerms.length === 1) {
+    newArg = remainingTerms[0];
+  } else {
+    newArg = add(...remainingTerms);
+  }
+
+  // For period 2 functions (sin, cos, sec, csc):
+  // - If we removed an even multiple of π (reduced from n to 0), no sign change
+  // - We've now reduced to having at most π in the argument
+  // The existing rules for sin(π + x) -> -sin(x) etc. will handle the final step
+
+  // For period 1 functions (tan, cot):
+  // - Any integer multiple of π is removed, no sign change needed
+
+  return ce.box([fn, newArg]);
+}
 
 /**
  * @todo: a set to "tidy" an expression. Different from a canonical form, but
@@ -1094,6 +1209,33 @@ export const SIMPLIFY_RULES: Rule[] = [
   '\\cot(\\pi + x) -> -\\cot(x)',
   '\\sec(\\pi + x) -> -\\sec(x)',
   '\\csc(\\pi + x) -> \\csc(x)',
+
+  // Trigonometric periodicity reduction for multiples of π
+  // sin(nπ + x) and cos(nπ + x) where n is an integer
+  {
+    match: ['Sin', '_arg'],
+    replace: (sub, ce) => reduceTrigPeriodicity('Sin', sub._arg, ce),
+  },
+  {
+    match: ['Cos', '_arg'],
+    replace: (sub, ce) => reduceTrigPeriodicity('Cos', sub._arg, ce),
+  },
+  {
+    match: ['Tan', '_arg'],
+    replace: (sub, ce) => reduceTrigPeriodicity('Tan', sub._arg, ce),
+  },
+  {
+    match: ['Cot', '_arg'],
+    replace: (sub, ce) => reduceTrigPeriodicity('Cot', sub._arg, ce),
+  },
+  {
+    match: ['Sec', '_arg'],
+    replace: (sub, ce) => reduceTrigPeriodicity('Sec', sub._arg, ce),
+  },
+  {
+    match: ['Csc', '_arg'],
+    replace: (sub, ce) => reduceTrigPeriodicity('Csc', sub._arg, ce),
+  },
 
   '\\sin(\\frac{\\pi}{2} - x) -> \\cos(x)',
   '\\cos(\\frac{\\pi}{2} - x) -> \\sin(x)',
