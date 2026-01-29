@@ -82,6 +82,33 @@ export const LOGIC_LIBRARY: SymbolDefinitions = {
     signature: '(boolean, boolean) -> boolean',
     evaluate: evaluateImplies,
   },
+  Xor: {
+    description: 'Exclusive or: true when exactly one operand is true',
+    wikidata: 'Q498186',
+    broadcastable: true,
+    commutative: true,
+    complexity: 10200,
+    signature: '(boolean, boolean) -> boolean',
+    evaluate: evaluateXor,
+  },
+  Nand: {
+    description: 'Not-and: negation of conjunction',
+    wikidata: 'Q189550',
+    broadcastable: true,
+    commutative: true,
+    complexity: 10200,
+    signature: '(boolean, boolean) -> boolean',
+    evaluate: evaluateNand,
+  },
+  Nor: {
+    description: 'Not-or: negation of disjunction',
+    wikidata: 'Q189561',
+    broadcastable: true,
+    commutative: true,
+    complexity: 10200,
+    signature: '(boolean, boolean) -> boolean',
+    evaluate: evaluateNor,
+  },
   // Quantifiers return boolean values (they are propositions)
   // They support evaluation over finite domains (e.g., ForAll with Element condition)
   // The first argument can be:
@@ -268,6 +295,60 @@ function evaluateImplies(
   return undefined;
 }
 
+function evaluateXor(
+  args: ReadonlyArray<BoxedExpression>,
+  { engine: ce }: { engine: ComputeEngine }
+): BoxedExpression | undefined {
+  const lhs = args[0].symbol;
+  const rhs = args[1].symbol;
+  // XOR is true when exactly one operand is true
+  if (
+    (lhs === 'True' && rhs === 'False') ||
+    (lhs === 'False' && rhs === 'True')
+  )
+    return ce.True;
+  if (
+    (lhs === 'True' && rhs === 'True') ||
+    (lhs === 'False' && rhs === 'False')
+  )
+    return ce.False;
+  return undefined;
+}
+
+function evaluateNand(
+  args: ReadonlyArray<BoxedExpression>,
+  { engine: ce }: { engine: ComputeEngine }
+): BoxedExpression | undefined {
+  // NAND is the negation of AND
+  const lhs = args[0].symbol;
+  const rhs = args[1].symbol;
+  if (lhs === 'True' && rhs === 'True') return ce.False;
+  if (
+    (lhs === 'True' && rhs === 'False') ||
+    (lhs === 'False' && rhs === 'True') ||
+    (lhs === 'False' && rhs === 'False')
+  )
+    return ce.True;
+  return undefined;
+}
+
+function evaluateNor(
+  args: ReadonlyArray<BoxedExpression>,
+  { engine: ce }: { engine: ComputeEngine }
+): BoxedExpression | undefined {
+  // NOR is the negation of OR
+  const lhs = args[0].symbol;
+  const rhs = args[1].symbol;
+  if (lhs === 'False' && rhs === 'False') return ce.True;
+  if (
+    (lhs === 'True' && rhs === 'True') ||
+    (lhs === 'True' && rhs === 'False') ||
+    (lhs === 'False' && rhs === 'True')
+  )
+    return ce.False;
+  return undefined;
+}
+
 export function simplifyLogicFunction(
   x: BoxedExpression
 ): { value: BoxedExpression; because: string } | undefined {
@@ -277,6 +358,9 @@ export function simplifyLogicFunction(
     Not: evaluateNot,
     Equivalent: evaluateEquivalent,
     Implies: evaluateImplies,
+    Xor: evaluateXor,
+    Nand: evaluateNand,
+    Nor: evaluateNor,
   }[x.operator];
 
   if (!fn || !x.ops) return undefined;

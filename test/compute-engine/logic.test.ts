@@ -47,6 +47,27 @@ describe('Logic', () => {
       `"True"`
     );
   });
+
+  it('should evaluate Xor', () => {
+    expect(box(['Xor', 'True', 'True'])).toMatchInlineSnapshot(`"False"`);
+    expect(box(['Xor', 'True', 'False'])).toMatchInlineSnapshot(`"True"`);
+    expect(box(['Xor', 'False', 'True'])).toMatchInlineSnapshot(`"True"`);
+    expect(box(['Xor', 'False', 'False'])).toMatchInlineSnapshot(`"False"`);
+  });
+
+  it('should evaluate Nand', () => {
+    expect(box(['Nand', 'True', 'True'])).toMatchInlineSnapshot(`"False"`);
+    expect(box(['Nand', 'True', 'False'])).toMatchInlineSnapshot(`"True"`);
+    expect(box(['Nand', 'False', 'True'])).toMatchInlineSnapshot(`"True"`);
+    expect(box(['Nand', 'False', 'False'])).toMatchInlineSnapshot(`"True"`);
+  });
+
+  it('should evaluate Nor', () => {
+    expect(box(['Nor', 'True', 'True'])).toMatchInlineSnapshot(`"False"`);
+    expect(box(['Nor', 'True', 'False'])).toMatchInlineSnapshot(`"False"`);
+    expect(box(['Nor', 'False', 'True'])).toMatchInlineSnapshot(`"False"`);
+    expect(box(['Nor', 'False', 'False'])).toMatchInlineSnapshot(`"True"`);
+  });
 });
 
 describe('Kronecker Delta', () => {
@@ -279,6 +300,18 @@ describe('CNF/DNF Conversion', () => {
     // A ↔ B ≡ (¬A ∨ B) ∧ (¬B ∨ A) - order may vary
     expect(box(['ToCNF', ['Equivalent', 'A', 'B']])).toMatchInlineSnapshot(
       `(B || !A) && (A || !B)`
+    );
+  });
+
+  it('should handle Xor', () => {
+    // A ⊕ B ≡ (A ∨ B) ∧ (¬A ∨ ¬B) in CNF
+    expect(box(['ToCNF', ['Xor', 'A', 'B']])).toMatchInlineSnapshot(
+      `(A || B) && (!A || !B)`
+    );
+
+    // A ⊕ B ≡ (A ∧ ¬B) ∨ (¬A ∧ B) in DNF
+    expect(box(['ToDNF', ['Xor', 'A', 'B']])).toMatchInlineSnapshot(
+      `A && !B || B && !A`
     );
   });
 

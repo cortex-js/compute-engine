@@ -39,6 +39,20 @@
   when simplifying expressions containing exponentials, such as the derivative
   of `erf(x)` which is `(2/√π)·e^(-x²)`.
 
+- **Special Function Derivatives**: Fixed derivative formulas for several special
+  functions and removed incorrect ones:
+  - Fixed `d/dx erfi(x) = (2/√π)·e^(x²)` (imaginary error function)
+  - Fixed `d/dx S(x) = sin(πx²/2)` (Fresnel sine integral)
+  - Fixed `d/dx C(x) = cos(πx²/2)` (Fresnel cosine integral)
+  - Removed incorrect derivative formulas for Zeta, Digamma, PolyGamma, Beta,
+    LambertW, Bessel functions, and Airy functions (these now return symbolic
+    derivatives like `Digamma'(x)` instead of wrong numeric results)
+
+- **Symbolic Derivative Evaluation**: Fixed derivatives of unknown functions
+  returning `0` instead of symbolic derivatives. For example, `D(Digamma(x), x)`
+  now correctly returns `Digamma'(x)` (as `Apply(Derivative(Digamma, 1), x)`)
+  instead of incorrectly returning `0`.
+
 - **([#168](https://github.com/cortex-js/compute-engine/issues/168))
   Absolute Value**: Fixed parsing of nested absolute value expressions that
   start with a double bar (e.g. `||3-5|-4|`), which previously produced an
