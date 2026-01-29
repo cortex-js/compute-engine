@@ -1258,9 +1258,29 @@ export const SIMPLIFY_RULES: Rule[] = [
   '\\sin(x) * \\sin(y) -> \\frac{1}{2} (\\cos(x-y) - \\cos(x+y))',
   '\\cos(x) * \\cos(y) -> \\frac{1}{2} (\\cos(x-y) + \\cos(x+y))',
   '\\tan(x) * \\cot(x) -> 1',
-  // '\\sin(x)^2 + \\cos(x)^2 -> 1',
-  '\\sin(x)^2 -> \\frac{1 - \\cos(2x)}{2}',
-  '\\cos(x)^2 -> \\frac{1 + \\cos(2x)}{2}',
+
+  // Pythagorean identities - basic forms
+  '\\sin(x)^2 + \\cos(x)^2 -> 1',
+  '1 - \\sin(x)^2 -> \\cos(x)^2',
+  '1 - \\cos(x)^2 -> \\sin(x)^2',
+  '\\tan(x)^2 + 1 -> \\sec(x)^2',
+  '1 + \\cot(x)^2 -> \\csc(x)^2',
+  '\\sec(x)^2 - 1 -> \\tan(x)^2',
+  '\\csc(x)^2 - 1 -> \\cot(x)^2',
+  // Pythagorean identities - reversed subtraction forms
+  '\\sin(x)^2 - 1 -> -\\cos(x)^2',
+  '\\cos(x)^2 - 1 -> -\\sin(x)^2',
+  '-1 + \\tan(x)^2 -> -\\cot(x)^2',
+  '-1 + \\sec(x)^2 -> \\tan(x)^2',
+  '-1 + \\csc(x)^2 -> \\cot(x)^2',
+  // Pythagorean identities - negated forms
+  '-\\sin(x)^2 - \\cos(x)^2 -> -1',
+  // Pythagorean identities with coefficient
+  'a * \\sin(x)^2 + a * \\cos(x)^2 -> a',
+
+  // Double-angle formulas for squares (commented out - often make expressions more complex)
+  // '\\sin(x)^2 -> \\frac{1 - \\cos(2x)}{2}',
+  // '\\cos(x)^2 -> \\frac{1 + \\cos(2x)}{2}',
   // Note: Unconditional tan/cot/sec/csc -> sin/cos conversions are disabled
   // because they often make expressions more complex (e.g., tan(x) -> sin(x)/cos(x)
   // increases cost from 11 to 30). This interferes with other simplifications

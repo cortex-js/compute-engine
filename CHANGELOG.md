@@ -41,6 +41,15 @@
   - Works for all six trig functions: sin, cos, tan, cot, sec, csc
   - Handles both positive and negative multiples of π
 
+- **Pythagorean Trigonometric Identities**: Added simplification rules for all
+  Pythagorean identities:
+  - `sin²(x) + cos²(x)` → `1`
+  - `1 - sin²(x)` → `cos²(x)` and `1 - cos²(x)` → `sin²(x)`
+  - `sin²(x) - 1` → `-cos²(x)` and `cos²(x) - 1` → `-sin²(x)`
+  - `tan²(x) + 1` → `sec²(x)` and `sec²(x) - 1` → `tan²(x)`
+  - `1 + cot²(x)` → `csc²(x)` and `csc²(x) - 1` → `cot²(x)`
+  - `a·sin²(x) + a·cos²(x)` → `a` (with coefficient)
+
 - **([#133](https://github.com/cortex-js/compute-engine/issues/133)) Element-based
   Indexing Sets for Sum/Product**: Added support for `\in` notation in summation
   and product subscripts:
