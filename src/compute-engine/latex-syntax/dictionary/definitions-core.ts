@@ -922,6 +922,53 @@ export const DEFINITIONS_CORE: LatexDictionary = [
     },
   },
 
+  // Serializer for D (partial derivative) - outputs Leibniz notation
+  {
+    name: 'D',
+    serialize: (serializer: Serializer, expr: Expression): string => {
+      // Only handle D function expressions, not the plain symbol D
+      if (operator(expr) !== 'D') return 'D';
+
+      // D has form: ["D", function, variable, ...moreVariables]
+      const fn = operand(expr, 1);
+      const variable = operand(expr, 2);
+
+      if (!fn || !variable) return 'D';
+
+      // Count nested D expressions to determine the derivative order
+      let order = 1;
+      let innerFn = fn;
+
+      // Check for nested D with same variable
+      while (operator(innerFn) === 'D') {
+        const innerVar = operand(innerFn, 2);
+        if (symbol(innerVar) === symbol(variable)) {
+          order++;
+          innerFn = operand(innerFn, 1)!;
+        } else {
+          break;
+        }
+      }
+
+      // If the inner function is a Function expression, extract the body
+      // e.g., ["Function", ["Sin", "x"], "x"] -> ["Sin", "x"]
+      let bodyToSerialize = innerFn;
+      if (operator(innerFn) === 'Function') {
+        bodyToSerialize = operand(innerFn, 1) ?? innerFn;
+      }
+
+      // Serialize the function body
+      const fnLatex = serializer.serialize(bodyToSerialize);
+      const varLatex = serializer.serialize(variable);
+
+      // Output Leibniz notation: \frac{d}{dx}f or \frac{d^n}{dx^n}f
+      if (order === 1) {
+        return `\\frac{\\mathrm{d}}{\\mathrm{d}${varLatex}}${fnLatex}`;
+      }
+      return `\\frac{\\mathrm{d}^{${order}}}{\\mathrm{d}${varLatex}^{${order}}}${fnLatex}`;
+    },
+  },
+
   // Newton notation for time derivatives: \dot{x}, \ddot{x}, etc.
   {
     name: 'NewtonDerivative1',
@@ -1312,37 +1359,41 @@ function parsePrime(
   // i.e. f' -> Derivative(f)
 
   const sym = symbol(lhs);
-  if ((sym && parser.getSymbolType(sym).matches('function')) || operator(lhs)) {
-    // Check if followed by arguments - if so, use D notation
-    // e.g., f'(x) -> ["D", ["f", "x"], "x"]
-    parser.skipSpace();
-    const args = parser.parseArguments('enclosure');
+  const isKnownFunction =
+    (sym && parser.getSymbolType(sym).matches('function')) || operator(lhs);
 
-    if (args && args.length > 0) {
-      // Infer differentiation variable from first argument (if it's a symbol)
-      const firstArg = args[0];
-      const variable = symbol(firstArg) ?? 'x';
+  // Check if followed by arguments - if so, treat as function derivative
+  // This handles both known functions like sin'(x) and unknown like g'(t)
+  parser.skipSpace();
+  const args = parser.parseArguments('enclosure');
 
-      // Build function call: f(x, y, ...) -> ['f', x, y, ...]
-      const fnCall =
-        typeof lhs === 'string'
-          ? ([lhs, ...args] as Expression)
-          : (['Apply', lhs, ...args] as Expression);
+  if (args && args.length > 0) {
+    // Infer differentiation variable from first argument (if it's a symbol)
+    const firstArg = args[0];
+    const variable = symbol(firstArg) ?? 'x';
 
-      // Wrap with nested D for the order
-      let result: Expression = fnCall;
-      for (let i = 0; i < order; i++) {
-        result = ['D', result, variable] as Expression;
-      }
-      return result;
+    // Build function call: f(x, y, ...) -> ['f', x, y, ...]
+    const fnCall =
+      typeof lhs === 'string'
+        ? ([lhs, ...args] as Expression)
+        : (['Apply', lhs, ...args] as Expression);
+
+    // Wrap with nested D for the order
+    let result: Expression = fnCall;
+    for (let i = 0; i < order; i++) {
+      result = ['D', result, variable] as Expression;
     }
+    return result;
+  }
 
-    // No arguments - return Derivative as before
+  // No arguments
+  if (isKnownFunction) {
+    // Return Derivative for known functions
     if (order === 1) return ['Derivative', lhs];
     return ['Derivative', lhs, order];
   }
-  // Otherwise, if it's a number or a symbol, return a
-  // generic "Prime"
+
+  // Otherwise, if it's a number or a symbol, return a generic "Prime"
   if (order === 1) return ['Prime', missingIfEmpty(lhs)];
   return ['Prime', missingIfEmpty(lhs), order];
 }

@@ -216,3 +216,55 @@ describe('EULER DERIVATIVE NOTATION', () => {
   test('D without subscript - should parse as symbol', () =>
     expect(parse('D')).toMatchSnapshot());
 });
+
+describe('DERIVATIVE ROUND-TRIP', () => {
+  // Verify that parsing and re-serializing produces valid output
+  test('Newton dot notation round-trip', () => {
+    const expr = ce.parse('\\dot{x}');
+    const latex = expr.toLatex();
+    const reparsed = ce.parse(latex);
+    // The MathJSON should be equivalent (both represent d/dt of x)
+    expect(reparsed.json).toEqual(expr.json);
+  });
+
+  test('Lagrange prime notation round-trip', () => {
+    const expr = ce.parse("f'(x)");
+    const latex = expr.toLatex();
+    const reparsed = ce.parse(latex);
+    expect(reparsed.json).toEqual(expr.json);
+  });
+
+  test('Euler notation round-trip', () => {
+    const expr = ce.parse('D_x f');
+    const latex = expr.toLatex();
+    const reparsed = ce.parse(latex);
+    expect(reparsed.json).toEqual(expr.json);
+  });
+});
+
+describe('DERIVATIVE EVALUATION', () => {
+  test('D of x^2 evaluates to 2x', () => {
+    const expr = ce.parse('\\frac{d}{dx} x^2');
+    const result = expr.evaluate();
+    expect(result.toString()).toBe('2x');
+  });
+
+  test('D of sin(x) evaluates to cos(x)', () => {
+    const expr = ce.parse('\\frac{d}{dx} \\sin(x)');
+    const result = expr.evaluate();
+    expect(result.toString()).toBe('cos(x)');
+  });
+
+  test('Newton notation evaluates correctly', () => {
+    // \dot{t^2} with respect to t should be 2t
+    const expr = ce.parse('\\dot{t^2}');
+    const result = expr.evaluate();
+    expect(result.toString()).toBe('2t');
+  });
+
+  test('Euler notation evaluates correctly', () => {
+    const expr = ce.parse('D_x x^3');
+    const result = expr.evaluate();
+    expect(result.toString()).toBe('3x^2');
+  });
+});

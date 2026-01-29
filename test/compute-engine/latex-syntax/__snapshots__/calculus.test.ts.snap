@@ -73,25 +73,25 @@ D
 `;
 
 exports[`EULER DERIVATIVE NOTATION D^2_x f - second derivative 1`] = `
-D(x\\mapsto D(x\\mapsto f, x), x)
+\\frac{\\mathrm{d}}{\\mathrm{d}x}\\frac{\\mathrm{d}}{\\mathrm{d}x}f
 D((x) |-> D((x) |-> f, x), x)
 ["D", ["Function", ["D", ["Function", "f", "x"], "x"], "x"], "x"]
 `;
 
 exports[`EULER DERIVATIVE NOTATION D_t x - different variable 1`] = `
-D(t\\mapsto x, t)
+\\frac{\\mathrm{d}}{\\mathrm{d}t}x
 D((t) |-> x, t)
 ["D", ["Function", "x", "t"], "t"]
 `;
 
 exports[`EULER DERIVATIVE NOTATION D_x (x^2 + 1) - derivative of expression 1`] = `
-D(x\\mapsto x^2+1, x)
+\\frac{\\mathrm{d}}{\\mathrm{d}x}x^2+1
 D((x) |-> x^2 + 1, x)
 ["D", ["Function", ["Add", ["Square", "x"], 1], "x"], "x"]
 `;
 
 exports[`EULER DERIVATIVE NOTATION D_x f - first derivative 1`] = `
-D(x\\mapsto f, x)
+\\frac{\\mathrm{d}}{\\mathrm{d}x}f
 D((x) |-> f, x)
 ["D", ["Function", "f", "x"], "x"]
 `;
@@ -417,7 +417,7 @@ int(sin(x) dx) + 1 === 2
 `;
 
 exports[`LAGRANGE PRIME NOTATION WITH ARGUMENTS \\sin'(x) - known function with prime 1`] = `
-D(x\\mapsto\\sin(x), x)
+\\frac{\\mathrm{d}}{\\mathrm{d}x}\\sin(x)
 D((x) |-> sin(x), x)
 ["D", ["Function", ["Sin", "x"], "x"], "x"]
 `;
@@ -429,7 +429,7 @@ Derivative(f)
 `;
 
 exports[`LAGRANGE PRIME NOTATION WITH ARGUMENTS f'''(x) - triple prime with argument 1`] = `
-D(x\\mapsto D(x\\mapsto D(x\\mapsto f(x), x), x), x)
+\\frac{\\mathrm{d}}{\\mathrm{d}x}\\frac{\\mathrm{d}}{\\mathrm{d}x}\\frac{\\mathrm{d}}{\\mathrm{d}x}f(x)
 D((x) |-> D((x) |-> D((x) |-> f(x), x), x), x)
 [
   "D",
@@ -447,7 +447,7 @@ D((x) |-> D((x) |-> D((x) |-> f(x), x), x), x)
 `;
 
 exports[`LAGRANGE PRIME NOTATION WITH ARGUMENTS f''(x) - double prime with argument 1`] = `
-D(x\\mapsto D(x\\mapsto f(x), x), x)
+\\frac{\\mathrm{d}}{\\mathrm{d}x}\\frac{\\mathrm{d}}{\\mathrm{d}x}f(x)
 D((x) |-> D((x) |-> f(x), x), x)
 [
   "D",
@@ -457,21 +457,21 @@ D((x) |-> D((x) |-> f(x), x), x)
 `;
 
 exports[`LAGRANGE PRIME NOTATION WITH ARGUMENTS f'(x) - single prime with argument 1`] = `
-D(x\\mapsto f(x), x)
+\\frac{\\mathrm{d}}{\\mathrm{d}x}f(x)
 D((x) |-> f(x), x)
 ["D", ["Function", ["f", "x"], "x"], "x"]
 `;
 
 exports[`LAGRANGE PRIME NOTATION WITH ARGUMENTS f'(x, y) - multiple arguments uses first as variable 1`] = `
-D(x\\mapsto f(x, y), x)
+\\frac{\\mathrm{d}}{\\mathrm{d}x}f(x, y)
 D((x) |-> f(x, y), x)
 ["D", ["Function", ["f", "x", "y"], "x"], "x"]
 `;
 
 exports[`LAGRANGE PRIME NOTATION WITH ARGUMENTS g'(t) - different variable 1`] = `
-(g^\\prime,t)
-(Prime(g), t)
-["Pair", ["Prime", "g"], "t"]
+\\frac{\\mathrm{d}}{\\mathrm{d}t}g(t)
+D((t) |-> g(t), t)
+["D", ["Function", ["g", "t"], "t"], "t"]
 `;
 
 exports[`MULTIPLE INTEGRALS Double integral 1`] = `
@@ -606,13 +606,13 @@ Error(ErrorCode("incompatible-type", "number", "expression")) + Error(ErrorCode(
 `;
 
 exports[`NEWTON DOT NOTATION First derivative \\dot{x} 1`] = `
-D(t\\mapsto x, t)
+\\frac{\\mathrm{d}}{\\mathrm{d}t}x
 D((t) |-> x, t)
 ["D", ["Function", "x", "t"], "t"]
 `;
 
 exports[`NEWTON DOT NOTATION Fourth derivative \\ddddot{z} 1`] = `
-D(t\\mapsto D(t\\mapsto D(t\\mapsto D(t\\mapsto z, t), t), t), t)
+\\frac{\\mathrm{d}}{\\mathrm{d}t}\\frac{\\mathrm{d}}{\\mathrm{d}t}\\frac{\\mathrm{d}}{\\mathrm{d}t}\\frac{\\mathrm{d}}{\\mathrm{d}t}z
 D((t) |-> D((t) |-> D((t) |-> D((t) |-> z, t), t), t), t)
 [
   "D",
@@ -638,13 +638,13 @@ D((t) |-> D((t) |-> D((t) |-> D((t) |-> z, t), t), t), t)
 `;
 
 exports[`NEWTON DOT NOTATION Second derivative \\ddot{x} 1`] = `
-D(t\\mapsto D(t\\mapsto x, t), t)
+\\frac{\\mathrm{d}}{\\mathrm{d}t}\\frac{\\mathrm{d}}{\\mathrm{d}t}x
 D((t) |-> D((t) |-> x, t), t)
 ["D", ["Function", ["D", ["Function", "x", "t"], "t"], "t"], "t"]
 `;
 
 exports[`NEWTON DOT NOTATION Third derivative \\dddot{y} 1`] = `
-D(t\\mapsto D(t\\mapsto D(t\\mapsto y, t), t), t)
+\\frac{\\mathrm{d}}{\\mathrm{d}t}\\frac{\\mathrm{d}}{\\mathrm{d}t}\\frac{\\mathrm{d}}{\\mathrm{d}t}y
 D((t) |-> D((t) |-> D((t) |-> y, t), t), t)
 [
   "D",

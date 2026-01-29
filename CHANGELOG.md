@@ -18,6 +18,47 @@
   - **Euler's subscript notation**: `D_x f` → `["D", "f", "x"]` and
     `D^2_x f` or `D_x^2 f` for second derivatives.
 
+  - **Derivative serialization**: `D` expressions now serialize to Leibniz notation
+    (`\frac{\mathrm{d}}{\mathrm{d}x}f`) for consistent round-trip parsing.
+
+- **Special Function Definitions**: Added type signatures for Digamma, Trigamma,
+  and PolyGamma functions to the library:
+  - `Digamma(x)` - The digamma function ψ(x), logarithmic derivative of Gamma
+  - `Trigamma(x)` - The trigamma function ψ₁(x), derivative of digamma
+  - `PolyGamma(n, x)` - The polygamma function ψₙ(x), nth derivative of digamma
+
+- **Derivative Rules for Special Functions**: Added derivative formulas for:
+  - `d/dx Digamma(x) = Trigamma(x)`
+  - `d/dx Erf(x)`, `d/dx Erfc(x)`, `d/dx Erfi(x)`
+  - `d/dx FresnelS(x)`, `d/dx FresnelC(x)`
+  - `d/dx LogGamma(x) = Digamma(x)`
+
+- **Linear Algebra Enhancements**: Improved tensor and matrix operations with
+  better scalar handling, new functionality, and clearer error messages:
+
+  - **Diagonal function**: Now fully implemented with bidirectional behavior:
+    - Vector → Matrix: Creates a diagonal matrix from a vector
+      (`Diagonal([1,2,3])` → 3×3 diagonal matrix)
+    - Matrix → Vector: Extracts the diagonal as a vector
+      (`Diagonal([[1,2],[3,4]])` → `[1,4]`)
+
+  - **Reshape cycling**: Implements APL-style ravel cycling. When reshaping
+    to a larger shape, elements cycle from the beginning:
+    `Reshape([1,2,3], (2,2))` → `[[1,2],[3,1]]`
+
+  - **Scalar handling**: Most linear algebra functions now handle scalar inputs:
+    - `Flatten(42)` → `[42]` (single-element list)
+    - `Transpose(42)` → `42` (identity)
+    - `Determinant(42)` → `42` (1×1 matrix determinant)
+    - `Trace(42)` → `42` (1×1 matrix trace)
+    - `Inverse(42)` → `1/42` (scalar reciprocal)
+    - `ConjugateTranspose(42)` → `42` (conjugate of real is itself)
+    - `Reshape(42, (2,2))` → `[[42,42],[42,42]]` (scalar replication)
+
+  - **Error messages**: Operations requiring square matrices (`Determinant`,
+    `Trace`, `Inverse`) now return `expected-square-matrix` error for vectors
+    and tensors (rank > 2).
+
 ### Bug Fixes
 
 - **Matrix Operations Type Validation**: Fixed matrix operations (`Shape`, `Rank`,

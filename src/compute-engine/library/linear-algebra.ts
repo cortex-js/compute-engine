@@ -64,8 +64,14 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
     // and dyadic Shape `⍴` in APL
     Reshape: {
       complexity: 8200,
-      signature: '(list<number>, tuple) -> value',
+      signature: '(value, tuple) -> value',
       type: ([value, shape]) => {
+        if (value.isNumber) {
+          // Scalar input
+          return parseType(
+            `list<number^${shape.ops!.map((x) => x.toString()).join('x')}>`
+          );
+        }
         if (!value.type.matches('list')) return 'nothing';
         const col = value.type.type as ListType;
         if (!isSubtype(col.elements, 'number')) return 'nothing';
@@ -75,7 +81,23 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
       },
       evaluate: (ops, { engine: ce }): BoxedExpression | undefined => {
         let op1 = ops[0].evaluate();
-        const shape = ops[1].ops?.map((op) => op.re) ?? [];
+        const targetShape = ops[1].ops?.map((op) => op.re) ?? [];
+
+        // Handle empty shape tuple - return scalar
+        if (targetShape.length === 0) {
+          if (op1.isNumber) return op1;
+          if (isBoxedTensor(op1)) {
+            // Return first element as scalar
+            const flatData = op1.tensor.flatten();
+            return flatData.length > 0 ? ce.box(flatData[0]) : ce.Zero;
+          }
+          return undefined;
+        }
+
+        // Handle scalar - replicate to fill target shape
+        if (op1.isNumber) {
+          return reshapeWithCycling(ce, [op1], targetShape);
+        }
 
         // If a finite indexable collection, convert to a list
         // -> BoxedTensor
@@ -83,8 +105,14 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
           op1 = ce.function('List', [...op1.each()]);
 
         if (isBoxedTensor(op1)) {
-          if (shape.join('x') === op1.shape.join('x')) return op1;
-          return op1.tensor.reshape(...shape).expression;
+          // If shapes match, return as-is
+          if (targetShape.join('x') === op1.shape.join('x')) return op1;
+
+          // Flatten tensor data and reshape with cycling
+          // Use tensor.flatten() to get all scalar elements
+          const flatData = op1.tensor.flatten();
+          const flatElements = flatData.map((x) => ce.box(x));
+          return reshapeWithCycling(ce, flatElements, targetShape);
         }
 
         return undefined;
@@ -98,6 +126,9 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
       signature: '(value) -> list',
       evaluate: (ops, { engine: ce }) => {
         let op1 = ops[0].evaluate();
+
+        // Handle scalar - return single-element list
+        if (op1.isNumber) return ce.box(['List', op1]);
 
         if (isBoxedTensor(op1))
           return ce.box([
@@ -119,6 +150,10 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
       signature: '(matrix|vector, axis1: integer?, axis2: integer?) -> matrix',
       evaluate: (ops, { engine: ce }) => {
         let op1 = ops[0].evaluate();
+
+        // Transpose of scalar is the scalar itself
+        if (op1.isNumber) return op1;
+
         let axis1 = 1;
         let axis2 = 2;
         if (ops.length === 3) {
@@ -141,8 +176,12 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
     ConjugateTranspose: {
       complexity: 8200,
       signature: '(tensor, axis1: integer?, axis2: integer?) -> matrix',
-      evaluate: (ops) => {
+      evaluate: (ops, { engine: ce }) => {
         const op1 = ops[0].evaluate();
+
+        // Conjugate transpose of scalar is its conjugate
+        if (op1.isNumber) return ce.box(['Conjugate', op1]).evaluate();
+
         let axis1 = 1;
         let axis2 = 2;
         if (ops.length === 3) {
@@ -162,9 +201,26 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
     Determinant: {
       complexity: 8200,
       signature: '(matrix) -> number',
-      evaluate: (ops) => {
+      evaluate: (ops, { engine: ce }) => {
         const op1 = ops[0].evaluate();
-        if (isBoxedTensor(op1)) return op1.tensor.determinant();
+
+        // Determinant of scalar (1x1 matrix) is the scalar itself
+        if (op1.isNumber) return op1;
+
+        if (isBoxedTensor(op1)) {
+          const shape = op1.shape;
+          // Vector: not a square matrix
+          if (shape.length === 1)
+            return ce.error('expected-square-matrix', op1.toString());
+          // Tensor (rank > 2): not a square matrix
+          if (shape.length > 2)
+            return ce.error('expected-square-matrix', op1.toString());
+          // Non-square matrix
+          if (shape.length === 2 && shape[0] !== shape[1])
+            return ce.error('expected-square-matrix', op1.toString());
+
+          return op1.tensor.determinant();
+        }
 
         return undefined;
       },
@@ -174,9 +230,26 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
       complexity: 8200,
       signature: '(matrix) -> matrix',
       type: ([matrix]) => matrix.type,
-      evaluate: ([matrix]) => {
+      evaluate: ([matrix], { engine: ce }) => {
         const op1 = matrix.evaluate();
-        if (isBoxedTensor(op1)) return op1.tensor.inverse()?.expression;
+
+        // Inverse of scalar is 1/scalar
+        if (op1.isNumber) return ce.box(['Divide', 1, op1]).evaluate();
+
+        if (isBoxedTensor(op1)) {
+          const shape = op1.shape;
+          // Vector: not a square matrix
+          if (shape.length === 1)
+            return ce.error('expected-square-matrix', op1.toString());
+          // Tensor (rank > 2): not a square matrix
+          if (shape.length > 2)
+            return ce.error('expected-square-matrix', op1.toString());
+          // Non-square matrix
+          if (shape.length === 2 && shape[0] !== shape[1])
+            return ce.error('expected-square-matrix', op1.toString());
+
+          return op1.tensor.inverse()?.expression;
+        }
 
         return undefined;
       },
@@ -185,8 +258,15 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
     PseudoInverse: {
       complexity: 8200,
       signature: '(matrix) -> matrix',
-      evaluate: ([matrix]) => {
+      evaluate: ([matrix], { engine: ce }) => {
         const op1 = matrix.evaluate();
+
+        // Pseudoinverse of scalar is 1/scalar (or 0 if scalar is 0)
+        if (op1.isNumber) {
+          if (op1.isZero) return ce.Zero;
+          return ce.box(['Divide', 1, op1]).evaluate();
+        }
+
         if (isBoxedTensor(op1)) return op1.tensor.pseudoInverse()?.expression;
 
         return undefined;
@@ -233,15 +313,131 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
     Trace: {
       complexity: 8200,
       signature: '(matrix) -> number',
-      evaluate: (ops) => {
+      evaluate: (ops, { engine: ce }) => {
         const op1 = ops[0].evaluate();
-        if (isBoxedTensor(op1)) return op1.tensor.trace();
+
+        // Trace of scalar is the scalar itself
+        if (op1.isNumber) return op1;
+
+        if (isBoxedTensor(op1)) {
+          const shape = op1.shape;
+          // Vector: not a square matrix
+          if (shape.length === 1)
+            return ce.error('expected-square-matrix', op1.toString());
+          // Tensor (rank > 2): not a square matrix
+          if (shape.length > 2)
+            return ce.error('expected-square-matrix', op1.toString());
+          // Non-square matrix
+          if (shape.length === 2 && shape[0] !== shape[1])
+            return ce.error('expected-square-matrix', op1.toString());
+
+          return op1.tensor.trace();
+        }
+
+        return undefined;
+      },
+    },
+
+    // Diagonal can be used to:
+    // 1. Create a diagonal matrix from a vector
+    // 2. Extract the diagonal from a matrix as a vector
+    // 3. For a scalar, return the scalar (or could create 1x1 matrix)
+    Diagonal: {
+      complexity: 8200,
+      signature: '(value) -> value',
+      evaluate: (ops, { engine: ce }) => {
+        const op1 = ops[0].evaluate();
+
+        // Scalar → return as-is
+        if (op1.isNumber) return op1;
+
+        if (isBoxedTensor(op1)) {
+          const shape = op1.shape;
+
+          // Vector → create diagonal matrix
+          if (shape.length === 1) {
+            const n = shape[0];
+            const rows: BoxedExpression[] = [];
+            const elements = [...op1.each()];
+            for (let i = 0; i < n; i++) {
+              const row: BoxedExpression[] = [];
+              for (let j = 0; j < n; j++) {
+                row.push(i === j ? elements[i] : ce.Zero);
+              }
+              rows.push(ce.box(['List', ...row]));
+            }
+            return ce.box(['List', ...rows]);
+          }
+
+          // Matrix → extract diagonal as vector
+          if (shape.length === 2) {
+            const [m, n] = shape;
+            const minDim = Math.min(m, n);
+            const diagonal: BoxedExpression[] = [];
+            for (let i = 0; i < minDim; i++) {
+              diagonal.push(op1.tensor.at(i + 1, i + 1) ?? ce.Zero);
+            }
+            return ce.box(['List', ...diagonal]);
+          }
+
+          // Tensor (rank > 2): not supported
+          return ce.error('expected-square-matrix', op1.toString());
+        }
 
         return undefined;
       },
     },
   },
 ];
+
+/**
+ * Reshape a flat array of elements into the target shape,
+ * cycling through elements if the target needs more elements than available.
+ * (APL-style ravel cycling)
+ */
+function reshapeWithCycling(
+  ce: ComputeEngine,
+  flatElements: BoxedExpression[],
+  targetShape: number[]
+): BoxedExpression {
+  const totalNeeded = targetShape.reduce((a, b) => a * b, 1);
+
+  // Cycle the elements to fill target shape
+  const cycledElements: BoxedExpression[] = [];
+  for (let i = 0; i < totalNeeded; i++) {
+    cycledElements.push(flatElements[i % flatElements.length]);
+  }
+
+  // Build nested structure according to target shape
+  return buildNestedList(ce, cycledElements, targetShape, 0);
+}
+
+/**
+ * Recursively build a nested List structure from flat data.
+ */
+function buildNestedList(
+  ce: ComputeEngine,
+  data: BoxedExpression[],
+  shape: number[],
+  offset: number
+): BoxedExpression {
+  if (shape.length === 1) {
+    // Base case: return a single list
+    return ce.box(['List', ...data.slice(offset, offset + shape[0])]);
+  }
+
+  // Recursive case: build lists of lists
+  const outerSize = shape[0];
+  const innerShape = shape.slice(1);
+  const innerSize = innerShape.reduce((a, b) => a * b, 1);
+  const rows: BoxedExpression[] = [];
+
+  for (let i = 0; i < outerSize; i++) {
+    rows.push(buildNestedList(ce, data, innerShape, offset + i * innerSize));
+  }
+
+  return ce.box(['List', ...rows]);
+}
 
 function canonicalMatrix(
   ops: BoxedExpression[],

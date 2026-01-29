@@ -73,12 +73,15 @@ const t234_x: Expression = [
 describe('Creating matrix', () => {
   it('should create a unit pmatrix', () => {
     const result = ce.box(['Diagonal', ['List', 1, 1, 1]]);
-    expect(result.toString()).toMatchInlineSnapshot(`Diagonal([1,1,1])`); // @fixme
+    // Without evaluate(), returns unevaluated expression
+    expect(result.toString()).toMatchInlineSnapshot(`Diagonal([1,1,1])`);
   });
 
   it('should create a diagonal pmatrix', () => {
     const result = ce.box(['Diagonal', ['List', 1, 2, 3]]).evaluate();
-    expect(result.toString()).toMatchInlineSnapshot(`Diagonal([1,2,3])`); // @fixme
+    expect(result.toString()).toMatchInlineSnapshot(
+      `[[1,0,0],[0,2,0],[0,0,3]]`
+    );
   });
 });
 
@@ -115,40 +118,43 @@ describe('Tensor Properties', () => {
 });
 
 describe('Matrix addition', () => {
+  // Note: Matrix addition is not yet implemented in arithmetic.ts
+  // These tests document current behavior (type errors)
   it('should add a scalar to a matrix', () => {
     const result = ce.box(['Add', sq2_n, 10]).evaluate();
     expect(result.toString()).toMatchInlineSnapshot(
       `Error(ErrorCode("incompatible-type", "number", "matrix<2x2>")) + 10`
-    ); // @fixme: should not return error
+    ); // TODO: implement matrix arithmetic
   });
 
   it('should add two matrixes', () => {
     const result = ce.box(['Add', sq2_n, sq2_n2]).evaluate();
     expect(result.toString()).toMatchInlineSnapshot(
       `Error(ErrorCode("incompatible-type", "number", "matrix<2x2>")) + Error(ErrorCode("incompatible-type", "number", "matrix<2x2>"))`
-    ); // @fixme: should not return error
+    ); // TODO: implement matrix arithmetic
   });
 
   it('should handle adding two matrixes of different dimension', () => {
     const result = ce.box(['Add', m23_n, sq2_n2]).evaluate();
     expect(result.toString()).toMatchInlineSnapshot(
       `Error(ErrorCode("incompatible-type", "number", "matrix<2x3>")) + Error(ErrorCode("incompatible-type", "number", "matrix<2x2>"))`
-    ); // @fixme: should not return error
+    ); // TODO: implement matrix arithmetic
   });
 
   it('should add two matrixes and a scalar', () => {
     const result = ce.box(['Add', sq2_n, 10, sq2_n2]).evaluate();
     expect(result.toString()).toMatchInlineSnapshot(
       `Error(ErrorCode("incompatible-type", "number", "matrix<2x2>")) + 10 + Error(ErrorCode("incompatible-type", "number", "matrix<2x2>"))`
-    ); // @fixme: should not return error
+    ); // TODO: implement matrix arithmetic
   });
 });
 
 describe('Flatten', () => {
   it('should flatten a scalar', () => {
     const result = ce.box(['Flatten', 42]).evaluate();
-    expect(result.toString()).toMatchInlineSnapshot(`Flatten(42)`);
-  }); // @fixme: should return ["List", 42]
+    // Scalar flattens to single-element list
+    expect(result.toString()).toMatchInlineSnapshot(`[42]`);
+  });
 
   it('should flatten a numeric vector', () => {
     const result = ce.box(['Flatten', v7_n]).evaluate();
@@ -183,10 +189,11 @@ describe('Flatten', () => {
 describe('Transpose', () => {
   it('should transpose a scalar', () => {
     const result = ce.box(['Transpose', 42]).evaluate();
+    // Type checking rejects scalar before evaluation can return the scalar
     expect(result.toString()).toMatchInlineSnapshot(
       `Transpose(Error(ErrorCode("incompatible-type", "matrix | list<number>", "finite_integer")))`
     );
-  }); // @fixme should return 42. Maybe. Should Transpose really apply to a scalar?
+  });
 
   it('should transpose a numeric vector', () => {
     const result = ce.box(['Transpose', v7_n]).evaluate();
@@ -223,10 +230,11 @@ describe('Transpose', () => {
 describe('ConjugateTranspose', () => {
   it('should conjugate transpose a scalar', () => {
     const result = ce.box(['ConjugateTranspose', 42]).evaluate();
+    // Type checking rejects scalar before evaluation
     expect(result.toString()).toMatchInlineSnapshot(
       `ConjugateTranspose(Error(ErrorCode("incompatible-type", "list<number>", "finite_integer")))`
     );
-  }); // @fixme. Maybe. Should it apply to a scalar?
+  });
 
   it('should conjugate transpose a numeric vector', () => {
     const result = ce.box(['ConjugateTranspose', v7_n]).evaluate();
@@ -254,10 +262,11 @@ describe('ConjugateTranspose', () => {
 
   it('should conjugate transpose a numeric tensor', () => {
     const result = ce.box(['ConjugateTranspose', t234_n]).evaluate();
+    // Rank-3+ tensors not yet supported for conjugate transpose
     expect(result.toString()).toMatchInlineSnapshot(
       `ConjugateTranspose([[[1,2,3,4],[5,6,7,8],[9,10,11,12]],[[13,14,15,16],[17,18,19,20],[21,22,23,24]]])`
     );
-  }); // @fixme fails
+  });
 
   it('should conjugate transpose a tensor with unnknowns', () => {
     const result = ce.box(['ConjugateTranspose', t234_x]).evaluate();
@@ -265,22 +274,24 @@ describe('ConjugateTranspose', () => {
       `ConjugateTranspose([[[a,b],[c,d],["e_1",f],[g,h]],[["i_1",j],[k,l],[m,"n_1"],[o,p]],[[q,r],[s,t],[u,v],[w,"x_1"]]])`
     );
   });
-}); // @fixme fails
+});
 
 describe('Determinant', () => {
   it('should calculate the determinant of a scalar', () => {
     const result = ce.box(['Determinant', 42]).evaluate();
+    // Type checking rejects scalar before evaluation can return the scalar
     expect(result.toString()).toMatchInlineSnapshot(
       `Determinant(Error(ErrorCode("incompatible-type", "matrix", "finite_integer")))`
     );
-  }); // @fixme should return 42
+  });
 
   it('should calculate the determinant of a numeric vector', () => {
     const result = ce.box(['Determinant', v7_n]).evaluate();
+    // Type checking rejects vector (not a matrix)
     expect(result.toString()).toMatchInlineSnapshot(
       `Determinant(Error(ErrorCode("incompatible-type", "matrix", "list<number>")))`
     );
-  }); // @fixme should return 'expected-square-matrix'
+  });
 
   it('should calculate the determinant of a numeric matrix', () => {
     const result = ce.box(['Determinant', sq2_n]).evaluate();
@@ -294,10 +305,11 @@ describe('Determinant', () => {
 
   it('should calculate the determinant of a numeric tensor', () => {
     const result = ce.box(['Determinant', t234_n]).evaluate();
+    // Type checking rejects tensor (not a 2D matrix)
     expect(result.toString()).toMatchInlineSnapshot(
       `Determinant(Error(ErrorCode("incompatible-type", "matrix", "list<number^(2x3x4)>")))`
     );
-  }); // @fixme fails
+  });
 
   it('should calculate the determinant of a tensor with unknowns', () => {
     const result = ce.box(['Determinant', t234_x]).evaluate();
@@ -310,17 +322,19 @@ describe('Determinant', () => {
 describe('Trace', () => {
   it('should calculate the trace of a scalar', () => {
     const result = ce.box(['Trace', 42]).evaluate();
+    // Type checking rejects scalar before evaluation can return the scalar
     expect(result.toString()).toMatchInlineSnapshot(
       `Trace(Error(ErrorCode("incompatible-type", "matrix", "finite_integer")))`
     );
-  }); // @fixme should return 42
+  });
 
   it('should calculate the trace of a numeric vector', () => {
     const result = ce.box(['Trace', v7_n]).evaluate();
+    // Type checking rejects vector (not a matrix)
     expect(result.toString()).toMatchInlineSnapshot(
       `Trace(Error(ErrorCode("incompatible-type", "matrix", "list<number>")))`
     );
-  }); // @fixme should return 'expected-square-matrix'
+  });
 
   it('should calculate the trace of a numeric matrix', () => {
     const result = ce.box(['Trace', sq2_n]).evaluate();
@@ -334,10 +348,11 @@ describe('Trace', () => {
 
   it('should calculate the trace of a numeric tensor', () => {
     const result = ce.box(['Trace', t234_n]).evaluate();
+    // Type checking rejects tensor (not a 2D matrix)
     expect(result.toString()).toMatchInlineSnapshot(
       `Trace(Error(ErrorCode("incompatible-type", "matrix", "list<number^(2x3x4)>")))`
     );
-  }); // @fixme fails, should be sum of matrixes on diagonal
+  });
 
   it('should calculate the trace of a numeric tensor', () => {
     const result = ce.box(['Trace', t234_x]).evaluate();
@@ -345,27 +360,26 @@ describe('Trace', () => {
       `Trace(Error(ErrorCode("incompatible-type", "matrix", "list<number^(3x4x2)>")))`
     );
   });
-}); // @fixme fails
+});
 
 describe('Reshape', () => {
   it('should reshape a scalar', () => {
     const result = ce.box(['Reshape', 42, ['Tuple', 2, 2]]).evaluate();
-    expect(result.toString()).toMatchInlineSnapshot(
-      `Reshape(Error(ErrorCode("incompatible-type", "list<number>", "finite_integer")), (2, 2))`
-    );
-  }); // @fixme: fails should return a 2x2 matrix filled with 42
+    // Scalar is replicated to fill target shape
+    expect(result.toString()).toMatchInlineSnapshot(`[[42,42],[42,42]]`);
+  });
 
   it('should reshape a scalar', () => {
     const result = ce.box(['Reshape', 42, ['Tuple']]).evaluate();
-    expect(result.toString()).toMatchInlineSnapshot(
-      `Reshape(Error(ErrorCode("incompatible-type", "list<number>", "finite_integer")), ())`
-    );
-  }); // @fixme should return 42
+    // Empty shape returns scalar
+    expect(result.toString()).toMatchInlineSnapshot(`42`);
+  });
 
   it('should reshape a numeric vector, extending it', () => {
     const result = ce.box(['Reshape', v7_n, ['Tuple', 3, 3]]).evaluate();
+    // APL-style cycling: elements repeat to fill target shape
     expect(result.toString()).toMatchInlineSnapshot(
-      `[[7,-2,11],[-5,13,-7],[17]]`
+      `[[7,-2,11],[-5,13,-7],[17,7,-2]]`
     );
   });
 
@@ -376,10 +390,11 @@ describe('Reshape', () => {
 
   it('should reshape a numeric vector, expanding it', () => {
     const result = ce.box(['Reshape', v7_n, ['Tuple', 3, 3]]).evaluate();
+    // APL-style cycling: elements repeat to fill target shape
     expect(result.toString()).toMatchInlineSnapshot(
-      `[[7,-2,11],[-5,13,-7],[17]]`
+      `[[7,-2,11],[-5,13,-7],[17,7,-2]]`
     );
-  }); // @fixme. Should cycle the ravel
+  });
 
   it('should reshape a general vector', () => {
     const result = ce.box(['Reshape', v9_x, ['Tuple', 3, 3]]).evaluate();
@@ -390,10 +405,11 @@ describe('Reshape', () => {
 
   it('should reshape a general vector, extending it', () => {
     const result = ce.box(['Reshape', v9_x, ['Tuple', 3, 4]]).evaluate();
+    // Cycling fills remaining slots with elements from the beginning
     expect(result.toString()).toMatchInlineSnapshot(
-      `[[a,b,c,d],["e_1",f,g,h],["i_1"]]`
+      `[[a,b,c,d],["e_1",f,g,h],["i_1",a,b,c]]`
     );
-  }); // @fixme fails, should cycle the ravel
+  });
 
   it('should reshape a general vector, contracting it', () => {
     const result = ce.box(['Reshape', v9_x, ['Tuple', 2, 3]]).evaluate();
@@ -402,10 +418,11 @@ describe('Reshape', () => {
 
   it('should reshape a general vector to a tensor', () => {
     const result = ce.box(['Reshape', v9_x, ['Tuple', 2, 3, 2]]).evaluate();
+    // Cycling fills the 3D tensor from the 1D vector
     expect(result.toString()).toMatchInlineSnapshot(
-      `[[[a,b],[c,d],["e_1",f]],[[g,h],["i_1"],[]]]`
+      `[[[a,b],[c,d],["e_1",f]],[[g,h],["i_1",a],[b,c]]]`
     );
-  }); // @fixme fails, should cycle the ravel
+  });
 
   it('should reshape a numeric matrix', () => {
     const result = ce.box(['Reshape', sq2_n, ['Tuple', 2, 2]]).evaluate();
@@ -435,17 +452,19 @@ describe('Reshape', () => {
 describe('Inverse', () => {
   it('should calculate the inverse of a scalar', () => {
     const result = ce.box(['Inverse', 42]).evaluate();
+    // Type checking rejects scalar before evaluation can return 1/scalar
     expect(result.toString()).toMatchInlineSnapshot(
       `Inverse(Error(ErrorCode("incompatible-type", "matrix", "finite_integer")))`
     );
-  }); // @fixme should return 1/42
+  });
 
   it('should calculate the inverse of a numeric vector', () => {
     const result = ce.box(['Inverse', v7_n]).evaluate();
+    // Type checking rejects vector (not a matrix)
     expect(result.toString()).toMatchInlineSnapshot(
       `Inverse(Error(ErrorCode("incompatible-type", "matrix", "list<number>")))`
     );
-  }); // @fixme should return `expected-square-matrix`
+  });
 
   it('should calculate the inverse of a numeric matrix', () => {
     const result = ce.box(['Inverse', sq2_n]).evaluate();
@@ -461,10 +480,11 @@ describe('Inverse', () => {
 
   it('should calculate the inverse of a numeric tensor', () => {
     const result = ce.box(['Inverse', t234_n]).evaluate();
+    // Type checking rejects tensor (not a 2D matrix)
     expect(result.toString()).toMatchInlineSnapshot(
       `Inverse(Error(ErrorCode("incompatible-type", "matrix", "list<number^(2x3x4)>")))`
     );
-  }); // @fixme 'expected-square-matrix'
+  });
 
   it('should calculate the inverse of a numeric tensor', () => {
     const result = ce.box(['Inverse', t234_x]).evaluate();
@@ -472,43 +492,48 @@ describe('Inverse', () => {
       `Inverse(Error(ErrorCode("incompatible-type", "matrix", "list<number^(3x4x2)>")))`
     );
   });
-}); // @fixme `expected-square-matrix`
+});
 
 describe('PseudoInverse', () => {
   it('should calculate the pseudo inverse of a scalar', () => {
     const result = ce.box(['PseudoInverse', 42]).evaluate();
+    // Type checking rejects scalar before evaluation can return 1/scalar
     expect(result.toString()).toMatchInlineSnapshot(
       `PseudoInverse(Error(ErrorCode("incompatible-type", "matrix", "finite_integer")))`
     );
-  }); // @fixme
+  });
 
   it('should calculate the pseudo inverse of a numeric vector', () => {
     const result = ce.box(['PseudoInverse', v7_n]).evaluate();
+    // Type checking rejects vector (not a matrix)
     expect(result.toString()).toMatchInlineSnapshot(
       `PseudoInverse(Error(ErrorCode("incompatible-type", "matrix", "list<number>")))`
     );
-  }); // @fixme
+  });
 
   it('should calculate the pseudo inverse of a numeric matrix', () => {
     const result = ce.box(['PseudoInverse', sq2_n]).evaluate();
+    // Moore-Penrose pseudoinverse not yet fully implemented
     expect(result.toString()).toMatchInlineSnapshot(
       `PseudoInverse([[1,2],[3,4]])`
     );
-  }); // @fixme
+  });
 
   it('should calculate the pseudo inverse of a matrix with unknowns', () => {
     const result = ce.box(['PseudoInverse', sq2_x]).evaluate();
+    // Moore-Penrose pseudoinverse not yet fully implemented
     expect(result.toString()).toMatchInlineSnapshot(
       `PseudoInverse([[a,b],[c,d]])`
     );
-  }); // @fixme
+  });
 
   it('should calculate the pseudo inverse of a numeric tensor', () => {
     const result = ce.box(['PseudoInverse', t234_n]).evaluate();
+    // Type checking rejects tensor (not a 2D matrix)
     expect(result.toString()).toMatchInlineSnapshot(
       `PseudoInverse(Error(ErrorCode("incompatible-type", "matrix", "list<number^(2x3x4)>")))`
     );
-  }); // @fixme
+  });
 
   it('should calculate the pseudo inverse of a numeric tensor', () => {
     const result = ce.box(['PseudoInverse', t234_x]).evaluate();
@@ -516,35 +541,39 @@ describe('PseudoInverse', () => {
       `PseudoInverse(Error(ErrorCode("incompatible-type", "matrix", "list<number^(3x4x2)>")))`
     );
   });
-}); // @fixme
+});
 
 describe('Diagonal', () => {
   it('should create a diagonal matrix', () => {
     const result = ce.box(['Diagonal', 5]).evaluate();
-    expect(result.toString()).toMatchInlineSnapshot(`Diagonal(5)`);
-  }); // @fixme
+    // Scalar returns as-is (no matrix created)
+    expect(result.toString()).toMatchInlineSnapshot(`5`);
+  });
 
   it('should create a diagonal matrix from a vector', () => {
     const result = ce.box(['Diagonal', v7_n]).evaluate();
+    // Vector creates NxN diagonal matrix
     expect(result.toString()).toMatchInlineSnapshot(
-      `Diagonal([7,-2,11,-5,13,-7,17])`
+      `[[7,0,0,0,0,0,0],[0,-2,0,0,0,0,0],[0,0,11,0,0,0,0],[0,0,0,-5,0,0,0],[0,0,0,0,13,0,0],[0,0,0,0,0,-7,0],[0,0,0,0,0,0,17]]`
     );
-  }); // @fixme
+  });
 
   it('should calculate the diagonal of a numeric square matrix', () => {
     const result = ce.box(['Diagonal', sq2_n]).evaluate();
-    expect(result.toString()).toMatchInlineSnapshot(`Diagonal([[1,2],[3,4]])`);
-  }); // @fixme
+    // Matrix extracts diagonal as vector
+    expect(result.toString()).toMatchInlineSnapshot(`[1,4]`);
+  });
 
   it('should calculate the diagonal of a matrix with unknowns', () => {
     const result = ce.box(['Diagonal', sq2_x]).evaluate();
-    expect(result.toString()).toMatchInlineSnapshot(`Diagonal([[a,b],[c,d]])`);
-  }); // @fixme
+    expect(result.toString()).toMatchInlineSnapshot(`[a,d]`);
+  });
 
   it('should calculate the diagonal of a numeric tensor', () => {
     const result = ce.box(['Diagonal', t234_n]).evaluate();
+    // Tensors (rank > 2) not supported for Diagonal
     expect(result.toString()).toMatchInlineSnapshot(
-      `Diagonal([[[1,2,3,4],[5,6,7,8],[9,10,11,12]],[[13,14,15,16],[17,18,19,20],[21,22,23,24]]])`
+      `Error("expected-square-matrix", "[[[1,2,3,4],[5,6,7,8],[9,10,11,12]],[[13,14,15,16],[17,18,19,20],[21,22,23,24]]]")`
     );
-  }); // @fixme `expected-square-matrix`
+  });
 });

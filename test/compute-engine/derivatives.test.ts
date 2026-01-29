@@ -302,6 +302,83 @@ describe('Step function derivatives', () => {
   });
 });
 
+describe('Special function derivatives', () => {
+  it('d/dx Gamma(x) = Gamma(x)*Digamma(x)', () => {
+    expect(D('\\Gamma(x)', 'x').evaluate().toString()).toMatchInlineSnapshot(
+      `Gamma(x) * Digamma(x)`
+    );
+  });
+
+  it('d/dx Digamma(x) = Trigamma(x)', () => {
+    const expr = engine.box(['D', ['Digamma', 'x'], 'x']);
+    const result = expr.evaluate();
+    expect(result.toString()).toMatchInlineSnapshot(`Trigamma(x)`);
+  });
+
+  it('d/dx Erf(x) = 2/sqrt(pi) * e^(-x^2)', () => {
+    // Use MathJSON directly since \mathrm{erf} parses differently
+    const expr = engine.box(['D', ['Erf', 'x'], 'x']);
+    const result = expr.evaluate();
+    expect(result.toString()).toMatchInlineSnapshot(
+      `(2e^(-(x^2))) / sqrt(pi)`
+    );
+  });
+
+  it('d/dx Erfc(x) = -2/sqrt(pi) * e^(-x^2)', () => {
+    const expr = engine.box(['D', ['Erfc', 'x'], 'x']);
+    const result = expr.evaluate();
+    expect(result.toString()).toMatchInlineSnapshot(
+      `(-2e^(-(x^2))) / sqrt(pi)`
+    );
+  });
+
+  it('d/dx LogGamma(x) = Digamma(x)', () => {
+    const expr = engine.box(['D', ['LogGamma', 'x'], 'x']);
+    const result = expr.evaluate();
+    expect(result.toString()).toMatchInlineSnapshot(`Digamma(x)`);
+  });
+
+  it('d/dx FresnelS(x) = sin(pi*x^2/2)', () => {
+    const expr = engine.box(['D', ['FresnelS', 'x'], 'x']);
+    const result = expr.evaluate();
+    expect(result.toString()).toMatchInlineSnapshot(`sin(1/2 * pi * x^2)`);
+  });
+
+  it('d/dx FresnelC(x) = cos(pi*x^2/2)', () => {
+    const expr = engine.box(['D', ['FresnelC', 'x'], 'x']);
+    const result = expr.evaluate();
+    expect(result.toString()).toMatchInlineSnapshot(`cos(1/2 * pi * x^2)`);
+  });
+});
+
+describe('Symbolic derivatives for unknown functions', () => {
+  it('d/dx f(x) returns symbolic derivative for unknown function', () => {
+    const expr = engine.box(['D', ['f', 'x'], 'x']);
+    const result = expr.evaluate();
+    // Returns Apply(Derivative(f, 1), x) which represents f'(x)
+    expect(result.toString()).toMatchInlineSnapshot(
+      `Apply(Derivative(f, 1), x)`
+    );
+  });
+
+  // Note: Chain rule with unknown functions currently returns 0 because
+  // unknown function symbols fail the isValid check in derivative.ts.
+  // This is a known limitation that could be improved in the future.
+  it('d/dx f(x^2) - chain rule with unknown function (current limitation)', () => {
+    const expr = engine.box(['D', ['f', ['Square', 'x']], 'x']);
+    const result = expr.evaluate();
+    // Ideally would return 2x * f'(x^2), currently returns 0
+    expect(result.toString()).toMatchInlineSnapshot(`0`);
+  });
+
+  it('d/dx g(sin(x)) - chain rule with unknown function (current limitation)', () => {
+    const expr = engine.box(['D', ['g', ['Sin', 'x']], 'x']);
+    const result = expr.evaluate();
+    // Ideally would return cos(x) * g'(sin(x)), currently returns 0
+    expect(result.toString()).toMatchInlineSnapshot(`0`);
+  });
+});
+
 describe('ND', () => {
   it('should compute the numerical approximation of the derivative of a polynomial', () => {
     const expr = parse('\\mathrm{ND}(x \\mapsto x^3 + 2x - 4, 2)');

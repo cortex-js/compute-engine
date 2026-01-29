@@ -109,6 +109,9 @@ const DERIVATIVES_TABLE = {
   ],
   // d/dx ln(Γ(x)) = ψ(x) (digamma function)
   LogGamma: ['Digamma', '_'],
+  // d/dx ψ(x) = ψ₁(x) (trigamma function)
+  // https://en.wikipedia.org/wiki/Trigamma_function
+  Digamma: ['Trigamma', '_'],
   // Note: LambertW derivative d/dx W(x) = W(x)/(x·(1+W(x))) is mathematically correct
   // but omitted because LambertW lacks a type signature, causing type errors.
   //
@@ -127,9 +130,9 @@ const DERIVATIVES_TABLE = {
   // of different orders or related derivative functions that are not in the standard
   // function set. For example, d/dx J_n(x) = (J_{n-1}(x) - J_{n+1}(x))/2.
   //
-  // Similarly, Zeta, Digamma, PolyGamma, and Beta derivatives are omitted because
-  // they either don't have simple closed forms or involve additional functions not
-  // in the standard set (trigamma function, etc.).
+  // Similarly, Zeta, PolyGamma, and Beta derivatives are omitted because
+  // they either don't have simple closed forms or involve the polygamma function
+  // with varying orders.
 };
 
 /**
