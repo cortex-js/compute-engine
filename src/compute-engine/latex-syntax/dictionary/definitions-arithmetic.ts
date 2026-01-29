@@ -127,6 +127,10 @@ function serializeAdd(serializer: Serializer, expr: Expression): string {
   const name = operator(expr);
   let result = '';
   let arg = operand(expr, 1);
+  // Note: This Negate case is not expected to be hit because Negate has its
+  // own serialize handler (defined in definitions.ts via makeSerializeHandler).
+  // This function is only registered as the serializer for 'Add', so `name`
+  // should always be 'Add' or 'Subtract'. Kept for defensive purposes.
   if (name === 'Negate') {
     result = '-' + serializer.wrap(arg, ADDITION_PRECEDENCE + 1);
   } else if (name === 'Subtract') {

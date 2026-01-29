@@ -295,3 +295,87 @@ describe('LATEX', () => {
     `);
   });
 });
+
+// Issue #130: Prefix/postfix operators should wrap lower-precedence operands
+describe('PREFIX/POSTFIX OPERATOR SERIALIZATION', () => {
+  test('Issue #130: Negate with Add operand', () => {
+    // -(2√3 - 1) should serialize with parentheses, not as -2√3 - 1
+    const expr = ce.parse('-(2\\sqrt3-1)');
+    expect(expr.latex).toMatchInlineSnapshot(`-(2\\sqrt{3}-1)`);
+
+    // Verify round-trip: parsing the output should give equivalent expression
+    const reparsed = ce.parse(expr.latex);
+    expect(expr.N().re).toBeCloseTo(reparsed.N().re as number);
+  });
+
+  test('Issue #130: Simple expression ordering', () => {
+    // 2√3 + 1 - order may change but should be mathematically equivalent
+    const expr = ce.parse('2\\sqrt3+1');
+    expect(expr.latex).toMatchInlineSnapshot(`1+2\\sqrt{3}`);
+  });
+
+  test('Negate with Add operand - symbolic', () => {
+    expect(latex(['Negate', ['Add', 'a', 'b']])).toMatchInlineSnapshot(
+      `-(a+b)`
+    );
+    expect(latex(['Negate', ['Add', 'x', 1]])).toMatchInlineSnapshot(`-(x+1)`);
+    expect(latex(['Negate', ['Subtract', 'a', 'b']])).toMatchInlineSnapshot(
+      `-(a-b)`
+    );
+  });
+
+  test('Factorial with Add operand', () => {
+    expect(latex(['Factorial', ['Add', 'n', 1]])).toMatchInlineSnapshot(
+      `(n+1)!`
+    );
+    expect(latex(['Factorial', ['Add', 'a', 'b']])).toMatchInlineSnapshot(
+      `(a+b)!`
+    );
+  });
+
+  test('Nested negations are canonicalized', () => {
+    // Note: nested negations are simplified in canonical form
+    // Negate(Negate(x)) -> x
+    expect(latex(['Negate', ['Negate', 'x']])).toMatchInlineSnapshot(`x`);
+    // Negate(Negate(Negate(x))) -> Negate(x) -> -x
+    expect(
+      latex(['Negate', ['Negate', ['Negate', 'x']]])
+    ).toMatchInlineSnapshot(`-x`);
+  });
+
+  test('Mixed prefix and postfix', () => {
+    // -(n!) - negate a factorial
+    expect(latex(['Negate', ['Factorial', 'n']])).toMatchInlineSnapshot(`-n!`);
+    // (-n)! - factorial of a negation
+    expect(latex(['Factorial', ['Negate', 'n']])).toMatchInlineSnapshot(
+      `(-n)!`
+    );
+  });
+
+  test('Prefix operators with Multiply operand', () => {
+    // Negate(Multiply(a,b)) -> -(ab) - parentheses added, but round-trips correctly
+    // since -ab also parses to Negate(Multiply(a,b))
+    expect(latex(['Negate', ['Multiply', 'a', 'b']])).toMatchInlineSnapshot(
+      `-(ab)`
+    );
+    expect(latex(['Factorial', ['Multiply', 'a', 'b']])).toMatchInlineSnapshot(
+      `(ab)!`
+    );
+  });
+
+  test('Round-trip verification', () => {
+    // These expressions should round-trip correctly
+    const testCases = [
+      ['Negate', ['Add', 'x', 1]],
+      ['Negate', ['Add', -1, ['Multiply', 2, ['Sqrt', 3]]]],
+      ['Factorial', ['Add', 'n', 1]],
+    ];
+
+    for (const expr of testCases) {
+      const boxed = ce.box(expr as any);
+      const serialized = boxed.latex;
+      const reparsed = ce.parse(serialized);
+      expect(boxed.isEqual(reparsed)).toBe(true);
+    }
+  });
+});
