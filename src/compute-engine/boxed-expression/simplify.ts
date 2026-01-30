@@ -97,7 +97,10 @@ export function simplify(
   if (!(expr.isCanonical || expr.isStructural)) {
     const canonical = expr.canonical;
     if (!(canonical.isCanonical || canonical.isStructural)) return steps;
-    return simplify(canonical, options, steps);
+    // Don't pass steps when recursing for canonicalization.
+    // The non-canonical form is structurally the same (isSame returns true),
+    // so the hasSeen check would incorrectly trigger and skip simplification.
+    return simplify(canonical, options);
   }
 
   const ce = expr.engine;

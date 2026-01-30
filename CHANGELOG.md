@@ -292,6 +292,16 @@
   - Trigonometric functions now reduce arguments by their period (e.g.,
     `cos(5π + k)` simplifies using `cos(π + k) = -cos(k)`)
 
+- **([#178](https://github.com/cortex-js/compute-engine/issues/178)) Non-Canonical
+  Expression Simplification**: Fixed `.simplify()` not working on expressions
+  parsed with `{ canonical: false }`. Previously, `ce.parse('x+x', { canonical: false }).simplify()`
+  would return `x+x` instead of `2x`. The bug was in the simplification loop
+  detection: when canonicalizing before simplification, the non-canonical form
+  was recorded in the "seen" set, and since `isSame()` considers non-canonical
+  and canonical forms equivalent, the canonical form was incorrectly detected
+  as already processed. Now the simplification correctly starts fresh when
+  canonicalizing, allowing full simplification to proceed.
+
 ## 0.32.0 _2026-01-28_
 
 ### Bug Fixes
