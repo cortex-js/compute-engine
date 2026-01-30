@@ -7616,7 +7616,7 @@ diagonal(axis1?, axis2?): DataTypeMap[DT][]
 ##### Tensor.trace()
 
 ```ts
-trace(axis1?, axis2?): DataTypeMap[DT]
+trace(axis1?, axis2?): Tensor<DT> | DataTypeMap[DT]
 ```
 
 ####### axis1?

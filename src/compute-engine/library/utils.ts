@@ -2,7 +2,7 @@ import type { BoxedExpression, ComputeEngine, Scope } from '../global-types';
 
 import { MAX_ITERATION } from '../numerics/numeric';
 import { fromRange, reduceCollection } from './collections';
-import { extractFiniteDomainWithReason, ExtractDomainResult } from './logic-analysis';
+import { extractFiniteDomainWithReason } from './logic-analysis';
 
 /**
  * EL-4: Convert known infinite integer sets to their equivalent Limits bounds.
@@ -267,11 +267,20 @@ export function canonicalIndexingSet(
 
   // Handle Element expressions - preserve them in canonical form
   // e.g., ["Element", "n", ["Set", 1, 2, 3]]
+  // or with condition: ["Element", "n", ["Set", 1, 2, 3], ["Greater", "n", 0]]
   if (expr.operator === 'Element') {
     const indexExpr = expr.op1;
     const collection = expr.op2;
+    const condition = expr.op3; // Optional condition (EL-3)
     if (!indexExpr?.symbol) return undefined;
     if (indexExpr.symbol !== 'Nothing') ce.declare(indexExpr.symbol, 'integer');
+    if (condition) {
+      return ce.function('Element', [
+        indexExpr.canonical,
+        collection.canonical,
+        condition.canonical,
+      ]);
+    }
     return ce.function('Element', [indexExpr.canonical, collection.canonical]);
   }
 
@@ -417,7 +426,11 @@ export function* reduceBigOp<T>(
     const finalResult = iterResult.value;
 
     // Check the final result type
-    if (finalResult && typeof finalResult === 'object' && 'status' in finalResult) {
+    if (
+      finalResult &&
+      typeof finalResult === 'object' &&
+      'status' in finalResult
+    ) {
       const typedResult = finalResult as ReduceElementResult<T>;
       if (typedResult.status === 'success') {
         return typedResult.value;
@@ -498,7 +511,10 @@ function* reduceElementIndexingSets<T>(
       if (domainResult.status === 'error') {
         // Invalid indexing expression - return error
         if (returnReason) {
-          return { status: 'error', reason: domainResult.reason } as ReduceElementResult<T>;
+          return {
+            status: 'error',
+            reason: domainResult.reason,
+          } as ReduceElementResult<T>;
         }
         return undefined;
       }

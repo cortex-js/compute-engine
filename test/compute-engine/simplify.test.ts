@@ -1695,7 +1695,9 @@ describe('TRIGONOMETRIC PERIODICITY REDUCTION', () => {
     ));
 
   test('cos(-4π + k) = cos(k)', () =>
-    expect(simplify('\\cos(-4\\pi + k)')).toMatchInlineSnapshot(`["Cos", "k"]`));
+    expect(simplify('\\cos(-4\\pi + k)')).toMatchInlineSnapshot(
+      `["Cos", "k"]`
+    ));
 });
 
 describe('PYTHAGOREAN IDENTITIES', () => {
@@ -1712,22 +1714,22 @@ describe('PYTHAGOREAN IDENTITIES', () => {
   // Subtraction forms
   test('1 - sin²(x) = cos²(x)', () =>
     expect(simplify('1 - \\sin(x)^2')).toMatchInlineSnapshot(
-      `["Power", ["Cos", "x"], 2]`
+      `["Square", ["Cos", "x"]]`
     ));
 
   test('1 - cos²(x) = sin²(x)', () =>
     expect(simplify('1 - \\cos(x)^2')).toMatchInlineSnapshot(
-      `["Power", ["Sin", "x"], 2]`
+      `["Square", ["Sin", "x"]]`
     ));
 
   test('sin²(x) - 1 = -cos²(x)', () =>
     expect(simplify('\\sin(x)^2 - 1')).toMatchInlineSnapshot(
-      `["Negate", ["Power", ["Cos", "x"], 2]]`
+      `["Negate", ["Square", ["Cos", "x"]]]`
     ));
 
   test('cos²(x) - 1 = -sin²(x)', () =>
     expect(simplify('\\cos(x)^2 - 1')).toMatchInlineSnapshot(
-      `["Negate", ["Power", ["Sin", "x"], 2]]`
+      `["Negate", ["Square", ["Sin", "x"]]]`
     ));
 
   // Negated form
@@ -1737,29 +1739,29 @@ describe('PYTHAGOREAN IDENTITIES', () => {
   // Tan/Sec identities
   test('tan²(x) + 1 = sec²(x)', () =>
     expect(simplify('\\tan(x)^2 + 1')).toMatchInlineSnapshot(
-      `["Power", ["Sec", "x"], 2]`
+      `["Square", ["Sec", "x"]]`
     ));
 
   test('sec²(x) - 1 = tan²(x)', () =>
     expect(simplify('\\sec(x)^2 - 1')).toMatchInlineSnapshot(
-      `["Power", ["Tan", "x"], 2]`
+      `["Square", ["Tan", "x"]]`
     ));
 
   // Cot/Csc identities
   test('1 + cot²(x) = csc²(x)', () =>
     expect(simplify('1 + \\cot(x)^2')).toMatchInlineSnapshot(
-      `["Power", ["Csc", "x"], 2]`
+      `["Square", ["Csc", "x"]]`
     ));
 
   test('csc²(x) - 1 = cot²(x)', () =>
     expect(simplify('\\csc(x)^2 - 1')).toMatchInlineSnapshot(
-      `["Power", ["Cot", "x"], 2]`
+      `["Square", ["Cot", "x"]]`
     ));
 
   // With coefficient
   test('a·sin²(x) + a·cos²(x) = a', () =>
     expect(simplify('a * \\sin(x)^2 + a * \\cos(x)^2')).toMatchInlineSnapshot(
-      `"a"`
+      `a`
     ));
 });
 

@@ -187,7 +187,10 @@ export interface Tensor<DT extends TensorDataType> extends TensorData<DT> {
 
   at(...indices: number[]): DataTypeMap[DT] | undefined;
   diagonal(axis1?: number, axis2?: number): undefined | DataTypeMap[DT][];
-  trace(axis1?: number, axis2?: number): undefined | DataTypeMap[DT] | Tensor<DT>;
+  trace(
+    axis1?: number,
+    axis2?: number
+  ): undefined | DataTypeMap[DT] | Tensor<DT>;
   reshape(...shape: number[]): Tensor<DT>;
   slice(index: number): Tensor<DT>;
   flatten(): DataTypeMap[DT][];

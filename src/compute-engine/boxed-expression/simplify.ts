@@ -118,10 +118,12 @@ function simplifyOperands(
 ): BoxedExpression {
   if (!expr.ops) return expr;
 
-  return expr.engine.function(
-    expr.operator,
-    holdMap(expr, (x) => simplify(x, options).at(-1)!.value)
-  );
+  // For simplification, we want to simplify all operands, even for lazy functions
+  // Don't use holdMap here as it skips lazy functions (which is correct for evaluation
+  // but not for simplification)
+  const simplifiedOps = expr.ops.map((x) => simplify(x, options).at(-1)!.value);
+
+  return expr.engine.function(expr.operator, simplifiedOps);
 }
 
 function simplifyExpression(

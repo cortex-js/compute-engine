@@ -226,7 +226,6 @@ export const LOGIC_LIBRARY: SymbolDefinitions = {
   },
 };
 
-
 export function simplifyLogicFunction(
   x: BoxedExpression
 ): { value: BoxedExpression; because: string } | undefined {
@@ -248,7 +247,6 @@ export function simplifyLogicFunction(
 
   return { value, because: 'logic' };
 }
-
 
 /**
  * Evaluate ForAll over a finite domain.
@@ -292,7 +290,10 @@ function evaluateForAll(
     if (nestedDomains.length > 0) {
       // Evaluate over Cartesian product of all domains
       return evaluateForAllCartesian(
-        [{ variable: domain.variable, values: domain.values }, ...nestedDomains],
+        [
+          { variable: domain.variable, values: domain.values },
+          ...nestedDomains,
+        ],
         getInnermostBody(body),
         ce
       );
@@ -364,7 +365,10 @@ function evaluateExists(
     if (nestedDomains.length > 0) {
       // Evaluate over Cartesian product of all domains
       return evaluateExistsCartesian(
-        [{ variable: domain.variable, values: domain.values }, ...nestedDomains],
+        [
+          { variable: domain.variable, values: domain.values },
+          ...nestedDomains,
+        ],
         getInnermostBody(body),
         ce
       );

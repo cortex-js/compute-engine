@@ -90,8 +90,7 @@ export function costFunction(expr: BoxedExpression): number {
     // Root(x^n, n) should have comparable cost to |x|
     // Use a base cost similar to Sqrt
     nameCost = 5;
-  }
-  else if (['Multiply'].includes(name)) {
+  } else if (['Multiply'].includes(name)) {
     // We want 2x to be less expensive than x + x, so if the first operand
     // is a small number coefficient, treat it as cheaper
     const ops = expr.ops ?? [];
@@ -122,8 +121,7 @@ export function costFunction(expr: BoxedExpression): number {
       }
     }
     nameCost = 7;
-  }
-  else if (['Divide'].includes(name)) nameCost = 8;
+  } else if (['Divide'].includes(name)) nameCost = 8;
   else if (['Ln', 'Exp', 'Log', 'Lb'].includes(name)) nameCost = 9;
   else if (['Cos', 'Sin', 'Tan'].includes(name)) nameCost = 10;
   else nameCost = 11;

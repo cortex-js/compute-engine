@@ -68,7 +68,7 @@ describe('Infer function signature', () => {
 
   test('declared function signature with expression body', () =>
     expect(engine.box('fn4').type.toString()).toMatchInlineSnapshot(
-      `function`
+      `(unknown) -> number`
     ));
 
   test('declared function signature with JS body', () =>
@@ -80,13 +80,7 @@ describe('Infer function signature', () => {
 describe('Infer result type', () => {
   // By calling add, the result of `f1` is inferred to be a number
   test('Add', () =>
-    expect(evaluate(['Add', 1, ['f1', 10]])).toMatchInlineSnapshot(`
-      [
-        "Add",
-        1,
-        ["Error", ["ErrorCode", "incompatible-type", "'number'", "'any'"]]
-      ]
-    `));
+    expect(evaluate(['Add', 1, ['f1', 10]])).toMatchInlineSnapshot(`12`));
 });
 
 describe('Anonymous function', () => {

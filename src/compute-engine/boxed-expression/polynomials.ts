@@ -542,7 +542,8 @@ export function polynomialDivide(
     // Subtract quotientCoef * divisor * x^(i - divisorDeg) from remainder
     for (let j = 0; j <= divisorDeg; j++) {
       const product = quotientCoef.mul(divisorCoeffs[j]);
-      remainder[i - divisorDeg + j] = remainder[i - divisorDeg + j].sub(product);
+      remainder[i - divisorDeg + j] =
+        remainder[i - divisorDeg + j].sub(product);
     }
   }
 

@@ -19,8 +19,33 @@ import {
  */
 export type ExtractDomainResult =
   | { status: 'success'; variable: string; values: BoxedExpression[] }
-  | { status: 'non-enumerable'; variable: string; domain: BoxedExpression; reason: string }
+  | {
+      status: 'non-enumerable';
+      variable: string;
+      domain: BoxedExpression;
+      reason: string;
+    }
   | { status: 'error'; reason: string };
+
+/**
+ * EL-3: Filter domain values using a condition expression.
+ * Evaluates the condition for each value and returns only those where the condition is true.
+ */
+function filterValuesWithCondition(
+  values: BoxedExpression[],
+  variable: string,
+  conditionExpr: BoxedExpression,
+  ce: ComputeEngine
+): BoxedExpression[] {
+  return values.filter((value) => {
+    // Substitute the variable with the value in the condition
+    const substituted = conditionExpr.subs({ [variable]: value });
+    // Evaluate the condition
+    const result = substituted.evaluate();
+    // Keep the value if the condition evaluates to True
+    return result.symbol === 'True';
+  });
+}
 
 /**
  * Extract the finite domain from a quantifier's condition.
@@ -28,13 +53,14 @@ export type ExtractDomainResult =
  * - ["Element", "x", ["Set", 1, 2, 3]] → [1, 2, 3]
  * - ["Element", "x", ["Range", 1, 5]] → [1, 2, 3, 4, 5]
  * - ["Element", "x", ["Interval", 1, 5]] → [1, 2, 3, 4, 5] (integers only)
+ * - ["Element", "x", ["Set", 1, 2, 3], condition] → filtered values (EL-3)
  * Returns detailed result indicating success, non-enumerable domain, or error.
  */
 export function extractFiniteDomainWithReason(
   condition: BoxedExpression,
   ce: ComputeEngine
 ): ExtractDomainResult {
-  // Check for ["Element", var, set] pattern
+  // Check for ["Element", var, set] or ["Element", var, set, condition] pattern
   if (condition.operator !== 'Element') {
     return { status: 'error', reason: 'expected-element-expression' };
   }
@@ -48,6 +74,29 @@ export function extractFiniteDomainWithReason(
   if (!domain) {
     return { status: 'error', reason: 'expected-domain' };
   }
+
+  // EL-3: Check for optional condition (3rd operand, index 2)
+  // Element with condition has form: ["Element", variable, domain, condition]
+  // Note: op3 returns Nothing when not present, so we also check nops >= 3
+  const maybeCondition = condition.op3;
+  const filterCondition =
+    condition.nops >= 3 && maybeCondition && maybeCondition.symbol !== 'Nothing'
+      ? maybeCondition
+      : null;
+
+  // Helper to return success result with optional condition filtering
+  const successResult = (values: BoxedExpression[]): ExtractDomainResult => {
+    if (filterCondition) {
+      const filteredValues = filterValuesWithCondition(
+        values,
+        variable,
+        filterCondition,
+        ce
+      );
+      return { status: 'success', variable, values: filteredValues };
+    }
+    return { status: 'success', variable, values };
+  };
 
   // Handle explicit sets: ["Set", 1, 2, 3]
   if (domain.operator === 'Set' || domain.operator === 'List') {
@@ -66,17 +115,27 @@ export function extractFiniteDomainWithReason(
             for (let i = start; i <= end; i++) {
               rangeValues.push(ce.number(i));
             }
-            return { status: 'success', variable, values: rangeValues };
+            return successResult(rangeValues);
           }
           if (count > 1000) {
-            return { status: 'non-enumerable', variable, domain, reason: 'domain-too-large' };
+            return {
+              status: 'non-enumerable',
+              variable,
+              domain,
+              reason: 'domain-too-large',
+            };
           }
         }
       }
-      return { status: 'success', variable, values: [...values] };
+      return successResult([...values]);
     }
     if (values && values.length > 1000) {
-      return { status: 'non-enumerable', variable, domain, reason: 'domain-too-large' };
+      return {
+        status: 'non-enumerable',
+        variable,
+        domain,
+        reason: 'domain-too-large',
+      };
     }
     return { status: 'error', reason: 'empty-domain' };
   }
@@ -87,9 +146,7 @@ export function extractFiniteDomainWithReason(
     const end = asSmallInteger(domain.op2);
     // op3 may be Nothing (a symbol) when not specified, so check ops length
     const step =
-      domain.ops && domain.ops.length >= 3
-        ? asSmallInteger(domain.op3)
-        : 1;
+      domain.ops && domain.ops.length >= 3 ? asSmallInteger(domain.op3) : 1;
 
     if (start !== null && end !== null && step !== null && step !== 0) {
       const count = Math.floor((end - start) / step) + 1;
@@ -98,14 +155,24 @@ export function extractFiniteDomainWithReason(
         for (let i = start; step > 0 ? i <= end : i >= end; i += step) {
           values.push(ce.number(i));
         }
-        return { status: 'success', variable, values };
+        return successResult(values);
       }
       if (count > 1000) {
-        return { status: 'non-enumerable', variable, domain, reason: 'domain-too-large' };
+        return {
+          status: 'non-enumerable',
+          variable,
+          domain,
+          reason: 'domain-too-large',
+        };
       }
     }
     // Range with non-integer or symbolic bounds
-    return { status: 'non-enumerable', variable, domain, reason: 'non-integer-bounds' };
+    return {
+      status: 'non-enumerable',
+      variable,
+      domain,
+      reason: 'non-integer-bounds',
+    };
   }
 
   // Handle finite integer Interval: ["Interval", start, end]
@@ -147,33 +214,87 @@ export function extractFiniteDomainWithReason(
         for (let i = start; i <= end; i++) {
           values.push(ce.number(i));
         }
-        return { status: 'success', variable, values };
+        return successResult(values);
       }
       if (count > 1000) {
-        return { status: 'non-enumerable', variable, domain, reason: 'domain-too-large' };
+        return {
+          status: 'non-enumerable',
+          variable,
+          domain,
+          reason: 'domain-too-large',
+        };
       }
     }
     // Interval with non-integer or symbolic bounds
-    return { status: 'non-enumerable', variable, domain, reason: 'non-integer-bounds' };
+    return {
+      status: 'non-enumerable',
+      variable,
+      domain,
+      reason: 'non-integer-bounds',
+    };
   }
 
   // Check for known infinite sets (e.g., NonNegativeIntegers, Integers, Reals, etc.)
   if (domain.symbol) {
     const knownInfiniteSets = [
-      'Integers', 'NonNegativeIntegers', 'PositiveIntegers', 'NegativeIntegers',
-      'Rationals', 'Reals', 'PositiveReals', 'NonNegativeReals', 'NegativeReals',
-      'NonPositiveReals', 'ExtendedReals', 'Complexes', 'ImaginaryNumbers',
-      'Numbers', 'ExtendedComplexes', 'AlgebraicNumbers', 'TranscendentalNumbers',
+      'Integers',
+      'NonNegativeIntegers',
+      'PositiveIntegers',
+      'NegativeIntegers',
+      'Rationals',
+      'Reals',
+      'PositiveReals',
+      'NonNegativeReals',
+      'NegativeReals',
+      'NonPositiveReals',
+      'ExtendedReals',
+      'Complexes',
+      'ImaginaryNumbers',
+      'Numbers',
+      'ExtendedComplexes',
+      'AlgebraicNumbers',
+      'TranscendentalNumbers',
     ];
     if (knownInfiniteSets.includes(domain.symbol)) {
-      return { status: 'non-enumerable', variable, domain, reason: 'infinite-domain' };
+      return {
+        status: 'non-enumerable',
+        variable,
+        domain,
+        reason: 'infinite-domain',
+      };
+    }
+    // Check if the symbol has a value that's a finite set
+    const domainValue = domain.value;
+    if (domainValue && domainValue.operator === 'Set') {
+      const values = domainValue.ops;
+      if (values && values.length <= 1000) {
+        return successResult([...values]);
+      }
+      if (values && values.length > 1000) {
+        return {
+          status: 'non-enumerable',
+          variable,
+          domain,
+          reason: 'domain-too-large',
+        };
+      }
     }
     // Unknown symbol - could be a finite set, but we can't determine
-    return { status: 'non-enumerable', variable, domain, reason: 'unknown-domain' };
+    return {
+      status: 'non-enumerable',
+      variable,
+      domain,
+      reason: 'unknown-domain',
+    };
   }
 
   // Unknown domain structure
-  return { status: 'non-enumerable', variable, domain, reason: 'unrecognized-domain-type' };
+  return {
+    status: 'non-enumerable',
+    variable,
+    domain,
+    reason: 'unrecognized-domain-type',
+  };
 }
 
 /**
@@ -237,7 +358,10 @@ export function collectNestedDomains(
   // Recursively collect from inner body
   const innerDomains = collectNestedDomains(innerBody, ce);
 
-  return [{ variable: domain.variable, values: domain.values }, ...innerDomains];
+  return [
+    { variable: domain.variable, values: domain.values },
+    ...innerDomains,
+  ];
 }
 
 /**

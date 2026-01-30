@@ -218,7 +218,10 @@ export function evaluateNor(
  * In NNF, negations only appear directly before variables (literals).
  * This is a prerequisite for CNF/DNF conversion.
  */
-export function toNNF(expr: BoxedExpression, ce: ComputeEngine): BoxedExpression {
+export function toNNF(
+  expr: BoxedExpression,
+  ce: ComputeEngine
+): BoxedExpression {
   const op = expr.operator;
 
   // Base cases
@@ -431,7 +434,10 @@ function distributeOrOverAnd(
 /**
  * Convert a boolean expression to Conjunctive Normal Form (CNF).
  */
-export function toCNF(expr: BoxedExpression, ce: ComputeEngine): BoxedExpression {
+export function toCNF(
+  expr: BoxedExpression,
+  ce: ComputeEngine
+): BoxedExpression {
   // First convert to NNF
   const nnf = toNNF(expr, ce);
 
@@ -502,7 +508,10 @@ function distributeAndOverOr(
 /**
  * Convert a boolean expression to Disjunctive Normal Form (DNF).
  */
-export function toDNF(expr: BoxedExpression, ce: ComputeEngine): BoxedExpression {
+export function toDNF(
+  expr: BoxedExpression,
+  ce: ComputeEngine
+): BoxedExpression {
   // First convert to NNF
   const nnf = toNNF(expr, ce);
 

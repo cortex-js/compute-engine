@@ -960,7 +960,10 @@ const INTEGRATION_RULES: Rule[] = [
         [
           'Multiply',
           ['Rational', 1, 2],
-          ['Ln', ['Add', 1, ['Power', ['Add', ['Multiply', '_a', '_x'], '__b'], 2]]],
+          [
+            'Ln',
+            ['Add', 1, ['Power', ['Add', ['Multiply', '_a', '_x'], '__b'], 2]],
+          ],
         ],
       ],
       '_a',

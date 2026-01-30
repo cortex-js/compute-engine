@@ -382,6 +382,149 @@ describe('SUM with Element indexing set', () => {
   });
 });
 
+describe('EL-2: Multiple Element indexing sets', () => {
+  // EL-2: Support comma-separated Element expressions like `\sum_{n \in S, m \in T}`
+
+  test('parsing multiple Element indexing sets', () => {
+    const expr = ce.parse('\\sum_{n \\in \\{1,2\\}, m \\in \\{3,4\\}} (n+m)');
+    // Should parse both Element expressions
+    expect(expr.json).toMatchObject([
+      'Sum',
+      expect.anything(), // body
+      ['Element', 'n', expect.anything()],
+      ['Element', 'm', expect.anything()],
+    ]);
+  });
+
+  test('evaluating sum with two Element indexing sets', () => {
+    // Sum of (n+m) for n in {1,2} and m in {3,4}
+    // = (1+3) + (1+4) + (2+3) + (2+4) = 4 + 5 + 5 + 6 = 20
+    const expr = ce.box([
+      'Sum',
+      ['Add', 'n', 'm'],
+      ['Element', 'n', ['Set', 1, 2]],
+      ['Element', 'm', ['Set', 3, 4]],
+    ]);
+    expect(expr.evaluate().json).toBe(20);
+  });
+
+  test('evaluating product with two Element indexing sets', () => {
+    // Product of (n*m) for n in {1,2} and m in {3,4}
+    // = (1*3) * (1*4) * (2*3) * (2*4) = 3 * 4 * 6 * 8 = 576
+    const expr = ce.box([
+      'Product',
+      ['Multiply', 'n', 'm'],
+      ['Element', 'n', ['Set', 1, 2]],
+      ['Element', 'm', ['Set', 3, 4]],
+    ]);
+    expect(expr.evaluate().json).toBe(576);
+  });
+
+  test('mixing Element and Range indexing sets', () => {
+    // Sum for n in {1,2} and m from 1 to 2
+    // = (1+1) + (1+2) + (2+1) + (2+2) = 2 + 3 + 3 + 4 = 12
+    const expr = ce.box([
+      'Sum',
+      ['Add', 'n', 'm'],
+      ['Element', 'n', ['Set', 1, 2]],
+      ['Limits', 'm', 1, 2],
+    ]);
+    expect(expr.evaluate().json).toBe(12);
+  });
+
+  test('serialization of multiple Element indexing sets', () => {
+    const expr = ce.box([
+      'Sum',
+      ['Add', 'n', 'm'],
+      ['Element', 'n', 'S'],
+      ['Element', 'm', 'T'],
+    ]);
+    const latex = expr.latex;
+    // Should serialize with both \in expressions
+    expect(latex).toContain('n\\in S');
+    expect(latex).toContain('m\\in T');
+  });
+});
+
+describe('EL-3: Condition/Filter Support in Element Expressions', () => {
+  // EL-3: Support conditions like `\sum_{n \in S, n > 0}` where the condition
+  // filters the values from the set
+
+  test('parsing Element with Greater condition', () => {
+    const ce2 = new (ce.constructor as typeof ce.constructor)();
+    const expr = ce2.parse('\\sum_{n \\in S, n > 0} n');
+    // Should parse with condition attached to Element
+    expect(expr.json).toMatchObject([
+      'Sum',
+      'n',
+      ['Element', 'n', 'S', expect.anything()], // condition is 4th element
+    ]);
+  });
+
+  test('parsing Element with GreaterEqual condition', () => {
+    const ce2 = new (ce.constructor as typeof ce.constructor)();
+    const expr = ce2.parse('\\sum_{n \\in S, n \\ge 2} n');
+    expect(expr.json).toMatchObject([
+      'Sum',
+      'n',
+      ['Element', 'n', 'S', expect.anything()],
+    ]);
+  });
+
+  test('parsing Element with Less condition', () => {
+    const ce2 = new (ce.constructor as typeof ce.constructor)();
+    const expr = ce2.parse('\\sum_{n \\in S, n < 0} n');
+    expect(expr.json).toMatchObject([
+      'Sum',
+      'n',
+      ['Element', 'n', 'S', expect.anything()],
+    ]);
+  });
+
+  test('sum with condition n > 0 filters positive values', () => {
+    const ce2 = new (ce.constructor as typeof ce.constructor)();
+    ce2.assign('S', ce2.box(['Set', 1, 2, 3, -1, -2]));
+    const expr = ce2.parse('\\sum_{n \\in S, n > 0} n');
+    // Should sum only 1+2+3 = 6
+    expect(expr.evaluate().json).toBe(6);
+  });
+
+  test('sum with condition n >= 2 filters values >= 2', () => {
+    const ce2 = new (ce.constructor as typeof ce.constructor)();
+    ce2.assign('S', ce2.box(['Set', 1, 2, 3, 4, 5, -1, -2]));
+    const expr = ce2.parse('\\sum_{n \\in S, n \\ge 2} n');
+    // Should sum only 2+3+4+5 = 14
+    expect(expr.evaluate().json).toBe(14);
+  });
+
+  test('sum with condition n < 0 filters negative values', () => {
+    const ce2 = new (ce.constructor as typeof ce.constructor)();
+    ce2.assign('S', ce2.box(['Set', 1, 2, 3, -1, -2, -3]));
+    const expr = ce2.parse('\\sum_{n \\in S, n < 0} n');
+    // Should sum only -1-2-3 = -6
+    expect(expr.evaluate().json).toBe(-6);
+  });
+
+  test('product with condition n > 0', () => {
+    const ce2 = new (ce.constructor as typeof ce.constructor)();
+    ce2.assign('S', ce2.box(['Set', 1, 2, 3, 4, -1, -2]));
+    const expr = ce2.parse('\\prod_{n \\in S, n > 0} n');
+    // Should multiply only 1*2*3*4 = 24
+    expect(expr.evaluate().json).toBe(24);
+  });
+
+  test('condition with explicit inline set', () => {
+    const ce2 = new (ce.constructor as typeof ce.constructor)();
+    const expr = ce2.box([
+      'Sum',
+      'n',
+      ['Element', 'n', ['Set', 1, 2, 3, -1, -2], ['Greater', 'n', 0]],
+    ]);
+    // Should sum only 1+2+3 = 6
+    expect(expr.evaluate().json).toBe(6);
+  });
+});
+
 describe('EL-5: Non-enumerable domains stay symbolic', () => {
   // EL-5: When the domain cannot be enumerated, the expression should
   // remain symbolic instead of returning NaN

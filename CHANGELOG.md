@@ -107,6 +107,21 @@
     - `\sum_{n \in [1,a]} n` with symbolic bound → stays symbolic
     - Previously these would all return `NaN` with no explanation
 
+  - **Multiple Element indexing sets**: Comma-separated Element expressions now
+    parse and evaluate correctly:
+    - `\sum_{n \in A, m \in B} (n+m)` → `["Sum", ..., ["Element", "n", "A"], ["Element", "m", "B"]]`
+    - Nested sums like `\sum_{i \in A}\sum_{j \in B} i \cdot j` evaluate correctly
+    - Mixed indexing sets (Element + Limits) work together
+
+  - **Condition/filter support in Element expressions**: Conditions can be attached
+    to Element expressions to filter values from the set:
+    - `\sum_{n \in S, n > 0} n` → sums only positive values from S
+    - `\sum_{n \in S, n \ge 2} n` → sums values ≥ 2 from S
+    - `\prod_{k \in S, k < 0} k` → multiplies only negative values from S
+    - Supported operators: `>`, `>=`, `<`, `<=`, `!=`
+    - Conditions are attached as the 4th operand of Element:
+      `["Element", "n", "S", ["Greater", "n", 0]]`
+
 - **Linear Algebra Enhancements**: Improved tensor and matrix operations with
   better scalar handling, new functionality, and clearer error messages:
 

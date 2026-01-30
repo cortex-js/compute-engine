@@ -234,12 +234,24 @@ export const UNIVARIATE_ROOTS: Rule[] = [
 
   // ax + b√x + c = 0 (plus root)
   {
-    match: ['Add', ['Multiply', '_x', '__a'], ['Multiply', '__b', ['Sqrt', '_x']], '___c'],
+    match: [
+      'Add',
+      ['Multiply', '_x', '__a'],
+      ['Multiply', '__b', ['Sqrt', '_x']],
+      '___c',
+    ],
     replace: [
       'Power',
       [
         'Divide',
-        ['Add', ['Negate', '__b'], ['Sqrt', ['Subtract', ['Square', '__b'], ['Multiply', 4, '__a', '___c']]]],
+        [
+          'Add',
+          ['Negate', '__b'],
+          [
+            'Sqrt',
+            ['Subtract', ['Square', '__b'], ['Multiply', 4, '__a', '___c']],
+          ],
+        ],
         ['Multiply', 2, '__a'],
       ],
       2,
@@ -250,12 +262,24 @@ export const UNIVARIATE_ROOTS: Rule[] = [
 
   // ax + b√x + c = 0 (minus root)
   {
-    match: ['Add', ['Multiply', '_x', '__a'], ['Multiply', '__b', ['Sqrt', '_x']], '___c'],
+    match: [
+      'Add',
+      ['Multiply', '_x', '__a'],
+      ['Multiply', '__b', ['Sqrt', '_x']],
+      '___c',
+    ],
     replace: [
       'Power',
       [
         'Divide',
-        ['Subtract', ['Negate', '__b'], ['Sqrt', ['Subtract', ['Square', '__b'], ['Multiply', 4, '__a', '___c']]]],
+        [
+          'Subtract',
+          ['Negate', '__b'],
+          [
+            'Sqrt',
+            ['Subtract', ['Square', '__b'], ['Multiply', 4, '__a', '___c']],
+          ],
+        ],
         ['Multiply', 2, '__a'],
       ],
       2,
@@ -267,12 +291,21 @@ export const UNIVARIATE_ROOTS: Rule[] = [
   // Handle negated coefficient: ax - b√x + c = 0
   // This handles the Negate(Multiply(...)) pattern
   {
-    match: ['Add', ['Multiply', '_x', '__a'], ['Negate', ['Multiply', '__b', ['Sqrt', '_x']]], '___c'],
+    match: [
+      'Add',
+      ['Multiply', '_x', '__a'],
+      ['Negate', ['Multiply', '__b', ['Sqrt', '_x']]],
+      '___c',
+    ],
     replace: [
       'Power',
       [
         'Divide',
-        ['Add', '__b', ['Sqrt', ['Add', ['Square', '__b'], ['Multiply', 4, '__a', '___c']]]],
+        [
+          'Add',
+          '__b',
+          ['Sqrt', ['Add', ['Square', '__b'], ['Multiply', 4, '__a', '___c']]],
+        ],
         ['Multiply', 2, '__a'],
       ],
       2,
@@ -283,12 +316,21 @@ export const UNIVARIATE_ROOTS: Rule[] = [
 
   // ax - b√x + c = 0 (minus root)
   {
-    match: ['Add', ['Multiply', '_x', '__a'], ['Negate', ['Multiply', '__b', ['Sqrt', '_x']]], '___c'],
+    match: [
+      'Add',
+      ['Multiply', '_x', '__a'],
+      ['Negate', ['Multiply', '__b', ['Sqrt', '_x']]],
+      '___c',
+    ],
     replace: [
       'Power',
       [
         'Divide',
-        ['Subtract', '__b', ['Sqrt', ['Add', ['Square', '__b'], ['Multiply', 4, '__a', '___c']]]],
+        [
+          'Subtract',
+          '__b',
+          ['Sqrt', ['Add', ['Square', '__b'], ['Multiply', 4, '__a', '___c']]],
+        ],
         ['Multiply', 2, '__a'],
       ],
       2,
@@ -363,7 +405,11 @@ export const UNIVARIATE_ROOTS: Rule[] = [
   // Second solution for sin: x = π - arcsin(-b/a)
   {
     match: ['Add', ['Multiply', '__a', ['Sin', '_x']], '__b'],
-    replace: ['Subtract', 'Pi', ['Arcsin', ['Divide', ['Negate', '__b'], '__a']]],
+    replace: [
+      'Subtract',
+      'Pi',
+      ['Arcsin', ['Divide', ['Negate', '__b'], '__a']],
+    ],
     useVariations: true,
     condition: (sub) => {
       if (!filter(sub)) return false;
@@ -536,9 +582,7 @@ function clearDenominators(
   if (!ops || ops.length === 0) return expr;
 
   // Collect all non-trivial denominators
-  const denominators = ops
-    .map((op) => op.denominator)
-    .filter((d) => !d.is(1));
+  const denominators = ops.map((op) => op.denominator).filter((d) => !d.is(1));
 
   if (denominators.length === 0) return expr;
 

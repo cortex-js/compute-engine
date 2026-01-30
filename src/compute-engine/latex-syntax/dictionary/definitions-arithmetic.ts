@@ -1273,8 +1273,9 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
     precedence: 720,
     serialize: (serializer, expr) => {
       const base = serializer.wrapShort(operand(expr, 1));
-      const wrapped =
-        base.startsWith('-') ? serializer.wrapString(base, 'normal') : base;
+      const wrapped = base.startsWith('-')
+        ? serializer.wrapString(base, 'normal')
+        : base;
       return wrapped + '^2';
     },
   },
@@ -1375,6 +1376,50 @@ function getIndexAssignment(
   return undefined;
 }
 
+/**
+ * Check if an expression is likely a condition (predicate) rather than
+ * an indexing set assignment or Element expression.
+ * Conditions are typically relational expressions like `n > 0`, `x < 10`, etc.
+ */
+function isConditionExpression(expr: Expression): boolean {
+  const op = operator(expr);
+  if (!op) return false;
+  // Common relational operators that indicate conditions
+  const conditionOperators = new Set([
+    'Less',
+    'LessEqual',
+    'Greater',
+    'GreaterEqual',
+    'NotEqual',
+    'And',
+    'Or',
+    'Not',
+    // Also allow function applications as conditions (e.g., IsPrime(n))
+  ]);
+  return conditionOperators.has(op);
+}
+
+/**
+ * Extract operands from a sequence-like expression.
+ * Handles Sequence, Tuple, and single expressions.
+ */
+function getSequenceOrTuple(expr: Expression | null): Expression[] {
+  if (expr === null) return [];
+
+  // First try getSequence (handles Sequence and Delimiter)
+  const seq = getSequence(expr);
+  if (seq) return [...seq];
+
+  // Also handle Tuple (which is what commas in subscripts often parse to)
+  if (operator(expr) === 'Tuple') {
+    const ops = operands(expr);
+    return ops ? [...ops] : [expr];
+  }
+
+  // Single expression
+  return [expr];
+}
+
 function getIndexes(
   sub: Expression | null,
   sup: Expression | null
@@ -1387,8 +1432,8 @@ function getIndexes(
   if (isEmptySequence(sub)) sub = null;
   if (isEmptySequence(sup)) sup = null;
 
-  const subs = sub === null ? [] : (getSequence(sub) ?? [sub]);
-  const sups = sup === null ? [] : (getSequence(sup) ?? [sup]);
+  const subs = getSequenceOrTuple(sub);
+  const sups = getSequenceOrTuple(sup);
 
   // If we have a superscript, we expect to have a subscript of the form
   // `i=1, j=1` with a superscript of the form `10, 20`
@@ -1398,14 +1443,62 @@ function getIndexes(
 
   // In both cases, we access sups[i], which may be undefined
 
-  return subs
-    .map((subExpr, i) => getIndexAssignment(subExpr, sups[i]))
-    .filter((x) => x !== undefined);
+  // EL-3: Process subscripts, attaching conditions to preceding Element expressions
+  const results: {
+    index: string;
+    lower?: Expression;
+    upper?: Expression;
+    element?: Expression;
+  }[] = [];
+
+  let i = 0;
+  while (i < subs.length) {
+    const subExpr = subs[i];
+    const assignment = getIndexAssignment(subExpr, sups[i]);
+
+    if (assignment) {
+      // EL-3: Check if this is an Element expression and the next item is a condition
+      if (assignment.element && i + 1 < subs.length) {
+        const nextExpr = subs[i + 1];
+        // Check if next expression is a condition (not another Element or assignment)
+        // Note: GreaterEqual IS allowed as a condition (e.g., n >= 2) when following an Element
+        // It's only a traditional index assignment when standalone (not after Element)
+        if (
+          isConditionExpression(nextExpr) &&
+          operator(nextExpr) !== 'Element' &&
+          operator(nextExpr) !== 'Equal'
+        ) {
+          // Attach condition to the Element expression
+          // Element goes from ["Element", var, domain] to ["Element", var, domain, condition]
+          const elementExpr = assignment.element;
+          if (Array.isArray(elementExpr) && elementExpr.length >= 3) {
+            // Create a new array with the condition appended
+            const newElement: Expression = [
+              elementExpr[0] as string,
+              ...elementExpr.slice(1),
+              nextExpr,
+            ];
+            assignment.element = newElement;
+          }
+          i++; // Skip the condition expression
+        }
+      }
+      results.push(assignment);
+    }
+    i++;
+  }
+
+  return results;
 }
 
 function parseBigOp(name: string, reduceOp: string, minPrec: number) {
   return (parser: Parser): Expression | null => {
     parser.skipSpace();
+
+    // Push a symbol table early to isolate subscript/superscript parsing
+    // This prevents index symbols (like 'n' in 'n \in S, n > 0') from
+    // polluting the outer scope
+    parser.pushSymbolTable();
 
     //
     // Capture the subscripts and superscripts
@@ -1424,18 +1517,17 @@ function parseBigOp(name: string, reduceOp: string, minPrec: number) {
     // \sum \{ 1, 2, 3 \}
     if (!sup && !sub) {
       const collection = parser.parseExpression({ minPrec: minPrec });
+      parser.popSymbolTable();
       if (collection) return ['Reduce', collection, reduceOp];
+      return null;
     }
 
     const indexes = getIndexes(sub, sup);
 
     //
     // Parse the body of the function
+    // The index symbols are already in scope from parsing the subscripts
     //
-    parser.pushSymbolTable();
-
-    for (const indexinSet of indexes)
-      parser.addSymbol(indexinSet.index, 'symbol');
 
     const fn = parser.parseExpression({ minPrec: minPrec });
 

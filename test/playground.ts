@@ -526,17 +526,24 @@ ce.box(['Multiply', 3, ['Add', ['Negate', 1], ['Rational', 1, 2]]])
   .print();
 
 //
+// MATRIX OPERATIONS
 //
-//
+
+// Numeric matrix operations work correctly - no need to test here
+// See PLAYGROUND.md for verified working operations:
+// - Shape, Rank, Flatten, Transpose, Determinant (all work with numeric matrices)
 
 // @issue Symbolic matrix assignment bug
 // ce.assign() for symbolic matrices doesn't store the value correctly
 // X.value becomes Operator("X") instead of the matrix
+// Expected: Determinant(X) should evaluate to -b*c + a*d
+// Actual: Error (incompatible-type)
 ce.assign(
   'X',
   ce.box(['Matrix', ['List', ['List', 'a', 'b'], ['List', 'c', 'd']]])
 );
-console.log(ce.box(['Determinant', 'X']).evaluate().toString()); // Expected: ad-bc, Actual: error
+console.log('Symbolic matrix X.value:', ce.symbol('X').value?.toString());
+console.log('Determinant(X):', ce.box(['Determinant', 'X']).evaluate().toString());
 
 // const expr = ce.parse('x^{}');
 // console.info(expr.json);

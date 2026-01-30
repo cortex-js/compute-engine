@@ -5,7 +5,12 @@ import {
 } from '../boxed-expression/trigonometry';
 import { mul } from '../boxed-expression/arithmetic-mul-div';
 import { simplifyLogicFunction } from '../library/logic';
-import type { BoxedExpression, Rule, RuleStep } from '../global-types';
+import type {
+  BoxedExpression,
+  Rule,
+  RuleStep,
+  ComputeEngine,
+} from '../global-types';
 import { expand } from '../boxed-expression/expand';
 import { factor } from '../boxed-expression/factor';
 import { add } from '../boxed-expression/arithmetic-add';
@@ -19,7 +24,6 @@ import {
 import { cancelCommonFactors } from '../boxed-expression/polynomials';
 import { simplifySum } from './simplify-sum';
 import { simplifyProduct } from './simplify-product';
-import type { ComputeEngine } from '../global-types';
 
 /**
  * Reduce trigonometric functions by their periodicity.
@@ -207,10 +211,10 @@ export const SIMPLIFY_RULES: Rule[] = [
   //
   (x): RuleStep | undefined => {
     if (x.operator !== 'Add') return undefined;
-    // The Add function has a 'lazy' property, so we have to simplify
-    // the operands first
+    // The Add function has a 'lazy' property, so we need to ensure operands are canonical.
+    // IMPORTANT: Don't call .simplify() to avoid infinite recursion.
     return {
-      value: add(...x.ops!.map((x) => x.canonical.simplify())),
+      value: add(...x.ops!.map((x) => x.canonical)),
       because: 'addition',
     };
   },
@@ -226,10 +230,10 @@ export const SIMPLIFY_RULES: Rule[] = [
   (x): RuleStep | undefined => {
     if (x.operator !== 'Multiply') return undefined;
 
-    // The Multiply function has a 'lazy' property, so we have to simplify
-    // the operands first
+    // The Multiply function has a 'lazy' property, so we need to ensure operands are canonical.
+    // IMPORTANT: Don't call .simplify() to avoid infinite recursion.
     return {
-      value: mul(...x.ops!.map((x) => x.canonical.simplify())),
+      value: mul(...x.ops!.map((x) => x.canonical)),
       because: 'multiplication',
     };
   },
@@ -585,7 +589,10 @@ export const SIMPLIFY_RULES: Rule[] = [
     if (!exponent.is(rootIndex)) return undefined;
     // Even root: return |x|
     if (rootIndex.isEven === true) {
-      return { value: x.engine.function('Abs', [base]), because: 'root(x^n, n) where n even' };
+      return {
+        value: x.engine.function('Abs', [base]),
+        because: 'root(x^n, n) where n even',
+      };
     }
     // Odd root or x >= 0: return x
     if (rootIndex.isOdd === true || base.isNonNegative === true) {
@@ -659,8 +666,7 @@ export const SIMPLIFY_RULES: Rule[] = [
   {
     match: '\\log_c(x^{n/k})',
     replace: '(n/k)*\\log_c(x)',
-    condition: (ids) =>
-      ids._x.isNonNegative === true || ids._n.isOdd === true,
+    condition: (ids) => ids._x.isNonNegative === true || ids._n.isOdd === true,
   },
 
   /*

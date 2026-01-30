@@ -481,9 +481,15 @@ export const SETS_LIBRARY: SymbolDefinitions = {
   //
   Element: {
     complexity: 11200,
-    signature: '(value, collection) -> boolean',
-    description: 'Test whether a value is an element of a collection.',
-    evaluate: ([value, collection], { engine: ce }) => {
+    // EL-3: Extended signature to support optional condition for filtered iteration
+    // The condition is used by Sum/Product to filter values when iterating
+    signature: '(value, collection, any?) -> boolean',
+    description:
+      'Test whether a value is an element of a collection. ' +
+      'Optional third argument is a condition for filtered iteration in Sum/Product.',
+    evaluate: ([value, collection, _condition], { engine: ce }) => {
+      // Note: condition is only used during Sum/Product iteration,
+      // not for standalone Element evaluation
       const result = collection.contains(value);
       if (result === true) return ce.True;
       if (result === false) return ce.False;

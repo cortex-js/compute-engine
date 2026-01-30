@@ -106,7 +106,11 @@ const DERIVATIVES_TABLE = {
   // d/dx erfc(x) = -d/dx erf(x) = -2/√π * e^(-x²)
   Erfc: [
     'Negate',
-    ['Multiply', ['Divide', 2, ['Sqrt', 'Pi']], ['Exp', ['Negate', ['Square', '_']]]],
+    [
+      'Multiply',
+      ['Divide', 2, ['Sqrt', 'Pi']],
+      ['Exp', ['Negate', ['Square', '_']]],
+    ],
   ],
   // d/dx ln(Γ(x)) = ψ(x) (digamma function)
   LogGamma: ['Digamma', '_'],
@@ -121,11 +125,7 @@ const DERIVATIVES_TABLE = {
   // d/dx C(x) = cos(πx²/2) where C is the Fresnel cosine integral
   FresnelC: ['Cos', ['Multiply', ['Divide', 'Pi', 2], ['Square', '_']]],
   // d/dx erfi(x) = (2/√π)·e^(x²) where erfi is the imaginary error function
-  Erfi: [
-    'Multiply',
-    ['Divide', 2, ['Sqrt', 'Pi']],
-    ['Exp', ['Square', '_']],
-  ],
+  Erfi: ['Multiply', ['Divide', 2, ['Sqrt', 'Pi']], ['Exp', ['Square', '_']]],
   // Note: Bessel functions (BesselJ, BesselY, BesselI, BesselK) and Airy functions
   // (AiryAi, AiryBi) have been omitted because their derivatives involve functions
   // of different orders or related derivative functions that are not in the standard
@@ -231,12 +231,15 @@ export function differentiate(
 
     // Compute derivative using the power rule
     // d/dx base^(1/n) = (1/n) * base^((1/n) - 1) * base'
-    const exponent = ce.One.div(n);  // 1/n
-    const basePrime = differentiate(base, v) ?? ce._fn('D', [base, ce.symbol(v)]);
-    const newExponent = exponent.sub(ce.One);  // (1/n) - 1 = (1-n)/n
+    const exponent = ce.One.div(n); // 1/n
+    const basePrime =
+      differentiate(base, v) ?? ce._fn('D', [base, ce.symbol(v)]);
+    const newExponent = exponent.sub(ce.One); // (1/n) - 1 = (1-n)/n
 
     // Create Power expression as structural (bound but not canonicalized) to avoid Root conversion
-    const power = ce.function('Power', [base, newExponent], { structural: true });
+    const power = ce.function('Power', [base, newExponent], {
+      structural: true,
+    });
 
     return simplifyDerivative(exponent.mul(power).mul(basePrime));
   }

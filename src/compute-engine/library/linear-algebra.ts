@@ -125,7 +125,7 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
       complexity: 8200,
       signature: '(value) -> list',
       evaluate: (ops, { engine: ce }) => {
-        let op1 = ops[0].evaluate();
+        const op1 = ops[0].evaluate();
 
         // Handle scalar - return single-element list
         if (op1.isNumber) return ce.box(['List', op1]);
@@ -435,10 +435,7 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
         if (shapeA.length === 2 && shapeB.length === 1) {
           const [m, n] = shapeA;
           if (n !== shapeB[0])
-            return ce.error(
-              'incompatible-dimensions',
-              `${n} vs ${shapeB[0]}`
-            );
+            return ce.error('incompatible-dimensions', `${n} vs ${shapeB[0]}`);
 
           const result: BoxedExpression[] = [];
           for (let i = 0; i < m; i++) {
@@ -458,10 +455,7 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
         if (shapeA.length === 1 && shapeB.length === 2) {
           const [m, n] = shapeB;
           if (shapeA[0] !== m)
-            return ce.error(
-              'incompatible-dimensions',
-              `${shapeA[0]} vs ${m}`
-            );
+            return ce.error('incompatible-dimensions', `${shapeA[0]} vs ${m}`);
 
           const result: BoxedExpression[] = [];
           for (let j = 0; j < n; j++) {
@@ -481,10 +475,7 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
           const [m, n1] = shapeA;
           const [n2, p] = shapeB;
           if (n1 !== n2)
-            return ce.error(
-              'incompatible-dimensions',
-              `${n1} vs ${n2}`
-            );
+            return ce.error('incompatible-dimensions', `${n1} vs ${n2}`);
 
           const n = n1;
           const rows: BoxedExpression[] = [];
@@ -1034,8 +1025,7 @@ function computeEigenvalues3x3(
 
   // Convert to depressed cubic t³ + pt + q = 0 where λ = t + trace/3
   const p = minorSum - (trace * trace) / 3;
-  const q =
-    (2 * trace * trace * trace) / 27 - (trace * minorSum) / 3 + det;
+  const q = (2 * trace * trace * trace) / 27 - (trace * minorSum) / 3 + det;
 
   // Solve using Cardano's formula or trigonometric method
   const eigenvalues = solveCubic(p, q, trace / 3);
@@ -1073,7 +1063,7 @@ function solveCubic(p: number, q: number, shift: number): number[] {
   } else if (discriminant < -eps) {
     // Three distinct real roots - use trigonometric method
     const r = Math.sqrt((-p * p * p) / 27);
-    const theta = Math.acos((-q / 2) / r);
+    const theta = Math.acos(-q / 2 / r);
     const cbrtR = Math.cbrt(r);
 
     const t1 = 2 * cbrtR * Math.cos(theta / 3);

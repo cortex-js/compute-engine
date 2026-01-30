@@ -7,7 +7,7 @@ import type { BoxedExpression, RuleStep } from '../global-types';
 export function simplifyProduct(x: BoxedExpression): RuleStep | undefined {
   if (x.operator !== 'Product') return undefined;
 
-  let body = x.op1;
+  const body = x.op1;
   const limits = x.op2;
   if (!body || !limits || limits.operator !== 'Limits') return undefined;
 
@@ -108,10 +108,7 @@ export function simplifyProduct(x: BoxedExpression): RuleStep | undefined {
   }
 
   // Telescoping product: Product((k+1)/k, [k, 1, n]) → n+1
-  if (
-    body.operator === 'Divide' &&
-    lower.is(1)
-  ) {
+  if (body.operator === 'Divide' && lower.is(1)) {
     const num = body.op1;
     const denom = body.op2;
     // Check for (k+1)/k pattern
@@ -155,9 +152,7 @@ export function simplifyProduct(x: BoxedExpression): RuleStep | undefined {
         op.ops?.some((o) => o.is(-1)) &&
         op.ops?.some(
           (o) =>
-            o.operator === 'Power' &&
-            o.op1?.symbol === index &&
-            o.op2?.is(-2)
+            o.operator === 'Power' && o.op1?.symbol === index && o.op2?.is(-2)
         )
       ) {
         hasNegInvSq = true;
@@ -176,11 +171,7 @@ export function simplifyProduct(x: BoxedExpression): RuleStep | undefined {
   }
 
   // Double factorial (odd): Product(2n-1, [n, 1, b]) → (2b-1)!!
-  if (
-    body.operator === 'Add' &&
-    body.ops?.length === 2 &&
-    lower.is(1)
-  ) {
+  if (body.operator === 'Add' && body.ops?.length === 2 && lower.is(1)) {
     // Check for 2n - 1 pattern
     const [op1, op2] = body.ops;
     let hasLinearTerm = false;
@@ -190,15 +181,20 @@ export function simplifyProduct(x: BoxedExpression): RuleStep | undefined {
     for (const op of body.ops) {
       if (op.isNumberLiteral && typeof op.numericValue === 'number') {
         constantTerm = op.numericValue;
-      } else if (
-        op.operator === 'Multiply' &&
-        op.ops?.length === 2
-      ) {
+      } else if (op.operator === 'Multiply' && op.ops?.length === 2) {
         const [a, b] = op.ops;
-        if (a.isNumberLiteral && typeof a.numericValue === 'number' && b.symbol === index) {
+        if (
+          a.isNumberLiteral &&
+          typeof a.numericValue === 'number' &&
+          b.symbol === index
+        ) {
           coefficient = a.numericValue;
           hasLinearTerm = true;
-        } else if (b.isNumberLiteral && typeof b.numericValue === 'number' && a.symbol === index) {
+        } else if (
+          b.isNumberLiteral &&
+          typeof b.numericValue === 'number' &&
+          a.symbol === index
+        ) {
           coefficient = b.numericValue;
           hasLinearTerm = true;
         }
@@ -222,11 +218,7 @@ export function simplifyProduct(x: BoxedExpression): RuleStep | undefined {
   }
 
   // Double factorial (even): Product(2n, [n, 1, b]) → 2^b * b!
-  if (
-    body.operator === 'Multiply' &&
-    body.ops?.length === 2 &&
-    lower.is(1)
-  ) {
+  if (body.operator === 'Multiply' && body.ops?.length === 2 && lower.is(1)) {
     const [op1, op2] = body.ops;
     // Check for 2 * n or n * 2 pattern
     if (
@@ -279,10 +271,7 @@ export function simplifyProduct(x: BoxedExpression): RuleStep | undefined {
     } else if (body.operator === 'Add' && body.ops?.length === 2) {
       // Check for x + (-k) form
       for (const op of body.ops) {
-        if (
-          op.operator === 'Negate' &&
-          op.op1?.symbol === index
-        ) {
+        if (op.operator === 'Negate' && op.op1?.symbol === index) {
           hasNegIndex = true;
         } else if (!new Set(op.unknowns).has(index)) {
           base = op;
