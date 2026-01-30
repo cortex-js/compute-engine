@@ -14,6 +14,7 @@ describe('TRIGONOMETRIC FUNCTIONS implicit arguments', () => {
     expect(check('\\cos \\frac{x}{2}^2')).toMatchInlineSnapshot(`
       box       = ["Cos", ["Square", ["Divide", "x", 2]]]
       canonical = ["Cos", ["Square", ["Multiply", ["Rational", 1, 2], "x"]]]
+      simplify  = cos(1/4 * x^2)
       eval-auto = cos(1/4 * x^2)
       eval-mach = cos(1/4 * x^2)
       N-auto    = cos(0.25 * x^2)

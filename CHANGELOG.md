@@ -86,6 +86,24 @@
   - `(-x)^n` → `-x^n` when n is odd (e.g., `(-x)^3` → `-x^3`)
   - `(-x)^{n/m}` → `x^{n/m}` when n is even and m is odd
   - `(-x)^{n/m}` → `-x^{n/m}` when both n and m are odd
+  - `(-1)^{p/q}` → `-1` when both p and q are odd (real odd root)
+
+- **Power Distribution**: Added rule to distribute integer exponents over products:
+  - `(ab)^n` → `a^n · b^n` when n is an integer
+  - Example: `(x³y²)²` → `x⁶y⁴`
+  - Example: `(-2x)²` → `4x²`
+
+- **Exponential e Simplification**: Added rules for combining powers of e:
+  - `eˣ · eʸ` → `e^(x+y)` (same-base multiplication)
+  - `eˣ / eʸ` → `e^(x-y)` (same-base division)
+  - `eˣ · e` → `e^(x+1)` and `eˣ / e` → `e^(x-1)`
+  - Preserves symbolic form instead of evaluating e^n numerically
+
+- **Same-Base Power Combination**: Improved power combination for products with
+  3+ terms:
+  - `a³ · a · a²` → `a⁶` (combines all same-base terms)
+  - Works with unknown symbols when sum of exponents is positive
+  - Handles mixed products: `b³c²dx⁷ya⁵gb²x⁵(3b)` → `3dgyx¹²b⁶a⁵c²`
 
 - **Trigonometric Equation Solving**: The `solve()` method now handles basic
   trigonometric equations:

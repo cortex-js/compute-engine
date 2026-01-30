@@ -85,6 +85,31 @@ export function simplifyPower(x: BoxedExpression): RuleStep | undefined {
 
     if (!base || !exp) return undefined;
 
+    // (-1)^{p/q} -> -1 when both p and q are odd (real odd root of -1)
+    // This handles the literal -1 case (not Negate(1))
+    if (base.is(-1)) {
+      const rat = asRational(exp);
+      if (rat) {
+        const [num, denom] = rat;
+        const numN = Number(num);
+        const denomN = Number(denom);
+        // Both numerator and denominator odd means real root exists
+        if (numN % 2 !== 0 && denomN % 2 !== 0) {
+          return { value: ce.number(-1), because: '(-1)^{p/q} -> -1 when p,q odd' };
+        }
+      }
+    }
+
+    // (a * b * ...)^n -> a^n * b^n * ... when n is an integer
+    // Distribute exponent over product
+    if (base.operator === 'Multiply' && base.ops && exp.isInteger === true) {
+      const newFactors = base.ops.map((factor) => factor.pow(exp));
+      return {
+        value: ce._fn('Multiply', newFactors),
+        because: '(a*b)^n -> a^n * b^n',
+      };
+    }
+
     // (-x)^n -> x^n when n is even, (-x)^n -> -x^n when n is odd
     if (base.operator === 'Negate' && base.op1) {
       const innerBase = base.op1;
@@ -226,6 +251,37 @@ export function simplifyPower(x: BoxedExpression): RuleStep | undefined {
     const denom = x.op2;
 
     if (!num || !denom) return undefined;
+
+    // Same-base division: a^m / a^n -> a^{m-n}
+    if (num.operator === 'Power' && denom.operator === 'Power') {
+      const baseNum = num.op1;
+      const expNum = num.op2;
+      const baseDenom = denom.op1;
+      const expDenom = denom.op2;
+
+      if (baseNum?.isSame(baseDenom) && expNum && expDenom) {
+        return {
+          value: baseNum.pow(expNum.sub(expDenom)),
+          because: 'a^m / a^n -> a^{m-n}',
+        };
+      }
+    }
+
+    // a^m / a -> a^{m-1}
+    if (num.operator === 'Power' && num.op1?.isSame(denom)) {
+      return {
+        value: denom.pow(num.op2.sub(ce.One)),
+        because: 'a^m / a -> a^{m-1}',
+      };
+    }
+
+    // a / a^n -> a^{1-n}
+    if (denom.operator === 'Power' && denom.op1?.isSame(num)) {
+      return {
+        value: num.pow(ce.One.sub(denom.op2)),
+        because: 'a / a^n -> a^{1-n}',
+      };
+    }
 
     // a / b^{-n} -> a * b^n
     if (

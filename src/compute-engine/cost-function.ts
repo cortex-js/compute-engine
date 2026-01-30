@@ -84,14 +84,21 @@ export function costFunction(expr: BoxedExpression): number {
   else if (['Subtract', 'Negate'].includes(name)) nameCost = 4;
   else if (['Square', 'Sqrt', 'Abs'].includes(name)) nameCost = 5;
   else if (name === 'Power') {
-    // We want 2q^2 to be less expensive than 2qq, so we mostly ignore the base.
-    // However, if the base is Negate, we should account for it since
-    // (-x)^n and -x^n have the same cost mathematically but different structure.
+    // We want 2q^2 to be less expensive than 2qq, so we mostly ignore the base
+    // when the base is simple. However:
+    // - If the base is Negate, account for it since (-x)^n and -x^n have same cost
+    // - If the base is Multiply, account for its complexity so (ab)^n isn't
+    //   artificially cheaper than the distributed form a^n * b^n
     const base = expr.ops![0];
     const expCost = costFunction(expr.ops![1]);
     if (base.operator === 'Negate') {
       // Add cost for the negate so (-x)^n isn't artificially cheaper than -x^n
       return expCost + 4; // 4 is the Negate nameCost
+    }
+    if (base.operator === 'Multiply') {
+      // For (a*b*...)^n, include the base's complexity so power distribution
+      // (a*b)^n -> a^n * b^n can be applied when appropriate
+      return expCost + costFunction(base);
     }
     return expCost;
   }

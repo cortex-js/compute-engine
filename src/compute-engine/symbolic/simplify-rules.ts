@@ -152,6 +152,28 @@ export const SIMPLIFY_RULES: Rule[] = [
   // Try to expand the expression:
   // x*(y+z) -> x*y + x*z
   (x) => {
+    // Skip expand for Multiply expressions with same-base powers
+    // Let simplifyPower handle e^x * e^2 -> e^{x+2} instead of evaluating e^2
+    // Also handle bare symbols (a = a^1) as having an implicit power
+    if (x.operator === 'Multiply' && x.ops) {
+      const powerBases = new Map<string, number>();
+      for (const op of x.ops) {
+        // Get the base: for Power it's op1, for symbols it's the symbol itself
+        let baseKey: string | null = null;
+        if (op.operator === 'Power' && op.op1) {
+          baseKey = JSON.stringify(op.op1.json);
+        } else if (op.symbol) {
+          baseKey = JSON.stringify(op.json);
+        }
+        if (baseKey) {
+          powerBases.set(baseKey, (powerBases.get(baseKey) || 0) + 1);
+        }
+      }
+      // If any base has multiple powers, skip expand
+      for (const count of powerBases.values()) {
+        if (count > 1) return undefined;
+      }
+    }
     const value = expand(x);
     return value ? { value, because: 'expand' } : undefined;
   },
@@ -192,15 +214,51 @@ export const SIMPLIFY_RULES: Rule[] = [
   (x): RuleStep | undefined => {
     if (x.operator !== 'Multiply') return undefined;
 
+    // Check if there are same-base powers that should be combined by simplifyPower
+    // e.g., e^x * e^2 should become e^{x+2}, not 7.389... * e^x
+    // Also handle bare symbols (a = a^1) as having an implicit power
+    const ops = x.ops!;
+    const powerBases = new Map<string, BoxedExpression[]>();
+    for (const op of ops) {
+      // Get the base: for Power it's op1, for symbols it's the symbol itself
+      let baseKey: string | null = null;
+      let baseOp: BoxedExpression | null = null;
+      if (op.operator === 'Power' && op.op1) {
+        baseKey = JSON.stringify(op.op1.json);
+        baseOp = op;
+      } else if (op.symbol) {
+        baseKey = JSON.stringify(op.json);
+        baseOp = op;
+      }
+      if (baseKey && baseOp) {
+        const group = powerBases.get(baseKey) || [];
+        group.push(baseOp);
+        powerBases.set(baseKey, group);
+      }
+    }
+    // If any base has multiple powers, skip this rule and let simplifyPower handle it
+    for (const group of powerBases.values()) {
+      if (group.length > 1) return undefined;
+    }
+
     // The Multiply function has a 'lazy' property, so we need to ensure operands are canonical.
     // Also evaluate purely numeric operands (no unknowns) to simplify expressions.
     // IMPORTANT: Don't call .simplify() on operands to avoid infinite recursion.
     return {
       value: mul(
-        ...x.ops!.map((op) => {
+        ...ops.map((op) => {
           const canonical = op.canonical;
           // Evaluate purely numeric operands (no unknowns) to simplify them
+          // BUT skip Power expressions with ExponentialE base to preserve symbolic form
+          // e.g., e^2 should stay as e^2 for potential combination with e^x
           if (canonical.unknowns.length === 0 && canonical.ops) {
+            // Skip evaluation for e^n to allow power combination rules to work
+            if (
+              canonical.operator === 'Power' &&
+              canonical.op1?.symbol === 'ExponentialE'
+            ) {
+              return canonical;
+            }
             const evaluated = canonical.evaluate();
             // Only use evaluated form if it's simpler (a number literal)
             if (evaluated.isNumberLiteral) return evaluated;
@@ -216,8 +274,21 @@ export const SIMPLIFY_RULES: Rule[] = [
   // Divide, Rational
   //
   (x): RuleStep | undefined => {
-    if (x.operator === 'Divide')
-      return { value: x.op1.div(x.op2), because: 'division' };
+    if (x.operator === 'Divide') {
+      // Skip if both operands are powers with the same base (let simplifyPower handle it)
+      // This preserves symbolic forms like e^x / e^2 -> e^{x-2}
+      const num = x.op1;
+      const denom = x.op2;
+      if (num.operator === 'Power' && denom.operator === 'Power') {
+        if (num.op1?.isSame(denom.op1)) return undefined;
+      }
+      // Also skip if one is a power and the other is the same base
+      // e.g., e^x / e -> e^{x-1}
+      if (num.operator === 'Power' && num.op1?.isSame(denom)) return undefined;
+      if (denom.operator === 'Power' && denom.op1?.isSame(num)) return undefined;
+
+      return { value: num.div(denom), because: 'division' };
+    }
     if (x.operator === 'Rational' && x.nops === 2)
       return { value: x.op1.div(x.op2), because: 'rational' };
     return undefined;
@@ -467,7 +538,7 @@ export const SIMPLIFY_RULES: Rule[] = [
 
     const ce = x.engine;
 
-    // Group terms by base
+    // Group ALL terms by base (including unknown symbols)
     const baseGroups = new Map<
       string,
       {
@@ -484,18 +555,12 @@ export const SIMPLIFY_RULES: Rule[] = [
       if (term.operator === 'Power') {
         base = term.op1;
         exp = term.op2;
-      } else {
+      } else if (term.symbol) {
+        // Bare symbol treated as base^1
         base = term;
         exp = ce.One;
-      }
-
-      // Only combine if base is positive, negative, or numeric
-      const canCombine =
-        base.isPositive === true ||
-        base.isNegative === true ||
-        base.isNumberLiteral === true;
-
-      if (!canCombine) {
+      } else {
+        // Non-symbol, non-power terms (e.g., numbers) go to otherTerms
         otherTerms.push(term);
         continue;
       }
@@ -509,12 +574,35 @@ export const SIMPLIFY_RULES: Rule[] = [
       group.terms.push({ term, exp });
     }
 
-    // Check if any base has multiple terms
+    // Check if any base has multiple terms that can be combined
     let hasCombinations = false;
     for (const group of baseGroups.values()) {
       if (group.terms.length > 1) {
-        hasCombinations = true;
-        break;
+        // Check if we can safely combine:
+        // - base is known non-zero (positive, negative, or numeric), OR
+        // - sum of exponents is positive (so 0^n = 0, not 0^(-k) = undefined)
+        const base = group.base;
+        const baseNonZero =
+          base.isPositive === true ||
+          base.isNegative === true ||
+          base.isNumberLiteral === true;
+
+        if (baseNonZero) {
+          hasCombinations = true;
+        } else {
+          // Check if sum of exponents is positive (safe even if base might be 0)
+          const exponents = group.terms.map((t) => t.exp);
+          const summedExp = exponents.reduce((a, b) => a.add(b));
+          if (summedExp.isPositive === true) {
+            hasCombinations = true;
+          } else {
+            // Can't safely combine - push all terms to otherTerms
+            for (const t of group.terms) {
+              otherTerms.push(t.term);
+            }
+            group.terms.length = 0;
+          }
+        }
       }
     }
 

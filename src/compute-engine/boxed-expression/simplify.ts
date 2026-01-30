@@ -49,6 +49,15 @@ function evaluateNumericSubexpressions(expr: BoxedExpression): BoxedExpression {
   // No ops means symbol or other atomic - return as is
   if (!expr.ops) return expr;
 
+  // Don't evaluate Power expressions with ExponentialE base (e.g., e^2)
+  // These should be preserved for symbolic combination rules like e^a / e^b -> e^{a-b}
+  if (
+    expr.operator === 'Power' &&
+    expr.op1?.symbol === 'ExponentialE'
+  ) {
+    return expr;
+  }
+
   // If purely numeric (no unknowns), evaluate the whole expression
   if (expr.unknowns.length === 0 && BASIC_ARITHMETIC.includes(expr.operator)) {
     const evaluated = expr.evaluate();
@@ -147,16 +156,8 @@ function isCheaper(
 
   // Use a threshold of 1.3 (30% more expensive) to allow mathematically valid
   // simplifications like combining powers (2 * 2^x -> 2^(x+1))
-  if (newCost <= 1.3 * oldCost) {
-    // console.log(
-    //   `isCheaper: Picked new (cost ${newCost}) over old (cost ${oldCost}): ${newExpr.toString()} vs ${oldExpr.toString()}`
-    // );
-    return true;
-  }
+  if (newCost <= 1.3 * oldCost) return true;
 
-  // console.log(
-  //   `isCheaper: Picked old (cost ${oldCost}) over new (cost ${newCost}): ${oldExpr.toString()} vs ${oldExpr.toString()}`
-  // );
   return false;
 }
 
