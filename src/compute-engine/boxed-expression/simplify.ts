@@ -139,15 +139,20 @@ function isCheaper(
 
   costFunction ??= (x) => ce.costFunction(x);
 
-  if (costFunction(newExpr) <= 1.2 * costFunction(oldExpr)) {
+  const oldCost = costFunction(oldExpr);
+  const newCost = costFunction(newExpr);
+
+  // Use a threshold of 1.3 (30% more expensive) to allow mathematically valid
+  // simplifications like combining powers (2 * 2^x -> 2^(x+1))
+  if (newCost <= 1.3 * oldCost) {
     // console.log(
-    //   'Picked new' + boxedNewExpr.toString() + ' over ' + oldExpr.toString()
+    //   `isCheaper: Picked new (cost ${newCost}) over old (cost ${oldCost}): ${newExpr.toString()} vs ${oldExpr.toString()}`
     // );
     return true;
   }
 
   // console.log(
-  //   'Picked old ' + oldExpr.toString() + ' over ' + newExpr.toString()
+  //   `isCheaper: Picked old (cost ${oldCost}) over new (cost ${newCost}): ${oldExpr.toString()} vs ${oldExpr.toString()}`
   // );
   return false;
 }

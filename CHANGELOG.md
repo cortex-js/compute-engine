@@ -203,6 +203,18 @@
 
 ### Bug Fixes
 
+- **([#176](https://github.com/cortex-js/compute-engine/issues/176)) Power
+  Combination Simplification**: Fixed simplification failing to combine powers
+  with the same base when one factor has an implicit exponent or when there are
+  3+ operands. Previously, expressions like `2 * 2^x`, `e * e^x * e^{-x}`, and
+  `x^2 * x` would not simplify. Now correctly simplifies to `2^(x+1)`, `e`, and
+  `x^3` respectively. The fix includes:
+  - Extended power combination rules to support numeric literal bases
+  - Added functional rule to handle n-ary Multiply expressions (3+ operands)
+  - Adjusted simplification cost threshold from 1.2 to 1.3 to accept
+    mathematically valid simplifications where exponents become slightly more
+    complex (e.g., `2 * 2^x → 2^(x+1)`)
+
 - **Matrix Operations Type Validation**: Fixed matrix operations (`Shape`, `Rank`,
   `Flatten`, `Transpose`, `Determinant`, `Inverse`, `Trace`, etc.) returning
   incorrect results or failing with type errors. The root cause was a type

@@ -698,6 +698,90 @@ export const SIMPLIFY_RULES: Rule[] = [
   //
   // Power Combination Rules
   //
+  // Combine all terms with the same base in a Multiply (handles 3+ operands)
+  (x): RuleStep | undefined => {
+    if (x.operator !== 'Multiply' || !x.ops || x.ops.length < 3)
+      return undefined;
+
+    const ce = x.engine;
+
+    // Group terms by base
+    const baseGroups = new Map<string, {
+      base: BoxedExpression;
+      terms: Array<{ term: BoxedExpression; exp: BoxedExpression }>;
+    }>();
+    const otherTerms: BoxedExpression[] = [];
+
+    for (const term of x.ops) {
+      let base: BoxedExpression;
+      let exp: BoxedExpression;
+
+      if (term.operator === 'Power') {
+        base = term.op1;
+        exp = term.op2;
+      } else {
+        base = term;
+        exp = ce.One;
+      }
+
+      // Only combine if base is positive, negative, or numeric
+      const canCombine =
+        base.isPositive === true ||
+        base.isNegative === true ||
+        base.isNumberLiteral === true;
+
+      if (!canCombine) {
+        otherTerms.push(term);
+        continue;
+      }
+
+      const baseKey = JSON.stringify(base.json);
+      let group = baseGroups.get(baseKey);
+      if (!group) {
+        group = { base, terms: [] };
+        baseGroups.set(baseKey, group);
+      }
+      group.terms.push({ term, exp });
+    }
+
+    // Check if any base has multiple terms
+    let hasCombinations = false;
+    for (const group of baseGroups.values()) {
+      if (group.terms.length > 1) {
+        hasCombinations = true;
+        break;
+      }
+    }
+
+    if (!hasCombinations) return undefined;
+
+    // Build result
+    const resultTerms: BoxedExpression[] = [...otherTerms];
+
+    for (const group of baseGroups.values()) {
+      if (group.terms.length === 1) {
+        // Single term, keep as-is
+        resultTerms.push(group.terms[0].term);
+      } else {
+        // Multiple terms with same base - combine exponents
+        const exponents = group.terms.map(t => t.exp);
+        const summedExp = exponents.reduce((a, b) => a.add(b));
+
+        if (summedExp.is(0)) {
+          resultTerms.push(ce.One);
+        } else if (summedExp.is(1)) {
+          resultTerms.push(group.base);
+        } else {
+          resultTerms.push(ce._fn('Power', [group.base, summedExp]));
+        }
+      }
+    }
+
+    if (resultTerms.length === 0) return { value: ce.One, because: 'combined powers' };
+    if (resultTerms.length === 1) return { value: resultTerms[0], because: 'combined powers' };
+    return { value: ce._fn('Multiply', resultTerms), because: 'combined powers with same base' };
+  },
+
   // x^n * x^m -> x^{n+m} (combine powers with same base)
   {
     match: ['Multiply', ['Power', '_x', '_n'], ['Power', '_x', '_m']],
@@ -713,14 +797,18 @@ export const SIMPLIFY_RULES: Rule[] = [
     match: ['Multiply', '_x', ['Power', '_x', '_n']],
     replace: ['Power', '_x', ['Add', '_n', 1]],
     condition: (ids) =>
-      ids._x.isPositive === true || ids._x.isNegative === true,
+      ids._x.isPositive === true ||
+      ids._x.isNegative === true ||
+      ids._x.isNumberLiteral === true,
   },
   // x^n * x -> x^{n+1} (special case when second power is implicit 1)
   {
     match: ['Multiply', ['Power', '_x', '_n'], '_x'],
     replace: ['Power', '_x', ['Add', '_n', 1]],
     condition: (ids) =>
-      ids._x.isPositive === true || ids._x.isNegative === true,
+      ids._x.isPositive === true ||
+      ids._x.isNegative === true ||
+      ids._x.isNumberLiteral === true,
   },
 
   //
