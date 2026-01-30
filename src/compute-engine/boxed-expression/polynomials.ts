@@ -534,16 +534,15 @@ export function polynomialDivide(
     if (remainder[i].is(0)) continue;
 
     // Compute the quotient term coefficient
-    // Note: .simplify() on coefficients is safe as they're typically numbers/simple expressions
-    const quotientCoef = remainder[i].div(leadingDivisor).simplify();
+    // IMPORTANT: Don't call .simplify() to avoid infinite recursion when called
+    // from simplification rules. Arithmetic operations produce canonical forms.
+    const quotientCoef = remainder[i].div(leadingDivisor);
     quotientCoeffs[i - divisorDeg] = quotientCoef;
 
     // Subtract quotientCoef * divisor * x^(i - divisorDeg) from remainder
     for (let j = 0; j <= divisorDeg; j++) {
-      const product = quotientCoef.mul(divisorCoeffs[j]).simplify();
-      remainder[i - divisorDeg + j] = remainder[i - divisorDeg + j]
-        .sub(product)
-        .simplify();
+      const product = quotientCoef.mul(divisorCoeffs[j]);
+      remainder[i - divisorDeg + j] = remainder[i - divisorDeg + j].sub(product);
     }
   }
 
@@ -632,8 +631,9 @@ function makeMonic(poly: BoxedExpression, variable: string): BoxedExpression {
   if (!leadingCoef || leadingCoef.is(1)) return poly;
 
   // Divide all coefficients by leading coefficient
-  // Note: .simplify() on coefficients is safe as they're typically numbers/simple expressions
-  const monicCoeffs = coeffs.map((c) => c.div(leadingCoef!).simplify());
+  // IMPORTANT: Don't call .simplify() to avoid infinite recursion when called
+  // from simplification rules. Arithmetic operations produce canonical forms.
+  const monicCoeffs = coeffs.map((c) => c.div(leadingCoef!));
   return fromCoefficients(monicCoeffs, variable);
 }
 

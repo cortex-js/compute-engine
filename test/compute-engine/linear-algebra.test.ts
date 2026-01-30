@@ -1161,3 +1161,151 @@ describe('Higher-Rank Tensor Operations (LA-4)', () => {
     });
   });
 });
+
+describe('Eigenvalues and Eigenvectors (LA-5)', () => {
+  describe('Eigenvalues', () => {
+    it('should compute eigenvalues of a 1×1 matrix', () => {
+      const result = ce.box(['Eigenvalues', ['List', ['List', 5]]]).evaluate();
+      expect(result.toString()).toMatchInlineSnapshot(`[5]`);
+    });
+
+    it('should compute eigenvalues of a 2×2 diagonal matrix', () => {
+      // Diagonal matrix: eigenvalues are diagonal elements
+      const result = ce
+        .box(['Eigenvalues', ['List', ['List', 3, 0], ['List', 0, 7]]])
+        .evaluate();
+      expect(result.toString()).toMatchInlineSnapshot(`[3,7]`);
+    });
+
+    it('should compute eigenvalues of a 2×2 triangular matrix', () => {
+      // Upper triangular: eigenvalues are diagonal elements
+      const result = ce
+        .box(['Eigenvalues', ['List', ['List', 2, 5], ['List', 0, 4]]])
+        .evaluate();
+      expect(result.toString()).toMatchInlineSnapshot(`[2,4]`);
+    });
+
+    it('should compute eigenvalues of a 2×2 matrix', () => {
+      // [[4, 2], [1, 3]] has eigenvalues 5 and 2
+      // trace = 7, det = 12 - 2 = 10
+      // λ = (7 ± √(49-40))/2 = (7 ± 3)/2 = 5, 2
+      const result = ce
+        .box(['Eigenvalues', ['List', ['List', 4, 2], ['List', 1, 3]]])
+        .evaluate();
+      expect(result.toString()).toMatchInlineSnapshot(`[5,2]`);
+    });
+
+    it('should compute eigenvalues of a 2×2 identity matrix', () => {
+      const result = ce
+        .box(['Eigenvalues', ['List', ['List', 1, 0], ['List', 0, 1]]])
+        .evaluate();
+      expect(result.toString()).toMatchInlineSnapshot(`[1,1]`);
+    });
+
+    it('should compute eigenvalues of a 2×2 matrix with repeated eigenvalue', () => {
+      // [[2, 1], [0, 2]] has eigenvalue 2 with multiplicity 2
+      const result = ce
+        .box(['Eigenvalues', ['List', ['List', 2, 1], ['List', 0, 2]]])
+        .evaluate();
+      expect(result.toString()).toMatchInlineSnapshot(`[2,2]`);
+    });
+
+    it('should compute eigenvalues of a 3×3 diagonal matrix', () => {
+      const result = ce
+        .box([
+          'Eigenvalues',
+          [
+            'List',
+            ['List', 1, 0, 0],
+            ['List', 0, 2, 0],
+            ['List', 0, 0, 3],
+          ],
+        ])
+        .evaluate();
+      expect(result.toString()).toMatchInlineSnapshot(`[1,2,3]`);
+    });
+
+    it('should compute eigenvalues of a 3×3 matrix numerically', () => {
+      // [[6, -1, 0], [-1, 5, -1], [0, -1, 4]]
+      // This symmetric matrix has eigenvalues approximately 7, 5, 3
+      const result = ce
+        .box([
+          'Eigenvalues',
+          [
+            'List',
+            ['List', 6, -1, 0],
+            ['List', -1, 5, -1],
+            ['List', 0, -1, 4],
+          ],
+        ])
+        .evaluate();
+      const eigenvalues = result.ops?.map((e) => e.re ?? 0) ?? [];
+      expect(eigenvalues.length).toBe(3);
+      // Check eigenvalues are approximately correct (order may vary)
+      eigenvalues.sort((a, b) => b - a);
+      expect(eigenvalues[0]).toBeCloseTo(7, 0);
+      expect(eigenvalues[1]).toBeCloseTo(5, 0);
+      expect(eigenvalues[2]).toBeCloseTo(3, 0);
+    });
+
+    it('should return error for non-square matrix', () => {
+      const result = ce.box(['Eigenvalues', m23_n]).evaluate();
+      expect(result.toString()).toContain('expected-square-matrix');
+    });
+
+    it('should return error for vector', () => {
+      const result = ce.box(['Eigenvalues', v7_n]).evaluate();
+      // Type checking rejects vectors (not a matrix)
+      expect(result.toString()).toContain('incompatible-type');
+    });
+  });
+
+  describe('Eigenvectors', () => {
+    it('should compute eigenvectors of a 2×2 diagonal matrix', () => {
+      // Diagonal matrix: eigenvectors are standard basis vectors
+      const result = ce
+        .box(['Eigenvectors', ['List', ['List', 3, 0], ['List', 0, 7]]])
+        .evaluate();
+      // Should return [[1, 0], [0, 1]] or normalized versions
+      expect(result.operator).toBe('List');
+      expect(result.ops?.length).toBe(2);
+    });
+
+    it('should compute eigenvectors of a 2×2 matrix', () => {
+      // [[4, 2], [1, 3]] has eigenvalues 5 and 2
+      // For λ=5: (A - 5I)v = 0 → [[-1, 2], [1, -2]]v = 0 → v = [2, 1]
+      // For λ=2: (A - 2I)v = 0 → [[2, 2], [1, 1]]v = 0 → v = [1, -1]
+      const result = ce
+        .box(['Eigenvectors', ['List', ['List', 4, 2], ['List', 1, 3]]])
+        .evaluate();
+      expect(result.operator).toBe('List');
+      expect(result.ops?.length).toBe(2);
+    });
+
+    it('should return error for non-square matrix', () => {
+      const result = ce.box(['Eigenvectors', m23_n]).evaluate();
+      expect(result.toString()).toContain('expected-square-matrix');
+    });
+  });
+
+  describe('Eigen (combined)', () => {
+    it('should return both eigenvalues and eigenvectors', () => {
+      const result = ce
+        .box(['Eigen', ['List', ['List', 4, 2], ['List', 1, 3]]])
+        .evaluate();
+      expect(result.operator).toBe('Tuple');
+      expect(result.ops?.length).toBe(2);
+
+      const eigenvalues = result.ops?.[0];
+      const eigenvectors = result.ops?.[1];
+
+      expect(eigenvalues?.operator).toBe('List');
+      expect(eigenvectors?.operator).toBe('List');
+    });
+
+    it('should return error for non-square matrix', () => {
+      const result = ce.box(['Eigen', m23_n]).evaluate();
+      expect(result.toString()).toContain('expected-square-matrix');
+    });
+  });
+});

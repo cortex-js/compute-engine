@@ -153,6 +153,16 @@
     - All operations support explicit axis specification for flexible tensor
       manipulation
 
+  - **Eigenvalues and Eigenvectors**: Added functions for eigenvalue decomposition:
+    - `Eigenvalues(matrix)`: Returns list of eigenvalues
+      - 2×2 matrices: symbolic computation via characteristic polynomial
+      - 3×3 matrices: Cardano's formula for cubic roots
+      - Larger matrices: numeric QR algorithm
+      - Optimized for diagonal/triangular matrices
+    - `Eigenvectors(matrix)`: Returns list of corresponding eigenvectors
+      - Uses null space computation via Gaussian elimination
+    - `Eigen(matrix)`: Returns tuple of (eigenvalues, eigenvectors)
+
   - **Diagonal function**: Now fully implemented with bidirectional behavior:
     - Vector → Matrix: Creates a diagonal matrix from a vector
       (`Diagonal([1,2,3])` → 3×3 diagonal matrix)

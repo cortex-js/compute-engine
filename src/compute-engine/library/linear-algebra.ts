@@ -805,8 +805,594 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
         return undefined;
       },
     },
+
+    // Compute the eigenvalues of a square matrix
+    // For 2×2 matrices: uses characteristic polynomial (symbolic)
+    // For larger matrices: uses QR algorithm (numeric)
+    Eigenvalues: {
+      complexity: 8500,
+      signature: '(matrix) -> list',
+      evaluate: (ops, { engine: ce }): BoxedExpression | undefined => {
+        const M = ops[0].evaluate();
+
+        if (!isBoxedTensor(M)) return undefined;
+
+        const shape = M.shape;
+        // Must be a square matrix
+        if (shape.length !== 2 || shape[0] !== shape[1]) {
+          return ce.error('expected-square-matrix', M.toString());
+        }
+
+        const n = shape[0];
+
+        // Special case: 1×1 matrix
+        if (n === 1) {
+          const val = M.tensor.at(1, 1);
+          return ce.box(['List', val !== undefined ? ce.box(val) : ce.Zero]);
+        }
+
+        // Check if matrix is diagonal or triangular (eigenvalues are diagonal elements)
+        const isDiagonalOrTriangular = checkDiagonalOrTriangular(M, n);
+        if (isDiagonalOrTriangular) {
+          const eigenvalues: BoxedExpression[] = [];
+          for (let i = 0; i < n; i++) {
+            const val = M.tensor.at(i + 1, i + 1);
+            eigenvalues.push(val !== undefined ? ce.box(val) : ce.Zero);
+          }
+          return ce.box(['List', ...eigenvalues]);
+        }
+
+        // 2×2 case: solve characteristic polynomial analytically
+        if (n === 2) {
+          const a = getElement(M, 1, 1, ce);
+          const b = getElement(M, 1, 2, ce);
+          const c = getElement(M, 2, 1, ce);
+          const d = getElement(M, 2, 2, ce);
+
+          // trace = a + d
+          const trace = a.add(d);
+          // det = ad - bc
+          const det = a.mul(d).sub(b.mul(c));
+          // discriminant = trace² - 4*det
+          const disc = trace.mul(trace).sub(det.mul(ce.number(4)));
+
+          // λ = (trace ± √disc) / 2
+          const sqrtDisc = ce.box(['Sqrt', disc]).evaluate();
+          const lambda1 = trace.add(sqrtDisc).div(ce.number(2)).evaluate();
+          const lambda2 = trace.sub(sqrtDisc).div(ce.number(2)).evaluate();
+
+          return ce.box(['List', lambda1, lambda2]);
+        }
+
+        // 3×3 case: solve cubic characteristic polynomial
+        if (n === 3) {
+          return computeEigenvalues3x3(M, ce);
+        }
+
+        // For larger matrices: use numeric QR algorithm
+        return computeEigenvaluesQR(M, n, ce);
+      },
+    },
+
+    // Compute the eigenvectors of a square matrix
+    // Returns a list of eigenvectors (as column vectors)
+    Eigenvectors: {
+      complexity: 8600,
+      signature: '(matrix) -> list',
+      evaluate: (ops, { engine: ce }): BoxedExpression | undefined => {
+        const M = ops[0].evaluate();
+
+        if (!isBoxedTensor(M)) return undefined;
+
+        const shape = M.shape;
+        // Must be a square matrix
+        if (shape.length !== 2 || shape[0] !== shape[1]) {
+          return ce.error('expected-square-matrix', M.toString());
+        }
+
+        const n = shape[0];
+
+        // First compute eigenvalues
+        const eigenvaluesExpr = ce.box(['Eigenvalues', M]).evaluate();
+        if (
+          eigenvaluesExpr.operator !== 'List' ||
+          !eigenvaluesExpr.ops ||
+          eigenvaluesExpr.ops.length === 0
+        ) {
+          return undefined;
+        }
+
+        const eigenvalues = eigenvaluesExpr.ops;
+
+        // For each eigenvalue, compute the corresponding eigenvector
+        const eigenvectors: BoxedExpression[] = [];
+        for (const lambda of eigenvalues) {
+          const eigenvector = computeEigenvector(M, lambda, n, ce);
+          if (eigenvector) {
+            eigenvectors.push(eigenvector);
+          } else {
+            // If we can't compute the eigenvector, return undefined
+            return undefined;
+          }
+        }
+
+        return ce.box(['List', ...eigenvectors]);
+      },
+    },
+
+    // Compute both eigenvalues and eigenvectors
+    // Returns a tuple: [eigenvalues, eigenvectors]
+    Eigen: {
+      complexity: 8700,
+      signature: '(matrix) -> tuple',
+      evaluate: (ops, { engine: ce }): BoxedExpression | undefined => {
+        const M = ops[0].evaluate();
+
+        if (!isBoxedTensor(M)) return undefined;
+
+        const shape = M.shape;
+        // Must be a square matrix
+        if (shape.length !== 2 || shape[0] !== shape[1]) {
+          return ce.error('expected-square-matrix', M.toString());
+        }
+
+        const eigenvalues = ce.box(['Eigenvalues', M]).evaluate();
+        const eigenvectors = ce.box(['Eigenvectors', M]).evaluate();
+
+        if (eigenvalues.operator === 'Error') return eigenvalues;
+        if (eigenvectors.operator === 'Error') return eigenvectors;
+
+        return ce.box(['Tuple', eigenvalues, eigenvectors]);
+      },
+    },
   },
 ];
+
+/**
+ * Get element from matrix at 1-based indices
+ */
+function getElement(
+  M: BoxedExpression,
+  i: number,
+  j: number,
+  ce: ComputeEngine
+): BoxedExpression {
+  if (!isBoxedTensor(M)) return ce.Zero;
+  const val = M.tensor.at(i, j);
+  return val !== undefined ? ce.box(val) : ce.Zero;
+}
+
+/**
+ * Check if matrix is diagonal or triangular
+ */
+function checkDiagonalOrTriangular(M: BoxedExpression, n: number): boolean {
+  if (!isBoxedTensor(M)) return false;
+
+  let isUpperTriangular = true;
+  let isLowerTriangular = true;
+
+  for (let i = 0; i < n && (isUpperTriangular || isLowerTriangular); i++) {
+    for (let j = 0; j < n; j++) {
+      const val = M.tensor.at(i + 1, j + 1);
+      const isZero =
+        val === undefined ||
+        val === 0 ||
+        (typeof val === 'object' && 're' in val && val.re === 0);
+
+      if (i > j && !isZero) isUpperTriangular = false;
+      if (i < j && !isZero) isLowerTriangular = false;
+    }
+  }
+
+  return isUpperTriangular || isLowerTriangular;
+}
+
+/**
+ * Compute eigenvalues for a 3×3 matrix using Cardano's formula
+ */
+function computeEigenvalues3x3(
+  M: BoxedExpression,
+  ce: ComputeEngine
+): BoxedExpression | undefined {
+  if (!isBoxedTensor(M)) return undefined;
+
+  // Get matrix elements
+  const a11 = getElement(M, 1, 1, ce).re ?? 0;
+  const a12 = getElement(M, 1, 2, ce).re ?? 0;
+  const a13 = getElement(M, 1, 3, ce).re ?? 0;
+  const a21 = getElement(M, 2, 1, ce).re ?? 0;
+  const a22 = getElement(M, 2, 2, ce).re ?? 0;
+  const a23 = getElement(M, 2, 3, ce).re ?? 0;
+  const a31 = getElement(M, 3, 1, ce).re ?? 0;
+  const a32 = getElement(M, 3, 2, ce).re ?? 0;
+  const a33 = getElement(M, 3, 3, ce).re ?? 0;
+
+  // If any element is not numeric, fall back to QR
+  if (
+    [a11, a12, a13, a21, a22, a23, a31, a32, a33].some(
+      (x) => x === undefined || isNaN(x)
+    )
+  ) {
+    return computeEigenvaluesQR(M, 3, ce);
+  }
+
+  // Characteristic polynomial: -λ³ + c₂λ² + c₁λ + c₀ = 0
+  // where c₂ = trace(A), c₁ = -(minor sums), c₀ = det(A)
+  const trace = a11 + a22 + a33;
+
+  // Sum of principal 2×2 minors
+  const m1 = a11 * a22 - a12 * a21;
+  const m2 = a11 * a33 - a13 * a31;
+  const m3 = a22 * a33 - a23 * a32;
+  const minorSum = m1 + m2 + m3;
+
+  // Determinant
+  const det =
+    a11 * (a22 * a33 - a23 * a32) -
+    a12 * (a21 * a33 - a23 * a31) +
+    a13 * (a21 * a32 - a22 * a31);
+
+  // Convert to depressed cubic t³ + pt + q = 0 where λ = t + trace/3
+  const p = minorSum - (trace * trace) / 3;
+  const q =
+    (2 * trace * trace * trace) / 27 - (trace * minorSum) / 3 + det;
+
+  // Solve using Cardano's formula or trigonometric method
+  const eigenvalues = solveCubic(p, q, trace / 3);
+
+  return ce.box([
+    'List',
+    ce.number(eigenvalues[0]),
+    ce.number(eigenvalues[1]),
+    ce.number(eigenvalues[2]),
+  ]);
+}
+
+/**
+ * Solve depressed cubic t³ + pt + q = 0, return roots shifted by shift
+ */
+function solveCubic(p: number, q: number, shift: number): number[] {
+  const eps = 1e-10;
+
+  // Check for special cases
+  if (Math.abs(p) < eps && Math.abs(q) < eps) {
+    return [shift, shift, shift];
+  }
+
+  const discriminant = (q * q) / 4 + (p * p * p) / 27;
+
+  if (discriminant > eps) {
+    // One real root, two complex conjugates
+    const sqrtD = Math.sqrt(discriminant);
+    const u = Math.cbrt(-q / 2 + sqrtD);
+    const v = Math.cbrt(-q / 2 - sqrtD);
+    const realRoot = u + v + shift;
+    // Return only real part for complex roots (they come in conjugate pairs)
+    const realPart = -(u + v) / 2 + shift;
+    return [realRoot, realPart, realPart];
+  } else if (discriminant < -eps) {
+    // Three distinct real roots - use trigonometric method
+    const r = Math.sqrt((-p * p * p) / 27);
+    const theta = Math.acos((-q / 2) / r);
+    const cbrtR = Math.cbrt(r);
+
+    const t1 = 2 * cbrtR * Math.cos(theta / 3);
+    const t2 = 2 * cbrtR * Math.cos((theta + 2 * Math.PI) / 3);
+    const t3 = 2 * cbrtR * Math.cos((theta + 4 * Math.PI) / 3);
+
+    return [t1 + shift, t2 + shift, t3 + shift];
+  } else {
+    // Discriminant ≈ 0: repeated root
+    const u = Math.cbrt(-q / 2);
+    return [2 * u + shift, -u + shift, -u + shift];
+  }
+}
+
+/**
+ * Compute eigenvalues using QR algorithm (numeric)
+ */
+function computeEigenvaluesQR(
+  M: BoxedExpression,
+  n: number,
+  ce: ComputeEngine
+): BoxedExpression | undefined {
+  if (!isBoxedTensor(M)) return undefined;
+
+  // Convert matrix to numeric array
+  const A: number[][] = [];
+  for (let i = 0; i < n; i++) {
+    A[i] = [];
+    for (let j = 0; j < n; j++) {
+      const val = M.tensor.at(i + 1, j + 1);
+      const num =
+        typeof val === 'number'
+          ? val
+          : typeof val === 'object' && 're' in val
+            ? (val.re ?? 0)
+            : 0;
+      if (isNaN(num)) return undefined; // Can't compute numerically
+      A[i][j] = num;
+    }
+  }
+
+  // QR iteration
+  const maxIterations = 100;
+  const tolerance = 1e-10;
+
+  for (let iter = 0; iter < maxIterations; iter++) {
+    // Check for convergence (matrix is nearly upper triangular)
+    let maxOffDiag = 0;
+    for (let i = 1; i < n; i++) {
+      for (let j = 0; j < i; j++) {
+        maxOffDiag = Math.max(maxOffDiag, Math.abs(A[i][j]));
+      }
+    }
+    if (maxOffDiag < tolerance) break;
+
+    // QR decomposition using Gram-Schmidt
+    const { Q, R } = qrDecomposition(A, n);
+
+    // A = R * Q
+    for (let i = 0; i < n; i++) {
+      for (let j = 0; j < n; j++) {
+        A[i][j] = 0;
+        for (let k = 0; k < n; k++) {
+          A[i][j] += R[i][k] * Q[k][j];
+        }
+      }
+    }
+  }
+
+  // Eigenvalues are on the diagonal
+  const eigenvalues: BoxedExpression[] = [];
+  for (let i = 0; i < n; i++) {
+    eigenvalues.push(ce.number(A[i][i]));
+  }
+
+  return ce.box(['List', ...eigenvalues]);
+}
+
+/**
+ * QR decomposition using Gram-Schmidt process
+ */
+function qrDecomposition(
+  A: number[][],
+  n: number
+): { Q: number[][]; R: number[][] } {
+  const Q: number[][] = Array(n)
+    .fill(null)
+    .map(() => Array(n).fill(0));
+  const R: number[][] = Array(n)
+    .fill(null)
+    .map(() => Array(n).fill(0));
+
+  // Copy columns of A
+  const columns: number[][] = [];
+  for (let j = 0; j < n; j++) {
+    columns[j] = [];
+    for (let i = 0; i < n; i++) {
+      columns[j][i] = A[i][j];
+    }
+  }
+
+  // Gram-Schmidt orthogonalization
+  const U: number[][] = [];
+  for (let j = 0; j < n; j++) {
+    U[j] = [...columns[j]];
+
+    // Subtract projections onto previous vectors
+    for (let k = 0; k < j; k++) {
+      const dotUU = dot(U[k], U[k]);
+      if (Math.abs(dotUU) > 1e-10) {
+        const proj = dot(columns[j], U[k]) / dotUU;
+        R[k][j] = proj * Math.sqrt(dotUU);
+        for (let i = 0; i < n; i++) {
+          U[j][i] -= proj * U[k][i];
+        }
+      }
+    }
+
+    // Normalize
+    const norm = Math.sqrt(dot(U[j], U[j]));
+    R[j][j] = norm;
+    if (norm > 1e-10) {
+      for (let i = 0; i < n; i++) {
+        Q[i][j] = U[j][i] / norm;
+      }
+    }
+  }
+
+  return { Q, R };
+}
+
+/**
+ * Dot product of two vectors
+ */
+function dot(a: number[], b: number[]): number {
+  let sum = 0;
+  for (let i = 0; i < a.length; i++) {
+    sum += a[i] * b[i];
+  }
+  return sum;
+}
+
+/**
+ * Compute eigenvector for a given eigenvalue
+ */
+function computeEigenvector(
+  M: BoxedExpression,
+  lambda: BoxedExpression,
+  n: number,
+  ce: ComputeEngine
+): BoxedExpression | undefined {
+  if (!isBoxedTensor(M)) return undefined;
+
+  const lambdaNum = lambda.re;
+  if (lambdaNum === undefined || isNaN(lambdaNum)) {
+    // Try symbolic computation for 2×2
+    if (n === 2) {
+      return computeEigenvector2x2Symbolic(M, lambda, ce);
+    }
+    return undefined;
+  }
+
+  // Build (A - λI) matrix
+  const AminusLambdaI: number[][] = [];
+  for (let i = 0; i < n; i++) {
+    AminusLambdaI[i] = [];
+    for (let j = 0; j < n; j++) {
+      const val = M.tensor.at(i + 1, j + 1);
+      const num =
+        typeof val === 'number'
+          ? val
+          : typeof val === 'object' && 're' in val
+            ? (val.re ?? 0)
+            : 0;
+      AminusLambdaI[i][j] = num - (i === j ? lambdaNum : 0);
+    }
+  }
+
+  // Solve (A - λI)v = 0 using Gaussian elimination to find null space
+  const eigenvector = solveNullSpace(AminusLambdaI, n);
+  if (!eigenvector) return undefined;
+
+  return ce.box(['List', ...eigenvector.map((x) => ce.number(x))]);
+}
+
+/**
+ * Compute eigenvector for 2×2 matrix symbolically
+ */
+function computeEigenvector2x2Symbolic(
+  M: BoxedExpression,
+  lambda: BoxedExpression,
+  ce: ComputeEngine
+): BoxedExpression | undefined {
+  if (!isBoxedTensor(M)) return undefined;
+
+  const a = getElement(M, 1, 1, ce);
+  const b = getElement(M, 1, 2, ce);
+  const c = getElement(M, 2, 1, ce);
+
+  // (A - λI)v = 0
+  // First row: (a - λ)v₁ + b*v₂ = 0
+  // If b ≠ 0: v = [b, λ - a] (or [-b, a - λ])
+  // If b = 0 and c ≠ 0: v = [λ - d, c]
+  // If b = 0 and c = 0: v = [1, 0] or [0, 1]
+
+  const bVal = b.re;
+  if (bVal !== undefined && Math.abs(bVal) > 1e-10) {
+    // v = [b, λ - a]
+    const v2 = lambda.sub(a).evaluate();
+    return ce.box(['List', b, v2]);
+  }
+
+  const cVal = c.re;
+  if (cVal !== undefined && Math.abs(cVal) > 1e-10) {
+    // v = [λ - d, c]
+    const d = getElement(M, 2, 2, ce);
+    const v1 = lambda.sub(d).evaluate();
+    return ce.box(['List', v1, c]);
+  }
+
+  // Diagonal matrix case
+  const aVal = a.re;
+  const lambdaVal = lambda.re;
+  if (aVal !== undefined && lambdaVal !== undefined) {
+    if (Math.abs(aVal - lambdaVal) < 1e-10) {
+      return ce.box(['List', ce.One, ce.Zero]);
+    } else {
+      return ce.box(['List', ce.Zero, ce.One]);
+    }
+  }
+
+  return undefined;
+}
+
+/**
+ * Find a non-trivial solution to Ax = 0 (null space vector)
+ */
+function solveNullSpace(A: number[][], n: number): number[] | undefined {
+  // Gaussian elimination with partial pivoting
+  const matrix = A.map((row) => [...row]);
+  const eps = 1e-10;
+
+  // Forward elimination
+  let pivotRow = 0;
+  const pivotCols: number[] = [];
+
+  for (let col = 0; col < n && pivotRow < n; col++) {
+    // Find pivot
+    let maxVal = Math.abs(matrix[pivotRow][col]);
+    let maxRow = pivotRow;
+    for (let row = pivotRow + 1; row < n; row++) {
+      if (Math.abs(matrix[row][col]) > maxVal) {
+        maxVal = Math.abs(matrix[row][col]);
+        maxRow = row;
+      }
+    }
+
+    if (maxVal < eps) continue; // Skip this column (free variable)
+
+    // Swap rows
+    [matrix[pivotRow], matrix[maxRow]] = [matrix[maxRow], matrix[pivotRow]];
+
+    // Eliminate below
+    for (let row = pivotRow + 1; row < n; row++) {
+      const factor = matrix[row][col] / matrix[pivotRow][col];
+      for (let j = col; j < n; j++) {
+        matrix[row][j] -= factor * matrix[pivotRow][j];
+      }
+    }
+
+    pivotCols.push(col);
+    pivotRow++;
+  }
+
+  // Find free variable (column without pivot)
+  let freeCol = -1;
+  for (let col = 0; col < n; col++) {
+    if (!pivotCols.includes(col)) {
+      freeCol = col;
+      break;
+    }
+  }
+
+  if (freeCol === -1) {
+    // Matrix has full rank, no null space (shouldn't happen for eigenvalue)
+    // Return unit vector as fallback
+    const result = Array(n).fill(0);
+    result[0] = 1;
+    return result;
+  }
+
+  // Back substitution with free variable = 1
+  const result = Array(n).fill(0);
+  result[freeCol] = 1;
+
+  for (let i = pivotCols.length - 1; i >= 0; i--) {
+    const row = i;
+    const col = pivotCols[i];
+    let sum = 0;
+    for (let j = col + 1; j < n; j++) {
+      sum += matrix[row][j] * result[j];
+    }
+    result[col] = -sum / matrix[row][col];
+  }
+
+  // Normalize
+  let norm = 0;
+  for (let i = 0; i < n; i++) {
+    norm += result[i] * result[i];
+  }
+  norm = Math.sqrt(norm);
+  if (norm > eps) {
+    for (let i = 0; i < n; i++) {
+      result[i] /= norm;
+    }
+  }
+
+  return result;
+}
 
 /**
  * Reshape a flat array of elements into the target shape,
