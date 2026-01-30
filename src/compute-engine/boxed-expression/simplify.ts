@@ -118,10 +118,33 @@ function simplifyOperands(
 ): BoxedExpression {
   if (!expr.ops) return expr;
 
-  // For simplification, we want to simplify all operands, even for lazy functions
-  // Don't use holdMap here as it skips lazy functions (which is correct for evaluation
-  // but not for simplification)
-  const simplifiedOps = expr.ops.map((x) => simplify(x, options).at(-1)!.value);
+  const def = expr.operatorDefinition;
+
+  // For scoped functions (Sum, Product), use holdMap but simplify non-body operands
+  if (def?.scoped === true) {
+    const simplifiedOps = expr.ops.map((x, i) => {
+      // Don't simplify the body (first operand) to allow pattern-matching rules to work
+      if (i === 0) return x;
+      // Simplify other operands (like Limits)
+      return simplify(x, options).at(-1)!.value;
+    });
+    return expr.engine.function(expr.operator, simplifiedOps);
+  }
+
+  // For lazy but non-scoped functions (Multiply, Add), we need a balanced approach:
+  // - Respect holdMap for evaluation semantics
+  // - But also simplify Sum/Product operands that result from other simplification rules
+
+  // First get the operands through holdMap
+  const ops = holdMap(expr, (x) => x);
+
+  // Then simplify any Sum/Product operands specifically
+  const simplifiedOps = ops.map((x) => {
+    if (x.operator === 'Sum' || x.operator === 'Product') {
+      return simplify(x, options).at(-1)!.value;
+    }
+    return x;
+  });
 
   return expr.engine.function(expr.operator, simplifiedOps);
 }

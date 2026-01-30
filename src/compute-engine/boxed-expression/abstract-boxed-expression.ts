@@ -31,7 +31,7 @@ import type {
 
 import type { NumericValue } from '../numeric-value/types';
 import type { SmallInteger } from '../numerics/types';
-import { JavaScriptTarget } from '../compilation/javascript-target';
+// Dynamic import for JavaScriptTarget to avoid circular dependency
 import { applicableN1 } from '../function-utils';
 
 import {
@@ -47,9 +47,9 @@ import { serializeLatex } from '../latex-syntax/serializer';
 import type { LatexString, SerializeLatexOptions } from '../latex-syntax/types';
 
 import { toAsciiMath } from './ascii-math';
-import { serializeJson } from './serialize';
+// Dynamic import for serializeJson to avoid circular dependency
 import { cmp, eq, same } from './compare';
-import { expand } from './expand';
+// Dynamic import for expand to avoid circular dependency
 import { CancellationError } from '../../common/interruptible';
 
 /**
@@ -302,6 +302,8 @@ export abstract class _BoxedExpression implements BoxedExpression {
       metadata: defaultOptions.metadata,
     };
 
+    // Dynamic import to avoid circular dependency
+    const { serializeJson } = require('./serialize');
     return serializeJson(this.engine, this, opts);
   }
 
@@ -714,6 +716,8 @@ export abstract class _BoxedExpression implements BoxedExpression {
   }
 
   expand(): BoxedExpression {
+    // Dynamic import to avoid circular dependency
+    const { expand } = require('./expand');
     return expand(this) ?? this;
   }
 
@@ -750,6 +754,8 @@ export abstract class _BoxedExpression implements BoxedExpression {
         );
       }
 
+      // Dynamic import to avoid circular dependency
+      const { JavaScriptTarget } = require('../compilation/javascript-target');
       const jsTarget = new JavaScriptTarget();
       return jsTarget.compileToExecutable(expr, {
         functions: options?.functions,

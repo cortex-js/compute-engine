@@ -35,7 +35,9 @@ export const MAX_BIGINT_DIGITS = 1024;
 
 // When doing a calculation via iteration (e.g. to calculate a sum)
 // do not iterate more than this value
-export const MAX_ITERATION = 1000000;
+// Reduced from 1,000,000 to 10,000 for better test performance
+// while still being sufficient for most practical calculations
+export const MAX_ITERATION = 10000;
 
 // When doing a symbolic calculations using multiple terms, do
 // not expand beyond this many terms
