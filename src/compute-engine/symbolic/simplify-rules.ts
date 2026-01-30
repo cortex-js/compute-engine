@@ -94,7 +94,8 @@ const toZero = (expr: BoxedExpression) => expr.engine.Zero;
 const toOne = (expr: BoxedExpression) => expr.engine.One;
 const toNegativeOne = (expr: BoxedExpression) => expr.engine.NegativeOne;
 const toInfinity = (expr: BoxedExpression) => expr.engine.PositiveInfinity;
-const toNegativeInfinity = (expr: BoxedExpression) => expr.engine.NegativeInfinity;
+const toNegativeInfinity = (expr: BoxedExpression) =>
+  expr.engine.NegativeInfinity;
 
 /**
  * Reduce trigonometric functions by their periodicity.
@@ -238,8 +239,10 @@ function reduceTrigPeriodicity(
  */
 export const SIMPLIFY_RULES: Rule[] = [
   // The Golden Ratio, a constant that can be simplified
-  '\\varphi -> \\frac{1+\\sqrt{5}}{2}',
-
+  {
+    match: { sym: 'GoldenRatio' },
+    replace: ['Divide', ['Add', 1, ['Sqrt', 5]], 2],
+  },
   simplifyRelationalOperator,
 
   simplifySystemOfEquations,
@@ -726,8 +729,7 @@ export const SIMPLIFY_RULES: Rule[] = [
   // ln(x^n) -> n*ln(x) when x is non-negative or n is odd
   {
     match: ['Ln', ['Power', '_x', '_n']],
-    replace: (expr, ids) =>
-      ids._n.mul(expr.engine.function('Ln', [ids._x])),
+    replace: (expr, ids) => ids._n.mul(expr.engine.function('Ln', [ids._x])),
     condition: (ids) =>
       ids._x.isNonNegative === true ||
       ids._n.isOdd === true ||
@@ -1712,8 +1714,7 @@ export const SIMPLIFY_RULES: Rule[] = [
   // Product-to-sum identities
   {
     match: ['Multiply', ['Sin', '_x'], ['Cos', '_x']],
-    replace: (expr, ids) =>
-      expr.engine.function('Sin', [ids._x.mul(2)]).div(2),
+    replace: (expr, ids) => expr.engine.function('Sin', [ids._x.mul(2)]).div(2),
   },
   {
     match: ['Multiply', ['Sin', '_x'], ['Sin', '_y']],

@@ -1,4 +1,11 @@
 /**
+ * Maximum number of elements for which permutations will be generated.
+ * 6! = 720 permutations, which is a reasonable limit.
+ * Beyond this, combinatorial explosion makes permutation-based matching impractical.
+ */
+const MAX_PERMUTATION_ELEMENTS = 6;
+
+/**
  *
  * <!--
  * !@consider?
@@ -26,6 +33,17 @@ export function permutations<T /* , Y extends any = any */>(
   ) => boolean
   // cacheKey?: (T) => Y
 ): ReadonlyArray<ReadonlyArray<T>> {
+  // Guard against combinatorial explosion: n! grows very fast
+  // 7! = 5040, 8! = 40320, 9! = 362880, 10! = 3628800
+  if (xs.length > MAX_PERMUTATION_ELEMENTS) {
+    console.assert(
+      false,
+      `permutations(): input has ${xs.length} elements, which exceeds the limit of ${MAX_PERMUTATION_ELEMENTS}. ` +
+        `This would generate ${factorial(xs.length)} permutations. Returning empty array to prevent memory exhaustion.`
+    );
+    return [];
+  }
+
   const result: ReadonlyArray<T>[] = [];
 
   const permute = (arr: T[], m: T[] = []) => {
@@ -47,6 +65,12 @@ export function permutations<T /* , Y extends any = any */>(
   permute(xs as T[]);
 
   return result;
+}
+
+/** Helper to compute factorial for error messages */
+function factorial(n: number): number {
+  if (n <= 1) return 1;
+  return n * factorial(n - 1);
 }
 
 export function hidePrivateProperties(obj: any) {
