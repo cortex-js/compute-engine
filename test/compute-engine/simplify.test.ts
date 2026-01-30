@@ -1765,6 +1765,94 @@ describe('PYTHAGOREAN IDENTITIES', () => {
     ));
 });
 
+describe('NEGATIVE BASE POWER RULES', () => {
+  // Even integer exponents: (-x)^{even} -> x^{even}
+  test('(-x)^2 = x^2', () =>
+    expect(simplify('(-x)^2')).toMatchInlineSnapshot(`["Square", "x"]`));
+
+  test('(-x)^4 = x^4', () =>
+    expect(simplify('(-x)^4')).toMatchInlineSnapshot(`["Power", "x", 4]`));
+
+  // Odd integer exponents: (-x)^{odd} -> -(x^{odd})
+  test('(-x)^3 = -x^3', () =>
+    expect(simplify('(-x)^3')).toMatchInlineSnapshot(
+      `["Negate", ["Power", "x", 3]]`
+    ));
+
+  test('(-x)^5 = -x^5', () =>
+    expect(simplify('(-x)^5')).toMatchInlineSnapshot(
+      `["Negate", ["Power", "x", 5]]`
+    ));
+
+  // Rational exponents: even/odd -> positive, odd/odd -> negative
+  test('(-x)^{4/3} = x^{4/3}', () =>
+    expect(simplify('(-x)^{4/3}')).toMatchInlineSnapshot(
+      `["Power", "x", ["Rational", 4, 3]]`
+    ));
+
+  test('(-x)^{3/5} = -x^{3/5}', () =>
+    expect(simplify('(-x)^{3/5}')).toMatchInlineSnapshot(
+      `["Negate", ["Power", "x", ["Rational", 3, 5]]]`
+    ));
+});
+
+describe('LOGARITHM COMBINATION RULES', () => {
+  // Addition: ln(x) + ln(y) -> ln(xy)
+  test('ln(x) + ln(y) = ln(xy)', () =>
+    expect(simplify('\\ln(x) + \\ln(y)')).toMatchInlineSnapshot(
+      `["Ln", ["Multiply", "x", "y"]]`
+    ));
+
+  test('ln(a) + ln(b) + ln(c) = ln(abc)', () =>
+    expect(simplify('\\ln(a) + \\ln(b) + \\ln(c)')).toMatchInlineSnapshot(
+      `["Ln", ["Multiply", "a", "b", "c"]]`
+    ));
+
+  // Subtraction: ln(x) - ln(y) -> ln(x/y)
+  test('ln(x) - ln(y) = ln(x/y)', () =>
+    expect(simplify('\\ln(x) - \\ln(y)')).toMatchInlineSnapshot(
+      `["Ln", ["Divide", "x", "y"]]`
+    ));
+
+  test('ln(xy) - ln(x) = ln(y)', () =>
+    expect(simplify('\\ln(xy) - \\ln(x)')).toMatchInlineSnapshot(
+      `["Ln", "y"]`
+    ));
+
+  test('ln(y/x) + ln(x) = ln(y)', () =>
+    expect(simplify('\\ln(y/x) + \\ln(x)')).toMatchInlineSnapshot(
+      `["Ln", "y"]`
+    ));
+
+  // Combined: ln(a) + ln(b) - ln(c) -> ln(ab/c)
+  test('ln(a) + ln(b) - ln(c) = ln(ab/c)', () =>
+    expect(simplify('\\ln(a) + \\ln(b) - \\ln(c)')).toMatchInlineSnapshot(
+      `["Ln", ["Divide", ["Multiply", "a", "b"], "c"]]`
+    ));
+
+  // Log with base: log_c(x) + log_c(y) -> log_c(xy)
+  test('log_2(x) + log_2(y) = log_2(xy)', () =>
+    expect(simplify('\\log_2(x) + \\log_2(y)')).toMatchInlineSnapshot(
+      `["Log", ["Multiply", "x", "y"], 2]`
+    ));
+
+  test('log_2(x) - log_2(y) = log_2(x/y)', () =>
+    expect(simplify('\\log_2(x) - \\log_2(y)')).toMatchInlineSnapshot(
+      `["Log", ["Divide", "x", "y"], 2]`
+    ));
+
+  test('log_c(xy) - log_c(x) = log_c(y)', () =>
+    expect(simplify('\\log_c(xy) - \\log_c(x)')).toMatchInlineSnapshot(
+      `["Log", "y", "c"]`
+    ));
+
+  // Mixed with other terms
+  test('ln(x) + ln(y) + z = z + ln(xy)', () =>
+    expect(simplify('\\ln(x) + \\ln(y) + z')).toMatchInlineSnapshot(
+      `["Add", "z", ["Ln", ["Multiply", "x", "y"]]]`
+    ));
+});
+
 //
 // Fu Test
 //

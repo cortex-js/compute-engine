@@ -58,6 +58,13 @@
   - `log_c(x) - log_c(y)` → `log_c(x/y)`
   - Handles multiple terms: `ln(a) + ln(b) - ln(c)` → `ln(ab/c)`
 
+- **Negative Base Power Simplification**: Added rules to simplify powers with
+  negated bases:
+  - `(-x)^n` → `x^n` when n is even (e.g., `(-x)^4` → `x^4`)
+  - `(-x)^n` → `-x^n` when n is odd (e.g., `(-x)^3` → `-x^3`)
+  - `(-x)^{n/m}` → `x^{n/m}` when n is even and m is odd
+  - `(-x)^{n/m}` → `-x^{n/m}` when both n and m are odd
+
 - **Trigonometric Equation Solving**: The `solve()` method now handles basic
   trigonometric equations:
   - `sin(x) = a` → `x = arcsin(a)` and `x = π - arcsin(a)` (two solutions)

@@ -1,4 +1,5 @@
 import type { BoxedExpression, RuleStep } from '../global-types';
+import { asRational } from '../boxed-expression/numerics';
 
 /**
  * Power simplification rules consolidated from simplify-rules.ts.
@@ -83,6 +84,52 @@ export function simplifyPower(x: BoxedExpression): RuleStep | undefined {
     const exp = x.op2;
 
     if (!base || !exp) return undefined;
+
+    // (-x)^n -> x^n when n is even, (-x)^n -> -x^n when n is odd
+    if (base.operator === 'Negate' && base.op1) {
+      const innerBase = base.op1;
+
+      // Handle integer exponents
+      if (exp.isEven === true) {
+        // (-x)^{even} -> x^{even}
+        return {
+          value: innerBase.pow(exp),
+          because: '(-x)^n -> x^n when n is even',
+        };
+      }
+      if (exp.isOdd === true) {
+        // (-x)^{odd} -> -(x^{odd})
+        return {
+          value: innerBase.pow(exp).neg(),
+          because: '(-x)^n -> -x^n when n is odd',
+        };
+      }
+
+      // Handle rational exponents n/m where we can determine parity
+      // Rational exponents may be stored as Number with rational numericValue
+      const rat = asRational(exp);
+      if (rat) {
+        const [num, denom] = rat;
+        const numIsEven = num % 2 === 0;
+        const numIsOdd = num % 2 !== 0;
+        const denomIsOdd = denom % 2 !== 0;
+
+        // (-x)^{even/odd} -> x^{even/odd} (e.g., (-x)^{4/3} -> x^{4/3})
+        if (numIsEven && denomIsOdd) {
+          return {
+            value: innerBase.pow(exp),
+            because: '(-x)^{n/m} -> x^{n/m} when n is even and m is odd',
+          };
+        }
+        // (-x)^{odd/odd} -> -(x^{odd/odd}) (e.g., (-x)^{3/5} -> -(x^{3/5}))
+        if (numIsOdd && denomIsOdd) {
+          return {
+            value: innerBase.pow(exp).neg(),
+            because: '(-x)^{n/m} -> -x^{n/m} when n and m are odd',
+          };
+        }
+      }
+    }
 
     // (x^n)^m -> x^{n*m} under certain conditions
     if (base.operator === 'Power') {
