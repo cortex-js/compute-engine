@@ -465,12 +465,12 @@ export const SIMPLIFY_RULES: Rule[] = [
     // return derivative(fn, degree);
     if (x.nops === 2)
       return {
-        value: ce.function('Derivative', [f.simplify(), degree]),
+        value: ce._fn('Derivative', [f.simplify(), degree]),
         because: 'derivative',
       };
     if (x.nops === 1) {
       return {
-        value: ce.function('Derivative', [f.simplify()]),
+        value: ce._fn('Derivative', [f.simplify()]),
         because: 'derivative',
       };
     }
@@ -684,7 +684,7 @@ export const SIMPLIFY_RULES: Rule[] = [
     // Even root: return |x|
     if (rootIndex.isEven === true) {
       return {
-        value: x.engine.function('Abs', [base]),
+        value: x.engine._fn('Abs', [base]),
         because: 'root(x^n, n) where n even',
       };
     }
@@ -817,7 +817,7 @@ export const SIMPLIFY_RULES: Rule[] = [
   // ln(x^n) -> n*ln(x) when x is non-negative or n is odd
   {
     match: ['Ln', ['Power', '_x', '_n']],
-    replace: (expr, ids) => ids._n.mul(expr.engine.function('Ln', [ids._x])),
+    replace: (expr, ids) => ids._n.mul(expr.engine._fn('Ln', [ids._x])),
     condition: (ids) =>
       ids._x.isNonNegative === true ||
       ids._n.isOdd === true ||
@@ -828,7 +828,7 @@ export const SIMPLIFY_RULES: Rule[] = [
     match: ['Ln', ['Power', '_x', '_n']],
     replace: (expr, ids) =>
       ids._n.mul(
-        expr.engine.function('Ln', [expr.engine.function('Abs', [ids._x])])
+        expr.engine._fn('Ln', [expr.engine._fn('Abs', [ids._x])])
       ),
     condition: (ids) => ids._n.isEven === true,
   },
@@ -836,7 +836,7 @@ export const SIMPLIFY_RULES: Rule[] = [
   {
     match: ['Log', ['Power', '_x', '_n'], '_c'],
     replace: (expr, ids) =>
-      ids._n.mul(expr.engine.function('Log', [ids._x, ids._c])),
+      ids._n.mul(expr.engine._fn('Log', [ids._x, ids._c])),
     condition: (ids) =>
       ids._x.isNonNegative === true ||
       ids._n.isOdd === true ||
@@ -847,8 +847,8 @@ export const SIMPLIFY_RULES: Rule[] = [
     match: ['Log', ['Power', '_x', '_n'], '_c'],
     replace: (expr, ids) =>
       ids._n.mul(
-        expr.engine.function('Log', [
-          expr.engine.function('Abs', [ids._x]),
+        expr.engine._fn('Log', [
+          expr.engine._fn('Abs', [ids._x]),
           ids._c,
         ])
       ),
@@ -858,7 +858,7 @@ export const SIMPLIFY_RULES: Rule[] = [
   {
     match: ['Log', ['Power', '_x', ['Divide', '_n', '_k']], '_c'],
     replace: (expr, ids) =>
-      ids._n.div(ids._k).mul(expr.engine.function('Log', [ids._x, ids._c])),
+      ids._n.div(ids._k).mul(expr.engine._fn('Log', [ids._x, ids._c])),
     condition: (ids) => ids._x.isNonNegative === true || ids._n.isOdd === true,
   },
 
@@ -916,24 +916,24 @@ export const SIMPLIFY_RULES: Rule[] = [
   // ln(x) + ln(y) -> ln(x*y) (assumes negative arguments are allowed)
   {
     match: ['Add', ['Ln', '_x'], ['Ln', '_y']],
-    replace: (expr, ids) => expr.engine.function('Ln', [ids._x.mul(ids._y)]),
+    replace: (expr, ids) => expr.engine._fn('Ln', [ids._x.mul(ids._y)]),
   },
   // ln(x) - ln(y) -> ln(x/y)
   {
     match: ['Subtract', ['Ln', '_x'], ['Ln', '_y']],
-    replace: (expr, ids) => expr.engine.function('Ln', [ids._x.div(ids._y)]),
+    replace: (expr, ids) => expr.engine._fn('Ln', [ids._x.div(ids._y)]),
   },
   // e^(ln(x)+y) -> x*e^y
   {
     match: ['Power', 'ExponentialE', ['Add', ['Ln', '_x'], '_y']],
     replace: (expr, ids) =>
-      ids._x.mul(expr.engine.function('Exp', [ids._y])),
+      ids._x.mul(expr.engine._fn('Exp', [ids._y])),
   },
   // e^(ln(x)-y) -> x/e^y
   {
     match: ['Power', 'ExponentialE', ['Subtract', ['Ln', '_x'], '_y']],
     replace: (expr, ids) =>
-      ids._x.div(expr.engine.function('Exp', [ids._y])),
+      ids._x.div(expr.engine._fn('Exp', [ids._y])),
   },
   // e^(ln(x)*y) -> x^y
   {
@@ -951,19 +951,19 @@ export const SIMPLIFY_RULES: Rule[] = [
   {
     match: ['Ln', ['Multiply', ['Power', 'ExponentialE', '_x'], '_y']],
     replace: (expr, ids) =>
-      ids._x.add(expr.engine.function('Ln', [ids._y])),
+      ids._x.add(expr.engine._fn('Ln', [ids._y])),
   },
   // ln(e^x/y) -> x-ln(y)
   {
     match: ['Ln', ['Divide', ['Power', 'ExponentialE', '_x'], '_y']],
     replace: (expr, ids) =>
-      ids._x.sub(expr.engine.function('Ln', [ids._y])),
+      ids._x.sub(expr.engine._fn('Ln', [ids._y])),
   },
   // ln(y/e^x) -> ln(y)-x
   {
     match: ['Ln', ['Divide', '_y', ['Power', 'ExponentialE', '_x']]],
     replace: (expr, ids) =>
-      expr.engine.function('Ln', [ids._y]).sub(ids._x),
+      expr.engine._fn('Ln', [ids._y]).sub(ids._x),
   },
   {
     match: ['Ln', 0],
@@ -980,13 +980,13 @@ export const SIMPLIFY_RULES: Rule[] = [
   {
     match: ['Add', ['Log', '_x', '_c'], ['Log', '_y', '_c']],
     replace: (expr, ids) =>
-      expr.engine.function('Log', [ids._x.mul(ids._y), ids._c]),
+      expr.engine._fn('Log', [ids._x.mul(ids._y), ids._c]),
   },
   // log_c(x) - log_c(y) -> log_c(x/y)
   {
     match: ['Subtract', ['Log', '_x', '_c'], ['Log', '_y', '_c']],
     replace: (expr, ids) =>
-      expr.engine.function('Log', [ids._x.div(ids._y), ids._c]),
+      expr.engine._fn('Log', [ids._x.div(ids._y), ids._c]),
   },
   // log_c(c^x) -> x
   { match: ['Log', ['Power', '_c', '_x'], '_c'], replace: '_x' },
@@ -1008,19 +1008,19 @@ export const SIMPLIFY_RULES: Rule[] = [
   {
     match: ['Log', ['Multiply', ['Power', '_c', '_x'], '_y'], '_c'],
     replace: (expr, ids) =>
-      ids._x.add(expr.engine.function('Log', [ids._y, ids._c])),
+      ids._x.add(expr.engine._fn('Log', [ids._y, ids._c])),
   },
   // log_c(c^x/y) -> x - log_c(y)
   {
     match: ['Log', ['Divide', ['Power', '_c', '_x'], '_y'], '_c'],
     replace: (expr, ids) =>
-      ids._x.sub(expr.engine.function('Log', [ids._y, ids._c])),
+      ids._x.sub(expr.engine._fn('Log', [ids._y, ids._c])),
   },
   // log_c(y/c^x) -> log_c(y) - x
   {
     match: ['Log', ['Divide', '_y', ['Power', '_c', '_x']], '_c'],
     replace: (expr, ids) =>
-      expr.engine.function('Log', [ids._y, ids._c]).sub(ids._x),
+      expr.engine._fn('Log', [ids._y, ids._c]).sub(ids._x),
   },
   // c^(log_c(x)+y) -> x*c^y
   {
@@ -1038,7 +1038,7 @@ export const SIMPLIFY_RULES: Rule[] = [
   {
     match: ['Log', '_a', ['Divide', 1, '_c']],
     replace: (expr, ids) =>
-      expr.engine.function('Log', [ids._a, ids._c]).neg(),
+      expr.engine._fn('Log', [ids._a, ids._c]).neg(),
   },
   // log_c(a) * ln(a) -> ln(c) - note: this seems mathematically incorrect, skipping
   // log_c(a) / log_c(b) -> ln(a) / ln(b)
@@ -1046,14 +1046,14 @@ export const SIMPLIFY_RULES: Rule[] = [
     match: ['Divide', ['Log', '_a', '_c'], ['Log', '_b', '_c']],
     replace: (expr, ids) =>
       expr.engine
-        .function('Ln', [ids._a])
-        .div(expr.engine.function('Ln', [ids._b])),
+        ._fn('Ln', [ids._a])
+        .div(expr.engine._fn('Ln', [ids._b])),
   },
   // log_c(a) / ln(a) -> 1/ln(c)
   {
     match: ['Divide', ['Log', '_a', '_c'], ['Ln', '_a']],
     replace: (expr, ids) =>
-      expr.engine.One.div(expr.engine.function('Ln', [ids._c])),
+      expr.engine.One.div(expr.engine._fn('Ln', [ids._c])),
   },
   // ln(a) / log_c(a) -> ln(c)
   { match: ['Divide', ['Ln', '_a'], ['Log', '_a', '_c']], replace: ['Ln', '_c'] },
@@ -1074,13 +1074,13 @@ export const SIMPLIFY_RULES: Rule[] = [
   {
     match: ['Abs', ['Multiply', '_x', '_y']],
     replace: (expr, ids) =>
-      ids._x.mul(expr.engine.function('Abs', [ids._y])),
+      ids._x.mul(expr.engine._fn('Abs', [ids._y])),
     condition: (ids) => ids._x.isNonNegative === true,
   },
   {
     match: ['Abs', ['Multiply', '_x', '_y']],
     replace: (expr, ids) =>
-      ids._x.neg().mul(expr.engine.function('Abs', [ids._y])),
+      ids._x.neg().mul(expr.engine._fn('Abs', [ids._y])),
     condition: (ids) => ids._x.isNonPositive === true,
   },
   // |xy| -> |x||y|
@@ -1088,16 +1088,16 @@ export const SIMPLIFY_RULES: Rule[] = [
     match: ['Abs', ['Multiply', '_x', '_y']],
     replace: (expr, ids) =>
       expr.engine
-        .function('Abs', [ids._x])
-        .mul(expr.engine.function('Abs', [ids._y])),
+        ._fn('Abs', [ids._x])
+        .mul(expr.engine._fn('Abs', [ids._y])),
   },
   // |x/y| -> |x|/|y|
   {
     match: ['Abs', ['Divide', '_x', '_y']],
     replace: (expr, ids) =>
       expr.engine
-        .function('Abs', [ids._x])
-        .div(expr.engine.function('Abs', [ids._y])),
+        ._fn('Abs', [ids._x])
+        .div(expr.engine._fn('Abs', [ids._y])),
   },
   // |x|^n -> x^n when n is even
   {
@@ -1115,14 +1115,14 @@ export const SIMPLIFY_RULES: Rule[] = [
   {
     match: ['Abs', ['Power', '_x', '_n']],
     replace: (expr, ids) =>
-      expr.engine.function('Abs', [ids._x]).pow(ids._n),
+      expr.engine._fn('Abs', [ids._x]).pow(ids._n),
     condition: (id) => id._n.isOdd === true || id._n.isRational === false,
   },
   // |x^(n/m)| -> |x|^(n/m) when n is odd or m is integer
   {
     match: ['Abs', ['Power', '_x', ['Divide', '_n', '_m']]],
     replace: (expr, ids) =>
-      expr.engine.function('Abs', [ids._x]).pow(ids._n.div(ids._m)),
+      expr.engine._fn('Abs', [ids._x]).pow(ids._n.div(ids._m)),
     condition: (id) => id._n.isOdd === true || id._m.isInteger === true,
   },
 
@@ -1130,28 +1130,28 @@ export const SIMPLIFY_RULES: Rule[] = [
   {
     match: ['Abs', ['Divide', '_x', '_y']],
     replace: (expr, ids) =>
-      ids._x.div(expr.engine.function('Abs', [ids._y])),
+      ids._x.div(expr.engine._fn('Abs', [ids._y])),
     condition: (ids) => ids._x.isNonNegative === true,
   },
   // |x/y| -> -x/|y| when x is non-positive
   {
     match: ['Abs', ['Divide', '_x', '_y']],
     replace: (expr, ids) =>
-      ids._x.neg().div(expr.engine.function('Abs', [ids._y])),
+      ids._x.neg().div(expr.engine._fn('Abs', [ids._y])),
     condition: (ids) => ids._x.isNonPositive === true,
   },
   // |x/y| -> |x|/y when y is non-negative
   {
     match: ['Abs', ['Divide', '_x', '_y']],
     replace: (expr, ids) =>
-      expr.engine.function('Abs', [ids._x]).div(ids._y),
+      expr.engine._fn('Abs', [ids._x]).div(ids._y),
     condition: (ids) => ids._y.isNonNegative === true,
   },
   // |x/y| -> -|x|/y when y is non-positive
   {
     match: ['Abs', ['Divide', '_x', '_y']],
     replace: (expr, ids) =>
-      expr.engine.function('Abs', [ids._x]).neg().div(ids._y),
+      expr.engine._fn('Abs', [ids._x]).neg().div(ids._y),
     condition: (ids) => ids._y.isNonPositive === true,
   },
 
@@ -1168,68 +1168,68 @@ export const SIMPLIFY_RULES: Rule[] = [
   {
     match: ['Abs', ['Csc', '_x']],
     replace: (expr, ids) =>
-      expr.engine.function('Csc', [expr.engine.function('Abs', [ids._x])]),
+      expr.engine._fn('Csc', [expr.engine._fn('Abs', [ids._x])]),
   },
   {
     match: ['Abs', ['Arcsin', '_x']],
     replace: (expr, ids) =>
-      expr.engine.function('Arcsin', [expr.engine.function('Abs', [ids._x])]),
+      expr.engine._fn('Arcsin', [expr.engine._fn('Abs', [ids._x])]),
   },
   {
     match: ['Abs', ['Arctan', '_x']],
     replace: (expr, ids) =>
-      expr.engine.function('Arctan', [expr.engine.function('Abs', [ids._x])]),
+      expr.engine._fn('Arctan', [expr.engine._fn('Abs', [ids._x])]),
   },
   {
     match: ['Abs', ['Arccot', '_x']],
     replace: (expr, ids) =>
-      expr.engine.function('Arccot', [expr.engine.function('Abs', [ids._x])]),
+      expr.engine._fn('Arccot', [expr.engine._fn('Abs', [ids._x])]),
   },
   {
     match: ['Abs', ['Arccsc', '_x']],
     replace: (expr, ids) =>
-      expr.engine.function('Arccsc', [expr.engine.function('Abs', [ids._x])]),
+      expr.engine._fn('Arccsc', [expr.engine._fn('Abs', [ids._x])]),
   },
   //Odd Hyperbolic Trig Functions
   {
     match: ['Abs', ['Sinh', '_x']],
     replace: (expr, ids) =>
-      expr.engine.function('Sinh', [expr.engine.function('Abs', [ids._x])]),
+      expr.engine._fn('Sinh', [expr.engine._fn('Abs', [ids._x])]),
   },
   {
     match: ['Abs', ['Tanh', '_x']],
     replace: (expr, ids) =>
-      expr.engine.function('Tanh', [expr.engine.function('Abs', [ids._x])]),
+      expr.engine._fn('Tanh', [expr.engine._fn('Abs', [ids._x])]),
   },
   {
     match: ['Abs', ['Coth', '_x']],
     replace: (expr, ids) =>
-      expr.engine.function('Coth', [expr.engine.function('Abs', [ids._x])]),
+      expr.engine._fn('Coth', [expr.engine._fn('Abs', [ids._x])]),
   },
   {
     match: ['Abs', ['Csch', '_x']],
     replace: (expr, ids) =>
-      expr.engine.function('Csch', [expr.engine.function('Abs', [ids._x])]),
+      expr.engine._fn('Csch', [expr.engine._fn('Abs', [ids._x])]),
   },
   {
     match: ['Abs', ['Arsinh', '_x']],
     replace: (expr, ids) =>
-      expr.engine.function('Arsinh', [expr.engine.function('Abs', [ids._x])]),
+      expr.engine._fn('Arsinh', [expr.engine._fn('Abs', [ids._x])]),
   },
   {
     match: ['Abs', ['Artanh', '_x']],
     replace: (expr, ids) =>
-      expr.engine.function('Artanh', [expr.engine.function('Abs', [ids._x])]),
+      expr.engine._fn('Artanh', [expr.engine._fn('Abs', [ids._x])]),
   },
   {
     match: ['Abs', ['Arcoth', '_x']],
     replace: (expr, ids) =>
-      expr.engine.function('Arcoth', [expr.engine.function('Abs', [ids._x])]),
+      expr.engine._fn('Arcoth', [expr.engine._fn('Abs', [ids._x])]),
   },
   {
     match: ['Abs', ['Arcsch', '_x']],
     replace: (expr, ids) =>
-      expr.engine.function('Arcsch', [expr.engine.function('Abs', [ids._x])]),
+      expr.engine._fn('Arcsch', [expr.engine._fn('Abs', [ids._x])]),
   },
 
   //Negative Exponents in Denominator
@@ -1673,22 +1673,22 @@ export const SIMPLIFY_RULES: Rule[] = [
   // Product-to-sum identities
   {
     match: ['Multiply', ['Sin', '_x'], ['Cos', '_x']],
-    replace: (expr, ids) => expr.engine.function('Sin', [ids._x.mul(2)]).div(2),
+    replace: (expr, ids) => expr.engine._fn('Sin', [ids._x.mul(2)]).div(2),
   },
   {
     match: ['Multiply', ['Sin', '_x'], ['Sin', '_y']],
     replace: (expr, ids) =>
       expr.engine
-        .function('Cos', [ids._x.sub(ids._y)])
-        .sub(expr.engine.function('Cos', [ids._x.add(ids._y)]))
+        ._fn('Cos', [ids._x.sub(ids._y)])
+        .sub(expr.engine._fn('Cos', [ids._x.add(ids._y)]))
         .div(2),
   },
   {
     match: ['Multiply', ['Cos', '_x'], ['Cos', '_y']],
     replace: (expr, ids) =>
       expr.engine
-        .function('Cos', [ids._x.sub(ids._y)])
-        .add(expr.engine.function('Cos', [ids._x.add(ids._y)]))
+        ._fn('Cos', [ids._x.sub(ids._y)])
+        .add(expr.engine._fn('Cos', [ids._x.add(ids._y)]))
         .div(2),
   },
   {
@@ -2246,7 +2246,7 @@ function simplifyRelationalOperator(
 
   const op1 = expr.op1.simplify();
   const op2 = expr.op2.simplify();
-  expr = ce.function(expr.operator, [op1, op2]);
+  expr = ce._fn(expr.operator, [op1, op2]);
 
   //
   // 2/ Try to factor terms across the relational operator
@@ -2258,7 +2258,7 @@ function simplifyRelationalOperator(
     // Try f(x) < g(x) -> f(x) - g(x) < 0
     if (!expr.op2.is(0)) {
       const alt = factor(
-        ce.function(expr.operator, [expr.op1.sub(expr.op2), ce.Zero])
+        ce._fn(expr.operator, [expr.op1.sub(expr.op2), ce.Zero])
       );
       // Pick the cheapest (simplest) of the two
       if (ce.costFunction(alt) < ce.costFunction(expr)) expr = alt;
