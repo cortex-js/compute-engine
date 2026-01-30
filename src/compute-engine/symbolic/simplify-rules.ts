@@ -858,10 +858,7 @@ export const SIMPLIFY_RULES: Rule[] = [
     replace: (expr, ids) => ids._x.pow(expr.engine.One.div(ids._y)),
   },
   // e^ln(x) -> x
-  {
-    match: ['Power', 'ExponentialE', ['Ln', '_x']],
-    replace: (expr, ids) => ids._x,
-  },
+  { match: ['Power', 'ExponentialE', ['Ln', '_x']], replace: '_x' },
   // ln(e^x*y) -> x+ln(y)
   {
     match: ['Ln', ['Multiply', ['Power', 'ExponentialE', '_x'], '_y']],
@@ -904,23 +901,11 @@ export const SIMPLIFY_RULES: Rule[] = [
       expr.engine.function('Log', [ids._x.div(ids._y), ids._c]),
   },
   // log_c(c^x) -> x
-  {
-    match: ['Log', ['Power', '_c', '_x'], '_c'],
-    replace: (expr, ids) => ids._x,
-  },
-  {
-    match: ['Log', '_c', '_c'],
-    replace: toOne,
-  },
-  {
-    match: ['Log', 0, '_c'],
-    replace: toNaN,
-  },
+  { match: ['Log', ['Power', '_c', '_x'], '_c'], replace: '_x' },
+  { match: ['Log', '_c', '_c'], replace: toOne },
+  { match: ['Log', 0, '_c'], replace: toNaN },
   // c^log_c(x) -> x
-  {
-    match: ['Power', '_c', ['Log', '_x', '_c']],
-    replace: (expr, ids) => ids._x,
-  },
+  { match: ['Power', '_c', ['Log', '_x', '_c']], replace: '_x' },
   // c^(log_c(x)*y) -> x^y
   {
     match: ['Power', '_c', ['Multiply', ['Log', '_x', '_c'], '_y']],
@@ -983,25 +968,19 @@ export const SIMPLIFY_RULES: Rule[] = [
       expr.engine.One.div(expr.engine.function('Ln', [ids._c])),
   },
   // ln(a) / log_c(a) -> ln(c)
-  {
-    match: ['Divide', ['Ln', '_a'], ['Log', '_a', '_c']],
-    replace: (expr, ids) => expr.engine.function('Ln', [ids._c]),
-  },
+  { match: ['Divide', ['Ln', '_a'], ['Log', '_a', '_c']], replace: ['Ln', '_c'] },
 
   //Absolute Value
   // |-x| -> |x|
-  {
-    match: ['Abs', ['Negate', '_x']],
-    replace: (expr, ids) => expr.engine.function('Abs', [ids._x]),
-  },
+  { match: ['Abs', ['Negate', '_x']], replace: ['Abs', '_x'] },
   {
     match: ['Abs', '_x'],
-    replace: (expr, ids) => ids._x,
+    replace: '_x',
     condition: (ids) => ids._x.isNonNegative === true,
   },
   {
     match: ['Abs', '_x'],
-    replace: (expr, ids) => ids._x.neg(),
+    replace: ['Negate', '_x'],
     condition: (ids) => ids._x.isNonPositive === true,
   },
   {
@@ -1089,39 +1068,15 @@ export const SIMPLIFY_RULES: Rule[] = [
   },
 
   // Even functions: f(|x|) -> f(x)
-  {
-    match: ['Cos', ['Abs', '_x']],
-    replace: (expr, ids) => expr.engine.function('Cos', [ids._x]),
-  },
-  {
-    match: ['Sec', ['Abs', '_x']],
-    replace: (expr, ids) => expr.engine.function('Sec', [ids._x]),
-  },
-  {
-    match: ['Cosh', ['Abs', '_x']],
-    replace: (expr, ids) => expr.engine.function('Cosh', [ids._x]),
-  },
-  {
-    match: ['Sech', ['Abs', '_x']],
-    replace: (expr, ids) => expr.engine.function('Sech', [ids._x]),
-  },
+  { match: ['Cos', ['Abs', '_x']], replace: ['Cos', '_x'] },
+  { match: ['Sec', ['Abs', '_x']], replace: ['Sec', '_x'] },
+  { match: ['Cosh', ['Abs', '_x']], replace: ['Cosh', '_x'] },
+  { match: ['Sech', ['Abs', '_x']], replace: ['Sech', '_x'] },
 
   // Odd Trig Functions: |f(x)| -> f(|x|)
-  {
-    match: ['Abs', ['Sin', '_x']],
-    replace: (expr, ids) =>
-      expr.engine.function('Sin', [expr.engine.function('Abs', [ids._x])]),
-  },
-  {
-    match: ['Abs', ['Tan', '_x']],
-    replace: (expr, ids) =>
-      expr.engine.function('Tan', [expr.engine.function('Abs', [ids._x])]),
-  },
-  {
-    match: ['Abs', ['Cot', '_x']],
-    replace: (expr, ids) =>
-      expr.engine.function('Cot', [expr.engine.function('Abs', [ids._x])]),
-  },
+  { match: ['Abs', ['Sin', '_x']], replace: ['Sin', ['Abs', '_x']] },
+  { match: ['Abs', ['Tan', '_x']], replace: ['Tan', ['Abs', '_x']] },
+  { match: ['Abs', ['Cot', '_x']], replace: ['Cot', ['Abs', '_x']] },
   {
     match: ['Abs', ['Csc', '_x']],
     replace: (expr, ids) =>
@@ -1356,24 +1311,12 @@ export const SIMPLIFY_RULES: Rule[] = [
   { match: ['Arccos', 'PositiveInfinity'], replace: toNaN },
   { match: ['Arcsin', 'NegativeInfinity'], replace: toNaN },
   { match: ['Arccos', 'NegativeInfinity'], replace: toNaN },
-  {
-    match: ['Arctan', 'PositiveInfinity'],
-    replace: (expr) => expr.engine.Pi.div(2),
-  },
-  {
-    match: ['Arctan', 'NegativeInfinity'],
-    replace: (expr) => expr.engine.Pi.div(2).neg(),
-  },
+  { match: ['Arctan', 'PositiveInfinity'], replace: ['Divide', 'Pi', 2] },
+  { match: ['Arctan', 'NegativeInfinity'], replace: ['Negate', ['Divide', 'Pi', 2]] },
   { match: ['Arccot', 'PositiveInfinity'], replace: toZero },
-  { match: ['Arccot', 'NegativeInfinity'], replace: (expr) => expr.engine.Pi },
-  {
-    match: ['Arcsec', 'PositiveInfinity'],
-    replace: (expr) => expr.engine.Pi.div(2),
-  },
-  {
-    match: ['Arcsec', 'NegativeInfinity'],
-    replace: (expr) => expr.engine.Pi.div(2),
-  },
+  { match: ['Arccot', 'NegativeInfinity'], replace: { sym: 'Pi' } },
+  { match: ['Arcsec', 'PositiveInfinity'], replace: ['Divide', 'Pi', 2] },
+  { match: ['Arcsec', 'NegativeInfinity'], replace: ['Divide', 'Pi', 2] },
   { match: ['Arccsc', 'PositiveInfinity'], replace: toZero },
   { match: ['Arccsc', 'NegativeInfinity'], replace: toZero },
 
@@ -1573,80 +1516,26 @@ export const SIMPLIFY_RULES: Rule[] = [
 
   // -------- TRIGONOMETRIC --------
   // Odd/even function properties with negation
-  {
-    match: ['Sin', ['Negate', '_x']],
-    replace: (expr, ids) => expr.engine.function('Sin', [ids._x]).neg(),
-  },
-  {
-    match: ['Cos', ['Negate', '_x']],
-    replace: (expr, ids) => expr.engine.function('Cos', [ids._x]),
-  },
-  {
-    match: ['Tan', ['Negate', '_x']],
-    replace: (expr, ids) => expr.engine.function('Tan', [ids._x]).neg(),
-  },
-  {
-    match: ['Cot', ['Negate', '_x']],
-    replace: (expr, ids) => expr.engine.function('Cot', [ids._x]).neg(),
-  },
-  {
-    match: ['Sec', ['Negate', '_x']],
-    replace: (expr, ids) => expr.engine.function('Sec', [ids._x]),
-  },
-  {
-    match: ['Csc', ['Negate', '_x']],
-    replace: (expr, ids) => expr.engine.function('Csc', [ids._x]).neg(),
-  },
+  { match: ['Sin', ['Negate', '_x']], replace: ['Negate', ['Sin', '_x']] },
+  { match: ['Cos', ['Negate', '_x']], replace: ['Cos', '_x'] },
+  { match: ['Tan', ['Negate', '_x']], replace: ['Negate', ['Tan', '_x']] },
+  { match: ['Cot', ['Negate', '_x']], replace: ['Negate', ['Cot', '_x']] },
+  { match: ['Sec', ['Negate', '_x']], replace: ['Sec', '_x'] },
+  { match: ['Csc', ['Negate', '_x']], replace: ['Negate', ['Csc', '_x']] },
   // π - x transformations
-  {
-    match: ['Sin', ['Subtract', 'Pi', '_x']],
-    replace: (expr, ids) => expr.engine.function('Sin', [ids._x]),
-  },
-  {
-    match: ['Cos', ['Subtract', 'Pi', '_x']],
-    replace: (expr, ids) => expr.engine.function('Cos', [ids._x]).neg(),
-  },
-  {
-    match: ['Tan', ['Subtract', 'Pi', '_x']],
-    replace: (expr, ids) => expr.engine.function('Tan', [ids._x]).neg(),
-  },
-  {
-    match: ['Cot', ['Subtract', 'Pi', '_x']],
-    replace: (expr, ids) => expr.engine.function('Cot', [ids._x]).neg(),
-  },
-  {
-    match: ['Sec', ['Subtract', 'Pi', '_x']],
-    replace: (expr, ids) => expr.engine.function('Sec', [ids._x]).neg(),
-  },
-  {
-    match: ['Csc', ['Subtract', 'Pi', '_x']],
-    replace: (expr, ids) => expr.engine.function('Csc', [ids._x]),
-  },
+  { match: ['Sin', ['Subtract', 'Pi', '_x']], replace: ['Sin', '_x'] },
+  { match: ['Cos', ['Subtract', 'Pi', '_x']], replace: ['Negate', ['Cos', '_x']] },
+  { match: ['Tan', ['Subtract', 'Pi', '_x']], replace: ['Negate', ['Tan', '_x']] },
+  { match: ['Cot', ['Subtract', 'Pi', '_x']], replace: ['Negate', ['Cot', '_x']] },
+  { match: ['Sec', ['Subtract', 'Pi', '_x']], replace: ['Negate', ['Sec', '_x']] },
+  { match: ['Csc', ['Subtract', 'Pi', '_x']], replace: ['Csc', '_x'] },
   // π + x transformations
-  {
-    match: ['Sin', ['Add', 'Pi', '_x']],
-    replace: (expr, ids) => expr.engine.function('Sin', [ids._x]).neg(),
-  },
-  {
-    match: ['Cos', ['Add', 'Pi', '_x']],
-    replace: (expr, ids) => expr.engine.function('Cos', [ids._x]).neg(),
-  },
-  {
-    match: ['Tan', ['Add', 'Pi', '_x']],
-    replace: (expr, ids) => expr.engine.function('Tan', [ids._x]),
-  },
-  {
-    match: ['Cot', ['Add', 'Pi', '_x']],
-    replace: (expr, ids) => expr.engine.function('Cot', [ids._x]).neg(),
-  },
-  {
-    match: ['Sec', ['Add', 'Pi', '_x']],
-    replace: (expr, ids) => expr.engine.function('Sec', [ids._x]).neg(),
-  },
-  {
-    match: ['Csc', ['Add', 'Pi', '_x']],
-    replace: (expr, ids) => expr.engine.function('Csc', [ids._x]),
-  },
+  { match: ['Sin', ['Add', 'Pi', '_x']], replace: ['Negate', ['Sin', '_x']] },
+  { match: ['Cos', ['Add', 'Pi', '_x']], replace: ['Negate', ['Cos', '_x']] },
+  { match: ['Tan', ['Add', 'Pi', '_x']], replace: ['Tan', '_x'] },
+  { match: ['Cot', ['Add', 'Pi', '_x']], replace: ['Negate', ['Cot', '_x']] },
+  { match: ['Sec', ['Add', 'Pi', '_x']], replace: ['Negate', ['Sec', '_x']] },
+  { match: ['Csc', ['Add', 'Pi', '_x']], replace: ['Csc', '_x'] },
 
   // Trigonometric periodicity reduction for multiples of π
   // sin(nπ + x) and cos(nπ + x) where n is an integer
@@ -1684,33 +1573,15 @@ export const SIMPLIFY_RULES: Rule[] = [
   // Co-function identities: π/2 - x
   {
     match: ['Sin', ['Subtract', 'Half', '_x']],
-    replace: (expr, ids) => expr.engine.function('Cos', [ids._x]),
+    replace: ['Cos', '_x'],
     condition: (ids, ce) => ids.Half?.isSame(ce.Pi.div(2)),
   },
-  {
-    match: ['Sin', ['Subtract', ['Divide', 'Pi', 2], '_x']],
-    replace: (expr, ids) => expr.engine.function('Cos', [ids._x]),
-  },
-  {
-    match: ['Cos', ['Subtract', ['Divide', 'Pi', 2], '_x']],
-    replace: (expr, ids) => expr.engine.function('Sin', [ids._x]),
-  },
-  {
-    match: ['Tan', ['Subtract', ['Divide', 'Pi', 2], '_x']],
-    replace: (expr, ids) => expr.engine.function('Cot', [ids._x]),
-  },
-  {
-    match: ['Cot', ['Subtract', ['Divide', 'Pi', 2], '_x']],
-    replace: (expr, ids) => expr.engine.function('Tan', [ids._x]),
-  },
-  {
-    match: ['Sec', ['Subtract', ['Divide', 'Pi', 2], '_x']],
-    replace: (expr, ids) => expr.engine.function('Csc', [ids._x]),
-  },
-  {
-    match: ['Csc', ['Subtract', ['Divide', 'Pi', 2], '_x']],
-    replace: (expr, ids) => expr.engine.function('Sec', [ids._x]),
-  },
+  { match: ['Sin', ['Subtract', ['Divide', 'Pi', 2], '_x']], replace: ['Cos', '_x'] },
+  { match: ['Cos', ['Subtract', ['Divide', 'Pi', 2], '_x']], replace: ['Sin', '_x'] },
+  { match: ['Tan', ['Subtract', ['Divide', 'Pi', 2], '_x']], replace: ['Cot', '_x'] },
+  { match: ['Cot', ['Subtract', ['Divide', 'Pi', 2], '_x']], replace: ['Tan', '_x'] },
+  { match: ['Sec', ['Subtract', ['Divide', 'Pi', 2], '_x']], replace: ['Csc', '_x'] },
+  { match: ['Csc', ['Subtract', ['Divide', 'Pi', 2], '_x']], replace: ['Sec', '_x'] },
   // Product-to-sum identities
   {
     match: ['Multiply', ['Sin', '_x'], ['Cos', '_x']],
@@ -1742,51 +1613,18 @@ export const SIMPLIFY_RULES: Rule[] = [
     match: ['Add', ['Power', ['Sin', '_x'], 2], ['Power', ['Cos', '_x'], 2]],
     replace: toOne,
   },
-  {
-    match: ['Subtract', 1, ['Power', ['Sin', '_x'], 2]],
-    replace: (expr, ids) => expr.engine.function('Cos', [ids._x]).pow(2),
-  },
-  {
-    match: ['Subtract', 1, ['Power', ['Cos', '_x'], 2]],
-    replace: (expr, ids) => expr.engine.function('Sin', [ids._x]).pow(2),
-  },
-  {
-    match: ['Add', ['Power', ['Tan', '_x'], 2], 1],
-    replace: (expr, ids) => expr.engine.function('Sec', [ids._x]).pow(2),
-  },
-  {
-    match: ['Add', 1, ['Power', ['Cot', '_x'], 2]],
-    replace: (expr, ids) => expr.engine.function('Csc', [ids._x]).pow(2),
-  },
-  {
-    match: ['Subtract', ['Power', ['Sec', '_x'], 2], 1],
-    replace: (expr, ids) => expr.engine.function('Tan', [ids._x]).pow(2),
-  },
-  {
-    match: ['Subtract', ['Power', ['Csc', '_x'], 2], 1],
-    replace: (expr, ids) => expr.engine.function('Cot', [ids._x]).pow(2),
-  },
+  { match: ['Subtract', 1, ['Power', ['Sin', '_x'], 2]], replace: ['Power', ['Cos', '_x'], 2] },
+  { match: ['Subtract', 1, ['Power', ['Cos', '_x'], 2]], replace: ['Power', ['Sin', '_x'], 2] },
+  { match: ['Add', ['Power', ['Tan', '_x'], 2], 1], replace: ['Power', ['Sec', '_x'], 2] },
+  { match: ['Add', 1, ['Power', ['Cot', '_x'], 2]], replace: ['Power', ['Csc', '_x'], 2] },
+  { match: ['Subtract', ['Power', ['Sec', '_x'], 2], 1], replace: ['Power', ['Tan', '_x'], 2] },
+  { match: ['Subtract', ['Power', ['Csc', '_x'], 2], 1], replace: ['Power', ['Cot', '_x'], 2] },
   // Pythagorean identities - reversed subtraction forms
-  {
-    match: ['Subtract', ['Power', ['Sin', '_x'], 2], 1],
-    replace: (expr, ids) => expr.engine.function('Cos', [ids._x]).pow(2).neg(),
-  },
-  {
-    match: ['Subtract', ['Power', ['Cos', '_x'], 2], 1],
-    replace: (expr, ids) => expr.engine.function('Sin', [ids._x]).pow(2).neg(),
-  },
-  {
-    match: ['Add', -1, ['Power', ['Tan', '_x'], 2]],
-    replace: (expr, ids) => expr.engine.function('Cot', [ids._x]).pow(2).neg(),
-  },
-  {
-    match: ['Add', -1, ['Power', ['Sec', '_x'], 2]],
-    replace: (expr, ids) => expr.engine.function('Tan', [ids._x]).pow(2),
-  },
-  {
-    match: ['Add', -1, ['Power', ['Csc', '_x'], 2]],
-    replace: (expr, ids) => expr.engine.function('Cot', [ids._x]).pow(2),
-  },
+  { match: ['Subtract', ['Power', ['Sin', '_x'], 2], 1], replace: ['Negate', ['Power', ['Cos', '_x'], 2]] },
+  { match: ['Subtract', ['Power', ['Cos', '_x'], 2], 1], replace: ['Negate', ['Power', ['Sin', '_x'], 2]] },
+  { match: ['Add', -1, ['Power', ['Tan', '_x'], 2]], replace: ['Negate', ['Power', ['Cot', '_x'], 2]] },
+  { match: ['Add', -1, ['Power', ['Sec', '_x'], 2]], replace: ['Power', ['Tan', '_x'], 2] },
+  { match: ['Add', -1, ['Power', ['Csc', '_x'], 2]], replace: ['Power', ['Cot', '_x'], 2] },
   // Pythagorean identities - negated forms
   {
     match: [
