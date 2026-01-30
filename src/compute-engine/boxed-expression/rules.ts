@@ -628,7 +628,10 @@ function boxRule(
   } else {
     ce.pushScope();
   }
-  const matchExpr = parseRulePart(ce, match, options);
+  // Match patterns should never be canonicalized - they need to preserve their
+  // structure with wildcards for pattern matching. For example, ['Divide', '_a', '_a']
+  // should remain as a Divide expression, not be simplified to 1.
+  const matchExpr = parseRulePart(ce, match, { canonical: false });
   const replaceExpr = parseRulePart(ce, replace, options);
   ce.popScope();
 
@@ -759,10 +762,10 @@ export function applyRule(
     const awc = getWildcards(match);
     const canonicalMatch = match.canonical;
     const bwc = getWildcards(canonicalMatch);
+    // If the canonical form of the match loses wildcards, this rule cannot match
+    // canonical expressions (they would already be simplified). Skip this rule.
     if (!awc.every((x) => bwc.includes(x)))
-      throw new Error(
-        `\n|   Invalid rule "${rule.id}"\n|   The canonical form of ${dewildcard(canonicalMatch).toString()} is "${dewildcard(match).toString()}" and it does not contain all the wildcards of the original match.\n|   This could indicate that the match expression in canonical form is already simplified and this rule may not be necessary`
-      );
+      return operandsMatched ? { value: expr, because } : null;
   }
 
   const useVariations = rule.useVariations ?? options?.useVariations ?? false;
