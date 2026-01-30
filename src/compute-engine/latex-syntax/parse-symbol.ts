@@ -302,7 +302,11 @@ export function parseSymbol(parser: Parser): MathJsonSymbol | null {
         // only simple tokens (letters, digits, and nested subscripts).
         // If it starts with '(' or contains operators, it's an expression.
         const firstToken = parser.peek;
-        if (firstToken === '(' || firstToken === '\\lparen' || firstToken === '\\left') {
+        if (
+          firstToken === '(' ||
+          firstToken === '\\lparen' ||
+          firstToken === '\\left'
+        ) {
           // Starts with parenthesis - it's an expression, not a symbol
           parser.index = underscoreIndex;
           break;
@@ -315,7 +319,12 @@ export function parseSymbol(parser: Parser): MathJsonSymbol | null {
         // - contains operators (converted to 'plus', 'minus', etc. by parseSymbolBody)
         // - doesn't end with closing brace
         const hasOperators = sub !== null && /plus|minus|times|ast/.test(sub);
-        if (sub === null || sub.includes(',') || hasOperators || parser.peek !== '<}>') {
+        if (
+          sub === null ||
+          sub.includes(',') ||
+          hasOperators ||
+          parser.peek !== '<}>'
+        ) {
           parser.index = underscoreIndex;
           break;
         }

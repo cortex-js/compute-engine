@@ -336,7 +336,10 @@ export abstract class AbstractTensor<
   // Trace is the sum of the diagonal entries of a square matrix.
   // `\operatorname{tr}(A) = \sum_{i=1}^n a_{ii}`
   // For rank > 2, returns a tensor of traces over the last two axes (batch trace)
-  trace(axis1?: number, axis2?: number): undefined | DataTypeMap[DT] | AbstractTensor<DT> {
+  trace(
+    axis1?: number,
+    axis2?: number
+  ): undefined | DataTypeMap[DT] | AbstractTensor<DT> {
     const rank = this.rank;
 
     // For rank < 2, trace is not defined

@@ -186,17 +186,12 @@ function matchOnce(
 
     // Special case: Match Divide(1, x) against a Power pattern
     // This handles cases like x^-1 which is canonicalized as 1/x
-    if (
-      operator === 'Power' &&
-      expr.operator === 'Divide' &&
-      expr.op1.is(1)
-    ) {
+    if (operator === 'Power' && expr.operator === 'Divide' && expr.op1.is(1)) {
       // Create a synthetic Power expression: Power(x, -1)
-      const powerExpr = ce.function(
-        'Power',
-        [expr.op2, ce.number(-1)],
-        { canonical: false, structural: true }
-      );
+      const powerExpr = ce.function('Power', [expr.op2, ce.number(-1)], {
+        canonical: false,
+        structural: true,
+      });
       const result = matchArguments(
         powerExpr,
         pattern.ops,

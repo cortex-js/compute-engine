@@ -7,7 +7,7 @@ import type { BoxedExpression, RuleStep } from '../global-types';
 export function simplifySum(x: BoxedExpression): RuleStep | undefined {
   if (x.operator !== 'Sum') return undefined;
 
-  let body = x.op1;
+  const body = x.op1;
   const limits = x.op2;
   if (!body || !limits || limits.operator !== 'Limits') return undefined;
 
@@ -78,7 +78,10 @@ export function simplifySum(x: BoxedExpression): RuleStep | undefined {
     // = b(b+1)/2 - (a-1)a/2 = (b(b+1) - a(a-1)) / 2
     const a = lower;
     const b = upper;
-    const result = b.mul(b.add(ce.One)).sub(a.mul(a.sub(ce.One))).div(2);
+    const result = b
+      .mul(b.add(ce.One))
+      .sub(a.mul(a.sub(ce.One)))
+      .div(2);
     return { value: result.simplify(), because: 'triangular number' };
   }
 
@@ -149,7 +152,10 @@ export function simplifySum(x: BoxedExpression): RuleStep | undefined {
       const result = ce.function('Multiply', [
         ce.function('Power', [ce.number(-1), b]),
         ce.function('Floor', [
-          ce.function('Divide', [ce.function('Add', [b, ce.One]), ce.number(2)]),
+          ce.function('Divide', [
+            ce.function('Add', [b, ce.One]),
+            ce.number(2),
+          ]),
         ]),
       ]);
       return { value: result, because: 'alternating linear series' };
@@ -177,8 +183,7 @@ export function simplifySum(x: BoxedExpression): RuleStep | undefined {
         // c * n form - extract coefficient
         const coef = term.ops!.filter((op) => op.symbol !== index);
         if (coef.length === term.ops!.length - 1) {
-          const c =
-            coef.length === 1 ? coef[0] : ce.function('Multiply', coef);
+          const c = coef.length === 1 ? coef[0] : ce.function('Multiply', coef);
           coefficient = coefficient ? coefficient.add(c) : c;
         }
       } else {
@@ -274,10 +279,7 @@ export function simplifySum(x: BoxedExpression): RuleStep | undefined {
     let binomialN: BoxedExpression | null = null;
 
     for (const op of body.ops) {
-      if (
-        op.operator === 'Binomial' &&
-        op.op2?.symbol === index
-      ) {
+      if (op.operator === 'Binomial' && op.op2?.symbol === index) {
         hasBinomial = true;
         binomialN = op.op1 ?? null;
       } else if (
@@ -303,16 +305,19 @@ export function simplifySum(x: BoxedExpression): RuleStep | undefined {
     for (const op of body.ops) {
       if (op.symbol === index) {
         hasIndex = true;
-      } else if (
-        op.operator === 'Binomial' &&
-        op.op2?.symbol === index
-      ) {
+      } else if (op.operator === 'Binomial' && op.op2?.symbol === index) {
         hasBinomial = true;
         binomialN = op.op1 ?? null;
       }
     }
 
-    if (hasIndex && hasBinomial && binomialN && upper.isSame(binomialN) && body.ops.length === 2) {
+    if (
+      hasIndex &&
+      hasBinomial &&
+      binomialN &&
+      upper.isSame(binomialN) &&
+      body.ops.length === 2
+    ) {
       // n * 2^(n-1)
       const n = binomialN;
       const result = ce.function('Multiply', [
@@ -328,18 +333,25 @@ export function simplifySum(x: BoxedExpression): RuleStep | undefined {
     hasBinomial = false;
 
     for (const op of body.ops) {
-      if (op.operator === 'Power' && op.op1?.symbol === index && op.op2?.is(2)) {
-        hasIndexSquared = true;
-      } else if (
-        op.operator === 'Binomial' &&
-        op.op2?.symbol === index
+      if (
+        op.operator === 'Power' &&
+        op.op1?.symbol === index &&
+        op.op2?.is(2)
       ) {
+        hasIndexSquared = true;
+      } else if (op.operator === 'Binomial' && op.op2?.symbol === index) {
         hasBinomial = true;
         binomialN = op.op1 ?? null;
       }
     }
 
-    if (hasIndexSquared && hasBinomial && binomialN && upper.isSame(binomialN) && body.ops.length === 2) {
+    if (
+      hasIndexSquared &&
+      hasBinomial &&
+      binomialN &&
+      upper.isSame(binomialN) &&
+      body.ops.length === 2
+    ) {
       // n(n+1) * 2^(n-2)
       const n = binomialN;
       const result = ce.function('Multiply', [
@@ -356,18 +368,25 @@ export function simplifySum(x: BoxedExpression): RuleStep | undefined {
     hasBinomial = false;
 
     for (const op of body.ops) {
-      if (op.operator === 'Power' && op.op1?.symbol === index && op.op2?.is(3)) {
-        hasIndexCubed = true;
-      } else if (
-        op.operator === 'Binomial' &&
-        op.op2?.symbol === index
+      if (
+        op.operator === 'Power' &&
+        op.op1?.symbol === index &&
+        op.op2?.is(3)
       ) {
+        hasIndexCubed = true;
+      } else if (op.operator === 'Binomial' && op.op2?.symbol === index) {
         hasBinomial = true;
         binomialN = op.op1 ?? null;
       }
     }
 
-    if (hasIndexCubed && hasBinomial && binomialN && upper.isSame(binomialN) && body.ops.length === 2) {
+    if (
+      hasIndexCubed &&
+      hasBinomial &&
+      binomialN &&
+      upper.isSame(binomialN) &&
+      body.ops.length === 2
+    ) {
       // n²(n+3) * 2^(n-3)
       const n = binomialN;
       const result = ce.function('Multiply', [
@@ -385,7 +404,11 @@ export function simplifySum(x: BoxedExpression): RuleStep | undefined {
     hasBinomial = false;
 
     for (const op of body.ops) {
-      if (op.operator === 'Power' && op.op1?.is(-1) && op.op2?.symbol === index) {
+      if (
+        op.operator === 'Power' &&
+        op.op1?.is(-1) &&
+        op.op2?.symbol === index
+      ) {
         hasAltTerm = true;
       } else if (op.symbol === index) {
         hasIndexTerm = true;
@@ -395,7 +418,14 @@ export function simplifySum(x: BoxedExpression): RuleStep | undefined {
       }
     }
 
-    if (hasAltTerm && hasIndexTerm && hasBinomial && binomialN && upper.isSame(binomialN) && body.ops.length === 3) {
+    if (
+      hasAltTerm &&
+      hasIndexTerm &&
+      hasBinomial &&
+      binomialN &&
+      upper.isSame(binomialN) &&
+      body.ops.length === 3
+    ) {
       // For n >= 2, sum = 0
       return { value: ce.Zero, because: 'alternating weighted binomial sum' };
     }
@@ -422,11 +452,7 @@ export function simplifySum(x: BoxedExpression): RuleStep | undefined {
   }
 
   // Sum of k*(k+1): Sum(k*(k+1), [k, 1, n]) → n(n+1)(n+2)/3
-  if (
-    body.operator === 'Multiply' &&
-    body.ops?.length === 2 &&
-    lower.is(1)
-  ) {
+  if (body.operator === 'Multiply' && body.ops?.length === 2 && lower.is(1)) {
     const [op1, op2] = body.ops;
     // Check for k * (k+1) pattern
     const isKTimesKPlus1 =
@@ -506,7 +532,10 @@ export function simplifySum(x: BoxedExpression): RuleStep | undefined {
           // (n - 1) / n
           const n = upper;
           const result = n.sub(ce.One).div(n);
-          return { value: result, because: 'partial fractions (telescoping k*(k-1))' };
+          return {
+            value: result,
+            because: 'partial fractions (telescoping k*(k-1))',
+          };
         }
       }
     }

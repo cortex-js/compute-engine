@@ -507,7 +507,8 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
     // Digamma function ψ(x) = d/dx ln(Γ(x)) = Γ'(x)/Γ(x)
     // Also known as the psi function
     Digamma: {
-      description: 'Digamma function, the logarithmic derivative of the gamma function',
+      description:
+        'Digamma function, the logarithmic derivative of the gamma function',
       wikidata: 'Q1142755',
       complexity: 8200,
       broadcastable: true,
@@ -530,7 +531,8 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
     // The n-th derivative of the digamma function
     // PolyGamma(0, x) = Digamma(x), PolyGamma(1, x) = Trigamma(x)
     PolyGamma: {
-      description: 'Polygamma function, the n-th derivative of the digamma function',
+      description:
+        'Polygamma function, the n-th derivative of the digamma function',
       wikidata: 'Q1817679',
       complexity: 8500,
       broadcastable: true,

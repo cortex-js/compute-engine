@@ -1621,7 +1621,6 @@ export class _Parser implements Parser {
     if (this.atEnd) return lhs;
     console.assert(lhs !== null);
 
-
     const index = this.index;
     this.skipSpace();
 

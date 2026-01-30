@@ -162,10 +162,7 @@ volumes
         if (f?.operator === 'D') return f;
         // Avoid evaluating symbolic derivative applications like Digamma'(x)
         // which would incorrectly evaluate to 0
-        if (
-          f?.operator === 'Apply' &&
-          f.op1?.operator === 'Derivative'
-        )
+        if (f?.operator === 'Apply' && f.op1?.operator === 'Derivative')
           return f;
         // If the result contains symbolic transcendentals (like ln(2)),
         // return it without full evaluation to preserve the symbolic form
