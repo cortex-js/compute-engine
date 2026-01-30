@@ -11,7 +11,7 @@ const v9_x: Expression = [
   'c',
   'd',
   'e_1',
-  'f',
+  'f_1',
   'g',
   'h',
   'i_1',
@@ -46,13 +46,14 @@ const t234_n: Expression = [
 ];
 
 // Tensor of shape [3, 4, 2] with unknowns
+// Note: 'f' is avoided as it may be interpreted as a built-in function
 const t234_x: Expression = [
   'List',
   [
     'List',
     ['List', 'a', 'b'],
     ['List', 'c', 'd'],
-    ['List', 'e_1', 'f'],
+    ['List', 'e_1', 'f_1'],
     ['List', 'g', 'h'],
   ],
   [
@@ -68,6 +69,55 @@ const t234_x: Expression = [
     ['List', 's', 't'],
     ['List', 'u', 'v'],
     ['List', 'w', 'x_1'],
+  ],
+];
+
+// Tensor of shape [2, 2, 2] - two 2×2 matrices (for batch trace testing)
+// First matrix: [[1, 2], [3, 4]], Second matrix: [[5, 6], [7, 8]]
+const t222_n: Expression = [
+  'List',
+  ['List', ['List', 1, 2], ['List', 3, 4]],
+  ['List', ['List', 5, 6], ['List', 7, 8]],
+];
+
+// Tensor of shape [3, 2, 2] - three 2×2 matrices
+// Matrices: [[1, 2], [3, 4]], [[5, 6], [7, 8]], [[9, 10], [11, 12]]
+const t322_n: Expression = [
+  'List',
+  ['List', ['List', 1, 2], ['List', 3, 4]],
+  ['List', ['List', 5, 6], ['List', 7, 8]],
+  ['List', ['List', 9, 10], ['List', 11, 12]],
+];
+
+// Tensor of shape [2, 3, 3] - two 3×3 matrices (for testing trace over different axes)
+const t233_n: Expression = [
+  'List',
+  [
+    'List',
+    ['List', 1, 2, 3],
+    ['List', 4, 5, 6],
+    ['List', 7, 8, 9],
+  ],
+  [
+    'List',
+    ['List', 10, 11, 12],
+    ['List', 13, 14, 15],
+    ['List', 16, 17, 18],
+  ],
+];
+
+// Tensor of shape [2, 2, 2] with complex values for conjugate transpose
+const t222_c: Expression = [
+  'List',
+  [
+    'List',
+    ['List', ['Complex', 1, 2], ['Complex', 3, 4]],
+    ['List', ['Complex', 5, 6], ['Complex', 7, 8]],
+  ],
+  [
+    'List',
+    ['List', ['Complex', 9, 10], ['Complex', 11, 12]],
+    ['List', ['Complex', 13, 14], ['Complex', 15, 16]],
   ],
 ];
 describe('Creating matrix', () => {
@@ -324,7 +374,7 @@ describe('Flatten', () => {
   it('should flatten a tensor with unknowns', () => {
     const result = ce.box(['Flatten', t234_x]).evaluate();
     expect(result.toString()).toMatchInlineSnapshot(
-      `[a,b,c,d,"e_1",f,g,h,"i_1",j,k,l,m,"n_1",o,p,q,r,s,t,u,v,w,"x_1"]`
+      `[a,b,c,d,"e_1","f_1",g,h,"i_1",j,k,l,m,"n_1",o,p,q,r,s,t,u,v,w,"x_1"]`
     );
   });
 });
@@ -332,17 +382,14 @@ describe('Flatten', () => {
 describe('Transpose', () => {
   it('should transpose a scalar', () => {
     const result = ce.box(['Transpose', 42]).evaluate();
-    // Type checking rejects scalar before evaluation can return the scalar
-    expect(result.toString()).toMatchInlineSnapshot(
-      `Transpose(Error(ErrorCode("incompatible-type", "matrix | list<number>", "finite_integer")))`
-    );
+    // Scalar transpose returns the scalar itself
+    expect(result.toString()).toMatchInlineSnapshot(`42`);
   });
 
   it('should transpose a numeric vector', () => {
     const result = ce.box(['Transpose', v7_n]).evaluate();
-    expect(result.toString()).toMatchInlineSnapshot(
-      `Transpose([7,-2,11,-5,13,-7,17])`
-    );
+    // Vector (rank 1) transpose returns the vector itself
+    expect(result.toString()).toMatchInlineSnapshot(`[7,-2,11,-5,13,-7,17]`);
   });
 
   it('should transpose a numeric matrix', () => {
@@ -357,15 +404,17 @@ describe('Transpose', () => {
 
   it('should transpose a numeric tensor', () => {
     const result = ce.box(['Transpose', t234_n]).evaluate();
+    // For rank-3 tensor [2, 3, 4], swaps last two axes -> [2, 4, 3]
     expect(result.toString()).toMatchInlineSnapshot(
-      `Transpose([[[1,2,3,4],[5,6,7,8],[9,10,11,12]],[[13,14,15,16],[17,18,19,20],[21,22,23,24]]])`
+      `[[[1,5,9],[2,6,10],[3,7,11],[4,8,12]],[[13,17,21],[14,18,22],[15,19,23],[16,20,24]]]`
     );
   });
 
   it('should transpose a tensor with unknowns', () => {
     const result = ce.box(['Transpose', t234_x]).evaluate();
+    // For rank-3 tensor [3, 4, 2], swaps last two axes -> [3, 2, 4]
     expect(result.toString()).toMatchInlineSnapshot(
-      `Transpose([[[a,b],[c,d],["e_1",f],[g,h]],[["i_1",j],[k,l],[m,"n_1"],[o,p]],[[q,r],[s,t],[u,v],[w,"x_1"]]])`
+      `[[[a,c,"e_1",g],[b,d,"f_1",h]],[["i_1",k,m,o],[j,l,"n_1",p]],[[q,s,u,w],[r,t,v,"x_1"]]]`
     );
   });
 });
@@ -373,17 +422,14 @@ describe('Transpose', () => {
 describe('ConjugateTranspose', () => {
   it('should conjugate transpose a scalar', () => {
     const result = ce.box(['ConjugateTranspose', 42]).evaluate();
-    // Type checking rejects scalar before evaluation
-    expect(result.toString()).toMatchInlineSnapshot(
-      `ConjugateTranspose(Error(ErrorCode("incompatible-type", "list<number>", "finite_integer")))`
-    );
+    // Scalar conjugate transpose returns the conjugate (42 for real)
+    expect(result.toString()).toMatchInlineSnapshot(`42`);
   });
 
   it('should conjugate transpose a numeric vector', () => {
     const result = ce.box(['ConjugateTranspose', v7_n]).evaluate();
-    expect(result.toString()).toMatchInlineSnapshot(
-      `ConjugateTranspose([7,-2,11,-5,13,-7,17])`
-    );
+    // Vector (rank 1) conjugate transpose returns the conjugated vector
+    expect(result.toString()).toMatchInlineSnapshot(`[7,-2,11,-5,13,-7,17]`);
   });
 
   it('should conjugate transpose a numeric matrix', () => {
@@ -405,16 +451,17 @@ describe('ConjugateTranspose', () => {
 
   it('should conjugate transpose a numeric tensor', () => {
     const result = ce.box(['ConjugateTranspose', t234_n]).evaluate();
-    // Rank-3+ tensors not yet supported for conjugate transpose
+    // For rank-3 tensor [2, 3, 4], swaps last two axes -> [2, 4, 3]
     expect(result.toString()).toMatchInlineSnapshot(
-      `ConjugateTranspose([[[1,2,3,4],[5,6,7,8],[9,10,11,12]],[[13,14,15,16],[17,18,19,20],[21,22,23,24]]])`
+      `[[[1,5,9],[2,6,10],[3,7,11],[4,8,12]],[[13,17,21],[14,18,22],[15,19,23],[16,20,24]]]`
     );
   });
 
-  it('should conjugate transpose a tensor with unnknowns', () => {
+  it('should conjugate transpose a tensor with unknowns', () => {
     const result = ce.box(['ConjugateTranspose', t234_x]).evaluate();
+    // For rank-3 tensor [3, 4, 2], swaps last two axes and conjugates -> [3, 2, 4]
     expect(result.toString()).toMatchInlineSnapshot(
-      `ConjugateTranspose([[[a,b],[c,d],["e_1",f],[g,h]],[["i_1",j],[k,l],[m,"n_1"],[o,p]],[[q,r],[s,t],[u,v],[w,"x_1"]]])`
+      `[[[Conjugate(a),Conjugate(c),Conjugate("e_1"),Conjugate(g)],[Conjugate(b),Conjugate(d),Conjugate("f_1"),Conjugate(h)]],[[Conjugate("i_1"),Conjugate(k),Conjugate(m),Conjugate(o)],[Conjugate(j),Conjugate(l),Conjugate("n_1"),Conjugate(p)]],[[Conjugate(q),Conjugate(s),Conjugate(u),Conjugate(w)],[Conjugate(r),Conjugate(t),Conjugate(v),Conjugate("x_1")]]]`
     );
   });
 });
@@ -465,17 +512,15 @@ describe('Determinant', () => {
 describe('Trace', () => {
   it('should calculate the trace of a scalar', () => {
     const result = ce.box(['Trace', 42]).evaluate();
-    // Type checking rejects scalar before evaluation can return the scalar
-    expect(result.toString()).toMatchInlineSnapshot(
-      `Trace(Error(ErrorCode("incompatible-type", "matrix", "finite_integer")))`
-    );
+    // Trace of scalar is the scalar itself
+    expect(result.toString()).toMatchInlineSnapshot(`42`);
   });
 
   it('should calculate the trace of a numeric vector', () => {
     const result = ce.box(['Trace', v7_n]).evaluate();
-    // Type checking rejects vector (not a matrix)
+    // Vector (rank 1) - trace not defined
     expect(result.toString()).toMatchInlineSnapshot(
-      `Trace(Error(ErrorCode("incompatible-type", "matrix", "list<number>")))`
+      `Error("expected-matrix-or-tensor", "[7,-2,11,-5,13,-7,17]")`
     );
   });
 
@@ -489,19 +534,18 @@ describe('Trace', () => {
     expect(result.toString()).toMatchInlineSnapshot(`a + d`);
   });
 
-  it('should calculate the trace of a numeric tensor', () => {
+  it('should reject trace for non-square last two axes', () => {
+    // Tensor with shape [2, 3, 4] - last two axes (3 and 4) are not equal
     const result = ce.box(['Trace', t234_n]).evaluate();
-    // Type checking rejects tensor (not a 2D matrix)
     expect(result.toString()).toMatchInlineSnapshot(
-      `Trace(Error(ErrorCode("incompatible-type", "matrix", "list<number^(2x3x4)>")))`
+      `Error("expected-square-matrix", "[[[1,2,3,4],[5,6,7,8],[9,10,11,12]],[[13,14,15,16],[17,18,19,20],[21,22,23,24]]]")`
     );
   });
 
-  it('should calculate the trace of a numeric tensor', () => {
+  it('should reject trace for non-square tensor slices', () => {
+    // Tensor with shape [3, 4, 2] - last two axes (4 and 2) are not equal
     const result = ce.box(['Trace', t234_x]).evaluate();
-    expect(result.toString()).toMatchInlineSnapshot(
-      `Trace(Error(ErrorCode("incompatible-type", "matrix", "list<number^(3x4x2)>")))`
-    );
+    expect(result.toString()).toContain('expected-square-matrix');
   });
 });
 
@@ -542,7 +586,7 @@ describe('Reshape', () => {
   it('should reshape a general vector', () => {
     const result = ce.box(['Reshape', v9_x, ['Tuple', 3, 3]]).evaluate();
     expect(result.toString()).toMatchInlineSnapshot(
-      `[[a,b,c],[d,"e_1",f],[g,h,"i_1"]]`
+      `[[a,b,c],[d,"e_1","f_1"],[g,h,"i_1"]]`
     );
   });
 
@@ -550,20 +594,20 @@ describe('Reshape', () => {
     const result = ce.box(['Reshape', v9_x, ['Tuple', 3, 4]]).evaluate();
     // Cycling fills remaining slots with elements from the beginning
     expect(result.toString()).toMatchInlineSnapshot(
-      `[[a,b,c,d],["e_1",f,g,h],["i_1",a,b,c]]`
+      `[[a,b,c,d],["e_1","f_1",g,h],["i_1",a,b,c]]`
     );
   });
 
   it('should reshape a general vector, contracting it', () => {
     const result = ce.box(['Reshape', v9_x, ['Tuple', 2, 3]]).evaluate();
-    expect(result.toString()).toMatchInlineSnapshot(`[[a,b,c],[d,"e_1",f]]`);
+    expect(result.toString()).toMatchInlineSnapshot(`[[a,b,c],[d,"e_1","f_1"]]`);
   });
 
   it('should reshape a general vector to a tensor', () => {
     const result = ce.box(['Reshape', v9_x, ['Tuple', 2, 3, 2]]).evaluate();
     // Cycling fills the 3D tensor from the 1D vector
     expect(result.toString()).toMatchInlineSnapshot(
-      `[[[a,b],[c,d],["e_1",f]],[[g,h],["i_1",a],[b,c]]]`
+      `[[[a,b],[c,d],["e_1","f_1"]],[[g,h],["i_1",a],[b,c]]]`
     );
   });
 
@@ -587,7 +631,7 @@ describe('Reshape', () => {
   it('should reshape a tensor with unknowns', () => {
     const result = ce.box(['Reshape', t234_x, ['Tuple', 2, 2, 3]]).evaluate();
     expect(result.toString()).toMatchInlineSnapshot(
-      `[[[a,b,c],[d,"e_1",f]],[[g,h,"i_1"],[j,k,l]]]`
+      `[[[a,b,c],[d,"e_1","f_1"]],[[g,h,"i_1"],[j,k,l]]]`
     );
   });
 });
@@ -977,5 +1021,143 @@ describe('Norm', () => {
   it('should compute the norm of a single element vector', () => {
     const result = ce.box(['Norm', ['List', -5]]).evaluate();
     expect(result.toString()).toMatchInlineSnapshot(`5`);
+  });
+});
+
+describe('Higher-Rank Tensor Operations (LA-4)', () => {
+  describe('Transpose for rank > 2', () => {
+    it('should transpose last two axes of a rank-3 tensor by default', () => {
+      // Shape [2, 2, 2] -> [2, 2, 2] (swapping last two axes)
+      // First matrix [[1, 2], [3, 4]] -> [[1, 3], [2, 4]]
+      // Second matrix [[5, 6], [7, 8]] -> [[5, 7], [6, 8]]
+      const result = ce.box(['Transpose', t222_n]).evaluate();
+      expect(result.toString()).toMatchInlineSnapshot(
+        `[[[1,3],[2,4]],[[5,7],[6,8]]]`
+      );
+    });
+
+    it('should transpose axes 1 and 2 of a rank-3 tensor', () => {
+      // Shape [2, 2, 2] with axes 1 and 2 swapped -> shape [2, 2, 2]
+      const result = ce.box(['Transpose', t222_n, 1, 2]).evaluate();
+      expect(result.toString()).toMatchInlineSnapshot(
+        `[[[1,2],[5,6]],[[3,4],[7,8]]]`
+      );
+    });
+
+    it('should transpose axes 1 and 3 of a rank-3 tensor', () => {
+      // Shape [2, 2, 2] with axes 1 and 3 swapped -> shape [2, 2, 2]
+      const result = ce.box(['Transpose', t222_n, 1, 3]).evaluate();
+      expect(result.toString()).toMatchInlineSnapshot(
+        `[[[1,5],[3,7]],[[2,6],[4,8]]]`
+      );
+    });
+
+    it('should transpose a non-square rank-3 tensor', () => {
+      // Shape [2, 3, 4] with default (swap last two) -> [2, 4, 3]
+      const result = ce.box(['Transpose', t234_n]).evaluate();
+      expect(result.toString()).toMatchInlineSnapshot(
+        `[[[1,5,9],[2,6,10],[3,7,11],[4,8,12]],[[13,17,21],[14,18,22],[15,19,23],[16,20,24]]]`
+      );
+    });
+
+    it('should transpose axes 1 and 2 of shape [3, 2, 2]', () => {
+      // Swap first two axes: [3, 2, 2] -> [2, 3, 2]
+      const result = ce.box(['Transpose', t322_n, 1, 2]).evaluate();
+      expect(result.toString()).toMatchInlineSnapshot(
+        `[[[1,2],[5,6],[9,10]],[[3,4],[7,8],[11,12]]]`
+      );
+    });
+  });
+
+  describe('ConjugateTranspose for rank > 2', () => {
+    it('should conjugate transpose last two axes of a rank-3 complex tensor', () => {
+      // Shape [2, 2, 2], conjugate and swap last two axes
+      const result = ce.box(['ConjugateTranspose', t222_c]).evaluate();
+      // First slice: [[1-2i, 5-6i], [3-4i, 7-8i]]
+      // Second slice: [[9-10i, 13-14i], [11-12i, 15-16i]]
+      expect(result.toString()).toMatchInlineSnapshot(
+        `[[[(1 - 2i),(5 - 6i)],[(3 - 4i),(7 - 8i)]],[[(9 - 10i),(13 - 14i)],[(11 - 12i),(15 - 16i)]]]`
+      );
+    });
+
+    it('should conjugate transpose specified axes of a rank-3 complex tensor', () => {
+      const result = ce.box(['ConjugateTranspose', t222_c, 1, 3]).evaluate();
+      expect(result.toString()).toMatchInlineSnapshot(
+        `[[[(1 - 2i),(9 - 10i)],[(5 - 6i),(13 - 14i)]],[[(3 - 4i),(11 - 12i)],[(7 - 8i),(15 - 16i)]]]`
+      );
+    });
+
+    it('should conjugate transpose a real rank-3 tensor (same as transpose)', () => {
+      // For real tensors, conjugate transpose is just transpose
+      const result = ce.box(['ConjugateTranspose', t222_n]).evaluate();
+      expect(result.toString()).toMatchInlineSnapshot(
+        `[[[1,3],[2,4]],[[5,7],[6,8]]]`
+      );
+    });
+  });
+
+  describe('Trace for rank > 2 (batch trace)', () => {
+    it('should compute batch trace of a [2, 2, 2] tensor', () => {
+      // First matrix [[1, 2], [3, 4]]: trace = 1 + 4 = 5
+      // Second matrix [[5, 6], [7, 8]]: trace = 5 + 8 = 13
+      // Result: [5, 13]
+      const result = ce.box(['Trace', t222_n]).evaluate();
+      expect(result.toString()).toMatchInlineSnapshot(`[5,13]`);
+    });
+
+    it('should compute batch trace of a [3, 2, 2] tensor', () => {
+      // First matrix [[1, 2], [3, 4]]: trace = 1 + 4 = 5
+      // Second matrix [[5, 6], [7, 8]]: trace = 5 + 8 = 13
+      // Third matrix [[9, 10], [11, 12]]: trace = 9 + 12 = 21
+      // Result: [5, 13, 21]
+      const result = ce.box(['Trace', t322_n]).evaluate();
+      expect(result.toString()).toMatchInlineSnapshot(`[5,13,21]`);
+    });
+
+    it('should compute batch trace of a [2, 3, 3] tensor', () => {
+      // First matrix: trace = 1 + 5 + 9 = 15
+      // Second matrix: trace = 10 + 14 + 18 = 42
+      // Result: [15, 42]
+      const result = ce.box(['Trace', t233_n]).evaluate();
+      expect(result.toString()).toMatchInlineSnapshot(`[15,42]`);
+    });
+
+    it('should return error for non-square last two axes', () => {
+      // Shape [2, 3, 4] - last two axes (3 and 4) are not equal
+      const result = ce.box(['Trace', t234_n]).evaluate();
+      expect(result.toString()).toMatchInlineSnapshot(
+        `Error("expected-square-matrix", "[[[1,2,3,4],[5,6,7,8],[9,10,11,12]],[[13,14,15,16],[17,18,19,20],[21,22,23,24]]]")`
+      );
+    });
+
+    it('should compute trace over specified axes', () => {
+      // t222_n has shape [2, 2, 2]
+      // Trace over axes 1 and 2 (first and second axes):
+      // For each value of axis 3 (2 values), sum diagonals over axes 1 and 2
+      // At axis3=1: (1,1,1) + (2,2,1) = 1 + 7 = 8?
+      // Actually this is tricky - let's compute carefully
+      // Shape [2, 2, 2], tracing over axes 1 and 2:
+      // Result shape: [2] (remaining axis 3)
+      // result[0] = sum of elements where axis1 == axis2 and axis3 == 0
+      //           = data[0,0,0] + data[1,1,0] = 1 + 7 = 8
+      // result[1] = data[0,0,1] + data[1,1,1] = 2 + 8 = 10
+      const result = ce.box(['Trace', t222_n, 1, 2]).evaluate();
+      expect(result.toString()).toMatchInlineSnapshot(`[8,10]`);
+    });
+
+    it('should compute trace over axes 1 and 3', () => {
+      // t222_n has shape [2, 2, 2]
+      // Trace over axes 1 and 3:
+      // Result shape: [2] (remaining axis 2)
+      // result[0] = data[0,0,0] + data[1,0,1] = 1 + 6 = 7
+      // result[1] = data[0,1,0] + data[1,1,1] = 3 + 8 = 11
+      const result = ce.box(['Trace', t222_n, 1, 3]).evaluate();
+      expect(result.toString()).toMatchInlineSnapshot(`[7,11]`);
+    });
+
+    it('should still work for rank-2 matrices (backwards compatibility)', () => {
+      const result = ce.box(['Trace', sq2_n]).evaluate();
+      expect(result.toString()).toMatchInlineSnapshot(`5`);
+    });
   });
 });

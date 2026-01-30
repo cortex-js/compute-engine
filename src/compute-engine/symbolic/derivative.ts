@@ -5,18 +5,19 @@ import { add } from '../boxed-expression/arithmetic-add';
 import { hasSymbolicTranscendental } from '../boxed-expression/utils';
 
 /**
- * Simplify a derivative result, preserving symbolic transcendental constants.
- * If the expression contains symbolic transcendentals like ln(2), return it
- * without full evaluation to avoid numeric conversion.
+ * Return a derivative result without simplification.
+ *
+ * IMPORTANT: Do not call .simplify() to avoid infinite recursion when
+ * derivative operations are called from within simplification rules.
+ * The expressions are already constructed using proper arithmetic operations
+ * (add, mul, etc.) that produce canonical forms by default.
  */
 function simplifyDerivative(expr: BoxedExpression): BoxedExpression {
-  if (hasSymbolicTranscendental(expr)) {
-    // Just return canonical form without simplification to preserve
-    // symbolic transcendentals like ln(2). Using simplify() would
-    // convert ln(2) to its numeric value 0.693...
-    return expr.canonical;
-  }
-  return expr.simplify();
+  // Return the expression as-is without simplification to avoid infinite recursion
+  // when derivatives are computed during simplification (e.g., second derivatives
+  // of arcsin, arccos involving Power rule).
+  // The arithmetic operations (add, mul, etc.) already produce canonical forms.
+  return expr;
 }
 
 // See also:

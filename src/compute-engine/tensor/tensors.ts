@@ -335,17 +335,90 @@ export abstract class AbstractTensor<
 
   // Trace is the sum of the diagonal entries of a square matrix.
   // `\operatorname{tr}(A) = \sum_{i=1}^n a_{ii}`
-  trace(axis1?: number, axis2?: number): undefined | DataTypeMap[DT] {
-    // @todo tensor: calculate for any axis
-    // Calculate the trace of a square matrix
-    if (this.rank !== 2) return undefined;
-    const [m, n] = this.shape;
-    if (m !== n) return undefined;
+  // For rank > 2, returns a tensor of traces over the last two axes (batch trace)
+  trace(axis1?: number, axis2?: number): undefined | DataTypeMap[DT] | AbstractTensor<DT> {
+    const rank = this.rank;
 
-    const data = this.data;
-    const trace: DataTypeMap[DT][] = new Array(m);
-    for (let i = 0; i < m; i++) trace[i] = data[i * m + i];
-    return this.field.addn(...trace);
+    // For rank < 2, trace is not defined
+    if (rank < 2) return undefined;
+
+    // Default: trace over last two axes
+    axis1 ??= rank - 1;
+    axis2 ??= rank;
+
+    // Convert to 0-based indices
+    const ax1 = axis1 - 1;
+    const ax2 = axis2 - 1;
+
+    // Check that the two axes have the same size (required for trace)
+    if (this.shape[ax1] !== this.shape[ax2]) return undefined;
+    const traceSize = this.shape[ax1];
+
+    // For rank 2, compute scalar trace
+    if (rank === 2) {
+      const data = this.data;
+      const n = traceSize;
+      const traceElements: DataTypeMap[DT][] = new Array(n);
+      for (let i = 0; i < n; i++) traceElements[i] = data[i * n + i];
+      return this.field.addn(...traceElements);
+    }
+
+    // For rank > 2, compute a tensor of traces
+    // The result shape is the original shape with the two trace axes removed
+    const resultShape = this.shape.filter((_, i) => i !== ax1 && i !== ax2);
+
+    // Compute strides for the source tensor
+    const srcStrides = getStrides(this.shape);
+
+    // Number of elements in the result tensor
+    const resultSize = resultShape.reduce((a, b) => a * b, 1);
+    const resultData: DataTypeMap[DT][] = new Array(resultSize);
+
+    // Compute strides for result shape (for iteration)
+    const resultStrides = getStrides(resultShape);
+
+    // For each element in the result tensor, compute the trace
+    for (let resultIdx = 0; resultIdx < resultSize; resultIdx++) {
+      // Convert flat result index to result multi-dimensional indices
+      const resultIndices: number[] = new Array(resultShape.length);
+      let remaining = resultIdx;
+      for (let d = 0; d < resultShape.length; d++) {
+        resultIndices[d] = Math.floor(remaining / resultStrides[d]);
+        remaining = remaining % resultStrides[d];
+      }
+
+      // Map result indices to source indices (inserting 0s at ax1 and ax2)
+      const srcIndices: number[] = new Array(rank);
+      let rIdx = 0;
+      for (let d = 0; d < rank; d++) {
+        if (d === ax1 || d === ax2) {
+          srcIndices[d] = 0; // Will be set in the trace loop
+        } else {
+          srcIndices[d] = resultIndices[rIdx++];
+        }
+      }
+
+      // Compute trace: sum of diagonal elements
+      const traceElements: DataTypeMap[DT][] = new Array(traceSize);
+      for (let i = 0; i < traceSize; i++) {
+        srcIndices[ax1] = i;
+        srcIndices[ax2] = i;
+
+        // Convert source indices to flat index
+        let srcIdx = 0;
+        for (let d = 0; d < rank; d++) {
+          srcIdx += srcIndices[d] * srcStrides[d];
+        }
+        traceElements[i] = this.data[srcIdx];
+      }
+      resultData[resultIdx] = this.field.addn(...traceElements);
+    }
+
+    return makeTensor(this.ce, {
+      dtype: this.dtype,
+      shape: resultShape,
+      data: resultData,
+    });
   }
 
   /**
@@ -401,7 +474,7 @@ export abstract class AbstractTensor<
     });
   }
 
-  /** Transpose the first and second axis */
+  /** Transpose the last two axes (default) */
   transpose(): undefined | AbstractTensor<DT>;
   /** Transpose two axes. */
   transpose(
@@ -414,30 +487,80 @@ export abstract class AbstractTensor<
     axis2?: number,
     fn?: (v: DataTypeMap[DT]) => DataTypeMap[DT]
   ): undefined | AbstractTensor<DT> {
-    if (this.rank !== 2) return undefined;
+    const rank = this.rank;
 
-    axis1 ??= 1;
-    axis2 ??= 2;
+    // For rank 1 (vector), transpose is identity
+    if (rank === 1) return this;
+
+    // Default: swap last two axes
+    axis1 ??= rank - 1;
+    axis2 ??= rank;
 
     if (axis1 === axis2) return this;
-    if (axis1 <= 0 || axis1 > 2) return undefined;
-    if (axis2 <= 0 || axis2 > 2) return undefined;
+    if (axis1 <= 0 || axis1 > rank) return undefined;
+    if (axis2 <= 0 || axis2 > rank) return undefined;
 
-    // Transpose the two axes of the matrix
-    const [m, n] = this.shape;
+    // Convert to 0-based indices
+    const ax1 = axis1 - 1;
+    const ax2 = axis2 - 1;
+
+    // Calculate new shape (swap the two axes)
+    const newShape = [...this.shape];
+    [newShape[ax1], newShape[ax2]] = [newShape[ax2], newShape[ax1]];
+
+    // Apply optional transformation function
     let data = this.data;
     if (fn) data = data.map((x) => fn(x));
 
-    let index = 0;
-    const result: DataTypeMap[DT][] = new Array(m * n);
-    const stride = n;
-    for (let i = 0; i < n; i++) {
-      for (let j = 0; j < m; j++) result[index++] = data[j * stride + i];
+    // For rank 2, use optimized path
+    if (rank === 2) {
+      const [m, n] = this.shape;
+      let index = 0;
+      const result: DataTypeMap[DT][] = new Array(m * n);
+      for (let i = 0; i < n; i++) {
+        for (let j = 0; j < m; j++) result[index++] = data[j * n + i];
+      }
+      return makeTensor(this.ce, {
+        dtype: this.dtype,
+        shape: newShape,
+        data: result,
+      });
+    }
+
+    // General case for rank > 2: compute transposed indices
+    const totalSize = data.length;
+    const result: DataTypeMap[DT][] = new Array(totalSize);
+
+    // Compute strides for source and destination
+    const srcStrides = getStrides(this.shape);
+    const dstStrides = getStrides(newShape);
+
+    // For each element in the result, find the corresponding source element
+    for (let dstIdx = 0; dstIdx < totalSize; dstIdx++) {
+      // Convert flat index to multi-dimensional indices in destination
+      const dstIndices = new Array(rank);
+      let remaining = dstIdx;
+      for (let d = 0; d < rank; d++) {
+        dstIndices[d] = Math.floor(remaining / dstStrides[d]);
+        remaining = remaining % dstStrides[d];
+      }
+
+      // Swap the axes to get source indices
+      const srcIndices = [...dstIndices];
+      [srcIndices[ax1], srcIndices[ax2]] = [srcIndices[ax2], srcIndices[ax1]];
+
+      // Convert source indices to flat index
+      let srcIdx = 0;
+      for (let d = 0; d < rank; d++) {
+        srcIdx += srcIndices[d] * srcStrides[d];
+      }
+
+      result[dstIdx] = data[srcIdx];
     }
 
     return makeTensor(this.ce, {
       dtype: this.dtype,
-      shape: [n, m],
+      shape: newShape,
       data: result,
     });
   }

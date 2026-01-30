@@ -141,6 +141,18 @@
       L1 (max column sum), L-infinity (max row sum)
     - Scalar norms return the absolute value
 
+  - **Higher-Rank Tensor Operations**: Extended `Transpose`, `ConjugateTranspose`,
+    and `Trace` to work with rank > 2 tensors:
+    - **Transpose**: Swaps last two axes by default (batch transpose), or
+      specify explicit axes with `['Transpose', T, axis1, axis2]`
+    - **ConjugateTranspose**: Same axis behavior as Transpose, plus element-wise
+      complex conjugation
+    - **Trace (batch trace)**: Returns a tensor of traces over the last two axes.
+      For a `[2,2,2]` tensor, returns `[trace of T[0], trace of T[1]]`.
+      Optional axis parameters: `['Trace', T, axis1, axis2]`
+    - All operations support explicit axis specification for flexible tensor
+      manipulation
+
   - **Diagonal function**: Now fully implemented with bidirectional behavior:
     - Vector → Matrix: Creates a diagonal matrix from a vector
       (`Diagonal([1,2,3])` → 3×3 diagonal matrix)

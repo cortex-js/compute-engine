@@ -4944,6 +4944,7 @@ type ParseLatexOptions = NumberFormat & {
   parseUnexpectedToken: (lhs, parser) => Expression | null;
   preserveLatex: boolean;
   quantifierScope: "tight" | "loose";
+  timeDerivativeVariable: string;
 };
 ```
 
@@ -5056,6 +5057,19 @@ like `\forall x. P(x) \rightarrow Q(x)`.
 // \forall x. P(x) \rightarrow Q(x)
 // parses as: ∀x. (P(x) → Q(x))
 ```
+
+#### ParseLatexOptions.timeDerivativeVariable
+
+```ts
+timeDerivativeVariable: string;
+```
+
+The variable used for time derivatives in Newton notation
+(`\dot{x}`, `\ddot{x}`, etc.).
+
+When parsing `\dot{x}`, it will be interpreted as `["D", "x", timeDerivativeVariable]`.
+
+**Default:** `"t"`
 
 </MemberCard>
 
@@ -5908,7 +5922,7 @@ powerStyle: (expr, level) => "quotient" | "solidus" | "root";
 ##### Serializer.numericSetStyle()
 
 ```ts
-numericSetStyle: (expr, level) => "interval" | "compact" | "regular" | "set-builder";
+numericSetStyle: (expr, level) => "compact" | "regular" | "interval" | "set-builder";
 ```
 
 </MemberCard>

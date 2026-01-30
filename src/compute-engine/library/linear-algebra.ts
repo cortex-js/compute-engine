@@ -145,54 +145,83 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
 
     // Similar to Zip, but has a single argument, a matrix
     // Ex: Transpose([[a, b, c], [1, 2, 3]]) = [[a, 1], [b, 2], [c, 3]]
+    // For rank > 2: Default swaps last two axes, or specify explicit axes
     Transpose: {
       complexity: 8200,
-      signature: '(matrix|vector, axis1: integer?, axis2: integer?) -> matrix',
+      signature: '(value, axis1: integer?, axis2: integer?) -> value',
       evaluate: (ops, { engine: ce }) => {
         let op1 = ops[0].evaluate();
 
         // Transpose of scalar is the scalar itself
         if (op1.isNumber) return op1;
 
-        let axis1 = 1;
-        let axis2 = 2;
-        if (ops.length === 3) {
-          axis1 = ops[1].re;
-          axis2 = ops[2].re;
-          console.assert(axis1 > 0 && axis2 > 0);
-        }
-        if (axis1 === axis2) return undefined;
         if (!isBoxedTensor(op1) && isFiniteIndexedCollection(op1))
           op1 = ce.function('List', [...op1.each()]);
+
         if (isBoxedTensor(op1)) {
-          if (axis1 === 1 && axis2 === 2)
-            return op1.tensor.transpose()?.expression;
-          else return op1.tensor.transpose(axis1, axis2)?.expression;
+          const rank = op1.shape.length;
+
+          // For rank 1 (vectors), transpose is identity
+          if (rank === 1) return op1;
+
+          // Default: swap last two axes (for rank-2, that's axes 1 and 2)
+          let axis1 = rank - 1; // second-to-last axis (1-based)
+          let axis2 = rank; // last axis (1-based)
+
+          if (ops.length === 3) {
+            axis1 = ops[1].re ?? axis1;
+            axis2 = ops[2].re ?? axis2;
+            console.assert(axis1 > 0 && axis2 > 0);
+          }
+
+          if (axis1 === axis2) return op1;
+          if (axis1 <= 0 || axis1 > rank) return undefined;
+          if (axis2 <= 0 || axis2 > rank) return undefined;
+
+          return op1.tensor.transpose(axis1, axis2)?.expression;
         }
         return undefined;
       },
     },
 
+    // Conjugate transpose (Hermitian adjoint): transpose + complex conjugate
+    // For rank > 2: Default swaps last two axes, or specify explicit axes
     ConjugateTranspose: {
       complexity: 8200,
-      signature: '(tensor, axis1: integer?, axis2: integer?) -> matrix',
+      signature: '(value, axis1: integer?, axis2: integer?) -> value',
       evaluate: (ops, { engine: ce }) => {
         const op1 = ops[0].evaluate();
 
         // Conjugate transpose of scalar is its conjugate
         if (op1.isNumber) return ce.box(['Conjugate', op1]).evaluate();
 
-        let axis1 = 1;
-        let axis2 = 2;
-        if (ops.length === 3) {
-          axis1 = ops[1].re;
-          axis2 = ops[2].re;
-          console.assert(axis1 > 0 && axis2 > 0);
-        }
-        if (axis1 === axis2) return undefined;
+        if (isBoxedTensor(op1)) {
+          const rank = op1.shape.length;
 
-        if (isBoxedTensor(op1))
+          // For rank 1 (vectors), conjugate transpose is just element-wise conjugate
+          if (rank === 1) {
+            const elements = [...op1.each()].map((el) =>
+              ce.box(['Conjugate', el]).evaluate()
+            );
+            return ce.box(['List', ...elements]);
+          }
+
+          // Default: swap last two axes
+          let axis1 = rank - 1; // second-to-last axis (1-based)
+          let axis2 = rank; // last axis (1-based)
+
+          if (ops.length === 3) {
+            axis1 = ops[1].re ?? axis1;
+            axis2 = ops[2].re ?? axis2;
+            console.assert(axis1 > 0 && axis2 > 0);
+          }
+
+          if (axis1 === axis2) return op1;
+          if (axis1 <= 0 || axis1 > rank) return undefined;
+          if (axis2 <= 0 || axis2 > rank) return undefined;
+
           return op1.tensor.conjugateTranspose(axis1, axis2)?.expression;
+        }
 
         return undefined;
       },
@@ -310,9 +339,13 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
     //   },
     // },
 
+    // Trace: sum of diagonal elements
+    // For matrices: returns scalar
+    // For rank > 2 tensors: returns tensor of traces over last two axes (batch trace)
+    // Optional axis1, axis2 to specify which axes to trace over (default: last two)
     Trace: {
       complexity: 8200,
-      signature: '(matrix) -> number',
+      signature: '(value, axis1: integer?, axis2: integer?) -> value',
       evaluate: (ops, { engine: ce }) => {
         const op1 = ops[0].evaluate();
 
@@ -321,17 +354,43 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
 
         if (isBoxedTensor(op1)) {
           const shape = op1.shape;
-          // Vector: not a square matrix
+
+          // Vector: trace not defined
           if (shape.length === 1)
-            return ce.error('expected-square-matrix', op1.toString());
-          // Tensor (rank > 2): not a square matrix
-          if (shape.length > 2)
-            return ce.error('expected-square-matrix', op1.toString());
-          // Non-square matrix
-          if (shape.length === 2 && shape[0] !== shape[1])
+            return ce.error('expected-matrix-or-tensor', op1.toString());
+
+          // Get optional axis parameters (1-based)
+          let axis1 = shape.length - 1; // Default: second-to-last axis
+          let axis2 = shape.length; // Default: last axis
+          if (ops.length >= 3) {
+            axis1 = ops[1].re ?? axis1;
+            axis2 = ops[2].re ?? axis2;
+          }
+
+          // Validate axes are within bounds
+          if (axis1 <= 0 || axis1 > shape.length)
+            return ce.error('invalid-axis', axis1.toString());
+          if (axis2 <= 0 || axis2 > shape.length)
+            return ce.error('invalid-axis', axis2.toString());
+          if (axis1 === axis2)
+            return ce.error('invalid-axis', 'axes must be different');
+
+          // Check that the two axes have the same size
+          if (shape[axis1 - 1] !== shape[axis2 - 1])
             return ce.error('expected-square-matrix', op1.toString());
 
-          return op1.tensor.trace();
+          const result = op1.tensor.trace(axis1, axis2);
+          if (result === undefined) return undefined;
+
+          // For scalar result (rank 2), box the value
+          if (typeof result === 'number' || typeof result === 'boolean')
+            return ce.box(result);
+
+          // Check if it's a primitive value that needs boxing
+          if (!('expression' in result)) return ce.box(result);
+
+          // For tensor result (rank > 2), return the expression
+          return result.expression;
         }
 
         return undefined;
