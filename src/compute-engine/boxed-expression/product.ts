@@ -110,6 +110,14 @@ export class Product {
         if (term.is(1)) return;
 
         if (term.is(0)) {
+          // infinity * 0 -> NaN (indeterminate form)
+          if (
+            this.coefficient.isPositiveInfinity ||
+            this.coefficient.isNegativeInfinity
+          ) {
+            this.coefficient = this.engine._numericValue(NaN);
+            return;
+          }
           this.coefficient = this.engine._numericValue(isZero(exp) ? NaN : 0);
           return;
         }
@@ -125,6 +133,11 @@ export class Product {
         }
 
         if (term.isInfinity) {
+          // 0 * infinity -> NaN (indeterminate form)
+          if (this.coefficient.isZero) {
+            this.coefficient = this.engine._numericValue(NaN);
+            return;
+          }
           if (isOne(exp)) {
             this.coefficient = this.engine._numericValue(
               term.isNegative ? -Infinity : Infinity

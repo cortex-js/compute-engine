@@ -110,9 +110,12 @@ export function simplifyPower(x: BoxedExpression): RuleStep | undefined {
       const rat = asRational(exp);
       if (rat) {
         const [num, denom] = rat;
-        const numIsEven = num % 2 === 0;
-        const numIsOdd = num % 2 !== 0;
-        const denomIsOdd = denom % 2 !== 0;
+        // Convert to Number for modulo operation (safe for small integers)
+        const numN = Number(num);
+        const denomN = Number(denom);
+        const numIsEven = numN % 2 === 0;
+        const numIsOdd = numN % 2 !== 0;
+        const denomIsOdd = denomN % 2 !== 0;
 
         // (-x)^{even/odd} -> x^{even/odd} (e.g., (-x)^{4/3} -> x^{4/3})
         if (numIsEven && denomIsOdd) {
@@ -128,6 +131,42 @@ export function simplifyPower(x: BoxedExpression): RuleStep | undefined {
             because: '(-x)^{n/m} -> -x^{n/m} when n and m are odd',
           };
         }
+      }
+    }
+
+    // (sqrt(x))^n -> x^{n/2}
+    if (base.operator === 'Sqrt' && base.op1) {
+      const innerBase = base.op1;
+      // sqrt(x)^n = x^{n/2}
+      // Safe when: n is even (result is integer power), or x is non-negative
+      if (exp.isEven === true) {
+        // sqrt(x)^{2k} = x^k - always valid
+        return {
+          value: innerBase.pow(exp.div(2)),
+          because: 'sqrt(x)^n -> x^{n/2} when n is even',
+        };
+      }
+      if (innerBase.isNonNegative === true) {
+        // sqrt(x)^n = x^{n/2} when x >= 0
+        return {
+          value: innerBase.pow(exp.div(2)),
+          because: 'sqrt(x)^n -> x^{n/2} when x >= 0',
+        };
+      }
+    }
+
+    // (root(x, k))^n -> x^{n/k}
+    if (base.operator === 'Root' && base.op1 && base.op2) {
+      const innerBase = base.op1;
+      const rootIndex = base.op2;
+      // root(x, k)^n = x^{n/k}
+      // Safe when result exponent is integer, or x is non-negative
+      const resultExp = exp.div(rootIndex);
+      if (resultExp.isInteger === true || innerBase.isNonNegative === true) {
+        return {
+          value: innerBase.pow(resultExp),
+          because: 'root(x, k)^n -> x^{n/k}',
+        };
       }
     }
 

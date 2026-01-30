@@ -218,6 +218,13 @@
 
 ### Bug Fixes
 
+- **Indeterminate Form Handling**: Fixed incorrect results for mathematical
+  indeterminate forms:
+  - `0 * ∞` now correctly returns `NaN` (previously returned `∞`)
+  - `∞ / ∞` now correctly returns `NaN` (previously returned `1`)
+  - `∞^0` now correctly returns `NaN` (was already correct)
+  - All combinations (`0 * (-∞)`, `(-∞) / ∞`, etc.) are handled correctly
+
 - **([#176](https://github.com/cortex-js/compute-engine/issues/176)) Power
   Combination Simplification**: Fixed simplification failing to combine powers
   with the same base when one factor has an implicit exponent or when there are

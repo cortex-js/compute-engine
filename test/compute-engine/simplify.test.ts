@@ -1853,6 +1853,35 @@ describe('LOGARITHM COMBINATION RULES', () => {
     ));
 });
 
+describe('INDETERMINATE FORMS', () => {
+  test('0 * infinity = NaN', () =>
+    expect(simplify('0 \\times \\infty')).toMatchInlineSnapshot(`NaN`));
+
+  test('0 * (-infinity) = NaN', () =>
+    expect(simplify('0 \\times (-\\infty)')).toMatchInlineSnapshot(`NaN`));
+
+  test('infinity * 0 = NaN', () =>
+    expect(simplify('\\infty \\times 0')).toMatchInlineSnapshot(`NaN`));
+
+  test('(-infinity) * 0 = NaN', () =>
+    expect(simplify('(-\\infty) \\times 0')).toMatchInlineSnapshot(`NaN`));
+
+  test('infinity / infinity = NaN', () =>
+    expect(simplify('\\frac{\\infty}{\\infty}')).toMatchInlineSnapshot(`NaN`));
+
+  test('(-infinity) / infinity = NaN', () =>
+    expect(simplify('\\frac{-\\infty}{\\infty}')).toMatchInlineSnapshot(`NaN`));
+
+  test('infinity / (-infinity) = NaN', () =>
+    expect(simplify('\\frac{\\infty}{-\\infty}')).toMatchInlineSnapshot(`NaN`));
+
+  test('(-infinity) / (-infinity) = NaN', () =>
+    expect(simplify('\\frac{-\\infty}{-\\infty}')).toMatchInlineSnapshot(`NaN`));
+
+  test('infinity^0 = NaN', () =>
+    expect(simplify('\\infty^0')).toMatchInlineSnapshot(`NaN`));
+});
+
 //
 // Fu Test
 //

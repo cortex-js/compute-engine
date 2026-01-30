@@ -21,6 +21,22 @@ export function simplifyInfinity(x: BoxedExpression): RuleStep | undefined {
   if (op === 'Multiply' && x.ops && x.ops.length === 2) {
     const [a, b] = x.ops;
 
+    // Use isInfinity property to detect infinity values
+    const aIsInf = a.isInfinity === true;
+    const bIsInf = b.isInfinity === true;
+    const aIsPosInf = aIsInf && a.isPositive === true;
+    const aIsNegInf = aIsInf && a.isNegative === true;
+    const bIsPosInf = bIsInf && b.isPositive === true;
+    const bIsNegInf = bIsInf && b.isNegative === true;
+
+    // 0 * infinity -> NaN (indeterminate form)
+    if (a.is(0) && bIsInf) {
+      return { value: ce.NaN, because: '0 * infinity -> NaN' };
+    }
+    if (b.is(0) && aIsInf) {
+      return { value: ce.NaN, because: 'infinity * 0 -> NaN' };
+    }
+
     // 0 * x -> 0 when x is finite
     if (a.is(0) && b.isFinite === true) {
       return { value: ce.Zero, because: '0 * finite -> 0' };
@@ -30,7 +46,7 @@ export function simplifyInfinity(x: BoxedExpression): RuleStep | undefined {
     }
 
     // PositiveInfinity * x
-    if (a.symbol === 'PositiveInfinity') {
+    if (aIsPosInf) {
       if (b.isPositive === true) {
         return { value: ce.PositiveInfinity, because: '+inf * positive -> +inf' };
       }
@@ -40,7 +56,7 @@ export function simplifyInfinity(x: BoxedExpression): RuleStep | undefined {
     }
 
     // x * NegativeInfinity
-    if (b.symbol === 'NegativeInfinity') {
+    if (bIsNegInf) {
       if (a.isPositive === true) {
         return { value: ce.NegativeInfinity, because: 'positive * -inf -> -inf' };
       }
@@ -50,7 +66,7 @@ export function simplifyInfinity(x: BoxedExpression): RuleStep | undefined {
     }
 
     // NegativeInfinity * x
-    if (a.symbol === 'NegativeInfinity') {
+    if (aIsNegInf) {
       if (b.isPositive === true) {
         return { value: ce.NegativeInfinity, because: '-inf * positive -> -inf' };
       }
@@ -60,7 +76,7 @@ export function simplifyInfinity(x: BoxedExpression): RuleStep | undefined {
     }
 
     // x * PositiveInfinity
-    if (b.symbol === 'PositiveInfinity') {
+    if (bIsPosInf) {
       if (a.isPositive === true) {
         return { value: ce.PositiveInfinity, because: 'positive * +inf -> +inf' };
       }
@@ -76,13 +92,19 @@ export function simplifyInfinity(x: BoxedExpression): RuleStep | undefined {
     const denom = x.op2;
 
     if (num && denom) {
-      // inf / inf -> NaN
-      if (num.isInfinity === true && denom.isInfinity === true) {
+      // Use isInfinity property to detect infinity values
+      const numIsInf = num.isInfinity === true;
+      const denomIsInf = denom.isInfinity === true;
+      const numIsPosInf = numIsInf && num.isPositive === true;
+      const numIsNegInf = numIsInf && num.isNegative === true;
+
+      // inf / inf -> NaN (indeterminate form)
+      if (numIsInf && denomIsInf) {
         return { value: ce.NaN, because: 'inf / inf -> NaN' };
       }
 
       // PositiveInfinity / x
-      if (num.symbol === 'PositiveInfinity') {
+      if (numIsPosInf) {
         if (denom.isPositive === true && denom.isFinite === true) {
           return { value: ce.PositiveInfinity, because: '+inf / positive -> +inf' };
         }
@@ -92,7 +114,7 @@ export function simplifyInfinity(x: BoxedExpression): RuleStep | undefined {
       }
 
       // NegativeInfinity / x
-      if (num.symbol === 'NegativeInfinity') {
+      if (numIsNegInf) {
         if (denom.isPositive === true && denom.isFinite === true) {
           return { value: ce.NegativeInfinity, because: '-inf / positive -> -inf' };
         }
@@ -109,13 +131,21 @@ export function simplifyInfinity(x: BoxedExpression): RuleStep | undefined {
     const exp = x.op2;
 
     if (base && exp) {
+      // Use isInfinity property to detect infinity values
+      const baseIsInf = base.isInfinity === true;
+      const expIsInf = exp.isInfinity === true;
+      const baseIsPosInf = baseIsInf && base.isPositive === true;
+      const baseIsNegInf = baseIsInf && base.isNegative === true;
+      const expIsPosInf = expIsInf && exp.isPositive === true;
+      const expIsNegInf = expIsInf && exp.isNegative === true;
+
       // 1^x -> 1 when x is finite
       if (base.is(1) && exp.isFinite === true) {
         return { value: ce.One, because: '1^finite -> 1' };
       }
 
       // a^0 -> NaN when a is infinity
-      if (exp.is(0) && base.isInfinity === true) {
+      if (exp.is(0) && baseIsInf) {
         return { value: ce.NaN, because: 'inf^0 -> NaN' };
       }
 
@@ -125,7 +155,7 @@ export function simplifyInfinity(x: BoxedExpression): RuleStep | undefined {
       }
 
       // a^PositiveInfinity patterns
-      if (exp.symbol === 'PositiveInfinity') {
+      if (expIsPosInf) {
         // a^+inf -> +inf when a > 1
         if (base.isGreater(1) === true) {
           return { value: ce.PositiveInfinity, because: 'a^+inf -> +inf when a > 1' };
@@ -137,7 +167,7 @@ export function simplifyInfinity(x: BoxedExpression): RuleStep | undefined {
       }
 
       // a^NegativeInfinity patterns
-      if (exp.symbol === 'NegativeInfinity') {
+      if (expIsNegInf) {
         // a^-inf -> 0 when a > 1
         if (base.isGreater(1) === true) {
           return { value: ce.Zero, because: 'a^-inf -> 0 when a > 1' };
@@ -149,7 +179,7 @@ export function simplifyInfinity(x: BoxedExpression): RuleStep | undefined {
       }
 
       // PositiveInfinity^a patterns
-      if (base.symbol === 'PositiveInfinity') {
+      if (baseIsPosInf) {
         // +inf^a -> 0 when a < 0
         if (exp.isNegative === true) {
           return { value: ce.Zero, because: '+inf^negative -> 0' };
@@ -158,7 +188,7 @@ export function simplifyInfinity(x: BoxedExpression): RuleStep | undefined {
       }
 
       // NegativeInfinity^a patterns
-      if (base.symbol === 'NegativeInfinity') {
+      if (baseIsNegInf) {
         // -inf^a -> 0 when a < 0
         if (exp.isNegative === true) {
           return { value: ce.Zero, because: '-inf^negative -> 0' };

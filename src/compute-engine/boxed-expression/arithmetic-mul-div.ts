@@ -34,11 +34,14 @@ export function canonicalDivide(
   // 0/0 = NaN, a/0 = ~∞ (a≠0)
   if (op2.is(0)) return op1.is(0) ? ce.NaN : ce.ComplexInfinity;
 
-  // 0/a = 0 (a≠0)
-  if (op1.is(0)) return ce.Zero;
+  // 0/a = 0 (a≠0, a is finite)
+  if (op1.is(0) && op2.isFinite !== false) return ce.Zero;
 
-  // a/a = 1 (if a ≠ 0)
-  if (op2.is(0) === false) {
+  // a/∞ = 0, ∞/∞ = NaN (check before a/a = 1 rule)
+  if (op2.isInfinity) return op1.isInfinity ? ce.NaN : ce.Zero;
+
+  // a/a = 1 (if a ≠ 0 and a is finite)
+  if (op2.is(0) === false && op2.isFinite !== false) {
     if (op1.symbol !== null && op1.symbol === op2.symbol && op1.isConstant)
       return ce.One;
 
@@ -76,9 +79,6 @@ export function canonicalDivide(
 
   // 1/a = a^-1
   if (op1.is(1)) return op2.inv();
-
-  // a/∞ = 0, ∞/∞ = NaN
-  if (op2.isInfinity) return op1.isInfinity ? ce.NaN : ce.Zero;
 
   // Note: (-1)/a ≠ -(a^-1). We distribute Negate over Divide.
 
