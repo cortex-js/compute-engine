@@ -2077,6 +2077,8 @@ function assignValueAsValue(
   if (typeof value === 'number' || typeof value === 'bigint')
     return ce.number(value);
   const expr = ce.box(value);
+  // Explicit function expressions should always be treated as operator definitions
+  if (expr.operator === 'Function') return undefined;
   if (expr.unknowns.some((s) => s.startsWith('_'))) {
     // If the expression has wildcards, it should be treated as a function
     // E.g. ["Add", "_", 1] or ["Add", "_x", 1]
@@ -2099,7 +2101,10 @@ function assignValueAsOperatorDef(
   const body = canonicalFunctionLiteral(ce.box(value));
   if (body === undefined) return undefined;
 
-  return { evaluate: body, signature: 'function' };
+  // Don't set an explicit signature - let it be inferred from the body.
+  // This ensures inferredSignature = true, which allows the return type
+  // to be properly narrowed during type checking (e.g., in Add operands).
+  return { evaluate: body };
 }
 
 function defToString(

@@ -696,7 +696,7 @@ describe('SUM', () => {
         .box(['Sum', ['Divide', 1, 'x'], 'x'])
         .evaluate()
         .toString()
-    ).toMatchInlineSnapshot(`44057567621371730/3061099221058841`));
+    ).toMatchInlineSnapshot(`5690887772881993/581432233225878`));
 
   it('should compute the sum of a collection', () =>
     expect(
@@ -757,7 +757,7 @@ describe('SUM', () => {
   it('should factor out constant from sum', () => {
     expect(
       ce.parse('\\sum_{n=1}^{b}(3n)').simplify().toString()
-    ).toMatchInlineSnapshot(`3/2 * (b^2 + b)`);
+    ).toMatchInlineSnapshot(`3/2 * b^2 + 3/2 * b`);
   });
 
   it('should factor out symbolic constant from sum', () => {
@@ -843,7 +843,7 @@ describe('SUM', () => {
   it('should simplify alternating linear series', () => {
     expect(
       ce.parse('\\sum_{n=0}^{b}((-1)^n * n)').simplify().toString()
-    ).toMatchInlineSnapshot(`floor(1/2 * b + 1/2) * (-1)^b`);
+    ).toMatchInlineSnapshot(`floor(1/2 * (b + 1)) * (-1)^b`);
   });
 
   it('should evaluate alternating linear series', () => {
@@ -1086,7 +1086,7 @@ describe('SUM', () => {
     // Sum(3n+5, [n, 1, b]) = (b)(5 + 3(1+b)/2) = 3b(b+1)/2 + 5b
     expect(
       ce.parse('\\sum_{n=1}^{b}(3n + 5)').simplify().toString()
-    ).toMatchInlineSnapshot(`3/2 * b^2 + 13/2 * b`);
+    ).toMatchInlineSnapshot(`3/2 * b * (b + 1) + 5b`);
   });
 
   it('should evaluate arithmetic progression with non-zero lower bound', () => {

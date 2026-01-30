@@ -160,40 +160,24 @@ describe('Quantifier Evaluation', () => {
     it('should evaluate ForAll over finite sets', () => {
       // All elements > 0
       expect(
-        box([
-          'ForAll',
-          ['Element', 'x', ['Set', 1, 2, 3]],
-          ['Greater', 'x', 0],
-        ])
+        box(['ForAll', ['Element', 'x', ['Set', 1, 2, 3]], ['Greater', 'x', 0]])
       ).toMatchInlineSnapshot(`"True"`);
 
       // Not all elements > 2
       expect(
-        box([
-          'ForAll',
-          ['Element', 'x', ['Set', 1, 2, 3]],
-          ['Greater', 'x', 2],
-        ])
+        box(['ForAll', ['Element', 'x', ['Set', 1, 2, 3]], ['Greater', 'x', 2]])
       ).toMatchInlineSnapshot(`"False"`);
     });
 
     it('should evaluate Exists over finite sets', () => {
       // Some element > 2
       expect(
-        box([
-          'Exists',
-          ['Element', 'x', ['Set', 1, 2, 3]],
-          ['Greater', 'x', 2],
-        ])
+        box(['Exists', ['Element', 'x', ['Set', 1, 2, 3]], ['Greater', 'x', 2]])
       ).toMatchInlineSnapshot(`"True"`);
 
       // No element > 5
       expect(
-        box([
-          'Exists',
-          ['Element', 'x', ['Set', 1, 2, 3]],
-          ['Greater', 'x', 5],
-        ])
+        box(['Exists', ['Element', 'x', ['Set', 1, 2, 3]], ['Greater', 'x', 5]])
       ).toMatchInlineSnapshot(`"False"`);
     });
 
@@ -240,20 +224,12 @@ describe('Quantifier Evaluation', () => {
     it('should evaluate over Range domains', () => {
       // All integers from 1 to 5 are > 0
       expect(
-        box([
-          'ForAll',
-          ['Element', 'n', ['Range', 1, 5]],
-          ['Greater', 'n', 0],
-        ])
+        box(['ForAll', ['Element', 'n', ['Range', 1, 5]], ['Greater', 'n', 0]])
       ).toMatchInlineSnapshot(`"True"`);
 
       // Some integer from 1 to 5 equals 3
       expect(
-        box([
-          'Exists',
-          ['Element', 'n', ['Range', 1, 5]],
-          ['Equal', 'n', 3],
-        ])
+        box(['Exists', ['Element', 'n', ['Range', 1, 5]], ['Equal', 'n', 3]])
       ).toMatchInlineSnapshot(`"True"`);
     });
   });
@@ -326,13 +302,13 @@ describe('CNF/DNF Conversion', () => {
 
     // A → B ≡ ¬A ∨ B (already in CNF)
     expect(box(['ToCNF', ['Implies', 'A', 'B']])).toMatchInlineSnapshot(
-      `B || !A`
+      `!A || B`
     );
 
     // ¬(A ∧ B) → ¬A ∨ ¬B (De Morgan)
-    expect(
-      box(['ToCNF', ['Not', ['And', 'A', 'B']]])
-    ).toMatchInlineSnapshot(`!A || !B`);
+    expect(box(['ToCNF', ['Not', ['And', 'A', 'B']]])).toMatchInlineSnapshot(
+      `!A || !B`
+    );
   });
 
   it('should convert to DNF', () => {
@@ -342,15 +318,15 @@ describe('CNF/DNF Conversion', () => {
     ).toMatchInlineSnapshot(`A && C || B && C`);
 
     // ¬(A ∨ B) → ¬A ∧ ¬B (De Morgan)
-    expect(
-      box(['ToDNF', ['Not', ['Or', 'A', 'B']]])
-    ).toMatchInlineSnapshot(`!A && !B`);
+    expect(box(['ToDNF', ['Not', ['Or', 'A', 'B']]])).toMatchInlineSnapshot(
+      `!A && !B`
+    );
   });
 
   it('should handle Equivalent', () => {
     // A ↔ B ≡ (¬A ∨ B) ∧ (¬B ∨ A) - order may vary
     expect(box(['ToCNF', ['Equivalent', 'A', 'B']])).toMatchInlineSnapshot(
-      `(B || !A) && (A || !B)`
+      `(!A || B) && (!B || A)`
     );
   });
 
@@ -362,7 +338,7 @@ describe('CNF/DNF Conversion', () => {
 
     // A ⊕ B ≡ (A ∧ ¬B) ∨ (¬A ∧ B) in DNF
     expect(box(['ToDNF', ['Xor', 'A', 'B']])).toMatchInlineSnapshot(
-      `A && !B || B && !A`
+      `!B && A || !A && B`
     );
   });
 
@@ -386,19 +362,15 @@ describe('CNF/DNF Conversion', () => {
 
   it('should handle Nor', () => {
     // NOR(A, B) ≡ ¬(A ∨ B) ≡ ¬A ∧ ¬B in CNF
-    expect(box(['ToCNF', ['Nor', 'A', 'B']])).toMatchInlineSnapshot(
-      `!A && !B`
-    );
+    expect(box(['ToCNF', ['Nor', 'A', 'B']])).toMatchInlineSnapshot(`!A && !B`);
     // In DNF it's the same (already in DNF form)
-    expect(box(['ToDNF', ['Nor', 'A', 'B']])).toMatchInlineSnapshot(
-      `!A && !B`
-    );
+    expect(box(['ToDNF', ['Nor', 'A', 'B']])).toMatchInlineSnapshot(`!A && !B`);
   });
 
   it('should handle n-ary operators in CNF/DNF', () => {
     // n-ary XOR - order of clauses may vary (AND is commutative)
     expect(box(['ToCNF', ['Xor', 'A', 'B', 'C']])).toMatchInlineSnapshot(
-      `(A || B || C) && (C || !A || !B) && (A || !B || !C) && (B || !A || !C)`
+      `(A || B || C) && (!A || !B || C) && (!B || A || !C) && (!A || B || !C)`
     );
     // n-ary NAND
     expect(box(['ToCNF', ['Nand', 'A', 'B', 'C']])).toMatchInlineSnapshot(

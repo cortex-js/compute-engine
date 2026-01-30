@@ -1621,9 +1621,9 @@ describe('POLYNOMIAL DIVISION REGRESSION', () => {
   test('Cancel common polynomial factors (x-1)', () =>
     expect(simplify('\\frac{(x-1)(x+2)}{(x-1)(x+3)}')).toMatchInlineSnapshot(`
       [
-        "Divide",
-        ["Add", ["Square", "x"], "x", -2],
-        ["Add", ["Square", "x"], ["Multiply", 2, "x"], -3]
+        "Add",
+        ["Divide", "x", ["Add", "x", 3]],
+        ["Divide", 2, ["Add", "x", 3]]
       ]
     `));
 });

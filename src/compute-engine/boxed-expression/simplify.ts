@@ -13,6 +13,59 @@ type InternalSimplifyOptions = SimplifyOptions & {
   useVariations: boolean;
 };
 
+const BASIC_ARITHMETIC = [
+  'Add',
+  'Subtract',
+  'Multiply',
+  'Divide',
+  'Negate',
+  'Power',
+  'Rational',
+];
+
+// Trig functions with constructible special values
+const CONSTRUCTIBLE_TRIG = ['Sin', 'Cos', 'Tan', 'Csc', 'Sec', 'Cot'];
+
+/**
+ * Check if an expression contains a constructible trig function somewhere
+ * in its subexpressions. Used to determine if we need to recursively
+ * simplify an operand to get constructible value simplification.
+ */
+function containsConstructibleTrig(expr: BoxedExpression): boolean {
+  if (CONSTRUCTIBLE_TRIG.includes(expr.operator)) return true;
+  if (!expr.ops) return false;
+  return expr.ops.some((op) => containsConstructibleTrig(op));
+}
+
+/**
+ * Recursively evaluate purely numeric subexpressions without full simplification.
+ * This handles cases like Power(x, Add(1,2)) where Add(1,2) should become 3.
+ * Unlike full simplification, this won't expand polynomial factors.
+ */
+function evaluateNumericSubexpressions(expr: BoxedExpression): BoxedExpression {
+  // Number literals are already simplified
+  if (expr.isNumberLiteral) return expr;
+
+  // No ops means symbol or other atomic - return as is
+  if (!expr.ops) return expr;
+
+  // If purely numeric (no unknowns), evaluate the whole expression
+  if (expr.unknowns.length === 0 && BASIC_ARITHMETIC.includes(expr.operator)) {
+    const evaluated = expr.evaluate();
+    if (evaluated.isNumberLiteral) return evaluated;
+  }
+
+  // Otherwise, recursively process operands
+  const newOps = expr.ops.map((op) => evaluateNumericSubexpressions(op));
+
+  // Check if anything changed
+  const changed = newOps.some((op, i) => op !== expr.ops![i]);
+  if (!changed) return expr;
+
+  // Reconstruct with _fn to avoid re-canonicalization
+  return expr.engine._fn(expr.operator, newOps);
+}
+
 export function simplify(
   expr: BoxedExpression,
   options?: Partial<InternalSimplifyOptions>,
@@ -120,7 +173,7 @@ function simplifyOperands(
 
   const def = expr.operatorDefinition;
 
-  // For scoped functions (Sum, Product), use holdMap but simplify non-body operands
+  // For scoped functions (Sum, Product, D), use holdMap but simplify non-body operands
   if (def?.scoped === true) {
     const simplifiedOps = expr.ops.map((x, i) => {
       // Don't simplify the body (first operand) to allow pattern-matching rules to work
@@ -128,25 +181,67 @@ function simplifyOperands(
       // Simplify other operands (like Limits)
       return simplify(x, options).at(-1)!.value;
     });
-    return expr.engine.function(expr.operator, simplifiedOps);
+    // Use _fn() to bypass canonicalization - operands are already canonical.
+    // This avoids triggering handlers like D's canonicalFunctionLiteralArguments
+    // which would add extra Function wrappers.
+    return expr.engine._fn(expr.operator, simplifiedOps);
   }
 
-  // For lazy but non-scoped functions (Multiply, Add), we need a balanced approach:
-  // - Respect holdMap for evaluation semantics
-  // - But also simplify Sum/Product operands that result from other simplification rules
+  // For non-scoped functions, we need to balance simplification with holdMap semantics
 
   // First get the operands through holdMap
   const ops = holdMap(expr, (x) => x);
 
-  // Then simplify any Sum/Product operands specifically
+  // For lazy functions (Multiply, Add), only simplify Sum/Product operands
+  // and expressions containing constructible trig functions
+  // to avoid interfering with their special handling in simplify-rules
+  if (def?.lazy) {
+    const simplifiedOps = ops.map((x) => {
+      if (
+        x.operator === 'Sum' ||
+        x.operator === 'Product' ||
+        containsConstructibleTrig(x)
+      ) {
+        return simplify(x, options).at(-1)!.value;
+      }
+      return x;
+    });
+    return expr.engine.function(expr.operator, simplifiedOps);
+  }
+
+  // For non-lazy, non-scoped functions (e.g., Factorial2, Sqrt, Degrees),
+  // recursively simplify operands. This ensures expressions like Factorial2(-1 + 2*3)
+  // become Factorial2(5) and Degrees(tan(90-0.000001)) becomes Degrees(tan(89.999999)).
+  //
+  // EXCEPTION: For Divide expressions, only evaluate purely numeric subexpressions
+  // but don't do full recursive simplification. This preserves factored polynomial
+  // structure for the cancelCommonFactors rule.
+  // e.g., (x-1)(x+2)/((x-1)(x+3)) should cancel to (x+2)/(x+3), not expand first.
+  // But x^(1+2)/(1+2) should still simplify to x^3/3.
+  if (expr.operator === 'Divide') {
+    const simplifiedOps = ops.map((x) => evaluateNumericSubexpressions(x));
+    const changed = simplifiedOps.some((op, i) => op !== ops[i]);
+    if (!changed) return expr;
+    return expr.engine._fn(expr.operator, simplifiedOps);
+  }
+
   const simplifiedOps = ops.map((x) => {
-    if (x.operator === 'Sum' || x.operator === 'Product') {
+    // For purely numeric basic arithmetic expressions, evaluate directly
+    // to get simpler results like √(1+2) → √3
+    if (!x.isNumberLiteral && x.ops && x.unknowns.length === 0) {
+      if (BASIC_ARITHMETIC.includes(x.operator)) {
+        const evaluated = x.evaluate();
+        if (evaluated.isNumberLiteral) return evaluated;
+      }
+    }
+    // For other expressions with ops (like Tan, Sqrt, etc.), recursively simplify
+    if (x.ops) {
       return simplify(x, options).at(-1)!.value;
     }
     return x;
   });
-
-  return expr.engine.function(expr.operator, simplifiedOps);
+  // Use _fn() since operands are already canonical (simplified above)
+  return expr.engine._fn(expr.operator, simplifiedOps);
 }
 
 function simplifyExpression(

@@ -201,6 +201,7 @@ const FUNCTIONS: Record<
   string | ((expr: BoxedExpression, serialize: AsciiMathSerializer) => string)
 > = {
   Abs: (expr: BoxedExpression, serialize) => `|${serialize(expr.op1)}|`,
+  Norm: (expr: BoxedExpression, serialize) => `||${serialize(expr.op1)}||`,
 
   // Trigonometric functions
   Sin: 'sin',

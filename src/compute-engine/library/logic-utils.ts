@@ -6,13 +6,63 @@ import { asSmallInteger } from '../boxed-expression/numerics';
  * Extracted from logic.ts for better code organization.
  */
 
+/**
+ * Check if an And expression is a contradiction (contains A and Not(A)).
+ * Non-recursive to avoid infinite loops.
+ */
+function isContradiction(
+  args: ReadonlyArray<BoxedExpression>
+): boolean {
+  for (let i = 0; i < args.length; i++) {
+    const arg = args[i];
+    for (let j = i + 1; j < args.length; j++) {
+      const other = args[j];
+      if (
+        (arg.operator === 'Not' && arg.op1.isSame(other)) ||
+        (other.operator === 'Not' && other.op1.isSame(arg))
+      ) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
+/**
+ * Check if an Or expression is a tautology (contains A and Not(A)).
+ * Non-recursive to avoid infinite loops.
+ */
+function isTautologyCheck(
+  args: ReadonlyArray<BoxedExpression>
+): boolean {
+  for (let i = 0; i < args.length; i++) {
+    const arg = args[i];
+    for (let j = i + 1; j < args.length; j++) {
+      const other = args[j];
+      if (
+        (arg.operator === 'Not' && arg.op1.isSame(other)) ||
+        (other.operator === 'Not' && other.op1.isSame(arg))
+      ) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
 export function evaluateAnd(
   args: ReadonlyArray<BoxedExpression>,
   { engine: ce }: { engine: ComputeEngine }
 ): BoxedExpression | undefined {
   if (args.length === 0) return ce.True;
   const ops: BoxedExpression[] = [];
-  for (const arg of args) {
+  for (let arg of args) {
+    // Check if an Or operand is a tautology (contains A and Not(A))
+    // For example: Or(A, Not(A)) -> True, and And(..., True, ...) simplifies
+    if (arg.operator === 'Or' && isTautologyCheck(arg.ops!)) {
+      arg = ce.True;
+    }
+
     // ['And', ... , 'False', ...] -> 'False'
     if (arg.symbol === 'False') return ce.False;
     if (arg.symbol !== 'True') {
@@ -46,7 +96,13 @@ export function evaluateOr(
 ): BoxedExpression | undefined {
   if (args.length === 0) return ce.True;
   const ops: BoxedExpression[] = [];
-  for (const arg of args) {
+  for (let arg of args) {
+    // Check if an And operand is a contradiction (contains A and Not(A))
+    // For example: And(A, Not(A)) -> False, and Or(..., False, ...) is removed
+    if (arg.operator === 'And' && isContradiction(arg.ops!)) {
+      arg = ce.False;
+    }
+
     // ['Or', ... , 'True', ...] -> 'True'
     if (arg.symbol === 'True') return ce.True;
     if (arg.symbol !== 'False') {

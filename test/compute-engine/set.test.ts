@@ -41,13 +41,17 @@ describe('ELEMENT', () => {
     expect(ce.box(['Element', 2]).evaluate()).toMatchInlineSnapshot(
       `["Element", 2, ["Error", "'missing'"]]`
     );
-    expect(ce.box(['Element', 2, 'Integers', 'Numbers']).evaluate())
-      .toMatchInlineSnapshot(`
+    expect(
+      ce.box(['Element', 2, 'Integers', 'Numbers']).evaluate()
+    ).toMatchInlineSnapshot(`
       [
         "Element",
         2,
         "Integers",
-        ["Error", "unexpected-argument", ""Numbers""]
+        [
+          "Error",
+          ["ErrorCode", "incompatible-type", "'boolean'", "set<number>"]
+        ]
       ]
     `);
     expect(ce.box(['Element', 2, 3]).evaluate()).toMatchInlineSnapshot(`

@@ -130,6 +130,8 @@ describe('OPERATOR invisible', () => {
         ["Delimiter", ["InvisibleOperator", 2, "q"]]
       ]
       canonical = ["q", ["Multiply", 2, "q"]]
+      simplify  = q(2Error(ErrorCode("incompatible-type", "number", "function")))
+      eval-auto = q(2q)
     `));
 
   test('f(2q) // Invisible operator as a function', () =>
@@ -420,7 +422,7 @@ describe('OPERATOR postfix', () => {
     expect(check('-2-5!')).toMatchInlineSnapshot(`
       box       = ["Add", -2, ["Negate", ["Factorial", 5]]]
       canonical = ["Subtract", ["Negate", ["Factorial", 5]], 2]
-      eval-auto = -122
+      simplify  = -122
     `));
   test('-5! // Precedence', () =>
     expect(check('-5!')).toMatchInlineSnapshot(`

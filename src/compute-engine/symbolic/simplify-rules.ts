@@ -26,6 +26,77 @@ import { simplifySum } from './simplify-sum';
 import { simplifyProduct } from './simplify-product';
 
 /**
+ * # Performance Optimization Notes for Simplification Rules
+ *
+ * This file contains rules that are applied repeatedly during simplification.
+ * Performance is critical here. Keep these guidelines in mind when writing
+ * or optimizing rules:
+ *
+ * ## 1. Use `_fn()` instead of `function()` when operands are already canonical
+ *
+ * When creating expressions in rule replacements, the operands (from pattern
+ * matching like `ids._x`) are already canonical. Using `_fn()` bypasses
+ * re-canonicalization and avoids potential recursion issues:
+ *
+ * ```typescript
+ * // Slower - re-canonicalizes operands:
+ * replace: (expr, ids) => expr.engine.function('Sin', [ids._x])
+ *
+ * // Faster - operands already canonical:
+ * replace: (expr, ids) => expr.engine._fn('Sin', [ids._x])
+ * ```
+ *
+ * Note: For n-ary operators like Add/Multiply that need flattening or sorting,
+ * `function()` may still be necessary.
+ *
+ * ## 2. Avoid LaTeX strings - prefer MathJSON patterns
+ *
+ * LaTeX strings require parsing which is costly. Use MathJSON arrays instead:
+ *
+ * ```typescript
+ * // Slower - requires LaTeX parsing:
+ * '\\sin(x) -> \\cos(x)'
+ *
+ * // Faster - direct MathJSON:
+ * { match: ['Sin', '_x'], replace: (expr, ids) => expr.engine._fn('Cos', [ids._x]) }
+ * ```
+ *
+ * The `match -> replace` string syntax is convenient for prototyping but should
+ * be converted to MathJSON for production rules.
+ *
+ * ## 3. Use functional rules for quick applicability checks
+ *
+ * Pattern matching has overhead. For rules that only apply to specific operators,
+ * use the functional form to do a quick check first:
+ *
+ * ```typescript
+ * // Pattern matching approach - always attempts match:
+ * { match: ['Abs', ['Negate', '_x']], replace: ... }
+ *
+ * // Functional approach - quick bailout if not applicable:
+ * (x): RuleStep | undefined => {
+ *   if (x.operator !== 'Abs') return undefined;
+ *   if (x.op1.operator !== 'Negate') return undefined;
+ *   return { value: x.engine._fn('Abs', [x.op1.op1]), because: 'abs-negate' };
+ * }
+ * ```
+ *
+ * ## 4. Use helper functions for common replacements
+ *
+ * The helper functions below (toNaN, toZero, etc.) avoid creating new
+ * expressions and improve performance for common constant replacements.
+ */
+
+// Helper functions for common rule replacements
+// These avoid parsing LaTeX strings and improve initialization performance
+const toNaN = (expr: BoxedExpression) => expr.engine.NaN;
+const toZero = (expr: BoxedExpression) => expr.engine.Zero;
+const toOne = (expr: BoxedExpression) => expr.engine.One;
+const toNegativeOne = (expr: BoxedExpression) => expr.engine.NegativeOne;
+const toInfinity = (expr: BoxedExpression) => expr.engine.PositiveInfinity;
+const toNegativeInfinity = (expr: BoxedExpression) => expr.engine.NegativeInfinity;
+
+/**
  * Reduce trigonometric functions by their periodicity.
  *
  * For sin/cos/sec/csc (period 2π): reduce coefficient of π modulo 2
@@ -212,9 +283,21 @@ export const SIMPLIFY_RULES: Rule[] = [
   (x): RuleStep | undefined => {
     if (x.operator !== 'Add') return undefined;
     // The Add function has a 'lazy' property, so we need to ensure operands are canonical.
-    // IMPORTANT: Don't call .simplify() to avoid infinite recursion.
+    // Also evaluate purely numeric operands (no unknowns) to simplify expressions like √(1+2) → √3.
+    // IMPORTANT: Don't call .simplify() on operands to avoid infinite recursion.
     return {
-      value: add(...x.ops!.map((x) => x.canonical)),
+      value: add(
+        ...x.ops!.map((op) => {
+          const canonical = op.canonical;
+          // Evaluate purely numeric operands (no unknowns) to simplify them
+          if (canonical.unknowns.length === 0 && canonical.ops) {
+            const evaluated = canonical.evaluate();
+            // Only use evaluated form if it's simpler (a number literal)
+            if (evaluated.isNumberLiteral) return evaluated;
+          }
+          return canonical;
+        })
+      ),
       because: 'addition',
     };
   },
@@ -231,9 +314,21 @@ export const SIMPLIFY_RULES: Rule[] = [
     if (x.operator !== 'Multiply') return undefined;
 
     // The Multiply function has a 'lazy' property, so we need to ensure operands are canonical.
-    // IMPORTANT: Don't call .simplify() to avoid infinite recursion.
+    // Also evaluate purely numeric operands (no unknowns) to simplify expressions.
+    // IMPORTANT: Don't call .simplify() on operands to avoid infinite recursion.
     return {
-      value: mul(...x.ops!.map((x) => x.canonical)),
+      value: mul(
+        ...x.ops!.map((op) => {
+          const canonical = op.canonical;
+          // Evaluate purely numeric operands (no unknowns) to simplify them
+          if (canonical.unknowns.length === 0 && canonical.ops) {
+            const evaluated = canonical.evaluate();
+            // Only use evaluated form if it's simpler (a number literal)
+            if (evaluated.isNumberLiteral) return evaluated;
+          }
+          return canonical;
+        })
+      ),
       because: 'multiplication',
     };
   },
@@ -462,12 +557,8 @@ export const SIMPLIFY_RULES: Rule[] = [
     };
   },
 
-  '\\arcsinh(x) -> \\ln(x+\\sqrt{x^2+1})',
-  '\\arccosh(x) -> \\ln(x+\\sqrt{x^2-1})',
-  '\\arctanh(x) -> \\frac{1}{2}\\ln(\\frac{1+x}{1-x})',
-  '\\arccoth(x) -> \\frac{1}{2}\\ln(\\frac{x+1}{x-1})',
-  '\\arcsech(x) -> \\ln(\\frac{1+\\sqrt{1-x^2}}{x})',
-  '\\arccsch(x) -> \\ln(\\frac{1}{x} + \\sqrt{\\frac{1}{x^2}+1})',
+  // Note: Inverse hyperbolic function conversions to logarithms are handled
+  // later in the file to avoid duplicate definitions
 
   //
   // Logic
@@ -478,33 +569,33 @@ export const SIMPLIFY_RULES: Rule[] = [
   // Trig and Infinity
   //
   {
-    match: '\\sin(x)',
-    replace: '\\operatorname{NaN}',
+    match: ['Sin', '_x'],
+    replace: toNaN,
     condition: (id) => id._x.isInfinity === true,
   },
   {
-    match: '\\cos(x)',
-    replace: '\\operatorname{NaN}',
+    match: ['Cos', '_x'],
+    replace: toNaN,
     condition: (id) => id._x.isInfinity === true,
   },
   {
-    match: '\\tan(x)',
-    replace: '\\operatorname{NaN}',
+    match: ['Tan', '_x'],
+    replace: toNaN,
     condition: (id) => id._x.isInfinity === true,
   },
   {
-    match: '\\cot(x)',
-    replace: '\\operatorname{NaN}',
+    match: ['Cot', '_x'],
+    replace: toNaN,
     condition: (id) => id._x.isInfinity === true,
   },
   {
-    match: '\\sec(x)',
-    replace: '\\operatorname{NaN}',
+    match: ['Sec', '_x'],
+    replace: toNaN,
     condition: (id) => id._x.isInfinity === true,
   },
   {
-    match: '\\csc(x)',
-    replace: '\\operatorname{NaN}',
+    match: ['Csc', '_x'],
+    replace: toNaN,
     condition: (id) => id._x.isInfinity === true,
   },
 
@@ -512,48 +603,48 @@ export const SIMPLIFY_RULES: Rule[] = [
   // Hyperbolic Trig and Infinity
   //
   {
-    match: '\\sinh(x)',
-    replace: '\\infty',
+    match: ['Sinh', '_x'],
+    replace: toInfinity,
     condition: (id) => id._x.isInfinity === true && id._x.isPositive === true,
   },
   {
-    match: '\\sinh(x)',
-    replace: '-\\infty',
+    match: ['Sinh', '_x'],
+    replace: toNegativeInfinity,
     condition: (id) => id._x.isInfinity === true && id._x.isNegative === true,
   },
   {
-    match: '\\cosh(x)',
-    replace: '\\infty',
+    match: ['Cosh', '_x'],
+    replace: toInfinity,
     condition: (id) => id._x.isInfinity === true,
   },
   {
-    match: '\\tanh(x)',
-    replace: '1',
+    match: ['Tanh', '_x'],
+    replace: toOne,
     condition: (id) => id._x.isInfinity === true && id._x.isPositive === true,
   },
   {
-    match: '\\tanh(x)',
-    replace: '-1',
+    match: ['Tanh', '_x'],
+    replace: toNegativeOne,
     condition: (id) => id._x.isInfinity === true && id._x.isNegative === true,
   },
   {
-    match: '\\coth(x)',
-    replace: '1',
+    match: ['Coth', '_x'],
+    replace: toOne,
     condition: (id) => id._x.isInfinity === true && id._x.isPositive === true,
   },
   {
-    match: '\\coth(x)',
-    replace: '-1',
+    match: ['Coth', '_x'],
+    replace: toNegativeOne,
     condition: (id) => id._x.isInfinity === true && id._x.isNegative === true,
   },
   {
-    match: '\\sech(x)',
-    replace: '0',
+    match: ['Sech', '_x'],
+    replace: toZero,
     condition: (id) => id._x.isInfinity === true,
   },
   {
-    match: '\\csch(x)',
-    replace: '0',
+    match: ['Csch', '_x'],
+    replace: toZero,
     condition: (id) => id._x.isInfinity === true,
   },
 
@@ -634,8 +725,9 @@ export const SIMPLIFY_RULES: Rule[] = [
   //
   // ln(x^n) -> n*ln(x) when x is non-negative or n is odd
   {
-    match: '\\ln(x^n)',
-    replace: 'n*\\ln(x)',
+    match: ['Ln', ['Power', '_x', '_n']],
+    replace: (expr, ids) =>
+      ids._n.mul(expr.engine.function('Ln', [ids._x])),
     condition: (ids) =>
       ids._x.isNonNegative === true ||
       ids._n.isOdd === true ||
@@ -643,14 +735,18 @@ export const SIMPLIFY_RULES: Rule[] = [
   },
   // ln(x^n) -> n*ln(|x|) when n is even
   {
-    match: '\\ln(x^n)',
-    replace: 'n*\\ln(|x|)',
+    match: ['Ln', ['Power', '_x', '_n']],
+    replace: (expr, ids) =>
+      ids._n.mul(
+        expr.engine.function('Ln', [expr.engine.function('Abs', [ids._x])])
+      ),
     condition: (ids) => ids._n.isEven === true,
   },
   // log_c(x^n) -> n*log_c(x) when x is non-negative or n is odd
   {
-    match: '\\log_c(x^n)',
-    replace: 'n*\\log_c(x)',
+    match: ['Log', ['Power', '_x', '_n'], '_c'],
+    replace: (expr, ids) =>
+      ids._n.mul(expr.engine.function('Log', [ids._x, ids._c])),
     condition: (ids) =>
       ids._x.isNonNegative === true ||
       ids._n.isOdd === true ||
@@ -658,14 +754,21 @@ export const SIMPLIFY_RULES: Rule[] = [
   },
   // log_c(x^n) -> n*log_c(|x|) when n is even
   {
-    match: '\\log_c(x^n)',
-    replace: 'n*\\log_c(|x|)',
+    match: ['Log', ['Power', '_x', '_n'], '_c'],
+    replace: (expr, ids) =>
+      ids._n.mul(
+        expr.engine.function('Log', [
+          expr.engine.function('Abs', [ids._x]),
+          ids._c,
+        ])
+      ),
     condition: (ids) => ids._n.isEven === true,
   },
-  // log_c(x^{n/k}) -> n*log_c(x)/k when x is non-negative or n is odd
+  // log_c(x^(n/k)) -> (n/k)*log_c(x) when x is non-negative or n is odd
   {
-    match: '\\log_c(x^{n/k})',
-    replace: '(n/k)*\\log_c(x)',
+    match: ['Log', ['Power', '_x', ['Divide', '_n', '_k']], '_c'],
+    replace: (expr, ids) =>
+      ids._n.div(ids._k).mul(expr.engine.function('Log', [ids._x, ids._c])),
     condition: (ids) => ids._x.isNonNegative === true || ids._n.isOdd === true,
   },
 
@@ -702,386 +805,650 @@ export const SIMPLIFY_RULES: Rule[] = [
   },
 
   //Not Being Run (gives infinity instead of NaN)
-  'x/0 -> \\operatorname{NaN}',
   {
-    match: '0^x',
-    replace: '\\operatorname{NaN}',
+    match: ['Divide', '_x', 0],
+    replace: toNaN,
+  },
+  {
+    match: ['Power', 0, '_x'],
+    replace: toNaN,
     condition: (ids) => ids._x.isNonPositive === true,
   },
 
   //Currently gives 0
   {
-    match: '0*x',
-    replace: '\\operatorname{NaN}',
+    match: ['Multiply', 0, '_x'],
+    replace: toNaN,
     condition: (_x) => _x._x.isInfinity === true,
   },
 
   //Ln
-  // '\\log(x) -> \\ln(x)',
-  '\\ln(x)+\\ln(y) -> \\ln(x*y)', //assumes negative arguments are allowed
-  '\\ln(x)-\\ln(y) -> \\ln(x/y)',
-  'e^{\\ln(x)+y} -> x*e^y',
-  'e^{\\ln(x)-y} -> x/e^y',
-  'e^{\\ln(x)*y} -> x^y',
-  'e^{\\ln(x)/y} -> x^{1/y}',
-  'e^\\ln(x) -> x',
-  '\\ln(e^x*y) -> x+\\ln(y)',
-  '\\ln(e^x/y) -> x-\\ln(y)',
-  '\\ln(y/e^x) -> \\ln(y)-x',
-  '\\ln(0) -> \\operatorname{NaN}',
+  // ln(x) + ln(y) -> ln(x*y) (assumes negative arguments are allowed)
+  {
+    match: ['Add', ['Ln', '_x'], ['Ln', '_y']],
+    replace: (expr, ids) => expr.engine.function('Ln', [ids._x.mul(ids._y)]),
+  },
+  // ln(x) - ln(y) -> ln(x/y)
+  {
+    match: ['Subtract', ['Ln', '_x'], ['Ln', '_y']],
+    replace: (expr, ids) => expr.engine.function('Ln', [ids._x.div(ids._y)]),
+  },
+  // e^(ln(x)+y) -> x*e^y
+  {
+    match: ['Power', 'ExponentialE', ['Add', ['Ln', '_x'], '_y']],
+    replace: (expr, ids) =>
+      ids._x.mul(expr.engine.function('Exp', [ids._y])),
+  },
+  // e^(ln(x)-y) -> x/e^y
+  {
+    match: ['Power', 'ExponentialE', ['Subtract', ['Ln', '_x'], '_y']],
+    replace: (expr, ids) =>
+      ids._x.div(expr.engine.function('Exp', [ids._y])),
+  },
+  // e^(ln(x)*y) -> x^y
+  {
+    match: ['Power', 'ExponentialE', ['Multiply', ['Ln', '_x'], '_y']],
+    replace: (expr, ids) => ids._x.pow(ids._y),
+  },
+  // e^(ln(x)/y) -> x^(1/y)
+  {
+    match: ['Power', 'ExponentialE', ['Divide', ['Ln', '_x'], '_y']],
+    replace: (expr, ids) => ids._x.pow(expr.engine.One.div(ids._y)),
+  },
+  // e^ln(x) -> x
+  {
+    match: ['Power', 'ExponentialE', ['Ln', '_x']],
+    replace: (expr, ids) => ids._x,
+  },
+  // ln(e^x*y) -> x+ln(y)
+  {
+    match: ['Ln', ['Multiply', ['Power', 'ExponentialE', '_x'], '_y']],
+    replace: (expr, ids) =>
+      ids._x.add(expr.engine.function('Ln', [ids._y])),
+  },
+  // ln(e^x/y) -> x-ln(y)
+  {
+    match: ['Ln', ['Divide', ['Power', 'ExponentialE', '_x'], '_y']],
+    replace: (expr, ids) =>
+      ids._x.sub(expr.engine.function('Ln', [ids._y])),
+  },
+  // ln(y/e^x) -> ln(y)-x
+  {
+    match: ['Ln', ['Divide', '_y', ['Power', 'ExponentialE', '_x']]],
+    replace: (expr, ids) =>
+      expr.engine.function('Ln', [ids._y]).sub(ids._x),
+  },
+  {
+    match: ['Ln', 0],
+    replace: toNaN,
+  },
 
   //Log base c
   {
-    match: '\\log_c(x)',
-    replace: '\\operatorname{NaN}',
+    match: ['Log', '_x', '_c'],
+    replace: toNaN,
     condition: (id) => id._c.isZero === true || id._c.isOne === true,
   },
-  '\\log_c(x)+\\log_c(y) -> \\log_c(x*y)', //assumes negative arguments are allowed
-  '\\log_c(x)-\\log_c(y) -> \\log_c(x/y)',
-  '\\log_c(c^x) -> x',
-  '\\log_c(c) -> 1',
-  '\\log_c(0) -> \\operatorname{NaN}',
-  'c^{\\log_c(x)} -> x',
-  'c^{\\log_c(x)*y} -> x^y',
-  'c^{\\log_c(x)/y} -> x^{1/y}',
-  '\\log_c(c^x*y) -> x+\\log_c(y)',
-  '\\log_c(c^x/y) -> x-\\log_c(y)',
-  '\\log_c(y/c^x) -> \\log_c(y)-x',
-  'c^{\\log_c(x)+y} -> x*c^y',
-  'c^{\\log_c(x)-y} -> x/c^y',
+  // log_c(x) + log_c(y) -> log_c(x*y) (assumes negative arguments are allowed)
+  {
+    match: ['Add', ['Log', '_x', '_c'], ['Log', '_y', '_c']],
+    replace: (expr, ids) =>
+      expr.engine.function('Log', [ids._x.mul(ids._y), ids._c]),
+  },
+  // log_c(x) - log_c(y) -> log_c(x/y)
+  {
+    match: ['Subtract', ['Log', '_x', '_c'], ['Log', '_y', '_c']],
+    replace: (expr, ids) =>
+      expr.engine.function('Log', [ids._x.div(ids._y), ids._c]),
+  },
+  // log_c(c^x) -> x
+  {
+    match: ['Log', ['Power', '_c', '_x'], '_c'],
+    replace: (expr, ids) => ids._x,
+  },
+  {
+    match: ['Log', '_c', '_c'],
+    replace: toOne,
+  },
+  {
+    match: ['Log', 0, '_c'],
+    replace: toNaN,
+  },
+  // c^log_c(x) -> x
+  {
+    match: ['Power', '_c', ['Log', '_x', '_c']],
+    replace: (expr, ids) => ids._x,
+  },
+  // c^(log_c(x)*y) -> x^y
+  {
+    match: ['Power', '_c', ['Multiply', ['Log', '_x', '_c'], '_y']],
+    replace: (expr, ids) => ids._x.pow(ids._y),
+  },
+  // c^(log_c(x)/y) -> x^(1/y)
+  {
+    match: ['Power', '_c', ['Divide', ['Log', '_x', '_c'], '_y']],
+    replace: (expr, ids) => ids._x.pow(expr.engine.One.div(ids._y)),
+  },
+  // log_c(c^x*y) -> x + log_c(y)
+  {
+    match: ['Log', ['Multiply', ['Power', '_c', '_x'], '_y'], '_c'],
+    replace: (expr, ids) =>
+      ids._x.add(expr.engine.function('Log', [ids._y, ids._c])),
+  },
+  // log_c(c^x/y) -> x - log_c(y)
+  {
+    match: ['Log', ['Divide', ['Power', '_c', '_x'], '_y'], '_c'],
+    replace: (expr, ids) =>
+      ids._x.sub(expr.engine.function('Log', [ids._y, ids._c])),
+  },
+  // log_c(y/c^x) -> log_c(y) - x
+  {
+    match: ['Log', ['Divide', '_y', ['Power', '_c', '_x']], '_c'],
+    replace: (expr, ids) =>
+      expr.engine.function('Log', [ids._y, ids._c]).sub(ids._x),
+  },
+  // c^(log_c(x)+y) -> x*c^y
+  {
+    match: ['Power', '_c', ['Add', ['Log', '_x', '_c'], '_y']],
+    replace: (expr, ids) => ids._x.mul(ids._c.pow(ids._y)),
+  },
+  // c^(log_c(x)-y) -> x/c^y
+  {
+    match: ['Power', '_c', ['Subtract', ['Log', '_x', '_c'], '_y']],
+    replace: (expr, ids) => ids._x.div(ids._c.pow(ids._y)),
+  },
 
   //Change of Base
-  '\\log_{1/c}(a) -> -\\log_c(a)',
-  '\\log_c(a)*\\ln(a) -> \\ln(c)',
-  '\\log_c(a)/\\log_c(b) -> \\ln(a)/\\ln(b)',
-  '\\log_c(a)/\\ln(a) -> 1/\\ln(c)',
-  '\\ln(a)/\\log_c(a) -> \\ln(c)',
+  // log_{1/c}(a) -> -log_c(a)
+  {
+    match: ['Log', '_a', ['Divide', 1, '_c']],
+    replace: (expr, ids) =>
+      expr.engine.function('Log', [ids._a, ids._c]).neg(),
+  },
+  // log_c(a) * ln(a) -> ln(c) - note: this seems mathematically incorrect, skipping
+  // log_c(a) / log_c(b) -> ln(a) / ln(b)
+  {
+    match: ['Divide', ['Log', '_a', '_c'], ['Log', '_b', '_c']],
+    replace: (expr, ids) =>
+      expr.engine
+        .function('Ln', [ids._a])
+        .div(expr.engine.function('Ln', [ids._b])),
+  },
+  // log_c(a) / ln(a) -> 1/ln(c)
+  {
+    match: ['Divide', ['Log', '_a', '_c'], ['Ln', '_a']],
+    replace: (expr, ids) =>
+      expr.engine.One.div(expr.engine.function('Ln', [ids._c])),
+  },
+  // ln(a) / log_c(a) -> ln(c)
+  {
+    match: ['Divide', ['Ln', '_a'], ['Log', '_a', '_c']],
+    replace: (expr, ids) => expr.engine.function('Ln', [ids._c]),
+  },
 
   //Absolute Value
-  '|-x| -> |x|',
+  // |-x| -> |x|
   {
-    match: '|x|',
-    replace: 'x',
+    match: ['Abs', ['Negate', '_x']],
+    replace: (expr, ids) => expr.engine.function('Abs', [ids._x]),
+  },
+  {
+    match: ['Abs', '_x'],
+    replace: (expr, ids) => ids._x,
     condition: (ids) => ids._x.isNonNegative === true,
   },
   {
-    match: '|x|',
-    replace: '-x',
+    match: ['Abs', '_x'],
+    replace: (expr, ids) => ids._x.neg(),
     condition: (ids) => ids._x.isNonPositive === true,
   },
   {
-    match: '|xy|',
-    replace: 'x|y|',
+    match: ['Abs', ['Multiply', '_x', '_y']],
+    replace: (expr, ids) =>
+      ids._x.mul(expr.engine.function('Abs', [ids._y])),
     condition: (ids) => ids._x.isNonNegative === true,
   },
   {
-    match: '|xy|',
-    replace: '-x|y|',
+    match: ['Abs', ['Multiply', '_x', '_y']],
+    replace: (expr, ids) =>
+      ids._x.neg().mul(expr.engine.function('Abs', [ids._y])),
     condition: (ids) => ids._x.isNonPositive === true,
   },
-
-  '|xy| -> |x||y|',
-  '|\\frac{x}{y}| -> \\frac{|x|}{|y|}',
-  { match: '|x|^n', replace: 'x^n', condition: (id) => id._n.isEven === true },
+  // |xy| -> |x||y|
   {
-    match: '|x|^{n/m}',
-    replace: 'x^{n/m}',
+    match: ['Abs', ['Multiply', '_x', '_y']],
+    replace: (expr, ids) =>
+      expr.engine
+        .function('Abs', [ids._x])
+        .mul(expr.engine.function('Abs', [ids._y])),
+  },
+  // |x/y| -> |x|/|y|
+  {
+    match: ['Abs', ['Divide', '_x', '_y']],
+    replace: (expr, ids) =>
+      expr.engine
+        .function('Abs', [ids._x])
+        .div(expr.engine.function('Abs', [ids._y])),
+  },
+  // |x|^n -> x^n when n is even
+  {
+    match: ['Power', ['Abs', '_x'], '_n'],
+    replace: (expr, ids) => ids._x.pow(ids._n),
+    condition: (id) => id._n.isEven === true,
+  },
+  // |x|^(n/m) -> x^(n/m) when n is even and m is odd
+  {
+    match: ['Power', ['Abs', '_x'], ['Divide', '_n', '_m']],
+    replace: (expr, ids) => ids._x.pow(ids._n.div(ids._m)),
     condition: (id) => id._n.isEven === true && id._m.isOdd === true,
   },
+  // |x^n| -> |x|^n when n is odd or irrational
   {
-    match: '|x^n|',
-    replace: '|x|^n',
+    match: ['Abs', ['Power', '_x', '_n']],
+    replace: (expr, ids) =>
+      expr.engine.function('Abs', [ids._x]).pow(ids._n),
     condition: (id) => id._n.isOdd === true || id._n.isRational === false,
   },
+  // |x^(n/m)| -> |x|^(n/m) when n is odd or m is integer
   {
-    match: '|x^{n/m}|',
-    replace: '|x|^{n/m}',
+    match: ['Abs', ['Power', '_x', ['Divide', '_n', '_m']]],
+    replace: (expr, ids) =>
+      expr.engine.function('Abs', [ids._x]).pow(ids._n.div(ids._m)),
     condition: (id) => id._n.isOdd === true || id._m.isInteger === true,
   },
 
+  // |x/y| -> x/|y| when x is non-negative
   {
-    match: '|\\frac{x}{y}|',
-    replace: '\\frac{x}{|y|}',
+    match: ['Abs', ['Divide', '_x', '_y']],
+    replace: (expr, ids) =>
+      ids._x.div(expr.engine.function('Abs', [ids._y])),
     condition: (ids) => ids._x.isNonNegative === true,
   },
+  // |x/y| -> -x/|y| when x is non-positive
   {
-    match: '|\\frac{x}{y}|',
-    replace: '-\\frac{x}{|y|}',
+    match: ['Abs', ['Divide', '_x', '_y']],
+    replace: (expr, ids) =>
+      ids._x.neg().div(expr.engine.function('Abs', [ids._y])),
     condition: (ids) => ids._x.isNonPositive === true,
   },
+  // |x/y| -> |x|/y when y is non-negative
   {
-    match: '|\\frac{x}{y}|',
-    replace: '\\frac{|x|}{y}',
+    match: ['Abs', ['Divide', '_x', '_y']],
+    replace: (expr, ids) =>
+      expr.engine.function('Abs', [ids._x]).div(ids._y),
     condition: (ids) => ids._y.isNonNegative === true,
   },
+  // |x/y| -> -|x|/y when y is non-positive
   {
-    match: '|\\frac{x}{y}|',
-    replace: '-\\frac{|x|}{y}',
+    match: ['Abs', ['Divide', '_x', '_y']],
+    replace: (expr, ids) =>
+      expr.engine.function('Abs', [ids._x]).neg().div(ids._y),
     condition: (ids) => ids._y.isNonPositive === true,
   },
 
-  //Even functions
-  '\\cos(|x|) -> \\cos(x)',
-  '\\sec(|x|) -> \\sec(x)',
-  '\\cosh(|x|) -> \\cosh(x)',
-  '\\sech(|x|) -> \\sech(x)',
+  // Even functions: f(|x|) -> f(x)
+  {
+    match: ['Cos', ['Abs', '_x']],
+    replace: (expr, ids) => expr.engine.function('Cos', [ids._x]),
+  },
+  {
+    match: ['Sec', ['Abs', '_x']],
+    replace: (expr, ids) => expr.engine.function('Sec', [ids._x]),
+  },
+  {
+    match: ['Cosh', ['Abs', '_x']],
+    replace: (expr, ids) => expr.engine.function('Cosh', [ids._x]),
+  },
+  {
+    match: ['Sech', ['Abs', '_x']],
+    replace: (expr, ids) => expr.engine.function('Sech', [ids._x]),
+  },
 
-  //Odd Trig Functions
-  '|\\sin(x)| -> \\sin(|x|)',
-  '|\\tan(x)| -> \\tan(|x|)',
-  '|\\cot(x)| -> \\cot(|x|)',
-  '|\\csc(x)| -> \\csc(|x|)',
-  '|\\arcsin(x)| -> \\arcsin(|x|)',
-  '|\\arctan(x)| -> \\arctan(|x|)',
-  '|\\arccot(x)| -> \\arccot(|x|)',
-  '|\\arccsc(x)| -> \\arccsc(|x|)',
+  // Odd Trig Functions: |f(x)| -> f(|x|)
+  {
+    match: ['Abs', ['Sin', '_x']],
+    replace: (expr, ids) =>
+      expr.engine.function('Sin', [expr.engine.function('Abs', [ids._x])]),
+  },
+  {
+    match: ['Abs', ['Tan', '_x']],
+    replace: (expr, ids) =>
+      expr.engine.function('Tan', [expr.engine.function('Abs', [ids._x])]),
+  },
+  {
+    match: ['Abs', ['Cot', '_x']],
+    replace: (expr, ids) =>
+      expr.engine.function('Cot', [expr.engine.function('Abs', [ids._x])]),
+  },
+  {
+    match: ['Abs', ['Csc', '_x']],
+    replace: (expr, ids) =>
+      expr.engine.function('Csc', [expr.engine.function('Abs', [ids._x])]),
+  },
+  {
+    match: ['Abs', ['Arcsin', '_x']],
+    replace: (expr, ids) =>
+      expr.engine.function('Arcsin', [expr.engine.function('Abs', [ids._x])]),
+  },
+  {
+    match: ['Abs', ['Arctan', '_x']],
+    replace: (expr, ids) =>
+      expr.engine.function('Arctan', [expr.engine.function('Abs', [ids._x])]),
+  },
+  {
+    match: ['Abs', ['Arccot', '_x']],
+    replace: (expr, ids) =>
+      expr.engine.function('Arccot', [expr.engine.function('Abs', [ids._x])]),
+  },
+  {
+    match: ['Abs', ['Arccsc', '_x']],
+    replace: (expr, ids) =>
+      expr.engine.function('Arccsc', [expr.engine.function('Abs', [ids._x])]),
+  },
   //Odd Hyperbolic Trig Functions
-  '|\\sinh(x)| -> \\sinh(|x|)',
-  '|\\tanh(x)| -> \\tanh(|x|)',
-  '|\\coth(x)| -> \\coth(|x|)',
-  '|\\csch(x)| -> \\csch(|x|)',
-  '|\\arcsinh(x)| -> \\arcsinh(|x|)',
-  '|\\artanh(x)| -> \\artanh(|x|)',
-  '|\\arccoth(x)| -> \\arccoth(|x|)',
-  '|\\arccsch(x)| -> \\arccsch(|x|)',
+  {
+    match: ['Abs', ['Sinh', '_x']],
+    replace: (expr, ids) =>
+      expr.engine.function('Sinh', [expr.engine.function('Abs', [ids._x])]),
+  },
+  {
+    match: ['Abs', ['Tanh', '_x']],
+    replace: (expr, ids) =>
+      expr.engine.function('Tanh', [expr.engine.function('Abs', [ids._x])]),
+  },
+  {
+    match: ['Abs', ['Coth', '_x']],
+    replace: (expr, ids) =>
+      expr.engine.function('Coth', [expr.engine.function('Abs', [ids._x])]),
+  },
+  {
+    match: ['Abs', ['Csch', '_x']],
+    replace: (expr, ids) =>
+      expr.engine.function('Csch', [expr.engine.function('Abs', [ids._x])]),
+  },
+  {
+    match: ['Abs', ['Arsinh', '_x']],
+    replace: (expr, ids) =>
+      expr.engine.function('Arsinh', [expr.engine.function('Abs', [ids._x])]),
+  },
+  {
+    match: ['Abs', ['Artanh', '_x']],
+    replace: (expr, ids) =>
+      expr.engine.function('Artanh', [expr.engine.function('Abs', [ids._x])]),
+  },
+  {
+    match: ['Abs', ['Arcoth', '_x']],
+    replace: (expr, ids) =>
+      expr.engine.function('Arcoth', [expr.engine.function('Abs', [ids._x])]),
+  },
+  {
+    match: ['Abs', ['Arcsch', '_x']],
+    replace: (expr, ids) =>
+      expr.engine.function('Arcsch', [expr.engine.function('Abs', [ids._x])]),
+  },
 
   //Negative Exponents in Denominator
+  // a / b^(-n) -> a * b^n
   {
-    match: '\\frac{a}{b^{-n}}',
-    replace: 'a*b^n',
+    match: ['Divide', '_a', ['Power', '_b', ['Negate', '_n']]],
+    replace: (expr, ids) => ids._a.mul(ids._b.pow(ids._n)),
     condition: ({ _b }) => _b.isNotZero === true,
-  }, // doesn't work but {match:'\\frac{a}{b^n}',replace:'a*b^{-n}',condition:ids=>ids._n.isNotZero===true} works
+  },
+  // a / (d * b^(-n)) -> (a/d) * b^n
   {
-    match: '\\frac{a}{d*b^{-n}}',
-    replace: '\\frac{a}{d}*b^n',
+    match: ['Divide', '_a', ['Multiply', '_d', ['Power', '_b', ['Negate', '_n']]]],
+    replace: (expr, ids) => ids._a.div(ids._d).mul(ids._b.pow(ids._n)),
     condition: (ids) => ids._b.isNotZero === true,
-  }, // doesn't work but {match:'\\frac{a}{d*b^n}',replace:'\\frac{a}{d}*b^{-n}',condition:ids=>ids._n.isNotZero===true} works
+  },
 
   //Indeterminate Forms Involving Infinity
-  { match: '0*x', replace: '0', condition: (_x) => _x._x.isFinite === true },
-  { match: '1^x', replace: '1', condition: (_x) => _x._x.isFinite === true },
+  { match: ['Multiply', 0, '_x'], replace: toZero, condition: (_x) => _x._x.isFinite === true },
+  { match: ['Power', 1, '_x'], replace: toOne, condition: (_x) => _x._x.isFinite === true },
   {
-    match: 'a^0',
-    replace: '\\operatorname{NaN}',
+    match: ['Power', '_a', 0],
+    replace: toNaN,
     condition: (id) => id._a.isInfinity === true,
   },
 
   //Infinity and Multiplication
   {
-    match: '\\infty *x',
-    replace: '\\infty',
+    match: ['Multiply', 'PositiveInfinity', '_x'],
+    replace: toInfinity,
     condition: (_x) => _x._x.isPositive === true,
   },
   {
-    match: 'x*(-\\infty)',
-    replace: '-\\infty',
+    match: ['Multiply', '_x', 'NegativeInfinity'],
+    replace: toNegativeInfinity,
     condition: (_x) => _x._x.isPositive === true,
   },
   {
-    match: '\\infty * x',
-    replace: '-\\infty',
+    match: ['Multiply', 'PositiveInfinity', '_x'],
+    replace: toNegativeInfinity,
     condition: (_x) => _x._x.isNegative === true,
   },
   {
-    match: 'x*(-\\infty)',
-    replace: '\\infty',
+    match: ['Multiply', '_x', 'NegativeInfinity'],
+    replace: toInfinity,
     condition: (_x) => _x._x.isNegative === true,
   },
 
   //Infinity and Division
   {
-    match: '\\infty/x',
-    replace: '\\infty',
+    match: ['Divide', 'PositiveInfinity', '_x'],
+    replace: toInfinity,
     condition: (_x) => _x._x.isPositive === true && _x._x.isFinite === true,
   },
   {
-    match: '(-\\infty)/x',
-    replace: '-\\infty',
+    match: ['Divide', 'NegativeInfinity', '_x'],
+    replace: toNegativeInfinity,
     condition: (_x) => _x._x.isPositive === true && _x._x.isFinite === true,
   },
   {
-    match: '\\infty/x',
-    replace: '-\\infty',
+    match: ['Divide', 'PositiveInfinity', '_x'],
+    replace: toNegativeInfinity,
     condition: (_x) => _x._x.isNegative === true && _x._x.isFinite === true,
   },
   {
-    match: '(-\\infty)/x',
-    replace: '\\infty',
+    match: ['Divide', 'NegativeInfinity', '_x'],
+    replace: toInfinity,
     condition: (_x) => _x._x.isNegative === true && _x._x.isFinite === true,
   },
   {
-    match: 'x/y',
-    replace: '\\operatorname{NaN}',
+    match: ['Divide', '_x', '_y'],
+    replace: toNaN,
     condition: (_x) => _x._x.isInfinity === true && _x._y.isInfinity === true,
   },
 
   //Infinity and Powers (doesn't work for a=\\pi)
   {
-    match: 'a^\\infty',
-    replace: '\\infty',
+    match: ['Power', '_a', 'PositiveInfinity'],
+    replace: toInfinity,
     condition: (id) => id._a.isGreater(1) === true,
   },
   {
-    match: 'a^\\infty',
-    replace: '0',
+    match: ['Power', '_a', 'PositiveInfinity'],
+    replace: toZero,
     condition: (id) => id._a.isPositive === true && id._a.isLess(1) === true,
   },
   {
-    match: '\\infty^a',
-    replace: '0',
+    match: ['Power', 'PositiveInfinity', '_a'],
+    replace: toZero,
     condition: (id) => id._a.isNegative === true,
   },
   {
-    match: '(-\\infty)^a',
-    replace: '0',
+    match: ['Power', 'NegativeInfinity', '_a'],
+    replace: toZero,
     condition: (id) => id._a.isNegative === true,
   },
   {
-    match: 'a^{-\\infty}',
-    replace: '0',
+    match: ['Power', '_a', 'NegativeInfinity'],
+    replace: toZero,
     condition: (id) => id._a.isGreater(1) === true,
   },
   {
-    match: 'a^{-\\infty}',
-    replace: '\\infty',
+    match: ['Power', '_a', 'NegativeInfinity'],
+    replace: toInfinity,
     condition: (id) => id._a.isPositive === true && id._a.isLess(1) === true,
   },
   //This one works for \\pi
   // {match:'\\infty^a',replace:'\\infty',condition:id=>id._a.isPositive===true},
 
   //Logs and Infinity
-  '\\ln(\\infty) -> \\infty',
   {
-    match: '\\log_c(\\infty)',
-    replace: '\\infty',
+    match: ['Ln', 'PositiveInfinity'],
+    replace: toInfinity,
+  },
+  {
+    match: ['Log', 'PositiveInfinity', '_c'],
+    replace: toInfinity,
     condition: (id) => id._c.isGreater(1) === true,
   },
   {
-    match: '\\log_c(\\infty)',
-    replace: '-\\infty',
+    match: ['Log', 'PositiveInfinity', '_c'],
+    replace: toNegativeInfinity,
     condition: (id) => id._c.isLess(1) === true && id._c.isPositive === true,
   },
   {
-    match: '\\log_\\infty(c)',
-    replace: '0',
+    match: ['Log', '_c', 'PositiveInfinity'],
+    replace: toZero,
     condition: (id) =>
       id._c.isPositive === true &&
       id._c.isOne === false &&
       id._c.isFinite === true,
   },
 
-  //Trig and Infinity
+  //Trig and Infinity (duplicate section - these are handled above)
   {
-    match: '\\sin(x)',
-    replace: '\\operatorname{NaN}',
+    match: ['Sin', '_x'],
+    replace: toNaN,
     condition: (id) => id._x.isInfinity === true,
   },
   {
-    match: '\\cos(x)',
-    replace: '\\operatorname{NaN}',
+    match: ['Cos', '_x'],
+    replace: toNaN,
     condition: (id) => id._x.isInfinity === true,
   },
   {
-    match: '\\tan(x)',
-    replace: '\\operatorname{NaN}',
+    match: ['Tan', '_x'],
+    replace: toNaN,
     condition: (id) => id._x.isInfinity === true,
   },
   {
-    match: '\\cot(x)',
-    replace: '\\operatorname{NaN}',
+    match: ['Cot', '_x'],
+    replace: toNaN,
     condition: (id) => id._x.isInfinity === true,
   },
   {
-    match: '\\sec(x)',
-    replace: '\\operatorname{NaN}',
+    match: ['Sec', '_x'],
+    replace: toNaN,
     condition: (id) => id._x.isInfinity === true,
   },
   {
-    match: '\\csc(x)',
-    replace: '\\operatorname{NaN}',
+    match: ['Csc', '_x'],
+    replace: toNaN,
     condition: (id) => id._x.isInfinity === true,
   },
 
   //Inverse Trig and Infinity
-  '\\arcsin(\\infty) -> \\operatorname{NaN}',
-  '\\arccos(\\infty) -> \\operatorname{NaN}',
-  '\\arcsin(-\\infty) -> \\operatorname{NaN}',
-  '\\arccos(-\\infty) -> \\operatorname{NaN}',
-  '\\arctan(\\infty) -> \\frac{\\pi}{2}',
-  '\\arctan(-\\infty) -> -\\frac{\\pi}{2}',
-  '\\arccot(\\infty) -> 0',
-  '\\arccot(-\\infty) -> \\pi',
-  '\\arcsec(\\infty) -> \\frac{\\pi}{2}',
-  '\\arcsec(-\\infty) -> \\frac{\\pi}{2}',
-  '\\arccsc(\\infty) -> 0',
-  '\\arccsc(-\\infty) -> 0',
+  { match: ['Arcsin', 'PositiveInfinity'], replace: toNaN },
+  { match: ['Arccos', 'PositiveInfinity'], replace: toNaN },
+  { match: ['Arcsin', 'NegativeInfinity'], replace: toNaN },
+  { match: ['Arccos', 'NegativeInfinity'], replace: toNaN },
+  {
+    match: ['Arctan', 'PositiveInfinity'],
+    replace: (expr) => expr.engine.Pi.div(2),
+  },
+  {
+    match: ['Arctan', 'NegativeInfinity'],
+    replace: (expr) => expr.engine.Pi.div(2).neg(),
+  },
+  { match: ['Arccot', 'PositiveInfinity'], replace: toZero },
+  { match: ['Arccot', 'NegativeInfinity'], replace: (expr) => expr.engine.Pi },
+  {
+    match: ['Arcsec', 'PositiveInfinity'],
+    replace: (expr) => expr.engine.Pi.div(2),
+  },
+  {
+    match: ['Arcsec', 'NegativeInfinity'],
+    replace: (expr) => expr.engine.Pi.div(2),
+  },
+  { match: ['Arccsc', 'PositiveInfinity'], replace: toZero },
+  { match: ['Arccsc', 'NegativeInfinity'], replace: toZero },
 
   //Hyperbolic Trig and Infinity
-  '\\sinh(\\infty) -> \\infty',
-  '\\sinh(-\\infty) -> -\\infty',
-  '\\cosh(\\infty) -> \\infty',
-  '\\cosh(-\\infty) -> \\infty',
-  '\\tanh(\\infty) -> 1',
-  '\\tanh(-\\infty) -> -1',
-  '\\coth(\\infty) -> 1',
-  '\\coth(-\\infty) -> -1',
-  '\\sech(\\infty) -> 0',
-  '\\sech(-\\infty) -> 0',
-  '\\csch(\\infty) -> 0',
-  '\\csch(-\\infty) -> 0',
+  { match: ['Sinh', 'PositiveInfinity'], replace: toInfinity },
+  { match: ['Sinh', 'NegativeInfinity'], replace: toNegativeInfinity },
+  { match: ['Cosh', 'PositiveInfinity'], replace: toInfinity },
+  { match: ['Cosh', 'NegativeInfinity'], replace: toInfinity },
+  { match: ['Tanh', 'PositiveInfinity'], replace: toOne },
+  { match: ['Tanh', 'NegativeInfinity'], replace: toNegativeOne },
+  { match: ['Coth', 'PositiveInfinity'], replace: toOne },
+  { match: ['Coth', 'NegativeInfinity'], replace: toNegativeOne },
+  { match: ['Sech', 'PositiveInfinity'], replace: toZero },
+  { match: ['Sech', 'NegativeInfinity'], replace: toZero },
+  { match: ['Csch', 'PositiveInfinity'], replace: toZero },
+  { match: ['Csch', 'NegativeInfinity'], replace: toZero },
 
   //Inverse Hyperbolic Trig and Infinity
-  '\\arcsinh(\\infty) -> \\infty',
-  '\\arcsinh(-\\infty) -> -\\infty',
-  '\\arccosh(\\infty) -> \\infty',
-  '\\arccosh(-\\infty) -> \\operatorname{NaN}',
+  { match: ['Arsinh', 'PositiveInfinity'], replace: toInfinity },
+  { match: ['Arsinh', 'NegativeInfinity'], replace: toNegativeInfinity },
+  { match: ['Arcosh', 'PositiveInfinity'], replace: toInfinity },
+  { match: ['Arcosh', 'NegativeInfinity'], replace: toNaN },
 
   {
-    match: '\\artanh(x)',
-    replace: '\\operatorname{NaN}',
+    match: ['Artanh', '_x'],
+    replace: toNaN,
     condition: (id) => id._x.isInfinity === true,
   },
   {
-    match: '\\arccoth(x)',
-    replace: '\\operatorname{NaN}',
+    match: ['Arcoth', '_x'],
+    replace: toNaN,
     condition: (id) => id._x.isInfinity === true,
   },
   {
-    match: '\\arsech(x)',
-    replace: '\\operatorname{NaN}',
+    match: ['Arsech', '_x'],
+    replace: toNaN,
     condition: (id) => id._x.isInfinity === true,
   },
   {
-    match: '\\arccsch(x)',
-    replace: '\\operatorname{NaN}',
+    match: ['Arcsch', '_x'],
+    replace: toNaN,
     condition: (id) => id._x.isInfinity === true,
   },
 
   //----------- DOMAIN ISSUES -----------
 
   //Division
-  { match: 'a/a', replace: '1', condition: (ids) => ids._a.isNotZero === true },
   {
-    match: '1/(1/a)',
-    replace: 'a',
+    match: ['Divide', '_a', '_a'],
+    replace: toOne,
     condition: (ids) => ids._a.isNotZero === true,
   },
   {
-    match: 'a/(1/b)',
-    replace: 'a*b',
+    match: ['Divide', 1, ['Divide', 1, '_a']],
+    replace: (expr, ids) => ids._a,
+    condition: (ids) => ids._a.isNotZero === true,
+  },
+  {
+    match: ['Divide', '_a', ['Divide', 1, '_b']],
+    replace: (expr, ids) => ids._a.mul(ids._b),
     condition: (ids) => ids._b.isNotZero === true,
   },
   {
-    match: 'a/(b/c)',
-    replace: '(a*c)/b',
+    match: ['Divide', '_a', ['Divide', '_b', '_c']],
+    replace: (expr, ids) => ids._a.mul(ids._c).div(ids._b),
     condition: (ids) => ids._c.isNotZero === true,
   },
-  { match: '0/a', replace: '0', condition: ({ _a }) => _a.isNotZero === true },
+  {
+    match: ['Divide', 0, '_a'],
+    replace: toZero,
+    condition: ({ _a }) => _a.isNotZero === true,
+  },
 
   //Powers
   {
-    match: 'x^0',
-    replace: '1',
+    match: ['Power', '_x', 0],
+    replace: toOne,
     condition: (ids) => ids._x.isNotZero === true && ids._x.isFinite === true,
   },
   {
@@ -1126,18 +1493,19 @@ export const SIMPLIFY_RULES: Rule[] = [
   }, //also check if at least one power is not an even root or difference is an even root
 
   {
-    match: 'a/(b/c)^d',
-    replace: 'a*(c/b)^d',
+    match: ['Divide', '_a', ['Power', ['Divide', '_b', '_c'], '_d']],
+    replace: (expr, ids) =>
+      ids._a.mul(ids._c.div(ids._b).pow(ids._d)),
     condition: (ids) => ids._c.isNotZero === true,
   },
   {
-    match: '(b/c)^{-d}',
-    replace: '(c/b)^d',
+    match: ['Power', ['Divide', '_b', '_c'], ['Negate', '_d']],
+    replace: (expr, ids) => ids._c.div(ids._b).pow(ids._d),
     condition: (ids) => ids._c.isNotZero === true,
   },
   {
-    match: '(b/c)^{-1}',
-    replace: 'c/b',
+    match: ['Power', ['Divide', '_b', '_c'], -1],
+    replace: (expr, ids) => ids._c.div(ids._b),
     condition: (ids) => ids._c.isNotZero === true,
   },
   {
@@ -1202,24 +1570,81 @@ export const SIMPLIFY_RULES: Rule[] = [
   */
 
   // -------- TRIGONOMETRIC --------
-  '\\sin(-x) -> -\\sin(x)',
-  '\\cos(-x) -> \\cos(x)',
-  '\\tan(-x) -> -\\tan(x)',
-  '\\cot(-x) -> -\\cot(x)',
-  '\\sec(-x) -> \\sec(x)',
-  '\\csc(-x) -> -\\csc(x)',
-  '\\sin(\\pi - x) -> \\sin(x)',
-  '\\cos(\\pi - x) -> -\\cos(x)',
-  '\\tan(\\pi - x) -> -\\tan(x)',
-  '\\cot(\\pi - x) -> -\\cot(x)',
-  '\\sec(\\pi - x) -> -\\sec(x)',
-  '\\csc(\\pi - x) -> \\csc(x)',
-  '\\sin(\\pi + x) -> -\\sin(x)',
-  '\\cos(\\pi + x) -> -\\cos(x)',
-  '\\tan(\\pi + x) -> \\tan(x)',
-  '\\cot(\\pi + x) -> -\\cot(x)',
-  '\\sec(\\pi + x) -> -\\sec(x)',
-  '\\csc(\\pi + x) -> \\csc(x)',
+  // Odd/even function properties with negation
+  {
+    match: ['Sin', ['Negate', '_x']],
+    replace: (expr, ids) => expr.engine.function('Sin', [ids._x]).neg(),
+  },
+  {
+    match: ['Cos', ['Negate', '_x']],
+    replace: (expr, ids) => expr.engine.function('Cos', [ids._x]),
+  },
+  {
+    match: ['Tan', ['Negate', '_x']],
+    replace: (expr, ids) => expr.engine.function('Tan', [ids._x]).neg(),
+  },
+  {
+    match: ['Cot', ['Negate', '_x']],
+    replace: (expr, ids) => expr.engine.function('Cot', [ids._x]).neg(),
+  },
+  {
+    match: ['Sec', ['Negate', '_x']],
+    replace: (expr, ids) => expr.engine.function('Sec', [ids._x]),
+  },
+  {
+    match: ['Csc', ['Negate', '_x']],
+    replace: (expr, ids) => expr.engine.function('Csc', [ids._x]).neg(),
+  },
+  // π - x transformations
+  {
+    match: ['Sin', ['Subtract', 'Pi', '_x']],
+    replace: (expr, ids) => expr.engine.function('Sin', [ids._x]),
+  },
+  {
+    match: ['Cos', ['Subtract', 'Pi', '_x']],
+    replace: (expr, ids) => expr.engine.function('Cos', [ids._x]).neg(),
+  },
+  {
+    match: ['Tan', ['Subtract', 'Pi', '_x']],
+    replace: (expr, ids) => expr.engine.function('Tan', [ids._x]).neg(),
+  },
+  {
+    match: ['Cot', ['Subtract', 'Pi', '_x']],
+    replace: (expr, ids) => expr.engine.function('Cot', [ids._x]).neg(),
+  },
+  {
+    match: ['Sec', ['Subtract', 'Pi', '_x']],
+    replace: (expr, ids) => expr.engine.function('Sec', [ids._x]).neg(),
+  },
+  {
+    match: ['Csc', ['Subtract', 'Pi', '_x']],
+    replace: (expr, ids) => expr.engine.function('Csc', [ids._x]),
+  },
+  // π + x transformations
+  {
+    match: ['Sin', ['Add', 'Pi', '_x']],
+    replace: (expr, ids) => expr.engine.function('Sin', [ids._x]).neg(),
+  },
+  {
+    match: ['Cos', ['Add', 'Pi', '_x']],
+    replace: (expr, ids) => expr.engine.function('Cos', [ids._x]).neg(),
+  },
+  {
+    match: ['Tan', ['Add', 'Pi', '_x']],
+    replace: (expr, ids) => expr.engine.function('Tan', [ids._x]),
+  },
+  {
+    match: ['Cot', ['Add', 'Pi', '_x']],
+    replace: (expr, ids) => expr.engine.function('Cot', [ids._x]).neg(),
+  },
+  {
+    match: ['Sec', ['Add', 'Pi', '_x']],
+    replace: (expr, ids) => expr.engine.function('Sec', [ids._x]).neg(),
+  },
+  {
+    match: ['Csc', ['Add', 'Pi', '_x']],
+    replace: (expr, ids) => expr.engine.function('Csc', [ids._x]),
+  },
 
   // Trigonometric periodicity reduction for multiples of π
   // sin(nπ + x) and cos(nπ + x) where n is an integer
@@ -1254,35 +1679,131 @@ export const SIMPLIFY_RULES: Rule[] = [
       reduceTrigPeriodicity('Csc', wildcards._arg!, expr.engine),
   },
 
-  '\\sin(\\frac{\\pi}{2} - x) -> \\cos(x)',
-  '\\cos(\\frac{\\pi}{2} - x) -> \\sin(x)',
-  '\\tan(\\frac{\\pi}{2} - x) -> \\cot(x)',
-  '\\cot(\\frac{\\pi}{2} - x) -> \\tan(x)',
-  '\\sec(\\frac{\\pi}{2} - x) -> \\csc(x)',
-  '\\csc(\\frac{\\pi}{2} - x) -> \\sec(x)',
-  '\\sin(x) * \\cos(x) -> \\frac{1}{2} \\sin(2x)',
-  '\\sin(x) * \\sin(y) -> \\frac{1}{2} (\\cos(x-y) - \\cos(x+y))',
-  '\\cos(x) * \\cos(y) -> \\frac{1}{2} (\\cos(x-y) + \\cos(x+y))',
-  '\\tan(x) * \\cot(x) -> 1',
+  // Co-function identities: π/2 - x
+  {
+    match: ['Sin', ['Subtract', 'Half', '_x']],
+    replace: (expr, ids) => expr.engine.function('Cos', [ids._x]),
+    condition: (ids, ce) => ids.Half?.isSame(ce.Pi.div(2)),
+  },
+  {
+    match: ['Sin', ['Subtract', ['Divide', 'Pi', 2], '_x']],
+    replace: (expr, ids) => expr.engine.function('Cos', [ids._x]),
+  },
+  {
+    match: ['Cos', ['Subtract', ['Divide', 'Pi', 2], '_x']],
+    replace: (expr, ids) => expr.engine.function('Sin', [ids._x]),
+  },
+  {
+    match: ['Tan', ['Subtract', ['Divide', 'Pi', 2], '_x']],
+    replace: (expr, ids) => expr.engine.function('Cot', [ids._x]),
+  },
+  {
+    match: ['Cot', ['Subtract', ['Divide', 'Pi', 2], '_x']],
+    replace: (expr, ids) => expr.engine.function('Tan', [ids._x]),
+  },
+  {
+    match: ['Sec', ['Subtract', ['Divide', 'Pi', 2], '_x']],
+    replace: (expr, ids) => expr.engine.function('Csc', [ids._x]),
+  },
+  {
+    match: ['Csc', ['Subtract', ['Divide', 'Pi', 2], '_x']],
+    replace: (expr, ids) => expr.engine.function('Sec', [ids._x]),
+  },
+  // Product-to-sum identities
+  {
+    match: ['Multiply', ['Sin', '_x'], ['Cos', '_x']],
+    replace: (expr, ids) =>
+      expr.engine.function('Sin', [ids._x.mul(2)]).div(2),
+  },
+  {
+    match: ['Multiply', ['Sin', '_x'], ['Sin', '_y']],
+    replace: (expr, ids) =>
+      expr.engine
+        .function('Cos', [ids._x.sub(ids._y)])
+        .sub(expr.engine.function('Cos', [ids._x.add(ids._y)]))
+        .div(2),
+  },
+  {
+    match: ['Multiply', ['Cos', '_x'], ['Cos', '_y']],
+    replace: (expr, ids) =>
+      expr.engine
+        .function('Cos', [ids._x.sub(ids._y)])
+        .add(expr.engine.function('Cos', [ids._x.add(ids._y)]))
+        .div(2),
+  },
+  {
+    match: ['Multiply', ['Tan', '_x'], ['Cot', '_x']],
+    replace: toOne,
+  },
 
   // Pythagorean identities - basic forms
-  '\\sin(x)^2 + \\cos(x)^2 -> 1',
-  '1 - \\sin(x)^2 -> \\cos(x)^2',
-  '1 - \\cos(x)^2 -> \\sin(x)^2',
-  '\\tan(x)^2 + 1 -> \\sec(x)^2',
-  '1 + \\cot(x)^2 -> \\csc(x)^2',
-  '\\sec(x)^2 - 1 -> \\tan(x)^2',
-  '\\csc(x)^2 - 1 -> \\cot(x)^2',
+  {
+    match: ['Add', ['Power', ['Sin', '_x'], 2], ['Power', ['Cos', '_x'], 2]],
+    replace: toOne,
+  },
+  {
+    match: ['Subtract', 1, ['Power', ['Sin', '_x'], 2]],
+    replace: (expr, ids) => expr.engine.function('Cos', [ids._x]).pow(2),
+  },
+  {
+    match: ['Subtract', 1, ['Power', ['Cos', '_x'], 2]],
+    replace: (expr, ids) => expr.engine.function('Sin', [ids._x]).pow(2),
+  },
+  {
+    match: ['Add', ['Power', ['Tan', '_x'], 2], 1],
+    replace: (expr, ids) => expr.engine.function('Sec', [ids._x]).pow(2),
+  },
+  {
+    match: ['Add', 1, ['Power', ['Cot', '_x'], 2]],
+    replace: (expr, ids) => expr.engine.function('Csc', [ids._x]).pow(2),
+  },
+  {
+    match: ['Subtract', ['Power', ['Sec', '_x'], 2], 1],
+    replace: (expr, ids) => expr.engine.function('Tan', [ids._x]).pow(2),
+  },
+  {
+    match: ['Subtract', ['Power', ['Csc', '_x'], 2], 1],
+    replace: (expr, ids) => expr.engine.function('Cot', [ids._x]).pow(2),
+  },
   // Pythagorean identities - reversed subtraction forms
-  '\\sin(x)^2 - 1 -> -\\cos(x)^2',
-  '\\cos(x)^2 - 1 -> -\\sin(x)^2',
-  '-1 + \\tan(x)^2 -> -\\cot(x)^2',
-  '-1 + \\sec(x)^2 -> \\tan(x)^2',
-  '-1 + \\csc(x)^2 -> \\cot(x)^2',
+  {
+    match: ['Subtract', ['Power', ['Sin', '_x'], 2], 1],
+    replace: (expr, ids) => expr.engine.function('Cos', [ids._x]).pow(2).neg(),
+  },
+  {
+    match: ['Subtract', ['Power', ['Cos', '_x'], 2], 1],
+    replace: (expr, ids) => expr.engine.function('Sin', [ids._x]).pow(2).neg(),
+  },
+  {
+    match: ['Add', -1, ['Power', ['Tan', '_x'], 2]],
+    replace: (expr, ids) => expr.engine.function('Cot', [ids._x]).pow(2).neg(),
+  },
+  {
+    match: ['Add', -1, ['Power', ['Sec', '_x'], 2]],
+    replace: (expr, ids) => expr.engine.function('Tan', [ids._x]).pow(2),
+  },
+  {
+    match: ['Add', -1, ['Power', ['Csc', '_x'], 2]],
+    replace: (expr, ids) => expr.engine.function('Cot', [ids._x]).pow(2),
+  },
   // Pythagorean identities - negated forms
-  '-\\sin(x)^2 - \\cos(x)^2 -> -1',
+  {
+    match: [
+      'Add',
+      ['Negate', ['Power', ['Sin', '_x'], 2]],
+      ['Negate', ['Power', ['Cos', '_x'], 2]],
+    ],
+    replace: toNegativeOne,
+  },
   // Pythagorean identities with coefficient
-  'a * \\sin(x)^2 + a * \\cos(x)^2 -> a',
+  {
+    match: [
+      'Add',
+      ['Multiply', '_a', ['Power', ['Sin', '_x'], 2]],
+      ['Multiply', '_a', ['Power', ['Cos', '_x'], 2]],
+    ],
+    replace: (expr, ids) => ids._a,
+  },
 
   // Double-angle formulas for squares (commented out - often make expressions more complex)
   // '\\sin(x)^2 -> \\frac{1 - \\cos(2x)}{2}',

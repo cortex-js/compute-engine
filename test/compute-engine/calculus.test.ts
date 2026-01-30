@@ -306,7 +306,7 @@ describe('INDEFINITE INTEGRATION', () => {
   // Irreducible quadratic powers (reduction formula)
   test('1/(x^2+1)^2 (quadratic power)', () =>
     expect(evaluate('\\int \\frac{1}{(x^2+1)^2} dx')).toMatchInlineSnapshot(
-      `x / (2x^2 + 2) + 1/2 * arctan(x)`
+      `x / (2(x^2 + 1)) + 1/2 * arctan(x)`
     ));
 
   // Mixed partial fractions (linear + irreducible quadratic)

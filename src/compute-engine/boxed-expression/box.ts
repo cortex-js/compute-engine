@@ -532,13 +532,15 @@ function makeCanonicalFunction(
     result = new BoxedFunction(
       ce,
       name,
-      validateArguments(
-        ce,
-        xs,
-        opDef.signature.type,
-        opDef.lazy,
-        opDef.broadcastable
-      ) ?? xs,
+      opDef.inferredSignature
+        ? xs
+        : validateArguments(
+            ce,
+            xs,
+            opDef.signature.type,
+            opDef.lazy,
+            opDef.broadcastable
+          ) ?? xs,
       { metadata, canonical: true, scope }
     );
     return result;
@@ -583,13 +585,18 @@ function makeCanonicalFunction(
     opDef.associative ? name : undefined
   );
 
-  const adjustedArgs = validateArguments(
-    ce,
-    args,
-    opDef.signature.type,
-    opDef.lazy,
-    opDef.broadcastable
-  );
+  // Skip validation for function literals with inferred signatures.
+  // These will be validated during evaluation by the lambda function,
+  // which handles currying and partial application.
+  const adjustedArgs = opDef.inferredSignature
+    ? null
+    : validateArguments(
+        ce,
+        args,
+        opDef.signature.type,
+        opDef.lazy,
+        opDef.broadcastable
+      );
 
   // If we have some adjusted arguments, the arguments did not
   // match the parameters of the signature. We're done.

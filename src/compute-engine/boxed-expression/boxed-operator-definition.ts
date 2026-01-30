@@ -320,6 +320,20 @@ export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
       if (!boxedFn.isValid)
         throw Error(`Invalid function ${boxedFn.toString()}`);
 
+      // If no explicit signature was provided and the evaluate handler is a
+      // Function expression, infer the signature from the function parameters
+      // and body type.
+      if (this.inferredSignature && boxedFn.operator === 'Function') {
+        const body = boxedFn.ops![0];
+        const params = boxedFn.ops!.slice(1);
+        const bodyType = body.type.toString();
+        const paramTypes = params.map(() => 'unknown').join(', ');
+        this.signature = new BoxedType(
+          `(${paramTypes}) -> ${bodyType}`,
+          this.engine._typeResolver
+        );
+      }
+
       const fn = applicable(boxedFn);
       evaluate = (xs) => fn(xs);
       Object.defineProperty(evaluate, 'toString', {

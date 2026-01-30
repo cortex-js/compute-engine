@@ -117,11 +117,15 @@ describe('MATCHFIX abs and norm', () => {
   });
 
   test('||a||', () =>
-    expect(check('||a||')).toMatchInlineSnapshot(`["Norm", "a"]`));
+    expect(check('||a||')).toMatchInlineSnapshot(`
+      box       = ["Norm", "a"]
+      eval-auto = |a|
+    `));
   test('||a||+|b|', () =>
-    expect(check('||a||+|b|')).toMatchInlineSnapshot(
-      `["Add", ["Norm", "a"], ["Abs", "b"]]`
-    ));
+    expect(check('||a||+|b|')).toMatchInlineSnapshot(`
+      box       = ["Add", ["Norm", "a"], ["Abs", "b"]]
+      eval-auto = |a| + |b|
+    `));
 });
 
 describe('MATCHFIX invalid', () => {

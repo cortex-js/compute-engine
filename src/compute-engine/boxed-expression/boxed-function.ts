@@ -174,13 +174,19 @@ export class BoxedFunction extends _BoxedExpression {
         this.engine._typeResolver
       );
     } else if (isSignatureType(def.signature.type)) {
+      // Preserve the argument information when updating the result type
+      const oldSig = def.signature.type;
       def.signature = new BoxedType(
         {
           kind: 'signature',
+          args: oldSig.args,
+          optArgs: oldSig.optArgs,
+          variadicArg: oldSig.variadicArg,
+          variadicMin: oldSig.variadicMin,
           result:
             inferenceMode === 'narrow'
-              ? narrow(def.signature.type.result, t)
-              : widen(def.signature.type.result, t),
+              ? narrow(oldSig.result, t)
+              : widen(oldSig.result, t),
         },
         this.engine._typeResolver
       );

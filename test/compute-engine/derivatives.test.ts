@@ -54,7 +54,7 @@ describe('D', () => {
     const expr = D('\\sin(\\frac{1}{x}) + \\ln(x^2+2x)', 'x');
     const result = expr.evaluate();
     expect(result.latex).toMatchInlineSnapshot(
-      `\\frac{2}{x+2}+(2)(x^2+2x)^{-1}-\\frac{\\cos(\\frac{1}{x})}{x^2}`
+      `\\frac{2x+2}{x^2+2x}-\\frac{\\cos(\\frac{1}{x})}{x^2}`
     );
   });
 });
@@ -195,7 +195,7 @@ describe('Inverse trigonometric derivatives', () => {
 describe('Hyperbolic function derivatives', () => {
   it('d/dx sinh(x) = cosh(x)', () => {
     expect(D('\\sinh(x)', 'x').evaluate().toString()).toMatchInlineSnapshot(
-      `1/2 * e^x + 1/2 * e^(-x)`
+      `cosh(x)`
     );
   });
 
