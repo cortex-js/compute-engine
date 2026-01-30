@@ -2077,10 +2077,10 @@ function assignValueAsValue(
   if (typeof value === 'number' || typeof value === 'bigint')
     return ce.number(value);
   const expr = ce.box(value);
-  if (expr.unknowns.length > 0) {
-    // If the expression has unknowns, we cannot assign it as a value
-    // (it would be a function)
-    // E.g. ["Add", "_", 1]
+  if (expr.unknowns.some((s) => s.startsWith('_'))) {
+    // If the expression has wildcards, it should be treated as a function
+    // E.g. ["Add", "_", 1] or ["Add", "_x", 1]
+    // Note: Regular unknowns (e.g., "x", "a", "b") are fine in values
     return undefined;
   }
   return expr;
