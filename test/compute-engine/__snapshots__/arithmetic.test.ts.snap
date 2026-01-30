@@ -816,7 +816,7 @@ N-mach    = 27.1509512887456
 exports[`MULTIPLY with +Infinity 1`] = `
 box       = ["Multiply", "x", -2, 3.1, "PositiveInfinity"]
 canonical = ["Multiply", -2, 3.1, "PositiveInfinity", "x"]
-simplify  = +oo
+simplify  = -oo
 `;
 
 exports[`MULTIPLY with <0 1`] = `
@@ -828,7 +828,7 @@ simplify  = 32.24 * x
 exports[`MULTIPLY with -Infinity 1`] = `
 box       = ["Multiply", "x", -2, 3.1, "NegativeInfinity", "NegativeInfinity"]
 canonical = ["Multiply", -2, 3.1, "PositiveInfinity", "PositiveInfinity", "x"]
-simplify  = +oo
+simplify  = -oo
 `;
 
 exports[`MULTIPLY with -Infinity and +Infinity 1`] = `

@@ -120,8 +120,8 @@ export function simplifyLog(x: BoxedExpression): RuleStep | undefined {
     const base = x.op2;
     if (!arg) return undefined;
 
-    // Default base is 10 if not specified
-    const logBase = base ?? ce.number(10);
+    // Default base is 10 if not specified (base may be Nothing symbol)
+    const logBase = (!base || base.symbol === 'Nothing') ? ce.number(10) : base;
 
     // log_c(x) -> NaN when c is 0 or 1
     if (logBase.is(0) || logBase.is(1)) {
@@ -166,6 +166,31 @@ export function simplifyLog(x: BoxedExpression): RuleStep | undefined {
       arg.op1?.isSame(logBase)
     ) {
       return { value: arg.op2, because: 'log_c(c^x) -> x' };
+    }
+
+    // log_c(e^x) -> x / ln(c) when c ≠ e
+    // This handles log₁₀(e^x) -> x/ln(10)
+    if (
+      arg.operator === 'Power' &&
+      arg.op1?.symbol === 'ExponentialE' &&
+      !logBase.symbol?.match(/ExponentialE/)
+    ) {
+      return {
+        value: arg.op2.div(ce._fn('Ln', [logBase])),
+        because: 'log_c(e^x) -> x/ln(c)',
+      };
+    }
+
+    // log_c(Exp(x)) -> x / ln(c) when c ≠ e
+    if (
+      arg.operator === 'Exp' &&
+      arg.op1 &&
+      !logBase.symbol?.match(/ExponentialE/)
+    ) {
+      return {
+        value: arg.op1.div(ce._fn('Ln', [logBase])),
+        because: 'log_c(exp(x)) -> x/ln(c)',
+      };
     }
 
     // log_c(x^n) -> n*log_c(x) when x >= 0 or n is odd or n is irrational

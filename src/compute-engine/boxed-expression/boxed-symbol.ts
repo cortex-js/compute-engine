@@ -259,11 +259,12 @@ export class BoxedSymbol extends _BoxedExpression {
     // Mathematica returns `Log[0]` as `-∞`
     if (this.is(0)) return this.engine.NegativeInfinity;
 
-    if (
-      (!base || base.symbol === 'ExponentialE') &&
-      this.symbol === 'ExponentialE'
-    )
-      return this.engine.One;
+    // ln(e) = 1 (natural log)
+    // ln_c(e) = 1/ln(c) (for other bases)
+    if (this.symbol === 'ExponentialE') {
+      if (!base || base.symbol === 'ExponentialE') return this.engine.One;
+      return this.engine.One.div(base.ln()); // log_c(e) = 1/ln(c)
+    }
 
     if (base) {
       if (base.re === 10) return this.engine._fn('Log', [this]);

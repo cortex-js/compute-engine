@@ -756,19 +756,31 @@ export class BoxedFunction extends _BoxedExpression {
     // Mathematica returns `Log[0]` as `-∞`
     if (this.is(0)) return this.engine.NegativeInfinity;
 
-    // ln(exp(x)) = x
-    if (this.operator === 'Exp') return this.op1;
+    // ln(exp(x)) = x (for natural log)
+    // ln_c(exp(x)) = x / ln(c) (for other bases)
+    if (this.operator === 'Exp') {
+      if (!base) return this.op1; // natural log
+      return this.op1.div(base.ln()); // log_c(e^x) = x / ln(c)
+    }
 
     // ln_c(c) = 1
     if (base && this.isSame(base)) return this.engine.One;
 
     // ln(e) = 1
-    if (!base && this.isSame(this.engine.E)) return this.engine.One;
+    // ln_c(e) = 1 / ln(c)
+    if (this.isSame(this.engine.E)) {
+      if (!base) return this.engine.One; // ln(e) = 1
+      return this.engine.One.div(base.ln()); // log_c(e) = 1/ln(c)
+    }
 
-    // ln(e^x) = x
+    // ln(e^x) = x (for natural log)
+    // ln_c(e^x) = x / ln(c) (for other bases)
     if (this.operator === 'Power') {
       const [b, exp] = this.ops;
-      if (b.isSame(this.engine.E)) return exp;
+      if (b.isSame(this.engine.E)) {
+        if (!base) return exp; // natural log: ln(e^x) = x
+        return exp.div(base.ln()); // log_c(e^x) = x / ln(c)
+      }
       return exp.mul(b.ln(base));
     }
 

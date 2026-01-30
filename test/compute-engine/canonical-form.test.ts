@@ -432,16 +432,13 @@ describe('CANONICAL FORMS', () => {
       // `);
 
       /*
-       * Control
+       * Control: j is declared as a constant with value 0 (see line 286),
+       * so (-j/4)^1 = (-0/4)^1 = 0^1 = 0
        */
-      //!@note:
-      //Not currently simplified, despite 'j' being an 'integer'-typed constant, because the base is
-      //a non-canonical function and therefore unbound to a definition; consequently with its 'type'
-      //non-determinable.
       expect(checkPower('{-j/4}^1')).toMatchInlineSnapshot(`
         box        = ["Power", ["Divide", ["Negate", "j"], 4], 1]
         canonForms = ["Power", ["Divide", ["Negate", "j"], 4], 1]
-        canonical  = ["Multiply", ["Rational", -1, 4], "j"]
+        canonical  = 0
       `);
     });
 

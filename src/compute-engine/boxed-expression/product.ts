@@ -139,8 +139,13 @@ export class Product {
             return;
           }
           if (isOne(exp)) {
+            // Multiply the signs: coef * infinity
+            // e.g., -2 * +∞ = -∞, 2 * -∞ = -∞, -2 * -∞ = +∞
+            const coefSign = this.coefficient.sgn();
+            const termSign = term.isNegative ? -1 : 1;
+            const resultSign = coefSign * termSign;
             this.coefficient = this.engine._numericValue(
-              term.isNegative ? -Infinity : Infinity
+              resultSign < 0 ? -Infinity : Infinity
             );
           } else this.terms.push({ term, exponent: exp });
           return;

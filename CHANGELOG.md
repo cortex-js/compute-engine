@@ -1,5 +1,25 @@
 ## [Unreleased]
 
+### Bug Fixes
+
+- **Division by Zero Edge Cases**: Fixed `0/(1-1)` incorrectly returning `0`
+  instead of `NaN`. The simplifier now properly detects when both numerator and
+  denominator evaluate to zero, even when they are expressions like `1-1`.
+
+- **Trigonometric Period Identities**: Fixed incorrect sign handling for
+  `csc(π+x)` and `cot(π+x)`:
+  - `csc(π+x)` now correctly simplifies to `-csc(x)` (was incorrectly `csc(x)`)
+  - `cot(π+x)` now correctly simplifies to `cot(x)` (was incorrectly `-cot(x)`,
+    cotangent has period π)
+
+- **Logarithm-Exponential Composition**: Fixed `log(exp(x))` incorrectly
+  simplifying to `x`. Now correctly returns `x/ln(10)` ≈ `0.434x` since
+  `log₁₀(eˣ) = x·log₁₀(e) = x/ln(10)`. The identity `log(exp(x)) = x` only
+  holds for natural logarithm.
+
+- **Infinity Sign Propagation**: Fixed infinity multiplication not propagating
+  signs correctly. Now `∞ * (-2) = -∞` and `-∞ * 2 = -∞` as expected.
+
 ### Features
 
 - **([#163](https://github.com/cortex-js/compute-engine/issues/163)) Additional

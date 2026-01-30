@@ -45,13 +45,17 @@ const COFUNCTION_MAP: Record<string, string> = {
 };
 
 // For pi + x: f(pi + x) = sign * f(x)
+// Mathematical identities:
+// - sin(π+x) = -sin(x), cos(π+x) = -cos(x)
+// - tan(π+x) = tan(x) (period π), cot(π+x) = cot(x) (period π)
+// - sec(π+x) = -sec(x), csc(π+x) = -csc(x)
 const PI_PLUS_SIGN: Record<string, number> = {
   Sin: -1,
   Cos: -1,
   Tan: 1,
-  Cot: -1,
+  Cot: 1, // cotangent has period π, so cot(π+x) = cot(x)
   Sec: -1,
-  Csc: 1,
+  Csc: -1, // csc(π+x) = 1/sin(π+x) = 1/(-sin(x)) = -csc(x)
 };
 
 // For pi - x: f(pi - x) = sign * f(x)

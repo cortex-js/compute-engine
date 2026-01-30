@@ -32,10 +32,14 @@ export function canonicalDivide(
   if (op1.isNaN || op2.isNaN) return ce.NaN;
 
   // 0/0 = NaN, a/0 = ~∞ (a≠0)
-  if (op2.is(0)) return op1.is(0) ? ce.NaN : ce.ComplexInfinity;
+  // Use N().is(0) to catch expressions that evaluate to zero (like 1-1)
+  const op1IsZero = op1.is(0) || (!op1.isNumberLiteral && op1.N().is(0));
+  const op2IsZero = op2.is(0) || (!op2.isNumberLiteral && op2.N().is(0));
+  if (op2IsZero) return op1IsZero ? ce.NaN : ce.ComplexInfinity;
 
   // 0/a = 0 (a≠0, a is finite)
-  if (op1.is(0) && op2.isFinite !== false) return ce.Zero;
+  // op2IsZero is already checked above, so op2 is definitely not zero here
+  if (op1IsZero && op2.isFinite !== false) return ce.Zero;
 
   // a/∞ = 0, ∞/∞ = NaN (check before a/a = 1 rule)
   if (op2.isInfinity) return op1.isInfinity ? ce.NaN : ce.Zero;
