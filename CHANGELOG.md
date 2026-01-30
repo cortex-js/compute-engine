@@ -50,6 +50,14 @@
   - `1 + cot²(x)` → `csc²(x)` and `csc²(x) - 1` → `cot²(x)`
   - `a·sin²(x) + a·cos²(x)` → `a` (with coefficient)
 
+- **Logarithm Combination Rules**: Added simplification rules that combine
+  logarithms with the same base:
+  - `ln(x) + ln(y)` → `ln(xy)` (addition combines via multiplication)
+  - `ln(x) - ln(y)` → `ln(x/y)` (subtraction combines via division)
+  - `log_c(x) + log_c(y)` → `log_c(xy)` (works with any base)
+  - `log_c(x) - log_c(y)` → `log_c(x/y)`
+  - Handles multiple terms: `ln(a) + ln(b) - ln(c)` → `ln(ab/c)`
+
 - **Trigonometric Equation Solving**: The `solve()` method now handles basic
   trigonometric equations:
   - `sin(x) = a` → `x = arcsin(a)` and `x = π - arcsin(a)` (two solutions)

@@ -261,7 +261,7 @@ describe('INDEFINITE INTEGRATION', () => {
 
   test('1/(x^2+3x+2) (partial fractions)', () =>
     expect(evaluate('\\int \\frac{1}{x^2+3x+2} dx')).toMatchInlineSnapshot(
-      `-ln(|x + 2|) + ln(|x + 1|)`
+      `ln(|x + 1| / |x + 2|)`
     ));
 
   // Test common factor cancellation before integration

@@ -379,6 +379,135 @@ export function simplifyLog(x: BoxedExpression): RuleStep | undefined {
     }
   }
 
+  // Handle Add for logarithm combination: ln(x) + ln(y) -> ln(xy), ln(x) - ln(y) -> ln(x/y)
+  // Note: Subtract is canonicalized to Add with Negate, so we handle both cases here
+  if (op === 'Add' && x.ops && x.ops.length >= 2) {
+    // Look for Ln and Log terms, tracking whether they're negated
+    // positive: true means ln(x), false means -ln(x) which represents subtraction
+    const lnTerms: Array<{
+      index: number;
+      arg: BoxedExpression;
+      positive: boolean;
+    }> = [];
+    const logTerms: Map<
+      string,
+      Array<{
+        index: number;
+        arg: BoxedExpression;
+        base: BoxedExpression;
+        positive: boolean;
+      }>
+    > = new Map();
+
+    for (let i = 0; i < x.ops.length; i++) {
+      const term = x.ops[i];
+
+      // Direct Ln term
+      if (term.operator === 'Ln' && term.op1) {
+        lnTerms.push({ index: i, arg: term.op1, positive: true });
+      }
+      // Negated Ln term: -ln(x) which comes from subtraction
+      else if (
+        term.operator === 'Negate' &&
+        term.op1?.operator === 'Ln' &&
+        term.op1.op1
+      ) {
+        lnTerms.push({ index: i, arg: term.op1.op1, positive: false });
+      }
+      // Direct Log term
+      else if (term.operator === 'Log' && term.op1 && term.op2) {
+        const baseKey = JSON.stringify(term.op2.json);
+        if (!logTerms.has(baseKey)) {
+          logTerms.set(baseKey, []);
+        }
+        logTerms
+          .get(baseKey)!
+          .push({ index: i, arg: term.op1, base: term.op2, positive: true });
+      }
+      // Negated Log term: -log_c(x)
+      else if (
+        term.operator === 'Negate' &&
+        term.op1?.operator === 'Log' &&
+        term.op1.op1 &&
+        term.op1.op2
+      ) {
+        const baseKey = JSON.stringify(term.op1.op2.json);
+        if (!logTerms.has(baseKey)) {
+          logTerms.set(baseKey, []);
+        }
+        logTerms.get(baseKey)!.push({
+          index: i,
+          arg: term.op1.op1,
+          base: term.op1.op2,
+          positive: false,
+        });
+      }
+    }
+
+    // Combine Ln terms: ln(a) + ln(b) -> ln(ab), ln(a) - ln(b) -> ln(a/b)
+    if (lnTerms.length >= 2) {
+      // Combine all Ln terms: multiply positives, divide negatives
+      // Result is ln(product of positives / product of negatives)
+      let numerator = ce.One;
+      let denominator = ce.One;
+      for (const t of lnTerms) {
+        if (t.positive) {
+          numerator = numerator.mul(t.arg);
+        } else {
+          denominator = denominator.mul(t.arg);
+        }
+      }
+
+      const combinedArg = numerator.div(denominator);
+      const combinedIndices = new Set(lnTerms.map((t) => t.index));
+      const remainingTerms = x.ops.filter((_, i) => !combinedIndices.has(i));
+
+      if (remainingTerms.length === 0) {
+        return {
+          value: ce._fn('Ln', [combinedArg]),
+          because: 'combine ln terms',
+        };
+      }
+      return {
+        value: ce._fn('Add', [ce._fn('Ln', [combinedArg]), ...remainingTerms]),
+        because: 'combine ln terms',
+      };
+    }
+
+    // Combine Log terms with same base: log_c(a) + log_c(b) -> log_c(ab)
+    for (const [, terms] of logTerms) {
+      if (terms.length >= 2) {
+        let numerator = ce.One;
+        let denominator = ce.One;
+        for (const t of terms) {
+          if (t.positive) {
+            numerator = numerator.mul(t.arg);
+          } else {
+            denominator = denominator.mul(t.arg);
+          }
+        }
+
+        const combinedArg = numerator.div(denominator);
+        const combinedIndices = new Set(terms.map((t) => t.index));
+        const remainingTerms = x.ops.filter((_, i) => !combinedIndices.has(i));
+
+        if (remainingTerms.length === 0) {
+          return {
+            value: ce._fn('Log', [combinedArg, terms[0].base]),
+            because: 'combine log terms',
+          };
+        }
+        return {
+          value: ce._fn('Add', [
+            ce._fn('Log', [combinedArg, terms[0].base]),
+            ...remainingTerms,
+          ]),
+          because: 'combine log terms',
+        };
+      }
+    }
+  }
+
   // Handle Divide for change of base formulas
   if (op === 'Divide') {
     const num = x.op1;
