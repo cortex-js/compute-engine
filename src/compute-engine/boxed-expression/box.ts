@@ -203,7 +203,11 @@ export function boxFunction(
       const n = asBigint(ops[0]);
       if (n !== null) {
         const d = asBigint(ops[1]);
-        if (d !== null) return ce.number([n, d], options);
+        if (d !== null) {
+          // Handle division by zero: 0/0 = NaN, a/0 = ~∞
+          if (d === 0n) return n === 0n ? ce.NaN : ce.ComplexInfinity;
+          return ce.number([n, d], options);
+        }
       }
       name = 'Divide';
     }

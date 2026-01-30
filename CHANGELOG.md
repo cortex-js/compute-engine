@@ -2,9 +2,11 @@
 
 ### Bug Fixes
 
-- **Division by Zero Edge Cases**: Fixed `0/(1-1)` incorrectly returning `0`
-  instead of `NaN`. The simplifier now properly detects when both numerator and
-  denominator evaluate to zero, even when they are expressions like `1-1`.
+- **Division by Zero**: Improved handling of division by zero:
+  - `0/0` returns `NaN` (indeterminate form)
+  - `a/0` where `a ≠ 0` returns `ComplexInfinity` (~∞) as a "better NaN" that
+    indicates an infinite result with unknown sign
+  - This applies to all forms including `1/0`, `x/0`, and rational literals
 
 - **Trigonometric Period Identities**: Fixed incorrect sign handling for
   `csc(π+x)` and `cot(π+x)`:

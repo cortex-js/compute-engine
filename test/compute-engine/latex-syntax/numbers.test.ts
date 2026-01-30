@@ -253,7 +253,7 @@ describe('PARSING OF NUMBER', () => {
     expect(parse('3\\times10^n')).toMatchInlineSnapshot(
       `["Multiply", 3, ["Power", 10, "n"]]`
     );
-    expect(parseVal('\\frac{2}{0}')).toMatchInlineSnapshot(`NaN`);
+    expect(parseVal('\\frac{2}{0}')).toMatchInlineSnapshot(`~oo`);
     expect(parseVal('\\operatorname{NaN}')).toEqual(NaN);
   });
 

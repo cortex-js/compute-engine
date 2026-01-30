@@ -32,14 +32,14 @@ export function canonicalDivide(
   if (op1.isNaN || op2.isNaN) return ce.NaN;
 
   // 0/0 = NaN, a/0 = ~∞ (a≠0)
-  // Use N().is(0) to catch expressions that evaluate to zero (like 1-1)
-  const op1IsZero = op1.is(0) || (!op1.isNumberLiteral && op1.N().is(0));
-  const op2IsZero = op2.is(0) || (!op2.isNumberLiteral && op2.N().is(0));
-  if (op2IsZero) return op1IsZero ? ce.NaN : ce.ComplexInfinity;
+  // Note: We only check .is(0) here, not .N().is(0), because .N() can be
+  // expensive (e.g., Monte Carlo integration) and canonicalization must be fast.
+  // Expressions like (1-1)/0 won't be detected as 0/0 here, but will be
+  // handled during simplification.
+  if (op2.is(0)) return op1.is(0) ? ce.NaN : ce.ComplexInfinity;
 
   // 0/a = 0 (a≠0, a is finite)
-  // op2IsZero is already checked above, so op2 is definitely not zero here
-  if (op1IsZero && op2.isFinite !== false) return ce.Zero;
+  if (op1.is(0) && op2.isFinite !== false) return ce.Zero;
 
   // a/∞ = 0, ∞/∞ = NaN (check before a/a = 1 rule)
   if (op2.isInfinity) return op1.isInfinity ? ce.NaN : ce.Zero;
@@ -119,13 +119,16 @@ export function canonicalDivide(
     }
 
     // a/b with a and b integer literals -> a/b rational
+    // But handle division by zero: 0/0 = NaN, a/0 = ~∞
     if (
       typeof v1 === 'number' &&
       Number.isInteger(v1) &&
       typeof v2 === 'number' &&
       Number.isInteger(v2)
-    )
+    ) {
+      if (v2 === 0) return v1 === 0 ? ce.NaN : ce.ComplexInfinity;
       return ce.number([v1, v2]);
+    }
 
     if (typeof v1 === 'number' && Number.isInteger(v1)) {
       if (v1 === 0) return ce.Zero;
@@ -198,8 +201,8 @@ export function div(
     if (denom === 1) return num;
     // a/(-1) = -a
     if (denom === -1) return num.neg();
-    // a/0 = NaN (a≠0)
-    if (denom === 0) return ce.NaN;
+    // a/0 = ~∞ (a≠0) - ComplexInfinity as "better NaN"
+    if (denom === 0) return ce.ComplexInfinity;
 
     if (num.isNumberLiteral) {
       const n = num.numericValue!;
