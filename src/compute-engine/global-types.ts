@@ -735,7 +735,7 @@ export interface BoxedExpression {
    * Return the value of this expression, if a number literal.
    *
    * Note it is possible for `expr.numericValue` to be `null`, and for
-   * `expr.isNotZero` to be true. For example, when a symbol has been
+   * `expr.is(0)` to be false. For example, when a symbol has been
    * defined with an assumption.
    *
    * Conversely, `expr.isNumber` may be true even if `expr.numericValue` is
