@@ -109,6 +109,23 @@
   This enables important mathematical simplifications that depend on knowing
   whether a variable is positive, negative, or zero.
 
+- **Multi-Argument Function Derivatives**: Added derivative support for:
+
+  - **Log(x, base)** - Logarithm with custom base:
+    ```javascript
+    ce.box(['D', ['Log', 'x', 2], 'x']).evaluate();  // → 1/(x·ln(2))
+    ce.box(['D', ['Log', 'x', 'a'], 'x']).evaluate(); // → 1/(x·ln(a))
+    ```
+    Also handles cases where both x and base depend on the variable by applying
+    the quotient rule to ln(x)/ln(base).
+
+  - **Discrete functions (Mod, GCD, LCM)** - Return 0 as these are step
+    functions with derivative 0 almost everywhere:
+    ```javascript
+    ce.box(['D', ['Mod', 'x', 5], 'x']).evaluate();  // → 0
+    ce.box(['D', ['GCD', 'x', 6], 'x']).evaluate();  // → 0
+    ```
+
 ### Improvements
 
 - **Derivative Recursion Safety**: Added robust recursion protection to the

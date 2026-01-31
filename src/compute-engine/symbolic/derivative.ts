@@ -349,6 +349,41 @@ export function differentiate(
     );
   }
 
+  // Log(x, base) - logarithm with custom base
+  // d/dx log_b(x) = 1/(x·ln(b)) when only x depends on v
+  // If both x and base depend on v, use quotient rule on ln(x)/ln(base)
+  if (expr.operator === 'Log' && expr.nops === 2) {
+    const [x, base] = expr.ops!;
+    const xHasV = x.has(v);
+    const baseHasV = base.has(v);
+
+    if (!xHasV && !baseHasV) {
+      // Neither depends on v - derivative is 0
+      return ce.Zero;
+    }
+
+    if (xHasV && !baseHasV) {
+      // Only x depends on v: d/dx log_b(x) = 1/(x·ln(b)) * x'
+      const xPrime =
+        differentiate(x, v, depth + 1) ?? ce._fn('D', [x, ce.symbol(v)]);
+      const lnBase = ce._fn('Ln', [base]);
+      return simplifyDerivative(xPrime.div(x.mul(lnBase)));
+    }
+
+    // If base depends on v, convert to ln(x)/ln(base) and differentiate
+    // d/dx (ln(x)/ln(base)) uses quotient rule
+    const lnX = ce._fn('Ln', [x]);
+    const lnBase = ce._fn('Ln', [base]);
+    return differentiate(lnX.div(lnBase), v, depth + 1);
+  }
+
+  // Discrete functions: Mod, GCD, LCM
+  // These are step functions with derivative 0 almost everywhere
+  // (undefined at discontinuities, but we return 0 as a useful approximation)
+  if (['Mod', 'GCD', 'LCM'].includes(expr.operator)) {
+    return ce.Zero;
+  }
+
   const h = DERIVATIVES_TABLE[expr.operator];
   if (h === undefined) {
     if (expr.nops > 1) return undefined;

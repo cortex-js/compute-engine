@@ -389,6 +389,81 @@ describe('Symbolic derivatives for unknown functions', () => {
   });
 });
 
+describe('Multi-argument function derivatives', () => {
+  describe('Log with custom base', () => {
+    it('d/dx log_2(x) = 1/(x*ln(2))', () => {
+      const expr = engine.box(['D', ['Log', 'x', 2], 'x']);
+      const result = expr.evaluate();
+      expect(result.toString()).toMatchInlineSnapshot(`1 / (x * ln(2))`);
+    });
+
+    it('d/dx log_e(x) = 1/x (natural log)', () => {
+      const expr = engine.box(['D', ['Log', 'x', 'ExponentialE'], 'x']);
+      const result = expr.evaluate();
+      expect(result.toString()).toMatchInlineSnapshot(`1 / x`);
+    });
+
+    it('d/dx log_a(x) = 1/(x*ln(a)) with symbolic base', () => {
+      const expr = engine.box(['D', ['Log', 'x', 'a'], 'x']);
+      const result = expr.evaluate();
+      expect(result.toString()).toMatchInlineSnapshot(`1 / (x * ln(a))`);
+    });
+
+    it('d/dx log_2(x^2) = 2/(x*ln(2)) via chain rule', () => {
+      const expr = engine.box(['D', ['Log', ['Square', 'x'], 2], 'x']);
+      const result = expr.evaluate();
+      expect(result.toString()).toMatchInlineSnapshot(`2 / (x * ln(2))`);
+    });
+
+    it('d/dx log_2(constant) = 0', () => {
+      const expr = engine.box(['D', ['Log', 5, 2], 'x']);
+      const result = expr.evaluate();
+      expect(result.toString()).toMatchInlineSnapshot(`0`);
+    });
+
+    it('d/dx log_x(a) when base depends on x', () => {
+      // log_x(a) = ln(a)/ln(x), so d/dx = -ln(a)/(x*ln(x)^2)
+      const expr = engine.box(['D', ['Log', 'a', 'x'], 'x']);
+      const result = expr.evaluate();
+      // Should use quotient rule on ln(a)/ln(x)
+      expect(result.toString()).toMatchInlineSnapshot(`-ln(a) / (x * ln(x)^2)`);
+    });
+
+    it('d/dx log_x(x) when both depend on x', () => {
+      // log_x(x) = ln(x)/ln(x) = 1, so d/dx = 0
+      const expr = engine.box(['D', ['Log', 'x', 'x'], 'x']);
+      const result = expr.evaluate();
+      expect(result.toString()).toMatchInlineSnapshot(`0`);
+    });
+  });
+
+  describe('Discrete functions (step functions)', () => {
+    it('d/dx mod(x, 5) = 0', () => {
+      const expr = engine.box(['D', ['Mod', 'x', 5], 'x']);
+      const result = expr.evaluate();
+      expect(result.toString()).toMatchInlineSnapshot(`0`);
+    });
+
+    it('d/dx mod(x^2, y) = 0', () => {
+      const expr = engine.box(['D', ['Mod', ['Square', 'x'], 'y'], 'x']);
+      const result = expr.evaluate();
+      expect(result.toString()).toMatchInlineSnapshot(`0`);
+    });
+
+    it('d/dx gcd(x, 6) = 0', () => {
+      const expr = engine.box(['D', ['GCD', 'x', 6], 'x']);
+      const result = expr.evaluate();
+      expect(result.toString()).toMatchInlineSnapshot(`0`);
+    });
+
+    it('d/dx lcm(x, y) = 0', () => {
+      const expr = engine.box(['D', ['LCM', 'x', 'y'], 'x']);
+      const result = expr.evaluate();
+      expect(result.toString()).toMatchInlineSnapshot(`0`);
+    });
+  });
+});
+
 describe('ND', () => {
   it('should compute the numerical approximation of the derivative of a polynomial', () => {
     const expr = parse('\\mathrm{ND}(x \\mapsto x^3 + 2x - 4, 2)');
