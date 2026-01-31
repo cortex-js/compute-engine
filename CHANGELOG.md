@@ -101,6 +101,61 @@
 
 ### Features
 
+- **Fu Algorithm for Trigonometric Simplification**: Implemented the Fu algorithm
+  based on Fu, Zhong, and Zeng's paper "Automated and readable simplification of
+  trigonometric expressions" (2006). This provides systematic, high-quality
+  trigonometric simplification through:
+
+  - **Transformation Rules (TR1-TR22)**: Comprehensive set of rewrite rules including
+    reciprocal conversions (sec→1/cos), ratio forms (tan→sin/cos), Pythagorean
+    substitutions (sin²+cos²=1), power reductions, product-to-sum, sum-to-product,
+    angle expansion/contraction, and Morrie's law for cosine product chains.
+
+  - **Rule Lists (RL1, RL2)**: Organized application sequences for tan/cot expressions
+    and sin/cos expressions respectively, with greedy selection of optimal results.
+
+  - **Cost Function**: Minimizes trigonometric function count as primary metric,
+    with leaf count as secondary, to find the most readable form.
+
+  **Usage**:
+  ```typescript
+  // Option 1: Use strategy option with simplify()
+  const result = expr.simplify({ strategy: 'fu' });
+
+  // Option 2: Dedicated trigSimplify() method
+  const result = expr.trigSimplify();
+  ```
+
+  **Examples**:
+  - `sin(x)⁴ - cos(x)⁴` → `-cos(2x)`
+  - `tan(x)·cot(x)` → `1`
+  - `sin²(x) + cos²(x)` → `1`
+  - `2sin(x)cos(x)` → `sin(2x)`
+  - `cos(x)·cos(2x)·cos(4x)` → `sin(8x)/(8sin(x))` (Morrie's law)
+
+  **Enhanced Transformations**:
+  - **TRmorrie with Rational Coefficients**: Morrie's law now handles angles that
+    are rational multiples of π, such as `cos(π/9)·cos(2π/9)·cos(4π/9)` → `1/8`.
+    The algorithm detects maximal geometric sequences and handles cases where the
+    sine terms cancel to produce pure fractions.
+
+  - **TR12i Tangent Sum Identity**: Recognizes the pattern `tan(A) + tan(B) - k·tan(A)·tan(B)`
+    and simplifies to `-tan(C)` when `A + B + C = π` and `k = tan(C)`. Works with
+    standard angles (π/6, π/4, π/3, etc.) and handles sign variations.
+
+  - **TRpythagorean for Compound Expressions**: Detects `sin²(x) + cos²(x)` pairs
+    within larger Add expressions and simplifies them to 1, e.g.,
+    `sin²(x) + cos²(x) + 2` → `3`.
+
+  - **Early TR9 Sum-to-Product**: Applies sum-to-product transformation before
+    angle expansion to catch patterns like `sin(x+h) + sin(x-h)` → `2sin(x)cos(h)`
+    that would otherwise be expanded and lose their simplified form.
+
+  - **Dual Strategy Approach**: The Fu strategy now tries both "Fu first" and
+    "simplify first" approaches and picks the best result. This handles both
+    Morrie-like patterns (which need Fu before evaluation) and period reduction
+    patterns (which need simplification first for angle contraction).
+
 - **([#163](https://github.com/cortex-js/compute-engine/issues/163)) Additional
   Derivative Notations**: Added support for parsing multiple derivative notations
   beyond Leibniz notation:

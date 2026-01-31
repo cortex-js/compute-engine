@@ -715,6 +715,10 @@ export abstract class _BoxedExpression implements BoxedExpression {
     return this;
   }
 
+  trigSimplify(): BoxedExpression {
+    return this.simplify({ strategy: 'fu' });
+  }
+
   expand(): BoxedExpression {
     // Dynamic import to avoid circular dependency
     const { expand } = require('./expand');

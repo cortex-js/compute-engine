@@ -1432,6 +1432,31 @@ export interface BoxedExpression {
   simplify(options?: Partial<SimplifyOptions>): BoxedExpression;
 
   /**
+   * Apply the Fu algorithm to simplify trigonometric expressions.
+   *
+   * The Fu algorithm is a systematic approach to trigonometric simplification
+   * that uses transformation rules (TR1-TR22), combination transforms (CTR),
+   * and rule lists (RL) to reduce the number of trigonometric functions.
+   *
+   * This is equivalent to calling `simplify({ strategy: 'fu' })` but is
+   * more convenient for trig-heavy expressions.
+   *
+   * Reference: Fu, Hongguang, Xiuqin Zhong, and Zhenbing Zeng.
+   * "Automated and readable simplification of trigonometric expressions."
+   * Mathematical and Computer Modelling 44.11 (2006): 1169-1177.
+   *
+   * @example
+   * ```typescript
+   * ce.parse('\\sin(x)\\cos(x)').trigSimplify()
+   * // => sin(2x)/2
+   *
+   * ce.parse('\\sin^2(x) + \\cos^2(x)').trigSimplify()
+   * // => 1
+   * ```
+   */
+  trigSimplify(): BoxedExpression;
+
+  /**
    * Expand the expression: distribute multiplications over additions,
    * and expand powers.
    */
@@ -2343,6 +2368,22 @@ export type SimplifyOptions = {
    * used.
    */
   costFunction?: (expr: BoxedExpression) => number;
+
+  /**
+   * The simplification strategy to use.
+   *
+   * - `'default'`: Use standard simplification rules (default)
+   * - `'fu'`: Use the Fu algorithm for trigonometric simplification.
+   *   This is more aggressive for trig expressions and may produce
+   *   different results than the default strategy.
+   *
+   *   **Note:** When using the `'fu'` strategy, the `costFunction` and `rules`
+   *   options are ignored. The Fu algorithm uses its own specialized cost
+   *   function that prioritizes minimizing the number of trigonometric
+   *   functions. Standard simplification is applied before and after the
+   *   Fu transformations using the engine's default rules.
+   */
+  strategy?: 'default' | 'fu';
 };
 
 /**

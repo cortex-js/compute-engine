@@ -9,6 +9,8 @@ import type {
   RuleSteps,
 } from '../global-types';
 
+import { fu as fuAlgorithm } from '../symbolic/fu';
+
 type InternalSimplifyOptions = SimplifyOptions & {
   useVariations: boolean;
 };
@@ -117,6 +119,50 @@ export function simplify(
   }
 
   const ce = expr.engine;
+
+  //
+  // 2/ If the 'fu' strategy is requested, apply the Fu algorithm
+  //
+  if (options?.strategy === 'fu') {
+    // Strategy: Try both approaches and pick the best result
+    // 1. Fu first (preserves symbolic patterns like Morrie's law)
+    // 2. Simplify first, then Fu (handles period reduction for angle contraction)
+
+    const costFn = (e: BoxedExpression) => ce.costFunction(e);
+
+    // Approach 1: Fu first (for Morrie-like patterns)
+    const fuFirst = fuAlgorithm(expr);
+    let result1 = fuFirst?.value ?? expr;
+    if (fuFirst) {
+      const postSimplified = result1.simplify();
+      if (!postSimplified.isSame(result1)) {
+        result1 = postSimplified;
+      }
+    }
+
+    // Approach 2: Simplify first, then Fu (for period reduction patterns)
+    const preSimplified = expr.simplify();
+    const fuSecond = fuAlgorithm(preSimplified);
+    let result2 = fuSecond?.value ?? preSimplified;
+    if (fuSecond) {
+      const postSimplified = result2.simplify();
+      if (!postSimplified.isSame(result2)) {
+        result2 = postSimplified;
+      }
+    }
+
+    // Pick the best result (lower cost wins)
+    const cost1 = costFn(result1);
+    const cost2 = costFn(result2);
+    const bestResult = cost1 <= cost2 ? result1 : result2;
+
+    if (!bestResult.isSame(expr)) {
+      steps.push({ value: bestResult, because: 'fu' });
+    }
+
+    return steps as RuleSteps;
+  }
+
   const rules = options?.rules
     ? ce.rules(options.rules, { canonical: true })
     : ce.getRuleSet('standard-simplification')!;
@@ -124,7 +170,7 @@ export function simplify(
   options = { ...options, rules };
 
   //
-  // 2/ Loop until the expression has been previously seen,
+  // 3/ Loop until the expression has been previously seen,
   // or no rules can be applied
   //
   do {

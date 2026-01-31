@@ -5,7 +5,7 @@ import {
   ComputeEngine,
   Rule,
 } from '../../src/compute-engine';
-import { Fu } from '../../src/compute-engine/boxed-expression/trigonometry.ts';
+import { fu } from '../../src/compute-engine/symbolic/fu';
 import { Expression } from '../../src/math-json/types.ts';
 import { simplify, exprToString } from '../utils';
 
@@ -24,7 +24,7 @@ export type TestCase =
   | [
       input: Expression | string,
       expected: Expression | string,
-      comment?: string
+      comment?: string,
     ]
   | [heading: string];
 
@@ -1876,44 +1876,136 @@ describe('INDETERMINATE FORMS', () => {
     expect(simplify('\\frac{\\infty}{-\\infty}')).toMatchInlineSnapshot(`NaN`));
 
   test('(-infinity) / (-infinity) = NaN', () =>
-    expect(simplify('\\frac{-\\infty}{-\\infty}')).toMatchInlineSnapshot(`NaN`));
+    expect(simplify('\\frac{-\\infty}{-\\infty}')).toMatchInlineSnapshot(
+      `NaN`
+    ));
 
   test('infinity^0 = NaN', () =>
     expect(simplify('\\infty^0')).toMatchInlineSnapshot(`NaN`));
 });
 
 //
-// Fu Test
+// Fu Algorithm Advanced Tests
 //
+// These tests cover advanced Fu algorithm functionality that requires
+// enhancements beyond the core implementation. See FU.md for the
+// implementation plan for each phase.
+//
+// Test categories:
+// - Phase 6: TR3 - Angle canonicalization (negative angles)
+// - Phase 7: TR4 - Special angle evaluation
+// - Phase 8: Period reduction (sin(x+π), cos(x+2π), etc.)
+// - Phase 9: TR7i - Inverse power reduction
+// - Phase 10: TR22i - Inverse Pythagorean identities
+// - Phase 11: Pythagorean identity in compound expressions
+// - Phase 12: Post-Fu arithmetic simplification
+// - Phase 13: TR9 enhancement - sum-to-product
+// - Phase 14: Complex multi-step simplifications (Fu paper examples)
 
-const testHelper = (a: string, b: string) => {
-  test(a, () => expect(Fu(ce.parse(a))).toBe(ce.parse(b)));
+const fuTestHelper = (a: string, b: string) => {
+  // Use full simplify flow with Fu strategy to include post-Fu arithmetic simplification
+  const simplified = ce.parse(a).simplify({ strategy: 'fu' });
+  expect(simplified.isSame(ce.parse(b))).toBe(true);
 };
 
-describe.skip('Fu Test', () => {
-  let tests = [
-    ['2\\sin(x)\\cos(x)-\\sin(2x)', '0'],
-    ['\\sin^2(x)+\\cos^2(x)+2x', '1+2x'],
-    ['\\sec^2(x)-1', '\\tan^2(x)'],
-    ['\\cot^2(x)-\\csc^2(x)', '-1'],
-    ['2-2\\sin^2(x)', '2\\cos^2(x)'],
-    ['\\cos(-x)+\\cos(x)', '2\\cos(x)'],
-    ['\\sec(-x)\\cos(x)', '1'],
-    ['\\sin(x)\\cos(h+2\\pi)+\\sin(-h+\\pi)\\cos(-x)', '\\sin(x+h)'],
-    ['(1-\\cos(2x))/2', '\\sin^2(x)'],
-    ['(1+\\cos(2x))/2', '\\cos^2(x)'],
-    ['\\sin(x+\\pi)+2\\sin(x)', '\\sin(x)'],
-    ['\\tan(x)\\tan(-x)', '-\\tan^2(x)'],
-    ['\\sin(x+h)+\\sin(x-h)', '2\\cos(x)\\sin(h)'],
-    //From Fu's Paper
-    ['1-(1/4)*\\sin^2(2x)-\\sin^2(y)-\\cos^4(x)', '\\sin(x+y)\\sin(x-y)'],
-    ['\\cos(\\pi/9)*\\cos(2\\pi/9)*\\cos(3\\pi/9)*\\cos(4\\pi/9)', '1/16'],
-    [
+describe('Fu Advanced Tests', () => {
+  // Phase 12: Post-Fu arithmetic simplification ✓ IMPLEMENTED
+  // Fu correctly transforms 2sin(x)cos(x) to sin(2x), then standard
+  // simplification reduces sin(2x)-sin(2x) to 0
+  test('2sin(x)cos(x)-sin(2x) [Phase 12: post-Fu arithmetic]', () => {
+    fuTestHelper('2\\sin(x)\\cos(x)-\\sin(2x)', '0');
+  });
+
+  // Phase 11: Pythagorean identity in compound expressions ✓ IMPLEMENTED
+  // Need to detect sin²+cos² pairs within larger Add expressions
+  test('sin²(x)+cos²(x)+2x [Phase 11: Pythagorean in compounds]', () => {
+    fuTestHelper('\\sin^2(x)+\\cos^2(x)+2x', '1+2x');
+  });
+
+  // Phase 10: TR22i - Inverse Pythagorean identities ✓ IMPLEMENTED
+  test('sec²(x)-1 [Phase 10: TR22i inverse Pythagorean]', () => {
+    fuTestHelper('\\sec^2(x)-1', '\\tan^2(x)');
+  });
+
+  test('cot²(x)-csc²(x) [Phase 10: TR22i inverse Pythagorean]', () => {
+    fuTestHelper('\\cot^2(x)-\\csc^2(x)', '-1');
+  });
+
+  // Phase 11: Pythagorean identity in compound expressions ✓ IMPLEMENTED
+  // 2-2sin²(x) = 2(1-sin²(x)) = 2cos²(x)
+  test('2-2sin²(x) [Phase 11: Pythagorean with coefficients]', () => {
+    fuTestHelper('2-2\\sin^2(x)', '2\\cos^2(x)');
+  });
+
+  // Phase 6: TR3 - Angle canonicalization ✓ IMPLEMENTED
+  // cos(-x) = cos(x) since cosine is even
+  test('cos(-x)+cos(x) [Phase 6: TR3 angle canonicalization]', () => {
+    fuTestHelper('\\cos(-x)+\\cos(x)', '2\\cos(x)');
+  });
+
+  test('sec(-x)cos(x) [Phase 6: TR3 angle canonicalization]', () => {
+    fuTestHelper('\\sec(-x)\\cos(x)', '1');
+  });
+
+  test('tan(x)tan(-x) [Phase 6: TR3 angle canonicalization]', () => {
+    fuTestHelper('\\tan(x)\\tan(-x)', '-\\tan^2(x)');
+  });
+
+  // Phase 8: Period reduction + Phase 6: TR3 ✓ IMPLEMENTED
+  // cos(h+2π) = cos(h), sin(-h+π) = sin(h), cos(-x) = cos(x)
+  test('sin(x)cos(h+2π)+sin(-h+π)cos(-x) [Phase 6+8: TR3+period]', () => {
+    fuTestHelper(
+      '\\sin(x)\\cos(h+2\\pi)+\\sin(-h+\\pi)\\cos(-x)',
+      '\\sin(x+h)'
+    );
+  });
+
+  // Phase 9: TR7i - Inverse power reduction ✓ IMPLEMENTED
+  // (1-cos(2x))/2 = sin²(x) and (1+cos(2x))/2 = cos²(x)
+  test('(1-cos(2x))/2 [Phase 9: TR7i inverse power reduction]', () => {
+    fuTestHelper('(1-\\cos(2x))/2', '\\sin^2(x)');
+  });
+
+  test('(1+cos(2x))/2 [Phase 9: TR7i inverse power reduction]', () => {
+    fuTestHelper('(1+\\cos(2x))/2', '\\cos^2(x)');
+  });
+
+  // Phase 8: Period reduction ✓ IMPLEMENTED
+  // sin(x+π) = -sin(x), so sin(x+π)+2sin(x) = -sin(x)+2sin(x) = sin(x)
+  test('sin(x+π)+2sin(x) [Phase 8: period reduction]', () => {
+    fuTestHelper('\\sin(x+\\pi)+2\\sin(x)', '\\sin(x)');
+  });
+
+  // Phase 13: TR9 enhancement - sum-to-product ✓ IMPLEMENTED
+  // sin(x+h)+sin(x-h) = 2sin(x)cos(h)
+  test('sin(x+h)+sin(x-h) [Phase 13: TR9 sum-to-product]', () => {
+    fuTestHelper('\\sin(x+h)+\\sin(x-h)', '2\\sin(x)\\cos(h)');
+  });
+
+  // Phase 14: Complex multi-step simplifications from Fu's paper
+  test.skip('Fu paper: 1-(1/4)sin²(2x)-sin²(y)-cos⁴(x) [Phase 14]', () => {
+    fuTestHelper(
+      '1-(1/4)*\\sin^2(2x)-\\sin^2(y)-\\cos^4(x)',
+      '\\sin(x+y)\\sin(x-y)'
+    );
+  });
+
+  // Phase 7: TR4 - Special angle evaluation + TRmorrie ✓ IMPLEMENTED
+  test('Fu paper: cos(π/9)cos(2π/9)cos(3π/9)cos(4π/9) [Phase 7+TRmorrie]', () => {
+    fuTestHelper(
+      '\\cos(\\pi/9)*\\cos(2\\pi/9)*\\cos(3\\pi/9)*\\cos(4\\pi/9)',
+      '1/16'
+    );
+  });
+
+  // Phase 7: TR12i tangent sum identity ✓ IMPLEMENTED
+  // tan(A) + tan(B) - tan(C)·tan(A)·tan(B) = -tan(C) when A+B+C = π
+  test('Fu paper: tan sum with special angles [Phase 7+TR12i]', () => {
+    fuTestHelper(
       '\\tan(7\\pi/18)+\\tan(5\\pi/18)-\\sqrt{3}\\tan(5\\pi/18)\\tan(7\\pi/18)',
-      '-\\sqrt{3}',
-    ],
-  ];
-  tests.forEach(([a, b]) => testHelper(a, b));
+      '-\\sqrt{3}'
+    );
+  });
 });
 
 function escape(s: string): string {
