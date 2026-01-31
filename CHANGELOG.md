@@ -2,6 +2,27 @@
 
 ### Bug Fixes
 
+- **Replace Method Auto-Wildcards Single-Char Symbols (Issue #23)**: Fixed an issue
+  where `.replace({match: 'a', replace: 2})` would unexpectedly convert the
+  single-character symbol `'a'` to a wildcard `'_a'`, causing it to match ANY
+  expression instead of just the literal symbol `a`. Object rules now correctly
+  match literal symbols:
+
+  ```javascript
+  const expr = ce.box(['Add', ['Multiply', 'a', 'x'], 'b']);
+
+  // Before (bug): returned 2 (matched entire expression with wildcard)
+  // After (fixed): returns ['Add', 'b', ['Multiply', 2, 'x']] (replaces only 'a')
+  expr.replace({ match: 'a', replace: 2 }, { recursive: true });
+  ```
+
+  **Important notes:**
+  - LaTeX rule strings like `'a + b -> c'` still auto-wildcard single-char symbols
+    (existing behavior preserved)
+  - Object rules now match literal symbols by default
+  - To use wildcards in object rules, use explicit wildcard syntax: `'_a'`
+  - For simple variable substitution, `.subs({a: 2})` is the recommended approach
+
 - **Extraneous Root Filtering for Sqrt Equations**: Fixed an issue where solving
   square root equations could return extraneous roots. When solving equations
   like `√x = x - 2` or `√x - x + 2 = 0` using the quadratic substitution method

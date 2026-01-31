@@ -335,6 +335,12 @@ function parseModifierExpression(parser: Parser): string | null {
 
 /* Return an expression for a match/replace part of a rule if a LaTeX string
  or MathJSON expression
+ *
+ * NOTE: This function does NOT auto-convert single-char symbols to wildcards.
+ * Auto-wildcarding only happens when parsing full rule strings via parseRule(),
+ * which uses a custom LaTeX dictionary. When the user provides a rule as an
+ * object like {match: 'a', replace: 2}, the 'a' should match the literal
+ * symbol 'a', not act as a wildcard matching any expression.
  */
 function parseRulePart(
   ce: ComputeEngine,
@@ -343,15 +349,7 @@ function parseRulePart(
 ): BoxedExpression | undefined {
   if (rule === undefined || typeof rule === 'function') return undefined;
   if (typeof rule === 'string') {
-    let expr = ce.parse(rule, { canonical: options?.canonical ?? false });
-    expr = expr.map(
-      (x) => {
-        // Only transform single character symbols. Avoid \pi, \imaginaryUnit, etc..
-        if (x.symbol && x.symbol.length === 1) return ce.symbol('_' + x.symbol);
-        return x;
-      },
-      { canonical: false }
-    );
+    const expr = ce.parse(rule, { canonical: options?.canonical ?? false });
     return expr;
   }
   const canonical =

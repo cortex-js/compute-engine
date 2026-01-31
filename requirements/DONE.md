@@ -1007,3 +1007,85 @@ dynamically, which cannot be expressed as a static pattern matching rule.
   - Complex expression matching
   - Commutative reordering with repeated wildcards
   - Canonical expression matching
+
+---
+
+### 23. Replace Method Auto-Wildcards Single-Char Symbols ✅
+
+**Status:** Fixed (Option 1 implemented).
+
+**Problem:** `.replace({match: 'a', replace: 2})` unexpectedly converted `'a'` to a
+wildcard `'_a'`, causing it to match ANY expression instead of just the literal
+symbol `a`.
+
+```typescript
+const expr = ce.box(['Add', ['Multiply', 'a', 'x'], 'b']);
+expr.replace({match: 'a', replace: 2}, {recursive: true})
+// Before: returned 2 (wrong! matched entire expression with wildcard)
+// After: returns ['Add', 'b', ['Multiply', 2, 'x']] (correct! replaces only 'a')
+```
+
+**Root cause:** In `parseRulePart` (rules.ts), all single-character symbols in string
+matches were auto-converted to wildcards:
+```typescript
+if (x.symbol && x.symbol.length === 1) return ce.symbol('_' + x.symbol);
+```
+
+This made sense when parsing rule strings like `"a*x -> 2*x"` where `a`, `x` should be
+wildcards, but NOT when the user explicitly provides `{match: 'a', replace: 2}` where
+they want literal matching.
+
+**Solution (Option 1):** Only auto-wildcard when parsing a full rule string (via
+`parseRule()`), not when parsing individual rule parts in an object rule (via
+`boxRule()` → `parseRulePart()`).
+
+The key insight is that:
+- `parseRule()` handles full LaTeX rule strings like `"a + b -> c"` and uses a custom
+  LaTeX dictionary to convert single-char symbols to wildcards during parsing
+- `parseRulePart()` is only called from `boxRule()` for object rules, where
+  auto-wildcarding is NOT desired
+
+**Implementation:** Removed the auto-wildcarding code from `parseRulePart()`:
+
+```typescript
+function parseRulePart(
+  ce: ComputeEngine,
+  rule?: string | SemiBoxedExpression | RuleReplaceFunction | RuleFunction,
+  options?: { canonical?: boolean }
+): BoxedExpression | undefined {
+  if (rule === undefined || typeof rule === 'function') return undefined;
+  if (typeof rule === 'string') {
+    // CHANGED: No longer auto-wildcards single-char symbols
+    const expr = ce.parse(rule, { canonical: options?.canonical ?? false });
+    return expr;
+  }
+  // ... rest unchanged
+}
+```
+
+**Behavior summary:**
+- **LaTeX rule strings:** `'a + b -> c'` still auto-wildcards (existing behavior preserved)
+- **Object rules with string match:** `{match: 'a', replace: 2}` now matches literal 'a'
+- **Object rules with MathJSON match:** `{match: ['Symbol', 'a'], replace: 2}` works as before
+- **Explicit wildcards:** `{match: '_a', replace: 2}` still works for wildcard matching
+
+**Workaround (still valid):** For simple variable substitution, `.subs()` is the
+recommended approach:
+```typescript
+expr.subs({a: 2})  // Returns: ['Add', 'b', ['Multiply', 2, 'x']]
+```
+
+**Files modified:**
+- `src/compute-engine/boxed-expression/rules.ts` - Removed auto-wildcarding from
+  `parseRulePart()` function
+
+**Tests added:**
+- `test/compute-engine/rules.test.ts` - Added "Object rules literal symbol matching"
+  describe block with 7 tests:
+  - should match literal symbol a, not wildcard (issue #23)
+  - should replace multiple occurrences of literal symbol
+  - should not affect other single-char symbols when matching literal
+  - should work with multi-char symbol names as literal match (MathJSON)
+  - string rule format should still auto-wildcard single-char symbols
+  - explicit wildcard in object rule should still work
+  - subs() workaround should also work for simple substitution
