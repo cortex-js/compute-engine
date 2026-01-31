@@ -75,6 +75,14 @@
   This affects products like `(-2x)^{3/5}·x` which now correctly simplify to
   `-2^{3/5}·x^{8/5}` instead of returning an imaginary value.
 
+- **Logarithm Quotient Rule**: Added expansion rule for logarithm of quotients.
+  `ln(x/y)` now simplifies to `ln(x) - ln(y)` when x and y are known positive.
+  Similarly for any base: `log_c(x/y)` → `log_c(x) - log_c(y)`.
+
+- **Exponential-Logarithm Composition**: Added simplification for `exp(log(x))`
+  where log has a different base than e. Now `e^log(x)` → `x^{1/ln(10)}` and
+  more generally `e^log_c(x)` → `x^{1/ln(c)}` for any base c.
+
 ### Features
 
 - **([#163](https://github.com/cortex-js/compute-engine/issues/163)) Additional

@@ -101,6 +101,19 @@ export function simplifyLog(x: BoxedExpression): RuleStep | undefined {
       };
     }
 
+    // ln(x/y) -> ln(x) - ln(y) (quotient rule expansion)
+    // Only apply when both x and y are positive (to avoid branch cut issues)
+    if (arg.operator === 'Divide' && arg.op1 && arg.op2) {
+      const num = arg.op1;
+      const denom = arg.op2;
+      if (num.isPositive === true && denom.isPositive === true) {
+        return {
+          value: ce._fn('Ln', [num]).sub(ce._fn('Ln', [denom])),
+          because: 'ln(x/y) -> ln(x) - ln(y)',
+        };
+      }
+    }
+
     // ln(y / e^x) -> ln(y) - x
     if (
       arg.operator === 'Divide' &&
@@ -275,6 +288,27 @@ export function simplifyLog(x: BoxedExpression): RuleStep | undefined {
       };
     }
 
+    // log_c(x/y) -> log_c(x) - log_c(y) (quotient rule expansion)
+    // Only apply when both x and y are positive (to avoid branch cut issues)
+    if (arg.operator === 'Divide' && arg.op1 && arg.op2) {
+      const num = arg.op1;
+      const denom = arg.op2;
+      if (num.isPositive === true && denom.isPositive === true) {
+        // Don't include 'Nothing' as explicit base
+        const isDefaultBase = logBase.symbol === 'Nothing';
+        const logNum = isDefaultBase
+          ? ce._fn('Log', [num])
+          : ce._fn('Log', [num, logBase]);
+        const logDenom = isDefaultBase
+          ? ce._fn('Log', [denom])
+          : ce._fn('Log', [denom, logBase]);
+        return {
+          value: logNum.sub(logDenom),
+          because: 'log_c(x/y) -> log_c(x) - log_c(y)',
+        };
+      }
+    }
+
     // Change of base: log_{1/c}(a) -> -log_c(a)
     if (
       logBase.operator === 'Divide' &&
@@ -297,6 +331,29 @@ export function simplifyLog(x: BoxedExpression): RuleStep | undefined {
     // e^ln(x) -> x
     if (base.symbol === 'ExponentialE' && exp.operator === 'Ln') {
       return { value: exp.op1, because: 'e^ln(x) -> x' };
+    }
+
+    // e^log_c(x) -> x^{1/ln(c)} when c ≠ e
+    // This handles exp(log(x)) = x^{1/ln(10)}
+    if (base.symbol === 'ExponentialE' && exp.operator === 'Log' && exp.op1) {
+      const logBase = exp.op2;
+      // If no base specified (Nothing) or base is 10, use ln(10)
+      const isDefaultOrBase10 =
+        !logBase || logBase.symbol === 'Nothing' || logBase.is(10);
+      if (isDefaultOrBase10) {
+        // e^log(x) = e^(ln(x)/ln(10)) = x^{1/ln(10)}
+        return {
+          value: exp.op1.pow(ce.One.div(ce._fn('Ln', [ce.number(10)]))),
+          because: 'e^log(x) -> x^{1/ln(10)}',
+        };
+      }
+      // For other bases: e^log_c(x) = x^{1/ln(c)}
+      if (logBase && logBase.symbol !== 'ExponentialE') {
+        return {
+          value: exp.op1.pow(ce.One.div(ce._fn('Ln', [logBase]))),
+          because: 'e^log_c(x) -> x^{1/ln(c)}',
+        };
+      }
     }
 
     // e^(ln(x) + y) -> x * e^y
