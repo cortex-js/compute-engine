@@ -144,6 +144,24 @@
   - Domain constraints (min/max valid indices)
   - Symbolic subscripts stay symbolic (e.g., `F_k` remains unevaluated)
 
+  Alternatively, sequences can be defined using natural LaTeX assignment notation:
+
+  ```javascript
+  // Arithmetic sequence via LaTeX
+  ce.parse('L_0 := 1').evaluate();
+  ce.parse('L_n := L_{n-1} + 2').evaluate();
+  ce.parse('L_{5}').evaluate();  // → 11
+
+  // Fibonacci via LaTeX
+  ce.parse('F_0 := 0').evaluate();
+  ce.parse('F_1 := 1').evaluate();
+  ce.parse('F_n := F_{n-1} + F_{n-2}').evaluate();
+  ce.parse('F_{10}').evaluate();  // → 55
+  ```
+
+  Base cases and recurrence can be defined in any order. The sequence is
+  finalized when both are present.
+
 - **Bessel Function Derivatives**: Added derivative support for all four Bessel
   function types using order-dependent recurrence relations:
   ```javascript

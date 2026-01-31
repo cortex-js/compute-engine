@@ -68,11 +68,9 @@ describe('DECLARATIVE SEQUENCE DEFINITIONS', () => {
     });
   });
 
-  // NOTE: The LaTeX API for sequence definitions requires parser changes
-  // to preserve Subscript expressions in assignment LHS rather than
-  // converting them to compound symbols. This is tracked for future work.
-  // For now, use the programmatic API (declareSequence) which works correctly.
-  describe.skip('LaTeX API (assignment notation)', () => {
+  // LaTeX API for sequence definitions using assignment notation
+  // e.g., L_0 := 1 and L_n := L_{n-1} + 2
+  describe('LaTeX API (assignment notation)', () => {
     test('Arithmetic sequence via LaTeX', () => {
       const ce = new ComputeEngine();
       ce.parse('L_0 := 1').evaluate();

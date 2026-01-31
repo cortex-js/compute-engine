@@ -1570,6 +1570,27 @@ export function latexToDelimiterShorthand(s: string): string | undefined {
 
 function parseAssign(parser: Parser, lhs: Expression): Expression | null {
   //
+  // 0/ Convert compound symbols back to Subscript form for sequence definitions
+  // e.g., "L_0" → ['Subscript', 'L', 0]
+  // e.g., "a_n" → ['Subscript', 'a', 'n']
+  //
+  const lhsSymbol = symbol(lhs);
+  if (lhsSymbol && lhsSymbol.includes('_')) {
+    const underscoreIndex = lhsSymbol.indexOf('_');
+    const baseName = lhsSymbol.substring(0, underscoreIndex);
+    const subscriptStr = lhsSymbol.substring(underscoreIndex + 1);
+
+    // Try to parse subscript as integer
+    const subscriptNum = parseInt(subscriptStr, 10);
+    const subscript: Expression =
+      !isNaN(subscriptNum) && String(subscriptNum) === subscriptStr
+        ? subscriptNum
+        : subscriptStr; // Keep as symbol string
+
+    lhs = ['Subscript', baseName, subscript];
+  }
+
+  //
   // 1/ f(x,y) := ...
   //
   if (
@@ -1613,9 +1634,12 @@ function parseAssign(parser: Parser, lhs: Expression): Expression | null {
 
     if (symbol(sub)) {
       //
-      // 2.2 // f_n := ...
+      // 2.2 // f_n := ... OR a_n := a_{n-1} + 1 (sequence definition)
+      // Preserve Subscript form - the Assign evaluate handler will determine
+      // if this is a function definition or sequence definition based on
+      // whether the RHS contains self-references.
       //
-      return ['Assign', fn, ['Function', rhs, sub!]];
+      return ['Assign', lhs, rhs];
     }
 
     return ['Assign', lhs, rhs];
