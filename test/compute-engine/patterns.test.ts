@@ -1258,3 +1258,226 @@ describe('matchPermutations option', () => {
     `);
   });
 });
+
+// ============================================================================
+// Permutation Matching Optimization Tests (PERMS-72)
+// ============================================================================
+
+describe('Permutation Matching Optimization', () => {
+  // Note: Tests with useVariations: false to test the guards without
+  // the variations system adding implicit elements (e.g., +0)
+  // Note: We use anchors like 1, 2, 3 instead of 0 because 0 gets
+  // canonicalized away (it's the identity for addition)
+
+  describe('Phase 1.1: Arity Guard', () => {
+    test('rejects when no sequence wildcards and length mismatch', () => {
+      // Pattern: 4 operands, Expression: 3 operands
+      // Use 1 as anchor (not 0, which gets canonicalized away)
+      const result = match(['Add', '_a', '_b', '_c', 1], ['Add', 'x', 'y', 'z'], {
+        useVariations: false,
+      });
+      expect(result).toBeNull();
+    });
+
+    test('accepts when lengths match exactly without sequence wildcards', () => {
+      const result = match(['Add', '_a', '_b', 1], ['Add', 'x', 'y', 1], {
+        useVariations: false,
+      });
+      expect(result).not.toBeNull();
+      expect(result).toHaveProperty('_a');
+      expect(result).toHaveProperty('_b');
+    });
+
+    test('accepts when sequence wildcards can absorb extra operands', () => {
+      const result = match(['Add', '__a', 1], ['Add', 'x', 'y', 'z', 1], {
+        useVariations: false,
+      });
+      expect(result).not.toBeNull();
+    });
+
+    test('rejects when pattern needs more operands than available', () => {
+      // Pattern: 3 anchors + 2 universal wildcards = needs 5
+      // Expression: only 4 operands
+      const result = match(
+        ['Add', 1, 2, 3, '_a', '_b'],
+        ['Add', 1, 2, 3, 'x'],
+        { useVariations: false }
+      );
+      expect(result).toBeNull();
+    });
+  });
+
+  describe('Phase 1.2: Anchor Fingerprint', () => {
+    test('rejects when required anchor is missing', () => {
+      // Pattern has anchor 5, expression does not contain 5
+      const result = match(['Add', '_a', '_b', 5], ['Add', 'x', 'y', 'z'], {
+        useVariations: false,
+      });
+      expect(result).toBeNull();
+    });
+
+    test('handles anchor multiplicity correctly - rejects when insufficient', () => {
+      // Pattern has two 1s, expression has only one
+      const result = match(['Add', 1, 1, '_a'], ['Add', 1, 'x', 'y'], {
+        useVariations: false,
+      });
+      expect(result).toBeNull();
+    });
+
+    test('matches when all anchors present with correct multiplicity', () => {
+      const result = match(['Add', 1, 1, '_a'], ['Add', 1, 1, 'x'], {
+        useVariations: false,
+      });
+      expect(result).not.toBeNull();
+      expect(result).toHaveProperty('_a');
+    });
+
+    test('handles complex anchors (function expressions)', () => {
+      // Anchor is ['Sqrt', 'x'], not a simple literal
+      const result = match(
+        ['Add', ['Sqrt', 'x'], '_a'],
+        ['Add', 'y', ['Sqrt', 'x']],
+        { useVariations: false }
+      );
+      expect(result).not.toBeNull();
+      expect(result).toHaveProperty('_a');
+    });
+
+    test('rejects when complex anchor not found', () => {
+      const result = match(
+        ['Add', ['Sqrt', 'x'], '_a'],
+        ['Add', 'y', ['Sqrt', 'z']],
+        { useVariations: false }
+      );
+      expect(result).toBeNull();
+    });
+  });
+
+  describe('Phase 2: Universal Anchoring', () => {
+    test('uses anchor-based matching for universal wildcards + anchors', () => {
+      // This pattern previously would enumerate all permutations
+      // Now it should use anchor-based matching
+      const result = match(['Add', 1, '_a', '_b'], ['Add', 'x', 1, 'y'], {
+        useVariations: false,
+      });
+      expect(result).not.toBeNull();
+      expect(result).toHaveProperty('_a');
+      expect(result).toHaveProperty('_b');
+    });
+
+    test('handles multiple anchors with universal wildcards', () => {
+      const result = match(
+        ['Add', 1, 2, '_a', '_b'],
+        ['Add', 'x', 1, 2, 'y'],
+        { useVariations: false }
+      );
+      expect(result).not.toBeNull();
+    });
+
+    test('preserves repeat-wildcard semantics - matches same value', () => {
+      // _a appears twice, must match same value
+      const result = match(['Add', '_a', '_a', 1], ['Add', 'x', 'x', 1], {
+        useVariations: false,
+      });
+      expect(result).not.toBeNull();
+      expect(result).toHaveProperty('_a');
+    });
+
+    test('preserves repeat-wildcard semantics - rejects different values', () => {
+      const result = match(['Add', '_a', '_a', 1], ['Add', 'x', 'y', 1], {
+        useVariations: false,
+      });
+      expect(result).toBeNull();
+    });
+  });
+
+  describe('Edge cases', () => {
+    test('all-wildcard pattern still works (no anchors)', () => {
+      const result = match(['Add', '_a', '_b', '_c'], ['Add', 'x', 'y', 'z'], {
+        useVariations: false,
+      });
+      expect(result).not.toBeNull();
+    });
+
+    test('pattern with only sequence wildcards works', () => {
+      const result = match(['Add', '__a'], ['Add', 'x', 'y', 'z'], {
+        useVariations: false,
+      });
+      expect(result).not.toBeNull();
+    });
+
+    test('symbol anchors work correctly', () => {
+      // 'x' is a symbol anchor (not a wildcard)
+      const result = match(['Add', 'x', '_a'], ['Add', 'x', 'y'], {
+        useVariations: false,
+      });
+      expect(result).not.toBeNull();
+      expect(result).toHaveProperty('_a');
+    });
+
+    test('rejects when symbol anchor missing', () => {
+      const result = match(['Add', 'x', '_a'], ['Add', 'y', 'z'], {
+        useVariations: false,
+      });
+      expect(result).toBeNull();
+    });
+  });
+
+  describe('Phase 3: Hash Bucketing', () => {
+    // Hash bucketing activates for patterns with 4+ anchors and expressions with 6+ operands
+
+    test('matches with many anchors using hash bucketing', () => {
+      // Pattern: 4 anchors + 2 wildcards = 6 operands
+      // Expression: 6 operands (triggers hash bucketing)
+      const result = match(
+        ['Add', 1, 2, 3, 4, '_a', '_b'],
+        ['Add', 'x', 1, 2, 3, 4, 'y'],
+        { useVariations: false }
+      );
+      expect(result).not.toBeNull();
+      expect(result).toHaveProperty('_a');
+      expect(result).toHaveProperty('_b');
+    });
+
+    test('rejects when anchor missing with hash bucketing', () => {
+      // Pattern has anchor 5, expression does not contain 5
+      const result = match(
+        ['Add', 1, 2, 3, 5, '_a', '_b'],
+        ['Add', 'x', 1, 2, 3, 4, 'y'],
+        { useVariations: false }
+      );
+      expect(result).toBeNull();
+    });
+
+    test('handles anchor multiplicity with hash bucketing', () => {
+      // Pattern has two 1s, expression has two 1s - should match
+      const result = match(
+        ['Add', 1, 1, 2, 3, '_a', '_b'],
+        ['Add', 'x', 1, 1, 2, 3, 'y'],
+        { useVariations: false }
+      );
+      expect(result).not.toBeNull();
+    });
+
+    test('rejects insufficient multiplicity with hash bucketing', () => {
+      // Pattern has two 1s, expression has only one 1
+      const result = match(
+        ['Add', 1, 1, 2, 3, '_a', '_b'],
+        ['Add', 'x', 1, 4, 2, 3, 'y'],
+        { useVariations: false }
+      );
+      expect(result).toBeNull();
+    });
+
+    test('handles hash collisions correctly', () => {
+      // Different values may have same hash - must use isSame() to verify
+      // Using symbols which might have hash collisions
+      const result = match(
+        ['Add', 'a', 'b', 'c', 'd', '_x', '_y'],
+        ['Add', 'a', 'b', 'c', 'd', 'e', 'f'],
+        { useVariations: false }
+      );
+      expect(result).not.toBeNull();
+    });
+  });
+});

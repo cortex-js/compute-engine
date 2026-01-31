@@ -428,15 +428,94 @@ function matchPermutation(
   console.assert(expr.operator === pattern.operator);
 
   const patternOps = pattern.ops!;
+  const exprOps = expr.ops!;
 
-  // Check if we have sequence wildcards with anchors - use anchor-based matching
-  const hasSequenceWildcard = patternOps.some((op) => {
+  // === Phase 1.1: Arity Guard ===
+  // Count wildcard types in pattern for early rejection
+  let universalCount = 0;
+  let sequenceCount = 0;
+  let optionalSequenceCount = 0;
+  let anchorCount = 0;
+
+  for (const op of patternOps) {
     const wType = wildcardType(op);
-    return wType === 'Sequence' || wType === 'OptionalSequence';
-  });
-  const hasAnchor = patternOps.some((op) => !isWildcard(op));
+    if (wType === null) {
+      anchorCount++;
+    } else if (wType === 'Wildcard') {
+      universalCount++;
+    } else if (wType === 'Sequence') {
+      sequenceCount++;
+    } else {
+      optionalSequenceCount++;
+    }
+  }
 
-  if (hasSequenceWildcard && hasAnchor) {
+  // Arity feasibility check
+  if (sequenceCount === 0 && optionalSequenceCount === 0) {
+    // Without sequence wildcards, lengths must match exactly
+    if (exprOps.length !== patternOps.length) return null;
+  } else {
+    // With sequence wildcards, ensure minimum operands available
+    // Each universal wildcard needs 1, each sequence wildcard needs at least 1
+    const minRequired = anchorCount + universalCount + sequenceCount;
+    if (exprOps.length < minRequired) return null;
+  }
+
+  // === Phase 1.2: Anchor Fingerprint ===
+  // Verify all anchors exist in expression (handles multiplicity)
+  if (anchorCount > 0) {
+    // Phase 3: Use hash bucketing for patterns with many anchors (4+)
+    // against large expressions (6+) to reduce O(n*m) to O(n+m) average case
+    if (anchorCount >= 4 && exprOps.length >= 6) {
+      // Build hash index: hash -> list of indices with that hash
+      const hashIndex = new Map<number, number[]>();
+      for (let i = 0; i < exprOps.length; i++) {
+        const h = exprOps[i].hash;
+        const bucket = hashIndex.get(h);
+        if (bucket) bucket.push(i);
+        else hashIndex.set(h, [i]);
+      }
+
+      // Track which expression indices have been used
+      const usedIndices = new Set<number>();
+
+      for (const op of patternOps) {
+        if (!hasWildcards(op)) {
+          const h = op.hash;
+          const candidates = hashIndex.get(h);
+          if (!candidates) return null; // No candidates with this hash
+
+          // Find a matching candidate that hasn't been used
+          let found = false;
+          for (const idx of candidates) {
+            if (!usedIndices.has(idx) && exprOps[idx].isSame(op)) {
+              usedIndices.add(idx);
+              found = true;
+              break;
+            }
+          }
+          if (!found) return null; // Anchor not found
+        }
+      }
+    } else {
+      // Original linear approach for small cases
+      const availableOps = [...exprOps];
+      for (const op of patternOps) {
+        if (!hasWildcards(op)) {
+          const idx = availableOps.findIndex((e) => e.isSame(op));
+          if (idx === -1) return null; // Anchor not found
+          availableOps.splice(idx, 1); // Remove to handle multiplicity
+        }
+      }
+    }
+  }
+
+  // === Phase 2: Universal Anchoring ===
+  // Use anchor-based matching for all patterns with anchors (not just sequence wildcards)
+  const hasSequenceWildcard = sequenceCount > 0 || optionalSequenceCount > 0;
+  const hasAnchor = anchorCount > 0;
+
+  if (hasAnchor) {
     const result = matchCommutativeWithAnchors(
       expr,
       pattern,
@@ -444,6 +523,7 @@ function matchPermutation(
       options
     );
     if (result !== null) return result;
+    // Fall through to permutation only if anchor-based matching fails
   }
 
   // Fall back to permutation-based matching

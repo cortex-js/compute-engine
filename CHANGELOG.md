@@ -256,6 +256,25 @@
     `Trace`, `Inverse`) now return `expected-square-matrix` error for vectors
     and tensors (rank > 2).
 
+### Performance
+
+- **Pattern Matching Optimization**: Significantly improved performance of
+  commutative pattern matching by adding early rejection guards:
+  - **Arity Guard**: Patterns without sequence wildcards (`__`/`___`) now
+    immediately reject expressions with mismatched operand counts instead of
+    attempting factorial permutations
+  - **Anchor Fingerprint**: Patterns with literal or symbolic anchors verify
+    anchor presence before attempting permutation matching, eliminating
+    impossible matches in O(n) time
+  - **Universal Anchoring**: Extended the efficient anchor-based backtracking
+    algorithm to all patterns with anchors, not just those with sequence
+    wildcards
+  - **Hash Bucketing**: For patterns with many anchors (4+) against large
+    expressions (6+ operands), uses hash-based indexing to reduce anchor
+    lookup from O(n×m) to O(n+m) average case
+  - Example: Matching `a + b + c + 1` against `x + y + z` now rejects
+    immediately (arity mismatch: 4 vs 3) instead of trying 24 permutations
+
 ### Bug Fixes
 
 - **Indeterminate Form Handling**: Fixed incorrect results for mathematical
