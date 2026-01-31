@@ -216,6 +216,37 @@
 
   Note: OEIS lookups require network access to oeis.org.
 
+- **Multi-Index Sequences**: Define sequences with multiple indices like Pascal's
+  triangle P_{n,k} or grid-based recurrences:
+
+  ```javascript
+  // Pascal's Triangle: P_{n,k} = P_{n-1,k-1} + P_{n-1,k}
+  ce.declareSequence('P', {
+    variables: ['n', 'k'],
+    base: { 'n,0': 1, 'n,n': 1 },  // Pattern-based base cases
+    recurrence: 'P_{n-1,k-1} + P_{n-1,k}',
+    domain: { n: { min: 0 }, k: { min: 0 } },
+    constraints: 'k <= n',  // k must not exceed n
+  });
+
+  ce.parse('P_{5,2}').evaluate();  // → 10
+  ce.parse('P_{10,5}').evaluate(); // → 252
+  ```
+
+  Features:
+  - Multiple index variables with `variables: ['n', 'k']`
+  - Pattern-based base cases: `'n,0'` matches any (n, 0), `'n,n'` matches diagonal
+  - Per-variable domain constraints
+  - Constraint expressions (e.g., `'k <= n'`)
+  - Composite key memoization (e.g., `'5,2'`)
+  - Full introspection support with `isMultiIndex` flag
+
+  Pattern matching for base cases:
+  - Exact values: `'0,0'` matches only (0, 0)
+  - Wildcards: `'n,0'` matches any value for n with k=0
+  - Equality: `'n,n'` matches when both indices are equal
+  - Priority: exact matches are checked before patterns
+
 #### Special Functions
 
 - **Special Function Definitions**: Added type signatures for special mathematical
