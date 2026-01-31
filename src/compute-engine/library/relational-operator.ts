@@ -61,9 +61,84 @@ export const RELOP_LIBRARY: SymbolDefinitions = {
     canonical: (args, { engine: ce }) => canonicalRelational(ce, 'Equal', args),
 
     // Comparing two equalities...
+    // Two equations are equivalent if they have the same solution set.
+    // For polynomial equations, this means the LHS-RHS expressions differ
+    // only by a non-zero constant factor.
     eq: (a, b) => {
-      if (a.operator !== b.operator) return false;
-      return a.op1.sub(a.op2).N().isEqual(b.op1.sub(b.op2).N());
+      if (a.operator !== b.operator) return undefined;
+
+      const ce = a.engine;
+
+      // Get LHS - RHS for each equation
+      const expr1 = a.op1.sub(a.op2);
+      const expr2 = b.op1.sub(b.op2);
+
+      // Handle special cases where expressions are zero (identity equations)
+      const s1 = expr1.simplify();
+      const s2 = expr2.simplify();
+      const expr1Zero = s1.is(0) || (s1.isNumberLiteral && s1.re === 0);
+      const expr2Zero = s2.is(0) || (s2.isNumberLiteral && s2.re === 0);
+
+      // If both are identities (0 = 0), they're equivalent
+      if (expr1Zero && expr2Zero) return true;
+
+      // If only one is an identity, they're not equivalent
+      if (expr1Zero || expr2Zero) return false;
+
+      // Get unknowns from both expressions
+      const unknowns = [...new Set([...expr1.unknowns, ...expr2.unknowns])];
+
+      // If no unknowns, compare directly
+      if (unknowns.length === 0) {
+        const v1 = expr1.N().re;
+        const v2 = expr2.N().re;
+        if (!Number.isFinite(v1) || !Number.isFinite(v2)) return undefined;
+        if (Math.abs(v2) < ce.tolerance) return false;
+        // Both are constants - they differ by a constant factor if both are non-zero
+        return (
+          Math.abs(v1) > ce.tolerance &&
+          Math.abs(v2) > ce.tolerance &&
+          Number.isFinite(v1 / v2)
+        );
+      }
+
+      // Sample-based check: if expr1/expr2 evaluates to the same constant
+      // for multiple values of unknowns, they're likely equivalent
+      const testValues = [0.5, 1.5, 2, -1, 3, -0.5, 0.7, 2.3];
+      let constantRatio: number | undefined = undefined;
+      const tolerance = ce.tolerance;
+
+      for (const testVal of testValues) {
+        // Create substitution for all unknowns
+        const sub: Record<string, number> = {};
+        for (const u of unknowns) sub[u] = testVal;
+
+        const v1 = expr1.subs(sub).N();
+        const v2 = expr2.subs(sub).N();
+
+        const n1 = v1.re;
+        const n2 = v2.re;
+
+        if (!Number.isFinite(n1) || !Number.isFinite(n2)) continue;
+        if (Math.abs(n2) < tolerance) continue; // Skip if denominator is zero
+
+        const r = n1 / n2;
+        if (!Number.isFinite(r)) continue;
+
+        if (constantRatio === undefined) {
+          constantRatio = r;
+        } else if (Math.abs(r - constantRatio) > tolerance) {
+          // Ratio is not constant - equations are not equivalent
+          return false;
+        }
+      }
+
+      // If we found a constant ratio (non-zero), equations are equivalent
+      if (constantRatio !== undefined && Math.abs(constantRatio) > tolerance) {
+        return true;
+      }
+
+      return undefined;
     },
 
     evaluate: (ops, { engine: ce }) => {
