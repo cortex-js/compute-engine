@@ -342,6 +342,20 @@
   guard against pathological expressions. All recursive calls now track depth
   and gracefully return `undefined` if the limit is exceeded.
 
+### Bug Fixes
+
+- **Equation Equivalence in `isEqual()`** (Issue #275): Two equations are now
+  correctly recognized as equivalent if they have the same solution set:
+
+  ```javascript
+  ce.parse('2x+1=0').isEqual(ce.parse('x=-1/2'));   // → true
+  ce.parse('3x+1=0').isEqual(ce.parse('6x+2=0'));   // → true
+  ```
+
+  The implementation uses a sampling-based approach to check if the ratio of
+  (LHS₁-RHS₁) to (LHS₂-RHS₂) is a non-zero constant, which indicates equivalent
+  solution sets.
+
 ## 0.33.0 _2026-01-30_
 
 ### Bug Fixes
