@@ -174,11 +174,22 @@ export class Product {
       }
 
       if (!term.symbol) {
-        // If possible, factor out a rational coefficient
-        let coef: NumericValue;
-        [coef, term] = term.toNumericValue();
-        if (exp && !isOne(exp)) coef = coef.pow(this.engine._numericValue(exp));
-        this.coefficient = this.coefficient.mul(coef);
+        // Skip numeric coefficient extraction for symbolic radicals like √2, ∛2, 2^{1/3}
+        // These should stay symbolic rather than evaluating to floats
+        const isSymbolicRadical =
+          (term.operator === 'Sqrt' ||
+            term.operator === 'Root' ||
+            term.operator === 'Power') &&
+          term.op1?.isNumberLiteral === true;
+
+        if (!isSymbolicRadical) {
+          // If possible, factor out a rational coefficient
+          let coef: NumericValue;
+          [coef, term] = term.toNumericValue();
+          if (exp && !isOne(exp))
+            coef = coef.pow(this.engine._numericValue(exp));
+          this.coefficient = this.coefficient.mul(coef);
+        }
       }
     }
 
@@ -198,23 +209,43 @@ export class Product {
       // Term is `Power(op1, op2)`
       const r = asRational(term.op2);
       if (r) {
-        this.mul(term.op1, rationalMul(exponent, r));
-        return;
+        // Don't extract non-integer exponents for numeric bases
+        // This would cause 2^{3/5} to evaluate numerically instead of staying symbolic
+        // Only extract when: base is not a number, or exponent is an integer
+        const baseIsNumeric = term.op1?.isNumberLiteral === true;
+        const expIsInteger = r[1] === 1 || r[1] === -1; // denominator is ±1
+        if (!baseIsNumeric || expIsInteger) {
+          this.mul(term.op1, rationalMul(exponent, r));
+          return;
+        }
+        // Otherwise, keep the Power expression as a single term
       }
     }
 
     if (term.operator === 'Sqrt') {
       // Term is `Sqrt(op1)`
-      this.mul(term.op1, rationalMul(exponent, [1, 2]));
-      return;
+      // Don't extract non-integer exponents for numeric bases
+      // This keeps √2 symbolic instead of evaluating to 1.414...
+      const baseIsNumeric = term.op1?.isNumberLiteral === true;
+      if (!baseIsNumeric) {
+        this.mul(term.op1, rationalMul(exponent, [1, 2]));
+        return;
+      }
+      // Otherwise, keep the Sqrt expression as a single term
     }
 
     if (term.operator === 'Root') {
       // Term is `Root(op1, op2)`
       const r = asRational(term.op2);
       if (r) {
-        this.mul(term.op1, rationalMul(exponent, inverse(r)));
-        return;
+        // Don't extract non-integer exponents for numeric bases
+        // This keeps ∛2 symbolic instead of evaluating to 1.259...
+        const baseIsNumeric = term.op1?.isNumberLiteral === true;
+        if (!baseIsNumeric) {
+          this.mul(term.op1, rationalMul(exponent, inverse(r)));
+          return;
+        }
+        // Otherwise, keep the Root expression as a single term
       }
     }
 

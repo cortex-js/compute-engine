@@ -88,6 +88,13 @@
   for patterns like `sin(x)*cos(x)` and `tan(x)*cot(x)`, ensuring these are
   simplified to `sin(2x)/2` and `1` respectively.
 
+- **Symbolic Radicals Preservation**: Fixed numeric radicals (`√2`, `∛5`, `2^{3/5}`)
+  being evaluated to floating-point approximations during multiplication. Now
+  `x * √2` stays as `√2 · x` instead of `1.414... · x`, and `x * 2^{1/3}` stays
+  as `x · ∛2` instead of `1.259... · x`. This preserves exact irrational values
+  and allows proper algebraic manipulation. Use `.N()` to get numeric approximations
+  when needed.
+
 ### Features
 
 - **([#163](https://github.com/cortex-js/compute-engine/issues/163)) Additional

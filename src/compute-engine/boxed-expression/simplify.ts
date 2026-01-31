@@ -49,13 +49,17 @@ function evaluateNumericSubexpressions(expr: BoxedExpression): BoxedExpression {
   // No ops means symbol or other atomic - return as is
   if (!expr.ops) return expr;
 
-  // Don't evaluate Power expressions with ExponentialE base (e.g., e^2)
-  // These should be preserved for symbolic combination rules like e^a / e^b -> e^{a-b}
-  if (
-    expr.operator === 'Power' &&
-    expr.op1?.symbol === 'ExponentialE'
-  ) {
-    return expr;
+  // Don't evaluate Power expressions that should stay symbolic:
+  // - e^n (for potential combination with e^x)
+  // - n^{p/q} where result is irrational (e.g., 2^{3/5})
+  if (expr.operator === 'Power') {
+    if (expr.op1?.symbol === 'ExponentialE') {
+      return expr;
+    }
+    // Skip n^{p/q} with non-integer exponent - these produce irrational results
+    if (expr.op2?.isRational === true && expr.op2?.isInteger === false) {
+      return expr;
+    }
   }
 
   // If purely numeric (no unknowns), evaluate the whole expression
@@ -247,8 +251,15 @@ function simplifyOperands(
   const simplifiedOps = ops.map((x) => {
     // For purely numeric basic arithmetic expressions, evaluate directly
     // to get simpler results like √(1+2) → √3
+    // BUT skip Power expressions that should stay symbolic:
+    // - e^n and n^{p/q} with non-integer exponent
     if (!x.isNumberLiteral && x.ops && x.unknowns.length === 0) {
       if (BASIC_ARITHMETIC.includes(x.operator)) {
+        // Don't evaluate Power expressions that produce irrational results
+        if (x.operator === 'Power') {
+          if (x.op1?.symbol === 'ExponentialE') return x;
+          if (x.op2?.isRational === true && x.op2?.isInteger === false) return x;
+        }
         const evaluated = x.evaluate();
         if (evaluated.isNumberLiteral) return evaluated;
       }

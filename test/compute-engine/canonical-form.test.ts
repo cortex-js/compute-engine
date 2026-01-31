@@ -85,9 +85,8 @@ describe('CANONICAL FORMS', () => {
     expect(check('\\frac{-101}{10^{\\frac{2}{3}}}')).toMatchInlineSnapshot(`
       box       = ["Divide", -101, ["Power", 10, ["Divide", 2, 3]]]
       canonical = ["Divide", -101, ["Power", 10, ["Rational", 2, 3]]]
-      simplify  = -21.75979036932202893
-      eval-auto = -21.75979036932202893
-      eval-mach = -21.759790369322026
+      eval-auto = -101 / 10^(2/3)
+      eval-mach = -101 / 10^(2/3)
       N-auto    = -21.7597903693220255898
       N-mach    = -21.75979036932202
     `);

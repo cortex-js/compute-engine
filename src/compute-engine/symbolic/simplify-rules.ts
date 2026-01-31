@@ -282,15 +282,24 @@ export const SIMPLIFY_RULES: Rule[] = [
         ...ops.map((op) => {
           const canonical = op.canonical;
           // Evaluate purely numeric operands (no unknowns) to simplify them
-          // BUT skip Power expressions with ExponentialE base to preserve symbolic form
-          // e.g., e^2 should stay as e^2 for potential combination with e^x
+          // BUT skip Power expressions that should stay symbolic:
+          // - e^n (for potential combination with e^x)
+          // - n^{p/q} where result is irrational (e.g., 2^{3/5})
           if (canonical.unknowns.length === 0 && canonical.ops) {
-            // Skip evaluation for e^n to allow power combination rules to work
-            if (
-              canonical.operator === 'Power' &&
-              canonical.op1?.symbol === 'ExponentialE'
-            ) {
-              return canonical;
+            if (canonical.operator === 'Power') {
+              // Skip evaluation for e^n to allow power combination rules to work
+              if (canonical.op1?.symbol === 'ExponentialE') {
+                return canonical;
+              }
+              // Skip evaluation for n^{p/q} with non-integer exponent
+              // These produce irrational results that should stay symbolic
+              // e.g., 2^{3/5} should stay as 2^{3/5}, not 1.5157...
+              if (
+                canonical.op2?.isRational === true &&
+                canonical.op2?.isInteger === false
+              ) {
+                return canonical;
+              }
             }
             const evaluated = canonical.evaluate();
             // Only use evaluated form if it's simpler (a number literal)
