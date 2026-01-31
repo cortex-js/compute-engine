@@ -392,32 +392,62 @@ export function simplifyTrig(x: BoxedExpression): RuleStep | undefined {
   }
 
   // Product-to-sum identities
-  if (op === 'Multiply' && x.ops && x.ops.length === 2) {
-    const [a, b] = x.ops;
+  if (op === 'Multiply' && x.ops) {
+    // Handle coefficient * sin(x) * cos(x) -> coefficient * sin(2x)/2
+    // This includes the case of 2*sin(x)*cos(x) -> sin(2x)
+    if (x.ops.length >= 2) {
+      // Find sin and cos terms
+      let sinTerm: BoxedExpression | null = null;
+      let cosTerm: BoxedExpression | null = null;
+      const otherTerms: BoxedExpression[] = [];
 
-    // sin(x) * cos(x) -> sin(2x)/2
-    if (a.operator === 'Sin' && b.operator === 'Cos') {
-      const argA = a.op1;
-      const argB = b.op1;
-      if (argA?.isSame(argB)) {
-        return {
-          value: ce._fn('Sin', [argA.mul(2)]).div(2),
-          because: 'sin(x)*cos(x) -> sin(2x)/2',
-        };
+      for (const term of x.ops) {
+        if (term.operator === 'Sin' && !sinTerm) {
+          sinTerm = term;
+        } else if (term.operator === 'Cos' && !cosTerm) {
+          cosTerm = term;
+        } else {
+          otherTerms.push(term);
+        }
+      }
+
+      // sin(x) * cos(x) with same argument -> coefficient * sin(2x)/2
+      if (sinTerm && cosTerm) {
+        const sinArg = sinTerm.op1;
+        const cosArg = cosTerm.op1;
+        if (sinArg?.isSame(cosArg)) {
+          const sin2x = ce._fn('Sin', [sinArg.mul(2)]);
+          if (otherTerms.length === 0) {
+            // Plain sin(x)*cos(x) -> sin(2x)/2
+            return {
+              value: sin2x.div(2),
+              because: 'sin(x)*cos(x) -> sin(2x)/2',
+            };
+          } else {
+            // coefficient * sin(x) * cos(x) -> coefficient * sin(2x)/2
+            // Special case: 2 * sin(x) * cos(x) -> sin(2x)
+            const coefficient =
+              otherTerms.length === 1
+                ? otherTerms[0]
+                : ce._fn('Multiply', otherTerms);
+            if (coefficient.is(2)) {
+              return {
+                value: sin2x,
+                because: '2*sin(x)*cos(x) -> sin(2x)',
+              };
+            }
+            return {
+              value: coefficient.mul(sin2x).div(2),
+              because: 'c*sin(x)*cos(x) -> c*sin(2x)/2',
+            };
+          }
+        }
       }
     }
 
-    // cos(x) * sin(x) -> sin(2x)/2
-    if (a.operator === 'Cos' && b.operator === 'Sin') {
-      const argA = a.op1;
-      const argB = b.op1;
-      if (argA?.isSame(argB)) {
-        return {
-          value: ce._fn('Sin', [argA.mul(2)]).div(2),
-          because: 'cos(x)*sin(x) -> sin(2x)/2',
-        };
-      }
-    }
+    // Remaining product-to-sum identities (need exactly 2 operands)
+    if (x.ops.length === 2) {
+      const [a, b] = x.ops;
 
     // sin(x) * sin(y) -> (cos(x-y) - cos(x+y))/2
     if (a.operator === 'Sin' && b.operator === 'Sin') {
@@ -465,6 +495,7 @@ export function simplifyTrig(x: BoxedExpression): RuleStep | undefined {
       if (argA?.isSame(argB)) {
         return { value: ce.One, because: 'cot(x)*tan(x) -> 1' };
       }
+    }
     }
   }
 

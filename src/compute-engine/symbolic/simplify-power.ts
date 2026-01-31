@@ -85,6 +85,12 @@ export function simplifyPower(x: BoxedExpression): RuleStep | undefined {
 
     if (!base || !exp) return undefined;
 
+    // 0^x -> 0 when x is positive (including symbolic like π)
+    // Note: 0^0 = NaN and 0^(-x) = ComplexInfinity are handled elsewhere
+    if (base.is(0) && exp.isPositive === true) {
+      return { value: ce.Zero, because: '0^x -> 0 when x > 0' };
+    }
+
     // (-1)^{p/q} -> -1 when both p and q are odd (real odd root of -1)
     // This handles the literal -1 case (not Negate(1))
     if (base.is(-1)) {

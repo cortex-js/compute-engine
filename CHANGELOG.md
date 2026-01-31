@@ -38,6 +38,15 @@
   - `sec(π/2 - x)` → `csc(x)`
   - `csc(π/2 - x)` → `sec(x)`
 
+- **Zero Power with Symbolic Exponent**: Fixed `0^π` and similar expressions with
+  positive symbolic exponents not simplifying. Now `0^x` → `0` when `x` is known
+  to be positive (including `π`, `e`, etc.).
+
+- **Double Angle with Coefficient**: Fixed `2sin(x)cos(x)` not simplifying to
+  `sin(2x)`. The product-to-sum identity now handles coefficients:
+  - `2sin(x)cos(x)` → `sin(2x)`
+  - `c·sin(x)cos(x)` → `c·sin(2x)/2` for any coefficient `c`
+
 ### Features
 
 - **([#163](https://github.com/cortex-js/compute-engine/issues/163)) Additional
