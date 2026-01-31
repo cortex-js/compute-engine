@@ -1,5 +1,23 @@
 ## [Unreleased]
 
+### Bug Fixes
+
+- **Extraneous Root Filtering for Sqrt Equations**: Fixed an issue where solving
+  square root equations could return extraneous roots. When solving equations
+  like `√x = x - 2` or `√x - x + 2 = 0` using the quadratic substitution method
+  (u = √x → solve for u → x = u²), the solver could return roots that satisfy
+  the transformed equation but not the original. The `validateRoots()` function
+  now correctly validates candidate solutions against the original expression
+  before any algebraic transformations (clearing denominators, harmonization),
+  properly filtering out extraneous roots.
+
+  Examples of equations that now correctly filter extraneous roots:
+  - `√x = x - 2` → returns `[4]` (filters out x=1)
+  - `√x + x - 2 = 0` → returns `[1]` (filters out x=4)
+  - `√x - x + 2 = 0` → returns `[4]` (filters out x=1)
+  - `x - 2√x - 3 = 0` → returns `[9]` (filters out x=1)
+  - `2x + 3√x - 2 = 0` → returns `[1/4]` (filters out x=4)
+
 ### New Features
 
 #### Subscripts and Indexing

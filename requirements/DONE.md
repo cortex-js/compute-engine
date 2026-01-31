@@ -877,3 +877,60 @@ ce.box(['Sum', 'n', ['Element', 'n', ['Interval', 1, ['Open', 6]]]]).evaluate()
 **Files modified:**
 - `src/compute-engine/library/logic-analysis.ts` - `extractFiniteDomain`
 - `test/compute-engine/latex-syntax/arithmetic.test.ts` - Added tests
+
+---
+
+## Equation Solving Enhancements (Completed)
+
+### 14. Extraneous Root Filtering for Sqrt Equations ✅
+
+**IMPLEMENTED:** Fixed extraneous root filtering for square root equations that
+use quadratic substitution (u = √x → au² + bu + c = 0 → x = u²).
+
+**Problem:** The sqrt equation solver uses quadratic substitution, which can
+produce extraneous roots that satisfy the transformed equation but not the
+original. The `validateRoots()` function was being called with the modified
+expression (after clearing denominators and harmonization) instead of the
+original expression.
+
+**Solution:** Save the original expression before any algebraic transformations
+(clearing denominators, harmonization) and use that for validating candidate
+solutions. The `validateRoots()` function substitutes each root back into the
+expression and verifies it evaluates to 0.
+
+**Examples that now correctly filter extraneous roots:**
+```typescript
+// √x = x - 2 has candidate solutions x=1 and x=4, but x=1 is extraneous
+// x=1: √1 = 1, 1-2 = -1, 1 ≠ -1 ❌
+// x=4: √4 = 2, 4-2 = 2 ✓
+ce.parse('\\sqrt{x} = x - 2').solve('x')  // → [4]
+
+// √x + x - 2 = 0: x=4 is extraneous
+ce.parse('\\sqrt{x} + x - 2 = 0').solve('x')  // → [1]
+
+// √x - x + 2 = 0: x=1 is extraneous (from u=-1)
+ce.parse('\\sqrt{x} - x + 2 = 0').solve('x')  // → [4]
+
+// x - 4√x + 3 = 0: both roots are valid (no extraneous)
+ce.parse('x - 4\\sqrt{x} + 3 = 0').solve('x')  // → [1, 9]
+
+// x - 2√x - 3 = 0: x=1 is extraneous (from u=-1)
+ce.parse('x - 2\\sqrt{x} - 3 = 0').solve('x')  // → [9]
+
+// 2x + 3√x - 2 = 0: x=4 is extraneous (from u=-2)
+ce.parse('2x + 3\\sqrt{x} - 2 = 0').solve('x')  // → [1/4]
+```
+
+**Implementation details:**
+- Added `originalExpr` variable to save the expression before `clearDenominators()`
+  and other transformations
+- Modified `validateRoots()` call to use `originalExpr` instead of the transformed
+  `expr`
+- The existing validation logic (substitute root, check if result equals 0) now
+  correctly filters extraneous roots
+
+**Files modified:**
+- `src/compute-engine/boxed-expression/solve.ts` - Save original expression and
+  validate against it
+- `test/compute-engine/solve.test.ts` - Added 6 new tests in "EXTRANEOUS ROOT
+  FILTERING FOR SQRT EQUATIONS" describe block
