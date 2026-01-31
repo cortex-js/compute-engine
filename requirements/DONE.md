@@ -435,6 +435,51 @@ ce.box(['Eigen', ['List', ['List', 4, 2], ['List', 1, 3]]]).evaluate();
 
 ---
 
+## Logic Enhancements (Completed)
+
+### L-1. Logic Simplification Rules ✅
+
+**IMPLEMENTED:** Added comprehensive boolean simplification rules:
+
+1. **Absorption** (NEW):
+   - `A ∧ (A ∨ B) → A`
+   - `A ∨ (A ∧ B) → A`
+
+2. **Idempotence** (already implemented):
+   - `A ∧ A → A`
+   - `A ∨ A → A`
+
+3. **Complementation** (already implemented):
+   - `A ∧ ¬A → False`
+   - `A ∨ ¬A → True`
+
+4. **Identity** (already implemented):
+   - `A ∧ True → A`
+   - `A ∨ False → A`
+
+5. **Domination** (already implemented):
+   - `A ∧ False → False`
+   - `A ∨ True → True`
+
+6. **Double negation** (already implemented via involution):
+   - `¬¬A → A`
+
+**Examples:**
+```typescript
+ce.box(['And', 'A', ['Or', 'A', 'B']]).simplify();  // → A
+ce.box(['Or', 'A', ['And', 'A', 'B']]).simplify();  // → A
+ce.box(['And', 'A', 'A']).simplify();              // → A
+ce.box(['And', 'A', ['Not', 'A']]).simplify();     // → False
+ce.box(['Or', 'A', ['Not', 'A']]).simplify();      // → True
+ce.box(['Not', ['Not', 'A']]).simplify();          // → A
+```
+
+**Files modified:**
+- `src/compute-engine/library/logic-utils.ts` - Added `applyAbsorptionAnd` and `applyAbsorptionOr` functions
+- `test/compute-engine/logic.test.ts` - Added "Logic Simplification Rules" describe block with 18 new tests
+
+---
+
 ## Medium Priority (Completed)
 
 ### 9. Implicit Multiplication Between `\exp` Function Calls ✅

@@ -455,6 +455,110 @@ describe('Satisfiability and Tautology', () => {
   });
 });
 
+describe('Logic Simplification Rules', () => {
+  function simplify(expr: any) {
+    return ce.box(expr).simplify().toString();
+  }
+
+  describe('Absorption', () => {
+    it('should simplify A ∧ (A ∨ B) → A', () => {
+      expect(simplify(['And', 'A', ['Or', 'A', 'B']])).toMatchInlineSnapshot(
+        `A`
+      );
+    });
+
+    it('should simplify A ∨ (A ∧ B) → A', () => {
+      expect(simplify(['Or', 'A', ['And', 'A', 'B']])).toMatchInlineSnapshot(
+        `A`
+      );
+    });
+
+    it('should simplify (A ∨ B) ∧ A → A', () => {
+      expect(simplify(['And', ['Or', 'A', 'B'], 'A'])).toMatchInlineSnapshot(
+        `A`
+      );
+    });
+
+    it('should simplify (A ∧ B) ∨ A → A', () => {
+      expect(simplify(['Or', ['And', 'A', 'B'], 'A'])).toMatchInlineSnapshot(
+        `A`
+      );
+    });
+
+    it('should simplify complex absorption A ∧ B ∧ (A ∨ C) → A ∧ B', () => {
+      expect(
+        simplify(['And', 'A', 'B', ['Or', 'A', 'C']])
+      ).toMatchInlineSnapshot(`A && B`);
+    });
+
+    it('should simplify complex absorption A ∨ B ∨ (A ∧ C) → A ∨ B', () => {
+      expect(simplify(['Or', 'A', 'B', ['And', 'A', 'C']])).toMatchInlineSnapshot(
+        `A || B`
+      );
+    });
+  });
+
+  describe('Idempotence', () => {
+    it('should simplify A ∧ A → A', () => {
+      expect(simplify(['And', 'A', 'A'])).toMatchInlineSnapshot(`A`);
+    });
+
+    it('should simplify A ∨ A → A', () => {
+      expect(simplify(['Or', 'A', 'A'])).toMatchInlineSnapshot(`A`);
+    });
+
+    it('should simplify A ∧ A ∧ A → A', () => {
+      expect(simplify(['And', 'A', 'A', 'A'])).toMatchInlineSnapshot(`A`);
+    });
+  });
+
+  describe('Complementation', () => {
+    it('should simplify A ∧ ¬A → False', () => {
+      expect(simplify(['And', 'A', ['Not', 'A']])).toMatchInlineSnapshot(
+        `"False"`
+      );
+    });
+
+    it('should simplify A ∨ ¬A → True', () => {
+      expect(simplify(['Or', 'A', ['Not', 'A']])).toMatchInlineSnapshot(
+        `"True"`
+      );
+    });
+  });
+
+  describe('Identity', () => {
+    it('should simplify A ∧ True → A', () => {
+      expect(simplify(['And', 'A', 'True'])).toMatchInlineSnapshot(`A`);
+    });
+
+    it('should simplify A ∨ False → A', () => {
+      expect(simplify(['Or', 'A', 'False'])).toMatchInlineSnapshot(`A`);
+    });
+  });
+
+  describe('Domination', () => {
+    it('should simplify A ∧ False → False', () => {
+      expect(simplify(['And', 'A', 'False'])).toMatchInlineSnapshot(`"False"`);
+    });
+
+    it('should simplify A ∨ True → True', () => {
+      expect(simplify(['Or', 'A', 'True'])).toMatchInlineSnapshot(`"True"`);
+    });
+  });
+
+  describe('Double Negation', () => {
+    it('should simplify ¬¬A → A', () => {
+      expect(simplify(['Not', ['Not', 'A']])).toMatchInlineSnapshot(`A`);
+    });
+
+    it('should simplify ¬¬¬A → ¬A', () => {
+      expect(simplify(['Not', ['Not', ['Not', 'A']]])).toMatchInlineSnapshot(
+        `!A`
+      );
+    });
+  });
+});
+
 describe('Truth Table Generation', () => {
   it('should generate truth table for simple expressions', () => {
     const result = ce.box(['TruthTable', 'A']).evaluate();

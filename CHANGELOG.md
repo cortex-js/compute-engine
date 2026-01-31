@@ -281,6 +281,23 @@
   This uses u-substitution: since `1/x = d/dx(ln(x))`, the integral becomes
   `∫ h'(x)/h(x) dx = ln|h(x)|`.
 
+#### Logic
+
+- **Boolean Simplification Rules**: Added absorption laws and improved boolean
+  expression simplification:
+  - **Absorption**: `A ∧ (A ∨ B) → A` and `A ∨ (A ∧ B) → A`
+  - **Idempotence**: `A ∧ A → A` and `A ∨ A → A`
+  - **Complementation**: `A ∧ ¬A → False` and `A ∨ ¬A → True`
+  - **Identity**: `A ∧ True → A` and `A ∨ False → A`
+  - **Domination**: `A ∧ False → False` and `A ∨ True → True`
+  - **Double negation**: `¬¬A → A`
+
+  These rules are applied automatically during simplification:
+  ```javascript
+  ce.box(['And', 'A', ['Or', 'A', 'B']]).simplify();  // → A
+  ce.box(['Or', 'A', ['And', 'A', 'B']]).simplify();  // → A
+  ```
+
 #### Linear Algebra
 
 - **Matrix Decompositions**: Added four matrix decomposition functions for

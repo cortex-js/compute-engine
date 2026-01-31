@@ -24,6 +24,7 @@
 **File:** `src/compute-engine/symbolic/antiderivative.ts`
 
 **Implementation notes:**
+
 - Each pattern needs proper wildcard handling for coefficients
 - Consider adding integration by parts as a general technique
 - Tabular integration could handle `∫ x^n·e^x dx` patterns
@@ -34,9 +35,12 @@
 
 ### 2. Simplification Performance
 
-**Problem:** The rule application system in `rules.ts` catches stack overflow errors and logs them, then continues. This is slow and produces noisy console output.
+**Problem:** The rule application system in `rules.ts` catches stack overflow
+errors and logs them, then continues. This is slow and produces noisy console
+output.
 
 **Current behavior (rules.ts:865-867):**
+
 ```typescript
 } catch (e) {
   console.error(`\n${expr.toString()}\n${rule.id}\n${e.message}`);
@@ -45,12 +49,15 @@
 ```
 
 **Potential improvements:**
+
 1. Add recursion depth limits to prevent stack overflows
 2. Track expression complexity and bail out early if it's growing
-3. Detect cycles in simplification (expression A → B → A) before they cause issues
+3. Detect cycles in simplification (expression A → B → A) before they cause
+   issues
 4. Remove or reduce console.error logging in production
 
 **Files:**
+
 - `src/compute-engine/boxed-expression/rules.ts`
 - `src/compute-engine/boxed-expression/simplify.ts`
 
@@ -58,12 +65,15 @@
 
 ### 3. Pattern Matching Improvements
 
-**Problem:** Some integration patterns don't match because the pattern matching system has limitations with:
+**Problem:** Some integration patterns don't match because the pattern matching
+system has limitations with:
+
 - Same wildcard appearing multiple times (should match same expression)
 - Matching against canonicalized expressions that have been reordered
 - Complex nested patterns
 
 **Example that doesn't work:**
+
 ```typescript
 // Trying to match 1/(x*ln(x)) where x appears twice
 {
@@ -73,11 +83,13 @@
 ```
 
 **Investigation needed:**
+
 - Review `src/compute-engine/boxed-expression/match.ts`
 - Understand how wildcard binding works
 - Consider adding "same as" constraints: `_x@1` and `_x@1` must match same expr
 
 **Files:**
+
 - `src/compute-engine/boxed-expression/match.ts`
 - `src/compute-engine/symbolic/antiderivative.ts`
 
@@ -85,16 +97,17 @@
 
 ## Logic and First-Order Logic Enhancements
 
-The following improvements build on the existing FOL support (quantifiers, CNF/DNF
-conversion, satisfiability checking, truth tables).
+The following improvements build on the existing FOL support (quantifiers,
+CNF/DNF conversion, satisfiability checking, truth tables).
 
 ### 4. Logical Equivalence Checking
 
-**Problem:** Currently, checking if two formulas are logically equivalent requires
-`IsTautology(['Equivalent', A, B])`, which converts to CNF and checks all assignments.
-This is inefficient.
+**Problem:** Currently, checking if two formulas are logically equivalent
+requires `IsTautology(['Equivalent', A, B])`, which converts to CNF and checks
+all assignments. This is inefficient.
 
 **Solution:** Add `IsEquivalent(expr1, expr2)` that:
+
 1. First tries syntactic equivalence (faster)
 2. Then tries canonical form comparison
 3. Falls back to truth table comparison only if needed
@@ -110,49 +123,13 @@ ce.box(['IsEquivalent',
 
 ---
 
-### 5. Logic Simplification Rules
-
-**Problem:** Boolean expressions aren't simplified using standard algebraic laws.
-
-**Rules to add:**
-```
-// Absorption
-A ∧ (A ∨ B) → A
-A ∨ (A ∧ B) → A
-
-// Idempotence (already partial support)
-A ∧ A → A
-A ∨ A → A
-
-// Complementation
-A ∧ ¬A → False
-A ∨ ¬A → True
-
-// Identity
-A ∧ True → A
-A ∨ False → A
-
-// Domination
-A ∧ False → False
-A ∨ True → True
-
-// Double negation (already supported)
-¬¬A → A
-
-// De Morgan (for simplification, not just CNF/DNF)
-¬(A ∧ B) → ¬A ∨ ¬B  (when simpler)
-¬(A ∨ B) → ¬A ∧ ¬B  (when simpler)
-```
-
-**File:** `src/compute-engine/symbolic/simplify-rules.ts` (add logic section)
-
----
-
 ### 6. Prime Implicants/Implicates
 
-**Problem:** For circuit minimization and optimal CNF/DNF, we need minimal representations.
+**Problem:** For circuit minimization and optimal CNF/DNF, we need minimal
+representations.
 
 **Solution:** Add functions:
+
 - `PrimeImplicants(expr)` - Find all prime implicants (minimal terms in DNF)
 - `PrimeImplicates(expr)` - Find all prime implicates (minimal clauses in CNF)
 - `MinimalDNF(expr)` - DNF with only prime implicants (Quine-McCluskey)
@@ -178,6 +155,7 @@ ce.box(['MinimalDNF', ['Or',
 **Problem:** FOL theorem proving often requires all quantifiers at the front.
 
 **Solution:** Add `ToPNF(expr)` that:
+
 1. Renames bound variables to avoid capture
 2. Moves all quantifiers to the front
 3. Preserves logical equivalence
@@ -193,6 +171,7 @@ ce.box(['ToPNF',
 ```
 
 **Transformations needed:**
+
 - `¬∀x.P → ∃x.¬P`
 - `¬∃x.P → ∀x.¬P`
 - `(∀x.P) ∧ Q → ∀x.(P ∧ Q)` (when x not free in Q)
@@ -208,21 +187,26 @@ ce.box(['ToPNF',
 **Problem:** Current `IsSatisfiable` uses brute-force enumeration (O(2^n)).
 
 **Solution:** Implement DPLL (Davis-Putnam-Logemann-Loveland) algorithm:
+
 1. Unit propagation: If a clause has one literal, it must be true
-2. Pure literal elimination: If a variable appears with only one polarity, assign it
+2. Pure literal elimination: If a variable appears with only one polarity,
+   assign it
 3. Branching with backtracking
 
 **Benefits:**
+
 - Much faster for most practical formulas
 - Can handle 100+ variables (vs current 20 limit)
 - Foundation for more advanced SAT techniques (CDCL)
 
 **API:** Same as current, but faster:
+
 ```typescript
 ce.box(['IsSatisfiable', large_formula]).evaluate()
 ```
 
 **Implementation notes:**
+
 - Convert to CNF internally (already have ToCNF)
 - Represent clauses as sets of literals for efficient manipulation
 - Consider adding conflict-driven clause learning (CDCL) later
@@ -233,11 +217,14 @@ ce.box(['IsSatisfiable', large_formula]).evaluate()
 
 ### 9. Model/Counterexample Finding
 
-**Problem:** `IsSatisfiable` and `IsTautology` only return True/False, not witnesses.
+**Problem:** `IsSatisfiable` and `IsTautology` only return True/False, not
+witnesses.
 
 **Solution:** Add functions that return satisfying assignments:
+
 - `FindModel(expr)` - Returns an assignment making expr true, or `Nothing`
-- `FindCounterexample(expr)` - Returns an assignment making expr false, or `Nothing`
+- `FindCounterexample(expr)` - Returns an assignment making expr false, or
+  `Nothing`
 
 ```typescript
 ce.box(['FindModel', ['And', 'A', ['Not', 'B']]]).evaluate()
@@ -248,6 +235,7 @@ ce.box(['FindCounterexample', ['Implies', 'A', 'B']]).evaluate()
 ```
 
 **Return format options:**
+
 1. List of pairs: `[["A", True], ["B", False]]`
 2. Dictionary: `{"A": True, "B": False}`
 3. Set of true variables: `["Set", "A"]` (false = not in set)
@@ -261,6 +249,7 @@ ce.box(['FindCounterexample', ['Implies', 'A', 'B']]).evaluate()
 **Problem:** No direct way to check if a conclusion follows from premises.
 
 **Solution:** Add `Entails(premises, conclusion)`:
+
 ```typescript
 // Modus Ponens: from P→Q and P, conclude Q
 ce.box(['Entails',
@@ -277,7 +266,8 @@ ce.box(['Entails',
 // → False
 ```
 
-**Implementation:** `Entails([p1, p2, ...], c)` ≡ `IsTautology(Implies(And(p1, p2, ...), c))`
+**Implementation:** `Entails([p1, p2, ...], c)` ≡
+`IsTautology(Implies(And(p1, p2, ...), c))`
 
 **File:** `src/compute-engine/library/logic.ts`
 
@@ -288,6 +278,7 @@ ce.box(['Entails',
 **Problem:** No support for automated theorem proving via resolution.
 
 **Solution:** Add resolution-based refutation:
+
 - `Resolve(clause1, clause2)` - Resolve two clauses on a complementary literal
 - `RefutationProof(premises, negated_conclusion)` - Try to derive empty clause
 
@@ -301,6 +292,7 @@ ce.box(['Resolve',
 ```
 
 **For full theorem proving:**
+
 ```typescript
 // Prove Q from P→Q and P using resolution
 ce.box(['IsTheorem',
@@ -311,6 +303,7 @@ ce.box(['IsTheorem',
 ```
 
 **Algorithm:**
+
 1. Convert premises and ¬goal to CNF clauses
 2. Repeatedly resolve clauses
 3. If empty clause derived → theorem proved
@@ -322,16 +315,19 @@ ce.box(['IsTheorem',
 
 ### 12. Skolemization
 
-**Problem:** Resolution in FOL requires removing existential quantifiers via Skolemization.
+**Problem:** Resolution in FOL requires removing existential quantifiers via
+Skolemization.
 
-**Background:** Skolemization replaces existentially quantified variables with Skolem
-functions (or constants). For example:
+**Background:** Skolemization replaces existentially quantified variables with
+Skolem functions (or constants). For example:
+
 - `∃x. P(x)` → `P(sk₁)` where `sk₁` is a Skolem constant
 - `∀x. ∃y. R(x, y)` → `∀x. R(x, f(x))` where `f` is a Skolem function
 
 **API Design Considerations:**
 
 **Option A: Simple conversion**
+
 ```typescript
 ce.box(['ToSkolem', ['Exists', 'x', ['P', 'x']]]).evaluate()
 // → ["P", "$sk1"]  (Skolem constant with generated name)
@@ -343,6 +339,7 @@ ce.box(['ToSkolem',
 ```
 
 **Option B: Return with metadata**
+
 ```typescript
 ce.box(['ToSkolem', expr]).evaluate()
 // Returns: ["Tuple",
@@ -355,6 +352,7 @@ ce.box(['ToSkolem', expr]).evaluate()
 ```
 
 **Option C: Skolem symbols as special expressions**
+
 ```typescript
 // Instead of plain symbols, use typed Skolem expressions:
 ["SkolemConstant", "sk1", "x"]  // Skolem constant replacing ∃x
@@ -362,12 +360,15 @@ ce.box(['ToSkolem', expr]).evaluate()
 ```
 
 **Recommended approach:** Option A with naming convention
+
 - Simple API: `ToSkolem(expr)` returns formula with Skolem symbols
 - Skolem constants: `$sk1`, `$sk2`, ... (prefix with $ to avoid collision)
-- Skolem functions: `$f1`, `$f2`, ... applied to universally quantified variables
+- Skolem functions: `$f1`, `$f2`, ... applied to universally quantified
+  variables
 - Document that these are Skolem symbols in the output
 
 **Combined operation for theorem proving:**
+
 ```typescript
 // ToClausalForm does: PNF → Skolemization → CNF → clause set
 ce.box(['ToClausalForm', fol_formula]).evaluate()
@@ -375,9 +376,11 @@ ce.box(['ToClausalForm', fol_formula]).evaluate()
 ```
 
 **Files:**
+
 - `src/compute-engine/library/logic.ts`
 
 **Implementation steps:**
+
 1. First implement `ToPNF` (prerequisite)
 2. Implement Skolemization on PNF formulas
 3. Combine with CNF for `ToClausalForm`
@@ -386,9 +389,11 @@ ce.box(['ToClausalForm', fol_formula]).evaluate()
 
 ### 13. Parse Natural Logic Notation
 
-**Problem:** Users must use LaTeX (`\land`, `\lor`) or MathJSON for logic expressions.
+**Problem:** Users must use LaTeX (`\land`, `\lor`) or MathJSON for logic
+expressions.
 
 **Solution:** Support ASCII logic notation in parsing:
+
 ```typescript
 ce.parse('p -> q')        // → ["Implies", "p", "q"]
 ce.parse('p <-> q')       // → ["Equivalent", "p", "q"]
@@ -402,11 +407,13 @@ ce.parse('exists x. P(x)')  // → ["Exists", "x", ["P", "x"]]
 ```
 
 **Challenges:**
+
 - `^` conflicts with Power notation
 - `|` might conflict with absolute value or set notation
 - Need to handle precedence correctly
 
-**Option:** Add a `logicNotation: true` parsing option to enable these alternatives.
+**Option:** Add a `logicNotation: true` parsing option to enable these
+alternatives.
 
 **File:** `src/compute-engine/latex-syntax/definitions-logic.ts`
 
@@ -416,9 +423,12 @@ ce.parse('exists x. P(x)')  // → ["Exists", "x", ["P", "x"]]
 
 ### 14. Extraneous Root Filtering for Sqrt Equations
 
-**Problem:** The sqrt equation solver uses quadratic substitution (u = √x, solve au² + bu + c = 0, then x = u²). This can produce extraneous roots that don't satisfy the original equation.
+**Problem:** The sqrt equation solver uses quadratic substitution (u = √x, solve
+au² + bu + c = 0, then x = u²). This can produce extraneous roots that don't
+satisfy the original equation.
 
 **Example:**
+
 ```
 x - 4√x + 3 = 0
 Substitution: u² - 4u + 3 = 0 → u = 1, 3
@@ -430,16 +440,21 @@ u² + 2u + 3 = 0 → u = -1 ± √2i (complex)
 x = u² might give real values that don't satisfy original
 ```
 
-**Current behavior:** Returns both roots from the quadratic formula without validation.
+**Current behavior:** Returns both roots from the quadratic formula without
+validation.
 
 **Solution:** Add a verification step in `validateRoots()` that:
+
 1. Substitutes each candidate solution back into the original equation
 2. Checks if it evaluates to 0 (within tolerance)
 3. Filters out solutions that don't satisfy
 
-**Implementation location:** The existing `validateRoots()` function in `solve.ts` already does this, but it's called with the wrong expression. Need to ensure the original (pre-harmonization) expression is used for validation.
+**Implementation location:** The existing `validateRoots()` function in
+`solve.ts` already does this, but it's called with the wrong expression. Need to
+ensure the original (pre-harmonization) expression is used for validation.
 
 **Test case to add:**
+
 ```typescript
 // Should return [1] not [1, 9] if 9 is extraneous
 test('should filter extraneous sqrt roots', () => {
@@ -455,12 +470,14 @@ test('should filter extraneous sqrt roots', () => {
 
 ### 15. Extended Sqrt Equation Patterns
 
-**Problem:** Current sqrt rules only handle `ax + b√x + c = 0`. More complex patterns aren't supported.
+**Problem:** Current sqrt rules only handle `ax + b√x + c = 0`. More complex
+patterns aren't supported.
 
 **Patterns to add:**
 
 1. **Sqrt of linear expression:** `√(ax + b) + c = 0`
    - Solution: `ax + b = c²` when `c ≤ 0`, so `x = (c² - b)/a`
+
    ```typescript
    {
      match: ['Add', ['Sqrt', ['Add', ['Multiply', '__a', '_x'], '__b']], '__c'],
@@ -486,7 +503,8 @@ test('should filter extraneous sqrt roots', () => {
    - Becomes `√(u² + u) = a`, then `u² + u = a²`
    - Solve quadratic for u, then x = u²
 
-**Complexity note:** Patterns 2-4 can produce extraneous roots and require careful validation.
+**Complexity note:** Patterns 2-4 can produce extraneous roots and require
+careful validation.
 
 **File:** `src/compute-engine/boxed-expression/solve.ts`
 
@@ -494,48 +512,58 @@ test('should filter extraneous sqrt roots', () => {
 
 ### 22. Equation Equivalence in isEqual
 
-**Problem:** `isEqual` should recognize mathematically equivalent equations, but currently
-returns `false` for equations with the same solution set.
+**Problem:** `isEqual` should recognize mathematically equivalent equations, but
+currently returns `false` for equations with the same solution set.
 
 **Current behavior:**
+
 ```typescript
 ce.parse('2x+1=0').isEqual(ce.parse('x=-1/2'))  // Returns: false
 // But both equations have the same solution: x = -1/2
 ```
 
 **Expected behavior:**
+
 ```typescript
 ce.parse('2x+1=0').isEqual(ce.parse('x=-1/2'))  // Should return: true
 ```
 
 **Background:**
+
 - `isSame` = structural equality (same expression tree)
 - `isEqual` = mathematical equality (same mathematical meaning)
 
 For regular expressions, `isEqual` works correctly:
+
 ```typescript
 ce.parse('2x').isEqual(ce.parse('x+x'))  // Returns: true (correct)
 ```
 
 **Solution:** When `isEqual` compares two `Equal` expressions (equations):
+
 1. Compute `expr1 = LHS1 - RHS1` and `expr2 = LHS2 - RHS2`
 2. Compute `ratio = expr1 / expr2`
 3. Simplify the ratio
-4. If ratio is a non-zero constant, the equations are equivalent (same solution set)
+4. If ratio is a non-zero constant, the equations are equivalent (same solution
+   set)
 
 **Example:**
+
 - `2x + 1 = 0` → `expr1 = 2x + 1`
 - `x = -1/2` → `expr2 = x + 1/2`
 - `ratio = (2x + 1) / (x + 1/2) = 2` (constant)
 - Therefore, equations are equivalent → return `true`
 
 **Edge cases:**
+
 - Handle equations with no solutions (e.g., `0 = 1`)
 - Handle equations that are identities (e.g., `x = x`)
 - Ensure ratio check handles symbolic expressions correctly
 
 **Files to modify:**
-- `src/compute-engine/boxed-expression/abstract-boxed-expression.ts` - `isEqual` method
+
+- `src/compute-engine/boxed-expression/abstract-boxed-expression.ts` - `isEqual`
+  method
 
 **Tests:** See `test/playground.ts` and PLAYGROUND.md Solve section
 
@@ -545,10 +573,11 @@ ce.parse('2x').isEqual(ce.parse('x+x'))  // Returns: true (correct)
 
 ### 16. Pre-Subscript and Pre-Superscript Parsing
 
-**Problem:** LaTeX supports pre-scripts (subscripts and superscripts that appear *before*
-the base symbol), but the current parser doesn't handle them correctly.
+**Problem:** LaTeX supports pre-scripts (subscripts and superscripts that appear
+_before_ the base symbol), but the current parser doesn't handle them correctly.
 
 **Examples that don't work:**
+
 ```latex
 {}_p^q X      % Pre-subscript p, pre-superscript q, base X (e.g., isotope notation)
 {}_2^4 He     % Helium-4 notation: mass number 4, atomic number 2
@@ -556,12 +585,14 @@ the base symbol), but the current parser doesn't handle them correctly.
 ```
 
 **Current behavior:**
+
 ```typescript
 ce.parse('{}_2^4 He').json
 // Likely parses incorrectly as sequence or tuple, not as a single entity
 ```
 
 **Expected behavior:**
+
 ```typescript
 ce.parse('{}_2^4 He').json
 // → ["PreScripts", "He", 2, 4]  // or some similar representation
@@ -579,7 +610,8 @@ ce.parse('{}_2^4 He').json
 2. **Parser changes needed:**
    - Detect when `_` or `^` follows an empty group `{}`
    - Capture these as "pre-scripts" and associate with the following symbol
-   - Handle all combinations: pre-sub only, pre-sup only, both pre-sub and pre-sup
+   - Handle all combinations: pre-sub only, pre-sup only, both pre-sub and
+     pre-sup
 
 3. **MathJSON representation options:**
    - `["PreScripts", base, pre_sub, pre_sup]` - explicit function
@@ -592,11 +624,14 @@ ce.parse('{}_2^4 He').json
    - Alternative binomial: `{}_{n}C_r`
 
 **Files to modify:**
+
 - `src/compute-engine/latex-syntax/parse.ts` - Main parsing logic
 - `src/compute-engine/latex-syntax/parse-symbol.ts` - Symbol parsing
-- `src/compute-engine/library/core.ts` - Add PreScripts function definition (if new function)
+- `src/compute-engine/library/core.ts` - Add PreScripts function definition (if
+  new function)
 
 **Tests to add:**
+
 ```typescript
 test('pre-subscript parsing', () => {
   expect(parse('{}_2 X')).toMatchInlineSnapshot(`["PreScripts", "X", 2, "Nothing"]`);
@@ -621,10 +656,12 @@ test('isotope notation', () => {
 
 ### 17. Subscript Evaluation Functions for Sequences
 
-**Problem:** Users cannot define evaluation functions for subscripted symbols. For example,
-defining a Fibonacci sequence `F_n` where `F_0 = 0`, `F_1 = 1`, `F_n = F_{n-1} + F_{n-2}`.
+**Problem:** Users cannot define evaluation functions for subscripted symbols.
+For example, defining a Fibonacci sequence `F_n` where `F_0 = 0`, `F_1 = 1`,
+`F_n = F_{n-1} + F_{n-2}`.
 
 **Current behavior:**
+
 ```typescript
 // No way to define this:
 ce.declare('F', { subscriptEvaluate: (n) => fibonacci(n) });
@@ -635,6 +672,7 @@ ce.parse('F_5').evaluate()
 ```
 
 **Desired behavior:**
+
 ```typescript
 // Define a sequence with subscript evaluation
 ce.declare('F', {
@@ -662,6 +700,7 @@ ce.parse('F_{10}').evaluate()
 **Implementation considerations:**
 
 1. **Extend symbol definition interface:**
+
    ```typescript
    interface SymbolDefinition {
      // ... existing properties ...
@@ -674,19 +713,20 @@ ce.parse('F_{10}').evaluate()
    }
    ```
 
-2. **Modify Subscript evaluation:**
-   In `src/compute-engine/library/core.ts`, the Subscript function's evaluate handler
-   should check if the base symbol has a `subscriptEvaluate` function defined.
+2. **Modify Subscript evaluation:** In `src/compute-engine/library/core.ts`, the
+   Subscript function's evaluate handler should check if the base symbol has a
+   `subscriptEvaluate` function defined.
 
-3. **Handle compound symbols:**
-   Need to decide how this interacts with compound symbols like `F_n` being parsed
-   as a single symbol. Options:
-   - Parse `F_5` as `['Subscript', 'F', 5]` (not a symbol) when `F` has subscriptEvaluate
+3. **Handle compound symbols:** Need to decide how this interacts with compound
+   symbols like `F_n` being parsed as a single symbol. Options:
+   - Parse `F_5` as `['Subscript', 'F', 5]` (not a symbol) when `F` has
+     subscriptEvaluate
    - Always parse as compound symbol but resolve during evaluation
    - Add a declaration flag to control parsing behavior
 
-4. **Recursive definitions:**
-   For sequences like Fibonacci, users might want to define them recursively:
+4. **Recursive definitions:** For sequences like Fibonacci, users might want to
+   define them recursively:
+
    ```typescript
    ce.declare('F', {
      subscriptEvaluate: (n, ce) => {
@@ -698,10 +738,11 @@ ce.parse('F_{10}').evaluate()
      },
    });
    ```
+
    Consider adding built-in memoization support.
 
-5. **Multi-index sequences:**
-   Support sequences with multiple indices (e.g., Pascal's triangle `C_{n,k}`):
+5. **Multi-index sequences:** Support sequences with multiple indices (e.g.,
+   Pascal's triangle `C_{n,k}`):
    ```typescript
    ce.declare('C', {
      subscriptEvaluate: ([n, k], ce) => {
@@ -711,6 +752,7 @@ ce.parse('F_{10}').evaluate()
    ```
 
 **Common sequences to support:**
+
 - Fibonacci: `F_n = F_{n-1} + F_{n-2}`
 - Lucas: `L_n = L_{n-1} + L_{n-2}` with `L_0 = 2, L_1 = 1`
 - Triangular: `T_n = n(n+1)/2`
@@ -719,12 +761,16 @@ ce.parse('F_{10}').evaluate()
 - Prime counting: `\pi_n` (number of primes ≤ n)
 
 **Files to modify:**
-- `src/compute-engine/global-types.ts` - Add subscriptEvaluate to SymbolDefinition interface
+
+- `src/compute-engine/global-types.ts` - Add subscriptEvaluate to
+  SymbolDefinition interface
 - `src/compute-engine/library/core.ts` - Modify Subscript evaluate handler
 - `src/compute-engine/compute-engine.ts` - Handle subscriptEvaluate in declare()
-- `src/compute-engine/latex-syntax/parse-symbol.ts` - Potentially modify compound symbol parsing
+- `src/compute-engine/latex-syntax/parse-symbol.ts` - Potentially modify
+  compound symbol parsing
 
 **Tests to add:**
+
 ```typescript
 test('fibonacci sequence', () => {
   ce.declare('F', {
@@ -753,26 +799,28 @@ test('multi-index sequence', () => {
 });
 ```
 
-**Related:** This feature would complement the type-aware subscript handling (implemented)
-where collection-typed symbols convert subscripts to `At()` calls. For sequences defined
-via subscriptEvaluate, the subscript becomes an evaluated function call rather than
-array indexing.
+**Related:** This feature would complement the type-aware subscript handling
+(implemented) where collection-typed symbols convert subscripts to `At()` calls.
+For sequences defined via subscriptEvaluate, the subscript becomes an evaluated
+function call rather than array indexing.
 
-**Priority:** Medium - useful for mathematical sequences and recurrence relations
+**Priority:** Medium - useful for mathematical sequences and recurrence
+relations
 
 ---
 
 ## Assumption System Enhancements
 
-The following improvements extend the assumption system beyond sign-based simplification
-(which is already implemented).
+The following improvements extend the assumption system beyond sign-based
+simplification (which is already implemented).
 
 ### 18. Value Resolution from Equality Assumptions
 
-**Problem:** When `ce.assume(['Equal', 'one', 1])` is made, subsequent uses of `one`
-should evaluate to `1`, but currently the symbol remains unevaluated.
+**Problem:** When `ce.assume(['Equal', 'one', 1])` is made, subsequent uses of
+`one` should evaluate to `1`, but currently the symbol remains unevaluated.
 
 **Current behavior:**
+
 ```typescript
 ce.assume(ce.box(['Equal', 'one', 1]));
 ce.box('one').evaluate().json  // Returns: "one" (unchanged)
@@ -780,6 +828,7 @@ ce.box(['Equal', 'one', 1]).evaluate().json  // Returns: ["Equal", "one", 1] (no
 ```
 
 **Expected behavior:**
+
 ```typescript
 ce.assume(ce.box(['Equal', 'one', 1]));
 ce.box('one').evaluate().json  // Should return: 1
@@ -788,26 +837,34 @@ ce.box(['Equal', 'one', 0]).evaluate().json  // Should return: "False"
 ```
 
 **Implementation notes:**
+
 - Equality assumptions should effectively assign a value to the symbol
 - This is different from `ce.assign()` which directly sets the value
-- The assumption system stores the equality but doesn't currently use it during evaluation
+- The assumption system stores the equality but doesn't currently use it during
+  evaluation
 - May need to modify `BoxedSymbol.value` getter to check equality assumptions
 
 **Files to investigate:**
-- `src/compute-engine/assume.ts` - Where assumptions are stored
-- `src/compute-engine/boxed-expression/boxed-symbol.ts` - Symbol value resolution
-- `src/compute-engine/library/relational-operator.ts` - Equal/NotEqual evaluation
 
-**Tests:** `test/compute-engine/assumptions.test.ts` - "VALUE RESOLUTION FROM EQUALITY ASSUMPTIONS"
+- `src/compute-engine/assume.ts` - Where assumptions are stored
+- `src/compute-engine/boxed-expression/boxed-symbol.ts` - Symbol value
+  resolution
+- `src/compute-engine/library/relational-operator.ts` - Equal/NotEqual
+  evaluation
+
+**Tests:** `test/compute-engine/assumptions.test.ts` - "VALUE RESOLUTION FROM
+EQUALITY ASSUMPTIONS"
 
 ---
 
 ### 19. Inequality Evaluation Using Assumptions
 
-**Problem:** When `x > 4` is assumed, evaluating `['Greater', 'x', 0]` should return `True`
-(since x > 4 implies x > 0), but currently it returns the expression unchanged.
+**Problem:** When `x > 4` is assumed, evaluating `['Greater', 'x', 0]` should
+return `True` (since x > 4 implies x > 0), but currently it returns the
+expression unchanged.
 
 **Current behavior:**
+
 ```typescript
 ce.assume(ce.box(['Greater', 'x', 4]));
 ce.box(['Greater', 'x', 0]).evaluate().json  // Returns: ["Less", 0, "x"] (unchanged)
@@ -815,6 +872,7 @@ ce.box(['Less', 'x', 0]).evaluate().json     // Returns: ["Less", "x", 0] (uncha
 ```
 
 **Expected behavior:**
+
 ```typescript
 ce.assume(ce.box(['Greater', 'x', 4]));
 ce.box(['Greater', 'x', 0]).evaluate().json  // Should return: "True"
@@ -823,31 +881,41 @@ ce.box(['Greater', 'x', 10]).evaluate().json // Should return: undefined (can't 
 ```
 
 **Implementation notes:**
+
 - Requires reasoning about transitive inequality relationships
 - `x > 4` implies `x > 0`, `x > 1`, `x > 2`, etc.
 - `x > 4` implies `x >= 0`, `x >= 4`
-- Combined with equality assumptions: `one = 1` should make `one > 0` evaluate to True
-- This is related to but distinct from sign-based simplification (which already works)
+- Combined with equality assumptions: `one = 1` should make `one > 0` evaluate
+  to True
+- This is related to but distinct from sign-based simplification (which already
+  works)
 
 **Algorithm sketch:**
-1. When evaluating `Greater(x, c)`, check if there's an assumption `Greater(x, k)` where `k >= c`
-2. When evaluating `Less(x, c)`, check if there's an assumption `Greater(x, k)` where `k >= c` (returns False)
+
+1. When evaluating `Greater(x, c)`, check if there's an assumption
+   `Greater(x, k)` where `k >= c`
+2. When evaluating `Less(x, c)`, check if there's an assumption `Greater(x, k)`
+   where `k >= c` (returns False)
 3. Handle all inequality operators: Greater, GreaterEqual, Less, LessEqual
 
 **Files to investigate:**
+
 - `src/compute-engine/library/relational-operator.ts` - Inequality evaluation
 - `src/compute-engine/assume.ts` - Assumption querying
 
-**Tests:** `test/compute-engine/assumptions.test.ts` - "INEQUALITY EVALUATION USING ASSUMPTIONS"
+**Tests:** `test/compute-engine/assumptions.test.ts` - "INEQUALITY EVALUATION
+USING ASSUMPTIONS"
 
 ---
 
 ### 20. Tautology and Contradiction Detection
 
-**Problem:** `ce.assume()` should detect when an assumption is redundant (tautology) or
-conflicts with existing assumptions (contradiction), but currently it always returns `"ok"`.
+**Problem:** `ce.assume()` should detect when an assumption is redundant
+(tautology) or conflicts with existing assumptions (contradiction), but
+currently it always returns `"ok"`.
 
 **Current behavior:**
+
 ```typescript
 ce.assume(ce.box(['Equal', 'one', 1]));
 ce.assume(ce.box(['Equal', 'one', 1]));  // Returns: "ok" (should be "tautology")
@@ -855,6 +923,7 @@ ce.assume(ce.box(['Less', 'one', 0]));   // Returns: "ok" (should be "contradict
 ```
 
 **Expected behavior:**
+
 ```typescript
 ce.assume(ce.box(['Equal', 'one', 1]));
 ce.assume(ce.box(['Equal', 'one', 1]));   // Should return: "tautology"
@@ -867,24 +936,31 @@ ce.assume(ce.box(['Less', 'x', 0]));      // Should return: "contradiction"
 ```
 
 **Implementation notes:**
-- Tautology detection: Check if the new assumption is already implied by existing assumptions
-- Contradiction detection: Check if the new assumption conflicts with existing assumptions
+
+- Tautology detection: Check if the new assumption is already implied by
+  existing assumptions
+- Contradiction detection: Check if the new assumption conflicts with existing
+  assumptions
 - Requires transitive reasoning for inequalities
-- The return type of `assume()` already includes `"tautology"` and `"contradiction"` as options
+- The return type of `assume()` already includes `"tautology"` and
+  `"contradiction"` as options
 
 **Files to investigate:**
+
 - `src/compute-engine/assume.ts` - `assume()` function and `AssumeResult` type
 
-**Tests:** `test/compute-engine/assumptions.test.ts` - "TAUTOLOGY AND CONTRADICTION DETECTION"
+**Tests:** `test/compute-engine/assumptions.test.ts` - "TAUTOLOGY AND
+CONTRADICTION DETECTION"
 
 ---
 
 ### 21. Type Inference from Assumptions
 
-**Problem:** When assumptions are made, symbol types should be inferred. For example,
-`x > 4` implies `x` is real, and `one = 1` implies `one` is an integer.
+**Problem:** When assumptions are made, symbol types should be inferred. For
+example, `x > 4` implies `x` is real, and `one = 1` implies `one` is an integer.
 
 **Current behavior:**
+
 ```typescript
 ce.assume(ce.box(['Greater', 'x', 4]));
 ce.box('x').type.toString()  // Returns: "unknown"
@@ -894,6 +970,7 @@ ce.box('one').type.toString()  // Returns: "unknown"
 ```
 
 **Expected behavior:**
+
 ```typescript
 ce.assume(ce.box(['Greater', 'x', 4]));
 ce.box('x').type.toString()  // Should return: "real" (inequalities imply real numbers)
@@ -903,6 +980,7 @@ ce.box('one').type.toString()  // Should return: "integer" (equal to integer lit
 ```
 
 **Implementation notes:**
+
 - Inequality assumptions (`>`, `<`, `>=`, `<=`) imply the symbol is `real`
 - Equality to an integer implies the symbol is `integer`
 - Equality to a rational implies the symbol is `rational`
@@ -910,30 +988,36 @@ ce.box('one').type.toString()  // Should return: "integer" (equal to integer lit
 - Alternatively, the type getter could query assumptions
 
 **Files to investigate:**
+
 - `src/compute-engine/assume.ts` - Assumption processing
 - `src/compute-engine/boxed-expression/boxed-symbol.ts` - Symbol type resolution
 
-**Tests:** `test/compute-engine/assumptions.test.ts` - "TYPE INFERENCE FROM ASSUMPTIONS"
+**Tests:** `test/compute-engine/assumptions.test.ts` - "TYPE INFERENCE FROM
+ASSUMPTIONS"
 
 ---
 
 ## Future Improvements (Not Yet Detailed)
 
 ### Trigonometric Simplification
+
 - Detect Pythagorean identity within larger sums: `sin²(x) + cos²(x) + 5` → `6`
 - Handle rational multiples of π in periodicity: `sin(3π/2 + k)` → `-cos(k)`
 - More product-to-sum identities from the Fu algorithm
 
 ### Trigonometric Equation Solving
+
 - Return general solutions with period parameter: `arcsin(a) + 2πn`
 - Support more complex trig equations: `sin(x) + cos(x) = 0`, `sin²(x) = 1/2`
 - Handle sec/csc equations
 
 ### Element-based Indexing Enhancements
+
 - Support colon/pipe notation: `\sum_{n \in \N : n < 100}`
 - Support "such that" notation: `\sum_{n \in S \mid P(n)}`
 - Support compound conditions with `And`/`Or`
-- Add convergence analysis for known series (Basel problem, geometric series, etc.)
+- Add convergence analysis for known series (Basel problem, geometric series,
+  etc.)
 - Support `.N()` for faster numeric approximations of infinite series
 - Consider adding early termination for quickly converging series
 
@@ -942,6 +1026,7 @@ ce.box('one').type.toString()  // Should return: "integer" (equal to integer lit
 ## Notes
 
 ### Related files for reference:
+
 - Derivatives: `src/compute-engine/symbolic/derivative.ts`
 - Integration: `src/compute-engine/symbolic/antiderivative.ts`
 - Simplification: `src/compute-engine/symbolic/simplify-rules.ts`
@@ -954,6 +1039,7 @@ ce.box('one').type.toString()  // Should return: "integer" (equal to integer lit
 - Logic reference: `doc/89-reference-logic.md`
 
 ### Testing commands:
+
 ```bash
 npm run test                    # Run all tests
 npm run test derivatives        # Run derivative tests
