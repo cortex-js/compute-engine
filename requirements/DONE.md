@@ -934,3 +934,76 @@ ce.parse('2x + 3\\sqrt{x} - 2 = 0').solve('x')  // → [1/4]
   validate against it
 - `test/compute-engine/solve.test.ts` - Added 6 new tests in "EXTRANEOUS ROOT
   FILTERING FOR SQRT EQUATIONS" describe block
+
+---
+
+### 3. Pattern Matching with Repeated Wildcards ✅
+
+**Status:** Verified working correctly. The pattern matching system properly handles
+wildcards that appear multiple times in a pattern.
+
+**Investigated behavior:**
+
+The `captureWildcard()` function in `match.ts` (lines 37-58) correctly handles
+repeated wildcards:
+
+1. When a named wildcard (like `_x`) is first encountered, it's captured in the
+   substitution dictionary
+2. When the same wildcard is encountered again, it checks if the new expression
+   is the same as the previously captured one using `isSame()`
+3. If they match, the substitution is preserved; if not, the match fails
+
+**Examples that work correctly:**
+
+```typescript
+// Pattern with repeated wildcard
+pattern = ['Divide', 1, ['Multiply', '_x', ['Ln', '_x']]]
+expr = ['Divide', 1, ['Multiply', 'x', ['Ln', 'x']]]
+// Result: { _x: x } ✓
+
+// Pattern with 3 levels of nesting
+pattern = ['Add', '_x', ['Multiply', '_x', ['Power', '_x', 2]]]
+expr = ['Add', 'x', ['Multiply', 'x', ['Power', 'x', 2]]]
+// Result: { _x: x } ✓
+
+// Repeated wildcard with commutative operators
+pattern = ['Add', '_x', ['Ln', '_x']]
+expr = ['Add', ['Ln', 'x'], 'x']  // order swapped
+// Result: { _x: x } ✓ (handles commutative reordering)
+
+// Mismatch correctly detected
+pattern = ['Multiply', '_x', ['Ln', '_x']]
+expr = ['Multiply', 'x', ['Ln', 'y']]  // different variables
+// Result: null ✓ (correctly rejects)
+
+// Complex expression matching
+pattern = ['Add', '_x', ['Power', '_x', 2]]
+expr = ['Add', ['Add', 'a', 1], ['Power', ['Add', 'a', 1], 2]]
+// Result: { _x: ['Add', 'a', 1] } ✓ (matches complex sub-expression)
+```
+
+**Integration with antiderivative.ts:**
+
+The specific integral `∫ 1/(x·ln(x)) dx = ln|ln(x)|` is handled procedurally in
+`antiderivative.ts` (lines 1772-1800) using Case D2, which:
+
+1. Recognizes patterns like `1/(g(x)·h(x))` where `g(x) = d/dx(h(x))`
+2. For `1/(x·ln(x))`, identifies that `1/x = d/dx(ln(x))`
+3. Returns `ln|h(x)|` = `ln|ln(x)|`
+
+This procedural approach is appropriate because it requires computing derivatives
+dynamically, which cannot be expressed as a static pattern matching rule.
+
+**Files verified:**
+- `src/compute-engine/boxed-expression/match.ts` - Pattern matching logic
+- `src/compute-engine/symbolic/antiderivative.ts` - Integration patterns
+
+**Tests added:**
+- `test/compute-engine/patterns.test.ts` - Added 15 new tests in "Repeated
+  Wildcards in Nested Contexts" describe block covering:
+  - Simple repeated wildcards in flat structures
+  - Repeated wildcards in nested function arguments
+  - Repeated wildcards with Divide patterns
+  - Complex expression matching
+  - Commutative reordering with repeated wildcards
+  - Canonical expression matching

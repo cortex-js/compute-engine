@@ -63,35 +63,9 @@ output.
 
 ---
 
-### 3. Pattern Matching Improvements
+### ~~3. Pattern Matching Improvements~~ ✅ COMPLETED
 
-**Problem:** Some integration patterns don't match because the pattern matching
-system has limitations with:
-
-- Same wildcard appearing multiple times (should match same expression)
-- Matching against canonicalized expressions that have been reordered
-- Complex nested patterns
-
-**Example that doesn't work:**
-
-```typescript
-// Trying to match 1/(x*ln(x)) where x appears twice
-{
-  match: ['Divide', 1, ['Multiply', '_x', ['Ln', '_x']]],
-  replace: ['Ln', ['Ln', '_x']],
-}
-```
-
-**Investigation needed:**
-
-- Review `src/compute-engine/boxed-expression/match.ts`
-- Understand how wildcard binding works
-- Consider adding "same as" constraints: `_x@1` and `_x@1` must match same expr
-
-**Files:**
-
-- `src/compute-engine/boxed-expression/match.ts`
-- `src/compute-engine/symbolic/antiderivative.ts`
+See `requirements/DONE.md` for implementation details.
 
 ---
 
