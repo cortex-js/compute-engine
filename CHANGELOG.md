@@ -144,6 +144,20 @@
   - Domain constraints (min/max valid indices)
   - Symbolic subscripts stay symbolic (e.g., `F_k` remains unevaluated)
 
+- **Bessel Function Derivatives**: Added derivative support for all four Bessel
+  function types using order-dependent recurrence relations:
+  ```javascript
+  ce.box(['D', ['BesselJ', 'n', 'x'], 'x']).evaluate();
+  // → 1/2 * BesselJ(n-1, x) - 1/2 * BesselJ(n+1, x)
+
+  ce.box(['D', ['BesselI', 'n', 'x'], 'x']).evaluate();
+  // → 1/2 * BesselI(n-1, x) + 1/2 * BesselI(n+1, x)
+
+  ce.box(['D', ['BesselK', 'n', 'x'], 'x']).evaluate();
+  // → -1/2 * BesselK(n-1, x) - 1/2 * BesselK(n+1, x)
+  ```
+  Chain rule is automatically applied for composite arguments.
+
 - **Multi-Argument Function Derivatives**: Added derivative support for:
 
   - **Log(x, base)** - Logarithm with custom base:

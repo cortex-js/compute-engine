@@ -389,6 +389,83 @@ describe('Symbolic derivatives for unknown functions', () => {
   });
 });
 
+describe('Bessel function derivatives', () => {
+  describe('BesselJ (first kind)', () => {
+    it('d/dx J_n(x) = (J_{n-1}(x) - J_{n+1}(x))/2', () => {
+      const expr = engine.box(['D', ['BesselJ', 'n', 'x'], 'x']);
+      const result = expr.evaluate();
+      expect(result.toString()).toMatchInlineSnapshot(
+        `-1/2 * BesselJ(n + 1, x) + 1/2 * BesselJ(n - 1, x)`
+      );
+    });
+
+    it('d/dx J_2(x) with numeric order', () => {
+      const expr = engine.box(['D', ['BesselJ', 2, 'x'], 'x']);
+      const result = expr.evaluate();
+      expect(result.toString()).toMatchInlineSnapshot(
+        `-1/2 * BesselJ(3, x) + 1/2 * BesselJ(1, x)`
+      );
+    });
+
+    it('d/dx J_0(x) = -J_1(x) (special case)', () => {
+      // J_{-1}(x) = -J_1(x), so (J_{-1}(x) - J_1(x))/2 = -J_1(x)
+      const expr = engine.box(['D', ['BesselJ', 0, 'x'], 'x']);
+      const result = expr.evaluate();
+      expect(result.toString()).toMatchInlineSnapshot(
+        `-1/2 * BesselJ(1, x) + 1/2 * BesselJ(-1, x)`
+      );
+    });
+  });
+
+  describe('BesselY (second kind)', () => {
+    it('d/dx Y_n(x) = (Y_{n-1}(x) - Y_{n+1}(x))/2', () => {
+      const expr = engine.box(['D', ['BesselY', 'n', 'x'], 'x']);
+      const result = expr.evaluate();
+      expect(result.toString()).toMatchInlineSnapshot(
+        `-1/2 * BesselY(n + 1, x) + 1/2 * BesselY(n - 1, x)`
+      );
+    });
+  });
+
+  describe('BesselI (modified first kind)', () => {
+    it('d/dx I_n(x) = (I_{n-1}(x) + I_{n+1}(x))/2', () => {
+      const expr = engine.box(['D', ['BesselI', 'n', 'x'], 'x']);
+      const result = expr.evaluate();
+      expect(result.toString()).toMatchInlineSnapshot(
+        `1/2 * BesselI(n - 1, x) + 1/2 * BesselI(n + 1, x)`
+      );
+    });
+  });
+
+  describe('BesselK (modified second kind)', () => {
+    it('d/dx K_n(x) = -(K_{n-1}(x) + K_{n+1}(x))/2', () => {
+      const expr = engine.box(['D', ['BesselK', 'n', 'x'], 'x']);
+      const result = expr.evaluate();
+      expect(result.toString()).toMatchInlineSnapshot(
+        `-1/2 * BesselK(n - 1, x) - 1/2 * BesselK(n + 1, x)`
+      );
+    });
+  });
+
+  describe('Chain rule with Bessel functions', () => {
+    it('d/dx J_2(x^2) applies chain rule', () => {
+      const expr = engine.box(['D', ['BesselJ', 2, ['Square', 'x']], 'x']);
+      const result = expr.evaluate();
+      expect(result.toString()).toMatchInlineSnapshot(
+        `x * BesselJ(1, x^2) - x * BesselJ(3, x^2)`
+      );
+    });
+  });
+
+  describe('Constant Bessel functions', () => {
+    it('d/dx J_2(5) = 0 (no variable)', () => {
+      const expr = engine.box(['D', ['BesselJ', 2, 5], 'x']);
+      const result = expr.evaluate();
+      expect(result.toString()).toMatchInlineSnapshot(`0`);
+    });
+  });
+});
+
 describe('Multi-argument function derivatives', () => {
   describe('Log with custom base', () => {
     it('d/dx log_2(x) = 1/(x*ln(2))', () => {

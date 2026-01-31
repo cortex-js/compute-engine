@@ -384,6 +384,60 @@ export function differentiate(
     return ce.Zero;
   }
 
+  // Bessel function derivatives
+  // BesselJ, BesselY, BesselI, BesselK have signature (order, x)
+  // d/dx J_n(x) = (J_{n-1}(x) - J_{n+1}(x))/2
+  // d/dx Y_n(x) = (Y_{n-1}(x) - Y_{n+1}(x))/2
+  // d/dx I_n(x) = (I_{n-1}(x) + I_{n+1}(x))/2
+  // d/dx K_n(x) = -(K_{n-1}(x) + K_{n+1}(x))/2
+  if (
+    ['BesselJ', 'BesselY', 'BesselI', 'BesselK'].includes(expr.operator) &&
+    expr.nops === 2
+  ) {
+    const [order, x] = expr.ops!;
+    const xHasV = x.has(v);
+    const orderHasV = order.has(v);
+
+    if (!xHasV && !orderHasV) {
+      // Neither depends on v - derivative is 0
+      return ce.Zero;
+    }
+
+    if (orderHasV) {
+      // If order depends on v, we can't compute a simple derivative
+      // Return symbolic derivative
+      return undefined;
+    }
+
+    // Only x depends on v - apply the standard Bessel derivative formulas
+    const xPrime =
+      differentiate(x, v, depth + 1) ?? ce._fn('D', [x, ce.symbol(v)]);
+    const op = expr.operator;
+    const nMinus1 = order.sub(ce.One);
+    const nPlus1 = order.add(ce.One);
+
+    let derivative: BoxedExpression;
+    if (op === 'BesselJ' || op === 'BesselY') {
+      // d/dx J_n(x) = (J_{n-1}(x) - J_{n+1}(x))/2
+      // d/dx Y_n(x) = (Y_{n-1}(x) - Y_{n+1}(x))/2
+      const fNMinus1 = ce._fn(op, [nMinus1, x]);
+      const fNPlus1 = ce._fn(op, [nPlus1, x]);
+      derivative = fNMinus1.sub(fNPlus1).div(2);
+    } else if (op === 'BesselI') {
+      // d/dx I_n(x) = (I_{n-1}(x) + I_{n+1}(x))/2
+      const fNMinus1 = ce._fn(op, [nMinus1, x]);
+      const fNPlus1 = ce._fn(op, [nPlus1, x]);
+      derivative = fNMinus1.add(fNPlus1).div(2);
+    } else {
+      // BesselK: d/dx K_n(x) = -(K_{n-1}(x) + K_{n+1}(x))/2
+      const fNMinus1 = ce._fn(op, [nMinus1, x]);
+      const fNPlus1 = ce._fn(op, [nPlus1, x]);
+      derivative = fNMinus1.add(fNPlus1).div(2).neg();
+    }
+
+    return simplifyDerivative(derivative.mul(xPrime));
+  }
+
   const h = DERIVATIVES_TABLE[expr.operator];
   if (h === undefined) {
     if (expr.nops > 1) return undefined;
