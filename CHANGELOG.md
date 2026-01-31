@@ -2,6 +2,8 @@
 
 ### New Features
 
+#### Subscripts and Indexing
+
 - **Subscript Evaluation Handler**: Define custom evaluation functions for
   subscripted symbols like mathematical sequences using `subscriptEvaluate`:
 
@@ -73,41 +75,7 @@
   ce.parse('v_{\\text{initial}}');  // → symbol "v_initial"
   ```
 
-- **Special Functions**: Added type signatures for special mathematical
-  functions, enabling them to be used in expressions without type errors:
-  - `Zeta` - Riemann zeta function ζ(s)
-  - `Beta` - Euler beta function B(a,b) = Γ(a)Γ(b)/Γ(a+b)
-  - `LambertW` - Lambert W function (product logarithm)
-  - `BesselJ`, `BesselY`, `BesselI`, `BesselK` - Bessel functions of
-    first/second kind
-  - `AiryAi`, `AiryBi` - Airy functions
-
-  These functions now have proper signatures and can be composed with other
-  expressions: `ce.box(['Add', 1, ['LambertW', 'x']])` works correctly.
-
-- **LambertW Derivative**: Added derivative rule for the Lambert W function:
-  `d/dx W(x) = W(x)/(x·(1+W(x)))`
-
-- **Special Function LaTeX Parsing**: Added LaTeX parsing support for special
-  functions: `\zeta(s)`, `\Beta(a,b)`, `\operatorname{W}(x)`, Bessel functions
-  via `\operatorname{J}`, `\operatorname{Y}`, etc., and Airy functions via
-  `\operatorname{Ai}`, `\operatorname{Bi}`.
-
-- **Assumption-Based Simplification**: Simplification rules now correctly use
-  assumptions about symbol signs. For example:
-
-  ```javascript
-  ce.assume(ce.parse('x > 0'));
-  ce.parse('\\sqrt{x^2}').simplify().latex;  // → "x" (was "|x|")
-  ce.parse('|x|').simplify().latex;          // → "x" (was "|x|")
-
-  ce.assume(ce.parse('y < 0'));
-  ce.parse('\\sqrt{y^2}').simplify().latex;  // → "-y"
-  ce.parse('|y|').simplify().latex;          // → "-y"
-  ```
-
-  This enables important mathematical simplifications that depend on knowing
-  whether a variable is positive, negative, or zero.
+#### Sequences
 
 - **Declarative Sequence Definitions**: Define mathematical sequences using
   recurrence relations with the new `declareSequence()` method:
@@ -162,6 +130,30 @@
   Base cases and recurrence can be defined in any order. The sequence is
   finalized when both are present.
 
+#### Special Functions
+
+- **Special Function Definitions**: Added type signatures for special mathematical
+  functions, enabling them to be used in expressions without type errors:
+  - `Zeta` - Riemann zeta function ζ(s)
+  - `Beta` - Euler beta function B(a,b) = Γ(a)Γ(b)/Γ(a+b)
+  - `LambertW` - Lambert W function (product logarithm)
+  - `BesselJ`, `BesselY`, `BesselI`, `BesselK` - Bessel functions of
+    first/second kind
+  - `AiryAi`, `AiryBi` - Airy functions
+
+  These functions now have proper signatures and can be composed with other
+  expressions: `ce.box(['Add', 1, ['LambertW', 'x']])` works correctly.
+
+- **Special Function LaTeX Parsing**: Added LaTeX parsing support for special
+  functions: `\zeta(s)`, `\Beta(a,b)`, `\operatorname{W}(x)`, Bessel functions
+  via `\operatorname{J}`, `\operatorname{Y}`, etc., and Airy functions via
+  `\operatorname{Ai}`, `\operatorname{Bi}`.
+
+#### Calculus
+
+- **LambertW Derivative**: Added derivative rule for the Lambert W function:
+  `d/dx W(x) = W(x)/(x·(1+W(x)))`
+
 - **Bessel Function Derivatives**: Added derivative support for all four Bessel
   function types using order-dependent recurrence relations:
   ```javascript
@@ -176,6 +168,23 @@
   ```
   Chain rule is automatically applied for composite arguments.
 
+- **Multi-Argument Function Derivatives**: Added derivative support for:
+
+  - **Log(x, base)** - Logarithm with custom base:
+    ```javascript
+    ce.box(['D', ['Log', 'x', 2], 'x']).evaluate();  // → 1/(x·ln(2))
+    ce.box(['D', ['Log', 'x', 'a'], 'x']).evaluate(); // → 1/(x·ln(a))
+    ```
+    Also handles cases where both x and base depend on the variable by applying
+    the quotient rule to ln(x)/ln(base).
+
+  - **Discrete functions (Mod, GCD, LCM)** - Return 0 as these are step
+    functions with derivative 0 almost everywhere:
+    ```javascript
+    ce.box(['D', ['Mod', 'x', 5], 'x']).evaluate();  // → 0
+    ce.box(['D', ['GCD', 'x', 6], 'x']).evaluate();  // → 0
+    ```
+
 - **Integration of `1/(x·ln(x))` Pattern**: Added support for integrating
   expressions where the denominator is a product and one factor is the derivative
   of another:
@@ -185,6 +194,8 @@
   ```
   This uses u-substitution: since `1/x = d/dx(ln(x))`, the integral becomes
   `∫ h'(x)/h(x) dx = ln|h(x)|`.
+
+#### Linear Algebra
 
 - **Matrix Decompositions**: Added four matrix decomposition functions for
   numerical linear algebra:
@@ -206,27 +217,28 @@
   ce.box(['SVD', [[1, 2], [3, 4]]]).evaluate();
   // → [U, Σ, V] where A = UΣV^T
   ```
-  This uses u-substitution: since `1/x = d/dx(ln(x))`, the integral becomes
-  `∫ h'(x)/h(x) dx = ln|h(x)|`.
 
-- **Multi-Argument Function Derivatives**: Added derivative support for:
+#### Simplification
 
-  - **Log(x, base)** - Logarithm with custom base:
-    ```javascript
-    ce.box(['D', ['Log', 'x', 2], 'x']).evaluate();  // → 1/(x·ln(2))
-    ce.box(['D', ['Log', 'x', 'a'], 'x']).evaluate(); // → 1/(x·ln(a))
-    ```
-    Also handles cases where both x and base depend on the variable by applying
-    the quotient rule to ln(x)/ln(base).
+- **Assumption-Based Simplification**: Simplification rules now correctly use
+  assumptions about symbol signs. For example:
 
-  - **Discrete functions (Mod, GCD, LCM)** - Return 0 as these are step
-    functions with derivative 0 almost everywhere:
-    ```javascript
-    ce.box(['D', ['Mod', 'x', 5], 'x']).evaluate();  // → 0
-    ce.box(['D', ['GCD', 'x', 6], 'x']).evaluate();  // → 0
-    ```
+  ```javascript
+  ce.assume(ce.parse('x > 0'));
+  ce.parse('\\sqrt{x^2}').simplify().latex;  // → "x" (was "|x|")
+  ce.parse('|x|').simplify().latex;          // → "x" (was "|x|")
+
+  ce.assume(ce.parse('y < 0'));
+  ce.parse('\\sqrt{y^2}').simplify().latex;  // → "-y"
+  ce.parse('|y|').simplify().latex;          // → "-y"
+  ```
+
+  This enables important mathematical simplifications that depend on knowing
+  whether a variable is positive, negative, or zero.
 
 ### Improvements
+
+#### Simplification
 
 - **Nested Root Simplification**: Nested roots now simplify to a single root:
   ```javascript
@@ -237,6 +249,8 @@
   This applies to all combinations: `sqrt(sqrt(x))`, `root(sqrt(x), n)`,
   `sqrt(root(x, n))`, and `root(root(x, m), n)`.
 
+#### Calculus
+
 - **Derivative Recursion Safety**: Added robust recursion protection to the
   `differentiate()` function with a depth limit (`MAX_DIFFERENTIATION_DEPTH`) to
   guard against pathological expressions. All recursive calls now track depth
@@ -246,22 +260,13 @@
 
 ### Bug Fixes
 
+#### Arithmetic and Infinity
+
 - **Division by Zero**: Improved handling of division by zero:
   - `0/0` returns `NaN` (indeterminate form)
   - `a/0` where `a ≠ 0` returns `ComplexInfinity` (~∞) as a "better NaN" that
     indicates an infinite result with unknown sign
   - This applies to all forms including `1/0`, `x/0`, and rational literals
-
-- **Trigonometric Period Identities**: Fixed incorrect sign handling for
-  `csc(π+x)` and `cot(π+x)`:
-  - `csc(π+x)` now correctly simplifies to `-csc(x)` (was incorrectly `csc(x)`)
-  - `cot(π+x)` now correctly simplifies to `cot(x)` (was incorrectly `-cot(x)`,
-    cotangent has period π)
-
-- **Logarithm-Exponential Composition**: Fixed `log(exp(x))` incorrectly
-  simplifying to `x`. Now correctly returns `x/ln(10)` ≈ `0.434x` since
-  `log₁₀(eˣ) = x·log₁₀(e) = x/ln(10)`. The identity `log(exp(x)) = x` only holds
-  for natural logarithm.
 
 - **Infinity Sign Propagation**: Fixed infinity multiplication not propagating
   signs correctly. Now `∞ * (-2) = -∞` and `-∞ * 2 = -∞` as expected.
@@ -270,8 +275,13 @@
   returns `NaN` (indeterminate form). The `a/a → 1` simplification rule now
   excludes infinity values.
 
-- **Logarithm of e**: Added simplification for `log(e)` → `1/ln(10)` ≈ `0.434`
-  and `log_c(e)` → `1/ln(c)` for any base `c`.
+#### Trigonometry
+
+- **Trigonometric Period Identities**: Fixed incorrect sign handling for
+  `csc(π+x)` and `cot(π+x)`:
+  - `csc(π+x)` now correctly simplifies to `-csc(x)` (was incorrectly `csc(x)`)
+  - `cot(π+x)` now correctly simplifies to `cot(x)` (was incorrectly `-cot(x)`,
+    cotangent has period π)
 
 - **Trigonometric Co-function Identities**: Fixed co-function identities not
   applying to canonical form expressions. Now correctly simplifies:
@@ -282,14 +292,43 @@
   - `sec(π/2 - x)` → `csc(x)`
   - `csc(π/2 - x)` → `sec(x)`
 
-- **Zero Power with Symbolic Exponent**: Fixed `0^π` and similar expressions
-  with positive symbolic exponents not simplifying. Now `0^x` → `0` when `x` is
-  known to be positive (including `π`, `e`, etc.).
-
 - **Double Angle with Coefficient**: Fixed `2sin(x)cos(x)` not simplifying to
   `sin(2x)`. The product-to-sum identity now handles coefficients:
   - `2sin(x)cos(x)` → `sin(2x)`
   - `c·sin(x)cos(x)` → `c·sin(2x)/2` for any coefficient `c`
+
+- **Trigonometric Product Identities**: Improved handling of trig products in
+  simplification. The Multiply rule now correctly defers to trig-specific rules
+  for patterns like `sin(x)*cos(x)` and `tan(x)*cot(x)`, ensuring these are
+  simplified to `sin(2x)/2` and `1` respectively.
+
+#### Logarithms and Exponentials
+
+- **Logarithm-Exponential Composition**: Fixed `log(exp(x))` incorrectly
+  simplifying to `x`. Now correctly returns `x/ln(10)` ≈ `0.434x` since
+  `log₁₀(eˣ) = x·log₁₀(e) = x/ln(10)`. The identity `log(exp(x)) = x` only holds
+  for natural logarithm.
+
+- **Logarithm of e**: Added simplification for `log(e)` → `1/ln(10)` ≈ `0.434`
+  and `log_c(e)` → `1/ln(c)` for any base `c`.
+
+- **Logarithm Combination Base Preservation**: Fixed `log(x) + log(y)` (base 10)
+  incorrectly becoming `ln(xy)`. Now correctly produces `log(xy)` preserving the
+  original base.
+
+- **Logarithm Quotient Rule**: Added expansion rule for logarithm of quotients.
+  `ln(x/y)` now simplifies to `ln(x) - ln(y)` when x and y are known positive.
+  Similarly for any base: `log_c(x/y)` → `log_c(x) - log_c(y)`.
+
+- **Exponential-Logarithm Composition**: Added simplification for `exp(log(x))`
+  where log has a different base than e. Now `e^log(x)` → `x^{1/ln(10)}` and
+  more generally `e^log_c(x)` → `x^{1/ln(c)}` for any base c.
+
+#### Powers and Exponents
+
+- **Zero Power with Symbolic Exponent**: Fixed `0^π` and similar expressions
+  with positive symbolic exponents not simplifying. Now `0^x` → `0` when `x` is
+  known to be positive (including `π`, `e`, etc.).
 
 - **Exponent Evaluation in Products**: Fixed `(x³)² · (y²)²` not simplifying to
   `x⁶y⁴`. Numeric subexpressions in exponents (like `2×3` in `x^{2×3}`) are now
@@ -299,9 +338,13 @@
   properly. Now `(x³/y²)^{-2}` correctly simplifies to `y⁴/x⁶` during
   canonicalization by distributing the negative exponent.
 
-- **Logarithm Combination Base Preservation**: Fixed `log(x) + log(y)` (base 10)
-  incorrectly becoming `ln(xy)`. Now correctly produces `log(xy)` preserving the
-  original base.
+- **Negative Base with Fractional Exponent**: Fixed `(-ax)^{p/q}` returning
+  complex results when `p` and `q` are both odd. Now correctly factors out the
+  negative sign: `(-2x)^{3/5}` → `-(2x)^{3/5}` = `-2^{3/5}·x^{3/5}`, giving real
+  results. This affects products like `(-2x)^{3/5}·x` which now correctly
+  simplify to `-2^{3/5}·x^{8/5}` instead of returning an imaginary value.
+
+#### Radicals
 
 - **Radical Perfect Square Factoring**: Fixed `√(x²y)` not simplifying to
   `|x|√y`. Adjusted cost function to penalize radicals containing perfect
@@ -314,25 +357,6 @@
   - `√{x^{odd}}` → `|x|^n · √x` factoring (e.g., `√{x⁵}` → `|x|²√x`)
   - Handles all combinations: `√[4]{x⁶}` → `|x|^{3/2}`, `√[3]{x⁶}` → `x²`
 
-- **Negative Base with Fractional Exponent**: Fixed `(-ax)^{p/q}` returning
-  complex results when `p` and `q` are both odd. Now correctly factors out the
-  negative sign: `(-2x)^{3/5}` → `-(2x)^{3/5}` = `-2^{3/5}·x^{3/5}`, giving real
-  results. This affects products like `(-2x)^{3/5}·x` which now correctly
-  simplify to `-2^{3/5}·x^{8/5}` instead of returning an imaginary value.
-
-- **Logarithm Quotient Rule**: Added expansion rule for logarithm of quotients.
-  `ln(x/y)` now simplifies to `ln(x) - ln(y)` when x and y are known positive.
-  Similarly for any base: `log_c(x/y)` → `log_c(x) - log_c(y)`.
-
-- **Exponential-Logarithm Composition**: Added simplification for `exp(log(x))`
-  where log has a different base than e. Now `e^log(x)` → `x^{1/ln(10)}` and
-  more generally `e^log_c(x)` → `x^{1/ln(c)}` for any base c.
-
-- **Trigonometric Product Identities**: Improved handling of trig products in
-  simplification. The Multiply rule now correctly defers to trig-specific rules
-  for patterns like `sin(x)*cos(x)` and `tan(x)*cot(x)`, ensuring these are
-  simplified to `sin(2x)/2` and `1` respectively.
-
 - **Symbolic Radicals Preservation**: Fixed numeric radicals (`√2`, `∛5`,
   `2^{3/5}`) being evaluated to floating-point approximations during
   multiplication. Now `x * √2` stays as `√2 · x` instead of `1.414... · x`, and
@@ -340,12 +364,16 @@
   exact irrational values and allows proper algebraic manipulation. Use `.N()`
   to get numeric approximations when needed.
 
+#### LaTeX Parsing
+
 - **LaTeX `\exp()` Juxtaposition**: Fixed adjacent `\exp()` calls not parsing as
   multiplication. Now `\exp(x)\exp(2)` correctly parses as `e^x · e^2` instead
   of producing a parse error. The expression then simplifies to `e^{x+2}` as
   expected.
 
 ### Features
+
+#### Trigonometry
 
 - **Fu Algorithm for Trigonometric Simplification**: Implemented the Fu
   algorithm based on Fu, Zhong, and Zeng's paper "Automated and readable
@@ -406,6 +434,36 @@
     Morrie-like patterns (which need Fu before evaluation) and period reduction
     patterns (which need simplification first for angle contraction).
 
+- **Trigonometric Periodicity Reduction**: Trigonometric functions now simplify
+  arguments containing integer multiples of π:
+  - `sin(5π + k)` → `-sin(k)` (period 2π, with sign change for odd multiples)
+  - `cos(4π + k)` → `cos(k)` (period 2π)
+  - `tan(3π + k)` → `tan(k)` (period π)
+  - Works for all six trig functions: sin, cos, tan, cot, sec, csc
+  - Handles both positive and negative multiples of π
+
+- **Pythagorean Trigonometric Identities**: Added simplification rules for all
+  Pythagorean identities:
+  - `sin²(x) + cos²(x)` → `1`
+  - `1 - sin²(x)` → `cos²(x)` and `1 - cos²(x)` → `sin²(x)`
+  - `sin²(x) - 1` → `-cos²(x)` and `cos²(x) - 1` → `-sin²(x)`
+  - `tan²(x) + 1` → `sec²(x)` and `sec²(x) - 1` → `tan²(x)`
+  - `1 + cot²(x)` → `csc²(x)` and `csc²(x) - 1` → `cot²(x)`
+  - `a·sin²(x) + a·cos²(x)` → `a` (with coefficient)
+
+- **Trigonometric Equation Solving**: The `solve()` method now handles basic
+  trigonometric equations:
+  - `sin(x) = a` → `x = arcsin(a)` and `x = π - arcsin(a)` (two solutions)
+  - `cos(x) = a` → `x = arccos(a)` and `x = -arccos(a)` (two solutions)
+  - `tan(x) = a` → `x = arctan(a)` (one solution per period)
+  - `cot(x) = a` → `x = arccot(a)`
+  - Supports coefficient form: `a·sin(x) + b = 0`
+  - Domain validation: returns no solutions when |a| > 1 for sin/cos
+  - Automatic deduplication of equivalent solutions (e.g., `cos(x) = 1` → single
+    solution `0`)
+
+#### Calculus
+
 - **([#163](https://github.com/cortex-js/compute-engine/issues/163)) Additional
   Derivative Notations**: Added support for parsing multiple derivative
   notations beyond Leibniz notation:
@@ -426,34 +484,21 @@
     notation (`\frac{\mathrm{d}}{\mathrm{d}x}f`) for consistent round-trip
     parsing.
 
-- **Special Function Definitions**: Added type signatures for Digamma, Trigamma,
-  and PolyGamma functions to the library:
-  - `Digamma(x)` - The digamma function ψ(x), logarithmic derivative of Gamma
-  - `Trigamma(x)` - The trigamma function ψ₁(x), derivative of digamma
-  - `PolyGamma(n, x)` - The polygamma function ψₙ(x), nth derivative of digamma
-
 - **Derivative Rules for Special Functions**: Added derivative formulas for:
   - `d/dx Digamma(x) = Trigamma(x)`
   - `d/dx Erf(x)`, `d/dx Erfc(x)`, `d/dx Erfi(x)`
   - `d/dx FresnelS(x)`, `d/dx FresnelC(x)`
   - `d/dx LogGamma(x) = Digamma(x)`
 
-- **Trigonometric Periodicity Reduction**: Trigonometric functions now simplify
-  arguments containing integer multiples of π:
-  - `sin(5π + k)` → `-sin(k)` (period 2π, with sign change for odd multiples)
-  - `cos(4π + k)` → `cos(k)` (period 2π)
-  - `tan(3π + k)` → `tan(k)` (period π)
-  - Works for all six trig functions: sin, cos, tan, cot, sec, csc
-  - Handles both positive and negative multiples of π
+#### Special Functions
 
-- **Pythagorean Trigonometric Identities**: Added simplification rules for all
-  Pythagorean identities:
-  - `sin²(x) + cos²(x)` → `1`
-  - `1 - sin²(x)` → `cos²(x)` and `1 - cos²(x)` → `sin²(x)`
-  - `sin²(x) - 1` → `-cos²(x)` and `cos²(x) - 1` → `-sin²(x)`
-  - `tan²(x) + 1` → `sec²(x)` and `sec²(x) - 1` → `tan²(x)`
-  - `1 + cot²(x)` → `csc²(x)` and `csc²(x) - 1` → `cot²(x)`
-  - `a·sin²(x) + a·cos²(x)` → `a` (with coefficient)
+- **Special Function Definitions**: Added type signatures for Digamma, Trigamma,
+  and PolyGamma functions to the library:
+  - `Digamma(x)` - The digamma function ψ(x), logarithmic derivative of Gamma
+  - `Trigamma(x)` - The trigamma function ψ₁(x), derivative of digamma
+  - `PolyGamma(n, x)` - The polygamma function ψₙ(x), nth derivative of digamma
+
+#### Logarithms and Exponentials
 
 - **Logarithm Combination Rules**: Added simplification rules that combine
   logarithms with the same base:
@@ -462,6 +507,14 @@
   - `log_c(x) + log_c(y)` → `log_c(xy)` (works with any base)
   - `log_c(x) - log_c(y)` → `log_c(x/y)`
   - Handles multiple terms: `ln(a) + ln(b) - ln(c)` → `ln(ab/c)`
+
+- **Exponential e Simplification**: Added rules for combining powers of e:
+  - `eˣ · eʸ` → `e^(x+y)` (same-base multiplication)
+  - `eˣ / eʸ` → `e^(x-y)` (same-base division)
+  - `eˣ · e` → `e^(x+1)` and `eˣ / e` → `e^(x-1)`
+  - Preserves symbolic form instead of evaluating e^n numerically
+
+#### Powers and Exponents
 
 - **Negative Base Power Simplification**: Added rules to simplify powers with
   negated bases:
@@ -477,28 +530,13 @@
   - Example: `(x³y²)²` → `x⁶y⁴`
   - Example: `(-2x)²` → `4x²`
 
-- **Exponential e Simplification**: Added rules for combining powers of e:
-  - `eˣ · eʸ` → `e^(x+y)` (same-base multiplication)
-  - `eˣ / eʸ` → `e^(x-y)` (same-base division)
-  - `eˣ · e` → `e^(x+1)` and `eˣ / e` → `e^(x-1)`
-  - Preserves symbolic form instead of evaluating e^n numerically
-
 - **Same-Base Power Combination**: Improved power combination for products with
   3+ terms:
   - `a³ · a · a²` → `a⁶` (combines all same-base terms)
   - Works with unknown symbols when sum of exponents is positive
   - Handles mixed products: `b³c²dx⁷ya⁵gb²x⁵(3b)` → `3dgyx¹²b⁶a⁵c²`
 
-- **Trigonometric Equation Solving**: The `solve()` method now handles basic
-  trigonometric equations:
-  - `sin(x) = a` → `x = arcsin(a)` and `x = π - arcsin(a)` (two solutions)
-  - `cos(x) = a` → `x = arccos(a)` and `x = -arccos(a)` (two solutions)
-  - `tan(x) = a` → `x = arctan(a)` (one solution per period)
-  - `cot(x) = a` → `x = arccot(a)`
-  - Supports coefficient form: `a·sin(x) + b = 0`
-  - Domain validation: returns no solutions when |a| > 1 for sin/cos
-  - Automatic deduplication of equivalent solutions (e.g., `cos(x) = 1` → single
-    solution `0`)
+#### Sum and Product
 
 - **([#133](https://github.com/cortex-js/compute-engine/issues/133))
   Element-based Indexing Sets for Sum/Product**: Added support for `\in`
@@ -565,6 +603,8 @@
     - Supported operators: `>`, `>=`, `<`, `<=`, `!=`
     - Conditions are attached as the 4th operand of Element:
       `["Element", "n", "S", ["Greater", "n", 0]]`
+
+#### Linear Algebra
 
 - **Linear Algebra Enhancements**: Improved tensor and matrix operations with
   better scalar handling, new functionality, and clearer error messages:
@@ -666,6 +706,8 @@
 
 ### Bug Fixes
 
+#### Arithmetic
+
 - **Indeterminate Form Handling**: Fixed incorrect results for mathematical
   indeterminate forms:
   - `0 * ∞` now correctly returns `NaN` (previously returned `∞`)
@@ -685,6 +727,13 @@
     mathematically valid simplifications where exponents become slightly more
     complex (e.g., `2 * 2^x → 2^(x+1)`)
 
+- **Symbolic Factorial**: Fixed `(n-1)!` incorrectly evaluating to `NaN` instead
+  of staying symbolic. The factorial `evaluate` function was attempting numeric
+  computation on symbolic arguments. Now correctly returns `undefined` (keeping
+  the expression symbolic) when the argument is not a number literal.
+
+#### Linear Algebra
+
 - **Matrix Operations Type Validation**: Fixed matrix operations (`Shape`,
   `Rank`, `Flatten`, `Transpose`, `Determinant`, `Inverse`, `Trace`, etc.)
   returning incorrect results or failing with type errors. The root cause was a
@@ -695,6 +744,8 @@
   algebra functions now properly evaluate their operands before checking if they
   are tensors.
 
+#### Calculus
+
 - **Numerical Integration**: Fixed `\int_0^1 \sin(x) dx` returning `NaN` when
   evaluated numerically with `.N()`. The integrand was already wrapped in a
   `Function` expression by the canonical form, but the numerical evaluation code
@@ -702,16 +753,13 @@
   instead of a number. Now correctly checks if the integrand is already a
   `Function` before wrapping.
 
+#### LaTeX Parsing and Serialization
+
 - **Subscript Function Calls**: Fixed parsing of function calls with subscripted
   names like `f_\text{a}(5)`. Previously, this was incorrectly parsed as a
   `Tuple` instead of a function call because `Subscript` expressions weren't
   being canonicalized before the function call check. Now correctly recognizes
   that `f_a(5)` is a function call when the subscript canonicalizes to a symbol.
-
-- **Symbolic Factorial**: Fixed `(n-1)!` incorrectly evaluating to `NaN` instead
-  of staying symbolic. The factorial `evaluate` function was attempting numeric
-  computation on symbolic arguments. Now correctly returns `undefined` (keeping
-  the expression symbolic) when the argument is not a number literal.
 
 - **([#130](https://github.com/cortex-js/compute-engine/issues/130))
   Prefix/Postfix Operator LaTeX Serialization**: Fixed incorrect LaTeX output
@@ -722,15 +770,6 @@
   different expression. Similarly, `Factorial(Add(a, b))` now correctly
   serializes as `(a+b)!` instead of `a+b!`. The fix ensures operands are wrapped
   in parentheses when their precedence is lower than the operator's precedence.
-
-- **Rules Cache Isolation**: Fixed rules cache building failing with "Invalid
-  rule" errors when user expressions had previously polluted the global scope.
-  For example, parsing `x(y+z)` would add `x` as a symbol with function type to
-  the global scope. Later, when the simplification rules cache was built, rule
-  parsing would fail because wildcards like `_x` in rules would be type-checked
-  against the polluted scope where `x` had incompatible type. The fix ensures
-  rule parsing uses a clean scope that inherits only from the system scope
-  (containing built-in definitions), not from user-polluted scopes.
 
 - **([#156](https://github.com/cortex-js/compute-engine/issues/156)) Logical
   Operator Precedence**: Fixed parsing of logical operators `\vee` (Or) and
@@ -753,6 +792,17 @@
     continue to work
   - `\to` remains available for function/set mapping notation (e.g.,
     `f: A \to B`)
+
+#### Simplification
+
+- **Rules Cache Isolation**: Fixed rules cache building failing with "Invalid
+  rule" errors when user expressions had previously polluted the global scope.
+  For example, parsing `x(y+z)` would add `x` as a symbol with function type to
+  the global scope. Later, when the simplification rules cache was built, rule
+  parsing would fail because wildcards like `_x` in rules would be type-checked
+  against the polluted scope where `x` had incompatible type. The fix ensures
+  rule parsing uses a clean scope that inherits only from the system scope
+  (containing built-in definitions), not from user-polluted scopes.
 
 - **Simplification Rules**: Added and fixed several simplification rules:
   - `x + x` now correctly simplifies to `2x` (term combination)
@@ -779,15 +829,7 @@
 
 ### Bug Fixes
 
-- **([#256](https://github.com/cortex-js/compute-engine/issues/256)) Subscript
-  Symbol Parsing**: Fixed parsing of single-letter symbols with subscripts.
-  Previously, `i_A` was incorrectly parsed as
-  `["Subscript", ["Complex", 0, 1], "A"]` because `i` was recognized as the
-  imaginary unit before the subscript was processed. Now `i_A` correctly parses
-  as the symbol `i_A`. This applies to all single-letter symbols including
-  constants like `e` and `i`. Complex subscripts containing operators (`n+1`),
-  commas (`n,m`), or parentheses (`(n+1)`) still produce `Subscript`
-  expressions.
+#### Calculus
 
 - **([#230](https://github.com/cortex-js/compute-engine/issues/230)) Root
   Derivatives**: Fixed the `D` operator not differentiating expressions
@@ -798,29 +840,16 @@
   `differentiate` function to handle `Root(base, n)` by applying the power rule
   with exponent `1/n`.
 
-- **Sign Simplification**: Fixed `Sign(x).simplify()` returning `1` instead of
-  `-1` when `x` is negative. The simplification rule incorrectly returned
-  `ce.One` for both positive and negative cases.
-
 - **Abs Derivative**: Fixed `d/dx |x|` returning an error when evaluated with a
   variable that has an assigned value. The derivative formula now uses `Sign(x)`
   instead of a complex `Which` expression that couldn't be evaluated
   symbolically.
-
-- **LaTeX Serialization**: Fixed TypeScript error in power serialization where
-  `denom` (a `number | null`) was incorrectly passed where an `Expression` was
-  expected. Now correctly uses `operand(exp, 2)` to get the expression form.
 
 - **Step Function Derivatives**: Fixed `D(floor(x), x)`, `D(ceil(x), x)`, and
   `D(round(x), x)` causing infinite recursion. These step functions now
   correctly return 0 (the derivative is 0 almost everywhere). Also fixed a bug
   where derivative formulas that evaluate to 0 weren't recognized due to a falsy
   check.
-
-- **Ceil Type Signature**: Fixed `Ceil` function signature from
-  `(real) -> integer` to `(number) -> integer` to match `Floor`. This resolves
-  "incompatible-type" errors when computing derivatives of ceiling expressions
-  or using `Ceil` in contexts expecting a general number type.
 
 - **Inverse Trig Integrals**: Fixed incorrect integration formulas for `arcsin`,
   `arccos`, and `arctan`. The previous formulas were completely wrong. Correct:
@@ -833,13 +862,6 @@
 
 - **LogGamma Derivative**: Added derivative rule for `LogGamma(x)` which returns
   `Digamma(x)` (the digamma/psi function).
-
-- **Polynomial Degree Detection**: Fixed `polynomialDegree()` returning 0 for
-  expressions like `e^x` or `e^(-x^2)` when it should return -1 (not a
-  polynomial). When the base of a power is constant but the exponent depends on
-  the variable, this is not a polynomial. This bug caused infinite recursion in
-  simplification when simplifying expressions containing exponentials, such as
-  the derivative of `erf(x)` which is `(2/√π)·e^(-x²)`.
 
 - **Special Function Derivatives**: Fixed derivative formulas for several
   special functions and removed incorrect ones:
@@ -855,6 +877,22 @@
   now correctly returns `Digamma'(x)` (as `Apply(Derivative(Digamma, 1), x)`)
   instead of incorrectly returning `0`.
 
+#### LaTeX Parsing and Serialization
+
+- **([#256](https://github.com/cortex-js/compute-engine/issues/256)) Subscript
+  Symbol Parsing**: Fixed parsing of single-letter symbols with subscripts.
+  Previously, `i_A` was incorrectly parsed as
+  `["Subscript", ["Complex", 0, 1], "A"]` because `i` was recognized as the
+  imaginary unit before the subscript was processed. Now `i_A` correctly parses
+  as the symbol `i_A`. This applies to all single-letter symbols including
+  constants like `e` and `i`. Complex subscripts containing operators (`n+1`),
+  commas (`n,m`), or parentheses (`(n+1)`) still produce `Subscript`
+  expressions.
+
+- **LaTeX Serialization**: Fixed TypeScript error in power serialization where
+  `denom` (a `number | null`) was incorrectly passed where an `Expression` was
+  expected. Now correctly uses `operand(exp, 2)` to get the expression form.
+
 - **([#168](https://github.com/cortex-js/compute-engine/issues/168)) Absolute
   Value**: Fixed parsing of nested absolute value expressions that start with a
   double bar (e.g. `||3-5|-4|`), which previously produced an invalid structure
@@ -866,34 +904,11 @@
   `-2^2`) when the base is negative, and negated powers now render as `-(2^2)`
   rather than `-2^2`.
 
-- **([#263](https://github.com/cortex-js/compute-engine/issues/263)) Quantifier
-  Scope**: Fixed quantifier scope in First-Order Logic expressions. Previously,
-  `\forall x.P(x)\rightarrow Q(x)` was parsed with the implication inside the
-  quantifier scope: `["ForAll", "x", ["To", P(x), Q(x)]]`. Now it correctly
-  follows standard FOL conventions where the quantifier binds only the
-  immediately following formula: `["To", ["ForAll", "x", P(x)], Q(x)]`. This
-  applies to all quantifiers (`ForAll`, `Exists`, `ExistsUnique`, `NotForAll`,
-  `NotExists`) and all logical connectives (`\rightarrow`, `\to`, `\implies`,
-  `\land`, `\lor`, `\iff`). Use explicit parentheses for wider scope:
-  `\forall x.(P(x)\rightarrow Q(x))`. Also fixed quantifier type signatures to
-  properly return `boolean`, enabling correct type checking when quantified
-  expressions are used as arguments to logical operators.
-
 - **([#243](https://github.com/cortex-js/compute-engine/issues/243)) LaTeX
   Parsing**: Fixed logic operator precedence causing expressions like
   `x = 1 \vee x = 2` to be parsed incorrectly as `x = (1 ∨ x) = 2` instead of
   `(x = 1) ∨ (x = 2)`. Comparison operators (`=`, `<`, `>`, etc.) now correctly
   bind tighter than logic operators (`\land`, `\lor`, `\veebar`, etc.).
-
-- **([#258](https://github.com/cortex-js/compute-engine/issues/258)) Pattern
-  Matching**: Fixed `BoxedExpression.match()` returning `null` when matching
-  patterns against canonicalized expressions. Several cases are now handled:
-  - `Rational` patterns now match expressions like `['Rational', 'x', 2]` which
-    are canonicalized to `['Multiply', ['Rational', 1, 2], 'x']`
-  - `Power` patterns now match `['Power', 'x', -1]` which is canonicalized to
-    `['Divide', 1, 'x']`, returning `{_base: x, _exp: -1}`
-  - `Power` patterns now match `['Root', 'x', 3]` (cube root), returning
-    `{_base: x, _exp: ['Divide', 1, 3]}`
 
 - **([#264](https://github.com/cortex-js/compute-engine/issues/264))
   Serialization**: Fixed LaTeX serialization of quantified expressions
@@ -901,15 +916,6 @@
   only the quantifier symbol was output (e.g., `\forall x` instead of
   `\forall x, x>y`). The body of the quantified expression is now correctly
   serialized.
-
-- **([#252](https://github.com/cortex-js/compute-engine/issues/252))
-  Sum/Product**: Fixed `Sum` and `Product` returning `NaN` when the body
-  contains free variables (variables not bound by the index). For example,
-  `\sum_{n=1}^{10}(x)` now correctly evaluates to `10x` instead of `NaN`, and
-  `\prod_{n=1}^{5}(x)` evaluates to `x^5`. Mixed expressions like
-  `\sum_{n=1}^{10}(n \cdot x)` now return `55x`. Also fixed `toString()` for
-  `Sum` and `Product` expressions with non-trivial bodies (e.g., `Multiply`)
-  which were incorrectly displayed as `int()`.
 
 - **([#257](https://github.com/cortex-js/compute-engine/issues/257)) LaTeX
   Parsing**: Fixed `\gcd` command not parsing function arguments correctly.
@@ -928,6 +934,77 @@
 - **LaTeX Parsing**: Fixed `\cosh` incorrectly mapping to `Csch` instead of
   `Cosh`.
 
+- **([#255](https://github.com/cortex-js/compute-engine/issues/255)) LaTeX
+  Parsing**: Fixed multi-letter subscripts like `A_{CD}` causing
+  "incompatible-type" errors in arithmetic operations. Multi-letter subscripts
+  without parentheses are now interpreted as compound symbol names (e.g.,
+  `A_{CD}` → `A_CD`, `x_{ij}` → `x_ij`, `T_{max}` → `T_max`). Use parentheses
+  for expression subscripts: `A_{(CD)}` creates a `Subscript` expression where
+  `CD` represents implicit multiplication. The `Delimiter` wrapper is now
+  stripped from subscript expressions for cleaner output.
+
+#### First-Order Logic
+
+- **([#263](https://github.com/cortex-js/compute-engine/issues/263)) Quantifier
+  Scope**: Fixed quantifier scope in First-Order Logic expressions. Previously,
+  `\forall x.P(x)\rightarrow Q(x)` was parsed with the implication inside the
+  quantifier scope: `["ForAll", "x", ["To", P(x), Q(x)]]`. Now it correctly
+  follows standard FOL conventions where the quantifier binds only the
+  immediately following formula: `["To", ["ForAll", "x", P(x)], Q(x)]`. This
+  applies to all quantifiers (`ForAll`, `Exists`, `ExistsUnique`, `NotForAll`,
+  `NotExists`) and all logical connectives (`\rightarrow`, `\to`, `\implies`,
+  `\land`, `\lor`, `\iff`). Use explicit parentheses for wider scope:
+  `\forall x.(P(x)\rightarrow Q(x))`. Also fixed quantifier type signatures to
+  properly return `boolean`, enabling correct type checking when quantified
+  expressions are used as arguments to logical operators.
+
+#### Simplification
+
+- **Sign Simplification**: Fixed `Sign(x).simplify()` returning `1` instead of
+  `-1` when `x` is negative. The simplification rule incorrectly returned
+  `ce.One` for both positive and negative cases.
+
+#### Type System
+
+- **Ceil Type Signature**: Fixed `Ceil` function signature from
+  `(real) -> integer` to `(number) -> integer` to match `Floor`. This resolves
+  "incompatible-type" errors when computing derivatives of ceiling expressions
+  or using `Ceil` in contexts expecting a general number type.
+
+#### Polynomials
+
+- **Polynomial Degree Detection**: Fixed `polynomialDegree()` returning 0 for
+  expressions like `e^x` or `e^(-x^2)` when it should return -1 (not a
+  polynomial). When the base of a power is constant but the exponent depends on
+  the variable, this is not a polynomial. This bug caused infinite recursion in
+  simplification when simplifying expressions containing exponentials, such as
+  the derivative of `erf(x)` which is `(2/√π)·e^(-x²)`.
+
+#### Pattern Matching
+
+- **([#258](https://github.com/cortex-js/compute-engine/issues/258)) Pattern
+  Matching**: Fixed `BoxedExpression.match()` returning `null` when matching
+  patterns against canonicalized expressions. Several cases are now handled:
+  - `Rational` patterns now match expressions like `['Rational', 'x', 2]` which
+    are canonicalized to `['Multiply', ['Rational', 1, 2], 'x']`
+  - `Power` patterns now match `['Power', 'x', -1]` which is canonicalized to
+    `['Divide', 1, 'x']`, returning `{_base: x, _exp: -1}`
+  - `Power` patterns now match `['Root', 'x', 3]` (cube root), returning
+    `{_base: x, _exp: ['Divide', 1, 3]}`
+
+#### Sum and Product
+
+- **([#252](https://github.com/cortex-js/compute-engine/issues/252))
+  Sum/Product**: Fixed `Sum` and `Product` returning `NaN` when the body
+  contains free variables (variables not bound by the index). For example,
+  `\sum_{n=1}^{10}(x)` now correctly evaluates to `10x` instead of `NaN`, and
+  `\prod_{n=1}^{5}(x)` evaluates to `x^5`. Mixed expressions like
+  `\sum_{n=1}^{10}(n \cdot x)` now return `55x`. Also fixed `toString()` for
+  `Sum` and `Product` expressions with non-trivial bodies (e.g., `Multiply`)
+  which were incorrectly displayed as `int()`.
+
+#### Equation Solving
+
 - **([#242](https://github.com/cortex-js/compute-engine/issues/242)) Solve**:
   Fixed `solve()` returning an empty array for equations with variables in
   fractions. For example, `F = 3g/h` solved for `g` now correctly returns `Fh/3`
@@ -943,16 +1020,9 @@
   solving logarithmic equations like `a·ln(x) + b = 0` which returns
   `x = e^(-b/a)`.
 
-- **([#255](https://github.com/cortex-js/compute-engine/issues/255)) LaTeX
-  Parsing**: Fixed multi-letter subscripts like `A_{CD}` causing
-  "incompatible-type" errors in arithmetic operations. Multi-letter subscripts
-  without parentheses are now interpreted as compound symbol names (e.g.,
-  `A_{CD}` → `A_CD`, `x_{ij}` → `x_ij`, `T_{max}` → `T_max`). Use parentheses
-  for expression subscripts: `A_{(CD)}` creates a `Subscript` expression where
-  `CD` represents implicit multiplication. The `Delimiter` wrapper is now
-  stripped from subscript expressions for cleaner output.
-
 ### Improvements
+
+#### First-Order Logic
 
 - **([#263](https://github.com/cortex-js/compute-engine/issues/263)) First-Order
   Logic**: Added several improvements for working with First-Order Logic
@@ -1058,12 +1128,16 @@
     `.N()` method for numeric evaluation, or construct it directly in MathJSON:
     `["N", expr]`.
 
+#### Polynomials
+
 - **Polynomial Simplification**: The `simplify()` function now automatically
   cancels common polynomial factors in univariate rational expressions. For
   example, `(x² - 1)/(x - 1)` simplifies to `x + 1`, `(x³ - x)/(x² - 1)`
   simplifies to `x`, and `(x + 1)/(x² + 3x + 2)` simplifies to `1/(x + 2)`.
   Previously, this required explicitly calling the `Cancel` function with a
   variable argument.
+
+#### Sum and Product
 
 - **Sum/Product Simplification**: Added simplification rules for `Sum` and
   `Product` expressions with symbolic bounds:
@@ -1117,12 +1191,6 @@
   - Edge cases: empty ranges (upper < lower) return identity elements (0 for
     Sum, 1 for Product), and single-iteration ranges substitute the bound value
 
-- **([#257](https://github.com/cortex-js/compute-engine/issues/257)) LaTeX
-  Parsing**: Fixed `\gcd` command not parsing function arguments correctly.
-  Previously `\gcd\left(24,37\right)` would parse as
-  `["Tuple", "GCD", ["Tuple", 24, 37]]` instead of the expected
-  `["GCD", 24, 37]`. The `\operatorname{gcd}` form was unaffected.
-
 ## 0.31.0 _2026-01-27_
 
 ### Breaking Changes
@@ -1141,6 +1209,8 @@
 
 ### Bug Fixes
 
+#### LaTeX Parsing
+
 - **Metadata Preservation**: Fixed `verbatimLatex` not being preserved when
   parsing with `preserveLatex: true`. The original LaTeX source is now correctly
   stored on parsed expressions (when using non-canonical mode). Also fixed
@@ -1150,6 +1220,8 @@
 - **String Parsing**: Fixed parsing of `\text{...}` with `preserveLatex: true`
   which was incorrectly returning an "invalid-symbol" error instead of a string
   expression.
+
+#### Calculus
 
 - **Derivatives**: `d/dx e^x` now correctly simplifies to `e^x` instead of
   `ln(e) * e^x`. The `hasSymbolicTranscendental()` function now recognizes that
@@ -1161,6 +1233,8 @@
   of function application when applying derivative formulas, which preserves
   symbolic transcendental constants.
 
+#### Arithmetic
+
 - **Rationals**: Fixed `reducedRational()` to properly normalize negative
   denominators before the early return check. Previously `1/-2` would not
   canonicalize to `-1/2`.
@@ -1168,6 +1242,8 @@
 - **Arithmetic**: Fixed `.mul()` to preserve logarithms symbolically. Previously
   multiplying expressions containing `Ln` or `Log` would evaluate the logarithm
   to its numeric value.
+
+#### Serialization
 
 - **Serialization**: Fixed case inconsistency in `toString()` output for
   trigonometric functions. Some functions like `Cot` were being serialized with
@@ -1184,15 +1260,19 @@
   - `d/dx arcsin(x)` now displays as `1/sqrt(1-x^2)` instead of
     `(-x^2+1)^(-1/2)`
 
+- **Scientific Notation**: Fixed normalization of scientific notation for
+  fractional values (e.g., numbers less than 1).
+
+#### Sum and Product
+
 - **Compilation**: Fixed compilation of `Sum` and `Product` expressions.
 
 - **Sum/Product**: Fixed `sum` and `prod` library functions to correctly handle
   substitution of index variables.
 
-- **Scientific Notation**: Fixed normalization of scientific notation for
-  fractional values (e.g., numbers less than 1).
-
 ### New Features and Improvements
+
+#### Serialization
 
 - **Number Serialization**: Added `adaptiveScientific` notation mode. When
   serializing numbers to LaTeX, this mode uses scientific notation but avoids
@@ -1200,12 +1280,18 @@
   This provides a balance between readability and precision for numbers across
   different orders of magnitude.
 
+#### Type System
+
 - Refactored the type parser to use a modular architecture. This allows for
   better extensibility and maintainability of the type system.
+
+#### Pattern Matching
 
 - **Pattern Matching**: The `validatePattern()` function is now exported from
   the public API. Use it to check patterns for invalid combinations like
   consecutive sequence wildcards before using them.
+
+#### Polynomials
 
 - **Polynomial Arithmetic**: Added new library functions for polynomial
   operations:
@@ -1216,6 +1302,8 @@
     remainder
   - `PolynomialGCD(a, b, var)` - Greatest common divisor of polynomials
   - `Cancel(expr, var)` - Cancel common factors in rational expressions
+
+#### Calculus
 
 - **Integration**: Significantly expanded symbolic integration capabilities:
   - **Polynomial division**: Integrals like `∫ x²/(x²+1) dx` now correctly
