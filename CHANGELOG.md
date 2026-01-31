@@ -55,6 +55,14 @@
   properly. Now `(x³/y²)^{-2}` correctly simplifies to `y⁴/x⁶` during
   canonicalization by distributing the negative exponent.
 
+- **Logarithm Combination Base Preservation**: Fixed `log(x) + log(y)` (base 10)
+  incorrectly becoming `ln(xy)`. Now correctly produces `log(xy)` preserving the
+  original base.
+
+- **Radical Perfect Square Factoring**: Fixed `√(x²y)` not simplifying to
+  `|x|√y`. Adjusted cost function to penalize radicals containing perfect
+  squares, enabling the simplification rule to apply.
+
 ### Features
 
 - **([#163](https://github.com/cortex-js/compute-engine/issues/163)) Additional

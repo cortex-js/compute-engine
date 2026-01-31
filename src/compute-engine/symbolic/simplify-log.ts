@@ -525,17 +525,21 @@ export function simplifyLog(x: BoxedExpression): RuleStep | undefined {
         const combinedIndices = new Set(terms.map((t) => t.index));
         const remainingTerms = x.ops.filter((_, i) => !combinedIndices.has(i));
 
+        // Don't include 'Nothing' as explicit base - use single-argument form for default base 10
+        const base = terms[0].base;
+        const isDefaultBase = base.symbol === 'Nothing';
+        const combinedLog = isDefaultBase
+          ? ce._fn('Log', [combinedArg])
+          : ce._fn('Log', [combinedArg, base]);
+
         if (remainingTerms.length === 0) {
           return {
-            value: ce._fn('Log', [combinedArg, terms[0].base]),
+            value: combinedLog,
             because: 'combine log terms',
           };
         }
         return {
-          value: ce._fn('Add', [
-            ce._fn('Log', [combinedArg, terms[0].base]),
-            ...remainingTerms,
-          ]),
+          value: ce._fn('Add', [combinedLog, ...remainingTerms]),
           because: 'combine log terms',
         };
       }

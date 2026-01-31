@@ -82,7 +82,25 @@ export function costFunction(expr: BoxedExpression): number {
   let nameCost = 2;
   if (['Add'].includes(name)) nameCost = 3;
   else if (['Subtract', 'Negate'].includes(name)) nameCost = 4;
-  else if (['Square', 'Sqrt', 'Abs'].includes(name)) nameCost = 5;
+  else if (name === 'Sqrt') {
+    // Sqrt with perfect squares inside should be more expensive
+    // because √(x²y) should simplify to |x|√y
+    const arg = expr.ops?.[0];
+    if (arg?.operator === 'Multiply' && arg.ops) {
+      // Check if any factor is a perfect square (Power with even exponent)
+      for (const factor of arg.ops) {
+        if (factor.operator === 'Power' && factor.op2?.isEven === true) {
+          // Add a penalty to encourage factoring out perfect squares
+          return 5 + costFunction(arg) + 6;
+        }
+      }
+    }
+    // Also check if arg is directly a perfect square
+    if (arg?.operator === 'Power' && arg.op2?.isEven === true) {
+      return 5 + costFunction(arg) + 6;
+    }
+    nameCost = 5;
+  } else if (['Square', 'Abs'].includes(name)) nameCost = 5;
   else if (name === 'Power') {
     // We want 2q^2 to be less expensive than 2qq, so we mostly ignore the base
     // when the base is simple. However:
