@@ -699,11 +699,19 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
   {
     kind: 'function',
     symbolTrigger: 'exp',
-    parse: 'Exp',
+    parse: (parser: Parser) => {
+      const args = parser.parseArguments('implicit');
+      if (args === null) return 'Exp' as Expression;
+      return ['Exp', ...args] as Expression;
+    },
   },
   {
     latexTrigger: '\\exp',
-    parse: 'Exp',
+    parse: (parser: Parser) => {
+      const args = parser.parseArguments('implicit');
+      if (args === null) return 'Exp' as Expression;
+      return ['Exp', ...args] as Expression;
+    },
   },
   {
     name: 'ImaginaryUnit',

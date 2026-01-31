@@ -95,6 +95,10 @@
   and allows proper algebraic manipulation. Use `.N()` to get numeric approximations
   when needed.
 
+- **LaTeX `\exp()` Juxtaposition**: Fixed adjacent `\exp()` calls not parsing as
+  multiplication. Now `\exp(x)\exp(2)` correctly parses as `e^x · e^2` instead of
+  producing a parse error. The expression then simplifies to `e^{x+2}` as expected.
+
 ### Features
 
 - **([#163](https://github.com/cortex-js/compute-engine/issues/163)) Additional
