@@ -5,18 +5,33 @@ import { add } from '../boxed-expression/arithmetic-add';
 import { hasSymbolicTranscendental } from '../boxed-expression/utils';
 
 /**
+ * Maximum recursion depth for differentiation.
+ *
+ * This guards against pathological cases where differentiation rules
+ * might loop indefinitely. Normal derivatives (including higher-order)
+ * should never approach this limit.
+ */
+const MAX_DIFFERENTIATION_DEPTH = 100;
+
+/**
  * Return a derivative result without simplification.
  *
- * IMPORTANT: Do not call .simplify() to avoid infinite recursion when
- * derivative operations are called from within simplification rules.
- * The expressions are already constructed using proper arithmetic operations
- * (add, mul, etc.) that produce canonical forms by default.
+ * ## Recursion Safety
+ *
+ * IMPORTANT: Do not call `.simplify()` on the result to avoid infinite recursion
+ * when derivative operations are called from within simplification rules.
+ *
+ * The differentiation system has multiple layers of recursion protection:
+ *
+ * 1. **This function** - Returns expressions without calling `.simplify()`
+ * 2. **D operator guard** (calculus.ts) - Returns early if result is still `D`
+ * 3. **differentiate() guard** - Returns `undefined` if evaluating `D` yields `D`
+ * 4. **Depth limit** - `MAX_DIFFERENTIATION_DEPTH` prevents runaway recursion
+ * 5. **DERIVATIVES_TABLE check** - Uses `=== undefined` not `!h` to handle `h = 0`
+ *
+ * The arithmetic operations (add, mul, etc.) already produce canonical forms.
  */
 function simplifyDerivative(expr: BoxedExpression): BoxedExpression {
-  // Return the expression as-is without simplification to avoid infinite recursion
-  // when derivatives are computed during simplification (e.g., second derivatives
-  // of arcsin, arccos involving Power rule).
-  // The arithmetic operations (add, mul, etc.) already produce canonical forms.
   return expr;
 }
 
@@ -171,11 +186,36 @@ export function derivative(
  * All expressions that do not explicitly depend on `v` are taken to have zero
  * partial derivative.
  *
+ * ## Recursion Safety
+ *
+ * This function includes a depth limit (`MAX_DIFFERENTIATION_DEPTH`) to prevent
+ * stack overflow from pathological expressions. The depth is tracked internally
+ * and incremented on each recursive call. If the limit is reached, the function
+ * returns `undefined` rather than continuing to recurse.
+ *
+ * Normal differentiation (including higher-order derivatives of complex
+ * expressions) should never approach this limit. Hitting the limit indicates
+ * either a bug in the differentiation rules or a maliciously constructed input.
+ *
+ * @param expr - The expression to differentiate
+ * @param v - The variable to differentiate with respect to
+ * @param depth - Internal recursion depth counter (do not pass manually)
+ * @returns The derivative expression, or `undefined` if unable to differentiate
  */
 export function differentiate(
   expr: BoxedExpression,
-  v: string
+  v: string,
+  depth: number = 0
 ): BoxedExpression | undefined {
+  // Guard against runaway recursion
+  if (depth > MAX_DIFFERENTIATION_DEPTH) {
+    console.assert(
+      false,
+      `Differentiation depth limit (${MAX_DIFFERENTIATION_DEPTH}) exceeded`
+    );
+    return undefined;
+  }
+
   const ce = expr.engine;
 
   // A few easy ones...
@@ -185,14 +225,14 @@ export function differentiate(
   if (expr.symbol) return expr.engine.Zero;
   if (!expr.operator) return undefined;
   if (expr.operator === 'Negate') {
-    const gPrime = differentiate(expr.op1, v);
+    const gPrime = differentiate(expr.op1, v, depth + 1);
     if (gPrime) return gPrime.neg();
     return ce._fn('D', [expr.op1!, ce.symbol(v)]).neg();
   }
 
   // Block - just differentiate the content
   if (expr.operator === 'Block') {
-    return differentiate(expr.op1, v);
+    return differentiate(expr.op1, v, depth + 1);
   }
 
   // D - evaluate the derivative first, then differentiate the result
@@ -200,12 +240,12 @@ export function differentiate(
     const evaluated = expr.evaluate();
     // Avoid infinite recursion if D doesn't simplify
     if (evaluated.operator === 'D') return undefined;
-    return differentiate(evaluated, v);
+    return differentiate(evaluated, v, depth + 1);
   }
 
   // Sum rule
   if (expr.operator === 'Add') {
-    const terms = expr.ops!.map((op) => differentiate(op, v));
+    const terms = expr.ops!.map((op) => differentiate(op, v, depth + 1));
     if (terms.some((term) => term === undefined)) return undefined;
     return simplifyDerivative(add(...(terms as BoxedExpression[])));
   }
@@ -216,7 +256,8 @@ export function differentiate(
       const otherTerms = expr.ops!.slice();
       otherTerms.splice(i, 1);
       const otherProduct = mul(...otherTerms);
-      const gPrime = differentiate(op, v) ?? ce._fn('D', [op, ce.symbol(v)]);
+      const gPrime =
+        differentiate(op, v, depth + 1) ?? ce._fn('D', [op, ce.symbol(v)]);
       return gPrime.mul(otherProduct);
     });
     if (terms.some((term) => term === undefined)) return undefined;
@@ -233,7 +274,7 @@ export function differentiate(
     // d/dx base^(1/n) = (1/n) * base^((1/n) - 1) * base'
     const exponent = ce.One.div(n); // 1/n
     const basePrime =
-      differentiate(base, v) ?? ce._fn('D', [base, ce.symbol(v)]);
+      differentiate(base, v, depth + 1) ?? ce._fn('D', [base, ce.symbol(v)]);
     const newExponent = exponent.sub(ce.One); // (1/n) - 1 = (1-n)/n
 
     // Create Power expression as structural (bound but not canonicalized) to avoid Root conversion
@@ -258,7 +299,7 @@ export function differentiate(
     if (baseHasV && !expHasV) {
       // Only base depends on v: d/dx f(x)^n = n * f(x)^(n-1) * f'(x)
       const fPrime =
-        differentiate(base, v) ?? ce._fn('D', [base, ce.symbol(v)]);
+        differentiate(base, v, depth + 1) ?? ce._fn('D', [base, ce.symbol(v)]);
       return simplifyDerivative(
         exponent.mul(base.pow(exponent.add(ce.NegativeOne))).mul(fPrime)
       );
@@ -269,7 +310,8 @@ export function differentiate(
       // Use ce._fn('Ln', ...) instead of base.ln() to keep ln symbolic
       // (base.ln() evaluates to a numeric value).
       const gPrime =
-        differentiate(exponent, v) ?? ce._fn('D', [exponent, ce.symbol(v)]);
+        differentiate(exponent, v, depth + 1) ??
+        ce._fn('D', [exponent, ce.symbol(v)]);
       const lnBase = ce._fn('Ln', [base]);
       return simplifyDerivative(expr.mul(lnBase).mul(gPrime));
     }
@@ -277,8 +319,10 @@ export function differentiate(
     // Both depend on v: d/dx f(x)^g(x) = f(x)^g(x) * (g'(x) * ln(f(x)) + g(x) * f'(x) / f(x))
     const f = base;
     const g = exponent;
-    const fPrime = differentiate(f, v) ?? ce._fn('D', [f, ce.symbol(v)]);
-    const gPrime = differentiate(g, v) ?? ce._fn('D', [g, ce.symbol(v)]);
+    const fPrime =
+      differentiate(f, v, depth + 1) ?? ce._fn('D', [f, ce.symbol(v)]);
+    const gPrime =
+      differentiate(g, v, depth + 1) ?? ce._fn('D', [g, ce.symbol(v)]);
     // Use ce._fn('Ln', ...) instead of f.ln() to keep ln symbolic
     // (f.ln() evaluates to a numeric value when f is a constant).
     const lnF = ce._fn('Ln', [f]);
@@ -291,9 +335,11 @@ export function differentiate(
   if (expr.operator === 'Divide') {
     const [numerator, denominator] = expr.ops!;
     const gPrime =
-      differentiate(numerator, v) ?? ce._fn('D', [numerator, ce.symbol(v)]);
+      differentiate(numerator, v, depth + 1) ??
+      ce._fn('D', [numerator, ce.symbol(v)]);
     const hPrime =
-      differentiate(denominator, v) ?? ce._fn('D', [denominator, ce.symbol(v)]);
+      differentiate(denominator, v, depth + 1) ??
+      ce._fn('D', [denominator, ce.symbol(v)]);
     return simplifyDerivative(
       gPrime.mul(denominator).sub(hPrime.mul(numerator)).div(denominator.pow(2))
     );
@@ -308,7 +354,8 @@ export function differentiate(
     const fPrime = ce._fn('Derivative', [ce.symbol(expr.operator), ce.One]);
     if (!fPrime.isValid) return undefined;
     const g = expr.ops![0];
-    const gPrime = differentiate(g, v) ?? ce._fn('D', [g, ce.symbol(v)]);
+    const gPrime =
+      differentiate(g, v, depth + 1) ?? ce._fn('D', [g, ce.symbol(v)]);
     if (!gPrime.isValid) return undefined;
     return ce._fn('Apply', [fPrime, g]).mul(gPrime);
   }
@@ -317,7 +364,8 @@ export function differentiate(
   // d/dx f(g(x)) = f'(g(x)) * g'(x)
   if (expr.nops > 1) return ce._fn('D', [expr, ce.symbol(v)]);
   const g = expr.ops![0];
-  const gPrime = differentiate(g, v) ?? ce._fn('D', [g, ce.symbol(v)]);
+  const gPrime =
+    differentiate(g, v, depth + 1) ?? ce._fn('D', [g, ce.symbol(v)]);
   // Substitute the argument into the derivative formula
   // We use subs() instead of apply() to avoid evaluating the expression,
   // which would convert symbolic transcendentals like ln(10) to numeric values.

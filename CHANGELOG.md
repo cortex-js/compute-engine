@@ -1,5 +1,12 @@
 ## [Unreleased]
 
+### Improvements
+
+- **Derivative Recursion Safety**: Added robust recursion protection to the
+  `differentiate()` function with a depth limit (`MAX_DIFFERENTIATION_DEPTH`)
+  to guard against pathological expressions. All recursive calls now track
+  depth and gracefully return `undefined` if the limit is exceeded.
+
 ## 0.33.0 _2026-01-30_
 
 ### Bug Fixes
