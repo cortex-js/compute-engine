@@ -805,11 +805,10 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     description: [
       'Access an element of an indexed collection.',
       'If the index is negative, it is counted from the end.',
-      // 'If the collection has a rank greater than 1, the index is a tuple of indexes.',
-      // 'If the index is a list, each element of the list is used as an index and the result if a list of the elements.',
+      'Multiple indices can be provided to access nested collections (e.g., matrices).',
     ],
     complexity: 8200,
-    signature: '(value: list|tuple|string, index: number | string) -> unknown',
+    signature: '(value: indexed_collection, index: (number|string)+) -> unknown',
     type: ([xs]) =>
       xs.operatorDefinition?.collection?.elttype?.(xs) ??
       collectionElementType(xs.type.type) ??

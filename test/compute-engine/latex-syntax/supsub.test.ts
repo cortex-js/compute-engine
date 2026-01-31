@@ -552,20 +552,8 @@ describe('COMPLEX SUBSCRIPTS IN ARITHMETIC (Issue #273)', () => {
 describe('TEXT SUBSCRIPTS', () => {
   // Text subscripts like x_{\text{max}} are clearly naming, not indexing
   test('Text subscripts become compound symbols', () => {
-    expect(ce.parse('x_{\\text{max}}')).toMatchInlineSnapshot(`
-      [
-        "Tuple",
-        "x_\\text<{>max",
-        ["Error", "unexpected-closing-delimiter", ["LatexString", "}"]]
-      ]
-    `);
-    expect(ce.parse('T_{\\text{ambient}}')).toMatchInlineSnapshot(`
-      [
-        "Tuple",
-        "T_\\text<{>ambient",
-        ["Error", "unexpected-closing-delimiter", ["LatexString", "}"]]
-      ]
-    `);
+    expect(ce.parse('x_{\\text{max}}')).toMatchInlineSnapshot(`x_max`);
+    expect(ce.parse('T_{\\text{ambient}}')).toMatchInlineSnapshot(`T_ambient`);
     expect(ce.parse('v_{\\mathrm{max}}')).toMatchInlineSnapshot(`v_max`);
   });
 
@@ -573,18 +561,7 @@ describe('TEXT SUBSCRIPTS', () => {
     expect(ce.parse('x_{\\text{max}}+1').json).toMatchInlineSnapshot(`
       [
         Add,
-        [
-          Tuple,
-          'x_\\text<{>max',
-          [
-            Error,
-            'unexpected-closing-delimiter',
-            [
-              LatexString,
-              '}',
-            ],
-          ],
-        ],
+        x_max,
         1,
       ]
     `);
@@ -592,18 +569,7 @@ describe('TEXT SUBSCRIPTS', () => {
       [
         Multiply,
         2,
-        [
-          Tuple,
-          'T_\\text<{>ambient',
-          [
-            Error,
-            'unexpected-closing-delimiter',
-            [
-              LatexString,
-              '}',
-            ],
-          ],
-        ],
+        T_ambient,
       ]
     `);
   });

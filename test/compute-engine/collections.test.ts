@@ -495,25 +495,13 @@ describe('OPERATIONS ON INDEXED COLLECTIONS', () => {
   test('At with negative index', () =>
     expect(evaluate(['At', list, -2])).toMatchInlineSnapshot(`3`));
 
-  test('At', () =>
-    expect(evaluate(['At', list, 1, 2])).toMatchInlineSnapshot(`
-      [
-        "At",
-        ["List", 7, 13, 5, 19, 2, 3, 11],
-        1,
-        ["Error", "unexpected-argument", "'2'"]
-      ]
-    `)); // @fixme: multiple indexes not implemented yet
+  test('At with multi-index on 1D list (stays symbolic)', () =>
+    expect(evaluate(['At', list, 1, 2])).toMatchInlineSnapshot(
+      `["At", ["List", 7, 13, 5, 19, 2, 3, 11], 1, 2]`
+    )); // 1D list can't be double-indexed, stays symbolic
 
-  test('At', () =>
-    expect(evaluate(['At', matrix, 1, 2])).toMatchInlineSnapshot(`
-      [
-        "At",
-        ["List", ["List", 2, 3, 4], ["List", 6, 7, 9], ["List", 11, 12, 13]],
-        1,
-        ["Error", "unexpected-argument", "'2'"]
-      ]
-    `)); // @fixme: multiple indexes not implemented yet
+  test('At with multi-index on 2D matrix', () =>
+    expect(evaluate(['At', matrix, 1, 2])).toMatchInlineSnapshot(`3`)); // Row 1, Column 2 → 3
 
   test('First', () =>
     expect(evaluate(['First', list])).toMatchInlineSnapshot(`7`));

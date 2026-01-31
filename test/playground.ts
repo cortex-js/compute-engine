@@ -3,15 +3,6 @@ import { ComputeEngine, Expression, InfixEntry } from '../src/compute-engine';
 const ce = new ComputeEngine();
 const engine = ce;
 
-console.log(ce.parse('a_{n}').json);
-console.log(ce.parse('a_{n+1}').json);
-console.log(ce.parse('a_{n,m}').json);
-
-ce.declare('b', 'list');
-console.log(ce.parse('b_{n}').json);
-console.log(ce.parse('b_{n+1}').json);
-console.log(ce.parse('b_{n,m}').json);
-
 console.log(ce.parse('x = \\textcolor{red}{y + 1} - z').json);
 
 console.log(ce.parse(`\\sum_{n=0,m=4}^{4,8}{n+m}`).json);

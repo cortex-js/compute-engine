@@ -136,7 +136,7 @@ describe('DELIMITERS', () => {
           [
             ErrorCode,
             'incompatible-type',
-            'list | tuple | string',
+            indexed_collection,
             function,
           ],
         ],
@@ -151,16 +151,12 @@ describe('DELIMITERS', () => {
           [
             ErrorCode,
             'incompatible-type',
-            'list | tuple | string',
+            indexed_collection,
             function,
           ],
         ],
         3,
-        [
-          Error,
-          'unexpected-argument',
-          '4',
-        ],
+        4,
       ]
     `);
     expect(ce.parse('v[3]').json).toMatchInlineSnapshot(`
@@ -175,11 +171,7 @@ describe('DELIMITERS', () => {
         At,
         v,
         3,
-        [
-          Error,
-          'unexpected-argument',
-          '4',
-        ],
+        4,
       ]
     `);
   });

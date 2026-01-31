@@ -20,6 +20,10 @@ const SYMBOL_PREFIX = {
   // are wrapped with `\\operatorname{}`.
   '\\operatorname': '',
 
+  // Text commands - extract the text content as a symbol name
+  // e.g., x_{\text{max}} -> x_max
+  '\\text': '',
+
   // These styling commands are used to change the font of a symbol
   // They may be problematic, as adjacent symbols may be merged
   // into a single symbol when used in editors, such a MathLive.

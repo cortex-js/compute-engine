@@ -2,9 +2,9 @@
 
 ### New Features
 
-- **Type-Aware Subscript Handling**: Subscripts on symbols declared as collection
-  types (list, tuple, matrix, etc.) now automatically convert to `At()` indexing
-  operations:
+- **Type-Aware Subscript Handling**: Subscripts on symbols declared as
+  collection types (list, tuple, matrix, etc.) now automatically convert to
+  `At()` indexing operations:
 
   ```javascript
   ce.declare('v', 'list<number>');
@@ -13,9 +13,10 @@
   ce.parse('v_{i,j}');  // → At(v, Tuple(i, j))
   ```
 
-  This works for both simple subscripts (`v_n`) and complex subscripts (`v_{n+1}`).
-  The type of the `At()` expression is correctly inferred from the collection's
-  element type, allowing subscripted collection elements to be used in arithmetic.
+  This works for both simple subscripts (`v_n`) and complex subscripts
+  (`v_{n+1}`). The type of the `At()` expression is correctly inferred from the
+  collection's element type, allowing subscripted collection elements to be used
+  in arithmetic.
 
 - **Complex Subscripts in Arithmetic** (Issue #273): Subscript expressions like
   `a_{n+1}` can now be used in arithmetic operations without type errors:
@@ -26,15 +27,35 @@
   ce.parse('a_{n+1}^2');       // → Power(Subscript(a, n+1), 2)
   ```
 
-  Previously, complex subscripts would fail with "incompatible-type" errors
-  when used in arithmetic contexts.
+  Previously, complex subscripts would fail with "incompatible-type" errors when
+  used in arithmetic contexts.
 
-- **Special Functions**: Added type signatures for special mathematical functions,
-  enabling them to be used in expressions without type errors:
+- **Multi-Index `At()` Support**: The `At` function now supports multiple
+  indices for accessing nested collections (e.g., matrices):
+
+  ```javascript
+  const matrix = ce.box(['List', ['List', 2, 3, 4], ['List', 6, 7, 9]]);
+  ce.box(['At', matrix, 1, 2]).evaluate();  // → 3 (row 1, column 2)
+  ```
+
+  The signature was updated from single index to variadic:
+  `(value: indexed_collection, index: (number|string)+) -> unknown`
+
+- **Text Subscripts**: Added support for `\text{}` in subscripts, allowing
+  descriptive subscript names:
+
+  ```javascript
+  ce.parse('x_{\\text{max}}');  // → symbol "x_max"
+  ce.parse('v_{\\text{initial}}');  // → symbol "v_initial"
+  ```
+
+- **Special Functions**: Added type signatures for special mathematical
+  functions, enabling them to be used in expressions without type errors:
   - `Zeta` - Riemann zeta function ζ(s)
   - `Beta` - Euler beta function B(a,b) = Γ(a)Γ(b)/Γ(a+b)
   - `LambertW` - Lambert W function (product logarithm)
-  - `BesselJ`, `BesselY`, `BesselI`, `BesselK` - Bessel functions of first/second kind
+  - `BesselJ`, `BesselY`, `BesselI`, `BesselK` - Bessel functions of
+    first/second kind
   - `AiryAi`, `AiryBi` - Airy functions
 
   These functions now have proper signatures and can be composed with other
@@ -51,9 +72,9 @@
 ### Improvements
 
 - **Derivative Recursion Safety**: Added robust recursion protection to the
-  `differentiate()` function with a depth limit (`MAX_DIFFERENTIATION_DEPTH`)
-  to guard against pathological expressions. All recursive calls now track
-  depth and gracefully return `undefined` if the limit is exceeded.
+  `differentiate()` function with a depth limit (`MAX_DIFFERENTIATION_DEPTH`) to
+  guard against pathological expressions. All recursive calls now track depth
+  and gracefully return `undefined` if the limit is exceeded.
 
 ## 0.33.0 _2026-01-30_
 
