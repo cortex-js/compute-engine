@@ -47,9 +47,9 @@ describe('VALUE RESOLUTION FROM EQUALITY ASSUMPTIONS', () => {
   });
 });
 
-// TODO #19: Inequality Evaluation Using Assumptions
+// #19: Inequality Evaluation Using Assumptions
 // When `x > 4` is assumed, `['Greater', 'x', 0]` should evaluate to True
-describe.skip('INEQUALITY EVALUATION USING ASSUMPTIONS', () => {
+describe('INEQUALITY EVALUATION USING ASSUMPTIONS', () => {
   test(`Greater(x, 0) should be True (x > 4 assumed)`, () => {
     expect(ce.box(['Greater', 'x', 0]).evaluate().json).toEqual('True');
   });

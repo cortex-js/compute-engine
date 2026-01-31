@@ -772,54 +772,9 @@ See `requirements/DONE.md` for implementation details.
 
 ---
 
-### 19. Inequality Evaluation Using Assumptions
+### ~~19. Inequality Evaluation Using Assumptions~~ ✅ COMPLETED
 
-**Problem:** When `x > 4` is assumed, evaluating `['Greater', 'x', 0]` should
-return `True` (since x > 4 implies x > 0), but currently it returns the
-expression unchanged.
-
-**Current behavior:**
-
-```typescript
-ce.assume(ce.box(['Greater', 'x', 4]));
-ce.box(['Greater', 'x', 0]).evaluate().json  // Returns: ["Less", 0, "x"] (unchanged)
-ce.box(['Less', 'x', 0]).evaluate().json     // Returns: ["Less", "x", 0] (unchanged)
-```
-
-**Expected behavior:**
-
-```typescript
-ce.assume(ce.box(['Greater', 'x', 4]));
-ce.box(['Greater', 'x', 0]).evaluate().json  // Should return: "True"
-ce.box(['Less', 'x', 0]).evaluate().json     // Should return: "False"
-ce.box(['Greater', 'x', 10]).evaluate().json // Should return: undefined (can't determine)
-```
-
-**Implementation notes:**
-
-- Requires reasoning about transitive inequality relationships
-- `x > 4` implies `x > 0`, `x > 1`, `x > 2`, etc.
-- `x > 4` implies `x >= 0`, `x >= 4`
-- Combined with equality assumptions: `one = 1` should make `one > 0` evaluate
-  to True
-- This is related to but distinct from sign-based simplification (which already
-  works)
-
-**Algorithm sketch:**
-
-1. When evaluating `Greater(x, c)`, check if there's an assumption
-   `Greater(x, k)` where `k >= c`
-2. When evaluating `Less(x, c)`, check if there's an assumption `Greater(x, k)`
-   where `k >= c` (returns False)
-3. Handle all inequality operators: Greater, GreaterEqual, Less, LessEqual
-
-**Files to investigate:**
-
-- `src/compute-engine/library/relational-operator.ts` - Inequality evaluation
-- `src/compute-engine/assume.ts` - Assumption querying
-
-**Tests:** `test/compute-engine/assumptions.test.ts` - "INEQUALITY EVALUATION
-USING ASSUMPTIONS"
+See `requirements/DONE.md` for implementation details.
 
 ---
 
@@ -909,6 +864,18 @@ ce.box('one').type.toString()  // Should return: "integer" (equal to integer lit
 
 **Tests:** `test/compute-engine/assumptions.test.ts` - "TYPE INFERENCE FROM
 ASSUMPTIONS"
+
+---
+
+### ~~24. BUG: forget() Doesn't Clear Assumed Values~~ ✅ FIXED
+
+See `requirements/DONE.md` for implementation details.
+
+---
+
+### ~~25. BUG: Scoped Assumptions Don't Clean Up on popScope()~~ ✅ FIXED
+
+See `requirements/DONE.md` for implementation details.
 
 ---
 
