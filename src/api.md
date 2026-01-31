@@ -3380,6 +3380,7 @@ type ValueDefinition = BaseDefinition & {
   neq: (a) => boolean | undefined;
   cmp: (a) => "=" | ">" | "<" | undefined;
   collection: CollectionHandlers;
+  subscriptEvaluate: (subscript, options) => BoxedExpression | undefined;
 };
 ```
 
@@ -3408,6 +3409,259 @@ value:
 `value` can be a JS function since for some constants, such as
 `Pi`, the actual value depends on the `precision` setting of the
 `ComputeEngine` and possible other environment settings
+
+#### ValueDefinition.subscriptEvaluate()?
+
+```ts
+optional subscriptEvaluate: (subscript, options) => BoxedExpression | undefined;
+```
+
+Custom evaluation handler for subscripted expressions of this symbol.
+Called when evaluating `Subscript(symbol, index)`.
+
+###### subscript
+
+[`BoxedExpression`](#boxedexpression)
+
+The subscript expression (already evaluated)
+
+###### options
+
+Contains the compute engine and evaluation options
+
+####### engine
+
+`ComputeEngine`
+
+####### numericApproximation?
+
+`boolean`
+
+</MemberCard>
+
+### SequenceDefinition
+
+Definition for a sequence declared with `ce.declareSequence()`.
+
+A sequence is defined by base cases and a recurrence relation.
+
+#### Example
+
+```typescript
+// Fibonacci sequence
+ce.declareSequence('F', {
+  base: { 0: 0, 1: 1 },
+  recurrence: 'F_{n-1} + F_{n-2}',
+});
+ce.parse('F_{10}').evaluate();  // → 55
+```
+
+<MemberCard>
+
+##### SequenceDefinition.variable?
+
+```ts
+optional variable: string;
+```
+
+Index variable name, default 'n'
+
+</MemberCard>
+
+<MemberCard>
+
+##### SequenceDefinition.base
+
+```ts
+base: Record<number, number | BoxedExpression>;
+```
+
+Base cases as index → value mapping
+
+</MemberCard>
+
+<MemberCard>
+
+##### SequenceDefinition.recurrence
+
+```ts
+recurrence: string | BoxedExpression;
+```
+
+Recurrence relation as LaTeX string or BoxedExpression
+
+</MemberCard>
+
+<MemberCard>
+
+##### SequenceDefinition.memoize?
+
+```ts
+optional memoize: boolean;
+```
+
+Whether to memoize computed values (default: true)
+
+</MemberCard>
+
+<MemberCard>
+
+##### SequenceDefinition.domain?
+
+```ts
+optional domain: {
+  min: number;
+  max: number;
+};
+```
+
+Valid index domain constraints
+
+</MemberCard>
+
+### SequenceStatus
+
+Status of a sequence definition.
+
+<MemberCard>
+
+##### SequenceStatus.status
+
+```ts
+status: "complete" | "pending" | "not-a-sequence";
+```
+
+Status of the sequence:
+- 'complete': Both base case(s) and recurrence defined
+- 'pending': Waiting for base case(s) or recurrence
+- 'not-a-sequence': Symbol is not a sequence
+
+</MemberCard>
+
+<MemberCard>
+
+##### SequenceStatus.hasBase
+
+```ts
+hasBase: boolean;
+```
+
+Whether at least one base case is defined
+
+</MemberCard>
+
+<MemberCard>
+
+##### SequenceStatus.hasRecurrence
+
+```ts
+hasRecurrence: boolean;
+```
+
+Whether a recurrence relation is defined
+
+</MemberCard>
+
+<MemberCard>
+
+##### SequenceStatus.baseIndices
+
+```ts
+baseIndices: number[];
+```
+
+Indices of defined base cases (e.g., [0, 1] for Fibonacci)
+
+</MemberCard>
+
+<MemberCard>
+
+##### SequenceStatus.variable?
+
+```ts
+optional variable: string;
+```
+
+Index variable name if recurrence is defined
+
+</MemberCard>
+
+### SequenceInfo
+
+Information about a defined sequence for introspection.
+
+<MemberCard>
+
+##### SequenceInfo.name
+
+```ts
+name: string;
+```
+
+The sequence name
+
+</MemberCard>
+
+<MemberCard>
+
+##### SequenceInfo.variable
+
+```ts
+variable: string;
+```
+
+Index variable name (e.g., 'n')
+
+</MemberCard>
+
+<MemberCard>
+
+##### SequenceInfo.baseIndices
+
+```ts
+baseIndices: number[];
+```
+
+Base case indices
+
+</MemberCard>
+
+<MemberCard>
+
+##### SequenceInfo.memoize
+
+```ts
+memoize: boolean;
+```
+
+Whether memoization is enabled
+
+</MemberCard>
+
+<MemberCard>
+
+##### SequenceInfo.domain
+
+```ts
+domain: {
+  min: number;
+  max: number;
+};
+```
+
+Domain constraints
+
+</MemberCard>
+
+<MemberCard>
+
+##### SequenceInfo.cacheSize
+
+```ts
+cacheSize: number;
+```
+
+Number of cached values
 
 </MemberCard>
 
@@ -4134,6 +4388,19 @@ A type that is not inferred, but has been set explicitly, cannot be updated.
 ```ts
 type: BoxedType;
 ```
+
+</MemberCard>
+
+<MemberCard>
+
+##### BoxedValueDefinition.subscriptEvaluate()?
+
+```ts
+optional subscriptEvaluate: (subscript, options) => BoxedExpression;
+```
+
+Custom evaluation handler for subscripted expressions of this symbol.
+Called when evaluating `Subscript(symbol, index)`.
 
 </MemberCard>
 
@@ -4975,6 +5242,7 @@ type ParseLatexOptions = NumberFormat & {
   skipSpace: boolean;
   parseNumbers: "auto" | "rational" | "decimal" | "never";
   getSymbolType: (symbol) => BoxedType;
+  hasSubscriptEvaluate: (symbol) => boolean;
   parseUnexpectedToken: (lhs, parser) => Expression | null;
   preserveLatex: boolean;
   quantifierScope: "tight" | "loose";
@@ -5025,6 +5293,17 @@ This handler is invoked when the parser encounters a
 that has not yet been declared.
 
 The `symbol` argument is a [valid symbol](#symbols).
+
+#### ParseLatexOptions.hasSubscriptEvaluate()?
+
+```ts
+optional hasSubscriptEvaluate: (symbol) => boolean;
+```
+
+This handler is invoked when the parser needs to determine if a symbol
+has a custom subscript evaluation handler. If true, subscripts on this
+symbol will be kept as `Subscript` expressions rather than being absorbed
+into a compound symbol name.
 
 #### ParseLatexOptions.parseUnexpectedToken()
 
@@ -5117,7 +5396,7 @@ LaTeX dictionary entries.
 ##### Parser.options
 
 ```ts
-readonly options: Required<ParseLatexOptions>;
+readonly options: Readonly<ParseLatexOptions>;
 ```
 
 </MemberCard>
@@ -5184,6 +5463,22 @@ Return the next token, without advancing the index
 ```ts
 getSymbolType(id): BoxedType
 ```
+
+####### id
+
+`string`
+
+</MemberCard>
+
+<MemberCard>
+
+##### Parser.hasSubscriptEvaluate()
+
+```ts
+hasSubscriptEvaluate(id): boolean
+```
+
+Check if a symbol has a custom subscript evaluation handler.
 
 ####### id
 
@@ -6730,6 +7025,112 @@ bignum(value): Decimal
 ####### value
 
 `string` | `number` | `bigint` | `Decimal`
+
+</MemberCard>
+
+## OEIS
+
+### OEISSequenceInfo
+
+Result from an OEIS lookup operation.
+
+<MemberCard>
+
+##### OEISSequenceInfo.id
+
+```ts
+id: string;
+```
+
+OEIS sequence ID (e.g., 'A000045')
+
+</MemberCard>
+
+<MemberCard>
+
+##### OEISSequenceInfo.name
+
+```ts
+name: string;
+```
+
+Sequence name/description
+
+</MemberCard>
+
+<MemberCard>
+
+##### OEISSequenceInfo.terms
+
+```ts
+terms: number[];
+```
+
+First several terms of the sequence
+
+</MemberCard>
+
+<MemberCard>
+
+##### OEISSequenceInfo.formula?
+
+```ts
+optional formula: string;
+```
+
+Formula or recurrence (if available)
+
+</MemberCard>
+
+<MemberCard>
+
+##### OEISSequenceInfo.comments?
+
+```ts
+optional comments: string[];
+```
+
+Comments about the sequence
+
+</MemberCard>
+
+<MemberCard>
+
+##### OEISSequenceInfo.url
+
+```ts
+url: string;
+```
+
+URL to the OEIS page
+
+</MemberCard>
+
+### OEISOptions
+
+Options for OEIS operations.
+
+<MemberCard>
+
+##### OEISOptions.timeout?
+
+```ts
+optional timeout: number;
+```
+
+Request timeout in milliseconds (default: 10000)
+
+</MemberCard>
+
+<MemberCard>
+
+##### OEISOptions.maxResults?
+
+```ts
+optional maxResults: number;
+```
+
+Maximum number of results to return for lookups (default: 5)
 
 </MemberCard>
 
