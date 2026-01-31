@@ -1,6 +1,7 @@
 import { NumericValue } from '../numeric-value/types';
 import type { BoxedExpression } from '../global-types';
 import { AbstractTensor } from '../tensor/tensors';
+import { getInequalityBoundsFromAssumptions } from '../assume';
 
 /**
  * Structural equality of boxed expressions.
@@ -197,7 +198,56 @@ export function cmp(
       return undefined;
     }
 
-    if (!b.isNumberLiteral) return undefined;
+    if (!b.isNumberLiteral) {
+      // Check if b is a symbol with inequality assumptions
+      if (b.symbol) {
+        const bounds = getInequalityBoundsFromAssumptions(a.engine, b.symbol);
+        const aNum =
+          typeof a.numericValue === 'number'
+            ? a.numericValue
+            : a.numericValue?.re;
+
+        if (aNum !== undefined && Number.isFinite(aNum)) {
+          // We're comparing a (number) to b (symbol)
+          // If b has a lower bound > a, then a < b
+          if (bounds.lowerBound !== undefined) {
+            const lowerNum =
+              typeof bounds.lowerBound.numericValue === 'number'
+                ? bounds.lowerBound.numericValue
+                : bounds.lowerBound.numericValue?.re;
+
+            if (lowerNum !== undefined && Number.isFinite(lowerNum)) {
+              // b > lowerBound (if strict) or b >= lowerBound (if not strict)
+              // If lowerBound > a, then b > a, so a < b
+              if (lowerNum > aNum) return '<';
+              // If lowerBound = a and strict (b > a), then a < b
+              if (lowerNum === aNum && bounds.lowerStrict) return '<';
+              // If lowerBound = a and not strict (b >= a), then a <= b
+              if (lowerNum === aNum && !bounds.lowerStrict) return '<=';
+            }
+          }
+
+          // If b has an upper bound < a, then a > b
+          if (bounds.upperBound !== undefined) {
+            const upperNum =
+              typeof bounds.upperBound.numericValue === 'number'
+                ? bounds.upperBound.numericValue
+                : bounds.upperBound.numericValue?.re;
+
+            if (upperNum !== undefined && Number.isFinite(upperNum)) {
+              // b < upperBound (if strict) or b <= upperBound (if not strict)
+              // If upperBound < a, then b < a, so a > b
+              if (upperNum < aNum) return '>';
+              // If upperBound = a and strict (b < a), then a > b
+              if (upperNum === aNum && bounds.upperStrict) return '>';
+              // If upperBound = a and not strict (b <= a), then a >= b
+              if (upperNum === aNum && !bounds.upperStrict) return '>=';
+            }
+          }
+        }
+      }
+      return undefined;
+    }
 
     const av = a.numericValue!;
     const bv = b.numericValue! as NumericValue;
@@ -209,7 +259,50 @@ export function cmp(
     return av.eq(bv) ? '=' : av.lt(bv) ? '<' : '>';
   }
 
-  if (typeof b === 'number') return undefined;
+  if (typeof b === 'number') {
+    // Check if a is a symbol with inequality assumptions
+    if (a.symbol) {
+      const bounds = getInequalityBoundsFromAssumptions(a.engine, a.symbol);
+
+      // We're comparing a (symbol) to b (number)
+      // If a has a lower bound >= b, then a > b (or a >= b)
+      if (bounds.lowerBound !== undefined) {
+        const lowerNum =
+          typeof bounds.lowerBound.numericValue === 'number'
+            ? bounds.lowerBound.numericValue
+            : bounds.lowerBound.numericValue?.re;
+
+        if (lowerNum !== undefined && Number.isFinite(lowerNum)) {
+          // a > lowerBound (if strict) or a >= lowerBound (if not strict)
+          // If lowerBound > b, then a > b
+          if (lowerNum > b) return '>';
+          // If lowerBound = b and strict (a > b), then a > b
+          if (lowerNum === b && bounds.lowerStrict) return '>';
+          // If lowerBound = b and not strict (a >= b), then a >= b
+          if (lowerNum === b && !bounds.lowerStrict) return '>=';
+        }
+      }
+
+      // If a has an upper bound <= b, then a < b (or a <= b)
+      if (bounds.upperBound !== undefined) {
+        const upperNum =
+          typeof bounds.upperBound.numericValue === 'number'
+            ? bounds.upperBound.numericValue
+            : bounds.upperBound.numericValue?.re;
+
+        if (upperNum !== undefined && Number.isFinite(upperNum)) {
+          // a < upperBound (if strict) or a <= upperBound (if not strict)
+          // If upperBound < b, then a < b
+          if (upperNum < b) return '<';
+          // If upperBound = b and strict (a < b), then a < b
+          if (upperNum === b && bounds.upperStrict) return '<';
+          // If upperBound = b and not strict (a <= b), then a <= b
+          if (upperNum === b && !bounds.upperStrict) return '<=';
+        }
+      }
+    }
+    return undefined;
+  }
 
   //
   // Do we have at least one function expression?
@@ -248,10 +341,58 @@ export function cmp(
     if (a.symbol === b.symbol) return '=';
 
     // Symbols may have special comparision handlers
-    const cmp = a.valueDefinition?.cmp?.(b);
-    if (cmp) return cmp;
-    const eq = a.valueDefinition?.eq?.(b);
-    if (eq === true) return '=';
+    const cmpResult = a.valueDefinition?.cmp?.(b);
+    if (cmpResult) return cmpResult;
+    const eqResult = a.valueDefinition?.eq?.(b);
+    if (eqResult === true) return '=';
+
+    // Check inequality assumptions for the symbol
+    if (b.isNumberLiteral) {
+      const bounds = getInequalityBoundsFromAssumptions(a.engine, a.symbol);
+      const bNum =
+        typeof b.numericValue === 'number'
+          ? b.numericValue
+          : b.numericValue?.re;
+
+      if (bNum !== undefined && Number.isFinite(bNum)) {
+        // If symbol has a lower bound >= b, then symbol > b (or symbol >= b)
+        if (bounds.lowerBound !== undefined) {
+          const lowerNum =
+            typeof bounds.lowerBound.numericValue === 'number'
+              ? bounds.lowerBound.numericValue
+              : bounds.lowerBound.numericValue?.re;
+
+          if (lowerNum !== undefined && Number.isFinite(lowerNum)) {
+            // symbol > lowerBound (if strict) or symbol >= lowerBound (if not strict)
+            // If lowerBound > b, then symbol > b
+            if (lowerNum > bNum) return '>';
+            // If lowerBound = b and strict (symbol > b), then symbol > b
+            if (lowerNum === bNum && bounds.lowerStrict) return '>';
+            // If lowerBound = b and not strict (symbol >= b), then symbol >= b
+            if (lowerNum === bNum && !bounds.lowerStrict) return '>=';
+          }
+        }
+
+        // If symbol has an upper bound <= b, then symbol < b (or symbol <= b)
+        if (bounds.upperBound !== undefined) {
+          const upperNum =
+            typeof bounds.upperBound.numericValue === 'number'
+              ? bounds.upperBound.numericValue
+              : bounds.upperBound.numericValue?.re;
+
+          if (upperNum !== undefined && Number.isFinite(upperNum)) {
+            // symbol < upperBound (if strict) or symbol <= upperBound (if not strict)
+            // If upperBound < b, then symbol < b
+            if (upperNum < bNum) return '<';
+            // If upperBound = b and strict (symbol < b), then symbol < b
+            if (upperNum === bNum && bounds.upperStrict) return '<';
+            // If upperBound = b and not strict (symbol <= b), then symbol <= b
+            if (upperNum === bNum && !bounds.upperStrict) return '<=';
+          }
+        }
+      }
+    }
+
     return undefined;
   }
 

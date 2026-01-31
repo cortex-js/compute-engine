@@ -18,6 +18,21 @@
   This also fixes comparison evaluation: `Equal(symbol, assumed_value)` now
   correctly evaluates to `True` instead of staying symbolic.
 
+- **Inequality Evaluation Using Assumptions**: When an inequality assumption
+  is made (e.g., `ce.assume(['Greater', 'x', 4])`), inequality comparisons
+  can now use transitive reasoning to determine results.
+
+  ```javascript
+  ce.assume(ce.box(['Greater', 'x', 4]));
+  ce.box(['Greater', 'x', 0]).evaluate();  // → True (x > 4 > 0)
+  ce.box(['Less', 'x', 0]).evaluate();     // → False
+  ce.box('x').isGreater(0);                // → true
+  ce.box('x').isPositive;                  // → true
+  ```
+
+  This works by extracting lower/upper bounds from inequality assumptions
+  and using them during comparison operations.
+
 ### Bug Fixes
 
 - **Extraneous Root Filtering for Sqrt Equations**: Fixed an issue where solving

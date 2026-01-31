@@ -1049,3 +1049,43 @@ ce.box('one').type.matches('integer')   // → true
 **Tests enabled:**
 - `test/compute-engine/assumptions.test.ts` - Enabled "VALUE RESOLUTION FROM
   EQUALITY ASSUMPTIONS" describe block (6 tests)
+
+---
+
+### 19. Inequality Evaluation Using Assumptions ✅
+
+**IMPLEMENTED:** When inequality assumptions are made via `ce.assume(['Greater', symbol, value])`,
+comparisons can now use transitive reasoning to determine results.
+
+**Problem:** When `x > 4` was assumed, evaluating `['Greater', 'x', 0]` would return the expression
+unchanged instead of `True` (since x > 4 implies x > 0).
+
+**Solution:** Added a new function `getInequalityBoundsFromAssumptions` that extracts lower/upper
+bounds for a symbol from inequality assumptions. The bounds are then used in the `cmp` function
+to determine comparison results.
+
+**Key insight:** Assumptions are normalized to forms like `Less(Add(Negate(x), k), 0)` (meaning
+`k - x < 0`, i.e., `x > k`). The implementation parses these normalized forms to extract bounds.
+
+**Examples that now work:**
+```typescript
+ce.assume(ce.box(['Greater', 'x', 4]));
+ce.box(['Greater', 'x', 0]).evaluate();  // → True (x > 4 > 0)
+ce.box(['Less', 'x', 0]).evaluate();     // → False
+ce.box('x').isGreater(0);                // → true
+ce.box('x').isGreater(4);                // → true (strict inequality)
+ce.box('x').isGreater(5);                // → undefined (can't determine)
+ce.box('x').isPositive;                  // → true
+
+ce.assume(ce.box(['Greater', 't', 0]));
+ce.box(['Greater', 't', 0]).evaluate();  // → True
+ce.box('t').isGreater(-1);               // → true
+```
+
+**Files modified:**
+- `src/compute-engine/assume.ts` - Added `getInequalityBoundsFromAssumptions()` function
+- `src/compute-engine/boxed-expression/compare.ts` - Modified `cmp()` to use bounds from assumptions
+
+**Tests enabled:**
+- `test/compute-engine/assumptions.test.ts` - Enabled "INEQUALITY EVALUATION USING ASSUMPTIONS"
+  describe block (6 tests)
