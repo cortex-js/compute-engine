@@ -914,6 +914,117 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
     latexTrigger: ['\\Gamma'],
     parse: 'Gamma',
   },
+  // Riemann zeta function - \zeta parses to Zeta function when followed by arguments
+  // Note: \zeta without arguments is handled by definitions-symbols.ts as Greek letter
+  {
+    latexTrigger: ['\\zeta'],
+    kind: 'function',
+    parse: 'Zeta',
+  },
+  // Beta function - \Beta parses to Beta function when followed by arguments
+  // Note: \Beta without arguments is handled by definitions-symbols.ts as Greek letter
+  {
+    latexTrigger: ['\\Beta'],
+    kind: 'function',
+    parse: 'Beta',
+  },
+  // Lambert W function (product logarithm)
+  {
+    name: 'LambertW',
+    latexTrigger: ['\\operatorname{W}'],
+    kind: 'function',
+    serialize: (serializer, expr) =>
+      '\\operatorname{W}' + serializer.wrapArguments(expr),
+  },
+  // Bessel functions - order is first argument, value is second
+  // BesselJ(n, x) represents J_n(x)
+  {
+    name: 'BesselJ',
+    latexTrigger: ['\\operatorname{J}'],
+    kind: 'function',
+    serialize: (serializer, expr) => {
+      const order = operand(expr, 1);
+      const x = operand(expr, 2);
+      if (order !== undefined && x !== undefined) {
+        return (
+          '\\operatorname{J}_{' +
+          serializer.serialize(order) +
+          '}' +
+          serializer.wrapArguments(['BesselJ', x])
+        );
+      }
+      return '\\operatorname{J}' + serializer.wrapArguments(expr);
+    },
+  },
+  {
+    name: 'BesselY',
+    latexTrigger: ['\\operatorname{Y}'],
+    kind: 'function',
+    serialize: (serializer, expr) => {
+      const order = operand(expr, 1);
+      const x = operand(expr, 2);
+      if (order !== undefined && x !== undefined) {
+        return (
+          '\\operatorname{Y}_{' +
+          serializer.serialize(order) +
+          '}' +
+          serializer.wrapArguments(['BesselY', x])
+        );
+      }
+      return '\\operatorname{Y}' + serializer.wrapArguments(expr);
+    },
+  },
+  {
+    name: 'BesselI',
+    latexTrigger: ['\\operatorname{I}'],
+    kind: 'function',
+    serialize: (serializer, expr) => {
+      const order = operand(expr, 1);
+      const x = operand(expr, 2);
+      if (order !== undefined && x !== undefined) {
+        return (
+          '\\operatorname{I}_{' +
+          serializer.serialize(order) +
+          '}' +
+          serializer.wrapArguments(['BesselI', x])
+        );
+      }
+      return '\\operatorname{I}' + serializer.wrapArguments(expr);
+    },
+  },
+  {
+    name: 'BesselK',
+    latexTrigger: ['\\operatorname{K}'],
+    kind: 'function',
+    serialize: (serializer, expr) => {
+      const order = operand(expr, 1);
+      const x = operand(expr, 2);
+      if (order !== undefined && x !== undefined) {
+        return (
+          '\\operatorname{K}_{' +
+          serializer.serialize(order) +
+          '}' +
+          serializer.wrapArguments(['BesselK', x])
+        );
+      }
+      return '\\operatorname{K}' + serializer.wrapArguments(expr);
+    },
+  },
+  // Airy functions
+  {
+    name: 'AiryAi',
+    latexTrigger: ['\\operatorname{Ai}'],
+    kind: 'function',
+    serialize: (serializer, expr) =>
+      '\\operatorname{Ai}' + serializer.wrapArguments(expr),
+  },
+  {
+    name: 'AiryBi',
+    latexTrigger: ['\\operatorname{Bi}'],
+    kind: 'function',
+    serialize: (serializer, expr) =>
+      '\\operatorname{Bi}' + serializer.wrapArguments(expr),
+  },
   {
     name: 'GCD',
     latexTrigger: ['\\gcd'], // command from amsmath package

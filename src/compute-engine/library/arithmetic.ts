@@ -540,6 +540,102 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       // Numerical evaluation not yet implemented
     },
 
+    // Riemann zeta function ζ(s) = Σ_{n=1}^∞ 1/n^s
+    // Converges for Re(s) > 1, analytically continued elsewhere
+    Zeta: {
+      description: 'Riemann zeta function',
+      wikidata: 'Q187235',
+      complexity: 8500,
+      broadcastable: true,
+      signature: '(number) -> number',
+      // Numerical evaluation not yet implemented
+    },
+
+    // Beta function B(a,b) = Γ(a)Γ(b)/Γ(a+b) = ∫₀¹ t^(a-1)(1-t)^(b-1) dt
+    Beta: {
+      description: 'Euler beta function',
+      wikidata: 'Q189062',
+      complexity: 8200,
+      broadcastable: true,
+      signature: '(number, number) -> number',
+      // Numerical evaluation not yet implemented
+    },
+
+    // Lambert W function: W(x)·e^(W(x)) = x
+    // Also known as the product logarithm or omega function
+    LambertW: {
+      description: 'Lambert W function (product logarithm)',
+      wikidata: 'Q429963',
+      complexity: 8300,
+      broadcastable: true,
+      signature: '(number) -> number',
+      // Numerical evaluation not yet implemented
+    },
+
+    // Bessel function of the first kind J_n(x)
+    // Solution to Bessel's differential equation that is finite at the origin
+    BesselJ: {
+      description: 'Bessel function of the first kind',
+      wikidata: 'Q627488',
+      complexity: 8500,
+      broadcastable: true,
+      signature: '(order: number, number) -> number',
+      // Numerical evaluation not yet implemented
+    },
+
+    // Bessel function of the second kind Y_n(x)
+    // Also known as Neumann function or Weber function
+    BesselY: {
+      description: 'Bessel function of the second kind (Neumann function)',
+      wikidata: 'Q627488',
+      complexity: 8500,
+      broadcastable: true,
+      signature: '(order: number, number) -> number',
+      // Numerical evaluation not yet implemented
+    },
+
+    // Modified Bessel function of the first kind I_n(x)
+    BesselI: {
+      description: 'Modified Bessel function of the first kind',
+      wikidata: 'Q627488',
+      complexity: 8500,
+      broadcastable: true,
+      signature: '(order: number, number) -> number',
+      // Numerical evaluation not yet implemented
+    },
+
+    // Modified Bessel function of the second kind K_n(x)
+    // Also known as Macdonald function
+    BesselK: {
+      description: 'Modified Bessel function of the second kind (Macdonald function)',
+      wikidata: 'Q627488',
+      complexity: 8500,
+      broadcastable: true,
+      signature: '(order: number, number) -> number',
+      // Numerical evaluation not yet implemented
+    },
+
+    // Airy function of the first kind Ai(x)
+    // Solution to Airy differential equation y'' - xy = 0
+    AiryAi: {
+      description: 'Airy function of the first kind',
+      wikidata: 'Q403629',
+      complexity: 8400,
+      broadcastable: true,
+      signature: '(number) -> number',
+      // Numerical evaluation not yet implemented
+    },
+
+    // Airy function of the second kind Bi(x)
+    AiryBi: {
+      description: 'Airy function of the second kind',
+      wikidata: 'Q403629',
+      complexity: 8400,
+      broadcastable: true,
+      signature: '(number) -> number',
+      // Numerical evaluation not yet implemented
+    },
+
     Ln: {
       description: 'Natural Logarithm',
       wikidata: 'Q204037',

@@ -1471,3 +1471,98 @@ describe('FACTOR', () => {
         .toString()
     ).toMatchInlineSnapshot(`3sqrt(3) * x`));
 });
+
+// Tests for special functions type signatures (Issue #1 from TODO.md)
+// These functions now have proper type signatures, allowing them to be used
+// in expressions without type errors.
+describe('SPECIAL FUNCTIONS TYPE SIGNATURES', () => {
+  // Single-argument special functions
+  test('Zeta function can be used in expressions', () => {
+    const expr = ce.box(['Add', 1, ['Zeta', 'x']]);
+    expect(expr.isValid).toBe(true);
+    expect(expr.toString()).toMatchInlineSnapshot(`Zeta(x) + 1`);
+  });
+
+  test('LambertW function can be used in expressions', () => {
+    const expr = ce.box(['Add', 1, ['LambertW', 'x']]);
+    expect(expr.isValid).toBe(true);
+    expect(expr.toString()).toMatchInlineSnapshot(`LambertW(x) + 1`);
+  });
+
+  test('AiryAi function can be used in expressions', () => {
+    const expr = ce.box(['Add', 1, ['AiryAi', 'x']]);
+    expect(expr.isValid).toBe(true);
+    expect(expr.toString()).toMatchInlineSnapshot(`AiryAi(x) + 1`);
+  });
+
+  test('AiryBi function can be used in expressions', () => {
+    const expr = ce.box(['Add', 1, ['AiryBi', 'x']]);
+    expect(expr.isValid).toBe(true);
+    expect(expr.toString()).toMatchInlineSnapshot(`AiryBi(x) + 1`);
+  });
+
+  // Two-argument special functions
+  test('Beta function can be used in expressions', () => {
+    const expr = ce.box(['Add', 1, ['Beta', 'a', 'b']]);
+    expect(expr.isValid).toBe(true);
+    expect(expr.toString()).toMatchInlineSnapshot(`Beta(a, b) + 1`);
+  });
+
+  // Bessel functions (order, value)
+  test('BesselJ function can be used in expressions', () => {
+    const expr = ce.box(['Add', 1, ['BesselJ', 0, 'x']]);
+    expect(expr.isValid).toBe(true);
+    expect(expr.toString()).toMatchInlineSnapshot(`BesselJ(0, x) + 1`);
+  });
+
+  test('BesselY function can be used in expressions', () => {
+    const expr = ce.box(['Add', 1, ['BesselY', 1, 'x']]);
+    expect(expr.isValid).toBe(true);
+    expect(expr.toString()).toMatchInlineSnapshot(`BesselY(1, x) + 1`);
+  });
+
+  test('BesselI function can be used in expressions', () => {
+    const expr = ce.box(['Add', 1, ['BesselI', 2, 'x']]);
+    expect(expr.isValid).toBe(true);
+    expect(expr.toString()).toMatchInlineSnapshot(`BesselI(2, x) + 1`);
+  });
+
+  test('BesselK function can be used in expressions', () => {
+    const expr = ce.box(['Add', 1, ['BesselK', 0, 'x']]);
+    expect(expr.isValid).toBe(true);
+    expect(expr.toString()).toMatchInlineSnapshot(`BesselK(0, x) + 1`);
+  });
+
+  // Test that these functions work with symbolic order for Bessel
+  test('BesselJ with symbolic order', () => {
+    const expr = ce.box(['BesselJ', 'n', 'x']);
+    expect(expr.isValid).toBe(true);
+    expect(expr.toString()).toMatchInlineSnapshot(`BesselJ(n, x)`);
+  });
+
+  // Test composition with other functions
+  test('Special functions can be composed', () => {
+    const expr = ce.box(['Multiply', ['Zeta', 2], ['LambertW', 'x']]);
+    expect(expr.isValid).toBe(true);
+    expect(expr.toString()).toMatchInlineSnapshot(`LambertW(x) * Zeta(2)`);
+  });
+
+  // Test that existing special functions still work
+  test('Digamma function still works', () => {
+    const expr = ce.box(['Add', 1, ['Digamma', 'x']]);
+    expect(expr.isValid).toBe(true);
+    expect(expr.toString()).toMatchInlineSnapshot(`Digamma(x) + 1`);
+  });
+
+  test('Trigamma function still works', () => {
+    const expr = ce.box(['Add', 1, ['Trigamma', 'x']]);
+    expect(expr.isValid).toBe(true);
+    expect(expr.toString()).toMatchInlineSnapshot(`Trigamma(x) + 1`);
+  });
+
+  test('PolyGamma function still works', () => {
+    const expr = ce.box(['Add', 1, ['PolyGamma', 2, 'x']]);
+    expect(expr.isValid).toBe(true);
+    expect(expr.toString()).toMatchInlineSnapshot(`PolyGamma(2, x) + 1`);
+  });
+});

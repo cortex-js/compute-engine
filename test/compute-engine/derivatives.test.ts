@@ -351,6 +351,14 @@ describe('Special function derivatives', () => {
     const result = expr.evaluate();
     expect(result.toString()).toMatchInlineSnapshot(`cos(1/2 * pi * x^2)`);
   });
+
+  it('d/dx LambertW(x) = LambertW(x)/(x*(1+LambertW(x)))', () => {
+    const expr = engine.box(['D', ['LambertW', 'x'], 'x']);
+    const result = expr.evaluate();
+    expect(result.toString()).toMatchInlineSnapshot(
+      `LambertW(x) / (x + x * LambertW(x))`
+    );
+  });
 });
 
 describe('Symbolic derivatives for unknown functions', () => {

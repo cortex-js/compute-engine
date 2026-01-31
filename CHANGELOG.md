@@ -1,5 +1,26 @@
 ## [Unreleased]
 
+### New Features
+
+- **Special Functions**: Added type signatures for special mathematical functions,
+  enabling them to be used in expressions without type errors:
+  - `Zeta` - Riemann zeta function ζ(s)
+  - `Beta` - Euler beta function B(a,b) = Γ(a)Γ(b)/Γ(a+b)
+  - `LambertW` - Lambert W function (product logarithm)
+  - `BesselJ`, `BesselY`, `BesselI`, `BesselK` - Bessel functions of first/second kind
+  - `AiryAi`, `AiryBi` - Airy functions
+
+  These functions now have proper signatures and can be composed with other
+  expressions: `ce.box(['Add', 1, ['LambertW', 'x']])` works correctly.
+
+- **LambertW Derivative**: Added derivative rule for the Lambert W function:
+  `d/dx W(x) = W(x)/(x·(1+W(x)))`
+
+- **Special Function LaTeX Parsing**: Added LaTeX parsing support for special
+  functions: `\zeta(s)`, `\Beta(a,b)`, `\operatorname{W}(x)`, Bessel functions
+  via `\operatorname{J}`, `\operatorname{Y}`, etc., and Airy functions via
+  `\operatorname{Ai}`, `\operatorname{Bi}`.
+
 ### Improvements
 
 - **Derivative Recursion Safety**: Added robust recursion protection to the

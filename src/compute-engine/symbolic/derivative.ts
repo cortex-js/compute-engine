@@ -132,9 +132,13 @@ const DERIVATIVES_TABLE = {
   // d/dx ψ(x) = ψ₁(x) (trigamma function)
   // https://en.wikipedia.org/wiki/Trigamma_function
   Digamma: ['Trigamma', '_'],
-  // Note: LambertW derivative d/dx W(x) = W(x)/(x·(1+W(x))) is mathematically correct
-  // but omitted because LambertW lacks a type signature, causing type errors.
-  //
+  // d/dx W(x) = W(x)/(x·(1+W(x))) where W is the Lambert W function
+  // https://en.wikipedia.org/wiki/Lambert_W_function#Derivative
+  LambertW: [
+    'Divide',
+    ['LambertW', '_'],
+    ['Multiply', '_', ['Add', 1, ['LambertW', '_']]],
+  ],
   // d/dx S(x) = sin(πx²/2) where S is the Fresnel sine integral
   FresnelS: ['Sin', ['Multiply', ['Divide', 'Pi', 2], ['Square', '_']]],
   // d/dx C(x) = cos(πx²/2) where C is the Fresnel cosine integral
