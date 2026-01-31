@@ -1184,3 +1184,52 @@ ce.box('y').evaluate().json;  // → 'y' (was: 10)
 
 **Tests added:**
 - `test/compute-engine/bug-fixes.test.ts` - Test for scoped assumption cleanup
+
+---
+
+### 21. Type Inference from Assumptions ✅
+
+**IMPLEMENTED:** When assumptions are made, symbol types are now correctly inferred
+based on the assumption.
+
+**Problem:** When `ce.assume(['Greater', 'x', 4])` was called, the symbol's type
+remained 'unknown'. Similarly, when `ce.assume(['Equal', 'one', 1])` was called,
+the symbol's type was 'finite_integer' instead of 'integer'.
+
+**Solution:** Modified the assumption processing to update symbol types:
+
+1. **For equality assumptions**: Added `inferTypeFromValue()` function that promotes
+   specific types to more general ones (e.g., `finite_integer` → `integer`,
+   `finite_real_number` → `real`). This is used when updating the type of a symbol
+   with an inferred type.
+
+2. **For inequality assumptions**: Updated `assumeInequality()` to set the symbol's
+   type to 'real' even when the symbol was already auto-declared with an inferred type.
+
+**Type promotion rules:**
+- `finite_integer`, `integer` → `integer`
+- `rational` → `real`
+- `finite_real_number`, `real` → `real`
+- `complex`, `imaginary` → `number`
+
+**Examples that now work:**
+```typescript
+ce.assume(ce.box(['Greater', 'x', 4]));
+ce.box('x').type.toString();  // → 'real' (was: 'unknown')
+
+ce.assume(ce.box(['Equal', 'one', 1]));
+ce.box('one').type.toString();  // → 'integer' (was: 'finite_integer' or 'unknown')
+
+ce.assume(ce.box(['Greater', 't', 0]));
+ce.box('t').type.toString();  // → 'real'
+
+ce.assume(ce.box(['Equal', 'p', 11]));
+ce.box('p').type.toString();  // → 'integer'
+```
+
+**Files modified:**
+- `src/compute-engine/assume.ts` - Added `inferTypeFromValue()`, updated type inference
+
+**Tests enabled:**
+- `test/compute-engine/assumptions.test.ts` - Enabled "TYPE INFERENCE FROM ASSUMPTIONS"
+  describe block (6 tests)

@@ -824,46 +824,9 @@ CONTRADICTION DETECTION"
 
 ---
 
-### 21. Type Inference from Assumptions
+### ~~21. Type Inference from Assumptions~~ ✅ COMPLETED
 
-**Problem:** When assumptions are made, symbol types should be inferred. For
-example, `x > 4` implies `x` is real, and `one = 1` implies `one` is an integer.
-
-**Current behavior:**
-
-```typescript
-ce.assume(ce.box(['Greater', 'x', 4]));
-ce.box('x').type.toString()  // Returns: "unknown"
-
-ce.assume(ce.box(['Equal', 'one', 1]));
-ce.box('one').type.toString()  // Returns: "unknown"
-```
-
-**Expected behavior:**
-
-```typescript
-ce.assume(ce.box(['Greater', 'x', 4]));
-ce.box('x').type.toString()  // Should return: "real" (inequalities imply real numbers)
-
-ce.assume(ce.box(['Equal', 'one', 1]));
-ce.box('one').type.toString()  // Should return: "integer" (equal to integer literal)
-```
-
-**Implementation notes:**
-
-- Inequality assumptions (`>`, `<`, `>=`, `<=`) imply the symbol is `real`
-- Equality to an integer implies the symbol is `integer`
-- Equality to a rational implies the symbol is `rational`
-- This might be handled by updating the symbol's type when an assumption is made
-- Alternatively, the type getter could query assumptions
-
-**Files to investigate:**
-
-- `src/compute-engine/assume.ts` - Assumption processing
-- `src/compute-engine/boxed-expression/boxed-symbol.ts` - Symbol type resolution
-
-**Tests:** `test/compute-engine/assumptions.test.ts` - "TYPE INFERENCE FROM
-ASSUMPTIONS"
+See `requirements/DONE.md` for implementation details.
 
 ---
 

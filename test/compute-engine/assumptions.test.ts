@@ -95,9 +95,9 @@ describe.skip('TAUTOLOGY AND CONTRADICTION DETECTION', () => {
   });
 });
 
-// TODO #21: Type Inference from Assumptions
+// #21: Type Inference from Assumptions - IMPLEMENTED
 // When assumptions are made, symbol types should be inferred
-describe.skip('TYPE INFERENCE FROM ASSUMPTIONS', () => {
+describe('TYPE INFERENCE FROM ASSUMPTIONS', () => {
   test(`x should have type real (x > 4 assumed)`, () => {
     expect(ce.box('x').type.toString()).toBe('real');
   });

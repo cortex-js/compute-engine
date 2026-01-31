@@ -33,6 +33,19 @@
   This works by extracting lower/upper bounds from inequality assumptions
   and using them during comparison operations.
 
+- **Type Inference from Assumptions**: When assumptions are made, symbol types
+  are now correctly inferred. Inequality assumptions (`>`, `<`, `>=`, `<=`) set
+  the symbol's type to `real`, and equality assumptions infer the type from the
+  value (e.g., equal to an integer means type `integer`).
+
+  ```javascript
+  ce.assume(ce.box(['Greater', 'x', 4]));
+  ce.box('x').type.toString();  // → 'real' (was: 'unknown')
+
+  ce.assume(ce.box(['Equal', 'one', 1]));
+  ce.box('one').type.toString();  // → 'integer' (was: 'unknown')
+  ```
+
 ### Bug Fixes
 
 - **forget() Now Clears Assumed Values**: Fixed an issue where `ce.forget()` did not

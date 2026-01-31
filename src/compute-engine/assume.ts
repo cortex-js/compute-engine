@@ -20,6 +20,34 @@ import { MathJsonSymbol } from '../math-json';
 import { isInequalityOperator } from './latex-syntax/utils';
 
 /**
+ * Infer a promoted type from a value expression.
+ * This promotes specific types to more general ones suitable for symbols:
+ * - finite_integer -> integer
+ * - rational -> real
+ * - finite_real_number -> real
+ * - complex/imaginary -> number
+ */
+function inferTypeFromValue(ce: ComputeEngine, value: BoxedExpression): BoxedType {
+  if (value.type.matches('integer')) {
+    // finite_integer, integer, etc. -> integer
+    return ce.type('integer');
+  }
+  if (value.type.matches('rational')) {
+    // rational -> real
+    return ce.type('real');
+  }
+  if (value.type.matches('real')) {
+    // finite_real_number, real -> real
+    return ce.type('real');
+  }
+  if (value.type.matches('complex')) {
+    // complex, imaginary -> number
+    return ce.type('number');
+  }
+  return value.type;
+}
+
+/**
  * An assumption is a predicate that is added to the current context.
  *
  * The predicate can take the form of:
@@ -239,8 +267,9 @@ function assumeEquality(proposition: BoxedExpression): AssumeResult {
     // Use _setCurrentContextValue so the value is scoped to the current context
     // and will be automatically removed when the scope is popped.
     ce._setCurrentContextValue(lhs, val);
-    // If the type was inferred, update it based on the value
-    if (def.value.inferredType) def.value.type = val.type;
+    // If the type was inferred, update it based on the value.
+    // Use inferTypeFromValue to promote specific types (e.g., finite_integer -> integer)
+    if (def.value.inferredType) def.value.type = inferTypeFromValue(ce, val);
     return 'ok';
   }
 
@@ -270,8 +299,9 @@ function assumeEquality(proposition: BoxedExpression): AssumeResult {
     // Use _setCurrentContextValue so the value is scoped to the current context
     // and will be automatically removed when the scope is popped.
     ce._setCurrentContextValue(lhs, val);
-    // If the type was inferred, update it based on the value
-    if (def.value.inferredType) def.value.type = val.type;
+    // If the type was inferred, update it based on the value.
+    // Use inferTypeFromValue to promote specific types (e.g., finite_integer -> integer)
+    if (def.value.inferredType) def.value.type = inferTypeFromValue(ce, val);
     return 'ok';
   }
 
@@ -364,10 +394,18 @@ function assumeInequality(proposition: BoxedExpression): AssumeResult {
   const unknowns = result.unknowns;
   if (unknowns.length === 0) return 'not-a-predicate';
 
-  // Case 3
+  // Case 3: single unknown - ensure the symbol has type 'real'
+  // (inequalities imply the symbol is a real number)
   if (unknowns.length === 1) {
-    if (!ce.lookupDefinition(unknowns[0]))
-      ce.declare(unknowns[0], { type: 'real' });
+    const symbol = unknowns[0];
+    const def = ce.lookupDefinition(symbol);
+    if (!def) {
+      // Symbol not defined yet - declare with type 'real'
+      ce.declare(symbol, { type: 'real' });
+    } else if (isValueDef(def) && def.value.inferredType) {
+      // Symbol was auto-declared with inferred type - update to 'real'
+      def.value.type = ce.type('real');
+    }
   }
 
   // Case 3, 4
