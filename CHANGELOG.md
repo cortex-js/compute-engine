@@ -22,6 +22,22 @@
 - **Infinity Sign Propagation**: Fixed infinity multiplication not propagating
   signs correctly. Now `∞ * (-2) = -∞` and `-∞ * 2 = -∞` as expected.
 
+- **Infinity Division**: Fixed `∞/∞` incorrectly returning `1`. Now correctly
+  returns `NaN` (indeterminate form). The `a/a → 1` simplification rule now
+  excludes infinity values.
+
+- **Logarithm of e**: Added simplification for `log(e)` → `1/ln(10)` ≈ `0.434`
+  and `log_c(e)` → `1/ln(c)` for any base `c`.
+
+- **Trigonometric Co-function Identities**: Fixed co-function identities not
+  applying to canonical form expressions. Now correctly simplifies:
+  - `sin(π/2 - x)` → `cos(x)`
+  - `cos(π/2 - x)` → `sin(x)`
+  - `tan(π/2 - x)` → `cot(x)`
+  - `cot(π/2 - x)` → `tan(x)`
+  - `sec(π/2 - x)` → `csc(x)`
+  - `csc(π/2 - x)` → `sec(x)`
+
 ### Features
 
 - **([#163](https://github.com/cortex-js/compute-engine/issues/163)) Additional

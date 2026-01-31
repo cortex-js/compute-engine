@@ -138,6 +138,15 @@ export function simplifyLog(x: BoxedExpression): RuleStep | undefined {
       return { value: ce.One, because: 'log_c(c) -> 1' };
     }
 
+    // log_c(e) -> 1/ln(c) when c ≠ e
+    // This handles log₁₀(e) -> 1/ln(10) ≈ 0.434
+    if (arg.symbol === 'ExponentialE' && logBase.symbol !== 'ExponentialE') {
+      return {
+        value: ce.One.div(ce._fn('Ln', [logBase])),
+        because: 'log_c(e) -> 1/ln(c)',
+      };
+    }
+
     // log_c(+inf) patterns
     if (arg.symbol === 'PositiveInfinity') {
       // log_c(+inf) -> +inf when c > 1

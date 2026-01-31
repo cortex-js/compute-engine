@@ -270,6 +270,7 @@ export function simplifyTrig(x: BoxedExpression): RuleStep | undefined {
     }
 
     // Co-function identities: f(π/2 - x) -> g(x)
+    // Handle both Subtract form and canonical Add form (Add(Negate(x), π/2))
     if (arg.operator === 'Subtract') {
       const left = arg.op1;
       const right = arg.op2;
@@ -289,6 +290,41 @@ export function simplifyTrig(x: BoxedExpression): RuleStep | undefined {
         if (coFunc) {
           return {
             value: ce._fn(coFunc, [right]),
+            because: `${op}(π/2 - x) -> ${coFunc}(x)`,
+          };
+        }
+      }
+    }
+
+    // Handle canonical form: Add(Negate(x), Multiply(1/2, Pi)) = π/2 - x
+    if (arg.operator === 'Add' && arg.nops === 2) {
+      const ops = arg.ops!;
+      let piOver2Term: BoxedExpression | null = null;
+      let negatedTerm: BoxedExpression | null = null;
+
+      for (const term of ops) {
+        // Check for π/2 term: Multiply(1/2, Pi) or Multiply(Rational(1,2), Pi)
+        if (term.operator === 'Multiply' && term.nops === 2) {
+          const [coef, sym] = [term.op1, term.op2];
+          if (sym?.symbol === 'Pi') {
+            // Check if coefficient is 1/2 using .re for numeric comparison
+            const coefRe = coef?.re;
+            if (typeof coefRe === 'number' && Math.abs(coefRe - 0.5) < 1e-10) {
+              piOver2Term = term;
+            }
+          }
+        }
+        // Check for negated term: Negate(x)
+        if (term.operator === 'Negate' && term.op1) {
+          negatedTerm = term.op1;
+        }
+      }
+
+      if (piOver2Term && negatedTerm) {
+        const coFunc = COFUNCTION_MAP[op];
+        if (coFunc) {
+          return {
+            value: ce._fn(coFunc, [negatedTerm]),
             because: `${op}(π/2 - x) -> ${coFunc}(x)`,
           };
         }

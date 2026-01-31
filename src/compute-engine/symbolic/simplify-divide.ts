@@ -29,9 +29,14 @@ export function simplifyDivide(x: BoxedExpression): RuleStep | undefined {
     return { value: ce.Zero, because: '0/a -> 0' };
   }
 
-  // a/a -> 1 when a ≠ 0
-  if (num.isSame(denom) && num.is(0) === false) {
+  // a/a -> 1 when a ≠ 0 and a is finite (∞/∞ is indeterminate)
+  if (num.isSame(denom) && num.is(0) === false && num.isInfinity !== true) {
     return { value: ce.One, because: 'a/a -> 1' };
+  }
+
+  // ∞/∞ -> NaN (indeterminate form)
+  if (num.isInfinity && denom.isInfinity) {
+    return { value: ce.NaN, because: 'inf/inf -> NaN' };
   }
 
   // Check if denominator is a Divide expression
