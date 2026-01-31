@@ -3,6 +3,15 @@ import { ComputeEngine, Expression, InfixEntry } from '../src/compute-engine';
 const ce = new ComputeEngine();
 const engine = ce;
 
+console.log(ce.parse('a_{n}').json);
+console.log(ce.parse('a_{n+1}').json);
+console.log(ce.parse('a_{n,m}').json);
+
+ce.declare('b', 'list');
+console.log(ce.parse('b_{n}').json);
+console.log(ce.parse('b_{n+1}').json);
+console.log(ce.parse('b_{n,m}').json);
+
 console.log(ce.parse('x = \\textcolor{red}{y + 1} - z').json);
 
 console.log(ce.parse(`\\sum_{n=0,m=4}^{4,8}{n+m}`).json);
@@ -51,7 +60,9 @@ ce.parse(
 
 // Note: In LaTeX, "D" is parsed as a user symbol, not the derivative operator.
 // Use ce.box(['D', ...]) directly for derivatives, or \frac{d}{dx} notation.
-ce.box(['D', ce.parse('\\sin(x)'), 'x']).evaluate().print();
+ce.box(['D', ce.parse('\\sin(x)'), 'x'])
+  .evaluate()
+  .print();
 
 // Should return '3^2'
 ce.parse('3\\times3', { canonical: ['Multiply'] });
@@ -309,7 +320,6 @@ expression.print();
 console.log(expression.latex);
 console.log(expression.json);
 
-
 // arcsinh does not exist, but give unexpected token error
 expression = ce.parse('|\\arcsinh(x)|').simplify();
 expression.print();
@@ -384,7 +394,6 @@ console.log(ce.parse('\\sqrt[3]{-2}').simplify().toString());
 console.log(ce.parse('\\sqrt[3]{-2}').simplify().latex);
 
 // console.log(ce.parse('2(13.1+x)<(10-5)').isEqual(ce.parse('26.2+2x<5')));
-
 
 // y powers should combine
 console.log(
@@ -543,7 +552,10 @@ ce.assign(
   ce.box(['Matrix', ['List', ['List', 'a', 'b'], ['List', 'c', 'd']]])
 );
 console.log('Symbolic matrix X.value:', ce.symbol('X').value?.toString());
-console.log('Determinant(X):', ce.box(['Determinant', 'X']).evaluate().toString());
+console.log(
+  'Determinant(X):',
+  ce.box(['Determinant', 'X']).evaluate().toString()
+);
 
 // const expr = ce.parse('x^{}');
 // console.info(expr.json);

@@ -269,7 +269,11 @@ function simplifyOperands(
       }
       // Power expressions with fractional exponents may need sign factoring
       // e.g., (-2x)^{3/5} should become -(2x)^{3/5} for correct real evaluation
-      if (x.operator === 'Power' && x.op2?.isRational === true && !x.op2.isInteger) {
+      if (
+        x.operator === 'Power' &&
+        x.op2?.isRational === true &&
+        !x.op2.isInteger
+      ) {
         return simplify(x, options).at(-1)!.value;
       }
       // Evaluate purely numeric subexpressions in all operands
@@ -304,7 +308,8 @@ function simplifyOperands(
         // Don't evaluate Power expressions that produce irrational results
         if (x.operator === 'Power') {
           if (x.op1?.symbol === 'ExponentialE') return x;
-          if (x.op2?.isRational === true && x.op2?.isInteger === false) return x;
+          if (x.op2?.isRational === true && x.op2?.isInteger === false)
+            return x;
         }
         const evaluated = x.evaluate();
         if (evaluated.isNumberLiteral) return evaluated;

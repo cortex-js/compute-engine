@@ -138,7 +138,10 @@ export function simplifyPower(x: BoxedExpression): RuleStep | undefined {
           const n = exp.sub(ce.One).div(2);
           if (n.isPositive === true) {
             return {
-              value: ce._fn('Abs', [base]).pow(n).mul(ce._fn('Sqrt', [base])),
+              value: ce
+                ._fn('Abs', [base])
+                .pow(n)
+                .mul(ce._fn('Sqrt', [base])),
               because: 'sqrt(x^{2n+1}) -> |x|^n * sqrt(x)',
             };
           }
@@ -201,9 +204,7 @@ export function simplifyPower(x: BoxedExpression): RuleStep | undefined {
         }
 
         const insideSqrt =
-          remaining.length === 1
-            ? remaining[0]
-            : ce._fn('Multiply', remaining);
+          remaining.length === 1 ? remaining[0] : ce._fn('Multiply', remaining);
 
         return {
           value: outsideSqrt.mul(ce._fn('Sqrt', [insideSqrt])),
@@ -236,7 +237,10 @@ export function simplifyPower(x: BoxedExpression): RuleStep | undefined {
         const denomN = Number(denom);
         // Both numerator and denominator odd means real root exists
         if (numN % 2 !== 0 && denomN % 2 !== 0) {
-          return { value: ce.number(-1), because: '(-1)^{p/q} -> -1 when p,q odd' };
+          return {
+            value: ce.number(-1),
+            because: '(-1)^{p/q} -> -1 when p,q odd',
+          };
         }
       }
     }
@@ -393,8 +397,7 @@ export function simplifyPower(x: BoxedExpression): RuleStep | undefined {
         const bothIntegers =
           innerExp.isInteger === true && exp.isInteger === true;
         const baseNonNeg = innerBase.isNonNegative === true;
-        const productIrrational =
-          innerExp.mul(exp).isRational === false;
+        const productIrrational = innerExp.mul(exp).isRational === false;
         const atLeastOnePositive =
           innerExp.isPositive === true || exp.isPositive === true;
 
@@ -477,10 +480,7 @@ export function simplifyPower(x: BoxedExpression): RuleStep | undefined {
     }
 
     // a / b^{-n} -> a * b^n
-    if (
-      denom.operator === 'Power' &&
-      denom.op1?.is(0) === false
-    ) {
+    if (denom.operator === 'Power' && denom.op1?.is(0) === false) {
       const base = denom.op1;
       const exp = denom.op2;
 

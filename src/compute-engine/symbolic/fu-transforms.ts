@@ -1939,12 +1939,12 @@ export function TRmorrie(expr: BoxedExpression): BoxedExpression | undefined {
 
   // Find the longest ratio-2 subsequence starting from the smallest multiplier
   // The Morrie pattern requires consecutive terms with ratio 2: a, 2a, 4a, 8a, ...
-  let morrieFactors: typeof matchingFactors = [];
+  const morrieFactors: typeof matchingFactors = [];
   let remainingCosFactors: typeof matchingFactors = [];
 
   // Build the Morrie sequence greedily
   const sorted = [...matchingFactors];
-  let currentMult = sorted[0].numericMult;
+  const currentMult = sorted[0].numericMult;
 
   if (currentMult > 0) {
     morrieFactors.push(sorted[0]);

@@ -420,7 +420,7 @@ readonly numericValue: number | NumericValue;
 Return the value of this expression, if a number literal.
 
 Note it is possible for `expr.numericValue` to be `null`, and for
-`expr.isNotZero` to be true. For example, when a symbol has been
+`expr.is(0)` to be false. For example, when a symbol has been
 defined with an assumption.
 
 Conversely, `expr.isNumber` may be true even if `expr.numericValue` is
@@ -1575,6 +1575,39 @@ To manipulate symbolically non-canonical expressions, use `expr.replace()`.
 
 <MemberCard>
 
+##### BoxedExpression.trigSimplify()
+
+```ts
+trigSimplify(): BoxedExpression
+```
+
+Apply the Fu algorithm to simplify trigonometric expressions.
+
+The Fu algorithm is a systematic approach to trigonometric simplification
+that uses transformation rules (TR1-TR22), combination transforms (CTR),
+and rule lists (RL) to reduce the number of trigonometric functions.
+
+This is equivalent to calling `simplify({ strategy: 'fu' })` but is
+more convenient for trig-heavy expressions.
+
+Reference: Fu, Hongguang, Xiuqin Zhong, and Zhenbing Zeng.
+"Automated and readable simplification of trigonometric expressions."
+Mathematical and Computer Modelling 44.11 (2006): 1169-1177.
+
+###### Example
+
+```typescript
+ce.parse('\\sin(x)\\cos(x)').trigSimplify()
+// => sin(2x)/2
+
+ce.parse('\\sin^2(x) + \\cos^2(x)').trigSimplify()
+// => 1
+```
+
+</MemberCard>
+
+<MemberCard>
+
 ##### BoxedExpression.expand()
 
 ```ts
@@ -2558,6 +2591,7 @@ type SimplifyOptions = {
      | ReadonlyArray<BoxedRule | Rule>
      | BoxedRuleSet;
   costFunction: (expr) => number;
+  strategy: "default" | "fu";
 };
 ```
 

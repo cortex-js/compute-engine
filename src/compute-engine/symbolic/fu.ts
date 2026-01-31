@@ -100,7 +100,10 @@ function tryTransform(
  * CTR1: Choose between sin²/cos² Pythagorean substitutions
  * Tries: original, TR5 (sin² -> 1-cos²), TR6 (cos² -> 1-sin²)
  */
-function CTR1(expr: BoxedExpression, measure: TrigCostFunction): BoxedExpression {
+function CTR1(
+  expr: BoxedExpression,
+  measure: TrigCostFunction
+): BoxedExpression {
   const tr5Result = tryTransform(expr, applyTR5);
   const tr6Result = tryTransform(expr, applyTR6);
 
@@ -114,7 +117,10 @@ function CTR1(expr: BoxedExpression, measure: TrigCostFunction): BoxedExpression
 /**
  * CTR2: Same as CTR1, used after TR11 in RL2
  */
-function CTR2(expr: BoxedExpression, measure: TrigCostFunction): BoxedExpression {
+function CTR2(
+  expr: BoxedExpression,
+  measure: TrigCostFunction
+): BoxedExpression {
   return CTR1(expr, measure);
 }
 
@@ -122,7 +128,10 @@ function CTR2(expr: BoxedExpression, measure: TrigCostFunction): BoxedExpression
  * CTR3: Try product-to-sum conversion and back
  * Tries: original, TR8 (product-to-sum), TR8 then TR10i (contract angles)
  */
-function CTR3(expr: BoxedExpression, measure: TrigCostFunction): BoxedExpression {
+function CTR3(
+  expr: BoxedExpression,
+  measure: TrigCostFunction
+): BoxedExpression {
   const tr8Result = tryTransform(expr, applyTR8);
 
   const candidates = [expr];
@@ -140,7 +149,10 @@ function CTR3(expr: BoxedExpression, measure: TrigCostFunction): BoxedExpression
  * CTR4: Try angle contraction
  * Tries: original, TR10i (angle contraction)
  */
-function CTR4(expr: BoxedExpression, measure: TrigCostFunction): BoxedExpression {
+function CTR4(
+  expr: BoxedExpression,
+  measure: TrigCostFunction
+): BoxedExpression {
   const tr10iResult = tryTransform(expr, applyTR10i);
 
   const candidates = [expr];
@@ -158,7 +170,10 @@ function CTR4(expr: BoxedExpression, measure: TrigCostFunction): BoxedExpression
  * RL1: For expressions containing tan/cot
  * Applies tan addition formula and tan*tan/cot*cot identities
  */
-function RL1(expr: BoxedExpression, measure: TrigCostFunction): BoxedExpression {
+function RL1(
+  expr: BoxedExpression,
+  measure: TrigCostFunction
+): BoxedExpression {
   // Apply TR12 (tan addition) then TR13 (tan products)
   let result = applyTR12(expr);
   result = applyTR13(result);
@@ -169,7 +184,10 @@ function RL1(expr: BoxedExpression, measure: TrigCostFunction): BoxedExpression 
  * RL2: For expressions containing sin/cos
  * The main simplification sequence for sin/cos expressions.
  */
-function RL2(expr: BoxedExpression, measure: TrigCostFunction): BoxedExpression {
+function RL2(
+  expr: BoxedExpression,
+  measure: TrigCostFunction
+): BoxedExpression {
   let result = expr;
 
   // Expand angles, then double angles, apply Pythagorean, power reduction, double angles again

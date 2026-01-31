@@ -48,40 +48,64 @@ export function simplifyInfinity(x: BoxedExpression): RuleStep | undefined {
     // PositiveInfinity * x
     if (aIsPosInf) {
       if (b.isPositive === true) {
-        return { value: ce.PositiveInfinity, because: '+inf * positive -> +inf' };
+        return {
+          value: ce.PositiveInfinity,
+          because: '+inf * positive -> +inf',
+        };
       }
       if (b.isNegative === true) {
-        return { value: ce.NegativeInfinity, because: '+inf * negative -> -inf' };
+        return {
+          value: ce.NegativeInfinity,
+          because: '+inf * negative -> -inf',
+        };
       }
     }
 
     // x * NegativeInfinity
     if (bIsNegInf) {
       if (a.isPositive === true) {
-        return { value: ce.NegativeInfinity, because: 'positive * -inf -> -inf' };
+        return {
+          value: ce.NegativeInfinity,
+          because: 'positive * -inf -> -inf',
+        };
       }
       if (a.isNegative === true) {
-        return { value: ce.PositiveInfinity, because: 'negative * -inf -> +inf' };
+        return {
+          value: ce.PositiveInfinity,
+          because: 'negative * -inf -> +inf',
+        };
       }
     }
 
     // NegativeInfinity * x
     if (aIsNegInf) {
       if (b.isPositive === true) {
-        return { value: ce.NegativeInfinity, because: '-inf * positive -> -inf' };
+        return {
+          value: ce.NegativeInfinity,
+          because: '-inf * positive -> -inf',
+        };
       }
       if (b.isNegative === true) {
-        return { value: ce.PositiveInfinity, because: '-inf * negative -> +inf' };
+        return {
+          value: ce.PositiveInfinity,
+          because: '-inf * negative -> +inf',
+        };
       }
     }
 
     // x * PositiveInfinity
     if (bIsPosInf) {
       if (a.isPositive === true) {
-        return { value: ce.PositiveInfinity, because: 'positive * +inf -> +inf' };
+        return {
+          value: ce.PositiveInfinity,
+          because: 'positive * +inf -> +inf',
+        };
       }
       if (a.isNegative === true) {
-        return { value: ce.NegativeInfinity, because: 'negative * +inf -> -inf' };
+        return {
+          value: ce.NegativeInfinity,
+          because: 'negative * +inf -> -inf',
+        };
       }
     }
   }
@@ -106,20 +130,32 @@ export function simplifyInfinity(x: BoxedExpression): RuleStep | undefined {
       // PositiveInfinity / x
       if (numIsPosInf) {
         if (denom.isPositive === true && denom.isFinite === true) {
-          return { value: ce.PositiveInfinity, because: '+inf / positive -> +inf' };
+          return {
+            value: ce.PositiveInfinity,
+            because: '+inf / positive -> +inf',
+          };
         }
         if (denom.isNegative === true && denom.isFinite === true) {
-          return { value: ce.NegativeInfinity, because: '+inf / negative -> -inf' };
+          return {
+            value: ce.NegativeInfinity,
+            because: '+inf / negative -> -inf',
+          };
         }
       }
 
       // NegativeInfinity / x
       if (numIsNegInf) {
         if (denom.isPositive === true && denom.isFinite === true) {
-          return { value: ce.NegativeInfinity, because: '-inf / positive -> -inf' };
+          return {
+            value: ce.NegativeInfinity,
+            because: '-inf / positive -> -inf',
+          };
         }
         if (denom.isNegative === true && denom.isFinite === true) {
-          return { value: ce.PositiveInfinity, because: '-inf / negative -> +inf' };
+          return {
+            value: ce.PositiveInfinity,
+            because: '-inf / negative -> +inf',
+          };
         }
       }
     }
@@ -158,7 +194,10 @@ export function simplifyInfinity(x: BoxedExpression): RuleStep | undefined {
       if (expIsPosInf) {
         // a^+inf -> +inf when a > 1
         if (base.isGreater(1) === true) {
-          return { value: ce.PositiveInfinity, because: 'a^+inf -> +inf when a > 1' };
+          return {
+            value: ce.PositiveInfinity,
+            because: 'a^+inf -> +inf when a > 1',
+          };
         }
         // a^+inf -> 0 when 0 < a < 1
         if (base.isPositive === true && base.isLess(1) === true) {
@@ -174,7 +213,10 @@ export function simplifyInfinity(x: BoxedExpression): RuleStep | undefined {
         }
         // a^-inf -> +inf when 0 < a < 1
         if (base.isPositive === true && base.isLess(1) === true) {
-          return { value: ce.PositiveInfinity, because: 'a^-inf -> +inf when 0 < a < 1' };
+          return {
+            value: ce.PositiveInfinity,
+            because: 'a^-inf -> +inf when 0 < a < 1',
+          };
         }
       }
 

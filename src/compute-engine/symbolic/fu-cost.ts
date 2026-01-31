@@ -7,14 +7,7 @@
 
 import type { BoxedExpression } from '../global-types';
 
-const TRIG_FUNCS = new Set([
-  'Sin',
-  'Cos',
-  'Tan',
-  'Cot',
-  'Sec',
-  'Csc',
-]);
+const TRIG_FUNCS = new Set(['Sin', 'Cos', 'Tan', 'Cot', 'Sec', 'Csc']);
 
 /**
  * Count the number of trigonometric function occurrences in an expression.

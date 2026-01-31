@@ -255,22 +255,17 @@ export const SIMPLIFY_RULES: Rule[] = [
         (b.operator === 'Power' &&
           b.op2?.is(2) &&
           ['Sin', 'Cos'].includes(b.op1?.operator || ''));
-      const hasCoefficient =
-        a.isNumberLiteral || b.isNumberLiteral;
+      const hasCoefficient = a.isNumberLiteral || b.isNumberLiteral;
       if (hasTrigSquared && hasCoefficient) return undefined;
 
       // Check for sin(x) * cos(x) pattern
-      const hasSin =
-        a.operator === 'Sin' || b.operator === 'Sin';
-      const hasCos =
-        a.operator === 'Cos' || b.operator === 'Cos';
+      const hasSin = a.operator === 'Sin' || b.operator === 'Sin';
+      const hasCos = a.operator === 'Cos' || b.operator === 'Cos';
       if (hasSin && hasCos) return undefined;
 
       // Check for tan(x) * cot(x) pattern
-      const hasTan =
-        a.operator === 'Tan' || b.operator === 'Tan';
-      const hasCot =
-        a.operator === 'Cot' || b.operator === 'Cot';
+      const hasTan = a.operator === 'Tan' || b.operator === 'Tan';
+      const hasCot = a.operator === 'Cot' || b.operator === 'Cot';
       if (hasTan && hasCot) return undefined;
     }
 
@@ -327,7 +322,8 @@ export const SIMPLIFY_RULES: Rule[] = [
       // Also skip if one is a power and the other is the same base
       // e.g., e^x / e -> e^{x-1}
       if (num.operator === 'Power' && num.op1?.isSame(denom)) return undefined;
-      if (denom.operator === 'Power' && denom.op1?.isSame(num)) return undefined;
+      if (denom.operator === 'Power' && denom.op1?.isSame(num))
+        return undefined;
 
       return { value: num.div(denom), because: 'division' };
     }

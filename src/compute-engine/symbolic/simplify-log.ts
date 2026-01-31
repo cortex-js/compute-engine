@@ -60,10 +60,7 @@ export function simplifyLog(x: BoxedExpression): RuleStep | undefined {
     }
 
     // ln(e^x) -> x
-    if (
-      arg.operator === 'Power' &&
-      arg.op1?.symbol === 'ExponentialE'
-    ) {
+    if (arg.operator === 'Power' && arg.op1?.symbol === 'ExponentialE') {
       return { value: arg.op2, because: 'ln(e^x) -> x' };
     }
 
@@ -134,7 +131,7 @@ export function simplifyLog(x: BoxedExpression): RuleStep | undefined {
     if (!arg) return undefined;
 
     // Default base is 10 if not specified (base may be Nothing symbol)
-    const logBase = (!base || base.symbol === 'Nothing') ? ce.number(10) : base;
+    const logBase = !base || base.symbol === 'Nothing' ? ce.number(10) : base;
 
     // log_c(x) -> NaN when c is 0 or 1
     if (logBase.is(0) || logBase.is(1)) {
@@ -164,11 +161,17 @@ export function simplifyLog(x: BoxedExpression): RuleStep | undefined {
     if (arg.symbol === 'PositiveInfinity') {
       // log_c(+inf) -> +inf when c > 1
       if (logBase.isGreater(1) === true) {
-        return { value: ce.PositiveInfinity, because: 'log_c(+inf) -> +inf when c > 1' };
+        return {
+          value: ce.PositiveInfinity,
+          because: 'log_c(+inf) -> +inf when c > 1',
+        };
       }
       // log_c(+inf) -> -inf when 0 < c < 1
       if (logBase.isLess(1) === true && logBase.isPositive === true) {
-        return { value: ce.NegativeInfinity, because: 'log_c(+inf) -> -inf when 0 < c < 1' };
+        return {
+          value: ce.NegativeInfinity,
+          because: 'log_c(+inf) -> -inf when 0 < c < 1',
+        };
       }
     }
 
@@ -183,10 +186,7 @@ export function simplifyLog(x: BoxedExpression): RuleStep | undefined {
     }
 
     // log_c(c^x) -> x
-    if (
-      arg.operator === 'Power' &&
-      arg.op1?.isSame(logBase)
-    ) {
+    if (arg.operator === 'Power' && arg.op1?.isSame(logBase)) {
       return { value: arg.op2, because: 'log_c(c^x) -> x' };
     }
 
@@ -246,10 +246,7 @@ export function simplifyLog(x: BoxedExpression): RuleStep | undefined {
     if (arg.operator === 'Multiply' && arg.ops) {
       for (let i = 0; i < arg.ops.length; i++) {
         const factor = arg.ops[i];
-        if (
-          factor.operator === 'Power' &&
-          factor.op1?.isSame(logBase)
-        ) {
+        if (factor.operator === 'Power' && factor.op1?.isSame(logBase)) {
           const exp = factor.op2;
           const otherFactors = arg.ops.filter((_, idx) => idx !== i);
           const remaining =
@@ -310,10 +307,7 @@ export function simplifyLog(x: BoxedExpression): RuleStep | undefined {
     }
 
     // Change of base: log_{1/c}(a) -> -log_c(a)
-    if (
-      logBase.operator === 'Divide' &&
-      logBase.op1?.is(1)
-    ) {
+    if (logBase.operator === 'Divide' && logBase.op1?.is(1)) {
       return {
         value: ce._fn('Log', [arg, logBase.op2]).neg(),
         because: 'log_{1/c}(a) -> -log_c(a)',
@@ -357,11 +351,7 @@ export function simplifyLog(x: BoxedExpression): RuleStep | undefined {
     }
 
     // e^(ln(x) + y) -> x * e^y
-    if (
-      base.symbol === 'ExponentialE' &&
-      exp.operator === 'Add' &&
-      exp.ops
-    ) {
+    if (base.symbol === 'ExponentialE' && exp.operator === 'Add' && exp.ops) {
       for (let i = 0; i < exp.ops.length; i++) {
         const term = exp.ops[i];
         if (term.operator === 'Ln') {

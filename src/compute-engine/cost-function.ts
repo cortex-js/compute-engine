@@ -145,8 +145,7 @@ export function costFunction(expr: BoxedExpression): number {
       return expCost + costFunction(base);
     }
     return expCost;
-  }
-  else if (name === 'Root') {
+  } else if (name === 'Root') {
     // Root(x^n, n) should have comparable cost to |x|
     // Use a base cost similar to Sqrt
     nameCost = 5;

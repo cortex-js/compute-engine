@@ -19,14 +19,7 @@ import { add } from '../boxed-expression/arithmetic-add';
  */
 
 // Trig functions
-const TRIG_FUNCS = new Set([
-  'Sin',
-  'Cos',
-  'Tan',
-  'Cot',
-  'Sec',
-  'Csc',
-]);
+const TRIG_FUNCS = new Set(['Sin', 'Cos', 'Tan', 'Cot', 'Sec', 'Csc']);
 
 // Odd trig functions: f(-x) = -f(x)
 const ODD_TRIG = new Set(['Sin', 'Tan', 'Cot', 'Csc']);
@@ -253,9 +246,7 @@ export function simplifyTrig(x: BoxedExpression): RuleStep | undefined {
         // Only handle simple case: Pi + x (not n*Pi + x)
         if (otherTerms.length === arg.ops.length - 1) {
           const remaining =
-            otherTerms.length === 1
-              ? otherTerms[0]
-              : ce._fn('Add', otherTerms);
+            otherTerms.length === 1 ? otherTerms[0] : ce._fn('Add', otherTerms);
 
           const sign = PI_PLUS_SIGN[op];
           if (sign !== undefined) {
@@ -449,92 +440,92 @@ export function simplifyTrig(x: BoxedExpression): RuleStep | undefined {
     if (x.ops.length === 2) {
       const [a, b] = x.ops;
 
-    // sin(x) * sin(y) -> (cos(x-y) - cos(x+y))/2
-    if (a.operator === 'Sin' && b.operator === 'Sin') {
-      const argA = a.op1;
-      const argB = b.op1;
-      if (argA && argB) {
-        return {
-          value: ce
-            ._fn('Cos', [argA.sub(argB)])
-            .sub(ce._fn('Cos', [argA.add(argB)]))
-            .div(2),
-          because: 'sin(x)*sin(y) -> (cos(x-y)-cos(x+y))/2',
-        };
+      // sin(x) * sin(y) -> (cos(x-y) - cos(x+y))/2
+      if (a.operator === 'Sin' && b.operator === 'Sin') {
+        const argA = a.op1;
+        const argB = b.op1;
+        if (argA && argB) {
+          return {
+            value: ce
+              ._fn('Cos', [argA.sub(argB)])
+              .sub(ce._fn('Cos', [argA.add(argB)]))
+              .div(2),
+            because: 'sin(x)*sin(y) -> (cos(x-y)-cos(x+y))/2',
+          };
+        }
       }
-    }
 
-    // cos(x) * cos(y) -> (cos(x-y) + cos(x+y))/2
-    if (a.operator === 'Cos' && b.operator === 'Cos') {
-      const argA = a.op1;
-      const argB = b.op1;
-      if (argA && argB) {
-        return {
-          value: ce
-            ._fn('Cos', [argA.sub(argB)])
-            .add(ce._fn('Cos', [argA.add(argB)]))
-            .div(2),
-          because: 'cos(x)*cos(y) -> (cos(x-y)+cos(x+y))/2',
-        };
+      // cos(x) * cos(y) -> (cos(x-y) + cos(x+y))/2
+      if (a.operator === 'Cos' && b.operator === 'Cos') {
+        const argA = a.op1;
+        const argB = b.op1;
+        if (argA && argB) {
+          return {
+            value: ce
+              ._fn('Cos', [argA.sub(argB)])
+              .add(ce._fn('Cos', [argA.add(argB)]))
+              .div(2),
+            because: 'cos(x)*cos(y) -> (cos(x-y)+cos(x+y))/2',
+          };
+        }
       }
-    }
 
-    // tan(x) * cot(x) -> 1
-    if (a.operator === 'Tan' && b.operator === 'Cot') {
-      const argA = a.op1;
-      const argB = b.op1;
-      if (argA?.isSame(argB)) {
-        return { value: ce.One, because: 'tan(x)*cot(x) -> 1' };
+      // tan(x) * cot(x) -> 1
+      if (a.operator === 'Tan' && b.operator === 'Cot') {
+        const argA = a.op1;
+        const argB = b.op1;
+        if (argA?.isSame(argB)) {
+          return { value: ce.One, because: 'tan(x)*cot(x) -> 1' };
+        }
       }
-    }
 
-    // cot(x) * tan(x) -> 1
-    if (a.operator === 'Cot' && b.operator === 'Tan') {
-      const argA = a.op1;
-      const argB = b.op1;
-      if (argA?.isSame(argB)) {
-        return { value: ce.One, because: 'cot(x)*tan(x) -> 1' };
+      // cot(x) * tan(x) -> 1
+      if (a.operator === 'Cot' && b.operator === 'Tan') {
+        const argA = a.op1;
+        const argB = b.op1;
+        if (argA?.isSame(argB)) {
+          return { value: ce.One, because: 'cot(x)*tan(x) -> 1' };
+        }
       }
-    }
 
-    // Power reduction identities:
-    // 2sin²(x) -> 1 - cos(2x)
-    // 2cos²(x) -> 1 + cos(2x)
-    if (a.is(2) && b.operator === 'Power' && b.op2?.is(2)) {
-      const base = b.op1;
-      if (base?.operator === 'Sin' && base.op1) {
-        const cos2x = ce._fn('Cos', [base.op1.mul(2)]);
-        return {
-          value: ce.One.sub(cos2x),
-          because: '2sin²(x) -> 1 - cos(2x)',
-        };
+      // Power reduction identities:
+      // 2sin²(x) -> 1 - cos(2x)
+      // 2cos²(x) -> 1 + cos(2x)
+      if (a.is(2) && b.operator === 'Power' && b.op2?.is(2)) {
+        const base = b.op1;
+        if (base?.operator === 'Sin' && base.op1) {
+          const cos2x = ce._fn('Cos', [base.op1.mul(2)]);
+          return {
+            value: ce.One.sub(cos2x),
+            because: '2sin²(x) -> 1 - cos(2x)',
+          };
+        }
+        if (base?.operator === 'Cos' && base.op1) {
+          const cos2x = ce._fn('Cos', [base.op1.mul(2)]);
+          return {
+            value: ce.One.add(cos2x),
+            because: '2cos²(x) -> 1 + cos(2x)',
+          };
+        }
       }
-      if (base?.operator === 'Cos' && base.op1) {
-        const cos2x = ce._fn('Cos', [base.op1.mul(2)]);
-        return {
-          value: ce.One.add(cos2x),
-          because: '2cos²(x) -> 1 + cos(2x)',
-        };
+      // Also check reversed order (Power first, then 2)
+      if (b.is(2) && a.operator === 'Power' && a.op2?.is(2)) {
+        const base = a.op1;
+        if (base?.operator === 'Sin' && base.op1) {
+          const cos2x = ce._fn('Cos', [base.op1.mul(2)]);
+          return {
+            value: ce.One.sub(cos2x),
+            because: '2sin²(x) -> 1 - cos(2x)',
+          };
+        }
+        if (base?.operator === 'Cos' && base.op1) {
+          const cos2x = ce._fn('Cos', [base.op1.mul(2)]);
+          return {
+            value: ce.One.add(cos2x),
+            because: '2cos²(x) -> 1 + cos(2x)',
+          };
+        }
       }
-    }
-    // Also check reversed order (Power first, then 2)
-    if (b.is(2) && a.operator === 'Power' && a.op2?.is(2)) {
-      const base = a.op1;
-      if (base?.operator === 'Sin' && base.op1) {
-        const cos2x = ce._fn('Cos', [base.op1.mul(2)]);
-        return {
-          value: ce.One.sub(cos2x),
-          because: '2sin²(x) -> 1 - cos(2x)',
-        };
-      }
-      if (base?.operator === 'Cos' && base.op1) {
-        const cos2x = ce._fn('Cos', [base.op1.mul(2)]);
-        return {
-          value: ce.One.add(cos2x),
-          because: '2cos²(x) -> 1 + cos(2x)',
-        };
-      }
-    }
     }
   }
 
@@ -549,20 +540,16 @@ export function simplifyTrig(x: BoxedExpression): RuleStep | undefined {
       a.op2?.is(2) &&
       b.op2?.is(2)
     ) {
-      const sinArg =
-        a.op1?.operator === 'Sin' ? a.op1.op1 : null;
-      const cosArg =
-        b.op1?.operator === 'Cos' ? b.op1.op1 : null;
+      const sinArg = a.op1?.operator === 'Sin' ? a.op1.op1 : null;
+      const cosArg = b.op1?.operator === 'Cos' ? b.op1.op1 : null;
 
       if (sinArg && cosArg && sinArg.isSame(cosArg)) {
         return { value: ce.One, because: 'sin²(x) + cos²(x) -> 1' };
       }
 
       // Also check reversed order
-      const sinArg2 =
-        b.op1?.operator === 'Sin' ? b.op1.op1 : null;
-      const cosArg2 =
-        a.op1?.operator === 'Cos' ? a.op1.op1 : null;
+      const sinArg2 = b.op1?.operator === 'Sin' ? b.op1.op1 : null;
+      const cosArg2 = a.op1?.operator === 'Cos' ? a.op1.op1 : null;
 
       if (sinArg2 && cosArg2 && sinArg2.isSame(cosArg2)) {
         return { value: ce.One, because: 'cos²(x) + sin²(x) -> 1' };
@@ -610,11 +597,7 @@ export function simplifyTrig(x: BoxedExpression): RuleStep | undefined {
     if (a.operator === 'Multiply' && b.operator === 'Multiply') {
       // Extract coefficient and trig functions
       const extractCoeffAndTrig = (expr: BoxedExpression) => {
-        if (
-          expr.operator !== 'Multiply' ||
-          !expr.ops ||
-          expr.ops.length !== 2
-        )
+        if (expr.operator !== 'Multiply' || !expr.ops || expr.ops.length !== 2)
           return null;
         const [c, p] = expr.ops;
         if (

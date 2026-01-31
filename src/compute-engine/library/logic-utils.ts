@@ -10,9 +10,7 @@ import { asSmallInteger } from '../boxed-expression/numerics';
  * Check if an And expression is a contradiction (contains A and Not(A)).
  * Non-recursive to avoid infinite loops.
  */
-function isContradiction(
-  args: ReadonlyArray<BoxedExpression>
-): boolean {
+function isContradiction(args: ReadonlyArray<BoxedExpression>): boolean {
   for (let i = 0; i < args.length; i++) {
     const arg = args[i];
     for (let j = i + 1; j < args.length; j++) {
@@ -32,9 +30,7 @@ function isContradiction(
  * Check if an Or expression is a tautology (contains A and Not(A)).
  * Non-recursive to avoid infinite loops.
  */
-function isTautologyCheck(
-  args: ReadonlyArray<BoxedExpression>
-): boolean {
+function isTautologyCheck(args: ReadonlyArray<BoxedExpression>): boolean {
   for (let i = 0; i < args.length; i++) {
     const arg = args[i];
     for (let j = i + 1; j < args.length; j++) {
