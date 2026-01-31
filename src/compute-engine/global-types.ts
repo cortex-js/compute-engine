@@ -2137,11 +2137,41 @@ export type ValueDefinition = BaseDefinition & {
  * @category Definitions
  */
 export interface SequenceDefinition {
-  /** Index variable name, default 'n' */
+  /**
+   * Index variable name for single-index sequences, default 'n'.
+   * For multi-index sequences, use `variables` instead.
+   */
   variable?: string;
 
-  /** Base cases as index → value mapping */
-  base: Record<number, number | BoxedExpression>;
+  /**
+   * Index variable names for multi-index sequences.
+   * Example: `['n', 'k']` for Pascal's triangle P_{n,k}
+   *
+   * If provided, this takes precedence over `variable`.
+   */
+  variables?: string[];
+
+  /**
+   * Base cases as index → value mapping.
+   *
+   * For single-index sequences, use numeric keys:
+   * ```typescript
+   * base: { 0: 0, 1: 1 }  // F_0 = 0, F_1 = 1
+   * ```
+   *
+   * For multi-index sequences, use comma-separated string keys:
+   * ```typescript
+   * base: {
+   *   '0,0': 1,    // Exact: P_{0,0} = 1
+   *   'n,0': 1,    // Pattern: P_{n,0} = 1 for all n
+   *   'n,n': 1,    // Pattern: P_{n,n} = 1 (diagonal)
+   * }
+   * ```
+   *
+   * Pattern keys use variable names to match any value. When the same
+   * variable appears multiple times (e.g., 'n,n'), the indices must be equal.
+   */
+  base: Record<number | string, number | BoxedExpression>;
 
   /** Recurrence relation as LaTeX string or BoxedExpression */
   recurrence: string | BoxedExpression;
@@ -2149,8 +2179,31 @@ export interface SequenceDefinition {
   /** Whether to memoize computed values (default: true) */
   memoize?: boolean;
 
-  /** Valid index domain constraints */
-  domain?: { min?: number; max?: number };
+  /**
+   * Valid index domain constraints.
+   *
+   * For single-index sequences:
+   * ```typescript
+   * domain: { min: 0, max: 100 }
+   * ```
+   *
+   * For multi-index sequences, use per-variable constraints:
+   * ```typescript
+   * domain: { n: { min: 0 }, k: { min: 0 } }
+   * ```
+   */
+  domain?:
+    | { min?: number; max?: number }
+    | Record<string, { min?: number; max?: number }>;
+
+  /**
+   * Constraint expression for multi-index sequences.
+   * The expression should evaluate to a boolean/numeric value.
+   * If it evaluates to false or 0, the subscript is considered out of domain.
+   *
+   * Example: `'k <= n'` for Pascal's triangle (only valid when k ≤ n)
+   */
+  constraints?: string | BoxedExpression;
 }
 
 /**
@@ -2172,11 +2225,18 @@ export interface SequenceStatus {
   /** Whether a recurrence relation is defined */
   hasRecurrence: boolean;
 
-  /** Indices of defined base cases (e.g., [0, 1] for Fibonacci) */
-  baseIndices: number[];
+  /**
+   * Keys of defined base cases.
+   * For single-index: numeric indices (e.g., [0, 1])
+   * For multi-index: string keys including patterns (e.g., ['0,0', 'n,0', 'n,n'])
+   */
+  baseIndices: (number | string)[];
 
-  /** Index variable name if recurrence is defined */
+  /** Index variable name if recurrence is defined (single-index) */
   variable?: string;
+
+  /** Index variable names if recurrence is defined (multi-index) */
+  variables?: string[];
 }
 
 /**
@@ -2187,20 +2247,36 @@ export interface SequenceInfo {
   /** The sequence name */
   name: string;
 
-  /** Index variable name (e.g., 'n') */
-  variable: string;
+  /** Index variable name for single-index sequences (e.g., 'n') */
+  variable?: string;
 
-  /** Base case indices */
-  baseIndices: number[];
+  /** Index variable names for multi-index sequences (e.g., ['n', 'k']) */
+  variables?: string[];
+
+  /**
+   * Base case keys.
+   * For single-index: numeric indices
+   * For multi-index: string keys including patterns
+   */
+  baseIndices: (number | string)[];
 
   /** Whether memoization is enabled */
   memoize: boolean;
 
-  /** Domain constraints */
-  domain: { min?: number; max?: number };
+  /**
+   * Domain constraints.
+   * For single-index: { min?, max? }
+   * For multi-index: per-variable constraints
+   */
+  domain:
+    | { min?: number; max?: number }
+    | Record<string, { min?: number; max?: number }>;
 
   /** Number of cached values */
   cacheSize: number;
+
+  /** Whether this is a multi-index sequence */
+  isMultiIndex: boolean;
 }
 
 /**
@@ -3707,8 +3783,11 @@ export interface ComputeEngine extends IBigNum {
   /**
    * Get the memoization cache for a sequence.
    * Returns a Map of index → value, or `undefined` if not a sequence or memoization is disabled.
+   *
+   * For single-index sequences, keys are numbers.
+   * For multi-index sequences, keys are comma-separated strings (e.g., '5,2').
    */
-  getSequenceCache(name: string): Map<number, BoxedExpression> | undefined;
+  getSequenceCache(name: string): Map<number | string, BoxedExpression> | undefined;
 
   /**
    * Generate a list of sequence terms from start to end (inclusive).

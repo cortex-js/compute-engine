@@ -3380,6 +3380,7 @@ type ValueDefinition = BaseDefinition & {
   neq: (a) => boolean | undefined;
   cmp: (a) => "=" | ">" | "<" | undefined;
   collection: CollectionHandlers;
+  subscriptEvaluate: (subscript, options) => BoxedExpression | undefined;
 };
 ```
 
@@ -3408,6 +3409,370 @@ value:
 `value` can be a JS function since for some constants, such as
 `Pi`, the actual value depends on the `precision` setting of the
 `ComputeEngine` and possible other environment settings
+
+#### ValueDefinition.subscriptEvaluate()?
+
+```ts
+optional subscriptEvaluate: (subscript, options) => BoxedExpression | undefined;
+```
+
+Custom evaluation handler for subscripted expressions of this symbol.
+Called when evaluating `Subscript(symbol, index)`.
+
+###### subscript
+
+[`BoxedExpression`](#boxedexpression)
+
+The subscript expression (already evaluated)
+
+###### options
+
+Contains the compute engine and evaluation options
+
+####### engine
+
+`ComputeEngine`
+
+####### numericApproximation?
+
+`boolean`
+
+</MemberCard>
+
+### SequenceDefinition
+
+Definition for a sequence declared with `ce.declareSequence()`.
+
+A sequence is defined by base cases and a recurrence relation.
+
+#### Example
+
+```typescript
+// Fibonacci sequence
+ce.declareSequence('F', {
+  base: { 0: 0, 1: 1 },
+  recurrence: 'F_{n-1} + F_{n-2}',
+});
+ce.parse('F_{10}').evaluate();  // → 55
+```
+
+<MemberCard>
+
+##### SequenceDefinition.variable?
+
+```ts
+optional variable: string;
+```
+
+Index variable name for single-index sequences, default 'n'.
+For multi-index sequences, use `variables` instead.
+
+</MemberCard>
+
+<MemberCard>
+
+##### SequenceDefinition.variables?
+
+```ts
+optional variables: string[];
+```
+
+Index variable names for multi-index sequences.
+Example: `['n', 'k']` for Pascal's triangle P_{n,k}
+
+If provided, this takes precedence over `variable`.
+
+</MemberCard>
+
+<MemberCard>
+
+##### SequenceDefinition.base
+
+```ts
+base: Record<number | string, number | BoxedExpression>;
+```
+
+Base cases as index → value mapping.
+
+For single-index sequences, use numeric keys:
+```typescript
+base: { 0: 0, 1: 1 }  // F_0 = 0, F_1 = 1
+```
+
+For multi-index sequences, use comma-separated string keys:
+```typescript
+base: {
+  '0,0': 1,    // Exact: P_{0,0} = 1
+  'n,0': 1,    // Pattern: P_{n,0} = 1 for all n
+  'n,n': 1,    // Pattern: P_{n,n} = 1 (diagonal)
+}
+```
+
+Pattern keys use variable names to match any value. When the same
+variable appears multiple times (e.g., 'n,n'), the indices must be equal.
+
+</MemberCard>
+
+<MemberCard>
+
+##### SequenceDefinition.recurrence
+
+```ts
+recurrence: string | BoxedExpression;
+```
+
+Recurrence relation as LaTeX string or BoxedExpression
+
+</MemberCard>
+
+<MemberCard>
+
+##### SequenceDefinition.memoize?
+
+```ts
+optional memoize: boolean;
+```
+
+Whether to memoize computed values (default: true)
+
+</MemberCard>
+
+<MemberCard>
+
+##### SequenceDefinition.domain?
+
+```ts
+optional domain: 
+  | {
+  min: number;
+  max: number;
+ }
+  | Record<string, {
+  min: number;
+  max: number;
+}>;
+```
+
+Valid index domain constraints.
+
+For single-index sequences:
+```typescript
+domain: { min: 0, max: 100 }
+```
+
+For multi-index sequences, use per-variable constraints:
+```typescript
+domain: { n: { min: 0 }, k: { min: 0 } }
+```
+
+</MemberCard>
+
+<MemberCard>
+
+##### SequenceDefinition.constraints?
+
+```ts
+optional constraints: string | BoxedExpression;
+```
+
+Constraint expression for multi-index sequences.
+The expression should evaluate to a boolean/numeric value.
+If it evaluates to false or 0, the subscript is considered out of domain.
+
+Example: `'k <= n'` for Pascal's triangle (only valid when k ≤ n)
+
+</MemberCard>
+
+### SequenceStatus
+
+Status of a sequence definition.
+
+<MemberCard>
+
+##### SequenceStatus.status
+
+```ts
+status: "complete" | "pending" | "not-a-sequence";
+```
+
+Status of the sequence:
+- 'complete': Both base case(s) and recurrence defined
+- 'pending': Waiting for base case(s) or recurrence
+- 'not-a-sequence': Symbol is not a sequence
+
+</MemberCard>
+
+<MemberCard>
+
+##### SequenceStatus.hasBase
+
+```ts
+hasBase: boolean;
+```
+
+Whether at least one base case is defined
+
+</MemberCard>
+
+<MemberCard>
+
+##### SequenceStatus.hasRecurrence
+
+```ts
+hasRecurrence: boolean;
+```
+
+Whether a recurrence relation is defined
+
+</MemberCard>
+
+<MemberCard>
+
+##### SequenceStatus.baseIndices
+
+```ts
+baseIndices: (string | number)[];
+```
+
+Keys of defined base cases.
+For single-index: numeric indices (e.g., [0, 1])
+For multi-index: string keys including patterns (e.g., ['0,0', 'n,0', 'n,n'])
+
+</MemberCard>
+
+<MemberCard>
+
+##### SequenceStatus.variable?
+
+```ts
+optional variable: string;
+```
+
+Index variable name if recurrence is defined (single-index)
+
+</MemberCard>
+
+<MemberCard>
+
+##### SequenceStatus.variables?
+
+```ts
+optional variables: string[];
+```
+
+Index variable names if recurrence is defined (multi-index)
+
+</MemberCard>
+
+### SequenceInfo
+
+Information about a defined sequence for introspection.
+
+<MemberCard>
+
+##### SequenceInfo.name
+
+```ts
+name: string;
+```
+
+The sequence name
+
+</MemberCard>
+
+<MemberCard>
+
+##### SequenceInfo.variable?
+
+```ts
+optional variable: string;
+```
+
+Index variable name for single-index sequences (e.g., 'n')
+
+</MemberCard>
+
+<MemberCard>
+
+##### SequenceInfo.variables?
+
+```ts
+optional variables: string[];
+```
+
+Index variable names for multi-index sequences (e.g., ['n', 'k'])
+
+</MemberCard>
+
+<MemberCard>
+
+##### SequenceInfo.baseIndices
+
+```ts
+baseIndices: (string | number)[];
+```
+
+Base case keys.
+For single-index: numeric indices
+For multi-index: string keys including patterns
+
+</MemberCard>
+
+<MemberCard>
+
+##### SequenceInfo.memoize
+
+```ts
+memoize: boolean;
+```
+
+Whether memoization is enabled
+
+</MemberCard>
+
+<MemberCard>
+
+##### SequenceInfo.domain
+
+```ts
+domain: 
+  | {
+  min: number;
+  max: number;
+ }
+  | Record<string, {
+  min: number;
+  max: number;
+}>;
+```
+
+Domain constraints.
+For single-index: { min?, max? }
+For multi-index: per-variable constraints
+
+</MemberCard>
+
+<MemberCard>
+
+##### SequenceInfo.cacheSize
+
+```ts
+cacheSize: number;
+```
+
+Number of cached values
+
+</MemberCard>
+
+<MemberCard>
+
+##### SequenceInfo.isMultiIndex
+
+```ts
+isMultiIndex: boolean;
+```
+
+Whether this is a multi-index sequence
 
 </MemberCard>
 
@@ -4134,6 +4499,19 @@ A type that is not inferred, but has been set explicitly, cannot be updated.
 ```ts
 type: BoxedType;
 ```
+
+</MemberCard>
+
+<MemberCard>
+
+##### BoxedValueDefinition.subscriptEvaluate()?
+
+```ts
+optional subscriptEvaluate: (subscript, options) => BoxedExpression;
+```
+
+Custom evaluation handler for subscripted expressions of this symbol.
+Called when evaluating `Subscript(symbol, index)`.
 
 </MemberCard>
 
@@ -4975,6 +5353,7 @@ type ParseLatexOptions = NumberFormat & {
   skipSpace: boolean;
   parseNumbers: "auto" | "rational" | "decimal" | "never";
   getSymbolType: (symbol) => BoxedType;
+  hasSubscriptEvaluate: (symbol) => boolean;
   parseUnexpectedToken: (lhs, parser) => Expression | null;
   preserveLatex: boolean;
   quantifierScope: "tight" | "loose";
@@ -5025,6 +5404,17 @@ This handler is invoked when the parser encounters a
 that has not yet been declared.
 
 The `symbol` argument is a [valid symbol](#symbols).
+
+#### ParseLatexOptions.hasSubscriptEvaluate()?
+
+```ts
+optional hasSubscriptEvaluate: (symbol) => boolean;
+```
+
+This handler is invoked when the parser needs to determine if a symbol
+has a custom subscript evaluation handler. If true, subscripts on this
+symbol will be kept as `Subscript` expressions rather than being absorbed
+into a compound symbol name.
 
 #### ParseLatexOptions.parseUnexpectedToken()
 
@@ -5117,7 +5507,7 @@ LaTeX dictionary entries.
 ##### Parser.options
 
 ```ts
-readonly options: Required<ParseLatexOptions>;
+readonly options: Readonly<ParseLatexOptions>;
 ```
 
 </MemberCard>
@@ -5184,6 +5574,22 @@ Return the next token, without advancing the index
 ```ts
 getSymbolType(id): BoxedType
 ```
+
+####### id
+
+`string`
+
+</MemberCard>
+
+<MemberCard>
+
+##### Parser.hasSubscriptEvaluate()
+
+```ts
+hasSubscriptEvaluate(id): boolean
+```
+
+Check if a symbol has a custom subscript evaluation handler.
 
 ####### id
 
@@ -6730,6 +7136,112 @@ bignum(value): Decimal
 ####### value
 
 `string` | `number` | `bigint` | `Decimal`
+
+</MemberCard>
+
+## OEIS
+
+### OEISSequenceInfo
+
+Result from an OEIS lookup operation.
+
+<MemberCard>
+
+##### OEISSequenceInfo.id
+
+```ts
+id: string;
+```
+
+OEIS sequence ID (e.g., 'A000045')
+
+</MemberCard>
+
+<MemberCard>
+
+##### OEISSequenceInfo.name
+
+```ts
+name: string;
+```
+
+Sequence name/description
+
+</MemberCard>
+
+<MemberCard>
+
+##### OEISSequenceInfo.terms
+
+```ts
+terms: number[];
+```
+
+First several terms of the sequence
+
+</MemberCard>
+
+<MemberCard>
+
+##### OEISSequenceInfo.formula?
+
+```ts
+optional formula: string;
+```
+
+Formula or recurrence (if available)
+
+</MemberCard>
+
+<MemberCard>
+
+##### OEISSequenceInfo.comments?
+
+```ts
+optional comments: string[];
+```
+
+Comments about the sequence
+
+</MemberCard>
+
+<MemberCard>
+
+##### OEISSequenceInfo.url
+
+```ts
+url: string;
+```
+
+URL to the OEIS page
+
+</MemberCard>
+
+### OEISOptions
+
+Options for OEIS operations.
+
+<MemberCard>
+
+##### OEISOptions.timeout?
+
+```ts
+optional timeout: number;
+```
+
+Request timeout in milliseconds (default: 10000)
+
+</MemberCard>
+
+<MemberCard>
+
+##### OEISOptions.maxResults?
+
+```ts
+optional maxResults: number;
+```
+
+Maximum number of results to return for lookups (default: 5)
 
 </MemberCard>
 
