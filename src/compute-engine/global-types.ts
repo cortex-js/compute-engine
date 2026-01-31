@@ -2204,6 +2204,42 @@ export interface SequenceInfo {
 }
 
 /**
+ * Result from an OEIS lookup operation.
+ * @category OEIS
+ */
+export interface OEISSequenceInfo {
+  /** OEIS sequence ID (e.g., 'A000045') */
+  id: string;
+
+  /** Sequence name/description */
+  name: string;
+
+  /** First several terms of the sequence */
+  terms: number[];
+
+  /** Formula or recurrence (if available) */
+  formula?: string;
+
+  /** Comments about the sequence */
+  comments?: string[];
+
+  /** URL to the OEIS page */
+  url: string;
+}
+
+/**
+ * Options for OEIS operations.
+ * @category OEIS
+ */
+export interface OEISOptions {
+  /** Request timeout in milliseconds (default: 10000) */
+  timeout?: number;
+
+  /** Maximum number of results to return for lookups (default: 5) */
+  maxResults?: number;
+}
+
+/**
  * Definition record for a function.
  * @category Definitions
  *
@@ -3696,6 +3732,45 @@ export interface ComputeEngine extends IBigNum {
     end: number,
     step?: number
   ): BoxedExpression[] | undefined;
+
+  /**
+   * Look up sequences in OEIS by their terms.
+   *
+   * @param terms - Array of sequence terms to search for
+   * @param options - Optional configuration (timeout, maxResults)
+   * @returns Promise resolving to array of matching sequences
+   *
+   * @example
+   * ```typescript
+   * const results = await ce.lookupOEIS([0, 1, 1, 2, 3, 5, 8, 13]);
+   * // → [{ id: 'A000045', name: 'Fibonacci numbers', ... }]
+   * ```
+   */
+  lookupOEIS(
+    terms: (number | BoxedExpression)[],
+    options?: OEISOptions
+  ): Promise<OEISSequenceInfo[]>;
+
+  /**
+   * Check if a defined sequence matches an OEIS sequence.
+   *
+   * @param name - Name of the defined sequence
+   * @param count - Number of terms to check (default: 10)
+   * @param options - Optional configuration
+   * @returns Promise with match results including OEIS matches and generated terms
+   *
+   * @example
+   * ```typescript
+   * ce.declareSequence('F', { base: { 0: 0, 1: 1 }, recurrence: 'F_{n-1} + F_{n-2}' });
+   * const result = await ce.checkSequenceOEIS('F', 10);
+   * // → { matches: [{ id: 'A000045', name: 'Fibonacci numbers', ... }], terms: [0, 1, 1, ...] }
+   * ```
+   */
+  checkSequenceOEIS(
+    name: string,
+    count?: number,
+    options?: OEISOptions
+  ): Promise<{ matches: OEISSequenceInfo[]; terms: number[] }>;
 
   forget(symbol?: MathJsonSymbol | MathJsonSymbol[]): void;
 

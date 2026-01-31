@@ -69,6 +69,8 @@ import type {
   SequenceDefinition,
   SequenceStatus,
   SequenceInfo,
+  OEISSequenceInfo,
+  OEISOptions,
 } from './global-types';
 
 import type {
@@ -143,6 +145,11 @@ import {
   getSequenceCache as getSequenceCacheImpl,
   generateSequenceTerms as generateSequenceTermsImpl,
 } from './sequence';
+
+import {
+  lookupSequence as lookupSequenceImpl,
+  checkSequence as checkSequenceImpl,
+} from './oeis';
 
 export * from './global-types';
 
@@ -1567,6 +1574,49 @@ export class ComputeEngine implements IComputeEngine {
     step?: number
   ): BoxedExpression[] | undefined {
     return generateSequenceTermsImpl(this, name, start, end, step);
+  }
+
+  /**
+   * Look up sequences in OEIS by their terms.
+   *
+   * @param terms - Array of sequence terms to search for
+   * @param options - Optional configuration (timeout, maxResults)
+   * @returns Promise resolving to array of matching sequences
+   *
+   * @example
+   * ```typescript
+   * const results = await ce.lookupOEIS([0, 1, 1, 2, 3, 5, 8, 13]);
+   * // → [{ id: 'A000045', name: 'Fibonacci numbers', ... }]
+   * ```
+   */
+  lookupOEIS(
+    terms: (number | BoxedExpression)[],
+    options?: OEISOptions
+  ): Promise<OEISSequenceInfo[]> {
+    return lookupSequenceImpl(this, terms, options);
+  }
+
+  /**
+   * Check if a defined sequence matches an OEIS sequence.
+   *
+   * @param name - Name of the defined sequence
+   * @param count - Number of terms to check (default: 10)
+   * @param options - Optional configuration
+   * @returns Promise with match results including OEIS matches and generated terms
+   *
+   * @example
+   * ```typescript
+   * ce.declareSequence('F', { base: { 0: 0, 1: 1 }, recurrence: 'F_{n-1} + F_{n-2}' });
+   * const result = await ce.checkSequenceOEIS('F', 10);
+   * // → { matches: [{ id: 'A000045', name: 'Fibonacci numbers', ... }], terms: [0, 1, 1, ...] }
+   * ```
+   */
+  checkSequenceOEIS(
+    name: string,
+    count?: number,
+    options?: OEISOptions
+  ): Promise<{ matches: OEISSequenceInfo[]; terms: number[] }> {
+    return checkSequenceImpl(this, name, count, options);
   }
 
   /**

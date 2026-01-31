@@ -196,6 +196,26 @@
   ce.parse('\\prod_{k=1}^{5} A_k').evaluate();  // Works with any defined sequence
   ```
 
+- **OEIS Integration**: Look up sequences in the Online Encyclopedia of Integer
+  Sequences (OEIS) and verify your sequences against known mathematical sequences:
+
+  ```javascript
+  // Look up a sequence by its terms
+  const results = await ce.lookupOEIS([0, 1, 1, 2, 3, 5, 8, 13]);
+  // → [{ id: 'A000045', name: 'Fibonacci numbers', terms: [...], url: '...' }]
+
+  // Check if your sequence matches a known OEIS sequence
+  ce.declareSequence('F', {
+    base: { 0: 0, 1: 1 },
+    recurrence: 'F_{n-1} + F_{n-2}',
+  });
+
+  const result = await ce.checkSequenceOEIS('F', 10);
+  // → { matches: [{ id: 'A000045', name: 'Fibonacci numbers', ... }], terms: [...] }
+  ```
+
+  Note: OEIS lookups require network access to oeis.org.
+
 #### Special Functions
 
 - **Special Function Definitions**: Added type signatures for special mathematical
