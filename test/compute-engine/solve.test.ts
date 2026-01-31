@@ -320,6 +320,83 @@ describe('SOLVING SQRT AND LN EQUATIONS', () => {
   });
 });
 
+// Tests for extraneous root filtering in sqrt equations (Task #14)
+// Sqrt equations using quadratic substitution (u = √x → solve for u → x = u²)
+// can produce extraneous roots that must be filtered out.
+describe('EXTRANEOUS ROOT FILTERING FOR SQRT EQUATIONS', () => {
+  // √x = x - 2 has candidate solutions x=1 and x=4, but x=1 is extraneous
+  // Derivation: √x = x - 2 → x = (x-2)² → x = x² - 4x + 4 → x² - 5x + 4 = 0
+  // → (x-1)(x-4) = 0 → x = 1, 4
+  // Verify: x=1: √1 = 1, 1-2 = -1, 1 ≠ -1 ❌ (extraneous)
+  // Verify: x=4: √4 = 2, 4-2 = 2, 2 = 2 ✓
+  test('should filter extraneous root for sqrt(x) = x - 2', () => {
+    const e = expr('\\sqrt{x} = x - 2');
+    const result = e.solve('x')?.map((x) => x.json);
+    expect(result).toEqual([4]);
+  });
+
+  // √x + x - 2 = 0 has candidate solutions from x + √x - 2 = 0
+  // u² + u - 2 = 0 → (u+2)(u-1) = 0 → u = -2 or u = 1
+  // x = u² → x = 4 or x = 1
+  // Verify: x=4: √4 + 4 - 2 = 2 + 4 - 2 = 4 ≠ 0 ❌ (extraneous)
+  // Verify: x=1: √1 + 1 - 2 = 1 + 1 - 2 = 0 ✓
+  test('should filter extraneous root for sqrt(x) + x - 2 = 0', () => {
+    const e = expr('\\sqrt{x} + x - 2 = 0');
+    const result = e.solve('x')?.map((x) => x.json);
+    expect(result).toEqual([1]);
+  });
+
+  // √x - x + 2 = 0 has u = √x → u - u² + 2 = 0 → u² - u - 2 = 0
+  // → (u-2)(u+1) = 0 → u = 2 or u = -1
+  // x = u² → x = 4 or x = 1
+  // Verify: x=4: √4 - 4 + 2 = 2 - 4 + 2 = 0 ✓
+  // Verify: x=1: √1 - 1 + 2 = 1 - 1 + 2 = 2 ≠ 0 ❌ (extraneous from u=-1)
+  test('should filter extraneous root for sqrt(x) - x + 2 = 0', () => {
+    const e = expr('\\sqrt{x} - x + 2 = 0');
+    const result = e.solve('x')?.map((x) => x.json);
+    expect(result).toEqual([4]);
+  });
+
+  // x - 4√x + 3 = 0: u = √x → u² - 4u + 3 = 0 → (u-1)(u-3) = 0 → u = 1, 3
+  // x = u² → x = 1, 9
+  // Verify: x=1: 1 - 4(1) + 3 = 1 - 4 + 3 = 0 ✓
+  // Verify: x=9: 9 - 4(3) + 3 = 9 - 12 + 3 = 0 ✓
+  // Both solutions are valid in this case (no extraneous roots)
+  test('should keep both valid roots for x - 4sqrt(x) + 3 = 0', () => {
+    const e = expr('x - 4\\sqrt{x} + 3 = 0');
+    const result = e.solve('x')?.map((x) => x.json);
+    expect(result?.sort()).toEqual([1, 9].sort());
+  });
+
+  // x - 2√x - 3 = 0: u² - 2u - 3 = 0 → (u-3)(u+1) = 0 → u = 3 or u = -1
+  // x = u² → x = 9 or x = 1
+  // Verify: x=9: 9 - 2(3) - 3 = 9 - 6 - 3 = 0 ✓
+  // Verify: x=1: 1 - 2(1) - 3 = 1 - 2 - 3 = -4 ≠ 0 ❌ (extraneous from u=-1)
+  test('should filter extraneous root for x - 2sqrt(x) - 3 = 0', () => {
+    const e = expr('x - 2\\sqrt{x} - 3 = 0');
+    const result = e.solve('x')?.map((x) => x.json);
+    expect(result).toEqual([9]);
+  });
+
+  // 2x + 3√x - 2 = 0: 2u² + 3u - 2 = 0 → (2u-1)(u+2) = 0 → u = 1/2 or u = -2
+  // x = u² → x = 1/4 or x = 4
+  // Verify: x=1/4: 2(1/4) + 3(1/2) - 2 = 0.5 + 1.5 - 2 = 0 ✓
+  // Verify: x=4: 2(4) + 3(2) - 2 = 8 + 6 - 2 = 12 ≠ 0 ❌ (extraneous from u=-2)
+  test('should filter extraneous root for 2x + 3sqrt(x) - 2 = 0', () => {
+    const e = expr('2x + 3\\sqrt{x} - 2 = 0');
+    const result = e.solve('x')?.map((x) => x.json);
+    expect(result).toMatchInlineSnapshot(`
+      [
+        [
+          Rational,
+          1,
+          4,
+        ],
+      ]
+    `);
+  });
+});
+
 // Tests for trigonometric equations
 describe('SOLVING TRIGONOMETRIC EQUATIONS', () => {
   test('should solve sin(x) = 0', () => {

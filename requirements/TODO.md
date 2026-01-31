@@ -400,50 +400,9 @@ alternatives.
 
 ## Equation Solving Enhancements
 
-### 14. Extraneous Root Filtering for Sqrt Equations
+### ~~14. Extraneous Root Filtering for Sqrt Equations~~ ✅ COMPLETED
 
-**Problem:** The sqrt equation solver uses quadratic substitution (u = √x, solve
-au² + bu + c = 0, then x = u²). This can produce extraneous roots that don't
-satisfy the original equation.
-
-**Example:**
-
-```
-x - 4√x + 3 = 0
-Substitution: u² - 4u + 3 = 0 → u = 1, 3
-Back-substitute: x = 1, 9
-Verify: 1 - 4(1) + 3 = 0 ✓, 9 - 4(3) + 3 = 0 ✓ (both valid in this case)
-
-But for x + 2√x + 3 = 0:
-u² + 2u + 3 = 0 → u = -1 ± √2i (complex)
-x = u² might give real values that don't satisfy original
-```
-
-**Current behavior:** Returns both roots from the quadratic formula without
-validation.
-
-**Solution:** Add a verification step in `validateRoots()` that:
-
-1. Substitutes each candidate solution back into the original equation
-2. Checks if it evaluates to 0 (within tolerance)
-3. Filters out solutions that don't satisfy
-
-**Implementation location:** The existing `validateRoots()` function in
-`solve.ts` already does this, but it's called with the wrong expression. Need to
-ensure the original (pre-harmonization) expression is used for validation.
-
-**Test case to add:**
-
-```typescript
-// Should return [1] not [1, 9] if 9 is extraneous
-test('should filter extraneous sqrt roots', () => {
-  const e = expr('\\sqrt{x} - x + 2 = 0');  // Only x=1 is valid
-  const result = e.solve('x');
-  // Verify each solution satisfies the original equation
-});
-```
-
-**File:** `src/compute-engine/boxed-expression/solve.ts`
+See `requirements/DONE.md` for implementation details.
 
 ---
 

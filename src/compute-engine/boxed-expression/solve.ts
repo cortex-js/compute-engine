@@ -638,6 +638,13 @@ export function findUnivariateRoots(
     expr = expr.op1.expand().sub(expr.op2.expand()).simplify();
   else expr = expr.expand().simplify();
 
+  // Save the expression BEFORE clearing denominators and other transformations.
+  // This is crucial for validating roots: clearing denominators and harmonization
+  // can introduce extraneous roots that satisfy the transformed equation but not
+  // the original. For example, sqrt equations using quadratic substitution
+  // (u = √x → au² + bu + c = 0 → x = u²) may produce extraneous roots.
+  const originalExpr = expr;
+
   // Clear denominators to enable matching of expressions like F - 3x/h = 0
   expr = clearDenominators(expr);
 
@@ -702,9 +709,11 @@ export function findUnivariateRoots(
 
   ce.popScope(); // End lexical scope for the unknown
 
-  // Validate the roots
+  // Validate the roots against the ORIGINAL expression (before clearing
+  // denominators and harmonization). This filters out extraneous roots that
+  // may have been introduced by algebraic transformations.
   return validateRoots(
-    expr,
+    originalExpr,
     x,
     result.map((x) => x.evaluate().simplify())
   );
