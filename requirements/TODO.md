@@ -1,35 +1,6 @@
 # TODO - Compute Engine Improvements
 
-## Medium Priority
-
-### 1. Add More Integration Patterns
-
-**Common integrals to add:**
-
-```
-∫ x·e^x dx = (x-1)·e^x
-∫ x²·e^x dx = (x²-2x+2)·e^x
-∫ x·sin(x) dx = sin(x) - x·cos(x)
-∫ x·cos(x) dx = cos(x) + x·sin(x)
-∫ ln(x) dx = x·ln(x) - x
-∫ x·ln(x) dx = (x²/2)·ln(x) - x²/4
-∫ sec(x) dx = ln|sec(x) + tan(x)|
-∫ csc(x) dx = -ln|csc(x) + cot(x)|
-∫ sec²(x) dx = tan(x)  (may already exist)
-∫ csc²(x) dx = -cot(x) (may already exist)
-∫ e^x·sin(x) dx = (e^x/2)·(sin(x) - cos(x))
-∫ e^x·cos(x) dx = (e^x/2)·(sin(x) + cos(x))
-```
-
-**File:** `src/compute-engine/symbolic/antiderivative.ts`
-
-**Implementation notes:**
-
-- Each pattern needs proper wildcard handling for coefficients
-- Consider adding integration by parts as a general technique
-- Tabular integration could handle `∫ x^n·e^x dx` patterns
-
----
+Next: #14, #15, #3, #23 (option 1), #18, #19, #20, #21
 
 ## Lower Priority
 
@@ -550,10 +521,12 @@ ce.parse('2x').isEqual(ce.parse('x+x'))  // Returns: true (correct)
 
 ### 23. Replace Method Auto-Wildcards Single-Char Symbols
 
-**Problem:** `.replace({match: 'a', replace: 2})` unexpectedly converts `'a'` to a wildcard
-`'_a'`, causing it to match ANY expression instead of just the literal symbol `a`.
+**Problem:** `.replace({match: 'a', replace: 2})` unexpectedly converts `'a'` to
+a wildcard `'_a'`, causing it to match ANY expression instead of just the
+literal symbol `a`.
 
 **Current behavior:**
+
 ```typescript
 const expr = ce.box(['Add', ['Multiply', 'a', 'x'], 'b']);
 expr.replace({match: 'a', replace: 2}, {recursive: true})
@@ -561,30 +534,38 @@ expr.replace({match: 'a', replace: 2}, {recursive: true})
 // Expected: 2*x + b
 ```
 
-**Root cause:** In `parseRulePart` (rules.ts:350), all single-character symbols are
-auto-converted to wildcards:
+**Root cause:** In `parseRulePart` (rules.ts:350), all single-character symbols
+are auto-converted to wildcards:
+
 ```typescript
 if (x.symbol && x.symbol.length === 1) return ce.symbol('_' + x.symbol);
 ```
 
-This makes sense when parsing rule strings like `"a*x -> 2*x"` where `a`, `x` should be
-wildcards, but NOT when the user explicitly provides `{match: 'a', replace: 2}` where
-they likely want literal matching.
+This makes sense when parsing rule strings like `"a*x -> 2*x"` where `a`, `x`
+should be wildcards, but NOT when the user explicitly provides
+`{match: 'a', replace: 2}` where they likely want literal matching.
 
 **Solution options:**
-1. Only auto-wildcard when parsing a rule string, not when rule is provided as an object
+
+1. Only auto-wildcard when parsing a rule string, not when rule is provided as
+   an object
 2. Add an option like `{literal: true}` to disable auto-wildcarding
 3. Require explicit wildcard syntax `'_a'` and never auto-wildcard
 
+[*] Option 1 is preferred.
+
 **Workaround:** Use `.subs()` for simple variable substitution:
+
 ```typescript
 expr.subs({a: 2})  // Returns: 2*x + b (correct)
 ```
 
 **Files to modify:**
+
 - `src/compute-engine/boxed-expression/rules.ts` - `parseRulePart` function
 
-**Tests:** See `test/playground.ts` lines 61-72 and PLAYGROUND.md Evaluation section
+**Tests:** See `test/playground.ts` lines 61-72 and PLAYGROUND.md Evaluation
+section
 
 ---
 
@@ -633,7 +614,7 @@ ce.parse('{}_2^4 He').json
      pre-sup
 
 3. **MathJSON representation options:**
-   - `["PreScripts", base, pre_sub, pre_sup]` - explicit function
+   - `["Prescripts", base, pre_sub, pre_sup]` - explicit function
    - `["Subscript", base, sub, pre_sub]` - extend existing Subscript
    - Keep as separate metadata in the expression structure
 
@@ -646,26 +627,26 @@ ce.parse('{}_2^4 He').json
 
 - `src/compute-engine/latex-syntax/parse.ts` - Main parsing logic
 - `src/compute-engine/latex-syntax/parse-symbol.ts` - Symbol parsing
-- `src/compute-engine/library/core.ts` - Add PreScripts function definition (if
+- `src/compute-engine/library/core.ts` - Add Prescripts function definition (if
   new function)
 
 **Tests to add:**
 
 ```typescript
 test('pre-subscript parsing', () => {
-  expect(parse('{}_2 X')).toMatchInlineSnapshot(`["PreScripts", "X", 2, "Nothing"]`);
+  expect(parse('{}_2 X')).toMatchInlineSnapshot(`["Prescripts", "X", 2, "Nothing"]`);
 });
 
 test('pre-superscript parsing', () => {
-  expect(parse('{}^4 X')).toMatchInlineSnapshot(`["PreScripts", "X", "Nothing", 4]`);
+  expect(parse('{}^4 X')).toMatchInlineSnapshot(`["Prescripts", "X", "Nothing", 4]`);
 });
 
 test('pre-scripts parsing', () => {
-  expect(parse('{}_2^4 X')).toMatchInlineSnapshot(`["PreScripts", "X", 2, 4]`);
+  expect(parse('{}_2^4 X')).toMatchInlineSnapshot(`["Prescripts", "X", 2, 4]`);
 });
 
 test('isotope notation', () => {
-  expect(parse('{}^{14}_6 C')).toMatchInlineSnapshot(`["PreScripts", "C", 6, 14]`);
+  expect(parse('{}^{14}_6 C')).toMatchInlineSnapshot(`["Prescripts", "C", 6, 14]`);
 });
 ```
 

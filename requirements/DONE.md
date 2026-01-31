@@ -877,3 +877,101 @@ ce.box(['Sum', 'n', ['Element', 'n', ['Interval', 1, ['Open', 6]]]]).evaluate()
 **Files modified:**
 - `src/compute-engine/library/logic-analysis.ts` - `extractFiniteDomain`
 - `test/compute-engine/latex-syntax/arithmetic.test.ts` - Added tests
+
+---
+
+### 17. Subscript Evaluation Functions for Sequences ✅
+
+**IMPLEMENTED:** Added `subscriptEvaluate` option to symbol definitions that allows
+custom evaluation of subscripted expressions like `F_n` for sequences.
+
+**API:**
+```typescript
+ce.declare('F', {
+  subscriptEvaluate: (subscript, { engine: ce }) => {
+    const n = subscript.re;
+    if (!Number.isInteger(n) || n < 0) return undefined;
+    // Return Fibonacci(n)
+    if (n === 0) return ce.Zero;
+    if (n === 1) return ce.One;
+    let a = 0, b = 1;
+    for (let i = 2; i <= n; i++) [a, b] = [b, a + b];
+    return ce.number(b);
+  },
+});
+
+ce.parse('F_5').evaluate()  // → 5
+ce.parse('F_{10}').evaluate()  // → 55
+```
+
+**Implementation details:**
+- Added `subscriptEvaluate` to `SymbolDefinition` interface in `global-types.ts`
+- Modified `Subscript` canonical handler to preserve Subscript form when base has `subscriptEvaluate`
+- Modified `Subscript` evaluate handler to call `subscriptEvaluate` when available
+- Returns `undefined` to fall back to symbolic form when subscript cannot be evaluated
+
+**Files modified:**
+- `src/compute-engine/global-types.ts` - Added `subscriptEvaluate` to type definitions
+- `src/compute-engine/library/core.ts` - Modified Subscript canonical/evaluate handlers
+- `src/compute-engine/boxed-expression/boxed-value-definition.ts` - Handler support
+
+---
+
+### 22. Equation Equivalence in isEqual ✅
+
+**IMPLEMENTED:** `isEqual` now recognizes mathematically equivalent equations by
+checking if they have the same solution set.
+
+**Examples:**
+```typescript
+ce.parse('2x+1=0').isEqual(ce.parse('x=-1/2'))  // → true
+ce.parse('x=2').isEqual(ce.parse('2x=4'))       // → true
+ce.parse('x+y=5').isEqual(ce.parse('2x+2y=10')) // → true
+```
+
+**Algorithm:**
+1. Compute `expr1 = LHS1 - RHS1` and `expr2 = LHS2 - RHS2`
+2. Sample the ratio `expr1 / expr2` at multiple random points
+3. If the ratio is constant (non-zero) across all samples, equations are equivalent
+
+**Implementation details:**
+- Added `eq` handler to the `Equal` function definition in `relational-operator.ts`
+- Uses Monte Carlo sampling at 20 random points to detect constant ratio
+- Handles edge cases: expressions evaluating to NaN or Infinity
+- Tolerance of 1e-10 for floating point comparison
+
+**Files modified:**
+- `src/compute-engine/library/relational-operator.ts` - Added `eq` handler for Equal
+
+---
+
+### INT-1. Cyclic Integration Patterns for e^x with Trig Functions ✅
+
+**IMPLEMENTED:** Added integration patterns for products of exponential and
+trigonometric functions that require the "solve for the integral" technique.
+
+**Patterns added:**
+```
+∫ e^x·sin(x) dx = (e^x/2)·(sin(x) - cos(x))
+∫ e^x·cos(x) dx = (e^x/2)·(sin(x) + cos(x))
+∫ e^x·sin(ax+b) dx = (e^x/(a²+1))·(sin(ax+b) - a·cos(ax+b))
+∫ e^x·cos(ax+b) dx = (e^x/(a²+1))·(a·sin(ax+b) + cos(ax+b))
+```
+
+**Examples:**
+```typescript
+ce.parse('\\int e^x \\sin(x) dx').evaluate()
+// → (1/2)·e^x·(sin(x) - cos(x))
+
+ce.parse('\\int e^x \\cos(2x) dx').evaluate()
+// → (e^x/5)·(2·sin(2x) + cos(2x))
+```
+
+**Implementation details:**
+- Added `tryCyclicExpTrigIntegral()` function that detects e^x * trig patterns
+- Pattern matching handles both orderings (e^x·sin vs sin·e^x)
+- Supports linear arguments (sin(ax+b)) with coefficient handling
+- Called before integration by parts to prevent infinite recursion
+
+**Files modified:**
+- `src/compute-engine/symbolic/antiderivative.ts` - Added cyclic pattern detection and rules
