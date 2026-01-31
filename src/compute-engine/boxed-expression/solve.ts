@@ -359,6 +359,79 @@ export const UNIVARIATE_ROOTS: Rule[] = [
     },
   },
 
+  //
+  // Extended sqrt equation patterns (Task #15)
+  //
+
+  // Pattern 1: √(ax + b) + c = 0  =>  x = (c² - b)/a  when c ≤ 0
+  // Derivation: √(ax + b) = -c, so ax + b = c² (when c ≤ 0 ensures -c ≥ 0)
+  {
+    match: ['Add', ['Sqrt', ['Add', ['Multiply', '__a', '_x'], '__b']], '__c'],
+    replace: ['Divide', ['Subtract', ['Square', '__c'], '__b'], '__a'],
+    useVariations: true,
+    condition: (sub) => {
+      if (!filter(sub)) return false;
+      const c = sub.__c;
+      return c.isNonPositive ?? true;
+    },
+  },
+
+  // Pattern 1 variant: √(x + b) + c = 0  =>  x = c² - b  when c ≤ 0
+  // (When coefficient a = 1)
+  {
+    match: ['Add', ['Sqrt', ['Add', '_x', '__b']], '__c'],
+    replace: ['Subtract', ['Square', '__c'], '__b'],
+    useVariations: true,
+    condition: (sub) => {
+      if (!filter(sub)) return false;
+      const c = sub.__c;
+      return c.isNonPositive ?? true;
+    },
+  },
+
+  // Pattern 1 variant: a√(x + b) + c = 0  =>  x = (c/a)² - b  when c/a ≤ 0
+  // (With coefficient on the sqrt)
+  {
+    match: [
+      'Add',
+      ['Multiply', '__a', ['Sqrt', ['Add', '_x', '__b']]],
+      '__c',
+    ],
+    replace: ['Subtract', ['Square', ['Divide', ['Negate', '__c'], '__a']], '__b'],
+    useVariations: true,
+    condition: (sub) => {
+      if (!filter(sub)) return false;
+      const a = sub.__a;
+      const c = sub.__c;
+      if (!a || a.is(0)) return false;
+      const ratio = c.div(a);
+      return ratio.isNonPositive ?? true;
+    },
+  },
+
+  // Pattern 1 variant: a√(dx + b) + c = 0  =>  x = ((c/a)² - b)/d
+  {
+    match: [
+      'Add',
+      ['Multiply', '__a', ['Sqrt', ['Add', ['Multiply', '__d', '_x'], '__b']]],
+      '__c',
+    ],
+    replace: [
+      'Divide',
+      ['Subtract', ['Square', ['Divide', ['Negate', '__c'], '__a']], '__b'],
+      '__d',
+    ],
+    useVariations: true,
+    condition: (sub) => {
+      if (!filter(sub)) return false;
+      const a = sub.__a;
+      const c = sub.__c;
+      if (!a || a.is(0)) return false;
+      const ratio = c.div(a);
+      return ratio.isNonPositive ?? true;
+    },
+  },
+
   // a·ln(x) + b = 0  =>  x = e^(-b/a)
   {
     match: ['Add', ['Multiply', '__a', ['Ln', '_x']], '__b'],
@@ -844,6 +917,14 @@ export const HARMONIZATION_RULES: Rule[] = [
     replace: ['PlusMinus', ['Sin', '_a'], ['Divide', ['Sqrt', 2], 2]],
     condition: ({ _a }) => _a.has('_x'),
   },
+
+  //
+  // Extended sqrt harmonization rules (Task #15)
+  // NOTE: More complex sqrt patterns (√(f(x)) = g(x), sum of sqrts, nested sqrts)
+  // require more sophisticated harmonization that properly handles the pattern
+  // matching system's substitution mechanism. These are documented in TODO.md
+  // for future enhancement.
+  //
 ];
 
 /** Transform expr into one or more equivalent expressions that

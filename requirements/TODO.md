@@ -406,45 +406,110 @@ See `requirements/DONE.md` for implementation details.
 
 ---
 
-### 15. Extended Sqrt Equation Patterns
+### ~~15. Extended Sqrt Equation Patterns~~ ✅ PARTIALLY COMPLETED
 
-**Problem:** Current sqrt rules only handle `ax + b√x + c = 0`. More complex
-patterns aren't supported.
+See `requirements/DONE.md` for Pattern 1 implementation details.
 
-**Patterns to add:**
+**Pattern 1 (COMPLETED):** `√(ax + b) + c = 0` with variants including
+coefficients on sqrt and linear coefficient inside sqrt.
 
-1. **Sqrt of linear expression:** `√(ax + b) + c = 0`
-   - Solution: `ax + b = c²` when `c ≤ 0`, so `x = (c² - b)/a`
-
-   ```typescript
-   {
-     match: ['Add', ['Sqrt', ['Add', ['Multiply', '__a', '_x'], '__b']], '__c'],
-     replace: ['Divide', ['Subtract', ['Square', '__c'], '__b'], '__a'],
-     condition: (sub) => filter(sub) && (sub.__c.isNonPositive ?? false),
-   }
-   ```
+**Remaining patterns (not yet implemented):**
 
 2. **Sqrt equals linear:** `√(ax + b) = cx + d`
-   - Square both sides: `ax + b = (cx + d)²`
-   - Expand: `ax + b = c²x² + 2cdx + d²`
-   - Rearrange: `c²x² + (2cd - a)x + (d² - b) = 0`
-   - Use quadratic formula, then validate (may have extraneous roots)
-
 3. **Sum of two sqrt terms:** `√(ax + b) + √(cx + d) = e`
-   - Isolate one sqrt: `√(ax + b) = e - √(cx + d)`
-   - Square: `ax + b = e² - 2e√(cx + d) + cx + d`
-   - Isolate remaining sqrt and square again
-   - Results in polynomial equation
-
 4. **Nested sqrt:** `√(x + √x) = a`
-   - Use substitution u = √x
-   - Becomes `√(u² + u) = a`, then `u² + u = a²`
-   - Solve quadratic for u, then x = u²
 
-**Complexity note:** Patterns 2-4 can produce extraneous roots and require
-careful validation.
+---
 
-**File:** `src/compute-engine/boxed-expression/solve.ts`
+#### Technical Analysis for Completing Remaining Patterns
+
+**Root Cause:** The harmonization system passes `{ _x: ce.symbol('_x') }` as
+substitution to `matchAnyRules()`. This binds `_x` in patterns to match only the
+literal symbol `_x`. However, pattern matching for expressions like
+`['Add', ['Negate', '_x'], ['Sqrt', ...]]` fails because:
+
+1. The `match()` function treats `_x` in patterns as a wildcard that should
+   match anything, but the substitution binding should make it match only `_x`
+2. The pattern `['Add', ['Negate', '_x'], ...]` doesn't match
+   `['Add', ['Negate', '_x'], ...]` even with the substitution binding
+
+**Approach 1: Fix Pattern Matching with Substitution (Recommended)**
+
+Investigate how `match()` handles the `substitution` parameter in
+`src/compute-engine/boxed-expression/match.ts`. The issue may be:
+- The substitution binding isn't being properly applied during matching
+- Wildcards are being treated as "match anything" before checking substitution
+- The order of operations in pattern matching needs adjustment
+
+Test case to verify the fix:
+```typescript
+const expr = ce.box(['Add', ['Negate', '_x'], ['Sqrt', ['Add', '_x', 2]]]);
+const pattern = ce.box(['Add', ['Negate', '_x'], ['Sqrt', '_f']]);
+const sub = { _x: ce.symbol('_x') };
+expr.match(pattern, { substitution: sub }); // Should return {_f: ['Add', '_x', 2]}
+```
+
+**Approach 2: Pre-process Expressions Before Harmonization**
+
+Instead of relying on pattern matching with wildcards, transform expressions
+before harmonization:
+
+1. Detect if expression contains a single sqrt term with the unknown variable
+2. Identify the "other" part of the expression (e.g., `-x` or `cx + d`)
+3. Programmatically square both sides: `sqrt(f) = -g` → `f = g²`
+4. Return the transformed expression for further solving
+
+This approach bypasses the pattern matching limitations.
+
+**Approach 3: Use a Two-Phase Solver**
+
+1. **Phase 1: Identify sqrt structure**
+   - Extract sqrt terms from the expression
+   - Count how many distinct sqrt terms exist
+   - Identify which terms contain the variable
+
+2. **Phase 2: Apply algebraic transformations**
+   - For single sqrt: isolate and square
+   - For two sqrts: isolate one, square, then handle the remaining sqrt
+   - For nested sqrt: use substitution u = √x
+
+Implementation in `solve.ts`:
+```typescript
+function harmonizeSqrtEquation(expr: BoxedExpression, x: string): BoxedExpression[] {
+  const sqrtTerms = extractSqrtTerms(expr, x);
+  if (sqrtTerms.length === 1) {
+    // √(f) + g = 0 → f - g² = 0
+    const [sqrtTerm, remainder] = isolateSqrt(expr, sqrtTerms[0]);
+    return [sqrtTerm.op1.sub(remainder.neg().pow(2))];
+  }
+  // Handle multiple sqrts...
+}
+```
+
+**Pattern-Specific Solutions:**
+
+**Pattern 2 (`√(ax + b) = cx + d`):**
+- After converting to `√(f) - g = 0`, square both sides: `f - g² = 0`
+- This becomes a quadratic that the existing solver can handle
+- Validate roots against original equation (already implemented)
+
+**Pattern 3 (`√(ax + b) + √(cx + d) = e`):**
+- Isolate one sqrt: `√A = e - √B`
+- Square: `A = e² - 2e√B + B`
+- Rearrange: `A - B - e² + 2e√B = 0` (becomes single-sqrt equation)
+- Apply Pattern 2 solution
+
+**Pattern 4 (`√(x + √x) = a`):**
+- Use substitution u = √x (so x = u²)
+- Equation becomes: `√(u² + u) = a`
+- Square: `u² + u = a²`
+- Solve quadratic for u, then x = u²
+- Validate u ≥ 0 for real solutions
+
+**Files to modify:**
+- `src/compute-engine/boxed-expression/match.ts` - Fix substitution handling
+- `src/compute-engine/boxed-expression/solve.ts` - Add programmatic harmonization
+- `src/compute-engine/boxed-expression/rules.ts` - Investigate `applyRule` substitution
 
 ---
 

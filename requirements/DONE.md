@@ -934,3 +934,46 @@ ce.parse('2x + 3\\sqrt{x} - 2 = 0').solve('x')  // → [1/4]
   validate against it
 - `test/compute-engine/solve.test.ts` - Added 6 new tests in "EXTRANEOUS ROOT
   FILTERING FOR SQRT EQUATIONS" describe block
+
+---
+
+### 15. Extended Sqrt Equation Patterns (Pattern 1) ✅
+
+**IMPLEMENTED (Partial):** Added solve rules for equations with sqrt of linear
+expressions: `√(ax + b) + c = 0` and variants.
+
+**Pattern 1 forms that now work:**
+
+1. **Basic:** `√(ax + b) + c = 0` → `x = (c² - b)/a` when `c ≤ 0`
+2. **Unit coefficient:** `√(x + b) + c = 0` → `x = c² - b` when `c ≤ 0`
+3. **Coefficient on sqrt:** `a√(x + b) + c = 0` → `x = (c/a)² - b` when `c/a ≤ 0`
+4. **Full form:** `a√(dx + b) + c = 0` → `x = ((c/a)² - b)/d`
+
+**Examples that now work:**
+```typescript
+ce.parse('\\sqrt{x + 3} - 2 = 0').solve('x')     // → [1]
+ce.parse('\\sqrt{2x + 1} - 3 = 0').solve('x')   // → [4]
+ce.parse('2\\sqrt{x - 1} - 4 = 0').solve('x')   // → [5]
+ce.parse('\\sqrt{4x + 5} - 3 = 0').solve('x')   // → [1]
+ce.parse('\\sqrt{x + 4} + 2 = 0').solve('x')    // → [] (no real solution)
+```
+
+**Solution derivation:**
+- `√(ax + b) + c = 0` implies `√(ax + b) = -c`
+- For real solutions, need `-c ≥ 0` (i.e., `c ≤ 0`)
+- Squaring: `ax + b = c²`
+- Solving: `x = (c² - b)/a`
+
+**Not yet implemented:**
+- Pattern 2: `√(ax + b) = cx + d` (requires complex harmonization)
+- Pattern 3: `√(ax + b) + √(cx + d) = e` (sum of two sqrts)
+- Pattern 4: `√(x + √x) = a` (nested sqrt)
+
+These patterns require more sophisticated harmonization rules that properly
+handle the pattern matching system's wildcard binding mechanism. See TODO.md
+for technical details on the challenges.
+
+**Files modified:**
+- `src/compute-engine/boxed-expression/solve.ts` - Added Pattern 1 solve rules
+- `test/compute-engine/solve.test.ts` - Added 6 new tests in "EXTENDED SQRT
+  EQUATION PATTERNS" describe block

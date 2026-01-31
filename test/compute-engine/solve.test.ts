@@ -397,6 +397,61 @@ describe('EXTRANEOUS ROOT FILTERING FOR SQRT EQUATIONS', () => {
   });
 });
 
+// Tests for extended sqrt equation patterns (Task #15)
+describe('EXTENDED SQRT EQUATION PATTERNS', () => {
+  // Pattern 1: √(ax + b) + c = 0
+  // Solution: x = (c² - b)/a when c ≤ 0
+
+  test('Pattern 1: √(x + 3) - 2 = 0', () => {
+    // √(x + 3) = 2 => x + 3 = 4 => x = 1
+    const e = expr('\\sqrt{x + 3} - 2 = 0');
+    const result = e.solve('x')?.map((x) => x.json);
+    expect(result).toEqual([1]);
+  });
+
+  test('Pattern 1: √(2x + 1) - 3 = 0', () => {
+    // √(2x + 1) = 3 => 2x + 1 = 9 => x = 4
+    const e = expr('\\sqrt{2x + 1} - 3 = 0');
+    const result = e.solve('x')?.map((x) => x.json);
+    expect(result).toEqual([4]);
+  });
+
+  test('Pattern 1: 2√(x - 1) - 4 = 0', () => {
+    // 2√(x - 1) = 4 => √(x - 1) = 2 => x - 1 = 4 => x = 5
+    const e = expr('2\\sqrt{x - 1} - 4 = 0');
+    const result = e.solve('x')?.map((x) => x.json);
+    expect(result).toEqual([5]);
+  });
+
+  test('Pattern 1: √(x + 4) + 2 = 0 (no real solution)', () => {
+    // √(x + 4) = -2 has no real solution since sqrt ≥ 0
+    const e = expr('\\sqrt{x + 4} + 2 = 0');
+    const result = e.solve('x');
+    expect(result).toEqual([]);
+  });
+
+  test('√(4x + 5) - 3 = 0', () => {
+    // √(4x + 5) = 3 => 4x + 5 = 9 => x = 1
+    const e = expr('\\sqrt{4x + 5} - 3 = 0');
+    const result = e.solve('x')?.map((x) => x.json);
+    expect(result).toEqual([1]);
+  });
+
+  // Pattern 2: √(x) = x - 2 (already supported by existing rules)
+  test('Pattern 2: √(x) = x - 2 (existing pattern)', () => {
+    // √x = x - 2 => x = (x-2)² => x² - 5x + 4 = 0
+    // x = 1 or x = 4, but x = 1 is extraneous
+    const e = expr('\\sqrt{x} = x - 2');
+    const result = e.solve('x')?.map((x) => x.json);
+    expect(result).toEqual([4]);
+  });
+
+  // NOTE: Pattern 2 variants like √(x + 2) = x, Pattern 3 (sum of two sqrts),
+  // and Pattern 4 (nested sqrt) require more complex harmonization rules
+  // that properly handle the pattern matching. These are documented in TODO.md
+  // for future enhancement. See TODO.md #15 for details.
+});
+
 // Tests for trigonometric equations
 describe('SOLVING TRIGONOMETRIC EQUATIONS', () => {
   test('should solve sin(x) = 0', () => {

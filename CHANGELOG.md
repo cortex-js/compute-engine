@@ -20,6 +20,27 @@
 
 ### New Features
 
+#### Equation Solving
+
+- **Extended Sqrt Equation Patterns**: Added support for solving equations of
+  the form `√(ax + b) + c = 0` and variants. The solver now handles:
+
+  - Basic form: `√(ax + b) + c = 0` → `x = (c² - b)/a` when `c ≤ 0`
+  - Unit coefficient: `√(x + b) + c = 0` → `x = c² - b`
+  - Coefficient on sqrt: `a√(x + b) + c = 0` → `x = (c/a)² - b`
+  - Full form: `a√(dx + b) + c = 0` → `x = ((c/a)² - b)/d`
+
+  Examples:
+  ```javascript
+  ce.parse('\\sqrt{x + 3} - 2 = 0').solve('x');   // → [1]
+  ce.parse('\\sqrt{2x + 1} - 3 = 0').solve('x'); // → [4]
+  ce.parse('2\\sqrt{x - 1} - 4 = 0').solve('x'); // → [5]
+  ce.parse('\\sqrt{x + 4} + 2 = 0').solve('x');  // → [] (no real solution)
+  ```
+
+  The solver correctly validates that `c ≤ 0` for real solutions (since
+  `√(expr) = -c` requires `-c ≥ 0`).
+
 #### Subscripts and Indexing
 
 - **Subscript Evaluation Handler**: Define custom evaluation functions for
