@@ -474,7 +474,41 @@ export function evaluateExistsCartesian(
 
 /**
  * Check if a boolean expression is satisfiable.
- * Returns True if there exists an assignment that makes the expression true.
+ *
+ * Returns `True` if there exists an assignment of truth values to variables
+ * that makes the expression true, `False` if no such assignment exists.
+ *
+ * ## Algorithm
+ *
+ * Uses brute-force enumeration of all possible truth assignments.
+ * This has **O(2^n) time complexity** where n is the number of variables.
+ *
+ * ## Performance Characteristics
+ *
+ * | Variables | Assignments | Approximate Time |
+ * |-----------|-------------|------------------|
+ * | 10        | 1,024       | < 1ms            |
+ * | 15        | 32,768      | ~10ms            |
+ * | 20        | 1,048,576   | ~100ms-1s        |
+ * | > 20      | (rejected)  | N/A              |
+ *
+ * ## Limits
+ *
+ * - **Maximum 20 variables**: Expressions with more than 20 distinct boolean
+ *   variables will return the unevaluated `IsSatisfiable` expression rather
+ *   than attempting evaluation (to prevent blocking the thread).
+ *
+ * ## Future Improvements
+ *
+ * For better performance on larger expressions, a DPLL-based SAT solver
+ * could be implemented. The current brute-force approach is suitable for
+ * small expressions typically encountered in educational and verification
+ * contexts.
+ *
+ * @param expr - A boolean expression to check for satisfiability
+ * @param ce - The ComputeEngine instance
+ * @returns `True` if satisfiable, `False` if unsatisfiable, or the
+ *          unevaluated expression if the variable limit is exceeded
  */
 export function isSatisfiable(
   expr: BoxedExpression,
@@ -507,7 +541,39 @@ export function isSatisfiable(
 
 /**
  * Check if a boolean expression is a tautology.
- * Returns True if the expression is true for all possible assignments.
+ *
+ * Returns `True` if the expression evaluates to true for all possible
+ * assignments of truth values to variables, `False` otherwise.
+ *
+ * ## Algorithm
+ *
+ * Uses brute-force enumeration of all possible truth assignments.
+ * This has **O(2^n) time complexity** where n is the number of variables.
+ *
+ * ## Performance Characteristics
+ *
+ * | Variables | Assignments | Approximate Time |
+ * |-----------|-------------|------------------|
+ * | 10        | 1,024       | < 1ms            |
+ * | 15        | 32,768      | ~10ms            |
+ * | 20        | 1,048,576   | ~100ms-1s        |
+ * | > 20      | (rejected)  | N/A              |
+ *
+ * ## Limits
+ *
+ * - **Maximum 20 variables**: Expressions with more than 20 distinct boolean
+ *   variables will return the unevaluated `IsTautology` expression rather
+ *   than attempting evaluation (to prevent blocking the thread).
+ *
+ * ## Future Improvements
+ *
+ * For better performance on larger expressions, a DPLL-based approach
+ * (checking unsatisfiability of the negation) could be implemented.
+ *
+ * @param expr - A boolean expression to check
+ * @param ce - The ComputeEngine instance
+ * @returns `True` if a tautology, `False` if not, or the unevaluated
+ *          expression if the variable limit is exceeded
  */
 export function isTautology(
   expr: BoxedExpression,
@@ -540,7 +606,36 @@ export function isTautology(
 
 /**
  * Generate a truth table for a boolean expression.
- * Returns a List of Lists with headers and rows.
+ *
+ * Returns a `List` of `List`s where the first row contains column headers
+ * (variable names followed by "Result") and subsequent rows contain the
+ * truth values for each assignment.
+ *
+ * ## Algorithm
+ *
+ * Generates all 2^n possible truth assignments and evaluates the expression
+ * for each. This has **O(2^n) time and space complexity**.
+ *
+ * ## Performance Characteristics
+ *
+ * | Variables | Rows Generated | Output Size |
+ * |-----------|----------------|-------------|
+ * | 5         | 32             | ~1 KB       |
+ * | 8         | 256            | ~8 KB       |
+ * | 10        | 1,024          | ~32 KB      |
+ * | > 10      | (rejected)     | N/A         |
+ *
+ * ## Limits
+ *
+ * - **Maximum 10 variables**: Expressions with more than 10 distinct boolean
+ *   variables will return the unevaluated `TruthTable` expression. This
+ *   stricter limit (compared to `IsSatisfiable`/`IsTautology`) accounts for
+ *   the memory required to store all rows.
+ *
+ * @param expr - A boolean expression to generate a truth table for
+ * @param ce - The ComputeEngine instance
+ * @returns A `List` of `List`s representing the truth table, or the
+ *          unevaluated expression if the variable limit is exceeded
  */
 export function generateTruthTable(
   expr: BoxedExpression,

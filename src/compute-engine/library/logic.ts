@@ -467,10 +467,17 @@ export const LOGIC_FUNCTION_LIBRARY: SymbolDefinitions = {
 
   /**
    * Check if a boolean expression is satisfiable.
-   * Returns True if there exists an assignment of truth values to variables
-   * that makes the expression true.
+   *
+   * Returns `True` if there exists an assignment of truth values to variables
+   * that makes the expression true, `False` if no such assignment exists.
+   *
+   * **Performance**: Uses brute-force enumeration with O(2^n) complexity.
+   * Limited to 20 variables; larger expressions return unevaluated.
+   * Expressions with 15+ variables may take noticeable time (~10ms+).
    */
   IsSatisfiable: {
+    description:
+      'Check satisfiability using brute-force enumeration. O(2^n) complexity, max 20 variables.',
     signature: '(boolean) -> boolean',
     evaluate: ([expr], { engine: ce }) => {
       if (!expr) return undefined;
@@ -480,10 +487,17 @@ export const LOGIC_FUNCTION_LIBRARY: SymbolDefinitions = {
 
   /**
    * Check if a boolean expression is a tautology.
-   * Returns True if the expression is true for all possible assignments
-   * of truth values to variables.
+   *
+   * Returns `True` if the expression is true for all possible assignments
+   * of truth values to variables, `False` otherwise.
+   *
+   * **Performance**: Uses brute-force enumeration with O(2^n) complexity.
+   * Limited to 20 variables; larger expressions return unevaluated.
+   * Expressions with 15+ variables may take noticeable time (~10ms+).
    */
   IsTautology: {
+    description:
+      'Check if expression is a tautology using brute-force enumeration. O(2^n) complexity, max 20 variables.',
     signature: '(boolean) -> boolean',
     evaluate: ([expr], { engine: ce }) => {
       if (!expr) return undefined;
@@ -493,10 +507,17 @@ export const LOGIC_FUNCTION_LIBRARY: SymbolDefinitions = {
 
   /**
    * Generate a truth table for a boolean expression.
-   * Returns a List of Lists, where each inner list contains the variable
-   * assignments followed by the result.
    *
-   * Example: TruthTable(["And", "A", "B"]) returns:
+   * Returns a `List` of `List`s, where the first row contains column headers
+   * (variable names followed by "Result") and subsequent rows contain the
+   * truth values for each assignment.
+   *
+   * **Performance**: Generates all 2^n rows with O(2^n) time and space.
+   * Limited to 10 variables (stricter than SAT/tautology checks due to
+   * memory requirements); larger expressions return unevaluated.
+   *
+   * @example
+   * TruthTable(["And", "A", "B"]) returns:
    * [["List", "A", "B", "Result"],
    *  ["List", False, False, False],
    *  ["List", False, True, False],
@@ -504,6 +525,8 @@ export const LOGIC_FUNCTION_LIBRARY: SymbolDefinitions = {
    *  ["List", True, True, True]]
    */
   TruthTable: {
+    description:
+      'Generate truth table for expression. O(2^n) complexity, max 10 variables.',
     signature: '(boolean) -> list',
     evaluate: ([expr], { engine: ce }) => {
       if (!expr) return undefined;
