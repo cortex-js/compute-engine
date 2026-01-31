@@ -312,6 +312,13 @@ export class _Parser implements Parser {
     return BoxedType.unknown;
   }
 
+  hasSubscriptEvaluate(id: MathJsonSymbol): boolean {
+    // Check if the symbol has a custom subscript evaluation handler
+    if (this.options.hasSubscriptEvaluate)
+      return this.options.hasSubscriptEvaluate(id);
+    return false;
+  }
+
   get peek(): LatexToken {
     const peek = this._tokens[this.index];
     if (peek === this._lastPeek) this._peekCounter += 1;

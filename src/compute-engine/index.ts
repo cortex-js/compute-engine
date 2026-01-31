@@ -1944,6 +1944,12 @@ export class ComputeEngine implements IComputeEngine {
 
         return BoxedType.unknown;
       },
+      hasSubscriptEvaluate: (id) => {
+        // Check if the symbol has a custom subscript evaluation handler
+        const def = this.lookupDefinition(id);
+        if (isValueDef(def) && def.value.subscriptEvaluate) return true;
+        return false;
+      },
       parseUnexpectedToken: (_lhs, _parser) => null,
       preserveLatex: false,
       quantifierScope: 'tight',

@@ -741,6 +741,14 @@ export type ParseLatexOptions = NumberFormat & {
    */
   getSymbolType: (symbol: MathJsonSymbol) => BoxedType;
 
+  /**
+   * This handler is invoked when the parser needs to determine if a symbol
+   * has a custom subscript evaluation handler. If true, subscripts on this
+   * symbol will be kept as `Subscript` expressions rather than being absorbed
+   * into a compound symbol name.
+   */
+  hasSubscriptEvaluate?: (symbol: MathJsonSymbol) => boolean;
+
   /** This handler is invoked when the parser encounters an unexpected token.
    *
    * The `lhs` argument is the left-hand side of the token, if any.
@@ -824,9 +832,14 @@ export type ParseLatexOptions = NumberFormat & {
  */
 
 export interface Parser {
-  readonly options: Required<ParseLatexOptions>;
+  readonly options: Readonly<ParseLatexOptions>;
 
   getSymbolType(id: MathJsonSymbol): BoxedType;
+
+  /**
+   * Check if a symbol has a custom subscript evaluation handler.
+   */
+  hasSubscriptEvaluate(id: MathJsonSymbol): boolean;
 
   pushSymbolTable(): void;
 

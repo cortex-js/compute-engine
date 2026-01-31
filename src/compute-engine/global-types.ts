@@ -2104,6 +2104,19 @@ export type ValueDefinition = BaseDefinition & {
   cmp: (a: BoxedExpression) => '=' | '>' | '<' | undefined;
 
   collection: CollectionHandlers;
+
+  /**
+   * Custom evaluation handler for subscripted expressions of this symbol.
+   * Called when evaluating `Subscript(symbol, index)`.
+   *
+   * @param subscript - The subscript expression (already evaluated)
+   * @param options - Contains the compute engine and evaluation options
+   * @returns The evaluated result, or `undefined` to fall back to symbolic form
+   */
+  subscriptEvaluate?: (
+    subscript: BoxedExpression,
+    options: { engine: ComputeEngine; numericApproximation?: boolean }
+  ) => BoxedExpression | undefined;
 };
 
 /**
@@ -2668,6 +2681,15 @@ export interface BoxedValueDefinition extends BoxedBaseDefinition {
   inferredType: boolean;
 
   type: BoxedType;
+
+  /**
+   * Custom evaluation handler for subscripted expressions of this symbol.
+   * Called when evaluating `Subscript(symbol, index)`.
+   */
+  subscriptEvaluate?: (
+    subscript: BoxedExpression,
+    options: { engine: ComputeEngine; numericApproximation?: boolean }
+  ) => BoxedExpression | undefined;
 }
 
 /**

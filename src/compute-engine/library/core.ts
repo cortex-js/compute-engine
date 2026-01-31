@@ -31,7 +31,7 @@ import type {
 } from '../global-types';
 import { BoxedString } from '../boxed-expression/boxed-string';
 import { canonical } from '../boxed-expression/canonical-utils';
-import { isDictionary } from '../boxed-expression/utils';
+import { isDictionary, isValueDef } from '../boxed-expression/utils';
 
 //   // := assign 80 // @todo
 // compose (compose(f, g) -> a new function such that compose(f, g)(x) -> f(g(x))
@@ -743,6 +743,12 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
         // (like a_n) are converted to compound symbols during canonicalization
         // and won't reach this type function.
         if (op1.symbol) {
+          // If the base symbol has subscriptEvaluate, the result will be a number
+          // (or undefined, which keeps it as Subscript)
+          const symbolDef = ce.lookupDefinition(op1.symbol);
+          if (isValueDef(symbolDef) && symbolDef.value.subscriptEvaluate) {
+            return 'number';
+          }
           // Check if this would become a compound symbol (simple subscript)
           const sub =
             op2.string ?? op2.symbol ?? asSmallInteger(op2)?.toString();
@@ -795,6 +801,15 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
           return ce._fn('At', [op1, op2.canonical]);
         }
 
+        // If the base symbol has a subscriptEvaluate handler, keep as Subscript
+        // so the evaluate handler can call it (don't create compound symbol)
+        if (op1.symbol) {
+          const symbolDef = ce.lookupDefinition(op1.symbol);
+          if (isValueDef(symbolDef) && symbolDef.value.subscriptEvaluate) {
+            return ce._fn('Subscript', [op1, op2.canonical]);
+          }
+        }
+
         // Is it a compound symbol `x_\operatorname{max}`, `\mu_0`
         if (op1.symbol) {
           const sub =
@@ -825,6 +840,31 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
         if (op2.operator === 'Delimiter' && op2.op1) sub = op2.op1.canonical;
 
         return ce._fn('Subscript', [op1, sub]);
+      },
+
+      evaluate: (ops, { engine: ce, numericApproximation }) => {
+        const [base, subscript] = ops;
+
+        // Check if base is a symbol with a subscriptEvaluate handler
+        if (base.symbol) {
+          const def = base.valueDefinition;
+          if (def?.subscriptEvaluate) {
+            // Evaluate the subscript first
+            const evalSubscript = subscript.evaluate({ numericApproximation });
+
+            // Call the custom handler
+            const result = def.subscriptEvaluate(evalSubscript, {
+              engine: ce,
+              numericApproximation,
+            });
+
+            // If handler returned a result, use it
+            if (result !== undefined) return result;
+          }
+        }
+
+        // Fallback: return undefined to keep expression symbolic
+        return undefined;
       },
     },
 

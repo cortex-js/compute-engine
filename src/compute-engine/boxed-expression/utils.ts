@@ -343,7 +343,12 @@ export function isValidValueDef(def: any): def is Partial<ValueDefinition> {
 
   if (isBoxedExpression(def)) return false;
 
-  if ('value' in def || 'constant' in def || 'inferred' in def) {
+  if (
+    'value' in def ||
+    'constant' in def ||
+    'inferred' in def ||
+    'subscriptEvaluate' in def
+  ) {
     // If the `type` field is a function, it's an operator definition
     if ('type' in def && typeof def.type === 'function') return false;
 

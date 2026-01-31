@@ -84,6 +84,12 @@ export class _BoxedValueDefinition
   // This optional handler is used to do collection operations on the symbol
   collection?: CollectionHandlers;
 
+  // This optional handler is used to evaluate subscripted expressions of this symbol
+  subscriptEvaluate?: (
+    subscript: BoxedExpression,
+    options: { engine: ComputeEngine; numericApproximation?: boolean }
+  ) => BoxedExpression | undefined;
+
   constructor(ce: ComputeEngine, name: string, def: Partial<ValueDefinition>) {
     this._engine = ce;
     this.name = name;
@@ -153,6 +159,8 @@ export class _BoxedValueDefinition
       if (name === 'Take') debugger;
       this.collection = defaultCollectionHandlers(def.collection);
     }
+
+    if (def.subscriptEvaluate) this.subscriptEvaluate = def.subscriptEvaluate;
 
     if (this.holdUntil === 'never' && !this.isConstant)
       throw new Error(

@@ -287,11 +287,13 @@ export function parseSymbol(parser: Parser): MathJsonSymbol | null {
   if (/^[a-zA-Z]$/.test(parser.peek) || /^\p{XIDS}$/u.test(parser.peek)) {
     let id = parser.nextToken();
 
-    // Check if the symbol is declared as a collection type.
+    // Check if the symbol is declared as a collection type or has subscriptEvaluate.
     // If so, don't absorb subscripts into the symbol name - let them be
-    // handled as Subscript expressions which will convert to At() calls.
+    // handled as Subscript expressions which will convert to At() calls
+    // or be evaluated by the subscriptEvaluate handler.
     const symbolType = parser.getSymbolType(id);
     const isCollection = symbolType.matches('indexed_collection');
+    const hasSubscriptEval = parser.hasSubscriptEvaluate(id);
 
     // Check if followed by subscript(s) - if so, include them in the symbol name
     // This ensures 'i_A' is parsed as a single symbol 'i_A', not as a subscript
@@ -300,9 +302,9 @@ export function parseSymbol(parser: Parser): MathJsonSymbol | null {
     // - {n,m} (comma indicates multi-index)
     // - {n+1} (operators indicate an expression)
     // - {(n+1)} (parentheses indicate an expression)
-    // Also, if the symbol is a collection type, all subscripts should be
-    // Subscript expressions (which convert to At() calls).
-    while (!parser.atEnd && !isCollection) {
+    // Also, if the symbol is a collection type or has subscriptEvaluate,
+    // all subscripts should be Subscript expressions.
+    while (!parser.atEnd && !isCollection && !hasSubscriptEval) {
       const currentPeek = parser.peek;
       if (currentPeek !== '_') break;
 

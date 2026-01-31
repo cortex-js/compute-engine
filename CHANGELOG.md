@@ -2,6 +2,30 @@
 
 ### New Features
 
+- **Subscript Evaluation Handler**: Define custom evaluation functions for
+  subscripted symbols like mathematical sequences using `subscriptEvaluate`:
+
+  ```javascript
+  // Define a Fibonacci sequence
+  ce.declare('F', {
+    subscriptEvaluate: (subscript, { engine }) => {
+      const n = subscript.re;
+      if (!Number.isInteger(n) || n < 0) return undefined;
+      // Calculate Fibonacci number...
+      return engine.number(fibValue);
+    },
+  });
+
+  ce.parse('F_{10}').evaluate();  // → 55
+  ce.parse('F_5').evaluate();     // → 5
+  ce.parse('F_n').evaluate();     // → stays symbolic (handler returns undefined)
+  ```
+
+  Both simple subscripts (`F_5`) and complex subscripts (`F_{5}`) are supported.
+  When the handler returns `undefined`, the expression stays symbolic. Subscripted
+  expressions with `subscriptEvaluate` have type `number` and can be used in
+  arithmetic operations: `ce.parse('F_{5} + F_{3}').evaluate()` works correctly.
+
 - **Type-Aware Subscript Handling**: Subscripts on symbols declared as
   collection types (list, tuple, matrix, etc.) now automatically convert to
   `At()` indexing operations:
