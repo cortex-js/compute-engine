@@ -1440,6 +1440,36 @@ export function antiderivative(
       }
     }
 
+    // Case D2: Recognize ∫ 1/(g(x)·h(x)) dx = ln|h(x)| when g(x) = d/dx(h(x))
+    // This handles patterns like ∫ 1/(x·ln(x)) dx = ln|ln(x)|
+    // because 1/x = d/dx(ln(x)), so 1/(x·ln(x)) = (1/x)/ln(x) = h'(x)/h(x)
+    if ((fn.op1.is(1) || !fn.op1.has(index)) && fn.op2.operator === 'Multiply') {
+      const factors = fn.op2.ops!;
+      // For each factor f, check if numerator / (product of other factors) = c * d/dx(f)
+      for (let i = 0; i < factors.length; i++) {
+        const f = factors[i];
+        const fDeriv = differentiate(f, index);
+        if (!fDeriv || fDeriv.is(0)) continue;
+
+        // Compute product of other factors
+        const otherFactors = factors.filter((_, j) => j !== i);
+        const otherProduct =
+          otherFactors.length === 1 ? otherFactors[0] : mul(...otherFactors);
+
+        // Check if numerator / otherProduct = c * fDeriv for some constant c
+        // This means: numerator = c * fDeriv * otherProduct
+        const ratio = fn.op1.div(otherProduct.mul(fDeriv)).simplify();
+        if (!ratio.has(index)) {
+          // ∫ 1/(g·h) dx where g = c·h' gives c·ln|h|
+          const lnExpr = ce.box(['Ln', ['Abs', f]]);
+          if (ratio.is(1)) {
+            return lnExpr;
+          }
+          return ratio.mul(lnExpr);
+        }
+      }
+    }
+
     // Handle ∫ 1/(ax+b) dx = (1/a) * ln|ax+b|
     // Check if denominator is a linear function of x
     if (fn.op1.is(1) || !fn.op1.has(index)) {

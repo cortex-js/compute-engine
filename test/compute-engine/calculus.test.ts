@@ -287,6 +287,19 @@ describe('INDEFINITE INTEGRATION', () => {
       `1/2 * ln(|x^2 + 1|)`
     ));
 
+  // Special u-substitution: 1/(x·ln(x)) -> ln(ln(x))
+  test('1/(x*ln(x)) (u-substitution)', () =>
+    expect(evaluate('\\int \\frac{1}{x\\ln x} dx')).toMatchInlineSnapshot(
+      `ln(|ln(x)|)`
+    ));
+
+  // Variant with constant: c/(x·ln(x)) -> c·ln(ln(x))
+  test('3/(x*ln(x)) (u-substitution with constant)', () =>
+    expect(evaluate('\\int \\frac{3}{x\\ln x} dx')).toMatchInlineSnapshot(
+      `3ln(|ln(x)|)`
+    ));
+
+
   test('(2x+1)/(x^2+x+1) (derivative pattern)', () =>
     expect(evaluate('\\int \\frac{2x+1}{x^2+x+1} dx')).toMatchInlineSnapshot(
       `ln(|x^2 + x + 1|)`

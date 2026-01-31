@@ -158,6 +158,16 @@
   ```
   Chain rule is automatically applied for composite arguments.
 
+- **Integration of `1/(x·ln(x))` Pattern**: Added support for integrating
+  expressions where the denominator is a product and one factor is the derivative
+  of another:
+  ```javascript
+  ce.parse('\\int \\frac{1}{x\\ln x} dx').evaluate();  // → ln(|ln(x)|)
+  ce.parse('\\int \\frac{3}{x\\ln x} dx').evaluate();  // → 3·ln(|ln(x)|)
+  ```
+  This uses u-substitution: since `1/x = d/dx(ln(x))`, the integral becomes
+  `∫ h'(x)/h(x) dx = ln|h(x)|`.
+
 - **Multi-Argument Function Derivatives**: Added derivative support for:
 
   - **Log(x, base)** - Logarithm with custom base:
