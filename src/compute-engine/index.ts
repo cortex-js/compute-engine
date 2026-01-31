@@ -1348,6 +1348,26 @@ export class ComputeEngine implements IComputeEngine {
   }
 
   /**
+   * Set a value directly in the current context's values map.
+   * This is used for assumptions so that the value is scoped to the current
+   * evaluation context and is automatically removed when the scope is popped.
+   * @internal
+   */
+  _setCurrentContextValue(
+    id: MathJsonSymbol,
+    value: BoxedExpression | boolean | number | undefined
+  ): void {
+    const l = this._evalContextStack.length - 1;
+    if (l < 0) throw new Error(`No evaluation context`);
+
+    if (typeof value === 'number') value = this.number(value);
+    else if (typeof value === 'boolean') value = value ? this.True : this.False;
+
+    this._evalContextStack[l].values[id] = value;
+    this._generation += 1;
+  }
+
+  /**
    * Declare a symbol in the current lexical scope: specify their type and
    * other attributes, including optionally a value.
    *
@@ -2256,6 +2276,14 @@ export class ComputeEngine implements IComputeEngine {
       // any previous assumptions about the symbol will be restored).
       for (const [assumption, _val] of this.context.assumptions) {
         if (assumption.has(symbol)) this.context.assumptions.delete(assumption);
+      }
+
+      // Also clear any values that were set for this symbol in the evaluation context.
+      // Values can be stored in any frame of the context stack, so we need to check all of them.
+      for (const ctx of this._evalContextStack) {
+        if (symbol in ctx.values) {
+          delete ctx.values[symbol];
+        }
       }
     }
     // The removed assumptions could affect existing expressions

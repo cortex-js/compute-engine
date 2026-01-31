@@ -867,6 +867,18 @@ ASSUMPTIONS"
 
 ---
 
+### ~~24. BUG: forget() Doesn't Clear Assumed Values~~ ✅ FIXED
+
+See `requirements/DONE.md` for implementation details.
+
+---
+
+### ~~25. BUG: Scoped Assumptions Don't Clean Up on popScope()~~ ✅ FIXED
+
+See `requirements/DONE.md` for implementation details.
+
+---
+
 ## Future Improvements (Not Yet Detailed)
 
 ### Trigonometric Simplification

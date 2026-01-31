@@ -1089,3 +1089,98 @@ ce.box('t').isGreater(-1);               // → true
 **Tests enabled:**
 - `test/compute-engine/assumptions.test.ts` - Enabled "INEQUALITY EVALUATION USING ASSUMPTIONS"
   describe block (6 tests)
+
+---
+
+### 24. BUG FIX: forget() Now Clears Assumed Values ✅
+
+**FIXED:** The `forget()` function now properly clears values from the evaluation
+context when a symbol is forgotten.
+
+**Problem:** When `ce.assume(['Equal', 'x', 5])` was called followed by `ce.forget('x')`,
+the value `5` would persist in the evaluation context, causing `ce.box('x').evaluate()`
+to still return `5` instead of the symbol `'x'`.
+
+**Root cause:** When task #18 was implemented, values were stored in the evaluation
+context via `ce._setSymbolValue()`. However, `forget()` only removed assumptions from
+`ce.context.assumptions` - it didn't clear the value from the evaluation context.
+
+**Solution:** Added code to `forget()` to iterate through all evaluation context frames
+and delete the symbol's value:
+
+```typescript
+// In forget() function, after removing assumptions:
+for (const ctx of this._evalContextStack) {
+  if (symbol in ctx.values) {
+    delete ctx.values[symbol];
+  }
+}
+```
+
+**Examples that now work:**
+```typescript
+const ce = new ComputeEngine();
+ce.assume(ce.box(['Equal', 'x', 5]));
+ce.box('x').evaluate().json;  // → 5
+
+ce.forget('x');
+ce.box('x').evaluate().json;  // → 'x' (was: 5)
+```
+
+**Files modified:**
+- `src/compute-engine/index.ts` - Added value cleanup in `forget()` function
+
+**Tests added:**
+- `test/compute-engine/bug-fixes.test.ts` - Test for forget() value clearing
+
+---
+
+### 25. BUG FIX: Scoped Assumptions Now Clean Up on popScope() ✅
+
+**FIXED:** Assumptions made inside a scope via `pushScope()`/`popScope()` now properly
+clean up when the scope is exited.
+
+**Problem:** When assumptions were made inside a nested scope, the values set via
+`ce._setSymbolValue()` would persist after `popScope()` was called, breaking scope
+isolation.
+
+**Root cause:** The `_setSymbolValue()` function stores values in the context where
+the symbol was declared (which might be a parent scope), not necessarily the current
+scope. When `popScope()` was called, only the current scope's context was removed,
+but the value remained in the parent context.
+
+**Solution:** Created a new internal method `_setCurrentContextValue()` that stores
+values directly in the current context's values map. Modified `assumeEquality()` to
+use this method instead of `_setSymbolValue()`, ensuring that assumption values are
+scoped to where the assumption was made.
+
+```typescript
+// New method in ComputeEngine:
+_setCurrentContextValue(id, value): void {
+  this._evalContextStack[this._evalContextStack.length - 1].values[id] = value;
+}
+
+// In assumeEquality(), changed from:
+ce._setSymbolValue(lhs, val);
+// to:
+ce._setCurrentContextValue(lhs, val);
+```
+
+**Examples that now work:**
+```typescript
+const ce = new ComputeEngine();
+ce.pushScope();
+ce.assume(ce.box(['Equal', 'y', 10]));
+ce.box('y').evaluate().json;  // → 10
+
+ce.popScope();
+ce.box('y').evaluate().json;  // → 'y' (was: 10)
+```
+
+**Files modified:**
+- `src/compute-engine/index.ts` - Added `_setCurrentContextValue()` method
+- `src/compute-engine/global-types.ts` - Added method signature
+- `src/compute-engine/assume.ts` - Changed to use `_setCurrentContextValue()`
+
+**Tests added:**
+- `test/compute-engine/bug-fixes.test.ts` - Test for scoped assumption cleanup

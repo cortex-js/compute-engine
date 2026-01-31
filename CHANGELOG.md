@@ -35,6 +35,32 @@
 
 ### Bug Fixes
 
+- **forget() Now Clears Assumed Values**: Fixed an issue where `ce.forget()` did not
+  clear values that were set by equality assumptions. After calling
+  `ce.assume(['Equal', 'x', 5])` followed by `ce.forget('x')`, the symbol would
+  incorrectly still evaluate to `5`. Now `forget()` properly clears values from
+  all evaluation context frames.
+
+  ```javascript
+  ce.assume(ce.box(['Equal', 'x', 5]));
+  ce.box('x').evaluate();  // → 5
+  ce.forget('x');
+  ce.box('x').evaluate();  // → 'x' (was: 5)
+  ```
+
+- **Scoped Assumptions Now Clean Up on popScope()**: Fixed an issue where
+  assumptions made inside a nested scope would persist after `popScope()` was
+  called. Values set by assumptions are now properly scoped to where the
+  assumption was made, and are automatically removed when the scope exits.
+
+  ```javascript
+  ce.pushScope();
+  ce.assume(ce.box(['Equal', 'y', 10]));
+  ce.box('y').evaluate();  // → 10
+  ce.popScope();
+  ce.box('y').evaluate();  // → 'y' (was: 10)
+  ```
+
 - **Extraneous Root Filtering for Sqrt Equations**: Fixed an issue where solving
   square root equations could return extraneous roots. When solving equations
   like `√x = x - 2` or `√x - x + 2 = 0` using the quadratic substitution method
