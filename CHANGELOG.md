@@ -672,84 +672,77 @@
 
 #### Linear Algebra
 
-- **Linear Algebra Enhancements**: Improved tensor and matrix operations with
-  better scalar handling, new functionality, and clearer error messages:
-  - **Matrix Multiplication**: Added `MatrixMultiply` function supporting:
-    - Matrix × Matrix: `A (m×n) × B (n×p) → result (m×p)`
-    - Matrix × Vector: `A (m×n) × v (n) → result (m)`
-    - Vector × Matrix: `v (m) × B (m×n) → result (n)`
-    - Vector × Vector (dot product): `v1 (n) · v2 (n) → scalar`
-    - Proper dimension validation with `incompatible-dimensions` errors
-    - LaTeX serialization using `\cdot` notation
+- **Matrix Multiplication**: Added `MatrixMultiply` function supporting:
+  - Matrix × Matrix: `A (m×n) × B (n×p) → result (m×p)`
+  - Matrix × Vector: `A (m×n) × v (n) → result (m)`
+  - Vector × Matrix: `v (m) × B (m×n) → result (n)`
+  - Vector × Vector (dot product): `v1 (n) · v2 (n) → scalar`
+  - Proper dimension validation with `incompatible-dimensions` errors
+  - LaTeX serialization using `\cdot` notation
 
-  - **Matrix Addition and Scalar Broadcasting**: `Add` now supports element-wise
-    operations on tensors (matrices and vectors):
-    - Matrix + Matrix: Element-wise addition (shapes must match)
-    - Scalar + Matrix: Broadcasts scalar to all elements
-    - Vector + Vector: Element-wise addition
-    - Scalar + Vector: Broadcasts scalar to all elements
-    - Symbolic support: `[[a,b],[c,d]] + [[1,2],[3,4]]` evaluates correctly
-    - Proper dimension validation with `incompatible-dimensions` errors
+- **Matrix Addition and Scalar Broadcasting**: `Add` now supports element-wise
+  operations on tensors (matrices and vectors):
+  - Matrix + Matrix: Element-wise addition (shapes must match)
+  - Scalar + Matrix: Broadcasts scalar to all elements
+  - Vector + Vector: Element-wise addition
+  - Scalar + Vector: Broadcasts scalar to all elements
+  - Symbolic support: `[[a,b],[c,d]] + [[1,2],[3,4]]` evaluates correctly
+  - Proper dimension validation with `incompatible-dimensions` errors
 
-  - **Matrix Construction Functions**: Added convenience functions for creating
-    common matrices:
-    - `IdentityMatrix(n)`: Creates an n×n identity matrix
-    - `ZeroMatrix(m, n?)`: Creates an m×n matrix of zeros (square if n omitted)
-    - `OnesMatrix(m, n?)`: Creates an m×n matrix of ones (square if n omitted)
+- **Matrix Construction Functions**: Added convenience functions for creating
+  common matrices:
+  - `IdentityMatrix(n)`: Creates an n×n identity matrix
+  - `ZeroMatrix(m, n?)`: Creates an m×n matrix of zeros (square if n omitted)
+  - `OnesMatrix(m, n?)`: Creates an m×n matrix of ones (square if n omitted)
 
-  - **Matrix and Vector Norms**: Added `Norm` function for computing various
-    norms:
-    - **Vector norms**: L1 (sum of absolute values), L2 (Euclidean, default),
-      L-infinity (max absolute value), and general Lp norms
-    - **Matrix norms**: Frobenius (default, sqrt of sum of squared elements), L1
-      (max column sum), L-infinity (max row sum)
-    - Scalar norms return the absolute value
+- **Matrix and Vector Norms**: Added `Norm` function for computing various
+  norms:
+  - **Vector norms**: L1 (sum of absolute values), L2 (Euclidean, default),
+    L-infinity (max absolute value), and general Lp norms
+  - **Matrix norms**: Frobenius (default, sqrt of sum of squared elements), L1
+    (max column sum), L-infinity (max row sum)
+  - Scalar norms return the absolute value
 
-  - **Higher-Rank Tensor Operations**: Extended `Transpose`,
-    `ConjugateTranspose`, and `Trace` to work with rank > 2 tensors:
-    - **Transpose**: Swaps last two axes by default (batch transpose), or
-      specify explicit axes with `['Transpose', T, axis1, axis2]`
-    - **ConjugateTranspose**: Same axis behavior as Transpose, plus element-wise
-      complex conjugation
-    - **Trace (batch trace)**: Returns a tensor of traces over the last two
-      axes. For a `[2,2,2]` tensor, returns `[trace of T[0], trace of T[1]]`.
-      Optional axis parameters: `['Trace', T, axis1, axis2]`
-    - All operations support explicit axis specification for flexible tensor
-      manipulation
+- **Eigenvalues and Eigenvectors**: Added functions for eigenvalue
+  decomposition:
+  - `Eigenvalues(matrix)`: Returns list of eigenvalues (2×2: symbolic via
+    characteristic polynomial; 3×3: Cardano's formula; larger: numeric QR)
+  - `Eigenvectors(matrix)`: Returns list of corresponding eigenvectors using
+    null space computation via Gaussian elimination
+  - `Eigen(matrix)`: Returns tuple of (eigenvalues, eigenvectors)
 
-  - **Eigenvalues and Eigenvectors**: Added functions for eigenvalue
-    decomposition:
-    - `Eigenvalues(matrix)`: Returns list of eigenvalues
-      - 2×2 matrices: symbolic computation via characteristic polynomial
-      - 3×3 matrices: Cardano's formula for cubic roots
-      - Larger matrices: numeric QR algorithm
-      - Optimized for diagonal/triangular matrices
-    - `Eigenvectors(matrix)`: Returns list of corresponding eigenvectors
-      - Uses null space computation via Gaussian elimination
-    - `Eigen(matrix)`: Returns tuple of (eigenvalues, eigenvectors)
+- **Diagonal Function**: Now fully implemented with bidirectional behavior:
+  - Vector → Matrix: Creates a diagonal matrix from a vector
+    (`Diagonal([1,2,3])` → 3×3 diagonal matrix)
+  - Matrix → Vector: Extracts the diagonal as a vector
+    (`Diagonal([[1,2],[3,4]])` → `[1,4]`)
 
-  - **Diagonal function**: Now fully implemented with bidirectional behavior:
-    - Vector → Matrix: Creates a diagonal matrix from a vector
-      (`Diagonal([1,2,3])` → 3×3 diagonal matrix)
-    - Matrix → Vector: Extracts the diagonal as a vector
-      (`Diagonal([[1,2],[3,4]])` → `[1,4]`)
+- **Higher-Rank Tensor Operations**: Extended `Transpose`, `ConjugateTranspose`,
+  and `Trace` to work with rank > 2 tensors:
+  - **Transpose**: Swaps last two axes by default (batch transpose), or specify
+    explicit axes with `['Transpose', T, axis1, axis2]`
+  - **ConjugateTranspose**: Same axis behavior as Transpose, plus element-wise
+    complex conjugation
+  - **Trace (batch trace)**: Returns a tensor of traces over the last two axes.
+    For a `[2,2,2]` tensor, returns `[trace of T[0], trace of T[1]]`. Optional
+    axis parameters: `['Trace', T, axis1, axis2]`
 
-  - **Reshape cycling**: Implements APL-style ravel cycling. When reshaping to a
-    larger shape, elements cycle from the beginning: `Reshape([1,2,3], (2,2))` →
-    `[[1,2],[3,1]]`
+- **Reshape Cycling**: Implements APL-style ravel cycling. When reshaping to a
+  larger shape, elements cycle from the beginning: `Reshape([1,2,3], (2,2))` →
+  `[[1,2],[3,1]]`
 
-  - **Scalar handling**: Most linear algebra functions now handle scalar inputs:
-    - `Flatten(42)` → `[42]` (single-element list)
-    - `Transpose(42)` → `42` (identity)
-    - `Determinant(42)` → `42` (1×1 matrix determinant)
-    - `Trace(42)` → `42` (1×1 matrix trace)
-    - `Inverse(42)` → `1/42` (scalar reciprocal)
-    - `ConjugateTranspose(42)` → `42` (conjugate of real is itself)
-    - `Reshape(42, (2,2))` → `[[42,42],[42,42]]` (scalar replication)
+- **Scalar Handling**: Most linear algebra functions now handle scalar inputs:
+  - `Flatten(42)` → `[42]` (single-element list)
+  - `Transpose(42)` → `42` (identity)
+  - `Determinant(42)` → `42` (1×1 matrix determinant)
+  - `Trace(42)` → `42` (1×1 matrix trace)
+  - `Inverse(42)` → `1/42` (scalar reciprocal)
+  - `ConjugateTranspose(42)` → `42` (conjugate of real is itself)
+  - `Reshape(42, (2,2))` → `[[42,42],[42,42]]` (scalar replication)
 
-  - **Error messages**: Operations requiring square matrices (`Determinant`,
-    `Trace`, `Inverse`) now return `expected-square-matrix` error for vectors
-    and tensors (rank > 2).
+- **Improved Error Messages**: Operations requiring square matrices
+  (`Determinant`, `Trace`, `Inverse`) now return `expected-square-matrix` error
+  for vectors and tensors (rank > 2).
 
 ### Performance
 
