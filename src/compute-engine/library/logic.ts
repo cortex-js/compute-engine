@@ -26,6 +26,10 @@ import {
   isSatisfiable,
   isTautology,
   generateTruthTable,
+  findPrimeImplicants,
+  findPrimeImplicates,
+  minimalDNF,
+  minimalCNF,
 } from './logic-analysis';
 
 export const LOGIC_LIBRARY: SymbolDefinitions = {
@@ -531,6 +535,112 @@ export const LOGIC_FUNCTION_LIBRARY: SymbolDefinitions = {
     evaluate: ([expr], { engine: ce }) => {
       if (!expr) return undefined;
       return generateTruthTable(expr, ce);
+    },
+  },
+
+  /**
+   * Find all prime implicants of a boolean expression.
+   *
+   * A prime implicant is a minimal product term (conjunction of literals)
+   * that implies the expression. Uses the Quine-McCluskey algorithm.
+   *
+   * **Performance**: O(3^n) worst case, limited to 12 variables.
+   *
+   * @example
+   * PrimeImplicants(["Or", ["And", "A", "B"], ["And", "A", ["Not", "B"]]]])
+   * → [A] (both AB and A¬B simplify to just A)
+   */
+  PrimeImplicants: {
+    description:
+      'Find all prime implicants using Quine-McCluskey. Max 12 variables.',
+    signature: '(boolean) -> list',
+    evaluate: ([expr], { engine: ce }) => {
+      if (!expr) return undefined;
+      const result = findPrimeImplicants(expr, ce);
+      if (result === null) {
+        return ce._fn('PrimeImplicants', [expr]);
+      }
+      return ce._fn('List', result);
+    },
+  },
+
+  /**
+   * Find all prime implicates of a boolean expression.
+   *
+   * A prime implicate is a minimal sum term (disjunction of literals)
+   * that is implied by the expression. These are the minimal clauses in CNF.
+   *
+   * **Performance**: O(3^n) worst case, limited to 12 variables.
+   *
+   * @example
+   * PrimeImplicates(["And", "A", "B"])
+   * → [A, B] (the expression implies both A and B separately)
+   */
+  PrimeImplicates: {
+    description:
+      'Find all prime implicates using Quine-McCluskey. Max 12 variables.',
+    signature: '(boolean) -> list',
+    evaluate: ([expr], { engine: ce }) => {
+      if (!expr) return undefined;
+      const result = findPrimeImplicates(expr, ce);
+      if (result === null) {
+        return ce._fn('PrimeImplicates', [expr]);
+      }
+      return ce._fn('List', result);
+    },
+  },
+
+  /**
+   * Convert a boolean expression to minimal Disjunctive Normal Form (DNF).
+   *
+   * Uses the Quine-McCluskey algorithm to find prime implicants, then
+   * selects a minimal cover. The result is a disjunction of conjunctions
+   * of literals with the fewest terms possible.
+   *
+   * **Performance**: O(3^n) worst case, limited to 12 variables.
+   *
+   * @example
+   * MinimalDNF(["Or", ["And", "A", "B"], ["And", "A", ["Not", "B"]], ["And", ["Not", "A"], "B"]])
+   * → ["Or", "A", "B"] (simplified from 3 terms to 2)
+   */
+  MinimalDNF: {
+    description:
+      'Convert to minimal DNF using Quine-McCluskey. Max 12 variables.',
+    signature: '(boolean) -> boolean',
+    evaluate: ([expr], { engine: ce }) => {
+      if (!expr) return undefined;
+      const result = minimalDNF(expr, ce);
+      if (result === null) {
+        return ce._fn('MinimalDNF', [expr]);
+      }
+      return result;
+    },
+  },
+
+  /**
+   * Convert a boolean expression to minimal Conjunctive Normal Form (CNF).
+   *
+   * Uses the Quine-McCluskey algorithm to find prime implicates, then
+   * selects a minimal cover. The result is a conjunction of disjunctions
+   * of literals with the fewest clauses possible.
+   *
+   * **Performance**: O(3^n) worst case, limited to 12 variables.
+   *
+   * @example
+   * MinimalCNF(["Or", ["And", "A", "B"], ["And", "A", ["Not", "B"]]])
+   * → A (the expression simplifies to just A)
+   */
+  MinimalCNF: {
+    description:
+      'Convert to minimal CNF using Quine-McCluskey. Max 12 variables.',
+    signature: '(boolean) -> boolean',
+    evaluate: ([expr], { engine: ce }) => {
+      if (!expr) return undefined;
+      const result = minimalCNF(expr, ce);
+      if (result === null) {
+        return ce._fn('MinimalCNF', [expr]);
+      }
+      return result;
     },
   },
 };

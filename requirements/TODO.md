@@ -123,30 +123,9 @@ ce.box(['IsEquivalent',
 
 ---
 
-### 6. Prime Implicants/Implicates
+### ~~6. Prime Implicants/Implicates~~ ✅ COMPLETED
 
-**Problem:** For circuit minimization and optimal CNF/DNF, we need minimal
-representations.
-
-**Solution:** Add functions:
-
-- `PrimeImplicants(expr)` - Find all prime implicants (minimal terms in DNF)
-- `PrimeImplicates(expr)` - Find all prime implicates (minimal clauses in CNF)
-- `MinimalDNF(expr)` - DNF with only prime implicants (Quine-McCluskey)
-- `MinimalCNF(expr)` - CNF with only prime implicates
-
-```typescript
-ce.box(['MinimalDNF', ['Or',
-  ['And', 'A', 'B'],
-  ['And', 'A', ['Not', 'B']],
-  ['And', ['Not', 'A'], 'B']
-]]).evaluate()
-// → A ∨ B (simplified from 3 terms to 1)
-```
-
-**Algorithm:** Quine-McCluskey or Espresso for larger formulas.
-
-**File:** `src/compute-engine/library/logic.ts`
+See `requirements/DONE.md` for implementation details.
 
 ---
 
