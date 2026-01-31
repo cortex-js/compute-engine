@@ -241,6 +241,39 @@ export const SIMPLIFY_RULES: Rule[] = [
       if (group.length > 1) return undefined;
     }
 
+    // Check for trig power patterns that simplifyTrig should handle:
+    // - n * sin²(x) or sin²(x) * n (power reduction identities)
+    // - sin(x) * cos(x) (product-to-sum identities)
+    // - tan(x) * cot(x) -> 1
+    if (ops.length === 2) {
+      const [a, b] = ops;
+      // Check for coefficient * trig²(x) pattern (e.g., 2sin²(x) -> 1-cos(2x))
+      const hasTrigSquared =
+        (a.operator === 'Power' &&
+          a.op2?.is(2) &&
+          ['Sin', 'Cos'].includes(a.op1?.operator || '')) ||
+        (b.operator === 'Power' &&
+          b.op2?.is(2) &&
+          ['Sin', 'Cos'].includes(b.op1?.operator || ''));
+      const hasCoefficient =
+        a.isNumberLiteral || b.isNumberLiteral;
+      if (hasTrigSquared && hasCoefficient) return undefined;
+
+      // Check for sin(x) * cos(x) pattern
+      const hasSin =
+        a.operator === 'Sin' || b.operator === 'Sin';
+      const hasCos =
+        a.operator === 'Cos' || b.operator === 'Cos';
+      if (hasSin && hasCos) return undefined;
+
+      // Check for tan(x) * cot(x) pattern
+      const hasTan =
+        a.operator === 'Tan' || b.operator === 'Tan';
+      const hasCot =
+        a.operator === 'Cot' || b.operator === 'Cot';
+      if (hasTan && hasCot) return undefined;
+    }
+
     // The Multiply function has a 'lazy' property, so we need to ensure operands are canonical.
     // Also evaluate purely numeric operands (no unknowns) to simplify expressions.
     // IMPORTANT: Don't call .simplify() on operands to avoid infinite recursion.

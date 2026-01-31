@@ -83,6 +83,11 @@
   where log has a different base than e. Now `e^log(x)` → `x^{1/ln(10)}` and
   more generally `e^log_c(x)` → `x^{1/ln(c)}` for any base c.
 
+- **Trigonometric Product Identities**: Improved handling of trig products in
+  simplification. The Multiply rule now correctly defers to trig-specific rules
+  for patterns like `sin(x)*cos(x)` and `tan(x)*cot(x)`, ensuring these are
+  simplified to `sin(2x)/2` and `1` respectively.
+
 ### Features
 
 - **([#163](https://github.com/cortex-js/compute-engine/issues/163)) Additional
