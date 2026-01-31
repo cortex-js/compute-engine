@@ -75,9 +75,9 @@ describe('INEQUALITY EVALUATION USING ASSUMPTIONS', () => {
   });
 });
 
-// TODO #20: Tautology and Contradiction Detection
+// #20: Tautology and Contradiction Detection
 // ce.assume() should return 'tautology' for redundant assumptions and 'contradiction' for conflicting ones
-describe.skip('TAUTOLOGY AND CONTRADICTION DETECTION', () => {
+describe('TAUTOLOGY AND CONTRADICTION DETECTION', () => {
   test(`assuming one = 1 again should return tautology`, () => {
     expect(ce.assume(ce.box(['Equal', 'one', 1]))).toEqual('tautology');
   });

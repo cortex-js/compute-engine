@@ -46,6 +46,28 @@
   ce.box('one').type.toString();  // → 'integer' (was: 'unknown')
   ```
 
+- **Tautology and Contradiction Detection**: `ce.assume()` now returns
+  `'tautology'` for redundant assumptions that are already implied by existing
+  assumptions, and `'contradiction'` for assumptions that conflict with
+  existing ones.
+
+  ```javascript
+  ce.assume(ce.box(['Greater', 'x', 4]));
+
+  // Redundant assumption (x > 4 implies x > 0)
+  ce.assume(ce.box(['Greater', 'x', 0]));  // → 'tautology' (was: 'ok')
+
+  // Conflicting assumption (x > 4 contradicts x < 0)
+  ce.assume(ce.box(['Less', 'x', 0]));     // → 'contradiction'
+
+  // Same assumption repeated
+  ce.assume(ce.box(['Equal', 'one', 1]));
+  ce.assume(ce.box(['Equal', 'one', 1]));  // → 'tautology'
+
+  // Conflicting equality
+  ce.assume(ce.box(['Less', 'one', 0]));   // → 'contradiction'
+  ```
+
 ### Bug Fixes
 
 - **forget() Now Clears Assumed Values**: Fixed an issue where `ce.forget()` did not

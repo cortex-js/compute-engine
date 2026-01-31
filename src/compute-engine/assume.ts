@@ -394,6 +394,127 @@ function assumeInequality(proposition: BoxedExpression): AssumeResult {
   const unknowns = result.unknowns;
   if (unknowns.length === 0) return 'not-a-predicate';
 
+  // Check if the new inequality is implied by or contradicts existing bounds
+  // (for single-symbol inequalities)
+  if (unknowns.length === 1) {
+    const symbol = unknowns[0];
+    const bounds = getInequalityBoundsFromAssumptions(ce, symbol);
+
+    // The normalized form is Less(p, 0) or LessEqual(p, 0) where p = lhs - rhs
+    // For a simple symbol case like "x > k", this becomes Less(-x + k, 0) meaning k - x < 0, i.e., x > k
+    // For "x < k", this becomes Less(x - k, 0) meaning x - k < 0, i.e., x < k
+
+    // Check if this is a simple "symbol > value" or "symbol < value" case
+    const originalOp = proposition.operator;
+    const isSymbolOnLeft = proposition.op1.symbol === symbol;
+    const otherSide = isSymbolOnLeft ? proposition.op2 : proposition.op1;
+
+    // Only do bounds checking for simple comparisons like "x > k" where k is numeric
+    if (otherSide.numericValue !== null) {
+      const k = otherSide.numericValue;
+
+      if (typeof k === 'number' && isFinite(k)) {
+        // Determine the EFFECTIVE relationship based on operator and symbol position
+        // Less(a, b) means a < b:
+        //   - if a is symbol: symbol < b, effective is "less"
+        //   - if b is symbol: a < symbol, so symbol > a, effective is "greater"
+        // Greater(a, b) means a > b:
+        //   - if a is symbol: symbol > b, effective is "greater"
+        //   - if b is symbol: a > symbol, so symbol < a, effective is "less"
+        let effectiveOp: 'greater' | 'greaterEqual' | 'less' | 'lessEqual';
+        if (originalOp === 'Greater') {
+          effectiveOp = isSymbolOnLeft ? 'greater' : 'less';
+        } else if (originalOp === 'GreaterEqual') {
+          effectiveOp = isSymbolOnLeft ? 'greaterEqual' : 'lessEqual';
+        } else if (originalOp === 'Less') {
+          effectiveOp = isSymbolOnLeft ? 'less' : 'greater';
+        } else {
+          // LessEqual
+          effectiveOp = isSymbolOnLeft ? 'lessEqual' : 'greaterEqual';
+        }
+
+        // Check for tautologies and contradictions based on existing bounds
+        if (effectiveOp === 'greater' || effectiveOp === 'greaterEqual') {
+          // We're asserting symbol > k or symbol >= k
+          const isStrict = effectiveOp === 'greater';
+
+          if (bounds.lowerBound !== undefined) {
+            const lowerVal = bounds.lowerBound.numericValue;
+            if (typeof lowerVal === 'number' && isFinite(lowerVal)) {
+              // We already know symbol > lowerVal (or >=)
+              if (isStrict) {
+                // Assuming symbol > k: tautology if existing lower bound implies this
+                // If lowerVal > k, then symbol > lowerVal > k, so symbol > k (tautology)
+                // If lowerVal == k and bound is strict, then symbol > lowerVal = k (tautology)
+                if (lowerVal > k) return 'tautology';
+                if (bounds.lowerStrict && lowerVal >= k) return 'tautology';
+              } else {
+                // Assuming symbol >= k: tautology if lowerVal >= k (with strict bound) or lowerVal > k
+                if (lowerVal > k) return 'tautology';
+                if (bounds.lowerStrict && lowerVal >= k) return 'tautology';
+                if (!bounds.lowerStrict && lowerVal >= k) return 'tautology';
+              }
+            }
+          }
+
+          if (bounds.upperBound !== undefined) {
+            const upperVal = bounds.upperBound.numericValue;
+            if (typeof upperVal === 'number' && isFinite(upperVal)) {
+              // We know symbol < upperVal (or <=), now checking symbol > k
+              if (isStrict) {
+                // Contradiction if upperVal <= k
+                if (upperVal < k) return 'contradiction';
+                if (bounds.upperStrict && upperVal <= k) return 'contradiction';
+                if (!bounds.upperStrict && upperVal <= k) return 'contradiction';
+              } else {
+                // symbol >= k: contradiction if upperVal < k
+                if (upperVal < k) return 'contradiction';
+                if (bounds.upperStrict && upperVal <= k) return 'contradiction';
+              }
+            }
+          }
+        } else {
+          // effectiveOp is 'less' or 'lessEqual'
+          // We're asserting symbol < k or symbol <= k
+          const isStrict = effectiveOp === 'less';
+
+          if (bounds.upperBound !== undefined) {
+            const upperVal = bounds.upperBound.numericValue;
+            if (typeof upperVal === 'number' && isFinite(upperVal)) {
+              // We already know symbol < upperVal (or <=)
+              if (isStrict) {
+                // Assuming symbol < k: tautology if existing upper bound implies this
+                if (upperVal < k) return 'tautology';
+                if (bounds.upperStrict && upperVal <= k) return 'tautology';
+              } else {
+                // symbol <= k: tautology if upperVal <= k
+                if (upperVal < k) return 'tautology';
+                if (upperVal <= k) return 'tautology';
+              }
+            }
+          }
+
+          if (bounds.lowerBound !== undefined) {
+            const lowerVal = bounds.lowerBound.numericValue;
+            if (typeof lowerVal === 'number' && isFinite(lowerVal)) {
+              // We know symbol > lowerVal (or >=), now checking symbol < k
+              if (isStrict) {
+                // Contradiction if lowerVal >= k
+                if (lowerVal > k) return 'contradiction';
+                if (bounds.lowerStrict && lowerVal >= k) return 'contradiction';
+                if (!bounds.lowerStrict && lowerVal >= k) return 'contradiction';
+              } else {
+                // symbol <= k: contradiction if lowerVal > k
+                if (lowerVal > k) return 'contradiction';
+                if (bounds.lowerStrict && lowerVal > k) return 'contradiction';
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+
   // Case 3: single unknown - ensure the symbol has type 'real'
   // (inequalities imply the symbol is a real number)
   if (unknowns.length === 1) {
