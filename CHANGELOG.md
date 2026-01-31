@@ -312,6 +312,28 @@
   This uses u-substitution: since `1/x = d/dx(ln(x))`, the integral becomes
   `∫ h'(x)/h(x) dx = ln|h(x)|`.
 
+- **Cyclic Integration for e^x with Trigonometric Functions**: Added support for
+  integrating products of exponentials and trigonometric functions that require
+  the "solve for the integral" technique:
+  ```javascript
+  ce.parse('\\int e^x \\sin x dx').evaluate();
+  // → -1/2·cos(x)·e^x + 1/2·sin(x)·e^x
+
+  ce.parse('\\int e^x \\cos x dx').evaluate();
+  // → 1/2·sin(x)·e^x + 1/2·cos(x)·e^x
+
+  // Also works with linear arguments:
+  ce.parse('\\int e^x \\sin(2x) dx').evaluate();
+  // → -2/5·cos(2x)·e^x + 1/5·sin(2x)·e^x
+
+  ce.parse('\\int e^x \\cos(2x) dx').evaluate();
+  // → 1/5·cos(2x)·e^x + 2/5·sin(2x)·e^x
+  ```
+  These patterns cannot be solved by standard integration by parts (which would
+  lead to infinite recursion) and instead use direct formulas:
+  - `∫ e^x·sin(ax+b) dx = (e^x/(a²+1))·(sin(ax+b) - a·cos(ax+b))`
+  - `∫ e^x·cos(ax+b) dx = (e^x/(a²+1))·(a·sin(ax+b) + cos(ax+b))`
+
 #### Logic
 
 - **Boolean Simplification Rules**: Added absorption laws and improved boolean
