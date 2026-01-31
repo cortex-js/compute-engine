@@ -109,6 +109,41 @@
   This enables important mathematical simplifications that depend on knowing
   whether a variable is positive, negative, or zero.
 
+- **Declarative Sequence Definitions**: Define mathematical sequences using
+  recurrence relations with the new `declareSequence()` method:
+
+  ```javascript
+  // Fibonacci sequence
+  ce.declareSequence('F', {
+    base: { 0: 0, 1: 1 },
+    recurrence: 'F_{n-1} + F_{n-2}',
+  });
+  ce.parse('F_{10}').evaluate();  // → 55
+  ce.parse('F_{20}').evaluate();  // → 6765
+
+  // Arithmetic sequence: a_n = a_{n-1} + 2, a_0 = 1
+  ce.declareSequence('A', {
+    base: { 0: 1 },
+    recurrence: 'A_{n-1} + 2',
+  });
+  ce.parse('A_{5}').evaluate();  // → 11
+
+  // Factorial via recurrence
+  ce.declareSequence('H', {
+    base: { 0: 1 },
+    recurrence: 'n \\cdot H_{n-1}',
+  });
+  ce.parse('H_{5}').evaluate();  // → 120
+  ```
+
+  Features:
+  - Base cases as index → value mapping
+  - Recurrence relation as LaTeX string or BoxedExpression
+  - Automatic memoization for efficient evaluation (configurable)
+  - Custom index variable name (default: `n`)
+  - Domain constraints (min/max valid indices)
+  - Symbolic subscripts stay symbolic (e.g., `F_k` remains unevaluated)
+
 - **Multi-Argument Function Derivatives**: Added derivative support for:
 
   - **Log(x, base)** - Logarithm with custom base:

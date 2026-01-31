@@ -66,6 +66,7 @@ import type {
   ComputeEngine as IComputeEngine,
   BoxedDefinition,
   SymbolDefinition,
+  SequenceDefinition,
 } from './global-types';
 
 import type {
@@ -129,6 +130,10 @@ import { bigint } from './numerics/bigint';
 import { canonicalFunctionLiteral, lookup } from './function-utils';
 
 import { assume } from './assume';
+import {
+  createSequenceHandler,
+  validateSequenceDefinition,
+} from './sequence';
 
 export * from './global-types';
 
@@ -1426,6 +1431,53 @@ export class ComputeEngine implements IComputeEngine {
       }
 
       this._declareSymbolValue(id, { type }, scope);
+    }
+
+    return this;
+  }
+
+  /**
+   * Declare a sequence with a recurrence relation.
+   *
+   * @example
+   * ```typescript
+   * // Fibonacci sequence
+   * ce.declareSequence('F', {
+   *   base: { 0: 0, 1: 1 },
+   *   recurrence: 'F_{n-1} + F_{n-2}',
+   * });
+   * ce.parse('F_{10}').evaluate();  // → 55
+   * ```
+   */
+  declareSequence(name: string, def: SequenceDefinition): IComputeEngine {
+    // Validate basic requirements (without parsing)
+    if (!def.base || Object.keys(def.base).length === 0) {
+      throw new Error(`Sequence "${name}" requires at least one base case`);
+    }
+    if (!def.recurrence) {
+      throw new Error(`Sequence "${name}" requires a recurrence relation`);
+    }
+
+    // Declare the symbol first with a placeholder handler
+    // This ensures the symbol exists when we parse the recurrence
+    this.declare(name, {
+      subscriptEvaluate: () => undefined,
+    });
+
+    // Now validate and create the actual handler
+    const validation = validateSequenceDefinition(this, name, def);
+    if (!validation.valid) {
+      throw new Error(validation.error);
+    }
+
+    // Create the full subscriptEvaluate handler
+    const handler = createSequenceHandler(this, name, def);
+
+    // Update the symbol's subscriptEvaluate handler
+    // We need to access the internal definition to update it
+    const boxedDef = this.lookupDefinition(name);
+    if (boxedDef && isValueDef(boxedDef)) {
+      boxedDef.value.subscriptEvaluate = handler;
     }
 
     return this;

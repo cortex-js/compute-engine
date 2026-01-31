@@ -2120,6 +2120,40 @@ export type ValueDefinition = BaseDefinition & {
 };
 
 /**
+ * Definition for a sequence declared with `ce.declareSequence()`.
+ *
+ * A sequence is defined by base cases and a recurrence relation.
+ *
+ * @example
+ * ```typescript
+ * // Fibonacci sequence
+ * ce.declareSequence('F', {
+ *   base: { 0: 0, 1: 1 },
+ *   recurrence: 'F_{n-1} + F_{n-2}',
+ * });
+ * ce.parse('F_{10}').evaluate();  // → 55
+ * ```
+ *
+ * @category Definitions
+ */
+export interface SequenceDefinition {
+  /** Index variable name, default 'n' */
+  variable?: string;
+
+  /** Base cases as index → value mapping */
+  base: Record<number, number | BoxedExpression>;
+
+  /** Recurrence relation as LaTeX string or BoxedExpression */
+  recurrence: string | BoxedExpression;
+
+  /** Whether to memoize computed values (default: true) */
+  memoize?: boolean;
+
+  /** Valid index domain constraints */
+  domain?: { min?: number; max?: number };
+}
+
+/**
  * Definition record for a function.
  * @category Definitions
  *
@@ -3533,6 +3567,21 @@ export interface ComputeEngine extends IBigNum {
   ): ComputeEngine;
 
   assume(predicate: BoxedExpression): AssumeResult;
+
+  /**
+   * Declare a sequence with a recurrence relation.
+   *
+   * @example
+   * ```typescript
+   * // Fibonacci sequence
+   * ce.declareSequence('F', {
+   *   base: { 0: 0, 1: 1 },
+   *   recurrence: 'F_{n-1} + F_{n-2}',
+   * });
+   * ce.parse('F_{10}').evaluate();  // → 55
+   * ```
+   */
+  declareSequence(name: string, def: SequenceDefinition): ComputeEngine;
 
   forget(symbol?: MathJsonSymbol | MathJsonSymbol[]): void;
 

@@ -259,9 +259,23 @@ ce.declare('fib', {
      - `src/compute-engine/latex-syntax/parse-symbol.ts` - check symbol type at parse time
      - `src/compute-engine/library/core.ts` - canonical handler for complex subscripts
 
-3. **Phase 3**: Add evaluation support for subscripted symbols
-   - Allow defining subscript evaluation functions
-   - Support sequence definitions
+3. **Phase 3**: Add evaluation support for subscripted symbols ✅ IMPLEMENTED
+   - Added `subscriptEvaluate` handler to `ValueDefinition`
+   - Supports both simple (`F_5`) and complex (`F_{5}`) subscript syntax
+   - Handler receives evaluated subscript and returns result (or `undefined` for symbolic)
+   - Subscripted expressions with `subscriptEvaluate` have type `number` for arithmetic
+   - Changes in:
+     - `src/compute-engine/global-types.ts` - added `subscriptEvaluate` to ValueDefinition
+     - `src/compute-engine/boxed-expression/boxed-value-definition.ts` - store handler
+     - `src/compute-engine/library/core.ts` - evaluate and type handlers for Subscript
+     - `src/compute-engine/latex-syntax/parse-symbol.ts` - prevent compound symbol creation
+     - `src/compute-engine/latex-syntax/types.ts` and `parse.ts` - parser callback
+     - `src/compute-engine/index.ts` - hasSubscriptEvaluate option
+
+4. **Phase 4**: Declarative sequence definitions (SUB-4) 🔲 PLANNED
+   - Allow defining sequences using LaTeX recurrence relations
+   - Support base cases and recurrence rules
+   - See [Declarative Sequence Definitions](#declarative-sequence-definitions-sub-4) below
 
 ### Open Questions
 
@@ -327,3 +341,311 @@ disambiguate:
 The immediate fix is to change the return type of `Subscript` from `'symbol'` to
 `'unknown'` for complex subscripts, allowing them to be used in arithmetic
 contexts. The longer-term solution is full type-aware subscript interpretation.
+
+---
+
+## Declarative Sequence Definitions (SUB-4)
+
+### Motivation
+
+While `subscriptEvaluate` allows defining sequences programmatically with
+JavaScript, mathematicians often define sequences using recurrence relations:
+
+```latex
+a_n = a_{n-1} + 1, \quad a_0 = 1
+F_n = F_{n-1} + F_{n-2}, \quad F_0 = 0, F_1 = 1
+```
+
+A declarative API would make it easier to define sequences using familiar
+mathematical notation.
+
+### Proposed API
+
+#### Option 1: Object-Based Declaration
+
+```typescript
+ce.declareSequence('a', {
+  base: { 0: 1 },                    // a_0 = 1
+  recurrence: 'a_{n-1} + 1',         // a_n = a_{n-1} + 1
+});
+
+ce.declareSequence('F', {
+  base: { 0: 0, 1: 1 },              // F_0 = 0, F_1 = 1
+  recurrence: 'F_{n-1} + F_{n-2}',   // F_n = F_{n-1} + F_{n-2}
+});
+
+// Usage
+ce.parse('a_{10}').evaluate();       // → 11
+ce.parse('F_{10}').evaluate();       // → 55
+```
+
+#### Option 2: LaTeX-Based Declaration
+
+```typescript
+// Using assignment notation
+ce.parse('a_0 := 1').evaluate();
+ce.parse('a_n := a_{n-1} + 1').evaluate();
+
+// Or using a sequence definition function
+ce.parse('\\operatorname{DefineSequence}(F, n, F_{n-1} + F_{n-2}, \\{0: 0, 1: 1\\})').evaluate();
+```
+
+#### Option 3: Combined Approach (Recommended)
+
+```typescript
+ce.declareSequence('a', {
+  variable: 'n',                     // Index variable (default: 'n')
+  base: { 0: 1 },                    // Base cases as object
+  recurrence: ce.parse('a_{n-1} + 1'), // Recurrence as expression
+  // OR
+  recurrence: 'a_{n-1} + 1',         // Recurrence as LaTeX string
+});
+```
+
+### Implementation Plan
+
+#### 1. Add `declareSequence` Method to ComputeEngine
+
+**File:** `src/compute-engine/index.ts`
+
+```typescript
+declareSequence(
+  name: string,
+  options: {
+    variable?: string;           // Index variable name, default 'n'
+    base: Record<number, number | BoxedExpression>;
+    recurrence: string | BoxedExpression;
+    memoize?: boolean;           // Default true
+    domain?: { min?: number; max?: number };  // Valid index range
+  }
+): void
+```
+
+#### 2. Parse Recurrence Expression
+
+The recurrence expression needs to:
+- Identify self-references (e.g., `a_{n-1}`, `a_{n-2}`)
+- Extract the offset from each self-reference
+- Handle multiple self-references (Fibonacci-style)
+
+```typescript
+function parseRecurrence(
+  ce: ComputeEngine,
+  name: string,
+  variable: string,
+  expr: BoxedExpression
+): {
+  offsets: number[];           // e.g., [-1, -2] for Fibonacci
+  evaluate: (n: number, memo: Map<number, number>) => number;
+}
+```
+
+#### 3. Generate subscriptEvaluate Handler
+
+Convert the parsed recurrence into a `subscriptEvaluate` handler:
+
+```typescript
+function createSequenceHandler(
+  ce: ComputeEngine,
+  base: Record<number, number>,
+  recurrence: BoxedExpression,
+  variable: string,
+  memoize: boolean
+): SubscriptEvaluateHandler {
+  const memo = memoize ? new Map<number, BoxedExpression>() : null;
+
+  return (subscript, { engine }) => {
+    const n = subscript.re;
+    if (!Number.isInteger(n)) return undefined;
+
+    // Check base cases
+    if (n in base) return engine.number(base[n]);
+
+    // Check memo
+    if (memo?.has(n)) return memo.get(n);
+
+    // Evaluate recurrence by substituting n
+    const result = evaluateRecurrence(engine, recurrence, variable, n, memo);
+
+    if (memo && result) memo.set(n, result);
+    return result;
+  };
+}
+```
+
+#### 4. Handle Self-References in Evaluation
+
+When evaluating the recurrence, self-references like `a_{n-1}` need to
+recursively call the sequence:
+
+```typescript
+function evaluateRecurrence(
+  ce: ComputeEngine,
+  expr: BoxedExpression,
+  variable: string,
+  n: number,
+  memo: Map<number, BoxedExpression> | null
+): BoxedExpression | undefined {
+  // Substitute the variable with the current index
+  const substituted = expr.subs({ [variable]: ce.number(n) });
+
+  // The substituted expression may contain Subscript(name, n-1) etc.
+  // These will evaluate via the subscriptEvaluate handler (recursive)
+  return substituted.evaluate();
+}
+```
+
+### Edge Cases and Validation
+
+#### 1. Detect Invalid Recurrences
+
+- **Missing base cases**: If recurrence references `a_{n-1}` but no base case
+  for `a_0` is provided
+- **Circular references**: `a_n = a_n + 1` (infinite loop)
+- **Non-convergent**: Ensure recurrence terminates
+
+```typescript
+function validateRecurrence(
+  offsets: number[],
+  base: Record<number, number>
+): { valid: boolean; error?: string } {
+  // Check that base cases cover all needed starting points
+  const minOffset = Math.min(...offsets);
+  for (let i = 0; i > minOffset; i--) {
+    if (!(i in base)) {
+      return { valid: false, error: `Missing base case for index ${i}` };
+    }
+  }
+  return { valid: true };
+}
+```
+
+#### 2. Handle Non-Integer Subscripts
+
+Return `undefined` for non-integer subscripts to keep expression symbolic.
+
+#### 3. Handle Negative Indices
+
+Option to support negative indices for bi-directional sequences:
+
+```typescript
+ce.declareSequence('a', {
+  base: { 0: 1 },
+  recurrence: 'a_{n-1} + 1',
+  domain: { min: 0 },  // Only valid for n >= 0
+});
+```
+
+### Multi-Index Sequences (Matrices, Tensors)
+
+For sequences with multiple indices:
+
+```typescript
+ce.declareSequence('P', {
+  variables: ['n', 'k'],           // Pascal's triangle
+  base: {
+    '0,0': 1,
+    'n,0': 1,                      // P_{n,0} = 1 for all n
+    'n,n': 1,                      // P_{n,n} = 1 for all n
+  },
+  recurrence: 'P_{n-1,k-1} + P_{n-1,k}',
+});
+
+ce.parse('P_{5,2}').evaluate();    // → 10
+```
+
+This is more complex and may be Phase 5.
+
+### Closed-Form Detection (Future Enhancement)
+
+For simple recurrences, detect and use closed-form solutions:
+
+| Recurrence | Closed Form |
+|------------|-------------|
+| `a_n = a_{n-1} + d` | `a_n = a_0 + n*d` (arithmetic) |
+| `a_n = r * a_{n-1}` | `a_n = a_0 * r^n` (geometric) |
+| `a_n = a_{n-1} + a_{n-2}` | Binet's formula (Fibonacci) |
+
+This optimization would avoid recursion for large indices.
+
+### Test Cases
+
+```typescript
+describe('Declarative Sequence Definitions', () => {
+  test('Arithmetic sequence', () => {
+    const ce = new ComputeEngine();
+    ce.declareSequence('a', {
+      base: { 0: 1 },
+      recurrence: 'a_{n-1} + 2',
+    });
+    expect(ce.parse('a_{5}').evaluate().re).toBe(11);  // 1, 3, 5, 7, 9, 11
+  });
+
+  test('Fibonacci sequence', () => {
+    const ce = new ComputeEngine();
+    ce.declareSequence('F', {
+      base: { 0: 0, 1: 1 },
+      recurrence: 'F_{n-1} + F_{n-2}',
+    });
+    expect(ce.parse('F_{10}').evaluate().re).toBe(55);
+  });
+
+  test('Factorial via recurrence', () => {
+    const ce = new ComputeEngine();
+    ce.declareSequence('fact', {
+      base: { 0: 1 },
+      recurrence: 'n * fact_{n-1}',  // Note: uses n directly
+    });
+    expect(ce.parse('fact_{5}').evaluate().re).toBe(120);
+  });
+
+  test('Symbolic subscript stays symbolic', () => {
+    const ce = new ComputeEngine();
+    ce.declareSequence('a', {
+      base: { 0: 1 },
+      recurrence: 'a_{n-1} + 1',
+    });
+    const result = ce.parse('a_k').evaluate();
+    expect(result.operator).toBe('Subscript');
+  });
+
+  test('Missing base case returns undefined', () => {
+    const ce = new ComputeEngine();
+    ce.declareSequence('a', {
+      base: { 1: 1 },  // Missing a_0
+      recurrence: 'a_{n-1} + 1',
+    });
+    expect(ce.parse('a_{0}').evaluate().re).toBe(NaN);
+  });
+
+  test('Arithmetic with sequence values', () => {
+    const ce = new ComputeEngine();
+    ce.declareSequence('S', {
+      base: { 0: 0 },
+      recurrence: 'S_{n-1} + n',  // Triangular numbers
+    });
+    expect(ce.parse('S_{5} + S_{3}').evaluate().re).toBe(21);  // 15 + 6
+  });
+});
+```
+
+### Files to Modify
+
+| File | Change |
+|------|--------|
+| `src/compute-engine/global-types.ts` | Add `SequenceDefinition` type |
+| `src/compute-engine/index.ts` | Add `declareSequence()` method |
+| `src/compute-engine/sequence.ts` | New file for sequence parsing/evaluation |
+| `test/compute-engine/sequences.test.ts` | New test file |
+| `doc/06-guide-augmenting.md` | Document `declareSequence()` |
+
+### Summary
+
+Phase 4 adds a declarative way to define sequences using recurrence relations.
+The implementation:
+
+1. Parses the recurrence expression to identify self-references
+2. Validates that base cases cover all required starting points
+3. Generates a `subscriptEvaluate` handler with memoization
+4. Supports symbolic subscripts (returns undefined → stays symbolic)
+5. Integrates with arithmetic (type is `number`)
