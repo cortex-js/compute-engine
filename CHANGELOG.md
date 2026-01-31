@@ -130,6 +130,72 @@
   Base cases and recurrence can be defined in any order. The sequence is
   finalized when both are present.
 
+- **Sequence Status API**: Query the status of sequence definitions with
+  `getSequenceStatus()`:
+
+  ```javascript
+  ce.parse('F_0 := 0').evaluate();
+  ce.getSequenceStatus('F');
+  // → { status: 'pending', hasBase: true, hasRecurrence: false, baseIndices: [0] }
+
+  ce.parse('F_n := F_{n-1} + F_{n-2}').evaluate();
+  ce.getSequenceStatus('F');
+  // → { status: 'complete', hasBase: true, hasRecurrence: true, baseIndices: [0] }
+
+  ce.getSequenceStatus('x');
+  // → { status: 'not-a-sequence', hasBase: false, hasRecurrence: false }
+  ```
+
+- **Sequence Introspection API**: Inspect and manage defined sequences:
+
+  ```javascript
+  // Get sequence information
+  ce.getSequence('F');
+  // → { name: 'F', variable: 'n', baseIndices: [0, 1], memoize: true, cacheSize: 5 }
+
+  // List all defined sequences
+  ce.listSequences();  // → ['F', 'A', 'H']
+
+  // Check if a symbol is a sequence
+  ce.isSequence('F');  // → true
+  ce.isSequence('x');  // → false
+
+  // Manage memoization cache
+  ce.getSequenceCache('F');  // → Map { 2 => 1, 3 => 2, ... }
+  ce.clearSequenceCache('F');  // Clear cache for specific sequence
+  ce.clearSequenceCache();     // Clear all sequence caches
+  ```
+
+- **Generate Sequence Terms**: Generate a list of sequence terms with
+  `getSequenceTerms()`:
+
+  ```javascript
+  ce.declareSequence('F', {
+    base: { 0: 0, 1: 1 },
+    recurrence: 'F_{n-1} + F_{n-2}',
+  });
+
+  ce.getSequenceTerms('F', 0, 10);
+  // → [0, 1, 1, 2, 3, 5, 8, 13, 21, 34, 55]
+
+  // With step parameter (every other term)
+  ce.getSequenceTerms('F', 0, 10, 2);
+  // → [0, 1, 3, 8, 21, 55]
+  ```
+
+- **Sum and Product over Sequences**: `Sum` and `Product` now work seamlessly
+  with user-defined sequences:
+
+  ```javascript
+  ce.declareSequence('F', {
+    base: { 0: 0, 1: 1 },
+    recurrence: 'F_{n-1} + F_{n-2}',
+  });
+
+  ce.parse('\\sum_{k=0}^{10} F_k').evaluate();  // → 143
+  ce.parse('\\prod_{k=1}^{5} A_k').evaluate();  // Works with any defined sequence
+  ```
+
 #### Special Functions
 
 - **Special Function Definitions**: Added type signatures for special mathematical

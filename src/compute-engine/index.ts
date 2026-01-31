@@ -67,6 +67,8 @@ import type {
   BoxedDefinition,
   SymbolDefinition,
   SequenceDefinition,
+  SequenceStatus,
+  SequenceInfo,
 } from './global-types';
 
 import type {
@@ -133,6 +135,13 @@ import { assume } from './assume';
 import {
   createSequenceHandler,
   validateSequenceDefinition,
+  getSequenceStatus as getSequenceStatusImpl,
+  getSequenceInfo as getSequenceInfoImpl,
+  listSequences as listSequencesImpl,
+  isSequence as isSequenceImpl,
+  clearSequenceCache as clearSequenceCacheImpl,
+  getSequenceCache as getSequenceCacheImpl,
+  generateSequenceTerms as generateSequenceTermsImpl,
 } from './sequence';
 
 export * from './global-types';
@@ -1481,6 +1490,83 @@ export class ComputeEngine implements IComputeEngine {
     }
 
     return this;
+  }
+
+  /**
+   * Get the status of a sequence definition.
+   *
+   * @example
+   * ```typescript
+   * ce.parse('F_0 := 0').evaluate();
+   * ce.getSequenceStatus('F');
+   * // → { status: 'pending', hasBase: true, hasRecurrence: false, baseIndices: [0] }
+   * ```
+   */
+  getSequenceStatus(name: string): SequenceStatus {
+    return getSequenceStatusImpl(this, name);
+  }
+
+  /**
+   * Get information about a defined sequence.
+   * Returns `undefined` if the symbol is not a sequence.
+   */
+  getSequence(name: string): SequenceInfo | undefined {
+    return getSequenceInfoImpl(this, name);
+  }
+
+  /**
+   * List all defined sequences.
+   */
+  listSequences(): string[] {
+    return listSequencesImpl(this);
+  }
+
+  /**
+   * Check if a symbol is a defined sequence.
+   */
+  isSequence(name: string): boolean {
+    return isSequenceImpl(this, name);
+  }
+
+  /**
+   * Clear the memoization cache for a sequence.
+   * If no name is provided, clears caches for all sequences.
+   */
+  clearSequenceCache(name?: string): void {
+    clearSequenceCacheImpl(this, name);
+  }
+
+  /**
+   * Get the memoization cache for a sequence.
+   * Returns a Map of index → value, or `undefined` if not a sequence or memoization is disabled.
+   */
+  getSequenceCache(name: string): Map<number, BoxedExpression> | undefined {
+    return getSequenceCacheImpl(this, name);
+  }
+
+  /**
+   * Generate a list of sequence terms from start to end (inclusive).
+   *
+   * @param name - The sequence name
+   * @param start - Starting index (inclusive)
+   * @param end - Ending index (inclusive)
+   * @param step - Step size (default: 1)
+   * @returns Array of BoxedExpressions, or undefined if not a sequence
+   *
+   * @example
+   * ```typescript
+   * ce.declareSequence('F', { base: { 0: 0, 1: 1 }, recurrence: 'F_{n-1} + F_{n-2}' });
+   * ce.getSequenceTerms('F', 0, 10);
+   * // → [0, 1, 1, 2, 3, 5, 8, 13, 21, 34, 55]
+   * ```
+   */
+  getSequenceTerms(
+    name: string,
+    start: number,
+    end: number,
+    step?: number
+  ): BoxedExpression[] | undefined {
+    return generateSequenceTermsImpl(this, name, start, end, step);
   }
 
   /**

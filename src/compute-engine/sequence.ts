@@ -9,8 +9,50 @@ import type {
   BoxedExpression,
   ComputeEngine,
   SequenceDefinition,
+  SequenceStatus,
+  SequenceInfo,
 } from './global-types';
-import { updateDef } from './boxed-expression/utils';
+import { isValueDef, updateDef } from './boxed-expression/utils';
+
+// ============================================================================
+// Sequence Registry (SUB-7: Introspection support)
+// ============================================================================
+
+/**
+ * Internal metadata for a sequence, used for introspection.
+ */
+interface SequenceMetadata {
+  name: string;
+  variable: string;
+  base: Map<number, BoxedExpression>;
+  memoize: boolean;
+  memo: Map<number, BoxedExpression> | null;
+  domain: { min?: number; max?: number };
+}
+
+/**
+ * Registry of complete sequences for introspection.
+ * Maps ComputeEngine → Map<name, SequenceMetadata>
+ */
+const sequenceRegistry = new WeakMap<ComputeEngine, Map<string, SequenceMetadata>>();
+
+function getOrCreateRegistry(ce: ComputeEngine): Map<string, SequenceMetadata> {
+  if (!sequenceRegistry.has(ce)) {
+    sequenceRegistry.set(ce, new Map());
+  }
+  return sequenceRegistry.get(ce)!;
+}
+
+/**
+ * Register a sequence in the registry for introspection.
+ */
+function registerSequence(
+  ce: ComputeEngine,
+  metadata: SequenceMetadata
+): void {
+  const registry = getOrCreateRegistry(ce);
+  registry.set(metadata.name, metadata);
+}
 
 /**
  * Create a subscriptEvaluate handler from a sequence definition.
@@ -22,7 +64,7 @@ import { updateDef } from './boxed-expression/utils';
  */
 export function createSequenceHandler(
   ce: ComputeEngine,
-  _name: string,
+  name: string,
   def: SequenceDefinition
 ): (
   subscript: BoxedExpression,
@@ -45,6 +87,16 @@ export function createSequenceHandler(
     const index = Number(k);
     base.set(index, typeof v === 'number' ? ce.number(v) : v);
   }
+
+  // Register sequence for introspection (SUB-7)
+  registerSequence(ce, {
+    name,
+    variable,
+    base,
+    memoize,
+    memo,
+    domain,
+  });
 
   return (subscript, { engine, numericApproximation }) => {
     // Lazy parse the recurrence on first use
@@ -284,4 +336,196 @@ export function extractIndexVariable(
   }
 
   return undefined;
+}
+
+/**
+ * Get the status of a sequence definition.
+ *
+ * Returns information about whether a sequence is complete, pending, or not defined.
+ */
+export function getSequenceStatus(
+  ce: ComputeEngine,
+  name: string
+): SequenceStatus {
+  // Check for pending sequence first
+  const pendingMap = pendingSequences.get(ce);
+  const pending = pendingMap?.get(name);
+
+  if (pending) {
+    return {
+      status: 'pending',
+      hasBase: pending.base.size > 0,
+      hasRecurrence: !!pending.recurrence,
+      baseIndices: Array.from(pending.base.keys()).sort((a, b) => a - b),
+      variable: pending.recurrence?.variable,
+    };
+  }
+
+  // Check if symbol has subscriptEvaluate (complete sequence)
+  const def = ce.lookupDefinition(name);
+  if (def && isValueDef(def) && def.value.subscriptEvaluate) {
+    // It's a complete sequence - get details from registry
+    const registry = sequenceRegistry.get(ce);
+    const metadata = registry?.get(name);
+    return {
+      status: 'complete',
+      hasBase: true,
+      hasRecurrence: true,
+      baseIndices: metadata
+        ? Array.from(metadata.base.keys()).sort((a, b) => a - b)
+        : [],
+      variable: metadata?.variable,
+    };
+  }
+
+  return {
+    status: 'not-a-sequence',
+    hasBase: false,
+    hasRecurrence: false,
+    baseIndices: [],
+  };
+}
+
+// ============================================================================
+// Introspection API (SUB-7)
+// ============================================================================
+
+/**
+ * Get information about a defined sequence.
+ * Returns `undefined` if the symbol is not a complete sequence.
+ */
+export function getSequenceInfo(
+  ce: ComputeEngine,
+  name: string
+): SequenceInfo | undefined {
+  const registry = sequenceRegistry.get(ce);
+  const metadata = registry?.get(name);
+
+  if (!metadata) return undefined;
+
+  return {
+    name: metadata.name,
+    variable: metadata.variable,
+    baseIndices: Array.from(metadata.base.keys()).sort((a, b) => a - b),
+    memoize: metadata.memoize,
+    domain: metadata.domain,
+    cacheSize: metadata.memo?.size ?? 0,
+  };
+}
+
+/**
+ * List all defined sequences.
+ */
+export function listSequences(ce: ComputeEngine): string[] {
+  const registry = sequenceRegistry.get(ce);
+  if (!registry) return [];
+  return Array.from(registry.keys());
+}
+
+/**
+ * Check if a symbol is a defined sequence.
+ */
+export function isSequence(ce: ComputeEngine, name: string): boolean {
+  const registry = sequenceRegistry.get(ce);
+  return registry?.has(name) ?? false;
+}
+
+/**
+ * Clear the memoization cache for a sequence or all sequences.
+ */
+export function clearSequenceCache(ce: ComputeEngine, name?: string): void {
+  const registry = sequenceRegistry.get(ce);
+  if (!registry) return;
+
+  if (name !== undefined) {
+    // Clear cache for specific sequence
+    const metadata = registry.get(name);
+    if (metadata?.memo) {
+      metadata.memo.clear();
+    }
+  } else {
+    // Clear caches for all sequences
+    for (const metadata of registry.values()) {
+      if (metadata.memo) {
+        metadata.memo.clear();
+      }
+    }
+  }
+}
+
+/**
+ * Get the memoization cache for a sequence.
+ * Returns a copy of the cache Map, or `undefined` if not a sequence or memoization is disabled.
+ */
+export function getSequenceCache(
+  ce: ComputeEngine,
+  name: string
+): Map<number, BoxedExpression> | undefined {
+  const registry = sequenceRegistry.get(ce);
+  const metadata = registry?.get(name);
+
+  if (!metadata?.memo) return undefined;
+
+  // Return a copy to prevent external modification
+  return new Map(metadata.memo);
+}
+
+// ============================================================================
+// Generate Sequence Terms (SUB-8)
+// ============================================================================
+
+/**
+ * Generate a list of sequence terms from start to end (inclusive).
+ *
+ * @param ce - The compute engine
+ * @param name - The sequence name
+ * @param start - Starting index (inclusive)
+ * @param end - Ending index (inclusive)
+ * @param step - Step size (default: 1)
+ * @returns Array of BoxedExpressions for each term, or undefined if not a sequence
+ *
+ * @example
+ * ```typescript
+ * // For Fibonacci sequence F
+ * generateSequenceTerms(ce, 'F', 0, 10);
+ * // → [0, 1, 1, 2, 3, 5, 8, 13, 21, 34, 55]
+ * ```
+ */
+export function generateSequenceTerms(
+  ce: ComputeEngine,
+  name: string,
+  start: number,
+  end: number,
+  step: number = 1
+): BoxedExpression[] | undefined {
+  // Validate inputs
+  if (!Number.isInteger(start) || !Number.isInteger(end)) {
+    return undefined;
+  }
+  if (step <= 0 || !Number.isInteger(step)) {
+    return undefined;
+  }
+
+  // Check if it's a valid sequence
+  if (!isSequence(ce, name)) {
+    return undefined;
+  }
+
+  const terms: BoxedExpression[] = [];
+
+  // Generate terms by evaluating subscripted expressions
+  for (let n = start; step > 0 ? n <= end : n >= end; n += step) {
+    const expr = ce.parse(`${name}_{${n}}`);
+    const value = expr.evaluate();
+
+    // Only include if we got a valid numeric result
+    if (value.isNumberLiteral) {
+      terms.push(value);
+    } else {
+      // If any term fails to evaluate, return undefined
+      return undefined;
+    }
+  }
+
+  return terms;
 }

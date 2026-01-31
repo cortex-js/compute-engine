@@ -2154,6 +2154,56 @@ export interface SequenceDefinition {
 }
 
 /**
+ * Status of a sequence definition.
+ * @category Definitions
+ */
+export interface SequenceStatus {
+  /**
+   * Status of the sequence:
+   * - 'complete': Both base case(s) and recurrence defined
+   * - 'pending': Waiting for base case(s) or recurrence
+   * - 'not-a-sequence': Symbol is not a sequence
+   */
+  status: 'complete' | 'pending' | 'not-a-sequence';
+
+  /** Whether at least one base case is defined */
+  hasBase: boolean;
+
+  /** Whether a recurrence relation is defined */
+  hasRecurrence: boolean;
+
+  /** Indices of defined base cases (e.g., [0, 1] for Fibonacci) */
+  baseIndices: number[];
+
+  /** Index variable name if recurrence is defined */
+  variable?: string;
+}
+
+/**
+ * Information about a defined sequence for introspection.
+ * @category Definitions
+ */
+export interface SequenceInfo {
+  /** The sequence name */
+  name: string;
+
+  /** Index variable name (e.g., 'n') */
+  variable: string;
+
+  /** Base case indices */
+  baseIndices: number[];
+
+  /** Whether memoization is enabled */
+  memoize: boolean;
+
+  /** Domain constraints */
+  domain: { min?: number; max?: number };
+
+  /** Number of cached values */
+  cacheSize: number;
+}
+
+/**
  * Definition record for a function.
  * @category Definitions
  *
@@ -3582,6 +3632,70 @@ export interface ComputeEngine extends IBigNum {
    * ```
    */
   declareSequence(name: string, def: SequenceDefinition): ComputeEngine;
+
+  /**
+   * Get the status of a sequence definition.
+   *
+   * @example
+   * ```typescript
+   * ce.parse('F_0 := 0').evaluate();
+   * ce.getSequenceStatus('F');
+   * // → { status: 'pending', hasBase: true, hasRecurrence: false, baseIndices: [0] }
+   * ```
+   */
+  getSequenceStatus(name: string): SequenceStatus;
+
+  /**
+   * Get information about a defined sequence.
+   * Returns `undefined` if the symbol is not a sequence.
+   */
+  getSequence(name: string): SequenceInfo | undefined;
+
+  /**
+   * List all defined sequences.
+   * Returns an array of sequence names.
+   */
+  listSequences(): string[];
+
+  /**
+   * Check if a symbol is a defined sequence.
+   */
+  isSequence(name: string): boolean;
+
+  /**
+   * Clear the memoization cache for a sequence.
+   * If no name is provided, clears caches for all sequences.
+   */
+  clearSequenceCache(name?: string): void;
+
+  /**
+   * Get the memoization cache for a sequence.
+   * Returns a Map of index → value, or `undefined` if not a sequence or memoization is disabled.
+   */
+  getSequenceCache(name: string): Map<number, BoxedExpression> | undefined;
+
+  /**
+   * Generate a list of sequence terms from start to end (inclusive).
+   *
+   * @param name - The sequence name
+   * @param start - Starting index (inclusive)
+   * @param end - Ending index (inclusive)
+   * @param step - Step size (default: 1)
+   * @returns Array of BoxedExpressions, or undefined if not a sequence
+   *
+   * @example
+   * ```typescript
+   * ce.declareSequence('F', { base: { 0: 0, 1: 1 }, recurrence: 'F_{n-1} + F_{n-2}' });
+   * ce.getSequenceTerms('F', 0, 10);
+   * // → [0, 1, 1, 2, 3, 5, 8, 13, 21, 34, 55]
+   * ```
+   */
+  getSequenceTerms(
+    name: string,
+    start: number,
+    end: number,
+    step?: number
+  ): BoxedExpression[] | undefined;
 
   forget(symbol?: MathJsonSymbol | MathJsonSymbol[]): void;
 
