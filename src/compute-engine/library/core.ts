@@ -731,7 +731,33 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
         if (op1.string && asSmallInteger(op2) !== null) return 'integer';
         if (op1.isIndexedCollection)
           return collectionElementType(op1.type.type) ?? 'any';
-        if (op1.symbol) return 'symbol';
+
+        // Check if the symbol is declared as a collection type
+        if (op1.symbol) {
+          const eltType = collectionElementType(op1.type.type);
+          if (eltType) return eltType;
+        }
+
+        // For symbol bases with complex subscripts (like a_{n+1}), return 'unknown'
+        // to allow type inference in arithmetic contexts. Simple subscripts
+        // (like a_n) are converted to compound symbols during canonicalization
+        // and won't reach this type function.
+        if (op1.symbol) {
+          // Check if this would become a compound symbol (simple subscript)
+          const sub =
+            op2.string ?? op2.symbol ?? asSmallInteger(op2)?.toString();
+          if (sub) return 'symbol';
+          // Check for InvisibleOperator of symbols/numbers (also becomes compound symbol)
+          if (op2.operator === 'InvisibleOperator' && op2.ops) {
+            const parts = op2.ops.map(
+              (x) => x.symbol ?? asSmallInteger(x)?.toString()
+            );
+            if (parts.every((p) => p !== undefined && p !== null))
+              return 'symbol';
+          }
+          // Complex subscript - return 'unknown' to allow numeric inference
+          return 'unknown';
+        }
         return 'expression';
       },
 
@@ -754,8 +780,20 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
           ]);
         }
 
-        // Is it a collection?
+        // Is it a collection expression (like a list literal)?
         if (op1.isIndexedCollection) return ce._fn('At', [op1, op2.canonical]);
+
+        // Is it a symbol declared as a collection type?
+        // If so, convert to At() for indexing
+        if (op1.symbol && collectionElementType(op1.type.type)) {
+          // For multi-index subscripts (Sequence/Tuple), pass each index as separate arg
+          if (
+            (op2.operator === 'Sequence' || op2.operator === 'Tuple') &&
+            op2.ops
+          )
+            return ce._fn('At', [op1, ...op2.ops.map((x) => x.canonical)]);
+          return ce._fn('At', [op1, op2.canonical]);
+        }
 
         // Is it a compound symbol `x_\operatorname{max}`, `\mu_0`
         if (op1.symbol) {

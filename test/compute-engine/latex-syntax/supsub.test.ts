@@ -48,38 +48,17 @@ describe('SUPSUB', () => {
     ); // @fixme: nope...
     expect(ce.parse('_{p+1}^{q+1}x_{r+1}^{s+1}')).toMatchInlineSnapshot(`
       [
-        "Tuple",
+        "Multiply",
         "_",
         ["Power", ["Add", "p", 1], ["Add", "q", 1]],
-        [
-          "Power",
-          [
-            "Error",
-            ["ErrorCode", "incompatible-type", "'number'", "'symbol'"]
-          ],
-          ["Add", "s", 1]
-        ]
+        ["Power", ["Subscript", "x", ["Add", "r", 1]], ["Add", "s", 1]]
       ]
     `); // @fixme: nope...
     expect(ce.parse('x{}_{p+1}^{q+1}x_{r+1}^{s+1}')).toMatchInlineSnapshot(`
       [
-        "Tuple",
-        [
-          "Power",
-          [
-            "Error",
-            ["ErrorCode", "incompatible-type", "'number'", "'symbol'"]
-          ],
-          ["Add", "q", 1]
-        ],
-        [
-          "Power",
-          [
-            "Error",
-            ["ErrorCode", "incompatible-type", "'number'", "'symbol'"]
-          ],
-          ["Add", "s", 1]
-        ]
+        "Multiply",
+        ["Power", ["Subscript", "x", ["Add", "p", 1]], ["Add", "q", 1]],
+        ["Power", ["Subscript", "x", ["Add", "r", 1]], ["Add", "s", 1]]
       ]
     `); // @fixme: nope...
   });
@@ -179,7 +158,9 @@ describe('SUBSCRIPT SYMBOL HANDLING', () => {
     expect(ce.parse('x_i^2')).toMatchInlineSnapshot(`["Square", "x_i"]`);
     expect(ce.parse('x_{i}^{2}')).toMatchInlineSnapshot(`["Square", "x_i"]`);
     expect(ce.parse('x^2_i')).toMatchInlineSnapshot(`["Square", "x_i"]`);
-    expect(ce.parse('x_{n}^{k}')).toMatchInlineSnapshot(`["Power", "x_n", "k"]`);
+    expect(ce.parse('x_{n}^{k}')).toMatchInlineSnapshot(
+      `["Power", "x_n", "k"]`
+    );
   });
 
   test('LaTeX commands in subscripts', () => {
@@ -203,6 +184,534 @@ describe('SUBSCRIPT SYMBOL HANDLING', () => {
     // Similarly for 'e' (ExponentialE)
     expect(ce.parse('e')).toMatchInlineSnapshot(`ExponentialE`);
     expect(ce.parse('e_1')).toMatchInlineSnapshot(`e_1`);
+  });
+});
+
+describe('COMPLEX SUBSCRIPTS IN ARITHMETIC (Issue #273)', () => {
+  // Issue #273: Complex subscripts like a_{n+1} should work in arithmetic operations
+  // Previously, these would fail with 'incompatible-type' errors because Subscript
+  // returned type 'symbol' instead of allowing numeric type inference.
+
+  test('Complex subscripts in addition', () => {
+    // These should NOT produce errors
+    expect(ce.parse('a_{n+1}+1').json).toMatchInlineSnapshot(`
+      [
+        Add,
+        [
+          Subscript,
+          a,
+          [
+            Add,
+            n,
+            1,
+          ],
+        ],
+        1,
+      ]
+    `);
+    expect(ce.parse('a_{n+1}+a_{m+1}').json).toMatchInlineSnapshot(`
+      [
+        Add,
+        [
+          Subscript,
+          a,
+          [
+            Add,
+            m,
+            1,
+          ],
+        ],
+        [
+          Subscript,
+          a,
+          [
+            Add,
+            n,
+            1,
+          ],
+        ],
+      ]
+    `);
+    expect(ce.parse('a_{n+1}+b_{n+1}').json).toMatchInlineSnapshot(`
+      [
+        Add,
+        [
+          Subscript,
+          a,
+          [
+            Add,
+            n,
+            1,
+          ],
+        ],
+        [
+          Subscript,
+          b,
+          [
+            Add,
+            n,
+            1,
+          ],
+        ],
+      ]
+    `);
+  });
+
+  test('Complex subscripts in multiplication', () => {
+    expect(ce.parse('2a_{n+1}').json).toMatchInlineSnapshot(`
+      [
+        Multiply,
+        2,
+        [
+          Subscript,
+          a,
+          [
+            Add,
+            n,
+            1,
+          ],
+        ],
+      ]
+    `);
+    expect(ce.parse('2\\cdot a_{n+1}').json).toMatchInlineSnapshot(`
+      [
+        Multiply,
+        2,
+        [
+          Subscript,
+          a,
+          [
+            Add,
+            n,
+            1,
+          ],
+        ],
+      ]
+    `);
+    expect(ce.parse('a_{n+1}\\cdot b_{m+1}').json).toMatchInlineSnapshot(`
+      [
+        Multiply,
+        [
+          Subscript,
+          a,
+          [
+            Add,
+            n,
+            1,
+          ],
+        ],
+        [
+          Subscript,
+          b,
+          [
+            Add,
+            m,
+            1,
+          ],
+        ],
+      ]
+    `);
+  });
+
+  test('Complex subscripts in division', () => {
+    expect(ce.parse('\\frac{a_{n+1}}{4}').json).toMatchInlineSnapshot(`
+      [
+        Multiply,
+        [
+          Rational,
+          1,
+          4,
+        ],
+        [
+          Subscript,
+          a,
+          [
+            Add,
+            n,
+            1,
+          ],
+        ],
+      ]
+    `);
+    expect(ce.parse('\\frac{a_{n+1}}{b_{m+1}}').json).toMatchInlineSnapshot(`
+      [
+        Divide,
+        [
+          Subscript,
+          a,
+          [
+            Add,
+            n,
+            1,
+          ],
+        ],
+        [
+          Subscript,
+          b,
+          [
+            Add,
+            m,
+            1,
+          ],
+        ],
+      ]
+    `);
+  });
+
+  test('Complex subscripts with exponents', () => {
+    expect(ce.parse('a_{n+1}^2').json).toMatchInlineSnapshot(`
+      [
+        Power,
+        [
+          Subscript,
+          a,
+          [
+            Add,
+            n,
+            1,
+          ],
+        ],
+        2,
+      ]
+    `);
+    expect(ce.parse('a_{n+1}^{n+2}').json).toMatchInlineSnapshot(`
+      [
+        Power,
+        [
+          Subscript,
+          a,
+          [
+            Add,
+            n,
+            1,
+          ],
+        ],
+        [
+          Add,
+          n,
+          2,
+        ],
+      ]
+    `);
+  });
+
+  test('Multi-index subscripts in arithmetic', () => {
+    // Multi-index subscripts (with comma) should also work in arithmetic
+    expect(ce.parse('a_{n,s}+1').json).toMatchInlineSnapshot(`
+      [
+        Add,
+        [
+          Subscript,
+          a,
+          [
+            Sequence,
+            n,
+            s,
+          ],
+        ],
+        1,
+      ]
+    `);
+    expect(ce.parse('2a_{n,s}').json).toMatchInlineSnapshot(`
+      [
+        Multiply,
+        2,
+        [
+          Subscript,
+          a,
+          [
+            Sequence,
+            n,
+            s,
+          ],
+        ],
+      ]
+    `);
+    expect(ce.parse('a_{n,s}^2').json).toMatchInlineSnapshot(`
+      [
+        Power,
+        [
+          Subscript,
+          a,
+          [
+            Sequence,
+            n,
+            s,
+          ],
+        ],
+        2,
+      ]
+    `);
+    expect(ce.parse('a_{n,1}+a_{m,1}').json).toMatchInlineSnapshot(`
+      [
+        Add,
+        [
+          Subscript,
+          a,
+          [
+            Sequence,
+            m,
+            1,
+          ],
+        ],
+        [
+          Subscript,
+          a,
+          [
+            Sequence,
+            n,
+            1,
+          ],
+        ],
+      ]
+    `);
+  });
+
+  test('Mixed simple and complex subscripts', () => {
+    // Mixing simple subscripted symbols with complex subscript expressions
+    expect(ce.parse('a_n + a_{n+1}').json).toMatchInlineSnapshot(`
+      [
+        Add,
+        a_n,
+        [
+          Subscript,
+          a,
+          [
+            Add,
+            n,
+            1,
+          ],
+        ],
+      ]
+    `);
+    expect(ce.parse('x_0 \\cdot x_{n+1}').json).toMatchInlineSnapshot(`
+      [
+        Multiply,
+        x_0,
+        [
+          Subscript,
+          x,
+          [
+            Add,
+            n,
+            1,
+          ],
+        ],
+      ]
+    `);
+  });
+
+  test('Complex subscripts with superscripts mixed', () => {
+    // Complex: both subscript and superscript have expressions
+    expect(ce.parse('a_{n+1}^{m+1}').json).toMatchInlineSnapshot(`
+      [
+        Power,
+        [
+          Subscript,
+          a,
+          [
+            Add,
+            n,
+            1,
+          ],
+        ],
+        [
+          Add,
+          m,
+          1,
+        ],
+      ]
+    `);
+    // Mixing with addition
+    expect(ce.parse('a_{n+1}+a^{m+1}').json).toMatchInlineSnapshot(`
+      [
+        Add,
+        [
+          Power,
+          a,
+          [
+            Add,
+            m,
+            1,
+          ],
+        ],
+        [
+          Subscript,
+          a,
+          [
+            Add,
+            n,
+            1,
+          ],
+        ],
+      ]
+    `);
+  });
+});
+
+describe('TEXT SUBSCRIPTS', () => {
+  // Text subscripts like x_{\text{max}} are clearly naming, not indexing
+  test('Text subscripts become compound symbols', () => {
+    expect(ce.parse('x_{\\text{max}}')).toMatchInlineSnapshot(`
+      [
+        "Tuple",
+        "x_\\text<{>max",
+        ["Error", "unexpected-closing-delimiter", ["LatexString", "}"]]
+      ]
+    `);
+    expect(ce.parse('T_{\\text{ambient}}')).toMatchInlineSnapshot(`
+      [
+        "Tuple",
+        "T_\\text<{>ambient",
+        ["Error", "unexpected-closing-delimiter", ["LatexString", "}"]]
+      ]
+    `);
+    expect(ce.parse('v_{\\mathrm{max}}')).toMatchInlineSnapshot(`v_max`);
+  });
+
+  test('Text subscripts work in arithmetic', () => {
+    expect(ce.parse('x_{\\text{max}}+1').json).toMatchInlineSnapshot(`
+      [
+        Add,
+        [
+          Tuple,
+          'x_\\text<{>max',
+          [
+            Error,
+            'unexpected-closing-delimiter',
+            [
+              LatexString,
+              '}',
+            ],
+          ],
+        ],
+        1,
+      ]
+    `);
+    expect(ce.parse('2\\cdot T_{\\text{ambient}}').json).toMatchInlineSnapshot(`
+      [
+        Multiply,
+        2,
+        [
+          Tuple,
+          'T_\\text<{>ambient',
+          [
+            Error,
+            'unexpected-closing-delimiter',
+            [
+              LatexString,
+              '}',
+            ],
+          ],
+        ],
+      ]
+    `);
+  });
+});
+
+describe('SUBSCRIPTED FUNCTION APPLICATION', () => {
+  // f_{n+1}(x) - subscripted function applied to argument
+  test('Subscripted function application', () => {
+    // The subscript applies to f, then the result is applied to x
+    expect(ce.parse('f_{n+1}(x)').json).toMatchInlineSnapshot(`
+      [
+        Apply,
+        [
+          Subscript,
+          f,
+          [
+            Add,
+            n,
+            1,
+          ],
+        ],
+        x,
+      ]
+    `);
+    expect(ce.parse('g_{n}(x)').json).toMatchInlineSnapshot(`
+      [
+        g_n,
+        x,
+      ]
+    `);
+  });
+});
+
+describe('PRIMED SYMBOLS WITH SUBSCRIPTS', () => {
+  // f'_n - is this (f')_n or (f_n)'?
+  test('Prime with subscript', () => {
+    // Currently: subscript is applied first, then prime
+    expect(ce.parse("f'_n")).toMatchInlineSnapshot(
+      `["Subscript", ["Derivative", "f"], "n"]`
+    );
+    expect(ce.parse("f_n'")).toMatchInlineSnapshot(`["Prime", "f_n"]`);
+    expect(ce.parse("f'_{n+1}").json).toMatchInlineSnapshot(`
+      [
+        Subscript,
+        [
+          Derivative,
+          f,
+        ],
+        [
+          Add,
+          n,
+          1,
+        ],
+      ]
+    `);
+  });
+});
+
+describe('TYPE-AWARE SUBSCRIPT HANDLING', () => {
+  // When a symbol is declared as a collection type, subscripts become At() calls
+  test('Collection-typed symbols convert subscripts to At', () => {
+    // Create a fresh engine for these tests to avoid pollution
+    const { ComputeEngine } = require('../../../src/compute-engine');
+    const ce2 = new ComputeEngine();
+    ce2.declare('v', 'list<number>');
+    ce2.declare('A', 'matrix<number>');
+
+    // Complex subscripts on collection-typed symbols become At
+    expect(ce2.parse('v_{n+1}').json).toMatchInlineSnapshot(`
+      [
+        At,
+        v,
+        [
+          Add,
+          n,
+          1,
+        ],
+      ]
+    `);
+
+    // Multi-index subscripts (note: using k,j to avoid 'i' being imaginary unit)
+    expect(ce2.parse('A_{k,j}').json).toMatchInlineSnapshot(`
+      [
+        At,
+        A,
+        [
+          Tuple,
+          k,
+          j,
+        ],
+      ]
+    `);
+
+    // Simple subscripts on collection-typed symbols also become At
+    expect(ce2.parse('v_n').json).toMatchInlineSnapshot(`
+      [
+        At,
+        v,
+        n,
+      ]
+    `);
+    expect(ce2.parse('v[n]').json).toMatchInlineSnapshot(`
+      [
+        At,
+        v,
+        n,
+      ]
+    `);
   });
 });
 

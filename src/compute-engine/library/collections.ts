@@ -810,7 +810,10 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     ],
     complexity: 8200,
     signature: '(value: list|tuple|string, index: number | string) -> unknown',
-    type: ([xs]) => xs.operatorDefinition?.collection?.elttype?.(xs) ?? 'any',
+    type: ([xs]) =>
+      xs.operatorDefinition?.collection?.elttype?.(xs) ??
+      collectionElementType(xs.type.type) ??
+      'any',
 
     evaluate: (ops, { engine: ce }) => {
       // @todo: the implementation does not match the description. Need to think this through...

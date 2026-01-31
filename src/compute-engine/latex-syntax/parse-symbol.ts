@@ -283,6 +283,12 @@ export function parseSymbol(parser: Parser): MathJsonSymbol | null {
   if (/^[a-zA-Z]$/.test(parser.peek) || /^\p{XIDS}$/u.test(parser.peek)) {
     let id = parser.nextToken();
 
+    // Check if the symbol is declared as a collection type.
+    // If so, don't absorb subscripts into the symbol name - let them be
+    // handled as Subscript expressions which will convert to At() calls.
+    const symbolType = parser.getSymbolType(id);
+    const isCollection = symbolType.matches('indexed_collection');
+
     // Check if followed by subscript(s) - if so, include them in the symbol name
     // This ensures 'i_A' is parsed as a single symbol 'i_A', not as a subscript
     // applied to 'i' (which would turn 'i' into ImaginaryUnit first)
@@ -290,7 +296,9 @@ export function parseSymbol(parser: Parser): MathJsonSymbol | null {
     // - {n,m} (comma indicates multi-index)
     // - {n+1} (operators indicate an expression)
     // - {(n+1)} (parentheses indicate an expression)
-    while (!parser.atEnd) {
+    // Also, if the symbol is a collection type, all subscripts should be
+    // Subscript expressions (which convert to At() calls).
+    while (!parser.atEnd && !isCollection) {
       const currentPeek = parser.peek;
       if (currentPeek !== '_') break;
 

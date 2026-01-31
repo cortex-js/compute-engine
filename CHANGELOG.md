@@ -2,6 +2,33 @@
 
 ### New Features
 
+- **Type-Aware Subscript Handling**: Subscripts on symbols declared as collection
+  types (list, tuple, matrix, etc.) now automatically convert to `At()` indexing
+  operations:
+
+  ```javascript
+  ce.declare('v', 'list<number>');
+  ce.parse('v_n');      // → At(v, n)
+  ce.parse('v_{n+1}');  // → At(v, n+1)
+  ce.parse('v_{i,j}');  // → At(v, Tuple(i, j))
+  ```
+
+  This works for both simple subscripts (`v_n`) and complex subscripts (`v_{n+1}`).
+  The type of the `At()` expression is correctly inferred from the collection's
+  element type, allowing subscripted collection elements to be used in arithmetic.
+
+- **Complex Subscripts in Arithmetic** (Issue #273): Subscript expressions like
+  `a_{n+1}` can now be used in arithmetic operations without type errors:
+
+  ```javascript
+  ce.parse('a_{n+1} + 1');     // → Add(Subscript(a, n+1), 1)
+  ce.parse('2 * a_{n+1}');     // → Multiply(2, Subscript(a, n+1))
+  ce.parse('a_{n+1}^2');       // → Power(Subscript(a, n+1), 2)
+  ```
+
+  Previously, complex subscripts would fail with "incompatible-type" errors
+  when used in arithmetic contexts.
+
 - **Special Functions**: Added type signatures for special mathematical functions,
   enabling them to be used in expressions without type errors:
   - `Zeta` - Riemann zeta function ζ(s)
