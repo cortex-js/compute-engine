@@ -163,6 +163,15 @@
 
 ### Improvements
 
+- **Nested Root Simplification**: Nested roots now simplify to a single root:
+  ```javascript
+  ce.box(['Sqrt', ['Sqrt', 'x']]).simplify()     // → root(4)(x)
+  ce.box(['Root', ['Root', 'x', 3], 2]).simplify() // → root(6)(x)
+  ce.box(['Sqrt', ['Root', 'x', 3]]).simplify()  // → root(6)(x)
+  ```
+  This applies to all combinations: `sqrt(sqrt(x))`, `root(sqrt(x), n)`,
+  `sqrt(root(x, n))`, and `root(root(x, m), n)`.
+
 - **Derivative Recursion Safety**: Added robust recursion protection to the
   `differentiate()` function with a depth limit (`MAX_DIFFERENTIATION_DEPTH`) to
   guard against pathological expressions. All recursive calls now track depth

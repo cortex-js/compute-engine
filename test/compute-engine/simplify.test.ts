@@ -453,6 +453,18 @@ const RULE_TEST_CASES: TestCase[] = [
   [
     `
                //
+               // Nested Roots
+               //
+             `,
+  ],
+  ['\\sqrt{\\sqrt{x}}', '\\sqrt[4]{x}'], // 👍 sqrt(sqrt(x)) -> x^{1/4}
+  ['\\sqrt[3]{\\sqrt{x}}', '\\sqrt[6]{x}'], // 👍 root(sqrt(x), 3) -> x^{1/6}
+  ['\\sqrt{\\sqrt[3]{x}}', '\\sqrt[6]{x}'], // 👍 sqrt(root(x, 3)) -> x^{1/6}
+  ['\\sqrt[3]{\\sqrt[4]{x}}', '\\sqrt[12]{x}'], // 👍 root(root(x, 4), 3) -> x^{1/12}
+  ['\\sqrt[4]{\\sqrt[4]{x}}', '\\sqrt[16]{x}'], // 👍 root(root(x, 4), 4) -> x^{1/16}
+  [
+    `
+               //
                // Double Powers
                //
              `,

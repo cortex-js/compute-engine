@@ -26,6 +26,27 @@ export function simplifyPower(x: BoxedExpression): RuleStep | undefined {
 
     if (!arg || !rootIndex) return undefined;
 
+    // root(sqrt(x), n) -> x^{1/(2n)} (nth root of square root)
+    if (arg.operator === 'Sqrt' && arg.op1) {
+      const innerBase = arg.op1;
+      // root(sqrt(x), n) = x^{1/(2n)}
+      return {
+        value: innerBase.pow(ce.One.div(ce.number(2).mul(rootIndex))),
+        because: 'root(sqrt(x), n) -> x^{1/(2n)}',
+      };
+    }
+
+    // root(root(x, m), n) -> x^{1/(m*n)} (nested roots)
+    if (arg.operator === 'Root' && arg.op1 && arg.op2) {
+      const innerBase = arg.op1;
+      const innerRootIndex = arg.op2;
+      // root(root(x, m), n) = x^{1/(m*n)}
+      return {
+        value: innerBase.pow(ce.One.div(innerRootIndex.mul(rootIndex))),
+        because: 'root(root(x, m), n) -> x^{1/(m*n)}',
+      };
+    }
+
     // Root(x^n, n) -> |x| or x depending on n
     if (arg.operator === 'Power') {
       const base = arg.op1;
@@ -104,6 +125,25 @@ export function simplifyPower(x: BoxedExpression): RuleStep | undefined {
   if (op === 'Sqrt') {
     const arg = x.op1;
     if (!arg) return undefined;
+
+    // sqrt(sqrt(x)) -> x^{1/4} (nested square roots)
+    if (arg.operator === 'Sqrt' && arg.op1) {
+      return {
+        value: arg.op1.pow(ce.number([1, 4])),
+        because: 'sqrt(sqrt(x)) -> x^{1/4}',
+      };
+    }
+
+    // sqrt(root(x, n)) -> x^{1/(2n)} (square root of nth root)
+    if (arg.operator === 'Root' && arg.op1 && arg.op2) {
+      const innerBase = arg.op1;
+      const rootIndex = arg.op2;
+      // sqrt(root(x, n)) = x^{1/(2n)}
+      return {
+        value: innerBase.pow(ce.One.div(ce.number(2).mul(rootIndex))),
+        because: 'sqrt(root(x, n)) -> x^{1/(2n)}',
+      };
+    }
 
     if (arg.operator === 'Power') {
       const base = arg.op1;
