@@ -20,21 +20,44 @@ import { isValueDef, updateDef } from './boxed-expression/utils';
 
 /**
  * Internal metadata for a sequence, used for introspection.
+ * Supports both single-index and multi-index sequences.
  */
 interface SequenceMetadata {
   name: string;
-  variable: string;
-  base: Map<number, BoxedExpression>;
+  /** For single-index sequences */
+  variable?: string;
+  /** For multi-index sequences */
+  variables?: string[];
+  /** Whether this is a multi-index sequence */
+  isMultiIndex: boolean;
+  /**
+   * Base cases.
+   * For single-index: numeric keys (0, 1, 2, ...)
+   * For multi-index: string keys ('0,0', 'n,0', 'n,n', ...)
+   */
+  base: Map<number | string, BoxedExpression>;
   memoize: boolean;
-  memo: Map<number, BoxedExpression> | null;
-  domain: { min?: number; max?: number };
+  /**
+   * Memoization cache.
+   * For single-index: numeric keys
+   * For multi-index: string keys like '5,2'
+   */
+  memo: Map<number | string, BoxedExpression> | null;
+  domain:
+    | { min?: number; max?: number }
+    | Record<string, { min?: number; max?: number }>;
+  /** Constraint expression for multi-index sequences */
+  constraints?: BoxedExpression;
 }
 
 /**
  * Registry of complete sequences for introspection.
  * Maps ComputeEngine → Map<name, SequenceMetadata>
  */
-const sequenceRegistry = new WeakMap<ComputeEngine, Map<string, SequenceMetadata>>();
+const sequenceRegistry = new WeakMap<
+  ComputeEngine,
+  Map<string, SequenceMetadata>
+>();
 
 function getOrCreateRegistry(ce: ComputeEngine): Map<string, SequenceMetadata> {
   if (!sequenceRegistry.has(ce)) {
@@ -46,21 +69,201 @@ function getOrCreateRegistry(ce: ComputeEngine): Map<string, SequenceMetadata> {
 /**
  * Register a sequence in the registry for introspection.
  */
-function registerSequence(
-  ce: ComputeEngine,
-  metadata: SequenceMetadata
-): void {
+function registerSequence(ce: ComputeEngine, metadata: SequenceMetadata): void {
   const registry = getOrCreateRegistry(ce);
   registry.set(metadata.name, metadata);
+}
+
+// ============================================================================
+// Multi-Index Pattern Matching (SUB-9)
+// ============================================================================
+
+/**
+ * Parsed base case pattern.
+ * - 'exact': All indices are numeric (e.g., '0,0' → [0, 0])
+ * - 'pattern': Contains variable names (e.g., 'n,0' → ['n', 0])
+ */
+interface ParsedPattern {
+  type: 'exact' | 'pattern';
+  values: (number | string)[];
+}
+
+/**
+ * Parse a base case key into a pattern.
+ *
+ * @example
+ * parseBasePattern('0,0') → { type: 'exact', values: [0, 0] }
+ * parseBasePattern('n,0') → { type: 'pattern', values: ['n', 0] }
+ * parseBasePattern('n,n') → { type: 'pattern', values: ['n', 'n'] }
+ */
+function parseBasePattern(key: string | number): ParsedPattern {
+  if (typeof key === 'number') {
+    return { type: 'exact', values: [key] };
+  }
+
+  const parts = key.split(',').map((p) => p.trim());
+  const values = parts.map((p) => {
+    const num = Number(p);
+    return isNaN(num) ? p : num; // Variable names or numeric indices
+  });
+  const hasVariable = values.some((v) => typeof v === 'string');
+  return { type: hasVariable ? 'pattern' : 'exact', values };
+}
+
+/**
+ * Match a pattern against concrete indices.
+ *
+ * Patterns can contain:
+ * - Numeric values that must match exactly
+ * - Variable names that match any value
+ * - Repeated variable names that must have equal values (e.g., 'n,n')
+ *
+ * @example
+ * matchPattern({ type: 'exact', values: [0, 0] }, [0, 0]) → true
+ * matchPattern({ type: 'pattern', values: ['n', 0] }, [5, 0]) → true
+ * matchPattern({ type: 'pattern', values: ['n', 'n'] }, [5, 5]) → true
+ * matchPattern({ type: 'pattern', values: ['n', 'n'] }, [5, 3]) → false
+ */
+function matchPattern(pattern: ParsedPattern, indices: number[]): boolean {
+  if (pattern.values.length !== indices.length) return false;
+
+  // Track variable bindings for equality checks (e.g., 'n,n' requires equal values)
+  const bindings = new Map<string, number>();
+
+  for (let i = 0; i < pattern.values.length; i++) {
+    const pv = pattern.values[i];
+    const iv = indices[i];
+
+    if (typeof pv === 'number') {
+      // Exact value must match
+      if (pv !== iv) return false;
+    } else {
+      // Variable - check if we've seen it before
+      if (bindings.has(pv)) {
+        // Variable appeared earlier - values must be equal
+        if (bindings.get(pv) !== iv) return false;
+      } else {
+        // First occurrence - bind it
+        bindings.set(pv, iv);
+      }
+    }
+  }
+  return true;
+}
+
+/**
+ * Prepared base case for efficient matching.
+ */
+interface PreparedBaseCase {
+  pattern: ParsedPattern;
+  value: BoxedExpression;
+  /** Number of variables in pattern (more specific = fewer variables) */
+  variableCount: number;
+}
+
+/**
+ * Prepare and sort base cases for matching.
+ * Order: exact matches first, then patterns with fewer variables (more specific first).
+ */
+function prepareBaseCases(
+  base: Map<number | string, BoxedExpression>
+): PreparedBaseCase[] {
+  const cases: PreparedBaseCase[] = [];
+
+  for (const [key, value] of base) {
+    const pattern = parseBasePattern(key);
+    const variableCount = pattern.values.filter(
+      (v) => typeof v === 'string'
+    ).length;
+    cases.push({ pattern, value, variableCount });
+  }
+
+  // Sort: exact matches first, then by ascending variable count
+  cases.sort((a, b) => {
+    if (a.pattern.type !== b.pattern.type) {
+      return a.pattern.type === 'exact' ? -1 : 1;
+    }
+    return a.variableCount - b.variableCount;
+  });
+
+  return cases;
+}
+
+/**
+ * Find matching base case for given indices.
+ */
+function findMatchingBaseCase(
+  cases: PreparedBaseCase[],
+  indices: number[]
+): BoxedExpression | undefined {
+  for (const { pattern, value } of cases) {
+    if (matchPattern(pattern, indices)) {
+      return value;
+    }
+  }
+  return undefined;
+}
+
+/**
+ * Validate domain constraints for multi-index sequences.
+ */
+function validateMultiIndexDomain(
+  indices: number[],
+  variables: string[],
+  domain: Record<string, { min?: number; max?: number }>
+): boolean {
+  for (let i = 0; i < variables.length; i++) {
+    const variable = variables[i];
+    const index = indices[i];
+    const constraint = domain[variable];
+
+    if (constraint) {
+      if (constraint.min !== undefined && index < constraint.min) return false;
+      if (constraint.max !== undefined && index > constraint.max) return false;
+    }
+  }
+  return true;
+}
+
+/**
+ * Check constraint expression for multi-index sequences.
+ * Returns true if constraints are satisfied or no constraints exist.
+ */
+function checkConstraints(
+  ce: ComputeEngine,
+  constraints: BoxedExpression,
+  variables: string[],
+  indices: number[]
+): boolean {
+  // Substitute variable values
+  const subs: Record<string, BoxedExpression> = {};
+  for (let i = 0; i < variables.length; i++) {
+    subs[variables[i]] = ce.number(indices[i]);
+  }
+
+  const substituted = constraints.subs(subs);
+  const result = substituted.evaluate();
+
+  // Check if result is truthy (non-zero number or True)
+  if (result.symbol === 'True') return true;
+  if (result.symbol === 'False') return false;
+  if (result.isNumberLiteral) return result.re !== 0;
+
+  // If we can't determine, assume constraints are not satisfied
+  return false;
 }
 
 /**
  * Create a subscriptEvaluate handler from a sequence definition.
  *
- * The handler evaluates expressions like `F_{10}` by:
- * 1. Checking base cases first
+ * The handler evaluates expressions like `F_{10}` or `P_{5,2}` by:
+ * 1. Checking base cases first (with pattern matching for multi-index)
  * 2. Looking up memoized values
  * 3. Recursively evaluating the recurrence relation
+ *
+ * Supports both single-index and multi-index sequences:
+ * - Single-index: `F_{10}` with subscript as a number
+ * - Multi-index: `P_{5,2}` with subscript as `Sequence(5, 2)`
  */
 export function createSequenceHandler(
   ce: ComputeEngine,
@@ -70,67 +273,149 @@ export function createSequenceHandler(
   subscript: BoxedExpression,
   options: { engine: ComputeEngine; numericApproximation?: boolean }
 ) => BoxedExpression | undefined {
-  const variable = def.variable ?? 'n';
+  // Determine if this is a multi-index sequence
+  const isMultiIndex = def.variables !== undefined && def.variables.length > 1;
+  const variables = def.variables ?? [def.variable ?? 'n'];
+  const variable = variables[0]; // For single-index backward compatibility
+
   const memoize = def.memoize ?? true;
-  const memo = memoize ? new Map<number, BoxedExpression>() : null;
+  // Use string keys for multi-index, number keys for single-index
+  const memo = memoize
+    ? new Map<number | string, BoxedExpression>()
+    : null;
   const domain = def.domain ?? {};
 
   // Store recurrence source for lazy parsing
-  // We parse lazily because at handler creation time, the sequence symbol
-  // may not yet have its subscriptEvaluate handler set up.
   const recurrenceSource = def.recurrence;
   let recurrence: BoxedExpression | null = null;
 
-  // Box base cases
-  const base = new Map<number, BoxedExpression>();
-  for (const [k, v] of Object.entries(def.base)) {
-    const index = Number(k);
-    base.set(index, typeof v === 'number' ? ce.number(v) : v);
+  // Parse and box constraint expression
+  let constraintsExpr: BoxedExpression | null = null;
+  if (def.constraints) {
+    constraintsExpr =
+      typeof def.constraints === 'string'
+        ? ce.parse(def.constraints)
+        : def.constraints;
   }
+
+  // Box base cases
+  const base = new Map<number | string, BoxedExpression>();
+  for (const [k, v] of Object.entries(def.base)) {
+    const key = isMultiIndex ? String(k) : Number(k);
+    base.set(key, typeof v === 'number' ? ce.number(v) : v);
+  }
+
+  // For multi-index: prepare sorted base cases for pattern matching
+  const preparedBaseCases = isMultiIndex ? prepareBaseCases(base) : null;
 
   // Register sequence for introspection (SUB-7)
   registerSequence(ce, {
     name,
-    variable,
+    variable: isMultiIndex ? undefined : variable,
+    variables: isMultiIndex ? variables : undefined,
+    isMultiIndex,
     base,
     memoize,
     memo,
     domain,
+    constraints: constraintsExpr ?? undefined,
   });
 
+  // Return the handler function
   return (subscript, { engine, numericApproximation }) => {
     // Lazy parse the recurrence on first use
-    // This ensures the sequence symbol has its subscriptEvaluate set up
     if (recurrence === null) {
       recurrence =
         typeof recurrenceSource === 'string'
           ? engine.parse(recurrenceSource)
           : recurrenceSource;
     }
-    const n = subscript.re;
 
-    // Must be an integer
-    if (!Number.isInteger(n)) return undefined;
+    // Extract indices from subscript
+    let indices: number[];
+
+    if (subscript.operator === 'Sequence' && subscript.ops) {
+      // Multi-index: Subscript(P, Sequence(n, k))
+      // Evaluate operands in case they contain unevaluated arithmetic (e.g., n-1)
+      indices = subscript.ops.map((op) => op.evaluate().re);
+    } else if (subscript.operator === 'Tuple' && subscript.ops) {
+      // Multi-index after canonicalization: Subscript(P, Tuple(n, k))
+      // Evaluate operands in case they contain unevaluated arithmetic (e.g., n-1)
+      indices = subscript.ops.map((op) => op.evaluate().re);
+    } else if (subscript.operator === 'Delimiter' && subscript.ops) {
+      // Alternative: Subscript(P, Delimiter(n, k))
+      // Evaluate operands in case they contain unevaluated arithmetic (e.g., n-1)
+      indices = subscript.ops.map((op) => op.evaluate().re);
+    } else {
+      // Single index - evaluate in case it contains arithmetic
+      indices = [subscript.evaluate().re];
+    }
+
+    // All indices must be integers
+    if (!indices.every((n) => Number.isInteger(n))) return undefined;
 
     // Check domain constraints
-    if (domain.min !== undefined && n < domain.min) return undefined;
-    if (domain.max !== undefined && n > domain.max) return undefined;
+    if (isMultiIndex) {
+      // Multi-index domain: per-variable constraints
+      const multiDomain = domain as Record<
+        string,
+        { min?: number; max?: number }
+      >;
+      if (
+        Object.keys(multiDomain).length > 0 &&
+        !validateMultiIndexDomain(indices, variables, multiDomain)
+      ) {
+        return undefined;
+      }
+    } else {
+      // Single-index domain
+      const singleDomain = domain as { min?: number; max?: number };
+      const n = indices[0];
+      if (singleDomain.min !== undefined && n < singleDomain.min)
+        return undefined;
+      if (singleDomain.max !== undefined && n > singleDomain.max)
+        return undefined;
+    }
+
+    // Check constraint expression (multi-index only)
+    if (constraintsExpr && !checkConstraints(engine, constraintsExpr, variables, indices)) {
+      return undefined;
+    }
+
+    // Generate memo key
+    const memoKey = isMultiIndex ? indices.join(',') : indices[0];
+
+    // Check memo first
+    if (memo?.has(memoKey)) return memo.get(memoKey)!;
 
     // Check base cases
-    if (base.has(n)) return base.get(n)!;
+    if (isMultiIndex) {
+      // Multi-index: use pattern matching
+      const baseValue = findMatchingBaseCase(preparedBaseCases!, indices);
+      if (baseValue !== undefined) {
+        if (memo) memo.set(memoKey, baseValue);
+        return baseValue;
+      }
+    } else {
+      // Single-index: direct lookup
+      const n = indices[0];
+      if (base.has(n)) return base.get(n)!;
+    }
 
-    // Check memo
-    if (memo?.has(n)) return memo.get(n)!;
+    // Evaluate recurrence by substituting all variables
+    const subs: Record<string, BoxedExpression> = {};
+    for (let i = 0; i < variables.length; i++) {
+      subs[variables[i]] = engine.number(indices[i]);
+    }
 
-    // Evaluate recurrence by substituting n
-    const substituted = recurrence.subs({ [variable]: engine.number(n) });
+    const substituted = recurrence.subs(subs);
     const result = numericApproximation
       ? substituted.N()
       : substituted.evaluate();
 
     // Memoize valid numeric results
     if (memo && result.isNumberLiteral) {
-      memo.set(n, result);
+      memo.set(memoKey, result);
     }
 
     return result.isNumberLiteral ? result : undefined;
@@ -184,13 +469,33 @@ export function validateSequenceDefinition(
 /**
  * Track pending sequence definitions (base cases + recurrence).
  * A sequence is "pending" until both base case(s) and recurrence are provided.
+ * Supports both single-index and multi-index sequences.
  */
 interface PendingSequence {
-  base: Map<number, BoxedExpression>;
-  recurrence?: { variable: string; latex: string };
+  /**
+   * Base cases.
+   * For single-index: Map<number, BoxedExpression>
+   * For multi-index: Map<string, BoxedExpression> with keys like '0,0', 'n,0'
+   */
+  base: Map<number | string, BoxedExpression>;
+  /**
+   * Recurrence definition.
+   * For single-index: variable is a string (e.g., 'n')
+   * For multi-index: variables is an array (e.g., ['n', 'k'])
+   */
+  recurrence?: {
+    variable?: string;
+    variables?: string[];
+    latex: string;
+  };
+  /** Whether this appears to be a multi-index sequence */
+  isMultiIndex: boolean;
 }
 
-const pendingSequences = new WeakMap<ComputeEngine, Map<string, PendingSequence>>();
+const pendingSequences = new WeakMap<
+  ComputeEngine,
+  Map<string, PendingSequence>
+>();
 
 function getOrCreatePending(ce: ComputeEngine, name: string): PendingSequence {
   if (!pendingSequences.has(ce)) {
@@ -198,13 +503,13 @@ function getOrCreatePending(ce: ComputeEngine, name: string): PendingSequence {
   }
   const map = pendingSequences.get(ce)!;
   if (!map.has(name)) {
-    map.set(name, { base: new Map() });
+    map.set(name, { base: new Map(), isMultiIndex: false });
   }
   return map.get(name)!;
 }
 
 /**
- * Add a base case for a sequence definition.
+ * Add a base case for a single-index sequence definition.
  * e.g., from `L_0 := 1`
  */
 export function addSequenceBaseCase(
@@ -219,7 +524,25 @@ export function addSequenceBaseCase(
 }
 
 /**
- * Add a recurrence relation for a sequence definition.
+ * Add a base case for a multi-index sequence definition.
+ * e.g., from `P_{0,0} := 1` or `P_{n,0} := 1`
+ *
+ * @param key - The base case key, e.g., '0,0' for exact or 'n,0' for pattern
+ */
+export function addMultiIndexBaseCase(
+  ce: ComputeEngine,
+  name: string,
+  key: string,
+  value: BoxedExpression
+): void {
+  const pending = getOrCreatePending(ce, name);
+  pending.base.set(key, value);
+  pending.isMultiIndex = true;
+  tryFinalizeSequence(ce, name);
+}
+
+/**
+ * Add a recurrence relation for a single-index sequence definition.
  * e.g., from `L_n := L_{n-1} + 1`
  *
  * We store the recurrence as a LaTeX string rather than a BoxedExpression
@@ -240,6 +563,24 @@ export function addSequenceRecurrence(
 }
 
 /**
+ * Add a recurrence relation for a multi-index sequence definition.
+ * e.g., from `P_{n,k} := P_{n-1,k-1} + P_{n-1,k}`
+ *
+ * @param variables - The index variable names, e.g., ['n', 'k']
+ */
+export function addMultiIndexRecurrence(
+  ce: ComputeEngine,
+  name: string,
+  variables: string[],
+  expr: BoxedExpression
+): void {
+  const pending = getOrCreatePending(ce, name);
+  pending.recurrence = { variables, latex: expr.latex };
+  pending.isMultiIndex = true;
+  tryFinalizeSequence(ce, name);
+}
+
+/**
  * Try to finalize a sequence definition.
  * A sequence is finalized when both base case(s) and recurrence are present.
  */
@@ -250,16 +591,24 @@ function tryFinalizeSequence(ce: ComputeEngine, name: string): void {
   if (pending.base.size === 0 || !pending.recurrence) return;
 
   // Convert to SequenceDefinition format
-  const base: Record<number, BoxedExpression> = {};
+  const base: Record<number | string, BoxedExpression> = {};
   for (const [k, v] of pending.base) {
     base[k] = v;
   }
 
+  // Build definition based on single vs multi-index
   const def: SequenceDefinition = {
-    variable: pending.recurrence.variable,
     base,
     recurrence: pending.recurrence.latex, // Pass as string for fresh parsing
   };
+
+  if (pending.isMultiIndex || pending.recurrence.variables) {
+    // Multi-index sequence
+    def.variables = pending.recurrence.variables;
+  } else {
+    // Single-index sequence
+    def.variable = pending.recurrence.variable;
+  }
 
   // Validate the definition
   const validation = validateSequenceDefinition(ce, name, def);
@@ -342,6 +691,7 @@ export function extractIndexVariable(
  * Get the status of a sequence definition.
  *
  * Returns information about whether a sequence is complete, pending, or not defined.
+ * Supports both single-index and multi-index sequences.
  */
 export function getSequenceStatus(
   ce: ComputeEngine,
@@ -352,12 +702,21 @@ export function getSequenceStatus(
   const pending = pendingMap?.get(name);
 
   if (pending) {
+    // Sort base indices appropriately
+    const baseIndices = Array.from(pending.base.keys());
+    if (!pending.isMultiIndex) {
+      // Single-index: sort numerically
+      (baseIndices as number[]).sort((a, b) => a - b);
+    }
+    // Multi-index: keep as strings, sort lexicographically
+
     return {
       status: 'pending',
       hasBase: pending.base.size > 0,
       hasRecurrence: !!pending.recurrence,
-      baseIndices: Array.from(pending.base.keys()).sort((a, b) => a - b),
+      baseIndices,
       variable: pending.recurrence?.variable,
+      variables: pending.recurrence?.variables,
     };
   }
 
@@ -367,14 +726,29 @@ export function getSequenceStatus(
     // It's a complete sequence - get details from registry
     const registry = sequenceRegistry.get(ce);
     const metadata = registry?.get(name);
+
+    if (metadata) {
+      const baseIndices = Array.from(metadata.base.keys());
+      if (!metadata.isMultiIndex) {
+        // Single-index: sort numerically
+        (baseIndices as number[]).sort((a, b) => a - b);
+      }
+
+      return {
+        status: 'complete',
+        hasBase: true,
+        hasRecurrence: true,
+        baseIndices,
+        variable: metadata.variable,
+        variables: metadata.variables,
+      };
+    }
+
     return {
       status: 'complete',
       hasBase: true,
       hasRecurrence: true,
-      baseIndices: metadata
-        ? Array.from(metadata.base.keys()).sort((a, b) => a - b)
-        : [],
-      variable: metadata?.variable,
+      baseIndices: [],
     };
   }
 
@@ -393,6 +767,7 @@ export function getSequenceStatus(
 /**
  * Get information about a defined sequence.
  * Returns `undefined` if the symbol is not a complete sequence.
+ * Supports both single-index and multi-index sequences.
  */
 export function getSequenceInfo(
   ce: ComputeEngine,
@@ -403,13 +778,22 @@ export function getSequenceInfo(
 
   if (!metadata) return undefined;
 
+  // Get and sort base indices
+  const baseIndices = Array.from(metadata.base.keys());
+  if (!metadata.isMultiIndex) {
+    // Single-index: sort numerically
+    (baseIndices as number[]).sort((a, b) => a - b);
+  }
+
   return {
     name: metadata.name,
     variable: metadata.variable,
-    baseIndices: Array.from(metadata.base.keys()).sort((a, b) => a - b),
+    variables: metadata.variables,
+    baseIndices,
     memoize: metadata.memoize,
     domain: metadata.domain,
     cacheSize: metadata.memo?.size ?? 0,
+    isMultiIndex: metadata.isMultiIndex,
   };
 }
 
@@ -456,11 +840,14 @@ export function clearSequenceCache(ce: ComputeEngine, name?: string): void {
 /**
  * Get the memoization cache for a sequence.
  * Returns a copy of the cache Map, or `undefined` if not a sequence or memoization is disabled.
+ *
+ * For single-index sequences, keys are numbers.
+ * For multi-index sequences, keys are comma-separated strings (e.g., '5,2').
  */
 export function getSequenceCache(
   ce: ComputeEngine,
   name: string
-): Map<number, BoxedExpression> | undefined {
+): Map<number | string, BoxedExpression> | undefined {
   const registry = sequenceRegistry.get(ce);
   const metadata = registry?.get(name);
 
