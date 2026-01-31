@@ -628,3 +628,315 @@ describe('DECLARATIVE SEQUENCE DEFINITIONS', () => {
     });
   });
 });
+
+// ============================================================================
+// MULTI-INDEX SEQUENCES (SUB-9)
+// ============================================================================
+
+describe('MULTI-INDEX SEQUENCES (SUB-9)', () => {
+  describe('Parser output for multi-index subscripts', () => {
+    test('Parser produces Sequence for comma-separated subscripts', () => {
+      const ce = new ComputeEngine();
+      // The subscript should be a Sequence when there's a comma
+      const p00 = ce.parse('Q_{0,0}');
+      const pnk = ce.parse('Q_{n,k}');
+      const p52 = ce.parse('Q_{5,2}');
+
+      expect(p00.operator).toBe('Subscript');
+      expect(p00.op2?.operator).toBe('Sequence');
+      expect(pnk.op2?.operator).toBe('Sequence');
+      expect(p52.op2?.operator).toBe('Sequence');
+    });
+  });
+
+  describe('Programmatic API with explicit base cases', () => {
+    test('Simple 2x2 grid with all explicit base cases', () => {
+      const ce = new ComputeEngine();
+      // Use 'U' instead of 'G' (G is reserved for CatalanConstant)
+      ce.declareSequence('U', {
+        variables: ['i', 'j'],
+        base: {
+          '0,0': 1,
+          '0,1': 2,
+          '1,0': 3,
+          '1,1': 4,
+        },
+        recurrence: 'U_{i-1,j} + U_{i,j-1}',
+      });
+
+      expect(ce.parse('U_{0,0}').evaluate().re).toBe(1);
+      expect(ce.parse('U_{0,1}').evaluate().re).toBe(2);
+      expect(ce.parse('U_{1,0}').evaluate().re).toBe(3);
+      expect(ce.parse('U_{1,1}').evaluate().re).toBe(4);
+    });
+
+    test('Explicit base cases only (no recurrence needed)', () => {
+      const ce = new ComputeEngine();
+      // A lookup table style multi-index sequence
+      // Use 'O' instead of 'T' (T is likely reserved)
+      ce.declareSequence('O', {
+        variables: ['x', 'y'],
+        base: {
+          '0,0': 0,
+          '1,0': 1,
+          '0,1': 10,
+          '1,1': 11,
+          '2,0': 2,
+          '2,1': 12,
+        },
+        recurrence: '0', // Dummy recurrence (won't be used for these indices)
+      });
+
+      expect(ce.parse('O_{0,0}').evaluate().re).toBe(0);
+      expect(ce.parse('O_{1,1}').evaluate().re).toBe(11);
+      expect(ce.parse('O_{2,1}').evaluate().re).toBe(12);
+    });
+  });
+
+  describe("Pascal's Triangle", () => {
+    test('Programmatic API with pattern base cases', () => {
+      const ce = new ComputeEngine();
+      ce.declareSequence('P', {
+        variables: ['n', 'k'],
+        base: {
+          '0,0': 1,
+          'n,0': 1, // Left edge: P_{n,0} = 1 for all n
+          'n,n': 1, // Diagonal: P_{n,n} = 1 (when n = k)
+        },
+        recurrence: 'P_{n-1,k-1} + P_{n-1,k}',
+        domain: { n: { min: 0 }, k: { min: 0 } },
+        constraints: 'k \\le n',
+      });
+
+      // Base cases
+      expect(ce.parse('P_{0,0}').evaluate().re).toBe(1);
+      expect(ce.parse('P_{5,0}').evaluate().re).toBe(1);
+      expect(ce.parse('P_{5,5}').evaluate().re).toBe(1);
+      expect(ce.parse('P_{10,0}').evaluate().re).toBe(1);
+      expect(ce.parse('P_{10,10}').evaluate().re).toBe(1);
+
+      // Computed values (Pascal's triangle)
+      expect(ce.parse('P_{2,1}').evaluate().re).toBe(2); // C(2,1) = 2
+      expect(ce.parse('P_{3,1}').evaluate().re).toBe(3); // C(3,1) = 3
+      expect(ce.parse('P_{3,2}').evaluate().re).toBe(3); // C(3,2) = 3
+      expect(ce.parse('P_{4,2}').evaluate().re).toBe(6); // C(4,2) = 6
+      expect(ce.parse('P_{5,2}').evaluate().re).toBe(10); // C(5,2) = 10
+      expect(ce.parse('P_{5,3}').evaluate().re).toBe(10); // C(5,3) = 10
+      expect(ce.parse('P_{6,3}').evaluate().re).toBe(20); // C(6,3) = 20
+      expect(ce.parse('P_{10,5}').evaluate().re).toBe(252); // C(10,5) = 252
+    });
+
+    test('Memoization for multi-index sequences', () => {
+      const ce = new ComputeEngine();
+      ce.declareSequence('Q', {
+        variables: ['n', 'k'],
+        base: {
+          '0,0': 1,
+          'n,0': 1,
+          'n,n': 1,
+        },
+        recurrence: 'Q_{n-1,k-1} + Q_{n-1,k}',
+      });
+
+      // Compute a value to populate the cache
+      ce.parse('Q_{8,4}').evaluate();
+
+      // Check cache has entries
+      const cache = ce.getSequenceCache('Q');
+      expect(cache).toBeDefined();
+      expect(cache!.size).toBeGreaterThan(0);
+      expect(cache!.has('8,4')).toBe(true);
+      expect(cache!.get('8,4')!.re).toBe(70); // C(8,4) = 70
+    });
+
+    test('Clear cache for multi-index sequences', () => {
+      const ce = new ComputeEngine();
+      ce.declareSequence('R', {
+        variables: ['n', 'k'],
+        base: { '0,0': 1, 'n,0': 1, 'n,n': 1 },
+        recurrence: 'R_{n-1,k-1} + R_{n-1,k}',
+      });
+
+      ce.parse('R_{5,2}').evaluate();
+      expect(ce.getSequenceCache('R')!.size).toBeGreaterThan(0);
+
+      ce.clearSequenceCache('R');
+      expect(ce.getSequenceCache('R')!.size).toBe(0);
+    });
+  });
+
+  describe('Domain and constraint validation', () => {
+    test('Out of domain returns undefined (stays symbolic)', () => {
+      const ce = new ComputeEngine();
+      // Use 'I' instead of 'D' (D might be reserved)
+      ce.declareSequence('I', {
+        variables: ['n', 'k'],
+        base: { '0,0': 1, 'n,0': 1, 'n,n': 1 },
+        recurrence: 'I_{n-1,k-1} + I_{n-1,k}',
+        domain: { n: { min: 0 }, k: { min: 0 } },
+        constraints: 'k \\le n',
+      });
+
+      // Valid: k <= n
+      expect(ce.parse('I_{3,2}').evaluate().re).toBe(3);
+
+      // Invalid: k > n (constraint violation)
+      const invalid = ce.parse('I_{3,5}').evaluate();
+      expect(invalid.operator).toBe('Subscript'); // Stays symbolic
+    });
+
+    test('Negative index with domain constraint', () => {
+      const ce = new ComputeEngine();
+      // Use 'b' as sequence name and unique variable names
+      ce.declareSequence('b', {
+        variables: ['m', 'n'],
+        base: { '0,0': 1, 'm,0': 1, '0,n': 1 },
+        recurrence: 'b_{m-1,n} + b_{m,n-1}',
+        domain: { m: { min: 0 }, n: { min: 0 } },
+      });
+
+      // Valid
+      expect(ce.parse('b_{2,2}').evaluate().re).toBe(6);
+
+      // Invalid: negative index
+      const invalid = ce.parse('b_{-1,2}').evaluate();
+      expect(invalid.operator).toBe('Subscript');
+    });
+  });
+
+  describe('Introspection for multi-index sequences', () => {
+    test('getSequence returns multi-index info', () => {
+      const ce = new ComputeEngine();
+      ce.declareSequence('M', {
+        variables: ['a', 'b'],
+        base: { '0,0': 1, 'a,0': 1 },
+        recurrence: 'M_{a-1,b} + 1',
+      });
+
+      const info = ce.getSequence('M');
+      expect(info).toBeDefined();
+      expect(info!.name).toBe('M');
+      expect(info!.isMultiIndex).toBe(true);
+      expect(info!.variables).toEqual(['a', 'b']);
+      expect(info!.baseIndices).toContain('0,0');
+      expect(info!.baseIndices).toContain('a,0');
+    });
+
+    test('isSequence works for multi-index', () => {
+      const ce = new ComputeEngine();
+      ce.declareSequence('N', {
+        variables: ['x', 'y'],
+        base: { '0,0': 0 },
+        recurrence: 'N_{x-1,y} + N_{x,y-1}',
+      });
+
+      expect(ce.isSequence('N')).toBe(true);
+      expect(ce.isSequence('NotASequence')).toBe(false);
+    });
+
+    test('listSequences includes multi-index sequences', () => {
+      const ce = new ComputeEngine();
+      // Use single letters - multi-letter names are parsed as products in LaTeX
+      ce.declareSequence('K', {
+        base: { 0: 1 },
+        recurrence: 'K_{n-1} + 1',
+      });
+      ce.declareSequence('L', {
+        variables: ['i', 'j'],
+        base: { '0,0': 1 },
+        recurrence: 'L_{i-1,j} + L_{i,j-1}',
+      });
+
+      const sequences = ce.listSequences();
+      expect(sequences).toContain('K');
+      expect(sequences).toContain('L');
+    });
+
+    test('getSequenceStatus for pending multi-index', () => {
+      const ce = new ComputeEngine();
+      // Only base case, no recurrence yet
+      ce.parse('W_{0,0} := 1').evaluate();
+
+      const status = ce.getSequenceStatus('W');
+      expect(status.status).toBe('pending');
+      expect(status.hasBase).toBe(true);
+      expect(status.hasRecurrence).toBe(false);
+    });
+  });
+
+  describe('Pattern matching edge cases', () => {
+    test('Exact match takes priority over pattern', () => {
+      const ce = new ComputeEngine();
+      ce.declareSequence('X', {
+        variables: ['n', 'k'],
+        base: {
+          '3,3': 999, // Specific override for (3,3)
+          'n,n': 1, // General diagonal pattern
+          'n,0': 1,
+          '0,0': 1,
+        },
+        recurrence: 'X_{n-1,k-1} + X_{n-1,k}',
+      });
+
+      // Exact match should take priority
+      expect(ce.parse('X_{3,3}').evaluate().re).toBe(999);
+      // Pattern match for other diagonal elements
+      expect(ce.parse('X_{5,5}').evaluate().re).toBe(1);
+      expect(ce.parse('X_{2,2}').evaluate().re).toBe(1);
+    });
+
+    test('Pattern with repeated variable requires equal indices', () => {
+      const ce = new ComputeEngine();
+      ce.declareSequence('Y', {
+        variables: ['n', 'k'],
+        base: {
+          'n,n': 100, // Only matches when n == k
+          'n,0': 1,
+          '0,k': 1,
+        },
+        recurrence: 'Y_{n-1,k-1} + Y_{n-1,k}',
+      });
+
+      // n,n pattern matches only when indices are equal
+      expect(ce.parse('Y_{4,4}').evaluate().re).toBe(100);
+      expect(ce.parse('Y_{7,7}').evaluate().re).toBe(100);
+
+      // n,0 pattern matches second index = 0
+      expect(ce.parse('Y_{5,0}').evaluate().re).toBe(1);
+
+      // 0,k pattern matches first index = 0
+      expect(ce.parse('Y_{0,3}').evaluate().re).toBe(1);
+    });
+  });
+
+  describe('Arithmetic with multi-index sequences', () => {
+    test('Add and multiply multi-index sequence values', () => {
+      const ce = new ComputeEngine();
+      ce.declareSequence('B', {
+        variables: ['n', 'k'],
+        base: { '0,0': 1, 'n,0': 1, 'n,n': 1 },
+        recurrence: 'B_{n-1,k-1} + B_{n-1,k}',
+      });
+
+      // B_{5,2} = 10, B_{4,2} = 6
+      const sum = ce.parse('B_{5,2} + B_{4,2}').evaluate();
+      expect(sum.re).toBe(16);
+
+      const product = ce.parse('B_{5,2} \\cdot B_{4,2}').evaluate();
+      expect(product.re).toBe(60);
+    });
+
+    test('Use in expressions', () => {
+      const ce = new ComputeEngine();
+      ce.declareSequence('C', {
+        variables: ['n', 'k'],
+        base: { '0,0': 1, 'n,0': 1, 'n,n': 1 },
+        recurrence: 'C_{n-1,k-1} + C_{n-1,k}',
+      });
+
+      // 2 * C_{4,2} + 3 = 2 * 6 + 3 = 15
+      const result = ce.parse('2 C_{4,2} + 3').evaluate();
+      expect(result.re).toBe(15);
+    });
+  });
+});
