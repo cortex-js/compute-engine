@@ -7,6 +7,7 @@ import {
   Assumption,
   BoxedExpression,
   ComputeEngine,
+  Sign,
 } from './global-types';
 
 import { findUnivariateRoots } from './boxed-expression/solve';
@@ -454,4 +455,111 @@ function hasValue(ce: ComputeEngine, s: string): boolean {
 
   if (ce._getSymbolValue(s) !== undefined) return true;
   return false;
+}
+
+/**
+ * Query assumptions to determine the sign of a symbol.
+ *
+ * Examines inequality assumptions in the current context to determine
+ * if a symbol's sign can be inferred. Assumptions are stored in normalized
+ * form (Less or LessEqual with lhs-rhs compared to 0), so:
+ * - `x > 0` is stored as `Less(-x, 0)` meaning `-x < 0`
+ * - `x >= 0` is stored as `LessEqual(-x, 0)` meaning `-x <= 0`
+ * - `x < 0` is stored as `Less(x, 0)` meaning `x < 0`
+ * - `x <= 0` is stored as `LessEqual(x, 0)` meaning `x <= 0`
+ *
+ * @param ce - The compute engine instance
+ * @param symbol - The symbol name to query
+ * @returns The inferred sign, or undefined if no relevant assumptions found
+ */
+export function getSignFromAssumptions(
+  ce: ComputeEngine,
+  symbol: string
+): Sign | undefined {
+  const assumptions = ce.context?.assumptions;
+  if (!assumptions) return undefined;
+
+  for (const [assumption, _] of assumptions.entries()) {
+    const op = assumption.operator;
+    if (!op) continue;
+
+    // Assumptions are normalized to Less or LessEqual
+    if (op !== 'Less' && op !== 'LessEqual') continue;
+
+    const ops = assumption.ops;
+    if (!ops || ops.length !== 2) continue;
+
+    const [lhs, rhs] = ops;
+
+    // Check if RHS is 0 (normalized form: expr < 0 or expr <= 0)
+    if (!rhs.is(0)) continue;
+
+    // Case 1: Direct symbol comparison
+    // x < 0 means x is negative
+    // x <= 0 means x is non-positive
+    if (lhs.symbol === symbol) {
+      if (op === 'Less') return 'negative';
+      if (op === 'LessEqual') return 'non-positive';
+    }
+
+    // Case 2: Negated symbol comparison
+    // -x < 0 means x > 0 (positive)
+    // -x <= 0 means x >= 0 (non-negative)
+    if (lhs.operator === 'Negate' && lhs.op1?.symbol === symbol) {
+      if (op === 'Less') return 'positive';
+      if (op === 'LessEqual') return 'non-negative';
+    }
+
+    // Case 3: Symbol with subtraction from constant
+    // a - x < 0 means x > a, so if a >= 0, x is positive
+    // x - a < 0 means x < a, so if a <= 0, x is negative
+    if (lhs.operator === 'Subtract') {
+      const [a, b] = lhs.ops ?? [];
+      if (a && b) {
+        // a - x < 0 => x > a
+        if (b.symbol === symbol && a.isNonNegative === true) {
+          if (op === 'Less') return 'positive';
+        }
+        // x - a < 0 => x < a
+        if (a.symbol === symbol && b.isNonPositive === true) {
+          if (op === 'Less') return 'negative';
+        }
+      }
+    }
+
+    // Case 4: Addition form (canonical form of subtraction)
+    // x + (-a) < 0 means x < a, so if a <= 0, x is negative
+    // -x + a < 0 means -x < -a means x > a, so if a >= 0, x is positive
+    if (lhs.operator === 'Add' && lhs.ops) {
+      for (const term of lhs.ops) {
+        // Direct symbol in sum: check if other terms give us bounds
+        if (term.symbol === symbol) {
+          // x + ... < 0, check if other terms are all non-negative
+          // That would mean x < -(sum of others), so x < non-positive = negative
+          const otherTerms = lhs.ops.filter((t) => t !== term);
+          if (
+            otherTerms.length > 0 &&
+            otherTerms.every((t) => t.isNonNegative === true)
+          ) {
+            if (op === 'Less') return 'negative';
+            if (op === 'LessEqual') return 'non-positive';
+          }
+        }
+        // Negated symbol in sum: -x + ... < 0
+        if (term.operator === 'Negate' && term.op1?.symbol === symbol) {
+          // -x + ... < 0 means x > ...
+          const otherTerms = lhs.ops.filter((t) => t !== term);
+          if (
+            otherTerms.length > 0 &&
+            otherTerms.every((t) => t.isNonPositive === true)
+          ) {
+            if (op === 'Less') return 'positive';
+            if (op === 'LessEqual') return 'non-negative';
+          }
+        }
+      }
+    }
+  }
+
+  return undefined;
 }

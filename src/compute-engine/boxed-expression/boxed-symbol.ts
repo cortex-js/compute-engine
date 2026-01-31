@@ -55,6 +55,7 @@ import {
   nonNegativeSign,
 } from './sgn';
 import { matchesSymbol } from '../../math-json/utils';
+import { getSignFromAssumptions } from '../assume';
 
 /**
  * ### BoxedSymbol
@@ -552,7 +553,11 @@ export class BoxedSymbol extends _BoxedExpression {
 
   // The sign of the value of the symbol
   get sgn(): Sign | undefined {
-    return this.value?.sgn;
+    // First check if there's an assigned value
+    if (this.value) return this.value.sgn;
+
+    // Otherwise, check if there are assumptions about this symbol's sign
+    return getSignFromAssumptions(this.engine, this.symbol);
   }
 
   get isOdd(): boolean | undefined {

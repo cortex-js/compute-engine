@@ -115,3 +115,107 @@ describe.skip('canonical types', () => {
     );
   });
 });
+
+// Tests for assumption-based simplification (Issue #8 from TODO.md)
+describe('ASSUMPTION-BASED SIMPLIFICATION', () => {
+  test('sqrt(x^2) simplifies to x when x > 0', () => {
+    const ce = new ComputeEngine();
+    ce.assume(ce.parse('x > 0'));
+    expect(ce.parse('\\sqrt{x^2}').simplify().latex).toBe('x');
+  });
+
+  test('sqrt(x^2) simplifies to x when x >= 0', () => {
+    const ce = new ComputeEngine();
+    ce.assume(ce.parse('x \\ge 0'));
+    expect(ce.parse('\\sqrt{x^2}').simplify().latex).toBe('x');
+  });
+
+  test('sqrt(x^2) simplifies to -x when x < 0', () => {
+    const ce = new ComputeEngine();
+    ce.assume(ce.parse('x < 0'));
+    expect(ce.parse('\\sqrt{x^2}').simplify().latex).toBe('-x');
+  });
+
+  test('sqrt(x^2) simplifies to -x when x <= 0', () => {
+    const ce = new ComputeEngine();
+    ce.assume(ce.parse('x \\le 0'));
+    expect(ce.parse('\\sqrt{x^2}').simplify().latex).toBe('-x');
+  });
+
+  test('sqrt(x^2) returns |x| without assumptions', () => {
+    const ce = new ComputeEngine();
+    expect(ce.parse('\\sqrt{x^2}').simplify().latex).toBe('\\vert x\\vert');
+  });
+
+  test('|x| simplifies to x when x > 0', () => {
+    const ce = new ComputeEngine();
+    ce.assume(ce.parse('x > 0'));
+    expect(ce.parse('|x|').simplify().latex).toBe('x');
+  });
+
+  test('|x| simplifies to x when x >= 0', () => {
+    const ce = new ComputeEngine();
+    ce.assume(ce.parse('x \\ge 0'));
+    expect(ce.parse('|x|').simplify().latex).toBe('x');
+  });
+
+  test('|x| simplifies to -x when x < 0', () => {
+    const ce = new ComputeEngine();
+    ce.assume(ce.parse('x < 0'));
+    expect(ce.parse('|x|').simplify().latex).toBe('-x');
+  });
+
+  test('|x| simplifies to -x when x <= 0', () => {
+    const ce = new ComputeEngine();
+    ce.assume(ce.parse('x \\le 0'));
+    expect(ce.parse('|x|').simplify().latex).toBe('-x');
+  });
+
+  test('fourth root of x^4 simplifies to x when x > 0', () => {
+    const ce = new ComputeEngine();
+    ce.assume(ce.parse('x > 0'));
+    expect(ce.parse('\\sqrt[4]{x^4}').simplify().latex).toBe('x');
+  });
+
+  test('isPositive returns true when x > 0 is assumed', () => {
+    const ce = new ComputeEngine();
+    ce.assume(ce.parse('x > 0'));
+    expect(ce.box('x').isPositive).toBe(true);
+    expect(ce.box('x').isNonNegative).toBe(true);
+    expect(ce.box('x').isNegative).toBe(false);
+  });
+
+  test('isNegative returns true when x < 0 is assumed', () => {
+    const ce = new ComputeEngine();
+    ce.assume(ce.parse('x < 0'));
+    expect(ce.box('x').isNegative).toBe(true);
+    expect(ce.box('x').isNonPositive).toBe(true);
+    expect(ce.box('x').isPositive).toBe(false);
+  });
+
+  test('isNonNegative returns true when x >= 0 is assumed', () => {
+    const ce = new ComputeEngine();
+    ce.assume(ce.parse('x \\ge 0'));
+    expect(ce.box('x').isNonNegative).toBe(true);
+    // Could be zero, so not strictly positive
+    expect(ce.box('x').isPositive).toBe(undefined);
+  });
+
+  test('isNonPositive returns true when x <= 0 is assumed', () => {
+    const ce = new ComputeEngine();
+    ce.assume(ce.parse('x \\le 0'));
+    expect(ce.box('x').isNonPositive).toBe(true);
+    // Could be zero, so not strictly negative
+    expect(ce.box('x').isNegative).toBe(undefined);
+  });
+
+  test('assumptions do not leak between engine instances', () => {
+    const ce1 = new ComputeEngine();
+    ce1.assume(ce1.parse('x > 0'));
+
+    const ce2 = new ComputeEngine();
+    // x should have unknown sign in ce2
+    expect(ce2.parse('\\sqrt{x^2}').simplify().latex).toBe('\\vert x\\vert');
+    expect(ce2.box('x').isPositive).toBe(undefined);
+  });
+});

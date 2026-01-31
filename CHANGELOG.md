@@ -69,6 +69,22 @@
   via `\operatorname{J}`, `\operatorname{Y}`, etc., and Airy functions via
   `\operatorname{Ai}`, `\operatorname{Bi}`.
 
+- **Assumption-Based Simplification**: Simplification rules now correctly use
+  assumptions about symbol signs. For example:
+
+  ```javascript
+  ce.assume(ce.parse('x > 0'));
+  ce.parse('\\sqrt{x^2}').simplify().latex;  // → "x" (was "|x|")
+  ce.parse('|x|').simplify().latex;          // → "x" (was "|x|")
+
+  ce.assume(ce.parse('y < 0'));
+  ce.parse('\\sqrt{y^2}').simplify().latex;  // → "-y"
+  ce.parse('|y|').simplify().latex;          // → "-y"
+  ```
+
+  This enables important mathematical simplifications that depend on knowing
+  whether a variable is positive, negative, or zero.
+
 ### Improvements
 
 - **Derivative Recursion Safety**: Added robust recursion protection to the
