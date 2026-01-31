@@ -548,6 +548,46 @@ ce.parse('2x').isEqual(ce.parse('x+x'))  // Returns: true (correct)
 
 ---
 
+### 23. Replace Method Auto-Wildcards Single-Char Symbols
+
+**Problem:** `.replace({match: 'a', replace: 2})` unexpectedly converts `'a'` to a wildcard
+`'_a'`, causing it to match ANY expression instead of just the literal symbol `a`.
+
+**Current behavior:**
+```typescript
+const expr = ce.box(['Add', ['Multiply', 'a', 'x'], 'b']);
+expr.replace({match: 'a', replace: 2}, {recursive: true})
+// Returns: 2  (wrong!)
+// Expected: 2*x + b
+```
+
+**Root cause:** In `parseRulePart` (rules.ts:350), all single-character symbols are
+auto-converted to wildcards:
+```typescript
+if (x.symbol && x.symbol.length === 1) return ce.symbol('_' + x.symbol);
+```
+
+This makes sense when parsing rule strings like `"a*x -> 2*x"` where `a`, `x` should be
+wildcards, but NOT when the user explicitly provides `{match: 'a', replace: 2}` where
+they likely want literal matching.
+
+**Solution options:**
+1. Only auto-wildcard when parsing a rule string, not when rule is provided as an object
+2. Add an option like `{literal: true}` to disable auto-wildcarding
+3. Require explicit wildcard syntax `'_a'` and never auto-wildcard
+
+**Workaround:** Use `.subs()` for simple variable substitution:
+```typescript
+expr.subs({a: 2})  // Returns: 2*x + b (correct)
+```
+
+**Files to modify:**
+- `src/compute-engine/boxed-expression/rules.ts` - `parseRulePart` function
+
+**Tests:** See `test/playground.ts` lines 61-72 and PLAYGROUND.md Evaluation section
+
+---
+
 ## Subscript and Superscript Enhancements
 
 ### 16. Pre-Subscript and Pre-Superscript Parsing

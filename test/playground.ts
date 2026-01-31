@@ -49,27 +49,15 @@ ce.parse(
   .N()
   .print();
 
-// Note: In LaTeX, "D" is parsed as a user symbol, not the derivative operator.
-// Use ce.box(['D', ...]) directly for derivatives, or \frac{d}{dx} notation.
-ce.box(['D', ce.parse('\\sin(x)'), 'x'])
-  .evaluate()
-  .print();
-
-// Should return '3^2'
-ce.parse('3\\times3', { canonical: ['Multiply'] });
-
-// @issue Replace operation returns 3 instead of 2x + 3
-// Expected: 2x + 3
-// Actual: 3 (the replace doesn't work correctly)
-ce.box(['Add', ['Multiply', 'a', 'x'], 'b'])
-  ?.replace(
-    [
-      { match: 'a', replace: 2 },
-      { match: 'b', replace: 3 },
-    ],
-    { recursive: true }
-  )
-  ?.print();
+// @issue: .replace() auto-wildcards single-char symbols (TODO #23)
+ce.box(['Add', ['Multiply', 'a', 'x'], 'b']).replace(
+  { match: 'a', replace: 2 },
+  { recursive: true }
+);
+// Expected: 2*x + b
+// Actual: 2
+// Bug: 'a' in match is converted to wildcard '_a', matching any expression
+// Workaround: Use .subs({a: 2}) for variable substitution
 
 ce.precision = 30;
 console.log(ce.parse('\\pi').N().toString());
@@ -223,12 +211,6 @@ ce.parse('\\mathrm{Variance}([7, 2, 11])').evaluate().print();
 console.info(ce.parse('{2^3}^4').latex);
 console.info(ce.parse('2^{3^4}').json);
 
-// @issue Power .value returns undefined instead of computed number
-// Expected: 4096 and 2417851639229258349412352
-// Actual: undefined
-console.info(ce.box(['Power', ['Power', 2, 3], 4]).value);
-console.info(ce.box(['Power', 2, ['Power', 3, 4]]).value);
-
 ce.box(['Add', 1, ['Hold', 2]])
   .evaluate()
   .print();
@@ -251,26 +233,10 @@ const exprln = ce.parse('\\ln |x|');
 const deriv = ce.box(['D', exprln, 'x']);
 deriv.evaluate().print();
 
-// @issue Assumptions not applied during simplification
-// Expected: sqrt(x^2) with x > 0 should simplify to x
-// See TODO.md for details on assumption-based simplification
-ce.assume(ce.parse('x > 0'));
-console.log(ce.parse('\\sqrt{x^2}').simplify().toLatex());
-console.log(ce.parse('\\sqrt[4]{x^4}').simplify().toLatex());
-
 // 3^{-2} gets calculated because canonicalDivide calls toNumericValue, which
 // does simplify the expression, i.e. "(3x)^2" -> "9x^2". That's a bit
 // inconsistent with, e.g. "3 + 5" which does not get reduced...
 // console.info(ce.parse('\\frac{x}{3^{-2}}').json);
-
-// @issue Type inference for n not working
-// n is of type unknown - should be inferred to be 'real'?
-// Since cos(n) ∈ [-1, 1], floor(cos(n)) ∈ {-1, 0, 1}
-// Expected: bounds or symbolic result
-// Actual: floor(cos(n)) unevaluated
-ce.box(['Floor', ['Cos', 'n']])
-  .evaluate()
-  .print();
 
 ce.costFunction = () => 0;
 console.info(
@@ -497,8 +463,6 @@ ce.parse('x__+1').print();
 // Expect 1/3
 ce.parse('\\int_{0}^{1} x^2 dx').evaluate().print();
 
-console.log(ce.parse('2x+1=0').isEqual(ce.parse('x=-\\frac12')));
-
 console.log(ce.parse('2\\times3xxx').simplify().toString());
 
 // Should have a single solution, 0
@@ -529,24 +493,8 @@ ce.box(['Multiply', 3, ['Add', ['Negate', 1], ['Rational', 1, 2]]])
 // MATRIX OPERATIONS
 //
 
-// Numeric matrix operations work correctly - no need to test here
-// See PLAYGROUND.md for verified working operations:
-// - Shape, Rank, Flatten, Transpose, Determinant (all work with numeric matrices)
-
-// @issue Symbolic matrix assignment bug
-// ce.assign() for symbolic matrices doesn't store the value correctly
-// X.value becomes Operator("X") instead of the matrix
-// Expected: Determinant(X) should evaluate to -b*c + a*d
-// Actual: Error (incompatible-type)
-ce.assign(
-  'X',
-  ce.box(['Matrix', ['List', ['List', 'a', 'b'], ['List', 'c', 'd']]])
-);
-console.log('Symbolic matrix X.value:', ce.symbol('X').value?.toString());
-console.log(
-  'Determinant(X):',
-  ce.box(['Determinant', 'X']).evaluate().toString()
-);
+// All matrix operations work correctly (numeric and symbolic)
+// See PLAYGROUND.md for verified working operations
 
 // const expr = ce.parse('x^{}');
 // console.info(expr.json);
@@ -582,13 +530,6 @@ console.info(l2.evaluate().toString()); // Works: [1, 3, 5]
 console.info(ce.function('List', [l2]).toString());
 console.info(ce.function('List', [l2]).evaluate().toString());
 
-// @issue Trig periodicity reduction not implemented
-// Expected: cos(5π+k) should simplify to -cos(k) using cos(π+x) = -cos(x)
-// See TODO.md item #9 for implementation details
-const t1 = ce.parse('\\cos(5\\pi+k)');
-console.info(t1.toString()); // cos(k + 5π)
-console.info(t1.simplify().toString()); // Still cos(k + 5π), should be -cos(k)
-
 console.info(ce.parse('f\\left(\\right)').toString());
 
 // Produces error -- mathlive #1707
@@ -618,16 +559,6 @@ console.info(ce.parse('\\frac{1}{2\\sqrt{3}}').canonical.latex);
 
 // Needs a \times between 2 and 3
 console.info(ce.parse('\\sqrt{\\sqrt{\\sqrt{2\\sqrt{3}}}}').latex);
-
-// `HorizontalScaling` should be interpreted as a function, not a symbol.
-// auto-add all the entries from libraries to the dictionary? Alternatively
-// check in default `parseUnknownSymbol` (and rename to
-// `parseUnknownIdentifier`): check Domain is 'Functions'. (See \\operatorname, parse.ts:983)
-// Also maybe unknown identifier in front of Delimiter -> function, .e.g
-// `p(n) =  2n`. Can always disambiguate with a \cdot, e.g. `p\cdot(n)`
-console.info(
-  ce.parse('\\operatorname{HorizontalScaling}\\left(3\\right)+1').json
-);
 
 // simplify() should decompose the square roots of rational
 let z7 = ce.parse('\\frac{\\sqrt{15}}{\\sqrt{3}}');
@@ -726,10 +657,6 @@ console.info(ce.parse('\\mathbb{1}_{\\N}\\left(x\\right)').json);
 //[P⊕Q]=([P]−[Q])
 // [P→Q]=1−[P]+[P][Q]
 // [P≡Q]=1−([P]−[Q])
-
-// Knuth's interval notation:
-console.info(ce.parse('(a..b)').json);
-// -> ["Range", a, b]
 
 // Knuth's coprime notation
 console.info(ce.parse('m\\bot n').json);

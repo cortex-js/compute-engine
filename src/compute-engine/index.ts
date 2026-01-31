@@ -1546,8 +1546,11 @@ export class ComputeEngine implements IComputeEngine {
   /**
    * Get the memoization cache for a sequence.
    * Returns a Map of index → value, or `undefined` if not a sequence or memoization is disabled.
+   *
+   * For single-index sequences, keys are numbers.
+   * For multi-index sequences, keys are comma-separated strings (e.g., '5,2').
    */
-  getSequenceCache(name: string): Map<number, BoxedExpression> | undefined {
+  getSequenceCache(name: string): Map<number | string, BoxedExpression> | undefined {
     return getSequenceCacheImpl(this, name);
   }
 

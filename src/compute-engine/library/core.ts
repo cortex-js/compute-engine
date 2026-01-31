@@ -6,6 +6,8 @@ import { asSmallInteger, toInteger } from '../boxed-expression/numerics';
 import {
   addSequenceBaseCase,
   addSequenceRecurrence,
+  addMultiIndexBaseCase,
+  addMultiIndexRecurrence,
   containsSelfReference,
   extractIndexVariable,
 } from '../sequence';
@@ -502,10 +504,82 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
         //
         // Check for Subscript LHS (sequence definition)
         // e.g., Subscript(L, 0) := 1  OR  Subscript(a, n) := a_{n-1} + 1
+        // Also handles multi-index: Subscript(P, Sequence(n, k)) := ...
         //
         if (op1.operator === 'Subscript' && op1.op1?.symbol) {
           const seqName = op1.op1.symbol;
           const subscript = op1.op2;
+
+          //
+          // Check for multi-index subscript: P_{n,k}
+          // Parser produces: Subscript(P, Sequence(n, k))
+          //
+          if (subscript?.operator === 'Sequence' && subscript.ops) {
+            const indices = subscript.ops;
+
+            // Case M1: All numeric → multi-index base case
+            // e.g., P_{0,0} := 1
+            if (
+              indices.every(
+                (op) => op.isNumberLiteral && Number.isInteger(op.re)
+              )
+            ) {
+              const key = indices.map((op) => op.re).join(',');
+              addMultiIndexBaseCase(ce, seqName, key, op2.evaluate());
+              return ce.Nothing;
+            }
+
+            // Extract variable names from indices
+            // For symbols: use the symbol name
+            // For numbers: use the number as string
+            // For expressions: try to extract the variable
+            const indexVars: string[] = [];
+            let hasSymbols = false;
+            let allValid = true;
+
+            for (const idx of indices) {
+              if (idx.symbol) {
+                indexVars.push(idx.symbol);
+                hasSymbols = true;
+              } else if (idx.isNumberLiteral && Number.isInteger(idx.re)) {
+                indexVars.push(String(idx.re));
+              } else {
+                // Complex expression - try to extract variable
+                const v = extractIndexVariable(idx);
+                if (v) {
+                  indexVars.push(v);
+                  hasSymbols = true;
+                } else {
+                  allValid = false;
+                  break;
+                }
+              }
+            }
+
+            if (allValid && indexVars.length === indices.length) {
+              if (containsSelfReference(op2, seqName)) {
+                // Case M2: Recurrence with self-reference
+                // e.g., P_{n,k} := P_{n-1,k-1} + P_{n-1,k}
+                // Only use symbol variables for the recurrence
+                const recurrenceVars = indices
+                  .filter((idx) => idx.symbol)
+                  .map((idx) => idx.symbol!);
+
+                if (recurrenceVars.length > 0) {
+                  addMultiIndexRecurrence(ce, seqName, recurrenceVars, op2);
+                  return ce.Nothing;
+                }
+              } else if (hasSymbols) {
+                // Case M3: Pattern base case (no self-reference)
+                // e.g., P_{n,0} := 1 or P_{n,n} := 1
+                const key = indexVars.join(',');
+                addMultiIndexBaseCase(ce, seqName, key, op2.evaluate());
+                return ce.Nothing;
+              }
+            }
+
+            // Fallback for multi-index: if we couldn't handle it, continue
+          }
 
           // Case 1: Numeric subscript → base case
           // e.g., L_0 := 1, F_1 := 1
