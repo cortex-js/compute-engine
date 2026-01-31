@@ -63,6 +63,18 @@
   `|x|√y`. Adjusted cost function to penalize radicals containing perfect
   squares, enabling the simplification rule to apply.
 
+- **Generalized Root Extraction**: Added comprehensive root simplification rules:
+  - `√[n]{x^m}` → `x^{m/n}` for odd roots (always valid)
+  - `√[n]{x^m}` → `|x|^{m/n}` for even roots with integer result
+  - `√{x^{odd}}` → `|x|^n · √x` factoring (e.g., `√{x⁵}` → `|x|²√x`)
+  - Handles all combinations: `√[4]{x⁶}` → `|x|^{3/2}`, `√[3]{x⁶}` → `x²`
+
+- **Negative Base with Fractional Exponent**: Fixed `(-ax)^{p/q}` returning complex
+  results when `p` and `q` are both odd. Now correctly factors out the negative
+  sign: `(-2x)^{3/5}` → `-(2x)^{3/5}` = `-2^{3/5}·x^{3/5}`, giving real results.
+  This affects products like `(-2x)^{3/5}·x` which now correctly simplify to
+  `-2^{3/5}·x^{8/5}` instead of returning an imaginary value.
+
 ### Features
 
 - **([#163](https://github.com/cortex-js/compute-engine/issues/163)) Additional

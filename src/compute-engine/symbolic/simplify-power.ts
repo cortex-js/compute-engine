@@ -44,6 +44,59 @@ export function simplifyPower(x: BoxedExpression): RuleStep | undefined {
           return { value: base, because: 'root(x^n, n) -> x when n odd' };
         }
       }
+
+      // Generalized root simplification: root(x^m, n) -> x^{m/n} or |x|^{m/n}
+      // Examples: root(x^6, 4) -> |x|^{3/2}, root(x^6, 3) -> x^2, root(x^8, 4) -> x^2
+      if (base && exp) {
+        // Get the resulting exponent m/n
+        const resultExp = exp.div(rootIndex);
+
+        // For even root index, we need |x|^{m/n}
+        if (rootIndex.isEven === true) {
+          // Only simplify if m/n is simpler than root form
+          // (i.e., m/n is a rational with smaller denominator than n, or an integer)
+          if (resultExp.isInteger === true) {
+            // root(x^m, n) -> |x|^k when m/n = k is integer
+            return {
+              value: ce._fn('Abs', [base]).pow(resultExp),
+              because: 'root(x^m, n) -> |x|^{m/n} when m/n is integer',
+            };
+          }
+          // For non-integer m/n, still simplify to |x|^{m/n} form
+          // This is simpler than root(x^m, n)
+          const rat = asRational(resultExp);
+          if (rat) {
+            const [, denom] = rat;
+            const rootN = asRational(rootIndex);
+            // Only simplify if the new denominator is smaller
+            if (rootN && Number(denom) < Number(rootN[0])) {
+              return {
+                value: ce._fn('Abs', [base]).pow(resultExp),
+                because: 'root(x^m, n) -> |x|^{m/n}',
+              };
+            }
+          }
+        }
+
+        // For odd root index: root(x^m, n) -> x^{m/n}
+        // Odd roots are single-valued for all real numbers, so this is always valid
+        if (rootIndex.isOdd === true && exp.isInteger === true) {
+          return {
+            value: base.pow(resultExp),
+            because: 'root(x^m, n) -> x^{m/n} when n is odd',
+          };
+        }
+
+        // If x is non-negative, we can always simplify
+        if (base.isNonNegative === true) {
+          if (resultExp.isInteger === true) {
+            return {
+              value: base.pow(resultExp),
+              because: 'root(x^m, n) -> x^{m/n} when x >= 0',
+            };
+          }
+        }
+      }
     }
   }
 
@@ -73,6 +126,22 @@ export function simplifyPower(x: BoxedExpression): RuleStep | undefined {
             value: ce._fn('Abs', [base]).pow(exp.div(2)),
             because: 'sqrt(x^{2n}) -> |x|^n',
           };
+        }
+
+        // sqrt(x^{2n+1}) -> |x|^n * sqrt(x) for positive integer n
+        // e.g., sqrt(x^5) = sqrt(x^4 * x) = |x|^2 * sqrt(x)
+        if (
+          exp.isOdd === true &&
+          exp.isInteger === true &&
+          exp.isPositive === true
+        ) {
+          const n = exp.sub(ce.One).div(2);
+          if (n.isPositive === true) {
+            return {
+              value: ce._fn('Abs', [base]).pow(n).mul(ce._fn('Sqrt', [base])),
+              because: 'sqrt(x^{2n+1}) -> |x|^n * sqrt(x)',
+            };
+          }
         }
       }
     }
@@ -168,6 +237,49 @@ export function simplifyPower(x: BoxedExpression): RuleStep | undefined {
         // Both numerator and denominator odd means real root exists
         if (numN % 2 !== 0 && denomN % 2 !== 0) {
           return { value: ce.number(-1), because: '(-1)^{p/q} -> -1 when p,q odd' };
+        }
+      }
+    }
+
+    // (negative * b * ...)^{p/q} -> -(positive * b * ...)^{p/q} when p,q odd
+    // e.g., (-2x)^{3/5} -> -(2x)^{3/5}
+    // This handles products like Multiply(-2, x) raised to a rational power
+    if (base.operator === 'Multiply' && base.ops) {
+      const rat = asRational(exp);
+      if (rat) {
+        const [num, denom] = rat;
+        const numN = Number(num);
+        const denomN = Number(denom);
+        const numIsOdd = numN % 2 !== 0;
+        const denomIsOdd = denomN % 2 !== 0;
+
+        if (numIsOdd && denomIsOdd) {
+          // Find if there's a negative numeric coefficient
+          let negativeIndex = -1;
+          for (let i = 0; i < base.ops.length; i++) {
+            const factor = base.ops[i];
+            if (factor.isNumberLiteral && factor.isNegative === true) {
+              negativeIndex = i;
+              break;
+            }
+          }
+
+          if (negativeIndex >= 0) {
+            // Factor out the sign: (-a * b)^{p/q} = -(a * b)^{p/q} when p,q odd
+            const negFactor = base.ops[negativeIndex];
+            const posFactor = negFactor.neg();
+            const newFactors = base.ops.map((f, i) =>
+              i === negativeIndex ? posFactor : f
+            );
+            const posBase =
+              newFactors.length === 1
+                ? newFactors[0]
+                : ce._fn('Multiply', newFactors);
+            return {
+              value: posBase.pow(exp).neg(),
+              because: '(-a*b)^{p/q} -> -(a*b)^{p/q} when p,q odd',
+            };
+          }
         }
       }
     }

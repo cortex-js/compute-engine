@@ -99,6 +99,20 @@ export function costFunction(expr: BoxedExpression): number {
     if (arg?.operator === 'Power' && arg.op2?.isEven === true) {
       return 5 + costFunction(arg) + 6;
     }
+    // Sqrt(x^{odd}) where odd > 1 can be factored: sqrt(x^5) -> |x|^2 * sqrt(x)
+    if (
+      arg?.operator === 'Power' &&
+      arg.op2?.isOdd === true &&
+      arg.op2?.isInteger === true
+    ) {
+      const exp = arg.op2;
+      // exp > 1 means (exp - 1) / 2 > 0, i.e., we can factor out something
+      const n = exp.numericValue;
+      if (typeof n === 'number' && n > 1) {
+        // Higher penalty (10) to ensure factored form |x|^n * sqrt(x) is preferred
+        return 5 + costFunction(arg) + 10;
+      }
+    }
     nameCost = 5;
   } else if (['Square', 'Abs'].includes(name)) nameCost = 5;
   else if (name === 'Power') {
@@ -108,12 +122,24 @@ export function costFunction(expr: BoxedExpression): number {
     // - If the base is Multiply, account for its complexity so (ab)^n isn't
     //   artificially cheaper than the distributed form a^n * b^n
     const base = expr.ops![0];
-    const expCost = costFunction(expr.ops![1]);
+    const exp = expr.ops![1];
+    const expCost = costFunction(exp);
     if (base.operator === 'Negate') {
       // Add cost for the negate so (-x)^n isn't artificially cheaper than -x^n
       return expCost + 4; // 4 is the Negate nameCost
     }
-    if (base.operator === 'Multiply') {
+    if (base.operator === 'Multiply' && base.ops) {
+      // Check if there's a negative coefficient and a fractional exponent
+      // (negative)^{p/q} where q is odd should factor out the sign for correct real evaluation
+      const hasNegativeCoef = base.ops.some(
+        (f) => f.isNumberLiteral && f.isNegative === true
+      );
+      if (hasNegativeCoef && exp.isRational === true && !exp.isInteger) {
+        // Heavy penalty to encourage factoring out the negative sign
+        // This is needed because (-a*x)^{p/q} gives complex results but
+        // -(a*x)^{p/q} gives correct real results when p,q are both odd
+        return expCost + costFunction(base) + 15;
+      }
       // For (a*b*...)^n, include the base's complexity so power distribution
       // (a*b)^n -> a^n * b^n can be applied when appropriate
       return expCost + costFunction(base);

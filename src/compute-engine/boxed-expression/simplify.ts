@@ -206,6 +206,8 @@ function simplifyOperands(
   // to avoid interfering with their special handling in simplify-rules.
   // However, always evaluate purely numeric subexpressions (like 2*3 in exponents)
   // so that (x^3)^2 * (y^2)^2 becomes x^6 * y^4.
+  // Also simplify Power expressions with negative bases and fractional exponents
+  // to ensure proper sign factoring (e.g., (-2x)^{3/5} -> -(2x)^{3/5}).
   if (def?.lazy) {
     const simplifiedOps = ops.map((x) => {
       if (
@@ -213,6 +215,11 @@ function simplifyOperands(
         x.operator === 'Product' ||
         containsConstructibleTrig(x)
       ) {
+        return simplify(x, options).at(-1)!.value;
+      }
+      // Power expressions with fractional exponents may need sign factoring
+      // e.g., (-2x)^{3/5} should become -(2x)^{3/5} for correct real evaluation
+      if (x.operator === 'Power' && x.op2?.isRational === true && !x.op2.isInteger) {
         return simplify(x, options).at(-1)!.value;
       }
       // Evaluate purely numeric subexpressions in all operands

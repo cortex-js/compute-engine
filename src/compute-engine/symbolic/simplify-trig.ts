@@ -496,6 +496,45 @@ export function simplifyTrig(x: BoxedExpression): RuleStep | undefined {
         return { value: ce.One, because: 'cot(x)*tan(x) -> 1' };
       }
     }
+
+    // Power reduction identities:
+    // 2sin²(x) -> 1 - cos(2x)
+    // 2cos²(x) -> 1 + cos(2x)
+    if (a.is(2) && b.operator === 'Power' && b.op2?.is(2)) {
+      const base = b.op1;
+      if (base?.operator === 'Sin' && base.op1) {
+        const cos2x = ce._fn('Cos', [base.op1.mul(2)]);
+        return {
+          value: ce.One.sub(cos2x),
+          because: '2sin²(x) -> 1 - cos(2x)',
+        };
+      }
+      if (base?.operator === 'Cos' && base.op1) {
+        const cos2x = ce._fn('Cos', [base.op1.mul(2)]);
+        return {
+          value: ce.One.add(cos2x),
+          because: '2cos²(x) -> 1 + cos(2x)',
+        };
+      }
+    }
+    // Also check reversed order (Power first, then 2)
+    if (b.is(2) && a.operator === 'Power' && a.op2?.is(2)) {
+      const base = a.op1;
+      if (base?.operator === 'Sin' && base.op1) {
+        const cos2x = ce._fn('Cos', [base.op1.mul(2)]);
+        return {
+          value: ce.One.sub(cos2x),
+          because: '2sin²(x) -> 1 - cos(2x)',
+        };
+      }
+      if (base?.operator === 'Cos' && base.op1) {
+        const cos2x = ce._fn('Cos', [base.op1.mul(2)]);
+        return {
+          value: ce.One.add(cos2x),
+          because: '2cos²(x) -> 1 + cos(2x)',
+        };
+      }
+    }
     }
   }
 
