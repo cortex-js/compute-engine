@@ -1,5 +1,23 @@
 ## [Unreleased]
 
+### Improvements
+
+- **Value Resolution from Equality Assumptions**: When an equality assumption
+  is made via `ce.assume(['Equal', symbol, value])`, the symbol now correctly
+  evaluates to the assumed value. Previously, the symbol would remain unchanged
+  even after the assumption.
+
+  ```javascript
+  ce.assume(ce.box(['Equal', 'one', 1]));
+  ce.box('one').evaluate();               // → 1 (was: 'one')
+  ce.box(['Equal', 'one', 1]).evaluate(); // → True (was: ['Equal', 'one', 1])
+  ce.box(['Equal', 'one', 0]).evaluate(); // → False
+  ce.box('one').type.matches('integer');  // → true
+  ```
+
+  This also fixes comparison evaluation: `Equal(symbol, assumed_value)` now
+  correctly evaluates to `True` instead of staying symbolic.
+
 ### Bug Fixes
 
 - **Extraneous Root Filtering for Sqrt Equations**: Fixed an issue where solving

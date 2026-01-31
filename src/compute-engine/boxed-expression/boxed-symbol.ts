@@ -676,6 +676,11 @@ export class BoxedSymbol extends _BoxedExpression {
   N(): BoxedExpression {
     const def = this.valueDefinition;
     if (def && def.holdUntil === 'never') return this;
+    // For non-constants, check the evaluation context value first
+    if (def && !def.isConstant) {
+      const contextValue = this.engine._getSymbolValue(this._id);
+      if (contextValue) return contextValue.N();
+    }
     return def?.value?.N() ?? this;
   }
 

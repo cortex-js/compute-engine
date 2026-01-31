@@ -235,8 +235,10 @@ function assumeEquality(proposition: BoxedExpression): AssumeResult {
     if (def.value.type && !val.type.matches(def.value.type))
       if (!def.value.inferredType) return 'contradiction';
 
-    // def.symbol.value = val;
-    // if (def.symbol.inferredType) def.symbol.type = val.type;
+    // Set the value for the symbol with an existing definition
+    ce._setSymbolValue(lhs, val);
+    // If the type was inferred, update it based on the value
+    if (def.value.inferredType) def.value.type = val.type;
     return 'ok';
   }
 
@@ -262,7 +264,10 @@ function assumeEquality(proposition: BoxedExpression): AssumeResult {
       !sols.every((sol) => !sol.type || val.type.matches(sol.type))
     )
       return 'contradiction';
-    // def.symbol.value = val;
+    // Set the value for the symbol with an existing definition
+    ce._setSymbolValue(lhs, val);
+    // If the type was inferred, update it based on the value
+    if (def.value.inferredType) def.value.type = val.type;
     return 'ok';
   }
 

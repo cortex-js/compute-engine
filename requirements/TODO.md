@@ -766,46 +766,9 @@ relations
 The following improvements extend the assumption system beyond sign-based
 simplification (which is already implemented).
 
-### 18. Value Resolution from Equality Assumptions
+### ~~18. Value Resolution from Equality Assumptions~~ ✅ COMPLETED
 
-**Problem:** When `ce.assume(['Equal', 'one', 1])` is made, subsequent uses of
-`one` should evaluate to `1`, but currently the symbol remains unevaluated.
-
-**Current behavior:**
-
-```typescript
-ce.assume(ce.box(['Equal', 'one', 1]));
-ce.box('one').evaluate().json  // Returns: "one" (unchanged)
-ce.box(['Equal', 'one', 1]).evaluate().json  // Returns: ["Equal", "one", 1] (not "True")
-```
-
-**Expected behavior:**
-
-```typescript
-ce.assume(ce.box(['Equal', 'one', 1]));
-ce.box('one').evaluate().json  // Should return: 1
-ce.box(['Equal', 'one', 1]).evaluate().json  // Should return: "True"
-ce.box(['Equal', 'one', 0]).evaluate().json  // Should return: "False"
-```
-
-**Implementation notes:**
-
-- Equality assumptions should effectively assign a value to the symbol
-- This is different from `ce.assign()` which directly sets the value
-- The assumption system stores the equality but doesn't currently use it during
-  evaluation
-- May need to modify `BoxedSymbol.value` getter to check equality assumptions
-
-**Files to investigate:**
-
-- `src/compute-engine/assume.ts` - Where assumptions are stored
-- `src/compute-engine/boxed-expression/boxed-symbol.ts` - Symbol value
-  resolution
-- `src/compute-engine/library/relational-operator.ts` - Equal/NotEqual
-  evaluation
-
-**Tests:** `test/compute-engine/assumptions.test.ts` - "VALUE RESOLUTION FROM
-EQUALITY ASSUMPTIONS"
+See `requirements/DONE.md` for implementation details.
 
 ---
 
