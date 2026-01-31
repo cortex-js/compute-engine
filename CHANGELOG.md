@@ -47,6 +47,14 @@
   - `2sin(x)cos(x)` → `sin(2x)`
   - `c·sin(x)cos(x)` → `c·sin(2x)/2` for any coefficient `c`
 
+- **Exponent Evaluation in Products**: Fixed `(x³)² · (y²)²` not simplifying to
+  `x⁶y⁴`. Numeric subexpressions in exponents (like `2×3` in `x^{2×3}`) are now
+  evaluated when the expression is part of a product.
+
+- **Negative Exponents on Fractions**: Fixed `(a/b)^{-n}` not simplifying
+  properly. Now `(x³/y²)^{-2}` correctly simplifies to `y⁴/x⁶` during
+  canonicalization by distributing the negative exponent.
+
 ### Features
 
 - **([#163](https://github.com/cortex-js/compute-engine/issues/163)) Additional

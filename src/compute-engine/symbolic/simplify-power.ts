@@ -76,6 +76,72 @@ export function simplifyPower(x: BoxedExpression): RuleStep | undefined {
         }
       }
     }
+
+    // sqrt(a * b * ...) -> factor out perfect squares
+    // sqrt(x^2 * y) -> |x| * sqrt(y)
+    // sqrt(x^{2n} * y) -> |x|^n * sqrt(y)
+    if (arg.operator === 'Multiply' && arg.ops) {
+      const perfectSquares: BoxedExpression[] = [];
+      const remaining: BoxedExpression[] = [];
+
+      for (const factor of arg.ops) {
+        if (factor.operator === 'Power' && factor.op1 && factor.op2) {
+          const base = factor.op1;
+          const exp = factor.op2;
+          // x^2 -> |x| outside, nothing inside
+          if (exp.is(2)) {
+            perfectSquares.push(ce._fn('Abs', [base]));
+          }
+          // x^{2n} -> |x|^n outside, nothing inside
+          else if (exp.isEven === true && exp.isPositive === true) {
+            perfectSquares.push(ce._fn('Abs', [base]).pow(exp.div(2)));
+          }
+          // x^{2n+1} -> |x|^n outside, x inside (for positive even part)
+          else if (
+            exp.isInteger === true &&
+            exp.isPositive === true &&
+            exp.isOdd === true
+          ) {
+            // Split: x^{2n+1} = x^{2n} * x
+            // sqrt(x^{2n+1}) = |x|^n * sqrt(x)
+            const n = exp.sub(ce.One).div(2);
+            if (n.isPositive === true) {
+              perfectSquares.push(ce._fn('Abs', [base]).pow(n));
+            }
+            remaining.push(base);
+          } else {
+            remaining.push(factor);
+          }
+        } else {
+          remaining.push(factor);
+        }
+      }
+
+      // Only simplify if we found at least one perfect square
+      if (perfectSquares.length > 0) {
+        const outsideSqrt =
+          perfectSquares.length === 1
+            ? perfectSquares[0]
+            : ce._fn('Multiply', perfectSquares);
+
+        if (remaining.length === 0) {
+          return {
+            value: outsideSqrt,
+            because: 'sqrt(a^2 * ...) -> |a| * ...',
+          };
+        }
+
+        const insideSqrt =
+          remaining.length === 1
+            ? remaining[0]
+            : ce._fn('Multiply', remaining);
+
+        return {
+          value: outsideSqrt.mul(ce._fn('Sqrt', [insideSqrt])),
+          because: 'sqrt(a^2 * b) -> |a| * sqrt(b)',
+        };
+      }
+    }
   }
 
   // Handle Power operator
@@ -247,6 +313,15 @@ export function simplifyPower(x: BoxedExpression): RuleStep | undefined {
       // (a/b)^{-1} -> b/a
       if (exp.is(-1)) {
         return { value: denom.div(num), because: '(a/b)^{-1} -> b/a' };
+      }
+
+      // (a/b)^{negative number} -> (b/a)^{positive number}
+      // Handle numeric negative exponents like (a/b)^{-2} -> (b/a)^2
+      if (exp.isNegative === true && exp.isNumberLiteral) {
+        return {
+          value: denom.div(num).pow(exp.neg()),
+          because: '(a/b)^{-n} -> (b/a)^n',
+        };
       }
     }
   }

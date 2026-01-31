@@ -70,6 +70,18 @@ export function canonicalPower(
     ]);
   }
 
+  // (a/b)^{-n} -> a^{-n} / b^{-n} = b^n / a^n
+  // Only distribute when exponent is negative to normalize negative exponents on fractions
+  // e.g., (a/b)^{-2} -> b^2 / a^2
+  if (a.operator === 'Divide' && a.op1 && a.op2 && b.isNegative === true) {
+    const num = a.op1;
+    const denom = a.op2;
+    // Use the pow function to recursively canonicalize
+    return pow(num, b, { numericApproximation: false }).div(
+      pow(denom, b, { numericApproximation: false })
+    );
+  }
+
   // Onwards, the focus on operations is where is a *numeric* exponent.
   // Therefore, exclude cases - which may otherwise be valid - of the exponent either: being a function (e.g.
   // '0 + 0'), a symbol, or of a non-numeric type.

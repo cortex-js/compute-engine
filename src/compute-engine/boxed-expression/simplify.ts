@@ -203,7 +203,9 @@ function simplifyOperands(
 
   // For lazy functions (Multiply, Add), only simplify Sum/Product operands
   // and expressions containing constructible trig functions
-  // to avoid interfering with their special handling in simplify-rules
+  // to avoid interfering with their special handling in simplify-rules.
+  // However, always evaluate purely numeric subexpressions (like 2*3 in exponents)
+  // so that (x^3)^2 * (y^2)^2 becomes x^6 * y^4.
   if (def?.lazy) {
     const simplifiedOps = ops.map((x) => {
       if (
@@ -213,7 +215,8 @@ function simplifyOperands(
       ) {
         return simplify(x, options).at(-1)!.value;
       }
-      return x;
+      // Evaluate purely numeric subexpressions in all operands
+      return evaluateNumericSubexpressions(x);
     });
     return expr.engine.function(expr.operator, simplifiedOps);
   }
