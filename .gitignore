@@ -3,6 +3,9 @@ CLAUDE.md
 
 doc/
 
+# Auto-generated API documentation
+src/api.md
+
 TODO.md
 REVIEW.md
 PLAYGROUND.md
