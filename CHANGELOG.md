@@ -18,6 +18,19 @@
   - `x - 2√x - 3 = 0` → returns `[9]` (filters out x=1)
   - `2x + 3√x - 2 = 0` → returns `[1/4]` (filters out x=4)
 
+### Testing
+
+- **Pattern Matching with Repeated Wildcards**: Added comprehensive tests
+  verifying that the pattern matching system correctly handles wildcards that
+  appear multiple times in a pattern. When a named wildcard like `_x` appears
+  in multiple positions, the matcher correctly ensures all occurrences match
+  the same expression. This works with:
+  - Nested function arguments (e.g., `['Multiply', '_x', ['Ln', '_x']]`)
+  - Multiple nesting levels (3+ levels deep)
+  - Commutative operators (handles reordering)
+  - Canonical expressions (from parsed LaTeX)
+  - Complex sub-expressions (matching entire sub-trees)
+
 ### New Features
 
 #### Subscripts and Indexing
