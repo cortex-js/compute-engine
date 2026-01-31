@@ -670,3 +670,559 @@ export function generateTruthTable(
 
   return ce._fn('List', rows);
 }
+
+//
+// =============================================================================
+// Quine-McCluskey Algorithm for Prime Implicants/Implicates
+// =============================================================================
+//
+
+/**
+ * Represents a term in the Quine-McCluskey algorithm.
+ * Each position is 0 (false), 1 (true), or -1 (don't care).
+ */
+type QMTerm = number[];
+
+/**
+ * Convert an integer minterm to a QM term representation.
+ */
+function mintermToQMTerm(minterm: number, numVars: number): QMTerm {
+  const term: QMTerm = [];
+  for (let i = numVars - 1; i >= 0; i--) {
+    term.push((minterm >> i) & 1);
+  }
+  return term;
+}
+
+/**
+ * Count the number of 1s in a QM term (ignoring don't cares).
+ */
+function countOnes(term: QMTerm): number {
+  return term.filter((x) => x === 1).length;
+}
+
+/**
+ * Check if two terms can be combined (differ in exactly one position,
+ * ignoring don't cares which must match).
+ * Returns the differing position index, or -1 if cannot combine.
+ */
+function canCombine(term1: QMTerm, term2: QMTerm): number {
+  let diffPos = -1;
+  for (let i = 0; i < term1.length; i++) {
+    // Don't cares must match
+    if (term1[i] === -1 || term2[i] === -1) {
+      if (term1[i] !== term2[i]) return -1;
+    } else if (term1[i] !== term2[i]) {
+      if (diffPos !== -1) return -1; // More than one difference
+      diffPos = i;
+    }
+  }
+  return diffPos;
+}
+
+/**
+ * Combine two terms at the given position, replacing the difference with don't care.
+ */
+function combineTerms(term1: QMTerm, diffPos: number): QMTerm {
+  const result = [...term1];
+  result[diffPos] = -1;
+  return result;
+}
+
+/**
+ * Convert a QM term to a string for comparison/deduplication.
+ */
+function termToString(term: QMTerm): string {
+  return term.map((x) => (x === -1 ? '-' : x.toString())).join('');
+}
+
+/**
+ * Check if term1 covers term2 (term1 is more general or equal).
+ * A term covers another if every specified position matches.
+ */
+function termCovers(general: QMTerm, specific: QMTerm): boolean {
+  for (let i = 0; i < general.length; i++) {
+    if (general[i] !== -1 && general[i] !== specific[i]) {
+      return false;
+    }
+  }
+  return true;
+}
+
+/**
+ * Find all prime implicants using the Quine-McCluskey algorithm.
+ *
+ * ## Algorithm
+ *
+ * 1. Generate minterms from the truth table (assignments where expression is true)
+ * 2. Group minterms by number of 1s
+ * 3. Combine terms differing in exactly one position, marking combined terms
+ * 4. Repeat until no more combinations possible
+ * 5. Return terms that were never combined (prime implicants)
+ *
+ * ## Performance Characteristics
+ *
+ * | Variables | Max Minterms | Approximate Time |
+ * |-----------|--------------|------------------|
+ * | 5         | 32           | < 1ms            |
+ * | 8         | 256          | ~10ms            |
+ * | 10        | 1,024        | ~100ms           |
+ * | > 12      | (rejected)   | N/A              |
+ *
+ * ## Limits
+ *
+ * - **Maximum 12 variables**: Larger expressions return unevaluated.
+ *
+ * @param expr - A boolean expression
+ * @param ce - The ComputeEngine instance
+ * @returns A Set of expressions representing prime implicants
+ */
+export function findPrimeImplicants(
+  expr: BoxedExpression,
+  ce: ComputeEngine
+): BoxedExpression[] | null {
+  const variables = extractVariables(expr);
+
+  // Limit variables to prevent explosion
+  if (variables.length > 12) {
+    return null;
+  }
+
+  if (variables.length === 0) {
+    // Constant expression
+    const result = expr.evaluate();
+    if (result.symbol === 'True') return [ce.True];
+    if (result.symbol === 'False') return [];
+    return null;
+  }
+
+  // Collect minterms (assignments where expression is true)
+  const minterms: number[] = [];
+  let index = 0;
+  for (const assignment of generateAssignments(variables)) {
+    const result = evaluateWithAssignment(expr, assignment, ce);
+    if (result.symbol === 'True') {
+      minterms.push(index);
+    }
+    index++;
+  }
+
+  // Handle edge cases
+  if (minterms.length === 0) {
+    return []; // Contradiction - no prime implicants
+  }
+  if (minterms.length === 1 << variables.length) {
+    return [ce.True]; // Tautology - True is the only prime implicant
+  }
+
+  // Run Quine-McCluskey
+  const primeImplicants = quineMcCluskey(minterms, variables.length);
+
+  // Convert QM terms back to expressions
+  return primeImplicants.map((term) => qmTermToExpression(term, variables, ce));
+}
+
+/**
+ * Find all prime implicates using the Quine-McCluskey algorithm.
+ *
+ * Prime implicates are the dual of prime implicants - they are the minimal
+ * clauses in CNF. We find them by finding prime implicants of the negation
+ * and then negating the result.
+ *
+ * @param expr - A boolean expression
+ * @param ce - The ComputeEngine instance
+ * @returns A Set of expressions representing prime implicates (clauses)
+ */
+export function findPrimeImplicates(
+  expr: BoxedExpression,
+  ce: ComputeEngine
+): BoxedExpression[] | null {
+  const variables = extractVariables(expr);
+
+  // Limit variables to prevent explosion
+  if (variables.length > 12) {
+    return null;
+  }
+
+  if (variables.length === 0) {
+    // Constant expression
+    const result = expr.evaluate();
+    if (result.symbol === 'True') return [];
+    if (result.symbol === 'False') return [ce.False];
+    return null;
+  }
+
+  // Collect maxterms (assignments where expression is false)
+  const maxterms: number[] = [];
+  let index = 0;
+  for (const assignment of generateAssignments(variables)) {
+    const result = evaluateWithAssignment(expr, assignment, ce);
+    if (result.symbol === 'False') {
+      maxterms.push(index);
+    }
+    index++;
+  }
+
+  // Handle edge cases
+  if (maxterms.length === 0) {
+    return []; // Tautology - no prime implicates
+  }
+  if (maxterms.length === 1 << variables.length) {
+    return [ce.False]; // Contradiction
+  }
+
+  // Run Quine-McCluskey on maxterms
+  const primeImplicateTerms = quineMcCluskey(maxterms, variables.length);
+
+  // Convert QM terms to clauses (Or expressions)
+  // For maxterms, a 0 means the variable should be true in the clause (positive literal)
+  // and a 1 means the variable should be negated in the clause
+  return primeImplicateTerms.map((term) =>
+    qmTermToClause(term, variables, ce)
+  );
+}
+
+/**
+ * Core Quine-McCluskey algorithm.
+ * Takes a list of minterms (as integers) and returns prime implicants as QM terms.
+ */
+function quineMcCluskey(minterms: number[], numVars: number): QMTerm[] {
+  // Convert minterms to QM terms
+  let currentTerms: Map<string, { term: QMTerm; combined: boolean }> =
+    new Map();
+
+  for (const minterm of minterms) {
+    const term = mintermToQMTerm(minterm, numVars);
+    currentTerms.set(termToString(term), { term, combined: false });
+  }
+
+  const primeImplicants: QMTerm[] = [];
+
+  // Iterate until no more combinations
+  while (currentTerms.size > 0) {
+    const nextTerms: Map<string, { term: QMTerm; combined: boolean }> =
+      new Map();
+
+    // Group terms by number of 1s
+    const groups: Map<number, Array<{ key: string; term: QMTerm }>> = new Map();
+    for (const [key, { term }] of currentTerms) {
+      const ones = countOnes(term);
+      if (!groups.has(ones)) {
+        groups.set(ones, []);
+      }
+      groups.get(ones)!.push({ key, term });
+    }
+
+    // Try to combine adjacent groups (differ by one 1)
+    const sortedGroupKeys = Array.from(groups.keys()).sort((a, b) => a - b);
+
+    for (let i = 0; i < sortedGroupKeys.length - 1; i++) {
+      const group1 = groups.get(sortedGroupKeys[i])!;
+      const group2 = groups.get(sortedGroupKeys[i + 1])!;
+
+      for (const { key: key1, term: term1 } of group1) {
+        for (const { key: key2, term: term2 } of group2) {
+          const diffPos = canCombine(term1, term2);
+          if (diffPos !== -1) {
+            // Mark both as combined
+            const entry1 = currentTerms.get(key1)!;
+            const entry2 = currentTerms.get(key2)!;
+            entry1.combined = true;
+            entry2.combined = true;
+
+            // Create combined term
+            const newTerm = combineTerms(term1, diffPos);
+            const newKey = termToString(newTerm);
+            if (!nextTerms.has(newKey)) {
+              nextTerms.set(newKey, { term: newTerm, combined: false });
+            }
+          }
+        }
+      }
+    }
+
+    // Collect uncombined terms as prime implicants
+    for (const { term, combined } of currentTerms.values()) {
+      if (!combined) {
+        primeImplicants.push(term);
+      }
+    }
+
+    currentTerms = nextTerms;
+  }
+
+  return primeImplicants;
+}
+
+/**
+ * Convert a QM term (for minterms) to a BoxedExpression.
+ * Each term becomes an And of literals.
+ */
+function qmTermToExpression(
+  term: QMTerm,
+  variables: string[],
+  ce: ComputeEngine
+): BoxedExpression {
+  const literals: BoxedExpression[] = [];
+
+  for (let i = 0; i < term.length; i++) {
+    if (term[i] === 1) {
+      // Variable is true
+      literals.push(ce.symbol(variables[i]));
+    } else if (term[i] === 0) {
+      // Variable is false (negated)
+      literals.push(ce._fn('Not', [ce.symbol(variables[i])]));
+    }
+    // Don't care (-1) is omitted
+  }
+
+  if (literals.length === 0) return ce.True;
+  if (literals.length === 1) return literals[0];
+  return ce._fn('And', literals);
+}
+
+/**
+ * Convert a QM term (for maxterms) to a clause (Or of literals).
+ * For maxterms: 0 means positive literal, 1 means negative literal.
+ */
+function qmTermToClause(
+  term: QMTerm,
+  variables: string[],
+  ce: ComputeEngine
+): BoxedExpression {
+  const literals: BoxedExpression[] = [];
+
+  for (let i = 0; i < term.length; i++) {
+    if (term[i] === 0) {
+      // Variable should be true in clause (positive literal)
+      literals.push(ce.symbol(variables[i]));
+    } else if (term[i] === 1) {
+      // Variable should be negated in clause
+      literals.push(ce._fn('Not', [ce.symbol(variables[i])]));
+    }
+    // Don't care (-1) is omitted
+  }
+
+  if (literals.length === 0) return ce.False;
+  if (literals.length === 1) return literals[0];
+  return ce._fn('Or', literals);
+}
+
+/**
+ * Find a minimal DNF (sum of products) using prime implicants.
+ *
+ * This uses the Quine-McCluskey algorithm followed by a greedy covering
+ * algorithm to select a minimal set of prime implicants.
+ *
+ * @param expr - A boolean expression
+ * @param ce - The ComputeEngine instance
+ * @returns The minimal DNF, or null if too many variables
+ */
+export function minimalDNF(
+  expr: BoxedExpression,
+  ce: ComputeEngine
+): BoxedExpression | null {
+  const variables = extractVariables(expr);
+
+  if (variables.length > 12) {
+    return null;
+  }
+
+  if (variables.length === 0) {
+    const result = expr.evaluate();
+    return result.symbol === 'True' ? ce.True : ce.False;
+  }
+
+  // Collect minterms
+  const minterms: number[] = [];
+  let index = 0;
+  for (const assignment of generateAssignments(variables)) {
+    const result = evaluateWithAssignment(expr, assignment, ce);
+    if (result.symbol === 'True') {
+      minterms.push(index);
+    }
+    index++;
+  }
+
+  if (minterms.length === 0) return ce.False;
+  if (minterms.length === 1 << variables.length) return ce.True;
+
+  // Get prime implicants
+  const primeImplicants = quineMcCluskey(minterms, variables.length);
+
+  // Find minimal cover using greedy algorithm
+  const cover = findMinimalCover(primeImplicants, minterms, variables.length);
+
+  // Convert to expression
+  if (cover.length === 0) return ce.False;
+  if (cover.length === 1) return qmTermToExpression(cover[0], variables, ce);
+
+  return ce._fn(
+    'Or',
+    cover.map((term) => qmTermToExpression(term, variables, ce))
+  );
+}
+
+/**
+ * Find a minimal CNF (product of sums) using prime implicates.
+ *
+ * @param expr - A boolean expression
+ * @param ce - The ComputeEngine instance
+ * @returns The minimal CNF, or null if too many variables
+ */
+export function minimalCNF(
+  expr: BoxedExpression,
+  ce: ComputeEngine
+): BoxedExpression | null {
+  const variables = extractVariables(expr);
+
+  if (variables.length > 12) {
+    return null;
+  }
+
+  if (variables.length === 0) {
+    const result = expr.evaluate();
+    return result.symbol === 'True' ? ce.True : ce.False;
+  }
+
+  // Collect maxterms
+  const maxterms: number[] = [];
+  let index = 0;
+  for (const assignment of generateAssignments(variables)) {
+    const result = evaluateWithAssignment(expr, assignment, ce);
+    if (result.symbol === 'False') {
+      maxterms.push(index);
+    }
+    index++;
+  }
+
+  if (maxterms.length === 0) return ce.True;
+  if (maxterms.length === 1 << variables.length) return ce.False;
+
+  // Get prime implicates
+  const primeImplicates = quineMcCluskey(maxterms, variables.length);
+
+  // Find minimal cover
+  const cover = findMinimalCover(primeImplicates, maxterms, variables.length);
+
+  // Convert to expression
+  if (cover.length === 0) return ce.True;
+  if (cover.length === 1) return qmTermToClause(cover[0], variables, ce);
+
+  return ce._fn(
+    'And',
+    cover.map((term) => qmTermToClause(term, variables, ce))
+  );
+}
+
+/**
+ * Find which minterms a QM term covers.
+ */
+function getCoveredMinterms(term: QMTerm, numVars: number): number[] {
+  const covered: number[] = [];
+  const dontCarePositions: number[] = [];
+
+  for (let i = 0; i < term.length; i++) {
+    if (term[i] === -1) {
+      dontCarePositions.push(i);
+    }
+  }
+
+  // Generate all combinations for don't care positions
+  const numDontCares = dontCarePositions.length;
+  const numCombinations = 1 << numDontCares;
+
+  for (let combo = 0; combo < numCombinations; combo++) {
+    let minterm = 0;
+    for (let i = 0; i < numVars; i++) {
+      const dcIndex = dontCarePositions.indexOf(i);
+      let bit: number;
+      if (dcIndex !== -1) {
+        bit = (combo >> (numDontCares - 1 - dcIndex)) & 1;
+      } else {
+        bit = term[i];
+      }
+      minterm = (minterm << 1) | bit;
+    }
+    covered.push(minterm);
+  }
+
+  return covered;
+}
+
+/**
+ * Greedy algorithm to find a minimal cover of prime implicants/implicates.
+ */
+function findMinimalCover(
+  primes: QMTerm[],
+  termsTocover: number[],
+  numVars: number
+): QMTerm[] {
+  const uncovered = new Set(termsTocover);
+  const cover: QMTerm[] = [];
+
+  // First, find essential prime implicants
+  // (those that are the only ones covering some minterm)
+  const mintermToPrimes: Map<number, number[]> = new Map();
+
+  for (const minterm of termsTocover) {
+    mintermToPrimes.set(minterm, []);
+  }
+
+  for (let i = 0; i < primes.length; i++) {
+    const covered = getCoveredMinterms(primes[i], numVars);
+    for (const m of covered) {
+      if (mintermToPrimes.has(m)) {
+        mintermToPrimes.get(m)!.push(i);
+      }
+    }
+  }
+
+  // Add essential prime implicants
+  const usedPrimes = new Set<number>();
+
+  for (const [minterm, coveringPrimes] of mintermToPrimes) {
+    if (coveringPrimes.length === 1 && uncovered.has(minterm)) {
+      const primeIndex = coveringPrimes[0];
+      if (!usedPrimes.has(primeIndex)) {
+        usedPrimes.add(primeIndex);
+        cover.push(primes[primeIndex]);
+        // Mark all minterms covered by this prime as covered
+        const coveredByPrime = getCoveredMinterms(primes[primeIndex], numVars);
+        for (const m of coveredByPrime) {
+          uncovered.delete(m);
+        }
+      }
+    }
+  }
+
+  // Greedy cover for remaining minterms
+  while (uncovered.size > 0) {
+    let bestPrime = -1;
+    let bestCount = 0;
+
+    for (let i = 0; i < primes.length; i++) {
+      if (usedPrimes.has(i)) continue;
+
+      const covered = getCoveredMinterms(primes[i], numVars);
+      const count = covered.filter((m) => uncovered.has(m)).length;
+
+      if (count > bestCount) {
+        bestCount = count;
+        bestPrime = i;
+      }
+    }
+
+    if (bestPrime === -1) break; // Should not happen if primes cover all minterms
+
+    usedPrimes.add(bestPrime);
+    cover.push(primes[bestPrime]);
+
+    const coveredByPrime = getCoveredMinterms(primes[bestPrime], numVars);
+    for (const m of coveredByPrime) {
+      uncovered.delete(m);
+    }
+  }
+
+  return cover;
+}

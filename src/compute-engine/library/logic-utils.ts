@@ -83,7 +83,43 @@ export function evaluateAnd(
   }
   if (ops.length === 0) return ce.True;
   if (ops.length === 1) return ops[0];
-  return ce._fn('And', ops);
+
+  // Absorption: A ∧ (A ∨ B) → A
+  // If we have both A and Or(A, ...), remove the Or
+  const absorbed = applyAbsorptionAnd(ops);
+
+  if (absorbed.length === 0) return ce.True;
+  if (absorbed.length === 1) return absorbed[0];
+  return ce._fn('And', absorbed);
+}
+
+/**
+ * Apply absorption law for And: A ∧ (A ∨ B) → A
+ * If any operand is an Or that contains another operand of the And, remove the Or.
+ */
+function applyAbsorptionAnd(ops: BoxedExpression[]): BoxedExpression[] {
+  const result: BoxedExpression[] = [];
+  for (const op of ops) {
+    // Check if this Or can be absorbed by another operand
+    if (op.operator === 'Or' && op.ops) {
+      let absorbed = false;
+      // Check if any element of the Or is also a direct operand of the And
+      for (const orArg of op.ops) {
+        for (const other of ops) {
+          if (other !== op && orArg.isSame(other)) {
+            // A ∧ (A ∨ B) → A: the Or is absorbed, skip it
+            absorbed = true;
+            break;
+          }
+        }
+        if (absorbed) break;
+      }
+      if (!absorbed) result.push(op);
+    } else {
+      result.push(op);
+    }
+  }
+  return result;
 }
 
 export function evaluateOr(
@@ -123,7 +159,43 @@ export function evaluateOr(
   }
   if (ops.length === 0) return ce.False;
   if (ops.length === 1) return ops[0];
-  return ce._fn('Or', ops);
+
+  // Absorption: A ∨ (A ∧ B) → A
+  // If we have both A and And(A, ...), remove the And
+  const absorbed = applyAbsorptionOr(ops);
+
+  if (absorbed.length === 0) return ce.False;
+  if (absorbed.length === 1) return absorbed[0];
+  return ce._fn('Or', absorbed);
+}
+
+/**
+ * Apply absorption law for Or: A ∨ (A ∧ B) → A
+ * If any operand is an And that contains another operand of the Or, remove the And.
+ */
+function applyAbsorptionOr(ops: BoxedExpression[]): BoxedExpression[] {
+  const result: BoxedExpression[] = [];
+  for (const op of ops) {
+    // Check if this And can be absorbed by another operand
+    if (op.operator === 'And' && op.ops) {
+      let absorbed = false;
+      // Check if any element of the And is also a direct operand of the Or
+      for (const andArg of op.ops) {
+        for (const other of ops) {
+          if (other !== op && andArg.isSame(other)) {
+            // A ∨ (A ∧ B) → A: the And is absorbed, skip it
+            absorbed = true;
+            break;
+          }
+        }
+        if (absorbed) break;
+      }
+      if (!absorbed) result.push(op);
+    } else {
+      result.push(op);
+    }
+  }
+  return result;
 }
 
 export function evaluateNot(

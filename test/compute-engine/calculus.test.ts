@@ -219,6 +219,48 @@ describe('INDEFINITE INTEGRATION', () => {
       `-x + x * ln(x)`
     ));
 
+  // Cyclic integration patterns (e^x with trig)
+  test('e^x*sin(x) (cyclic integration)', () =>
+    expect(evaluate('\\int e^x \\sin x dx')).toMatchInlineSnapshot(
+      `-1/2 * cos(x) * e^x + 1/2 * sin(x) * e^x`
+    ));
+
+  test('e^x*cos(x) (cyclic integration)', () =>
+    expect(evaluate('\\int e^x \\cos x dx')).toMatchInlineSnapshot(
+      `1/2 * sin(x) * e^x + 1/2 * cos(x) * e^x`
+    ));
+
+  test('e^x*sin(2x) (cyclic with linear argument)', () =>
+    expect(evaluate('\\int e^x \\sin(2x) dx')).toMatchInlineSnapshot(
+      `-2/5 * cos(2x) * e^x + 1/5 * sin(2x) * e^x`
+    ));
+
+  test('e^x*cos(2x) (cyclic with linear argument)', () =>
+    expect(evaluate('\\int e^x \\cos(2x) dx')).toMatchInlineSnapshot(
+      `1/5 * cos(2x) * e^x + 2/5 * sin(2x) * e^x`
+    ));
+
+  // Additional integration patterns from TODO.md
+  test('x^2*e^x (integration by parts twice)', () =>
+    expect(evaluate('\\int x^2 e^x dx')).toMatchInlineSnapshot(
+      `x^2 * e^x - 2x * e^x + 2e^x`
+    ));
+
+  test('x*ln(x) (integration by parts)', () =>
+    expect(evaluate('\\int x \\ln(x) dx')).toMatchInlineSnapshot(
+      `-1/4 * x^2 + 1/2 * ln(x) * x^2`
+    ));
+
+  test('sec(x) (basic)', () =>
+    expect(evaluate('\\int \\sec x dx')).toMatchInlineSnapshot(
+      `ln(|tan(x) + sec(x)|)`
+    ));
+
+  test('csc(x) (basic)', () =>
+    expect(evaluate('\\int \\csc x dx')).toMatchInlineSnapshot(
+      `-ln(|csc(x) + cot(x)|)`
+    ));
+
   // U-substitution tests (chain rule recognition)
   test('sin(x^2)*2x (u-substitution)', () =>
     expect(evaluate('\\int \\sin(x^2) \\cdot 2x dx')).toMatchInlineSnapshot(
@@ -298,7 +340,6 @@ describe('INDEFINITE INTEGRATION', () => {
     expect(evaluate('\\int \\frac{3}{x\\ln x} dx')).toMatchInlineSnapshot(
       `3ln(|ln(x)|)`
     ));
-
 
   test('(2x+1)/(x^2+x+1) (derivative pattern)', () =>
     expect(evaluate('\\int \\frac{2x+1}{x^2+x+1} dx')).toMatchInlineSnapshot(

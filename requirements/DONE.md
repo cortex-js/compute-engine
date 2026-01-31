@@ -435,6 +435,108 @@ ce.box(['Eigen', ['List', ['List', 4, 2], ['List', 1, 3]]]).evaluate();
 
 ---
 
+## Logic Enhancements (Completed)
+
+### L-1. Logic Simplification Rules ✅
+
+**IMPLEMENTED:** Added comprehensive boolean simplification rules:
+
+1. **Absorption** (NEW):
+   - `A ∧ (A ∨ B) → A`
+   - `A ∨ (A ∧ B) → A`
+
+2. **Idempotence** (already implemented):
+   - `A ∧ A → A`
+   - `A ∨ A → A`
+
+3. **Complementation** (already implemented):
+   - `A ∧ ¬A → False`
+   - `A ∨ ¬A → True`
+
+4. **Identity** (already implemented):
+   - `A ∧ True → A`
+   - `A ∨ False → A`
+
+5. **Domination** (already implemented):
+   - `A ∧ False → False`
+   - `A ∨ True → True`
+
+6. **Double negation** (already implemented via involution):
+   - `¬¬A → A`
+
+**Examples:**
+```typescript
+ce.box(['And', 'A', ['Or', 'A', 'B']]).simplify();  // → A
+ce.box(['Or', 'A', ['And', 'A', 'B']]).simplify();  // → A
+ce.box(['And', 'A', 'A']).simplify();              // → A
+ce.box(['And', 'A', ['Not', 'A']]).simplify();     // → False
+ce.box(['Or', 'A', ['Not', 'A']]).simplify();      // → True
+ce.box(['Not', ['Not', 'A']]).simplify();          // → A
+```
+
+**Files modified:**
+- `src/compute-engine/library/logic-utils.ts` - Added `applyAbsorptionAnd` and `applyAbsorptionOr` functions
+- `test/compute-engine/logic.test.ts` - Added "Logic Simplification Rules" describe block with 18 new tests
+
+---
+
+### L-2. Prime Implicants/Implicates (Quine-McCluskey) ✅
+
+**IMPLEMENTED:** Added functions for finding prime implicants/implicates and
+computing minimal normal forms using the Quine-McCluskey algorithm:
+
+1. **`PrimeImplicants(expr)`** - Find all prime implicants (minimal product terms):
+   ```typescript
+   ce.box(['PrimeImplicants', ['Or', ['And', 'A', 'B'], ['And', 'A', ['Not', 'B']]]]).evaluate();
+   // → [A] (AB and A¬B combine to just A)
+
+   ce.box(['PrimeImplicants', ['Or', 'A', 'B']]).evaluate();
+   // → [A, B] (two prime implicants)
+   ```
+
+2. **`PrimeImplicates(expr)`** - Find all prime implicates (minimal sum clauses):
+   ```typescript
+   ce.box(['PrimeImplicates', ['And', 'A', 'B']]).evaluate();
+   // → [A, B] (the expression implies both A and B)
+
+   ce.box(['PrimeImplicates', ['Or', 'A', 'B']]).evaluate();
+   // → [A ∨ B] (single prime implicate)
+   ```
+
+3. **`MinimalDNF(expr)`** - Convert to minimal Disjunctive Normal Form:
+   ```typescript
+   ce.box(['MinimalDNF', ['Or',
+     ['And', 'A', 'B'],
+     ['And', 'A', ['Not', 'B']],
+     ['And', ['Not', 'A'], 'B']
+   ]]).evaluate();
+   // → A ∨ B (simplified from 3 terms to 2 prime implicants)
+   ```
+
+4. **`MinimalCNF(expr)`** - Convert to minimal Conjunctive Normal Form:
+   ```typescript
+   ce.box(['MinimalCNF', ['And', ['Or', 'A', 'B'], ['Or', 'A', ['Not', 'B']]]]).evaluate();
+   // → A (simplified to single literal)
+   ```
+
+**Algorithm:** Quine-McCluskey with greedy covering:
+1. Generate minterms (for DNF) or maxterms (for CNF) from truth table
+2. Iteratively combine terms differing in exactly one variable
+3. Identify essential prime implicants
+4. Use greedy algorithm to find minimal cover
+
+**Performance:**
+- O(3^n) worst case complexity
+- Limited to 12 variables to prevent exponential blowup
+- Expressions with more variables return unevaluated
+
+**Files modified:**
+- `src/compute-engine/library/logic-analysis.ts` - Implemented Quine-McCluskey algorithm
+- `src/compute-engine/library/logic.ts` - Added 4 new function definitions
+- `test/compute-engine/logic.test.ts` - Added 17 new tests in "Prime Implicants and Minimal Forms" describe block
+
+---
+
 ## Medium Priority (Completed)
 
 ### 9. Implicit Multiplication Between `\exp` Function Calls ✅

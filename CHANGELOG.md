@@ -312,6 +312,47 @@
   This uses u-substitution: since `1/x = d/dx(ln(x))`, the integral becomes
   `∫ h'(x)/h(x) dx = ln|h(x)|`.
 
+#### Logic
+
+- **Boolean Simplification Rules**: Added absorption laws and improved boolean
+  expression simplification:
+  - **Absorption**: `A ∧ (A ∨ B) → A` and `A ∨ (A ∧ B) → A`
+  - **Idempotence**: `A ∧ A → A` and `A ∨ A → A`
+  - **Complementation**: `A ∧ ¬A → False` and `A ∨ ¬A → True`
+  - **Identity**: `A ∧ True → A` and `A ∨ False → A`
+  - **Domination**: `A ∧ False → False` and `A ∨ True → True`
+  - **Double negation**: `¬¬A → A`
+
+  These rules are applied automatically during simplification:
+  ```javascript
+  ce.box(['And', 'A', ['Or', 'A', 'B']]).simplify();  // → A
+  ce.box(['Or', 'A', ['And', 'A', 'B']]).simplify();  // → A
+  ```
+
+- **Prime Implicants and Minimal Normal Forms**: Added Quine-McCluskey algorithm
+  for finding prime implicants/implicates and computing minimal CNF/DNF:
+  - `PrimeImplicants(expr)` - Find all prime implicants (minimal product terms)
+  - `PrimeImplicates(expr)` - Find all prime implicates (minimal sum clauses)
+  - `MinimalDNF(expr)` - Convert to minimal DNF using prime implicant cover
+  - `MinimalCNF(expr)` - Convert to minimal CNF using prime implicate cover
+
+  ```javascript
+  // Find prime implicants (terms that can't be further simplified)
+  ce.box(['PrimeImplicants', ['Or', ['And', 'A', 'B'], ['And', 'A', ['Not', 'B']]]]).evaluate();
+  // → [A] (AB and A¬B combine to just A)
+
+  // Compute minimal DNF
+  ce.box(['MinimalDNF', ['Or',
+    ['And', 'A', 'B'],
+    ['And', 'A', ['Not', 'B']],
+    ['And', ['Not', 'A'], 'B']
+  ]]).evaluate();
+  // → A ∨ B (simplified from 3 terms to 2)
+  ```
+
+  Limited to 12 variables to prevent exponential blowup; larger expressions
+  return unevaluated.
+
 #### Linear Algebra
 
 - **Matrix Decompositions**: Added four matrix decomposition functions for

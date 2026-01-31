@@ -422,6 +422,135 @@ function tryGetConstantRatio(
   return null;
 }
 
+/**
+ * Try to integrate cyclic e^x * trig patterns directly.
+ * These patterns (e^x * sin(x), e^x * cos(x)) require the "solve for the integral"
+ * technique and cannot be solved by standard integration by parts.
+ *
+ * ∫ e^x * sin(ax+b) dx = (e^x/(a² + 1)) * (sin(ax+b) - a*cos(ax+b))
+ * ∫ e^x * cos(ax+b) dx = (e^x/(a² + 1)) * (a*sin(ax+b) + cos(ax+b))
+ */
+function tryCyclicExpTrigIntegral(
+  factors: ReadonlyArray<BoxedExpression>,
+  index: string
+): BoxedExpression | null {
+  if (factors.length !== 2) return null;
+
+  const ce = factors[0].engine;
+  let expFactor: BoxedExpression | null = null;
+  let trigFactor: BoxedExpression | null = null;
+
+  for (const f of factors) {
+    // Check for e^x
+    if (f.operator === 'Exp' && f.op1.symbol === index) {
+      expFactor = f;
+    } else if (
+      f.operator === 'Power' &&
+      f.op1.symbol === 'ExponentialE' &&
+      f.op2.symbol === index
+    ) {
+      expFactor = f;
+    }
+    // Check for sin(x) or cos(x) or sin(ax+b) or cos(ax+b)
+    else if (f.operator === 'Sin' || f.operator === 'Cos') {
+      trigFactor = f;
+    }
+  }
+
+  if (!expFactor || !trigFactor) return null;
+
+  const trigOp = trigFactor.operator as 'Sin' | 'Cos';
+  const trigArg = trigFactor.op1;
+
+  // Case 1: sin(x) or cos(x) - simple argument
+  if (trigArg.symbol === index) {
+    if (trigOp === 'Sin') {
+      // ∫ e^x * sin(x) dx = (e^x/2) * (sin(x) - cos(x))
+      return ce
+        .box([
+          'Multiply',
+          ['Rational', 1, 2],
+          ['Exp', index],
+          ['Subtract', ['Sin', index], ['Cos', index]],
+        ])
+        .simplify();
+    } else {
+      // ∫ e^x * cos(x) dx = (e^x/2) * (sin(x) + cos(x))
+      return ce
+        .box([
+          'Multiply',
+          ['Rational', 1, 2],
+          ['Exp', index],
+          ['Add', ['Sin', index], ['Cos', index]],
+        ])
+        .simplify();
+    }
+  }
+
+  // Case 2: sin(ax) where argument is just a*x (Multiply)
+  if (trigArg.operator === 'Multiply' && trigArg.ops) {
+    // Find the coefficient and the variable
+    let coefficient: BoxedExpression | null = null;
+    let hasIndex = false;
+
+    for (const op of trigArg.ops) {
+      if (op.symbol === index) {
+        hasIndex = true;
+      } else if (!op.has(index)) {
+        coefficient = coefficient ? coefficient.mul(op) : op;
+      }
+    }
+
+    if (hasIndex && coefficient) {
+      const a = coefficient;
+      // Coefficient: e^x / (a² + 1)
+      const expX = ce.box(['Exp', index]);
+      const denominator = ce.box(['Add', ['Power', a.json, 2], 1]);
+      const coeff = expX.div(denominator);
+
+      if (trigOp === 'Sin') {
+        // ∫ e^x * sin(ax) dx = (e^x/(a²+1)) * (sin(ax) - a*cos(ax))
+        const sinPart = trigFactor;
+        const cosPart = ce.box(['Cos', trigArg.json]);
+        const result = coeff.mul(sinPart.sub(a.mul(cosPart)));
+        return result.simplify();
+      } else {
+        // ∫ e^x * cos(ax) dx = (e^x/(a²+1)) * (a*sin(ax) + cos(ax))
+        const sinPart = ce.box(['Sin', trigArg.json]);
+        const cosPart = trigFactor;
+        const result = coeff.mul(a.mul(sinPart).add(cosPart));
+        return result.simplify();
+      }
+    }
+  }
+
+  // Case 3: sin(ax+b) or cos(ax+b) - linear argument (Add form)
+  const linearCoeffs = getLinearCoefficients(trigArg, index);
+  if (linearCoeffs) {
+    const { a } = linearCoeffs;
+    // Coefficient: e^x / (a² + 1)
+    const expX = ce.box(['Exp', index]);
+    const denominator = ce.box(['Add', ['Power', a.json, 2], 1]);
+    const coeff = expX.div(denominator);
+
+    if (trigOp === 'Sin') {
+      // ∫ e^x * sin(ax+b) dx = (e^x/(a²+1)) * (sin(ax+b) - a*cos(ax+b))
+      const sinPart = trigFactor;
+      const cosPart = ce.box(['Cos', trigArg.json]);
+      const result = coeff.mul(sinPart.sub(a.mul(cosPart)));
+      return result.simplify();
+    } else {
+      // ∫ e^x * cos(ax+b) dx = (e^x/(a²+1)) * (a*sin(ax+b) + cos(ax+b))
+      const sinPart = ce.box(['Sin', trigArg.json]);
+      const cosPart = trigFactor;
+      const result = coeff.mul(a.mul(sinPart).add(cosPart));
+      return result.simplify();
+    }
+  }
+
+  return null;
+}
+
 function filter(sub: BoxedSubstitution): boolean {
   for (const [k, v] of Object.entries(sub)) {
     if (k !== 'x' && k !== '_x' && v.has('_x')) return false;
@@ -1097,6 +1226,195 @@ const INTEGRATION_RULES: Rule[] = [
     ],
     condition: filter,
   },
+
+  //
+  // Cyclic integration patterns (e^x with trig functions)
+  // These require the "solve for the integral" technique
+  //
+
+  // e^x * sin(x) -> (e^x/2)(sin(x) - cos(x))
+  {
+    match: ['Multiply', ['Exp', '_x'], ['Sin', '_x']],
+    replace: [
+      'Multiply',
+      ['Rational', 1, 2],
+      ['Exp', '_x'],
+      ['Subtract', ['Sin', '_x'], ['Cos', '_x']],
+    ],
+    condition: (sub) => filter(sub) && sub._x.symbol !== null,
+  },
+
+  // e^x * cos(x) -> (e^x/2)(sin(x) + cos(x))
+  {
+    match: ['Multiply', ['Exp', '_x'], ['Cos', '_x']],
+    replace: [
+      'Multiply',
+      ['Rational', 1, 2],
+      ['Exp', '_x'],
+      ['Add', ['Sin', '_x'], ['Cos', '_x']],
+    ],
+    condition: (sub) => filter(sub) && sub._x.symbol !== null,
+  },
+
+  // sin(x) * e^x -> (e^x/2)(sin(x) - cos(x)) (commuted order)
+  {
+    match: ['Multiply', ['Sin', '_x'], ['Exp', '_x']],
+    replace: [
+      'Multiply',
+      ['Rational', 1, 2],
+      ['Exp', '_x'],
+      ['Subtract', ['Sin', '_x'], ['Cos', '_x']],
+    ],
+    condition: (sub) => filter(sub) && sub._x.symbol !== null,
+  },
+
+  // cos(x) * e^x -> (e^x/2)(sin(x) + cos(x)) (commuted order)
+  {
+    match: ['Multiply', ['Cos', '_x'], ['Exp', '_x']],
+    replace: [
+      'Multiply',
+      ['Rational', 1, 2],
+      ['Exp', '_x'],
+      ['Add', ['Sin', '_x'], ['Cos', '_x']],
+    ],
+    condition: (sub) => filter(sub) && sub._x.symbol !== null,
+  },
+
+  // e^x * sin(ax) -> (e^x/(a² + 1))(sin(ax) - a*cos(ax)) (no constant term)
+  {
+    match: ['Multiply', ['Exp', '_x'], ['Sin', ['Multiply', '_a', '_x']]],
+    replace: [
+      'Multiply',
+      ['Divide', ['Exp', '_x'], ['Add', ['Power', '_a', 2], 1]],
+      [
+        'Subtract',
+        ['Sin', ['Multiply', '_a', '_x']],
+        ['Multiply', '_a', ['Cos', ['Multiply', '_a', '_x']]],
+      ],
+    ],
+    condition: filter,
+  },
+
+  // e^x * cos(ax) -> (e^x/(a² + 1))(a*sin(ax) + cos(ax)) (no constant term)
+  {
+    match: ['Multiply', ['Exp', '_x'], ['Cos', ['Multiply', '_a', '_x']]],
+    replace: [
+      'Multiply',
+      ['Divide', ['Exp', '_x'], ['Add', ['Power', '_a', 2], 1]],
+      [
+        'Add',
+        ['Multiply', '_a', ['Sin', ['Multiply', '_a', '_x']]],
+        ['Cos', ['Multiply', '_a', '_x']],
+      ],
+    ],
+    condition: filter,
+  },
+
+  // sin(ax) * e^x -> (e^x/(a² + 1))(sin(ax) - a*cos(ax)) (commuted)
+  {
+    match: ['Multiply', ['Sin', ['Multiply', '_a', '_x']], ['Exp', '_x']],
+    replace: [
+      'Multiply',
+      ['Divide', ['Exp', '_x'], ['Add', ['Power', '_a', 2], 1]],
+      [
+        'Subtract',
+        ['Sin', ['Multiply', '_a', '_x']],
+        ['Multiply', '_a', ['Cos', ['Multiply', '_a', '_x']]],
+      ],
+    ],
+    condition: filter,
+  },
+
+  // cos(ax) * e^x -> (e^x/(a² + 1))(a*sin(ax) + cos(ax)) (commuted)
+  {
+    match: ['Multiply', ['Cos', ['Multiply', '_a', '_x']], ['Exp', '_x']],
+    replace: [
+      'Multiply',
+      ['Divide', ['Exp', '_x'], ['Add', ['Power', '_a', 2], 1]],
+      [
+        'Add',
+        ['Multiply', '_a', ['Sin', ['Multiply', '_a', '_x']]],
+        ['Cos', ['Multiply', '_a', '_x']],
+      ],
+    ],
+    condition: filter,
+  },
+
+  // General case: e^x * sin(ax + b) -> (e^x/(a² + 1))(sin(ax+b) - a*cos(ax+b))
+  {
+    match: [
+      'Multiply',
+      ['Exp', '_x'],
+      ['Sin', ['Add', ['Multiply', '_a', '_x'], '__b']],
+    ],
+    replace: [
+      'Multiply',
+      ['Divide', ['Exp', '_x'], ['Add', ['Power', '_a', 2], 1]],
+      [
+        'Subtract',
+        ['Sin', ['Add', ['Multiply', '_a', '_x'], '__b']],
+        ['Multiply', '_a', ['Cos', ['Add', ['Multiply', '_a', '_x'], '__b']]],
+      ],
+    ],
+    condition: filter,
+  },
+
+  // General case: e^x * cos(ax + b) -> (e^x/(a² + 1))(a*sin(ax+b) + cos(ax+b))
+  {
+    match: [
+      'Multiply',
+      ['Exp', '_x'],
+      ['Cos', ['Add', ['Multiply', '_a', '_x'], '__b']],
+    ],
+    replace: [
+      'Multiply',
+      ['Divide', ['Exp', '_x'], ['Add', ['Power', '_a', 2], 1]],
+      [
+        'Add',
+        ['Multiply', '_a', ['Sin', ['Add', ['Multiply', '_a', '_x'], '__b']]],
+        ['Cos', ['Add', ['Multiply', '_a', '_x'], '__b']],
+      ],
+    ],
+    condition: filter,
+  },
+
+  // Commuted order: sin(ax + b) * e^x
+  {
+    match: [
+      'Multiply',
+      ['Sin', ['Add', ['Multiply', '_a', '_x'], '__b']],
+      ['Exp', '_x'],
+    ],
+    replace: [
+      'Multiply',
+      ['Divide', ['Exp', '_x'], ['Add', ['Power', '_a', 2], 1]],
+      [
+        'Subtract',
+        ['Sin', ['Add', ['Multiply', '_a', '_x'], '__b']],
+        ['Multiply', '_a', ['Cos', ['Add', ['Multiply', '_a', '_x'], '__b']]],
+      ],
+    ],
+    condition: filter,
+  },
+
+  // Commuted order: cos(ax + b) * e^x
+  {
+    match: [
+      'Multiply',
+      ['Cos', ['Add', ['Multiply', '_a', '_x'], '__b']],
+      ['Exp', '_x'],
+    ],
+    replace: [
+      'Multiply',
+      ['Divide', ['Exp', '_x'], ['Add', ['Power', '_a', 2], 1]],
+      [
+        'Add',
+        ['Multiply', '_a', ['Sin', ['Add', ['Multiply', '_a', '_x'], '__b']]],
+        ['Cos', ['Add', ['Multiply', '_a', '_x'], '__b']],
+      ],
+    ],
+    condition: filter,
+  },
 ];
 
 /**
@@ -1321,6 +1639,12 @@ export function antiderivative(
         if (uSubResult) return constantProduct.mul(uSubResult).evaluate();
       }
 
+      // Try cyclic e^x * trig patterns
+      if (variableFactors.length === 2) {
+        const cyclicResult = tryCyclicExpTrigIntegral(variableFactors, index);
+        if (cyclicResult) return constantProduct.mul(cyclicResult).evaluate();
+      }
+
       const antideriv = antiderivative(variableProduct, index);
       return constantProduct.mul(antideriv).evaluate();
     }
@@ -1329,6 +1653,11 @@ export function antiderivative(
     // First try u-substitution (chain rule recognition)
     const uSubResult = tryUSubstitution(fn, index);
     if (uSubResult) return uSubResult;
+
+    // Try cyclic e^x * trig patterns (must be before integration by parts)
+    // These patterns would cause infinite recursion with standard integration by parts
+    const cyclicResult = tryCyclicExpTrigIntegral(fn.ops!, index);
+    if (cyclicResult) return cyclicResult;
 
     // Then try integration by parts for products of variable terms
     if (fn.ops!.length >= 2) {
