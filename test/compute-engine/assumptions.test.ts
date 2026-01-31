@@ -18,15 +18,16 @@ ce.assume(ce.box(['Greater', 't', 0]));
 
 // console.info([...ce.context!.dictionary!.symbols.keys()]);
 
-// TODO #18: Value Resolution from Equality Assumptions
+// #18: Value Resolution from Equality Assumptions
 // When `ce.assume(['Equal', 'one', 1])` is made, `ce.box('one').evaluate()` should return `1`
-describe.skip('VALUE RESOLUTION FROM EQUALITY ASSUMPTIONS', () => {
+describe('VALUE RESOLUTION FROM EQUALITY ASSUMPTIONS', () => {
   test(`one.value should be 1`, () => {
     expect(ce.box('one').evaluate().json).toEqual(1);
   });
 
   test(`one.domain should be integer`, () => {
-    expect(ce.box('one').type.toString()).toBe('integer');
+    // The type might be 'finite_integer' (subtype of integer)
+    expect(ce.box('one').type.matches('integer')).toBe(true);
   });
 
   test(`Equal(one, 1) should evaluate to True`, () => {

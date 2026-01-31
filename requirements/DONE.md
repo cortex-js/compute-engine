@@ -1007,3 +1007,45 @@ dynamically, which cannot be expressed as a static pattern matching rule.
   - Complex expression matching
   - Commutative reordering with repeated wildcards
   - Canonical expression matching
+
+---
+
+### 18. Value Resolution from Equality Assumptions ✅
+
+**IMPLEMENTED:** When an equality assumption is made via `ce.assume(['Equal', symbol, value])`,
+the symbol now correctly evaluates to the assumed value.
+
+**Problem:** When `ce.assume(['Equal', 'one', 1])` was called, subsequent uses of
+`one` would not evaluate to `1` - the symbol remained unevaluated. Additionally,
+`['Equal', 'one', 1]` would not evaluate to `True`.
+
+**Solution:** Fixed two issues:
+
+1. **Value assignment in `assumeEquality`:** When a symbol already has a definition
+   (which happens automatically when accessed via `.unknowns`), the code was not
+   setting its value. Added `ce._setSymbolValue(lhs, val)` to store the value in
+   the evaluation context.
+
+2. **Numeric evaluation for comparisons:** The `N()` method in `BoxedSymbol` was
+   only checking the definition's value, not the evaluation context value. Updated
+   to check `_getSymbolValue()` first for non-constant symbols.
+
+**Examples that now work:**
+```typescript
+ce.assume(ce.box(['Equal', 'one', 1]));
+ce.box('one').evaluate().json           // → 1 (was: "one")
+ce.box('one').N().json                  // → 1 (was: "one")
+ce.box(['Equal', 'one', 1]).evaluate()  // → True (was: ['Equal', 'one', 1])
+ce.box(['Equal', 'one', 0]).evaluate()  // → False
+ce.box(['NotEqual', 'one', 1]).evaluate() // → False
+ce.box(['NotEqual', 'one', 0]).evaluate() // → True
+ce.box('one').type.matches('integer')   // → true
+```
+
+**Files modified:**
+- `src/compute-engine/assume.ts` - Added value assignment when symbol has existing definition
+- `src/compute-engine/boxed-expression/boxed-symbol.ts` - Fixed `N()` to check context value
+
+**Tests enabled:**
+- `test/compute-engine/assumptions.test.ts` - Enabled "VALUE RESOLUTION FROM
+  EQUALITY ASSUMPTIONS" describe block (6 tests)
