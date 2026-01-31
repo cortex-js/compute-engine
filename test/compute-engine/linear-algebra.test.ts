@@ -1309,3 +1309,263 @@ describe('Eigenvalues and Eigenvectors (LA-5)', () => {
     });
   });
 });
+
+describe('Matrix Decompositions (LA-7)', () => {
+  describe('LUDecomposition', () => {
+    it('should decompose a 2x2 matrix', () => {
+      const result = ce
+        .box(['LUDecomposition', ['List', ['List', 4, 3], ['List', 6, 3]]])
+        .evaluate();
+      expect(result.operator).toBe('Tuple');
+      expect(result.ops?.length).toBe(3);
+
+      const [P, L, U] = result.ops!;
+      expect(P.operator).toBe('List');
+      expect(L.operator).toBe('List');
+      expect(U.operator).toBe('List');
+
+      // Verify PA = LU by computing L*U and comparing to P*A
+      // For this simple case, just check structure
+      expect(L.ops?.length).toBe(2);
+      expect(U.ops?.length).toBe(2);
+    });
+
+    it('should decompose a 3x3 matrix', () => {
+      const result = ce
+        .box([
+          'LUDecomposition',
+          [
+            'List',
+            ['List', 2, 1, 1],
+            ['List', 4, 3, 3],
+            ['List', 8, 7, 9],
+          ],
+        ])
+        .evaluate();
+      expect(result.operator).toBe('Tuple');
+      expect(result.ops?.length).toBe(3);
+    });
+
+    it('should return error for non-square matrix', () => {
+      const result = ce.box(['LUDecomposition', m23_n]).evaluate();
+      expect(result.toString()).toContain('expected-square-matrix');
+    });
+
+    it('should handle identity matrix', () => {
+      const result = ce
+        .box([
+          'LUDecomposition',
+          ['List', ['List', 1, 0], ['List', 0, 1]],
+        ])
+        .evaluate();
+      expect(result.operator).toBe('Tuple');
+
+      const L = result.ops?.[1];
+      const U = result.ops?.[2];
+
+      // For identity, L and U should both be identity
+      expect(L?.ops?.[0]?.ops?.[0]?.re).toBe(1);
+      expect(U?.ops?.[0]?.ops?.[0]?.re).toBe(1);
+    });
+  });
+
+  describe('QRDecomposition', () => {
+    it('should decompose a 2x2 matrix', () => {
+      const result = ce
+        .box(['QRDecomposition', ['List', ['List', 1, 2], ['List', 3, 4]]])
+        .evaluate();
+      expect(result.operator).toBe('Tuple');
+      expect(result.ops?.length).toBe(2);
+
+      const [Q, R] = result.ops!;
+      expect(Q.operator).toBe('List');
+      expect(R.operator).toBe('List');
+
+      // Q should be 2x2 orthogonal
+      expect(Q.ops?.length).toBe(2);
+      // R should be 2x2 upper triangular
+      expect(R.ops?.length).toBe(2);
+    });
+
+    it('should decompose a 3x3 matrix', () => {
+      const result = ce
+        .box([
+          'QRDecomposition',
+          [
+            'List',
+            ['List', 12, -51, 4],
+            ['List', 6, 167, -68],
+            ['List', -4, 24, -41],
+          ],
+        ])
+        .evaluate();
+      expect(result.operator).toBe('Tuple');
+      expect(result.ops?.length).toBe(2);
+
+      const [Q, R] = result.ops!;
+      // Q should be 3x3
+      expect(Q.ops?.length).toBe(3);
+      // R should be 3x3 upper triangular
+      expect(R.ops?.length).toBe(3);
+
+      // R should be upper triangular (elements below diagonal near 0)
+      const R21 = R.ops?.[1]?.ops?.[0]?.re ?? 999;
+      const R31 = R.ops?.[2]?.ops?.[0]?.re ?? 999;
+      const R32 = R.ops?.[2]?.ops?.[1]?.re ?? 999;
+      expect(Math.abs(R21)).toBeLessThan(1e-9);
+      expect(Math.abs(R31)).toBeLessThan(1e-9);
+      expect(Math.abs(R32)).toBeLessThan(1e-9);
+    });
+
+    it('should handle rectangular matrix (m > n)', () => {
+      const result = ce
+        .box([
+          'QRDecomposition',
+          ['List', ['List', 1, 2], ['List', 3, 4], ['List', 5, 6]],
+        ])
+        .evaluate();
+      expect(result.operator).toBe('Tuple');
+      expect(result.ops?.length).toBe(2);
+
+      const [Q, R] = result.ops!;
+      // Q should be 3x3
+      expect(Q.ops?.length).toBe(3);
+      // R should be 3x2
+      expect(R.ops?.length).toBe(3);
+      expect(R.ops?.[0]?.ops?.length).toBe(2);
+    });
+  });
+
+  describe('CholeskyDecomposition', () => {
+    it('should decompose a positive definite 2x2 matrix', () => {
+      // Matrix [[4, 2], [2, 2]] is positive definite
+      const result = ce
+        .box(['CholeskyDecomposition', ['List', ['List', 4, 2], ['List', 2, 2]]])
+        .evaluate();
+      expect(result.operator).toBe('List');
+      expect(result.ops?.length).toBe(2);
+
+      // L should be lower triangular
+      const L11 = result.ops?.[0]?.ops?.[0]?.re ?? 0;
+      const L12 = result.ops?.[0]?.ops?.[1]?.re ?? 999;
+      const L21 = result.ops?.[1]?.ops?.[0]?.re ?? 0;
+      const L22 = result.ops?.[1]?.ops?.[1]?.re ?? 0;
+
+      expect(L12).toBe(0); // Upper triangle should be 0
+      expect(L11).toBeCloseTo(2, 5); // sqrt(4) = 2
+      expect(L21).toBeCloseTo(1, 5); // 2/2 = 1
+      expect(L22).toBeCloseTo(1, 5); // sqrt(2-1) = 1
+    });
+
+    it('should decompose identity matrix', () => {
+      const result = ce
+        .box([
+          'CholeskyDecomposition',
+          ['List', ['List', 1, 0], ['List', 0, 1]],
+        ])
+        .evaluate();
+      expect(result.operator).toBe('List');
+
+      // Cholesky of identity is identity
+      expect(result.ops?.[0]?.ops?.[0]?.re).toBe(1);
+      expect(result.ops?.[0]?.ops?.[1]?.re).toBe(0);
+      expect(result.ops?.[1]?.ops?.[0]?.re).toBe(0);
+      expect(result.ops?.[1]?.ops?.[1]?.re).toBe(1);
+    });
+
+    it('should return error for non-positive-definite matrix', () => {
+      // Matrix [[1, 2], [2, 1]] is not positive definite (det = -3 < 0)
+      const result = ce
+        .box(['CholeskyDecomposition', ['List', ['List', 1, 2], ['List', 2, 1]]])
+        .evaluate();
+      expect(result.toString()).toContain('expected-positive-definite-matrix');
+    });
+
+    it('should return error for non-square matrix', () => {
+      const result = ce.box(['CholeskyDecomposition', m23_n]).evaluate();
+      expect(result.toString()).toContain('expected-square-matrix');
+    });
+  });
+
+  describe('SVD (Singular Value Decomposition)', () => {
+    it('should decompose a 2x2 matrix', () => {
+      const result = ce
+        .box(['SVD', ['List', ['List', 4, 0], ['List', 3, -5]]])
+        .evaluate();
+      expect(result.operator).toBe('Tuple');
+      expect(result.ops?.length).toBe(3);
+
+      const [U, S, V] = result.ops!;
+      expect(U.operator).toBe('List');
+      expect(S.operator).toBe('List');
+      expect(V.operator).toBe('List');
+
+      // S should be diagonal (non-negative singular values)
+      const S11 = S.ops?.[0]?.ops?.[0]?.re ?? -1;
+      const S12 = S.ops?.[0]?.ops?.[1]?.re ?? 999;
+      const S21 = S.ops?.[1]?.ops?.[0]?.re ?? 999;
+      const S22 = S.ops?.[1]?.ops?.[1]?.re ?? -1;
+
+      expect(S11).toBeGreaterThanOrEqual(0);
+      expect(S22).toBeGreaterThanOrEqual(0);
+      expect(Math.abs(S12)).toBeLessThan(1e-9);
+      expect(Math.abs(S21)).toBeLessThan(1e-9);
+    });
+
+    it('should decompose identity matrix', () => {
+      const result = ce
+        .box(['SVD', ['List', ['List', 1, 0], ['List', 0, 1]]])
+        .evaluate();
+      expect(result.operator).toBe('Tuple');
+
+      const S = result.ops?.[1];
+      // Singular values of identity are all 1
+      expect(S?.ops?.[0]?.ops?.[0]?.re).toBeCloseTo(1, 5);
+      expect(S?.ops?.[1]?.ops?.[1]?.re).toBeCloseTo(1, 5);
+    });
+
+    it('should handle rectangular matrix', () => {
+      const result = ce
+        .box(['SVD', ['List', ['List', 1, 2, 3], ['List', 4, 5, 6]]])
+        .evaluate();
+      expect(result.operator).toBe('Tuple');
+      expect(result.ops?.length).toBe(3);
+
+      const [U, S, V] = result.ops!;
+      // U should be 2x2
+      expect(U.ops?.length).toBe(2);
+      // S should be 2x3
+      expect(S.ops?.length).toBe(2);
+      expect(S.ops?.[0]?.ops?.length).toBe(3);
+      // V should be 3x3
+      expect(V.ops?.length).toBe(3);
+    });
+
+    it('should decompose a 3x3 matrix', () => {
+      const result = ce
+        .box([
+          'SVD',
+          [
+            'List',
+            ['List', 1, 0, 0],
+            ['List', 0, 2, 0],
+            ['List', 0, 0, 3],
+          ],
+        ])
+        .evaluate();
+      expect(result.operator).toBe('Tuple');
+
+      const S = result.ops?.[1];
+      // For diagonal matrix, singular values are diagonal elements (sorted or not)
+      const singularValues = [
+        S?.ops?.[0]?.ops?.[0]?.re ?? 0,
+        S?.ops?.[1]?.ops?.[1]?.re ?? 0,
+        S?.ops?.[2]?.ops?.[2]?.re ?? 0,
+      ].sort((a, b) => b - a);
+
+      expect(singularValues[0]).toBeCloseTo(3, 5);
+      expect(singularValues[1]).toBeCloseTo(2, 5);
+      expect(singularValues[2]).toBeCloseTo(1, 5);
+    });
+  });
+});

@@ -936,8 +936,574 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
         return ce.box(['Tuple', eigenvalues, eigenvectors]);
       },
     },
+
+    // LU Decomposition: A = LU (or PA = LU with pivoting)
+    // Returns [L, U] for no pivoting or [P, L, U] with pivoting
+    LUDecomposition: {
+      complexity: 8600,
+      signature: '(matrix) -> tuple',
+      evaluate: (ops, { engine: ce }): BoxedExpression | undefined => {
+        const M = ops[0].evaluate();
+
+        if (!isBoxedTensor(M)) return undefined;
+
+        const shape = M.shape;
+        // Must be a square matrix
+        if (shape.length !== 2 || shape[0] !== shape[1]) {
+          return ce.error('expected-square-matrix', M.toString());
+        }
+
+        const n = shape[0];
+        const result = computeLU(M, n, ce);
+        if (!result) return undefined;
+
+        const { P, L, U } = result;
+        return ce.box(['Tuple', P, L, U]);
+      },
+    },
+
+    // QR Decomposition: A = QR
+    // Returns [Q, R] where Q is orthogonal and R is upper triangular
+    QRDecomposition: {
+      complexity: 8600,
+      signature: '(matrix) -> tuple',
+      evaluate: (ops, { engine: ce }): BoxedExpression | undefined => {
+        const M = ops[0].evaluate();
+
+        if (!isBoxedTensor(M)) return undefined;
+
+        const shape = M.shape;
+        // Must be at least a 2D matrix
+        if (shape.length !== 2) {
+          return ce.error('expected-matrix', M.toString());
+        }
+
+        const [m, n] = shape;
+        const result = computeQR(M, m, n, ce);
+        if (!result) return undefined;
+
+        const { Q, R } = result;
+        return ce.box(['Tuple', Q, R]);
+      },
+    },
+
+    // Cholesky Decomposition: A = LL^T (for positive definite matrices)
+    // Returns L (lower triangular matrix)
+    CholeskyDecomposition: {
+      complexity: 8600,
+      signature: '(matrix) -> matrix',
+      evaluate: (ops, { engine: ce }): BoxedExpression | undefined => {
+        const M = ops[0].evaluate();
+
+        if (!isBoxedTensor(M)) return undefined;
+
+        const shape = M.shape;
+        // Must be a square matrix
+        if (shape.length !== 2 || shape[0] !== shape[1]) {
+          return ce.error('expected-square-matrix', M.toString());
+        }
+
+        const n = shape[0];
+        return computeCholesky(M, n, ce);
+      },
+    },
+
+    // Singular Value Decomposition: A = UΣV^T
+    // Returns [U, Σ, V] where U and V are orthogonal, Σ is diagonal
+    SVD: {
+      complexity: 8700,
+      signature: '(matrix) -> tuple',
+      evaluate: (ops, { engine: ce }): BoxedExpression | undefined => {
+        const M = ops[0].evaluate();
+
+        if (!isBoxedTensor(M)) return undefined;
+
+        const shape = M.shape;
+        // Must be a 2D matrix
+        if (shape.length !== 2) {
+          return ce.error('expected-matrix', M.toString());
+        }
+
+        const [m, n] = shape;
+        const result = computeSVD(M, m, n, ce);
+        if (!result) return undefined;
+
+        const { U, S, V } = result;
+        return ce.box(['Tuple', U, S, V]);
+      },
+    },
   },
 ];
+
+/**
+ * Compute LU decomposition with partial pivoting
+ * Returns P, L, U such that PA = LU
+ */
+function computeLU(
+  M: BoxedExpression,
+  n: number,
+  ce: ComputeEngine
+): { P: BoxedExpression; L: BoxedExpression; U: BoxedExpression } | undefined {
+  if (!isBoxedTensor(M)) return undefined;
+
+  // Convert matrix to numeric array
+  const A: number[][] = [];
+  for (let i = 0; i < n; i++) {
+    A[i] = [];
+    for (let j = 0; j < n; j++) {
+      const val = M.tensor.at(i + 1, j + 1);
+      const num =
+        typeof val === 'number'
+          ? val
+          : typeof val === 'object' && 're' in val
+            ? (val.re ?? 0)
+            : 0;
+      if (isNaN(num)) return undefined;
+      A[i][j] = num;
+    }
+  }
+
+  // Initialize L as identity, U as copy of A, P as identity permutation
+  const L: number[][] = Array(n)
+    .fill(null)
+    .map((_, i) =>
+      Array(n)
+        .fill(0)
+        .map((_, j) => (i === j ? 1 : 0))
+    );
+  const U: number[][] = A.map((row) => [...row]);
+  const perm: number[] = Array(n)
+    .fill(0)
+    .map((_, i) => i);
+
+  const eps = 1e-10;
+
+  // Gaussian elimination with partial pivoting
+  for (let k = 0; k < n - 1; k++) {
+    // Find pivot
+    let maxVal = Math.abs(U[k][k]);
+    let maxRow = k;
+    for (let i = k + 1; i < n; i++) {
+      if (Math.abs(U[i][k]) > maxVal) {
+        maxVal = Math.abs(U[i][k]);
+        maxRow = i;
+      }
+    }
+
+    if (maxVal < eps) continue; // Skip if column is zero
+
+    // Swap rows in U and L (for L, only the part that's been filled)
+    if (maxRow !== k) {
+      [U[k], U[maxRow]] = [U[maxRow], U[k]];
+      [perm[k], perm[maxRow]] = [perm[maxRow], perm[k]];
+      // Swap the L entries for columns 0 to k-1
+      for (let j = 0; j < k; j++) {
+        [L[k][j], L[maxRow][j]] = [L[maxRow][j], L[k][j]];
+      }
+    }
+
+    // Elimination
+    for (let i = k + 1; i < n; i++) {
+      const factor = U[i][k] / U[k][k];
+      L[i][k] = factor;
+      for (let j = k; j < n; j++) {
+        U[i][j] -= factor * U[k][j];
+      }
+    }
+  }
+
+  // Build permutation matrix P
+  const P: BoxedExpression[][] = [];
+  for (let i = 0; i < n; i++) {
+    P[i] = [];
+    for (let j = 0; j < n; j++) {
+      P[i][j] = perm[i] === j ? ce.One : ce.Zero;
+    }
+  }
+
+  // Build result matrices
+  const PExpr = ce.box(['List', ...P.map((row) => ce.box(['List', ...row]))]);
+  const LExpr = ce.box([
+    'List',
+    ...L.map((row) => ce.box(['List', ...row.map((x) => ce.number(x))])),
+  ]);
+  const UExpr = ce.box([
+    'List',
+    ...U.map((row) => ce.box(['List', ...row.map((x) => ce.number(x))])),
+  ]);
+
+  return { P: PExpr, L: LExpr, U: UExpr };
+}
+
+/**
+ * Compute QR decomposition using Gram-Schmidt process
+ * For m×n matrix, returns Q (m×m orthogonal) and R (m×n upper triangular)
+ */
+function computeQR(
+  M: BoxedExpression,
+  m: number,
+  n: number,
+  ce: ComputeEngine
+): { Q: BoxedExpression; R: BoxedExpression } | undefined {
+  if (!isBoxedTensor(M)) return undefined;
+
+  // Convert matrix to numeric array
+  const A: number[][] = [];
+  for (let i = 0; i < m; i++) {
+    A[i] = [];
+    for (let j = 0; j < n; j++) {
+      const val = M.tensor.at(i + 1, j + 1);
+      const num =
+        typeof val === 'number'
+          ? val
+          : typeof val === 'object' && 're' in val
+            ? (val.re ?? 0)
+            : 0;
+      if (isNaN(num)) return undefined;
+      A[i][j] = num;
+    }
+  }
+
+  // Use Householder reflections for better numerical stability
+  const Q: number[][] = Array(m)
+    .fill(null)
+    .map((_, i) =>
+      Array(m)
+        .fill(0)
+        .map((_, j) => (i === j ? 1 : 0))
+    );
+  const R: number[][] = A.map((row) => [...row]);
+
+  const minMN = Math.min(m, n);
+
+  for (let k = 0; k < minMN; k++) {
+    // Compute the Householder vector for column k
+    let norm = 0;
+    for (let i = k; i < m; i++) {
+      norm += R[i][k] * R[i][k];
+    }
+    norm = Math.sqrt(norm);
+
+    if (norm < 1e-10) continue;
+
+    const sign = R[k][k] >= 0 ? 1 : -1;
+    const u0 = R[k][k] + sign * norm;
+
+    // Compute v = [u0, R[k+1][k], ..., R[m-1][k]] / u0
+    const v: number[] = Array(m).fill(0);
+    v[k] = 1;
+    for (let i = k + 1; i < m; i++) {
+      v[i] = R[i][k] / u0;
+    }
+
+    // beta = 2 / (v'v)
+    let vTv = 1;
+    for (let i = k + 1; i < m; i++) {
+      vTv += v[i] * v[i];
+    }
+    const beta = 2 / vTv;
+
+    // Apply H = I - beta * v * v' to R
+    for (let j = k; j < n; j++) {
+      let vTr = 0;
+      for (let i = k; i < m; i++) {
+        vTr += v[i] * R[i][j];
+      }
+      for (let i = k; i < m; i++) {
+        R[i][j] -= beta * v[i] * vTr;
+      }
+    }
+
+    // Apply H to Q (Q = Q * H)
+    for (let i = 0; i < m; i++) {
+      let qTv = 0;
+      for (let j = k; j < m; j++) {
+        qTv += Q[i][j] * v[j];
+      }
+      for (let j = k; j < m; j++) {
+        Q[i][j] -= beta * qTv * v[j];
+      }
+    }
+  }
+
+  // Clean up small values in R below diagonal
+  for (let i = 0; i < m; i++) {
+    for (let j = 0; j < Math.min(i, n); j++) {
+      if (Math.abs(R[i][j]) < 1e-10) R[i][j] = 0;
+    }
+  }
+
+  // Build result matrices
+  const QExpr = ce.box([
+    'List',
+    ...Q.map((row) => ce.box(['List', ...row.map((x) => ce.number(x))])),
+  ]);
+  const RExpr = ce.box([
+    'List',
+    ...R.map((row) => ce.box(['List', ...row.map((x) => ce.number(x))])),
+  ]);
+
+  return { Q: QExpr, R: RExpr };
+}
+
+/**
+ * Compute Cholesky decomposition: A = LL^T
+ * Only works for positive definite matrices
+ */
+function computeCholesky(
+  M: BoxedExpression,
+  n: number,
+  ce: ComputeEngine
+): BoxedExpression | undefined {
+  if (!isBoxedTensor(M)) return undefined;
+
+  // Convert matrix to numeric array
+  const A: number[][] = [];
+  for (let i = 0; i < n; i++) {
+    A[i] = [];
+    for (let j = 0; j < n; j++) {
+      const val = M.tensor.at(i + 1, j + 1);
+      const num =
+        typeof val === 'number'
+          ? val
+          : typeof val === 'object' && 're' in val
+            ? (val.re ?? 0)
+            : 0;
+      if (isNaN(num)) return undefined;
+      A[i][j] = num;
+    }
+  }
+
+  // Initialize L as zero matrix
+  const L: number[][] = Array(n)
+    .fill(null)
+    .map(() => Array(n).fill(0));
+
+  for (let i = 0; i < n; i++) {
+    for (let j = 0; j <= i; j++) {
+      let sum = 0;
+
+      if (j === i) {
+        // Diagonal element
+        for (let k = 0; k < j; k++) {
+          sum += L[j][k] * L[j][k];
+        }
+        const val = A[j][j] - sum;
+        if (val < 0) {
+          // Matrix is not positive definite
+          return ce.error('expected-positive-definite-matrix', M.toString());
+        }
+        L[j][j] = Math.sqrt(val);
+      } else {
+        // Off-diagonal element
+        for (let k = 0; k < j; k++) {
+          sum += L[i][k] * L[j][k];
+        }
+        if (Math.abs(L[j][j]) < 1e-10) {
+          return ce.error('expected-positive-definite-matrix', M.toString());
+        }
+        L[i][j] = (A[i][j] - sum) / L[j][j];
+      }
+    }
+  }
+
+  // Build result matrix
+  return ce.box([
+    'List',
+    ...L.map((row) => ce.box(['List', ...row.map((x) => ce.number(x))])),
+  ]);
+}
+
+/**
+ * Compute Singular Value Decomposition: A = UΣV^T
+ * Uses iterative algorithm based on QR iteration
+ */
+function computeSVD(
+  M: BoxedExpression,
+  m: number,
+  n: number,
+  ce: ComputeEngine
+): { U: BoxedExpression; S: BoxedExpression; V: BoxedExpression } | undefined {
+  if (!isBoxedTensor(M)) return undefined;
+
+  // Convert matrix to numeric array
+  const A: number[][] = [];
+  for (let i = 0; i < m; i++) {
+    A[i] = [];
+    for (let j = 0; j < n; j++) {
+      const val = M.tensor.at(i + 1, j + 1);
+      const num =
+        typeof val === 'number'
+          ? val
+          : typeof val === 'object' && 're' in val
+            ? (val.re ?? 0)
+            : 0;
+      if (isNaN(num)) return undefined;
+      A[i][j] = num;
+    }
+  }
+
+  // Compute A^T * A for right singular vectors
+  const AtA: number[][] = Array(n)
+    .fill(null)
+    .map(() => Array(n).fill(0));
+  for (let i = 0; i < n; i++) {
+    for (let j = 0; j < n; j++) {
+      for (let k = 0; k < m; k++) {
+        AtA[i][j] += A[k][i] * A[k][j];
+      }
+    }
+  }
+
+  // Compute A * A^T for left singular vectors
+  const AAt: number[][] = Array(m)
+    .fill(null)
+    .map(() => Array(m).fill(0));
+  for (let i = 0; i < m; i++) {
+    for (let j = 0; j < m; j++) {
+      for (let k = 0; k < n; k++) {
+        AAt[i][j] += A[i][k] * A[j][k];
+      }
+    }
+  }
+
+  // Use QR iteration to find eigenvalues/eigenvectors of A^T*A
+  const maxIter = 100;
+  const tol = 1e-10;
+
+  // Initialize V as identity
+  let V: number[][] = Array(n)
+    .fill(null)
+    .map((_, i) =>
+      Array(n)
+        .fill(0)
+        .map((_, j) => (i === j ? 1 : 0))
+    );
+  let B = AtA.map((row) => [...row]);
+
+  for (let iter = 0; iter < maxIter; iter++) {
+    // QR decomposition of B
+    const { Q, R } = qrDecomposition(B, n);
+
+    // B = R * Q
+    const newB: number[][] = Array(n)
+      .fill(null)
+      .map(() => Array(n).fill(0));
+    for (let i = 0; i < n; i++) {
+      for (let j = 0; j < n; j++) {
+        for (let k = 0; k < n; k++) {
+          newB[i][j] += R[i][k] * Q[k][j];
+        }
+      }
+    }
+
+    // V = V * Q
+    const newV: number[][] = Array(n)
+      .fill(null)
+      .map(() => Array(n).fill(0));
+    for (let i = 0; i < n; i++) {
+      for (let j = 0; j < n; j++) {
+        for (let k = 0; k < n; k++) {
+          newV[i][j] += V[i][k] * Q[k][j];
+        }
+      }
+    }
+
+    // Check convergence
+    let maxOffDiag = 0;
+    for (let i = 1; i < n; i++) {
+      for (let j = 0; j < i; j++) {
+        maxOffDiag = Math.max(maxOffDiag, Math.abs(newB[i][j]));
+      }
+    }
+
+    B = newB;
+    V = newV;
+
+    if (maxOffDiag < tol) break;
+  }
+
+  // Singular values are sqrt of diagonal of B (eigenvalues of A^T*A)
+  const singularValues: number[] = [];
+  for (let i = 0; i < n; i++) {
+    singularValues.push(Math.sqrt(Math.max(0, B[i][i])));
+  }
+
+  // Compute U = A * V * Σ^(-1)
+  const U: number[][] = Array(m)
+    .fill(null)
+    .map(() => Array(m).fill(0));
+
+  for (let j = 0; j < Math.min(m, n); j++) {
+    if (singularValues[j] > tol) {
+      // Compute j-th column of U
+      for (let i = 0; i < m; i++) {
+        let sum = 0;
+        for (let k = 0; k < n; k++) {
+          sum += A[i][k] * V[k][j];
+        }
+        U[i][j] = sum / singularValues[j];
+      }
+    }
+  }
+
+  // Complete U to orthogonal basis if m > n
+  if (m > n) {
+    // Use Gram-Schmidt to add orthogonal columns
+    for (let j = n; j < m; j++) {
+      // Start with a unit vector
+      const col: number[] = Array(m).fill(0);
+      col[j] = 1;
+
+      // Orthogonalize against existing columns
+      for (let k = 0; k < j; k++) {
+        let dotProd = 0;
+        for (let i = 0; i < m; i++) {
+          dotProd += col[i] * U[i][k];
+        }
+        for (let i = 0; i < m; i++) {
+          col[i] -= dotProd * U[i][k];
+        }
+      }
+
+      // Normalize
+      let norm = 0;
+      for (let i = 0; i < m; i++) {
+        norm += col[i] * col[i];
+      }
+      norm = Math.sqrt(norm);
+      if (norm > tol) {
+        for (let i = 0; i < m; i++) {
+          U[i][j] = col[i] / norm;
+        }
+      }
+    }
+  }
+
+  // Build Σ matrix (m x n diagonal matrix)
+  const S: number[][] = Array(m)
+    .fill(null)
+    .map(() => Array(n).fill(0));
+  for (let i = 0; i < Math.min(m, n); i++) {
+    S[i][i] = singularValues[i];
+  }
+
+  // Build result matrices
+  const UExpr = ce.box([
+    'List',
+    ...U.map((row) => ce.box(['List', ...row.map((x) => ce.number(x))])),
+  ]);
+  const SExpr = ce.box([
+    'List',
+    ...S.map((row) => ce.box(['List', ...row.map((x) => ce.number(x))])),
+  ]);
+  const VExpr = ce.box([
+    'List',
+    ...V.map((row) => ce.box(['List', ...row.map((x) => ce.number(x))])),
+  ]);
+
+  return { U: UExpr, S: SExpr, V: VExpr };
+}
 
 /**
  * Get element from matrix at 1-based indices

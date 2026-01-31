@@ -186,6 +186,29 @@
   This uses u-substitution: since `1/x = d/dx(ln(x))`, the integral becomes
   `∫ h'(x)/h(x) dx = ln|h(x)|`.
 
+- **Matrix Decompositions**: Added four matrix decomposition functions for
+  numerical linear algebra:
+  - `LUDecomposition(A)` → `[P, L, U]` - LU factorization with partial pivoting
+  - `QRDecomposition(A)` → `[Q, R]` - QR factorization using Householder reflections
+  - `CholeskyDecomposition(A)` → `L` - Cholesky factorization for positive definite matrices
+  - `SVD(A)` → `[U, Σ, V]` - Singular Value Decomposition
+
+  ```javascript
+  ce.box(['LUDecomposition', [[4, 3], [6, 3]]]).evaluate();
+  // → [P, L, U] where PA = LU
+
+  ce.box(['QRDecomposition', [[1, 2], [3, 4]]]).evaluate();
+  // → [Q, R] where A = QR, Q orthogonal, R upper triangular
+
+  ce.box(['CholeskyDecomposition', [[4, 2], [2, 2]]]).evaluate();
+  // → L where A = LL^T
+
+  ce.box(['SVD', [[1, 2], [3, 4]]]).evaluate();
+  // → [U, Σ, V] where A = UΣV^T
+  ```
+  This uses u-substitution: since `1/x = d/dx(ln(x))`, the integral becomes
+  `∫ h'(x)/h(x) dx = ln|h(x)|`.
+
 - **Multi-Argument Function Derivatives**: Added derivative support for:
 
   - **Log(x, base)** - Logarithm with custom base:
