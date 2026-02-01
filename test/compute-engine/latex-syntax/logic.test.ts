@@ -701,6 +701,18 @@ describe('Logic', () => {
         ],
       ]
     `);
+    // With dot separator (no space after dot) - issue #157
+    expect(ce.parse('\\forall x.x>0').json).toMatchInlineSnapshot(`
+      [
+        ForAll,
+        x,
+        [
+          Greater,
+          x,
+          0,
+        ],
+      ]
+    `);
     // With colon separator
     expect(ce.parse('\\forall x: x>0').json).toMatchInlineSnapshot(`
       [
@@ -745,6 +757,43 @@ describe('Logic', () => {
           Predicate,
           P,
           x,
+        ],
+      ]
+    `);
+  });
+
+  // https://github.com/cortex-js/compute-engine/issues/157
+  it('should parse ForAll with dot separator and no space (issue #157)', () => {
+    expect(ce.parse('\\forall x.x\\in A').json).toMatchInlineSnapshot(`
+      [
+        ForAll,
+        x,
+        [
+          Element,
+          x,
+          A,
+        ],
+      ]
+    `);
+    expect(ce.parse('\\forall x.x>0').json).toMatchInlineSnapshot(`
+      [
+        ForAll,
+        x,
+        [
+          Greater,
+          x,
+          0,
+        ],
+      ]
+    `);
+    expect(ce.parse('\\exists y.y<10').json).toMatchInlineSnapshot(`
+      [
+        Exists,
+        y,
+        [
+          Less,
+          y,
+          10,
         ],
       ]
     `);
