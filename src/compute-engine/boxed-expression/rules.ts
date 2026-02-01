@@ -334,24 +334,37 @@ function parseModifierExpression(parser: Parser): string | null {
 }
 
 /* Return an expression for a match/replace part of a rule if a LaTeX string
- or MathJSON expression
+ or MathJSON expression.
+
+ When `autoWildcard` is true (default for string rule parsing), single-character
+ symbols are automatically converted to wildcards (e.g., 'a' -> '_a'). This is
+ appropriate when parsing rule strings like "a*x -> 2*x" where pattern matching
+ is expected.
+
+ When `autoWildcard` is false (default for object rules), symbols are kept as
+ literals. This allows `.replace({match: 'a', replace: 2})` to match the literal
+ symbol 'a' rather than acting as a wildcard.
  */
 function parseRulePart(
   ce: ComputeEngine,
   rule?: string | SemiBoxedExpression | RuleReplaceFunction | RuleFunction,
-  options?: { canonical?: boolean }
+  options?: { canonical?: boolean; autoWildcard?: boolean }
 ): BoxedExpression | undefined {
   if (rule === undefined || typeof rule === 'function') return undefined;
   if (typeof rule === 'string') {
     let expr = ce.parse(rule, { canonical: options?.canonical ?? false });
-    expr = expr.map(
-      (x) => {
-        // Only transform single character symbols. Avoid \pi, \imaginaryUnit, etc..
-        if (x.symbol && x.symbol.length === 1) return ce.symbol('_' + x.symbol);
-        return x;
-      },
-      { canonical: false }
-    );
+    // Only auto-wildcard when explicitly requested (e.g., when parsing
+    // rule strings like "a*x -> 2*x"). For object rules, keep symbols literal.
+    if (options?.autoWildcard) {
+      expr = expr.map(
+        (x) => {
+          // Only transform single character symbols. Avoid \pi, \imaginaryUnit, etc..
+          if (x.symbol && x.symbol.length === 1) return ce.symbol('_' + x.symbol);
+          return x;
+        },
+        { canonical: false }
+      );
+    }
     return expr;
   }
   const canonical =

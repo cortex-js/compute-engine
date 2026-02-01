@@ -50,6 +50,51 @@ describe('RULES', () => {
   });
 });
 
+// Test for issue #23: replace() with object rules should NOT auto-wildcard
+// single-character symbols. Only string rules should auto-wildcard.
+describe('OBJECT RULES LITERAL MATCHING', () => {
+  it('should match literal symbol in object rule, not wildcard', () => {
+    // {match: 'a', replace: 2} should replace literal 'a' with 2
+    // NOT treat 'a' as a wildcard matching any expression
+    const expr = ce.box(['Add', ['Multiply', 'a', 'x'], 'b']);
+    const result = expr.replace({ match: 'a', replace: 2 }, { recursive: true });
+    // Expected: 2x + b (only 'a' replaced, not the whole expression)
+    expect(result?.toString()).toBe('b + 2x');
+  });
+
+  it('should match literal symbol not present in expression', () => {
+    const expr = ce.box(['Add', ['Multiply', 'x', 'y'], 'z']);
+    // 'a' is not in the expression, so no match
+    const result = expr.replace({ match: 'a', replace: 2 }, { recursive: true });
+    expect(result).toBeNull();
+  });
+
+  it('should still allow explicit wildcards in object rules', () => {
+    const expr = ce.box(['Add', ['Multiply', 3, 'x'], 5]);
+    const result = expr.replace(
+      { match: ['Multiply', '_a', 'x'], replace: ['Multiply', 10, 'x'] },
+      { recursive: true }
+    );
+    expect(result?.toString()).toBe('10x + 5');
+  });
+
+  it('string rules should still auto-wildcard', () => {
+    const expr = ce.box(['Add', ['Multiply', 2, 'x'], 3]);
+    const result = expr.replace('a*x -> 5*x', { recursive: true });
+    expect(result?.toString()).toBe('5x + 3');
+  });
+
+  it('subs() should work the same as literal replace', () => {
+    const expr = ce.box(['Add', ['Multiply', 'a', 'x'], 'b']);
+    const subsResult = expr.subs({ a: 2 });
+    const replaceResult = expr.replace(
+      { match: 'a', replace: 2 },
+      { recursive: true }
+    );
+    expect(subsResult.toString()).toBe(replaceResult?.toString());
+  });
+});
+
 describe('INVALID RULES', () => {
   it('should handle shorthand rule with no replace', () => {
     const expr = ce.parse('\\pi + 3');
