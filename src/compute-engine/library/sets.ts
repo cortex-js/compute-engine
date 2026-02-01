@@ -523,7 +523,14 @@ export const SETS_LIBRARY: SymbolDefinitions = {
     signature: '(value, collection, boolean?) -> boolean',
     description:
       'Test whether a value is an element of a collection. ' +
-      'Optional third argument is a boolean expression (condition) for filtered iteration in Sum/Product.',
+      'Optional third argument is a boolean expression (condition) for filtered iteration in Sum/Product.\n\n' +
+      'Element supports two modes of operation:\n' +
+      '1. Set membership: Element(3, [List, 1, 2, 3]) checks if 3 is in the list\n' +
+      '2. Type-style membership: Element(x, integer) checks if x has type integer\n\n' +
+      'Type-style membership works with:\n' +
+      '- Mathematical sets: Integers, RealNumbers, ComplexNumbers, etc.\n' +
+      '- Type names: integer, real, number, finite_real, positive_integer, etc.\n' +
+      '- Invalid type names remain unevaluated (e.g., Element(2, "Booleans"))',
     canonical: (args, { engine: ce }) => {
       // Let default signature validation handle missing required arguments
       if (args.length === 0) {

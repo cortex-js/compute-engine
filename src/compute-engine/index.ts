@@ -787,10 +787,35 @@ export class ComputeEngine implements IComputeEngine {
 
   private _recursionLimit: number = 1024;
 
-  /** Flag to prevent recursive verify() -> ask() -> verify() loops */
+  /**
+   * Flag to prevent infinite recursion in the verify/ask/equality checking cycle.
+   *
+   * **The Problem:**
+   * When verifying equality predicates, a recursion loop can occur:
+   * 1. `verify(Equal(x, 0))` evaluates the expression
+   * 2. `Equal.evaluate()` calls `eq(x, 0)` to check equality
+   * 3. `eq()` calls `ask(['NotEqual', x, 0])` to check assumptions
+   * 4. `ask()` calls `verify(NotEqual(x, 0))` as a fallback
+   * 5. `verify()` evaluates, calling `eq()` again → infinite loop
+   *
+   * **The Solution:**
+   * - Set `_isVerifying = true` when entering `verify()`
+   * - `ask()` skips the `verify()` fallback when `_isVerifying` is true
+   * - `Equal/NotEqual` evaluate handlers check this flag to preserve 3-valued
+   *   logic in verification mode while still returning False/True in normal mode
+   *
+   * @see verify() in index.ts
+   * @see ask() in index.ts
+   * @see eq() in compare.ts
+   * @see Equal/NotEqual operators in relational-operator.ts
+   */
   private _isVerifying: boolean = false;
 
-  /** @internal */
+  /**
+   * @internal
+   * Indicates whether we're currently inside a verify() call.
+   * Used to prevent recursion and to enable 3-valued logic in verification mode.
+   */
   get isVerifying(): boolean {
     return this._isVerifying;
   }
@@ -2340,7 +2365,11 @@ export class ComputeEngine implements IComputeEngine {
     // B3: For closed predicates (no wildcards), fall back to verify().
     // This makes `ask()` useful for "is this known?" queries even when the
     // fact is not explicitly stored in the assumptions DB (e.g. declarations).
-    // Skip this if we're already inside a verify() call to prevent infinite recursion.
+    //
+    // IMPORTANT: Skip this if we're already inside a verify() call to prevent
+    // infinite recursion. The recursion occurs when:
+    //   verify(Equal(x,0)) → Equal.evaluate() → eq() → ask(NotEqual(x,0)) → verify()
+    // By checking _isVerifying, we break this cycle.
     if (result.length === 0 && !patternHasWildcards(pat) && !this._isVerifying) {
       // Use the canonical form so symbol declarations/definitions are visible
       // to the evaluator.

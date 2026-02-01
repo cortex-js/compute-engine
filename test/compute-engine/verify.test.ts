@@ -47,5 +47,61 @@ describe('VERIFY', () => {
       undefined
     );
   });
+
+  // Regression tests for recursion bug (issue from 2026-02-01)
+  // Previously caused: RangeError: Maximum call stack size exceeded
+  // The bug was caused by: eq() → ask() → verify() → Equal.evaluate() → eq()
+  test('verify(Equal) does not cause stack overflow', () => {
+    const ce = new ComputeEngine();
+    // These should not cause infinite recursion
+    expect(ce.verify(ce.box(['Equal', 'x', 0]))).toBe(undefined);
+    expect(ce.verify(ce.box(['Equal', 'x', 1]))).toBe(undefined);
+    // Different symbols are not equal (they represent different entities)
+    expect(ce.verify(ce.box(['Equal', 'x', 'y']))).toBe(false);
+    // Same symbol is equal to itself
+    expect(ce.verify(ce.box(['Equal', 'x', 'x']))).toBe(true);
+  });
+
+  test('verify(NotEqual) does not cause stack overflow', () => {
+    const ce = new ComputeEngine();
+    // These should not cause infinite recursion
+    expect(ce.verify(ce.box(['NotEqual', 'x', 0]))).toBe(undefined);
+    expect(ce.verify(ce.box(['NotEqual', 'x', 1]))).toBe(undefined);
+    // Different symbols are not equal (so NotEqual is true)
+    expect(ce.verify(ce.box(['NotEqual', 'x', 'y']))).toBe(true);
+    // Same symbol is equal to itself (so NotEqual is false)
+    expect(ce.verify(ce.box(['NotEqual', 'x', 'x']))).toBe(false);
+  });
+
+  test('Equal/NotEqual use 3-valued logic in verification mode', () => {
+    const ce = new ComputeEngine();
+    // In verification mode, unknown comparisons should return undefined
+    expect(ce.verify(ce.box(['Equal', 'x', 0]))).toBe(undefined);
+    expect(ce.verify(ce.box(['NotEqual', 'x', 0]))).toBe(undefined);
+
+    // But when evaluated directly (not in verify), they return False/True
+    expect(ce.box(['Equal', 'x', 0]).evaluate().symbol).toBe('False');
+    expect(ce.box(['NotEqual', 'x', 0]).evaluate().symbol).toBe('True');
+  });
+
+  test('Less/Greater/LessEqual/GreaterEqual do not cause stack overflow', () => {
+    const ce = new ComputeEngine();
+    // These should not cause infinite recursion (they use cmp(), not eq())
+    expect(ce.verify(ce.box(['Less', 'x', 0]))).toBe(undefined);
+    expect(ce.verify(ce.box(['Greater', 'x', 0]))).toBe(undefined);
+    expect(ce.verify(ce.box(['LessEqual', 'x', 0]))).toBe(undefined);
+    expect(ce.verify(ce.box(['GreaterEqual', 'x', 0]))).toBe(undefined);
+  });
+
+  test('Less/Greater consistently return undefined for unknown comparisons', () => {
+    const ce = new ComputeEngine();
+    // Unlike Equal/NotEqual, inequality operators return undefined in both modes
+    // This is because inequalities are fundamentally different from equality
+    expect(ce.verify(ce.box(['Less', 'x', 0]))).toBe(undefined);
+    expect(ce.box(['Less', 'x', 0]).evaluate().operator).toBe('Less'); // Remains unevaluated
+
+    expect(ce.verify(ce.box(['Greater', 'x', 0]))).toBe(undefined);
+    expect(ce.box(['Greater', 'x', 0]).evaluate().operator).toBe('Less'); // Canonical form
+  });
 });
 

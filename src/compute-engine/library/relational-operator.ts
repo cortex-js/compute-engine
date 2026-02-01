@@ -149,9 +149,17 @@ export const RELOP_LIBRARY: SymbolDefinitions = {
         else {
           const test = eq(lhs, arg);
           if (test === false) return ce.False;
-          // In verification mode, preserve undefined for 3-valued logic
+
+          // Handle undefined (unknown) comparisons differently based on context:
+          //
+          // In verification mode (ce.isVerifying = true):
+          //   Return undefined to preserve 3-valued logic (true/false/unknown).
+          //   This is needed for verify() to correctly handle unprovable predicates.
+          //
+          // In normal evaluation mode:
+          //   Return False because Equal(x, 1) should evaluate to False when we
+          //   can't prove it's true. This matches expected behavior for equations.
           if (test === undefined && ce.isVerifying) return undefined;
-          // Outside verification mode, treat "can't prove true" as false
           if (test === undefined) return ce.False;
         }
       }
@@ -187,10 +195,19 @@ export const RELOP_LIBRARY: SymbolDefinitions = {
         else {
           const test = lhs.isEqual(arg);
           if (test === true) return ce.False;
-          // In verification mode, preserve undefined for 3-valued logic
+
+          // Handle undefined (unknown) comparisons differently based on context:
+          //
+          // In verification mode (ce.isVerifying = true):
+          //   Return undefined to preserve 3-valued logic.
+          //
+          // In normal evaluation mode:
+          //   Return True because NotEqual(x, 1) should evaluate to True when we
+          //   can't prove equality. This matches expected behavior (though note
+          //   this is not strictly correct three-valued logic - it's a pragmatic
+          //   choice for usability).
           if (test === undefined && ce.isVerifying) return undefined;
-          // Outside verification mode, treat "can't prove equal" as not equal
-          // (Note: this is not strictly correct logic, but matches expected behavior)
+          // Continue the loop - if all comparisons are not equal, return True
         }
       }
       return ce.True;

@@ -390,6 +390,30 @@ export class _Parser implements Parser {
     return this.error(msg, currentBoundary.index);
   }
 
+  /**
+   * Performance optimization: determines if we can skip expensive re-parsing
+   * for matchfix boundary mismatches.
+   *
+   * We skip re-parsing only for specific non-ambiguous cases where we know
+   * the boundary mismatch is due to trying interval notation on regular parens.
+   * For example, trying (] on input () - we can safely skip without re-parsing.
+   *
+   * All other cases (including |, [, and other delimiters) require re-parsing
+   * to handle nested delimiters correctly.
+   */
+  private canSkipMatchfixReparsing(
+    openTrigger: string | undefined,
+    boundary: LatexToken[],
+    sameTrigger: boolean
+  ): boolean {
+    return (
+      !sameTrigger && // Not same open/close (e.g., not ||)
+      boundary.length === 1 && // No prefix like \right
+      (openTrigger === '(' || openTrigger === '\\lparen') && // Only for (
+      (boundary[0] === ']' || boundary[0] === '\\rbrack') // Only when expecting ]
+    );
+  }
+
   latex(start: number, end?: number): string {
     return tokensToString(this._tokens.slice(start, end));
   }
@@ -463,29 +487,86 @@ export class _Parser implements Parser {
     if (this.atEnd) return [];
 
     const result: [IndexedLatexDictionaryEntry, number][] = [];
-    const defs = [...this.getDefs(kind)];
 
-    //
-    // Add any "universal" definitions (ones with an empty string for a trigger)
-    //
+    // Get the appropriate trigger index for this kind
+    let triggerIndex: Map<string, IndexedLatexDictionaryEntry[]> | undefined;
 
-    for (const def of defs) if (def.latexTrigger === '') result.push([def, 0]);
-
-    //
-    // Filter the definition matching the tokens ahead with a LaTeX trigger
-    //
-    for (const [n, tokens] of this.lookAhead()) {
-      for (const def of defs)
-        if (def.latexTrigger === tokens) result.push([def, n]);
+    switch (kind) {
+      case 'infix':
+        triggerIndex = this._dictionary.infixByTrigger;
+        break;
+      case 'prefix':
+        triggerIndex = this._dictionary.prefixByTrigger;
+        break;
+      case 'postfix':
+        triggerIndex = this._dictionary.postfixByTrigger;
+        break;
+      case 'function':
+        triggerIndex = this._dictionary.functionByTrigger;
+        break;
+      case 'symbol':
+        triggerIndex = this._dictionary.symbolByTrigger;
+        break;
+      case 'expression':
+        triggerIndex = this._dictionary.expressionByTrigger;
+        break;
+      case 'operator':
+        // 'operator' kind needs special handling - fall back to iteration
+        triggerIndex = undefined;
+        break;
     }
 
-    //
-    // Filter the definitions that match with a complex LaTeX symbol
-    //
-    for (const def of defs) {
-      if (def.symbolTrigger) {
-        const n = parseComplexId(this, def.symbolTrigger);
-        if (n > 0) result.push([def, n]);
+    if (triggerIndex) {
+      // OPTIMIZED PATH: Use trigger index for fast lookup
+
+      // Collect defs that need iteration (universal and symbolTrigger)
+      // Do this in a single pass to avoid multiple getDefs() calls
+      const defsNeedingIteration: IndexedLatexDictionaryEntry[] = [];
+      for (const def of this.getDefs(kind)) {
+        if (def.latexTrigger === '' || def.symbolTrigger) {
+          defsNeedingIteration.push(def);
+        }
+      }
+
+      // Add universal definitions (empty trigger)
+      for (const def of defsNeedingIteration) {
+        if (def.latexTrigger === '') result.push([def, 0]);
+      }
+
+      // Direct index lookup for latexTrigger matches - O(lookahead)
+      for (const [n, tokens] of this.lookAhead()) {
+        const defs = triggerIndex.get(tokens);
+        if (defs) {
+          for (const def of defs) result.push([def, n]);
+        }
+      }
+
+      // Process symbolTrigger defs
+      for (const def of defsNeedingIteration) {
+        if (def.symbolTrigger) {
+          const n = parseComplexId(this, def.symbolTrigger);
+          if (n > 0) result.push([def, n]);
+        }
+      }
+    } else {
+      // FALLBACK PATH: For 'operator' kind or if no index available
+      const defs = [...this.getDefs(kind)];
+
+      // Add universal definitions
+      for (const def of defs) if (def.latexTrigger === '') result.push([def, 0]);
+
+      // Match latexTrigger
+      for (const [n, tokens] of this.lookAhead()) {
+        for (const def of defs)
+          if (def.latexTrigger === tokens) result.push([def, n]);
+      }
+
+      // Match symbolTrigger
+      for (const def of defs) {
+        if (def.symbolTrigger) {
+          const n = parseComplexId(this, def.symbolTrigger);
+          if (n > 0) result.push([def, n]);
+        }
       }
     }
 
@@ -1513,15 +1594,7 @@ export class _Parser implements Parser {
           continue;
         }
 
-        // Performance optimization: skip re-parsing for specific non-ambiguous cases
-        // Only skip for ( and ) where we know interval notation failures are safe to skip
-        const canSkipReparsing =
-          !sameTrigger && // Not same open/close
-          boundary.length === 1 && // No prefix
-          (lookupToken === '(' || lookupToken === '\\lparen') && // Only for (
-          (boundary[0] === ']' || boundary[0] === '\\rbrack'); // Only when expecting interval close
-
-        if (!canSkipReparsing) {
+        if (!this.canSkipMatchfixReparsing(lookupToken, boundary, sameTrigger)) {
           // Re-parse without the boundary to handle ambiguous cases
           this.removeBoundary();
           this.index = bodyStart;

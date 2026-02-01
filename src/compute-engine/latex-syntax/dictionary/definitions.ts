@@ -226,6 +226,16 @@ export type IndexedLatexDictionary = {
   // Index of matchfix entries by their opening delimiter token
   // This allows fast lookup of which matchfix defs could match a given opening token
   matchfixByOpen: Map<string, IndexedMatchfixEntry[]>;
+
+  // Trigger-based indexes for fast operator lookup
+  // Maps latexTrigger string to definitions of each kind
+  // Reduces O(n*lookahead) to O(lookahead) for operator lookups
+  infixByTrigger: Map<string, IndexedInfixEntry[]>;
+  prefixByTrigger: Map<string, IndexedPrefixEntry[]>;
+  postfixByTrigger: Map<string, IndexedPostfixEntry[]>;
+  functionByTrigger: Map<string, IndexedFunctionEntry[]>;
+  symbolByTrigger: Map<string, IndexedSymbolEntry[]>;
+  expressionByTrigger: Map<string, IndexedExpressionEntry[]>;
 };
 
 //
@@ -351,6 +361,45 @@ function addEntry(
   }
 
   //
+  // 2.2 Update the trigger-based indexes for operators
+  //     Index entries by their latexTrigger for fast lookup
+  //
+  if (indexedEntry.latexTrigger && indexedEntry.latexTrigger !== '') {
+    const trigger = indexedEntry.latexTrigger;
+    let index: Map<string, any> | undefined;
+
+    switch (indexedEntry.kind) {
+      case 'infix':
+        index = result.infixByTrigger;
+        break;
+      case 'prefix':
+        index = result.prefixByTrigger;
+        break;
+      case 'postfix':
+        index = result.postfixByTrigger;
+        break;
+      case 'function':
+        index = result.functionByTrigger;
+        break;
+      case 'symbol':
+        index = result.symbolByTrigger;
+        break;
+      case 'expression':
+        index = result.expressionByTrigger;
+        break;
+    }
+
+    if (index) {
+      const existing = index.get(trigger);
+      if (existing) {
+        existing.unshift(indexedEntry as any); // Prepend - maintain reverse order
+      } else {
+        index.set(trigger, [indexedEntry as any]);
+      }
+    }
+  }
+
+  //
   // 3. Update the name index
   //    This is an index of MathJSON symbols to dictionary entries
   //
@@ -381,6 +430,12 @@ export function indexLatexDictionary(
     ids: new Map(),
     defs: [],
     matchfixByOpen: new Map(),
+    infixByTrigger: new Map(),
+    prefixByTrigger: new Map(),
+    postfixByTrigger: new Map(),
+    functionByTrigger: new Map(),
+    symbolByTrigger: new Map(),
+    expressionByTrigger: new Map(),
   };
 
   for (const entry of dic)
