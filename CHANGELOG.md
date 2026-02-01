@@ -2,6 +2,36 @@
 
 ### Improvements
 
+- **Interval Notation Parsing**: Added support for parsing mathematical interval
+  notation from LaTeX, including half-open intervals. Addresses #254.
+
+  ```javascript
+  // Half-open intervals (American notation)
+  ce.parse('[3, 4)').json;   // → ["Interval", 3, ["Open", 4]]
+  ce.parse('(3, 4]').json;   // → ["Interval", ["Open", 3], 4]
+
+  // Open intervals (ISO/European notation)
+  ce.parse(']3, 4[').json;   // → ["Interval", ["Open", 3], ["Open", 4]]
+
+  // LaTeX bracket commands
+  ce.parse('\\lbrack 3, 4\\rparen').json;  // → ["Interval", 3, ["Open", 4]]
+  ```
+
+  **Contextual Parsing**: Lists and tuples are automatically converted to
+  intervals when used in set contexts (Element, Union, Intersection, etc.):
+
+  ```javascript
+  ce.parse('x \\in [0, 1]').json;
+  // → ["Element", "x", ["Interval", 0, 1]]
+
+  ce.parse('[0, 1] \\cup [2, 3]').json;
+  // → ["Union", ["Interval", 0, 1], ["Interval", 2, 3]]
+
+  // Standalone notation remains backward compatible
+  ce.parse('[0, 1]').json;  // → ["List", 0, 1]
+  ce.parse('(0, 1)').json;  // → ["Tuple", 0, 1]
+  ```
+
 - **Absolute Value Power Simplification**: Fixed simplification of `|x^n|`
   expressions with even and rational exponents. Previously, expressions like
   `|x²|` and `|x^{2/3}|` were not simplified. Now they correctly simplify

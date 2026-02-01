@@ -26,7 +26,24 @@ describe('SERIALIZING SETS', () => {
 
   // test('Range', () => {});
 
-  // test('Interval', () => {});
+  test('Interval serialization', () => {
+    // Closed interval [a, b]
+    expect(latex(['Interval', 3, 4])).toMatchInlineSnapshot(
+      `\\lbrack3, 4\\rbrack`
+    );
+    // Open-closed interval (a, b]
+    expect(latex(['Interval', ['Open', 3], 4])).toMatchInlineSnapshot(
+      `\\lparen3, 4\\rbrack`
+    );
+    // Closed-open interval [a, b)
+    expect(latex(['Interval', 3, ['Open', 4]])).toMatchInlineSnapshot(
+      `\\lbrack3, 4\\rparen`
+    );
+    // Open interval (a, b)
+    expect(latex(['Interval', ['Open', 3], ['Open', 4]])).toMatchInlineSnapshot(
+      `\\lparen3, 4\\rparen`
+    );
+  });
 
   test('Multiple', () => {
     expect(latex(['Multiple', 'Integers'])).toMatchInlineSnapshot(``);
@@ -73,6 +90,212 @@ describe('SERIALIZING SETS', () => {
   //     `\\mathrm{CartesianPower}(\\Z, n)`
   //   );
   // });
+});
+
+describe('PARSING INTERVALS', () => {
+  // Issue #254: Interval notation parsing from MathLive
+
+  it('should parse half-open intervals with mismatched brackets', () => {
+    // [a, b) - closed-open (American notation)
+    expect(parse('[3, 4)').json).toMatchInlineSnapshot(`
+      [
+        Interval,
+        3,
+        [
+          Open,
+          4,
+        ],
+      ]
+    `);
+
+    // (a, b] - open-closed (American notation)
+    expect(parse('(3, 4]').json).toMatchInlineSnapshot(`
+      [
+        Interval,
+        [
+          Open,
+          3,
+        ],
+        4,
+      ]
+    `);
+  });
+
+  it('should parse intervals with ISO/European reversed bracket notation', () => {
+    // ]a, b[ - open interval (ISO notation)
+    // This uses reversed brackets which are unambiguous
+    expect(parse(']3, 4[').json).toMatchInlineSnapshot(`
+      [
+        Interval,
+        [
+          Open,
+          3,
+        ],
+        [
+          Open,
+          4,
+        ],
+      ]
+    `);
+
+    // Note: [a, b[ and ]a, b] are NOT supported with plain brackets because
+    // they conflict with nested list parsing. Use American notation instead:
+    // [a, b) for closed-open, (a, b] for open-closed
+  });
+
+  it('should parse intervals with LaTeX bracket commands', () => {
+    // Using \lbrack and \rparen
+    expect(parse('\\lbrack 3, 4\\rparen').json).toMatchInlineSnapshot(`
+      [
+        Interval,
+        3,
+        [
+          Open,
+          4,
+        ],
+      ]
+    `);
+
+    // Using \lparen and \rbrack
+    expect(parse('\\lparen 3, 4\\rbrack').json).toMatchInlineSnapshot(`
+      [
+        Interval,
+        [
+          Open,
+          3,
+        ],
+        4,
+      ]
+    `);
+  });
+
+  it('should parse intervals with \\mathopen and \\mathclose', () => {
+    // Using \mathopen and \mathclose with brackets (as Range serializes)
+    expect(parse('\\mathopen\\lbrack 3, 4\\mathclose\\rbrack').json)
+      .toMatchInlineSnapshot(`
+      [
+        List,
+        3,
+        4,
+      ]
+    `);
+
+    // Using \mathopen and \mathclose for half-open interval
+    expect(parse('\\mathopen\\lbrack 3, 4\\mathclose\\rparen').json)
+      .toMatchInlineSnapshot(`
+      [
+        Interval,
+        3,
+        [
+          Open,
+          4,
+        ],
+      ]
+    `);
+
+    // Using \mathopen and \mathclose with parentheses
+    expect(parse('\\mathopen( 3, 4\\mathclose)').json).toMatchInlineSnapshot(`
+      [
+        Tuple,
+        3,
+        4,
+      ]
+    `);
+  });
+
+  it('should parse intervals with expressions as endpoints', () => {
+    // Variables
+    expect(parse('[x, y)').json).toMatchInlineSnapshot(`
+      [
+        Interval,
+        x,
+        [
+          Open,
+          y,
+        ],
+      ]
+    `);
+
+    // Expressions
+    expect(parse('(a+b, c-d]').json).toMatchInlineSnapshot(`
+      [
+        Interval,
+        [
+          Open,
+          [
+            Add,
+            a,
+            b,
+          ],
+        ],
+        [
+          Add,
+          c,
+          [
+            Negate,
+            d,
+          ],
+        ],
+      ]
+    `);
+  });
+
+  it('should parse intervals with infinity', () => {
+    // [0, +∞)
+    expect(parse('[0, +\\infty)').json).toMatchInlineSnapshot(`
+      [
+        Interval,
+        0,
+        [
+          Open,
+          PositiveInfinity,
+        ],
+      ]
+    `);
+
+    // (-∞, 0]
+    expect(parse('(-\\infty, 0]').json).toMatchInlineSnapshot(`
+      [
+        Interval,
+        [
+          Open,
+          [
+            Negate,
+            PositiveInfinity,
+          ],
+        ],
+        0,
+      ]
+    `);
+  });
+
+  it('should maintain backward compatibility for matched brackets', () => {
+    // [a, b] should remain a List (not an interval)
+    expect(parse('[3, 4]').json).toMatchInlineSnapshot(`
+      [
+        List,
+        3,
+        4,
+      ]
+    `);
+
+    // (a, b) should remain a Tuple (not an interval)
+    expect(parse('(3, 4)').json).toMatchInlineSnapshot(`
+      [
+        Tuple,
+        3,
+        4,
+      ]
+    `);
+  });
+
+  it('should reject invalid interval bodies', () => {
+    // Single element - not valid for interval, falls back to other parsing
+    expect(parse('[3)').json).not.toHaveProperty('0', 'Interval');
+
+    // Three elements - not valid for interval
+    expect(parse('[3, 4, 5)').json).not.toHaveProperty('0', 'Interval');
+  });
 });
 
 // describe('PARSING SETS', () => {

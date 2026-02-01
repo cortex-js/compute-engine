@@ -16,6 +16,57 @@ import {
   COMPARISON_PRECEDENCE,
 } from '../types';
 
+/**
+ * Parse the body of an interval expression and create an Interval MathJSON expression.
+ *
+ * @param body - The parsed body between the delimiters (typically a Delimiter with comma separator)
+ * @param openLeft - If true, the left endpoint is open (excluded)
+ * @param openRight - If true, the right endpoint is open (excluded)
+ * @returns An Interval expression or null if the body doesn't have exactly 2 elements
+ */
+function parseIntervalBody(
+  body: Expression,
+  openLeft: boolean,
+  openRight: boolean
+): Expression | null {
+  // Handle empty body
+  if (isEmptySequence(body)) return null;
+
+  // Extract the two endpoints from the body
+  // The body is typically a Delimiter with a comma separator: ["Delimiter", ["Sequence", a, b], ","]
+  // or just a Sequence: ["Sequence", a, b]
+  let elements: Expression[];
+
+  const h = operator(body);
+  if (h === 'Delimiter') {
+    const delim = stringValue(operand(body, 2));
+    // Must be comma-separated
+    if (delim !== ',' && delim !== '(,)' && delim !== '[,]') return null;
+    const inner = operand(body, 1);
+    if (operator(inner) === 'Sequence') {
+      elements = [...operands(inner)];
+    } else {
+      elements = inner ? [inner] : [];
+    }
+  } else if (h === 'Sequence') {
+    elements = [...operands(body)];
+  } else {
+    // Single element - not valid for interval
+    return null;
+  }
+
+  // Intervals must have exactly two endpoints
+  if (elements.length !== 2) return null;
+
+  const [lower, upper] = elements;
+
+  // Build the Interval expression with Open wrappers for open endpoints
+  const lowerExpr: Expression = openLeft ? ['Open', lower] : lower;
+  const upperExpr: Expression = openRight ? ['Open', upper] : upper;
+
+  return ['Interval', lowerExpr, upperExpr];
+}
+
 export const DEFINITIONS_SETS: LatexDictionary = [
   //
   // Constants
@@ -184,9 +235,96 @@ export const DEFINITIONS_SETS: LatexDictionary = [
   },
   {
     name: 'Interval',
-    // @todo: parse opening '[' or ']' or '('
     serialize: serializeSet,
   },
+
+  //
+  // Interval Parsing - Half-open intervals with mismatched brackets
+  //
+  // These matchfix entries handle interval notations where the opening and closing
+  // delimiters differ, indicating open vs closed endpoints.
+  //
+
+  // [a, b) - Closed-open interval (American notation)
+  {
+    kind: 'matchfix',
+    openTrigger: ['['],
+    closeTrigger: [')'],
+    parse: (_parser: Parser, body: Expression): Expression | null =>
+      parseIntervalBody(body, false, true),
+  },
+  {
+    kind: 'matchfix',
+    openTrigger: ['\\lbrack'],
+    closeTrigger: ['\\rparen'],
+    parse: (_parser: Parser, body: Expression): Expression | null =>
+      parseIntervalBody(body, false, true),
+  },
+  {
+    kind: 'matchfix',
+    openTrigger: ['\\lbrack'],
+    closeTrigger: [')'],
+    parse: (_parser: Parser, body: Expression): Expression | null =>
+      parseIntervalBody(body, false, true),
+  },
+  {
+    kind: 'matchfix',
+    openTrigger: ['['],
+    closeTrigger: ['\\rparen'],
+    parse: (_parser: Parser, body: Expression): Expression | null =>
+      parseIntervalBody(body, false, true),
+  },
+
+  // (a, b] - Open-closed interval (American notation)
+  {
+    kind: 'matchfix',
+    openTrigger: ['('],
+    closeTrigger: [']'],
+    parse: (_parser: Parser, body: Expression): Expression | null =>
+      parseIntervalBody(body, true, false),
+  },
+  {
+    kind: 'matchfix',
+    openTrigger: ['\\lparen'],
+    closeTrigger: ['\\rbrack'],
+    parse: (_parser: Parser, body: Expression): Expression | null =>
+      parseIntervalBody(body, true, false),
+  },
+  {
+    kind: 'matchfix',
+    openTrigger: ['\\lparen'],
+    closeTrigger: [']'],
+    parse: (_parser: Parser, body: Expression): Expression | null =>
+      parseIntervalBody(body, true, false),
+  },
+  {
+    kind: 'matchfix',
+    openTrigger: ['('],
+    closeTrigger: ['\\rbrack'],
+    parse: (_parser: Parser, body: Expression): Expression | null =>
+      parseIntervalBody(body, true, false),
+  },
+
+  // ]a, b[ - Open interval (ISO/European reversed bracket notation)
+  {
+    kind: 'matchfix',
+    openTrigger: [']'],
+    closeTrigger: ['['],
+    parse: (_parser: Parser, body: Expression): Expression | null =>
+      parseIntervalBody(body, true, true),
+  },
+  {
+    kind: 'matchfix',
+    openTrigger: ['\\rbrack'],
+    closeTrigger: ['\\lbrack'],
+    parse: (_parser: Parser, body: Expression): Expression | null =>
+      parseIntervalBody(body, true, true),
+  },
+
+  // Note: ISO notation ]a, b] (open-closed) and [a, b[ (closed-open) are NOT
+  // supported with plain brackets because they conflict with nested list parsing.
+  // Use the American notation (a, b] and [a, b) instead, or use explicit
+  // commands like \rbrack a, b \rbrack which are unambiguous.
   {
     name: 'Multiple',
     // @todo: parse
@@ -467,12 +605,17 @@ function serializeSet(
       op2 = operand(op2, 1);
       openRight = true;
     }
+    // Use American notation for interval serialization:
+    // [a, b] closed, (a, b) open, [a, b) closed-open, (a, b] open-closed
+    // This enables round-trip parsing for half-open intervals.
+    // Note: [a, b] and (a, b) will parse back as List/Tuple respectively
+    // due to backward compatibility constraints.
     return joinLatex([
-      `\\mathopen${openLeft ? '\\rbrack' : '\\lbrack'}`,
+      openLeft ? '\\lparen' : '\\lbrack',
       serializer.serialize(op1),
       ', ',
       serializer.serialize(op2),
-      `\\mathclose${openRight ? '\\lbrack' : '\\rbrack'}`,
+      openRight ? '\\rparen' : '\\rbrack',
     ]);
   }
 

@@ -86,6 +86,17 @@ describe('MATCHFIX synonyms', () => {
       box       = ["Delimiter", ["Sequence", "a", "b", "c"], "(,)"]
       canonical = ["Triple", "a", "b", "c"]
     `));
+  test('\\mathopen(a, b, c\\mathclose)', () =>
+    expect(check(`\\mathopen(a, b, c\\mathclose)`)).toMatchInlineSnapshot(`
+      box       = ["Delimiter", ["Sequence", "a", "b", "c"], "(,)"]
+      canonical = ["Triple", "a", "b", "c"]
+    `));
+  test('\\mathopen\\lparen a, b, c\\mathclose\\rparen', () =>
+    expect(check(`\\mathopen\\lparen a, b, c\\mathclose\\rparen`))
+      .toMatchInlineSnapshot(`
+      box       = ["Delimiter", ["Sequence", "a", "b", "c"], "(,)"]
+      canonical = ["Triple", "a", "b", "c"]
+    `));
 });
 
 describe('MATCHFIX abs and norm', () => {
