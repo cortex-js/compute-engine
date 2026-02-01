@@ -3691,6 +3691,15 @@ export interface ComputeEngine extends IBigNum {
     value: BoxedExpression | boolean | number | undefined
   ): void;
 
+  /**
+   * Set a value directly in the current context's values map.
+   * Used for assumptions so values are properly scoped.
+   * @internal */
+  _setCurrentContextValue(
+    id: MathJsonSymbol,
+    value: BoxedExpression | boolean | number | undefined
+  ): void;
+
   /** A list of the function calls to the current evaluation context */
   trace: ReadonlyArray<string>;
 

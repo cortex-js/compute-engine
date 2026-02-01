@@ -20,6 +20,34 @@ import { MathJsonSymbol } from '../math-json';
 import { isInequalityOperator } from './latex-syntax/utils';
 
 /**
+ * Infer a promoted type from a value expression.
+ * This promotes specific types to more general ones suitable for symbols:
+ * - finite_integer -> integer
+ * - rational -> real
+ * - finite_real_number -> real
+ * - complex/imaginary -> number
+ */
+function inferTypeFromValue(ce: ComputeEngine, value: BoxedExpression): BoxedType {
+  if (value.type.matches('integer')) {
+    // finite_integer, integer, etc. -> integer
+    return ce.type('integer');
+  }
+  if (value.type.matches('rational')) {
+    // rational -> real
+    return ce.type('real');
+  }
+  if (value.type.matches('real')) {
+    // finite_real_number, real -> real
+    return ce.type('real');
+  }
+  if (value.type.matches('complex')) {
+    // complex, imaginary -> number
+    return ce.type('number');
+  }
+  return value.type;
+}
+
+/**
  * An assumption is a predicate that is added to the current context.
  *
  * The predicate can take the form of:
@@ -235,8 +263,13 @@ function assumeEquality(proposition: BoxedExpression): AssumeResult {
     if (def.value.type && !val.type.matches(def.value.type))
       if (!def.value.inferredType) return 'contradiction';
 
-    // def.symbol.value = val;
-    // if (def.symbol.inferredType) def.symbol.type = val.type;
+    // Set the value for the symbol with an existing definition.
+    // Use _setCurrentContextValue so the value is scoped to the current context
+    // and will be automatically removed when the scope is popped.
+    ce._setCurrentContextValue(lhs, val);
+    // If the type was inferred, update it based on the value.
+    // Use inferTypeFromValue to promote specific types (e.g., finite_integer -> integer)
+    if (def.value.inferredType) def.value.type = inferTypeFromValue(ce, val);
     return 'ok';
   }
 
@@ -262,7 +295,13 @@ function assumeEquality(proposition: BoxedExpression): AssumeResult {
       !sols.every((sol) => !sol.type || val.type.matches(sol.type))
     )
       return 'contradiction';
-    // def.symbol.value = val;
+    // Set the value for the symbol with an existing definition.
+    // Use _setCurrentContextValue so the value is scoped to the current context
+    // and will be automatically removed when the scope is popped.
+    ce._setCurrentContextValue(lhs, val);
+    // If the type was inferred, update it based on the value.
+    // Use inferTypeFromValue to promote specific types (e.g., finite_integer -> integer)
+    if (def.value.inferredType) def.value.type = inferTypeFromValue(ce, val);
     return 'ok';
   }
 
@@ -355,10 +394,139 @@ function assumeInequality(proposition: BoxedExpression): AssumeResult {
   const unknowns = result.unknowns;
   if (unknowns.length === 0) return 'not-a-predicate';
 
-  // Case 3
+  // Check if the new inequality is implied by or contradicts existing bounds
+  // (for single-symbol inequalities)
   if (unknowns.length === 1) {
-    if (!ce.lookupDefinition(unknowns[0]))
-      ce.declare(unknowns[0], { type: 'real' });
+    const symbol = unknowns[0];
+    const bounds = getInequalityBoundsFromAssumptions(ce, symbol);
+
+    // The normalized form is Less(p, 0) or LessEqual(p, 0) where p = lhs - rhs
+    // For a simple symbol case like "x > k", this becomes Less(-x + k, 0) meaning k - x < 0, i.e., x > k
+    // For "x < k", this becomes Less(x - k, 0) meaning x - k < 0, i.e., x < k
+
+    // Check if this is a simple "symbol > value" or "symbol < value" case
+    const originalOp = proposition.operator;
+    const isSymbolOnLeft = proposition.op1.symbol === symbol;
+    const otherSide = isSymbolOnLeft ? proposition.op2 : proposition.op1;
+
+    // Only do bounds checking for simple comparisons like "x > k" where k is numeric
+    if (otherSide.numericValue !== null) {
+      const k = otherSide.numericValue;
+
+      if (typeof k === 'number' && isFinite(k)) {
+        // Determine the EFFECTIVE relationship based on operator and symbol position
+        // Less(a, b) means a < b:
+        //   - if a is symbol: symbol < b, effective is "less"
+        //   - if b is symbol: a < symbol, so symbol > a, effective is "greater"
+        // Greater(a, b) means a > b:
+        //   - if a is symbol: symbol > b, effective is "greater"
+        //   - if b is symbol: a > symbol, so symbol < a, effective is "less"
+        let effectiveOp: 'greater' | 'greaterEqual' | 'less' | 'lessEqual';
+        if (originalOp === 'Greater') {
+          effectiveOp = isSymbolOnLeft ? 'greater' : 'less';
+        } else if (originalOp === 'GreaterEqual') {
+          effectiveOp = isSymbolOnLeft ? 'greaterEqual' : 'lessEqual';
+        } else if (originalOp === 'Less') {
+          effectiveOp = isSymbolOnLeft ? 'less' : 'greater';
+        } else {
+          // LessEqual
+          effectiveOp = isSymbolOnLeft ? 'lessEqual' : 'greaterEqual';
+        }
+
+        // Check for tautologies and contradictions based on existing bounds
+        if (effectiveOp === 'greater' || effectiveOp === 'greaterEqual') {
+          // We're asserting symbol > k or symbol >= k
+          const isStrict = effectiveOp === 'greater';
+
+          if (bounds.lowerBound !== undefined) {
+            const lowerVal = bounds.lowerBound.numericValue;
+            if (typeof lowerVal === 'number' && isFinite(lowerVal)) {
+              // We already know symbol > lowerVal (or >=)
+              if (isStrict) {
+                // Assuming symbol > k: tautology if existing lower bound implies this
+                // If lowerVal > k, then symbol > lowerVal > k, so symbol > k (tautology)
+                // If lowerVal == k and bound is strict, then symbol > lowerVal = k (tautology)
+                if (lowerVal > k) return 'tautology';
+                if (bounds.lowerStrict && lowerVal >= k) return 'tautology';
+              } else {
+                // Assuming symbol >= k: tautology if lowerVal >= k (with strict bound) or lowerVal > k
+                if (lowerVal > k) return 'tautology';
+                if (bounds.lowerStrict && lowerVal >= k) return 'tautology';
+                if (!bounds.lowerStrict && lowerVal >= k) return 'tautology';
+              }
+            }
+          }
+
+          if (bounds.upperBound !== undefined) {
+            const upperVal = bounds.upperBound.numericValue;
+            if (typeof upperVal === 'number' && isFinite(upperVal)) {
+              // We know symbol < upperVal (or <=), now checking symbol > k
+              if (isStrict) {
+                // Contradiction if upperVal <= k
+                if (upperVal < k) return 'contradiction';
+                if (bounds.upperStrict && upperVal <= k) return 'contradiction';
+                if (!bounds.upperStrict && upperVal <= k) return 'contradiction';
+              } else {
+                // symbol >= k: contradiction if upperVal < k
+                if (upperVal < k) return 'contradiction';
+                if (bounds.upperStrict && upperVal <= k) return 'contradiction';
+              }
+            }
+          }
+        } else {
+          // effectiveOp is 'less' or 'lessEqual'
+          // We're asserting symbol < k or symbol <= k
+          const isStrict = effectiveOp === 'less';
+
+          if (bounds.upperBound !== undefined) {
+            const upperVal = bounds.upperBound.numericValue;
+            if (typeof upperVal === 'number' && isFinite(upperVal)) {
+              // We already know symbol < upperVal (or <=)
+              if (isStrict) {
+                // Assuming symbol < k: tautology if existing upper bound implies this
+                if (upperVal < k) return 'tautology';
+                if (bounds.upperStrict && upperVal <= k) return 'tautology';
+              } else {
+                // symbol <= k: tautology if upperVal <= k
+                if (upperVal < k) return 'tautology';
+                if (upperVal <= k) return 'tautology';
+              }
+            }
+          }
+
+          if (bounds.lowerBound !== undefined) {
+            const lowerVal = bounds.lowerBound.numericValue;
+            if (typeof lowerVal === 'number' && isFinite(lowerVal)) {
+              // We know symbol > lowerVal (or >=), now checking symbol < k
+              if (isStrict) {
+                // Contradiction if lowerVal >= k
+                if (lowerVal > k) return 'contradiction';
+                if (bounds.lowerStrict && lowerVal >= k) return 'contradiction';
+                if (!bounds.lowerStrict && lowerVal >= k) return 'contradiction';
+              } else {
+                // symbol <= k: contradiction if lowerVal > k
+                if (lowerVal > k) return 'contradiction';
+                if (bounds.lowerStrict && lowerVal > k) return 'contradiction';
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+
+  // Case 3: single unknown - ensure the symbol has type 'real'
+  // (inequalities imply the symbol is a real number)
+  if (unknowns.length === 1) {
+    const symbol = unknowns[0];
+    const def = ce.lookupDefinition(symbol);
+    if (!def) {
+      // Symbol not defined yet - declare with type 'real'
+      ce.declare(symbol, { type: 'real' });
+    } else if (isValueDef(def) && def.value.inferredType) {
+      // Symbol was auto-declared with inferred type - update to 'real'
+      def.value.type = ce.type('real');
+    }
   }
 
   // Case 3, 4
@@ -562,4 +730,149 @@ export function getSignFromAssumptions(
   }
 
   return undefined;
+}
+
+/**
+ * Get inequality bounds for a symbol from the assumption database.
+ *
+ * For example, if `x > 4` is assumed, this returns `{ lowerBound: 4, lowerStrict: true }`.
+ * If `x <= 10` is assumed, this returns `{ upperBound: 10, upperStrict: false }`.
+ *
+ * Note: Assumptions are normalized to forms like:
+ * - `x > 4` becomes `Less(Add(Negate(x), 4), 0)` i.e., `4 - x < 0`
+ * - `x > 0` becomes `Less(Negate(x), 0)` i.e., `-x < 0`
+ *
+ * @param ce - The compute engine instance
+ * @param symbol - The symbol name to query
+ * @returns An object with lowerBound, upperBound, and strictness flags
+ */
+export function getInequalityBoundsFromAssumptions(
+  ce: ComputeEngine,
+  symbol: string
+): {
+  lowerBound?: BoxedExpression;
+  lowerStrict?: boolean;
+  upperBound?: BoxedExpression;
+  upperStrict?: boolean;
+} {
+  const result: {
+    lowerBound?: BoxedExpression;
+    lowerStrict?: boolean;
+    upperBound?: BoxedExpression;
+    upperStrict?: boolean;
+  } = {};
+
+  const assumptions = ce.context?.assumptions;
+  if (!assumptions) return result;
+
+  for (const [assumption, _] of assumptions.entries()) {
+    const op = assumption.operator;
+    if (!op) continue;
+
+    // Assumptions are normalized to Less or LessEqual with RHS = 0
+    if (op !== 'Less' && op !== 'LessEqual') continue;
+
+    const ops = assumption.ops;
+    if (!ops || ops.length !== 2) continue;
+
+    const [lhs, rhs] = ops;
+
+    // RHS should be 0 for normalized assumptions
+    if (!rhs.is(0)) continue;
+
+    const isStrict = op === 'Less';
+
+    // Case 1: Negate(symbol) < 0 => -symbol < 0 => symbol > 0
+    // This gives us a lower bound of 0
+    if (lhs.operator === 'Negate' && lhs.op1?.symbol === symbol) {
+      const bound = ce.Zero;
+      if (
+        result.lowerBound === undefined ||
+        bound.isGreater(result.lowerBound) === true
+      ) {
+        result.lowerBound = bound;
+        result.lowerStrict = isStrict;
+      }
+    }
+
+    // Case 2: Add(Negate(symbol), k) < 0 => k - symbol < 0 => symbol > k
+    // This gives us a lower bound of k
+    if (lhs.operator === 'Add' && lhs.ops) {
+      let hasNegatedSymbol = false;
+      let constantSum = 0;
+
+      for (const term of lhs.ops) {
+        if (term.operator === 'Negate' && term.op1?.symbol === symbol) {
+          hasNegatedSymbol = true;
+        } else if (term.isNumberLiteral) {
+          const val =
+            typeof term.numericValue === 'number'
+              ? term.numericValue
+              : term.numericValue?.re;
+          if (val !== undefined && Number.isFinite(val)) {
+            constantSum += val;
+          }
+        }
+      }
+
+      if (hasNegatedSymbol && constantSum !== 0) {
+        // k - symbol < 0 => symbol > k
+        const bound = ce.box(constantSum);
+        if (
+          result.lowerBound === undefined ||
+          bound.isGreater(result.lowerBound) === true
+        ) {
+          result.lowerBound = bound;
+          result.lowerStrict = isStrict;
+        }
+      }
+    }
+
+    // Case 3: symbol < 0 => symbol has upper bound 0
+    if (lhs.symbol === symbol) {
+      const bound = ce.Zero;
+      if (
+        result.upperBound === undefined ||
+        bound.isLess(result.upperBound) === true
+      ) {
+        result.upperBound = bound;
+        result.upperStrict = isStrict;
+      }
+    }
+
+    // Case 4: Add(symbol, k) < 0 => symbol + k < 0 => symbol < -k
+    // This gives us an upper bound of -k
+    if (lhs.operator === 'Add' && lhs.ops) {
+      let hasSymbol = false;
+      let constantSum = 0;
+
+      for (const term of lhs.ops) {
+        if (term.symbol === symbol) {
+          hasSymbol = true;
+        } else if (term.isNumberLiteral) {
+          const val =
+            typeof term.numericValue === 'number'
+              ? term.numericValue
+              : term.numericValue?.re;
+          if (val !== undefined && Number.isFinite(val)) {
+            constantSum += val;
+          }
+        }
+      }
+
+      if (hasSymbol && constantSum !== 0) {
+        // symbol + k < 0 => symbol < -k
+        const bound = ce.box(-constantSum);
+        if (
+          result.upperBound === undefined ||
+          bound.isLess(result.upperBound) === true
+        ) {
+          result.upperBound = bound;
+          result.upperStrict = isStrict;
+        }
+      }
+    }
+  }
+
+  return result;
 }

@@ -34,35 +34,9 @@ output.
 
 ---
 
-### 3. Pattern Matching Improvements
+### ~~3. Pattern Matching Improvements~~ ✅ COMPLETED
 
-**Problem:** Some integration patterns don't match because the pattern matching
-system has limitations with:
-
-- Same wildcard appearing multiple times (should match same expression)
-- Matching against canonicalized expressions that have been reordered
-- Complex nested patterns
-
-**Example that doesn't work:**
-
-```typescript
-// Trying to match 1/(x*ln(x)) where x appears twice
-{
-  match: ['Divide', 1, ['Multiply', '_x', ['Ln', '_x']]],
-  replace: ['Ln', ['Ln', '_x']],
-}
-```
-
-**Investigation needed:**
-
-- Review `src/compute-engine/boxed-expression/match.ts`
-- Understand how wildcard binding works
-- Consider adding "same as" constraints: `_x@1` and `_x@1` must match same expr
-
-**Files:**
-
-- `src/compute-engine/boxed-expression/match.ts`
-- `src/compute-engine/symbolic/antiderivative.ts`
+See `requirements/DONE.md` for implementation details.
 
 ---
 
@@ -371,50 +345,9 @@ alternatives.
 
 ## Equation Solving Enhancements
 
-### 14. Extraneous Root Filtering for Sqrt Equations
+### ~~14. Extraneous Root Filtering for Sqrt Equations~~ ✅ COMPLETED
 
-**Problem:** The sqrt equation solver uses quadratic substitution (u = √x, solve
-au² + bu + c = 0, then x = u²). This can produce extraneous roots that don't
-satisfy the original equation.
-
-**Example:**
-
-```
-x - 4√x + 3 = 0
-Substitution: u² - 4u + 3 = 0 → u = 1, 3
-Back-substitute: x = 1, 9
-Verify: 1 - 4(1) + 3 = 0 ✓, 9 - 4(3) + 3 = 0 ✓ (both valid in this case)
-
-But for x + 2√x + 3 = 0:
-u² + 2u + 3 = 0 → u = -1 ± √2i (complex)
-x = u² might give real values that don't satisfy original
-```
-
-**Current behavior:** Returns both roots from the quadratic formula without
-validation.
-
-**Solution:** Add a verification step in `validateRoots()` that:
-
-1. Substitutes each candidate solution back into the original equation
-2. Checks if it evaluates to 0 (within tolerance)
-3. Filters out solutions that don't satisfy
-
-**Implementation location:** The existing `validateRoots()` function in
-`solve.ts` already does this, but it's called with the wrong expression. Need to
-ensure the original (pre-harmonization) expression is used for validation.
-
-**Test case to add:**
-
-```typescript
-// Should return [1] not [1, 9] if 9 is extraneous
-test('should filter extraneous sqrt roots', () => {
-  const e = expr('\\sqrt{x} - x + 2 = 0');  // Only x=1 is valid
-  const result = e.solve('x');
-  // Verify each solution satisfies the original equation
-});
-```
-
-**File:** `src/compute-engine/boxed-expression/solve.ts`
+See `requirements/DONE.md` for implementation details.
 
 ---
 
@@ -600,186 +533,39 @@ test('isotope notation', () => {
 The following improvements extend the assumption system beyond sign-based
 simplification (which is already implemented).
 
-### 18. Value Resolution from Equality Assumptions
+### ~~18. Value Resolution from Equality Assumptions~~ ✅ COMPLETED
 
-**Problem:** When `ce.assume(['Equal', 'one', 1])` is made, subsequent uses of
-`one` should evaluate to `1`, but currently the symbol remains unevaluated.
-
-**Current behavior:**
-
-```typescript
-ce.assume(ce.box(['Equal', 'one', 1]));
-ce.box('one').evaluate().json  // Returns: "one" (unchanged)
-ce.box(['Equal', 'one', 1]).evaluate().json  // Returns: ["Equal", "one", 1] (not "True")
-```
-
-**Expected behavior:**
-
-```typescript
-ce.assume(ce.box(['Equal', 'one', 1]));
-ce.box('one').evaluate().json  // Should return: 1
-ce.box(['Equal', 'one', 1]).evaluate().json  // Should return: "True"
-ce.box(['Equal', 'one', 0]).evaluate().json  // Should return: "False"
-```
-
-**Implementation notes:**
-
-- Equality assumptions should effectively assign a value to the symbol
-- This is different from `ce.assign()` which directly sets the value
-- The assumption system stores the equality but doesn't currently use it during
-  evaluation
-- May need to modify `BoxedSymbol.value` getter to check equality assumptions
-
-**Files to investigate:**
-
-- `src/compute-engine/assume.ts` - Where assumptions are stored
-- `src/compute-engine/boxed-expression/boxed-symbol.ts` - Symbol value
-  resolution
-- `src/compute-engine/library/relational-operator.ts` - Equal/NotEqual
-  evaluation
-
-**Tests:** `test/compute-engine/assumptions.test.ts` - "VALUE RESOLUTION FROM
-EQUALITY ASSUMPTIONS"
+See `requirements/DONE.md` for implementation details.
 
 ---
 
-### 19. Inequality Evaluation Using Assumptions
+### ~~19. Inequality Evaluation Using Assumptions~~ ✅ COMPLETED
 
-**Problem:** When `x > 4` is assumed, evaluating `['Greater', 'x', 0]` should
-return `True` (since x > 4 implies x > 0), but currently it returns the
-expression unchanged.
-
-**Current behavior:**
-
-```typescript
-ce.assume(ce.box(['Greater', 'x', 4]));
-ce.box(['Greater', 'x', 0]).evaluate().json  // Returns: ["Less", 0, "x"] (unchanged)
-ce.box(['Less', 'x', 0]).evaluate().json     // Returns: ["Less", "x", 0] (unchanged)
-```
-
-**Expected behavior:**
-
-```typescript
-ce.assume(ce.box(['Greater', 'x', 4]));
-ce.box(['Greater', 'x', 0]).evaluate().json  // Should return: "True"
-ce.box(['Less', 'x', 0]).evaluate().json     // Should return: "False"
-ce.box(['Greater', 'x', 10]).evaluate().json // Should return: undefined (can't determine)
-```
-
-**Implementation notes:**
-
-- Requires reasoning about transitive inequality relationships
-- `x > 4` implies `x > 0`, `x > 1`, `x > 2`, etc.
-- `x > 4` implies `x >= 0`, `x >= 4`
-- Combined with equality assumptions: `one = 1` should make `one > 0` evaluate
-  to True
-- This is related to but distinct from sign-based simplification (which already
-  works)
-
-**Algorithm sketch:**
-
-1. When evaluating `Greater(x, c)`, check if there's an assumption
-   `Greater(x, k)` where `k >= c`
-2. When evaluating `Less(x, c)`, check if there's an assumption `Greater(x, k)`
-   where `k >= c` (returns False)
-3. Handle all inequality operators: Greater, GreaterEqual, Less, LessEqual
-
-**Files to investigate:**
-
-- `src/compute-engine/library/relational-operator.ts` - Inequality evaluation
-- `src/compute-engine/assume.ts` - Assumption querying
-
-**Tests:** `test/compute-engine/assumptions.test.ts` - "INEQUALITY EVALUATION
-USING ASSUMPTIONS"
+See `requirements/DONE.md` for implementation details.
 
 ---
 
-### 20. Tautology and Contradiction Detection
+### ~~20. Tautology and Contradiction Detection~~ ✅ COMPLETED
 
-**Problem:** `ce.assume()` should detect when an assumption is redundant
-(tautology) or conflicts with existing assumptions (contradiction), but
-currently it always returns `"ok"`.
-
-**Current behavior:**
-
-```typescript
-ce.assume(ce.box(['Equal', 'one', 1]));
-ce.assume(ce.box(['Equal', 'one', 1]));  // Returns: "ok" (should be "tautology")
-ce.assume(ce.box(['Less', 'one', 0]));   // Returns: "ok" (should be "contradiction")
-```
-
-**Expected behavior:**
-
-```typescript
-ce.assume(ce.box(['Equal', 'one', 1]));
-ce.assume(ce.box(['Equal', 'one', 1]));   // Should return: "tautology"
-ce.assume(ce.box(['Less', 'one', 0]));    // Should return: "contradiction"
-ce.assume(ce.box(['Greater', 'one', 0])); // Should return: "tautology" (one=1 > 0)
-
-ce.assume(ce.box(['Greater', 'x', 4]));
-ce.assume(ce.box(['Greater', 'x', 0]));   // Should return: "tautology" (implied by x > 4)
-ce.assume(ce.box(['Less', 'x', 0]));      // Should return: "contradiction"
-```
-
-**Implementation notes:**
-
-- Tautology detection: Check if the new assumption is already implied by
-  existing assumptions
-- Contradiction detection: Check if the new assumption conflicts with existing
-  assumptions
-- Requires transitive reasoning for inequalities
-- The return type of `assume()` already includes `"tautology"` and
-  `"contradiction"` as options
-
-**Files to investigate:**
-
-- `src/compute-engine/assume.ts` - `assume()` function and `AssumeResult` type
-
-**Tests:** `test/compute-engine/assumptions.test.ts` - "TAUTOLOGY AND
-CONTRADICTION DETECTION"
+See `requirements/DONE.md` for implementation details.
 
 ---
 
-### 21. Type Inference from Assumptions
+### ~~21. Type Inference from Assumptions~~ ✅ COMPLETED
 
-**Problem:** When assumptions are made, symbol types should be inferred. For
-example, `x > 4` implies `x` is real, and `one = 1` implies `one` is an integer.
+See `requirements/DONE.md` for implementation details.
 
-**Current behavior:**
+---
 
-```typescript
-ce.assume(ce.box(['Greater', 'x', 4]));
-ce.box('x').type.toString()  // Returns: "unknown"
+### ~~24. BUG: forget() Doesn't Clear Assumed Values~~ ✅ FIXED
 
-ce.assume(ce.box(['Equal', 'one', 1]));
-ce.box('one').type.toString()  // Returns: "unknown"
-```
+See `requirements/DONE.md` for implementation details.
 
-**Expected behavior:**
+---
 
-```typescript
-ce.assume(ce.box(['Greater', 'x', 4]));
-ce.box('x').type.toString()  // Should return: "real" (inequalities imply real numbers)
+### ~~25. BUG: Scoped Assumptions Don't Clean Up on popScope()~~ ✅ FIXED
 
-ce.assume(ce.box(['Equal', 'one', 1]));
-ce.box('one').type.toString()  // Should return: "integer" (equal to integer literal)
-```
-
-**Implementation notes:**
-
-- Inequality assumptions (`>`, `<`, `>=`, `<=`) imply the symbol is `real`
-- Equality to an integer implies the symbol is `integer`
-- Equality to a rational implies the symbol is `rational`
-- This might be handled by updating the symbol's type when an assumption is made
-- Alternatively, the type getter could query assumptions
-
-**Files to investigate:**
-
-- `src/compute-engine/assume.ts` - Assumption processing
-- `src/compute-engine/boxed-expression/boxed-symbol.ts` - Symbol type resolution
-
-**Tests:** `test/compute-engine/assumptions.test.ts` - "TYPE INFERENCE FROM
-ASSUMPTIONS"
+See `requirements/DONE.md` for implementation details.
 
 ---
 

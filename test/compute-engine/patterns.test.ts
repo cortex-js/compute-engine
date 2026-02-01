@@ -1481,3 +1481,173 @@ describe('Permutation Matching Optimization', () => {
     });
   });
 });
+
+// ============================================================================
+// REPEATED WILDCARDS IN NESTED CONTEXTS (TODO #3)
+// ============================================================================
+
+describe('Repeated Wildcards in Nested Contexts', () => {
+  // Non-canonical matching helper
+  const matchNonCanonical = (pattern, expr) => {
+    const boxedPattern = ce.box(pattern, { canonical: false });
+    const boxedExpr = ce.box(expr, { canonical: false });
+    return boxedExpr.match(boxedPattern);
+  };
+
+  describe('Simple repeated wildcards (flat structure)', () => {
+    test('_a appears twice - same value should match', () => {
+      const result = matchNonCanonical(
+        ['Add', '_a', '_a'],
+        ['Add', 'x', 'x']
+      );
+      expect(result).not.toBeNull();
+      expect(result?._a?.toString()).toBe('x');
+    });
+
+    test('_a appears twice - different values should not match', () => {
+      const result = matchNonCanonical(
+        ['Add', '_a', '_a'],
+        ['Add', 'x', 'y']
+      );
+      expect(result).toBeNull();
+    });
+  });
+
+  describe('Repeated wildcards in nested function arguments', () => {
+    test('_x in direct arg and inside Ln - same value', () => {
+      const result = matchNonCanonical(
+        ['Multiply', '_x', ['Ln', '_x']],
+        ['Multiply', 'x', ['Ln', 'x']]
+      );
+      expect(result).not.toBeNull();
+      expect(result?._x?.toString()).toBe('x');
+    });
+
+    test('_x in direct arg and inside Ln - different values should not match', () => {
+      const result = matchNonCanonical(
+        ['Multiply', '_x', ['Ln', '_x']],
+        ['Multiply', 'x', ['Ln', 'y']]
+      );
+      expect(result).toBeNull();
+    });
+
+    test('_x appears at 3 different nesting levels', () => {
+      const result = matchNonCanonical(
+        ['Add', '_x', ['Multiply', '_x', ['Power', '_x', 2]]],
+        ['Add', 'x', ['Multiply', 'x', ['Power', 'x', 2]]]
+      );
+      expect(result).not.toBeNull();
+      expect(result?._x?.toString()).toBe('x');
+    });
+
+    test('exp(x)*sin(x) with repeated _x', () => {
+      const result = matchNonCanonical(
+        ['Multiply', ['Exp', '_x'], ['Sin', '_x']],
+        ['Multiply', ['Exp', 'x'], ['Sin', 'x']]
+      );
+      expect(result).not.toBeNull();
+      expect(result?._x?.toString()).toBe('x');
+    });
+  });
+
+  describe('Repeated wildcards with Divide patterns', () => {
+    test('1/(x*ln(x)) pattern - the TODO #3 example', () => {
+      const result = matchNonCanonical(
+        ['Divide', 1, ['Multiply', '_x', ['Ln', '_x']]],
+        ['Divide', 1, ['Multiply', 'x', ['Ln', 'x']]]
+      );
+      expect(result).not.toBeNull();
+      expect(result?._x?.toString()).toBe('x');
+    });
+
+    test('1/(x*ln(x)) with different variables should not match', () => {
+      const result = matchNonCanonical(
+        ['Divide', 1, ['Multiply', '_x', ['Ln', '_x']]],
+        ['Divide', 1, ['Multiply', 'x', ['Ln', 'y']]]
+      );
+      expect(result).toBeNull();
+    });
+  });
+
+  describe('Repeated wildcards matching complex expressions', () => {
+    test('_x should match the same complex expression everywhere', () => {
+      const result = matchNonCanonical(
+        ['Add', '_x', ['Power', '_x', 2]],
+        ['Add', ['Add', 'a', 1], ['Power', ['Add', 'a', 1], 2]]
+      );
+      expect(result).not.toBeNull();
+      // _x should match ['Add', 'a', 1]
+    });
+
+    test('_x matching complex expr - mismatch should fail', () => {
+      const result = matchNonCanonical(
+        ['Add', '_x', ['Power', '_x', 2]],
+        ['Add', ['Add', 'a', 1], ['Power', ['Add', 'a', 2], 2]]
+      );
+      expect(result).toBeNull();
+    });
+  });
+
+  describe('Repeated wildcards with commutative reordering', () => {
+    test('_x + ln(_x) with Add being commutative', () => {
+      const result = matchNonCanonical(
+        ['Add', '_x', ['Ln', '_x']],
+        ['Add', ['Ln', 'x'], 'x']
+      );
+      // Add is commutative, so this should match with _x = x
+      expect(result).not.toBeNull();
+      expect(result?._x?.toString()).toBe('x');
+    });
+
+    test('_x * sin(_x) with Multiply being commutative', () => {
+      const result = matchNonCanonical(
+        ['Multiply', '_x', ['Sin', '_x']],
+        ['Multiply', ['Sin', 'x'], 'x']
+      );
+      expect(result).not.toBeNull();
+      expect(result?._x?.toString()).toBe('x');
+    });
+  });
+
+  describe('Repeated wildcards with CANONICAL expressions', () => {
+    test('1/(x*ln(x)) with canonical expression', () => {
+      // Pattern is non-canonical (structural)
+      const pattern = ce.box(['Divide', 1, ['Multiply', '_x', ['Ln', '_x']]], {
+        canonical: false,
+      });
+      // Expression is canonical (what you get from parsing)
+      const expr = ce.parse('\\frac{1}{x \\ln x}');
+
+      const result = expr.match(pattern);
+      expect(result).not.toBeNull();
+      expect(result?._x?.toString()).toBe('x');
+    });
+
+    test('exp(x)*sin(x) canonical expression', () => {
+      // e^x becomes Power(ExponentialE, x), which doesn't match Exp(_x)
+      // So this pattern needs to account for the canonical form
+      const pattern = ce.box(
+        ['Multiply', ['Power', 'ExponentialE', '_x'], ['Sin', '_x']],
+        { canonical: false }
+      );
+      const expr = ce.parse('e^x \\sin x');
+
+      const result = expr.match(pattern);
+      expect(result).not.toBeNull();
+      expect(result?._x?.toString()).toBe('x');
+    });
+
+    test('Repeated wildcard fails when canonical order differs', () => {
+      // Multiply may reorder operands, so [x, ln(x)] might become [ln(x), x]
+      // The pattern matching should still work due to commutativity handling
+      const pattern = ce.box(['Multiply', '_x', ['Ln', '_x']], {
+        canonical: false,
+      });
+      const expr = ce.parse('x \\ln x');
+
+      const result = expr.match(pattern);
+      expect(result).not.toBeNull();
+      expect(result?._x?.toString()).toBe('x');
+    });
+  });
+});

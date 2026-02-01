@@ -1,5 +1,130 @@
 ## [Unreleased]
 
+### Improvements
+
+- **Value Resolution from Equality Assumptions**: When an equality assumption
+  is made via `ce.assume(['Equal', symbol, value])`, the symbol now correctly
+  evaluates to the assumed value. Previously, the symbol would remain unchanged
+  even after the assumption.
+
+  ```javascript
+  ce.assume(ce.box(['Equal', 'one', 1]));
+  ce.box('one').evaluate();               // → 1 (was: 'one')
+  ce.box(['Equal', 'one', 1]).evaluate(); // → True (was: ['Equal', 'one', 1])
+  ce.box(['Equal', 'one', 0]).evaluate(); // → False
+  ce.box('one').type.matches('integer');  // → true
+  ```
+
+  This also fixes comparison evaluation: `Equal(symbol, assumed_value)` now
+  correctly evaluates to `True` instead of staying symbolic.
+
+- **Inequality Evaluation Using Assumptions**: When an inequality assumption
+  is made (e.g., `ce.assume(['Greater', 'x', 4])`), inequality comparisons
+  can now use transitive reasoning to determine results.
+
+  ```javascript
+  ce.assume(ce.box(['Greater', 'x', 4]));
+  ce.box(['Greater', 'x', 0]).evaluate();  // → True (x > 4 > 0)
+  ce.box(['Less', 'x', 0]).evaluate();     // → False
+  ce.box('x').isGreater(0);                // → true
+  ce.box('x').isPositive;                  // → true
+  ```
+
+  This works by extracting lower/upper bounds from inequality assumptions
+  and using them during comparison operations.
+
+- **Type Inference from Assumptions**: When assumptions are made, symbol types
+  are now correctly inferred. Inequality assumptions (`>`, `<`, `>=`, `<=`) set
+  the symbol's type to `real`, and equality assumptions infer the type from the
+  value (e.g., equal to an integer means type `integer`).
+
+  ```javascript
+  ce.assume(ce.box(['Greater', 'x', 4]));
+  ce.box('x').type.toString();  // → 'real' (was: 'unknown')
+
+  ce.assume(ce.box(['Equal', 'one', 1]));
+  ce.box('one').type.toString();  // → 'integer' (was: 'unknown')
+  ```
+
+- **Tautology and Contradiction Detection**: `ce.assume()` now returns
+  `'tautology'` for redundant assumptions that are already implied by existing
+  assumptions, and `'contradiction'` for assumptions that conflict with
+  existing ones.
+
+  ```javascript
+  ce.assume(ce.box(['Greater', 'x', 4]));
+
+  // Redundant assumption (x > 4 implies x > 0)
+  ce.assume(ce.box(['Greater', 'x', 0]));  // → 'tautology' (was: 'ok')
+
+  // Conflicting assumption (x > 4 contradicts x < 0)
+  ce.assume(ce.box(['Less', 'x', 0]));     // → 'contradiction'
+
+  // Same assumption repeated
+  ce.assume(ce.box(['Equal', 'one', 1]));
+  ce.assume(ce.box(['Equal', 'one', 1]));  // → 'tautology'
+
+  // Conflicting equality
+  ce.assume(ce.box(['Less', 'one', 0]));   // → 'contradiction'
+  ```
+
+### Bug Fixes
+
+- **forget() Now Clears Assumed Values**: Fixed an issue where `ce.forget()` did not
+  clear values that were set by equality assumptions. After calling
+  `ce.assume(['Equal', 'x', 5])` followed by `ce.forget('x')`, the symbol would
+  incorrectly still evaluate to `5`. Now `forget()` properly clears values from
+  all evaluation context frames.
+
+  ```javascript
+  ce.assume(ce.box(['Equal', 'x', 5]));
+  ce.box('x').evaluate();  // → 5
+  ce.forget('x');
+  ce.box('x').evaluate();  // → 'x' (was: 5)
+  ```
+
+- **Scoped Assumptions Now Clean Up on popScope()**: Fixed an issue where
+  assumptions made inside a nested scope would persist after `popScope()` was
+  called. Values set by assumptions are now properly scoped to where the
+  assumption was made, and are automatically removed when the scope exits.
+
+  ```javascript
+  ce.pushScope();
+  ce.assume(ce.box(['Equal', 'y', 10]));
+  ce.box('y').evaluate();  // → 10
+  ce.popScope();
+  ce.box('y').evaluate();  // → 'y' (was: 10)
+  ```
+
+- **Extraneous Root Filtering for Sqrt Equations**: Fixed an issue where solving
+  square root equations could return extraneous roots. When solving equations
+  like `√x = x - 2` or `√x - x + 2 = 0` using the quadratic substitution method
+  (u = √x → solve for u → x = u²), the solver could return roots that satisfy
+  the transformed equation but not the original. The `validateRoots()` function
+  now correctly validates candidate solutions against the original expression
+  before any algebraic transformations (clearing denominators, harmonization),
+  properly filtering out extraneous roots.
+
+  Examples of equations that now correctly filter extraneous roots:
+  - `√x = x - 2` → returns `[4]` (filters out x=1)
+  - `√x + x - 2 = 0` → returns `[1]` (filters out x=4)
+  - `√x - x + 2 = 0` → returns `[4]` (filters out x=1)
+  - `x - 2√x - 3 = 0` → returns `[9]` (filters out x=1)
+  - `2x + 3√x - 2 = 0` → returns `[1/4]` (filters out x=4)
+
+### Testing
+
+- **Pattern Matching with Repeated Wildcards**: Added comprehensive tests
+  verifying that the pattern matching system correctly handles wildcards that
+  appear multiple times in a pattern. When a named wildcard like `_x` appears
+  in multiple positions, the matcher correctly ensures all occurrences match
+  the same expression. This works with:
+  - Nested function arguments (e.g., `['Multiply', '_x', ['Ln', '_x']]`)
+  - Multiple nesting levels (3+ levels deep)
+  - Commutative operators (handles reordering)
+  - Canonical expressions (from parsed LaTeX)
+  - Complex sub-expressions (matching entire sub-trees)
+
 ### New Features
 
 #### Subscripts and Indexing
