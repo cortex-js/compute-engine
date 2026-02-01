@@ -3497,6 +3497,9 @@ export interface ComputeEngine extends IBigNum {
   contextStack: ReadonlyArray<EvalContext>;
 
   /** @internal */
+  readonly isVerifying: boolean;
+
+  /** @internal */
   readonly _typeResolver: TypeResolver;
 
   /** Absolute time beyond which evaluation should not proceed

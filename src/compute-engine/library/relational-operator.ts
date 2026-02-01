@@ -148,7 +148,11 @@ export const RELOP_LIBRARY: SymbolDefinitions = {
         if (!lhs) lhs = arg;
         else {
           const test = eq(lhs, arg);
-          if (test !== true) return ce.False;
+          if (test === false) return ce.False;
+          // In verification mode, preserve undefined for 3-valued logic
+          if (test === undefined && ce.isVerifying) return undefined;
+          // Outside verification mode, treat "can't prove true" as false
+          if (test === undefined) return ce.False;
         }
       }
       return ce.True;
@@ -183,6 +187,10 @@ export const RELOP_LIBRARY: SymbolDefinitions = {
         else {
           const test = lhs.isEqual(arg);
           if (test === true) return ce.False;
+          // In verification mode, preserve undefined for 3-valued logic
+          if (test === undefined && ce.isVerifying) return undefined;
+          // Outside verification mode, treat "can't prove equal" as not equal
+          // (Note: this is not strictly correct logic, but matches expected behavior)
         }
       }
       return ce.True;

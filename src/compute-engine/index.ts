@@ -787,6 +787,14 @@ export class ComputeEngine implements IComputeEngine {
 
   private _recursionLimit: number = 1024;
 
+  /** Flag to prevent recursive verify() -> ask() -> verify() loops */
+  private _isVerifying: boolean = false;
+
+  /** @internal */
+  get isVerifying(): boolean {
+    return this._isVerifying;
+  }
+
   get tolerance(): number {
     return this._tolerance;
   }
@@ -2332,7 +2340,8 @@ export class ComputeEngine implements IComputeEngine {
     // B3: For closed predicates (no wildcards), fall back to verify().
     // This makes `ask()` useful for "is this known?" queries even when the
     // fact is not explicitly stored in the assumptions DB (e.g. declarations).
-    if (result.length === 0 && !patternHasWildcards(pat)) {
+    // Skip this if we're already inside a verify() call to prevent infinite recursion.
+    if (result.length === 0 && !patternHasWildcards(pat) && !this._isVerifying) {
       // Use the canonical form so symbol declarations/definitions are visible
       // to the evaluator.
       const verified = this.verify(this.box(pattern, { canonical: true }));
@@ -2348,51 +2357,59 @@ export class ComputeEngine implements IComputeEngine {
    */
 
   verify(query: BoxedExpression): boolean | undefined {
-    const boxed = isLatexString(query)
-      ? this.parse(query, { canonical: false })
-      : this.box(query, { canonical: false });
+    // Prevent recursive verify() -> ask() -> verify() loops
+    if (this._isVerifying) return undefined;
 
-    const expr = boxed.evaluate();
-    if (expr.symbol === 'True') return true;
-    if (expr.symbol === 'False') return false;
+    this._isVerifying = true;
+    try {
+      const boxed = isLatexString(query)
+        ? this.parse(query, { canonical: false })
+        : this.box(query, { canonical: false });
 
-    const op = expr.operator;
+      const expr = boxed.evaluate();
+      if (expr.symbol === 'True') return true;
+      if (expr.symbol === 'False') return false;
 
-    if (op === 'Not') {
-      const result = this.verify(expr.op1);
-      if (result === undefined) return undefined;
-      return !result;
-    }
+      const op = expr.operator;
 
-    if (op === 'And') {
-      // Kleene 3-valued logic:
-      // - if any operand is false, the result is false
-      // - if all operands are true, the result is true
-      // - otherwise the result is unknown
-      let hasUnknown = false;
-      for (const x of expr.ops ?? []) {
-        const r = this.verify(x);
-        if (r === false) return false;
-        if (r === undefined) hasUnknown = true;
+      if (op === 'Not') {
+        const result = this.verify(expr.op1);
+        if (result === undefined) return undefined;
+        return !result;
       }
-      return hasUnknown ? undefined : true;
-    }
 
-    if (op === 'Or') {
-      // Kleene 3-valued logic:
-      // - if any operand is true, the result is true
-      // - if all operands are false, the result is false
-      // - otherwise the result is unknown
-      let hasUnknown = false;
-      for (const x of expr.ops ?? []) {
-        const r = this.verify(x);
-        if (r === true) return true;
-        if (r === undefined) hasUnknown = true;
+      if (op === 'And') {
+        // Kleene 3-valued logic:
+        // - if any operand is false, the result is false
+        // - if all operands are true, the result is true
+        // - otherwise the result is unknown
+        let hasUnknown = false;
+        for (const x of expr.ops ?? []) {
+          const r = this.verify(x);
+          if (r === false) return false;
+          if (r === undefined) hasUnknown = true;
+        }
+        return hasUnknown ? undefined : true;
       }
-      return hasUnknown ? undefined : false;
-    }
 
-    return undefined;
+      if (op === 'Or') {
+        // Kleene 3-valued logic:
+        // - if any operand is true, the result is true
+        // - if all operands are false, the result is false
+        // - otherwise the result is unknown
+        let hasUnknown = false;
+        for (const x of expr.ops ?? []) {
+          const r = this.verify(x);
+          if (r === true) return true;
+          if (r === undefined) hasUnknown = true;
+        }
+        return hasUnknown ? undefined : false;
+      }
+
+      return undefined;
+    } finally {
+      this._isVerifying = false;
+    }
   }
 
   /**

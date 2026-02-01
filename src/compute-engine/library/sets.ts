@@ -525,12 +525,38 @@ export const SETS_LIBRARY: SymbolDefinitions = {
       'Test whether a value is an element of a collection. ' +
       'Optional third argument is a boolean expression (condition) for filtered iteration in Sum/Product.',
     canonical: (args, { engine: ce }) => {
-      if (args.length < 2) return ce._fn('Element', args);
+      // Let default signature validation handle missing required arguments
+      if (args.length === 0) {
+        return ce._fn('Element', [ce.error('missing'), ce.error('missing')]);
+      }
+      if (args.length === 1) {
+        return ce._fn('Element', [args[0].canonical, ce.error('missing')]);
+      }
+
       const [value, collection, condition] = args;
       // Transform List/Tuple with 2 elements to Interval in set context
       const canonicalCollection = listToIntervalInSetContext(ce, collection);
-      // Only include condition if it's present and not Nothing
+
+      // Validate collection type
+      if (!canonicalCollection.type.matches('collection') &&
+          !canonicalCollection.symbol &&
+          !canonicalCollection.isValid) {
+        return ce._fn('Element', [
+          value.canonical,
+          ce.error(['incompatible-type', `'collection'`, canonicalCollection.type.toString()]),
+          ...(condition ? [condition.canonical] : [])
+        ]);
+      }
+
+      // Validate optional third argument
       if (condition && condition.symbol !== 'Nothing') {
+        if (!condition.type.matches('boolean')) {
+          return ce._fn('Element', [
+            value.canonical,
+            canonicalCollection,
+            ce.error(['incompatible-type', `'boolean'`, collection.type.toString()])
+          ]);
+        }
         return ce._fn('Element', [
           value.canonical,
           canonicalCollection,
@@ -542,20 +568,29 @@ export const SETS_LIBRARY: SymbolDefinitions = {
     evaluate: ([value, collection, _condition], { engine: ce }) => {
       // Note: condition is only used during Sum/Product iteration,
       // not for standalone Element evaluation
-      const result = collection.contains(value);
-      if (result === true) return ce.True;
-      if (result === false) return ce.False;
 
-      // Support type-style membership checks, e.g. Element(x, real) or
-      // Element(x, finite_real). This complements set membership checks.
-      const typeName = collection.symbol;
+      // Check if collection has a contains method before calling it
+      if (collection && typeof collection.contains === 'function') {
+        const result = collection.contains(value);
+        if (result === true) return ce.True;
+        if (result === false) return ce.False;
+      }
+
+      // Support type-style membership checks, e.g. Element(x, finite_real) or
+      // Element(x, Integers). Try to interpret the collection as a type.
+      const typeName = collection?.symbol;
       if (typeName) {
-        const type = ce.type(typeName);
-        if (!type.isUnknown) {
-          const valueType = value.type;
-          if (valueType.matches(type)) return ce.True;
-          if (typeIntersection(valueType.type, type.type) === 'nothing')
-            return ce.False;
+        try {
+          const type = ce.type(typeName);
+          if (!type.isUnknown) {
+            const valueType = value.type;
+            if (valueType.matches(type)) return ce.True;
+            if (typeIntersection(valueType.type, type.type) === 'nothing')
+              return ce.False;
+          }
+        } catch {
+          // If type parsing fails (e.g., "Booleans" is not a valid type),
+          // fall through and return undefined
         }
       }
 
