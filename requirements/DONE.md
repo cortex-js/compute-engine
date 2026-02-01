@@ -1747,3 +1747,55 @@ pentagon.solve(['x', 'y']);
   detect and dispatch to inequality solver
 - `test/compute-engine/solve.test.ts` - Added 8 new tests for inequality systems
 - `doc/17-guide-linear-algebra.md` - Added documentation for linear inequality systems
+
+---
+
+### 27. Under-determined Systems (Parametric Solutions) ✅
+
+**IMPLEMENTED:** The `solve()` method now returns parametric solutions for
+under-determined linear systems (fewer equations than variables) instead of
+returning `null`.
+
+**Examples that now work:**
+
+```typescript
+// Single equation with two variables
+const e = ce.parse('\\begin{cases}x+y=5\\end{cases}');
+e.solve(['x', 'y']);
+// → { x: -y + 5, y: y }  (y is a free variable)
+
+// Two equations with three variables
+const e2 = ce.parse('\\begin{cases}x+y+z=6\\\\x-y=2\\end{cases}');
+e2.solve(['x', 'y', 'z']);
+// → { x: -z/2 + 4, y: -z/2 + 2, z: z }  (z is a free variable)
+
+// Three equations with four variables (one free variable)
+const e3 = ce.parse('\\begin{cases}a+b+c+d=10\\\\a-b=2\\\\c+d=4\\end{cases}');
+e3.solve(['a', 'b', 'c', 'd']);
+// → { a: 4, b: 2, c: -d + 4, d: d }  (d is a free variable)
+```
+
+**Algorithm:**
+
+1. Build augmented matrix [A|b] from the linear equations
+2. Apply Gaussian elimination with partial pivoting
+3. Identify pivot columns (bound variables) and free columns (free variables)
+4. For each free variable, set its solution to itself (as a symbol)
+5. Back-substitute to express pivot variables in terms of free variables
+6. Return a dictionary mapping each variable to its (possibly parametric) solution
+
+**Key implementation details:**
+
+- Uses `solveParametric()` function when `m < n` (fewer equations than variables)
+- Free variables appear as themselves in the solution (e.g., `z` maps to symbol `z`)
+- Pivot variables are expressed as linear combinations of free variables
+- Returns `null` for inconsistent systems (no solution)
+- Properly handles symbolic coefficients in back-substitution
+
+**Files modified:**
+
+- `src/compute-engine/boxed-expression/solve-linear-system.ts` - Added
+  `solveParametric()` function with Gaussian elimination and back-substitution
+  for under-determined systems
+- `test/compute-engine/solve.test.ts` - Added 5 new tests for parametric solutions
+  and updated existing test to expect parametric result

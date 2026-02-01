@@ -84,11 +84,20 @@ function isLinearInVariables(
  * @param variables - Array of variable names to solve for
  * @returns Object mapping variable names to their solutions, or null if unsolvable
  *
+ * For under-determined systems (fewer equations than variables), returns
+ * parametric solutions where free variables appear in the expressions.
+ *
  * @example
  * ```typescript
+ * // Unique solution
  * const e = ce.parse('\\begin{cases}x+y=70\\\\2x-4y=80\\end{cases}');
  * const result = e.solve(['x', 'y']);
  * // result = { x: BoxedExpression(60), y: BoxedExpression(10) }
+ *
+ * // Parametric solution (under-determined)
+ * const e2 = ce.parse('\\begin{cases}x+y=5\\end{cases}');
+ * const result2 = e2.solve(['x', 'y']);
+ * // result2 = { x: 5 - y, y: y }
  * ```
  */
 export function solveLinearSystem(
@@ -101,14 +110,16 @@ export function solveLinearSystem(
   const n = variables.length;
   const m = equations.length;
 
-  // Need at least as many equations as variables for a unique solution
-  if (m < n) return null;
-
   // Build augmented matrix [A|b] where Ax = b
   const matrix = buildAugmentedMatrix(equations, variables, ce);
   if (!matrix) return null;
 
   const { A, b } = matrix;
+
+  // For under-determined systems, use parametric solver
+  if (m < n) {
+    return solveParametric(A, b, variables, ce);
+  }
 
   // Solve using Gaussian elimination with partial pivoting
   const solutions = gaussianElimination(A, b, n, ce);
@@ -400,6 +411,146 @@ function gaussianElimination(
   }
 
   return solution;
+}
+
+/**
+ * Solve an under-determined linear system (more variables than equations).
+ * Returns parametric solutions where free variables appear in expressions.
+ *
+ * Algorithm:
+ * 1. Perform Gaussian elimination with column pivoting
+ * 2. Identify pivot columns (variables with unique solutions in terms of others)
+ * 3. Identify free columns (variables that can take any value)
+ * 4. Express pivot variables in terms of free variables via back-substitution
+ *
+ * @param A - Coefficient matrix (m×n where m < n)
+ * @param b - Right-hand side vector
+ * @param variables - Variable names
+ * @param ce - ComputeEngine instance
+ * @returns Object mapping variable names to their solutions (may contain free variables)
+ */
+function solveParametric(
+  A: BoxedExpression[][],
+  b: BoxedExpression[],
+  variables: string[],
+  ce: ComputeEngine
+): Record<string, BoxedExpression> | null {
+  const m = A.length; // number of equations
+  const n = variables.length; // number of variables
+
+  // Create augmented matrix [A|b]
+  const aug: BoxedExpression[][] = [];
+  for (let i = 0; i < m; i++) {
+    aug.push([...A[i], b[i]]);
+  }
+
+  // Track which columns have pivots
+  const pivotCol: number[] = []; // pivotCol[row] = column index of pivot in that row
+  const isPivotCol: boolean[] = new Array(n).fill(false);
+
+  // Forward elimination with partial pivoting (row and column)
+  let currentRow = 0;
+  for (let col = 0; col < n && currentRow < m; col++) {
+    // Find the best pivot in this column (from currentRow down)
+    let maxRow = currentRow;
+    for (let row = currentRow + 1; row < m; row++) {
+      const cmp = compareAbsoluteValues(aug[row]?.[col], aug[maxRow]?.[col]);
+      if (cmp === 1) {
+        maxRow = row;
+      }
+    }
+
+    // If no valid pivot in this column, skip it (it's a free variable)
+    if (isEffectivelyZero(aug[maxRow]?.[col])) {
+      continue;
+    }
+
+    // Swap rows if needed
+    if (maxRow !== currentRow) {
+      [aug[currentRow], aug[maxRow]] = [aug[maxRow], aug[currentRow]];
+    }
+
+    // Record this as a pivot column
+    pivotCol[currentRow] = col;
+    isPivotCol[col] = true;
+
+    const pivot = aug[currentRow][col];
+
+    // Eliminate below
+    for (let row = currentRow + 1; row < m; row++) {
+      if (!isEffectivelyZero(aug[row][col])) {
+        const factor = aug[row][col].div(pivot);
+        aug[row][col] = ce.Zero;
+
+        for (let j = col + 1; j <= n; j++) {
+          aug[row][j] = aug[row][j].sub(factor.mul(aug[currentRow][j]));
+        }
+      }
+    }
+
+    currentRow++;
+  }
+
+  const rank = currentRow; // Number of pivot rows
+
+  // Check for inconsistency: if any row has all zeros in coefficients but non-zero RHS
+  for (let row = 0; row < m; row++) {
+    let allZero = true;
+    for (let col = 0; col < n; col++) {
+      if (!isEffectivelyZero(aug[row][col])) {
+        allZero = false;
+        break;
+      }
+    }
+    if (allZero && !isEffectivelyZero(aug[row][n])) {
+      return null; // Inconsistent system
+    }
+  }
+
+  // Identify free variables (columns without pivots)
+  const freeVars: number[] = [];
+  for (let col = 0; col < n; col++) {
+    if (!isPivotCol[col]) {
+      freeVars.push(col);
+    }
+  }
+
+  // Build solution: start with free variables as themselves
+  const solution: BoxedExpression[] = new Array(n);
+  for (let col = 0; col < n; col++) {
+    if (!isPivotCol[col]) {
+      // Free variable: equals itself
+      solution[col] = ce.symbol(variables[col]);
+    }
+  }
+
+  // Back substitution for pivot variables
+  // Go through pivot rows in reverse order
+  for (let row = rank - 1; row >= 0; row--) {
+    const col = pivotCol[row];
+    if (col === undefined) continue;
+
+    // Start with RHS
+    let expr = aug[row][n];
+
+    // Subtract contributions from columns to the right
+    for (let j = col + 1; j < n; j++) {
+      if (!isEffectivelyZero(aug[row][j])) {
+        expr = expr.sub(aug[row][j].mul(solution[j]));
+      }
+    }
+
+    // Divide by pivot
+    solution[col] = expr.div(aug[row][col]).simplify();
+  }
+
+  // Build result object
+  const result: Record<string, BoxedExpression> = {};
+  for (let i = 0; i < n; i++) {
+    result[variables[i]] = solution[i];
+  }
+
+  return result;
 }
 
 /**

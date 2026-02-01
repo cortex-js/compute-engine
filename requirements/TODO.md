@@ -387,44 +387,9 @@ e.solve(['x', 'y']);
 
 ---
 
-### 27. Under-determined Systems (Parametric Solutions)
+### ~~27. Under-determined Systems (Parametric Solutions)~~ ✅ COMPLETED
 
-**Problem:** Systems with fewer equations than unknowns currently return `null`.
-These systems have infinitely many solutions that can be expressed parametrically.
-
-**Current behavior:**
-
-```typescript
-const e = ce.parse('\\begin{cases}x+y=5\\end{cases}');
-e.solve(['x', 'y']);  // → null
-```
-
-**Expected behavior:**
-
-```typescript
-e.solve(['x', 'y']);
-// → { x: t, y: 5 - t } where t is a free parameter
-// Or: { x: ['Subtract', 5, 'y'], y: 'y' } (express x in terms of y)
-```
-
-**Design considerations:**
-
-1. **Free parameter naming:** Use `t`, `s`, `u` or `_t1`, `_t2` for parameters
-2. **Multiple free variables:** For `x + y + z = 10` with 2 free parameters
-3. **Return format:** Could return:
-   - Object with parameter expressions: `{ x: expr_in_t, y: expr_in_t, t: 't' }`
-   - Separate parametric form: `{ solution: {...}, parameters: ['t'] }`
-4. **User preference:** May want to specify which variables are free
-
-**Algorithm:**
-
-1. After Gaussian elimination, identify free variables (columns without pivots)
-2. Express pivot variables in terms of free variables via back-substitution
-3. Return mapping with free variables as themselves or as parameters
-
-**Files:**
-
-- `src/compute-engine/boxed-expression/solve-linear-system.ts`
+See `requirements/DONE.md` for implementation details.
 
 ---
 

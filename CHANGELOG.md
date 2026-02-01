@@ -126,6 +126,25 @@
   Vertices are returned in counterclockwise convex hull order. Returns `null` for
   infeasible systems or non-linear constraints.
 
+- **Under-determined Systems (Parametric Solutions)**: The `solve()` method now
+  returns parametric solutions for under-determined linear systems (fewer
+  equations than variables) instead of returning `null`. Free variables appear
+  as themselves in the solution, with other variables expressed in terms of them.
+
+  ```javascript
+  // Single equation with two variables
+  const e = ce.parse('\\begin{cases}x+y=5\\end{cases}');
+  const result = e.solve(['x', 'y']);
+  // → { x: -y + 5, y: y }  (y is a free variable)
+
+  // Two equations with three variables
+  const e2 = ce.parse('\\begin{cases}x+y+z=6\\\\x-y=2\\end{cases}');
+  const result2 = e2.solve(['x', 'y', 'z']);
+  // → { x: -z/2 + 4, y: -z/2 + 2, z: z }  (z is a free variable)
+  ```
+
+  Inconsistent systems still return `null`.
+
 - **Extended Sqrt Equation Solving**: The equation solver now handles sqrt
   equations of the form `√(f(x)) = g(x)` by squaring both sides and solving
   the resulting polynomial. Extraneous roots are automatically filtered.

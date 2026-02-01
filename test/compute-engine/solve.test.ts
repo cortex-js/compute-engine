@@ -717,10 +717,13 @@ describe('SOLVING SYSTEMS OF LINEAR EQUATIONS', () => {
     expect(solutions).toContainEqual({ x: 3, y: 2 });
   });
 
-  test('should return null for under-determined system: single equation, two variables', () => {
+  test('should return parametric solution for under-determined system: single equation, two variables', () => {
     const e = expr('\\begin{cases}x+y=5\\end{cases}');
-    const result = e.solve(['x', 'y']);
-    expect(result).toBeNull();
+    const result = e.solve(['x', 'y']) as Record<string, any>;
+    expect(result).not.toBeNull();
+    // y is free, x = 5 - y
+    expect(result.y.json).toBe('y');
+    expect(result.x.json).toEqual(['Add', ['Negate', 'y'], 5]);
   });
 
   test('should solve system with fractional solution: x+2y=5, 2x+3y=8', () => {
@@ -801,6 +804,72 @@ describe('SOLVING SYSTEMS OF LINEAR EQUATIONS', () => {
     // y = 6 - 3(6/5) = 6 - 18/5 = 30/5 - 18/5 = 12/5
     expect(result.x.json).toEqual(['Rational', 6, 5]);
     expect(result.y.json).toEqual(['Rational', 12, 5]);
+  });
+
+  // Under-determined systems (parametric solutions)
+  test('should solve under-determined system: x+y=5 (1 eq, 2 vars)', () => {
+    const e = expr('\\begin{cases}x+y=5\\end{cases}');
+    const result = e.solve(['x', 'y']) as Record<string, any>;
+    expect(result).not.toBeNull();
+    // y is free variable, x = 5 - y
+    expect(result.y.json).toBe('y'); // y is free
+    // x should be 5 - y
+    const xExpr = result.x;
+    // Verify by substitution: x + y should equal 5
+    const sum = xExpr.add(result.y).simplify();
+    expect(sum.json).toBe(5);
+  });
+
+  test('should solve under-determined system: x+y+z=10 (1 eq, 3 vars)', () => {
+    const e = expr('\\begin{cases}x+y+z=10\\end{cases}');
+    const result = e.solve(['x', 'y', 'z']) as Record<string, any>;
+    expect(result).not.toBeNull();
+    // y and z are free variables, x = 10 - y - z
+    expect(result.y.json).toBe('y');
+    expect(result.z.json).toBe('z');
+    // Verify by substitution: x + y + z should equal 10
+    const sum = result.x.add(result.y).add(result.z).simplify();
+    expect(sum.json).toBe(10);
+  });
+
+  test('should solve under-determined system: 2 equations, 3 variables', () => {
+    // x + y + z = 6
+    // x + 2y + 3z = 10
+    // Subtracting: y + 2z = 4, so y = 4 - 2z
+    // Then x = 6 - y - z = 6 - (4 - 2z) - z = 2 + z
+    const e = expr('\\begin{cases}x+y+z=6\\\\x+2y+3z=10\\end{cases}');
+    const result = e.solve(['x', 'y', 'z']) as Record<string, any>;
+    expect(result).not.toBeNull();
+    // z is free variable
+    expect(result.z.json).toBe('z');
+    // Verify by substitution into both equations
+    const eq1 = result.x.add(result.y).add(result.z).simplify();
+    expect(eq1.json).toBe(6);
+    const eq2 = result.x
+      .add(result.y.mul(2))
+      .add(result.z.mul(3))
+      .simplify();
+    expect(eq2.json).toBe(10);
+  });
+
+  test('should solve under-determined system with coefficients: 2x+3y=12', () => {
+    const e = expr('\\begin{cases}2x+3y=12\\end{cases}');
+    const result = e.solve(['x', 'y']) as Record<string, any>;
+    expect(result).not.toBeNull();
+    // y is free, x = (12 - 3y) / 2 = 6 - (3/2)y
+    expect(result.y.json).toBe('y');
+    // Verify: 2x + 3y = 12
+    const lhs = result.x.mul(2).add(result.y.mul(3)).simplify();
+    expect(lhs.json).toBe(12);
+  });
+
+  test('should return null for inconsistent under-determined system', () => {
+    // x + y = 5
+    // x + y = 7
+    // These are inconsistent (no solution)
+    const e = expr('\\begin{cases}x+y=5\\\\x+y=7\\end{cases}');
+    const result = e.solve(['x', 'y']);
+    expect(result).toBeNull();
   });
 });
 
