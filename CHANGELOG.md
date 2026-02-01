@@ -338,7 +338,7 @@
   - **Implicit multiplication powers**: `xx` now simplifies to `x^2`.
   - **Exponential/log separation**: `\exp(\log(x)+y)` and `\exp(\log(x)-y)` now
     simplify without leaving a remaining `\log(...)` term in the exponent
-    (preferred by the default cost function).
+    (preferred by the default cost function via a targeted heuristic).
 
 ### New Features
 

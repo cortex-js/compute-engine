@@ -1457,9 +1457,17 @@ export class _Parser implements Parser {
     const hasPrefix = OPEN_DELIMITER_PREFIX[currentToken];
     const lookupToken = hasPrefix ? this._tokens[this.index + 1] : currentToken;
 
+    if (lookupToken === '|') {
+      console.log(`parseEnclosure for |: start=${start}`);
+    }
+
     // Get only the matchfix defs that could match this opening token
     // Note: some tokens (like |) may match multiple defs (|| and |)
     let defs = this._dictionary.matchfixByOpen.get(lookupToken) ?? [];
+
+    if (lookupToken === '|') {
+      console.log(`  Found ${defs.length} defs for |`);
+    }
 
     // If no defs found and lookupToken is undefined, fall back to all matchfix defs
     // (This handles edge cases with complex delimiters)
@@ -1471,19 +1479,35 @@ export class _Parser implements Parser {
     // Try each potentially matching def
     //
     for (const def of defs) {
+      if (lookupToken === '|') {
+        console.log(`  Trying def: open=${JSON.stringify(def.openTrigger)} close=${JSON.stringify(def.closeTrigger)}`);
+      }
       this.index = start;
 
       // 1. Match the opening delimiter
       const matched = this.matchDelimiter(def.openTrigger, def.closeTrigger);
+      if (lookupToken === '|') {
+        const currentBoundary = this._boundaries[this._boundaries.length - 1]?.tokens;
+        console.log(`    matchDelimiter returned ${matched}, boundary set to ${JSON.stringify(currentBoundary)}`);
+      }
       if (!matched) continue;
 
       // 2. Collect the expression in between the delimiters
       const bodyStart = this.index;
       this.skipSpace();
+      if (lookupToken === '|') {
+        console.log(`    About to parseExpression for body at ${bodyStart}`);
+      }
       let body = this.parseExpression();
+      if (lookupToken === '|') {
+        console.log(`    parseExpression returned, body=${JSON.stringify(body).substring(0, 80)}`);
+      }
       this.skipSpace();
       const boundary = this._boundaries[this._boundaries.length - 1]?.tokens;
       const matchedBoundary = this.matchBoundary();
+      if (lookupToken === '|') {
+        console.log(`    After parseExpression: body=${JSON.stringify(body).substring(0, 50)}, matchedBoundary=${matchedBoundary}, boundary=${JSON.stringify(boundary)}`);
+      }
       const sameTrigger =
         (typeof def.openTrigger === 'string' &&
           typeof def.closeTrigger === 'string' &&
@@ -1496,6 +1520,9 @@ export class _Parser implements Parser {
         // If the open/close delimiter are identical and the body is empty,
         // we may have consumed an inner delimiter (e.g. "||3-5|-4|").
         // Retry parsing without the boundary and look for the closing delimiter.
+        if (lookupToken === '|') {
+          console.log(`    RE-PARSING (empty body, sameTrigger)`);
+        }
         this.index = bodyStart;
         this.skipSpace();
         body = this.parseExpression();
@@ -1509,6 +1536,9 @@ export class _Parser implements Parser {
         // We couldn't parse the body up to the closing delimiter.
         const boundary = this._boundaries[this._boundaries.length - 1]?.tokens;
         if (!boundary) {
+          if (lookupToken === '|') {
+            console.log(`    !matchedBoundary but no boundary - continuing`);
+          }
           this.index = start;
           continue;
         }
@@ -1521,12 +1551,22 @@ export class _Parser implements Parser {
           (lookupToken === '(' || lookupToken === '\\lparen') && // Only for (
           (boundary[0] === ']' || boundary[0] === '\\rbrack'); // Only when expecting interval close
 
+        if (lookupToken === '|') {
+          console.log(`    !matchedBoundary: canSkipReparsing=${canSkipReparsing}`);
+        }
+
         if (!canSkipReparsing) {
           // Re-parse without the boundary to handle ambiguous cases
+          if (lookupToken === '|') {
+            console.log(`    RE-PARSING (!matchedBoundary, ambiguous)`);
+          }
           this.removeBoundary();
           this.index = bodyStart;
           this.skipSpace();
           body = this.parseExpression();
+          if (lookupToken === '|') {
+            console.log(`    After RE-PARSE: body=${JSON.stringify(body).substring(0, 80)}`);
+          }
           this.skipSpace();
           if (!this.matchAll(boundary)) {
             this.index = start;
@@ -1535,13 +1575,14 @@ export class _Parser implements Parser {
           }
         } else {
           // Performance optimization: skip re-parsing for (] when input is ()
-          // Must remove the boundary that matchDelimiter added before continuing
-          this.removeBoundary();
           this.index = start;
           continue;
         }
       }
       const result = def.parse(this, body ?? 'Nothing');
+      if (lookupToken === '|') {
+        console.log(`  Tried def, result=${result === null ? 'null' : 'success'}`);
+      }
       if (result !== null) return result;
     }
     this.index = start;

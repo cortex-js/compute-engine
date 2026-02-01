@@ -23,8 +23,8 @@ by priority and category.
 
 - **Bugs (incorrect results)**: 0 cases ✅
 - **Limitations**: 5 cases (by-design or architectural)
-  - `0/(1-1)` → sub-expression evaluation timing
-  - `(1-1)/0` → sub-expression evaluation timing
+  - `0/(1-1)` → sub-expression evaluation timing (requires explicit evaluation)
+  - `(1-1)/0` → sub-expression evaluation timing (requires explicit evaluation)
   - `log(√2)` → constants stored as numeric literals
   - `ln(√2)` → constants stored as numeric literals
   - `2sin²(x)` → cost function prefers compact form
@@ -108,7 +108,14 @@ These produce mathematically incorrect results and should be fixed first.
 | `\frac{1-1}{0}` | `~∞`           | `NaN`    | ⚠️ Limitation\* |
 
 \*Limitation: Expressions like `1-1` are not evaluated during canonicalization
-to avoid expensive computations. Use `.simplify()` to evaluate.
+or simplification by default to avoid potentially expensive computations. Run an
+explicit evaluation step first:
+
+```javascript
+const denom = ce.parse('1-1', { canonical: false }).simplify();
+ce.box(['Divide', 0, denom], { canonical: false }).simplify().latex;
+// → '\\operatorname{NaN}' (0/0)
+```
 
 **Fix Applied**:
 

@@ -42,6 +42,7 @@ describe('BUG FIXES', () => {
         .simplify();
       expect(simp.operator).toBe('Divide');
     });
+
   });
 
   describe('Bug #178: exp(log(x) ± y) should separate the log term', () => {

@@ -66,6 +66,53 @@ function numericCostFunction(n: NumericValue | number): number {
  *
  */
 export function costFunction(expr: BoxedExpression): number {
+  // Special-case: Encourage the "exp/log separation" rewrite used by
+  // `simplifyLog()` for base-10 logs:
+  //
+  //   exp(log(x) + y)  ->  x^(1/ln(10)) * e^y
+  //
+  // Without this tweak, the separated form can look more expensive than
+  // `exp(log(x)+y)` because it introduces an explicit `1/ln(10)` exponent.
+  //
+  // This is intentionally narrow and only affects the specific separated form
+  // we generate (a 2-factor Multiply). It exists to prevent a readability
+  // rewrite from being rejected purely by the default cost heuristic.
+  const expLogSepCost = (() => {
+    if (expr.operator !== 'Multiply' || !expr.ops || expr.ops.length !== 2)
+      return null;
+
+    const match = (
+      xPow: BoxedExpression,
+      ePow: BoxedExpression
+    ): { xBase: BoxedExpression; eExp: BoxedExpression } | null => {
+      if (ePow.operator !== 'Power') return null;
+      if (ePow.op1?.symbol !== 'ExponentialE') return null;
+      if (!ePow.op2) return null;
+
+      if (xPow.operator !== 'Power') return null;
+      if (!xPow.op1 || !xPow.op2) return null;
+
+      // Match exponent: 1/ln(10)
+      const exponent = xPow.op2;
+      if (exponent.operator !== 'Divide') return null;
+      if (exponent.op1?.is(1) !== true) return null;
+
+      const denom = exponent.op2;
+      if (denom?.operator !== 'Ln') return null;
+      if (denom.op1?.is(10) !== true) return null;
+
+      return { xBase: xPow.op1, eExp: ePow.op2 };
+    };
+
+    const [a, b] = expr.ops;
+    const m = match(a, b) ?? match(b, a);
+    if (!m) return null;
+
+    // Approximate the cost of exp(log(x)+y): Add(Log(x), y) ≈ 12 + cost(x) + cost(y)
+    return 12 + costFunction(m.xBase) + costFunction(m.eExp);
+  })();
+  if (expLogSepCost !== null) return expLogSepCost;
+
   //
   // 1/ Symbols
   //
