@@ -1440,3 +1440,147 @@ ce.assume(ce.box(['Less', 'x', 0]));      // → 'contradiction' (x > 4 contradi
 
 - `test/compute-engine/assumptions.test.ts` - Enabled "TAUTOLOGY AND
   CONTRADICTION DETECTION" describe block (4 tests)
+
+---
+
+### 23. Replace Method Auto-Wildcards Fix ✅
+
+**FIXED:** The `.replace()` method no longer auto-converts single-character
+symbols to wildcards when using object rules. This fixes issue #23.
+
+**Problem:** When using `.replace({match: 'a', replace: 2})`, the symbol `'a'`
+was being auto-converted to wildcard `'_a'`, causing it to match ANY expression
+instead of just the literal symbol `a`.
+
+**Solution:** Added `autoWildcard` parameter to `parseRulePart()`. Auto-wildcarding
+is now only enabled when parsing string rules (like `"a*x -> 2*x"`), not when
+parsing object rules.
+
+**Examples that now work correctly:**
+
+```typescript
+const expr = ce.box(['Add', ['Multiply', 'a', 'x'], 'b']);
+
+// Object rules: literal matching
+expr.replace({match: 'a', replace: 2}, {recursive: true});
+// → 2x + b (was: 2 - incorrectly matched entire expression)
+
+// String rules: still auto-wildcard
+expr.replace('a*x -> 5*x', {recursive: true});
+// → 5x + b (works as before)
+
+// Explicit wildcards in object rules still work
+expr.replace({match: ['Multiply', '_a', 'x'], replace: 10}, {recursive: true});
+// → 10 + b
+```
+
+**Files modified:**
+
+- `src/compute-engine/boxed-expression/rules.ts` - Added `autoWildcard` parameter
+  to `parseRulePart()`, defaults to `false` for object rules
+- `test/compute-engine/rules.test.ts` - Added 5 new tests in "OBJECT RULES
+  LITERAL MATCHING" describe block
+
+---
+
+### 15. Extended Sqrt Pattern 4: Nested Sqrt Equations ✅
+
+**IMPLEMENTED:** The solver now handles nested sqrt equations of the form
+`√(x + √x) = a` and similar patterns where √x appears inside the argument of an
+outer sqrt.
+
+**Problem:** Equations like `√(x + 2√x) = 3` or `√(x - √x) = 1` were not being
+solved because they require a substitution approach.
+
+**Solution:** Added `solveNestedSqrtEquation()` function that:
+
+1. Detects patterns where √x appears inside the argument of an outer √
+2. Uses substitution u = √x, so x = u²
+3. Transforms the equation: `√(u² + ku) = a` → `u² + ku = a²`
+4. Solves the resulting quadratic for u
+5. Filters out negative u values (since u = √x ≥ 0)
+6. Returns x = u² for valid u values
+
+**Key implementation details:**
+
+- Uses a unique internal symbol `__internalU` to avoid wildcard interpretation
+- Must replace √x with u BEFORE replacing x with u², otherwise √x becomes √(u²)
+- Uses `isNegative` property on the evaluated u value for filtering
+- Integrates with `validateRoots()` for additional extraneous root filtering
+
+**Examples that now work:**
+
+```typescript
+ce.parse("\sqrt{x + 2\sqrt{x}} = 3").solve("x")  // → [11 - 2√10] ≈ 4.675
+// u² + 2u - 9 = 0 → u = -1 ± √10
+// u = -1 + √10 ≈ 2.16 (valid), u = -1 - √10 ≈ -4.16 (filtered)
+// x = (−1 + √10)² = 11 - 2√10
+
+ce.parse("\sqrt{x + \sqrt{x}} = 2").solve("x")   // → [9/2 - √17/2] ≈ 2.438
+// u² + u - 4 = 0 → u = (-1 ± √17)/2
+// Only u = (-1 + √17)/2 ≈ 1.56 is valid
+
+ce.parse("\sqrt{x - \sqrt{x}} = 1").solve("x")   // → [φ²] ≈ 2.618
+// u² - u - 1 = 0 → u = (1 ± √5)/2
+// Only u = φ (golden ratio) ≈ 1.618 is valid
+```
+
+**Files modified:**
+
+- `src/compute-engine/boxed-expression/solve.ts` - Added `solveNestedSqrtEquation()`
+  function and integration in `findUnivariateRoots()`
+- `test/compute-engine/solve.test.ts` - Added 3 new tests in "NESTED SQRT
+  EQUATIONS (Pattern 4)" describe block
+- `requirements/TODO.md` - Updated Pattern 4 as implemented
+
+---
+
+### 15. Extended Sqrt Pattern 3: Two Sqrt Terms ✅
+
+**IMPLEMENTED:** The solver now handles equations with two sqrt terms of the
+form `√(f(x)) + √(g(x)) = e` using double squaring.
+
+**Problem:** Equations like `√(x+1) + √(x+4) = 3` or `√(x+5) - √(x-3) = 2` were
+not being solved because they require squaring twice to eliminate both sqrts.
+
+**Solution:** Added `solveTwoSqrtEquation()` function that:
+
+1. Detects equations with exactly two sqrt terms and a constant
+2. Isolates one sqrt: `√(f(x)) = e - √(g(x))`
+3. Squares both sides: `f(x) = e² - 2e√(g(x)) + g(x)`
+4. Isolates remaining sqrt: `f(x) - e² - g(x) = -2e√(g(x))`
+5. Squares again: `(f(x) - e² - g(x))² = 4e²·g(x)`
+6. Solves the resulting polynomial equation
+7. Validates each solution by checking:
+   - `f(x) ≥ 0` and `g(x) ≥ 0` (for real sqrts)
+   - The original equation holds numerically
+
+**Key implementation details:**
+
+- Handles both addition (`√f + √g = e`) and subtraction (`√f - √g = e`)
+- Handles negated sqrt terms (`-√f + √g = e`)
+- Validates solutions numerically with tolerance of 1e-9
+- Filters out extraneous roots introduced by squaring
+
+**Examples that now work:**
+
+```typescript
+ce.parse("\sqrt{x+1} + \sqrt{x+4} = 3").solve("x")  // → [0]
+// Verify: √1 + √4 = 1 + 2 = 3 ✓
+
+ce.parse("\sqrt{x} + \sqrt{x+7} = 7").solve("x")    // → [9]
+// Verify: √9 + √16 = 3 + 4 = 7 ✓
+
+ce.parse("\sqrt{x+5} - \sqrt{x-3} = 2").solve("x")  // → [4]
+// Verify: √9 - √1 = 3 - 1 = 2 ✓
+
+ce.parse("\sqrt{2x+1} + \sqrt{x-1} = 4").solve("x") // → [46 - 8√29] ≈ 2.919
+```
+
+**Files modified:**
+
+- `src/compute-engine/boxed-expression/solve.ts` - Added `solveTwoSqrtEquation()`
+  and `solveTwoSqrtEquationCore()` functions, integrated into `findUnivariateRoots()`
+- `test/compute-engine/solve.test.ts` - Added 5 new tests in "TWO SQRT EQUATIONS
+  (Pattern 3)" describe block
+- `requirements/TODO.md` - Updated Pattern 3 as implemented

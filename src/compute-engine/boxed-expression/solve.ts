@@ -1,7 +1,7 @@
 import { isInequalityOperator } from '../latex-syntax/utils';
 import { matchAnyRules } from './rules';
 import { expand } from './expand';
-import type { BoxedExpression, BoxedSubstitution, Rule } from '../global-types';
+import type { BoxedExpression, BoxedSubstitution, ComputeEngine, Rule } from '../global-types';
 
 //
 // Solve Rules
@@ -730,6 +730,207 @@ function transformSqrtLinearEquation(
 }
 
 /**
+ * Detect and solve equations with two sqrt terms: √(f(x)) + √(g(x)) = e
+ *
+ * Pattern 3: √(ax + b) + √(cx + d) = e
+ * Algorithm (double squaring):
+ * 1. Isolate one sqrt: √(f(x)) = e - √(g(x))
+ * 2. Square: f(x) = e² - 2e√(g(x)) + g(x)
+ * 3. Isolate remaining sqrt: f(x) - e² - g(x) = -2e√(g(x))
+ * 4. Square again: (f(x) - e² - g(x))² = 4e²·g(x)
+ * 5. Expand: polynomial equation in x
+ * 6. Solve and validate roots against original equation
+ *
+ * Returns solutions for x, or null if pattern not detected.
+ */
+function solveTwoSqrtEquation(
+  expr: BoxedExpression,
+  variable: string
+): BoxedExpression[] | null {
+  if (expr.operator !== 'Add') return null;
+
+  const ce = expr.engine;
+  const ops = expr.ops;
+  if (!ops || ops.length < 2) return null;
+
+  // Find all sqrt terms in the expression
+  const sqrtTerms: { term: BoxedExpression; arg: BoxedExpression; index: number }[] = [];
+
+  for (let i = 0; i < ops.length; i++) {
+    const op = ops[i];
+
+    // Check for Sqrt(...)
+    if (op.operator === 'Sqrt' && op.op1) {
+      sqrtTerms.push({ term: op, arg: op.op1, index: i });
+      continue;
+    }
+
+    // Check for Negate(Sqrt(...))
+    if (op.operator === 'Negate' && op.op1?.operator === 'Sqrt' && op.op1.op1) {
+      sqrtTerms.push({ term: op, arg: op.op1.op1, index: i });
+      continue;
+    }
+
+    // Check for coefficient * Sqrt(...)
+    if (op.operator === 'Multiply' && op.ops) {
+      for (const factor of op.ops) {
+        if (factor.operator === 'Sqrt' && factor.op1) {
+          sqrtTerms.push({ term: op, arg: factor.op1, index: i });
+          break;
+        }
+      }
+    }
+  }
+
+  // Need exactly 2 sqrt terms for this pattern
+  if (sqrtTerms.length !== 2) return null;
+
+  // Both sqrt args must contain the variable
+  if (!sqrtTerms[0].arg.has(variable) || !sqrtTerms[1].arg.has(variable)) {
+    return null;
+  }
+
+  // Collect non-sqrt terms (the constant e, possibly negated)
+  const sqrtIndices = new Set(sqrtTerms.map((s) => s.index));
+  const nonSqrtTerms = ops.filter((_, i) => !sqrtIndices.has(i));
+
+  // The constant term e (from √f + √g + (-e) = 0, so e = -(non-sqrt terms))
+  let eExpr: BoxedExpression;
+  if (nonSqrtTerms.length === 0) {
+    // √f + √g = 0 case - only works if both are 0
+    return null;
+  } else if (nonSqrtTerms.length === 1) {
+    eExpr = nonSqrtTerms[0].neg();
+  } else {
+    eExpr = ce.function('Add', nonSqrtTerms).neg();
+  }
+
+  // e should be a constant (not contain the variable)
+  if (eExpr.has(variable)) return null;
+
+  // Get f(x) and g(x) from the sqrt arguments
+  const fExpr = sqrtTerms[0].arg;
+  const gExpr = sqrtTerms[1].arg;
+
+  // Check that the sqrt terms are simple (coefficient 1 or -1)
+  // For now, handle: √f + √g = e or √f - √g = e or -√f + √g = e
+  let fSign = 1;
+  let gSign = 1;
+
+  if (sqrtTerms[0].term.operator === 'Negate') fSign = -1;
+  if (sqrtTerms[0].term.operator === 'Multiply') {
+    // Check if coefficient is negative
+    const coef = sqrtTerms[0].term.ops?.find((o) => o.operator !== 'Sqrt');
+    if (coef?.isNegative) fSign = -1;
+    // For now, only handle coefficient ±1
+    const absCoef = coef?.abs().N().numericValue;
+    if (absCoef !== 1 && absCoef !== null) return null;
+  }
+
+  if (sqrtTerms[1].term.operator === 'Negate') gSign = -1;
+  if (sqrtTerms[1].term.operator === 'Multiply') {
+    const coef = sqrtTerms[1].term.ops?.find((o) => o.operator !== 'Sqrt');
+    if (coef?.isNegative) gSign = -1;
+    const absCoef = coef?.abs().N().numericValue;
+    if (absCoef !== 1 && absCoef !== null) return null;
+  }
+
+  // We have: fSign·√f + gSign·√g = e
+  // Rearrange to isolate one sqrt: fSign·√f = e - gSign·√g
+  // For simplicity, assume fSign = 1: √f = e - gSign·√g
+
+  if (fSign !== 1) {
+    // Swap f and g to get the positive one on the left
+    if (gSign === 1) {
+      // Use g on the left: √g = e - fSign·√f
+      // For now, just swap the variables
+      return solveTwoSqrtEquationCore(ce, gExpr, fExpr, eExpr, fSign, variable);
+    }
+    // Both negative: -√f - √g = e, i.e., √f + √g = -e
+    // This only has solutions if -e ≥ 0 and both sqrts can equal parts of it
+    return null;
+  }
+
+  return solveTwoSqrtEquationCore(ce, fExpr, gExpr, eExpr, gSign, variable);
+}
+
+/**
+ * Core solver for √f = e - sign·√g (after isolating one sqrt)
+ */
+function solveTwoSqrtEquationCore(
+  ce: ComputeEngine,
+  fExpr: BoxedExpression,
+  gExpr: BoxedExpression,
+  eExpr: BoxedExpression,
+  gSign: number,
+  variable: string
+): BoxedExpression[] | null {
+  // We have: √f = e - gSign·√g
+  // Square both sides: f = e² - 2·e·gSign·√g + g
+  // Rearrange: f - e² - g = -2·e·gSign·√g
+  // Square again: (f - e² - g)² = 4·e²·g
+
+  const eSquared = eExpr.mul(eExpr);
+
+  // Left side after first squaring and rearranging: f - e² - g
+  const leftSide = fExpr.sub(eSquared).sub(gExpr).simplify();
+
+  // Right side: 4·e²·g
+  const four = ce.number(4);
+  const rightSide = four.mul(eSquared).mul(gExpr).simplify();
+
+  // Square the left side: (f - e² - g)²
+  const leftSquared = leftSide.mul(leftSide).simplify();
+
+  // Final equation: (f - e² - g)² - 4·e²·g = 0
+  const finalEquation = leftSquared.sub(rightSide).simplify();
+
+  // Solve the polynomial equation
+  const solutions = findUnivariateRoots(finalEquation, variable);
+
+  if (solutions.length === 0) return null;
+
+  // Validate solutions against original constraints:
+  // 1. f(x) ≥ 0 (for √f to be real)
+  // 2. g(x) ≥ 0 (for √g to be real)
+  // 3. e - gSign·√g ≥ 0 (for √f = e - gSign·√g, the RHS must be non-negative)
+  // 4. The actual equation √f + gSign·√g = e holds
+
+  const validSolutions: BoxedExpression[] = [];
+
+  for (const sol of solutions) {
+    // Substitute into f and g
+    const fVal = fExpr.subs({ [variable]: sol }).N();
+    const gVal = gExpr.subs({ [variable]: sol }).N();
+
+    // Check f ≥ 0 and g ≥ 0
+    if (fVal.isNegative || gVal.isNegative) continue;
+
+    // Check the original equation: √f + gSign·√g = e
+    const sqrtF = fVal.sqrt();
+    const sqrtG = gVal.sqrt();
+    const lhs = gSign === 1 ? sqrtF.add(sqrtG) : sqrtF.sub(sqrtG);
+    const eVal = eExpr.N();
+
+    // Check if lhs ≈ e
+    const diff = lhs.sub(eVal).abs().N();
+    const diffNum = diff.numericValue;
+    let diffReal = 0;
+    if (typeof diffNum === 'number') {
+      diffReal = diffNum;
+    } else if (diffNum && typeof diffNum === 'object' && 'decimal' in diffNum) {
+      diffReal = (diffNum as any).decimal?.toNumber?.() ?? 0;
+    }
+
+    if (diffReal < 1e-9) {
+      validSolutions.push(sol);
+    }
+  }
+
+  return validSolutions.length > 0 ? validSolutions : null;
+}
+
+/**
  * Detect and solve nested sqrt equations of the form √(f(x, √x)) = a.
  *
  * Pattern 4: √(x + √x) = a (or similar with √x inside outer sqrt)
@@ -932,6 +1133,14 @@ export function findUnivariateRoots(
 
   // Clear denominators to enable matching of expressions like F - 3x/h = 0
   expr = clearDenominators(expr);
+
+  // Try to solve equations with two sqrt terms: √(f(x)) + √(g(x)) = e
+  // Pattern 3: Uses double squaring to eliminate both sqrts
+  const twoSqrtSolutions = solveTwoSqrtEquation(expr, x);
+  if (twoSqrtSolutions !== null) {
+    // Solutions are already validated inside the function
+    return twoSqrtSolutions;
+  }
 
   // Try to solve nested sqrt equations: √(f(x, √x)) = a
   // This uses substitution u = √x, solves for u, then converts back to x = u²

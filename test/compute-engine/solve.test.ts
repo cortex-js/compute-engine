@@ -519,6 +519,54 @@ describe('NESTED SQRT EQUATIONS (Pattern 4)', () => {
   });
 });
 
+// Tests for equations with two sqrt terms: √(f(x)) + √(g(x)) = e (Pattern 3 from TODO #15)
+// Uses double squaring to eliminate both sqrts, then validates roots
+describe('TWO SQRT EQUATIONS (Pattern 3)', () => {
+  // √(x+1) + √(x+4) = 3 → x = 0
+  // Verify: √1 + √4 = 1 + 2 = 3 ✓
+  test('should solve sqrt(x+1) + sqrt(x+4) = 3', () => {
+    const e = expr('\\sqrt{x+1} + \\sqrt{x+4} = 3');
+    const result = e.solve('x');
+    expect(result?.length).toBe(1);
+    expect(result?.[0]?.json).toBe(0);
+  });
+
+  // √x + √(x+7) = 7 → x = 9
+  // Verify: √9 + √16 = 3 + 4 = 7 ✓
+  test('should solve sqrt(x) + sqrt(x+7) = 7', () => {
+    const e = expr('\\sqrt{x} + \\sqrt{x+7} = 7');
+    const result = e.solve('x');
+    expect(result?.length).toBe(1);
+    expect(result?.[0]?.json).toBe(9);
+  });
+
+  // √(x+5) - √(x-3) = 2 → x = 4
+  // Verify: √9 - √1 = 3 - 1 = 2 ✓
+  test('should solve sqrt(x+5) - sqrt(x-3) = 2', () => {
+    const e = expr('\\sqrt{x+5} - \\sqrt{x-3} = 2');
+    const result = e.solve('x');
+    expect(result?.length).toBe(1);
+    expect(result?.[0]?.json).toBe(4);
+  });
+
+  // √(2x+1) + √(x-1) = 4 → x ≈ 2.919
+  test('should solve sqrt(2x+1) + sqrt(x-1) = 4', () => {
+    const e = expr('\\sqrt{2x+1} + \\sqrt{x-1} = 4');
+    const result = e.solve('x');
+    expect(result?.length).toBe(1);
+    expect(result?.[0]?.N().toString()).toMatch(/^2\.91/);
+  });
+
+  // √(x+3) + √(x+8) = 5 → x = 1
+  // Verify: √4 + √9 = 2 + 3 = 5 ✓
+  test('should solve sqrt(x+3) + sqrt(x+8) = 5', () => {
+    const e = expr('\\sqrt{x+3} + \\sqrt{x+8} = 5');
+    const result = e.solve('x');
+    expect(result?.length).toBe(1);
+    expect(result?.[0]?.json).toBe(1);
+  });
+});
+
 // Tests for trigonometric equations
 describe('SOLVING TRIGONOMETRIC EQUATIONS', () => {
   test('should solve sin(x) = 0', () => {

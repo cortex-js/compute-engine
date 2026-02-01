@@ -1,6 +1,6 @@
 # TODO - Compute Engine Improvements
 
-Next: #14, #15, #3, #23 (option 1), #18, #19, #20, #21
+Next: (all sqrt patterns complete)
 
 ## Lower Priority
 
@@ -358,88 +358,42 @@ patterns aren't supported.
 
 **Patterns to add:**
 
-1. **Sqrt of linear expression:** `√(ax + b) + c = 0`
+1. **Sqrt of linear expression:** `√(ax + b) + c = 0` ✅ IMPLEMENTED (in prior work)
    - Solution: `ax + b = c²` when `c ≤ 0`, so `x = (c² - b)/a`
 
-   ```typescript
-   {
-     match: ['Add', ['Sqrt', ['Add', ['Multiply', '__a', '_x'], '__b']], '__c'],
-     replace: ['Divide', ['Subtract', ['Square', '__c'], '__b'], '__a'],
-     condition: (sub) => filter(sub) && (sub.__c.isNonPositive ?? false),
-   }
-   ```
+2. **Sqrt equals linear:** `√(ax + b) = cx + d` ✅ IMPLEMENTED
+   - Pre-processing in `transformSqrtLinearEquation()` squares both sides
+   - Transforms to: `c²x² + (2cd - a)x + (d² - b) = 0`
+   - Quadratic formula solves, `validateRoots()` filters extraneous roots
+   - Examples: `√(x+1) = x` → `1.618`, `√(3x-2) = x` → `[1, 2]`
 
-2. **Sqrt equals linear:** `√(ax + b) = cx + d`
-   - Square both sides: `ax + b = (cx + d)²`
-   - Expand: `ax + b = c²x² + 2cdx + d²`
-   - Rearrange: `c²x² + (2cd - a)x + (d² - b) = 0`
-   - Use quadratic formula, then validate (may have extraneous roots)
+3. **Sum of two sqrt terms:** `√(ax + b) + √(cx + d) = e` ✅ IMPLEMENTED
+   - Isolate one sqrt: `√(f(x)) = e - √(g(x))`
+   - Square: `f(x) = e² - 2e√(g(x)) + g(x)`
+   - Isolate remaining sqrt: `f(x) - e² - g(x) = -2e√(g(x))`
+   - Square again: `(f(x) - e² - g(x))² = 4e²·g(x)`
+   - Solve polynomial and validate against original equation
+   - Implemented in `solveTwoSqrtEquation()` function
+   - Examples: `√(x+1) + √(x+4) = 3` → `0`, `√(x+5) - √(x-3) = 2` → `4`
 
-3. **Sum of two sqrt terms:** `√(ax + b) + √(cx + d) = e`
-   - Isolate one sqrt: `√(ax + b) = e - √(cx + d)`
-   - Square: `ax + b = e² - 2e√(cx + d) + cx + d`
-   - Isolate remaining sqrt and square again
-   - Results in polynomial equation
-
-4. **Nested sqrt:** `√(x + √x) = a`
-   - Use substitution u = √x
+4. **Nested sqrt:** `√(x + √x) = a` ✅ IMPLEMENTED
+   - Uses substitution u = √x, so x = u²
    - Becomes `√(u² + u) = a`, then `u² + u = a²`
-   - Solve quadratic for u, then x = u²
+   - Solves quadratic for u, filters u < 0 (since u = √x ≥ 0), then x = u²
+   - Implemented in `solveNestedSqrtEquation()` function
+   - Examples: `√(x + 2√x) = 3` → `11 - 2√10`, `√(x - √x) = 1` → `φ² ≈ 2.618`
 
-**Complexity note:** Patterns 2-4 can produce extraneous roots and require
-careful validation.
+**Also implemented:** Quadratic without constant term: `ax² + bx = 0`
+- Factor: `x(ax + b) = 0` → `x = 0` or `x = -b/a`
+- This enables Pattern 2 cases like `√x = x` → `x² - x = 0`
 
 **File:** `src/compute-engine/boxed-expression/solve.ts`
 
 ---
 
-### 23. Replace Method Auto-Wildcards Single-Char Symbols
+### ~~23. Replace Method Auto-Wildcards Single-Char Symbols~~ ✅ FIXED
 
-**Problem:** `.replace({match: 'a', replace: 2})` unexpectedly converts `'a'` to
-a wildcard `'_a'`, causing it to match ANY expression instead of just the
-literal symbol `a`.
-
-**Current behavior:**
-
-```typescript
-const expr = ce.box(['Add', ['Multiply', 'a', 'x'], 'b']);
-expr.replace({match: 'a', replace: 2}, {recursive: true})
-// Returns: 2  (wrong!)
-// Expected: 2*x + b
-```
-
-**Root cause:** In `parseRulePart` (rules.ts:350), all single-character symbols
-are auto-converted to wildcards:
-
-```typescript
-if (x.symbol && x.symbol.length === 1) return ce.symbol('_' + x.symbol);
-```
-
-This makes sense when parsing rule strings like `"a*x -> 2*x"` where `a`, `x`
-should be wildcards, but NOT when the user explicitly provides
-`{match: 'a', replace: 2}` where they likely want literal matching.
-
-**Solution options:**
-
-1. Only auto-wildcard when parsing a rule string, not when rule is provided as
-   an object
-2. Add an option like `{literal: true}` to disable auto-wildcarding
-3. Require explicit wildcard syntax `'_a'` and never auto-wildcard
-
-[*] Option 1 is preferred.
-
-**Workaround:** Use `.subs()` for simple variable substitution:
-
-```typescript
-expr.subs({a: 2})  // Returns: 2*x + b (correct)
-```
-
-**Files to modify:**
-
-- `src/compute-engine/boxed-expression/rules.ts` - `parseRulePart` function
-
-**Tests:** See `test/playground.ts` lines 61-72 and PLAYGROUND.md Evaluation
-section
+See `requirements/DONE.md` for implementation details
 
 ---
 

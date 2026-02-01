@@ -13,6 +13,18 @@
   ce.parse('\\sqrt{x} = x').solve('x');        // → [0, 1]
   ```
 
+- **Two Sqrt Equation Solving**: The equation solver now handles equations
+  with two sqrt terms of the form `√(f(x)) + √(g(x)) = e` using double squaring.
+  Both addition and subtraction forms are supported, and extraneous roots are
+  automatically filtered.
+
+  ```javascript
+  ce.parse('\\sqrt{x+1} + \\sqrt{x+4} = 3').solve('x');  // → [0]
+  ce.parse('\\sqrt{x} + \\sqrt{x+7} = 7').solve('x');    // → [9]
+  ce.parse('\\sqrt{x+5} - \\sqrt{x-3} = 2').solve('x');  // → [4]
+  ce.parse('\\sqrt{2x+1} + \\sqrt{x-1} = 4').solve('x'); // → [46 - 8√29] ≈ 2.919
+  ```
+
 - **Nested Sqrt Equation Solving**: The equation solver now handles nested
   sqrt equations of the form `√(x + √x) = a` using substitution. These patterns
   have √x inside the argument of an outer sqrt. The solver uses u = √x
