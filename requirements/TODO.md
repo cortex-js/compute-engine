@@ -343,6 +343,259 @@ alternatives.
 
 ---
 
+## Systems of Equations Enhancements
+
+The following improvements build on the linear system solver implemented for
+issue #189.
+
+### 26. Symbolic Coefficients in Linear Systems
+
+**Problem:** The current linear system solver only works with numeric
+coefficients. Systems like `ax + by = c, dx + ey = f` where coefficients are
+symbols cannot be solved.
+
+**Current behavior:**
+
+```typescript
+const e = ce.parse('\\begin{cases}ax+by=c\\\\dx+ey=f\\end{cases}');
+e.solve(['x', 'y']);  // → null (fails because a, b, c, d, e, f are symbolic)
+```
+
+**Expected behavior:**
+
+```typescript
+e.solve(['x', 'y']);
+// → { x: (ce - bf) / (ae - bd), y: (af - cd) / (ae - bd) }
+```
+
+**Implementation approach:**
+
+1. Extend `gaussianElimination()` to handle symbolic pivots
+2. Use symbolic division instead of numeric comparison for pivot selection
+3. The result will contain expressions in terms of the symbolic coefficients
+4. Handle the case where the determinant (ae - bd) might be zero symbolically
+
+**Challenges:**
+
+- Pivot selection can't use numeric comparison; may need to assume non-zero
+- Results may need simplification to be useful
+- Division by symbolic expressions requires care (domain restrictions)
+
+**Files:**
+
+- `src/compute-engine/boxed-expression/solve-linear-system.ts`
+
+---
+
+### 27. Under-determined Systems (Parametric Solutions)
+
+**Problem:** Systems with fewer equations than unknowns currently return `null`.
+These systems have infinitely many solutions that can be expressed parametrically.
+
+**Current behavior:**
+
+```typescript
+const e = ce.parse('\\begin{cases}x+y=5\\end{cases}');
+e.solve(['x', 'y']);  // → null
+```
+
+**Expected behavior:**
+
+```typescript
+e.solve(['x', 'y']);
+// → { x: t, y: 5 - t } where t is a free parameter
+// Or: { x: ['Subtract', 5, 'y'], y: 'y' } (express x in terms of y)
+```
+
+**Design considerations:**
+
+1. **Free parameter naming:** Use `t`, `s`, `u` or `_t1`, `_t2` for parameters
+2. **Multiple free variables:** For `x + y + z = 10` with 2 free parameters
+3. **Return format:** Could return:
+   - Object with parameter expressions: `{ x: expr_in_t, y: expr_in_t, t: 't' }`
+   - Separate parametric form: `{ solution: {...}, parameters: ['t'] }`
+4. **User preference:** May want to specify which variables are free
+
+**Algorithm:**
+
+1. After Gaussian elimination, identify free variables (columns without pivots)
+2. Express pivot variables in terms of free variables via back-substitution
+3. Return mapping with free variables as themselves or as parameters
+
+**Files:**
+
+- `src/compute-engine/boxed-expression/solve-linear-system.ts`
+
+---
+
+### 28. Non-linear Polynomial Systems
+
+**Problem:** Simple polynomial systems like `xy = 6, x + y = 5` have exact
+solutions but currently return `null` because they're not linear.
+
+**Current behavior:**
+
+```typescript
+const e = ce.parse('\\begin{cases}xy=6\\\\x+y=5\\end{cases}');
+e.solve(['x', 'y']);  // → null
+```
+
+**Expected behavior:**
+
+```typescript
+e.solve(['x', 'y']);
+// → [{ x: 2, y: 3 }, { x: 3, y: 2 }]  // Two solutions
+```
+
+**Solvable patterns:**
+
+1. **Product + sum:** `xy = p, x + y = s` → solve `t² - st + p = 0`
+2. **Substitution-reducible:** One equation is linear in one variable
+   - Solve linear equation for one variable
+   - Substitute into other equation(s)
+   - Solve resulting univariate equation
+3. **Symmetric systems:** Can use symmetric function substitution
+
+**Algorithm for pattern 1 (product + sum):**
+
+```
+Given: xy = p, x + y = s
+x and y are roots of: t² - st + p = 0
+Solve quadratic: t = (s ± √(s² - 4p)) / 2
+Return both (x,y) pairs
+```
+
+**Algorithm for substitution:**
+
+```
+1. Find an equation linear in some variable, e.g., x + 2y = 5 → x = 5 - 2y
+2. Substitute into remaining equations
+3. Solve the resulting system (may be univariate)
+4. Back-substitute to find other variables
+```
+
+**Files:**
+
+- `src/compute-engine/boxed-expression/solve-linear-system.ts` (or new file)
+
+---
+
+### 29. Diagnostic Error Returns
+
+**Problem:** When `solve()` returns `null`, there's no indication of _why_ the
+system couldn't be solved.
+
+**Current behavior:**
+
+```typescript
+ce.parse('\\begin{cases}x+y=1\\\\x+y=2\\end{cases}').solve(['x', 'y']);
+// → null (but why? inconsistent? non-linear? under-determined?)
+```
+
+**Expected behavior options:**
+
+**Option A: Error expressions**
+
+```typescript
+// Returns a BoxedExpression with error info
+// → ["Error", "inconsistent-system", { equations: [...] }]
+```
+
+**Option B: Result object with status**
+
+```typescript
+// Returns { status: 'inconsistent', reason: 'equations 1 and 2 are parallel' }
+// Or: { status: 'under-determined', freeVariables: ['y'] }
+// Or: { status: 'non-linear', nonLinearTerms: ['xy'] }
+```
+
+**Option C: Separate diagnostic function**
+
+```typescript
+ce.diagnoseSystem(equations, variables);
+// → { solvable: false, reason: 'inconsistent', details: {...} }
+```
+
+**Diagnostic categories:**
+
+- `'solved'` - Unique solution found
+- `'inconsistent'` - No solution exists (parallel lines, contradictory equations)
+- `'under-determined'` - Infinitely many solutions
+- `'over-determined'` - More equations than needed (check consistency)
+- `'non-linear'` - Contains non-linear terms
+- `'symbolic-coefficients'` - Contains symbolic coefficients (not yet supported)
+
+**Files:**
+
+- `src/compute-engine/boxed-expression/solve-linear-system.ts`
+
+---
+
+### 30. Linear Inequality Systems
+
+**Problem:** No support for systems of linear inequalities, which define feasible
+regions rather than point solutions.
+
+**Example:**
+
+```typescript
+const e = ce.parse('\\begin{cases}x+y\\leq 10\\\\x\\geq 0\\\\y\\geq 0\\end{cases}');
+e.solve(['x', 'y']);  // → currently null or error
+```
+
+**Possible return formats:**
+
+1. **Vertices of feasible region:** `[(0,0), (10,0), (0,10)]`
+2. **Parametric description:** `{ x: [0, 10], y: [0, 10-x] }`
+3. **Constraint set:** Keep as symbolic representation
+
+**Use cases:**
+
+- Linear programming feasibility
+- Constraint satisfaction
+- Geometric computations (polygon vertices)
+
+**Algorithm (2D vertex enumeration):**
+
+1. Convert inequalities to equalities (boundary lines)
+2. Find all pairwise intersections
+3. Filter to points satisfying all inequalities
+4. Order vertices (convex hull)
+
+**Complexity:** This is significantly more complex than equality systems. May
+want to start with 2-variable case only.
+
+**Files:**
+
+- `src/compute-engine/boxed-expression/solve-linear-system.ts` (or new file)
+
+---
+
+### ~~31. Exact Rational Arithmetic Throughout~~ ✅ COMPLETED
+
+The linear system solver now uses exact rational arithmetic throughout Gaussian
+elimination. Pivot selection uses symbolic comparison via `compareAbsoluteValues()`
+which compares using `abs()` and exact numeric values when possible, with
+fallback to numeric comparison. Zero checks use `isEffectivelyZero()` which
+tries symbolic `.is(0)` first. Systems with fractional coefficients now return
+exact rational results.
+
+**Example:**
+
+```typescript
+const e = ce.parse('\\begin{cases}x+y=1\\\\x-y=1/2\\end{cases}');
+const result = e.solve(['x', 'y']);
+console.log(result.x.json);  // ["Rational", 3, 4]
+console.log(result.y.json);  // ["Rational", 1, 4]
+```
+
+**Files modified:**
+
+- `src/compute-engine/boxed-expression/solve-linear-system.ts`
+- `test/compute-engine/solve.test.ts`
+
+---
+
 ## Equation Solving Enhancements
 
 ### ~~14. Extraneous Root Filtering for Sqrt Equations~~ ✅ COMPLETED
@@ -558,11 +811,15 @@ See `requirements/DONE.md` for implementation details.
 - Simplification: `src/compute-engine/symbolic/simplify-rules.ts`
 - Pattern matching: `src/compute-engine/boxed-expression/match.ts`
 - Rule application: `src/compute-engine/boxed-expression/rules.ts`
+- Univariate solving: `src/compute-engine/boxed-expression/solve.ts`
+- Linear system solving: `src/compute-engine/boxed-expression/solve-linear-system.ts`
+- Polynomials: `src/compute-engine/boxed-expression/polynomials.ts`
 - Library definitions: `src/compute-engine/library/`
 - Logic library: `src/compute-engine/library/logic.ts`
 - Logic tests: `test/compute-engine/logic.test.ts`
 - Logic guide: `doc/16-guide-logic.md`
 - Logic reference: `doc/89-reference-logic.md`
+- Linear algebra guide: `doc/17-guide-linear-algebra.md`
 
 ### Testing commands:
 

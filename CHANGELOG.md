@@ -2,6 +2,18 @@
 
 ### Improvements
 
+- **Absolute Value Power Simplification**: Fixed simplification of `|x^n|`
+  expressions with even and rational exponents. Previously, expressions like
+  `|x²|` and `|x^{2/3}|` were not simplified. Now they correctly simplify
+  based on the parity of the exponent's numerator. Addresses #181.
+
+  ```javascript
+  ce.parse('|x^2|').simplify().latex;      // → "x^2" (even exponent)
+  ce.parse('|x^3|').simplify().latex;      // → "|x|^3" (odd exponent)
+  ce.parse('|x^{2/3}|').simplify().latex;  // → "x^{2/3}" (even numerator)
+  ce.parse('|x^{3/2}|').simplify().latex;  // → "|x|^{3/2}" (odd numerator)
+  ```
+
 - **Systems of Linear Equations**: The `solve()` method now handles systems of
   linear equations parsed from LaTeX `\begin{cases}...\end{cases}` environments.
   Returns an object mapping variable names to their solutions.

@@ -157,24 +157,46 @@ export function simplifyAbs(x: BoxedExpression): RuleStep | undefined {
     const exp = op.op2;
 
     if (base && exp) {
-      // |x^n| -> |x|^n when n is odd or irrational
-      if (exp.isOdd === true || exp.isRational === false) {
+      // |x^n| -> x^n when n is even integer (x^n is always non-negative)
+      if (exp.isEven === true) {
         return {
-          value: ce._fn('Abs', [base]).pow(exp),
-          because: '|x^n| -> |x|^n when n is odd/irrational',
+          value: base.pow(exp),
+          because: '|x^n| -> x^n when n is even',
         };
       }
 
-      // |x^(n/m)| patterns
-      if (exp.operator === 'Divide') {
-        const n = exp.op1;
-        const m = exp.op2;
-        if (n && m) {
-          // |x^(n/m)| -> |x|^(n/m) when n is odd or m is integer
-          if (n.isOdd === true || m.isInteger === true) {
+      // |x^n| -> |x|^n when n is odd integer
+      if (exp.isOdd === true) {
+        return {
+          value: ce._fn('Abs', [base]).pow(exp),
+          because: '|x^n| -> |x|^n when n is odd',
+        };
+      }
+
+      // |x^n| -> |x|^n when n is irrational
+      if (exp.isRational === false) {
+        return {
+          value: ce._fn('Abs', [base]).pow(exp),
+          because: '|x^n| -> |x|^n when n is irrational',
+        };
+      }
+
+      // Handle rational (non-integer) exponents via numerator/denominator
+      // |x^(p/q)| -> x^(p/q) when p is even (x^p is non-negative)
+      // |x^(p/q)| -> |x|^(p/q) when p is odd
+      if (exp.isRational === true && exp.isInteger === false) {
+        const num = exp.numerator;
+        if (num) {
+          if (num.isEven === true) {
+            return {
+              value: base.pow(exp),
+              because: '|x^(p/q)| -> x^(p/q) when p is even',
+            };
+          }
+          if (num.isOdd === true) {
             return {
               value: ce._fn('Abs', [base]).pow(exp),
-              because: '|x^(n/m)| -> |x|^(n/m)',
+              because: '|x^(p/q)| -> |x|^(p/q) when p is odd',
             };
           }
         }
