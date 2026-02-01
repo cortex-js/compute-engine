@@ -397,6 +397,88 @@ describe('EXTRANEOUS ROOT FILTERING FOR SQRT EQUATIONS', () => {
   });
 });
 
+// Tests for sqrt-linear equations: √(f(x)) = g(x) (Pattern 2 from TODO #15)
+// These are transformed by squaring both sides, which can introduce extraneous roots.
+describe('SQRT-LINEAR EQUATIONS (Pattern 2)', () => {
+  // √(x+1) = x → x+1 = x² → x² - x - 1 = 0
+  // Solutions: (1 ± √5)/2 ≈ 1.618 or -0.618
+  // Check: √(1.618+1) ≈ 1.618 ✓, √(-0.618+1) ≈ 0.618 ≠ -0.618 ❌
+  test('should solve sqrt(x+1) = x with extraneous root filtered', () => {
+    const e = expr('\\sqrt{x+1} = x');
+    const result = e.solve('x')?.map((x) => x.N().json);
+    expect(result?.length).toBe(1);
+    expect((result?.[0] as { num: string }).num).toMatch(/^1\.618/);
+  });
+
+  // √(2x+3) = x - 1 → 2x+3 = (x-1)² = x² - 2x + 1
+  // Rearranging: x² - 4x - 2 = 0, solutions: 2 ± √6 ≈ 4.449 or -0.449
+  // Check: √(2*4.449+3) ≈ 3.449 = 4.449-1 ✓, extraneous at -0.449
+  test('should solve sqrt(2x+3) = x-1 with extraneous root filtered', () => {
+    const e = expr('\\sqrt{2x+3} = x - 1');
+    const result = e.solve('x')?.map((x) => x.N().json);
+    expect(result?.length).toBe(1);
+    expect((result?.[0] as { num: string }).num).toMatch(/^4\.449/);
+  });
+
+  // √(x+5) = x + 1 → x+5 = (x+1)² = x² + 2x + 1
+  // Rearranging: x² + x - 4 = 0, solutions: (-1 ± √17)/2 ≈ 1.56 or -2.56
+  // Check: √(1.56+5) ≈ 2.56 = 1.56+1 ✓, extraneous at -2.56
+  test('should solve sqrt(x+5) = x+1 with extraneous root filtered', () => {
+    const e = expr('\\sqrt{x+5} = x + 1');
+    const result = e.solve('x')?.map((x) => x.N().json);
+    expect(result?.length).toBe(1);
+    expect((result?.[0] as { num: string }).num).toMatch(/^1\.56/);
+  });
+
+  // √(3x-2) = x → 3x-2 = x² → x² - 3x + 2 = 0 = (x-1)(x-2)
+  // Solutions: x=1 and x=2, both valid
+  // Check: √(3*1-2) = 1 ✓, √(3*2-2) = 2 ✓
+  test('should solve sqrt(3x-2) = x keeping both valid roots', () => {
+    const e = expr('\\sqrt{3x-2} = x');
+    const result = e.solve('x')?.map((x) => x.json);
+    expect(result?.sort()).toEqual([1, 2].sort());
+  });
+
+  // √(x-1) = x - 3 → x-1 = (x-3)² = x² - 6x + 9
+  // Rearranging: x² - 7x + 10 = 0 = (x-2)(x-5)
+  // Solutions: x=2 and x=5
+  // Check: √(2-1) = 1 ≠ 2-3 = -1 ❌, √(5-1) = 2 = 5-3 ✓
+  test('should solve sqrt(x-1) = x-3 with extraneous root filtered', () => {
+    const e = expr('\\sqrt{x-1} = x - 3');
+    const result = e.solve('x')?.map((x) => x.json);
+    expect(result).toEqual([5]);
+  });
+
+  // √(4x+5) = 2x + 1 → 4x+5 = (2x+1)² = 4x² + 4x + 1
+  // Rearranging: 4x² - 4 = 0 → x² = 1 → x = ±1
+  // Check: √(4*1+5) = 3 = 2*1+1 ✓, √(4*(-1)+5) = 1 ≠ 2*(-1)+1 = -1 ❌
+  test('should solve sqrt(4x+5) = 2x+1 with extraneous root filtered', () => {
+    const e = expr('\\sqrt{4x+5} = 2x + 1');
+    const result = e.solve('x')?.map((x) => x.json);
+    expect(result).toEqual([1]);
+  });
+
+  // Edge case: √x = x (simpler form)
+  // x = x² → x² - x = 0 → x(x-1) = 0 → x = 0 or x = 1
+  // Check: √0 = 0 ✓, √1 = 1 ✓
+  test('should solve sqrt(x) = x with both roots valid', () => {
+    const e = expr('\\sqrt{x} = x');
+    const result = e.solve('x')?.map((x) => x.json);
+    expect(result?.sort()).toEqual([0, 1].sort());
+  });
+
+  // No real solution case: √(x+1) = -x where x > 0
+  // √(x+1) ≥ 0 always, so -x must be ≥ 0, meaning x ≤ 0
+  // Squaring: x+1 = x² → x² - x - 1 = 0, solutions ≈ 1.618 or -0.618
+  // Check: √(1.618+1) ≈ 1.618 ≠ -1.618 ❌, √(-0.618+1) ≈ 0.618 = -(-0.618) ✓
+  test('should solve sqrt(x+1) = -x correctly', () => {
+    const e = expr('\\sqrt{x+1} = -x');
+    const result = e.solve('x')?.map((x) => x.N().json);
+    expect(result?.length).toBe(1);
+    expect((result?.[0] as { num: string }).num).toMatch(/^-0\.618/);
+  });
+});
+
 // Tests for trigonometric equations
 describe('SOLVING TRIGONOMETRIC EQUATIONS', () => {
   test('should solve sin(x) = 0', () => {

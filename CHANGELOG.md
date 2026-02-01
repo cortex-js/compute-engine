@@ -2,6 +2,26 @@
 
 ### Improvements
 
+- **Extended Sqrt Equation Solving**: The equation solver now handles sqrt
+  equations of the form `√(f(x)) = g(x)` by squaring both sides and solving
+  the resulting polynomial. Extraneous roots are automatically filtered.
+
+  ```javascript
+  ce.parse('\\sqrt{x+1} = x').solve('x');      // → [1.618...] (golden ratio)
+  ce.parse('\\sqrt{2x+3} = x - 1').solve('x'); // → [4.449...]
+  ce.parse('\\sqrt{3x-2} = x').solve('x');     // → [1, 2]
+  ce.parse('\\sqrt{x} = x').solve('x');        // → [0, 1]
+  ```
+
+- **Quadratic Equations Without Constant Term**: Added support for solving
+  quadratic equations of the form `ax² + bx = 0` (missing constant term).
+  These are solved by factoring: `x(ax + b) = 0` → `x = 0` or `x = -b/a`.
+
+  ```javascript
+  ce.parse('x^2 + 3x = 0').solve('x');  // → [0, -3]
+  ce.parse('2x^2 - 4x = 0').solve('x'); // → [0, 2]
+  ```
+
 - **Value Resolution from Equality Assumptions**: When an equality assumption
   is made via `ce.assume(['Equal', symbol, value])`, the symbol now correctly
   evaluates to the assumed value. Previously, the symbol would remain unchanged
@@ -69,6 +89,18 @@
   ```
 
 ### Bug Fixes
+
+- **replace() No Longer Auto-Wildcards in Object Rules**: Fixed an issue where
+  `.replace({match: 'a', replace: 2})` would incorrectly treat `'a'` as a
+  wildcard, matching any expression instead of the literal symbol `a`. Now
+  object rules use literal matching, while string rules (like `"a*x -> 2*x"`)
+  continue to auto-wildcard as expected.
+
+  ```javascript
+  const expr = ce.box(['Add', ['Multiply', 'a', 'x'], 'b']);
+  expr.replace({match: 'a', replace: 2}, {recursive: true});
+  // → 2x + b (was: 2 - incorrectly matched entire expression)
+  ```
 
 - **forget() Now Clears Assumed Values**: Fixed an issue where `ce.forget()` did not
   clear values that were set by equality assumptions. After calling

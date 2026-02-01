@@ -88,6 +88,23 @@ export const UNIVARIATE_ROOTS: Rule[] = [
   },
 
   //
+  // Quadratic without constant: ax^2 + bx = 0
+  // Factor: x(ax + b) = 0 → x = 0 or x = -b/a
+  //
+  {
+    match: ['Add', ['Multiply', '__a', ['Power', '_x', 2]], ['Multiply', '__b', '_x']],
+    replace: 0,
+    useVariations: true,
+    condition: filter,
+  },
+  {
+    match: ['Add', ['Multiply', '__a', ['Power', '_x', 2]], ['Multiply', '__b', '_x']],
+    replace: ['Divide', ['Negate', '__b'], '__a'],
+    useVariations: true,
+    condition: filter,
+  },
+
+  //
   // Quadratic formula
   // ax^2 + bx + c = 0
   //
@@ -623,6 +640,96 @@ function clearDenominators(
 }
 
 /**
+ * Transform sqrt equations of the form √(f(x)) = g(x) into polynomial form.
+ *
+ * Pattern 2: √(ax+b) = cx+d
+ * - Squaring both sides: ax+b = (cx+d)²
+ * - Expanding: ax+b = c²x² + 2cdx + d²
+ * - Rearranging: c²x² + (2cd-a)x + (d²-b) = 0
+ *
+ * This handles equations like:
+ * - √(x+1) = x        → x² - x - 1 = 0
+ * - √(2x+3) = x - 1   → x² - 4x - 2 = 0
+ * - √x = x - 2        → x² - 5x + 4 = 0
+ *
+ * Returns the transformed expression if a sqrt-linear pattern is found,
+ * otherwise returns the original expression unchanged.
+ *
+ * Note: Squaring can introduce extraneous roots. The caller should validate
+ * roots against the original equation using validateRoots().
+ */
+function transformSqrtLinearEquation(
+  expr: BoxedExpression,
+  variable: string
+): BoxedExpression {
+  if (expr.operator !== 'Add') return expr;
+
+  const ce = expr.engine;
+  const ops = expr.ops;
+  if (!ops || ops.length === 0) return expr;
+
+  // Find the sqrt term(s) in the expression
+  let sqrtTerm: BoxedExpression | null = null;
+  let sqrtIndex = -1;
+
+  for (let i = 0; i < ops.length; i++) {
+    const op = ops[i];
+    // Check for Sqrt(...)
+    if (op.operator === 'Sqrt') {
+      sqrtTerm = op;
+      sqrtIndex = i;
+      break;
+    }
+    // Check for coefficient * Sqrt(...) like 2*sqrt(x)
+    if (op.operator === 'Multiply' && op.ops) {
+      for (const factor of op.ops) {
+        if (factor.operator === 'Sqrt') {
+          // This is a more complex case (a*√f(x) + g(x) = 0)
+          // For now, only handle the simple case √f(x) + g(x) = 0
+          // The coefficient case is already handled by existing rules
+          break;
+        }
+      }
+    }
+  }
+
+  // No sqrt term found
+  if (!sqrtTerm || sqrtIndex < 0) return expr;
+
+  // Get the argument inside the sqrt
+  const sqrtArg = sqrtTerm.op1;
+  if (!sqrtArg) return expr;
+
+  // Check if the sqrt argument contains the variable
+  if (!sqrtArg.has(variable)) return expr;
+
+  // Collect all non-sqrt terms: these form g(x) where √f(x) + g(x) = 0
+  // So √f(x) = -g(x), and we square to get f(x) = g(x)²
+  const nonSqrtTerms = ops.filter((_, i) => i !== sqrtIndex);
+
+  if (nonSqrtTerms.length === 0) return expr;
+
+  // g(x) = -(sum of non-sqrt terms), since √f(x) + g(x) = 0 means √f(x) = -g(x)
+  let gExpr: BoxedExpression;
+  if (nonSqrtTerms.length === 1) {
+    gExpr = nonSqrtTerms[0].neg();
+  } else {
+    gExpr = ce.function('Add', nonSqrtTerms).neg();
+  }
+
+  // Check that g(x) is linear or polynomial in the variable
+  // (We want to avoid cases where g(x) itself contains sqrt terms)
+  if (gExpr.has('Sqrt')) return expr;
+
+  // Transform: √f(x) = -g(x) becomes f(x) = g(x)²
+  // So the new equation is: f(x) - g(x)² = 0
+  const gSquared = gExpr.mul(gExpr);
+  const transformed = sqrtArg.sub(gSquared).simplify();
+
+  return transformed;
+}
+
+/**
  * Expression is a function of a single variable (`x`) or an Equality
  *
  * Return the roots of that variable
@@ -647,6 +754,12 @@ export function findUnivariateRoots(
 
   // Clear denominators to enable matching of expressions like F - 3x/h = 0
   expr = clearDenominators(expr);
+
+  // Transform sqrt-linear equations: √(f(x)) = g(x) → f(x) - g(x)² = 0
+  // This handles Pattern 2: √(ax+b) = cx+d by squaring both sides.
+  // Must be done before pattern matching so quadratic formula can match.
+  // Note: This can introduce extraneous roots, which are filtered by validateRoots().
+  expr = transformSqrtLinearEquation(expr, x);
 
   const rules = ce.getRuleSet('solve-univariate')!;
 
