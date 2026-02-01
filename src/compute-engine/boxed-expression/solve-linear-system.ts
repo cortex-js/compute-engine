@@ -1,5 +1,6 @@
 import type { BoxedExpression, ComputeEngine } from '../global-types';
 import { polynomialDegree } from './polynomials';
+import { findUnivariateRoots } from './solve';
 
 /**
  * Check if an expression is linear in the given variables.
@@ -488,4 +489,425 @@ function isEffectivelyZero(expr: BoxedExpression | undefined): boolean {
   if (typeof re === 'number' && Math.abs(re) < 1e-14) return true;
 
   return false;
+}
+
+/**
+ * Solve a system of polynomial equations that may be non-linear.
+ * Currently supports:
+ * 1. Product + sum pattern: xy = p, x + y = s (2 equations, 2 variables)
+ * 2. Substitution-reducible: one equation is linear in one variable
+ *
+ * @param equations - Array of BoxedExpression representing equations (Equal expressions)
+ * @param variables - Array of variable names to solve for
+ * @returns Array of solution objects, or null if unsolvable
+ *
+ * @example
+ * ```typescript
+ * // Product + sum pattern
+ * const e = ce.parse('\\begin{cases}xy=6\\\\x+y=5\\end{cases}');
+ * const result = e.solve(['x', 'y']);
+ * // result = [{ x: 2, y: 3 }, { x: 3, y: 2 }]
+ * ```
+ */
+export function solvePolynomialSystem(
+  equations: BoxedExpression[],
+  variables: string[]
+): Array<Record<string, BoxedExpression>> | null {
+  if (equations.length !== 2 || variables.length !== 2) return null;
+
+  const ce = equations[0].engine;
+  const [x, y] = variables;
+
+  // Normalize equations to lhs - rhs = 0 form
+  const normalized = equations.map((eq) => {
+    if (eq.operator === 'Equal') {
+      return eq.op1.sub(eq.op2).expand().simplify();
+    }
+    return eq.expand().simplify();
+  });
+
+  // Try product + sum pattern first
+  const productSumResult = tryProductSumPattern(normalized, x, y, ce);
+  if (productSumResult) return productSumResult;
+
+  // Try substitution method
+  const substitutionResult = trySubstitutionMethod(normalized, x, y, ce);
+  if (substitutionResult) return substitutionResult;
+
+  return null;
+}
+
+/**
+ * Try to solve using the product + sum pattern.
+ * Pattern: xy = p, x + y = s
+ * Solution: x and y are roots of t² - st + p = 0
+ */
+function tryProductSumPattern(
+  equations: BoxedExpression[],
+  x: string,
+  y: string,
+  ce: ComputeEngine
+): Array<Record<string, BoxedExpression>> | null {
+  let productEq: BoxedExpression | null = null;
+  let sumEq: BoxedExpression | null = null;
+  let product: BoxedExpression | null = null;
+  let sum: BoxedExpression | null = null;
+
+  for (const eq of equations) {
+    // Check if this is a product equation: xy - p = 0 or p - xy = 0
+    const productInfo = extractProductEquation(eq, x, y, ce);
+    if (productInfo) {
+      productEq = eq;
+      product = productInfo.product;
+      continue;
+    }
+
+    // Check if this is a sum equation: x + y - s = 0 or s - x - y = 0
+    const sumInfo = extractSumEquation(eq, x, y, ce);
+    if (sumInfo) {
+      sumEq = eq;
+      sum = sumInfo.sum;
+      continue;
+    }
+  }
+
+  if (!productEq || !sumEq || !product || !sum) return null;
+
+  // Now solve: x and y are roots of t² - s*t + p = 0
+  // Construct the quadratic: t² - sum*t + product = 0
+  const t = '_t';
+  const quadratic = ce
+    .box([
+      'Add',
+      ['Square', t],
+      ['Negate', ['Multiply', sum, t]],
+      product,
+    ])
+    .simplify();
+
+  const roots = findUnivariateRoots(quadratic, t);
+  if (roots.length === 0) return null;
+
+  // Filter to only real roots (exclude complex numbers)
+  const realRoots = filterRealRoots(roots);
+  if (realRoots.length === 0) return null;
+
+  // Build solution pairs
+  const solutions: Array<Record<string, BoxedExpression>> = [];
+
+  if (realRoots.length === 1) {
+    // Double root - both x and y have the same value
+    const val = realRoots[0].simplify();
+    solutions.push({ [x]: val, [y]: val });
+  } else if (realRoots.length >= 2) {
+    // Two distinct roots - return both orderings
+    const r1 = realRoots[0].simplify();
+    const r2 = realRoots[1].simplify();
+    solutions.push({ [x]: r1, [y]: r2 });
+    // Only add second solution if roots are different
+    if (!r1.isSame(r2)) {
+      solutions.push({ [x]: r2, [y]: r1 });
+    }
+  }
+
+  return solutions.length > 0 ? solutions : null;
+}
+
+/**
+ * Extract product equation of the form xy = p.
+ * Returns the product value p, or null if not a product equation.
+ */
+function extractProductEquation(
+  eq: BoxedExpression,
+  x: string,
+  y: string,
+  ce: ComputeEngine
+): { product: BoxedExpression } | null {
+  // eq is in the form: lhs - rhs = 0 (already expanded)
+  // We're looking for: xy - p = 0 or c*xy - p = 0
+
+  // Check if the equation contains both variables
+  if (!eq.has(x) || !eq.has(y)) return null;
+
+  // Check if it's a simple product: should have total degree 2 (degree 1 in each var)
+  const degX = polynomialDegree(eq, x);
+  const degY = polynomialDegree(eq, y);
+  if (degX !== 1 || degY !== 1) return null;
+
+  // Extract the coefficient of xy term and the constant term
+  const xyCoef = extractXYCoefficient(eq, x, y, ce);
+  if (!xyCoef || xyCoef.coef.is(0)) return null;
+
+  // The equation is: coef * xy + constant = 0
+  // So: xy = -constant / coef
+  // Product p = -constant / coef
+  const product = xyCoef.constant.neg().div(xyCoef.coef).simplify();
+
+  return { product };
+}
+
+/**
+ * Extract coefficient of xy term and constant from an expression.
+ */
+function extractXYCoefficient(
+  expr: BoxedExpression,
+  x: string,
+  y: string,
+  ce: ComputeEngine
+): { coef: BoxedExpression; constant: BoxedExpression } | null {
+  let xyCoef: BoxedExpression = ce.Zero;
+  let constant: BoxedExpression = ce.Zero;
+
+  // Handle Add
+  if (expr.operator === 'Add') {
+    for (const term of expr.ops!) {
+      const termResult = extractXYCoefficientFromTerm(term, x, y, ce);
+      if (termResult === null) return null;
+      xyCoef = xyCoef.add(termResult.coef);
+      constant = constant.add(termResult.constant);
+    }
+    return { coef: xyCoef, constant };
+  }
+
+  // Handle single term
+  const termResult = extractXYCoefficientFromTerm(expr, x, y, ce);
+  if (termResult === null) return null;
+  return termResult;
+}
+
+/**
+ * Extract xy coefficient from a single term.
+ */
+function extractXYCoefficientFromTerm(
+  term: BoxedExpression,
+  x: string,
+  y: string,
+  ce: ComputeEngine
+): { coef: BoxedExpression; constant: BoxedExpression } | null {
+  const hasX = term.has(x);
+  const hasY = term.has(y);
+
+  // Constant term (no variables)
+  if (!hasX && !hasY) {
+    return { coef: ce.Zero, constant: term };
+  }
+
+  // Term with only one variable - not a pure product equation
+  if (hasX !== hasY) {
+    return null; // Has x but not y, or y but not x - not a pure xy = p form
+  }
+
+  // Term has both x and y - should be c*x*y
+  if (term.operator === 'Multiply') {
+    let coef: BoxedExpression = ce.One;
+    let foundX = false;
+    let foundY = false;
+
+    for (const factor of term.ops!) {
+      if (factor.symbol === x) {
+        if (foundX) return null; // x appears twice
+        foundX = true;
+      } else if (factor.symbol === y) {
+        if (foundY) return null; // y appears twice
+        foundY = true;
+      } else if (factor.has(x) || factor.has(y)) {
+        return null; // Variable in complex subexpression
+      } else {
+        coef = coef.mul(factor);
+      }
+    }
+
+    if (foundX && foundY) {
+      return { coef, constant: ce.Zero };
+    }
+    return null;
+  }
+
+  // Simple x*y (implicit multiply handled differently?)
+  if (term.symbol === x || term.symbol === y) {
+    return null; // Just x or y alone, not xy
+  }
+
+  return null;
+}
+
+/**
+ * Extract sum equation of the form x + y = s.
+ * Returns the sum value s, or null if not a sum equation.
+ */
+function extractSumEquation(
+  eq: BoxedExpression,
+  x: string,
+  y: string,
+  ce: ComputeEngine
+): { sum: BoxedExpression } | null {
+  // eq is in the form: lhs - rhs = 0 (already expanded)
+  // We're looking for: ax + by - s = 0 where equation is linear in both vars
+
+  // Must have both variables
+  if (!eq.has(x) || !eq.has(y)) return null;
+
+  // Must be linear in both
+  const degX = polynomialDegree(eq, x);
+  const degY = polynomialDegree(eq, y);
+  if (degX !== 1 || degY !== 1) return null;
+
+  // Must not have xy term (that would make it non-linear in the system sense)
+  if (!isLinearInVariables(eq, [x, y])) return null;
+
+  // Extract coefficients: ax + by + c = 0
+  const coefX = extractCoefficient(eq, x, ce);
+  const coefY = extractCoefficient(eq, y, ce);
+  const constant = extractConstantTerm(eq, [x, y], ce);
+
+  if (coefX === null || coefY === null) return null;
+
+  // For a "sum" equation we need coefX = coefY (both 1 or both equal)
+  // Actually, we need ax + by = s, so sum s = -(c/a) when a=b, or we normalize
+  // Let's be more flexible: sum = -constant when coefX = coefY = 1
+  // Or more generally: if we can write it as x + y = s (possibly after scaling)
+
+  // Check if coefficients are equal (or one is multiple of other)
+  const ratio = coefX.div(coefY).simplify();
+  if (!ratio.is(1) && !ratio.is(-1)) {
+    // Coefficients are different - not a simple x + y = s form
+    // Could still handle ax + by = s but let's start simple
+    return null;
+  }
+
+  if (ratio.is(1)) {
+    // coefX = coefY, so ax + ay = -c means x + y = -c/a
+    const sum = constant.neg().div(coefX).simplify();
+    return { sum };
+  } else {
+    // ratio is -1: coefX = -coefY, so ax - ay = -c means x - y = -c/a
+    // This is not a sum equation
+    return null;
+  }
+}
+
+/**
+ * Check if a BoxedExpression represents a real value (not complex).
+ */
+function isRealValue(expr: BoxedExpression): boolean {
+  const simplified = expr.simplify();
+  // Check if it's a complex number
+  if (simplified.operator === 'Complex') return false;
+  // Check if it has an imaginary part
+  const im = simplified.im;
+  if (im !== undefined && im !== 0) return false;
+  return true;
+}
+
+/**
+ * Filter roots to only include real values (exclude complex numbers).
+ */
+function filterRealRoots(
+  roots: ReadonlyArray<BoxedExpression>
+): BoxedExpression[] {
+  return roots.filter((r) => isRealValue(r));
+}
+
+/**
+ * Try to solve using the substitution method.
+ * If one equation is linear in one variable, solve for that variable
+ * and substitute into the other equation.
+ */
+function trySubstitutionMethod(
+  equations: BoxedExpression[],
+  x: string,
+  y: string,
+  ce: ComputeEngine
+): Array<Record<string, BoxedExpression>> | null {
+  // Try each equation and each variable
+  for (let i = 0; i < equations.length; i++) {
+    const eq = equations[i];
+    const otherEq = equations[1 - i];
+
+    // Try solving for x
+    const solveForXResult = trySolveLinearFor(eq, x, y, ce);
+    if (solveForXResult) {
+      // x = f(y), substitute into other equation
+      const substituted = otherEq
+        .subs({ [x]: solveForXResult }, { canonical: true })
+        .simplify();
+
+      // Solve the resulting univariate equation for y
+      const yRoots = filterRealRoots(findUnivariateRoots(substituted, y));
+      if (yRoots.length > 0) {
+        const solutions: Array<Record<string, BoxedExpression>> = [];
+        for (const yVal of yRoots) {
+          const ySimplified = yVal.simplify();
+          const xVal = solveForXResult
+            .subs({ [y]: ySimplified }, { canonical: true })
+            .simplify();
+          // Only include if both x and y are real
+          if (isRealValue(xVal) && isRealValue(ySimplified)) {
+            solutions.push({ [x]: xVal, [y]: ySimplified });
+          }
+        }
+        if (solutions.length > 0) return solutions;
+      }
+    }
+
+    // Try solving for y
+    const solveForYResult = trySolveLinearFor(eq, y, x, ce);
+    if (solveForYResult) {
+      // y = f(x), substitute into other equation
+      const substituted = otherEq
+        .subs({ [y]: solveForYResult }, { canonical: true })
+        .simplify();
+
+      // Solve the resulting univariate equation for x
+      const xRoots = filterRealRoots(findUnivariateRoots(substituted, x));
+      if (xRoots.length > 0) {
+        const solutions: Array<Record<string, BoxedExpression>> = [];
+        for (const xVal of xRoots) {
+          const xSimplified = xVal.simplify();
+          const yVal = solveForYResult
+            .subs({ [x]: xSimplified }, { canonical: true })
+            .simplify();
+          // Only include if both x and y are real
+          if (isRealValue(xSimplified) && isRealValue(yVal)) {
+            solutions.push({ [x]: xSimplified, [y]: yVal });
+          }
+        }
+        if (solutions.length > 0) return solutions;
+      }
+    }
+  }
+
+  return null;
+}
+
+/**
+ * Try to solve an equation for one variable, assuming it's linear in that variable.
+ * Returns the expression for the variable, or null if not linear.
+ *
+ * For equation ax + f(y) = 0, returns x = -f(y)/a
+ */
+function trySolveLinearFor(
+  eq: BoxedExpression,
+  solveFor: string,
+  otherVar: string,
+  ce: ComputeEngine
+): BoxedExpression | null {
+  // Check if the equation is linear in solveFor
+  const deg = polynomialDegree(eq, solveFor);
+  if (deg !== 1) return null;
+
+  // Extract coefficient of solveFor and the rest
+  // eq = a * solveFor + rest(otherVar) = 0
+  // solveFor = -rest / a
+
+  const coef = extractCoefficient(eq, solveFor, ce);
+  if (coef === null || coef.is(0)) return null;
+
+  // rest = eq - coef * solveFor
+  const rest = eq.sub(coef.mul(ce.symbol(solveFor))).simplify();
+
+  // solveFor = -rest / coef
+  const solution = rest.neg().div(coef).simplify();
+
+  return solution;
 }

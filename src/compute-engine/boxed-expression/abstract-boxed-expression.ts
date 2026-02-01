@@ -622,7 +622,11 @@ export abstract class _BoxedExpression implements BoxedExpression {
       | string
       | BoxedExpression
       | Iterable<BoxedExpression>
-  ): null | ReadonlyArray<BoxedExpression> | Record<string, BoxedExpression> {
+  ):
+    | null
+    | ReadonlyArray<BoxedExpression>
+    | Record<string, BoxedExpression>
+    | Array<Record<string, BoxedExpression>> {
     return null;
   }
 

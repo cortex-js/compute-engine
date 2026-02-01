@@ -701,10 +701,20 @@ describe('SOLVING SYSTEMS OF LINEAR EQUATIONS', () => {
     expect(result).toBeNull();
   });
 
-  test('should return null for non-linear system: xy=6, x+y=5', () => {
+  test('should solve non-linear product-sum system: xy=6, x+y=5', () => {
+    // Now supported via polynomial system solver
     const e = expr('\\begin{cases}xy=6\\\\x+y=5\\end{cases}');
-    const result = e.solve(['x', 'y']);
-    expect(result).toBeNull();
+    const result = e.solve(['x', 'y']) as Array<Record<string, any>>;
+    expect(result).not.toBeNull();
+    expect(Array.isArray(result)).toBe(true);
+    expect(result.length).toBe(2);
+    // Solutions: (x=2, y=3) and (x=3, y=2)
+    const solutions = result.map((r) => ({
+      x: r.x.json,
+      y: r.y.json,
+    }));
+    expect(solutions).toContainEqual({ x: 2, y: 3 });
+    expect(solutions).toContainEqual({ x: 3, y: 2 });
   });
 
   test('should return null for under-determined system: single equation, two variables', () => {
@@ -721,10 +731,21 @@ describe('SOLVING SYSTEMS OF LINEAR EQUATIONS', () => {
     expect(result.y.json).toBe(2);
   });
 
-  test('should return null for quadratic system: x^2+y=5, x+y=3', () => {
+  test('should solve quadratic system via substitution: x^2+y=5, x+y=3', () => {
+    // Now supported via substitution method
     const e = expr('\\begin{cases}x^2+y=5\\\\x+y=3\\end{cases}');
-    const result = e.solve(['x', 'y']);
-    expect(result).toBeNull();
+    const result = e.solve(['x', 'y']) as Array<Record<string, any>>;
+    expect(result).not.toBeNull();
+    expect(Array.isArray(result)).toBe(true);
+    expect(result.length).toBe(2);
+    // From x+y=3: y = 3-x. Substitute: x² + (3-x) = 5 → x² - x - 2 = 0
+    // Roots: x = 2, x = -1. So solutions: (2, 1) and (-1, 4)
+    const solutions = result.map((r) => ({
+      x: r.x.json,
+      y: r.y.json,
+    }));
+    expect(solutions).toContainEqual({ x: 2, y: 1 });
+    expect(solutions).toContainEqual({ x: -1, y: 4 });
   });
 
   // Tests for exact rational arithmetic (Issue #31)
@@ -780,5 +801,94 @@ describe('SOLVING SYSTEMS OF LINEAR EQUATIONS', () => {
     // y = 6 - 3(6/5) = 6 - 18/5 = 30/5 - 18/5 = 12/5
     expect(result.x.json).toEqual(['Rational', 6, 5]);
     expect(result.y.json).toEqual(['Rational', 12, 5]);
+  });
+});
+
+describe('SOLVING NON-LINEAR POLYNOMIAL SYSTEMS', () => {
+  // Product + sum pattern: xy = p, x + y = s
+  // Note: Basic xy=6, x+y=5 test is in LINEAR SYSTEMS section above
+
+  test('should solve product-sum system: xy=12, x+y=7', () => {
+    const e = expr('\\begin{cases}xy=12\\\\x+y=7\\end{cases}');
+    const result = e.solve(['x', 'y']) as Array<Record<string, any>>;
+    expect(result).not.toBeNull();
+    expect(Array.isArray(result)).toBe(true);
+    expect(result.length).toBe(2);
+    // Solutions: (x=3, y=4) and (x=4, y=3)
+    const solutions = result.map((r) => ({
+      x: r.x.json,
+      y: r.y.json,
+    }));
+    expect(solutions).toContainEqual({ x: 3, y: 4 });
+    expect(solutions).toContainEqual({ x: 4, y: 3 });
+  });
+
+  test('should solve product-sum with double root: xy=4, x+y=4', () => {
+    const e = expr('\\begin{cases}xy=4\\\\x+y=4\\end{cases}');
+    const result = e.solve(['x', 'y']) as Array<Record<string, any>>;
+    expect(result).not.toBeNull();
+    expect(Array.isArray(result)).toBe(true);
+    // Double root: x = y = 2
+    expect(result.length).toBe(1);
+    expect(result[0].x.json).toBe(2);
+    expect(result[0].y.json).toBe(2);
+  });
+
+  test('should solve product-sum with negative product: xy=-6, x+y=1', () => {
+    const e = expr('\\begin{cases}xy=-6\\\\x+y=1\\end{cases}');
+    const result = e.solve(['x', 'y']) as Array<Record<string, any>>;
+    expect(result).not.toBeNull();
+    expect(Array.isArray(result)).toBe(true);
+    expect(result.length).toBe(2);
+    // Solutions: (x=3, y=-2) and (x=-2, y=3)
+    const solutions = result.map((r) => ({
+      x: r.x.json,
+      y: r.y.json,
+    }));
+    expect(solutions).toContainEqual({ x: 3, y: -2 });
+    expect(solutions).toContainEqual({ x: -2, y: 3 });
+  });
+
+  test('should return null for product-sum with no real solutions: xy=10, x+y=1', () => {
+    // t² - t + 10 = 0 has discriminant 1 - 40 = -39 < 0, no real solutions
+    const e = expr('\\begin{cases}xy=10\\\\x+y=1\\end{cases}');
+    const result = e.solve(['x', 'y']);
+    // May return null or empty array depending on implementation
+    expect(result === null || (Array.isArray(result) && result.length === 0)).toBe(true);
+  });
+
+  // Substitution method tests
+  test('should solve via substitution: x+y=5, x^2+y=7', () => {
+    // From first equation: y = 5 - x
+    // Substitute: x² + (5 - x) = 7 → x² - x - 2 = 0 → (x-2)(x+1) = 0
+    // x = 2, y = 3 or x = -1, y = 6
+    const e = expr('\\begin{cases}x+y=5\\\\x^2+y=7\\end{cases}');
+    const result = e.solve(['x', 'y']) as Array<Record<string, any>>;
+    expect(result).not.toBeNull();
+    expect(Array.isArray(result)).toBe(true);
+    expect(result.length).toBe(2);
+    const solutions = result.map((r) => ({
+      x: r.x.json,
+      y: r.y.json,
+    }));
+    expect(solutions).toContainEqual({ x: 2, y: 3 });
+    expect(solutions).toContainEqual({ x: -1, y: 6 });
+  });
+
+  test('should solve via substitution: 2x-y=1, xy=3', () => {
+    // From first equation: y = 2x - 1
+    // Substitute: x(2x - 1) = 3 → 2x² - x - 3 = 0 → (2x-3)(x+1) = 0
+    // x = 3/2, y = 2 or x = -1, y = -3
+    const e = expr('\\begin{cases}2x-y=1\\\\xy=3\\end{cases}');
+    const result = e.solve(['x', 'y']) as Array<Record<string, any>>;
+    expect(result).not.toBeNull();
+    expect(Array.isArray(result)).toBe(true);
+    expect(result.length).toBe(2);
+    const solutions = result.map((r) => ({
+      x: r.x.json,
+      y: r.y.json,
+    }));
+    expect(solutions).toContainEqual({ x: ['Rational', 3, 2], y: 2 });
+    expect(solutions).toContainEqual({ x: -1, y: -3 });
   });
 });

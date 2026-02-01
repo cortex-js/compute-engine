@@ -30,8 +30,34 @@
   // → { x: 1, y: 2, z: 3 }
   ```
 
-  Non-linear systems (containing `xy`, `x²`, etc.) and inconsistent systems
+  Non-linear systems that don't match known patterns and inconsistent systems
   return `null`.
+
+- **Non-linear Polynomial Systems**: The `solve()` method now handles certain
+  non-linear polynomial systems with 2 equations and 2 variables:
+
+  - **Product + sum pattern**: Systems like `xy = p, x + y = s` are solved by
+    recognizing that x and y are roots of the quadratic `t² - st + p = 0`.
+
+  - **Substitution method**: When one equation is linear in one variable, it
+    substitutes into the other equation and solves the resulting univariate
+    equation.
+
+  Returns an array of solution objects (multiple solutions possible):
+
+  ```javascript
+  // Product + sum pattern
+  const e = ce.parse('\\begin{cases}xy=6\\\\x+y=5\\end{cases}');
+  const result = e.solve(['x', 'y']);
+  // → [{ x: 2, y: 3 }, { x: 3, y: 2 }]
+
+  // Substitution method
+  const e2 = ce.parse('\\begin{cases}x+y=5\\\\x^2+y=7\\end{cases}');
+  const result2 = e2.solve(['x', 'y']);
+  // → [{ x: 2, y: 3 }, { x: -1, y: 6 }]
+  ```
+
+  Only real solutions are returned; complex solutions are filtered out.
 
 - **Exact Rational Arithmetic in Linear Systems**: The linear system solver now
   uses exact rational arithmetic throughout the Gaussian elimination process.

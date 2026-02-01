@@ -366,7 +366,11 @@ export class BoxedTensor<T extends TensorDataType> extends _BoxedExpression {
       | string
       | BoxedExpression
       | Iterable<BoxedExpression>
-  ): null | ReadonlyArray<BoxedExpression> | Record<string, BoxedExpression> {
+  ):
+    | null
+    | ReadonlyArray<BoxedExpression>
+    | Record<string, BoxedExpression>
+    | Array<Record<string, BoxedExpression>> {
     // Delegate to the structural expression which may be a BoxedFunction
     // that can handle system of equations
     return this.structural.solve(vars);

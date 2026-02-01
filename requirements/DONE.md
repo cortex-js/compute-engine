@@ -1584,3 +1584,112 @@ ce.parse("\sqrt{2x+1} + \sqrt{x-1} = 4").solve("x") // → [46 - 8√29] ≈ 2.9
 - `test/compute-engine/solve.test.ts` - Added 5 new tests in "TWO SQRT EQUATIONS
   (Pattern 3)" describe block
 - `requirements/TODO.md` - Updated Pattern 3 as implemented
+
+
+---
+
+### 31. Exact Rational Arithmetic in Linear Systems ✅
+
+**IMPLEMENTED:** The linear system solver now uses exact rational arithmetic
+throughout the Gaussian elimination process. Systems with fractional
+coefficients produce exact fractional results rather than floating-point
+approximations.
+
+**Problem:** The solver used floating-point comparison (`Math.abs(val) >
+Math.abs(maxVal)`) for pivot selection, which could introduce numerical errors
+for exact symbolic computation.
+
+**Solution:** Added two new helper functions:
+
+1. `compareAbsoluteValues(a, b)` - Compares absolute values symbolically:
+   - Uses `.abs()` to get absolute values
+   - Compares exact numeric values when both expressions are numeric
+   - Falls back to numeric comparison only when necessary
+   - Returns `1`, `0`, `-1`, or `undefined`
+
+2. `isEffectivelyZero(expr)` - Checks for zero symbolically:
+   - First tries `.is(0)` for exact symbolic check
+   - Then tries `.simplify().is(0)`
+   - Falls back to numeric check with small tolerance only if needed
+
+**Examples that now work:**
+
+```typescript
+const e = ce.parse('\\begin{cases}x+y=1\\\\x-y=1/2\\end{cases}');
+const result = e.solve(['x', 'y']);
+console.log(result.x.json);  // ["Rational", 3, 4]  (exact 3/4)
+console.log(result.y.json);  // ["Rational", 1, 4]  (exact 1/4)
+
+// Fractional coefficients
+const e2 = ce.parse('\\begin{cases}x/3+y/2=1\\\\x/4+y/5=1\\end{cases}');
+const result2 = e2.solve(['x', 'y']);
+// → { x: 36/7, y: -10/7 }  (exact rationals)
+```
+
+**Files modified:**
+
+- `src/compute-engine/boxed-expression/solve-linear-system.ts` - Added
+  `compareAbsoluteValues()` and `isEffectivelyZero()` functions, updated
+  `gaussianElimination()` to use them
+- `test/compute-engine/solve.test.ts` - Added 4 new tests for exact rational
+  arithmetic
+- `CHANGELOG.md` and `doc/changelog.md` - Documented the feature
+- `doc/17-guide-linear-algebra.md` - Added "Exact Rational Arithmetic" section
+
+---
+
+### 28. Non-linear Polynomial Systems ✅
+
+**IMPLEMENTED:** The `solve()` method now handles certain non-linear polynomial
+systems with 2 equations and 2 variables.
+
+**Supported patterns:**
+
+1. **Product + sum:** `xy = p, x + y = s` → x and y are roots of `t² - st + p = 0`
+2. **Substitution method:** When one equation is linear in one variable, solve
+   for it and substitute into the other equation.
+
+**Examples that now work:**
+
+```typescript
+// Product + sum pattern
+const e = ce.parse('\\begin{cases}xy=6\\\\x+y=5\\end{cases}');
+e.solve(['x', 'y']);
+// → [{ x: 2, y: 3 }, { x: 3, y: 2 }]
+
+// Substitution method
+const e2 = ce.parse('\\begin{cases}x+y=5\\\\x^2+y=7\\end{cases}');
+e2.solve(['x', 'y']);
+// → [{ x: 2, y: 3 }, { x: -1, y: 6 }]
+
+// No real solutions → returns null
+const e3 = ce.parse('\\begin{cases}xy=10\\\\x+y=1\\end{cases}');
+e3.solve(['x', 'y']);  // → null (discriminant < 0)
+```
+
+**Key implementation details:**
+
+- `solvePolynomialSystem()` dispatches to pattern-specific solvers
+- `tryProductSumPattern()` extracts product and sum values, constructs and
+  solves the characteristic quadratic
+- `trySubstitutionMethod()` solves one equation for a variable, substitutes,
+  solves the univariate result
+- `filterRealRoots()` and `isRealValue()` filter out complex solutions
+- Returns array of solution objects (multiple solutions) unlike linear systems
+  which return a single object
+
+**Files modified:**
+
+- `src/compute-engine/boxed-expression/solve-linear-system.ts` - Added
+  `solvePolynomialSystem()`, `tryProductSumPattern()`, `trySubstitutionMethod()`,
+  and helper functions
+- `src/compute-engine/boxed-expression/boxed-function.ts` - Updated `solve()` to
+  call polynomial solver after linear solver fails
+- `src/compute-engine/global-types.ts` - Updated return type to include
+  `Array<Record<string, BoxedExpression>>`
+- `src/compute-engine/boxed-expression/abstract-boxed-expression.ts` - Updated
+  return type
+- `src/compute-engine/boxed-expression/boxed-tensor.ts` - Updated return type
+- `test/compute-engine/solve.test.ts` - Added 8 new tests for non-linear systems
+- Updated documentation in CHANGELOG.md, doc/changelog.md, and
+  doc/17-guide-linear-algebra.md

@@ -36,7 +36,10 @@ import {
 import { NumericValue } from '../numeric-value/types';
 
 import { findUnivariateRoots } from './solve';
-import { solveLinearSystem } from './solve-linear-system';
+import {
+  solveLinearSystem,
+  solvePolynomialSystem,
+} from './solve-linear-system';
 import { replace } from './rules';
 import { negate } from './negate';
 import { Product } from './product';
@@ -905,14 +908,24 @@ export class BoxedFunction extends _BoxedExpression {
       | string
       | BoxedExpression
       | Iterable<BoxedExpression>
-  ): null | ReadonlyArray<BoxedExpression> | Record<string, BoxedExpression> {
+  ):
+    | null
+    | ReadonlyArray<BoxedExpression>
+    | Record<string, BoxedExpression>
+    | Array<Record<string, BoxedExpression>> {
     const varNames = normalizedUnknownsForSolve(vars ?? this.unknowns);
 
     // Handle List of equations (system of equations)
     if (this.operator === 'List') {
       const equations = this.ops;
       if (equations && equations.every((eq) => eq.operator === 'Equal')) {
-        return solveLinearSystem([...equations], varNames);
+        // Try linear system first
+        const linearResult = solveLinearSystem([...equations], varNames);
+        if (linearResult) return linearResult;
+
+        // Try polynomial system (non-linear)
+        const polyResult = solvePolynomialSystem([...equations], varNames);
+        if (polyResult) return polyResult;
       }
     }
 

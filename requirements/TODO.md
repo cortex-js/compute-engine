@@ -428,55 +428,9 @@ e.solve(['x', 'y']);
 
 ---
 
-### 28. Non-linear Polynomial Systems
+### ~~28. Non-linear Polynomial Systems~~ ✅ COMPLETED
 
-**Problem:** Simple polynomial systems like `xy = 6, x + y = 5` have exact
-solutions but currently return `null` because they're not linear.
-
-**Current behavior:**
-
-```typescript
-const e = ce.parse('\\begin{cases}xy=6\\\\x+y=5\\end{cases}');
-e.solve(['x', 'y']);  // → null
-```
-
-**Expected behavior:**
-
-```typescript
-e.solve(['x', 'y']);
-// → [{ x: 2, y: 3 }, { x: 3, y: 2 }]  // Two solutions
-```
-
-**Solvable patterns:**
-
-1. **Product + sum:** `xy = p, x + y = s` → solve `t² - st + p = 0`
-2. **Substitution-reducible:** One equation is linear in one variable
-   - Solve linear equation for one variable
-   - Substitute into other equation(s)
-   - Solve resulting univariate equation
-3. **Symmetric systems:** Can use symmetric function substitution
-
-**Algorithm for pattern 1 (product + sum):**
-
-```
-Given: xy = p, x + y = s
-x and y are roots of: t² - st + p = 0
-Solve quadratic: t = (s ± √(s² - 4p)) / 2
-Return both (x,y) pairs
-```
-
-**Algorithm for substitution:**
-
-```
-1. Find an equation linear in some variable, e.g., x + 2y = 5 → x = 5 - 2y
-2. Substitute into remaining equations
-3. Solve the resulting system (may be univariate)
-4. Back-substitute to find other variables
-```
-
-**Files:**
-
-- `src/compute-engine/boxed-expression/solve-linear-system.ts` (or new file)
+See `requirements/DONE.md` for implementation details.
 
 ---
 
@@ -573,26 +527,7 @@ want to start with 2-variable case only.
 
 ### ~~31. Exact Rational Arithmetic Throughout~~ ✅ COMPLETED
 
-The linear system solver now uses exact rational arithmetic throughout Gaussian
-elimination. Pivot selection uses symbolic comparison via `compareAbsoluteValues()`
-which compares using `abs()` and exact numeric values when possible, with
-fallback to numeric comparison. Zero checks use `isEffectivelyZero()` which
-tries symbolic `.is(0)` first. Systems with fractional coefficients now return
-exact rational results.
-
-**Example:**
-
-```typescript
-const e = ce.parse('\\begin{cases}x+y=1\\\\x-y=1/2\\end{cases}');
-const result = e.solve(['x', 'y']);
-console.log(result.x.json);  // ["Rational", 3, 4]
-console.log(result.y.json);  // ["Rational", 1, 4]
-```
-
-**Files modified:**
-
-- `src/compute-engine/boxed-expression/solve-linear-system.ts`
-- `test/compute-engine/solve.test.ts`
+See `requirements/DONE.md` for implementation details.
 
 ---
 
@@ -777,6 +712,69 @@ See `requirements/DONE.md` for implementation details.
 ---
 
 ## Future Improvements (Not Yet Detailed)
+
+### 32. Ambiguous Interval Notation Handling
+
+**Problem:** Currently, `[a, b]` parses as `List` and `(a, b)` parses as `Tuple`
+to maintain backward compatibility. However, in set theory contexts, these
+notations represent closed and open intervals respectively.
+
+**Current behavior:**
+
+```typescript
+ce.parse('[3, 4]').json; // → ["List", 3, 4]
+ce.parse('(3, 4)').json; // → ["Tuple", 3, 4]
+
+// Half-open intervals work (issue #254, implemented)
+ce.parse('[3, 4)').json; // → ["Interval", 3, ["Open", 4]]
+ce.parse('(3, 4]').json; // → ["Interval", ["Open", 3], 4]
+```
+
+**Potential solutions:**
+
+1. **Context-aware parsing:** Detect set theory context (e.g., following `\in`,
+   `\subset`, or within set operations) and parse as intervals:
+
+   ```typescript
+   ce.parse('x \\in [0, 1]'); // [0,1] interpreted as closed interval
+   ce.parse('[0, 1] \\cup [2, 3]'); // Both as intervals
+   ```
+
+2. **Explicit LaTeX notation:** Support the CTAN `interval` package commands:
+
+   ```typescript
+   ce.parse('\\interval{a}{b}'); // Closed interval [a, b]
+   ce.parse('\\interval[open]{a}{b}'); // Open interval (a, b)
+   ce.parse('\\interval[open left]{a}{b}'); // Half-open (a, b]
+   ce.parse('\\interval[open right]{a}{b}'); // Half-open [a, b)
+   ```
+
+3. **Parsing option:** Add a `parseIntervalsAsSets: true` option to the parser:
+   ```typescript
+   ce.parse('[0, 1]', { parseIntervalsAsSets: true });
+   // → ["Interval", 0, 1]
+   ```
+
+**Design considerations:**
+
+- Backward compatibility is important; changing default behavior could break
+  existing code
+- Context-aware parsing adds complexity and may have edge cases
+- Explicit notation is unambiguous but requires users to learn new commands
+- A parsing option gives users control but affects all parsing in that context
+
+**Related:**
+
+- Issue #254 (implemented half-open interval parsing)
+- `\left`/`\right` delimiters with mismatched brackets currently don't work for
+  intervals (e.g., `\left[a, b\right)` fails to parse correctly)
+
+**Files:**
+
+- `src/compute-engine/latex-syntax/dictionary/definitions-sets.ts`
+- `src/compute-engine/latex-syntax/parse.ts`
+
+---
 
 ### Trigonometric Simplification
 
