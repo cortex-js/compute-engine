@@ -13,6 +13,17 @@
   ce.parse('\\sqrt{x} = x').solve('x');        // → [0, 1]
   ```
 
+- **Nested Sqrt Equation Solving**: The equation solver now handles nested
+  sqrt equations of the form `√(x + √x) = a` using substitution. These patterns
+  have √x inside the argument of an outer sqrt. The solver uses u = √x
+  substitution, solves the resulting quadratic, and filters negative u values.
+
+  ```javascript
+  ce.parse('\\sqrt{x + 2\\sqrt{x}} = 3').solve('x');  // → [11 - 2√10] ≈ 4.675
+  ce.parse('\\sqrt{x + \\sqrt{x}} = 2').solve('x');   // → [9/2 - √17/2] ≈ 2.438
+  ce.parse('\\sqrt{x - \\sqrt{x}} = 1').solve('x');   // → [φ²] ≈ 2.618
+  ```
+
 - **Quadratic Equations Without Constant Term**: Added support for solving
   quadratic equations of the form `ax² + bx = 0` (missing constant term).
   These are solved by factoring: `x(ax + b) = 0` → `x = 0` or `x = -b/a`.

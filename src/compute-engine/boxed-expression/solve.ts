@@ -730,6 +730,184 @@ function transformSqrtLinearEquation(
 }
 
 /**
+ * Detect and solve nested sqrt equations of the form √(f(x, √x)) = a.
+ *
+ * Pattern 4: √(x + √x) = a (or similar with √x inside outer sqrt)
+ * - Use substitution u = √x, so x = u²
+ * - √(u² + u) = a becomes u² + u = a² (after squaring)
+ * - Solve quadratic for u, then x = u² for valid u ≥ 0
+ *
+ * Returns the solutions for x, or null if pattern not detected.
+ */
+function solveNestedSqrtEquation(
+  expr: BoxedExpression,
+  variable: string
+): BoxedExpression[] | null {
+  if (expr.operator !== 'Add') return null;
+
+  const ce = expr.engine;
+  const ops = expr.ops;
+  if (!ops || ops.length === 0) return null;
+
+  // Find the outer sqrt term
+  let outerSqrt: BoxedExpression | null = null;
+  let sqrtIndex = -1;
+
+  for (let i = 0; i < ops.length; i++) {
+    if (ops[i].operator === 'Sqrt') {
+      outerSqrt = ops[i];
+      sqrtIndex = i;
+      break;
+    }
+  }
+
+  if (!outerSqrt || sqrtIndex < 0) return null;
+
+  // Get the argument of the outer sqrt
+  const outerArg = outerSqrt.op1;
+  if (!outerArg) return null;
+
+  // Check if the outer sqrt argument contains an inner √x (Sqrt of just the variable)
+  // Pattern: √(... + √x + ...) or √(... + a*√x + ...)
+  let hasInnerSqrtX = false;
+  let innerSqrtCoeff: BoxedExpression | null = null;
+
+  if (outerArg.operator === 'Add' && outerArg.ops) {
+    for (const term of outerArg.ops) {
+      // Check for √x directly
+      if (
+        term.operator === 'Sqrt' &&
+        term.op1?.symbol === variable
+      ) {
+        hasInnerSqrtX = true;
+        innerSqrtCoeff = ce.One;
+        break;
+      }
+      // Check for Negate(Sqrt(x))
+      if (
+        term.operator === 'Negate' &&
+        term.op1?.operator === 'Sqrt' &&
+        term.op1?.op1?.symbol === variable
+      ) {
+        hasInnerSqrtX = true;
+        innerSqrtCoeff = ce.NegativeOne;
+        break;
+      }
+      // Check for coefficient * √x
+      if (term.operator === 'Multiply' && term.ops) {
+        for (const factor of term.ops) {
+          if (
+            factor.operator === 'Sqrt' &&
+            factor.op1?.symbol === variable
+          ) {
+            hasInnerSqrtX = true;
+            // Get coefficient (product of other factors)
+            const otherFactors = term.ops.filter((f) => f !== factor);
+            innerSqrtCoeff =
+              otherFactors.length === 1
+                ? otherFactors[0]
+                : ce.function('Multiply', otherFactors);
+            break;
+          }
+        }
+        if (hasInnerSqrtX) break;
+      }
+    }
+  }
+
+  if (!hasInnerSqrtX) return null;
+
+  // We have √(f(x, √x)) = a pattern
+  // Collect the constant terms (non-sqrt parts of the Add expression)
+  const nonSqrtTerms = ops.filter((_, i) => i !== sqrtIndex);
+  if (nonSqrtTerms.length === 0) return null;
+
+  // a = -(sum of non-sqrt terms)
+  let aExpr: BoxedExpression;
+  if (nonSqrtTerms.length === 1) {
+    aExpr = nonSqrtTerms[0].neg();
+  } else {
+    aExpr = ce.function('Add', nonSqrtTerms).neg();
+  }
+
+  // The constant should not contain the variable
+  if (aExpr.has(variable)) return null;
+
+  // Now we have: √(f(x, √x)) = a
+  // Substitute u = √x, so x = u², √x = u
+  // The outer arg f(x, √x) becomes f(u², u)
+
+  // Create a unique internal symbol for u (avoiding wildcard prefix _)
+  // Use __internalU to avoid collision with user symbols
+  const uSymbolName = '__internalU';
+  const uSymbol = ce.symbol(uSymbolName);
+
+  // Substitute √x → u and x → u² in the outer sqrt argument
+  // IMPORTANT: Must replace √x first, THEN x, otherwise √x becomes √(u²)
+  const step1 = outerArg.replace(
+    { match: ['Sqrt', variable], replace: uSymbol },
+    { recursive: true }
+  );
+  const substitutedArg = step1?.subs({ [variable]: ce.box(['Power', uSymbolName, 2]) });
+
+  if (!substitutedArg) return null;
+
+  // Now we have √(g(u)) = a where g(u) = substitutedArg
+  // Square both sides: g(u) = a²
+  // So g(u) - a² = 0
+
+  const aSquared = aExpr.mul(aExpr);
+  const uEquation = substitutedArg.sub(aSquared).simplify();
+
+  // Solve for u
+  ce.pushScope();
+  ce.declare(uSymbolName, { type: 'real' });
+
+  const uSolutions = findUnivariateRoots(uEquation, uSymbolName);
+
+  ce.popScope();
+
+  if (uSolutions.length === 0) return null;
+
+  // Convert u solutions back to x = u²
+  // Only keep solutions where u ≥ 0 (since u = √x ≥ 0)
+  const xSolutions: BoxedExpression[] = [];
+
+  for (const uVal of uSolutions) {
+    // Check if u is real and non-negative (since u = √x ≥ 0)
+    const uNumeric = uVal.N();
+
+    // Use the expression's isNegative property for reliable checking
+    if (uNumeric.isNegative) continue; // Skip negative u values
+
+    // Also check numericValue for cases where isNegative might not be set
+    const uNum = uNumeric.numericValue;
+    if (uNum !== null) {
+      let uReal: number | null = null;
+      if (typeof uNum === 'number') {
+        uReal = uNum;
+      } else if (typeof uNum === 'object' && 'decimal' in uNum) {
+        // BigNumericValue object - extract numeric value from decimal
+        const decimal = (uNum as any).decimal;
+        if (decimal && typeof decimal.toNumber === 'function') {
+          uReal = decimal.toNumber();
+        }
+      } else if (typeof uNum === 'object' && 're' in uNum) {
+        // Complex number object
+        uReal = (uNum as any).re;
+      }
+      if (uReal !== null && uReal < -1e-10) continue; // Skip negative u values
+    }
+
+    // x = u²
+    const xVal = uVal.mul(uVal).simplify();
+    xSolutions.push(xVal);
+  }
+
+  return xSolutions.length > 0 ? xSolutions : null;
+}
+
+/**
  * Expression is a function of a single variable (`x`) or an Equality
  *
  * Return the roots of that variable
@@ -754,6 +932,14 @@ export function findUnivariateRoots(
 
   // Clear denominators to enable matching of expressions like F - 3x/h = 0
   expr = clearDenominators(expr);
+
+  // Try to solve nested sqrt equations: √(f(x, √x)) = a
+  // This uses substitution u = √x, solves for u, then converts back to x = u²
+  const nestedSqrtSolutions = solveNestedSqrtEquation(expr, x);
+  if (nestedSqrtSolutions !== null) {
+    // Validate and return the solutions
+    return validateRoots(originalExpr, x, nestedSqrtSolutions);
+  }
 
   // Transform sqrt-linear equations: √(f(x)) = g(x) → f(x) - g(x)² = 0
   // This handles Pattern 2: √(ax+b) = cx+d by squaring both sides.

@@ -479,6 +479,46 @@ describe('SQRT-LINEAR EQUATIONS (Pattern 2)', () => {
   });
 });
 
+// Tests for nested sqrt equations: √(f(x, √x)) = a (Pattern 4 from TODO #15)
+// Uses substitution u = √x, solves for u, then x = u² with u ≥ 0 filtering
+describe('NESTED SQRT EQUATIONS (Pattern 4)', () => {
+  // √(x + 2√x) = 3 → u = √x, √(u² + 2u) = 3 → u² + 2u = 9 → u² + 2u - 9 = 0
+  // u = (-2 ± √40)/2 = -1 ± √10
+  // u₁ = -1 + √10 ≈ 2.16 ≥ 0 ✓, u₂ = -1 - √10 ≈ -4.16 < 0 ❌
+  // x = u² = (-1 + √10)² = 1 - 2√10 + 10 = 11 - 2√10 ≈ 4.675
+  test('should solve sqrt(x + 2sqrt(x)) = 3 with negative u filtered', () => {
+    const e = expr('\\sqrt{x + 2\\sqrt{x}} = 3');
+    const result = e.solve('x');
+    expect(result?.length).toBe(1);
+    // x = 11 - 2√10 ≈ 4.675
+    expect(result?.[0]?.N().toString()).toMatch(/^4\.67/);
+  });
+
+  // √(x + √x) = 2 → u² + u = 4 → u² + u - 4 = 0
+  // u = (-1 ± √17)/2
+  // u₁ = (-1 + √17)/2 ≈ 1.56 ≥ 0 ✓, u₂ = (-1 - √17)/2 ≈ -2.56 < 0 ❌
+  // x = u² ≈ 2.44
+  test('should solve sqrt(x + sqrt(x)) = 2 with negative u filtered', () => {
+    const e = expr('\\sqrt{x + \\sqrt{x}} = 2');
+    const result = e.solve('x');
+    expect(result?.length).toBe(1);
+    expect(result?.[0]?.N().toString()).toMatch(/^2\.43/);
+  });
+
+  // √(x - √x) = 1 → u² - u = 1 → u² - u - 1 = 0
+  // u = (1 ± √5)/2
+  // u₁ = (1 + √5)/2 ≈ 1.618 (golden ratio) ≥ 0 ✓
+  // u₂ = (1 - √5)/2 ≈ -0.618 < 0 ❌
+  // x = u² = φ² ≈ 2.618
+  test('should solve sqrt(x - sqrt(x)) = 1 with negative u filtered', () => {
+    const e = expr('\\sqrt{x - \\sqrt{x}} = 1');
+    const result = e.solve('x');
+    expect(result?.length).toBe(1);
+    // x = φ² = ((1+√5)/2)² ≈ 2.618
+    expect(result?.[0]?.N().toString()).toMatch(/^2\.61/);
+  });
+});
+
 // Tests for trigonometric equations
 describe('SOLVING TRIGONOMETRIC EQUATIONS', () => {
   test('should solve sin(x) = 0', () => {
