@@ -659,3 +659,71 @@ describe('SOLVING TRIGONOMETRIC EQUATIONS', () => {
     expect(result).toEqual([]);
   });
 });
+
+// Tests for systems of linear equations
+describe('SOLVING SYSTEMS OF LINEAR EQUATIONS', () => {
+  test('should solve 2x2 system: x+y=70, 2x-4y=80', () => {
+    const e = expr('\\begin{cases}x+y=70\\\\2x-4y=80\\end{cases}');
+    const result = e.solve(['x', 'y']) as Record<string, any>;
+    expect(result).not.toBeNull();
+    expect(result.x.json).toBe(60);
+    expect(result.y.json).toBe(10);
+  });
+
+  test('should solve 3x3 system: x+y+z=6, 2x+y-z=1, x-y+2z=5', () => {
+    const e = expr('\\begin{cases}x+y+z=6\\\\2x+y-z=1\\\\x-y+2z=5\\end{cases}');
+    const result = e.solve(['x', 'y', 'z']) as Record<string, any>;
+    expect(result).not.toBeNull();
+    expect(result.x.json).toBe(1);
+    expect(result.y.json).toBe(2);
+    expect(result.z.json).toBe(3);
+  });
+
+  test('should solve simple 2x2 system: x=1, y=2', () => {
+    const e = expr('\\begin{cases}x=1\\\\y=2\\end{cases}');
+    const result = e.solve(['x', 'y']) as Record<string, any>;
+    expect(result).not.toBeNull();
+    expect(result.x.json).toBe(1);
+    expect(result.y.json).toBe(2);
+  });
+
+  test('should solve system with negative coefficients: -x+y=2, x+y=4', () => {
+    const e = expr('\\begin{cases}-x+y=2\\\\x+y=4\\end{cases}');
+    const result = e.solve(['x', 'y']) as Record<string, any>;
+    expect(result).not.toBeNull();
+    expect(result.x.json).toBe(1);
+    expect(result.y.json).toBe(3);
+  });
+
+  test('should return null for inconsistent system: x+y=1, x+y=2', () => {
+    const e = expr('\\begin{cases}x+y=1\\\\x+y=2\\end{cases}');
+    const result = e.solve(['x', 'y']);
+    expect(result).toBeNull();
+  });
+
+  test('should return null for non-linear system: xy=6, x+y=5', () => {
+    const e = expr('\\begin{cases}xy=6\\\\x+y=5\\end{cases}');
+    const result = e.solve(['x', 'y']);
+    expect(result).toBeNull();
+  });
+
+  test('should return null for under-determined system: single equation, two variables', () => {
+    const e = expr('\\begin{cases}x+y=5\\end{cases}');
+    const result = e.solve(['x', 'y']);
+    expect(result).toBeNull();
+  });
+
+  test('should solve system with fractional solution: x+2y=5, 2x+3y=8', () => {
+    const e = expr('\\begin{cases}x+2y=5\\\\2x+3y=8\\end{cases}');
+    const result = e.solve(['x', 'y']) as Record<string, any>;
+    expect(result).not.toBeNull();
+    expect(result.x.json).toBe(1);
+    expect(result.y.json).toBe(2);
+  });
+
+  test('should return null for quadratic system: x^2+y=5, x+y=3', () => {
+    const e = expr('\\begin{cases}x^2+y=5\\\\x+y=3\\end{cases}');
+    const result = e.solve(['x', 'y']);
+    expect(result).toBeNull();
+  });
+});

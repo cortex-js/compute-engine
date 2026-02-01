@@ -359,6 +359,18 @@ export class BoxedTensor<T extends TensorDataType> extends _BoxedExpression {
     if (this._tensor && this._tensor.dtype !== 'expression') return this;
     return this.structural.N();
   }
+
+  solve(
+    vars?:
+      | Iterable<string>
+      | string
+      | BoxedExpression
+      | Iterable<BoxedExpression>
+  ): null | ReadonlyArray<BoxedExpression> | Record<string, BoxedExpression> {
+    // Delegate to the structural expression which may be a BoxedFunction
+    // that can handle system of equations
+    return this.structural.solve(vars);
+  }
 }
 
 export function isBoxedTensor(val: unknown): val is BoxedTensor<any> {

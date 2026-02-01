@@ -2,6 +2,25 @@
 
 ### Improvements
 
+- **Systems of Linear Equations**: The `solve()` method now handles systems of
+  linear equations parsed from LaTeX `\begin{cases}...\end{cases}` environments.
+  Returns an object mapping variable names to their solutions.
+
+  ```javascript
+  const e = ce.parse('\\begin{cases}x+y=70\\\\2x-4y=80\\end{cases}');
+  const result = e.solve(['x', 'y']);
+  console.log(result.x.json);  // 60
+  console.log(result.y.json);  // 10
+
+  // 3x3 systems work too
+  const e2 = ce.parse('\\begin{cases}x+y+z=6\\\\2x+y-z=1\\\\x-y+2z=5\\end{cases}');
+  const result2 = e2.solve(['x', 'y', 'z']);
+  // → { x: 1, y: 2, z: 3 }
+  ```
+
+  Non-linear systems (containing `xy`, `x²`, etc.) and inconsistent systems
+  return `null`.
+
 - **Extended Sqrt Equation Solving**: The equation solver now handles sqrt
   equations of the form `√(f(x)) = g(x)` by squaring both sides and solving
   the resulting polynomial. Extraneous roots are automatically filtered.

@@ -1552,13 +1552,19 @@ export interface BoxedExpression {
    * If this is an equation, solve the equation for the variables in vars.
    * Otherwise, solve the equation `this = 0` for the variables in vars.
    *
+   * For univariate equations, returns an array of solutions (roots).
+   * For systems of linear equations (List of Equal expressions), returns
+   * an object mapping variable names to their values.
    *
    * ```javascript
+   * // Univariate equation
    * const expr = ce.parse("x^2 + 2*x + 1 = 0");
-   * console.log(expr.solve("x"));
+   * console.log(expr.solve("x")); // Returns array of roots
+   *
+   * // System of linear equations
+   * const system = ce.parse("\\begin{cases}x+y=70\\\\2x-4y=80\\end{cases}");
+   * console.log(system.solve(["x", "y"])); // Returns { x: 60, y: 10 }
    * ```
-   *
-   *
    */
   solve(
     vars?:
@@ -1566,7 +1572,7 @@ export interface BoxedExpression {
       | string
       | BoxedExpression
       | Iterable<BoxedExpression>
-  ): null | ReadonlyArray<BoxedExpression>;
+  ): null | ReadonlyArray<BoxedExpression> | Record<string, BoxedExpression>;
 
   /**
    * If this expression is a number literal, a string literal or a function
