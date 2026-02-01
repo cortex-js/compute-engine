@@ -5,16 +5,15 @@ This document summarizes the status of various test snippets from
 
 ## Summary
 
-| Category          | Fixed | Issues Remaining |
-| ----------------- | ----- | ---------------- |
-| Parsing           | 14    | 6                |
-| Simplification    | 18    | 0                |
-| Evaluation        | 17    | 1                |
-| Solve             | 4     | 1                |
-| Matrix Operations | 6     | 0                |
-| Pattern Matching  | 0     | 2                |
-| Formatting        | 3     | 0                |
-| Other             | 4     | 1                |
+| Category         | Fixed | Issues Remaining |
+| ---------------- | ----- | ---------------- |
+| Parsing          | 14    | 6                |
+| Simplification   | 18    | 0                |
+| Evaluation       | 17    | 1                |
+| Solve            | 4     | 1                |
+| Pattern Matching | 0     | 2                |
+| Formatting       | 3     | 0                |
+| Other            | 4     | 1                |
 
 ---
 
@@ -41,14 +40,14 @@ This document summarizes the status of various test snippets from
 
 ### Issues Remaining
 
-| Test                                  | Line    | Expected               | Actual                                | Notes                               |
-| ------------------------------------- | ------- | ---------------------- | ------------------------------------- | ----------------------------------- |
-| `\textcolor{red}{=}`                  | 11-12   | Styled equals          | `Error('expected-closing-delimiter')` | Cannot style delimiters             |
-| Double integral parsing               | 27-31   | Nested integrals       | Complex nested structure              | Parses but N() times out            |
-| `\mathrm{x+\alpha}`                   | 188     | Symbol with operators  | `"xplusalpha"` (loses plus)           | Characters merged                   |
-| `\mathrm{\oplus}`                     | 189     | Valid symbol           | Error: invalid-first-char             | Cannot use operators in mathrm      |
-| `\gamma(2, 1)`                        | 430     | `Gamma(2, 1)` function | `"EulerGamma" * (2, 1)`               | Should be incomplete gamma          |
-| `\sin\left(x\right.`                  | 645     | Graceful handling      | Multiple errors                       | Missing matchfix handling           |
+| Test                    | Line  | Expected               | Actual                                | Notes                          |
+| ----------------------- | ----- | ---------------------- | ------------------------------------- | ------------------------------ |
+| `\textcolor{red}{=}`    | 11-12 | Styled equals          | `Error('expected-closing-delimiter')` | Cannot style delimiters        |
+| Double integral parsing | 27-31 | Nested integrals       | Complex nested structure              | Parses but N() times out       |
+| `\mathrm{x+\alpha}`     | 188   | Symbol with operators  | `"xplusalpha"` (loses plus)           | Characters merged              |
+| `\mathrm{\oplus}`       | 189   | Valid symbol           | Error: invalid-first-char             | Cannot use operators in mathrm |
+| `\gamma(2, 1)`          | 430   | `Gamma(2, 1)` function | `"EulerGamma" * (2, 1)`               | Should be incomplete gamma     |
+| `\sin\left(x\right.`    | 645   | Graceful handling      | Multiple errors                       | Missing matchfix handling      |
 
 ---
 
@@ -79,8 +78,8 @@ This document summarizes the status of various test snippets from
 
 ### Notes
 
-- **Distribution/Expansion**: `simplify()` does NOT automatically distribute. Use
-  `.expand()` to distribute: `a*(c+d)` → `ac + ad`. This is by design.
+- **Distribution/Expansion**: `simplify()` does NOT automatically distribute.
+  Use `.expand()` to distribute: `a*(c+d)` → `ac + ad`. This is by design.
 - **Assumptions**: Simplifications that depend on assumptions (like `x > 0`) now
   work correctly. Use `ce.assume()` before simplifying.
 
@@ -109,29 +108,30 @@ This document summarizes the status of various test snippets from
 
 ### Issues Remaining
 
-| Test                 | Line    | Expected        | Actual | Notes                             |
-| -------------------- | ------- | --------------- | ------ | --------------------------------- |
-| `.replace()` bug     | 61-72   | `2*x + b`       | `2`    | Single-char symbols auto-wildcard |
+| Test             | Line  | Expected  | Actual | Notes                             |
+| ---------------- | ----- | --------- | ------ | --------------------------------- |
+| `.replace()` bug | 61-72 | `2*x + b` | `2`    | Single-char symbols auto-wildcard |
 
-**Note:** `.replace({match: 'a', replace: 2})` on `a*x + b` returns `2` instead of `2*x + b`.
-The bug is in `parseRulePart` (rules.ts:350) which auto-converts all single-character symbols
-to wildcards. So `'a'` becomes `'_a'`, matching ANY expression rather than the literal symbol `a`.
-See TODO.md #23.
+**Note:** `.replace({match: 'a', replace: 2})` on `a*x + b` returns `2` instead
+of `2*x + b`. The bug is in `parseRulePart` (rules.ts:350) which auto-converts
+all single-character symbols to wildcards. So `'a'` becomes `'_a'`, matching ANY
+expression rather than the literal symbol `a`. See TODO.md #23.
 
 ### Expected Behavior (Not Bugs)
 
-| Test                            | Line    | Behavior                    | Workaround                       |
-| ------------------------------- | ------- | --------------------------- | -------------------------------- |
-| `D(\sin(x), x)` via LaTeX       | 52-56   | Parses `D` as user symbol   | Use `ce.box(['D', ...])` instead |
-| Power `.value`                  | 229-230 | `undefined` before evaluate | Use `.evaluate().value` instead  |
+| Test                      | Line    | Behavior                    | Workaround                       |
+| ------------------------- | ------- | --------------------------- | -------------------------------- |
+| `D(\sin(x), x)` via LaTeX | 52-56   | Parses `D` as user symbol   | Use `ce.box(['D', ...])` instead |
+| Power `.value`            | 229-230 | `undefined` before evaluate | Use `.evaluate().value` instead  |
 
 **Notes:**
-- In LaTeX, `D` is parsed as a predicate/symbol. For derivatives, use `ce.box(['D', expr, var])`
-  or LaTeX notation like `\frac{d}{dx}`.
-- `.value` returns the numeric value only for already-evaluated expressions. For symbolic
-  expressions like `Power(2, 3)`, call `.evaluate()` first.
-- For simple variable substitution, use `.subs()` not `.replace()`. The `.replace()` method
-  is for pattern-based rule replacement.
+
+- In LaTeX, `D` is parsed as a predicate/symbol. For derivatives, use
+  `ce.box(['D', expr, var])` or LaTeX notation like `\frac{d}{dx}`.
+- `.value` returns the numeric value only for already-evaluated expressions. For
+  symbolic expressions like `Power(2, 3)`, call `.evaluate()` first.
+- For simple variable substitution, use `.subs()` not `.replace()`. The
+  `.replace()` method is for pattern-based rule replacement.
 
 ---
 
@@ -148,32 +148,14 @@ See TODO.md #23.
 
 ### Issues Remaining
 
-| Test                      | Line | Expected | Actual  | Notes                                    |
-| ------------------------- | ---- | -------- | ------- | ---------------------------------------- |
+| Test                      | Line | Expected | Actual  | Notes                                           |
+| ------------------------- | ---- | -------- | ------- | ----------------------------------------------- |
 | `2x+1=0` isEqual `x=-1/2` | —    | `true`   | `false` | `isEqual` should recognize equivalent equations |
 
-**Note:** `isEqual` is for mathematical equality (vs `isSame` for structural equality).
-For equations, `isEqual` should check if `(LHS1-RHS1)/(LHS2-RHS2)` simplifies to a
-non-zero constant, indicating the same solution set. See TODO.md #22.
-
----
-
-## Matrix Operations
-
-### Working Correctly
-
-| Test                    | Line    | Input                              | Result              |
-| ----------------------- | ------- | ---------------------------------- | ------------------- |
-| `Shape(A)`              | 532-534 | 2x2 numeric matrix                 | `(2, 2)`            |
-| `Rank(A)`               | 532-534 | 2x2 numeric matrix                 | `2`                 |
-| `Flatten(A)`            | 532-534 | `[[1,2],[3,4]]`                    | `[1,2,3,4]`         |
-| `Transpose(A)`          | 532-534 | `[[1,2],[3,4]]`                    | `[[1,3],[2,4]]`     |
-| `Determinant(A)`        | 532-534 | Numeric matrix                     | `-2`                |
-| `Determinant(X)` symbolic | 536-549 | `[[a,b],[c,d]]`                  | `-b*c + a*d`        |
-
-### Notes
-
-All matrix operations now work correctly, including symbolic matrices assigned via `ce.assign()`.
+**Note:** `isEqual` is for mathematical equality (vs `isSame` for structural
+equality). For equations, `isEqual` should check if `(LHS1-RHS1)/(LHS2-RHS2)`
+simplifies to a non-zero constant, indicating the same solution set. See TODO.md
+#22.
 
 ---
 
@@ -181,13 +163,14 @@ All matrix operations now work correctly, including symbolic matrices assigned v
 
 ### Issues Remaining
 
-| Test                  | Line    | Expected           | Actual | Notes                       |
-| --------------------- | ------- | ------------------ | ------ | --------------------------- |
+| Test                  | Line    | Expected           | Actual | Notes                                         |
+| --------------------- | ------- | ------------------ | ------ | --------------------------------------------- |
 | Match with variation  | 135-148 | Substitution found | `null` | Match `0` against `_a*x` with `a=0` variation |
-| Complex pattern match | 153-165 | Substitution       | `null` | Match `2x-√5√x` against complex Add pattern |
+| Complex pattern match | 153-165 | Substitution       | `null` | Match `2x-√5√x` against complex Add pattern   |
 
-**Note:** Pattern matching with `useVariations: true` has known limitations. The system
-doesn't fully handle all algebraic variations (like matching `0` as `0*x`).
+**Note:** Pattern matching with `useVariations: true` has known limitations. The
+system doesn't fully handle all algebraic variations (like matching `0` as
+`0*x`).
 
 ---
 
@@ -195,16 +178,16 @@ doesn't fully handle all algebraic variations (like matching `0` as `0*x`).
 
 ### Working Correctly
 
-| Test                      | Line    | Input                            | Result                         |
-| ------------------------- | ------- | -------------------------------- | ------------------------------ |
-| Scientific notation       | 40-44   | `1000`                           | `1\cdot10^{3}`                 |
-| Fraction canonical        | 298     | `\frac{2}{-3222233}+\frac{1}{3}` | Uses `Rational` not `Subtract` |
-| `1/(2\sqrt{3})` canonical | 617     | Rationalized                     | `\frac{\sqrt{3}}{6}`           |
+| Test                      | Line  | Input                            | Result                         |
+| ------------------------- | ----- | -------------------------------- | ------------------------------ |
+| Scientific notation       | 40-44 | `1000`                           | `1\cdot10^{3}`                 |
+| Fraction canonical        | 298   | `\frac{2}{-3222233}+\frac{1}{3}` | Uses `Rational` not `Subtract` |
+| `1/(2\sqrt{3})` canonical | 617   | Rationalized                     | `\frac{\sqrt{3}}{6}`           |
 
 ### Expected Behavior
 
-| Test                 | Line | Behavior        | Notes                                   |
-| -------------------- | ---- | --------------- | --------------------------------------- |
+| Test                 | Line | Behavior        | Notes                                                                            |
+| -------------------- | ---- | --------------- | -------------------------------------------------------------------------------- |
 | `3\times3` canonical | 59   | Returns `3 * 3` | `.simplify()` returns `9`. Converting to `3^2` would be a separate optimization. |
 
 ---
@@ -213,25 +196,25 @@ doesn't fully handle all algebraic variations (like matching `0` as `0*x`).
 
 ### Working Correctly
 
-| Test          | Line    | Feature                      | Result                            |
-| ------------- | ------- | ---------------------------- | --------------------------------- |
-| Filter        | 573-577 | `Filter([1,2,3,4,5], IsOdd)` | `[1,3,5]`                         |
-| Expand        | 467-475 | `4x(3x+2)-5(5x-4)`           | `12x^2 - 17x + 20`                |
-| Negate i      | 405-406 | `-i`                         | `-i`                              |
-| Hold          | 232-234 | `Add(1, Hold(2))`            | `1 + Hold(2)`                     |
+| Test     | Line    | Feature                      | Result             |
+| -------- | ------- | ---------------------------- | ------------------ |
+| Filter   | 573-577 | `Filter([1,2,3,4,5], IsOdd)` | `[1,3,5]`          |
+| Expand   | 467-475 | `4x(3x+2)-5(5x-4)`           | `12x^2 - 17x + 20` |
+| Negate i | 405-406 | `-i`                         | `-i`               |
+| Hold     | 232-234 | `Add(1, Hold(2))`            | `1 + Hold(2)`      |
 
 ### Issues Remaining
 
-| Test                      | Line    | Expected         | Actual                            | Notes                         |
-| ------------------------- | ------- | ---------------- | --------------------------------- | ----------------------------- |
-| `List(Filter).evaluate()` | 581-583 | Evaluated filter | Filter not evaluated inside List  | Nested evaluation issue       |
+| Test                      | Line    | Expected         | Actual                           | Notes                   |
+| ------------------------- | ------- | ---------------- | -------------------------------- | ----------------------- |
+| `List(Filter).evaluate()` | 581-583 | Evaluated filter | Filter not evaluated inside List | Nested evaluation issue |
 
 ### Expected Behavior
 
-| Test              | Line    | Behavior           | Notes                                              |
-| ----------------- | ------- | ------------------ | -------------------------------------------------- |
-| Sum with data     | 175-186 | `[50, 130]`        | Element-wise multiplication is correct; use explicit indexing for dot product |
-| `Floor(Cos(n))`   | 271-273 | `floor(cos(n))`    | `n` is unknown, so expression stays symbolic       |
+| Test            | Line    | Behavior        | Notes                                                                         |
+| --------------- | ------- | --------------- | ----------------------------------------------------------------------------- |
+| Sum with data   | 175-186 | `[50, 130]`     | Element-wise multiplication is correct; use explicit indexing for dot product |
+| `Floor(Cos(n))` | 271-273 | `floor(cos(n))` | `n` is unknown, so expression stays symbolic                                  |
 
 ---
 
@@ -263,8 +246,9 @@ These tests verify error handling for malformed input:
 4. **Pattern matching**: The pattern matching system has issues with variations
    and complex patterns.
 
-5. **D operator syntax**: The `D` operator must be used via `ce.box(['D', ...])`,
-   not LaTeX parsing. In LaTeX, `D` is parsed as a user symbol.
+5. **D operator syntax**: The `D` operator must be used via
+   `ce.box(['D', ...])`, not LaTeX parsing. In LaTeX, `D` is parsed as a user
+   symbol.
 
 6. **Trig periodicity**: Trigonometric functions now reduce arguments by their
    period (e.g., `cos(5π + k)` simplifies to `-cos(k)`).

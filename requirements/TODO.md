@@ -1,35 +1,6 @@
 # TODO - Compute Engine Improvements
 
-## Medium Priority
-
-### 1. Add More Integration Patterns
-
-**Common integrals to add:**
-
-```
-∫ x·e^x dx = (x-1)·e^x
-∫ x²·e^x dx = (x²-2x+2)·e^x
-∫ x·sin(x) dx = sin(x) - x·cos(x)
-∫ x·cos(x) dx = cos(x) + x·sin(x)
-∫ ln(x) dx = x·ln(x) - x
-∫ x·ln(x) dx = (x²/2)·ln(x) - x²/4
-∫ sec(x) dx = ln|sec(x) + tan(x)|
-∫ csc(x) dx = -ln|csc(x) + cot(x)|
-∫ sec²(x) dx = tan(x)  (may already exist)
-∫ csc²(x) dx = -cot(x) (may already exist)
-∫ e^x·sin(x) dx = (e^x/2)·(sin(x) - cos(x))
-∫ e^x·cos(x) dx = (e^x/2)·(sin(x) + cos(x))
-```
-
-**File:** `src/compute-engine/symbolic/antiderivative.ts`
-
-**Implementation notes:**
-
-- Each pattern needs proper wildcard handling for coefficients
-- Consider adding integration by parts as a general technique
-- Tabular integration could handle `∫ x^n·e^x dx` patterns
-
----
+Next: #14, #15, #3, #23 (option 1), #18, #19, #20, #21
 
 ## Lower Priority
 
@@ -422,71 +393,14 @@ careful validation.
 
 ---
 
-### 22. Equation Equivalence in isEqual
-
-**Problem:** `isEqual` should recognize mathematically equivalent equations, but
-currently returns `false` for equations with the same solution set.
-
-**Current behavior:**
-
-```typescript
-ce.parse('2x+1=0').isEqual(ce.parse('x=-1/2'))  // Returns: false
-// But both equations have the same solution: x = -1/2
-```
-
-**Expected behavior:**
-
-```typescript
-ce.parse('2x+1=0').isEqual(ce.parse('x=-1/2'))  // Should return: true
-```
-
-**Background:**
-
-- `isSame` = structural equality (same expression tree)
-- `isEqual` = mathematical equality (same mathematical meaning)
-
-For regular expressions, `isEqual` works correctly:
-
-```typescript
-ce.parse('2x').isEqual(ce.parse('x+x'))  // Returns: true (correct)
-```
-
-**Solution:** When `isEqual` compares two `Equal` expressions (equations):
-
-1. Compute `expr1 = LHS1 - RHS1` and `expr2 = LHS2 - RHS2`
-2. Compute `ratio = expr1 / expr2`
-3. Simplify the ratio
-4. If ratio is a non-zero constant, the equations are equivalent (same solution
-   set)
-
-**Example:**
-
-- `2x + 1 = 0` → `expr1 = 2x + 1`
-- `x = -1/2` → `expr2 = x + 1/2`
-- `ratio = (2x + 1) / (x + 1/2) = 2` (constant)
-- Therefore, equations are equivalent → return `true`
-
-**Edge cases:**
-
-- Handle equations with no solutions (e.g., `0 = 1`)
-- Handle equations that are identities (e.g., `x = x`)
-- Ensure ratio check handles symbolic expressions correctly
-
-**Files to modify:**
-
-- `src/compute-engine/boxed-expression/abstract-boxed-expression.ts` - `isEqual`
-  method
-
-**Tests:** See `test/playground.ts` and PLAYGROUND.md Solve section
-
----
-
 ### 23. Replace Method Auto-Wildcards Single-Char Symbols
 
-**Problem:** `.replace({match: 'a', replace: 2})` unexpectedly converts `'a'` to a wildcard
-`'_a'`, causing it to match ANY expression instead of just the literal symbol `a`.
+**Problem:** `.replace({match: 'a', replace: 2})` unexpectedly converts `'a'` to
+a wildcard `'_a'`, causing it to match ANY expression instead of just the
+literal symbol `a`.
 
 **Current behavior:**
+
 ```typescript
 const expr = ce.box(['Add', ['Multiply', 'a', 'x'], 'b']);
 expr.replace({match: 'a', replace: 2}, {recursive: true})
@@ -494,30 +408,38 @@ expr.replace({match: 'a', replace: 2}, {recursive: true})
 // Expected: 2*x + b
 ```
 
-**Root cause:** In `parseRulePart` (rules.ts:350), all single-character symbols are
-auto-converted to wildcards:
+**Root cause:** In `parseRulePart` (rules.ts:350), all single-character symbols
+are auto-converted to wildcards:
+
 ```typescript
 if (x.symbol && x.symbol.length === 1) return ce.symbol('_' + x.symbol);
 ```
 
-This makes sense when parsing rule strings like `"a*x -> 2*x"` where `a`, `x` should be
-wildcards, but NOT when the user explicitly provides `{match: 'a', replace: 2}` where
-they likely want literal matching.
+This makes sense when parsing rule strings like `"a*x -> 2*x"` where `a`, `x`
+should be wildcards, but NOT when the user explicitly provides
+`{match: 'a', replace: 2}` where they likely want literal matching.
 
 **Solution options:**
-1. Only auto-wildcard when parsing a rule string, not when rule is provided as an object
+
+1. Only auto-wildcard when parsing a rule string, not when rule is provided as
+   an object
 2. Add an option like `{literal: true}` to disable auto-wildcarding
 3. Require explicit wildcard syntax `'_a'` and never auto-wildcard
 
+[*] Option 1 is preferred.
+
 **Workaround:** Use `.subs()` for simple variable substitution:
+
 ```typescript
 expr.subs({a: 2})  // Returns: 2*x + b (correct)
 ```
 
 **Files to modify:**
+
 - `src/compute-engine/boxed-expression/rules.ts` - `parseRulePart` function
 
-**Tests:** See `test/playground.ts` lines 61-72 and PLAYGROUND.md Evaluation section
+**Tests:** See `test/playground.ts` lines 61-72 and PLAYGROUND.md Evaluation
+section
 
 ---
 
@@ -566,7 +488,7 @@ ce.parse('{}_2^4 He').json
      pre-sup
 
 3. **MathJSON representation options:**
-   - `["PreScripts", base, pre_sub, pre_sup]` - explicit function
+   - `["Prescripts", base, pre_sub, pre_sup]` - explicit function
    - `["Subscript", base, sub, pre_sub]` - extend existing Subscript
    - Keep as separate metadata in the expression structure
 
@@ -579,185 +501,30 @@ ce.parse('{}_2^4 He').json
 
 - `src/compute-engine/latex-syntax/parse.ts` - Main parsing logic
 - `src/compute-engine/latex-syntax/parse-symbol.ts` - Symbol parsing
-- `src/compute-engine/library/core.ts` - Add PreScripts function definition (if
+- `src/compute-engine/library/core.ts` - Add Prescripts function definition (if
   new function)
 
 **Tests to add:**
 
 ```typescript
 test('pre-subscript parsing', () => {
-  expect(parse('{}_2 X')).toMatchInlineSnapshot(`["PreScripts", "X", 2, "Nothing"]`);
+  expect(parse('{}_2 X')).toMatchInlineSnapshot(`["Prescripts", "X", 2, "Nothing"]`);
 });
 
 test('pre-superscript parsing', () => {
-  expect(parse('{}^4 X')).toMatchInlineSnapshot(`["PreScripts", "X", "Nothing", 4]`);
+  expect(parse('{}^4 X')).toMatchInlineSnapshot(`["Prescripts", "X", "Nothing", 4]`);
 });
 
 test('pre-scripts parsing', () => {
-  expect(parse('{}_2^4 X')).toMatchInlineSnapshot(`["PreScripts", "X", 2, 4]`);
+  expect(parse('{}_2^4 X')).toMatchInlineSnapshot(`["Prescripts", "X", 2, 4]`);
 });
 
 test('isotope notation', () => {
-  expect(parse('{}^{14}_6 C')).toMatchInlineSnapshot(`["PreScripts", "C", 6, 14]`);
+  expect(parse('{}^{14}_6 C')).toMatchInlineSnapshot(`["Prescripts", "C", 6, 14]`);
 });
 ```
 
 **Priority:** Low - primarily affects physics/chemistry notation
-
----
-
-### 17. Subscript Evaluation Functions for Sequences
-
-**Problem:** Users cannot define evaluation functions for subscripted symbols.
-For example, defining a Fibonacci sequence `F_n` where `F_0 = 0`, `F_1 = 1`,
-`F_n = F_{n-1} + F_{n-2}`.
-
-**Current behavior:**
-
-```typescript
-// No way to define this:
-ce.declare('F', { subscriptEvaluate: (n) => fibonacci(n) });
-
-// Subscript expressions remain symbolic:
-ce.parse('F_5').evaluate()
-// → ['Subscript', 'F', 5]  // No evaluation possible
-```
-
-**Desired behavior:**
-
-```typescript
-// Define a sequence with subscript evaluation
-ce.declare('F', {
-  type: 'function',  // or 'sequence' if we add a new type
-  subscriptEvaluate: (n, ce) => {
-    const nVal = n.re;
-    if (!Number.isInteger(nVal) || nVal < 0) return undefined;
-    if (nVal === 0) return ce.Zero;
-    if (nVal === 1) return ce.One;
-    let a = 0, b = 1;
-    for (let i = 2; i <= nVal; i++) {
-      [a, b] = [b, a + b];
-    }
-    return ce.number(b);
-  },
-});
-
-ce.parse('F_5').evaluate()
-// → 5
-
-ce.parse('F_{10}').evaluate()
-// → 55
-```
-
-**Implementation considerations:**
-
-1. **Extend symbol definition interface:**
-
-   ```typescript
-   interface SymbolDefinition {
-     // ... existing properties ...
-
-     // New: Function to evaluate subscripted forms of this symbol
-     subscriptEvaluate?: (
-       subscript: BoxedExpression,
-       engine: IComputeEngine
-     ) => BoxedExpression | undefined;
-   }
-   ```
-
-2. **Modify Subscript evaluation:** In `src/compute-engine/library/core.ts`, the
-   Subscript function's evaluate handler should check if the base symbol has a
-   `subscriptEvaluate` function defined.
-
-3. **Handle compound symbols:** Need to decide how this interacts with compound
-   symbols like `F_n` being parsed as a single symbol. Options:
-   - Parse `F_5` as `['Subscript', 'F', 5]` (not a symbol) when `F` has
-     subscriptEvaluate
-   - Always parse as compound symbol but resolve during evaluation
-   - Add a declaration flag to control parsing behavior
-
-4. **Recursive definitions:** For sequences like Fibonacci, users might want to
-   define them recursively:
-
-   ```typescript
-   ce.declare('F', {
-     subscriptEvaluate: (n, ce) => {
-       const nVal = n.re;
-       if (nVal === 0) return ce.Zero;
-       if (nVal === 1) return ce.One;
-       // Recursive call - need memoization to avoid exponential time
-       return ce.parse(`F_{${nVal-1}} + F_{${nVal-2}}`).evaluate();
-     },
-   });
-   ```
-
-   Consider adding built-in memoization support.
-
-5. **Multi-index sequences:** Support sequences with multiple indices (e.g.,
-   Pascal's triangle `C_{n,k}`):
-   ```typescript
-   ce.declare('C', {
-     subscriptEvaluate: ([n, k], ce) => {
-       // Binomial coefficient C(n, k)
-     },
-   });
-   ```
-
-**Common sequences to support:**
-
-- Fibonacci: `F_n = F_{n-1} + F_{n-2}`
-- Lucas: `L_n = L_{n-1} + L_{n-2}` with `L_0 = 2, L_1 = 1`
-- Triangular: `T_n = n(n+1)/2`
-- Catalan: `C_n = \frac{1}{n+1}\binom{2n}{n}`
-- Bell numbers: `B_n` (number of partitions of n-element set)
-- Prime counting: `\pi_n` (number of primes ≤ n)
-
-**Files to modify:**
-
-- `src/compute-engine/global-types.ts` - Add subscriptEvaluate to
-  SymbolDefinition interface
-- `src/compute-engine/library/core.ts` - Modify Subscript evaluate handler
-- `src/compute-engine/compute-engine.ts` - Handle subscriptEvaluate in declare()
-- `src/compute-engine/latex-syntax/parse-symbol.ts` - Potentially modify
-  compound symbol parsing
-
-**Tests to add:**
-
-```typescript
-test('fibonacci sequence', () => {
-  ce.declare('F', {
-    subscriptEvaluate: (n, ce) => {
-      // ... fibonacci implementation ...
-    },
-  });
-  expect(ce.parse('F_0').evaluate().value).toBe(0);
-  expect(ce.parse('F_1').evaluate().value).toBe(1);
-  expect(ce.parse('F_{10}').evaluate().value).toBe(55);
-});
-
-test('custom sequence with symbolic subscript', () => {
-  ce.declare('a', {
-    subscriptEvaluate: (n, ce) => ce.number(n.re * 2),
-  });
-  expect(ce.parse('a_5').evaluate().value).toBe(10);
-  expect(ce.parse('a_n').evaluate().json).toMatchInlineSnapshot(`["Subscript", "a", "n"]`);
-});
-
-test('multi-index sequence', () => {
-  ce.declare('A', {
-    subscriptEvaluate: ([i, j], ce) => ce.number(i.re + j.re),
-  });
-  expect(ce.parse('A_{2,3}').evaluate().value).toBe(5);
-});
-```
-
-**Related:** This feature would complement the type-aware subscript handling
-(implemented) where collection-typed symbols convert subscripts to `At()` calls.
-For sequences defined via subscriptEvaluate, the subscript becomes an evaluated
-function call rather than array indexing.
-
-**Priority:** Medium - useful for mathematical sequences and recurrence
-relations
 
 ---
 
