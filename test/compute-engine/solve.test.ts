@@ -892,3 +892,117 @@ describe('SOLVING NON-LINEAR POLYNOMIAL SYSTEMS', () => {
     expect(solutions).toContainEqual({ x: -1, y: -3 });
   });
 });
+
+describe('SOLVING LINEAR INEQUALITY SYSTEMS', () => {
+  // Test basic triangle feasible region: x >= 0, y >= 0, x + y <= 10
+  test('should solve simple triangle: x>=0, y>=0, x+y<=10', () => {
+    const e = expr('\\begin{cases}x\\geq 0\\\\y\\geq 0\\\\x+y\\leq 10\\end{cases}');
+    const result = e.solve(['x', 'y']) as Array<Record<string, any>>;
+    expect(result).not.toBeNull();
+    expect(Array.isArray(result)).toBe(true);
+    expect(result.length).toBe(3);
+
+    // Extract numeric values for easier comparison
+    const vertices = result.map((r) => ({
+      x: typeof r.x.json === 'number' ? r.x.json : r.x.N().numericValue,
+      y: typeof r.y.json === 'number' ? r.y.json : r.y.N().numericValue,
+    }));
+
+    // Should have vertices at (0,0), (10,0), (0,10)
+    expect(vertices).toContainEqual({ x: 0, y: 0 });
+    expect(vertices).toContainEqual({ x: 10, y: 0 });
+    expect(vertices).toContainEqual({ x: 0, y: 10 });
+  });
+
+  // Test square feasible region: 0 <= x <= 5, 0 <= y <= 5
+  test('should solve square region: 0<=x<=5, 0<=y<=5', () => {
+    const e = expr('\\begin{cases}x\\geq 0\\\\x\\leq 5\\\\y\\geq 0\\\\y\\leq 5\\end{cases}');
+    const result = e.solve(['x', 'y']) as Array<Record<string, any>>;
+    expect(result).not.toBeNull();
+    expect(Array.isArray(result)).toBe(true);
+    expect(result.length).toBe(4);
+
+    const vertices = result.map((r) => ({
+      x: typeof r.x.json === 'number' ? r.x.json : r.x.N().numericValue,
+      y: typeof r.y.json === 'number' ? r.y.json : r.y.N().numericValue,
+    }));
+
+    // Should have vertices at (0,0), (5,0), (5,5), (0,5)
+    expect(vertices).toContainEqual({ x: 0, y: 0 });
+    expect(vertices).toContainEqual({ x: 5, y: 0 });
+    expect(vertices).toContainEqual({ x: 5, y: 5 });
+    expect(vertices).toContainEqual({ x: 0, y: 5 });
+  });
+
+  // Test with coefficients: 2x + 3y <= 12, x >= 0, y >= 0
+  test('should solve with coefficients: 2x+3y<=12, x>=0, y>=0', () => {
+    const e = expr('\\begin{cases}2x+3y\\leq 12\\\\x\\geq 0\\\\y\\geq 0\\end{cases}');
+    const result = e.solve(['x', 'y']) as Array<Record<string, any>>;
+    expect(result).not.toBeNull();
+    expect(Array.isArray(result)).toBe(true);
+    expect(result.length).toBe(3);
+
+    const vertices = result.map((r) => ({
+      x: typeof r.x.json === 'number' ? r.x.json : r.x.N().numericValue,
+      y: typeof r.y.json === 'number' ? r.y.json : r.y.N().numericValue,
+    }));
+
+    // Vertices at (0,0), (6,0), (0,4)
+    expect(vertices).toContainEqual({ x: 0, y: 0 });
+    expect(vertices).toContainEqual({ x: 6, y: 0 });
+    expect(vertices).toContainEqual({ x: 0, y: 4 });
+  });
+
+  // Test using Less (strict inequality)
+  test('should handle strict inequalities: x>0, y>0, x+y<10', () => {
+    const e = expr('\\begin{cases}x>0\\\\y>0\\\\x+y<10\\end{cases}');
+    const result = e.solve(['x', 'y']) as Array<Record<string, any>>;
+    expect(result).not.toBeNull();
+    expect(Array.isArray(result)).toBe(true);
+    // Same vertices as non-strict case (boundary points)
+    expect(result.length).toBe(3);
+  });
+
+  // Test pentagon with multiple constraints
+  test('should solve pentagon: x>=0, y>=0, x<=4, y<=4, x+y<=6', () => {
+    const e = expr('\\begin{cases}x\\geq 0\\\\y\\geq 0\\\\x\\leq 4\\\\y\\leq 4\\\\x+y\\leq 6\\end{cases}');
+    const result = e.solve(['x', 'y']) as Array<Record<string, any>>;
+    expect(result).not.toBeNull();
+    expect(Array.isArray(result)).toBe(true);
+    expect(result.length).toBe(5);
+
+    const vertices = result.map((r) => ({
+      x: typeof r.x.json === 'number' ? r.x.json : r.x.N().numericValue,
+      y: typeof r.y.json === 'number' ? r.y.json : r.y.N().numericValue,
+    }));
+
+    // Vertices at (0,0), (4,0), (4,2), (2,4), (0,4)
+    expect(vertices).toContainEqual({ x: 0, y: 0 });
+    expect(vertices).toContainEqual({ x: 4, y: 0 });
+    expect(vertices).toContainEqual({ x: 4, y: 2 });
+    expect(vertices).toContainEqual({ x: 2, y: 4 });
+    expect(vertices).toContainEqual({ x: 0, y: 4 });
+  });
+
+  // Test infeasible region (no solution)
+  test('should return null for infeasible system: x>=5, x<=2', () => {
+    const e = expr('\\begin{cases}x\\geq 5\\\\x\\leq 2\\\\y\\geq 0\\end{cases}');
+    const result = e.solve(['x', 'y']);
+    expect(result).toBeNull();
+  });
+
+  // Test non-linear inequality returns null
+  test('should return null for non-linear inequalities: x^2+y<=10', () => {
+    const e = expr('\\begin{cases}x^2+y\\leq 10\\\\x\\geq 0\\\\y\\geq 0\\end{cases}');
+    const result = e.solve(['x', 'y']);
+    expect(result).toBeNull();
+  });
+
+  // Test mixed equality and inequality (should not match)
+  test('should return null for mixed equality and inequality', () => {
+    const e = expr('\\begin{cases}x+y=5\\\\x\\geq 0\\end{cases}');
+    const result = e.solve(['x', 'y']);
+    // Currently returns null as we don't mix equalities and inequalities
+    expect(result).toBeNull();
+  });
+});

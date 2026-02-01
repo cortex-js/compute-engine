@@ -1693,3 +1693,57 @@ e3.solve(['x', 'y']);  // → null (discriminant < 0)
 - `test/compute-engine/solve.test.ts` - Added 8 new tests for non-linear systems
 - Updated documentation in CHANGELOG.md, doc/changelog.md, and
   doc/17-guide-linear-algebra.md
+
+---
+
+### 30. Linear Inequality Systems ✅
+
+**IMPLEMENTED:** The `solve()` method now handles systems of linear inequalities
+in 2 variables, returning the vertices of the feasible region (convex polygon).
+
+**Supported inequality operators:**
+
+- `<` (Less), `<=` (LessEqual), `>` (Greater), `>=` (GreaterEqual)
+
+**Examples that now work:**
+
+```typescript
+// Triangle: x >= 0, y >= 0, x + y <= 10
+const e = ce.parse('\\begin{cases}x\\geq 0\\\\y\\geq 0\\\\x+y\\leq 10\\end{cases}');
+e.solve(['x', 'y']);
+// → [{ x: 0, y: 0 }, { x: 10, y: 0 }, { x: 0, y: 10 }]
+
+// Square: 0 <= x <= 5, 0 <= y <= 5
+const square = ce.parse('\\begin{cases}x\\geq 0\\\\x\\leq 5\\\\y\\geq 0\\\\y\\leq 5\\end{cases}');
+square.solve(['x', 'y']);
+// → [{ x: 0, y: 0 }, { x: 5, y: 0 }, { x: 5, y: 5 }, { x: 0, y: 5 }]
+
+// Pentagon with multiple constraints
+const pentagon = ce.parse('\\begin{cases}x\\geq 0\\\\y\\geq 0\\\\x\\leq 4\\\\y\\leq 4\\\\x+y\\leq 6\\end{cases}');
+pentagon.solve(['x', 'y']);
+// → 5 vertices in counterclockwise order
+```
+
+**Algorithm:**
+
+1. Extract linear constraints from each inequality (normalize to `ax + by + c <= 0`)
+2. Find all pairwise intersections of constraint boundary lines
+3. Filter to vertices that satisfy all original constraints
+4. Order vertices in counterclockwise convex hull order
+5. Return as array of coordinate objects
+
+**Limitations:**
+
+- Only supports 2-variable systems
+- Returns `null` for infeasible regions (no valid vertices)
+- Returns `null` for non-linear constraints
+
+**Files modified:**
+
+- `src/compute-engine/boxed-expression/solve-linear-system.ts` - Added
+  `solveLinearInequalitySystem()` and supporting functions (`extractLinearConstraint()`,
+  `findLineIntersection()`, `satisfiesConstraint()`, `orderConvexHull()`)
+- `src/compute-engine/boxed-expression/boxed-function.ts` - Updated `solve()` to
+  detect and dispatch to inequality solver
+- `test/compute-engine/solve.test.ts` - Added 8 new tests for inequality systems
+- `doc/17-guide-linear-algebra.md` - Added documentation for linear inequality systems

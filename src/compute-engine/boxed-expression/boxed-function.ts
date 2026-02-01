@@ -39,6 +39,7 @@ import { findUnivariateRoots } from './solve';
 import {
   solveLinearSystem,
   solvePolynomialSystem,
+  solveLinearInequalitySystem,
 } from './solve-linear-system';
 import { replace } from './rules';
 import { negate } from './negate';
@@ -926,6 +927,19 @@ export class BoxedFunction extends _BoxedExpression {
         // Try polynomial system (non-linear)
         const polyResult = solvePolynomialSystem([...equations], varNames);
         if (polyResult) return polyResult;
+      }
+
+      // Check for inequality systems (Less, LessEqual, Greater, GreaterEqual)
+      const inequalityOps = ['Less', 'LessEqual', 'Greater', 'GreaterEqual'];
+      if (
+        equations &&
+        equations.every((eq) => inequalityOps.includes(eq.operator ?? ''))
+      ) {
+        const inequalityResult = solveLinearInequalitySystem(
+          [...equations],
+          varNames
+        );
+        if (inequalityResult) return inequalityResult;
       }
     }
 

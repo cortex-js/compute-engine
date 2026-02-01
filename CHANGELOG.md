@@ -76,6 +76,26 @@
   // → { x: 36/7, y: -10/7 }
   ```
 
+- **Linear Inequality Systems**: The `solve()` method now handles systems of
+  linear inequalities in 2 variables, returning the vertices of the feasible
+  region (convex polygon). Supports all inequality operators: `<`, `<=`, `>`,
+  `>=`.
+
+  ```javascript
+  // Triangle: x >= 0, y >= 0, x + y <= 10
+  const e = ce.parse('\\begin{cases}x\\geq 0\\\\y\\geq 0\\\\x+y\\leq 10\\end{cases}');
+  const result = e.solve(['x', 'y']);
+  // → [{ x: 0, y: 0 }, { x: 10, y: 0 }, { x: 0, y: 10 }]
+
+  // Square: 0 <= x <= 5, 0 <= y <= 5
+  const square = ce.parse('\\begin{cases}x\\geq 0\\\\x\\leq 5\\\\y\\geq 0\\\\y\\leq 5\\end{cases}');
+  square.solve(['x', 'y']);
+  // → [{ x: 0, y: 0 }, { x: 5, y: 0 }, { x: 5, y: 5 }, { x: 0, y: 5 }]
+  ```
+
+  Vertices are returned in counterclockwise convex hull order. Returns `null` for
+  infeasible systems or non-linear constraints.
+
 - **Extended Sqrt Equation Solving**: The equation solver now handles sqrt
   equations of the form `√(f(x)) = g(x)` by squaring both sides and solving
   the resulting polynomial. Extraneous roots are automatically filtered.

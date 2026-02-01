@@ -911,3 +911,251 @@ function trySolveLinearFor(
 
   return solution;
 }
+
+/**
+ * Inequality operators that we handle
+ */
+const INEQUALITY_OPERATORS = ['Less', 'LessEqual', 'Greater', 'GreaterEqual'];
+
+/**
+ * Check if an operator is an inequality operator
+ */
+function isInequalityOperator(op: string | null): boolean {
+  return op !== null && INEQUALITY_OPERATORS.includes(op);
+}
+
+/**
+ * Represents a linear inequality constraint in 2D.
+ * Form: a*x + b*y + c <= 0 (or < 0 for strict)
+ */
+interface LinearConstraint {
+  a: number; // coefficient of x
+  b: number; // coefficient of y
+  c: number; // constant term
+  strict: boolean; // true for < or >, false for <= or >=
+}
+
+/**
+ * Solve a system of linear inequalities in 2 variables.
+ * Returns the vertices of the feasible region (convex polygon).
+ *
+ * @param inequalities - Array of BoxedExpression representing inequalities
+ * @param variables - Array of exactly 2 variable names
+ * @returns Array of vertex coordinate objects, or null if unsolvable/unbounded
+ *
+ * @example
+ * ```typescript
+ * const e = ce.parse('\\begin{cases}x+y\\leq 10\\\\x\\geq 0\\\\y\\geq 0\\end{cases}');
+ * const result = e.solve(['x', 'y']);
+ * // result = [{ x: 0, y: 0 }, { x: 10, y: 0 }, { x: 0, y: 10 }]
+ * ```
+ */
+export function solveLinearInequalitySystem(
+  inequalities: BoxedExpression[],
+  variables: string[]
+): Array<Record<string, BoxedExpression>> | null {
+  // Only support 2-variable systems
+  if (variables.length !== 2) return null;
+  if (inequalities.length < 2) return null;
+
+  const ce = inequalities[0].engine;
+  const [xVar, yVar] = variables;
+
+  // Extract constraints
+  const constraints: LinearConstraint[] = [];
+  for (const ineq of inequalities) {
+    const constraint = extractLinearConstraint(ineq, xVar, yVar, ce);
+    if (!constraint) return null; // Not a linear inequality
+    constraints.push(constraint);
+  }
+
+  // Find all intersection points of constraint boundaries
+  const candidates: Array<{ x: number; y: number }> = [];
+
+  for (let i = 0; i < constraints.length; i++) {
+    for (let j = i + 1; j < constraints.length; j++) {
+      const intersection = findLineIntersection(constraints[i], constraints[j]);
+      if (intersection) {
+        candidates.push(intersection);
+      }
+    }
+  }
+
+  // Filter candidates: keep only points that satisfy ALL constraints
+  const vertices = candidates.filter((pt) =>
+    constraints.every((c) => satisfiesConstraint(pt, c))
+  );
+
+  if (vertices.length === 0) return null;
+
+  // Remove duplicate vertices
+  const uniqueVertices = removeDuplicatePoints(vertices);
+
+  if (uniqueVertices.length === 0) return null;
+
+  // Order vertices in convex hull order (counterclockwise)
+  const orderedVertices = orderConvexHull(uniqueVertices);
+
+  // Convert to BoxedExpression result format
+  return orderedVertices.map((pt) => ({
+    [xVar]: ce.number(pt.x).simplify(),
+    [yVar]: ce.number(pt.y).simplify(),
+  }));
+}
+
+/**
+ * Extract a linear constraint from an inequality expression.
+ * Normalizes to form: a*x + b*y + c <= 0 (or < 0)
+ */
+function extractLinearConstraint(
+  ineq: BoxedExpression,
+  xVar: string,
+  yVar: string,
+  ce: ComputeEngine
+): LinearConstraint | null {
+  const op = ineq.operator;
+  if (!isInequalityOperator(op)) return null;
+
+  // Get lhs and rhs
+  const lhs = ineq.op1;
+  const rhs = ineq.op2;
+  if (!lhs || !rhs) return null;
+
+  // Normalize: move everything to left side
+  // For Less/LessEqual: lhs < rhs => lhs - rhs < 0
+  // For Greater/GreaterEqual: lhs > rhs => rhs - lhs < 0
+  let expr: BoxedExpression;
+  let strict: boolean;
+
+  if (op === 'Less' || op === 'LessEqual') {
+    expr = lhs.sub(rhs).expand().simplify();
+    strict = op === 'Less';
+  } else {
+    // Greater or GreaterEqual: flip to Less form
+    expr = rhs.sub(lhs).expand().simplify();
+    strict = op === 'Greater';
+  }
+
+  // Check if linear in both variables
+  const degX = polynomialDegree(expr, xVar);
+  const degY = polynomialDegree(expr, yVar);
+  if (degX > 1 || degY > 1) return null;
+  if (!isLinearInVariables(expr, [xVar, yVar])) return null;
+
+  // Extract coefficients
+  const coefX = extractCoefficient(expr, xVar, ce);
+  const coefY = extractCoefficient(expr, yVar, ce);
+  const constant = extractConstantTerm(expr, [xVar, yVar], ce);
+
+  if (coefX === null || coefY === null) return null;
+
+  // Get numeric values (handle both plain numbers and ExactNumericValue objects)
+  const aVal = coefX.N().numericValue;
+  const bVal = coefY.N().numericValue;
+  const cVal = constant.N().numericValue;
+
+  // Extract real number from numericValue (may be number or object with 're' property)
+  const toNumber = (val: unknown): number | null => {
+    if (typeof val === 'number') return val;
+    if (val && typeof val === 'object' && 're' in val) {
+      const re = (val as { re: number }).re;
+      if (typeof re === 'number') return re;
+    }
+    return null;
+  };
+
+  const a = toNumber(aVal);
+  const b = toNumber(bVal);
+  const c = toNumber(cVal);
+
+  if (a === null || b === null || c === null) return null;
+  if (!Number.isFinite(a) || !Number.isFinite(b) || !Number.isFinite(c))
+    return null;
+
+  return { a, b, c, strict };
+}
+
+/**
+ * Find the intersection of two lines given by constraints.
+ * Line 1: a1*x + b1*y + c1 = 0
+ * Line 2: a2*x + b2*y + c2 = 0
+ */
+function findLineIntersection(
+  c1: LinearConstraint,
+  c2: LinearConstraint
+): { x: number; y: number } | null {
+  // Using Cramer's rule
+  const det = c1.a * c2.b - c2.a * c1.b;
+
+  // Lines are parallel (no intersection)
+  if (Math.abs(det) < 1e-14) return null;
+
+  const x = (c1.b * c2.c - c2.b * c1.c) / det;
+  const y = (c2.a * c1.c - c1.a * c2.c) / det;
+
+  if (!Number.isFinite(x) || !Number.isFinite(y)) return null;
+
+  return { x, y };
+}
+
+/**
+ * Check if a point satisfies a constraint.
+ */
+function satisfiesConstraint(
+  pt: { x: number; y: number },
+  c: LinearConstraint
+): boolean {
+  const val = c.a * pt.x + c.b * pt.y + c.c;
+
+  if (c.strict) {
+    // Strict inequality: val < 0, but allow small tolerance at boundary
+    return val < 1e-10;
+  } else {
+    // Non-strict: val <= 0
+    return val <= 1e-10;
+  }
+}
+
+/**
+ * Remove duplicate points (within tolerance)
+ */
+function removeDuplicatePoints(
+  points: Array<{ x: number; y: number }>
+): Array<{ x: number; y: number }> {
+  const tolerance = 1e-10;
+  const result: Array<{ x: number; y: number }> = [];
+
+  for (const pt of points) {
+    const isDuplicate = result.some(
+      (existing) =>
+        Math.abs(existing.x - pt.x) < tolerance &&
+        Math.abs(existing.y - pt.y) < tolerance
+    );
+    if (!isDuplicate) {
+      result.push(pt);
+    }
+  }
+
+  return result;
+}
+
+/**
+ * Order points in counterclockwise convex hull order.
+ * Uses Graham scan algorithm.
+ */
+function orderConvexHull(
+  points: Array<{ x: number; y: number }>
+): Array<{ x: number; y: number }> {
+  if (points.length <= 2) return points;
+
+  // Find centroid
+  const cx = points.reduce((sum, p) => sum + p.x, 0) / points.length;
+  const cy = points.reduce((sum, p) => sum + p.y, 0) / points.length;
+
+  // Sort by angle from centroid
+  return [...points].sort((a, b) => {
+    const angleA = Math.atan2(a.y - cy, a.x - cx);
+    const angleB = Math.atan2(b.y - cy, b.x - cx);
+    return angleA - angleB;
+  });
+}

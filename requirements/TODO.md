@@ -485,43 +485,9 @@ ce.diagnoseSystem(equations, variables);
 
 ---
 
-### 30. Linear Inequality Systems
+### ~~30. Linear Inequality Systems~~ ✅ COMPLETED
 
-**Problem:** No support for systems of linear inequalities, which define feasible
-regions rather than point solutions.
-
-**Example:**
-
-```typescript
-const e = ce.parse('\\begin{cases}x+y\\leq 10\\\\x\\geq 0\\\\y\\geq 0\\end{cases}');
-e.solve(['x', 'y']);  // → currently null or error
-```
-
-**Possible return formats:**
-
-1. **Vertices of feasible region:** `[(0,0), (10,0), (0,10)]`
-2. **Parametric description:** `{ x: [0, 10], y: [0, 10-x] }`
-3. **Constraint set:** Keep as symbolic representation
-
-**Use cases:**
-
-- Linear programming feasibility
-- Constraint satisfaction
-- Geometric computations (polygon vertices)
-
-**Algorithm (2D vertex enumeration):**
-
-1. Convert inequalities to equalities (boundary lines)
-2. Find all pairwise intersections
-3. Filter to points satisfying all inequalities
-4. Order vertices (convex hull)
-
-**Complexity:** This is significantly more complex than equality systems. May
-want to start with 2-variable case only.
-
-**Files:**
-
-- `src/compute-engine/boxed-expression/solve-linear-system.ts` (or new file)
+See `requirements/DONE.md` for implementation details.
 
 ---
 
