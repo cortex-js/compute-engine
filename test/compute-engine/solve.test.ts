@@ -726,4 +726,59 @@ describe('SOLVING SYSTEMS OF LINEAR EQUATIONS', () => {
     const result = e.solve(['x', 'y']);
     expect(result).toBeNull();
   });
+
+  // Tests for exact rational arithmetic (Issue #31)
+  test('should solve system with fractional coefficients: x/3+y/2=1, x/4+y/5=1', () => {
+    const e = expr(
+      '\\begin{cases}\\frac{x}{3}+\\frac{y}{2}=1\\\\\\frac{x}{4}+\\frac{y}{5}=1\\end{cases}'
+    );
+    const result = e.solve(['x', 'y']) as Record<string, any>;
+    expect(result).not.toBeNull();
+    // System: x/3 + y/2 = 1  and  x/4 + y/5 = 1
+    // Multiply first by 6:  2x + 3y = 6
+    // Multiply second by 20: 5x + 4y = 20
+    // Solving: y = -10/7, x = 36/7
+    // The results should be exact rationals
+    expect(result.x.json).toEqual(['Rational', 36, 7]);
+    expect(result.y.json).toEqual(['Rational', -10, 7]);
+  });
+
+  test('should produce exact rational solution: 2x+3y=7, 4x+5y=13', () => {
+    const e = expr('\\begin{cases}2x+3y=7\\\\4x+5y=13\\end{cases}');
+    const result = e.solve(['x', 'y']) as Record<string, any>;
+    expect(result).not.toBeNull();
+    // Using Cramer's rule: det = 2*5 - 3*4 = -2
+    // x = (7*5 - 3*13) / -2 = (35 - 39) / -2 = -4 / -2 = 2
+    // y = (2*13 - 7*4) / -2 = (26 - 28) / -2 = -2 / -2 = 1
+    expect(result.x.json).toBe(2);
+    expect(result.y.json).toBe(1);
+  });
+
+  test('should preserve exact fractions in result: x+y=1, x-y=1/2', () => {
+    const e = expr('\\begin{cases}x+y=1\\\\x-y=\\frac{1}{2}\\end{cases}');
+    const result = e.solve(['x', 'y']) as Record<string, any>;
+    expect(result).not.toBeNull();
+    // x + y = 1
+    // x - y = 1/2
+    // Adding: 2x = 3/2, so x = 3/4
+    // Subtracting: 2y = 1/2, so y = 1/4
+    expect(result.x.json).toEqual(['Rational', 3, 4]);
+    expect(result.y.json).toEqual(['Rational', 1, 4]);
+  });
+
+  test('should handle system requiring pivot selection with fractions', () => {
+    // This system tests pivot selection with fractional entries
+    const e = expr(
+      '\\begin{cases}\\frac{1}{2}x+y=3\\\\x+\\frac{1}{3}y=2\\end{cases}'
+    );
+    const result = e.solve(['x', 'y']) as Record<string, any>;
+    expect(result).not.toBeNull();
+    // (1/2)x + y = 3  =>  x + 2y = 6  (multiply by 2)
+    // x + (1/3)y = 2  =>  3x + y = 6  (multiply by 3)
+    // From second equation: y = 6 - 3x
+    // Substitute into first: x + 2(6 - 3x) = 6  =>  x + 12 - 6x = 6  =>  -5x = -6  =>  x = 6/5
+    // y = 6 - 3(6/5) = 6 - 18/5 = 30/5 - 18/5 = 12/5
+    expect(result.x.json).toEqual(['Rational', 6, 5]);
+    expect(result.y.json).toEqual(['Rational', 12, 5]);
+  });
 });

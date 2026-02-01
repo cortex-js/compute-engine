@@ -1,5 +1,5 @@
 import type { BoxedExpression, ComputeEngine } from '../global-types';
-import { polynomialDegree, totalDegree } from './polynomials';
+import { polynomialDegree } from './polynomials';
 
 /**
  * Check if an expression is linear in the given variables.
@@ -312,6 +312,9 @@ function buildAugmentedMatrix(
 /**
  * Solve Ax = b using Gaussian elimination with partial pivoting.
  * Returns the solution vector or null if no unique solution exists.
+ *
+ * Uses exact rational arithmetic when possible, preserving fractions
+ * throughout the computation for exact results.
  */
 function gaussianElimination(
   A: BoxedExpression[][],
@@ -330,23 +333,20 @@ function gaussianElimination(
   // Forward elimination with partial pivoting
   for (let col = 0; col < n; col++) {
     // Find pivot row (row with largest absolute value in current column)
+    // Use symbolic comparison for exact arithmetic
     let maxRow = col;
-    let maxVal = getNumericValue(aug[col]?.[col]);
 
     for (let row = col + 1; row < m; row++) {
-      const val = getNumericValue(aug[row]?.[col]);
-      if (val !== null && (maxVal === null || Math.abs(val) > Math.abs(maxVal))) {
-        maxVal = val;
+      const cmp = compareAbsoluteValues(aug[row]?.[col], aug[maxRow]?.[col]);
+      if (cmp === 1) {
+        // |aug[row][col]| > |aug[maxRow][col]|
         maxRow = row;
       }
     }
 
     // Check for zero pivot (singular matrix or no unique solution)
-    if (maxVal === null || Math.abs(maxVal) < 1e-12) {
-      // Try symbolic check
-      if (aug[col]?.[col]?.is(0)) {
-        return null; // Singular matrix
-      }
+    if (isEffectivelyZero(aug[maxRow]?.[col])) {
+      return null; // Singular matrix - no unique solution
     }
 
     // Swap rows if needed
@@ -357,6 +357,7 @@ function gaussianElimination(
     const pivot = aug[col][col];
 
     // Eliminate below
+    // The division and multiplication preserve exact rationals
     for (let row = col + 1; row < m; row++) {
       const factor = aug[row][col].div(pivot);
       aug[row][col] = ce.Zero;
@@ -370,11 +371,11 @@ function gaussianElimination(
   // Check for inconsistency (non-zero in last column of zero rows)
   for (let row = n; row < m; row++) {
     const lastCol = aug[row][n];
-    if (!lastCol.is(0)) {
+    if (!isEffectivelyZero(lastCol)) {
       // Check if all coefficients in this row are zero
       let allZero = true;
       for (let col = 0; col < n; col++) {
-        if (!aug[row][col].is(0)) {
+        if (!isEffectivelyZero(aug[row][col])) {
           allZero = false;
           break;
         }
@@ -386,6 +387,7 @@ function gaussianElimination(
   }
 
   // Back substitution
+  // Division preserves exact rationals when possible
   const solution: BoxedExpression[] = new Array(n);
 
   for (let i = n - 1; i >= 0; i--) {
@@ -400,14 +402,90 @@ function gaussianElimination(
 }
 
 /**
- * Get numeric value from a BoxedExpression, or null if not numeric.
+ * Compare the absolute values of two BoxedExpressions.
+ * Returns:
+ *   1 if |a| > |b|
+ *   0 if |a| = |b|
+ *  -1 if |a| < |b|
+ *  undefined if comparison is indeterminate
+ *
+ * Uses symbolic comparison when possible, falling back to numeric.
  */
-function getNumericValue(expr: BoxedExpression | undefined): number | null {
-  if (!expr) return null;
-  const val = expr.N().numericValue;
-  if (typeof val === 'number' && !isNaN(val)) return val;
-  if (typeof val === 'object' && val !== null && 're' in val) {
-    return (val as { re: number }).re;
+function compareAbsoluteValues(
+  a: BoxedExpression | undefined,
+  b: BoxedExpression | undefined
+): 1 | 0 | -1 | undefined {
+  if (!a || !b) return undefined;
+
+  // Get absolute values
+  const absA = a.abs();
+  const absB = b.abs();
+
+  // Try symbolic comparison first
+  // For purely numeric expressions, this should work exactly
+  const aNum = absA.numericValue;
+  const bNum = absB.numericValue;
+
+  // If both are numeric values (not expressions), compare them exactly
+  if (aNum !== null && bNum !== null) {
+    // Handle machine numbers
+    if (typeof aNum === 'number' && typeof bNum === 'number') {
+      if (aNum === bNum) return 0;
+      return aNum > bNum ? 1 : -1;
+    }
+
+    // Handle NumericValue objects (exact rationals, etc.)
+    if (typeof aNum === 'object' && 're' in aNum) {
+      const aRe = aNum.re;
+      const bRe = typeof bNum === 'number' ? bNum : (bNum as any).re;
+      if (aRe === bRe) return 0;
+      return aRe > bRe ? 1 : -1;
+    }
+
+    if (typeof bNum === 'object' && 're' in bNum) {
+      const aRe = typeof aNum === 'number' ? aNum : (aNum as any).re;
+      const bRe = bNum.re;
+      if (aRe === bRe) return 0;
+      return aRe > bRe ? 1 : -1;
+    }
   }
-  return null;
+
+  // Fallback: evaluate numerically
+  const aVal = absA.N().numericValue;
+  const bVal = absB.N().numericValue;
+
+  if (aVal === null || bVal === null) return undefined;
+
+  const aReal = typeof aVal === 'number' ? aVal : (aVal as any).re ?? aVal;
+  const bReal = typeof bVal === 'number' ? bVal : (bVal as any).re ?? bVal;
+
+  if (typeof aReal !== 'number' || typeof bReal !== 'number') return undefined;
+  if (isNaN(aReal) || isNaN(bReal)) return undefined;
+
+  if (aReal === bReal) return 0;
+  return aReal > bReal ? 1 : -1;
+}
+
+/**
+ * Check if a BoxedExpression is zero (or effectively zero).
+ * Uses symbolic check first, then numeric fallback with tolerance.
+ */
+function isEffectivelyZero(expr: BoxedExpression | undefined): boolean {
+  if (!expr) return true;
+
+  // Try symbolic zero check first
+  if (expr.is(0)) return true;
+
+  // Check if the expression simplifies to zero
+  const simplified = expr.simplify();
+  if (simplified.is(0)) return true;
+
+  // Fallback: check numeric value with small tolerance
+  const numVal = expr.N().numericValue;
+  if (numVal === null) return false;
+
+  const re = typeof numVal === 'number' ? numVal : (numVal as any).re;
+  if (typeof re === 'number' && Math.abs(re) < 1e-14) return true;
+
+  return false;
 }

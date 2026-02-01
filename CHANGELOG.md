@@ -21,6 +21,23 @@
   Non-linear systems (containing `xy`, `x²`, etc.) and inconsistent systems
   return `null`.
 
+- **Exact Rational Arithmetic in Linear Systems**: The linear system solver now
+  uses exact rational arithmetic throughout the Gaussian elimination process.
+  Systems with fractional coefficients produce exact fractional results rather
+  than floating-point approximations.
+
+  ```javascript
+  const e = ce.parse('\\begin{cases}x+y=1\\\\x-y=1/2\\end{cases}');
+  const result = e.solve(['x', 'y']);
+  console.log(result.x.json);  // ["Rational", 3, 4]  (exact 3/4)
+  console.log(result.y.json);  // ["Rational", 1, 4]  (exact 1/4)
+
+  // Fractional coefficients
+  const e2 = ce.parse('\\begin{cases}x/3+y/2=1\\\\x/4+y/5=1\\end{cases}');
+  const result2 = e2.solve(['x', 'y']);
+  // → { x: 36/7, y: -10/7 }
+  ```
+
 - **Extended Sqrt Equation Solving**: The equation solver now handles sqrt
   equations of the form `√(f(x)) = g(x)` by squaring both sides and solving
   the resulting polynomial. Extraneous roots are automatically filtered.
