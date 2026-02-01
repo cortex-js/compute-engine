@@ -3880,7 +3880,7 @@ export interface ComputeEngine extends IBigNum {
 
   ask(pattern: BoxedExpression): BoxedSubstitution[];
 
-  verify(query: BoxedExpression): boolean;
+  verify(query: BoxedExpression): boolean | undefined;
 
   /** @internal */
   _shouldContinueExecution(): boolean;

@@ -3,6 +3,8 @@
 
 import { BoxedType } from '../../common/type/boxed-type';
 import { parseType } from '../../common/type/parse';
+import { reduceType } from '../../common/type/reduce';
+import type { Type } from '../../common/type/types';
 import { flatten } from '../boxed-expression/flatten';
 import { validateArguments } from '../boxed-expression/validate';
 import {
@@ -20,6 +22,10 @@ import {
   cantorEnumeratePositiveRationals,
   cantorEnumerateRationals,
 } from '../numerics/numeric';
+
+function typeIntersection(a: Type, b: Type): Type {
+  return reduceType({ kind: 'intersection', types: [a, b] });
+}
 
 /**
  * Transform a List or Tuple with exactly 2 elements to an Interval in set contexts.
@@ -539,6 +545,20 @@ export const SETS_LIBRARY: SymbolDefinitions = {
       const result = collection.contains(value);
       if (result === true) return ce.True;
       if (result === false) return ce.False;
+
+      // Support type-style membership checks, e.g. Element(x, real) or
+      // Element(x, finite_real). This complements set membership checks.
+      const typeName = collection.symbol;
+      if (typeName) {
+        const type = ce.type(typeName);
+        if (!type.isUnknown) {
+          const valueType = value.type;
+          if (valueType.matches(type)) return ce.True;
+          if (typeIntersection(valueType.type, type.type) === 'nothing')
+            return ce.False;
+        }
+      }
+
       return undefined;
     },
   },
@@ -551,6 +571,19 @@ export const SETS_LIBRARY: SymbolDefinitions = {
       const result = collection.contains(value);
       if (result === true) return ce.False;
       if (result === false) return ce.True;
+
+      // Support type-style membership checks, e.g. NotElement(x, real).
+      const typeName = collection.symbol;
+      if (typeName) {
+        const type = ce.type(typeName);
+        if (!type.isUnknown) {
+          const valueType = value.type;
+          if (valueType.matches(type)) return ce.False;
+          if (typeIntersection(valueType.type, type.type) === 'nothing')
+            return ce.True;
+        }
+      }
+
       return undefined;
     },
   },

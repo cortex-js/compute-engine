@@ -2201,9 +2201,52 @@ export class ComputeEngine implements IComputeEngine {
    *
    */
 
-  verify(_query: BoxedExpression): boolean {
-    // @todo
-    return false;
+  verify(query: BoxedExpression): boolean | undefined {
+    const boxed = isLatexString(query)
+      ? this.parse(query, { canonical: false })
+      : this.box(query, { canonical: false });
+
+    const expr = boxed.evaluate();
+    if (expr.symbol === 'True') return true;
+    if (expr.symbol === 'False') return false;
+
+    const op = expr.operator;
+
+    if (op === 'Not') {
+      const result = this.verify(expr.op1);
+      if (result === undefined) return undefined;
+      return !result;
+    }
+
+    if (op === 'And') {
+      // Kleene 3-valued logic:
+      // - if any operand is false, the result is false
+      // - if all operands are true, the result is true
+      // - otherwise the result is unknown
+      let hasUnknown = false;
+      for (const x of expr.ops ?? []) {
+        const r = this.verify(x);
+        if (r === false) return false;
+        if (r === undefined) hasUnknown = true;
+      }
+      return hasUnknown ? undefined : true;
+    }
+
+    if (op === 'Or') {
+      // Kleene 3-valued logic:
+      // - if any operand is true, the result is true
+      // - if all operands are false, the result is false
+      // - otherwise the result is unknown
+      let hasUnknown = false;
+      for (const x of expr.ops ?? []) {
+        const r = this.verify(x);
+        if (r === true) return true;
+        if (r === undefined) hasUnknown = true;
+      }
+      return hasUnknown ? undefined : false;
+    }
+
+    return undefined;
   }
 
   /**

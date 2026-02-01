@@ -2,6 +2,21 @@
 
 ### Improvements
 
+- **Improved `ask()` Queries**: `ce.ask()` now matches patterns with wildcards
+  correctly, can answer common “bound” queries such as
+  `ask(["Greater", "x", "_k"])`, and falls back to `verify()` for closed
+  predicates when the fact is known but not stored as an explicit assumption.
+
+- **Tri-state `verify()`**: Implemented `ce.verify()` as a truth query that
+  returns `true`, `false` or `undefined` when a predicate cannot be determined
+  from the current assumptions and declarations. `And`/`Or`/`Not` use 3-valued
+  logic.
+
+- **`Element`/`NotElement` Type Membership**: `Element(x, T)` and
+  `NotElement(x, T)` now support type-style RHS (e.g. `real`, `finite_real`,
+  `number`, `any`) in addition to set collections (e.g. `RealNumbers`,
+  `Integers`).
+
 - **Interval Notation Parsing**: Added support for parsing mathematical interval
   notation from LaTeX, including half-open intervals. Addresses #254.
 
