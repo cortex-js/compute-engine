@@ -31,8 +31,7 @@ import type {
 
 import type { NumericValue } from '../numeric-value/types';
 import type { SmallInteger } from '../numerics/types';
-// Dynamic import for JavaScriptTarget to avoid circular dependency
-import { applicableN1 } from '../function-utils';
+// Dynamic import for JavaScriptTarget and applicableN1 to avoid circular dependency
 
 import {
   getApplyFunctionStyle,
@@ -773,7 +772,11 @@ export abstract class _BoxedExpression implements BoxedExpression {
       });
     } catch (e) {
       // @fixme: the fallback needs to handle multiple arguments
-      if (options?.fallback ?? true) return applicableN1(this);
+      if (options?.fallback ?? true) {
+        // Dynamic import to avoid circular dependency
+        const { applicableN1 } = require('../function-utils');
+        return applicableN1(this);
+      }
       throw e;
     }
   }

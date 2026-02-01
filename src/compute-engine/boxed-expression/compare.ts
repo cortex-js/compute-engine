@@ -1,7 +1,7 @@
 import { NumericValue } from '../numeric-value/types';
 import type { BoxedExpression } from '../global-types';
 import { AbstractTensor } from '../tensor/tensors';
-import { getInequalityBoundsFromAssumptions } from '../assume';
+// Dynamic import to avoid circular dependency
 
 /**
  * Structural equality of boxed expressions.
@@ -201,6 +201,8 @@ export function cmp(
     if (!b.isNumberLiteral) {
       // Check if b is a symbol with inequality assumptions
       if (b.symbol) {
+        // Dynamic import to avoid circular dependency
+        const { getInequalityBoundsFromAssumptions } = require('../assume');
         const bounds = getInequalityBoundsFromAssumptions(a.engine, b.symbol);
         const aNum =
           typeof a.numericValue === 'number'
@@ -262,6 +264,8 @@ export function cmp(
   if (typeof b === 'number') {
     // Check if a is a symbol with inequality assumptions
     if (a.symbol) {
+      // Dynamic import to avoid circular dependency
+      const { getInequalityBoundsFromAssumptions } = require('../assume');
       const bounds = getInequalityBoundsFromAssumptions(a.engine, a.symbol);
 
       // We're comparing a (symbol) to b (number)
@@ -348,6 +352,8 @@ export function cmp(
 
     // Check inequality assumptions for the symbol
     if (b.isNumberLiteral) {
+      // Dynamic import to avoid circular dependency
+      const { getInequalityBoundsFromAssumptions } = require('../assume');
       const bounds = getInequalityBoundsFromAssumptions(a.engine, a.symbol);
       const bNum =
         typeof b.numericValue === 'number'
