@@ -368,6 +368,35 @@ export function simplifyLog(x: BoxedExpression): RuleStep | undefined {
           };
         }
       }
+
+      // e^(log_c(x) + y) -> x^{1/ln(c)} * e^y
+      for (let i = 0; i < exp.ops.length; i++) {
+        const term = exp.ops[i];
+        if (term.operator !== 'Log' || !term.op1) continue;
+
+        const otherTerms = exp.ops.filter((_, idx) => idx !== i);
+        const remaining =
+          otherTerms.length === 0
+            ? ce.Zero
+            : otherTerms.length === 1
+              ? otherTerms[0]
+              : ce._fn('Add', otherTerms);
+
+        const logBase = term.op2;
+        const isDefaultOrBase10 =
+          !logBase || logBase.symbol === 'Nothing' || logBase.is(10);
+
+        const expOfLog = isDefaultOrBase10
+          ? term.op1.pow(ce.One.div(ce._fn('Ln', [ce.number(10)])))
+          : logBase.symbol === 'ExponentialE'
+            ? term.op1
+            : term.op1.pow(ce.One.div(ce._fn('Ln', [logBase])));
+
+        return {
+          value: expOfLog.mul(base.pow(remaining)),
+          because: 'e^(log_c(x) + y) -> x^{1/ln(c)} * e^y',
+        };
+      }
     }
 
     // e^(ln(x) * y) -> x^y

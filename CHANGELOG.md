@@ -312,18 +312,15 @@
   - `x - 2√x - 3 = 0` → returns `[9]` (filters out x=1)
   - `2x + 3√x - 2 = 0` → returns `[1/4]` (filters out x=4)
 
-### Testing
-
-- **Pattern Matching with Repeated Wildcards**: Added comprehensive tests
-  verifying that the pattern matching system correctly handles wildcards that
-  appear multiple times in a pattern. When a named wildcard like `_x` appears in
-  multiple positions, the matcher correctly ensures all occurrences match the
-  same expression. This works with:
-  - Nested function arguments (e.g., `['Multiply', '_x', ['Ln', '_x']]`)
-  - Multiple nesting levels (3+ levels deep)
-  - Commutative operators (handles reordering)
-  - Canonical expressions (from parsed LaTeX)
-  - Complex sub-expressions (matching entire sub-trees)
+- **(#178)Simplification Improvements**:
+  - **Safer division canonicalization**: Avoids collapsing expressions like
+    `\frac{0}{1-1}` or `\frac{1-1}{1-1}` during canonicalization/simplification
+    when the denominator is a non-literal constant expression that could
+    simplify to `0`. These cases now require an explicit evaluation step if you
+    want them reduced to `\frac{0}{0}` → `\operatorname{NaN}`.
+  - **Implicit multiplication powers**: `xx` now simplifies to `x^2`.
+  - **Exponential/log separation**: `\exp(\log(x)+y)` and `\exp(\log(x)-y)` now
+    simplify without leaving a remaining `\log(...)` term in the exponent.
 
 ### New Features
 

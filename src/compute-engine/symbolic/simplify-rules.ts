@@ -312,10 +312,24 @@ export const SIMPLIFY_RULES: Rule[] = [
   //
   (x): RuleStep | undefined => {
     if (x.operator === 'Divide') {
-      // Skip if both operands are powers with the same base (let simplifyPower handle it)
-      // This preserves symbolic forms like e^x / e^2 -> e^{x-2}
+      // Be conservative about simplifying division when the denominator is a
+      // constant expression (no unknowns) that is not already a number literal.
+      // In particular, avoid turning 0/(1-1) into 0, or (1-1)/(1-1) into 1,
+      // since (1-1) can simplify/evaluate to 0.
+      // These cases can be handled by an explicit preliminary evaluation.
       const num = x.op1;
       const denom = x.op2;
+      if (
+        num &&
+        denom &&
+        denom.isNumberLiteral !== true &&
+        denom.symbols.length === 0
+      ) {
+        if (num.is(0) || num.isSame(denom)) return undefined;
+      }
+
+      // Skip if both operands are powers with the same base (let simplifyPower handle it)
+      // This preserves symbolic forms like e^x / e^2 -> e^{x-2}
       if (num.operator === 'Power' && denom.operator === 'Power') {
         if (num.op1?.isSame(denom.op1)) return undefined;
       }
@@ -568,10 +582,10 @@ export const SIMPLIFY_RULES: Rule[] = [
   simplifyDivide,
 
   //
-  // Power combination for 3+ operands in Multiply
+  // Power combination for 2+ operands in Multiply
   //
   (x): RuleStep | undefined => {
-    if (x.operator !== 'Multiply' || !x.ops || x.ops.length < 3)
+    if (x.operator !== 'Multiply' || !x.ops || x.ops.length < 2)
       return undefined;
 
     const ce = x.engine;

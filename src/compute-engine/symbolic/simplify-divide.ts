@@ -24,13 +24,30 @@ export function simplifyDivide(x: BoxedExpression): RuleStep | undefined {
 
   const ce = x.engine;
 
+  // 0/0 -> NaN
+  if (num.is(0) && denom.is(0)) {
+    return { value: ce.NaN, because: '0/0 -> NaN' };
+  }
+
   // 0/a -> 0 when a ≠ 0
-  if (num.is(0) && denom.is(0) === false) {
+  // Note: be conservative with constant (no-unknown) denominators, since they
+  // may simplify/evaluate to 0 (e.g. 1-1) and we want to avoid 0/(1-1) -> 0.
+  // Those cases can be handled by an explicit preliminary evaluation.
+  if (
+    num.is(0) &&
+    denom.is(0) === false &&
+    (denom.isNumberLiteral || denom.symbols.length !== 0)
+  ) {
     return { value: ce.Zero, because: '0/a -> 0' };
   }
 
   // a/a -> 1 when a ≠ 0 and a is finite (∞/∞ is indeterminate)
-  if (num.isSame(denom) && num.is(0) === false && num.isInfinity !== true) {
+  if (
+    num.isSame(denom) &&
+    num.is(0) === false &&
+    num.isInfinity !== true &&
+    (num.isNumberLiteral || num.symbols.length !== 0)
+  ) {
     return { value: ce.One, because: 'a/a -> 1' };
   }
 
