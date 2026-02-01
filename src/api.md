@@ -1765,15 +1765,33 @@ function will throw an error if it cannot be compiled.
 ##### BoxedExpression.solve()
 
 ```ts
-solve(vars?): readonly BoxedExpression[]
+solve(vars?): 
+  | readonly BoxedExpression[]
+  | Record<string, BoxedExpression>
+  | Record<string, BoxedExpression>[]
 ```
 
 If this is an equation, solve the equation for the variables in vars.
 Otherwise, solve the equation `this = 0` for the variables in vars.
 
+For univariate equations, returns an array of solutions (roots).
+For systems of linear equations (List of Equal expressions), returns
+an object mapping variable names to their values.
+For non-linear polynomial systems (like xy=6, x+y=5), returns an array
+of solution objects (multiple solutions possible).
+
 ```javascript
+// Univariate equation
 const expr = ce.parse("x^2 + 2*x + 1 = 0");
-console.log(expr.solve("x"));
+console.log(expr.solve("x")); // Returns array of roots
+
+// System of linear equations
+const system = ce.parse("\\begin{cases}x+y=70\\\\2x-4y=80\\end{cases}");
+console.log(system.solve(["x", "y"])); // Returns { x: 60, y: 10 }
+
+// Non-linear polynomial system (product + sum)
+const nonlinear = ce.parse("\\begin{cases}xy=6\\\\x+y=5\\end{cases}");
+console.log(nonlinear.solve(["x", "y"])); // Returns [{ x: 2, y: 3 }, { x: 3, y: 2 }]
 ```
 
 ####### vars?

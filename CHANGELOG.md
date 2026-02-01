@@ -13,8 +13,10 @@
   // Open intervals (ISO/European notation)
   ce.parse(']3, 4[').json;   // → ["Interval", ["Open", 3], ["Open", 4]]
 
-  // LaTeX bracket commands
+  // LaTeX bracket commands and sizing prefixes
   ce.parse('\\lbrack 3, 4\\rparen').json;  // → ["Interval", 3, ["Open", 4]]
+  ce.parse('\\left[ 3, 4 \\right)').json;  // → ["Interval", 3, ["Open", 4]]
+  ce.parse('\\bigl( 3, 4 \\bigr]').json;   // → ["Interval", ["Open", 3], 4]
   ```
 
   **Contextual Parsing**: Lists and tuples are automatically converted to

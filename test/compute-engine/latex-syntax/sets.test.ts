@@ -203,6 +203,91 @@ describe('PARSING INTERVALS', () => {
     `);
   });
 
+  it('should parse intervals with \\left and \\right', () => {
+    // \left[ ... \right) - closed-open interval
+    expect(parse('\\left[ 3, 4 \\right)').json).toMatchInlineSnapshot(`
+      [
+        Interval,
+        3,
+        [
+          Open,
+          4,
+        ],
+      ]
+    `);
+
+    // \left( ... \right] - open-closed interval
+    expect(parse('\\left( 3, 4 \\right]').json).toMatchInlineSnapshot(`
+      [
+        Interval,
+        [
+          Open,
+          3,
+        ],
+        4,
+      ]
+    `);
+
+    // \left[ ... \right] - closed interval (remains List for backward compat)
+    expect(parse('\\left[ 3, 4 \\right]').json).toMatchInlineSnapshot(`
+      [
+        List,
+        3,
+        4,
+      ]
+    `);
+
+    // \left( ... \right) - open interval (remains Tuple for backward compat)
+    expect(parse('\\left( 3, 4 \\right)').json).toMatchInlineSnapshot(`
+      [
+        Tuple,
+        3,
+        4,
+      ]
+    `);
+
+    // \left] ... \right[ - open interval (ISO notation)
+    expect(parse('\\left] 3, 4 \\right[').json).toMatchInlineSnapshot(`
+      [
+        Interval,
+        [
+          Open,
+          3,
+        ],
+        [
+          Open,
+          4,
+        ],
+      ]
+    `);
+  });
+
+  it('should parse intervals with \\bigl and \\bigr', () => {
+    // \bigl[ ... \bigr) - closed-open interval
+    expect(parse('\\bigl[ 3, 4 \\bigr)').json).toMatchInlineSnapshot(`
+      [
+        Interval,
+        3,
+        [
+          Open,
+          4,
+        ],
+      ]
+    `);
+
+    // \Bigl( ... \Bigr] - open-closed interval
+    expect(parse('\\Bigl( 3, 4 \\Bigr]').json).toMatchInlineSnapshot(`
+      [
+        Interval,
+        [
+          Open,
+          3,
+        ],
+        4,
+      ]
+    `);
+  });
+
   it('should parse intervals with expressions as endpoints', () => {
     // Variables
     expect(parse('[x, y)').json).toMatchInlineSnapshot(`

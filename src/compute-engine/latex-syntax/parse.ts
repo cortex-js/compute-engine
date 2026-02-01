@@ -95,6 +95,7 @@ const OPEN_DELIMITER_PREFIX = {
   '\\Big': '\\Big',
   '\\bigg': '\\bigg',
   '\\Bigg': '\\Bigg',
+  '\\mathopen': '\\mathclose',
 };
 
 /** Commands that can be used with a middle delimiter */
@@ -753,20 +754,58 @@ export class _Parser implements Parser {
     open: Delimiter | LatexToken[],
     close: Delimiter | LatexToken[]
   ): boolean {
+    const start = this.index;
+
+    // Check for delimiter prefix like \left, \mathopen, etc.
+    const closePrefix = OPEN_DELIMITER_PREFIX[this.peek];
+    if (closePrefix) this.nextToken();
+
     // If the delimiters are token arrays, look specifically for those
     if (Array.isArray(open)) {
       // If the open trigger is an array, the close trigger must be an array too
       console.assert(Array.isArray(close));
-      if (!this.matchAll(open)) return false;
-      this.addBoundary(close as LatexToken[]);
+
+      // For single-token array triggers, also check DELIMITER_SHORTHAND
+      // This allows ['['] to match both '[' and '\lbrack'
+      if (open.length === 1) {
+        const possibleTokens = DELIMITER_SHORTHAND[open[0]] ?? [open[0]];
+        if (!possibleTokens.includes(this.peek)) {
+          this.index = start;
+          return false;
+        }
+        // Check if we matched a LaTeX command variant (e.g., \lbrack for [)
+        const matchedToken = this.nextToken();
+        const useLatexCommand = matchedToken.startsWith('\\');
+
+        // Find the corresponding close token variant
+        const closeTokens = DELIMITER_SHORTHAND[close[0] as string] ?? [
+          close[0],
+        ];
+        const closeToken = (closeTokens.find((t) =>
+          useLatexCommand ? t.startsWith('\\') : !t.startsWith('\\')
+        ) ?? closeTokens[0]) as LatexToken;
+
+        const closeBoundary = closePrefix
+          ? [closePrefix, closeToken]
+          : [closeToken];
+        this.addBoundary(closeBoundary);
+        return true;
+      }
+
+      // For multi-token array triggers, match exactly
+      if (!this.matchAll(open)) {
+        this.index = start;
+        return false;
+      }
+      // If there was a prefix, prepend the close prefix to the close tokens
+      const closeBoundary = closePrefix
+        ? [closePrefix, ...(close as LatexToken[])]
+        : (close as LatexToken[]);
+      this.addBoundary(closeBoundary);
       return true;
     }
 
     console.assert(!Array.isArray(close));
-
-    const start = this.index;
-    const closePrefix = OPEN_DELIMITER_PREFIX[this.peek];
-    if (closePrefix) this.nextToken();
 
     if (open === '||' && this.matchAll(['|', '|'])) {
       this.addBoundary(['|', '|']);
@@ -1410,18 +1449,33 @@ export class _Parser implements Parser {
    * and finally a closing matching operator.
    */
   parseEnclosure(): Expression | null {
-    const defs = this.getDefs('matchfix') as Iterable<IndexedMatchfixEntry>;
-
     const start = this.index;
+    const currentToken = this.peek;
+
+    // Use the matchfix index for fast lookup of relevant definitions
+    // If there's a delimiter prefix like \left, \mathopen, peek ahead to get the actual delimiter
+    const hasPrefix = OPEN_DELIMITER_PREFIX[currentToken];
+    const lookupToken = hasPrefix ? this._tokens[this.index + 1] : currentToken;
+
+    // Get only the matchfix defs that could match this opening token
+    // Note: some tokens (like |) may match multiple defs (|| and |)
+    let defs = this._dictionary.matchfixByOpen.get(lookupToken) ?? [];
+
+    // If no defs found and lookupToken is undefined, fall back to all matchfix defs
+    // (This handles edge cases with complex delimiters)
+    if (defs.length === 0 && !lookupToken) {
+      defs = [...this.getDefs('matchfix')] as IndexedMatchfixEntry[];
+    }
 
     //
-    // Try each def
+    // Try each potentially matching def
     //
     for (const def of defs) {
       this.index = start;
 
       // 1. Match the opening delimiter
-      if (!this.matchDelimiter(def.openTrigger, def.closeTrigger)) continue;
+      const matched = this.matchDelimiter(def.openTrigger, def.closeTrigger);
+      if (!matched) continue;
 
       // 2. Collect the expression in between the delimiters
       const bodyStart = this.index;
@@ -1442,6 +1496,9 @@ export class _Parser implements Parser {
         // If the open/close delimiter are identical and the body is empty,
         // we may have consumed an inner delimiter (e.g. "||3-5|-4|").
         // Retry parsing without the boundary and look for the closing delimiter.
+        if (lookupToken === '|') {
+          console.log(`    RE-PARSING (empty body, sameTrigger)`);
+        }
         this.index = bodyStart;
         this.skipSpace();
         body = this.parseExpression();
@@ -1453,24 +1510,57 @@ export class _Parser implements Parser {
         }
       } else if (!matchedBoundary) {
         // We couldn't parse the body up to the closing delimiter.
-        // This could be a case where the boundary of the enclosure is
-        // ambiguous, i.e. `|(a+|b|+c)|`. Attempt to parse without the boundary
-        const boundary = this._boundaries[this._boundaries.length - 1].tokens;
-        this.removeBoundary();
-        this.index = bodyStart;
-        this.skipSpace();
-        body = this.parseExpression();
-        this.skipSpace();
-        // If still could not match, try another
-        if (!this.matchAll(boundary)) {
+        const boundary = this._boundaries[this._boundaries.length - 1]?.tokens;
+        if (!boundary) {
+          if (lookupToken === '|') {
+            console.log(`    !matchedBoundary but no boundary - continuing`);
+          }
           this.index = start;
-          if (!this.atEnd) continue;
-          // If we're at the end, we may need to backtrack and try again
-          // That's the case for `|1+|2|+3|`
-          return null;
+          continue;
+        }
+
+        // Performance optimization: skip re-parsing for specific non-ambiguous cases
+        // Only skip for ( and ) where we know interval notation failures are safe to skip
+        const canSkipReparsing =
+          !sameTrigger && // Not same open/close
+          boundary.length === 1 && // No prefix
+          (lookupToken === '(' || lookupToken === '\\lparen') && // Only for (
+          (boundary[0] === ']' || boundary[0] === '\\rbrack'); // Only when expecting interval close
+
+        if (lookupToken === '|') {
+          console.log(`    !matchedBoundary: canSkipReparsing=${canSkipReparsing}`);
+        }
+
+        if (!canSkipReparsing) {
+          // Re-parse without the boundary to handle ambiguous cases
+          if (lookupToken === '|') {
+            console.log(`    RE-PARSING (!matchedBoundary, ambiguous)`);
+          }
+          this.removeBoundary();
+          this.index = bodyStart;
+          this.skipSpace();
+          body = this.parseExpression();
+          if (lookupToken === '|') {
+            console.log(`    After RE-PARSE: body=${JSON.stringify(body).substring(0, 80)}`);
+          }
+          this.skipSpace();
+          if (!this.matchAll(boundary)) {
+            this.index = start;
+            if (!this.atEnd) continue;
+            return null;
+          }
+        } else {
+          // Performance optimization: skip re-parsing for (] when input is ()
+          // Must remove the boundary that matchDelimiter added before continuing
+          this.removeBoundary();
+          this.index = start;
+          continue;
         }
       }
       const result = def.parse(this, body ?? 'Nothing');
+      if (lookupToken === '|') {
+        console.log(`  Tried def, result=${result === null ? 'null' : 'success'}`);
+      }
       if (result !== null) return result;
     }
     this.index = start;

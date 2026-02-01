@@ -47,6 +47,21 @@ import { DEFINITIONS_LINEAR_ALGEBRA } from './definitions-linear-algebra';
 import { DEFINITIONS_LOGIC } from './definitions-logic';
 import { DEFINITIONS_OTHERS } from './definitions-other';
 import { DEFINITIONS_TRIGONOMETRY } from './definitions-trigonometry';
+
+/** Delimiter shorthands and their token variants for matchfix indexing */
+const DELIMITER_SHORTHAND: { [key: string]: LatexToken[] } = {
+  '(': ['\\lparen', '('],
+  ')': ['\\rparen', ')'],
+  '[': ['\\lbrack', '\\[', '['],
+  ']': ['\\rbrack', '\\]', ']'],
+  '<': ['<', '\\langle'],
+  '>': ['>', '\\rangle'],
+  '{': ['\\{', '\\lbrace'],
+  '}': ['\\}', '\\rbrace'],
+  ':': [':', '\\colon'],
+  '|': ['|', '\\|', '\\lvert', '\\rvert'],
+  '||': ['||', '\\Vert', '\\lVert', '\\rVert'],
+};
 import { DEFINITIONS_SETS } from './definitions-sets';
 import { DEFINITIONS_CALCULUS } from './definitions-calculus';
 import { DEFINITIONS_SYMBOLS } from './definitions-symbols';
@@ -207,6 +222,10 @@ export type IndexedLatexDictionary = {
   lookahead: number;
 
   defs: IndexedLatexDictionaryEntry[];
+
+  // Index of matchfix entries by their opening delimiter token
+  // This allows fast lookup of which matchfix defs could match a given opening token
+  matchfixByOpen: Map<string, IndexedMatchfixEntry[]>;
 };
 
 //
@@ -293,6 +312,45 @@ function addEntry(
   result.defs.push(indexedEntry);
 
   //
+  // 2.1 Update the matchfix index
+  //     Index matchfix entries by their opening delimiter for fast lookup
+  //
+  if (isIndexedMatchfixEntry(indexedEntry)) {
+    const openTrigger = indexedEntry.openTrigger;
+    // Get all possible opening tokens for this matchfix def
+    const openTokens: string[] = [];
+
+    if (typeof openTrigger === 'string') {
+      // For string triggers, include all variants from DELIMITER_SHORTHAND
+      const variants = DELIMITER_SHORTHAND[openTrigger];
+      if (variants) {
+        openTokens.push(...variants);
+      } else {
+        openTokens.push(openTrigger);
+      }
+      // Special case: || can also start with single |
+      if (openTrigger === '||') {
+        openTokens.push('|');
+      }
+    } else if (Array.isArray(openTrigger) && openTrigger.length > 0) {
+      // For array triggers, use the first token
+      openTokens.push(openTrigger[0]);
+    }
+
+    // Add this entry to the index for each possible opening token
+    // Use unshift() to maintain reverse order (later defs tried first) for correctness.
+    // This ensures selective defs (like Boole for []) are tried before catch-all defs (like List).
+    for (const token of openTokens) {
+      const existing = result.matchfixByOpen.get(token);
+      if (existing) {
+        existing.unshift(indexedEntry); // Prepend - maintain reverse order
+      } else {
+        result.matchfixByOpen.set(token, [indexedEntry]);
+      }
+    }
+  }
+
+  //
   // 3. Update the name index
   //    This is an index of MathJSON symbols to dictionary entries
   //
@@ -322,10 +380,62 @@ export function indexLatexDictionary(
     lookahead: 1,
     ids: new Map(),
     defs: [],
+    matchfixByOpen: new Map(),
   };
 
   for (const entry of dic)
     addEntry(result, entry as LatexDictionaryEntry, onError);
+
+  // Optimize matchfix index: sort each bucket to try common patterns first.
+  // For delimiters with multiple definitions (like '(' with (), (], (\rbrack),
+  // try defs with standard complementary pairs (like () or []) before
+  // non-standard pairs (like (] for interval notation).
+  // This improves performance for nested structures without breaking correctness.
+  const COMPLEMENTARY_PAIRS: { [key: string]: string[] } = {
+    '(': [')', '\\rparen'],
+    '\\lparen': [')', '\\rparen'],
+    '[': [']', '\\rbrack', '\\]'],
+    '\\lbrack': [']', '\\rbrack', '\\]'],
+    '\\[': [']', '\\rbrack', '\\]'],
+    '{': ['}', '\\rbrace'],
+    '\\lbrace': ['}', '\\rbrace'],
+    '\\{': ['}', '\\rbrace'],
+    '<': ['>', '\\rangle'],
+    '\\langle': ['>', '\\rangle'],
+    '|': ['|', '\\|', '\\rvert', '\\lvert'],
+    '\\|': ['|', '\\|', '\\rvert', '\\lvert'],
+    '\\lvert': ['|', '\\|', '\\rvert', '\\lvert'],
+    '||': ['||', '\\Vert', '\\lVert', '\\rVert'],
+    '\\Vert': ['||', '\\Vert', '\\lVert', '\\rVert'],
+    '\\lVert': ['||', '\\Vert', '\\lVert', '\\rVert'],
+  };
+
+  for (const [token, defs] of result.matchfixByOpen.entries()) {
+    result.matchfixByOpen.set(
+      token,
+      defs.sort((a, b) => {
+        // Check if close trigger is a standard complement for the open trigger
+        const getOpenToken = (trigger: string | string[]): string =>
+          typeof trigger === 'string' ? trigger : trigger[0] || '';
+        const getCloseToken = (trigger: string | string[]): string =>
+          typeof trigger === 'string' ? trigger : trigger[0] || '';
+
+        const aOpen = getOpenToken(a.openTrigger);
+        const aClose = getCloseToken(a.closeTrigger);
+        const aIsStandard = COMPLEMENTARY_PAIRS[aOpen]?.includes(aClose) ?? false;
+
+        const bOpen = getOpenToken(b.openTrigger);
+        const bClose = getCloseToken(b.closeTrigger);
+        const bIsStandard = COMPLEMENTARY_PAIRS[bOpen]?.includes(bClose) ?? false;
+
+        // Standard pairs come first in array (tried first on iteration)
+        // This maintains the reverse order within each category
+        if (aIsStandard && !bIsStandard) return -1; // a before b
+        if (!aIsStandard && bIsStandard) return 1; // b before a
+        return 0; // Maintain original order within category
+      })
+    );
+  }
 
   return result;
 }
