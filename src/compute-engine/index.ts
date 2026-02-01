@@ -157,6 +157,21 @@ export * from './global-types';
 
 export { validatePattern };
 
+// Export compilation types and classes for advanced users
+export type {
+  CompileTarget,
+  CompiledOperators,
+  CompiledFunctions,
+  CompilationOptions,
+  CompiledExecutable,
+  LanguageTarget,
+  TargetSource,
+  CompiledFunction,
+} from './compilation/types';
+
+export { JavaScriptTarget } from './compilation/javascript-target';
+export { BaseCompiler } from './compilation/base-compiler';
+
 /**
  *
  * To use the Compute Engine, create a `ComputeEngine` instance:

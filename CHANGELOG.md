@@ -33,6 +33,39 @@
   - Works with both scalar and collection (vector/array) arguments
   - Partial overrides supported (only override some operators)
 
+- **Exported Compilation Interfaces**: Advanced users can now create custom
+  compilation targets by using the exported `CompileTarget` interface,
+  `BaseCompiler` class, and `JavaScriptTarget` class.
+
+  ```javascript
+  import { BaseCompiler, JavaScriptTarget } from '@cortex-js/compute-engine';
+
+  // Create a custom compilation target
+  const customTarget = {
+    language: 'my-dsl',
+    operators: (op) => ({ Add: ['ADD', 11], Multiply: ['MUL', 12] }[op]),
+    functions: (id) => id.toUpperCase(),
+    var: (id) => `VAR("${id}")`,
+    string: (s) => `"${s}"`,
+    number: (n) => n.toString(),
+    ws: () => ' ',
+    preamble: '',
+    indent: 0,
+  };
+
+  const expr = ce.parse('x + y * 2');
+  const code = BaseCompiler.compile(expr, customTarget);
+  // → "ADD(VAR("x"), MUL(VAR("y"), 2))"
+  ```
+
+  **Exported types and classes**:
+  - `CompileTarget` - Interface for defining compilation targets
+  - `CompiledOperators`, `CompiledFunctions` - Type definitions
+  - `CompilationOptions`, `CompiledExecutable` - Options and result types
+  - `LanguageTarget` - Interface for language-specific targets
+  - `BaseCompiler` - Core compilation logic
+  - `JavaScriptTarget` - JavaScript compilation target implementation
+
 ### Improvements
 
 - **Improved `ask()` Queries**: `ce.ask()` now matches patterns with wildcards

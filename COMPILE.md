@@ -330,15 +330,27 @@ float f(float x) {
 - Added comprehensive test coverage including edge cases
 - Created working example in `examples/compile-vector-operations.js`
 
-### Medium Priority (Phase 2)
+### Medium Priority (Phase 2) ✅ COMPLETED
 
-- [ ] Export `CompileTarget` and related interfaces
-- [ ] Export `JavaScriptTarget` and `BaseCompiler`
-- [ ] Add advanced examples
-- [ ] Document custom target creation
+- [x] Export `CompileTarget` and related interfaces
+- [x] Export `JavaScriptTarget` and `BaseCompiler`
+- [x] Add advanced examples
+- [x] Document custom target creation
 
-**Estimated effort**: 1 day **Impact**: Enables advanced users to create custom
-targets
+**Status**: ✅ **Completed**
+**Impact**: Enables advanced users to create custom targets
+
+**Implementation notes**:
+- Exported all compilation types from main entry point (`src/compute-engine.ts`)
+- Types exported: `CompileTarget`, `CompiledOperators`, `CompiledFunctions`, `CompilationOptions`, `CompiledExecutable`, `LanguageTarget`, `TargetSource`, `CompiledFunction`
+- Classes exported: `JavaScriptTarget`, `BaseCompiler`
+- Created comprehensive example (`examples/compile-custom-target.js`) showing:
+  - Extending JavaScriptTarget with custom mappings
+  - Creating all-function-call targets for legacy systems
+  - Implementing RPN (Reverse Polish Notation) compilation
+  - SQL-like expression target
+  - Pretty-print target with formatting
+- All exports are available in the production build
 
 ### Lower Priority (Phase 3)
 
