@@ -1732,11 +1732,30 @@ falls back to the interpreting the expression, unless the
 `options.fallback` is set to `false`. If it is set to `false`, the
 function will throw an error if it cannot be compiled.
 
+**Custom operators**: You can override operators to use function calls
+instead of native operators, useful for vector/matrix operations:
+
+```javascript
+const expr = ce.parse("v + w");
+const f = expr.compile({
+  operators: {
+    Add: ['add', 11],      // Convert + to add()
+    Multiply: ['mul', 12]   // Convert * to mul()
+  }
+});
+// Result: add(v, w) instead of v + w
+```
+
 ####### options?
 
 ####### to?
 
 `"javascript"` \| `"wgsl"` \| `"python"` \| `"webassembly"`
+
+####### operators?
+
+  \| `Partial`\<`Record`\<`string`, \[`string`, `number`\]\>\>
+  \| (`op`) => \[`string`, `number`\]
 
 ####### functions?
 

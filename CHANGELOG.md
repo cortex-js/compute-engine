@@ -1,9 +1,42 @@
 ## [Unreleased]
 
+### New Features
+
+- **Custom Operator Compilation**: The `compile()` method now supports overriding
+  operators to use function calls instead of native operators. This enables
+  compilation of vector/matrix operations and custom domain-specific languages.
+  Addresses #240.
+
+  ```javascript
+  // Override operators for vector operations
+  const expr = ce.parse('v + w');
+  const compiled = expr.compile({
+    operators: {
+      Add: ['add', 11],      // Convert + to add() function
+      Multiply: ['mul', 12]  // Convert * to mul() function
+    },
+    functions: {
+      add: (a, b) => a.map((v, i) => v + b[i]),
+      mul: (a, b) => a.map((v, i) => v * b[i])
+    }
+  });
+
+  const result = compiled({ v: [1, 2, 3], w: [4, 5, 6] });
+  // → [5, 7, 9]
+  ```
+
+  **Features**:
+  - Override operators using an object mapping operator names to function names
+  - Use a function to conditionally override operators
+  - Function-name operators (e.g., `add`, `mul`) compile to function calls
+  - Symbol operators (e.g., `+`, `-`) compile to infix operators
+  - Works with both scalar and collection (vector/array) arguments
+  - Partial overrides supported (only override some operators)
+
 ### Improvements
 
 - **Improved `ask()` Queries**: `ce.ask()` now matches patterns with wildcards
-  correctly, can answer common “bound” queries such as
+  correctly, can answer common "bound" queries such as
   `ask(["Greater", "x", "_k"])` and `ask(["Greater", "_x", "_k"])`, normalizes
   inequality patterns for matching (e.g. `ask(["Greater", "_x", 0])`), and falls
   back to `verify()` for closed predicates when the fact is known but not stored

@@ -742,6 +742,9 @@ export abstract class _BoxedExpression implements BoxedExpression {
 
   compile(options?: {
     to?: 'javascript' | 'wgsl' | 'python' | 'webassembly';
+    operators?:
+      | Partial<Record<MathJsonSymbol, [op: string, prec: number]>>
+      | ((op: MathJsonSymbol) => [op: string, prec: number] | undefined);
     functions?: Record<MathJsonSymbol, string | ((...any) => any)>;
     vars?: Record<MathJsonSymbol, string>;
     imports?: ((...any) => any)[];
@@ -765,6 +768,7 @@ export abstract class _BoxedExpression implements BoxedExpression {
       const { JavaScriptTarget } = require('../compilation/javascript-target');
       const jsTarget = new JavaScriptTarget();
       return jsTarget.compileToExecutable(expr, {
+        operators: options?.operators,
         functions: options?.functions,
         vars: options?.vars,
         imports: options?.imports,

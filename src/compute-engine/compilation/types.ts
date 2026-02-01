@@ -88,6 +88,27 @@ export interface LanguageTarget {
  * Options for compilation
  */
 export interface CompilationOptions {
+  /**
+   * Custom operator mappings. Can be:
+   * - A partial object mapping operator names to [operator, precedence] tuples
+   * - A function that returns the operator mapping for a given symbol
+   *
+   * When an operator is overridden, it will be compiled using the specified
+   * string and precedence instead of the default for the target language.
+   *
+   * @example
+   * ```typescript
+   * // Override operators as object
+   * { operators: { Add: ['add', 11], Multiply: ['mul', 12] } }
+   *
+   * // Override operators as function
+   * { operators: (op) => op === 'Add' ? ['add', 11] : undefined }
+   * ```
+   */
+  operators?:
+    | Partial<CompiledOperators>
+    | ((op: MathJsonSymbol) => [op: string, prec: number] | undefined);
+
   /** Custom function implementations */
   functions?: Record<MathJsonSymbol, TargetSource | Function>;
 

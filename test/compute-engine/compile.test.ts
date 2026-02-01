@@ -127,4 +127,201 @@ describe('COMPILE', () => {
       );
     });
   });
+
+  describe('Custom Operators', () => {
+    describe('Object-based operator overrides', () => {
+      it('should override a single operator', () => {
+        const expr = ce.parse('x + y');
+        const compiled = expr.compile({
+          operators: { Add: ['add', 11] },
+        });
+        expect(compiled?.toString() ?? '').toMatchInlineSnapshot(
+          `add(_.x, _.y)`
+        );
+      });
+
+      it('should override multiple operators', () => {
+        const expr = ce.parse('x + y * z');
+        const compiled = expr.compile({
+          operators: {
+            Add: ['add', 11],
+            Multiply: ['mul', 12],
+          },
+        });
+        // Note: canonical form may reorder arguments
+        expect(compiled?.toString() ?? '').toMatchInlineSnapshot(
+          `add(mul(_.y, _.z), _.x)`
+        );
+      });
+
+      it('should handle division override', () => {
+        const expr = ce.parse('x / y');
+        const compiled = expr.compile({
+          operators: { Divide: ['div', 13] },
+        });
+        expect(compiled?.toString() ?? '').toMatchInlineSnapshot(
+          `div(_.x, _.y)`
+        );
+      });
+
+      it('should override unary operators', () => {
+        const expr = ce.parse('-x');
+        const compiled = expr.compile({
+          operators: { Negate: ['neg', 14] },
+        });
+        expect(compiled?.toString() ?? '').toMatchInlineSnapshot(`neg(_.x)`);
+      });
+
+      it('should handle subtraction with Negate override', () => {
+        // Note: Subtraction is canonicalized to Add(x, Negate(y))
+        const expr = ce.parse('x - y');
+        const compiled = expr.compile({
+          operators: {
+            Add: ['add', 11],
+            Negate: ['neg', 14],
+          },
+        });
+        expect(compiled?.toString() ?? '').toMatchInlineSnapshot(
+          `add(_.x, neg(_.y))`
+        );
+      });
+
+      it('should use default operators for non-overridden operators', () => {
+        const expr = ce.parse('x + y - z');
+        const compiled = expr.compile({
+          operators: { Add: ['add', 11] },
+        });
+        // Note: Subtraction is canonicalized to Add(x, y, Negate(z))
+        expect(compiled?.toString() ?? '').toMatchInlineSnapshot(
+          `add(_.x, _.y, -_.z)`
+        );
+      });
+    });
+
+    describe('Function-based operator overrides', () => {
+      it('should override using a function', () => {
+        const expr = ce.parse('x + y');
+        const compiled = expr.compile({
+          operators: (op) => (op === 'Add' ? ['add', 11] : undefined),
+        });
+        expect(compiled?.toString() ?? '').toMatchInlineSnapshot(
+          `add(_.x, _.y)`
+        );
+      });
+
+      it('should fall back to defaults when function returns undefined', () => {
+        const expr = ce.parse('x + y * z');
+        const compiled = expr.compile({
+          operators: (op) => (op === 'Add' ? ['add', 11] : undefined),
+        });
+        // Note: canonical form may reorder arguments
+        expect(compiled?.toString() ?? '').toMatchInlineSnapshot(
+          `add(_.y * _.z, _.x)`
+        );
+      });
+    });
+
+    describe('Vector/matrix operations use case', () => {
+      it('should compile vector addition to function call', () => {
+        // Use case from Issue #240
+        const expr = ce.box(['Add', ['List', 1, 1, 1], ['List', 1, 1, 1]]);
+        const compiled = expr.compile({
+          operators: { Add: ['add', 11] },
+        });
+        expect(compiled?.toString() ?? '').toMatchInlineSnapshot(
+          `add([1, 1, 1], [1, 1, 1])`
+        );
+      });
+
+      it('should execute vector operations with custom functions', () => {
+        function add(a, b) {
+          return a.map((v, i) => v + b[i]);
+        }
+        function mul(a, b) {
+          return a.map((v, i) => v * b[i]);
+        }
+
+        const expr = ce.box([
+          'Add',
+          ['List', 1, 2, 3],
+          ['Multiply', ['List', 2, 3, 4], ['List', 1, 1, 1]],
+        ]);
+
+        const compiled = expr.compile({
+          operators: {
+            Add: ['add', 11],
+            Multiply: ['mul', 12],
+          },
+          functions: { add, mul },
+        });
+
+        const result = compiled?.();
+        expect(result).toEqual([3, 5, 7]);
+      });
+    });
+
+    describe('Complex expressions with operator overrides', () => {
+      it('should handle nested expressions', () => {
+        const expr = ce.parse('(x + y) * (z + w)');
+        const compiled = expr.compile({
+          operators: {
+            Add: ['add', 11],
+            Multiply: ['mul', 12],
+          },
+        });
+        // Note: canonical form may reorder arguments
+        expect(compiled?.toString() ?? '').toMatchInlineSnapshot(
+          `mul(add(_.w, _.z), add(_.x, _.y))`
+        );
+      });
+
+      it('should handle expressions with multiple operator types', () => {
+        const expr = ce.parse('x + y - z * w / v');
+        const compiled = expr.compile({
+          operators: {
+            Add: ['add', 11],
+            Multiply: ['mul', 12],
+            Divide: ['div', 13],
+            Negate: ['neg', 14],
+          },
+        });
+        // Note: Subtraction is canonicalized to Add with Negate
+        expect(compiled?.toString() ?? '').toMatchInlineSnapshot(
+          `add(neg(mul(_.z, div(_.w, _.v))), _.x, _.y)`
+        );
+      });
+    });
+
+    describe('Precedence handling with custom operators', () => {
+      it('should respect custom precedence', () => {
+        const expr = ce.parse('x + y * z');
+        const compiled = expr.compile({
+          operators: {
+            Add: ['add', 20], // Higher precedence than multiply
+            Multiply: ['mul', 10],
+          },
+        });
+        // Note: canonical form may reorder arguments
+        expect(compiled?.toString() ?? '').toMatchInlineSnapshot(
+          `add(mul(_.y, _.z), _.x)`
+        );
+      });
+    });
+
+    describe('Partial overrides', () => {
+      it('should allow overriding only some operators', () => {
+        const expr = ce.parse('a + b * c - d / g');
+        const compiled = expr.compile({
+          operators: {
+            Add: ['add', 11],
+            // Multiply, Negate, Divide use defaults
+          },
+        });
+        // Note: Subtraction is canonicalized to Add with Negate
+        expect(compiled?.toString() ?? '').toMatchInlineSnapshot(
+          `add(_.b * _.c, _.a, -_.d / _.g)`
+        );
+      });
+    });
+  });
 });

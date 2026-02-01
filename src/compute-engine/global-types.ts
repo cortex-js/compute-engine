@@ -1538,9 +1538,26 @@ export interface BoxedExpression {
    * `options.fallback` is set to `false`. If it is set to `false`, the
    * function will throw an error if it cannot be compiled.
    *
+   * **Custom operators**: You can override operators to use function calls
+   * instead of native operators, useful for vector/matrix operations:
+   *
+   * ```javascript
+   * const expr = ce.parse("v + w");
+   * const f = expr.compile({
+   *   operators: {
+   *     Add: ['add', 11],      // Convert + to add()
+   *     Multiply: ['mul', 12]   // Convert * to mul()
+   *   }
+   * });
+   * // Result: add(v, w) instead of v + w
+   * ```
+   *
    */
   compile(options?: {
     to?: 'javascript' | 'wgsl' | 'python' | 'webassembly';
+    operators?:
+      | Partial<Record<MathJsonSymbol, [op: string, prec: number]>>
+      | ((op: MathJsonSymbol) => [op: string, prec: number] | undefined);
     functions?: Record<MathJsonSymbol, JSSource | ((...any) => any)>;
     vars?: Record<MathJsonSymbol, JSSource>;
     imports?: ((...any) => any)[];

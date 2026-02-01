@@ -1,4 +1,5 @@
 import type { BoxedExpression } from '../global-types';
+import type { MathJsonSymbol } from '../../math-json/types';
 
 import { chop, factorial, gcd, lcm, limit } from '../numerics/numeric';
 import { gamma, gammaln } from '../numerics/special-functions';
@@ -396,7 +397,7 @@ export class JavaScriptTarget implements LanguageTarget {
     expr: BoxedExpression,
     options: CompilationOptions = {}
   ): CompiledExecutable {
-    const { functions, vars, imports = [], preamble } = options;
+    const { operators, functions, vars, imports = [], preamble } = options;
     const unknowns = expr.unknowns;
 
     // Process imports
@@ -427,7 +428,22 @@ export class JavaScriptTarget implements LanguageTarget {
       }
     }
 
+    // Create operator lookup function
+    const operatorLookup = (op: MathJsonSymbol) => {
+      // Check custom operators first
+      if (operators) {
+        const customOp =
+          typeof operators === 'function'
+            ? operators(op)
+            : operators[op as keyof typeof operators];
+        if (customOp) return customOp;
+      }
+      // Fall back to default JavaScript operators
+      return JAVASCRIPT_OPERATORS[op];
+    };
+
     const target = this.createTarget({
+      operators: operatorLookup,
       functions: (id) =>
         namedFunctions?.[id] ? namedFunctions[id] : JAVASCRIPT_FUNCTIONS[id],
       var: (id) => {
