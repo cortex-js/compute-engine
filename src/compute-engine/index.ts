@@ -133,7 +133,7 @@ import { SIMPLIFY_RULES } from './symbolic/simplify-rules';
 import { bigint } from './numerics/bigint';
 import { canonicalFunctionLiteral, lookup } from './function-utils';
 
-import { assume } from './assume';
+import { assume, getInequalityBoundsFromAssumptions } from './assume';
 import {
   createSequenceHandler,
   validateSequenceDefinition,
@@ -150,6 +150,8 @@ import {
   lookupSequence as lookupSequenceImpl,
   checkSequence as checkSequenceImpl,
 } from './oeis';
+
+import { isWildcard, wildcardName } from './boxed-expression/boxed-patterns';
 
 export * from './global-types';
 
@@ -2188,11 +2190,155 @@ export class ComputeEngine implements IComputeEngine {
   ask(pattern: BoxedExpression): BoxedSubstitution[] {
     const pat = this.box(pattern, { canonical: false });
     const result: BoxedSubstitution[] = [];
+
+    const patternHasWildcards = (expr: BoxedExpression): boolean => {
+      if (expr.operator?.startsWith('_')) return true;
+      if (isWildcard(expr)) return true;
+      if (expr.ops) return expr.ops.some(patternHasWildcards);
+      return false;
+    };
+
+    const pushResult = (m: BoxedSubstitution) => {
+      const keys = Object.keys(m).sort();
+      for (const prev of result) {
+        const prevKeys = Object.keys(prev).sort();
+        if (prevKeys.length !== keys.length) continue;
+        let same = true;
+        for (let i = 0; i < keys.length; i++) {
+          if (prevKeys[i] !== keys[i]) {
+            same = false;
+            break;
+          }
+          const k = keys[i]!;
+          if (!m[k]!.isSame(prev[k]!)) {
+            same = false;
+            break;
+          }
+        }
+        if (same) return;
+      }
+      result.push(m);
+    };
+
     const assumptions = this.context.assumptions;
-    for (const [assumption, val] of assumptions) {
-      const m = pat.match(assumption);
-      if (m !== null && val === true) result.push(m);
+
+    const candidatesFromAssumptions = (): string[] => {
+      const candidates = new Set<string>();
+      for (const [assumption, val] of assumptions) {
+        if (val !== true) continue;
+        for (const s of assumption.symbols) candidates.add(s);
+      }
+      return [...candidates];
+    };
+
+    const normalizedInequalityPatterns = (
+      expr: BoxedExpression
+    ): Array<{ pattern: BoxedExpression; matchPermutations?: boolean }> => {
+      const op = expr.operator;
+      if (
+        op !== 'Less' &&
+        op !== 'LessEqual' &&
+        op !== 'Greater' &&
+        op !== 'GreaterEqual'
+      )
+        return [{ pattern: expr }];
+
+      const lhs = op === 'Greater' || op === 'GreaterEqual' ? expr.op2 : expr.op1;
+      const rhs = op === 'Greater' || op === 'GreaterEqual' ? expr.op1 : expr.op2;
+      const normalizedOp = op === 'Less' || op === 'Greater' ? 'Less' : 'LessEqual';
+
+      // Normalize to Less/LessEqual with RHS = 0, matching how assumptions are stored:
+      //   Greater(a, b) -> Less(b - a, 0)
+      //   Less(a, b)    -> Less(a - b, 0)
+      const diff = this.box(['Add', lhs, ['Negate', rhs]], { canonical: false });
+      return [
+        { pattern: expr },
+        // For the normalized form, disable permutations: for commutative
+        // subexpressions (notably Add), allowing permutations can lead to
+        // ambiguous wildcard bindings and duplicate, surprising matches.
+        {
+          pattern: this.box([normalizedOp, diff, 0], { canonical: false }),
+          matchPermutations: false,
+        },
+      ];
+    };
+
+    // B1: Element(x, _T) can be answered from the declared/inferred type of x
+    if (pat.operator === 'Element' && pat.op1?.symbol && isWildcard(pat.op2)) {
+      const typeWildcard = wildcardName(pat.op2);
+      if (typeWildcard && !typeWildcard.startsWith('__')) {
+        const symbolType = this.box(pat.op1.symbol).type;
+        if (!symbolType.isUnknown) {
+          pushResult({
+            [typeWildcard]: this.box(symbolType.toString(), { canonical: false }),
+          });
+        }
+      }
     }
+
+    // B2: Inequality bound queries, e.g. Greater(x, _k) -> {_k: lowerBound}
+    if (
+      (pat.operator === 'Greater' ||
+        pat.operator === 'GreaterEqual' ||
+        pat.operator === 'Less' ||
+        pat.operator === 'LessEqual') &&
+      isWildcard(pat.op2)
+    ) {
+      const boundWildcard = wildcardName(pat.op2);
+      if (boundWildcard && !boundWildcard.startsWith('__')) {
+        const isLower = pat.operator === 'Greater' || pat.operator === 'GreaterEqual';
+        const isStrict = pat.operator === 'Greater' || pat.operator === 'Less';
+
+        // Symbol on LHS: Greater(x, _k)
+        if (pat.op1?.symbol) {
+          const bounds = getInequalityBoundsFromAssumptions(this, pat.op1.symbol);
+          const bound = isLower ? bounds.lowerBound : bounds.upperBound;
+          const strictOk = isLower ? bounds.lowerStrict : bounds.upperStrict;
+          if (bound !== undefined && (!isStrict || strictOk === true))
+            pushResult({ [boundWildcard]: bound });
+        }
+
+        // Wildcard on LHS: Greater(_x, _k)
+        if (isWildcard(pat.op1)) {
+          const symbolWildcard = wildcardName(pat.op1);
+          if (symbolWildcard && !symbolWildcard.startsWith('__')) {
+            for (const s of candidatesFromAssumptions()) {
+              const bounds = getInequalityBoundsFromAssumptions(this, s);
+              const bound = isLower ? bounds.lowerBound : bounds.upperBound;
+              const strictOk = isLower ? bounds.lowerStrict : bounds.upperStrict;
+              if (bound === undefined || (isStrict && strictOk !== true)) continue;
+              pushResult({
+                [symbolWildcard]: this.box(s, { canonical: true }),
+                [boundWildcard]: bound,
+              });
+            }
+          }
+        }
+      }
+    }
+
+    const patternsToTry = normalizedInequalityPatterns(pat);
+    for (const [assumption, val] of assumptions) {
+      if (val !== true) continue;
+      for (const { pattern: p, matchPermutations } of patternsToTry) {
+        const m = assumption.match(p, {
+          useVariations: true,
+          matchPermutations,
+        });
+        if (m !== null) pushResult(m);
+      }
+    }
+
+    // B3: For closed predicates (no wildcards), fall back to verify().
+    // This makes `ask()` useful for "is this known?" queries even when the
+    // fact is not explicitly stored in the assumptions DB (e.g. declarations).
+    if (result.length === 0 && !patternHasWildcards(pat)) {
+      // Use the canonical form so symbol declarations/definitions are visible
+      // to the evaluator.
+      const verified = this.verify(this.box(pattern, { canonical: true }));
+      if (verified === true) pushResult({});
+    }
+
     return result;
   }
 

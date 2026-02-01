@@ -19,6 +19,25 @@ describe('ASK', () => {
     expect(r[0]!._k.json).toBe(0);
   });
 
+  test('normalizes inequality patterns for matching', () => {
+    const ce = new ComputeEngine();
+    ce.assume(ce.parse('x > 0'));
+
+    const r = ce.ask(['Greater', '_x', 0]);
+    expect(r.length).toBe(1);
+    expect(r[0]!._x.symbol).toBe('x');
+  });
+
+  test('supports wildcard symbols in bound queries', () => {
+    const ce = new ComputeEngine();
+    ce.assume(ce.parse('x > 0'));
+
+    const r = ce.ask(['Greater', '_x', '_k']);
+    expect(r.length).toBe(1);
+    expect(r[0]!._x.symbol).toBe('x');
+    expect(r[0]!._k.json).toBe(0);
+  });
+
   test('is conservative about strictness of bounds', () => {
     const ce = new ComputeEngine();
     ce.assume(ce.parse('x \\ge 0'));
@@ -43,4 +62,3 @@ describe('ASK', () => {
     expect(r[0]!._T.json).toBe('finite_real');
   });
 });
-

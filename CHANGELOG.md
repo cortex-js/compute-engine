@@ -4,8 +4,10 @@
 
 - **Improved `ask()` Queries**: `ce.ask()` now matches patterns with wildcards
   correctly, can answer common “bound” queries such as
-  `ask(["Greater", "x", "_k"])`, and falls back to `verify()` for closed
-  predicates when the fact is known but not stored as an explicit assumption.
+  `ask(["Greater", "x", "_k"])` and `ask(["Greater", "_x", "_k"])`, normalizes
+  inequality patterns for matching (e.g. `ask(["Greater", "_x", 0])`), and falls
+  back to `verify()` for closed predicates when the fact is known but not stored
+  as an explicit assumption.
 
 - **Tri-state `verify()`**: Implemented `ce.verify()` as a truth query that
   returns `true`, `false` or `undefined` when a predicate cannot be determined
@@ -335,7 +337,8 @@
     want them reduced to `\frac{0}{0}` → `\operatorname{NaN}`.
   - **Implicit multiplication powers**: `xx` now simplifies to `x^2`.
   - **Exponential/log separation**: `\exp(\log(x)+y)` and `\exp(\log(x)-y)` now
-    simplify without leaving a remaining `\log(...)` term in the exponent.
+    simplify without leaving a remaining `\log(...)` term in the exponent
+    (preferred by the default cost function).
 
 ### New Features
 
