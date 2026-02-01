@@ -778,92 +778,15 @@ See `requirements/DONE.md` for implementation details.
 
 ---
 
-### 20. Tautology and Contradiction Detection
+### ~~20. Tautology and Contradiction Detection~~ ✅ COMPLETED
 
-**Problem:** `ce.assume()` should detect when an assumption is redundant
-(tautology) or conflicts with existing assumptions (contradiction), but
-currently it always returns `"ok"`.
-
-**Current behavior:**
-
-```typescript
-ce.assume(ce.box(['Equal', 'one', 1]));
-ce.assume(ce.box(['Equal', 'one', 1]));  // Returns: "ok" (should be "tautology")
-ce.assume(ce.box(['Less', 'one', 0]));   // Returns: "ok" (should be "contradiction")
-```
-
-**Expected behavior:**
-
-```typescript
-ce.assume(ce.box(['Equal', 'one', 1]));
-ce.assume(ce.box(['Equal', 'one', 1]));   // Should return: "tautology"
-ce.assume(ce.box(['Less', 'one', 0]));    // Should return: "contradiction"
-ce.assume(ce.box(['Greater', 'one', 0])); // Should return: "tautology" (one=1 > 0)
-
-ce.assume(ce.box(['Greater', 'x', 4]));
-ce.assume(ce.box(['Greater', 'x', 0]));   // Should return: "tautology" (implied by x > 4)
-ce.assume(ce.box(['Less', 'x', 0]));      // Should return: "contradiction"
-```
-
-**Implementation notes:**
-
-- Tautology detection: Check if the new assumption is already implied by
-  existing assumptions
-- Contradiction detection: Check if the new assumption conflicts with existing
-  assumptions
-- Requires transitive reasoning for inequalities
-- The return type of `assume()` already includes `"tautology"` and
-  `"contradiction"` as options
-
-**Files to investigate:**
-
-- `src/compute-engine/assume.ts` - `assume()` function and `AssumeResult` type
-
-**Tests:** `test/compute-engine/assumptions.test.ts` - "TAUTOLOGY AND
-CONTRADICTION DETECTION"
+See `requirements/DONE.md` for implementation details.
 
 ---
 
-### 21. Type Inference from Assumptions
+### ~~21. Type Inference from Assumptions~~ ✅ COMPLETED
 
-**Problem:** When assumptions are made, symbol types should be inferred. For
-example, `x > 4` implies `x` is real, and `one = 1` implies `one` is an integer.
-
-**Current behavior:**
-
-```typescript
-ce.assume(ce.box(['Greater', 'x', 4]));
-ce.box('x').type.toString()  // Returns: "unknown"
-
-ce.assume(ce.box(['Equal', 'one', 1]));
-ce.box('one').type.toString()  // Returns: "unknown"
-```
-
-**Expected behavior:**
-
-```typescript
-ce.assume(ce.box(['Greater', 'x', 4]));
-ce.box('x').type.toString()  // Should return: "real" (inequalities imply real numbers)
-
-ce.assume(ce.box(['Equal', 'one', 1]));
-ce.box('one').type.toString()  // Should return: "integer" (equal to integer literal)
-```
-
-**Implementation notes:**
-
-- Inequality assumptions (`>`, `<`, `>=`, `<=`) imply the symbol is `real`
-- Equality to an integer implies the symbol is `integer`
-- Equality to a rational implies the symbol is `rational`
-- This might be handled by updating the symbol's type when an assumption is made
-- Alternatively, the type getter could query assumptions
-
-**Files to investigate:**
-
-- `src/compute-engine/assume.ts` - Assumption processing
-- `src/compute-engine/boxed-expression/boxed-symbol.ts` - Symbol type resolution
-
-**Tests:** `test/compute-engine/assumptions.test.ts` - "TYPE INFERENCE FROM
-ASSUMPTIONS"
+See `requirements/DONE.md` for implementation details.
 
 ---
 

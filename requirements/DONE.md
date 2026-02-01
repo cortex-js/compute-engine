@@ -1184,3 +1184,102 @@ ce.box('y').evaluate().json;  // → 'y' (was: 10)
 
 **Tests added:**
 - `test/compute-engine/bug-fixes.test.ts` - Test for scoped assumption cleanup
+
+---
+
+### 21. Type Inference from Assumptions ✅
+
+**IMPLEMENTED:** When assumptions are made, symbol types are now correctly inferred
+based on the assumption.
+
+**Problem:** When `ce.assume(['Greater', 'x', 4])` was called, the symbol's type
+remained 'unknown'. Similarly, when `ce.assume(['Equal', 'one', 1])` was called,
+the symbol's type was 'finite_integer' instead of 'integer'.
+
+**Solution:** Modified the assumption processing to update symbol types:
+
+1. **For equality assumptions**: Added `inferTypeFromValue()` function that promotes
+   specific types to more general ones (e.g., `finite_integer` → `integer`,
+   `finite_real_number` → `real`). This is used when updating the type of a symbol
+   with an inferred type.
+
+2. **For inequality assumptions**: Updated `assumeInequality()` to set the symbol's
+   type to 'real' even when the symbol was already auto-declared with an inferred type.
+
+**Type promotion rules:**
+- `finite_integer`, `integer` → `integer`
+- `rational` → `real`
+- `finite_real_number`, `real` → `real`
+- `complex`, `imaginary` → `number`
+
+**Examples that now work:**
+```typescript
+ce.assume(ce.box(['Greater', 'x', 4]));
+ce.box('x').type.toString();  // → 'real' (was: 'unknown')
+
+ce.assume(ce.box(['Equal', 'one', 1]));
+ce.box('one').type.toString();  // → 'integer' (was: 'finite_integer' or 'unknown')
+
+ce.assume(ce.box(['Greater', 't', 0]));
+ce.box('t').type.toString();  // → 'real'
+
+ce.assume(ce.box(['Equal', 'p', 11]));
+ce.box('p').type.toString();  // → 'integer'
+```
+
+**Files modified:**
+- `src/compute-engine/assume.ts` - Added `inferTypeFromValue()`, updated type inference
+
+**Tests enabled:**
+- `test/compute-engine/assumptions.test.ts` - Enabled "TYPE INFERENCE FROM ASSUMPTIONS"
+  describe block (6 tests)
+
+---
+
+### 20. Tautology and Contradiction Detection ✅
+
+**IMPLEMENTED:** `ce.assume()` now returns `'tautology'` for redundant assumptions
+that are already implied by existing assumptions, and `'contradiction'` for
+assumptions that conflict with existing ones.
+
+**Problem:** When a user made an assumption like `x > 0` after already assuming
+`x > 4`, the function would return `'ok'` even though the new assumption was
+redundant (implied by the existing one). Similarly, assuming `x < 0` when `x > 4`
+exists would silently accept a contradictory assumption.
+
+**Solution:** Added bounds checking logic in `assumeInequality()` that:
+
+1. Extracts the symbol from the inequality being assumed
+2. Retrieves existing bounds for that symbol from current assumptions
+3. Compares the new inequality against existing bounds to detect:
+   - **Tautologies**: When the new inequality is implied by existing bounds
+   - **Contradictions**: When the new inequality conflicts with existing bounds
+
+The implementation correctly handles all combinations:
+- `Greater`/`GreaterEqual` vs existing lower bounds → tautology detection
+- `Greater`/`GreaterEqual` vs existing upper bounds → contradiction detection
+- `Less`/`LessEqual` vs existing upper bounds → tautology detection
+- `Less`/`LessEqual` vs existing lower bounds → contradiction detection
+
+It also handles canonical form normalization - the compute engine canonicalizes
+`Greater(x, k)` to `Less(k, x)`, so the code determines the "effective" relationship
+based on both the operator and which operand contains the symbol.
+
+**Examples that now work:**
+```typescript
+ce.assume(ce.box(['Equal', 'one', 1]));
+ce.assume(ce.box(['Equal', 'one', 1]));   // → 'tautology' (same assumption repeated)
+ce.assume(ce.box(['Less', 'one', 0]));    // → 'contradiction' (one=1 is not < 0)
+ce.assume(ce.box(['Greater', 'one', 0])); // → 'tautology' (one=1 > 0)
+
+ce.assume(ce.box(['Greater', 'x', 4]));
+ce.assume(ce.box(['Greater', 'x', 0]));   // → 'tautology' (x > 4 implies x > 0)
+ce.assume(ce.box(['Less', 'x', 0]));      // → 'contradiction' (x > 4 contradicts x < 0)
+```
+
+**Files modified:**
+- `src/compute-engine/assume.ts` - Added bounds checking logic in `assumeInequality()`
+
+**Tests enabled:**
+- `test/compute-engine/assumptions.test.ts` - Enabled "TAUTOLOGY AND CONTRADICTION
+  DETECTION" describe block (4 tests)
