@@ -5368,6 +5368,7 @@ dictionary entries to define custom LaTeX parsing and serialization.
 
 ```ts
 type ParseLatexOptions = NumberFormat & {
+  strict: boolean;
   skipSpace: boolean;
   parseNumbers: "auto" | "rational" | "decimal" | "never";
   getSymbolType: (symbol) => BoxedType;
@@ -5380,6 +5381,20 @@ type ParseLatexOptions = NumberFormat & {
 ```
 
 The LaTeX parsing options can be used with the `ce.parse()` method.
+
+#### ParseLatexOptions.strict
+
+```ts
+strict: boolean;
+```
+
+Controls the strictness of LaTeX parsing:
+
+- `true`: Strict LaTeX syntax required (e.g., `\sin{x}`, `x^{n+1}`)
+- `false`: Accept relaxed Math-ASCII/Typst-like syntax in addition to
+  LaTeX (e.g., `sin(x)`, `x^(n+1)`)
+
+**Default**: `true`
 
 #### ParseLatexOptions.skipSpace
 

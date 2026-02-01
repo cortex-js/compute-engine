@@ -623,7 +623,10 @@ export const DEFINITIONS_CORE: LatexDictionary = [
       // return null (or interpret as a symbol).
 
       // Parse either a group or a single symbol
-      const rhs = parser.parseGroup() ?? parser.parseToken();
+      let rhs = parser.parseGroup() ?? parser.parseToken();
+      // In non-strict mode, also accept parenthesized expressions
+      if (rhs === null && parser.options.strict === false && parser.peek === '(')
+        rhs = parser.parseEnclosure();
       return ['Subscript', lhs, rhs];
     },
   } as PostfixEntry,

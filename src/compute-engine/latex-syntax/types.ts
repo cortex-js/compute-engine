@@ -706,6 +706,17 @@ export type NumberSerializationFormat = NumberFormat & {
 
 export type ParseLatexOptions = NumberFormat & {
   /**
+   * Controls the strictness of LaTeX parsing:
+   *
+   * - `true`: Strict LaTeX syntax required (e.g., `\sin{x}`, `x^{n+1}`)
+   * - `false`: Accept relaxed Math-ASCII/Typst-like syntax in addition to
+   *   LaTeX (e.g., `sin(x)`, `x^(n+1)`)
+   *
+   * **Default**: `true`
+   */
+  strict: boolean;
+
+  /**
    * If true, ignore space characters in math mode.
    *
    * **Default**: `true`

@@ -2178,6 +2178,7 @@ export class ComputeEngine implements IComputeEngine {
 
       repeatingDecimal: 'auto', // auto will accept any notation
 
+      strict: true,
       skipSpace: true,
       parseNumbers: 'auto',
       getSymbolType: (id) => {

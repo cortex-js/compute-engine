@@ -1758,6 +1758,112 @@ export class _Parser implements Parser {
   }
 
   /**
+   * In non-strict mode, try to parse a bare function name followed by parentheses.
+   * This allows syntax like `sin(x)` instead of requiring `\sin(x)`.
+   *
+   * Returns the parsed function call or null if not a bare function.
+   */
+  private tryParseBareFunction(until?: Readonly<Terminator>): Expression | null {
+    if (this.options.strict !== false) return null;
+
+    const start = this.index;
+
+    // Collect consecutive letter tokens to form a potential function name
+    let name = '';
+    while (!this.atEnd && /^[a-zA-Z]$/.test(this.peek)) {
+      name += this.peek;
+      this.index++;
+    }
+
+    if (!name) {
+      this.index = start;
+      return null;
+    }
+
+    this.skipSpace();
+
+    // Check if followed by opening parenthesis
+    if (this.peek !== '(') {
+      this.index = start;
+      return null;
+    }
+
+    // Map of common function names to their LaTeX equivalents
+    const BARE_FUNCTION_MAP: Record<string, string> = {
+      // Trigonometric
+      sin: 'Sin',
+      cos: 'Cos',
+      tan: 'Tan',
+      cot: 'Cot',
+      sec: 'Sec',
+      csc: 'Csc',
+      // Hyperbolic
+      sinh: 'Sinh',
+      cosh: 'Cosh',
+      tanh: 'Tanh',
+      coth: 'Coth',
+      sech: 'Sech',
+      csch: 'Csch',
+      // Inverse trigonometric
+      arcsin: 'Arcsin',
+      arccos: 'Arccos',
+      arctan: 'Arctan',
+      arccot: 'Arccot',
+      arcsec: 'Arcsec',
+      arccsc: 'Arccsc',
+      asin: 'Arcsin',
+      acos: 'Arccos',
+      atan: 'Arctan',
+      // Inverse hyperbolic
+      arcsinh: 'Arsinh',
+      arccosh: 'Arcosh',
+      arctanh: 'Artanh',
+      arccoth: 'Arcoth',
+      arcsech: 'Arsech',
+      arccsch: 'Arcsch',
+      asinh: 'Arsinh',
+      acosh: 'Arcosh',
+      atanh: 'Artanh',
+      // Logarithms and exponentials
+      log: 'Log',
+      ln: 'Ln',
+      exp: 'Exp',
+      lg: 'Lg',
+      lb: 'Lb',
+      // Other common functions
+      sqrt: 'Sqrt',
+      abs: 'Abs',
+      sgn: 'Sgn',
+      sign: 'Sgn',
+      floor: 'Floor',
+      ceil: 'Ceil',
+      round: 'Round',
+      max: 'Max',
+      min: 'Min',
+      gcd: 'Gcd',
+      lcm: 'Lcm',
+    };
+
+    const fnName = BARE_FUNCTION_MAP[name];
+    if (!fnName) {
+      // Not a recognized function name, backtrack
+      this.index = start;
+      return null;
+    }
+
+    // Parse the arguments in the enclosure (parentheses)
+    const args = this.parseArguments('enclosure', until);
+
+    if (args === null) {
+      // No valid arguments found, backtrack
+      this.index = start;
+      return null;
+    }
+
+    return [fnName, ...args];
+  }
+
+  /**
    * Parse a sequence superfix/subfix operator, e.g. `^{*}`
    *
    * Superfix and subfix need special handling:
@@ -1787,8 +1893,16 @@ export class _Parser implements Parser {
         if (this.match('_') || this.match('^'))
           subscripts.push(this.error('syntax-error', subIndex));
         else {
-          const sub =
-            this.parseGroup() ?? this.parseToken() ?? this.parseStringGroup();
+          let sub = this.parseGroup() ?? this.parseToken();
+          // In non-strict mode, also accept parenthesized expressions
+          // Note: After match('_'), peek has changed but TypeScript doesn't know
+          if (
+            sub === null &&
+            this.options.strict === false &&
+            (this.peek as string) === '('
+          )
+            sub = this.parseEnclosure();
+          sub ??= this.parseStringGroup();
           if (sub === null) return this.error('missing', index);
 
           subscripts.push(sub);
@@ -1798,7 +1912,15 @@ export class _Parser implements Parser {
         if (this.match('_') || this.match('^'))
           superscripts.push(this.error('syntax-error', subIndex));
         else {
-          const sup = this.parseGroup() ?? this.parseToken();
+          let sup = this.parseGroup() ?? this.parseToken();
+          // In non-strict mode, also accept parenthesized expressions
+          // Note: After match('^'), peek has changed but TypeScript doesn't know
+          if (
+            sup === null &&
+            this.options.strict === false &&
+            (this.peek as string) === '('
+          )
+            sup = this.parseEnclosure();
           if (sup === null) return this.error('missing', index);
           superscripts.push(sup);
         }
@@ -2103,6 +2225,9 @@ export class _Parser implements Parser {
       result = 'NaN';
     if (result === null && this.matchAll(this._imaginaryUnitTokens))
       result = 'ImaginaryUnit';
+
+    // In non-strict mode, try to parse bare function names like sin(x)
+    result ??= this.tryParseBareFunction(until);
 
     // ParseGenericExpression() has priority. Some generic expressions
     // may include symbols which have not been explicitly defined

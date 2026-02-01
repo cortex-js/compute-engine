@@ -3,11 +3,17 @@
 [!] Need to think more about MathJSON API. What does "ClosedForm" return? Is it
 a function? Or is there such a think as a "Series" type?
 
+**✅ UPDATE (2026)**: The LaTeX parser now has a `strict: false` option that accepts Math-ASCII/Typst-like syntax (e.g., `sin(x)`, `x^(n+1)`, `a_(k+m)`). This **may eliminate the need for a separate ASCII Math parser** for OEIS formulas. See [LaTeX Parser Non-Strict Mode](#latex-parser-non-strict-mode) section for details.
+
 ## Summary
 
 Add the ability to parse OEIS formula notation and reconstruct usable sequence
-definitions. This is achieved by creating an **ASCII Math parser** (inverse of
+definitions. This can be achieved through two approaches:
+
+**Option A (Original Plan)**: Create an **ASCII Math parser** (inverse of
 the existing `toAsciiMath()` serializer), with OEIS support as a thin wrapper.
+
+**Option B (Simplified)**: Leverage the LaTeX parser's `strict: false` mode which already handles most ASCII Math/OEIS notation, reducing implementation complexity.
 
 ## Approach
 
@@ -44,9 +50,48 @@ ASCII Math string. We create the inverse: ASCII Math string → BoxedExpression.
 
 The main transformation needed for OEIS: `a(n-1)` → `a_(n-1)`
 
+## LaTeX Parser Non-Strict Mode
+
+**UPDATE**: The LaTeX parser now supports a `strict: false` option that accepts
+Math-ASCII/Typst-like syntax, which overlaps significantly with OEIS notation:
+
+```typescript
+ce.parse('sin(x)^(n+1)', { strict: false })
+// Accepts:
+// - Parentheses for superscripts/subscripts: x^(n+1), a_(k+m)
+// - Bare function names: sin(x), cos(x), log(x), sqrt(x), etc.
+// - Division with slash: (n+1)/b
+
+// Supported bare functions:
+// Trig: sin, cos, tan, cot, sec, csc
+// Hyperbolic: sinh, cosh, tanh, coth, sech, csch
+// Inverse: arcsin, arccos, arctan, asin, acos, atan
+// Logarithmic: log, ln, exp, lg, lb
+// Other: sqrt, abs, floor, ceil, round, max, min, gcd, lcm
+```
+
+This means we can potentially **leverage the LaTeX parser in non-strict mode**
+for OEIS formula parsing instead of building a separate ASCII Math parser,
+reducing implementation complexity.
+
+**Benefits:**
+
+- Reuses existing, well-tested parser infrastructure
+- Handles operator precedence, function calls, parentheses automatically
+- Already integrated with MathJSON conversion
+- Reduces maintenance burden (one parser instead of two)
+
+**Considerations:**
+
+- Still need OEIS-specific pre-processing for `a(n)` → `a_n` notation
+- May need minor extensions for OEIS-specific patterns (e.g., `Sum_{k=0..n}`)
+- Non-strict mode is permissive but doesn't validate against ASCII Math spec
+
 ## New API
 
 ### ASCII Math Parser (general use)
+
+**Option A: Dedicated ASCII Math parser**
 
 ```typescript
 // New method on ComputeEngine
@@ -54,6 +99,19 @@ ce.parseAsciiMath('sqrt(x^2 + 1)')  // → BoxedExpression
 
 // Round-trip test
 expr.toAsciiMath() → string → ce.parseAsciiMath() → same expr
+```
+
+**Option B: Use LaTeX parser in non-strict mode** _(recommended for simplicity)_
+
+```typescript
+// Use existing LaTeX parser with strict: false
+ce.parse('sqrt(x^2 + 1)', { strict: false })  // → BoxedExpression
+
+// Advantages:
+// - Reuses existing parser infrastructure
+// - No need for new parser implementation
+// - Handles most OEIS notation already
+// - Maintains single source of truth for parsing logic
 ```
 
 ### MathJSON Functions for Sequence Analysis
@@ -112,6 +170,8 @@ interface ParsedOEISFormula {
 
 ## Files to Modify
 
+**If using dedicated ASCII Math parser (Option A):**
+
 | File                                                       | Change                                                                               |
 | ---------------------------------------------------------- | ------------------------------------------------------------------------------------ |
 | `src/compute-engine/boxed-expression/ascii-math-parser.ts` | **NEW** - ASCII Math parser                                                          |
@@ -123,11 +183,23 @@ interface ParsedOEISFormula {
 | `test/compute-engine/ascii-math-parser.test.ts`            | **NEW** - Parser tests + round-trip                                                  |
 | `test/compute-engine/oeis.test.ts`                         | Add formula parsing tests                                                            |
 
+**If using LaTeX parser with strict: false (Option B - recommended):**
+
+| File                                            | Change                                                                               |
+| ----------------------------------------------- | ------------------------------------------------------------------------------------ |
+| ~~`ascii-math-parser.ts`~~                      | **NOT NEEDED** - Use LaTeX parser with `strict: false`                               |
+| `src/compute-engine/latex-syntax/types.ts`      | ✅ **DONE** - Added `strict?: boolean` to `ParseLatexOptions`                        |
+| `src/compute-engine/oeis.ts`                    | Add OEIS pre-processing (`a(n)` → `a_n`), `declareOEISSequence()`                   |
+| `src/compute-engine/library/sequences.ts`       | **NEW** or extend - Add ClosedForm, Recurrence, GeneratingFunction, OEISId functions |
+| `src/compute-engine/index.ts`                   | Expose `declareOEISSequence()`                                                       |
+| `src/compute-engine/global-types.ts`            | Add new type definitions                                                             |
+| `test/compute-engine/oeis.test.ts`              | Add formula parsing tests using `parse(formula, {strict: false})`                    |
+
 ## Implementation Phases
 
 ### Phase 1: ASCII Math Parser Core
 
-Create `ascii-math-parser.ts`:
+**Option A: Build dedicated ASCII Math parser** Create `ascii-math-parser.ts`:
 
 - Tokenizer for ASCII Math notation
 - Precedence-climbing parser (similar to LaTeX parser but simpler)
@@ -136,11 +208,24 @@ Create `ascii-math-parser.ts`:
 - Handle symbols: `pi`, `phi`, Greek letters, single-letter variables
 - Handle subscripts: `a_n`, `a_(n-1)`
 
+**Option B: Use LaTeX parser with `strict: false`** _(✅ IMPLEMENTED)_
+
+- **Already handles**: `sqrt(x)`, `sin(x)`, `x^(n+1)`, `a_(k+m)`, `(n+1)/b`
+- **Still needed**: OEIS-specific pre-processing for `a(n)` → `a_n` notation
+- **Benefit**: No new parser needed, leverages existing tested infrastructure
+
 ### Phase 2: Round-trip Testing
+
+**If using dedicated parser:**
 
 - Test: `toAsciiMath(parseAsciiMath(str)) ≈ str`
 - Test: `parseAsciiMath(toAsciiMath(expr)).isSame(expr)`
 - Use existing serializer output as test cases
+
+**If using LaTeX parser with strict: false:**
+
+- Test: `parse(str, {strict: false}).toAsciiMath() ≈ str`
+- Verify OEIS notation compatibility with non-strict mode
 
 ### Phase 3: OEIS Pre-processing
 
