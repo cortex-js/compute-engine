@@ -207,9 +207,9 @@ export function simplifyHyperbolic(x: BoxedExpression): RuleStep | undefined {
     }
 
     if (op === 'Arcsch') {
-      // arcsch(±inf) -> NaN
+      // arcsch(±inf) -> 0
       if (arg.isInfinity === true) {
-        return { value: ce.NaN, because: 'arcsch(±inf) -> NaN' };
+        return { value: ce.Zero, because: 'arcsch(±inf) -> 0' };
       }
     }
   }

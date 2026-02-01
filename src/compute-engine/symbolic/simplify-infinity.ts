@@ -161,6 +161,21 @@ export function simplifyInfinity(x: BoxedExpression): RuleStep | undefined {
     }
   }
 
+  // Handle Exp function with infinity
+  if (op === 'Exp') {
+    const arg = x.op1;
+    if (arg) {
+      // exp(+inf) -> +inf
+      if (arg.symbol === 'PositiveInfinity') {
+        return { value: ce.PositiveInfinity, because: 'exp(+inf) -> +inf' };
+      }
+      // exp(-inf) -> 0
+      if (arg.symbol === 'NegativeInfinity') {
+        return { value: ce.Zero, because: 'exp(-inf) -> 0' };
+      }
+    }
+  }
+
   // Handle Power with infinity
   if (op === 'Power') {
     const base = x.op1;
@@ -174,6 +189,15 @@ export function simplifyInfinity(x: BoxedExpression): RuleStep | undefined {
       const baseIsNegInf = baseIsInf && base.isNegative === true;
       const expIsPosInf = expIsInf && exp.isPositive === true;
       const expIsNegInf = expIsInf && exp.isNegative === true;
+
+      // e^(+inf) -> +inf (handle exponential base explicitly)
+      if (base.symbol === 'ExponentialE' && expIsPosInf) {
+        return { value: ce.PositiveInfinity, because: 'e^(+inf) -> +inf' };
+      }
+      // e^(-inf) -> 0
+      if (base.symbol === 'ExponentialE' && expIsNegInf) {
+        return { value: ce.Zero, because: 'e^(-inf) -> 0' };
+      }
 
       // 1^x -> 1 when x is finite
       if (base.is(1) && exp.isFinite === true) {
@@ -234,6 +258,59 @@ export function simplifyInfinity(x: BoxedExpression): RuleStep | undefined {
         // -inf^a -> 0 when a < 0
         if (exp.isNegative === true) {
           return { value: ce.Zero, because: '-inf^negative -> 0' };
+        }
+
+        // (-inf)^n -> +inf when n is even integer
+        if (exp.isInteger === true && exp.isEven === true) {
+          return {
+            value: ce.PositiveInfinity,
+            because: '(-inf)^(even integer) -> +inf',
+          };
+        }
+
+        // (-inf)^n -> -inf when n is odd integer
+        if (exp.isInteger === true && exp.isOdd === true) {
+          return {
+            value: ce.NegativeInfinity,
+            because: '(-inf)^(odd integer) -> -inf',
+          };
+        }
+
+        // (-inf)^(n/m) -> +inf when n is even and m is odd
+        // This handles cases like (-inf)^(2/3), (-inf)^(4/5)
+        if (exp.isRational === true) {
+          const [numExpr, denomExpr] = exp.numeratorDenominator;
+          const num = numExpr.re;
+          const denom = denomExpr.re;
+
+          if (
+            typeof num === 'number' &&
+            typeof denom === 'number' &&
+            Number.isInteger(num) &&
+            Number.isInteger(denom)
+          ) {
+            const numIsEven = num % 2 === 0;
+            const numIsOdd = num % 2 !== 0;
+            const denomIsOdd = denom % 2 !== 0;
+
+            // n even, m odd -> +inf
+            if (numIsEven && denomIsOdd) {
+              return {
+                value: ce.PositiveInfinity,
+                because: '(-inf)^(even/odd) -> +inf',
+              };
+            }
+
+            // n odd, m odd -> -inf (real interpretation)
+            // Note: This is the real branch of the multivalued function
+            // The principal complex value would be different
+            if (numIsOdd && denomIsOdd) {
+              return {
+                value: ce.NegativeInfinity,
+                because: '(-inf)^(odd/odd) -> -inf (real)',
+              };
+            }
+          }
         }
       }
     }

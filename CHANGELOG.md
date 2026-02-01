@@ -34,8 +34,8 @@
 
 - **Absolute Value Power Simplification**: Fixed simplification of `|x^n|`
   expressions with even and rational exponents. Previously, expressions like
-  `|x²|` and `|x^{2/3}|` were not simplified. Now they correctly simplify
-  based on the parity of the exponent's numerator. Addresses #181.
+  `|x²|` and `|x^{2/3}|` were not simplified. Now they correctly simplify based
+  on the parity of the exponent's numerator. Addresses #181.
 
   ```javascript
   ce.parse('|x^2|').simplify().latex;      // → "x^2" (even exponent)
@@ -65,7 +65,6 @@
 
 - **Non-linear Polynomial Systems**: The `solve()` method now handles certain
   non-linear polynomial systems with 2 equations and 2 variables:
-
   - **Product + sum pattern**: Systems like `xy = p, x + y = s` are solved by
     recognizing that x and y are roots of the quadratic `t² - st + p = 0`.
 
@@ -123,13 +122,14 @@
   // → [{ x: 0, y: 0 }, { x: 5, y: 0 }, { x: 5, y: 5 }, { x: 0, y: 5 }]
   ```
 
-  Vertices are returned in counterclockwise convex hull order. Returns `null` for
-  infeasible systems or non-linear constraints.
+  Vertices are returned in counterclockwise convex hull order. Returns `null`
+  for infeasible systems or non-linear constraints.
 
 - **Under-determined Systems (Parametric Solutions)**: The `solve()` method now
   returns parametric solutions for under-determined linear systems (fewer
   equations than variables) instead of returning `null`. Free variables appear
-  as themselves in the solution, with other variables expressed in terms of them.
+  as themselves in the solution, with other variables expressed in terms of
+  them.
 
   ```javascript
   // Single equation with two variables
@@ -146,8 +146,8 @@
   Inconsistent systems still return `null`.
 
 - **Extended Sqrt Equation Solving**: The equation solver now handles sqrt
-  equations of the form `√(f(x)) = g(x)` by squaring both sides and solving
-  the resulting polynomial. Extraneous roots are automatically filtered.
+  equations of the form `√(f(x)) = g(x)` by squaring both sides and solving the
+  resulting polynomial. Extraneous roots are automatically filtered.
 
   ```javascript
   ce.parse('\\sqrt{x+1} = x').solve('x');      // → [1.618...] (golden ratio)
@@ -156,9 +156,9 @@
   ce.parse('\\sqrt{x} = x').solve('x');        // → [0, 1]
   ```
 
-- **Two Sqrt Equation Solving**: The equation solver now handles equations
-  with two sqrt terms of the form `√(f(x)) + √(g(x)) = e` using double squaring.
-  Both addition and subtraction forms are supported, and extraneous roots are
+- **Two Sqrt Equation Solving**: The equation solver now handles equations with
+  two sqrt terms of the form `√(f(x)) + √(g(x)) = e` using double squaring. Both
+  addition and subtraction forms are supported, and extraneous roots are
   automatically filtered.
 
   ```javascript
@@ -168,10 +168,10 @@
   ce.parse('\\sqrt{2x+1} + \\sqrt{x-1} = 4').solve('x'); // → [46 - 8√29] ≈ 2.919
   ```
 
-- **Nested Sqrt Equation Solving**: The equation solver now handles nested
-  sqrt equations of the form `√(x + √x) = a` using substitution. These patterns
-  have √x inside the argument of an outer sqrt. The solver uses u = √x
-  substitution, solves the resulting quadratic, and filters negative u values.
+- **Nested Sqrt Equation Solving**: The equation solver now handles nested sqrt
+  equations of the form `√(x + √x) = a` using substitution. These patterns have
+  √x inside the argument of an outer sqrt. The solver uses u = √x substitution,
+  solves the resulting quadratic, and filters negative u values.
 
   ```javascript
   ce.parse('\\sqrt{x + 2\\sqrt{x}} = 3').solve('x');  // → [11 - 2√10] ≈ 4.675
@@ -180,16 +180,16 @@
   ```
 
 - **Quadratic Equations Without Constant Term**: Added support for solving
-  quadratic equations of the form `ax² + bx = 0` (missing constant term).
-  These are solved by factoring: `x(ax + b) = 0` → `x = 0` or `x = -b/a`.
+  quadratic equations of the form `ax² + bx = 0` (missing constant term). These
+  are solved by factoring: `x(ax + b) = 0` → `x = 0` or `x = -b/a`.
 
   ```javascript
   ce.parse('x^2 + 3x = 0').solve('x');  // → [0, -3]
   ce.parse('2x^2 - 4x = 0').solve('x'); // → [0, 2]
   ```
 
-- **Value Resolution from Equality Assumptions**: When an equality assumption
-  is made via `ce.assume(['Equal', symbol, value])`, the symbol now correctly
+- **Value Resolution from Equality Assumptions**: When an equality assumption is
+  made via `ce.assume(['Equal', symbol, value])`, the symbol now correctly
   evaluates to the assumed value. Previously, the symbol would remain unchanged
   even after the assumption.
 
@@ -204,9 +204,9 @@
   This also fixes comparison evaluation: `Equal(symbol, assumed_value)` now
   correctly evaluates to `True` instead of staying symbolic.
 
-- **Inequality Evaluation Using Assumptions**: When an inequality assumption
-  is made (e.g., `ce.assume(['Greater', 'x', 4])`), inequality comparisons
-  can now use transitive reasoning to determine results.
+- **Inequality Evaluation Using Assumptions**: When an inequality assumption is
+  made (e.g., `ce.assume(['Greater', 'x', 4])`), inequality comparisons can now
+  use transitive reasoning to determine results.
 
   ```javascript
   ce.assume(ce.box(['Greater', 'x', 4]));
@@ -216,8 +216,8 @@
   ce.box('x').isPositive;                  // → true
   ```
 
-  This works by extracting lower/upper bounds from inequality assumptions
-  and using them during comparison operations.
+  This works by extracting lower/upper bounds from inequality assumptions and
+  using them during comparison operations.
 
 - **Type Inference from Assumptions**: When assumptions are made, symbol types
   are now correctly inferred. Inequality assumptions (`>`, `<`, `>=`, `<=`) set
@@ -234,8 +234,8 @@
 
 - **Tautology and Contradiction Detection**: `ce.assume()` now returns
   `'tautology'` for redundant assumptions that are already implied by existing
-  assumptions, and `'contradiction'` for assumptions that conflict with
-  existing ones.
+  assumptions, and `'contradiction'` for assumptions that conflict with existing
+  ones.
 
   ```javascript
   ce.assume(ce.box(['Greater', 'x', 4]));
@@ -268,8 +268,8 @@
   // → 2x + b (was: 2 - incorrectly matched entire expression)
   ```
 
-- **forget() Now Clears Assumed Values**: Fixed an issue where `ce.forget()` did not
-  clear values that were set by equality assumptions. After calling
+- **forget() Now Clears Assumed Values**: Fixed an issue where `ce.forget()` did
+  not clear values that were set by equality assumptions. After calling
   `ce.assume(['Equal', 'x', 5])` followed by `ce.forget('x')`, the symbol would
   incorrectly still evaluate to `5`. Now `forget()` properly clears values from
   all evaluation context frames.
@@ -314,9 +314,9 @@
 
 - **Pattern Matching with Repeated Wildcards**: Added comprehensive tests
   verifying that the pattern matching system correctly handles wildcards that
-  appear multiple times in a pattern. When a named wildcard like `_x` appears
-  in multiple positions, the matcher correctly ensures all occurrences match
-  the same expression. This works with:
+  appear multiple times in a pattern. When a named wildcard like `_x` appears in
+  multiple positions, the matcher correctly ensures all occurrences match the
+  same expression. This works with:
   - Nested function arguments (e.g., `['Multiply', '_x', ['Ln', '_x']]`)
   - Multiple nesting levels (3+ levels deep)
   - Commutative operators (handles reordering)
@@ -347,9 +347,10 @@
   ```
 
   Both simple subscripts (`F_5`) and complex subscripts (`F_{5}`) are supported.
-  When the handler returns `undefined`, the expression stays symbolic. Subscripted
-  expressions with `subscriptEvaluate` have type `number` and can be used in
-  arithmetic operations: `ce.parse('F_{5} + F_{3}').evaluate()` works correctly.
+  When the handler returns `undefined`, the expression stays symbolic.
+  Subscripted expressions with `subscriptEvaluate` have type `number` and can be
+  used in arithmetic operations: `ce.parse('F_{5} + F_{3}').evaluate()` works
+  correctly.
 
 - **Type-Aware Subscript Handling**: Subscripts on symbols declared as
   collection types (list, tuple, matrix, etc.) now automatically convert to
@@ -435,7 +436,8 @@
   - Domain constraints (min/max valid indices)
   - Symbolic subscripts stay symbolic (e.g., `F_k` remains unevaluated)
 
-  Alternatively, sequences can be defined using natural LaTeX assignment notation:
+  Alternatively, sequences can be defined using natural LaTeX assignment
+  notation:
 
   ```javascript
   // Arithmetic sequence via LaTeX
@@ -520,7 +522,8 @@
   ```
 
 - **OEIS Integration**: Look up sequences in the Online Encyclopedia of Integer
-  Sequences (OEIS) and verify your sequences against known mathematical sequences:
+  Sequences (OEIS) and verify your sequences against known mathematical
+  sequences:
 
   ```javascript
   // Look up a sequence by its terms
@@ -539,8 +542,8 @@
 
   Note: OEIS lookups require network access to oeis.org.
 
-- **Multi-Index Sequences**: Define sequences with multiple indices like Pascal's
-  triangle P_{n,k} or grid-based recurrences:
+- **Multi-Index Sequences**: Define sequences with multiple indices like
+  Pascal's triangle P\_{n,k} or grid-based recurrences:
 
   ```javascript
   // Pascal's Triangle: P_{n,k} = P_{n-1,k-1} + P_{n-1,k}
@@ -558,7 +561,8 @@
 
   Features:
   - Multiple index variables with `variables: ['n', 'k']`
-  - Pattern-based base cases: `'n,0'` matches any (n, 0), `'n,n'` matches diagonal
+  - Pattern-based base cases: `'n,0'` matches any (n, 0), `'n,n'` matches
+    diagonal
   - Per-variable domain constraints
   - Constraint expressions (e.g., `'k <= n'`)
   - Composite key memoization (e.g., `'5,2'`)
@@ -572,8 +576,9 @@
 
 #### Special Functions
 
-- **Special Function Definitions**: Added type signatures for special mathematical
-  functions, enabling them to be used in expressions without type errors:
+- **Special Function Definitions**: Added type signatures for special
+  mathematical functions, enabling them to be used in expressions without type
+  errors:
   - `Zeta` - Riemann zeta function ζ(s)
   - `Beta` - Euler beta function B(a,b) = Γ(a)Γ(b)/Γ(a+b)
   - `LambertW` - Lambert W function (product logarithm)
@@ -596,6 +601,7 @@
 
 - **Bessel Function Derivatives**: Added derivative support for all four Bessel
   function types using order-dependent recurrence relations:
+
   ```javascript
   ce.box(['D', ['BesselJ', 'n', 'x'], 'x']).evaluate();
   // → 1/2 * BesselJ(n-1, x) - 1/2 * BesselJ(n+1, x)
@@ -606,15 +612,17 @@
   ce.box(['D', ['BesselK', 'n', 'x'], 'x']).evaluate();
   // → -1/2 * BesselK(n-1, x) - 1/2 * BesselK(n+1, x)
   ```
+
   Chain rule is automatically applied for composite arguments.
 
 - **Multi-Argument Function Derivatives**: Added derivative support for:
-
   - **Log(x, base)** - Logarithm with custom base:
+
     ```javascript
     ce.box(['D', ['Log', 'x', 2], 'x']).evaluate();  // → 1/(x·ln(2))
     ce.box(['D', ['Log', 'x', 'a'], 'x']).evaluate(); // → 1/(x·ln(a))
     ```
+
     Also handles cases where both x and base depend on the variable by applying
     the quotient rule to ln(x)/ln(base).
 
@@ -626,18 +634,21 @@
     ```
 
 - **Integration of `1/(x·ln(x))` Pattern**: Added support for integrating
-  expressions where the denominator is a product and one factor is the derivative
-  of another:
+  expressions where the denominator is a product and one factor is the
+  derivative of another:
+
   ```javascript
   ce.parse('\\int \\frac{1}{x\\ln x} dx').evaluate();  // → ln(|ln(x)|)
   ce.parse('\\int \\frac{3}{x\\ln x} dx').evaluate();  // → 3·ln(|ln(x)|)
   ```
+
   This uses u-substitution: since `1/x = d/dx(ln(x))`, the integral becomes
   `∫ h'(x)/h(x) dx = ln|h(x)|`.
 
 - **Cyclic Integration for e^x with Trigonometric Functions**: Added support for
   integrating products of exponentials and trigonometric functions that require
   the "solve for the integral" technique:
+
   ```javascript
   ce.parse('\\int e^x \\sin x dx').evaluate();
   // → -1/2·cos(x)·e^x + 1/2·sin(x)·e^x
@@ -652,6 +663,7 @@
   ce.parse('\\int e^x \\cos(2x) dx').evaluate();
   // → 1/5·cos(2x)·e^x + 2/5·sin(2x)·e^x
   ```
+
   These patterns cannot be solved by standard integration by parts (which would
   lead to infinite recursion) and instead use direct formulas:
   - `∫ e^x·sin(ax+b) dx = (e^x/(a²+1))·(sin(ax+b) - a·cos(ax+b))`
@@ -669,6 +681,7 @@
   - **Double negation**: `¬¬A → A`
 
   These rules are applied automatically during simplification:
+
   ```javascript
   ce.box(['And', 'A', ['Or', 'A', 'B']]).simplify();  // → A
   ce.box(['Or', 'A', ['And', 'A', 'B']]).simplify();  // → A
@@ -703,8 +716,10 @@
 - **Matrix Decompositions**: Added four matrix decomposition functions for
   numerical linear algebra:
   - `LUDecomposition(A)` → `[P, L, U]` - LU factorization with partial pivoting
-  - `QRDecomposition(A)` → `[Q, R]` - QR factorization using Householder reflections
-  - `CholeskyDecomposition(A)` → `L` - Cholesky factorization for positive definite matrices
+  - `QRDecomposition(A)` → `[Q, R]` - QR factorization using Householder
+    reflections
+  - `CholeskyDecomposition(A)` → `L` - Cholesky factorization for positive
+    definite matrices
   - `SVD(A)` → `[U, Σ, V]` - Singular Value Decomposition
 
   ```javascript
