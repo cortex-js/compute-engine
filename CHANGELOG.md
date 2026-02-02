@@ -65,6 +65,89 @@
   - `LanguageTarget` - Interface for language-specific targets
   - `BaseCompiler` - Core compilation logic
   - `JavaScriptTarget` - JavaScript compilation target implementation
+  - `GLSLTarget` - GLSL compilation target implementation
+
+- **Compilation Plugin Architecture**: The Compute Engine now supports registering
+  custom compilation targets, allowing you to compile mathematical expressions to
+  any target language beyond the built-in JavaScript and GLSL targets.
+
+  ```javascript
+  import { ComputeEngine, BaseCompiler } from '@cortex-js/compute-engine';
+
+  const ce = new ComputeEngine();
+
+  // Define a custom Python target
+  class PythonTarget {
+    // ... implementation (see documentation)
+  }
+
+  // Register the custom target
+  ce.registerCompilationTarget('python', new PythonTarget());
+
+  // Compile to Python
+  const expr = ce.parse('\\sin(x) + \\cos(y)');
+  const pythonCode = expr.compile({ to: 'python' });
+  console.log(pythonCode.toString());
+  // → math.sin(x) + math.cos(y)
+
+  // Switch between targets
+  const jsFunc = expr.compile({ to: 'javascript' });
+  const glslCode = expr.compile({ to: 'glsl' });
+  ```
+
+  **Features**:
+  - Built-in targets: `javascript` (executable functions) and `glsl` (shader code)
+  - Register custom targets with `ce.registerCompilationTarget(name, target)`
+  - Switch between targets using the `to` option in `compile()`
+  - Direct target override with the `target` option for one-time use
+  - Extend or replace built-in targets
+  - Full `LanguageTarget` interface for creating custom compilation targets
+
+- **GLSL Compilation Target**: New built-in GLSL (OpenGL Shading Language) target
+  for compiling mathematical expressions to WebGL shaders.
+
+  ```javascript
+  const expr = ce.parse('x^2 + y^2');
+  const glslCode = expr.compile({ to: 'glsl' });
+  console.log(glslCode.toString());
+  // → pow(x, 2.0) + pow(y, 2.0)
+
+  // Generate complete GLSL functions
+  import { GLSLTarget } from '@cortex-js/compute-engine';
+  const glsl = new GLSLTarget();
+
+  const distExpr = ce.parse('\\sqrt{x^2 + y^2 + z^2}');
+  const func = glsl.compileFunction(distExpr, 'distance3D', 'float', [
+    ['x', 'float'],
+    ['y', 'float'],
+    ['z', 'float'],
+  ]);
+  console.log(func);
+  // → float distance3D(float x, float y, float z) {
+  //     return sqrt(pow(x, 2.0) + pow(y, 2.0) + pow(z, 2.0));
+  //   }
+
+  // Generate complete shaders
+  const shader = glsl.compileShader({
+    type: 'fragment',
+    version: '300 es',
+    outputs: [{ name: 'fragColor', type: 'vec4' }],
+    body: [
+      {
+        variable: 'fragColor',
+        expression: ce.box(['List', 1, 0, 0, 1]),
+      },
+    ],
+  });
+  ```
+
+  **Features**:
+  - GLSL operators work natively on vectors and matrices
+  - Automatic float literal formatting with `.0` suffix
+  - Vector constructors: `vec2()`, `vec3()`, `vec4()`
+  - Complete shader generation with `compileShader()`
+  - Function generation with `compileFunction()`
+  - Built-in GLSL functions: `sin`, `cos`, `sqrt`, `pow`, `abs`, etc.
 
 ### Improvements
 

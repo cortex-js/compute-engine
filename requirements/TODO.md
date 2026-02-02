@@ -642,6 +642,177 @@ See `requirements/DONE.md` for implementation details.
 
 ---
 
+## Polynomial Operations
+
+### 33. Polynomial Factoring
+
+**Problem:** The system lacks polynomial factoring capability to convert expanded
+polynomials into factored forms. This prevents simplification of expressions like
+`√(x²+2x+1)` which should factor to `√((x+1)²)` and simplify to `|x+1|`.
+
+**Related issue:** [#180](https://github.com/cortex-js/compute-engine/issues/180)
+- "Factoring before trying to simplify"
+
+**Current behavior:**
+
+```typescript
+// Factored form works
+ce.parse('\\sqrt{(x+1)^2}').simplify().latex;
+// → "\vert x+1\vert"  ✓
+
+// Expanded form doesn't factor first
+ce.parse('\\sqrt{x^2+2x+1}').simplify().latex;
+// → "\sqrt{x^2+2x+1}"  ✗ (should recognize perfect square)
+
+// Rational simplification works (partial fix in #180)
+ce.parse('\\frac{x}{x^2-x}').simplify().latex;
+// → "\frac{1}{x-1}"  ✓ (factors denominator for cancellation)
+```
+
+**Expected behavior:**
+
+```typescript
+// Perfect square trinomials
+ce.parse('\\sqrt{x^2+2x+1}').simplify().latex;
+// → "\vert x+1\vert"
+
+ce.parse('\\sqrt{a^2+2ab+b^2}').simplify().latex;
+// → "\vert a+b\vert"
+
+ce.parse('\\sqrt{a^2-2ab+b^2}').simplify().latex;
+// → "\vert a-b\vert"
+
+// General quadratic factoring
+ce.parse('x^2+5x+6').factor().latex;
+// → "(x+2)(x+3)"
+
+ce.parse('2x^2-8').factor().latex;
+// → "2(x-2)(x+2)"
+```
+
+**Implementation approach:**
+
+1. **Add `factor()` method to BoxedExpression:**
+   - Extend existing `factor()` in `src/compute-engine/boxed-expression/factor.ts`
+   - Current implementation only factors out common coefficients/terms
+   - Need to add polynomial factorization algorithms
+
+2. **Factoring algorithms to implement:**
+   - **Perfect square detection:** `a²+2ab+b²` → `(a+b)²`, `a²-2ab+b²` → `(a-b)²`
+   - **Difference of squares:** `a²-b²` → `(a-b)(a+b)`
+   - **Quadratic formula factoring:** For `ax²+bx+c`, use roots to construct factors
+   - **Common factor extraction:** `6x²+9x` → `3x(2x+3)` (already implemented)
+   - **Rational root theorem:** For higher-degree polynomials with integer coefficients
+   - **Kronecker's method:** General factorization over integers (optional, for completeness)
+
+3. **Perfect square trinomial detection (priority for issue #180):**
+   ```typescript
+   function isPerfectSquare(expr: BoxedExpression): BoxedExpression | null {
+     // For Add with 3 terms
+     if (expr.operator !== 'Add' || expr.ops.length !== 3) return null;
+
+     // Check pattern: a² + 2ab + b² or a² - 2ab + b²
+     // Extract terms, identify squares and cross term
+     // Return (a+b)² or (a-b)² if match found
+   }
+   ```
+
+4. **Integration with simplification:**
+   - Modify `simplifyPower()` in `src/compute-engine/symbolic/simplify-power.ts`
+   - Before checking `sqrt(x^2)` patterns, try factoring the argument
+   - Add check around line 126 (Sqrt operator handling):
+
+   ```typescript
+   if (op === 'Sqrt') {
+     const arg = x.op1;
+     if (!arg) return undefined;
+
+     // Try factoring first for perfect squares
+     if (arg.operator === 'Add') {
+       const factored = factorPerfectSquare(arg);
+       if (factored?.operator === 'Power' && factored.op2?.is(2)) {
+         // Found perfect square, apply sqrt(x^2) -> |x| rule
+         return {
+           value: ce._fn('Abs', [factored.op1]),
+           because: 'sqrt(perfect square trinomial) -> |factor|'
+         };
+       }
+     }
+
+     // ... existing sqrt simplification rules
+   }
+   ```
+
+5. **IMPORTANT - Recursion prevention:**
+   - Factoring functions should NOT call `.simplify()` on results
+   - Follow pattern from `polynomialDivide()` and other polynomial operations
+   - Return canonical expressions, let caller decide if simplification needed
+   - See `CLAUDE.md` "Simplification and Recursion Prevention" section
+
+**Use cases:**
+
+1. **Square root simplification** (issue #180):
+   - `√(x²+2x+1)` → `|x+1|`
+   - `√(4x²-12x+9)` → `|2x-3|`
+
+2. **Rational expression simplification:**
+   - `(x²-1)/(x+1)` → `x-1` (currently requires already factored form)
+   - `(x²+5x+6)/(x+2)` → `x+3`
+
+3. **Equation solving:**
+   - `x²+5x+6 = 0` → factor → `(x+2)(x+3) = 0` → `x = -2` or `x = -3`
+
+4. **Partial fraction decomposition:**
+   - Requires factored denominators
+
+**Files to modify:**
+
+- `src/compute-engine/boxed-expression/factor.ts` - Add polynomial factoring
+- `src/compute-engine/symbolic/simplify-power.ts` - Use factoring in sqrt simplification
+- `src/compute-engine/boxed-expression/polynomials.ts` - Add helper functions if needed
+- `src/compute-engine/boxed-expression/abstract-boxed-expression.ts` - Ensure `.factor()` method exists
+
+**Tests to add:**
+
+```typescript
+// test/compute-engine/factor.test.ts
+describe('Polynomial factoring', () => {
+  test('perfect square trinomials', () => {
+    expect(parse('x^2+2x+1').factor()).toMatchInlineSnapshot(`["Square", ["Add", "x", 1]]`);
+    expect(parse('a^2+2ab+b^2').factor()).toMatchInlineSnapshot(`["Square", ["Add", "a", "b"]]`);
+  });
+
+  test('difference of squares', () => {
+    expect(parse('x^2-4').factor()).toMatchInlineSnapshot(`["Multiply", ["Add", "x", -2], ["Add", "x", 2]]`);
+  });
+
+  test('quadratic with roots', () => {
+    expect(parse('x^2+5x+6').factor()).toMatchInlineSnapshot(`["Multiply", ["Add", "x", 2], ["Add", "x", 3]]`);
+  });
+});
+
+// test/compute-engine/simplify.test.ts - add to existing tests
+test('sqrt of perfect square trinomial', () => {
+  expect(parse('\\sqrt{x^2+2x+1}').simplify()).toMatchInlineSnapshot(`["Abs", ["Add", "x", 1]]`);
+  expect(parse('\\sqrt{a^2-2ab+b^2}').simplify()).toMatchInlineSnapshot(`["Abs", ["Add", "a", ["Negate", "b"]]]`);
+});
+```
+
+**Implementation priority:**
+
+1. **High priority:** Perfect square trinomial detection for sqrt simplification (fixes issue #180 cases)
+2. **Medium priority:** General quadratic factoring with rational roots
+3. **Low priority:** Higher-degree polynomial factoring (Kronecker's method, etc.)
+
+**References:**
+
+- Issue #180: https://github.com/cortex-js/compute-engine/issues/180
+- Current factor implementation: `src/compute-engine/boxed-expression/factor.ts`
+- Sqrt simplification: `src/compute-engine/symbolic/simplify-power.ts:124-254`
+- Polynomial utilities: `src/compute-engine/boxed-expression/polynomials.ts`
+
+---
+
 ## Future Improvements (Not Yet Detailed)
 
 ### 32. Ambiguous Interval Notation Handling

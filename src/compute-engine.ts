@@ -23,6 +23,7 @@ export type {
 } from './compute-engine/compilation/types';
 
 export { JavaScriptTarget } from './compute-engine/compilation/javascript-target';
+export { GLSLTarget } from './compute-engine/compilation/glsl-target';
 export { BaseCompiler } from './compute-engine/compilation/base-compiler';
 
 globalThis[Symbol.for('io.cortexjs.compute-engine')] = {

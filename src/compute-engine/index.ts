@@ -170,7 +170,13 @@ export type {
 } from './compilation/types';
 
 export { JavaScriptTarget } from './compilation/javascript-target';
+export { GLSLTarget } from './compilation/glsl-target';
 export { BaseCompiler } from './compilation/base-compiler';
+
+// Import for internal use
+import type { LanguageTarget } from './compilation/types';
+import { JavaScriptTarget as _JavaScriptTarget } from './compilation/javascript-target';
+import { GLSLTarget as _GLSLTarget } from './compilation/glsl-target';
 
 /**
  *
@@ -282,6 +288,9 @@ export class ComputeEngine implements IComputeEngine {
 
   /** @internal */
   private _cost?: (expr: BoxedExpression) => number;
+
+  /** @internal Registry of compilation targets */
+  private _compilationTargets: Map<string, LanguageTarget> = new Map();
 
   /** @internal */
   private _commonSymbols: { [symbol: string]: null | BoxedExpression } = {
@@ -605,6 +614,10 @@ export class ComputeEngine implements IComputeEngine {
     // this will be the "global" scope
     this.pushScope(undefined, 'global');
 
+    // Register default compilation targets
+    this._compilationTargets.set('javascript', new _JavaScriptTarget());
+    this._compilationTargets.set('glsl', new _GLSLTarget());
+
     hidePrivateProperties(this);
   }
 
@@ -677,6 +690,49 @@ export class ComputeEngine implements IComputeEngine {
     tracker: ConfigurationChangeListener
   ): () => void {
     return this._configurationChangeTracker.listen(tracker);
+  }
+
+  /**
+   * Register a custom compilation target.
+   *
+   * This allows you to compile mathematical expressions to different target
+   * languages beyond the built-in JavaScript and GLSL targets.
+   *
+   * @param name - The name of the target (e.g., 'python', 'wgsl', 'matlab')
+   * @param target - The LanguageTarget implementation
+   *
+   * @example
+   * ```typescript
+   * import { ComputeEngine, GLSLTarget } from '@cortex-js/compute-engine';
+   *
+   * const ce = new ComputeEngine();
+   *
+   * // Register a custom target
+   * class PythonTarget implements LanguageTarget {
+   *   // Implementation...
+   * }
+   *
+   * ce.registerCompilationTarget('python', new PythonTarget());
+   *
+   * // Use the custom target
+   * const expr = ce.parse('x^2 + y^2');
+   * const code = expr.compile({ to: 'python' });
+   * ```
+   */
+  registerCompilationTarget(name: string, target: LanguageTarget): void {
+    this._compilationTargets.set(name, target);
+  }
+
+  /**
+   * Get a registered compilation target by name.
+   *
+   * @param name - The name of the target (e.g., 'javascript', 'glsl')
+   * @returns The LanguageTarget implementation, or undefined if not found
+   *
+   * @internal
+   */
+  _getCompilationTarget(name: string): LanguageTarget | undefined {
+    return this._compilationTargets.get(name);
   }
 
   get precision(): number {

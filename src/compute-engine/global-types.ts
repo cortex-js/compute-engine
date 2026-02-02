@@ -1554,7 +1554,8 @@ export interface BoxedExpression {
    *
    */
   compile(options?: {
-    to?: 'javascript' | 'wgsl' | 'python' | 'webassembly';
+    to?: string;
+    target?: any; // CompileTarget, but any to avoid circular deps
     operators?:
       | Partial<Record<MathJsonSymbol, [op: string, prec: number]>>
       | ((op: MathJsonSymbol) => [op: string, prec: number] | undefined);

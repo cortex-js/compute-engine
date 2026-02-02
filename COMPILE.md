@@ -352,25 +352,75 @@ float f(float x) {
   - Pretty-print target with formatting
 - All exports are available in the production build
 
-### Lower Priority (Phase 3)
+### Lower Priority (Phase 3) ✅ COMPLETED
 
-- [ ] Create target registry in `ComputeEngine`
-- [ ] Update `compile()` to use registry
-- [ ] Create base class helpers
-- [ ] Document plugin architecture
+- [x] Create target registry in `ComputeEngine`
+- [x] Update `compile()` to use registry
+- [x] Add `registerCompilationTarget()` method
+- [x] Update `CompilationOptions` to include `to` and `target` options
+- [x] Document plugin architecture
+- [x] Create comprehensive tests
+- [x] Create example demonstrating plugin architecture
 
-**Estimated effort**: 2-3 days **Impact**: Better extensibility, cleaner
-architecture
+**Status**: ✅ **Completed**
+**Impact**: Better extensibility, cleaner architecture, enables custom compilation targets
 
-### Optional (Phase 4)
+**Implementation notes**:
+- Added `_compilationTargets` Map to ComputeEngine for storing registered targets
+- Initialized registry with built-in JavaScript and GLSL targets in constructor
+- Created public `registerCompilationTarget(name, target)` method
+- Updated `compile()` method in BoxedExpression to:
+  - Support `target` option for direct target override
+  - Support `to` option for named target lookup
+  - Use registry to resolve target names to LanguageTarget instances
+  - Fall back to JavaScript if target not found (with error when fallback is disabled)
+- Added comprehensive tests in `test/compute-engine/compile-plugin.test.ts`:
+  - Target registry operations
+  - Compiling with custom targets (Python, RPN)
+  - Direct target override
+  - Error handling for unregistered targets
+  - Integration with built-in targets
+- Created example in `examples/compile-plugin-architecture.js` demonstrating:
+  - Using built-in targets (JavaScript, GLSL)
+  - Creating and registering custom targets (Python, RPN)
+  - Direct target override (Forth)
+  - Switching between targets
+- Updated documentation in `doc/13-guide-compile.md` with:
+  - Plugin Architecture section
+  - Built-in targets documentation
+  - Registering custom targets tutorial
+  - Direct target override examples
+  - Creating custom language targets guide
+  - LanguageTarget interface documentation
 
-- [ ] Implement `GLSLTarget`
-- [ ] Add type inference for GLSL
-- [ ] GLSL-specific tests
-- [ ] Example shaders
+### Optional (Phase 4) ✅ COMPLETED
 
-**Estimated effort**: 3-5 days **Impact**: Demonstrates multi-target capability,
-useful for graphics applications
+- [x] Implement `GLSLTarget`
+- [x] Add GLSL-specific formatting (float literals, vector constructors)
+- [x] GLSL-specific tests
+- [x] Example shaders
+- [x] Complete shader generation (fragment/vertex shaders)
+- [x] GLSL function compilation with type signatures
+
+**Status**: ✅ **Completed**
+**Impact**: Demonstrates multi-target capability, useful for graphics applications
+
+**Implementation notes**:
+- Created complete `GLSLTarget` class (`src/compute-engine/compilation/glsl-target.ts`)
+- GLSL operators match JavaScript for basic arithmetic (work on vectors/matrices natively)
+- GLSL functions without `Math.` prefix (`sin`, `cos`, `sqrt`, `pow`, etc.)
+- Float literals automatically formatted with `.0` suffix
+- Vector constructors: `vec2()`, `vec3()`, `vec4()`
+- Complete shader generation with `compileShader()` method
+- Function generation with `compileFunction()` method for reusable GLSL functions
+- Comprehensive test suite in `test/compute-engine/compile-glsl.test.ts`
+- Working examples in `examples/compile-glsl-shaders.js` including:
+  - Basic expression compilation
+  - Vector operations
+  - Complete GLSL functions
+  - Fragment and vertex shader generation
+  - Mandelbrot set example
+- Exported from main entry point for public use
 
 ## Breaking Changes
 

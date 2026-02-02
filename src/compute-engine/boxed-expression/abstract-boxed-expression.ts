@@ -741,7 +741,8 @@ export abstract class _BoxedExpression implements BoxedExpression {
   }
 
   compile(options?: {
-    to?: 'javascript' | 'wgsl' | 'python' | 'webassembly';
+    to?: string;
+    target?: any; // CompileTarget, but any to avoid circular deps
     operators?:
       | Partial<Record<MathJsonSymbol, [op: string, prec: number]>>
       | ((op: MathJsonSymbol) => [op: string, prec: number] | undefined);
@@ -752,22 +753,40 @@ export abstract class _BoxedExpression implements BoxedExpression {
     fallback?: boolean;
   }): ((...args: any[]) => any) & { isCompiled?: boolean } {
     try {
-      const target = options?.to ?? 'javascript';
-
       // eslint-disable-next-line @typescript-eslint/no-this-alias
       const expr = this as BoxedExpression;
 
-      // For now, only JavaScript is implemented
-      if (target !== 'javascript') {
+      // Determine the target to use
+      let languageTarget;
+
+      if (options?.target) {
+        // Direct target override - use BaseCompiler
+        const { BaseCompiler } = require('../compilation/base-compiler');
+        const code = BaseCompiler.compile(expr, options.target);
+
+        // Create a function that returns the compiled code
+        const result = function () {
+          return code;
+        };
+        Object.defineProperty(result, 'toString', { value: () => code });
+        Object.defineProperty(result, 'isCompiled', { value: true });
+        return result as any;
+      }
+
+      const targetName = options?.to ?? 'javascript';
+
+      // Look up the target in the registry
+      // @ts-ignore - accessing internal property
+      languageTarget = this.engine._getCompilationTarget(targetName);
+
+      if (!languageTarget) {
         throw new Error(
-          `Compilation target "${target}" is not yet implemented. Available targets: javascript`
+          `Compilation target "${targetName}" is not registered. Available targets: ${Array.from(this.engine['_compilationTargets'].keys()).join(', ')}`
         );
       }
 
-      // Dynamic import to avoid circular dependency
-      const { JavaScriptTarget } = require('../compilation/javascript-target');
-      const jsTarget = new JavaScriptTarget();
-      return jsTarget.compileToExecutable(expr, {
+      // Use the language target to compile
+      return languageTarget.compileToExecutable(expr, {
         operators: options?.operators,
         functions: options?.functions,
         vars: options?.vars,
