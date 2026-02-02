@@ -603,3 +603,91 @@ describe('SET OPERATOR PRECEDENCE WITH LOGIC', () => {
     }
   });
 });
+
+describe('RANGE AND INTERVAL SERIALIZATION', () => {
+  it('should serialize Range with a..b notation', () => {
+    // Range with symbolic bounds serializes as a..b
+    // Note: must use materialization:false to prevent lazy evaluation to List
+    const range = ce.box(['Range', 'a', 'b']);
+    expect(range.toLatex({ materialization: false })).toBe('a..b');
+  });
+
+  it('should round-trip Range expressions', () => {
+    // Parse a..b -> Range -> serialize -> parse again
+    const expr1 = ce.parse('a..b');
+    expect(expr1.json).toMatchInlineSnapshot(`
+      [
+        Range,
+        a,
+        b,
+      ]
+    `);
+
+    // Round-trip with materialization:false
+    const latex = expr1.toLatex({ materialization: false });
+    expect(latex).toBe('a..b');
+
+    const expr2 = ce.parse(latex);
+    expect(expr2.json).toEqual(expr1.json);
+  });
+
+  it('should round-trip Interval expressions', () => {
+    // Closed interval [a, b]
+    const closed = ce.box(['Interval', 3, 4]);
+    const closedLatex = closed.latex;
+    const closedReparsed = ce.parse(closedLatex);
+    // Note: [3, 4] parses as List due to backward compatibility
+    expect(closedReparsed.json).toMatchInlineSnapshot(`
+      [
+        List,
+        3,
+        4,
+      ]
+    `);
+
+    // Half-open interval [a, b)
+    const halfOpen = ce.box(['Interval', 3, ['Open', 4]]);
+    const halfOpenLatex = halfOpen.latex;
+    expect(halfOpenLatex).toMatchInlineSnapshot(`\\lbrack3, 4\\rparen`);
+    const halfOpenReparsed = ce.parse(halfOpenLatex);
+    expect(halfOpenReparsed.json).toMatchInlineSnapshot(`
+      [
+        Interval,
+        3,
+        [
+          Open,
+          4,
+        ],
+      ]
+    `);
+
+    // Open-closed interval (a, b]
+    const openClosed = ce.box(['Interval', ['Open', 3], 4]);
+    const openClosedLatex = openClosed.latex;
+    expect(openClosedLatex).toMatchInlineSnapshot(`\\lparen3, 4\\rbrack`);
+    const openClosedReparsed = ce.parse(openClosedLatex);
+    expect(openClosedReparsed.json).toMatchInlineSnapshot(`
+      [
+        Interval,
+        [
+          Open,
+          3,
+        ],
+        4,
+      ]
+    `);
+  });
+
+  it('should parse intervals with \\mathopen/\\mathclose round-trip', () => {
+    // The \mathopen/\mathclose prefixes should be handled correctly
+    const tests = [
+      '\\mathopen\\lbrack 3, 4\\mathclose\\rparen', // half-open [3,4)
+      '\\mathopen( 3, 4\\mathclose\\rbrack', // open-closed (3,4]
+    ];
+
+    for (const latex of tests) {
+      const expr1 = ce.parse(latex);
+      expect(expr1.json[0]).toBe('Interval');
+    }
+  });
+});

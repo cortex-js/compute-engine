@@ -1,4 +1,5 @@
 import { Expression } from '../../../src/math-json/types.ts';
+import { ComputeEngine } from '../../../src/compute-engine';
 import { engine as ce, evaluate, latex } from '../../utils';
 
 describe('SUM parsing', () => {
@@ -393,7 +394,7 @@ describe('EL-3: Condition/Filter Support in Element Expressions', () => {
   // filters the values from the set
 
   test('parsing Element with Greater condition', () => {
-    const ce2 = new (ce.constructor as typeof ce.constructor)();
+    const ce2 = new ComputeEngine();
     const expr = ce2.parse('\\sum_{n \\in S, n > 0} n');
     // Should parse with condition attached to Element
     expect(expr.json).toMatchObject([
@@ -404,7 +405,7 @@ describe('EL-3: Condition/Filter Support in Element Expressions', () => {
   });
 
   test('parsing Element with GreaterEqual condition', () => {
-    const ce2 = new (ce.constructor as typeof ce.constructor)();
+    const ce2 = new ComputeEngine();
     const expr = ce2.parse('\\sum_{n \\in S, n \\ge 2} n');
     expect(expr.json).toMatchObject([
       'Sum',
@@ -414,7 +415,7 @@ describe('EL-3: Condition/Filter Support in Element Expressions', () => {
   });
 
   test('parsing Element with Less condition', () => {
-    const ce2 = new (ce.constructor as typeof ce.constructor)();
+    const ce2 = new ComputeEngine();
     const expr = ce2.parse('\\sum_{n \\in S, n < 0} n');
     expect(expr.json).toMatchObject([
       'Sum',
@@ -424,7 +425,7 @@ describe('EL-3: Condition/Filter Support in Element Expressions', () => {
   });
 
   test('sum with condition n > 0 filters positive values', () => {
-    const ce2 = new (ce.constructor as typeof ce.constructor)();
+    const ce2 = new ComputeEngine();
     ce2.assign('S', ce2.box(['Set', 1, 2, 3, -1, -2]));
     const expr = ce2.parse('\\sum_{n \\in S, n > 0} n');
     // Should sum only 1+2+3 = 6
@@ -432,7 +433,7 @@ describe('EL-3: Condition/Filter Support in Element Expressions', () => {
   });
 
   test('sum with condition n >= 2 filters values >= 2', () => {
-    const ce2 = new (ce.constructor as typeof ce.constructor)();
+    const ce2 = new ComputeEngine();
     ce2.assign('S', ce2.box(['Set', 1, 2, 3, 4, 5, -1, -2]));
     const expr = ce2.parse('\\sum_{n \\in S, n \\ge 2} n');
     // Should sum only 2+3+4+5 = 14
@@ -440,7 +441,7 @@ describe('EL-3: Condition/Filter Support in Element Expressions', () => {
   });
 
   test('sum with condition n < 0 filters negative values', () => {
-    const ce2 = new (ce.constructor as typeof ce.constructor)();
+    const ce2 = new ComputeEngine();
     ce2.assign('S', ce2.box(['Set', 1, 2, 3, -1, -2, -3]));
     const expr = ce2.parse('\\sum_{n \\in S, n < 0} n');
     // Should sum only -1-2-3 = -6
@@ -448,7 +449,7 @@ describe('EL-3: Condition/Filter Support in Element Expressions', () => {
   });
 
   test('product with condition n > 0', () => {
-    const ce2 = new (ce.constructor as typeof ce.constructor)();
+    const ce2 = new ComputeEngine();
     ce2.assign('S', ce2.box(['Set', 1, 2, 3, 4, -1, -2]));
     const expr = ce2.parse('\\prod_{n \\in S, n > 0} n');
     // Should multiply only 1*2*3*4 = 24
@@ -456,7 +457,7 @@ describe('EL-3: Condition/Filter Support in Element Expressions', () => {
   });
 
   test('condition with explicit inline set', () => {
-    const ce2 = new (ce.constructor as typeof ce.constructor)();
+    const ce2 = new ComputeEngine();
     const expr = ce2.box([
       'Sum',
       'n',

@@ -2,6 +2,12 @@
 
 ### New Features
 
+- **`\mathopen` and `\mathclose` Support**: The LaTeX parser now supports
+  `\mathopen` and `\mathclose` delimiter prefixes for matchfix operators. This
+  allows parsing expressions like `\mathopen(a, b\mathclose)` and the braced
+  form `\mathopen{(}a, b\mathclose{)}`. These commands are commonly used in
+  LaTeX for explicit delimiter spacing control.
+
 - **Custom Operator Compilation**: The `compile()` method now supports overriding
   operators to use function calls instead of native operators. This enables
   compilation of vector/matrix operations and custom domain-specific languages.

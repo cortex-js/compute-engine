@@ -1799,3 +1799,51 @@ e3.solve(['a', 'b', 'c', 'd']);
   for under-determined systems
 - `test/compute-engine/solve.test.ts` - Added 5 new tests for parametric solutions
   and updated existing test to expect parametric result
+
+---
+
+### 33. Polynomial Factoring ✅
+
+**IMPLEMENTED:** Polynomial factoring capability for perfect square trinomials,
+difference of squares, and quadratic factoring. Enables simplification of
+expressions like `√(x²+2x+1)` → `|x+1|`. Fixes issue #180.
+
+**Factoring functions implemented:**
+
+- `factorPerfectSquare()` - Detects a² ± 2ab + b² → (a±b)²
+- `factorDifferenceOfSquares()` - Detects a² - b² → (a-b)(a+b)
+- `factorQuadratic()` - Factors ax² + bx + c when roots are rational
+- `factorPolynomial()` - Combined entry point that tries all strategies
+
+**Examples that now work:**
+
+```typescript
+// Perfect square trinomials in sqrt
+ce.parse('\\sqrt{x^2+2x+1}').simplify().latex;      // → "|x+1|"
+ce.parse('\\sqrt{a^2+2ab+b^2}').simplify().latex;   // → "|a+b|"
+ce.parse('\\sqrt{a^2-2ab+b^2}').simplify().latex;   // → "|a-b|"
+ce.parse('\\sqrt{4x^2-12x+9}').simplify().latex;    // → "|2x-3|"
+
+// Direct factoring
+factorPolynomial(ce.parse('x^2+5x+6'), 'x').latex;  // → "(x+2)(x+3)"
+factorPolynomial(ce.parse('x^2-4'), 'x').latex;     // → "(x-2)(x+2)"
+factorPolynomial(ce.parse('2x^2-8'), 'x').latex;    // → "2(x-2)(x+2)"
+
+// Rational expression simplification
+ce.parse('\\frac{x^2-1}{x-1}').simplify().latex;    // → "x+1"
+```
+
+**Integration with sqrt simplification:**
+
+The `simplify-power.ts` file calls `factorPerfectSquare()` when simplifying
+`Sqrt` of `Add` expressions, enabling automatic simplification of perfect
+square trinomials inside square roots.
+
+**Files modified:**
+
+- `src/compute-engine/boxed-expression/factor.ts` - Added `factorPerfectSquare()`,
+  `factorDifferenceOfSquares()`, `factorQuadratic()`, `factorPolynomial()`, and
+  helper `extractSquareRoot()`
+- `src/compute-engine/symbolic/simplify-power.ts` - Integrated perfect square
+  and difference of squares detection in Sqrt simplification
+- `test/compute-engine/factor.test.ts` - Comprehensive test suite with 30+ tests

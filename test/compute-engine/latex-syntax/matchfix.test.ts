@@ -97,6 +97,15 @@ describe('MATCHFIX synonyms', () => {
       box       = ["Delimiter", ["Sequence", "a", "b", "c"], "(,)"]
       canonical = ["Triple", "a", "b", "c"]
     `));
+  // Braced form: \mathopen{(}
+  test('\\mathopen{(}a, b, c\\mathclose{)}', () =>
+    expect(check(`\\mathopen{(}a, b, c\\mathclose{)}`)).toMatchInlineSnapshot(`
+      box       = ["Delimiter", ["Sequence", "a", "b", "c"], "(,)"]
+      canonical = ["Triple", "a", "b", "c"]
+    `));
+  test('\\mathopen{\\lbrack}1, 2\\mathclose{\\rbrack}', () =>
+    expect(check(`\\mathopen{\\lbrack}1, 2\\mathclose{\\rbrack}`))
+      .toMatchInlineSnapshot(`["List", 1, 2]`));
 });
 
 describe('MATCHFIX abs and norm', () => {

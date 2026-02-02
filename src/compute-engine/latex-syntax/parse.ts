@@ -841,6 +841,11 @@ export class _Parser implements Parser {
     const closePrefix = OPEN_DELIMITER_PREFIX[this.peek];
     if (closePrefix) this.nextToken();
 
+    // Handle braced form: \mathopen{(} or \mathopen{\lbrack}
+    // After consuming the prefix, check if there's a braced delimiter
+    const hasBracedDelimiter = closePrefix && this.peek === '<{>';
+    if (hasBracedDelimiter) this.nextToken(); // consume the opening brace
+
     // If the delimiters are token arrays, look specifically for those
     if (Array.isArray(open)) {
       // If the open trigger is an array, the close trigger must be an array too
@@ -858,6 +863,12 @@ export class _Parser implements Parser {
         const matchedToken = this.nextToken();
         const useLatexCommand = matchedToken.startsWith('\\');
 
+        // Consume closing brace if we had a braced delimiter \mathopen{(}
+        if (hasBracedDelimiter && !this.match('<}>')) {
+          this.index = start;
+          return false;
+        }
+
         // Find the corresponding close token variant
         const closeTokens = DELIMITER_SHORTHAND[close[0] as string] ?? [
           close[0],
@@ -866,8 +877,11 @@ export class _Parser implements Parser {
           useLatexCommand ? t.startsWith('\\') : !t.startsWith('\\')
         ) ?? closeTokens[0]) as LatexToken;
 
+        // Build the close boundary: for braced form, expect \mathclose{)}
         const closeBoundary = closePrefix
-          ? [closePrefix, closeToken]
+          ? hasBracedDelimiter
+            ? [closePrefix, '<{>', closeToken, '<}>']
+            : [closePrefix, closeToken]
           : [closeToken];
         this.addBoundary(closeBoundary);
         return true;
@@ -901,11 +915,23 @@ export class _Parser implements Parser {
 
     open = this.nextToken() as Delimiter;
 
+    // Consume closing brace if we had a braced delimiter \mathopen{(}
+    if (hasBracedDelimiter && !this.match('<}>')) {
+      this.index = start;
+      return false;
+    }
+
     // If we are using a shorthand delimiter, we need to add the
     // corresponding close delimiter.
     close = CLOSE_DELIMITER[open] ?? close;
 
-    this.addBoundary(closePrefix ? [closePrefix, close] : [close]);
+    // Build the close boundary: for braced form, expect \mathclose{)}
+    const closeBoundary = closePrefix
+      ? hasBracedDelimiter
+        ? [closePrefix, '<{>', close, '<}>']
+        : [closePrefix, close]
+      : [close];
+    this.addBoundary(closeBoundary);
     return true;
   }
 
@@ -1536,7 +1562,10 @@ export class _Parser implements Parser {
     // Use the matchfix index for fast lookup of relevant definitions
     // If there's a delimiter prefix like \left, \mathopen, peek ahead to get the actual delimiter
     const hasPrefix = OPEN_DELIMITER_PREFIX[currentToken];
-    const lookupToken = hasPrefix ? this._tokens[this.index + 1] : currentToken;
+    let lookupToken = hasPrefix ? this._tokens[this.index + 1] : currentToken;
+    // Handle braced form: \mathopen{(} - skip past the brace to get the actual delimiter
+    if (hasPrefix && lookupToken === '<{>')
+      lookupToken = this._tokens[this.index + 2];
 
     // Get only the matchfix defs that could match this opening token
     // Note: some tokens (like |) may match multiple defs (|| and |)
