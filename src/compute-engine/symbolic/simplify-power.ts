@@ -1,6 +1,9 @@
 import type { BoxedExpression, RuleStep } from '../global-types';
 import { asRational } from '../boxed-expression/numerics';
-import { factorPerfectSquare, factorDifferenceOfSquares } from '../boxed-expression/factor';
+import {
+  factorPerfectSquare,
+  factorDifferenceOfSquares,
+} from '../boxed-expression/factor';
 
 /**
  * Power simplification rules consolidated from simplify-rules.ts.

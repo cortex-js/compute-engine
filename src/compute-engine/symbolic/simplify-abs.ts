@@ -52,7 +52,8 @@ export function simplifyAbs(x: BoxedExpression): RuleStep | undefined {
 
   // |x| -> -x when x is non-positive (includes x < 0 and x = 0)
   // Note: -0 = 0, so this is mathematically correct
-  if (op.isNonPositive === true) return { value: op.neg(), because: '|x| -> -x' };
+  if (op.isNonPositive === true)
+    return { value: op.neg(), because: '|x| -> -x' };
 
   const opOperator = op.operator;
 

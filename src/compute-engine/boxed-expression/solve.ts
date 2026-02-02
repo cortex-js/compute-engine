@@ -1,7 +1,12 @@
 import { isInequalityOperator } from '../latex-syntax/utils';
 import { matchAnyRules } from './rules';
 import { expand } from './expand';
-import type { BoxedExpression, BoxedSubstitution, ComputeEngine, Rule } from '../global-types';
+import type {
+  BoxedExpression,
+  BoxedSubstitution,
+  ComputeEngine,
+  Rule,
+} from '../global-types';
 
 //
 // Solve Rules
@@ -92,13 +97,21 @@ export const UNIVARIATE_ROOTS: Rule[] = [
   // Factor: x(ax + b) = 0 → x = 0 or x = -b/a
   //
   {
-    match: ['Add', ['Multiply', '__a', ['Power', '_x', 2]], ['Multiply', '__b', '_x']],
+    match: [
+      'Add',
+      ['Multiply', '__a', ['Power', '_x', 2]],
+      ['Multiply', '__b', '_x'],
+    ],
     replace: 0,
     useVariations: true,
     condition: filter,
   },
   {
-    match: ['Add', ['Multiply', '__a', ['Power', '_x', 2]], ['Multiply', '__b', '_x']],
+    match: [
+      'Add',
+      ['Multiply', '__a', ['Power', '_x', 2]],
+      ['Multiply', '__b', '_x'],
+    ],
     replace: ['Divide', ['Negate', '__b'], '__a'],
     useVariations: true,
     condition: filter,
@@ -754,7 +767,11 @@ function solveTwoSqrtEquation(
   if (!ops || ops.length < 2) return null;
 
   // Find all sqrt terms in the expression
-  const sqrtTerms: { term: BoxedExpression; arg: BoxedExpression; index: number }[] = [];
+  const sqrtTerms: {
+    term: BoxedExpression;
+    arg: BoxedExpression;
+    index: number;
+  }[] = [];
 
   for (let i = 0; i < ops.length; i++) {
     const op = ops[i];
@@ -976,10 +993,7 @@ function solveNestedSqrtEquation(
   if (outerArg.operator === 'Add' && outerArg.ops) {
     for (const term of outerArg.ops) {
       // Check for √x directly
-      if (
-        term.operator === 'Sqrt' &&
-        term.op1?.symbol === variable
-      ) {
+      if (term.operator === 'Sqrt' && term.op1?.symbol === variable) {
         hasInnerSqrtX = true;
         innerSqrtCoeff = ce.One;
         break;
@@ -997,10 +1011,7 @@ function solveNestedSqrtEquation(
       // Check for coefficient * √x
       if (term.operator === 'Multiply' && term.ops) {
         for (const factor of term.ops) {
-          if (
-            factor.operator === 'Sqrt' &&
-            factor.op1?.symbol === variable
-          ) {
+          if (factor.operator === 'Sqrt' && factor.op1?.symbol === variable) {
             hasInnerSqrtX = true;
             // Get coefficient (product of other factors)
             const otherFactors = term.ops.filter((f) => f !== factor);
@@ -1049,7 +1060,9 @@ function solveNestedSqrtEquation(
     { match: ['Sqrt', variable], replace: uSymbol },
     { recursive: true }
   );
-  const substitutedArg = step1?.subs({ [variable]: ce.box(['Power', uSymbolName, 2]) });
+  const substitutedArg = step1?.subs({
+    [variable]: ce.box(['Power', uSymbolName, 2]),
+  });
 
   if (!substitutedArg) return null;
 

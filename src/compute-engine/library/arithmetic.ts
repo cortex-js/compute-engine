@@ -607,7 +607,8 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
     // Modified Bessel function of the second kind K_n(x)
     // Also known as Macdonald function
     BesselK: {
-      description: 'Modified Bessel function of the second kind (Macdonald function)',
+      description:
+        'Modified Bessel function of the second kind (Macdonald function)',
       wikidata: 'Q627488',
       complexity: 8500,
       broadcastable: true,

@@ -477,11 +477,13 @@ export function indexLatexDictionary(
 
         const aOpen = getOpenToken(a.openTrigger);
         const aClose = getCloseToken(a.closeTrigger);
-        const aIsStandard = COMPLEMENTARY_PAIRS[aOpen]?.includes(aClose) ?? false;
+        const aIsStandard =
+          COMPLEMENTARY_PAIRS[aOpen]?.includes(aClose) ?? false;
 
         const bOpen = getOpenToken(b.openTrigger);
         const bClose = getCloseToken(b.closeTrigger);
-        const bIsStandard = COMPLEMENTARY_PAIRS[bOpen]?.includes(bClose) ?? false;
+        const bIsStandard =
+          COMPLEMENTARY_PAIRS[bOpen]?.includes(bClose) ?? false;
 
         // Standard pairs come first in array (tried first on iteration)
         // This maintains the reverse order within each category

@@ -280,9 +280,7 @@ export function createSequenceHandler(
 
   const memoize = def.memoize ?? true;
   // Use string keys for multi-index, number keys for single-index
-  const memo = memoize
-    ? new Map<number | string, BoxedExpression>()
-    : null;
+  const memo = memoize ? new Map<number | string, BoxedExpression>() : null;
   const domain = def.domain ?? {};
 
   // Store recurrence source for lazy parsing
@@ -378,7 +376,10 @@ export function createSequenceHandler(
     }
 
     // Check constraint expression (multi-index only)
-    if (constraintsExpr && !checkConstraints(engine, constraintsExpr, variables, indices)) {
+    if (
+      constraintsExpr &&
+      !checkConstraints(engine, constraintsExpr, variables, indices)
+    ) {
       return undefined;
     }
 

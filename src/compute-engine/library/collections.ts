@@ -808,7 +808,8 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       'Multiple indices can be provided to access nested collections (e.g., matrices).',
     ],
     complexity: 8200,
-    signature: '(value: indexed_collection, index: (number|string)+) -> unknown',
+    signature:
+      '(value: indexed_collection, index: (number|string)+) -> unknown',
     type: ([xs]) =>
       xs.operatorDefinition?.collection?.elttype?.(xs) ??
       collectionElementType(xs.type.type) ??

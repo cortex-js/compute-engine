@@ -545,13 +545,19 @@ export const SETS_LIBRARY: SymbolDefinitions = {
       const canonicalCollection = listToIntervalInSetContext(ce, collection);
 
       // Validate collection type
-      if (!canonicalCollection.type.matches('collection') &&
-          !canonicalCollection.symbol &&
-          !canonicalCollection.isValid) {
+      if (
+        !canonicalCollection.type.matches('collection') &&
+        !canonicalCollection.symbol &&
+        !canonicalCollection.isValid
+      ) {
         return ce._fn('Element', [
           value.canonical,
-          ce.error(['incompatible-type', `'collection'`, canonicalCollection.type.toString()]),
-          ...(condition ? [condition.canonical] : [])
+          ce.error([
+            'incompatible-type',
+            `'collection'`,
+            canonicalCollection.type.toString(),
+          ]),
+          ...(condition ? [condition.canonical] : []),
         ]);
       }
 
@@ -561,7 +567,11 @@ export const SETS_LIBRARY: SymbolDefinitions = {
           return ce._fn('Element', [
             value.canonical,
             canonicalCollection,
-            ce.error(['incompatible-type', `'boolean'`, collection.type.toString()])
+            ce.error([
+              'incompatible-type',
+              `'boolean'`,
+              collection.type.toString(),
+            ]),
           ]);
         }
         return ce._fn('Element', [

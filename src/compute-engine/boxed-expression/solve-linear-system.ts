@@ -46,7 +46,8 @@ function isLinearInVariables(
           if (!factor.symbol && factor.has(variables[0])) {
             // Check if any variable in the factor has degree > 1
             for (const v of variables) {
-              if (factor.has(v) && polynomialDegree(factor, v) > 1) return false;
+              if (factor.has(v) && polynomialDegree(factor, v) > 1)
+                return false;
             }
           }
         }
@@ -608,8 +609,8 @@ function compareAbsoluteValues(
 
   if (aVal === null || bVal === null) return undefined;
 
-  const aReal = typeof aVal === 'number' ? aVal : (aVal as any).re ?? aVal;
-  const bReal = typeof bVal === 'number' ? bVal : (bVal as any).re ?? bVal;
+  const aReal = typeof aVal === 'number' ? aVal : ((aVal as any).re ?? aVal);
+  const bReal = typeof bVal === 'number' ? bVal : ((bVal as any).re ?? bVal);
 
   if (typeof aReal !== 'number' || typeof bReal !== 'number') return undefined;
   if (isNaN(aReal) || isNaN(bReal)) return undefined;
@@ -728,12 +729,7 @@ function tryProductSumPattern(
   // Construct the quadratic: t² - sum*t + product = 0
   const t = '_t';
   const quadratic = ce
-    .box([
-      'Add',
-      ['Square', t],
-      ['Negate', ['Multiply', sum, t]],
-      product,
-    ])
+    .box(['Add', ['Square', t], ['Negate', ['Multiply', sum, t]], product])
     .simplify();
 
   const roots = findUnivariateRoots(quadratic, t);

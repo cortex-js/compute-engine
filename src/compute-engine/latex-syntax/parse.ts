@@ -553,7 +553,8 @@ export class _Parser implements Parser {
       const defs = [...this.getDefs(kind)];
 
       // Add universal definitions
-      for (const def of defs) if (def.latexTrigger === '') result.push([def, 0]);
+      for (const def of defs)
+        if (def.latexTrigger === '') result.push([def, 0]);
 
       // Match latexTrigger
       for (const [n, tokens] of this.lookAhead()) {
@@ -1623,7 +1624,9 @@ export class _Parser implements Parser {
           continue;
         }
 
-        if (!this.canSkipMatchfixReparsing(lookupToken, boundary, sameTrigger)) {
+        if (
+          !this.canSkipMatchfixReparsing(lookupToken, boundary, sameTrigger)
+        ) {
           // Re-parse without the boundary to handle ambiguous cases
           this.removeBoundary();
           this.index = bodyStart;
@@ -1792,7 +1795,9 @@ export class _Parser implements Parser {
    *
    * Returns the parsed function call or null if not a bare function.
    */
-  private tryParseBareFunction(until?: Readonly<Terminator>): Expression | null {
+  private tryParseBareFunction(
+    until?: Readonly<Terminator>
+  ): Expression | null {
     if (this.options.strict !== false) return null;
 
     const start = this.index;

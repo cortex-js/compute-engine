@@ -1772,7 +1772,10 @@ export function antiderivative(
     // Case D2: Recognize ∫ 1/(g(x)·h(x)) dx = ln|h(x)| when g(x) = d/dx(h(x))
     // This handles patterns like ∫ 1/(x·ln(x)) dx = ln|ln(x)|
     // because 1/x = d/dx(ln(x)), so 1/(x·ln(x)) = (1/x)/ln(x) = h'(x)/h(x)
-    if ((fn.op1.is(1) || !fn.op1.has(index)) && fn.op2.operator === 'Multiply') {
+    if (
+      (fn.op1.is(1) || !fn.op1.has(index)) &&
+      fn.op2.operator === 'Multiply'
+    ) {
       const factors = fn.op2.ops!;
       // For each factor f, check if numerator / (product of other factors) = c * d/dx(f)
       for (let i = 0; i < factors.length; i++) {

@@ -116,9 +116,12 @@ const GLSL_FUNCTIONS: CompiledFunctions = {
   // Common patterns
   List: (args, compile) => {
     // Detect vector type from number of elements
-    if (args.length === 2) return `vec2(${args.map((x) => compile(x)).join(', ')})`;
-    if (args.length === 3) return `vec3(${args.map((x) => compile(x)).join(', ')})`;
-    if (args.length === 4) return `vec4(${args.map((x) => compile(x)).join(', ')})`;
+    if (args.length === 2)
+      return `vec2(${args.map((x) => compile(x)).join(', ')})`;
+    if (args.length === 3)
+      return `vec3(${args.map((x) => compile(x)).join(', ')})`;
+    if (args.length === 4)
+      return `vec4(${args.map((x) => compile(x)).join(', ')})`;
     // For arrays or other cases, use array notation
     return `float[${args.length}](${args.map((x) => compile(x)).join(', ')})`;
   },
@@ -262,7 +265,9 @@ export class GLSLTarget implements LanguageTarget {
     const target = this.createTarget();
     const body = BaseCompiler.compile(expr, target);
 
-    const params = parameters.map(([name, type]) => `${type} ${name}`).join(', ');
+    const params = parameters
+      .map(([name, type]) => `${type} ${name}`)
+      .join(', ');
 
     return `${returnType} ${functionName}(${params}) {
   return ${body};
@@ -305,15 +310,20 @@ export class GLSLTarget implements LanguageTarget {
     }
 
     // Add inputs
-    const inputKeyword = version.startsWith('300') || version.startsWith('3') ? 'in' :
-                         type === 'vertex' ? 'attribute' : 'varying';
+    const inputKeyword =
+      version.startsWith('300') || version.startsWith('3')
+        ? 'in'
+        : type === 'vertex'
+          ? 'attribute'
+          : 'varying';
     for (const input of inputs) {
       code += `${inputKeyword} ${input.type} ${input.name};\n`;
     }
     if (inputs.length > 0) code += '\n';
 
     // Add outputs
-    const outputKeyword = version.startsWith('300') || version.startsWith('3') ? 'out' : 'varying';
+    const outputKeyword =
+      version.startsWith('300') || version.startsWith('3') ? 'out' : 'varying';
     for (const output of outputs) {
       code += `${outputKeyword} ${output.type} ${output.name};\n`;
     }

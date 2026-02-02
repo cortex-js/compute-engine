@@ -451,7 +451,7 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
 
         // Check if LHS is a Subscript expression (for sequence definitions)
         // e.g., ['Subscript', 'L', 0] or ['Subscript', 'a', 'n']
-        let lhs = args[0];
+        const lhs = args[0];
         if (lhs.operator === 'Subscript') {
           // Preserve Subscript form for sequence definitions
           return ce._fn('Assign', [lhs.canonical, args[1].canonical]);
@@ -493,10 +493,7 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
           }
 
           // No self-reference → function definition
-          const fnDef = ce.function('Function', [
-            op2,
-            ce.symbol(subscriptStr),
-          ]);
+          const fnDef = ce.function('Function', [op2, ce.symbol(subscriptStr)]);
           ce.assign(seqName, fnDef);
           return ce.Nothing;
         }

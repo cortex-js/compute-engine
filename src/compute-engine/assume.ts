@@ -27,7 +27,10 @@ import { isInequalityOperator } from './latex-syntax/utils';
  * - finite_real_number -> real
  * - complex/imaginary -> number
  */
-function inferTypeFromValue(ce: ComputeEngine, value: BoxedExpression): BoxedType {
+function inferTypeFromValue(
+  ce: ComputeEngine,
+  value: BoxedExpression
+): BoxedType {
   if (value.type.matches('integer')) {
     // finite_integer, integer, etc. -> integer
     return ce.type('integer');
@@ -465,7 +468,8 @@ function assumeInequality(proposition: BoxedExpression): AssumeResult {
                 // Contradiction if upperVal <= k
                 if (upperVal < k) return 'contradiction';
                 if (bounds.upperStrict && upperVal <= k) return 'contradiction';
-                if (!bounds.upperStrict && upperVal <= k) return 'contradiction';
+                if (!bounds.upperStrict && upperVal <= k)
+                  return 'contradiction';
               } else {
                 // symbol >= k: contradiction if upperVal < k
                 if (upperVal < k) return 'contradiction';
@@ -502,7 +506,8 @@ function assumeInequality(proposition: BoxedExpression): AssumeResult {
                 // Contradiction if lowerVal >= k
                 if (lowerVal > k) return 'contradiction';
                 if (bounds.lowerStrict && lowerVal >= k) return 'contradiction';
-                if (!bounds.lowerStrict && lowerVal >= k) return 'contradiction';
+                if (!bounds.lowerStrict && lowerVal >= k)
+                  return 'contradiction';
               } else {
                 // symbol <= k: contradiction if lowerVal > k
                 if (lowerVal > k) return 'contradiction';

@@ -48,7 +48,8 @@ export function canonicalDivide(
   if (op1.is(0) && op2.isFinite !== false) {
     // Be conservative with constant (no-unknown) denominators that aren't
     // already a literal number. Avoid 0/(1-1) -> 0 during canonicalization.
-    if (op2IsConstantExpression) return ce._fn('Divide', [op1, op2], { canonical: false });
+    if (op2IsConstantExpression)
+      return ce._fn('Divide', [op1, op2], { canonical: false });
     return ce.Zero;
   }
 
@@ -64,7 +65,8 @@ export function canonicalDivide(
     if (op1.isSame(op2)) {
       // Same conservative guard as above: don't collapse constant expressions
       // like (1-1)/(1-1) into 1 during canonicalization.
-      if (op2IsConstantExpression) return ce._fn('Divide', [op1, op2], { canonical: false });
+      if (op2IsConstantExpression)
+        return ce._fn('Divide', [op1, op2], { canonical: false });
       return ce.One;
     }
   }

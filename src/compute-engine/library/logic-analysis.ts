@@ -877,9 +877,7 @@ export function findPrimeImplicates(
   // Convert QM terms to clauses (Or expressions)
   // For maxterms, a 0 means the variable should be true in the clause (positive literal)
   // and a 1 means the variable should be negated in the clause
-  return primeImplicateTerms.map((term) =>
-    qmTermToClause(term, variables, ce)
-  );
+  return primeImplicateTerms.map((term) => qmTermToClause(term, variables, ce));
 }
 
 /**

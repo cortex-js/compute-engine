@@ -112,7 +112,11 @@ import {
   updateDef,
 } from './boxed-expression/utils';
 import { boxRules } from './boxed-expression/rules';
-import { validatePattern } from './boxed-expression/boxed-patterns';
+import {
+  validatePattern,
+  isWildcard,
+  wildcardName,
+} from './boxed-expression/boxed-patterns';
 import { BoxedString } from './boxed-expression/boxed-string';
 import { BoxedNumber, canonicalNumber } from './boxed-expression/boxed-number';
 import { _BoxedValueDefinition } from './boxed-expression/boxed-value-definition';
@@ -157,8 +161,6 @@ import {
   lookupSequence as lookupSequenceImpl,
   checkSequence as checkSequenceImpl,
 } from './oeis';
-
-import { isWildcard, wildcardName } from './boxed-expression/boxed-patterns';
 
 export * from './global-types';
 
@@ -1692,7 +1694,9 @@ export class ComputeEngine implements IComputeEngine {
    * For single-index sequences, keys are numbers.
    * For multi-index sequences, keys are comma-separated strings (e.g., '5,2').
    */
-  getSequenceCache(name: string): Map<number | string, BoxedExpression> | undefined {
+  getSequenceCache(
+    name: string
+  ): Map<number | string, BoxedExpression> | undefined {
     return getSequenceCacheImpl(this, name);
   }
 
@@ -2364,14 +2368,19 @@ export class ComputeEngine implements IComputeEngine {
       )
         return [{ pattern: expr }];
 
-      const lhs = op === 'Greater' || op === 'GreaterEqual' ? expr.op2 : expr.op1;
-      const rhs = op === 'Greater' || op === 'GreaterEqual' ? expr.op1 : expr.op2;
-      const normalizedOp = op === 'Less' || op === 'Greater' ? 'Less' : 'LessEqual';
+      const lhs =
+        op === 'Greater' || op === 'GreaterEqual' ? expr.op2 : expr.op1;
+      const rhs =
+        op === 'Greater' || op === 'GreaterEqual' ? expr.op1 : expr.op2;
+      const normalizedOp =
+        op === 'Less' || op === 'Greater' ? 'Less' : 'LessEqual';
 
       // Normalize to Less/LessEqual with RHS = 0, matching how assumptions are stored:
       //   Greater(a, b) -> Less(b - a, 0)
       //   Less(a, b)    -> Less(a - b, 0)
-      const diff = this.box(['Add', lhs, ['Negate', rhs]], { canonical: false });
+      const diff = this.box(['Add', lhs, ['Negate', rhs]], {
+        canonical: false,
+      });
       return [
         { pattern: expr },
         // For the normalized form, disable permutations: for commutative
@@ -2391,7 +2400,9 @@ export class ComputeEngine implements IComputeEngine {
         const symbolType = this.box(pat.op1.symbol).type;
         if (!symbolType.isUnknown) {
           pushResult({
-            [typeWildcard]: this.box(symbolType.toString(), { canonical: false }),
+            [typeWildcard]: this.box(symbolType.toString(), {
+              canonical: false,
+            }),
           });
         }
       }
@@ -2407,12 +2418,16 @@ export class ComputeEngine implements IComputeEngine {
     ) {
       const boundWildcard = wildcardName(pat.op2);
       if (boundWildcard && !boundWildcard.startsWith('__')) {
-        const isLower = pat.operator === 'Greater' || pat.operator === 'GreaterEqual';
+        const isLower =
+          pat.operator === 'Greater' || pat.operator === 'GreaterEqual';
         const isStrict = pat.operator === 'Greater' || pat.operator === 'Less';
 
         // Symbol on LHS: Greater(x, _k)
         if (pat.op1?.symbol) {
-          const bounds = getInequalityBoundsFromAssumptions(this, pat.op1.symbol);
+          const bounds = getInequalityBoundsFromAssumptions(
+            this,
+            pat.op1.symbol
+          );
           const bound = isLower ? bounds.lowerBound : bounds.upperBound;
           const strictOk = isLower ? bounds.lowerStrict : bounds.upperStrict;
           if (bound !== undefined && (!isStrict || strictOk === true))
@@ -2426,8 +2441,11 @@ export class ComputeEngine implements IComputeEngine {
             for (const s of candidatesFromAssumptions()) {
               const bounds = getInequalityBoundsFromAssumptions(this, s);
               const bound = isLower ? bounds.lowerBound : bounds.upperBound;
-              const strictOk = isLower ? bounds.lowerStrict : bounds.upperStrict;
-              if (bound === undefined || (isStrict && strictOk !== true)) continue;
+              const strictOk = isLower
+                ? bounds.lowerStrict
+                : bounds.upperStrict;
+              if (bound === undefined || (isStrict && strictOk !== true))
+                continue;
               pushResult({
                 [symbolWildcard]: this.box(s, { canonical: true }),
                 [boundWildcard]: bound,
@@ -2458,7 +2476,11 @@ export class ComputeEngine implements IComputeEngine {
     // infinite recursion. The recursion occurs when:
     //   verify(Equal(x,0)) → Equal.evaluate() → eq() → ask(NotEqual(x,0)) → verify()
     // By checking _isVerifying, we break this cycle.
-    if (result.length === 0 && !patternHasWildcards(pat) && !this._isVerifying) {
+    if (
+      result.length === 0 &&
+      !patternHasWildcards(pat) &&
+      !this._isVerifying
+    ) {
       // Use the canonical form so symbol declarations/definitions are visible
       // to the evaluator.
       const verified = this.verify(this.box(pattern, { canonical: true }));

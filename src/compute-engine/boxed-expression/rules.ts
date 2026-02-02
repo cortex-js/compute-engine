@@ -359,7 +359,8 @@ function parseRulePart(
       expr = expr.map(
         (x) => {
           // Only transform single character symbols. Avoid \pi, \imaginaryUnit, etc..
-          if (x.symbol && x.symbol.length === 1) return ce.symbol('_' + x.symbol);
+          if (x.symbol && x.symbol.length === 1)
+            return ce.symbol('_' + x.symbol);
           return x;
         },
         { canonical: false }
