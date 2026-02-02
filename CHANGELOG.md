@@ -1,12 +1,45 @@
 ## [Unreleased]
 
-### New Features
+### Parsing
 
-- **`\mathopen` and `\mathclose` Support**: The LaTeX parser now supports
-  `\mathopen` and `\mathclose` delimiter prefixes for matchfix operators. This
-  allows parsing expressions like `\mathopen(a, b\mathclose)` and the braced
-  form `\mathopen{(}a, b\mathclose{)}`. These commands are commonly used in
-  LaTeX for explicit delimiter spacing control.
+- **`\mathopen` and `\mathclose`**: The LaTeX parser supports `\mathopen` and
+  `\mathclose` delimiter prefixes for matchfix operators (explicit delimiter
+  spacing control), e.g. `\mathopen(a, b\mathclose)` and
+  `\mathopen{(}a, b\mathclose{)}`.
+
+- **Interval Notation Parsing**: Added support for parsing mathematical interval
+  notation from LaTeX, including half-open intervals. Addresses #254.
+
+  ```javascript
+  // Half-open intervals (American notation)
+  ce.parse('[3, 4)').json;   // → ["Interval", 3, ["Open", 4]]
+  ce.parse('(3, 4]').json;   // → ["Interval", ["Open", 3], 4]
+
+  // Open intervals (ISO/European notation)
+  ce.parse(']3, 4[').json;   // → ["Interval", ["Open", 3], ["Open", 4]]
+
+  // LaTeX bracket commands and sizing prefixes
+  ce.parse('\\lbrack 3, 4\\rparen').json;  // → ["Interval", 3, ["Open", 4]]
+  ce.parse('\\left[ 3, 4 \\right)').json;  // → ["Interval", 3, ["Open", 4]]
+  ce.parse('\\bigl( 3, 4 \\bigr]').json;   // → ["Interval", ["Open", 3], 4]
+  ```
+
+  **Contextual Parsing**: Lists and tuples are automatically converted to
+  intervals when used in set contexts (Element, Union, Intersection, etc.):
+
+  ```javascript
+  ce.parse('x \\in [0, 1]').json;
+  // → ["Element", "x", ["Interval", 0, 1]]
+
+  ce.parse('[0, 1] \\cup [2, 3]').json;
+  // → ["Union", ["Interval", 0, 1], ["Interval", 2, 3]]
+
+  // Standalone notation remains backward compatible
+  ce.parse('[0, 1]').json;  // → ["List", 0, 1]
+  ce.parse('(0, 1)').json;  // → ["Tuple", 0, 1]
+  ```
+
+### Compilation
 
 - **Custom Operator Compilation**: The `compile()` method now supports overriding
   operators to use function calls instead of native operators. This enables
@@ -31,13 +64,10 @@
   // → [5, 7, 9]
   ```
 
-  **Features**:
-  - Override operators using an object mapping operator names to function names
-  - Use a function to conditionally override operators
-  - Function-name operators (e.g., `add`, `mul`) compile to function calls
-  - Symbol operators (e.g., `+`, `-`) compile to infix operators
-  - Works with both scalar and collection (vector/array) arguments
-  - Partial overrides supported (only override some operators)
+  Highlights:
+  - Map operators via an object or a function
+  - Function-name operators compile to calls; symbol operators compile to infix
+  - Supports scalar/collection arguments and partial overrides
 
 - **Exported Compilation Interfaces**: Advanced users can now create custom
   compilation targets by using the exported `CompileTarget` interface,
@@ -64,14 +94,10 @@
   // → "ADD(VAR("x"), MUL(VAR("y"), 2))"
   ```
 
-  **Exported types and classes**:
-  - `CompileTarget` - Interface for defining compilation targets
-  - `CompiledOperators`, `CompiledFunctions` - Type definitions
-  - `CompilationOptions`, `CompiledExecutable` - Options and result types
-  - `LanguageTarget` - Interface for language-specific targets
-  - `BaseCompiler` - Core compilation logic
-  - `JavaScriptTarget` - JavaScript compilation target implementation
-  - `GLSLTarget` - GLSL compilation target implementation
+  Exported building blocks include `CompileTarget`, `LanguageTarget`,
+  `CompilationOptions`, `CompiledExecutable`, `BaseCompiler`, `JavaScriptTarget`,
+  and `GLSLTarget` (plus helper types like `CompiledOperators` and
+  `CompiledFunctions`).
 
 - **Compilation Plugin Architecture**: The Compute Engine now supports registering
   custom compilation targets, allowing you to compile mathematical expressions to
@@ -101,9 +127,10 @@
   const glslCode = expr.compile({ to: 'glsl' });
   ```
 
-  **Features**:
-  - Built-in targets: `javascript` (executable functions) and `glsl` (shader code)
-  - Register custom targets with `ce.registerCompilationTarget(name, target)`
+  Notes:
+  - Built-in targets: `javascript` (executable) and `glsl` (shader code)
+  - Add targets via `ce.registerCompilationTarget(name, target)`
+  - Switch targets with `compile({ to: ... })` (or override once with `target`)
 
 - **Python/NumPy Compilation Target**: Added a complete Python/NumPy compilation
   target for scientific computing workflows. The `PythonTarget` class compiles
@@ -141,32 +168,13 @@
   //     return np.sqrt(x ** 2 + y ** 2)
   ```
 
-  **Features**:
-  - Compiles to NumPy-compatible Python code (works with arrays)
-  - 50+ function mappings (trig, exponential, linear algebra, statistics)
-  - Generate complete Python functions with docstrings
-  - Create Python lambda expressions
-  - Generate NumPy-vectorized functions
-  - Configuration options for imports and SciPy support
-  - Ideal for scientific computing, ML, data analysis, and education
-
-  **Use Cases**:
-  - **Scientific Computing**: Generate NumPy code for numerical analysis
-  - **Machine Learning**: Create feature engineering functions
-  - **Data Analysis**: Convert formulas to Pandas/NumPy operations
-  - **Education**: Show Python equivalents of mathematical notation
-  - **Code Generation**: Automated function creation from LaTeX
-
-  **Supported Functions**: Trigonometric (sin, cos, tan), exponential (exp, ln, log),
-  power (sqrt, power), rounding (abs, floor, ceil), statistics (sum, mean, std),
-  linear algebra (dot, cross, norm, det, inv), and more.
+  Highlights:
+  - NumPy-compatible output (including arrays)
+  - Function mapping for common math + linear algebra
+  - Helpers for full functions, lambdas, and vectorized code
 
   See the [Python/NumPy Target Guide](/compute-engine/guides/python-target/) for
   complete documentation and examples.
-  - Switch between targets using the `to` option in `compile()`
-  - Direct target override with the `target` option for one-time use
-  - Extend or replace built-in targets
-  - Full `LanguageTarget` interface for creating custom compilation targets
 
 - **GLSL Compilation Target**: New built-in GLSL (OpenGL Shading Language) target
   for compiling mathematical expressions to WebGL shaders.
@@ -206,13 +214,12 @@
   });
   ```
 
-  **Features**:
-  - GLSL operators work natively on vectors and matrices
-  - Automatic float literal formatting with `.0` suffix
-  - Vector constructors: `vec2()`, `vec3()`, `vec4()`
-  - Complete shader generation with `compileShader()`
-  - Function generation with `compileFunction()`
-  - Built-in GLSL functions: `sin`, `cos`, `sqrt`, `pow`, `abs`, etc.
+  Highlights:
+  - Native vector/matrix operators and constructors
+  - Float literal formatting (`2.0`)
+  - Helpers for functions and complete shaders
+
+### Algebra
 
 - **Polynomial Factoring**: The `Factor` function now supports comprehensive
   polynomial factoring including perfect square trinomials, difference of
@@ -252,14 +259,10 @@
   // → "\\vert a+b\\vert"
   ```
 
-  **Features**:
-  - Perfect square trinomial factoring: `a² ± 2ab + b²` → `(a±b)²`
-  - Difference of squares: `a² - b²` → `(a-b)(a+b)`
-  - Quadratic factoring with rational roots
-  - Optional variable parameter for explicit control
-  - Automatic integration with sqrt simplification
-  - Exported functions for advanced users: `factorPerfectSquare`,
-    `factorDifferenceOfSquares`, `factorQuadratic`, `factorPolynomial`
+  Includes perfect square trinomials, difference of squares, and quadratics with
+  rational roots. Helper functions are exported for advanced usage
+  (`factorPerfectSquare`, `factorDifferenceOfSquares`, `factorQuadratic`,
+  `factorPolynomial`).
 
   **MathJSON API**:
   ```json
@@ -270,7 +273,45 @@
   The enhanced factoring system works seamlessly with existing polynomial
   functions like `Expand`, `Together`, `Cancel`, `PolynomialGCD`, and others.
 
-### Improvements
+### Simplification
+
+- **Absolute Value Power Simplification**: Fixed simplification of `|x^n|`
+  expressions with even and rational exponents. Previously, expressions like
+  `|x²|` and `|x^{2/3}|` were not simplified. Now they correctly simplify based
+  on the parity of the exponent's numerator. Addresses #181.
+
+  ```javascript
+  ce.parse('|x^2|').simplify().latex;      // → "x^2" (even exponent)
+  ce.parse('|x^3|').simplify().latex;      // → "|x|^3" (odd exponent)
+  ce.parse('|x^{2/3}|').simplify().latex;  // → "x^{2/3}" (even numerator)
+  ce.parse('|x^{3/2}|').simplify().latex;  // → "|x|^{3/2}" (odd numerator)
+  ```
+
+- **Assumption-Based Simplification**: Simplification rules use assumptions about
+  symbol signs:
+
+  ```javascript
+  ce.assume(ce.parse('x > 0'));
+  ce.parse('\\sqrt{x^2}').simplify().latex;  // → "x" (was "|x|")
+  ce.parse('|x|').simplify().latex;          // → "x" (was "|x|")
+
+  ce.assume(ce.parse('y < 0'));
+  ce.parse('\\sqrt{y^2}').simplify().latex;  // → "-y"
+  ce.parse('|y|').simplify().latex;          // → "-y"
+  ```
+
+- **Nested Root Simplification**: Nested roots simplify to a single root:
+
+  ```javascript
+  ce.box(['Sqrt', ['Sqrt', 'x']]).simplify()     // → root(4)(x)
+  ce.box(['Root', ['Root', 'x', 3], 2]).simplify() // → root(6)(x)
+  ce.box(['Sqrt', ['Root', 'x', 3]]).simplify()  // → root(6)(x)
+  ```
+
+  Applies to all combinations: `sqrt(sqrt(x))`, `root(sqrt(x), n)`,
+  `sqrt(root(x, n))`, and `root(root(x, m), n)`.
+
+### Assumptions & Types
 
 - **Improved `ask()` Queries**: `ce.ask()` now matches patterns with wildcards
   correctly, can answer common "bound" queries such as
@@ -289,49 +330,64 @@
   `number`, `any`) in addition to set collections (e.g. `RealNumbers`,
   `Integers`).
 
-- **Interval Notation Parsing**: Added support for parsing mathematical interval
-  notation from LaTeX, including half-open intervals. Addresses #254.
+- **Value Resolution from Equality Assumptions**: After
+  `ce.assume(['Equal', symbol, value])`, the symbol now evaluates to the assumed
+  value:
 
   ```javascript
-  // Half-open intervals (American notation)
-  ce.parse('[3, 4)').json;   // → ["Interval", 3, ["Open", 4]]
-  ce.parse('(3, 4]').json;   // → ["Interval", ["Open", 3], 4]
-
-  // Open intervals (ISO/European notation)
-  ce.parse(']3, 4[').json;   // → ["Interval", ["Open", 3], ["Open", 4]]
-
-  // LaTeX bracket commands and sizing prefixes
-  ce.parse('\\lbrack 3, 4\\rparen').json;  // → ["Interval", 3, ["Open", 4]]
-  ce.parse('\\left[ 3, 4 \\right)').json;  // → ["Interval", 3, ["Open", 4]]
-  ce.parse('\\bigl( 3, 4 \\bigr]').json;   // → ["Interval", ["Open", 3], 4]
+  ce.assume(ce.box(['Equal', 'one', 1]));
+  ce.box('one').evaluate();               // → 1 (was: 'one')
+  ce.box(['Equal', 'one', 1]).evaluate(); // → True (was: ['Equal', 'one', 1])
+  ce.box(['Equal', 'one', 0]).evaluate(); // → False
+  ce.box('one').type.matches('integer');  // → true
   ```
 
-  **Contextual Parsing**: Lists and tuples are automatically converted to
-  intervals when used in set contexts (Element, Union, Intersection, etc.):
+  This also fixes comparison evaluation: `Equal(symbol, assumed_value)` now
+  correctly evaluates to `True` instead of staying symbolic.
+
+- **Inequality Evaluation Using Assumptions**: Inequality comparisons can use
+  transitive bounds extracted from assumptions.
 
   ```javascript
-  ce.parse('x \\in [0, 1]').json;
-  // → ["Element", "x", ["Interval", 0, 1]]
-
-  ce.parse('[0, 1] \\cup [2, 3]').json;
-  // → ["Union", ["Interval", 0, 1], ["Interval", 2, 3]]
-
-  // Standalone notation remains backward compatible
-  ce.parse('[0, 1]').json;  // → ["List", 0, 1]
-  ce.parse('(0, 1)').json;  // → ["Tuple", 0, 1]
+  ce.assume(ce.box(['Greater', 'x', 4]));
+  ce.box(['Greater', 'x', 0]).evaluate();  // → True (x > 4 > 0)
+  ce.box(['Less', 'x', 0]).evaluate();     // → False
+  ce.box('x').isGreater(0);                // → true
+  ce.box('x').isPositive;                  // → true
   ```
 
-- **Absolute Value Power Simplification**: Fixed simplification of `|x^n|`
-  expressions with even and rational exponents. Previously, expressions like
-  `|x²|` and `|x^{2/3}|` were not simplified. Now they correctly simplify based
-  on the parity of the exponent's numerator. Addresses #181.
+- **Type Inference from Assumptions**: Inequalities infer `real`; equalities
+  infer from the value.
 
   ```javascript
-  ce.parse('|x^2|').simplify().latex;      // → "x^2" (even exponent)
-  ce.parse('|x^3|').simplify().latex;      // → "|x|^3" (odd exponent)
-  ce.parse('|x^{2/3}|').simplify().latex;  // → "x^{2/3}" (even numerator)
-  ce.parse('|x^{3/2}|').simplify().latex;  // → "|x|^{3/2}" (odd numerator)
+  ce.assume(ce.box(['Greater', 'x', 4]));
+  ce.box('x').type.toString();  // → 'real' (was: 'unknown')
+
+  ce.assume(ce.box(['Equal', 'one', 1]));
+  ce.box('one').type.toString();  // → 'integer' (was: 'unknown')
   ```
+
+- **Tautology and Contradiction Detection**: `ce.assume()` returns `'tautology'`
+  for redundant assumptions and `'contradiction'` for conflicts.
+
+  ```javascript
+  ce.assume(ce.box(['Greater', 'x', 4]));
+
+  // Redundant assumption (x > 4 implies x > 0)
+  ce.assume(ce.box(['Greater', 'x', 0]));  // → 'tautology' (was: 'ok')
+
+  // Conflicting assumption (x > 4 contradicts x < 0)
+  ce.assume(ce.box(['Less', 'x', 0]));     // → 'contradiction'
+
+  // Same assumption repeated
+  ce.assume(ce.box(['Equal', 'one', 1]));
+  ce.assume(ce.box(['Equal', 'one', 1]));  // → 'tautology'
+
+  // Conflicting equality
+  ce.assume(ce.box(['Less', 'one', 0]));   // → 'contradiction'
+  ```
+
+### Solving
 
 - **Systems of Linear Equations**: The `solve()` method now handles systems of
   linear equations parsed from LaTeX `\begin{cases}...\end{cases}` environments.
@@ -477,142 +533,7 @@
   ce.parse('2x^2 - 4x = 0').solve('x'); // → [0, 2]
   ```
 
-- **Value Resolution from Equality Assumptions**: When an equality assumption is
-  made via `ce.assume(['Equal', symbol, value])`, the symbol now correctly
-  evaluates to the assumed value. Previously, the symbol would remain unchanged
-  even after the assumption.
-
-  ```javascript
-  ce.assume(ce.box(['Equal', 'one', 1]));
-  ce.box('one').evaluate();               // → 1 (was: 'one')
-  ce.box(['Equal', 'one', 1]).evaluate(); // → True (was: ['Equal', 'one', 1])
-  ce.box(['Equal', 'one', 0]).evaluate(); // → False
-  ce.box('one').type.matches('integer');  // → true
-  ```
-
-  This also fixes comparison evaluation: `Equal(symbol, assumed_value)` now
-  correctly evaluates to `True` instead of staying symbolic.
-
-- **Inequality Evaluation Using Assumptions**: When an inequality assumption is
-  made (e.g., `ce.assume(['Greater', 'x', 4])`), inequality comparisons can now
-  use transitive reasoning to determine results.
-
-  ```javascript
-  ce.assume(ce.box(['Greater', 'x', 4]));
-  ce.box(['Greater', 'x', 0]).evaluate();  // → True (x > 4 > 0)
-  ce.box(['Less', 'x', 0]).evaluate();     // → False
-  ce.box('x').isGreater(0);                // → true
-  ce.box('x').isPositive;                  // → true
-  ```
-
-  This works by extracting lower/upper bounds from inequality assumptions and
-  using them during comparison operations.
-
-- **Type Inference from Assumptions**: When assumptions are made, symbol types
-  are now correctly inferred. Inequality assumptions (`>`, `<`, `>=`, `<=`) set
-  the symbol's type to `real`, and equality assumptions infer the type from the
-  value (e.g., equal to an integer means type `integer`).
-
-  ```javascript
-  ce.assume(ce.box(['Greater', 'x', 4]));
-  ce.box('x').type.toString();  // → 'real' (was: 'unknown')
-
-  ce.assume(ce.box(['Equal', 'one', 1]));
-  ce.box('one').type.toString();  // → 'integer' (was: 'unknown')
-  ```
-
-- **Tautology and Contradiction Detection**: `ce.assume()` now returns
-  `'tautology'` for redundant assumptions that are already implied by existing
-  assumptions, and `'contradiction'` for assumptions that conflict with existing
-  ones.
-
-  ```javascript
-  ce.assume(ce.box(['Greater', 'x', 4]));
-
-  // Redundant assumption (x > 4 implies x > 0)
-  ce.assume(ce.box(['Greater', 'x', 0]));  // → 'tautology' (was: 'ok')
-
-  // Conflicting assumption (x > 4 contradicts x < 0)
-  ce.assume(ce.box(['Less', 'x', 0]));     // → 'contradiction'
-
-  // Same assumption repeated
-  ce.assume(ce.box(['Equal', 'one', 1]));
-  ce.assume(ce.box(['Equal', 'one', 1]));  // → 'tautology'
-
-  // Conflicting equality
-  ce.assume(ce.box(['Less', 'one', 0]));   // → 'contradiction'
-  ```
-
-### Bug Fixes
-
-- **replace() No Longer Auto-Wildcards in Object Rules**: Fixed an issue where
-  `.replace({match: 'a', replace: 2})` would incorrectly treat `'a'` as a
-  wildcard, matching any expression instead of the literal symbol `a`. Now
-  object rules use literal matching, while string rules (like `"a*x -> 2*x"`)
-  continue to auto-wildcard as expected.
-
-  ```javascript
-  const expr = ce.box(['Add', ['Multiply', 'a', 'x'], 'b']);
-  expr.replace({match: 'a', replace: 2}, {recursive: true});
-  // → 2x + b (was: 2 - incorrectly matched entire expression)
-  ```
-
-- **forget() Now Clears Assumed Values**: Fixed an issue where `ce.forget()` did
-  not clear values that were set by equality assumptions. After calling
-  `ce.assume(['Equal', 'x', 5])` followed by `ce.forget('x')`, the symbol would
-  incorrectly still evaluate to `5`. Now `forget()` properly clears values from
-  all evaluation context frames.
-
-  ```javascript
-  ce.assume(ce.box(['Equal', 'x', 5]));
-  ce.box('x').evaluate();  // → 5
-  ce.forget('x');
-  ce.box('x').evaluate();  // → 'x' (was: 5)
-  ```
-
-- **Scoped Assumptions Now Clean Up on popScope()**: Fixed an issue where
-  assumptions made inside a nested scope would persist after `popScope()` was
-  called. Values set by assumptions are now properly scoped to where the
-  assumption was made, and are automatically removed when the scope exits.
-
-  ```javascript
-  ce.pushScope();
-  ce.assume(ce.box(['Equal', 'y', 10]));
-  ce.box('y').evaluate();  // → 10
-  ce.popScope();
-  ce.box('y').evaluate();  // → 'y' (was: 10)
-  ```
-
-- **Extraneous Root Filtering for Sqrt Equations**: Fixed an issue where solving
-  square root equations could return extraneous roots. When solving equations
-  like `√x = x - 2` or `√x - x + 2 = 0` using the quadratic substitution method
-  (u = √x → solve for u → x = u²), the solver could return roots that satisfy
-  the transformed equation but not the original. The `validateRoots()` function
-  now correctly validates candidate solutions against the original expression
-  before any algebraic transformations (clearing denominators, harmonization),
-  properly filtering out extraneous roots.
-
-  Examples of equations that now correctly filter extraneous roots:
-  - `√x = x - 2` → returns `[4]` (filters out x=1)
-  - `√x + x - 2 = 0` → returns `[1]` (filters out x=4)
-  - `√x - x + 2 = 0` → returns `[4]` (filters out x=1)
-  - `x - 2√x - 3 = 0` → returns `[9]` (filters out x=1)
-  - `2x + 3√x - 2 = 0` → returns `[1/4]` (filters out x=4)
-
-- **(#178)Simplification Improvements**:
-  - **Safer division canonicalization**: Avoids collapsing expressions like
-    `\frac{0}{1-1}` or `\frac{1-1}{1-1}` during canonicalization/simplification
-    when the denominator is a non-literal constant expression that could
-    simplify to `0`. These cases now require an explicit evaluation step if you
-    want them reduced to `\frac{0}{0}` → `\operatorname{NaN}`.
-  - **Implicit multiplication powers**: `xx` now simplifies to `x^2`.
-  - **Exponential/log separation**: `\exp(\log(x)+y)` and `\exp(\log(x)-y)` now
-    simplify without leaving a remaining `\log(...)` term in the exponent
-    (preferred by the default cost function via a targeted heuristic).
-
-### New Features
-
-#### Subscripts and Indexing
+### Subscripts & Indexing
 
 - **Subscript Evaluation Handler**: Define custom evaluation functions for
   subscripted symbols like mathematical sequences using `subscriptEvaluate`:
@@ -686,7 +607,7 @@
   ce.parse('v_{\\text{initial}}');  // → symbol "v_initial"
   ```
 
-#### Sequences
+### Sequences
 
 - **Declarative Sequence Definitions**: Define mathematical sequences using
   recurrence relations with the new `declareSequence()` method:
@@ -830,7 +751,7 @@
   Note: OEIS lookups require network access to oeis.org.
 
 - **Multi-Index Sequences**: Define sequences with multiple indices like
-  Pascal's triangle P\_{n,k} or grid-based recurrences:
+  Pascal's triangle `P_{n,k}` or grid-based recurrences:
 
   ```javascript
   // Pascal's Triangle: P_{n,k} = P_{n-1,k-1} + P_{n-1,k}
@@ -861,7 +782,7 @@
   - Equality: `'n,n'` matches when both indices are equal
   - Priority: exact matches are checked before patterns
 
-#### Special Functions
+### Special Functions
 
 - **Special Function Definitions**: Added type signatures for special
   mathematical functions, enabling them to be used in expressions without type
@@ -881,7 +802,7 @@
   via `\operatorname{J}`, `\operatorname{Y}`, etc., and Airy functions via
   `\operatorname{Ai}`, `\operatorname{Bi}`.
 
-#### Calculus
+### Calculus
 
 - **LambertW Derivative**: Added derivative rule for the Lambert W function:
   `d/dx W(x) = W(x)/(x·(1+W(x)))`
@@ -956,7 +877,21 @@
   - `∫ e^x·sin(ax+b) dx = (e^x/(a²+1))·(sin(ax+b) - a·cos(ax+b))`
   - `∫ e^x·cos(ax+b) dx = (e^x/(a²+1))·(a·sin(ax+b) + cos(ax+b))`
 
-#### Logic
+- **Derivative Recursion Safety**: Added recursion protection to
+  `differentiate()` with a depth limit (`MAX_DIFFERENTIATION_DEPTH`), returning
+  `undefined` when the limit is exceeded.
+
+- **Equation Equivalence in `isEqual()`** (Issue #275): Two equations are now
+  recognized as equivalent if they have the same solution set:
+
+  ```javascript
+  ce.parse('2x+1=0').isEqual(ce.parse('x=-1/2'));   // → true
+  ce.parse('3x+1=0').isEqual(ce.parse('6x+2=0'));   // → true
+  ```
+
+  Uses sampling to check whether (LHS₁-RHS₁)/(LHS₂-RHS₂) is a non-zero constant.
+
+### Logic
 
 - **Boolean Simplification Rules**: Added absorption laws and improved boolean
   expression simplification:
@@ -998,7 +933,7 @@
   Limited to 12 variables to prevent exponential blowup; larger expressions
   return unevaluated.
 
-#### Linear Algebra
+### Linear Algebra
 
 - **Matrix Decompositions**: Added four matrix decomposition functions for
   numerical linear algebra:
@@ -1023,57 +958,54 @@
   // → [U, Σ, V] where A = UΣV^T
   ```
 
-#### Simplification
+### Fixed
 
-- **Assumption-Based Simplification**: Simplification rules now correctly use
-  assumptions about symbol signs. For example:
-
-  ```javascript
-  ce.assume(ce.parse('x > 0'));
-  ce.parse('\\sqrt{x^2}').simplify().latex;  // → "x" (was "|x|")
-  ce.parse('|x|').simplify().latex;          // → "x" (was "|x|")
-
-  ce.assume(ce.parse('y < 0'));
-  ce.parse('\\sqrt{y^2}').simplify().latex;  // → "-y"
-  ce.parse('|y|').simplify().latex;          // → "-y"
-  ```
-
-  This enables important mathematical simplifications that depend on knowing
-  whether a variable is positive, negative, or zero.
-
-### Improvements
-
-#### Simplification
-
-- **Nested Root Simplification**: Nested roots now simplify to a single root:
-  ```javascript
-  ce.box(['Sqrt', ['Sqrt', 'x']]).simplify()     // → root(4)(x)
-  ce.box(['Root', ['Root', 'x', 3], 2]).simplify() // → root(6)(x)
-  ce.box(['Sqrt', ['Root', 'x', 3]]).simplify()  // → root(6)(x)
-  ```
-  This applies to all combinations: `sqrt(sqrt(x))`, `root(sqrt(x), n)`,
-  `sqrt(root(x, n))`, and `root(root(x, m), n)`.
-
-#### Calculus
-
-- **Derivative Recursion Safety**: Added robust recursion protection to the
-  `differentiate()` function with a depth limit (`MAX_DIFFERENTIATION_DEPTH`) to
-  guard against pathological expressions. All recursive calls now track depth
-  and gracefully return `undefined` if the limit is exceeded.
-
-### Bug Fixes
-
-- **Equation Equivalence in `isEqual()`** (Issue #275): Two equations are now
-  correctly recognized as equivalent if they have the same solution set:
+- **replace() Literal Matching in Object Rules**:
+  `.replace({ match: 'a', replace: 2 })` no longer treats `'a'` as a wildcard
+  (string rules like `"a*x -> 2*x"` still auto-wildcard).
 
   ```javascript
-  ce.parse('2x+1=0').isEqual(ce.parse('x=-1/2'));   // → true
-  ce.parse('3x+1=0').isEqual(ce.parse('6x+2=0'));   // → true
+  const expr = ce.box(['Add', ['Multiply', 'a', 'x'], 'b']);
+  expr.replace({match: 'a', replace: 2}, {recursive: true});
+  // → 2x + b (was: 2 - incorrectly matched entire expression)
   ```
 
-  The implementation uses a sampling-based approach to check if the ratio of
-  (LHS₁-RHS₁) to (LHS₂-RHS₂) is a non-zero constant, which indicates equivalent
-  solution sets.
+- **forget() Clears Assumed Values**: `ce.forget()` now clears values set by
+  equality assumptions across all evaluation context frames.
+
+  ```javascript
+  ce.assume(ce.box(['Equal', 'x', 5]));
+  ce.box('x').evaluate();  // → 5
+  ce.forget('x');
+  ce.box('x').evaluate();  // → 'x' (was: 5)
+  ```
+
+- **Scoped Assumptions Clean Up on popScope()**: Assumptions made inside a scope
+  no longer leak after `popScope()`.
+
+  ```javascript
+  ce.pushScope();
+  ce.assume(ce.box(['Equal', 'y', 10]));
+  ce.box('y').evaluate();  // → 10
+  ce.popScope();
+  ce.box('y').evaluate();  // → 'y' (was: 10)
+  ```
+
+- **Extraneous Root Filtering for Sqrt Equations**: Candidate solutions are now
+  validated against the original expression (before clearing denominators /
+  harmonization) to filter extraneous roots.
+
+  Examples of equations that now correctly filter extraneous roots:
+  - `√x = x - 2` → returns `[4]` (filters out x=1)
+  - `√x + x - 2 = 0` → returns `[1]` (filters out x=4)
+  - `√x - x + 2 = 0` → returns `[4]` (filters out x=1)
+  - `x - 2√x - 3 = 0` → returns `[9]` (filters out x=1)
+  - `2x + 3√x - 2 = 0` → returns `[1/4]` (filters out x=4)
+
+- **Simplification (#178)**:
+  - Safer division canonicalization for denominators that may simplify to `0`
+  - Implicit multiplication powers: `xx` → `x^2`
+  - Targeted exp/log rewriting for `\exp(\log(x)±y)`
 
 ## 0.33.0 _2026-01-30_
 
@@ -4008,7 +3940,7 @@ They can be iterated, sliced, filtered, mapped, etc...
   - `apply`
 
 - Properly handle inverse and derivate notations, e.g. `\sin^{-1}(x)`,
-  `\sin'(x)`, `\cos''(x)`, \cos^{(4)}(x)`or even`\sin^{-1}''(x)`
+  `\sin'(x)`, `\cos''(x)`, `\cos^{(4)}(x)` or even `\sin^{-1}''(x)`
 
 ## 0.13.0 _2023-09-09_
 
@@ -4241,7 +4173,7 @@ Work around unpckg.com issue with libraries using BigInt.
   used to represent both integers and floating point numbers. Its key
   characteristic is that it is an arbitrary precision number, aka "bignum". This
   affects `ce.numericMode` which now uses `bignum` instead of
-  `decimal', `expr.decimalValue`->`expr.bignumValue`, `decimalValue()`-> `bignumValue()`
+  `decimal`, `expr.decimalValue`->`expr.bignumValue`, `decimalValue()`->`bignumValue()`
 
 ### Bugs Fixed
 
@@ -4271,7 +4203,7 @@ Work around unpckg.com issue with libraries using BigInt.
 - Parsing of `\sum`, `\prod`, `\int`.
 - Added parsing of log functions, `\lb`, `\ln`, `\ln_{10}`, `\ln_2`, etc...
 - Added
-  `expr.`subexpressions`, `expr.getSubexpressions()`, `expr.errors`, `expr.symbols`, `expr.isValid`.
+  `expr.subexpressions`, `expr.getSubexpressions()`, `expr.errors`, `expr.symbols`, `expr.isValid`.
 - Symbols can now be used to represent functions, i.e. `ce.box('Sin').domain`
   correctly returns `["Domain", "Function"]`.
 - Correctly handle rational numbers with a numerator or denominator outside the

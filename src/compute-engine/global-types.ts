@@ -618,7 +618,7 @@ export interface BoxedExpression {
    * Compute Engine or it may return a different value each time it is
    * evaluated, even if the state of the Compute Engine is the same.
    *
-   * As an example, the ["Add", 2, 3]` function expression is pure, but
+   * As an example, the `["Add", 2, 3]` function expression is pure, but
    * the `["Random"]` function expression is not pure.
    *
    * For a function expression to be pure, the function itself (its operator)
@@ -2281,10 +2281,10 @@ export interface SequenceInfo {
   /** The sequence name */
   name: string;
 
-  /** Index variable name for single-index sequences (e.g., 'n') */
+  /** Index variable name for single-index sequences (e.g., `"n"`) */
   variable?: string;
 
-  /** Index variable names for multi-index sequences (e.g., ['n', 'k']) */
+  /** Index variable names for multi-index sequences (e.g., `["n", "k"]`) */
   variables?: string[];
 
   /**
@@ -2299,7 +2299,7 @@ export interface SequenceInfo {
 
   /**
    * Domain constraints.
-   * For single-index: { min?, max? }
+   * For single-index: `{ min?, max? }`
    * For multi-index: per-variable constraints
    */
   domain:
@@ -3292,7 +3292,7 @@ export type RuleSteps = RuleStep[];
  * into a new expression `replace`.
  *
  * - `x-1` \( \to \) `1-x`
- * - `(x+1)(x-1)` \( \to \) `x^2-1
+ * - `(x+1)(x-1)` \( \to \) `x^2-1`
  *
  * The patterns can be expressed as LaTeX strings or `SemiBoxedExpression`'s.
  * Alternatively, match/replace logic may be specified by a `RuleFunction`, allowing both custom
@@ -3833,7 +3833,9 @@ export interface ComputeEngine extends IBigNum {
    * For single-index sequences, keys are numbers.
    * For multi-index sequences, keys are comma-separated strings (e.g., '5,2').
    */
-  getSequenceCache(name: string): Map<number | string, BoxedExpression> | undefined;
+  getSequenceCache(
+    name: string
+  ): Map<number | string, BoxedExpression> | undefined;
 
   /**
    * Generate a list of sequence terms from start to end (inclusive).

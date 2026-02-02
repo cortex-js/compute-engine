@@ -877,7 +877,7 @@ If *false*, evaluating this expression may change the state of the
 Compute Engine or it may return a different value each time it is
 evaluated, even if the state of the Compute Engine is the same.
 
-As an example, the ["Add", 2, 3]` function expression is pure, but
+As an example, the `["Add", 2, 3]` function expression is pure, but
 the `["Random"]` function expression is not pure.
 
 For a function expression to be pure, the function itself (its operator)
@@ -2898,7 +2898,7 @@ A rule describes how to modify an expression that matches a pattern `match`
 into a new expression `replace`.
 
 - `x-1` \( \to \) `1-x`
-- `(x+1)(x-1)` \( \to \) `x^2-1
+- `(x+1)(x-1)` \( \to \) `x^2-1`
 
 The patterns can be expressed as LaTeX strings or `SemiBoxedExpression`'s.
 Alternatively, match/replace logic may be specified by a `RuleFunction`, allowing both custom
@@ -3519,7 +3519,7 @@ optional variables: string[];
 ```
 
 Index variable names for multi-index sequences.
-Example: `['n', 'k']` for Pascal's triangle P_{n,k}
+Example: `['n', 'k']` for Pascal's triangle `P_{n,k}`
 
 If provided, this takes precedence over `variable`.
 
@@ -3729,7 +3729,7 @@ The sequence name
 optional variable: string;
 ```
 
-Index variable name for single-index sequences (e.g., 'n')
+Index variable name for single-index sequences (e.g., `"n"`)
 
 </MemberCard>
 
@@ -3741,7 +3741,7 @@ Index variable name for single-index sequences (e.g., 'n')
 optional variables: string[];
 ```
 
-Index variable names for multi-index sequences (e.g., ['n', 'k'])
+Index variable names for multi-index sequences (e.g., `["n", "k"]`)
 
 </MemberCard>
 
@@ -3788,7 +3788,7 @@ domain:
 ```
 
 Domain constraints.
-For single-index: { min?, max? }
+For single-index: `{ min?, max? }`
 For multi-index: per-variable constraints
 
 </MemberCard>
