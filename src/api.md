@@ -3519,7 +3519,7 @@ optional variables: string[];
 ```
 
 Index variable names for multi-index sequences.
-Example: `['n', 'k']` for Pascal's triangle `P_{n,k}`
+Example: `['n', 'k']` for Pascal's triangle P_{n,k}
 
 If provided, this takes precedence over `variable`.
 
