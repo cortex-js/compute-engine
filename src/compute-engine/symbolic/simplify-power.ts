@@ -1,5 +1,6 @@
 import type { BoxedExpression, RuleStep } from '../global-types';
 import { asRational } from '../boxed-expression/numerics';
+import { factorPerfectSquare, factorDifferenceOfSquares } from '../boxed-expression/factor';
 
 /**
  * Power simplification rules consolidated from simplify-rules.ts.
@@ -125,6 +126,33 @@ export function simplifyPower(x: BoxedExpression): RuleStep | undefined {
   if (op === 'Sqrt') {
     const arg = x.op1;
     if (!arg) return undefined;
+
+    // Try factoring perfect square trinomials and difference of squares first
+    // This enables simplification of sqrt(x^2+2x+1) -> |x+1|
+    if (arg.operator === 'Add') {
+      // Try perfect square trinomial: a² ± 2ab + b² → (a±b)²
+      const perfectSquare = factorPerfectSquare(arg);
+      if (perfectSquare !== null) {
+        // We have (a±b)², so sqrt((a±b)²) = |a±b|
+        const base = perfectSquare.op1!;
+        return {
+          value: ce._fn('Abs', [base]),
+          because: 'sqrt(perfect square trinomial) -> |factor|',
+        };
+      }
+
+      // Try difference of squares: a² - b² → (a-b)(a+b)
+      const diffSquares = factorDifferenceOfSquares(arg);
+      if (diffSquares !== null) {
+        // We have (a-b)(a+b), so sqrt((a-b)(a+b)) = sqrt(a²-b²)
+        // This doesn't simplify further directly, but we return the factored form
+        // wrapped in sqrt for further simplification
+        return {
+          value: ce._fn('Sqrt', [diffSquares]),
+          because: 'sqrt(a²-b²) -> sqrt((a-b)(a+b))',
+        };
+      }
+    }
 
     // sqrt(sqrt(x)) -> x^{1/4} (nested square roots)
     if (arg.operator === 'Sqrt' && arg.op1) {

@@ -124,6 +124,13 @@ import {
   HARMONIZATION_RULES,
   UNIVARIATE_ROOTS,
 } from './boxed-expression/solve';
+import {
+  factor,
+  factorPerfectSquare,
+  factorDifferenceOfSquares,
+  factorQuadratic,
+  factorPolynomial,
+} from './boxed-expression/factor';
 
 // To avoid circular dependencies, serializeToJson is forward declared. Type
 // to import it.
@@ -156,6 +163,15 @@ import { isWildcard, wildcardName } from './boxed-expression/boxed-patterns';
 export * from './global-types';
 
 export { validatePattern };
+
+// Export polynomial factoring functions for advanced users
+export {
+  factor,
+  factorPerfectSquare,
+  factorDifferenceOfSquares,
+  factorQuadratic,
+  factorPolynomial,
+};
 
 // Export compilation types and classes for advanced users
 export type {
