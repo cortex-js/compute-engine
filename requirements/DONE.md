@@ -1,5 +1,102 @@
 # DONE - Completed Compute Engine Improvements
 
+## LaTeX Parsing Enhancements (Completed)
+
+### LP-1. `\mathopen` and `\mathclose` Delimiter Support ✅
+
+**IMPLEMENTED:** The LaTeX parser now supports `\mathopen` and `\mathclose` as
+delimiter prefixes for matchfix operators, similar to `\left`/`\right` and
+`\bigl`/`\bigr`.
+
+**Supported forms:**
+
+1. **Direct form**: `\mathopen(...\mathclose)` - prefix directly before delimiter
+2. **Braced form**: `\mathopen{(}...\mathclose{)}` - delimiter inside braces
+
+**Examples that now work:**
+
+```typescript
+ce.parse('\\mathopen(a, b, c\\mathclose)').json
+// → ["Delimiter", ["Sequence", "a", "b", "c"], "(,)"]
+
+ce.parse('\\mathopen\\lparen a, b, c\\mathclose\\rparen').json
+// → ["Delimiter", ["Sequence", "a", "b", "c"], "(,)"]
+
+ce.parse('\\mathopen{(}a, b, c\\mathclose{)}').json
+// → ["Delimiter", ["Sequence", "a", "b", "c"], "(,)"]
+
+ce.parse('\\mathopen{\\lbrack}1, 2\\mathclose{\\rbrack}').json
+// → ["List", 1, 2]
+```
+
+**Implementation details:**
+
+1. Added `\mathopen` → `\mathclose` mapping to `OPEN_DELIMITER_PREFIX` in
+   `parse.ts`
+
+2. Modified `parseEnclosure()` to handle braced form lookup:
+   - When a prefix like `\mathopen` is detected, check if next token is `<{>`
+   - If braced, look two tokens ahead to get the actual delimiter for matchfix
+     definition lookup
+
+3. Modified `matchDelimiter()` to handle braced form consumption:
+   - Detect braced delimiter after prefix (`\mathopen{(}`)
+   - Consume opening brace, match delimiter, consume closing brace
+   - Set up boundary to expect matching braced close form
+     (`\mathclose{)}`)
+
+**Files modified:**
+
+- `src/compute-engine/latex-syntax/parse.ts` - Added prefix mapping and braced
+  form handling
+- `test/compute-engine/latex-syntax/matchfix.test.ts` - Added tests for both
+  direct and braced forms
+
+**Note:** Middle delimiter support (`\middle\mid`) was investigated but deferred
+as it requires significant architectural changes to the matchfix parsing system.
+The parser would need to recognize middle delimiters within matchfix bodies and
+split expressions at these boundaries.
+
+---
+
+### LP-2. Context-Aware Interval Notation Parsing ✅
+
+**Status:** Already implemented. While standalone `[a, b]` and `(a, b)` parse as
+List/Tuple for backward compatibility, set theory contexts correctly parse them
+as intervals.
+
+**Working examples:**
+
+```typescript
+// Context-aware parsing detects set theory context
+ce.parse('x \\in [0, 1]').json;
+// → ["Element", "x", ["Interval", 0, 1]]
+
+ce.parse('x \\in (0, 1)').json;
+// → ["Element", "x", ["Interval", ["Open", 0], ["Open", 1]]]
+
+ce.parse('[0, 1] \\cup [2, 3]').json;
+// → ["Union", ["Interval", 0, 1], ["Interval", 2, 3]]
+
+// Half-open intervals (issue #254)
+ce.parse('[3, 4)').json;  // → ["Interval", 3, ["Open", 4]]
+ce.parse('(3, 4]').json;  // → ["Interval", ["Open", 3], 4]
+
+// Mismatched \left/\right delimiters (fixed with LP-1)
+ce.parse('\\left[3, 4\\right)').json;
+// → ["Interval", 3, ["Open", 4]]
+```
+
+**Backward compatibility preserved:**
+
+```typescript
+// Standalone brackets still parse as List/Tuple
+ce.parse('[3, 4]').json;  // → ["List", 3, 4]
+ce.parse('(3, 4)').json;  // → ["Tuple", 3, 4]
+```
+
+---
+
 ## High Priority (Completed)
 
 ### 1. Add Type Signatures for Special Functions ✅
