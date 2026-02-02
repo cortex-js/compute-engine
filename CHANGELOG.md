@@ -98,6 +98,65 @@
   **Features**:
   - Built-in targets: `javascript` (executable functions) and `glsl` (shader code)
   - Register custom targets with `ce.registerCompilationTarget(name, target)`
+
+- **Python/NumPy Compilation Target**: Added a complete Python/NumPy compilation
+  target for scientific computing workflows. The `PythonTarget` class compiles
+  mathematical expressions to NumPy-compatible Python code.
+
+  ```javascript
+  import { ComputeEngine, PythonTarget } from '@cortex-js/compute-engine';
+
+  const ce = new ComputeEngine();
+  const python = new PythonTarget({ includeImports: true });
+
+  // Register the target
+  ce.registerCompilationTarget('python', python);
+
+  // Compile expressions to Python
+  const expr = ce.parse('\\sin(x) + \\cos(y)');
+  const code = expr.compile({ to: 'python' });
+  console.log(code.toString());
+  // → import numpy as np
+  //
+  //   np.sin(x) + np.cos(y)
+
+  // Generate complete Python functions
+  const func = python.compileFunction(
+    ce.parse('\\sqrt{x^2 + y^2}'),
+    'magnitude',
+    ['x', 'y'],
+    'Calculate vector magnitude'
+  );
+  // Generates:
+  // import numpy as np
+  //
+  // def magnitude(x, y):
+  //     """Calculate vector magnitude"""
+  //     return np.sqrt(x ** 2 + y ** 2)
+  ```
+
+  **Features**:
+  - Compiles to NumPy-compatible Python code (works with arrays)
+  - 50+ function mappings (trig, exponential, linear algebra, statistics)
+  - Generate complete Python functions with docstrings
+  - Create Python lambda expressions
+  - Generate NumPy-vectorized functions
+  - Configuration options for imports and SciPy support
+  - Ideal for scientific computing, ML, data analysis, and education
+
+  **Use Cases**:
+  - **Scientific Computing**: Generate NumPy code for numerical analysis
+  - **Machine Learning**: Create feature engineering functions
+  - **Data Analysis**: Convert formulas to Pandas/NumPy operations
+  - **Education**: Show Python equivalents of mathematical notation
+  - **Code Generation**: Automated function creation from LaTeX
+
+  **Supported Functions**: Trigonometric (sin, cos, tan), exponential (exp, ln, log),
+  power (sqrt, power), rounding (abs, floor, ceil), statistics (sum, mean, std),
+  linear algebra (dot, cross, norm, det, inv), and more.
+
+  See the [Python/NumPy Target Guide](/compute-engine/guides/python-target/) for
+  complete documentation and examples.
   - Switch between targets using the `to` option in `compile()`
   - Direct target override with the `target` option for one-time use
   - Extend or replace built-in targets
