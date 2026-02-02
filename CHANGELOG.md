@@ -149,6 +149,62 @@
   - Function generation with `compileFunction()`
   - Built-in GLSL functions: `sin`, `cos`, `sqrt`, `pow`, `abs`, etc.
 
+- **Polynomial Factoring**: The `Factor` function now supports comprehensive
+  polynomial factoring including perfect square trinomials, difference of
+  squares, and quadratic factoring with rational roots. Addresses #180 and #33.
+
+  ```javascript
+  // Perfect square trinomials
+  ce.parse('x^2 + 2x + 1').factor().latex;
+  // → "(x+1)^2"
+
+  ce.parse('4x^2 + 12x + 9').factor().latex;
+  // → "(2x+3)^2"
+
+  // Difference of squares
+  ce.parse('x^2 - 4').factor().latex;
+  // → "(x-2)(x+2)"
+
+  // Quadratic with rational roots
+  ce.box(['Factor', ['Add', ['Power', 'x', 2], ['Multiply', 5, 'x'], 6], 'x'])
+    .evaluate().latex;
+  // → "(x+2)(x+3)"
+  ```
+
+  **Automatic Factoring in sqrt Simplification**: Square roots now
+  automatically factor their arguments before applying simplification rules,
+  enabling expressions like `√(x²+2x+1)` to simplify to `|x+1|`.
+
+  ```javascript
+  // Issue #180 - Now works!
+  ce.parse('\\sqrt{x^2 + 2x + 1}').simplify().latex;
+  // → "\\vert x+1\\vert"
+
+  ce.parse('\\sqrt{4x^2 + 12x + 9}').simplify().latex;
+  // → "\\vert 2x+3\\vert"
+
+  ce.parse('\\sqrt{a^2 + 2ab + b^2}').simplify().latex;
+  // → "\\vert a+b\\vert"
+  ```
+
+  **Features**:
+  - Perfect square trinomial factoring: `a² ± 2ab + b²` → `(a±b)²`
+  - Difference of squares: `a² - b²` → `(a-b)(a+b)`
+  - Quadratic factoring with rational roots
+  - Optional variable parameter for explicit control
+  - Automatic integration with sqrt simplification
+  - Exported functions for advanced users: `factorPerfectSquare`,
+    `factorDifferenceOfSquares`, `factorQuadratic`, `factorPolynomial`
+
+  **MathJSON API**:
+  ```json
+  ["Factor", expr]              // Auto-detect variable
+  ["Factor", expr, variable]    // Explicit variable specification
+  ```
+
+  The enhanced factoring system works seamlessly with existing polynomial
+  functions like `Expand`, `Together`, `Cancel`, `PolynomialGCD`, and others.
+
 ### Improvements
 
 - **Improved `ask()` Queries**: `ce.ask()` now matches patterns with wildcards

@@ -1750,7 +1750,11 @@ const f = expr.compile({
 
 ####### to?
 
-`"javascript"` \| `"wgsl"` \| `"python"` \| `"webassembly"`
+`string`
+
+####### target?
+
+`any`
 
 ####### operators?
 

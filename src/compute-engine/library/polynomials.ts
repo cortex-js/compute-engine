@@ -1,4 +1,4 @@
-import { factor, together } from '../boxed-expression/factor';
+import { factor, factorPolynomial, together } from '../boxed-expression/factor';
 import { distribute } from '../symbolic/distribute';
 import { expand, expandAll } from '../boxed-expression/expand';
 import {
@@ -28,12 +28,25 @@ export const POLYNOMIALS_LIBRARY: SymbolDefinitions[] = [
     },
 
     Factor: {
-      // @todo: extend to factor over the integers: return a ['Multiply', ['Power', a, b], ...]
       description:
-        'Factors an algebraic expression into a product of irreducible factors',
+        'Factor a polynomial expression into a product of irreducible factors. ' +
+        'Supports perfect square trinomials, difference of squares, and quadratic factoring with rational roots. ' +
+        'Example: Factor(x² + 5x + 6) → (x+2)(x+3), Factor(x² + 2x + 1) → (x+1)²',
       lazy: true,
-      signature: '(value)-> value',
-      evaluate: ([x]) => factor(x.canonical) ?? x.canonical,
+      signature: '(value, symbol?) -> value',
+      evaluate: ([x, varExpr]) => {
+        if (!x) return x;
+
+        // If variable is provided, use polynomial factoring with that variable
+        if (varExpr) {
+          const variable = varExpr.canonical.symbol;
+          if (!variable) return x.canonical;
+          return factorPolynomial(x.canonical, variable);
+        }
+
+        // Otherwise, try polynomial factoring without specific variable
+        return factorPolynomial(x.canonical);
+      },
     },
 
     Together: {
