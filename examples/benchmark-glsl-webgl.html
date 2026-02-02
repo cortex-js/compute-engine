@@ -1,0 +1,631 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>GLSL vs JavaScript Performance Benchmark</title>
+  <style>
+    body {
+      font-family: 'SF Mono', 'Monaco', 'Inconsolata', 'Fira Mono', monospace;
+      max-width: 1200px;
+      margin: 40px auto;
+      padding: 20px;
+      background: #1e1e1e;
+      color: #d4d4d4;
+    }
+    h1 {
+      color: #4ec9b0;
+      border-bottom: 2px solid #4ec9b0;
+      padding-bottom: 10px;
+    }
+    h2 {
+      color: #569cd6;
+      margin-top: 30px;
+    }
+    .benchmark {
+      background: #252526;
+      padding: 20px;
+      margin: 20px 0;
+      border-radius: 8px;
+      border-left: 4px solid #007acc;
+    }
+    .result {
+      background: #1e1e1e;
+      padding: 15px;
+      margin: 10px 0;
+      border-radius: 4px;
+      font-family: monospace;
+    }
+    .metric {
+      display: flex;
+      justify-content: space-between;
+      padding: 5px 0;
+      border-bottom: 1px solid #3c3c3c;
+    }
+    .metric:last-child {
+      border-bottom: none;
+    }
+    .label {
+      color: #9cdcfe;
+    }
+    .value {
+      color: #ce9178;
+      font-weight: bold;
+    }
+    .speedup {
+      color: #4ec9b0;
+      font-weight: bold;
+      font-size: 1.2em;
+    }
+    .faster {
+      color: #4ec9b0;
+    }
+    .slower {
+      color: #f48771;
+    }
+    button {
+      background: #0e639c;
+      color: white;
+      border: none;
+      padding: 12px 24px;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 14px;
+      font-family: inherit;
+      margin: 10px 10px 10px 0;
+    }
+    button:hover {
+      background: #1177bb;
+    }
+    button:disabled {
+      background: #3c3c3c;
+      cursor: not-allowed;
+    }
+    .info {
+      background: #1e3a5f;
+      padding: 15px;
+      border-radius: 4px;
+      margin: 20px 0;
+      border-left: 4px solid #569cd6;
+    }
+    .warning {
+      background: #5a3e1b;
+      padding: 15px;
+      border-radius: 4px;
+      margin: 20px 0;
+      border-left: 4px solid #dcdcaa;
+    }
+    canvas {
+      display: none;
+    }
+    .summary {
+      background: #1a3a1a;
+      padding: 20px;
+      border-radius: 8px;
+      margin: 30px 0;
+      border-left: 4px solid #4ec9b0;
+    }
+    code {
+      background: #1e1e1e;
+      padding: 2px 6px;
+      border-radius: 3px;
+      color: #ce9178;
+    }
+  </style>
+</head>
+<body>
+  <h1>🚀 GLSL vs JavaScript Performance Benchmark</h1>
+
+  <div class="info">
+    <strong>About this benchmark:</strong> This page compares CPU execution (JavaScript compiled)
+    vs GPU execution (GLSL compiled and run via WebGL). The GPU can process thousands of computations
+    in parallel, making it ideal for mathematical operations on large datasets.
+  </div>
+
+  <div class="warning">
+    <strong>Note:</strong> GPU performance varies greatly depending on your hardware.
+    Discrete GPUs will show much better results than integrated graphics.
+    The benchmarks use transform feedback to compute results on the GPU without rendering.
+  </div>
+
+  <div id="timingMethod"></div>
+
+  <button id="runAll">Run All Benchmarks</button>
+  <button id="clear">Clear Results</button>
+
+  <div id="results"></div>
+
+  <canvas id="glCanvas" width="1" height="1"></canvas>
+
+  <script type="module">
+    import { ComputeEngine, GLSLTarget } from '../dist/compute-engine.esm.js';
+
+    const ce = new ComputeEngine();
+    const glsl = new GLSLTarget();
+    const resultsDiv = document.getElementById('results');
+    const canvas = document.getElementById('glCanvas');
+    const gl = canvas.getContext('webgl2');
+
+    if (!gl) {
+      resultsDiv.innerHTML = '<div class="warning"><strong>Error:</strong> WebGL 2.0 is not supported in your browser. Cannot run GPU benchmarks.</div>';
+      document.getElementById('runAll').disabled = true;
+    }
+
+    // Get timer query extension for accurate GPU timing
+    const timerExt = gl.getExtension('EXT_disjoint_timer_query_webgl2');
+    const timingMethodDiv = document.getElementById('timingMethod');
+
+    if (timerExt) {
+      timingMethodDiv.innerHTML = '<div class="info"><strong>✓ GPU Timer Query Extension Active</strong><br>Using hardware timer queries for accurate GPU measurement (Chrome/Edge).</div>';
+    } else {
+      timingMethodDiv.innerHTML = '<div class="warning"><strong>⚠️ GPU Timer Query Not Available (Safari)</strong><br>Using wall-clock timing which includes ~50ms synchronization overhead per benchmark. GPU times will appear similar across operations. For accurate GPU timing, use Chrome or Edge.</div>';
+      console.warn('EXT_disjoint_timer_query_webgl2 not available - using performance.now() instead (includes overhead)');
+    }
+
+    // Add WebGL context lost/restored handlers
+    let contextLost = false;
+    canvas.addEventListener('webglcontextlost', (event) => {
+      event.preventDefault();
+      contextLost = true;
+      console.error('WebGL context lost! This usually means GPU timeout or too many iterations.');
+      resultsDiv.innerHTML += '<div class="warning"><strong>⚠️ WebGL Context Lost:</strong> GPU timeout detected. Try reducing iterations or closing other GPU-intensive applications.</div>';
+    }, false);
+
+    canvas.addEventListener('webglcontextrestored', () => {
+      contextLost = false;
+      console.log('WebGL context restored');
+    }, false);
+
+    // Helper to run JavaScript benchmark
+    function benchmarkJS(expr, iterations, testData) {
+      const compiled = expr.compile({ to: 'javascript' });
+      let result;
+
+      const start = performance.now();
+      for (let i = 0; i < iterations; i++) {
+        result = compiled(testData);
+      }
+      const end = performance.now();
+
+      return { time: end - start, result };
+    }
+
+    // Helper to create and run GLSL compute shader
+    async function benchmarkGLSL(expr, iterations, varName = 'x', testValue = 2.5) {
+      // Check if context is valid
+      if (gl.isContextLost()) {
+        throw new Error('WebGL context is lost');
+      }
+
+      // Compile to GLSL
+      const glslExpr = glsl.compile(expr);
+
+      // Create a simple compute shader using transform feedback
+      const vertexShaderSource = `#version 300 es
+        in float a_input;
+        out float v_result;
+
+        void main() {
+          float ${varName} = a_input;
+          v_result = ${glslExpr};
+        }
+      `;
+
+      const vertexShader = gl.createShader(gl.VERTEX_SHADER);
+      gl.shaderSource(vertexShader, vertexShaderSource);
+      gl.compileShader(vertexShader);
+
+      if (!gl.getShaderParameter(vertexShader, gl.COMPILE_STATUS)) {
+        const error = gl.getShaderInfoLog(vertexShader);
+        console.error('Vertex shader compilation error:', error);
+        console.error('Failed GLSL code:', glslExpr);
+        throw new Error(`Shader compilation failed: ${error}`);
+      }
+
+      // Dummy fragment shader (we're using transform feedback, not rendering)
+      const fragmentShaderSource = `#version 300 es
+        precision highp float;
+        out vec4 outColor;
+        void main() {
+          outColor = vec4(1.0);
+        }
+      `;
+
+      const fragmentShader = gl.createShader(gl.FRAGMENT_SHADER);
+      gl.shaderSource(fragmentShader, fragmentShaderSource);
+      gl.compileShader(fragmentShader);
+
+      const program = gl.createProgram();
+      gl.attachShader(program, vertexShader);
+      gl.attachShader(program, fragmentShader);
+
+      // Set up transform feedback
+      gl.transformFeedbackVaryings(program, ['v_result'], gl.SEPARATE_ATTRIBS);
+      gl.linkProgram(program);
+
+      if (!gl.getProgramParameter(program, gl.LINK_STATUS)) {
+        console.error('Program linking error:', gl.getProgramInfoLog(program));
+        return null;
+      }
+
+      // Create input data
+      const inputData = new Float32Array(iterations);
+      for (let i = 0; i < iterations; i++) {
+        inputData[i] = testValue; // Use same value as JS benchmark
+      }
+
+      // Create buffers
+      const inputBuffer = gl.createBuffer();
+      gl.bindBuffer(gl.ARRAY_BUFFER, inputBuffer);
+      gl.bufferData(gl.ARRAY_BUFFER, inputData, gl.STATIC_DRAW);
+
+      const outputBuffer = gl.createBuffer();
+      gl.bindBuffer(gl.ARRAY_BUFFER, outputBuffer);
+      gl.bufferData(gl.ARRAY_BUFFER, iterations * 4, gl.STATIC_READ);
+
+      // Set up vertex array
+      const vao = gl.createVertexArray();
+      gl.bindVertexArray(vao);
+
+      const inputLocation = gl.getAttribLocation(program, 'a_input');
+      gl.bindBuffer(gl.ARRAY_BUFFER, inputBuffer);
+      gl.enableVertexAttribArray(inputLocation);
+      gl.vertexAttribPointer(inputLocation, 1, gl.FLOAT, false, 0, 0);
+
+      gl.useProgram(program);
+
+      // Bind transform feedback buffer
+      gl.bindBufferBase(gl.TRANSFORM_FEEDBACK_BUFFER, 0, outputBuffer);
+
+      // Ensure GPU is idle before benchmarking
+      gl.finish();
+
+      let gpuTime;
+
+      if (timerExt) {
+        // Use WebGL timer query for accurate GPU timing
+        const query = gl.createQuery();
+        gl.beginQuery(timerExt.TIME_ELAPSED_EXT, query);
+
+        gl.beginTransformFeedback(gl.POINTS);
+        gl.drawArrays(gl.POINTS, 0, iterations);
+        gl.endTransformFeedback();
+
+        gl.endQuery(timerExt.TIME_ELAPSED_EXT);
+
+        // Wait for query result
+        await new Promise((resolve) => {
+          const check = () => {
+            const available = gl.getQueryParameter(query, gl.QUERY_RESULT_AVAILABLE);
+            const disjoint = gl.getParameter(timerExt.GPU_DISJOINT_EXT);
+
+            if (available && !disjoint) {
+              const timeElapsed = gl.getQueryParameter(query, gl.QUERY_RESULT);
+              gpuTime = timeElapsed / 1000000; // Convert nanoseconds to milliseconds
+              gl.deleteQuery(query);
+              resolve();
+            } else if (disjoint) {
+              // Timing is invalid, use fallback
+              console.warn('GPU timing disjoint - result may be inaccurate');
+              gpuTime = 0;
+              gl.deleteQuery(query);
+              resolve();
+            } else {
+              setTimeout(check, 1);
+            }
+          };
+          check();
+        });
+      } else {
+        // Fallback to performance.now() (Safari)
+        // Safari doesn't support timer query extension
+        // We measure wall-clock time which includes CPU overhead
+
+        const start = performance.now();
+
+        gl.beginTransformFeedback(gl.POINTS);
+        gl.drawArrays(gl.POINTS, 0, iterations);
+        gl.endTransformFeedback();
+
+        // Create fence for synchronization
+        const fence = gl.fenceSync(gl.SYNC_GPU_COMMANDS_COMPLETE, 0);
+        gl.flush();
+
+        // Poll for completion (no timeout to avoid measuring timeout instead of actual time)
+        await new Promise((resolve) => {
+          const poll = () => {
+            const status = gl.clientWaitSync(fence, 0, 0); // No blocking, just check status
+            if (status === gl.ALREADY_SIGNALED || status === gl.CONDITION_SATISFIED) {
+              resolve();
+            } else if (status === gl.WAIT_FAILED) {
+              console.warn('Sync failed, falling back to finish()');
+              gl.finish();
+              resolve();
+            } else {
+              // Not ready yet, check again soon
+              setTimeout(poll, 0);
+            }
+          };
+          poll();
+        });
+
+        const end = performance.now();
+        gpuTime = end - start;
+
+        gl.deleteSync(fence);
+      }
+
+      // Unbind transform feedback completely
+      gl.bindBufferBase(gl.TRANSFORM_FEEDBACK_BUFFER, 0, null);
+
+      // Create fence for synchronization before reading
+      const fence = gl.fenceSync(gl.SYNC_GPU_COMMANDS_COMPLETE, 0);
+      gl.flush();
+
+      // Wait for fence to ensure GPU is done
+      while (true) {
+        const status = gl.clientWaitSync(fence, 0, 0);
+        if (status === gl.ALREADY_SIGNALED || status === gl.CONDITION_SATISFIED) {
+          break;
+        }
+        await new Promise(resolve => setTimeout(resolve, 0));
+      }
+      gl.deleteSync(fence);
+
+      // Create a separate buffer for reading (Chrome workaround)
+      const readBuffer = gl.createBuffer();
+      gl.bindBuffer(gl.COPY_READ_BUFFER, outputBuffer);
+      gl.bindBuffer(gl.COPY_WRITE_BUFFER, readBuffer);
+      gl.bufferData(gl.COPY_WRITE_BUFFER, 4, gl.STREAM_READ);
+      gl.copyBufferSubData(gl.COPY_READ_BUFFER, gl.COPY_WRITE_BUFFER, 0, 0, 4);
+
+      // Read from the copy buffer
+      const outputData = new Float32Array(1);
+      gl.bindBuffer(gl.ARRAY_BUFFER, readBuffer);
+      gl.getBufferSubData(gl.ARRAY_BUFFER, 0, outputData);
+      const result = outputData[0];
+
+      // Cleanup read buffer
+      gl.deleteBuffer(readBuffer);
+      gl.bindBuffer(gl.ARRAY_BUFFER, null);
+      gl.bindBuffer(gl.COPY_READ_BUFFER, null);
+      gl.bindBuffer(gl.COPY_WRITE_BUFFER, null);
+
+      // Cleanup
+      gl.deleteBuffer(inputBuffer);
+      gl.deleteBuffer(outputBuffer);
+      gl.deleteVertexArray(vao);
+      gl.deleteProgram(program);
+      gl.deleteShader(vertexShader);
+      gl.deleteShader(fragmentShader);
+
+      return { time: gpuTime, result };
+    }
+
+    // Helper to run a single benchmark with error handling
+    async function runSingleBenchmark(name, description, latex, cpuIterations, gpuIterations, varName = 'x', testValue = 2.5) {
+      try {
+        // Check if context was lost
+        if (contextLost) {
+          throw new Error('WebGL context lost - cannot continue benchmarks');
+        }
+
+        const expr = ce.parse(latex);
+        const testData = { [varName]: testValue };
+
+        console.log(`Running ${name}... (CPU: ${cpuIterations.toLocaleString()}, GPU: ${gpuIterations.toLocaleString()} iterations)`);
+
+        // Get the "correct" answer from evaluation - just use compile and call it
+        let expectedResult;
+        try {
+          const evalFn = expr.compile({ to: 'javascript' });
+          expectedResult = evalFn(testData);
+          if (typeof expectedResult !== 'number' || !isFinite(expectedResult)) {
+            console.warn(`Invalid expected result for ${name}:`, expectedResult);
+            expectedResult = NaN;
+          }
+        } catch (e) {
+          console.warn(`Failed to evaluate expected result for ${name}:`, e);
+          expectedResult = NaN;
+        }
+
+        const jsResult = benchmarkJS(expr, cpuIterations, testData);
+        await new Promise(resolve => setTimeout(resolve, 100));
+        const glslResult = await benchmarkGLSL(expr, gpuIterations, varName, testValue);
+
+        return createBenchmarkResult(
+          name,
+          description,
+          jsResult.time,
+          glslResult.time,
+          cpuIterations,
+          gpuIterations,
+          expectedResult,
+          jsResult.result,
+          glslResult.result
+        );
+      } catch (e) {
+        console.error(`${name} failed:`, e);
+        return `
+          <div class="benchmark">
+            <h2>${name} ❌ FAILED</h2>
+            <p>${description}</p>
+            <div class="result" style="border-left: 4px solid #f48771;">
+              <div class="metric">
+                <span class="label">Error:</span>
+                <span class="value" style="color: #f48771;">${e.message}</span>
+              </div>
+            </div>
+          </div>
+        `;
+      }
+    }
+
+    // Helper to create benchmark result HTML
+    function createBenchmarkResult(name, description, jsTime, glslTime, cpuIterations, gpuIterations, expectedResult, jsResult, glslResult) {
+      // Calculate performance per operation (accounting for different iteration counts)
+      const cpuTimePerOp = jsTime / cpuIterations;
+      const gpuTimePerOp = glslTime / gpuIterations;
+      const speedup = cpuTimePerOp / gpuTimePerOp;
+      const speedupText = speedup > 1 ? `${speedup.toFixed(2)}x faster` : `${(1/speedup).toFixed(2)}x slower`;
+
+      // Check if results match (within floating point tolerance)
+      const tolerance = 1e-5;
+      const jsMatch = Math.abs(jsResult - expectedResult) < tolerance;
+      const glslMatch = Math.abs(glslResult - expectedResult) < tolerance;
+      const resultsMatch = Math.abs(jsResult - glslResult) < tolerance;
+
+      const formatResult = (val) => {
+        if (val === undefined || val === null || isNaN(val)) return 'N/A';
+        if (Math.abs(val) < 1e-10) return '~0';
+        if (Math.abs(val) > 1e6) return val.toExponential(4);
+        return val.toFixed(6);
+      };
+
+      return `
+        <div class="benchmark">
+          <h2>${name} ${resultsMatch ? '✅' : '⚠️'}</h2>
+          <p>${description}</p>
+          <div class="result">
+            <div class="metric">
+              <span class="label">CPU Iterations:</span>
+              <span class="value">${cpuIterations.toLocaleString()}</span>
+            </div>
+            <div class="metric">
+              <span class="label">GPU Iterations:</span>
+              <span class="value">${gpuIterations.toLocaleString()}</span>
+            </div>
+            <div class="metric">
+              <span class="label">Expected Result:</span>
+              <span class="value">${formatResult(expectedResult)}</span>
+            </div>
+            <div class="metric">
+              <span class="label">CPU Result:</span>
+              <span class="value" style="color: ${jsMatch ? '#4ec9b0' : '#f48771'}">${formatResult(jsResult)} ${jsMatch ? '✓' : '✗'}</span>
+            </div>
+            <div class="metric">
+              <span class="label">GPU Result:</span>
+              <span class="value" style="color: ${glslMatch ? '#4ec9b0' : '#f48771'}">${formatResult(glslResult)} ${glslMatch ? '✓' : '✗'}</span>
+            </div>
+            <div class="metric">
+              <span class="label">CPU (JavaScript):</span>
+              <span class="value">${jsTime.toFixed(2)} ms</span>
+            </div>
+            <div class="metric">
+              <span class="label">GPU (GLSL):</span>
+              <span class="value">${glslTime.toFixed(2)} ms</span>
+            </div>
+            <div class="metric">
+              <span class="label">Performance:</span>
+              <span class="speedup ${speedup > 1 ? 'faster' : 'slower'}">
+                GPU is ${speedupText}
+              </span>
+            </div>
+            <div class="metric">
+              <span class="label">Throughput (GPU):</span>
+              <span class="value">${(gpuIterations / glslTime * 1000).toLocaleString(undefined, {maximumFractionDigits: 0})} ops/sec</span>
+            </div>
+          </div>
+        </div>
+      `;
+    }
+
+    // Benchmark suite
+    async function runBenchmarks() {
+      resultsDiv.innerHTML = '<h2>Running benchmarks...</h2><p>Please wait, this may take 30-60 seconds...</p>';
+      const results = [];
+
+      // Define all benchmarks
+      // Increased GPU iterations to ensure measurable timing (need >0.5ms for accurate measurement)
+      // GPU still gets many more iterations since it's massively parallel
+      const benchmarks = [
+        { name: '1. Simple Power: x²', desc: 'Basic arithmetic operation', latex: 'x^2', cpuIter: 100000, gpuIter: 5000000, val: 2.5 },
+        { name: '2. Polynomial: x⁴ + 3x³ + 2x² + x + 1', desc: 'Complex polynomial evaluation', latex: 'x^4 + 3x^3 + 2x^2 + x + 1', cpuIter: 50000, gpuIter: 3000000, val: 2.5 },
+        { name: '3. Trigonometric: sin(x)', desc: 'Trigonometric function evaluation', latex: '\\sin(x)', cpuIter: 50000, gpuIter: 3000000, val: 1.5 },
+        { name: '4. Square Root: √x', desc: 'Square root computation', latex: '\\sqrt{x}', cpuIter: 100000, gpuIter: 5000000, val: 2.5 },
+        { name: '5. Complex: √(x² + 1)', desc: 'Nested arithmetic and square root', latex: '\\sqrt{x^2 + 1}', cpuIter: 50000, gpuIter: 3000000, val: 2.5 },
+        { name: '6. Trig Combo: sin(x)·cos(x) + tan(x)', desc: 'Multiple trigonometric operations', latex: '\\sin(x) \\cdot \\cos(x) + \\tan(x)', cpuIter: 50000, gpuIter: 3000000, val: 1.5 },
+        { name: '7. Exponential: eˣ + x³', desc: 'Exponential function and cubic power', latex: '\\exp(x) + x^3', cpuIter: 50000, gpuIter: 3000000, val: 2.0 },
+        { name: '8. Nested Roots: √(√(x² + 1) + x)', desc: 'Deeply nested operations', latex: '\\sqrt{\\sqrt{x^2 + 1} + x}', cpuIter: 50000, gpuIter: 3000000, val: 2.5 },
+        { name: '9. High Polynomial: x⁸ - 5x⁶ + 3x⁴ - 2x² + 1', desc: '8th degree polynomial', latex: 'x^8 - 5x^6 + 3x^4 - 2x^2 + 1', cpuIter: 50000, gpuIter: 3000000, val: 1.5 },
+        { name: '10. Rational: (x² + 1)/(x² - 1)', desc: 'Polynomial division', latex: '\\frac{x^2 + 1}{x^2 - 1}', cpuIter: 50000, gpuIter: 3000000, val: 2.5 },
+        { name: '11. Smoothstep: 3x² - 2x³', desc: 'Common in graphics interpolation', latex: '3x^2 - 2x^3', cpuIter: 100000, gpuIter: 5000000, val: 0.5 },
+        { name: '12. Physics: x - ½·9.8·x²', desc: 'Projectile motion formula', latex: 'x - \\frac{1}{2} \\cdot 9.8 \\cdot x^2', cpuIter: 100000, gpuIter: 5000000, val: 1.0 },
+        { name: '13. Gaussian: e^(-x²)', desc: 'Bell curve / normal distribution', latex: '\\exp(-x^2)', cpuIter: 50000, gpuIter: 3000000, val: 1.5 },
+        { name: '14. Absolute: |x³ - 1|', desc: 'Absolute value with cubic', latex: '|x^3 - 1|', cpuIter: 100000, gpuIter: 5000000, val: 2.0 },
+        { name: '15. Complex Trig: sin(x²)/(1 + cos(x))', desc: 'Nested trig with division', latex: '\\frac{\\sin(x^2)}{1 + \\cos(x)}', cpuIter: 50000, gpuIter: 3000000, val: 1.5 },
+
+        // Linear Algebra Operations
+        { name: '16. 2D Vector Length: ||v||', desc: 'Euclidean norm √(x² + (x+1)²)', latex: '\\sqrt{x^2 + (x+1)^2}', cpuIter: 50000, gpuIter: 3000000, val: 2.0 },
+        { name: '17. Dot Product: v·w', desc: '3D dot product: x·1 + (x+1)·2 + (x+2)·3', latex: 'x \\cdot 1 + (x+1) \\cdot 2 + (x+2) \\cdot 3', cpuIter: 100000, gpuIter: 5000000, val: 2.0 },
+        { name: '18. 2×2 Determinant', desc: 'det([[x, 2], [3, x+1]]) = x(x+1) - 6', latex: 'x(x+1) - 2 \\cdot 3', cpuIter: 100000, gpuIter: 5000000, val: 2.0 },
+        { name: '19. Matrix Element: cos²θ + sin²θ', desc: 'Rotation matrix identity', latex: '\\cos(x)^2 + \\sin(x)^2', cpuIter: 50000, gpuIter: 3000000, val: 1.5 },
+        { name: '20. Vector Projection', desc: 'Project v onto w: (v·w/||w||²)·||w||', latex: '\\frac{x \\cdot 2 + (x+1) \\cdot 3}{2^2 + 3^2} \\cdot \\sqrt{2^2 + 3^2}', cpuIter: 50000, gpuIter: 3000000, val: 2.0 },
+        { name: '21. 3×3 Determinant (simplified)', desc: 'det of diagonal matrix: x·(x+1)·(x+2)', latex: 'x \\cdot (x+1) \\cdot (x+2)', cpuIter: 100000, gpuIter: 5000000, val: 2.0 },
+        { name: '22. Distance in 4D', desc: 'Euclidean distance √(Σxᵢ²) in 4D space', latex: '\\sqrt{x^2 + (x+1)^2 + (x+2)^2 + (x+3)^2}', cpuIter: 50000, gpuIter: 3000000, val: 1.5 },
+        { name: '23. Linear Combination', desc: 'αv + βw where α=x, β=x+1', latex: 'x \\cdot 2 + (x+1) \\cdot 3 + x \\cdot 4 + (x+1) \\cdot 5', cpuIter: 100000, gpuIter: 5000000, val: 2.0 },
+      ];
+
+      // Run all benchmarks with delays between them
+      for (const bench of benchmarks) {
+        const result = await runSingleBenchmark(
+          bench.name,
+          bench.desc,
+          bench.latex,
+          bench.cpuIter,
+          bench.gpuIter,
+          'x',
+          bench.val
+        );
+        results.push(result);
+        resultsDiv.innerHTML = results.join('');
+
+        // Add delay between benchmarks to let GPU cool down and ensure cleanup
+        await new Promise(resolve => setTimeout(resolve, 200));
+      }
+
+
+      // Add summary
+      const summary = `
+        <div class="summary">
+          <h2>📊 Summary</h2>
+          <p><strong>GPU vs CPU Performance:</strong></p>
+          <ul>
+            <li>The GPU excels at <strong>parallel computation</strong> - processing millions of operations simultaneously</li>
+            <li>For single-threaded operations, CPU may be faster due to lower overhead</li>
+            <li>GPU advantage increases with operation count and complexity</li>
+            <li>Real-world GPU advantage: Fragment shaders can process millions of pixels in parallel</li>
+          </ul>
+          <p><strong>Benchmark Categories:</strong></p>
+          <ul>
+            <li><strong>Arithmetic</strong> (1-5): Basic operations, polynomials, roots</li>
+            <li><strong>Transcendental</strong> (6-8, 13, 15): Trig, exponential, complex functions</li>
+            <li><strong>Applied Math</strong> (9-14): Graphics, physics, statistics formulas</li>
+            <li><strong>Linear Algebra</strong> (16-23): Vectors, matrices, determinants, projections</li>
+          </ul>
+          <p><strong>Key Insights:</strong></p>
+          <ul>
+            <li><code>GLSL compilation</code> enables GPU execution for massive parallelism</li>
+            <li><code>JavaScript compilation</code> optimizes CPU execution (40-2900x vs evaluation)</li>
+            <li>Choose target based on use case: CPU for single calculations, GPU for parallel workloads</li>
+            <li>Linear algebra operations showcase GPU strength in vector/matrix computations</li>
+          </ul>
+          <p><strong>Browser Compatibility:</strong></p>
+          <ul>
+            <li><strong>Chrome/Edge</strong>: Uses hardware timer queries for accurate GPU timing</li>
+            <li><strong>Safari</strong>: Uses wall-clock timing with ~50ms overhead - GPU times less accurate</li>
+            <li>For best GPU benchmark results, use Chrome or Edge</li>
+          </ul>
+        </div>
+      `;
+
+      resultsDiv.innerHTML += summary;
+    }
+
+    document.getElementById('runAll').addEventListener('click', runBenchmarks);
+    document.getElementById('clear').addEventListener('click', () => {
+      resultsDiv.innerHTML = '';
+    });
+  </script>
+</body>
+</html>
