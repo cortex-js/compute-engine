@@ -189,12 +189,16 @@ export type {
 
 export { JavaScriptTarget } from './compilation/javascript-target';
 export { GLSLTarget } from './compilation/glsl-target';
+export { IntervalJavaScriptTarget } from './compilation/interval-javascript-target';
+export { IntervalGLSLTarget } from './compilation/interval-glsl-target';
 export { BaseCompiler } from './compilation/base-compiler';
 
 // Import for internal use
 import type { LanguageTarget } from './compilation/types';
 import { JavaScriptTarget as _JavaScriptTarget } from './compilation/javascript-target';
 import { GLSLTarget as _GLSLTarget } from './compilation/glsl-target';
+import { IntervalJavaScriptTarget as _IntervalJavaScriptTarget } from './compilation/interval-javascript-target';
+import { IntervalGLSLTarget as _IntervalGLSLTarget } from './compilation/interval-glsl-target';
 
 /**
  *
@@ -635,6 +639,11 @@ export class ComputeEngine implements IComputeEngine {
     // Register default compilation targets
     this._compilationTargets.set('javascript', new _JavaScriptTarget());
     this._compilationTargets.set('glsl', new _GLSLTarget());
+    this._compilationTargets.set(
+      'interval-js',
+      new _IntervalJavaScriptTarget()
+    );
+    this._compilationTargets.set('interval-glsl', new _IntervalGLSLTarget());
 
     hidePrivateProperties(this);
   }

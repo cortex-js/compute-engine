@@ -1,3 +1,12 @@
+## [Unreleased]
+
+### Compilation
+
+- **Interval Arithmetic Targets**: Added two new compilation targets for
+  reliable singularity detection:
+  - `interval-js` - Compiles to JavaScript using interval arithmetic
+  - `interval-glsl` - Compiles to GLSL for GPU-based interval evaluation
+
 ## 0.34.0 _2026-02-01_
 
 ### Parsing
@@ -41,10 +50,10 @@
 
 ### Compilation
 
-- **Custom Operator Compilation**: The `compile()` method now supports overriding
-  operators to use function calls instead of native operators. This enables
-  compilation of vector/matrix operations and custom domain-specific languages.
-  Addresses #240.
+- **Custom Operator Compilation**: The `compile()` method now supports
+  overriding operators to use function calls instead of native operators. This
+  enables compilation of vector/matrix operations and custom domain-specific
+  languages. Addresses #240.
 
   ```javascript
   // Override operators for vector operations
@@ -95,13 +104,14 @@
   ```
 
   Exported building blocks include `CompileTarget`, `LanguageTarget`,
-  `CompilationOptions`, `CompiledExecutable`, `BaseCompiler`, `JavaScriptTarget`,
-  and `GLSLTarget` (plus helper types like `CompiledOperators` and
-  `CompiledFunctions`).
+  `CompilationOptions`, `CompiledExecutable`, `BaseCompiler`,
+  `JavaScriptTarget`, and `GLSLTarget` (plus helper types like
+  `CompiledOperators` and `CompiledFunctions`).
 
-- **Compilation Plugin Architecture**: The Compute Engine now supports registering
-  custom compilation targets, allowing you to compile mathematical expressions to
-  any target language beyond the built-in JavaScript and GLSL targets.
+- **Compilation Plugin Architecture**: The Compute Engine now supports
+  registering custom compilation targets, allowing you to compile mathematical
+  expressions to any target language beyond the built-in JavaScript and GLSL
+  targets.
 
   ```javascript
   import { ComputeEngine, BaseCompiler } from '@cortex-js/compute-engine';
@@ -176,8 +186,8 @@
   See the [Python/NumPy Target Guide](/compute-engine/guides/python-target/) for
   complete documentation and examples.
 
-- **GLSL Compilation Target**: New built-in GLSL (OpenGL Shading Language) target
-  for compiling mathematical expressions to WebGL shaders.
+- **GLSL Compilation Target**: New built-in GLSL (OpenGL Shading Language)
+  target for compiling mathematical expressions to WebGL shaders.
 
   ```javascript
   const expr = ce.parse('x^2 + y^2');
@@ -243,9 +253,9 @@
   // → "(x+2)(x+3)"
   ```
 
-  **Automatic Factoring in sqrt Simplification**: Square roots now
-  automatically factor their arguments before applying simplification rules,
-  enabling expressions like `√(x²+2x+1)` to simplify to `|x+1|`.
+  **Automatic Factoring in sqrt Simplification**: Square roots now automatically
+  factor their arguments before applying simplification rules, enabling
+  expressions like `√(x²+2x+1)` to simplify to `|x+1|`.
 
   ```javascript
   // Issue #180 - Now works!
@@ -265,6 +275,7 @@
   `factorPolynomial`).
 
   **MathJSON API**:
+
   ```json
   ["Factor", expr]              // Auto-detect variable
   ["Factor", expr, variable]    // Explicit variable specification
@@ -287,8 +298,8 @@
   ce.parse('|x^{3/2}|').simplify().latex;  // → "|x|^{3/2}" (odd numerator)
   ```
 
-- **Assumption-Based Simplification**: Simplification rules use assumptions about
-  symbol signs:
+- **Assumption-Based Simplification**: Simplification rules use assumptions
+  about symbol signs:
 
   ```javascript
   ce.assume(ce.parse('x > 0'));
@@ -4172,8 +4183,8 @@ Work around unpckg.com issue with libraries using BigInt.
 - Changed from "decimal" to "bignum". "Decimal" is a confusing name, since it is
   used to represent both integers and floating point numbers. Its key
   characteristic is that it is an arbitrary precision number, aka "bignum". This
-  affects `ce.numericMode` which now uses `bignum` instead of
-  `decimal`, `expr.decimalValue`->`expr.bignumValue`, `decimalValue()`->`bignumValue()`
+  affects `ce.numericMode` which now uses `bignum` instead of `decimal`,
+  `expr.decimalValue`->`expr.bignumValue`, `decimalValue()`->`bignumValue()`
 
 ### Bugs Fixed
 
@@ -4202,8 +4213,8 @@ Work around unpckg.com issue with libraries using BigInt.
 - Added `Min`, `Max`, `Clamp`
 - Parsing of `\sum`, `\prod`, `\int`.
 - Added parsing of log functions, `\lb`, `\ln`, `\ln_{10}`, `\ln_2`, etc...
-- Added
-  `expr.subexpressions`, `expr.getSubexpressions()`, `expr.errors`, `expr.symbols`, `expr.isValid`.
+- Added `expr.subexpressions`, `expr.getSubexpressions()`, `expr.errors`,
+  `expr.symbols`, `expr.isValid`.
 - Symbols can now be used to represent functions, i.e. `ce.box('Sin').domain`
   correctly returns `["Domain", "Function"]`.
 - Correctly handle rational numbers with a numerator or denominator outside the

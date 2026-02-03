@@ -4,6 +4,8 @@ export * from './base-compiler';
 export * from './javascript-target';
 export * from './glsl-target';
 export * from './python-target';
+export * from './interval-javascript-target';
+export * from './interval-glsl-target';
 
 // Legacy exports for backward compatibility
 export { BaseCompiler as compile } from './base-compiler';
