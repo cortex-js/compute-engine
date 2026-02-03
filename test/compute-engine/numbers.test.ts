@@ -382,3 +382,59 @@ describe('PROPERTIES OF NUMBERS', () => {
     `);
   });
 });
+
+// Issue #283: parseNumbers: 'rational' loses precision for large integers
+describe('PARSING LARGE INTEGERS WITH parseNumbers: rational', () => {
+  test('Integers at MAX_SAFE_INTEGER boundary', () => {
+    // MAX_SAFE_INTEGER = 9007199254740991
+    expect(ce.parse('9007199254740991', { parseNumbers: 'rational' }).toString())
+      .toBe('9007199254740991');
+
+    // Just above MAX_SAFE_INTEGER - these previously lost precision
+    expect(ce.parse('9007199254740992', { parseNumbers: 'rational' }).toString())
+      .toBe('9007199254740992');
+    expect(ce.parse('9007199254740993', { parseNumbers: 'rational' }).toString())
+      .toBe('9007199254740993');
+    expect(ce.parse('9007199254740999', { parseNumbers: 'rational' }).toString())
+      .toBe('9007199254740999');
+  });
+
+  test('Very large integers preserve precision', () => {
+    const veryLarge = '12345678901234567890';
+    expect(ce.parse(veryLarge, { parseNumbers: 'rational' }).toString())
+      .toBe(veryLarge);
+
+    const huge = '123456789012345678901234567890';
+    expect(ce.parse(huge, { parseNumbers: 'rational' }).toString())
+      .toBe(huge);
+  });
+
+  test('Negative large integers preserve precision', () => {
+    expect(ce.parse('-9007199254740993', { parseNumbers: 'rational' }).toString())
+      .toBe('-9007199254740993');
+    expect(ce.parse('-12345678901234567890', { parseNumbers: 'rational' }).toString())
+      .toBe('-12345678901234567890');
+  });
+
+  test('Large integers use string num format in JSON', () => {
+    const result = ce.parse('9007199254740993', { parseNumbers: 'rational' });
+    expect(result.json).toEqual({ num: '9007199254740993' });
+  });
+
+  test('Small integers still use number format', () => {
+    const result = ce.parse('123', { parseNumbers: 'rational' });
+    expect(result.json).toBe(123);
+  });
+
+  test('Large decimal numerators preserve precision', () => {
+    // 9007199254740993.5 should become 18014398509481987/2
+    const result = ce.parse('9007199254740993.5', { parseNumbers: 'rational' });
+    expect(result.json).toEqual(['Rational', { num: '18014398509481987' }, 2]);
+  });
+
+  test('Arithmetic on large integers is exact', () => {
+    const a = ce.parse('9007199254740993', { parseNumbers: 'rational' });
+    const b = ce.parse('1', { parseNumbers: 'rational' });
+    expect(a.add(b).toString()).toBe('9007199254740994');
+  });
+});

@@ -1422,18 +1422,60 @@ export class _Parser implements Parser {
     // If we prefer to parse numbers as rationals, and there is no repeating part
     // we can return a rational number
     if (!hasRepeatingPart && this.options.parseNumbers === 'rational') {
-      const whole = parseInt(wholePart, 10);
+      // Check if the whole part exceeds MAX_SAFE_INTEGER
+      // Use BigInt arithmetic to preserve precision for large integers
+      const isLargeInteger =
+        wholePart.length > 16 ||
+        (wholePart.length === 16 && wholePart > '9007199254740991');
 
       if (!fractionalPart) {
+        if (isLargeInteger) {
+          // Use { num: string } format to preserve precision
+          const numStr = sign < 0 ? '-' + wholePart : wholePart;
+          if (exponent)
+            return ['Multiply', { num: numStr }, ['Power', 10, exponent]];
+          return { num: numStr };
+        }
+        const whole = parseInt(wholePart, 10);
         if (exponent)
           return ['Multiply', sign * whole, ['Power', 10, exponent]];
         return numberExpression(sign * whole);
       }
 
-      const fraction = parseInt(fractionalPart, 10);
-
-      // Determine the number of decimal places in fractional part
+      // Has fractional part - need to compute rational
       const n = fractionalPart.length;
+
+      // Check if the numerator calculation might overflow
+      // Numerator = whole * 10^n + fraction, which has roughly wholePart.length + n digits
+      const numeratorDigits = wholePart.length + n;
+      if (numeratorDigits > 15) {
+        // Use BigInt arithmetic to preserve precision
+        const wholeBig = BigInt(wholePart);
+        const fractionBig = BigInt(fractionalPart);
+        const denominatorBig = BigInt(10) ** BigInt(n);
+        const numeratorBig = wholeBig * denominatorBig + fractionBig;
+        const signedNumerator = sign < 0 ? -numeratorBig : numeratorBig;
+
+        if (exponent) {
+          return [
+            'Multiply',
+            [
+              'Rational',
+              { num: signedNumerator.toString() },
+              Number(denominatorBig),
+            ],
+            ['Power', 10, exponent],
+          ];
+        }
+        return [
+          'Rational',
+          { num: signedNumerator.toString() },
+          Number(denominatorBig),
+        ];
+      }
+
+      const whole = parseInt(wholePart, 10);
+      const fraction = parseInt(fractionalPart, 10);
 
       // Calculate numerator and denominator
       const numerator = whole * 10 ** n + fraction;

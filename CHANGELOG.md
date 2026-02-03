@@ -1,5 +1,12 @@
 ## [Unreleased]
 
+### Parsing
+
+- **Large Integer Precision**: Fixed precision loss when parsing integers
+  exceeding `Number.MAX_SAFE_INTEGER` with `parseNumbers: 'rational'`. Large
+  integers and rational numerators now use BigInt arithmetic to preserve exact
+  values. Fixes #283.
+
 ### Compilation
 
 - **Interval Arithmetic Targets**: Added two new compilation targets for
