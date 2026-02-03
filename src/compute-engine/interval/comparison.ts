@@ -5,7 +5,7 @@
  */
 
 import type { Interval, IntervalResult, BoolInterval } from './types';
-import { unionResults } from './util';
+import { unionResults, unwrapOrPropagate } from './util';
 
 /**
  * Less than comparison for intervals.
@@ -15,36 +15,60 @@ import { unionResults } from './util';
  * - 'false' if a is entirely greater than or equal to b (a.lo >= b.hi)
  * - 'maybe' if intervals overlap
  */
-export function less(a: Interval, b: Interval): BoolInterval {
-  if (a.hi < b.lo) return 'true';
-  if (a.lo >= b.hi) return 'false';
+export function less(
+  a: Interval | IntervalResult,
+  b: Interval | IntervalResult
+): BoolInterval {
+  const unwrapped = unwrapOrPropagate(a, b);
+  if (!Array.isArray(unwrapped)) return 'maybe';
+  const [aVal, bVal] = unwrapped;
+  if (aVal.hi < bVal.lo) return 'true';
+  if (aVal.lo >= bVal.hi) return 'false';
   return 'maybe';
 }
 
 /**
  * Less than or equal comparison for intervals.
  */
-export function lessEqual(a: Interval, b: Interval): BoolInterval {
-  if (a.hi <= b.lo) return 'true';
-  if (a.lo > b.hi) return 'false';
+export function lessEqual(
+  a: Interval | IntervalResult,
+  b: Interval | IntervalResult
+): BoolInterval {
+  const unwrapped = unwrapOrPropagate(a, b);
+  if (!Array.isArray(unwrapped)) return 'maybe';
+  const [aVal, bVal] = unwrapped;
+  if (aVal.hi <= bVal.lo) return 'true';
+  if (aVal.lo > bVal.hi) return 'false';
   return 'maybe';
 }
 
 /**
  * Greater than comparison for intervals.
  */
-export function greater(a: Interval, b: Interval): BoolInterval {
-  if (a.lo > b.hi) return 'true';
-  if (a.hi <= b.lo) return 'false';
+export function greater(
+  a: Interval | IntervalResult,
+  b: Interval | IntervalResult
+): BoolInterval {
+  const unwrapped = unwrapOrPropagate(a, b);
+  if (!Array.isArray(unwrapped)) return 'maybe';
+  const [aVal, bVal] = unwrapped;
+  if (aVal.lo > bVal.hi) return 'true';
+  if (aVal.hi <= bVal.lo) return 'false';
   return 'maybe';
 }
 
 /**
  * Greater than or equal comparison for intervals.
  */
-export function greaterEqual(a: Interval, b: Interval): BoolInterval {
-  if (a.lo >= b.hi) return 'true';
-  if (a.hi < b.lo) return 'false';
+export function greaterEqual(
+  a: Interval | IntervalResult,
+  b: Interval | IntervalResult
+): BoolInterval {
+  const unwrapped = unwrapOrPropagate(a, b);
+  if (!Array.isArray(unwrapped)) return 'maybe';
+  const [aVal, bVal] = unwrapped;
+  if (aVal.lo >= bVal.hi) return 'true';
+  if (aVal.hi < bVal.lo) return 'false';
   return 'maybe';
 }
 
@@ -56,18 +80,28 @@ export function greaterEqual(a: Interval, b: Interval): BoolInterval {
  * - 'false' if intervals don't overlap
  * - 'maybe' if intervals overlap
  */
-export function equal(a: Interval, b: Interval): BoolInterval {
+export function equal(
+  a: Interval | IntervalResult,
+  b: Interval | IntervalResult
+): BoolInterval {
+  const unwrapped = unwrapOrPropagate(a, b);
+  if (!Array.isArray(unwrapped)) return 'maybe';
+  const [aVal, bVal] = unwrapped;
   // Equal only if both are point intervals with same value
-  if (a.lo === a.hi && b.lo === b.hi && a.lo === b.lo) return 'true';
+  if (aVal.lo === aVal.hi && bVal.lo === bVal.hi && aVal.lo === bVal.lo)
+    return 'true';
   // Definitely not equal if intervals don't overlap
-  if (a.hi < b.lo || b.hi < a.lo) return 'false';
+  if (aVal.hi < bVal.lo || bVal.hi < aVal.lo) return 'false';
   return 'maybe';
 }
 
 /**
  * Not equal comparison for intervals.
  */
-export function notEqual(a: Interval, b: Interval): BoolInterval {
+export function notEqual(
+  a: Interval | IntervalResult,
+  b: Interval | IntervalResult
+): BoolInterval {
   const eq = equal(a, b);
   if (eq === 'true') return 'false';
   if (eq === 'false') return 'true';
@@ -113,23 +147,49 @@ export function not(a: BoolInterval): BoolInterval {
  * @param falseBranch - Function for when condition is false
  */
 export function piecewise(
-  x: Interval,
-  condition: (x: Interval) => BoolInterval,
-  trueBranch: (x: Interval) => IntervalResult,
-  falseBranch: (x: Interval) => IntervalResult
+  xOrCond: Interval | IntervalResult | BoolInterval,
+  conditionOrTrue:
+    | ((x: Interval) => BoolInterval)
+    | (() => IntervalResult),
+  trueOrFalse:
+    | ((x: Interval) => IntervalResult)
+    | (() => IntervalResult),
+  falseBranch?: (x: Interval) => IntervalResult
 ): IntervalResult {
-  const cond = condition(x);
+  if (xOrCond === 'true' || xOrCond === 'false' || xOrCond === 'maybe') {
+    const cond = xOrCond;
+    const trueBranch = conditionOrTrue as () => IntervalResult;
+    const falseBranchFn = trueOrFalse as () => IntervalResult;
+    switch (cond) {
+      case 'true':
+        return trueBranch();
+      case 'false':
+        return falseBranchFn();
+      case 'maybe':
+        return unionResults(trueBranch(), falseBranchFn());
+    }
+  }
+
+  const x = xOrCond as Interval | IntervalResult;
+  const condition = conditionOrTrue as (x: Interval) => BoolInterval;
+  const trueBranch = trueOrFalse as (x: Interval) => IntervalResult;
+  const falseBranchFn = falseBranch as (x: Interval) => IntervalResult;
+
+  const unwrapped = unwrapOrPropagate(x);
+  if (!Array.isArray(unwrapped)) return unwrapped;
+  const [xVal] = unwrapped;
+  const cond = condition(xVal);
 
   switch (cond) {
     case 'true':
-      return trueBranch(x);
+      return trueBranch(xVal);
     case 'false':
-      return falseBranch(x);
+      return falseBranchFn(xVal);
     case 'maybe':
       // Condition is indeterminate - must evaluate both branches
       // and return their union
-      const t = trueBranch(x);
-      const f = falseBranch(x);
+      const t = trueBranch(xVal);
+      const f = falseBranchFn(xVal);
       return unionResults(t, f);
   }
 }
@@ -139,10 +199,17 @@ export function piecewise(
  *
  * clamp(x, lo, hi) returns x clamped to [lo, hi].
  */
-export function clamp(x: Interval, lo: Interval, hi: Interval): IntervalResult {
+export function clamp(
+  x: Interval | IntervalResult,
+  lo: Interval | IntervalResult,
+  hi: Interval | IntervalResult
+): IntervalResult {
+  const unwrapped = unwrapOrPropagate(x, lo, hi);
+  if (!Array.isArray(unwrapped)) return unwrapped;
+  const [xVal, loVal, hiVal] = unwrapped;
   // Use the most restrictive bounds
-  const resultLo = Math.max(x.lo, lo.lo);
-  const resultHi = Math.min(x.hi, hi.hi);
+  const resultLo = Math.max(xVal.lo, loVal.lo);
+  const resultHi = Math.min(xVal.hi, hiVal.hi);
 
   if (resultLo > resultHi) {
     return { kind: 'empty' };

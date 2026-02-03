@@ -102,47 +102,59 @@ function intPow(base: Interval, n: number): Interval {
  * - Negative integer: x^(-n) = 1/x^n, singular if base contains 0
  * - Fractional: requires non-negative base for real result
  */
-export function pow(base: Interval, exp: number): IntervalResult {
+export function pow(
+  base: Interval | IntervalResult,
+  exp: number
+): IntervalResult {
+  const unwrapped = unwrapOrPropagate(base);
+  if (!Array.isArray(unwrapped)) return unwrapped;
+  const [baseVal] = unwrapped;
   if (Number.isInteger(exp)) {
     if (exp >= 0) {
-      return ok(intPow(base, exp));
+      return ok(intPow(baseVal, exp));
     } else {
       // Negative integer: x^(-n) = 1/x^n - singularity if base contains 0
-      if (containsZero(base)) {
+      if (containsZero(baseVal)) {
         return { kind: 'singular' };
       }
-      const denom = intPow(base, -exp);
+      const denom = intPow(baseVal, -exp);
       // 1 / [a, b] = [1/b, 1/a] when a, b have same sign
       return ok({ lo: 1 / denom.hi, hi: 1 / denom.lo });
     }
   } else {
     // Fractional exponent - requires non-negative base for real result
-    if (isNegative(base)) {
+    if (isNegative(baseVal)) {
       // Entirely negative - no real values
       return { kind: 'empty' };
     }
-    if (base.lo < 0) {
+    if (baseVal.lo < 0) {
       // Straddles zero - valid for [0, base.hi]
       const value =
         exp > 0
-          ? { lo: 0, hi: Math.pow(base.hi, exp) }
-          : { lo: Math.pow(base.hi, exp), hi: Infinity }; // x^(-0.5) etc
+          ? { lo: 0, hi: Math.pow(baseVal.hi, exp) }
+          : { lo: Math.pow(baseVal.hi, exp), hi: Infinity }; // x^(-0.5) etc
       return { kind: 'partial', value, domainClipped: 'lo' };
     }
     // Entirely non-negative - straightforward
     // Handle exp > 0 vs exp < 0 for monotonicity
     if (exp > 0) {
-      return ok({ lo: Math.pow(base.lo, exp), hi: Math.pow(base.hi, exp) });
+      return ok({
+        lo: Math.pow(baseVal.lo, exp),
+        hi: Math.pow(baseVal.hi, exp),
+      });
     } else {
       // Decreasing function
-      if (base.lo === 0) {
+      if (baseVal.lo === 0) {
         return {
           kind: 'partial',
-          value: { lo: Math.pow(base.hi, exp), hi: Infinity },
+          value: { lo: Math.pow(baseVal.hi, exp), hi: Infinity },
           domainClipped: 'hi',
         };
       }
-      return ok({ lo: Math.pow(base.hi, exp), hi: Math.pow(base.lo, exp) });
+      return ok({
+        lo: Math.pow(baseVal.hi, exp),
+        hi: Math.pow(baseVal.lo, exp),
+      });
     }
   }
 }
@@ -153,20 +165,29 @@ export function pow(base: Interval, exp: number): IntervalResult {
  * For simplicity, we evaluate at the four corners and take the hull.
  * This requires base to be positive for real results.
  */
-export function powInterval(base: Interval, exp: Interval): IntervalResult {
+export function powInterval(
+  base: Interval | IntervalResult,
+  exp: Interval | IntervalResult
+): IntervalResult {
+  const unwrapped = unwrapOrPropagate(base, exp);
+  if (!Array.isArray(unwrapped)) return unwrapped;
+  const [baseVal, expVal] = unwrapped;
   // For real-valued results, base must be positive
-  if (base.hi <= 0) {
+  if (baseVal.hi <= 0) {
     return { kind: 'empty' };
   }
-  if (base.lo <= 0) {
+  if (baseVal.lo <= 0) {
     // Straddles or touches zero - complex behavior
     // For safety, restrict to positive part
-    const posBase = { lo: Math.max(base.lo, Number.EPSILON), hi: base.hi };
+    const posBase = {
+      lo: Math.max(baseVal.lo, Number.EPSILON),
+      hi: baseVal.hi,
+    };
     const corners = [
-      Math.pow(posBase.lo, exp.lo),
-      Math.pow(posBase.lo, exp.hi),
-      Math.pow(posBase.hi, exp.lo),
-      Math.pow(posBase.hi, exp.hi),
+      Math.pow(posBase.lo, expVal.lo),
+      Math.pow(posBase.lo, expVal.hi),
+      Math.pow(posBase.hi, expVal.lo),
+      Math.pow(posBase.hi, expVal.hi),
     ];
     return {
       kind: 'partial',
@@ -177,10 +198,10 @@ export function powInterval(base: Interval, exp: Interval): IntervalResult {
 
   // Both base values are positive
   const corners = [
-    Math.pow(base.lo, exp.lo),
-    Math.pow(base.lo, exp.hi),
-    Math.pow(base.hi, exp.lo),
-    Math.pow(base.hi, exp.hi),
+    Math.pow(baseVal.lo, expVal.lo),
+    Math.pow(baseVal.lo, expVal.hi),
+    Math.pow(baseVal.hi, expVal.lo),
+    Math.pow(baseVal.hi, expVal.hi),
   ];
   return ok({ lo: Math.min(...corners), hi: Math.max(...corners) });
 }
@@ -205,22 +226,25 @@ export function exp(x: Interval | IntervalResult): IntervalResult {
  * - Entirely positive: straightforward monotonic
  * - Contains/touches zero: partial with -Infinity lower bound
  */
-export function ln(x: Interval): IntervalResult {
+export function ln(x: Interval | IntervalResult): IntervalResult {
+  const unwrapped = unwrapOrPropagate(x);
+  if (!Array.isArray(unwrapped)) return unwrapped;
+  const [xVal] = unwrapped;
   // Case 1: Entirely non-positive - no valid values
-  if (x.hi <= 0) {
+  if (xVal.hi <= 0) {
     return { kind: 'empty' };
   }
 
   // Case 2: Entirely positive - straightforward
-  if (x.lo > 0) {
-    return ok({ lo: Math.log(x.lo), hi: Math.log(x.hi) });
+  if (xVal.lo > 0) {
+    return ok({ lo: Math.log(xVal.lo), hi: Math.log(xVal.hi) });
   }
 
   // Case 3: Includes zero or negative values
   // ln(x) -> -Infinity as x -> 0+
   return {
     kind: 'partial',
-    value: { lo: -Infinity, hi: Math.log(x.hi) },
+    value: { lo: -Infinity, hi: Math.log(xVal.hi) },
     domainClipped: 'lo',
   };
 }
@@ -228,18 +252,21 @@ export function ln(x: Interval): IntervalResult {
 /**
  * Base-10 logarithm.
  */
-export function log10(x: Interval): IntervalResult {
-  if (x.hi <= 0) {
+export function log10(x: Interval | IntervalResult): IntervalResult {
+  const unwrapped = unwrapOrPropagate(x);
+  if (!Array.isArray(unwrapped)) return unwrapped;
+  const [xVal] = unwrapped;
+  if (xVal.hi <= 0) {
     return { kind: 'empty' };
   }
 
-  if (x.lo > 0) {
-    return ok({ lo: Math.log10(x.lo), hi: Math.log10(x.hi) });
+  if (xVal.lo > 0) {
+    return ok({ lo: Math.log10(xVal.lo), hi: Math.log10(xVal.hi) });
   }
 
   return {
     kind: 'partial',
-    value: { lo: -Infinity, hi: Math.log10(x.hi) },
+    value: { lo: -Infinity, hi: Math.log10(xVal.hi) },
     domainClipped: 'lo',
   };
 }
@@ -247,18 +274,21 @@ export function log10(x: Interval): IntervalResult {
 /**
  * Base-2 logarithm.
  */
-export function log2(x: Interval): IntervalResult {
-  if (x.hi <= 0) {
+export function log2(x: Interval | IntervalResult): IntervalResult {
+  const unwrapped = unwrapOrPropagate(x);
+  if (!Array.isArray(unwrapped)) return unwrapped;
+  const [xVal] = unwrapped;
+  if (xVal.hi <= 0) {
     return { kind: 'empty' };
   }
 
-  if (x.lo > 0) {
-    return ok({ lo: Math.log2(x.lo), hi: Math.log2(x.hi) });
+  if (xVal.lo > 0) {
+    return ok({ lo: Math.log2(xVal.lo), hi: Math.log2(xVal.hi) });
   }
 
   return {
     kind: 'partial',
-    value: { lo: -Infinity, hi: Math.log2(x.hi) },
+    value: { lo: -Infinity, hi: Math.log2(xVal.hi) },
     domainClipped: 'lo',
   };
 }
@@ -266,15 +296,18 @@ export function log2(x: Interval): IntervalResult {
 /**
  * Absolute value of an interval.
  */
-export function abs(x: Interval): IntervalResult {
-  if (x.lo >= 0) {
-    return ok(x);
+export function abs(x: Interval | IntervalResult): IntervalResult {
+  const unwrapped = unwrapOrPropagate(x);
+  if (!Array.isArray(unwrapped)) return unwrapped;
+  const [xVal] = unwrapped;
+  if (xVal.lo >= 0) {
+    return ok(xVal);
   }
-  if (x.hi <= 0) {
-    return ok({ lo: -x.hi, hi: -x.lo });
+  if (xVal.hi <= 0) {
+    return ok({ lo: -xVal.hi, hi: -xVal.lo });
   }
   // Interval straddles zero - minimum is 0
-  return ok({ lo: 0, hi: Math.max(-x.lo, x.hi) });
+  return ok({ lo: 0, hi: Math.max(-xVal.lo, xVal.hi) });
 }
 
 /**
@@ -282,8 +315,11 @@ export function abs(x: Interval): IntervalResult {
  *
  * Note: Produces step-function discontinuities when floor(x.lo) != floor(x.hi).
  */
-export function floor(x: Interval): IntervalResult {
-  return ok({ lo: Math.floor(x.lo), hi: Math.floor(x.hi) });
+export function floor(x: Interval | IntervalResult): IntervalResult {
+  const unwrapped = unwrapOrPropagate(x);
+  if (!Array.isArray(unwrapped)) return unwrapped;
+  const [xVal] = unwrapped;
+  return ok({ lo: Math.floor(xVal.lo), hi: Math.floor(xVal.hi) });
 }
 
 /**
@@ -291,29 +327,53 @@ export function floor(x: Interval): IntervalResult {
  *
  * Note: Produces step-function discontinuities when ceil(x.lo) != ceil(x.hi).
  */
-export function ceil(x: Interval): IntervalResult {
-  return ok({ lo: Math.ceil(x.lo), hi: Math.ceil(x.hi) });
+export function ceil(x: Interval | IntervalResult): IntervalResult {
+  const unwrapped = unwrapOrPropagate(x);
+  if (!Array.isArray(unwrapped)) return unwrapped;
+  const [xVal] = unwrapped;
+  return ok({ lo: Math.ceil(xVal.lo), hi: Math.ceil(xVal.hi) });
 }
 
 /**
  * Round to nearest integer.
  */
-export function round(x: Interval): IntervalResult {
-  return ok({ lo: Math.round(x.lo), hi: Math.round(x.hi) });
+export function round(x: Interval | IntervalResult): IntervalResult {
+  const unwrapped = unwrapOrPropagate(x);
+  if (!Array.isArray(unwrapped)) return unwrapped;
+  const [xVal] = unwrapped;
+  return ok({ lo: Math.round(xVal.lo), hi: Math.round(xVal.hi) });
 }
 
 /**
  * Minimum of two intervals.
  */
-export function min(a: Interval, b: Interval): IntervalResult {
-  return ok({ lo: Math.min(a.lo, b.lo), hi: Math.min(a.hi, b.hi) });
+export function min(
+  a: Interval | IntervalResult,
+  b: Interval | IntervalResult
+): IntervalResult {
+  const unwrapped = unwrapOrPropagate(a, b);
+  if (!Array.isArray(unwrapped)) return unwrapped;
+  const [aVal, bVal] = unwrapped;
+  return ok({
+    lo: Math.min(aVal.lo, bVal.lo),
+    hi: Math.min(aVal.hi, bVal.hi),
+  });
 }
 
 /**
  * Maximum of two intervals.
  */
-export function max(a: Interval, b: Interval): IntervalResult {
-  return ok({ lo: Math.max(a.lo, b.lo), hi: Math.max(a.hi, b.hi) });
+export function max(
+  a: Interval | IntervalResult,
+  b: Interval | IntervalResult
+): IntervalResult {
+  const unwrapped = unwrapOrPropagate(a, b);
+  if (!Array.isArray(unwrapped)) return unwrapped;
+  const [aVal, bVal] = unwrapped;
+  return ok({
+    lo: Math.max(aVal.lo, bVal.lo),
+    hi: Math.max(aVal.hi, bVal.hi),
+  });
 }
 
 /**
@@ -322,14 +382,20 @@ export function max(a: Interval, b: Interval): IntervalResult {
  * Has discontinuities and is complex with interval divisor.
  * Conservative approach: if interval spans a period, return [0, |b|).
  */
-export function mod(a: Interval, b: Interval): IntervalResult {
+export function mod(
+  a: Interval | IntervalResult,
+  b: Interval | IntervalResult
+): IntervalResult {
+  const unwrapped = unwrapOrPropagate(a, b);
+  if (!Array.isArray(unwrapped)) return unwrapped;
+  const [aVal, bVal] = unwrapped;
   // Division by zero in mod
-  if (containsZero(b)) {
+  if (containsZero(bVal)) {
     return { kind: 'singular' };
   }
 
-  const bAbs = Math.max(Math.abs(b.lo), Math.abs(b.hi));
-  const aWidth = a.hi - a.lo;
+  const bAbs = Math.max(Math.abs(bVal.lo), Math.abs(bVal.hi));
+  const aWidth = aVal.hi - aVal.lo;
 
   if (aWidth >= bAbs) {
     // Interval is wide enough to span all possible mod values
@@ -338,8 +404,8 @@ export function mod(a: Interval, b: Interval): IntervalResult {
 
   // For narrow intervals, compute endpoint values
   // This may over-estimate due to wrap-around
-  const modLo = ((a.lo % bAbs) + bAbs) % bAbs;
-  const modHi = ((a.hi % bAbs) + bAbs) % bAbs;
+  const modLo = ((aVal.lo % bAbs) + bAbs) % bAbs;
+  const modHi = ((aVal.hi % bAbs) + bAbs) % bAbs;
 
   if (modLo <= modHi) {
     return ok({ lo: modLo, hi: modHi });
@@ -354,13 +420,16 @@ export function mod(a: Interval, b: Interval): IntervalResult {
  *
  * Returns -1, 0, or 1 depending on the sign.
  */
-export function sign(x: Interval): IntervalResult {
-  if (x.lo > 0) return ok({ lo: 1, hi: 1 });
-  if (x.hi < 0) return ok({ lo: -1, hi: -1 });
-  if (x.lo === 0 && x.hi === 0) return ok({ lo: 0, hi: 0 });
+export function sign(x: Interval | IntervalResult): IntervalResult {
+  const unwrapped = unwrapOrPropagate(x);
+  if (!Array.isArray(unwrapped)) return unwrapped;
+  const [xVal] = unwrapped;
+  if (xVal.lo > 0) return ok({ lo: 1, hi: 1 });
+  if (xVal.hi < 0) return ok({ lo: -1, hi: -1 });
+  if (xVal.lo === 0 && xVal.hi === 0) return ok({ lo: 0, hi: 0 });
   // Interval crosses zero
-  if (x.lo < 0 && x.hi > 0) return ok({ lo: -1, hi: 1 });
-  if (x.lo === 0) return ok({ lo: 0, hi: 1 });
+  if (xVal.lo < 0 && xVal.hi > 0) return ok({ lo: -1, hi: 1 });
+  if (xVal.lo === 0) return ok({ lo: 0, hi: 1 });
   // x.hi === 0
   return ok({ lo: -1, hi: 0 });
 }

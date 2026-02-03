@@ -1,3 +1,13 @@
+## [Unreleased]
+
+### Bug Fixes
+
+- **Interval Arithmetic (JS/GLSL)**: Fixed interval evaluation of compound
+  arguments (e.g. `sin(2x)`, `sin(x+x)`, `sin(x^2)`, `cos(2x)`) by propagating
+  interval results through trig, elementary, and comparison functions in
+  `interval-js`, and by adding `IntervalResult` overloads to the GLSL interval
+  library for `interval-glsl`.
+
 ## 0.35.0 _2026-02-02_
 
 ### Parsing

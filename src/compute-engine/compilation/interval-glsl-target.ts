@@ -79,6 +79,10 @@ IntervalResult ia_partial(vec2 v, float clip) {
   return IntervalResult(v, clip);
 }
 
+bool ia_is_error(float status) {
+  return status == IA_EMPTY || status == IA_ENTIRE || status == IA_SINGULAR;
+}
+
 // Addition
 IntervalResult ia_add(vec2 a, vec2 b) {
   return ia_ok(vec2(a.x + b.x - IA_EPS, a.y + b.y + IA_EPS));
@@ -393,6 +397,198 @@ IntervalResult ia_cosh(vec2 x) {
 // Hyperbolic tangent
 IntervalResult ia_tanh(vec2 x) {
   return ia_ok(vec2(tanh(x.x) - IA_EPS, tanh(x.y) + IA_EPS));
+}
+
+// IntervalResult overloads for propagation
+IntervalResult ia_add(IntervalResult a, IntervalResult b) {
+  if (ia_is_error(a.status)) return a;
+  if (ia_is_error(b.status)) return b;
+  return ia_add(a.value, b.value);
+}
+
+IntervalResult ia_add(IntervalResult a, vec2 b) {
+  if (ia_is_error(a.status)) return a;
+  return ia_add(a.value, b);
+}
+
+IntervalResult ia_add(vec2 a, IntervalResult b) {
+  if (ia_is_error(b.status)) return b;
+  return ia_add(a, b.value);
+}
+
+IntervalResult ia_sub(IntervalResult a, IntervalResult b) {
+  if (ia_is_error(a.status)) return a;
+  if (ia_is_error(b.status)) return b;
+  return ia_sub(a.value, b.value);
+}
+
+IntervalResult ia_sub(IntervalResult a, vec2 b) {
+  if (ia_is_error(a.status)) return a;
+  return ia_sub(a.value, b);
+}
+
+IntervalResult ia_sub(vec2 a, IntervalResult b) {
+  if (ia_is_error(b.status)) return b;
+  return ia_sub(a, b.value);
+}
+
+IntervalResult ia_mul(IntervalResult a, IntervalResult b) {
+  if (ia_is_error(a.status)) return a;
+  if (ia_is_error(b.status)) return b;
+  return ia_mul(a.value, b.value);
+}
+
+IntervalResult ia_mul(IntervalResult a, vec2 b) {
+  if (ia_is_error(a.status)) return a;
+  return ia_mul(a.value, b);
+}
+
+IntervalResult ia_mul(vec2 a, IntervalResult b) {
+  if (ia_is_error(b.status)) return b;
+  return ia_mul(a, b.value);
+}
+
+IntervalResult ia_div(IntervalResult a, IntervalResult b) {
+  if (ia_is_error(a.status)) return a;
+  if (ia_is_error(b.status)) return b;
+  return ia_div(a.value, b.value);
+}
+
+IntervalResult ia_div(IntervalResult a, vec2 b) {
+  if (ia_is_error(a.status)) return a;
+  return ia_div(a.value, b);
+}
+
+IntervalResult ia_div(vec2 a, IntervalResult b) {
+  if (ia_is_error(b.status)) return b;
+  return ia_div(a, b.value);
+}
+
+IntervalResult ia_negate(IntervalResult x) {
+  if (ia_is_error(x.status)) return x;
+  return ia_negate(x.value);
+}
+
+IntervalResult ia_sqrt(IntervalResult x) {
+  if (ia_is_error(x.status)) return x;
+  return ia_sqrt(x.value);
+}
+
+IntervalResult ia_square(IntervalResult x) {
+  if (ia_is_error(x.status)) return x;
+  return ia_square(x.value);
+}
+
+IntervalResult ia_exp(IntervalResult x) {
+  if (ia_is_error(x.status)) return x;
+  return ia_exp(x.value);
+}
+
+IntervalResult ia_ln(IntervalResult x) {
+  if (ia_is_error(x.status)) return x;
+  return ia_ln(x.value);
+}
+
+IntervalResult ia_abs(IntervalResult x) {
+  if (ia_is_error(x.status)) return x;
+  return ia_abs(x.value);
+}
+
+IntervalResult ia_sign(IntervalResult x) {
+  if (ia_is_error(x.status)) return x;
+  return ia_sign(x.value);
+}
+
+IntervalResult ia_floor(IntervalResult x) {
+  if (ia_is_error(x.status)) return x;
+  return ia_floor(x.value);
+}
+
+IntervalResult ia_ceil(IntervalResult x) {
+  if (ia_is_error(x.status)) return x;
+  return ia_ceil(x.value);
+}
+
+IntervalResult ia_min(IntervalResult a, IntervalResult b) {
+  if (ia_is_error(a.status)) return a;
+  if (ia_is_error(b.status)) return b;
+  return ia_min(a.value, b.value);
+}
+
+IntervalResult ia_min(IntervalResult a, vec2 b) {
+  if (ia_is_error(a.status)) return a;
+  return ia_min(a.value, b);
+}
+
+IntervalResult ia_min(vec2 a, IntervalResult b) {
+  if (ia_is_error(b.status)) return b;
+  return ia_min(a, b.value);
+}
+
+IntervalResult ia_max(IntervalResult a, IntervalResult b) {
+  if (ia_is_error(a.status)) return a;
+  if (ia_is_error(b.status)) return b;
+  return ia_max(a.value, b.value);
+}
+
+IntervalResult ia_max(IntervalResult a, vec2 b) {
+  if (ia_is_error(a.status)) return a;
+  return ia_max(a.value, b);
+}
+
+IntervalResult ia_max(vec2 a, IntervalResult b) {
+  if (ia_is_error(b.status)) return b;
+  return ia_max(a, b.value);
+}
+
+IntervalResult ia_pow(IntervalResult base, float exp) {
+  if (ia_is_error(base.status)) return base;
+  return ia_pow(base.value, exp);
+}
+
+IntervalResult ia_sin(IntervalResult x) {
+  if (ia_is_error(x.status)) return x;
+  return ia_sin(x.value);
+}
+
+IntervalResult ia_cos(IntervalResult x) {
+  if (ia_is_error(x.status)) return x;
+  return ia_cos(x.value);
+}
+
+IntervalResult ia_tan(IntervalResult x) {
+  if (ia_is_error(x.status)) return x;
+  return ia_tan(x.value);
+}
+
+IntervalResult ia_asin(IntervalResult x) {
+  if (ia_is_error(x.status)) return x;
+  return ia_asin(x.value);
+}
+
+IntervalResult ia_acos(IntervalResult x) {
+  if (ia_is_error(x.status)) return x;
+  return ia_acos(x.value);
+}
+
+IntervalResult ia_atan(IntervalResult x) {
+  if (ia_is_error(x.status)) return x;
+  return ia_atan(x.value);
+}
+
+IntervalResult ia_sinh(IntervalResult x) {
+  if (ia_is_error(x.status)) return x;
+  return ia_sinh(x.value);
+}
+
+IntervalResult ia_cosh(IntervalResult x) {
+  if (ia_is_error(x.status)) return x;
+  return ia_cosh(x.value);
+}
+
+IntervalResult ia_tanh(IntervalResult x) {
+  if (ia_is_error(x.status)) return x;
+  return ia_tanh(x.value);
 }
 `;
 

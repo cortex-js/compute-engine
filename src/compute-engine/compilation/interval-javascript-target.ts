@@ -191,11 +191,24 @@ const INTERVAL_JAVASCRIPT_FUNCTIONS: CompiledFunctions = {
     // For interval arithmetic, we need to handle indeterminate conditions
     return `_IA.piecewise(
       ${compile(args[0])},
-      (_x) => ${compile(args[0])},
-      (_x) => ${compile(args[1])},
-      (_x) => ${compile(args[2])}
+      () => ${compile(args[1])},
+      () => ${compile(args[2])}
     )`;
   },
+  // Comparisons
+  Equal: (args, compile) => `_IA.equal(${compile(args[0])}, ${compile(args[1])})`,
+  NotEqual: (args, compile) =>
+    `_IA.notEqual(${compile(args[0])}, ${compile(args[1])})`,
+  LessEqual: (args, compile) =>
+    `_IA.lessEqual(${compile(args[0])}, ${compile(args[1])})`,
+  GreaterEqual: (args, compile) =>
+    `_IA.greaterEqual(${compile(args[0])}, ${compile(args[1])})`,
+  Less: (args, compile) => `_IA.less(${compile(args[0])}, ${compile(args[1])})`,
+  Greater: (args, compile) =>
+    `_IA.greater(${compile(args[0])}, ${compile(args[1])})`,
+  And: (args, compile) => `_IA.and(${compile(args[0])}, ${compile(args[1])})`,
+  Or: (args, compile) => `_IA.or(${compile(args[0])}, ${compile(args[1])})`,
+  Not: (args, compile) => `_IA.not(${compile(args[0])})`,
 };
 
 /**

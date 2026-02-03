@@ -116,6 +116,12 @@ describe('INTERVAL JS COMPILATION - FUNCTIONS', () => {
     const fn = expr.compile({ to: 'interval-js' });
     expect(fn.toString()).toContain('_IA.abs');
   });
+
+  test('compiles if to piecewise', () => {
+    const expr = ce.box(['If', ['Greater', 'x', 0], 'x', ['Negate', 'x']]);
+    const fn = expr.compile({ to: 'interval-js' });
+    expect(fn.toString()).toContain('_IA.piecewise');
+  });
 });
 
 describe('INTERVAL JS EXECUTION', () => {
@@ -177,6 +183,130 @@ describe('INTERVAL JS EXECUTION', () => {
     expect(result.kind).toBe('interval');
     expect(result.value.lo).toBe(-1);
     expect(result.value.hi).toBe(1);
+  });
+
+  test('sin with compound arguments', () => {
+    const expr = ce.parse('\\sin(2x)');
+    const fn = expr.compile({ to: 'interval-js' });
+    const result = fn({ x: { lo: 0, hi: 0.1 } });
+
+    expect(result.kind).toBe('interval');
+    expect(result.value.lo).toBeCloseTo(0, 6);
+    expect(result.value.hi).toBeCloseTo(Math.sin(0.2), 6);
+  });
+
+  test('sin with additive argument', () => {
+    const expr = ce.parse('\\sin(x+x)');
+    const fn = expr.compile({ to: 'interval-js' });
+    const result = fn({ x: { lo: 0, hi: 0.1 } });
+
+    expect(result.kind).toBe('interval');
+    expect(result.value.lo).toBeCloseTo(0, 6);
+    expect(result.value.hi).toBeCloseTo(Math.sin(0.2), 6);
+  });
+
+  test('sin with power argument', () => {
+    const expr = ce.parse('\\sin(x^2)');
+    const fn = expr.compile({ to: 'interval-js' });
+    const result = fn({ x: { lo: 0, hi: 0.1 } });
+
+    expect(result.kind).toBe('interval');
+    expect(result.value.lo).toBeCloseTo(0, 6);
+    expect(result.value.hi).toBeCloseTo(Math.sin(0.01), 6);
+  });
+
+  test('cos with compound arguments', () => {
+    const expr = ce.parse('\\cos(2x)');
+    const fn = expr.compile({ to: 'interval-js' });
+    const result = fn({ x: { lo: 0, hi: 0.1 } });
+
+    expect(result.kind).toBe('interval');
+    expect(result.value.lo).toBeCloseTo(Math.cos(0.2), 6);
+    expect(result.value.hi).toBeCloseTo(1, 6);
+  });
+
+  test('ln with compound argument', () => {
+    const expr = ce.parse('\\ln(2x)');
+    const fn = expr.compile({ to: 'interval-js' });
+    const result = fn({ x: { lo: 1, hi: 2 } });
+
+    expect(result.kind).toBe('interval');
+    expect(result.value.lo).toBeCloseTo(Math.log(2), 6);
+    expect(result.value.hi).toBeCloseTo(Math.log(4), 6);
+  });
+
+  test('abs with additive argument', () => {
+    const expr = ce.parse('|x+x|');
+    const fn = expr.compile({ to: 'interval-js' });
+    const result = fn({ x: { lo: -0.1, hi: 0.2 } });
+
+    expect(result.kind).toBe('interval');
+    expect(result.value.lo).toBeCloseTo(0, 6);
+    expect(result.value.hi).toBeCloseTo(0.4, 6);
+  });
+
+  test('max with compound argument', () => {
+    const expr = ce.parse('\\max(x, x+1)');
+    const fn = expr.compile({ to: 'interval-js' });
+    const result = fn({ x: { lo: 0, hi: 0.2 } });
+
+    expect(result.kind).toBe('interval');
+    expect(result.value.lo).toBeCloseTo(1, 6);
+    expect(result.value.hi).toBeCloseTo(1.2, 6);
+  });
+
+  test('comparison with compound argument', () => {
+    const expr = ce.box(['Less', 'x', ['Add', 'x', 2]]);
+    const fn = expr.compile({ to: 'interval-js' });
+    const result = fn({ x: { lo: 1, hi: 2 } });
+
+    expect(result).toBe('true');
+  });
+
+  test('comparison with compound argument is indeterminate', () => {
+    const expr = ce.box(['Less', 'x', ['Add', 'x', 1]]);
+    const fn = expr.compile({ to: 'interval-js' });
+    const result = fn({ x: { lo: 0, hi: 2 } });
+
+    expect(result).toBe('maybe');
+  });
+
+  test('comparison with compound argument is false', () => {
+    const expr = ce.box(['Greater', 'x', ['Add', 'x', 3]]);
+    const fn = expr.compile({ to: 'interval-js' });
+    const result = fn({ x: { lo: 0, hi: 2 } });
+
+    expect(result).toBe('false');
+  });
+
+  test('piecewise with compound argument', () => {
+    const expr = ce.box([
+      'If',
+      ['Greater', ['Add', 'x', 'x'], 0],
+      ['Add', 'x', 1],
+      ['Negate', ['Add', 'x', 1]],
+    ]);
+    const fn = expr.compile({ to: 'interval-js' });
+    const result = fn({ x: { lo: 1, hi: 2 } });
+
+    expect(result.kind).toBe('interval');
+    expect(result.value.lo).toBeCloseTo(2, 6);
+    expect(result.value.hi).toBeCloseTo(3, 6);
+  });
+
+  test('piecewise union on indeterminate condition', () => {
+    const expr = ce.box([
+      'If',
+      ['Greater', ['Add', 'x', 'x'], 0],
+      ['Add', 'x', 1],
+      ['Negate', ['Add', 'x', 1]],
+    ]);
+    const fn = expr.compile({ to: 'interval-js' });
+    const result = fn({ x: { lo: -1, hi: 1 } });
+
+    expect(result.kind).toBe('interval');
+    expect(result.value.lo).toBeCloseTo(-2, 6);
+    expect(result.value.hi).toBeCloseTo(2, 6);
   });
 
   test('multiplication widens interval', () => {

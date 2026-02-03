@@ -145,6 +145,14 @@ export class BaseCompiler {
 
     if (h === 'If') {
       if (args.length !== 3) throw new Error('If: wrong number of arguments');
+      const fn = target.functions?.(h);
+      if (fn) {
+        if (typeof fn === 'function') {
+          return fn(args, (expr) => BaseCompiler.compile(expr, target), target);
+        }
+        if (args === null) return `${fn}()`;
+        return `${fn}(${args.map((x) => BaseCompiler.compile(x, target)).join(', ')})`;
+      }
       return `((${BaseCompiler.compile(args[0], target)}) ? (${BaseCompiler.compile(
         args[1],
         target
