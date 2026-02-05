@@ -31,11 +31,14 @@ export function canonicalDivide(
 
   if (op1.isNaN || op2.isNaN) return ce.NaN;
 
-  // A purely numeric expression (no symbols) that is not already a literal.
-  // Such expressions may simplify to 0 (e.g. 1-1) and we want to avoid
-  // collapsing divisions like 0/(1-1) or (1-1)/(1-1) during canonicalization.
+  // A fully-determined expression (no free variables) that is not already a
+  // literal. Such expressions may evaluate to 0 or ∞ (e.g. 1-1, tan(π/2))
+  // and we want to avoid collapsing divisions like 0/(1-1) or
+  // tan(π/2)/tan(π/2) during canonicalization. We use `unknowns` instead of
+  // `symbols` because `symbols` includes mathematical constants like Pi and E,
+  // which would let expressions like tan(π/2) slip through the guard.
   const op2IsConstantExpression =
-    op2.symbols.length === 0 && !op2.isNumberLiteral;
+    op2.unknowns.length === 0 && !op2.isNumberLiteral;
 
   // 0/0 = NaN, a/0 = ~∞ (a≠0)
   // Note: We only check .is(0) here, not .N().is(0), because .N() can be
@@ -48,8 +51,12 @@ export function canonicalDivide(
   if (op1.is(0) && op2.isFinite !== false) {
     // Be conservative with constant (no-unknown) denominators that aren't
     // already a literal number. Avoid 0/(1-1) -> 0 during canonicalization.
+    // Use structural mode so the expression is bound and can evaluate later.
     if (op2IsConstantExpression)
-      return ce._fn('Divide', [op1, op2], { canonical: false });
+      return ce.function('Divide', [op1, op2], {
+        canonical: false,
+        structural: true,
+      });
     return ce.Zero;
   }
 
@@ -64,9 +71,13 @@ export function canonicalDivide(
     // (x+1)/(x+1) = 1 (if x+1 ≠ 0)
     if (op1.isSame(op2)) {
       // Same conservative guard as above: don't collapse constant expressions
-      // like (1-1)/(1-1) into 1 during canonicalization.
+      // like (1-1)/(1-1) or tan(π/2)/tan(π/2) into 1 during canonicalization.
+      // Use structural mode so the expression is bound and can evaluate later.
       if (op2IsConstantExpression)
-        return ce._fn('Divide', [op1, op2], { canonical: false });
+        return ce.function('Divide', [op1, op2], {
+          canonical: false,
+          structural: true,
+        });
       return ce.One;
     }
   }

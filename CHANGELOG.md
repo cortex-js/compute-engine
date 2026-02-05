@@ -30,6 +30,16 @@
   `ce.declare('a', 'number | list')` and using it in `ce.box(['Multiply', 'a', 'b'])`
   would produce an `incompatible-type` error.
 
+- **Division Canonicalization Over-Simplification** ([#227](https://github.com/cortex-js/compute-engine/issues/227)):
+  Fixed `A/A` being incorrectly simplified to `1` during canonicalization for
+  constant expressions that evaluate to infinity or zero, such as
+  `tan(π/2)/tan(π/2)`. This now correctly evaluates to `NaN` (since `∞/∞` is
+  indeterminate) instead of `1`. Expressions with free variables (e.g., `x/x`,
+  `sin(x)/sin(x)`) continue to simplify to `1` per standard algebraic
+  convention. Also fixed deferred constant divisions like `0/(1-1)` and
+  `(1-1)/(1-1)` to properly evaluate to `NaN` instead of remaining as
+  unevaluated expressions.
+
 ## 0.35.1 _2026-02-03_
 
 ### Bug Fixes

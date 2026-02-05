@@ -28,19 +28,18 @@ describe('BUG FIXES', () => {
   });
 
   describe('Bug #178: division by expressions that simplify to 0', () => {
-    test('0/(1-1) does not simplify to 0', () => {
+    test('0/(1-1) simplifies to NaN, not 0', () => {
       const ce = new ComputeEngine();
       const simp = ce.parse('\\frac{0}{1-1}', { canonical: false }).simplify();
-      expect(simp.operator).toBe('Divide');
-      expect(simp.op1?.is(0)).toBe(true);
+      expect(simp.isNaN).toBe(true);
     });
 
-    test('(1-1)/(1-1) does not simplify to 1', () => {
+    test('(1-1)/(1-1) simplifies to NaN, not 1', () => {
       const ce = new ComputeEngine();
       const simp = ce
         .parse('\\frac{1-1}{1-1}', { canonical: false })
         .simplify();
-      expect(simp.operator).toBe('Divide');
+      expect(simp.isNaN).toBe(true);
     });
 
   });
