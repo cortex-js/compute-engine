@@ -501,6 +501,34 @@ describe('SERIALIZATION OF NUMBERS', () => {
     expect(reformat('-6.02e23')).toMatchInlineSnapshot(`-6.02\\times10^{23}`);
   });
 
+  test('Scientific notation edge cases', () => {
+    const reformat = (s: string) =>
+      ce.parse(s).toLatex({
+        notation: 'scientific',
+        avoidExponentsInRange: null,
+        exponentProduct: '\\times',
+      });
+
+    // Very small numbers (negative exponents)
+    expect(reformat('1.23e-100')).toMatchInlineSnapshot(`1.23\\times10^{-100}`);
+    expect(reformat('123e-102')).toMatchInlineSnapshot(`1.23\\times10^{-100}`);
+    expect(reformat('-1.23e-100')).toMatchInlineSnapshot(
+      `-1.23\\times10^{-100}`
+    );
+
+    // Very large exponents
+    expect(reformat('1.23e400')).toMatchInlineSnapshot(`1.23\\times10^{400}`);
+    expect(reformat('1.23e-400')).toMatchInlineSnapshot(`1.23\\times10^{-400}`);
+
+    // Single digit mantissa
+    expect(reformat('5e10')).toMatchInlineSnapshot(`5\\times10^{10}`);
+    expect(reformat('5e-10')).toMatchInlineSnapshot(`5\\times10^{-10}`);
+
+    // Edge case: mantissa with trailing zeros
+    expect(reformat('1.20e5')).toMatchInlineSnapshot(`1.2\\times10^{5}`);
+    expect(reformat('120e3')).toMatchInlineSnapshot(`1.2\\times10^{5}`);
+  });
+
   test('Engineering notation with large numbers', () => {
     const reformat = (s: string) =>
       ce.parse(s).toLatex({
