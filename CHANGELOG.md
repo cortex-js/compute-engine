@@ -1,3 +1,14 @@
+## [Unreleased]
+
+### Bug Fixes
+
+- **([#284](https://github.com/cortex-js/compute-engine/issues/284))Scientific
+  Notation Serialization**: Fixed `toLatex()` with `scientific` and
+  `adaptiveScientific` notation options to produce properly normalized output.
+  Previously, numbers like `6.02e23` would serialize as `602\cdot10^{21}`
+  instead of the expected `6.02\cdot10^{23}`. The output now depends only on the
+  numeric value and formatting options, not on the internal representation.
+
 ## 0.35.1 _2026-02-03_
 
 ### Bug Fixes

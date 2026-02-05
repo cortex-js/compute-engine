@@ -282,6 +282,27 @@ function serializeScientificNotationNumber(
   let exponent = parseInt(m[2]);
   let mantissa = m[1];
 
+  // Normalize mantissa to have exactly one digit before decimal point
+  // e.g., '602e+21' -> '6.02e+23'
+  {
+    const signMatch = mantissa.match(/^(-?)/);
+    const sign = signMatch ? signMatch[1] : '';
+    const unsigned = sign ? mantissa.substring(1) : mantissa;
+    const parts = unsigned.match(/^(\d+)(?:\.(\d*))?$/);
+    if (parts) {
+      let whole = parts[1];
+      let fraction = parts[2] ?? '';
+      if (whole.length > 1) {
+        // Need to normalize: '602' -> '6.02', exponent += 2
+        fraction = whole.slice(1) + fraction;
+        exponent += whole.length - 1;
+        whole = whole[0];
+      }
+      mantissa = sign + whole;
+      if (fraction) mantissa += '.' + fraction;
+    }
+  }
+
   if (Math.abs(exponent) % expMultiple !== 0) {
     // Need to adjust the exponent and values, e.g. for engineering notation
     const adjust =

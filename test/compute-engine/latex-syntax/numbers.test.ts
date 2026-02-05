@@ -435,6 +435,64 @@ describe('SERIALIZATION OF NUMBERS', () => {
     );
   });
 
+  // Issue #284: Scientific notation should normalize mantissa regardless of
+  // internal representation (bigint vs float)
+  test('Scientific notation normalization of large numbers', () => {
+    const reformat = (s: string) =>
+      ce.parse(s).toLatex({
+        notation: 'scientific',
+        avoidExponentsInRange: null,
+        exponentProduct: '\\times',
+      });
+
+    // These numbers are stored as bigints internally, but should still
+    // produce normalized scientific notation output
+    expect(reformat('6.02e23')).toMatchInlineSnapshot(`6.02\\times10^{23}`);
+    expect(reformat('602e21')).toMatchInlineSnapshot(`6.02\\times10^{23}`);
+    expect(reformat('6020e20')).toMatchInlineSnapshot(`6.02\\times10^{23}`);
+
+    // Negative large numbers
+    expect(reformat('-6.02e23')).toMatchInlineSnapshot(`-6.02\\times10^{23}`);
+
+    // Numbers with more significant digits
+    expect(reformat('6.022e23')).toMatchInlineSnapshot(`6.022\\times10^{23}`);
+    expect(reformat('6.02214076e23')).toMatchInlineSnapshot(
+      `6.022\\,140\\,76\\times10^{23}`
+    );
+
+    // Very large exponents
+    expect(reformat('1.23e100')).toMatchInlineSnapshot(`1.23\\times10^{100}`);
+    expect(reformat('123e98')).toMatchInlineSnapshot(`1.23\\times10^{100}`);
+  });
+
+  test('Adaptive scientific notation normalization of large numbers', () => {
+    const reformat = (s: string) =>
+      ce.parse(s).toLatex({
+        notation: 'adaptiveScientific',
+        exponentProduct: '\\times',
+      });
+
+    // These should produce normalized scientific notation (outside avoid range)
+    expect(reformat('6.02e23')).toMatchInlineSnapshot(`6.02\\times10^{23}`);
+    expect(reformat('602e21')).toMatchInlineSnapshot(`6.02\\times10^{23}`);
+    expect(reformat('-6.02e23')).toMatchInlineSnapshot(`-6.02\\times10^{23}`);
+  });
+
+  test('Engineering notation with large numbers', () => {
+    const reformat = (s: string) =>
+      ce.parse(s).toLatex({
+        notation: 'engineering',
+        avoidExponentsInRange: null,
+        exponentProduct: '\\times',
+      });
+
+    // Engineering notation uses exponents that are multiples of 3
+    // 6.02e23 -> exponent 23 rounds to 21, so 602e21
+    expect(reformat('6.02e23')).toMatchInlineSnapshot(`602\\times10^{21}`);
+    expect(reformat('6.02e24')).toMatchInlineSnapshot(`6.02\\times10^{24}`);
+    expect(reformat('6.02e25')).toMatchInlineSnapshot(`60.2\\times10^{24}`);
+  });
+
   test('Number with repeating pattern', () => {
     const format = (num: string, p: string) =>
       ce.box({ num }).toLatex({
