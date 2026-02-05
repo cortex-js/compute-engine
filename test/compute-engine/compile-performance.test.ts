@@ -13,6 +13,15 @@ import { GLSLTarget } from '../../src/compute-engine/compilation/glsl-target';
  */
 
 describe('COMPILATION PERFORMANCE', () => {
+  const verbose =
+    process.env.COMPILE_PERF_VERBOSE === '1' ||
+    process.env.BENCH_VERBOSE === '1' ||
+    process.env.VERBOSE === '1';
+  const log = (...args: unknown[]) => {
+    if (verbose) {
+      console.log(...args);
+    }
+  };
   // Helper to measure execution time
   function benchmark(fn: () => any, iterations: number): number {
     const start = performance.now();
@@ -42,7 +51,9 @@ describe('COMPILATION PERFORMANCE', () => {
         expr.compile();
       }, 1000);
 
-      console.log(`  Simple arithmetic compilation: ${(compilationTime / 1000).toFixed(3)}ms per compilation`);
+      log(
+        `  Simple arithmetic compilation: ${(compilationTime / 1000).toFixed(3)}ms per compilation`
+      );
       expect(compilationTime).toBeLessThan(1000); // Should be very fast
     });
 
@@ -62,9 +73,9 @@ describe('COMPILATION PERFORMANCE', () => {
         compiled(testData);
       }, 10000);
 
-      console.log(`  Evaluation time: ${evalTime.toFixed(2)}ms (10k iterations)`);
-      console.log(`  Compiled time: ${compiledTime.toFixed(2)}ms (10k iterations)`);
-      console.log(`  Speedup: ${(evalTime / compiledTime).toFixed(2)}x`);
+      log(`  Evaluation time: ${evalTime.toFixed(2)}ms (10k iterations)`);
+      log(`  Compiled time: ${compiledTime.toFixed(2)}ms (10k iterations)`);
+      log(`  Speedup: ${(evalTime / compiledTime).toFixed(2)}x`);
 
       // Compiled should be faster
       expect(compiledTime).toBeLessThan(evalTime);
@@ -79,7 +90,9 @@ describe('COMPILATION PERFORMANCE', () => {
         expr.compile();
       }, 100);
 
-      console.log(`  Polynomial compilation: ${(compilationTime / 100).toFixed(3)}ms per compilation`);
+      log(
+        `  Polynomial compilation: ${(compilationTime / 100).toFixed(3)}ms per compilation`
+      );
 
       const compiled = expr.compile();
       const evalTime = benchmark(() => {
@@ -90,9 +103,9 @@ describe('COMPILATION PERFORMANCE', () => {
         compiled({ x: 2.5 });
       }, 10000);
 
-      console.log(`  Polynomial evaluation: ${evalTime.toFixed(2)}ms`);
-      console.log(`  Polynomial compiled: ${compiledTime.toFixed(2)}ms`);
-      console.log(`  Speedup: ${(evalTime / compiledTime).toFixed(2)}x`);
+      log(`  Polynomial evaluation: ${evalTime.toFixed(2)}ms`);
+      log(`  Polynomial compiled: ${compiledTime.toFixed(2)}ms`);
+      log(`  Speedup: ${(evalTime / compiledTime).toFixed(2)}x`);
 
       expect(compiledTime).toBeLessThan(evalTime);
     });
@@ -104,7 +117,9 @@ describe('COMPILATION PERFORMANCE', () => {
         expr.compile();
       }, 100);
 
-      console.log(`  Trigonometric compilation: ${(compilationTime / 100).toFixed(3)}ms per compilation`);
+      log(
+        `  Trigonometric compilation: ${(compilationTime / 100).toFixed(3)}ms per compilation`
+      );
 
       const compiled = expr.compile();
       const testData = { x: 1, y: 2, z: 3 };
@@ -117,9 +132,9 @@ describe('COMPILATION PERFORMANCE', () => {
         compiled(testData);
       }, 10000);
 
-      console.log(`  Trig evaluation: ${evalTime.toFixed(2)}ms`);
-      console.log(`  Trig compiled: ${compiledTime.toFixed(2)}ms`);
-      console.log(`  Speedup: ${(evalTime / compiledTime).toFixed(2)}x`);
+      log(`  Trig evaluation: ${evalTime.toFixed(2)}ms`);
+      log(`  Trig compiled: ${compiledTime.toFixed(2)}ms`);
+      log(`  Speedup: ${(evalTime / compiledTime).toFixed(2)}x`);
 
       expect(compiledTime).toBeLessThan(evalTime);
     });
@@ -131,7 +146,9 @@ describe('COMPILATION PERFORMANCE', () => {
         expr.compile();
       }, 100);
 
-      console.log(`  Nested expr compilation: ${(compilationTime / 100).toFixed(3)}ms per compilation`);
+      log(
+        `  Nested expr compilation: ${(compilationTime / 100).toFixed(3)}ms per compilation`
+      );
 
       const compiled = expr.compile();
       const testData = { x: 5, y: 6, z: 7, a: 1, b: 2, c: 3 };
@@ -144,9 +161,9 @@ describe('COMPILATION PERFORMANCE', () => {
         compiled(testData);
       }, 10000);
 
-      console.log(`  Nested evaluation: ${evalTime.toFixed(2)}ms`);
-      console.log(`  Nested compiled: ${compiledTime.toFixed(2)}ms`);
-      console.log(`  Speedup: ${(evalTime / compiledTime).toFixed(2)}x`);
+      log(`  Nested evaluation: ${evalTime.toFixed(2)}ms`);
+      log(`  Nested compiled: ${compiledTime.toFixed(2)}ms`);
+      log(`  Speedup: ${(evalTime / compiledTime).toFixed(2)}x`);
 
       expect(compiledTime).toBeLessThan(evalTime);
     });
@@ -162,7 +179,9 @@ describe('COMPILATION PERFORMANCE', () => {
         expr.compile();
       }, 10);
 
-      console.log(`  Large expr (50 terms) compilation: ${(compilationTime / 10).toFixed(3)}ms per compilation`);
+      log(
+        `  Large expr (50 terms) compilation: ${(compilationTime / 10).toFixed(3)}ms per compilation`
+      );
 
       const compiled = expr.compile();
 
@@ -174,9 +193,9 @@ describe('COMPILATION PERFORMANCE', () => {
         compiled({ x: 1.1 });
       }, 1000);
 
-      console.log(`  Large expr evaluation: ${evalTime.toFixed(2)}ms`);
-      console.log(`  Large expr compiled: ${compiledTime.toFixed(2)}ms`);
-      console.log(`  Speedup: ${(evalTime / compiledTime).toFixed(2)}x`);
+      log(`  Large expr evaluation: ${evalTime.toFixed(2)}ms`);
+      log(`  Large expr compiled: ${compiledTime.toFixed(2)}ms`);
+      log(`  Speedup: ${(evalTime / compiledTime).toFixed(2)}x`);
 
       expect(compiledTime).toBeLessThan(evalTime);
     });
@@ -190,7 +209,9 @@ describe('COMPILATION PERFORMANCE', () => {
         expr.compile();
       }, 100);
 
-      console.log(`  Many variables (20) compilation: ${(compilationTime / 100).toFixed(3)}ms per compilation`);
+      log(
+        `  Many variables (20) compilation: ${(compilationTime / 100).toFixed(3)}ms per compilation`
+      );
 
       const compiled = expr.compile();
 
@@ -207,9 +228,9 @@ describe('COMPILATION PERFORMANCE', () => {
         compiled(testData);
       }, 10000);
 
-      console.log(`  Many vars evaluation: ${evalTime.toFixed(2)}ms`);
-      console.log(`  Many vars compiled: ${compiledTime.toFixed(2)}ms`);
-      console.log(`  Speedup: ${(evalTime / compiledTime).toFixed(2)}x`);
+      log(`  Many vars evaluation: ${evalTime.toFixed(2)}ms`);
+      log(`  Many vars compiled: ${compiledTime.toFixed(2)}ms`);
+      log(`  Speedup: ${(evalTime / compiledTime).toFixed(2)}x`);
 
       expect(compiledTime).toBeLessThan(evalTime);
     });
@@ -223,7 +244,7 @@ describe('COMPILATION PERFORMANCE', () => {
         expr.compile({ to: 'javascript' });
       }, 1000);
 
-      console.log(`  JavaScript target: ${(time / 1000).toFixed(3)}ms per compilation`);
+      log(`  JavaScript target: ${(time / 1000).toFixed(3)}ms per compilation`);
       expect(time).toBeLessThan(1000);
     });
 
@@ -234,7 +255,7 @@ describe('COMPILATION PERFORMANCE', () => {
         expr.compile({ to: 'glsl' });
       }, 1000);
 
-      console.log(`  GLSL target: ${(time / 1000).toFixed(3)}ms per compilation`);
+      log(`  GLSL target: ${(time / 1000).toFixed(3)}ms per compilation`);
       expect(time).toBeLessThan(1000);
     });
 
@@ -249,9 +270,9 @@ describe('COMPILATION PERFORMANCE', () => {
         expr.compile({ to: 'glsl' });
       }, 500);
 
-      console.log(`  JavaScript target: ${(jsTime / 500).toFixed(3)}ms`);
-      console.log(`  GLSL target: ${(glslTime / 500).toFixed(3)}ms`);
-      console.log(`  Overhead: ${Math.abs(jsTime - glslTime).toFixed(2)}ms total`);
+      log(`  JavaScript target: ${(jsTime / 500).toFixed(3)}ms`);
+      log(`  GLSL target: ${(glslTime / 500).toFixed(3)}ms`);
+      log(`  Overhead: ${Math.abs(jsTime - glslTime).toFixed(2)}ms total`);
 
       // Both should be reasonably fast
       expect(jsTime).toBeLessThan(500);
@@ -278,9 +299,9 @@ describe('COMPILATION PERFORMANCE', () => {
         });
       }, 1000);
 
-      console.log(`  Baseline compilation: ${(baselineTime / 1000).toFixed(3)}ms`);
-      console.log(`  Custom operators: ${(customTime / 1000).toFixed(3)}ms`);
-      console.log(`  Overhead: ${((customTime - baselineTime) / 1000).toFixed(3)}ms`);
+      log(`  Baseline compilation: ${(baselineTime / 1000).toFixed(3)}ms`);
+      log(`  Custom operators: ${(customTime / 1000).toFixed(3)}ms`);
+      log(`  Overhead: ${((customTime - baselineTime) / 1000).toFixed(3)}ms`);
 
       // Overhead should be minimal
       expect(customTime - baselineTime).toBeLessThan(100);
@@ -308,9 +329,9 @@ describe('COMPILATION PERFORMANCE', () => {
         custom({ x: 1, y: 2 });
       }, 10000);
 
-      console.log(`  Baseline execution: ${baselineExec.toFixed(2)}ms`);
-      console.log(`  Custom op execution: ${customExec.toFixed(2)}ms`);
-      console.log(`  Overhead: ${(customExec - baselineExec).toFixed(2)}ms`);
+      log(`  Baseline execution: ${baselineExec.toFixed(2)}ms`);
+      log(`  Custom op execution: ${customExec.toFixed(2)}ms`);
+      log(`  Overhead: ${(customExec - baselineExec).toFixed(2)}ms`);
 
       // Should be comparable (function call overhead is small)
       expect(customExec).toBeLessThan(baselineExec * 2);
@@ -327,8 +348,8 @@ describe('COMPILATION PERFORMANCE', () => {
         }
       });
 
-      console.log(`  Memory for 100 compilations: ${(memory / 1024).toFixed(2)} KB`);
-      console.log(`  Per compilation: ${(memory / 100 / 1024).toFixed(2)} KB`);
+      log(`  Memory for 100 compilations: ${(memory / 1024).toFixed(2)} KB`);
+      log(`  Per compilation: ${(memory / 100 / 1024).toFixed(2)} KB`);
 
       // Should be reasonable (< 1MB for 100 compilations)
       expect(memory).toBeLessThan(1024 * 1024);
@@ -344,8 +365,8 @@ describe('COMPILATION PERFORMANCE', () => {
         }
       });
 
-      console.log(`  GLSL memory for 100 compilations: ${(memory / 1024).toFixed(2)} KB`);
-      console.log(`  Per compilation: ${(memory / 100 / 1024).toFixed(2)} KB`);
+      log(`  GLSL memory for 100 compilations: ${(memory / 1024).toFixed(2)} KB`);
+      log(`  Per compilation: ${(memory / 100 / 1024).toFixed(2)} KB`);
 
       expect(memory).toBeLessThan(1024 * 1024);
     });
@@ -360,7 +381,7 @@ describe('COMPILATION PERFORMANCE', () => {
         expr.compile();
       }, 100);
 
-      console.log(`  Distance formula compilation: ${(compilationTime / 100).toFixed(3)}ms`);
+      log(`  Distance formula compilation: ${(compilationTime / 100).toFixed(3)}ms`);
 
       const compiled = expr.compile();
       const testData = { x_1: 0, y_1: 0, x_2: 3, y_2: 4 };
@@ -373,9 +394,9 @@ describe('COMPILATION PERFORMANCE', () => {
         compiled(testData);
       }, 10000);
 
-      console.log(`  Distance evaluation: ${evalTime.toFixed(2)}ms`);
-      console.log(`  Distance compiled: ${compiledTime.toFixed(2)}ms`);
-      console.log(`  Speedup: ${(evalTime / compiledTime).toFixed(2)}x`);
+      log(`  Distance evaluation: ${evalTime.toFixed(2)}ms`);
+      log(`  Distance compiled: ${compiledTime.toFixed(2)}ms`);
+      log(`  Speedup: ${(evalTime / compiledTime).toFixed(2)}x`);
 
       expect(compiledTime).toBeLessThan(evalTime);
     });
@@ -388,7 +409,7 @@ describe('COMPILATION PERFORMANCE', () => {
         expr.compile();
       }, 100);
 
-      console.log(`  Quadratic formula compilation: ${(compilationTime / 100).toFixed(3)}ms`);
+      log(`  Quadratic formula compilation: ${(compilationTime / 100).toFixed(3)}ms`);
 
       const compiled = expr.compile();
       const testData = { a: 1, b: -5, c: 6 };
@@ -401,9 +422,9 @@ describe('COMPILATION PERFORMANCE', () => {
         compiled(testData);
       }, 10000);
 
-      console.log(`  Quadratic evaluation: ${evalTime.toFixed(2)}ms`);
-      console.log(`  Quadratic compiled: ${compiledTime.toFixed(2)}ms`);
-      console.log(`  Speedup: ${(evalTime / compiledTime).toFixed(2)}x`);
+      log(`  Quadratic evaluation: ${evalTime.toFixed(2)}ms`);
+      log(`  Quadratic compiled: ${compiledTime.toFixed(2)}ms`);
+      log(`  Speedup: ${(evalTime / compiledTime).toFixed(2)}x`);
 
       expect(compiledTime).toBeLessThan(evalTime);
     });
@@ -416,7 +437,7 @@ describe('COMPILATION PERFORMANCE', () => {
         expr.compile();
       }, 100);
 
-      console.log(`  Kinematics compilation: ${(compilationTime / 100).toFixed(3)}ms`);
+      log(`  Kinematics compilation: ${(compilationTime / 100).toFixed(3)}ms`);
 
       const compiled = expr.compile();
       const testData = { u: 10, a: 9.8, t: 2 };
@@ -429,9 +450,9 @@ describe('COMPILATION PERFORMANCE', () => {
         compiled(testData);
       }, 10000);
 
-      console.log(`  Kinematics evaluation: ${evalTime.toFixed(2)}ms`);
-      console.log(`  Kinematics compiled: ${compiledTime.toFixed(2)}ms`);
-      console.log(`  Speedup: ${(evalTime / compiledTime).toFixed(2)}x`);
+      log(`  Kinematics evaluation: ${evalTime.toFixed(2)}ms`);
+      log(`  Kinematics compiled: ${compiledTime.toFixed(2)}ms`);
+      log(`  Speedup: ${(evalTime / compiledTime).toFixed(2)}x`);
 
       expect(compiledTime).toBeLessThan(evalTime);
     });
@@ -453,9 +474,9 @@ describe('COMPILATION PERFORMANCE', () => {
         expr.compile();
       }, 100);
 
-      console.log(`  First compilation: ${(firstTime / 100).toFixed(3)}ms`);
-      console.log(`  Cached compilation: ${(cachedTime / 100).toFixed(3)}ms`);
-      console.log(`  Difference: ${((firstTime - cachedTime) / 100).toFixed(3)}ms`);
+      log(`  First compilation: ${(firstTime / 100).toFixed(3)}ms`);
+      log(`  Cached compilation: ${(cachedTime / 100).toFixed(3)}ms`);
+      log(`  Difference: ${((firstTime - cachedTime) / 100).toFixed(3)}ms`);
 
       // Both should be fast
       expect(firstTime).toBeLessThan(1000);

@@ -14,6 +14,18 @@ import * as path from 'path';
 
 describe('PYTHON BENCHMARK GENERATION', () => {
   const python = new PythonTarget({ includeImports: true });
+  const verbose =
+    process.env.COMPILE_PERF_VERBOSE === '1' ||
+    process.env.BENCH_VERBOSE === '1' ||
+    process.env.VERBOSE === '1';
+  const writeLine = (line: string) => {
+    process.stdout.write(`${line}\n`);
+  };
+  const log = (...args: unknown[]) => {
+    if (verbose) {
+      writeLine(args.join(' '));
+    }
+  };
 
   it('should generate Python performance benchmark script', () => {
     // Benchmark expressions matching compile-performance.test.ts
@@ -101,6 +113,8 @@ Requirements:
 """
 
 import numpy as np
+import os
+import sys
 import time
 from typing import Dict, Any, Callable
 
@@ -111,6 +125,9 @@ def benchmark(fn: Callable, iterations: int, **kwargs) -> float:
         fn(**kwargs)
     end = time.perf_counter()
     return (end - start) * 1000  # Convert to milliseconds
+
+def is_verbose() -> bool:
+    return ('--verbose' in sys.argv) or ('-v' in sys.argv) or (os.getenv('BENCH_VERBOSE') == '1')
 
 # Generated benchmark functions
 `;
@@ -138,10 +155,14 @@ def benchmark(fn: Callable, iterations: int, **kwargs) -> float:
 # Benchmark suite
 def run_benchmarks():
     """Run all benchmarks and display results"""
-    print("=" * 80)
-    print("Python/NumPy Performance Benchmarks")
-    print("=" * 80)
-    print()
+    verbose = is_verbose()
+    if verbose:
+        print("=" * 80)
+        print("Python/NumPy Performance Benchmarks")
+        print("=" * 80)
+        print()
+    else:
+        print("Python/NumPy Performance Benchmarks (summary)")
 
     results = []
 `;
@@ -153,12 +174,14 @@ def run_benchmarks():
 
       pythonCode += `
     # ${bench.name}
-    print(f"Running: ${bench.name} (${iterations} iterations)")
+    if verbose:
+        print(f"Running: ${bench.name} (${iterations} iterations)")
     test_data_${funcName} = ${testDataStr}
     time_${funcName} = benchmark(${funcName}, ${bench.iterations}, **test_data_${funcName})
     result_${funcName} = ${funcName}(**test_data_${funcName})
-    print(f"  Time: {time_${funcName}:.2f} ms")
-    print(f"  Result: {result_${funcName}}")
+    if verbose:
+        print(f"  Time: {time_${funcName}:.2f} ms")
+        print(f"  Result: {result_${funcName}}")
     results.append({
         'name': '${bench.name}',
         'iterations': ${bench.iterations},
@@ -166,7 +189,8 @@ def run_benchmarks():
         'time_per_op_us': (time_${funcName} * 1000) / ${bench.iterations},
         'result': result_${funcName}
     })
-    print()
+    if verbose:
+        print()
 `;
     }
 
@@ -183,18 +207,21 @@ def run_benchmarks():
         print(f"{r['name']:<30} {r['iterations']:<12,} {r['time_ms']:<12.2f} {r['time_per_op_us']:<12.6f}")
 
     print()
-    print("=" * 80)
-    print("Comparison with JavaScript (from compile-performance.test.ts)")
-    print("=" * 80)
-    print()
-    print("To compare with JavaScript performance:")
-    print("  npm run test compute-engine/compile-performance")
-    print()
-    print("Expected results:")
-    print("  - NumPy should be faster than JavaScript for vectorized operations")
-    print("  - JavaScript may be faster for single evaluations (less overhead)")
-    print("  - Both should be much faster than interpreted evaluation")
-    print()
+    if verbose:
+        print("=" * 80)
+        print("Comparison with JavaScript (from compile-performance.test.ts)")
+        print("=" * 80)
+        print()
+        print("To compare with JavaScript performance:")
+        print("  npm run test compute-engine/compile-performance")
+        print()
+        print("Expected results:")
+        print("  - NumPy should be faster than JavaScript for vectorized operations")
+        print("  - JavaScript may be faster for single evaluations (less overhead)")
+        print("  - Both should be much faster than interpreted evaluation")
+        print()
+    else:
+        print("Tip: run with --verbose (or set BENCH_VERBOSE=1) for per-benchmark output.")
 
 if __name__ == '__main__':
     run_benchmarks()
@@ -214,13 +241,17 @@ if __name__ == '__main__':
 
     fs.writeFileSync(outputPath, pythonCode);
 
-    console.log(`\n✅ Generated Python benchmark script:`);
-    console.log(`   ${outputPath}`);
-    console.log(`\nTo run the benchmarks:`);
-    console.log(`   python benchmarks/python-performance.py`);
-    console.log(`\nOr with timing:`);
-    console.log(`   time python benchmarks/python-performance.py`);
-
+    log(`\n✔ Generated Python benchmark script:`);
+    log(`   ${outputPath}`);
+    log(`\nTo run the benchmarks:`);
+    log(`   python benchmarks/python-performance.py`);
+    log(`\nOr with timing:`);
+    log(`   time python benchmarks/python-performance.py`);
+    if (!verbose) {
+      writeLine(
+        '\u001b[2K\u001b[80D\u001b[32m✔ \u001b[0m Generated Python benchmark script. \u001b[0;2mSet BENCH_VERBOSE=1 for details.\u001b[0m'
+      );
+    }
     expect(fs.existsSync(outputPath)).toBe(true);
   });
 
@@ -244,6 +275,18 @@ Run the benchmark script:
 
 \`\`\`bash
 python benchmarks/python-performance.py
+\`\`\`
+
+Show per-benchmark output:
+
+\`\`\`bash
+python benchmarks/python-performance.py --verbose
+\`\`\`
+
+Or via environment variable:
+
+\`\`\`bash
+BENCH_VERBOSE=1 python benchmarks/python-performance.py
 \`\`\`
 
 ## Regenerating Benchmarks
@@ -287,15 +330,12 @@ For JavaScript:
 - Works great in browser and Node.js
 `;
 
-    const outputPath = path.join(
-      __dirname,
-      '../../benchmarks/README.md'
-    );
+    const outputPath = path.join(__dirname, '../../benchmarks/README.md');
 
     fs.writeFileSync(outputPath, readmeContent);
 
-    console.log(`\n✅ Generated README:`);
-    console.log(`   ${outputPath}`);
+    log(`\n✔  Generated README:`);
+    log(`   ${outputPath}`);
 
     expect(fs.existsSync(outputPath)).toBe(true);
   });

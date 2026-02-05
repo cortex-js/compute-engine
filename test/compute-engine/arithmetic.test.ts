@@ -160,6 +160,23 @@ describe('ADD', () => {
   test('Add a real to a complex variable', () => {
     expect(ce.parse('z+5').evaluate()).toMatchSnapshot();
   });
+
+  // Regression test: precision loss when summing large integers with rationals
+  // The issue was in ExactNumericValue.sum() using .re (loses precision) instead of .bignumRe
+  test('Add large integer power to fraction preserves precision', () => {
+    const result = ce.parse('12345678^3 + \\frac{1}{3}').N();
+    // 12345678^3 = 1881675960266558605752
+    // Result should be 1881675960266558605752 + 1/3 = 1881675960266558605752.333...
+    // Key: the integer part "1881675960266558605752" must be preserved exactly
+    expect(result.toString()).toMatch('1.881675960266558605752');
+  });
+
+  test('Add large integer to fraction preserves full precision', () => {
+    // Verify the integer part is exactly correct (not losing digits)
+    const result = ce.parse('1881675960266558605752 + \\frac{1}{3}').N();
+    // Before the fix, this would produce "1.881675960266558" (truncated)
+    expect(result.toString()).toMatch('1.881675960266558605752');
+  });
 });
 
 describe('SUBTRACT', () => {

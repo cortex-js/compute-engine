@@ -13,6 +13,8 @@ Requirements:
 """
 
 import numpy as np
+import os
+import sys
 import time
 from typing import Dict, Any, Callable
 
@@ -23,6 +25,9 @@ def benchmark(fn: Callable, iterations: int, **kwargs) -> float:
         fn(**kwargs)
     end = time.perf_counter()
     return (end - start) * 1000  # Convert to milliseconds
+
+def is_verbose() -> bool:
+    return ('--verbose' in sys.argv) or ('-v' in sys.argv) or (os.getenv('BENCH_VERBOSE') == '1')
 
 # Generated benchmark functions
 
@@ -74,20 +79,26 @@ def kinematics(u, a, t):
 # Benchmark suite
 def run_benchmarks():
     """Run all benchmarks and display results"""
-    print("=" * 80)
-    print("Python/NumPy Performance Benchmarks")
-    print("=" * 80)
-    print()
+    verbose = is_verbose()
+    if verbose:
+        print("=" * 80)
+        print("Python/NumPy Performance Benchmarks")
+        print("=" * 80)
+        print()
+    else:
+        print("Python/NumPy Performance Benchmarks (summary)")
 
     results = []
 
     # Simple Power
-    print(f"Running: Simple Power (10,000 iterations)")
+    if verbose:
+        print(f"Running: Simple Power (10,000 iterations)")
     test_data_simple_power = {"x":3,"y":4,"z":5}
     time_simple_power = benchmark(simple_power, 10000, **test_data_simple_power)
     result_simple_power = simple_power(**test_data_simple_power)
-    print(f"  Time: {time_simple_power:.2f} ms")
-    print(f"  Result: {result_simple_power}")
+    if verbose:
+        print(f"  Time: {time_simple_power:.2f} ms")
+        print(f"  Result: {result_simple_power}")
     results.append({
         'name': 'Simple Power',
         'iterations': 10000,
@@ -95,15 +106,18 @@ def run_benchmarks():
         'time_per_op_us': (time_simple_power * 1000) / 10000,
         'result': result_simple_power
     })
-    print()
+    if verbose:
+        print()
 
     # Polynomial
-    print(f"Running: Polynomial (10,000 iterations)")
+    if verbose:
+        print(f"Running: Polynomial (10,000 iterations)")
     test_data_polynomial = {"x":2.5}
     time_polynomial = benchmark(polynomial, 10000, **test_data_polynomial)
     result_polynomial = polynomial(**test_data_polynomial)
-    print(f"  Time: {time_polynomial:.2f} ms")
-    print(f"  Result: {result_polynomial}")
+    if verbose:
+        print(f"  Time: {time_polynomial:.2f} ms")
+        print(f"  Result: {result_polynomial}")
     results.append({
         'name': 'Polynomial',
         'iterations': 10000,
@@ -111,15 +125,18 @@ def run_benchmarks():
         'time_per_op_us': (time_polynomial * 1000) / 10000,
         'result': result_polynomial
     })
-    print()
+    if verbose:
+        print()
 
     # Trigonometric
-    print(f"Running: Trigonometric (10,000 iterations)")
+    if verbose:
+        print(f"Running: Trigonometric (10,000 iterations)")
     test_data_trigonometric = {"x":1,"y":2,"z":3}
     time_trigonometric = benchmark(trigonometric, 10000, **test_data_trigonometric)
     result_trigonometric = trigonometric(**test_data_trigonometric)
-    print(f"  Time: {time_trigonometric:.2f} ms")
-    print(f"  Result: {result_trigonometric}")
+    if verbose:
+        print(f"  Time: {time_trigonometric:.2f} ms")
+        print(f"  Result: {result_trigonometric}")
     results.append({
         'name': 'Trigonometric',
         'iterations': 10000,
@@ -127,15 +144,18 @@ def run_benchmarks():
         'time_per_op_us': (time_trigonometric * 1000) / 10000,
         'result': result_trigonometric
     })
-    print()
+    if verbose:
+        print()
 
     # Nested Expression
-    print(f"Running: Nested Expression (10,000 iterations)")
+    if verbose:
+        print(f"Running: Nested Expression (10,000 iterations)")
     test_data_nested_expression = {"x":5,"y":6,"z":7,"a":1,"b":2,"c":3}
     time_nested_expression = benchmark(nested_expression, 10000, **test_data_nested_expression)
     result_nested_expression = nested_expression(**test_data_nested_expression)
-    print(f"  Time: {time_nested_expression:.2f} ms")
-    print(f"  Result: {result_nested_expression}")
+    if verbose:
+        print(f"  Time: {time_nested_expression:.2f} ms")
+        print(f"  Result: {result_nested_expression}")
     results.append({
         'name': 'Nested Expression',
         'iterations': 10000,
@@ -143,15 +163,18 @@ def run_benchmarks():
         'time_per_op_us': (time_nested_expression * 1000) / 10000,
         'result': result_nested_expression
     })
-    print()
+    if verbose:
+        print()
 
     # Large Expression (50 terms)
-    print(f"Running: Large Expression (50 terms) (1,000 iterations)")
+    if verbose:
+        print(f"Running: Large Expression (50 terms) (1,000 iterations)")
     test_data_large_expression__50_terms_ = {"x":1.1}
     time_large_expression__50_terms_ = benchmark(large_expression__50_terms_, 1000, **test_data_large_expression__50_terms_)
     result_large_expression__50_terms_ = large_expression__50_terms_(**test_data_large_expression__50_terms_)
-    print(f"  Time: {time_large_expression__50_terms_:.2f} ms")
-    print(f"  Result: {result_large_expression__50_terms_}")
+    if verbose:
+        print(f"  Time: {time_large_expression__50_terms_:.2f} ms")
+        print(f"  Result: {result_large_expression__50_terms_}")
     results.append({
         'name': 'Large Expression (50 terms)',
         'iterations': 1000,
@@ -159,15 +182,18 @@ def run_benchmarks():
         'time_per_op_us': (time_large_expression__50_terms_ * 1000) / 1000,
         'result': result_large_expression__50_terms_
     })
-    print()
+    if verbose:
+        print()
 
     # Many Variables (20 vars)
-    print(f"Running: Many Variables (20 vars) (10,000 iterations)")
+    if verbose:
+        print(f"Running: Many Variables (20 vars) (10,000 iterations)")
     test_data_many_variables__20_vars_ = {"x_0":1,"x_1":2,"x_2":3,"x_3":4,"x_4":5,"x_5":6,"x_6":7,"x_7":8,"x_8":9,"x_9":10,"x_10":11,"x_11":12,"x_12":13,"x_13":14,"x_14":15,"x_15":16,"x_16":17,"x_17":18,"x_18":19,"x_19":20}
     time_many_variables__20_vars_ = benchmark(many_variables__20_vars_, 10000, **test_data_many_variables__20_vars_)
     result_many_variables__20_vars_ = many_variables__20_vars_(**test_data_many_variables__20_vars_)
-    print(f"  Time: {time_many_variables__20_vars_:.2f} ms")
-    print(f"  Result: {result_many_variables__20_vars_}")
+    if verbose:
+        print(f"  Time: {time_many_variables__20_vars_:.2f} ms")
+        print(f"  Result: {result_many_variables__20_vars_}")
     results.append({
         'name': 'Many Variables (20 vars)',
         'iterations': 10000,
@@ -175,15 +201,18 @@ def run_benchmarks():
         'time_per_op_us': (time_many_variables__20_vars_ * 1000) / 10000,
         'result': result_many_variables__20_vars_
     })
-    print()
+    if verbose:
+        print()
 
     # Distance Formula
-    print(f"Running: Distance Formula (10,000 iterations)")
+    if verbose:
+        print(f"Running: Distance Formula (10,000 iterations)")
     test_data_distance_formula = {"x_1":0,"y_1":0,"x_2":3,"y_2":4}
     time_distance_formula = benchmark(distance_formula, 10000, **test_data_distance_formula)
     result_distance_formula = distance_formula(**test_data_distance_formula)
-    print(f"  Time: {time_distance_formula:.2f} ms")
-    print(f"  Result: {result_distance_formula}")
+    if verbose:
+        print(f"  Time: {time_distance_formula:.2f} ms")
+        print(f"  Result: {result_distance_formula}")
     results.append({
         'name': 'Distance Formula',
         'iterations': 10000,
@@ -191,15 +220,18 @@ def run_benchmarks():
         'time_per_op_us': (time_distance_formula * 1000) / 10000,
         'result': result_distance_formula
     })
-    print()
+    if verbose:
+        print()
 
     # Quadratic Formula
-    print(f"Running: Quadratic Formula (10,000 iterations)")
+    if verbose:
+        print(f"Running: Quadratic Formula (10,000 iterations)")
     test_data_quadratic_formula = {"a":1,"b":-5,"c":6}
     time_quadratic_formula = benchmark(quadratic_formula, 10000, **test_data_quadratic_formula)
     result_quadratic_formula = quadratic_formula(**test_data_quadratic_formula)
-    print(f"  Time: {time_quadratic_formula:.2f} ms")
-    print(f"  Result: {result_quadratic_formula}")
+    if verbose:
+        print(f"  Time: {time_quadratic_formula:.2f} ms")
+        print(f"  Result: {result_quadratic_formula}")
     results.append({
         'name': 'Quadratic Formula',
         'iterations': 10000,
@@ -207,15 +239,18 @@ def run_benchmarks():
         'time_per_op_us': (time_quadratic_formula * 1000) / 10000,
         'result': result_quadratic_formula
     })
-    print()
+    if verbose:
+        print()
 
     # Kinematics
-    print(f"Running: Kinematics (10,000 iterations)")
+    if verbose:
+        print(f"Running: Kinematics (10,000 iterations)")
     test_data_kinematics = {"u":10,"a":9.8,"t":2}
     time_kinematics = benchmark(kinematics, 10000, **test_data_kinematics)
     result_kinematics = kinematics(**test_data_kinematics)
-    print(f"  Time: {time_kinematics:.2f} ms")
-    print(f"  Result: {result_kinematics}")
+    if verbose:
+        print(f"  Time: {time_kinematics:.2f} ms")
+        print(f"  Result: {result_kinematics}")
     results.append({
         'name': 'Kinematics',
         'iterations': 10000,
@@ -223,7 +258,8 @@ def run_benchmarks():
         'time_per_op_us': (time_kinematics * 1000) / 10000,
         'result': result_kinematics
     })
-    print()
+    if verbose:
+        print()
 
     # Summary
     print("=" * 80)
@@ -237,18 +273,21 @@ def run_benchmarks():
         print(f"{r['name']:<30} {r['iterations']:<12,} {r['time_ms']:<12.2f} {r['time_per_op_us']:<12.6f}")
 
     print()
-    print("=" * 80)
-    print("Comparison with JavaScript (from compile-performance.test.ts)")
-    print("=" * 80)
-    print()
-    print("To compare with JavaScript performance:")
-    print("  npm run test compute-engine/compile-performance")
-    print()
-    print("Expected results:")
-    print("  - NumPy should be faster than JavaScript for vectorized operations")
-    print("  - JavaScript may be faster for single evaluations (less overhead)")
-    print("  - Both should be much faster than interpreted evaluation")
-    print()
+    if verbose:
+        print("=" * 80)
+        print("Comparison with JavaScript (from compile-performance.test.ts)")
+        print("=" * 80)
+        print()
+        print("To compare with JavaScript performance:")
+        print("  npm run test compute-engine/compile-performance")
+        print()
+        print("Expected results:")
+        print("  - NumPy should be faster than JavaScript for vectorized operations")
+        print("  - JavaScript may be faster for single evaluations (less overhead)")
+        print("  - Both should be much faster than interpreted evaluation")
+        print()
+    else:
+        print("Tip: run with --verbose (or set BENCH_VERBOSE=1) for per-benchmark output.")
 
 if __name__ == '__main__':
     run_benchmarks()

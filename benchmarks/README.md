@@ -19,6 +19,18 @@ Run the benchmark script:
 python benchmarks/python-performance.py
 ```
 
+Show per-benchmark output:
+
+```bash
+python benchmarks/python-performance.py --verbose
+```
+
+Or via environment variable:
+
+```bash
+BENCH_VERBOSE=1 python benchmarks/python-performance.py
+```
+
 ## Regenerating Benchmarks
 
 The Python benchmark script is generated from TypeScript tests. To regenerate:
