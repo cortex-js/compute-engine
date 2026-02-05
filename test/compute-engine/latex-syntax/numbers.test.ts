@@ -145,8 +145,9 @@ describe('PARSING OF NUMBER', () => {
     expect(parse('123\\,45\\,67.123\\,456\\,e5')).toMatchInlineSnapshot(
       `123456712345.6`
     );
+    // With a decimal point, this is now treated as approximate (BigNumericValue)
     expect(parse('123\\,45\\,67.123\\,456\\,e12\\,345')).toMatchInlineSnapshot(
-      `{num: "1234567123456e+12339"}`
+      `1.234567123456e+12351`
     );
 
     expect(parse('-1 2')).toMatchInlineSnapshot(`-12`);
@@ -159,8 +160,9 @@ describe('PARSING OF NUMBER', () => {
   });
 
   test('Parsing digits', () => {
+    // Numbers with decimal points are treated as approximate (BigNumericValue)
     // Number with exactly three digits after the decimal point
-    expect(parseVal('3.423e4')).toEqual(34230);
+    expect(parseVal('3.423e4')).toEqual('34230');
     // Number with more than three, less than six digits after the decimal point
     expect(parseVal('3.42334e4')).toEqual('34233.4');
     // Number with more than 6 digits after the decimal point
@@ -208,9 +210,8 @@ describe('PARSING OF NUMBER', () => {
 
   test('Non-machine number', () => {
     // Exponent larger than 10^308 (Number.MAX_VALUE = 1.7976931348623157e+308)
-    expect(ce.parse('421.35e+1000')).toMatchInlineSnapshot(
-      `{num: "42135e+998"}`
-    );
+    // With decimal point, treated as approximate BigNumericValue
+    expect(ce.parse('421.35e+1000')).toMatchInlineSnapshot(`4.2135e+1002`);
     // Exponent smaller than 10^-323 (Number.MIN_VALUE = 5e-324)
     expect(ce.parse('421.35e-323')).toMatchInlineSnapshot(`4.2135e-321`);
 
@@ -231,8 +232,9 @@ describe('PARSING OF NUMBER', () => {
         num: "900719923453434553982347938645934876598347659823479234879234867923487692348792348692348769234876923487692348769234876923487634876234876234987692348762348769234876348576453454740992123456789"
       }
     `);
+    // With decimal point, treated as approximate BigNumericValue
     expect(ce.parse('31324234.23423143\\times10^{5000}')).toMatchInlineSnapshot(
-      `{num: "3132423423423143e+4992"}`
+      `3.132423423423143e+5007`
     );
   });
 
@@ -260,6 +262,27 @@ describe('PARSING OF NUMBER', () => {
   test('Bigints', () => {
     expect(parse('9007199254741033')).toMatchInlineSnapshot(
       `{num: "9007199254741033"}`
+    );
+  });
+
+  // Numbers with decimal points are approximate, without are exact
+  test('Decimal vs integer representation', () => {
+    // With decimal point -> approximate BigNumericValue
+    expect(parseVal('6.02e23')).toMatchInlineSnapshot(`6.02e+23`);
+    expect(ce.parse('6.02e23').numericValue?.constructor.name).toBe(
+      'BigNumericValue'
+    );
+
+    // Without decimal point -> exact ExactNumericValue (bigint)
+    expect(parseVal('602e21')).toMatchInlineSnapshot(`602e+21`);
+    expect(ce.parse('602e21').numericValue?.constructor.name).toBe(
+      'ExactNumericValue'
+    );
+
+    // Very large exponent with decimal -> still approximate (not huge bigint)
+    expect(parseVal('6.02e250')).toMatchInlineSnapshot(`6.02e+250`);
+    expect(ce.parse('6.02e250').numericValue?.constructor.name).toBe(
+      'BigNumericValue'
     );
   });
 });

@@ -77,9 +77,7 @@ describe('PARSING numbers', () => {
     expect(ce.parse('1 + 1e199')).toMatchInlineSnapshot(`["Add", 1, 1e+199]`));
 
   test(`421.35e+1000`, () =>
-    expect(ce.parse('421.35e+1000')).toMatchInlineSnapshot(
-      `{num: "42135e+998"}`
-    ));
+    expect(ce.parse('421.35e+1000')).toMatchInlineSnapshot(`4.2135e+1002`));
 
   test(`\\frac34 + 1e199`, () =>
     expect(ce.parse('\\frac34 + 1e199')).toMatchInlineSnapshot(

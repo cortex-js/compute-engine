@@ -1117,12 +1117,11 @@ export class ComputeEngine implements IComputeEngine {
       );
 
     if (value instanceof Decimal) {
-      if (value.isInteger() && value.e <= MAX_BIGINT_DIGITS)
-        return new ExactNumericValue(
-          bigint(value.toString())!,
-          makeNumericValue,
-          bignum
-        );
+      if (value.isInteger() && value.e <= MAX_BIGINT_DIGITS) {
+        const n = bigint(value.toString());
+        if (n !== null)
+          return new ExactNumericValue(n, makeNumericValue, bignum);
+      }
       return makeNumericValue(value);
     }
 

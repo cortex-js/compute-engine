@@ -33,7 +33,7 @@ describe('NUMBERS', () => {
     expect(check('1.1')).toMatch(`1.1`);
     expect(check('-1.1')).toMatch(`-1.1`);
     expect(check('2345.5')).toMatch(`2345.5`);
-    expect(check('2345.123e99')).toMatchInlineSnapshot(`2345123e+96`);
+    expect(check('2345.123e99')).toMatchInlineSnapshot(`2.345123e+102`);
     expect(check('-2345.123e-99')).toMatchInlineSnapshot(`-2.345123e-96`);
   });
 
@@ -172,7 +172,7 @@ describe('ARITHMETIC OPERATORS', () => {
       `-3.455 - 2.3454 - 1.23`
     );
     expect(check('-1.23e30 - 2.3454e32 - 3.455e35')).toMatchInlineSnapshot(
-      `-3455e+32 - 23454e+28 - 123e+28`
+      `-3.455e+35 - 2.3454e+32 - 1.23e+30`
     );
     expect(check('1 + (2+3i)')).toMatchInlineSnapshot(`1 + (2 + 3i)`);
     expect(check('1 + (-2-3i)')).toMatchInlineSnapshot(`1 + (-2 - 3i)`);
@@ -212,7 +212,7 @@ describe('ARITHMETIC OPERATORS', () => {
     ).toMatchInlineSnapshot(`-2.123 * 3.456 * 4.465 * 5.564`);
     expect(
       check('2.123e32 \\times 3.456e33 \\times -4.465 \\times 5')
-    ).toMatchInlineSnapshot(`-2123e+29 * 5 * 3456e+30 * 4.465`);
+    ).toMatchInlineSnapshot(`-2.123e+32 * 5 * 3.456e+33 * 4.465`);
 
     expect(check('\\pi \\times 4')).toMatchInlineSnapshot(`4pi`);
     expect(check('4 \\times \\pi')).toMatchInlineSnapshot(`4pi`);

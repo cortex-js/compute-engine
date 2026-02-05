@@ -2,12 +2,26 @@
 
 ### Bug Fixes
 
-- **([#284](https://github.com/cortex-js/compute-engine/issues/284))Scientific
-  Notation Serialization**: Fixed `toLatex()` with `scientific` and
-  `adaptiveScientific` notation options to produce properly normalized output.
-  Previously, numbers like `6.02e23` would serialize as `602\cdot10^{21}`
-  instead of the expected `6.02\cdot10^{23}`. The output now depends only on the
-  numeric value and formatting options, not on the internal representation.
+- **Decimal Number Representation**: Numbers written with a decimal point (e.g.,
+  `6.02e23`) are now correctly treated as approximate decimal values
+  (`BigNumericValue`) rather than exact integers. Previously, `6.02e23` was
+  incorrectly converted to the exact bigint `602000000000000000000000`, which
+  implied false precision and caused memory inefficiency for very large
+  exponents. Numbers without a decimal point (e.g., `602e21`) continue to be
+  treated as exact integers when possible. This change aligns with the
+  documented behavior of the `parseNumbers: 'auto'` option.
+
+- **Scientific Notation Serialization** ([#284](https://github.com/cortex-js/compute-engine/issues/284)):
+  Fixed `toLatex()` with `scientific` and `adaptiveScientific` notation options
+  to produce properly normalized output. Previously, numbers like `6.02e23`
+  would serialize as `602\cdot10^{21}` instead of the expected
+  `6.02\cdot10^{23}`. The output now depends only on the numeric value and
+  formatting options, not on the internal representation.
+
+- **Numeric Sum Precision**: Fixed precision loss when summing large integers
+  with rational values (e.g., `12345678^3 + 1/3`). The `ExactNumericValue.sum()`
+  method now uses `bignumRe` instead of `re` to preserve full precision when
+  handling large integer values from `BigNumericValue`.
 
 ## 0.35.1 _2026-02-03_
 

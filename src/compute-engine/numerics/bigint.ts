@@ -16,23 +16,23 @@ export function bigint(a: Decimal | number | bigint | string): bigint | null {
 
   if (a instanceof Decimal) {
     if (!a.isInteger()) return null;
-    return bigint(a.toString());
+    // Use toFixed(0) to get the full integer representation without
+    // scientific notation (which would have a decimal point like "3.14e+10")
+    return BigInt(a.toFixed(0));
   }
 
   let s = a.toLowerCase();
 
-  // BigInt constructor does not deal well with e.g. `1e30` or `1.2e5`
-  const m = s.match(/([+-]?[0-9]*)(?:\.([0-9]+))?e([+-]?[0-9]+)$/);
-  // If we have a match, we need to add zeros to the fractional part
+  // BigInt constructor does not deal well with e.g. `1e30`
+  // Only convert to bigint if there's NO decimal point - a decimal point
+  // indicates an approximate value, not an exact integer
+  const m = s.match(/^([+-]?[0-9]+)e([+-]?[0-9]+)$/);
   if (m) {
-    // Group 1 is the integer part
-    // Group 2 is the fractional part
-    // Group 3 is the exponent
-    const exp = parseInt(m[3]);
-    const pad = exp - (m[2] ? m[2].length : 0);
-    if (pad < 0) return null;
-    // m[2] is the fractional part
-    s = (m[1] ?? '') + (m[2] ?? '') + '0'.repeat(pad);
+    // Group 1 is the integer part (no decimal point)
+    // Group 2 is the exponent
+    const exp = parseInt(m[2]);
+    if (exp < 0) return null;
+    s = m[1] + '0'.repeat(exp);
   }
 
   // Do we have a decimal point?
