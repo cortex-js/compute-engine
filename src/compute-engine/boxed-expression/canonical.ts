@@ -71,6 +71,16 @@ export function canonicalForm(
     }
   }
 
+  // Partial canonicalization produces a structural expression, not a fully
+  // canonical one. This allows subsequent .canonical calls to perform full
+  // canonicalization.
+  if (expr.isFunctionExpression && expr.isCanonical) {
+    expr = expr.engine.function(expr.operator, [...expr.ops!], {
+      canonical: false,
+      structural: true,
+    });
+  }
+
   return expr;
 }
 
@@ -238,6 +248,14 @@ function numberForm(expr: BoxedExpression): BoxedExpression {
     : ce._fn(name, ops, { canonical: false });
 }
 
+/**
+ * Apply the 'Multiply' form recursively. Each sub-expression is visited
+ * and any `Multiply` or `Negate` at the current level is canonicalized.
+ *
+ * Operands are passed directly to `canonicalMultiply` without calling
+ * `.canonical` on them, consistent with `addForm` and `powerForm`.
+ * `canonicalMultiply` documents that "The input ops may not be canonical."
+ */
 function multiplyForm(expr: BoxedExpression) {
   // Recursively visit all sub-expressions
   if (!expr.ops) return expr;
@@ -245,10 +263,7 @@ function multiplyForm(expr: BoxedExpression) {
 
   // If this is a multiply, canonicalize it
   if (expr.operator === 'Multiply')
-    return canonicalMultiply(
-      expr.engine,
-      ops.map((x) => x.canonical)
-    );
+    return canonicalMultiply(expr.engine, ops);
 
   if (expr.operator === 'Negate')
     return canonicalMultiply(expr.engine, [ops[0], expr.engine.NegativeOne]);
@@ -270,6 +285,14 @@ function addForm(expr: BoxedExpression) {
   return expr.engine._fn(expr.operator, ops);
 }
 
+/**
+ * Apply the 'Power' form recursively. Each sub-expression is visited
+ * and any `Power` at the current level is canonicalized via `canonicalPower`.
+ *
+ * Note: `divideForm` intentionally calls `powerForm` on its operands before
+ * passing them to `canonicalDivide`, since division canonicalization benefits
+ * from normalized power expressions.
+ */
 function powerForm(expr: BoxedExpression) {
   if (!expr.ops) return expr;
 
@@ -296,6 +319,16 @@ function symbolForm(expr: BoxedExpression): BoxedExpression {
   });
 }
 
+/**
+ * Apply the 'Divide' form recursively. For `Divide` expressions, operands
+ * are first passed through `powerForm` before being canonicalized via
+ * `canonicalDivide`. This is because division canonicalization benefits from
+ * having power expressions already normalized (e.g., `a / b^{-1}` simplifies
+ * better when the exponent is already in canonical form).
+ *
+ * This is the only form that internally applies another form (`Power`) to
+ * its operands.
+ */
 function divideForm(expr: BoxedExpression) {
   // If this is a divide, canonicalize it
   if (expr.operator === 'Divide')

@@ -354,7 +354,7 @@ export function canonicalOrder(
   { recursive = false }: { recursive?: boolean }
 ): BoxedExpression {
   // If the expression is already in canonical form, return it as is
-  if (expr.isCanonical || !expr.ops) return expr;
+  if (expr.isCanonical || expr.isStructural || !expr.ops) return expr;
 
   let ops = expr.ops;
   if (recursive) ops = ops.map((x) => canonicalOrder(x, { recursive }));

@@ -219,7 +219,7 @@ export class BoxedFunction extends _BoxedExpression {
   }
 
   get isCanonical(): boolean {
-    return this._def !== undefined && this._def !== null;
+    return this._def !== undefined && this._def !== null && !this._isStructural;
   }
 
   get isPure(): boolean {
@@ -459,7 +459,7 @@ export class BoxedFunction extends _BoxedExpression {
   ): BoxedExpression {
     options ??= { canonical: undefined };
     if (options.canonical === undefined)
-      options = { canonical: this.isCanonical };
+      options = { canonical: this.isCanonical || this.isStructural };
 
     const ops = this._ops.map((x) => x.subs(sub, options));
 
@@ -562,7 +562,7 @@ export class BoxedFunction extends _BoxedExpression {
   }
 
   get numeratorDenominator(): [BoxedExpression, BoxedExpression] {
-    if (!this.isCanonical) return [this, this.engine.One];
+    if (!(this.isCanonical || this.isStructural)) return [this, this.engine.One];
     if (this.isNumber !== true)
       return [this.engine.Nothing, this.engine.Nothing];
 
@@ -614,12 +614,12 @@ export class BoxedFunction extends _BoxedExpression {
   //
 
   neg(): BoxedExpression {
-    if (!this.isCanonical) throw new Error('Not canonical');
+    if (!(this.isCanonical || this.isStructural)) throw new Error('Not canonical');
     return negate(this);
   }
 
   inv(): BoxedExpression {
-    if (!this.isCanonical) throw new Error('Not canonical');
+    if (!(this.isCanonical || this.isStructural)) throw new Error('Not canonical');
     if (this.isOne) return this;
     if (this.isNegativeOne) return this;
 
@@ -643,7 +643,7 @@ export class BoxedFunction extends _BoxedExpression {
   }
 
   abs(): BoxedExpression {
-    if (!this.isCanonical) throw new Error('Not canonical');
+    if (!(this.isCanonical || this.isStructural)) throw new Error('Not canonical');
     if (this.operator === 'Abs' || this.operator === 'Negate') return this;
     if (this.isNonNegative) return this;
     if (this.isNonPositive) return this.neg();
@@ -652,12 +652,12 @@ export class BoxedFunction extends _BoxedExpression {
 
   add(rhs: number | BoxedExpression): BoxedExpression {
     if (rhs === 0) return this;
-    if (!this.isCanonical) throw new Error('Not canonical');
+    if (!(this.isCanonical || this.isStructural)) throw new Error('Not canonical');
     return add(this, this.engine.box(rhs));
   }
 
   mul(rhs: NumericValue | number | BoxedExpression): BoxedExpression {
-    if (!this.isCanonical) throw new Error('Not canonical');
+    if (!(this.isCanonical || this.isStructural)) throw new Error('Not canonical');
     if (rhs === 0) return this.engine.Zero;
     if (rhs === 1) return this;
     if (rhs === -1) return this.neg();
@@ -672,7 +672,7 @@ export class BoxedFunction extends _BoxedExpression {
   }
 
   div(rhs: number | BoxedExpression): BoxedExpression {
-    if (!this.isCanonical) throw new Error('Not canonical');
+    if (!(this.isCanonical || this.isStructural)) throw new Error('Not canonical');
     return div(this, rhs);
   }
 
@@ -681,7 +681,7 @@ export class BoxedFunction extends _BoxedExpression {
   }
 
   root(exp: number | BoxedExpression): BoxedExpression {
-    if (!this.isCanonical || (typeof exp !== 'number' && !exp.isCanonical))
+    if (!(this.isCanonical || this.isStructural) || (typeof exp !== 'number' && !(exp.isCanonical || exp.isStructural)))
       throw new Error('Not canonical');
 
     const e = typeof exp === 'number' ? exp : exp.im === 0 ? exp.re : undefined;
@@ -756,7 +756,7 @@ export class BoxedFunction extends _BoxedExpression {
 
   ln(semiBase?: number | BoxedExpression): BoxedExpression {
     const base = semiBase ? this.engine.box(semiBase) : undefined;
-    if (!this.isCanonical) throw new Error('Not canonical');
+    if (!(this.isCanonical || this.isStructural)) throw new Error('Not canonical');
 
     // Mathematica returns `Log[0]` as `-∞`
     if (this.is(0)) return this.engine.NegativeInfinity;
@@ -814,7 +814,7 @@ export class BoxedFunction extends _BoxedExpression {
   get complexity(): number | undefined {
     // Since the canonical and non-canonical version of the expression
     // may have different heads, not applicable to non-canonical expressions.
-    if (!this.isCanonical) return undefined;
+    if (!(this.isCanonical || this.isStructural)) return undefined;
     return this.operatorDefinition?.complexity ?? DEFAULT_COMPLEXITY;
   }
 
