@@ -1,3 +1,4 @@
+import { ComputeEngine } from '../../src/compute-engine';
 import { engine as ce } from '../utils';
 
 describe('NUMERIC TYPES', () => {
@@ -90,5 +91,50 @@ describe('NUMERIC SUBTYPES', () => {
     expect(expr.type.matches('complex')).toBe(false);
     expect(expr.type.matches('finite_number')).toBe(false);
     expect(expr.type.matches('non_finite_number')).toBe(false);
+  });
+});
+
+// https://github.com/cortex-js/compute-engine/issues/235
+describe('BROADCASTABLE FUNCTIONS WITH UNION TYPES', () => {
+  it('should accept number | list arguments for Multiply', () => {
+    const ce = new ComputeEngine();
+    ce.declare('a', 'number | list');
+    ce.declare('b', 'number | list');
+    const expr = ce.box(['Multiply', 'a', 'b']);
+    expect(expr.json).toEqual(['Multiply', 'a', 'b']);
+  });
+
+  it('should accept number | list arguments for Add', () => {
+    const ce = new ComputeEngine();
+    ce.declare('a', 'number | list');
+    ce.declare('b', 'number | list');
+    const expr = ce.box(['Add', 'a', 'b']);
+    expect(expr.json).toEqual(['Add', 'a', 'b']);
+  });
+
+  it('should accept any-typed arguments for Multiply', () => {
+    const ce = new ComputeEngine();
+    ce.declare('a', 'any');
+    ce.declare('b', 'any');
+    const expr = ce.box(['Multiply', 'a', 'b']);
+    expect(expr.json).toEqual(['Multiply', 'a', 'b']);
+  });
+
+  it('should accept unknown-typed arguments for Multiply', () => {
+    const ce = new ComputeEngine();
+    ce.declare('a', 'unknown');
+    ce.declare('b', 'unknown');
+    const expr = ce.box(['Multiply', 'a', 'b']);
+    expect(expr.json).toEqual(['Multiply', 'a', 'b']);
+  });
+
+  it('should evaluate Multiply with list-valued symbols', () => {
+    const ce = new ComputeEngine();
+    ce.declare('a', 'number | list');
+    ce.declare('b', 'number | list');
+    ce.assign('a', ['List', 1, 2, 3]);
+    ce.assign('b', ['List', 4, 5, 6]);
+    const expr = ce.box(['Multiply', 'a', 'b']);
+    expect(expr.evaluate().json).toEqual(['List', 4, 10, 18]);
   });
 });

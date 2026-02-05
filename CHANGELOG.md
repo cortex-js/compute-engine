@@ -23,6 +23,13 @@
   method now uses `bignumRe` instead of `re` to preserve full precision when
   handling large integer values from `BigNumericValue`.
 
+- **Broadcastable Functions with Union/Any Types** ([#235](https://github.com/cortex-js/compute-engine/issues/235)):
+  Broadcastable (threadable) functions like `Multiply` and `Add` no longer
+  reject arguments whose type is a union of numeric and collection types (e.g.,
+  `number | list`) or `any`. Previously, declaring a symbol as
+  `ce.declare('a', 'number | list')` and using it in `ce.box(['Multiply', 'a', 'b'])`
+  would produce an `incompatible-type` error.
+
 ## 0.35.1 _2026-02-03_
 
 ### Bug Fixes

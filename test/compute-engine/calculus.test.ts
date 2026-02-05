@@ -90,12 +90,12 @@ describe('INDEFINITE INTEGRATION', () => {
 
   test('sum', () =>
     expect(evaluate('\\int f(x) + g(x) dx')).toMatchInlineSnapshot(
-      `int(Error(ErrorCode("incompatible-type", "number", "any")) + g(x) dx)`
+      `int(g(x) dx) + int(f(x) dx)`
     ));
 
   test('product', () =>
     expect(evaluate('\\int f(x) g(x) dx')).toMatchInlineSnapshot(
-      `int((f(x), g, x) dg  dx)`
+      `int((f(x), g(x)) dx)`
     ));
 
   test('product with constants', () =>

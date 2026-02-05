@@ -9,6 +9,53 @@ import { isOperatorDef, isValueDef } from './utils';
 import { isBoxedTensor } from './boxed-tensor';
 
 /**
+ * Return true if a type could be a collection type at runtime.
+ * This is used for threadable/broadcastable functions to accept arguments
+ * whose type includes a collection possibility (e.g. `number | list`).
+ */
+function typeCouldBeCollection(type: Type): boolean {
+  if (typeof type === 'string') {
+    return (
+      type === 'collection' ||
+      type === 'indexed_collection' ||
+      type === 'list' ||
+      type === 'set' ||
+      type === 'tuple' ||
+      type === 'any'
+    );
+  }
+  if (
+    type.kind === 'list' ||
+    type.kind === 'set' ||
+    type.kind === 'tuple'
+  )
+    return true;
+  if (type.kind === 'union') return type.types.some((t) => typeCouldBeCollection(t));
+  return false;
+}
+
+/**
+ * Return true if a type could be a numeric collection at runtime.
+ * Used in `checkNumericArgs` (the fastpath for threadable numeric functions)
+ * to accept types like `list`, `number | list`, but not tuples
+ * with non-numeric elements.
+ */
+function typeCouldBeNumericCollection(type: Type): boolean {
+  if (typeof type === 'string') {
+    return (
+      type === 'list' ||
+      type === 'set' ||
+      type === 'collection' ||
+      type === 'indexed_collection'
+    );
+  }
+  if (type.kind === 'list' || type.kind === 'set') return true;
+  if (type.kind === 'union')
+    return type.types.some((t) => typeCouldBeNumericCollection(t));
+  return false;
+}
+
+/**
  * Check that the number of arguments is as expected.
  *
  * Converts the arguments to canonical, and flattens the sequence.
@@ -102,8 +149,13 @@ export function checkNumericArgs(
     } else if (op.symbol && !ce.lookupDefinition(op.symbol)) {
       // We have an unknown symbol, we'll infer it's a number later
       xs.push(op);
-    } else if (op.type.isUnknown) {
-      // Unknown type. Keep it that way, infer later
+    } else if (op.type.isUnknown || op.type.type === 'any') {
+      // Unknown or any type. Keep it that way, infer later
+      xs.push(op);
+    } else if (typeCouldBeNumericCollection(op.type.type)) {
+      // The argument's type could be a numeric collection at runtime
+      // (e.g. `list`, `number | list`). Since numeric functions are
+      // threadable, accept it.
       xs.push(op);
     } else if (isBoxedTensor(op)) {
       // The argument is a tensor (matrix or vector). Accept it for tensor
@@ -282,13 +334,13 @@ export function validateArguments(
       isValid = false;
       continue;
     }
-    if (op.type.isUnknown) {
-      // An expression with an unknown type is assumed to be valid,
+    if (op.type.isUnknown || op.type.type === 'any') {
+      // An expression with an unknown or any type is assumed to be valid,
       // we'll infer the type later
       result.push(op);
       continue;
     }
-    if (threadable && isFiniteIndexedCollection(op)) {
+    if (threadable && (isFiniteIndexedCollection(op) || typeCouldBeCollection(op.type.type))) {
       result.push(op);
       continue;
     }
@@ -328,14 +380,14 @@ export function validateArguments(
       i += 1;
       continue;
     }
-    if (op.type.isUnknown) {
-      // An expression with an unknown assumed to be valid,
+    if (op.type.isUnknown || op.type.type === 'any') {
+      // An expression with an unknown or any type is assumed to be valid,
       // we'll infer the type later
       result.push(op);
       i += 1;
       continue;
     }
-    if (threadable && isFiniteIndexedCollection(op)) {
+    if (threadable && (isFiniteIndexedCollection(op) || typeCouldBeCollection(op.type.type))) {
       result.push(op);
       i += 1;
       continue;
@@ -372,13 +424,13 @@ export function validateArguments(
         isValid = false;
         continue;
       }
-      if (op.type.isUnknown) {
-        // An expression without a type is assumed to be valid,
+      if (op.type.isUnknown || op.type.type === 'any') {
+        // An expression with an unknown or any type is assumed to be valid,
         // we'll infer the type later
         result.push(op);
         continue;
       }
-      if (threadable && isFiniteIndexedCollection(op)) {
+      if (threadable && (isFiniteIndexedCollection(op) || typeCouldBeCollection(op.type.type))) {
         result.push(op);
         continue;
       }
@@ -418,19 +470,21 @@ export function validateArguments(
   i = 0;
   for (const param of params) {
     if (!lazy)
-      if (!threadable || !isFiniteIndexedCollection(ops[i]))
+      if (!threadable || (!isFiniteIndexedCollection(ops[i]) && !typeCouldBeCollection(ops[i].type.type)))
         ops[i].infer(param);
     i += 1;
   }
   for (const param of optParams) {
     if (!ops[i]) break;
-    if (!threadable || !isFiniteIndexedCollection(ops[i])) ops[i]?.infer(param);
+    if (!threadable || (!isFiniteIndexedCollection(ops[i]) && !typeCouldBeCollection(ops[i].type.type)))
+      ops[i]?.infer(param);
     i += 1;
   }
   if (varParam) {
     for (const op of ops.slice(i)) {
       if (!lazy)
-        if (!threadable || !isFiniteIndexedCollection(op)) op.infer(varParam);
+        if (!threadable || (!isFiniteIndexedCollection(op) && !typeCouldBeCollection(op.type.type)))
+          op.infer(varParam);
       i += 1;
     }
   }
