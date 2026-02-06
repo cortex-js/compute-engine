@@ -79,7 +79,7 @@ const GLSL_FUNCTIONS: CompiledFunctions = {
   Arccos: 'acos',
   Arcsin: 'asin',
   Arctan: 'atan',
-  Ceiling: 'ceil',
+  Ceil: 'ceil',
   Clamp: 'clamp',
   Cos: 'cos',
   Degrees: 'degrees',
@@ -173,7 +173,7 @@ const GLSL_FUNCTIONS: CompiledFunctions = {
   },
 
   // Additional math functions
-  Sgn: 'sign',
+  // Sign is already registered in the standard functions above
   Lb: 'log2',
   Log: (args, compile) => {
     if (args.length === 0) throw new Error('Log: no argument');

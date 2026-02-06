@@ -151,7 +151,6 @@ const PYTHON_FUNCTIONS: CompiledFunctions = {
   },
 
   // Elementary
-  Sgn: 'np.sign',
   Lb: 'np.log2',
   Square: ([x], compile) => {
     if (x === null) throw new Error('Square: no argument');
@@ -192,7 +191,7 @@ const PYTHON_FUNCTIONS: CompiledFunctions = {
   Abs: 'np.abs',
   Sign: 'np.sign',
   Floor: 'np.floor',
-  Ceiling: 'np.ceil',
+  Ceil: 'np.ceil',
   Round: 'np.round',
   Truncate: 'np.trunc',
 

@@ -88,7 +88,7 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions = {
   Arsinh: 'Math.asinh',
   Arctan: 'Math.atan',
   Artanh: 'Math.atanh',
-  Ceiling: 'Math.ceil',
+  Ceil: 'Math.ceil',
   Chop: '_SYS.chop',
   Cos: 'Math.cos',
   Cosh: 'Math.cosh',
@@ -267,7 +267,7 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions = {
     if (arg === null) throw new Error('Sech: no argument');
     return `1 / Math.cosh(${compile(arg)})`;
   },
-  Sgn: 'Math.sign',
+  Sign: 'Math.sign',
   Sin: 'Math.sin',
   Sinh: 'Math.sinh',
   Sqrt: 'Math.sqrt',

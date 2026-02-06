@@ -1015,7 +1015,7 @@ const INTERVAL_GLSL_FUNCTIONS: CompiledFunctions = {
 
   // Elementary functions
   Abs: (args, compile) => `ia_abs(${compile(args[0])})`,
-  Ceiling: (args, compile) => `ia_ceil(${compile(args[0])})`,
+  Ceil: (args, compile) => `ia_ceil(${compile(args[0])})`,
   Exp: (args, compile) => `ia_exp(${compile(args[0])})`,
   Floor: (args, compile) => `ia_floor(${compile(args[0])})`,
   Fract: (args, compile) => `ia_fract(${compile(args[0])})`,
@@ -1057,7 +1057,7 @@ const INTERVAL_GLSL_FUNCTIONS: CompiledFunctions = {
     throw new Error('Interval GLSL does not support variable exponents');
   },
   Round: (args, compile) => `ia_round(${compile(args[0])})`,
-  Sgn: (args, compile) => `ia_sign(${compile(args[0])})`,
+  Sign: (args, compile) => `ia_sign(${compile(args[0])})`,
   Sqrt: (args, compile) => `ia_sqrt(${compile(args[0])})`,
   Square: (args, compile) => `ia_square(${compile(args[0])})`,
 

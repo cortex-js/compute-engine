@@ -96,7 +96,7 @@ const INTERVAL_JAVASCRIPT_FUNCTIONS: CompiledFunctions = {
 
   // Elementary functions
   Abs: (args, compile) => `_IA.abs(${compile(args[0])})`,
-  Ceiling: (args, compile) => `_IA.ceil(${compile(args[0])})`,
+  Ceil: (args, compile) => `_IA.ceil(${compile(args[0])})`,
   Exp: (args, compile) => `_IA.exp(${compile(args[0])})`,
   Floor: (args, compile) => `_IA.floor(${compile(args[0])})`,
   Ln: (args, compile) => `_IA.ln(${compile(args[0])})`,
@@ -154,7 +154,7 @@ const INTERVAL_JAVASCRIPT_FUNCTIONS: CompiledFunctions = {
     return `_IA.powInterval(${compile(arg)}, _IA.div(_IA.point(1), ${compile(exp)}))`;
   },
   Round: (args, compile) => `_IA.round(${compile(args[0])})`,
-  Sgn: (args, compile) => `_IA.sign(${compile(args[0])})`,
+  Sign: (args, compile) => `_IA.sign(${compile(args[0])})`,
   Sqrt: (args, compile) => `_IA.sqrt(${compile(args[0])})`,
   Square: (args, compile) => `_IA.square(${compile(args[0])})`,
 
