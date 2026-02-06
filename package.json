@@ -1,5 +1,5 @@
 {
-  "version": "0.35.3",
+  "version": "0.35.4",
   "scripts": {
     "doc": "bash ./scripts/doc.sh",
     "build": "bash ./scripts/build.sh",

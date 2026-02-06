@@ -1,4 +1,4 @@
-### [Unreleased]
+### 0.35.4 _2026-02-06_
 
 ### Interval Arithmetic
 
