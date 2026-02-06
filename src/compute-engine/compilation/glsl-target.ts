@@ -104,6 +104,94 @@ const GLSL_FUNCTIONS: CompiledFunctions = {
   Step: 'step',
   Tan: 'tan',
 
+  // Reciprocal trigonometric functions (no GLSL built-ins)
+  Cot: ([x], compile) => {
+    if (x === null) throw new Error('Cot: no argument');
+    const arg = compile(x);
+    return `(cos(${arg}) / sin(${arg}))`;
+  },
+  Csc: ([x], compile) => {
+    if (x === null) throw new Error('Csc: no argument');
+    return `(1.0 / sin(${compile(x)}))`;
+  },
+  Sec: ([x], compile) => {
+    if (x === null) throw new Error('Sec: no argument');
+    return `(1.0 / cos(${compile(x)}))`;
+  },
+
+  // Inverse trigonometric (reciprocal)
+  Arccot: ([x], compile) => {
+    if (x === null) throw new Error('Arccot: no argument');
+    return `atan(1.0 / (${compile(x)}))`;
+  },
+  Arccsc: ([x], compile) => {
+    if (x === null) throw new Error('Arccsc: no argument');
+    return `asin(1.0 / (${compile(x)}))`;
+  },
+  Arcsec: ([x], compile) => {
+    if (x === null) throw new Error('Arcsec: no argument');
+    return `acos(1.0 / (${compile(x)}))`;
+  },
+
+  // Hyperbolic functions (GLSL ES 3.0+ built-ins)
+  Sinh: 'sinh',
+  Cosh: 'cosh',
+  Tanh: 'tanh',
+
+  // Reciprocal hyperbolic functions
+  Coth: ([x], compile) => {
+    if (x === null) throw new Error('Coth: no argument');
+    const arg = compile(x);
+    return `(cosh(${arg}) / sinh(${arg}))`;
+  },
+  Csch: ([x], compile) => {
+    if (x === null) throw new Error('Csch: no argument');
+    return `(1.0 / sinh(${compile(x)}))`;
+  },
+  Sech: ([x], compile) => {
+    if (x === null) throw new Error('Sech: no argument');
+    return `(1.0 / cosh(${compile(x)}))`;
+  },
+
+  // Inverse hyperbolic functions (GLSL ES 3.0+ built-ins)
+  Arcosh: 'acosh',
+  Arsinh: 'asinh',
+  Artanh: 'atanh',
+
+  // Inverse hyperbolic (reciprocal)
+  Arcoth: ([x], compile) => {
+    if (x === null) throw new Error('Arcoth: no argument');
+    return `atanh(1.0 / (${compile(x)}))`;
+  },
+  Arcsch: ([x], compile) => {
+    if (x === null) throw new Error('Arcsch: no argument');
+    return `asinh(1.0 / (${compile(x)}))`;
+  },
+  Arsech: ([x], compile) => {
+    if (x === null) throw new Error('Arsech: no argument');
+    return `acosh(1.0 / (${compile(x)}))`;
+  },
+
+  // Additional math functions
+  Sgn: 'sign',
+  Lb: 'log2',
+  Log: (args, compile) => {
+    if (args.length === 0) throw new Error('Log: no argument');
+    if (args.length === 1) return `(log(${compile(args[0])}) / log(10.0))`;
+    return `(log(${compile(args[0])}) / log(${compile(args[1])}))`;
+  },
+  Square: ([x], compile) => {
+    if (x === null) throw new Error('Square: no argument');
+    const arg = compile(x);
+    return `(${arg} * ${arg})`;
+  },
+  Root: ([x, n], compile) => {
+    if (x === null) throw new Error('Root: no argument');
+    if (n === null || n === undefined) return `sqrt(${compile(x)})`;
+    if (n?.re === 2) return `sqrt(${compile(x)})`;
+    return `pow(${compile(x)}, 1.0 / ${compile(n)})`;
+  },
+
   // Vector/Matrix operations
   Cross: 'cross',
   Distance: 'distance',

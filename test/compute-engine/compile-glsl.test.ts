@@ -56,6 +56,60 @@ describe('GLSL COMPILATION', () => {
       const code = glsl.compile(expr);
       expect(code).toMatchInlineSnapshot(`max(x, y)`);
     });
+
+    it('should compile cot', () => {
+      const expr = ce.parse('\\cot(x)');
+      const code = glsl.compile(expr);
+      expect(code).toMatchInlineSnapshot(`(cos(x) / sin(x))`);
+    });
+
+    it('should compile csc', () => {
+      const expr = ce.parse('\\csc(x)');
+      const code = glsl.compile(expr);
+      expect(code).toMatchInlineSnapshot(`(1.0 / sin(x))`);
+    });
+
+    it('should compile sec', () => {
+      const expr = ce.parse('\\sec(x)');
+      const code = glsl.compile(expr);
+      expect(code).toMatchInlineSnapshot(`(1.0 / cos(x))`);
+    });
+
+    it('should compile hyperbolic functions', () => {
+      expect(glsl.compile(ce.parse('\\sinh(x)'))).toMatchInlineSnapshot(
+        `sinh(x)`
+      );
+      expect(glsl.compile(ce.parse('\\cosh(x)'))).toMatchInlineSnapshot(
+        `cosh(x)`
+      );
+      expect(glsl.compile(ce.parse('\\tanh(x)'))).toMatchInlineSnapshot(
+        `tanh(x)`
+      );
+    });
+
+    it('should compile inverse hyperbolic functions', () => {
+      expect(glsl.compile(ce.box(['Arcosh', 'x']))).toMatchInlineSnapshot(
+        `acosh(x)`
+      );
+      expect(glsl.compile(ce.box(['Arsinh', 'x']))).toMatchInlineSnapshot(
+        `asinh(x)`
+      );
+      expect(glsl.compile(ce.box(['Artanh', 'x']))).toMatchInlineSnapshot(
+        `atanh(x)`
+      );
+    });
+
+    it('should compile reciprocal hyperbolic functions', () => {
+      expect(glsl.compile(ce.box(['Coth', 'x']))).toMatchInlineSnapshot(
+        `(cosh(x) / sinh(x))`
+      );
+      expect(glsl.compile(ce.box(['Csch', 'x']))).toMatchInlineSnapshot(
+        `(1.0 / sinh(x))`
+      );
+      expect(glsl.compile(ce.box(['Sech', 'x']))).toMatchInlineSnapshot(
+        `(1.0 / cosh(x))`
+      );
+    });
   });
 
   describe('Float Literals', () => {

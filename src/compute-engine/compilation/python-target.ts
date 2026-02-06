@@ -91,6 +91,65 @@ const PYTHON_FUNCTIONS: CompiledFunctions = {
   Arccosh: 'np.arccosh',
   Arctanh: 'np.arctanh',
 
+  // Reciprocal trigonometric functions
+  Cot: ([x], compile) => {
+    if (x === null) throw new Error('Cot: no argument');
+    return `(np.cos(${compile(x)}) / np.sin(${compile(x)}))`;
+  },
+  Csc: ([x], compile) => {
+    if (x === null) throw new Error('Csc: no argument');
+    return `(1 / np.sin(${compile(x)}))`;
+  },
+  Sec: ([x], compile) => {
+    if (x === null) throw new Error('Sec: no argument');
+    return `(1 / np.cos(${compile(x)}))`;
+  },
+
+  // Inverse trigonometric (reciprocal)
+  Arccot: ([x], compile) => {
+    if (x === null) throw new Error('Arccot: no argument');
+    return `np.arctan(1 / (${compile(x)}))`;
+  },
+  Arccsc: ([x], compile) => {
+    if (x === null) throw new Error('Arccsc: no argument');
+    return `np.arcsin(1 / (${compile(x)}))`;
+  },
+  Arcsec: ([x], compile) => {
+    if (x === null) throw new Error('Arcsec: no argument');
+    return `np.arccos(1 / (${compile(x)}))`;
+  },
+
+  // Reciprocal hyperbolic functions
+  Coth: ([x], compile) => {
+    if (x === null) throw new Error('Coth: no argument');
+    return `(np.cosh(${compile(x)}) / np.sinh(${compile(x)}))`;
+  },
+  Csch: ([x], compile) => {
+    if (x === null) throw new Error('Csch: no argument');
+    return `(1 / np.sinh(${compile(x)}))`;
+  },
+  Sech: ([x], compile) => {
+    if (x === null) throw new Error('Sech: no argument');
+    return `(1 / np.cosh(${compile(x)}))`;
+  },
+
+  // Inverse hyperbolic (reciprocal)
+  Arsinh: 'np.arcsinh',
+  Arcosh: 'np.arccosh',
+  Artanh: 'np.arctanh',
+  Arcoth: ([x], compile) => {
+    if (x === null) throw new Error('Arcoth: no argument');
+    return `np.arctanh(1 / (${compile(x)}))`;
+  },
+  Arcsch: ([x], compile) => {
+    if (x === null) throw new Error('Arcsch: no argument');
+    return `np.arcsinh(1 / (${compile(x)}))`;
+  },
+  Arsech: ([x], compile) => {
+    if (x === null) throw new Error('Arsech: no argument');
+    return `np.arccosh(1 / (${compile(x)}))`;
+  },
+
   // Exponential and logarithmic
   Exp: 'np.exp',
   Ln: 'np.log', // Natural logarithm

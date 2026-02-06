@@ -213,14 +213,26 @@ IntervalResult ia_sign(vec2 x) {
   return ia_ok(vec2(-1.0, 0.0));
 }
 
-// Floor
+// Floor - has jump discontinuities at every integer
 IntervalResult ia_floor(vec2 x) {
-  return ia_ok(vec2(floor(x.x), floor(x.y)));
+  float flo = floor(x.x);
+  float fhi = floor(x.y);
+  if (flo == fhi) {
+    return ia_ok(vec2(flo, fhi));
+  }
+  // Interval spans an integer boundary - discontinuity at first integer > x.x
+  return ia_singular(flo + 1.0);
 }
 
-// Ceiling
+// Ceiling - has jump discontinuities at every integer
 IntervalResult ia_ceil(vec2 x) {
-  return ia_ok(vec2(ceil(x.x), ceil(x.y)));
+  float clo = ceil(x.x);
+  float chi = ceil(x.y);
+  if (clo == chi) {
+    return ia_ok(vec2(clo, chi));
+  }
+  // Interval spans an integer boundary - discontinuity at ceil(x.x)
+  return ia_singular(clo);
 }
 
 // Min of two intervals
@@ -590,6 +602,171 @@ IntervalResult ia_tanh(IntervalResult x) {
   if (ia_is_error(x.status)) return x;
   return ia_tanh(x.value);
 }
+
+// Cotangent (derived from cos/sin)
+IntervalResult ia_cot(vec2 x) {
+  return ia_div(ia_cos(x), ia_sin(x));
+}
+
+IntervalResult ia_cot(IntervalResult x) {
+  if (ia_is_error(x.status)) return x;
+  return ia_cot(x.value);
+}
+
+// Cosecant (derived from 1/sin)
+IntervalResult ia_csc(vec2 x) {
+  return ia_div(ia_ok(vec2(1.0, 1.0)), ia_sin(x));
+}
+
+IntervalResult ia_csc(IntervalResult x) {
+  if (ia_is_error(x.status)) return x;
+  return ia_csc(x.value);
+}
+
+// Secant (derived from 1/cos)
+IntervalResult ia_sec(vec2 x) {
+  return ia_div(ia_ok(vec2(1.0, 1.0)), ia_cos(x));
+}
+
+IntervalResult ia_sec(IntervalResult x) {
+  if (ia_is_error(x.status)) return x;
+  return ia_sec(x.value);
+}
+
+// Inverse cotangent
+IntervalResult ia_acot(vec2 x) {
+  return ia_atan(ia_div(ia_ok(vec2(1.0, 1.0)), ia_ok(x)));
+}
+
+IntervalResult ia_acot(IntervalResult x) {
+  if (ia_is_error(x.status)) return x;
+  return ia_acot(x.value);
+}
+
+// Inverse cosecant
+IntervalResult ia_acsc(vec2 x) {
+  return ia_asin(ia_div(ia_ok(vec2(1.0, 1.0)), ia_ok(x)));
+}
+
+IntervalResult ia_acsc(IntervalResult x) {
+  if (ia_is_error(x.status)) return x;
+  return ia_acsc(x.value);
+}
+
+// Inverse secant
+IntervalResult ia_asec(vec2 x) {
+  return ia_acos(ia_div(ia_ok(vec2(1.0, 1.0)), ia_ok(x)));
+}
+
+IntervalResult ia_asec(IntervalResult x) {
+  if (ia_is_error(x.status)) return x;
+  return ia_asec(x.value);
+}
+
+// Hyperbolic cotangent
+IntervalResult ia_coth(vec2 x) {
+  return ia_div(ia_cosh(x), ia_sinh(x));
+}
+
+IntervalResult ia_coth(IntervalResult x) {
+  if (ia_is_error(x.status)) return x;
+  return ia_coth(x.value);
+}
+
+// Hyperbolic cosecant
+IntervalResult ia_csch(vec2 x) {
+  return ia_div(ia_ok(vec2(1.0, 1.0)), ia_sinh(x));
+}
+
+IntervalResult ia_csch(IntervalResult x) {
+  if (ia_is_error(x.status)) return x;
+  return ia_csch(x.value);
+}
+
+// Hyperbolic secant
+IntervalResult ia_sech(vec2 x) {
+  return ia_div(ia_ok(vec2(1.0, 1.0)), ia_cosh(x));
+}
+
+IntervalResult ia_sech(IntervalResult x) {
+  if (ia_is_error(x.status)) return x;
+  return ia_sech(x.value);
+}
+
+// Inverse hyperbolic sine
+IntervalResult ia_asinh(vec2 x) {
+  return ia_ok(vec2(asinh(x.x) - IA_EPS, asinh(x.y) + IA_EPS));
+}
+
+IntervalResult ia_asinh(IntervalResult x) {
+  if (ia_is_error(x.status)) return x;
+  return ia_asinh(x.value);
+}
+
+// Inverse hyperbolic cosine
+IntervalResult ia_acosh(vec2 x) {
+  if (x.y < 1.0) {
+    return ia_empty();
+  }
+  if (x.x >= 1.0) {
+    return ia_ok(vec2(acosh(x.x) - IA_EPS, acosh(x.y) + IA_EPS));
+  }
+  return ia_partial(vec2(0.0, acosh(x.y) + IA_EPS), IA_PARTIAL_LO);
+}
+
+IntervalResult ia_acosh(IntervalResult x) {
+  if (ia_is_error(x.status)) return x;
+  return ia_acosh(x.value);
+}
+
+// Inverse hyperbolic tangent
+IntervalResult ia_atanh(vec2 x) {
+  if (x.x >= 1.0 || x.y <= -1.0) {
+    return ia_empty();
+  }
+  vec2 clipped = vec2(max(x.x, -1.0 + IA_EPS), min(x.y, 1.0 - IA_EPS));
+  if (x.x < -1.0 || x.y > 1.0) {
+    float clip = (x.x < -1.0 && x.y > 1.0) ? IA_PARTIAL_BOTH :
+                 (x.x < -1.0) ? IA_PARTIAL_LO : IA_PARTIAL_HI;
+    return ia_partial(vec2(atanh(clipped.x) - IA_EPS, atanh(clipped.y) + IA_EPS), clip);
+  }
+  return ia_ok(vec2(atanh(x.x) - IA_EPS, atanh(x.y) + IA_EPS));
+}
+
+IntervalResult ia_atanh(IntervalResult x) {
+  if (ia_is_error(x.status)) return x;
+  return ia_atanh(x.value);
+}
+
+// Inverse hyperbolic cotangent
+IntervalResult ia_acoth(vec2 x) {
+  return ia_atanh(ia_div(ia_ok(vec2(1.0, 1.0)), ia_ok(x)));
+}
+
+IntervalResult ia_acoth(IntervalResult x) {
+  if (ia_is_error(x.status)) return x;
+  return ia_acoth(x.value);
+}
+
+// Inverse hyperbolic cosecant
+IntervalResult ia_acsch(vec2 x) {
+  return ia_asinh(ia_div(ia_ok(vec2(1.0, 1.0)), ia_ok(x)));
+}
+
+IntervalResult ia_acsch(IntervalResult x) {
+  if (ia_is_error(x.status)) return x;
+  return ia_acsch(x.value);
+}
+
+// Inverse hyperbolic secant
+IntervalResult ia_asech(vec2 x) {
+  return ia_acosh(ia_div(ia_ok(vec2(1.0, 1.0)), ia_ok(x)));
+}
+
+IntervalResult ia_asech(IntervalResult x) {
+  if (ia_is_error(x.status)) return x;
+  return ia_asech(x.value);
+}
 `;
 
 /**
@@ -697,10 +874,35 @@ const INTERVAL_GLSL_FUNCTIONS: CompiledFunctions = {
   Arccos: (args, compile) => `ia_acos(${compile(args[0])})`,
   Arctan: (args, compile) => `ia_atan(${compile(args[0])})`,
 
+  // Reciprocal trigonometric functions
+  Cot: (args, compile) => `ia_cot(${compile(args[0])})`,
+  Csc: (args, compile) => `ia_csc(${compile(args[0])})`,
+  Sec: (args, compile) => `ia_sec(${compile(args[0])})`,
+
+  // Inverse trigonometric (reciprocal)
+  Arccot: (args, compile) => `ia_acot(${compile(args[0])})`,
+  Arccsc: (args, compile) => `ia_acsc(${compile(args[0])})`,
+  Arcsec: (args, compile) => `ia_asec(${compile(args[0])})`,
+
   // Hyperbolic functions
   Sinh: (args, compile) => `ia_sinh(${compile(args[0])})`,
   Cosh: (args, compile) => `ia_cosh(${compile(args[0])})`,
   Tanh: (args, compile) => `ia_tanh(${compile(args[0])})`,
+
+  // Reciprocal hyperbolic functions
+  Coth: (args, compile) => `ia_coth(${compile(args[0])})`,
+  Csch: (args, compile) => `ia_csch(${compile(args[0])})`,
+  Sech: (args, compile) => `ia_sech(${compile(args[0])})`,
+
+  // Inverse hyperbolic functions
+  Arsinh: (args, compile) => `ia_asinh(${compile(args[0])})`,
+  Arcosh: (args, compile) => `ia_acosh(${compile(args[0])})`,
+  Artanh: (args, compile) => `ia_atanh(${compile(args[0])})`,
+
+  // Inverse hyperbolic (reciprocal)
+  Arcoth: (args, compile) => `ia_acoth(${compile(args[0])})`,
+  Arcsch: (args, compile) => `ia_acsch(${compile(args[0])})`,
+  Arsech: (args, compile) => `ia_asech(${compile(args[0])})`,
 };
 
 /**
