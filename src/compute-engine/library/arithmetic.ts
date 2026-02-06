@@ -337,6 +337,17 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       },
     },
 
+    Exp2: {
+      description: 'Base-2 exponential: 2^x',
+      complexity: 3500,
+      broadcastable: true,
+      signature: '(number) -> number',
+      canonical: (args, { engine }) => {
+        args = checkNumericArgs(engine, args, 1);
+        return engine.function('Power', [engine.number(2), ...args]);
+      },
+    },
+
     Factorial: {
       description:
         'Factorial function: the product of all positive integers less than or equal to n',
@@ -467,6 +478,24 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
           Math.floor,
           (x) => x.floor(),
           (z) => z.floor(0)
+        ),
+    },
+
+    Fract: {
+      description: 'Fractional part of a number: x - floor(x)',
+      complexity: 1250,
+      broadcastable: true,
+      signature: '(number) -> number',
+      sgn: ([x]) => {
+        if (x.isNonNegative) return 'non-negative';
+        return undefined;
+      },
+      evaluate: ([x]) =>
+        apply(
+          x,
+          (x) => x - Math.floor(x),
+          (x) => x.sub(x.floor()),
+          (z) => z.sub(z.floor(0))
         ),
     },
 
@@ -738,6 +767,24 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       signature: '(number) -> number',
       sgn: ([x]) => lnSign(x),
       canonical: ([x], { engine }) => engine._fn('Log', [x]),
+    },
+
+    Log10: {
+      description: 'Base-10 Logarithm',
+      complexity: 4100,
+      broadcastable: true,
+      signature: '(number) -> number',
+      sgn: ([x]) => lnSign(x),
+      canonical: ([x], { engine }) => engine._fn('Log', [x]),
+    },
+
+    Log2: {
+      description: 'Base-2 Logarithm',
+      complexity: 4100,
+      broadcastable: true,
+      signature: '(number) -> number',
+      sgn: ([x]) => lnSign(x),
+      canonical: ([x], { engine }) => engine._fn('Log', [x, engine.number(2)]),
     },
 
     Mod: {
@@ -1046,6 +1093,21 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         root(x, n, { numericApproximation }),
     },
 
+    Remainder: {
+      description:
+        'IEEE remainder: the signed remainder after dividing x by y, with the quotient rounded to the nearest integer',
+      complexity: 2500,
+      broadcastable: true,
+      signature: '(number, number) -> number',
+      evaluate: ([a, b]) =>
+        apply2(
+          a,
+          b,
+          (a, b) => a - b * Math.round(a / b),
+          (a, b) => a.sub(b.mul(a.div(b).round()))
+        ),
+    },
+
     Round: {
       complexity: 1250,
       broadcastable: true,
@@ -1196,6 +1258,21 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         const rest = args.slice(1);
         return canonicalAdd(engine, [first, ...rest.map((x) => x.neg())]);
       },
+    },
+
+    Truncate: {
+      description: 'Rounds a number towards zero (removes the fractional part)',
+      complexity: 1250,
+      broadcastable: true,
+      signature: '(number) -> integer',
+      sgn: ([x]) => x.sgn,
+      evaluate: ([x]) =>
+        apply(
+          x,
+          Math.trunc,
+          (x) => x.trunc(),
+          (z) => z.trunc(0)
+        ),
     },
   },
   {

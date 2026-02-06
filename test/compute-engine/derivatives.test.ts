@@ -334,8 +334,8 @@ describe('Special function derivatives', () => {
     );
   });
 
-  it('d/dx LogGamma(x) = Digamma(x)', () => {
-    const expr = engine.box(['D', ['LogGamma', 'x'], 'x']);
+  it('d/dx GammaLn(x) = Digamma(x)', () => {
+    const expr = engine.box(['D', ['GammaLn', 'x'], 'x']);
     const result = expr.evaluate();
     expect(result.toString()).toMatchInlineSnapshot(`Digamma(x)`);
   });

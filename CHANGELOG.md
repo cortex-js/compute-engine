@@ -1,3 +1,26 @@
+### [Unreleased]
+
+### Bug Fixes
+
+- **Compilation Target Function Name Mismatches**: Fixed several function keys
+  in compilation targets that did not match their canonical library operator
+  names, causing silent compilation failures and runtime errors ("Unexpected
+  value"). Affected mappings: `Ceiling` → `Ceil`, `Sgn` → `Sign`,
+  `LogGamma` → `GammaLn`, `Arcsinh` → `Arsinh`, `Arccosh` → `Arcosh`,
+  `Arctanh` → `Artanh`, `Re` → `Real`, `Im` → `Imaginary`, `Arg` → `Argument`
+  across all five compilation targets.
+
+- **Missing Library Operator Definitions**: Added library definitions for
+  `Exp2`, `Fract`, `Log10`, `Log2`, `Remainder`, and `Truncate` which were
+  referenced by compilation targets but had no corresponding library entries.
+  `Exp2` canonicalizes to `Power(2, x)`, `Log10`/`Log2` canonicalize to `Log`
+  with the appropriate base, and `Fract`, `Remainder`, `Truncate` have direct
+  numeric evaluation.
+
+- **Derivative Rule for GammaLn**: Fixed the derivative table entry that used
+  the non-canonical name `LogGamma` instead of `GammaLn`, preventing the
+  derivative `d/dx GammaLn(x) = Digamma(x)` from being computed.
+
 ### 0.35.4 _2026-02-06_
 
 ### Interval Arithmetic

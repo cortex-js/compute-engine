@@ -87,9 +87,9 @@ const PYTHON_FUNCTIONS: CompiledFunctions = {
   Sinh: 'np.sinh',
   Cosh: 'np.cosh',
   Tanh: 'np.tanh',
-  Arcsinh: 'np.arcsinh',
-  Arccosh: 'np.arccosh',
-  Arctanh: 'np.arctanh',
+  Arsinh: 'np.arcsinh',
+  Arcosh: 'np.arccosh',
+  Artanh: 'np.arctanh',
 
   // Reciprocal trigonometric functions
   Cot: ([x], compile) => {
@@ -204,9 +204,9 @@ const PYTHON_FUNCTIONS: CompiledFunctions = {
   Remainder: 'np.remainder',
 
   // Complex numbers
-  Re: 'np.real',
-  Im: 'np.imag',
-  Arg: 'np.angle',
+  Real: 'np.real',
+  Imaginary: 'np.imag',
+  Argument: 'np.angle',
   Conjugate: 'np.conj',
 
   // Array/Vector operations
@@ -241,7 +241,7 @@ const PYTHON_FUNCTIONS: CompiledFunctions = {
   Erf: 'scipy.special.erf',
   Erfc: 'scipy.special.erfc',
   Gamma: 'scipy.special.gamma',
-  LogGamma: 'scipy.special.loggamma',
+  GammaLn: 'scipy.special.loggamma',
   Factorial: 'scipy.special.factorial',
 
   // Common patterns

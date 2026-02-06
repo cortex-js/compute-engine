@@ -135,7 +135,7 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions = {
     if (args.length === 1) return `Math.log10(${compile(args[0])})`;
     return `(Math.log(${compile(args[0])}) / Math.log(${compile(args[1])}))`;
   },
-  LogGamma: '_SYS.lngamma',
+  GammaLn: '_SYS.lngamma',
   Lb: 'Math.log2',
   Max: 'Math.max',
   Mean: (args, compile) => {
