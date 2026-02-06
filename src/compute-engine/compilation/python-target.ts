@@ -134,9 +134,6 @@ const PYTHON_FUNCTIONS: CompiledFunctions = {
   },
 
   // Inverse hyperbolic (reciprocal)
-  Arsinh: 'np.arcsinh',
-  Arcosh: 'np.arccosh',
-  Artanh: 'np.arctanh',
   Arcoth: ([x], compile) => {
     if (x === null) throw new Error('Arcoth: no argument');
     return `np.arctanh(1 / (${compile(x)}))`;
