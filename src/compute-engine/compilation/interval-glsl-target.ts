@@ -203,14 +203,13 @@ IntervalResult ia_abs(vec2 x) {
   return ia_ok(vec2(0.0, max(-x.x, x.y)));
 }
 
-// Sign function
+// Sign function - has jump discontinuity at 0
 IntervalResult ia_sign(vec2 x) {
   if (x.x > 0.0) return ia_ok(vec2(1.0, 1.0));
   if (x.y < 0.0) return ia_ok(vec2(-1.0, -1.0));
   if (x.x == 0.0 && x.y == 0.0) return ia_ok(vec2(0.0, 0.0));
-  if (x.x < 0.0 && x.y > 0.0) return ia_ok(vec2(-1.0, 1.0));
-  if (x.x == 0.0) return ia_ok(vec2(0.0, 1.0));
-  return ia_ok(vec2(-1.0, 0.0));
+  // Interval spans 0 - discontinuity
+  return ia_singular(0.0);
 }
 
 // Floor - has jump discontinuities at every integer
@@ -233,6 +232,63 @@ IntervalResult ia_ceil(vec2 x) {
   }
   // Interval spans an integer boundary - discontinuity at ceil(x.x)
   return ia_singular(clo);
+}
+
+// Round - has jump discontinuities at every half-integer
+// round(x) = floor(x + 0.5), so discontinuities at n + 0.5
+IntervalResult ia_round(vec2 x) {
+  float rlo = round(x.x);
+  float rhi = round(x.y);
+  if (rlo == rhi) {
+    return ia_ok(vec2(rlo, rhi));
+  }
+  // Interval spans a half-integer boundary - discontinuity
+  return ia_singular(rlo + 0.5);
+}
+
+// Fract - sawtooth discontinuities at every integer
+// fract(x) = x - floor(x), jumps from ~1 back to 0 at each integer
+IntervalResult ia_fract(vec2 x) {
+  float flo = floor(x.x);
+  float fhi = floor(x.y);
+  if (flo == fhi) {
+    // No integer crossing - fract is continuous (linear) on this interval
+    return ia_ok(vec2(fract(x.x) - IA_EPS, fract(x.y) + IA_EPS));
+  }
+  // Interval spans an integer - sawtooth discontinuity
+  return ia_singular(flo + 1.0);
+}
+
+// Mod - periodic discontinuities at multiples of the modulus
+// mod(x, y) = x - y * floor(x / y)
+IntervalResult ia_mod(vec2 x, vec2 y) {
+  // y contains zero - undefined
+  if (y.x <= 0.0 && y.y >= 0.0) {
+    return ia_singular(0.0);
+  }
+
+  // Constant modulus (point interval) - common case
+  if (y.x == y.y) {
+    float period = abs(y.x);
+    float flo = floor(x.x / period);
+    float fhi = floor(x.y / period);
+    if (flo == fhi) {
+      // No discontinuity - mod is continuous (linear) on this interval
+      float mlo = x.x - period * flo;
+      float mhi = x.y - period * flo;
+      return ia_ok(vec2(min(mlo, mhi) - IA_EPS, max(mlo, mhi) + IA_EPS));
+    }
+    // Discontinuity at first multiple of period in the interval
+    return ia_singular((flo + 1.0) * period);
+  }
+
+  // General case: compose from existing operations
+  // Discontinuity detection comes from ia_floor
+  IntervalResult q = ia_div(x, y);
+  if (ia_is_error(q.status)) return q;
+  IntervalResult fq = ia_floor(q.value);
+  if (ia_is_error(fq.status)) return fq;
+  return ia_sub(x, ia_mul_raw(y, fq.value));
 }
 
 // Min of two intervals
@@ -519,6 +575,32 @@ IntervalResult ia_floor(IntervalResult x) {
 IntervalResult ia_ceil(IntervalResult x) {
   if (ia_is_error(x.status)) return x;
   return ia_ceil(x.value);
+}
+
+IntervalResult ia_round(IntervalResult x) {
+  if (ia_is_error(x.status)) return x;
+  return ia_round(x.value);
+}
+
+IntervalResult ia_fract(IntervalResult x) {
+  if (ia_is_error(x.status)) return x;
+  return ia_fract(x.value);
+}
+
+IntervalResult ia_mod(IntervalResult a, IntervalResult b) {
+  if (ia_is_error(a.status)) return a;
+  if (ia_is_error(b.status)) return b;
+  return ia_mod(a.value, b.value);
+}
+
+IntervalResult ia_mod(IntervalResult a, vec2 b) {
+  if (ia_is_error(a.status)) return a;
+  return ia_mod(a.value, b);
+}
+
+IntervalResult ia_mod(vec2 a, IntervalResult b) {
+  if (ia_is_error(b.status)) return b;
+  return ia_mod(a, b.value);
 }
 
 IntervalResult ia_min(IntervalResult a, IntervalResult b) {
@@ -827,7 +909,10 @@ const INTERVAL_GLSL_FUNCTIONS: CompiledFunctions = {
   Ceiling: (args, compile) => `ia_ceil(${compile(args[0])})`,
   Exp: (args, compile) => `ia_exp(${compile(args[0])})`,
   Floor: (args, compile) => `ia_floor(${compile(args[0])})`,
+  Fract: (args, compile) => `ia_fract(${compile(args[0])})`,
   Ln: (args, compile) => `ia_ln(${compile(args[0])})`,
+  Mod: (args, compile) =>
+    `ia_mod(${compile(args[0])}, ${compile(args[1])})`,
   Max: (args, compile) => {
     if (args.length === 0) return 'ia_point(-1e38)';
     if (args.length === 1) return compile(args[0]);
@@ -862,6 +947,7 @@ const INTERVAL_GLSL_FUNCTIONS: CompiledFunctions = {
     // Variable exponent - not fully supported in this simple implementation
     throw new Error('Interval GLSL does not support variable exponents');
   },
+  Round: (args, compile) => `ia_round(${compile(args[0])})`,
   Sgn: (args, compile) => `ia_sign(${compile(args[0])})`,
   Sqrt: (args, compile) => `ia_sqrt(${compile(args[0])})`,
   Square: (args, compile) => `ia_square(${compile(args[0])})`,
