@@ -26,6 +26,8 @@ import {
   abs,
   floor,
   ceil,
+  round,
+  fract,
   min,
   max,
   mod,
@@ -34,12 +36,27 @@ import {
   sin,
   cos,
   tan,
+  cot,
+  csc,
+  sec,
   asin,
   acos,
   atan,
+  acot,
+  acsc,
+  asec,
   sinh,
   cosh,
   tanh,
+  coth,
+  csch,
+  sech,
+  asinh,
+  acosh,
+  atanh,
+  acoth,
+  acsch,
+  asech,
   // Comparison
   less,
   lessEqual,
@@ -298,6 +315,41 @@ describe('INTERVAL ELEMENTARY FUNCTIONS', () => {
   test('mod - narrow interval no crossing', () => {
     expectInterval(mod({ lo: 1, hi: 2 }, { lo: 3, hi: 3 }), 1, 2);
   });
+
+  test('mod - negative dividend, positive modulus, no crossing', () => {
+    // -5 mod 3 = 1, -4 mod 3 = 2 (Euclidean convention)
+    expectInterval(mod({ lo: -5, hi: -4 }, { lo: 3, hi: 3 }), 1, 2);
+  });
+
+  test('mod - negative dividend, crosses period boundary', () => {
+    // -4 mod 3 = 2, -2 mod 3 = 1 — crosses boundary at -3
+    const result = mod({ lo: -4, hi: -2 }, { lo: 3, hi: 3 });
+    expect(result.kind).toBe('singular');
+  });
+
+  test('round - no boundary crossing', () => {
+    expectInterval(round({ lo: 1.1, hi: 1.4 }), 1, 1);
+  });
+
+  test('round - crosses half-integer boundary', () => {
+    const result = round({ lo: 1.3, hi: 1.7 });
+    expect(result.kind).toBe('singular');
+  });
+
+  test('fract - no boundary crossing', () => {
+    expectInterval(fract({ lo: 1.2, hi: 1.8 }), 0.2, 0.8, 1e-6);
+  });
+
+  test('fract - crosses integer boundary', () => {
+    const result = fract({ lo: 1.8, hi: 2.2 });
+    expect(result.kind).toBe('singular');
+  });
+
+  test('fract - negative, no crossing', () => {
+    // fract(-1.7) = -1.7 - floor(-1.7) = -1.7 - (-2) = 0.3
+    // fract(-1.3) = -1.3 - floor(-1.3) = -1.3 - (-2) = 0.7
+    expectInterval(fract({ lo: -1.7, hi: -1.3 }), 0.3, 0.7, 1e-6);
+  });
 });
 
 describe('INTERVAL TRIGONOMETRIC FUNCTIONS', () => {
@@ -372,6 +424,187 @@ describe('INTERVAL TRIGONOMETRIC FUNCTIONS', () => {
 
   test('tanh', () => {
     expectInterval(tanh({ lo: -1, hi: 1 }), Math.tanh(-1), Math.tanh(1), 1e-6);
+  });
+
+  // Reciprocal trigonometric functions
+  test('cot - safe interval', () => {
+    // cot(x) = cos(x)/sin(x), safe away from n*pi
+    const result = cot({ lo: 0.5, hi: 1.0 });
+    expect(result.kind).toBe('interval');
+    if (result.kind === 'interval') {
+      const cotLo = Math.min(1 / Math.tan(0.5), 1 / Math.tan(1.0));
+      const cotHi = Math.max(1 / Math.tan(0.5), 1 / Math.tan(1.0));
+      expect(result.value.lo).toBeCloseTo(cotLo, 5);
+      expect(result.value.hi).toBeCloseTo(cotHi, 5);
+    }
+  });
+
+  test('cot - contains singularity at pi', () => {
+    const result = cot({ lo: 3.0, hi: 3.3 }); // Contains pi ~ 3.14159
+    expect(result.kind).toBe('singular');
+  });
+
+  test('csc - safe interval', () => {
+    const result = csc({ lo: 0.5, hi: 1.0 });
+    expect(result.kind).toBe('interval');
+    if (result.kind === 'interval') {
+      const cscLo = Math.min(1 / Math.sin(0.5), 1 / Math.sin(1.0));
+      const cscHi = Math.max(1 / Math.sin(0.5), 1 / Math.sin(1.0));
+      expect(result.value.lo).toBeCloseTo(cscLo, 5);
+      expect(result.value.hi).toBeCloseTo(cscHi, 5);
+    }
+  });
+
+  test('csc - contains singularity at pi', () => {
+    const result = csc({ lo: 3.0, hi: 3.3 }); // Contains pi
+    expect(result.kind).toBe('singular');
+  });
+
+  test('sec - safe interval', () => {
+    const result = sec({ lo: 0.1, hi: 0.5 });
+    expect(result.kind).toBe('interval');
+    if (result.kind === 'interval') {
+      const secLo = Math.min(1 / Math.cos(0.1), 1 / Math.cos(0.5));
+      const secHi = Math.max(1 / Math.cos(0.1), 1 / Math.cos(0.5));
+      expect(result.value.lo).toBeCloseTo(secLo, 5);
+      expect(result.value.hi).toBeCloseTo(secHi, 5);
+    }
+  });
+
+  test('sec - contains singularity at pi/2', () => {
+    const result = sec({ lo: 1.5, hi: 1.7 }); // Contains pi/2 ~ 1.5708
+    expect(result.kind).toBe('singular');
+  });
+
+  // Inverse reciprocal trigonometric functions
+  test('acot - safe interval (positive)', () => {
+    const result = acot({ lo: 1, hi: 2 });
+    expect(result.kind).toBe('interval');
+  });
+
+  test('acot - singular at zero', () => {
+    const result = acot({ lo: -1, hi: 1 });
+    expect(result.kind).toBe('singular');
+  });
+
+  test('acsc - safe interval', () => {
+    const result = acsc({ lo: 1, hi: 2 });
+    expect(result.kind).not.toBe('empty');
+  });
+
+  test('acsc - singular at zero', () => {
+    const result = acsc({ lo: -0.5, hi: 0.5 });
+    expect(result.kind).toBe('singular');
+  });
+
+  test('asec - safe interval', () => {
+    const result = asec({ lo: 1, hi: 2 });
+    expect(result.kind).not.toBe('empty');
+  });
+
+  test('asec - singular at zero', () => {
+    const result = asec({ lo: -0.5, hi: 0.5 });
+    expect(result.kind).toBe('singular');
+  });
+
+  // Reciprocal hyperbolic functions
+  test('coth - safe positive interval', () => {
+    const result = coth({ lo: 1, hi: 2 });
+    expect(result.kind).toBe('interval');
+  });
+
+  test('coth - singular at zero', () => {
+    const result = coth({ lo: -1, hi: 1 });
+    expect(result.kind).toBe('singular');
+  });
+
+  test('csch - safe positive interval', () => {
+    const result = csch({ lo: 1, hi: 2 });
+    expect(result.kind).toBe('interval');
+  });
+
+  test('csch - singular at zero', () => {
+    const result = csch({ lo: -1, hi: 1 });
+    expect(result.kind).toBe('singular');
+  });
+
+  test('sech - always valid (cosh >= 1)', () => {
+    const result = sech({ lo: -1, hi: 1 });
+    expect(result.kind).toBe('interval');
+    if (result.kind === 'interval') {
+      // sech is bounded (0, 1], max at x=0
+      expect(result.value.hi).toBeCloseTo(1, 5);
+    }
+  });
+
+  // Inverse hyperbolic functions
+  test('asinh - monotonically increasing', () => {
+    expectInterval(
+      asinh({ lo: -1, hi: 1 }),
+      Math.asinh(-1),
+      Math.asinh(1),
+      1e-6
+    );
+  });
+
+  test('acosh - within domain', () => {
+    expectInterval(
+      acosh({ lo: 1, hi: 3 }),
+      Math.acosh(1),
+      Math.acosh(3),
+      1e-6
+    );
+  });
+
+  test('acosh - partially outside domain', () => {
+    const result = acosh({ lo: 0, hi: 3 });
+    expect(result.kind).toBe('partial');
+  });
+
+  test('atanh - within domain', () => {
+    expectInterval(
+      atanh({ lo: -0.5, hi: 0.5 }),
+      Math.atanh(-0.5),
+      Math.atanh(0.5),
+      1e-6
+    );
+  });
+
+  test('atanh - outside domain', () => {
+    const result = atanh({ lo: 2, hi: 3 });
+    expect(result.kind).toBe('empty');
+  });
+
+  // Inverse reciprocal hyperbolic functions
+  test('acoth - safe interval (|x| > 1)', () => {
+    const result = acoth({ lo: 2, hi: 3 });
+    expect(result.kind).not.toBe('empty');
+    expect(result.kind).not.toBe('singular');
+  });
+
+  test('acoth - singular at zero', () => {
+    const result = acoth({ lo: -1, hi: 1 });
+    expect(result.kind).toBe('singular');
+  });
+
+  test('acsch - safe interval', () => {
+    const result = acsch({ lo: 1, hi: 2 });
+    expect(result.kind).toBe('interval');
+  });
+
+  test('acsch - singular at zero', () => {
+    const result = acsch({ lo: -1, hi: 1 });
+    expect(result.kind).toBe('singular');
+  });
+
+  test('asech - safe interval (0 < x <= 1)', () => {
+    const result = asech({ lo: 0.5, hi: 1 });
+    expect(result.kind).not.toBe('empty');
+  });
+
+  test('asech - singular at zero', () => {
+    const result = asech({ lo: -0.5, hi: 0.5 });
+    expect(result.kind).toBe('singular');
   });
 });
 

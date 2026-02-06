@@ -235,7 +235,9 @@ IntervalResult ia_ceil(vec2 x) {
 }
 
 // Round - has jump discontinuities at every half-integer
-// round(x) = floor(x + 0.5), so discontinuities at n + 0.5
+// Note: GLSL round() uses IEEE 754 round-half-to-even, while JS Math.round
+// uses round-half-up. They differ only AT half-integers; discontinuity
+// detection is safe because intervals spanning half-integers return singular.
 IntervalResult ia_round(vec2 x) {
   float rlo = round(x.x);
   float rhi = round(x.y);
@@ -849,6 +851,98 @@ IntervalResult ia_asech(IntervalResult x) {
   if (ia_is_error(x.status)) return x;
   return ia_asech(x.value);
 }
+
+// Boolean interval comparisons
+// Returns 1.0 = true, 0.0 = false, 0.5 = maybe
+const float IA_TRUE = 1.0;
+const float IA_FALSE = 0.0;
+const float IA_MAYBE = 0.5;
+
+float ia_less(vec2 a, vec2 b) {
+  if (a.y < b.x) return IA_TRUE;
+  if (a.x >= b.y) return IA_FALSE;
+  return IA_MAYBE;
+}
+
+float ia_lessEqual(vec2 a, vec2 b) {
+  if (a.y <= b.x) return IA_TRUE;
+  if (a.x > b.y) return IA_FALSE;
+  return IA_MAYBE;
+}
+
+float ia_greater(vec2 a, vec2 b) {
+  if (a.x > b.y) return IA_TRUE;
+  if (a.y <= b.x) return IA_FALSE;
+  return IA_MAYBE;
+}
+
+float ia_greaterEqual(vec2 a, vec2 b) {
+  if (a.x >= b.y) return IA_TRUE;
+  if (a.y < b.x) return IA_FALSE;
+  return IA_MAYBE;
+}
+
+float ia_equal(vec2 a, vec2 b) {
+  if (a.x == a.y && b.x == b.y && a.x == b.x) return IA_TRUE;
+  if (a.y < b.x || b.y < a.x) return IA_FALSE;
+  return IA_MAYBE;
+}
+
+float ia_notEqual(vec2 a, vec2 b) {
+  float eq = ia_equal(a, b);
+  if (eq == IA_TRUE) return IA_FALSE;
+  if (eq == IA_FALSE) return IA_TRUE;
+  return IA_MAYBE;
+}
+
+float ia_and(float a, float b) {
+  if (a == IA_FALSE || b == IA_FALSE) return IA_FALSE;
+  if (a == IA_TRUE && b == IA_TRUE) return IA_TRUE;
+  return IA_MAYBE;
+}
+
+float ia_or(float a, float b) {
+  if (a == IA_TRUE || b == IA_TRUE) return IA_TRUE;
+  if (a == IA_FALSE && b == IA_FALSE) return IA_FALSE;
+  return IA_MAYBE;
+}
+
+float ia_not(float a) {
+  if (a == IA_TRUE) return IA_FALSE;
+  if (a == IA_FALSE) return IA_TRUE;
+  return IA_MAYBE;
+}
+
+// IntervalResult overloads for comparisons
+float ia_less(IntervalResult a, IntervalResult b) {
+  if (ia_is_error(a.status) || ia_is_error(b.status)) return IA_MAYBE;
+  return ia_less(a.value, b.value);
+}
+
+float ia_lessEqual(IntervalResult a, IntervalResult b) {
+  if (ia_is_error(a.status) || ia_is_error(b.status)) return IA_MAYBE;
+  return ia_lessEqual(a.value, b.value);
+}
+
+float ia_greater(IntervalResult a, IntervalResult b) {
+  if (ia_is_error(a.status) || ia_is_error(b.status)) return IA_MAYBE;
+  return ia_greater(a.value, b.value);
+}
+
+float ia_greaterEqual(IntervalResult a, IntervalResult b) {
+  if (ia_is_error(a.status) || ia_is_error(b.status)) return IA_MAYBE;
+  return ia_greaterEqual(a.value, b.value);
+}
+
+float ia_equal(IntervalResult a, IntervalResult b) {
+  if (ia_is_error(a.status) || ia_is_error(b.status)) return IA_MAYBE;
+  return ia_equal(a.value, b.value);
+}
+
+float ia_notEqual(IntervalResult a, IntervalResult b) {
+  if (ia_is_error(a.status) || ia_is_error(b.status)) return IA_MAYBE;
+  return ia_notEqual(a.value, b.value);
+}
 `;
 
 /**
@@ -989,6 +1083,25 @@ const INTERVAL_GLSL_FUNCTIONS: CompiledFunctions = {
   Arcoth: (args, compile) => `ia_acoth(${compile(args[0])})`,
   Arcsch: (args, compile) => `ia_acsch(${compile(args[0])})`,
   Arsech: (args, compile) => `ia_asech(${compile(args[0])})`,
+
+  // Comparison and logic (return float: 1.0=true, 0.0=false, 0.5=maybe)
+  Equal: (args, compile) =>
+    `ia_equal(${compile(args[0])}, ${compile(args[1])})`,
+  NotEqual: (args, compile) =>
+    `ia_notEqual(${compile(args[0])}, ${compile(args[1])})`,
+  Less: (args, compile) =>
+    `ia_less(${compile(args[0])}, ${compile(args[1])})`,
+  LessEqual: (args, compile) =>
+    `ia_lessEqual(${compile(args[0])}, ${compile(args[1])})`,
+  Greater: (args, compile) =>
+    `ia_greater(${compile(args[0])}, ${compile(args[1])})`,
+  GreaterEqual: (args, compile) =>
+    `ia_greaterEqual(${compile(args[0])}, ${compile(args[1])})`,
+  And: (args, compile) =>
+    `ia_and(${compile(args[0])}, ${compile(args[1])})`,
+  Or: (args, compile) =>
+    `ia_or(${compile(args[0])}, ${compile(args[1])})`,
+  Not: (args, compile) => `ia_not(${compile(args[0])})`,
 };
 
 /**

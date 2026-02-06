@@ -346,6 +346,11 @@ export function ceil(x: Interval | IntervalResult): IntervalResult {
  * Round to nearest integer.
  *
  * Has jump discontinuities at every half-integer.
+ *
+ * Note: JS `Math.round` uses round-half-up, while GLSL `round()` uses
+ * IEEE 754 round-half-to-even. They differ only AT half-integer values.
+ * For discontinuity detection this is safe because any interval spanning
+ * a half-integer returns `singular` regardless of the rounding convention.
  */
 export function round(x: Interval | IntervalResult): IntervalResult {
   const unwrapped = unwrapOrPropagate(x);
@@ -413,6 +418,12 @@ export function max(
  * Modulo (remainder) operation.
  *
  * Has sawtooth discontinuities at multiples of the modulus.
+ * Uses Euclidean (mathematical) convention: result is non-negative for
+ * positive modulus, even with negative dividends.
+ *
+ * Note: For non-point modulus intervals, uses `max(|lo|, |hi|)` as
+ * a conservative approximation of the period. This may produce bounds
+ * that are too narrow for wide modulus intervals.
  */
 export function mod(
   a: Interval | IntervalResult,
