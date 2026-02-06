@@ -24,13 +24,10 @@ function typeCouldBeCollection(type: Type): boolean {
       type === 'any'
     );
   }
-  if (
-    type.kind === 'list' ||
-    type.kind === 'set' ||
-    type.kind === 'tuple'
-  )
+  if (type.kind === 'list' || type.kind === 'set' || type.kind === 'tuple')
     return true;
-  if (type.kind === 'union') return type.types.some((t) => typeCouldBeCollection(t));
+  if (type.kind === 'union')
+    return type.types.some((t) => typeCouldBeCollection(t));
   return false;
 }
 
@@ -340,7 +337,10 @@ export function validateArguments(
       result.push(op);
       continue;
     }
-    if (threadable && (isFiniteIndexedCollection(op) || typeCouldBeCollection(op.type.type))) {
+    if (
+      threadable &&
+      (isFiniteIndexedCollection(op) || typeCouldBeCollection(op.type.type))
+    ) {
       result.push(op);
       continue;
     }
@@ -387,7 +387,10 @@ export function validateArguments(
       i += 1;
       continue;
     }
-    if (threadable && (isFiniteIndexedCollection(op) || typeCouldBeCollection(op.type.type))) {
+    if (
+      threadable &&
+      (isFiniteIndexedCollection(op) || typeCouldBeCollection(op.type.type))
+    ) {
       result.push(op);
       i += 1;
       continue;
@@ -430,7 +433,10 @@ export function validateArguments(
         result.push(op);
         continue;
       }
-      if (threadable && (isFiniteIndexedCollection(op) || typeCouldBeCollection(op.type.type))) {
+      if (
+        threadable &&
+        (isFiniteIndexedCollection(op) || typeCouldBeCollection(op.type.type))
+      ) {
         result.push(op);
         continue;
       }
@@ -470,20 +476,32 @@ export function validateArguments(
   i = 0;
   for (const param of params) {
     if (!lazy)
-      if (!threadable || (!isFiniteIndexedCollection(ops[i]) && !typeCouldBeCollection(ops[i].type.type)))
+      if (
+        !threadable ||
+        (!isFiniteIndexedCollection(ops[i]) &&
+          !typeCouldBeCollection(ops[i].type.type))
+      )
         ops[i].infer(param);
     i += 1;
   }
   for (const param of optParams) {
     if (!ops[i]) break;
-    if (!threadable || (!isFiniteIndexedCollection(ops[i]) && !typeCouldBeCollection(ops[i].type.type)))
+    if (
+      !threadable ||
+      (!isFiniteIndexedCollection(ops[i]) &&
+        !typeCouldBeCollection(ops[i].type.type))
+    )
       ops[i]?.infer(param);
     i += 1;
   }
   if (varParam) {
     for (const op of ops.slice(i)) {
       if (!lazy)
-        if (!threadable || (!isFiniteIndexedCollection(op) && !typeCouldBeCollection(op.type.type)))
+        if (
+          !threadable ||
+          (!isFiniteIndexedCollection(op) &&
+            !typeCouldBeCollection(op.type.type))
+        )
           op.infer(varParam);
       i += 1;
     }

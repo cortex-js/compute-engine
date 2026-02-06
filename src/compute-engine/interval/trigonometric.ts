@@ -430,11 +430,7 @@ export function atanh(x: Interval | IntervalResult): IntervalResult {
       kind: 'partial',
       value: { lo: Math.atanh(clippedLo), hi: Math.atanh(clippedHi) },
       domainClipped:
-        xVal.lo <= -1 && xVal.hi >= 1
-          ? 'both'
-          : xVal.lo <= -1
-            ? 'lo'
-            : 'hi',
+        xVal.lo <= -1 && xVal.hi >= 1 ? 'both' : xVal.lo <= -1 ? 'lo' : 'hi',
     };
   }
 

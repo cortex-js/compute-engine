@@ -441,7 +441,11 @@ export function mod(
     return { kind: 'singular' };
   }
 
-  const period = Math.abs(bVal.lo === bVal.hi ? bVal.lo : Math.max(Math.abs(bVal.lo), Math.abs(bVal.hi)));
+  const period = Math.abs(
+    bVal.lo === bVal.hi
+      ? bVal.lo
+      : Math.max(Math.abs(bVal.lo), Math.abs(bVal.hi))
+  );
 
   // Check if interval crosses a period boundary
   const flo = Math.floor(aVal.lo / period);

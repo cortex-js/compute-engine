@@ -208,7 +208,8 @@ const INTERVAL_JAVASCRIPT_FUNCTIONS: CompiledFunctions = {
     )`;
   },
   // Comparisons
-  Equal: (args, compile) => `_IA.equal(${compile(args[0])}, ${compile(args[1])})`,
+  Equal: (args, compile) =>
+    `_IA.equal(${compile(args[0])}, ${compile(args[1])})`,
   NotEqual: (args, compile) =>
     `_IA.notEqual(${compile(args[0])}, ${compile(args[1])})`,
   LessEqual: (args, compile) =>

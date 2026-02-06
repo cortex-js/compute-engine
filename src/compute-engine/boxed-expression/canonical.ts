@@ -262,8 +262,7 @@ function multiplyForm(expr: BoxedExpression) {
   const ops = expr.ops.map(multiplyForm);
 
   // If this is a multiply, canonicalize it
-  if (expr.operator === 'Multiply')
-    return canonicalMultiply(expr.engine, ops);
+  if (expr.operator === 'Multiply') return canonicalMultiply(expr.engine, ops);
 
   if (expr.operator === 'Negate')
     return canonicalMultiply(expr.engine, [ops[0], expr.engine.NegativeOne]);

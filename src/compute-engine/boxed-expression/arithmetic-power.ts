@@ -56,7 +56,8 @@ export function canonicalPower(
 ): BoxedExpression {
   const ce = a.engine;
 
-  const fullyCanonical = (a.isCanonical || a.isStructural) && (b.isCanonical || b.isStructural);
+  const fullyCanonical =
+    (a.isCanonical || a.isStructural) && (b.isCanonical || b.isStructural);
   const unchanged = () =>
     ce._fn('Power', [a, b], { canonical: fullyCanonical });
 
@@ -263,14 +264,14 @@ export function canonicalPower(
   // Fractional exponents
   //---------------------
   if (b.is(0.5))
-    return (a.isCanonical || a.isStructural)
+    return a.isCanonical || a.isStructural
       ? canonicalRoot(a, 2)
       : ce._fn('Sqrt', [a], { canonical: false });
   const r = asRational(b);
 
   //1/3, 1/4...
   if (r !== undefined && r[0] === 1 && r[1] !== 1)
-    return (a.isCanonical || a.isStructural)
+    return a.isCanonical || a.isStructural
       ? canonicalRoot(a, ce.number(r[1]))
       : ce._fn('Root', [a, ce.number(r[1])], { canonical: false });
 
@@ -301,7 +302,9 @@ export function canonicalRoot(
   }
 
   return ce._fn('Root', [a, typeof b === 'number' ? ce.number(b) : b], {
-    canonical: (a.isCanonical || a.isStructural) && (typeof b === 'number' || b.isCanonical || b.isStructural),
+    canonical:
+      (a.isCanonical || a.isStructural) &&
+      (typeof b === 'number' || b.isCanonical || b.isStructural),
   });
 }
 
@@ -319,7 +322,10 @@ export function pow(
   exp: number | BoxedExpression,
   { numericApproximation }: { numericApproximation: boolean }
 ): BoxedExpression {
-  if (!(x.isCanonical || x.isStructural) || (typeof exp !== 'number' && !(exp.isCanonical || exp.isStructural)))
+  if (
+    !(x.isCanonical || x.isStructural) ||
+    (typeof exp !== 'number' && !(exp.isCanonical || exp.isStructural))
+  )
     return x.engine._fn('Power', [x, x.engine.box(exp)], { canonical: false });
 
   //

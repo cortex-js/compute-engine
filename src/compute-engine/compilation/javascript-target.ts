@@ -118,10 +118,7 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions = {
   Floor: 'Math.floor',
   Fract: ([x], compile) => {
     if (x === null) throw new Error('Fract: no argument');
-    return BaseCompiler.inlineExpression(
-      '${x} - Math.floor(${x})',
-      compile(x)
-    );
+    return BaseCompiler.inlineExpression('${x} - Math.floor(${x})', compile(x));
   },
   Gamma: '_SYS.gamma',
   GCD: '_SYS.gcd',

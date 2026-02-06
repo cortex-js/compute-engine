@@ -148,12 +148,8 @@ export function not(a: BoolInterval): BoolInterval {
  */
 export function piecewise(
   xOrCond: Interval | IntervalResult | BoolInterval,
-  conditionOrTrue:
-    | ((x: Interval) => BoolInterval)
-    | (() => IntervalResult),
-  trueOrFalse:
-    | ((x: Interval) => IntervalResult)
-    | (() => IntervalResult),
+  conditionOrTrue: ((x: Interval) => BoolInterval) | (() => IntervalResult),
+  trueOrFalse: ((x: Interval) => IntervalResult) | (() => IntervalResult),
   falseBranch?: (x: Interval) => IntervalResult
 ): IntervalResult {
   if (xOrCond === 'true' || xOrCond === 'false' || xOrCond === 'maybe') {

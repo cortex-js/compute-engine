@@ -1020,8 +1020,7 @@ const INTERVAL_GLSL_FUNCTIONS: CompiledFunctions = {
   Floor: (args, compile) => `ia_floor(${compile(args[0])})`,
   Fract: (args, compile) => `ia_fract(${compile(args[0])})`,
   Ln: (args, compile) => `ia_ln(${compile(args[0])})`,
-  Mod: (args, compile) =>
-    `ia_mod(${compile(args[0])}, ${compile(args[1])})`,
+  Mod: (args, compile) => `ia_mod(${compile(args[0])}, ${compile(args[1])})`,
   Max: (args, compile) => {
     if (args.length === 0) return 'ia_point(-1e38)';
     if (args.length === 1) return compile(args[0]);
@@ -1104,18 +1103,15 @@ const INTERVAL_GLSL_FUNCTIONS: CompiledFunctions = {
     `ia_equal(${compile(args[0])}, ${compile(args[1])})`,
   NotEqual: (args, compile) =>
     `ia_notEqual(${compile(args[0])}, ${compile(args[1])})`,
-  Less: (args, compile) =>
-    `ia_less(${compile(args[0])}, ${compile(args[1])})`,
+  Less: (args, compile) => `ia_less(${compile(args[0])}, ${compile(args[1])})`,
   LessEqual: (args, compile) =>
     `ia_lessEqual(${compile(args[0])}, ${compile(args[1])})`,
   Greater: (args, compile) =>
     `ia_greater(${compile(args[0])}, ${compile(args[1])})`,
   GreaterEqual: (args, compile) =>
     `ia_greaterEqual(${compile(args[0])}, ${compile(args[1])})`,
-  And: (args, compile) =>
-    `ia_and(${compile(args[0])}, ${compile(args[1])})`,
-  Or: (args, compile) =>
-    `ia_or(${compile(args[0])}, ${compile(args[1])})`,
+  And: (args, compile) => `ia_and(${compile(args[0])}, ${compile(args[1])})`,
+  Or: (args, compile) => `ia_or(${compile(args[0])}, ${compile(args[1])})`,
   Not: (args, compile) => `ia_not(${compile(args[0])})`,
 };
 
