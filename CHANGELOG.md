@@ -1,3 +1,5 @@
+### [Unreleased]
+
 ### 0.35.5 _2026-02-06_
 
 ### Bug Fixes
@@ -5,10 +7,10 @@
 - **Compilation Target Function Name Mismatches**: Fixed several function keys
   in compilation targets that did not match their canonical library operator
   names, causing silent compilation failures and runtime errors ("Unexpected
-  value"). Affected mappings: `Ceiling` → `Ceil`, `Sgn` → `Sign`,
-  `LogGamma` → `GammaLn`, `Arcsinh` → `Arsinh`, `Arccosh` → `Arcosh`,
-  `Arctanh` → `Artanh`, `Re` → `Real`, `Im` → `Imaginary`, `Arg` → `Argument`
-  across all five compilation targets.
+  value"). Affected mappings: `Ceiling` → `Ceil`, `Sgn` → `Sign`, `LogGamma` →
+  `GammaLn`, `Arcsinh` → `Arsinh`, `Arccosh` → `Arcosh`, `Arctanh` → `Artanh`,
+  `Re` → `Real`, `Im` → `Imaginary`, `Arg` → `Argument` across all five
+  compilation targets.
 
 - **Missing Library Operator Definitions**: Added library definitions for
   `Exp2`, `Fract`, `Log10`, `Log2`, `Remainder`, and `Truncate` which were
