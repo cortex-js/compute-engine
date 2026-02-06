@@ -5,7 +5,8 @@
  */
 
 import type { Interval, IntervalResult } from './types';
-import { ok, containsExtremum, unwrapOrPropagate } from './util';
+import { ok, containsExtremum, containsZero, unwrapOrPropagate } from './util';
+import { div } from './arithmetic';
 
 const TWO_PI = 2 * Math.PI;
 const PI = Math.PI;
@@ -438,4 +439,133 @@ export function atanh(x: Interval | IntervalResult): IntervalResult {
   }
 
   return ok({ lo: Math.atanh(xVal.lo), hi: Math.atanh(xVal.hi) });
+}
+
+/**
+ * Inverse cotangent: acot(x) = atan(1/x).
+ *
+ * Has a discontinuity at x = 0.
+ */
+export function acot(x: Interval | IntervalResult): IntervalResult {
+  const unwrapped = unwrapOrPropagate(x);
+  if (!Array.isArray(unwrapped)) return unwrapped;
+  const [xVal] = unwrapped;
+  if (containsZero(xVal)) {
+    return { kind: 'singular', at: 0 };
+  }
+  return atan(div(ok({ lo: 1, hi: 1 }), ok(xVal)));
+}
+
+/**
+ * Inverse cosecant: acsc(x) = asin(1/x).
+ *
+ * Domain: |x| >= 1. Has a singularity at x = 0.
+ */
+export function acsc(x: Interval | IntervalResult): IntervalResult {
+  const unwrapped = unwrapOrPropagate(x);
+  if (!Array.isArray(unwrapped)) return unwrapped;
+  const [xVal] = unwrapped;
+  if (containsZero(xVal)) {
+    return { kind: 'singular', at: 0 };
+  }
+  return asin(div(ok({ lo: 1, hi: 1 }), ok(xVal)));
+}
+
+/**
+ * Inverse secant: asec(x) = acos(1/x).
+ *
+ * Domain: |x| >= 1. Has a singularity at x = 0.
+ */
+export function asec(x: Interval | IntervalResult): IntervalResult {
+  const unwrapped = unwrapOrPropagate(x);
+  if (!Array.isArray(unwrapped)) return unwrapped;
+  const [xVal] = unwrapped;
+  if (containsZero(xVal)) {
+    return { kind: 'singular', at: 0 };
+  }
+  return acos(div(ok({ lo: 1, hi: 1 }), ok(xVal)));
+}
+
+/**
+ * Hyperbolic cotangent: coth(x) = cosh(x)/sinh(x).
+ *
+ * Has a singularity at x = 0.
+ */
+export function coth(x: Interval | IntervalResult): IntervalResult {
+  const unwrapped = unwrapOrPropagate(x);
+  if (!Array.isArray(unwrapped)) return unwrapped;
+  const [xVal] = unwrapped;
+  if (containsZero(xVal)) {
+    return { kind: 'singular', at: 0 };
+  }
+  return div(cosh(xVal), sinh(xVal));
+}
+
+/**
+ * Hyperbolic cosecant: csch(x) = 1/sinh(x).
+ *
+ * Has a singularity at x = 0.
+ */
+export function csch(x: Interval | IntervalResult): IntervalResult {
+  const unwrapped = unwrapOrPropagate(x);
+  if (!Array.isArray(unwrapped)) return unwrapped;
+  const [xVal] = unwrapped;
+  if (containsZero(xVal)) {
+    return { kind: 'singular', at: 0 };
+  }
+  return div(ok({ lo: 1, hi: 1 }), sinh(xVal));
+}
+
+/**
+ * Hyperbolic secant: sech(x) = 1/cosh(x).
+ *
+ * Always valid since cosh(x) >= 1.
+ */
+export function sech(x: Interval | IntervalResult): IntervalResult {
+  return div(ok({ lo: 1, hi: 1 }), cosh(x));
+}
+
+/**
+ * Inverse hyperbolic cotangent: acoth(x) = atanh(1/x).
+ *
+ * Domain: |x| > 1. Has a singularity at x = 0.
+ */
+export function acoth(x: Interval | IntervalResult): IntervalResult {
+  const unwrapped = unwrapOrPropagate(x);
+  if (!Array.isArray(unwrapped)) return unwrapped;
+  const [xVal] = unwrapped;
+  if (containsZero(xVal)) {
+    return { kind: 'singular', at: 0 };
+  }
+  return atanh(div(ok({ lo: 1, hi: 1 }), ok(xVal)));
+}
+
+/**
+ * Inverse hyperbolic cosecant: acsch(x) = asinh(1/x).
+ *
+ * Domain: x != 0.
+ */
+export function acsch(x: Interval | IntervalResult): IntervalResult {
+  const unwrapped = unwrapOrPropagate(x);
+  if (!Array.isArray(unwrapped)) return unwrapped;
+  const [xVal] = unwrapped;
+  if (containsZero(xVal)) {
+    return { kind: 'singular', at: 0 };
+  }
+  return asinh(div(ok({ lo: 1, hi: 1 }), ok(xVal)));
+}
+
+/**
+ * Inverse hyperbolic secant: asech(x) = acosh(1/x).
+ *
+ * Domain: (0, 1]. Has a singularity at x = 0.
+ */
+export function asech(x: Interval | IntervalResult): IntervalResult {
+  const unwrapped = unwrapOrPropagate(x);
+  if (!Array.isArray(unwrapped)) return unwrapped;
+  const [xVal] = unwrapped;
+  if (containsZero(xVal)) {
+    return { kind: 'singular', at: 0 };
+  }
+  return acosh(div(ok({ lo: 1, hi: 1 }), ok(xVal)));
 }

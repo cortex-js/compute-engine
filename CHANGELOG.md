@@ -1,3 +1,27 @@
+## [Unreleased]
+
+### Compilation
+
+- **Expanded Function Support Across All Targets**: Added comprehensive function
+  mappings to all five compilation targets (JavaScript, GLSL, Interval GLSL,
+  Interval JavaScript, Python): reciprocal trig (`Cot`, `Csc`, `Sec`), inverse
+  reciprocal trig (`Arccot`, `Arccsc`, `Arcsec`), hyperbolic (`Sinh`, `Cosh`,
+  `Tanh`), reciprocal hyperbolic (`Coth`, `Csch`, `Sech`), inverse hyperbolic
+  (`Arcosh`, `Arsinh`, `Artanh`, `Arcoth`, `Arcsch`, `Arsech`), and elementary
+  functions (`Sgn`, `Lb`, `Log` with base, `Square`, `Root`, `Fract`).
+
+- **Interval Discontinuity Detection**: `Floor`, `Ceil`, `Round`, `Sign`,
+  `Fract`, and `Mod` now correctly report singularities when an interval spans a
+  discontinuity point, in both the JavaScript and GLSL interval arithmetic
+  targets. Previously these functions returned normal interval bounds even across
+  jump discontinuities, which could cause incorrect connecting lines in plotted
+  curves.
+
+- **New Interval Functions**: Added `Round`, `Fract`, and `Mod` to the interval
+  arithmetic targets (both JS and GLSL) with proper discontinuity detection.
+
+### Bug Fixes
+
 ## 0.35.2 _2026-02-05_
 
 ### Bug Fixes
@@ -11,34 +35,36 @@
   treated as exact integers when possible. This change aligns with the
   documented behavior of the `parseNumbers: 'auto'` option.
 
-- **Scientific Notation Serialization** ([#284](https://github.com/cortex-js/compute-engine/issues/284)):
-  Fixed `toLatex()` with `scientific` and `adaptiveScientific` notation options
-  to produce properly normalized output. Previously, numbers like `6.02e23`
-  would serialize as `602\cdot10^{21}` instead of the expected
-  `6.02\cdot10^{23}`. The output now depends only on the numeric value and
-  formatting options, not on the internal representation.
+- **Scientific Notation Serialization**
+  ([#284](https://github.com/cortex-js/compute-engine/issues/284)): Fixed
+  `toLatex()` with `scientific` and `adaptiveScientific` notation options to
+  produce properly normalized output. Previously, numbers like `6.02e23` would
+  serialize as `602\cdot10^{21}` instead of the expected `6.02\cdot10^{23}`. The
+  output now depends only on the numeric value and formatting options, not on
+  the internal representation.
 
 - **Numeric Sum Precision**: Fixed precision loss when summing large integers
   with rational values (e.g., `12345678^3 + 1/3`). The `ExactNumericValue.sum()`
   method now uses `bignumRe` instead of `re` to preserve full precision when
   handling large integer values from `BigNumericValue`.
 
-- **Broadcastable Functions with Union/Any Types** ([#235](https://github.com/cortex-js/compute-engine/issues/235)):
+- **Broadcastable Functions with Union/Any Types**
+  ([#235](https://github.com/cortex-js/compute-engine/issues/235)):
   Broadcastable (threadable) functions like `Multiply` and `Add` no longer
   reject arguments whose type is a union of numeric and collection types (e.g.,
   `number | list`) or `any`. Previously, declaring a symbol as
-  `ce.declare('a', 'number | list')` and using it in `ce.box(['Multiply', 'a', 'b'])`
-  would produce an `incompatible-type` error.
+  `ce.declare('a', 'number | list')` and using it in
+  `ce.box(['Multiply', 'a', 'b'])` would produce an `incompatible-type` error.
 
-- **Division Canonicalization Over-Simplification** ([#227](https://github.com/cortex-js/compute-engine/issues/227)):
-  Fixed `A/A` being incorrectly simplified to `1` during canonicalization for
-  constant expressions that evaluate to infinity or zero, such as
-  `tan(π/2)/tan(π/2)`. This now correctly evaluates to `NaN` (since `∞/∞` is
-  indeterminate) instead of `1`. Expressions with free variables (e.g., `x/x`,
-  `sin(x)/sin(x)`) continue to simplify to `1` per standard algebraic
-  convention. Also fixed deferred constant divisions like `0/(1-1)` and
-  `(1-1)/(1-1)` to properly evaluate to `NaN` instead of remaining as
-  unevaluated expressions.
+- **Division Canonicalization Over-Simplification**
+  ([#227](https://github.com/cortex-js/compute-engine/issues/227)): Fixed `A/A`
+  being incorrectly simplified to `1` during canonicalization for constant
+  expressions that evaluate to infinity or zero, such as `tan(π/2)/tan(π/2)`.
+  This now correctly evaluates to `NaN` (since `∞/∞` is indeterminate) instead
+  of `1`. Expressions with free variables (e.g., `x/x`, `sin(x)/sin(x)`)
+  continue to simplify to `1` per standard algebraic convention. Also fixed
+  deferred constant divisions like `0/(1-1)` and `(1-1)/(1-1)` to properly
+  evaluate to `NaN` instead of remaining as unevaluated expressions.
 
 ## 0.35.1 _2026-02-03_
 

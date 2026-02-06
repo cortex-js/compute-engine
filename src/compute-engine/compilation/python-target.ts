@@ -150,6 +150,18 @@ const PYTHON_FUNCTIONS: CompiledFunctions = {
     return `np.arccosh(1 / (${compile(x)}))`;
   },
 
+  // Elementary
+  Sgn: 'np.sign',
+  Lb: 'np.log2',
+  Square: ([x], compile) => {
+    if (x === null) throw new Error('Square: no argument');
+    return `np.square(${compile(x)})`;
+  },
+  Fract: ([x], compile) => {
+    if (x === null) throw new Error('Fract: no argument');
+    return `np.modf(${compile(x)})[0]`;
+  },
+
   // Exponential and logarithmic
   Exp: 'np.exp',
   Ln: 'np.log', // Natural logarithm

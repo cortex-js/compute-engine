@@ -313,35 +313,68 @@ export function abs(x: Interval | IntervalResult): IntervalResult {
 /**
  * Floor function (greatest integer <= x).
  *
- * Note: Produces step-function discontinuities when floor(x.lo) != floor(x.hi).
+ * Has jump discontinuities at every integer.
  */
 export function floor(x: Interval | IntervalResult): IntervalResult {
   const unwrapped = unwrapOrPropagate(x);
   if (!Array.isArray(unwrapped)) return unwrapped;
   const [xVal] = unwrapped;
-  return ok({ lo: Math.floor(xVal.lo), hi: Math.floor(xVal.hi) });
+  const flo = Math.floor(xVal.lo);
+  const fhi = Math.floor(xVal.hi);
+  if (flo === fhi) return ok({ lo: flo, hi: fhi });
+  // Interval spans an integer boundary — discontinuity
+  return { kind: 'singular', at: flo + 1 };
 }
 
 /**
  * Ceiling function (least integer >= x).
  *
- * Note: Produces step-function discontinuities when ceil(x.lo) != ceil(x.hi).
+ * Has jump discontinuities at every integer.
  */
 export function ceil(x: Interval | IntervalResult): IntervalResult {
   const unwrapped = unwrapOrPropagate(x);
   if (!Array.isArray(unwrapped)) return unwrapped;
   const [xVal] = unwrapped;
-  return ok({ lo: Math.ceil(xVal.lo), hi: Math.ceil(xVal.hi) });
+  const clo = Math.ceil(xVal.lo);
+  const chi = Math.ceil(xVal.hi);
+  if (clo === chi) return ok({ lo: clo, hi: chi });
+  // Interval spans an integer boundary — discontinuity
+  return { kind: 'singular', at: clo };
 }
 
 /**
  * Round to nearest integer.
+ *
+ * Has jump discontinuities at every half-integer.
  */
 export function round(x: Interval | IntervalResult): IntervalResult {
   const unwrapped = unwrapOrPropagate(x);
   if (!Array.isArray(unwrapped)) return unwrapped;
   const [xVal] = unwrapped;
-  return ok({ lo: Math.round(xVal.lo), hi: Math.round(xVal.hi) });
+  const rlo = Math.round(xVal.lo);
+  const rhi = Math.round(xVal.hi);
+  if (rlo === rhi) return ok({ lo: rlo, hi: rhi });
+  // Interval spans a half-integer boundary — discontinuity
+  return { kind: 'singular', at: rlo + 0.5 };
+}
+
+/**
+ * Fractional part: fract(x) = x - floor(x).
+ *
+ * Sawtooth function with discontinuities at every integer.
+ */
+export function fract(x: Interval | IntervalResult): IntervalResult {
+  const unwrapped = unwrapOrPropagate(x);
+  if (!Array.isArray(unwrapped)) return unwrapped;
+  const [xVal] = unwrapped;
+  const flo = Math.floor(xVal.lo);
+  const fhi = Math.floor(xVal.hi);
+  if (flo === fhi) {
+    // No integer crossing — fract is continuous (linear)
+    return ok({ lo: xVal.lo - flo, hi: xVal.hi - flo });
+  }
+  // Interval spans an integer — sawtooth discontinuity
+  return { kind: 'singular', at: flo + 1 };
 }
 
 /**
@@ -379,8 +412,7 @@ export function max(
 /**
  * Modulo (remainder) operation.
  *
- * Has discontinuities and is complex with interval divisor.
- * Conservative approach: if interval spans a period, return [0, |b|).
+ * Has sawtooth discontinuities at multiples of the modulus.
  */
 export function mod(
   a: Interval | IntervalResult,
@@ -394,31 +426,28 @@ export function mod(
     return { kind: 'singular' };
   }
 
-  const bAbs = Math.max(Math.abs(bVal.lo), Math.abs(bVal.hi));
-  const aWidth = aVal.hi - aVal.lo;
+  const period = Math.abs(bVal.lo === bVal.hi ? bVal.lo : Math.max(Math.abs(bVal.lo), Math.abs(bVal.hi)));
 
-  if (aWidth >= bAbs) {
-    // Interval is wide enough to span all possible mod values
-    return ok({ lo: 0, hi: bAbs });
+  // Check if interval crosses a period boundary
+  const flo = Math.floor(aVal.lo / period);
+  const fhi = Math.floor(aVal.hi / period);
+
+  if (flo !== fhi) {
+    // Interval spans a multiple of the period — discontinuity
+    return { kind: 'singular', at: (flo + 1) * period };
   }
 
-  // For narrow intervals, compute endpoint values
-  // This may over-estimate due to wrap-around
-  const modLo = ((aVal.lo % bAbs) + bAbs) % bAbs;
-  const modHi = ((aVal.hi % bAbs) + bAbs) % bAbs;
-
-  if (modLo <= modHi) {
-    return ok({ lo: modLo, hi: modHi });
-  } else {
-    // Wrap-around occurred - result spans [0, bAbs)
-    return ok({ lo: 0, hi: bAbs });
-  }
+  // No discontinuity — mod is continuous (linear) on this interval
+  const modLo = aVal.lo - period * flo;
+  const modHi = aVal.hi - period * flo;
+  return ok({ lo: Math.min(modLo, modHi), hi: Math.max(modLo, modHi) });
 }
 
 /**
  * Sign function.
  *
  * Returns -1, 0, or 1 depending on the sign.
+ * Has a jump discontinuity at 0.
  */
 export function sign(x: Interval | IntervalResult): IntervalResult {
   const unwrapped = unwrapOrPropagate(x);
@@ -427,9 +456,6 @@ export function sign(x: Interval | IntervalResult): IntervalResult {
   if (xVal.lo > 0) return ok({ lo: 1, hi: 1 });
   if (xVal.hi < 0) return ok({ lo: -1, hi: -1 });
   if (xVal.lo === 0 && xVal.hi === 0) return ok({ lo: 0, hi: 0 });
-  // Interval crosses zero
-  if (xVal.lo < 0 && xVal.hi > 0) return ok({ lo: -1, hi: 1 });
-  if (xVal.lo === 0) return ok({ lo: 0, hi: 1 });
-  // x.hi === 0
-  return ok({ lo: -1, hi: 0 });
+  // Interval spans zero — discontinuity
+  return { kind: 'singular', at: 0 };
 }

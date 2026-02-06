@@ -233,12 +233,22 @@ describe('INTERVAL ELEMENTARY FUNCTIONS', () => {
     expectInterval(abs({ lo: -2, hi: 3 }), 0, 3);
   });
 
-  test('floor', () => {
-    expectInterval(floor({ lo: 1.5, hi: 2.5 }), 1, 2);
+  test('floor - no boundary crossing', () => {
+    expectInterval(floor({ lo: 1.2, hi: 1.8 }), 1, 1);
   });
 
-  test('ceil', () => {
-    expectInterval(ceil({ lo: 1.5, hi: 2.5 }), 2, 3);
+  test('floor - crosses integer boundary', () => {
+    const result = floor({ lo: 1.5, hi: 2.5 });
+    expect(result.kind).toBe('singular');
+  });
+
+  test('ceil - no boundary crossing', () => {
+    expectInterval(ceil({ lo: 1.2, hi: 1.8 }), 2, 2);
+  });
+
+  test('ceil - crosses integer boundary', () => {
+    const result = ceil({ lo: 1.5, hi: 2.5 });
+    expect(result.kind).toBe('singular');
   });
 
   test('min', () => {
@@ -258,7 +268,8 @@ describe('INTERVAL ELEMENTARY FUNCTIONS', () => {
   });
 
   test('sign - contains zero', () => {
-    expectInterval(sign({ lo: -1, hi: 1 }), -1, 1);
+    const result = sign({ lo: -1, hi: 1 });
+    expect(result.kind).toBe('singular');
   });
 
   test('pow - positive integer', () => {
@@ -279,8 +290,13 @@ describe('INTERVAL ELEMENTARY FUNCTIONS', () => {
     expect(result.kind).toBe('singular');
   });
 
-  test('mod - wide interval', () => {
-    expectInterval(mod({ lo: 0, hi: 10 }, { lo: 3, hi: 3 }), 0, 3);
+  test('mod - wide interval crosses period', () => {
+    const result = mod({ lo: 0, hi: 10 }, { lo: 3, hi: 3 });
+    expect(result.kind).toBe('singular');
+  });
+
+  test('mod - narrow interval no crossing', () => {
+    expectInterval(mod({ lo: 1, hi: 2 }, { lo: 3, hi: 3 }), 1, 2);
   });
 });
 

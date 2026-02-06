@@ -168,19 +168,31 @@ const INTERVAL_JAVASCRIPT_FUNCTIONS: CompiledFunctions = {
   Arcsin: (args, compile) => `_IA.asin(${compile(args[0])})`,
   Arccos: (args, compile) => `_IA.acos(${compile(args[0])})`,
   Arctan: (args, compile) => `_IA.atan(${compile(args[0])})`,
+  Arccot: (args, compile) => `_IA.acot(${compile(args[0])})`,
+  Arccsc: (args, compile) => `_IA.acsc(${compile(args[0])})`,
+  Arcsec: (args, compile) => `_IA.asec(${compile(args[0])})`,
 
   // Hyperbolic functions
   Sinh: (args, compile) => `_IA.sinh(${compile(args[0])})`,
   Cosh: (args, compile) => `_IA.cosh(${compile(args[0])})`,
   Tanh: (args, compile) => `_IA.tanh(${compile(args[0])})`,
+  Coth: (args, compile) => `_IA.coth(${compile(args[0])})`,
+  Csch: (args, compile) => `_IA.csch(${compile(args[0])})`,
+  Sech: (args, compile) => `_IA.sech(${compile(args[0])})`,
   Arsinh: (args, compile) => `_IA.asinh(${compile(args[0])})`,
   Arcosh: (args, compile) => `_IA.acosh(${compile(args[0])})`,
   Artanh: (args, compile) => `_IA.atanh(${compile(args[0])})`,
+  Arcoth: (args, compile) => `_IA.acoth(${compile(args[0])})`,
+  Arcsch: (args, compile) => `_IA.acsch(${compile(args[0])})`,
+  Arsech: (args, compile) => `_IA.asech(${compile(args[0])})`,
 
   // Inverse trig (alternative names)
   Asin: (args, compile) => `_IA.asin(${compile(args[0])})`,
   Acos: (args, compile) => `_IA.acos(${compile(args[0])})`,
   Atan: (args, compile) => `_IA.atan(${compile(args[0])})`,
+
+  // Elementary
+  Fract: (args, compile) => `_IA.fract(${compile(args[0])})`,
 
   // Mod
   Mod: (args, compile) => `_IA.mod(${compile(args[0])}, ${compile(args[1])})`,
