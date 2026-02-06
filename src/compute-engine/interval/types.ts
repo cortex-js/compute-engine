@@ -31,7 +31,7 @@ export type IntervalResult =
   | { kind: 'interval'; value: Interval }
   | { kind: 'empty' }
   | { kind: 'entire' }
-  | { kind: 'singular'; at?: number }
+  | { kind: 'singular'; at?: number; continuity?: 'left' | 'right' }
   | { kind: 'partial'; value: Interval; domainClipped: 'lo' | 'hi' | 'both' };
 
 /**

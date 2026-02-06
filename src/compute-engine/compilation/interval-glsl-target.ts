@@ -42,6 +42,8 @@ const float IA_SINGULAR = 3.0;
 const float IA_PARTIAL_LO = 4.0;
 const float IA_PARTIAL_HI = 5.0;
 const float IA_PARTIAL_BOTH = 6.0;
+const float IA_SINGULAR_RIGHT = 7.0;
+const float IA_SINGULAR_LEFT = 8.0;
 
 // Interval result struct
 struct IntervalResult {
@@ -75,12 +77,20 @@ IntervalResult ia_singular(float at) {
   return IntervalResult(vec2(at, at), IA_SINGULAR);
 }
 
+IntervalResult ia_singular_right(float at) {
+  return IntervalResult(vec2(at, at), IA_SINGULAR_RIGHT);
+}
+
+IntervalResult ia_singular_left(float at) {
+  return IntervalResult(vec2(at, at), IA_SINGULAR_LEFT);
+}
+
 IntervalResult ia_partial(vec2 v, float clip) {
   return IntervalResult(v, clip);
 }
 
 bool ia_is_error(float status) {
-  return status == IA_EMPTY || status == IA_ENTIRE || status == IA_SINGULAR;
+  return status == IA_EMPTY || status == IA_ENTIRE || status == IA_SINGULAR || status == IA_SINGULAR_RIGHT || status == IA_SINGULAR_LEFT;
 }
 
 // Addition
@@ -220,7 +230,8 @@ IntervalResult ia_floor(vec2 x) {
     return ia_ok(vec2(flo, fhi));
   }
   // Interval spans an integer boundary - discontinuity at first integer > x.x
-  return ia_singular(flo + 1.0);
+  // floor is right-continuous
+  return ia_singular_right(flo + 1.0);
 }
 
 // Ceiling - has jump discontinuities at every integer
@@ -231,7 +242,8 @@ IntervalResult ia_ceil(vec2 x) {
     return ia_ok(vec2(clo, chi));
   }
   // Interval spans an integer boundary - discontinuity at ceil(x.x)
-  return ia_singular(clo);
+  // ceil is left-continuous
+  return ia_singular_left(clo);
 }
 
 // Round - has jump discontinuities at every half-integer
@@ -245,7 +257,8 @@ IntervalResult ia_round(vec2 x) {
     return ia_ok(vec2(rlo, rhi));
   }
   // Interval spans a half-integer boundary - discontinuity
-  return ia_singular(rlo + 0.5);
+  // round is right-continuous (with round-half-up convention)
+  return ia_singular_right(rlo + 0.5);
 }
 
 // Fract - sawtooth discontinuities at every integer
@@ -258,7 +271,8 @@ IntervalResult ia_fract(vec2 x) {
     return ia_ok(vec2(fract(x.x) - IA_EPS, fract(x.y) + IA_EPS));
   }
   // Interval spans an integer - sawtooth discontinuity
-  return ia_singular(flo + 1.0);
+  // fract is right-continuous (inherits from floor)
+  return ia_singular_right(flo + 1.0);
 }
 
 // Mod - periodic discontinuities at multiples of the modulus
@@ -281,7 +295,8 @@ IntervalResult ia_mod(vec2 x, vec2 y) {
       return ia_ok(vec2(min(mlo, mhi) - IA_EPS, max(mlo, mhi) + IA_EPS));
     }
     // Discontinuity at first multiple of period in the interval
-    return ia_singular((flo + 1.0) * period);
+    // mod has sawtooth discontinuities, right-continuous
+    return ia_singular_right((flo + 1.0) * period);
   }
 
   // General case: compose from existing operations

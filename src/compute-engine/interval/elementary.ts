@@ -323,7 +323,8 @@ export function floor(x: Interval | IntervalResult): IntervalResult {
   const fhi = Math.floor(xVal.hi);
   if (flo === fhi) return ok({ lo: flo, hi: fhi });
   // Interval spans an integer boundary — discontinuity
-  return { kind: 'singular', at: flo + 1 };
+  // floor is right-continuous: lim_{x→n+} floor(x) = floor(n) = n
+  return { kind: 'singular', at: flo + 1, continuity: 'right' };
 }
 
 /**
@@ -339,7 +340,8 @@ export function ceil(x: Interval | IntervalResult): IntervalResult {
   const chi = Math.ceil(xVal.hi);
   if (clo === chi) return ok({ lo: clo, hi: chi });
   // Interval spans an integer boundary — discontinuity
-  return { kind: 'singular', at: clo };
+  // ceil is left-continuous: lim_{x→n-} ceil(x) = ceil(n) = n
+  return { kind: 'singular', at: clo, continuity: 'left' };
 }
 
 /**
@@ -360,7 +362,8 @@ export function round(x: Interval | IntervalResult): IntervalResult {
   const rhi = Math.round(xVal.hi);
   if (rlo === rhi) return ok({ lo: rlo, hi: rhi });
   // Interval spans a half-integer boundary — discontinuity
-  return { kind: 'singular', at: rlo + 0.5 };
+  // round is right-continuous (with round-half-up convention)
+  return { kind: 'singular', at: rlo + 0.5, continuity: 'right' };
 }
 
 /**
@@ -379,7 +382,8 @@ export function fract(x: Interval | IntervalResult): IntervalResult {
     return ok({ lo: xVal.lo - flo, hi: xVal.hi - flo });
   }
   // Interval spans an integer — sawtooth discontinuity
-  return { kind: 'singular', at: flo + 1 };
+  // fract is right-continuous (inherits from floor)
+  return { kind: 'singular', at: flo + 1, continuity: 'right' };
 }
 
 /**
@@ -445,7 +449,8 @@ export function mod(
 
   if (flo !== fhi) {
     // Interval spans a multiple of the period — discontinuity
-    return { kind: 'singular', at: (flo + 1) * period };
+    // mod has sawtooth discontinuities, right-continuous
+    return { kind: 'singular', at: (flo + 1) * period, continuity: 'right' };
   }
 
   // No discontinuity — mod is continuous (linear) on this interval

@@ -1,3 +1,16 @@
+### [Unreleased]
+
+### Interval Arithmetic
+
+- **Discontinuity Continuity Direction**: Singular interval results now include
+  an optional `continuity` field (`'left'` or `'right'`) indicating from which
+  side the function is continuous at a jump discontinuity. `Floor`, `Round`,
+  `Fract`, and `Mod` report `'right'` (right-continuous), `Ceil` reports
+  `'left'` (left-continuous). Pole-type singularities (e.g., `tan`, `1/x`) leave
+  the field undefined. This is reflected in both the JavaScript and GLSL
+  interval arithmetic targets (new `IA_SINGULAR_RIGHT` and `IA_SINGULAR_LEFT`
+  status constants in GLSL).
+
 ## 0.35.3 _2026-02-06_
 
 ### Compilation
@@ -13,9 +26,9 @@
 - **Interval Discontinuity Detection**: `Floor`, `Ceil`, `Round`, `Sign`,
   `Fract`, and `Mod` now correctly report singularities when an interval spans a
   discontinuity point, in both the JavaScript and GLSL interval arithmetic
-  targets. Previously these functions returned normal interval bounds even across
-  jump discontinuities, which could cause incorrect connecting lines in plotted
-  curves.
+  targets. Previously these functions returned normal interval bounds even
+  across jump discontinuities, which could cause incorrect connecting lines in
+  plotted curves.
 
 - **New Interval Functions**: Added `Round`, `Fract`, and `Mod` to the interval
   arithmetic targets (both JS and GLSL) with proper discontinuity detection.

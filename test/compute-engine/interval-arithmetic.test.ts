@@ -257,6 +257,10 @@ describe('INTERVAL ELEMENTARY FUNCTIONS', () => {
   test('floor - crosses integer boundary', () => {
     const result = floor({ lo: 1.5, hi: 2.5 });
     expect(result.kind).toBe('singular');
+    if (result.kind === 'singular') {
+      expect(result.continuity).toBe('right');
+      expect(result.at).toBe(2);
+    }
   });
 
   test('ceil - no boundary crossing', () => {
@@ -266,6 +270,10 @@ describe('INTERVAL ELEMENTARY FUNCTIONS', () => {
   test('ceil - crosses integer boundary', () => {
     const result = ceil({ lo: 1.5, hi: 2.5 });
     expect(result.kind).toBe('singular');
+    if (result.kind === 'singular') {
+      expect(result.continuity).toBe('left');
+      expect(result.at).toBe(2);
+    }
   });
 
   test('min', () => {
@@ -287,6 +295,10 @@ describe('INTERVAL ELEMENTARY FUNCTIONS', () => {
   test('sign - contains zero', () => {
     const result = sign({ lo: -1, hi: 1 });
     expect(result.kind).toBe('singular');
+    if (result.kind === 'singular') {
+      // sign has no one-sided continuity at 0
+      expect(result.continuity).toBeUndefined();
+    }
   });
 
   test('pow - positive integer', () => {
@@ -310,6 +322,9 @@ describe('INTERVAL ELEMENTARY FUNCTIONS', () => {
   test('mod - wide interval crosses period', () => {
     const result = mod({ lo: 0, hi: 10 }, { lo: 3, hi: 3 });
     expect(result.kind).toBe('singular');
+    if (result.kind === 'singular') {
+      expect(result.continuity).toBe('right');
+    }
   });
 
   test('mod - narrow interval no crossing', () => {
@@ -334,6 +349,10 @@ describe('INTERVAL ELEMENTARY FUNCTIONS', () => {
   test('round - crosses half-integer boundary', () => {
     const result = round({ lo: 1.3, hi: 1.7 });
     expect(result.kind).toBe('singular');
+    if (result.kind === 'singular') {
+      expect(result.continuity).toBe('right');
+      expect(result.at).toBe(1.5);
+    }
   });
 
   test('fract - no boundary crossing', () => {
@@ -343,6 +362,10 @@ describe('INTERVAL ELEMENTARY FUNCTIONS', () => {
   test('fract - crosses integer boundary', () => {
     const result = fract({ lo: 1.8, hi: 2.2 });
     expect(result.kind).toBe('singular');
+    if (result.kind === 'singular') {
+      expect(result.continuity).toBe('right');
+      expect(result.at).toBe(2);
+    }
   });
 
   test('fract - negative, no crossing', () => {
