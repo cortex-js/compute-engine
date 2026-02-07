@@ -4,6 +4,7 @@ import {
   processInverseFunction,
 } from '../boxed-expression/trigonometry';
 import { mul } from '../boxed-expression/arithmetic-mul-div';
+// eslint-disable-next-line import/no-restricted-paths
 import { simplifyLogicFunction } from '../library/logic';
 import type { BoxedExpression, Rule, RuleStep } from '../global-types';
 import { expand } from '../boxed-expression/expand';

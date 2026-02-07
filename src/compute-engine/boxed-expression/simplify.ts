@@ -9,6 +9,7 @@ import type {
   RuleSteps,
 } from '../global-types';
 
+// eslint-disable-next-line import/no-restricted-paths
 import { fu as fuAlgorithm } from '../symbolic/fu';
 
 type InternalSimplifyOptions = SimplifyOptions & {

@@ -12,6 +12,7 @@ import { centeredDiff8thOrder, limit } from '../numerics/numeric';
 import { derivative, differentiate } from '../symbolic/derivative';
 import { antiderivative } from '../symbolic/antiderivative';
 import { canonicalLimits, canonicalLimitsSequence } from './utils';
+// eslint-disable-next-line import/no-restricted-paths
 import { compile } from '../compilation/compile-expression';
 
 export const CALCULUS_LIBRARY: SymbolDefinitions[] = [

@@ -56,6 +56,87 @@ module.exports = {
     'import/no-namespace': 'error',
     'import/order': 'off',
 
+    // Enforce layered architecture: lower layers must not import from higher layers.
+    // Layer order (low → high): common → latex-syntax → boxed-expression → symbolic → library → compilation → engine
+    'import/no-restricted-paths': [
+      'error',
+      {
+        zones: [
+          // common/ cannot import from any compute-engine layer
+          {
+            target: './src/common/**',
+            from: './src/compute-engine/**',
+            message:
+              'common/ is a lower layer and must not import from compute-engine/.',
+          },
+          // latex-syntax/ cannot import from boxed-expression/, symbolic/, library/, compilation/
+          {
+            target: './src/compute-engine/latex-syntax/**',
+            from: './src/compute-engine/boxed-expression/**',
+            message:
+              'latex-syntax/ is a lower layer and must not import from boxed-expression/.',
+          },
+          {
+            target: './src/compute-engine/latex-syntax/**',
+            from: './src/compute-engine/symbolic/**',
+            message:
+              'latex-syntax/ is a lower layer and must not import from symbolic/.',
+          },
+          {
+            target: './src/compute-engine/latex-syntax/**',
+            from: './src/compute-engine/library/**',
+            message:
+              'latex-syntax/ is a lower layer and must not import from library/.',
+          },
+          {
+            target: './src/compute-engine/latex-syntax/**',
+            from: './src/compute-engine/compilation/**',
+            message:
+              'latex-syntax/ is a lower layer and must not import from compilation/.',
+          },
+          // boxed-expression/ cannot import from symbolic/, library/, compilation/
+          {
+            target: './src/compute-engine/boxed-expression/**',
+            from: './src/compute-engine/symbolic/**',
+            message:
+              'boxed-expression/ is a lower layer and must not import from symbolic/.',
+          },
+          {
+            target: './src/compute-engine/boxed-expression/**',
+            from: './src/compute-engine/library/**',
+            message:
+              'boxed-expression/ is a lower layer and must not import from library/.',
+          },
+          {
+            target: './src/compute-engine/boxed-expression/**',
+            from: './src/compute-engine/compilation/**',
+            message:
+              'boxed-expression/ is a lower layer and must not import from compilation/.',
+          },
+          // symbolic/ cannot import from library/, compilation/
+          {
+            target: './src/compute-engine/symbolic/**',
+            from: './src/compute-engine/library/**',
+            message:
+              'symbolic/ is a lower layer and must not import from library/.',
+          },
+          {
+            target: './src/compute-engine/symbolic/**',
+            from: './src/compute-engine/compilation/**',
+            message:
+              'symbolic/ is a lower layer and must not import from compilation/.',
+          },
+          // library/ cannot import from compilation/
+          {
+            target: './src/compute-engine/library/**',
+            from: './src/compute-engine/compilation/**',
+            message:
+              'library/ is a lower layer and must not import from compilation/.',
+          },
+        ],
+      },
+    ],
+
     'no-unused-vars': ['off'],
     '@typescript-eslint/no-unused-vars': [
       'warn',
