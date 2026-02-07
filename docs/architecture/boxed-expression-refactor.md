@@ -3,10 +3,10 @@
 > Status (2026-02-07)
 > - This is a focused sub-proposal for boxed-expression internals.
 > - It is still useful, but partially superseded by the broader roadmap in
->   `REFACTOR.md` and `PROPOSAL.md`.
+>   `REFACTOR.md` and `PLAN.md`.
 > - Use this document during Phase 2/4 implementation work on internal
 >   type-system hardening.
-> - See `PROPOSAL.md` §3.1 for sequencing and phased migration strategy.
+> - See `PLAN.md` §3.1 for sequencing and phased migration strategy.
 
 ---
 

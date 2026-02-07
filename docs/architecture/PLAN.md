@@ -376,7 +376,7 @@ documents this inconsistency but does not resolve it.
    `null` for "explicitly empty" only where semantically meaningful (e.g., an
    optional argument that was explicitly set to null).
 
-3. **Split compile API** as proposed in REFACTOR.md. The callable-with-toString
+3. **Split compile API** as proposed in `REFACTOR.md`. The callable-with-toString
    pattern should go.
 
 ---
@@ -414,7 +414,7 @@ Standardize all examples to use the package name import. Remove any `../src` or
 
 ---
 
-## 6. Comparison with REFACTOR.md
+## 6. Comparison with `REFACTOR.md`
 
 The existing `REFACTOR.md` is a thorough document that identifies many of the
 same issues. Here is where this proposal agrees, diverges, or adds:
@@ -430,7 +430,7 @@ same issues. Here is where this proposal agrees, diverges, or adds:
 
 ### Divergences
 
-| Topic                          | REFACTOR.md                                                             | This Proposal                                                                                                                                     |
+| Topic                          | `REFACTOR.md`                                                             | This Proposal                                                                                                                                     |
 | ------------------------------ | ----------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- | ----- | ------------------ | ------------------------------------------------------------------------------------------------------------------------------ |
 | Plugin system                  | Full plugin manifest with semver, requires, conflicts, topological sort | Lighter library dependency declarations first; full plugin system is premature before the dependency graph is clean                               |
 | Service extraction             | 4 named services (Context, Factory, Registry, Execution)                | Same split targets, but start with file extraction before introducing service interfaces. Interfaces before implementation risks over-engineering |
@@ -439,7 +439,7 @@ same issues. Here is where this proposal agrees, diverges, or adds:
 | Event stream for observability | Proposed                                                                | Not recommended yet. Debug/trace is useful but an event bus adds coupling. Start with structured logging                                          |
 | API form option                | `form: 'canonical' \| 'structural' \| 'raw' \| CanonicalForm[]`         | Agree. Keep `CanonicalForm[]` as an advanced option for power users who need granular control over canonicalization passes                         |
 
-### Additions (not in REFACTOR.md)
+### Additions (not in `REFACTOR.md`)
 
 - **Simplification rules should be user-extensible** (§3.6)
 - **LaTeX parser should be split** (§3.7) — with the caveat that LaTeX parsing
@@ -467,7 +467,7 @@ immediately.
      preventing regression, not immediate elimination.
 
 2. **Fix Monte Carlo improper integral scaling**
-   - As described in REFACTOR.md §Critical Fix Detail
+   - As described in `REFACTOR.md` §Critical Fix Detail
    - Add tests for `∫_0^∞ e^{-x} dx`, `∫_{-∞}^{∞} e^{-x²} dx`, `∫_0^1 x² dx`
 
 3. **Clean up repository hygiene**
@@ -560,7 +560,7 @@ immediately.
 
 ## 8. What Not To Do
 
-Certain directions from REFACTOR.md are premature or over-engineered for the
+Certain directions from `REFACTOR.md` are premature or over-engineered for the
 current state of the project:
 
 1. **Do not introduce a full plugin manifest system yet.** Semver dependency
@@ -575,7 +575,7 @@ current state of the project:
    that is hard to reason about and debug.
 
 3. **Do not attempt to compete with Mathematica/SymPy on solver breadth.** The
-   numeric fallback solver (bisection, Brent) from REFACTOR.md Phase 3 is a good
+   numeric fallback solver (bisection, Brent) from `REFACTOR.md` Phase 3 is a good
    idea, but keep the scope to common undergraduate-level equations. The
    library's strength is web integration, not solver completeness.
 

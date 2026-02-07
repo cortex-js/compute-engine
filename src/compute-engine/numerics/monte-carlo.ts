@@ -51,34 +51,40 @@ export function monteCarloEstimate(
   let sumSq = 0;
 
   if (a === -Infinity && b === Infinity) {
+    // Transform: x = tan(π(u - 1/2)), u ∈ (0,1) → x ∈ (-∞, +∞)
+    // |dx/du| = π(1 + x²)
+    // Estimator: f(x) * |dx/du| = f(x) * π(1 + x²)
     for (let i = 0; i < n; i++) {
       const u = Math.random();
       const x = Math.tan(Math.PI * (u - 0.5));
-      const jacobian = Math.PI * (1 + x * x);
-      const val = f(x) / jacobian;
+      const val = f(x) * Math.PI * (1 + x * x);
       sum += val;
       sumSq += val * val;
     }
   } else if (a === -Infinity) {
+    // Transform: x = b + ln(u), u ∈ (0,1) → x ∈ (-∞, b]
+    // |dx/du| = 1/u
+    // Estimator: f(x) * |dx/du| = f(x) / u
     for (let i = 0; i < n; i++) {
       const u = Math.random();
-      const x = b - Math.log(1 - u);
-      const jacobian = 1 / (1 - u);
-      const val = f(x) / jacobian;
+      const x = b + Math.log(u);
+      const val = f(x) / u;
       sum += val;
       sumSq += val * val;
     }
   } else if (b === Infinity) {
+    // Transform: x = a - ln(u), u ∈ (0,1) → x ∈ [a, +∞)
+    // |dx/du| = 1/u
+    // Estimator: f(x) * |dx/du| = f(x) / u
     for (let i = 0; i < n; i++) {
       const u = Math.random();
-      const x = a + Math.log(u);
-      const jacobian = 1 / u;
-      const val = f(x) / jacobian;
+      const x = a - Math.log(u);
+      const val = f(x) / u;
       sum += val;
       sumSq += val * val;
     }
   } else {
-    // Proper integral
+    // Finite interval [a, b]: standard uniform sampling
     for (let i = 0; i < n; i++) {
       const val = f(a + Math.random() * (b - a));
       sum += val;
@@ -89,7 +95,10 @@ export function monteCarloEstimate(
   const mean = sum / n;
   const variance = (sumSq - n * mean * mean) / (n - 1);
   const stdError = Math.sqrt(variance / n);
-  const scale = b - a;
+
+  // Only the finite-interval case needs (b - a) scaling.
+  // The transformed cases already incorporate the measure via Jacobian.
+  const scale = isFinite(a) && isFinite(b) ? b - a : 1;
 
   const estimate = mean * scale;
   const error = stdError * scale;

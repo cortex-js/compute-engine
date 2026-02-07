@@ -1,13 +1,22 @@
 ### [Unreleased]
 
+### Bug Fixes
+
+- **Monte Carlo improper integrals**: Fixed two bugs in `monteCarloEstimate()`
+  that produced incorrect results (typically `NaN` or `Infinity`) for improper
+  integrals. The change-of-variables estimator was inverted (`f(x) / jacobian`
+  instead of `f(x) * jacobian`), and the finite-interval scale factor `b - a`
+  was applied to transformed domains where it is infinite. Affects `NIntegrate`
+  and compiled `integrate` for any integral with infinite bounds.
+
 ### Compilation
 
 - **`Truncate`, `Remainder`, and `Mod` for JS/GLSL targets**: Added `Truncate`
   (`Math.trunc` / `trunc`), `Remainder`, and `Mod` to the JavaScript and GLSL
   compilation targets, matching the Python target which already had them.
 
-- **Interval `trunc` and `remainder`**: Added `trunc()` and `remainder()` to
-  the interval arithmetic library. `trunc` has proper discontinuity detection
+- **Interval `trunc` and `remainder`**: Added `trunc()` and `remainder()` to the
+  interval arithmetic library. `trunc` has proper discontinuity detection
   (behaves like `floor` for positive, `ceil` for negative, continuous at zero).
   `remainder(a, b) = a - b * round(a/b)` composes existing interval operations
   with discontinuity detection inherited from `round`. Added corresponding
