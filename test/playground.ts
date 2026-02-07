@@ -1,4 +1,5 @@
 import { ComputeEngine, Expression, InfixEntry } from '../src/compute-engine';
+import { expand } from '../src/compute-engine/boxed-expression/expand';
 
 const ce = new ComputeEngine();
 const engine = ce;
@@ -505,12 +506,12 @@ ce.box(['Multiply', 3, ['Add', ['Negate', 1], ['Rational', 1, 2]]])
 // console.info(expr.json);
 
 // Note: Distribution is NOT automatic during simplify()
-// Use .expand() to distribute: a*(c+d) -> ac + ad
+// Use expand() to distribute: a*(c+d) -> ac + ad
 const xp = ce.parse('a\\times(c+d)');
 console.info(xp.json);
 console.info(xp.latex);
 console.info(xp.simplify().toString()); // Returns a*(c+d)
-console.info(xp.expand().toString()); // Returns ac + ad
+console.info((expand(xp) ?? xp).toString()); // Returns ac + ad
 
 // console.info(ce.parse('\\frac{\\sqrt{15}}{\\sqrt{3}}').simplify().toString());
 

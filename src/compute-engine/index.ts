@@ -743,7 +743,7 @@ export class ComputeEngine implements IComputeEngine {
    *
    * // Use the custom target
    * const expr = ce.parse('x^2 + y^2');
-   * const code = expr.compile({ to: 'python' });
+   * const code = compile(expr, { to: 'python' });
    * ```
    */
   registerCompilationTarget(name: string, target: LanguageTarget): void {

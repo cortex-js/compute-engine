@@ -1,4 +1,5 @@
 import { ComputeEngine } from '../../src/compute-engine.ts';
+import { compile } from '../../src/compute-engine/compilation/compile-expression';
 import {
   add,
   mul,
@@ -221,7 +222,7 @@ function compiledEval() {
   const expr3 = expr.subs(vars).N();
 
   try {
-    const fn = expr3.compile()!;
+    const fn = compile(expr3)!;
     let y = 0;
     const startTime = performance.now();
     for (let x = 0; x <= Math.PI; x += 0.01) {

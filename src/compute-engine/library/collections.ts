@@ -11,6 +11,8 @@ import {
   isFiniteIndexedCollection,
 } from '../collection-utils';
 import { applicable, canonicalFunctionLiteral } from '../function-utils';
+// Dynamic import for compile to avoid circular dependency
+// (collections → compile-expression → base-compiler → library/utils → collections)
 import { parseType } from '../../common/type/parse';
 import { Type } from '../../common/type/types';
 import {
@@ -731,7 +733,8 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         collection.type.matches(ce.type('collection<real>'))
       ) {
         // If we're dealing with real numbers, we can compile.
-        const jsf = fn.compile();
+        const { compile } = require('../compilation/compile-expression');
+        const jsf = compile(fn);
         if (!jsf) return undefined;
 
         let accumulator = initial.re;

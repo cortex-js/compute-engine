@@ -1,4 +1,5 @@
 import { engine as ce } from '../utils';
+import { compile } from '../../src/compute-engine/compilation/compile-expression';
 import { GLSLTarget } from '../../src/compute-engine/compilation/glsl-target';
 
 /**
@@ -48,7 +49,7 @@ describe('COMPILATION PERFORMANCE', () => {
       const expr = ce.parse('x + y');
 
       const compilationTime = benchmark(() => {
-        expr.compile();
+        compile(expr);
       }, 1000);
 
       log(
@@ -59,7 +60,7 @@ describe('COMPILATION PERFORMANCE', () => {
 
     it('should execute compiled code faster than evaluation', () => {
       const expr = ce.parse('x^2 + y^2 + z^2');
-      const compiled = expr.compile();
+      const compiled = compile(expr);
 
       const testData = { x: 3, y: 4, z: 5 };
 
@@ -87,14 +88,14 @@ describe('COMPILATION PERFORMANCE', () => {
       const expr = ce.parse('x^4 + 3x^3 + 2x^2 + x + 1');
 
       const compilationTime = benchmark(() => {
-        expr.compile();
+        compile(expr);
       }, 100);
 
       log(
         `  Polynomial compilation: ${(compilationTime / 100).toFixed(3)}ms per compilation`
       );
 
-      const compiled = expr.compile();
+      const compiled = compile(expr);
       const evalTime = benchmark(() => {
         expr.evaluate({ x: 2.5 }).numericValue;
       }, 10000);
@@ -114,14 +115,14 @@ describe('COMPILATION PERFORMANCE', () => {
       const expr = ce.parse('\\sin(x) + \\cos(y) + \\tan(z)');
 
       const compilationTime = benchmark(() => {
-        expr.compile();
+        compile(expr);
       }, 100);
 
       log(
         `  Trigonometric compilation: ${(compilationTime / 100).toFixed(3)}ms per compilation`
       );
 
-      const compiled = expr.compile();
+      const compiled = compile(expr);
       const testData = { x: 1, y: 2, z: 3 };
 
       const evalTime = benchmark(() => {
@@ -143,14 +144,14 @@ describe('COMPILATION PERFORMANCE', () => {
       const expr = ce.parse('\\sqrt{(x-a)^2 + (y-b)^2 + (z-c)^2}');
 
       const compilationTime = benchmark(() => {
-        expr.compile();
+        compile(expr);
       }, 100);
 
       log(
         `  Nested expr compilation: ${(compilationTime / 100).toFixed(3)}ms per compilation`
       );
 
-      const compiled = expr.compile();
+      const compiled = compile(expr);
       const testData = { x: 5, y: 6, z: 7, a: 1, b: 2, c: 3 };
 
       const evalTime = benchmark(() => {
@@ -176,14 +177,14 @@ describe('COMPILATION PERFORMANCE', () => {
       const expr = ce.parse(terms);
 
       const compilationTime = benchmark(() => {
-        expr.compile();
+        compile(expr);
       }, 10);
 
       log(
         `  Large expr (50 terms) compilation: ${(compilationTime / 10).toFixed(3)}ms per compilation`
       );
 
-      const compiled = expr.compile();
+      const compiled = compile(expr);
 
       const evalTime = benchmark(() => {
         expr.evaluate({ x: 1.1 }).numericValue;
@@ -206,14 +207,14 @@ describe('COMPILATION PERFORMANCE', () => {
       const expr = ce.parse(terms);
 
       const compilationTime = benchmark(() => {
-        expr.compile();
+        compile(expr);
       }, 100);
 
       log(
         `  Many variables (20) compilation: ${(compilationTime / 100).toFixed(3)}ms per compilation`
       );
 
-      const compiled = expr.compile();
+      const compiled = compile(expr);
 
       const testData: any = {};
       for (let i = 0; i < 20; i++) {
@@ -241,7 +242,7 @@ describe('COMPILATION PERFORMANCE', () => {
       const expr = ce.parse('x^2 + y^2');
 
       const time = benchmark(() => {
-        expr.compile({ to: 'javascript' });
+        compile(expr, { to: 'javascript' });
       }, 1000);
 
       log(`  JavaScript target: ${(time / 1000).toFixed(3)}ms per compilation`);
@@ -252,7 +253,7 @@ describe('COMPILATION PERFORMANCE', () => {
       const expr = ce.parse('x^2 + y^2');
 
       const time = benchmark(() => {
-        expr.compile({ to: 'glsl' });
+        compile(expr, { to: 'glsl' });
       }, 1000);
 
       log(`  GLSL target: ${(time / 1000).toFixed(3)}ms per compilation`);
@@ -263,11 +264,11 @@ describe('COMPILATION PERFORMANCE', () => {
       const expr = ce.parse('\\sin(x) * \\cos(y)');
 
       const jsTime = benchmark(() => {
-        expr.compile({ to: 'javascript' });
+        compile(expr, { to: 'javascript' });
       }, 500);
 
       const glslTime = benchmark(() => {
-        expr.compile({ to: 'glsl' });
+        compile(expr, { to: 'glsl' });
       }, 500);
 
       log(`  JavaScript target: ${(jsTime / 500).toFixed(3)}ms`);
@@ -286,12 +287,12 @@ describe('COMPILATION PERFORMANCE', () => {
 
       // Baseline: no customization
       const baselineTime = benchmark(() => {
-        expr.compile();
+        compile(expr);
       }, 1000);
 
       // With operator customization
       const customTime = benchmark(() => {
-        expr.compile({
+        compile(expr, {
           operators: {
             Add: ['add', 11],
             Multiply: ['mul', 12],
@@ -311,13 +312,13 @@ describe('COMPILATION PERFORMANCE', () => {
       const expr = ce.parse('x + y');
 
       // Baseline compiled
-      const baseline = expr.compile();
+      const baseline = compile(expr);
       const baselineExec = benchmark(() => {
         baseline({ x: 1, y: 2 });
       }, 10000);
 
       // Custom operator compiled
-      const custom = expr.compile({
+      const custom = compile(expr, {
         operators: {
           Add: ['customAdd', 11],
         },
@@ -344,7 +345,7 @@ describe('COMPILATION PERFORMANCE', () => {
 
       const memory = measureMemory(() => {
         for (let i = 0; i < 100; i++) {
-          expr.compile();
+          compile(expr);
         }
       });
 
@@ -378,12 +379,12 @@ describe('COMPILATION PERFORMANCE', () => {
       const expr = ce.parse('\\sqrt{(x_2-x_1)^2 + (y_2-y_1)^2}');
 
       const compilationTime = benchmark(() => {
-        expr.compile();
+        compile(expr);
       }, 100);
 
       log(`  Distance formula compilation: ${(compilationTime / 100).toFixed(3)}ms`);
 
-      const compiled = expr.compile();
+      const compiled = compile(expr);
       const testData = { x_1: 0, y_1: 0, x_2: 3, y_2: 4 };
 
       const evalTime = benchmark(() => {
@@ -406,12 +407,12 @@ describe('COMPILATION PERFORMANCE', () => {
       const expr = ce.parse('\\frac{-b + \\sqrt{b^2 - 4ac}}{2a}');
 
       const compilationTime = benchmark(() => {
-        expr.compile();
+        compile(expr);
       }, 100);
 
       log(`  Quadratic formula compilation: ${(compilationTime / 100).toFixed(3)}ms`);
 
-      const compiled = expr.compile();
+      const compiled = compile(expr);
       const testData = { a: 1, b: -5, c: 6 };
 
       const evalTime = benchmark(() => {
@@ -434,12 +435,12 @@ describe('COMPILATION PERFORMANCE', () => {
       const expr = ce.parse('u \\cdot t + \\frac{1}{2} a \\cdot t^2');
 
       const compilationTime = benchmark(() => {
-        expr.compile();
+        compile(expr);
       }, 100);
 
       log(`  Kinematics compilation: ${(compilationTime / 100).toFixed(3)}ms`);
 
-      const compiled = expr.compile();
+      const compiled = compile(expr);
       const testData = { u: 10, a: 9.8, t: 2 };
 
       const evalTime = benchmark(() => {
@@ -465,13 +466,13 @@ describe('COMPILATION PERFORMANCE', () => {
       // First compilation
       const firstTime = benchmark(() => {
         const expr = ce.parse(latex);
-        expr.compile();
+        compile(expr);
       }, 100);
 
       // Subsequent compilations (same expression)
       const cachedTime = benchmark(() => {
         const expr = ce.parse(latex);
-        expr.compile();
+        compile(expr);
       }, 100);
 
       log(`  First compilation: ${(firstTime / 100).toFixed(3)}ms`);

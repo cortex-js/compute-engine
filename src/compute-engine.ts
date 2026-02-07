@@ -26,6 +26,9 @@ export { JavaScriptTarget } from './compute-engine/compilation/javascript-target
 export { GLSLTarget } from './compute-engine/compilation/glsl-target';
 export { BaseCompiler } from './compute-engine/compilation/base-compiler';
 
+export { expand } from './compute-engine/boxed-expression/expand';
+export { compile } from './compute-engine/compilation/compile-expression';
+
 globalThis[Symbol.for('io.cortexjs.compute-engine')] = {
   ComputeEngine: ComputeEngine.prototype.constructor,
   version: '{{SDK_VERSION}}',

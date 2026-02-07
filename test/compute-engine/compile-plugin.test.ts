@@ -1,4 +1,5 @@
 import { engine as ce } from '../utils';
+import { compile } from '../../src/compute-engine/compilation/compile-expression';
 import type { LanguageTarget, CompileTarget, CompiledOperators, CompiledFunctions } from '../../src/compute-engine/compilation/types';
 import type { BoxedExpression } from '../../src/compute-engine/global-types';
 
@@ -156,46 +157,46 @@ describe('COMPILATION PLUGIN ARCHITECTURE', () => {
 
     it('should compile to Python target', () => {
       const expr = ce.parse('x + y');
-      const compiled = expr.compile({ to: 'python' });
+      const compiled = compile(expr, { to: 'python' });
       expect(compiled.toString()).toMatchInlineSnapshot(`x + y`);
     });
 
     it('should compile to Python with functions', () => {
       const expr = ce.parse('\\sin(x) + \\cos(y)');
-      const compiled = expr.compile({ to: 'python' });
+      const compiled = compile(expr, { to: 'python' });
       expect(compiled.toString()).toMatchInlineSnapshot(`math.sin(x) + math.cos(y)`);
     });
 
     it('should compile to Python with power operator', () => {
       const expr = ce.parse('x^2');
-      const compiled = expr.compile({ to: 'python' });
+      const compiled = compile(expr, { to: 'python' });
       // Power in Python is **
       expect(compiled.toString()).toMatchInlineSnapshot(`x ** 2`);
     });
 
     it('should compile to RPN target', () => {
       const expr = ce.parse('x + y');
-      const compiled = expr.compile({ to: 'rpn' });
+      const compiled = compile(expr, { to: 'rpn' });
       expect(compiled.toString()).toMatchInlineSnapshot(`x y +`);
     });
 
     it('should compile complex expression to RPN', () => {
       const expr = ce.parse('(x + y) * z');
-      const compiled = expr.compile({ to: 'rpn' });
+      const compiled = compile(expr, { to: 'rpn' });
       // Canonical form may reorder operands: z * (x + y)
       expect(compiled.toString()).toMatchInlineSnapshot(`z x y + *`);
     });
 
     it('should compile trigonometric to RPN', () => {
       const expr = ce.parse('\\sin(x)');
-      const compiled = expr.compile({ to: 'rpn' });
+      const compiled = compile(expr, { to: 'rpn' });
       expect(compiled.toString()).toMatchInlineSnapshot(`x sin`);
     });
 
     it('should throw error for unregistered target', () => {
       const expr = ce.parse('x + y');
       expect(() => {
-        expr.compile({ to: 'matlab', fallback: false });
+        compile(expr, { to: 'matlab', fallback: false });
       }).toThrow(/not registered/);
     });
   });
@@ -216,7 +217,7 @@ describe('COMPILATION PLUGIN ARCHITECTURE', () => {
         preamble: '',
       };
 
-      const compiled = expr.compile({ target: customTarget });
+      const compiled = compile(expr, { target: customTarget });
       expect(compiled.toString()).toMatchInlineSnapshot(`VAR_x ⊕ VAR_y`);
     });
 
@@ -235,7 +236,7 @@ describe('COMPILATION PLUGIN ARCHITECTURE', () => {
         preamble: '',
       };
 
-      const compiled = expr.compile({
+      const compiled = compile(expr, {
         to: 'javascript',
         target: customTarget,
       });
@@ -248,19 +249,19 @@ describe('COMPILATION PLUGIN ARCHITECTURE', () => {
   describe('GLSL Target via Registry', () => {
     it('should compile to GLSL via registry', () => {
       const expr = ce.parse('x + y');
-      const compiled = expr.compile({ to: 'glsl' });
+      const compiled = compile(expr, { to: 'glsl' });
       expect(compiled.toString()).toMatchInlineSnapshot(`x + y`);
     });
 
     it('should compile GLSL functions', () => {
       const expr = ce.parse('\\sin(x)');
-      const compiled = expr.compile({ to: 'glsl' });
+      const compiled = compile(expr, { to: 'glsl' });
       expect(compiled.toString()).toMatchInlineSnapshot(`sin(x)`);
     });
 
     it('should compile GLSL vectors', () => {
       const expr = ce.box(['List', 1, 2, 3]);
-      const compiled = expr.compile({ to: 'glsl' });
+      const compiled = compile(expr, { to: 'glsl' });
       expect(compiled.toString()).toMatchInlineSnapshot(`vec3(1.0, 2.0, 3.0)`);
     });
   });
@@ -268,21 +269,21 @@ describe('COMPILATION PLUGIN ARCHITECTURE', () => {
   describe('JavaScript Target via Registry', () => {
     it('should compile to JavaScript via registry (default)', () => {
       const expr = ce.parse('x + y');
-      const compiled = expr.compile();
+      const compiled = compile(expr);
       expect(typeof compiled).toBe('function');
       expect(compiled.isCompiled).toBe(true);
     });
 
     it('should compile to JavaScript via registry (explicit)', () => {
       const expr = ce.parse('x + y');
-      const compiled = expr.compile({ to: 'javascript' });
+      const compiled = compile(expr, { to: 'javascript' });
       expect(typeof compiled).toBe('function');
       expect(compiled.isCompiled).toBe(true);
     });
 
     it('should execute compiled JavaScript function', () => {
       const expr = ce.parse('x + y');
-      const f = expr.compile({ to: 'javascript' }) as any;
+      const f = compile(expr, { to: 'javascript' }) as any;
       expect(f({ x: 3, y: 4 })).toBe(7);
     });
   });

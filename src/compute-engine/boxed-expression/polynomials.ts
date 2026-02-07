@@ -1,6 +1,7 @@
 import type { BoxedExpression } from '../global-types';
 import { asSmallInteger } from './numerics';
 import { add } from './arithmetic-add';
+import { expand } from './expand';
 
 /**
  * Coefficient of a univariate (single variable) polynomial.
@@ -322,7 +323,7 @@ export function getPolynomialCoefficients(
   const coeffs: BoxedExpression[] = new Array(degree + 1).fill(ce.Zero);
 
   // Expand the expression to get standard form
-  const expanded = expr.expand();
+  const expanded = expand(expr) ?? expr;
 
   // Helper to add a term's coefficient at a specific degree
   const addCoefficient = (coef: BoxedExpression, deg: number): boolean => {

@@ -138,7 +138,7 @@
   <canvas id="glCanvas" width="1" height="1"></canvas>
 
   <script type="module">
-    import { ComputeEngine, GLSLTarget } from '../dist/compute-engine.esm.js';
+    import { ComputeEngine, GLSLTarget, compile } from '../dist/compute-engine.esm.js';
 
     const ce = new ComputeEngine();
     const glsl = new GLSLTarget();
@@ -178,7 +178,7 @@
 
     // Helper to run JavaScript benchmark
     function benchmarkJS(expr, iterations, testData) {
-      const compiled = expr.compile({ to: 'javascript' });
+      const compiled = compile(expr, { to: 'javascript' });
       let result;
 
       const start = performance.now();
@@ -418,7 +418,7 @@
         // Get the "correct" answer from evaluation - just use compile and call it
         let expectedResult;
         try {
-          const evalFn = expr.compile({ to: 'javascript' });
+          const evalFn = compile(expr, { to: 'javascript' });
           expectedResult = evalFn(testData);
           if (typeof expectedResult !== 'number' || !isFinite(expectedResult)) {
             console.warn(`Invalid expected result for ${name}:`, expectedResult);

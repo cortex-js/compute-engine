@@ -3,26 +3,27 @@
  */
 
 import { ComputeEngine } from '../../src/compute-engine';
+import { compile } from '../../src/compute-engine/compilation/compile-expression';
 
 const ce = new ComputeEngine();
 
 describe('INTERVAL JS COMPILATION - BASIC', () => {
   test('compiles constant', () => {
     const expr = ce.parse('5');
-    const fn = expr.compile({ to: 'interval-js' });
+    const fn = compile(expr, { to: 'interval-js' });
     expect(fn.isCompiled).toBe(true);
     expect(fn.toString()).toContain('_IA.point(5)');
   });
 
   test('compiles variable', () => {
     const expr = ce.parse('x');
-    const fn = expr.compile({ to: 'interval-js' });
+    const fn = compile(expr, { to: 'interval-js' });
     expect(fn.toString()).toContain('_.x');
   });
 
   test('compiles Pi', () => {
     const expr = ce.parse('\\pi');
-    const fn = expr.compile({ to: 'interval-js' });
+    const fn = compile(expr, { to: 'interval-js' });
     expect(fn.toString()).toContain('_IA.point(Math.PI)');
   });
 });
@@ -30,13 +31,13 @@ describe('INTERVAL JS COMPILATION - BASIC', () => {
 describe('INTERVAL JS COMPILATION - ARITHMETIC', () => {
   test('compiles addition', () => {
     const expr = ce.parse('x + y');
-    const fn = expr.compile({ to: 'interval-js' });
+    const fn = compile(expr, { to: 'interval-js' });
     expect(fn.toString()).toContain('_IA.add');
   });
 
   test('compiles subtraction', () => {
     const expr = ce.parse('x - y');
-    const fn = expr.compile({ to: 'interval-js' });
+    const fn = compile(expr, { to: 'interval-js' });
     // Subtraction may compile to add(x, negate(y)) or sub(x, y)
     const code = fn.toString();
     expect(code.includes('_IA.sub') || code.includes('_IA.negate')).toBe(true);
@@ -44,19 +45,19 @@ describe('INTERVAL JS COMPILATION - ARITHMETIC', () => {
 
   test('compiles multiplication', () => {
     const expr = ce.parse('x \\cdot y');
-    const fn = expr.compile({ to: 'interval-js' });
+    const fn = compile(expr, { to: 'interval-js' });
     expect(fn.toString()).toContain('_IA.mul');
   });
 
   test('compiles division', () => {
     const expr = ce.parse('\\frac{x}{y}');
-    const fn = expr.compile({ to: 'interval-js' });
+    const fn = compile(expr, { to: 'interval-js' });
     expect(fn.toString()).toContain('_IA.div');
   });
 
   test('compiles negation', () => {
     const expr = ce.parse('-x');
-    const fn = expr.compile({ to: 'interval-js' });
+    const fn = compile(expr, { to: 'interval-js' });
     expect(fn.toString()).toContain('_IA.negate');
   });
 });
@@ -64,62 +65,62 @@ describe('INTERVAL JS COMPILATION - ARITHMETIC', () => {
 describe('INTERVAL JS COMPILATION - FUNCTIONS', () => {
   test('compiles sin', () => {
     const expr = ce.parse('\\sin(x)');
-    const fn = expr.compile({ to: 'interval-js' });
+    const fn = compile(expr, { to: 'interval-js' });
     expect(fn.toString()).toContain('_IA.sin');
   });
 
   test('compiles cos', () => {
     const expr = ce.parse('\\cos(x)');
-    const fn = expr.compile({ to: 'interval-js' });
+    const fn = compile(expr, { to: 'interval-js' });
     expect(fn.toString()).toContain('_IA.cos');
   });
 
   test('compiles tan', () => {
     const expr = ce.parse('\\tan(x)');
-    const fn = expr.compile({ to: 'interval-js' });
+    const fn = compile(expr, { to: 'interval-js' });
     expect(fn.toString()).toContain('_IA.tan');
   });
 
   test('compiles sqrt', () => {
     const expr = ce.parse('\\sqrt{x}');
-    const fn = expr.compile({ to: 'interval-js' });
+    const fn = compile(expr, { to: 'interval-js' });
     expect(fn.toString()).toContain('_IA.sqrt');
   });
 
   test('compiles square', () => {
     const expr = ce.parse('x^2');
-    const fn = expr.compile({ to: 'interval-js' });
+    const fn = compile(expr, { to: 'interval-js' });
     expect(fn.toString()).toContain('_IA.square');
   });
 
   test('compiles power', () => {
     const expr = ce.parse('x^3');
-    const fn = expr.compile({ to: 'interval-js' });
+    const fn = compile(expr, { to: 'interval-js' });
     expect(fn.toString()).toContain('_IA.pow');
   });
 
   test('compiles exp', () => {
     // e^x is Power(ExponentialE, x) internally but should compile to exp
     const expr = ce.parse('e^x');
-    const fn = expr.compile({ to: 'interval-js' });
+    const fn = compile(expr, { to: 'interval-js' });
     expect(fn.toString()).toContain('_IA.exp');
   });
 
   test('compiles ln', () => {
     const expr = ce.parse('\\ln(x)');
-    const fn = expr.compile({ to: 'interval-js' });
+    const fn = compile(expr, { to: 'interval-js' });
     expect(fn.toString()).toContain('_IA.ln');
   });
 
   test('compiles abs', () => {
     const expr = ce.parse('|x|');
-    const fn = expr.compile({ to: 'interval-js' });
+    const fn = compile(expr, { to: 'interval-js' });
     expect(fn.toString()).toContain('_IA.abs');
   });
 
   test('compiles if to piecewise', () => {
     const expr = ce.box(['If', ['Greater', 'x', 0], 'x', ['Negate', 'x']]);
-    const fn = expr.compile({ to: 'interval-js' });
+    const fn = compile(expr, { to: 'interval-js' });
     expect(fn.toString()).toContain('_IA.piecewise');
   });
 });
@@ -127,7 +128,7 @@ describe('INTERVAL JS COMPILATION - FUNCTIONS', () => {
 describe('INTERVAL JS EXECUTION', () => {
   test('evaluates constant', () => {
     const expr = ce.parse('5');
-    const fn = expr.compile({ to: 'interval-js' });
+    const fn = compile(expr, { to: 'interval-js' });
     const result = fn({});
 
     // Constants compile to point intervals (plain Interval, not IntervalResult)
@@ -137,7 +138,7 @@ describe('INTERVAL JS EXECUTION', () => {
 
   test('evaluates point interval input', () => {
     const expr = ce.parse('x + 1');
-    const fn = expr.compile({ to: 'interval-js' });
+    const fn = compile(expr, { to: 'interval-js' });
     const result = fn({ x: { lo: 2, hi: 2 } });
 
     expect(result.kind).toBe('interval');
@@ -147,7 +148,7 @@ describe('INTERVAL JS EXECUTION', () => {
 
   test('evaluates interval input', () => {
     const expr = ce.parse('x + 1');
-    const fn = expr.compile({ to: 'interval-js' });
+    const fn = compile(expr, { to: 'interval-js' });
     const result = fn({ x: { lo: 1, hi: 2 } });
 
     expect(result.kind).toBe('interval');
@@ -157,7 +158,7 @@ describe('INTERVAL JS EXECUTION', () => {
 
   test('evaluates number input (converts to point)', () => {
     const expr = ce.parse('x + 1');
-    const fn = expr.compile({ to: 'interval-js' });
+    const fn = compile(expr, { to: 'interval-js' });
     const result = fn({ x: 5 });
 
     expect(result.kind).toBe('interval');
@@ -167,7 +168,7 @@ describe('INTERVAL JS EXECUTION', () => {
 
   test('evaluates sin', () => {
     const expr = ce.parse('\\sin(x)');
-    const fn = expr.compile({ to: 'interval-js' });
+    const fn = compile(expr, { to: 'interval-js' });
     const result = fn({ x: { lo: 0, hi: 0.1 } });
 
     expect(result.kind).toBe('interval');
@@ -177,7 +178,7 @@ describe('INTERVAL JS EXECUTION', () => {
 
   test('sin over full period', () => {
     const expr = ce.parse('\\sin(x)');
-    const fn = expr.compile({ to: 'interval-js' });
+    const fn = compile(expr, { to: 'interval-js' });
     const result = fn({ x: { lo: 0, hi: 2 * Math.PI } });
 
     expect(result.kind).toBe('interval');
@@ -187,7 +188,7 @@ describe('INTERVAL JS EXECUTION', () => {
 
   test('sin with compound arguments', () => {
     const expr = ce.parse('\\sin(2x)');
-    const fn = expr.compile({ to: 'interval-js' });
+    const fn = compile(expr, { to: 'interval-js' });
     const result = fn({ x: { lo: 0, hi: 0.1 } });
 
     expect(result.kind).toBe('interval');
@@ -197,7 +198,7 @@ describe('INTERVAL JS EXECUTION', () => {
 
   test('sin with additive argument', () => {
     const expr = ce.parse('\\sin(x+x)');
-    const fn = expr.compile({ to: 'interval-js' });
+    const fn = compile(expr, { to: 'interval-js' });
     const result = fn({ x: { lo: 0, hi: 0.1 } });
 
     expect(result.kind).toBe('interval');
@@ -207,7 +208,7 @@ describe('INTERVAL JS EXECUTION', () => {
 
   test('sin with power argument', () => {
     const expr = ce.parse('\\sin(x^2)');
-    const fn = expr.compile({ to: 'interval-js' });
+    const fn = compile(expr, { to: 'interval-js' });
     const result = fn({ x: { lo: 0, hi: 0.1 } });
 
     expect(result.kind).toBe('interval');
@@ -217,7 +218,7 @@ describe('INTERVAL JS EXECUTION', () => {
 
   test('cos with compound arguments', () => {
     const expr = ce.parse('\\cos(2x)');
-    const fn = expr.compile({ to: 'interval-js' });
+    const fn = compile(expr, { to: 'interval-js' });
     const result = fn({ x: { lo: 0, hi: 0.1 } });
 
     expect(result.kind).toBe('interval');
@@ -227,7 +228,7 @@ describe('INTERVAL JS EXECUTION', () => {
 
   test('ln with compound argument', () => {
     const expr = ce.parse('\\ln(2x)');
-    const fn = expr.compile({ to: 'interval-js' });
+    const fn = compile(expr, { to: 'interval-js' });
     const result = fn({ x: { lo: 1, hi: 2 } });
 
     expect(result.kind).toBe('interval');
@@ -237,7 +238,7 @@ describe('INTERVAL JS EXECUTION', () => {
 
   test('abs with additive argument', () => {
     const expr = ce.parse('|x+x|');
-    const fn = expr.compile({ to: 'interval-js' });
+    const fn = compile(expr, { to: 'interval-js' });
     const result = fn({ x: { lo: -0.1, hi: 0.2 } });
 
     expect(result.kind).toBe('interval');
@@ -247,7 +248,7 @@ describe('INTERVAL JS EXECUTION', () => {
 
   test('max with compound argument', () => {
     const expr = ce.parse('\\max(x, x+1)');
-    const fn = expr.compile({ to: 'interval-js' });
+    const fn = compile(expr, { to: 'interval-js' });
     const result = fn({ x: { lo: 0, hi: 0.2 } });
 
     expect(result.kind).toBe('interval');
@@ -257,7 +258,7 @@ describe('INTERVAL JS EXECUTION', () => {
 
   test('comparison with compound argument', () => {
     const expr = ce.box(['Less', 'x', ['Add', 'x', 2]]);
-    const fn = expr.compile({ to: 'interval-js' });
+    const fn = compile(expr, { to: 'interval-js' });
     const result = fn({ x: { lo: 1, hi: 2 } });
 
     expect(result).toBe('true');
@@ -265,7 +266,7 @@ describe('INTERVAL JS EXECUTION', () => {
 
   test('comparison with compound argument is indeterminate', () => {
     const expr = ce.box(['Less', 'x', ['Add', 'x', 1]]);
-    const fn = expr.compile({ to: 'interval-js' });
+    const fn = compile(expr, { to: 'interval-js' });
     const result = fn({ x: { lo: 0, hi: 2 } });
 
     expect(result).toBe('maybe');
@@ -273,7 +274,7 @@ describe('INTERVAL JS EXECUTION', () => {
 
   test('comparison with compound argument is false', () => {
     const expr = ce.box(['Greater', 'x', ['Add', 'x', 3]]);
-    const fn = expr.compile({ to: 'interval-js' });
+    const fn = compile(expr, { to: 'interval-js' });
     const result = fn({ x: { lo: 0, hi: 2 } });
 
     expect(result).toBe('false');
@@ -286,7 +287,7 @@ describe('INTERVAL JS EXECUTION', () => {
       ['Add', 'x', 1],
       ['Negate', ['Add', 'x', 1]],
     ]);
-    const fn = expr.compile({ to: 'interval-js' });
+    const fn = compile(expr, { to: 'interval-js' });
     const result = fn({ x: { lo: 1, hi: 2 } });
 
     expect(result.kind).toBe('interval');
@@ -301,7 +302,7 @@ describe('INTERVAL JS EXECUTION', () => {
       ['Add', 'x', 1],
       ['Negate', ['Add', 'x', 1]],
     ]);
-    const fn = expr.compile({ to: 'interval-js' });
+    const fn = compile(expr, { to: 'interval-js' });
     const result = fn({ x: { lo: -1, hi: 1 } });
 
     expect(result.kind).toBe('interval');
@@ -311,7 +312,7 @@ describe('INTERVAL JS EXECUTION', () => {
 
   test('multiplication widens interval', () => {
     const expr = ce.parse('x \\cdot y');
-    const fn = expr.compile({ to: 'interval-js' });
+    const fn = compile(expr, { to: 'interval-js' });
     const result = fn({ x: { lo: 1, hi: 2 }, y: { lo: 3, hi: 4 } });
 
     expect(result.kind).toBe('interval');
@@ -323,7 +324,7 @@ describe('INTERVAL JS EXECUTION', () => {
 describe('INTERVAL JS SINGULARITY DETECTION', () => {
   test('division by zero interval is singular', () => {
     const expr = ce.parse('\\frac{1}{x}');
-    const fn = expr.compile({ to: 'interval-js' });
+    const fn = compile(expr, { to: 'interval-js' });
     const result = fn({ x: { lo: -1, hi: 1 } });
 
     expect(result.kind).toBe('singular');
@@ -331,7 +332,7 @@ describe('INTERVAL JS SINGULARITY DETECTION', () => {
 
   test('division by positive interval is safe', () => {
     const expr = ce.parse('\\frac{1}{x}');
-    const fn = expr.compile({ to: 'interval-js' });
+    const fn = compile(expr, { to: 'interval-js' });
     const result = fn({ x: { lo: 1, hi: 2 } });
 
     expect(result.kind).toBe('interval');
@@ -341,7 +342,7 @@ describe('INTERVAL JS SINGULARITY DETECTION', () => {
 
   test('sqrt of negative interval is empty', () => {
     const expr = ce.parse('\\sqrt{x}');
-    const fn = expr.compile({ to: 'interval-js' });
+    const fn = compile(expr, { to: 'interval-js' });
     const result = fn({ x: { lo: -2, hi: -1 } });
 
     expect(result.kind).toBe('empty');
@@ -349,7 +350,7 @@ describe('INTERVAL JS SINGULARITY DETECTION', () => {
 
   test('sqrt of mixed interval is partial', () => {
     const expr = ce.parse('\\sqrt{x}');
-    const fn = expr.compile({ to: 'interval-js' });
+    const fn = compile(expr, { to: 'interval-js' });
     const result = fn({ x: { lo: -1, hi: 4 } });
 
     expect(result.kind).toBe('partial');
@@ -360,7 +361,7 @@ describe('INTERVAL JS SINGULARITY DETECTION', () => {
 
   test('tan near PI/2 is singular', () => {
     const expr = ce.parse('\\tan(x)');
-    const fn = expr.compile({ to: 'interval-js' });
+    const fn = compile(expr, { to: 'interval-js' });
     const result = fn({ x: { lo: 1.5, hi: 1.65 } });
 
     expect(result.kind).toBe('singular');
@@ -368,7 +369,7 @@ describe('INTERVAL JS SINGULARITY DETECTION', () => {
 
   test('ln of non-positive is empty', () => {
     const expr = ce.parse('\\ln(x)');
-    const fn = expr.compile({ to: 'interval-js' });
+    const fn = compile(expr, { to: 'interval-js' });
     const result = fn({ x: { lo: -2, hi: 0 } });
 
     expect(result.kind).toBe('empty');
@@ -376,7 +377,7 @@ describe('INTERVAL JS SINGULARITY DETECTION', () => {
 
   test('ln crossing zero is partial', () => {
     const expr = ce.parse('\\ln(x)');
-    const fn = expr.compile({ to: 'interval-js' });
+    const fn = compile(expr, { to: 'interval-js' });
     const result = fn({ x: { lo: -1, hi: Math.E } });
 
     expect(result.kind).toBe('partial');
@@ -389,7 +390,7 @@ describe('INTERVAL JS SINGULARITY DETECTION', () => {
 describe('INTERVAL JS COMPLEX EXPRESSIONS', () => {
   test('sin(x)/x - classic singularity example', () => {
     const expr = ce.parse('\\frac{\\sin(x)}{x}');
-    const fn = expr.compile({ to: 'interval-js' });
+    const fn = compile(expr, { to: 'interval-js' });
 
     // At zero - singular
     const atZero = fn({ x: { lo: -0.1, hi: 0.1 } });
@@ -402,7 +403,7 @@ describe('INTERVAL JS COMPLEX EXPRESSIONS', () => {
 
   test('x^2 + y^2 composition', () => {
     const expr = ce.parse('x^2 + y^2');
-    const fn = expr.compile({ to: 'interval-js' });
+    const fn = compile(expr, { to: 'interval-js' });
     const result = fn({ x: { lo: 1, hi: 2 }, y: { lo: 3, hi: 4 } });
 
     expect(result.kind).toBe('interval');
@@ -413,7 +414,7 @@ describe('INTERVAL JS COMPLEX EXPRESSIONS', () => {
 
   test('exp(-x^2) Gaussian-like', () => {
     const expr = ce.parse('e^{-x^2}');
-    const fn = expr.compile({ to: 'interval-js' });
+    const fn = compile(expr, { to: 'interval-js' });
     const result = fn({ x: { lo: 0, hi: 1 } });
 
     expect(result.kind).toBe('interval');

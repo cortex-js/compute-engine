@@ -8,7 +8,7 @@
  * https://github.com/cortex-js/compute-engine/issues/240
  */
 
-import { ComputeEngine } from '@cortex-js/compute-engine';
+import { ComputeEngine, compile } from '@cortex-js/compute-engine';
 
 const ce = new ComputeEngine();
 
@@ -33,7 +33,7 @@ const expr1 = ce.parse('v + w');
 console.log('Expression:', expr1.toString());
 
 // Compile with operator override
-const fn1 = expr1.compile({
+const fn1 = compile(expr1, {
   operators: {
     Add: ['vectorAdd', 11],
   },
@@ -55,7 +55,7 @@ console.log('=' .repeat(50));
 const expr2 = ce.parse('v + w * u');
 console.log('Expression:', expr2.toString());
 
-const fn2 = expr2.compile({
+const fn2 = compile(expr2, {
   operators: {
     Add: ['vectorAdd', 11],
     Multiply: ['vectorMultiply', 12],
@@ -83,7 +83,7 @@ console.log('=' .repeat(50));
 const expr3 = ce.parse('a + b - c');
 console.log('Expression:', expr3.toString());
 
-const fn3 = expr3.compile({
+const fn3 = compile(expr3, {
   operators: (op) => {
     // Override only Add, others use defaults
     if (op === 'Add') return ['vectorAdd', 11];
@@ -115,7 +115,7 @@ function vectorNegate(a) {
 const expr4 = ce.parse('v - w');
 console.log('Expression:', expr4.toString());
 
-const fn4 = expr4.compile({
+const fn4 = compile(expr4, {
   operators: {
     Add: ['vectorAdd', 11],
     Negate: ['vectorNegate', 14],
@@ -141,7 +141,7 @@ console.log('=' .repeat(50));
 
 // You can still use symbol operators like '⊕' if needed
 const expr5 = ce.parse('x + y');
-const fn5 = expr5.compile({
+const fn5 = compile(expr5, {
   operators: {
     Add: ['⊕', 11], // This will use ⊕ as an infix operator
   },

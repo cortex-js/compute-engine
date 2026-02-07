@@ -11,7 +11,7 @@
  * - Use direct target overrides without registration
  */
 
-import { ComputeEngine, BaseCompiler } from '@cortex-js/compute-engine';
+import { ComputeEngine, BaseCompiler, compile } from '@cortex-js/compute-engine';
 
 const ce = new ComputeEngine();
 
@@ -28,20 +28,20 @@ console.log('-'.repeat(70));
 const expr1 = ce.parse('x^2 + y^2');
 
 // Compile to JavaScript (default)
-const jsFunc = expr1.compile();
+const jsFunc = compile(expr1);
 console.log('JavaScript (default):');
 console.log('  Code:', jsFunc.toString());
 console.log('  Result: f({x: 3, y: 4}) =', jsFunc({ x: 3, y: 4 }));
 console.log();
 
 // Compile to JavaScript (explicit)
-const jsFunc2 = expr1.compile({ to: 'javascript' });
+const jsFunc2 = compile(expr1, { to: 'javascript' });
 console.log('JavaScript (explicit):');
 console.log('  Code:', jsFunc2.toString());
 console.log();
 
 // Compile to GLSL
-const glslCode = expr1.compile({ to: 'glsl' });
+const glslCode = compile(expr1, { to: 'glsl' });
 console.log('GLSL:');
 console.log('  Code:', glslCode.toString());
 console.log();
@@ -114,19 +114,19 @@ ce.registerCompilationTarget('python', new PythonTarget());
 
 // Compile expressions to Python
 const expr2 = ce.parse('\\sin(x) + \\cos(y)');
-const pythonCode1 = expr2.compile({ to: 'python' });
+const pythonCode1 = compile(expr2, { to: 'python' });
 console.log('Expression: sin(x) + cos(y)');
 console.log('Python:', pythonCode1.toString());
 console.log();
 
 const expr3 = ce.parse('x^2 + y^2');
-const pythonCode2 = expr3.compile({ to: 'python' });
+const pythonCode2 = compile(expr3, { to: 'python' });
 console.log('Expression: x² + y²');
 console.log('Python:', pythonCode2.toString());
 console.log();
 
 const expr4 = ce.parse('\\sqrt{a^2 + b^2}');
-const pythonCode3 = expr4.compile({ to: 'python' });
+const pythonCode3 = compile(expr4, { to: 'python' });
 console.log('Expression: √(a² + b²)');
 console.log('Python:', pythonCode3.toString());
 console.log();
@@ -191,19 +191,19 @@ ce.registerCompilationTarget('rpn', new RPNTarget());
 
 // Compile expressions to RPN
 const expr5 = ce.parse('x + y');
-const rpnCode1 = expr5.compile({ to: 'rpn' });
+const rpnCode1 = compile(expr5, { to: 'rpn' });
 console.log('Expression: x + y');
 console.log('RPN:', rpnCode1.toString());
 console.log();
 
 const expr6 = ce.parse('(x + y) * z');
-const rpnCode2 = expr6.compile({ to: 'rpn' });
+const rpnCode2 = compile(expr6, { to: 'rpn' });
 console.log('Expression: (x + y) * z');
 console.log('RPN:', rpnCode2.toString());
 console.log();
 
 const expr7 = ce.parse('\\sin(x)');
-const rpnCode3 = expr7.compile({ to: 'rpn' });
+const rpnCode3 = compile(expr7, { to: 'rpn' });
 console.log('Expression: sin(x)');
 console.log('RPN:', rpnCode3.toString());
 console.log();
@@ -238,7 +238,7 @@ const forthTarget = {
   preamble: '',
 };
 
-const forthCode = expr8.compile({ target: forthTarget });
+const forthCode = compile(expr8, { target: forthTarget });
 console.log('Expression: a + b');
 console.log('Forth:', forthCode.toString());
 console.log();

@@ -342,7 +342,7 @@
 
   <script defer type="module">
     import { convertLatexToMarkup } from "https://unpkg.com/mathlive/mathlive.min.mjs";
-    import { ComputeEngine } from "../compute-engine.esm.js";
+    import { ComputeEngine, compile } from "../compute-engine.esm.js";
 
     // terminal.display(
     //   highlightSyntax(
@@ -1035,11 +1035,11 @@
           let fn;
 
           if (jsonLines.length > 1) {
-            fn = ce.box(["Block", ...jsonLines]).compile("javascript", {
-              optimize: [],
+            fn = compile(ce.box(["Block", ...jsonLines]), {
+              to: "javascript",
             });
           } else {
-            fn = canonicalExpr.compile("javascript", { optimize: [] });
+            fn = compile(canonicalExpr, { to: "javascript" });
           }
 
           let start = performance.now();

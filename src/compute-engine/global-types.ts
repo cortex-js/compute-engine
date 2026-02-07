@@ -1457,12 +1457,6 @@ export interface BoxedExpression {
   trigSimplify(): BoxedExpression;
 
   /**
-   * Expand the expression: distribute multiplications over additions,
-   * and expand powers.
-   */
-  expand(): BoxedExpression;
-
-  /**
    * Return the value of the canonical form of this expression.
    *
    * A pure expression always returns the same value (provided that it
@@ -1507,64 +1501,6 @@ export interface BoxedExpression {
    * The result is in canonical form.
    */
   N(): BoxedExpression;
-
-  /**
-   * Compile the expression to a JavaScript function.
-   *
-   * The function takes an object as argument, with the keys being the
-   * symbols in the expression, and returns the value of the expression.
-   *
-   *
-   * ```javascript
-   * const expr = ce.parse("x^2 + y^2");
-   * const f = expr.compile();
-   * console.log(f({x: 2, y: 3}));
-   * // -> 13
-   * ```
-   *
-   * If the expression is a function literal, the function takes the
-   * arguments of the function as arguments, and returns the value of the
-   * expression.
-   *
-   * ```javascript
-   * const expr = ce.parse("(x) \mapsto 2x");
-   * const f = expr.compile();
-   * console.log(f(42));
-   * // -> 84
-   * ```
-   *
-   * If the expression cannot be compiled, a JS function is returned that
-   * falls back to the interpreting the expression, unless the
-   * `options.fallback` is set to `false`. If it is set to `false`, the
-   * function will throw an error if it cannot be compiled.
-   *
-   * **Custom operators**: You can override operators to use function calls
-   * instead of native operators, useful for vector/matrix operations:
-   *
-   * ```javascript
-   * const expr = ce.parse("v + w");
-   * const f = expr.compile({
-   *   operators: {
-   *     Add: ['add', 11],      // Convert + to add()
-   *     Multiply: ['mul', 12]   // Convert * to mul()
-   *   }
-   * });
-   * // Result: add(v, w) instead of v + w
-   * ```
-   *
-   */
-  compile(options?: {
-    to?: string;
-    target?: any; // CompileTarget, but any to avoid circular deps
-    operators?:
-      | Partial<Record<MathJsonSymbol, [op: string, prec: number]>>
-      | ((op: MathJsonSymbol) => [op: string, prec: number] | undefined);
-    functions?: Record<MathJsonSymbol, JSSource | ((...any) => any)>;
-    vars?: Record<MathJsonSymbol, JSSource>;
-    imports?: ((...any) => any)[];
-    preamble?: string;
-    fallback?: boolean;
-  }): ((...args: any[]) => any) & { isCompiled?: boolean };
 
   /**
    * If this is an equation, solve the equation for the variables in vars.

@@ -1,6 +1,7 @@
 import type { BoxedExpression, ComputeEngine } from '../global-types';
 import { polynomialDegree } from './polynomials';
 import { findUnivariateRoots } from './solve';
+import { expand } from './expand';
 
 /**
  * Check if an expression is linear in the given variables.
@@ -157,10 +158,10 @@ function extractLinearCoefficients(
   if (equation.operator === 'Equal') {
     const lhs = equation.op1;
     const rhs = equation.op2;
-    expr = lhs.sub(rhs).expand();
+    expr = expand(lhs.sub(rhs)) ?? lhs.sub(rhs);
   } else {
     // Assume equation = 0
-    expr = equation.expand();
+    expr = expand(equation) ?? equation;
   }
 
   // Check that all variables appear with degree at most 1 (linear)
@@ -673,9 +674,10 @@ export function solvePolynomialSystem(
   // Normalize equations to lhs - rhs = 0 form
   const normalized = equations.map((eq) => {
     if (eq.operator === 'Equal') {
-      return eq.op1.sub(eq.op2).expand().simplify();
+      const diff = eq.op1.sub(eq.op2);
+      return (expand(diff) ?? diff).simplify();
     }
-    return eq.expand().simplify();
+    return (expand(eq) ?? eq).simplify();
   });
 
   // Try product + sum pattern first
@@ -1175,11 +1177,13 @@ function extractLinearConstraint(
   let strict: boolean;
 
   if (op === 'Less' || op === 'LessEqual') {
-    expr = lhs.sub(rhs).expand().simplify();
+    const diff1 = lhs.sub(rhs);
+    expr = (expand(diff1) ?? diff1).simplify();
     strict = op === 'Less';
   } else {
     // Greater or GreaterEqual: flip to Less form
-    expr = rhs.sub(lhs).expand().simplify();
+    const diff2 = rhs.sub(lhs);
+    expr = (expand(diff2) ?? diff2).simplify();
     strict = op === 'Greater';
   }
 

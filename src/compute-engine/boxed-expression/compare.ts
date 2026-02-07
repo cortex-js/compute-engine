@@ -1,7 +1,9 @@
 import { NumericValue } from '../numeric-value/types';
 import type { BoxedExpression } from '../global-types';
 import { AbstractTensor } from '../tensor/tensors';
-// Dynamic import to avoid circular dependency
+import { getInequalityBoundsFromAssumptions } from './inequality-bounds';
+// Dynamic import for expand to avoid circular dependency
+// (expand → arithmetic-add → boxed-tensor → abstract-boxed-expression → compare)
 
 /**
  * Structural equality of boxed expressions.
@@ -113,8 +115,9 @@ export function eq(
     // If the expression have some unknowns, we only try to prove equality
     // if they have the same unknowns and are structurally equal after
     // expansing and simplification
-    a = a.expand().simplify();
-    b = b.expand().simplify();
+    const { expand } = require('./expand');
+    a = (expand(a) ?? a).simplify();
+    b = (expand(b) ?? b).simplify();
     if (!sameUnknowns(a, b)) return undefined;
     return same(a, b);
   }
@@ -201,8 +204,6 @@ export function cmp(
     if (!b.isNumberLiteral) {
       // Check if b is a symbol with inequality assumptions
       if (b.symbol) {
-        // Dynamic import to avoid circular dependency
-        const { getInequalityBoundsFromAssumptions } = require('../assume');
         const bounds = getInequalityBoundsFromAssumptions(a.engine, b.symbol);
         const aNum =
           typeof a.numericValue === 'number'
@@ -264,8 +265,6 @@ export function cmp(
   if (typeof b === 'number') {
     // Check if a is a symbol with inequality assumptions
     if (a.symbol) {
-      // Dynamic import to avoid circular dependency
-      const { getInequalityBoundsFromAssumptions } = require('../assume');
       const bounds = getInequalityBoundsFromAssumptions(a.engine, a.symbol);
 
       // We're comparing a (symbol) to b (number)
@@ -352,8 +351,6 @@ export function cmp(
 
     // Check inequality assumptions for the symbol
     if (b.isNumberLiteral) {
-      // Dynamic import to avoid circular dependency
-      const { getInequalityBoundsFromAssumptions } = require('../assume');
       const bounds = getInequalityBoundsFromAssumptions(a.engine, a.symbol);
       const bNum =
         typeof b.numericValue === 'number'

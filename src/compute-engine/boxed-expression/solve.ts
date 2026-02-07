@@ -1133,9 +1133,11 @@ export function findUnivariateRoots(
 ): ReadonlyArray<BoxedExpression> {
   const ce = expr.engine;
 
-  if (expr.operator === 'Equal')
-    expr = expr.op1.expand().sub(expr.op2.expand()).simplify();
-  else expr = expr.expand().simplify();
+  if (expr.operator === 'Equal') {
+    const lhs = expand(expr.op1) ?? expr.op1;
+    const rhs = expand(expr.op2) ?? expr.op2;
+    expr = lhs.sub(rhs).simplify();
+  } else expr = (expand(expr) ?? expr).simplify();
 
   // Save the expression BEFORE clearing denominators and other transformations.
   // This is crucial for validating roots: clearing denominators and harmonization
