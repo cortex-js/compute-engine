@@ -30,7 +30,7 @@
   functions have compilation support in every target. Currently all 5 targets
   have full coverage of the 47 compilable math functions.
 
-### 0.35.5 _2026-02-06_
+## 0.35.5 _2026-02-06_
 
 ### Bug Fixes
 
@@ -53,7 +53,7 @@
   the non-canonical name `LogGamma` instead of `GammaLn`, preventing the
   derivative `d/dx GammaLn(x) = Digamma(x)` from being computed.
 
-### 0.35.4 _2026-02-06_
+## 0.35.4 _2026-02-06_
 
 ### Interval Arithmetic
 
@@ -87,8 +87,6 @@
 
 - **New Interval Functions**: Added `Round`, `Fract`, and `Mod` to the interval
   arithmetic targets (both JS and GLSL) with proper discontinuity detection.
-
-### Bug Fixes
 
 ## 0.35.2 _2026-02-05_
 
