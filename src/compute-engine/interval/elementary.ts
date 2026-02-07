@@ -13,6 +13,7 @@ import {
   isPositive,
   unwrapOrPropagate,
 } from './util';
+import { sub, mul, div } from './arithmetic';
 
 /**
  * Square root of an interval (or IntervalResult).
@@ -491,6 +492,20 @@ export function mod(
   const modLo = aVal.lo - period * flo;
   const modHi = aVal.hi - period * flo;
   return ok({ lo: Math.min(modLo, modHi), hi: Math.max(modLo, modHi) });
+}
+
+/**
+ * IEEE remainder: remainder(a, b) = a - b * round(a / b).
+ *
+ * Composes division, rounding, multiplication, and subtraction.
+ * Discontinuities arise from the `round` step when `a/b` spans
+ * a half-integer boundary.
+ */
+export function remainder(
+  a: Interval | IntervalResult,
+  b: Interval | IntervalResult
+): IntervalResult {
+  return sub(a, mul(b, round(div(a, b))));
 }
 
 /**

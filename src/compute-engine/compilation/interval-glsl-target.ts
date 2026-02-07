@@ -336,6 +336,16 @@ IntervalResult ia_mod(vec2 x, vec2 y) {
   return ia_sub(x, ia_mul_raw(y, fq.value));
 }
 
+// IEEE remainder: a - b * round(a / b)
+// Discontinuities arise from round when a/b spans a half-integer
+IntervalResult ia_remainder(vec2 a, vec2 b) {
+  IntervalResult q = ia_div(a, b);
+  if (ia_is_error(q.status)) return q;
+  IntervalResult rq = ia_round(q.value);
+  if (ia_is_error(rq.status)) return rq;
+  return ia_sub(a, ia_mul_raw(b, rq.value));
+}
+
 // Min of two intervals
 IntervalResult ia_min(vec2 a, vec2 b) {
   return ia_ok(vec2(min(a.x, b.x), min(a.y, b.y)));
@@ -661,6 +671,22 @@ IntervalResult ia_mod(IntervalResult a, vec2 b) {
 IntervalResult ia_mod(vec2 a, IntervalResult b) {
   if (ia_is_error(b.status)) return b;
   return ia_mod(a, b.value);
+}
+
+IntervalResult ia_remainder(IntervalResult a, IntervalResult b) {
+  if (ia_is_error(a.status)) return a;
+  if (ia_is_error(b.status)) return b;
+  return ia_remainder(a.value, b.value);
+}
+
+IntervalResult ia_remainder(IntervalResult a, vec2 b) {
+  if (ia_is_error(a.status)) return a;
+  return ia_remainder(a.value, b);
+}
+
+IntervalResult ia_remainder(vec2 a, IntervalResult b) {
+  if (ia_is_error(b.status)) return b;
+  return ia_remainder(a, b.value);
 }
 
 IntervalResult ia_min(IntervalResult a, IntervalResult b) {
@@ -1070,6 +1096,7 @@ const INTERVAL_GLSL_FUNCTIONS: CompiledFunctions = {
     return `ia_div(ia_ln(${compile(args[0])}), ia_ln(${compile(args[1])}))`;
   },
   Mod: (args, compile) => `ia_mod(${compile(args[0])}, ${compile(args[1])})`,
+  Remainder: (args, compile) => `ia_remainder(${compile(args[0])}, ${compile(args[1])})`,
   Max: (args, compile) => {
     if (args.length === 0) return 'ia_point(-1e38)';
     if (args.length === 1) return compile(args[0]);
@@ -1103,6 +1130,15 @@ const INTERVAL_GLSL_FUNCTIONS: CompiledFunctions = {
     }
     // Variable exponent - not fully supported in this simple implementation
     throw new Error('Interval GLSL does not support variable exponents');
+  },
+  Root: (args, compile) => {
+    const [arg, exp] = args;
+    if (arg === null) throw new Error('Root: no argument');
+    if (exp === null || exp?.re === 2) return `ia_sqrt(${compile(arg)})`;
+    if (exp?.isNumberLiteral && exp.im === 0) {
+      return `ia_pow(${compile(arg)}, ${1 / exp.re})`;
+    }
+    throw new Error('Interval GLSL does not support variable root indices');
   },
   Round: (args, compile) => `ia_round(${compile(args[0])})`,
   Sign: (args, compile) => `ia_sign(${compile(args[0])})`,

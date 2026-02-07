@@ -190,8 +190,9 @@ const INTERVAL_JAVASCRIPT_FUNCTIONS: CompiledFunctions = {
   Fract: (args, compile) => `_IA.fract(${compile(args[0])})`,
   Truncate: (args, compile) => `_IA.trunc(${compile(args[0])})`,
 
-  // Mod
+  // Mod / Remainder
   Mod: (args, compile) => `_IA.mod(${compile(args[0])}, ${compile(args[1])})`,
+  Remainder: (args, compile) => `_IA.remainder(${compile(args[0])}, ${compile(args[1])})`,
 
   // Conditionals
   If: (args, compile) => {

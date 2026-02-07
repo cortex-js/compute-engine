@@ -53,6 +53,7 @@ import {
   min as _min,
   max as _max,
   mod as _mod,
+  remainder as _remainder,
   sign as _sign,
 } from './elementary';
 import {
@@ -141,6 +142,7 @@ export {
   min,
   max,
   mod,
+  remainder,
   sign,
 } from './elementary';
 
@@ -238,6 +240,7 @@ export const IntervalArithmetic = {
   min: _min,
   max: _max,
   mod: _mod,
+  remainder: _remainder,
   sign: _sign,
 
   // Trigonometric

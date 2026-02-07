@@ -270,6 +270,12 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions = {
   Sqrt: 'Math.sqrt',
   Tan: 'Math.tan',
   Tanh: 'Math.tanh',
+  Mod: ([a, b], compile) => {
+    if (a === null || b === null) throw new Error('Mod: missing argument');
+    const ca = compile(a);
+    const cb = compile(b);
+    return `((${ca} % ${cb}) + ${cb}) % ${cb}`;
+  },
   Truncate: 'Math.trunc',
   Remainder: ([a, b], compile) => {
     if (a === null || b === null) throw new Error('Remainder: missing argument');

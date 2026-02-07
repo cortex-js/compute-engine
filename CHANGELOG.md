@@ -2,18 +2,24 @@
 
 ### Compilation
 
-- **`Truncate` and `Remainder` for JS/GLSL targets**: Added `Truncate`
-  (`Math.trunc` / `trunc`) and `Remainder` to the JavaScript and GLSL
+- **`Truncate`, `Remainder`, and `Mod` for JS/GLSL targets**: Added `Truncate`
+  (`Math.trunc` / `trunc`), `Remainder`, and `Mod` to the JavaScript and GLSL
   compilation targets, matching the Python target which already had them.
 
-- **Interval `trunc`**: Added `trunc()` to the interval arithmetic library with
-  proper discontinuity detection (behaves like `floor` for positive, `ceil` for
-  negative, continuous at zero). Added corresponding `Truncate` mappings to both
-  interval JavaScript and interval GLSL targets.
+- **Interval `trunc` and `remainder`**: Added `trunc()` and `remainder()` to
+  the interval arithmetic library. `trunc` has proper discontinuity detection
+  (behaves like `floor` for positive, `ceil` for negative, continuous at zero).
+  `remainder(a, b) = a - b * round(a/b)` composes existing interval operations
+  with discontinuity detection inherited from `round`. Added corresponding
+  mappings to both interval JavaScript and interval GLSL targets.
 
-- **Interval `Lb` and `Log` for GLSL**: Added `ia_log2` and `ia_log10` to the
-  interval GLSL target, plus `Lb` and `Log` function mappings, for consistency
-  with the interval JavaScript target.
+- **Interval `Lb`, `Log`, and `Root` for GLSL**: Added `ia_log2`, `ia_log10`,
+  and `Root` to the interval GLSL target for consistency with the interval
+  JavaScript target.
+
+- **Reverse cross-reference test**: Added a test that verifies all core CE math
+  functions have compilation support in every target. Currently all 5 targets
+  have full coverage of the 47 compilable math functions.
 
 ### 0.35.5 _2026-02-06_
 

@@ -384,4 +384,64 @@ describe('COMPILE', () => {
       });
     }
   });
+
+  describe('Reverse cross-reference: CE math functions have target coverage', () => {
+    // Math functions defined in the CE library that should ideally be compilable.
+    // Excludes structural/meta functions (Block, Declare, Assign, etc.),
+    // set operations, logic, and domain-specific functions.
+    const COMPILABLE_MATH_FUNCTIONS = [
+      // Arithmetic
+      'Add', 'Subtract', 'Multiply', 'Divide', 'Negate', 'Power', 'Root', 'Sqrt', 'Square',
+      // Rounding / parts
+      'Abs', 'Sign', 'Floor', 'Ceil', 'Round', 'Truncate', 'Fract', 'Mod', 'Remainder',
+      // Exponential / logarithmic
+      'Exp', 'Ln', 'Log', 'Lb',
+      // Trigonometric
+      'Sin', 'Cos', 'Tan', 'Cot', 'Sec', 'Csc',
+      'Arcsin', 'Arccos', 'Arctan', 'Arccot', 'Arccsc', 'Arcsec',
+      // Hyperbolic
+      'Sinh', 'Cosh', 'Tanh', 'Coth', 'Csch', 'Sech',
+      'Arsinh', 'Arcosh', 'Artanh', 'Arcoth', 'Arcsch', 'Arsech',
+      // Comparison
+      'Equal', 'NotEqual', 'Less', 'LessEqual', 'Greater', 'GreaterEqual',
+      // Logic
+      'And', 'Or', 'Not',
+      // Aggregates
+      'Min', 'Max',
+    ];
+
+    const targets: Array<[string, { getFunctions: () => Record<string, unknown>; getOperators: () => Record<string, unknown> }]> = [
+      ['javascript', new JavaScriptTarget()],
+      ['glsl', new GLSLTarget()],
+      ['interval-javascript', new IntervalJavaScriptTarget()],
+      ['interval-glsl', new IntervalGLSLTarget()],
+      ['python', new PythonTarget()],
+    ];
+
+    for (const [name, target] of targets) {
+      it(`${name}: coverage of compilable CE math functions`, () => {
+        const functions = target.getFunctions();
+        const operators = target.getOperators();
+        const missing: string[] = [];
+
+        for (const fn of COMPILABLE_MATH_FUNCTIONS) {
+          if (!(fn in functions) && !(fn in operators)) {
+            missing.push(fn);
+          }
+        }
+
+        // This test ensures no regressions. If a function is intentionally
+        // unsupported in a target, add it to the expected list below.
+        const expectedMissing: Record<string, string[]> = {
+          javascript: [],
+          glsl: [],
+          'interval-javascript': [],
+          'interval-glsl': [],
+          python: [],
+        };
+
+        expect(missing.sort()).toEqual((expectedMissing[name] ?? []).sort());
+      });
+    }
+  });
 });
