@@ -9,7 +9,6 @@ import type {
   RuleSteps,
 } from '../global-types';
 
-
 type InternalSimplifyOptions = SimplifyOptions & {
   useVariations: boolean;
 };

@@ -192,7 +192,8 @@ const INTERVAL_JAVASCRIPT_FUNCTIONS: CompiledFunctions = {
 
   // Mod / Remainder
   Mod: (args, compile) => `_IA.mod(${compile(args[0])}, ${compile(args[1])})`,
-  Remainder: (args, compile) => `_IA.remainder(${compile(args[0])}, ${compile(args[1])})`,
+  Remainder: (args, compile) =>
+    `_IA.remainder(${compile(args[0])}, ${compile(args[1])})`,
 
   // Conditionals
   If: (args, compile) => {

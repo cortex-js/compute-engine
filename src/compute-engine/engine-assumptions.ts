@@ -7,10 +7,7 @@ import type {
 
 import type { MathJsonSymbol } from '../math-json/types';
 
-import {
-  isWildcard,
-  wildcardName,
-} from './boxed-expression/boxed-patterns';
+import { isWildcard, wildcardName } from './boxed-expression/boxed-patterns';
 
 import {
   assume as assumeImpl,
@@ -78,10 +75,8 @@ export function ask(
     )
       return [{ pattern: expr }];
 
-    const lhs =
-      op === 'Greater' || op === 'GreaterEqual' ? expr.op2 : expr.op1;
-    const rhs =
-      op === 'Greater' || op === 'GreaterEqual' ? expr.op1 : expr.op2;
+    const lhs = op === 'Greater' || op === 'GreaterEqual' ? expr.op2 : expr.op1;
+    const rhs = op === 'Greater' || op === 'GreaterEqual' ? expr.op1 : expr.op2;
     const normalizedOp =
       op === 'Less' || op === 'Greater' ? 'Less' : 'LessEqual';
 
@@ -134,10 +129,7 @@ export function ask(
 
       // Symbol on LHS: Greater(x, _k)
       if (pat.op1?.symbol) {
-        const bounds = getInequalityBoundsFromAssumptions(
-          ce,
-          pat.op1.symbol
-        );
+        const bounds = getInequalityBoundsFromAssumptions(ce, pat.op1.symbol);
         const bound = isLower ? bounds.lowerBound : bounds.upperBound;
         const strictOk = isLower ? bounds.lowerStrict : bounds.upperStrict;
         if (bound !== undefined && (!isStrict || strictOk === true))
@@ -151,9 +143,7 @@ export function ask(
           for (const s of candidatesFromAssumptions()) {
             const bounds = getInequalityBoundsFromAssumptions(ce, s);
             const bound = isLower ? bounds.lowerBound : bounds.upperBound;
-            const strictOk = isLower
-              ? bounds.lowerStrict
-              : bounds.upperStrict;
+            const strictOk = isLower ? bounds.lowerStrict : bounds.upperStrict;
             if (bound === undefined || (isStrict && strictOk !== true))
               continue;
             pushResult({
@@ -186,11 +176,7 @@ export function ask(
   // infinite recursion. The recursion occurs when:
   //   verify(Equal(x,0)) → Equal.evaluate() → eq() → ask(NotEqual(x,0)) → verify()
   // By checking _isVerifying, we break this cycle.
-  if (
-    result.length === 0 &&
-    !patternHasWildcards(pat) &&
-    !ce._isVerifying
-  ) {
+  if (result.length === 0 && !patternHasWildcards(pat) && !ce._isVerifying) {
     // Use the canonical form so symbol declarations/definitions are visible
     // to the evaluator.
     const verified = verify(ce, ce.box(pattern, { canonical: true }));

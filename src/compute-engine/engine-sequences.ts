@@ -87,10 +87,7 @@ export function isSequence(ce: IComputeEngine, name: string): boolean {
   return isSequenceImpl(ce, name);
 }
 
-export function clearSequenceCache(
-  ce: IComputeEngine,
-  name?: string
-): void {
+export function clearSequenceCache(ce: IComputeEngine, name?: string): void {
   clearSequenceCacheImpl(ce, name);
 }
 

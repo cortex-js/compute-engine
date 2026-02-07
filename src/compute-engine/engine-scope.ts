@@ -59,8 +59,7 @@ export function pushEvalContext(
   //
   const values: { [id: string]: BoxedExpression | undefined } = {};
   for (const [id, def] of scope.bindings.entries()) {
-    if (isValueDef(def) && !def.value.isConstant)
-      values[id] = def.value.value;
+    if (isValueDef(def) && !def.value.isConstant) values[id] = def.value.value;
   }
 
   ce._evalContextStack.push({
@@ -154,9 +153,7 @@ export function printStack(
 
     for (const [k, b] of bindings) {
       if (context.lexicalScope.bindings.has(k)) {
-        console.info(
-          defToString(k, context.lexicalScope.bindings.get(k)!, b)
-        );
+        console.info(defToString(k, context.lexicalScope.bindings.get(k)!, b));
       } else if (b === undefined) {
         console.info(`${CYAN}${k}${RESET}: ${GREY}undefined${RESET}`);
       } else {
@@ -196,10 +193,7 @@ export function lookupContext(
   return undefined;
 }
 
-export function swapContext(
-  ce: IComputeEngine,
-  context: EvalContext
-): void {
+export function swapContext(ce: IComputeEngine, context: EvalContext): void {
   while (
     ce._evalContextStack.length > 0 &&
     ce._evalContextStack[ce._evalContextStack.length - 1] !== context

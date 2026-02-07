@@ -278,7 +278,8 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions = {
   },
   Truncate: 'Math.trunc',
   Remainder: ([a, b], compile) => {
-    if (a === null || b === null) throw new Error('Remainder: missing argument');
+    if (a === null || b === null)
+      throw new Error('Remainder: missing argument');
     return `(${compile(a)} - ${compile(b)} * Math.round(${compile(a)} / ${compile(b)}))`;
   },
 };

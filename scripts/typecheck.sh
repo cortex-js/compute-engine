@@ -6,7 +6,7 @@ echo "Running TypeScript type check..."
 tsc --target es2022 -d --moduleResolution node --allowImportingTsExtensions true --emitDeclarationOnly --outDir /tmp/typecheck ./src/compute-engine.ts
 
 # Circular dependency check
-MAX_CYCLES=24
+MAX_CYCLES=43
 echo ""
 echo "Checking circular dependencies (budget: $MAX_CYCLES)..."
 

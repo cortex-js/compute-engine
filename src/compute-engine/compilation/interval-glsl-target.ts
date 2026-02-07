@@ -1096,7 +1096,8 @@ const INTERVAL_GLSL_FUNCTIONS: CompiledFunctions = {
     return `ia_div(ia_ln(${compile(args[0])}), ia_ln(${compile(args[1])}))`;
   },
   Mod: (args, compile) => `ia_mod(${compile(args[0])}, ${compile(args[1])})`,
-  Remainder: (args, compile) => `ia_remainder(${compile(args[0])}, ${compile(args[1])})`,
+  Remainder: (args, compile) =>
+    `ia_remainder(${compile(args[0])}, ${compile(args[1])})`,
   Max: (args, compile) => {
     if (args.length === 0) return 'ia_point(-1e38)';
     if (args.length === 1) return compile(args[0]);

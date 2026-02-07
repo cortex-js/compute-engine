@@ -1,8 +1,4 @@
-import type {
-  Type,
-  TypeString,
-  TypeResolver,
-} from '../common/type/types';
+import type { Type, TypeString, TypeResolver } from '../common/type/types';
 import { isValidType, isValidTypeName, widen } from '../common/type/utils';
 import { parseType } from '../common/type/parse';
 import { BoxedType } from '../common/type/boxed-type';
@@ -164,8 +160,7 @@ export function declareType(
   type: BoxedType | Type | TypeString,
   { alias }: { alias?: boolean } = {}
 ): void {
-  if (!isValidTypeName(name))
-    throw Error(`The type name "${name}" is invalid`);
+  if (!isValidTypeName(name)) throw Error(`The type name "${name}" is invalid`);
 
   // Is the type already defined in this scope?
   const scope = ce.context.lexicalScope;
@@ -343,8 +338,7 @@ export function assignFn(
   // 2/ We were given an operator definition
   //
   const fnDef = assignValueAsOperatorDef(ce, arg2);
-  if (fnDef === undefined)
-    throw Error(`Invalid definition for symbol "${id}"`);
+  if (fnDef === undefined) throw Error(`Invalid definition for symbol "${id}"`);
 
   if (def) {
     // If we get here, the previous definition was a value definition.

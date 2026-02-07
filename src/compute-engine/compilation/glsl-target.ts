@@ -105,7 +105,8 @@ const GLSL_FUNCTIONS: CompiledFunctions = {
   Tan: 'tan',
   Truncate: 'trunc',
   Remainder: ([a, b], compile) => {
-    if (a === null || b === null) throw new Error('Remainder: missing argument');
+    if (a === null || b === null)
+      throw new Error('Remainder: missing argument');
     return `(${compile(a)} - ${compile(b)} * round(${compile(a)} / ${compile(b)}))`;
   },
 

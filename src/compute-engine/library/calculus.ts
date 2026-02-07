@@ -186,7 +186,9 @@ volumes
         const xValue = x.N().re;
         if (isNaN(xValue)) return undefined;
 
-        return engine.number(centeredDiff8thOrder(engine._compile(body), xValue));
+        return engine.number(
+          centeredDiff8thOrder(engine._compile(body), xValue)
+        );
       },
     },
 

@@ -91,10 +91,7 @@ import { BigNumericValue } from './numeric-value/big-numeric-value';
 import { MachineNumericValue } from './numeric-value/machine-numeric-value';
 
 import { box, boxFunction } from './boxed-expression/box';
-import {
-  isValueDef,
-  isOperatorDef,
-} from './boxed-expression/utils';
+import { isValueDef, isOperatorDef } from './boxed-expression/utils';
 import { boxRules } from './boxed-expression/rules';
 import { validatePattern } from './boxed-expression/boxed-patterns';
 import { BoxedString } from './boxed-expression/boxed-string';
@@ -1964,5 +1961,3 @@ export class ComputeEngine implements IComputeEngine {
     forgetImpl(this, symbol);
   }
 }
-
-

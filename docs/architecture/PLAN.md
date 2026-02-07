@@ -217,12 +217,12 @@ implementation detail that is not exposed in the public API.
 
 ### 3.4 Monolithic Core Files
 
-| File                           | Lines | Responsibility                                                                                                      |
-| ------------------------------ | ----- | ------------------------------------------------------------------------------------------------------------------- |
-| `global-types.ts`              | 3,922 | All type definitions                                                                                                |
-| `index.ts` (ComputeEngine)     | 2,745 | Engine facade + scope management + parsing + evaluation + compilation registry + assumption system + OEIS + caching |
-| `abstract-boxed-expression.ts` | 911   | Base class with default stubs                                                                                       |
-| `parse.ts` (LaTeX)             | 2,684 | Full LaTeX parser                                                                                                   |
+| File                           | Lines       | Responsibility                                                                                                      |
+| ------------------------------ | ----------- | ------------------------------------------------------------------------------------------------------------------- |
+| `global-types.ts`              | ~~3,922~~ 15 (barrel) | All type definitions → now split into 5 `types-*.ts` files                                              |
+| `index.ts` (ComputeEngine)     | ~~2,745~~ 1,955 | Engine facade → scope/assumptions/declarations/sequences extracted                                          |
+| `abstract-boxed-expression.ts` | 911         | Base class with default stubs                                                                                       |
+| `parse.ts` (LaTeX)             | ~~2,684~~ 2,309 | LaTeX parser → number parsing extracted to `parse-number.ts`                                                 |
 
 These files are the primary source of coupling. When everything is in one file,
 everything can depend on everything.
@@ -510,22 +510,37 @@ immediately.
     - Eliminated 4 of 7 dynamic `require()` calls (serializeJson deferred,
       2 new dynamic requires needed for expand-in-compare and compile-in-collections
       due to unavoidable cycle chains)
-    - Cycle count: 24 (one pre-existing `arithmetic-add ↔ terms` cycle surfaced)
+    - Cycle count after extraction: 24 (one pre-existing `arithmetic-add ↔ terms`
+      cycle surfaced). After item 11 (file splits): 43 — the increase is from
+      type-only `import type` cycles between split type files + pre-existing
+      latex-syntax internal cycles now separately enumerated by madge.
 
-11. **Split monolithic files**
-    - `index.ts` → scope, factory, registry, evaluate modules
-    - `global-types.ts` → domain-specific type files
-    - `parse.ts` → extract tokenizer; keep parser cohesive
+11. **Split monolithic files** ✅ DONE
+    - `index.ts` (2745→1955 lines) → extracted `engine-sequences.ts` (129),
+      `engine-assumptions.ts` (328), `engine-scope.ts` (270),
+      `engine-declarations.ts` (404)
+    - `global-types.ts` (3894→15 lines) → barrel re-exporting from 5 type files:
+      `types-expression.ts` (1857, includes tensor/compilation types),
+      `types-definitions.ts` (1008), `types-engine.ts` (539),
+      `types-evaluation.ts` (308), `types-serialization.ts` (255).
+      `types-tensor.ts` is a re-export shim (merged into types-expression).
+      All 105+ existing imports from `global-types` continue to work unchanged.
+    - `parse.ts` (2684→2309 lines) → extracted `parse-number.ts` (437) with
+      `parseNumber()`, `parseRepeatingDecimal()` + helpers as standalone functions
+      taking `Parser` interface + `NumberFormatTokens` config
+    - Cycle budget: 24→43 (type-only cycles from the split + pre-existing
+      latex-syntax internal cycles now separately enumerated by madge)
 
 12. **Enforce layered dependencies**
     - Configure eslint-plugin-boundaries or equivalent
     - Define allowed import directions per directory
     - Fail CI on violations
 
-13. **Add type guards for BoxedExpression roles**
-    - `isNumeric(expr)`, `isCollection(expr)`, `isSymbol(expr)`
-    - Use in internal code alongside existing interface
-    - No removal of base class members yet
+13. **Add type guards for BoxedExpression roles** ✅ DONE
+    - `type-guards.ts` with 7 guards: `isNumericExpression`, `isSymbolExpression`,
+      `isFunctionExpression`, `isStringExpression`, `isCollectionExpression`,
+      `isTensorExpression`, `isDictionaryExpression`
+    - Exported from `compute-engine.ts`, 19 tests in `type-guards.test.ts`
 
 ### Phase 3: Extensibility (4-6 weeks)
 

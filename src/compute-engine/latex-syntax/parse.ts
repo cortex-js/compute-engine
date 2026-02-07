@@ -41,7 +41,11 @@ import type {
   IndexedEnvironmentEntry,
   IndexedMatchfixEntry,
 } from './dictionary/definitions';
-import { SMALL_INTEGER } from '../numerics/numeric';
+import {
+  parseNumber as _parseNumber,
+  parseRepeatingDecimal as _parseRepeatingDecimal,
+  type NumberFormatTokens,
+} from './parse-number';
 import { BoxedType } from '../../common/type/boxed-type';
 import { TypeString } from '../types';
 
@@ -296,7 +300,20 @@ export class _Parser implements Parser {
     this._endExponentMarkerTokens = tokenize(this.options.endExponentMarker);
     this._truncationMarkerTokens = tokenize(this.options.truncationMarker);
     this._imaginaryUnitTokens = tokenize(this.options.imaginaryUnit);
+
+    this._numberFormatTokens = {
+      decimalSeparatorTokens: this._decimalSeparatorTokens,
+      wholeDigitGroupSeparatorTokens: this._wholeDigitGroupSeparatorTokens,
+      fractionalDigitGroupSeparatorTokens:
+        this._fractionalDigitGroupSeparatorTokens,
+      exponentProductTokens: this._exponentProductTokens,
+      beginExponentMarkerTokens: this._beginExponentMarkerTokens,
+      endExponentMarkerTokens: this._endExponentMarkerTokens,
+      truncationMarkerTokens: this._truncationMarkerTokens,
+    };
   }
+
+  private _numberFormatTokens!: NumberFormatTokens;
 
   getSymbolType(id: MathJsonSymbol): BoxedType {
     // Check if the symbol is in the symbol table
@@ -1149,355 +1166,12 @@ export class _Parser implements Parser {
     return this.error(['unknown-environment', { str: name }], index);
   }
 
-  /** If the next token matches a `-` sign, return '-', otherwise return '+'
-   *
-   */
-  private parseOptionalSign(): string {
-    let isNegative = !!this.matchAny(['-', '\u2212']);
-    while (this.matchAny(['+', '\ufe62']) || this.skipSpace())
-      if (this.matchAny(['-', '\u2212'])) isNegative = !isNegative;
-
-    return isNegative ? '-' : '+';
-  }
-
-  /** Parse a sequence of decimal digits. The part indicates which
-   * grouping separator should be expected.
-   */
-  private parseDecimalDigits(
-    part: 'none' | 'whole' | 'fraction' = 'whole'
-  ): string {
-    const result: string[] = [];
-    let done = false;
-    while (!done) {
-      while (/^[0-9]$/.test(this.peek)) {
-        result.push(this.nextToken());
-        this.skipVisualSpace();
-      }
-
-      done = true;
-      const group =
-        part === 'whole'
-          ? this._wholeDigitGroupSeparatorTokens
-          : this._fractionalDigitGroupSeparatorTokens;
-      if (part !== 'none' && group.length > 0) {
-        const savedIndex = this.index;
-        this.skipVisualSpace();
-        if (this.matchAll(group)) {
-          this.skipVisualSpace();
-          // Are there more digits after a group separator
-          if (/^[0-9]$/.test(this.peek)) done = false;
-          else this.index = savedIndex;
-        }
-      }
-    }
-    return result.join('');
-  }
-
-  /** The 'part' argument is used to dermine what grouping separator
-   *  should be expected.
-   */
-  private parseSignedInteger(part: 'whole' | 'fraction' | 'none'): string {
-    const start = this.index;
-
-    const sign = this.parseOptionalSign();
-    const result = this.parseDecimalDigits(part);
-    if (result) return sign === '-' ? '-' + result : result;
-
-    this.index = start;
-    return '';
-  }
-
-  private parseExponent(): string {
-    const start = this.index;
-
-    this.skipVisualSpace();
-
-    if (this.matchAny(['e', 'E'])) {
-      // The exponent does not contain grouping markers. See
-      // https://physics.nist.gov/cuu/Units/checklist.html  #16
-      const exponent = this.parseSignedInteger('none');
-      if (exponent) return exponent;
-    }
-
-    this.index = start;
-    if (this.match('\\times')) {
-      this.skipVisualSpace();
-      if (this.matchAll(['1', '0'])) {
-        this.skipVisualSpace();
-        if (this.match('^')) {
-          this.skipVisualSpace();
-          // Is it a single digit exponent, i.e. `\times 10^5`
-          if (/^[0-9]$/.test(this.peek)) return this.nextToken();
-
-          if (this.match('<{>')) {
-            // Multi digit exponent,i.e. `\times 10^{10}` or `\times 10^{-5}`
-            this.skipVisualSpace();
-            // Note: usually don't have group markers, but since we're inside
-            // a `{}` there can't be ambiguity, so we're lenient
-            const exponent = this.parseSignedInteger('whole');
-            this.skipVisualSpace();
-            if (exponent && this.match('<}>')) return exponent;
-          }
-        }
-      }
-    }
-
-    this.index = start;
-    // `%` is a synonym for `e-2`. See // https://physics.nist.gov/cuu/Units/checklist.html  #10
-    this.skipVisualSpace();
-    if (this.match('\\%')) return `-2`;
-
-    this.index = start;
-    if (this.matchAll(this._exponentProductTokens)) {
-      this.skipVisualSpace();
-      if (this.matchAll(this._beginExponentMarkerTokens)) {
-        this.skipVisualSpace();
-        const exponent = this.parseSignedInteger('none');
-        this.skipVisualSpace();
-        if (exponent && this.matchAll(this._endExponentMarkerTokens))
-          return exponent;
-      }
-    }
-
-    this.index = start;
-    return '';
-  }
-
   parseRepeatingDecimal(): string {
-    const start = this.index;
-    const format = this.options.repeatingDecimal;
-
-    let repeatingDecimals = '';
-    if ((format === 'auto' || format === 'parentheses') && this.match('(')) {
-      repeatingDecimals = this.parseDecimalDigits('fraction');
-      if (repeatingDecimals && this.match(')')) return `(${repeatingDecimals})`;
-      this.index = start;
-      return '';
-    }
-
-    this.index = start;
-    if (
-      (format === 'auto' || format === 'parentheses') &&
-      this.matchAll([`\\left`, '('])
-    ) {
-      repeatingDecimals = this.parseDecimalDigits('fraction');
-      if (repeatingDecimals && this.matchAll([`\\right`, ')']))
-        return `(${repeatingDecimals})`;
-      this.index = start;
-      return '';
-    }
-
-    this.index = start;
-    if (
-      (format === 'auto' || format === 'vinculum') &&
-      this.matchAll([`\\overline`, '<{>'])
-    ) {
-      repeatingDecimals = this.parseDecimalDigits('fraction');
-      if (repeatingDecimals && this.match('<}>'))
-        return `(${repeatingDecimals})`;
-      this.index = start;
-      return '';
-    }
-
-    this.index = start;
-    if (
-      (format === 'auto' || format === 'arc') &&
-      (this.matchAll([`\\wideparen`, '<{>']) ||
-        this.matchAll([`\\overarc`, '<{>']))
-    ) {
-      repeatingDecimals = this.parseDecimalDigits('fraction');
-      if (repeatingDecimals && this.match('<}>'))
-        return `(${repeatingDecimals})`;
-      this.index = start;
-      return '';
-    }
-
-    this.index = start;
-    if (format === 'auto' || format === 'dots') {
-      const first = dotOverDigit(this);
-      if (first !== null) {
-        repeatingDecimals = this.parseDecimalDigits('fraction');
-
-        // Is there a single digit, i.e. `1.\overset{.}{3}`
-        if (!repeatingDecimals) return `(${first})`;
-
-        // If there are repeating decimals, we should have a final digit
-        const last = dotOverDigit(this);
-        if (last !== null) {
-          return `(${first}${repeatingDecimals}${last})`;
-        }
-      }
-    }
-
-    this.index = start;
-    return '';
+    return _parseRepeatingDecimal(this, this._numberFormatTokens);
   }
 
-  /**
-   * Parse a number, with an optional sign, exponent, decimal marker,
-   * repeating decimals, etc...
-   */
   parseNumber(): Expression | null {
-    // If we don't parse numbers, we'll return them as individual tokens
-    if (
-      (this.options.parseNumbers as any as boolean) === false ||
-      this.options.parseNumbers === 'never'
-    )
-      return null;
-
-    const start = this.index;
-
-    this.skipVisualSpace();
-
-    // Parse a '+' or '-' sign
-    let sign = +1;
-    while (this.peek === '-' || this.peek === '+') {
-      if (this.match('-')) sign = -sign;
-      else this.match('+');
-      this.skipVisualSpace();
-    }
-
-    let wholePart = '';
-    let fractionalPart = '';
-
-    // Does the number start with the decimal marker? i.e. `.5`
-    let startsWithdecimalSeparator = false;
-
-    if (this.match('.') || this.matchAll(this._decimalSeparatorTokens)) {
-      const peek = this.peek;
-      // We have a number if followed by a digit, or a repeating digit marker
-      if (/^[\d]$/.test(peek) || mayBeRepeatingDigits(this)) {
-        startsWithdecimalSeparator = true;
-        wholePart = '0';
-      }
-    } else wholePart = this.parseDecimalDigits('whole');
-
-    if (!wholePart) {
-      this.index = start;
-      return null;
-    }
-
-    const fractionalIndex = this.index;
-    let hasFractionalPart = false;
-    if (
-      startsWithdecimalSeparator ||
-      this.match('.') ||
-      this.matchAll(this._decimalSeparatorTokens)
-    ) {
-      fractionalPart = this.parseDecimalDigits('fraction');
-      hasFractionalPart = true;
-    }
-
-    let hasRepeatingPart = false;
-    if (hasFractionalPart) {
-      const repeat = this.parseRepeatingDecimal();
-      if (repeat) {
-        fractionalPart += repeat;
-        hasRepeatingPart = true;
-      }
-      if (
-        this.match('\\ldots') ||
-        this.matchAll(this._truncationMarkerTokens)
-      ) {
-        // We got a truncation marker, just ignore it.
-      }
-    }
-
-    if (hasFractionalPart && !fractionalPart) {
-      // There was a '.', but an empty fractional part and no repeating part.
-      // The '.' may be part of something else, i.e. '1..2'
-      // so backtrack
-      this.index = fractionalIndex;
-      if (wholePart.length < 10)
-        return numberExpression(sign * parseInt(wholePart, 10));
-      return { num: sign < 0 ? '-' + wholePart : wholePart };
-    }
-
-    const exponent = this.parseExponent();
-
-    // If we have a small-ish whole number, use a shortcut for the number
-    if (!hasFractionalPart && !exponent && wholePart.length < 10)
-      return numberExpression(sign * parseInt(wholePart, 10));
-
-    // If we prefer to parse numbers as rationals, and there is no repeating part
-    // we can return a rational number
-    if (!hasRepeatingPart && this.options.parseNumbers === 'rational') {
-      // Check if the whole part exceeds MAX_SAFE_INTEGER
-      // Use BigInt arithmetic to preserve precision for large integers
-      const isLargeInteger =
-        wholePart.length > 16 ||
-        (wholePart.length === 16 && wholePart > '9007199254740991');
-
-      if (!fractionalPart) {
-        if (isLargeInteger) {
-          // Use { num: string } format to preserve precision
-          const numStr = sign < 0 ? '-' + wholePart : wholePart;
-          if (exponent)
-            return ['Multiply', { num: numStr }, ['Power', 10, exponent]];
-          return { num: numStr };
-        }
-        const whole = parseInt(wholePart, 10);
-        if (exponent)
-          return ['Multiply', sign * whole, ['Power', 10, exponent]];
-        return numberExpression(sign * whole);
-      }
-
-      // Has fractional part - need to compute rational
-      const n = fractionalPart.length;
-
-      // Check if the numerator calculation might overflow
-      // Numerator = whole * 10^n + fraction, which has roughly wholePart.length + n digits
-      const numeratorDigits = wholePart.length + n;
-      if (numeratorDigits > 15) {
-        // Use BigInt arithmetic to preserve precision
-        const wholeBig = BigInt(wholePart);
-        const fractionBig = BigInt(fractionalPart);
-        const denominatorBig = BigInt(10) ** BigInt(n);
-        const numeratorBig = wholeBig * denominatorBig + fractionBig;
-        const signedNumerator = sign < 0 ? -numeratorBig : numeratorBig;
-
-        if (exponent) {
-          return [
-            'Multiply',
-            [
-              'Rational',
-              { num: signedNumerator.toString() },
-              Number(denominatorBig),
-            ],
-            ['Power', 10, exponent],
-          ];
-        }
-        return [
-          'Rational',
-          { num: signedNumerator.toString() },
-          Number(denominatorBig),
-        ];
-      }
-
-      const whole = parseInt(wholePart, 10);
-      const fraction = parseInt(fractionalPart, 10);
-
-      // Calculate numerator and denominator
-      const numerator = whole * 10 ** n + fraction;
-      const denominator = 10 ** n;
-
-      if (exponent) {
-        return [
-          'Multiply',
-          ['Rational', sign * numerator, denominator],
-          ['Power', 10, exponent],
-        ];
-      }
-      return ['Rational', sign * numerator, denominator];
-    }
-
-    return {
-      num:
-        (sign < 0 ? '-' : '') +
-        wholePart +
-        (hasFractionalPart ? '.' + fractionalPart : '') +
-        (exponent ? 'e' + exponent : ''),
-    };
+    return _parseNumber(this, this._numberFormatTokens);
   }
 
   private parsePrefixOperator(until?: Readonly<Terminator>): Expression | null {
@@ -2595,36 +2269,6 @@ function isDelimiterCommand(parser: Parser): boolean {
   return false;
 }
 
-function dotOverDigit(parser: Parser): string | null {
-  // Check if the next tokens is \overset with a dot and a digit
-  const start = parser.index;
-  if (parser.matchAll([`\\overset`, '<{>'])) {
-    if (parser.match('.') || parser.match('\\cdots')) {
-      if (parser.matchAll([`<}>`, '<{>'])) {
-        const digit = parser.nextToken();
-        if (digit && /^\d$/.test(digit)) {
-          if (parser.match('<}>')) {
-            return digit;
-          }
-        }
-      }
-    }
-  }
-  parser.index = start;
-  return null;
-}
-
-function mayBeRepeatingDigits(parser: Parser): boolean {
-  const peek = parser.peek;
-  if (peek === '\\overline') return true;
-  if (peek === '\\overset') return true;
-  if (peek === '\\wideparent' || peek === '\\overarc') return true;
-  if (peek === '(') return true;
-  if (peek === '\\left') return true;
-
-  return false;
-}
-
 export function parse(
   latex: string,
   dictionary: IndexedLatexDictionary,
@@ -2661,24 +2305,4 @@ export function parse(
   }
 
   return expr;
-}
-
-/**
- * If n is a small number, use a shorthand (i.e. a JS number). Otherwise, use a {num: n} object.
- * For zero, always use a {num} object. While `0` is a valid Expression, it is too easy to confuse it with null or undefined and
- * to do for example:
- * ```
- * expr = getExpression();
- * if (expr) {...}
- * ```
- *
- * instead of
- * ```
- * if (expr !== undefined && expr !== null) {...}
- * ```
- */
-function numberExpression(n: number): Expression {
-  if (n === 0) return { num: '0' };
-  if (Number.isInteger(n) && Math.abs(n) < SMALL_INTEGER) return n;
-  return { num: n.toString() };
 }
