@@ -4,7 +4,7 @@ import {
   extractVariables,
   evaluateWithAssignment,
   generateAssignments,
-} from './logic-utils';
+} from '../symbolic/logic-utils';
 
 /**
  * Quantifier domain helpers and boolean analysis functions.

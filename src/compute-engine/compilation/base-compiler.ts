@@ -2,7 +2,6 @@ import type { BoxedExpression, ComputeEngine } from '../global-types';
 import { isOperatorDef } from '../boxed-expression/utils';
 import { isFiniteIndexedCollection } from '../collection-utils';
 import { isRelationalOperator } from '../latex-syntax/utils';
-// eslint-disable-next-line import/no-restricted-paths
 import { normalizeIndexingSet } from '../library/utils';
 
 import type { CompileTarget, TargetSource } from './types';

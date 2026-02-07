@@ -3551,6 +3551,18 @@ export interface ComputeEngine extends IBigNum {
     }
   ): BoxedExpression;
 
+  /** @internal Compile a boxed expression to an executable function. */
+  _compile(
+    expr: BoxedExpression,
+    options?: Record<string, any>
+  ): ((...args: any[]) => any) & { isCompiled?: boolean };
+
+  /** @internal Fu trigonometric simplification algorithm */
+  _fuAlgorithm(
+    expr: BoxedExpression,
+    options?: Record<string, any>
+  ): RuleStep | undefined;
+
   number(
     value:
       | number

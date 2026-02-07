@@ -25,8 +25,7 @@ import {
 
 import { Parser } from '../latex-syntax/types';
 
-// eslint-disable-next-line import/no-restricted-paths
-import { isPrime } from '../library/arithmetic';
+import { isPrime } from './predicates';
 // @todo:
 // export function fixPoint(rule: Rule);
 // export function chain(rules: RuleSet);

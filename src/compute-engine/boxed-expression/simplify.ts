@@ -9,8 +9,6 @@ import type {
   RuleSteps,
 } from '../global-types';
 
-// eslint-disable-next-line import/no-restricted-paths
-import { fu as fuAlgorithm } from '../symbolic/fu';
 
 type InternalSimplifyOptions = SimplifyOptions & {
   useVariations: boolean;
@@ -132,7 +130,7 @@ export function simplify(
     const costFn = (e: BoxedExpression) => ce.costFunction(e);
 
     // Approach 1: Fu first (for Morrie-like patterns)
-    const fuFirst = fuAlgorithm(expr);
+    const fuFirst = ce._fuAlgorithm(expr);
     let result1 = fuFirst?.value ?? expr;
     if (fuFirst) {
       const postSimplified = result1.simplify();
@@ -143,7 +141,7 @@ export function simplify(
 
     // Approach 2: Simplify first, then Fu (for period reduction patterns)
     const preSimplified = expr.simplify();
-    const fuSecond = fuAlgorithm(preSimplified);
+    const fuSecond = ce._fuAlgorithm(preSimplified);
     let result2 = fuSecond?.value ?? preSimplified;
     if (fuSecond) {
       const postSimplified = result2.simplify();

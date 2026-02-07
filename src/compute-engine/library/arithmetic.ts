@@ -36,7 +36,7 @@ import {
 } from '../numerics/special-functions';
 import { factorial2, gcd, lcm } from '../numerics/numeric';
 import { rationalize } from '../numerics/rationals';
-import { isPrime as isPrimeMachine, isPrimeBigint } from '../numerics/primes';
+import { isPrime } from '../boxed-expression/predicates';
 import { fromDigits } from '../numerics/strings';
 
 import {
@@ -1925,17 +1925,3 @@ function evaluateGcdLcm(
   return ce._fn(mode, [ce.number(result), ...rest]);
 }
 
-export function isPrime(expr: BoxedExpression): boolean | undefined {
-  if (!expr.isInteger) return undefined;
-  if (expr.isNegative) return undefined;
-
-  const value = expr.numericValue;
-  if (value === null) return undefined;
-
-  const n = toInteger(expr);
-  if (n !== null) return isPrimeMachine(n);
-  const b = asBigint(expr);
-  if (b !== null) return isPrimeBigint(b);
-
-  return undefined;
-}

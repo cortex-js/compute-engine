@@ -733,9 +733,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         collection.type.matches(ce.type('collection<real>'))
       ) {
         // If we're dealing with real numbers, we can compile.
-        // eslint-disable-next-line import/no-restricted-paths
-        const { compile } = require('../compilation/compile-expression');
-        const jsf = compile(fn);
+        const jsf = ce._compile(fn);
         if (!jsf) return undefined;
 
         let accumulator = initial.re;

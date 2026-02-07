@@ -15,7 +15,7 @@ import {
   toNNF,
   toCNF,
   toDNF,
-} from './logic-utils';
+} from '../symbolic/logic-utils';
 import {
   extractFiniteDomain,
   bodyContainsVariable,
@@ -229,28 +229,6 @@ export const LOGIC_LIBRARY: SymbolDefinitions = {
       args[0].symbol === 'True' ? ce.One : ce.Zero,
   },
 };
-
-export function simplifyLogicFunction(
-  x: BoxedExpression
-): { value: BoxedExpression; because: string } | undefined {
-  const fn = {
-    And: evaluateAnd,
-    Or: evaluateOr,
-    Not: evaluateNot,
-    Equivalent: evaluateEquivalent,
-    Implies: evaluateImplies,
-    Xor: evaluateXor,
-    Nand: evaluateNand,
-    Nor: evaluateNor,
-  }[x.operator];
-
-  if (!fn || !x.ops) return undefined;
-
-  const value = fn(x.ops, { engine: x.engine });
-  if (!value) return undefined;
-
-  return { value, because: 'logic' };
-}
 
 /**
  * Evaluate ForAll over a finite domain.

@@ -12,8 +12,6 @@ import { centeredDiff8thOrder, limit } from '../numerics/numeric';
 import { derivative, differentiate } from '../symbolic/derivative';
 import { antiderivative } from '../symbolic/antiderivative';
 import { canonicalLimits, canonicalLimitsSequence } from './utils';
-// eslint-disable-next-line import/no-restricted-paths
-import { compile } from '../compilation/compile-expression';
 
 export const CALCULUS_LIBRARY: SymbolDefinitions[] = [
   {
@@ -188,7 +186,7 @@ volumes
         const xValue = x.N().re;
         if (isNaN(xValue)) return undefined;
 
-        return engine.number(centeredDiff8thOrder(compile(body), xValue));
+        return engine.number(centeredDiff8thOrder(engine._compile(body), xValue));
       },
     },
 
@@ -225,7 +223,7 @@ volumes
           // This converts e.g. 'x' to ['Function', 'x', 'x'] -> (x) => x
           const fnExpr =
             f.operator === 'Function' ? f : ce.box(['Function', f, variable]);
-          const jsf = compile(fnExpr);
+          const jsf = ce._compile(fnExpr);
 
           const mce = monteCarloEstimate(
             jsf,
@@ -310,7 +308,7 @@ volumes
       evaluate: ([f, a, b], { engine }) => {
         const [lower, upper] = [a.N().re, b.N().re];
         if (isNaN(lower) || isNaN(upper)) return undefined;
-        const jsf = compile(f);
+        const jsf = engine._compile(f);
         return engine.number(
           monteCarloEstimate(jsf, lower, upper, jsf.isCompiled ? 1e7 : 1e4)
             .estimate
@@ -354,7 +352,7 @@ volumes
         if (numericApproximation) {
           const target = x.N().re;
           if (Number.isNaN(target)) return undefined;
-          const fn = compile(f);
+          const fn = engine._compile(f);
           return engine.number(limit(fn, target, dir ? dir.re : 1));
         }
         return undefined;
@@ -376,7 +374,7 @@ volumes
       evaluate: ([f, x, dir], { engine }) => {
         const target = x.N().re;
         if (Number.isNaN(target)) return undefined;
-        const fn = compile(f);
+        const fn = engine._compile(f);
         return engine.number(limit(fn, target, dir ? dir.re : 1));
       },
     },

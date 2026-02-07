@@ -17,7 +17,6 @@ import {
   variance,
 } from '../numerics/statistics';
 import { monteCarloEstimate } from '../numerics/monte-carlo';
-// eslint-disable-next-line import/no-restricted-paths
 import { normalizeIndexingSet } from '../library/utils';
 
 import { BaseCompiler } from './base-compiler';

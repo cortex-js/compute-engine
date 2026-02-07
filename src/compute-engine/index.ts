@@ -198,6 +198,8 @@ export { BaseCompiler } from './compilation/base-compiler';
 
 // Import for internal use
 import type { LanguageTarget } from './compilation/types';
+import { compile as _compile } from './compilation/compile-expression';
+import { fu as _fu } from './symbolic/fu';
 import { JavaScriptTarget as _JavaScriptTarget } from './compilation/javascript-target';
 import { GLSLTarget as _GLSLTarget } from './compilation/glsl-target';
 import { IntervalJavaScriptTarget as _IntervalJavaScriptTarget } from './compilation/interval-javascript-target';
@@ -316,6 +318,9 @@ export class ComputeEngine implements IComputeEngine {
 
   /** @internal Registry of compilation targets */
   private _compilationTargets: Map<string, LanguageTarget> = new Map();
+
+  /** @internal Fu trigonometric simplification algorithm */
+  _fuAlgorithm = _fu;
 
   /** @internal */
   private _commonSymbols: { [symbol: string]: null | BoxedExpression } = {
@@ -738,6 +743,14 @@ export class ComputeEngine implements IComputeEngine {
    */
   _getCompilationTarget(name: string): LanguageTarget | undefined {
     return this._compilationTargets.get(name);
+  }
+
+  /** @internal Compile a boxed expression to an executable function. */
+  _compile(
+    expr: BoxedExpression,
+    options?: Parameters<typeof _compile>[1]
+  ): ReturnType<typeof _compile> {
+    return _compile(expr, options);
   }
 
   get precision(): number {
