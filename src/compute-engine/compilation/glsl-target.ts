@@ -103,6 +103,11 @@ const GLSL_FUNCTIONS: CompiledFunctions = {
   Sqrt: 'sqrt',
   Step: 'step',
   Tan: 'tan',
+  Truncate: 'trunc',
+  Remainder: ([a, b], compile) => {
+    if (a === null || b === null) throw new Error('Remainder: missing argument');
+    return `(${compile(a)} - ${compile(b)} * round(${compile(a)} / ${compile(b)}))`;
+  },
 
   // Reciprocal trigonometric functions (no GLSL built-ins)
   Cot: ([x], compile) => {

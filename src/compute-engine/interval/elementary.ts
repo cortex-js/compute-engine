@@ -387,6 +387,36 @@ export function fract(x: Interval | IntervalResult): IntervalResult {
 }
 
 /**
+ * Truncate toward zero: trunc(x) = floor(x) for x >= 0, ceil(x) for x < 0.
+ *
+ * Has jump discontinuities at every non-zero integer.
+ * Continuous at zero (unlike floor/ceil).
+ * For positive values: right-continuous at discontinuities (like floor).
+ * For negative values: left-continuous at discontinuities (like ceil).
+ */
+export function trunc(x: Interval | IntervalResult): IntervalResult {
+  const unwrapped = unwrapOrPropagate(x);
+  if (!Array.isArray(unwrapped)) return unwrapped;
+  const [xVal] = unwrapped;
+  const tlo = Math.trunc(xVal.lo);
+  const thi = Math.trunc(xVal.hi);
+  if (tlo === thi) return ok({ lo: tlo, hi: thi });
+  // Interval spans a discontinuity
+  if (xVal.lo >= 0) {
+    // Entirely non-negative: behaves like floor (right-continuous)
+    return { kind: 'singular', at: tlo + 1, continuity: 'right' };
+  }
+  // First integer in range (toward zero)
+  const firstInt = Math.ceil(xVal.lo);
+  if (firstInt !== 0) {
+    // Entirely negative: behaves like ceil (left-continuous)
+    return { kind: 'singular', at: firstInt, continuity: 'left' };
+  }
+  // Spans zero: first discontinuity is at +1 (right-continuous like floor)
+  return { kind: 'singular', at: 1, continuity: 'right' };
+}
+
+/**
  * Minimum of two intervals.
  */
 export function min(

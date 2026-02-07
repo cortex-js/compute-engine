@@ -202,6 +202,22 @@ IntervalResult ia_ln(vec2 x) {
   return ia_partial(vec2(-IA_HUGE, log(x.y) + IA_EPS), IA_PARTIAL_LO);
 }
 
+// Log base 2
+IntervalResult ia_log2(vec2 x) {
+  const float INV_LN2 = 1.44269504089;
+  if (x.y <= 0.0) return ia_empty();
+  if (x.x > 0.0) return ia_ok(vec2(log2(x.x) - IA_EPS, log2(x.y) + IA_EPS));
+  return ia_partial(vec2(-IA_HUGE, log2(x.y) + IA_EPS), IA_PARTIAL_LO);
+}
+
+// Log base 10
+IntervalResult ia_log10(vec2 x) {
+  const float INV_LN10 = 0.43429448190;
+  if (x.y <= 0.0) return ia_empty();
+  if (x.x > 0.0) return ia_ok(vec2(log(x.x) * INV_LN10 - IA_EPS, log(x.y) * INV_LN10 + IA_EPS));
+  return ia_partial(vec2(-IA_HUGE, log(x.y) * INV_LN10 + IA_EPS), IA_PARTIAL_LO);
+}
+
 // Absolute value
 IntervalResult ia_abs(vec2 x) {
   if (x.x >= 0.0) {
@@ -273,6 +289,18 @@ IntervalResult ia_fract(vec2 x) {
   // Interval spans an integer - sawtooth discontinuity
   // fract is right-continuous (inherits from floor)
   return ia_singular_right(flo + 1.0);
+}
+
+// Truncate toward zero - floor for positive, ceil for negative
+// Discontinuous at every non-zero integer, continuous at zero
+IntervalResult ia_trunc(vec2 x) {
+  float tlo = trunc(x.x);
+  float thi = trunc(x.y);
+  if (tlo == thi) return ia_ok(vec2(tlo, thi));
+  if (x.x >= 0.0) return ia_singular_right(tlo + 1.0);  // like floor
+  float firstInt = ceil(x.x);
+  if (firstInt != 0.0) return ia_singular_left(firstInt); // like ceil
+  return ia_singular_right(1.0); // spans zero, first discontinuity at +1
 }
 
 // Mod - periodic discontinuities at multiples of the modulus
@@ -574,6 +602,16 @@ IntervalResult ia_ln(IntervalResult x) {
   return ia_ln(x.value);
 }
 
+IntervalResult ia_log2(IntervalResult x) {
+  if (ia_is_error(x.status)) return x;
+  return ia_log2(x.value);
+}
+
+IntervalResult ia_log10(IntervalResult x) {
+  if (ia_is_error(x.status)) return x;
+  return ia_log10(x.value);
+}
+
 IntervalResult ia_abs(IntervalResult x) {
   if (ia_is_error(x.status)) return x;
   return ia_abs(x.value);
@@ -602,6 +640,11 @@ IntervalResult ia_round(IntervalResult x) {
 IntervalResult ia_fract(IntervalResult x) {
   if (ia_is_error(x.status)) return x;
   return ia_fract(x.value);
+}
+
+IntervalResult ia_trunc(IntervalResult x) {
+  if (ia_is_error(x.status)) return x;
+  return ia_trunc(x.value);
 }
 
 IntervalResult ia_mod(IntervalResult a, IntervalResult b) {
@@ -1019,7 +1062,13 @@ const INTERVAL_GLSL_FUNCTIONS: CompiledFunctions = {
   Exp: (args, compile) => `ia_exp(${compile(args[0])})`,
   Floor: (args, compile) => `ia_floor(${compile(args[0])})`,
   Fract: (args, compile) => `ia_fract(${compile(args[0])})`,
+  Truncate: (args, compile) => `ia_trunc(${compile(args[0])})`,
+  Lb: (args, compile) => `ia_log2(${compile(args[0])})`,
   Ln: (args, compile) => `ia_ln(${compile(args[0])})`,
+  Log: (args, compile) => {
+    if (args.length === 1) return `ia_log10(${compile(args[0])})`;
+    return `ia_div(ia_ln(${compile(args[0])}), ia_ln(${compile(args[1])}))`;
+  },
   Mod: (args, compile) => `ia_mod(${compile(args[0])}, ${compile(args[1])})`,
   Max: (args, compile) => {
     if (args.length === 0) return 'ia_point(-1e38)';

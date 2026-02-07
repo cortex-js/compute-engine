@@ -1,4 +1,9 @@
 import { engine as ce } from '../utils';
+import { JavaScriptTarget } from '../../src/compute-engine/compilation/javascript-target';
+import { GLSLTarget } from '../../src/compute-engine/compilation/glsl-target';
+import { IntervalJavaScriptTarget } from '../../src/compute-engine/compilation/interval-javascript-target';
+import { IntervalGLSLTarget } from '../../src/compute-engine/compilation/interval-glsl-target';
+import { PythonTarget } from '../../src/compute-engine/compilation/python-target';
 
 describe('COMPILE', () => {
   describe('Expressions', () => {
@@ -323,5 +328,60 @@ describe('COMPILE', () => {
         );
       });
     });
+  });
+
+  describe('Cross-reference: target functions exist in ComputeEngine library', () => {
+    // Functions that are target-specific and intentionally not in the CE library.
+    // These are GLSL graphics built-ins, Python-specific numpy/scipy functions,
+    // or control-flow constructs handled by the compiler.
+    const TARGET_SPECIFIC: Record<string, Set<string>> = {
+      javascript: new Set([
+        'If', 'List', 'Range', 'Integrate',
+      ]),
+      glsl: new Set([
+        'Clamp', 'Mix', 'Smoothstep', 'Step',
+        'Degrees', 'Radians', 'Exp2', 'Log2', 'Inversesqrt',
+        'Cross', 'Distance', 'Dot', 'Length', 'Normalize', 'Reflect', 'Refract',
+        'List',
+      ]),
+      'interval-javascript': new Set([
+        'If',
+      ]),
+      'interval-glsl': new Set([]),
+      python: new Set([
+        'Arctan2',
+        'Real', 'Imaginary', 'Argument', 'Conjugate',
+        'Sum', 'Product',
+        'Dot', 'Cross',
+        'Norm', 'Determinant', 'Inverse', 'Transpose', 'MatrixMultiply',
+        'Erf', 'Erfc',
+        'List',
+      ]),
+    };
+
+    const targets: Array<[string, { getFunctions: () => Record<string, unknown> }]> = [
+      ['javascript', new JavaScriptTarget()],
+      ['glsl', new GLSLTarget()],
+      ['interval-javascript', new IntervalJavaScriptTarget()],
+      ['interval-glsl', new IntervalGLSLTarget()],
+      ['python', new PythonTarget()],
+    ];
+
+    for (const [name, target] of targets) {
+      it(`${name}: all function keys should exist in CE library or exception list`, () => {
+        const functions = target.getFunctions();
+        const exceptions = TARGET_SPECIFIC[name] ?? new Set();
+        const missing: string[] = [];
+
+        for (const key of Object.keys(functions)) {
+          if (exceptions.has(key)) continue;
+          if (!ce.lookupDefinition(key)) {
+            missing.push(key);
+          }
+        }
+
+        expect(missing).toEqual([]);
+      });
+    }
   });
 });

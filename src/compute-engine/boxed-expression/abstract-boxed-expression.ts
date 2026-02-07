@@ -796,6 +796,7 @@ export abstract class _BoxedExpression implements BoxedExpression {
     } catch (e) {
       // @fixme: the fallback needs to handle multiple arguments
       if (options?.fallback ?? true) {
+        console.warn(`Compilation fallback for "${this.operator}": ${(e as Error).message}`);
         // Dynamic import to avoid circular dependency
         const { applicableN1 } = require('../function-utils');
         return applicableN1(this);

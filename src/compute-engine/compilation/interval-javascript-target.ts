@@ -186,13 +186,9 @@ const INTERVAL_JAVASCRIPT_FUNCTIONS: CompiledFunctions = {
   Arcsch: (args, compile) => `_IA.acsch(${compile(args[0])})`,
   Arsech: (args, compile) => `_IA.asech(${compile(args[0])})`,
 
-  // Inverse trig (alternative names)
-  Asin: (args, compile) => `_IA.asin(${compile(args[0])})`,
-  Acos: (args, compile) => `_IA.acos(${compile(args[0])})`,
-  Atan: (args, compile) => `_IA.atan(${compile(args[0])})`,
-
   // Elementary
   Fract: (args, compile) => `_IA.fract(${compile(args[0])})`,
+  Truncate: (args, compile) => `_IA.trunc(${compile(args[0])})`,
 
   // Mod
   Mod: (args, compile) => `_IA.mod(${compile(args[0])}, ${compile(args[1])})`,
