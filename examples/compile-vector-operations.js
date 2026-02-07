@@ -8,7 +8,7 @@
  * https://github.com/cortex-js/compute-engine/issues/240
  */
 
-import { ComputeEngine } from '../dist/compute-engine.esm.js';
+import { ComputeEngine } from '@cortex-js/compute-engine';
 
 const ce = new ComputeEngine();
 

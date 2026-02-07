@@ -11,7 +11,7 @@
  * - Scientific visualization
  */
 
-import { ComputeEngine, GLSLTarget } from '../dist/compute-engine.esm.js';
+import { ComputeEngine, GLSLTarget } from '@cortex-js/compute-engine';
 
 const ce = new ComputeEngine();
 const glsl = new GLSLTarget();

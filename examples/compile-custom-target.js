@@ -13,7 +13,7 @@ import {
   ComputeEngine,
   BaseCompiler,
   JavaScriptTarget,
-} from '../dist/compute-engine.esm.js';
+} from '@cortex-js/compute-engine';
 
 const ce = new ComputeEngine();
 

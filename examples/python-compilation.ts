@@ -5,7 +5,10 @@
  * to generate NumPy code from mathematical expressions.
  */
 
-import { ComputeEngine } from '../src/compute-engine';
+import { ComputeEngine } from '@cortex-js/compute-engine';
+
+// NOTE: PythonTarget is not exported from the package.
+// This import path works only when running from source with tsx.
 import { PythonTarget } from '../src/compute-engine/compilation/python-target';
 
 const ce = new ComputeEngine();

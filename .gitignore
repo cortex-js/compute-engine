@@ -12,6 +12,9 @@ temp-docs/
 # OS Files
 .DS_Store
 
+# Backup files
+*.bak
+
 # Secret files
 *secret.js
 

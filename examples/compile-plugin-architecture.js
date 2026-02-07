@@ -11,7 +11,7 @@
  * - Use direct target overrides without registration
  */
 
-import { ComputeEngine, BaseCompiler } from '../dist/compute-engine.esm.js';
+import { ComputeEngine, BaseCompiler } from '@cortex-js/compute-engine';
 
 const ce = new ComputeEngine();
 

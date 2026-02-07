@@ -1,7 +1,7 @@
 // Polynomial Factoring Examples
 // Demonstrates the new polynomial factoring capabilities
 
-import { ComputeEngine } from '../dist/compute-engine.esm.js';
+import { ComputeEngine } from '@cortex-js/compute-engine';
 
 const ce = new ComputeEngine();
 
@@ -41,6 +41,8 @@ console.log('Both now simplify to: |x+1|');
 console.log('\n6. Using the factorPolynomial Function');
 console.log('-'.repeat(40));
 
+// NOTE: These factor functions are internal APIs not exported from the package.
+// This import path works only when running from within the repository.
 import {
   factorPerfectSquare,
   factorDifferenceOfSquares,

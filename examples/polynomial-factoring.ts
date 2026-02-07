@@ -2,7 +2,10 @@
 // Demonstrates the new polynomial factoring capabilities
 // Run with: npx tsx examples/polynomial-factoring.ts
 
-import { ComputeEngine } from '../src/compute-engine/index.ts';
+import { ComputeEngine } from '@cortex-js/compute-engine';
+
+// NOTE: These factor functions are internal APIs not exported from the package.
+// This import path works only when running from source with tsx.
 import {
   factorPerfectSquare,
   factorDifferenceOfSquares,
