@@ -3451,6 +3451,12 @@ export interface ComputeEngine extends IBigNum {
   contextStack: ReadonlyArray<EvalContext>;
 
   /** @internal */
+  _evalContextStack: EvalContext[];
+
+  /** @internal */
+  _isVerifying: boolean;
+
+  /** @internal */
   readonly isVerifying: boolean;
 
   /** @internal */
@@ -3651,6 +3657,24 @@ export interface ComputeEngine extends IBigNum {
    * executes the function `f` in that scope and returns the result.
    * @internal */
   _inScope<T>(scope: Scope | undefined, f: () => T): T;
+
+  /**
+   * For internal use. Use `ce.declare()` instead.
+   * @internal */
+  _declareSymbolValue(
+    name: MathJsonSymbol,
+    def: Partial<ValueDefinition>,
+    scope?: Scope
+  ): BoxedDefinition;
+
+  /**
+   * For internal use. Use `ce.declare()` instead.
+   * @internal */
+  _declareSymbolOperator(
+    name: string,
+    def: OperatorDefinition,
+    scope?: Scope
+  ): BoxedDefinition;
 
   /**
    * Use `ce.box(id)` instead

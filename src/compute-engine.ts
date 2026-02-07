@@ -29,6 +29,22 @@ export { BaseCompiler } from './compute-engine/compilation/base-compiler';
 export { expand } from './compute-engine/boxed-expression/expand';
 export { compile } from './compute-engine/compilation/compile-expression';
 
+export {
+  isBoxedExpression,
+  isBoxedNumber,
+  isBoxedSymbol,
+  isBoxedFunction,
+  isBoxedString,
+  isBoxedTensor,
+  isDictionary,
+} from './compute-engine/boxed-expression/type-guards';
+
+export type { BoxedNumber } from './compute-engine/boxed-expression/boxed-number';
+export type { BoxedSymbol } from './compute-engine/boxed-expression/boxed-symbol';
+export type { BoxedFunction } from './compute-engine/boxed-expression/boxed-function';
+export type { BoxedString } from './compute-engine/boxed-expression/boxed-string';
+export type { BoxedTensor } from './compute-engine/boxed-expression/boxed-tensor';
+
 globalThis[Symbol.for('io.cortexjs.compute-engine')] = {
   ComputeEngine: ComputeEngine.prototype.constructor,
   version: '{{SDK_VERSION}}',

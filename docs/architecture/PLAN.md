@@ -503,10 +503,14 @@ immediately.
 
 ### Phase 2: Dependency Health (3-5 weeks)
 
-10. **Extract cyclic methods to free functions**
-    - `expand(expr)` instead of `expr.expand()`
-    - `serialize(expr, options)` instead of `expr.serialize()`
-    - This immediately eliminates the dynamic `require()` calls
+10. **Extract cyclic methods to free functions** ✅ DONE
+    - `expand(expr)` instead of `expr.expand()` — done, exported from package
+    - `compile(expr, options)` instead of `expr.compile()` — done, exported from package
+    - `getInequalityBoundsFromAssumptions` extracted to `inequality-bounds.ts`
+    - Eliminated 4 of 7 dynamic `require()` calls (serializeJson deferred,
+      2 new dynamic requires needed for expand-in-compare and compile-in-collections
+      due to unavoidable cycle chains)
+    - Cycle count: 24 (one pre-existing `arithmetic-add ↔ terms` cycle surfaced)
 
 11. **Split monolithic files**
     - `index.ts` → scope, factory, registry, evaluate modules

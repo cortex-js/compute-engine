@@ -1,16 +1,6 @@
 import { Complex } from 'complex-esm';
 import { Decimal } from 'decimal.js';
 
-import {
-  BLUE,
-  BOLD,
-  CYAN,
-  GREY,
-  INVERSE_RED,
-  RESET,
-  YELLOW,
-} from '../common/ansi-codes';
-
 import { isValidSymbol, validateSymbol } from '../math-json/symbols';
 
 import {
@@ -19,8 +9,6 @@ import {
   TypeResolver,
   TypeString,
 } from '../common/type/types';
-import { isValidType, isValidTypeName, widen } from '../common/type/utils';
-import { parseType } from '../common/type/parse';
 import { BoxedType } from '../common/type/boxed-type';
 import { typeToString } from '../common/type/serialize';
 
@@ -103,23 +91,14 @@ import { BigNumericValue } from './numeric-value/big-numeric-value';
 import { MachineNumericValue } from './numeric-value/machine-numeric-value';
 
 import { box, boxFunction } from './boxed-expression/box';
-import { ExpressionMap } from './boxed-expression/expression-map';
 import {
-  isValidOperatorDef,
-  isValidValueDef,
   isValueDef,
   isOperatorDef,
-  updateDef,
 } from './boxed-expression/utils';
 import { boxRules } from './boxed-expression/rules';
-import {
-  validatePattern,
-  isWildcard,
-  wildcardName,
-} from './boxed-expression/boxed-patterns';
+import { validatePattern } from './boxed-expression/boxed-patterns';
 import { BoxedString } from './boxed-expression/boxed-string';
 import { BoxedNumber, canonicalNumber } from './boxed-expression/boxed-number';
-import { _BoxedValueDefinition } from './boxed-expression/boxed-value-definition';
 import { BoxedFunction } from './boxed-expression/boxed-function';
 import { BoxedSymbol } from './boxed-expression/boxed-symbol';
 import { _BoxedExpression } from './boxed-expression/abstract-boxed-expression';
@@ -142,25 +121,49 @@ import './boxed-expression/serialize';
 import { SIMPLIFY_RULES } from './symbolic/simplify-rules';
 
 import { bigint } from './numerics/bigint';
-import { canonicalFunctionLiteral, lookup } from './function-utils';
 
-import { assume, getInequalityBoundsFromAssumptions } from './assume';
 import {
-  createSequenceHandler,
-  validateSequenceDefinition,
+  lookupDefinition as lookupDefinitionImpl,
+  declareSymbolValue as declareSymbolValueImpl,
+  declareSymbolOperator as declareSymbolOperatorImpl,
+  getSymbolValue as getSymbolValueImpl,
+  setSymbolValue as setSymbolValueImpl,
+  setCurrentContextValue as setCurrentContextValueImpl,
+  declareType as declareTypeImpl,
+  declareFn as declareFnImpl,
+  assignFn as assignFnImpl,
+} from './engine-declarations';
+
+import {
+  pushScope as pushScopeImpl,
+  popScope as popScopeImpl,
+  pushEvalContext as pushEvalContextImpl,
+  popEvalContext as popEvalContextImpl,
+  inScope as inScopeImpl,
+  printStack as printStackImpl,
+  lookupContext as lookupContextImpl,
+  swapContext as swapContextImpl,
+} from './engine-scope';
+
+import {
+  ask as askImpl,
+  verify as verifyImpl,
+  assumeFn as assumeFnImpl,
+  forget as forgetImpl,
+} from './engine-assumptions';
+
+import {
+  declareSequence as declareSequenceImpl,
   getSequenceStatus as getSequenceStatusImpl,
-  getSequenceInfo as getSequenceInfoImpl,
+  getSequence as getSequenceImpl,
   listSequences as listSequencesImpl,
   isSequence as isSequenceImpl,
   clearSequenceCache as clearSequenceCacheImpl,
   getSequenceCache as getSequenceCacheImpl,
-  generateSequenceTerms as generateSequenceTermsImpl,
-} from './sequence';
-
-import {
-  lookupSequence as lookupSequenceImpl,
-  checkSequence as checkSequenceImpl,
-} from './oeis';
+  getSequenceTerms as getSequenceTermsImpl,
+  lookupOEIS as lookupOEISImpl,
+  checkSequenceOEIS as checkSequenceOEISImpl,
+} from './engine-sequences';
 
 export * from './global-types';
 
@@ -423,34 +426,9 @@ export class ComputeEngine implements IComputeEngine {
   declareType(
     name: string,
     type: BoxedType | Type | TypeString,
-    { alias }: { alias?: boolean } = {}
+    options?: { alias?: boolean }
   ): void {
-    if (!isValidTypeName(name))
-      throw Error(`The type name "${name}" is invalid`);
-
-    // Is the type already defined in this scope?
-    const scope = this.context.lexicalScope;
-    if (scope.types?.[name])
-      throw Error(`The type "${name}" is already defined in the current scope`);
-
-    scope.types ??= {};
-
-    alias ??= false; // Nominal by default
-
-    // First, add a placeholder record to allow recursive types
-    scope.types[name] = { kind: 'reference', name, alias, def: undefined };
-
-    // Parse the type (which may reference itself)
-    const def =
-      type instanceof BoxedType
-        ? type.type
-        : typeof type === 'string'
-          ? parseType(type, this._typeResolver)
-          : type;
-
-    // Adjust the definition (the type references in the type will point to
-    // the placeholder record)
-    scope.types[name].def = def;
+    declareTypeImpl(this, name, type, options);
   }
 
   /**
@@ -907,7 +885,8 @@ export class ComputeEngine implements IComputeEngine {
    * @see eq() in compare.ts
    * @see Equal/NotEqual operators in relational-operator.ts
    */
-  private _isVerifying: boolean = false;
+  /** @internal */
+  _isVerifying: boolean = false;
 
   /**
    * @internal
@@ -1205,7 +1184,7 @@ export class ComputeEngine implements IComputeEngine {
    * lexical scope and going up the scope chain.
    */
   lookupDefinition(id: MathJsonSymbol): undefined | BoxedDefinition {
-    return lookup(id, this.context.lexicalScope);
+    return lookupDefinitionImpl(this, id);
   }
 
   /**
@@ -1220,34 +1199,7 @@ export class ComputeEngine implements IComputeEngine {
     def: Partial<ValueDefinition>,
     scope?: Scope
   ): BoxedDefinition {
-    scope ??= this.context.lexicalScope;
-
-    // Insert a placeholder in the bindings to handle recursive calls
-    // (the value could be a function that references itself)
-    scope.bindings.set(name, {
-      value: new _BoxedValueDefinition(this, name, {
-        type: 'unknown',
-        inferred: true,
-      }),
-    });
-
-    const boxedDef = scope.bindings.get(name)!;
-    updateDef(this, name, boxedDef, def);
-
-    // If we are modifying the current scope, and we have a value,
-    // set the value in the evaluation context
-    if (
-      scope === this.context.lexicalScope &&
-      isValueDef(boxedDef) &&
-      boxedDef.value.value &&
-      !boxedDef.value.isConstant
-    ) {
-      this.context.values[name] = boxedDef.value.value;
-    }
-
-    this._generation += 1;
-
-    return boxedDef;
+    return declareSymbolValueImpl(this, name, def, scope);
   }
 
   /**
@@ -1262,19 +1214,7 @@ export class ComputeEngine implements IComputeEngine {
     def: OperatorDefinition,
     scope?: Scope
   ): BoxedDefinition {
-    scope ??= this.context.lexicalScope;
-    // Insert a placeholder in the bindings to handle recursive calls
-    // (the function is not yet defined)
-    scope.bindings.set(name, {
-      value: new _BoxedValueDefinition(this, name, { type: 'function' }),
-    });
-
-    const boxedDef = scope.bindings.get(name)!;
-    updateDef(this, name, boxedDef, def);
-
-    this._generation += 1;
-
-    return boxedDef;
+    return declareSymbolOperatorImpl(this, name, def, scope);
   }
 
   /**
@@ -1284,163 +1224,41 @@ export class ComputeEngine implements IComputeEngine {
    *
    */
   pushScope(scope?: Scope, name?: string): void {
-    this._pushEvalContext(
-      scope ?? {
-        parent: this.context?.lexicalScope,
-        bindings: new Map(),
-      },
-      name
-    );
+    pushScopeImpl(this, scope, name);
   }
 
   /**
    * Remove the most recent scope from the scope stack.
    */
   popScope(): void {
-    this._popEvalContext();
+    popScopeImpl(this);
   }
 
   /** @internal */
   _pushEvalContext(scope: Scope, name?: string): void {
-    if (!name) {
-      const l = this._evalContextStack.length;
-      if (l === 0) name = 'system';
-      if (l === 1) name = 'global';
-      name ??= `anonymous_${l - 1}`;
-    }
-
-    //
-    // The values in the evaluation context are all the non-constant symbols
-    // in the scope.
-    //
-    const values: { [id: string]: BoxedExpression | undefined } = {};
-    for (const [id, def] of scope.bindings.entries()) {
-      if (isValueDef(def) && !def.value.isConstant)
-        values[id] = def.value.value;
-    }
-
-    this._evalContextStack.push({
-      lexicalScope: scope,
-      name,
-      assumptions: new ExpressionMap(this.context?.assumptions ?? []),
-      values,
-    });
+    pushEvalContextImpl(this, scope, name);
   }
 
   /** @internal */
   _popEvalContext(): void {
-    this._evalContextStack.pop();
+    popEvalContextImpl(this);
   }
 
   /** @internal */
   _inScope<T>(scope: Scope | undefined, f: () => T): T {
-    if (!scope) return f();
-
-    // Push a dummy context (@todo: we could just have a lexical scope chain instead)
-    this._evalContextStack.push({
-      lexicalScope: scope,
-      name: '',
-      assumptions: new ExpressionMap([]),
-      values: {},
-    });
-
-    try {
-      return f();
-    } finally {
-      this._evalContextStack.pop();
-    }
+    return inScopeImpl(this, scope, f);
   }
 
   /** @internal */
   _printStack(options?: { details?: boolean; maxDepth?: number }): void {
-    if (options) {
-      options = { ...options };
-      options.maxDepth ??= 1;
-      options.details ??= false;
-    } else options = { details: false, maxDepth: -2 };
-
-    if (options.maxDepth !== undefined && options.maxDepth < 0)
-      options.maxDepth = this._evalContextStack.length + options.maxDepth;
-
-    options.maxDepth = Math.min(
-      this._evalContextStack.length - 1,
-      options.maxDepth!
-    );
-
-    let depth = 0;
-
-    while (depth <= options.maxDepth) {
-      const context =
-        this._evalContextStack[this._evalContextStack.length - 1 - depth];
-      if (depth === 0) console.group(`${BOLD}${BLUE}${context.name}${RESET}`);
-      else
-        console.groupCollapsed(
-          `${BOLD}${BLUE}${context.name}${RESET} ${GREY}(${depth})${RESET}`
-        );
-
-      //
-      // Display assumptions
-      //
-      const assumptions = [...context.assumptions.entries()].map(
-        ([k, v]) => `${k}: ${v}`
-      );
-      if (assumptions.length > 0) {
-        console.groupCollapsed(
-          `${BOLD}${assumptions.length} assumptions${RESET}`
-        );
-        for (const a of assumptions) console.info(a);
-        console.groupEnd();
-      }
-
-      //
-      // Display values
-      //
-
-      const bindings = Object.entries(context.values);
-      if (bindings.length + context.lexicalScope.bindings.size === 0) {
-        console.groupEnd();
-        depth += 1;
-        continue;
-      }
-
-      for (const [k, b] of bindings) {
-        if (context.lexicalScope.bindings.has(k)) {
-          console.info(
-            defToString(k, context.lexicalScope.bindings.get(k)!, b)
-          );
-        } else if (b === undefined) {
-          console.info(`${CYAN}${k}${RESET}: ${GREY}undefined${RESET}`);
-        } else {
-          console.info(`${CYAN}${k}${RESET}: ${GREY}${b.toString()}${RESET}`);
-        }
-      }
-
-      //
-      // Display the lexical scope entries without a matching value
-      //
-      for (const [k, def] of context.lexicalScope.bindings)
-        if (!(k in context.values)) console.info(defToString(k, def));
-
-      console.groupEnd();
-
-      // Next execution context
-      depth += 1;
-    }
+    printStackImpl(this, options);
   }
 
   /**
    * Use `ce.box(name)` instead
    * @internal */
   _getSymbolValue(id: MathJsonSymbol): BoxedExpression | undefined {
-    // Iterate over all the frames, starting with the most recent
-    // and going back to the root frame
-    const l = this._evalContextStack.length - 1;
-    if (l < 0) return undefined;
-    for (let j = l; j >= 0; j--) {
-      const frame = this._evalContextStack[j].values;
-      if (id in frame) return frame[id];
-    }
-    return undefined;
+    return getSymbolValueImpl(this, id);
   }
 
   /**
@@ -1451,32 +1269,7 @@ export class ComputeEngine implements IComputeEngine {
     id: MathJsonSymbol,
     value: BoxedExpression | boolean | number | undefined
   ): void {
-    // Iterate over all the frames, starting with the most recent
-    // and going back to the root frame
-    const l = this._evalContextStack.length - 1;
-    if (l < 0) throw new Error(`Unknown symbol "${id}"`);
-
-    if (typeof value === 'number') value = this.number(value);
-    else if (typeof value === 'boolean') value = value ? this.True : this.False;
-
-    for (let j = l; j >= 0; j--) {
-      const values = this._evalContextStack[j].values;
-      if (id in values) {
-        values[id] = value;
-        this._generation += 1;
-        return;
-      }
-    }
-
-    // If we reach here, the symbol is not defined in any frame
-    // Add it to the frame that has the declaration for it.
-    // Note: this code path can happen if we have a symbol declared as a
-    // function/operator, and we are assigning a value to it: ordinarily
-    // there would be an entry in the `values` map if it it had been declared
-    // as a value, but it is not the case here.
-    const ctx = this.lookupContext(id);
-    if (!ctx) throw new Error(`Unknown symbol "${id}"`);
-    ctx.values[id] = value;
+    setSymbolValueImpl(this, id, value);
   }
 
   /**
@@ -1489,14 +1282,7 @@ export class ComputeEngine implements IComputeEngine {
     id: MathJsonSymbol,
     value: BoxedExpression | boolean | number | undefined
   ): void {
-    const l = this._evalContextStack.length - 1;
-    if (l < 0) throw new Error(`No evaluation context`);
-
-    if (typeof value === 'number') value = this.number(value);
-    else if (typeof value === 'boolean') value = value ? this.True : this.False;
-
-    this._evalContextStack[l].values[id] = value;
-    this._generation += 1;
+    setCurrentContextValueImpl(this, id, value);
   }
 
   /**
@@ -1530,78 +1316,7 @@ export class ComputeEngine implements IComputeEngine {
     arg2?: Type | TypeString | Partial<SymbolDefinition>,
     scope?: Scope
   ): IComputeEngine {
-    //
-    // If the argument is an object literal, call `declare` for each entry
-    //
-    if (typeof arg1 !== 'string') {
-      for (const [id, def] of Object.entries(arg1)) this.declare(id, def);
-      return this;
-    }
-
-    const id = arg1;
-
-    // The special id `Nothing` can never be redeclared.
-    // It is also used to indicate that a symbol should be ignored,
-    // so it's valid, but it doesn't do anything.
-    if (id === 'Nothing') return this;
-
-    // Can't "undeclare" (set to `undefined`/`null`) a symbol either
-    // (but its value can be set to `undefined` with `ce.assign()`)
-    if (arg2 === undefined || arg2 === null)
-      throw Error(`Expected a definition or type for "${id}"`);
-
-    // Check the id is valid
-    if (typeof id !== 'string' || id.length === 0 || !isValidSymbol(id)) {
-      throw new Error(`Invalid symbol "${id}": ${validateSymbol(id)}`);
-    }
-
-    scope ??= this.context.lexicalScope;
-
-    //
-    // Check the id is not already declared in the current scope
-    //
-    const bindings = scope.bindings;
-    if (bindings.has(id))
-      throw new Error(`The symbol "${id}" is already declared in this scope`);
-
-    //
-    // Declaring a symbol or function with a definition or type
-    //
-
-    const def = arg2;
-
-    if (isValidValueDef(def)) {
-      this._declareSymbolValue(id, def, scope);
-      return this;
-    }
-
-    if (isValidOperatorDef(def)) {
-      this._declareSymbolOperator(id, def, scope);
-      return this;
-    }
-
-    //
-    // Declaring a symbol with a type
-    // `ce.declare("f", "number -> number")`
-    // `ce.declare("z", "complex")`
-    // `ce.declare("n", "integer")`
-    //
-    {
-      const type = parseType(def, this._typeResolver);
-      if (!isValidType(type)) {
-        throw Error(
-          [
-            `Invalid argument for "${id}"`,
-            JSON.stringify(def, undefined, 4),
-            `Use a type, a \`OperatorDefinition\` or a \`ValueDefinition\``,
-          ].join('\n|   ')
-        );
-      }
-
-      this._declareSymbolValue(id, { type }, scope);
-    }
-
-    return this;
+    return declareFnImpl(this, arg1, arg2, scope);
   }
 
   /**
@@ -1618,37 +1333,7 @@ export class ComputeEngine implements IComputeEngine {
    * ```
    */
   declareSequence(name: string, def: SequenceDefinition): IComputeEngine {
-    // Validate basic requirements (without parsing)
-    if (!def.base || Object.keys(def.base).length === 0) {
-      throw new Error(`Sequence "${name}" requires at least one base case`);
-    }
-    if (!def.recurrence) {
-      throw new Error(`Sequence "${name}" requires a recurrence relation`);
-    }
-
-    // Declare the symbol first with a placeholder handler
-    // This ensures the symbol exists when we parse the recurrence
-    this.declare(name, {
-      subscriptEvaluate: () => undefined,
-    });
-
-    // Now validate and create the actual handler
-    const validation = validateSequenceDefinition(this, name, def);
-    if (!validation.valid) {
-      throw new Error(validation.error);
-    }
-
-    // Create the full subscriptEvaluate handler
-    const handler = createSequenceHandler(this, name, def);
-
-    // Update the symbol's subscriptEvaluate handler
-    // We need to access the internal definition to update it
-    const boxedDef = this.lookupDefinition(name);
-    if (boxedDef && isValueDef(boxedDef)) {
-      boxedDef.value.subscriptEvaluate = handler;
-    }
-
-    return this;
+    return declareSequenceImpl(this, name, def);
   }
 
   /**
@@ -1670,7 +1355,7 @@ export class ComputeEngine implements IComputeEngine {
    * Returns `undefined` if the symbol is not a sequence.
    */
   getSequence(name: string): SequenceInfo | undefined {
-    return getSequenceInfoImpl(this, name);
+    return getSequenceImpl(this, name);
   }
 
   /**
@@ -1730,7 +1415,7 @@ export class ComputeEngine implements IComputeEngine {
     end: number,
     step?: number
   ): BoxedExpression[] | undefined {
-    return generateSequenceTermsImpl(this, name, start, end, step);
+    return getSequenceTermsImpl(this, name, start, end, step);
   }
 
   /**
@@ -1750,7 +1435,7 @@ export class ComputeEngine implements IComputeEngine {
     terms: (number | BoxedExpression)[],
     options?: OEISOptions
   ): Promise<OEISSequenceInfo[]> {
-    return lookupSequenceImpl(this, terms, options);
+    return lookupOEISImpl(this, terms, options);
   }
 
   /**
@@ -1773,26 +1458,14 @@ export class ComputeEngine implements IComputeEngine {
     count?: number,
     options?: OEISOptions
   ): Promise<{ matches: OEISSequenceInfo[]; terms: number[] }> {
-    return checkSequenceImpl(this, name, count, options);
+    return checkSequenceOEISImpl(this, name, count, options);
   }
 
   /**
    * Return an evaluation context in which the symbol is defined.
    */
   lookupContext(id: MathJsonSymbol): EvalContext | undefined {
-    if (id.length === 0 || !isValidSymbol(id))
-      throw Error(`Invalid symbol "${id}": ${validateSymbol(id)}}`);
-
-    // Iterate over all the frames, starting with the most recent
-    // and going back to the root frame
-    const l = this._evalContextStack.length - 1;
-    if (l < 0) return undefined;
-    for (let j = l; j >= 0; j--) {
-      const context = this._evalContextStack[j];
-      if (context.lexicalScope.bindings.has(id)) return context;
-    }
-
-    return undefined;
+    return lookupContextImpl(this, id);
   }
 
   /**  Find the context in the stack frame, and set the stack frame to
@@ -1800,14 +1473,7 @@ export class ComputeEngine implements IComputeEngine {
    * a different scope.
    */
   _swapContext(context: EvalContext): void {
-    while (
-      this._evalContextStack.length > 0 &&
-      this._evalContextStack[this._evalContextStack.length - 1] !== context
-    )
-      this._evalContextStack.pop();
-
-    // This is unlikely to happen, but just in case...
-    if (this._evalContextStack.length === 0) this._evalContextStack = [context];
+    swapContextImpl(this, context);
   }
 
   /**
@@ -1829,85 +1495,7 @@ export class ComputeEngine implements IComputeEngine {
     arg1: string | { [id: string]: AssignValue },
     arg2?: AssignValue
   ): IComputeEngine {
-    //
-    // If the first argument is an object literal, call `assign()` for each key
-    //
-    if (typeof arg1 === 'object') {
-      console.assert(arg2 === undefined);
-      for (const [id, def] of Object.entries(arg1)) this.assign(id, def);
-      return this;
-    }
-
-    const id = arg1;
-
-    // Cannot set the value of 'Nothing'
-    // @todo: could have a 'locked' attribute on the definition
-    if (id === 'Nothing') return this;
-
-    const def = this.lookupDefinition(id);
-
-    if (isOperatorDef(def)) {
-      const value = assignValueAsValue(this, arg2);
-      if (value) throw Error(`Cannot change the operator "${id}" to a value`);
-
-      // Update the operator definition.
-      // Note: this is a potentially dangerous operation, since the
-      // operator may be used in other expressions that are not
-      // re-canonicalized. However, it might be desirable to override the
-      // evaluation of an operator in a specific context, even a system
-      // operator.
-      // However, it is preferable to use `ce.declare()` to create a new
-      // operator.
-      const fnDef = assignValueAsOperatorDef(this, arg2);
-      if (!fnDef) throw Error(`Cannot change the operator "${id}" to a value`);
-      updateDef(this, id, def, fnDef);
-      return this;
-    }
-
-    //
-    // 1/ We were given a value
-    //
-    const value = assignValueAsValue(this, arg2);
-    if (value !== undefined) {
-      if (!def) {
-        // No previous definition: create a new one
-        this._declareSymbolValue(id, { value });
-        return this;
-      }
-      if (def.value.isConstant)
-        throw Error(`Cannot assign a value to the constant "${id}"`);
-
-      // We have a value definition, update the inferred type...
-      if (def.value.inferredType)
-        def.value.type = this.type(widen(def.value.type.type, value.type.type));
-
-      // ... and set the value
-      this._setSymbolValue(id, value);
-
-      return this;
-    }
-
-    //
-    // 2/ We were given an operator definition
-    //
-    const fnDef = assignValueAsOperatorDef(this, arg2);
-    if (fnDef === undefined)
-      throw Error(`Invalid definition for symbol "${id}"`);
-
-    if (def) {
-      // If we get here, the previous definition was a value definition.
-      // We can update it to an operator definition.
-      console.assert(isValueDef(def));
-      updateDef(this, id, def, fnDef);
-
-      // Remove the value associated with the previous definition
-      this._setSymbolValue(id, undefined);
-    } else {
-      // No previous definition: create a new one
-      this.declare(id, fnDef);
-    }
-
-    return this;
+    return assignFnImpl(this, arg1, arg2);
   }
 
   /**
@@ -2321,181 +1909,7 @@ export class ComputeEngine implements IComputeEngine {
    * ```
    */
   ask(pattern: BoxedExpression): BoxedSubstitution[] {
-    const pat = this.box(pattern, { canonical: false });
-    const result: BoxedSubstitution[] = [];
-
-    const patternHasWildcards = (expr: BoxedExpression): boolean => {
-      if (expr.operator?.startsWith('_')) return true;
-      if (isWildcard(expr)) return true;
-      if (expr.ops) return expr.ops.some(patternHasWildcards);
-      return false;
-    };
-
-    const pushResult = (m: BoxedSubstitution) => {
-      const keys = Object.keys(m).sort();
-      for (const prev of result) {
-        const prevKeys = Object.keys(prev).sort();
-        if (prevKeys.length !== keys.length) continue;
-        let same = true;
-        for (let i = 0; i < keys.length; i++) {
-          if (prevKeys[i] !== keys[i]) {
-            same = false;
-            break;
-          }
-          const k = keys[i]!;
-          if (!m[k]!.isSame(prev[k]!)) {
-            same = false;
-            break;
-          }
-        }
-        if (same) return;
-      }
-      result.push(m);
-    };
-
-    const assumptions = this.context.assumptions;
-
-    const candidatesFromAssumptions = (): string[] => {
-      const candidates = new Set<string>();
-      for (const [assumption, val] of assumptions) {
-        if (val !== true) continue;
-        for (const s of assumption.symbols) candidates.add(s);
-      }
-      return [...candidates];
-    };
-
-    const normalizedInequalityPatterns = (
-      expr: BoxedExpression
-    ): Array<{ pattern: BoxedExpression; matchPermutations?: boolean }> => {
-      const op = expr.operator;
-      if (
-        op !== 'Less' &&
-        op !== 'LessEqual' &&
-        op !== 'Greater' &&
-        op !== 'GreaterEqual'
-      )
-        return [{ pattern: expr }];
-
-      const lhs =
-        op === 'Greater' || op === 'GreaterEqual' ? expr.op2 : expr.op1;
-      const rhs =
-        op === 'Greater' || op === 'GreaterEqual' ? expr.op1 : expr.op2;
-      const normalizedOp =
-        op === 'Less' || op === 'Greater' ? 'Less' : 'LessEqual';
-
-      // Normalize to Less/LessEqual with RHS = 0, matching how assumptions are stored:
-      //   Greater(a, b) -> Less(b - a, 0)
-      //   Less(a, b)    -> Less(a - b, 0)
-      const diff = this.box(['Add', lhs, ['Negate', rhs]], {
-        canonical: false,
-      });
-      return [
-        { pattern: expr },
-        // For the normalized form, disable permutations: for commutative
-        // subexpressions (notably Add), allowing permutations can lead to
-        // ambiguous wildcard bindings and duplicate, surprising matches.
-        {
-          pattern: this.box([normalizedOp, diff, 0], { canonical: false }),
-          matchPermutations: false,
-        },
-      ];
-    };
-
-    // B1: Element(x, _T) can be answered from the declared/inferred type of x
-    if (pat.operator === 'Element' && pat.op1?.symbol && isWildcard(pat.op2)) {
-      const typeWildcard = wildcardName(pat.op2);
-      if (typeWildcard && !typeWildcard.startsWith('__')) {
-        const symbolType = this.box(pat.op1.symbol).type;
-        if (!symbolType.isUnknown) {
-          pushResult({
-            [typeWildcard]: this.box(symbolType.toString(), {
-              canonical: false,
-            }),
-          });
-        }
-      }
-    }
-
-    // B2: Inequality bound queries, e.g. Greater(x, _k) -> {_k: lowerBound}
-    if (
-      (pat.operator === 'Greater' ||
-        pat.operator === 'GreaterEqual' ||
-        pat.operator === 'Less' ||
-        pat.operator === 'LessEqual') &&
-      isWildcard(pat.op2)
-    ) {
-      const boundWildcard = wildcardName(pat.op2);
-      if (boundWildcard && !boundWildcard.startsWith('__')) {
-        const isLower =
-          pat.operator === 'Greater' || pat.operator === 'GreaterEqual';
-        const isStrict = pat.operator === 'Greater' || pat.operator === 'Less';
-
-        // Symbol on LHS: Greater(x, _k)
-        if (pat.op1?.symbol) {
-          const bounds = getInequalityBoundsFromAssumptions(
-            this,
-            pat.op1.symbol
-          );
-          const bound = isLower ? bounds.lowerBound : bounds.upperBound;
-          const strictOk = isLower ? bounds.lowerStrict : bounds.upperStrict;
-          if (bound !== undefined && (!isStrict || strictOk === true))
-            pushResult({ [boundWildcard]: bound });
-        }
-
-        // Wildcard on LHS: Greater(_x, _k)
-        if (isWildcard(pat.op1)) {
-          const symbolWildcard = wildcardName(pat.op1);
-          if (symbolWildcard && !symbolWildcard.startsWith('__')) {
-            for (const s of candidatesFromAssumptions()) {
-              const bounds = getInequalityBoundsFromAssumptions(this, s);
-              const bound = isLower ? bounds.lowerBound : bounds.upperBound;
-              const strictOk = isLower
-                ? bounds.lowerStrict
-                : bounds.upperStrict;
-              if (bound === undefined || (isStrict && strictOk !== true))
-                continue;
-              pushResult({
-                [symbolWildcard]: this.box(s, { canonical: true }),
-                [boundWildcard]: bound,
-              });
-            }
-          }
-        }
-      }
-    }
-
-    const patternsToTry = normalizedInequalityPatterns(pat);
-    for (const [assumption, val] of assumptions) {
-      if (val !== true) continue;
-      for (const { pattern: p, matchPermutations } of patternsToTry) {
-        const m = assumption.match(p, {
-          useVariations: true,
-          matchPermutations,
-        });
-        if (m !== null) pushResult(m);
-      }
-    }
-
-    // B3: For closed predicates (no wildcards), fall back to verify().
-    // This makes `ask()` useful for "is this known?" queries even when the
-    // fact is not explicitly stored in the assumptions DB (e.g. declarations).
-    //
-    // IMPORTANT: Skip this if we're already inside a verify() call to prevent
-    // infinite recursion. The recursion occurs when:
-    //   verify(Equal(x,0)) → Equal.evaluate() → eq() → ask(NotEqual(x,0)) → verify()
-    // By checking _isVerifying, we break this cycle.
-    if (
-      result.length === 0 &&
-      !patternHasWildcards(pat) &&
-      !this._isVerifying
-    ) {
-      // Use the canonical form so symbol declarations/definitions are visible
-      // to the evaluator.
-      const verified = this.verify(this.box(pattern, { canonical: true }));
-      if (verified === true) pushResult({});
-    }
-
-    return result;
+    return askImpl(this, pattern);
   }
 
   /**
@@ -2504,59 +1918,7 @@ export class ComputeEngine implements IComputeEngine {
    */
 
   verify(query: BoxedExpression): boolean | undefined {
-    // Prevent recursive verify() -> ask() -> verify() loops
-    if (this._isVerifying) return undefined;
-
-    this._isVerifying = true;
-    try {
-      const boxed = isLatexString(query)
-        ? this.parse(query, { canonical: false })
-        : this.box(query, { canonical: false });
-
-      const expr = boxed.evaluate();
-      if (expr.symbol === 'True') return true;
-      if (expr.symbol === 'False') return false;
-
-      const op = expr.operator;
-
-      if (op === 'Not') {
-        const result = this.verify(expr.op1);
-        if (result === undefined) return undefined;
-        return !result;
-      }
-
-      if (op === 'And') {
-        // Kleene 3-valued logic:
-        // - if any operand is false, the result is false
-        // - if all operands are true, the result is true
-        // - otherwise the result is unknown
-        let hasUnknown = false;
-        for (const x of expr.ops ?? []) {
-          const r = this.verify(x);
-          if (r === false) return false;
-          if (r === undefined) hasUnknown = true;
-        }
-        return hasUnknown ? undefined : true;
-      }
-
-      if (op === 'Or') {
-        // Kleene 3-valued logic:
-        // - if any operand is true, the result is true
-        // - if all operands are false, the result is false
-        // - otherwise the result is unknown
-        let hasUnknown = false;
-        for (const x of expr.ops ?? []) {
-          const r = this.verify(x);
-          if (r === true) return true;
-          if (r === undefined) hasUnknown = true;
-        }
-        return hasUnknown ? undefined : false;
-      }
-
-      return undefined;
-    } finally {
-      this._isVerifying = false;
-    }
+    return verifyImpl(this, query);
   }
 
   /**
@@ -2573,19 +1935,7 @@ export class ComputeEngine implements IComputeEngine {
    *
    */
   assume(predicate: BoxedExpression): AssumeResult {
-    try {
-      const pred = isLatexString(predicate)
-        ? this.parse(predicate, { canonical: false })
-        : this.box(predicate, { canonical: false });
-
-      // The new assumption could affect existing expressions
-      this._generation += 1;
-
-      return assume(pred);
-    } catch (e) {
-      console.error(e.message.toString());
-      throw e;
-    }
+    return assumeFnImpl(this, predicate);
   }
 
   /**
@@ -2598,148 +1948,8 @@ export class ComputeEngine implements IComputeEngine {
    *
    * */
   forget(symbol: undefined | MathJsonSymbol | MathJsonSymbol[]): void {
-    //
-    // ## THEORY OF OPERATIONS
-    //
-    // When forgeting we need to preserve existing definitions for symbols,
-    // as some expressions may be pointing to them. Instead, we
-    // reset the value of those definitions, but don't change the domain.
-    //
-
-    if (symbol === undefined) {
-      this.context.assumptions?.clear();
-
-      // The removed assumptions could affect existing expressions
-      this._generation += 1;
-
-      return;
-    }
-
-    if (Array.isArray(symbol)) {
-      for (const x of symbol) this.forget(x);
-      return;
-    }
-
-    if (typeof symbol === 'string') {
-      // Remove any assumptions that make a reference to this symbol
-      // (note that when a scope is created, any assumptions from the
-      // parent scope are copied over, so this effectively removes any
-      // reference to this symbol, even if there are assumptions about
-      // it in a parent scope. However, when the current scope exits,
-      // any previous assumptions about the symbol will be restored).
-      for (const [assumption, _val] of this.context.assumptions) {
-        if (assumption.has(symbol)) this.context.assumptions.delete(assumption);
-      }
-
-      // Also clear any values that were set for this symbol in the evaluation context.
-      // Values can be stored in any frame of the context stack, so we need to check all of them.
-      for (const ctx of this._evalContextStack) {
-        if (symbol in ctx.values) {
-          delete ctx.values[symbol];
-        }
-      }
-    }
-    // The removed assumptions could affect existing expressions
-    this._generation += 1;
+    forgetImpl(this, symbol);
   }
 }
 
-function assignValueAsValue(
-  ce: ComputeEngine,
-  value: AssignValue
-): BoxedExpression | undefined {
-  if (value === undefined || value === null) return undefined;
-  if (typeof value === 'function') return undefined;
 
-  if (typeof value === 'boolean') return value ? ce.True : ce.False;
-  if (typeof value === 'number' || typeof value === 'bigint')
-    return ce.number(value);
-  const expr = ce.box(value);
-  // Explicit function expressions should always be treated as operator definitions
-  if (expr.operator === 'Function') return undefined;
-  if (expr.unknowns.some((s) => s.startsWith('_'))) {
-    // If the expression has wildcards, it should be treated as a function
-    // E.g. ["Add", "_", 1] or ["Add", "_x", 1]
-    // Note: Regular unknowns (e.g., "x", "a", "b") are fine in values
-    return undefined;
-  }
-  return expr;
-}
-
-function assignValueAsOperatorDef(
-  ce: ComputeEngine,
-  value: AssignValue
-): OperatorDefinition | undefined {
-  if (typeof value === 'function')
-    return { evaluate: value, signature: 'function' };
-
-  if (value === undefined || value === null) return undefined;
-  if (typeof value === 'boolean') return undefined;
-
-  const body = canonicalFunctionLiteral(ce.box(value));
-  if (body === undefined) return undefined;
-
-  // Don't set an explicit signature - let it be inferred from the body.
-  // This ensures inferredSignature = true, which allows the return type
-  // to be properly narrowed during type checking (e.g., in Add operands).
-  return { evaluate: body };
-}
-
-function defToString(
-  name: string,
-  def: BoxedDefinition,
-  v?: BoxedExpression
-): string {
-  let result = '';
-  if (isValueDef(def)) {
-    const tags: string[] = [];
-    if (def.value.holdUntil === 'never') tags.push('(hold never)');
-    if (def.value.holdUntil === 'N') tags.push('(hold until N)');
-
-    if (def.value.inferredType) tags.push('inferred');
-
-    const allTags = tags.length > 0 ? ` ${tags.join(' ')}` : '';
-
-    result = `${CYAN}${name}${RESET}:${allTags}`;
-
-    if (def.value.isConstant) {
-      result += ` const ${def.value.type.toString()}`;
-      if (def.value.value !== undefined)
-        result += ` = ${def.value.value?.toString()}`;
-      console.assert(v === undefined);
-    } else result += ` ${def.value.type.toString()}`;
-  } else if (isOperatorDef(def)) {
-    const tags: string[] = [];
-    if (def.operator.inferredSignature) tags.push('(inferred)');
-
-    const allTags = tags.length > 0 ? ` (${tags.join(' ')})` : '';
-
-    result = `${CYAN}${name}${RESET}:${allTags} ${def.operator.signature.toString()}`;
-
-    const details: string[] = [];
-
-    if (def.operator.lazy) details.push('lazy');
-    if (def.operator.scoped) details.push('scoped');
-    if (def.operator.broadcastable) details.push('broadcastable');
-    if (def.operator.associative) details.push('associative');
-    if (def.operator.commutative) details.push('commutative');
-    if (def.operator.idempotent) details.push('idempotent');
-    if (def.operator.involution) details.push('involution');
-    if (!def.operator.pure) details.push('not pure');
-
-    const allDetails = details.map((x) => `${GREY}${x}${RESET}`).join(' ');
-    if (allDetails.length > 0) result += `\n   \u2514 ${allDetails}`;
-  } else result = 'unknown';
-
-  if (v) {
-    if (!v.isValid) {
-      result += ` = ${INVERSE_RED}${v.toString()}${RESET} (not valid)`;
-    } else if (!v.isCanonical) {
-      result += ` = ${YELLOW}${v.toString()}${RESET} (not canonical)`;
-    } else {
-      result += ` = ${GREY}${v.toString()}${RESET}`;
-    }
-  }
-
-  return result;
-}
