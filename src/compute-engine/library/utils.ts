@@ -1,4 +1,8 @@
-import type { BoxedExpression, ComputeEngine, Scope } from '../global-types';
+import type {
+  BoxedExpression,
+  IComputeEngine as ComputeEngine,
+  Scope,
+} from '../global-types';
 
 import { MAX_ITERATION } from '../numerics/numeric';
 import { fromRange, reduceCollection } from './collections';
@@ -97,8 +101,8 @@ export function indexingSetCartesianProduct(
   //
   // Start with the first index
   //
-  let { index, lower, upper, isFinite } = indexingSets[0];
-  if (!isFinite) upper = lower + MAX_ITERATION;
+  const { index: _index, lower, upper: upper0, isFinite } = indexingSets[0];
+  const upper = !isFinite ? lower + MAX_ITERATION : upper0;
   let result = fromRange(lower, upper).map((x) => [x]);
 
   // We had a single index, we're done
@@ -108,9 +112,8 @@ export function indexingSetCartesianProduct(
   // We have multiple indexes
   //
   for (let i = 1; i < indexingSets.length; i++) {
-    // eslint-disable-next-line prefer-const
-    let { index, lower, upper, isFinite } = indexingSets[i];
-    if (!isFinite) upper = lower + MAX_ITERATION;
+    const { index: _index2, lower, upper: upperI, isFinite } = indexingSets[i];
+    const upper = !isFinite ? lower + MAX_ITERATION : upperI;
 
     result = cartesianProduct(
       result.map((x) => x[0]),

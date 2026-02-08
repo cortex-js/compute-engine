@@ -151,6 +151,7 @@ export interface CompilationOptions {
     | ((op: MathJsonSymbol) => [op: string, prec: number] | undefined);
 
   /** Custom function implementations */
+  // eslint-disable-next-line @typescript-eslint/ban-types
   functions?: Record<MathJsonSymbol, TargetSource | Function>;
 
   /** Variable bindings */

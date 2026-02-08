@@ -6,7 +6,7 @@ import { checkArity } from '../boxed-expression/validate';
 import { isFiniteIndexedCollection } from '../collection-utils';
 import {
   BoxedExpression,
-  ComputeEngine,
+  IComputeEngine as ComputeEngine,
   SymbolDefinitions,
   Sign,
 } from '../global-types';

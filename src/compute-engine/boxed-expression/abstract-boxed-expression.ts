@@ -24,7 +24,7 @@ import type {
   JsonSerializationOptions,
   PatternMatchOptions,
   SimplifyOptions,
-  ComputeEngine,
+  IComputeEngine as ComputeEngine,
   Scope,
   Tensor,
 } from '../global-types';
@@ -409,7 +409,7 @@ export abstract class _BoxedExpression implements BoxedExpression {
     return this.engine.NaN;
   }
 
-  add(rhs: number | BoxedExpression): BoxedExpression {
+  add(_rhs: number | BoxedExpression): BoxedExpression {
     return this.engine.NaN;
   }
 
@@ -417,19 +417,19 @@ export abstract class _BoxedExpression implements BoxedExpression {
     return this.add(rhs.neg());
   }
 
-  mul(rhs: NumericValue | number | BoxedExpression): BoxedExpression {
+  mul(_rhs: NumericValue | number | BoxedExpression): BoxedExpression {
     return this.engine.NaN;
   }
 
-  div(rhs: number | BoxedExpression): BoxedExpression {
+  div(_rhs: number | BoxedExpression): BoxedExpression {
     return this.engine.NaN;
   }
 
-  pow(exp: number | BoxedExpression): BoxedExpression {
+  pow(_exp: number | BoxedExpression): BoxedExpression {
     return this.engine.NaN;
   }
 
-  root(exp: number | BoxedExpression): BoxedExpression {
+  root(_exp: number | BoxedExpression): BoxedExpression {
     return this.engine.NaN;
   }
 
@@ -437,7 +437,7 @@ export abstract class _BoxedExpression implements BoxedExpression {
     return this.engine.NaN;
   }
 
-  ln(base?: number | BoxedExpression): BoxedExpression {
+  ln(_base?: number | BoxedExpression): BoxedExpression {
     return this.engine.NaN;
   }
 
@@ -668,7 +668,7 @@ export abstract class _BoxedExpression implements BoxedExpression {
     return undefined;
   }
 
-  infer(t: Type, inferenceMode?: 'narrow' | 'widen'): boolean {
+  infer(_t: Type, _inferenceMode?: 'narrow' | 'widen'): boolean {
     return false; // The inference was ignored if false
   }
 

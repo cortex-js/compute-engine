@@ -1,5 +1,3 @@
-import { permutations } from '../../common/utils';
-
 import { replace } from './rules';
 import { holdMap } from './hold';
 import type {
@@ -209,19 +207,6 @@ function isCheaper(
   return false;
 }
 
-/**
- * Considering an old (existing) expression and a new (simplified) one,
- * return the cheapest of the two, with a bias towards the new (which can
- * actually be a bit more expensive than the old one, and still be picked).
- */
-function cheapest(
-  oldExpr: BoxedExpression,
-  newExpr: BoxedExpression | null | undefined,
-  costFunction?: (expr: BoxedExpression) => number
-): BoxedExpression {
-  return isCheaper(oldExpr, newExpr, costFunction) ? newExpr! : oldExpr;
-}
-
 function simplifyOperands(
   expr: BoxedExpression,
   options?: Partial<SimplifyOptions>
@@ -364,7 +349,7 @@ function simplifyExpression(
 
   // If this is a commutative function, try variations on the order of the operands
   // if (expr.functionDefinition?.commutative === true) {
-  //   result = simplifyCommutativeFunction(expr, rules, options, steps);
+  //   result = _simplifyCommutativeFunction(expr, rules, options, steps);
   //   if (result.length > steps.length) return result;
   // }
   // @fixme: should try permutations on rules that are commutative
@@ -400,51 +385,4 @@ function simplifyNonCommutativeFunction(
 
   result.at(-1)!.value = last;
   return [...steps, ...result];
-}
-
-function simplifyCommutativeFunction(
-  expr: BoxedExpression,
-  rules: BoxedRuleSet,
-  options: SimplifyOptions,
-  steps: RuleSteps,
-  seen: BoxedExpression[] = []
-): RuleSteps {
-  if (expr.nops < 3)
-    return simplifyNonCommutativeFunction(expr, rules, options, steps);
-
-  const operator = expr.operator;
-  const ce = expr.engine;
-
-  // If the function is commutative, we will try all permutations
-  // of the arguments
-  const ps =
-    expr.operatorDefinition?.commutative === true
-      ? permutations(expr.ops!)
-      : [expr.ops!];
-
-  for (const p of ps) {
-    // For a given permutation, try to simplify the first nth arguments
-    for (let i = p.length - 1; i >= 2; i--) {
-      const left = ce.function(operator, p.slice(0, i));
-
-      if (seen.some((x) => x.isSame(left))) continue;
-
-      seen.push(left);
-      const newSteps = simplifyCommutativeFunction(
-        left,
-        rules,
-        options,
-        steps,
-        seen
-      );
-      if (newSteps.length > steps.length) {
-        let last = newSteps.at(-1)!.value;
-        const right = ce.function(operator, expr.ops!.slice(i));
-        last = ce.function(operator, [last, right]);
-        newSteps.at(-1)!.value = last;
-        return newSteps;
-      }
-    }
-  }
-  return steps;
 }

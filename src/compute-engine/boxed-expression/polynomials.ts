@@ -22,21 +22,6 @@ export { totalDegree, maxDegree, lex, revlex } from './polynomial-degree';
 export type UnivariateCoefficients = (null | BoxedExpression)[];
 export type MultivariateCoefficients = (null | (null | BoxedExpression)[])[];
 
-/** Given `term` */
-function coefficientDegree(
-  term: BoxedExpression,
-  vars: string[]
-): [coef: BoxedExpression, degrees: number[]] {
-  if (term.operator === 'Negate') {
-  } else if (term.operator === 'Multiply') {
-  } else if (term.operator === 'Power') {
-  } else {
-    // if (term.symbol in vars)...
-    // Sqrt, Ln, trig, constants, numbers
-  }
-  return [term, [1, 0, 0]];
-}
-
 /**
  * Return a list of coefficient of powers of `vars` in `poly`,
  * starting with power 0.
@@ -52,9 +37,10 @@ export function coefficients(
   vars: string[]
 ): MultivariateCoefficients | null;
 export function coefficients(
-  poly: BoxedExpression,
-  vars: string | string[]
+  _poly: BoxedExpression,
+  _vars: string | string[]
 ): UnivariateCoefficients | MultivariateCoefficients | null {
+  // @todo
   return univariateCoefficients([[]]) ?? [[]];
 }
 
@@ -106,9 +92,10 @@ export function coefficients(
 /** If possible, attempt to return a UnivariateCoefficient.
  * If the coefficients really are multivariate, return `null` */
 function univariateCoefficients(
-  coefs: UnivariateCoefficients | MultivariateCoefficients
+  _coefs: UnivariateCoefficients | MultivariateCoefficients
 ): UnivariateCoefficients | null {
-  const result: UnivariateCoefficients = [];
+  // @todo
+  const _result: UnivariateCoefficients = [];
 
   return null;
 }
@@ -116,7 +103,7 @@ function univariateCoefficients(
 /**
  * Return the sum of positive integer exponents for an expression.
  */
-function getDegree(expr: BoxedExpression | undefined): number {
+function _getDegree(expr: BoxedExpression | undefined): number {
   if (expr === undefined) return 0;
 
   if (expr.symbol) {
@@ -128,12 +115,12 @@ function getDegree(expr: BoxedExpression | undefined): number {
     if (operator === 'Power') return expr.op2.re;
 
     if (operator === 'Multiply') {
-      return [...expr.ops].reduce((acc, x) => acc + getDegree(x), 0);
+      return [...expr.ops].reduce((acc, x) => acc + _getDegree(x), 0);
     }
     if (operator === 'Add' || operator === 'Subtract') {
-      return Math.max(...expr.ops.map((x) => getDegree(x)));
+      return Math.max(...expr.ops.map((x) => _getDegree(x)));
     }
-    if (operator === 'Negate') return getDegree(expr.op1);
+    if (operator === 'Negate') return _getDegree(expr.op1);
   }
   return 0;
 }
@@ -524,7 +511,6 @@ export function polynomialGCD(
  * Make a polynomial monic (leading coefficient = 1).
  */
 function makeMonic(poly: BoxedExpression, variable: string): BoxedExpression {
-  const ce = poly.engine;
   const coeffs = getPolynomialCoefficients(poly, variable);
 
   if (!coeffs) return poly;
@@ -559,8 +545,6 @@ export function cancelCommonFactors(
   expr: BoxedExpression,
   variable: string
 ): BoxedExpression {
-  const ce = expr.engine;
-
   if (expr.operator !== 'Divide') return expr;
 
   const numerator = expr.op1;

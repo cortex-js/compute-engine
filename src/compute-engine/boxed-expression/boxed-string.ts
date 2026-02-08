@@ -2,7 +2,7 @@ import type {
   BoxedExpression,
   PatternMatchOptions,
   BoxedSubstitution,
-  ComputeEngine,
+  IComputeEngine as ComputeEngine,
   Metadata,
 } from '../global-types';
 

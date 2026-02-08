@@ -423,73 +423,12 @@ export function cmp(
   return undefined;
 }
 
-function estimateZero(expr: BoxedExpression): boolean | undefined {
-  // We can only estimate if there is exactly one unknown
-  if (expr.unknowns.length === 0) return undefined;
-  if (expr.unknowns.length > 1) return undefined;
-
-  const ce = expr.engine;
-
-  // Estimate expr assuming various values for the unknown
-  const values = [
-    0,
-    1,
-    -1,
-    0.5,
-    -0.5,
-    2,
-    -2,
-    0.1,
-    -0.1,
-    Math.PI,
-    -Math.PI,
-    Math.E,
-    -Math.E,
-  ];
-  // Add a 1000 random values between -1000 and 1000
-  for (let i = 0; i < 1000; i++) values.push(Math.random() * 20 - 10);
-
-  ce.pushScope();
-
-  const [unknown] = expr.unknowns;
-
-  for (const value of values) {
-    ce.assign(unknown, value);
-    const n = expr.N();
-    if (!n.isNumberLiteral) {
-      ce.popScope();
-      return false;
-    }
-    if (typeof n.numericValue === 'number') {
-      if (ce.chop(n.numericValue) !== 0) {
-        ce.popScope();
-        return false;
-      }
-    } else {
-      if (!n.numericValue!.isZeroWithTolerance(ce.tolerance)) {
-        ce.popScope();
-        return false;
-      }
-    }
-  }
-
-  ce.popScope();
-  return true;
-}
-
 function isZeroWithTolerance(expr: BoxedExpression): boolean {
   if (!expr.isNumberLiteral) return false;
   const n = expr.numericValue!;
   const ce = expr.engine;
   if (typeof n === 'number') return ce.chop(n) === 0;
   return n.isZeroWithTolerance(ce.tolerance);
-}
-
-function commonUnknowns(a: BoxedExpression, b: BoxedExpression): string[] {
-  const unknowns = new Set<string>();
-  for (const u of a.unknowns) unknowns.add(u);
-  for (const u of b.unknowns) unknowns.add(u);
-  return Array.from(unknowns);
 }
 
 function sameUnknowns(a: BoxedExpression, b: BoxedExpression): boolean {

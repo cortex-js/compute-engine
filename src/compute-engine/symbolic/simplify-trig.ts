@@ -1,4 +1,8 @@
-import type { BoxedExpression, ComputeEngine, RuleStep } from '../global-types';
+import type {
+  BoxedExpression,
+  IComputeEngine as ComputeEngine,
+  RuleStep,
+} from '../global-types';
 import { add } from '../boxed-expression/arithmetic-add';
 
 /**

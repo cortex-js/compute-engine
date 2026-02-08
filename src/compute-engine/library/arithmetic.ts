@@ -37,7 +37,6 @@ import {
 import { factorial2, gcd, lcm } from '../numerics/numeric';
 import { rationalize } from '../numerics/rationals';
 import { isPrime } from '../boxed-expression/predicates';
-import { fromDigits } from '../numerics/strings';
 
 import {
   canonicalAdd,
@@ -62,7 +61,7 @@ import { range, rangeLast } from './collections';
 import { run, runAsync } from '../../common/interruptible';
 import type {
   BoxedExpression,
-  ComputeEngine,
+  IComputeEngine as ComputeEngine,
   SymbolDefinitions,
   Sign,
 } from '../global-types';

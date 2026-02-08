@@ -172,8 +172,6 @@ export function simplifyProduct(x: BoxedExpression): RuleStep | undefined {
 
   // Double factorial (odd): Product(2n-1, [n, 1, b]) → (2b-1)!!
   if (body.operator === 'Add' && body.ops?.length === 2 && lower.is(1)) {
-    // Check for 2n - 1 pattern
-    const [op1, op2] = body.ops;
     let hasLinearTerm = false;
     let coefficient = 0;
     let constantTerm = 0;

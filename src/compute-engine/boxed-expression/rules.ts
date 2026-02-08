@@ -5,7 +5,7 @@ import type {
   BoxedRule,
   BoxedRuleSet,
   BoxedSubstitution,
-  ComputeEngine,
+  IComputeEngine as ComputeEngine,
   Rule,
   RuleConditionFunction,
   RuleFunction,
@@ -164,10 +164,10 @@ export const CONDITIONS = {
   string: (x: BoxedExpression) => x.string !== null,
   number: (x: BoxedExpression) => x.isNumberLiteral,
   symbol: (x: BoxedExpression) => x.symbol !== null,
-  expression: (x: BoxedExpression) => true,
+  expression: (_x: BoxedExpression) => true,
 
   numeric: (x: BoxedExpression) => {
-    const [c, term] = x.toNumericValue();
+    const [_c, term] = x.toNumericValue();
     return term.is(1);
   },
   integer: (x: BoxedExpression) => x.isInteger,
@@ -388,7 +388,7 @@ function parseRule(
       kind: 'symbol',
       latexTrigger: x,
       // domain: { kind: 'Any' },
-      parse: (parser, until) => {
+      parse: (parser, _until) => {
         if (!wildcards[x]) wildcards[x] = `_${x}`;
         // conditions are `:condition` or `:condition1,condition2,...`
         // or `:\mathrm{condition}`
@@ -420,7 +420,7 @@ function parseRule(
       kind: 'prefix',
       precedence: 100,
       latexTrigger: '...',
-      parse: (parser, until) => {
+      parse: (parser, _until) => {
         const id = parser.nextToken();
         if (!'abcfghjklmnopqrstuvwxyz'.includes(id)) return null;
         let prefix = '__';
@@ -529,8 +529,10 @@ function parseRule(
     );
   }
 
-  let [match, replace, condition] = expr.ops!;
+  const [match_, replace_, condition] = expr.ops!;
 
+  let match = match_;
+  let replace = replace_;
   if (canonical) {
     match = match.canonical;
     replace = replace.canonical;

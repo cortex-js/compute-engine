@@ -1,4 +1,7 @@
-import type { BoxedExpression, ComputeEngine } from '../global-types';
+import type {
+  BoxedExpression,
+  IComputeEngine as ComputeEngine,
+} from '../global-types';
 import { addOrder, order } from './order';
 
 export function canonicalNegate(expr: BoxedExpression): BoxedExpression {

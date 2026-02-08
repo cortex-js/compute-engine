@@ -618,7 +618,7 @@ export const DEFINITIONS_CORE: LatexDictionary = [
   {
     kind: 'postfix',
     latexTrigger: ['_'],
-    parse: (parser: Parser, lhs: Expression, until?: Readonly<Terminator>) => {
+    parse: (parser: Parser, lhs: Expression, _until?: Readonly<Terminator>) => {
       // @fixme: should check that the lhs is a collection. If not a collection,
       // return null (or interpret as a symbol).
 

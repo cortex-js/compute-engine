@@ -82,8 +82,6 @@ function tryIntegrationByParts(
 ): BoxedExpression | null {
   if (factors.length < 2 || depth > 2) return null; // Limit recursion depth
 
-  const ce = factors[0].engine;
-
   // Sort factors by LIATE priority (descending)
   const sorted = [...factors].sort(
     (a, b) => liatePriority(b, index) - liatePriority(a, index)
@@ -1807,7 +1805,7 @@ export function antiderivative(
     if (fn.op1.is(1) || !fn.op1.has(index)) {
       const linearCoeffs = getLinearCoefficients(fn.op2, index);
       if (linearCoeffs) {
-        const { a, b } = linearCoeffs;
+        const { a, b: _b } = linearCoeffs;
         // ∫ 1/(ax+b) dx = (1/a) * ln|ax+b|
         const lnExpr = ce.box(['Ln', ['Abs', fn.op2]]);
         if (a.is(1)) {

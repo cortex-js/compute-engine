@@ -1,4 +1,4 @@
-import { ansiFgColor, ansiBgColor, BOLD, BOLD_OFF, DIM } from './ansi-codes';
+import { ansiFgColor, ansiBgColor } from './ansi-codes';
 import { StyledBlock, StyledSpan } from './styled-text';
 
 type TerminalCapabilities = 'none' | 'basic' | '256' | 'full' | 'css';
@@ -229,7 +229,7 @@ class ColorTerminal extends Terminal {
 }
 
 /* @todo: Implement HTML terminal */
-class HtmlTerminal extends Terminal {
+class _HtmlTerminal extends Terminal {
   renderSpan(span: StyledSpan): string {
     let content =
       typeof span.content === 'string'
@@ -247,7 +247,7 @@ class HtmlTerminal extends Terminal {
   // display(s: TaggedText[]): void {}
 }
 
-function consoleSupportsStyles() {
+function _consoleSupportsStyles() {
   if (typeof window === 'undefined' || typeof console === 'undefined') {
     return false; // Likely non-browser environment (e.g., Node.js)
   }
@@ -255,6 +255,7 @@ function consoleSupportsStyles() {
   // Chrome or Chromium-based browsers
   const isChrome = 'chrome' in window;
 
+  /* eslint-disable no-restricted-globals */
   // Firefox
   const isFirefox =
     navigator.userAgent.toLowerCase().includes('firefox') &&
@@ -263,6 +264,7 @@ function consoleSupportsStyles() {
     );
   // Safari
   const isSafari = /^Apple/.test(navigator.vendor);
+  /* eslint-enable no-restricted-globals */
 
   // If any of these are true, we can assume console styling is supported
   return isChrome || isFirefox || isSafari;
@@ -345,6 +347,7 @@ export const wrapAnsiString = (
 function terminalColorSupport(): TerminalCapabilities {
   if (typeof process === 'undefined') {
     if (globalThis.navigator['userAgentData']) {
+      // eslint-disable-next-line no-restricted-globals
       const brand = navigator['userAgentData'].brands.find(
         ({ brand }) => brand === 'Chromium'
       );

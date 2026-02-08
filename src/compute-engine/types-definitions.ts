@@ -1,5 +1,5 @@
 import type { OneOf } from '../common/one-of';
-import type { Type, TypeString, TypeReference } from '../common/type/types';
+import type { Type, TypeString } from '../common/type/types';
 import type { BoxedType } from '../common/type/boxed-type';
 import type { LatexString, LatexDictionaryEntry } from './latex-syntax/types';
 import type {
@@ -7,7 +7,6 @@ import type {
   SemiBoxedExpression,
   CompiledExpression,
 } from './types-expression';
-import type { CanonicalOptions } from './types-serialization';
 import type {
   EvaluateOptions,
   BoxedRule,
@@ -15,7 +14,7 @@ import type {
   Rule,
   Scope,
 } from './types-evaluation';
-import type { ComputeEngine } from './types-engine';
+import type { IComputeEngine as ComputeEngine } from './types-engine';
 
 /**
  * A bound symbol (i.e. one with an associated definition) has either a type

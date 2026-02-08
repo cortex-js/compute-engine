@@ -8,7 +8,7 @@ import type {
   CollectionHandlers,
   CompiledExpression,
   EvaluateOptions,
-  ComputeEngine,
+  IComputeEngine as ComputeEngine,
   Scope,
   Sign,
 } from '../global-types';

@@ -1,4 +1,4 @@
-import { factor, factorPolynomial, together } from '../boxed-expression/factor';
+import { factorPolynomial, together } from '../boxed-expression/factor';
 import { distribute } from '../symbolic/distribute';
 import { expand, expandAll } from '../boxed-expression/expand';
 import {

@@ -24,7 +24,7 @@ import { ExactNumericValue } from '../numeric-value/exact-numeric-value';
 import { order } from './order';
 import { asSmallInteger } from './numerics';
 import type {
-  ComputeEngine,
+  IComputeEngine as ComputeEngine,
   Metadata,
   BoxedExpression,
   JsonSerializationOptions,

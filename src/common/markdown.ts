@@ -1,6 +1,3 @@
-import { TaggedText } from './markdown-types';
-import { StyledBlock, StyledSpan } from './styled-text';
-
 /** A basic renderer that doesn't use any styling. Styles are represented
  * using Markdown syntax instead.
  */
@@ -160,7 +157,7 @@ import { StyledBlock, StyledSpan } from './styled-text';
 //   return renderer.renderSpan();
 // }
 
-const TEST_TEXT = `# Markdown: Syntax
+const _TEST_TEXT = `# Markdown: Syntax
 
 *   [Overview](#overview)
     *   [Philosophy](#philosophy)

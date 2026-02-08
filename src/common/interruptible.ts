@@ -28,13 +28,16 @@ export async function runAsync<T>(
   timeLimitMs: number,
   signal?: AbortSignal
 ): Promise<T> {
+  // eslint-disable-next-line no-restricted-globals
   const startTime = performance.now();
 
   while (true) {
+    // eslint-disable-next-line no-restricted-globals
     const chunkStart = performance.now();
     const chunkDurationMs = 16; // Maximum chunk duration in milliseconds
 
     // Process a chunk of iterations
+    // eslint-disable-next-line no-restricted-globals
     while (performance.now() - chunkStart < chunkDurationMs) {
       const { done, value } = gen.next();
 
@@ -45,6 +48,7 @@ export async function runAsync<T>(
         throw new CancellationError({ value, cause: (signal as any).reason });
 
       // Check overall time limit
+      // eslint-disable-next-line no-restricted-globals
       if (performance.now() - startTime >= timeLimitMs)
         throw new CancellationError({
           value,

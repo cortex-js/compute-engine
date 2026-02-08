@@ -5,7 +5,6 @@ import {
   operator,
   getSequence,
   dictionaryFromExpression,
-  stringValue,
   machineValue,
   operands,
   isEmptySequence,
@@ -434,11 +433,11 @@ export const DEFINITIONS_OTHERS: LatexDictionary = [
   },
   {
     latexTrigger: ['\\strut'],
-    parse: (parser) => 'Nothing',
+    parse: (_parser) => 'Nothing',
   },
   {
     latexTrigger: ['\\mathstrut'],
-    parse: (parser) => 'Nothing',
+    parse: (_parser) => 'Nothing',
   },
   {
     name: 'HorizontalSpacing',

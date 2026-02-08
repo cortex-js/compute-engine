@@ -2,7 +2,7 @@ import type {
   BoxedExpression,
   PatternMatchOptions,
   BoxedSubstitution,
-  ComputeEngine,
+  IComputeEngine as ComputeEngine,
   Metadata,
   DictionaryInterface,
   JsonSerializationOptions,
@@ -40,7 +40,7 @@ export class BoxedDictionary
     super(ce, options?.metadata);
 
     if (keyValues instanceof _BoxedExpression) {
-      this._initFromExpression(keyValues, options);
+      this._initFromExpression(keyValues);
     } else {
       this._initFromRecord(
         keyValues as Record<string, DictionaryValue>,
@@ -69,10 +69,7 @@ export class BoxedDictionary
     }
   }
 
-  private _initFromExpression(
-    dictionary: BoxedExpression,
-    options?: { canonical?: boolean }
-  ) {
+  private _initFromExpression(dictionary: BoxedExpression) {
     // Return early if already a BoxedDictionary
     if (dictionary instanceof BoxedDictionary) {
       Object.assign(this._keyValues, dictionary._keyValues);

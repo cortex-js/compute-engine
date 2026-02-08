@@ -45,13 +45,11 @@ export type {
 } from './indexed-types';
 
 import type {
-  CommonEntry,
   IndexedSymbolEntry,
   IndexedExpressionEntry,
   IndexedFunctionEntry,
   IndexedMatchfixEntry,
   IndexedInfixEntry,
-  IndexedPrefixEntry,
   IndexedPostfixEntry,
   IndexedEnvironmentEntry,
   IndexedLatexDictionaryEntry,

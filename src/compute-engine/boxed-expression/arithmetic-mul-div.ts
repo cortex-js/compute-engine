@@ -1,6 +1,9 @@
 import { isSubtype } from '../../common/type/subtype';
 
-import type { BoxedExpression, ComputeEngine } from '../global-types';
+import type {
+  BoxedExpression,
+  IComputeEngine as ComputeEngine,
+} from '../global-types';
 import { NumericValue } from '../numeric-value/types';
 import { ExactNumericValue } from '../numeric-value/exact-numeric-value';
 import type { Rational } from '../numerics/types';
@@ -496,31 +499,6 @@ function degreeKey(exponent: Rational): number {
   if (n > 0) return 2;
   if (Number.isInteger(n / d)) return 3;
   return 4;
-}
-
-function degreeOrder(
-  a: {
-    exponent: Rational;
-    terms: BoxedExpression[];
-  },
-  b: {
-    exponent: Rational;
-    terms: BoxedExpression[];
-  }
-): number {
-  const keyA = degreeKey(a.exponent);
-  const keyB = degreeKey(b.exponent);
-  if (keyA !== keyB) return keyA - keyB;
-
-  const [a_n, a_d] = [
-    machineNumerator(a.exponent),
-    machineDenominator(a.exponent),
-  ];
-  const [b_n, b_d] = [
-    machineNumerator(b.exponent),
-    machineDenominator(b.exponent),
-  ];
-  return a_n / a_d - b_n / b_d;
 }
 
 function termsAsExpression(

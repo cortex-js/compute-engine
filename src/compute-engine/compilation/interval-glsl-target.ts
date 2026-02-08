@@ -11,7 +11,6 @@
  */
 
 import type { BoxedExpression } from '../global-types';
-import type { MathJsonSymbol } from '../../math-json/types';
 
 import { BaseCompiler } from './base-compiler';
 import type {
@@ -1307,7 +1306,7 @@ export class IntervalGLSLTarget implements LanguageTarget {
   /**
    * Compile an expression to GLSL interval code.
    */
-  compile(expr: BoxedExpression, options: CompilationOptions = {}): string {
+  compile(expr: BoxedExpression, _options: CompilationOptions = {}): string {
     const target = this.createTarget();
     return BaseCompiler.compile(expr, target);
   }

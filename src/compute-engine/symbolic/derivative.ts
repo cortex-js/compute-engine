@@ -2,7 +2,6 @@ import { apply } from '../function-utils';
 import { mul } from '../boxed-expression/arithmetic-mul-div';
 import type { BoxedExpression } from '../global-types';
 import { add } from '../boxed-expression/arithmetic-add';
-import { hasSymbolicTranscendental } from '../boxed-expression/utils';
 
 /**
  * Maximum recursion depth for differentiation.

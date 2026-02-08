@@ -17,7 +17,7 @@ import type {
   ReplaceOptions,
   BoxedValueDefinition,
   BoxedOperatorDefinition,
-  ComputeEngine,
+  IComputeEngine as ComputeEngine,
   Metadata,
   CanonicalOptions,
   BoxedBaseDefinition,
@@ -454,9 +454,9 @@ export class BoxedSymbol extends _BoxedExpression {
     //
     if (v?.type.matches('function')) {
       // New operator definitions always completely replace an existing one
-      // @ts-expect-error
+      // @ts-expect-error - value may not exist on all def types
       delete this._def.value;
-      // @ts-expect-error
+      // @ts-expect-error - adding operator to def that may not have it
       this._def.operator = {
         signature: v.type,
         evaluate: v, // Evaluate as a lambda
@@ -507,7 +507,7 @@ export class BoxedSymbol extends _BoxedExpression {
     if (t === 'function' || isSignatureType(t)) {
       if (isOperatorDef(this._def)) {
         // We are changing the signature of a function
-        // @ts-expect-error
+        // @ts-expect-error - signature is readonly but we need to update it
         this._def.operator.signature = t;
       } else {
         // We are changing a symbol to a function

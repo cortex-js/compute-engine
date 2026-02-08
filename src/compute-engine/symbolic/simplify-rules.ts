@@ -93,12 +93,6 @@ import { simplifyDivide } from './simplify-divide';
  * expressions and improve performance for common constant replacements.
  */
 
-// Helper functions for common rule replacements
-// These avoid parsing LaTeX strings and improve initialization performance
-const toZero = (expr: BoxedExpression) => expr.engine.Zero;
-const toOne = (expr: BoxedExpression) => expr.engine.One;
-const toNegativeOne = (expr: BoxedExpression) => expr.engine.NegativeOne;
-
 /**
  * A set of simplification rules.
  *

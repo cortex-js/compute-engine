@@ -8,7 +8,6 @@
  */
 
 import type { BoxedExpression } from '../global-types';
-import type { MathJsonSymbol } from '../../math-json/types';
 
 import { BaseCompiler } from './base-compiler';
 import type {
@@ -20,7 +19,6 @@ import type {
   CompiledExecutable,
 } from './types';
 import { IntervalArithmetic } from '../interval';
-import type { Interval, IntervalResult } from '../interval';
 
 /**
  * Interval arithmetic operators mapped to _IA library calls.

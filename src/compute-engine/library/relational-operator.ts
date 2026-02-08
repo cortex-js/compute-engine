@@ -2,7 +2,7 @@ import type {
   BoxedExpression,
   OperatorDefinition,
   SymbolDefinitions,
-  ComputeEngine,
+  IComputeEngine as ComputeEngine,
 } from '../global-types';
 
 import { isRelationalOperator } from '../latex-syntax/utils';

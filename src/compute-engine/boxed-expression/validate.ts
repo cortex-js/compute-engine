@@ -3,7 +3,11 @@ import { isFiniteIndexedCollection } from '../collection-utils';
 import { flatten } from './flatten';
 import { isSubtype } from '../../common/type/subtype';
 import { Type } from '../../common/type/types';
-import type { BoxedExpression, ComputeEngine, Scope } from '../global-types';
+import type {
+  BoxedExpression,
+  IComputeEngine as ComputeEngine,
+  Scope,
+} from '../global-types';
 import { fuzzyStringMatch } from '../../common/fuzzy-string-match';
 import { isOperatorDef, isValueDef } from './utils';
 import { isBoxedTensor } from './boxed-tensor';

@@ -771,7 +771,7 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
       lazy: true,
       signature:
         '(match: expression, replace: expression, predicate: function?) -> expression',
-      evaluate: ([match, replace, predicate], { engine: ce }) => {
+      evaluate: ([_match, _replace, _predicate], { engine: _ce }) => {
         return undefined;
       },
     },

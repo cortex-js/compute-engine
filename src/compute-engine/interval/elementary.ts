@@ -5,14 +5,7 @@
  */
 
 import type { Interval, IntervalResult } from './types';
-import {
-  ok,
-  containsZero,
-  isNegative,
-  isNonNegative,
-  isPositive,
-  unwrapOrPropagate,
-} from './util';
+import { ok, containsZero, isNegative, unwrapOrPropagate } from './util';
 import { sub, mul, div } from './arithmetic';
 
 /**

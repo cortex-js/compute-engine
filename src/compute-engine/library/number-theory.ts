@@ -1,7 +1,7 @@
 import type { SymbolDefinitions } from '../global-types';
 import { toBigint } from '../boxed-expression/numerics';
 import { gcd } from '../numerics/numeric-bigint';
-import Decimal from 'decimal.js';
+import { Decimal } from 'decimal.js';
 
 export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
   {

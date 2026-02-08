@@ -144,7 +144,7 @@ export class Result<T> {
    * ```
    * From Rust.
    */
-  inspect<U>(fn: (value: T) => void): Result<T> {
+  inspect<_U>(fn: (value: T) => void): Result<T> {
     if (this.ok) fn(this.value as T);
     return this;
   }

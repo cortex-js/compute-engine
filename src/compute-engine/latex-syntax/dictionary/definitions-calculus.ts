@@ -8,7 +8,6 @@ import {
   symbol,
 } from '../../../math-json/utils';
 import { LatexDictionary, Parser, Serializer } from '../types';
-import { joinLatex } from '../tokenizer';
 
 // See https://de.wikipedia.org/wiki/Formelsatz
 // for a discussion of typographical notation in Germany, Russia and France

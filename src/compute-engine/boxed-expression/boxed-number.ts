@@ -37,7 +37,7 @@ import type {
   BoxedSubstitution,
   CanonicalOptions,
   EvaluateOptions,
-  ComputeEngine,
+  IComputeEngine as ComputeEngine,
   Metadata,
   Rule,
   Sign,

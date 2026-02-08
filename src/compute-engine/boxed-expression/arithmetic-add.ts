@@ -6,7 +6,10 @@ import { Type } from '../../common/type/types';
 import { widen } from '../../common/type/utils';
 import { isSubtype } from '../../common/type/subtype';
 import { BoxedType } from '../../common/type/boxed-type';
-import type { BoxedExpression, ComputeEngine } from '../global-types';
+import type {
+  BoxedExpression,
+  IComputeEngine as ComputeEngine,
+} from '../global-types';
 import { isBoxedTensor } from './boxed-tensor';
 
 import { MACHINE_PRECISION } from '../numerics/numeric';

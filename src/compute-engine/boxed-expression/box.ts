@@ -4,7 +4,7 @@ import type {
   SemiBoxedExpression,
   BoxedExpression,
   CanonicalOptions,
-  ComputeEngine,
+  IComputeEngine as ComputeEngine,
   Metadata,
   Scope,
 } from '../global-types';

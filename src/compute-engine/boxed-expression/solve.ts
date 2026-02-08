@@ -4,7 +4,7 @@ import { expand } from './expand';
 import type {
   BoxedExpression,
   BoxedSubstitution,
-  ComputeEngine,
+  IComputeEngine as ComputeEngine,
   Rule,
 } from '../global-types';
 
@@ -604,7 +604,7 @@ export const UNIVARIATE_ROOTS: Rule[] = [
  */
 function clearDenominators(
   expr: BoxedExpression,
-  variable?: string
+  _variable?: string
 ): BoxedExpression {
   if (expr.operator !== 'Add') return expr;
 
@@ -987,15 +987,15 @@ function solveNestedSqrtEquation(
 
   // Check if the outer sqrt argument contains an inner √x (Sqrt of just the variable)
   // Pattern: √(... + √x + ...) or √(... + a*√x + ...)
+  // Note: we only need to detect the presence of √x — the coefficient is handled
+  // implicitly by the replace+subs substitution below.
   let hasInnerSqrtX = false;
-  let innerSqrtCoeff: BoxedExpression | null = null;
 
   if (outerArg.operator === 'Add' && outerArg.ops) {
     for (const term of outerArg.ops) {
       // Check for √x directly
       if (term.operator === 'Sqrt' && term.op1?.symbol === variable) {
         hasInnerSqrtX = true;
-        innerSqrtCoeff = ce.One;
         break;
       }
       // Check for Negate(Sqrt(x))
@@ -1005,24 +1005,18 @@ function solveNestedSqrtEquation(
         term.op1?.op1?.symbol === variable
       ) {
         hasInnerSqrtX = true;
-        innerSqrtCoeff = ce.NegativeOne;
         break;
       }
       // Check for coefficient * √x
       if (term.operator === 'Multiply' && term.ops) {
-        for (const factor of term.ops) {
-          if (factor.operator === 'Sqrt' && factor.op1?.symbol === variable) {
-            hasInnerSqrtX = true;
-            // Get coefficient (product of other factors)
-            const otherFactors = term.ops.filter((f) => f !== factor);
-            innerSqrtCoeff =
-              otherFactors.length === 1
-                ? otherFactors[0]
-                : ce.function('Multiply', otherFactors);
-            break;
-          }
+        if (
+          term.ops.some(
+            (f) => f.operator === 'Sqrt' && f.op1?.symbol === variable
+          )
+        ) {
+          hasInnerSqrtX = true;
+          break;
         }
-        if (hasInnerSqrtX) break;
       }
     }
   }

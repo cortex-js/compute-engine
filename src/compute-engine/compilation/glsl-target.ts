@@ -1,5 +1,4 @@
 import type { BoxedExpression } from '../global-types';
-import type { MathJsonSymbol } from '../../math-json/types';
 
 import type {
   CompileTarget,
@@ -8,7 +7,6 @@ import type {
   LanguageTarget,
   CompilationOptions,
   CompiledExecutable,
-  TargetSource,
 } from './types';
 
 /**
@@ -332,7 +330,7 @@ export class GLSLTarget implements LanguageTarget {
    *
    * Returns the GLSL code as a string.
    */
-  compile(expr: BoxedExpression, options: CompilationOptions = {}): string {
+  compile(expr: BoxedExpression, _options: CompilationOptions = {}): string {
     // Dynamic import to avoid circular dependency
     const { BaseCompiler } = require('./base-compiler');
     const target = this.createTarget();

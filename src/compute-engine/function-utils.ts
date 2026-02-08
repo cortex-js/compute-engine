@@ -3,7 +3,7 @@ import { cmp } from './boxed-expression/compare';
 import type {
   BoxedDefinition,
   BoxedExpression,
-  ComputeEngine,
+  IComputeEngine as ComputeEngine,
   Scope,
 } from './global-types';
 
@@ -234,44 +234,6 @@ export function canonicalFunctionLiteralArguments(
     }
   }
   return ce._fn('Function', [block, ...params]);
-}
-
-/**
- * Given a function literal (including possibly a shorthand function
- * literal), return the body and the parameters.
- *
- */
-function splitFunctionLiteral(
-  body: BoxedExpression
-): [body: BoxedExpression, ...params: BoxedExpression[]] {
-  //
-  // 2/ This is a shorthand function literal, e.g. `["Add", "_", 1]`
-  // We need to extract the wildcards from the body. The wildcards can
-  // be `_`, `_1`, `_2`, etc.
-
-  // Replace '_' with '_1'
-  body = body.subs({ _: '_1' });
-
-  let i = 1;
-  const params: BoxedExpression[] = [];
-  while (i < 10) {
-    if (body.has(`_${i}`))
-      params.push(body.engine.symbol(`_${i}`, { canonical: false }));
-
-    i++;
-  }
-
-  return [body, ...params];
-}
-
-/**
- *
- * @param f
- * @returns
- */
-function evaluateFunctionLiteral(f: BoxedExpression): BoxedExpression {
-  console.assert(f.isCanonical);
-  return f;
 }
 
 /**

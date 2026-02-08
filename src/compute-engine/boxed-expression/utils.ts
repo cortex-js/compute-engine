@@ -2,7 +2,7 @@ import type {
   BoxedExpression,
   OperatorDefinition,
   ValueDefinition,
-  ComputeEngine,
+  IComputeEngine as ComputeEngine,
   BoxedDefinition,
   TaggedValueDefinition,
   TaggedOperatorDefinition,

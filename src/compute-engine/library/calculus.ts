@@ -143,7 +143,7 @@ volumes
 
         return ce._fn('D', [f, ...ops!.slice(1)], { scope });
       },
-      evaluate: (ops, { engine }) => {
+      evaluate: (ops, { engine: _engine }) => {
         let f: BoxedExpression | undefined = ops[0].canonical;
         f = f.evaluate();
         const params = ops.slice(1);

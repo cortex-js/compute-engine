@@ -539,6 +539,7 @@ function compileIntegrate(args, _, target: CompileTarget): string {
 /**
  * Check if function has a true name (not anonymous)
  */
+// eslint-disable-next-line @typescript-eslint/ban-types
 function isTrulyNamed(func: Function): boolean {
   const source = func.toString();
   if (source.includes('=>')) return false;

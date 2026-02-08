@@ -1,7 +1,7 @@
 import type { Expression } from '../../math-json/types';
 
 import type {
-  ComputeEngine,
+  IComputeEngine as ComputeEngine,
   TensorDataType,
   Metadata,
   BoxedBaseDefinition,
@@ -16,7 +16,6 @@ import type {
   Tensor,
 } from '../global-types';
 
-import { parseType } from '../../common/type/parse';
 import { BoxedType } from '../../common/type/boxed-type';
 
 import {

@@ -1,6 +1,9 @@
 import { flatten } from './flatten';
 import { isImaginaryUnit, isOperatorDef } from './utils';
-import type { BoxedExpression, ComputeEngine } from '../global-types';
+import type {
+  BoxedExpression,
+  IComputeEngine as ComputeEngine,
+} from '../global-types';
 
 export function canonicalInvisibleOperator(
   ops: ReadonlyArray<BoxedExpression>,

@@ -1,4 +1,7 @@
-import type { BoxedExpression, ComputeEngine } from '../global-types';
+import type {
+  BoxedExpression,
+  IComputeEngine as ComputeEngine,
+} from '../global-types';
 import { isOperatorDef } from '../boxed-expression/utils';
 import { isFiniteIndexedCollection } from '../collection-utils';
 import { isRelationalOperator } from '../latex-syntax/utils';
@@ -235,7 +238,12 @@ export class BaseCompiler {
     if (args === null) throw new Error('Sum/Product: no arguments');
     if (!args[0]) throw new Error('Sum/Product: no body');
 
-    const { index, lower, upper, isFinite } = normalizeIndexingSet(args[1]);
+    const {
+      index,
+      lower,
+      upper,
+      isFinite: _isFinite,
+    } = normalizeIndexingSet(args[1]);
     const op = h === 'Sum' ? '+' : '*';
 
     if (!index) {

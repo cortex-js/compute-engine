@@ -1,4 +1,4 @@
-import type { ComputeEngine } from '../global-types';
+import type { IComputeEngine as ComputeEngine } from '../global-types';
 import type { BigNum } from './types';
 
 const gammaG = 7;

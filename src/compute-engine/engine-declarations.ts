@@ -1,4 +1,4 @@
-import type { Type, TypeString, TypeResolver } from '../common/type/types';
+import type { Type, TypeString } from '../common/type/types';
 import { isValidType, isValidTypeName, widen } from '../common/type/utils';
 import { parseType } from '../common/type/parse';
 import { BoxedType } from '../common/type/boxed-type';
@@ -13,7 +13,7 @@ import type {
   BoxedExpression,
   BoxedDefinition,
   SymbolDefinition,
-  ComputeEngine as IComputeEngine,
+  IComputeEngine,
   Scope,
 } from './global-types';
 

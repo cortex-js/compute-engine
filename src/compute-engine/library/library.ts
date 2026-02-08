@@ -36,7 +36,7 @@ import { isValidSymbol, validateSymbol } from '../../math-json/symbols';
 import { isValidOperatorDef, isValidValueDef } from '../boxed-expression/utils';
 import type {
   SymbolDefinitions,
-  ComputeEngine,
+  IComputeEngine as ComputeEngine,
   LibraryDefinition,
 } from '../global-types';
 import { _BoxedOperatorDefinition } from '../boxed-expression/boxed-operator-definition';

@@ -1,5 +1,7 @@
-import type { BoxedExpression, ComputeEngine } from '../global-types';
-import { asSmallInteger } from '../boxed-expression/numerics';
+import type {
+  BoxedExpression,
+  IComputeEngine as ComputeEngine,
+} from '../global-types';
 
 /**
  * Basic evaluation functions for logical operators.

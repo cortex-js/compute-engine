@@ -366,16 +366,6 @@ export class Result<IR = any> {
   }
 }
 
-function skipUntil(parser: Parser, value: number): number {
-  let i = parser.offset;
-  while (i < parser.length) {
-    const c = parser.get(i);
-    if (c === value) return i;
-    i += codePointLength(c);
-  }
-  return -1;
-}
-
 export function skipUntilString(parser: Parser, pattern: string): number {
   let i = parser.offset;
   const cps = [...pattern].map((x) => x.codePointAt(0));

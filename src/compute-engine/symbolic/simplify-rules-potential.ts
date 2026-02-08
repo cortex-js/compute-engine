@@ -26,12 +26,7 @@
  * (e.g., ['Power', '_x', '_n']) when activating.
  */
 
-import type { BoxedExpression, Rule } from '../global-types';
-
-// Helper functions referenced by rules below
-const toNaN = (expr: BoxedExpression) => expr.engine.NaN;
-const toZero = (expr: BoxedExpression) => expr.engine.Zero;
-const toOne = (expr: BoxedExpression) => expr.engine.One;
+import type { Rule } from '../global-types';
 
 /**
  * Potential rules that are NOT currently active.

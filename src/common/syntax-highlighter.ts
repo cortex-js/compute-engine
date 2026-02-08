@@ -419,7 +419,8 @@ export function highlightCodeBlock(
 
 export function mark(line: StyledSpan[], mark: string): StyledSpan[] {
   // Mark is of the form "1-3" and indicates a range of characters to mark
-  let [start, end] = mark.split('-').map((x) => parseInt(x));
+  const [start, end_] = mark.split('-').map((x) => parseInt(x));
+  let end = end_;
   if (end === undefined) end = start + 1;
   if (start >= end) end = start + 1;
 

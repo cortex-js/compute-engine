@@ -8,7 +8,11 @@ import { apply } from './apply'; // @fixme
 
 import { canonicalAngle } from './utils';
 
-import type { BoxedExpression, ComputeEngine, Sign } from '../global-types';
+import type {
+  BoxedExpression,
+  IComputeEngine as ComputeEngine,
+  Sign,
+} from '../global-types';
 import { asLatexString } from '../latex-syntax/utils';
 
 type ConstructibleTrigValues = [
@@ -567,7 +571,7 @@ function constructibleValuesInverse(
     },
 
     (cache: ConstructibleTrigValuesInverse) => {
-      for (const [[match_arg, match_arg_N], [n, d]] of cache) {
+      for (const [[match_arg, _match_arg_N], [_n, _d]] of cache) {
         match_arg.reset();
       }
       return cache;
@@ -584,7 +588,7 @@ function constructibleValuesInverse(
     x = x.neg();
   }
 
-  for (const [[match_arg, match_arg_N], [n, d]] of specialInverseValues) {
+  for (const [[_match_arg, match_arg_N], [n, d]] of specialInverseValues) {
     if (ce.chop(x_N - match_arg_N) === 0) {
       // there is an implicit Pi in the numerator
       let theta = ce.Pi.mul(n).div(d);

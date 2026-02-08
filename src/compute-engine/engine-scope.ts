@@ -14,7 +14,7 @@ import type { MathJsonSymbol } from '../math-json/types';
 import type {
   BoxedExpression,
   BoxedDefinition,
-  ComputeEngine as IComputeEngine,
+  IComputeEngine,
   Scope,
   EvalContext,
 } from './global-types';

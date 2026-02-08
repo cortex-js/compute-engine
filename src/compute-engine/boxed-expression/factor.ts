@@ -5,12 +5,7 @@ import { NumericValue } from '../numeric-value/types';
 
 import { Product, commonTerms, mul } from './arithmetic-mul-div';
 import { add } from './arithmetic-add';
-import {
-  polynomialDegree,
-  getPolynomialCoefficients,
-  fromCoefficients,
-} from './polynomials';
-import { asSmallInteger } from './numerics';
+import { polynomialDegree, getPolynomialCoefficients } from './polynomials';
 
 /** Combine rational expressions into a single fraction */
 export function together(op: BoxedExpression): BoxedExpression {

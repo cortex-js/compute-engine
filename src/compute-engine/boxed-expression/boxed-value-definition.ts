@@ -4,7 +4,7 @@ import type {
   ValueDefinition,
   BoxedValueDefinition,
   CollectionHandlers,
-  ComputeEngine,
+  IComputeEngine as ComputeEngine,
 } from '../global-types';
 
 import type { Type, TypeString } from '../../common/type/types';

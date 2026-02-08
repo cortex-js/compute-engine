@@ -42,8 +42,6 @@ export function compile(
 ): ((...args: any[]) => any) & { isCompiled?: boolean } {
   try {
     // Determine the target to use
-    let languageTarget;
-
     if (options?.target) {
       // Direct target override - use BaseCompiler
       const code = BaseCompiler.compile(expr, options.target);
@@ -60,8 +58,8 @@ export function compile(
     const targetName = options?.to ?? 'javascript';
 
     // Look up the target in the registry
-    // @ts-ignore - accessing internal property
-    languageTarget = expr.engine._getCompilationTarget(targetName);
+    // @ts-expect-error - accessing internal property
+    const languageTarget = expr.engine._getCompilationTarget(targetName);
 
     if (!languageTarget) {
       throw new Error(

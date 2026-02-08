@@ -1,6 +1,6 @@
 import type {
   BoxedExpression,
-  ComputeEngine as IComputeEngine,
+  IComputeEngine,
   SequenceDefinition,
   SequenceStatus,
   SequenceInfo,

@@ -38,7 +38,7 @@ import {
   applyTRpythagorean,
 } from './fu-transforms';
 
-import { trigCost, TrigCostFunction, DEFAULT_TRIG_COST } from './fu-cost';
+import { TrigCostFunction, DEFAULT_TRIG_COST } from './fu-cost';
 
 export interface FuOptions {
   /**
@@ -172,7 +172,7 @@ function CTR4(
  */
 function RL1(
   expr: BoxedExpression,
-  measure: TrigCostFunction
+  _measure: TrigCostFunction
 ): BoxedExpression {
   // Apply TR12 (tan addition) then TR13 (tan products)
   let result = applyTR12(expr);

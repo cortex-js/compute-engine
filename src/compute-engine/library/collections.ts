@@ -6,10 +6,7 @@ import {
 } from '../boxed-expression/validate';
 import { toInteger } from '../boxed-expression/numerics';
 
-import {
-  basicIndexedCollectionHandlers,
-  isFiniteIndexedCollection,
-} from '../collection-utils';
+import { basicIndexedCollectionHandlers } from '../collection-utils';
 import { applicable, canonicalFunctionLiteral } from '../function-utils';
 // Dynamic import for compile to avoid circular dependency
 // (collections → compile-expression → base-compiler → library/utils → collections)
@@ -21,12 +18,10 @@ import {
   widen,
 } from '../../common/type/utils';
 import { interval } from '../numerics/interval';
-import { Expression } from '../../math-json';
 import { CancellationError } from '../../common/interruptible';
 import type {
   BoxedExpression,
   OperatorDefinition,
-  ComputeEngine,
   SymbolDefinitions,
 } from '../global-types';
 import { BoxedType } from '../types';
@@ -71,7 +66,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     complexity: 8200,
 
     signature: '(any*) -> list',
-    type: (ops, { engine: ce }) =>
+    type: (ops, { engine: _ce }) =>
       parseType(`list<${BoxedType.widen(...ops.map((op) => op.type))}>`),
     canonical: canonicalList,
     lazy: true,
@@ -92,7 +87,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     complexity: 8200,
 
     signature: '(any*) -> set',
-    type: (ops, { engine: ce }) =>
+    type: (ops, { engine: _ce }) =>
       parseType(`set<${BoxedType.widen(...ops.map((op) => op.type))}>`),
 
     canonical: canonicalSet,
@@ -120,7 +115,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     eq: defaultCollectionEq,
     collection: {
       ...basicIndexedCollectionHandlers(),
-      keys: (expr) => {
+      keys: (_expr) => {
         return ['first', 'second', 'last'];
       },
     },
@@ -130,7 +125,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     description: 'A key/value pair',
     complexity: 8200,
     signature: '(key: string, value: any) -> tuple<string, unknown>',
-    type: ([key, value]) => parseType(`tuple<string, ${value.type}>`),
+    type: ([_key, value]) => parseType(`tuple<string, ${value.type}>`),
 
     canonical: (args, { engine }) => {
       const [key, value] = checkTypes(engine, args, ['string', 'any']);
@@ -1465,7 +1460,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       'Return a tuple with the unique elements of the collection and their respective counts.',
     complexity: 8200,
     signature: '(collection) -> tuple<list, list<integer>>',
-    type: ([xs], { engine: ce }) => {
+    type: ([xs], { engine: _ce }) => {
       const t = xs.type.type;
       if (t === 'string')
         return parseType(`tuple<list<string>, list<integer>>`);
@@ -1696,11 +1691,11 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     collection: {
       isLazy: (_expr) => true,
       count: () => Infinity,
-      isEmpty: (expr) => false, // Never empty
+      isEmpty: (_expr) => false, // Never empty
       isFinite: () => false, // Infinite collection
       contains: (expr, target) => expr.op1.isSame(target),
       iterator: (expr) => ({ next: () => ({ value: expr.op1, done: false }) }),
-      at: (expr, index) => expr.op1,
+      at: (expr, _index) => expr.op1,
     },
   },
 
@@ -1988,7 +1983,7 @@ export function rangeLast(
  * the last element, -2 the one before that, etc...
  *
  */
-function indexRangeArg(
+function _indexRangeArg(
   op: BoxedExpression | undefined,
   l: number
 ): [lower: number, upper: number, step: number] {
@@ -2020,54 +2015,6 @@ function indexRangeArg(
   if (lower > upper) step = -step;
 
   return [lower, upper, step];
-}
-
-// function xslice(
-//   expr: BoxedExpression,
-//   s: [first: number, last: number, step: number]
-// ): BoxedExpression {
-//   const ce = expr.engine;
-
-//   const str = expr.string;
-
-//   if (str !== null) return ce.string(sliceString(str, slice(s, str.length)));
-
-//   const [first, last, step] = slice(s, length(expr));
-
-//   return ce.function('List', arrayFrom(expr, first, last, step));
-// }
-
-function sliceString(
-  s: string,
-  slice: [first: number, last: number, step: number]
-): string {
-  let s2 = '';
-  const [first, last, step] = slice;
-  if (step === 1) return s!.slice(first - 1, last);
-
-  if (step < 0) for (let i = first; i >= last; i += step) s2 += s[i - 1];
-  else for (let i = first; i <= last; i += step) s2 += s[i - 1];
-  return s2;
-}
-
-/** Return an array of the indexes described by an array of ranges */
-function indexes(
-  ranges: [lower: number, upper: number, step: number][]
-): number[] {
-  const result: number[] = [];
-  for (const range of ranges) {
-    const [lower, upper, step] = range;
-    if (step === 0) continue;
-    if (step < 0) {
-      for (let index = lower; index >= upper; index += step) result.push(index);
-    } else {
-      for (let index = lower; index <= upper; index += step) {
-        result.push(index);
-      }
-    }
-  }
-
-  return result;
 }
 
 function canonicalList(
@@ -2110,38 +2057,6 @@ function canonicalSet(
   for (const op of ops) if (!has(op)) set.push(op);
 
   return engine._fn('Set', set);
-}
-
-function collectionFunction(
-  ops: ReadonlyArray<BoxedExpression>
-): [
-  Iterable<BoxedExpression>,
-  undefined | ((args: BoxedExpression[]) => BoxedExpression | undefined),
-] {
-  if (ops.length !== 2) return [[], undefined];
-
-  const fn = applicable(ops[1]);
-  if (!fn) return [[], undefined];
-
-  if (ops[0].string) {
-    return [
-      [ops[0]],
-      (args) => {
-        const s = args[0].string;
-        if (s === null) return undefined;
-        const ce = args[0].engine;
-        return ce.string(
-          s
-            .split('')
-            .map((c) => fn([ce.string(c)])?.string ?? '')
-            .join('')
-        );
-      },
-    ];
-  }
-
-  if (!isFiniteIndexedCollection(ops[0]) || !ops[1]) return [[], undefined];
-  return [ops[0].each(), fn];
 }
 
 function tally(
@@ -2199,84 +2114,6 @@ function joinResultType(ops: ReadonlyArray<BoxedExpression>): Type {
   return 'list';
 }
 
-/** Add a value to a record */
-function joinRecord(
-  values: Record<string, BoxedExpression>,
-  value: BoxedExpression
-): Record<string, BoxedExpression> | undefined {
-  if (value.operator === 'KeyValuePair') {
-    const key = value.op1.string;
-    if (!key) return undefined;
-    values[key] = value.op2;
-    return values;
-  }
-
-  if (value.operator === 'Tuple') {
-    const [key, val] = value.ops!;
-    if (!key.string) return undefined;
-    values[key.string] = val;
-    return values;
-  }
-
-  if (value.operator === 'List' || value.operator === 'Set') {
-    for (const val of value.ops!) {
-      const result = joinRecord(values, val);
-      if (!result) return undefined;
-      values = result;
-    }
-    return values;
-  }
-
-  return undefined;
-}
-
-function joinSet(
-  set: BoxedExpression[] | undefined,
-  value: BoxedExpression
-): BoxedExpression[] | undefined {
-  if (value.operator === 'Set' || value.operator === 'List') {
-    for (const val of value.ops!) {
-      set = joinSet(set, val);
-      if (!set) return undefined;
-    }
-  }
-
-  const has = (x) => set!.some((y) => y.isSame(x));
-
-  if (!has(value)) set!.push(value);
-  return set!;
-}
-
-function keyValues(
-  ops: ReadonlyArray<BoxedExpression>
-): Record<string, BoxedExpression> {
-  const values: Record<string, BoxedExpression> = {};
-  let i = 1;
-  // The `Dictionary` function has a hold attribute, so we can assume that the
-  for (const pair of ops) {
-    if (
-      pair.operator === 'KeyValuePair' ||
-      pair.operator === 'Tuple' ||
-      pair.operator === 'Pair'
-    ) {
-      const [key, val] = pair.ops!;
-
-      // The 'Nothing' symbol is skipped
-      if (key.symbol === 'Nothing') continue;
-
-      // A key is either a string or a symbol. If it's another expression,
-      // (i.e. "1" or "x+1") turn it into a string. If there is no key, use the index.
-      values[key?.string ?? key?.toString() ?? i.toString()] =
-        val ?? pair.engine.Nothing;
-    } else {
-      // We didn't get a tuple, so make a key from the index
-      values[i.toString()] = pair;
-    }
-    i += 1;
-  }
-  return values;
-}
-
 function defaultCollectionEq(a: BoxedExpression, b: BoxedExpression) {
   // Compare two collections
   if (a.operator !== b.operator) return false;
@@ -2288,138 +2125,6 @@ function defaultCollectionEq(a: BoxedExpression, b: BoxedExpression) {
 
 export function fromRange(start: number, end: number): number[] {
   return Array.from({ length: end - start + 1 }, (_, index) => start + index);
-}
-
-/**
- * A slice represents a range of elements in a collection.
- * It is defined by three parameters: first, last, and step.
- *
- * This function normalizes the parameters to ensure that they are
- * within the bounds of the collection length and that they are
- * in the correct order.
- *
- * `step` will be positive if the range is increasing (first <= last),
- * negative if it is decreasing (first > last),
- * and 0 if the range is empty.
- */
-function slice(
-  [first, last, step]: [first: number, last?: number, step?: number],
-  length: number
-): [first: number, last: number, step: number] {
-  if (last === undefined) {
-    // Single number -> [n, n, 1]
-    if (first < 0) first = length + first + 1;
-    if (first < 1) return [0, 0, 0];
-    return [first, first, 1];
-  }
-
-  if (first === 0 || last === 0 || step === 0) return [0, 0, 0];
-
-  if (first < 0) first = length + first + 1;
-  if (first > length) return [0, 0, 0];
-  if (last < 0) last = length + last + 1;
-  if (last > length) last = length;
-
-  if (last === first) return [first, first, 1];
-
-  if (step === undefined) step = 1;
-
-  if (last < first) step = -Math.abs(step);
-  else step = Math.abs(step);
-
-  return [first, last, step];
-}
-
-function evaluateSlice(
-  expr: BoxedExpression
-): [first: number, last: number, step: number] {
-  if (expr.symbol === 'Nothing') return [0, 0, 0];
-
-  // Single number -> element first n elements if n > 0, or last n elements
-  // if n < 0
-  if (expr.isNumberLiteral) {
-    const n = Math.round(expr.re);
-    if (isNaN(n)) return [0, 0, 0];
-    return n < 0 ? [n, -1, 1] : [1, n, 1];
-  }
-
-  if (expr.operator === 'Tuple') {
-    const [first, last, step] = expr.ops!.map((op) => {
-      if (op.isNumberLiteral) {
-        const value = Math.round(op.re);
-        if (isNaN(value)) return undefined;
-        return value;
-      }
-      return undefined;
-    });
-    return [first ?? 1, last ?? first ?? 1, step ?? 1];
-  }
-
-  return [0, 0, 0];
-}
-
-/**
- * A slice expression can be:
- * - a number, n: elements 1 to n or n to last if n < 0 [1, n]
- * - a tuple of the form [from, to] or [from, to, step]
- * - a tuple of the form [n]: elements n (equivalent to [n, n])
- * - 'All': [1, -1]
- * - 'None': [0, 0]
- * - 'Nothing': [0, 0]
- * - Range(from, to, step): [from, to, step]
- *
- * The canonical form is:
- * - Nothing
- * - a number n, indicating first or last n elements
- * - a tuple of the form [from, to] or [from, to, step]
- *
- * Pass the result to evaluateSlice() to get the actual slice when
- * evaluating.
- */
-function canonicalSlice(expr: BoxedExpression): BoxedExpression {
-  const ce = expr.engine;
-
-  expr = expr.canonical;
-
-  // All = [1, -1]
-  if (expr.symbol === 'All') return ce.tuple(ce.One, ce.NegativeOne);
-
-  // None = Nothing
-  if (expr.symbol === 'Nothing' || expr.symbol === 'None') return ce.Nothing;
-
-  if (
-    expr.operator === 'Tuple' ||
-    expr.operator === 'Single' ||
-    expr.operator === 'Pair' ||
-    expr.operator === 'Triple' ||
-    expr.operator === 'Range'
-  ) {
-    // Empty tuple = Nothing
-    if (expr.nops === 0) return ce.Nothing;
-
-    // [n] equiv [n, n]
-    if (expr.nops === 1) return ce.tuple(checkType(ce, expr.ops![0], 'number'));
-
-    // [from, to]
-    if (expr.nops === 2)
-      return ce.tuple(...checkTypes(ce, expr.ops!, ['number', 'number']));
-
-    // [from, to, step]
-    if (expr.nops === 3)
-      return ce.tuple(
-        ...checkTypes(ce, expr.ops!, ['number', 'number', 'number'])
-      );
-
-    // We have too many elements in the tuple...
-    return ce.tuple(...checkArity(ce, expr.ops!, 3));
-  }
-
-  // n could be [1, n] or [n, -1] if n < 0
-  // Since we don't have its value yet, we just return the expression
-  // (could be a variable). We'll resolve it in evaluateSlice().
-  if (expr.type.matches('number')) return expr;
-
-  return expr;
 }
 
 export function sortedIndices(
@@ -2525,15 +2230,6 @@ function takeCount(expr: BoxedExpression): number | undefined {
   const n = Math.max(0, toInteger(op2) ?? 0);
   if (!Number.isFinite(n)) return Infinity;
   return Math.min(count, n);
-}
-
-function dropCount(expr: BoxedExpression): number | undefined {
-  const [xs, op2] = expr.ops!;
-  const count = xs.count;
-  if (count === undefined) return undefined;
-  const n = Math.max(0, toInteger(op2) ?? 0);
-  if (!Number.isFinite(n)) return Infinity;
-  return Math.max(count - n, 0);
 }
 
 function zipCount(expr: BoxedExpression): number | undefined {

@@ -19,7 +19,6 @@ import type {
   JsonSerializationOptions,
   PatternMatchOptions,
   ReplaceOptions,
-  Metadata,
   Substitution,
   BoxedSubstitution,
   CanonicalOptions,
@@ -30,17 +29,14 @@ import type {
   BoxedOperatorDefinition,
   BoxedValueDefinition,
   SimplifyOptions,
-  CollectionHandlers,
 } from './types-definitions';
 import type {
   EvaluateOptions,
   Rule,
-  BoxedRule,
   BoxedRuleSet,
-  RuleStep,
   Scope,
 } from './types-evaluation';
-import type { ComputeEngine } from './types-engine';
+import type { IComputeEngine as ComputeEngine } from './types-engine';
 
 //
 // ── Tensor & Compilation Types ──────────────────────────────────────────

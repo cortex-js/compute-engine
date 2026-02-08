@@ -8,7 +8,6 @@ import {
   missingIfEmpty,
   operator,
   operands,
-  nops,
   operand,
   isEmptySequence,
   matchesSymbol,

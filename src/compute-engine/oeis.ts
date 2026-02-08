@@ -7,7 +7,10 @@
  * @see https://oeis.org
  */
 
-import type { ComputeEngine, BoxedExpression } from './global-types';
+import type {
+  IComputeEngine as ComputeEngine,
+  BoxedExpression,
+} from './global-types';
 
 // ============================================================================
 // Types

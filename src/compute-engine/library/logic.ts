@@ -1,7 +1,7 @@
 import type {
   BoxedExpression,
   SymbolDefinitions,
-  ComputeEngine,
+  IComputeEngine as ComputeEngine,
 } from '../global-types';
 import {
   evaluateAnd,
@@ -12,7 +12,6 @@ import {
   evaluateXor,
   evaluateNand,
   evaluateNor,
-  toNNF,
   toCNF,
   toDNF,
 } from '../symbolic/logic-utils';
@@ -193,7 +192,7 @@ export const LOGIC_LIBRARY: SymbolDefinitions = {
     signature: '(symbol, value+) -> boolean',
     lazy: true,
     // Predicates remain symbolic unless explicitly defined
-    evaluate: (args, { engine }) => {
+    evaluate: (args, { engine: _engine }) => {
       if (args.length === 0) return undefined;
       const pred = args[0];
       if (!pred.symbol) return undefined;

@@ -1,4 +1,7 @@
-import type { BoxedExpression, ComputeEngine } from '../global-types';
+import type {
+  BoxedExpression,
+  IComputeEngine as ComputeEngine,
+} from '../global-types';
 
 /**
  * Get inequality bounds for a symbol from the assumption database.

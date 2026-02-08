@@ -6,7 +6,7 @@ import type {
   BoxedExpression,
   SymbolDefinitions,
   EvaluateOptions,
-  ComputeEngine,
+  IComputeEngine as ComputeEngine,
   Scope,
 } from '../global-types';
 import { spellCheckMessage } from '../boxed-expression/validate';
@@ -45,7 +45,7 @@ export const CONTROL_STRUCTURES_LIBRARY: SymbolDefinitions[] = [
     If: {
       lazy: true,
       signature: '(expression, expression, expression) -> any',
-      type: ([cond, ifTrue, ifFalse]) =>
+      type: ([_cond, ifTrue, ifFalse]) =>
         widen(ifTrue.type.type, ifFalse.type.type),
       canonical: ([cond, ifTrue, ifFalse], { engine }) =>
         engine._fn('If', [cond.canonical, ifTrue.canonical, ifFalse.canonical]),

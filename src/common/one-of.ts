@@ -1,5 +1,6 @@
 // From https://github.com/typed-rocks/typescript/blob/main/one_of.ts
 
+// eslint-disable-next-line @typescript-eslint/ban-types
 type MergeTypes<TypesArray extends any[], Res = {}> = TypesArray extends [
   infer Head,
   ...infer Rem,
@@ -16,7 +17,7 @@ export type OneOf<
   ? OneOf<Rem, Res | OnlyFirst<Head, AllProperties>, AllProperties>
   : Res;
 
-type SimpleOneOf<F, S> = OnlyFirst<F, S> | OnlyFirst<S, F>;
+// type _SimpleOneOf<F, S> = OnlyFirst<F, S> | OnlyFirst<S, F>;
 
 /** @internal */
 type OnlyFirst<F, S> = F & { [Key in keyof Omit<S, keyof F>]?: never };

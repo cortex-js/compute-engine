@@ -1,4 +1,7 @@
-import type { BoxedExpression, ComputeEngine } from '../global-types';
+import type {
+  BoxedExpression,
+  IComputeEngine as ComputeEngine,
+} from '../global-types';
 import { asSmallInteger } from '../boxed-expression/numerics';
 import {
   extractVariables,
@@ -35,7 +38,7 @@ function filterValuesWithCondition(
   values: BoxedExpression[],
   variable: string,
   conditionExpr: BoxedExpression,
-  ce: ComputeEngine
+  _ce: ComputeEngine
 ): BoxedExpression[] {
   return values.filter((value) => {
     // Substitute the variable with the value in the condition
@@ -734,19 +737,6 @@ function combineTerms(term1: QMTerm, diffPos: number): QMTerm {
  */
 function termToString(term: QMTerm): string {
   return term.map((x) => (x === -1 ? '-' : x.toString())).join('');
-}
-
-/**
- * Check if term1 covers term2 (term1 is more general or equal).
- * A term covers another if every specified position matches.
- */
-function termCovers(general: QMTerm, specific: QMTerm): boolean {
-  for (let i = 0; i < general.length; i++) {
-    if (general[i] !== -1 && general[i] !== specific[i]) {
-      return false;
-    }
-  }
-  return true;
 }
 
 /**

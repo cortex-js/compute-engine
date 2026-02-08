@@ -512,7 +512,6 @@ function matchPermutation(
 
   // === Phase 2: Universal Anchoring ===
   // Use anchor-based matching for all patterns with anchors (not just sequence wildcards)
-  const hasSequenceWildcard = sequenceCount > 0 || optionalSequenceCount > 0;
   const hasAnchor = anchorCount > 0;
 
   if (hasAnchor) {

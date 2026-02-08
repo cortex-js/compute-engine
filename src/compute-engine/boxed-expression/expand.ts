@@ -1,4 +1,7 @@
-import type { ComputeEngine, BoxedExpression } from '../global-types';
+import type {
+  IComputeEngine as ComputeEngine,
+  BoxedExpression,
+} from '../global-types';
 
 import { isRelationalOperator } from '../latex-syntax/utils';
 
@@ -113,35 +116,6 @@ function expandPower(
     result.push(mul(...product));
   }
   return add(...result);
-}
-
-/** ExpandNumerator
- * Expand the numerator of a fraction, or a simple product
- */
-
-function expandNumerator(expr: BoxedExpression): BoxedExpression | null {
-  if (expr.operator !== 'Divide') return null;
-  const expandedNumerator = expand(expr.op1);
-  if (expandedNumerator === null) return null;
-  if (expandedNumerator.operator === 'Add') {
-    return add(...expandedNumerator.ops!.map((x) => x.div(expr.op2)));
-  }
-  return expandedNumerator.div(expr.op2);
-}
-
-/** ExpandDenominator
- * Expand the denominator of a fraction (but not a simple product)
- */
-
-function expandDenominator(expr: BoxedExpression): BoxedExpression | null {
-  if (expr.operator !== 'Divide') return null;
-  const expandedDenominator = expand(expr.op2);
-  if (expandedDenominator === null) return null;
-  const ce = expr.engine;
-  if (expandedDenominator.operator === 'Add') {
-    return add(...expandedDenominator.ops!.map((x) => expr.op1.div(x)));
-  }
-  return expr.op1.div(expandedDenominator);
 }
 
 /** Attempt to transform the expression (h, ops) into a sum */

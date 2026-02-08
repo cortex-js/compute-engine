@@ -5,7 +5,7 @@ import type { LatexString } from './latex-syntax/types';
 import type { BoxedExpression, SemiBoxedExpression } from './types-expression';
 import type { BoxedSubstitution } from './types-serialization';
 import type { BoxedDefinition } from './types-definitions';
-import type { ComputeEngine } from './types-engine';
+import type { IComputeEngine as ComputeEngine } from './types-engine';
 
 /** @category Assumptions */
 export interface Assumption {

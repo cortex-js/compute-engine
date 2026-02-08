@@ -51,7 +51,7 @@ import type {
   Scope,
   EvalContext,
   SemiBoxedExpression,
-  ComputeEngine as IComputeEngine,
+  IComputeEngine,
   BoxedDefinition,
   SymbolDefinition,
   SequenceDefinition,
@@ -384,7 +384,8 @@ export class ComputeEngine implements IComputeEngine {
 
   /** @internal */
   get _typeResolver(): TypeResolver {
-    const ce = this; // capture this
+    // eslint-disable-next-line @typescript-eslint/no-this-alias
+    const ce = this; // capture this for getter closures
     return {
       get names() {
         // Return all known type names as a string array

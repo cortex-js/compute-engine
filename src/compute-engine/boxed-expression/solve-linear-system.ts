@@ -1,4 +1,7 @@
-import type { BoxedExpression, ComputeEngine } from '../global-types';
+import type {
+  BoxedExpression,
+  IComputeEngine as ComputeEngine,
+} from '../global-types';
 import { polynomialDegree } from './polynomials';
 import { findUnivariateRoots } from './solve';
 import { expand } from './expand';
@@ -113,7 +116,7 @@ export function solveLinearSystem(
   const m = equations.length;
 
   // Build augmented matrix [A|b] where Ax = b
-  const matrix = buildAugmentedMatrix(equations, variables, ce);
+  const matrix = buildAugmentedMatrix(equations, variables);
   if (!matrix) return null;
 
   const { A, b } = matrix;
@@ -303,11 +306,9 @@ function extractConstantTerm(
  */
 function buildAugmentedMatrix(
   equations: BoxedExpression[],
-  variables: string[],
-  ce: ComputeEngine
+  variables: string[]
 ): { A: BoxedExpression[][]; b: BoxedExpression[] } | null {
   const m = equations.length;
-  const n = variables.length;
 
   const A: BoxedExpression[][] = [];
   const b: BoxedExpression[] = [];

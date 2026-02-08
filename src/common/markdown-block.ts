@@ -174,7 +174,7 @@ export class MarkdownParser extends Buffer {
       this.skipWhitespace();
       const markerMatch = this.matchListMarker();
       if (markerMatch) {
-        const { marker, isOrdered } = markerMatch;
+        const { marker: _marker, isOrdered } = markerMatch;
         listType = isOrdered ? 'ordered-list' : 'unordered-list';
         this.skipWhitespace();
         const content = this.readUntil('\n');
@@ -195,7 +195,7 @@ export class MarkdownParser extends Buffer {
     const headerLine = this.readUntil('\n');
     this.consume(); // Consume the newline
     // Skip the separator line
-    const separatorLine = this.readUntil('\n');
+    this.readUntil('\n');
     this.consume();
     const headerCells = headerLine
       .split('|')

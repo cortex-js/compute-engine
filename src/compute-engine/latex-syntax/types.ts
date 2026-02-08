@@ -1,6 +1,6 @@
 import type { OneOf } from '../../common/one-of';
 import type { Expression, MathJsonSymbol } from '../../math-json/types';
-import type { Type, TypeString } from '../../common/type/types';
+import type { TypeString } from '../../common/type/types';
 import { BoxedType } from '../../common/type/boxed-type';
 import type {
   IndexedLatexDictionary,

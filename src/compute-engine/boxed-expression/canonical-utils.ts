@@ -1,4 +1,8 @@
-import type { BoxedExpression, ComputeEngine, Scope } from '../global-types';
+import type {
+  BoxedExpression,
+  IComputeEngine as ComputeEngine,
+  Scope,
+} from '../global-types';
 
 /**
  * Ensure all expressions in the array are in canonical form

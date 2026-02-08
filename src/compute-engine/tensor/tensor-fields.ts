@@ -1,7 +1,7 @@
 import { Complex } from 'complex-esm';
 import {
   BoxedExpression,
-  ComputeEngine,
+  IComputeEngine as ComputeEngine,
   DataTypeMap,
   TensorDataType,
   TensorField,

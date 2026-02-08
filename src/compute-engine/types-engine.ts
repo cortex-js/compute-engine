@@ -17,11 +17,7 @@ import type {
 } from './latex-syntax/types';
 import type { IndexedLatexDictionary } from './latex-syntax/dictionary/definitions';
 
-import type {
-  CompiledExpression,
-  BoxedExpression,
-  SemiBoxedExpression,
-} from './types-expression';
+import type { BoxedExpression, SemiBoxedExpression } from './types-expression';
 import type {
   Metadata,
   CanonicalOptions,
@@ -40,10 +36,7 @@ import type {
   OEISOptions,
 } from './types-definitions';
 import type {
-  Assumption,
-  ExpressionMapInterface,
   AssumeResult,
-  EvaluateOptions,
   Rule,
   BoxedRule,
   BoxedRuleSet,
@@ -54,7 +47,7 @@ import type {
 } from './types-evaluation';
 
 /** @internal */
-export interface ComputeEngine extends IBigNum {
+export interface IComputeEngine extends IBigNum {
   latexDictionary: readonly LatexDictionaryEntry[];
 
   /** @private */
@@ -367,23 +360,23 @@ export interface ComputeEngine extends IBigNum {
 
   lookupDefinition(id: MathJsonSymbol): undefined | BoxedDefinition;
 
-  assign(ids: { [id: MathJsonSymbol]: AssignValue }): ComputeEngine;
-  assign(id: MathJsonSymbol, value: AssignValue): ComputeEngine;
+  assign(ids: { [id: MathJsonSymbol]: AssignValue }): IComputeEngine;
+  assign(id: MathJsonSymbol, value: AssignValue): IComputeEngine;
   assign(
     arg1: MathJsonSymbol | { [id: MathJsonSymbol]: AssignValue },
     arg2?: AssignValue
-  ): ComputeEngine;
+  ): IComputeEngine;
 
   declareType(name: string, type: Type, options?: { alias?: boolean }): void;
 
   declare(symbols: {
     [id: MathJsonSymbol]: Type | TypeString | Partial<SymbolDefinition>;
-  }): ComputeEngine;
+  }): IComputeEngine;
   declare(
     id: MathJsonSymbol,
     def: Type | TypeString | Partial<SymbolDefinition>,
     scope?: Scope
-  ): ComputeEngine;
+  ): IComputeEngine;
   declare(
     arg1:
       | MathJsonSymbol
@@ -392,7 +385,7 @@ export interface ComputeEngine extends IBigNum {
         },
     arg2?: Type | TypeString | Partial<SymbolDefinition>,
     arg3?: Scope
-  ): ComputeEngine;
+  ): IComputeEngine;
 
   assume(predicate: BoxedExpression): AssumeResult;
 
@@ -409,7 +402,7 @@ export interface ComputeEngine extends IBigNum {
    * ce.parse('F_{10}').evaluate();  // → 55
    * ```
    */
-  declareSequence(name: string, def: SequenceDefinition): ComputeEngine;
+  declareSequence(name: string, def: SequenceDefinition): IComputeEngine;
 
   /**
    * Get the status of a sequence definition.

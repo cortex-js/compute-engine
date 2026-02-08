@@ -2,7 +2,7 @@ import { Complex } from 'complex-esm';
 import { getSupertype, makeTensorField } from './tensor-fields';
 import type {
   BoxedExpression,
-  ComputeEngine,
+  IComputeEngine as ComputeEngine,
   DataTypeMap,
   TensorData,
   TensorDataType,
@@ -287,7 +287,7 @@ export abstract class AbstractTensor<
 
   get isIdentity(): boolean {
     if (!this.isSquare) return false;
-    const [m, n] = this.shape;
+    const [_m, n] = this.shape;
     const data = this.data;
     const isOne = this.field.isOne.bind(this.field);
     const isZero = this.field.isZero.bind(this.field);
@@ -451,7 +451,7 @@ export abstract class AbstractTensor<
       });
     }
 
-    const size = this.shape[1];
+    const _size = this.shape[1];
     const stride = this._strides[0];
     const start = index * stride;
     const end = start + stride;
@@ -758,7 +758,7 @@ export abstract class AbstractTensor<
   }
 
   // The determinant of the matrix obtained by deleting row i and column j from this matrix. https://en.wikipedia.org/wiki/Minor_(linear_algebra)
-  minor(i: number, j: number): undefined | DataTypeMap[DT] {
+  minor(_i: number, _j: number): undefined | DataTypeMap[DT] {
     // @todo tensor
     return undefined;
   }

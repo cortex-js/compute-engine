@@ -1,7 +1,7 @@
 import type {
   BoxedExpression,
   BoxedSubstitution,
-  ComputeEngine as IComputeEngine,
+  IComputeEngine,
   AssumeResult,
 } from './global-types';
 

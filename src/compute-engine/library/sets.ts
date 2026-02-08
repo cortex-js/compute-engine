@@ -14,7 +14,7 @@ import {
 import type {
   BoxedExpression,
   SymbolDefinitions,
-  ComputeEngine,
+  IComputeEngine as ComputeEngine,
 } from '../global-types';
 import {
   cantorEnumerateComplexNumbers,
@@ -883,7 +883,7 @@ export const SETS_LIBRARY: SymbolDefinitions = {
       },
       count: (expr) =>
         countMatchingElements(expr, (elem) => {
-          const [col, ...values] = expr.ops!;
+          const [_col, ...values] = expr.ops!;
           return !values.some((val) => val.isSame(elem));
         }),
       iterator: setMinusIterator,
@@ -972,13 +972,6 @@ function intersection(
 }
 
 function setMinus(
-  _ops: BoxedExpression[],
-  { engine: ce }: { engine: ComputeEngine }
-): BoxedExpression {
-  return ce.symbol('EmptySet');
-}
-
-function cartesianProduct(
   _ops: BoxedExpression[],
   { engine: ce }: { engine: ComputeEngine }
 ): BoxedExpression {

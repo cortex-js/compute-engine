@@ -405,7 +405,7 @@ export function lexicographicOrder(
   vars?: ReadonlyArray<string>
 ): BoxedExpression {
   // @todo
-  vars = vars ?? expr.unknowns;
+  const _vars = vars ?? expr.unknowns;
   return expr;
 }
 
@@ -414,7 +414,7 @@ export function degreeLexicographicOrder(
   vars?: ReadonlyArray<string>
 ): BoxedExpression {
   // @todo
-  vars = vars ?? expr.unknowns;
+  const _vars = vars ?? expr.unknowns;
   return expr;
 }
 
@@ -423,7 +423,7 @@ export function degreeReverseLexicographicOrder(
   vars?: ReadonlyArray<string>
 ): BoxedExpression {
   // @todo
-  vars = vars ?? expr.unknowns;
+  const _vars = vars ?? expr.unknowns;
   return expr;
 }
 
@@ -432,7 +432,7 @@ export function eliminationOrder(
   vars?: ReadonlyArray<string>
 ): BoxedExpression {
   // @todo
-  vars = vars ?? expr.unknowns;
+  const _vars = vars ?? expr.unknowns;
   return expr;
 }
 

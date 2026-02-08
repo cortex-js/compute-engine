@@ -7,7 +7,7 @@
 
 import type {
   BoxedExpression,
-  ComputeEngine,
+  IComputeEngine as ComputeEngine,
   SequenceDefinition,
   SequenceStatus,
   SequenceInfo,
