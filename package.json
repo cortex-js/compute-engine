@@ -11,6 +11,7 @@
     "snapshot": "bash ./scripts/test.sh snapshot",
     "version": "bash ./scripts/version.sh",
     "test": "bash ./scripts/test.sh",
+    "check:deps": "madge --circular --extensions ts src/compute-engine && echo 'No runtime circular dependencies found (type-only cycles are expected)'",
     "lint": "eslint src --ext .ts --fix && prettier --write 'src/**/*.{ts,js,css,md}'",
     "typecheck": "bash ./scripts/typecheck.sh"
   },

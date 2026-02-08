@@ -1,6 +1,6 @@
 import { Decimal } from 'decimal.js';
 
-import { Rational, SmallInteger } from '../numerics/types';
+import { type BigNumFactory, Rational, SmallInteger } from '../numerics/types';
 import { canonicalInteger, gcd, SMALL_INTEGER } from '../numerics/numeric';
 import {
   isOne,
@@ -17,7 +17,6 @@ import {
   rationalGcd,
 } from '../numerics/rationals';
 import {
-  BigNumFactory,
   ExactNumericValueData,
   NumericValue,
   NumericValueFactory,

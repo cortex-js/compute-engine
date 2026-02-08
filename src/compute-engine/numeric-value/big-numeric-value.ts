@@ -1,9 +1,9 @@
 import { Decimal } from 'decimal.js';
-import { BigNumFactory, NumericValue, NumericValueData } from './types';
+import type { BigNumFactory, SmallInteger } from '../numerics/types';
+import { NumericValue, NumericValueData } from './types';
 import { ExactNumericValue } from './exact-numeric-value';
 import { isInMachineRange } from '../numerics/numeric-bignum';
 import { Expression } from '../../math-json/types';
-import { SmallInteger } from '../numerics/types';
 import { numberToExpression } from '../numerics/expression';
 import { numberToString } from '../numerics/strings';
 import { bigint } from '../numerics/bigint';

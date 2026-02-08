@@ -28,8 +28,6 @@ import { Decimal } from 'decimal.js';
 import type { Rational, SmallInteger } from '../numerics/types';
 import { NumericPrimitiveType } from '../../common/type/types';
 
-export type BigNumFactory = (value: Decimal.Value) => Decimal;
-
 /** The value is equal to `(decimal * rational * sqrt(radical)) + im * i`
  * @category Numerics */
 export type ExactNumericValueData = {

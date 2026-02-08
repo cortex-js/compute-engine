@@ -57,7 +57,22 @@ module.exports = {
     'import/order': 'off',
 
     // Enforce layered architecture: lower layers must not import from higher layers.
-    // Layer order (low → high): common → latex-syntax → boxed-expression → symbolic → library → compilation → engine
+    //
+    // Layer order (low → high):
+    //   common/              (type system utilities, no compute-engine imports)
+    //   math-json/           (JSON interchange format, depends on common only)
+    //   numerics/            (pure numeric algorithms, no boxing)
+    //   numeric-value/       (NumericValue wrapper, depends on numerics)
+    //   types-*.ts           (type definitions — may `import type` from lower layers
+    //                         but must not import implementation code)
+    //   latex-syntax/        (LaTeX ↔ MathJSON, depends on math-json)
+    //   boxed-expression/    (core expression types and operations)
+    //   tensor/              (peer of boxed-expression, tensor field ops)
+    //   interval/            (peer of boxed-expression, interval arithmetic)
+    //   symbolic/            (simplification rules, derivatives, etc.)
+    //   library/             (mathematical function definitions)
+    //   compilation/         (code generation targets)
+    //   engine (root .ts)    (ComputeEngine facade, can import from all)
     'import/no-restricted-paths': [
       'error',
       {
@@ -69,6 +84,77 @@ module.exports = {
             message:
               'common/ is a lower layer and must not import from compute-engine/.',
           },
+
+          // numerics/ cannot import from numeric-value, latex-syntax, boxed-expression, symbolic, library, compilation
+          {
+            target: './src/compute-engine/numerics/**',
+            from: './src/compute-engine/numeric-value/**',
+            message:
+              'numerics/ is a lower layer and must not import from numeric-value/.',
+          },
+          {
+            target: './src/compute-engine/numerics/**',
+            from: './src/compute-engine/latex-syntax/**',
+            message:
+              'numerics/ is a lower layer and must not import from latex-syntax/.',
+          },
+          {
+            target: './src/compute-engine/numerics/**',
+            from: './src/compute-engine/boxed-expression/**',
+            message:
+              'numerics/ is a lower layer and must not import from boxed-expression/.',
+          },
+          {
+            target: './src/compute-engine/numerics/**',
+            from: './src/compute-engine/symbolic/**',
+            message:
+              'numerics/ is a lower layer and must not import from symbolic/.',
+          },
+          {
+            target: './src/compute-engine/numerics/**',
+            from: './src/compute-engine/library/**',
+            message:
+              'numerics/ is a lower layer and must not import from library/.',
+          },
+          {
+            target: './src/compute-engine/numerics/**',
+            from: './src/compute-engine/compilation/**',
+            message:
+              'numerics/ is a lower layer and must not import from compilation/.',
+          },
+
+          // numeric-value/ cannot import from latex-syntax, boxed-expression, symbolic, library, compilation
+          {
+            target: './src/compute-engine/numeric-value/**',
+            from: './src/compute-engine/latex-syntax/**',
+            message:
+              'numeric-value/ is a lower layer and must not import from latex-syntax/.',
+          },
+          {
+            target: './src/compute-engine/numeric-value/**',
+            from: './src/compute-engine/boxed-expression/**',
+            message:
+              'numeric-value/ is a lower layer and must not import from boxed-expression/.',
+          },
+          {
+            target: './src/compute-engine/numeric-value/**',
+            from: './src/compute-engine/symbolic/**',
+            message:
+              'numeric-value/ is a lower layer and must not import from symbolic/.',
+          },
+          {
+            target: './src/compute-engine/numeric-value/**',
+            from: './src/compute-engine/library/**',
+            message:
+              'numeric-value/ is a lower layer and must not import from library/.',
+          },
+          {
+            target: './src/compute-engine/numeric-value/**',
+            from: './src/compute-engine/compilation/**',
+            message:
+              'numeric-value/ is a lower layer and must not import from compilation/.',
+          },
+
           // latex-syntax/ cannot import from boxed-expression/, symbolic/, library/, compilation/
           {
             target: './src/compute-engine/latex-syntax/**',
@@ -94,6 +180,7 @@ module.exports = {
             message:
               'latex-syntax/ is a lower layer and must not import from compilation/.',
           },
+
           // boxed-expression/ cannot import from symbolic/, library/, compilation/
           {
             target: './src/compute-engine/boxed-expression/**',
@@ -113,6 +200,85 @@ module.exports = {
             message:
               'boxed-expression/ is a lower layer and must not import from compilation/.',
           },
+
+          // tensor/ cannot import from symbolic/, library/, compilation/
+          {
+            target: './src/compute-engine/tensor/**',
+            from: './src/compute-engine/symbolic/**',
+            message:
+              'tensor/ must not import from symbolic/.',
+          },
+          {
+            target: './src/compute-engine/tensor/**',
+            from: './src/compute-engine/library/**',
+            message:
+              'tensor/ must not import from library/.',
+          },
+          {
+            target: './src/compute-engine/tensor/**',
+            from: './src/compute-engine/compilation/**',
+            message:
+              'tensor/ must not import from compilation/.',
+          },
+
+          // interval/ cannot import from symbolic/, library/, compilation/
+          {
+            target: './src/compute-engine/interval/**',
+            from: './src/compute-engine/symbolic/**',
+            message:
+              'interval/ must not import from symbolic/.',
+          },
+          {
+            target: './src/compute-engine/interval/**',
+            from: './src/compute-engine/library/**',
+            message:
+              'interval/ must not import from library/.',
+          },
+          {
+            target: './src/compute-engine/interval/**',
+            from: './src/compute-engine/compilation/**',
+            message:
+              'interval/ must not import from compilation/.',
+          },
+
+          // Type definition files (types-*.ts) cannot import from implementation layers
+          {
+            target: './src/compute-engine/types-*.ts',
+            from: './src/compute-engine/boxed-expression/**',
+            message:
+              'Type definition files must not import from boxed-expression/ implementation.',
+          },
+          {
+            target: './src/compute-engine/types-*.ts',
+            from: './src/compute-engine/symbolic/**',
+            message:
+              'Type definition files must not import from symbolic/ implementation.',
+          },
+          {
+            target: './src/compute-engine/types-*.ts',
+            from: './src/compute-engine/library/**',
+            message:
+              'Type definition files must not import from library/ implementation.',
+          },
+          {
+            target: './src/compute-engine/types-*.ts',
+            from: './src/compute-engine/compilation/**',
+            message:
+              'Type definition files must not import from compilation/ implementation.',
+          },
+          {
+            target: './src/compute-engine/types-*.ts',
+            from: './src/compute-engine/tensor/**',
+            message:
+              'Type definition files must not import from tensor/ implementation.',
+          },
+          {
+            target: './src/compute-engine/types-*.ts',
+            from: './src/compute-engine/interval/**',
+            message:
+              'Type definition files must not import from interval/ implementation.',
+          },
+
           // symbolic/ cannot import from library/, compilation/
           {
             target: './src/compute-engine/symbolic/**',
@@ -126,6 +292,7 @@ module.exports = {
             message:
               'symbolic/ is a lower layer and must not import from compilation/.',
           },
+
           // library/ cannot import from compilation/
           {
             target: './src/compute-engine/library/**',

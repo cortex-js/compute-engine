@@ -27,6 +27,9 @@ export type Rational = [SmallInteger, SmallInteger] | [bigint, bigint];
 export type BigNum = Decimal;
 
 /** @category Numerics */
+export type BigNumFactory = (value: Decimal.Value) => Decimal;
+
+/** @category Numerics */
 export interface IBigNum {
   readonly _BIGNUM_NAN: BigNum;
   readonly _BIGNUM_ZERO: BigNum;
