@@ -4,12 +4,7 @@ import { add } from './arithmetic-add';
 import { expand } from './expand';
 
 // Re-export degree functions from leaf module (no circular deps)
-export {
-  totalDegree,
-  maxDegree,
-  lex,
-  revlex,
-} from './polynomial-degree';
+export { totalDegree, maxDegree, lex, revlex } from './polynomial-degree';
 
 /**
  * Coefficient of a univariate (single variable) polynomial.

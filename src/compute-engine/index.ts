@@ -616,8 +616,7 @@ export class ComputeEngine implements IComputeEngine {
         options.libraries.map((lib) => {
           if (typeof lib === 'string') {
             const found = STANDARD_LIBRARIES.find((l) => l.name === lib);
-            if (!found)
-              throw new Error(`Unknown standard library: "${lib}"`);
+            if (!found) throw new Error(`Unknown standard library: "${lib}"`);
             return found;
           }
           return lib;

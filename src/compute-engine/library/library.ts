@@ -156,9 +156,7 @@ export const STANDARD_LIBRARIES: LibraryDefinition[] = [
  * Topological sort of libraries using Kahn's algorithm.
  * Throws on cycle or missing dependency.
  */
-export function sortLibraries(
-  libs: LibraryDefinition[]
-): LibraryDefinition[] {
+export function sortLibraries(libs: LibraryDefinition[]): LibraryDefinition[] {
   const byName = new Map<string, LibraryDefinition>();
   for (const lib of libs) {
     if (byName.has(lib.name))

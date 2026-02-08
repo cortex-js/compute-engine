@@ -115,9 +115,15 @@ export function isSubtype(
   lhs: Type | TypeString,
   rhs: Type | TypeString
 ): boolean {
-  if (typeof lhs === 'string' && !PRIMITIVE_TYPES.includes(lhs as PrimitiveType))
+  if (
+    typeof lhs === 'string' &&
+    !PRIMITIVE_TYPES.includes(lhs as PrimitiveType)
+  )
     lhs = lazyParseType(lhs);
-  if (typeof rhs === 'string' && !PRIMITIVE_TYPES.includes(rhs as PrimitiveType))
+  if (
+    typeof rhs === 'string' &&
+    !PRIMITIVE_TYPES.includes(rhs as PrimitiveType)
+  )
     rhs = lazyParseType(rhs);
 
   // Every type is a subtype of `any`, the top type
@@ -429,7 +435,13 @@ export function isSubtype(
       const m2 = './utils';
       const { widen } = require(m2);
       return isSubtype(
-        { kind: 'tuple', elements: [{ type: 'string' }, { type: widen(...Object.values(lhs.elements)) }] },
+        {
+          kind: 'tuple',
+          elements: [
+            { type: 'string' },
+            { type: widen(...Object.values(lhs.elements)) },
+          ],
+        },
         rhs.elements
       );
     }

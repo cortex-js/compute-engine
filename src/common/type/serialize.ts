@@ -73,7 +73,11 @@ export function typeToString(type: Type, precedence = 0): string {
       break;
 
     case 'list':
-      if (type.dimensions && typeof type.elements === 'string' && NUMERIC_TYPES.includes(type.elements as NumericPrimitiveType)) {
+      if (
+        type.dimensions &&
+        typeof type.elements === 'string' &&
+        NUMERIC_TYPES.includes(type.elements as NumericPrimitiveType)
+      ) {
         // We have a numeric list, possibly vector or matrix.
         if (type.dimensions === undefined) {
           //

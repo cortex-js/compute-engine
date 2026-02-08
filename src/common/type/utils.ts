@@ -5,11 +5,7 @@ import { isSubtype } from './subtype';
 
 // Re-export isValidType from primitive for backward compatibility
 export { isValidType };
-import type {
-  Type,
-  FunctionSignature,
-  TypeString,
-} from './types';
+import type { Type, FunctionSignature, TypeString } from './types';
 
 /** Given two types a and b, return the narrowest type common to a and b */
 function narrow2(a: Readonly<Type>, b: Readonly<Type>): Readonly<Type> {
