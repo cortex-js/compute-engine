@@ -137,7 +137,7 @@ const OPERATORS: Record<
       if (!expr.ops) return '';
       if (expr.nops === 2) {
         const lhs = expr.op1.numericValue;
-        if (lhs !== null) {
+        if (lhs !== undefined) {
           if (typeof lhs !== 'number' && lhs.im !== 0) {
             joinMul(
               serialize(expr.op2, 12),
@@ -449,7 +449,7 @@ function bigOp(
 
 function delimiter(
   expr: BoxedExpression | undefined,
-  delimiter: string | undefined | null,
+  delimiter: string | undefined,
   serialize: AsciiMathSerializer
 ) {
   if (!delimiter) delimiter = '(,)';
@@ -527,7 +527,7 @@ export function toAsciiMath(
   // A number ?
   //
   const num = expr.numericValue;
-  if (num !== null) {
+  if (num !== undefined) {
     if (expr.isNaN) return serializeSymbol('NaN', options);
     if (expr.isFinite === false) {
       if (expr.isNegative !== true && expr.isPositive !== true)

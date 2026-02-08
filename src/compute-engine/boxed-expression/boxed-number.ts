@@ -214,7 +214,7 @@ export class BoxedNumber extends _BoxedExpression {
 
       return ce.number(this._value.add(rhs));
     }
-    if (rhs.numericValue !== null) {
+    if (rhs.numericValue !== undefined) {
       // @fastpath
       if (typeof this._value === 'number') {
         if (typeof rhs.numericValue === 'number')
@@ -254,7 +254,7 @@ export class BoxedNumber extends _BoxedExpression {
       return ce.number(rhs.mul(this._value));
     }
 
-    if (rhs.numericValue !== null)
+    if (rhs.numericValue !== undefined)
       return ce.number(ce._numericValue(this._value).mul(rhs.numericValue));
 
     return mul(this, rhs);
@@ -573,7 +573,7 @@ export class BoxedNumber extends _BoxedExpression {
 
   get structural(): BoxedExpression {
     if (this.isStructural) return this;
-    return this.engine.box(this.json, { canonical: false, structural: true });
+    return this.engine.box(this.json, { form: 'structural' });
   }
 
   toNumericValue(): [NumericValue, BoxedExpression] {

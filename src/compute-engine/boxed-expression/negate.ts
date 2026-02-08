@@ -34,7 +34,7 @@ export function negate(expr: BoxedExpression): BoxedExpression {
   }
   if (sign === 1) return expr;
 
-  if (expr.numericValue !== null) return expr.neg();
+  if (expr.numericValue !== undefined) return expr.neg();
 
   const ce = expr.engine;
 
@@ -92,7 +92,7 @@ export function negateProduct(
   if (!done) {
     result = [];
     for (const arg of args) {
-      if (done || (arg.numericValue === null && !arg.isInteger))
+      if (done || (arg.numericValue === undefined && !arg.isInteger))
         result.push(arg);
       else {
         done = true;
@@ -106,7 +106,7 @@ export function negateProduct(
   if (!done) {
     result = [];
     for (const arg of args) {
-      if (done || arg.numericValue === null || !arg.isNumber) result.push(arg);
+      if (done || arg.numericValue === undefined || !arg.isNumber) result.push(arg);
       else {
         done = true;
         if (!arg.is(-1)) result.push(arg.neg());

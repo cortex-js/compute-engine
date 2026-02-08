@@ -275,7 +275,7 @@ function assumeInequality(proposition: BoxedExpression): AssumeResult {
     const otherSide = isSymbolOnLeft ? proposition.op2 : proposition.op1;
 
     // Only do bounds checking for simple comparisons like "x > k" where k is numeric
-    if (otherSide.numericValue !== null) {
+    if (otherSide.numericValue !== undefined) {
       const k = otherSide.numericValue;
 
       if (typeof k === 'number' && isFinite(k)) {

@@ -339,7 +339,7 @@ export class BoxedTensor<T extends TensorDataType> extends _BoxedExpression {
     options?: PatternMatchOptions
   ): BoxedSubstitution | null {
     if (!isBoxedExpression(pattern))
-      pattern = this.engine.box(pattern, { canonical: false });
+      pattern = this.engine.box(pattern, { form: 'raw' });
     if (isWildcard(pattern)) return { [wildcardName(pattern)!]: this };
     return this.structural.match(pattern, options);
   }

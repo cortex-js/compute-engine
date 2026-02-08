@@ -307,15 +307,14 @@ export class BoxedFunction extends _BoxedExpression {
         this._operator,
         this.isValid ? sortOperands(this._operator, ys) : ys,
         {
-          canonical: false,
-          structural: true,
+          form: 'structural',
         }
       );
     }
     return this.engine.function(
       this._operator,
       this.ops.map((x) => x.structural),
-      { canonical: false, structural: true }
+      { form: 'structural' }
     );
   }
 
@@ -340,7 +339,7 @@ export class BoxedFunction extends _BoxedExpression {
     let expr: BoxedExpression = this;
     if (expr.operator === 'Add') {
       expr = factor(this);
-      if (expr.numericValue !== null) {
+      if (expr.numericValue !== undefined) {
         if (typeof expr.numericValue === 'number') {
           if (Number.isInteger(expr.numericValue))
             return [ce._numericValue(expr.numericValue), ce.One];
@@ -390,7 +389,7 @@ export class BoxedFunction extends _BoxedExpression {
     //
     if (expr.operator === 'Power') {
       // We can only extract a coef if the exponent is a literal
-      if (expr.op2.numericValue === null) return [ce._numericValue(1), this];
+      if (expr.op2.numericValue === undefined) return [ce._numericValue(1), this];
 
       // eslint-disable-next-line prefer-const
       let [coef, base] = expr.op1.toNumericValue();
@@ -462,10 +461,13 @@ export class BoxedFunction extends _BoxedExpression {
 
     const ops = this._ops.map((x) => x.subs(sub, options));
 
-    if (!ops.every((x) => x.isValid))
-      return this.engine.function(this._operator, ops, { canonical: false });
+    const form = options.canonical === true ? 'canonical' :
+      options.canonical === false ? 'raw' : options.canonical;
 
-    return this.engine.function(this._operator, ops, options);
+    if (!ops.every((x) => x.isValid))
+      return this.engine.function(this._operator, ops, { form: 'raw' });
+
+    return this.engine.function(this._operator, ops, { form });
   }
 
   replace(

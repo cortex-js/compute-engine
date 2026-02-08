@@ -26,7 +26,7 @@ import type {
   CompiledFunctions,
   LanguageTarget,
   CompilationOptions,
-  CompiledExecutable,
+  CompilationResult,
 } from './types';
 
 /**
@@ -409,10 +409,10 @@ export class JavaScriptTarget implements LanguageTarget {
     };
   }
 
-  compileToExecutable(
+  compile(
     expr: BoxedExpression,
     options: CompilationOptions = {}
-  ): CompiledExecutable {
+  ): CompilationResult {
     const { operators, functions, vars, imports = [], preamble } = options;
     const unknowns = expr.unknowns;
 
@@ -492,7 +492,7 @@ export class JavaScriptTarget implements LanguageTarget {
 function compileToTarget(
   expr: BoxedExpression,
   target: CompileTarget
-): CompiledExecutable {
+): CompilationResult {
   if (expr.operator === 'Function') {
     const args = expr.ops!;
     const params = args.slice(1).map((x) => x.symbol ?? '_');
@@ -500,27 +500,36 @@ function compileToTarget(
       ...target,
       var: (id) => (params.includes(id) ? id : target.var(id)),
     });
-    return new ComputeEngineFunctionLiteral(
-      body,
-      params
-    ) as unknown as CompiledExecutable;
+    const fn = new ComputeEngineFunctionLiteral(body, params);
+    return {
+      target: 'javascript',
+      success: true,
+      code: `(${params.join(', ')}) => ${body}`,
+      run: fn as unknown as (...args: any[]) => any,
+    };
   }
 
   if (expr.symbol) {
     const op = target.operators?.(expr.symbol);
     if (op) {
-      return new ComputeEngineFunctionLiteral(`a ${op[0]} b`, [
-        'a',
-        'b',
-      ]) as unknown as CompiledExecutable;
+      const fn = new ComputeEngineFunctionLiteral(`a ${op[0]} b`, ['a', 'b']);
+      return {
+        target: 'javascript',
+        success: true,
+        code: `(a, b) => a ${op[0]} b`,
+        run: fn as unknown as (...args: any[]) => any,
+      };
     }
   }
 
   const js = BaseCompiler.compile(expr, target);
-  return new ComputeEngineFunction(
-    js,
-    target.preamble
-  ) as unknown as CompiledExecutable;
+  const fn = new ComputeEngineFunction(js, target.preamble);
+  return {
+    target: 'javascript',
+    success: true,
+    code: js,
+    run: fn as unknown as (...args: any[]) => any,
+  };
 }
 
 /**

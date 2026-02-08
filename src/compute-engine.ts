@@ -16,7 +16,7 @@ export type {
   CompiledOperators,
   CompiledFunctions,
   CompilationOptions,
-  CompiledExecutable,
+  CompilationResult,
   LanguageTarget,
   TargetSource,
   CompiledFunction,

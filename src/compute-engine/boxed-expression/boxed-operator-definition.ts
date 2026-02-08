@@ -314,7 +314,7 @@ export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
           }
         : undefined;
       const boxedFn = this.engine.box(def.evaluate, {
-        canonical: false,
+        form: 'raw',
         scope,
       });
       if (!boxedFn.isValid)

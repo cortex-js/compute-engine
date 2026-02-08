@@ -612,7 +612,7 @@ const INTEGRATION_RULES: Rule[] = [
   {
     match: ['Power', ['Add', '_x', '__b'], -1],
     replace: ['Ln', ['Abs', ['Add', '_x', '__b']]],
-    condition: (sub) => filter(sub) && sub._x.symbol !== null,
+    condition: (sub) => filter(sub) && sub._x.symbol !== undefined,
   },
 
   // 1/(ax + b) -> \ln(ax + b) / a
@@ -630,7 +630,7 @@ const INTEGRATION_RULES: Rule[] = [
   {
     match: ['Divide', 1, ['Add', '_x', '__b']],
     replace: ['Ln', ['Abs', ['Add', '_x', '__b']]],
-    condition: (sub) => filter(sub) && sub._x.symbol !== null,
+    condition: (sub) => filter(sub) && sub._x.symbol !== undefined,
   },
 
   // \ln(ax + b) -> (ax + b) \ln(ax + b) - ax - b
@@ -1239,7 +1239,7 @@ const INTEGRATION_RULES: Rule[] = [
       ['Exp', '_x'],
       ['Subtract', ['Sin', '_x'], ['Cos', '_x']],
     ],
-    condition: (sub) => filter(sub) && sub._x.symbol !== null,
+    condition: (sub) => filter(sub) && sub._x.symbol !== undefined,
   },
 
   // e^x * cos(x) -> (e^x/2)(sin(x) + cos(x))
@@ -1251,7 +1251,7 @@ const INTEGRATION_RULES: Rule[] = [
       ['Exp', '_x'],
       ['Add', ['Sin', '_x'], ['Cos', '_x']],
     ],
-    condition: (sub) => filter(sub) && sub._x.symbol !== null,
+    condition: (sub) => filter(sub) && sub._x.symbol !== undefined,
   },
 
   // sin(x) * e^x -> (e^x/2)(sin(x) - cos(x)) (commuted order)
@@ -1263,7 +1263,7 @@ const INTEGRATION_RULES: Rule[] = [
       ['Exp', '_x'],
       ['Subtract', ['Sin', '_x'], ['Cos', '_x']],
     ],
-    condition: (sub) => filter(sub) && sub._x.symbol !== null,
+    condition: (sub) => filter(sub) && sub._x.symbol !== undefined,
   },
 
   // cos(x) * e^x -> (e^x/2)(sin(x) + cos(x)) (commuted order)
@@ -1275,7 +1275,7 @@ const INTEGRATION_RULES: Rule[] = [
       ['Exp', '_x'],
       ['Add', ['Sin', '_x'], ['Cos', '_x']],
     ],
-    condition: (sub) => filter(sub) && sub._x.symbol !== null,
+    condition: (sub) => filter(sub) && sub._x.symbol !== undefined,
   },
 
   // e^x * sin(ax) -> (e^x/(a² + 1))(sin(ax) - a*cos(ax)) (no constant term)

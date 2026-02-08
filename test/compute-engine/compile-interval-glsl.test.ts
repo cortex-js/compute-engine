@@ -12,20 +12,20 @@ describe('INTERVAL GLSL COMPILATION - BASIC', () => {
   test('compiles constant', () => {
     const expr = ce.parse('5');
     const fn = compile(expr, { to: 'interval-glsl' });
-    expect(fn.isCompiled).toBe(true);
-    expect(fn.toString()).toContain('ia_point(5.0)');
+    expect(fn.success).toBe(true);
+    expect(fn.code).toContain('ia_point(5.0)');
   });
 
   test('compiles variable', () => {
     const expr = ce.parse('x');
     const fn = compile(expr, { to: 'interval-glsl' });
-    expect(fn.toString()).toBe('x');
+    expect(fn.code).toBe('x');
   });
 
   test('compiles Pi', () => {
     const expr = ce.parse('\\pi');
     const fn = compile(expr, { to: 'interval-glsl' });
-    expect(fn.toString()).toContain('ia_point(3.14159');
+    expect(fn.code).toContain('ia_point(3.14159');
   });
 });
 
@@ -33,33 +33,33 @@ describe('INTERVAL GLSL COMPILATION - ARITHMETIC', () => {
   test('compiles addition', () => {
     const expr = ce.parse('x + y');
     const fn = compile(expr, { to: 'interval-glsl' });
-    expect(fn.toString()).toContain('ia_add');
+    expect(fn.code).toContain('ia_add');
   });
 
   test('compiles subtraction', () => {
     const expr = ce.parse('x - y');
     const fn = compile(expr, { to: 'interval-glsl' });
     // Subtraction may compile to ia_add(x, ia_negate(y)) or ia_sub(x, y)
-    const code = fn.toString();
+    const code = fn.code;
     expect(code.includes('ia_sub') || code.includes('ia_negate')).toBe(true);
   });
 
   test('compiles multiplication', () => {
     const expr = ce.parse('x \\cdot y');
     const fn = compile(expr, { to: 'interval-glsl' });
-    expect(fn.toString()).toContain('ia_mul');
+    expect(fn.code).toContain('ia_mul');
   });
 
   test('compiles division', () => {
     const expr = ce.parse('\\frac{x}{y}');
     const fn = compile(expr, { to: 'interval-glsl' });
-    expect(fn.toString()).toContain('ia_div');
+    expect(fn.code).toContain('ia_div');
   });
 
   test('compiles negation', () => {
     const expr = ce.parse('-x');
     const fn = compile(expr, { to: 'interval-glsl' });
-    expect(fn.toString()).toContain('ia_negate');
+    expect(fn.code).toContain('ia_negate');
   });
 });
 
@@ -67,13 +67,13 @@ describe('INTERVAL GLSL COMPILATION - FUNCTIONS', () => {
   test('compiles sin', () => {
     const expr = ce.parse('\\sin(x)');
     const fn = compile(expr, { to: 'interval-glsl' });
-    expect(fn.toString()).toContain('ia_sin');
+    expect(fn.code).toContain('ia_sin');
   });
 
   test('compiles sin with compound argument', () => {
     const expr = ce.parse('\\sin(2x)');
     const fn = compile(expr, { to: 'interval-glsl' });
-    const code = fn.toString();
+    const code = fn.code;
     expect(code).toContain('ia_sin');
     expect(code).toContain('ia_mul');
   });
@@ -81,13 +81,13 @@ describe('INTERVAL GLSL COMPILATION - FUNCTIONS', () => {
   test('compiles cos', () => {
     const expr = ce.parse('\\cos(x)');
     const fn = compile(expr, { to: 'interval-glsl' });
-    expect(fn.toString()).toContain('ia_cos');
+    expect(fn.code).toContain('ia_cos');
   });
 
   test('compiles cos with compound argument', () => {
     const expr = ce.parse('\\cos(2x)');
     const fn = compile(expr, { to: 'interval-glsl' });
-    const code = fn.toString();
+    const code = fn.code;
     expect(code).toContain('ia_cos');
     expect(code).toContain('ia_mul');
   });
@@ -95,46 +95,46 @@ describe('INTERVAL GLSL COMPILATION - FUNCTIONS', () => {
   test('compiles tan', () => {
     const expr = ce.parse('\\tan(x)');
     const fn = compile(expr, { to: 'interval-glsl' });
-    expect(fn.toString()).toContain('ia_tan');
+    expect(fn.code).toContain('ia_tan');
   });
 
   test('compiles sqrt', () => {
     const expr = ce.parse('\\sqrt{x}');
     const fn = compile(expr, { to: 'interval-glsl' });
-    expect(fn.toString()).toContain('ia_sqrt');
+    expect(fn.code).toContain('ia_sqrt');
   });
 
   test('compiles square', () => {
     const expr = ce.parse('x^2');
     const fn = compile(expr, { to: 'interval-glsl' });
     // Square may compile to ia_square or ia_pow with exponent 2
-    const code = fn.toString();
+    const code = fn.code;
     expect(code.includes('ia_square') || code.includes('ia_pow')).toBe(true);
   });
 
   test('compiles power', () => {
     const expr = ce.parse('x^3');
     const fn = compile(expr, { to: 'interval-glsl' });
-    expect(fn.toString()).toContain('ia_pow');
+    expect(fn.code).toContain('ia_pow');
   });
 
   test('compiles exp', () => {
     // e^x is Power(ExponentialE, x) internally but should compile to ia_exp
     const expr = ce.parse('e^x');
     const fn = compile(expr, { to: 'interval-glsl' });
-    expect(fn.toString()).toContain('ia_exp');
+    expect(fn.code).toContain('ia_exp');
   });
 
   test('compiles ln', () => {
     const expr = ce.parse('\\ln(x)');
     const fn = compile(expr, { to: 'interval-glsl' });
-    expect(fn.toString()).toContain('ia_ln');
+    expect(fn.code).toContain('ia_ln');
   });
 
   test('compiles ln with compound argument', () => {
     const expr = ce.parse('\\ln(2x)');
     const fn = compile(expr, { to: 'interval-glsl' });
-    const code = fn.toString();
+    const code = fn.code;
     expect(code).toContain('ia_ln');
     expect(code).toContain('ia_mul');
   });
@@ -142,13 +142,13 @@ describe('INTERVAL GLSL COMPILATION - FUNCTIONS', () => {
   test('compiles abs', () => {
     const expr = ce.parse('|x|');
     const fn = compile(expr, { to: 'interval-glsl' });
-    expect(fn.toString()).toContain('ia_abs');
+    expect(fn.code).toContain('ia_abs');
   });
 
   test('compiles abs with additive argument', () => {
     const expr = ce.parse('|x+x|');
     const fn = compile(expr, { to: 'interval-glsl' });
-    const code = fn.toString();
+    const code = fn.code;
     expect(code).toContain('ia_abs');
     expect(code).toContain('ia_add');
   });
@@ -239,7 +239,7 @@ describe('INTERVAL GLSL COMPLEX EXPRESSIONS', () => {
   test('compiles sin(x)/x', () => {
     const expr = ce.parse('\\frac{\\sin(x)}{x}');
     const fn = compile(expr, { to: 'interval-glsl' });
-    const code = fn.toString();
+    const code = fn.code;
 
     expect(code).toContain('ia_div');
     expect(code).toContain('ia_sin');
@@ -248,7 +248,7 @@ describe('INTERVAL GLSL COMPLEX EXPRESSIONS', () => {
   test('compiles x^2 + y^2', () => {
     const expr = ce.parse('x^2 + y^2');
     const fn = compile(expr, { to: 'interval-glsl' });
-    const code = fn.toString();
+    const code = fn.code;
 
     expect(code).toContain('ia_add');
     // Square may be ia_square or ia_pow
@@ -258,7 +258,7 @@ describe('INTERVAL GLSL COMPLEX EXPRESSIONS', () => {
   test('compiles nested expressions', () => {
     const expr = ce.parse('\\sin(\\cos(x))');
     const fn = compile(expr, { to: 'interval-glsl' });
-    const code = fn.toString();
+    const code = fn.code;
 
     expect(code).toContain('ia_sin');
     expect(code).toContain('ia_cos');
@@ -269,7 +269,7 @@ describe('INTERVAL GLSL COMPLEX EXPRESSIONS', () => {
   test('compiles exp(-x^2)', () => {
     const expr = ce.parse('e^{-x^2}');
     const fn = compile(expr, { to: 'interval-glsl' });
-    const code = fn.toString();
+    const code = fn.code;
 
     expect(code).toContain('ia_exp');
     expect(code).toContain('ia_negate');
@@ -282,13 +282,13 @@ describe('INTERVAL GLSL OUTPUT FORMAT', () => {
   test('float constants have decimal points', () => {
     const expr = ce.parse('5');
     const fn = compile(expr, { to: 'interval-glsl' });
-    expect(fn.toString()).toContain('5.0');
+    expect(fn.code).toContain('5.0');
   });
 
   test('compiles chained operations correctly', () => {
     const expr = ce.parse('a + b + c');
     const fn = compile(expr, { to: 'interval-glsl' });
-    const code = fn.toString();
+    const code = fn.code;
 
     // Should be nested: ia_add(ia_add(a, b), c)
     const addCount = (code.match(/ia_add/g) || []).length;

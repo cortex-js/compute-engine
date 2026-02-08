@@ -4,8 +4,8 @@ import { engine, exprToString } from '../../utils';
 function check(arg: string | Expression): string {
   const boxed =
     typeof arg === 'string'
-      ? engine.parse(arg, { canonical: false })
-      : engine.box(arg, { canonical: false });
+      ? engine.parse(arg, { form: 'raw' })
+      : engine.box(arg, { form: 'raw' });
   const canonical = boxed.canonical;
   // const evaluated = canonical.evaluate();
 

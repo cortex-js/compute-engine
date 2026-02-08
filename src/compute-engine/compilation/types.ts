@@ -77,11 +77,11 @@ export interface LanguageTarget {
   /** Create a CompileTarget for this language */
   createTarget(options?: Partial<CompileTarget>): CompileTarget;
 
-  /** Compile an expression to executable code in this language */
-  compileToExecutable(
+  /** Compile an expression to this language */
+  compile(
     expr: BoxedExpression,
     options?: CompilationOptions
-  ): CompiledExecutable;
+  ): CompilationResult;
 }
 
 /**
@@ -165,15 +165,18 @@ export interface CompilationOptions {
 }
 
 /**
- * A compiled expression that can be executed
+ * Result of compiling an expression
  */
-export interface CompiledExecutable {
-  /** Execute the compiled code */
-  (...args: any[]): any;
+export interface CompilationResult {
+  /** Target language name */
+  target: string;
 
-  /** Get the source code */
-  toString(): string;
+  /** Whether compilation succeeded (vs falling back to interpretation) */
+  success: boolean;
 
-  /** Flag indicating this is a compiled expression */
-  isCompiled: true;
+  /** Generated source code */
+  code: string;
+
+  /** Executable function (present for JS-executable targets only) */
+  run?: (...args: any[]) => any;
 }

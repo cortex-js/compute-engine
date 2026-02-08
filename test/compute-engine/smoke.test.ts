@@ -20,7 +20,7 @@ import { engine, simplify } from '../utils';
 const ce = engine;
 
 function parseToJson(latex: string): Expression {
-  return engine.parse(latex, { canonical: false }).json;
+  return engine.parse(latex, { form: 'raw' }).json;
 }
 
 function canonicalToJson(latex: string): Expression {
@@ -46,7 +46,7 @@ function customCanonical(expr) {
 
   if (expr.ops)
     return expr.engine.box([expr.head, ...expr.ops.map(customCanonical)], {
-      canonical: ['InvisibleOperator', 'Order', 'Flatten'],
+      form: ['InvisibleOperator', 'Order', 'Flatten'],
     });
 
   return expr.canonical;
@@ -199,13 +199,13 @@ describe('SERIALIZING Incomplete expressions', () => {
     ).toMatchInlineSnapshot(`\\frac{2}{3}`);
   });
   test(`['Divide']`, () =>
-    expect(ce.box(['Divide'], { canonical: false })).toMatchInlineSnapshot(
+    expect(ce.box(['Divide'], { form: 'raw' })).toMatchInlineSnapshot(
       `["Divide"]`
     ));
   test(`['Power', undefined]`, () =>
     expect(
       ce.box(['Power', undefined as unknown as Expression], {
-        canonical: false,
+        form: 'raw',
       })
     ).toMatchInlineSnapshot(`["Power", ["Error", "'missing'"]]`));
 });

@@ -225,6 +225,29 @@ export type CanonicalForm =
 export type CanonicalOptions = boolean | CanonicalForm | CanonicalForm[];
 
 /**
+ * Controls how an expression is created:
+ *
+ * - `'canonical'` (default): Full canonicalization with binding. Equivalent
+ *   to the previous `{ canonical: true }`.
+ * - `'raw'`: No canonicalization, no binding. Equivalent to the previous
+ *   `{ canonical: false }`.
+ * - `'structural'`: Binding + structural normalization (flatten associative
+ *   ops, sort commutative ops) but no full canonicalization. Equivalent to
+ *   the previous `{ structural: true }`.
+ * - A single `CanonicalForm` name (e.g. `'Number'`): Apply only that canonical
+ *   form.
+ * - An array of `CanonicalForm` names: Apply those canonical forms in order.
+ *
+ * @category Boxed Expression
+ */
+export type FormOption =
+  | 'canonical'
+  | 'structural'
+  | 'raw'
+  | CanonicalForm
+  | CanonicalForm[];
+
+/**
  * Metadata that can be associated with an MathJSON expression.
  *
  * @category Boxed Expression

@@ -10,12 +10,12 @@ describe('CANONICAL FORM RESTRICTIONS', () => {
   // Some operations are not allowed in non-canonical form
   test("Can't set value of non-canonical", () => {
     expect(() => {
-      TEST_ENGINE.box('m', { canonical: false }).value = 1;
+      TEST_ENGINE.box('m', { form: 'raw' }).value = 1;
     }).toThrow();
   });
   test('Non-canonical expressions evaluate to themselves', () => {
     expect(
-      TEST_ENGINE.parse('2 + 3', { canonical: false }).evaluate().toString()
+      TEST_ENGINE.parse('2 + 3', { form: 'raw' }).evaluate().toString()
     ).toEqual('2 + 3');
   });
 });
@@ -728,14 +728,14 @@ describe('CANONICAL FORMS', () => {
 
     const nonCanon = (input: string | SemiBoxedExpression) =>
       typeof input === 'string'
-        ? ce.parse(input, { canonical: false })
-        : ce.box(input, { canonical: false });
+        ? ce.parse(input, { form: 'raw' })
+        : ce.box(input, { form: 'raw' });
     const checkNumber = (input: string | SemiBoxedExpression) =>
       checkForms(input, ['Number'], ce);
     const canonNumber = (input: string | SemiBoxedExpression) =>
       typeof input === 'string'
-        ? ce.parse(input, { canonical: 'Number' })
-        : ce.box(input, { canonical: 'Number' });
+        ? ce.parse(input, { form: 'Number' })
+        : ce.box(input, { form: 'Number' });
 
     //*note*: BoxedNumbers may get JSON serialized as ['Rational',...] ('check' outputs JSON): so
     //need to additionally test for the result 'operator' as 'Number' for desired result.
@@ -1231,8 +1231,8 @@ function checkForms(
     //Boxed, *non-canonical*
     const boxed =
       typeof inExpr === 'string'
-        ? engine.parse(inExpr, { canonical: false })
-        : engine.box(inExpr, { canonical: false });
+        ? engine.parse(inExpr, { form: 'raw' })
+        : engine.box(inExpr, { form: 'raw' });
 
     const boxedStr = exprToString(boxed);
 
@@ -1240,7 +1240,7 @@ function checkForms(
       return `invalid   =${exprToString(boxed)}`;
     }
 
-    const partialCanon = engine.box(boxed, { canonical: forms });
+    const partialCanon = engine.box(boxed, { form: forms });
     const partialCanonStr = exprToString(partialCanon);
 
     const canonical = engine.box(boxed);

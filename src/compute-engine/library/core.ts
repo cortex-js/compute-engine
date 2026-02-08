@@ -802,7 +802,7 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
         const forms = ops
           .slice(1)
           .map((x) => x.symbol ?? x.string)
-          .filter((x) => x !== undefined && x !== null) as CanonicalForm[];
+          .filter((x) => x !== undefined) as CanonicalForm[];
         return canonicalForm(ops[0], forms);
       },
     },

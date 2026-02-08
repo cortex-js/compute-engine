@@ -9,7 +9,7 @@ function parse(s: string) {
 function parseVal(s: string): string | number {
   const result = ce.parse(s).numericValue;
   if (typeof result === 'number') return result;
-  if (result === null) return NaN;
+  if (result === undefined) return NaN;
   return result.toString();
 }
 

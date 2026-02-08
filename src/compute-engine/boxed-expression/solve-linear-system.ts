@@ -582,7 +582,7 @@ function compareAbsoluteValues(
   const bNum = absB.numericValue;
 
   // If both are numeric values (not expressions), compare them exactly
-  if (aNum !== null && bNum !== null) {
+  if (aNum !== undefined && bNum !== undefined) {
     // Handle machine numbers
     if (typeof aNum === 'number' && typeof bNum === 'number') {
       if (aNum === bNum) return 0;
@@ -609,7 +609,7 @@ function compareAbsoluteValues(
   const aVal = absA.N().numericValue;
   const bVal = absB.N().numericValue;
 
-  if (aVal === null || bVal === null) return undefined;
+  if (aVal === undefined || bVal === undefined) return undefined;
 
   const aReal = typeof aVal === 'number' ? aVal : ((aVal as any).re ?? aVal);
   const bReal = typeof bVal === 'number' ? bVal : ((bVal as any).re ?? bVal);
@@ -637,7 +637,7 @@ function isEffectivelyZero(expr: BoxedExpression | undefined): boolean {
 
   // Fallback: check numeric value with small tolerance
   const numVal = expr.N().numericValue;
-  if (numVal === null) return false;
+  if (numVal === undefined) return false;
 
   const re = typeof numVal === 'number' ? numVal : (numVal as any).re;
   if (typeof re === 'number' && Math.abs(re) < 1e-14) return true;
@@ -1070,8 +1070,8 @@ const INEQUALITY_OPERATORS = ['Less', 'LessEqual', 'Greater', 'GreaterEqual'];
 /**
  * Check if an operator is an inequality operator
  */
-function isInequalityOperator(op: string | null): boolean {
-  return op !== null && INEQUALITY_OPERATORS.includes(op);
+function isInequalityOperator(op: string | undefined): boolean {
+  return op !== undefined && INEQUALITY_OPERATORS.includes(op);
 }
 
 /**

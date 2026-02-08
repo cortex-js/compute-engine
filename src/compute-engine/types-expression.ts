@@ -223,7 +223,7 @@ export interface Tensor<DT extends TensorDataType> extends TensorData<DT> {
  * function expressions.
  *
  * When a property is not applicable to this `BoxedExpression` its value is
- * `null`. For example `expr.symbol` for a `BoxedNumber` is `null`.
+ * `undefined`. For example `expr.symbol` for a `BoxedNumber` is `undefined`.
  *
  * This convention makes it convenient to manipulate expressions without
  * having to check what kind of instance they are before manipulating them.
@@ -718,7 +718,7 @@ export interface BoxedExpression {
    * Return `true` if this expression is a number literal, for example
    * `2`, `3.14`, `1/2`, `√2` etc.
    *
-   * When `true`, `expr.numericValue` is not `null`.
+   * When `true`, `expr.numericValue` is not `undefined`.
    *
    * @category Numeric Expression
    *
@@ -728,22 +728,22 @@ export interface BoxedExpression {
   /**
    * Return the value of this expression, if a number literal.
    *
-   * Note it is possible for `expr.numericValue` to be `null`, and for
+   * Note it is possible for `expr.numericValue` to be `undefined`, and for
    * `expr.is(0)` to be false. For example, when a symbol has been
    * defined with an assumption.
    *
    * Conversely, `expr.isNumber` may be true even if `expr.numericValue` is
-   * `null`, for example the symbol `Pi` return `true` for `isNumber` but
-   * `expr.numericValue` is `null` (it's a symbol, not a number literal).
+   * `undefined`, for example the symbol `Pi` return `true` for `isNumber` but
+   * `expr.numericValue` is `undefined` (it's a symbol, not a number literal).
    * Its value can be accessed with `expr.value`.
    *
    * To check if an expression is a number literal, use `expr.isNumberLiteral`.
-   * If `expr.isNumberLiteral` is `true`, `expr.numericValue` is not `null`.
+   * If `expr.isNumberLiteral` is `true`, `expr.numericValue` is not `undefined`.
    *
    * @category Numeric Expression
    *
    */
-  readonly numericValue: number | NumericValue | null;
+  readonly numericValue: number | NumericValue | undefined;
 
   /**
    * Attempt to factor a numeric coefficient `c` and a `rest` out of a
@@ -918,7 +918,7 @@ export interface BoxedExpression {
   get numeratorDenominator(): [BoxedExpression, BoxedExpression];
 
   /** If this expression is a symbol, return the name of the symbol as a string.
-   * Otherwise, return `null`.
+   * Otherwise, return `undefined`.
    *
    * :::info[Note]
    * Applicable to canonical and non-canonical expressions.
@@ -927,10 +927,10 @@ export interface BoxedExpression {
    * @category Symbol Expression
    *
    */
-  readonly symbol: string | null;
+  readonly symbol: string | undefined;
 
   /** If this expression is a string, return the value of the string.
-    * Otherwise, return `null`.
+    * Otherwise, return `undefined`.
     *
     * :::info[Note]
     * Applicable to canonical and non-canonical expressions.
@@ -939,12 +939,12 @@ export interface BoxedExpression {
     * @category String Expression
     *
     */
-  readonly string: string | null;
+  readonly string: string | undefined;
 
   /**
    * Return `true` if this expression is a function expression.
    *
-   * If `true`, `expr.ops` is not `null`, and `expr.operator` is the name
+   * If `true`, `expr.ops` is not `undefined`, and `expr.operator` is the name
    * of the function.
    *
    * @category Function Expression
@@ -970,7 +970,7 @@ export interface BoxedExpression {
 
   /** The list of operands of the function.
    *
-   * If the expression is not a function, return `null`.
+   * If the expression is not a function, return `undefined`.
    *
    * :::info[Note]
    * Applicable to canonical and non-canonical expressions.
@@ -979,12 +979,12 @@ export interface BoxedExpression {
    * @category Function Expression
    *
    */
-  readonly ops: null | ReadonlyArray<BoxedExpression>;
+  readonly ops: ReadonlyArray<BoxedExpression> | undefined;
 
   /** If this expression is a function, the number of operands, otherwise 0.
    *
    * Note that a function can have 0 operands, so to check if this expression
-   * is a function, check if `this.ops !== null` instead.
+   * is a function, check if `this.ops !== undefined` instead.
    *
    * :::info[Note]
    * Applicable to canonical and non-canonical expressions.
@@ -1141,7 +1141,7 @@ export interface BoxedExpression {
 
   /** Structural/symbolic equality (weak equality).
    *
-   * `ce.parse('1+x', {canonical: false}).isSame(ce.parse('x+1', {canonical: false}))` is `false`.
+   * `ce.parse('1+x', {form: 'raw'}).isSame(ce.parse('x+1', {form: 'raw'}))` is `false`.
    *
    * See `expr.isEqual()` for mathematical equality.
    *
@@ -1187,7 +1187,7 @@ export interface BoxedExpression {
   ): BoxedSubstitution | null;
 
   /** If this expression is a tensor, return the tensor data.
-   * Otherwise, return `null`.
+   * Otherwise, return `undefined`.
    *
    * :::info[Note]
    * Applicable to canonical and non-canonical expressions.
@@ -1196,7 +1196,7 @@ export interface BoxedExpression {
    * @category Tensor Expression
    *
    */
-  readonly tensor: null | Tensor<any>;
+  readonly tensor: Tensor<any> | undefined;
 
   /**
    *

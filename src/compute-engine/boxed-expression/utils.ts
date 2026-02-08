@@ -247,7 +247,7 @@ export function isImaginaryUnit(expr: BoxedExpression): boolean {
 
   // !note: use 'isSame' instead of checking identity with 'I', to account for potential,
   // non-default definition of the imaginary unit
-  if (expr.symbol !== null) return expr.canonical.isSame(engine.I);
+  if (expr.symbol !== undefined) return expr.canonical.isSame(engine.I);
 
   // function/string/...
   return false;

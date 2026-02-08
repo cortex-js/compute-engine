@@ -189,12 +189,12 @@ console.log(ce.parse('x').value);
 console.log(ce.parse('x').re);
 
 const localInput = '12+(-2)';
-const expr = engine.parse(localInput, { canonical: false });
+const expr = engine.parse(localInput, { form: 'raw' });
 if (expr.operator === 'Add' && expr.op1.valueOf() === 0) {
 }
 
-console.info(JSON.stringify(ce.parse('12+(-2)', { canonical: false }).json));
-console.info(JSON.stringify(ce.parse('12-2', { canonical: false }).json));
+console.info(JSON.stringify(ce.parse('12+(-2)', { form: 'raw' }).json));
+console.info(JSON.stringify(ce.parse('12-2', { form: 'raw' }).json));
 
 ce.box(['Add', 1, { str: 'hello' }]).print();
 

@@ -1,6 +1,6 @@
 import { engine as ce } from '../utils';
 import { compile } from '../../src/compute-engine/compilation/compile-expression';
-import type { LanguageTarget, CompileTarget, CompiledOperators, CompiledFunctions } from '../../src/compute-engine/compilation/types';
+import type { LanguageTarget, CompileTarget, CompiledOperators, CompiledFunctions, CompilationResult } from '../../src/compute-engine/compilation/types';
 import type { BoxedExpression } from '../../src/compute-engine/global-types';
 
 /**
@@ -46,20 +46,19 @@ class PythonTarget implements LanguageTarget {
     };
   }
 
-  compileToExecutable(
+  compile(
     expr: BoxedExpression,
     options: any = {}
-  ): any {
+  ): CompilationResult {
     const { BaseCompiler } = require('../../src/compute-engine/compilation/base-compiler');
     const target = this.createTarget();
     const pythonCode = BaseCompiler.compile(expr, target);
 
-    const result = function () {
-      return pythonCode;
+    return {
+      target: 'python',
+      success: true,
+      code: pythonCode,
     };
-    Object.defineProperty(result, 'toString', { value: () => pythonCode });
-    Object.defineProperty(result, 'isCompiled', { value: true });
-    return result;
   }
 }
 
@@ -102,17 +101,16 @@ class RPNTarget implements LanguageTarget {
     };
   }
 
-  compileToExecutable(expr: BoxedExpression, options: any = {}): any {
+  compile(expr: BoxedExpression, options: any = {}): CompilationResult {
     const { BaseCompiler } = require('../../src/compute-engine/compilation/base-compiler');
     const target = this.createTarget();
     const rpnCode = BaseCompiler.compile(expr, target);
 
-    const result = function () {
-      return rpnCode;
+    return {
+      target: 'rpn',
+      success: true,
+      code: rpnCode,
     };
-    Object.defineProperty(result, 'toString', { value: () => rpnCode });
-    Object.defineProperty(result, 'isCompiled', { value: true });
-    return result;
   }
 }
 
@@ -200,39 +198,39 @@ describe('COMPILATION PLUGIN ARCHITECTURE', () => {
     it('should compile to Python target', () => {
       const expr = ce.parse('x + y');
       const compiled = compile(expr, { to: 'python' });
-      expect(compiled.toString()).toMatchInlineSnapshot(`x + y`);
+      expect(compiled.code).toMatchInlineSnapshot(`x + y`);
     });
 
     it('should compile to Python with functions', () => {
       const expr = ce.parse('\\sin(x) + \\cos(y)');
       const compiled = compile(expr, { to: 'python' });
-      expect(compiled.toString()).toMatchInlineSnapshot(`math.sin(x) + math.cos(y)`);
+      expect(compiled.code).toMatchInlineSnapshot(`math.sin(x) + math.cos(y)`);
     });
 
     it('should compile to Python with power operator', () => {
       const expr = ce.parse('x^2');
       const compiled = compile(expr, { to: 'python' });
       // Power in Python is **
-      expect(compiled.toString()).toMatchInlineSnapshot(`x ** 2`);
+      expect(compiled.code).toMatchInlineSnapshot(`x ** 2`);
     });
 
     it('should compile to RPN target', () => {
       const expr = ce.parse('x + y');
       const compiled = compile(expr, { to: 'rpn' });
-      expect(compiled.toString()).toMatchInlineSnapshot(`x y +`);
+      expect(compiled.code).toMatchInlineSnapshot(`x y +`);
     });
 
     it('should compile complex expression to RPN', () => {
       const expr = ce.parse('(x + y) * z');
       const compiled = compile(expr, { to: 'rpn' });
       // Canonical form may reorder operands: z * (x + y)
-      expect(compiled.toString()).toMatchInlineSnapshot(`z x y + *`);
+      expect(compiled.code).toMatchInlineSnapshot(`z x y + *`);
     });
 
     it('should compile trigonometric to RPN', () => {
       const expr = ce.parse('\\sin(x)');
       const compiled = compile(expr, { to: 'rpn' });
-      expect(compiled.toString()).toMatchInlineSnapshot(`x sin`);
+      expect(compiled.code).toMatchInlineSnapshot(`x sin`);
     });
 
     it('should throw error for unregistered target', () => {
@@ -260,7 +258,7 @@ describe('COMPILATION PLUGIN ARCHITECTURE', () => {
       };
 
       const compiled = compile(expr, { target: customTarget });
-      expect(compiled.toString()).toMatchInlineSnapshot(`VAR_x ⊕ VAR_y`);
+      expect(compiled.code).toMatchInlineSnapshot(`VAR_x ⊕ VAR_y`);
     });
 
     it('should prioritize target over to option', () => {
@@ -284,7 +282,7 @@ describe('COMPILATION PLUGIN ARCHITECTURE', () => {
       });
 
       // Should use custom target, not javascript
-      expect(compiled.toString()).toBe('CUSTOM_x');
+      expect(compiled.code).toBe('CUSTOM_x');
     });
   });
 
@@ -292,19 +290,19 @@ describe('COMPILATION PLUGIN ARCHITECTURE', () => {
     it('should compile to GLSL via registry', () => {
       const expr = ce.parse('x + y');
       const compiled = compile(expr, { to: 'glsl' });
-      expect(compiled.toString()).toMatchInlineSnapshot(`x + y`);
+      expect(compiled.code).toMatchInlineSnapshot(`x + y`);
     });
 
     it('should compile GLSL functions', () => {
       const expr = ce.parse('\\sin(x)');
       const compiled = compile(expr, { to: 'glsl' });
-      expect(compiled.toString()).toMatchInlineSnapshot(`sin(x)`);
+      expect(compiled.code).toMatchInlineSnapshot(`sin(x)`);
     });
 
     it('should compile GLSL vectors', () => {
       const expr = ce.box(['List', 1, 2, 3]);
       const compiled = compile(expr, { to: 'glsl' });
-      expect(compiled.toString()).toMatchInlineSnapshot(`vec3(1.0, 2.0, 3.0)`);
+      expect(compiled.code).toMatchInlineSnapshot(`vec3(1.0, 2.0, 3.0)`);
     });
   });
 
@@ -312,21 +310,21 @@ describe('COMPILATION PLUGIN ARCHITECTURE', () => {
     it('should compile to JavaScript via registry (default)', () => {
       const expr = ce.parse('x + y');
       const compiled = compile(expr);
-      expect(typeof compiled).toBe('function');
-      expect(compiled.isCompiled).toBe(true);
+      expect(compiled.run).toBeDefined();
+      expect(compiled.success).toBe(true);
     });
 
     it('should compile to JavaScript via registry (explicit)', () => {
       const expr = ce.parse('x + y');
       const compiled = compile(expr, { to: 'javascript' });
-      expect(typeof compiled).toBe('function');
-      expect(compiled.isCompiled).toBe(true);
+      expect(compiled.run).toBeDefined();
+      expect(compiled.success).toBe(true);
     });
 
     it('should execute compiled JavaScript function', () => {
       const expr = ce.parse('x + y');
-      const f = compile(expr, { to: 'javascript' }) as any;
-      expect(f({ x: 3, y: 4 })).toBe(7);
+      const compiled = compile(expr, { to: 'javascript' });
+      expect(compiled.run!({ x: 3, y: 4 })).toBe(7);
     });
   });
 });

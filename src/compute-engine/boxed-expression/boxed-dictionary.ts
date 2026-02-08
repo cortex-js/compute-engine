@@ -272,7 +272,7 @@ function boxedExpressionToDictionaryValue(
   if (value.symbol === 'False') return false;
   if (value.symbol) return { sym: value.symbol };
 
-  if (value.numericValue !== null && value.type.matches('real'))
+  if (value.numericValue !== undefined && value.type.matches('real'))
     return value.re;
 
   if (value.operator === 'List')
@@ -292,6 +292,8 @@ function dictionaryValueToBoxedExpression(
   if (typeof value === 'number') return ce.number(value, options);
   if (typeof value === 'boolean') return value ? ce.True : ce.False;
 
+  const form = options?.canonical === false ? 'raw' : 'canonical';
+
   if (Array.isArray(value)) {
     return ce.function(
       'List',
@@ -302,7 +304,7 @@ function dictionaryValueToBoxedExpression(
     if ('num' in value) return ce.number(value.num, options);
     if ('str' in value) return ce.string(value.str);
     if ('sym' in value) return ce.symbol(value.sym, options);
-    if ('fn' in value) return ce.box(value, options);
+    if ('fn' in value) return ce.box(value, { form });
     if ('dict' in value) return new BoxedDictionary(ce, value.dict, options);
   }
   return ce.Nothing;

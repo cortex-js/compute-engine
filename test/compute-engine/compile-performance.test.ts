@@ -71,7 +71,7 @@ describe('COMPILATION PERFORMANCE', () => {
 
       // Measure compiled execution time
       const compiledTime = benchmark(() => {
-        compiled(testData);
+        compiled.run!(testData);
       }, 10000);
 
       log(`  Evaluation time: ${evalTime.toFixed(2)}ms (10k iterations)`);
@@ -101,7 +101,7 @@ describe('COMPILATION PERFORMANCE', () => {
       }, 10000);
 
       const compiledTime = benchmark(() => {
-        compiled({ x: 2.5 });
+        compiled.run!({ x: 2.5 });
       }, 10000);
 
       log(`  Polynomial evaluation: ${evalTime.toFixed(2)}ms`);
@@ -130,7 +130,7 @@ describe('COMPILATION PERFORMANCE', () => {
       }, 10000);
 
       const compiledTime = benchmark(() => {
-        compiled(testData);
+        compiled.run!(testData);
       }, 10000);
 
       log(`  Trig evaluation: ${evalTime.toFixed(2)}ms`);
@@ -159,7 +159,7 @@ describe('COMPILATION PERFORMANCE', () => {
       }, 10000);
 
       const compiledTime = benchmark(() => {
-        compiled(testData);
+        compiled.run!(testData);
       }, 10000);
 
       log(`  Nested evaluation: ${evalTime.toFixed(2)}ms`);
@@ -191,7 +191,7 @@ describe('COMPILATION PERFORMANCE', () => {
       }, 1000);
 
       const compiledTime = benchmark(() => {
-        compiled({ x: 1.1 });
+        compiled.run!({ x: 1.1 });
       }, 1000);
 
       log(`  Large expr evaluation: ${evalTime.toFixed(2)}ms`);
@@ -226,7 +226,7 @@ describe('COMPILATION PERFORMANCE', () => {
       }, 10000);
 
       const compiledTime = benchmark(() => {
-        compiled(testData);
+        compiled.run!(testData);
       }, 10000);
 
       log(`  Many vars evaluation: ${evalTime.toFixed(2)}ms`);
@@ -314,7 +314,7 @@ describe('COMPILATION PERFORMANCE', () => {
       // Baseline compiled
       const baseline = compile(expr);
       const baselineExec = benchmark(() => {
-        baseline({ x: 1, y: 2 });
+        baseline.run!({ x: 1, y: 2 });
       }, 10000);
 
       // Custom operator compiled
@@ -327,7 +327,7 @@ describe('COMPILATION PERFORMANCE', () => {
         },
       });
       const customExec = benchmark(() => {
-        custom({ x: 1, y: 2 });
+        custom.run!({ x: 1, y: 2 });
       }, 10000);
 
       log(`  Baseline execution: ${baselineExec.toFixed(2)}ms`);
@@ -392,7 +392,7 @@ describe('COMPILATION PERFORMANCE', () => {
       }, 10000);
 
       const compiledTime = benchmark(() => {
-        compiled(testData);
+        compiled.run!(testData);
       }, 10000);
 
       log(`  Distance evaluation: ${evalTime.toFixed(2)}ms`);
@@ -420,7 +420,7 @@ describe('COMPILATION PERFORMANCE', () => {
       }, 10000);
 
       const compiledTime = benchmark(() => {
-        compiled(testData);
+        compiled.run!(testData);
       }, 10000);
 
       log(`  Quadratic evaluation: ${evalTime.toFixed(2)}ms`);
@@ -448,7 +448,7 @@ describe('COMPILATION PERFORMANCE', () => {
       }, 10000);
 
       const compiledTime = benchmark(() => {
-        compiled(testData);
+        compiled.run!(testData);
       }, 10000);
 
       log(`  Kinematics evaluation: ${evalTime.toFixed(2)}ms`);

@@ -78,7 +78,7 @@ export function wildcardType(
     return null;
   }
 
-  if (expr.symbol !== null) {
+  if (expr.symbol !== undefined) {
     const symbol = expr.symbol!;
     if (!symbol.startsWith('_')) return null;
     if (!symbol.startsWith('__')) return 'Wildcard';

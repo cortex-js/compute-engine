@@ -18,7 +18,7 @@ export const COMPLEX_LIBRARY: SymbolDefinitions[] = [
       },
       evaluate: (ops, { engine: ce }) => {
         const op = ops[0].numericValue;
-        if (op === null) return undefined;
+        if (op === undefined) return undefined;
         if (typeof op === 'number') return ops[0];
         return ce.number(op.bignumRe ?? op.re);
       },
@@ -35,7 +35,7 @@ export const COMPLEX_LIBRARY: SymbolDefinitions[] = [
       },
       evaluate: (ops, { engine: ce }) => {
         const op = ops[0].numericValue;
-        if (op === null) return undefined;
+        if (op === undefined) return undefined;
         if (typeof op === 'number') return ce.Zero;
         return ce.number(op.im);
       },
@@ -46,7 +46,7 @@ export const COMPLEX_LIBRARY: SymbolDefinitions[] = [
       signature: '(number) -> real',
       evaluate: (ops, { engine: ce }) => {
         const op = ops[0].numericValue;
-        if (op === null) return undefined;
+        if (op === undefined) return undefined;
         if (typeof op === 'number') return op >= 0 ? ce.Zero : ce.Pi;
         if (op.im === 0) return op.re >= 0 ? ce.Zero : ce.Pi;
         return ce.function('ArcTan2', [op.im, op.re]).evaluate();
@@ -60,7 +60,7 @@ export const COMPLEX_LIBRARY: SymbolDefinitions[] = [
       complexity: 1200,
       signature: '(number) -> tuple<real, real>',
       evaluate: (ops, { engine: ce }) => {
-        if (ops[0].numericValue === null) return undefined;
+        if (ops[0].numericValue === undefined) return undefined;
         return ce.tuple(
           ce.function('Abs', ops).evaluate(),
           ce.function('Argument', ops).evaluate()
@@ -76,7 +76,7 @@ export const COMPLEX_LIBRARY: SymbolDefinitions[] = [
       sgn: ([z]) => z.sgn,
       evaluate: (ops, { engine: ce }) => {
         const op = ops[0].numericValue;
-        if (op === null) return undefined;
+        if (op === undefined) return undefined;
         if (typeof op === 'number' || op.im === 0) return ops[0];
         return ce.number(ce.complex(op.re, -op.im));
       },

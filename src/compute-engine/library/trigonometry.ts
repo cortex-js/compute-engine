@@ -54,7 +54,7 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
         if (ce.angularUnit === 'deg') return ops[0];
         if (ops.length !== 1) return ce._fn('Degrees', ops);
         const arg = ops[0];
-        if (arg.numericValue === null || !arg.isValid)
+        if (arg.numericValue === undefined || !arg.isValid)
           return ce._fn('Degrees', ops);
 
         let fArg = arg.re;

@@ -43,7 +43,7 @@ function exprToStringRecursive(
   if (expr instanceof _BoxedExpression) {
     const ce = expr.engine;
     return exprToStringRecursive(
-      ce.box(expr, { canonical: false }).toMathJson({ prettify: true }), // The default is 'prettify: true'
+      ce.box(expr, { form: 'raw' }).toMathJson({ prettify: true }), // The default is 'prettify: true'
       start
     );
   }
@@ -166,7 +166,7 @@ export function checkJson(
       'N-auto',
     ];
 
-    const boxed = exprToString(ce.box(inExpr, { canonical: false }));
+    const boxed = exprToString(ce.box(inExpr, { form: 'raw' }));
 
     const expr = ce.box(inExpr);
 
@@ -231,7 +231,7 @@ export function checkJson(
 }
 
 export function check(latex: string, variants?: Array<ExprVariant>): string {
-  return checkJson(engine.parse(latex, { canonical: false }), variants);
+  return checkJson(engine.parse(latex, { form: 'raw' }), variants);
 }
 
 export function latex(expr: Expression | undefined | null): string {

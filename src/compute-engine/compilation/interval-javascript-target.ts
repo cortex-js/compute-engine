@@ -16,7 +16,7 @@ import type {
   CompiledFunctions,
   LanguageTarget,
   CompilationOptions,
-  CompiledExecutable,
+  CompilationResult,
 } from './types';
 import { IntervalArithmetic } from '../interval';
 
@@ -326,10 +326,10 @@ export class IntervalJavaScriptTarget implements LanguageTarget {
     };
   }
 
-  compileToExecutable(
+  compile(
     expr: BoxedExpression,
     options: CompilationOptions = {}
-  ): CompiledExecutable {
+  ): CompilationResult {
     const { functions, vars, preamble } = options;
     const unknowns = expr.unknowns;
 
@@ -383,10 +383,13 @@ export class IntervalJavaScriptTarget implements LanguageTarget {
 function compileToIntervalTarget(
   expr: BoxedExpression,
   target: CompileTarget
-): CompiledExecutable {
+): CompilationResult {
   const js = BaseCompiler.compile(expr, target);
-  return new ComputeEngineIntervalFunction(
-    js,
-    target.preamble
-  ) as unknown as CompiledExecutable;
+  const fn = new ComputeEngineIntervalFunction(js, target.preamble);
+  return {
+    target: 'interval-js',
+    success: true,
+    code: js,
+    run: fn as unknown as (...args: any[]) => any,
+  };
 }

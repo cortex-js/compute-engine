@@ -282,7 +282,7 @@ export function differentiate(
 
     // Create Power expression as structural (bound but not canonicalized) to avoid Root conversion
     const power = ce.function('Power', [base, newExponent], {
-      structural: true,
+      form: 'structural',
     });
 
     return simplifyDerivative(exponent.mul(power).mul(basePrime));

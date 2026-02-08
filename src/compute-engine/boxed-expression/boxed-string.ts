@@ -84,7 +84,7 @@ export class BoxedString extends _BoxedExpression {
     _options?: PatternMatchOptions
   ): BoxedSubstitution | null {
     if (!isBoxedExpression(pattern))
-      pattern = this.engine.box(pattern, { canonical: false });
+      pattern = this.engine.box(pattern, { form: 'raw' });
 
     if (isWildcard(pattern)) return { [wildcardName(pattern)!]: this };
 

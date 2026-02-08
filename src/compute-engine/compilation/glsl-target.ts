@@ -6,7 +6,7 @@ import type {
   CompiledFunctions,
   LanguageTarget,
   CompilationOptions,
-  CompiledExecutable,
+  CompilationResult,
 } from './types';
 
 /**
@@ -267,13 +267,12 @@ export class GLSLTarget implements LanguageTarget {
   /**
    * Compile to GLSL source code (not executable)
    *
-   * GLSL doesn't run in JavaScript, so this returns source code as a string
-   * rather than an executable function.
+   * GLSL doesn't run in JavaScript, so this returns source code only.
    */
-  compileToExecutable(
+  compile(
     expr: BoxedExpression,
     options: CompilationOptions = {}
-  ): CompiledExecutable {
+  ): CompilationResult {
     const { functions, vars } = options;
 
     // Dynamic import to avoid circular dependency
@@ -306,23 +305,7 @@ export class GLSLTarget implements LanguageTarget {
 
     const glslCode = BaseCompiler.compile(expr, target);
 
-    // Return a "compiled" object that contains the GLSL source code
-    // This follows the CompiledExecutable interface but doesn't execute
-    const result = function () {
-      return glslCode;
-    };
-
-    // Add toString to return the GLSL code
-    Object.defineProperty(result, 'toString', {
-      value: () => glslCode,
-    });
-
-    // Add isCompiled flag
-    Object.defineProperty(result, 'isCompiled', {
-      value: true,
-    });
-
-    return result as CompiledExecutable;
+    return { target: 'glsl', success: true, code: glslCode };
   }
 
   /**
@@ -330,7 +313,7 @@ export class GLSLTarget implements LanguageTarget {
    *
    * Returns the GLSL code as a string.
    */
-  compile(expr: BoxedExpression, _options: CompilationOptions = {}): string {
+  compileToSource(expr: BoxedExpression, _options: CompilationOptions = {}): string {
     // Dynamic import to avoid circular dependency
     const { BaseCompiler } = require('./base-compiler');
     const target = this.createTarget();
@@ -430,7 +413,7 @@ export class GLSLTarget implements LanguageTarget {
     // Add main function
     code += 'void main() {\n';
     for (const assignment of body) {
-      const glsl = this.compile(assignment.expression);
+      const glsl = this.compileToSource(assignment.expression);
       code += `  ${assignment.variable} = ${glsl};\n`;
     }
     code += '}\n';

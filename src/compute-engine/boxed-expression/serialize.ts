@@ -51,7 +51,7 @@ function serializeSubtract(
   options: Readonly<JsonSerializationOptions>,
   metadata?: Metadata
 ): Expression | null {
-  if (a.numericValue !== null && a.isNegative) {
+  if (a.numericValue !== undefined && a.isNegative) {
     const v = a.numericValue;
     if (typeof v === 'number') {
       return serializeJsonFunction(
@@ -149,7 +149,7 @@ function serializePrettyJsonFunction(
     if (!exclusions.includes('Exp') && args[0]?.symbol === 'ExponentialE')
       return serializeJsonFunction(ce, 'Exp', [args[1]], options, metadata);
 
-    if (args[1]?.numericValue !== null) {
+    if (args[1]?.numericValue !== undefined) {
       const exp = asSmallInteger(args[1]);
       // x^2 -> Square(x)
       if (exp === 2 && !exclusions.includes('Square'))
@@ -228,7 +228,7 @@ function serializePrettyJsonFunction(
   }
 
   if (name === 'Add' && args.length === 2 && !exclusions.includes('Subtract')) {
-    if (args[1]?.numericValue !== null) {
+    if (args[1]?.numericValue !== undefined) {
       const t1 = asSmallInteger(args[1]);
       if (t1 !== null && t1 < 0)
         return serializeJsonFunction(
@@ -264,8 +264,8 @@ function serializePrettyJsonFunction(
       const block = args[0];
       if (block.nops === 1) {
         const params = args.slice(1);
-        if (params.every((x) => /_\d?/.test(x.symbol!))) {
-          if (block.op1.ops?.every((x, i) => x.symbol === params[i]?.symbol)) {
+        if (params.every((x) => x.symbol !== undefined && /_\d?/.test(x.symbol))) {
+          if (block.op1.ops?.every((x, i) => x.symbol !== undefined && x.symbol === params[i]?.symbol)) {
             // [`["Function", ["Block", ["Add", "_1", "_2"]], "_1", "_2"]`] -> `["Function", "Add"]`
             return serializeJsonFunction(
               ce,
@@ -315,7 +315,7 @@ function serializeJsonFunction(
   //
   if (name === 'Negate' && args.length === 1) {
     const num0 = args[0]?.numericValue;
-    if (num0 !== null) {
+    if (num0 !== undefined) {
       if (typeof num0 === 'number')
         return serializeJsonNumber(ce, -num0, options);
       if (num0 instanceof Decimal)
@@ -358,7 +358,7 @@ function serializeJsonFunction(
     if (
       name === 'Root' &&
       args.length === 2 &&
-      args[1]?.numericValue !== null
+      args[1]?.numericValue !== undefined
     ) {
       const n = asSmallInteger(args[1]);
       if (n === 2) return serializeJsonFunction(ce, 'Sqrt', [args[0]], options);
@@ -837,7 +837,7 @@ export function serializeJson(
   const wikidata = expr.wikidata;
 
   // Is it a number literal?
-  if (expr.numericValue !== null)
+  if (expr.numericValue !== undefined)
     return serializeJsonNumber(ce, expr.numericValue, options, {
       latex: expr.verbatimLatex,
     });
@@ -849,10 +849,10 @@ export function serializeJson(
   if (expr.type.matches('dictionary')) return expr.toMathJson(options);
 
   // Is it a string?
-  if (expr.string !== null) return serializeJsonString(expr.string, options);
+  if (expr.string !== undefined) return serializeJsonString(expr.string, options);
 
   // Is it a symbol?
-  if (expr.symbol !== null) {
+  if (expr.symbol !== undefined) {
     return serializeJsonSymbol(ce, expr.symbol, options, {
       latex: expr.verbatimLatex,
       wikidata,

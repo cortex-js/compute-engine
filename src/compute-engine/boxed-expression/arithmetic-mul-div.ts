@@ -118,7 +118,7 @@ export class Product {
       // If we're calculating a canonical product, fold exact literals into
       // running terms
       const num = term.numericValue;
-      if (num !== null) {
+      if (num !== undefined) {
         if (term.is(1)) return;
 
         if (term.is(0)) {
@@ -563,8 +563,7 @@ export function canonicalDivide(
     // Use structural mode so the expression is bound and can evaluate later.
     if (op2IsConstantExpression)
       return ce.function('Divide', [op1, op2], {
-        canonical: false,
-        structural: true,
+        form: 'structural',
       });
     return ce.Zero;
   }
@@ -574,7 +573,7 @@ export function canonicalDivide(
 
   // a/a = 1 (if a ≠ 0 and a is finite)
   if (op2.is(0) === false && op2.isFinite !== false) {
-    if (op1.symbol !== null && op1.symbol === op2.symbol && op1.isConstant)
+    if (op1.symbol !== undefined && op1.symbol === op2.symbol && op1.isConstant)
       return ce.One;
 
     // (x+1)/(x+1) = 1 (if x+1 ≠ 0)
@@ -584,8 +583,7 @@ export function canonicalDivide(
       // Use structural mode so the expression is bound and can evaluate later.
       if (op2IsConstantExpression)
         return ce.function('Divide', [op1, op2], {
-          canonical: false,
-          structural: true,
+          form: 'structural',
         });
       return ce.One;
     }
@@ -647,7 +645,7 @@ export function canonicalDivide(
   // Are both op1 and op2 a numeric value?
   const v1 = op1.numericValue;
   const v2 = op2.numericValue;
-  if (v1 !== null && v2 !== null) {
+  if (v1 !== undefined && v2 !== undefined) {
     if (
       (typeof v1 !== 'number' && v1.im !== 0) ||
       (typeof v2 !== 'number' && v2.im !== 0)

@@ -1029,7 +1029,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         //
         if (ops.length === 1) {
           const f = ops[0].N();
-          if (f.numericValue === null || f.im !== 0) return undefined;
+          if (f.numericValue === undefined || f.im !== 0) return undefined;
           return ce.number(rationalize(f.re));
         }
 
@@ -1785,7 +1785,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
 function evaluateAbs(arg: BoxedExpression): BoxedExpression | undefined {
   const ce = arg.engine;
   const num = arg.numericValue;
-  if (num !== null) {
+  if (num !== undefined) {
     if (typeof num === 'number') return ce.number(Math.abs(num));
     return ce.number(num.abs());
   }
@@ -1805,7 +1805,7 @@ function processMinMaxItem(
   if (item.operator === 'Interval') {
     const b = upper ? item.op2 : item.op1;
 
-    if (!b.isNumber || b.numericValue === null) return [undefined, [item]];
+    if (!b.isNumber || b.numericValue === undefined) return [undefined, [item]];
     return [b, []];
   }
 
@@ -1847,7 +1847,7 @@ function processMinMaxItem(
     return [result, rest];
   }
 
-  if (!item.isNumber || item.numericValue === null) return [undefined, [item]];
+  if (!item.isNumber || item.numericValue === undefined) return [undefined, [item]];
   return [item, []];
 }
 

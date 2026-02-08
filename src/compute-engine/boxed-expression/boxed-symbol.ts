@@ -698,7 +698,9 @@ export class BoxedSymbol extends _BoxedExpression {
     const canonical = options?.canonical ?? this.isCanonical;
     if (sub[this._id] === undefined) return canonical ? this.canonical : this;
 
-    return this.engine.box(sub[this._id], { canonical });
+    const form = canonical === true ? 'canonical' :
+      canonical === false ? 'raw' : canonical;
+    return this.engine.box(sub[this._id], { form });
   }
 
   get _asCollection(): CollectionHandlers | undefined {

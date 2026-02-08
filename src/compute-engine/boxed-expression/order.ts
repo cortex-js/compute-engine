@@ -81,7 +81,7 @@ export function equalOrder(a: BoxedExpression, b: BoxedExpression): number {
   // Ranks 2: expression
   // Rank 3: numbers
   const rank = (x: BoxedExpression): number => {
-    if (x.symbol !== null) return 1;
+    if (x.symbol !== undefined) return 1;
     if (x.isNumberLiteral) return 3;
     return 2;
   };
@@ -243,8 +243,8 @@ export function order(a: BoxedExpression, b: BoxedExpression): number {
     let aN = a.numericValue;
     let bN = b.numericValue;
 
-    if (aN === null && a.operator === 'Rational') aN = a.op1.re / a.op2.re!;
-    if (bN === null && b.operator === 'Rational') bN = b.op1.re / b.op2.re!;
+    if (aN === undefined && a.operator === 'Rational') aN = a.op1.re / a.op2.re!;
+    if (bN === undefined && b.operator === 'Rational') bN = b.op1.re / b.op2.re!;
 
     const af = typeof aN === 'number' ? aN : aN!.re;
     const bf = typeof bN === 'number' ? bN : bN!.re;
@@ -451,10 +451,10 @@ function getComplex(a: BoxedExpression): [number, number] {
   }
   if (a.operator === 'Complex') {
     const op1 = a.op1.numericValue;
-    if (op1 === null) return [0, 0];
+    if (op1 === undefined) return [0, 0];
     const re = typeof op1 === 'number' ? op1 : op1!.re;
     const op2 = a.op2.numericValue;
-    if (op2 === null) return [0, 0];
+    if (op2 === undefined) return [0, 0];
     const im = typeof op2 === 'number' ? op2 : op2!.re;
     return [re, im];
   }

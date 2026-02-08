@@ -66,7 +66,7 @@ export function canonicalPower(
     return ce._fn('Power', [
       base,
       ce.box(['Multiply', aPow, b], {
-        canonical: fullyCanonical || 'Power',
+        form: fullyCanonical ? 'canonical' : 'Power',
       }),
     ]);
   }
@@ -92,7 +92,7 @@ export function canonicalPower(
   // here)
   if (
     b.isFunctionExpression ||
-    b.symbol !== null ||
+    b.symbol !== undefined ||
     !b.type.matches('number' as Type)
   )
     return unchanged();

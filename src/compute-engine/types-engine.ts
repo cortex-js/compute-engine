@@ -21,6 +21,7 @@ import type { BoxedExpression, SemiBoxedExpression } from './types-expression';
 import type {
   Metadata,
   CanonicalOptions,
+  FormOption,
   BoxedSubstitution,
 } from './types-serialization';
 import type {
@@ -45,7 +46,7 @@ import type {
   Scope,
   EvalContext,
 } from './types-evaluation';
-import type { LanguageTarget } from './compilation/types';
+import type { LanguageTarget, CompilationResult } from './compilation/types';
 
 /** @internal */
 export interface IComputeEngine extends IBigNum {
@@ -158,8 +159,7 @@ export interface IComputeEngine extends IBigNum {
   box(
     expr: NumericValue | SemiBoxedExpression,
     options?: {
-      canonical?: CanonicalOptions;
-      structural?: boolean;
+      form?: FormOption;
       scope?: Scope;
     }
   ): BoxedExpression;
@@ -169,8 +169,7 @@ export interface IComputeEngine extends IBigNum {
     ops: ReadonlyArray<SemiBoxedExpression>,
     options?: {
       metadata?: Metadata;
-      canonical?: CanonicalOptions;
-      structural?: boolean;
+      form?: FormOption;
       scope?: Scope;
     }
   ): BoxedExpression;
@@ -198,11 +197,11 @@ export interface IComputeEngine extends IBigNum {
     }
   ): BoxedExpression;
 
-  /** @internal Compile a boxed expression to an executable function. */
+  /** @internal Compile a boxed expression. */
   _compile(
     expr: BoxedExpression,
     options?: Record<string, any>
-  ): ((...args: any[]) => any) & { isCompiled?: boolean };
+  ): CompilationResult;
 
   /** Register a custom compilation target. */
   registerCompilationTarget(name: string, target: LanguageTarget): void;
@@ -273,15 +272,15 @@ export interface IComputeEngine extends IBigNum {
 
   parse(
     latex: null,
-    options?: Partial<ParseLatexOptions> & { canonical?: CanonicalOptions }
+    options?: Partial<ParseLatexOptions> & { form?: FormOption }
   ): null;
   parse(
     latex: LatexString,
-    options?: Partial<ParseLatexOptions> & { canonical?: CanonicalOptions }
+    options?: Partial<ParseLatexOptions> & { form?: FormOption }
   ): BoxedExpression;
   parse(
     latex: LatexString | null,
-    options?: Partial<ParseLatexOptions> & { canonical?: CanonicalOptions }
+    options?: Partial<ParseLatexOptions> & { form?: FormOption }
   ): BoxedExpression | null;
 
   pushScope(scope?: Scope, name?: string): void;

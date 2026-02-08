@@ -95,7 +95,8 @@ import { ExactNumericValue } from './numeric-value/exact-numeric-value';
 import { BigNumericValue } from './numeric-value/big-numeric-value';
 import { MachineNumericValue } from './numeric-value/machine-numeric-value';
 
-import { box, boxFunction } from './boxed-expression/box';
+import { box, boxFunction, formToInternal } from './boxed-expression/box';
+import type { FormOption } from './types-serialization';
 import { isValueDef, isOperatorDef } from './boxed-expression/utils';
 import { boxRules } from './boxed-expression/rules';
 import { validatePattern } from './boxed-expression/boxed-patterns';
@@ -186,7 +187,7 @@ export type {
   CompiledOperators,
   CompiledFunctions,
   CompilationOptions,
-  CompiledExecutable,
+  CompilationResult,
   LanguageTarget,
   TargetSource,
   CompiledFunction,
@@ -819,7 +820,7 @@ export class ComputeEngine implements IComputeEngine {
     this._compilationTargets.delete(name);
   }
 
-  /** @internal Compile a boxed expression to an executable function. */
+  /** @internal Compile a boxed expression. */
   _compile(
     expr: BoxedExpression,
     options?: Parameters<typeof _compile>[1]
@@ -1668,12 +1669,12 @@ export class ComputeEngine implements IComputeEngine {
   box(
     expr: NumericValue | SemiBoxedExpression,
     options?: {
-      canonical?: CanonicalOptions;
-      structural?: boolean;
+      form?: FormOption;
       scope?: Scope | undefined;
     }
   ): BoxedExpression {
-    return box(this, expr, options);
+    const { canonical, structural } = formToInternal(options?.form);
+    return box(this, expr, { canonical, structural, scope: options?.scope });
   }
 
   function(
@@ -1681,12 +1682,17 @@ export class ComputeEngine implements IComputeEngine {
     ops: ReadonlyArray<BoxedExpression> | ReadonlyArray<Expression>,
     options?: {
       metadata?: Metadata;
-      canonical?: CanonicalOptions;
-      structural?: boolean;
+      form?: FormOption;
       scope?: Scope | undefined;
     }
   ): BoxedExpression {
-    return boxFunction(this, name, ops, options);
+    const { canonical, structural } = formToInternal(options?.form);
+    return boxFunction(this, name, ops, {
+      metadata: options?.metadata,
+      canonical,
+      structural,
+      scope: options?.scope,
+    });
   }
 
   /**
@@ -1736,7 +1742,7 @@ export class ComputeEngine implements IComputeEngine {
    * Add a `["Hold"]` wrapper to `expr`.
    */
   hold(expr: SemiBoxedExpression): BoxedExpression {
-    return this._fn('Hold', [this.box(expr, { canonical: false })]);
+    return this._fn('Hold', [this.box(expr, { form: 'raw' })]);
   }
 
   /** Shortcut for `this.box(["Tuple", ...])`
@@ -1953,20 +1959,21 @@ export class ComputeEngine implements IComputeEngine {
   /**
    * Parse a string of LaTeX and return a corresponding `BoxedExpression`.
    *
-   * If the `canonical` option is set to `true`, the result will be canonical
+   * If the `form` option is set to `'canonical'` (the default), the result
+   * will be canonical.
    *
    */
   parse(
     latex: null,
-    options?: Partial<ParseLatexOptions> & { canonical?: CanonicalOptions }
+    options?: Partial<ParseLatexOptions> & { form?: FormOption }
   ): null;
   parse(
     latex: LatexString,
-    options?: Partial<ParseLatexOptions> & { canonical?: CanonicalOptions }
+    options?: Partial<ParseLatexOptions> & { form?: FormOption }
   ): BoxedExpression;
   parse(
     latex: LatexString | null,
-    options?: Partial<ParseLatexOptions> & { canonical?: CanonicalOptions }
+    options?: Partial<ParseLatexOptions> & { form?: FormOption }
   ): BoxedExpression | null {
     if (latex === null || latex === undefined) return null;
     if (typeof latex !== 'string')
@@ -2023,7 +2030,8 @@ export class ComputeEngine implements IComputeEngine {
       { ...defaultOptions, ...options }
     );
     if (result === null) throw Error('Failed to parse LaTeX string');
-    return this.box(result, { canonical: options?.canonical ?? true });
+    const { canonical } = formToInternal(options?.form);
+    return box(this, result, { canonical });
   }
 
   /**

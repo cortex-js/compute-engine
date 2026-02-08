@@ -20,7 +20,7 @@ export function ask(
   ce: IComputeEngine,
   pattern: BoxedExpression
 ): BoxedSubstitution[] {
-  const pat = ce.box(pattern, { canonical: false });
+  const pat = ce.box(pattern, { form: 'raw' });
   const result: BoxedSubstitution[] = [];
 
   const patternHasWildcards = (expr: BoxedExpression): boolean => {
@@ -84,7 +84,7 @@ export function ask(
     //   Greater(a, b) -> Less(b - a, 0)
     //   Less(a, b)    -> Less(a - b, 0)
     const diff = ce.box(['Add', lhs, ['Negate', rhs]], {
-      canonical: false,
+      form: 'raw',
     });
     return [
       { pattern: expr },
@@ -92,7 +92,7 @@ export function ask(
       // subexpressions (notably Add), allowing permutations can lead to
       // ambiguous wildcard bindings and duplicate, surprising matches.
       {
-        pattern: ce.box([normalizedOp, diff, 0], { canonical: false }),
+        pattern: ce.box([normalizedOp, diff, 0], { form: 'raw' }),
         matchPermutations: false,
       },
     ];
@@ -106,7 +106,7 @@ export function ask(
       if (!symbolType.isUnknown) {
         pushResult({
           [typeWildcard]: ce.box(symbolType.toString(), {
-            canonical: false,
+            form: 'raw',
           }),
         });
       }
@@ -147,7 +147,7 @@ export function ask(
             if (bound === undefined || (isStrict && strictOk !== true))
               continue;
             pushResult({
-              [symbolWildcard]: ce.box(s, { canonical: true }),
+              [symbolWildcard]: ce.box(s, { form: 'canonical' }),
               [boundWildcard]: bound,
             });
           }
@@ -179,7 +179,7 @@ export function ask(
   if (result.length === 0 && !patternHasWildcards(pat) && !ce._isVerifying) {
     // Use the canonical form so symbol declarations/definitions are visible
     // to the evaluator.
-    const verified = verify(ce, ce.box(pattern, { canonical: true }));
+    const verified = verify(ce, ce.box(pattern, { form: 'canonical' }));
     if (verified === true) pushResult({});
   }
 
@@ -196,8 +196,8 @@ export function verify(
   ce._isVerifying = true;
   try {
     const boxed = isLatexString(query)
-      ? ce.parse(query, { canonical: false })
-      : ce.box(query, { canonical: false });
+      ? ce.parse(query, { form: 'raw' })
+      : ce.box(query, { form: 'raw' });
 
     const expr = boxed.evaluate();
     if (expr.symbol === 'True') return true;
@@ -251,8 +251,8 @@ export function assumeFn(
 ): AssumeResult {
   try {
     const pred = isLatexString(predicate)
-      ? ce.parse(predicate, { canonical: false })
-      : ce.box(predicate, { canonical: false });
+      ? ce.parse(predicate, { form: 'raw' })
+      : ce.box(predicate, { form: 'raw' });
 
     // The new assumption could affect existing expressions
     ce._generation += 1;

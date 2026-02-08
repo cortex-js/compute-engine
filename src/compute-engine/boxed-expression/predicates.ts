@@ -7,7 +7,7 @@ export function isPrime(expr: BoxedExpression): boolean | undefined {
   if (expr.isNegative) return undefined;
 
   const value = expr.numericValue;
-  if (value === null) return undefined;
+  if (value === undefined) return undefined;
 
   const n = toInteger(expr);
   if (n !== null) return isPrimeMachine(n);

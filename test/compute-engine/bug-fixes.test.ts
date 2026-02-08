@@ -30,14 +30,14 @@ describe('BUG FIXES', () => {
   describe('Bug #178: division by expressions that simplify to 0', () => {
     test('0/(1-1) simplifies to NaN, not 0', () => {
       const ce = new ComputeEngine();
-      const simp = ce.parse('\\frac{0}{1-1}', { canonical: false }).simplify();
+      const simp = ce.parse('\\frac{0}{1-1}', { form: 'raw' }).simplify();
       expect(simp.isNaN).toBe(true);
     });
 
     test('(1-1)/(1-1) simplifies to NaN, not 1', () => {
       const ce = new ComputeEngine();
       const simp = ce
-        .parse('\\frac{1-1}{1-1}', { canonical: false })
+        .parse('\\frac{1-1}{1-1}', { form: 'raw' })
         .simplify();
       expect(simp.isNaN).toBe(true);
     });
@@ -47,7 +47,7 @@ describe('BUG FIXES', () => {
   describe('Bug #178: exp(log(x) ± y) should separate the log term', () => {
     test('exp(log(x)+y) has no remaining log()', () => {
       const ce = new ComputeEngine();
-      const latex = ce.parse('\\exp(\\log(x)+y)', { canonical: false })
+      const latex = ce.parse('\\exp(\\log(x)+y)', { form: 'raw' })
         .simplify().latex;
       expect(latex).toContain('\\exponentialE^{y}');
       expect(latex).toContain('x^{');
@@ -56,7 +56,7 @@ describe('BUG FIXES', () => {
 
     test('exp(log(x)-y) has no remaining log()', () => {
       const ce = new ComputeEngine();
-      const latex = ce.parse('\\exp(\\log(x)-y)', { canonical: false })
+      const latex = ce.parse('\\exp(\\log(x)-y)', { form: 'raw' })
         .simplify().latex;
       expect(latex).toContain('x^{');
       expect(latex).not.toContain('\\log');
@@ -66,7 +66,7 @@ describe('BUG FIXES', () => {
   describe('Bug #178: xx should simplify to x^2', () => {
     test('xx -> x^2', () => {
       const ce = new ComputeEngine();
-      expect(ce.parse('xx', { canonical: false }).simplify().latex).toBe('x^2');
+      expect(ce.parse('xx', { form: 'raw' }).simplify().latex).toBe('x^2');
     });
   });
 });

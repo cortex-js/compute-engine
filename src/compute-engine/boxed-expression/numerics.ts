@@ -16,7 +16,7 @@ import { Expression } from '../types';
 
 export function asRational(expr: BoxedExpression): Rational | undefined {
   const num = expr.numericValue;
-  if (num === null) return undefined;
+  if (num === undefined) return undefined;
   if (typeof num === 'number' && !Number.isFinite(num)) return undefined;
   if (
     num instanceof NumericValue &&
@@ -59,7 +59,7 @@ export function asBigint(
 
   if (isBoxedExpression(x)) {
     const num = x.numericValue;
-    if (num === null) return null;
+    if (num === undefined) return null;
 
     if (typeof num === 'number') {
       if (Number.isInteger(num)) return BigInt(num);
@@ -89,7 +89,7 @@ export function asBigint(
 export function asBignum(expr: BoxedExpression | undefined): Decimal | null {
   if (expr === undefined || expr === null) return null;
   const num = typeof expr === 'number' ? expr : expr.numericValue;
-  if (num === null) return null;
+  if (num === undefined) return null;
 
   if (typeof num === 'number') return expr.engine.bignum(num);
 
@@ -122,7 +122,7 @@ export function asSmallInteger(
     return null;
   }
   const num = expr.numericValue;
-  if (num === null) return null;
+  if (num === undefined) return null;
 
   if (typeof num === 'number') {
     if (Number.isInteger(num) && num >= -SMALL_INTEGER && num <= SMALL_INTEGER)
@@ -165,7 +165,7 @@ export function toBigint(expr: BoxedExpression | undefined): bigint | null {
   if (expr === undefined || expr === null) return null;
 
   const num = expr.numericValue;
-  if (num === null) return null;
+  if (num === undefined) return null;
 
   if (typeof num === 'number') return BigInt(Math.round(num));
 

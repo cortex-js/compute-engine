@@ -90,8 +90,8 @@ function matchOnce(
   //
   // Match a number
   //
-  if (pattern.numericValue !== null) {
-    if (expr.numericValue === null) return null;
+  if (pattern.numericValue !== undefined) {
+    if (expr.numericValue === undefined) return null;
     if (pattern.isEqual(expr)) return substitution;
 
     // Attempt to match the expression to a variant of the pattern
@@ -105,13 +105,13 @@ function matchOnce(
   // Match a string
   //
   const str = pattern.string;
-  if (str !== null) return expr.string === str ? substitution : null;
+  if (str !== undefined) return expr.string === str ? substitution : null;
 
   //
   // Match a symbol
   //
   const symbol = pattern.symbol;
-  if (symbol !== null) {
+  if (symbol !== undefined) {
     if (symbol === expr.symbol) return substitution;
     // Match the symbol to a variant of the pattern
     // (e.g. `x` to `0+x`).
@@ -135,14 +135,14 @@ function matchOnce(
     // This allows patterns like ['Divide', '_num', '_den'] to match rationals like 3/2
     if (
       operator === 'Divide' &&
-      expr.numericValue !== null &&
+      expr.numericValue !== undefined &&
       !expr.denominator.is(1)
     ) {
       // Create a synthetic Divide expression to match against
       const divideExpr = ce.function(
         'Divide',
         [expr.numerator, expr.denominator],
-        { canonical: false, structural: true }
+        { form: 'structural' }
       );
       return matchArguments(divideExpr, pattern.ops, substitution, options);
     }
@@ -156,7 +156,7 @@ function matchOnce(
 
         // Check if op is a rational number with numerator 1 (i.e., 1/n form)
         if (
-          op.numericValue !== null &&
+          op.numericValue !== undefined &&
           op.numerator.is(1) &&
           !op.denominator.is(1)
         ) {
@@ -165,13 +165,13 @@ function matchOnce(
           const numerator =
             others.length === 1
               ? others[0]
-              : ce.function('Multiply', others, { canonical: false });
+              : ce.function('Multiply', others, { form: 'raw' });
 
           // Create a synthetic Divide expression to match against
           const divideExpr = ce.function(
             'Divide',
             [numerator, op.denominator],
-            { canonical: false, structural: true }
+            { form: 'structural' }
           );
           const result = matchArguments(
             divideExpr,
@@ -189,8 +189,7 @@ function matchOnce(
     if (operator === 'Power' && expr.operator === 'Divide' && expr.op1.is(1)) {
       // Create a synthetic Power expression: Power(x, -1)
       const powerExpr = ce.function('Power', [expr.op2, ce.number(-1)], {
-        canonical: false,
-        structural: true,
+        form: 'structural',
       });
       const result = matchArguments(
         powerExpr,
@@ -207,8 +206,8 @@ function matchOnce(
       // Create a synthetic Power expression: Power(x, 1/n)
       const powerExpr = ce.function(
         'Power',
-        [expr.op1, ce.box(['Divide', 1, expr.op2], { canonical: false })],
-        { canonical: false, structural: true }
+        [expr.op1, ce.box(['Divide', 1, expr.op2], { form: 'raw' })],
+        { form: 'structural' }
       );
       const result = matchArguments(
         powerExpr,
@@ -273,7 +272,7 @@ function matchRecursive(
     acceptVariants?: boolean;
   }
 ): BoxedSubstitution | null {
-  console.assert(expr.ops !== null);
+  console.assert(expr.ops !== undefined);
   let result: BoxedSubstitution | null = null;
   for (const op of expr.ops!) {
     const r = matchOnce(op, pattern, substitution, options);
@@ -304,7 +303,7 @@ function matchVariations(
 
   const matchVariation = (op, ops) =>
     matchOnce(
-      ce.function(op, ops, { canonical: false }),
+      ce.function(op, ops, { form: 'raw' }),
       pattern,
       substitution,
       varOptions
@@ -831,9 +830,9 @@ function matchCommutativeWithAnchors(
     // For associative operators, wrap in the same operator
     const def = ce.lookupDefinition(expr.operator);
     if (def && isOperatorDef(def) && def.operator.associative) {
-      return ce.function(expr.operator, captured, { canonical: false });
+      return ce.function(expr.operator, captured, { form: 'raw' });
     }
-    return ce.function('Sequence', captured, { canonical: false });
+    return ce.function('Sequence', captured, { form: 'raw' });
   }
 
   function getCombinations(n: number, k: number): number[][] {
@@ -1112,9 +1111,9 @@ function matchArguments(
         const def = ce.lookupDefinition(expr.operator);
         const args = ops.splice(0, qty);
         if (def && isOperatorDef(def) && def.operator.associative) {
-          value = ce.function(expr.operator, args, { canonical: false });
+          value = ce.function(expr.operator, args, { form: 'raw' });
         } else {
-          value = ce.function('Sequence', args, { canonical: false });
+          value = ce.function('Sequence', args, { form: 'raw' });
         }
       }
 

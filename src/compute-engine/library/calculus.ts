@@ -4,6 +4,7 @@ import { checkType } from '../boxed-expression/validate';
 import { hasSymbolicTranscendental } from '../boxed-expression/utils';
 
 import {
+  applicableN1,
   canonicalFunctionLiteral,
   canonicalFunctionLiteralArguments,
 } from '../function-utils';
@@ -186,9 +187,9 @@ volumes
         const xValue = x.N().re;
         if (isNaN(xValue)) return undefined;
 
-        return engine.number(
-          centeredDiff8thOrder(engine._compile(body), xValue)
-        );
+        const compiled = engine._compile(body);
+        const fn = compiled.run ?? applicableN1(body);
+        return engine.number(centeredDiff8thOrder(fn, xValue));
       },
     },
 
@@ -225,13 +226,14 @@ volumes
           // This converts e.g. 'x' to ['Function', 'x', 'x'] -> (x) => x
           const fnExpr =
             f.operator === 'Function' ? f : ce.box(['Function', f, variable]);
-          const jsf = ce._compile(fnExpr);
+          const compiled = ce._compile(fnExpr);
+          const jsf = compiled.run ?? applicableN1(fnExpr);
 
           const mce = monteCarloEstimate(
             jsf,
             lower,
             upper,
-            jsf.isCompiled ? 1e7 : 1e4
+            compiled.success ? 1e7 : 1e4
           );
           return ce.box([
             'PlusMinus',
@@ -310,9 +312,10 @@ volumes
       evaluate: ([f, a, b], { engine }) => {
         const [lower, upper] = [a.N().re, b.N().re];
         if (isNaN(lower) || isNaN(upper)) return undefined;
-        const jsf = engine._compile(f);
+        const compiled = engine._compile(f);
+        const jsf = compiled.run ?? applicableN1(f);
         return engine.number(
-          monteCarloEstimate(jsf, lower, upper, jsf.isCompiled ? 1e7 : 1e4)
+          monteCarloEstimate(jsf, lower, upper, compiled.success ? 1e7 : 1e4)
             .estimate
         );
       },
@@ -354,7 +357,8 @@ volumes
         if (numericApproximation) {
           const target = x.N().re;
           if (Number.isNaN(target)) return undefined;
-          const fn = engine._compile(f);
+          const compiled = engine._compile(f);
+          const fn = compiled.run ?? applicableN1(f);
           return engine.number(limit(fn, target, dir ? dir.re : 1));
         }
         return undefined;
@@ -376,7 +380,8 @@ volumes
       evaluate: ([f, x, dir], { engine }) => {
         const target = x.N().re;
         if (Number.isNaN(target)) return undefined;
-        const fn = engine._compile(f);
+        const compiled = engine._compile(f);
+        const fn = compiled.run ?? applicableN1(f);
         return engine.number(limit(fn, target, dir ? dir.re : 1));
       },
     },

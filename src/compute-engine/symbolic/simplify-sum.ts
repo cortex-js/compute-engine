@@ -57,7 +57,7 @@ export function simplifySum(x: BoxedExpression): RuleStep | undefined {
   if (!bodyUnknowns.has(index)) {
     const count = upper.sub(lower).add(ce.One).simplify();
     // Check for empty range with symbolic bounds
-    if (count.isNumberLiteral && count.numericValue !== null) {
+    if (count.isNumberLiteral && count.numericValue !== undefined) {
       const countVal =
         typeof count.numericValue === 'number'
           ? count.numericValue

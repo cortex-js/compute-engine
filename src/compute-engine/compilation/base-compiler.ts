@@ -30,7 +30,7 @@ export class BaseCompiler {
 
     // Is it a symbol?
     const s = expr.symbol;
-    if (s !== null) {
+    if (s !== undefined) {
       const op = target.operators?.(s);
       if (op !== undefined) {
         // We're compiling something like "Add"
@@ -47,7 +47,7 @@ export class BaseCompiler {
 
     // Is it a string?
     const str = expr.string;
-    if (str !== null) return target.string(str);
+    if (str !== undefined) return target.string(str);
 
     // It must be a function expression...
     return BaseCompiler.compileExpr(

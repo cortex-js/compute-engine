@@ -10,19 +10,19 @@ describe('COMPILE', () => {
   describe('Expressions', () => {
     it('should compile (and simplify) a simple expression', () => {
       expect(
-        compile(ce.parse('3.45 + \\frac57'))?.toString()
+        compile(ce.parse('3.45 + \\frac57'))?.code
       ).toMatchInlineSnapshot(`0.7142857142857143 + 3.45`);
     });
 
     it('should compile an expression with a constant', () => {
       expect(
-        compile(ce.parse('2\\exponentialE'))?.toString()
+        compile(ce.parse('2\\exponentialE'))?.code
       ).toMatchInlineSnapshot(`2 * Math.E`);
     });
 
     it('should compile an expression with trig functions', () => {
       expect(
-        compile(ce.parse('2 \\cos(\\frac{\\pi}{5})'))?.toString()
+        compile(ce.parse('2 \\cos(\\frac{\\pi}{5})'))?.code
       ).toMatchInlineSnapshot(`2 * Math.cos(0.2 * Math.PI)`);
     });
   });
@@ -30,12 +30,12 @@ describe('COMPILE', () => {
   describe('Blocks', () => {
     it('should compile a simple block', () => {
       const expr = ce.box(['Block', ['Multiply', 10, 2]]);
-      expect(compile(expr)?.toString() ?? '').toMatchInlineSnapshot(`2 * 10`);
+      expect(compile(expr)?.code ?? '').toMatchInlineSnapshot(`2 * 10`);
     });
 
     it('should compile a block with two statements', () => {
       const expr = ce.box(['Block', ['Add', 13, 15], ['Multiply', 10, 2]]);
-      expect(compile(expr)?.toString() ?? '').toMatchInlineSnapshot(`
+      expect(compile(expr)?.code ?? '').toMatchInlineSnapshot(`
         (() => {
         13 + 15;
         return 2 * 10
@@ -50,7 +50,7 @@ describe('COMPILE', () => {
         ['Assign', 'x', 4.1],
         ['Multiply', 'x', 'n'],
       ]);
-      expect(compile(expr)?.toString() ?? '').toMatchInlineSnapshot(`
+      expect(compile(expr)?.code ?? '').toMatchInlineSnapshot(`
         (() => {
         let x;
         x = 4.1;
@@ -67,7 +67,7 @@ describe('COMPILE', () => {
         ['Return', ['Add', 'x', 1]],
         ['Multiply', 'x', 2],
       ]);
-      expect(compile(expr)?.toString() ?? '').toMatchInlineSnapshot(`
+      expect(compile(expr)?.code ?? '').toMatchInlineSnapshot(`
         (() => {
         let x;
         x = 4.1;
@@ -85,38 +85,38 @@ describe('COMPILE', () => {
     });
 
     it('should compile a function imported inline', () => {
-      const fn = compile(ce.box(['Foo', 3]), {
+      const result = compile(ce.box(['Foo', 3]), {
         functions: { Foo: (x) => x + 1 },
       })!;
-      expect(fn()).toBe(4);
+      expect(result.run!()).toBe(4);
     });
 
     it('should compile a function referenced by name', () => {
       function foo(x) {
         return x + 1;
       }
-      const fn = compile(ce.box(['Foo', 3]), {
+      const result = compile(ce.box(['Foo', 3]), {
         functions: { Foo: foo },
       })!;
-      expect(fn()).toBe(4);
+      expect(result.run!()).toBe(4);
     });
 
     it('should compile a function imported by name', () => {
       function foo(x) {
         return x + 1;
       }
-      const fn = compile(ce.box(['Foo', 3]), {
+      const result = compile(ce.box(['Foo', 3]), {
         functions: { Foo: 'foo' },
         imports: [foo],
       })!;
-      expect(fn()).toBe(4);
+      expect(result.run!()).toBe(4);
     });
   });
 
   describe('Conditionals / Ifs', () => {
     it('should compile an if statement', () => {
       const expr = ce.box(['If', ['Greater', 'x', 0], 'x', ['Negate', 'x']]);
-      expect(compile(expr)?.toString() ?? '').toMatchInlineSnapshot(
+      expect(compile(expr)?.code ?? '').toMatchInlineSnapshot(
         `((0 < _.x) ? (_.x) : (-_.x))`
       );
     });
@@ -128,7 +128,7 @@ describe('COMPILE', () => {
         ['Block', 'x'],
         ['Block', ['Negate', 'x']],
       ]);
-      expect(compile(expr)?.toString() ?? '').toMatchInlineSnapshot(
+      expect(compile(expr)?.code ?? '').toMatchInlineSnapshot(
         `((0 < _.x) ? (_.x) : (-_.x))`
       );
     });
@@ -141,7 +141,7 @@ describe('COMPILE', () => {
         const compiled = compile(expr, {
           operators: { Add: ['add', 11] },
         });
-        expect(compiled?.toString() ?? '').toMatchInlineSnapshot(
+        expect(compiled?.code ?? '').toMatchInlineSnapshot(
           `add(_.x, _.y)`
         );
       });
@@ -155,7 +155,7 @@ describe('COMPILE', () => {
           },
         });
         // Note: canonical form may reorder arguments
-        expect(compiled?.toString() ?? '').toMatchInlineSnapshot(
+        expect(compiled?.code ?? '').toMatchInlineSnapshot(
           `add(mul(_.y, _.z), _.x)`
         );
       });
@@ -165,7 +165,7 @@ describe('COMPILE', () => {
         const compiled = compile(expr, {
           operators: { Divide: ['div', 13] },
         });
-        expect(compiled?.toString() ?? '').toMatchInlineSnapshot(
+        expect(compiled?.code ?? '').toMatchInlineSnapshot(
           `div(_.x, _.y)`
         );
       });
@@ -175,7 +175,7 @@ describe('COMPILE', () => {
         const compiled = compile(expr, {
           operators: { Negate: ['neg', 14] },
         });
-        expect(compiled?.toString() ?? '').toMatchInlineSnapshot(`neg(_.x)`);
+        expect(compiled?.code ?? '').toMatchInlineSnapshot(`neg(_.x)`);
       });
 
       it('should handle subtraction with Negate override', () => {
@@ -187,7 +187,7 @@ describe('COMPILE', () => {
             Negate: ['neg', 14],
           },
         });
-        expect(compiled?.toString() ?? '').toMatchInlineSnapshot(
+        expect(compiled?.code ?? '').toMatchInlineSnapshot(
           `add(_.x, neg(_.y))`
         );
       });
@@ -198,7 +198,7 @@ describe('COMPILE', () => {
           operators: { Add: ['add', 11] },
         });
         // Note: Subtraction is canonicalized to Add(x, y, Negate(z))
-        expect(compiled?.toString() ?? '').toMatchInlineSnapshot(
+        expect(compiled?.code ?? '').toMatchInlineSnapshot(
           `add(_.x, _.y, -_.z)`
         );
       });
@@ -210,7 +210,7 @@ describe('COMPILE', () => {
         const compiled = compile(expr, {
           operators: (op) => (op === 'Add' ? ['add', 11] : undefined),
         });
-        expect(compiled?.toString() ?? '').toMatchInlineSnapshot(
+        expect(compiled?.code ?? '').toMatchInlineSnapshot(
           `add(_.x, _.y)`
         );
       });
@@ -221,7 +221,7 @@ describe('COMPILE', () => {
           operators: (op) => (op === 'Add' ? ['add', 11] : undefined),
         });
         // Note: canonical form may reorder arguments
-        expect(compiled?.toString() ?? '').toMatchInlineSnapshot(
+        expect(compiled?.code ?? '').toMatchInlineSnapshot(
           `add(_.y * _.z, _.x)`
         );
       });
@@ -234,7 +234,7 @@ describe('COMPILE', () => {
         const compiled = compile(expr, {
           operators: { Add: ['add', 11] },
         });
-        expect(compiled?.toString() ?? '').toMatchInlineSnapshot(
+        expect(compiled?.code ?? '').toMatchInlineSnapshot(
           `add([1, 1, 1], [1, 1, 1])`
         );
       });
@@ -261,7 +261,7 @@ describe('COMPILE', () => {
           functions: { add, mul },
         });
 
-        const result = compiled?.();
+        const result = compiled?.run?.();
         expect(result).toEqual([3, 5, 7]);
       });
     });
@@ -276,7 +276,7 @@ describe('COMPILE', () => {
           },
         });
         // Note: canonical form may reorder arguments
-        expect(compiled?.toString() ?? '').toMatchInlineSnapshot(
+        expect(compiled?.code ?? '').toMatchInlineSnapshot(
           `mul(add(_.w, _.z), add(_.x, _.y))`
         );
       });
@@ -292,7 +292,7 @@ describe('COMPILE', () => {
           },
         });
         // Note: Subtraction is canonicalized to Add with Negate
-        expect(compiled?.toString() ?? '').toMatchInlineSnapshot(
+        expect(compiled?.code ?? '').toMatchInlineSnapshot(
           `add(neg(mul(_.z, div(_.w, _.v))), _.x, _.y)`
         );
       });
@@ -308,7 +308,7 @@ describe('COMPILE', () => {
           },
         });
         // Note: canonical form may reorder arguments
-        expect(compiled?.toString() ?? '').toMatchInlineSnapshot(
+        expect(compiled?.code ?? '').toMatchInlineSnapshot(
           `add(mul(_.y, _.z), _.x)`
         );
       });
@@ -324,7 +324,7 @@ describe('COMPILE', () => {
           },
         });
         // Note: Subtraction is canonicalized to Add with Negate
-        expect(compiled?.toString() ?? '').toMatchInlineSnapshot(
+        expect(compiled?.code ?? '').toMatchInlineSnapshot(
           `add(_.b * _.c, _.a, -_.d / _.g)`
         );
       });

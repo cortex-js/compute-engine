@@ -372,9 +372,9 @@ describe('PATTERNS  MATCH - Sequence wildcards', () => {
         //(?Prettified MathJSON results in ["Square", "z"] here... ?)
         expect(
           match(
-            ce.box(pattern, { canonical: false }),
+            ce.box(pattern, { form: 'raw' }),
             ce.box(['Subtract', 'x', 'y', ['Power', 'z', 2]], {
-              canonical: false,
+              form: 'raw',
             })
           )
         ).toMatchInlineSnapshot(`
@@ -389,16 +389,16 @@ describe('PATTERNS  MATCH - Sequence wildcards', () => {
         // Too many operands RHS (right of 'y')
         expect(
           match(
-            ce.box(ce.box(pattern, { canonical: false }), { canonical: false }),
+            ce.box(ce.box(pattern, { form: 'raw' }), { form: 'raw' }),
             ce.box(['Subtract', 'x', 'y', ['Power', 'z', 2], 'w'], {
-              canonical: false,
+              form: 'raw',
             })
           )
         ).toMatchInlineSnapshot(`null`);
 
         // Missing capture of '__a'
         expect(
-          match(ce.box(pattern, { canonical: false }), [
+          match(ce.box(pattern, { form: 'raw' }), [
             'Subtract',
             'y',
             ['Power', 'z', 2],
@@ -451,9 +451,9 @@ describe('PATTERNS  MATCH - Sequence wildcards', () => {
 
         expect(
           match(
-            ce.box(pattern, { canonical: false }),
+            ce.box(pattern, { form: 'raw' }),
             ce.box(['Subtract', 'x', 'y', ['Power', 'z', 2]], {
-              canonical: false,
+              form: 'raw',
             })
           )
         ).toMatchInlineSnapshot(`{}`);
@@ -549,8 +549,8 @@ describe('PATTERNS  MATCH - Sequence wildcards', () => {
       expect(
         match(
           //@note: non-canonical for both, because do not want Subtract to become 'Add'
-          ce.box(['Subtract', '__s', 5], { canonical: false }),
-          ce.box(['Subtract', 8, 7, 6, 5], { canonical: false })
+          ce.box(['Subtract', '__s', 5], { form: 'raw' }),
+          ce.box(['Subtract', 8, 7, 6, 5], { form: 'raw' })
         )
       ).toMatchInlineSnapshot(`
         {
@@ -1128,7 +1128,7 @@ describe('PATTERN VALIDATION', () => {
   // Test validatePattern directly with non-canonical patterns
   // (canonical forms may reorder operands for commutative operators)
   const validate = (pattern: Expression) => {
-    const boxedPattern = ce.box(pattern, { canonical: false });
+    const boxedPattern = ce.box(pattern, { form: 'raw' });
     validatePattern(boxedPattern);
   };
 
@@ -1193,8 +1193,8 @@ describe('matchPermutations option', () => {
     expr: Expression,
     options?: PatternMatchOptions
   ) => {
-    const boxedPattern = ce.box(pattern, { canonical: false });
-    const boxedExpr = ce.box(expr, { canonical: false });
+    const boxedPattern = ce.box(pattern, { form: 'raw' });
+    const boxedExpr = ce.box(expr, { form: 'raw' });
     return boxedExpr.match(boxedPattern, { useVariations: true, ...options });
   };
 
@@ -1489,8 +1489,8 @@ describe('Permutation Matching Optimization', () => {
 describe('Repeated Wildcards in Nested Contexts', () => {
   // Non-canonical matching helper
   const matchNonCanonical = (pattern, expr) => {
-    const boxedPattern = ce.box(pattern, { canonical: false });
-    const boxedExpr = ce.box(expr, { canonical: false });
+    const boxedPattern = ce.box(pattern, { form: 'raw' });
+    const boxedExpr = ce.box(expr, { form: 'raw' });
     return boxedExpr.match(boxedPattern);
   };
 
@@ -1613,7 +1613,7 @@ describe('Repeated Wildcards in Nested Contexts', () => {
     test('1/(x*ln(x)) with canonical expression', () => {
       // Pattern is non-canonical (structural)
       const pattern = ce.box(['Divide', 1, ['Multiply', '_x', ['Ln', '_x']]], {
-        canonical: false,
+        form: 'raw',
       });
       // Expression is canonical (what you get from parsing)
       const expr = ce.parse('\\frac{1}{x \\ln x}');
@@ -1628,7 +1628,7 @@ describe('Repeated Wildcards in Nested Contexts', () => {
       // So this pattern needs to account for the canonical form
       const pattern = ce.box(
         ['Multiply', ['Power', 'ExponentialE', '_x'], ['Sin', '_x']],
-        { canonical: false }
+        { form: 'raw' }
       );
       const expr = ce.parse('e^x \\sin x');
 
@@ -1641,7 +1641,7 @@ describe('Repeated Wildcards in Nested Contexts', () => {
       // Multiply may reorder operands, so [x, ln(x)] might become [ln(x), x]
       // The pattern matching should still work due to commutativity handling
       const pattern = ce.box(['Multiply', '_x', ['Ln', '_x']], {
-        canonical: false,
+        form: 'raw',
       });
       const expr = ce.parse('x \\ln x');
 

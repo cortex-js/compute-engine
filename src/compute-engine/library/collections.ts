@@ -728,14 +728,14 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         collection.type.matches(ce.type('collection<real>'))
       ) {
         // If we're dealing with real numbers, we can compile.
-        const jsf = ce._compile(fn);
-        if (!jsf) return undefined;
+        const compiled = ce._compile(fn);
+        if (!compiled.run) return undefined;
 
         let accumulator = initial.re;
         let first = true;
         for (const item of collection.each()) {
           if (first) accumulator = item.re;
-          else accumulator = jsf(accumulator, item.re);
+          else accumulator = compiled.run(accumulator, item.re);
           first = false;
         }
 
@@ -821,7 +821,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         const at = def?.collection?.at;
         if (!at) return undefined;
         const s = ops[index].string;
-        if (s !== null) expr = at(expr, s) ?? ce.Nothing;
+        if (s !== undefined) expr = at(expr, s) ?? ce.Nothing;
         else {
           const i = ops[index].re;
           if (!Number.isInteger(i)) return undefined;

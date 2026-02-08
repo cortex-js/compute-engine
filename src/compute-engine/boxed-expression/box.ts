@@ -8,6 +8,7 @@ import type {
   Metadata,
   Scope,
 } from '../global-types';
+import type { FormOption } from '../types-serialization';
 
 import {
   Expression,
@@ -98,6 +99,22 @@ import { canonical } from './canonical-utils';
  * - sin(2) + √2.1 -> 2.35844
  */
 
+/**
+ * Translate a public `FormOption` to the internal
+ * `{ canonical, structural }` representation.
+ */
+export function formToInternal(form?: FormOption): {
+  canonical: CanonicalOptions;
+  structural: boolean;
+} {
+  if (form === undefined || form === 'canonical')
+    return { canonical: true, structural: false };
+  if (form === 'raw') return { canonical: false, structural: false };
+  if (form === 'structural') return { canonical: false, structural: true };
+  // CanonicalForm or CanonicalForm[]
+  return { canonical: form, structural: false };
+}
+
 function boxHold(
   ce: ComputeEngine,
   expr: SemiBoxedExpression | null,
@@ -177,7 +194,7 @@ export function boxFunction(
     return new BoxedFunction(
       ce,
       name,
-      ops.map((x) => ce.box(x, { canonical: false })),
+      ops.map((x) => ce.box(x, { form: 'raw' })),
       { metadata: options?.metadata, canonical: true }
     );
   }
@@ -258,7 +275,7 @@ export function boxFunction(
       if (op1 instanceof Decimal) return ce.number(op1.neg(), options);
       const boxedop1 = ce.box(op1, options);
       const num = boxedop1.numericValue;
-      if (num !== null)
+      if (num !== undefined)
         return ce.number(typeof num === 'number' ? -num : num.neg(), options);
       ops = [boxedop1];
     }
@@ -453,7 +470,7 @@ function makeCanonicalFunction(
   //
   if (name === 'List') {
     // We don't canonicalize it, in case it's a List (we want to detect lists of lists)
-    const boxedOps = ops.map((x) => ce.box(x, { canonical: false }));
+    const boxedOps = ops.map((x) => ce.box(x, { form: 'raw' }));
     const tensorInfo = expressionTensorInfo('List', boxedOps);
 
     if (tensorInfo && tensorInfo.dtype) {
@@ -474,7 +491,7 @@ function makeCanonicalFunction(
   }
 
   if (name === 'Dictionary') {
-    const boxedOps = ops.map((x) => ce.box(x, { canonical: false }));
+    const boxedOps = ops.map((x) => ce.box(x, { form: 'raw' }));
     return new BoxedDictionary(ce, ce._fn('Dictionary', boxedOps), {
       canonical: true,
     });
@@ -517,7 +534,7 @@ function makeCanonicalFunction(
 
   if (opDef.lazy) {
     // If we have a lazy function, we don't canonicalize the arguments
-    const xs = ops.map((x) => ce.box(x, { canonical: false }));
+    const xs = ops.map((x) => ce.box(x, { form: 'raw' }));
     if (opDef.canonical) {
       try {
         result = opDef.canonical(xs, { engine: ce, scope });

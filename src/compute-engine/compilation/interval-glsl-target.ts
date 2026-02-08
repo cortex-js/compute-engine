@@ -19,7 +19,7 @@ import type {
   CompiledFunctions,
   LanguageTarget,
   CompilationOptions,
-  CompiledExecutable,
+  CompilationResult,
 } from './types';
 
 /**
@@ -1256,10 +1256,10 @@ export class IntervalGLSLTarget implements LanguageTarget {
     };
   }
 
-  compileToExecutable(
+  compile(
     expr: BoxedExpression,
     options: CompilationOptions = {}
-  ): CompiledExecutable {
+  ): CompilationResult {
     const { functions, vars } = options;
 
     const target = this.createTarget({
@@ -1287,26 +1287,13 @@ export class IntervalGLSLTarget implements LanguageTarget {
 
     const glslCode = BaseCompiler.compile(expr, target);
 
-    // Return a "compiled" object containing the GLSL code
-    const result = function () {
-      return glslCode;
-    };
-
-    Object.defineProperty(result, 'toString', {
-      value: () => glslCode,
-    });
-
-    Object.defineProperty(result, 'isCompiled', {
-      value: true,
-    });
-
-    return result as CompiledExecutable;
+    return { target: 'interval-glsl', success: true, code: glslCode };
   }
 
   /**
-   * Compile an expression to GLSL interval code.
+   * Compile an expression to GLSL interval code string.
    */
-  compile(expr: BoxedExpression, _options: CompilationOptions = {}): string {
+  compileToSource(expr: BoxedExpression, _options: CompilationOptions = {}): string {
     const target = this.createTarget();
     return BaseCompiler.compile(expr, target);
   }

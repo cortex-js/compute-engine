@@ -352,7 +352,7 @@ function parseRulePart(
 ): BoxedExpression | undefined {
   if (rule === undefined || typeof rule === 'function') return undefined;
   if (typeof rule === 'string') {
-    let expr = ce.parse(rule, { canonical: options?.canonical ?? false });
+    let expr = ce.parse(rule, { form: options?.canonical ? 'canonical' : 'raw' });
     // Only auto-wildcard when explicitly requested (e.g., when parsing
     // rule strings like "a*x -> 2*x"). For object rules, keep symbols literal.
     if (options?.autoWildcard) {
@@ -371,7 +371,7 @@ function parseRulePart(
   const canonical =
     options?.canonical ??
     (rule instanceof _BoxedExpression ? rule.isCanonical : false);
-  return ce.box(rule, { canonical });
+  return ce.box(rule, { form: canonical ? 'canonical' : 'raw' });
 }
 
 /** A rule can be expressed as a string of the form
@@ -612,7 +612,7 @@ function boxRule(
       // If the condition is a LaTeX string, it should be a predicate
       // (an expression with a Boolean value).
       const condPattern = ce.parse(latex, {
-        canonical: options?.canonical ?? false,
+        form: options?.canonical ? 'canonical' : 'raw',
       });
 
       // Substitute any unbound vars in the condition to a wildcard,
@@ -647,7 +647,7 @@ function boxRule(
   // Match patterns should never be canonicalized - they need to preserve their
   // structure with wildcards for pattern matching. For example, ['Divide', '_a', '_a']
   // should remain as a Divide expression, not be simplified to 1.
-  const matchExpr = parseRulePart(ce, match, { canonical: false });
+  const matchExpr = parseRulePart(ce, match, { canonical: false, autoWildcard: false });
   const replaceExpr = parseRulePart(ce, replace, options);
   ce.popScope();
 
@@ -766,7 +766,9 @@ export function applyRule(
       )
         canonical = true;
 
-      expr = expr.engine.function(expr.operator, newOps, { canonical });
+      expr = expr.engine.function(expr.operator, newOps, {
+        form: canonical ? 'canonical' : 'raw',
+      });
     }
   }
 
@@ -953,7 +955,7 @@ function dewildcard(expr: BoxedExpression): BoxedExpression {
   }
   if (expr.ops) {
     const ops = expr.ops.map((x) => dewildcard(x));
-    return expr.engine.function(expr.operator, ops, { canonical: false });
+    return expr.engine.function(expr.operator, ops, { form: 'raw' });
   }
   return expr;
 }

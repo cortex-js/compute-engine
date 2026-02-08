@@ -6,7 +6,7 @@ import type {
   CompiledFunctions,
   LanguageTarget,
   CompilationOptions,
-  CompiledExecutable,
+  CompilationResult,
 } from './types';
 
 /**
@@ -329,28 +329,12 @@ export class PythonTarget implements LanguageTarget {
    *
    * Returns Python code as a string. To execute it, use Python runtime.
    */
-  compileToExecutable(
+  compile(
     expr: BoxedExpression,
     options: CompilationOptions = {}
-  ): CompiledExecutable {
-    const code = this.compile(expr, options);
-
-    // Return a "compiled" object that contains the Python source code
-    const result = function () {
-      return code;
-    };
-
-    // Add toString to return the Python code
-    Object.defineProperty(result, 'toString', {
-      value: () => code,
-    });
-
-    // Add isCompiled flag
-    Object.defineProperty(result, 'isCompiled', {
-      value: true,
-    });
-
-    return result as CompiledExecutable;
+  ): CompilationResult {
+    const code = this.compileToSource(expr, options);
+    return { target: 'python', success: true, code };
   }
 
   /**
@@ -358,7 +342,7 @@ export class PythonTarget implements LanguageTarget {
    *
    * Returns the Python code as a string.
    */
-  compile(expr: BoxedExpression, _options: CompilationOptions = {}): string {
+  compileToSource(expr: BoxedExpression, _options: CompilationOptions = {}): string {
     // Dynamic import to avoid circular dependency
     const { BaseCompiler } = require('./base-compiler');
     const target = this.createTarget();

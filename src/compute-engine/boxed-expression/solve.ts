@@ -426,7 +426,7 @@ export const UNIVARIATE_ROOTS: Rule[] = [
       if (!a || a.is(0)) return false;
       const ratio = b.div(a).neg();
       const val = ratio.numericValue;
-      if (val === null) return true; // Allow symbolic ratios
+      if (val === undefined) return true; // Allow symbolic ratios
       if (typeof val === 'number') return Math.abs(val) <= 1;
       return true;
     },
@@ -448,7 +448,7 @@ export const UNIVARIATE_ROOTS: Rule[] = [
       if (!a || a.is(0)) return false;
       const ratio = b.div(a).neg();
       const val = ratio.numericValue;
-      if (val === null) return true;
+      if (val === undefined) return true;
       if (typeof val === 'number') return Math.abs(val) <= 1;
       return true;
     },
@@ -463,7 +463,7 @@ export const UNIVARIATE_ROOTS: Rule[] = [
       if (!filter(sub)) return false;
       const b = sub.__b;
       const val = b.numericValue;
-      if (val === null) return true;
+      if (val === undefined) return true;
       if (typeof val === 'number') return Math.abs(val) <= 1;
       return true;
     },
@@ -478,7 +478,7 @@ export const UNIVARIATE_ROOTS: Rule[] = [
       if (!filter(sub)) return false;
       const b = sub.__b;
       const val = b.numericValue;
-      if (val === null) return true;
+      if (val === undefined) return true;
       if (typeof val === 'number') return Math.abs(val) <= 1;
       return true;
     },
@@ -497,7 +497,7 @@ export const UNIVARIATE_ROOTS: Rule[] = [
       if (!a || a.is(0)) return false;
       const ratio = b.div(a).neg();
       const val = ratio.numericValue;
-      if (val === null) return true;
+      if (val === undefined) return true;
       if (typeof val === 'number') return Math.abs(val) <= 1;
       return true;
     },
@@ -515,7 +515,7 @@ export const UNIVARIATE_ROOTS: Rule[] = [
       if (!a || a.is(0)) return false;
       const ratio = b.div(a).neg();
       const val = ratio.numericValue;
-      if (val === null) return true;
+      if (val === undefined) return true;
       if (typeof val === 'number') return Math.abs(val) <= 1;
       return true;
     },
@@ -530,7 +530,7 @@ export const UNIVARIATE_ROOTS: Rule[] = [
       if (!filter(sub)) return false;
       const b = sub.__b;
       const val = b.numericValue;
-      if (val === null) return true;
+      if (val === undefined) return true;
       if (typeof val === 'number') return Math.abs(val) <= 1;
       return true;
     },
@@ -545,7 +545,7 @@ export const UNIVARIATE_ROOTS: Rule[] = [
       if (!filter(sub)) return false;
       const b = sub.__b;
       const val = b.numericValue;
-      if (val === null) return true;
+      if (val === undefined) return true;
       if (typeof val === 'number') return Math.abs(val) <= 1;
       return true;
     },
@@ -841,7 +841,7 @@ function solveTwoSqrtEquation(
     if (coef?.isNegative) fSign = -1;
     // For now, only handle coefficient ±1
     const absCoef = coef?.abs().N().numericValue;
-    if (absCoef !== 1 && absCoef !== null) return null;
+    if (absCoef !== 1 && absCoef !== undefined) return null;
   }
 
   if (sqrtTerms[1].term.operator === 'Negate') gSign = -1;
@@ -849,7 +849,7 @@ function solveTwoSqrtEquation(
     const coef = sqrtTerms[1].term.ops?.find((o) => o.operator !== 'Sqrt');
     if (coef?.isNegative) gSign = -1;
     const absCoef = coef?.abs().N().numericValue;
-    if (absCoef !== 1 && absCoef !== null) return null;
+    if (absCoef !== 1 && absCoef !== undefined) return null;
   }
 
   // We have: fSign·√f + gSign·√g = e
@@ -1090,7 +1090,7 @@ function solveNestedSqrtEquation(
 
     // Also check numericValue for cases where isNegative might not be set
     const uNum = uNumeric.numericValue;
-    if (uNum !== null) {
+    if (uNum !== undefined) {
       let uReal: number | null = null;
       if (typeof uNum === 'number') {
         uReal = uNum;

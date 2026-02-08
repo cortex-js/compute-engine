@@ -35,7 +35,7 @@ export function canonicalAdd(
   ops = flatten(ops, 'Add');
 
   // Remove literal 0
-  ops = ops.filter((x) => x.numericValue === null || !x.is(0));
+  ops = ops.filter((x) => x.numericValue === undefined || !x.is(0));
 
   if (ops.length === 0) return ce.Zero;
   if (ops.length === 1 && !ops[0].isIndexedCollection) return ops[0];
@@ -296,7 +296,7 @@ export class Terms {
     }
 
     // This is a new term: just add it
-    console.assert(term.numericValue === null || term.is(1));
+    console.assert(term.numericValue === undefined || term.is(1));
     this.terms.push({ coef: [coef], term });
   }
 

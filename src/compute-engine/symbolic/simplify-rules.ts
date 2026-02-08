@@ -688,8 +688,8 @@ export const SIMPLIFY_RULES: Rule[] = [
 ];
 
 // Helper function to check if a value is exact
-function isExact(n: number | NumericValue | null): boolean {
-  if (n === null) return false;
+function isExact(n: number | NumericValue | undefined): boolean {
+  if (n === undefined) return false;
   if (typeof n === 'number') return Number.isInteger(n);
   return n.isExact;
 }

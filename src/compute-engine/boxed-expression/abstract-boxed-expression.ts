@@ -338,8 +338,8 @@ export abstract class _BoxedExpression implements BoxedExpression {
     return false;
   }
 
-  get numericValue(): number | NumericValue | null {
-    return null;
+  get numericValue(): number | NumericValue | undefined {
+    return undefined;
   }
 
   toNumericValue(): [NumericValue, BoxedExpression] {
@@ -503,16 +503,16 @@ export abstract class _BoxedExpression implements BoxedExpression {
     return c === '>=' || c === '>' || c === '=';
   }
 
-  get symbol(): string | null {
-    return null;
+  get symbol(): string | undefined {
+    return undefined;
   }
 
-  get tensor(): null | Tensor<any> {
-    return null;
+  get tensor(): Tensor<any> | undefined {
+    return undefined;
   }
 
-  get string(): string | null {
-    return null;
+  get string(): string | undefined {
+    return undefined;
   }
 
   getSubexpressions(operator: MathJsonSymbol): ReadonlyArray<BoxedExpression> {
@@ -543,9 +543,9 @@ export abstract class _BoxedExpression implements BoxedExpression {
     return false;
   }
 
-  // Only return non-null for functions
-  get ops(): null | ReadonlyArray<BoxedExpression> {
-    return null;
+  // Only return non-undefined for functions
+  get ops(): ReadonlyArray<BoxedExpression> | undefined {
+    return undefined;
   }
 
   get isScoped(): boolean {
@@ -610,7 +610,7 @@ export abstract class _BoxedExpression implements BoxedExpression {
     const recursive = options?.recursive ?? true;
 
     const ops = this.ops.map((x) => (recursive ? x.map(fn, options) : fn(x)));
-    return fn(this.engine.function(this.operator, ops, { canonical }));
+    return fn(this.engine.function(this.operator, ops, { form: canonical ? 'canonical' : 'raw' }));
   }
 
   solve(

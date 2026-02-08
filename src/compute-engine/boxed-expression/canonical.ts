@@ -76,8 +76,7 @@ export function canonicalForm(
   // canonicalization.
   if (expr.isFunctionExpression && expr.isCanonical) {
     expr = expr.engine.function(expr.operator, [...expr.ops!], {
-      canonical: false,
-      structural: true,
+      form: 'structural',
     });
   }
 
@@ -232,7 +231,7 @@ function numberForm(expr: BoxedExpression): BoxedExpression {
   if (name === 'Negate' && ops.length === 1) {
     const op1 = ops[0]!;
     const { numericValue } = op1;
-    if (numericValue !== null)
+    if (numericValue !== undefined)
       return ce.number(
         typeof numericValue === 'number' ? -numericValue : numericValue.neg()
       );
@@ -310,7 +309,7 @@ function powerForm(expr: BoxedExpression) {
  * @returns
  */
 function symbolForm(expr: BoxedExpression): BoxedExpression {
-  if (expr.symbol !== null) return expr.canonical;
+  if (expr.symbol !== undefined) return expr.canonical;
   if (!expr.isFunctionExpression) return expr;
 
   return expr.engine._fn(expr.operator, expr.ops!.map(symbolForm), {
