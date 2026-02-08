@@ -1075,3 +1075,32 @@ describe('SOLVING LINEAR INEQUALITY SYSTEMS', () => {
     expect(result).toBeNull();
   });
 });
+
+describe('DOMAIN-CONSTRAINED SOLVE', () => {
+  const { ComputeEngine } = require('../../src/compute-engine');
+
+  test('integer variable: 2n - 5 = 0 has no integer solutions', () => {
+    const ce = new ComputeEngine();
+    ce.declare('n', { type: 'integer' });
+    const result = ce.parse('2n - 5 = 0').solve('n');
+    // 5/2 is not an integer, so no solutions
+    expect(result).toEqual([]);
+  });
+
+  test('integer variable: m^2 - 4 = 0 has integer solutions [2, -2]', () => {
+    const ce = new ComputeEngine();
+    ce.declare('m', { type: 'integer' });
+    const result = ce.parse('m^2 - 4 = 0').solve('m');
+    expect(result).not.toBeNull();
+    const values = (result as any[])?.map((x: any) => x.re).sort();
+    expect(values).toEqual([-2, 2]);
+  });
+
+  test('real variable: r^2 + 1 = 0 has no real solutions', () => {
+    const ce = new ComputeEngine();
+    ce.declare('r', { type: 'real' });
+    const result = ce.parse('r^2 + 1 = 0').solve('r');
+    // sqrt(-1) = i is not real, so no solutions
+    expect(result).toEqual([]);
+  });
+});

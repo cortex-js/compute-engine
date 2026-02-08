@@ -50,6 +50,7 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
     Degrees: {
       /* = Pi / 180 */
       signature: '(real) -> real',
+      type: () => 'finite_real',
       canonical: (ops, { engine }) => {
         const ce = engine;
         if (ce.angularUnit === 'deg') return ops[0];
@@ -86,6 +87,7 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
     Hypot: {
       broadcastable: true,
       signature: '(real, real) -> real',
+      type: () => 'finite_real',
       sgn: () => 'non-negative',
       evaluate: ([x, y], { engine }) =>
         engine.box(['Sqrt', ['Add', ['Square', x], ['Square', y]]]),
@@ -174,6 +176,7 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
       wikidata: 'Q2528380',
       broadcastable: true,
       signature: '(real) -> number',
+      type: () => 'finite_real',
       evaluate: ([z], { engine }) =>
         engine.box(['Divide', ['Subtract', 1, ['Cos', z]], 2]),
     },
@@ -183,6 +186,7 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
       //  Range ['Interval', [['Negate', 'Pi'], 'Pi'],
       broadcastable: true,
       signature: '(real) -> real',
+      type: () => 'finite_real',
       evaluate: ([x], { engine }) =>
         engine.box(['Multiply', 2, ['Arcsin', ['Sqrt', x]]]),
     },
@@ -242,6 +246,10 @@ function trigFunction(
     description,
     broadcastable: true,
     signature: '(number) -> number',
+    type: ([x]) => {
+      if (x.type.matches('real')) return 'finite_real';
+      return 'finite_number';
+    },
     sgn: ([x]) => trigSign(operator, x),
     evaluate: ([x], { numericApproximation }) => {
       if (numericApproximation) return evalTrig(operator, x);

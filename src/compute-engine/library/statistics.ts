@@ -32,6 +32,7 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
     Erf: {
       complexity: 7500,
       signature: '(number) -> number',
+      type: () => 'finite_real',
       evaluate: (ops, { engine: ce }) => {
         const x = ops[0].re;
         if (!Number.isFinite(x)) return undefined;
@@ -42,6 +43,7 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
     Erfc: {
       complexity: 7500,
       signature: '(number) -> number',
+      type: () => 'finite_real',
       evaluate: (ops, { engine: ce }) => {
         const x = ops[0].re;
         if (!Number.isFinite(x)) return undefined;
@@ -52,6 +54,7 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
     ErfInv: {
       complexity: 7500,
       signature: '(number) -> number',
+      type: () => 'finite_real',
       evaluate: (ops, { engine: ce }) => {
         const x = ops[0].re;
         if (!Number.isFinite(x)) return undefined;
@@ -67,6 +70,7 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
       complexity: 1200,
       broadcastable: false,
       signature: '((collection|number)+) -> number',
+      type: () => 'finite_real',
       description: 'The most frequently occurring value in the collection.',
       evaluate: (ops, { engine }) =>
         engine.number(
@@ -80,6 +84,7 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
       complexity: 1200,
       broadcastable: false,
       signature: '((collection|number)+) -> number',
+      type: () => 'finite_real',
       description: 'The most frequently occurring value in the collection.',
       examples: ['Mode([1, 2, 2, 3])  // Returns 2'],
       evaluate: (ops, { engine }) =>
@@ -94,6 +99,7 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
       complexity: 1200,
       broadcastable: false,
       signature: '((collection|number)+) -> number',
+      type: () => 'finite_real',
       evaluate: (ops, { engine }) =>
         engine.number(
           bignumPreferred(engine)
@@ -106,6 +112,7 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
       complexity: 1200,
       broadcastable: false,
       signature: '((collection|number)+) -> number',
+      type: () => 'finite_real',
       evaluate: (ops, { engine }) =>
         engine.number(
           bignumPreferred(engine)
@@ -122,6 +129,7 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
       broadcastable: false,
       description: 'Sample Standard Deviation of a collection of numbers.',
       signature: '((collection|number)+) -> number',
+      type: () => 'finite_real',
       evaluate: (ops, { engine }) =>
         engine.number(
           bignumPreferred(engine)
@@ -138,6 +146,7 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
       broadcastable: false,
       description: 'Population Standard Deviation of a collection of numbers.',
       signature: '((collection|number)+) -> number',
+      type: () => 'finite_real',
       evaluate: (ops, { engine }) =>
         engine.number(
           bignumPreferred(engine)
@@ -153,6 +162,7 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
       complexity: 1200,
       broadcastable: false,
       signature: '((collection|number)+) -> number',
+      type: () => 'finite_real',
       evaluate: (ops, { engine }) =>
         engine.number(
           bignumPreferred(engine)
@@ -165,6 +175,7 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
       complexity: 1200,
       broadcastable: false,
       signature: '((collection|number)+) -> number',
+      type: () => 'finite_real',
       evaluate: (ops, { engine }) =>
         engine.number(
           bignumPreferred(engine)
@@ -177,6 +188,7 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
       complexity: 1200,
       broadcastable: false,
       signature: '((collection|number)+) -> number',
+      type: () => 'finite_real',
       evaluate: (ops, { engine }) =>
         engine.number(
           bignumPreferred(engine)
@@ -205,6 +217,7 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
       complexity: 1200,
       broadcastable: false,
       signature: '((collection|number)+) -> number',
+      type: () => 'finite_real',
 
       evaluate: (ops, { engine }) =>
         engine.number(

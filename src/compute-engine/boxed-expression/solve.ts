@@ -1181,8 +1181,9 @@ export function findUnivariateRoots(
   // Create a lexical scope for the unknown
   ce.pushScope();
 
-  // Assume that the unknown is a number
-  ce.declare('_x', 'number');
+  // Use the declared type of the variable, if any, otherwise assume 'number'
+  const varType = ce.symbol(x).type.type;
+  ce.declare('_x', typeof varType === 'string' ? varType : 'number');
 
   let result = exprs.flatMap((expr) =>
     matchAnyRules(
@@ -1237,11 +1238,14 @@ export function findUnivariateRoots(
   // Validate the roots against the ORIGINAL expression (before clearing
   // denominators and harmonization). This filters out extraneous roots that
   // may have been introduced by algebraic transformations.
-  return validateRoots(
+  const validatedRoots = validateRoots(
     originalExpr,
     x,
     result.map((x) => x.evaluate().simplify())
   );
+
+  // Filter solutions by the declared type of the variable
+  return filterRootsByType(ce, x, validatedRoots);
 }
 
 /** Expr is an equation with an operator of
@@ -1409,4 +1413,29 @@ function validateRoots(
   }
 
   return uniqueRoots;
+}
+
+/** Filter solutions by the declared type of the variable.
+ * For example, if the variable is declared as integer, discard non-integer roots.
+ */
+function filterRootsByType(
+  ce: ComputeEngine,
+  x: string,
+  roots: ReadonlyArray<BoxedExpression>
+): ReadonlyArray<BoxedExpression> {
+  const varTypeObj = ce.symbol(x).type;
+  const vt = varTypeObj.type;
+  // Only filter for specific numeric subtypes
+  if (typeof vt !== 'string' || vt === 'number' || vt === 'unknown') return roots;
+
+  return roots.filter((root) => {
+    const val = root.evaluate();
+    if (varTypeObj.matches('integer') || varTypeObj.matches('finite_integer'))
+      return val.isInteger === true;
+    if (varTypeObj.matches('rational') || varTypeObj.matches('finite_rational'))
+      return val.isRational === true;
+    if (varTypeObj.matches('real') || varTypeObj.matches('finite_real'))
+      return val.isReal === true;
+    return true;
+  });
 }

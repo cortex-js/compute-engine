@@ -57,6 +57,8 @@ import {
   root,
 } from '../boxed-expression/arithmetic-power';
 import { parseType } from '../../common/type/parse';
+import type { Type } from '../../common/type/types';
+import { widen } from '../../common/type/utils';
 import { range, rangeLast } from './collections';
 import { run, runAsync } from '../../common/interruptible';
 import type {
@@ -70,6 +72,17 @@ import {
   isBoxedFunction,
 } from '../boxed-expression/type-guards';
 import { canonical } from '../boxed-expression/canonical-utils';
+
+/**
+ * Shared type handler for functions that produce finite numeric output
+ * from numeric input. Real inputs → finite_real, otherwise → finite_number.
+ */
+export function numericTypeHandler(
+  ops: ReadonlyArray<BoxedExpression>
+): Type {
+  if (ops.every((x) => x.type.matches('real'))) return 'finite_real';
+  return 'finite_number';
+}
 
 // When processing an arithmetic expression, the following are the core
 // canonical arithmetic operations to account for:
@@ -507,6 +520,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       complexity: 8000,
       broadcastable: true,
       signature: '(number) -> number',
+      type: (ops) => numericTypeHandler(ops),
 
       sgn: ([x]) => (x.isPositive ? 'positive' : x.is(0) ? 'zero' : undefined),
       evaluate: ([x], { numericApproximation, engine }) =>
@@ -524,6 +538,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       complexity: 8000,
       broadcastable: true,
       signature: '(number) -> number',
+      type: (ops) => numericTypeHandler(ops),
 
       evaluate: (ops, { numericApproximation, engine }) =>
         numericApproximation
@@ -545,7 +560,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       complexity: 8200,
       broadcastable: true,
       signature: '(number) -> number',
-      // Numerical evaluation not yet implemented
+      type: (ops) => numericTypeHandler(ops),
     },
 
     // Trigamma function ψ₁(x) = d/dx ψ(x) = d²/dx² ln(Γ(x))
@@ -556,7 +571,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       complexity: 8400,
       broadcastable: true,
       signature: '(number) -> number',
-      // Numerical evaluation not yet implemented
+      type: (ops) => numericTypeHandler(ops),
     },
 
     // PolyGamma function ψₙ(x) = dⁿ/dxⁿ ψ(x)
@@ -569,7 +584,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       complexity: 8500,
       broadcastable: true,
       signature: '(order: integer, number) -> number',
-      // Numerical evaluation not yet implemented
+      type: (ops) => numericTypeHandler(ops),
     },
 
     // Riemann zeta function ζ(s) = Σ_{n=1}^∞ 1/n^s
@@ -580,7 +595,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       complexity: 8500,
       broadcastable: true,
       signature: '(number) -> number',
-      // Numerical evaluation not yet implemented
+      type: (ops) => numericTypeHandler(ops),
     },
 
     // Beta function B(a,b) = Γ(a)Γ(b)/Γ(a+b) = ∫₀¹ t^(a-1)(1-t)^(b-1) dt
@@ -590,7 +605,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       complexity: 8200,
       broadcastable: true,
       signature: '(number, number) -> number',
-      // Numerical evaluation not yet implemented
+      type: (ops) => numericTypeHandler(ops),
     },
 
     // Lambert W function: W(x)·e^(W(x)) = x
@@ -601,7 +616,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       complexity: 8300,
       broadcastable: true,
       signature: '(number) -> number',
-      // Numerical evaluation not yet implemented
+      type: (ops) => numericTypeHandler(ops),
     },
 
     // Bessel function of the first kind J_n(x)
@@ -612,7 +627,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       complexity: 8500,
       broadcastable: true,
       signature: '(order: number, number) -> number',
-      // Numerical evaluation not yet implemented
+      type: (ops) => numericTypeHandler(ops),
     },
 
     // Bessel function of the second kind Y_n(x)
@@ -623,7 +638,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       complexity: 8500,
       broadcastable: true,
       signature: '(order: number, number) -> number',
-      // Numerical evaluation not yet implemented
+      type: (ops) => numericTypeHandler(ops),
     },
 
     // Modified Bessel function of the first kind I_n(x)
@@ -633,7 +648,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       complexity: 8500,
       broadcastable: true,
       signature: '(order: number, number) -> number',
-      // Numerical evaluation not yet implemented
+      type: (ops) => numericTypeHandler(ops),
     },
 
     // Modified Bessel function of the second kind K_n(x)
@@ -645,7 +660,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       complexity: 8500,
       broadcastable: true,
       signature: '(order: number, number) -> number',
-      // Numerical evaluation not yet implemented
+      type: (ops) => numericTypeHandler(ops),
     },
 
     // Airy function of the first kind Ai(x)
@@ -656,7 +671,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       complexity: 8400,
       broadcastable: true,
       signature: '(number) -> number',
-      // Numerical evaluation not yet implemented
+      type: (ops) => numericTypeHandler(ops),
     },
 
     // Airy function of the second kind Bi(x)
@@ -666,7 +681,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       complexity: 8400,
       broadcastable: true,
       signature: '(number) -> number',
-      // Numerical evaluation not yet implemented
+      type: (ops) => numericTypeHandler(ops),
     },
 
     Ln: {
@@ -676,6 +691,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       broadcastable: true,
 
       signature: '(number, base: number?) -> number',
+      type: ([x]) => numericTypeHandler([x]),
       sgn: ([x]) => lnSign(x),
       // @fastpath: this doesn't get called. See makeNumericFunction()
       evaluate: ([z], { numericApproximation, engine }) => {
@@ -708,6 +724,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       broadcastable: true,
 
       signature: '(number, base: number?) -> number',
+      type: ([x]) => numericTypeHandler([x]),
 
       sgn: ([x, base]) => {
         if (!base) return lnSign(x);
@@ -797,6 +814,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       broadcastable: true,
 
       signature: '(number, number) -> number',
+      type: ([a, b]) => widen(a.type.type, b.type.type),
       sgn: (ops) => {
         const n = ops[1]; //base of Mod
         if (n === undefined || n.isReal == false) return undefined;
@@ -1102,6 +1120,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       complexity: 2500,
       broadcastable: true,
       signature: '(number, number) -> number',
+      type: ([a, b]) => widen(a.type.type, b.type.type),
       evaluate: ([a, b]) =>
         apply2(
           a,

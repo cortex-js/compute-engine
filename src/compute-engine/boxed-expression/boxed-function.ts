@@ -33,6 +33,7 @@ import { Type } from '../../common/type/types';
 import { BoxedType } from '../../common/type/boxed-type';
 import { parseType } from '../../common/type/parse';
 import { isSubtype } from '../../common/type/subtype';
+import { NUMERIC_TYPES } from '../../common/type/primitive';
 import {
   functionResult,
   isSignatureType,
@@ -1314,6 +1315,20 @@ function type(expr: BoxedFunction): Type {
         else
           sigResult =
             parseType(calculatedType, expr.engine._typeResolver) ?? sigResult;
+      }
+    } else if (
+      expr.ops.length > 0 &&
+      (sigResult === 'number' || sigResult === 'finite_number')
+    ) {
+      // No explicit type handler and signature result is a broad numeric
+      // type: try to narrow based on argument types.
+      // E.g., if signature says "number" but all args are "integer",
+      // narrow result to "finite_integer".
+      const argTypes = expr.ops.map((op) => op.type.type);
+      if (argTypes.every((t) => typeof t === 'string' && NUMERIC_TYPES.includes(t as any))) {
+        const widened = widen(...argTypes);
+        if (typeof widened === 'string' && isSubtype(widened, sigResult))
+          sigResult = widened;
       }
     }
 
