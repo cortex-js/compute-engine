@@ -318,6 +318,12 @@ export class ComputeEngine implements IComputeEngine {
   /** @internal */
   private _cost?: (expr: BoxedExpression) => number;
 
+  /** @internal Backing array for simplificationRules */
+  private _simplificationRules: Rule[] = [...SIMPLIFY_RULES];
+
+  /** @internal Cached length of _simplificationRules for staleness detection */
+  private _simplificationRulesCachedLength = -1;
+
   /** @internal Registry of compilation targets */
   private _compilationTargets: Map<string, LanguageTarget> = new Map();
 
@@ -1239,6 +1245,34 @@ export class ComputeEngine implements IComputeEngine {
   }
 
   /**
+   * The rules used by `.simplify()` when no explicit `rules` option is passed.
+   * Initialized to a copy of the built-in simplification rules.
+   *
+   * Add custom rules with `push()`:
+   * ```ts
+   * ce.simplificationRules.push({
+   *   match: ['Power', ['Sin', '_x'], 2],
+   *   replace: ['Subtract', 1, ['Power', ['Cos', '_x'], 2]],
+   * });
+   * ```
+   *
+   * Or replace entirely:
+   * ```ts
+   * ce.simplificationRules = myCustomRules;
+   * ```
+   */
+  get simplificationRules(): Rule[] {
+    return this._simplificationRules;
+  }
+
+  set simplificationRules(rules: Rule[]) {
+    this._simplificationRules = rules;
+    // Invalidate the cached boxed rule set
+    this._simplificationRulesCachedLength = -1;
+    delete (this as any).__cache['standard-simplification-rules'];
+  }
+
+  /**
    * Return definition matching the symbol, starting with the current
    * lexical scope and going up the scope chain.
    */
@@ -1838,10 +1872,22 @@ export class ComputeEngine implements IComputeEngine {
   getRuleSet(id?: string): BoxedRuleSet | undefined {
     id ??= 'standard-simplification';
 
-    if (id === 'standard-simplification')
-      return this._cache('standard-simplification-rules', () =>
-        boxRules(this, SIMPLIFY_RULES, { canonical: true })
+    if (id === 'standard-simplification') {
+      // Invalidate cache if rules array was mutated (e.g. via push/splice)
+      if (
+        this._simplificationRulesCachedLength >= 0 &&
+        this._simplificationRules.length !==
+          this._simplificationRulesCachedLength
+      ) {
+        delete (this as any).__cache['standard-simplification-rules'];
+      }
+
+      const result = this._cache('standard-simplification-rules', () =>
+        boxRules(this, this._simplificationRules, { canonical: true })
       );
+      this._simplificationRulesCachedLength = this._simplificationRules.length;
+      return result;
+    }
 
     if (id === 'solve-univariate')
       return this._cache('univariate-roots-rules', () =>

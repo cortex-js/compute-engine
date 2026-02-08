@@ -531,10 +531,16 @@ immediately.
     - Cycle budget: 24→43 (type-only cycles from the split + pre-existing
       latex-syntax internal cycles now separately enumerated by madge)
 
-12. **Enforce layered dependencies**
-    - Configure eslint-plugin-boundaries or equivalent
-    - Define allowed import directions per directory
-    - Fail CI on violations
+12. **Enforce layered dependencies** ✅ DONE
+    - Added 24 new zones to `import/no-restricted-paths` in `.eslintrc.cjs`
+      covering `numerics/`, `numeric-value/`, `tensor/`, `interval/`, and
+      `types-*.ts` files (total 35 zones, up from 11)
+    - Full layer hierarchy documented in ESLint config comment block
+    - Added `check:deps` npm script (`madge --circular`)
+    - Fixed one violation: moved `BigNumFactory` type from `numeric-value/types`
+      to `numerics/types` (correct layer) with re-export for backward compat
+    - Verified: 0 ESLint errors, 8 type-only madge cycles (unchanged), 11
+      pre-existing TS errors (unchanged)
 
 13. **Add type guards for BoxedExpression roles** ✅ DONE
     - `type-guards.ts` with 7 guards: `isNumericExpression`, `isSymbolExpression`,

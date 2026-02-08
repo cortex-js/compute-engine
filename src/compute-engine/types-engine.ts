@@ -147,6 +147,11 @@ export interface IComputeEngine extends IBigNum {
 
   costFunction: (expr: BoxedExpression) => number;
 
+  /** The rules used by `.simplify()` when no explicit `rules` option is passed.
+   *  Initialized to the built-in simplification rules.
+   *  Users can `push()` additional rules or replace the entire array. */
+  simplificationRules: Rule[];
+
   strict: boolean;
 
   box(
