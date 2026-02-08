@@ -59,6 +59,7 @@ import {
 import { parseType } from '../../common/type/parse';
 import type { Type } from '../../common/type/types';
 import { widen } from '../../common/type/utils';
+import { numericTypeHandler } from './type-handlers';
 import { range, rangeLast } from './collections';
 import { run, runAsync } from '../../common/interruptible';
 import type {
@@ -72,15 +73,6 @@ import {
   isBoxedFunction,
 } from '../boxed-expression/type-guards';
 import { canonical } from '../boxed-expression/canonical-utils';
-
-/**
- * Shared type handler for functions that produce finite numeric output
- * from numeric input. Real inputs → finite_real, otherwise → finite_number.
- */
-export function numericTypeHandler(ops: ReadonlyArray<BoxedExpression>): Type {
-  if (ops.every((x) => x.type.matches('real'))) return 'finite_real';
-  return 'finite_number';
-}
 
 // When processing an arithmetic expression, the following are the core
 // canonical arithmetic operations to account for:
@@ -500,6 +492,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       complexity: 1250,
       broadcastable: true,
       signature: '(number) -> number',
+      type: ([x]) => numericTypeHandler([x]),
       sgn: ([x]) => {
         if (x.isNonNegative) return 'non-negative';
         return undefined;

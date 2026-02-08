@@ -945,15 +945,22 @@ export class BoxedFunction
 
     // Handle List of equations (system of equations)
     if (this.operator === 'List') {
+      const ce = this.engine;
       const equations = this.ops;
       if (equations && equations.every((eq) => eq.operator === 'Equal')) {
         // Try linear system first
         const linearResult = solveLinearSystem([...equations], varNames);
-        if (linearResult) return linearResult;
+        if (linearResult && filterSolutionByTypes(ce, varNames, linearResult))
+          return linearResult;
 
         // Try polynomial system (non-linear)
         const polyResult = solvePolynomialSystem([...equations], varNames);
-        if (polyResult) return polyResult;
+        if (polyResult) {
+          const filtered = polyResult.filter((s) =>
+            filterSolutionByTypes(ce, varNames, s)
+          );
+          if (filtered.length > 0) return filtered;
+        }
       }
 
       // Check for inequality systems (Less, LessEqual, Greater, GreaterEqual)
@@ -966,7 +973,12 @@ export class BoxedFunction
           [...equations],
           varNames
         );
-        if (inequalityResult) return inequalityResult;
+        if (inequalityResult) {
+          const filtered = inequalityResult.filter((s) =>
+            filterSolutionByTypes(ce, varNames, s)
+          );
+          if (filtered.length > 0) return filtered;
+        }
       }
     }
 
@@ -1270,6 +1282,26 @@ export class BoxedFunction
       );
     };
   }
+}
+
+/** Filter a multivariate solution by the declared types of the variables.
+ * Returns true if the solution satisfies all type constraints. */
+function filterSolutionByTypes(
+  ce: ComputeEngine,
+  variables: string[],
+  solution: Record<string, BoxedExpression>
+): boolean {
+  for (const v of variables) {
+    const varTypeObj = ce.symbol(v).type;
+    const vt = varTypeObj.type;
+    if (typeof vt !== 'string' || vt === 'number' || vt === 'unknown') continue;
+    const val = solution[v]?.evaluate();
+    if (!val) continue;
+    if (varTypeObj.matches('integer') && val.isInteger !== true) return false;
+    if (varTypeObj.matches('rational') && val.isRational !== true) return false;
+    if (varTypeObj.matches('real') && val.isReal !== true) return false;
+  }
+  return true;
 }
 
 /** Return the type of the value of the expression, without actually

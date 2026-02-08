@@ -1103,4 +1103,28 @@ describe('DOMAIN-CONSTRAINED SOLVE', () => {
     // sqrt(-1) = i is not real, so no solutions
     expect(result).toEqual([]);
   });
+
+  test('linear system with integer constraint filters non-integer solution', () => {
+    const ce = new ComputeEngine();
+    ce.declare('x', { type: 'integer' });
+    ce.declare('y', { type: 'integer' });
+    // x + y = 5, x - y = 2 → x=3.5, y=1.5 (not integers)
+    const result = ce
+      .parse('\\begin{cases}x+y=5\\\\x-y=2\\end{cases}')
+      .solve(['x', 'y']);
+    expect(result).toBeNull();
+  });
+
+  test('linear system with integer constraint keeps integer solution', () => {
+    const ce = new ComputeEngine();
+    ce.declare('x', { type: 'integer' });
+    ce.declare('y', { type: 'integer' });
+    // x + y = 5, x - y = 1 → x=3, y=2
+    const result = ce
+      .parse('\\begin{cases}x+y=5\\\\x-y=1\\end{cases}')
+      .solve(['x', 'y']) as Record<string, any>;
+    expect(result).not.toBeNull();
+    expect(result.x.json).toBe(3);
+    expect(result.y.json).toBe(2);
+  });
 });

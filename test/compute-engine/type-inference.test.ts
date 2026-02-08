@@ -73,6 +73,19 @@ describe('TYPE INFERENCE FOR TRIG FUNCTIONS', () => {
     localCe.declare('x', { type: 'real' });
     expect(localCe.parse('\\arctan(x)').type.toString()).toBe('finite_real');
   });
+
+  it('Arctan2 of real args → finite_real', () => {
+    const expr = ce.box(['Arctan2', 1, 2]);
+    expect(expr.type.toString()).toBe('finite_real');
+  });
+
+  it('Arctan2 of number args → finite_number', () => {
+    const localCe = new ComputeEngine();
+    localCe.declare('y', { type: 'number' });
+    localCe.declare('x', { type: 'number' });
+    const expr = localCe.box(['Arctan2', 'y', 'x']);
+    expect(expr.type.toString()).toBe('finite_number');
+  });
 });
 
 describe('TYPE INFERENCE FOR SPECIAL FUNCTIONS', () => {
@@ -87,6 +100,20 @@ describe('TYPE INFERENCE FOR SPECIAL FUNCTIONS', () => {
     expect(ce.parse('\\lfloor 3.5 \\rfloor').type.matches('integer')).toBe(
       true
     );
+  });
+
+  it('Fract of real → finite_real', () => {
+    const localCe = new ComputeEngine();
+    localCe.declare('x', { type: 'real' });
+    const expr = localCe.box(['Fract', 'x']);
+    expect(expr.type.toString()).toBe('finite_real');
+  });
+
+  it('Fract of number → finite_number', () => {
+    const localCe = new ComputeEngine();
+    localCe.declare('z', { type: 'number' });
+    const expr = localCe.box(['Fract', 'z']);
+    expect(expr.type.toString()).toBe('finite_number');
   });
 });
 

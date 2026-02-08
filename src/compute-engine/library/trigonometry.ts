@@ -14,6 +14,7 @@ import { apply2 } from '../boxed-expression/apply';
 import { reducedRational } from '../numerics/rationals';
 import type { OperatorDefinition, SymbolDefinitions } from '../global-types';
 import { isBoxedNumber } from '../boxed-expression/type-guards';
+import { numericTypeHandler } from './type-handlers';
 
 //
 // Note: The name of trigonometric functions follow NIST DLMF
@@ -118,6 +119,7 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
       complexity: 5200,
       broadcastable: true,
       signature: '(y:number, x: number) -> real',
+      type: (ops) => numericTypeHandler(ops),
       evaluate: ([y, x], { engine: ce, numericApproximation }) => {
         if (numericApproximation)
           return apply2(y, x, Math.atan2, (a, b) => Decimal.atan2(a, b));
@@ -245,10 +247,7 @@ function trigFunction(
     description,
     broadcastable: true,
     signature: '(number) -> number',
-    type: ([x]) => {
-      if (x.type.matches('real')) return 'finite_real';
-      return 'finite_number';
-    },
+    type: (ops) => numericTypeHandler(ops),
     sgn: ([x]) => trigSign(operator, x),
     evaluate: ([x], { numericApproximation }) => {
       if (numericApproximation) return evalTrig(operator, x);
