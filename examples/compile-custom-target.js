@@ -13,6 +13,9 @@ import {
   ComputeEngine,
   BaseCompiler,
   JavaScriptTarget,
+  isBoxedSymbol,
+  isBoxedNumber,
+  isBoxedFunction,
 } from '@cortex-js/compute-engine';
 
 const ce = new ComputeEngine();
@@ -121,11 +124,16 @@ class RPNTarget {
   }
 
   compileToRPN(expr) {
-    if (expr.symbol) return expr.symbol;
-    if (expr.isNumberLiteral) return expr.re.toString();
+    // Use type guards for safe property access
+    if (isBoxedSymbol(expr)) return expr.symbol;
+    if (isBoxedNumber(expr)) return expr.re.toString();
 
     const op = expr.operator;
-    const args = expr.ops || [];
+
+    // Only access ops if this is a function expression
+    if (!isBoxedFunction(expr)) return expr.toString();
+
+    const args = expr.ops;
 
     // Compile arguments first (postorder traversal)
     const compiledArgs = args.map((arg) => this.compileToRPN(arg));

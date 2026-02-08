@@ -16,20 +16,129 @@ Reference documentation and guides at
 
 [![](https://dcbadge.vercel.app/api/server/yhmvVeJ4Hd)](https://discord.gg/yhmvVeJ4Hd)
 
-## Using Compute Engine
+## Installation
 
 ```bash
 $ npm install --save @cortex-js/compute-engine
 ```
+
+## Quick Start
+
+### Basic Parsing and Evaluation
 
 ```js
 import { ComputeEngine } from "@cortex-js/compute-engine";
 
 const ce = new ComputeEngine();
 
-ce.parse("2^{11}-1 \\in \\Z").evaluate().print()
-// ➔ "True"
+// Parse LaTeX and evaluate
+const result = ce.parse("2^{11}-1").evaluate();
+console.log(result.toString());
+// ➔ 2047
+
+// Check properties
+ce.parse("2^{11}-1 \\in \\Z").evaluate().print();
+// ➔ True
 ```
+
+### Working with Numbers (Type-Safe)
+
+Use type guards to safely access specialized properties:
+
+```js
+import { ComputeEngine, isBoxedNumber } from "@cortex-js/compute-engine";
+
+const ce = new ComputeEngine();
+const expr = ce.parse("\\frac{5}{2}").evaluate();
+
+// ✓ Modern approach with type guards
+if (isBoxedNumber(expr)) {
+  console.log(expr.numericValue);  // 2.5 (type-safe access)
+  console.log(expr.isInteger);     // false
+}
+```
+
+### Working with Symbols
+
+```js
+import { ComputeEngine, isBoxedSymbol, sym } from "@cortex-js/compute-engine";
+
+const ce = new ComputeEngine();
+const expr = ce.parse("x + 1");
+
+// Check if expression is a specific symbol
+if (sym(expr) === "x") {
+  console.log("This is the variable x");
+}
+
+// Or use full type guard for more access
+const variable = ce.parse("y");
+if (isBoxedSymbol(variable)) {
+  console.log(variable.symbol);  // "y"
+}
+```
+
+### Working with Functions
+
+```js
+import { ComputeEngine, isBoxedFunction } from "@cortex-js/compute-engine";
+
+const ce = new ComputeEngine();
+const expr = ce.parse("2x + 3y");
+
+// Access function structure safely
+if (isBoxedFunction(expr)) {
+  console.log(expr.operator);    // "Add"
+  console.log(expr.ops.length);  // 2
+
+  // Iterate over operands
+  for (const op of expr.ops) {
+    console.log(op.toString());
+  }
+}
+```
+
+### Simplification and Manipulation
+
+```js
+import { ComputeEngine, expand } from "@cortex-js/compute-engine";
+
+const ce = new ComputeEngine();
+
+// Simplify expressions
+ce.parse("x + x").simplify().print();
+// ➔ 2x
+
+// Expand expressions (free function)
+const expr = ce.parse("(x + 1)^2");
+expand(expr).print();
+// ➔ x^2 + 2x + 1
+
+// Substitute values
+const expr2 = ce.parse("x^2 + 2x + 1");
+expr2.subs({ x: 3 }).evaluate().print();
+// ➔ 16
+```
+
+### Solving Equations
+
+```js
+const ce = new ComputeEngine();
+
+// Solve linear system
+const system = ce.parse("\\begin{cases}x+y=5\\\\x-y=1\\end{cases}");
+const solution = system.solve(["x", "y"]);
+
+console.log(solution.x.json);  // 3
+console.log(solution.y.json);  // 2
+```
+
+**💡 Best Practices:**
+- Always use type guards (`isBoxedNumber`, `isBoxedSymbol`, `isBoxedFunction`) before accessing specialized properties
+- Import type guards from `@cortex-js/compute-engine` alongside `ComputeEngine`
+- Use the `sym()` helper for quick symbol name checks
+
+**📚 Learn More:** [Full documentation and guides](https://cortexjs.io/compute-engine/)
 
 ## FAQ
 

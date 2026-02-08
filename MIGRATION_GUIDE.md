@@ -100,7 +100,7 @@ if (expr.numericValue !== null) {
 ### After
 
 ```ts
-import { isBoxedSymbol, isBoxedNumber } from '@cortex-js/compute-engine';
+import { isBoxedSymbol, isBoxedNumber, sym } from '@cortex-js/compute-engine';
 
 if (isBoxedSymbol(expr)) {
   // expr.symbol is `string` — guaranteed non-undefined
@@ -111,9 +111,17 @@ if (isBoxedNumber(expr)) {
   // expr.numericValue is `number | NumericValue` — guaranteed non-undefined
   console.log(expr.numericValue);
 }
+
+// Convenience helper for symbol checks
+if (sym(expr) === 'Pi') {
+  console.log('This is Pi');
+}
 ```
 
 See Section 6 for the full list of type guards and role interfaces.
+
+**Note:** The `sym()` helper combines `isBoxedSymbol()` check with symbol name access,
+making simple symbol comparisons more concise.
 
 ### Still on `BoxedExpression`
 
@@ -335,6 +343,23 @@ if (isIndexedCollection(expr)) {
 }
 ```
 
+### Convenience Helper: `sym()`
+
+For quick symbol name checks, use the `sym()` helper:
+
+```ts
+import { sym } from '@cortex-js/compute-engine';
+
+// Instead of:
+if (isBoxedSymbol(expr) && expr.symbol === 'Pi') { /* ... */ }
+
+// You can write:
+if (sym(expr) === 'Pi') { /* ... */ }
+
+// Returns symbol name or undefined
+const name = sym(expr);  // string | undefined
+```
+
 ### Role Interfaces
 
 | Guard              | Narrows to                                 |
@@ -494,6 +519,104 @@ console.log(expr.symbol);
 // Correct — narrow first, then access
 if (isBoxedSymbol(expr)) {
   console.log(expr.symbol);  // string, guaranteed
+}
+```
+
+---
+
+## 11. Common Migration Patterns
+
+### Pattern: Checking Multiple Expression Types
+
+**Before:**
+```ts
+if (expr.symbol !== null) {
+  return expr.symbol;
+} else if (expr.numericValue !== null) {
+  return expr.numericValue.toString();
+} else if (expr.ops !== null) {
+  return expr.operator;
+}
+```
+
+**After:**
+```ts
+import { isBoxedSymbol, isBoxedNumber, isBoxedFunction } from '@cortex-js/compute-engine';
+
+if (isBoxedSymbol(expr)) {
+  return expr.symbol;
+} else if (isBoxedNumber(expr)) {
+  return expr.numericValue.toString();
+} else if (isBoxedFunction(expr)) {
+  return expr.operator;
+}
+```
+
+### Pattern: Processing Function Arguments
+
+**Before:**
+```ts
+if (expr.ops) {
+  for (const arg of expr.ops) {
+    process(arg);
+  }
+}
+```
+
+**After:**
+```ts
+import { isBoxedFunction } from '@cortex-js/compute-engine';
+
+if (isBoxedFunction(expr)) {
+  for (const arg of expr.ops) {
+    process(arg);
+  }
+}
+```
+
+### Pattern: Safe Numeric Value Access
+
+**Before:**
+```ts
+const value = expr.numericValue ?? 0;  // Default to 0 if not a number
+```
+
+**After:**
+```ts
+import { isBoxedNumber } from '@cortex-js/compute-engine';
+
+const value = isBoxedNumber(expr) ? expr.numericValue : 0;
+```
+
+### Pattern: Symbol Name Extraction
+
+**Before:**
+```ts
+const name = expr.symbol || 'unknown';
+```
+
+**After:**
+```ts
+import { sym } from '@cortex-js/compute-engine';
+
+const name = sym(expr) ?? 'unknown';
+```
+
+### Pattern: Working with Decomposition Results
+
+**Before:**
+```ts
+const [P, L, U] = luDecomposition.ops;  // Unsafe - ops might be null
+```
+
+**After:**
+```ts
+import { isBoxedFunction } from '@cortex-js/compute-engine';
+
+const lu = luDecomposition.evaluate();
+if (isBoxedFunction(lu)) {
+  const [P, L, U] = lu.ops;
+  // Safe to use P, L, U here
 }
 ```
 
