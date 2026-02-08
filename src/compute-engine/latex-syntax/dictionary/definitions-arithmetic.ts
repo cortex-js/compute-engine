@@ -575,7 +575,7 @@ function serializePower(
         return serializer.serialize([
           'Divide',
           '1',
-          ['Root', base, operand(exp, 2)],
+          ['Root', base, operand(exp, 2) ?? MISSING],
         ]);
       }
       if (denom === 2) {
@@ -945,7 +945,7 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
     serialize: (serializer, expr) => {
       const order = operand(expr, 1);
       const x = operand(expr, 2);
-      if (order !== undefined && x !== undefined) {
+      if (order !== null && x !== null) {
         return (
           '\\operatorname{J}_{' +
           serializer.serialize(order) +
@@ -963,7 +963,7 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
     serialize: (serializer, expr) => {
       const order = operand(expr, 1);
       const x = operand(expr, 2);
-      if (order !== undefined && x !== undefined) {
+      if (order !== null && x !== null) {
         return (
           '\\operatorname{Y}_{' +
           serializer.serialize(order) +
@@ -981,7 +981,7 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
     serialize: (serializer, expr) => {
       const order = operand(expr, 1);
       const x = operand(expr, 2);
-      if (order !== undefined && x !== undefined) {
+      if (order !== null && x !== null) {
         return (
           '\\operatorname{I}_{' +
           serializer.serialize(order) +
@@ -999,7 +999,7 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
     serialize: (serializer, expr) => {
       const order = operand(expr, 1);
       const x = operand(expr, 2);
-      if (order !== undefined && x !== undefined) {
+      if (order !== null && x !== null) {
         return (
           '\\operatorname{K}_{' +
           serializer.serialize(order) +

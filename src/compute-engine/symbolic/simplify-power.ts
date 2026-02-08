@@ -4,6 +4,7 @@ import {
   factorPerfectSquare,
   factorDifferenceOfSquares,
 } from '../boxed-expression/factor';
+import { isBoxedFunction, isBoxedNumber } from '../boxed-expression/type-guards';
 
 /**
  * Power simplification rules consolidated from simplify-rules.ts.
@@ -24,14 +25,14 @@ export function simplifyPower(x: BoxedExpression): RuleStep | undefined {
   const ce = x.engine;
 
   // Handle Root operator
-  if (op === 'Root') {
+  if (op === 'Root' && isBoxedFunction(x)) {
     const arg = x.op1;
     const rootIndex = x.op2;
 
     if (!arg || !rootIndex) return undefined;
 
     // root(sqrt(x), n) -> x^{1/(2n)} (nth root of square root)
-    if (arg.operator === 'Sqrt' && arg.op1) {
+    if (arg.operator === 'Sqrt' && isBoxedFunction(arg) && arg.op1) {
       const innerBase = arg.op1;
       // root(sqrt(x), n) = x^{1/(2n)}
       return {
@@ -41,7 +42,7 @@ export function simplifyPower(x: BoxedExpression): RuleStep | undefined {
     }
 
     // root(root(x, m), n) -> x^{1/(m*n)} (nested roots)
-    if (arg.operator === 'Root' && arg.op1 && arg.op2) {
+    if (arg.operator === 'Root' && isBoxedFunction(arg) && arg.op1 && arg.op2) {
       const innerBase = arg.op1;
       const innerRootIndex = arg.op2;
       // root(root(x, m), n) = x^{1/(m*n)}
@@ -52,7 +53,7 @@ export function simplifyPower(x: BoxedExpression): RuleStep | undefined {
     }
 
     // Root(x^n, n) -> |x| or x depending on n
-    if (arg.operator === 'Power') {
+    if (arg.operator === 'Power' && isBoxedFunction(arg)) {
       const base = arg.op1;
       const exp = arg.op2;
 
@@ -126,7 +127,7 @@ export function simplifyPower(x: BoxedExpression): RuleStep | undefined {
   }
 
   // Handle Sqrt operator
-  if (op === 'Sqrt') {
+  if (op === 'Sqrt' && isBoxedFunction(x)) {
     const arg = x.op1;
     if (!arg) return undefined;
 
@@ -137,7 +138,7 @@ export function simplifyPower(x: BoxedExpression): RuleStep | undefined {
       const perfectSquare = factorPerfectSquare(arg);
       if (perfectSquare !== null) {
         // We have (a±b)², so sqrt((a±b)²) = |a±b|
-        const base = perfectSquare.op1!;
+        const base = isBoxedFunction(perfectSquare) ? perfectSquare.op1 : perfectSquare;
         return {
           value: ce._fn('Abs', [base]),
           because: 'sqrt(perfect square trinomial) -> |factor|',
@@ -158,7 +159,7 @@ export function simplifyPower(x: BoxedExpression): RuleStep | undefined {
     }
 
     // sqrt(sqrt(x)) -> x^{1/4} (nested square roots)
-    if (arg.operator === 'Sqrt' && arg.op1) {
+    if (arg.operator === 'Sqrt' && isBoxedFunction(arg) && arg.op1) {
       return {
         value: arg.op1.pow(ce.number([1, 4])),
         because: 'sqrt(sqrt(x)) -> x^{1/4}',
@@ -166,7 +167,7 @@ export function simplifyPower(x: BoxedExpression): RuleStep | undefined {
     }
 
     // sqrt(root(x, n)) -> x^{1/(2n)} (square root of nth root)
-    if (arg.operator === 'Root' && arg.op1 && arg.op2) {
+    if (arg.operator === 'Root' && isBoxedFunction(arg) && arg.op1 && arg.op2) {
       const innerBase = arg.op1;
       const rootIndex = arg.op2;
       // sqrt(root(x, n)) = x^{1/(2n)}
@@ -176,7 +177,7 @@ export function simplifyPower(x: BoxedExpression): RuleStep | undefined {
       };
     }
 
-    if (arg.operator === 'Power') {
+    if (arg.operator === 'Power' && isBoxedFunction(arg)) {
       const base = arg.op1;
       const exp = arg.op2;
 
@@ -223,12 +224,12 @@ export function simplifyPower(x: BoxedExpression): RuleStep | undefined {
     // sqrt(a * b * ...) -> factor out perfect squares
     // sqrt(x^2 * y) -> |x| * sqrt(y)
     // sqrt(x^{2n} * y) -> |x|^n * sqrt(y)
-    if (arg.operator === 'Multiply' && arg.ops) {
+    if (arg.operator === 'Multiply' && isBoxedFunction(arg)) {
       const perfectSquares: BoxedExpression[] = [];
       const remaining: BoxedExpression[] = [];
 
       for (const factor of arg.ops) {
-        if (factor.operator === 'Power' && factor.op1 && factor.op2) {
+        if (factor.operator === 'Power' && isBoxedFunction(factor) && factor.op1 && factor.op2) {
           const base = factor.op1;
           const exp = factor.op2;
           // x^2 -> |x| outside, nothing inside
@@ -286,7 +287,7 @@ export function simplifyPower(x: BoxedExpression): RuleStep | undefined {
   }
 
   // Handle Power operator
-  if (op === 'Power') {
+  if (op === 'Power' && isBoxedFunction(x)) {
     const base = x.op1;
     const exp = x.op2;
 
@@ -319,7 +320,7 @@ export function simplifyPower(x: BoxedExpression): RuleStep | undefined {
     // (negative * b * ...)^{p/q} -> -(positive * b * ...)^{p/q} when p,q odd
     // e.g., (-2x)^{3/5} -> -(2x)^{3/5}
     // This handles products like Multiply(-2, x) raised to a rational power
-    if (base.operator === 'Multiply' && base.ops) {
+    if (base.operator === 'Multiply' && isBoxedFunction(base)) {
       const rat = asRational(exp);
       if (rat) {
         const [num, denom] = rat;
@@ -333,7 +334,7 @@ export function simplifyPower(x: BoxedExpression): RuleStep | undefined {
           let negativeIndex = -1;
           for (let i = 0; i < base.ops.length; i++) {
             const factor = base.ops[i];
-            if (factor.isNumberLiteral && factor.isNegative === true) {
+            if (isBoxedNumber(factor) && factor.isNegative === true) {
               negativeIndex = i;
               break;
             }
@@ -361,7 +362,7 @@ export function simplifyPower(x: BoxedExpression): RuleStep | undefined {
 
     // (a * b * ...)^n -> a^n * b^n * ... when n is an integer
     // Distribute exponent over product
-    if (base.operator === 'Multiply' && base.ops && exp.isInteger === true) {
+    if (base.operator === 'Multiply' && isBoxedFunction(base) && exp.isInteger === true) {
       const newFactors = base.ops.map((factor) => factor.pow(exp));
       return {
         value: ce._fn('Multiply', newFactors),
@@ -370,7 +371,7 @@ export function simplifyPower(x: BoxedExpression): RuleStep | undefined {
     }
 
     // (-x)^n -> x^n when n is even, (-x)^n -> -x^n when n is odd
-    if (base.operator === 'Negate' && base.op1) {
+    if (base.operator === 'Negate' && isBoxedFunction(base)) {
       const innerBase = base.op1;
 
       // Handle integer exponents
@@ -419,7 +420,7 @@ export function simplifyPower(x: BoxedExpression): RuleStep | undefined {
     }
 
     // (sqrt(x))^n -> x^{n/2}
-    if (base.operator === 'Sqrt' && base.op1) {
+    if (base.operator === 'Sqrt' && isBoxedFunction(base)) {
       const innerBase = base.op1;
       // sqrt(x)^n = x^{n/2}
       // Safe when: n is even (result is integer power), or x is non-negative
@@ -440,7 +441,7 @@ export function simplifyPower(x: BoxedExpression): RuleStep | undefined {
     }
 
     // (root(x, k))^n -> x^{n/k}
-    if (base.operator === 'Root' && base.op1 && base.op2) {
+    if (base.operator === 'Root' && isBoxedFunction(base)) {
       const innerBase = base.op1;
       const rootIndex = base.op2;
       // root(x, k)^n = x^{n/k}
@@ -455,7 +456,7 @@ export function simplifyPower(x: BoxedExpression): RuleStep | undefined {
     }
 
     // (x^n)^m -> x^{n*m} under certain conditions
-    if (base.operator === 'Power') {
+    if (base.operator === 'Power' && isBoxedFunction(base)) {
       const innerBase = base.op1;
       const innerExp = base.op2;
 
@@ -485,11 +486,11 @@ export function simplifyPower(x: BoxedExpression): RuleStep | undefined {
     }
 
     // (a/b)^{-n} -> (b/a)^n
-    if (base.operator === 'Divide' && base.op2?.is(0) === false) {
+    if (base.operator === 'Divide' && isBoxedFunction(base) && base.op2.is(0) === false) {
       const num = base.op1;
       const denom = base.op2;
 
-      if (exp.operator === 'Negate') {
+      if (exp.operator === 'Negate' && isBoxedFunction(exp)) {
         return {
           value: denom.div(num).pow(exp.op1),
           because: '(a/b)^{-n} -> (b/a)^n',
@@ -503,7 +504,7 @@ export function simplifyPower(x: BoxedExpression): RuleStep | undefined {
 
       // (a/b)^{negative number} -> (b/a)^{positive number}
       // Handle numeric negative exponents like (a/b)^{-2} -> (b/a)^2
-      if (exp.isNegative === true && exp.isNumberLiteral) {
+      if (exp.isNegative === true && isBoxedNumber(exp)) {
         return {
           value: denom.div(num).pow(exp.neg()),
           because: '(a/b)^{-n} -> (b/a)^n',
@@ -513,14 +514,14 @@ export function simplifyPower(x: BoxedExpression): RuleStep | undefined {
   }
 
   // Handle Divide with negative exponent in denominator
-  if (op === 'Divide') {
+  if (op === 'Divide' && isBoxedFunction(x)) {
     const num = x.op1;
     const denom = x.op2;
 
     if (!num || !denom) return undefined;
 
     // Same-base division: a^m / a^n -> a^{m-n}
-    if (num.operator === 'Power' && denom.operator === 'Power') {
+    if (num.operator === 'Power' && isBoxedFunction(num) && denom.operator === 'Power' && isBoxedFunction(denom)) {
       const baseNum = num.op1;
       const expNum = num.op2;
       const baseDenom = denom.op1;
@@ -535,7 +536,7 @@ export function simplifyPower(x: BoxedExpression): RuleStep | undefined {
     }
 
     // a^m / a -> a^{m-1}
-    if (num.operator === 'Power' && num.op1?.isSame(denom)) {
+    if (num.operator === 'Power' && isBoxedFunction(num) && num.op1.isSame(denom)) {
       return {
         value: denom.pow(num.op2.sub(ce.One)),
         because: 'a^m / a -> a^{m-1}',
@@ -543,7 +544,7 @@ export function simplifyPower(x: BoxedExpression): RuleStep | undefined {
     }
 
     // a / a^n -> a^{1-n}
-    if (denom.operator === 'Power' && denom.op1?.isSame(num)) {
+    if (denom.operator === 'Power' && isBoxedFunction(denom) && denom.op1.isSame(num)) {
       return {
         value: num.pow(ce.One.sub(denom.op2)),
         because: 'a / a^n -> a^{1-n}',
@@ -551,11 +552,11 @@ export function simplifyPower(x: BoxedExpression): RuleStep | undefined {
     }
 
     // a / b^{-n} -> a * b^n
-    if (denom.operator === 'Power' && denom.op1?.is(0) === false) {
+    if (denom.operator === 'Power' && isBoxedFunction(denom) && denom.op1.is(0) === false) {
       const base = denom.op1;
       const exp = denom.op2;
 
-      if (exp?.operator === 'Negate') {
+      if (exp.operator === 'Negate' && isBoxedFunction(exp)) {
         return {
           value: num.mul(base.pow(exp.op1)),
           because: 'a / b^{-n} -> a * b^n',
@@ -564,13 +565,15 @@ export function simplifyPower(x: BoxedExpression): RuleStep | undefined {
     }
 
     // a / (d * b^{-n}) -> (a/d) * b^n
-    if (denom.operator === 'Multiply' && denom.ops) {
+    if (denom.operator === 'Multiply' && isBoxedFunction(denom)) {
       for (let i = 0; i < denom.ops.length; i++) {
         const factor = denom.ops[i];
         if (
           factor.operator === 'Power' &&
-          factor.op1?.is(0) === false &&
-          factor.op2?.operator === 'Negate'
+          isBoxedFunction(factor) &&
+          factor.op1.is(0) === false &&
+          factor.op2.operator === 'Negate' &&
+          isBoxedFunction(factor.op2)
         ) {
           const base = factor.op1;
           const posExp = factor.op2.op1;
@@ -590,8 +593,10 @@ export function simplifyPower(x: BoxedExpression): RuleStep | undefined {
     // a / (b/c)^d -> a * (c/b)^d
     if (
       denom.operator === 'Power' &&
-      denom.op1?.operator === 'Divide' &&
-      denom.op1.op2?.is(0) === false
+      isBoxedFunction(denom) &&
+      denom.op1.operator === 'Divide' &&
+      isBoxedFunction(denom.op1) &&
+      denom.op1.op2.is(0) === false
     ) {
       const fracNum = denom.op1.op1;
       const fracDenom = denom.op1.op2;
@@ -604,7 +609,7 @@ export function simplifyPower(x: BoxedExpression): RuleStep | undefined {
   }
 
   // Handle Multiply for power combination
-  if (op === 'Multiply' && x.ops && x.ops.length >= 2) {
+  if (op === 'Multiply' && isBoxedFunction(x) && x.ops.length >= 2) {
     // x^n * x^m -> x^{n+m}
     // This is a more complex rule that needs to find matching bases
     // The main rule file has a more complete implementation for 3+ operands
@@ -614,7 +619,7 @@ export function simplifyPower(x: BoxedExpression): RuleStep | undefined {
       const [a, b] = x.ops;
 
       // Both are powers
-      if (a.operator === 'Power' && b.operator === 'Power') {
+      if (a.operator === 'Power' && isBoxedFunction(a) && b.operator === 'Power' && isBoxedFunction(b)) {
         const baseA = a.op1;
         const expA = a.op2;
         const baseB = b.op1;
@@ -637,11 +642,11 @@ export function simplifyPower(x: BoxedExpression): RuleStep | undefined {
       }
 
       // x * x^n -> x^{n+1}
-      if (b.operator === 'Power' && a.isSame(b.op1)) {
+      if (b.operator === 'Power' && isBoxedFunction(b) && a.isSame(b.op1)) {
         const canCombine =
           a.isPositive === true ||
           a.isNegative === true ||
-          a.isNumberLiteral === true;
+          isBoxedNumber(a);
 
         if (canCombine) {
           return {
@@ -652,11 +657,11 @@ export function simplifyPower(x: BoxedExpression): RuleStep | undefined {
       }
 
       // x^n * x -> x^{n+1}
-      if (a.operator === 'Power' && b.isSame(a.op1)) {
+      if (a.operator === 'Power' && isBoxedFunction(a) && b.isSame(a.op1)) {
         const canCombine =
           b.isPositive === true ||
           b.isNegative === true ||
-          b.isNumberLiteral === true;
+          isBoxedNumber(b);
 
         if (canCombine) {
           return {

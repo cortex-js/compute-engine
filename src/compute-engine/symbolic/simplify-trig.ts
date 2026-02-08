@@ -4,6 +4,11 @@ import type {
   RuleStep,
 } from '../global-types';
 import { add } from '../boxed-expression/arithmetic-add';
+import {
+  isBoxedFunction,
+  isBoxedNumber,
+  sym,
+} from '../boxed-expression/type-guards';
 
 /**
  * Trigonometric simplification rules consolidated from simplify-rules.ts.
@@ -89,7 +94,7 @@ function reduceTrigPeriodicity(
   ce: ComputeEngine
 ): BoxedExpression | null {
   // Only handle Add expressions
-  if (arg.operator !== 'Add' || !arg.ops) return null;
+  if (!isBoxedFunction(arg) || arg.operator !== 'Add') return null;
 
   const terms = arg.ops;
 
@@ -101,26 +106,29 @@ function reduceTrigPeriodicity(
     const term = terms[i];
 
     // Check for plain Pi
-    if (term.symbol === 'Pi') {
+    if (sym(term) === 'Pi') {
       piCoeff = 1;
       piTermIndex = i;
       break;
     }
 
     // Check for n * Pi or Pi * n
-    if (term.operator === 'Multiply' && term.ops) {
+    if (isBoxedFunction(term) && term.operator === 'Multiply') {
       const termOps = term.ops;
       // Look for Pi among the factors
-      const piIndex = termOps.findIndex((op) => op.symbol === 'Pi');
+      const piIndex = termOps.findIndex((op) => sym(op) === 'Pi');
       if (piIndex >= 0) {
         // Get the coefficient (product of all other factors)
         const otherFactors = termOps.filter((_, idx) => idx !== piIndex);
         if (otherFactors.length === 1) {
-          const n = otherFactors[0].numericValue;
-          if (typeof n === 'number' && Number.isInteger(n)) {
-            piCoeff = n;
-            piTermIndex = i;
-            break;
+          const factor = otherFactors[0];
+          if (isBoxedNumber(factor)) {
+            const n = factor.numericValue;
+            if (typeof n === 'number' && Number.isInteger(n)) {
+              piCoeff = n;
+              piTermIndex = i;
+              break;
+            }
           }
         } else if (otherFactors.length === 0) {
           // Just Pi in a Multiply (shouldn't happen but handle it)
@@ -132,7 +140,7 @@ function reduceTrigPeriodicity(
     }
 
     // Check for Negate(Pi) = -Pi
-    if (term.operator === 'Negate' && term.op1?.symbol === 'Pi') {
+    if (isBoxedFunction(term) && term.operator === 'Negate' && sym(term.op1) === 'Pi') {
       piCoeff = -1;
       piTermIndex = i;
       break;
@@ -195,6 +203,7 @@ export function simplifyTrig(x: BoxedExpression): RuleStep | undefined {
 
   // Handle basic trig functions
   if (TRIG_FUNCS.has(op)) {
+    if (!isBoxedFunction(x)) return undefined;
     const arg = x.op1;
     if (!arg) return undefined;
 
@@ -204,7 +213,7 @@ export function simplifyTrig(x: BoxedExpression): RuleStep | undefined {
     }
 
     // Odd/even function properties with negation
-    if (arg.operator === 'Negate') {
+    if (isBoxedFunction(arg) && arg.operator === 'Negate') {
       const innerArg = arg.op1;
       if (innerArg) {
         // Odd functions: f(-x) = -f(x)
@@ -225,10 +234,10 @@ export function simplifyTrig(x: BoxedExpression): RuleStep | undefined {
     }
 
     // π - x transformations
-    if (arg.operator === 'Subtract') {
+    if (isBoxedFunction(arg) && arg.operator === 'Subtract') {
       const left = arg.op1;
       const right = arg.op2;
-      if (left?.symbol === 'Pi' && right) {
+      if (sym(left) === 'Pi' && right) {
         const sign = PI_MINUS_SIGN[op];
         if (sign !== undefined) {
           const result = ce._fn(op, [right]);
@@ -241,9 +250,9 @@ export function simplifyTrig(x: BoxedExpression): RuleStep | undefined {
     }
 
     // π + x transformations (when Pi appears in Add)
-    if (arg.operator === 'Add' && arg.ops) {
+    if (isBoxedFunction(arg) && arg.operator === 'Add') {
       // Check if Pi is one of the operands
-      const piIndex = arg.ops.findIndex((op) => op.symbol === 'Pi');
+      const piIndex = arg.ops.findIndex((term) => sym(term) === 'Pi');
       if (piIndex >= 0) {
         const otherTerms = arg.ops.filter((_, idx) => idx !== piIndex);
 
@@ -266,15 +275,16 @@ export function simplifyTrig(x: BoxedExpression): RuleStep | undefined {
 
     // Co-function identities: f(π/2 - x) -> g(x)
     // Handle both Subtract form and canonical Add form (Add(Negate(x), π/2))
-    if (arg.operator === 'Subtract') {
+    if (isBoxedFunction(arg) && arg.operator === 'Subtract') {
       const left = arg.op1;
       const right = arg.op2;
 
       // Check if left is π/2
       let isPiOver2 = false;
       if (
-        left?.operator === 'Divide' &&
-        left.op1?.symbol === 'Pi' &&
+        isBoxedFunction(left) &&
+        left.operator === 'Divide' &&
+        sym(left.op1) === 'Pi' &&
         left.op2?.is(2)
       ) {
         isPiOver2 = true;
@@ -292,16 +302,16 @@ export function simplifyTrig(x: BoxedExpression): RuleStep | undefined {
     }
 
     // Handle canonical form: Add(Negate(x), Multiply(1/2, Pi)) = π/2 - x
-    if (arg.operator === 'Add' && arg.nops === 2) {
-      const ops = arg.ops!;
+    if (isBoxedFunction(arg) && arg.operator === 'Add' && arg.nops === 2) {
+      const argOps = arg.ops;
       let piOver2Term: BoxedExpression | null = null;
       let negatedTerm: BoxedExpression | null = null;
 
-      for (const term of ops) {
+      for (const term of argOps) {
         // Check for π/2 term: Multiply(1/2, Pi) or Multiply(Rational(1,2), Pi)
-        if (term.operator === 'Multiply' && term.nops === 2) {
-          const [coef, sym] = [term.op1, term.op2];
-          if (sym?.symbol === 'Pi') {
+        if (isBoxedFunction(term) && term.operator === 'Multiply' && term.nops === 2) {
+          const [coef, symExpr] = [term.op1, term.op2];
+          if (sym(symExpr) === 'Pi') {
             // Check if coefficient is 1/2 using .re for numeric comparison
             const coefRe = coef?.re;
             if (typeof coefRe === 'number' && Math.abs(coefRe - 0.5) < 1e-10) {
@@ -310,7 +320,7 @@ export function simplifyTrig(x: BoxedExpression): RuleStep | undefined {
           }
         }
         // Check for negated term: Negate(x)
-        if (term.operator === 'Negate' && term.op1) {
+        if (isBoxedFunction(term) && term.operator === 'Negate' && term.op1) {
           negatedTerm = term.op1;
         }
       }
@@ -341,6 +351,7 @@ export function simplifyTrig(x: BoxedExpression): RuleStep | undefined {
 
   // Inverse trig with infinity
   if (INVERSE_TRIG.has(op)) {
+    if (!isBoxedFunction(x)) return undefined;
     const arg = x.op1;
     if (!arg) return undefined;
 
@@ -353,20 +364,20 @@ export function simplifyTrig(x: BoxedExpression): RuleStep | undefined {
 
     // Arctan with infinity -> ±π/2
     if (op === 'Arctan') {
-      if (arg.symbol === 'PositiveInfinity') {
+      if (sym(arg) === 'PositiveInfinity') {
         return { value: ce.Pi.div(2), because: 'arctan(+inf) -> π/2' };
       }
-      if (arg.symbol === 'NegativeInfinity') {
+      if (sym(arg) === 'NegativeInfinity') {
         return { value: ce.Pi.div(-2), because: 'arctan(-inf) -> -π/2' };
       }
     }
 
     // Arccot with infinity
     if (op === 'Arccot') {
-      if (arg.symbol === 'PositiveInfinity') {
+      if (sym(arg) === 'PositiveInfinity') {
         return { value: ce.Zero, because: 'arccot(+inf) -> 0' };
       }
-      if (arg.symbol === 'NegativeInfinity') {
+      if (sym(arg) === 'NegativeInfinity') {
         return { value: ce.Pi, because: 'arccot(-inf) -> π' };
       }
     }
@@ -387,19 +398,19 @@ export function simplifyTrig(x: BoxedExpression): RuleStep | undefined {
   }
 
   // Product-to-sum identities
-  if (op === 'Multiply' && x.ops) {
+  if (op === 'Multiply' && isBoxedFunction(x)) {
     // Handle coefficient * sin(x) * cos(x) -> coefficient * sin(2x)/2
     // This includes the case of 2*sin(x)*cos(x) -> sin(2x)
     if (x.ops.length >= 2) {
       // Find sin and cos terms
-      let sinTerm: BoxedExpression | null = null;
-      let cosTerm: BoxedExpression | null = null;
+      let sinTerm: (BoxedExpression & { op1: BoxedExpression }) | null = null;
+      let cosTerm: (BoxedExpression & { op1: BoxedExpression }) | null = null;
       const otherTerms: BoxedExpression[] = [];
 
       for (const term of x.ops) {
-        if (term.operator === 'Sin' && !sinTerm) {
+        if (isBoxedFunction(term) && term.operator === 'Sin' && !sinTerm) {
           sinTerm = term;
-        } else if (term.operator === 'Cos' && !cosTerm) {
+        } else if (isBoxedFunction(term) && term.operator === 'Cos' && !cosTerm) {
           cosTerm = term;
         } else {
           otherTerms.push(term);
@@ -445,7 +456,10 @@ export function simplifyTrig(x: BoxedExpression): RuleStep | undefined {
       const [a, b] = x.ops;
 
       // sin(x) * sin(y) -> (cos(x-y) - cos(x+y))/2
-      if (a.operator === 'Sin' && b.operator === 'Sin') {
+      if (
+        isBoxedFunction(a) && a.operator === 'Sin' &&
+        isBoxedFunction(b) && b.operator === 'Sin'
+      ) {
         const argA = a.op1;
         const argB = b.op1;
         if (argA && argB) {
@@ -460,7 +474,10 @@ export function simplifyTrig(x: BoxedExpression): RuleStep | undefined {
       }
 
       // cos(x) * cos(y) -> (cos(x-y) + cos(x+y))/2
-      if (a.operator === 'Cos' && b.operator === 'Cos') {
+      if (
+        isBoxedFunction(a) && a.operator === 'Cos' &&
+        isBoxedFunction(b) && b.operator === 'Cos'
+      ) {
         const argA = a.op1;
         const argB = b.op1;
         if (argA && argB) {
@@ -475,7 +492,10 @@ export function simplifyTrig(x: BoxedExpression): RuleStep | undefined {
       }
 
       // tan(x) * cot(x) -> 1
-      if (a.operator === 'Tan' && b.operator === 'Cot') {
+      if (
+        isBoxedFunction(a) && a.operator === 'Tan' &&
+        isBoxedFunction(b) && b.operator === 'Cot'
+      ) {
         const argA = a.op1;
         const argB = b.op1;
         if (argA?.isSame(argB)) {
@@ -484,7 +504,10 @@ export function simplifyTrig(x: BoxedExpression): RuleStep | undefined {
       }
 
       // cot(x) * tan(x) -> 1
-      if (a.operator === 'Cot' && b.operator === 'Tan') {
+      if (
+        isBoxedFunction(a) && a.operator === 'Cot' &&
+        isBoxedFunction(b) && b.operator === 'Tan'
+      ) {
         const argA = a.op1;
         const argB = b.op1;
         if (argA?.isSame(argB)) {
@@ -495,16 +518,16 @@ export function simplifyTrig(x: BoxedExpression): RuleStep | undefined {
       // Power reduction identities:
       // 2sin²(x) -> 1 - cos(2x)
       // 2cos²(x) -> 1 + cos(2x)
-      if (a.is(2) && b.operator === 'Power' && b.op2?.is(2)) {
+      if (a.is(2) && isBoxedFunction(b) && b.operator === 'Power' && b.op2?.is(2)) {
         const base = b.op1;
-        if (base?.operator === 'Sin' && base.op1) {
+        if (isBoxedFunction(base) && base.operator === 'Sin' && base.op1) {
           const cos2x = ce._fn('Cos', [base.op1.mul(2)]);
           return {
             value: ce.One.sub(cos2x),
             because: '2sin²(x) -> 1 - cos(2x)',
           };
         }
-        if (base?.operator === 'Cos' && base.op1) {
+        if (isBoxedFunction(base) && base.operator === 'Cos' && base.op1) {
           const cos2x = ce._fn('Cos', [base.op1.mul(2)]);
           return {
             value: ce.One.add(cos2x),
@@ -513,16 +536,16 @@ export function simplifyTrig(x: BoxedExpression): RuleStep | undefined {
         }
       }
       // Also check reversed order (Power first, then 2)
-      if (b.is(2) && a.operator === 'Power' && a.op2?.is(2)) {
+      if (b.is(2) && isBoxedFunction(a) && a.operator === 'Power' && a.op2?.is(2)) {
         const base = a.op1;
-        if (base?.operator === 'Sin' && base.op1) {
+        if (isBoxedFunction(base) && base.operator === 'Sin' && base.op1) {
           const cos2x = ce._fn('Cos', [base.op1.mul(2)]);
           return {
             value: ce.One.sub(cos2x),
             because: '2sin²(x) -> 1 - cos(2x)',
           };
         }
-        if (base?.operator === 'Cos' && base.op1) {
+        if (isBoxedFunction(base) && base.operator === 'Cos' && base.op1) {
           const cos2x = ce._fn('Cos', [base.op1.mul(2)]);
           return {
             value: ce.One.add(cos2x),
@@ -534,26 +557,28 @@ export function simplifyTrig(x: BoxedExpression): RuleStep | undefined {
   }
 
   // Pythagorean identities
-  if (op === 'Add' && x.ops && x.ops.length === 2) {
+  if (op === 'Add' && isBoxedFunction(x) && x.ops.length === 2) {
     const [a, b] = x.ops;
 
     // sin²(x) + cos²(x) -> 1
     if (
-      a.operator === 'Power' &&
-      b.operator === 'Power' &&
+      isBoxedFunction(a) && a.operator === 'Power' &&
+      isBoxedFunction(b) && b.operator === 'Power' &&
       a.op2?.is(2) &&
       b.op2?.is(2)
     ) {
-      const sinArg = a.op1?.operator === 'Sin' ? a.op1.op1 : null;
-      const cosArg = b.op1?.operator === 'Cos' ? b.op1.op1 : null;
+      const aBase = a.op1;
+      const bBase = b.op1;
+      const sinArg = isBoxedFunction(aBase) && aBase.operator === 'Sin' ? aBase.op1 : null;
+      const cosArg = isBoxedFunction(bBase) && bBase.operator === 'Cos' ? bBase.op1 : null;
 
       if (sinArg && cosArg && sinArg.isSame(cosArg)) {
         return { value: ce.One, because: 'sin²(x) + cos²(x) -> 1' };
       }
 
       // Also check reversed order
-      const sinArg2 = b.op1?.operator === 'Sin' ? b.op1.op1 : null;
-      const cosArg2 = a.op1?.operator === 'Cos' ? a.op1.op1 : null;
+      const sinArg2 = isBoxedFunction(bBase) && bBase.operator === 'Sin' ? bBase.op1 : null;
+      const cosArg2 = isBoxedFunction(aBase) && aBase.operator === 'Cos' ? aBase.op1 : null;
 
       if (sinArg2 && cosArg2 && sinArg2.isSame(cosArg2)) {
         return { value: ce.One, because: 'cos²(x) + sin²(x) -> 1' };
@@ -562,16 +587,16 @@ export function simplifyTrig(x: BoxedExpression): RuleStep | undefined {
 
     // tan²(x) + 1 -> sec²(x) and 1 + tan²(x) -> sec²(x)
     // (one operand is Power, the other is 1)
-    if (a.operator === 'Power' && a.op2?.is(2) && b.is(1)) {
-      if (a.op1?.operator === 'Tan') {
+    if (isBoxedFunction(a) && a.operator === 'Power' && a.op2?.is(2) && b.is(1)) {
+      if (isBoxedFunction(a.op1) && a.op1.operator === 'Tan') {
         return {
           value: ce._fn('Sec', [a.op1.op1]).pow(2),
           because: 'tan²(x) + 1 -> sec²(x)',
         };
       }
     }
-    if (b.operator === 'Power' && b.op2?.is(2) && a.is(1)) {
-      if (b.op1?.operator === 'Tan') {
+    if (isBoxedFunction(b) && b.operator === 'Power' && b.op2?.is(2) && a.is(1)) {
+      if (isBoxedFunction(b.op1) && b.op1.operator === 'Tan') {
         return {
           value: ce._fn('Sec', [b.op1.op1]).pow(2),
           because: '1 + tan²(x) -> sec²(x)',
@@ -580,16 +605,16 @@ export function simplifyTrig(x: BoxedExpression): RuleStep | undefined {
     }
 
     // 1 + cot²(x) -> csc²(x) and cot²(x) + 1 -> csc²(x)
-    if (a.operator === 'Power' && a.op2?.is(2) && b.is(1)) {
-      if (a.op1?.operator === 'Cot') {
+    if (isBoxedFunction(a) && a.operator === 'Power' && a.op2?.is(2) && b.is(1)) {
+      if (isBoxedFunction(a.op1) && a.op1.operator === 'Cot') {
         return {
           value: ce._fn('Csc', [a.op1.op1]).pow(2),
           because: 'cot²(x) + 1 -> csc²(x)',
         };
       }
     }
-    if (b.operator === 'Power' && b.op2?.is(2) && a.is(1)) {
-      if (b.op1?.operator === 'Cot') {
+    if (isBoxedFunction(b) && b.operator === 'Power' && b.op2?.is(2) && a.is(1)) {
+      if (isBoxedFunction(b.op1) && b.op1.operator === 'Cot') {
         return {
           value: ce._fn('Csc', [b.op1.op1]).pow(2),
           because: '1 + cot²(x) -> csc²(x)',
@@ -598,24 +623,31 @@ export function simplifyTrig(x: BoxedExpression): RuleStep | undefined {
     }
 
     // a*sin²(x) + a*cos²(x) -> a (with coefficient)
-    if (a.operator === 'Multiply' && b.operator === 'Multiply') {
+    if (
+      isBoxedFunction(a) && a.operator === 'Multiply' &&
+      isBoxedFunction(b) && b.operator === 'Multiply'
+    ) {
       // Extract coefficient and trig functions
       const extractCoeffAndTrig = (expr: BoxedExpression) => {
-        if (expr.operator !== 'Multiply' || !expr.ops || expr.ops.length !== 2)
+        if (!isBoxedFunction(expr) || expr.operator !== 'Multiply' || expr.ops.length !== 2)
           return null;
         const [c, p] = expr.ops;
         if (
+          isBoxedFunction(p) &&
           p.operator === 'Power' &&
           p.op2?.is(2) &&
-          (p.op1?.operator === 'Sin' || p.op1?.operator === 'Cos')
+          isBoxedFunction(p.op1) &&
+          (p.op1.operator === 'Sin' || p.op1.operator === 'Cos')
         ) {
           return { coeff: c, trigFunc: p.op1.operator, trigArg: p.op1.op1 };
         }
         // Try reversed
         if (
+          isBoxedFunction(c) &&
           c.operator === 'Power' &&
           c.op2?.is(2) &&
-          (c.op1?.operator === 'Sin' || c.op1?.operator === 'Cos')
+          isBoxedFunction(c.op1) &&
+          (c.op1.operator === 'Sin' || c.op1.operator === 'Cos')
         ) {
           return { coeff: p, trigFunc: c.op1.operator, trigArg: c.op1.op1 };
         }
@@ -645,7 +677,7 @@ export function simplifyTrig(x: BoxedExpression): RuleStep | undefined {
   // These are canonicalized as Add expressions:
   // - "1 - sin²(x)" becomes Add(Negate(Power(Sin(x), 2)), 1) or Add(1, Negate(Power(Sin(x), 2)))
   // - "sin²(x) - 1" becomes Add(Power(Sin(x), 2), -1)
-  if (op === 'Add' && x.ops && x.ops.length === 2) {
+  if (op === 'Add' && isBoxedFunction(x) && x.ops.length === 2) {
     const [a, b] = x.ops;
 
     // Check for "1 + Negate(sin²(x))" or "Negate(sin²(x)) + 1" pattern (1 - sin²(x))
@@ -653,10 +685,10 @@ export function simplifyTrig(x: BoxedExpression): RuleStep | undefined {
     let one: BoxedExpression | null = null;
     let negatedTrigSquared: BoxedExpression | null = null;
 
-    if (a.is(1) && b.operator === 'Negate') {
+    if (a.is(1) && isBoxedFunction(b) && b.operator === 'Negate') {
       one = a;
       negatedTrigSquared = b.op1;
-    } else if (b.is(1) && a.operator === 'Negate') {
+    } else if (b.is(1) && isBoxedFunction(a) && a.operator === 'Negate') {
       one = b;
       negatedTrigSquared = a.op1;
     }
@@ -664,19 +696,20 @@ export function simplifyTrig(x: BoxedExpression): RuleStep | undefined {
     if (one && negatedTrigSquared) {
       // Check if it's a squared trig function
       if (
+        isBoxedFunction(negatedTrigSquared) &&
         negatedTrigSquared.operator === 'Power' &&
         negatedTrigSquared.op2?.is(2)
       ) {
         const base = negatedTrigSquared.op1;
         // 1 - sin²(x) -> cos²(x)
-        if (base?.operator === 'Sin') {
+        if (isBoxedFunction(base) && base.operator === 'Sin') {
           return {
             value: ce._fn('Cos', [base.op1]).pow(2),
             because: '1 - sin²(x) -> cos²(x)',
           };
         }
         // 1 - cos²(x) -> sin²(x)
-        if (base?.operator === 'Cos') {
+        if (isBoxedFunction(base) && base.operator === 'Cos') {
           return {
             value: ce._fn('Sin', [base.op1]).pow(2),
             because: '1 - cos²(x) -> sin²(x)',
@@ -690,39 +723,39 @@ export function simplifyTrig(x: BoxedExpression): RuleStep | undefined {
     let negOne: BoxedExpression | null = null;
     let trigSquared: BoxedExpression | null = null;
 
-    if (a.is(-1) && b.operator === 'Power' && b.op2?.is(2)) {
+    if (a.is(-1) && isBoxedFunction(b) && b.operator === 'Power' && b.op2?.is(2)) {
       negOne = a;
       trigSquared = b;
-    } else if (b.is(-1) && a.operator === 'Power' && a.op2?.is(2)) {
+    } else if (b.is(-1) && isBoxedFunction(a) && a.operator === 'Power' && a.op2?.is(2)) {
       negOne = b;
       trigSquared = a;
     }
 
-    if (negOne && trigSquared) {
+    if (negOne && trigSquared && isBoxedFunction(trigSquared)) {
       const base = trigSquared.op1;
       // sin²(x) - 1 -> -cos²(x)
-      if (base?.operator === 'Sin') {
+      if (isBoxedFunction(base) && base.operator === 'Sin') {
         return {
           value: ce._fn('Cos', [base.op1]).pow(2).neg(),
           because: 'sin²(x) - 1 -> -cos²(x)',
         };
       }
       // cos²(x) - 1 -> -sin²(x)
-      if (base?.operator === 'Cos') {
+      if (isBoxedFunction(base) && base.operator === 'Cos') {
         return {
           value: ce._fn('Sin', [base.op1]).pow(2).neg(),
           because: 'cos²(x) - 1 -> -sin²(x)',
         };
       }
       // sec²(x) - 1 -> tan²(x)
-      if (base?.operator === 'Sec') {
+      if (isBoxedFunction(base) && base.operator === 'Sec') {
         return {
           value: ce._fn('Tan', [base.op1]).pow(2),
           because: 'sec²(x) - 1 -> tan²(x)',
         };
       }
       // csc²(x) - 1 -> cot²(x)
-      if (base?.operator === 'Csc') {
+      if (isBoxedFunction(base) && base.operator === 'Csc') {
         return {
           value: ce._fn('Cot', [base.op1]).pow(2),
           because: 'csc²(x) - 1 -> cot²(x)',
@@ -736,16 +769,20 @@ export function simplifyTrig(x: BoxedExpression): RuleStep | undefined {
     let secOrCscSquared: BoxedExpression | null = null;
 
     if (
+      isBoxedFunction(a) &&
       a.operator === 'Negate' &&
       a.op1?.is(1) &&
+      isBoxedFunction(b) &&
       b.operator === 'Power' &&
       b.op2?.is(2)
     ) {
       negOneAlt = a;
       secOrCscSquared = b;
     } else if (
+      isBoxedFunction(b) &&
       b.operator === 'Negate' &&
       b.op1?.is(1) &&
+      isBoxedFunction(a) &&
       a.operator === 'Power' &&
       a.op2?.is(2)
     ) {
@@ -753,17 +790,17 @@ export function simplifyTrig(x: BoxedExpression): RuleStep | undefined {
       secOrCscSquared = a;
     }
 
-    if (negOneAlt && secOrCscSquared) {
+    if (negOneAlt && secOrCscSquared && isBoxedFunction(secOrCscSquared)) {
       const base = secOrCscSquared.op1;
       // sec²(x) - 1 -> tan²(x)
-      if (base?.operator === 'Sec') {
+      if (isBoxedFunction(base) && base.operator === 'Sec') {
         return {
           value: ce._fn('Tan', [base.op1]).pow(2),
           because: 'sec²(x) - 1 -> tan²(x)',
         };
       }
       // csc²(x) - 1 -> cot²(x)
-      if (base?.operator === 'Csc') {
+      if (isBoxedFunction(base) && base.operator === 'Csc') {
         return {
           value: ce._fn('Cot', [base.op1]).pow(2),
           because: 'csc²(x) - 1 -> cot²(x)',
@@ -772,22 +809,28 @@ export function simplifyTrig(x: BoxedExpression): RuleStep | undefined {
     }
 
     // Check for "-sin²(x) + -cos²(x)" pattern -> -1
-    if (a.operator === 'Negate' && b.operator === 'Negate') {
+    if (
+      isBoxedFunction(a) && a.operator === 'Negate' &&
+      isBoxedFunction(b) && b.operator === 'Negate'
+    ) {
       const aInner = a.op1;
       const bInner = b.op1;
       if (
-        aInner?.operator === 'Power' &&
+        isBoxedFunction(aInner) &&
+        aInner.operator === 'Power' &&
         aInner.op2?.is(2) &&
-        bInner?.operator === 'Power' &&
+        isBoxedFunction(bInner) &&
+        bInner.operator === 'Power' &&
         bInner.op2?.is(2)
       ) {
         const aBase = aInner.op1;
         const bBase = bInner.op1;
         // -sin²(x) + -cos²(x) -> -1
         if (
-          ((aBase?.operator === 'Sin' && bBase?.operator === 'Cos') ||
-            (aBase?.operator === 'Cos' && bBase?.operator === 'Sin')) &&
-          aBase?.op1?.isSame(bBase?.op1)
+          isBoxedFunction(aBase) && isBoxedFunction(bBase) &&
+          ((aBase.operator === 'Sin' && bBase.operator === 'Cos') ||
+            (aBase.operator === 'Cos' && bBase.operator === 'Sin')) &&
+          aBase.op1?.isSame(bBase.op1)
         ) {
           return { value: ce.NegativeOne, because: '-sin²(x) - cos²(x) -> -1' };
         }
@@ -797,6 +840,7 @@ export function simplifyTrig(x: BoxedExpression): RuleStep | undefined {
 
   // Arcsin(x) -> 2 * Arctan2(x, 1 + sqrt(1 - x²))
   if (op === 'Arcsin') {
+    if (!isBoxedFunction(x)) return undefined;
     const arg = x.op1;
     if (arg) {
       return {

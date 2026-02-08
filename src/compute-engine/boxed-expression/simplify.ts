@@ -6,6 +6,7 @@ import type {
   BoxedRuleSet,
   RuleSteps,
 } from '../global-types';
+import { isBoxedNumber, isBoxedSymbol, isBoxedFunction, isBoxedString } from './type-guards';
 
 type InternalSimplifyOptions = SimplifyOptions & {
   useVariations: boolean;
@@ -31,7 +32,7 @@ const CONSTRUCTIBLE_TRIG = ['Sin', 'Cos', 'Tan', 'Csc', 'Sec', 'Cot'];
  */
 function containsConstructibleTrig(expr: BoxedExpression): boolean {
   if (CONSTRUCTIBLE_TRIG.includes(expr.operator)) return true;
-  if (!expr.ops) return false;
+  if (!isBoxedFunction(expr)) return false;
   return expr.ops.some((op) => containsConstructibleTrig(op));
 }
 
@@ -42,16 +43,16 @@ function containsConstructibleTrig(expr: BoxedExpression): boolean {
  */
 function evaluateNumericSubexpressions(expr: BoxedExpression): BoxedExpression {
   // Number literals are already simplified
-  if (expr.isNumberLiteral) return expr;
+  if (isBoxedNumber(expr)) return expr;
 
   // No ops means symbol or other atomic - return as is
-  if (!expr.ops) return expr;
+  if (!isBoxedFunction(expr)) return expr;
 
   // Don't evaluate Power expressions that should stay symbolic:
   // - e^n (for potential combination with e^x)
   // - n^{p/q} where result is irrational (e.g., 2^{3/5})
   if (expr.operator === 'Power') {
-    if (expr.op1?.symbol === 'ExponentialE') {
+    if (isBoxedSymbol(expr.op1) && expr.op1.symbol === 'ExponentialE') {
       return expr;
     }
     // Skip n^{p/q} with non-integer exponent - these produce irrational results
@@ -63,14 +64,14 @@ function evaluateNumericSubexpressions(expr: BoxedExpression): BoxedExpression {
   // If purely numeric (no unknowns), evaluate the whole expression
   if (expr.unknowns.length === 0 && BASIC_ARITHMETIC.includes(expr.operator)) {
     const evaluated = expr.evaluate();
-    if (evaluated.isNumberLiteral) return evaluated;
+    if (isBoxedNumber(evaluated)) return evaluated;
   }
 
   // Otherwise, recursively process operands
   const newOps = expr.ops.map((op) => evaluateNumericSubexpressions(op));
 
   // Check if anything changed
-  const changed = newOps.some((op, i) => op !== expr.ops![i]);
+  const changed = newOps.some((op, i) => op !== expr.ops[i]);
   if (!changed) return expr;
 
   // Reconstruct with _fn to avoid re-canonicalization
@@ -211,13 +212,13 @@ function simplifyOperands(
   expr: BoxedExpression,
   options?: Partial<SimplifyOptions>
 ): BoxedExpression {
-  if (!expr.ops) return expr;
+  if (!isBoxedFunction(expr)) return expr;
 
   const def = expr.operatorDefinition;
 
   // For scoped functions (Sum, Product, D), use holdMap but simplify non-body operands
   if (def?.scoped === true) {
-    const simplifiedOps = expr.ops.map((x, i) => {
+    const simplifiedOps = [...expr.ops].map((x, i) => {
       // Don't simplify the body (first operand) to allow pattern-matching rules to work
       if (i === 0) return x;
       // Simplify other operands (like Limits)
@@ -253,7 +254,7 @@ function simplifyOperands(
       // Power expressions with fractional exponents may need sign factoring
       // e.g., (-2x)^{3/5} should become -(2x)^{3/5} for correct real evaluation
       if (
-        x.operator === 'Power' &&
+        x.operator === 'Power' && isBoxedFunction(x) &&
         x.op2?.isRational === true &&
         !x.op2.isInteger
       ) {
@@ -286,20 +287,20 @@ function simplifyOperands(
     // to get simpler results like √(1+2) → √3
     // BUT skip Power expressions that should stay symbolic:
     // - e^n and n^{p/q} with non-integer exponent
-    if (!x.isNumberLiteral && x.ops && x.unknowns.length === 0) {
+    if (!isBoxedNumber(x) && isBoxedFunction(x) && x.unknowns.length === 0) {
       if (BASIC_ARITHMETIC.includes(x.operator)) {
         // Don't evaluate Power expressions that produce irrational results
         if (x.operator === 'Power') {
-          if (x.op1?.symbol === 'ExponentialE') return x;
+          if (isBoxedSymbol(x.op1) && x.op1.symbol === 'ExponentialE') return x;
           if (x.op2?.isRational === true && x.op2?.isInteger === false)
             return x;
         }
         const evaluated = x.evaluate();
-        if (evaluated.isNumberLiteral) return evaluated;
+        if (isBoxedNumber(evaluated)) return evaluated;
       }
     }
     // For other expressions with ops (like Tan, Sqrt, etc.), recursively simplify
-    if (x.ops) {
+    if (isBoxedFunction(x)) {
       return simplify(x, options).at(-1)!.value;
     }
     return x;
@@ -317,12 +318,12 @@ function simplifyExpression(
   //
   // 1/ If a number or a string, no simplification to do
   //
-  if (expr.isNumberLiteral || expr.string) return steps;
+  if (isBoxedNumber(expr) || isBoxedString(expr)) return steps;
 
   //
   // 2/ Simplify a symbol
   //
-  if (expr.symbol) {
+  if (isBoxedSymbol(expr)) {
     const result = replace(expr, rules, {
       recursive: false,
       canonical: true,

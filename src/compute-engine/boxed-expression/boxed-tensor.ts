@@ -31,6 +31,7 @@ import { NumericValue } from '../numeric-value/types';
 import { _BoxedExpression } from './abstract-boxed-expression';
 import { isWildcard, wildcardName } from './pattern-utils';
 import { hashCode, isBoxedExpression } from './utils';
+import { isBoxedFunction } from './type-guards';
 
 /**
  * A boxed tensor represents an expression that can be represented by a tensor.
@@ -47,6 +48,8 @@ export class BoxedTensor<T extends TensorDataType>
   extends _BoxedExpression
   implements TensorInterface
 {
+  override readonly _kind = 'tensor';
+
   private _tensor: AbstractTensor<T>;
 
   private _expression?: BoxedExpression;
@@ -132,11 +135,13 @@ export class BoxedTensor<T extends TensorDataType>
 
   get nops(): number {
     if (this._tensor) return this._tensor.shape[0];
-    return this.structural.nops;
+    const s = this.structural;
+    return isBoxedFunction(s) ? s.nops : 0;
   }
 
   get ops(): ReadonlyArray<BoxedExpression> {
-    return this.structural.ops!;
+    const s = this.structural;
+    return isBoxedFunction(s) ? s.ops : [];
   }
 
   get op1(): BoxedExpression {
@@ -145,7 +150,8 @@ export class BoxedTensor<T extends TensorDataType>
       if (data.length === 0) return this.engine.Nothing;
       return this.engine.box(data[0]);
     }
-    return this.structural.op1;
+    const s = this.structural;
+    return isBoxedFunction(s) ? s.op1 : this.engine.Nothing;
   }
 
   get op2(): BoxedExpression {
@@ -154,7 +160,8 @@ export class BoxedTensor<T extends TensorDataType>
       if (data.length < 2) return this.engine.Nothing;
       return this.engine.box(data[1]);
     }
-    return this.structural.op2;
+    const s = this.structural;
+    return isBoxedFunction(s) ? s.op2 : this.engine.Nothing;
   }
 
   get op3(): BoxedExpression {
@@ -163,7 +170,8 @@ export class BoxedTensor<T extends TensorDataType>
       if (data.length < 3) return this.engine.Nothing;
       return this.engine.box(data[2]);
     }
-    return this.structural.op3;
+    const s = this.structural;
+    return isBoxedFunction(s) ? s.op3 : this.engine.Nothing;
   }
 
   //
@@ -309,8 +317,10 @@ export class BoxedTensor<T extends TensorDataType>
       for (let i = 1; i <= count; i += 1) {
         // slice(i - 1) returns a tensor of rank-1 less
         const row = self.tensor.slice(i - 1);
+        const rowExpr = row.expression;
+        const rowOps = isBoxedFunction(rowExpr) ? rowExpr.ops : [];
         yield new BoxedTensor(self.engine, {
-          ops: row.expression.ops!,
+          ops: rowOps,
           shape: row.shape,
           dtype: row.dtype,
         });
@@ -329,8 +339,10 @@ export class BoxedTensor<T extends TensorDataType>
       return this.engine.box(row.data[0]);
     } else if (row.rank > 1) {
       // Higher rank tensor: return a new boxed tensor
+      const rowExpr = row.expression;
+      const rowOps = isBoxedFunction(rowExpr) ? rowExpr.ops : [];
       return new BoxedTensor(this.engine, {
-        ops: row.expression.ops!,
+        ops: rowOps,
         shape: row.shape,
         dtype: row.dtype,
       });
@@ -426,8 +438,10 @@ export function expressionTensorInfo(
     // 4a. all nested → recurse
     if (nestedCount === len) {
       for (const item of t) {
-        visit(item.ops!, axis + 1);
-        if (!valid) return;
+        if (isBoxedFunction(item)) {
+          visit(item.ops, axis + 1);
+          if (!valid) return;
+        }
       }
     }
     // 4b. all leaves → accumulate dtype
@@ -465,7 +479,8 @@ function expressionAsTensor<T extends TensorDataType = 'expression'>(
 
     for (const item of t) {
       if (!isValid) return;
-      if (item.operator === operator) visit(item.ops!, axis + 1);
+      if (item.operator === operator && isBoxedFunction(item))
+        visit(item.ops, axis + 1);
       else {
         const v = cast(item, dtype);
         if (v === undefined) {

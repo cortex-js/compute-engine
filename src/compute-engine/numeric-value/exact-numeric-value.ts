@@ -813,7 +813,7 @@ export class ExactNumericValue extends NumericValue {
       } else {
         console.assert(isSubtype(value.type, 'integer'));
         // Use bignumRe to avoid precision loss for large integers
-        const intValue = BigInt(value.bignumRe.toFixed(0));
+        const intValue = BigInt(value.bignumRe!.toFixed(0));
         rationalSum = add(rationalSum, [intValue, BigInt(1)]);
       }
     }

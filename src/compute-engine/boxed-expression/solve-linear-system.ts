@@ -5,6 +5,7 @@ import type {
 import { polynomialDegree } from './polynomials';
 import { findUnivariateRoots } from './solve';
 import { expand } from './expand';
+import { isBoxedNumber, isBoxedFunction, isBoxedSymbol } from './type-guards';
 
 /**
  * Check if an expression is linear in the given variables.
@@ -23,7 +24,7 @@ function isLinearInVariables(
   const countVariables = (e: BoxedExpression): number => {
     let count = 0;
     for (const v of variables) {
-      if (e.symbol === v) return 1;
+      if (isBoxedSymbol(e) && e.symbol === v) return 1;
       if (e.has(v)) count++;
     }
     return count;
@@ -36,18 +37,18 @@ function isLinearInVariables(
     if (varCount === 0) return true;
 
     // If it's just a symbol that's one of our variables, it's linear
-    if (term.symbol && variables.includes(term.symbol)) return true;
+    if (isBoxedSymbol(term) && variables.includes(term.symbol)) return true;
 
     // Handle Multiply: each variable should appear in at most one factor
-    if (term.operator === 'Multiply') {
+    if (term.operator === 'Multiply' && isBoxedFunction(term)) {
       let varFactorCount = 0;
-      for (const factor of term.ops!) {
+      for (const factor of term.ops) {
         if (countVariables(factor) > 0) {
           varFactorCount++;
           // If this factor contains multiple variables, it's not linear
           if (countVariables(factor) > 1) return false;
           // If the factor is not just a symbol (e.g., x^2), check if it's linear
-          if (!factor.symbol && factor.has(variables[0])) {
+          if (!isBoxedSymbol(factor) && factor.has(variables[0])) {
             // Check if any variable in the factor has degree > 1
             for (const v of variables) {
               if (factor.has(v) && polynomialDegree(factor, v) > 1)
@@ -61,17 +62,17 @@ function isLinearInVariables(
     }
 
     // Handle Add: each term should be linear
-    if (term.operator === 'Add') {
-      return term.ops!.every((t) => checkTerm(t));
+    if (term.operator === 'Add' && isBoxedFunction(term)) {
+      return term.ops.every((t) => checkTerm(t));
     }
 
     // Handle Negate
-    if (term.operator === 'Negate') {
+    if (term.operator === 'Negate' && isBoxedFunction(term)) {
       return checkTerm(term.op1);
     }
 
     // Handle Subtract
-    if (term.operator === 'Subtract') {
+    if (term.operator === 'Subtract' && isBoxedFunction(term)) {
       return checkTerm(term.op1) && checkTerm(term.op2);
     }
 
@@ -158,7 +159,7 @@ function extractLinearCoefficients(
 
   // Handle Equal(lhs, rhs) -> lhs - rhs = 0
   let expr: BoxedExpression;
-  if (equation.operator === 'Equal') {
+  if (equation.operator === 'Equal' && isBoxedFunction(equation)) {
     const lhs = equation.op1;
     const rhs = equation.op2;
     expr = expand(lhs.sub(rhs)) ?? lhs.sub(rhs);
@@ -205,22 +206,22 @@ function extractCoefficient(
   if (!expr.has(variable)) return ce.Zero;
 
   // If it's just the variable, coefficient is 1
-  if (expr.symbol === variable) return ce.One;
+  if (isBoxedSymbol(expr) && expr.symbol === variable) return ce.One;
 
   // Handle Negate
-  if (expr.operator === 'Negate') {
+  if (expr.operator === 'Negate' && isBoxedFunction(expr)) {
     const inner = extractCoefficient(expr.op1, variable, ce);
     return inner?.neg() ?? null;
   }
 
   // Handle Multiply: look for variable * coefficient
-  if (expr.operator === 'Multiply') {
-    const ops = expr.ops!;
+  if (expr.operator === 'Multiply' && isBoxedFunction(expr)) {
+    const ops = expr.ops;
     let coef: BoxedExpression = ce.One;
     let foundVar = false;
 
     for (const op of ops) {
-      if (op.symbol === variable) {
+      if (isBoxedSymbol(op) && op.symbol === variable) {
         if (foundVar) return null; // Variable appears twice (non-linear)
         foundVar = true;
       } else if (op.has(variable)) {
@@ -234,9 +235,9 @@ function extractCoefficient(
   }
 
   // Handle Add: sum the coefficients from each term
-  if (expr.operator === 'Add') {
+  if (expr.operator === 'Add' && isBoxedFunction(expr)) {
     let totalCoef: BoxedExpression = ce.Zero;
-    for (const term of expr.ops!) {
+    for (const term of expr.ops) {
       const termCoef = extractCoefficient(term, variable, ce);
       if (termCoef === null) return null;
       totalCoef = totalCoef.add(termCoef);
@@ -245,7 +246,7 @@ function extractCoefficient(
   }
 
   // Handle Subtract
-  if (expr.operator === 'Subtract') {
+  if (expr.operator === 'Subtract' && isBoxedFunction(expr)) {
     const leftCoef = extractCoefficient(expr.op1, variable, ce);
     const rightCoef = extractCoefficient(expr.op2, variable, ce);
     if (leftCoef === null || rightCoef === null) return null;
@@ -274,9 +275,9 @@ function extractConstantTerm(
   if (!hasAnyVar) return expr;
 
   // Handle Add: collect constant terms
-  if (expr.operator === 'Add') {
+  if (expr.operator === 'Add' && isBoxedFunction(expr)) {
     let constant: BoxedExpression = ce.Zero;
-    for (const term of expr.ops!) {
+    for (const term of expr.ops) {
       const termHasVar = variables.some((v) => term.has(v));
       if (!termHasVar) {
         constant = constant.add(term);
@@ -286,12 +287,12 @@ function extractConstantTerm(
   }
 
   // Handle Negate
-  if (expr.operator === 'Negate') {
+  if (expr.operator === 'Negate' && isBoxedFunction(expr)) {
     return extractConstantTerm(expr.op1, variables, ce).neg();
   }
 
   // Handle Subtract
-  if (expr.operator === 'Subtract') {
+  if (expr.operator === 'Subtract' && isBoxedFunction(expr)) {
     const leftConst = extractConstantTerm(expr.op1, variables, ce);
     const rightConst = extractConstantTerm(expr.op2, variables, ce);
     return leftConst.sub(rightConst);
@@ -578,8 +579,8 @@ function compareAbsoluteValues(
 
   // Try symbolic comparison first
   // For purely numeric expressions, this should work exactly
-  const aNum = absA.numericValue;
-  const bNum = absB.numericValue;
+  const aNum = isBoxedNumber(absA) ? absA.numericValue : undefined;
+  const bNum = isBoxedNumber(absB) ? absB.numericValue : undefined;
 
   // If both are numeric values (not expressions), compare them exactly
   if (aNum !== undefined && bNum !== undefined) {
@@ -606,8 +607,10 @@ function compareAbsoluteValues(
   }
 
   // Fallback: evaluate numerically
-  const aVal = absA.N().numericValue;
-  const bVal = absB.N().numericValue;
+  const aN = absA.N();
+  const bN = absB.N();
+  const aVal = isBoxedNumber(aN) ? aN.numericValue : undefined;
+  const bVal = isBoxedNumber(bN) ? bN.numericValue : undefined;
 
   if (aVal === undefined || bVal === undefined) return undefined;
 
@@ -636,7 +639,8 @@ function isEffectivelyZero(expr: BoxedExpression | undefined): boolean {
   if (simplified.is(0)) return true;
 
   // Fallback: check numeric value with small tolerance
-  const numVal = expr.N().numericValue;
+  const exprN = expr.N();
+  const numVal = isBoxedNumber(exprN) ? exprN.numericValue : undefined;
   if (numVal === undefined) return false;
 
   const re = typeof numVal === 'number' ? numVal : (numVal as any).re;
@@ -674,7 +678,7 @@ export function solvePolynomialSystem(
 
   // Normalize equations to lhs - rhs = 0 form
   const normalized = equations.map((eq) => {
-    if (eq.operator === 'Equal') {
+    if (eq.operator === 'Equal' && isBoxedFunction(eq)) {
       const diff = eq.op1.sub(eq.op2);
       return (expand(diff) ?? diff).simplify();
     }
@@ -809,8 +813,8 @@ function extractXYCoefficient(
   let constant: BoxedExpression = ce.Zero;
 
   // Handle Add
-  if (expr.operator === 'Add') {
-    for (const term of expr.ops!) {
+  if (expr.operator === 'Add' && isBoxedFunction(expr)) {
+    for (const term of expr.ops) {
       const termResult = extractXYCoefficientFromTerm(term, x, y, ce);
       if (termResult === null) return null;
       xyCoef = xyCoef.add(termResult.coef);
@@ -848,16 +852,16 @@ function extractXYCoefficientFromTerm(
   }
 
   // Term has both x and y - should be c*x*y
-  if (term.operator === 'Multiply') {
+  if (term.operator === 'Multiply' && isBoxedFunction(term)) {
     let coef: BoxedExpression = ce.One;
     let foundX = false;
     let foundY = false;
 
-    for (const factor of term.ops!) {
-      if (factor.symbol === x) {
+    for (const factor of term.ops) {
+      if (isBoxedSymbol(factor) && factor.symbol === x) {
         if (foundX) return null; // x appears twice
         foundX = true;
-      } else if (factor.symbol === y) {
+      } else if (isBoxedSymbol(factor) && factor.symbol === y) {
         if (foundY) return null; // y appears twice
         foundY = true;
       } else if (factor.has(x) || factor.has(y)) {
@@ -874,7 +878,7 @@ function extractXYCoefficientFromTerm(
   }
 
   // Simple x*y (implicit multiply handled differently?)
-  if (term.symbol === x || term.symbol === y) {
+  if (isBoxedSymbol(term) && (term.symbol === x || term.symbol === y)) {
     return null; // Just x or y alone, not xy
   }
 
@@ -1167,6 +1171,7 @@ function extractLinearConstraint(
   if (!isInequalityOperator(op)) return null;
 
   // Get lhs and rhs
+  if (!isBoxedFunction(ineq)) return null;
   const lhs = ineq.op1;
   const rhs = ineq.op2;
   if (!lhs || !rhs) return null;
@@ -1202,9 +1207,12 @@ function extractLinearConstraint(
   if (coefX === null || coefY === null) return null;
 
   // Get numeric values (handle both plain numbers and ExactNumericValue objects)
-  const aVal = coefX.N().numericValue;
-  const bVal = coefY.N().numericValue;
-  const cVal = constant.N().numericValue;
+  const coefXN = coefX.N();
+  const coefYN = coefY.N();
+  const constantN = constant.N();
+  const aVal = isBoxedNumber(coefXN) ? coefXN.numericValue : undefined;
+  const bVal = isBoxedNumber(coefYN) ? coefYN.numericValue : undefined;
+  const cVal = isBoxedNumber(constantN) ? constantN.numericValue : undefined;
 
   // Extract real number from numericValue (may be number or object with 're' property)
   const toNumber = (val: unknown): number | null => {

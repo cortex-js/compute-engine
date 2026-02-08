@@ -16,6 +16,7 @@ import type {
 import { applicable } from '../function-utils';
 
 import { DEFAULT_COMPLEXITY } from './constants';
+import { isBoxedFunction } from './type-guards';
 import { functionResult } from '../../common/type/utils';
 import { isSubtype } from '../../common/type/subtype';
 import { defaultCollectionHandlers } from '../collection-utils';
@@ -323,9 +324,9 @@ export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
       // If no explicit signature was provided and the evaluate handler is a
       // Function expression, infer the signature from the function parameters
       // and body type.
-      if (this.inferredSignature && boxedFn.operator === 'Function') {
-        const body = boxedFn.ops![0];
-        const params = boxedFn.ops!.slice(1);
+      if (this.inferredSignature && isBoxedFunction(boxedFn) && boxedFn.operator === 'Function') {
+        const body = boxedFn.ops[0];
+        const params = boxedFn.ops.slice(1);
         const bodyType = body.type.toString();
         const paramTypes = params.map(() => 'unknown').join(', ');
         this.signature = new BoxedType(

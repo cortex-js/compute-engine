@@ -806,17 +806,6 @@ function isValidEntry(
   }
   if (Array.isArray(subject)) subject = tokensToString(subject);
 
-  if ('trigger' in entry) {
-    onError({
-      severity: 'warning',
-      message: [
-        'invalid-dictionary-entry',
-        subject,
-        `The 'trigger' property is deprecated. Use 'latexTrigger' or 'symbolTrigger' instead`,
-      ],
-    });
-  }
-
   if (
     'kind' in entry &&
     ![

@@ -16,6 +16,11 @@ import {
   isOperatorDef,
 } from './boxed-expression/utils';
 import { isInequalityOperator } from './latex-syntax/utils';
+import {
+  isBoxedFunction,
+  isBoxedSymbol,
+  isBoxedNumber,
+} from './boxed-expression/type-guards';
 
 /**
  * Infer a promoted type from a value expression.
@@ -102,8 +107,8 @@ function assumeEquality(proposition: BoxedExpression): AssumeResult {
   const unknowns = proposition.unknowns;
   if (unknowns.length === 0) {
     const val = proposition.evaluate();
-    if (val.symbol === 'True') return 'tautology';
-    if (val.symbol === 'False') return 'contradiction';
+    if (isBoxedSymbol(val) && val.symbol === 'True') return 'tautology';
+    if (isBoxedSymbol(val) && val.symbol === 'False') return 'contradiction';
     console.log(proposition.canonical.evaluate());
     return 'not-a-predicate';
   }
@@ -116,7 +121,9 @@ function assumeEquality(proposition: BoxedExpression): AssumeResult {
   // that's not really an assumption, that's an assignment.
   // Assumptions are meant to be complementary to declarations, not replacing
   // them, i.e. `ce.assume(ce.parse("x > 0"))`
-  const lhs = proposition.op1.symbol;
+  if (!isBoxedFunction(proposition)) return 'not-a-predicate';
+  const lhsExpr = proposition.op1;
+  const lhs = isBoxedSymbol(lhsExpr) ? lhsExpr.symbol : undefined;
   if (lhs && !hasValue(ce, lhs) && !proposition.op2.has(lhs)) {
     const val = proposition.op2.evaluate();
     if (!val.isValid) return 'not-a-predicate';
@@ -227,6 +234,7 @@ function assumeInequality(proposition: BoxedExpression): AssumeResult {
   // // @todo: handle if proposition.op1 *has* a def (and no value)
 
   // Normalize to Less, LessEqual
+  if (!isBoxedFunction(proposition)) return 'internal-error';
   let op = '';
   let lhs: BoxedExpression;
   let rhs: BoxedExpression;
@@ -253,8 +261,8 @@ function assumeInequality(proposition: BoxedExpression): AssumeResult {
   // Case 2
   const result = ce.box([op === '<' ? 'Less' : 'LessEqual', p, 0]).evaluate();
 
-  if (result.symbol === 'True') return 'tautology';
-  if (result.symbol === 'False') return 'contradiction';
+  if (isBoxedSymbol(result) && result.symbol === 'True') return 'tautology';
+  if (isBoxedSymbol(result) && result.symbol === 'False') return 'contradiction';
 
   const unknowns = result.unknowns;
   if (unknowns.length === 0) return 'not-a-predicate';
@@ -271,12 +279,15 @@ function assumeInequality(proposition: BoxedExpression): AssumeResult {
 
     // Check if this is a simple "symbol > value" or "symbol < value" case
     const originalOp = proposition.operator;
-    const isSymbolOnLeft = proposition.op1.symbol === symbol;
-    const otherSide = isSymbolOnLeft ? proposition.op2 : proposition.op1;
+    const propOp1 = proposition.op1;
+    const propOp2 = proposition.op2;
+    const isSymbolOnLeft = isBoxedSymbol(propOp1) && propOp1.symbol === symbol;
+    const otherSide = isSymbolOnLeft ? propOp2 : propOp1;
 
     // Only do bounds checking for simple comparisons like "x > k" where k is numeric
-    if (otherSide.numericValue !== undefined) {
-      const k = otherSide.numericValue;
+    const otherNumericValue = isBoxedNumber(otherSide) ? otherSide.numericValue : undefined;
+    if (otherNumericValue !== undefined) {
+      const k = otherNumericValue;
 
       if (typeof k === 'number' && isFinite(k)) {
         // Determine the EFFECTIVE relationship based on operator and symbol position
@@ -304,7 +315,7 @@ function assumeInequality(proposition: BoxedExpression): AssumeResult {
           const isStrict = effectiveOp === 'greater';
 
           if (bounds.lowerBound !== undefined) {
-            const lowerVal = bounds.lowerBound.numericValue;
+            const lowerVal = isBoxedNumber(bounds.lowerBound) ? bounds.lowerBound.numericValue : undefined;
             if (typeof lowerVal === 'number' && isFinite(lowerVal)) {
               // We already know symbol > lowerVal (or >=)
               if (isStrict) {
@@ -323,7 +334,7 @@ function assumeInequality(proposition: BoxedExpression): AssumeResult {
           }
 
           if (bounds.upperBound !== undefined) {
-            const upperVal = bounds.upperBound.numericValue;
+            const upperVal = isBoxedNumber(bounds.upperBound) ? bounds.upperBound.numericValue : undefined;
             if (typeof upperVal === 'number' && isFinite(upperVal)) {
               // We know symbol < upperVal (or <=), now checking symbol > k
               if (isStrict) {
@@ -345,7 +356,7 @@ function assumeInequality(proposition: BoxedExpression): AssumeResult {
           const isStrict = effectiveOp === 'less';
 
           if (bounds.upperBound !== undefined) {
-            const upperVal = bounds.upperBound.numericValue;
+            const upperVal = isBoxedNumber(bounds.upperBound) ? bounds.upperBound.numericValue : undefined;
             if (typeof upperVal === 'number' && isFinite(upperVal)) {
               // We already know symbol < upperVal (or <=)
               if (isStrict) {
@@ -361,7 +372,7 @@ function assumeInequality(proposition: BoxedExpression): AssumeResult {
           }
 
           if (bounds.lowerBound !== undefined) {
-            const lowerVal = bounds.lowerBound.numericValue;
+            const lowerVal = isBoxedNumber(bounds.lowerBound) ? bounds.lowerBound.numericValue : undefined;
             if (typeof lowerVal === 'number' && isFinite(lowerVal)) {
               // We know symbol > lowerVal (or >=), now checking symbol < k
               if (isStrict) {
@@ -421,6 +432,7 @@ function assumeElement(proposition: BoxedExpression): AssumeResult {
   //    => evaluate and return result (contradiction or tautology)
 
   const ce = proposition.engine;
+  if (!isBoxedFunction(proposition)) return 'not-a-predicate';
   // Note: this is not 'unknowns' because proposition is not canonical (so all symbols are "unknowns")
   const undefs = undefinedIdentifiers(proposition.op1);
   // Case 1
@@ -437,15 +449,17 @@ function assumeElement(proposition: BoxedExpression): AssumeResult {
   }
 
   // Case 2
-  if (proposition.op1.symbol && hasDef(ce, proposition.op1.symbol)) {
+  const propOp1 = proposition.op1;
+  const propOp1Symbol = isBoxedSymbol(propOp1) ? propOp1.symbol : undefined;
+  if (propOp1Symbol && hasDef(ce, propOp1Symbol)) {
     const domain = proposition.op2.evaluate();
     if (!domain.isValid) return 'not-a-predicate';
     const type = domainToType(domain);
 
-    if (!ce.context?.lexicalScope?.bindings.has(proposition.op1.symbol))
-      ce.declare(proposition.op1.symbol, domainToType(domain));
+    if (!ce.context?.lexicalScope?.bindings.has(propOp1Symbol))
+      ce.declare(propOp1Symbol, domainToType(domain));
 
-    const def = ce.lookupDefinition(proposition.op1.symbol);
+    const def = ce.lookupDefinition(propOp1Symbol);
     if (isValueDef(def)) {
       if (def.value.type && !isSubtype(type, def.value.type.type))
         return 'contradiction';
@@ -469,8 +483,8 @@ function assumeElement(proposition: BoxedExpression): AssumeResult {
 
   // Case 4
   const val = proposition.evaluate();
-  if (val.symbol === 'True') return 'tautology';
-  if (val.symbol === 'False') return 'contradiction';
+  if (isBoxedSymbol(val) && val.symbol === 'True') return 'tautology';
+  if (isBoxedSymbol(val) && val.symbol === 'False') return 'contradiction';
   return 'not-a-predicate';
 }
 
@@ -521,8 +535,9 @@ export function getSignFromAssumptions(
     // Assumptions are normalized to Less or LessEqual
     if (op !== 'Less' && op !== 'LessEqual') continue;
 
+    if (!isBoxedFunction(assumption)) continue;
     const ops = assumption.ops;
-    if (!ops || ops.length !== 2) continue;
+    if (ops.length !== 2) continue;
 
     const [lhs, rhs] = ops;
 
@@ -532,7 +547,7 @@ export function getSignFromAssumptions(
     // Case 1: Direct symbol comparison
     // x < 0 means x is negative
     // x <= 0 means x is non-positive
-    if (lhs.symbol === symbol) {
+    if (isBoxedSymbol(lhs) && lhs.symbol === symbol) {
       if (op === 'Less') return 'negative';
       if (op === 'LessEqual') return 'non-positive';
     }
@@ -540,7 +555,7 @@ export function getSignFromAssumptions(
     // Case 2: Negated symbol comparison
     // -x < 0 means x > 0 (positive)
     // -x <= 0 means x >= 0 (non-negative)
-    if (lhs.operator === 'Negate' && lhs.op1?.symbol === symbol) {
+    if (isBoxedFunction(lhs) && lhs.operator === 'Negate' && isBoxedSymbol(lhs.op1) && lhs.op1.symbol === symbol) {
       if (op === 'Less') return 'positive';
       if (op === 'LessEqual') return 'non-negative';
     }
@@ -548,15 +563,15 @@ export function getSignFromAssumptions(
     // Case 3: Symbol with subtraction from constant
     // a - x < 0 means x > a, so if a >= 0, x is positive
     // x - a < 0 means x < a, so if a <= 0, x is negative
-    if (lhs.operator === 'Subtract') {
-      const [a, b] = lhs.ops ?? [];
+    if (isBoxedFunction(lhs) && lhs.operator === 'Subtract') {
+      const [a, b] = lhs.ops;
       if (a && b) {
         // a - x < 0 => x > a
-        if (b.symbol === symbol && a.isNonNegative === true) {
+        if (isBoxedSymbol(b) && b.symbol === symbol && a.isNonNegative === true) {
           if (op === 'Less') return 'positive';
         }
         // x - a < 0 => x < a
-        if (a.symbol === symbol && b.isNonPositive === true) {
+        if (isBoxedSymbol(a) && a.symbol === symbol && b.isNonPositive === true) {
           if (op === 'Less') return 'negative';
         }
       }
@@ -565,10 +580,10 @@ export function getSignFromAssumptions(
     // Case 4: Addition form (canonical form of subtraction)
     // x + (-a) < 0 means x < a, so if a <= 0, x is negative
     // -x + a < 0 means -x < -a means x > a, so if a >= 0, x is positive
-    if (lhs.operator === 'Add' && lhs.ops) {
+    if (isBoxedFunction(lhs) && lhs.operator === 'Add') {
       for (const term of lhs.ops) {
         // Direct symbol in sum: check if other terms give us bounds
-        if (term.symbol === symbol) {
+        if (isBoxedSymbol(term) && term.symbol === symbol) {
           // x + ... < 0, check if other terms are all non-negative
           // That would mean x < -(sum of others), so x < non-positive = negative
           const otherTerms = lhs.ops.filter((t) => t !== term);
@@ -581,7 +596,7 @@ export function getSignFromAssumptions(
           }
         }
         // Negated symbol in sum: -x + ... < 0
-        if (term.operator === 'Negate' && term.op1?.symbol === symbol) {
+        if (isBoxedFunction(term) && term.operator === 'Negate' && isBoxedSymbol(term.op1) && term.op1.symbol === symbol) {
           // -x + ... < 0 means x > ...
           const otherTerms = lhs.ops.filter((t) => t !== term);
           if (

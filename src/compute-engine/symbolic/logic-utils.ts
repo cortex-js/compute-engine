@@ -3,10 +3,33 @@ import type {
   IComputeEngine as ComputeEngine,
 } from '../global-types';
 
+import {
+  isBoxedFunction,
+  isBoxedSymbol,
+  sym,
+} from '../boxed-expression/type-guards';
+
 /**
  * Basic evaluation functions for logical operators.
  * Extracted from logic.ts for better code organization.
  */
+
+/** Helper to get `.op1` from a function expression, or undefined. */
+function fnOp1(expr: BoxedExpression): BoxedExpression | undefined {
+  return isBoxedFunction(expr) ? expr.op1 : undefined;
+}
+
+/** Helper to get `.op2` from a function expression, or undefined. */
+function fnOp2(expr: BoxedExpression): BoxedExpression | undefined {
+  return isBoxedFunction(expr) ? expr.op2 : undefined;
+}
+
+/** Helper to get `.ops` from a function expression, or undefined. */
+function fnOps(
+  expr: BoxedExpression
+): ReadonlyArray<BoxedExpression> | undefined {
+  return isBoxedFunction(expr) ? expr.ops : undefined;
+}
 
 /**
  * Check if an And expression is a contradiction (contains A and Not(A)).
@@ -18,8 +41,8 @@ function isContradiction(args: ReadonlyArray<BoxedExpression>): boolean {
     for (let j = i + 1; j < args.length; j++) {
       const other = args[j];
       if (
-        (arg.operator === 'Not' && arg.op1.isSame(other)) ||
-        (other.operator === 'Not' && other.op1.isSame(arg))
+        (arg.operator === 'Not' && fnOp1(arg)!.isSame(other)) ||
+        (other.operator === 'Not' && fnOp1(other)!.isSame(arg))
       ) {
         return true;
       }
@@ -38,8 +61,8 @@ function isTautologyCheck(args: ReadonlyArray<BoxedExpression>): boolean {
     for (let j = i + 1; j < args.length; j++) {
       const other = args[j];
       if (
-        (arg.operator === 'Not' && arg.op1.isSame(other)) ||
-        (other.operator === 'Not' && other.op1.isSame(arg))
+        (arg.operator === 'Not' && fnOp1(arg)!.isSame(other)) ||
+        (other.operator === 'Not' && fnOp1(other)!.isSame(arg))
       ) {
         return true;
       }
@@ -57,13 +80,13 @@ export function evaluateAnd(
   for (let arg of args) {
     // Check if an Or operand is a tautology (contains A and Not(A))
     // For example: Or(A, Not(A)) -> True, and And(..., True, ...) simplifies
-    if (arg.operator === 'Or' && isTautologyCheck(arg.ops!)) {
+    if (arg.operator === 'Or' && isTautologyCheck(fnOps(arg)!)) {
       arg = ce.True;
     }
 
     // ['And', ... , 'False', ...] -> 'False'
-    if (arg.symbol === 'False') return ce.False;
-    if (arg.symbol !== 'True') {
+    if (sym(arg) === 'False') return ce.False;
+    if (sym(arg) !== 'True') {
       //Check if arg matches one of the tail elements
       let duplicate = false;
       for (const x of ops) {
@@ -72,8 +95,8 @@ export function evaluateAnd(
           // Duplicate element, ignore it
           duplicate = true;
         } else if (
-          (arg.operator === 'Not' && arg.op1.isSame(x)) ||
-          (x.operator === 'Not' && x.op1.isSame(arg))
+          (arg.operator === 'Not' && fnOp1(arg)!.isSame(x)) ||
+          (x.operator === 'Not' && fnOp1(x)!.isSame(arg))
         ) {
           // ['And', ['Not', a],... a]
           // Contradiction
@@ -103,10 +126,11 @@ function applyAbsorptionAnd(ops: BoxedExpression[]): BoxedExpression[] {
   const result: BoxedExpression[] = [];
   for (const op of ops) {
     // Check if this Or can be absorbed by another operand
-    if (op.operator === 'Or' && op.ops) {
+    const orOps = op.operator === 'Or' ? fnOps(op) : undefined;
+    if (orOps) {
       let absorbed = false;
       // Check if any element of the Or is also a direct operand of the And
-      for (const orArg of op.ops) {
+      for (const orArg of orOps) {
         for (const other of ops) {
           if (other !== op && orArg.isSame(other)) {
             // A ∧ (A ∨ B) → A: the Or is absorbed, skip it
@@ -133,13 +157,13 @@ export function evaluateOr(
   for (let arg of args) {
     // Check if an And operand is a contradiction (contains A and Not(A))
     // For example: And(A, Not(A)) -> False, and Or(..., False, ...) is removed
-    if (arg.operator === 'And' && isContradiction(arg.ops!)) {
+    if (arg.operator === 'And' && isContradiction(fnOps(arg)!)) {
       arg = ce.False;
     }
 
     // ['Or', ... , 'True', ...] -> 'True'
-    if (arg.symbol === 'True') return ce.True;
-    if (arg.symbol !== 'False') {
+    if (sym(arg) === 'True') return ce.True;
+    if (sym(arg) !== 'False') {
       //Check if arg matches one of the tail elements
       let duplicate = false;
       for (const x of ops) {
@@ -148,8 +172,8 @@ export function evaluateOr(
           // Duplicate element, ignore it
           duplicate = true;
         } else if (
-          (arg.operator === 'Not' && arg.op1.isSame(x)) ||
-          (x.operator === 'Not' && x.op1.isSame(arg))
+          (arg.operator === 'Not' && fnOp1(arg)!.isSame(x)) ||
+          (x.operator === 'Not' && fnOp1(x)!.isSame(arg))
         ) {
           // ['Or', ['Not', a],... a]
           // Tautology
@@ -179,10 +203,11 @@ function applyAbsorptionOr(ops: BoxedExpression[]): BoxedExpression[] {
   const result: BoxedExpression[] = [];
   for (const op of ops) {
     // Check if this And can be absorbed by another operand
-    if (op.operator === 'And' && op.ops) {
+    const andOps = op.operator === 'And' ? fnOps(op) : undefined;
+    if (andOps) {
       let absorbed = false;
       // Check if any element of the And is also a direct operand of the Or
-      for (const andArg of op.ops) {
+      for (const andArg of andOps) {
         for (const other of ops) {
           if (other !== op && andArg.isSame(other)) {
             // A ∨ (A ∧ B) → A: the And is absorbed, skip it
@@ -204,7 +229,7 @@ export function evaluateNot(
   args: ReadonlyArray<BoxedExpression>,
   { engine: ce }: { engine: ComputeEngine }
 ): BoxedExpression | undefined {
-  const op1 = args[0]?.symbol;
+  const op1 = sym(args[0]);
   if (op1 === 'True') return ce.False;
   if (op1 === 'False') return ce.True;
   return undefined;
@@ -214,8 +239,8 @@ export function evaluateEquivalent(
   args: ReadonlyArray<BoxedExpression>,
   { engine: ce }: { engine: ComputeEngine }
 ): BoxedExpression | undefined {
-  const lhs = args[0].symbol;
-  const rhs = args[1].symbol;
+  const lhs = sym(args[0]);
+  const rhs = sym(args[1]);
   if (
     (lhs === 'True' && rhs === 'True') ||
     (lhs === 'False' && rhs === 'False')
@@ -233,8 +258,8 @@ export function evaluateImplies(
   args: ReadonlyArray<BoxedExpression>,
   { engine: ce }: { engine: ComputeEngine }
 ): BoxedExpression | undefined {
-  const lhs = args[0].symbol;
-  const rhs = args[1].symbol;
+  const lhs = sym(args[0]);
+  const rhs = sym(args[1]);
   if (
     (lhs === 'True' && rhs === 'True') ||
     (lhs === 'False' && rhs === 'False') ||
@@ -257,9 +282,9 @@ export function evaluateXor(
   const unknowns: BoxedExpression[] = [];
 
   for (const arg of args) {
-    if (arg.symbol === 'True') {
+    if (sym(arg) === 'True') {
       trueCount++;
-    } else if (arg.symbol === 'False') {
+    } else if (sym(arg) === 'False') {
       // False doesn't change parity
     } else {
       unknowns.push(arg);
@@ -295,13 +320,13 @@ export function evaluateNand(
 
   // If any argument is False, AND is False, so NAND is True
   for (const arg of args) {
-    if (arg.symbol === 'False') return ce.True;
+    if (sym(arg) === 'False') return ce.True;
   }
 
   // Check if all are True
   let allTrue = true;
   for (const arg of args) {
-    if (arg.symbol !== 'True') {
+    if (sym(arg) !== 'True') {
       allTrue = false;
       break;
     }
@@ -322,13 +347,13 @@ export function evaluateNor(
 
   // If any argument is True, OR is True, so NOR is False
   for (const arg of args) {
-    if (arg.symbol === 'True') return ce.False;
+    if (sym(arg) === 'True') return ce.False;
   }
 
   // Check if all are False
   let allFalse = true;
   for (const arg of args) {
-    if (arg.symbol !== 'False') {
+    if (sym(arg) !== 'False') {
       allFalse = false;
       break;
     }
@@ -352,47 +377,51 @@ export function toNNF(
 
   // Base cases
   if (!op) return expr;
-  if (expr.symbol === 'True' || expr.symbol === 'False') return expr;
+  if (sym(expr) === 'True' || sym(expr) === 'False') return expr;
 
   // Handle Not
   if (op === 'Not') {
-    const inner = expr.op1;
+    const inner = fnOp1(expr);
     if (!inner) return expr;
 
     const innerOp = inner.operator;
 
     // Double negation: ¬¬A → A
     if (innerOp === 'Not') {
-      return toNNF(inner.op1, ce);
+      return toNNF(fnOp1(inner)!, ce);
     }
 
     // De Morgan's law: ¬(A ∧ B) → (¬A ∨ ¬B)
     if (innerOp === 'And') {
-      const negatedOps = inner.ops!.map((x) => toNNF(ce._fn('Not', [x]), ce));
+      const negatedOps = fnOps(inner)!.map((x) =>
+        toNNF(ce._fn('Not', [x]), ce)
+      );
       return ce._fn('Or', negatedOps);
     }
 
     // De Morgan's law: ¬(A ∨ B) → (¬A ∧ ¬B)
     if (innerOp === 'Or') {
-      const negatedOps = inner.ops!.map((x) => toNNF(ce._fn('Not', [x]), ce));
+      const negatedOps = fnOps(inner)!.map((x) =>
+        toNNF(ce._fn('Not', [x]), ce)
+      );
       return ce._fn('And', negatedOps);
     }
 
     // ¬True → False, ¬False → True
-    if (inner.symbol === 'True') return ce.False;
-    if (inner.symbol === 'False') return ce.True;
+    if (sym(inner) === 'True') return ce.False;
+    if (sym(inner) === 'False') return ce.True;
 
     // Negation of implication: ¬(A → B) → (A ∧ ¬B)
     if (innerOp === 'Implies') {
-      const a = inner.op1;
-      const b = inner.op2;
+      const a = fnOp1(inner)!;
+      const b = fnOp2(inner)!;
       return toNNF(ce._fn('And', [a, ce._fn('Not', [b])]), ce);
     }
 
     // Negation of equivalence: ¬(A ↔ B) → (A ∧ ¬B) ∨ (¬A ∧ B)
     if (innerOp === 'Equivalent') {
-      const a = inner.op1;
-      const b = inner.op2;
+      const a = fnOp1(inner)!;
+      const b = fnOp2(inner)!;
       return toNNF(
         ce._fn('Or', [
           ce._fn('And', [a, ce._fn('Not', [b])]),
@@ -404,10 +433,10 @@ export function toNNF(
 
     // Negation of Xor: ¬(A ⊕ B) ≡ A ↔ B ≡ (A ∧ B) ∨ (¬A ∧ ¬B)
     if (innerOp === 'Xor') {
-      const ops = inner.ops!;
-      if (ops.length === 2) {
-        const a = ops[0];
-        const b = ops[1];
+      const innerOps = fnOps(inner)!;
+      if (innerOps.length === 2) {
+        const a = innerOps[0];
+        const b = innerOps[1];
         return toNNF(
           ce._fn('Or', [
             ce._fn('And', [a, b]),
@@ -422,12 +451,12 @@ export function toNNF(
 
     // Negation of Nand: ¬NAND(A, B) ≡ A ∧ B
     if (innerOp === 'Nand') {
-      return toNNF(ce._fn('And', inner.ops!), ce);
+      return toNNF(ce._fn('And', fnOps(inner)!), ce);
     }
 
     // Negation of Nor: ¬NOR(A, B) ≡ A ∨ B
     if (innerOp === 'Nor') {
-      return toNNF(ce._fn('Or', inner.ops!), ce);
+      return toNNF(ce._fn('Or', fnOps(inner)!), ce);
     }
 
     // Literal: ¬x stays as is
@@ -436,15 +465,15 @@ export function toNNF(
 
   // Handle Implies: A → B ≡ ¬A ∨ B
   if (op === 'Implies') {
-    const a = expr.op1;
-    const b = expr.op2;
+    const a = fnOp1(expr)!;
+    const b = fnOp2(expr)!;
     return toNNF(ce._fn('Or', [ce._fn('Not', [a]), b]), ce);
   }
 
   // Handle Equivalent: A ↔ B ≡ (A → B) ∧ (B → A) ≡ (¬A ∨ B) ∧ (¬B ∨ A)
   if (op === 'Equivalent') {
-    const a = expr.op1;
-    const b = expr.op2;
+    const a = fnOp1(expr)!;
+    const b = fnOp2(expr)!;
     return toNNF(
       ce._fn('And', [
         ce._fn('Or', [ce._fn('Not', [a]), b]),
@@ -457,10 +486,10 @@ export function toNNF(
   // Handle Xor: A ⊕ B ≡ (A ∨ B) ∧ (¬A ∨ ¬B)
   // For n-ary Xor, we process pairwise
   if (op === 'Xor') {
-    const ops = expr.ops!;
-    if (ops.length === 2) {
-      const a = ops[0];
-      const b = ops[1];
+    const exprOps = fnOps(expr)!;
+    if (exprOps.length === 2) {
+      const a = exprOps[0];
+      const b = exprOps[1];
       return toNNF(
         ce._fn('And', [
           ce._fn('Or', [a, b]),
@@ -470,32 +499,32 @@ export function toNNF(
       );
     }
     // For n-ary Xor, reduce: Xor(a, b, c) = Xor(Xor(a, b), c)
-    if (ops.length > 2) {
-      const first = ce._fn('Xor', [ops[0], ops[1]]);
-      const rest = ops.slice(2);
+    if (exprOps.length > 2) {
+      const first = ce._fn('Xor', [exprOps[0], exprOps[1]]);
+      const rest = exprOps.slice(2);
       return toNNF(ce._fn('Xor', [first, ...rest]), ce);
     }
-    if (ops.length === 1) return toNNF(ops[0], ce);
+    if (exprOps.length === 1) return toNNF(exprOps[0], ce);
     return ce.False; // Empty Xor
   }
 
   // Handle Nand: NAND(A, B) ≡ ¬(A ∧ B) ≡ ¬A ∨ ¬B
   if (op === 'Nand') {
-    const ops = expr.ops!;
+    const exprOps = fnOps(expr)!;
     // NAND(a, b, c, ...) = NOT(AND(a, b, c, ...))
-    return toNNF(ce._fn('Not', [ce._fn('And', ops)]), ce);
+    return toNNF(ce._fn('Not', [ce._fn('And', exprOps)]), ce);
   }
 
   // Handle Nor: NOR(A, B) ≡ ¬(A ∨ B) ≡ ¬A ∧ ¬B
   if (op === 'Nor') {
-    const ops = expr.ops!;
+    const exprOps = fnOps(expr)!;
     // NOR(a, b, c, ...) = NOT(OR(a, b, c, ...))
-    return toNNF(ce._fn('Not', [ce._fn('Or', ops)]), ce);
+    return toNNF(ce._fn('Not', [ce._fn('Or', exprOps)]), ce);
   }
 
   // Recursively process And/Or
   if (op === 'And' || op === 'Or') {
-    const nnfOps = expr.ops!.map((x) => toNNF(x, ce));
+    const nnfOps = fnOps(expr)!.map((x) => toNNF(x, ce));
     return ce._fn(op, nnfOps);
   }
 
@@ -516,7 +545,7 @@ function distributeOrOverAnd(
     if (op === 'And') {
       return ce._fn(
         'And',
-        expr.ops!.map((x) => distributeOrOverAnd(x, ce))
+        fnOps(expr)!.map((x) => distributeOrOverAnd(x, ce))
       );
     }
     return expr;
@@ -524,9 +553,9 @@ function distributeOrOverAnd(
 
   // Collect all operands, flattening nested Ors
   const orOperands: BoxedExpression[] = [];
-  for (const operand of expr.ops!) {
+  for (const operand of fnOps(expr)!) {
     if (operand.operator === 'Or') {
-      orOperands.push(...operand.ops!);
+      orOperands.push(...fnOps(operand)!);
     } else {
       orOperands.push(operand);
     }
@@ -550,7 +579,7 @@ function distributeOrOverAnd(
   // Distribute: (A ∧ B) ∨ C → (A ∨ C) ∧ (B ∨ C)
   const distributed = ce._fn(
     'And',
-    andExpr.ops!.map((x) => ce._fn('Or', [x, otherOr]))
+    fnOps(andExpr)!.map((x) => ce._fn('Or', [x, otherOr]))
   );
 
   // Recursively distribute
@@ -588,7 +617,7 @@ function distributeAndOverOr(
     if (op === 'Or') {
       return ce._fn(
         'Or',
-        expr.ops!.map((x) => distributeAndOverOr(x, ce))
+        fnOps(expr)!.map((x) => distributeAndOverOr(x, ce))
       );
     }
     return expr;
@@ -596,9 +625,9 @@ function distributeAndOverOr(
 
   // Collect all operands, flattening nested Ands
   const andOperands: BoxedExpression[] = [];
-  for (const operand of expr.ops!) {
+  for (const operand of fnOps(expr)!) {
     if (operand.operator === 'And') {
-      andOperands.push(...operand.ops!);
+      andOperands.push(...fnOps(operand)!);
     } else {
       andOperands.push(operand);
     }
@@ -624,7 +653,7 @@ function distributeAndOverOr(
   // Distribute: (A ∨ B) ∧ C → (A ∧ C) ∨ (B ∧ C)
   const distributed = ce._fn(
     'Or',
-    orExpr.ops!.map((x) => ce._fn('And', [x, otherAnd]))
+    fnOps(orExpr)!.map((x) => ce._fn('And', [x, otherAnd]))
   );
 
   // Recursively distribute
@@ -657,17 +686,16 @@ export function extractVariables(expr: BoxedExpression): string[] {
 
   function visit(e: BoxedExpression) {
     // Skip True/False constants
-    if (e.symbol === 'True' || e.symbol === 'False') return;
+    if (sym(e) === 'True' || sym(e) === 'False') return;
 
     // If it's a symbol (variable), add it
-    // Note: BoxedSymbol has operator === 'Symbol'
-    if (e.symbol && e.operator === 'Symbol') {
+    if (isBoxedSymbol(e) && e.operator === 'Symbol') {
       variables.add(e.symbol);
       return;
     }
 
     // Recursively process operands
-    if (e.ops) {
+    if (isBoxedFunction(e)) {
       for (const op of e.ops) {
         visit(op);
       }

@@ -6,6 +6,7 @@
  */
 
 import type { BoxedExpression } from '../global-types';
+import { isBoxedFunction, isBoxedNumber, isBoxedSymbol } from '../boxed-expression/type-guards';
 
 const TRIG_FUNCS = new Set(['Sin', 'Cos', 'Tan', 'Cot', 'Sec', 'Csc']);
 
@@ -20,7 +21,7 @@ export function countTrigFunctions(expr: BoxedExpression): number {
     count = 1;
   }
 
-  if (expr.ops) {
+  if (isBoxedFunction(expr)) {
     for (const op of expr.ops) {
       count += countTrigFunctions(op);
     }
@@ -35,12 +36,12 @@ export function countTrigFunctions(expr: BoxedExpression): number {
  */
 export function countLeaves(expr: BoxedExpression): number {
   // Symbols and numbers are leaves
-  if (expr.symbol) return 1;
-  if (expr.isNumberLiteral) return 1;
+  if (isBoxedSymbol(expr)) return 1;
+  if (isBoxedNumber(expr)) return 1;
 
   // For functions, count the operator name + operands
   let count = 1; // The function name itself
-  if (expr.ops) {
+  if (isBoxedFunction(expr)) {
     for (const op of expr.ops) {
       count += countLeaves(op);
     }

@@ -1,6 +1,7 @@
 import type { BoxedExpression } from '../global-types';
 
 import { isRelationalOperator } from '../latex-syntax/utils';
+import { isBoxedNumber, isBoxedFunction } from './type-guards';
 import { NumericValue } from '../numeric-value/types';
 
 import { Product, commonTerms, mul } from './arithmetic-mul-div';
@@ -13,24 +14,26 @@ export function together(op: BoxedExpression): BoxedExpression {
   const h = op.operator;
 
   // Thread over inequality
-  if (isRelationalOperator(h)) return ce.function(h, op.ops!.map(together));
+  if (isBoxedFunction(op)) {
+    if (isRelationalOperator(h)) return ce.function(h, op.ops.map(together));
 
-  if (h === 'Divide') return op.ops![0].div(op.ops![1]);
+    if (h === 'Divide') return op.ops[0].div(op.ops[1]);
 
-  if (h === 'Negate') return together(op.ops![0]).neg();
+    if (h === 'Negate') return together(op.ops[0]).neg();
 
-  if (h === 'Add') {
-    const [numer, denom] = op.ops!.reduce(
-      (acc, x) => {
-        if (x.operator === 'Divide') {
-          acc[0].push(x.ops![0]);
-          acc[1].push(x.ops![1]);
-        } else acc[0].push(x);
-        return acc;
-      },
-      [[], []] as BoxedExpression[][]
-    );
-    return add(...numer).div(add(...denom));
+    if (h === 'Add') {
+      const [numer, denom] = op.ops.reduce(
+        (acc, x) => {
+          if (isBoxedFunction(x) && x.operator === 'Divide') {
+            acc[0].push(x.ops[0]);
+            acc[1].push(x.ops[1]);
+          } else acc[0].push(x);
+          return acc;
+        },
+        [[], []] as BoxedExpression[][]
+      );
+      return add(...numer).div(add(...denom));
+    }
   }
 
   return op;
@@ -55,9 +58,9 @@ export function factorPerfectSquare(
   const ce = expr.engine;
 
   // Must be an Add expression
-  if (expr.operator !== 'Add') return null;
+  if (!isBoxedFunction(expr) || expr.operator !== 'Add') return null;
 
-  const terms = expr.ops!;
+  const terms = expr.ops;
 
   // Perfect square trinomial must have exactly 3 terms
   if (terms.length !== 3) return null;
@@ -127,7 +130,7 @@ function extractSquareRoot(
 
   // Check if it's a Number with a radical component (like √8)
   // These are represented as Number with numericValue.radical property
-  if (sqrt.isNumberLiteral && sqrt.numericValue) {
+  if (isBoxedNumber(sqrt)) {
     const nv = sqrt.numericValue as any;
     // If radical exists and is not 1, it's an irrational sqrt
     if (nv.radical !== undefined && nv.radical !== 1) return null;
@@ -136,17 +139,17 @@ function extractSquareRoot(
   // For expressions with Abs, extract the inner value since we're looking for
   // the algebraic base (we'll check signs separately)
   // e.g., 2|x| → 2x for matching purposes
-  if (sqrt.operator === 'Abs') {
+  if (isBoxedFunction(sqrt) && sqrt.operator === 'Abs') {
     return sqrt.op1;
   }
 
   // Handle Multiply(coefficient, Abs(...))
-  if (sqrt.operator === 'Multiply') {
-    const absFactors = sqrt.ops!.filter((op) => op.operator === 'Abs');
+  if (isBoxedFunction(sqrt) && sqrt.operator === 'Multiply') {
+    const absFactors = sqrt.ops.filter((op) => op.operator === 'Abs');
     if (absFactors.length > 0) {
       // Replace Abs with its inner value
-      const newOps = sqrt.ops!.map((op) =>
-        op.operator === 'Abs' ? op.op1! : op
+      const newOps = sqrt.ops.map((op) =>
+        isBoxedFunction(op) && op.operator === 'Abs' ? op.op1 : op
       );
       return ce.box(['Multiply', ...newOps.map((op) => op.json)]);
     }
@@ -169,9 +172,9 @@ export function factorDifferenceOfSquares(
   const ce = expr.engine;
 
   // Must be an Add expression with exactly 2 terms (one positive, one negative)
-  if (expr.operator !== 'Add') return null;
+  if (!isBoxedFunction(expr) || expr.operator !== 'Add') return null;
 
-  const terms = expr.ops!;
+  const terms = expr.ops;
   if (terms.length !== 2) return null;
 
   // Try to extract square roots of both terms
@@ -183,20 +186,20 @@ export function factorDifferenceOfSquares(
 
   for (const term of terms) {
     // Check if term is negative
-    let isNeg = term.operator === 'Negate';
-    let absTerm = isNeg ? term.op1! : term;
+    let isNeg = isBoxedFunction(term) && term.operator === 'Negate';
+    let absTerm = isNeg && isBoxedFunction(term) ? term.op1 : term;
 
     // Also handle negative numeric literals
-    if (!isNeg && term.isNumberLiteral && term.isNegative === true) {
+    if (!isNeg && isBoxedNumber(term) && term.isNegative === true) {
       isNeg = true;
       absTerm = term.neg(); // Get the absolute value
     }
 
     // Also handle negative terms from Multiply with negative coefficient
-    if (!isNeg && term.operator === 'Multiply') {
-      const ops = term.ops!;
+    if (!isNeg && isBoxedFunction(term) && term.operator === 'Multiply') {
+      const ops = term.ops;
       // Check if first operand is negative number
-      if (ops[0].isNumberLiteral && ops[0].isNegative === true) {
+      if (isBoxedNumber(ops[0]) && ops[0].isNegative === true) {
         isNeg = true;
         // Create positive version by negating the coefficient
         const newOps = [ops[0].neg(), ...ops.slice(1)];
@@ -269,7 +272,7 @@ export function factorQuadratic(
   if (sqrtDisc.operator === 'Sqrt') return null;
 
   // Check if it's a Number with a radical component (like √8)
-  if (sqrtDisc.isNumberLiteral && sqrtDisc.numericValue) {
+  if (isBoxedNumber(sqrtDisc)) {
     const nv = sqrtDisc.numericValue as any;
     // If radical exists and is not 1, it's an irrational sqrt
     if (nv.radical !== undefined && nv.radical !== 1) return null;
@@ -284,12 +287,12 @@ export function factorQuadratic(
   // Check if roots have radical components
   const checkRadical = (expr: BoxedExpression): boolean => {
     if (expr.operator === 'Sqrt') return true;
-    if (expr.isNumberLiteral && expr.numericValue) {
+    if (isBoxedNumber(expr)) {
       const nv = expr.numericValue as any;
       if (nv.radical !== undefined && nv.radical !== 1) return true;
     }
     // Check in subexpressions
-    if (expr.ops) {
+    if (isBoxedFunction(expr)) {
       for (const op of expr.ops) {
         if (checkRadical(op)) return true;
       }
@@ -352,7 +355,7 @@ export function factorPolynomial(
  */
 export function factor(expr: BoxedExpression): BoxedExpression {
   const h = expr.operator;
-  if (isRelationalOperator(h)) {
+  if (isBoxedFunction(expr) && isRelationalOperator(h)) {
     let lhs = Product.from(expr.op1);
     let rhs = Product.from(expr.op2);
     const [coef, common] = commonTerms(lhs, rhs);
@@ -381,15 +384,15 @@ export function factor(expr: BoxedExpression): BoxedExpression {
     return expr.engine.function(h, [lhs.asExpression(), rhs.asExpression()]);
   }
 
-  if (h === 'Negate') return factor(expr.ops![0]).neg();
+  if (isBoxedFunction(expr) && h === 'Negate') return factor(expr.ops[0]).neg();
 
-  if (h === 'Add') {
+  if (isBoxedFunction(expr) && h === 'Add') {
     const ce = expr.engine;
     let common: NumericValue | undefined = undefined;
 
     // Calculate the GCD of all coefficients
     const terms: { coeff: NumericValue; term: BoxedExpression }[] = [];
-    for (const op of expr.ops!) {
+    for (const op of expr.ops) {
       const [coeff, term] = op.toNumericValue();
       common = common ? common.gcd(coeff) : coeff;
       if (!coeff.isZero) terms.push({ coeff, term });

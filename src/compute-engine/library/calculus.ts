@@ -2,6 +2,7 @@ import type { BoxedExpression, SymbolDefinitions } from '../global-types';
 
 import { checkType } from '../boxed-expression/validate';
 import { hasSymbolicTranscendental } from '../boxed-expression/utils';
+import { isBoxedFunction, sym } from '../boxed-expression/type-guards';
 
 import {
   applicableN1,
@@ -150,12 +151,13 @@ volumes
         const params = ops.slice(1);
         if (params.length === 0) f = undefined;
         for (const param of params) {
-          if (!param.symbol) {
+          const paramSym = sym(param);
+          if (!paramSym) {
             f = undefined;
             break;
           }
-          if (f && f.operator === 'Function') f = f.op1;
-          f = differentiate(f!, param.symbol);
+          if (f && f.operator === 'Function' && isBoxedFunction(f)) f = f.op1;
+          f = differentiate(f!, paramSym);
           if (f === undefined) break;
         }
         f = f?.canonical;
@@ -163,7 +165,7 @@ volumes
         if (f?.operator === 'D') return f;
         // Avoid evaluating symbolic derivative applications like Digamma'(x)
         // which would incorrectly evaluate to 0
-        if (f?.operator === 'Apply' && f.op1?.operator === 'Derivative')
+        if (f?.operator === 'Apply' && isBoxedFunction(f) && f.op1?.operator === 'Derivative')
           return f;
         // If the result contains symbolic transcendentals (like ln(2)),
         // return it without full evaluation to preserve the symbolic form
@@ -214,11 +216,12 @@ volumes
           // If a numeric approximation is requested, equivalent to NIntegrate
           const f = ops[0];
           const firstLimit = ops[1];
+          if (!isBoxedFunction(firstLimit)) return undefined;
           const [lower, upper] = [firstLimit.op2.N().re, firstLimit.op3.N().re];
           if (isNaN(lower) || isNaN(upper)) return undefined;
 
           // Get the integration variable from the limits
-          const variable = firstLimit.op1.symbol ?? 'x';
+          const variable = sym(firstLimit.op1) ?? 'x';
 
           // Compile the integrand as a function.
           // If it's already a Function expression, compile directly.
@@ -243,7 +246,7 @@ volumes
         }
 
         let expr = ops[0];
-        const argNames = expr.ops?.slice(1)?.map((x) => x.symbol) ?? [];
+        const argNames = isBoxedFunction(expr) ? expr.ops.slice(1).map((x) => sym(x)) : [];
 
         const limitsSequence = ops.slice(1);
 
@@ -254,8 +257,10 @@ volumes
 
         let isIndefinite = true;
         for (let i = limitsSequence.length - 1; i >= 0; i--) {
-          const [varExpr, lower, upper] = limitsSequence[i].ops!;
-          let variable = varExpr.symbol;
+          if (!isBoxedFunction(limitsSequence[i])) continue;
+          const limitFn = limitsSequence[i] as BoxedExpression & import('../global-types').FunctionInterface;
+          const [varExpr, lower, upper] = limitFn.ops;
+          let variable = sym(varExpr);
 
           // Default variable name if missing
           if ((!variable || variable === 'Nothing') && i < argNames.length)
@@ -266,7 +271,7 @@ volumes
 
           if (antideriv.operator !== 'Integrate') {
             const fAntideriv = antideriv; // ce.box(['Function', antideriv.op1, variable]);
-            if (lower.symbol === 'Nothing' && upper.symbol === 'Nothing') {
+            if (sym(lower) === 'Nothing' && sym(upper) === 'Nothing') {
               expr = fAntideriv;
             } else {
               isIndefinite = false;
@@ -274,7 +279,7 @@ volumes
               expr = ce.box(['EvaluateAt', F, lower, upper]);
             }
           } else {
-            if (lower.symbol === 'Nothing' && upper.symbol === 'Nothing') {
+            if (sym(lower) === 'Nothing' && sym(upper) === 'Nothing') {
               expr = antideriv;
             } else {
               isIndefinite = false;

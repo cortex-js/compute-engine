@@ -50,6 +50,7 @@ import { flatten } from './flatten';
 import { isValueDef } from './utils';
 import { canonicalNegate } from './negate';
 import { canonical } from './canonical-utils';
+import { isBoxedNumber, isBoxedFunction } from './type-guards';
 // Dynamic import to avoid circular dependency
 
 /**
@@ -274,9 +275,10 @@ export function boxFunction(
       if (typeof op1 === 'number') return ce.number(-op1, options);
       if (op1 instanceof Decimal) return ce.number(op1.neg(), options);
       const boxedop1 = ce.box(op1, options);
-      const num = boxedop1.numericValue;
-      if (num !== undefined)
+      if (isBoxedNumber(boxedop1)) {
+        const num = boxedop1.numericValue;
         return ce.number(typeof num === 'number' ? -num : num.neg(), options);
+      }
       ops = [boxedop1];
     }
   }
@@ -634,11 +636,11 @@ function makeCanonicalFunction(
   //
   if (args.length === 1 && args[0].operator === name) {
     // f(f(x)) -> x
-    if (opDef.involution) return args[0].op1;
+    if (opDef.involution && isBoxedFunction(args[0])) return args[0].op1;
 
     // f(f(x)) -> f(x)
-    if (opDef.idempotent)
-      return new BoxedFunction(ce, name, xs[0].ops!, {
+    if (opDef.idempotent && isBoxedFunction(xs[0]))
+      return new BoxedFunction(ce, name, xs[0].ops, {
         metadata,
         canonical: true,
         scope,

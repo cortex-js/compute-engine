@@ -10,6 +10,7 @@ import {
   SymbolDefinitions,
   Sign,
 } from '../global-types';
+import { isBoxedFunction, isBoxedNumber, isBoxedString, isBoxedSymbol } from '../boxed-expression/type-guards';
 
 export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
   {
@@ -66,22 +67,23 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
       complexity: 8200,
       signature: '(value, tuple) -> value',
       type: ([value, shape]) => {
+        const shapeOps = isBoxedFunction(shape) ? shape.ops : undefined;
         if (value.isNumber) {
           // Scalar input
           return parseType(
-            `list<number^${shape.ops!.map((x) => x.toString()).join('x')}>`
+            `list<number^${shapeOps?.map((x) => x.toString()).join('x') ?? ''}>`
           );
         }
         if (!value.type.matches('list')) return 'nothing';
         const col = value.type.type as ListType;
         if (!isSubtype(col.elements, 'number')) return 'nothing';
         return parseType(
-          `list<number^${shape.ops!.map((x) => x.toString()).join('x')}>`
+          `list<number^${shapeOps?.map((x) => x.toString()).join('x') ?? ''}>`
         );
       },
       evaluate: (ops, { engine: ce }): BoxedExpression | undefined => {
         let op1 = ops[0].evaluate();
-        const targetShape = ops[1].ops?.map((op) => op.re) ?? [];
+        const targetShape = isBoxedFunction(ops[1]) ? ops[1].ops.map((op) => op.re) : [];
 
         // Handle empty shape tuple - return scalar
         if (targetShape.length === 0) {
@@ -292,7 +294,7 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
 
         // Pseudoinverse of scalar is 1/scalar (or 0 if scalar is 0)
         if (op1.isNumber) {
-          if (op1.isZero) return ce.Zero;
+          if (op1.is(0)) return ce.Zero;
           return ce.box(['Divide', 1, op1]).evaluate();
         }
 
@@ -383,8 +385,10 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
           if (result === undefined) return undefined;
 
           // For scalar result (rank 2), box the value
-          if (typeof result === 'number' || typeof result === 'boolean')
+          if (typeof result === 'number')
             return ce.box(result);
+          if (typeof result === 'boolean')
+            return result ? ce.True : ce.False;
 
           // Check if it's a primitive value that needs boxing
           if (!('expression' in result)) return ce.box(result);
@@ -664,13 +668,15 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
         // Determine norm type
         let normType: number | string = 2; // Default to L2/Frobenius
         if (normTypeExpr) {
+          const normStr = isBoxedString(normTypeExpr) ? normTypeExpr.string : undefined;
+          const normSym = isBoxedSymbol(normTypeExpr) ? normTypeExpr.symbol : undefined;
           if (
-            normTypeExpr.string === 'Infinity' ||
-            normTypeExpr.symbol === 'Infinity' ||
+            normStr === 'Infinity' ||
+            normSym === 'Infinity' ||
             normTypeExpr.re === Infinity
           ) {
             normType = 'infinity';
-          } else if (normTypeExpr.string === 'Frobenius') {
+          } else if (normStr === 'Frobenius') {
             normType = 'frobenius';
           } else if (normTypeExpr.re !== undefined) {
             normType = normTypeExpr.re;
@@ -887,7 +893,7 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
         const eigenvaluesExpr = ce.box(['Eigenvalues', M]).evaluate();
         if (
           eigenvaluesExpr.operator !== 'List' ||
-          !eigenvaluesExpr.ops ||
+          !isBoxedFunction(eigenvaluesExpr) ||
           eigenvaluesExpr.ops.length === 0
         ) {
           return undefined;
@@ -2006,8 +2012,9 @@ function canonicalMatrix(
   const operator = 'Matrix';
   if (ops.length === 0) return ce._fn(operator, []);
 
+  const canonOp0 = ops[0].canonical;
   const body =
-    ops[0].operator === 'Vector' ? ops[0].canonical.ops![0] : ops[0].canonical;
+    ops[0].operator === 'Vector' && isBoxedFunction(canonOp0) ? canonOp0.ops[0] : canonOp0;
   const delims = ops[1]?.canonical;
   const columns = ops[2]?.canonical;
 

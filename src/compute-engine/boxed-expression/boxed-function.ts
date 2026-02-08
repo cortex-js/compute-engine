@@ -24,6 +24,11 @@ import type {
 
 import { isFiniteIndexedCollection, zip } from '../collection-utils';
 import { isBoxedTensor } from './boxed-tensor';
+import {
+  isBoxedNumber,
+  isBoxedFunction,
+  isBoxedString,
+} from './type-guards';
 import { Type } from '../../common/type/types';
 import { BoxedType } from '../../common/type/boxed-type';
 import { parseType } from '../../common/type/parse';
@@ -91,6 +96,8 @@ export class BoxedFunction
   extends _BoxedExpression
   implements FunctionInterface
 {
+  override readonly _kind = 'function';
+
   // The operator of the function expression
   private readonly _operator: string;
 
@@ -247,7 +254,9 @@ export class BoxedFunction
   }
 
   get json(): Expression {
-    return [this._operator, ...this.structural.ops!.map((x) => x.json)];
+    const s = this.structural;
+    const ops = isBoxedFunction(s) ? s.ops : this._ops;
+    return [this._operator, ...ops.map((x) => x.json)];
   }
 
   get operator(): string {
@@ -303,7 +312,8 @@ export class BoxedFunction
       if (!def.associative) ys = xs;
       else {
         for (const x of xs) {
-          if (x.operator === this.operator) ys.push(...x.ops!);
+          if (x.operator === this.operator && isBoxedFunction(x))
+            ys.push(...x.ops);
           else ys.push(x);
         }
       }
@@ -343,7 +353,7 @@ export class BoxedFunction
     let expr: BoxedExpression = this;
     if (expr.operator === 'Add') {
       expr = factor(this);
-      if (expr.numericValue !== undefined) {
+      if (isBoxedNumber(expr)) {
         if (typeof expr.numericValue === 'number') {
           if (Number.isInteger(expr.numericValue))
             return [ce._numericValue(expr.numericValue), ce.One];
@@ -356,7 +366,7 @@ export class BoxedFunction
     //
     // Negate
     //
-    if (expr.operator === 'Negate') {
+    if (expr.operator === 'Negate' && isBoxedFunction(expr)) {
       const [coef, rest] = expr.op1.toNumericValue();
       return [coef.neg(), rest];
     }
@@ -364,10 +374,10 @@ export class BoxedFunction
     //
     // Multiply
     //
-    if (expr.operator === 'Multiply') {
+    if (expr.operator === 'Multiply' && isBoxedFunction(expr)) {
       const rest: BoxedExpression[] = [];
       let coef = ce._numericValue(1);
-      for (const arg of expr.ops!) {
+      for (const arg of expr.ops) {
         const [c, r] = arg.toNumericValue();
         coef = coef.mul(c);
         if (!r.is(1)) rest.push(r);
@@ -380,7 +390,7 @@ export class BoxedFunction
     //
     // Divide
     //
-    if (expr.operator === 'Divide') {
+    if (expr.operator === 'Divide' && isBoxedFunction(expr)) {
       const [coef1, numer] = expr.op1.toNumericValue();
       const [coef2, denom] = expr.op2.toNumericValue();
       const coef = coef1.div(coef2);
@@ -391,9 +401,9 @@ export class BoxedFunction
     //
     // Power/Sqrt/Root
     //
-    if (expr.operator === 'Power') {
+    if (expr.operator === 'Power' && isBoxedFunction(expr)) {
       // We can only extract a coef if the exponent is a literal
-      if (expr.op2.numericValue === undefined)
+      if (!isBoxedNumber(expr.op2))
         return [ce._numericValue(1), this];
 
       // eslint-disable-next-line prefer-const
@@ -409,7 +419,7 @@ export class BoxedFunction
       return [ce._numericValue(1), this];
     }
 
-    if (expr.operator === 'Sqrt') {
+    if (expr.operator === 'Sqrt' && isBoxedFunction(expr)) {
       const [coef, rest] = expr.op1.toNumericValue();
       // @fastpasth
       if (rest.is(1) || rest.is(0)) {
@@ -419,7 +429,7 @@ export class BoxedFunction
       return [coef.sqrt(), ce.function('Sqrt', [rest])];
     }
 
-    if (expr.operator === 'Root') {
+    if (expr.operator === 'Root' && isBoxedFunction(expr)) {
       const exp = expr.op2.re;
       if (isNaN(exp) || expr.op2.im !== 0) return [ce._numericValue(1), this];
 
@@ -431,7 +441,7 @@ export class BoxedFunction
     //
     // Abs
     //
-    if (expr.operator === 'Abs') {
+    if (expr.operator === 'Abs' && isBoxedFunction(expr)) {
       const [coef, rest] = expr.op1.toNumericValue();
       return [coef.abs(), ce.function('Abs', [rest])];
     }
@@ -1048,7 +1058,7 @@ export class BoxedFunction
     if (typeof index === 'string')
       return this.operatorDefinition?.collection?.at?.(this, index);
 
-    if (!index.string) return undefined;
+    if (!isBoxedString(index)) return undefined;
     return this.operatorDefinition?.collection?.at?.(this, index.string);
   }
 

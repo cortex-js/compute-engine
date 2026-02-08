@@ -1,4 +1,5 @@
 import type { BoxedExpression, RuleStep } from '../global-types';
+import { isBoxedFunction, isBoxedNumber } from '../boxed-expression/type-guards';
 
 /**
  * Division simplification rules consolidated from simplify-rules.ts.
@@ -15,7 +16,7 @@ import type { BoxedExpression, RuleStep } from '../global-types';
  */
 
 export function simplifyDivide(x: BoxedExpression): RuleStep | undefined {
-  if (x.operator !== 'Divide') return undefined;
+  if (x.operator !== 'Divide' || !isBoxedFunction(x)) return undefined;
 
   const num = x.op1;
   const denom = x.op2;
@@ -36,7 +37,7 @@ export function simplifyDivide(x: BoxedExpression): RuleStep | undefined {
   if (
     num.is(0) &&
     denom.is(0) === false &&
-    (denom.isNumberLiteral || denom.symbols.length !== 0)
+    (isBoxedNumber(denom) || denom.symbols.length !== 0)
   ) {
     return { value: ce.Zero, because: '0/a -> 0' };
   }
@@ -46,7 +47,7 @@ export function simplifyDivide(x: BoxedExpression): RuleStep | undefined {
     num.isSame(denom) &&
     num.is(0) === false &&
     num.isInfinity !== true &&
-    (num.isNumberLiteral || num.symbols.length !== 0)
+    (isBoxedNumber(num) || num.symbols.length !== 0)
   ) {
     return { value: ce.One, because: 'a/a -> 1' };
   }
@@ -57,7 +58,7 @@ export function simplifyDivide(x: BoxedExpression): RuleStep | undefined {
   }
 
   // Check if denominator is a Divide expression
-  if (denom.operator === 'Divide') {
+  if (denom.operator === 'Divide' && isBoxedFunction(denom)) {
     const denomNum = denom.op1;
     const denomDenom = denom.op2;
 

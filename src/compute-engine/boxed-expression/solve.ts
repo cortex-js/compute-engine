@@ -7,6 +7,7 @@ import type {
   IComputeEngine as ComputeEngine,
   Rule,
 } from '../global-types';
+import { isBoxedNumber, isBoxedFunction, isBoxedSymbol } from './type-guards';
 
 //
 // Solve Rules
@@ -425,7 +426,7 @@ export const UNIVARIATE_ROOTS: Rule[] = [
       const b = sub.__b;
       if (!a || a.is(0)) return false;
       const ratio = b.div(a).neg();
-      const val = ratio.numericValue;
+      const val = isBoxedNumber(ratio) ? ratio.numericValue : undefined;
       if (val === undefined) return true; // Allow symbolic ratios
       if (typeof val === 'number') return Math.abs(val) <= 1;
       return true;
@@ -447,7 +448,7 @@ export const UNIVARIATE_ROOTS: Rule[] = [
       const b = sub.__b;
       if (!a || a.is(0)) return false;
       const ratio = b.div(a).neg();
-      const val = ratio.numericValue;
+      const val = isBoxedNumber(ratio) ? ratio.numericValue : undefined;
       if (val === undefined) return true;
       if (typeof val === 'number') return Math.abs(val) <= 1;
       return true;
@@ -462,7 +463,7 @@ export const UNIVARIATE_ROOTS: Rule[] = [
     condition: (sub) => {
       if (!filter(sub)) return false;
       const b = sub.__b;
-      const val = b.numericValue;
+      const val = isBoxedNumber(b) ? b.numericValue : undefined;
       if (val === undefined) return true;
       if (typeof val === 'number') return Math.abs(val) <= 1;
       return true;
@@ -477,7 +478,7 @@ export const UNIVARIATE_ROOTS: Rule[] = [
     condition: (sub) => {
       if (!filter(sub)) return false;
       const b = sub.__b;
-      const val = b.numericValue;
+      const val = isBoxedNumber(b) ? b.numericValue : undefined;
       if (val === undefined) return true;
       if (typeof val === 'number') return Math.abs(val) <= 1;
       return true;
@@ -496,7 +497,7 @@ export const UNIVARIATE_ROOTS: Rule[] = [
       const b = sub.__b;
       if (!a || a.is(0)) return false;
       const ratio = b.div(a).neg();
-      const val = ratio.numericValue;
+      const val = isBoxedNumber(ratio) ? ratio.numericValue : undefined;
       if (val === undefined) return true;
       if (typeof val === 'number') return Math.abs(val) <= 1;
       return true;
@@ -514,7 +515,7 @@ export const UNIVARIATE_ROOTS: Rule[] = [
       const b = sub.__b;
       if (!a || a.is(0)) return false;
       const ratio = b.div(a).neg();
-      const val = ratio.numericValue;
+      const val = isBoxedNumber(ratio) ? ratio.numericValue : undefined;
       if (val === undefined) return true;
       if (typeof val === 'number') return Math.abs(val) <= 1;
       return true;
@@ -529,7 +530,7 @@ export const UNIVARIATE_ROOTS: Rule[] = [
     condition: (sub) => {
       if (!filter(sub)) return false;
       const b = sub.__b;
-      const val = b.numericValue;
+      const val = isBoxedNumber(b) ? b.numericValue : undefined;
       if (val === undefined) return true;
       if (typeof val === 'number') return Math.abs(val) <= 1;
       return true;
@@ -544,7 +545,7 @@ export const UNIVARIATE_ROOTS: Rule[] = [
     condition: (sub) => {
       if (!filter(sub)) return false;
       const b = sub.__b;
-      const val = b.numericValue;
+      const val = isBoxedNumber(b) ? b.numericValue : undefined;
       if (val === undefined) return true;
       if (typeof val === 'number') return Math.abs(val) <= 1;
       return true;
@@ -606,10 +607,10 @@ function clearDenominators(
   expr: BoxedExpression,
   _variable?: string
 ): BoxedExpression {
-  if (expr.operator !== 'Add') return expr;
+  if (expr.operator !== 'Add' || !isBoxedFunction(expr)) return expr;
 
   const ops = expr.ops;
-  if (!ops || ops.length === 0) return expr;
+  if (ops.length === 0) return expr;
 
   // Collect all non-trivial denominators
   const denominators = ops.map((op) => op.denominator).filter((d) => !d.is(1));
@@ -631,7 +632,7 @@ function clearDenominators(
       }
       // Check if one is a symbol and the other contains it (partial match)
       // This handles cases like h and h appearing multiple times
-      if (denom.symbol && existing.symbol && denom.symbol === existing.symbol) {
+      if (isBoxedSymbol(denom) && isBoxedSymbol(existing) && denom.symbol === existing.symbol) {
         isDuplicate = true;
         break;
       }
@@ -675,11 +676,11 @@ function transformSqrtLinearEquation(
   expr: BoxedExpression,
   variable: string
 ): BoxedExpression {
-  if (expr.operator !== 'Add') return expr;
+  if (expr.operator !== 'Add' || !isBoxedFunction(expr)) return expr;
 
   const ce = expr.engine;
   const ops = expr.ops;
-  if (!ops || ops.length === 0) return expr;
+  if (ops.length === 0) return expr;
 
   // Find the sqrt term(s) in the expression
   let sqrtTerm: BoxedExpression | null = null;
@@ -694,7 +695,7 @@ function transformSqrtLinearEquation(
       break;
     }
     // Check for coefficient * Sqrt(...) like 2*sqrt(x)
-    if (op.operator === 'Multiply' && op.ops) {
+    if (op.operator === 'Multiply' && isBoxedFunction(op)) {
       for (const factor of op.ops) {
         if (factor.operator === 'Sqrt') {
           // This is a more complex case (a*√f(x) + g(x) = 0)
@@ -710,6 +711,7 @@ function transformSqrtLinearEquation(
   if (!sqrtTerm || sqrtIndex < 0) return expr;
 
   // Get the argument inside the sqrt
+  if (!isBoxedFunction(sqrtTerm)) return expr;
   const sqrtArg = sqrtTerm.op1;
   if (!sqrtArg) return expr;
 
@@ -760,11 +762,11 @@ function solveTwoSqrtEquation(
   expr: BoxedExpression,
   variable: string
 ): BoxedExpression[] | null {
-  if (expr.operator !== 'Add') return null;
+  if (expr.operator !== 'Add' || !isBoxedFunction(expr)) return null;
 
   const ce = expr.engine;
   const ops = expr.ops;
-  if (!ops || ops.length < 2) return null;
+  if (ops.length < 2) return null;
 
   // Find all sqrt terms in the expression
   const sqrtTerms: {
@@ -777,21 +779,21 @@ function solveTwoSqrtEquation(
     const op = ops[i];
 
     // Check for Sqrt(...)
-    if (op.operator === 'Sqrt' && op.op1) {
+    if (op.operator === 'Sqrt' && isBoxedFunction(op) && op.op1) {
       sqrtTerms.push({ term: op, arg: op.op1, index: i });
       continue;
     }
 
     // Check for Negate(Sqrt(...))
-    if (op.operator === 'Negate' && op.op1?.operator === 'Sqrt' && op.op1.op1) {
+    if (isBoxedFunction(op) && op.operator === 'Negate' && isBoxedFunction(op.op1) && op.op1.operator === 'Sqrt' && isBoxedFunction(op.op1) && op.op1.op1) {
       sqrtTerms.push({ term: op, arg: op.op1.op1, index: i });
       continue;
     }
 
     // Check for coefficient * Sqrt(...)
-    if (op.operator === 'Multiply' && op.ops) {
+    if (op.operator === 'Multiply' && isBoxedFunction(op)) {
       for (const factor of op.ops) {
-        if (factor.operator === 'Sqrt' && factor.op1) {
+        if (factor.operator === 'Sqrt' && isBoxedFunction(factor) && factor.op1) {
           sqrtTerms.push({ term: op, arg: factor.op1, index: i });
           break;
         }
@@ -835,20 +837,22 @@ function solveTwoSqrtEquation(
   let gSign = 1;
 
   if (sqrtTerms[0].term.operator === 'Negate') fSign = -1;
-  if (sqrtTerms[0].term.operator === 'Multiply') {
+  if (sqrtTerms[0].term.operator === 'Multiply' && isBoxedFunction(sqrtTerms[0].term)) {
     // Check if coefficient is negative
-    const coef = sqrtTerms[0].term.ops?.find((o) => o.operator !== 'Sqrt');
+    const coef = sqrtTerms[0].term.ops.find((o) => o.operator !== 'Sqrt');
     if (coef?.isNegative) fSign = -1;
     // For now, only handle coefficient ±1
-    const absCoef = coef?.abs().N().numericValue;
+    const absCoefExpr = coef?.abs().N();
+    const absCoef = isBoxedNumber(absCoefExpr) ? absCoefExpr.numericValue : undefined;
     if (absCoef !== 1 && absCoef !== undefined) return null;
   }
 
   if (sqrtTerms[1].term.operator === 'Negate') gSign = -1;
-  if (sqrtTerms[1].term.operator === 'Multiply') {
-    const coef = sqrtTerms[1].term.ops?.find((o) => o.operator !== 'Sqrt');
+  if (sqrtTerms[1].term.operator === 'Multiply' && isBoxedFunction(sqrtTerms[1].term)) {
+    const coef = sqrtTerms[1].term.ops.find((o) => o.operator !== 'Sqrt');
     if (coef?.isNegative) gSign = -1;
-    const absCoef = coef?.abs().N().numericValue;
+    const absCoefExpr = coef?.abs().N();
+    const absCoef = isBoxedNumber(absCoefExpr) ? absCoefExpr.numericValue : undefined;
     if (absCoef !== 1 && absCoef !== undefined) return null;
   }
 
@@ -931,7 +935,7 @@ function solveTwoSqrtEquationCore(
 
     // Check if lhs ≈ e
     const diff = lhs.sub(eVal).abs().N();
-    const diffNum = diff.numericValue;
+    const diffNum = isBoxedNumber(diff) ? diff.numericValue : undefined;
     let diffReal = 0;
     if (typeof diffNum === 'number') {
       diffReal = diffNum;
@@ -961,11 +965,11 @@ function solveNestedSqrtEquation(
   expr: BoxedExpression,
   variable: string
 ): BoxedExpression[] | null {
-  if (expr.operator !== 'Add') return null;
+  if (expr.operator !== 'Add' || !isBoxedFunction(expr)) return null;
 
   const ce = expr.engine;
   const ops = expr.ops;
-  if (!ops || ops.length === 0) return null;
+  if (ops.length === 0) return null;
 
   // Find the outer sqrt term
   let outerSqrt: BoxedExpression | null = null;
@@ -979,7 +983,7 @@ function solveNestedSqrtEquation(
     }
   }
 
-  if (!outerSqrt || sqrtIndex < 0) return null;
+  if (!outerSqrt || sqrtIndex < 0 || !isBoxedFunction(outerSqrt)) return null;
 
   // Get the argument of the outer sqrt
   const outerArg = outerSqrt.op1;
@@ -991,27 +995,31 @@ function solveNestedSqrtEquation(
   // implicitly by the replace+subs substitution below.
   let hasInnerSqrtX = false;
 
-  if (outerArg.operator === 'Add' && outerArg.ops) {
+  if (outerArg.operator === 'Add' && isBoxedFunction(outerArg)) {
     for (const term of outerArg.ops) {
       // Check for √x directly
-      if (term.operator === 'Sqrt' && term.op1?.symbol === variable) {
+      if (term.operator === 'Sqrt' && isBoxedFunction(term) && isBoxedSymbol(term.op1) && term.op1.symbol === variable) {
         hasInnerSqrtX = true;
         break;
       }
       // Check for Negate(Sqrt(x))
       if (
         term.operator === 'Negate' &&
-        term.op1?.operator === 'Sqrt' &&
-        term.op1?.op1?.symbol === variable
+        isBoxedFunction(term) &&
+        isBoxedFunction(term.op1) &&
+        term.op1.operator === 'Sqrt' &&
+        isBoxedFunction(term.op1) &&
+        isBoxedSymbol(term.op1.op1) &&
+        term.op1.op1.symbol === variable
       ) {
         hasInnerSqrtX = true;
         break;
       }
       // Check for coefficient * √x
-      if (term.operator === 'Multiply' && term.ops) {
+      if (term.operator === 'Multiply' && isBoxedFunction(term)) {
         if (
           term.ops.some(
-            (f) => f.operator === 'Sqrt' && f.op1?.symbol === variable
+            (f) => f.operator === 'Sqrt' && isBoxedFunction(f) && isBoxedSymbol(f.op1) && f.op1.symbol === variable
           )
         ) {
           hasInnerSqrtX = true;
@@ -1089,7 +1097,7 @@ function solveNestedSqrtEquation(
     if (uNumeric.isNegative) continue; // Skip negative u values
 
     // Also check numericValue for cases where isNegative might not be set
-    const uNum = uNumeric.numericValue;
+    const uNum = isBoxedNumber(uNumeric) ? uNumeric.numericValue : undefined;
     if (uNum !== undefined) {
       let uReal: number | null = null;
       if (typeof uNum === 'number') {
@@ -1127,7 +1135,7 @@ export function findUnivariateRoots(
 ): ReadonlyArray<BoxedExpression> {
   const ce = expr.engine;
 
-  if (expr.operator === 'Equal') {
+  if (expr.operator === 'Equal' && isBoxedFunction(expr)) {
     const lhs = expand(expr.op1) ?? expr.op1;
     const rhs = expand(expr.op2) ?? expr.op2;
     expr = lhs.sub(rhs).simplify();
@@ -1260,6 +1268,7 @@ export function univariateSolve(
   )
     return null;
 
+  if (!isBoxedFunction(expr)) return null;
   let lhs: BoxedExpression = expr.op1;
   const rhs = expr.op2;
   if (!rhs.is(0)) lhs = ce.box(['Subtract', lhs, rhs]);

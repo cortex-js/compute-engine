@@ -45,7 +45,6 @@ import type {
   BoxedRuleSet,
   BoxedSubstitution,
   CanonicalOptions,
-  SymbolDefinitions,
   Metadata,
   Rule,
   Scope,
@@ -574,8 +573,6 @@ export class ComputeEngine implements IComputeEngine {
    * `chop()` as well.
    */
   constructor(options?: {
-    /** @deprecated Use `libraries` instead */
-    ids?: readonly SymbolDefinitions[];
     libraries?: readonly (string | LibraryDefinition)[];
     precision?: number | 'machine';
     tolerance?: number | 'auto';
@@ -631,9 +628,6 @@ export class ComputeEngine implements IComputeEngine {
           return lib;
         })
       );
-    } else if (options?.ids) {
-      // Backward compat: wrap raw SymbolDefinitions
-      libs = [{ name: '_user', definitions: [...options.ids] }];
     } else {
       libs = [...getStandardLibrary()];
     }

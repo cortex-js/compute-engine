@@ -1,4 +1,5 @@
 import type { BoxedExpression } from '../global-types';
+import { isBoxedSymbol, isBoxedNumber, isBoxedFunction } from '../boxed-expression/type-guards';
 
 /** An interval is a continuous set of real numbers */
 export type Interval = {
@@ -9,29 +10,29 @@ export type Interval = {
 };
 
 export function interval(expr: BoxedExpression): Interval | undefined {
-  if (expr.operator === 'Interval') {
-    let op1 = expr.op1;
-    let op2 = expr.op2;
+  if (expr.operator === 'Interval' && isBoxedFunction(expr)) {
+    let op1: BoxedExpression = expr.op1;
+    let op2: BoxedExpression = expr.op2;
     let openStart = false;
     let openEnd = false;
-    if (op1.operator === 'Open') {
+    if (op1.operator === 'Open' && isBoxedFunction(op1)) {
       openStart = true;
       op1 = op1.op1;
-    } else if (op1.operator === 'Closed') {
+    } else if (op1.operator === 'Closed' && isBoxedFunction(op1)) {
       op1 = op1.op1;
     }
 
-    if (op2.operator === 'Open') {
+    if (op2.operator === 'Open' && isBoxedFunction(op2)) {
       openEnd = true;
       op2 = op2.op1;
-    } else if (op2.operator === 'Closed') {
+    } else if (op2.operator === 'Closed' && isBoxedFunction(op2)) {
       op2 = op2.op1;
     }
 
     const start = op1.N();
     const end = op2.N();
 
-    if (!start.isNumberLiteral || !end.isNumberLiteral) return undefined;
+    if (!isBoxedNumber(start) || !isBoxedNumber(end)) return undefined;
 
     return { start: start.re, openStart, end: end.re, openEnd };
   }
@@ -39,28 +40,30 @@ export function interval(expr: BoxedExpression): Interval | undefined {
   //
   // Known sets which are also intervals...
   //
-  if (expr.symbol === 'EmptySet')
-    return { start: 0, openStart: true, end: 0, openEnd: true };
+  if (isBoxedSymbol(expr)) {
+    if (expr.symbol === 'EmptySet')
+      return { start: 0, openStart: true, end: 0, openEnd: true };
 
-  if (expr.symbol === 'RealNumbers')
-    return {
-      start: -Infinity,
-      openStart: false,
-      end: Infinity,
-      openEnd: false,
-    };
+    if (expr.symbol === 'RealNumbers')
+      return {
+        start: -Infinity,
+        openStart: false,
+        end: Infinity,
+        openEnd: false,
+      };
 
-  if (expr.symbol === 'NegativeNumbers')
-    return { start: -Infinity, openStart: false, end: 0, openEnd: true };
+    if (expr.symbol === 'NegativeNumbers')
+      return { start: -Infinity, openStart: false, end: 0, openEnd: true };
 
-  if (expr.symbol === 'NonPositiveNumbers')
-    return { start: -Infinity, openStart: false, end: 0, openEnd: false };
+    if (expr.symbol === 'NonPositiveNumbers')
+      return { start: -Infinity, openStart: false, end: 0, openEnd: false };
 
-  if (expr.symbol === 'PositiveNumbers')
-    return { start: 0, openStart: true, end: Infinity, openEnd: false };
+    if (expr.symbol === 'PositiveNumbers')
+      return { start: 0, openStart: true, end: Infinity, openEnd: false };
 
-  if (expr.symbol === 'NonNegativeNumbers')
-    return { start: 0, openStart: false, end: Infinity, openEnd: false };
+    if (expr.symbol === 'NonNegativeNumbers')
+      return { start: 0, openStart: false, end: Infinity, openEnd: false };
+  }
 
   return undefined;
 }

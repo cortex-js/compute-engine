@@ -1,6 +1,7 @@
 import { toBigint, toInteger } from '../boxed-expression/numerics';
 import type { BoxedExpression, SymbolDefinitions } from '../global-types';
 import { choose } from '../boxed-expression/expand';
+import { isBoxedFunction } from '../boxed-expression/type-guards';
 
 export const COMBINATORICS_LIBRARY: SymbolDefinitions[] = [
   {
@@ -69,14 +70,17 @@ export const COMBINATORICS_LIBRARY: SymbolDefinitions[] = [
       signature: '(set+) -> set',
       collection: {
         contains: (expr, x) => {
-          const factors = expr.ops!;
-          if (!x.isCollection || x.ops!.length !== factors.length) return false;
+          if (!isBoxedFunction(expr)) return false;
+          const factors = expr.ops;
+          if (!x.isCollection || !isBoxedFunction(x) || x.ops.length !== factors.length) return false;
+          const xOps = x.ops;
           return factors.every(
-            (factor, i) => factor.contains(x.ops![i]) ?? false
+            (factor, i) => factor.contains(xOps[i]) ?? false
           );
         },
         count: (expr) => {
-          const sizes = expr.ops!.map((op) => op.count);
+          if (!isBoxedFunction(expr)) return 0;
+          const sizes = expr.ops.map((op) => op.count);
           if (sizes.includes(Infinity)) return Infinity;
           return sizes.reduce((a, b) => a! * b!, 1);
         },
@@ -90,12 +94,14 @@ export const COMBINATORICS_LIBRARY: SymbolDefinitions[] = [
       signature: '(set) -> set',
       collection: {
         contains: (expr, x) => {
-          const base = expr.ops![0];
-          if (!x.isCollection) return false;
-          return x.ops!.every((elem) => base.contains(elem) ?? false);
+          if (!isBoxedFunction(expr)) return false;
+          const base = expr.ops[0];
+          if (!x.isCollection || !isBoxedFunction(x)) return false;
+          return x.ops.every((elem) => base.contains(elem) ?? false);
         },
         count: (expr) => {
-          const xs = expr.ops![0];
+          if (!isBoxedFunction(expr)) return 0;
+          const xs = expr.ops[0];
           if (xs.isEmptyCollection) return 1; // Power set of empty set is {{}}
           if (xs.isFiniteCollection === false) return Infinity;
           return 2 ** xs.count!;
@@ -232,7 +238,8 @@ export const COMBINATORICS_LIBRARY: SymbolDefinitions[] = [
 function* cartesianProductIterator(
   expr: BoxedExpression
 ): Generator<BoxedExpression, undefined, any> {
-  const factors = expr.ops!;
+  if (!isBoxedFunction(expr)) return;
+  const factors = expr.ops;
   const iterators = factors.map((f) => [...f.each()] as BoxedExpression[]);
   const lengths = iterators.map((it) => it.length);
   if (lengths.some((len) => len === 0)) return;
@@ -257,7 +264,8 @@ function* cartesianProductIterator(
 function* powerSetIterator(
   expr: BoxedExpression
 ): Generator<BoxedExpression, undefined, any> {
-  const elements = [...expr.ops![0].each()] as BoxedExpression[];
+  if (!isBoxedFunction(expr)) return;
+  const elements = [...expr.ops[0].each()] as BoxedExpression[];
   const n = elements.length;
   const ce = expr.engine;
 

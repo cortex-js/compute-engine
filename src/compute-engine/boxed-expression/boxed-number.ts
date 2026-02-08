@@ -48,6 +48,7 @@ import type {
   SimplifyOptions,
   NumberLiteralInterface,
 } from '../global-types';
+import { isBoxedNumber, isBoxedSymbol } from './type-guards';
 
 /**
  * BoxedNumber
@@ -58,6 +59,8 @@ export class BoxedNumber
   extends _BoxedExpression
   implements NumberLiteralInterface
 {
+  override readonly _kind = 'number';
+
   // The value of a BoxedNumber is either a small integer or a NumericValue
   protected readonly _value: SmallInteger | NumericValue;
 
@@ -218,7 +221,7 @@ export class BoxedNumber
 
       return ce.number(this._value.add(rhs));
     }
-    if (rhs.numericValue !== undefined) {
+    if (isBoxedNumber(rhs)) {
       // @fastpath
       if (typeof this._value === 'number') {
         if (typeof rhs.numericValue === 'number')
@@ -258,7 +261,7 @@ export class BoxedNumber
       return ce.number(rhs.mul(this._value));
     }
 
-    if (rhs.numericValue !== undefined)
+    if (isBoxedNumber(rhs))
       return ce.number(ce._numericValue(this._value).mul(rhs.numericValue));
 
     return mul(this, rhs);
@@ -337,7 +340,7 @@ export class BoxedNumber
 
     if (base && this.isSame(base)) return this.engine.One;
     if (
-      (!base || base.symbol === 'ExponentialE') &&
+      (!base || (isBoxedSymbol(base) && base.symbol === 'ExponentialE')) &&
       this.symbol === 'ExponentialE'
     )
       return this.engine.One;

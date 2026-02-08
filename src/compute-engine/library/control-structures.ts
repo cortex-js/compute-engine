@@ -10,6 +10,7 @@ import type {
   Scope,
 } from '../global-types';
 import { spellCheckMessage } from '../boxed-expression/validate';
+import { isBoxedFunction, isBoxedSymbol, sym } from '../boxed-expression/type-guards';
 
 export const CONTROL_STRUCTURES_LIBRARY: SymbolDefinitions[] = [
   {
@@ -32,10 +33,10 @@ export const CONTROL_STRUCTURES_LIBRARY: SymbolDefinitions[] = [
       signature: '(value, symbol) -> boolean',
       evaluate: ([value, conds], { engine }) => {
         let conditions: string[] = [];
-        if (conds.symbol) {
+        if (isBoxedSymbol(conds)) {
           conditions = [conds.symbol];
-        } else if (conds.operator === 'And') {
-          conditions = conds.ops!.map((op) => op.symbol ?? '');
+        } else if (conds.operator === 'And' && isBoxedFunction(conds)) {
+          conditions = conds.ops.map((op) => sym(op) ?? '');
         }
         if (checkConditions(value, conditions)) return engine.True;
         return engine.False;
@@ -50,7 +51,7 @@ export const CONTROL_STRUCTURES_LIBRARY: SymbolDefinitions[] = [
       canonical: ([cond, ifTrue, ifFalse], { engine }) =>
         engine._fn('If', [cond.canonical, ifTrue.canonical, ifFalse.canonical]),
       evaluate: ([cond, ifTrue, ifFalse], { engine }) => {
-        const evaluatedCond = cond.evaluate().symbol;
+        const evaluatedCond = sym(cond.evaluate());
         if (evaluatedCond === 'True')
           return ifTrue?.evaluate() ?? engine.Nothing;
         if (evaluatedCond === 'False')
@@ -100,7 +101,7 @@ function evaluateWhich(
 ): BoxedExpression {
   let i = 0;
   while (i < args.length - 1) {
-    const cond = args[i].evaluate().symbol;
+    const cond = sym(args[i].evaluate());
     if (cond === 'True') {
       if (!args[i + 1]) return options.engine.symbol('Undefined');
       return args[i + 1].evaluate(options);
@@ -126,11 +127,11 @@ function evaluateBlock(
   let result: BoxedExpression | undefined = undefined;
   for (const op of ops) {
     const h = op.operator;
-    if (h === 'Return') {
+    if (h === 'Return' && isBoxedFunction(op)) {
       result = op.op1.evaluate();
       break;
     }
-    if (h === 'Break' || h === 'Continue') {
+    if ((h === 'Break' || h === 'Continue') && isBoxedFunction(op)) {
       result = ce.box([h, op.op1.evaluate()]);
       break;
     }
@@ -173,7 +174,7 @@ function* runLoop(
   ce: ComputeEngine
 ): Generator<BoxedExpression> {
   body ??= ce.Nothing;
-  if (body.symbol === 'Nothing') return body;
+  if (sym(body) === 'Nothing') return body;
 
   if (collection?.isCollection) {
     //
@@ -185,7 +186,7 @@ function* runLoop(
 
     for (const x of collection.each()) {
       result = fn([x]) ?? ce.Nothing;
-      if (result.operator === 'Break') return result.op1;
+      if (result.operator === 'Break' && isBoxedFunction(result)) return result.op1;
       if (result.operator === 'Return') return result;
       i += 1;
       if (i % 1000 === 0) yield result;
@@ -201,7 +202,7 @@ function* runLoop(
   let i = 0;
   while (true) {
     const result = body.evaluate();
-    if (result.operator === 'Break') return result.op1;
+    if (result.operator === 'Break' && isBoxedFunction(result)) return result.op1;
     if (result.operator === 'Return') return result;
     i += 1;
     if (i % 1000 === 0) yield result;

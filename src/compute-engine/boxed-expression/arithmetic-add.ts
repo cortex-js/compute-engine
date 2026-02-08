@@ -8,9 +8,11 @@ import { isSubtype } from '../../common/type/subtype';
 import { BoxedType } from '../../common/type/boxed-type';
 import type {
   BoxedExpression,
+  TensorInterface,
   IComputeEngine as ComputeEngine,
 } from '../global-types';
 import { isBoxedTensor } from './boxed-tensor';
+import { isBoxedNumber, isBoxedFunction, isBoxedSymbol } from './type-guards';
 
 import { MACHINE_PRECISION } from '../numerics/numeric';
 import type { NumericValue } from '../numeric-value/types';
@@ -35,7 +37,7 @@ export function canonicalAdd(
   ops = flatten(ops, 'Add');
 
   // Remove literal 0
-  ops = ops.filter((x) => x.numericValue === undefined || !x.is(0));
+  ops = ops.filter((x) => !isBoxedNumber(x) || !x.is(0));
 
   if (ops.length === 0) return ce.Zero;
   if (ops.length === 1 && !ops[0].isIndexedCollection) return ops[0];
@@ -45,8 +47,8 @@ export function canonicalAdd(
   const xs: BoxedExpression[] = [];
   for (let i = 0; i < ops.length; i++) {
     const op = ops[i];
-    if (op.isNumberLiteral) {
-      const nv = op.numericValue!;
+    if (isBoxedNumber(op)) {
+      const nv = op.numericValue;
 
       if (
         typeof nv === 'number' ||
@@ -58,9 +60,10 @@ export function canonicalAdd(
 
         const next = ops[i + 1];
         if (next) {
-          const fac = getImaginaryFactor(next)?.numericValue;
+          const facExpr = getImaginaryFactor(next);
+          const fac = facExpr && isBoxedNumber(facExpr) ? facExpr.numericValue : undefined;
           if (fac !== undefined) {
-            const im = typeof fac === 'number' ? fac : fac?.re;
+            const im = typeof fac === 'number' ? fac : fac.re;
             if (im !== 0) {
               const re = typeof nv === 'number' ? nv : nv.re;
               xs.push(ce.number(ce._numericValue({ re, im: im ?? 0 })));
@@ -112,7 +115,7 @@ export function addN(...xs: ReadonlyArray<BoxedExpression>): BoxedExpression {
   }
 
   // Don't N() the number literals (fractions) to avoid losing precision
-  xs = xs.map((x) => (x.isNumberLiteral ? x.evaluate() : x.N()));
+  xs = xs.map((x) => (isBoxedNumber(x) ? x.evaluate() : x.N()));
   return new Terms(xs[0].engine, xs).N();
 }
 
@@ -126,7 +129,7 @@ function addTensors(
   ops: ReadonlyArray<BoxedExpression>
 ): BoxedExpression {
   // Separate tensors and scalars
-  const tensors: BoxedExpression[] = [];
+  const tensors: (BoxedExpression & TensorInterface)[] = [];
   const scalars: BoxedExpression[] = [];
 
   for (const op of ops) {
@@ -229,7 +232,7 @@ export class Terms {
         this.terms = [{ term: ce.ComplexInfinity, coef: [] }];
         return;
       }
-      if (term.isNaN || term.symbol === 'Undefined') {
+      if (term.isNaN || (isBoxedSymbol(term) && term.symbol === 'Undefined')) {
         this.terms = [{ term: ce.NaN, coef: [] }];
         return;
       }
@@ -274,15 +277,15 @@ export class Terms {
       return;
     }
 
-    if (term.operator === 'Add') {
-      for (const x of term.ops!) {
+    if (isBoxedFunction(term) && term.operator === 'Add') {
+      for (const x of term.ops) {
         const [c, t] = x.toNumericValue();
         this._add(coef.mul(c), t);
       }
       return;
     }
 
-    if (term.operator === 'Negate') {
+    if (isBoxedFunction(term) && term.operator === 'Negate') {
       this._add(coef.neg(), term.op1);
       return;
     }
@@ -296,7 +299,7 @@ export class Terms {
     }
 
     // This is a new term: just add it
-    console.assert(term.numericValue === undefined || term.is(1));
+    console.assert(!isBoxedNumber(term) || term.is(1));
     this.terms.push({ coef: [coef], term });
   }
 
@@ -317,10 +320,10 @@ export class Terms {
     // Gather all the numericValues and the rest
     for (const { coef, term } of terms) {
       if (coef.length === 0) {
-        if (term.isNumberLiteral) {
+        if (isBoxedNumber(term)) {
           if (typeof term.numericValue === 'number')
             numericValues.push(ce._numericValue(term.numericValue));
-          else numericValues.push(term.numericValue!);
+          else numericValues.push(term.numericValue);
         } else rest.push(term);
       } else {
         const sum = coef.reduce((acc, x) => acc.add(x)).N();

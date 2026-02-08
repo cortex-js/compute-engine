@@ -13,6 +13,7 @@ import { apply2 } from '../boxed-expression/apply';
 
 import { reducedRational } from '../numerics/rationals';
 import type { OperatorDefinition, SymbolDefinitions } from '../global-types';
+import { isBoxedNumber } from '../boxed-expression/type-guards';
 
 //
 // Note: The name of trigonometric functions follow NIST DLMF
@@ -54,7 +55,7 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
         if (ce.angularUnit === 'deg') return ops[0];
         if (ops.length !== 1) return ce._fn('Degrees', ops);
         const arg = ops[0];
-        if (arg.numericValue === undefined || !arg.isValid)
+        if (!isBoxedNumber(arg) || !arg.isValid)
           return ce._fn('Degrees', ops);
 
         let fArg = arg.re;

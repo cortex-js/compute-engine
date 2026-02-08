@@ -390,6 +390,9 @@ export interface Tensor<DT extends TensorDataType> extends TensorData<DT> {
  */
 export interface BoxedExpression {
   /** @internal */
+  readonly _kind: string;
+
+  /** @internal */
   readonly hash: number;
 
   /**
@@ -714,42 +717,6 @@ export interface BoxedExpression {
    */
   readonly unknowns: ReadonlyArray<string>;
 
-  /**
-   * Return `true` if this expression is a number literal, for example
-   * `2`, `3.14`, `1/2`, `√2` etc.
-   *
-   * When `true`, `expr.numericValue` is not `undefined`.
-   *
-   * @deprecated Use `isBoxedNumber()` type guard to narrow, then access
-   * `numericValue` directly.
-   *
-   * @category Numeric Expression
-   *
-   */
-  readonly isNumberLiteral: boolean;
-
-  /**
-   * Return the value of this expression, if a number literal.
-   *
-   * Note it is possible for `expr.numericValue` to be `undefined`, and for
-   * `expr.is(0)` to be false. For example, when a symbol has been
-   * defined with an assumption.
-   *
-   * Conversely, `expr.isNumber` may be true even if `expr.numericValue` is
-   * `undefined`, for example the symbol `Pi` return `true` for `isNumber` but
-   * `expr.numericValue` is `undefined` (it's a symbol, not a number literal).
-   * Its value can be accessed with `expr.value`.
-   *
-   * To check if an expression is a number literal, use `expr.isNumberLiteral`.
-   * If `expr.isNumberLiteral` is `true`, `expr.numericValue` is not `undefined`.
-   *
-   * @deprecated Use `isBoxedNumber()` type guard to narrow, then access
-   * `numericValue` without `undefined`.
-   *
-   * @category Numeric Expression
-   *
-   */
-  readonly numericValue: number | NumericValue | undefined;
 
   /**
    * Attempt to factor a numeric coefficient `c` and a `rest` out of a
@@ -923,48 +890,6 @@ export interface BoxedExpression {
    */
   get numeratorDenominator(): [BoxedExpression, BoxedExpression];
 
-  /** If this expression is a symbol, return the name of the symbol as a string.
-   * Otherwise, return `undefined`.
-   *
-   * :::info[Note]
-   * Applicable to canonical and non-canonical expressions.
-   * :::
-   *
-   * @deprecated Use `isBoxedSymbol()` type guard to narrow, then access
-   * `symbol` without `undefined`.
-   *
-   * @category Symbol Expression
-   *
-   */
-  readonly symbol: string | undefined;
-
-  /** If this expression is a string, return the value of the string.
-    * Otherwise, return `undefined`.
-    *
-    * :::info[Note]
-    * Applicable to canonical and non-canonical expressions.
-    * :::
-    *
-    * @deprecated Use `isBoxedString()` type guard to narrow, then access
-    * `string` without `undefined`.
-
-    * @category String Expression
-    *
-    */
-  readonly string: string | undefined;
-
-  /**
-   * Return `true` if this expression is a function expression.
-   *
-   * If `true`, `expr.ops` is not `undefined`, and `expr.operator` is the name
-   * of the function.
-   *
-   * @deprecated Use `isBoxedFunction()` type guard to narrow, then access
-   * function-specific members directly.
-   *
-   * @category Function Expression
-   */
-  readonly isFunctionExpression: boolean;
 
   /**
    * The name of the operator of the expression.
@@ -983,89 +908,6 @@ export interface BoxedExpression {
    */
   readonly operator: string;
 
-  /** The list of operands of the function.
-   *
-   * If the expression is not a function, return `undefined`.
-   *
-   * :::info[Note]
-   * Applicable to canonical and non-canonical expressions.
-   * :::
-   *
-   * @deprecated Use `isBoxedFunction()` type guard to narrow, then access
-   * `ops` without `undefined`.
-   *
-   * @category Function Expression
-   *
-   */
-  readonly ops: ReadonlyArray<BoxedExpression> | undefined;
-
-  /** If this expression is a function, the number of operands, otherwise 0.
-   *
-   * Note that a function can have 0 operands, so to check if this expression
-   * is a function, check if `this.ops !== undefined` instead.
-   *
-   * :::info[Note]
-   * Applicable to canonical and non-canonical expressions.
-   * :::
-   *
-   * @deprecated Use `isBoxedFunction()` type guard to narrow, then access
-   * `nops` directly.
-   *
-   * @category Function Expression
-   *
-   */
-  readonly nops: number;
-
-  /** First operand, i.e.`this.ops[0]`.
-   *
-   * If there is no first operand, return the symbol `Nothing`.
-   *
-   * :::info[Note]
-   * Applicable to canonical and non-canonical expressions.
-   * :::
-   *
-   * @deprecated Use `isBoxedFunction()` type guard to narrow, then access
-   * `op1` directly.
-   *
-   * @category Function Expression
-   *
-   *
-   */
-  readonly op1: BoxedExpression;
-
-  /** Second operand, i.e.`this.ops[1]`
-   *
-   * If there is no second operand, return the symbol `Nothing`.
-   *
-   * :::info[Note]
-   * Applicable to canonical and non-canonical expressions.
-   * :::
-   *
-   * @deprecated Use `isBoxedFunction()` type guard to narrow, then access
-   * `op2` directly.
-   *
-   * @category Function Expression
-   *
-   *
-   */
-  readonly op2: BoxedExpression;
-
-  /** Third operand, i.e. `this.ops[2]`
-   *
-   * If there is no third operand, return the symbol `Nothing`.
-   *
-   * :::info[Note]
-   * Applicable to canonical and non-canonical expressions.
-   * :::
-   *
-   * @deprecated Use `isBoxedFunction()` type guard to narrow, then access
-   * `op3` directly.
-   *
-   * @category Function Expression
-   *
-   *
-   */
-  readonly op3: BoxedExpression;
 
   /** If true, the expression has its own local scope that can be used
    * for local variables and arguments. Only true if the expression is a
@@ -1216,20 +1058,6 @@ export interface BoxedExpression {
     options?: PatternMatchOptions
   ): BoxedSubstitution | null;
 
-  /** If this expression is a tensor, return the tensor data.
-   * Otherwise, return `undefined`.
-   *
-   * :::info[Note]
-   * Applicable to canonical and non-canonical expressions.
-   * :::
-   *
-   * @deprecated Use `isBoxedTensor()` type guard to narrow, then access
-   * `tensor` without `undefined`.
-   *
-   * @category Tensor Expression
-   *
-   */
-  readonly tensor: Tensor<any> | undefined;
 
   /**
    *

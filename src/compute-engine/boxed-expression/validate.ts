@@ -11,6 +11,7 @@ import type {
 import { fuzzyStringMatch } from '../../common/fuzzy-string-match';
 import { isOperatorDef, isValueDef } from './utils';
 import { isBoxedTensor } from './boxed-tensor';
+import { isBoxedSymbol, isBoxedFunction } from './type-guards';
 
 /**
  * Return true if a type could be a collection type at runtime.
@@ -147,7 +148,7 @@ export function checkNumericArgs(
     } else if (op.isNumber) {
       // The argument is a number literal or a function whose result is a number
       xs.push(op);
-    } else if (op.symbol && !ce.lookupDefinition(op.symbol)) {
+    } else if (isBoxedSymbol(op) && !ce.lookupDefinition(op.symbol)) {
       // We have an unknown symbol, we'll infer it's a number later
       xs.push(op);
     } else if (op.type.isUnknown || op.type.type === 'any') {
@@ -522,7 +523,7 @@ function spellcheckSymbols(expr: BoxedExpression): Record<string, string> {
   const knownOperators = getOperatorNames(expr.engine);
 
   if (
-    expr.symbol &&
+    isBoxedSymbol(expr) &&
     !suggestions[expr.symbol] &&
     !expr.symbol.startsWith('_')
   ) {
@@ -531,7 +532,7 @@ function spellcheckSymbols(expr: BoxedExpression): Record<string, string> {
       if (match) suggestions[expr.symbol] = match;
     }
   } else if (
-    expr.ops &&
+    isBoxedFunction(expr) &&
     !suggestions[expr.operator] &&
     !expr.operator.startsWith('_')
   ) {

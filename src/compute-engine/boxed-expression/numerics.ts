@@ -13,10 +13,11 @@ import { ExactNumericValue } from '../numeric-value/exact-numeric-value';
 import { NumericValue } from '../numeric-value/types';
 import { bigintValue } from '../numerics/expression';
 import { Expression } from '../types';
+import { isBoxedNumber } from './type-guards';
 
 export function asRational(expr: BoxedExpression): Rational | undefined {
+  if (!isBoxedNumber(expr)) return undefined;
   const num = expr.numericValue;
-  if (num === undefined) return undefined;
   if (typeof num === 'number' && !Number.isFinite(num)) return undefined;
   if (
     num instanceof NumericValue &&
@@ -58,8 +59,8 @@ export function asBigint(
   if (typeof x === 'number' && Number.isInteger(x)) return BigInt(x);
 
   if (isBoxedExpression(x)) {
+    if (!isBoxedNumber(x)) return null;
     const num = x.numericValue;
-    if (num === undefined) return null;
 
     if (typeof num === 'number') {
       if (Number.isInteger(num)) return BigInt(num);
@@ -88,8 +89,8 @@ export function asBigint(
 
 export function asBignum(expr: BoxedExpression | undefined): Decimal | null {
   if (expr === undefined || expr === null) return null;
+  if (!isBoxedNumber(expr)) return null;
   const num = typeof expr === 'number' ? expr : expr.numericValue;
-  if (num === undefined) return null;
 
   if (typeof num === 'number') return expr.engine.bignum(num);
 
@@ -121,8 +122,8 @@ export function asSmallInteger(
       return expr;
     return null;
   }
+  if (!isBoxedNumber(expr)) return null;
   const num = expr.numericValue;
-  if (num === undefined) return null;
 
   if (typeof num === 'number') {
     if (Number.isInteger(num) && num >= -SMALL_INTEGER && num <= SMALL_INTEGER)
@@ -150,8 +151,8 @@ export function asSmallInteger(
  *
  */
 export function toInteger(expr: BoxedExpression | undefined): number | null {
-  const num = expr?.numericValue ?? undefined;
-  if (num === undefined) return null;
+  if (!expr || !isBoxedNumber(expr)) return null;
+  const num = expr.numericValue;
 
   return Math.round(typeof num === 'number' ? num : num.re);
 }
@@ -163,9 +164,8 @@ export function toInteger(expr: BoxedExpression | undefined): number | null {
  */
 export function toBigint(expr: BoxedExpression | undefined): bigint | null {
   if (expr === undefined || expr === null) return null;
-
+  if (!isBoxedNumber(expr)) return null;
   const num = expr.numericValue;
-  if (num === undefined) return null;
 
   if (typeof num === 'number') return BigInt(Math.round(num));
 

@@ -8,6 +8,11 @@ import {
   evaluateWithAssignment,
   generateAssignments,
 } from '../symbolic/logic-utils';
+import {
+  isBoxedSymbol,
+  isBoxedFunction,
+  sym,
+} from '../boxed-expression/type-guards';
 
 /**
  * Quantifier domain helpers and boolean analysis functions.
@@ -46,7 +51,7 @@ function filterValuesWithCondition(
     // Evaluate the condition
     const result = substituted.evaluate();
     // Keep the value if the condition evaluates to True
-    return result.symbol === 'True';
+    return sym(result) === 'True';
   });
 }
 
@@ -68,7 +73,11 @@ export function extractFiniteDomainWithReason(
     return { status: 'error', reason: 'expected-element-expression' };
   }
 
-  const variable = condition.op1?.symbol;
+  if (!isBoxedFunction(condition)) {
+    return { status: 'error', reason: 'expected-element-expression' };
+  }
+
+  const variable = isBoxedSymbol(condition.op1) ? condition.op1.symbol : undefined;
   if (!variable) {
     return { status: 'error', reason: 'expected-index-variable' };
   }
@@ -83,7 +92,7 @@ export function extractFiniteDomainWithReason(
   // Note: op3 returns Nothing when not present, so we also check nops >= 3
   const maybeCondition = condition.op3;
   const filterCondition =
-    condition.nops >= 3 && maybeCondition && maybeCondition.symbol !== 'Nothing'
+    condition.nops >= 3 && maybeCondition && sym(maybeCondition) !== 'Nothing'
       ? maybeCondition
       : null;
 
@@ -103,7 +112,7 @@ export function extractFiniteDomainWithReason(
 
   // Handle explicit sets: ["Set", 1, 2, 3]
   if (domain.operator === 'Set' || domain.operator === 'List') {
-    const values = domain.ops;
+    const values = isBoxedFunction(domain) ? domain.ops : undefined;
     if (values && values.length <= 1000) {
       // EL-1: Special case for 2-element Lists with integer values
       // Treat [a, b] as Range(a, b) in Element context for Sum/Product
@@ -144,12 +153,12 @@ export function extractFiniteDomainWithReason(
   }
 
   // Handle Range: ["Range", start, end] or ["Range", start, end, step]
-  if (domain.operator === 'Range') {
+  if (domain.operator === 'Range' && isBoxedFunction(domain)) {
     const start = asSmallInteger(domain.op1);
     const end = asSmallInteger(domain.op2);
     // op3 may be Nothing (a symbol) when not specified, so check ops length
     const step =
-      domain.ops && domain.ops.length >= 3 ? asSmallInteger(domain.op3) : 1;
+      domain.ops.length >= 3 ? asSmallInteger(domain.op3) : 1;
 
     if (start !== null && end !== null && step !== null && step !== 0) {
       const count = Math.floor((end - start) / step) + 1;
@@ -182,24 +191,24 @@ export function extractFiniteDomainWithReason(
   // EL-6: Support Open/Closed boundary wrappers
   // e.g., ["Interval", ["Open", 0], 5] → iterates 1, 2, 3, 4, 5
   // e.g., ["Interval", 1, ["Open", 6]] → iterates 1, 2, 3, 4, 5
-  if (domain.operator === 'Interval') {
-    let op1 = domain.op1;
-    let op2 = domain.op2;
+  if (domain.operator === 'Interval' && isBoxedFunction(domain)) {
+    let op1: BoxedExpression | undefined = domain.op1;
+    let op2: BoxedExpression | undefined = domain.op2;
     let openStart = false;
     let openEnd = false;
 
     // Unwrap Open/Closed boundary markers
-    if (op1?.operator === 'Open') {
+    if (op1?.operator === 'Open' && isBoxedFunction(op1)) {
       openStart = true;
       op1 = op1.op1;
-    } else if (op1?.operator === 'Closed') {
+    } else if (op1?.operator === 'Closed' && isBoxedFunction(op1)) {
       op1 = op1.op1;
     }
 
-    if (op2?.operator === 'Open') {
+    if (op2?.operator === 'Open' && isBoxedFunction(op2)) {
       openEnd = true;
       op2 = op2.op1;
-    } else if (op2?.operator === 'Closed') {
+    } else if (op2?.operator === 'Closed' && isBoxedFunction(op2)) {
       op2 = op2.op1;
     }
 
@@ -238,7 +247,8 @@ export function extractFiniteDomainWithReason(
   }
 
   // Check for known infinite sets (e.g., NonNegativeIntegers, Integers, Reals, etc.)
-  if (domain.symbol) {
+  const domainSymbol = sym(domain);
+  if (domainSymbol) {
     const knownInfiniteSets = [
       'Integers',
       'NonNegativeIntegers',
@@ -258,7 +268,7 @@ export function extractFiniteDomainWithReason(
       'AlgebraicNumbers',
       'TranscendentalNumbers',
     ];
-    if (knownInfiniteSets.includes(domain.symbol)) {
+    if (knownInfiniteSets.includes(domainSymbol)) {
       return {
         status: 'non-enumerable',
         variable,
@@ -268,7 +278,7 @@ export function extractFiniteDomainWithReason(
     }
     // Check if the symbol has a value that's a finite set
     const domainValue = domain.value;
-    if (domainValue && domainValue.operator === 'Set') {
+    if (domainValue && domainValue.operator === 'Set' && isBoxedFunction(domainValue)) {
       const values = domainValue.ops;
       if (values && values.length <= 1000) {
         return successResult([...values]);
@@ -301,34 +311,14 @@ export function extractFiniteDomainWithReason(
 }
 
 /**
- * Extract the finite domain from a quantifier's condition.
- * Supports:
- * - ["Element", "x", ["Set", 1, 2, 3]] → [1, 2, 3]
- * - ["Element", "x", ["Range", 1, 5]] → [1, 2, 3, 4, 5]
- * - ["Element", "x", ["Interval", 1, 5]] → [1, 2, 3, 4, 5] (integers only)
- * Returns null if the domain is not finite or not recognized.
- * @deprecated Use extractFiniteDomainWithReason for better error handling
- */
-export function extractFiniteDomain(
-  condition: BoxedExpression,
-  ce: ComputeEngine
-): { variable: string; values: BoxedExpression[] } | null {
-  const result = extractFiniteDomainWithReason(condition, ce);
-  if (result.status === 'success') {
-    return { variable: result.variable, values: result.values };
-  }
-  return null;
-}
-
-/**
  * Check if an expression contains a reference to a specific variable.
  */
 export function bodyContainsVariable(
   expr: BoxedExpression,
   variable: string
 ): boolean {
-  if (expr.symbol === variable) return true;
-  if (expr.ops) {
+  if (sym(expr) === variable) return true;
+  if (isBoxedFunction(expr)) {
     for (const op of expr.ops) {
       if (bodyContainsVariable(op, variable)) return true;
     }
@@ -349,20 +339,21 @@ export function collectNestedDomains(
 
   // Only collect from same quantifier type (ForAll or Exists)
   if (op !== 'ForAll' && op !== 'Exists') return [];
+  if (!isBoxedFunction(canonicalBody)) return [];
 
   const condition = canonicalBody.op1;
   const innerBody = canonicalBody.op2;
 
   if (!condition || !innerBody) return [];
 
-  const domain = extractFiniteDomain(condition, ce);
-  if (!domain) return [];
+  const domainResult = extractFiniteDomainWithReason(condition, ce);
+  if (domainResult.status !== 'success') return [];
 
   // Recursively collect from inner body
   const innerDomains = collectNestedDomains(innerBody, ce);
 
   return [
-    { variable: domain.variable, values: domain.values },
+    { variable: domainResult.variable, values: domainResult.values },
     ...innerDomains,
   ];
 }
@@ -374,7 +365,7 @@ export function getInnermostBody(body: BoxedExpression): BoxedExpression {
   const canonicalBody = body.canonical;
   const op = canonicalBody.operator;
 
-  if (op === 'ForAll' || op === 'Exists') {
+  if ((op === 'ForAll' || op === 'Exists') && isBoxedFunction(canonicalBody)) {
     const innerBody = canonicalBody.op2;
     if (innerBody) return getInnermostBody(innerBody);
   }
@@ -409,10 +400,10 @@ export function evaluateForAllCartesian(
     const substituted = body.subs(subs).canonical;
     const result = substituted.evaluate();
 
-    if (result.symbol === 'False') {
+    if (sym(result) === 'False') {
       return ce.False; // Found a counterexample
     }
-    if (result.symbol !== 'True') {
+    if (sym(result) !== 'True') {
       return undefined; // Can't determine
     }
 
@@ -457,7 +448,7 @@ export function evaluateExistsCartesian(
     const substituted = body.subs(subs).canonical;
     const result = substituted.evaluate();
 
-    if (result.symbol === 'True') {
+    if (sym(result) === 'True') {
       return ce.True; // Found a witness
     }
 
@@ -522,7 +513,7 @@ export function isSatisfiable(
   // Handle constant expressions
   if (variables.length === 0) {
     const result = expr.evaluate();
-    return result.symbol === 'True' ? ce.True : ce.False;
+    return sym(result) === 'True' ? ce.True : ce.False;
   }
 
   // Limit the number of variables to prevent explosion (2^n combinations)
@@ -534,7 +525,7 @@ export function isSatisfiable(
   // Try all possible assignments
   for (const assignment of generateAssignments(variables)) {
     const result = evaluateWithAssignment(expr, assignment, ce);
-    if (result.symbol === 'True') {
+    if (sym(result) === 'True') {
       return ce.True;
     }
   }
@@ -587,7 +578,7 @@ export function isTautology(
   // Handle constant expressions
   if (variables.length === 0) {
     const result = expr.evaluate();
-    return result.symbol === 'True' ? ce.True : ce.False;
+    return sym(result) === 'True' ? ce.True : ce.False;
   }
 
   // Limit the number of variables to prevent explosion
@@ -599,7 +590,7 @@ export function isTautology(
   // Check all possible assignments
   for (const assignment of generateAssignments(variables)) {
     const result = evaluateWithAssignment(expr, assignment, ce);
-    if (result.symbol !== 'True') {
+    if (sym(result) !== 'True') {
       return ce.False;
     }
   }
@@ -781,8 +772,8 @@ export function findPrimeImplicants(
   if (variables.length === 0) {
     // Constant expression
     const result = expr.evaluate();
-    if (result.symbol === 'True') return [ce.True];
-    if (result.symbol === 'False') return [];
+    if (sym(result) === 'True') return [ce.True];
+    if (sym(result) === 'False') return [];
     return null;
   }
 
@@ -791,7 +782,7 @@ export function findPrimeImplicants(
   let index = 0;
   for (const assignment of generateAssignments(variables)) {
     const result = evaluateWithAssignment(expr, assignment, ce);
-    if (result.symbol === 'True') {
+    if (sym(result) === 'True') {
       minterms.push(index);
     }
     index++;
@@ -837,8 +828,8 @@ export function findPrimeImplicates(
   if (variables.length === 0) {
     // Constant expression
     const result = expr.evaluate();
-    if (result.symbol === 'True') return [];
-    if (result.symbol === 'False') return [ce.False];
+    if (sym(result) === 'True') return [];
+    if (sym(result) === 'False') return [ce.False];
     return null;
   }
 
@@ -847,7 +838,7 @@ export function findPrimeImplicates(
   let index = 0;
   for (const assignment of generateAssignments(variables)) {
     const result = evaluateWithAssignment(expr, assignment, ce);
-    if (result.symbol === 'False') {
+    if (sym(result) === 'False') {
       maxterms.push(index);
     }
     index++;
@@ -1018,7 +1009,7 @@ export function minimalDNF(
 
   if (variables.length === 0) {
     const result = expr.evaluate();
-    return result.symbol === 'True' ? ce.True : ce.False;
+    return sym(result) === 'True' ? ce.True : ce.False;
   }
 
   // Collect minterms
@@ -1026,7 +1017,7 @@ export function minimalDNF(
   let index = 0;
   for (const assignment of generateAssignments(variables)) {
     const result = evaluateWithAssignment(expr, assignment, ce);
-    if (result.symbol === 'True') {
+    if (sym(result) === 'True') {
       minterms.push(index);
     }
     index++;
@@ -1070,7 +1061,7 @@ export function minimalCNF(
 
   if (variables.length === 0) {
     const result = expr.evaluate();
-    return result.symbol === 'True' ? ce.True : ce.False;
+    return sym(result) === 'True' ? ce.True : ce.False;
   }
 
   // Collect maxterms
@@ -1078,7 +1069,7 @@ export function minimalCNF(
   let index = 0;
   for (const assignment of generateAssignments(variables)) {
     const result = evaluateWithAssignment(expr, assignment, ce);
-    if (result.symbol === 'False') {
+    if (sym(result) === 'False') {
       maxterms.push(index);
     }
     index++;

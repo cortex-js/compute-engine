@@ -1,5 +1,6 @@
 import type { BoxedExpression } from '../global-types';
 import { asSmallInteger } from './numerics';
+import { isBoxedSymbol, isBoxedFunction, isBoxedNumber } from './type-guards';
 
 /**
  * The total degree of an expression is the sum of the
@@ -9,9 +10,11 @@ import { asSmallInteger } from './numerics';
  */
 export function totalDegree(expr: BoxedExpression): number {
   // e.g. "x"
-  if (expr.symbol && !expr.isConstant) return 1;
+  if (isBoxedSymbol(expr) && !expr.isConstant) return 1;
 
-  if (expr.operator === 'Power' && expr.op2.isNumberLiteral) {
+  if (!isBoxedFunction(expr)) return 0;
+
+  if (expr.operator === 'Power' && isBoxedNumber(expr.op2)) {
     // If the base has no unknowns, the degree is 0, e.g. 2^3
     if (totalDegree(expr.op1) === 0) return 0;
     const deg = asSmallInteger(expr.op2);
@@ -21,7 +24,7 @@ export function totalDegree(expr: BoxedExpression): number {
 
   if (expr.operator === 'Multiply') {
     let deg = 0;
-    for (const arg of expr.ops!) {
+    for (const arg of expr.ops) {
       const t = totalDegree(arg);
       deg = deg + t;
     }
@@ -30,7 +33,7 @@ export function totalDegree(expr: BoxedExpression): number {
 
   if (expr.operator === 'Add' || expr.operator === 'Subtract') {
     let deg = 0;
-    for (const arg of expr.ops!) deg = Math.max(deg, totalDegree(arg));
+    for (const arg of expr.ops) deg = Math.max(deg, totalDegree(arg));
     return deg;
   }
 
@@ -50,9 +53,11 @@ export function totalDegree(expr: BoxedExpression): number {
  */
 export function maxDegree(expr: BoxedExpression): number {
   // e.g. "x"
-  if (expr.symbol && !expr.isConstant) return 1;
+  if (isBoxedSymbol(expr) && !expr.isConstant) return 1;
 
-  if (expr.operator === 'Power' && expr.op2.isNumberLiteral) {
+  if (!isBoxedFunction(expr)) return 0;
+
+  if (expr.operator === 'Power' && isBoxedNumber(expr.op2)) {
     // If the base has no unknowns, the degree is 0, e.g. 2^3
     if (maxDegree(expr.op1) === 0) return 0;
 
@@ -67,7 +72,7 @@ export function maxDegree(expr: BoxedExpression): number {
     expr.operator === 'Subtract'
   ) {
     let deg = 0;
-    for (const arg of expr.ops!) deg = Math.max(deg, totalDegree(arg));
+    for (const arg of expr.ops) deg = Math.max(deg, totalDegree(arg));
     return deg;
   }
 
@@ -80,8 +85,8 @@ export function maxDegree(expr: BoxedExpression): number {
 
 export function lex(expr: BoxedExpression): string {
   // Consider symbols, but ignore constants such as "Pi" or "ExponentialE"
-  if (expr.symbol && !expr.isConstant) return expr.symbol;
-  if (!expr.ops) return '';
+  if (isBoxedSymbol(expr) && !expr.isConstant) return expr.symbol;
+  if (!isBoxedFunction(expr)) return '';
   return expr.ops
     .map((x) => lex(x))
     .join(' ')

@@ -26,6 +26,7 @@ import {
 import { Parser } from '../latex-syntax/types';
 
 import { isPrime } from './predicates';
+import { isBoxedString, isBoxedNumber, isBoxedSymbol, isBoxedFunction } from './type-guards';
 // @todo:
 // export function fixPoint(rule: Rule);
 // export function chain(rules: RuleSet);
@@ -161,9 +162,9 @@ export const ConditionParent = {
 
 export const CONDITIONS = {
   boolean: (x: BoxedExpression) => x.type.matches('boolean'),
-  string: (x: BoxedExpression) => x.string !== null,
-  number: (x: BoxedExpression) => x.isNumberLiteral,
-  symbol: (x: BoxedExpression) => x.symbol !== null,
+  string: (x: BoxedExpression) => isBoxedString(x),
+  number: (x: BoxedExpression) => isBoxedNumber(x),
+  symbol: (x: BoxedExpression) => isBoxedSymbol(x),
   expression: (_x: BoxedExpression) => true,
 
   numeric: (x: BoxedExpression) => {
@@ -361,7 +362,7 @@ function parseRulePart(
       expr = expr.map(
         (x) => {
           // Only transform single character symbols. Avoid \pi, \imaginaryUnit, etc..
-          if (x.symbol && x.symbol.length === 1)
+          if (isBoxedSymbol(x) && x.symbol.length === 1)
             return ce.symbol('_' + x.symbol);
           return x;
         },
@@ -531,7 +532,13 @@ function parseRule(
     );
   }
 
-  const [match_, replace_, condition] = expr.ops!;
+  if (!isBoxedFunction(expr)) {
+    if (systemScope) {
+      ce.popScope();
+    }
+    throw new Error(`Invalid rule "${rule}"`);
+  }
+  const [match_, replace_, condition] = expr.ops;
 
   let match = match_;
   let replace = replace_;
@@ -566,8 +573,10 @@ function parseRule(
       );
 
     // Evaluate the condition as a predicate
-    condFn = (sub: BoxedSubstitution): boolean =>
-      condition.subs(sub).canonical.evaluate()?.symbol === 'True';
+    condFn = (sub: BoxedSubstitution): boolean => {
+      const evaluated = condition.subs(sub).canonical.evaluate();
+      return isBoxedSymbol(evaluated) && evaluated.symbol === 'True';
+    };
   }
 
   return boxRule(ce, { match, replace, condition: condFn, id: rule }, options);
@@ -619,8 +628,10 @@ function boxRule(
 
       // Substitute any unbound vars in the condition to a wildcard,
       // then evaluate the condition
-      condFn = (x: BoxedSubstitution, _ce: ComputeEngine): boolean =>
-        condPattern.subs(x).evaluate()?.symbol === 'True';
+      condFn = (x: BoxedSubstitution, _ce: ComputeEngine): boolean => {
+        const evaluated = condPattern.subs(x).evaluate();
+        return isBoxedSymbol(evaluated) && evaluated.symbol === 'True';
+      };
     }
   } else {
     if (condition !== undefined && typeof condition !== 'function')
@@ -750,7 +761,7 @@ export function applyRule(
 
   let operandsMatched = false;
 
-  if (expr.ops && options?.recursive) {
+  if (isBoxedFunction(expr) && options?.recursive) {
     // Apply the rule to the operands of the expression
     const newOps = expr.ops.map((op) => {
       const subExpr = applyRule(rule, op, {}, options);
@@ -954,11 +965,10 @@ export function matchAnyRules(
  * Replace all occurrences of a wildcard in an expression with a the corresponding non-wildcard, e.g. `_x` -> `x`
  */
 function dewildcard(expr: BoxedExpression): BoxedExpression {
-  const symbol = expr.symbol;
-  if (symbol) {
-    if (symbol.startsWith('_')) return expr.engine.symbol(symbol.slice(1));
+  if (isBoxedSymbol(expr)) {
+    if (expr.symbol.startsWith('_')) return expr.engine.symbol(expr.symbol.slice(1));
   }
-  if (expr.ops) {
+  if (isBoxedFunction(expr)) {
     const ops = expr.ops.map((x) => dewildcard(x));
     return expr.engine.function(expr.operator, ops, { form: 'raw' });
   }
@@ -967,8 +977,8 @@ function dewildcard(expr: BoxedExpression): BoxedExpression {
 
 function getWildcards(expr: BoxedExpression): string[] {
   const wildcards: string[] = [];
-  if (expr.symbol && expr.symbol.startsWith('_')) wildcards.push(expr.symbol);
-  if (expr.ops) expr.ops.forEach((x) => wildcards.push(...getWildcards(x)));
+  if (isBoxedSymbol(expr) && expr.symbol.startsWith('_')) wildcards.push(expr.symbol);
+  if (isBoxedFunction(expr)) expr.ops.forEach((x) => wildcards.push(...getWildcards(x)));
   return wildcards;
 }
 

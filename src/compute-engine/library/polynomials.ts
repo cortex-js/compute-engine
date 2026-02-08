@@ -9,6 +9,7 @@ import {
   cancelCommonFactors,
 } from '../boxed-expression/polynomials';
 import type { SymbolDefinitions } from '../global-types';
+import { sym } from '../boxed-expression/type-guards';
 
 export const POLYNOMIALS_LIBRARY: SymbolDefinitions[] = [
   {
@@ -39,7 +40,7 @@ export const POLYNOMIALS_LIBRARY: SymbolDefinitions[] = [
 
         // If variable is provided, use polynomial factoring with that variable
         if (varExpr) {
-          const variable = varExpr.canonical.symbol;
+          const variable = sym(varExpr.canonical);
           if (!variable) return x.canonical;
           return factorPolynomial(x.canonical, variable);
         }
@@ -71,7 +72,7 @@ export const POLYNOMIALS_LIBRARY: SymbolDefinitions[] = [
       signature: '(value, symbol) -> integer',
       evaluate: ([poly, varExpr]) => {
         if (!poly || !varExpr) return undefined;
-        const variable = varExpr.canonical.symbol;
+        const variable = sym(varExpr.canonical);
         if (!variable) return undefined;
         const deg = polynomialDegree(poly.canonical, variable);
         return deg >= 0 ? poly.engine.number(deg) : undefined;
@@ -86,7 +87,7 @@ export const POLYNOMIALS_LIBRARY: SymbolDefinitions[] = [
       signature: '(value, symbol) -> list<value>',
       evaluate: ([poly, varExpr]) => {
         if (!poly || !varExpr) return undefined;
-        const variable = varExpr.canonical.symbol;
+        const variable = sym(varExpr.canonical);
         if (!variable) return undefined;
         const coeffs = getPolynomialCoefficients(poly.canonical, variable);
         if (!coeffs) return undefined;
@@ -102,7 +103,7 @@ export const POLYNOMIALS_LIBRARY: SymbolDefinitions[] = [
       signature: '(dividend: value, divisor: value, variable: symbol) -> value',
       evaluate: ([dividend, divisor, varExpr]) => {
         if (!dividend || !divisor || !varExpr) return undefined;
-        const variable = varExpr.canonical.symbol;
+        const variable = sym(varExpr.canonical);
         if (!variable) return undefined;
         const result = polynomialDivide(
           dividend.canonical,
@@ -121,7 +122,7 @@ export const POLYNOMIALS_LIBRARY: SymbolDefinitions[] = [
       signature: '(dividend: value, divisor: value, variable: symbol) -> value',
       evaluate: ([dividend, divisor, varExpr]) => {
         if (!dividend || !divisor || !varExpr) return undefined;
-        const variable = varExpr.canonical.symbol;
+        const variable = sym(varExpr.canonical);
         if (!variable) return undefined;
         const result = polynomialDivide(
           dividend.canonical,
@@ -140,7 +141,7 @@ export const POLYNOMIALS_LIBRARY: SymbolDefinitions[] = [
       signature: '(a: value, b: value, variable: symbol) -> value',
       evaluate: ([a, b, varExpr]) => {
         if (!a || !b || !varExpr) return undefined;
-        const variable = varExpr.canonical.symbol;
+        const variable = sym(varExpr.canonical);
         if (!variable) return undefined;
         return polynomialGCD(a.canonical, b.canonical, variable);
       },
@@ -154,7 +155,7 @@ export const POLYNOMIALS_LIBRARY: SymbolDefinitions[] = [
       signature: '(value, symbol) -> value',
       evaluate: ([expr, varExpr]) => {
         if (!expr || !varExpr) return undefined;
-        const variable = varExpr.canonical.symbol;
+        const variable = sym(varExpr.canonical);
         if (!variable) return undefined;
         return cancelCommonFactors(expr.canonical, variable);
       },

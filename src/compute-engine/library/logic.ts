@@ -16,7 +16,12 @@ import {
   toDNF,
 } from '../symbolic/logic-utils';
 import {
-  extractFiniteDomain,
+  isBoxedSymbol,
+  isBoxedFunction,
+  sym,
+} from '../boxed-expression/type-guards';
+import {
+  extractFiniteDomainWithReason,
   bodyContainsVariable,
   collectNestedDomains,
   getInnermostBody,
@@ -85,8 +90,8 @@ export const LOGIC_LIBRARY: SymbolDefinitions = {
     complexity: 10200,
     signature: '(boolean, boolean) -> boolean',
     canonical: (args: BoxedExpression[], { engine: ce }) => {
-      const lhs = args[0].symbol;
-      const rhs = args[1].symbol;
+      const lhs = sym(args[0]);
+      const rhs = sym(args[1]);
       if (
         (lhs === 'True' && rhs === 'True') ||
         (lhs === 'False' && rhs === 'False')
@@ -153,8 +158,8 @@ export const LOGIC_LIBRARY: SymbolDefinitions = {
     scoped: true,
     evaluate: (args, options) => {
       const result = evaluateExists(args, options);
-      if (result?.symbol === 'True') return options.engine.False;
-      if (result?.symbol === 'False') return options.engine.True;
+      if (sym(result) === 'True') return options.engine.False;
+      if (sym(result) === 'False') return options.engine.True;
       return undefined;
     },
   },
@@ -176,8 +181,8 @@ export const LOGIC_LIBRARY: SymbolDefinitions = {
     scoped: true,
     evaluate: (args, options) => {
       const result = evaluateForAll(args, options);
-      if (result?.symbol === 'True') return options.engine.False;
-      if (result?.symbol === 'False') return options.engine.True;
+      if (sym(result) === 'True') return options.engine.False;
+      if (sym(result) === 'False') return options.engine.True;
       return undefined;
     },
   },
@@ -195,7 +200,7 @@ export const LOGIC_LIBRARY: SymbolDefinitions = {
     evaluate: (args, { engine: _engine }) => {
       if (args.length === 0) return undefined;
       const pred = args[0];
-      if (!pred.symbol) return undefined;
+      if (!isBoxedSymbol(pred)) return undefined;
       // Could check if the predicate has a definition and evaluate it
       // For now, predicates remain symbolic
       return undefined;
@@ -207,7 +212,7 @@ export const LOGIC_LIBRARY: SymbolDefinitions = {
     signature: '(value+) -> integer',
     evaluate: (args, { engine: ce }) => {
       if (args.length === 1)
-        return args[0].symbol === 'True' ? ce.One : ce.Zero;
+        return sym(args[0]) === 'True' ? ce.One : ce.Zero;
 
       if (args.length === 2) return args[0].isEqual(args[1]) ? ce.One : ce.Zero;
 
@@ -225,7 +230,7 @@ export const LOGIC_LIBRARY: SymbolDefinitions = {
       'Return 1 if the argument is true, 0 otherwise. Also known as the Iverson bracket',
     signature: '(boolean) -> integer',
     evaluate: (args, { engine: ce }) =>
-      args[0].symbol === 'True' ? ce.One : ce.Zero,
+      sym(args[0]) === 'True' ? ce.One : ce.Zero,
   },
 };
 
@@ -252,27 +257,28 @@ function evaluateForAll(
 
   // Symbolic simplification: check if body is constant (doesn't depend on the variable)
   const canonicalBody = body.canonical;
-  if (canonicalBody.symbol === 'True') return ce.True;
-  if (canonicalBody.symbol === 'False') return ce.False;
+  if (sym(canonicalBody) === 'True') return ce.True;
+  if (sym(canonicalBody) === 'False') return ce.False;
 
   // Check if body doesn't contain the quantified variable
-  const variable = condition.symbol ?? condition.op1?.symbol;
+  const condOp1 = isBoxedFunction(condition) ? condition.op1 : undefined;
+  const variable = sym(condition) ?? (condOp1 ? sym(condOp1) : undefined);
   if (variable && !bodyContainsVariable(canonicalBody, variable)) {
     // Body doesn't depend on x, so ∀x. P ≡ P
     return canonicalBody.evaluate();
   }
 
   // Try to extract a finite domain from the condition
-  const domain = extractFiniteDomain(condition, ce);
+  const domainResult = extractFiniteDomainWithReason(condition, ce);
 
-  if (domain) {
+  if (domainResult.status === 'success') {
     // Check for nested quantifiers - collect all domains for Cartesian product
     const nestedDomains = collectNestedDomains(body, ce);
     if (nestedDomains.length > 0) {
       // Evaluate over Cartesian product of all domains
       return evaluateForAllCartesian(
         [
-          { variable: domain.variable, values: domain.values },
+          { variable: domainResult.variable, values: domainResult.values },
           ...nestedDomains,
         ],
         getInnermostBody(body),
@@ -281,14 +287,16 @@ function evaluateForAll(
     }
 
     // Single quantifier - evaluate body for each value in the domain
-    for (const value of domain.values) {
-      const substituted = body.subs({ [domain.variable]: value }).canonical;
+    for (const value of domainResult.values) {
+      const substituted = body.subs({
+        [domainResult.variable]: value,
+      }).canonical;
       const result = substituted.evaluate();
 
-      if (result.symbol === 'False') {
+      if (sym(result) === 'False') {
         return ce.False; // Found a counterexample
       }
-      if (result.symbol !== 'True') {
+      if (sym(result) !== 'True') {
         // Can't determine truth value, return undefined
         return undefined;
       }
@@ -298,8 +306,8 @@ function evaluateForAll(
 
   // No finite domain - try evaluating the body
   const bodyEval = canonicalBody.evaluate();
-  if (bodyEval.symbol === 'True') return ce.True;
-  if (bodyEval.symbol === 'False') return ce.False;
+  if (sym(bodyEval) === 'True') return ce.True;
+  if (sym(bodyEval) === 'False') return ce.False;
 
   return undefined;
 }
@@ -327,27 +335,28 @@ function evaluateExists(
 
   // Symbolic simplification: check if body is constant (doesn't depend on the variable)
   const canonicalBody = body.canonical;
-  if (canonicalBody.symbol === 'True') return ce.True;
-  if (canonicalBody.symbol === 'False') return ce.False;
+  if (sym(canonicalBody) === 'True') return ce.True;
+  if (sym(canonicalBody) === 'False') return ce.False;
 
   // Check if body doesn't contain the quantified variable
-  const variable = condition.symbol ?? condition.op1?.symbol;
+  const condOp1 = isBoxedFunction(condition) ? condition.op1 : undefined;
+  const variable = sym(condition) ?? (condOp1 ? sym(condOp1) : undefined);
   if (variable && !bodyContainsVariable(canonicalBody, variable)) {
     // Body doesn't depend on x, so ∃x. P ≡ P
     return canonicalBody.evaluate();
   }
 
   // Try to extract a finite domain from the condition
-  const domain = extractFiniteDomain(condition, ce);
+  const domainResult = extractFiniteDomainWithReason(condition, ce);
 
-  if (domain) {
+  if (domainResult.status === 'success') {
     // Check for nested quantifiers - collect all domains for Cartesian product
     const nestedDomains = collectNestedDomains(body, ce);
     if (nestedDomains.length > 0) {
       // Evaluate over Cartesian product of all domains
       return evaluateExistsCartesian(
         [
-          { variable: domain.variable, values: domain.values },
+          { variable: domainResult.variable, values: domainResult.values },
           ...nestedDomains,
         ],
         getInnermostBody(body),
@@ -356,11 +365,13 @@ function evaluateExists(
     }
 
     // Single quantifier - evaluate body for each value in the domain
-    for (const value of domain.values) {
-      const substituted = body.subs({ [domain.variable]: value }).canonical;
+    for (const value of domainResult.values) {
+      const substituted = body.subs({
+        [domainResult.variable]: value,
+      }).canonical;
       const result = substituted.evaluate();
 
-      if (result.symbol === 'True') {
+      if (sym(result) === 'True') {
         return ce.True; // Found a witness
       }
     }
@@ -369,8 +380,8 @@ function evaluateExists(
 
   // No finite domain - try evaluating the body
   const bodyEval = canonicalBody.evaluate();
-  if (bodyEval.symbol === 'True') return ce.True;
-  if (bodyEval.symbol === 'False') return ce.False;
+  if (sym(bodyEval) === 'True') return ce.True;
+  if (sym(bodyEval) === 'False') return ce.False;
 
   return undefined;
 }
@@ -389,22 +400,24 @@ function evaluateExistsUnique(
   const body = args[1];
 
   // Try to extract a finite domain from the condition
-  const domain = extractFiniteDomain(condition, ce);
+  const domainResult = extractFiniteDomainWithReason(condition, ce);
 
-  if (domain) {
+  if (domainResult.status === 'success') {
     let count = 0;
     // Evaluate body for each value in the domain using substitution
-    for (const value of domain.values) {
+    for (const value of domainResult.values) {
       // Substitute the variable with the value, canonicalize, then evaluate
       // Note: body may be non-canonical due to lazy evaluation, so we need
       // to canonicalize the substituted expression before evaluation
-      const substituted = body.subs({ [domain.variable]: value }).canonical;
+      const substituted = body.subs({
+        [domainResult.variable]: value,
+      }).canonical;
       const result = substituted.evaluate();
 
-      if (result.symbol === 'True') {
+      if (sym(result) === 'True') {
         count++;
         if (count > 1) return ce.False; // More than one witness
-      } else if (result.symbol !== 'False') {
+      } else if (sym(result) !== 'False') {
         // Can't determine truth value
         return undefined;
       }

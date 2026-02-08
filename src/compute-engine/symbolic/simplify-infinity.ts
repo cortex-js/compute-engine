@@ -1,4 +1,5 @@
 import type { BoxedExpression, RuleStep } from '../global-types';
+import { isBoxedFunction, isBoxedSymbol } from '../boxed-expression/type-guards';
 
 /**
  * Infinity simplification rules consolidated from simplify-rules.ts.
@@ -18,7 +19,7 @@ export function simplifyInfinity(x: BoxedExpression): RuleStep | undefined {
   const ce = x.engine;
 
   // Handle Multiply with infinity
-  if (op === 'Multiply' && x.ops && x.ops.length === 2) {
+  if (op === 'Multiply' && isBoxedFunction(x) && x.ops.length === 2) {
     const [a, b] = x.ops;
 
     // Use isInfinity property to detect infinity values
@@ -111,7 +112,7 @@ export function simplifyInfinity(x: BoxedExpression): RuleStep | undefined {
   }
 
   // Handle Divide with infinity
-  if (op === 'Divide') {
+  if (op === 'Divide' && isBoxedFunction(x)) {
     const num = x.op1;
     const denom = x.op2;
 
@@ -162,22 +163,22 @@ export function simplifyInfinity(x: BoxedExpression): RuleStep | undefined {
   }
 
   // Handle Exp function with infinity
-  if (op === 'Exp') {
+  if (op === 'Exp' && isBoxedFunction(x)) {
     const arg = x.op1;
     if (arg) {
       // exp(+inf) -> +inf
-      if (arg.symbol === 'PositiveInfinity') {
+      if (isBoxedSymbol(arg) && arg.symbol === 'PositiveInfinity') {
         return { value: ce.PositiveInfinity, because: 'exp(+inf) -> +inf' };
       }
       // exp(-inf) -> 0
-      if (arg.symbol === 'NegativeInfinity') {
+      if (isBoxedSymbol(arg) && arg.symbol === 'NegativeInfinity') {
         return { value: ce.Zero, because: 'exp(-inf) -> 0' };
       }
     }
   }
 
   // Handle Power with infinity
-  if (op === 'Power') {
+  if (op === 'Power' && isBoxedFunction(x)) {
     const base = x.op1;
     const exp = x.op2;
 
@@ -191,11 +192,11 @@ export function simplifyInfinity(x: BoxedExpression): RuleStep | undefined {
       const expIsNegInf = expIsInf && exp.isNegative === true;
 
       // e^(+inf) -> +inf (handle exponential base explicitly)
-      if (base.symbol === 'ExponentialE' && expIsPosInf) {
+      if (isBoxedSymbol(base) && base.symbol === 'ExponentialE' && expIsPosInf) {
         return { value: ce.PositiveInfinity, because: 'e^(+inf) -> +inf' };
       }
       // e^(-inf) -> 0
-      if (base.symbol === 'ExponentialE' && expIsNegInf) {
+      if (isBoxedSymbol(base) && base.symbol === 'ExponentialE' && expIsNegInf) {
         return { value: ce.Zero, because: 'e^(-inf) -> 0' };
       }
 

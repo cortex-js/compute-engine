@@ -48,6 +48,11 @@ import { toAsciiMath } from './ascii-math';
 // Dynamic import for serializeJson to avoid circular dependency
 import { cmp, eq, same } from './compare';
 import { CancellationError } from '../../common/interruptible';
+import {
+  isBoxedSymbol,
+  isBoxedString,
+  isBoxedFunction,
+} from './type-guards';
 
 /**
  * _BoxedExpression
@@ -56,6 +61,8 @@ import { CancellationError } from '../../common/interruptible';
  */
 
 export abstract class _BoxedExpression implements BoxedExpression {
+  readonly _kind: string = 'expression';
+
   abstract readonly hash: number;
   abstract readonly json: Expression;
   abstract isCanonical: boolean;
@@ -461,12 +468,18 @@ export abstract class _BoxedExpression implements BoxedExpression {
     if (other === null || other === undefined) return false;
 
     if (typeof other === 'boolean') {
-      if (other === true) return this.value?.symbol === 'True';
-      if (other === false) return this.value?.symbol === 'False';
+      const val = this.value;
+      if (other === true)
+        return isBoxedSymbol(val) ? val.symbol === 'True' : false;
+      if (other === false)
+        return isBoxedSymbol(val) ? val.symbol === 'False' : false;
       return false;
     }
 
-    if (typeof other === 'string') return this.value?.string === other;
+    if (typeof other === 'string') {
+      const val = this.value;
+      return isBoxedString(val) ? val.string === other : false;
+    }
 
     return same(this, this.engine.box(other));
   }
@@ -798,7 +811,7 @@ export function getSubexpressions(
   name: MathJsonSymbol
 ): ReadonlyArray<BoxedExpression> {
   const result = !name || expr.operator === name ? [expr] : [];
-  if (expr.ops) {
+  if (isBoxedFunction(expr)) {
     for (const op of expr.ops) result.push(...getSubexpressions(op, name));
   }
   return result;
@@ -810,12 +823,13 @@ export function getSubexpressions(
  *
  */
 function getSymbols(expr: BoxedExpression, result: Set<string>): void {
-  if (expr.symbol) {
+  if (isBoxedSymbol(expr)) {
     result.add(expr.symbol);
     return;
   }
 
-  if (expr.ops) for (const op of expr.ops) getSymbols(op, result);
+  if (isBoxedFunction(expr))
+    for (const op of expr.ops) getSymbols(op, result);
 }
 
 /**
@@ -825,7 +839,7 @@ function getSymbols(expr: BoxedExpression, result: Set<string>): void {
  *
  */
 function getUnknowns(expr: BoxedExpression, result: Set<string>): void {
-  if (expr.symbol) {
+  if (isBoxedSymbol(expr)) {
     const s = expr.symbol;
     if (s === 'Unknown' || s === 'Undefined' || s === 'Nothing') return;
 
@@ -838,5 +852,6 @@ function getUnknowns(expr: BoxedExpression, result: Set<string>): void {
     return;
   }
 
-  if (expr.ops) for (const op of expr.ops) getUnknowns(op, result);
+  if (isBoxedFunction(expr))
+    for (const op of expr.ops) getUnknowns(op, result);
 }

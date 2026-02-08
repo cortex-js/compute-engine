@@ -1,5 +1,6 @@
 import { widen } from '../common/type/utils';
 import { BoxedExpression, CollectionHandlers } from './global-types';
+import { isBoxedFunction } from './boxed-expression/type-guards';
 
 /** If a collection has fewer than this many elements, eagerly evaluate it.
  *
@@ -144,8 +145,9 @@ function basicCollectionIndexWhere(
   expr: BoxedExpression,
   predicate: (element: BoxedExpression) => boolean
 ): number | undefined {
+  if (!isBoxedFunction(expr)) return undefined;
   for (let i = 0; i !== expr.nops; i += 1)
-    if (predicate(expr.ops![i]!)) return i + 1;
+    if (predicate(expr.ops[i]!)) return i + 1;
 
   return undefined;
 }
@@ -193,23 +195,24 @@ export function basicIndexedCollectionHandlers(): CollectionHandlers {
   return {
     isLazy: (_expr) => false,
 
-    count: (expr) => expr.nops,
+    count: (expr) => isBoxedFunction(expr) ? expr.nops : 0,
 
-    isEmpty: (expr) => expr.nops === 0,
+    isEmpty: (expr) => !isBoxedFunction(expr) || expr.nops === 0,
 
     isFinite: (_expr) => true,
 
-    contains: (expr, target) => expr.ops!.some((x) => x.isSame(target)),
+    contains: (expr, target) => isBoxedFunction(expr) ? expr.ops.some((x) => x.isSame(target)) : false,
 
     iterator: (expr) => {
+      if (!isBoxedFunction(expr)) return { next: () => ({ value: undefined, done: true as const }) };
       let index = 1;
       const last = expr.nops;
 
       return {
         next: () => {
-          if (index === last + 1) return { value: undefined, done: true };
+          if (index === last + 1) return { value: undefined, done: true as const };
           index += 1;
-          return { value: expr.ops![index - 1 - 1], done: false };
+          return { value: expr.ops[index - 1 - 1], done: false as const };
         },
       };
     },
@@ -220,10 +223,10 @@ export function basicIndexedCollectionHandlers(): CollectionHandlers {
       expr: BoxedExpression,
       index: number | string
     ): undefined | BoxedExpression => {
-      if (typeof index !== 'number') return undefined;
+      if (typeof index !== 'number' || !isBoxedFunction(expr)) return undefined;
       if (index < 0) index = expr.nops + index + 1;
       if (index < 1 || index > expr.nops) return undefined;
-      return expr.ops![index - 1];
+      return expr.ops[index - 1];
     },
 
     indexWhere: basicCollectionIndexWhere,
@@ -231,9 +234,9 @@ export function basicIndexedCollectionHandlers(): CollectionHandlers {
     eltsgn: (_expr) => undefined,
 
     elttype: (expr) => {
-      if (expr.nops === 0) return 'unknown';
-      if (expr.nops === 1) return expr.ops![0].type.type;
-      return widen(...expr.ops!.map((op) => op.type.type));
+      if (!isBoxedFunction(expr) || expr.nops === 0) return 'unknown';
+      if (expr.nops === 1) return expr.ops[0].type.type;
+      return widen(...expr.ops.map((op) => op.type.type));
     },
   };
 }

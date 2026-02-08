@@ -1,4 +1,5 @@
 import type { BoxedExpression, RuleStep } from '../global-types';
+import { isBoxedFunction, isBoxedSymbol } from '../boxed-expression/type-guards';
 
 /**
  * Hyperbolic trig simplification rules consolidated from simplify-rules.ts.
@@ -45,12 +46,12 @@ export function simplifyHyperbolic(x: BoxedExpression): RuleStep | undefined {
   const ce = x.engine;
 
   // Handle basic hyperbolic functions
-  if (HYPERBOLIC_FUNCS.has(op)) {
+  if (HYPERBOLIC_FUNCS.has(op) && isBoxedFunction(x)) {
     const arg = x.op1;
     if (!arg) return undefined;
 
     // Hyperbolic with infinity
-    if (arg.symbol === 'PositiveInfinity') {
+    if (isBoxedSymbol(arg) && arg.symbol === 'PositiveInfinity') {
       switch (op) {
         case 'Sinh':
           return { value: ce.PositiveInfinity, because: 'sinh(+inf) -> +inf' };
@@ -67,7 +68,7 @@ export function simplifyHyperbolic(x: BoxedExpression): RuleStep | undefined {
       }
     }
 
-    if (arg.symbol === 'NegativeInfinity') {
+    if (isBoxedSymbol(arg) && arg.symbol === 'NegativeInfinity') {
       switch (op) {
         case 'Sinh':
           return { value: ce.NegativeInfinity, because: 'sinh(-inf) -> -inf' };
@@ -91,7 +92,7 @@ export function simplifyHyperbolic(x: BoxedExpression): RuleStep | undefined {
     }
 
     // Odd/even function properties with negation
-    if (arg.operator === 'Negate') {
+    if (arg.operator === 'Negate' && isBoxedFunction(arg)) {
       const innerArg = arg.op1;
       if (innerArg) {
         // Odd functions: f(-x) = -f(x)
@@ -136,16 +137,16 @@ export function simplifyHyperbolic(x: BoxedExpression): RuleStep | undefined {
   }
 
   // Handle inverse hyperbolic functions
-  if (INVERSE_HYPERBOLIC.has(op)) {
+  if (INVERSE_HYPERBOLIC.has(op) && isBoxedFunction(x)) {
     const arg = x.op1;
     if (!arg) return undefined;
 
     // Inverse hyperbolic with infinity
     if (op === 'Arsinh') {
-      if (arg.symbol === 'PositiveInfinity') {
+      if (isBoxedSymbol(arg) && arg.symbol === 'PositiveInfinity') {
         return { value: ce.PositiveInfinity, because: 'arsinh(+inf) -> +inf' };
       }
-      if (arg.symbol === 'NegativeInfinity') {
+      if (isBoxedSymbol(arg) && arg.symbol === 'NegativeInfinity') {
         return { value: ce.NegativeInfinity, because: 'arsinh(-inf) -> -inf' };
       }
 
@@ -159,10 +160,10 @@ export function simplifyHyperbolic(x: BoxedExpression): RuleStep | undefined {
     }
 
     if (op === 'Arcosh') {
-      if (arg.symbol === 'PositiveInfinity') {
+      if (isBoxedSymbol(arg) && arg.symbol === 'PositiveInfinity') {
         return { value: ce.PositiveInfinity, because: 'arcosh(+inf) -> +inf' };
       }
-      if (arg.symbol === 'NegativeInfinity') {
+      if (isBoxedSymbol(arg) && arg.symbol === 'NegativeInfinity') {
         return { value: ce.NaN, because: 'arcosh(-inf) -> NaN' };
       }
 

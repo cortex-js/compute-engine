@@ -6,8 +6,10 @@ import type { Rational } from '../numerics/types';
 import { asRational } from './numerics';
 import { canonicalAngle, getImaginaryFactor } from './utils';
 import { apply, apply2 } from './apply';
+import { isBoxedNumber, isBoxedFunction, isBoxedSymbol } from './type-guards';
 
 function isSqrt(expr: BoxedExpression): boolean {
+  if (!isBoxedFunction(expr)) return false;
   return (
     expr.operator === 'Sqrt' ||
     (expr.operator === 'Power' && expr.op2.im === 0 && expr.op2.re === 0.5) ||
@@ -21,9 +23,9 @@ function isSqrt(expr: BoxedExpression): boolean {
 // : 1/sqrt(n), return 1/n
 // : (could do): sqrt(n)/m, return n/m^2
 export function asRadical(expr: BoxedExpression): Rational | null {
-  if (isSqrt(expr)) return asRational(expr.op1) ?? null;
+  if (isSqrt(expr) && isBoxedFunction(expr)) return asRational(expr.op1) ?? null;
 
-  if (expr.operator === 'Divide' && expr.op1.is(1) && isSqrt(expr.op2)) {
+  if (isBoxedFunction(expr) && expr.operator === 'Divide' && expr.op1.is(1) && isSqrt(expr.op2)) {
     const n = expr.op2.re;
     if (!Number.isInteger(n)) return null;
     return [1, n];
@@ -61,8 +63,8 @@ export function canonicalPower(
   const unchanged = () =>
     ce._fn('Power', [a, b], { canonical: fullyCanonical });
 
-  if (a.operator === 'Power') {
-    const [base, aPow] = a.ops!;
+  if (isBoxedFunction(a) && a.operator === 'Power') {
+    const [base, aPow] = a.ops;
     return ce._fn('Power', [
       base,
       ce.box(['Multiply', aPow, b], {
@@ -74,7 +76,7 @@ export function canonicalPower(
   // (a/b)^{-n} -> a^{-n} / b^{-n} = b^n / a^n
   // Only distribute when exponent is negative to normalize negative exponents on fractions
   // e.g., (a/b)^{-2} -> b^2 / a^2
-  if (a.operator === 'Divide' && a.op1 && a.op2 && b.isNegative === true) {
+  if (isBoxedFunction(a) && a.operator === 'Divide' && b.isNegative === true) {
     const num = a.op1;
     const denom = a.op2;
     // Use the pow function to recursively canonicalize
@@ -91,14 +93,14 @@ export function canonicalPower(
   // Negate... (However, provided that canonicalNumber provided prior, should not be missing anything
   // here)
   if (
-    b.isFunctionExpression ||
-    b.symbol !== undefined ||
+    isBoxedFunction(b) ||
+    isBoxedSymbol(b) ||
     !b.type.matches('number' as Type)
   )
     return unchanged();
 
   // Zero as base
-  if (a.isNumberLiteral && a.is(0)) {
+  if (isBoxedNumber(a) && a.is(0)) {
     if (b.type.matches('imaginary' as NumericPrimitiveType) || b.isNaN)
       return ce.NaN;
 
@@ -126,7 +128,7 @@ export function canonicalPower(
   //  'maybeNumber'?
   const aIsNum =
     a.type.matches('number' as NumericPrimitiveType) &&
-    (a.isFunctionExpression === false || a.operator === 'Negate');
+    (!isBoxedFunction(a) || a.operator === 'Negate');
 
   // Zero as exponent
   if (b.is(0)) {
@@ -170,7 +172,7 @@ export function canonicalPower(
       // (note: 0^∞ = 0, 1^∞ = NaN, covered prior)
 
       // e^∞ = ∞ (handle explicitly before general case)
-      if (a.symbol === 'ExponentialE') return ce.PositiveInfinity;
+      if (isBoxedSymbol(a) && a.symbol === 'ExponentialE') return ce.PositiveInfinity;
 
       // (-1)^∞ = NaN
       // Because of oscillations in the limit.
@@ -195,7 +197,7 @@ export function canonicalPower(
     // x^-oo
     if (b.isNegative) {
       // e^(-∞) = 0 (handle explicitly before general case)
-      if (a.symbol === 'ExponentialE') return ce.Zero;
+      if (isBoxedSymbol(a) && a.symbol === 'ExponentialE') return ce.Zero;
 
       if (a.is(-1)) return ce.NaN;
       //Same result for all infinity types...
@@ -218,7 +220,7 @@ export function canonicalPower(
   }
 
   //'AnyInfinity^b'
-  if (a.isNumberLiteral && a.isInfinity) {
+  if (isBoxedNumber(a) && a.isInfinity) {
     // Special handling for NegativeInfinity with integer/rational exponents
     if (a.isNegative) {
       // (-inf)^n for integer n
@@ -286,16 +288,18 @@ export function canonicalRoot(
   let exp: number | undefined = undefined;
   if (typeof b === 'number') exp = b;
   else {
-    if (b.isNumberLiteral && b.im === 0) exp = b.re;
+    if (isBoxedNumber(b) && b.im === 0) exp = b.re;
   }
 
   if (exp === 1) return a;
   if (exp === 2) {
-    if (a.isNumberLiteral && a.type.matches('rational')) {
+    if (isBoxedNumber(a) && a.type.matches('rational')) {
       if (a.re < SMALL_INTEGER) {
         const v = a.sqrt();
-        if (typeof v.numericValue === 'number') return v;
-        if (v.numericValue!.isExact) return v;
+        if (isBoxedNumber(v)) {
+          if (typeof v.numericValue === 'number') return v;
+          if (v.numericValue.isExact) return v;
+        }
       }
     }
     return ce._fn('Sqrt', [a], { canonical: a.isCanonical || a.isStructural });
@@ -332,7 +336,7 @@ export function pow(
   // If a numeric approximation is requested, we try to evaluate the expression
   //
   if (numericApproximation) {
-    if (x.isNumberLiteral) {
+    if (isBoxedNumber(x)) {
       if (typeof exp === 'number') {
         return (
           apply(
@@ -342,7 +346,7 @@ export function pow(
             (x) => x.pow(exp as number)
           ) ?? pow(x, exp, { numericApproximation: false })
         );
-      } else if (exp.isNumberLiteral)
+      } else if (isBoxedNumber(exp))
         return (
           apply2(
             x,
@@ -369,9 +373,9 @@ export function pow(
   const e = typeof exp === 'number' ? exp : exp.im === 0 ? exp.re : undefined;
 
   // @todo: this should be canonicalized to a number, so it should never happen here
-  if (x.symbol === 'ComplexInfinity') return ce.NaN;
+  if (isBoxedSymbol(x) && x.symbol === 'ComplexInfinity') return ce.NaN;
 
-  if (x.symbol === 'ExponentialE') {
+  if (isBoxedSymbol(x) && x.symbol === 'ExponentialE') {
     // Is the argument an imaginary or complex number?
     let theta = getImaginaryFactor(exp);
     if (theta !== undefined) {
@@ -388,31 +392,35 @@ export function pow(
         //   return ce._fn('Power', [ce.E, radiansToAngle(theta)!.mul(ce.I)]);
       }
     } else {
-      if (typeof exp === 'number') {
-        return ce.number(ce._numericValue(ce.E.N().numericValue!).pow(exp));
-      } else if (exp.isNumberLiteral) {
-        return ce.number(
-          ce._numericValue(ce.E.N().numericValue!).pow(exp.numericValue!)
-        );
+      const eN = ce.E.N();
+      const eNv = isBoxedNumber(eN) ? eN.numericValue : undefined;
+      if (eNv !== undefined) {
+        if (typeof exp === 'number') {
+          return ce.number(ce._numericValue(eNv).pow(exp));
+        } else if (isBoxedNumber(exp)) {
+          return ce.number(
+            ce._numericValue(eNv).pow(exp.numericValue)
+          );
+        }
       }
     }
   }
 
   // (a^b)^c -> a^(b*c)
-  if (x.operator === 'Power') {
-    const [base, power] = x.ops!;
+  if (isBoxedFunction(x) && x.operator === 'Power') {
+    const [base, power] = x.ops;
     return pow(base, power.mul(exp), { numericApproximation });
   }
 
   // (a/b)^c -> a^c / b^c
-  if (x.operator === 'Divide') {
-    const [num, denom] = x.ops!;
+  if (isBoxedFunction(x) && x.operator === 'Divide') {
+    const [num, denom] = x.ops;
     return pow(num, exp, { numericApproximation }).div(
       pow(denom, exp, { numericApproximation })
     );
   }
 
-  if (x.operator === 'Negate') {
+  if (isBoxedFunction(x) && x.operator === 'Negate') {
     // (-x)^n = (-1)^n x^n
     if (e !== undefined) {
       if (e % 2 === 0) return pow(x.op1, exp, { numericApproximation });
@@ -421,33 +429,33 @@ export function pow(
   }
 
   // (√a)^b -> a^(b/2) or √(a^b)
-  if (x.operator === 'Sqrt') {
+  if (isBoxedFunction(x) && x.operator === 'Sqrt') {
     if (e === 2) return x.op1;
     if (e !== undefined && e % 2 === 0) return x.op1.pow(e / 2);
     return pow(x.op1, exp, { numericApproximation }).sqrt();
   }
 
   // exp(a)^b -> e^(a*b)
-  if (x.operator === 'Exp')
+  if (isBoxedFunction(x) && x.operator === 'Exp')
     return pow(ce.E, x.op1.mul(exp), { numericApproximation });
 
   // (a*b)^c -> a^c * b^c
-  if (x.operator === 'Multiply') {
-    const ops = x.ops!.map((x) => pow(x, exp, { numericApproximation }));
+  if (isBoxedFunction(x) && x.operator === 'Multiply') {
+    const ops = x.ops.map((x) => pow(x, exp, { numericApproximation }));
     // return mul(...ops);  // don't call: infinite recursion
     return ce._fn('Multiply', ops);
   }
 
   // a^(b/c) -> root(a, c)^b if b = 1 or c = 1
-  if (typeof exp !== 'number' && exp.isNumberLiteral) {
+  if (typeof exp !== 'number' && isBoxedNumber(exp)) {
     const r = asRational(exp);
     if (r !== undefined && r[0] === 1)
       return root(x, ce.number(r[1]), { numericApproximation });
   }
 
   // (a^(1/b))^c -> a^(c/b)
-  if (x.operator === 'Root') {
-    const [base, root] = x.ops!;
+  if (isBoxedFunction(x) && x.operator === 'Root') {
+    const [base, root] = x.ops;
     return pow(base, ce.box(exp).div(root), { numericApproximation });
   }
 
@@ -455,10 +463,10 @@ export function pow(
   // We were not requested for a numeric approximation,
   // so we evaluate a numeric expression only if exact
   //
-  if (x.isNumberLiteral && Number.isInteger(e)) {
+  if (isBoxedNumber(x) && Number.isInteger(e)) {
     // x^e: evaluate if e is an integer and x is exact
 
-    const n = x.numericValue!;
+    const n = x.numericValue;
     if (typeof n === 'number') {
       return (
         apply(
@@ -485,7 +493,7 @@ export function root(
     return a.engine._fn('Root', [a, b], { canonical: false });
 
   if (numericApproximation) {
-    if (a.isNumberLiteral && b.isNumberLiteral) {
+    if (isBoxedNumber(a) && isBoxedNumber(b)) {
       // (-x)^n = (-1)^n x^n
       const isNegative = a.isNegative;
       const isEven = b.isEven;
@@ -515,7 +523,7 @@ export function root(
     }
   }
 
-  if (a.isNumberLiteral && b.isNumberLiteral && b.isInteger) {
+  if (isBoxedNumber(a) && isBoxedNumber(b) && b.isInteger) {
     const e = typeof b === 'number' ? b : b.im === 0 ? b.re : undefined;
 
     // a^(1/b): evaluate if b is an integer and a is exact
@@ -523,10 +531,10 @@ export function root(
     // @todo the result should always be exact if e is an integer
     if (e !== undefined) {
       if (typeof a.numericValue === 'number') {
-        const v = a.engine._numericValue(a.numericValue)?.root(e);
+        const v = a.engine._numericValue(a.numericValue).root(e);
         if (v?.isExact) return a.engine.number(v);
       } else {
-        const v = a.numericValue!.asExact?.root(e);
+        const v = a.numericValue.asExact?.root(e);
         if (v?.isExact) return a.engine.number(v);
       }
     }

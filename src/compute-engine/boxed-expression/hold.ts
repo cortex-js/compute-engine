@@ -1,6 +1,7 @@
 import type { BoxedExpression } from '../global-types';
 
 import { flattenOps } from './flatten';
+import { isBoxedFunction } from './type-guards';
 
 /** Apply the function `f` to each operand of the expression `expr`,
  * account for the 'lazy' property of the operator definition:
@@ -13,7 +14,7 @@ export function holdMap(
   expr: BoxedExpression,
   f: (x: BoxedExpression) => BoxedExpression | null
 ): ReadonlyArray<BoxedExpression> {
-  if (!expr.ops) return [];
+  if (!isBoxedFunction(expr)) return [];
 
   let xs = expr.ops;
 
@@ -36,7 +37,7 @@ export function holdMap(
     const h = x.operator;
     if (h === 'Hold') result.push(x);
     else {
-      const op = h === 'ReleaseHold' ? x.op1 : x;
+      const op = h === 'ReleaseHold' && isBoxedFunction(x) ? x.op1 : x;
       if (op) {
         const y = f(op);
         if (y !== null) result.push(y);
@@ -50,7 +51,7 @@ export async function holdMapAsync(
   expr: BoxedExpression,
   f: (x: BoxedExpression) => Promise<BoxedExpression | null>
 ): Promise<ReadonlyArray<BoxedExpression>> {
-  if (!expr.ops) return [];
+  if (!isBoxedFunction(expr)) return [];
 
   let xs = expr.ops;
 
@@ -73,7 +74,7 @@ export async function holdMapAsync(
     const h = x.operator;
     if (h === 'Hold') result.push(x);
     else {
-      const op = h === 'ReleaseHold' ? x.op1 : x;
+      const op = h === 'ReleaseHold' && isBoxedFunction(x) ? x.op1 : x;
       if (op) {
         const y = await f(op);
         if (y !== null) result.push(y);

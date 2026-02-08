@@ -6,6 +6,7 @@ import { isOperatorDef } from '../boxed-expression/utils';
 import { isFiniteIndexedCollection } from '../collection-utils';
 import { isRelationalOperator } from '../latex-syntax/utils';
 import { normalizeIndexingSet } from '../library/utils';
+import { isBoxedSymbol, isBoxedNumber, isBoxedString, isBoxedFunction } from '../boxed-expression/type-guards';
 
 import type { CompileTarget, TargetSource } from './types';
 
@@ -29,8 +30,8 @@ export class BaseCompiler {
     }
 
     // Is it a symbol?
-    const s = expr.symbol;
-    if (s !== undefined) {
+    if (isBoxedSymbol(expr)) {
+      const s = expr.symbol;
       const op = target.operators?.(s);
       if (op !== undefined) {
         // We're compiling something like "Add"
@@ -40,20 +41,23 @@ export class BaseCompiler {
     }
 
     // Is it a number?
-    if (expr.isNumberLiteral) {
+    if (isBoxedNumber(expr)) {
       if (expr.im !== 0) throw new Error('Complex numbers are not supported');
       return target.number(expr.re);
     }
 
     // Is it a string?
-    const str = expr.string;
-    if (str !== undefined) return target.string(str);
+    if (isBoxedString(expr)) {
+      return target.string(expr.string);
+    }
 
     // It must be a function expression...
+    if (!isBoxedFunction(expr))
+      throw new Error(`Cannot compile expression: "${expr.toString()}"`);
     return BaseCompiler.compileExpr(
       expr.engine,
       expr.operator,
-      expr.ops!,
+      expr.ops,
       prec,
       target
     );
@@ -130,7 +134,7 @@ export class BaseCompiler {
     // Handle special constructs
     if (h === 'Function') {
       // Anonymous function
-      const params = args.slice(1).map((x) => x.symbol);
+      const params = args.slice(1).map((x) => isBoxedSymbol(x) ? x.symbol : '_');
       return `((${params.join(', ')}) => ${BaseCompiler.compile(
         args[0].canonical,
         {
@@ -140,9 +144,9 @@ export class BaseCompiler {
       )})`;
     }
 
-    if (h === 'Declare') return `let ${args[0].symbol}`;
+    if (h === 'Declare') return `let ${isBoxedSymbol(args[0]) ? args[0].symbol : '_'}`;
     if (h === 'Assign')
-      return `${args[0].symbol} = ${BaseCompiler.compile(args[1], target)}`;
+      return `${isBoxedSymbol(args[0]) ? args[0].symbol : '_'} = ${BaseCompiler.compile(args[1], target)}`;
     if (h === 'Return')
       return `return ${BaseCompiler.compile(args[0], target)}`;
 
@@ -203,7 +207,10 @@ export class BaseCompiler {
     // Get all the Declare statements
     const locals: string[] = [];
     for (const arg of args) {
-      if (arg.operator === 'Declare') locals.push(arg.ops![0].symbol!);
+      if (arg.operator === 'Declare' && isBoxedFunction(arg)) {
+        const firstOp = arg.ops[0];
+        if (isBoxedSymbol(firstOp)) locals.push(firstOp.symbol);
+      }
     }
 
     if (args.length === 1 && locals.length === 0) {

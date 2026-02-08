@@ -2,18 +2,19 @@ import type {
   BoxedExpression,
   IComputeEngine as ComputeEngine,
 } from '../global-types';
+import { isBoxedNumber, isBoxedFunction } from './type-guards';
 import { addOrder, order } from './order';
 
 export function canonicalNegate(expr: BoxedExpression): BoxedExpression {
   // Negate(Negate(x)) -> x
   let sign = -1;
-  while (expr.operator === 'Negate') {
+  while (isBoxedFunction(expr) && expr.operator === 'Negate') {
     expr = expr.op1;
     sign = -sign;
   }
   if (sign === 1) return expr;
 
-  if (expr.isNumberLiteral) return expr.neg();
+  if (isBoxedNumber(expr)) return expr.neg();
 
   return expr.engine._fn('Negate', [expr]);
 }
@@ -28,33 +29,35 @@ export function canonicalNegate(expr: BoxedExpression): BoxedExpression {
 export function negate(expr: BoxedExpression): BoxedExpression {
   // Negate(Negate(x)) -> x
   let sign = -1;
-  while (expr.operator === 'Negate') {
+  while (isBoxedFunction(expr) && expr.operator === 'Negate') {
     expr = expr.op1;
     sign = -sign;
   }
   if (sign === 1) return expr;
 
-  if (expr.numericValue !== undefined) return expr.neg();
+  if (isBoxedNumber(expr)) return expr.neg();
 
   const ce = expr.engine;
 
-  // Negate(Subtract(a, b)) -> Subtract(b, a)
-  if (expr.operator === 'Subtract') return expr.op2.sub(expr.op1);
+  if (isBoxedFunction(expr)) {
+    // Negate(Subtract(a, b)) -> Subtract(b, a)
+    if (expr.operator === 'Subtract') return expr.op2.sub(expr.op1);
 
-  // Distribute over addition
-  // Negate(Add(a, b)) -> Add(Negate(a), Negate(b))
-  if (expr.operator === 'Add') {
-    const negated = expr.ops!.map((x) => negate(x));
-    return ce._fn('Add', [...negated].sort(addOrder));
+    // Distribute over addition
+    // Negate(Add(a, b)) -> Add(Negate(a), Negate(b))
+    if (expr.operator === 'Add') {
+      const negated = expr.ops.map((x) => negate(x));
+      return ce._fn('Add', [...negated].sort(addOrder));
+    }
+
+    // Distribute over multiplication
+    // Negate(Multiply(a, b)) -> Multiply(Negate(a), b)
+    if (expr.operator === 'Multiply') return negateProduct(ce, expr.ops);
+
+    // Distribute over division
+    // Negate(Divide(a, b)) -> Divide(Negate(a), b)
+    if (expr.operator === 'Divide') return negate(expr.op1).div(expr.op2);
   }
-
-  // Distribute over multiplication
-  // Negate(Multiply(a, b)) -> Multiply(Negate(a), b)
-  if (expr.operator === 'Multiply') return negateProduct(ce, expr.ops!);
-
-  // Distribute over division
-  // Negate(Divide(a, b)) -> Divide(Negate(a), b)
-  if (expr.operator === 'Divide') return negate(expr.op1).div(expr.op2);
 
   return ce._fn('Negate', [expr]);
 }
@@ -82,7 +85,7 @@ export function negateProduct(
   let done = false;
   // If there is `Negate` as one of the args, remove it
   for (const arg of args) {
-    if (!done && arg.operator === 'Negate') {
+    if (!done && isBoxedFunction(arg) && arg.operator === 'Negate') {
       done = true;
       if (!arg.op1.is(1)) result.push(arg.op1);
     } else result.push(arg);
@@ -92,7 +95,7 @@ export function negateProduct(
   if (!done) {
     result = [];
     for (const arg of args) {
-      if (done || (arg.numericValue === undefined && !arg.isInteger))
+      if (done || (!isBoxedNumber(arg) && !arg.isInteger))
         result.push(arg);
       else {
         done = true;
@@ -106,7 +109,7 @@ export function negateProduct(
   if (!done) {
     result = [];
     for (const arg of args) {
-      if (done || arg.numericValue === undefined || !arg.isNumber)
+      if (done || !isBoxedNumber(arg) || !arg.isNumber)
         result.push(arg);
       else {
         done = true;

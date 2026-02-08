@@ -13,6 +13,7 @@ import type {
   SequenceInfo,
 } from './global-types';
 import { isValueDef, updateDef } from './boxed-expression/utils';
+import { isBoxedSymbol, isBoxedNumber, isBoxedFunction } from './boxed-expression/type-guards';
 
 // ============================================================================
 // Sequence Registry (SUB-7: Introspection support)
@@ -245,9 +246,11 @@ function checkConstraints(
   const result = substituted.evaluate();
 
   // Check if result is truthy (non-zero number or True)
-  if (result.symbol === 'True') return true;
-  if (result.symbol === 'False') return false;
-  if (result.isNumberLiteral) return result.re !== 0;
+  if (isBoxedSymbol(result)) {
+    if (result.symbol === 'True') return true;
+    if (result.symbol === 'False') return false;
+  }
+  if (isBoxedNumber(result)) return result.re !== 0;
 
   // If we can't determine, assume constraints are not satisfied
   return false;
@@ -332,15 +335,15 @@ export function createSequenceHandler(
     // Extract indices from subscript
     let indices: number[];
 
-    if (subscript.operator === 'Sequence' && subscript.ops) {
+    if (subscript.operator === 'Sequence' && isBoxedFunction(subscript)) {
       // Multi-index: Subscript(P, Sequence(n, k))
       // Evaluate operands in case they contain unevaluated arithmetic (e.g., n-1)
       indices = subscript.ops.map((op) => op.evaluate().re);
-    } else if (subscript.operator === 'Tuple' && subscript.ops) {
+    } else if (subscript.operator === 'Tuple' && isBoxedFunction(subscript)) {
       // Multi-index after canonicalization: Subscript(P, Tuple(n, k))
       // Evaluate operands in case they contain unevaluated arithmetic (e.g., n-1)
       indices = subscript.ops.map((op) => op.evaluate().re);
-    } else if (subscript.operator === 'Delimiter' && subscript.ops) {
+    } else if (subscript.operator === 'Delimiter' && isBoxedFunction(subscript)) {
       // Alternative: Subscript(P, Delimiter(n, k))
       // Evaluate operands in case they contain unevaluated arithmetic (e.g., n-1)
       indices = subscript.ops.map((op) => op.evaluate().re);
@@ -415,11 +418,11 @@ export function createSequenceHandler(
       : substituted.evaluate();
 
     // Memoize valid numeric results
-    if (memo && result.isNumberLiteral) {
+    if (memo && isBoxedNumber(result)) {
       memo.set(memoKey, result);
     }
 
-    return result.isNumberLiteral ? result : undefined;
+    return isBoxedNumber(result) ? result : undefined;
   };
 }
 
@@ -649,13 +652,14 @@ export function containsSelfReference(
   expr: BoxedExpression,
   seqName: string
 ): boolean {
-  // Check if this is a Subscript with the sequence name as base
-  if (expr.operator === 'Subscript' && expr.op1?.symbol === seqName) {
-    return true;
-  }
+  if (isBoxedFunction(expr)) {
+    // Check if this is a Subscript with the sequence name as base
+    if (expr.operator === 'Subscript') {
+      const op1 = expr.op1;
+      if (isBoxedSymbol(op1) && op1.symbol === seqName) return true;
+    }
 
-  // Recursively check operands
-  if (expr.ops) {
+    // Recursively check operands
     return expr.ops.some((op) => containsSelfReference(op, seqName));
   }
 
@@ -670,7 +674,7 @@ export function extractIndexVariable(
   subscript: BoxedExpression
 ): string | undefined {
   // Simple symbol
-  if (subscript.symbol) return subscript.symbol;
+  if (isBoxedSymbol(subscript)) return subscript.symbol;
 
   // Look for symbols in expression
   const symbols = subscript.symbols;
@@ -907,7 +911,7 @@ export function generateSequenceTerms(
     const value = expr.evaluate();
 
     // Only include if we got a valid numeric result
-    if (value.isNumberLiteral) {
+    if (isBoxedNumber(value)) {
       terms.push(value);
     } else {
       // If any term fails to evaluate, return undefined

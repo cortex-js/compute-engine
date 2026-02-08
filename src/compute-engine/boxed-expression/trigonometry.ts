@@ -14,6 +14,7 @@ import type {
   Sign,
 } from '../global-types';
 import { asLatexString } from '../latex-syntax/utils';
+import { isBoxedNumber, isBoxedSymbol, isBoxedFunction } from './type-guards';
 
 type ConstructibleTrigValues = [
   [numerator: number, denominator: number],
@@ -519,10 +520,10 @@ export function processInverseFunction(
 ): BoxedExpression | undefined {
   if (xs.length !== 1 || !xs[0].isValid) return undefined;
   const expr = xs[0];
-  if (expr.operator === 'InverseFunction') return expr.op1.canonical;
+  if (expr.operator === 'InverseFunction' && isBoxedFunction(expr)) return expr.op1.canonical;
 
+  if (!isBoxedSymbol(expr)) return undefined;
   const name = expr.symbol;
-  if (typeof name !== 'string') return undefined;
 
   const newHead = inverseTrigFuncName(name);
   return newHead ? ce.symbol(newHead) : undefined;
@@ -694,7 +695,7 @@ export function constructibleValues(
   for (const [[n, d], value] of specialValues) {
     const r = value[operator];
     if (r && Math.abs(theta - (Math.PI * n) / d) <= 1e-12) {
-      if (r.symbol === 'ComplexInfinity') return r;
+      if (isBoxedSymbol(r) && r.symbol === 'ComplexInfinity') return r;
       return identitySign * sign < 0 ? r.neg() : r;
     }
   }
@@ -707,7 +708,7 @@ function quadrant(
   theta: BoxedExpression
 ): [number | undefined, number | undefined] {
   // theta = theta.N();
-  if (!theta.isValid || !theta.isNumberLiteral) return [undefined, undefined];
+  if (!theta.isValid || !isBoxedNumber(theta)) return [undefined, undefined];
   if (theta.im !== 0) return [undefined, undefined];
 
   // Normalize the angle to the range [0, 2π)

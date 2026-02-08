@@ -4,6 +4,12 @@ import type {
   Scope,
 } from '../global-types';
 
+import {
+  isBoxedNumber,
+  isBoxedSymbol,
+  isBoxedFunction,
+} from '../boxed-expression/type-guards';
+
 import { MAX_ITERATION } from '../numerics/numeric';
 import { fromRange, reduceCollection } from './collections';
 import { extractFiniteDomainWithReason } from './logic-analysis';
@@ -63,23 +69,30 @@ export function normalizeIndexingSet(
   indexingSet: BoxedExpression
 ): IndexingSet {
   console.assert(indexingSet?.operator === 'Limits');
+  console.assert(isBoxedFunction(indexingSet), 'Indexing set must be a function expression');
 
   let lower = 1;
   let upper = lower + MAX_ITERATION;
   let index: string | undefined = undefined;
   let isFinite = true;
-  index = indexingSet.op1.symbol!;
+
+  // We've asserted it's a function above; narrow the type
+  const fn = indexingSet as BoxedExpression & import('../global-types').FunctionInterface;
+  const op1 = fn.op1;
+  index = isBoxedSymbol(op1) ? op1.symbol : undefined;
   console.assert(index, 'Indexing set must have an index');
-  lower = Math.floor(indexingSet.op2.re);
+  lower = Math.floor(fn.op2.re);
   if (isNaN(lower)) lower = 1;
 
   if (!Number.isFinite(lower)) isFinite = false;
 
-  if (indexingSet.op3.symbol === 'Nothing' || indexingSet.op3.isInfinity) {
+  const op3 = fn.op3;
+  const op3Sym = isBoxedSymbol(op3) ? op3.symbol : undefined;
+  if (op3Sym === 'Nothing' || op3.isInfinity) {
     isFinite = false;
   } else {
-    if (!isNaN(indexingSet.op3.re))
-      upper = Math.floor(indexingSet.op3.re ?? upper);
+    if (!isNaN(op3.re))
+      upper = Math.floor(op3.re ?? upper);
     if (!Number.isFinite(upper)) isFinite = false;
   }
   if (!isFinite && Number.isFinite(lower)) upper = lower + MAX_ITERATION;
@@ -161,8 +174,9 @@ export function canonicalLimitsSequence(
     const op = ops[i];
     if (op.operator === 'Range') {
       // ["Range", 1, 10]
+      const rangeFn = op as BoxedExpression & import('../global-types').FunctionInterface;
       result.push(
-        canonicalLimits([ce.Nothing, op.op1, op.op2], options) ??
+        canonicalLimits([ce.Nothing, rangeFn.op1, rangeFn.op2], options) ??
           ce.error('missing')
       );
     } else if (
@@ -174,11 +188,12 @@ export function canonicalLimitsSequence(
       // ["Tuple", "n", 1, 10]
       // ["Limits", "n", 1, 10]
       // ["Hold", "x"]
-      result.push(canonicalLimits(op.ops!, options) ?? ce.error('missing'));
-    } else if (op.symbol) {
+      const fnOp = op as BoxedExpression & import('../global-types').FunctionInterface;
+      result.push(canonicalLimits(fnOp.ops, options) ?? ce.error('missing'));
+    } else if (isBoxedSymbol(op)) {
       // "x" or "1, 10"
-      if (ops[i + 1]?.isNumberLiteral) {
-        if (ops[i + 2]?.isNumberLiteral) {
+      if (isBoxedNumber(ops[i + 1])) {
+        if (isBoxedNumber(ops[i + 2])) {
           // "n", 1, 10
           result.push(
             canonicalLimits([op, ops[i + 1], ops[i + 2]], options) ??
@@ -211,8 +226,9 @@ export function canonicalLimits(
     // ["Limits", ["Hold", "n"]]
     // ["Limits", "10"] --> ???
     const op = ops[0];
-    if (op.symbol) return ce._fn('Limits', [op, ce.Nothing, ce.Nothing]);
-    if (op.operator === 'Hold') return canonicalLimits(op.ops!, { engine: ce });
+    if (isBoxedSymbol(op)) return ce._fn('Limits', [op, ce.Nothing, ce.Nothing]);
+    if (op.operator === 'Hold' && isBoxedFunction(op))
+      return canonicalLimits(op.ops, { engine: ce });
 
     // We didn't find a symbol, so we can't create a Limits expression
     return ce._fn('Limits', [ce.typeError('symbol', undefined, op)]);
@@ -224,10 +240,10 @@ export function canonicalLimits(
       // ["Limits", "n", 10]
       // ["Limits", ["Hold", "n"], 10]]
       // ["Limits", 0, 10]
-      if (ops[0].operator === 'Hold') {
+      if (ops[0].operator === 'Hold' && isBoxedFunction(ops[0])) {
         index = ops[0].op1;
         upper = ops[1].canonical;
-      } else if (ops[0].symbol) {
+      } else if (isBoxedSymbol(ops[0])) {
         index = ops[0];
         upper = ops[1].canonical;
       } else {
@@ -240,9 +256,9 @@ export function canonicalLimits(
       lower = ops[1]?.canonical ?? ce.Nothing;
       upper = ops[2]?.canonical ?? ce.Nothing;
     }
-    if (index.operator === 'Hold') index = index.op1;
+    if (index.operator === 'Hold' && isBoxedFunction(index)) index = index.op1;
 
-    if (!index.symbol) index = ce.typeError('symbol', index.type, index);
+    if (!isBoxedSymbol(index)) index = ce.typeError('symbol', index.type, index);
 
     return ce._fn('Limits', [index, lower, upper]);
   }
@@ -271,11 +287,11 @@ export function canonicalIndexingSet(
   // Handle Element expressions - preserve them in canonical form
   // e.g., ["Element", "n", ["Set", 1, 2, 3]]
   // or with condition: ["Element", "n", ["Set", 1, 2, 3], ["Greater", "n", 0]]
-  if (expr.operator === 'Element') {
+  if (expr.operator === 'Element' && isBoxedFunction(expr)) {
     const indexExpr = expr.op1;
     const collection = expr.op2;
     const condition = expr.op3; // Optional condition (EL-3)
-    if (!indexExpr?.symbol) return undefined;
+    if (!isBoxedSymbol(indexExpr)) return undefined;
     if (indexExpr.symbol !== 'Nothing') ce.declare(indexExpr.symbol, 'integer');
     if (condition) {
       return ce.function('Element', [
@@ -290,11 +306,11 @@ export function canonicalIndexingSet(
   // If this is already a canonical Limits expression, return it (after
   // canonicalizing its operands) so re-canonicalization paths (like `subs`)
   // preserve the bounds.
-  if (expr.operator === 'Limits') {
+  if (expr.operator === 'Limits' && isBoxedFunction(expr)) {
     const canonicalIndex = expr.op1.canonical;
     const canonicalLower = expr.op2?.canonical ?? ce.Nothing;
     const canonicalUpper = expr.op3?.canonical ?? ce.Nothing;
-    if (!canonicalIndex.symbol)
+    if (!isBoxedSymbol(canonicalIndex))
       return ce.function('Limits', [
         ce.typeError('symbol', undefined, canonicalIndex),
       ]);
@@ -311,16 +327,17 @@ export function canonicalIndexingSet(
     expr.operator === 'Pair' ||
     expr.operator === 'Single'
   ) {
+    if (!isBoxedFunction(expr)) return undefined;
     index = expr.op1;
-    lower = expr.ops![1]?.canonical ?? null;
-    upper = expr.ops![2]?.canonical ?? null;
+    lower = expr.ops[1]?.canonical ?? null;
+    upper = expr.ops[2]?.canonical ?? null;
   } else index = expr;
 
-  if (index.operator === 'Hold') index = index.op1;
+  if (index.operator === 'Hold' && isBoxedFunction(index)) index = index.op1;
 
-  if (!index.symbol) return undefined;
+  if (!isBoxedSymbol(index)) return undefined;
 
-  if (index.symbol && index.symbol !== 'Nothing')
+  if (index.symbol !== 'Nothing')
     ce.declare(index.symbol, 'integer');
 
   if (upper && lower) return ce.function('Limits', [index, lower, upper]);
@@ -527,7 +544,8 @@ function* reduceElementIndexingSets<T>(
         // converted to Limits form for iteration
         if (
           domainResult.reason === 'infinite-domain' &&
-          domainResult.domain?.symbol
+          domainResult.domain &&
+          isBoxedSymbol(domainResult.domain)
         ) {
           const limits = convertInfiniteSetToLimits(domainResult.domain.symbol);
           if (limits) {

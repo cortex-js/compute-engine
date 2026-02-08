@@ -17,6 +17,7 @@ import { NumericValue } from '../numeric-value/types';
 import { _BoxedOperatorDefinition } from './boxed-operator-definition';
 import { _BoxedValueDefinition } from './boxed-value-definition';
 import { _BoxedExpression } from './abstract-boxed-expression';
+import { isBoxedNumber, isBoxedFunction, isBoxedSymbol } from './type-guards';
 
 /**
  * Check if an expression contains symbolic transcendental functions of constants
@@ -40,7 +41,7 @@ export function hasSymbolicTranscendental(expr: BoxedExpression): boolean {
     'Tan',
     'Exp',
   ];
-  if (transcendentals.includes(op) && expr.op1?.isConstant) {
+  if (transcendentals.includes(op) && isBoxedFunction(expr) && expr.op1?.isConstant) {
     // Check if this transcendental simplifies to an exact rational value
     // (e.g., ln(e) = 1, sin(0) = 0). If so, it's not truly a
     // "symbolic transcendental" that needs to be preserved.
@@ -53,7 +54,7 @@ export function hasSymbolicTranscendental(expr: BoxedExpression): boolean {
     return true;
   }
   // Recursively check sub-expressions
-  if (expr.ops) {
+  if (isBoxedFunction(expr)) {
     for (const child of expr.ops) {
       if (hasSymbolicTranscendental(child)) return true;
     }
@@ -110,10 +111,10 @@ export function normalizedUnknownsForSolve(
 ): string[] {
   if (syms === null || syms === undefined) return [];
   if (typeof syms === 'string') return [syms];
-  if (isBoxedExpression(syms)) return normalizedUnknownsForSolve(syms.symbol);
+  if (isBoxedExpression(syms)) return normalizedUnknownsForSolve(isBoxedSymbol(syms) ? syms.symbol : undefined);
   if (typeof syms[Symbol.iterator] === 'function')
     return Array.from(syms as Iterable<any>).map((s) =>
-      typeof s === 'string' ? s : s.symbol
+      typeof s === 'string' ? s : (isBoxedSymbol(s) ? s.symbol : '')
     );
   return [];
 }
@@ -130,6 +131,7 @@ export function getLocalVariables(expr: BoxedExpression): string[] {
 }
 
 export function domainToType(expr: BoxedExpression): Type {
+  if (!isBoxedSymbol(expr)) return 'unknown';
   // if (expr.symbol === 'Booleans') return 'boolean';
   // if (expr.symbol === 'Strings') return 'string';
   if (expr.symbol === 'Numbers') return 'number';
@@ -178,7 +180,8 @@ export function canonicalAngle(
   if (k.isZero) return ce.number(t);
 
   const k2 = ce._numericValue(k.bignumRe ? k.bignumRe.mod(2) : k.re % 2);
-  return ce.number(t.add(ce.Pi.mul(k2).N().numericValue!));
+  const piMulK2N = ce.Pi.mul(k2).N();
+  return ce.number(t.add(isBoxedNumber(piMulK2N) ? piMulK2N.numericValue : 0));
 }
 
 /**
@@ -196,32 +199,32 @@ export function getImaginaryFactor(
 ): BoxedExpression | undefined {
   if (typeof expr === 'number') return undefined;
   const ce = expr.engine;
-  if (expr.symbol === 'ImaginaryUnit') return ce.One;
+  if (isBoxedSymbol(expr) && expr.symbol === 'ImaginaryUnit') return ce.One;
 
   if (expr.re === 0) return ce.number(expr.im!);
 
-  if (expr.operator === 'Negate') return getImaginaryFactor(expr.op1)?.neg();
+  if (isBoxedFunction(expr) && expr.operator === 'Negate') return getImaginaryFactor(expr.op1)?.neg();
 
-  if (expr.operator === 'Complex') {
+  if (isBoxedFunction(expr) && expr.operator === 'Complex') {
     if (expr.op1.is(0) && !isNaN(expr.op2.re)) return ce.number(expr.op2.re);
     return undefined;
   }
 
-  if (expr.operator === 'Multiply' && expr.nops === 2) {
-    const [op1, op2] = expr.ops!;
-    if (op1.symbol === 'ImaginaryUnit') return op2;
-    if (op2.symbol === 'ImaginaryUnit') return op1;
+  if (isBoxedFunction(expr) && expr.operator === 'Multiply' && expr.nops === 2) {
+    const [op1, op2] = expr.ops;
+    if (isBoxedSymbol(op1) && op1.symbol === 'ImaginaryUnit') return op2;
+    if (isBoxedSymbol(op2) && op2.symbol === 'ImaginaryUnit') return op1;
 
     // c * (bi)
-    if (op2.isNumberLiteral && op2.re === 0 && op2.im !== 0)
+    if (isBoxedNumber(op2) && op2.re === 0 && op2.im !== 0)
       return op1.mul(op2.im!);
 
     // (bi) * c
-    if (op1.isNumberLiteral && op1.re === 0 && op1.im !== 0)
+    if (isBoxedNumber(op1) && op1.re === 0 && op1.im !== 0)
       return op2.mul(op1.im!);
   }
 
-  if (expr.operator === 'Divide') {
+  if (isBoxedFunction(expr) && expr.operator === 'Divide') {
     const denom = expr.op2;
     if (denom.is(0)) return undefined;
     return getImaginaryFactor(expr.op1)?.div(denom);
@@ -243,11 +246,11 @@ export function isImaginaryUnit(expr: BoxedExpression): boolean {
   // Shortcut: boxed engine imaginary unit
   if (expr === engine.I) return true;
 
-  if (expr.isNumberLiteral) return expr.re === 0 && expr.im === 1;
+  if (isBoxedNumber(expr)) return expr.re === 0 && expr.im === 1;
 
   // !note: use 'isSame' instead of checking identity with 'I', to account for potential,
   // non-default definition of the imaginary unit
-  if (expr.symbol !== undefined) return expr.canonical.isSame(engine.I);
+  if (isBoxedSymbol(expr)) return expr.canonical.isSame(engine.I);
 
   // function/string/...
   return false;
@@ -261,41 +264,42 @@ export function getPiTerm(
   expr: BoxedExpression
 ): [k: NumericValue, t: NumericValue] {
   const ce = expr.engine;
-  if (expr.symbol === 'Pi') return [ce._numericValue(1), ce._numericValue(0)];
+  if (isBoxedSymbol(expr) && expr.symbol === 'Pi') return [ce._numericValue(1), ce._numericValue(0)];
 
-  if (expr.operator === 'Negate') {
-    const [k, t] = getPiTerm(expr.ops![0]);
+  if (isBoxedFunction(expr) && expr.operator === 'Negate') {
+    const [k, t] = getPiTerm(expr.ops[0]);
     return [k.neg(), t.neg()];
   }
 
-  if (expr.operator === 'Add' && expr.nops === 2) {
+  if (isBoxedFunction(expr) && expr.operator === 'Add' && expr.nops === 2) {
     const [k1, t1] = getPiTerm(expr.op1);
     const [k2, t2] = getPiTerm(expr.op2);
     return [k1.add(k2), t1.add(t2)];
   }
 
-  if (expr.operator === 'Multiply' && expr.nops === 2) {
-    if (expr.op1.isNumberLiteral) {
+  if (isBoxedFunction(expr) && expr.operator === 'Multiply' && expr.nops === 2) {
+    if (isBoxedNumber(expr.op1)) {
       const [k, t] = getPiTerm(expr.op2);
-      const n = expr.op1.numericValue!;
+      const n = expr.op1.numericValue;
       return [k.mul(n), t.mul(n)];
     }
-    if (expr.op2.isNumberLiteral) {
+    if (isBoxedNumber(expr.op2)) {
       const [k, t] = getPiTerm(expr.op1);
-      const n = expr.op2.numericValue!;
+      const n = expr.op2.numericValue;
       return [k.mul(n), t.mul(n)];
     }
   }
 
-  if (expr.operator === 'Divide') {
-    if (expr.op2.isNumberLiteral) {
+  if (isBoxedFunction(expr) && expr.operator === 'Divide') {
+    if (isBoxedNumber(expr.op2)) {
       const [k1, t1] = getPiTerm(expr.op1);
-      const d = expr.op2.numericValue!;
+      const d = expr.op2.numericValue;
       return [k1.div(d), t1.div(d)];
     }
   }
 
-  return [ce._numericValue(0), ce._numericValue(expr.N().numericValue ?? 0)];
+  const nVal = expr.N();
+  return [ce._numericValue(0), ce._numericValue(isBoxedNumber(nVal) ? nVal.numericValue : 0)];
 }
 
 export function isValidOperatorDef(

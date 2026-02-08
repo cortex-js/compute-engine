@@ -18,10 +18,9 @@ import { matchesNumber, matchesSymbol } from '../../math-json/utils';
  *
  */
 
-export class BoxedString
-  extends _BoxedExpression
-  implements StringInterface
-{
+export class BoxedString extends _BoxedExpression implements StringInterface {
+  override readonly _kind = 'string';
+
   [Symbol.toStringTag]: string = '[BoxedString]';
   private readonly _string: string;
   private _utf8Buffer?: Uint8Array | undefined;

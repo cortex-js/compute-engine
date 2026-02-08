@@ -4,6 +4,7 @@ import type {
 } from '../global-types';
 
 import { isRelationalOperator } from '../latex-syntax/utils';
+import { isBoxedFunction } from './type-guards';
 
 import { asSmallInteger } from './numerics';
 import { mul, expandProducts } from './arithmetic-mul-div';
@@ -75,7 +76,7 @@ function expandPower(
   }
   if (exp === 0) return ce.One;
   if (exp === 1) return expand(base);
-  if (base.operator === 'Negate') {
+  if (isBoxedFunction(base) && base.operator === 'Negate') {
     if (Number.isInteger(exp)) {
       const sign = exp % 2 === 0 ? 1 : -1;
       const result = expandPower(base.op1, exp);
@@ -88,7 +89,7 @@ function expandPower(
   console.assert(base.operator !== 'Subtract');
 
   // We can expand only if the expression is a power of a sum.
-  if (base.operator !== 'Add') return null;
+  if (!isBoxedFunction(base) || base.operator !== 'Add') return null;
 
   // Apply the multinomial theorem
   // https://en.wikipedia.org/wiki/Multinomial_theorem
@@ -101,7 +102,7 @@ function expandPower(
   // (a + b + c)^2 = (a + b + c) (a + b + c) = a^2 + b^2 + c^2 + 2ab + 2ac + 2bc
   // (a + b + c)^3 = (a + b + c) (a + b + c) (a + b + c) = a^3 + b^3 + c^3 + 3a^2b + 3a^2c + 3b^2a + 3b^2c + 3c^2a + 3c^2b + 6abc
 
-  const terms = base.ops!;
+  const terms = base.ops;
   const it = powers(terms.length, exp);
 
   const result: BoxedExpression[] = [];
@@ -132,8 +133,8 @@ export function expandFunction(
   if (h === 'Divide') {
     const num = expand(ops[0]);
     if (num === null) return null;
-    if (num.operator === 'Add')
-      return add(...num.ops!.map((x) => x.div(ops[1])));
+    if (isBoxedFunction(num) && num.operator === 'Add')
+      return add(...num.ops.map((x) => x.div(ops[1])));
     return ce._fn('Divide', [num, ops[1]]);
   }
 
@@ -185,13 +186,14 @@ export function expand(
   // Expand relational operators
   //
   if (isRelationalOperator(expr.operator)) {
+    const ops = isBoxedFunction(expr) ? expr.ops : [];
     return expr.engine._fn(
       expr.operator,
-      expr.ops!.map((x) => expand(x) ?? x)
+      ops.map((x) => expand(x) ?? x)
     );
   }
 
-  return expandFunction(expr.engine, expr.operator, expr.ops ?? []);
+  return expandFunction(expr.engine, expr.operator, isBoxedFunction(expr) ? expr.ops : []);
 }
 
 /**
@@ -200,7 +202,7 @@ export function expand(
  * `expand()` only expands the top level of the expression.
  */
 export function expandAll(expr: BoxedExpression): BoxedExpression | null {
-  if (!expr.operator || !expr.ops) return null;
+  if (!expr.operator || !isBoxedFunction(expr)) return null;
 
   const ops = expr.ops.map((x) => expandAll(x) ?? x);
 

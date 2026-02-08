@@ -6,6 +6,10 @@ import { parseType } from '../../common/type/parse';
 import { reduceType } from '../../common/type/reduce';
 import type { Type } from '../../common/type/types';
 import { flatten } from '../boxed-expression/flatten';
+import {
+  isBoxedFunction,
+  sym,
+} from '../boxed-expression/type-guards';
 import { validateArguments } from '../boxed-expression/validate';
 import {
   isFiniteIndexedCollection,
@@ -43,12 +47,12 @@ function listToIntervalInSetContext(
   expr: BoxedExpression
 ): BoxedExpression {
   // Transform List with 2 elements to closed Interval
-  if (expr.operator === 'List' && expr.nops === 2) {
+  if (expr.operator === 'List' && isBoxedFunction(expr) && expr.nops === 2) {
     return ce.function('Interval', [expr.op1.canonical, expr.op2.canonical]);
   }
 
   // Transform Tuple with 2 elements to open Interval
-  if (expr.operator === 'Tuple' && expr.nops === 2) {
+  if (expr.operator === 'Tuple' && isBoxedFunction(expr) && expr.nops === 2) {
     return ce.function('Interval', [
       ce.function('Open', [expr.op1.canonical]),
       ce.function('Open', [expr.op2.canonical]),
@@ -98,7 +102,7 @@ export const SETS_LIBRARY: SymbolDefinitions = {
           return true;
         return (
           other.type.matches(BoxedType.setNumber) &&
-          (!strict || other.symbol !== 'Numbers')
+          (!strict || sym(other) !== 'Numbers')
         );
       },
       eltsgn: () => 'unsigned',
@@ -121,7 +125,7 @@ export const SETS_LIBRARY: SymbolDefinitions = {
           return true;
         return (
           rhs.type.matches(BoxedType.setComplex) &&
-          (!strict || rhs.symbol !== 'ComplexNumbers')
+          (!strict || sym(rhs) !== 'ComplexNumbers')
         );
       },
       eltsgn: () => 'unsigned',
@@ -144,7 +148,7 @@ export const SETS_LIBRARY: SymbolDefinitions = {
           return true;
         return (
           rhs.type.matches(BoxedType.setComplex) &&
-          (!strict || rhs.symbol !== 'ComplexNumbers')
+          (!strict || sym(rhs) !== 'ComplexNumbers')
         );
       },
       eltsgn: () => 'unsigned',
@@ -164,7 +168,7 @@ export const SETS_LIBRARY: SymbolDefinitions = {
       contains: (_, x) => x.type.matches(BoxedType.setImaginary),
       subsetOf: (_, rhs, strict) =>
         rhs.type.matches(BoxedType.setImaginary) &&
-        (!strict || rhs.symbol !== 'ImaginaryNumbers'),
+        (!strict || sym(rhs) !== 'ImaginaryNumbers'),
       eltsgn: () => 'unsigned',
       elttype: () => 'imaginary',
     },
@@ -182,7 +186,7 @@ export const SETS_LIBRARY: SymbolDefinitions = {
       isFinite: () => false,
       subsetOf: (_, rhs, strict) =>
         rhs.type.matches(BoxedType.setReal) &&
-        (!strict || rhs.symbol !== 'RealNumbers'),
+        (!strict || sym(rhs) !== 'RealNumbers'),
       eltsgn: () => undefined,
       elttype: () => 'finite_real',
     },
@@ -200,7 +204,7 @@ export const SETS_LIBRARY: SymbolDefinitions = {
       isFinite: () => false,
       subsetOf: (_, rhs, strict) =>
         rhs.type.matches(BoxedType.setReal) &&
-        (!strict || rhs.symbol !== 'ExtendedRealNumbers'),
+        (!strict || sym(rhs) !== 'ExtendedRealNumbers'),
       eltsgn: () => undefined,
       elttype: () => 'real',
     },
@@ -220,7 +224,7 @@ export const SETS_LIBRARY: SymbolDefinitions = {
         if (rhs.operator === 'Range') return true;
         return (
           rhs.type.matches(BoxedType.setFiniteInteger) &&
-          (!strict || rhs.symbol !== 'Integers')
+          (!strict || sym(rhs) !== 'Integers')
         );
       },
       eltsgn: () => undefined,
@@ -242,7 +246,7 @@ export const SETS_LIBRARY: SymbolDefinitions = {
         if (rhs.operator === 'Range') return true;
         return (
           rhs.type.matches(BoxedType.setInteger) &&
-          (!strict || rhs.symbol !== 'ExtendedIntegers')
+          (!strict || sym(rhs) !== 'ExtendedIntegers')
         );
       },
       eltsgn: () => undefined,
@@ -262,7 +266,7 @@ export const SETS_LIBRARY: SymbolDefinitions = {
       contains: (_, x) => x.type.matches('finite_rational'),
       subsetOf: (_, rhs, strict) =>
         rhs.type.matches(BoxedType.setRational) &&
-        (!strict || rhs.symbol !== 'RationalNumbers'),
+        (!strict || sym(rhs) !== 'RationalNumbers'),
       eltsgn: () => undefined,
       elttype: () => 'finite_rational',
     },
@@ -280,7 +284,7 @@ export const SETS_LIBRARY: SymbolDefinitions = {
       isFinite: () => false,
       subsetOf: (_, rhs, strict) =>
         rhs.type.matches(BoxedType.setRational) &&
-        (!strict || rhs.symbol !== 'ExtendedRationalNumbers'),
+        (!strict || sym(rhs) !== 'ExtendedRationalNumbers'),
       eltsgn: () => undefined,
       elttype: () => 'rational',
     },
@@ -297,15 +301,18 @@ export const SETS_LIBRARY: SymbolDefinitions = {
       count: () => Infinity,
       contains: (_, x) => x.type.matches('real') && x.isNegative === true,
       subsetOf: (_, rhs, strict) => {
-        if (rhs.operator === 'Range' || rhs.operator === 'Linspace') {
-          const low = rhs.ops![0].re;
-          const high = rhs.ops![1].re;
+        if (
+          (rhs.operator === 'Range' || rhs.operator === 'Linspace') &&
+          isBoxedFunction(rhs)
+        ) {
+          const low = rhs.ops[0].re;
+          const high = rhs.ops[1].re;
           return low < 0 && high < 0;
         }
         return (
           rhs.type.matches(BoxedType.setReal) &&
           rhs.baseDefinition?.collection?.eltsgn?.(rhs) === 'negative' &&
-          (!strict || rhs.symbol !== 'NegativeNumbers')
+          (!strict || sym(rhs) !== 'NegativeNumbers')
         );
       },
 
@@ -327,16 +334,19 @@ export const SETS_LIBRARY: SymbolDefinitions = {
       isEmpty: () => false,
       isFinite: () => false,
       subsetOf: (_, rhs, strict) => {
-        if (rhs.operator === 'Range' || rhs.operator === 'Linspace') {
-          const low = rhs.ops![0].re;
-          const high = rhs.ops![1].re;
+        if (
+          (rhs.operator === 'Range' || rhs.operator === 'Linspace') &&
+          isBoxedFunction(rhs)
+        ) {
+          const low = rhs.ops[0].re;
+          const high = rhs.ops[1].re;
           return low >= 0 && high >= 0;
         }
 
         return (
           rhs.type.matches(BoxedType.setReal) &&
           rhs.baseDefinition?.collection?.eltsgn?.(rhs) === 'non-positive' &&
-          (!strict || rhs.symbol !== 'NonPositiveNumbers')
+          (!strict || sym(rhs) !== 'NonPositiveNumbers')
         );
       },
       eltsgn: () => 'non-positive',
@@ -357,15 +367,18 @@ export const SETS_LIBRARY: SymbolDefinitions = {
       isEmpty: () => false,
       isFinite: () => false,
       subsetOf: (_, rhs, strict) => {
-        if (rhs.operator === 'Range' || rhs.operator === 'Linspace') {
-          const low = rhs.ops![0].re;
-          const high = rhs.ops![1].re;
+        if (
+          (rhs.operator === 'Range' || rhs.operator === 'Linspace') &&
+          isBoxedFunction(rhs)
+        ) {
+          const low = rhs.ops[0].re;
+          const high = rhs.ops[1].re;
           return low <= 0 && high <= 0;
         }
         return (
           rhs.type.matches(BoxedType.setReal) &&
           rhs.baseDefinition?.collection?.eltsgn?.(rhs) === 'non-negative' &&
-          (!strict || rhs.symbol !== 'NonNegativeNumbers')
+          (!strict || sym(rhs) !== 'NonNegativeNumbers')
         );
       },
       eltsgn: () => 'non-negative',
@@ -384,15 +397,18 @@ export const SETS_LIBRARY: SymbolDefinitions = {
       contains: (_, x) => x.type.matches('real') && x.isPositive === true,
       count: () => Infinity,
       subsetOf: (_, rhs, strict) => {
-        if (rhs.operator === 'Range' || rhs.operator === 'Linspace') {
-          const low = rhs.ops![0].re;
-          const high = rhs.ops![1].re;
+        if (
+          (rhs.operator === 'Range' || rhs.operator === 'Linspace') &&
+          isBoxedFunction(rhs)
+        ) {
+          const low = rhs.ops[0].re;
+          const high = rhs.ops[1].re;
           return low > 0 && high > 0;
         }
         return (
           rhs.type.matches(BoxedType.setReal) &&
           rhs.baseDefinition?.collection?.eltsgn?.(rhs) === 'positive' &&
-          (!strict || rhs.symbol !== 'PositiveNumbers')
+          (!strict || sym(rhs) !== 'PositiveNumbers')
         );
       },
       eltsgn: () => 'positive',
@@ -412,16 +428,16 @@ export const SETS_LIBRARY: SymbolDefinitions = {
       isEmpty: () => false,
       isFinite: () => false,
       subsetOf: (_, rhs, strict) => {
-        if (rhs.operator === 'Range') {
-          const low = rhs.ops![0].re;
-          const high = rhs.ops![1].re;
+        if (rhs.operator === 'Range' && isBoxedFunction(rhs)) {
+          const low = rhs.ops[0].re;
+          const high = rhs.ops[1].re;
           return low < 0 && high < 0;
         }
 
         return (
           rhs.type.matches(BoxedType.setInteger) &&
           rhs.baseDefinition?.collection?.eltsgn?.(rhs) === 'negative' &&
-          (!strict || rhs.symbol !== 'NegativeIntegers')
+          (!strict || sym(rhs) !== 'NegativeIntegers')
         );
       },
       eltsgn: () => 'negative',
@@ -441,15 +457,15 @@ export const SETS_LIBRARY: SymbolDefinitions = {
       isEmpty: () => false,
       isFinite: () => false,
       subsetOf: (_, rhs, strict) => {
-        if (rhs.operator === 'Range') {
-          const low = rhs.ops![0].re;
-          const high = rhs.ops![1].re;
+        if (rhs.operator === 'Range' && isBoxedFunction(rhs)) {
+          const low = rhs.ops[0].re;
+          const high = rhs.ops[1].re;
           return low <= 0 && high <= 0;
         }
         return (
           rhs.type.matches(BoxedType.setInteger) &&
           rhs.baseDefinition?.collection?.eltsgn?.(rhs) === 'non-positive' &&
-          (!strict || rhs.symbol !== 'NonPositiveIntegers')
+          (!strict || sym(rhs) !== 'NonPositiveIntegers')
         );
       },
       eltsgn: () => 'non-positive',
@@ -469,15 +485,15 @@ export const SETS_LIBRARY: SymbolDefinitions = {
       isEmpty: () => false,
       isFinite: () => false,
       subsetOf: (_, rhs, strict) => {
-        if (rhs.operator === 'Range') {
-          const low = rhs.ops![0].re;
-          const high = rhs.ops![1].re;
+        if (rhs.operator === 'Range' && isBoxedFunction(rhs)) {
+          const low = rhs.ops[0].re;
+          const high = rhs.ops[1].re;
           return low > 0 && high > 0;
         }
         return (
           rhs.type.matches(BoxedType.setInteger) &&
           rhs.baseDefinition?.collection?.eltsgn?.(rhs) === 'non-negative' &&
-          (!strict || rhs.symbol !== 'NonNegativeIntegers')
+          (!strict || sym(rhs) !== 'NonNegativeIntegers')
         );
       },
       eltsgn: () => 'non-negative',
@@ -497,15 +513,15 @@ export const SETS_LIBRARY: SymbolDefinitions = {
       isEmpty: () => false,
       isFinite: () => false,
       subsetOf: (_, rhs, strict) => {
-        if (rhs.operator === 'Range') {
-          const low = rhs.ops![0].re;
-          const high = rhs.ops![1].re;
+        if (rhs.operator === 'Range' && isBoxedFunction(rhs)) {
+          const low = rhs.ops[0].re;
+          const high = rhs.ops[1].re;
           return low > 0 && high > 0;
         }
         return (
           rhs.type.matches(BoxedType.setInteger) &&
           rhs.baseDefinition?.collection?.eltsgn?.(rhs) === 'positive' &&
-          (!strict || rhs.symbol !== 'PositiveIntegers')
+          (!strict || sym(rhs) !== 'PositiveIntegers')
         );
       },
       eltsgn: () => 'positive',
@@ -547,7 +563,7 @@ export const SETS_LIBRARY: SymbolDefinitions = {
       // Validate collection type
       if (
         !canonicalCollection.type.matches('collection') &&
-        !canonicalCollection.symbol &&
+        !sym(canonicalCollection) &&
         !canonicalCollection.isValid
       ) {
         return ce._fn('Element', [
@@ -562,7 +578,7 @@ export const SETS_LIBRARY: SymbolDefinitions = {
       }
 
       // Validate optional third argument
-      if (condition && condition.symbol !== 'Nothing') {
+      if (condition && sym(condition) !== 'Nothing') {
         if (!condition.type.matches('boolean')) {
           return ce._fn('Element', [
             value.canonical,
@@ -595,7 +611,7 @@ export const SETS_LIBRARY: SymbolDefinitions = {
 
       // Support type-style membership checks, e.g. Element(x, finite_real) or
       // Element(x, Integers). Try to interpret the collection as a type.
-      const typeName = collection?.symbol;
+      const typeName = sym(collection);
       if (typeName) {
         try {
           const type = ce.type(typeName);
@@ -625,7 +641,7 @@ export const SETS_LIBRARY: SymbolDefinitions = {
       if (result === false) return ce.True;
 
       // Support type-style membership checks, e.g. NotElement(x, real).
-      const typeName = collection.symbol;
+      const typeName = sym(collection);
       if (typeName) {
         const type = ce.type(typeName);
         if (!type.isUnknown) {
@@ -784,15 +800,18 @@ export const SETS_LIBRARY: SymbolDefinitions = {
       'Return the elements of the first set that are not in any of the subsequent sets.',
     collection: {
       contains: (expr, x) => {
-        const [col, ...others] = expr.ops!;
+        if (!isBoxedFunction(expr)) return false;
+        const [col, ...others] = expr.ops;
         return (
           (col.contains(x) ?? false) && others.every((set) => !set.contains(x))
         );
       },
-      count: (expr) =>
-        countMatchingElements(expr, (elem) =>
-          expr.ops!.slice(1).every((set) => !set.contains(elem))
-        ),
+      count: (expr) => {
+        if (!isBoxedFunction(expr)) return 0;
+        return countMatchingElements(expr, (elem) =>
+          expr.ops.slice(1).every((set) => !set.contains(elem))
+        );
+      },
 
       iterator: complementIterator,
     },
@@ -821,10 +840,12 @@ export const SETS_LIBRARY: SymbolDefinitions = {
     evaluate: intersection,
     collection: {
       contains: containsAll,
-      count: (expr) =>
-        countMatchingElements(expr, (elem) =>
-          expr.ops!.slice(1).every((op) => op.contains(elem))
-        ),
+      count: (expr) => {
+        if (!isBoxedFunction(expr)) return 0;
+        return countMatchingElements(expr, (elem) =>
+          expr.ops.slice(1).every((op) => op.contains(elem))
+        );
+      },
       iterator: intersectionIterator,
     },
   },
@@ -857,13 +878,16 @@ export const SETS_LIBRARY: SymbolDefinitions = {
     // that is a union of collections with more than MAX_SIZE_EAGER_COLLECTION
     // elements. Otherwise, when we evaluated the union, we got a set literal.
     collection: {
-      contains: (col, x) => col.ops!.some((op) => op.contains(x)),
+      contains: (col, x) =>
+        isBoxedFunction(col) && col.ops.some((op) => op.contains(x)),
       count: (col) =>
         countMatchingUnion(col, (elem, seen) =>
           seen.every((e) => !e.contains(elem))
         ),
-      isEmpty: (col) => col.ops!.every((op) => op.isEmptyCollection),
-      isFinite: (col) => col.ops!.every((op) => op.isFiniteCollection),
+      isEmpty: (col) =>
+        isBoxedFunction(col) && col.ops.every((op) => op.isEmptyCollection),
+      isFinite: (col) =>
+        isBoxedFunction(col) && col.ops.every((op) => op.isFiniteCollection),
       iterator: unionIterator,
     },
   },
@@ -876,16 +900,19 @@ export const SETS_LIBRARY: SymbolDefinitions = {
     evaluate: setMinus,
     collection: {
       contains: (expr, x) => {
-        const [col, ...values] = expr.ops!;
+        if (!isBoxedFunction(expr)) return false;
+        const [col, ...values] = expr.ops;
         return (
           (col.contains(x) ?? false) && !values.some((val) => val.isSame(x))
         );
       },
-      count: (expr) =>
-        countMatchingElements(expr, (elem) => {
-          const [_col, ...values] = expr.ops!;
+      count: (expr) => {
+        if (!isBoxedFunction(expr)) return 0;
+        return countMatchingElements(expr, (elem) => {
+          const [_col, ...values] = expr.ops;
           return !values.some((val) => val.isSame(elem));
-        }),
+        });
+      },
       iterator: setMinusIterator,
     },
   },
@@ -899,18 +926,21 @@ export const SETS_LIBRARY: SymbolDefinitions = {
       'Return the symmetric difference of two sets (elements in either set but not both).',
     collection: {
       contains: (expr, x) => {
-        const [a, b] = expr.ops!;
+        if (!isBoxedFunction(expr)) return false;
+        const [a, b] = expr.ops;
         const inA = a.contains(x) ?? false;
         const inB = b.contains(x) ?? false;
         return (inA && !inB) || (!inA && inB);
       },
-      count: (expr) =>
-        countMatchingElements(expr, (elem) => {
-          const [a, b] = expr.ops!;
+      count: (expr) => {
+        if (!isBoxedFunction(expr)) return 0;
+        return countMatchingElements(expr, (elem) => {
+          const [a, b] = expr.ops;
           const inA = a.contains(elem) ?? false;
           const inB = b.contains(elem) ?? false;
           return (inA && !inB) || (!inA && inB);
-        }),
+        });
+      },
       iterator: symmetricDifferenceIterator,
     },
   },
@@ -953,7 +983,8 @@ function intersection(
   { engine: ce }: { engine: ComputeEngine }
 ): BoxedExpression {
   // @fixme: need to account for eager/lazy collections. See Union
-  let elements: BoxedExpression[] = [...(ops[0].ops ?? [])];
+  const firstOps = isBoxedFunction(ops[0]) ? ops[0].ops : [];
+  let elements: BoxedExpression[] = [...firstOps];
 
   // Remove elements that are not in all the other sets
   for (const op of ops.slice(1)) {
@@ -1053,8 +1084,9 @@ function* integerRangeIterator(
 function* unionIterator(
   col: BoxedExpression
 ): Generator<BoxedExpression, undefined, any> {
+  if (!isBoxedFunction(col)) return;
   const seen: BoxedExpression[] = [];
-  for (const op of col.ops!) {
+  for (const op of col.ops) {
     for (const elem of op.each()) {
       if (seen.every((e) => !e.contains(elem))) {
         yield elem;
@@ -1067,7 +1099,8 @@ function* unionIterator(
 function* setMinusIterator(
   expr: BoxedExpression
 ): Generator<BoxedExpression, undefined, any> {
-  const [col, ...values] = expr.ops!;
+  if (!isBoxedFunction(expr)) return;
+  const [col, ...values] = expr.ops;
   for (const elem of col.each()) {
     if (!values.some((val) => val.isSame(elem))) {
       yield elem;
@@ -1077,7 +1110,8 @@ function* setMinusIterator(
 function* complementIterator(
   expr: BoxedExpression
 ): Generator<BoxedExpression, undefined, any> {
-  const [col, ...others] = expr.ops!;
+  if (!isBoxedFunction(expr)) return;
+  const [col, ...others] = expr.ops;
   for (const elem of col.each()) {
     if (others.every((set) => !set.contains(elem))) {
       yield elem;
@@ -1088,8 +1122,9 @@ function* complementIterator(
 function* intersectionIterator(
   expr: BoxedExpression
 ): Generator<BoxedExpression, undefined, any> {
-  for (const elem of expr.ops![0].each()) {
-    if (expr.ops!.slice(1).every((op) => op.contains(elem))) {
+  if (!isBoxedFunction(expr)) return;
+  for (const elem of expr.ops[0].each()) {
+    if (expr.ops.slice(1).every((op) => op.contains(elem))) {
       yield elem;
     }
   }
@@ -1097,7 +1132,8 @@ function* intersectionIterator(
 function* symmetricDifferenceIterator(
   expr: BoxedExpression
 ): Generator<BoxedExpression, undefined, any> {
-  const [a, b] = expr.ops!;
+  if (!isBoxedFunction(expr)) return;
+  const [a, b] = expr.ops;
   for (const elem of a.each()) {
     if (!(b.contains(elem) ?? false)) {
       yield elem;
@@ -1115,9 +1151,10 @@ function countMatchingElements(
   expr: BoxedExpression,
   filter: (elem: BoxedExpression) => boolean
 ): number {
-  if (expr.ops!.some((op) => op.count === Infinity)) return Infinity;
+  if (!isBoxedFunction(expr)) return 0;
+  if (expr.ops.some((op) => op.count === Infinity)) return Infinity;
   let count = 0;
-  for (const elem of expr.ops![0].each()) {
+  for (const elem of expr.ops[0].each()) {
     if (filter(elem)) count += 1;
   }
   return count;
@@ -1127,10 +1164,11 @@ function countMatchingUnion(
   expr: BoxedExpression,
   isUnique: (elem: BoxedExpression, seen: BoxedExpression[]) => boolean
 ): number {
-  if (expr.ops!.some((op) => op.count === Infinity)) return Infinity;
+  if (!isBoxedFunction(expr)) return 0;
+  if (expr.ops.some((op) => op.count === Infinity)) return Infinity;
   const seen: BoxedExpression[] = [];
   let count = 0;
-  for (const op of expr.ops!) {
+  for (const op of expr.ops) {
     for (const elem of op.each()) {
       if (isUnique(elem, seen)) count += 1;
     }
@@ -1140,5 +1178,6 @@ function countMatchingUnion(
 }
 
 function containsAll(expr: BoxedExpression, x: BoxedExpression): boolean {
-  return expr.ops!.every((op) => op.contains(x) ?? false);
+  if (!isBoxedFunction(expr)) return false;
+  return expr.ops.every((op) => op.contains(x) ?? false);
 }

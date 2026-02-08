@@ -8,13 +8,14 @@ import { permutations } from '../../common/utils';
 
 import { isWildcard, wildcardName, wildcardType } from './pattern-utils';
 import { isOperatorDef } from './utils';
+import { isBoxedNumber, isBoxedFunction, isBoxedSymbol, isBoxedString } from './type-guards';
 
 function hasWildcards(expr: string | BoxedExpression): boolean {
   if (typeof expr === 'string') return expr.startsWith('_');
 
   if (isWildcard(expr)) return true;
 
-  if (expr.ops)
+  if (isBoxedFunction(expr))
     return hasWildcards(expr.operator) || expr.ops.some(hasWildcards);
 
   return false;
@@ -90,8 +91,8 @@ function matchOnce(
   //
   // Match a number
   //
-  if (pattern.numericValue !== undefined) {
-    if (expr.numericValue === undefined) return null;
+  if (isBoxedNumber(pattern)) {
+    if (!isBoxedNumber(expr)) return null;
     if (pattern.isEqual(expr)) return substitution;
 
     // Attempt to match the expression to a variant of the pattern
@@ -104,15 +105,17 @@ function matchOnce(
   //
   // Match a string
   //
-  const str = pattern.string;
-  if (str !== undefined) return expr.string === str ? substitution : null;
+  if (isBoxedString(pattern)) {
+    const str = pattern.string;
+    return (isBoxedString(expr) && expr.string === str) ? substitution : null;
+  }
 
   //
   // Match a symbol
   //
-  const symbol = pattern.symbol;
-  if (symbol !== undefined) {
-    if (symbol === expr.symbol) return substitution;
+  if (isBoxedSymbol(pattern)) {
+    const symbol = pattern.symbol;
+    if (isBoxedSymbol(expr) && symbol === expr.symbol) return substitution;
     // Match the symbol to a variant of the pattern
     // (e.g. `x` to `0+x`).
     if (!acceptVariants) return null;
@@ -123,7 +126,7 @@ function matchOnce(
   // Match a function
   //
 
-  if (pattern.ops) {
+  if (isBoxedFunction(pattern)) {
     const useVariations = options.useVariations ?? false;
     const ce = expr.engine;
 
@@ -135,7 +138,7 @@ function matchOnce(
     // This allows patterns like ['Divide', '_num', '_den'] to match rationals like 3/2
     if (
       operator === 'Divide' &&
-      expr.numericValue !== undefined &&
+      isBoxedNumber(expr) &&
       !expr.denominator.is(1)
     ) {
       // Create a synthetic Divide expression to match against
@@ -149,14 +152,14 @@ function matchOnce(
 
     // Special case: Match Multiply(Rational(1, n), x) against a Divide pattern
     // This handles cases like x/2 which is canonicalized as x * (1/2)
-    if (operator === 'Divide' && expr.operator === 'Multiply') {
-      const ops = expr.ops!;
+    if (operator === 'Divide' && isBoxedFunction(expr) && expr.operator === 'Multiply') {
+      const ops = expr.ops;
       for (let i = 0; i < ops.length; i++) {
         const op = ops[i];
 
         // Check if op is a rational number with numerator 1 (i.e., 1/n form)
         if (
-          op.numericValue !== undefined &&
+          isBoxedNumber(op) &&
           op.numerator.is(1) &&
           !op.denominator.is(1)
         ) {
@@ -165,7 +168,7 @@ function matchOnce(
           const numerator =
             others.length === 1
               ? others[0]
-              : ce.function('Multiply', others, { form: 'raw' });
+              : ce.function('Multiply', [...others], { form: 'raw' });
 
           // Create a synthetic Divide expression to match against
           const divideExpr = ce.function(
@@ -186,7 +189,7 @@ function matchOnce(
 
     // Special case: Match Divide(1, x) against a Power pattern
     // This handles cases like x^-1 which is canonicalized as 1/x
-    if (operator === 'Power' && expr.operator === 'Divide' && expr.op1.is(1)) {
+    if (operator === 'Power' && isBoxedFunction(expr) && expr.operator === 'Divide' && expr.op1.is(1)) {
       // Create a synthetic Power expression: Power(x, -1)
       const powerExpr = ce.function('Power', [expr.op2, ce.number(-1)], {
         form: 'structural',
@@ -202,7 +205,7 @@ function matchOnce(
 
     // Special case: Match Root(x, n) against a Power pattern
     // This handles cases like x^(1/3) which is canonicalized as Root(x, 3)
-    if (operator === 'Power' && expr.operator === 'Root') {
+    if (operator === 'Power' && isBoxedFunction(expr) && expr.operator === 'Root') {
       // Create a synthetic Power expression: Power(x, 1/n)
       const powerExpr = ce.function(
         'Power',
@@ -248,7 +251,7 @@ function matchOnce(
     if (result !== null) substitution = result;
 
     // If requested, try to match the pattern recursively
-    if (options.recursive && expr.ops)
+    if (options.recursive && isBoxedFunction(expr))
       result =
         matchRecursive(expr, pattern, substitution, {
           ...options,
@@ -272,9 +275,10 @@ function matchRecursive(
     acceptVariants?: boolean;
   }
 ): BoxedSubstitution | null {
-  console.assert(expr.ops !== undefined);
+  console.assert(isBoxedFunction(expr));
+  if (!isBoxedFunction(expr)) return null;
   let result: BoxedSubstitution | null = null;
-  for (const op of expr.ops!) {
+  for (const op of expr.ops) {
     const r = matchOnce(op, pattern, substitution, options);
     if (r !== null) {
       result = r;
@@ -313,7 +317,7 @@ function matchVariations(
 
   if (operator === 'Negate') {
     // 0 -> -x (if x=0)
-    if (expr.is(0))
+    if (expr.is(0) && isBoxedFunction(pattern))
       return matchOnce(ce.Zero, pattern.op1, substitution, varOptions);
   }
 
@@ -323,8 +327,8 @@ function matchVariations(
     if (result !== null) return result;
 
     // a-b -> a+(-b)
-    if (expr.operator === 'Subtract')
-      result = matchVariation('Add', [expr.op1!, ['Negate', expr.op2!]]);
+    if (isBoxedFunction(expr) && expr.operator === 'Subtract')
+      result = matchVariation('Add', [expr.op1, ['Negate', expr.op2]]);
 
     if (result !== null) return result;
   }
@@ -336,8 +340,8 @@ function matchVariations(
     if (result !== null) return result;
 
     // -a -> 0-a
-    if (expr.operator === 'Negate')
-      result = matchVariation('Subtract', [0, expr.op1!]);
+    if (isBoxedFunction(expr) && expr.operator === 'Negate')
+      result = matchVariation('Subtract', [0, expr.op1]);
 
     if (result !== null) return result;
   }
@@ -349,16 +353,16 @@ function matchVariations(
     if (result !== null) return result;
 
     // -x -> -1*x
-    if (expr.operator === 'Negate') {
-      result = matchVariation('Multiply', [-1, expr.op1!]);
+    if (isBoxedFunction(expr) && expr.operator === 'Negate') {
+      result = matchVariation('Multiply', [-1, expr.op1]);
       if (result !== null) return result;
     }
 
     // x/a -> (1/a)*x
-    if (expr.operator === 'Divide') {
+    if (isBoxedFunction(expr) && expr.operator === 'Divide') {
       result = matchVariation('Multiply', [
-        expr.op1!,
-        ['Divide', 1, expr.op2!],
+        expr.op1,
+        ['Divide', 1, expr.op2],
       ]);
       if (result !== null) return result;
     }
@@ -382,14 +386,14 @@ function matchVariations(
     if (result !== null) return result;
   }
 
-  if (operator === 'Power') {
+  if (operator === 'Power' && isBoxedFunction(pattern)) {
     // Square(x) -> Power(x, 2)
     if (pattern.op2.re === 2 && pattern.op2.im === 0) {
       const result = matchVariation('Square', [expr]);
       if (result !== null) return result;
     }
     // Exp(x) -> Power(E, x)
-    if (pattern.op1.symbol === 'ExponentialE') {
+    if (isBoxedSymbol(pattern.op1) && pattern.op1.symbol === 'ExponentialE') {
       const result = matchVariation('Exp', [expr]);
       if (result !== null) return result;
     }
@@ -425,9 +429,11 @@ function matchPermutation(
   options: PatternMatchOptions
 ): BoxedSubstitution | null {
   console.assert(expr.operator === pattern.operator);
+  console.assert(isBoxedFunction(expr) && isBoxedFunction(pattern));
+  if (!isBoxedFunction(expr) || !isBoxedFunction(pattern)) return null;
 
-  const patternOps = pattern.ops!;
-  const exprOps = expr.ops!;
+  const patternOps = pattern.ops;
+  const exprOps = expr.ops;
 
   // === Phase 1.1: Arity Guard ===
   // Count wildcard types in pattern for early rejection
@@ -579,19 +585,17 @@ const MAX_COMBINATIONS = 1000;
  * - Complex expressions: lower specificity
  */
 function anchorSpecificity(anchor: BoxedExpression): number {
-  if (anchor.isNumberLiteral) return 100;
-  if (anchor.symbol) return 80;
-  if (anchor.string !== undefined) return 90;
+  if (isBoxedNumber(anchor)) return 100;
+  if (isBoxedSymbol(anchor)) return 80;
+  if (isBoxedString(anchor)) return 90;
   // Functions - specificity based on depth/complexity
-  if (anchor.operator) {
+  if (isBoxedFunction(anchor)) {
     // More operands = more specific
-    const opCount = anchor.nops ?? 0;
+    const opCount = anchor.nops;
     // Count non-wildcard children for extra specificity
     let nonWildcardChildren = 0;
-    if (anchor.ops) {
-      for (const op of anchor.ops) {
-        if (wildcardType(op) === null) nonWildcardChildren++;
-      }
+    for (const op of anchor.ops) {
+      if (wildcardType(op) === null) nonWildcardChildren++;
     }
     return 50 + opCount + nonWildcardChildren * 5;
   }
@@ -605,8 +609,9 @@ function matchCommutativeWithAnchors(
   options: PatternMatchOptions
 ): BoxedSubstitution | null {
   const ce = expr.engine;
-  const patternOps = pattern.ops!;
-  const exprOps = [...expr.ops!];
+  if (!isBoxedFunction(expr) || !isBoxedFunction(pattern)) return null;
+  const patternOps = pattern.ops;
+  const exprOps = [...expr.ops];
 
   // Categorize pattern operands
   const anchors: BoxedExpression[] = [];
@@ -889,14 +894,15 @@ function matchArguments(
   options: PatternMatchOptions
 ): BoxedSubstitution | null {
   if (patterns.length === 0) {
-    if (expr.ops && expr.ops.length === 0) return substitution;
+    if (isBoxedFunction(expr) && expr.ops.length === 0) return substitution;
     return null;
   }
 
   const ce = patterns[0].engine;
 
   // We're going to consume the ops array, so make a copy
-  const ops = [...expr.ops!];
+  if (!isBoxedFunction(expr)) return null;
+  const ops = [...expr.ops];
 
   return matchRemaining(patterns, substitution);
 

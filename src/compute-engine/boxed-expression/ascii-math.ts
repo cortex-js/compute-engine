@@ -1,6 +1,10 @@
-import type { BoxedExpression } from '../global-types';
+import type { BoxedExpression, FunctionInterface } from '../global-types';
 
 import { isRational } from '../numerics/rationals';
+import { isBoxedFunction, isBoxedSymbol, isBoxedString, isBoxedNumber } from './type-guards';
+
+/** Helper type for expressions known to be function expressions (in operator/function callbacks) */
+type FnExpr = BoxedExpression & FunctionInterface;
 
 export type AsciiMathSerializer = (
   expr: BoxedExpression,
@@ -77,8 +81,9 @@ const OPERATORS: Record<
   ]
 > = {
   Add: [
-    (expr, serialize) => {
-      let ops = expr.ops ?? [];
+    (expr_, serialize) => {
+      const expr = expr_ as FnExpr;
+      let ops = [...expr.ops];
 
       // For binary sums like "-x^2 + 1", swap to display as "1 - x^2"
       // Only applies when: exactly 2 terms, first is negative, second is a positive constant
@@ -86,7 +91,7 @@ const OPERATORS: Record<
         ops.length === 2 &&
         ops[0].operator === 'Negate' &&
         ops[1].operator !== 'Negate' &&
-        ops[1].isNumberLiteral
+        isBoxedNumber(ops[1])
       ) {
         ops = [ops[1], ops[0]];
       }
@@ -95,7 +100,7 @@ const OPERATORS: Record<
       // we don't include a '+' in the result
       return (
         ops.reduce((acc: string, x) => {
-          if (x.operator === 'Negate') {
+          if (isBoxedFunction(x) && x.operator === 'Negate') {
             const rhs = serialize(x.op1, 10);
             if (acc === '') return `-${rhs}`;
             if (rhs.startsWith('+')) return `${acc} - ${rhs.substring(1)}`;
@@ -109,7 +114,8 @@ const OPERATORS: Record<
     11,
   ],
   Negate: [
-    (expr, serialize) => {
+    (expr_, serialize) => {
+      const expr = expr_ as FnExpr;
       const base = serialize(expr.op1, 14);
       // Always wrap the base in parentheses if power to avoid ambiguity,
       // i.e. -3^2 -> -(3^2)
@@ -120,9 +126,10 @@ const OPERATORS: Record<
     14,
   ],
   Subtract: [
-    (expr, serialize) => {
+    (expr_, serialize) => {
+      const expr = expr_ as FnExpr;
       return (
-        expr.ops?.reduce((acc, x) => {
+        expr.ops.reduce((acc, x) => {
           const rhs = serialize(x, 10);
           if (acc === '') return rhs;
           if (rhs.startsWith('-')) return `${acc} - (${rhs})`;
@@ -133,11 +140,12 @@ const OPERATORS: Record<
     11,
   ],
   Multiply: [
-    (expr, serialize) => {
-      if (!expr.ops) return '';
+    (expr_, serialize) => {
+      const expr = expr_ as FnExpr;
       if (expr.nops === 2) {
-        const lhs = expr.op1.numericValue;
-        if (lhs !== undefined) {
+        const op1 = expr.op1;
+        if (isBoxedNumber(op1)) {
+          const lhs = op1.numericValue;
           if (typeof lhs !== 'number' && lhs.im !== 0) {
             joinMul(
               serialize(expr.op2, 12),
@@ -147,7 +155,7 @@ const OPERATORS: Record<
 
           const rhs = expr.op2;
           if (
-            rhs.symbol ||
+            isBoxedSymbol(rhs) ||
             rhs.operator === 'Power' ||
             rhs.operator === 'Square' ||
             typeof FUNCTIONS[rhs.operator] === 'string'
@@ -168,7 +176,8 @@ const OPERATORS: Record<
   ],
   Divide: ['/', 13],
   Power: [
-    (expr, serialize) => {
+    (expr_, serialize) => {
+      const expr = expr_ as FnExpr;
       const exponent = serialize(expr.op2, 14);
       if (exponent === '1') return serialize(expr.op1);
       if (exponent === '(1/2)' || exponent === '1/2' || exponent === '0.5')
@@ -200,8 +209,8 @@ const FUNCTIONS: Record<
   string,
   string | ((expr: BoxedExpression, serialize: AsciiMathSerializer) => string)
 > = {
-  Abs: (expr: BoxedExpression, serialize) => `|${serialize(expr.op1)}|`,
-  Norm: (expr: BoxedExpression, serialize) => `||${serialize(expr.op1)}||`,
+  Abs: (expr: BoxedExpression, serialize) => `|${serialize((expr as FnExpr).op1)}|`,
+  Norm: (expr: BoxedExpression, serialize) => `||${serialize((expr as FnExpr).op1)}||`,
 
   // Trigonometric functions
   Sin: 'sin',
@@ -237,19 +246,20 @@ const FUNCTIONS: Record<
 
   Ceil: 'ceil', // also: (expr, serialize) => `|~${serialize(expr.op1)}~|`,
   Exp: 'exp',
-  Factorial: (expr, serialize) => `${serialize(expr.op1, 12)}!`,
+  Factorial: (expr, serialize) => `${serialize((expr as FnExpr).op1, 12)}!`,
   Floor: 'floor', // also: (expr, serialize) => `|__${serialize(expr.op1)}__|`,
   Log: 'log',
   Ln: 'ln',
   Log10: 'log10',
   Sqrt: 'sqrt',
-  Root: (expr, serialize) => {
+  Root: (expr_, serialize) => {
+    const expr = expr_ as FnExpr;
     const x = expr.op1;
     const n = expr.op2;
     if (n.is(2)) return `sqrt${wrap(serialize(x))}`;
     return `root${wrap(serialize(n))}${wrap(serialize(x))}`;
   },
-  Square: (expr, serialize) => `${serialize(expr.op1, 12)}^2`,
+  Square: (expr, serialize) => `${serialize((expr as FnExpr).op1, 12)}^2`,
 
   Det: 'det',
   Dim: 'dim',
@@ -262,8 +272,8 @@ const FUNCTIONS: Record<
   Max: 'max',
   Min: 'min',
 
-  PlusMinus: (expr, serialize) => {
-    const [lhs, rhs] = expr.ops ?? [];
+  PlusMinus: (expr_, serialize) => {
+    const [lhs, rhs] = (expr_ as FnExpr).ops;
     if (!rhs) return serialize(lhs);
     if (lhs && rhs) {
       const lhs_ = serialize(lhs);
@@ -279,18 +289,19 @@ const FUNCTIONS: Record<
   Product: (expr: BoxedExpression, serialize) => bigOp(expr, 'prod', serialize),
   Integrate: (expr: BoxedExpression, serialize) =>
     bigOp(expr, 'int', serialize),
-  Limit: (expr: BoxedExpression, serialize) => {
-    const [fn, val] = expr.ops ?? [];
+  Limit: (expr_: BoxedExpression, serialize) => {
+    const expr = expr_ as FnExpr;
+    const [fn, val] = expr.ops;
 
-    if (fn?.operator === 'Function') {
-      const args = fn.ops?.slice(2) ?? [];
+    if (fn?.operator === 'Function' && isBoxedFunction(fn)) {
+      const args = fn.ops.slice(2);
       const body = fn.op1 ?? fn;
       let arg: BoxedExpression | null = null;
       if (args.length === 1) arg = args[0];
       return arg
         ? `lim_(${serialize(arg)} -> ${serialize(val)}) ${serialize(body)}`
         : `lim_(${serialize(val)}) ${serialize(body)}`;
-    } else if (fn?.symbol) {
+    } else if (fn && isBoxedSymbol(fn)) {
       return `lim_(x -> ${serialize(val)}) ${serialize(fn)}(x)`;
     }
 
@@ -299,34 +310,50 @@ const FUNCTIONS: Record<
 
   // Note: use ops[0], not op1 because op1 is "Nothing" when empty, and
   // we need to correctly handle `["Delimiter"]`
-  Delimiter: (expr: BoxedExpression, serialize) =>
-    delimiter(expr.ops![0], expr.ops![1]?.string, serialize),
-  Sequence: (expr: BoxedExpression, serialize) => {
+  Delimiter: (expr_: BoxedExpression, serialize) => {
+    const expr = expr_ as FnExpr;
+    const delimStr = isBoxedString(expr.ops[1]) ? expr.ops[1].string : undefined;
+    return delimiter(expr.ops[0], delimStr, serialize);
+  },
+  Sequence: (expr_: BoxedExpression, serialize) => {
+    const expr = expr_ as FnExpr;
     if (expr.nops === 0) return '';
-    return expr.ops!.map((x) => serialize(x)).join(' ');
+    return expr.ops.map((x) => serialize(x)).join(' ');
   },
 
-  List: (expr: BoxedExpression, serialize) =>
-    `[${expr.ops?.map((x) => serialize(x)) ?? ''}]`,
-  Single: (expr: BoxedExpression, serialize) =>
-    `(${expr.ops!.map((x) => serialize(x)).join(', ')})`,
-  Pair: (expr: BoxedExpression, serialize) =>
-    `(${expr.ops!.map((x) => serialize(x)).join(', ')})`,
-  Triple: (expr: BoxedExpression, serialize) =>
-    `(${expr.ops!.map((x) => serialize(x)).join(', ')})`,
-  Tuple: (expr: BoxedExpression, serialize) =>
-    `(${expr.ops!.map((x) => serialize(x)).join(', ')})`,
+  List: (expr_: BoxedExpression, serialize) => {
+    const expr = expr_ as FnExpr;
+    return `[${expr.ops.map((x) => serialize(x))}]`;
+  },
+  Single: (expr_: BoxedExpression, serialize) => {
+    const expr = expr_ as FnExpr;
+    return `(${expr.ops.map((x) => serialize(x)).join(', ')})`;
+  },
+  Pair: (expr_: BoxedExpression, serialize) => {
+    const expr = expr_ as FnExpr;
+    return `(${expr.ops.map((x) => serialize(x)).join(', ')})`;
+  },
+  Triple: (expr_: BoxedExpression, serialize) => {
+    const expr = expr_ as FnExpr;
+    return `(${expr.ops.map((x) => serialize(x)).join(', ')})`;
+  },
+  Tuple: (expr_: BoxedExpression, serialize) => {
+    const expr = expr_ as FnExpr;
+    return `(${expr.ops.map((x) => serialize(x)).join(', ')})`;
+  },
 
-  Block: (expr: BoxedExpression, serialize) => {
+  Block: (expr_: BoxedExpression, serialize) => {
+    const expr = expr_ as FnExpr;
     if (expr.nops === 0) return '{}';
     if (expr.nops === 1) return `{${serialize(expr.op1)}}`;
-    return `{    ${expr.ops!.map((x) => serialize(x)).join(';\n     ')}\n    }`;
+    return `{    ${expr.ops.map((x) => serialize(x)).join(';\n     ')}\n    }`;
   },
 
-  EvaluateAt: (expr: BoxedExpression, serialize) => {
+  EvaluateAt: (expr_: BoxedExpression, serialize) => {
+    const expr = expr_ as FnExpr;
     // Output f|_(...)
     const f = expr.op1;
-    const args = expr.ops!.slice(1);
+    const args = expr.ops.slice(1);
     if (args.length === 0) return serialize(f);
     if (args.length === 1) return `(${serialize(f)})|_(${serialize(args[0])})`;
     if (args.length === 2)
@@ -334,39 +361,42 @@ const FUNCTIONS: Record<
     return `(${serialize(f)})|_(${args.map((x) => serialize(x)).join(', ')})`;
   },
 
-  Function: (expr: BoxedExpression, serialize) => {
-    const args = expr.ops!.slice(1);
+  Function: (expr_: BoxedExpression, serialize) => {
+    const expr = expr_ as FnExpr;
+    const args = expr.ops.slice(1);
 
     const serializedArgs = () => args.map((x) => serialize(x)).join(', ');
 
-    if (expr.op1.operator === 'Block') {
+    if (expr.op1.operator === 'Block' && isBoxedFunction(expr.op1)) {
       if (expr.op1.nops === 0) return `(${serializedArgs()}) |-> {}`;
       if (expr.op1.nops === 1) {
-        if (args.length === 1 && args[0].symbol === '_1') {
+        if (args.length === 1 && isBoxedSymbol(args[0]) && args[0].symbol === '_1') {
           // If there is a single argument and it's _1, we can use _ instead
           return `(_) |-> ${serialize(expr.op1.op1.subs({ _1: '_' }))}`;
         }
         return `(${serializedArgs()}) |-> ${serialize(expr.op1.op1)}`;
       }
       return `(${serializedArgs()}) |-> {\n    ${expr.op1
-        .ops!.map((x) => serialize(x))
+        .ops.map((x) => serialize(x))
         .join(';\n     ')}\n}`;
     }
     return `(${serializedArgs()}) |-> ${serialize(expr.op1)}`;
   },
 
   Domain: (expr: BoxedExpression) => JSON.stringify(expr.json),
-  Error: (expr: BoxedExpression, serialize) => {
+  Error: (expr_: BoxedExpression, serialize) => {
+    const expr = expr_ as FnExpr;
     if (expr.nops === 1) return `Error(${serialize(expr.op1)})`;
     if (expr.nops === 2) {
-      if (expr.op1.string)
+      if (isBoxedString(expr.op1))
         return `Error("${expr.op1.string}", ${serialize(expr.op2)})`;
       return `Error(${serialize(expr.op1)}, ${serialize(expr.op2)})`;
     }
-    return `Error(${expr.ops!.map((x) => serialize(x)).join(', ')})`;
+    return `Error(${expr.ops.map((x) => serialize(x)).join(', ')})`;
   },
-  LatexString: (expr: BoxedExpression) => {
-    return `"${expr.op1.string ?? ''}"`;
+  LatexString: (expr_: BoxedExpression) => {
+    const expr = expr_ as FnExpr;
+    return `"${isBoxedString(expr.op1) ? expr.op1.string : ''}"`;
   },
 };
 
@@ -375,17 +405,18 @@ function bigOp(
   op: string,
   serialize: AsciiMathSerializer
 ): string {
-  const [fn, ...limits] = expr.ops ?? [];
+  if (!isBoxedFunction(expr)) return `${op}()`;
+  const [fn, ...limits] = expr.ops;
 
   const indexes: BoxedExpression[] = [];
   let body: string;
 
   let args: ReadonlyArray<BoxedExpression> = [];
 
-  if (fn?.operator === 'Function') {
-    args = fn.ops!.slice(1) ?? [];
+  if (fn?.operator === 'Function' && isBoxedFunction(fn)) {
+    args = fn.ops.slice(1);
     const b = fn.op1 ?? fn;
-    if (b.operator === 'Block') body = serialize(b.op1 ?? b);
+    if (b.operator === 'Block' && isBoxedFunction(b)) body = serialize(b.op1 ?? b);
     else body = serialize(b);
   } else if (fn) {
     // Handle symbols and general expressions (e.g., Multiply, Add)
@@ -402,31 +433,32 @@ function bigOp(
       !['Range', 'Tuple', 'Pair', 'Single', 'Limits'].includes(limit.operator)
     )
       continue;
+    if (!isBoxedFunction(limit)) continue;
     if (limit.nops === 0) continue;
     if (limit.nops === 2) {
-      if (limit.op1.symbol) {
+      if (isBoxedSymbol(limit.op1) && limit.op1.symbol) {
         // ["Integrate", ["Tuple", "x", 1]]
         if (limit.op1.symbol !== 'Nothing') indexes.push(limit.op1);
-        if (limit.op2.symbol !== 'Nothing') {
+        if (!(isBoxedSymbol(limit.op2) && limit.op2.symbol === 'Nothing')) {
           if (op === 'int') result += `_${wrap(serialize(limit.op2))}`;
           else
             result += '_' + wrap(`${limit.op1.symbol}=${serialize(limit.op2)}`);
         }
       } else {
         // ["Integrate", ["Tuple", 1, 2]]
-        if (limit.op1.symbol !== 'Nothing')
+        if (!(isBoxedSymbol(limit.op1) && limit.op1.symbol === 'Nothing'))
           result += `_${wrap(serialize(limit.op1))}`;
-        if (limit.op2.symbol !== 'Nothing')
+        if (!(isBoxedSymbol(limit.op2) && limit.op2.symbol === 'Nothing'))
           result += `^${wrap(serialize(limit.op2))}`;
       }
     } else if (limit.nops === 3) {
       let index = '';
-      if (limit.op1.symbol !== 'Nothing') {
+      if (!(isBoxedSymbol(limit.op1) && limit.op1.symbol === 'Nothing')) {
         indexes.push(limit.op1);
-        index = limit.op1.symbol ?? '';
+        index = isBoxedSymbol(limit.op1) ? limit.op1.symbol : '';
       }
-      const start = limit.op2.symbol !== 'Nothing' ? limit.op2 : null;
-      const end = limit.op3.symbol !== 'Nothing' ? limit.op3 : null;
+      const start = !(isBoxedSymbol(limit.op2) && limit.op2.symbol === 'Nothing') ? limit.op2 : null;
+      const end = !(isBoxedSymbol(limit.op3) && limit.op3.symbol === 'Nothing') ? limit.op3 : null;
 
       if (start) {
         if (op === 'int' || !index) result += `_${wrap(serialize(start))}`;
@@ -470,7 +502,7 @@ function delimiter(
   if (!expr) return `${open}${close}`;
 
   let items: ReadonlyArray<BoxedExpression> = [expr];
-  if (expr.operator === 'Sequence') items = expr.ops!;
+  if (isBoxedFunction(expr) && expr.operator === 'Sequence') items = expr.ops;
 
   return `${open}${items.map((x) => serialize(x)).join(separator)}${close}`;
 }
@@ -511,7 +543,7 @@ export function toAsciiMath(
   //
   // A symbol?
   //
-  if (expr.symbol) return serializeSymbol(expr.symbol, options);
+  if (isBoxedSymbol(expr)) return serializeSymbol(expr.symbol, options);
 
   const serialize: AsciiMathSerializer = (expr, precedence = 0) =>
     toAsciiMath(expr, options, precedence);
@@ -519,15 +551,15 @@ export function toAsciiMath(
   //
   // A string ?
   //
-  if (expr.string) {
+  if (isBoxedString(expr)) {
     return `"${expr.string.replace(/"/g, '\\"')}"`;
   }
 
   //
   // A number ?
   //
-  const num = expr.numericValue;
-  if (num !== undefined) {
+  if (isBoxedNumber(expr)) {
+    const num = expr.numericValue;
     if (expr.isNaN) return serializeSymbol('NaN', options);
     if (expr.isFinite === false) {
       if (expr.isNegative !== true && expr.isPositive !== true)
@@ -543,25 +575,30 @@ export function toAsciiMath(
   }
 
   //
-  // A function expression?
+  // A function expression (or tensor with operator)?
   //
+  // Check operator (available on all expression types) for dispatch,
+  // then use isBoxedFunction for narrowing to access .ops, .op1 etc.
+  // Tensors like List also have operator but _kind = 'tensor'.
+  //
+  const fnExpr = isBoxedFunction(expr) ? expr : null;
   if (expr.operator) {
     const operators = options.operators
       ? { ...OPERATORS, ...options.operators }
       : OPERATORS;
     const [operator, precedence_] = operators[expr.operator] ?? [];
-    if (operator) {
+    if (operator && fnExpr) {
       // Go over each operands and convert them to ascii math
       let result = '';
       if (typeof operator === 'function') {
-        result = operator(expr, serialize);
+        result = operator(fnExpr, serialize);
       } else {
-        if (expr.nops === 1)
-          return `${operator}${serialize(expr.op1, precedence_ + 1)}`;
+        if (fnExpr.nops === 1)
+          return `${operator}${serialize(fnExpr.op1, precedence_ + 1)}`;
 
         result =
-          expr.ops
-            ?.map((x) => serialize(x, precedence_ + 1))
+          fnExpr.ops
+            .map((x) => serialize(x, precedence_ + 1))
             .join(` ${operator} `) ?? '';
       }
       return wrap(result, precedence, precedence_);
@@ -571,9 +608,13 @@ export function toAsciiMath(
       : FUNCTIONS;
     const func = functions[expr.operator];
     if (typeof func === 'function') return func(expr, serialize);
-    if (typeof func === 'string')
-      return `${func}(${expr.ops?.map((x) => serialize(x)).join(', ') ?? ''})`;
-    return `${expr.operator}(${expr.ops?.map((x) => serialize(x)).join(', ') ?? ''})`;
+    // For non-function expression types with operators (e.g., tensors like List),
+    // fall through to JSON serialization if no matching function/operator handler
+    if (fnExpr) {
+      if (typeof func === 'string')
+        return `${func}(${fnExpr.ops.map((x) => serialize(x)).join(', ') ?? ''})`;
+      return `${expr.operator}(${fnExpr.ops.map((x) => serialize(x)).join(', ') ?? ''})`;
+    }
   }
 
   return JSON.stringify(expr.json);

@@ -2,6 +2,13 @@ import { apply } from '../function-utils';
 import { mul } from '../boxed-expression/arithmetic-mul-div';
 import type { BoxedExpression } from '../global-types';
 import { add } from '../boxed-expression/arithmetic-add';
+import {
+  isBoxedNumber,
+  isBoxedSymbol,
+  isBoxedFunction,
+  isBoxedString,
+  sym,
+} from '../boxed-expression/type-guards';
 
 /**
  * Maximum recursion depth for differentiation.
@@ -168,14 +175,14 @@ export function derivative(
   if (order === 0) return fn;
   const ce = fn.engine;
   let v = '_';
-  if (fn.symbol && fn.operatorDefinition) {
+  if (isBoxedSymbol(fn) && fn.operatorDefinition) {
     // We have, e.g. fn = 'Sin"
     fn = apply(ce.symbol(fn.symbol), [ce.symbol('_')]);
   }
-  if (fn.operator === 'Function') {
+  if (fn.operator === 'Function' && isBoxedFunction(fn)) {
     // We have, e.g. fn = ['Function', ['Sin', 'x'], 'x']
-    v = fn.ops![1]?.symbol ?? '_';
-    fn = fn.ops![0];
+    v = sym(fn.ops[1]) ?? '_';
+    fn = fn.ops[0];
   }
   let result: BoxedExpression | undefined = fn;
   while (order-- > 0 && result) result = differentiate(result, v);
@@ -222,15 +229,19 @@ export function differentiate(
   const ce = expr.engine;
 
   // A few easy ones...
-  if (expr.string) return undefined;
-  if (expr.isNumberLiteral) return expr.engine.Zero;
-  if (expr.symbol === v) return expr.engine.One;
-  if (expr.symbol) return expr.engine.Zero;
-  if (!expr.operator) return undefined;
+  if (isBoxedString(expr)) return undefined;
+  if (isBoxedNumber(expr)) return expr.engine.Zero;
+  if (isBoxedSymbol(expr)) {
+    if (expr.symbol === v) return expr.engine.One;
+    return expr.engine.Zero;
+  }
+  if (!expr.operator || !isBoxedFunction(expr)) return undefined;
+
+  // From here on, expr is narrowed to BoxedExpression & FunctionInterface
   if (expr.operator === 'Negate') {
     const gPrime = differentiate(expr.op1, v, depth + 1);
     if (gPrime) return gPrime.neg();
-    return ce._fn('D', [expr.op1!, ce.symbol(v)]).neg();
+    return ce._fn('D', [expr.op1, ce.symbol(v)]).neg();
   }
 
   // Block - just differentiate the content
@@ -248,15 +259,15 @@ export function differentiate(
 
   // Sum rule
   if (expr.operator === 'Add') {
-    const terms = expr.ops!.map((op) => differentiate(op, v, depth + 1));
+    const terms = expr.ops.map((op) => differentiate(op, v, depth + 1));
     if (terms.some((term) => term === undefined)) return undefined;
     return simplifyDerivative(add(...(terms as BoxedExpression[])));
   }
 
   // Product rule
   if (expr.operator === 'Multiply') {
-    const terms = expr.ops!.map((op, i) => {
-      const otherTerms = expr.ops!.slice();
+    const terms = expr.ops.map((op, i) => {
+      const otherTerms = expr.ops.slice();
       otherTerms.splice(i, 1);
       const otherProduct = mul(...otherTerms);
       const gPrime =
@@ -270,7 +281,7 @@ export function differentiate(
   // Root rule: Root(base, n) = base^(1/n)
   // d/dx Root(base, n) = d/dx base^(1/n) = (1/n) * base^((1/n) - 1) * d/dx base
   if (expr.operator === 'Root') {
-    const [base, n] = expr.ops!;
+    const [base, n] = expr.ops;
     if (!base.has(v)) return ce.Zero;
 
     // Compute derivative using the power rule
@@ -290,7 +301,7 @@ export function differentiate(
 
   // Power rule
   if (expr.operator === 'Power') {
-    const [base, exponent] = expr.ops!;
+    const [base, exponent] = expr.ops;
     const baseHasV = base.has(v);
     const expHasV = exponent.has(v);
 
@@ -336,7 +347,7 @@ export function differentiate(
 
   // Quotient rule
   if (expr.operator === 'Divide') {
-    const [numerator, denominator] = expr.ops!;
+    const [numerator, denominator] = expr.ops;
     const gPrime =
       differentiate(numerator, v, depth + 1) ??
       ce._fn('D', [numerator, ce.symbol(v)]);
@@ -352,7 +363,7 @@ export function differentiate(
   // d/dx log_b(x) = 1/(x·ln(b)) when only x depends on v
   // If both x and base depend on v, use quotient rule on ln(x)/ln(base)
   if (expr.operator === 'Log' && expr.nops === 2) {
-    const [x, base] = expr.ops!;
+    const [x, base] = expr.ops;
     const xHasV = x.has(v);
     const baseHasV = base.has(v);
 
@@ -393,7 +404,7 @@ export function differentiate(
     ['BesselJ', 'BesselY', 'BesselI', 'BesselK'].includes(expr.operator) &&
     expr.nops === 2
   ) {
-    const [order, x] = expr.ops!;
+    const [order, x] = expr.ops;
     const xHasV = x.has(v);
     const orderHasV = order.has(v);
 
@@ -445,7 +456,7 @@ export function differentiate(
     // function of v and apply the chain rule.
     const fPrime = ce._fn('Derivative', [ce.symbol(expr.operator), ce.One]);
     if (!fPrime.isValid) return undefined;
-    const g = expr.ops![0];
+    const g = expr.ops[0];
     const gPrime =
       differentiate(g, v, depth + 1) ?? ce._fn('D', [g, ce.symbol(v)]);
     if (!gPrime.isValid) return undefined;
@@ -455,7 +466,7 @@ export function differentiate(
   // Apply the chain rule:
   // d/dx f(g(x)) = f'(g(x)) * g'(x)
   if (expr.nops > 1) return ce._fn('D', [expr, ce.symbol(v)]);
-  const g = expr.ops![0];
+  const g = expr.ops[0];
   const gPrime =
     differentiate(g, v, depth + 1) ?? ce._fn('D', [g, ce.symbol(v)]);
   // Substitute the argument into the derivative formula

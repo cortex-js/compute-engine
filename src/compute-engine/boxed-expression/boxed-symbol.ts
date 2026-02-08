@@ -57,6 +57,7 @@ import {
 } from './sgn';
 import { matchesSymbol } from '../../math-json/utils';
 import { getSignFromAssumptions } from '../assume';
+import { isBoxedSymbol } from './type-guards';
 
 /**
  * ### BoxedSymbol
@@ -86,10 +87,9 @@ import { getSignFromAssumptions } from '../assume';
  * symbol may have no value).
  *
  */
-export class BoxedSymbol
-  extends _BoxedExpression
-  implements SymbolInterface
-{
+export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
+  override readonly _kind = 'symbol';
+
   private _hash: number | undefined;
 
   /** The name of the symbol */
@@ -161,11 +161,17 @@ export class BoxedSymbol
   is(other: any): boolean {
     // Shortcuts
     if (other === true)
-      return this.symbol === 'True' || this.value?.symbol === 'True';
+      return (
+        this.symbol === 'True' ||
+        (isBoxedSymbol(this.value) && this.value.symbol === 'True')
+      );
     if (other === false)
-      return this.symbol === 'False' || this.value?.symbol === 'False';
+      return (
+        this.symbol === 'False' ||
+        (isBoxedSymbol(this.value) && this.value.symbol === 'False')
+      );
 
-    if (other instanceof _BoxedExpression && other.symbol)
+    if (other instanceof _BoxedExpression && isBoxedSymbol(other))
       return this.symbol === other.symbol;
 
     // Check if the _value_ of this symbol is equal to the value of other
@@ -267,7 +273,11 @@ export class BoxedSymbol
     // ln(e) = 1 (natural log)
     // ln_c(e) = 1/ln(c) (for other bases)
     if (this.symbol === 'ExponentialE') {
-      if (!base || base.symbol === 'ExponentialE') return this.engine.One;
+      if (
+        !base ||
+        (isBoxedSymbol(base) && base.symbol === 'ExponentialE')
+      )
+        return this.engine.One;
       return this.engine.One.div(base.ln()); // log_c(e) = 1/ln(c)
     }
 
