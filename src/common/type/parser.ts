@@ -300,14 +300,39 @@ export class Parser {
       const signature = this.parseFunctionSignature();
       if (signature) return signature;
 
-      // Fall back to grouped type
+      // Fall back to grouped type or parenthesized tuple
       if (this.match('(')) {
-        const type = this.parseUnionType();
-        if (!type) {
+        const firstType = this.parseUnionType();
+        if (!firstType) {
           this.error('Expected type after (');
         }
+
+        // If comma follows, this is a parenthesized tuple: (type1, type2, ...)
+        if ((this.current as Token).type === ',') {
+          const elements: NamedElementNode[] = [
+            this.createNode<NamedElementNode>('named_element', {
+              name: undefined,
+              type: firstType,
+            }),
+          ];
+          while (this.match(',')) {
+            const type = this.parseUnionType();
+            if (!type) {
+              this.error('Expected type after ,');
+            }
+            elements.push(
+              this.createNode<NamedElementNode>('named_element', {
+                name: undefined,
+                type,
+              })
+            );
+          }
+          this.expect(')');
+          return this.createNode<TupleTypeNode>('tuple', { elements });
+        }
+
         this.expect(')');
-        return this.createNode<GroupTypeNode>('group', { type });
+        return this.createNode<GroupTypeNode>('group', { type: firstType });
       }
     }
 
