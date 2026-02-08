@@ -8,6 +8,7 @@ export const COMBINATORICS_LIBRARY: SymbolDefinitions[] = [
     Choose: {
       complexity: 1200,
       signature: '(n:number, m:number) -> number',
+      type: () => 'finite_integer',
 
       evaluate: (ops, { engine: ce }) => {
         const n = ops[0].re;
@@ -24,6 +25,7 @@ export const COMBINATORICS_LIBRARY: SymbolDefinitions[] = [
       description: 'Compute the nth Fibonacci number.',
       wikidata: 'Q47577',
       signature: '(integer) -> integer',
+      type: () => 'finite_integer',
       evaluate: ([n], { engine: ce }) => {
         const k = toBigint(n);
         if (k === null) return undefined;
@@ -47,6 +49,7 @@ export const COMBINATORICS_LIBRARY: SymbolDefinitions[] = [
         'Compute the binomial coefficient C(n, k) = n! / (k! (n-k)!).',
       wikidata: 'Q209875',
       signature: '(integer, integer) -> integer',
+      type: () => 'finite_integer',
       evaluate: ([nExpr, kExpr], { engine: ce }) => {
         const n = toBigint(nExpr);
         const k = toBigint(kExpr);
@@ -183,6 +186,7 @@ export const COMBINATORICS_LIBRARY: SymbolDefinitions[] = [
       description: 'Compute the multinomial coefficient for multiple integers.',
       wikidata: 'Q20820114',
       signature: '(integer+) -> integer',
+      type: () => 'finite_integer',
       evaluate: (ops, { engine: ce }) => {
         const ks = ops.map(toInteger);
         if (ks.some((k) => k === null || k < 0)) return undefined;
@@ -206,6 +210,7 @@ export const COMBINATORICS_LIBRARY: SymbolDefinitions[] = [
         'Compute the number of derangements (subfactorial) of n items.',
       wikidata: 'Q2361661',
       signature: '(integer) -> integer',
+      type: () => 'finite_integer',
       evaluate: ([n], { engine: ce }) => {
         const k = toInteger(n);
         if (k === null || k < 0) return undefined;
@@ -222,6 +227,7 @@ export const COMBINATORICS_LIBRARY: SymbolDefinitions[] = [
         'Compute the Bell number B(n), the number of partitions of a set of n elements.',
       wikidata: 'Q816063',
       signature: '(integer) -> integer',
+      type: () => 'finite_integer',
       evaluate: ([n], { engine: ce }) => {
         const k = toInteger(n);
         if (k === null || k < 0) return undefined;

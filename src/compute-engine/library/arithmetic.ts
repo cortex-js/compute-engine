@@ -220,6 +220,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       complexity: 1250,
       broadcastable: true,
       signature: '(number) -> integer',
+      type: ([x]) => (x.isFinite !== false ? 'finite_integer' : 'integer'),
       sgn: ([x]) => {
         if (x.isLessEqual(-1)) return 'negative';
         if (x.isPositive) return 'positive';
@@ -362,6 +363,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       complexity: 9000,
 
       signature: '(integer) -> integer',
+      type: () => 'finite_integer',
 
       // Assumes that the inside of the factorial is an integer
       sgn: ([x]) =>
@@ -441,6 +443,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       broadcastable: true,
 
       signature: '(integer) -> integer',
+      type: () => 'finite_integer',
       sgn: (
         [x] //Assumes that the inside of the factorial is an integer
       ) =>
@@ -469,6 +472,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       broadcastable: true,
 
       signature: '(number) -> integer',
+      type: ([x]) => (x.isFinite !== false ? 'finite_integer' : 'integer'),
       sgn: ([x]) => {
         if (x.isNegative) return 'negative';
         if (x.isGreaterEqual(1)) return 'positive';
@@ -1157,6 +1161,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       complexity: 1200,
       broadcastable: true,
       signature: '(number) -> integer',
+      type: () => 'finite_integer',
       sgn: ([x]) => x.sgn,
       evaluate: ([x], { engine }) => {
         if (x.is(0)) return engine.Zero;

@@ -11,6 +11,7 @@ export const COMPLEX_LIBRARY: SymbolDefinitions[] = [
       broadcastable: true,
       complexity: 1200,
       signature: '(number) -> real',
+      type: () => 'finite_real',
       sgn: ([op]) => {
         const re = op.re;
         if (isNaN(re)) return undefined;
@@ -28,6 +29,7 @@ export const COMPLEX_LIBRARY: SymbolDefinitions[] = [
       broadcastable: true,
       complexity: 1200,
       signature: '(number) -> real',
+      type: () => 'finite_real',
       sgn: ([op]) => {
         const im = op.im;
         if (isNaN(im)) return undefined;
@@ -45,6 +47,7 @@ export const COMPLEX_LIBRARY: SymbolDefinitions[] = [
       broadcastable: true,
       complexity: 1200,
       signature: '(number) -> real',
+      type: () => 'finite_real',
       evaluate: (ops, { engine: ce }) => {
         if (!isBoxedNumber(ops[0])) return undefined;
         const op = ops[0].numericValue;

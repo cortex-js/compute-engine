@@ -1128,3 +1128,59 @@ describe('DOMAIN-CONSTRAINED SOLVE', () => {
     expect(result.y.json).toBe(2);
   });
 });
+
+describe('SOLVING SYSTEMS VIA And OPERATOR', () => {
+  test('should solve And(x+y=70, 2x-4y=80)', () => {
+    const ce = engine;
+    const e = ce.box([
+      'And',
+      ['Equal', ['Add', 'x', 'y'], 70],
+      ['Equal', ['Add', ['Multiply', 2, 'x'], ['Multiply', -4, 'y']], 80],
+    ]);
+    const result = e.solve(['x', 'y']) as Record<string, any>;
+    expect(result).not.toBeNull();
+    expect(result.x.json).toBe(60);
+    expect(result.y.json).toBe(10);
+  });
+
+  test('should solve And with 3 equations', () => {
+    const ce = engine;
+    const e = ce.box([
+      'And',
+      ['Equal', ['Add', 'x', 'y', 'z'], 6],
+      ['Equal', ['Add', ['Multiply', 2, 'x'], 'y', ['Negate', 'z']], 1],
+      ['Equal', ['Add', 'x', ['Negate', 'y'], ['Multiply', 2, 'z']], 5],
+    ]);
+    const result = e.solve(['x', 'y', 'z']) as Record<string, any>;
+    expect(result).not.toBeNull();
+    expect(result.x.json).toBe(1);
+    expect(result.y.json).toBe(2);
+    expect(result.z.json).toBe(3);
+  });
+
+  test('should return null for inconsistent And system', () => {
+    const ce = engine;
+    const e = ce.box([
+      'And',
+      ['Equal', ['Add', 'x', 'y'], 1],
+      ['Equal', ['Add', 'x', 'y'], 2],
+    ]);
+    const result = e.solve(['x', 'y']);
+    expect(result).toBeNull();
+  });
+});
+
+describe('PARAMETRIC SOLUTION TYPE FILTERING', () => {
+  test('underdetermined system with integer vars should not be rejected', () => {
+    const { ComputeEngine } = require('../../src/compute-engine');
+    const ce = new ComputeEngine();
+    ce.declare('x', { type: 'integer' });
+    ce.declare('y', { type: 'integer' });
+    // x + y = 5 with 2 unknowns → underdetermined, parametric solution
+    const e = ce.box(['List', ['Equal', ['Add', 'x', 'y'], 5]]);
+    const result = e.solve(['x', 'y']);
+    // Should not return null — parametric solutions should pass through
+    // (isInteger returns undefined for symbolic expressions, not false)
+    expect(result).not.toBeNull();
+  });
+});

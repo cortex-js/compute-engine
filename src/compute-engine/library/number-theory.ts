@@ -8,8 +8,9 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
     Totient: {
       wikidata: 'Q190026',
       description:
-        'Euler’s totient function φ(n): count of positive integers ≤ n that are coprime to n.',
+        "Euler's totient function φ(n): count of positive integers ≤ n that are coprime to n.",
       signature: '(integer) -> integer',
+      type: () => 'finite_integer',
       evaluate: ([n], { engine: ce }) => {
         const k = toBigint(n);
         if (k === null || k < 1) return undefined;
@@ -24,6 +25,7 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
     Sigma0: {
       description: 'Number of positive divisors of n.',
       signature: '(integer) -> integer',
+      type: () => 'finite_integer',
       evaluate: ([n], { engine: ce }) => {
         const k = toBigint(n);
         if (k === null || k < 1) return undefined;
@@ -38,6 +40,7 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
     Sigma1: {
       description: 'Sum of positive divisors of n.',
       signature: '(integer) -> integer',
+      type: () => 'finite_integer',
       evaluate: ([n], { engine: ce }) => {
         const k = toBigint(n);
         if (k === null || k < 1) return undefined;
@@ -52,6 +55,7 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
     SigmaMinus1: {
       description: 'Sum of reciprocals of positive divisors of n.',
       signature: '(integer) -> number',
+      type: () => 'finite_rational',
       evaluate: ([n], { engine: ce }) => {
         const k = toBigint(n);
         if (k === null || k < 1) return undefined;
@@ -83,6 +87,7 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
       description:
         'Eulerian number A(n, m): number of permutations of {1..n} with exactly m ascents.',
       signature: '(integer, integer) -> integer',
+      type: () => 'finite_integer',
       evaluate: ([n, m], { engine: ce }) => {
         const nn = toBigint(n);
         const mm = toBigint(m);
@@ -101,6 +106,7 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
       description:
         'Stirling number of the second kind S(n, m): ways to partition n elements into m non-empty subsets.',
       signature: '(integer, integer) -> integer',
+      type: () => 'finite_integer',
       evaluate: ([n, m], { engine: ce }) => {
         const nn = toBigint(n);
         const mm = toBigint(m);
@@ -118,6 +124,7 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
     NPartition: {
       description: 'Number of integer partitions of n.',
       signature: '(integer) -> integer',
+      type: () => 'finite_integer',
       evaluate: ([n], { engine: ce }) => {
         const nn = toBigint(n);
         if (nn === null || nn < 0n) return undefined;

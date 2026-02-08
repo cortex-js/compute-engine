@@ -145,6 +145,104 @@ describe('TYPE INFERENCE FOR LOG FUNCTIONS', () => {
   });
 });
 
+describe('TYPE INFERENCE FOR ARITHMETIC FUNCTIONS', () => {
+  it('Factorial returns finite_integer', () => {
+    expect(ce.box(['Factorial', 5]).type.toString()).toBe('finite_integer');
+  });
+
+  it('Factorial2 returns finite_integer', () => {
+    expect(ce.box(['Factorial2', 5]).type.toString()).toBe('finite_integer');
+  });
+
+  it('Sign returns finite_integer', () => {
+    expect(ce.box(['Sign', 3.14]).type.toString()).toBe('finite_integer');
+  });
+
+  it('Ceil of finite returns finite_integer', () => {
+    expect(ce.box(['Ceil', 3.14]).type.toString()).toBe('finite_integer');
+  });
+
+  it('Floor of finite returns finite_integer', () => {
+    expect(ce.box(['Floor', 3.14]).type.toString()).toBe('finite_integer');
+  });
+
+  it('Arctan of real → finite_real', () => {
+    const localCe = new ComputeEngine();
+    localCe.declare('x', { type: 'real' });
+    expect(localCe.box(['Arctan', 'x']).type.toString()).toBe('finite_real');
+  });
+});
+
+describe('TYPE INFERENCE FOR COMPLEX FUNCTIONS', () => {
+  it('Real returns finite_real', () => {
+    expect(ce.box(['Real', 3]).type.toString()).toBe('finite_real');
+  });
+
+  it('Imaginary returns finite_real', () => {
+    expect(ce.box(['Imaginary', 3]).type.toString()).toBe('finite_real');
+  });
+
+  it('Argument returns finite_real', () => {
+    expect(ce.box(['Argument', 3]).type.toString()).toBe('finite_real');
+  });
+});
+
+describe('TYPE INFERENCE FOR NUMBER THEORY FUNCTIONS', () => {
+  it('Totient returns finite_integer', () => {
+    expect(ce.box(['Totient', 12]).type.toString()).toBe('finite_integer');
+  });
+
+  it('Sigma0 returns finite_integer', () => {
+    expect(ce.box(['Sigma0', 12]).type.toString()).toBe('finite_integer');
+  });
+
+  it('Sigma1 returns finite_integer', () => {
+    expect(ce.box(['Sigma1', 12]).type.toString()).toBe('finite_integer');
+  });
+
+  it('SigmaMinus1 returns finite_rational', () => {
+    expect(ce.box(['SigmaMinus1', 12]).type.toString()).toBe('finite_rational');
+  });
+
+  it('Eulerian returns finite_integer', () => {
+    expect(ce.box(['Eulerian', 4, 1]).type.toString()).toBe('finite_integer');
+  });
+
+  it('Stirling returns finite_integer', () => {
+    expect(ce.box(['Stirling', 4, 2]).type.toString()).toBe('finite_integer');
+  });
+
+  it('NPartition returns finite_integer', () => {
+    expect(ce.box(['NPartition', 5]).type.toString()).toBe('finite_integer');
+  });
+});
+
+describe('TYPE INFERENCE FOR COMBINATORICS FUNCTIONS', () => {
+  it('Choose returns finite_integer', () => {
+    expect(ce.box(['Choose', 5, 2]).type.toString()).toBe('finite_integer');
+  });
+
+  it('Fibonacci returns finite_integer', () => {
+    expect(ce.box(['Fibonacci', 10]).type.toString()).toBe('finite_integer');
+  });
+
+  it('Binomial returns finite_integer', () => {
+    expect(ce.box(['Binomial', 5, 2]).type.toString()).toBe('finite_integer');
+  });
+
+  it('Multinomial returns finite_integer', () => {
+    expect(ce.box(['Multinomial', 2, 3]).type.toString()).toBe('finite_integer');
+  });
+
+  it('Subfactorial returns finite_integer', () => {
+    expect(ce.box(['Subfactorial', 4]).type.toString()).toBe('finite_integer');
+  });
+
+  it('BellNumber returns finite_integer', () => {
+    expect(ce.box(['BellNumber', 4]).type.toString()).toBe('finite_integer');
+  });
+});
+
 describe('SIGNATURE-BASED FALLBACK TYPE NARROWING', () => {
   it('Mod(integer, integer) narrows to integer', () => {
     const expr = ce.box(['Mod', 7, 3]);

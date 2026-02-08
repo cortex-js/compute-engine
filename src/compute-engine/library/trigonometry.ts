@@ -107,6 +107,7 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
       complexity: 5200,
       broadcastable: true,
       signature: '(number) -> finite_real',
+      type: (ops) => numericTypeHandler(ops),
       sgn: ([x]) => trigSign('Arctan', x),
       evaluate: ([x], { numericApproximation }) =>
         numericApproximation
