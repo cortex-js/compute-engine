@@ -1,5 +1,5 @@
-import { isSubtype } from './subtype';
-import type { NamedElement, Type } from './types';
+import { NUMERIC_TYPES } from './primitive';
+import type { NamedElement, NumericPrimitiveType, Type } from './types';
 
 const NEGATION_PRECEDENCE = 3;
 const UNION_PRECEDENCE = 1;
@@ -73,7 +73,7 @@ export function typeToString(type: Type, precedence = 0): string {
       break;
 
     case 'list':
-      if (type.dimensions && isSubtype(type.elements, 'number')) {
+      if (type.dimensions && typeof type.elements === 'string' && NUMERIC_TYPES.includes(type.elements as NumericPrimitiveType)) {
         // We have a numeric list, possibly vector or matrix.
         if (type.dimensions === undefined) {
           //

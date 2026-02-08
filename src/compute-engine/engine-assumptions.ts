@@ -7,7 +7,7 @@ import type {
 
 import type { MathJsonSymbol } from '../math-json/types';
 
-import { isWildcard, wildcardName } from './boxed-expression/boxed-patterns';
+import { isWildcard, wildcardName } from './boxed-expression/pattern-utils';
 
 import {
   assume as assumeImpl,

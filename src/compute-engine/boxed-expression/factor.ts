@@ -3,8 +3,7 @@ import type { BoxedExpression } from '../global-types';
 import { isRelationalOperator } from '../latex-syntax/utils';
 import { NumericValue } from '../numeric-value/types';
 
-import { Product, commonTerms } from './product';
-import { mul } from './arithmetic-mul-div';
+import { Product, commonTerms, mul } from './arithmetic-mul-div';
 import { add } from './arithmetic-add';
 import {
   polynomialDegree,

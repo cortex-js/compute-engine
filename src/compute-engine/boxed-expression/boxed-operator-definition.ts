@@ -15,7 +15,7 @@ import type {
 
 import { applicable } from '../function-utils';
 
-import { DEFAULT_COMPLEXITY } from './order';
+import { DEFAULT_COMPLEXITY } from './constants';
 import { functionResult } from '../../common/type/utils';
 import { isSubtype } from '../../common/type/subtype';
 import { defaultCollectionHandlers } from '../collection-utils';

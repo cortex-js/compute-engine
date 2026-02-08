@@ -29,7 +29,7 @@ import { AbstractTensor, makeTensor } from '../tensor/tensors'; // @fixme
 import { NumericValue } from '../numeric-value/types';
 
 import { _BoxedExpression } from './abstract-boxed-expression';
-import { isWildcard, wildcardName } from './boxed-patterns';
+import { isWildcard, wildcardName } from './pattern-utils';
 import { hashCode, isBoxedExpression } from './utils';
 
 /**

@@ -7,9 +7,8 @@ import type {
   NumericPrimitiveType,
 } from './types';
 
-import { PRIMITIVE_TYPES } from './primitive';
+import { PRIMITIVE_TYPES, isValidType } from './primitive';
 import { typeToString } from './serialize';
-import { isValidType } from './utils';
 import { fuzzyStringMatch } from '../fuzzy-string-match';
 import { Parser } from './parser';
 import { buildTypeFromAST } from './type-builder';

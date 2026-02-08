@@ -1,6 +1,4 @@
 import { Complex } from 'complex-esm';
-import { mul } from '../boxed-expression/arithmetic-mul-div';
-import { add } from '../boxed-expression/arithmetic-add';
 import {
   BoxedExpression,
   ComputeEngine,
@@ -167,7 +165,7 @@ export class TensorFieldExpression implements TensorField<BoxedExpression> {
   private ce: ComputeEngine;
 
   constructor(ce: ComputeEngine) {
-    // this.one = ce.One;
+    this.one = ce.One;
     this.zero = ce.Zero;
     this.nan = ce.NaN;
     this.ce = ce;
@@ -270,7 +268,7 @@ export class TensorFieldExpression implements TensorField<BoxedExpression> {
   }
 
   addn(...xs: BoxedExpression[]): BoxedExpression {
-    return add(...xs);
+    return xs.reduce((a, b) => a.add(b), this.zero);
   }
 
   neg(x: BoxedExpression): BoxedExpression {
@@ -286,7 +284,7 @@ export class TensorFieldExpression implements TensorField<BoxedExpression> {
   }
 
   muln(...xs: BoxedExpression[]): BoxedExpression {
-    return mul(...xs);
+    return xs.reduce((a, b) => a.mul(b), this.one);
   }
 
   div(lhs: BoxedExpression, rhs: BoxedExpression): BoxedExpression {

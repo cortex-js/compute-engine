@@ -542,35 +542,79 @@ immediately.
       `isTensorExpression`, `isDictionaryExpression`
     - Exported from `compute-engine.ts`, 19 tests in `type-guards.test.ts`
 
-### Phase 3: Extensibility (4-6 weeks)
+### Phase 3: Extensibility + Zero Cycles
 
-14. **Make library dependencies explicit**
-    - Each library declares its requirements
-    - Load via topological sort
-    - Allow user-authored libraries in constructor
+14. **Make library dependencies explicit** ✅ DONE
+    - `LibraryDefinition` type in `types-definitions.ts`; `STANDARD_LIBRARIES`
+      array in `library/library.ts` with topological sort
+    - LaTeX dictionaries bundled into library defs; `DEFAULT_LATEX_DICTIONARY`
+      removed from `definitions.ts`
+    - Constructor supports `libraries` option (string names or custom
+      `LibraryDefinition` objects)
+    - `LibraryCategory` pruned from 24→15 members (removed empty categories:
+      algebra, dimensions, domains, numeric, units, data-structures, complex,
+      styling, symbols, sets)
+    - Cycle budget 43→29 (removed latex-syntax ↔ library cycles by eliminating
+      `DEFAULT_LATEX_DICTIONARY` re-exports)
 
-15. **Add user-extensible simplification rules**
+15. **Eliminate all circular dependencies** (29→0)
+    See `ZERO-CYCLES-PLAN.md` for full details. Summary:
+
+    **15a. Type-only cycles** (15 cycles)
+    - Restructure `common/type/` into DAG with shared base module
+    - Fix `types.ts` barrel: `latex-syntax/types.ts` imports from source
+      modules instead of barrel
+    - Merge `types-*.ts` files back to 2-3 (too coupled for 5-way split)
+    - Move `IndexedLatexDictionary` types into `latex-syntax/types.ts`
+
+    **15b. Tensor field decoupling** (7 cycles)
+    - `TensorFieldOps` interface: tensor-fields receives `add`/`mul` via
+      injection instead of importing from arithmetic modules
+    - Makes `tensor/` a self-contained module
+
+    **15c. Base class decoupling + merges** (7 cycles)
+    - Move `DEFAULT_COMPLEXITY` to constants file
+    - Replace `instanceof _BoxedExpression` with Symbol tag
+    - Extract `cmp`/`eq` from base class to free functions (or late-bind
+      via engine) — first step of role interface migration
+    - Merge `terms` into `arithmetic-add`, `product` into
+      `arithmetic-mul-div` (bidirectionally coupled)
+    - Polynomial functions receive arithmetic ops as parameters
+    - Break `function-utils → compare` via extracted comparison utility
+    - Convert all 9 dynamic `require()` to static imports
+
+    **15d. Pattern matching & assumptions** (3 cycles)
+    - Move `isWildcard`/`wildcardName` to leaf utility
+    - Break `boxed-patterns ↔ boxed-symbol` type import
+    - Make assumption ↔ solver coupling injectable
+
+    **15e. Compilation module cleanup**
+    - Convert 6 dynamic `require('./base-compiler')` to static imports
+
+16. **Add user-extensible simplification rules**
     - Rule registration API on ComputeEngine
     - Rules participate in standard simplification pipeline
     - Cost function support for custom rules
 
-16. **Generalize compilation target registration**
+17. **Generalize compilation target registration**
     - Already the best extension point — formalize and document it
     - Add target discovery for plugin-contributed targets
 
 ### Phase 4: Type System Hardening (ongoing)
 
-17. **Role interfaces alongside BoxedExpression**
+18. **Role interfaces alongside BoxedExpression**
     - `INumeric`, `ICollection`, `ICallable`
     - Concrete classes implement applicable interfaces
     - Type guards narrow `BoxedExpression` to role interfaces
+    - Enabled by Phase 3 cycle-breaking: base class no longer imports
+      arithmetic/compare modules
 
-18. **Deprecate then remove base-class stubs**
+19. **Deprecate then remove base-class stubs**
     - Properties like `.re`, `.im`, `.size` on non-applicable types get
       deprecation warnings
     - After migration period, remove from base interface
 
-19. **Strengthen type inference**
+20. **Strengthen type inference**
     - Automatic widening (integer → rational → real → complex)
     - Constraint propagation through function signatures
     - Domain-aware solve validation

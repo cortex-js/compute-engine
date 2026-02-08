@@ -15,17 +15,10 @@ import { ErrorSignal, WarningSignal } from '../../../common/signals';
 import { countTokens, joinLatex, tokenize, tokensToString } from '../tokenizer';
 
 import {
-  Delimiter,
-  EnvironmentParseHandler,
-  ExpressionParseHandler,
-  InfixParseHandler,
   LatexDictionaryEntry,
   LatexString,
   LatexToken,
-  MatchfixParseHandler,
   Parser,
-  PostfixParseHandler,
-  Precedence,
   SerializeHandler,
   Terminator,
   isEnvironmentEntry,
@@ -36,6 +29,34 @@ import {
   isPrefixEntry,
   isSymbolEntry,
 } from '../types';
+
+export type {
+  CommonEntry,
+  IndexedSymbolEntry,
+  IndexedExpressionEntry,
+  IndexedFunctionEntry,
+  IndexedMatchfixEntry,
+  IndexedInfixEntry,
+  IndexedPrefixEntry,
+  IndexedPostfixEntry,
+  IndexedEnvironmentEntry,
+  IndexedLatexDictionaryEntry,
+  IndexedLatexDictionary,
+} from './indexed-types';
+
+import type {
+  CommonEntry,
+  IndexedSymbolEntry,
+  IndexedExpressionEntry,
+  IndexedFunctionEntry,
+  IndexedMatchfixEntry,
+  IndexedInfixEntry,
+  IndexedPrefixEntry,
+  IndexedPostfixEntry,
+  IndexedEnvironmentEntry,
+  IndexedLatexDictionaryEntry,
+  IndexedLatexDictionary,
+} from './indexed-types';
 
 /** Delimiter shorthands and their token variants for matchfix indexing */
 const DELIMITER_SHORTHAND: { [key: string]: LatexToken[] } = {
@@ -52,27 +73,6 @@ const DELIMITER_SHORTHAND: { [key: string]: LatexToken[] } = {
   '||': ['||', '\\Vert', '\\lVert', '\\rVert'],
 };
 
-export type CommonEntry = {
-  /** Note: a name is required if a serialize handler is provided */
-  name?: string;
-
-  serialize?: SerializeHandler;
-
-  /** Note: not all kinds have a `latexTrigger` or `symbolTrigger`.
-   * For example, matchfix operators use `openTrigger`/`closeTrigger`
-   */
-  latexTrigger?: LatexString;
-  symbolTrigger?: string;
-};
-
-export type IndexedSymbolEntry = CommonEntry & {
-  kind: 'symbol';
-
-  // The 'precedence' of symbols is used to determine appropriate wrapping when serializing
-  precedence: Precedence;
-
-  parse: ExpressionParseHandler;
-};
 /** @internal */
 export function isIndexedSymbolEntry(
   entry: IndexedLatexDictionaryEntry
@@ -80,14 +80,6 @@ export function isIndexedSymbolEntry(
   return 'kind' in entry && entry.kind === 'symbol';
 }
 
-export type IndexedExpressionEntry = CommonEntry & {
-  kind: 'expression';
-
-  // The 'precedence' of expressions is used to determine appropriate wrapping when serializing
-  precedence: Precedence;
-
-  parse: ExpressionParseHandler;
-};
 /** @internal */
 export function isIndexedExpressionEntry(
   entry: IndexedLatexDictionaryEntry
@@ -95,20 +87,6 @@ export function isIndexedExpressionEntry(
   return 'kind' in entry && entry.kind === 'expression';
 }
 
-/**
- * A function has the following form:
- * - a prefix such as `\mathrm` or `\operatorname`
- * - a trigger string, such as `gcd`
- * - some postfix operators such as `\prime`
- * - an optional list of arguments in an enclosure (parentheses)
- *
- * Functions of this type are indexed in the dictionary by their trigger string.
- */
-export type IndexedFunctionEntry = CommonEntry & {
-  kind: 'function';
-
-  parse: ExpressionParseHandler;
-};
 /** @internal */
 export function isIndexedFunctionEntry(
   entry: IndexedLatexDictionaryEntry
@@ -116,14 +94,6 @@ export function isIndexedFunctionEntry(
   return 'kind' in entry && entry.kind === 'function';
 }
 
-export type IndexedMatchfixEntry = CommonEntry & {
-  kind: 'matchfix';
-
-  openTrigger: Delimiter | LatexToken[];
-  closeTrigger: Delimiter | LatexToken[];
-
-  parse: MatchfixParseHandler;
-};
 /** @internal */
 export function isIndexedMatchfixEntry(
   entry: IndexedLatexDictionaryEntry
@@ -131,13 +101,6 @@ export function isIndexedMatchfixEntry(
   return 'kind' in entry && entry.kind === 'matchfix';
 }
 
-export type IndexedInfixEntry = CommonEntry & {
-  kind: 'infix';
-  associativity: 'right' | 'left' | 'none' | 'any';
-  precedence: Precedence;
-
-  parse: InfixParseHandler;
-};
 /** @internal */
 export function isIndexedInfixdEntry(
   entry: IndexedLatexDictionaryEntry
@@ -145,25 +108,12 @@ export function isIndexedInfixdEntry(
   return 'kind' in entry && entry.kind === 'infix';
 }
 
-export type IndexedPrefixEntry = CommonEntry & {
-  kind: 'prefix';
-  precedence: Precedence;
-
-  parse: ExpressionParseHandler;
-};
 /** @internal */
 export function isIndexedPrefixedEntry(
   entry: IndexedLatexDictionaryEntry
 ): entry is IndexedPostfixEntry {
   return 'kind' in entry && entry.kind === 'prefix';
 }
-
-export type IndexedPostfixEntry = CommonEntry & {
-  kind: 'postfix';
-  precedence: Precedence;
-
-  parse: PostfixParseHandler;
-};
 
 /** @internal */
 export function isIndexedPostfixEntry(
@@ -172,55 +122,12 @@ export function isIndexedPostfixEntry(
   return 'kind' in entry && entry.kind === 'postfix';
 }
 
-export type IndexedEnvironmentEntry = CommonEntry & {
-  kind: 'environment';
-
-  parse: EnvironmentParseHandler;
-};
-
 /** @internal */
 export function isIndexedEnvironmentEntry(
   entry: IndexedLatexDictionaryEntry
 ): entry is IndexedEnvironmentEntry {
   return 'kind' in entry && entry.kind === 'environment';
 }
-
-/** @internal */
-export type IndexedLatexDictionaryEntry =
-  | IndexedExpressionEntry
-  | IndexedFunctionEntry
-  | IndexedSymbolEntry
-  | IndexedMatchfixEntry
-  | IndexedInfixEntry
-  | IndexedPrefixEntry
-  | IndexedPostfixEntry
-  | IndexedEnvironmentEntry;
-
-/** @internal */
-export type IndexedLatexDictionary = {
-  // Mapping from  MathJSON symbols to dictionary entry
-  ids: Map<string, IndexedLatexDictionaryEntry>;
-
-  // Maximum number of tokens ahead of the current one that need to be
-  // considered (longest trigger length)
-  lookahead: number;
-
-  defs: IndexedLatexDictionaryEntry[];
-
-  // Index of matchfix entries by their opening delimiter token
-  // This allows fast lookup of which matchfix defs could match a given opening token
-  matchfixByOpen: Map<string, IndexedMatchfixEntry[]>;
-
-  // Trigger-based indexes for fast operator lookup
-  // Maps latexTrigger string to definitions of each kind
-  // Reduces O(n*lookahead) to O(lookahead) for operator lookups
-  infixByTrigger: Map<string, IndexedInfixEntry[]>;
-  prefixByTrigger: Map<string, IndexedPrefixEntry[]>;
-  postfixByTrigger: Map<string, IndexedPostfixEntry[]>;
-  functionByTrigger: Map<string, IndexedFunctionEntry[]>;
-  symbolByTrigger: Map<string, IndexedSymbolEntry[]>;
-  expressionByTrigger: Map<string, IndexedExpressionEntry[]>;
-};
 
 //
 // This table is used for the default serializer for matchfix operators

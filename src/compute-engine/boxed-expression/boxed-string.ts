@@ -8,7 +8,7 @@ import type {
 
 import { _BoxedExpression } from './abstract-boxed-expression';
 import { hashCode, isBoxedExpression } from './utils';
-import { isWildcard, wildcardName } from './boxed-patterns';
+import { isWildcard, wildcardName } from './pattern-utils';
 import { BoxedType } from '../../common/type/boxed-type';
 import { matchesNumber, matchesSymbol } from '../../math-json/utils';
 

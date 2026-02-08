@@ -10,7 +10,7 @@ import type {
 
 import { _BoxedExpression } from './abstract-boxed-expression';
 import { hashCode } from './utils';
-import { isWildcard, wildcardName } from './boxed-patterns';
+import { isWildcard, wildcardName } from './pattern-utils';
 import { BoxedType } from '../../common/type/boxed-type';
 import { DictionaryValue, Expression } from '../../math-json/types';
 import { widen } from '../../common/type/utils';

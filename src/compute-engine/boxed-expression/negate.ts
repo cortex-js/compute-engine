@@ -1,6 +1,5 @@
 import type { BoxedExpression, ComputeEngine } from '../global-types';
-import { add } from './arithmetic-add';
-import { order } from './order';
+import { addOrder, order } from './order';
 
 export function canonicalNegate(expr: BoxedExpression): BoxedExpression {
   // Negate(Negate(x)) -> x
@@ -41,7 +40,10 @@ export function negate(expr: BoxedExpression): BoxedExpression {
 
   // Distribute over addition
   // Negate(Add(a, b)) -> Add(Negate(a), Negate(b))
-  if (expr.operator === 'Add') return add(...expr.ops!.map((x) => negate(x)));
+  if (expr.operator === 'Add') {
+    const negated = expr.ops!.map((x) => negate(x));
+    return ce._fn('Add', [...negated].sort(addOrder));
+  }
 
   // Distribute over multiplication
   // Negate(Multiply(a, b)) -> Multiply(Negate(a), b)

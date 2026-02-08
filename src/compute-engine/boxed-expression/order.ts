@@ -1,12 +1,13 @@
 import type { BoxedExpression } from '../global-types';
 
-import { maxDegree, revlex, totalDegree } from './polynomials';
+import { maxDegree, revlex, totalDegree } from './polynomial-degree';
 import { asRadical } from './arithmetic-power';
 import { isOperatorDef } from './utils';
 
 export type Order = 'lex' | 'dexlex' | 'grevlex' | 'elim';
 
-export const DEFAULT_COMPLEXITY = 100000;
+import { DEFAULT_COMPLEXITY } from './constants';
+export { DEFAULT_COMPLEXITY };
 
 const TRIGONOMETRIC_OPERATORS: { [key: string]: boolean } = {
   Sin: true,

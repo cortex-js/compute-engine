@@ -43,9 +43,8 @@ import {
 } from './solve-linear-system';
 import { replace } from './rules';
 import { negate } from './negate';
-import { Product } from './product';
 import { simplify } from './simplify';
-import { canonicalMultiply, mul, div } from './arithmetic-mul-div';
+import { canonicalMultiply, mul, div, Product } from './arithmetic-mul-div';
 import { add } from './arithmetic-add';
 import { pow } from './arithmetic-power';
 import { asSmallInteger } from './numerics';

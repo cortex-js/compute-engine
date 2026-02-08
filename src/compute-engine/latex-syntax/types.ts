@@ -1,10 +1,11 @@
 import type { OneOf } from '../../common/one-of';
 import type { Expression, MathJsonSymbol } from '../../math-json/types';
-import { BoxedType, Type, TypeString } from '../types';
+import type { Type, TypeString } from '../../common/type/types';
+import { BoxedType } from '../../common/type/boxed-type';
 import type {
   IndexedLatexDictionary,
   IndexedLatexDictionaryEntry,
-} from './dictionary/definitions';
+} from './dictionary/indexed-types';
 
 export type SymbolTable = {
   parent: SymbolTable | null;

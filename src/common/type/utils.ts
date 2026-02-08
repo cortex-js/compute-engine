@@ -1,12 +1,14 @@
 import { parseType } from './parse';
-import { PRIMITIVE_TYPES } from './primitive';
+import { isValidType } from './primitive';
 import { typeToString } from './serialize';
 import { isSubtype } from './subtype';
+
+// Re-export isValidType from primitive for backward compatibility
+export { isValidType };
 import type {
   Type,
   FunctionSignature,
   TypeString,
-  PrimitiveType,
 } from './types';
 
 /** Given two types a and b, return the narrowest type common to a and b */
@@ -149,28 +151,6 @@ export function collectionElementType(type: Readonly<Type>): Type | undefined {
 
 export function isValidTypeName(name: string): boolean {
   return /^[a-zA-Z_][a-zA-Z0-9_]*$/.test(name);
-}
-
-export function isValidType(t: any): t is Readonly<Type> {
-  if (typeof t === 'string')
-    return PRIMITIVE_TYPES.includes(t as PrimitiveType);
-  if (typeof t !== 'object') return false;
-  if (!('kind' in t)) return false;
-  return (
-    t.kind === 'signature' ||
-    t.kind === 'union' ||
-    t.kind === 'intersection' ||
-    t.kind === 'negation' ||
-    t.kind === 'tuple' ||
-    t.kind === 'list' ||
-    t.kind === 'record' ||
-    t.kind === 'dictionary' ||
-    t.kind === 'set' ||
-    t.kind === 'function' ||
-    t.kind === 'collection' ||
-    t.kind === 'indexed_collection' ||
-    t.kind === 'reference'
-  );
 }
 
 function superType(a: Readonly<Type>, b: Readonly<Type>): Type {

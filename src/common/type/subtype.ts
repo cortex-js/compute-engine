@@ -1,4 +1,3 @@
-import { parseType } from './parse';
 import {
   COLLECTION_TYPES,
   EXPRESSION_TYPES,
@@ -8,7 +7,6 @@ import {
   SCALAR_TYPES,
   VALUE_TYPES,
 } from './primitive';
-import { typeToString } from './serialize';
 import type {
   NumericPrimitiveType,
   PrimitiveType,
@@ -16,7 +14,16 @@ import type {
   TypeCompatibility,
   TypeString,
 } from './types';
-import { widen } from './utils';
+
+// Lazy import to break subtype → parse cycle
+let _parseType: typeof import('./parse').parseType | undefined;
+function lazyParseType(s: string): Type {
+  if (!_parseType) {
+    const m = './parse';
+    _parseType = require(m).parseType;
+  }
+  return _parseType!(s);
+}
 
 /** For each key, *all* the primitive subtypes of the type corresponding to that key */
 const PRIMITIVE_SUBTYPES: Record<PrimitiveType, PrimitiveType[]> = {
@@ -108,8 +115,10 @@ export function isSubtype(
   lhs: Type | TypeString,
   rhs: Type | TypeString
 ): boolean {
-  if (typeof lhs === 'string') lhs = parseType(lhs);
-  if (typeof rhs === 'string') rhs = parseType(rhs);
+  if (typeof lhs === 'string' && !PRIMITIVE_TYPES.includes(lhs as PrimitiveType))
+    lhs = lazyParseType(lhs);
+  if (typeof rhs === 'string' && !PRIMITIVE_TYPES.includes(rhs as PrimitiveType))
+    rhs = lazyParseType(rhs);
 
   // Every type is a subtype of `any`, the top type
   if (rhs === 'any') return true;
@@ -411,17 +420,19 @@ export function isSubtype(
 
     if (lhs.kind === 'dictionary')
       return isSubtype(
-        parseType(`tuple<string, ${typeToString(lhs.values)}>`),
+        { kind: 'tuple', elements: [{ type: 'string' }, { type: lhs.values }] },
         rhs.elements
       );
 
-    if (lhs.kind === 'record')
+    if (lhs.kind === 'record') {
+      // Lazy import widen to break subtype → utils cycle
+      const m2 = './utils';
+      const { widen } = require(m2);
       return isSubtype(
-        parseType(
-          `tuple<$string, ${typeToString(widen(...Object.values(lhs.elements)))}>`
-        ),
+        { kind: 'tuple', elements: [{ type: 'string' }, { type: widen(...Object.values(lhs.elements)) }] },
         rhs.elements
       );
+    }
   }
 
   //

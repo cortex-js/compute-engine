@@ -6,7 +6,7 @@ import type {
 
 import { permutations } from '../../common/utils';
 
-import { isWildcard, wildcardName, wildcardType } from './boxed-patterns';
+import { isWildcard, wildcardName, wildcardType } from './pattern-utils';
 import { isOperatorDef } from './utils';
 
 function hasWildcards(expr: string | BoxedExpression): boolean {

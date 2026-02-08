@@ -3,65 +3,8 @@ import type { ComputeEngine, BoxedExpression } from '../global-types';
 import { isRelationalOperator } from '../latex-syntax/utils';
 
 import { asSmallInteger } from './numerics';
-import { mul } from './arithmetic-mul-div';
+import { mul, expandProducts } from './arithmetic-mul-div';
 import { add } from './arithmetic-add';
-import { Product } from './product';
-
-function expandProduct(
-  lhs: Readonly<BoxedExpression>,
-  rhs: Readonly<BoxedExpression>
-): BoxedExpression {
-  //
-  // Negate
-  //
-
-  if (lhs.operator === 'Negate' && rhs.operator === 'Negate')
-    return expandProduct(lhs.op1, rhs.op1);
-
-  const ce = lhs.engine;
-
-  if (lhs.operator === 'Negate') return expandProduct(lhs.op1, rhs).neg();
-  if (rhs.operator === 'Negate') return expandProduct(lhs, rhs.op1).neg();
-
-  //
-  // Divide
-  //
-  if (lhs.operator === 'Divide' && rhs.operator === 'Divide') {
-    // Apply distribute to the numerators only.
-    const denom = lhs.op2.mul(rhs.op2);
-    return expandProduct(lhs.op1, rhs.op1).div(denom);
-  }
-
-  if (lhs.operator === 'Divide')
-    return expandProduct(lhs.op1, rhs).div(lhs.op2);
-  if (rhs.operator === 'Divide')
-    return expandProduct(lhs, rhs.op1).div(rhs.op2);
-
-  //
-  // Add
-  //
-  if (lhs.operator === 'Add')
-    return add(...lhs.ops!.map((x) => expandProduct(x, rhs)));
-  if (rhs.operator === 'Add')
-    return add(...rhs.ops!.map((x) => expandProduct(lhs, x)));
-
-  //
-  // Something else...
-  //
-  return new Product(ce, [lhs, rhs]).asExpression();
-}
-
-export function expandProducts(
-  ce: ComputeEngine,
-  ops: ReadonlyArray<BoxedExpression>
-): BoxedExpression | null {
-  if (ops.length === 0) return null;
-  if (ops.length === 1) return ops[0];
-  if (ops.length === 2) return expandProduct(ops[0], ops[1]);
-
-  const rhs = expandProducts(ce, ops.slice(1));
-  return rhs === null ? null : expandProduct(ops[0], rhs);
-}
 
 const binomials = [
   [1],

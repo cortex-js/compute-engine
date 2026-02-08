@@ -1,4 +1,4 @@
-import type { NumericPrimitiveType, PrimitiveType } from './types';
+import type { NumericPrimitiveType, PrimitiveType, Type } from './types';
 
 /** All the types representing numeric values */
 export const NUMERIC_TYPES: NumericPrimitiveType[] = [
@@ -62,4 +62,26 @@ export const PRIMITIVE_TYPES: PrimitiveType[] = [
 export function isValidPrimitiveType(s: any): s is PrimitiveType {
   if (typeof s !== 'string') return false;
   return PRIMITIVE_TYPES.includes(s as PrimitiveType);
+}
+
+export function isValidType(t: any): t is Readonly<Type> {
+  if (typeof t === 'string')
+    return PRIMITIVE_TYPES.includes(t as PrimitiveType);
+  if (typeof t !== 'object') return false;
+  if (!('kind' in t)) return false;
+  return (
+    t.kind === 'signature' ||
+    t.kind === 'union' ||
+    t.kind === 'intersection' ||
+    t.kind === 'negation' ||
+    t.kind === 'tuple' ||
+    t.kind === 'list' ||
+    t.kind === 'record' ||
+    t.kind === 'dictionary' ||
+    t.kind === 'set' ||
+    t.kind === 'function' ||
+    t.kind === 'collection' ||
+    t.kind === 'indexed_collection' ||
+    t.kind === 'reference'
+  );
 }
