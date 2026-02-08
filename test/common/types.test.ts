@@ -1052,6 +1052,65 @@ describe('Type References', () => {
     ).toBe(true);
   });
 
+  it('should parse a forward type reference in an expression type inside a function signature', () => {
+    const forwardResolver = {
+      get names() {
+        return [];
+      },
+      forward: (name: string) => {
+        return {
+          kind: 'reference',
+          name,
+          alias: false,
+          def: undefined,
+        } as TypeReference;
+      },
+      resolve: (name: string) => {
+        if (name === 'ErrorCode') {
+          return {
+            kind: 'reference',
+            name,
+            alias: false,
+            def: undefined,
+          } as TypeReference;
+        }
+        return undefined;
+      },
+    };
+
+    // The original motivating case: should parse without throwing an exception
+    expect(
+      parseType(
+        '((string|expression<ErrorCode>), expression?) -> nothing',
+        forwardResolver
+      )
+    ).toMatchInlineSnapshot(`
+      {
+        "args": [
+          {
+            "type": {
+              "kind": "union",
+              "types": [
+                "string",
+                {
+                  "kind": "expression",
+                  "operator": "ErrorCode",
+                },
+              ],
+            },
+          },
+        ],
+        "kind": "signature",
+        "optArgs": [
+          {
+            "type": "expression",
+          },
+        ],
+        "result": "nothing",
+      }
+    `);
+  });
+
   it('should parse a recursive type reference', () => {
     const nodeType = {
       kind: 'reference',
@@ -1133,6 +1192,101 @@ describe('Type References', () => {
         "def": undefined,
         "kind": "reference",
         "name": "node",
+      }
+    `);
+  });
+});
+
+describe('Paren disambiguation (grouped type vs function signature)', () => {
+  it('should parse grouped union type', () => {
+    expect(parseType('(string | number)')).toMatchInlineSnapshot(`
+      {
+        "kind": "union",
+        "types": [
+          "string",
+          "number",
+        ],
+      }
+    `);
+  });
+
+  it('should parse nested group', () => {
+    expect(parseType('((integer))')).toMatchInlineSnapshot(`"integer"`);
+  });
+
+  it('should parse parenthesized tuple arg in function signature', () => {
+    expect(parseType('((string, number)) -> boolean')).toMatchInlineSnapshot(`
+      {
+        "args": [
+          {
+            "type": {
+              "elements": [
+                {
+                  "type": "string",
+                },
+                {
+                  "type": "number",
+                },
+              ],
+              "kind": "tuple",
+            },
+          },
+        ],
+        "kind": "signature",
+        "result": "boolean",
+      }
+    `);
+  });
+
+  it('should parse higher-order function signature (function type as argument)', () => {
+    expect(
+      parseType('((number) -> boolean, string) -> nothing')
+    ).toMatchInlineSnapshot(`
+      {
+        "args": [
+          {
+            "type": {
+              "args": [
+                {
+                  "type": "number",
+                },
+              ],
+              "kind": "signature",
+              "result": "boolean",
+            },
+          },
+          {
+            "type": "string",
+          },
+        ],
+        "kind": "signature",
+        "result": "nothing",
+      }
+    `);
+  });
+
+  it('should parse named function-typed argument', () => {
+    expect(
+      parseType('(f: (x: number) -> number) -> string')
+    ).toMatchInlineSnapshot(`
+      {
+        "args": [
+          {
+            "name": "f",
+            "type": {
+              "args": [
+                {
+                  "name": "x",
+                  "type": "number",
+                },
+              ],
+              "kind": "signature",
+              "result": "number",
+            },
+          },
+        ],
+        "kind": "signature",
+        "result": "string",
       }
     `);
   });
