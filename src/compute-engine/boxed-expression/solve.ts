@@ -632,7 +632,11 @@ function clearDenominators(
       }
       // Check if one is a symbol and the other contains it (partial match)
       // This handles cases like h and h appearing multiple times
-      if (isBoxedSymbol(denom) && isBoxedSymbol(existing) && denom.symbol === existing.symbol) {
+      if (
+        isBoxedSymbol(denom) &&
+        isBoxedSymbol(existing) &&
+        denom.symbol === existing.symbol
+      ) {
         isDuplicate = true;
         break;
       }
@@ -785,7 +789,14 @@ function solveTwoSqrtEquation(
     }
 
     // Check for Negate(Sqrt(...))
-    if (isBoxedFunction(op) && op.operator === 'Negate' && isBoxedFunction(op.op1) && op.op1.operator === 'Sqrt' && isBoxedFunction(op.op1) && op.op1.op1) {
+    if (
+      isBoxedFunction(op) &&
+      op.operator === 'Negate' &&
+      isBoxedFunction(op.op1) &&
+      op.op1.operator === 'Sqrt' &&
+      isBoxedFunction(op.op1) &&
+      op.op1.op1
+    ) {
       sqrtTerms.push({ term: op, arg: op.op1.op1, index: i });
       continue;
     }
@@ -793,7 +804,11 @@ function solveTwoSqrtEquation(
     // Check for coefficient * Sqrt(...)
     if (op.operator === 'Multiply' && isBoxedFunction(op)) {
       for (const factor of op.ops) {
-        if (factor.operator === 'Sqrt' && isBoxedFunction(factor) && factor.op1) {
+        if (
+          factor.operator === 'Sqrt' &&
+          isBoxedFunction(factor) &&
+          factor.op1
+        ) {
           sqrtTerms.push({ term: op, arg: factor.op1, index: i });
           break;
         }
@@ -837,22 +852,32 @@ function solveTwoSqrtEquation(
   let gSign = 1;
 
   if (sqrtTerms[0].term.operator === 'Negate') fSign = -1;
-  if (sqrtTerms[0].term.operator === 'Multiply' && isBoxedFunction(sqrtTerms[0].term)) {
+  if (
+    sqrtTerms[0].term.operator === 'Multiply' &&
+    isBoxedFunction(sqrtTerms[0].term)
+  ) {
     // Check if coefficient is negative
     const coef = sqrtTerms[0].term.ops.find((o) => o.operator !== 'Sqrt');
     if (coef?.isNegative) fSign = -1;
     // For now, only handle coefficient ±1
     const absCoefExpr = coef?.abs().N();
-    const absCoef = isBoxedNumber(absCoefExpr) ? absCoefExpr.numericValue : undefined;
+    const absCoef = isBoxedNumber(absCoefExpr)
+      ? absCoefExpr.numericValue
+      : undefined;
     if (absCoef !== 1 && absCoef !== undefined) return null;
   }
 
   if (sqrtTerms[1].term.operator === 'Negate') gSign = -1;
-  if (sqrtTerms[1].term.operator === 'Multiply' && isBoxedFunction(sqrtTerms[1].term)) {
+  if (
+    sqrtTerms[1].term.operator === 'Multiply' &&
+    isBoxedFunction(sqrtTerms[1].term)
+  ) {
     const coef = sqrtTerms[1].term.ops.find((o) => o.operator !== 'Sqrt');
     if (coef?.isNegative) gSign = -1;
     const absCoefExpr = coef?.abs().N();
-    const absCoef = isBoxedNumber(absCoefExpr) ? absCoefExpr.numericValue : undefined;
+    const absCoef = isBoxedNumber(absCoefExpr)
+      ? absCoefExpr.numericValue
+      : undefined;
     if (absCoef !== 1 && absCoef !== undefined) return null;
   }
 
@@ -998,7 +1023,12 @@ function solveNestedSqrtEquation(
   if (outerArg.operator === 'Add' && isBoxedFunction(outerArg)) {
     for (const term of outerArg.ops) {
       // Check for √x directly
-      if (term.operator === 'Sqrt' && isBoxedFunction(term) && isBoxedSymbol(term.op1) && term.op1.symbol === variable) {
+      if (
+        term.operator === 'Sqrt' &&
+        isBoxedFunction(term) &&
+        isBoxedSymbol(term.op1) &&
+        term.op1.symbol === variable
+      ) {
         hasInnerSqrtX = true;
         break;
       }
@@ -1019,7 +1049,11 @@ function solveNestedSqrtEquation(
       if (term.operator === 'Multiply' && isBoxedFunction(term)) {
         if (
           term.ops.some(
-            (f) => f.operator === 'Sqrt' && isBoxedFunction(f) && isBoxedSymbol(f.op1) && f.op1.symbol === variable
+            (f) =>
+              f.operator === 'Sqrt' &&
+              isBoxedFunction(f) &&
+              isBoxedSymbol(f.op1) &&
+              f.op1.symbol === variable
           )
         ) {
           hasInnerSqrtX = true;
@@ -1426,7 +1460,8 @@ function filterRootsByType(
   const varTypeObj = ce.symbol(x).type;
   const vt = varTypeObj.type;
   // Only filter for specific numeric subtypes
-  if (typeof vt !== 'string' || vt === 'number' || vt === 'unknown') return roots;
+  if (typeof vt !== 'string' || vt === 'number' || vt === 'unknown')
+    return roots;
 
   return roots.filter((root) => {
     const val = root.evaluate();

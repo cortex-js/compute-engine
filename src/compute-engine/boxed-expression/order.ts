@@ -3,7 +3,12 @@ import type { BoxedExpression } from '../global-types';
 import { maxDegree, revlex, totalDegree } from './polynomial-degree';
 import { asRadical } from './arithmetic-power';
 import { isOperatorDef } from './utils';
-import { isBoxedNumber, isBoxedFunction, isBoxedSymbol, isBoxedString } from './type-guards';
+import {
+  isBoxedNumber,
+  isBoxedFunction,
+  isBoxedSymbol,
+  isBoxedString,
+} from './type-guards';
 
 export type Order = 'lex' | 'dexlex' | 'grevlex' | 'elim';
 
@@ -243,8 +248,10 @@ export function order(a: BoxedExpression, b: BoxedExpression): number {
   }
 
   if (rankA === 'integer' || rankA === 'rational' || rankA === 'real') {
-    let aN: number | import('../numeric-value/types').NumericValue | undefined = isBoxedNumber(a) ? a.numericValue : undefined;
-    let bN: number | import('../numeric-value/types').NumericValue | undefined = isBoxedNumber(b) ? b.numericValue : undefined;
+    let aN: number | import('../numeric-value/types').NumericValue | undefined =
+      isBoxedNumber(a) ? a.numericValue : undefined;
+    let bN: number | import('../numeric-value/types').NumericValue | undefined =
+      isBoxedNumber(b) ? b.numericValue : undefined;
 
     if (aN === undefined && isBoxedFunction(a) && a.operator === 'Rational')
       aN = a.op1.re / a.op2.re!;
@@ -258,8 +265,7 @@ export function order(a: BoxedExpression, b: BoxedExpression): number {
   }
 
   if (rankA === 'radical') {
-    if (isBoxedFunction(a) && isBoxedFunction(b))
-      return order(a.op1, b.op1);
+    if (isBoxedFunction(a) && isBoxedFunction(b)) return order(a.op1, b.op1);
     return 0;
   }
 
@@ -298,8 +304,7 @@ export function order(a: BoxedExpression, b: BoxedExpression): number {
     }
 
     // console.log('same degree ', order(a.op1, b.op1));
-    if (isBoxedFunction(a) && isBoxedFunction(b))
-      return order(a.op1, b.op1);
+    if (isBoxedFunction(a) && isBoxedFunction(b)) return order(a.op1, b.op1);
     return 0;
   }
 
@@ -338,7 +343,13 @@ export function order(a: BoxedExpression, b: BoxedExpression): number {
   }
 
   if (rankA === 'fn' || rankA === 'trig') {
-    if (isBoxedFunction(a) && isBoxedFunction(b) && a.operator == b.operator && a.nops === 1 && b.nops === 1) {
+    if (
+      isBoxedFunction(a) &&
+      isBoxedFunction(b) &&
+      a.operator == b.operator &&
+      a.nops === 1 &&
+      b.nops === 1
+    ) {
       return order(a.op1, b.op1);
     }
     const aComplexity = a.operatorDefinition?.complexity ?? DEFAULT_COMPLEXITY;
@@ -374,7 +385,8 @@ export function canonicalOrder(
   { recursive = false }: { recursive?: boolean }
 ): BoxedExpression {
   // If the expression is already in canonical form, return it as is
-  if (expr.isCanonical || expr.isStructural || !isBoxedFunction(expr)) return expr;
+  if (expr.isCanonical || expr.isStructural || !isBoxedFunction(expr))
+    return expr;
 
   let ops: ReadonlyArray<BoxedExpression> = expr.ops;
   if (recursive) ops = ops.map((x) => canonicalOrder(x, { recursive }));
@@ -472,9 +484,15 @@ function getComplex(a: BoxedExpression): [number, number] {
     const aOp1 = a.op1;
     const aOp2 = a.op2;
     if (!isBoxedNumber(aOp1)) return [0, 0];
-    const re = typeof aOp1.numericValue === 'number' ? aOp1.numericValue : aOp1.numericValue.re;
+    const re =
+      typeof aOp1.numericValue === 'number'
+        ? aOp1.numericValue
+        : aOp1.numericValue.re;
     if (!isBoxedNumber(aOp2)) return [0, 0];
-    const im = typeof aOp2.numericValue === 'number' ? aOp2.numericValue : aOp2.numericValue.re;
+    const im =
+      typeof aOp2.numericValue === 'number'
+        ? aOp2.numericValue
+        : aOp2.numericValue.re;
     return [re, im];
   }
 

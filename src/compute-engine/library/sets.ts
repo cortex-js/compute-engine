@@ -6,10 +6,7 @@ import { parseType } from '../../common/type/parse';
 import { reduceType } from '../../common/type/reduce';
 import type { Type } from '../../common/type/types';
 import { flatten } from '../boxed-expression/flatten';
-import {
-  isBoxedFunction,
-  sym,
-} from '../boxed-expression/type-guards';
+import { isBoxedFunction, sym } from '../boxed-expression/type-guards';
 import { validateArguments } from '../boxed-expression/validate';
 import {
   isFiniteIndexedCollection,

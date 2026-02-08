@@ -23,9 +23,15 @@ function isSqrt(expr: BoxedExpression): boolean {
 // : 1/sqrt(n), return 1/n
 // : (could do): sqrt(n)/m, return n/m^2
 export function asRadical(expr: BoxedExpression): Rational | null {
-  if (isSqrt(expr) && isBoxedFunction(expr)) return asRational(expr.op1) ?? null;
+  if (isSqrt(expr) && isBoxedFunction(expr))
+    return asRational(expr.op1) ?? null;
 
-  if (isBoxedFunction(expr) && expr.operator === 'Divide' && expr.op1.is(1) && isSqrt(expr.op2)) {
+  if (
+    isBoxedFunction(expr) &&
+    expr.operator === 'Divide' &&
+    expr.op1.is(1) &&
+    isSqrt(expr.op2)
+  ) {
     const n = expr.op2.re;
     if (!Number.isInteger(n)) return null;
     return [1, n];
@@ -172,7 +178,8 @@ export function canonicalPower(
       // (note: 0^∞ = 0, 1^∞ = NaN, covered prior)
 
       // e^∞ = ∞ (handle explicitly before general case)
-      if (isBoxedSymbol(a) && a.symbol === 'ExponentialE') return ce.PositiveInfinity;
+      if (isBoxedSymbol(a) && a.symbol === 'ExponentialE')
+        return ce.PositiveInfinity;
 
       // (-1)^∞ = NaN
       // Because of oscillations in the limit.
@@ -401,9 +408,7 @@ export function pow(
         if (typeof exp === 'number') {
           return ce.number(ce._numericValue(eNv).pow(exp));
         } else if (isBoxedNumber(exp)) {
-          return ce.number(
-            ce._numericValue(eNv).pow(exp.numericValue)
-          );
+          return ce.number(ce._numericValue(eNv).pow(exp.numericValue));
         }
       }
     }

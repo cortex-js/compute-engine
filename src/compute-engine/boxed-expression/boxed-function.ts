@@ -24,11 +24,7 @@ import type {
 
 import { isFiniteIndexedCollection, zip } from '../collection-utils';
 import { isBoxedTensor } from './boxed-tensor';
-import {
-  isBoxedNumber,
-  isBoxedFunction,
-  isBoxedString,
-} from './type-guards';
+import { isBoxedNumber, isBoxedFunction, isBoxedString } from './type-guards';
 import { Type } from '../../common/type/types';
 import { BoxedType } from '../../common/type/boxed-type';
 import { parseType } from '../../common/type/parse';
@@ -404,8 +400,7 @@ export class BoxedFunction
     //
     if (expr.operator === 'Power' && isBoxedFunction(expr)) {
       // We can only extract a coef if the exponent is a literal
-      if (!isBoxedNumber(expr.op2))
-        return [ce._numericValue(1), this];
+      if (!isBoxedNumber(expr.op2)) return [ce._numericValue(1), this];
 
       // eslint-disable-next-line prefer-const
       let [coef, base] = expr.op1.toNumericValue();
@@ -1325,7 +1320,11 @@ function type(expr: BoxedFunction): Type {
       // E.g., if signature says "number" but all args are "integer",
       // narrow result to "finite_integer".
       const argTypes = expr.ops.map((op) => op.type.type);
-      if (argTypes.every((t) => typeof t === 'string' && NUMERIC_TYPES.includes(t as any))) {
+      if (
+        argTypes.every(
+          (t) => typeof t === 'string' && NUMERIC_TYPES.includes(t as any)
+        )
+      ) {
         const widened = widen(...argTypes);
         if (typeof widened === 'string' && isSubtype(widened, sigResult))
           sigResult = widened;

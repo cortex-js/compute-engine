@@ -72,7 +72,12 @@ export const COMBINATORICS_LIBRARY: SymbolDefinitions[] = [
         contains: (expr, x) => {
           if (!isBoxedFunction(expr)) return false;
           const factors = expr.ops;
-          if (!x.isCollection || !isBoxedFunction(x) || x.ops.length !== factors.length) return false;
+          if (
+            !x.isCollection ||
+            !isBoxedFunction(x) ||
+            x.ops.length !== factors.length
+          )
+            return false;
           const xOps = x.ops;
           return factors.every(
             (factor, i) => factor.contains(xOps[i]) ?? false

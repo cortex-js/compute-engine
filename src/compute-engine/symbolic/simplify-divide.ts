@@ -1,5 +1,8 @@
 import type { BoxedExpression, RuleStep } from '../global-types';
-import { isBoxedFunction, isBoxedNumber } from '../boxed-expression/type-guards';
+import {
+  isBoxedFunction,
+  isBoxedNumber,
+} from '../boxed-expression/type-guards';
 
 /**
  * Division simplification rules consolidated from simplify-rules.ts.

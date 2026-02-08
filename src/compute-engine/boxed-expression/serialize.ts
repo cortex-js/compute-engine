@@ -30,7 +30,12 @@ import type {
   JsonSerializationOptions,
 } from '../global-types';
 import { isOperatorDef } from './utils';
-import { isBoxedNumber, isBoxedSymbol, isBoxedString, isBoxedFunction } from './type-guards';
+import {
+  isBoxedNumber,
+  isBoxedSymbol,
+  isBoxedString,
+  isBoxedFunction,
+} from './type-guards';
 import { matchesNumber, matchesSymbol } from '../../math-json/utils';
 
 function _escapeJsonString(s: undefined): undefined;
@@ -147,7 +152,11 @@ function serializePrettyJsonFunction(
 
   if (name === 'Power') {
     // e^x -> Exp(x)
-    if (!exclusions.includes('Exp') && isBoxedSymbol(args[0]) && args[0].symbol === 'ExponentialE')
+    if (
+      !exclusions.includes('Exp') &&
+      isBoxedSymbol(args[0]) &&
+      args[0].symbol === 'ExponentialE'
+    )
       return serializeJsonFunction(ce, 'Exp', [args[1]], options, metadata);
 
     if (isBoxedNumber(args[1])) {
@@ -265,12 +274,14 @@ function serializePrettyJsonFunction(
       const block = args[0];
       if (block.nops === 1) {
         const params = args.slice(1);
-        if (
-          params.every((x) => isBoxedSymbol(x) && /_\d?/.test(x.symbol))
-        ) {
+        if (params.every((x) => isBoxedSymbol(x) && /_\d?/.test(x.symbol))) {
           if (
-            isBoxedFunction(block.op1) && block.op1.ops?.every(
-              (x, i) => isBoxedSymbol(x) && isBoxedSymbol(params[i]) && x.symbol === params[i].symbol
+            isBoxedFunction(block.op1) &&
+            block.op1.ops?.every(
+              (x, i) =>
+                isBoxedSymbol(x) &&
+                isBoxedSymbol(params[i]) &&
+                x.symbol === params[i].symbol
             )
           ) {
             // [`["Function", ["Block", ["Add", "_1", "_2"]], "_1", "_2"]`] -> `["Function", "Add"]`
@@ -362,11 +373,7 @@ function serializeJsonFunction(
         metadata
       );
 
-    if (
-      name === 'Root' &&
-      args.length === 2 &&
-      isBoxedNumber(args[1])
-    ) {
+    if (name === 'Root' && args.length === 2 && isBoxedNumber(args[1])) {
       const n = asSmallInteger(args[1]);
       if (n === 2) return serializeJsonFunction(ce, 'Sqrt', [args[0]], options);
 
@@ -856,8 +863,7 @@ export function serializeJson(
   if (expr.type.matches('dictionary')) return expr.toMathJson(options);
 
   // Is it a string?
-  if (isBoxedString(expr))
-    return serializeJsonString(expr.string, options);
+  if (isBoxedString(expr)) return serializeJsonString(expr.string, options);
 
   // Is it a symbol?
   if (isBoxedSymbol(expr)) {
@@ -870,7 +876,9 @@ export function serializeJson(
   // Is it a function?
   if (isBoxedFunction(expr)) {
     const structuralExpr = expr.structural;
-    const structuralOps = isBoxedFunction(structuralExpr) ? structuralExpr.ops : [];
+    const structuralOps = isBoxedFunction(structuralExpr)
+      ? structuralExpr.ops
+      : [];
     if (
       expr.isValid &&
       (expr.isCanonical || expr.isStructural) &&
@@ -886,16 +894,10 @@ export function serializeJson(
           wikidata,
         }
       );
-    return serializeJsonFunction(
-      ce,
-      expr.operator,
-      structuralOps,
-      options,
-      {
-        latex: expr.verbatimLatex,
-        wikidata,
-      }
-    );
+    return serializeJsonFunction(ce, expr.operator, structuralOps, options, {
+      latex: expr.verbatimLatex,
+      wikidata,
+    });
   }
 
   return expr.json;

@@ -77,9 +77,7 @@ import { canonical } from '../boxed-expression/canonical-utils';
  * Shared type handler for functions that produce finite numeric output
  * from numeric input. Real inputs → finite_real, otherwise → finite_number.
  */
-export function numericTypeHandler(
-  ops: ReadonlyArray<BoxedExpression>
-): Type {
+export function numericTypeHandler(ops: ReadonlyArray<BoxedExpression>): Type {
   if (ops.every((x) => x.type.matches('real'))) return 'finite_real';
   return 'finite_number';
 }
@@ -1552,7 +1550,10 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         // reducible, for example.
         if (ops.length === 0) return engine.Nothing;
         const op = ops[0];
-        if ((op.operator === 'Rational' || op.operator === 'Divide') && isBoxedFunction(op))
+        if (
+          (op.operator === 'Rational' || op.operator === 'Divide') &&
+          isBoxedFunction(op)
+        )
           return op.op1;
         return engine._fn('Numerator', canonical(engine, ops));
       },
@@ -1561,7 +1562,10 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         const ce = engine;
         if (ops.length === 0) return ce.Nothing;
         const op = ops[0];
-        if ((op.operator === 'Rational' || op.operator === 'Divide') && isBoxedFunction(op))
+        if (
+          (op.operator === 'Rational' || op.operator === 'Divide') &&
+          isBoxedFunction(op)
+        )
           return op.op1.evaluate();
         return op.numerator;
       },
@@ -1580,7 +1584,10 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         // reductible, for example.
         if (ops.length === 0) return engine.Nothing;
         const op = ops[0];
-        if ((op.operator === 'Rational' || op.operator === 'Divide') && isBoxedFunction(op))
+        if (
+          (op.operator === 'Rational' || op.operator === 'Divide') &&
+          isBoxedFunction(op)
+        )
           return op.op2;
         const num = asRational(op);
         if (num !== undefined) return engine.number(num[1]);
@@ -1591,7 +1598,10 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         const ce = engine;
         if (ops.length === 0) return ce.Nothing;
         const op = ops[0];
-        if ((op.operator === 'Rational' || op.operator === 'Divide') && isBoxedFunction(op))
+        if (
+          (op.operator === 'Rational' || op.operator === 'Divide') &&
+          isBoxedFunction(op)
+        )
           return op.op2.evaluate();
         return op.denominator;
       },
@@ -1610,7 +1620,10 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         // reductible, for example.
         if (ops.length === 0) return engine.Nothing;
         const op = ops[0];
-        if ((op.operator === 'Rational' || op.operator === 'Divide') && isBoxedFunction(op))
+        if (
+          (op.operator === 'Rational' || op.operator === 'Divide') &&
+          isBoxedFunction(op)
+        )
           return engine.tuple(...op.ops);
         const num = asRational(op.evaluate());
         if (num !== undefined)
@@ -1625,7 +1638,10 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         const ce = engine;
         if (ops.length === 0) return ce.Nothing;
         const op = ops[0];
-        if ((op.operator === 'Rational' || op.operator === 'Divide') && isBoxedFunction(op))
+        if (
+          (op.operator === 'Rational' || op.operator === 'Divide') &&
+          isBoxedFunction(op)
+        )
           return ce.tuple(...op.ops);
 
         return ce.tuple(...op.numeratorDenominator);
@@ -1870,8 +1886,7 @@ function processMinMaxItem(
     return [result, rest];
   }
 
-  if (!item.isNumber || !isBoxedNumber(item))
-    return [undefined, [item]];
+  if (!item.isNumber || !isBoxedNumber(item)) return [undefined, [item]];
   return [item, []];
 }
 

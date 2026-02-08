@@ -1,5 +1,9 @@
 import type { BoxedExpression } from '../global-types';
-import { isBoxedSymbol, isBoxedNumber, isBoxedFunction } from '../boxed-expression/type-guards';
+import {
+  isBoxedSymbol,
+  isBoxedNumber,
+  isBoxedFunction,
+} from '../boxed-expression/type-guards';
 
 /** An interval is a continuous set of real numbers */
 export type Interval = {

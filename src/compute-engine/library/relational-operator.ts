@@ -8,7 +8,10 @@ import type {
 import { isRelationalOperator } from '../latex-syntax/utils';
 import { flatten } from '../boxed-expression/flatten';
 import { eq } from '../boxed-expression/compare';
-import { isBoxedNumber, isBoxedFunction } from '../boxed-expression/type-guards';
+import {
+  isBoxedNumber,
+  isBoxedFunction,
+} from '../boxed-expression/type-guards';
 
 //   // eq, lt, leq, gt, geq, neq, approx
 //   //     shortLogicalImplies: 52, // ➔

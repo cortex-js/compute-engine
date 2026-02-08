@@ -520,7 +520,8 @@ export function processInverseFunction(
 ): BoxedExpression | undefined {
   if (xs.length !== 1 || !xs[0].isValid) return undefined;
   const expr = xs[0];
-  if (expr.operator === 'InverseFunction' && isBoxedFunction(expr)) return expr.op1.canonical;
+  if (expr.operator === 'InverseFunction' && isBoxedFunction(expr))
+    return expr.op1.canonical;
 
   if (!isBoxedSymbol(expr)) return undefined;
   const name = expr.symbol;

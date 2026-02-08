@@ -166,10 +166,7 @@ export function simplifyLog(x: BoxedExpression): RuleStep | undefined {
 
     // log_c(e) -> 1/ln(c) when c ≠ e
     // This handles log_10(e) -> 1/ln(10) ~ 0.434
-    if (
-      sym(arg) === 'ExponentialE' &&
-      sym(logBase) !== 'ExponentialE'
-    ) {
+    if (sym(arg) === 'ExponentialE' && sym(logBase) !== 'ExponentialE') {
       return {
         value: ce.One.div(ce._fn('Ln', [logBase])),
         because: 'log_c(e) -> 1/ln(c)',
@@ -422,11 +419,7 @@ export function simplifyLog(x: BoxedExpression): RuleStep | undefined {
       // e^(log_c(x) + y) -> x^{1/ln(c)} * e^y
       for (let i = 0; i < exp.ops.length; i++) {
         const term = exp.ops[i];
-        if (
-          term.operator !== 'Log' ||
-          !isBoxedFunction(term) ||
-          !term.op1
-        )
+        if (term.operator !== 'Log' || !isBoxedFunction(term) || !term.op1)
           continue;
 
         const otherTerms = exp.ops.filter((_, idx) => idx !== i);

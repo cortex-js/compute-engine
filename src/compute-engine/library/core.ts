@@ -519,7 +519,11 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
         // e.g., Subscript(L, 0) := 1  OR  Subscript(a, n) := a_{n-1} + 1
         // Also handles multi-index: Subscript(P, Sequence(n, k)) := ...
         //
-        if (op1.operator === 'Subscript' && isBoxedFunction(op1) && sym(op1.op1)) {
+        if (
+          op1.operator === 'Subscript' &&
+          isBoxedFunction(op1) &&
+          sym(op1.op1)
+        ) {
           const seqName = sym(op1.op1)!;
           const subscript = op1.op2;
 
@@ -527,7 +531,10 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
           // Check for multi-index subscript: P_{n,k}
           // Parser produces: Subscript(P, Sequence(n, k))
           //
-          if (subscript?.operator === 'Sequence' && isBoxedFunction(subscript)) {
+          if (
+            subscript?.operator === 'Sequence' &&
+            isBoxedFunction(subscript)
+          ) {
             const indices = subscript.ops;
 
             // Case M1: All numeric → multi-index base case
@@ -683,9 +690,7 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
         const t = ops[1].canonical.evaluate();
 
         const type = parseType(
-          (isBoxedString(t) ? t.string : undefined) ??
-            sym(t) ??
-            undefined
+          (isBoxedString(t) ? t.string : undefined) ?? sym(t) ?? undefined
         );
         if (!isValidType(type)) return undefined;
 
@@ -922,7 +927,8 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
 
       signature: '(collection, any) -> any',
       type: ([op1, op2], { engine: ce }) => {
-        if (isBoxedString(op1) && asSmallInteger(op2) !== null) return 'integer';
+        if (isBoxedString(op1) && asSmallInteger(op2) !== null)
+          return 'integer';
         if (op1.isIndexedCollection)
           return collectionElementType(op1.type.type) ?? 'any';
 

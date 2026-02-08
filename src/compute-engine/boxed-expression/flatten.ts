@@ -38,14 +38,25 @@ export function flatten<
       if (isBoxedSymbol(x) && x.symbol === 'Nothing') continue;
 
       // If the operator matches, flatten the expression
-      if (isBoxedFunction(x) && (x.operator === operator || x.operator === 'Sequence'))
+      if (
+        isBoxedFunction(x) &&
+        (x.operator === operator || x.operator === 'Sequence')
+      )
         ys.push(...flatten(x.ops, operator));
       else ys.push(x);
     }
     return ys as T;
   }
 
-  if (xs.every((x) => !((isBoxedSymbol(x) && x.symbol === 'Nothing') || x.operator === 'Sequence')))
+  if (
+    xs.every(
+      (x) =>
+        !(
+          (isBoxedSymbol(x) && x.symbol === 'Nothing') ||
+          x.operator === 'Sequence'
+        )
+    )
+  )
     return xs as T;
 
   // Iterate over the list of expressions and flatten them
@@ -73,7 +84,8 @@ export function flattenOps<
 >(ops: T, operator: string): T {
   if (!operator) return ops;
   // Bypass memory allocation for the common case where there is nothing to flatten
-  if (ops.every((x) => !isBoxedFunction(x) || x.operator !== operator)) return ops;
+  if (ops.every((x) => !isBoxedFunction(x) || x.operator !== operator))
+    return ops;
 
   const result: BoxedExpression[] = [];
   for (const arg of ops) {

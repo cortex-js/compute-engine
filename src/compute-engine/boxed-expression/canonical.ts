@@ -130,7 +130,10 @@ function invisibleOperatorForm(expr: BoxedExpression) {
     );
   }
 
-  return expr.engine._fn(expr.operator, [...expr.ops].map(invisibleOperatorForm));
+  return expr.engine._fn(
+    expr.operator,
+    [...expr.ops].map(invisibleOperatorForm)
+  );
 }
 
 /**

@@ -717,7 +717,6 @@ export interface BoxedExpression {
    */
   readonly unknowns: ReadonlyArray<string>;
 
-
   /**
    * Attempt to factor a numeric coefficient `c` and a `rest` out of a
    * canonical expression such that `rest.mul(c)` is equal to `this`.
@@ -890,7 +889,6 @@ export interface BoxedExpression {
    */
   get numeratorDenominator(): [BoxedExpression, BoxedExpression];
 
-
   /**
    * The name of the operator of the expression.
    *
@@ -907,7 +905,6 @@ export interface BoxedExpression {
    * @category Function Expression
    */
   readonly operator: string;
-
 
   /** If true, the expression has its own local scope that can be used
    * for local variables and arguments. Only true if the expression is a
@@ -1057,7 +1054,6 @@ export interface BoxedExpression {
     pattern: BoxedExpression,
     options?: PatternMatchOptions
   ): BoxedSubstitution | null;
-
 
   /**
    *

@@ -211,8 +211,7 @@ export const LOGIC_LIBRARY: SymbolDefinitions = {
     description: 'Return 1 if the arguments are equal, 0 otherwise',
     signature: '(value+) -> integer',
     evaluate: (args, { engine: ce }) => {
-      if (args.length === 1)
-        return sym(args[0]) === 'True' ? ce.One : ce.Zero;
+      if (args.length === 1) return sym(args[0]) === 'True' ? ce.One : ce.Zero;
 
       if (args.length === 2) return args[0].isEqual(args[1]) ? ce.One : ce.Zero;
 

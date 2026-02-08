@@ -6,7 +6,12 @@ import { isOperatorDef } from '../boxed-expression/utils';
 import { isFiniteIndexedCollection } from '../collection-utils';
 import { isRelationalOperator } from '../latex-syntax/utils';
 import { normalizeIndexingSet } from '../library/utils';
-import { isBoxedSymbol, isBoxedNumber, isBoxedString, isBoxedFunction } from '../boxed-expression/type-guards';
+import {
+  isBoxedSymbol,
+  isBoxedNumber,
+  isBoxedString,
+  isBoxedFunction,
+} from '../boxed-expression/type-guards';
 
 import type { CompileTarget, TargetSource } from './types';
 
@@ -134,7 +139,9 @@ export class BaseCompiler {
     // Handle special constructs
     if (h === 'Function') {
       // Anonymous function
-      const params = args.slice(1).map((x) => isBoxedSymbol(x) ? x.symbol : '_');
+      const params = args
+        .slice(1)
+        .map((x) => (isBoxedSymbol(x) ? x.symbol : '_'));
       return `((${params.join(', ')}) => ${BaseCompiler.compile(
         args[0].canonical,
         {
@@ -144,7 +151,8 @@ export class BaseCompiler {
       )})`;
     }
 
-    if (h === 'Declare') return `let ${isBoxedSymbol(args[0]) ? args[0].symbol : '_'}`;
+    if (h === 'Declare')
+      return `let ${isBoxedSymbol(args[0]) ? args[0].symbol : '_'}`;
     if (h === 'Assign')
       return `${isBoxedSymbol(args[0]) ? args[0].symbol : '_'} = ${BaseCompiler.compile(args[1], target)}`;
     if (h === 'Return')

@@ -162,21 +162,13 @@ export function TR2i(expr: BoxedExpression): BoxedExpression | undefined {
   if (!num || !den) return undefined;
 
   // sin(x)/cos(x) -> tan(x)
-  if (
-    num.operator === 'Sin' &&
-    den.operator === 'Cos' &&
-    sameArg(num, den)
-  ) {
+  if (num.operator === 'Sin' && den.operator === 'Cos' && sameArg(num, den)) {
     if (!isBoxedFunction(num)) return undefined;
     return ce._fn('Tan', [num.op1]);
   }
 
   // cos(x)/sin(x) -> cot(x)
-  if (
-    num.operator === 'Cos' &&
-    den.operator === 'Sin' &&
-    sameArg(num, den)
-  ) {
+  if (num.operator === 'Cos' && den.operator === 'Sin' && sameArg(num, den)) {
     if (!isBoxedFunction(num)) return undefined;
     return ce._fn('Cot', [num.op1]);
   }
@@ -398,7 +390,11 @@ export function TR7i(expr: BoxedExpression): BoxedExpression | undefined {
     if (!num || !den || !den.is(2)) return undefined;
 
     // Check numerator is Add(1, +/-cos(2x))
-    if (num.operator === 'Add' && isBoxedFunction(num) && num.ops.length === 2) {
+    if (
+      num.operator === 'Add' &&
+      isBoxedFunction(num) &&
+      num.ops.length === 2
+    ) {
       return checkHalfAnglePattern(ce, num.ops);
     }
   }
@@ -429,7 +425,11 @@ export function TR7i(expr: BoxedExpression): BoxedExpression | undefined {
   // Check for expanded form: 1/2 +/- cos(2x)/2
   // This appears as Add(1/2, +/-Multiply(1/2, Cos(2x))) or Add(1/2, +/-Divide(Cos(2x), 2))
   // Also handles: Add(Multiply(-1/2, Cos(2x)), 1/2) where -1/2 is Rational(-1, 2)
-  if (expr.operator === 'Add' && isBoxedFunction(expr) && expr.ops.length === 2) {
+  if (
+    expr.operator === 'Add' &&
+    isBoxedFunction(expr) &&
+    expr.ops.length === 2
+  ) {
     let halfTerm: BoxedExpression | undefined;
     let cosTerm: BoxedExpression | undefined;
     let isNegCos = false;
@@ -456,7 +456,11 @@ export function TR7i(expr: BoxedExpression): BoxedExpression | undefined {
       }
 
       // cos(2x)/2
-      if (checkOp.operator === 'Divide' && isBoxedFunction(checkOp) && checkOp.op2?.is(2)) {
+      if (
+        checkOp.operator === 'Divide' &&
+        isBoxedFunction(checkOp) &&
+        checkOp.op2?.is(2)
+      ) {
         const num = checkOp.op1;
         if (num?.operator === 'Cos') {
           cosTerm = num;
@@ -1228,7 +1232,11 @@ export function TR11i(expr: BoxedExpression): BoxedExpression | undefined {
 
   // cos^2(x) - sin^2(x) -> cos(2x)
   // This appears as Add(Power(Cos(x), 2), Negate(Power(Sin(x), 2)))
-  if (expr.operator === 'Add' && isBoxedFunction(expr) && expr.ops.length === 2) {
+  if (
+    expr.operator === 'Add' &&
+    isBoxedFunction(expr) &&
+    expr.ops.length === 2
+  ) {
     const [a, b] = expr.ops;
 
     // Check for cos^2(x) + (-sin^2(x))
@@ -1286,14 +1294,16 @@ export function TR11i(expr: BoxedExpression): BoxedExpression | undefined {
     let cosArg = extractTwoCosSq(a);
     if (
       cosArg &&
-      (b.is(-1) || (b.operator === 'Negate' && isBoxedFunction(b) && b.op1?.is(1)))
+      (b.is(-1) ||
+        (b.operator === 'Negate' && isBoxedFunction(b) && b.op1?.is(1)))
     ) {
       return ce._fn('Cos', [cosArg.mul(2)]);
     }
     cosArg = extractTwoCosSq(b);
     if (
       cosArg &&
-      (a.is(-1) || (a.operator === 'Negate' && isBoxedFunction(a) && a.op1?.is(1)))
+      (a.is(-1) ||
+        (a.operator === 'Negate' && isBoxedFunction(a) && a.op1?.is(1)))
     ) {
       return ce._fn('Cos', [cosArg.mul(2)]);
     }
@@ -1495,7 +1505,11 @@ function extractTanProduct(
       const sqrtExpr = op.op1;
       if (isBoxedFunction(sqrtExpr)) {
         const sqrtArg = sqrtExpr.op1;
-        if (sqrtArg && isBoxedNumber(sqrtArg) && typeof sqrtArg.re === 'number') {
+        if (
+          sqrtArg &&
+          isBoxedNumber(sqrtArg) &&
+          typeof sqrtArg.re === 'number'
+        ) {
           coef *= -Math.sqrt(sqrtArg.re);
         } else {
           return undefined;
@@ -1898,10 +1912,18 @@ export function TR22i(expr: BoxedExpression): BoxedExpression | undefined {
     } else if (op.is(-1)) {
       oneIndex = i;
       isNegOne = true;
-    } else if (op.operator === 'Negate' && isBoxedFunction(op) && op.op1?.is(1)) {
+    } else if (
+      op.operator === 'Negate' &&
+      isBoxedFunction(op) &&
+      op.op1?.is(1)
+    ) {
       oneIndex = i;
       isNegOne = true;
-    } else if (op.operator === 'Power' && isBoxedFunction(op) && op.op2?.is(2)) {
+    } else if (
+      op.operator === 'Power' &&
+      isBoxedFunction(op) &&
+      op.op2?.is(2)
+    ) {
       powerIndex = i;
     }
   }
@@ -2180,7 +2202,11 @@ function extractSquaredTrig(
     let trigPower: BoxedExpression | undefined;
 
     for (const factor of op.ops) {
-      if (factor.operator === 'Power' && isBoxedFunction(factor) && factor.op2?.is(2)) {
+      if (
+        factor.operator === 'Power' &&
+        isBoxedFunction(factor) &&
+        factor.op2?.is(2)
+      ) {
         const base = factor.op1;
         if (base?.operator === 'Sin' || base?.operator === 'Cos') {
           trigPower = factor;
@@ -2192,10 +2218,20 @@ function extractSquaredTrig(
 
     if (trigPower && isBoxedFunction(trigPower)) {
       const base = trigPower.op1;
-      if (base && base.operator === 'Sin' && isBoxedFunction(base) && base.op1) {
+      if (
+        base &&
+        base.operator === 'Sin' &&
+        isBoxedFunction(base) &&
+        base.op1
+      ) {
         return { func: 'Sin', arg: base.op1, coef };
       }
-      if (base && base.operator === 'Cos' && isBoxedFunction(base) && base.op1) {
+      if (
+        base &&
+        base.operator === 'Cos' &&
+        isBoxedFunction(base) &&
+        base.op1
+      ) {
         return { func: 'Cos', arg: base.op1, coef };
       }
     }

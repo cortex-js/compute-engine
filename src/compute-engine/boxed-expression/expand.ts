@@ -193,7 +193,11 @@ export function expand(
     );
   }
 
-  return expandFunction(expr.engine, expr.operator, isBoxedFunction(expr) ? expr.ops : []);
+  return expandFunction(
+    expr.engine,
+    expr.operator,
+    isBoxedFunction(expr) ? expr.ops : []
+  );
 }
 
 /**

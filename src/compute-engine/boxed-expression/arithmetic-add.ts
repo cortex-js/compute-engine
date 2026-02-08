@@ -61,7 +61,10 @@ export function canonicalAdd(
         const next = ops[i + 1];
         if (next) {
           const facExpr = getImaginaryFactor(next);
-          const fac = facExpr && isBoxedNumber(facExpr) ? facExpr.numericValue : undefined;
+          const fac =
+            facExpr && isBoxedNumber(facExpr)
+              ? facExpr.numericValue
+              : undefined;
           if (fac !== undefined) {
             const im = typeof fac === 'number' ? fac : fac.re;
             if (im !== 0) {

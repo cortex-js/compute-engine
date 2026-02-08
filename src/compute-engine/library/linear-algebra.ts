@@ -10,7 +10,12 @@ import {
   SymbolDefinitions,
   Sign,
 } from '../global-types';
-import { isBoxedFunction, isBoxedNumber, isBoxedString, isBoxedSymbol } from '../boxed-expression/type-guards';
+import {
+  isBoxedFunction,
+  isBoxedNumber,
+  isBoxedString,
+  isBoxedSymbol,
+} from '../boxed-expression/type-guards';
 
 export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
   {
@@ -83,7 +88,9 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
       },
       evaluate: (ops, { engine: ce }): BoxedExpression | undefined => {
         let op1 = ops[0].evaluate();
-        const targetShape = isBoxedFunction(ops[1]) ? ops[1].ops.map((op) => op.re) : [];
+        const targetShape = isBoxedFunction(ops[1])
+          ? ops[1].ops.map((op) => op.re)
+          : [];
 
         // Handle empty shape tuple - return scalar
         if (targetShape.length === 0) {
@@ -385,10 +392,8 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
           if (result === undefined) return undefined;
 
           // For scalar result (rank 2), box the value
-          if (typeof result === 'number')
-            return ce.box(result);
-          if (typeof result === 'boolean')
-            return result ? ce.True : ce.False;
+          if (typeof result === 'number') return ce.box(result);
+          if (typeof result === 'boolean') return result ? ce.True : ce.False;
 
           // Check if it's a primitive value that needs boxing
           if (!('expression' in result)) return ce.box(result);
@@ -668,8 +673,12 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
         // Determine norm type
         let normType: number | string = 2; // Default to L2/Frobenius
         if (normTypeExpr) {
-          const normStr = isBoxedString(normTypeExpr) ? normTypeExpr.string : undefined;
-          const normSym = isBoxedSymbol(normTypeExpr) ? normTypeExpr.symbol : undefined;
+          const normStr = isBoxedString(normTypeExpr)
+            ? normTypeExpr.string
+            : undefined;
+          const normSym = isBoxedSymbol(normTypeExpr)
+            ? normTypeExpr.symbol
+            : undefined;
           if (
             normStr === 'Infinity' ||
             normSym === 'Infinity' ||
@@ -2014,7 +2023,9 @@ function canonicalMatrix(
 
   const canonOp0 = ops[0].canonical;
   const body =
-    ops[0].operator === 'Vector' && isBoxedFunction(canonOp0) ? canonOp0.ops[0] : canonOp0;
+    ops[0].operator === 'Vector' && isBoxedFunction(canonOp0)
+      ? canonOp0.ops[0]
+      : canonOp0;
   const delims = ops[1]?.canonical;
   const columns = ops[2]?.canonical;
 

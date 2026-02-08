@@ -10,7 +10,11 @@ import type {
   Scope,
 } from '../global-types';
 import { spellCheckMessage } from '../boxed-expression/validate';
-import { isBoxedFunction, isBoxedSymbol, sym } from '../boxed-expression/type-guards';
+import {
+  isBoxedFunction,
+  isBoxedSymbol,
+  sym,
+} from '../boxed-expression/type-guards';
 
 export const CONTROL_STRUCTURES_LIBRARY: SymbolDefinitions[] = [
   {
@@ -186,7 +190,8 @@ function* runLoop(
 
     for (const x of collection.each()) {
       result = fn([x]) ?? ce.Nothing;
-      if (result.operator === 'Break' && isBoxedFunction(result)) return result.op1;
+      if (result.operator === 'Break' && isBoxedFunction(result))
+        return result.op1;
       if (result.operator === 'Return') return result;
       i += 1;
       if (i % 1000 === 0) yield result;
@@ -202,7 +207,8 @@ function* runLoop(
   let i = 0;
   while (true) {
     const result = body.evaluate();
-    if (result.operator === 'Break' && isBoxedFunction(result)) return result.op1;
+    if (result.operator === 'Break' && isBoxedFunction(result))
+      return result.op1;
     if (result.operator === 'Return') return result;
     i += 1;
     if (i % 1000 === 0) yield result;

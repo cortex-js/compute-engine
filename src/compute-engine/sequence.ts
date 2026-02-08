@@ -13,7 +13,11 @@ import type {
   SequenceInfo,
 } from './global-types';
 import { isValueDef, updateDef } from './boxed-expression/utils';
-import { isBoxedSymbol, isBoxedNumber, isBoxedFunction } from './boxed-expression/type-guards';
+import {
+  isBoxedSymbol,
+  isBoxedNumber,
+  isBoxedFunction,
+} from './boxed-expression/type-guards';
 
 // ============================================================================
 // Sequence Registry (SUB-7: Introspection support)
@@ -343,7 +347,10 @@ export function createSequenceHandler(
       // Multi-index after canonicalization: Subscript(P, Tuple(n, k))
       // Evaluate operands in case they contain unevaluated arithmetic (e.g., n-1)
       indices = subscript.ops.map((op) => op.evaluate().re);
-    } else if (subscript.operator === 'Delimiter' && isBoxedFunction(subscript)) {
+    } else if (
+      subscript.operator === 'Delimiter' &&
+      isBoxedFunction(subscript)
+    ) {
       // Alternative: Subscript(P, Delimiter(n, k))
       // Evaluate operands in case they contain unevaluated arithmetic (e.g., n-1)
       indices = subscript.ops.map((op) => op.evaluate().re);

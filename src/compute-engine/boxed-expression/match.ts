@@ -8,7 +8,12 @@ import { permutations } from '../../common/utils';
 
 import { isWildcard, wildcardName, wildcardType } from './pattern-utils';
 import { isOperatorDef } from './utils';
-import { isBoxedNumber, isBoxedFunction, isBoxedSymbol, isBoxedString } from './type-guards';
+import {
+  isBoxedNumber,
+  isBoxedFunction,
+  isBoxedSymbol,
+  isBoxedString,
+} from './type-guards';
 
 function hasWildcards(expr: string | BoxedExpression): boolean {
   if (typeof expr === 'string') return expr.startsWith('_');
@@ -107,7 +112,7 @@ function matchOnce(
   //
   if (isBoxedString(pattern)) {
     const str = pattern.string;
-    return (isBoxedString(expr) && expr.string === str) ? substitution : null;
+    return isBoxedString(expr) && expr.string === str ? substitution : null;
   }
 
   //
@@ -152,17 +157,17 @@ function matchOnce(
 
     // Special case: Match Multiply(Rational(1, n), x) against a Divide pattern
     // This handles cases like x/2 which is canonicalized as x * (1/2)
-    if (operator === 'Divide' && isBoxedFunction(expr) && expr.operator === 'Multiply') {
+    if (
+      operator === 'Divide' &&
+      isBoxedFunction(expr) &&
+      expr.operator === 'Multiply'
+    ) {
       const ops = expr.ops;
       for (let i = 0; i < ops.length; i++) {
         const op = ops[i];
 
         // Check if op is a rational number with numerator 1 (i.e., 1/n form)
-        if (
-          isBoxedNumber(op) &&
-          op.numerator.is(1) &&
-          !op.denominator.is(1)
-        ) {
+        if (isBoxedNumber(op) && op.numerator.is(1) && !op.denominator.is(1)) {
           // Collect all other operands
           const others = ops.filter((_, j) => j !== i);
           const numerator =
@@ -189,7 +194,12 @@ function matchOnce(
 
     // Special case: Match Divide(1, x) against a Power pattern
     // This handles cases like x^-1 which is canonicalized as 1/x
-    if (operator === 'Power' && isBoxedFunction(expr) && expr.operator === 'Divide' && expr.op1.is(1)) {
+    if (
+      operator === 'Power' &&
+      isBoxedFunction(expr) &&
+      expr.operator === 'Divide' &&
+      expr.op1.is(1)
+    ) {
       // Create a synthetic Power expression: Power(x, -1)
       const powerExpr = ce.function('Power', [expr.op2, ce.number(-1)], {
         form: 'structural',
@@ -205,7 +215,11 @@ function matchOnce(
 
     // Special case: Match Root(x, n) against a Power pattern
     // This handles cases like x^(1/3) which is canonicalized as Root(x, 3)
-    if (operator === 'Power' && isBoxedFunction(expr) && expr.operator === 'Root') {
+    if (
+      operator === 'Power' &&
+      isBoxedFunction(expr) &&
+      expr.operator === 'Root'
+    ) {
       // Create a synthetic Power expression: Power(x, 1/n)
       const powerExpr = ce.function(
         'Power',
@@ -360,10 +374,7 @@ function matchVariations(
 
     // x/a -> (1/a)*x
     if (isBoxedFunction(expr) && expr.operator === 'Divide') {
-      result = matchVariation('Multiply', [
-        expr.op1,
-        ['Divide', 1, expr.op2],
-      ]);
+      result = matchVariation('Multiply', [expr.op1, ['Divide', 1, expr.op2]]);
       if (result !== null) return result;
     }
   }

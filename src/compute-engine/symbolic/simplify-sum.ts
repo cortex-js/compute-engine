@@ -1,5 +1,10 @@
 import type { BoxedExpression, RuleStep } from '../global-types';
-import { isBoxedFunction, isBoxedNumber, isBoxedSymbol, sym } from '../boxed-expression/type-guards';
+import {
+  isBoxedFunction,
+  isBoxedNumber,
+  isBoxedSymbol,
+  sym,
+} from '../boxed-expression/type-guards';
 
 /**
  * Sum simplification rules extracted from simplify-rules.ts.
@@ -10,7 +15,13 @@ export function simplifySum(x: BoxedExpression): RuleStep | undefined {
 
   const body = x.op1;
   const limits = x.op2;
-  if (!body || !limits || limits.operator !== 'Limits' || !isBoxedFunction(limits)) return undefined;
+  if (
+    !body ||
+    !limits ||
+    limits.operator !== 'Limits' ||
+    !isBoxedFunction(limits)
+  )
+    return undefined;
 
   const index = sym(limits.op1);
   const lower = limits.op2;
@@ -287,7 +298,11 @@ export function simplifySum(x: BoxedExpression): RuleStep | undefined {
     let binomialN: BoxedExpression | null = null;
 
     for (const op of body.ops) {
-      if (op.operator === 'Binomial' && isBoxedFunction(op) && sym(op.op2) === index) {
+      if (
+        op.operator === 'Binomial' &&
+        isBoxedFunction(op) &&
+        sym(op.op2) === index
+      ) {
         hasBinomial = true;
         binomialN = op.op1 ?? null;
       } else if (
@@ -314,7 +329,11 @@ export function simplifySum(x: BoxedExpression): RuleStep | undefined {
     for (const op of body.ops) {
       if (sym(op) === index) {
         hasIndex = true;
-      } else if (op.operator === 'Binomial' && isBoxedFunction(op) && sym(op.op2) === index) {
+      } else if (
+        op.operator === 'Binomial' &&
+        isBoxedFunction(op) &&
+        sym(op.op2) === index
+      ) {
         hasBinomial = true;
         binomialN = op.op1 ?? null;
       }
@@ -349,7 +368,11 @@ export function simplifySum(x: BoxedExpression): RuleStep | undefined {
         op.op2.is(2)
       ) {
         hasIndexSquared = true;
-      } else if (op.operator === 'Binomial' && isBoxedFunction(op) && sym(op.op2) === index) {
+      } else if (
+        op.operator === 'Binomial' &&
+        isBoxedFunction(op) &&
+        sym(op.op2) === index
+      ) {
         hasBinomial = true;
         binomialN = op.op1 ?? null;
       }
@@ -385,7 +408,11 @@ export function simplifySum(x: BoxedExpression): RuleStep | undefined {
         op.op2.is(3)
       ) {
         hasIndexCubed = true;
-      } else if (op.operator === 'Binomial' && isBoxedFunction(op) && sym(op.op2) === index) {
+      } else if (
+        op.operator === 'Binomial' &&
+        isBoxedFunction(op) &&
+        sym(op.op2) === index
+      ) {
         hasBinomial = true;
         binomialN = op.op1 ?? null;
       }
@@ -424,7 +451,11 @@ export function simplifySum(x: BoxedExpression): RuleStep | undefined {
         hasAltTerm = true;
       } else if (sym(op) === index) {
         hasIndexTerm = true;
-      } else if (op.operator === 'Binomial' && isBoxedFunction(op) && sym(op.op2) === index) {
+      } else if (
+        op.operator === 'Binomial' &&
+        isBoxedFunction(op) &&
+        sym(op.op2) === index
+      ) {
         hasBinomial = true;
         binomialN = op.op1 ?? null;
       }
@@ -466,7 +497,12 @@ export function simplifySum(x: BoxedExpression): RuleStep | undefined {
   }
 
   // Sum of k*(k+1): Sum(k*(k+1), [k, 1, n]) → n(n+1)(n+2)/3
-  if (body.operator === 'Multiply' && isBoxedFunction(body) && body.ops.length === 2 && lower.is(1)) {
+  if (
+    body.operator === 'Multiply' &&
+    isBoxedFunction(body) &&
+    body.ops.length === 2 &&
+    lower.is(1)
+  ) {
     const [op1, op2] = body.ops;
     // Check for k * (k+1) pattern
     const isKTimesKPlus1 =

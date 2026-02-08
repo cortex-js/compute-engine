@@ -1,7 +1,12 @@
 import type { BoxedExpression, FunctionInterface } from '../global-types';
 
 import { isRational } from '../numerics/rationals';
-import { isBoxedFunction, isBoxedSymbol, isBoxedString, isBoxedNumber } from './type-guards';
+import {
+  isBoxedFunction,
+  isBoxedSymbol,
+  isBoxedString,
+  isBoxedNumber,
+} from './type-guards';
 
 /** Helper type for expressions known to be function expressions (in operator/function callbacks) */
 type FnExpr = BoxedExpression & FunctionInterface;
@@ -209,8 +214,10 @@ const FUNCTIONS: Record<
   string,
   string | ((expr: BoxedExpression, serialize: AsciiMathSerializer) => string)
 > = {
-  Abs: (expr: BoxedExpression, serialize) => `|${serialize((expr as FnExpr).op1)}|`,
-  Norm: (expr: BoxedExpression, serialize) => `||${serialize((expr as FnExpr).op1)}||`,
+  Abs: (expr: BoxedExpression, serialize) =>
+    `|${serialize((expr as FnExpr).op1)}|`,
+  Norm: (expr: BoxedExpression, serialize) =>
+    `||${serialize((expr as FnExpr).op1)}||`,
 
   // Trigonometric functions
   Sin: 'sin',
@@ -312,7 +319,9 @@ const FUNCTIONS: Record<
   // we need to correctly handle `["Delimiter"]`
   Delimiter: (expr_: BoxedExpression, serialize) => {
     const expr = expr_ as FnExpr;
-    const delimStr = isBoxedString(expr.ops[1]) ? expr.ops[1].string : undefined;
+    const delimStr = isBoxedString(expr.ops[1])
+      ? expr.ops[1].string
+      : undefined;
     return delimiter(expr.ops[0], delimStr, serialize);
   },
   Sequence: (expr_: BoxedExpression, serialize) => {
@@ -370,14 +379,18 @@ const FUNCTIONS: Record<
     if (expr.op1.operator === 'Block' && isBoxedFunction(expr.op1)) {
       if (expr.op1.nops === 0) return `(${serializedArgs()}) |-> {}`;
       if (expr.op1.nops === 1) {
-        if (args.length === 1 && isBoxedSymbol(args[0]) && args[0].symbol === '_1') {
+        if (
+          args.length === 1 &&
+          isBoxedSymbol(args[0]) &&
+          args[0].symbol === '_1'
+        ) {
           // If there is a single argument and it's _1, we can use _ instead
           return `(_) |-> ${serialize(expr.op1.op1.subs({ _1: '_' }))}`;
         }
         return `(${serializedArgs()}) |-> ${serialize(expr.op1.op1)}`;
       }
-      return `(${serializedArgs()}) |-> {\n    ${expr.op1
-        .ops.map((x) => serialize(x))
+      return `(${serializedArgs()}) |-> {\n    ${expr.op1.ops
+        .map((x) => serialize(x))
         .join(';\n     ')}\n}`;
     }
     return `(${serializedArgs()}) |-> ${serialize(expr.op1)}`;
@@ -416,7 +429,8 @@ function bigOp(
   if (fn?.operator === 'Function' && isBoxedFunction(fn)) {
     args = fn.ops.slice(1);
     const b = fn.op1 ?? fn;
-    if (b.operator === 'Block' && isBoxedFunction(b)) body = serialize(b.op1 ?? b);
+    if (b.operator === 'Block' && isBoxedFunction(b))
+      body = serialize(b.op1 ?? b);
     else body = serialize(b);
   } else if (fn) {
     // Handle symbols and general expressions (e.g., Multiply, Add)
@@ -457,8 +471,14 @@ function bigOp(
         indexes.push(limit.op1);
         index = isBoxedSymbol(limit.op1) ? limit.op1.symbol : '';
       }
-      const start = !(isBoxedSymbol(limit.op2) && limit.op2.symbol === 'Nothing') ? limit.op2 : null;
-      const end = !(isBoxedSymbol(limit.op3) && limit.op3.symbol === 'Nothing') ? limit.op3 : null;
+      const start = !(
+        isBoxedSymbol(limit.op2) && limit.op2.symbol === 'Nothing'
+      )
+        ? limit.op2
+        : null;
+      const end = !(isBoxedSymbol(limit.op3) && limit.op3.symbol === 'Nothing')
+        ? limit.op3
+        : null;
 
       if (start) {
         if (op === 'int' || !index) result += `_${wrap(serialize(start))}`;

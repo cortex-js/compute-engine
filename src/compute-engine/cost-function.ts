@@ -1,6 +1,10 @@
 import type { BoxedExpression } from './global-types';
 import type { NumericValue } from './numeric-value/types.js';
-import { isBoxedSymbol, isBoxedNumber, isBoxedFunction } from './boxed-expression/type-guards';
+import {
+  isBoxedSymbol,
+  isBoxedNumber,
+  isBoxedFunction,
+} from './boxed-expression/type-guards';
 
 /**
  * The Cost Function is used to select the simplest between two expressions:
@@ -79,7 +83,11 @@ export function costFunction(expr: BoxedExpression): number {
   // we generate (a 2-factor Multiply). It exists to prevent a readability
   // rewrite from being rejected purely by the default cost heuristic.
   const expLogSepCost = (() => {
-    if (expr.operator !== 'Multiply' || !isBoxedFunction(expr) || expr.ops.length !== 2)
+    if (
+      expr.operator !== 'Multiply' ||
+      !isBoxedFunction(expr) ||
+      expr.ops.length !== 2
+    )
       return null;
 
     const match = (
@@ -87,13 +95,15 @@ export function costFunction(expr: BoxedExpression): number {
       ePow: BoxedExpression
     ): { xBase: BoxedExpression; eExp: BoxedExpression } | null => {
       if (!isBoxedFunction(ePow) || ePow.operator !== 'Power') return null;
-      if (!isBoxedSymbol(ePow.op1) || ePow.op1.symbol !== 'ExponentialE') return null;
+      if (!isBoxedSymbol(ePow.op1) || ePow.op1.symbol !== 'ExponentialE')
+        return null;
 
       if (!isBoxedFunction(xPow) || xPow.operator !== 'Power') return null;
 
       // Match exponent: 1/ln(10)
       const exponent = xPow.op2;
-      if (!isBoxedFunction(exponent) || exponent.operator !== 'Divide') return null;
+      if (!isBoxedFunction(exponent) || exponent.operator !== 'Divide')
+        return null;
       if (exponent.op1?.is(1) !== true) return null;
 
       const denom = exponent.op2;
@@ -136,14 +146,22 @@ export function costFunction(expr: BoxedExpression): number {
     if (isBoxedFunction(arg) && arg.operator === 'Multiply') {
       // Check if any factor is a perfect square (Power with even exponent)
       for (const factor of arg.ops) {
-        if (isBoxedFunction(factor) && factor.operator === 'Power' && factor.op2?.isEven === true) {
+        if (
+          isBoxedFunction(factor) &&
+          factor.operator === 'Power' &&
+          factor.op2?.isEven === true
+        ) {
           // Add a penalty to encourage factoring out perfect squares
           return 5 + costFunction(arg) + 6;
         }
       }
     }
     // Also check if arg is directly a perfect square
-    if (isBoxedFunction(arg) && arg.operator === 'Power' && arg.op2?.isEven === true) {
+    if (
+      isBoxedFunction(arg) &&
+      arg.operator === 'Power' &&
+      arg.op2?.isEven === true
+    ) {
       return 5 + costFunction(arg) + 6;
     }
     // Sqrt(x^{odd}) where odd > 1 can be factored: sqrt(x^5) -> |x|^2 * sqrt(x)
@@ -239,7 +257,8 @@ export function costFunction(expr: BoxedExpression): number {
 
   const fnExprFinal = isBoxedFunction(expr) ? expr : undefined;
   return (
-    nameCost + (fnExprFinal?.ops.reduce((acc, x) => acc + costFunction(x), 0) ?? 0)
+    nameCost +
+    (fnExprFinal?.ops.reduce((acc, x) => acc + costFunction(x), 0) ?? 0)
   );
 }
 

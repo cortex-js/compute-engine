@@ -273,10 +273,7 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
     // ln(e) = 1 (natural log)
     // ln_c(e) = 1/ln(c) (for other bases)
     if (this.symbol === 'ExponentialE') {
-      if (
-        !base ||
-        (isBoxedSymbol(base) && base.symbol === 'ExponentialE')
-      )
+      if (!base || (isBoxedSymbol(base) && base.symbol === 'ExponentialE'))
         return this.engine.One;
       return this.engine.One.div(base.ln()); // log_c(e) = 1/ln(c)
     }

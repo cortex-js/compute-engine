@@ -56,8 +56,7 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
         if (ce.angularUnit === 'deg') return ops[0];
         if (ops.length !== 1) return ce._fn('Degrees', ops);
         const arg = ops[0];
-        if (!isBoxedNumber(arg) || !arg.isValid)
-          return ce._fn('Degrees', ops);
+        if (!isBoxedNumber(arg) || !arg.isValid) return ce._fn('Degrees', ops);
 
         let fArg = arg.re;
 

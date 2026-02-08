@@ -560,7 +560,12 @@ export function canonicalDivide(
 
   // a/a = 1 (if a ≠ 0 and a is finite)
   if (op2.is(0) === false && op2.isFinite !== false) {
-    if (isBoxedSymbol(op1) && isBoxedSymbol(op2) && op1.symbol === op2.symbol && op1.isConstant)
+    if (
+      isBoxedSymbol(op1) &&
+      isBoxedSymbol(op2) &&
+      op1.symbol === op2.symbol &&
+      op1.isConstant
+    )
       return ce.One;
 
     // (x+1)/(x+1) = 1 (if x+1 ≠ 0)
@@ -577,13 +582,23 @@ export function canonicalDivide(
   }
 
   // -a/-b = a/b
-  if (isBoxedFunction(op1) && op1.operator === 'Negate' && isBoxedFunction(op2) && op2.operator === 'Negate') {
+  if (
+    isBoxedFunction(op1) &&
+    op1.operator === 'Negate' &&
+    isBoxedFunction(op2) &&
+    op2.operator === 'Negate'
+  ) {
     op1 = op1.op1;
     op2 = op2.op1;
   }
 
   // (a/b)/(c/d) = (a*d)/(b*c)
-  if (isBoxedFunction(op1) && op1.operator === 'Divide' && isBoxedFunction(op2) && op2.operator === 'Divide') {
+  if (
+    isBoxedFunction(op1) &&
+    op1.operator === 'Divide' &&
+    isBoxedFunction(op2) &&
+    op2.operator === 'Divide'
+  ) {
     return canonicalDivide(
       canonicalMultiply(ce, [op1.op1, op2.op2]),
       canonicalMultiply(ce, [op1.op2, op2.op1])
@@ -610,7 +625,12 @@ export function canonicalDivide(
   // Note: (-1)/a ≠ -(a^-1). We distribute Negate over Divide.
 
   // √a/√b = (1/b)√(ab) as a numeric value
-  if (isBoxedFunction(op1) && op1.operator === 'Sqrt' && isBoxedFunction(op2) && op2.operator === 'Sqrt') {
+  if (
+    isBoxedFunction(op1) &&
+    op1.operator === 'Sqrt' &&
+    isBoxedFunction(op2) &&
+    op2.operator === 'Sqrt'
+  ) {
     const a = asSmallInteger(op1.op1);
     const b = asSmallInteger(op2.op1);
     if (a !== null && b !== null)
@@ -954,15 +974,27 @@ function expandProduct(
   lhs: Readonly<BoxedExpression>,
   rhs: Readonly<BoxedExpression>
 ): BoxedExpression {
-  if (isBoxedFunction(lhs) && lhs.operator === 'Negate' && isBoxedFunction(rhs) && rhs.operator === 'Negate')
+  if (
+    isBoxedFunction(lhs) &&
+    lhs.operator === 'Negate' &&
+    isBoxedFunction(rhs) &&
+    rhs.operator === 'Negate'
+  )
     return expandProduct(lhs.op1, rhs.op1);
 
   const ce = lhs.engine;
 
-  if (isBoxedFunction(lhs) && lhs.operator === 'Negate') return expandProduct(lhs.op1, rhs).neg();
-  if (isBoxedFunction(rhs) && rhs.operator === 'Negate') return expandProduct(lhs, rhs.op1).neg();
+  if (isBoxedFunction(lhs) && lhs.operator === 'Negate')
+    return expandProduct(lhs.op1, rhs).neg();
+  if (isBoxedFunction(rhs) && rhs.operator === 'Negate')
+    return expandProduct(lhs, rhs.op1).neg();
 
-  if (isBoxedFunction(lhs) && lhs.operator === 'Divide' && isBoxedFunction(rhs) && rhs.operator === 'Divide') {
+  if (
+    isBoxedFunction(lhs) &&
+    lhs.operator === 'Divide' &&
+    isBoxedFunction(rhs) &&
+    rhs.operator === 'Divide'
+  ) {
     const denom = lhs.op2.mul(rhs.op2);
     return expandProduct(lhs.op1, rhs.op1).div(denom);
   }

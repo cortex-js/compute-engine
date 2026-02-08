@@ -77,7 +77,9 @@ export function extractFiniteDomainWithReason(
     return { status: 'error', reason: 'expected-element-expression' };
   }
 
-  const variable = isBoxedSymbol(condition.op1) ? condition.op1.symbol : undefined;
+  const variable = isBoxedSymbol(condition.op1)
+    ? condition.op1.symbol
+    : undefined;
   if (!variable) {
     return { status: 'error', reason: 'expected-index-variable' };
   }
@@ -157,8 +159,7 @@ export function extractFiniteDomainWithReason(
     const start = asSmallInteger(domain.op1);
     const end = asSmallInteger(domain.op2);
     // op3 may be Nothing (a symbol) when not specified, so check ops length
-    const step =
-      domain.ops.length >= 3 ? asSmallInteger(domain.op3) : 1;
+    const step = domain.ops.length >= 3 ? asSmallInteger(domain.op3) : 1;
 
     if (start !== null && end !== null && step !== null && step !== 0) {
       const count = Math.floor((end - start) / step) + 1;
@@ -278,7 +279,11 @@ export function extractFiniteDomainWithReason(
     }
     // Check if the symbol has a value that's a finite set
     const domainValue = domain.value;
-    if (domainValue && domainValue.operator === 'Set' && isBoxedFunction(domainValue)) {
+    if (
+      domainValue &&
+      domainValue.operator === 'Set' &&
+      isBoxedFunction(domainValue)
+    ) {
       const values = domainValue.ops;
       if (values && values.length <= 1000) {
         return successResult([...values]);

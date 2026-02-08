@@ -165,7 +165,11 @@ volumes
         if (f?.operator === 'D') return f;
         // Avoid evaluating symbolic derivative applications like Digamma'(x)
         // which would incorrectly evaluate to 0
-        if (f?.operator === 'Apply' && isBoxedFunction(f) && f.op1?.operator === 'Derivative')
+        if (
+          f?.operator === 'Apply' &&
+          isBoxedFunction(f) &&
+          f.op1?.operator === 'Derivative'
+        )
           return f;
         // If the result contains symbolic transcendentals (like ln(2)),
         // return it without full evaluation to preserve the symbolic form
@@ -246,7 +250,9 @@ volumes
         }
 
         let expr = ops[0];
-        const argNames = isBoxedFunction(expr) ? expr.ops.slice(1).map((x) => sym(x)) : [];
+        const argNames = isBoxedFunction(expr)
+          ? expr.ops.slice(1).map((x) => sym(x))
+          : [];
 
         const limitsSequence = ops.slice(1);
 
@@ -258,7 +264,8 @@ volumes
         let isIndefinite = true;
         for (let i = limitsSequence.length - 1; i >= 0; i--) {
           if (!isBoxedFunction(limitsSequence[i])) continue;
-          const limitFn = limitsSequence[i] as BoxedExpression & import('../global-types').FunctionInterface;
+          const limitFn = limitsSequence[i] as BoxedExpression &
+            import('../global-types').FunctionInterface;
           const [varExpr, lower, upper] = limitFn.ops;
           let variable = sym(varExpr);
 

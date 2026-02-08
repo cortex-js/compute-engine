@@ -41,8 +41,7 @@ export function apply2(
   bigFn?: (x1: Decimal, x2: Decimal) => Decimal | Complex | number,
   complexFn?: (x1: Complex, x2: number | Complex) => Complex | number
 ): BoxedExpression | undefined {
-  if (!isBoxedNumber(expr1) || !isBoxedNumber(expr2))
-    return undefined;
+  if (!isBoxedNumber(expr1) || !isBoxedNumber(expr2)) return undefined;
 
   const ce = expr1.engine;
 

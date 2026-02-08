@@ -6,7 +6,11 @@
  */
 
 import type { BoxedExpression } from '../global-types';
-import { isBoxedFunction, isBoxedNumber, isBoxedSymbol } from '../boxed-expression/type-guards';
+import {
+  isBoxedFunction,
+  isBoxedNumber,
+  isBoxedSymbol,
+} from '../boxed-expression/type-guards';
 
 const TRIG_FUNCS = new Set(['Sin', 'Cos', 'Tan', 'Cot', 'Sec', 'Csc']);
 

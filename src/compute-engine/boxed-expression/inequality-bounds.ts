@@ -57,7 +57,12 @@ export function getInequalityBoundsFromAssumptions(
 
     // Case 1: Negate(symbol) < 0 => -symbol < 0 => symbol > 0
     // This gives us a lower bound of 0
-    if (isBoxedFunction(lhs) && lhs.operator === 'Negate' && isBoxedSymbol(lhs.op1) && lhs.op1.symbol === symbol) {
+    if (
+      isBoxedFunction(lhs) &&
+      lhs.operator === 'Negate' &&
+      isBoxedSymbol(lhs.op1) &&
+      lhs.op1.symbol === symbol
+    ) {
       const bound = ce.Zero;
       if (
         result.lowerBound === undefined ||
@@ -75,7 +80,12 @@ export function getInequalityBoundsFromAssumptions(
       let constantSum = 0;
 
       for (const term of lhs.ops) {
-        if (isBoxedFunction(term) && term.operator === 'Negate' && isBoxedSymbol(term.op1) && term.op1.symbol === symbol) {
+        if (
+          isBoxedFunction(term) &&
+          term.operator === 'Negate' &&
+          isBoxedSymbol(term.op1) &&
+          term.op1.symbol === symbol
+        ) {
           hasNegatedSymbol = true;
         } else if (isBoxedNumber(term)) {
           const val =

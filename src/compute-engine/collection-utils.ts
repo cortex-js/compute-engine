@@ -195,22 +195,25 @@ export function basicIndexedCollectionHandlers(): CollectionHandlers {
   return {
     isLazy: (_expr) => false,
 
-    count: (expr) => isBoxedFunction(expr) ? expr.nops : 0,
+    count: (expr) => (isBoxedFunction(expr) ? expr.nops : 0),
 
     isEmpty: (expr) => !isBoxedFunction(expr) || expr.nops === 0,
 
     isFinite: (_expr) => true,
 
-    contains: (expr, target) => isBoxedFunction(expr) ? expr.ops.some((x) => x.isSame(target)) : false,
+    contains: (expr, target) =>
+      isBoxedFunction(expr) ? expr.ops.some((x) => x.isSame(target)) : false,
 
     iterator: (expr) => {
-      if (!isBoxedFunction(expr)) return { next: () => ({ value: undefined, done: true as const }) };
+      if (!isBoxedFunction(expr))
+        return { next: () => ({ value: undefined, done: true as const }) };
       let index = 1;
       const last = expr.nops;
 
       return {
         next: () => {
-          if (index === last + 1) return { value: undefined, done: true as const };
+          if (index === last + 1)
+            return { value: undefined, done: true as const };
           index += 1;
           return { value: expr.ops[index - 1 - 1], done: false as const };
         },

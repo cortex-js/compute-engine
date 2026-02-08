@@ -1,5 +1,8 @@
 import type { BoxedExpression, RuleStep } from '../global-types';
-import { isBoxedFunction, isBoxedSymbol } from '../boxed-expression/type-guards';
+import {
+  isBoxedFunction,
+  isBoxedSymbol,
+} from '../boxed-expression/type-guards';
 
 /**
  * Hyperbolic trig simplification rules consolidated from simplify-rules.ts.

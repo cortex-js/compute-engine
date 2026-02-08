@@ -6,7 +6,12 @@ import type {
   BoxedRuleSet,
   RuleSteps,
 } from '../global-types';
-import { isBoxedNumber, isBoxedSymbol, isBoxedFunction, isBoxedString } from './type-guards';
+import {
+  isBoxedNumber,
+  isBoxedSymbol,
+  isBoxedFunction,
+  isBoxedString,
+} from './type-guards';
 
 type InternalSimplifyOptions = SimplifyOptions & {
   useVariations: boolean;
@@ -254,7 +259,8 @@ function simplifyOperands(
       // Power expressions with fractional exponents may need sign factoring
       // e.g., (-2x)^{3/5} should become -(2x)^{3/5} for correct real evaluation
       if (
-        x.operator === 'Power' && isBoxedFunction(x) &&
+        x.operator === 'Power' &&
+        isBoxedFunction(x) &&
         x.op2?.isRational === true &&
         !x.op2.isInteger
       ) {

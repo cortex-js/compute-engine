@@ -123,7 +123,8 @@ export function canonicalFunctionLiteral(
   //    This operator is just a "tag" indicating the nature of the
   //    symbol.
   //
-  if (expr.operator === 'BuiltinFunction' && isBoxedFunction(expr)) return expr.op1;
+  if (expr.operator === 'BuiltinFunction' && isBoxedFunction(expr))
+    return expr.op1;
 
   //
   // 4/ Parenthesized expression, e.g. ["Delimiter", ["Sin", "_"], "'()'"]
@@ -142,7 +143,9 @@ export function canonicalFunctionLiteral(
       }
     }
 
-    return canonicalFunctionLiteral(isBoxedFunction(expr) ? expr.op1 : undefined);
+    return canonicalFunctionLiteral(
+      isBoxedFunction(expr) ? expr.op1 : undefined
+    );
   }
 
   //
@@ -219,7 +222,9 @@ export function canonicalFunctionLiteralArguments(
 
   const params = ops
     .slice(1)
-    .map((x) => (isBoxedSymbol(x) ? x : ce.error('expected-a-symbol', x.toString())));
+    .map((x) =>
+      isBoxedSymbol(x) ? x : ce.error('expected-a-symbol', x.toString())
+    );
 
   console.assert(block.isScoped);
   // Declare the arguments in the scope of the body of the function.
@@ -312,7 +317,7 @@ function makeLambda(
       // Generate unique parameter names to avoid collisions
       const allSymbols = new Set([
         ...body.symbols,
-        ...params.map((p) => isBoxedSymbol(p) ? p.symbol : ''),
+        ...params.map((p) => (isBoxedSymbol(p) ? p.symbol : '')),
       ]);
       const extras = params.slice(args.length).map((_, i) => {
         let name = `_${i + 1}`;
@@ -326,14 +331,21 @@ function makeLambda(
 
       // Create substitution map for remaining parameters
       const substitutions = Object.fromEntries(
-        params.slice(args.length).map((param, i) => [isBoxedSymbol(param) ? param.symbol : '', extras[i]])
+        params
+          .slice(args.length)
+          .map((param, i) => [
+            isBoxedSymbol(param) ? param.symbol : '',
+            extras[i],
+          ])
       );
 
       // Apply known arguments and substitute remaining parameters
       const newBody = body
         .evaluate({
           withArguments: Object.fromEntries(
-            params.slice(0, args.length).map((key, i) => [isBoxedSymbol(key) ? key.symbol : '', args[i]])
+            params
+              .slice(0, args.length)
+              .map((key, i) => [isBoxedSymbol(key) ? key.symbol : '', args[i]])
           ),
         })
         .subs(substitutions);
@@ -350,7 +362,10 @@ function makeLambda(
     // Note: evaluate will switch to the function scope
     const result = body.evaluate({
       withArguments: Object.fromEntries(
-        params.map((key, i) => [isBoxedSymbol(key) ? key.symbol : '', args[i].evaluate()])
+        params.map((key, i) => [
+          isBoxedSymbol(key) ? key.symbol : '',
+          args[i].evaluate(),
+        ])
       ),
     });
 

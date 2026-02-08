@@ -324,7 +324,11 @@ export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
       // If no explicit signature was provided and the evaluate handler is a
       // Function expression, infer the signature from the function parameters
       // and body type.
-      if (this.inferredSignature && isBoxedFunction(boxedFn) && boxedFn.operator === 'Function') {
+      if (
+        this.inferredSignature &&
+        isBoxedFunction(boxedFn) &&
+        boxedFn.operator === 'Function'
+      ) {
         const body = boxedFn.ops[0];
         const params = boxedFn.ops.slice(1);
         const bodyType = body.type.toString();

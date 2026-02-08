@@ -48,11 +48,7 @@ import { toAsciiMath } from './ascii-math';
 // Dynamic import for serializeJson to avoid circular dependency
 import { cmp, eq, same } from './compare';
 import { CancellationError } from '../../common/interruptible';
-import {
-  isBoxedSymbol,
-  isBoxedString,
-  isBoxedFunction,
-} from './type-guards';
+import { isBoxedSymbol, isBoxedString, isBoxedFunction } from './type-guards';
 
 /**
  * _BoxedExpression
@@ -828,8 +824,7 @@ function getSymbols(expr: BoxedExpression, result: Set<string>): void {
     return;
   }
 
-  if (isBoxedFunction(expr))
-    for (const op of expr.ops) getSymbols(op, result);
+  if (isBoxedFunction(expr)) for (const op of expr.ops) getSymbols(op, result);
 }
 
 /**
@@ -852,6 +847,5 @@ function getUnknowns(expr: BoxedExpression, result: Set<string>): void {
     return;
   }
 
-  if (isBoxedFunction(expr))
-    for (const op of expr.ops) getUnknowns(op, result);
+  if (isBoxedFunction(expr)) for (const op of expr.ops) getUnknowns(op, result);
 }

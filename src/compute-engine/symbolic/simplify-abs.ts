@@ -211,7 +211,10 @@ export function simplifyAbs(x: BoxedExpression): RuleStep | undefined {
   // Note: This is handled separately since x here is actually Abs(something)
 
   // Odd trig/hyperbolic functions: |f(x)| -> f(|x|)
-  if ((ODD_TRIG.has(opOperator) || ODD_HYPER.has(opOperator)) && isBoxedFunction(op)) {
+  if (
+    (ODD_TRIG.has(opOperator) || ODD_HYPER.has(opOperator)) &&
+    isBoxedFunction(op)
+  ) {
     const innerArg = op.op1;
     if (innerArg) {
       return {
@@ -234,7 +237,8 @@ export function simplifyAbsPower(x: BoxedExpression): RuleStep | undefined {
   const base = x.op1;
   const exp = x.op2;
 
-  if (!base || !exp || base.operator !== 'Abs' || !isBoxedFunction(base)) return undefined;
+  if (!base || !exp || base.operator !== 'Abs' || !isBoxedFunction(base))
+    return undefined;
 
   const innerBase = base.op1;
   if (!innerBase) return undefined;

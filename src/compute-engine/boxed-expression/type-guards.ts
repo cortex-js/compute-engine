@@ -82,4 +82,3 @@ export function sym(
     ? (expr as BoxedExpression & SymbolInterface).symbol
     : undefined;
 }
-

@@ -2,7 +2,13 @@ import { NumericValue } from '../numeric-value/types';
 import type { BoxedExpression } from '../global-types';
 import { AbstractTensor } from '../tensor/tensors';
 import { getInequalityBoundsFromAssumptions } from './inequality-bounds';
-import { isBoxedNumber, isBoxedFunction, isBoxedSymbol, isBoxedString, isBoxedTensor } from './type-guards';
+import {
+  isBoxedNumber,
+  isBoxedFunction,
+  isBoxedSymbol,
+  isBoxedString,
+  isBoxedTensor,
+} from './type-guards';
 // Dynamic import for expand to avoid circular dependency
 // (expand → arithmetic-add → boxed-tensor → abstract-boxed-expression → compare)
 
@@ -183,7 +189,11 @@ export function cmp(
     //
     // Special case when b is a plain machine number
     //
-    if (typeof b !== 'number' && isBoxedNumber(b) && typeof b.numericValue === 'number')
+    if (
+      typeof b !== 'number' &&
+      isBoxedNumber(b) &&
+      typeof b.numericValue === 'number'
+    )
       b = b.numericValue;
     if (typeof b === 'number') {
       if (b === 0) {
@@ -223,9 +233,9 @@ export function cmp(
           if (bounds.lowerBound !== undefined) {
             const lb = bounds.lowerBound;
             const lowerNum = isBoxedNumber(lb)
-              ? (typeof lb.numericValue === 'number'
-                  ? lb.numericValue
-                  : lb.numericValue.re)
+              ? typeof lb.numericValue === 'number'
+                ? lb.numericValue
+                : lb.numericValue.re
               : undefined;
 
             if (lowerNum !== undefined && Number.isFinite(lowerNum)) {
@@ -243,9 +253,9 @@ export function cmp(
           if (bounds.upperBound !== undefined) {
             const ub = bounds.upperBound;
             const upperNum = isBoxedNumber(ub)
-              ? (typeof ub.numericValue === 'number'
-                  ? ub.numericValue
-                  : ub.numericValue.re)
+              ? typeof ub.numericValue === 'number'
+                ? ub.numericValue
+                : ub.numericValue.re
               : undefined;
 
             if (upperNum !== undefined && Number.isFinite(upperNum)) {
@@ -283,9 +293,9 @@ export function cmp(
       if (bounds.lowerBound !== undefined) {
         const lb = bounds.lowerBound;
         const lowerNum = isBoxedNumber(lb)
-          ? (typeof lb.numericValue === 'number'
-              ? lb.numericValue
-              : lb.numericValue.re)
+          ? typeof lb.numericValue === 'number'
+            ? lb.numericValue
+            : lb.numericValue.re
           : undefined;
 
         if (lowerNum !== undefined && Number.isFinite(lowerNum)) {
@@ -303,9 +313,9 @@ export function cmp(
       if (bounds.upperBound !== undefined) {
         const ub = bounds.upperBound;
         const upperNum = isBoxedNumber(ub)
-          ? (typeof ub.numericValue === 'number'
-              ? ub.numericValue
-              : ub.numericValue.re)
+          ? typeof ub.numericValue === 'number'
+            ? ub.numericValue
+            : ub.numericValue.re
           : undefined;
 
         if (upperNum !== undefined && Number.isFinite(upperNum)) {
@@ -368,18 +378,16 @@ export function cmp(
     if (isBoxedNumber(b)) {
       const bounds = getInequalityBoundsFromAssumptions(a.engine, a.symbol);
       const bNum =
-        typeof b.numericValue === 'number'
-          ? b.numericValue
-          : b.numericValue.re;
+        typeof b.numericValue === 'number' ? b.numericValue : b.numericValue.re;
 
       if (bNum !== undefined && Number.isFinite(bNum)) {
         // If symbol has a lower bound >= b, then symbol > b (or symbol >= b)
         if (bounds.lowerBound !== undefined) {
           const lb = bounds.lowerBound;
           const lowerNum = isBoxedNumber(lb)
-            ? (typeof lb.numericValue === 'number'
-                ? lb.numericValue
-                : lb.numericValue.re)
+            ? typeof lb.numericValue === 'number'
+              ? lb.numericValue
+              : lb.numericValue.re
             : undefined;
 
           if (lowerNum !== undefined && Number.isFinite(lowerNum)) {
@@ -397,9 +405,9 @@ export function cmp(
         if (bounds.upperBound !== undefined) {
           const ub = bounds.upperBound;
           const upperNum = isBoxedNumber(ub)
-            ? (typeof ub.numericValue === 'number'
-                ? ub.numericValue
-                : ub.numericValue.re)
+            ? typeof ub.numericValue === 'number'
+              ? ub.numericValue
+              : ub.numericValue.re
             : undefined;
 
           if (upperNum !== undefined && Number.isFinite(upperNum)) {

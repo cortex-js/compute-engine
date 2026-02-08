@@ -2175,7 +2175,10 @@ function canonicalList(
     // Adjust the matrix to have the correct delimiter
     const [body, delimiters, columns] = op1.ops;
 
-    if (!delimiters || (isBoxedString(delimiters) && delimiters.string === '..')) {
+    if (
+      !delimiters ||
+      (isBoxedString(delimiters) && delimiters.string === '..')
+    ) {
       if (!columns) return ce._fn('Matrix', [body, delimiters]);
       return ce._fn('Matrix', [body, ce.string('[]'), columns]);
     }

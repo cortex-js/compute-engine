@@ -95,8 +95,7 @@ export function negateProduct(
   if (!done) {
     result = [];
     for (const arg of args) {
-      if (done || (!isBoxedNumber(arg) && !arg.isInteger))
-        result.push(arg);
+      if (done || (!isBoxedNumber(arg) && !arg.isInteger)) result.push(arg);
       else {
         done = true;
         if (!arg.is(-1)) result.push(arg.neg());
@@ -109,8 +108,7 @@ export function negateProduct(
   if (!done) {
     result = [];
     for (const arg of args) {
-      if (done || !isBoxedNumber(arg) || !arg.isNumber)
-        result.push(arg);
+      if (done || !isBoxedNumber(arg) || !arg.isNumber) result.push(arg);
       else {
         done = true;
         if (!arg.is(-1)) result.push(arg.neg());

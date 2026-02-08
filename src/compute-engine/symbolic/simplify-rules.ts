@@ -321,10 +321,7 @@ export const SIMPLIFY_RULES: Rule[] = [
       // These cases can be handled by an explicit preliminary evaluation.
       const num = x.op1;
       const denom = x.op2;
-      if (
-        !isBoxedNumber(denom) &&
-        denom.symbols.length === 0
-      ) {
+      if (!isBoxedNumber(denom) && denom.symbols.length === 0) {
         if (num.is(0) || num.isSame(denom)) return undefined;
       }
 
@@ -340,9 +337,17 @@ export const SIMPLIFY_RULES: Rule[] = [
       }
       // Also skip if one is a power and the other is the same base
       // e.g., e^x / e -> e^{x-1}
-      if (num.operator === 'Power' && isBoxedFunction(num) && num.op1.isSame(denom))
+      if (
+        num.operator === 'Power' &&
+        isBoxedFunction(num) &&
+        num.op1.isSame(denom)
+      )
         return undefined;
-      if (denom.operator === 'Power' && isBoxedFunction(denom) && denom.op1.isSame(num))
+      if (
+        denom.operator === 'Power' &&
+        isBoxedFunction(denom) &&
+        denom.op1.isSame(num)
+      )
         return undefined;
 
       return { value: num.div(denom), because: 'division' };
@@ -524,7 +529,8 @@ export const SIMPLIFY_RULES: Rule[] = [
   // Inverse Function (i.e. sin^{-1})
   //
   (x): RuleStep | undefined => {
-    if (x.operator !== 'InverseFunction' || !isBoxedFunction(x)) return undefined;
+    if (x.operator !== 'InverseFunction' || !isBoxedFunction(x))
+      return undefined;
     const value = processInverseFunction(x.engine, x.ops);
     if (!value) return undefined;
     return { value, because: 'inverse function' };

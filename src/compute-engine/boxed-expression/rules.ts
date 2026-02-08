@@ -26,7 +26,12 @@ import {
 import { Parser } from '../latex-syntax/types';
 
 import { isPrime } from './predicates';
-import { isBoxedString, isBoxedNumber, isBoxedSymbol, isBoxedFunction } from './type-guards';
+import {
+  isBoxedString,
+  isBoxedNumber,
+  isBoxedSymbol,
+  isBoxedFunction,
+} from './type-guards';
 // @todo:
 // export function fixPoint(rule: Rule);
 // export function chain(rules: RuleSet);
@@ -966,7 +971,8 @@ export function matchAnyRules(
  */
 function dewildcard(expr: BoxedExpression): BoxedExpression {
   if (isBoxedSymbol(expr)) {
-    if (expr.symbol.startsWith('_')) return expr.engine.symbol(expr.symbol.slice(1));
+    if (expr.symbol.startsWith('_'))
+      return expr.engine.symbol(expr.symbol.slice(1));
   }
   if (isBoxedFunction(expr)) {
     const ops = expr.ops.map((x) => dewildcard(x));
@@ -977,8 +983,10 @@ function dewildcard(expr: BoxedExpression): BoxedExpression {
 
 function getWildcards(expr: BoxedExpression): string[] {
   const wildcards: string[] = [];
-  if (isBoxedSymbol(expr) && expr.symbol.startsWith('_')) wildcards.push(expr.symbol);
-  if (isBoxedFunction(expr)) expr.ops.forEach((x) => wildcards.push(...getWildcards(x)));
+  if (isBoxedSymbol(expr) && expr.symbol.startsWith('_'))
+    wildcards.push(expr.symbol);
+  if (isBoxedFunction(expr))
+    expr.ops.forEach((x) => wildcards.push(...getWildcards(x)));
   return wildcards;
 }
 
