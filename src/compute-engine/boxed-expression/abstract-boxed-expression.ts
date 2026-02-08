@@ -729,10 +729,6 @@ export abstract class _BoxedExpression implements BoxedExpression {
     return this;
   }
 
-  trigSimplify(): BoxedExpression {
-    return this.simplify({ strategy: 'fu' });
-  }
-
   evaluate(_options?: Partial<EvaluateOptions>): BoxedExpression {
     return this.simplify();
   }

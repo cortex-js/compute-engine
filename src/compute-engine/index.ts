@@ -180,6 +180,9 @@ export {
   factorPolynomial,
 };
 
+// Export expression expansion functions
+export { expand, expandAll } from './boxed-expression/expand';
+
 // Export compilation types and classes for advanced users
 export type {
   CompileTarget,

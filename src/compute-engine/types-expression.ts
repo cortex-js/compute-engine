@@ -1284,31 +1284,6 @@ export interface BoxedExpression {
   simplify(options?: Partial<SimplifyOptions>): BoxedExpression;
 
   /**
-   * Apply the Fu algorithm to simplify trigonometric expressions.
-   *
-   * The Fu algorithm is a systematic approach to trigonometric simplification
-   * that uses transformation rules (TR1-TR22), combination transforms (CTR),
-   * and rule lists (RL) to reduce the number of trigonometric functions.
-   *
-   * This is equivalent to calling `simplify({ strategy: 'fu' })` but is
-   * more convenient for trig-heavy expressions.
-   *
-   * Reference: Fu, Hongguang, Xiuqin Zhong, and Zhenbing Zeng.
-   * "Automated and readable simplification of trigonometric expressions."
-   * Mathematical and Computer Modelling 44.11 (2006): 1169-1177.
-   *
-   * @example
-   * ```typescript
-   * ce.parse('\\sin(x)\\cos(x)').trigSimplify()
-   * // => sin(2x)/2
-   *
-   * ce.parse('\\sin^2(x) + \\cos^2(x)').trigSimplify()
-   * // => 1
-   * ```
-   */
-  trigSimplify(): BoxedExpression;
-
-  /**
    * Return the value of the canonical form of this expression.
    *
    * A pure expression always returns the same value (provided that it
