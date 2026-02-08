@@ -222,7 +222,9 @@ function compiledEval() {
   const expr3 = expr.subs(vars).N();
 
   try {
-    const fn = compile(expr3)!;
+    const result = compile(expr3);
+    if (!result.run) throw new Error('fn is not a function');
+    const fn = result.run;
     let y = 0;
     const startTime = performance.now();
     for (let x = 0; x <= Math.PI; x += 0.01) {
@@ -241,17 +243,16 @@ describe.skip('Rationals', () => {
 });
 
 describe.skip('Compute Engine modes', () => {
-  const slow = slowEval();
-  const fast = fastEval();
-  const turbo = compiledEval();
-
-  // console.info(`Slow = ${Math.round(slow / turbo)} x compiled`);
-  // console.info(`Fast = ${Math.round(fast / turbo)} x compiled`);
-
-  it('precise strict vs compiled', () =>
-    expect(slow / turbo).toBeLessThan(1600));
-  it('machine non-strict vs compiled', () =>
-    expect(fast / turbo).toBeLessThan(360));
+  it('precise strict vs compiled', () => {
+    const slow = slowEval();
+    const turbo = compiledEval();
+    expect(slow / turbo).toBeLessThan(1600);
+  });
+  it('machine non-strict vs compiled', () => {
+    const fast = fastEval();
+    const turbo = compiledEval();
+    expect(fast / turbo).toBeLessThan(360);
+  });
 });
 
 describe.skip('Relative performance', () => {
