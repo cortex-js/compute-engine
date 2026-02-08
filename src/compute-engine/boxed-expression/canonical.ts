@@ -1,7 +1,6 @@
 import type { BoxedExpression, CanonicalOptions, Scope } from '../global-types';
 
-// eslint-disable-next-line import/no-restricted-paths
-import { canonicalInvisibleOperator } from '../library/invisible-operator';
+import { canonicalInvisibleOperator } from './invisible-operator';
 
 import { flattenOps } from './flatten';
 import { canonicalAdd } from './arithmetic-add';

@@ -23,7 +23,7 @@ import { flatten, flattenSequence } from '../boxed-expression/flatten';
 import { fromDigits } from '../numerics/strings';
 
 import { randomExpression } from './random-expression';
-import { canonicalInvisibleOperator } from './invisible-operator';
+import { canonicalInvisibleOperator } from '../boxed-expression/invisible-operator';
 import {
   collectionElementType,
   functionResult,

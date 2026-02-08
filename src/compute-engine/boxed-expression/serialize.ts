@@ -21,9 +21,6 @@ import { numberToExpression } from '../numerics/expression';
 import { NumericValue } from '../numeric-value/types';
 import { ExactNumericValue } from '../numeric-value/exact-numeric-value';
 
-// eslint-disable-next-line import/no-cycle
-import { Product } from './product';
-
 import { order } from './order';
 import { asSmallInteger } from './numerics';
 import type {
@@ -130,7 +127,10 @@ function serializePrettyJsonFunction(
 
   if (name === 'Multiply' && !exclusions.includes('Divide')) {
     // Display a product with negative exponents as a division if
-    // there are terms with a negative degree
+    // there are terms with a negative degree.
+    // Dynamic require to avoid circular dependency:
+    // serialize → product → ... → abstract-boxed-expression → serialize
+    const { Product } = require('./product');
     const result = new Product(ce, args, {
       canonical: false,
     }).asRationalExpression();
