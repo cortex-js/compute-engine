@@ -391,7 +391,7 @@ export function pow(
         //   // Return simplify angle
         //   return ce._fn('Power', [ce.E, radiansToAngle(theta)!.mul(ce.I)]);
       }
-    } else {
+    } else if (numericApproximation) {
       const eN = ce.E.N();
       const eNv = isBoxedNumber(eN) ? eN.numericValue : undefined;
       if (eNv !== undefined) {

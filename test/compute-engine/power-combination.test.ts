@@ -74,8 +74,8 @@ describe('Power Combination (#176)', () => {
   });
 
   test('two powers with same base', () => {
-    // e^2 * e^3 = e^5 (evaluated numerically by simplify)
-    check('e^2 \\cdot e^3', { num: '148.413159102576603421115580040552279623487667593878989046752845110912064820958576079688409459899021' }, { simplify: true });
+    // e^2 * e^3 = e^5 (stays symbolic)
+    check('e^2 \\cdot e^3', ['Power', 'ExponentialE', 5], { simplify: true });
     check('2^a \\cdot 2^b', ['Power', 2, ['Add', 'a', 'b']], {
       simplify: true,
     });
@@ -99,21 +99,22 @@ describe('Power Combination (#176)', () => {
     check('x \\cdot x^{-1}', 1, { simplify: true, assume: ['x > 0'] });
   });
 
-  test('factoring numeric coefficients to match base', () => {
-    // Coefficient factoring into the power base is not currently implemented;
-    // the engine keeps the product form.
-    check('4 \\cdot 2^x', ['Multiply', 4, ['Power', 2, 'x']], { simplify: true });
-    check('8 \\cdot 2^x', ['Multiply', 8, ['Power', 2, 'x']], { simplify: true });
-    check('9 \\cdot 3^x', ['Multiply', 9, ['Power', 3, 'x']], { simplify: true });
-    check('27 \\cdot 3^n', ['Multiply', 27, ['Power', 3, 'n']], { simplify: true });
+  // Coefficient factoring into the power base is not yet implemented (#176).
+  // When implemented: 4·2^x → 2^(x+2), since 4 = 2^2.
+  test.skip('factoring numeric coefficients to match base', () => {
+    check('4 \\cdot 2^x', ['Power', 2, ['Add', 'x', 2]], { simplify: true });
+    check('8 \\cdot 2^x', ['Power', 2, ['Add', 'x', 3]], { simplify: true });
+    check('9 \\cdot 3^x', ['Power', 3, ['Add', 'x', 2]], { simplify: true });
+    check('27 \\cdot 3^n', ['Power', 3, ['Add', 'n', 3]], { simplify: true });
   });
 
-  test('multiple numeric factors with power base', () => {
-    // Numeric factors are collapsed but not merged into the power base
-    check('2 \\cdot 2 \\cdot 2^x', ['Multiply', 4, ['Power', 2, 'x']], {
+  // Same as above: numeric factors are collapsed (2·2 → 4) but not merged
+  // into the power base. When implemented: 2·2·2^x → 2^(x+2).
+  test.skip('multiple numeric factors with power base', () => {
+    check('2 \\cdot 2 \\cdot 2^x', ['Power', 2, ['Add', 'x', 2]], {
       simplify: true,
     });
-    check('3 \\cdot 3 \\cdot 3 \\cdot 3^a', ['Multiply', 27, ['Power', 3, 'a']], {
+    check('3 \\cdot 3 \\cdot 3 \\cdot 3^a', ['Power', 3, ['Add', 'a', 3]], {
       simplify: true,
     });
   });

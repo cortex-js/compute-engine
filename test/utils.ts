@@ -148,12 +148,12 @@ export function checkJson(
   variants?: Array<ExprVariant>
 ): string {
   if (!inExpr) return 'null';
+  const ce =
+    inExpr instanceof _BoxedExpression
+      ? inExpr.engine
+      : engine; /* default test engine */
+  const precision = ce.precision;
   try {
-    const ce =
-      inExpr instanceof _BoxedExpression
-        ? inExpr.engine
-        : engine; /* default test engine */
-    const precision = ce.precision;
     ce.precision = 'auto';
 
     variants ??= [
@@ -182,8 +182,6 @@ export function checkJson(
     ce.precision = 'machine';
     const evalMachine = expr.evaluate().toString();
     const numEvalMachine = expr.N().toString();
-
-    ce.precision = precision;
 
     if (
       boxed === canonical &&
@@ -225,8 +223,8 @@ export function checkJson(
       result.push('N-mach    = ' + numEvalMachine);
 
     return result.join('\n');
-  } catch (e) {
-    return e.toString();
+  } finally {
+    ce.precision = precision;
   }
 }
 
