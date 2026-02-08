@@ -610,7 +610,11 @@ export abstract class _BoxedExpression implements BoxedExpression {
     const recursive = options?.recursive ?? true;
 
     const ops = this.ops.map((x) => (recursive ? x.map(fn, options) : fn(x)));
-    return fn(this.engine.function(this.operator, ops, { form: canonical ? 'canonical' : 'raw' }));
+    return fn(
+      this.engine.function(this.operator, ops, {
+        form: canonical ? 'canonical' : 'raw',
+      })
+    );
   }
 
   solve(

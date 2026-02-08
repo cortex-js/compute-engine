@@ -1847,7 +1847,8 @@ function processMinMaxItem(
     return [result, rest];
   }
 
-  if (!item.isNumber || item.numericValue === undefined) return [undefined, [item]];
+  if (!item.isNumber || item.numericValue === undefined)
+    return [undefined, [item]];
   return [item, []];
 }
 

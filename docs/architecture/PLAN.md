@@ -482,24 +482,34 @@ immediately.
 
 ### Phase 1: API Clarity (2-4 weeks)
 
-5. **Unify expression creation**
-   - Implement single `form` option: `'canonical' | 'structural' | 'raw' | CanonicalForm[]`
-   - `CanonicalForm[]` provides granular control for power users
-   - Deprecate boolean `canonical` option
-   - Remove `_fn` from public API (keep as internal)
+5. **Unify expression creation** ✅ DONE
+   - New `FormOption` type: `'canonical' | 'structural' | 'raw' | CanonicalForm | CanonicalForm[]`
+   - `ce.box()`, `ce.function()`, `ce.parse()` accept `{ form?: FormOption }`
+     replacing `{ canonical?, structural? }`
+   - Internal `formToInternal()` helper translates to legacy `{ canonical, structural }`
+     for `BoxedFunction` constructor and `ce._fn()` (unchanged internal API)
+   - `CanonicalOptions` type kept for internal use; `FormOption` is the public type
+   - Updated ~48 source call sites + ~43 test call sites
 
-6. **Standardize null/undefined**
-   - Audit all `BoxedExpression` properties
-   - Adopt convention: `undefined` = not applicable, `null` = explicitly empty
-   - Document the convention
+6. **Standardize null/undefined** ✅ DONE
+   - 5 properties changed from `null` to `undefined`: `.symbol`, `.string`,
+     `.ops`, `.tensor`, `.numericValue`
+   - `.re`/`.im` kept as `NaN` (typed `number`, correct sentinel)
+   - `.shape` kept as `[]` (correct for scalar = zero-dimensional tensor)
+   - Updated ~49 explicit null checks across ~20 files + tests
 
-7. **Add subpath exports**
-   - `./math-json` for type-only consumers
-   - `./types` for TypeScript types without runtime
+7. **Add subpath exports** ✅ DONE
+   - Added `./math-json` subpath export to `package.json`
+   - `./types` not needed: TypeScript resolves types from the `"types"` condition
+     in each export entry; users can use `import type { ... }` from main path
 
-8. **Split compile return type**
-   - New `compile()` returns `{ target, success, code, run?, diagnostics? }`
-   - Remove callable-with-toString pattern
+8. **Split compile return type** ✅ DONE
+   - New `CompilationResult` interface: `{ target, success, code, run? }`
+   - Removed `CompiledExecutable` interface
+   - Renamed `compileToExecutable` → `compile` on `LanguageTarget` interface
+     and all 5 targets (JS, GLSL, Python, Interval-JS, Interval-GLSL)
+   - Updated free `compile()` function, `ce._compile()`, and 6 internal callers
+   - Updated 219 compile tests across 7 test files
 
 ### Phase 2: Dependency Health (3-5 weeks)
 
@@ -563,39 +573,17 @@ immediately.
     - Cycle budget 43→29 (removed latex-syntax ↔ library cycles by eliminating
       `DEFAULT_LATEX_DICTIONARY` re-exports)
 
-15. **Eliminate all circular dependencies** (29→0)
-    See `ZERO-CYCLES-PLAN.md` for full details. Summary:
-
-    **15a. Type-only cycles** (15 cycles)
-    - Restructure `common/type/` into DAG with shared base module
-    - Fix `types.ts` barrel: `latex-syntax/types.ts` imports from source
-      modules instead of barrel
-    - Merge `types-*.ts` files back to 2-3 (too coupled for 5-way split)
-    - Move `IndexedLatexDictionary` types into `latex-syntax/types.ts`
-
-    **15b. Tensor field decoupling** (7 cycles)
-    - `TensorFieldOps` interface: tensor-fields receives `add`/`mul` via
-      injection instead of importing from arithmetic modules
-    - Makes `tensor/` a self-contained module
-
-    **15c. Base class decoupling + merges** (7 cycles)
-    - Move `DEFAULT_COMPLEXITY` to constants file
-    - Replace `instanceof _BoxedExpression` with Symbol tag
-    - Extract `cmp`/`eq` from base class to free functions (or late-bind
-      via engine) — first step of role interface migration
-    - Merge `terms` into `arithmetic-add`, `product` into
-      `arithmetic-mul-div` (bidirectionally coupled)
-    - Polynomial functions receive arithmetic ops as parameters
-    - Break `function-utils → compare` via extracted comparison utility
-    - Convert all 9 dynamic `require()` to static imports
-
-    **15d. Pattern matching & assumptions** (3 cycles)
-    - Move `isWildcard`/`wildcardName` to leaf utility
-    - Break `boxed-patterns ↔ boxed-symbol` type import
-    - Make assumption ↔ solver coupling injectable
-
-    **15e. Compilation module cleanup**
-    - Convert 6 dynamic `require('./base-compiler')` to static imports
+15. **Eliminate runtime circular dependencies** ✅ DONE (29→8, all remaining type-only)
+    - Extracted `pattern-utils.ts` (wildcard functions from boxed-patterns)
+    - Merged `Terms` into `arithmetic-add.ts`, `Product` into `arithmetic-mul-div.ts`
+    - Moved `expandProduct`/`expandProducts` into `arithmetic-mul-div.ts`
+    - Extracted `polynomial-degree.ts` (totalDegree, maxDegree, lex, revlex)
+    - Decoupled `tensor-fields.ts` from arithmetic imports (use instance methods)
+    - Broke `negate→arithmetic-add` cycle (use `ce._fn('Add', ...)` directly)
+    - Broke all 5 `common/type/` cycles: moved `isValidType` to primitive.ts,
+      lazy `parseType` in subtype.ts, replaced `isSubtype` in serialize.ts
+    - 8 remaining cycles are all `import type` (type-only, benign, no runtime impact)
+    - See `ZERO-CYCLES-PLAN.md` for full details
 
 16. **Add user-extensible simplification rules** ✅ DONE
     - `ce.simplificationRules` mutable array (getter/setter) on ComputeEngine
@@ -605,9 +593,10 @@ immediately.
     - Per-call `expr.simplify({ rules })` override still works
     - 10 tests in `simplify-rules.test.ts`
 
-17. **Generalize compilation target registration**
-    - Already the best extension point — formalize and document it
-    - Add target discovery for plugin-contributed targets
+17. **Generalize compilation target registration** ✅ DONE
+    - `registerCompilationTarget()` / `unregisterCompilationTarget()` API
+    - Custom targets implement `LanguageTarget` interface
+    - Target discovery via `getCompilationTargets()`
 
 ### Phase 4: Type System Hardening (ongoing)
 

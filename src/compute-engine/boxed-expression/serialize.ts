@@ -264,8 +264,14 @@ function serializePrettyJsonFunction(
       const block = args[0];
       if (block.nops === 1) {
         const params = args.slice(1);
-        if (params.every((x) => x.symbol !== undefined && /_\d?/.test(x.symbol))) {
-          if (block.op1.ops?.every((x, i) => x.symbol !== undefined && x.symbol === params[i]?.symbol)) {
+        if (
+          params.every((x) => x.symbol !== undefined && /_\d?/.test(x.symbol))
+        ) {
+          if (
+            block.op1.ops?.every(
+              (x, i) => x.symbol !== undefined && x.symbol === params[i]?.symbol
+            )
+          ) {
             // [`["Function", ["Block", ["Add", "_1", "_2"]], "_1", "_2"]`] -> `["Function", "Add"]`
             return serializeJsonFunction(
               ce,
@@ -849,7 +855,8 @@ export function serializeJson(
   if (expr.type.matches('dictionary')) return expr.toMathJson(options);
 
   // Is it a string?
-  if (expr.string !== undefined) return serializeJsonString(expr.string, options);
+  if (expr.string !== undefined)
+    return serializeJsonString(expr.string, options);
 
   // Is it a symbol?
   if (expr.symbol !== undefined) {

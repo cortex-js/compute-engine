@@ -106,7 +106,8 @@ export function negateProduct(
   if (!done) {
     result = [];
     for (const arg of args) {
-      if (done || arg.numericValue === undefined || !arg.isNumber) result.push(arg);
+      if (done || arg.numericValue === undefined || !arg.isNumber)
+        result.push(arg);
       else {
         done = true;
         if (!arg.is(-1)) result.push(arg.neg());

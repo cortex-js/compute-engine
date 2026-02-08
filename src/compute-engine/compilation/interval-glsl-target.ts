@@ -1293,7 +1293,10 @@ export class IntervalGLSLTarget implements LanguageTarget {
   /**
    * Compile an expression to GLSL interval code string.
    */
-  compileToSource(expr: BoxedExpression, _options: CompilationOptions = {}): string {
+  compileToSource(
+    expr: BoxedExpression,
+    _options: CompilationOptions = {}
+  ): string {
     const target = this.createTarget();
     return BaseCompiler.compile(expr, target);
   }

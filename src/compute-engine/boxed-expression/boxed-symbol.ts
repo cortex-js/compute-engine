@@ -698,8 +698,12 @@ export class BoxedSymbol extends _BoxedExpression {
     const canonical = options?.canonical ?? this.isCanonical;
     if (sub[this._id] === undefined) return canonical ? this.canonical : this;
 
-    const form = canonical === true ? 'canonical' :
-      canonical === false ? 'raw' : canonical;
+    const form =
+      canonical === true
+        ? 'canonical'
+        : canonical === false
+          ? 'raw'
+          : canonical;
     return this.engine.box(sub[this._id], { form });
   }
 

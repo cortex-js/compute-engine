@@ -486,21 +486,6 @@ export function commonTerms(
   return [coef, xs.length === 0 ? ce.One : mul(...xs)];
 }
 
-// Put the exponents in a bucket:
-// - exponent 1
-// - positive integer exponents
-// - positive fractional exponents
-// - negative integer exponents
-// - negative fractional exponents
-function degreeKey(exponent: Rational): number {
-  if (isOne(exponent)) return 0;
-  const [n, d] = [machineNumerator(exponent), machineDenominator(exponent)];
-  if (n > 0 && Number.isInteger(n / d)) return 1;
-  if (n > 0) return 2;
-  if (Number.isInteger(n / d)) return 3;
-  return 4;
-}
-
 function termsAsExpression(
   ce: ComputeEngine,
   terms: { exponent: Rational; terms: ReadonlyArray<BoxedExpression> }[]

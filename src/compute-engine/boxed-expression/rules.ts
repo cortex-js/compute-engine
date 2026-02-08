@@ -352,7 +352,9 @@ function parseRulePart(
 ): BoxedExpression | undefined {
   if (rule === undefined || typeof rule === 'function') return undefined;
   if (typeof rule === 'string') {
-    let expr = ce.parse(rule, { form: options?.canonical ? 'canonical' : 'raw' });
+    let expr = ce.parse(rule, {
+      form: options?.canonical ? 'canonical' : 'raw',
+    });
     // Only auto-wildcard when explicitly requested (e.g., when parsing
     // rule strings like "a*x -> 2*x"). For object rules, keep symbols literal.
     if (options?.autoWildcard) {
@@ -647,7 +649,10 @@ function boxRule(
   // Match patterns should never be canonicalized - they need to preserve their
   // structure with wildcards for pattern matching. For example, ['Divide', '_a', '_a']
   // should remain as a Divide expression, not be simplified to 1.
-  const matchExpr = parseRulePart(ce, match, { canonical: false, autoWildcard: false });
+  const matchExpr = parseRulePart(ce, match, {
+    canonical: false,
+    autoWildcard: false,
+  });
   const replaceExpr = parseRulePart(ce, replace, options);
   ce.popScope();
 

@@ -243,8 +243,10 @@ export function order(a: BoxedExpression, b: BoxedExpression): number {
     let aN = a.numericValue;
     let bN = b.numericValue;
 
-    if (aN === undefined && a.operator === 'Rational') aN = a.op1.re / a.op2.re!;
-    if (bN === undefined && b.operator === 'Rational') bN = b.op1.re / b.op2.re!;
+    if (aN === undefined && a.operator === 'Rational')
+      aN = a.op1.re / a.op2.re!;
+    if (bN === undefined && b.operator === 'Rational')
+      bN = b.op1.re / b.op2.re!;
 
     const af = typeof aN === 'number' ? aN : aN!.re;
     const bf = typeof bN === 'number' ? bN : bN!.re;

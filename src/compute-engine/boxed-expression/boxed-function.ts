@@ -389,7 +389,8 @@ export class BoxedFunction extends _BoxedExpression {
     //
     if (expr.operator === 'Power') {
       // We can only extract a coef if the exponent is a literal
-      if (expr.op2.numericValue === undefined) return [ce._numericValue(1), this];
+      if (expr.op2.numericValue === undefined)
+        return [ce._numericValue(1), this];
 
       // eslint-disable-next-line prefer-const
       let [coef, base] = expr.op1.toNumericValue();
@@ -461,8 +462,12 @@ export class BoxedFunction extends _BoxedExpression {
 
     const ops = this._ops.map((x) => x.subs(sub, options));
 
-    const form = options.canonical === true ? 'canonical' :
-      options.canonical === false ? 'raw' : options.canonical;
+    const form =
+      options.canonical === true
+        ? 'canonical'
+        : options.canonical === false
+          ? 'raw'
+          : options.canonical;
 
     if (!ops.every((x) => x.isValid))
       return this.engine.function(this._operator, ops, { form: 'raw' });
@@ -1020,9 +1025,9 @@ export class BoxedFunction extends _BoxedExpression {
 
     return (function* () {
       let result = iter.next();
-      let i = 0;
+      // let i = 0;
       while (!result.done) {
-        i += 1;
+        // i += 1;
         //     if (i++ > limit)
         //       throw new CancellationError({ cause: 'iteration-limit-exceeded' });
         yield result.value;

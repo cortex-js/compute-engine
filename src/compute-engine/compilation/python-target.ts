@@ -342,7 +342,10 @@ export class PythonTarget implements LanguageTarget {
    *
    * Returns the Python code as a string.
    */
-  compileToSource(expr: BoxedExpression, _options: CompilationOptions = {}): string {
+  compileToSource(
+    expr: BoxedExpression,
+    _options: CompilationOptions = {}
+  ): string {
     // Dynamic import to avoid circular dependency
     const { BaseCompiler } = require('./base-compiler');
     const target = this.createTarget();
