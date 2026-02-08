@@ -262,9 +262,9 @@ module.exports = {
           },
           {
             target: './src/compute-engine/types-*.ts',
-            from: './src/compute-engine/compilation/**',
+            from: './src/compute-engine/compilation/!(types).ts',
             message:
-              'Type definition files must not import from compilation/ implementation.',
+              'Type definition files must not import from compilation/ implementation (compilation/types.ts is allowed).',
           },
           {
             target: './src/compute-engine/types-*.ts',

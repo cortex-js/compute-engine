@@ -58,12 +58,11 @@ export function compile(
     const targetName = options?.to ?? 'javascript';
 
     // Look up the target in the registry
-    // @ts-expect-error - accessing internal property
-    const languageTarget = expr.engine._getCompilationTarget(targetName);
+    const languageTarget = expr.engine.getCompilationTarget(targetName);
 
     if (!languageTarget) {
       throw new Error(
-        `Compilation target "${targetName}" is not registered. Available targets: ${Array.from((expr.engine as any)['_compilationTargets'].keys()).join(', ')}`
+        `Compilation target "${targetName}" is not registered. Available targets: ${expr.engine.listCompilationTargets().join(', ')}`
       );
     }
 

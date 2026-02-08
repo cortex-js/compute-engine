@@ -24,6 +24,9 @@ export type {
 
 export { JavaScriptTarget } from './compute-engine/compilation/javascript-target';
 export { GLSLTarget } from './compute-engine/compilation/glsl-target';
+export { PythonTarget } from './compute-engine/compilation/python-target';
+export { IntervalJavaScriptTarget } from './compute-engine/compilation/interval-javascript-target';
+export { IntervalGLSLTarget } from './compute-engine/compilation/interval-glsl-target';
 export { BaseCompiler } from './compute-engine/compilation/base-compiler';
 
 export { expand } from './compute-engine/boxed-expression/expand';

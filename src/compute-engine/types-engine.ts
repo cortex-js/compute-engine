@@ -45,6 +45,7 @@ import type {
   Scope,
   EvalContext,
 } from './types-evaluation';
+import type { LanguageTarget } from './compilation/types';
 
 /** @internal */
 export interface IComputeEngine extends IBigNum {
@@ -202,6 +203,18 @@ export interface IComputeEngine extends IBigNum {
     expr: BoxedExpression,
     options?: Record<string, any>
   ): ((...args: any[]) => any) & { isCompiled?: boolean };
+
+  /** Register a custom compilation target. */
+  registerCompilationTarget(name: string, target: LanguageTarget): void;
+
+  /** Get a registered compilation target by name. */
+  getCompilationTarget(name: string): LanguageTarget | undefined;
+
+  /** Return the names of all registered compilation targets. */
+  listCompilationTargets(): string[];
+
+  /** Remove a registered compilation target. */
+  unregisterCompilationTarget(name: string): void;
 
   /** @internal Fu trigonometric simplification algorithm */
   _fuAlgorithm(

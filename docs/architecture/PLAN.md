@@ -597,10 +597,13 @@ immediately.
     **15e. Compilation module cleanup**
     - Convert 6 dynamic `require('./base-compiler')` to static imports
 
-16. **Add user-extensible simplification rules**
-    - Rule registration API on ComputeEngine
-    - Rules participate in standard simplification pipeline
-    - Cost function support for custom rules
+16. **Add user-extensible simplification rules** ✅ DONE
+    - `ce.simplificationRules` mutable array (getter/setter) on ComputeEngine
+    - Initialized to copy of `SIMPLIFY_RULES`; users can `push()` or replace
+    - Cache invalidation via length check (catches push) + setter (catches assignment)
+    - Rules participate in standard simplification pipeline via `getRuleSet()`
+    - Per-call `expr.simplify({ rules })` override still works
+    - 10 tests in `simplify-rules.test.ts`
 
 17. **Generalize compilation target registration**
     - Already the best extension point — formalize and document it

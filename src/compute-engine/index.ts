@@ -194,6 +194,7 @@ export type {
 
 export { JavaScriptTarget } from './compilation/javascript-target';
 export { GLSLTarget } from './compilation/glsl-target';
+export { PythonTarget } from './compilation/python-target';
 export { IntervalJavaScriptTarget } from './compilation/interval-javascript-target';
 export { IntervalGLSLTarget } from './compilation/interval-glsl-target';
 export { BaseCompiler } from './compilation/base-compiler';
@@ -788,13 +789,34 @@ export class ComputeEngine implements IComputeEngine {
   /**
    * Get a registered compilation target by name.
    *
-   * @param name - The name of the target (e.g., 'javascript', 'glsl')
+   * @param name - The name of the target (e.g., 'javascript', 'glsl', 'python')
    * @returns The LanguageTarget implementation, or undefined if not found
-   *
-   * @internal
    */
-  _getCompilationTarget(name: string): LanguageTarget | undefined {
+  getCompilationTarget(name: string): LanguageTarget | undefined {
     return this._compilationTargets.get(name);
+  }
+
+  /**
+   * Return the names of all registered compilation targets.
+   *
+   * @example
+   * ```typescript
+   * const ce = new ComputeEngine();
+   * console.log(ce.listCompilationTargets());
+   * // → ['javascript', 'glsl', 'interval-js', 'interval-glsl']
+   * ```
+   */
+  listCompilationTargets(): string[] {
+    return [...this._compilationTargets.keys()];
+  }
+
+  /**
+   * Remove a registered compilation target.
+   *
+   * @param name - The name of the target to remove
+   */
+  unregisterCompilationTarget(name: string): void {
+    this._compilationTargets.delete(name);
   }
 
   /** @internal Compile a boxed expression to an executable function. */
