@@ -353,46 +353,58 @@ export class Parser {
     );
   }
 
-  private parseFunctionSignature(): FunctionSignatureNode | undefined {
-    // Save lexer state for backtracking
+  /**
+   * Scan forward from the current '(' to determine if this is a function
+   * signature (i.e. `(...)  ->`) without consuming any tokens. Tracks
+   * parenthesis depth so nested parens like `((string|number), expr?)` are
+   * handled correctly.
+   */
+  private isFunctionSignature(): boolean {
     const savedLexerState = this.lexer.saveState();
     const savedCurrent = this.current;
+
+    // We expect current token to be '('
+    this.advance(); // consume '('
+    let depth = 1;
+
+    while (depth > 0 && (this.current as Token).type !== 'EOF') {
+      if ((this.current as Token).type === '(') depth++;
+      else if ((this.current as Token).type === ')') depth--;
+      this.advance();
+    }
+
+    // After exiting, we've consumed the matching ')'. Check for '->'
+    const isSignature = (this.current as Token).type === '->';
+
+    this.lexer.restoreState(savedLexerState);
+    this.current = savedCurrent;
+    return isSignature;
+  }
+
+  private parseFunctionSignature(): FunctionSignatureNode | undefined {
+    if (this.current.type !== '(' || !this.isFunctionSignature()) {
+      return undefined;
+    }
+
     const args: ArgumentNode[] = [];
 
-    if (!this.match('(')) {
-      return undefined;
+    this.advance(); // consume '('
+
+    // Parse arguments
+    if (!this.match(')')) {
+      do {
+        const arg = this.parseArgument();
+        if (!arg) {
+          this.error('Expected argument');
+        }
+        args.push(arg);
+      } while (this.match(','));
+
+      this.expect(')');
     }
 
-    try {
-      // Parse arguments
-      if (!this.match(')')) {
-        do {
-          const arg = this.parseArgument();
-          if (!arg) {
-            throw new Error('Expected argument');
-          }
-          args.push(arg);
-        } while (this.match(','));
-
-        this.expect(')');
-      }
-
-      // Must have arrow for function signature
-      if (!this.match('->')) {
-        throw new Error('Expected -> for function signature');
-      }
-    } catch (error) {
-      // If this is a type resolution error (unknown type), re-throw it without backtracking
-      // to preserve the correct error position
-      if (error instanceof Error && error.message.includes('Invalid type')) {
-        throw error;
-      }
-
-      // For other parsing errors, backtrack
-      this.lexer.restoreState(savedLexerState);
-      this.current = savedCurrent;
-      return undefined;
-    }
+    // We know '->' is present from the lookahead
+    this.expect('->');
 
     const returnType = this.parseUnionType();
     if (!returnType) {
