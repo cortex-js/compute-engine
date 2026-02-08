@@ -1,7 +1,7 @@
 import type { OneOf } from '../common/one-of';
 import type { Type, TypeString, TypeReference } from '../common/type/types';
 import type { BoxedType } from '../common/type/boxed-type';
-import type { LatexString } from './latex-syntax/types';
+import type { LatexString, LatexDictionaryEntry } from './latex-syntax/types';
 import type {
   BoxedExpression,
   SemiBoxedExpression,
@@ -561,6 +561,36 @@ export type SymbolDefinition = OneOf<[ValueDefinition, OperatorDefinition]>;
 export type SymbolDefinitions = Readonly<{
   [id: string]: Partial<SymbolDefinition>;
 }>;
+
+/**
+ * A library bundles symbol/operator definitions with their LaTeX dictionary
+ * entries and declares dependencies on other libraries.
+ *
+ * Use with the `libraries` constructor option to load standard or custom
+ * libraries:
+ *
+ * ```ts
+ * const ce = new ComputeEngine({
+ *   libraries: ['core', 'arithmetic', {
+ *     name: 'custom',
+ *     requires: ['arithmetic'],
+ *     definitions: { G: { value: 6.674e-11, type: 'real', isConstant: true } },
+ *   }],
+ * });
+ * ```
+ *
+ * @category Definitions
+ */
+export interface LibraryDefinition {
+  /** Library identifier */
+  name: string;
+  /** Libraries that must be loaded before this one */
+  requires?: string[];
+  /** Symbol and operator definitions */
+  definitions?: SymbolDefinitions | SymbolDefinitions[];
+  /** LaTeX dictionary entries for parsing/serialization */
+  latexDictionary?: Readonly<Partial<LatexDictionaryEntry>[]>;
+}
 
 /**
  * When a unitless value is passed to or returned from a trigonometric function,

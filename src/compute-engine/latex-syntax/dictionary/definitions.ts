@@ -19,11 +19,9 @@ import {
   EnvironmentParseHandler,
   ExpressionParseHandler,
   InfixParseHandler,
-  LatexDictionary,
   LatexDictionaryEntry,
   LatexString,
   LatexToken,
-  LibraryCategory,
   MatchfixParseHandler,
   Parser,
   PostfixParseHandler,
@@ -39,15 +37,6 @@ import {
   isSymbolEntry,
 } from '../types';
 
-import { DEFINITIONS_ALGEBRA } from './definitions-algebra';
-import { DEFINITIONS_ARITHMETIC } from './definitions-arithmetic';
-import { DEFINITIONS_CORE } from './definitions-core';
-import { DEFINITIONS_INEQUALITIES } from './definitions-relational-operators';
-import { DEFINITIONS_LINEAR_ALGEBRA } from './definitions-linear-algebra';
-import { DEFINITIONS_LOGIC } from './definitions-logic';
-import { DEFINITIONS_OTHERS } from './definitions-other';
-import { DEFINITIONS_TRIGONOMETRY } from './definitions-trigonometry';
-
 /** Delimiter shorthands and their token variants for matchfix indexing */
 const DELIMITER_SHORTHAND: { [key: string]: LatexToken[] } = {
   '(': ['\\lparen', '('],
@@ -62,11 +51,6 @@ const DELIMITER_SHORTHAND: { [key: string]: LatexToken[] } = {
   '|': ['|', '\\|', '\\lvert', '\\rvert'],
   '||': ['||', '\\Vert', '\\lVert', '\\rVert'],
 };
-import { DEFINITIONS_SETS } from './definitions-sets';
-import { DEFINITIONS_CALCULUS } from './definitions-calculus';
-import { DEFINITIONS_SYMBOLS } from './definitions-symbols';
-import { DEFINITIONS_COMPLEX } from './definitions-complex';
-import { DEFINITIONS_STATISTICS } from './definitions-statistics';
 
 export type CommonEntry = {
   /** Note: a name is required if a serialize handler is provided */
@@ -1161,46 +1145,3 @@ function isValidEntry(
 // !=   ne
 // https://reference.wolfram.com/language/tutorial/OperatorInputForms.html
 
-export const DEFAULT_LATEX_DICTIONARY: {
-  [category in LibraryCategory]?: LatexDictionary;
-} = {
-  'symbols': DEFINITIONS_SYMBOLS,
-  'algebra': DEFINITIONS_ALGEBRA,
-  'arithmetic': DEFINITIONS_ARITHMETIC,
-  'calculus': DEFINITIONS_CALCULUS,
-  'complex': DEFINITIONS_COMPLEX,
-  'core': DEFINITIONS_CORE,
-  'linear-algebra': DEFINITIONS_LINEAR_ALGEBRA,
-  'logic': DEFINITIONS_LOGIC,
-  'relop': DEFINITIONS_INEQUALITIES,
-  'other': DEFINITIONS_OTHERS,
-  'physics': [
-    {
-      name: 'mu0',
-      kind: 'symbol',
-      latexTrigger: '\\mu_0',
-    },
-  ],
-  'sets': DEFINITIONS_SETS,
-  'statistics': DEFINITIONS_STATISTICS,
-  'trigonometry': DEFINITIONS_TRIGONOMETRY,
-};
-
-export function getLatexDictionary(
-  category: LibraryCategory | 'all' = 'all'
-): readonly Readonly<LatexDictionaryEntry>[] {
-  if (category === 'all') {
-    const result: LatexDictionaryEntry[] = [];
-    for (const domain of Object.keys(DEFAULT_LATEX_DICTIONARY))
-      if (DEFAULT_LATEX_DICTIONARY[domain])
-        result.push(...DEFAULT_LATEX_DICTIONARY[domain]!);
-
-    return result;
-  }
-
-  if (!DEFAULT_LATEX_DICTIONARY[category]) return [];
-
-  return Object.freeze([
-    ...DEFAULT_LATEX_DICTIONARY[category]!,
-  ]) as Readonly<LatexDictionaryEntry>[];
-}

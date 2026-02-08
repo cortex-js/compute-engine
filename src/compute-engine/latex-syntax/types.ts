@@ -61,31 +61,21 @@ export type DelimiterScale = 'normal' | 'scaled' | 'big' | 'none';
  * @category Latex Parsing and Serialization
  */
 export type LibraryCategory =
-  | 'algebra'
   | 'arithmetic'
   | 'calculus'
   | 'collections'
   | 'control-structures'
   | 'combinatorics'
-  | 'complex'
   | 'core'
-  | 'data-structures'
-  | 'dimensions'
-  | 'domains'
   | 'linear-algebra'
   | 'logic'
   | 'number-theory'
-  | 'numeric'
   | 'other'
   | 'physics'
   | 'polynomials'
   | 'relop'
-  | 'sets'
   | 'statistics'
-  | 'styling'
-  | 'symbols'
-  | 'trigonometry'
-  | 'units';
+  | 'trigonometry';
 
 /**
  *

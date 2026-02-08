@@ -14,109 +14,225 @@ import { SETS_LIBRARY } from './sets';
 import { STATISTICS_LIBRARY } from './statistics';
 import { TRIGONOMETRY_LIBRARY } from './trigonometry';
 
-import { LibraryCategory } from '../latex-syntax/types';
+import { DEFINITIONS_ALGEBRA } from '../latex-syntax/dictionary/definitions-algebra';
+import { DEFINITIONS_ARITHMETIC } from '../latex-syntax/dictionary/definitions-arithmetic';
+import { DEFINITIONS_CALCULUS } from '../latex-syntax/dictionary/definitions-calculus';
+import { DEFINITIONS_COMPLEX } from '../latex-syntax/dictionary/definitions-complex';
+import { DEFINITIONS_CORE } from '../latex-syntax/dictionary/definitions-core';
+import { DEFINITIONS_INEQUALITIES } from '../latex-syntax/dictionary/definitions-relational-operators';
+import { DEFINITIONS_LINEAR_ALGEBRA } from '../latex-syntax/dictionary/definitions-linear-algebra';
+import { DEFINITIONS_LOGIC } from '../latex-syntax/dictionary/definitions-logic';
+import { DEFINITIONS_OTHERS } from '../latex-syntax/dictionary/definitions-other';
+import { DEFINITIONS_SETS } from '../latex-syntax/dictionary/definitions-sets';
+import { DEFINITIONS_STATISTICS } from '../latex-syntax/dictionary/definitions-statistics';
+import { DEFINITIONS_SYMBOLS } from '../latex-syntax/dictionary/definitions-symbols';
+import { DEFINITIONS_TRIGONOMETRY } from '../latex-syntax/dictionary/definitions-trigonometry';
+
+import type { LibraryCategory } from '../latex-syntax/types';
 
 import { _BoxedValueDefinition } from '../boxed-expression/boxed-value-definition';
 import { _BoxedExpression } from '../boxed-expression/abstract-boxed-expression';
 import { isValidSymbol, validateSymbol } from '../../math-json/symbols';
 import { isValidOperatorDef, isValidValueDef } from '../boxed-expression/utils';
-import type { SymbolDefinitions, ComputeEngine } from '../global-types';
+import type {
+  SymbolDefinitions,
+  ComputeEngine,
+  LibraryDefinition,
+} from '../global-types';
 import { _BoxedOperatorDefinition } from '../boxed-expression/boxed-operator-definition';
 
-export function getStandardLibrary(
-  categories: LibraryCategory[] | LibraryCategory | 'all'
-): readonly SymbolDefinitions[] {
-  if (categories === 'all') {
-    // **Note** the order of the libraries is significant:
-    // earlier libraries cannot reference definitions in later libraries.
-    return getStandardLibrary([
-      'core',
-      'control-structures', // If, Block, Loop
-      'logic',
-      'collections', // Dictionary, List, Sets
-      'relop',
+/**
+ * The standard libraries bundled with the Compute Engine.
+ *
+ * Each entry bundles symbol/operator definitions with their LaTeX dictionary
+ * entries and declares dependencies on other libraries.
+ */
+export const STANDARD_LIBRARIES: LibraryDefinition[] = [
+  {
+    name: 'core',
+    definitions: CORE_LIBRARY,
+    latexDictionary: [
+      ...DEFINITIONS_CORE,
+      ...DEFINITIONS_SYMBOLS,
+      ...DEFINITIONS_ALGEBRA,
+    ],
+  },
+  {
+    name: 'control-structures',
+    requires: ['core'],
+    definitions: CONTROL_STRUCTURES_LIBRARY,
+  },
+  {
+    name: 'logic',
+    requires: ['core'],
+    definitions: [LOGIC_LIBRARY, LOGIC_FUNCTION_LIBRARY],
+    latexDictionary: DEFINITIONS_LOGIC,
+  },
+  {
+    name: 'collections',
+    requires: ['core'],
+    definitions: [SETS_LIBRARY, COLLECTIONS_LIBRARY],
+    latexDictionary: DEFINITIONS_SETS,
+  },
+  {
+    name: 'relop',
+    requires: ['core'],
+    definitions: RELOP_LIBRARY,
+    latexDictionary: DEFINITIONS_INEQUALITIES,
+  },
+  {
+    name: 'arithmetic',
+    requires: ['core'],
+    definitions: [...ARITHMETIC_LIBRARY, ...COMPLEX_LIBRARY],
+    latexDictionary: [...DEFINITIONS_ARITHMETIC, ...DEFINITIONS_COMPLEX],
+  },
+  {
+    name: 'trigonometry',
+    requires: ['arithmetic'],
+    definitions: TRIGONOMETRY_LIBRARY,
+    latexDictionary: DEFINITIONS_TRIGONOMETRY,
+  },
+  {
+    name: 'calculus',
+    requires: ['arithmetic'],
+    definitions: CALCULUS_LIBRARY,
+    latexDictionary: DEFINITIONS_CALCULUS,
+  },
+  {
+    name: 'polynomials',
+    requires: ['arithmetic'],
+    definitions: POLYNOMIALS_LIBRARY,
+  },
+  {
+    name: 'combinatorics',
+    requires: ['arithmetic'],
+    definitions: COMBINATORICS_LIBRARY,
+  },
+  {
+    name: 'number-theory',
+    requires: ['arithmetic'],
+    definitions: NUMBER_THEORY_LIBRARY,
+  },
+  {
+    name: 'linear-algebra',
+    requires: ['arithmetic'],
+    definitions: LINEAR_ALGEBRA_LIBRARY,
+    latexDictionary: DEFINITIONS_LINEAR_ALGEBRA,
+  },
+  {
+    name: 'statistics',
+    requires: ['arithmetic'],
+    definitions: STATISTICS_LIBRARY,
+    latexDictionary: DEFINITIONS_STATISTICS,
+  },
+  {
+    name: 'physics',
+    requires: ['arithmetic'],
+    definitions: {
+      Mu0: {
+        description: 'Vaccum permeability',
+        isConstant: true,
+        wikidata: 'Q1515261',
+        type: 'real',
+        value: 1.25663706212e-6,
+      },
+    },
+    latexDictionary: [
+      {
+        name: 'mu0',
+        kind: 'symbol',
+        latexTrigger: '\\mu_0',
+      },
+    ],
+  },
+  {
+    name: 'other',
+    requires: ['core'],
+    latexDictionary: DEFINITIONS_OTHERS,
+  },
+];
 
-      'numeric',
-      'arithmetic',
-      'trigonometry',
-
-      'algebra',
-      'calculus', // D, Integerate
-      'polynomials',
-
-      'combinatorics',
-      'number-theory',
-      'linear-algebra',
-
-      'statistics',
-      'dimensions',
-      'units',
-      'physics',
-
-      'other',
-    ]);
-  } else if (typeof categories === 'string') categories = [categories];
-  const result: SymbolDefinitions[] = [];
-  for (const category of categories) {
-    const dict = LIBRARIES[category];
-    if (!dict) throw Error(`Unknown library category ${category}`);
-    if (Array.isArray(dict)) result.push(...dict);
-    else result.push(dict);
+/**
+ * Topological sort of libraries using Kahn's algorithm.
+ * Throws on cycle or missing dependency.
+ */
+export function sortLibraries(
+  libs: LibraryDefinition[]
+): LibraryDefinition[] {
+  const byName = new Map<string, LibraryDefinition>();
+  for (const lib of libs) {
+    if (byName.has(lib.name))
+      throw new Error(`Duplicate library name: "${lib.name}"`);
+    byName.set(lib.name, lib);
   }
-  return Object.freeze(result);
+
+  // Build in-degree map (only count dependencies within the provided set)
+  const inDegree = new Map<string, number>();
+  const dependents = new Map<string, string[]>(); // dep → libs that need it
+
+  for (const lib of libs) {
+    if (!inDegree.has(lib.name)) inDegree.set(lib.name, 0);
+    for (const req of lib.requires ?? []) {
+      if (!byName.has(req))
+        throw new Error(
+          `Library "${lib.name}" requires "${req}", which is not available`
+        );
+      inDegree.set(lib.name, (inDegree.get(lib.name) ?? 0) + 1);
+      const deps = dependents.get(req);
+      if (deps) deps.push(lib.name);
+      else dependents.set(req, [lib.name]);
+    }
+  }
+
+  // Seed queue with libraries that have no dependencies
+  const queue: string[] = [];
+  for (const [name, deg] of inDegree) {
+    if (deg === 0) queue.push(name);
+  }
+
+  const sorted: LibraryDefinition[] = [];
+  while (queue.length > 0) {
+    const name = queue.shift()!;
+    sorted.push(byName.get(name)!);
+    for (const dep of dependents.get(name) ?? []) {
+      const newDeg = inDegree.get(dep)! - 1;
+      inDegree.set(dep, newDeg);
+      if (newDeg === 0) queue.push(dep);
+    }
+  }
+
+  if (sorted.length !== libs.length) {
+    const remaining = libs
+      .filter((l) => !sorted.some((s) => s.name === l.name))
+      .map((l) => l.name);
+    throw new Error(
+      `Circular dependency detected among libraries: ${remaining.join(', ')}`
+    );
+  }
+
+  return sorted;
 }
 
-export const LIBRARIES: {
-  [category in LibraryCategory]?: SymbolDefinitions | SymbolDefinitions[];
-} = {
-  'algebra': [],
-  // 'algebra': [
-  //   // polynomial([0, 2, 0, 4]:list, x:symbol) -> 2x + 4x^3
-  //   // polynomial(2x + 4x^3, x) -> {0, 2, 0, 4}
-  //   // rational(2x + 4x^3, {3, 1}, x) -> (2x + 4x^3)/(3+x)
-  //   // https://reference.wolfram.com/language/tutorial/AlgebraicCalculations.html
-  //   // simplify-trig (macsyma)
-  //   //  - trigReduce, trigExpand, trigFactor, trigToExp (mathematica)
-  //   // Mathematica:
-  //   // - distribute -> (a+b)(c+d) -> ac+ ad+ bc+ bd (doesn't have to be multiply,
-  //   // f(a+b, c+d) -> f(a, c) + f(a, d) + f(b, c) + f(b, d)
-  //   // -- distribute(expr, over=add, with=multiply)
-  //   // https://reference.wolfram.com/language/ref/Distribute.html
-  //   // - expand, expand-all
-  //   // - factor
-  //   // - simplify
-  // ],
-  'arithmetic': [...ARITHMETIC_LIBRARY, ...COMPLEX_LIBRARY],
-  'calculus': CALCULUS_LIBRARY,
-  'collections': [SETS_LIBRARY, COLLECTIONS_LIBRARY],
-  'combinatorics': COMBINATORICS_LIBRARY,
-  'control-structures': CONTROL_STRUCTURES_LIBRARY,
-  'core': CORE_LIBRARY,
-  'dimensions': [], // @todo // volume, speed, area
-  'domains': [],
-  // 'domains': getDomainsDictionary(),
-  'linear-algebra': LINEAR_ALGEBRA_LIBRARY,
-  'logic': [LOGIC_LIBRARY, LOGIC_FUNCTION_LIBRARY],
-  'number-theory': NUMBER_THEORY_LIBRARY,
-  'numeric': [], // @todo   // 'numeric': [
+/**
+ * Return the standard libraries, optionally filtered by category name.
+ * Libraries are returned in dependency order (topologically sorted).
+ */
+export function getStandardLibrary(
+  categories?: LibraryCategory[] | LibraryCategory | 'all'
+): readonly LibraryDefinition[] {
+  if (!categories || categories === 'all')
+    return Object.freeze(sortLibraries([...STANDARD_LIBRARIES]));
 
-  'other': [],
-  'relop': RELOP_LIBRARY,
-  'polynomials': POLYNOMIALS_LIBRARY,
-  'physics': {
-    Mu0: {
-      description: 'Vaccum permeability',
-      isConstant: true,
-      wikidata: 'Q1515261',
-      type: 'real',
-      value: 1.25663706212e-6,
-      // unit: ['Divide', 'N', ['Square', 'A']],
-    },
-  },
-  'statistics': STATISTICS_LIBRARY,
-  'trigonometry': TRIGONOMETRY_LIBRARY,
-  'units': [], // @todo see also "dimensions"
-};
+  if (typeof categories === 'string') categories = [categories];
+
+  const filtered = categories.map((cat) => {
+    const lib = STANDARD_LIBRARIES.find((l) => l.name === cat);
+    if (!lib) throw new Error(`Unknown library category "${cat}"`);
+    return lib;
+  });
+
+  return Object.freeze(sortLibraries(filtered));
+}
 
 function validateDefinitionName(name: string): string {
   name = name.normalize();

@@ -59,6 +59,7 @@ import type {
   SequenceInfo,
   OEISSequenceInfo,
   OEISOptions,
+  LibraryDefinition,
 } from './global-types';
 
 import type {
@@ -69,13 +70,17 @@ import type {
 } from './latex-syntax/types';
 import {
   type IndexedLatexDictionary,
-  getLatexDictionary,
   indexLatexDictionary,
 } from './latex-syntax/dictionary/definitions';
 import { parse } from './latex-syntax/parse';
 import { asLatexString, isLatexString } from './latex-syntax/utils';
 
-import { setSymbolDefinitions, getStandardLibrary } from './library/library';
+import {
+  setSymbolDefinitions,
+  getStandardLibrary,
+  STANDARD_LIBRARIES,
+  sortLibraries,
+} from './library/library';
 
 import { DEFAULT_COST_FUNCTION } from './cost-function';
 
@@ -485,8 +490,8 @@ export class ComputeEngine implements IComputeEngine {
   _bignum: Decimal.Constructor;
 
   static getStandardLibrary(
-    categories: LibraryCategory[] | LibraryCategory | 'all' = 'all'
-  ): readonly SymbolDefinitions[] {
+    categories?: LibraryCategory[] | LibraryCategory | 'all'
+  ): readonly LibraryDefinition[] {
     return getStandardLibrary(categories);
   }
 
@@ -523,9 +528,19 @@ export class ComputeEngine implements IComputeEngine {
    */
 
   static getLatexDictionary(
-    domain: LibraryCategory | 'all' = 'all'
+    domain?: LibraryCategory | 'all'
   ): readonly Readonly<LatexDictionaryEntry>[] {
-    return getLatexDictionary(domain);
+    const libs =
+      !domain || domain === 'all'
+        ? STANDARD_LIBRARIES
+        : STANDARD_LIBRARIES.filter((l) => l.name === domain);
+
+    const result: LatexDictionaryEntry[] = [];
+    for (const lib of libs) {
+      if (lib.latexDictionary)
+        result.push(...(lib.latexDictionary as LatexDictionaryEntry[]));
+    }
+    return result;
   }
 
   /**
@@ -550,7 +565,9 @@ export class ComputeEngine implements IComputeEngine {
    * `chop()` as well.
    */
   constructor(options?: {
+    /** @deprecated Use `libraries` instead */
     ids?: readonly SymbolDefinitions[];
+    libraries?: readonly (string | LibraryDefinition)[];
     precision?: number | 'machine';
     tolerance?: number | 'auto';
   }) {
@@ -592,11 +609,43 @@ export class ComputeEngine implements IComputeEngine {
     // Declare the standard types
     this.declareType('limits', 'expression<Limits>');
 
-    for (const table of ComputeEngine.getStandardLibrary('domains'))
-      setSymbolDefinitions(this, table);
+    // Resolve libraries
+    let libs: LibraryDefinition[];
+    if (options?.libraries) {
+      libs = sortLibraries(
+        options.libraries.map((lib) => {
+          if (typeof lib === 'string') {
+            const found = STANDARD_LIBRARIES.find((l) => l.name === lib);
+            if (!found)
+              throw new Error(`Unknown standard library: "${lib}"`);
+            return found;
+          }
+          return lib;
+        })
+      );
+    } else if (options?.ids) {
+      // Backward compat: wrap raw SymbolDefinitions
+      libs = [{ name: '_user', definitions: [...options.ids] }];
+    } else {
+      libs = [...getStandardLibrary()];
+    }
 
-    const tables = options?.ids ?? ComputeEngine.getStandardLibrary();
-    for (const table of tables) setSymbolDefinitions(this, table);
+    // Load symbol definitions
+    for (const lib of libs) {
+      const defs = lib.definitions;
+      if (defs) {
+        const tables = Array.isArray(defs) ? defs : [defs];
+        for (const table of tables) setSymbolDefinitions(this, table);
+      }
+    }
+
+    // Collect and set LaTeX dictionary from loaded libraries
+    const latexEntries: LatexDictionaryEntry[] = [];
+    for (const lib of libs) {
+      if (lib.latexDictionary)
+        latexEntries.push(...(lib.latexDictionary as LatexDictionaryEntry[]));
+    }
+    if (latexEntries.length > 0) this.latexDictionary = latexEntries;
 
     // Populate the table of common symbols
     // (they should be in the global context)
