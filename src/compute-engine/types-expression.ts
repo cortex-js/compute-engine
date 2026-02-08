@@ -720,6 +720,9 @@ export interface BoxedExpression {
    *
    * When `true`, `expr.numericValue` is not `undefined`.
    *
+   * @deprecated Use `isBoxedNumber()` type guard to narrow, then access
+   * `numericValue` directly.
+   *
    * @category Numeric Expression
    *
    */
@@ -739,6 +742,9 @@ export interface BoxedExpression {
    *
    * To check if an expression is a number literal, use `expr.isNumberLiteral`.
    * If `expr.isNumberLiteral` is `true`, `expr.numericValue` is not `undefined`.
+   *
+   * @deprecated Use `isBoxedNumber()` type guard to narrow, then access
+   * `numericValue` without `undefined`.
    *
    * @category Numeric Expression
    *
@@ -924,6 +930,9 @@ export interface BoxedExpression {
    * Applicable to canonical and non-canonical expressions.
    * :::
    *
+   * @deprecated Use `isBoxedSymbol()` type guard to narrow, then access
+   * `symbol` without `undefined`.
+   *
    * @category Symbol Expression
    *
    */
@@ -935,6 +944,9 @@ export interface BoxedExpression {
     * :::info[Note]
     * Applicable to canonical and non-canonical expressions.
     * :::
+    *
+    * @deprecated Use `isBoxedString()` type guard to narrow, then access
+    * `string` without `undefined`.
 
     * @category String Expression
     *
@@ -946,6 +958,9 @@ export interface BoxedExpression {
    *
    * If `true`, `expr.ops` is not `undefined`, and `expr.operator` is the name
    * of the function.
+   *
+   * @deprecated Use `isBoxedFunction()` type guard to narrow, then access
+   * function-specific members directly.
    *
    * @category Function Expression
    */
@@ -976,6 +991,9 @@ export interface BoxedExpression {
    * Applicable to canonical and non-canonical expressions.
    * :::
    *
+   * @deprecated Use `isBoxedFunction()` type guard to narrow, then access
+   * `ops` without `undefined`.
+   *
    * @category Function Expression
    *
    */
@@ -990,6 +1008,9 @@ export interface BoxedExpression {
    * Applicable to canonical and non-canonical expressions.
    * :::
    *
+   * @deprecated Use `isBoxedFunction()` type guard to narrow, then access
+   * `nops` directly.
+   *
    * @category Function Expression
    *
    */
@@ -1002,6 +1023,9 @@ export interface BoxedExpression {
    * :::info[Note]
    * Applicable to canonical and non-canonical expressions.
    * :::
+   *
+   * @deprecated Use `isBoxedFunction()` type guard to narrow, then access
+   * `op1` directly.
    *
    * @category Function Expression
    *
@@ -1017,6 +1041,9 @@ export interface BoxedExpression {
    * Applicable to canonical and non-canonical expressions.
    * :::
    *
+   * @deprecated Use `isBoxedFunction()` type guard to narrow, then access
+   * `op2` directly.
+   *
    * @category Function Expression
    *
    *
@@ -1030,6 +1057,9 @@ export interface BoxedExpression {
    * :::info[Note]
    * Applicable to canonical and non-canonical expressions.
    * :::
+   *
+   * @deprecated Use `isBoxedFunction()` type guard to narrow, then access
+   * `op3` directly.
    *
    * @category Function Expression
    *
@@ -1192,6 +1222,9 @@ export interface BoxedExpression {
    * :::info[Note]
    * Applicable to canonical and non-canonical expressions.
    * :::
+   *
+   * @deprecated Use `isBoxedTensor()` type guard to narrow, then access
+   * `tensor` without `undefined`.
    *
    * @category Tensor Expression
    *
@@ -1802,6 +1835,110 @@ export interface BoxedExpression {
    * that matches the predicate.
    *
    */
+  indexWhere(
+    predicate: (element: BoxedExpression) => boolean
+  ): number | undefined;
+}
+
+//
+// ── Role Interfaces ─────────────────────────────────────────────────────
+//
+// These interfaces narrow `BoxedExpression` to expression-kind-specific
+// members.  Use the corresponding type guard (`isBoxedNumber`, etc.) to
+// narrow an expression, then access these members without `undefined`.
+//
+
+/**
+ * Narrowed interface for number literal expressions.
+ *
+ * Obtained via `isBoxedNumber()`.
+ *
+ * @category Boxed Expression
+ */
+export interface NumberLiteralInterface {
+  readonly numericValue: number | NumericValue;
+  readonly isNumberLiteral: true;
+}
+
+/**
+ * Narrowed interface for symbol expressions.
+ *
+ * Obtained via `isBoxedSymbol()`.
+ *
+ * @category Boxed Expression
+ */
+export interface SymbolInterface {
+  readonly symbol: string;
+}
+
+/**
+ * Narrowed interface for function expressions.
+ *
+ * Obtained via `isBoxedFunction()`.
+ *
+ * @category Boxed Expression
+ */
+export interface FunctionInterface {
+  readonly isFunctionExpression: true;
+  readonly ops: ReadonlyArray<BoxedExpression>;
+  readonly nops: number;
+  readonly op1: BoxedExpression;
+  readonly op2: BoxedExpression;
+  readonly op3: BoxedExpression;
+}
+
+/**
+ * Narrowed interface for string expressions.
+ *
+ * Obtained via `isBoxedString()`.
+ *
+ * @category Boxed Expression
+ */
+export interface StringInterface {
+  readonly string: string;
+}
+
+/**
+ * Narrowed interface for tensor expressions.
+ *
+ * Obtained via `isBoxedTensor()`.
+ *
+ * @category Boxed Expression
+ */
+export interface TensorInterface {
+  readonly tensor: Tensor<any>;
+  readonly shape: number[];
+  readonly rank: number;
+}
+
+/**
+ * Narrowed interface for collection expressions.
+ *
+ * Obtained via `isCollection()`.
+ *
+ * @category Boxed Expression
+ */
+export interface CollectionInterface {
+  readonly isCollection: true;
+  each(): Generator<BoxedExpression>;
+  contains(rhs: BoxedExpression): boolean | undefined;
+  subsetOf(other: BoxedExpression, strict: boolean): boolean | undefined;
+  readonly count: number | undefined;
+  readonly isFiniteCollection: boolean | undefined;
+  readonly isEmptyCollection: boolean | undefined;
+}
+
+/**
+ * Narrowed interface for indexed collection expressions (lists, vectors,
+ * matrices, tuples).
+ *
+ * Obtained via `isIndexedCollection()`.
+ *
+ * @category Boxed Expression
+ */
+export interface IndexedCollectionInterface extends CollectionInterface {
+  readonly isIndexedCollection: true;
+  at(index: number): BoxedExpression | undefined;
   indexWhere(
     predicate: (element: BoxedExpression) => boolean
   ): number | undefined;

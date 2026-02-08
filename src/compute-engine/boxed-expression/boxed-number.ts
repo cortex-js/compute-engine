@@ -46,6 +46,7 @@ import type {
   PatternMatchOptions,
   ReplaceOptions,
   SimplifyOptions,
+  NumberLiteralInterface,
 } from '../global-types';
 
 /**
@@ -53,7 +54,10 @@ import type {
  *
  */
 
-export class BoxedNumber extends _BoxedExpression {
+export class BoxedNumber
+  extends _BoxedExpression
+  implements NumberLiteralInterface
+{
   // The value of a BoxedNumber is either a small integer or a NumericValue
   protected readonly _value: SmallInteger | NumericValue;
 
@@ -150,7 +154,7 @@ export class BoxedNumber extends _BoxedExpression {
     return this._value;
   }
 
-  get isNumberLiteral(): boolean {
+  get isNumberLiteral(): true {
     return true;
   }
 

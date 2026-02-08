@@ -40,6 +40,8 @@ export {
   isBoxedString,
   isBoxedTensor,
   isDictionary,
+  isCollection,
+  isIndexedCollection,
 } from './compute-engine/boxed-expression/type-guards';
 
 export type { BoxedNumber } from './compute-engine/boxed-expression/boxed-number';

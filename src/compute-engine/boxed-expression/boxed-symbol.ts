@@ -30,6 +30,7 @@ import type {
   Sign,
   BoxedDefinition,
   CollectionHandlers,
+  SymbolInterface,
 } from '../global-types';
 
 import { mul, div } from './arithmetic-mul-div';
@@ -85,7 +86,10 @@ import { getSignFromAssumptions } from '../assume';
  * symbol may have no value).
  *
  */
-export class BoxedSymbol extends _BoxedExpression {
+export class BoxedSymbol
+  extends _BoxedExpression
+  implements SymbolInterface
+{
   private _hash: number | undefined;
 
   /** The name of the symbol */

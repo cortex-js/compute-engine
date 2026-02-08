@@ -4,6 +4,7 @@ import type {
   BoxedSubstitution,
   IComputeEngine as ComputeEngine,
   Metadata,
+  StringInterface,
 } from '../global-types';
 
 import { _BoxedExpression } from './abstract-boxed-expression';
@@ -17,7 +18,10 @@ import { matchesNumber, matchesSymbol } from '../../math-json/utils';
  *
  */
 
-export class BoxedString extends _BoxedExpression {
+export class BoxedString
+  extends _BoxedExpression
+  implements StringInterface
+{
   [Symbol.toStringTag]: string = '[BoxedString]';
   private readonly _string: string;
   private _utf8Buffer?: Uint8Array | undefined;

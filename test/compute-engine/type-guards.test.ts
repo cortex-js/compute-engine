@@ -7,6 +7,8 @@ import {
   isBoxedString,
   isBoxedTensor,
   isDictionary,
+  isCollection,
+  isIndexedCollection,
 } from '../../src/compute-engine';
 
 const ce = engine;
@@ -41,11 +43,12 @@ describe('isBoxedNumber', () => {
     expect(isBoxedNumber(undefined)).toBe(false);
   });
 
-  test('narrows type to BoxedNumber', () => {
+  test('narrows type to NumberLiteralInterface', () => {
     const expr = ce.box(42);
     if (isBoxedNumber(expr)) {
-      // After guard, numericValue should be accessible and non-null
-      expect(expr.numericValue).not.toBeNull();
+      // After guard, numericValue is number | NumericValue (no undefined)
+      expect(expr.numericValue).not.toBeUndefined();
+      expect(expr.isNumberLiteral).toBe(true);
     }
   });
 });
@@ -63,10 +66,12 @@ describe('isBoxedSymbol', () => {
     expect(isBoxedSymbol(undefined)).toBe(false);
   });
 
-  test('narrows type to BoxedSymbol', () => {
+  test('narrows type to SymbolInterface', () => {
     const expr = ce.box('x');
     if (isBoxedSymbol(expr)) {
-      expect(expr.symbol).toBe('x');
+      // After guard, symbol is string (no undefined)
+      const name: string = expr.symbol;
+      expect(name).toBe('x');
     }
   });
 });
@@ -84,11 +89,14 @@ describe('isBoxedFunction', () => {
     expect(isBoxedFunction(undefined)).toBe(false);
   });
 
-  test('narrows type to BoxedFunction', () => {
+  test('narrows type to FunctionInterface', () => {
     const expr = ce.parse('x + 1');
     if (isBoxedFunction(expr)) {
-      expect(expr.ops).toBeDefined();
-      expect(expr.operator).toBeDefined();
+      // After guard, ops is ReadonlyArray<BoxedExpression> (no undefined)
+      expect(expr.ops.length).toBeGreaterThan(0);
+      expect(expr.nops).toBeGreaterThan(0);
+      expect(expr.isFunctionExpression).toBe(true);
+      expect(expr.op1).toBeDefined();
     }
   });
 });
@@ -105,10 +113,12 @@ describe('isBoxedString', () => {
     expect(isBoxedString(undefined)).toBe(false);
   });
 
-  test('narrows type to BoxedString', () => {
+  test('narrows type to StringInterface', () => {
     const expr = ce.box({ str: 'hello' });
     if (isBoxedString(expr)) {
-      expect(expr.string).toBe('hello');
+      // After guard, string is string (no undefined)
+      const val: string = expr.string;
+      expect(val).toBe('hello');
     }
   });
 });
@@ -123,6 +133,16 @@ describe('isBoxedTensor', () => {
     expect(isBoxedTensor(ce.box('x'))).toBe(false);
     expect(isBoxedTensor(null)).toBe(false);
     expect(isBoxedTensor(undefined)).toBe(false);
+  });
+
+  test('narrows type to TensorInterface', () => {
+    const expr = ce.box(['List', 1, 2, 3]);
+    if (isBoxedTensor(expr)) {
+      // After guard, tensor is Tensor<any> (no undefined)
+      expect(expr.tensor).toBeDefined();
+      expect(expr.shape).toEqual([3]);
+      expect(expr.rank).toBe(1);
+    }
   });
 });
 
@@ -150,6 +170,60 @@ describe('isDictionary', () => {
     if (isDictionary(expr)) {
       expect(expr.has('a')).toBe(true);
       expect(expr.keys).toBeDefined();
+    }
+  });
+});
+
+describe('isCollection', () => {
+  test('returns true for collections (lists)', () => {
+    const list = ce.box(['List', 1, 2, 3]);
+    expect(isCollection(list)).toBe(true);
+  });
+
+  test('returns true for Range (lazy collection)', () => {
+    const range = ce.box(['Range', 1, 10]);
+    expect(isCollection(range)).toBe(true);
+  });
+
+  test('returns false for non-collections', () => {
+    expect(isCollection(ce.box(42))).toBe(false);
+    expect(isCollection(ce.box('x'))).toBe(false);
+    expect(isCollection(null)).toBe(false);
+    expect(isCollection(undefined)).toBe(false);
+  });
+
+  test('narrows type to CollectionInterface', () => {
+    const list = ce.box(['List', 1, 2, 3]);
+    if (isCollection(list)) {
+      expect(list.isCollection).toBe(true);
+      // each() returns a generator
+      const items = [...list.each()];
+      expect(items.length).toBe(3);
+    }
+  });
+});
+
+describe('isIndexedCollection', () => {
+  test('returns true for indexed collections (lists)', () => {
+    const list = ce.box(['List', 1, 2, 3]);
+    expect(isIndexedCollection(list)).toBe(true);
+  });
+
+  test('returns false for non-indexed collections', () => {
+    expect(isIndexedCollection(ce.box(42))).toBe(false);
+    expect(isIndexedCollection(ce.box('x'))).toBe(false);
+    expect(isIndexedCollection(null)).toBe(false);
+    expect(isIndexedCollection(undefined)).toBe(false);
+  });
+
+  test('narrows type to IndexedCollectionInterface', () => {
+    const list = ce.box(['List', 1, 2, 3]);
+    if (isIndexedCollection(list)) {
+      expect(list.isIndexedCollection).toBe(true);
+      // at() is available
+      const first = list.at(1);
+      expect(first).toBeDefined();
+      expect(first!.re).toBe(1);
     }
   });
 });

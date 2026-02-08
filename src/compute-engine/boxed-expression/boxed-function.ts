@@ -19,6 +19,7 @@ import type {
   EvalContext,
   Scope,
   BoxedValueDefinition,
+  FunctionInterface,
 } from '../global-types';
 
 import { isFiniteIndexedCollection, zip } from '../collection-utils';
@@ -86,7 +87,10 @@ const DEFAULT_MATERIALIZATION: [number, number] = [5, 5] as const;
  *
  */
 
-export class BoxedFunction extends _BoxedExpression {
+export class BoxedFunction
+  extends _BoxedExpression
+  implements FunctionInterface
+{
   // The operator of the function expression
   private readonly _operator: string;
 
@@ -872,7 +876,7 @@ export class BoxedFunction extends _BoxedExpression {
     return isSubtype(this.type.type, 'real');
   }
 
-  get isFunctionExpression(): boolean {
+  get isFunctionExpression(): true {
     return true;
   }
 

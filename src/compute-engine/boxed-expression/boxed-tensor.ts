@@ -14,6 +14,7 @@ import type {
   SimplifyOptions,
   PatternMatchOptions,
   Tensor,
+  TensorInterface,
 } from '../global-types';
 
 import { BoxedType } from '../../common/type/boxed-type';
@@ -42,7 +43,10 @@ import { hashCode, isBoxedExpression } from './utils';
  * if input is expression) is created lazily.
  *
  */
-export class BoxedTensor<T extends TensorDataType> extends _BoxedExpression {
+export class BoxedTensor<T extends TensorDataType>
+  extends _BoxedExpression
+  implements TensorInterface
+{
   private _tensor: AbstractTensor<T>;
 
   private _expression?: BoxedExpression;
