@@ -382,11 +382,14 @@ export function pow(
       // We have an expression of the form `e^(i theta)`
       theta = canonicalAngle(theta);
       if (theta !== undefined) {
-        // Use Euler's formula to return a complex trigonometric expression
-        return ce
-          .function('Cos', [theta])
-          .add(ce.function('Sin', [theta]).mul(ce.I))
-          .simplify();
+        // Use Euler's formula: e^{i*theta} = cos(theta) + i*sin(theta)
+        // IMPORTANT: Use .evaluate() not .simplify() to avoid infinite
+        // recursion when pow() is called from simplification rules.
+        // canonicalAngle always returns a numeric angle, so evaluate
+        // will compute the trig values directly.
+        const cosVal = ce.function('Cos', [theta]).evaluate();
+        const sinVal = ce.function('Sin', [theta]).evaluate();
+        return cosVal.add(sinVal.mul(ce.I));
         // } else if (theta) {
         //   // Return simplify angle
         //   return ce._fn('Power', [ce.E, radiansToAngle(theta)!.mul(ce.I)]);
