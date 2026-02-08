@@ -16,6 +16,7 @@ import { expand } from '../boxed-expression/expand';
 import { factor } from '../boxed-expression/factor';
 import { add } from '../boxed-expression/arithmetic-add';
 import { SMALL_INTEGER } from '../numerics/numeric';
+import { primeFactors } from '../numerics/primes';
 import { NumericValue } from '../numeric-value/types';
 import {
   isEquationOperator,
@@ -642,8 +643,31 @@ export const SIMPLIFY_RULES: Rule[] = [
       group.terms.push({ term, exp });
     }
 
-    // Check if any base has multiple terms that can be combined
+    // Second pass: try to decompose numeric coefficients as perfect powers
+    // of an existing base. E.g. 4·2^x → 2^(x+2) since 4 = 2^2.
     let hasCombinations = false;
+    for (let i = otherTerms.length - 1; i >= 0; i--) {
+      const term = otherTerms[i];
+      if (!isBoxedNumber(term)) continue;
+      const n = term.re;
+      if (!Number.isInteger(n) || n <= 1) continue;
+
+      const factors = primeFactors(n);
+      const primes = Object.keys(factors);
+      if (primes.length !== 1) continue; // not a single-prime power
+
+      const p = Number(primes[0]);
+      const e = factors[p];
+      const baseKey = JSON.stringify(ce.number(p).json);
+      const group = baseGroups.get(baseKey);
+      if (!group) continue;
+
+      group.terms.push({ term, exp: ce.number(e) });
+      otherTerms.splice(i, 1);
+      hasCombinations = true;
+    }
+
+    // Check if any base has multiple terms that can be combined
     for (const group of baseGroups.values()) {
       if (group.terms.length > 1) {
         // Check if we can safely combine:

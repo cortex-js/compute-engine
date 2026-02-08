@@ -99,18 +99,14 @@ describe('Power Combination (#176)', () => {
     check('x \\cdot x^{-1}', 1, { simplify: true, assume: ['x > 0'] });
   });
 
-  // Coefficient factoring into the power base is not yet implemented (#176).
-  // When implemented: 4·2^x → 2^(x+2), since 4 = 2^2.
-  test.skip('factoring numeric coefficients to match base', () => {
+  test('factoring numeric coefficients to match base', () => {
     check('4 \\cdot 2^x', ['Power', 2, ['Add', 'x', 2]], { simplify: true });
     check('8 \\cdot 2^x', ['Power', 2, ['Add', 'x', 3]], { simplify: true });
     check('9 \\cdot 3^x', ['Power', 3, ['Add', 'x', 2]], { simplify: true });
     check('27 \\cdot 3^n', ['Power', 3, ['Add', 'n', 3]], { simplify: true });
   });
 
-  // Same as above: numeric factors are collapsed (2·2 → 4) but not merged
-  // into the power base. When implemented: 2·2·2^x → 2^(x+2).
-  test.skip('multiple numeric factors with power base', () => {
+  test('multiple numeric factors with power base', () => {
     check('2 \\cdot 2 \\cdot 2^x', ['Power', 2, ['Add', 'x', 2]], {
       simplify: true,
     });
