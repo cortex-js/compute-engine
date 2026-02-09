@@ -26,6 +26,7 @@ import {
 } from '../types';
 import { joinLatex } from '../tokenizer';
 import { isEquationOperator, isInequalityOperator } from '../utils';
+import { BoxedType } from '../../../common/type/boxed-type';
 
 // function isSpacingToken(token: string): boolean {
 //   return (
@@ -892,10 +893,21 @@ export const DEFINITIONS_CORE: LatexDictionary = [
     latexTrigger: '^{-1', // Note: the closing brace is not included
     kind: 'postfix',
     parse: (parser: Parser, lhs: Expression) => {
+      const sym = symbol(lhs);
+      if (!sym) return null;
+
+      const symType = parser.getSymbolType(sym);
+
+      // If the lhs is a matrix, return the matrix inverse
+      // i.e. A^{-1} -> Inverse(A)
+      if (symType.matches(new BoxedType('matrix'))) {
+        parser.match('<}>');
+        return ['Inverse', lhs] as Expression;
+      }
+
       // If the lhs is a function, return the inverse function
       // i.e. f^{-1} -> InverseFunction(f)
-      const sym = symbol(lhs);
-      if (!sym || !parser.getSymbolType(sym).matches('function')) return null;
+      if (!symType.matches('function')) return null;
 
       // There may be additional postfixes, i.e. \prime, \doubleprime,
       // \tripleprime in the superscript. Account for them.

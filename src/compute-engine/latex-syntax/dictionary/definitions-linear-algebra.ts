@@ -1,5 +1,5 @@
 import { Expression } from '../../../math-json';
-import { stringValue, operands, operand } from '../../../math-json/utils';
+import { stringValue, operands, operand, operator } from '../../../math-json/utils';
 import { LatexDictionary, Parser, Serializer } from '../types';
 import { joinLatex } from '../tokenizer';
 import { DELIMITERS_SHORTHAND } from './definitions-core';
@@ -87,12 +87,12 @@ export const DEFINITIONS_LINEAR_ALGEBRA: LatexDictionary = [
     symbolTrigger: 'vmatrix',
     parse: (parser: Parser) => {
       const columns = parseColumnFormat(parser);
-      const [operator, cells] = parseCells(parser);
+      const [op, cells] = parseCells(parser);
 
       if (columns)
-        return [operator, cells, { str: '||' }, { str: columns }] as Expression;
+        return ['Determinant', [op, cells, { str: columns }]] as Expression;
 
-      return [operator, cells, { str: '||' }] as Expression;
+      return ['Determinant', [op, cells]] as Expression;
     },
   },
 
@@ -222,6 +222,12 @@ export const DEFINITIONS_LINEAR_ALGEBRA: LatexDictionary = [
   },
 
   {
+    name: 'Inverse',
+    serialize: (serializer: Serializer, expr: Expression): string =>
+      serializer.serialize(operand(expr, 1)) + '^{-1}',
+  },
+
+  {
     name: 'Trace',
     kind: 'function',
     symbolTrigger: 'tr',
@@ -231,6 +237,20 @@ export const DEFINITIONS_LINEAR_ALGEBRA: LatexDictionary = [
     name: 'Determinant',
     kind: 'function',
     symbolTrigger: 'det',
+    serialize: (serializer: Serializer, expr: Expression): string => {
+      const arg = operand(expr, 1);
+      if (operator(arg) === 'Matrix') {
+        // Serialize as vmatrix environment
+        const rows = operands(operand(arg, 1));
+        return serializeTabular(
+          serializer,
+          rows,
+          '||',
+          stringValue(operand(arg, 2))
+        );
+      }
+      return `\\det\\left(${serializer.serialize(arg)}\\right)`;
+    },
   },
 
   // MatrixMultiply serializes as multiplication with \cdot

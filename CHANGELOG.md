@@ -191,8 +191,8 @@ ce.simplificationRules.push({
 
 - **Numeric evaluation for Digamma, Trigamma, PolyGamma, Beta, Zeta, LambertW**:
   These six functions now evaluate numerically when `.N()` is called, at both
-  machine precision and arbitrary precision (bignum). Returns unevaluated without
-  numeric approximation.
+  machine precision and arbitrary precision (bignum). Returns unevaluated
+  without numeric approximation.
   - `Digamma`/`Trigamma`: recurrence + asymptotic with Bernoulli numbers
   - `PolyGamma`: generalized recurrence for arbitrary order n
   - `Beta`: via gamma, with log-gamma fallback for large arguments
@@ -221,6 +221,25 @@ ce.simplificationRules.push({
   decay for Ai, exponential growth for Bi at positive x, oscillatory for
   negative x) for large arguments.
 
+### Linear Algebra
+
+(Fix [#285](https://github.com/cortex-js/compute-engine/issues/285))
+
+- **`\begin{vmatrix}` now parses to `Determinant`**: The `vmatrix` LaTeX
+  environment now produces `["Determinant", ["Matrix", ...]]` instead of
+  `["Matrix", ..., "'||'"]`. Serialization round-trips correctly back to
+  `\begin{vmatrix}...\end{vmatrix}` when the argument is a `Matrix` expression,
+  and uses `\det\left(...\right)` for symbol arguments.
+
+- **`A^{-1}` produces `Inverse` for matrix-typed symbols**: When a symbol is
+  declared with type `matrix`, parsing `A^{-1}` now returns `["Inverse", "A"]`
+  instead of `["Power", "A", -1]`. Undeclared symbols still fall through to the
+  default `Power`/`Divide` handling, and function symbols still produce
+  `InverseFunction` (e.g., `\sin^{-1}` &rarr; `Arcsin`).
+
+- **`Inverse` serializes as `^{-1}`**: `["Inverse", "A"]` now serializes to
+  `A^{-1}` instead of `\mathrm{Inverse}(A)`.
+
 ### Canonicalization
 
 - **Exact numeric folding during canonicalization**: `canonicalAdd` and
@@ -230,7 +249,6 @@ ce.simplificationRules.push({
   without waiting for a `.simplify()` call.
 
   **What gets folded** (exact values):
-
   - Integers: `Add(2, x, 5)` &rarr; `Add(x, 7)`
   - Rationals: `Add(1/3, x, 2/3)` &rarr; `Add(x, 1)`
   - Radicals: `Add(√2, x, √2)` &rarr; `Add(x, 2√2)`
@@ -240,20 +258,19 @@ ce.simplificationRules.push({
   - Complex promotion: `Add(1, Complex(0, -1))` &rarr; `Complex(1, -1)`
 
   **What is NOT folded** (non-exact values):
-
   - Machine floats: `Add(1.5, x, 0.5)` remains `Add(x, 0.5, 1.5)`
   - Infinity/NaN: `Multiply(0, ∞)` correctly returns `NaN`
   - Single numeric: `Multiply(5, Pi)` is unchanged (nothing to fold)
 
   The folding uses the existing `ExactNumericValue` arithmetic, which
-  automatically handles radical grouping (`√2 + √2 = 2√2`) and
-  rational simplification (`1/3 + 2/3 = 1`).
+  automatically handles radical grouping (`√2 + √2 = 2√2`) and rational
+  simplification (`1/3 + 2/3 = 1`).
 
 - **Exact numeric folding in `canonicalPower`**: Integer powers of numeric
-  literals are now folded during canonicalization when the exponent is an integer
-  with |e| &le; 64. For machine-number bases, the result must be a safe integer;
-  for exact numeric values (rationals, radicals), `NumericValue.pow()` is used.
-
+  literals are now folded during canonicalization when the exponent is an
+  integer with |e| &le; 64. For machine-number bases, the result must be a safe
+  integer; for exact numeric values (rationals, radicals), `NumericValue.pow()`
+  is used.
   - `Power(2, 3)` &rarr; `8`
   - `Power(3, 2)` &rarr; `9`
   - `Power(1/2, 2)` &rarr; `1/4`
@@ -299,12 +316,12 @@ ce.simplificationRules.push({
   additional power distribution rules in `pow()` were applied unconditionally,
   producing wrong results when the exponent is non-integer and operands are
   negative. (1) `(a/b)^c -> a^c / b^c` — e.g. `((-2)(-3))^{1/2} = sqrt(6)` but
-  distributing gives `(-2)^{1/2} * (-3)^{1/2} = -sqrt(6)`. (2) `(a*b)^c ->
-  a^c * b^c` — same class of bug. (3) `(-x)^n` used `n % 2 === 0` to test
-  parity, but for non-integer `n` (e.g. 0.5), `0.5 % 2 = 0.5` falls to the odd
-  branch, giving `(-x)^{0.5} -> -(x^{0.5})` which is wrong. All three rules, plus
-  the corresponding `canonicalPower()` Divide rule, now require integer exponents
-  (or non-negative operands) before distributing.
+  distributing gives `(-2)^{1/2} * (-3)^{1/2} = -sqrt(6)`. (2)
+  `(a*b)^c -> a^c * b^c` — same class of bug. (3) `(-x)^n` used `n % 2 === 0` to
+  test parity, but for non-integer `n` (e.g. 0.5), `0.5 % 2 = 0.5` falls to the
+  odd branch, giving `(-x)^{0.5} -> -(x^{0.5})` which is wrong. All three rules,
+  plus the corresponding `canonicalPower()` Divide rule, now require integer
+  exponents (or non-negative operands) before distributing.
 
 - **Sqrt/Root exponent rearrangement now guarded**: Two more rules in `pow()`
   unconditionally rearranged exponents. (1) `(√a)^b -> √(a^b)` rearranges
@@ -312,9 +329,9 @@ ce.simplificationRules.push({
   `(√(-4))^3 = -8i` but `√((-4)^3) = 8i`). Now only applied when `a >= 0`. The
   even-integer branches (`(√a)^2 -> a`, `(√a)^{2k} -> a^k`) remain unconditional
   since integer outer exponents are always safe. (2) `Root(a,b)^c -> a^{c/b}`
-  combined exponents unconditionally. Now guarded with `a >= 0` or `c` is integer.
-  Audit of `simplify-power.ts` confirmed all rules there are already properly
-  guarded.
+  combined exponents unconditionally. Now guarded with `a >= 0` or `c` is
+  integer. Audit of `simplify-power.ts` confirmed all rules there are already
+  properly guarded.
 
 - **Relational operators now evaluate**: Seven relational operators
   (`TildeFullEqual`, `TildeEqual`, `Approx`, `ApproxEqual`, `ApproxNotEqual`,
@@ -344,9 +361,9 @@ ce.simplificationRules.push({
   `\operatorname{speed\unicode{"2012}of\unicode{"2012}sound}`), the characters
   are now encoded as `____XXXXXX` (4 underscores + 6 hex digits) in the symbol
   name. This encoding is valid per `isValidSymbol()` and round-trips correctly:
-  the serializer decodes `____XXXXXX` back to `\unicode{"XXXX"}` in LaTeX output.
-  Previously, these characters passed through raw and caused symbol validation to
-  fail.
+  the serializer decodes `____XXXXXX` back to `\unicode{"XXXX"}` in LaTeX
+  output. Previously, these characters passed through raw and caused symbol
+  validation to fail.
 
 ## 0.35.6 _2026-02-07_
 
@@ -826,19 +843,19 @@ ce.simplificationRules.push({
 - **Extended Coefficient Factoring in Power Combination**: The power combination
   rule now handles additional coefficient forms when combining same-base powers
   in products:
-  - **Multi-prime coefficients**: `12·2ˣ·3ˣ` &rarr; `2^(x+2)·3^(x+1)` (since
-    12 = 2²·3). All primes in the factorization must have a matching base.
+  - **Multi-prime coefficients**: `12·2ˣ·3ˣ` &rarr; `2^(x+2)·3^(x+1)` (since 12
+    = 2²·3). All primes in the factorization must have a matching base.
     Non-matching multi-prime coefficients like `6·2ˣ` are left unchanged.
   - **Negative coefficients**: `-4·2ˣ` &rarr; `-2^(x+2)`, `-8·2ˣ` &rarr;
     `-2^(x+3)`. The absolute value is factored and the sign is preserved.
-  - **Rational-radical coefficients**: `√2·2ˣ` &rarr; `2^(x+½)`,
-    `2√2·2ˣ` &rarr; `2^(x+3/2)`, `(√2/2)·2ˣ` &rarr; `2^(x-½)`.
-    Decomposes `(num/den)·√radical` into prime contributions from all three
-    components (radical primes get half-integer exponents, numerator primes get
-    positive exponents, denominator primes get negative exponents).
-  - **Rational coefficients**: `2ˣ/4` &rarr; `2^(x-2)`, `3ˣ/9` &rarr;
-    `3^(x-2)`. Factors both numerator (positive exponents) and denominator
-    (negative exponents).
+  - **Rational-radical coefficients**: `√2·2ˣ` &rarr; `2^(x+½)`, `2√2·2ˣ` &rarr;
+    `2^(x+3/2)`, `(√2/2)·2ˣ` &rarr; `2^(x-½)`. Decomposes `(num/den)·√radical`
+    into prime contributions from all three components (radical primes get
+    half-integer exponents, numerator primes get positive exponents, denominator
+    primes get negative exponents).
+  - **Rational coefficients**: `2ˣ/4` &rarr; `2^(x-2)`, `3ˣ/9` &rarr; `3^(x-2)`.
+    Factors both numerator (positive exponents) and denominator (negative
+    exponents).
 
 - **Improved Cost Function for Negated Powers**: `Negate(Power(...))` now costs
   `3 + cost(exponent)`, consistent with the cost of `Multiply(-1, Power(...))`.
