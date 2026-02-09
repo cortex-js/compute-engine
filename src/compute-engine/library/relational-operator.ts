@@ -332,7 +332,7 @@ export const RELOP_LIBRARY: SymbolDefinitions = {
 
     canonical: (args, { engine: ce }) =>
       canonicalRelational(ce, 'TildeFullEqual', args),
-    // @todo evaluate: (ce, ...args: BoxedExpression[]) => SemiBoxedExpression {}
+    evaluate: (ops, { engine: ce }) => evaluateApproxChain(ops, ce),
   },
 
   NotTildeFullEqual: {
@@ -349,7 +349,7 @@ export const RELOP_LIBRARY: SymbolDefinitions = {
     signature: '(any, any+) -> boolean',
     canonical: (args, { engine: ce }) =>
       canonicalRelational(ce, 'TildeEqual', args),
-    // @todo evaluate: (ce, ...args: BoxedExpression[]) => SemiBoxedExpression {}
+    evaluate: (ops, { engine: ce }) => evaluateApproxChain(ops, ce),
   },
 
   NotTildeEqual: {
@@ -365,7 +365,7 @@ export const RELOP_LIBRARY: SymbolDefinitions = {
     signature: '(any, any+) -> boolean',
     canonical: (args, { engine: ce }) =>
       canonicalRelational(ce, 'Approx', args),
-    // @todo evaluate: (ce, ...args: BoxedExpression[]) => SemiBoxedExpression {}
+    evaluate: (ops, { engine: ce }) => evaluateApproxChain(ops, ce),
   },
 
   NotApprox: {
@@ -380,7 +380,7 @@ export const RELOP_LIBRARY: SymbolDefinitions = {
     signature: '(any, any+) -> boolean',
     canonical: (args, { engine: ce }) =>
       canonicalRelational(ce, 'ApproxEqual', args),
-    // @todo evaluate: (ce, ...args: BoxedExpression[]) => SemiBoxedExpression {}
+    evaluate: (ops, { engine: ce }) => evaluateApproxChain(ops, ce),
   },
 
   NotApproxEqual: {
@@ -394,7 +394,11 @@ export const RELOP_LIBRARY: SymbolDefinitions = {
     signature: '(any, any+) -> boolean',
     canonical: (args, { engine: ce }) =>
       canonicalRelational(ce, 'ApproxNotEqual', args),
-    // @todo evaluate: (ce, ...args: BoxedExpression[]) => SemiBoxedExpression {}
+    evaluate: (ops, { engine: ce }) => {
+      const result = evaluateApproxChain(ops, ce);
+      if (result === undefined) return undefined;
+      return result === ce.True ? ce.False : ce.True;
+    },
   },
 
   NotApproxNotEqual: {
@@ -409,7 +413,17 @@ export const RELOP_LIBRARY: SymbolDefinitions = {
     signature: '(any, any+) -> boolean',
     canonical: (args, { engine: ce }) =>
       canonicalRelational(ce, 'Precedes', args),
-    // @todo evaluate: (ce, ...args: BoxedExpression[]) => SemiBoxedExpression {}
+    evaluate: (ops, { engine: ce }) => {
+      if (ops.length < 2) return ce.True;
+      let prev = ops[0];
+      for (let i = 1; i < ops.length; i++) {
+        const result = prev.isLess(ops[i]);
+        if (result === undefined) return undefined;
+        if (result === false) return ce.False;
+        prev = ops[i];
+      }
+      return ce.True;
+    },
   },
 
   NotPrecedes: {
@@ -423,7 +437,17 @@ export const RELOP_LIBRARY: SymbolDefinitions = {
     signature: '(any, any+) -> boolean',
     canonical: (args, { engine }) =>
       canonicalRelational(engine, 'Succeeds', args),
-    // @todo evaluate: (ce, ...args: BoxedExpression[]) => SemiBoxedExpression {}
+    evaluate: (ops, { engine: ce }) => {
+      if (ops.length < 2) return ce.True;
+      let prev = ops[0];
+      for (let i = 1; i < ops.length; i++) {
+        const result = ops[i].isLess(prev);
+        if (result === undefined) return undefined;
+        if (result === false) return ce.False;
+        prev = ops[i];
+      }
+      return ce.True;
+    },
   },
 
   NotSucceeds: {
@@ -433,6 +457,48 @@ export const RELOP_LIBRARY: SymbolDefinitions = {
       engine._fn('Not', [canonicalRelational(engine, 'Succeeds', args)]),
   },
 };
+
+/**
+ * Check if two expressions are approximately equal, i.e. their numeric
+ * values differ by at most `ce.tolerance`.
+ * Returns `true`, `false`, or `undefined` if the comparison can't be made.
+ */
+function approxEq(
+  a: BoxedExpression,
+  b: BoxedExpression
+): boolean | undefined {
+  const ce = a.engine;
+  const aN = a.N();
+  const bN = b.N();
+
+  if (!isBoxedNumber(aN) || !isBoxedNumber(bN)) return undefined;
+
+  const diff = aN.sub(bN);
+  if (!isBoxedNumber(diff)) return undefined;
+
+  const n = diff.numericValue;
+  if (typeof n === 'number') return ce.chop(n) === 0;
+  return n.isZeroWithTolerance(ce.tolerance);
+}
+
+/**
+ * Evaluate a chain of approximately-equal comparisons:
+ * `a ≈ b ≈ c` means `a ≈ b` and `b ≈ c`.
+ */
+function evaluateApproxChain(
+  ops: ReadonlyArray<BoxedExpression>,
+  ce: ComputeEngine
+): BoxedExpression | undefined {
+  if (ops.length < 2) return ce.True;
+  let prev = ops[0];
+  for (let i = 1; i < ops.length; i++) {
+    const result = approxEq(prev, ops[i]);
+    if (result === false) return ce.False;
+    if (result === undefined) return undefined;
+    prev = ops[i];
+  }
+  return ce.True;
+}
 
 function canonicalRelational(
   ce: ComputeEngine,

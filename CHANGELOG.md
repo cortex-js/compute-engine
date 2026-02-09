@@ -316,6 +316,16 @@ ce.simplificationRules.push({
   Audit of `simplify-power.ts` confirmed all rules there are already properly
   guarded.
 
+- **Relational operators now evaluate**: Seven relational operators
+  (`TildeFullEqual`, `TildeEqual`, `Approx`, `ApproxEqual`, `ApproxNotEqual`,
+  `Precedes`, `Succeeds`) previously had `canonical` handlers but no `evaluate`
+  handlers, so expressions like `Approx(3.14, 3.14)` returned unevaluated. The
+  approximate-equality family (`TildeFullEqual`, `TildeEqual`, `Approx`,
+  `ApproxEqual`) now checks whether `|a - b| <= tolerance` via `ce.chop()`, with
+  support for multi-argument chains. `Precedes` and `Succeeds` evaluate as
+  numeric `<` and `>` respectively. Negated variants (`NotApprox`,
+  `NotTildeFullEqual`, etc.) work automatically through the `Not` operator.
+
 ## 0.35.6 _2026-02-07_
 
 ### Bug Fixes
