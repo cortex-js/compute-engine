@@ -1102,12 +1102,12 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
     kind: 'function',
     parse: 'LCM',
   },
-  { symbolTrigger: 'max', kind: 'function', parse: 'Max' },
-  { symbolTrigger: 'min', kind: 'function', parse: 'Min' },
-  { name: 'Max', latexTrigger: '\\max', kind: 'function' },
-  { name: 'Min', latexTrigger: '\\min', kind: 'function' },
-  { name: 'Supremum', latexTrigger: '\\sup', kind: 'function' },
-  { name: 'Infimum', latexTrigger: '\\inf', kind: 'function' },
+  { symbolTrigger: 'max', kind: 'function', parse: 'Max', arguments: 'implicit' },
+  { symbolTrigger: 'min', kind: 'function', parse: 'Min', arguments: 'implicit' },
+  { name: 'Max', latexTrigger: '\\max', kind: 'function', arguments: 'implicit' },
+  { name: 'Min', latexTrigger: '\\min', kind: 'function', arguments: 'implicit' },
+  { name: 'Supremum', latexTrigger: '\\sup', kind: 'function', arguments: 'implicit' },
+  { name: 'Infimum', latexTrigger: '\\inf', kind: 'function', arguments: 'implicit' },
 
   {
     name: 'Limit',

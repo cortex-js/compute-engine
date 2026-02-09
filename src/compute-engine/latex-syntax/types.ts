@@ -511,6 +511,17 @@ export type FunctionEntry = BaseEntry &
   Trigger & {
     kind: 'function';
     parse?: Expression | FunctionParseHandler;
+
+    /**
+     * How arguments are parsed:
+     * - `'enclosure'` (default): arguments must be enclosed in parentheses,
+     *   e.g. `\max(a, b)`.
+     * - `'implicit'`: arguments can be provided with or without parentheses,
+     *   e.g. `\det A` is parsed as `\det(A)`.
+     *   Bare arguments are parsed at multiplication precedence, so
+     *   `\det 2A + 1` is parsed as `\det(2A) + 1`.
+     */
+    arguments?: 'enclosure' | 'implicit';
   };
 
 /**

@@ -257,6 +257,24 @@ ce.simplificationRules.push({
   instead of `symbolTrigger`, which only matches plain identifiers. Both
   functions also accept plain text forms (`det(A)`, `tr(A)`).
 
+- **`\det A` and `\tr A` work without parentheses**: `Determinant` and `Trace`
+  now accept implicit arguments, so `\det A` parses as `["Determinant", "A"]`
+  (like `\cos x` parses as `["Cos", "x"]`). Implicit arguments bind at
+  multiplication precedence, so `\det 2A + 1` parses as `det(2A) + 1`.
+
+- **`Determinant` serialization uses `\det A` for simple arguments**: Symbol
+  arguments serialize as `\det A` instead of `\det\left(A\right)`. Matrix
+  arguments still serialize as `\begin{vmatrix}...\end{vmatrix}`.
+
+### LaTeX Parsing
+
+- **`arguments: 'implicit'` option for function dictionary entries**: Function
+  entries in the LaTeX dictionary can now set `arguments: 'implicit'` to accept
+  bare arguments without parentheses (e.g., `\det A`), matching the behavior of
+  trig functions. The default remains `'enclosure'` (parentheses required).
+  Applied to `\det`, `\tr`, `\Re`, `\Im`, `\arg`, `\max`, `\min`, `\sup`,
+  `\inf`.
+
 ### Canonicalization
 
 - **Exact numeric folding during canonicalization**: `canonicalAdd` and

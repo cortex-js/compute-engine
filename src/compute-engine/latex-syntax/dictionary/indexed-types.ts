@@ -63,6 +63,8 @@ export type IndexedFunctionEntry = CommonEntry & {
   kind: 'function';
 
   parse: ExpressionParseHandler;
+
+  arguments?: 'enclosure' | 'implicit';
 };
 
 export type IndexedMatchfixEntry = CommonEntry & {

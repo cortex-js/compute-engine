@@ -1413,6 +1413,7 @@ export class _Parser implements Parser {
     //  `\\mathrm`, etc...)
     //
     let fn: Expression | null = null;
+    let argMode: 'enclosure' | 'implicit' = 'enclosure';
     for (const [def, tokenCount] of this.peekDefinitions('function')) {
       // Skip the trigger tokens
       this.index = start + tokenCount;
@@ -1422,6 +1423,7 @@ export class _Parser implements Parser {
         if (fn !== null) return fn;
       } else {
         fn = def.name!;
+        argMode = def.arguments ?? 'enclosure';
         break;
       }
     }
@@ -1456,7 +1458,7 @@ export class _Parser implements Parser {
 
     // If fn is a function symbol, it may be followed by an argument list
 
-    const args = this.parseArguments('enclosure', until);
+    const args = this.parseArguments(argMode, until);
 
     if (args === null) return fn;
 

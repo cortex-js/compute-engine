@@ -492,6 +492,10 @@ function makeIndexedEntry(
   const parse = makeParseHandler(entry, tokensTrigger, idTrigger);
   if (parse) result.parse = parse as any;
 
+  // Carry over the arguments mode for function entries
+  if (result.kind === 'function' && 'arguments' in entry)
+    (result as Partial<IndexedFunctionEntry>).arguments = entry.arguments;
+
   return result as IndexedLatexDictionaryEntry;
 }
 
@@ -650,9 +654,10 @@ function makeParseHandler(
   //
   if (kind === 'function') {
     const fnName = entry.parse ?? entry.name ?? idTrigger;
+    const argMode = ('arguments' in entry ? entry.arguments : undefined) ?? 'enclosure';
     if (fnName)
       return (parser: Parser, until: Terminator) => {
-        const args = parser.parseArguments('enclosure', until);
+        const args = parser.parseArguments(argMode, until);
         return args === null ? fnName : [fnName, ...args];
       };
   }

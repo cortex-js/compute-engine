@@ -231,15 +231,17 @@ export const DEFINITIONS_LINEAR_ALGEBRA: LatexDictionary = [
     name: 'Trace',
     kind: 'function',
     latexTrigger: '\\tr',
+    arguments: 'implicit',
   },
 
   // Also support plain text: tr(A)
-  { symbolTrigger: 'tr', kind: 'function', parse: 'Trace' },
+  { symbolTrigger: 'tr', kind: 'function', parse: 'Trace', arguments: 'implicit' },
 
   {
     name: 'Determinant',
     kind: 'function',
     latexTrigger: '\\det',
+    arguments: 'implicit',
     serialize: (serializer: Serializer, expr: Expression): string => {
       const arg = operand(expr, 1);
       if (operator(arg) === 'Matrix') {
@@ -252,12 +254,16 @@ export const DEFINITIONS_LINEAR_ALGEBRA: LatexDictionary = [
           stringValue(operand(arg, 2))
         );
       }
-      return `\\det\\left(${serializer.serialize(arg)}\\right)`;
+      const argLatex = serializer.serialize(arg);
+      // Use \det A for simple args, \det\left(...\right) for complex ones
+      if (typeof arg === 'string' || typeof arg === 'number')
+        return `\\det ${argLatex}`;
+      return `\\det\\left(${argLatex}\\right)`;
     },
   },
 
   // Also support plain text: det(A)
-  { symbolTrigger: 'det', kind: 'function', parse: 'Determinant' },
+  { symbolTrigger: 'det', kind: 'function', parse: 'Determinant', arguments: 'implicit' },
 
   // MatrixMultiply serializes as multiplication with \cdot
   {
