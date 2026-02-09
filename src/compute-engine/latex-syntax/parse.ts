@@ -324,7 +324,11 @@ export class _Parser implements Parser {
     }
 
     // Is the symbol known in the compute engine current scope?
-    if (this.options.getSymbolType) return this.options.getSymbolType(id);
+    if (this.options.getSymbolType) {
+      const type = this.options.getSymbolType(id);
+      if (typeof type === 'string') return new BoxedType(type);
+      return type;
+    }
 
     return BoxedType.unknown;
   }

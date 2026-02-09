@@ -752,7 +752,7 @@ export type ParseLatexOptions = NumberFormat & {
    * The `symbol` argument is a [valid symbol](/math-json/#symbols).
    *
    */
-  getSymbolType: (symbol: MathJsonSymbol) => BoxedType;
+  getSymbolType: (symbol: MathJsonSymbol) => BoxedType | TypeString;
 
   /**
    * This handler is invoked when the parser needs to determine if a symbol

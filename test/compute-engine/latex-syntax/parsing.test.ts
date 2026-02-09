@@ -28,6 +28,16 @@ describe('FUNCTIONS', () => {
     ));
 });
 
+describe('CUSTOM SYMBOL TYPE CALLBACK', () => {
+  test('Accept type strings from getSymbolType()', () => {
+    expect(
+      ce.parse('f(x)', {
+        getSymbolType: (symbol) => (symbol === 'f' ? 'function' : 'unknown'),
+      })
+    ).toMatchInlineSnapshot(`["f", "x"]`);
+  });
+});
+
 describe('UNKNOWN COMMANDS', () => {
   test('Parse', () => {
     expect(parse('\\foo')).toMatchInlineSnapshot(
