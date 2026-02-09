@@ -158,11 +158,7 @@ export const SIMPLIFY_RULES: Rule[] = [
     const num = x.op1;
     const denom = x.op2;
     if (!num || !denom) return undefined;
-    if (
-      num.isSame(denom) &&
-      num.is(0) === false &&
-      num.isInfinity !== true
-    ) {
+    if (num.isSame(denom) && num.is(0) === false && num.isInfinity !== true) {
       return { value: x.engine.One, because: 'a/a -> 1' };
     }
     return undefined;
@@ -467,25 +463,30 @@ export const SIMPLIFY_RULES: Rule[] = [
       const logBase = x.ops[1] ?? 10;
       // Skip edge cases that simplifyLog handles correctly:
       // base 0 or 1 -> NaN, base infinity -> special handling
-      const baseExpr = typeof logBase === 'number'
-        ? x.engine.number(logBase)
-        : logBase;
+      const baseExpr =
+        typeof logBase === 'number' ? x.engine.number(logBase) : logBase;
       if (baseExpr.is(0) || baseExpr.is(1) || baseExpr.isInfinity === true)
         return undefined;
       // Skip edge cases that simplifyLog handles correctly
       if (x.op1.is(0)) return undefined;
       if (x.op1.isInfinity === true) return undefined;
       // Skip log_c(c^x) — simplifyLog returns x directly
-      if (x.op1.operator === 'Power' && isBoxedFunction(x.op1) && x.op1.op1?.isSame(baseExpr))
+      if (
+        x.op1.operator === 'Power' &&
+        isBoxedFunction(x.op1) &&
+        x.op1.op1?.isSame(baseExpr)
+      )
         return undefined;
       // Skip Power args — simplifyLog handles these with proper sign/abs tracking:
       // irrational exponents, non-integer rationals, and even exponents (need |x|)
       if (x.op1.operator === 'Power' && isBoxedFunction(x.op1) && x.op1.op2) {
         const exp = x.op1.op2;
-        if (exp.isRational === false || (exp.isRational === true && exp.isInteger === false))
+        if (
+          exp.isRational === false ||
+          (exp.isRational === true && exp.isInteger === false)
+        )
           return undefined;
-        if (exp.isEven === true)
-          return undefined;
+        if (exp.isEven === true) return undefined;
       }
       // Skip reciprocal bases (Rational(1,q)) — simplifyLog has a dedicated rule
       if (baseExpr.operator === 'Rational') {
@@ -497,7 +498,11 @@ export const SIMPLIFY_RULES: Rule[] = [
       // simplifyLog has log_c(c^x * y) → x + log_c(y) rule
       if (x.op1.operator === 'Multiply' && isBoxedFunction(x.op1)) {
         for (const factor of x.op1.ops) {
-          if (factor.operator === 'Power' && isBoxedFunction(factor) && factor.op1?.isSame(baseExpr))
+          if (
+            factor.operator === 'Power' &&
+            isBoxedFunction(factor) &&
+            factor.op1?.isSame(baseExpr)
+          )
             return undefined;
         }
       }
@@ -506,9 +511,17 @@ export const SIMPLIFY_RULES: Rule[] = [
       if (x.op1.operator === 'Divide' && isBoxedFunction(x.op1)) {
         const num = x.op1.op1;
         const denom = x.op1.op2;
-        if (num?.operator === 'Power' && isBoxedFunction(num) && num.op1?.isSame(baseExpr))
+        if (
+          num?.operator === 'Power' &&
+          isBoxedFunction(num) &&
+          num.op1?.isSame(baseExpr)
+        )
           return undefined;
-        if (denom?.operator === 'Power' && isBoxedFunction(denom) && denom.op1?.isSame(baseExpr))
+        if (
+          denom?.operator === 'Power' &&
+          isBoxedFunction(denom) &&
+          denom.op1?.isSame(baseExpr)
+        )
           return undefined;
       }
       return { value: x.op1.ln(logBase), because: 'log' };

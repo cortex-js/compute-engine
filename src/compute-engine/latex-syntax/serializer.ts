@@ -524,8 +524,7 @@ function parseSymbolBody(
         if (countTokens(body) > 1) {
           // Use \operatorname for symbols containing \unicode escapes
           // (these are named symbols, not styled text)
-          if (body.includes('\\unicode'))
-            body = `\\operatorname{${body}}`;
+          if (body.includes('\\unicode')) body = `\\operatorname{${body}}`;
           else body = `\\mathrm{${body}}`;
         }
         break;

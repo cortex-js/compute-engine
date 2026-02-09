@@ -75,7 +75,6 @@ import {
   root,
 } from '../boxed-expression/arithmetic-power';
 import { parseType } from '../../common/type/parse';
-import type { Type } from '../../common/type/types';
 import { widen } from '../../common/type/utils';
 import { numericTypeHandler } from './type-handlers';
 import { range, rangeLast } from './collections';

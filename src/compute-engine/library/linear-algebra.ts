@@ -13,7 +13,6 @@ import {
 } from '../global-types';
 import {
   isBoxedFunction,
-  isBoxedNumber,
   isBoxedString,
   isBoxedSymbol,
 } from '../boxed-expression/type-guards';
@@ -2039,7 +2038,7 @@ function asNumber(value: unknown): number | undefined {
 function asRealNumber(value: unknown): number | undefined {
   if (typeof value === 'object' && value !== null && 're' in value) {
     const re = asNumber(value.re);
-    const im = 'im' in value ? asNumber(value.im) ?? 0 : 0;
+    const im = 'im' in value ? (asNumber(value.im) ?? 0) : 0;
     if (im !== 0) return undefined;
     return re;
   }
@@ -2061,7 +2060,9 @@ function tensorToNumericMatrix(
     matrix[i] = [];
     for (let j = 0; j < columnCount; j++) {
       const value =
-        tensor.rank === 1 ? tensor.tensor.at(j + 1) : tensor.tensor.at(i + 1, j + 1);
+        tensor.rank === 1
+          ? tensor.tensor.at(j + 1)
+          : tensor.tensor.at(i + 1, j + 1);
       const num = asRealNumber(value);
       if (num === undefined || isNaN(num)) return undefined;
       matrix[i][j] = num;
@@ -2074,7 +2075,10 @@ function tensorToNumericMatrix(
 /**
  * Compute RREF and return the pivot columns.
  */
-function rref(matrix: number[][], tolerance = 1e-10): {
+function rref(
+  matrix: number[][],
+  tolerance = 1e-10
+): {
   matrix: number[][];
   pivotCols: number[];
 } {
@@ -2096,7 +2100,8 @@ function rref(matrix: number[][], tolerance = 1e-10): {
     }
     if (maxVal <= tolerance) continue;
 
-    if (maxRow !== pivotRow) [out[pivotRow], out[maxRow]] = [out[maxRow], out[pivotRow]];
+    if (maxRow !== pivotRow)
+      [out[pivotRow], out[maxRow]] = [out[maxRow], out[pivotRow]];
 
     const pivot = out[pivotRow][col];
     for (let j = col; j < colCount; j++) out[pivotRow][j] /= pivot;
@@ -2203,9 +2208,7 @@ function kernelBasisDimension(value: BoxedExpression): number | undefined {
   if (isBoxedFunction(value) && value.operator === 'List') {
     if (value.ops.length === 0) return 0;
     if (
-      value.ops.every(
-        (op) => isBoxedFunction(op) && op.operator === 'List'
-      )
+      value.ops.every((op) => isBoxedFunction(op) && op.operator === 'List')
     ) {
       return value.ops.length;
     }
@@ -2226,7 +2229,11 @@ function isPolynomialExpression(value: BoxedExpression): boolean {
   if (!isBoxedFunction(value)) return false;
   if (value.unknowns.length === 0) return true;
 
-  if (value.operator === 'Add' || value.operator === 'Subtract' || value.operator === 'Multiply')
+  if (
+    value.operator === 'Add' ||
+    value.operator === 'Subtract' ||
+    value.operator === 'Multiply'
+  )
     return value.ops.every((op) => isPolynomialExpression(op));
 
   if (value.operator === 'Negate') return isPolynomialExpression(value.op1);

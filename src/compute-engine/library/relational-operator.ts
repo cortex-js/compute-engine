@@ -463,10 +463,7 @@ export const RELOP_LIBRARY: SymbolDefinitions = {
  * values differ by at most `ce.tolerance`.
  * Returns `true`, `false`, or `undefined` if the comparison can't be made.
  */
-function approxEq(
-  a: BoxedExpression,
-  b: BoxedExpression
-): boolean | undefined {
+function approxEq(a: BoxedExpression, b: BoxedExpression): boolean | undefined {
   const ce = a.engine;
   const aN = a.N();
   const bN = b.N();

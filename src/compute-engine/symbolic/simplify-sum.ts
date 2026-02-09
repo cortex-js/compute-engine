@@ -2,7 +2,6 @@ import type { BoxedExpression, RuleStep } from '../global-types';
 import {
   isBoxedFunction,
   isBoxedNumber,
-  isBoxedSymbol,
   sym,
 } from '../boxed-expression/type-guards';
 

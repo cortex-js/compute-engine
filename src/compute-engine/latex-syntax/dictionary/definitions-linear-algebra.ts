@@ -1,5 +1,10 @@
 import { Expression } from '../../../math-json';
-import { stringValue, operands, operand, operator } from '../../../math-json/utils';
+import {
+  stringValue,
+  operands,
+  operand,
+  operator,
+} from '../../../math-json/utils';
 import { LatexDictionary, Parser, Serializer } from '../types';
 import { joinLatex } from '../tokenizer';
 import { DELIMITERS_SHORTHAND } from './definitions-core';
@@ -103,8 +108,7 @@ export const DEFINITIONS_LINEAR_ALGEBRA: LatexDictionary = [
       const columns = parseColumnFormat(parser);
       const [op, cells] = parseCells(parser);
 
-      if (columns)
-        return ['Norm', [op, cells, { str: columns }]] as Expression;
+      if (columns) return ['Norm', [op, cells, { str: columns }]] as Expression;
 
       return ['Norm', [op, cells]] as Expression;
     },
@@ -237,7 +241,12 @@ export const DEFINITIONS_LINEAR_ALGEBRA: LatexDictionary = [
   },
 
   // Also support plain text: tr(A)
-  { symbolTrigger: 'tr', kind: 'function', parse: 'Trace', arguments: 'implicit' },
+  {
+    symbolTrigger: 'tr',
+    kind: 'function',
+    parse: 'Trace',
+    arguments: 'implicit',
+  },
 
   {
     name: 'Kernel',
@@ -247,7 +256,12 @@ export const DEFINITIONS_LINEAR_ALGEBRA: LatexDictionary = [
     serialize: (serializer: Serializer, expr: Expression): string =>
       serializeImplicitOperator(serializer, expr, '\\ker'),
   },
-  { symbolTrigger: 'ker', kind: 'function', parse: 'Kernel', arguments: 'implicit' },
+  {
+    symbolTrigger: 'ker',
+    kind: 'function',
+    parse: 'Kernel',
+    arguments: 'implicit',
+  },
 
   {
     name: 'Dimension',
@@ -272,7 +286,12 @@ export const DEFINITIONS_LINEAR_ALGEBRA: LatexDictionary = [
     serialize: (serializer: Serializer, expr: Expression): string =>
       serializeImplicitOperator(serializer, expr, '\\deg'),
   },
-  { symbolTrigger: 'deg', kind: 'function', parse: 'Degree', arguments: 'implicit' },
+  {
+    symbolTrigger: 'deg',
+    kind: 'function',
+    parse: 'Degree',
+    arguments: 'implicit',
+  },
 
   {
     name: 'Hom',
@@ -282,7 +301,12 @@ export const DEFINITIONS_LINEAR_ALGEBRA: LatexDictionary = [
     serialize: (serializer: Serializer, expr: Expression): string =>
       serializeImplicitOperator(serializer, expr, '\\hom'),
   },
-  { symbolTrigger: 'hom', kind: 'function', parse: 'Hom', arguments: 'implicit' },
+  {
+    symbolTrigger: 'hom',
+    kind: 'function',
+    parse: 'Hom',
+    arguments: 'implicit',
+  },
 
   {
     name: 'Determinant',
@@ -306,7 +330,12 @@ export const DEFINITIONS_LINEAR_ALGEBRA: LatexDictionary = [
   },
 
   // Also support plain text: det(A)
-  { symbolTrigger: 'det', kind: 'function', parse: 'Determinant', arguments: 'implicit' },
+  {
+    symbolTrigger: 'det',
+    kind: 'function',
+    parse: 'Determinant',
+    arguments: 'implicit',
+  },
 
   // MatrixMultiply serializes as multiplication with \cdot
   {

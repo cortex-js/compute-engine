@@ -55,7 +55,10 @@ export function simplifyPower(x: BoxedExpression): RuleStep | undefined {
     // Edge case: root(+inf, n) -> +inf when n > 0
     if (arg.isInfinity === true && arg.isPositive === true) {
       if (rootIndex.isPositive === true) {
-        return { value: ce.PositiveInfinity, because: 'root(+inf, n) -> +inf when n > 0' };
+        return {
+          value: ce.PositiveInfinity,
+          because: 'root(+inf, n) -> +inf when n > 0',
+        };
       }
       if (rootIndex.isNegative === true) {
         return { value: ce.Zero, because: 'root(+inf, n) -> 0 when n < 0' };

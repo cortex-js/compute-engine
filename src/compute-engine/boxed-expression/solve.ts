@@ -1,4 +1,3 @@
-import { isInequalityOperator } from '../latex-syntax/utils';
 import { matchAnyRules } from './rules';
 import { expand } from './expand';
 import type {

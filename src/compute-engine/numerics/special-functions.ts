@@ -305,7 +305,10 @@ export function bigTrigamma(ce: ComputeEngine, z: BigNum): BigNum {
     if (z.isInteger()) return ce._BIGNUM_NAN;
     const pi = ce._BIGNUM_NEGATIVE_ONE.acos();
     const s = pi.mul(z).sin();
-    return pi.mul(pi).div(s.mul(s)).sub(bigTrigamma(ce, ce._BIGNUM_ONE.sub(z)));
+    return pi
+      .mul(pi)
+      .div(s.mul(s))
+      .sub(bigTrigamma(ce, ce._BIGNUM_ONE.sub(z)));
   }
 
   if (z.isZero()) return ce._BIGNUM_NAN; // pole
@@ -340,11 +343,7 @@ export function bigTrigamma(ce: ComputeEngine, z: BigNum): BigNum {
  * Delegates to bigDigamma/bigTrigamma for n=0,1.
  * For n ≥ 2, uses recurrence + asymptotic expansion.
  */
-export function bigPolygamma(
-  ce: ComputeEngine,
-  n: BigNum,
-  z: BigNum
-): BigNum {
+export function bigPolygamma(ce: ComputeEngine, n: BigNum, z: BigNum): BigNum {
   const nNum = n.toNumber();
   if (!Number.isInteger(nNum) || nNum < 0) return ce._BIGNUM_NAN;
   if (nNum === 0) return bigDigamma(ce, z);
@@ -374,7 +373,10 @@ export function bigPolygamma(
     const negSign = nNum % 2 === 0 ? 1 : -1;
     while (w.lessThan(1)) {
       result = result.add(
-        ce.bignum(negSign).mul(bigFactorial(nNum)).div(w.pow(nNum + 1))
+        ce
+          .bignum(negSign)
+          .mul(bigFactorial(nNum))
+          .div(w.pow(nNum + 1))
       );
       w = w.add(ce._BIGNUM_ONE);
     }
@@ -383,7 +385,10 @@ export function bigPolygamma(
   // Recurrence: ψₙ(z+1) = ψₙ(z) + (-1)^n n! / z^{n+1}
   while (w.lessThan(shift)) {
     result = result.add(
-      ce.bignum(sign).mul(bigFactorial(nNum)).div(w.pow(nNum + 1))
+      ce
+        .bignum(sign)
+        .mul(bigFactorial(nNum))
+        .div(w.pow(nNum + 1))
     );
     w = w.add(ce._BIGNUM_ONE);
   }
@@ -391,10 +396,16 @@ export function bigPolygamma(
   // Asymptotic: ψₙ(w) ~ (-1)^{n+1} [(n-1)!/w^n + n!/(2w^{n+1}) + Σ ...]
   const signA = nNum % 2 === 0 ? -1 : 1;
   result = result.add(
-    ce.bignum(signA).mul(bigFactorial(nNum - 1)).div(w.pow(nNum))
+    ce
+      .bignum(signA)
+      .mul(bigFactorial(nNum - 1))
+      .div(w.pow(nNum))
   );
   result = result.add(
-    ce.bignum(signA).mul(bigFactorial(nNum)).div(w.pow(nNum + 1).mul(2))
+    ce
+      .bignum(signA)
+      .mul(bigFactorial(nNum))
+      .div(w.pow(nNum + 1).mul(2))
   );
 
   // Higher-order terms using Bernoulli numbers
@@ -406,7 +417,11 @@ export function bigPolygamma(
     const m = 2 * (k + 1);
     let coeff = ce._BIGNUM_ONE;
     for (let j = 0; j < m; j++) coeff = coeff.mul(nNum + j);
-    const term = ce.bignum(signA).mul(BERNOULLI[k]).mul(coeff).div(bigFactorial(m).mul(wPow));
+    const term = ce
+      .bignum(signA)
+      .mul(BERNOULLI[k])
+      .mul(coeff)
+      .div(bigFactorial(m).mul(wPow));
     if (term.abs().lessThan(tol)) break;
     result = result.add(term);
     wPow = wPow.mul(w2);
@@ -420,7 +435,9 @@ export function bigPolygamma(
  * Uses bigGamma directly.
  */
 export function bigBeta(ce: ComputeEngine, a: BigNum, b: BigNum): BigNum {
-  return bigGamma(ce, a).mul(bigGamma(ce, b)).div(bigGamma(ce, a.add(b)));
+  return bigGamma(ce, a)
+    .mul(bigGamma(ce, b))
+    .div(bigGamma(ce, a.add(b)));
 }
 
 /**
@@ -473,7 +490,10 @@ export function bigZeta(ce: ComputeEngine, s: BigNum): BigNum {
   for (let k = 0; k <= n; k++) {
     const sign = k % 2 === 0 ? 1 : -1;
     sum = sum.add(
-      ce.bignum(sign).mul(d[k].sub(dn)).div(ce.bignum(k + 1).pow(s))
+      ce
+        .bignum(sign)
+        .mul(d[k].sub(dn))
+        .div(ce.bignum(k + 1).pow(s))
     );
   }
   const eta = ce._BIGNUM_ONE.sub(ce.bignum(2).pow(ce._BIGNUM_ONE.sub(s)));
@@ -518,7 +538,7 @@ export function bigLambertW(ce: ComputeEngine, x: BigNum): BigNum {
   const xNum = x.toNumber();
   if (xNum < 0) {
     const p = Math.sqrt(2 * (Math.E * xNum + 1));
-    w = ce.bignum(-1 + p - p * p / 3 + (11 / 72) * p * p * p);
+    w = ce.bignum(-1 + p - (p * p) / 3 + (11 / 72) * p * p * p);
   } else if (xNum <= 1) {
     w = ce.bignum(xNum * (1 - xNum * (1 - 1.5 * xNum)));
   } else if (xNum < 100) {
@@ -590,7 +610,7 @@ export function digamma(x: number): number {
   result += Math.log(z) - 1 / (2 * z);
   let z2k = z * z; // z^2
   for (let k = 0; k < BERNOULLI_2K.length; k++) {
-    result -= BERNOULLI_2K[k] / ((2 * (k + 1)) * z2k);
+    result -= BERNOULLI_2K[k] / (2 * (k + 1) * z2k);
     z2k *= z * z;
   }
 
@@ -653,7 +673,7 @@ export function polygamma(n: number, x: number): number {
     const sign = n % 2 === 0 ? 1 : -1;
     while (z < 1) {
       // ψₙ(x) = ψₙ(x+1) + (-1)^{n+1} n! / x^{n+1}
-      result += sign * factorial(n) / Math.pow(z, n + 1);
+      result += (sign * factorial(n)) / Math.pow(z, n + 1);
       z += 1;
     }
     return result + polygamma(n, z);
@@ -664,22 +684,22 @@ export function polygamma(n: number, x: number): number {
   let z = x;
   const sign = n % 2 === 0 ? -1 : 1;
   while (z < 7) {
-    result += sign * factorial(n) / Math.pow(z, n + 1);
+    result += (sign * factorial(n)) / Math.pow(z, n + 1);
     z += 1;
   }
 
   // Asymptotic: ψₙ(z) ~ (-1)^{n+1} [ (n-1)!/z^n + n!/(2z^{n+1}) + Σ ... ]
   const signA = n % 2 === 0 ? -1 : 1;
-  result += signA * factorial(n - 1) / Math.pow(z, n);
-  result += signA * factorial(n) / (2 * Math.pow(z, n + 1));
+  result += (signA * factorial(n - 1)) / Math.pow(z, n);
+  result += (signA * factorial(n)) / (2 * Math.pow(z, n + 1));
 
   // Higher-order terms using Bernoulli numbers
   let zPow = Math.pow(z, n + 2);
   for (let k = 0; k < Math.min(BERNOULLI_2K.length, 6); k++) {
     const m = 2 * (k + 1);
     let coeff = 1;
-    for (let j = 0; j < m; j++) coeff *= (n + j);
-    result += signA * BERNOULLI_2K[k] * coeff / (factorial(m) * zPow);
+    for (let j = 0; j < m; j++) coeff *= n + j;
+    result += (signA * BERNOULLI_2K[k] * coeff) / (factorial(m) * zPow);
     zPow *= z * z;
   }
 
@@ -717,9 +737,9 @@ export function zeta(s: number): number {
   // Special values for positive even integers
   if (s === 0) return -0.5;
   if (s === 2) return (Math.PI * Math.PI) / 6;
-  if (s === 4) return (Math.PI ** 4) / 90;
-  if (s === 6) return (Math.PI ** 6) / 945;
-  if (s === 8) return (Math.PI ** 8) / 9450;
+  if (s === 4) return Math.PI ** 4 / 90;
+  if (s === 6) return Math.PI ** 6 / 945;
+  if (s === 8) return Math.PI ** 8 / 9450;
 
   // Functional equation for Re(s) < 0:
   // ζ(s) = 2^s π^{s-1} sin(πs/2) Γ(1-s) ζ(1-s)
@@ -740,7 +760,7 @@ export function zeta(s: number): number {
   const dn = d[n];
   let sum = 0;
   for (let k = 0; k <= n; k++) {
-    sum += (k % 2 === 0 ? 1 : -1) * (d[k] - dn) / Math.pow(k + 1, s);
+    sum += ((k % 2 === 0 ? 1 : -1) * (d[k] - dn)) / Math.pow(k + 1, s);
   }
   return (-1 / (dn * (1 - Math.pow(2, 1 - s)))) * sum;
 }
@@ -788,7 +808,7 @@ export function lambertW(x: number): number {
   if (x < 0) {
     // Near -1/e: use series expansion around branch point
     const p = Math.sqrt(2 * (Math.E * x + 1));
-    w = -1 + p - p * p / 3 + (11 / 72) * p * p * p;
+    w = -1 + p - (p * p) / 3 + (11 / 72) * p * p * p;
   } else if (x <= 1) {
     w = x * (1 - x * (1 - 1.5 * x)); // Padé-like initial guess for small x
   } else if (x < 100) {
@@ -837,7 +857,7 @@ export function besselJ(n: number, x: number): number {
   if (x < 0) return n % 2 === 0 ? besselJ(n, -x) : -besselJ(n, -x);
 
   // For large x, use asymptotic expansion
-  if (x > 25 + n * n / 2) return besselJAsymptotic(n, x);
+  if (x > 25 + (n * n) / 2) return besselJAsymptotic(n, x);
 
   // For small x relative to order, use power series
   if (x < 5 + n) return besselJSeries(n, x);
@@ -878,7 +898,7 @@ function hankelPQ(n: number, x: number): [number, number] {
   let ak = 1;
   const e8x = 8 * x;
   for (let k = 1; k <= 20; k++) {
-    ak *= (mu - (2 * k - 1) * (2 * k - 1));
+    ak *= mu - (2 * k - 1) * (2 * k - 1);
     // Denominators: k! * (8x)^k
     const denom = factorial(k) * Math.pow(e8x, k);
     const contrib = ak / denom;
@@ -943,7 +963,7 @@ export function besselY(n: number, x: number): number {
   // For large x, use asymptotic expansion.
   // The series for Y_n suffers from catastrophic cancellation at large x,
   // so we switch to asymptotic earlier than for J_n.
-  if (x > 12 + n * n / 4) return besselYAsymptotic(n, x);
+  if (x > 12 + (n * n) / 4) return besselYAsymptotic(n, x);
 
   // Compute Y_0 and Y_1 via series, then recur forward
   const y0 = besselY0(x);
@@ -1007,12 +1027,16 @@ function besselY1(x: number): number {
     const psiKp1 = -EULER_MASCHERONI + Hk;
     const psiKp2 = -EULER_MASCHERONI + Hkp1;
     const sign = k % 2 === 0 ? 1 : -1;
-    const termVal = sign * (psiKp1 + psiKp2) * x2k / (factK * factKp1);
+    const termVal = (sign * (psiKp1 + psiKp2) * x2k) / (factK * factKp1);
     sum += termVal;
     if (k > 3 && Math.abs(termVal) < 1e-16 * Math.abs(sum)) break;
   }
 
-  return -2 / (Math.PI * x) + (2 / Math.PI) * Math.log(halfX) * j1 - (halfX / Math.PI) * sum;
+  return (
+    -2 / (Math.PI * x) +
+    (2 / Math.PI) * Math.log(halfX) * j1 -
+    (halfX / Math.PI) * sum
+  );
 }
 
 /** Y_n(x) ~ sqrt(2/(πx)) [P sin(χ) + Q cos(χ)] where χ = x - nπ/2 - π/4 */
@@ -1197,8 +1221,8 @@ export function airyAi(x: number): number {
   let termG = x;
   for (let k = 1; k <= 80; k++) {
     const k3 = 3 * k;
-    termF *= x * x * x / ((k3 - 1) * k3);
-    termG *= x * x * x / (k3 * (k3 + 1));
+    termF *= (x * x * x) / ((k3 - 1) * k3);
+    termG *= (x * x * x) / (k3 * (k3 + 1));
     f += termF;
     g += termG;
     if (Math.abs(termF) + Math.abs(termG) < 1e-16 * (Math.abs(f) + Math.abs(g)))
@@ -1265,8 +1289,8 @@ export function airyBi(x: number): number {
   let termG = x;
   for (let k = 1; k <= 80; k++) {
     const k3 = 3 * k;
-    termF *= x * x * x / ((k3 - 1) * k3);
-    termG *= x * x * x / (k3 * (k3 + 1));
+    termF *= (x * x * x) / ((k3 - 1) * k3);
+    termG *= (x * x * x) / (k3 * (k3 + 1));
     f += termF;
     g += termG;
     if (Math.abs(termF) + Math.abs(termG) < 1e-16 * (Math.abs(f) + Math.abs(g)))

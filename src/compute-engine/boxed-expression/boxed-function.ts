@@ -1371,9 +1371,7 @@ function solveOr(
     const seen = new Set<string>();
     const results: BoxedExpression[] = [];
     for (const op of operands) {
-      const sol = op.solve(varNames) as
-        | ReadonlyArray<BoxedExpression>
-        | null;
+      const sol = op.solve(varNames) as ReadonlyArray<BoxedExpression> | null;
       if (!sol || !Array.isArray(sol)) continue;
       for (const s of sol) {
         const key = JSON.stringify(s.json);
@@ -1396,9 +1394,7 @@ function solveOr(
     if (!Array.isArray(sol)) {
       const rec = sol as Record<string, BoxedExpression>;
       const key = JSON.stringify(
-        Object.fromEntries(
-          Object.entries(rec).map(([k, v]) => [k, v.json])
-        )
+        Object.fromEntries(Object.entries(rec).map(([k, v]) => [k, v.json]))
       );
       if (!seen.has(key)) {
         seen.add(key);
@@ -1409,9 +1405,7 @@ function solveOr(
     // Array of Records
     for (const s of sol as Array<Record<string, BoxedExpression>>) {
       const key = JSON.stringify(
-        Object.fromEntries(
-          Object.entries(s).map(([k, v]) => [k, v.json])
-        )
+        Object.fromEntries(Object.entries(s).map(([k, v]) => [k, v.json]))
       );
       if (!seen.has(key)) {
         seen.add(key);
@@ -1438,7 +1432,8 @@ function filterSolutionByTypes(
     const val = solution[v]?.evaluate();
     if (!val) continue;
     if (varTypeObj.matches('integer') && val.isInteger === false) return false;
-    if (varTypeObj.matches('rational') && val.isRational === false) return false;
+    if (varTypeObj.matches('rational') && val.isRational === false)
+      return false;
     if (varTypeObj.matches('real') && val.isReal === false) return false;
   }
   return true;

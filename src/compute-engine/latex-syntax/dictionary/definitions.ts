@@ -654,7 +654,8 @@ function makeParseHandler(
   //
   if (kind === 'function') {
     const fnName = entry.parse ?? entry.name ?? idTrigger;
-    const argMode = ('arguments' in entry ? entry.arguments : undefined) ?? 'enclosure';
+    const argMode =
+      ('arguments' in entry ? entry.arguments : undefined) ?? 'enclosure';
     if (fnName)
       return (parser: Parser, until: Terminator) => {
         const args = parser.parseArguments(argMode, until);

@@ -438,7 +438,14 @@ function simplifyNonCommutativeFunction(
   const isAbsRule = because?.startsWith('|');
   // Quotient-power distribution: a/(b/c)^d -> a*(c/b)^d eliminates nested fractions
   const isQuotientPowerRule = because === 'a / (b/c)^d -> a * (c/b)^d';
-  if (!isCheaper(expr, last, options?.costFunction) && !isPowerCombination && !isLogRule && !isRootSignRule && !isAbsRule && !isQuotientPowerRule)
+  if (
+    !isCheaper(expr, last, options?.costFunction) &&
+    !isPowerCombination &&
+    !isLogRule &&
+    !isRootSignRule &&
+    !isAbsRule &&
+    !isQuotientPowerRule
+  )
     return steps;
 
   result.at(-1)!.value = last;

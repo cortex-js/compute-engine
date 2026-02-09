@@ -147,8 +147,7 @@ export function costFunction(expr: BoxedExpression): number {
       if (innerPow) return 3 + costFunction(innerPow.ops[1]);
     }
     nameCost = 4;
-  }
-  else if (name === 'Sqrt') {
+  } else if (name === 'Sqrt') {
     // Sqrt with perfect squares inside should be more expensive
     // because √(x²y) should simplify to |x|√y
     const fnExpr = isBoxedFunction(expr) ? expr : undefined;

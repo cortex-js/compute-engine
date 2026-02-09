@@ -5477,7 +5477,9 @@ type ParseLatexOptions = NumberFormat & {
   strict: boolean;
   skipSpace: boolean;
   parseNumbers: "auto" | "rational" | "decimal" | "never";
-  getSymbolType: (symbol) => BoxedType;
+  getSymbolType: (symbol) => 
+     | BoxedType
+     | TypeString;
   hasSubscriptEvaluate: (symbol) => boolean;
   parseUnexpectedToken: (lhs, parser) => Expression | null;
   preserveLatex: boolean;
@@ -5536,7 +5538,9 @@ it will be parsed as a decimal number even if this setting is `"rational"`.
 #### ParseLatexOptions.getSymbolType()
 
 ```ts
-getSymbolType: (symbol) => BoxedType;
+getSymbolType: (symbol) => 
+  | BoxedType
+  | TypeString;
 ```
 
 This handler is invoked when the parser encounters a
