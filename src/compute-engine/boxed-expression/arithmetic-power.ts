@@ -71,12 +71,23 @@ export function canonicalPower(
 
   if (isBoxedFunction(a) && a.operator === 'Power') {
     const [base, aPow] = a.ops;
-    return ce._fn('Power', [
-      base,
-      ce.box(['Multiply', aPow, b], {
-        form: fullyCanonical ? 'canonical' : 'Power',
-      }),
-    ]);
+    // (a^n)^m -> a^{n*m} only when mathematically safe:
+    // - base is non-negative (no sign info to lose)
+    // - outer exponent m is integer (repeated multiplication is safe)
+    // - inner exponent n is odd integer (sign-preserving bijection)
+    const outerIsInteger = b.isInteger === true;
+    const innerIsOddInteger = aPow.isInteger === true && aPow.isOdd === true;
+    const baseNonNeg = base.isNonNegative === true;
+
+    if (baseNonNeg || outerIsInteger || innerIsOddInteger) {
+      return ce._fn('Power', [
+        base,
+        ce.box(['Multiply', aPow, b], {
+          form: fullyCanonical ? 'canonical' : 'Power',
+        }),
+      ]);
+    }
+    // Unsafe to combine — leave as nested Power, fall through
   }
 
   // (a/b)^{-n} -> a^{-n} / b^{-n} = b^n / a^n
@@ -414,10 +425,18 @@ export function pow(
     }
   }
 
-  // (a^b)^c -> a^(b*c)
+  // (a^b)^c -> a^(b*c) only when mathematically safe
   if (isBoxedFunction(x) && x.operator === 'Power') {
     const [base, power] = x.ops;
-    return pow(base, power.mul(exp), { numericApproximation });
+    const expExpr = typeof exp === 'number' ? ce.number(exp) : exp;
+    const outerIsInteger =
+      typeof exp === 'number' ? Number.isInteger(exp) : exp.isInteger === true;
+    const innerIsOddInteger = power.isInteger === true && power.isOdd === true;
+    const baseNonNeg = base.isNonNegative === true;
+
+    if (baseNonNeg || outerIsInteger || innerIsOddInteger) {
+      return pow(base, power.mul(expExpr), { numericApproximation });
+    }
   }
 
   // (a/b)^c -> a^c / b^c

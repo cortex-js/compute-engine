@@ -475,22 +475,16 @@ export function simplifyPower(x: BoxedExpression): RuleStep | undefined {
       const innerExp = base.op2;
 
       if (innerBase && innerExp) {
-        // Only combine when safe:
-        // - both exponents are integers
-        // - or base is non-negative
-        // - or n*m is irrational
-        // Also require at least one exponent to be positive to avoid issues
-        const bothIntegers =
-          innerExp.isInteger === true && exp.isInteger === true;
+        // (a^n)^m -> a^{n*m} only when mathematically safe:
+        // - base is non-negative (no sign info to lose)
+        // - outer exponent m is integer (repeated multiplication is safe)
+        // - inner exponent n is odd integer (sign-preserving bijection)
         const baseNonNeg = innerBase.isNonNegative === true;
-        const productIrrational = innerExp.mul(exp).isRational === false;
-        const atLeastOnePositive =
-          innerExp.isPositive === true || exp.isPositive === true;
+        const outerIsInteger = exp.isInteger === true;
+        const innerIsOddInteger =
+          innerExp.isInteger === true && innerExp.isOdd === true;
 
-        if (
-          (bothIntegers || baseNonNeg || productIrrational) &&
-          atLeastOnePositive
-        ) {
+        if (baseNonNeg || outerIsInteger || innerIsOddInteger) {
           return {
             value: innerBase.pow(innerExp.mul(exp)),
             because: '(x^n)^m -> x^{n*m}',

@@ -194,16 +194,17 @@ export const POTENTIAL_RULES: Rule[] = [
         ids._x.isNonNegative === true),
   },
 
-  // (a^n)^m -> a^{m*n} (with domain checks)
-  // @fixme: this rule may not be correct for all n,m
+  // (a^n)^m -> a^{m*n} only when mathematically safe:
+  // - base is non-negative (no sign info to lose)
+  // - outer exponent m is integer (repeated multiplication is safe)
+  // - inner exponent n is odd integer (sign-preserving bijection)
   {
     match: '(a^n)^m',
     replace: 'a^{m*n}',
     condition: (ids) =>
-      ((ids._n.isInteger === true && ids._m.isInteger === true) ||
-        ids._a.isNonNegative ||
-        ids._n.mul(ids._m).isRational === false) &&
-      (ids._n.isPositive === true || ids._m.isPositive === true),
+      ids._a.isNonNegative === true ||
+      ids._m.isInteger === true ||
+      (ids._n.isInteger === true && ids._n.isOdd === true),
   },
 
   // ========================================

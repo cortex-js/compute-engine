@@ -701,22 +701,13 @@ describe('CANONICAL FORMS', () => {
         ]
         canonForms = [
           "Power",
-          "a",
-          [
-            "Multiply",
-            ["Power", "b", ["Multiply", 2, "ExponentialE"]],
-            ["Multiply", 0.5, "Pi"]
-          ]
+          ["Power", "a", ["Power", ["Square", "b"], "ExponentialE"]],
+          ["Multiply", 0.5, "Pi"]
         ]
         canonical  = [
           "Power",
-          "a",
-          [
-            "Multiply",
-            0.5,
-            "Pi",
-            ["Power", "b", ["Multiply", 2, "ExponentialE"]]
-          ]
+          ["Power", "a", ["Power", ["Square", "b"], "ExponentialE"]],
+          ["Multiply", 0.5, "Pi"]
         ]
       `);
     });

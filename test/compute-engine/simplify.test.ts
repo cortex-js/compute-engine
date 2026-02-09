@@ -163,6 +163,9 @@ const CANONICALIZATION_TEST_CASES: TestCase[] = [
     'Not defined at x=0, but we assume variables represent values in the general domain where the operation is valid ',
   ],
   ['(x^3)^{2/5}', 'x^{6/5}'],
+  // Guard tests: (a^n)^m should NOT flatten when unsafe
+  ['(x^2)^{1/2}', '|x|', 'even inner, fractional outer, unknown sign → |x|'],
+  ['(x^3)^{1/3}', 'x', 'odd inner → safe to combine'],
   [
     `
                //

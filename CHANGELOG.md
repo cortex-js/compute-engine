@@ -221,6 +221,17 @@ ce.simplificationRules.push({
   decay for Ai, exponential growth for Bi at positive x, oscillatory for
   negative x) for large arguments.
 
+### Bug Fixes
+
+- **Power simplification `(a^n)^m -> a^{nm}` now correctly guarded**: The rule
+  was applied unconditionally, which is mathematically incorrect when the base
+  can be negative and exponents are non-integer. The classic counterexample:
+  `((-1)^2)^{1/2} = 1`, but `(-1)^{2·1/2} = -1`. The rule is now only applied
+  when: (1) the base is non-negative, (2) the outer exponent is an integer, or
+  (3) the inner exponent is an odd integer. This fix applies to canonicalization
+  (`canonicalPower`), the `pow()` helper, and simplification (`simplifyPower`).
+  As a result, `(x^2)^{1/2}` now correctly simplifies to `|x|` instead of `x`.
+
 ## 0.35.6 _2026-02-07_
 
 ### Bug Fixes
