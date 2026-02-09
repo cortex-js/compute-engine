@@ -1857,6 +1857,55 @@ describe('POWER DISTRIBUTION GUARDS', () => {
     expect(simplify('(a \\cdot b)^2')).toMatchInlineSnapshot(
       `["Multiply", ["Square", "a"], ["Square", "b"]]`
     ));
+
+  // More negative exponent fractions (from RULE_TEST_CASES, previously 🙁)
+  test('(π/e)^{-1} = e/π', () =>
+    expect(simplify('(\\pi/e)^{-1}')).toMatchInlineSnapshot(
+      `["Divide", "ExponentialE", "Pi"]`
+    ));
+
+  test('(x^2/π^3)^{-2} = π^6/x^4', () =>
+    expect(simplify('(x^2/\\pi^3)^{-2}')).toMatchInlineSnapshot(
+      `["Divide", ["Power", "Pi", 6], ["Power", "x", 4]]`
+    ));
+
+  // Powers and denominators (from RULE_TEST_CASES, still 🙁 — distribution into
+  // complex denominator not yet implemented)
+  test('x/(π/y)^3 stays undistributed', () =>
+    expect(simplify('x/(\\pi/y)^3')).toMatchInlineSnapshot(
+      `["Divide", "x", ["Power", ["Divide", "Pi", "y"], 3]]`
+    ));
+});
+
+describe('SQRT AND ROOT POWER SIMPLIFICATION', () => {
+  // Roots and powers (from RULE_TEST_CASES, previously 🙁 — now works)
+  // √(x^4) = x^2 (equivalent to |x|^2 since x^2 >= 0 for all real x)
+  test('√(x^4) = x^2', () =>
+    expect(simplify('\\sqrt{x^4}')).toMatchInlineSnapshot(
+      `["Square", "x"]`
+    ));
+
+  test('√(x^6) = |x|^3', () =>
+    expect(simplify('\\sqrt{x^6}')).toMatchInlineSnapshot(
+      `["Power", ["Abs", "x"], 3]`
+    ));
+
+  test('∜(x^4) = |x|', () =>
+    expect(simplify('\\sqrt[4]{x^4}')).toMatchInlineSnapshot(
+      `["Abs", "x"]`
+    ));
+
+  // Non-integer exponent should NOT rearrange (√a)^b when a may be negative
+  test('(√x)^3 with unknown sign stays as-is or simplifies correctly', () =>
+    expect(simplify('(\\sqrt{x})^3')).toMatchInlineSnapshot(
+      `["Power", ["Sqrt", "x"], 3]`
+    ));
+
+  // Even exponent on sqrt IS safe (always)
+  test('(√x)^4 = x^2', () =>
+    expect(simplify('(\\sqrt{x})^4')).toMatchInlineSnapshot(
+      `["Square", "x"]`
+    ));
 });
 
 describe('LOGARITHM COMBINATION RULES', () => {

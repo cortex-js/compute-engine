@@ -486,9 +486,14 @@ export function pow(
 
   // (√a)^b -> a^(b/2) or √(a^b)
   if (isBoxedFunction(x) && x.operator === 'Sqrt') {
+    // (√a)^2 -> a (integer outer exponent, always safe)
     if (e === 2) return x.op1;
+    // (√a)^{2k} -> a^k (even integer outer exponent, always safe)
     if (e !== undefined && e % 2 === 0) return x.op1.pow(e / 2);
-    return pow(x.op1, exp, { numericApproximation }).sqrt();
+    // (√a)^b -> √(a^b) — rearranges (a^{1/2})^b to (a^b)^{1/2},
+    // only valid when a >= 0 (negative a changes sign under rearrangement)
+    if (x.op1.isNonNegative === true)
+      return pow(x.op1, exp, { numericApproximation }).sqrt();
   }
 
   // exp(a)^b -> e^(a*b)
@@ -513,10 +518,14 @@ export function pow(
       return root(x, ce.number(r[1]), { numericApproximation });
   }
 
-  // (a^(1/b))^c -> a^(c/b)
+  // (a^(1/b))^c -> a^(c/b) — combines exponents, only safe when
+  // base is non-negative or outer exponent c is integer
   if (isBoxedFunction(x) && x.operator === 'Root') {
-    const [base, root] = x.ops;
-    return pow(base, ce.box(exp).div(root), { numericApproximation });
+    const [base, rootIdx] = x.ops;
+    const expIsInteger =
+      typeof exp === 'number' ? Number.isInteger(exp) : exp.isInteger === true;
+    if (base.isNonNegative === true || expIsInteger)
+      return pow(base, ce.box(exp).div(rootIdx), { numericApproximation });
   }
 
   //

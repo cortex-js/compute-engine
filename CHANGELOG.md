@@ -267,6 +267,12 @@ ce.simplificationRules.push({
 
 ### Bug Fixes
 
+- **`Sequence` type inference now returns a proper tuple type**: Multi-argument
+  `Sequence` expressions previously returned `'any'` as their inferred type,
+  losing all type information. They now return a `tuple<...>` type with each
+  element's individual type preserved (e.g., `Sequence(1, "a")` types as
+  `tuple<integer, string>`), consistent with the `Tuple` operator.
+
 - **Subscript parsing now checks for collection type**: The LaTeX subscript
   (`_`) parser now checks whether the LHS is a collection (symbol declared as
   `indexed_collection`, or a list literal) and produces `At()` directly at parse
@@ -299,6 +305,16 @@ ce.simplificationRules.push({
   branch, giving `(-x)^{0.5} -> -(x^{0.5})` which is wrong. All three rules, plus
   the corresponding `canonicalPower()` Divide rule, now require integer exponents
   (or non-negative operands) before distributing.
+
+- **Sqrt/Root exponent rearrangement now guarded**: Two more rules in `pow()`
+  unconditionally rearranged exponents. (1) `(√a)^b -> √(a^b)` rearranges
+  `(a^{1/2})^b` to `(a^b)^{1/2}`, which is wrong for negative `a` (e.g.
+  `(√(-4))^3 = -8i` but `√((-4)^3) = 8i`). Now only applied when `a >= 0`. The
+  even-integer branches (`(√a)^2 -> a`, `(√a)^{2k} -> a^k`) remain unconditional
+  since integer outer exponents are always safe. (2) `Root(a,b)^c -> a^{c/b}`
+  combined exponents unconditionally. Now guarded with `a >= 0` or `c` is integer.
+  Audit of `simplify-power.ts` confirmed all rules there are already properly
+  guarded.
 
 ## 0.35.6 _2026-02-07_
 
