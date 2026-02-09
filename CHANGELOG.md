@@ -326,6 +326,18 @@ ce.simplificationRules.push({
   numeric `<` and `>` respectively. Negated variants (`NotApprox`,
   `NotTildeFullEqual`, etc.) work automatically through the `Not` operator.
 
+- **`BoxedNumber.operator` now returns specific numeric types**: The `operator`
+  property on `BoxedNumber` instances previously returned the generic `'Number'`
+  for all numeric values. It now returns specific types that match the internal
+  type system: `'Integer'` for integers, `'Rational'` for non-integer rationals,
+  `'Real'` for floating-point numbers, `'Complex'` for complex numbers with
+  non-zero imaginary part, and `'NaN'`, `'PositiveInfinity'`,
+  `'NegativeInfinity'` for special values. This improves API consistency with
+  the `type` property and enables more precise pattern matching and type
+  discrimination in user code. **Breaking change**: Code that explicitly checks
+  for `.operator === 'Number'` will need to be updated to check for specific
+  numeric types or use the `isBoxedNumber()` type guard instead.
+
 ## 0.35.6 _2026-02-07_
 
 ### Bug Fixes

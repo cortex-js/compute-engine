@@ -438,3 +438,44 @@ describe('PARSING LARGE INTEGERS WITH parseNumbers: rational', () => {
     expect(a.add(b).toString()).toBe('9007199254740994');
   });
 });
+
+describe('OPERATOR PROPERTY RETURNS SPECIFIC NUMERIC TYPE', () => {
+  test('Integer literals return "Integer"', () => {
+    expect(ce.box(42).operator).toBe('Integer');
+    expect(ce.box(-5).operator).toBe('Integer');
+    expect(ce.box(0).operator).toBe('Integer');
+    expect(ce.number(1000).operator).toBe('Integer');
+  });
+
+  test('Floating point numbers return "Real"', () => {
+    expect(ce.box(3.14).operator).toBe('Real');
+    expect(ce.box(-2.5).operator).toBe('Real');
+    expect(ce.number(0.5).operator).toBe('Real');
+  });
+
+  test('Rational numbers return "Rational"', () => {
+    expect(ce.box(['Rational', 1, 2]).operator).toBe('Rational');
+    expect(ce.box(['Rational', 3, 4]).operator).toBe('Rational');
+    expect(ce.box('Half').operator).toBe('Rational');
+  });
+
+  test('Complex numbers return "Complex"', () => {
+    expect(ce.box(['Complex', 1, 2]).operator).toBe('Complex');
+    expect(ce.box(['Complex', 0, 1]).operator).toBe('Complex');
+    expect(ce.box('i').operator).toBe('Complex');
+  });
+
+  test('Special numeric values return specific operators', () => {
+    expect(ce.box(NaN).operator).toBe('NaN');
+    expect(ce.box(Infinity).operator).toBe('PositiveInfinity');
+    expect(ce.box(-Infinity).operator).toBe('NegativeInfinity');
+    expect(ce.box('NaN').operator).toBe('NaN');
+    expect(ce.box('PositiveInfinity').operator).toBe('PositiveInfinity');
+    expect(ce.box('NegativeInfinity').operator).toBe('NegativeInfinity');
+  });
+
+  test('Real constants return "Real"', () => {
+    // Numbers with radicals are represented as real
+    expect(ce.parse('\\sqrt{2}').evaluate().operator).toBe('Real');
+  });
+});

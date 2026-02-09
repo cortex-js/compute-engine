@@ -718,7 +718,7 @@ describe('CANONICAL FORMS', () => {
         canonForms = ["Rational", 1, 3]
         canonical  = ["Rational", 1, 3]
       `);
-      expect(canonNumber(expr).operator).toBe('Number');
+      expect(canonNumber(expr).operator).toBe('Rational');
 
       expr = '3/7';
       expect(checkNumber(expr)).toMatchInlineSnapshot(`
@@ -726,7 +726,7 @@ describe('CANONICAL FORMS', () => {
         canonForms = ["Rational", 3, 7]
         canonical  = ["Rational", 3, 7]
       `);
-      expect(canonNumber(expr).operator).toBe('Number');
+      expect(canonNumber(expr).operator).toBe('Rational');
 
       //(case of direct number serialization (denominator of 1))
       expr = '2/1';
@@ -735,7 +735,7 @@ describe('CANONICAL FORMS', () => {
         canonForms = 2
         canonical  = 2
       `);
-      expect(canonNumber(expr).operator).toBe('Number');
+      expect(canonNumber(expr).operator).toBe('Integer');
 
       /*
        * BigNum (Decimal)
@@ -764,7 +764,7 @@ describe('CANONICAL FORMS', () => {
           {num: "358796515092200247647243"}
         ]
       `);
-      expect(canonNumber(expr).operator).toBe('Number'); // ✔
+      expect(canonNumber(bigRational).operator).toBe('Rational'); // ✔
 
       /*
        * Control
@@ -809,7 +809,7 @@ describe('CANONICAL FORMS', () => {
           type?: NumericType
         ) => {
           expect(nonCanon(expr).operator).toMatchInlineSnapshot(`Complex`);
-          expect(canonNumber(expr).operator).toBe(`Number`);
+          expect(canonNumber(expr).operator).toBe(`Complex`);
           expect(canonNumber(expr).type.matches(type ?? 'complex')).toBe(true);
         };
 
@@ -870,7 +870,7 @@ describe('CANONICAL FORMS', () => {
         canonForms = ["Complex", -1, -4]
         canonical  = ["Complex", -1, -4]
       `);
-      expect(canonNumber(expr).operator).toBe('Number');
+      expect(canonNumber(expr).operator).toBe('Complex');
 
       expr = ['Negate', ['Rational', 9, 16]];
       expect(checkNumber(expr)).toMatchInlineSnapshot(`
@@ -878,7 +878,7 @@ describe('CANONICAL FORMS', () => {
         canonForms = ["Rational", -9, 16]
         canonical  = ["Rational", -9, 16]
       `);
-      expect(canonNumber(expr).operator).toBe('Number');
+      expect(canonNumber(expr).operator).toBe('Rational');
     });
 
     //(↓Only replaces for the *unit*, including negated...)

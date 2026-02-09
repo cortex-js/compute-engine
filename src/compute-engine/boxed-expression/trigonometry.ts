@@ -4,7 +4,7 @@ import { Decimal } from 'decimal.js';
 import type { Expression } from '../../math-json/types';
 import type { LatexString } from '../latex-syntax/types';
 
-import { apply } from './apply'; // @fixme
+import { apply } from './apply';
 
 import { canonicalAngle } from './utils';
 

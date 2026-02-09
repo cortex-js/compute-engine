@@ -119,7 +119,37 @@ export class BoxedNumber
   }
 
   get operator(): string {
-    // @fixme: return 'Number', 'Integer', 'Rational', 'Real'
+    // Handle plain JavaScript numbers
+    if (typeof this._value === 'number') {
+      if (Number.isNaN(this._value)) return 'NaN';
+      if (!Number.isFinite(this._value))
+        return this._value > 0 ? 'PositiveInfinity' : 'NegativeInfinity';
+      return Number.isInteger(this._value) ? 'Integer' : 'Real';
+    }
+
+    // Handle NumericValue objects
+    if (this._value.isNaN) return 'NaN';
+    if (this._value.isPositiveInfinity) return 'PositiveInfinity';
+    if (this._value.isNegativeInfinity) return 'NegativeInfinity';
+
+    // Check for complex numbers (non-zero imaginary part)
+    if (this._value.im !== 0) return 'Complex';
+
+    // Map the type property to operator string
+    const type = this._value.type;
+    if (type === 'integer' || type === 'finite_integer') return 'Integer';
+    if (type === 'rational' || type === 'finite_rational') return 'Rational';
+    if (
+      type === 'real' ||
+      type === 'finite_real' ||
+      type === 'imaginary' ||
+      type === 'finite_complex' ||
+      type === 'complex'
+    )
+      return 'Real';
+    if (type === 'non_finite_number') return 'Infinity';
+
+    // Fallback for any other numeric type
     return 'Number';
   }
 
