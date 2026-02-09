@@ -101,10 +101,26 @@ function parseSymbolToken(
     return SYMBOLS[i][0];
   }
 
-  // @fixme: encode other unicode chars as ____UUUU
+  // Handle \char, \unicode, and ^^ character escapes
+  const c = parser.parseChar();
+  if (c !== null) {
+    // Valid XIDC characters pass through as-is
+    if (/^\p{XIDC}+$/u.test(c)) return c;
 
-  // Unexpected LaTeX command or \\char or \\unicode?
-  return parser.parseChar() ?? parser.nextToken();
+    // Single non-XIDC character: encode as ____XXXXXX (4 underscores + 6 hex digits)
+    // Always 6 digits to avoid ambiguity when followed by hex-valid characters.
+    // This keeps the symbol name valid per isValidSymbol()
+    if ([...c].length === 1) {
+      const cp = c.codePointAt(0)!;
+      return '____' + cp.toString(16).toUpperCase().padStart(6, '0');
+    }
+
+    return c;
+  }
+
+  // Raw token (e.g., unrecognized LaTeX command or punctuation) — pass through
+  // without encoding so that isValidSymbol() can reject invalid characters
+  return parser.nextToken();
 }
 
 // The body of a symbol is a sequence of tokens contained

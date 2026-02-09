@@ -348,6 +348,15 @@ export function appendLatex(src: string, s: string): string {
  * So, for example `Number` is not `\Nu mber`, but `Number`.
  */
 function specialName(s: string): [result: string, rest: string] {
+  // Handle ____XXXX unicode escape at the start of the string
+  const unicodeMatch = s.match(/^____([0-9A-Fa-f]{6})(.*)/s);
+  if (unicodeMatch) {
+    // Trim leading zeros but keep at least 4 hex digits
+    const hex = unicodeMatch[1].replace(/^0+/, '') || '0';
+    const paddedHex = hex.padStart(4, '0');
+    return [`\\unicode{"${paddedHex}}`, unicodeMatch[2]];
+  }
+
   const prefix = s.match(/^([^_]+)/)?.[1] ?? '';
   // Does the name start with a greek letter or other special symbol?
   let i = SYMBOLS.findIndex((x) => prefix === x[0]);
@@ -451,6 +460,16 @@ function parseSymbolBody(
     if (ACCENT_MODIFIERS[accent]) body = ACCENT_MODIFIERS[accent](body);
   }
 
+  // Consume continuation text after unicode escapes (e.g., "abc" in "____2012abc")
+  // This handles the case where specialName consumed a ____XXXX prefix and left
+  // plain text in rest that isn't a modifier/subscript/superscript
+  while (rest.length > 0 && !rest.startsWith('_') && !/^\d/.test(rest)) {
+    const [nextSegment, nextRest] = specialName(rest);
+    if (nextSegment === '' || nextRest === rest) break;
+    body += nextSegment;
+    rest = nextRest;
+  }
+
   // Only the top level can have superscripts and subscripts
   if (topLevel) {
     const sups: string[] = [];
@@ -464,7 +483,20 @@ function parseSymbolBody(
     }
 
     while (rest.length > 0) {
-      if (rest.startsWith('__')) {
+      // Check for ____XXXX unicode escape (4 underscores + hex) before
+      // checking __ (superscript) or _ (subscript) separators
+      const ucMatch = rest.match(/^____([0-9A-Fa-f]{6})(.*)/s);
+      if (ucMatch) {
+        const ucHex = ucMatch[1].replace(/^0+/, '') || '0';
+        body += `\\unicode{"${ucHex.padStart(4, '0')}}`;
+        rest = ucMatch[2];
+        // Consume any following text segment up to the next _ separator
+        if (rest.length > 0 && !rest.startsWith('_')) {
+          const [nextSegment, nextRest] = specialName(rest);
+          body += nextSegment;
+          rest = nextRest;
+        }
+      } else if (rest.startsWith('__')) {
         const [sup, rest2] = parseSymbolBody(rest.substring(2), false, 'none');
         sups.push(sup);
         rest = rest2;
@@ -542,8 +574,9 @@ function serializeSymbol(
 
   // If the symbol starts with one or more underscore,
   // it's a wildcard symbol and always wrapped with \operatorname{...}.
+  // But ____XXXXXX (4 underscores + 6 hex digits) is a unicode escape, not a wildcard.
   const m = s.match(/^(_+)(.*)/);
-  if (m) {
+  if (m && !s.match(/^____[0-9A-Fa-f]{6}/)) {
     const [body, rest] = parseSymbolBody(m[2], true, 'none');
     return `\\operatorname{${'\\_'.repeat(m[1].length) + body + rest}}`;
   }

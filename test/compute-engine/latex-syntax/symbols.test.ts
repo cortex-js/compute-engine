@@ -1,4 +1,4 @@
-import { validateSymbol } from '../../../src/math-json/symbols';
+import { isValidSymbol, validateSymbol } from '../../../src/math-json/symbols';
 import { engine as ce, exprToString, latex } from '../../utils';
 
 function symbol(expr) {
@@ -425,16 +425,14 @@ describe('SYMBOLS', () => {
         ]
       `);
     });
-    test('Braille are not valid symbols', () => {
-      expect(parse('\\mathrm{\\char"280B}')).toMatchInlineSnapshot(`
-        [
-          "Error",
-          ["ErrorCode", "invalid-symbol", "unexpected-script"],
-          ["LatexString", "\\mathrm{\\char"280B}"]
-        ]
-      `);
+    test('Braille via \\char are now encoded as valid symbols', () => {
+      // Non-XIDC characters from \char are encoded as ____XXXXXX
+      expect(parse('\\mathrm{\\char"280B}')).toMatchInlineSnapshot(
+        `____00280B`
+      );
     });
     test('Egyptians Hieroglyphs are not valid symbols', () => {
+      // Egyptian hieroglyphs are XIDC but rejected by isValidSymbol's script check
       expect(parse('\\mathrm{\\char"13000}')).toMatchInlineSnapshot(`
         [
           "Error",
@@ -581,6 +579,51 @@ describe('SYMBOLS', () => {
       );
       expect(latex('`x_plus`')).toEqual(`\\mathrm{x_{+}}`);
       expect(latex('`R_blackboard__0__plus`')).toEqual(`\\mathbb{R^{0,+}}`);
+    });
+  });
+
+  describe('UNICODE CHARACTER ENCODING (____XXXXXX)', () => {
+    test('Parsing non-XIDC characters encodes as ____XXXXXX', () => {
+      // U+2012 figure dash is not XIDC
+      expect(parse('\\operatorname{x\\unicode{"2012}y}')).toMatchInlineSnapshot(
+        `x____002012y`
+      );
+      expect(
+        parse(
+          '\\operatorname{speed\\unicode{"2012}of\\unicode{"2012}sound}'
+        )
+      ).toMatchInlineSnapshot(`speed____002012of____002012sound`);
+      // Leading unicode escape
+      expect(
+        parse('\\operatorname{\\unicode{"2012}abc}')
+      ).toMatchInlineSnapshot(`____002012abc`);
+    });
+
+    test('Serializing ____XXXXXX symbols produces \\unicode', () => {
+      expect(latex('x____002012y')).toEqual(
+        `\\mathrm{x\\unicode{"2012}y}`
+      );
+      expect(latex('speed____002012of____002012sound')).toEqual(
+        `\\mathrm{speed\\unicode{"2012}of\\unicode{"2012}sound}`
+      );
+      expect(latex('____002012abc')).toEqual(
+        `\\mathrm{\\unicode{"2012}abc}`
+      );
+    });
+
+    test('Round-trip: parse -> serialize -> parse', () => {
+      const input = '\\operatorname{speed\\unicode{"2012}of\\unicode{"2012}sound}';
+      const parsed = ce.parse(input);
+      // Use .latex property to serialize back
+      const serialized = ce.box(parsed).latex;
+      const reparsed = ce.parse(serialized);
+      expect(JSON.stringify(reparsed)).toEqual(JSON.stringify(parsed));
+    });
+
+    test('Encoded symbols are valid per isValidSymbol', () => {
+      expect(isValidSymbol('speed____002012of____002012sound')).toBe(true);
+      expect(isValidSymbol('x____002012y')).toBe(true);
+      expect(isValidSymbol('____002012abc')).toBe(true);
     });
   });
 });

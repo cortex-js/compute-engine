@@ -338,6 +338,16 @@ ce.simplificationRules.push({
   for `.operator === 'Number'` will need to be updated to check for specific
   numeric types or use the `isBoxedNumber()` type guard instead.
 
+- **Non-XIDC Unicode characters in symbol names now encoded correctly**: When
+  parsing LaTeX symbols containing non-identifier Unicode characters via
+  `\unicode{...}`, `\char`, or `^^XX` escapes (e.g., figure dash U+2012 in
+  `\operatorname{speed\unicode{"2012}of\unicode{"2012}sound}`), the characters
+  are now encoded as `____XXXXXX` (4 underscores + 6 hex digits) in the symbol
+  name. This encoding is valid per `isValidSymbol()` and round-trips correctly:
+  the serializer decodes `____XXXXXX` back to `\unicode{"XXXX"}` in LaTeX output.
+  Previously, these characters passed through raw and caused symbol validation to
+  fail.
+
 ## 0.35.6 _2026-02-07_
 
 ### Bug Fixes
