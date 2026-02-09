@@ -140,6 +140,20 @@ const CLOSE_DELIMITER = {
   '\\llbracket': '\\rrbracket',
 };
 
+function describeTypeCallbackResult(value: unknown): string {
+  if (value === null) return 'null';
+  if (value === undefined) return 'undefined';
+  if (value instanceof BoxedType) return 'BoxedType';
+  if (typeof value === 'string') return `"${value}"`;
+  if (typeof value === 'object') {
+    const ctor = (value as { constructor?: { name?: string } }).constructor
+      ?.name;
+    if (ctor && ctor !== 'Object') return ctor;
+    return 'object';
+  }
+  return `${typeof value} (${String(value)})`;
+}
+
 /**
  * ## THEORY OF OPERATIONS
  *
@@ -326,8 +340,23 @@ export class _Parser implements Parser {
     // Is the symbol known in the compute engine current scope?
     if (this.options.getSymbolType) {
       const type = this.options.getSymbolType(id);
-      if (typeof type === 'string') return new BoxedType(type);
-      return type;
+      if (type instanceof BoxedType) return type;
+
+      if (typeof type === 'string') {
+        try {
+          return new BoxedType(type);
+        } catch (error) {
+          const message =
+            error instanceof Error ? error.message : String(error);
+          throw new Error(
+            `ce.parse(): getSymbolType("${id}") returned invalid type string "${type}". ${message}`
+          );
+        }
+      }
+
+      throw new Error(
+        `ce.parse(): getSymbolType("${id}") must return a BoxedType or a type string, received ${describeTypeCallbackResult(type)}`
+      );
     }
 
     return BoxedType.unknown;

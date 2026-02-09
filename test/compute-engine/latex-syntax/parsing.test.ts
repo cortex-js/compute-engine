@@ -36,6 +36,31 @@ describe('CUSTOM SYMBOL TYPE CALLBACK', () => {
       })
     ).toMatchInlineSnapshot(`["f", "x"]`);
   });
+
+  test('Accept mixed getSymbolType() return styles', () => {
+    expect(
+      ce.parse('f(g)', {
+        getSymbolType: (symbol) => {
+          if (symbol === 'f') return 'function';
+          if (symbol === 'g') return ce.type('unknown');
+          return 'unknown';
+        },
+      })
+    ).toMatchInlineSnapshot(`["f", "g"]`);
+  });
+
+  test('Report invalid getSymbolType() return values', () => {
+    expect(() =>
+      ce.parse('f(x)', {
+        getSymbolType: (symbol) =>
+          symbol === 'f'
+            ? ({} as unknown as ReturnType<typeof ce.type>)
+            : 'unknown',
+      })
+    ).toThrow(
+      /ce\.parse\(\): getSymbolType\("f"\) must return a BoxedType or a type string, received object/
+    );
+  });
 });
 
 describe('UNKNOWN COMMANDS', () => {
