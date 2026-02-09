@@ -3,7 +3,7 @@ import { isBoxedFunction, isBoxedSymbol } from './type-guards';
 
 /**
  *
- * Make all the arguments canonical.
+ * Optionally make all the arguments canonical (default).
  *
  * "Lift" Sequence expressions to the top level.
  * e.g. `["Add", 1, ["Sequence", 2, 3]]` -> `["Add", 1, 2, 3]`
@@ -16,11 +16,12 @@ import { isBoxedFunction, isBoxedSymbol } from './type-guards';
  */
 export function flatten<
   T extends ReadonlyArray<BoxedExpression> | BoxedExpression[],
->(ops: T, operator?: string): T {
-  // Make all the arguments canonical.
-  const xs: ReadonlyArray<BoxedExpression> = ops.every((x) => x.isCanonical)
-    ? ops
-    : ops.map((x) => x.canonical);
+>(ops: T, operator?: string, canonicalize = true): T {
+  // Optionally make all the arguments canonical.
+  const xs: ReadonlyArray<BoxedExpression> =
+    !canonicalize || ops.every((x) => x.isCanonical)
+      ? ops
+      : ops.map((x) => x.canonical);
 
   if (operator) {
     const shouldFlatten = (x: BoxedExpression) =>
@@ -42,7 +43,7 @@ export function flatten<
         isBoxedFunction(x) &&
         (x.operator === operator || x.operator === 'Sequence')
       )
-        ys.push(...flatten(x.ops, operator));
+        ys.push(...flatten(x.ops, operator, canonicalize));
       else ys.push(x);
     }
     return ys as T;
@@ -67,46 +68,12 @@ export function flatten<
 
     // If the operator matches, flatten the expression
     if (isBoxedFunction(x) && x.operator === 'Sequence')
-      ys.push(...flatten(x.ops, operator));
+      ys.push(...flatten(x.ops, operator, canonicalize));
     else ys.push(x);
   }
   return ys as T;
 }
 
-/**
- * Flatten the arguments.
- * @fixme replace with just flatten.
- * @fixme consider adding flatternSort()
- */
-
-export function flattenOps<
-  T extends ReadonlyArray<BoxedExpression> | BoxedExpression[],
->(ops: T, operator: string): T {
-  if (!operator) return ops;
-  // Bypass memory allocation for the common case where there is nothing to flatten
-  if (ops.every((x) => !isBoxedFunction(x) || x.operator !== operator))
-    return ops;
-
-  const result: BoxedExpression[] = [];
-  for (const arg of ops) {
-    if (!isBoxedFunction(arg) || arg.operator !== operator) result.push(arg);
-    else {
-      // ["f", a, ["f", b, c]] -> ["f", a, b, c]
-      // or ["f", ["f", a]] -> ["f", a]
-      result.push(...flattenOps(arg.ops, operator));
-    }
-  }
-
-  // If number of arguments didn't change, we didn't flatten
-  console.assert(result.length !== ops.length); // @todo check below may not be necessary
-  if (result.length === ops.length) return ops;
-
-  return result as T;
-}
-
-/**
- * @todo: this function should probably not be recursive. As it, it is semi-recursive.
- */
 export function flattenSequence(
   xs: ReadonlyArray<BoxedExpression>
 ): ReadonlyArray<BoxedExpression> {

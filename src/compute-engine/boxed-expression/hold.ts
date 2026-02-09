@@ -1,6 +1,6 @@
 import type { BoxedExpression } from '../global-types';
 
-import { flattenOps } from './flatten';
+import { flatten } from './flatten';
 import { isBoxedFunction } from './type-guards';
 
 /** Apply the function `f` to each operand of the expression `expr`,
@@ -22,10 +22,8 @@ export function holdMap(
 
   if (!def || xs.length === 0) return xs;
 
-  const associativeHead = def?.associative ? expr.operator : '';
-
   // f(a, f(b, c), d) -> f(a, b, c, d)
-  xs = flattenOps(xs, associativeHead);
+  if (def?.associative) xs = flatten(xs, expr.operator, false);
 
   //
   // Apply the hold as necessary
@@ -44,7 +42,7 @@ export function holdMap(
       }
     }
   }
-  return flattenOps(result, associativeHead);
+  return def?.associative ? flatten(result, expr.operator, false) : result;
 }
 
 export async function holdMapAsync(
@@ -59,10 +57,8 @@ export async function holdMapAsync(
 
   if (!def || xs.length === 0) return xs;
 
-  const associativeHead = def?.associative ? expr.operator : '';
-
   // f(a, f(b, c), d) -> f(a, b, c, d)
-  xs = flattenOps(xs, associativeHead);
+  if (def?.associative) xs = flatten(xs, expr.operator, false);
 
   //
   // Apply the hold as necessary
@@ -81,5 +77,5 @@ export async function holdMapAsync(
       }
     }
   }
-  return flattenOps(result, associativeHead);
+  return def?.associative ? flatten(result, expr.operator, false) : result;
 }

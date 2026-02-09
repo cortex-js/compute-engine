@@ -2,7 +2,7 @@ import type { BoxedExpression, CanonicalOptions, Scope } from '../global-types';
 
 import { canonicalInvisibleOperator } from './invisible-operator';
 
-import { flattenOps } from './flatten';
+import { flatten } from './flatten';
 import { canonicalAdd } from './arithmetic-add';
 import { canonicalMultiply, canonicalDivide } from './arithmetic-mul-div';
 import { canonicalPower } from './arithmetic-power';
@@ -113,7 +113,7 @@ function flattenForm(expr: BoxedExpression) {
   if (isAssociative)
     return ce.function(
       expr.operator,
-      flattenOps(expr.ops.map(flattenForm), expr.operator)
+      flatten(expr.ops.map(flattenForm), expr.operator, false)
     );
 
   return expr;
