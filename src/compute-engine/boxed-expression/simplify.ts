@@ -400,8 +400,15 @@ function simplifyNonCommutativeFunction(
 
   last = simplifyOperands(last);
 
-  // If the simplified expression is not cheaper, we're done
-  if (!isCheaper(expr, last, options?.costFunction)) return steps;
+  // If the simplified expression is not cheaper, we're done.
+  // Exception: power combination results (e.g., -4·2^x → -2^(x+2)) may be
+  // structurally more expensive but are mathematically preferred.
+  const because = result.at(-1)!.because;
+  const isPowerCombination =
+    because === 'combined powers' ||
+    because === 'combined powers with same base';
+  if (!isCheaper(expr, last, options?.costFunction) && !isPowerCombination)
+    return steps;
 
   result.at(-1)!.value = last;
   return [...steps, ...result];

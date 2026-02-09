@@ -126,4 +126,46 @@ describe('Power Combination (#176)', () => {
       simplify: true,
     });
   });
+
+  test('negative coefficients', () => {
+    // -4·2^x → -2^(x+2)
+    check('-4 \\cdot 2^x', ['Negate', ['Power', 2, ['Add', 'x', 2]]], {
+      simplify: true,
+    });
+    // -8·2^x → -2^(x+3)
+    check('-8 \\cdot 2^x', ['Negate', ['Power', 2, ['Add', 'x', 3]]], {
+      simplify: true,
+    });
+  });
+
+  test('sqrt coefficient factoring', () => {
+    // √2·2^x → 2^(x+1/2)
+    check('\\sqrt{2} \\cdot 2^x', ['Power', 2, ['Add', 'x', ['Rational', 1, 2]]], {
+      simplify: true,
+    });
+    // √3·3^x → 3^(x+1/2)
+    check('\\sqrt{3} \\cdot 3^x', ['Power', 3, ['Add', 'x', ['Rational', 1, 2]]], {
+      simplify: true,
+    });
+  });
+
+  test('rational (division) coefficient factoring', () => {
+    // 2^x / 4 → 2^(x-2)
+    check('\\frac{2^x}{4}', ['Power', 2, ['Add', 'x', -2]], {
+      simplify: true,
+    });
+    // 3^x / 9 → 3^(x-2)
+    check('\\frac{3^x}{9}', ['Power', 3, ['Add', 'x', -2]], {
+      simplify: true,
+    });
+  });
+
+  test('multi-prime coefficient factoring', () => {
+    // 12·2^x·3^x → 2^(x+2)·3^(x+1) since 12 = 2^2 * 3^1
+    check(
+      '12 \\cdot 2^x \\cdot 3^x',
+      ['Multiply', ['Power', 2, ['Add', 'x', 2]], ['Power', 3, ['Add', 'x', 1]]],
+      { simplify: true }
+    );
+  });
 });

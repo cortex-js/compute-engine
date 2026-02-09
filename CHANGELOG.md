@@ -823,6 +823,21 @@ ce.simplificationRules.push({
   Applies to all combinations: `sqrt(sqrt(x))`, `root(sqrt(x), n)`,
   `sqrt(root(x, n))`, and `root(root(x, m), n)`.
 
+- **Extended Coefficient Factoring in Power Combination**: The power combination
+  rule now handles additional coefficient forms when combining same-base powers
+  in products:
+  - **Multi-prime coefficients**: `12·2ˣ·3ˣ` &rarr; `2^(x+2)·3^(x+1)` (since
+    12 = 2²·3). All primes in the factorization must have a matching base.
+    Non-matching multi-prime coefficients like `6·2ˣ` are left unchanged.
+  - **Negative coefficients**: `-4·2ˣ` &rarr; `-2^(x+2)`, `-8·2ˣ` &rarr;
+    `-2^(x+3)`. The absolute value is factored and the sign is preserved.
+  - **Square root coefficients**: `√2·2ˣ` &rarr; `2^(x+½)`, `√3·3ˣ` &rarr;
+    `3^(x+½)`. Detects radical components in numeric values and adds half-integer
+    exponents.
+  - **Rational coefficients**: `2ˣ/4` &rarr; `2^(x-2)`, `3ˣ/9` &rarr;
+    `3^(x-2)`. Factors both numerator (positive exponents) and denominator
+    (negative exponents).
+
 ### Assumptions & Types
 
 - **Improved `ask()` Queries**: `ce.ask()` now matches patterns with wildcards

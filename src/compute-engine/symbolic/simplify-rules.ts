@@ -606,7 +606,6 @@ export const SIMPLIFY_RULES: Rule[] = [
       return undefined;
 
     const ce = x.engine;
-
     // Group ALL terms by base (including unknown symbols)
     const baseGroups = new Map<
       string,
@@ -643,28 +642,125 @@ export const SIMPLIFY_RULES: Rule[] = [
       group.terms.push({ term, exp });
     }
 
-    // Second pass: try to decompose numeric coefficients as perfect powers
-    // of an existing base. E.g. 4·2^x → 2^(x+2) since 4 = 2^2.
+    // Second pass: try to decompose numeric coefficients as powers
+    // of existing bases. E.g. 4·2^x → 2^(x+2) since 4 = 2^2.
+    // Handles: multi-prime (12·2^x·3^x), negative (-4·2^x),
+    // sqrt (√2·2^x), and rational (2^x/4) coefficients.
     let hasCombinations = false;
     for (let i = otherTerms.length - 1; i >= 0; i--) {
       const term = otherTerms[i];
+
+      // --- Sqrt(n) terms: √p^e → p^(e/2) ---
+      // Sqrt(n) is represented as a BoxedNumber with a radical component.
+      // Check numericValue.radical > 1 and rational coefficient = ±1/1
+      if (isBoxedNumber(term)) {
+        const nv = term.numericValue;
+        if (typeof nv === 'object' && nv !== null && 'radical' in nv) {
+          const nvAny = nv as unknown as {
+            radical: number;
+            rational: number[];
+          };
+          const radical = nvAny.radical;
+          const rational = nvAny.rational;
+          if (
+            radical > 1 &&
+            Array.isArray(rational) &&
+            Math.abs(rational[0]) === 1 &&
+            rational[1] === 1
+          ) {
+            const factors = primeFactors(radical);
+            const primes = Object.keys(factors).filter((k) => k !== '1');
+            if (
+              primes.length > 0 &&
+              primes.every((p) =>
+                baseGroups.has(JSON.stringify(ce.number(Number(p)).json))
+              )
+            ) {
+              for (const p of primes) {
+                const e = factors[Number(p)];
+                const baseKey = JSON.stringify(ce.number(Number(p)).json);
+                const group = baseGroups.get(baseKey)!;
+                group.terms.push({ term, exp: ce.number([e, 2]) });
+              }
+              otherTerms.splice(i, 1);
+              if (rational[0] < 0) otherTerms.push(ce.NegativeOne);
+              hasCombinations = true;
+              continue;
+            }
+          }
+        }
+      }
+
       if (!isBoxedNumber(term)) continue;
+
+      // --- Integer coefficients (positive and negative) ---
       const n = term.re;
-      if (!Number.isInteger(n) || n <= 1) continue;
+      if (Number.isInteger(n) && Math.abs(n) > 1) {
+        const absN = Math.abs(n);
+        const factors = primeFactors(absN);
+        const primes = Object.keys(factors).filter((k) => k !== '1');
 
-      const factors = primeFactors(n);
-      const primes = Object.keys(factors);
-      if (primes.length !== 1) continue; // not a single-prime power
+        // All primes in the factorization must have a matching base
+        if (
+          primes.length > 0 &&
+          primes.every((p) =>
+            baseGroups.has(JSON.stringify(ce.number(Number(p)).json))
+          )
+        ) {
+          for (const p of primes) {
+            const e = factors[Number(p)];
+            const baseKey = JSON.stringify(ce.number(Number(p)).json);
+            const group = baseGroups.get(baseKey)!;
+            group.terms.push({ term, exp: ce.number(e) });
+          }
+          otherTerms.splice(i, 1);
+          if (n < 0) otherTerms.push(ce.NegativeOne);
+          hasCombinations = true;
+          continue;
+        }
+      }
 
-      const p = Number(primes[0]);
-      const e = factors[p];
-      const baseKey = JSON.stringify(ce.number(p).json);
-      const group = baseGroups.get(baseKey);
-      if (!group) continue;
+      // --- Rational coefficients (num/den) ---
+      const num = term.numerator?.re;
+      const den = term.denominator?.re;
+      if (
+        num !== undefined &&
+        den !== undefined &&
+        Number.isFinite(num) &&
+        Number.isFinite(den) &&
+        Number.isInteger(num) &&
+        Number.isInteger(den) &&
+        den > 1
+      ) {
+        const absNum = Math.abs(num);
+        const numFactors = absNum > 1 ? primeFactors(absNum) : {};
+        const denFactors = primeFactors(den);
 
-      group.terms.push({ term, exp: ce.number(e) });
-      otherTerms.splice(i, 1);
-      hasCombinations = true;
+        // Collect all primes from both numerator and denominator
+        const allPrimes = new Set([
+          ...Object.keys(numFactors).filter((k) => k !== '1'),
+          ...Object.keys(denFactors).filter((k) => k !== '1'),
+        ]);
+
+        if (
+          allPrimes.size > 0 &&
+          [...allPrimes].every((p) =>
+            baseGroups.has(JSON.stringify(ce.number(Number(p)).json))
+          )
+        ) {
+          for (const p of allPrimes) {
+            const pNum = Number(p);
+            const posExp = numFactors[pNum] ?? 0;
+            const negExp = denFactors[pNum] ?? 0;
+            const baseKey = JSON.stringify(ce.number(pNum).json);
+            const group = baseGroups.get(baseKey)!;
+            group.terms.push({ term, exp: ce.number(posExp - negExp) });
+          }
+          otherTerms.splice(i, 1);
+          if (num < 0) otherTerms.push(ce.NegativeOne);
+          hasCombinations = true;
+        }
+      }
     }
 
     // Check if any base has multiple terms that can be combined
