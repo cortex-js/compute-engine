@@ -137,7 +137,17 @@ export function costFunction(expr: BoxedExpression): number {
   const name = expr.operator;
   let nameCost = 2;
   if (['Add'].includes(name)) nameCost = 3;
-  else if (['Subtract', 'Negate'].includes(name)) nameCost = 4;
+  else if (name === 'Subtract') nameCost = 4;
+  else if (name === 'Negate') {
+    // Negate(Power(...)) should cost similar to Multiply(-1, Power(...))
+    // so that -2^(x+2) is seen as comparable to Multiply(-1, Power(2, Add(x,2)))
+    const fnNeg = isBoxedFunction(expr) ? expr : undefined;
+    if (fnNeg?.op1?.operator === 'Power') {
+      const innerPow = isBoxedFunction(fnNeg.op1) ? fnNeg.op1 : undefined;
+      if (innerPow) return 3 + costFunction(innerPow.ops[1]);
+    }
+    nameCost = 4;
+  }
   else if (name === 'Sqrt') {
     // Sqrt with perfect squares inside should be more expensive
     // because √(x²y) should simplify to |x|√y

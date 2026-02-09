@@ -831,12 +831,18 @@ ce.simplificationRules.push({
     Non-matching multi-prime coefficients like `6·2ˣ` are left unchanged.
   - **Negative coefficients**: `-4·2ˣ` &rarr; `-2^(x+2)`, `-8·2ˣ` &rarr;
     `-2^(x+3)`. The absolute value is factored and the sign is preserved.
-  - **Square root coefficients**: `√2·2ˣ` &rarr; `2^(x+½)`, `√3·3ˣ` &rarr;
-    `3^(x+½)`. Detects radical components in numeric values and adds half-integer
-    exponents.
+  - **Rational-radical coefficients**: `√2·2ˣ` &rarr; `2^(x+½)`,
+    `2√2·2ˣ` &rarr; `2^(x+3/2)`, `(√2/2)·2ˣ` &rarr; `2^(x-½)`.
+    Decomposes `(num/den)·√radical` into prime contributions from all three
+    components (radical primes get half-integer exponents, numerator primes get
+    positive exponents, denominator primes get negative exponents).
   - **Rational coefficients**: `2ˣ/4` &rarr; `2^(x-2)`, `3ˣ/9` &rarr;
     `3^(x-2)`. Factors both numerator (positive exponents) and denominator
     (negative exponents).
+
+- **Improved Cost Function for Negated Powers**: `Negate(Power(...))` now costs
+  `3 + cost(exponent)`, consistent with the cost of `Multiply(-1, Power(...))`.
+  This makes the cost model more accurate when comparing negated power forms.
 
 ### Assumptions & Types
 

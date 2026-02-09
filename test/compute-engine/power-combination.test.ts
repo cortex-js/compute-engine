@@ -160,6 +160,17 @@ describe('Power Combination (#176)', () => {
     });
   });
 
+  test('rational-radical coefficient factoring', () => {
+    // 2√2·2^x → 2^(x+3/2) since 2√2 = 2^1 · 2^(1/2) = 2^(3/2)
+    check('2\\sqrt{2} \\cdot 2^x', ['Power', 2, ['Add', 'x', ['Rational', 3, 2]]], {
+      simplify: true,
+    });
+    // √2/2·2^x → 2^(x-1/2) since √2/2 = 2^(1/2) · 2^(-1) = 2^(-1/2)
+    check('\\frac{\\sqrt{2}}{2} \\cdot 2^x', ['Power', 2, ['Add', 'x', ['Rational', -1, 2]]], {
+      simplify: true,
+    });
+  });
+
   test('multi-prime coefficient factoring', () => {
     // 12·2^x·3^x → 2^(x+2)·3^(x+1) since 12 = 2^2 * 3^1
     check(

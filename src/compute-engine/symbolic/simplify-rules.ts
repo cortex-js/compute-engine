@@ -15,9 +15,10 @@ import {
 import { expand } from '../boxed-expression/expand';
 import { factor } from '../boxed-expression/factor';
 import { add } from '../boxed-expression/arithmetic-add';
-import { SMALL_INTEGER } from '../numerics/numeric';
+import { SMALL_INTEGER, gcd } from '../numerics/numeric';
 import { primeFactors } from '../numerics/primes';
 import { NumericValue } from '../numeric-value/types';
+import { ExactNumericValue } from '../numeric-value/exact-numeric-value';
 import {
   isEquationOperator,
   isInequalityOperator,
@@ -650,43 +651,76 @@ export const SIMPLIFY_RULES: Rule[] = [
     for (let i = otherTerms.length - 1; i >= 0; i--) {
       const term = otherTerms[i];
 
-      // --- Sqrt(n) terms: √p^e → p^(e/2) ---
-      // Sqrt(n) is represented as a BoxedNumber with a radical component.
-      // Check numericValue.radical > 1 and rational coefficient = ±1/1
+      // --- Rational-radical terms: (num/den)·√radical → prime contributions ---
+      // ExactNumericValue stores rational (Rational) and radical (number).
+      // Decompose as: radical primes get e/2, |num| primes get e, den primes get -e.
       if (isBoxedNumber(term)) {
         const nv = term.numericValue;
-        if (typeof nv === 'object' && nv !== null && 'radical' in nv) {
-          const nvAny = nv as unknown as {
-            radical: number;
-            rational: number[];
-          };
-          const radical = nvAny.radical;
-          const rational = nvAny.rational;
-          if (
-            radical > 1 &&
-            Array.isArray(rational) &&
-            Math.abs(rational[0]) === 1 &&
-            rational[1] === 1
-          ) {
-            const factors = primeFactors(radical);
-            const primes = Object.keys(factors).filter((k) => k !== '1');
-            if (
-              primes.length > 0 &&
-              primes.every((p) =>
-                baseGroups.has(JSON.stringify(ce.number(Number(p)).json))
-              )
-            ) {
-              for (const p of primes) {
-                const e = factors[Number(p)];
-                const baseKey = JSON.stringify(ce.number(Number(p)).json);
-                const group = baseGroups.get(baseKey)!;
-                group.terms.push({ term, exp: ce.number([e, 2]) });
-              }
-              otherTerms.splice(i, 1);
-              if (rational[0] < 0) otherTerms.push(ce.NegativeOne);
-              hasCombinations = true;
-              continue;
+        if (nv instanceof ExactNumericValue && nv.radical > 1) {
+          const rational = nv.rational;
+          const num = Number(rational[0]);
+          const den = Number(rational[1]);
+
+          // Build merged prime→exponent map from all three sources
+          const primeExps = new Map<number, [number, number]>(); // prime → [numerator, denominator]
+
+          // Radical primes: contribute e/2
+          const radFactors = primeFactors(nv.radical);
+          for (const [p, e] of Object.entries(radFactors)) {
+            if (p === '1') continue;
+            const pn = Number(p);
+            const [curNum, curDen] = primeExps.get(pn) ?? [0, 1];
+            // curNum/curDen + e/2 = (curNum*2 + e*curDen) / (curDen*2)
+            primeExps.set(pn, [curNum * 2 + e * curDen, curDen * 2]);
+          }
+
+          // Numerator primes: contribute e
+          const absNum = Math.abs(num);
+          if (absNum > 1) {
+            const numFactors = primeFactors(absNum);
+            for (const [p, e] of Object.entries(numFactors)) {
+              if (p === '1') continue;
+              const pn = Number(p);
+              const [curNum, curDen] = primeExps.get(pn) ?? [0, 1];
+              primeExps.set(pn, [curNum + e * curDen, curDen]);
             }
+          }
+
+          // Denominator primes: contribute -e
+          if (den > 1) {
+            const denFactors = primeFactors(den);
+            for (const [p, e] of Object.entries(denFactors)) {
+              if (p === '1') continue;
+              const pn = Number(p);
+              const [curNum, curDen] = primeExps.get(pn) ?? [0, 1];
+              primeExps.set(pn, [curNum - e * curDen, curDen]);
+            }
+          }
+
+          // Check all primes have matching bases
+          const allMatch =
+            primeExps.size > 0 &&
+            [...primeExps.keys()].every((p) =>
+              baseGroups.has(JSON.stringify(ce.number(p).json))
+            );
+
+          if (allMatch) {
+            for (const [p, [expNum, expDen]] of primeExps) {
+              const baseKey = JSON.stringify(ce.number(p).json);
+              const group = baseGroups.get(baseKey)!;
+              // Simplify the fraction
+              const g = gcd(Math.abs(expNum), expDen);
+              const sn = expNum / g;
+              const sd = expDen / g;
+              group.terms.push({
+                term,
+                exp: sd === 1 ? ce.number(sn) : ce.number([sn, sd]),
+              });
+            }
+            otherTerms.splice(i, 1);
+            if (num < 0) otherTerms.push(ce.NegativeOne);
+            hasCombinations = true;
+            continue;
           }
         }
       }
