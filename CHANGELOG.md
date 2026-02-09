@@ -315,6 +315,13 @@ ce.simplificationRules.push({
   arguments serialize as `\det A` instead of `\det\left(A\right)`. Matrix
   arguments still serialize as `\begin{vmatrix}...\end{vmatrix}`.
 
+- **Added standard LaTeX operators `\ker`, `\dim`, `\deg`, `\hom`**: These
+  commands are now in the MathJSON LaTeX dictionary as function entries with
+  implicit arguments, so forms like `\ker V`, `\dim V`, `\deg p`, and
+  `\hom(V, W)` parse correctly and serialize back to the corresponding standard
+  operator notation. The corresponding function symbols (`Kernel`, `Dimension`,
+  `Degree`, `Hom`) are also registered in the linear algebra library.
+
 ### LaTeX Parsing
 
 - **`arguments: 'implicit'` option for function dictionary entries**: Function

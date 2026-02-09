@@ -245,3 +245,60 @@ describe('MatrixMultiply LaTeX', () => {
     );
   });
 });
+
+describe('Trace LaTeX', () => {
+  it('should serialize simple symbol argument without parentheses', () => {
+    const result = ce.box(['Trace', 'A']);
+    expect(result.latex).toBe('\\tr A');
+  });
+
+  it('should serialize simple numeric argument without parentheses', () => {
+    const result = ce.box(['Trace', 2]);
+    expect(result.latex).toBe('\\tr 2');
+  });
+
+  it('should serialize complex argument with parentheses', () => {
+    const result = ce.box(['Trace', ['Add', 'A', 'B']]);
+    expect(result.latex).toBe('\\tr\\left(A+B\\right)');
+  });
+});
+
+describe('Standard operator commands', () => {
+  it('should parse \\ker with implicit argument', () => {
+    expect(ce.parse('\\ker V').json).toEqual(['Kernel', 'V']);
+  });
+
+  it('should parse \\dim with implicit argument', () => {
+    expect(ce.parse('\\dim V').json).toEqual(['Dimension', 'V']);
+  });
+
+  it('should parse \\deg with implicit argument', () => {
+    expect(ce.parse('\\deg p').json).toEqual(['Degree', 'p']);
+  });
+
+  it('should parse \\hom with explicit argument list', () => {
+    expect(ce.parse('\\hom(V, W)').json).toEqual(['Hom', 'V', 'W']);
+  });
+});
+
+describe('Kernel/Dimension/Degree/Hom LaTeX', () => {
+  it('should serialize simple kernel argument without parentheses', () => {
+    const result = ce.box(['Kernel', 'V']);
+    expect(result.latex).toBe('\\ker V');
+  });
+
+  it('should serialize complex dimension argument with parentheses', () => {
+    const result = ce.box(['Dimension', ['Add', 'V', 'W']]);
+    expect(result.latex).toBe('\\dim\\left(V+W\\right)');
+  });
+
+  it('should serialize simple degree argument without parentheses', () => {
+    const result = ce.box(['Degree', 'p']);
+    expect(result.latex).toBe('\\deg p');
+  });
+
+  it('should serialize multiple hom arguments without dropping any', () => {
+    const result = ce.box(['Hom', 'V', 'W']);
+    expect(result.latex).toMatchInlineSnapshot(`\\hom(V, W)`);
+  });
+});

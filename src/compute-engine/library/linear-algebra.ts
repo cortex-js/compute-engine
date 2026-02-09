@@ -406,6 +406,30 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
       },
     },
 
+    Kernel: {
+      description: 'Kernel (null space) of a linear map',
+      complexity: 8200,
+      signature: '(value) -> value',
+    },
+
+    Dimension: {
+      description: 'Dimension of an object',
+      complexity: 8200,
+      signature: '(value) -> value',
+    },
+
+    Degree: {
+      description: 'Degree of an object',
+      complexity: 8200,
+      signature: '(value) -> value',
+    },
+
+    Hom: {
+      description: 'Hom-set of morphisms between objects',
+      complexity: 8200,
+      signature: '(value*) -> value',
+    },
+
     // Matrix multiplication: A (m×n) × B (n×p) → result (m×p)
     // Handles matrix × matrix, matrix × vector, vector × matrix
     MatrixMultiply: {

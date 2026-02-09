@@ -232,18 +232,57 @@ export const DEFINITIONS_LINEAR_ALGEBRA: LatexDictionary = [
     kind: 'function',
     latexTrigger: '\\tr',
     arguments: 'implicit',
-    serialize: (serializer: Serializer, expr: Expression): string => {
-      const arg = operand(expr, 1);
-      const argLatex = serializer.serialize(arg);
-      // Use \tr A for simple args, \tr\left(...\right) for complex ones
-      if (typeof arg === 'string' || typeof arg === 'number')
-        return `\\tr ${argLatex}`;
-      return `\\tr\\left(${argLatex}\\right)`;
-    },
+    serialize: (serializer: Serializer, expr: Expression): string =>
+      serializeImplicitOperator(serializer, expr, '\\tr'),
   },
 
   // Also support plain text: tr(A)
   { symbolTrigger: 'tr', kind: 'function', parse: 'Trace', arguments: 'implicit' },
+
+  {
+    name: 'Kernel',
+    kind: 'function',
+    latexTrigger: '\\ker',
+    arguments: 'implicit',
+    serialize: (serializer: Serializer, expr: Expression): string =>
+      serializeImplicitOperator(serializer, expr, '\\ker'),
+  },
+  { symbolTrigger: 'ker', kind: 'function', parse: 'Kernel', arguments: 'implicit' },
+
+  {
+    name: 'Dimension',
+    kind: 'function',
+    latexTrigger: '\\dim',
+    arguments: 'implicit',
+    serialize: (serializer: Serializer, expr: Expression): string =>
+      serializeImplicitOperator(serializer, expr, '\\dim'),
+  },
+  {
+    symbolTrigger: 'dim',
+    kind: 'function',
+    parse: 'Dimension',
+    arguments: 'implicit',
+  },
+
+  {
+    name: 'Degree',
+    kind: 'function',
+    latexTrigger: '\\deg',
+    arguments: 'implicit',
+    serialize: (serializer: Serializer, expr: Expression): string =>
+      serializeImplicitOperator(serializer, expr, '\\deg'),
+  },
+  { symbolTrigger: 'deg', kind: 'function', parse: 'Degree', arguments: 'implicit' },
+
+  {
+    name: 'Hom',
+    kind: 'function',
+    latexTrigger: '\\hom',
+    arguments: 'implicit',
+    serialize: (serializer: Serializer, expr: Expression): string =>
+      serializeImplicitOperator(serializer, expr, '\\hom'),
+  },
+  { symbolTrigger: 'hom', kind: 'function', parse: 'Hom', arguments: 'implicit' },
 
   {
     name: 'Determinant',
@@ -262,11 +301,7 @@ export const DEFINITIONS_LINEAR_ALGEBRA: LatexDictionary = [
           stringValue(operand(arg, 2))
         );
       }
-      const argLatex = serializer.serialize(arg);
-      // Use \det A for simple args, \det\left(...\right) for complex ones
-      if (typeof arg === 'string' || typeof arg === 'number')
-        return `\\det ${argLatex}`;
-      return `\\det\\left(${argLatex}\\right)`;
+      return serializeImplicitOperator(serializer, expr, '\\det');
     },
   },
 
@@ -312,6 +347,21 @@ function parseColumnFormat(parser: Parser, optional = true): string {
   }
 
   return result;
+}
+
+function serializeImplicitOperator(
+  serializer: Serializer,
+  expr: Expression,
+  command: string
+): string {
+  const args = operands(expr);
+  if (args.length !== 1) return `${command}${serializer.wrapArguments(expr)}`;
+  const arg = operand(expr, 1);
+  const argLatex = serializer.serialize(arg);
+  // Use \foo A for simple args, \foo\left(...\right) for complex ones
+  if (typeof arg === 'string' || typeof arg === 'number')
+    return `${command} ${argLatex}`;
+  return `${command}\\left(${argLatex}\\right)`;
 }
 
 function serializeTabular(
