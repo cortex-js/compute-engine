@@ -400,7 +400,11 @@ export class ExactNumericValue extends NumericValue {
   }
 
   mul(other: number | Decimal | NumericValue): NumericValue {
-    if (other === 0) return this.clone(0);
+    if (other === 0) {
+      if (this.isPositiveInfinity || this.isNegativeInfinity || this.isNaN)
+        return this.clone(NaN);
+      return this.clone(0);
+    }
     if (other === 1) return this;
     if (other === -1) return this.neg();
     if (typeof other === 'number') {
@@ -416,12 +420,25 @@ export class ExactNumericValue extends NumericValue {
     if (other instanceof Decimal) return this.factory(other).mul(this);
     if (other.im !== 0) return other.mul(this);
 
-    if (other.isZero) return other;
+    if (other.isZero) {
+      if (this.isPositiveInfinity || this.isNegativeInfinity || this.isNaN)
+        return this.clone(NaN);
+      return other;
+    }
     if (other.isOne) return this;
     if (other.isNegativeOne) return this.neg();
     if (other.isNaN) return other;
 
-    if (this.isZero) return this;
+    if (this.isZero) {
+      if (
+        other.isPositiveInfinity ||
+        other.isNegativeInfinity ||
+        other.isComplexInfinity ||
+        other.isNaN
+      )
+        return this.clone(NaN);
+      return this;
+    }
     if (this.isOne) return other;
     if (this.isNegativeOne) return other.neg();
 

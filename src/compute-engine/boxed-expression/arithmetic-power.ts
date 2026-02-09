@@ -295,6 +295,21 @@ export function canonicalPower(
       ? canonicalRoot(a, ce.number(r[1]))
       : ce._fn('Root', [a, ce.number(r[1])], { canonical: false });
 
+  // Fold exact numeric powers: Power(2, 3) → 8, Power(1/2, 2) → 1/4
+  // Only when both base and exponent are exact, and exponent is integer
+  if (isBoxedNumber(a) && isBoxedNumber(b)) {
+    const e = b.re;
+    if (typeof e === 'number' && Number.isInteger(e) && Math.abs(e) <= 64) {
+      const n = a.numericValue;
+      if (typeof n === 'number') {
+        const result = Math.pow(n, e);
+        if (Number.isSafeInteger(result)) return ce.number(result);
+      } else if (n.isExact) {
+        return ce.number(n.pow(e));
+      }
+    }
+  }
+
   return unchanged();
 }
 

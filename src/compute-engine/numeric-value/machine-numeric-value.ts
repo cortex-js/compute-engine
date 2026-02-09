@@ -210,12 +210,30 @@ export class MachineNumericValue extends NumericValue {
 
   mul(other: number | Decimal | NumericValue): NumericValue {
     if (this.isNaN) return this._makeExact(NaN);
-    if (this.isZero) return this;
+    if (this.isZero) {
+      if (
+        other instanceof NumericValue &&
+        (other.isPositiveInfinity ||
+          other.isNegativeInfinity ||
+          other.isComplexInfinity ||
+          other.isNaN)
+      )
+        return this._makeExact(NaN);
+      return this;
+    }
 
     if (other instanceof Decimal) other = other.toNumber();
     if (other === 1) return this;
     if (other === -1) return this.neg();
-    if (other === 0) return this.clone(0);
+    if (other === 0) {
+      if (
+        this.isPositiveInfinity ||
+        this.isNegativeInfinity ||
+        this.isComplexInfinity
+      )
+        return this._makeExact(NaN);
+      return this.clone(0);
+    }
 
     // We need to ensure that non-exact propagates, so clone value in case
     // it was an ExactNumericValue
@@ -239,7 +257,15 @@ export class MachineNumericValue extends NumericValue {
     }
     if (other.isOne) return this;
     if (other.isNegativeOne) return this.neg();
-    if (other.isZero) return this.clone(0);
+    if (other.isZero) {
+      if (
+        this.isPositiveInfinity ||
+        this.isNegativeInfinity ||
+        this.isComplexInfinity
+      )
+        return this._makeExact(NaN);
+      return this.clone(0);
+    }
 
     if (this.im === 0 && other.im === 0)
       return this.clone(this.decimal * other.re);

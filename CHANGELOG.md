@@ -249,7 +249,29 @@ ce.simplificationRules.push({
   automatically handles radical grouping (`√2 + √2 = 2√2`) and
   rational simplification (`1/3 + 2/3 = 1`).
 
+- **Exact numeric folding in `canonicalPower`**: Integer powers of numeric
+  literals are now folded during canonicalization when the exponent is an integer
+  with |e| &le; 64. For machine-number bases, the result must be a safe integer;
+  for exact numeric values (rationals, radicals), `NumericValue.pow()` is used.
+
+  - `Power(2, 3)` &rarr; `8`
+  - `Power(3, 2)` &rarr; `9`
+  - `Power(1/2, 2)` &rarr; `1/4`
+  - `Power(-2, 3)` &rarr; `-8`
+  - `Power(2, 100)` remains unevaluated (exponent exceeds limit)
+
+- **Complex promotion handles non-adjacent operands**: `canonicalAdd` now
+  combines a real float with imaginary terms even when they are not adjacent in
+  the operand list. Previously, only a real immediately followed by an imaginary
+  was promoted to a complex number.
+
 ### Bug Fixes
+
+- **`NumericValue(0).mul(Infinity)` now returns NaN**: All three `NumericValue`
+  subclasses (`MachineNumericValue`, `BigNumericValue`, `ExactNumericValue`) had
+  an early-return `if (this.isZero) return this` in `mul()`, which returned `0`
+  without checking if the other operand was infinity. `0 × ±∞` is now correctly
+  indeterminate (`NaN`), and `±∞ × 0` is handled symmetrically.
 
 - **Power simplification `(a^n)^m -> a^{nm}` now correctly guarded**: The rule
   was applied unconditionally, which is mathematically incorrect when the base

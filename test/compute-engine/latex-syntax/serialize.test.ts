@@ -109,9 +109,9 @@ describe('LATEX SERIALIZING', () => {
   });
   test('Power', () => {
     expect(latex(['Power', 'x', -2])).toMatchInlineSnapshot(`\\frac{1}{x^2}`);
-    expect(latex(['Power', -2, 2])).toMatchInlineSnapshot(`(-2)^2`);
-    expect(latex(['Power', ['Negate', 2], 2])).toMatchInlineSnapshot(`(-2)^2`);
-    expect(latex(['Negate', ['Power', 2, 2]])).toMatchInlineSnapshot(`-2^2`);
+    expect(latex(['Power', -2, 2])).toMatchInlineSnapshot(`4`);
+    expect(latex(['Power', ['Negate', 2], 2])).toMatchInlineSnapshot(`4`);
+    expect(latex(['Negate', ['Power', 2, 2]])).toMatchInlineSnapshot(`-4`);
     expect(latex(['Power', 'x', ['Divide', 1, 2]])).toMatchInlineSnapshot(
       `\\sqrt{x}`
     );

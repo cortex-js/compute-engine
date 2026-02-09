@@ -92,8 +92,7 @@ describe('OPERATOR invisible', () => {
   test('2^{3}4+5 // Invisible operator', () =>
     expect(check('2^{3}4+5')).toMatchInlineSnapshot(`
       box       = ["Add", ["InvisibleOperator", ["Power", 2, 3], 4], 5]
-      canonical = ["Add", 5, ["Multiply", 4, ["Power", 2, 3]]]
-      simplify  = 37
+      canonical = 37
     `));
 
   test('2xyz // Invisible operator', () =>

@@ -1044,7 +1044,7 @@ eval-auto = (2 + i)
 
 exports[`SQRT √(3^2) 1`] = `
 box       = ["Sqrt", ["Square", 3]]
-simplify  = 3
+canonical = 3
 `;
 
 exports[`SQRT √(4x) 1`] = `

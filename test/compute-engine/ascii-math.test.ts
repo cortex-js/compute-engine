@@ -114,11 +114,11 @@ describe('NUMBERS', () => {
 describe('POWERS/ROOTS', () => {
   it('should serialize square', () => {
     expect(check('x^2')).toMatchInlineSnapshot(`x^2`);
-    expect(check('2^2')).toMatchInlineSnapshot(`2^2`);
+    expect(check('2^2')).toMatchInlineSnapshot(`4`);
     expect(check('(x+1)^2')).toMatchInlineSnapshot(`(x + 1)^2`);
-    expect(check('(-1)^2')).toMatchInlineSnapshot(`(-1)^2`);
-    expect(check('(-2)^2')).toMatchInlineSnapshot(`(-2)^2`);
-    expect(check('x+(-1)^2')).toMatchInlineSnapshot(`x + (-1)^2`);
+    expect(check('(-1)^2')).toMatchInlineSnapshot(`1`);
+    expect(check('(-2)^2')).toMatchInlineSnapshot(`4`);
+    expect(check('x+(-1)^2')).toMatchInlineSnapshot(`x + 1`);
   });
   it('should serialize other powers', () => {
     expect(check('x^{0}')).toMatchInlineSnapshot(`x^0`);
@@ -186,8 +186,8 @@ describe('ARITHMETIC OPERATORS', () => {
   it('should serialize Negate', () => {
     expect(check('(-x)')).toMatchInlineSnapshot(`-x`);
     expect(check('-(x+y)')).toMatchInlineSnapshot(`-(x + y)`);
-    expect(check('-(2^3)')).toMatchInlineSnapshot(`-(2^3)`);
-    expect(check('-(2^2)')).toMatchInlineSnapshot(`-(2^2)`);
+    expect(check('-(2^3)')).toMatchInlineSnapshot(`-8`);
+    expect(check('-(2^2)')).toMatchInlineSnapshot(`-4`);
   });
 
   it('should serialize Multiply', () => {
@@ -253,8 +253,8 @@ describe('PRECEDENCE', () => {
     expect(check('(1+2)*3')).toMatchInlineSnapshot(`9`);
     expect(check('1*2+3')).toMatchInlineSnapshot(`5`);
     expect(check('1*(2+3)')).toMatchInlineSnapshot(`5`);
-    expect(check('1+2^3')).toMatchInlineSnapshot(`1 + 2^3`);
-    expect(check('(1+2)^3')).toMatchInlineSnapshot(`3^3`);
+    expect(check('1+2^3')).toMatchInlineSnapshot(`9`);
+    expect(check('(1+2)^3')).toMatchInlineSnapshot(`27`);
     expect(check('1^2+3')).toMatchInlineSnapshot(`4`);
     expect(check('1^{2+3}')).toMatchInlineSnapshot(`1`);
     expect(check('1+2/3')).toMatchInlineSnapshot(`5/3`);

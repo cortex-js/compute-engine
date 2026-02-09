@@ -73,42 +73,70 @@ export function canonicalAdd(
     // else: 0 or 1 exact numerics — ops is unchanged, no folding needed
   }
 
-  // Iterate over the terms and check if any are complex numbers
-  // (a real number followed by an imaginary number)
+  // Combine pure-real and pure-imaginary BoxedNumber operands into complex numbers.
+  // First pass: check if there are any imaginary terms (otherwise skip entirely)
   const xs: BoxedExpression[] = [];
-  for (let i = 0; i < ops.length; i++) {
-    const op = ops[i];
-    if (isBoxedNumber(op)) {
-      const nv = op.numericValue;
+  {
+    let imSum = 0;
+    let hasIm = false;
 
-      if (
-        typeof nv === 'number' ||
-        (isSubtype(nv.type, 'real') && !nv.isExact) ||
-        isSubtype(nv.type, 'integer')
-      ) {
-        // We have a number such as 4, 3.14, etc. but not 2/3, √2, etc.
-        // Check the following term to see if it's an imaginary number
-
-        const next = ops[i + 1];
-        if (next) {
-          const facExpr = getImaginaryFactor(next);
-          const fac =
-            facExpr && isBoxedNumber(facExpr)
-              ? facExpr.numericValue
-              : undefined;
-          if (fac !== undefined) {
-            const im = typeof fac === 'number' ? fac : fac.re;
-            if (im !== 0) {
-              const re = typeof nv === 'number' ? nv : nv.re;
-              xs.push(ce.number(ce._numericValue({ re, im: im ?? 0 })));
-              i++;
-              continue;
-            }
+    for (const op of ops) {
+      if (isBoxedNumber(op)) {
+        const facExpr = getImaginaryFactor(op);
+        if (facExpr !== undefined && isBoxedNumber(facExpr)) {
+          const f = facExpr.numericValue;
+          const im = typeof f === 'number' ? f : f.re;
+          if (im !== 0 && typeof im === 'number') {
+            imSum += im;
+            hasIm = true;
           }
         }
       }
     }
-    xs.push(op);
+
+    if (hasIm) {
+      // We have imaginary terms: find the first real float/integer to pair with
+      let realVal: number | undefined;
+      let realFound = false;
+
+      for (const op of ops) {
+        if (isBoxedNumber(op)) {
+          // Skip pure imaginary terms (already summed above)
+          const facExpr = getImaginaryFactor(op);
+          if (facExpr !== undefined && isBoxedNumber(facExpr)) {
+            const f = facExpr.numericValue;
+            const im = typeof f === 'number' ? f : f.re;
+            if (im !== 0 && typeof im === 'number') continue;
+          }
+
+          // Take only the first real to combine with imaginary
+          if (!realFound) {
+            const nv = op.numericValue;
+            if (
+              typeof nv === 'number' ||
+              (isSubtype(nv.type, 'real') && !nv.isExact) ||
+              isSubtype(nv.type, 'integer')
+            ) {
+              const re = typeof nv === 'number' ? nv : nv.re;
+              if (typeof re === 'number') {
+                realVal = re;
+                realFound = true;
+                continue;
+              }
+            }
+          }
+        }
+        xs.push(op);
+      }
+
+      if (realFound)
+        xs.push(ce.number(ce._numericValue({ re: realVal!, im: imSum })));
+      else if (imSum !== 0)
+        xs.push(ce.number(ce._numericValue({ re: 0, im: imSum })));
+    } else {
+      // No imaginary terms — nothing to combine
+      xs.push(...ops);
+    }
   }
 
   if (xs.length === 1) return xs[0];

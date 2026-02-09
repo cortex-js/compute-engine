@@ -818,7 +818,7 @@ describe('SUM', () => {
   it('should return body value for single iteration sum', () => {
     expect(
       ce.parse('\\sum_{n=5}^{5}(n^2)').simplify().toString()
-    ).toMatchInlineSnapshot(`5^2`);
+    ).toMatchInlineSnapshot(`25`);
   });
 
   // Alternating unit series

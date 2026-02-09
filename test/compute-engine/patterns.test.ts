@@ -520,7 +520,7 @@ describe('PATTERNS  MATCH - Sequence wildcards', () => {
         )
       ).toMatchInlineSnapshot(`
         {
-          __a: ["Sequence", ["Power", 6, 3], 72],
+          __a: ["Sequence", 216, 72],
         }
       `);
 
@@ -644,7 +644,7 @@ describe('PATTERNS  MATCH - Sequence wildcards', () => {
       expect(match(['Log', '_l', '___'], ['Log', ['Power', 10, 10]]))
         .toMatchInlineSnapshot(`
         {
-          _l: ["Power", 10, 10],
+          _l: 10000000000,
         }
       `);
 

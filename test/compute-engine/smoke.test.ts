@@ -412,16 +412,7 @@ describe('CANONICALIZATION divide', () => {
 });
 describe('CANONICALIZATION sqrt', () => {
   test('\\sqrt{3^2}', () => {
-    expect(canonicalToJson('\\sqrt{3^2}')).toMatchInlineSnapshot(`
-      [
-        Sqrt,
-        [
-          Power,
-          3,
-          2,
-        ],
-      ]
-    `);
+    expect(canonicalToJson('\\sqrt{3^2}')).toMatchInlineSnapshot(`3`);
 
     // Canonical of Sqrt should not transform to Power
     expect(canonicalToJson('\\sqrt{12}')).toMatchInlineSnapshot(`

@@ -54,8 +54,7 @@ describe('CANONICAL FORMS', () => {
   test('2^3x"', () => {
     expect(check('2^3x')).toMatchInlineSnapshot(`
       box       = ["InvisibleOperator", ["Power", 2, 3], "x"]
-      canonical = ["Multiply", "x", ["Power", 2, 3]]
-      simplify  = 8x
+      canonical = ["Multiply", 8, "x"]
     `);
   });
 
@@ -151,8 +150,7 @@ describe('CANONICAL FORMS', () => {
   test('Convert numbers followed by imaginary unit or radical to complex', () => {
     expect(check('3i+1.5i')).toMatchInlineSnapshot(`
       box       = ["Add", ["InvisibleOperator", 3, "i"], ["InvisibleOperator", 1.5, "i"]]
-      canonical = ["Add", ["Complex", 0, 1.5], ["Complex", 0, 3]]
-      simplify  = 4.5i
+      canonical = ["Complex", 0, 4.5]
     `);
   });
 
