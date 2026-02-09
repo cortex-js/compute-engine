@@ -232,6 +232,14 @@ export const DEFINITIONS_LINEAR_ALGEBRA: LatexDictionary = [
     kind: 'function',
     latexTrigger: '\\tr',
     arguments: 'implicit',
+    serialize: (serializer: Serializer, expr: Expression): string => {
+      const arg = operand(expr, 1);
+      const argLatex = serializer.serialize(arg);
+      // Use \tr A for simple args, \tr\left(...\right) for complex ones
+      if (typeof arg === 'string' || typeof arg === 'number')
+        return `\\tr ${argLatex}`;
+      return `\\tr\\left(${argLatex}\\right)`;
+    },
   },
 
   // Also support plain text: tr(A)
