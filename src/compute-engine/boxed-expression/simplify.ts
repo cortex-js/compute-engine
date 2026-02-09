@@ -350,16 +350,29 @@ function simplifyExpression(
     expr = alt;
   }
 
-  // Try to simplify, not considering commutativity
+  // Try to simplify the function expression
   const result = simplifyNonCommutativeFunction(expr, rules, options, steps);
   if (result.length > steps.length) return result;
 
-  // If this is a commutative function, try variations on the order of the operands
-  // if (expr.functionDefinition?.commutative === true) {
-  //   result = _simplifyCommutativeFunction(expr, rules, options, steps);
-  //   if (result.length > steps.length) return result;
-  // }
-  // @fixme: should try permutations on rules that are commutative
+  // NOTE: Trying permutations of operands for commutative functions is
+  // NOT needed:
+  //
+  // 1. Pattern-based rules already try permutations via `matchPermutations:
+  //    true` (default) which permutes the *pattern* operands to find matches.
+  //
+  // 2. Most simplification rules (90%+) are functional, not pattern-based.
+  //    Functional rules have direct access to operands and can check any
+  //    ordering they need.
+  //
+  // 3. Canonicalization sorts commutative operators during boxing, providing
+  //    consistent ordering that most rules rely on.
+  //
+  // 4. The performance cost would be factorial: 6× for 3 operands, 24× for
+  //    4 operands, 720× for 6 operands - far exceeding any benefit.
+  //
+  // 5. Rules that truly need custom permutation logic
+  //    (like factorPerfectSquare) implement it internally with controlled
+  //    complexity.
 
   return steps;
 }
