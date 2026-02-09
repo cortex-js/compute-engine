@@ -625,5 +625,21 @@ describe('SYMBOLS', () => {
       expect(isValidSymbol('x____002012y')).toBe(true);
       expect(isValidSymbol('____002012abc')).toBe(true);
     });
+
+    test('Spaces in symbol body are ignored', () => {
+      // Literal space
+      expect(parse('\\operatorname{ab cd}')).toMatchInlineSnapshot(`abcd`);
+      expect(parse('\\mathrm{ab cd}')).toMatchInlineSnapshot(`abcd`);
+      // Space after \char hex number
+      expect(parse('\\operatorname{x\\char"2260 y}')).toMatchInlineSnapshot(
+        `x____002260y`
+      );
+      // Space after \unicode
+      expect(
+        parse('\\operatorname{x\\unicode{"2012} y}')
+      ).toMatchInlineSnapshot(`x____002012y`);
+      // Tilde (active char → space)
+      expect(parse('\\operatorname{a~b}')).toMatchInlineSnapshot(`ab`);
+    });
   });
 });

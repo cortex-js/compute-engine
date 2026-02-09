@@ -151,6 +151,7 @@ function parseSymbolBody(parser: Parser): string | null {
     while (!parser.atEnd) {
       const token = parser.peek;
       if (token === '<}>' || token === '_' || token === '^') break;
+      if (token === '<space>') { parser.nextToken(); continue; }
       const next = parseSymbolToken(parser, { toplevel: false });
       if (next === null) return null;
       id += next;
