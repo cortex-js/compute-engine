@@ -2,10 +2,6 @@ import type { OneOf } from '../../common/one-of';
 import type { Expression, MathJsonSymbol } from '../../math-json/types';
 import type { TypeString } from '../../common/type/types';
 import { BoxedType } from '../../common/type/boxed-type';
-import type {
-  IndexedLatexDictionary,
-  IndexedLatexDictionaryEntry,
-} from './dictionary/indexed-types';
 
 export type SymbolTable = {
   parent: SymbolTable | null;
@@ -1185,6 +1181,18 @@ export type SerializeLatexOptions = NumberSerializationFormat & {
   ) => 'compact' | 'regular' | 'interval' | 'set-builder';
 };
 
+/** @internal */
+export interface SerializerDictionaryEntry {
+  name?: string;
+}
+
+/** @internal */
+export interface SerializerDictionary {
+  ids: ReadonlyMap<string, SerializerDictionaryEntry>;
+  lookahead: number;
+  defs: readonly SerializerDictionaryEntry[];
+}
+
 /**
  *
  * An instance of `Serializer` is provided to the `serialize` handlers of custom
@@ -1195,7 +1203,7 @@ export type SerializeLatexOptions = NumberSerializationFormat & {
  */
 export interface Serializer {
   readonly options: Required<SerializeLatexOptions>;
-  readonly dictionary: IndexedLatexDictionary;
+  readonly dictionary: SerializerDictionary;
 
   /** "depth" of the expression:
    * - 0 for the root
@@ -1215,7 +1223,7 @@ export interface Serializer {
 
   serializeFunction(
     expr: Expression,
-    def?: IndexedLatexDictionaryEntry
+    def?: SerializerDictionaryEntry
   ): LatexString;
 
   serializeSymbol(expr: Expression): LatexString;

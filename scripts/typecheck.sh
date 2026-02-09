@@ -6,12 +6,14 @@ echo "Running TypeScript type check..."
 tsc --target es2022 -d --moduleResolution node --allowImportingTsExtensions true --emitDeclarationOnly --outDir /tmp/typecheck ./src/compute-engine.ts
 
 # Circular dependency check
-MAX_CYCLES=9
+MAX_CYCLES=7
 echo ""
 echo "Checking circular dependencies (budget: $MAX_CYCLES)..."
 
 CYCLE_OUTPUT=$(npx madge --circular --extensions ts src/compute-engine 2>&1) || true
-CYCLE_COUNT=$(echo "$CYCLE_OUTPUT" | grep -oE 'Found [0-9]+ circular' | grep -oE '[0-9]+')
+CYCLE_COUNT=$(
+  echo "$CYCLE_OUTPUT" | grep -oE 'Found [0-9]+ circular' | grep -oE '[0-9]+' || true
+)
 
 if [ -z "$CYCLE_COUNT" ]; then
   echo "No circular dependencies found."

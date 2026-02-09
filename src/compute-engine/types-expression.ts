@@ -1705,7 +1705,7 @@ export interface StringInterface {
  * @category Boxed Expression
  */
 export interface TensorInterface {
-  readonly tensor: Tensor<any>;
+  readonly tensor: Tensor<TensorDataType>;
   readonly shape: number[];
   readonly rank: number;
 }

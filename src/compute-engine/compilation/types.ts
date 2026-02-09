@@ -1,5 +1,5 @@
 import type { MathJsonSymbol } from '../../math-json/types';
-import type { BoxedExpression } from '../global-types';
+import type { BoxedExpression } from '../types-expression';
 
 /**
  * Source code in the target language
@@ -178,5 +178,5 @@ export interface CompilationResult {
   code: string;
 
   /** Executable function (present for JS-executable targets only) */
-  run?: (...args: any[]) => any;
+  run?: (...args: number[]) => number;
 }
