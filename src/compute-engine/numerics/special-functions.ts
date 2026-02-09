@@ -219,3 +219,273 @@ export function bigGamma(ce: ComputeEngine, z: BigNum): BigNum {
     .sqrt()
     .mul(x.mul(t.neg().exp()).mul(t.pow(z.add(ce._BIGNUM_HALF))));
 }
+
+// Euler-Mascheroni constant
+const EULER_MASCHERONI = 0.5772156649015329;
+
+// Bernoulli numbers B_{2k} for k=1..10 (used in asymptotic expansions)
+const BERNOULLI_2K = [
+  1 / 6, // B_2
+  -1 / 30, // B_4
+  1 / 42, // B_6
+  -1 / 30, // B_8
+  5 / 66, // B_10
+  -691 / 2730, // B_12
+  7 / 6, // B_14
+  -3617 / 510, // B_16
+  43867 / 798, // B_18
+  -174611 / 330, // B_20
+];
+
+/**
+ * Digamma function ψ(x) = d/dx ln(Γ(x)) = Γ'(x)/Γ(x)
+ * Uses recurrence to shift x > 7 then asymptotic expansion.
+ */
+export function digamma(x: number): number {
+  if (!isFinite(x)) return NaN;
+
+  // Reflection formula for negative values: ψ(1-x) = ψ(x) + π·cot(πx)
+  if (x < 0) {
+    if (Number.isInteger(x)) return NaN; // poles at non-positive integers
+    return digamma(1 - x) - Math.PI / Math.tan(Math.PI * x);
+  }
+
+  // Special value
+  if (x === 0) return NaN; // pole
+
+  // Recurrence: ψ(x+1) = ψ(x) + 1/x — shift x up until x > 7
+  let result = 0;
+  let z = x;
+  while (z < 7) {
+    result -= 1 / z;
+    z += 1;
+  }
+
+  // Asymptotic expansion: ψ(z) ~ ln(z) - 1/(2z) - Σ B_{2k}/(2k·z^{2k})
+  result += Math.log(z) - 1 / (2 * z);
+  let z2k = z * z; // z^2
+  for (let k = 0; k < BERNOULLI_2K.length; k++) {
+    result -= BERNOULLI_2K[k] / ((2 * (k + 1)) * z2k);
+    z2k *= z * z;
+  }
+
+  return result;
+}
+
+/**
+ * Trigamma function ψ₁(x) = d/dx ψ(x) = d²/dx² ln(Γ(x))
+ * Uses recurrence + asymptotic expansion.
+ */
+export function trigamma(x: number): number {
+  if (!isFinite(x)) return NaN;
+
+  // Reflection formula: ψ₁(1-x) + ψ₁(x) = π²/sin²(πx)
+  if (x < 0) {
+    if (Number.isInteger(x)) return NaN;
+    const s = Math.sin(Math.PI * x);
+    return (Math.PI * Math.PI) / (s * s) - trigamma(1 - x);
+  }
+
+  if (x === 0) return NaN; // pole
+
+  // Recurrence: ψ₁(x+1) = ψ₁(x) - 1/x²
+  let result = 0;
+  let z = x;
+  while (z < 7) {
+    result += 1 / (z * z);
+    z += 1;
+  }
+
+  // Asymptotic: ψ₁(z) ~ 1/z + 1/(2z²) + Σ B_{2k}/z^{2k+1}
+  result += 1 / z + 1 / (2 * z * z);
+  let z2kp1 = z * z * z; // z^3
+  for (let k = 0; k < BERNOULLI_2K.length; k++) {
+    result += BERNOULLI_2K[k] / z2kp1;
+    z2kp1 *= z * z;
+  }
+
+  return result;
+}
+
+/**
+ * Polygamma function ψₙ(x) = dⁿ/dxⁿ ψ(x)
+ * PolyGamma(0, x) = Digamma(x), PolyGamma(1, x) = Trigamma(x)
+ * For n ≥ 2, uses recurrence + asymptotic expansion.
+ */
+export function polygamma(n: number, x: number): number {
+  if (!Number.isInteger(n) || n < 0) return NaN;
+  if (n === 0) return digamma(x);
+  if (n === 1) return trigamma(x);
+  if (!isFinite(x) || x === 0) return NaN;
+
+  // Reflection formula for negative x
+  if (x < 0) {
+    if (Number.isInteger(x)) return NaN;
+    // ψₙ(1-x) + (-1)^{n+1} ψₙ(x) = (-1)^n π dⁿ/dxⁿ cot(πx)
+    // This is complex for general n, so use recurrence to shift to positive
+    let result = 0;
+    let z = x;
+    const sign = n % 2 === 0 ? 1 : -1;
+    while (z < 1) {
+      // ψₙ(x) = ψₙ(x+1) + (-1)^{n+1} n! / x^{n+1}
+      result += sign * factorial(n) / Math.pow(z, n + 1);
+      z += 1;
+    }
+    return result + polygamma(n, z);
+  }
+
+  // Recurrence: ψₙ(x+1) = ψₙ(x) + (-1)^n n! / x^{n+1}
+  let result = 0;
+  let z = x;
+  const sign = n % 2 === 0 ? -1 : 1;
+  while (z < 7) {
+    result += sign * factorial(n) / Math.pow(z, n + 1);
+    z += 1;
+  }
+
+  // Asymptotic: ψₙ(z) ~ (-1)^{n+1} [ (n-1)!/z^n + n!/(2z^{n+1}) + Σ ... ]
+  const signA = n % 2 === 0 ? -1 : 1;
+  result += signA * factorial(n - 1) / Math.pow(z, n);
+  result += signA * factorial(n) / (2 * Math.pow(z, n + 1));
+
+  // Higher-order terms using Bernoulli numbers
+  let zPow = Math.pow(z, n + 2);
+  for (let k = 0; k < Math.min(BERNOULLI_2K.length, 6); k++) {
+    const m = 2 * (k + 1);
+    let coeff = 1;
+    for (let j = 0; j < m; j++) coeff *= (n + j);
+    result += signA * BERNOULLI_2K[k] * coeff / (factorial(m) * zPow);
+    zPow *= z * z;
+  }
+
+  return result;
+}
+
+function factorial(n: number): number {
+  if (n <= 1) return 1;
+  let r = 1;
+  for (let i = 2; i <= n; i++) r *= i;
+  return r;
+}
+
+/**
+ * Beta function B(a, b) = Γ(a)Γ(b)/Γ(a+b)
+ * Uses gamma directly for small args (more accurate) and gammaln for large.
+ */
+export function beta(a: number, b: number): number {
+  // For large arguments, use gammaln to avoid overflow
+  if (a > 100 || b > 100 || a + b > 100) {
+    return Math.exp(gammaln(a) + gammaln(b) - gammaln(a + b));
+  }
+  // Direct computation: more accurate for small arguments
+  return (gamma(a) * gamma(b)) / gamma(a + b);
+}
+
+/**
+ * Riemann zeta function ζ(s) = Σ_{n=1}^∞ 1/n^s
+ * Uses Borwein's algorithm for convergence acceleration.
+ */
+export function zeta(s: number): number {
+  if (!isFinite(s)) return NaN;
+  if (s === 1) return Infinity; // pole
+
+  // Special values for positive even integers
+  if (s === 0) return -0.5;
+  if (s === 2) return (Math.PI * Math.PI) / 6;
+  if (s === 4) return (Math.PI ** 4) / 90;
+  if (s === 6) return (Math.PI ** 6) / 945;
+  if (s === 8) return (Math.PI ** 8) / 9450;
+
+  // Functional equation for Re(s) < 0:
+  // ζ(s) = 2^s π^{s-1} sin(πs/2) Γ(1-s) ζ(1-s)
+  if (s < 0) {
+    return (
+      Math.pow(2, s) *
+      Math.pow(Math.PI, s - 1) *
+      Math.sin((Math.PI * s) / 2) *
+      gamma(1 - s) *
+      zeta(1 - s)
+    );
+  }
+
+  // Cohen-Villegas-Zagier acceleration for the Dirichlet eta function
+  // ζ(s) = -1/(d_{n}(1-2^{1-s})) Σ_{k=0}^{n} (-1)^k (d_k - d_n) / (k+1)^s
+  const n = 22;
+  const d = zetaCoefficients(n);
+  const dn = d[n];
+  let sum = 0;
+  for (let k = 0; k <= n; k++) {
+    sum += (k % 2 === 0 ? 1 : -1) * (d[k] - dn) / Math.pow(k + 1, s);
+  }
+  return (-1 / (dn * (1 - Math.pow(2, 1 - s)))) * sum;
+}
+
+/** Cohen-Villegas-Zagier coefficients for zeta function acceleration.
+ * d_k = Σ_{i=0}^{k} C(n,i) for the partial sums of binomial coefficients. */
+function zetaCoefficients(n: number): number[] {
+  const d = new Array(n + 1);
+  d[0] = 1;
+  for (let i = 1; i <= n; i++) {
+    // C(n, i) = C(n, i-1) * (n-i+1) / i
+    // d[i] = d[i-1] + C(n, i)
+    d[i] = d[i - 1] + binomialCoeff(n, i);
+  }
+  return d;
+}
+
+function binomialCoeff(n: number, k: number): number {
+  if (k > n - k) k = n - k;
+  let r = 1;
+  for (let i = 0; i < k; i++) {
+    r = (r * (n - i)) / (i + 1);
+  }
+  return r;
+}
+
+/**
+ * Lambert W function W₀(x): the principal branch satisfying W(x)·e^{W(x)} = x.
+ * Uses Halley's method with appropriate initial guesses.
+ */
+export function lambertW(x: number): number {
+  if (!isFinite(x)) return x; // ±Infinity, NaN
+  if (x === 0) return 0;
+
+  const e1 = 1 / Math.E; // 1/e ≈ 0.3679
+
+  // W is defined for x >= -1/e
+  if (x < -e1) return NaN;
+
+  // Branch point: W(-1/e) = -1
+  if (Math.abs(x + e1) < 1e-15) return -1;
+
+  // Initial guess
+  let w: number;
+  if (x < 0) {
+    // Near -1/e: use series expansion around branch point
+    const p = Math.sqrt(2 * (Math.E * x + 1));
+    w = -1 + p - p * p / 3 + (11 / 72) * p * p * p;
+  } else if (x <= 1) {
+    w = x * (1 - x * (1 - 1.5 * x)); // Padé-like initial guess for small x
+  } else if (x < 100) {
+    const lnx = Math.log(x);
+    w = lnx - Math.log(lnx);
+  } else {
+    const l1 = Math.log(x);
+    const l2 = Math.log(l1);
+    w = l1 - l2 + l2 / l1;
+  }
+
+  // Halley's method: converges cubically
+  for (let i = 0; i < 30; i++) {
+    const ew = Math.exp(w);
+    const wew = w * ew;
+    const f = wew - x;
+    const fp = ew * (w + 1);
+    const fpp = ew * (w + 2);
+    const delta = f / (fp - (f * fpp) / (2 * fp));
+    w -= delta;
+    if (Math.abs(delta) < 1e-15 * (1 + Math.abs(w))) break;
+  }
+
+  return w;
+}

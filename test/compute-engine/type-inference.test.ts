@@ -254,3 +254,17 @@ describe('SIGNATURE-BASED FALLBACK TYPE NARROWING', () => {
     expect(expr.type.matches('integer')).toBe(true);
   });
 });
+
+describe('TYPE INFERENCE FOR ROUNDING AND DIVISOR FUNCTIONS', () => {
+  it('Truncate returns finite_integer for finite input', () => {
+    expect(ce.box(['Truncate', 3.7]).type.toString()).toBe('finite_integer');
+  });
+
+  it('GCD returns finite_integer', () => {
+    expect(ce.box(['GCD', 12, 8]).type.toString()).toBe('finite_integer');
+  });
+
+  it('LCM returns finite_integer', () => {
+    expect(ce.box(['LCM', 4, 6]).type.toString()).toBe('finite_integer');
+  });
+});

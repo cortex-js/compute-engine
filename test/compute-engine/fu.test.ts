@@ -386,42 +386,42 @@ describe('Integration - simplify({ strategy: "fu" })', () => {
   });
 });
 
-describe('Integration - trigSimplify() method', () => {
-  test('trigSimplify on sin*cos', () => {
+describe('Integration - simplify with fu strategy', () => {
+  test('fu strategy on sin*cos', () => {
     const expr = ce.parse('\\sin(x)\\cos(x)');
-    const result = expr.trigSimplify();
+    const result = expr.simplify({ strategy: 'fu' });
     expect(result).toBeDefined();
     expect(countTrigFunctions(result)).toBeLessThanOrEqual(
       countTrigFunctions(expr)
     );
   });
 
-  test('trigSimplify on Pythagorean identity', () => {
+  test('fu strategy on Pythagorean identity', () => {
     const expr = ce.parse('\\sin^2(x) + \\cos^2(x)');
-    const result = expr.trigSimplify();
+    const result = expr.simplify({ strategy: 'fu' });
     expect(result.is(1)).toBe(true);
   });
 
-  test('trigSimplify on non-trig expression returns same', () => {
+  test('fu strategy on non-trig expression returns same', () => {
     const expr = ce.parse('x^2 + 2x + 1');
-    const result = expr.trigSimplify();
+    const result = expr.simplify({ strategy: 'fu' });
     // Should still simplify normally
     expect(result).toBeDefined();
   });
 
-  test('trigSimplify on double angle', () => {
+  test('fu strategy on double angle', () => {
     const expr = ce.parse('2\\sin(x)\\cos(x)');
-    const result = expr.trigSimplify();
+    const result = expr.simplify({ strategy: 'fu' });
     // Should become sin(2x)
     expect(result.operator).toBe('Sin');
     expect(countTrigFunctions(result)).toBe(1);
   });
 
-  test('trigSimplify on sec expression', () => {
+  test('fu strategy on sec expression', () => {
     // sec(x) alone may stay as sec due to cost function preference
     // but sec in a larger expression should be convertible
     const expr = ce.parse('\\sec(x) - \\cos(x)');
-    const result = expr.trigSimplify();
+    const result = expr.simplify({ strategy: 'fu' });
     // Result should be valid and not have more trig functions
     expect(result).toBeDefined();
     expect(countTrigFunctions(result)).toBeLessThanOrEqual(

@@ -24,7 +24,12 @@ import type {
 
 import { isFiniteIndexedCollection, zip } from '../collection-utils';
 import { isBoxedTensor } from './boxed-tensor';
-import { isBoxedNumber, isBoxedFunction, isBoxedString } from './type-guards';
+import {
+  isBoxedNumber,
+  isBoxedFunction,
+  isBoxedString,
+  isBoxedSymbol,
+} from './type-guards';
 import { Type } from '../../common/type/types';
 import { BoxedType } from '../../common/type/boxed-type';
 import { parseType } from '../../common/type/parse';
@@ -949,6 +954,11 @@ export class BoxedFunction
       if (result !== null) return result;
     }
 
+    // Handle Or: solve each operand independently, merge results
+    if (this.operator === 'Or') {
+      return solveOr(this.ops, varNames);
+    }
+
     // Existing univariate solving
     if (varNames.length !== 1) return null;
     return findUnivariateRoots(this, varNames[0]);
@@ -1295,7 +1305,121 @@ function solveSystem(
     }
   }
 
+  // Mixed equality + inequality system
+  if (equations) {
+    const equalities = equations.filter((eq) => eq.operator === 'Equal');
+    const inequalities = equations.filter((eq) =>
+      inequalityOps.includes(eq.operator ?? '')
+    );
+
+    // Only handle if all equations are equalities or inequalities (no unknowns)
+    if (
+      equalities.length > 0 &&
+      inequalities.length > 0 &&
+      equalities.length + inequalities.length === equations.length
+    ) {
+      // Solve equalities first
+      const linearResult = solveLinearSystem([...equalities], varNames);
+      if (linearResult) {
+        // Single parametric solution — check against inequalities
+        if (satisfiesInequalities(linearResult, inequalities))
+          return filterSolutionByTypes(ce, varNames, linearResult)
+            ? linearResult
+            : null;
+      }
+
+      // Try polynomial system
+      const polyResult = solvePolynomialSystem([...equalities], varNames);
+      if (polyResult) {
+        const filtered = polyResult.filter(
+          (s) =>
+            satisfiesInequalities(s, inequalities) &&
+            filterSolutionByTypes(ce, varNames, s)
+        );
+        if (filtered.length > 0) return filtered;
+      }
+    }
+  }
+
   return null;
+}
+
+/** Check whether a solution record satisfies all inequality constraints.
+ * Substitutes the solution into each inequality and evaluates. */
+function satisfiesInequalities(
+  solution: Record<string, BoxedExpression>,
+  inequalities: ReadonlyArray<BoxedExpression>
+): boolean {
+  return inequalities.every((ineq) => {
+    const substituted = ineq.subs(solution, { canonical: true }).evaluate();
+    return isBoxedSymbol(substituted) && substituted.symbol === 'True';
+  });
+}
+
+/** Solve an Or expression by solving each operand independently and merging
+ * results. For univariate: collects BoxedExpression[], deduplicates via JSON.
+ * For multivariate: collects Record[], deduplicates similarly. */
+function solveOr(
+  operands: ReadonlyArray<BoxedExpression>,
+  varNames: string[]
+):
+  | null
+  | ReadonlyArray<BoxedExpression>
+  | Array<Record<string, BoxedExpression>> {
+  if (varNames.length === 1) {
+    // Univariate: collect all roots, deduplicate
+    const seen = new Set<string>();
+    const results: BoxedExpression[] = [];
+    for (const op of operands) {
+      const sol = op.solve(varNames) as
+        | ReadonlyArray<BoxedExpression>
+        | null;
+      if (!sol || !Array.isArray(sol)) continue;
+      for (const s of sol) {
+        const key = JSON.stringify(s.json);
+        if (!seen.has(key)) {
+          seen.add(key);
+          results.push(s);
+        }
+      }
+    }
+    return results.length > 0 ? results : null;
+  }
+
+  // Multivariate: collect Record solutions, deduplicate
+  const seen = new Set<string>();
+  const results: Array<Record<string, BoxedExpression>> = [];
+  for (const op of operands) {
+    const sol = op.solve(varNames);
+    if (!sol) continue;
+    // Single Record result
+    if (!Array.isArray(sol)) {
+      const rec = sol as Record<string, BoxedExpression>;
+      const key = JSON.stringify(
+        Object.fromEntries(
+          Object.entries(rec).map(([k, v]) => [k, v.json])
+        )
+      );
+      if (!seen.has(key)) {
+        seen.add(key);
+        results.push(rec);
+      }
+      continue;
+    }
+    // Array of Records
+    for (const s of sol as Array<Record<string, BoxedExpression>>) {
+      const key = JSON.stringify(
+        Object.fromEntries(
+          Object.entries(s).map(([k, v]) => [k, v.json])
+        )
+      );
+      if (!seen.has(key)) {
+        seen.add(key);
+        results.push(s);
+      }
+    }
+  }
+  return results.length > 0 ? results : null;
 }
 
 /** Filter a multivariate solution by the declared types of the variables.

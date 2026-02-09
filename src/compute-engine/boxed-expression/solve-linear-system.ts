@@ -548,10 +548,12 @@ function solveParametric(
     solution[col] = expr.div(aug[row][col]).simplify();
   }
 
-  // Build result object
+  // Build result object, omitting free variables (self-referential symbols)
   const result: Record<string, BoxedExpression> = {};
   for (let i = 0; i < n; i++) {
-    result[variables[i]] = solution[i];
+    const sol = solution[i];
+    if (isBoxedSymbol(sol) && sol.symbol === variables[i]) continue;
+    result[variables[i]] = sol;
   }
 
   return result;

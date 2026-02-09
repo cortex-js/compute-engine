@@ -33,6 +33,12 @@ import {
   gammaln,
   bigGamma,
   bigGammaln,
+  digamma,
+  trigamma,
+  polygamma,
+  beta,
+  zeta,
+  lambertW,
 } from '../numerics/special-functions';
 import { factorial2, gcd, lcm } from '../numerics/numeric';
 import { rationalize } from '../numerics/rationals';
@@ -556,6 +562,8 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       broadcastable: true,
       signature: '(number) -> number',
       type: (ops) => numericTypeHandler(ops),
+      evaluate: ([x], { numericApproximation }) =>
+        numericApproximation ? apply(x, digamma) : undefined,
     },
 
     // Trigamma function ψ₁(x) = d/dx ψ(x) = d²/dx² ln(Γ(x))
@@ -567,6 +575,8 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       broadcastable: true,
       signature: '(number) -> number',
       type: (ops) => numericTypeHandler(ops),
+      evaluate: ([x], { numericApproximation }) =>
+        numericApproximation ? apply(x, trigamma) : undefined,
     },
 
     // PolyGamma function ψₙ(x) = dⁿ/dxⁿ ψ(x)
@@ -580,6 +590,10 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       broadcastable: true,
       signature: '(order: integer, number) -> number',
       type: (ops) => numericTypeHandler(ops),
+      evaluate: ([n, x], { numericApproximation }) =>
+        numericApproximation
+          ? apply2(n, x, (n, x) => polygamma(n, x))
+          : undefined,
     },
 
     // Riemann zeta function ζ(s) = Σ_{n=1}^∞ 1/n^s
@@ -591,6 +605,8 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       broadcastable: true,
       signature: '(number) -> number',
       type: (ops) => numericTypeHandler(ops),
+      evaluate: ([x], { numericApproximation }) =>
+        numericApproximation ? apply(x, zeta) : undefined,
     },
 
     // Beta function B(a,b) = Γ(a)Γ(b)/Γ(a+b) = ∫₀¹ t^(a-1)(1-t)^(b-1) dt
@@ -601,6 +617,8 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       broadcastable: true,
       signature: '(number, number) -> number',
       type: (ops) => numericTypeHandler(ops),
+      evaluate: ([a, b], { numericApproximation }) =>
+        numericApproximation ? apply2(a, b, beta) : undefined,
     },
 
     // Lambert W function: W(x)·e^(W(x)) = x
@@ -612,6 +630,8 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       broadcastable: true,
       signature: '(number) -> number',
       type: (ops) => numericTypeHandler(ops),
+      evaluate: ([x], { numericApproximation }) =>
+        numericApproximation ? apply(x, lambertW) : undefined,
     },
 
     // Bessel function of the first kind J_n(x)
@@ -1283,6 +1303,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       complexity: 1250,
       broadcastable: true,
       signature: '(number) -> integer',
+      type: ([x]) => (x.isFinite !== false ? 'finite_integer' : 'integer'),
       sgn: ([x]) => x.sgn,
       evaluate: ([x]) =>
         apply(
@@ -1522,6 +1543,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       broadcastable: false, // The function take a variable number of arguments,
       // including collections
       signature: '(any*) -> integer',
+      type: () => 'finite_integer',
       sgn: () => 'positive',
       evaluate: (xs) => evaluateGcdLcm(xs, 'GCD'),
     },
@@ -1531,6 +1553,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       broadcastable: false, // The function take a variable number of arguments,
       // including collections
       signature: '(any*) -> integer',
+      type: () => 'finite_integer',
       sgn: () => 'positive',
       evaluate: (xs) => evaluateGcdLcm(xs, 'LCM'),
     },
