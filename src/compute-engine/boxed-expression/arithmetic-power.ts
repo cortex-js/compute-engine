@@ -96,10 +96,16 @@ export function canonicalPower(
   if (isBoxedFunction(a) && a.operator === 'Divide' && b.isNegative === true) {
     const num = a.op1;
     const denom = a.op2;
-    // Use the pow function to recursively canonicalize
-    return pow(num, b, { numericApproximation: false }).div(
-      pow(denom, b, { numericApproximation: false })
-    );
+    // Only distribute when exponent is integer or both operands are non-negative
+    // (distributing non-integer exponents over negative operands changes sign)
+    if (
+      b.isInteger === true ||
+      (num.isNonNegative === true && denom.isNonNegative === true)
+    ) {
+      return pow(num, b, { numericApproximation: false }).div(
+        pow(denom, b, { numericApproximation: false })
+      );
+    }
   }
 
   // Onwards, the focus on operations is where is a *numeric* exponent.
@@ -455,16 +461,24 @@ export function pow(
   }
 
   // (a/b)^c -> a^c / b^c
+  // Only distribute when exponent is integer or both operands are non-negative
   if (isBoxedFunction(x) && x.operator === 'Divide') {
     const [num, denom] = x.ops;
-    return pow(num, exp, { numericApproximation }).div(
-      pow(denom, exp, { numericApproximation })
-    );
+    const expIsInteger =
+      typeof exp === 'number' ? Number.isInteger(exp) : exp.isInteger === true;
+    if (
+      expIsInteger ||
+      (num.isNonNegative === true && denom.isNonNegative === true)
+    ) {
+      return pow(num, exp, { numericApproximation }).div(
+        pow(denom, exp, { numericApproximation })
+      );
+    }
   }
 
   if (isBoxedFunction(x) && x.operator === 'Negate') {
-    // (-x)^n = (-1)^n x^n
-    if (e !== undefined) {
+    // (-x)^n = (-1)^n x^n — only valid when n is integer
+    if (e !== undefined && Number.isInteger(e)) {
       if (e % 2 === 0) return pow(x.op1, exp, { numericApproximation });
       return pow(x.op1, exp, { numericApproximation }).neg();
     }
@@ -481,11 +495,15 @@ export function pow(
   if (isBoxedFunction(x) && x.operator === 'Exp')
     return pow(ce.E, x.op1.mul(exp), { numericApproximation });
 
-  // (a*b)^c -> a^c * b^c
+  // (a*b)^c -> a^c * b^c — only valid when c is integer
   if (isBoxedFunction(x) && x.operator === 'Multiply') {
-    const ops = x.ops.map((x) => pow(x, exp, { numericApproximation }));
-    // return mul(...ops);  // don't call: infinite recursion
-    return ce._fn('Multiply', ops);
+    const expIsInteger =
+      typeof exp === 'number' ? Number.isInteger(exp) : exp.isInteger === true;
+    if (expIsInteger) {
+      const ops = x.ops.map((x) => pow(x, exp, { numericApproximation }));
+      // return mul(...ops);  // don't call: infinite recursion
+      return ce._fn('Multiply', ops);
+    }
   }
 
   // a^(b/c) -> root(a, c)^b if b = 1 or c = 1

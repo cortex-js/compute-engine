@@ -1812,6 +1812,53 @@ describe('NEGATIVE BASE POWER RULES', () => {
     ));
 });
 
+describe('POWER DISTRIBUTION GUARDS', () => {
+  // Double powers (from RULE_TEST_CASES, previously 🙁)
+  test('(x^{-2})^2 = x^{-4}', () =>
+    expect(simplify('(x^{-2})^2')).toMatchInlineSnapshot(
+      `["Divide", 1, ["Power", "x", 4]]`
+    ));
+
+  test('(x^{√2})^3 = x^{3√2}', () =>
+    expect(simplify('(x^{\\sqrt{2}})^3')).toMatchInlineSnapshot(
+      `["Power", "x", ["Multiply", 3, ["Sqrt", 2]]]`
+    ));
+
+  // Negative exponents on fractions (from RULE_TEST_CASES, previously 🙁)
+  test('(3/x)^{-1} = x/3', () =>
+    expect(simplify('(3/x)^{-1}')).toMatchInlineSnapshot(
+      `["Multiply", ["Rational", 1, 3], "x"]`
+    ));
+
+  test('(3/π)^{-1} = π/3', () =>
+    expect(simplify('(3/\\pi)^{-1}')).toMatchInlineSnapshot(
+      `["Multiply", ["Rational", 1, 3], "Pi"]`
+    ));
+
+  test('(x/π)^{-3} = π^3/x^3', () =>
+    expect(simplify('(x/\\pi)^{-3}')).toMatchInlineSnapshot(
+      `["Divide", ["Power", "Pi", 3], ["Power", "x", 3]]`
+    ));
+
+  // Non-integer exponent should NOT distribute over Negate
+  test('(-x)^{0.5} stays as Sqrt(-x)', () =>
+    expect(simplify('(-x)^{0.5}')).toMatchInlineSnapshot(
+      `["Sqrt", ["Negate", "x"]]`
+    ));
+
+  // Non-integer exponent should NOT distribute over Multiply
+  test('(2*3)^{1/2} stays as Sqrt(6)', () =>
+    expect(simplify('(2 \\cdot 3)^{1/2}')).toMatchInlineSnapshot(
+      `["Sqrt", 6]`
+    ));
+
+  // Integer exponent SHOULD distribute over Multiply
+  test('(a*b)^2 = a^2 * b^2', () =>
+    expect(simplify('(a \\cdot b)^2')).toMatchInlineSnapshot(
+      `["Multiply", ["Square", "a"], ["Square", "b"]]`
+    ));
+});
+
 describe('LOGARITHM COMBINATION RULES', () => {
   // Addition: ln(x) + ln(y) -> ln(xy)
   test('ln(x) + ln(y) = ln(xy)', () =>

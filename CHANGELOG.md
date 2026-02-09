@@ -289,6 +289,17 @@ ce.simplificationRules.push({
   (`canonicalPower`), the `pow()` helper, and simplification (`simplifyPower`).
   As a result, `(x^2)^{1/2}` now correctly simplifies to `|x|` instead of `x`.
 
+- **Power distribution rules now guarded for non-integer exponents**: Three
+  additional power distribution rules in `pow()` were applied unconditionally,
+  producing wrong results when the exponent is non-integer and operands are
+  negative. (1) `(a/b)^c -> a^c / b^c` — e.g. `((-2)(-3))^{1/2} = sqrt(6)` but
+  distributing gives `(-2)^{1/2} * (-3)^{1/2} = -sqrt(6)`. (2) `(a*b)^c ->
+  a^c * b^c` — same class of bug. (3) `(-x)^n` used `n % 2 === 0` to test
+  parity, but for non-integer `n` (e.g. 0.5), `0.5 % 2 = 0.5` falls to the odd
+  branch, giving `(-x)^{0.5} -> -(x^{0.5})` which is wrong. All three rules, plus
+  the corresponding `canonicalPower()` Divide rule, now require integer exponents
+  (or non-negative operands) before distributing.
+
 ## 0.35.6 _2026-02-07_
 
 ### Bug Fixes

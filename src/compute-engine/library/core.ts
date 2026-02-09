@@ -167,8 +167,7 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
       type: (args) => {
         if (args.length === 0) return 'nothing';
         if (args.length === 1) return args[0].type;
-        // @fixme: need more logic to determine the result type
-        return 'any';
+        return parseType(`tuple<${args.map((a) => a.type).join(', ')}>`);
       },
       canonical: (args, { engine: ce }) => {
         const xs = flatten(args);
