@@ -1282,41 +1282,6 @@ export function findUnivariateRoots(
   return filterRootsByType(ce, x, validatedRoots);
 }
 
-/** Expr is an equation with an operator of
- * - `Equal`, `Less`, `Greater`, `LessEqual`, `GreaterEqual`
- *
- * Return an expression with the same operator, but with the first argument
- * a variable, if possible:
- * `2x < 4` => `x < 2`
- */
-export function univariateSolve(
-  expr: BoxedExpression,
-  x: string
-): ReadonlyArray<BoxedExpression> | null {
-  const ce = expr.engine;
-  const name = expr.operator;
-  if (name === 'Tuple') {
-    // @todo: System of equations
-    return null;
-  }
-
-  if (
-    name === null ||
-    !(expr.operator === 'Equal' || isInequalityOperator(expr.operator))
-  )
-    return null;
-
-  if (!isBoxedFunction(expr)) return null;
-  let lhs: BoxedExpression = expr.op1;
-  const rhs = expr.op2;
-  if (!rhs.is(0)) lhs = ce.box(['Subtract', lhs, rhs]);
-
-  const roots = findUnivariateRoots(lhs, x);
-
-  if (roots.length === 0) return null;
-  return roots;
-}
-
 /** Harmonization rules transform an expr into one or more equivalent
  * expressions that are easier to solve */
 export const HARMONIZATION_RULES: Rule[] = [
