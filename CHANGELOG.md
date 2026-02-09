@@ -1,3 +1,174 @@
+## [Unreleased]
+
+### API Changes
+
+#### Expression Creation: `form` Replaces `canonical`/`structural`
+
+The `canonical` (boolean or array) and `structural` (boolean) options on
+`ce.box()`, `ce.function()`, and `ce.parse()` have been unified into a single
+`form` option.
+
+```ts
+ce.box(['Add', 1, 'x'], { form: 'canonical' }); // default
+ce.box(['Add', 1, 'x'], { form: 'raw' });        // no canonicalization, no binding
+ce.function('Add', [1, 'x'], { form: 'structural' }); // bound, not fully canonical
+ce.box(['Add', 1, 'x'], { form: ['Number', 'Order'] }); // selective passes
+```
+
+#### Role-Specific Properties Moved to Type-Guarded Interfaces
+
+Properties that were previously on all `BoxedExpression` instances (returning
+`undefined` when not applicable) have been moved to role interfaces. They are
+now only accessible after narrowing with a type guard.
+
+| Removed from `BoxedExpression`        | Access via                                     |
+| :------------------------------------ | :--------------------------------------------- |
+| `.symbol`                             | `isBoxedSymbol(expr)` then `expr.symbol`       |
+| `.string`                             | `isBoxedString(expr)` then `expr.string`       |
+| `.ops`, `.nops`, `.op1`/`.op2`/`.op3` | `isBoxedFunction(expr)` then `expr.ops` etc.   |
+| `.numericValue`, `.isNumberLiteral`   | `isBoxedNumber(expr)` then `expr.numericValue` |
+| `.tensor`                             | `isBoxedTensor(expr)` then `expr.tensor`       |
+
+```ts
+// Before
+if (expr.symbol !== null) console.log(expr.symbol);
+
+// After
+import { isBoxedSymbol, sym } from '@cortex-js/compute-engine';
+
+if (isBoxedSymbol(expr)) console.log(expr.symbol);
+// or use the convenience helper:
+if (sym(expr) === 'Pi') { /* ... */ }
+```
+
+Properties that remain on `BoxedExpression`: `.operator`, `.re`/`.im`, `.shape`,
+all arithmetic methods (`.add()`, `.mul()`, etc.), and all numeric predicates
+(`.isPositive`, `.isInteger`, etc.).
+
+#### `compile()` Is Now a Free Function
+
+The `expr.compile()` method has been replaced by a standalone `compile()`
+function with a structured `CompilationResult` return type.
+
+```ts
+import { compile } from '@cortex-js/compute-engine';
+
+const result = compile(ce.parse('x^2 + 1'));
+result.run({ x: 3 });  // 10
+result.code;            // generated source
+result.success;         // true
+result.target;          // 'javascript'
+
+// Target a different language
+compile(expr, { to: 'python' });
+```
+
+Custom compilation targets can be registered and unregistered dynamically via
+`ce.registerCompilationTarget()` and `ce.unregisterCompilationTarget()`.
+
+#### `expand()` and `expandAll()` Are Now Public Free Functions
+
+`expand()` applies the distributive law at the top level of the expression,
+while `expandAll()` applies it recursively. Both return `null` if the expression
+cannot be expanded.
+
+```ts
+import { expand, expandAll } from '@cortex-js/compute-engine';
+
+const expr = ce.parse('(x+1)(x+2)');
+expand(expr);               // x^2 + 3x + 2
+expandAll(complexExpr);     // recursive expansion
+
+// Returns null when not expandable — use ?? for fallback
+const result = expand(expr) ?? expr;
+```
+
+#### `factor()` Is a Free Function
+
+Polynomial factoring functions are now standalone free functions.
+
+```ts
+import { factor, factorPolynomial, factorQuadratic } from '@cortex-js/compute-engine';
+
+factor(expr);              // general factoring
+factorPolynomial(expr);    // polynomial-specific
+factorQuadratic(expr);     // quadratic-specific
+```
+
+#### `trigSimplify()` Method Removed
+
+Use `simplify({ strategy: 'fu' })` instead, which is equivalent.
+
+```ts
+// Before
+const result = expr.trigSimplify();
+
+// After
+const result = expr.simplify({ strategy: 'fu' });
+```
+
+#### Library System
+
+The constructor now accepts a `libraries` option for controlling which libraries
+are loaded. Libraries declare their dependencies and are loaded in topological
+order.
+
+```ts
+// Load specific standard libraries
+const ce = new ComputeEngine({
+  libraries: ['core', 'arithmetic', 'trigonometry'],
+});
+
+// Add a custom library
+const ce = new ComputeEngine({
+  libraries: [
+    ...ComputeEngine.getStandardLibrary(),
+    { name: 'physics', requires: ['arithmetic'], definitions: { /* ... */ } },
+  ],
+});
+```
+
+#### User-Extensible Simplification Rules
+
+`ce.simplificationRules` is now a public getter/setter. Users can push
+additional rules or replace the entire rule set.
+
+```ts
+ce.simplificationRules.push({
+  match: ['Power', ['Sin', '_x'], 2],
+  replace: ['Subtract', 1, ['Power', ['Cos', '_x'], 2]],
+});
+```
+
+### Type Inference
+
+- **Type handlers for 25 operators**: Added explicit `type` handlers to
+  operators that were missing them, enabling the type system to return precise
+  types instead of the broad signature return type.
+  - **Arithmetic**: `Factorial`, `Factorial2`, `Sign` return `finite_integer`;
+    `Ceil` and `Floor` return `finite_integer` for finite inputs, `integer`
+    otherwise.
+  - **Trigonometry**: `Arctan` uses `numericTypeHandler` (returns `finite_real`
+    for real inputs, `finite_number` for complex).
+  - **Complex**: `Real`, `Imaginary`, `Argument` return `finite_real`.
+  - **Number theory**: `Totient`, `Sigma0`, `Sigma1`, `Eulerian`, `Stirling`,
+    `NPartition` return `finite_integer`; `SigmaMinus1` returns
+    `finite_rational`.
+  - **Combinatorics**: `Choose`, `Fibonacci`, `Binomial`, `Multinomial`,
+    `Subfactorial`, `BellNumber` return `finite_integer`.
+
+### Solving
+
+- **`And` operator support for systems of equations**: `solve()` now accepts
+  `And(Equal(...), Equal(...))` in addition to `List(Equal(...), Equal(...))`
+  for representing systems of equations. Both forms route through the same
+  linear, polynomial, and inequality solvers.
+
+- **Parametric solution type filtering**: `filterSolutionByTypes` now uses
+  `=== false` instead of `!== true` for type predicate checks. This allows
+  underdetermined (parametric) solutions to pass through when type predicates
+  return `undefined` (unknown) rather than being incorrectly rejected.
+
 ## 0.35.6 _2026-02-07_
 
 ### Bug Fixes
