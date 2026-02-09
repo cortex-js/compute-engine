@@ -2,6 +2,7 @@ import { parseType } from '../../common/type/parse';
 import { isSubtype } from '../../common/type/subtype';
 import { ListType } from '../../common/type/types';
 import { isBoxedTensor } from '../boxed-expression/boxed-tensor';
+import { totalDegree } from '../boxed-expression/polynomial-degree';
 import { checkArity } from '../boxed-expression/validate';
 import { isFiniteIndexedCollection } from '../collection-utils';
 import {
@@ -409,25 +410,107 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
     Kernel: {
       description: 'Kernel (null space) of a linear map',
       complexity: 8200,
-      signature: '(value) -> value',
+      signature: '(value) -> list',
+      evaluate: ([map], { engine: ce }) => {
+        const op = map.evaluate();
+
+        // Kernel of scalar map x -> a*x over R
+        if (op.isNumber) {
+          if (op.is(0)) return ce.box(['List', ['List', 1]]);
+          return ce.box(['List']);
+        }
+
+        if (!isBoxedTensor(op)) return undefined;
+
+        // Interpret vectors as 1×n matrices (linear forms)
+        const shape = op.shape;
+        if (shape.length > 2) return ce.error('expected-matrix', op.toString());
+
+        const rowCount = shape.length === 1 ? 1 : shape[0];
+        const columnCount = shape.length === 1 ? shape[0] : shape[1];
+        const matrix = tensorToNumericMatrix(op, rowCount, columnCount);
+        if (!matrix) return undefined;
+
+        const basis = computeNullSpaceBasis(matrix);
+        return ce.box([
+          'List',
+          ...basis.map((vector) =>
+            ce.box(['List', ...vector.map((x) => ce.number(ce.chop(x)))])
+          ),
+        ]);
+      },
     },
 
     Dimension: {
       description: 'Dimension of an object',
       complexity: 8200,
-      signature: '(value) -> value',
+      signature: '(value) -> integer',
+      sgn: (): Sign => 'non-negative',
+      evaluate: ([object], { engine: ce }) => {
+        const op = object.evaluate();
+
+        // Structural check on the *unevaluated* expression: we pattern-match
+        // on the literal Kernel(...) / Hom(...) form so that
+        // Dimension(Kernel(M)) can compute the nullity directly from the
+        // kernel basis.  If the kernel was computed earlier and stored in a
+        // symbol this branch won't fire, which is acceptable — the generic
+        // finiteDimension path below will handle it.
+        if (isBoxedFunction(object) && object.operator === 'Kernel') {
+          const kernelDim = kernelBasisDimension(op);
+          if (kernelDim !== undefined) return ce.number(kernelDim);
+        }
+
+        // dim(Hom(V, W)) = dim(V) * dim(W) for finite-dimensional objects.
+        // Same structural matching caveat as Kernel above.
+        if (
+          isBoxedFunction(object) &&
+          object.operator === 'Hom' &&
+          object.ops.length >= 2
+        ) {
+          const domainDim = finiteDimension(object.ops[0].evaluate());
+          const codomainDim = finiteDimension(object.ops[1].evaluate());
+          if (domainDim !== undefined && codomainDim !== undefined)
+            return ce.number(domainDim * codomainDim);
+        }
+
+        const dim = finiteDimension(op);
+        if (dim !== undefined) return ce.number(dim);
+
+        return undefined;
+      },
     },
 
     Degree: {
       description: 'Degree of an object',
       complexity: 8200,
-      signature: '(value) -> value',
+      signature: '(value) -> integer',
+      sgn: (): Sign => 'non-negative',
+      evaluate: ([object], { engine: ce }) => {
+        const op = object.evaluate();
+
+        // Constants have degree 0
+        if (op.unknowns.length === 0) return ce.Zero;
+
+        // A bare symbol is ambiguous (variable vs named polynomial object),
+        // keep it symbolic.
+        if (isBoxedSymbol(op) && !op.isConstant) return undefined;
+
+        if (!isPolynomialExpression(op)) return undefined;
+
+        return ce.number(totalDegree(op));
+      },
     },
 
     Hom: {
       description: 'Hom-set of morphisms between objects',
       complexity: 8200,
       signature: '(value*) -> value',
+      evaluate: (ops, { engine: ce }) => {
+        return ce._fn(
+          'Hom',
+          ops.map((op) => op.evaluate())
+        );
+      },
     },
 
     // Matrix multiplication: A (m×n) × B (n×p) → result (m×p)
@@ -1836,13 +1919,7 @@ function computeEigenvector(
   for (let i = 0; i < n; i++) {
     AminusLambdaI[i] = [];
     for (let j = 0; j < n; j++) {
-      const val = M.tensor.at(i + 1, j + 1);
-      const num =
-        typeof val === 'number'
-          ? val
-          : typeof val === 'object' && 're' in val
-            ? (val.re ?? 0)
-            : 0;
+      const num = asRealNumber(M.tensor.at(i + 1, j + 1)) ?? 0;
       AminusLambdaI[i][j] = num - (i === j ? lambdaNum : 0);
     }
   }
@@ -1904,38 +1981,135 @@ function computeEigenvector2x2Symbolic(
 }
 
 /**
- * Find a non-trivial solution to Ax = 0 (null space vector)
+ * Find a non-trivial solution to Ax = 0 (null space vector).
+ * Delegates to computeNullSpaceBasis and returns the first basis vector,
+ * normalized to unit length.
  */
 function solveNullSpace(A: number[][], n: number): number[] | undefined {
-  // Gaussian elimination with partial pivoting
-  const matrix = A.map((row) => [...row]);
-  const eps = 1e-10;
+  const basis = computeNullSpaceBasis(A);
+  if (basis.length === 0) {
+    // Matrix has full rank, no null space (shouldn't happen for eigenvalue).
+    // Return unit vector as fallback.
+    const result = Array(n).fill(0);
+    result[0] = 1;
+    return result;
+  }
 
-  // Forward elimination
-  let pivotRow = 0;
+  const result = basis[0];
+
+  // Normalize to unit length
+  let norm = 0;
+  for (let i = 0; i < result.length; i++) norm += result[i] * result[i];
+  norm = Math.sqrt(norm);
+  if (norm > 1e-10) {
+    for (let i = 0; i < result.length; i++) result[i] /= norm;
+  }
+
+  return result;
+}
+
+/**
+ * Convert a raw tensor storage value to a JS number.
+ *
+ * `tensor.tensor.at()` (AbstractTensor.at) returns raw storage values
+ * whose type depends on the tensor's dtype: number for float64,
+ * {re, im} for complex128, boolean for bool, or BoxedExpression for
+ * expression tensors. This function handles all those cases via
+ * duck-typing, which is the appropriate strategy for raw storage values.
+ */
+function asNumber(value: unknown): number | undefined {
+  if (typeof value === 'number') return value;
+  if (typeof value === 'boolean') return value ? 1 : 0;
+  if (
+    typeof value === 'object' &&
+    value !== null &&
+    'toNumber' in value &&
+    typeof value.toNumber === 'function'
+  ) {
+    const n = value.toNumber();
+    return typeof n === 'number' ? n : undefined;
+  }
+  return undefined;
+}
+
+/**
+ * Convert a tensor element to a real number.
+ * Complex values with non-zero imaginary part are rejected.
+ */
+function asRealNumber(value: unknown): number | undefined {
+  if (typeof value === 'object' && value !== null && 're' in value) {
+    const re = asNumber(value.re);
+    const im = 'im' in value ? asNumber(value.im) ?? 0 : 0;
+    if (im !== 0) return undefined;
+    return re;
+  }
+  return asNumber(value);
+}
+
+/**
+ * Convert a boxed vector/matrix tensor into a numeric matrix.
+ */
+function tensorToNumericMatrix(
+  tensor: BoxedExpression,
+  rowCount: number,
+  columnCount: number
+): number[][] | undefined {
+  if (!isBoxedTensor(tensor)) return undefined;
+
+  const matrix: number[][] = [];
+  for (let i = 0; i < rowCount; i++) {
+    matrix[i] = [];
+    for (let j = 0; j < columnCount; j++) {
+      const value =
+        tensor.rank === 1 ? tensor.tensor.at(j + 1) : tensor.tensor.at(i + 1, j + 1);
+      const num = asRealNumber(value);
+      if (num === undefined || isNaN(num)) return undefined;
+      matrix[i][j] = num;
+    }
+  }
+
+  return matrix;
+}
+
+/**
+ * Compute RREF and return the pivot columns.
+ */
+function rref(matrix: number[][], tolerance = 1e-10): {
+  matrix: number[][];
+  pivotCols: number[];
+} {
+  const rowCount = matrix.length;
+  const colCount = matrix[0]?.length ?? 0;
+  const out = matrix.map((row) => [...row]);
   const pivotCols: number[] = [];
 
-  for (let col = 0; col < n && pivotRow < n; col++) {
-    // Find pivot
-    let maxVal = Math.abs(matrix[pivotRow][col]);
+  let pivotRow = 0;
+  for (let col = 0; col < colCount && pivotRow < rowCount; col++) {
     let maxRow = pivotRow;
-    for (let row = pivotRow + 1; row < n; row++) {
-      if (Math.abs(matrix[row][col]) > maxVal) {
-        maxVal = Math.abs(matrix[row][col]);
+    let maxVal = Math.abs(out[pivotRow][col] ?? 0);
+    for (let row = pivotRow + 1; row < rowCount; row++) {
+      const v = Math.abs(out[row][col] ?? 0);
+      if (v > maxVal) {
+        maxVal = v;
         maxRow = row;
       }
     }
+    if (maxVal <= tolerance) continue;
 
-    if (maxVal < eps) continue; // Skip this column (free variable)
+    if (maxRow !== pivotRow) [out[pivotRow], out[maxRow]] = [out[maxRow], out[pivotRow]];
 
-    // Swap rows
-    [matrix[pivotRow], matrix[maxRow]] = [matrix[maxRow], matrix[pivotRow]];
+    const pivot = out[pivotRow][col];
+    for (let j = col; j < colCount; j++) out[pivotRow][j] /= pivot;
 
-    // Eliminate below
-    for (let row = pivotRow + 1; row < n; row++) {
-      const factor = matrix[row][col] / matrix[pivotRow][col];
-      for (let j = col; j < n; j++) {
-        matrix[row][j] -= factor * matrix[pivotRow][j];
+    for (let row = 0; row < rowCount; row++) {
+      if (row === pivotRow) continue;
+      const factor = out[row][col];
+      if (Math.abs(factor) <= tolerance) {
+        out[row][col] = 0;
+        continue;
+      }
+      for (let j = col; j < colCount; j++) {
+        out[row][j] -= factor * out[pivotRow][j];
       }
     }
 
@@ -1943,50 +2117,135 @@ function solveNullSpace(A: number[][], n: number): number[] | undefined {
     pivotRow++;
   }
 
-  // Find free variable (column without pivot)
-  let freeCol = -1;
-  for (let col = 0; col < n; col++) {
-    if (!pivotCols.includes(col)) {
-      freeCol = col;
-      break;
+  // Chop tiny values introduced by floating point noise.
+  for (let i = 0; i < rowCount; i++) {
+    for (let j = 0; j < colCount; j++) {
+      if (Math.abs(out[i][j]) <= tolerance) out[i][j] = 0;
     }
   }
 
-  if (freeCol === -1) {
-    // Matrix has full rank, no null space (shouldn't happen for eigenvalue)
-    // Return unit vector as fallback
-    const result = Array(n).fill(0);
-    result[0] = 1;
-    return result;
+  return { matrix: out, pivotCols };
+}
+
+/**
+ * Return a basis of the null space of A as row vectors.
+ */
+function computeNullSpaceBasis(A: number[][]): number[][] {
+  const colCount = A[0]?.length ?? 0;
+  if (colCount === 0) return [];
+
+  const { matrix, pivotCols } = rref(A);
+  const pivotSet = new Set(pivotCols);
+  const freeCols: number[] = [];
+  for (let col = 0; col < colCount; col++) {
+    if (!pivotSet.has(col)) freeCols.push(col);
   }
+  if (freeCols.length === 0) return [];
 
-  // Back substitution with free variable = 1
-  const result = Array(n).fill(0);
-  result[freeCol] = 1;
-
-  for (let i = pivotCols.length - 1; i >= 0; i--) {
-    const row = i;
-    const col = pivotCols[i];
-    let sum = 0;
-    for (let j = col + 1; j < n; j++) {
-      sum += matrix[row][j] * result[j];
+  const basis: number[][] = [];
+  for (const freeCol of freeCols) {
+    const vector = Array(colCount).fill(0);
+    vector[freeCol] = 1;
+    for (let row = 0; row < pivotCols.length; row++) {
+      const pivotCol = pivotCols[row];
+      vector[pivotCol] = -matrix[row][freeCol];
     }
-    result[col] = -sum / matrix[row][col];
+    basis.push(vector);
   }
+  return basis;
+}
 
-  // Normalize
-  let norm = 0;
-  for (let i = 0; i < n; i++) {
-    norm += result[i] * result[i];
-  }
-  norm = Math.sqrt(norm);
-  if (norm > eps) {
-    for (let i = 0; i < n; i++) {
-      result[i] /= norm;
+/**
+ * Infer the finite dimension of a value when possible.
+ */
+function finiteDimension(value: BoxedExpression): number | undefined {
+  if (value.isNumber) return 1;
+
+  // Access the internal type representation. BoxedType.type returns the
+  // underlying TypeNode union; for list types it is a ListType object with
+  // { kind: 'list', dimensions, ... }.  This couples to the internal
+  // TypeNode representation in common/type/types.ts.
+  const type = value.type.type;
+  if (
+    typeof type === 'object' &&
+    type !== null &&
+    'kind' in type &&
+    type.kind === 'list'
+  ) {
+    const dimensions = (type as ListType).dimensions;
+    if (
+      dimensions !== undefined &&
+      dimensions.length > 0 &&
+      dimensions.every((d) => Number.isInteger(d) && d >= 0)
+    ) {
+      return dimensions.reduce((a, b) => a * b, 1);
     }
   }
 
-  return result;
+  if (isBoxedTensor(value)) {
+    if (value.shape.length === 0) return 1;
+    return value.shape.reduce((a, b) => a * b, 1);
+  }
+
+  if (isFiniteIndexedCollection(value)) {
+    let count = 0;
+    for (const _ of value.each()) count += 1;
+    return count;
+  }
+
+  return undefined;
+}
+
+/**
+ * Infer the dimension of a kernel basis representation.
+ */
+function kernelBasisDimension(value: BoxedExpression): number | undefined {
+  if (isBoxedFunction(value) && value.operator === 'List') {
+    if (value.ops.length === 0) return 0;
+    if (
+      value.ops.every(
+        (op) => isBoxedFunction(op) && op.operator === 'List'
+      )
+    ) {
+      return value.ops.length;
+    }
+  }
+
+  if (isBoxedTensor(value) && (value.rank === 1 || value.rank === 2))
+    return value.shape[0];
+
+  return undefined;
+}
+
+/**
+ * Return true if `value` is a polynomial expression in its unknowns.
+ */
+function isPolynomialExpression(value: BoxedExpression): boolean {
+  if (value.isNumber) return true;
+  if (isBoxedSymbol(value)) return !value.isConstant;
+  if (!isBoxedFunction(value)) return false;
+  if (value.unknowns.length === 0) return true;
+
+  if (value.operator === 'Add' || value.operator === 'Subtract' || value.operator === 'Multiply')
+    return value.ops.every((op) => isPolynomialExpression(op));
+
+  if (value.operator === 'Negate') return isPolynomialExpression(value.op1);
+
+  if (value.operator === 'Divide')
+    return isPolynomialExpression(value.op1) && value.op2.unknowns.length === 0;
+
+  if (value.operator === 'Power') {
+    const exp = value.op2.re;
+    return (
+      isPolynomialExpression(value.op1) &&
+      value.op2.unknowns.length === 0 &&
+      exp !== undefined &&
+      Number.isInteger(exp) &&
+      exp >= 0
+    );
+  }
+
+  return false;
 }
 
 /**

@@ -322,6 +322,18 @@ ce.simplificationRules.push({
   operator notation. The corresponding function symbols (`Kernel`, `Dimension`,
   `Degree`, `Hom`) are also registered in the linear algebra library.
 
+- **Implemented runtime evaluation for `Kernel`, `Dimension`, `Degree`, and
+  `Hom`**:
+  - `Kernel` now computes a numeric null-space basis (for scalar/vector/matrix
+    real inputs) and returns it as a list of basis vectors.
+  - `Dimension` now evaluates finite dimensions for concrete tensors and
+    collections, and computes `dim(Hom(V, W)) = dim(V) * dim(W)` when both
+    dimensions are inferable.
+  - `Degree` now evaluates polynomial degree for polynomial-form expressions
+    while keeping ambiguous bare symbols (for example `Degree(p)`) unevaluated.
+  - `Hom` now evaluates/simplifies its arguments while preserving the symbolic
+    `Hom(...)` form.
+
 ### LaTeX Parsing
 
 - **`arguments: 'implicit'` option for function dictionary entries**: Function

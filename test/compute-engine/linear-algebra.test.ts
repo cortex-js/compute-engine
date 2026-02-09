@@ -167,6 +167,79 @@ describe('Tensor Properties', () => {
   });
 });
 
+describe('Kernel/Dimension/Degree/Hom', () => {
+  it('should compute a kernel basis for a rank-deficient matrix', () => {
+    const matrix: Expression = ['List', ['List', 1, 0], ['List', 0, 0]];
+    const result = ce.box(['Kernel', matrix]).evaluate();
+    expect(result.toString()).toMatchInlineSnapshot(`[[0,1]]`);
+  });
+
+  it('should return an empty kernel basis for a full-rank matrix', () => {
+    const result = ce.box(['Kernel', sq2_n]).evaluate();
+    expect(result.toString()).toMatchInlineSnapshot(`[]`);
+  });
+
+  it('should compute dimensions of finite vectors and matrices', () => {
+    expect(ce.box(['Dimension', ['List', 1, 2, 3]]).evaluate().toString()).toBe(
+      '3'
+    );
+    expect(ce.box(['Dimension', m23_n]).evaluate().toString()).toBe('6');
+  });
+
+  it('should compute dim(Hom(V, W)) when dimensions are finite', () => {
+    const homDim = ce
+      .box(['Dimension', ['Hom', ['List', 1, 2], ['List', 3, 4, 5]]])
+      .evaluate();
+
+    expect(homDim.toString()).toBe('6');
+  });
+
+  it('should compute degree of polynomial expressions', () => {
+    const result = ce
+      .box(['Degree', ['Add', ['Power', 'x', 3], ['Multiply', 2, 'x'], 1]])
+      .evaluate();
+    expect(result.toString()).toBe('3');
+  });
+
+  it('should keep degree of an ambiguous symbol unevaluated', () => {
+    const result = ce.box(['Degree', 'p_1']).evaluate();
+    expect(result.toString()).toBe('Degree("p_1")');
+  });
+
+  it('should evaluate Hom arguments and preserve symbolic Hom form', () => {
+    const result = ce.box(['Hom', ['Add', 1, 2], ['Multiply', 2, 3]]).evaluate();
+    expect(result.toString()).toBe('Hom(3, 6)');
+  });
+
+  it('should compute kernel basis for a rectangular matrix', () => {
+    // 1×3 matrix [1, 0, 0] has a 2-dimensional null space
+    const matrix: Expression = ['List', ['List', 1, 0, 0]];
+    const result = ce.box(['Kernel', matrix]).evaluate();
+    expect(result.toString()).toMatchInlineSnapshot(`[[0,1,0],[0,0,1]]`);
+  });
+
+  it('should compute degree of Negate and Subtract expressions', () => {
+    // deg(-x^2) = 2
+    const negResult = ce
+      .box(['Degree', ['Negate', ['Power', 'x', 2]]])
+      .evaluate();
+    expect(negResult.toString()).toBe('2');
+
+    // deg(x^3 - x) = 3
+    const subResult = ce
+      .box(['Degree', ['Subtract', ['Power', 'x', 3], 'x']])
+      .evaluate();
+    expect(subResult.toString()).toBe('3');
+  });
+
+  it('should return dimension 0 for kernel of a full-rank matrix', () => {
+    const result = ce
+      .box(['Dimension', ['Kernel', sq2_n]])
+      .evaluate();
+    expect(result.toString()).toBe('0');
+  });
+});
+
 describe('Matrix addition', () => {
   it('should add a scalar to a matrix', () => {
     // Scalar + Matrix: broadcast scalar to all elements
