@@ -267,6 +267,13 @@ ce.simplificationRules.push({
 
 ### Bug Fixes
 
+- **Subscript parsing now checks for collection type**: The LaTeX subscript
+  (`_`) parser now checks whether the LHS is a collection (symbol declared as
+  `indexed_collection`, or a list literal) and produces `At()` directly at parse
+  time, consistent with bracket indexing (`x[i]`). Multi-index subscripts on
+  collections (`A_{k,j}`) are now correctly unpacked into separate `At`
+  arguments instead of being wrapped in a `Tuple`.
+
 - **`NumericValue(0).mul(Infinity)` now returns NaN**: All three `NumericValue`
   subclasses (`MachineNumericValue`, `BigNumericValue`, `ExactNumericValue`) had
   an early-return `if (this.isZero) return this` in `mul()`, which returned `0`

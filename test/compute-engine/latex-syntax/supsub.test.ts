@@ -645,15 +645,14 @@ describe('TYPE-AWARE SUBSCRIPT HANDLING', () => {
     `);
 
     // Multi-index subscripts (note: using k,j to avoid 'i' being imaginary unit)
+    // Multi-index subscripts are unpacked into separate At arguments,
+    // consistent with bracket indexing: A[k,j] also produces At(A, k, j)
     expect(ce2.parse('A_{k,j}').json).toMatchInlineSnapshot(`
       [
         At,
         A,
-        [
-          Tuple,
-          k,
-          j,
-        ],
+        k,
+        j,
       ]
     `);
 

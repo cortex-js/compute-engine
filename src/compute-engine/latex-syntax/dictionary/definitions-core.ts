@@ -619,9 +619,6 @@ export const DEFINITIONS_CORE: LatexDictionary = [
     kind: 'postfix',
     latexTrigger: ['_'],
     parse: (parser: Parser, lhs: Expression, _until?: Readonly<Terminator>) => {
-      // @fixme: should check that the lhs is a collection. If not a collection,
-      // return null (or interpret as a symbol).
-
       // Parse either a group or a single symbol
       let rhs = parser.parseGroup() ?? parser.parseToken();
       // In non-strict mode, also accept parenthesized expressions
@@ -631,6 +628,21 @@ export const DEFINITIONS_CORE: LatexDictionary = [
         parser.peek === '('
       )
         rhs = parser.parseEnclosure();
+      // If the LHS is a collection (symbol declared as indexed_collection,
+      // or a list literal), produce At() directly for indexing.
+      const sym = symbol(lhs);
+      if (
+        rhs !== null &&
+        ((sym && parser.getSymbolType(sym).matches('indexed_collection')) ||
+          operator(lhs) === 'List')
+      ) {
+        // Unwrap Delimiter if present (e.g. from comma-separated subscripts)
+        if (operator(rhs) === 'Delimiter') rhs = operand(rhs, 1) ?? 'Nothing';
+        // Multi-index: unpack Sequence into separate At arguments
+        if (operator(rhs) === 'Sequence') return ['At', lhs, ...operands(rhs)];
+        return ['At', lhs, rhs];
+      }
+
       return ['Subscript', lhs, rhs];
     },
   } as PostfixEntry,
