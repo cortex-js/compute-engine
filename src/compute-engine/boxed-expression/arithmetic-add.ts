@@ -42,6 +42,37 @@ export function canonicalAdd(
   if (ops.length === 0) return ce.Zero;
   if (ops.length === 1 && !ops[0].isIndexedCollection) return ops[0];
 
+  //
+  // Fold exact numeric operands (integers, rationals, radicals)
+  // e.g. Add(2, x, 5) → Add(x, 7), Add(√2, x, √2) → Add(x, 2√2)
+  //
+  {
+    const exactNumerics: NumericValue[] = [];
+    const rest: BoxedExpression[] = [];
+    for (const op of ops) {
+      if (isBoxedNumber(op) && !op.isInfinity && !op.isNaN) {
+        const nv = op.numericValue;
+        if (typeof nv === 'number' || nv.isExact) {
+          exactNumerics.push(
+            typeof nv === 'number' ? ce._numericValue(nv) : nv
+          );
+          continue;
+        }
+      }
+      rest.push(op);
+    }
+    if (exactNumerics.length >= 2) {
+      const summed = nvSum(ce, exactNumerics);
+      for (const nv of summed) {
+        if (!nv.isZero) rest.push(ce.number(nv));
+      }
+      ops = rest;
+      if (ops.length === 0) return ce.Zero;
+      if (ops.length === 1 && !ops[0].isIndexedCollection) return ops[0];
+    }
+    // else: 0 or 1 exact numerics — ops is unchanged, no folding needed
+  }
+
   // Iterate over the terms and check if any are complex numbers
   // (a real number followed by an imaginary number)
   const xs: BoxedExpression[] = [];

@@ -20,7 +20,7 @@ const tests: [
   ['boolean', '"True"', true],
   ['string', '"hello"', 'hello'],
   [['Add', 'x', 1], undefined, 'x + 1'],
-  [['Add', 2, 1], undefined, '1 + 2'],
+  [['Add', 2, 1], '3', 3],
 ];
 
 describe('value and valueOf()', () => {

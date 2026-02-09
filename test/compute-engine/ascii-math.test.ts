@@ -164,15 +164,15 @@ describe('POWERS/ROOTS', () => {
 
 describe('ARITHMETIC OPERATORS', () => {
   it('should serialize Add', () => {
-    expect(check('1+2')).toMatchInlineSnapshot(`1 + 2`);
-    expect(check('1-2')).toMatchInlineSnapshot(`-2 + 1`);
-    expect(check('-1-2')).toMatchInlineSnapshot(`-2 - 1`);
-    expect(check('-1-2-3')).toMatchInlineSnapshot(`-3 - 2 - 1`);
+    expect(check('1+2')).toMatchInlineSnapshot(`3`);
+    expect(check('1-2')).toMatchInlineSnapshot(`-1`);
+    expect(check('-1-2')).toMatchInlineSnapshot(`-3`);
+    expect(check('-1-2-3')).toMatchInlineSnapshot(`-6`);
     expect(check('-1.23 - 2.3454 - 3.455')).toMatchInlineSnapshot(
       `-3.455 - 2.3454 - 1.23`
     );
     expect(check('-1.23e30 - 2.3454e32 - 3.455e35')).toMatchInlineSnapshot(
-      `-3.455e+35 - 2.3454e+32 - 1.23e+30`
+      `-34573577e+28`
     );
     expect(check('1 + (2+3i)')).toMatchInlineSnapshot(`1 + (2 + 3i)`);
     expect(check('1 + (-2-3i)')).toMatchInlineSnapshot(`1 + (-2 - 3i)`);
@@ -191,34 +191,30 @@ describe('ARITHMETIC OPERATORS', () => {
   });
 
   it('should serialize Multiply', () => {
-    expect(check('2 \\times 3')).toMatchInlineSnapshot(`2 * 3`);
+    expect(check('2 \\times 3')).toMatchInlineSnapshot(`6`);
     expect(check('1 \\times 3')).toMatchInlineSnapshot(`3`);
     expect(check('-1 \\times 3')).toMatchInlineSnapshot(`-3`);
     expect(check('2 \\times 1')).toMatchInlineSnapshot(`2`);
     expect(check('2 \\times -1')).toMatchInlineSnapshot(`-2`);
-    expect(check('2 \\times -3')).toMatchInlineSnapshot(`-2 * 3`);
-    expect(check('-2 \\times -3')).toMatchInlineSnapshot(`2 * 3`);
-    expect(check('-2 \\times -3 \\times -4')).toMatchInlineSnapshot(
-      `-2 * 3 * 4`
-    );
+    expect(check('2 \\times -3')).toMatchInlineSnapshot(`-6`);
+    expect(check('-2 \\times -3')).toMatchInlineSnapshot(`6`);
+    expect(check('-2 \\times -3 \\times -4')).toMatchInlineSnapshot(`-24`);
     expect(check('-x \\times -3 \\times -4 \\times -5')).toMatchInlineSnapshot(
-      `3 * 4 * 5 * x`
+      `60x`
     );
     expect(check('2 \\times 3 \\times -4 \\times 5')).toMatchInlineSnapshot(
-      `-2 * 3 * 4 * 5`
+      `-120`
     );
     expect(
       check('2.123 \\times 3.456 \\times -4.465 \\times 5.564')
     ).toMatchInlineSnapshot(`-2.123 * 3.456 * 4.465 * 5.564`);
     expect(
       check('2.123e32 \\times 3.456e33 \\times -4.465 \\times 5')
-    ).toMatchInlineSnapshot(`-2.123e+32 * 5 * 3.456e+33 * 4.465`);
+    ).toMatchInlineSnapshot(`-3.668544e+66 * 4.465`);
 
     expect(check('\\pi \\times 4')).toMatchInlineSnapshot(`4pi`);
     expect(check('4 \\times \\pi')).toMatchInlineSnapshot(`4pi`);
-    expect(check('4 \\times \\pi \\times 3')).toMatchInlineSnapshot(
-      `3 * 4 * pi`
-    );
+    expect(check('4 \\times \\pi \\times 3')).toMatchInlineSnapshot(`12pi`);
 
     expect(check('4 \\times (2+3i)')).toMatchInlineSnapshot(`4(2 + 3i)`);
     expect(check('(2+3i) \\times 4')).toMatchInlineSnapshot(`4(2 + 3i)`);
@@ -229,7 +225,7 @@ describe('ARITHMETIC OPERATORS', () => {
 
     expect(check('x \\times y')).toMatchInlineSnapshot(`x * y`);
     expect(check('2 \\times y')).toMatchInlineSnapshot(`2y`);
-    expect(check('-2 \\times -3')).toMatchInlineSnapshot(`2 * 3`);
+    expect(check('-2 \\times -3')).toMatchInlineSnapshot(`6`);
     expect(check('-2 \\times x')).toMatchInlineSnapshot(`-2x`);
     expect(check('-2 \\times -x')).toMatchInlineSnapshot(`2x`);
 
@@ -253,22 +249,22 @@ describe('ARITHMETIC OPERATORS', () => {
 
 describe('PRECEDENCE', () => {
   it('should correctly put parentheses where needed', () => {
-    expect(check('1+2*3')).toMatchInlineSnapshot(`1 + 2 * 3`);
-    expect(check('(1+2)*3')).toMatchInlineSnapshot(`3(1 + 2)`);
-    expect(check('1*2+3')).toMatchInlineSnapshot(`2 + 3`);
-    expect(check('1*(2+3)')).toMatchInlineSnapshot(`2 + 3`);
+    expect(check('1+2*3')).toMatchInlineSnapshot(`7`);
+    expect(check('(1+2)*3')).toMatchInlineSnapshot(`9`);
+    expect(check('1*2+3')).toMatchInlineSnapshot(`5`);
+    expect(check('1*(2+3)')).toMatchInlineSnapshot(`5`);
     expect(check('1+2^3')).toMatchInlineSnapshot(`1 + 2^3`);
-    expect(check('(1+2)^3')).toMatchInlineSnapshot(`(1 + 2)^3`);
-    expect(check('1^2+3')).toMatchInlineSnapshot(`1 + 3`);
-    expect(check('1^{2+3}')).toMatchInlineSnapshot(`1^(2 + 3)`);
-    expect(check('1+2/3')).toMatchInlineSnapshot(`1 + 2/3`);
-    expect(check('(1+2)/3')).toMatchInlineSnapshot(`1/3 * (1 + 2)`);
-    expect(check('1/2+3')).toMatchInlineSnapshot(`3 + 1/2`);
-    expect(check('1/(2+3)')).toMatchInlineSnapshot(`1 / (2 + 3)`);
-    expect(check('1+(2/3)+4')).toMatchInlineSnapshot(`1 + 4 + 2/3`);
-    expect(check('1+2/(3+4)')).toMatchInlineSnapshot(`1 + 2 / (3 + 4)`);
-    expect(check('(1+2)/3+4')).toMatchInlineSnapshot(`4 + 1/3 * (1 + 2)`);
-    expect(check('1+(2/3)*4')).toMatchInlineSnapshot(`1 + 4 * 2/3`);
+    expect(check('(1+2)^3')).toMatchInlineSnapshot(`3^3`);
+    expect(check('1^2+3')).toMatchInlineSnapshot(`4`);
+    expect(check('1^{2+3}')).toMatchInlineSnapshot(`1`);
+    expect(check('1+2/3')).toMatchInlineSnapshot(`5/3`);
+    expect(check('(1+2)/3')).toMatchInlineSnapshot(`1`);
+    expect(check('1/2+3')).toMatchInlineSnapshot(`7/2`);
+    expect(check('1/(2+3)')).toMatchInlineSnapshot(`1/5`);
+    expect(check('1+(2/3)+4')).toMatchInlineSnapshot(`17/3`);
+    expect(check('1+2/(3+4)')).toMatchInlineSnapshot(`9/7`);
+    expect(check('(1+2)/3+4')).toMatchInlineSnapshot(`5`);
+    expect(check('1+(2/3)*4')).toMatchInlineSnapshot(`11/3`);
   });
 
   it('should correctly put parentheses with relational operators', () => {

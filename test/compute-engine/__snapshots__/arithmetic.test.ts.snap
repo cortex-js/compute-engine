@@ -28,22 +28,17 @@ box       = [
 ]
 canonical = [
   "Add",
-  2,
-  2,
-  4,
-  ["Rational", 3, 11],
-  ["Rational", 5, 7],
-  ["Sqrt", 5],
-  ["Sqrt", 5],
+  ["Rational", 692, 77],
   1.5,
   1.7,
-  "Pi"
+  "Pi",
+  ["Multiply", 2, ["Sqrt", 5]]
 ]
-simplify  = 16.6591489420125664058 + pi
-eval-auto = 16.6591489420125664058 + pi
-eval-mach = 16.659148942012564 + pi
-N-auto    = 19.8007415956023596443
-N-mach    = 19.800741595602357
+simplify  = 16.6591489420125663928 + pi
+eval-auto = 16.6591489420125663928 + pi
+eval-mach = 16.65914894201257 + pi
+N-auto    = 19.8007415956023596313
+N-mach    = 19.800741595602364
 `;
 
 exports[`ADD Add '\\frac{2}{3}+\\frac{12345678912345678}{987654321987654321}+\\frac{987654321987654321}{12345678912345678}' 1`] = `
@@ -54,12 +49,10 @@ box       = [
   ["Divide", {num: "987654321987654321"}, 12345678912345678]
 ]
 canonical = [
-  "Add",
-  ["Rational", 1371742101371742, {num: "109739369109739369"}],
-  ["Rational", 2, 3],
-  ["Rational", {num: "109739369109739369"}, 1371742101371742]
+  "Rational",
+  {num: "12144966884186830401015120518973257"},
+  {num: "150534112785803114146067001510798"}
 ]
-simplify  = 12144966884186830401015120518973257/150534112785803114146067001510798
 eval-auto = 12144966884186830401015120518973257/150534112785803114146067001510798
 eval-mach = 12144966884186830401015120518973257/150534112785803114146067001510798
 N-auto    = 80.6791673955527728817
@@ -78,8 +71,7 @@ exports[`ADD Add ['Add'] 1`] = `0`;
 
 exports[`ADD Add \\frac{2}{-3222233}+\\frac{1}{3} 1`] = `
 box       = ["Add", ["Divide", 2, ["Negate", 3222233]], ["Divide", 1, 3]]
-canonical = ["Subtract", ["Rational", 1, 3], ["Rational", 2, 3222233]]
-simplify  = 3222227/9666699
+canonical = ["Rational", 3222227, 9666699]
 eval-auto = 3222227/9666699
 eval-mach = 3222227/9666699
 N-auto    = 0.333332712645754253856
@@ -149,8 +141,7 @@ exports[`DIVIDE Divide with single argument 1`] = `["Divide", 2.5, ["Error", "'m
 
 exports[`EXACT EVALUATION Add: All exact 1`] = `
 box       = ["Add", 6, ["Divide", 10, 14], ["Sqrt", ["Divide", 18, 9]]]
-canonical = ["Add", 6, ["Rational", 5, 7], ["Sqrt", 2]]
-simplify  = 47/7 + sqrt(2)
+canonical = ["Add", ["Rational", 47, 7], ["Sqrt", 2]]
 eval-auto = 47/7 + sqrt(2)
 eval-mach = 47/7 + sqrt(2)
 N-auto    = 8.12849927665880933451
@@ -167,20 +158,11 @@ N-mach    = 9.65028153987289
 
 exports[`EXACT EVALUATION Add: All exact 3`] = `
 box       = ["Add", 2, 5, ["Divide", 5, 7], ["Divide", 7, 9], ["Sqrt", 2], "Pi"]
-canonical = [
-  "Add",
-  2,
-  5,
-  ["Rational", 5, 7],
-  ["Rational", 7, 9],
-  ["Sqrt", 2],
-  "Pi"
-]
-simplify  = 535/63 + sqrt(2) + pi
+canonical = ["Add", ["Rational", 535, 63], ["Sqrt", 2], "Pi"]
 eval-auto = 535/63 + sqrt(2) + pi
 eval-mach = 535/63 + sqrt(2) + pi
-N-auto    = 13.0478697080263803508
-N-mach    = 13.047869708026381
+N-auto    = 13.0478697080263802873
+N-mach    = 13.04786970802638
 `;
 
 exports[`EXACT EVALUATION Add: one inexact 1`] = `
@@ -194,21 +176,12 @@ box       = [
   ["Sqrt", 2],
   "Pi"
 ]
-canonical = [
-  "Add",
-  2,
-  5,
-  ["Rational", 5, 7],
-  ["Rational", 7, 9],
-  ["Sqrt", 2],
-  1.1,
-  "Pi"
-]
-simplify  = 11.0062770544365871123 + pi
-eval-auto = 11.0062770544365871123 + pi
-eval-mach = 11.006277054436588 + pi
-N-auto    = 14.1478697080263803508
-N-mach    = 14.14786970802638
+canonical = ["Add", ["Rational", 535, 63], ["Sqrt", 2], 1.1, "Pi"]
+simplify  = 11.0062770544365870488 + pi
+eval-auto = 11.0062770544365870488 + pi
+eval-mach = 11.006277054436586 + pi
+N-auto    = 14.1478697080263802873
+N-mach    = 14.147869708026379
 `;
 
 exports[`EXACT EVALUATION Canceled inexact values are ignored 1`] = `
@@ -221,15 +194,7 @@ box       = [
   ["Sqrt", 5],
   ["Sqrt", 7]
 ]
-canonical = [
-  "Add",
-  ["Rational", 1, 4],
-  ["Rational", 1, 4],
-  ["Sqrt", 5],
-  ["Sqrt", 7],
-  -2.12,
-  2.12
-]
+canonical = ["Add", ["Rational", 1, 2], ["Sqrt", 5], ["Sqrt", 7], -2.12, 2.12]
 simplify  = 5.38181928856438028691
 eval-auto = 5.38181928856438028691
 eval-mach = 5.3818192885643805
@@ -268,15 +233,7 @@ box       = [
   ["Sqrt", 5],
   ["Sqrt", 7]
 ]
-canonical = [
-  "Add",
-  2,
-  ["Rational", 1, 4],
-  ["Rational", 1, 4],
-  ["Sqrt", 5],
-  ["Sqrt", 7]
-]
-simplify  = 5/2 + sqrt(5) + sqrt(7)
+canonical = ["Add", ["Rational", 5, 2], ["Sqrt", 5], ["Sqrt", 7]]
 eval-auto = 5/2 + sqrt(5) + sqrt(7)
 eval-mach = 5/2 + sqrt(5) + sqrt(7)
 N-auto    = 7.38181928856438028691
@@ -285,7 +242,7 @@ N-mach    = 7.3818192885643805
 
 exports[`EXACT EVALUATION Inexact values propagate 1`] = `
 box       = ["Add", 0.1, 2, ["Divide", 1, 4]]
-canonical = ["Add", 2, ["Rational", 1, 4], 0.1]
+canonical = ["Add", ["Rational", 9, 4], 0.1]
 simplify  = 2.35
 `;
 
@@ -314,7 +271,7 @@ eval-mach = 2.25831795812724
 
 exports[`EXACT EVALUATION Square rationals are grouped together 1`] = `
 box       = ["Add", ["Sqrt", 5], ["Sqrt", 5]]
-simplify  = 2sqrt(5)
+canonical = ["Multiply", 2, ["Sqrt", 5]]
 eval-auto = 2sqrt(5)
 eval-mach = 2sqrt(5)
 N-auto    = 4.47213595499957939282
@@ -659,8 +616,7 @@ N-mach    = 0.04139268515822507
 
 exports[`MULTIPLY 2x(-2/3) 1`] = `
 box       = ["Multiply", 2, ["Rational", -2, 3]]
-canonical = ["Multiply", -2, ["Rational", 2, 3]]
-simplify  = -4/3
+canonical = ["Rational", -4, 3]
 eval-auto = -4/3
 eval-mach = -4/3
 N-auto    = -1.33333333333333333333
@@ -694,7 +650,7 @@ simplify  = 2.2i
 
 exports[`MULTIPLY 2x(2/3) 1`] = `
 box       = ["Multiply", 2, ["Rational", 2, 3]]
-simplify  = 4/3
+canonical = ["Rational", 4, 3]
 eval-auto = 4/3
 eval-mach = 4/3
 N-auto    = 1.33333333333333333333
@@ -703,8 +659,7 @@ N-mach    = 1.33333333333333
 
 exports[`MULTIPLY 2x(1234567890987654321/3) 1`] = `
 box       = ["Multiply", 2, ["Rational", {num: "1234567890987654321"}, 3]]
-canonical = ["Multiply", 2, {num: "411522630329218107"}]
-simplify  = 823045260658436214
+canonical = {num: "823045260658436214"}
 `;
 
 exports[`MULTIPLY 2x-1234567890987654321.123456789 1`] = `
@@ -716,7 +671,7 @@ eval-mach = 2469135781975310000
 
 exports[`MULTIPLY 2x1234567890987654321 1`] = `
 box       = ["Multiply", 2, {num: "1234567890987654321"}]
-simplify  = 2469135781975308642
+canonical = {num: "2469135781975308642"}
 `;
 
 exports[`MULTIPLY 5x(-2.1) 1`] = `
@@ -727,8 +682,7 @@ simplify  = -10.5
 
 exports[`MULTIPLY 5x2 1`] = `
 box       = ["Multiply", 5, 2]
-canonical = ["Multiply", 2, 5]
-simplify  = 10
+canonical = 10
 `;
 
 exports[`MULTIPLY Multiply 1`] = `
@@ -772,19 +726,10 @@ box       = [
   ["Sqrt", 2],
   "Pi"
 ]
-canonical = [
-  "Multiply",
-  2,
-  5,
-  ["Rational", 5, 7],
-  ["Rational", 7, 9],
-  ["Sqrt", 2],
-  "Pi"
-]
-simplify  = 50/9sqrt(2) * pi
+canonical = ["Multiply", ["Rational", 50, 9], ["Sqrt", 2], "Pi"]
 eval-auto = 50/9sqrt(2) * pi
 eval-mach = 50/9sqrt(2) * pi
-N-auto    = 24.6826829897687013722
+N-auto    = 24.6826829897687013723
 N-mach    = 24.6826829897688
 `;
 
@@ -799,21 +744,12 @@ box       = [
   ["Sqrt", 2],
   "Pi"
 ]
-canonical = [
-  "Multiply",
-  2,
-  5,
-  ["Rational", 5, 7],
-  ["Rational", 7, 9],
-  ["Sqrt", 2],
-  1.1,
-  "Pi"
-]
-simplify  = 8.64241621450224752044 * pi
-eval-auto = 8.64241621450224752044 * pi
-eval-mach = 8.64241621450222 * pi
-N-auto    = 27.1509512887455715096
-N-mach    = 27.1509512887456
+canonical = ["Multiply", ["Rational", 50, 9], ["Sqrt", 2], 1.1, "Pi"]
+simplify  = 8.64241621450224752045 * pi
+eval-auto = 8.64241621450224752045 * pi
+eval-mach = 8.64241621450229 * pi
+N-auto    = 27.1509512887455715095
+N-mach    = 27.1509512887457
 `;
 
 exports[`MULTIPLY with +Infinity 1`] = `
@@ -886,8 +822,7 @@ simplify  = NaN
 
 exports[`MULTIPLY with zero 1`] = `
 box       = ["Multiply", "x", 2, 3.1, 0]
-canonical = ["Multiply", 0, 2, 3.1, "x"]
-simplify  = 0
+canonical = 0
 `;
 
 exports[`Min/Max Max 1`] = `
@@ -1131,8 +1066,7 @@ N-mach    = 0.845154254728518
 
 exports[`SQRT √(5x(3+2)) 1`] = `
 box       = ["Sqrt", ["Multiply", 5, ["Add", 3, 2]]]
-canonical = ["Sqrt", ["Multiply", 5, ["Add", 2, 3]]]
-simplify  = 5
+canonical = 5
 `;
 
 exports[`SQRT √(175) 1`] = `

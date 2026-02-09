@@ -42,16 +42,16 @@ describe('SEQUENCES SERIALIZING', () => {
   test('Sequences can be used as arguments', () =>
     expect(check(['Add', ['Sequence', 1, 2, 3]])).toMatchInlineSnapshot(`
       box       = ["Add", ["Sequence", 1, 2, 3]]
-      canonical = ["Add", 1, 2, 3]
+      canonical = 6
       box-latex = 1 2 3
-      latex     = 1+2+3
+      latex     = 6
     `));
   test('Empty sequences are ignored', () =>
     expect(check(['Add', 1, ['Sequence'], 2])).toMatchInlineSnapshot(`
       box       = ["Add", 1, ["Sequence"], 2]
-      canonical = ["Add", 1, 2]
+      canonical = 3
       box-latex = 1++2
-      latex     = 1+2
+      latex     = 3
     `));
 });
 
@@ -68,17 +68,17 @@ describe('DELIMITERS SERIALIZING', () => {
     expect(check(['Delimiter', ['Sequence', ['Add', 1, 2]]]))
       .toMatchInlineSnapshot(`
       box       = ["Delimiter", ["Sequence", ["Add", 1, 2]]]
-      canonical = ["Single", ["Add", 1, 2]]
+      canonical = ["Single", 3]
       box-latex = (1+2)
-      latex     = (1+2)
+      latex     = (3)
     `));
 
   test('Non-collection with default parens and comma', () =>
     expect(check(['Delimiter', ['Add', 1, 2]])).toMatchInlineSnapshot(`
       box       = ["Delimiter", ["Add", 1, 2]]
-      canonical = ["Add", 1, 2]
+      canonical = 3
       box-latex = (1+2)
-      latex     = 1+2
+      latex     = 3
     `));
 
   test('List with default parens and comma', () =>

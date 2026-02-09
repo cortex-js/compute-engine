@@ -2,81 +2,25 @@ import { engine as ce } from '../../utils';
 
 describe('DELIMITERS', () => {
   test('Parentheses', () => {
-    expect(ce.parse('(2+3)').json).toMatchInlineSnapshot(`
-      [
-        Add,
-        2,
-        3,
-      ]
-    `);
+    expect(ce.parse('(2+3)').json).toMatchInlineSnapshot(`5`);
     expect(ce.parse('(2+3, 4+5)').json).toMatchInlineSnapshot(`
       [
         Tuple,
-        [
-          Add,
-          2,
-          3,
-        ],
-        [
-          Add,
-          4,
-          5,
-        ],
+        5,
+        9,
       ]
     `);
     expect(ce.parse('(2+3; 4+5)').json).toMatchInlineSnapshot(`
       [
         Tuple,
-        [
-          Add,
-          2,
-          3,
-        ],
-        [
-          Add,
-          4,
-          5,
-        ],
+        5,
+        9,
       ]
     `);
-    expect(ce.parse('1+(2+3)').json).toMatchInlineSnapshot(`
-      [
-        Add,
-        1,
-        2,
-        3,
-      ]
-    `);
-    expect(ce.parse('1+((2+3))').json).toMatchInlineSnapshot(`
-      [
-        Add,
-        1,
-        2,
-        3,
-      ]
-    `);
-    expect(ce.parse('4(2+3)').json).toMatchInlineSnapshot(`
-      [
-        Multiply,
-        4,
-        [
-          Add,
-          2,
-          3,
-        ],
-      ]
-    `);
-    expect(ce.parse('4((2+(3)))').json).toMatchInlineSnapshot(`
-      [
-        Multiply,
-        4,
-        [
-          Add,
-          2,
-          3,
-        ],
-      ]
-    `);
+    expect(ce.parse('1+(2+3)').json).toMatchInlineSnapshot(`6`);
+    expect(ce.parse('1+((2+3))').json).toMatchInlineSnapshot(`6`);
+    expect(ce.parse('4(2+3)').json).toMatchInlineSnapshot(`20`);
+    expect(ce.parse('4((2+(3)))').json).toMatchInlineSnapshot(`20`);
   });
 
   test('Function application', () => {

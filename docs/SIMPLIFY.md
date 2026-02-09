@@ -9,6 +9,14 @@ Method: `ce.parse(<latex>, { canonical: false }).simplify()` and record
 (e.g. `log(1)`); these are normalized to LaTeX (e.g. `\log(1)`) for
 `ce.parse()`.
 
+**Note**: As of the latest version, exact numeric literals (integers, rationals,
+radicals) are folded during canonicalization itself. This means expressions like
+`2 + 3` become `5` at parse time (when using default canonical mode), before
+`.simplify()` is called. The tests below use `{ canonical: false }` and then
+call `.simplify()`, so they exercise the simplification path rather than the
+canonicalization path. With default canonical parsing, many of these reductions
+happen even earlier.
+
 ## Still notable / requires explicit evaluation or assumptions
 
 - \frac{0}{1-1}: \(\frac{0}{1-1}\) — No longer incorrectly simplifies to 0

@@ -128,7 +128,7 @@ describe('LATEX SERIALIZING', () => {
   test('Missing', () => {
     expect(
       latex(['Equal', ['Multiply', 2, 2], ['Error', "'missing'"]])
-    ).toMatchInlineSnapshot(`2\\times2=\\error{\\blacksquare}`);
+    ).toMatchInlineSnapshot(`4=\\error{\\blacksquare}`);
   });
 
   test('Integral', () => {
@@ -192,14 +192,14 @@ describe('CUSTOM LATEX SERIALIZING', () => {
     // Multiply of two numbers
     expect(
       ce.box(['Multiply', 5, 7]).toLatex({ multiply: `\\otimes` })
-    ).toMatchInlineSnapshot(`5\\otimes7`);
+    ).toMatchInlineSnapshot(`35`);
 
     // Multiply of a number and a rational
     expect(
       ce
         .box(['Multiply', 5, ['Rational', 3, 4]])
         .toLatex({ multiply: `\\otimes` })
-    ).toMatchInlineSnapshot(`\\frac{5\\otimes3}{4}`);
+    ).toMatchInlineSnapshot(`\\frac{15}{4}`);
   });
 
   test('Numbers', () => {

@@ -251,8 +251,8 @@ describe('PYTHON TARGET', () => {
     it('should handle nested power', () => {
       const expr = ce.parse('(x^2)^3');
       const code = python.compile(expr).code;
-      // Nested powers are compiled correctly
-      expect(code).toBe('x ** (2 * 3)');
+      // Nested powers are compiled: (x^2)^3 = x^(2*3) = x^6
+      expect(code).toBe('x ** 6');
     });
   });
 });

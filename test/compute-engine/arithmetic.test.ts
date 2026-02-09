@@ -774,7 +774,7 @@ describe('SUM', () => {
   it('should factor out constant from sum', () => {
     expect(
       ce.parse('\\sum_{n=1}^{b}(3n)').simplify().toString()
-    ).toMatchInlineSnapshot(`3/2 * b^2 + 3/2 * b`);
+    ).toMatchInlineSnapshot(`3/2 * (b^2 + b)`);
   });
 
   it('should factor out symbolic constant from sum', () => {

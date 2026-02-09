@@ -99,11 +99,7 @@ describe('PATTERNS  MATCH - Universal wildcard', () => {
     pattern = ['Add', 1, '_q'];
 
     test('Simple match (literals)', () => {
-      expect(match(pattern, ['Add', 1, 2])).toMatchInlineSnapshot(`
-        {
-          _q: 2,
-        }
-      `);
+      expect(match(pattern, ['Add', 1, 2])).toMatchInlineSnapshot(`null`);
       expect(match(pattern, ['Add', 1, 'GoldenRatio'])).toMatchInlineSnapshot(`
         {
           _q: GoldenRatio,
@@ -135,11 +131,7 @@ describe('PATTERNS  MATCH - Universal wildcard', () => {
     });
 
     test('Commutative (should match operand permutations', () => {
-      expect(match(pattern, ['Add', 2, 1])).toMatchInlineSnapshot(`
-        {
-          _q: 2,
-        }
-      `);
+      expect(match(pattern, ['Add', 2, 1])).toMatchInlineSnapshot(`null`);
       expect(match(pattern, ['Add', 'x', 1])).toMatchInlineSnapshot(`
         {
           _q: x,
@@ -153,12 +145,7 @@ describe('PATTERNS  MATCH - Universal wildcard', () => {
        *
        */
       pattern = ['Add', '_a', 'n', '_c'];
-      expect(match(pattern, ['Add', 'n', 3, 3])).toMatchInlineSnapshot(`
-        {
-          _a: 3,
-          _c: 3,
-        }
-      `);
+      expect(match(pattern, ['Add', 'n', 3, 3])).toMatchInlineSnapshot(`null`);
 
       expect(match(pattern, ['Add', ['Multiply', 6, 'm'], 'n', ['Sqrt', 6]]))
         .toMatchInlineSnapshot(`
@@ -226,7 +213,7 @@ describe('PATTERNS  MATCH - Universal wildcard', () => {
      *
      */
     pattern = ['Add', 1, '_'];
-    expect(match(pattern, ['Add', 1, 2])).toMatchInlineSnapshot(`{}`);
+    expect(match(pattern, ['Add', 1, 2])).toMatchInlineSnapshot(`null`);
     expect(match(pattern, ['Add', 1, 'GoldenRatio'])).toMatchInlineSnapshot(
       `{}`
     );
@@ -241,7 +228,7 @@ describe('PATTERNS  MATCH - Universal wildcard', () => {
     expect(match(pattern, ['Add', 1, ['List', 5, 6]])).toMatchInlineSnapshot(
       `{}`
     );
-    expect(match(pattern, ['Add', 2, 1])).toMatchInlineSnapshot(`{}`);
+    expect(match(pattern, ['Add', 2, 1])).toMatchInlineSnapshot(`null`);
 
     // Multiple wildcards
     pattern = ['_', '_', 'x'];
@@ -280,22 +267,16 @@ describe('PATTERNS  MATCH - Sequence wildcards', () => {
          * 1 Operand
          *
          */
-        expect(match(pattern, ['Add', 1, 2])).toMatchInlineSnapshot(`
-                  {
-                    __a: 2,
-                  }
-              `);
+        expect(match(pattern, ['Add', 1, 2])).toMatchInlineSnapshot(`null`);
 
         /*
          * >1 Operand
          *
          */
         // Anchor-based matching: anchor `1` matches, __a captures all remaining elements
-        expect(match(pattern, ['Add', 1, 2, 3, 'x', 5])).toMatchInlineSnapshot(`
-          {
-            __a: ["Add", "x", 2, 3, 5],
-          }
-        `);
+        expect(match(pattern, ['Add', 1, 2, 3, 'x', 5])).toMatchInlineSnapshot(
+          `null`
+        );
 
         /*
          * Function-expression operand/s
@@ -312,11 +293,9 @@ describe('PATTERNS  MATCH - Sequence wildcards', () => {
          * Operand permutations
          */
         // Anchor-based matching: anchor `1` matches, __a captures remaining [x, 3, y]
-        expect(match(pattern, ['Add', 'x', 1, 3, 'y'])).toMatchInlineSnapshot(`
-          {
-            __a: ["Add", "x", "y", 3],
-          }
-        `);
+        expect(match(pattern, ['Add', 'x', 1, 3, 'y'])).toMatchInlineSnapshot(
+          `null`
+        );
 
         expect(match(pattern, ['Add', ['Square', 'x'], 1]))
           .toMatchInlineSnapshot(`
@@ -338,9 +317,8 @@ describe('PATTERNS  MATCH - Sequence wildcards', () => {
 
         // Anchor-based matching: anchor ['Sqrt', 'x'] matches one occurrence,
         // __m captures remaining [2, ['Sqrt', 'x']]
-        expect(
-          match(pattern, ['Multiply', 2, ['Sqrt', 'x'], ['Sqrt', 'x']])
-        ).toMatchInlineSnapshot(`
+        expect(match(pattern, ['Multiply', 2, ['Sqrt', 'x'], ['Sqrt', 'x']]))
+          .toMatchInlineSnapshot(`
           {
             __m: ["Multiply", 2, ["Sqrt", "x"]],
           }
@@ -350,7 +328,7 @@ describe('PATTERNS  MATCH - Sequence wildcards', () => {
         expect(match(pattern, ['Multiply', ['Sqrt', 'x'], ['Add', 2, 3]]))
           .toMatchInlineSnapshot(`
           {
-            __m: ["Add", 2, 3],
+            __m: 5,
           }
         `);
 
@@ -433,12 +411,16 @@ describe('PATTERNS  MATCH - Sequence wildcards', () => {
 
         pattern = ['Add', 1, '__'];
 
-        expect(match(pattern, ['Add', 1, 2])).toMatchInlineSnapshot(`{}`);
+        expect(match(pattern, ['Add', 1, 2])).toMatchInlineSnapshot(`null`);
 
         // Anchor-based matching with unnamed wildcard
-        expect(match(pattern, ['Add', 1, 2, 3, 'x', 5])).toMatchInlineSnapshot(`{}`);
+        expect(match(pattern, ['Add', 1, 2, 3, 'x', 5])).toMatchInlineSnapshot(
+          `null`
+        );
 
-        expect(match(pattern, ['Add', 'x', 1, 3, 'y'])).toMatchInlineSnapshot(`{}`);
+        expect(match(pattern, ['Add', 'x', 1, 3, 'y'])).toMatchInlineSnapshot(
+          `null`
+        );
 
         pattern = ['Multiply', '__', ['Sqrt', 'x']];
 
@@ -505,12 +487,9 @@ describe('PATTERNS  MATCH - Sequence wildcards', () => {
           _z: y,
         }
       `);
-      expect(match(pattern, ['Multiply', 3, 10, ['Log', 100]]))
-        .toMatchInlineSnapshot(`
-        {
-          _z: 3,
-        }
-      `);
+      expect(
+        match(pattern, ['Multiply', 3, 10, ['Log', 100]])
+      ).toMatchInlineSnapshot(`null`);
 
       // No match (Missing '_z' operand)
       expect(
@@ -541,7 +520,7 @@ describe('PATTERNS  MATCH - Sequence wildcards', () => {
         )
       ).toMatchInlineSnapshot(`
         {
-          __a: ["Sequence", ["Power", 6, 3], ["Subtract", 74, 2]],
+          __a: ["Sequence", ["Power", 6, 3], 72],
         }
       `);
 
@@ -580,13 +559,9 @@ describe('PATTERNS  MATCH - Sequence wildcards', () => {
        */
       pattern = ['Tuple', '__t', ['_', '__'], '__q'];
 
-      expect(match(pattern, ['Tuple', ['Sqrt', 'x'], ['Add', 2, 3], 'y']))
-        .toMatchInlineSnapshot(`
-        {
-          __q: y,
-          __t: ["Sqrt", "x"],
-        }
-      `);
+      expect(
+        match(pattern, ['Tuple', ['Sqrt', 'x'], ['Add', 2, 3], 'y'])
+      ).toMatchInlineSnapshot(`null`);
 
       // 3+ seq.
       pattern = ['List', 1, '__a', 4, '__b', 7, '__c'];
@@ -1172,7 +1147,9 @@ describe('PATTERN VALIDATION', () => {
 
   // VALID: Multi-element wildcards separated by non-wildcard elements
   test('allows optional sequences with delimiters between them', () => {
-    expect(() => validate(['Multiply', '___u', 'q', 'r', 's', '___v'])).not.toThrow();
+    expect(() =>
+      validate(['Multiply', '___u', 'q', 'r', 's', '___v'])
+    ).not.toThrow();
   });
 
   test('validates nested patterns', () => {
@@ -1244,12 +1221,20 @@ describe('matchPermutations option', () => {
   test('matchPermutations does not affect non-commutative operators', () => {
     // Subtract is not commutative, so permutations should never be tried
     // regardless of the option value
-    const withPerms = matchNonCanonical(['Subtract', 1, '_a'], ['Subtract', 1, 'x'], {
-      matchPermutations: true,
-    });
-    const withoutPerms = matchNonCanonical(['Subtract', 1, '_a'], ['Subtract', 1, 'x'], {
-      matchPermutations: false,
-    });
+    const withPerms = matchNonCanonical(
+      ['Subtract', 1, '_a'],
+      ['Subtract', 1, 'x'],
+      {
+        matchPermutations: true,
+      }
+    );
+    const withoutPerms = matchNonCanonical(
+      ['Subtract', 1, '_a'],
+      ['Subtract', 1, 'x'],
+      {
+        matchPermutations: false,
+      }
+    );
     expect(withPerms).toEqual(withoutPerms);
     expect(withPerms).toMatchInlineSnapshot(`
       {
@@ -1273,9 +1258,13 @@ describe('Permutation Matching Optimization', () => {
     test('rejects when no sequence wildcards and length mismatch', () => {
       // Pattern: 4 operands, Expression: 3 operands
       // Use 1 as anchor (not 0, which gets canonicalized away)
-      const result = match(['Add', '_a', '_b', '_c', 1], ['Add', 'x', 'y', 'z'], {
-        useVariations: false,
-      });
+      const result = match(
+        ['Add', '_a', '_b', '_c', 1],
+        ['Add', 'x', 'y', 'z'],
+        {
+          useVariations: false,
+        }
+      );
       expect(result).toBeNull();
     });
 
@@ -1366,11 +1355,9 @@ describe('Permutation Matching Optimization', () => {
     });
 
     test('handles multiple anchors with universal wildcards', () => {
-      const result = match(
-        ['Add', 1, 2, '_a', '_b'],
-        ['Add', 'x', 1, 2, 'y'],
-        { useVariations: false }
-      );
+      const result = match(['Add', 1, 2, '_a', '_b'], ['Add', 'x', 1, 2, 'y'], {
+        useVariations: false,
+      });
       expect(result).not.toBeNull();
     });
 
@@ -1496,19 +1483,13 @@ describe('Repeated Wildcards in Nested Contexts', () => {
 
   describe('Simple repeated wildcards (flat structure)', () => {
     test('_a appears twice - same value should match', () => {
-      const result = matchNonCanonical(
-        ['Add', '_a', '_a'],
-        ['Add', 'x', 'x']
-      );
+      const result = matchNonCanonical(['Add', '_a', '_a'], ['Add', 'x', 'x']);
       expect(result).not.toBeNull();
       expect(result?._a?.toString()).toBe('x');
     });
 
     test('_a appears twice - different values should not match', () => {
-      const result = matchNonCanonical(
-        ['Add', '_a', '_a'],
-        ['Add', 'x', 'y']
-      );
+      const result = matchNonCanonical(['Add', '_a', '_a'], ['Add', 'x', 'y']);
       expect(result).toBeNull();
     });
   });

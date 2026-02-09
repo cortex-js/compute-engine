@@ -221,6 +221,34 @@ ce.simplificationRules.push({
   decay for Ai, exponential growth for Bi at positive x, oscillatory for
   negative x) for large arguments.
 
+### Canonicalization
+
+- **Exact numeric folding during canonicalization**: `canonicalAdd` and
+  `canonicalMultiply` now fold **exact** numeric operands at canonicalization
+  time, making behavior consistent with `canonicalDivide` which already folded
+  coefficients. This means expressions are reduced earlier in the pipeline
+  without waiting for a `.simplify()` call.
+
+  **What gets folded** (exact values):
+
+  - Integers: `Add(2, x, 5)` &rarr; `Add(x, 7)`
+  - Rationals: `Add(1/3, x, 2/3)` &rarr; `Add(x, 1)`
+  - Radicals: `Add(√2, x, √2)` &rarr; `Add(x, 2√2)`
+  - Mixed exact: `Multiply(2, x, 5)` &rarr; `Multiply(10, x)`
+  - Full reduction: `Add(2, 3)` &rarr; `5`, `Multiply(2, 3)` &rarr; `6`
+  - Identity elimination: `Multiply(1/2, x, 2)` &rarr; `x`
+  - Complex promotion: `Add(1, Complex(0, -1))` &rarr; `Complex(1, -1)`
+
+  **What is NOT folded** (non-exact values):
+
+  - Machine floats: `Add(1.5, x, 0.5)` remains `Add(x, 0.5, 1.5)`
+  - Infinity/NaN: `Multiply(0, ∞)` correctly returns `NaN`
+  - Single numeric: `Multiply(5, Pi)` is unchanged (nothing to fold)
+
+  The folding uses the existing `ExactNumericValue` arithmetic, which
+  automatically handles radical grouping (`√2 + √2 = 2√2`) and
+  rational simplification (`1/3 + 2/3 = 1`).
+
 ### Bug Fixes
 
 - **Power simplification `(a^n)^m -> a^{nm}` now correctly guarded**: The rule

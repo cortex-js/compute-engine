@@ -50,8 +50,8 @@ describe('PARSING OF NUMBER', () => {
     expect(parse('--1')).toMatchInlineSnapshot(`1`);
     expect(parse('-+-1')).toMatchInlineSnapshot(`1`);
 
-    expect(parse('2--1')).toMatchInlineSnapshot(`["Add", 1, 2]`);
-    expect(parse('2++1')).toMatchInlineSnapshot(`["Add", 1, 2]`);
+    expect(parse('2--1')).toMatchInlineSnapshot(`3`);
+    expect(parse('2++1')).toMatchInlineSnapshot(`3`);
   });
 
   test('Parsing invisible add/mixed fraction', () => {
@@ -63,7 +63,7 @@ describe('PARSING OF NUMBER', () => {
       `["Subtract", ["Rational", -1, 4], 3]`
     );
     expect(parse('3\\frac14+\\frac12')).toMatchInlineSnapshot(
-      `["Add", 3, ["Rational", 1, 4], ["Rational", 1, 2]]`
+      `["Rational", 15, 4]`
     );
   });
 
@@ -116,7 +116,7 @@ describe('PARSING OF NUMBER', () => {
       `["Equal", "x", 1230]`
     );
     expect(parse('x=.123\\ldots e4+1')).toMatchInlineSnapshot(
-      `["Equal", "x", ["Add", 1, 1230]]`
+      `["Equal", "x", 1231]`
     );
     expect(parse('x=.123\\ldots e-423+1')).toMatchInlineSnapshot(
       `["Equal", "x", ["Add", 1, "1.23e-424"]]`

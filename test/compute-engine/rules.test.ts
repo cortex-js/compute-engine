@@ -4,25 +4,25 @@ describe('RULES', () => {
   it('should handle rule with match and replace as expressions', () => {
     const expr = ce.parse('\\pi + 3');
     const rule = '\\pi + a -> 2a';
-    expect(expr.replace(rule)).toMatchInlineSnapshot(`["Multiply", 2, 3]`);
+    expect(expr.replace(rule)).toMatchInlineSnapshot(`6`);
   });
 
   it('should handle rule with match and replace as LaTeX', () => {
     const expr = ce.parse('\\pi + 3');
     const rule = '\\pi + a -> 2a';
-    expect(expr.replace(rule)).toMatchInlineSnapshot(`["Multiply", 2, 3]`);
+    expect(expr.replace(rule)).toMatchInlineSnapshot(`6`);
   });
 
   it('should handle rule with match, replace and condition as LaTeX', () => {
     const expr = ce.parse('\\pi + 3');
     const rule = '\\pi + a -> 2a; a > 0';
-    expect(expr.replace(rule)).toMatchInlineSnapshot(`["Multiply", 2, 3]`);
+    expect(expr.replace(rule)).toMatchInlineSnapshot(`6`);
   });
 
   it('should handle rule with match, replace and short inline condition as LaTeX', () => {
     const expr = ce.parse('\\pi + 3');
     const rule = '\\pi + a:>0 -> 2a';
-    expect(expr.replace(rule)).toMatchInlineSnapshot(`["Multiply", 2, 3]`);
+    expect(expr.replace(rule)).toMatchInlineSnapshot(`6`);
   });
 
   it('should handle rule with match, replace and short inline condition as LaTeX that dont match', () => {
@@ -34,19 +34,19 @@ describe('RULES', () => {
   it('should handle rule with match, replace and inline condition as LaTeX', () => {
     const expr = ce.parse('\\pi + 3');
     const rule = '\\pi + a:positive -> 2a';
-    expect(expr.replace(rule)).toMatchInlineSnapshot(`["Multiply", 2, 3]`);
+    expect(expr.replace(rule)).toMatchInlineSnapshot(`6`);
   });
 
   it('should handle rule with match, replace and inline sub condition as LaTeX', () => {
     const expr = ce.parse('\\pi + 3');
     const rule = '\\pi + a_{positive} -> 2a';
-    expect(expr.replace(rule)).toMatchInlineSnapshot(`["Multiply", 2, 3]`);
+    expect(expr.replace(rule)).toMatchInlineSnapshot(`6`);
   });
 
   it('should return the correct shorthand rule for the given expression', () => {
     const expr = ce.parse('\\pi + 3');
     const rule = '\\pi + a -> 2a';
-    expect(expr.replace(rule)).toMatchInlineSnapshot(`["Multiply", 2, 3]`);
+    expect(expr.replace(rule)).toMatchInlineSnapshot(`6`);
   });
 });
 
@@ -57,7 +57,10 @@ describe('OBJECT RULES LITERAL MATCHING', () => {
     // {match: 'a', replace: 2} should replace literal 'a' with 2
     // NOT treat 'a' as a wildcard matching any expression
     const expr = ce.box(['Add', ['Multiply', 'a', 'x'], 'b']);
-    const result = expr.replace({ match: 'a', replace: 2 }, { recursive: true });
+    const result = expr.replace(
+      { match: 'a', replace: 2 },
+      { recursive: true }
+    );
     // Expected: 2x + b (only 'a' replaced, not the whole expression)
     expect(result?.toString()).toBe('b + 2x');
   });
@@ -65,7 +68,10 @@ describe('OBJECT RULES LITERAL MATCHING', () => {
   it('should match literal symbol not present in expression', () => {
     const expr = ce.box(['Add', ['Multiply', 'x', 'y'], 'z']);
     // 'a' is not in the expression, so no match
-    const result = expr.replace({ match: 'a', replace: 2 }, { recursive: true });
+    const result = expr.replace(
+      { match: 'a', replace: 2 },
+      { recursive: true }
+    );
     expect(result).toBeNull();
   });
 
@@ -152,9 +158,9 @@ describe('matchPermutations option', () => {
   it('matchPermutations: true explicitly allows permutation matching', () => {
     const expr = ce.box(['Add', 'x', 1], { form: 'raw' });
     const rule = { match: ['Add', 1, '_a'], replace: ['Multiply', 2, '_a'] };
-    expect(expr.replace(rule, { matchPermutations: true })).toMatchInlineSnapshot(
-      `["Multiply", 2, "x"]`
-    );
+    expect(
+      expr.replace(rule, { matchPermutations: true })
+    ).toMatchInlineSnapshot(`["Multiply", 2, "x"]`);
   });
 
   it('matchPermutations: false disables permutation matching', () => {
@@ -168,8 +174,8 @@ describe('matchPermutations option', () => {
     const expr = ce.box(['Add', 1, 'x'], { form: 'raw' });
     const rule = { match: ['Add', 1, '_a'], replace: ['Multiply', 2, '_a'] };
     // Exact order matches even without permutations
-    expect(expr.replace(rule, { matchPermutations: false })).toMatchInlineSnapshot(
-      `["Multiply", 2, "x"]`
-    );
+    expect(
+      expr.replace(rule, { matchPermutations: false })
+    ).toMatchInlineSnapshot(`["Multiply", 2, "x"]`);
   });
 });

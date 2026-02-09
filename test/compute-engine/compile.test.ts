@@ -9,15 +9,15 @@ import { PythonTarget } from '../../src/compute-engine/compilation/python-target
 describe('COMPILE', () => {
   describe('Expressions', () => {
     it('should compile (and simplify) a simple expression', () => {
-      expect(
-        compile(ce.parse('3.45 + \\frac57'))?.code
-      ).toMatchInlineSnapshot(`0.7142857142857143 + 3.45`);
+      expect(compile(ce.parse('3.45 + \\frac57'))?.code).toMatchInlineSnapshot(
+        `0.7142857142857143 + 3.45`
+      );
     });
 
     it('should compile an expression with a constant', () => {
-      expect(
-        compile(ce.parse('2\\exponentialE'))?.code
-      ).toMatchInlineSnapshot(`2 * Math.E`);
+      expect(compile(ce.parse('2\\exponentialE'))?.code).toMatchInlineSnapshot(
+        `2 * Math.E`
+      );
     });
 
     it('should compile an expression with trig functions', () => {
@@ -30,15 +30,15 @@ describe('COMPILE', () => {
   describe('Blocks', () => {
     it('should compile a simple block', () => {
       const expr = ce.box(['Block', ['Multiply', 10, 2]]);
-      expect(compile(expr)?.code ?? '').toMatchInlineSnapshot(`2 * 10`);
+      expect(compile(expr)?.code ?? '').toMatchInlineSnapshot(`20`);
     });
 
     it('should compile a block with two statements', () => {
       const expr = ce.box(['Block', ['Add', 13, 15], ['Multiply', 10, 2]]);
       expect(compile(expr)?.code ?? '').toMatchInlineSnapshot(`
         (() => {
-        13 + 15;
-        return 2 * 10
+        28;
+        return 20
         })()
       `);
     });
@@ -141,9 +141,7 @@ describe('COMPILE', () => {
         const compiled = compile(expr, {
           operators: { Add: ['add', 11] },
         });
-        expect(compiled?.code ?? '').toMatchInlineSnapshot(
-          `add(_.x, _.y)`
-        );
+        expect(compiled?.code ?? '').toMatchInlineSnapshot(`add(_.x, _.y)`);
       });
 
       it('should override multiple operators', () => {
@@ -165,9 +163,7 @@ describe('COMPILE', () => {
         const compiled = compile(expr, {
           operators: { Divide: ['div', 13] },
         });
-        expect(compiled?.code ?? '').toMatchInlineSnapshot(
-          `div(_.x, _.y)`
-        );
+        expect(compiled?.code ?? '').toMatchInlineSnapshot(`div(_.x, _.y)`);
       });
 
       it('should override unary operators', () => {
@@ -210,9 +206,7 @@ describe('COMPILE', () => {
         const compiled = compile(expr, {
           operators: (op) => (op === 'Add' ? ['add', 11] : undefined),
         });
-        expect(compiled?.code ?? '').toMatchInlineSnapshot(
-          `add(_.x, _.y)`
-        );
+        expect(compiled?.code ?? '').toMatchInlineSnapshot(`add(_.x, _.y)`);
       });
 
       it('should fall back to defaults when function returns undefined', () => {
@@ -336,31 +330,52 @@ describe('COMPILE', () => {
     // These are GLSL graphics built-ins, Python-specific numpy/scipy functions,
     // or control-flow constructs handled by the compiler.
     const TARGET_SPECIFIC: Record<string, Set<string>> = {
-      javascript: new Set([
-        'If', 'List', 'Range', 'Integrate',
-      ]),
-      glsl: new Set([
-        'Clamp', 'Mix', 'Smoothstep', 'Step',
-        'Degrees', 'Radians', 'Exp2', 'Log2', 'Inversesqrt',
-        'Cross', 'Distance', 'Dot', 'Length', 'Normalize', 'Reflect', 'Refract',
+      'javascript': new Set(['If', 'List', 'Range', 'Integrate']),
+      'glsl': new Set([
+        'Clamp',
+        'Mix',
+        'Smoothstep',
+        'Step',
+        'Degrees',
+        'Radians',
+        'Exp2',
+        'Log2',
+        'Inversesqrt',
+        'Cross',
+        'Distance',
+        'Dot',
+        'Length',
+        'Normalize',
+        'Reflect',
+        'Refract',
         'List',
       ]),
-      'interval-javascript': new Set([
-        'If',
-      ]),
+      'interval-javascript': new Set(['If']),
       'interval-glsl': new Set([]),
-      python: new Set([
+      'python': new Set([
         'Arctan2',
-        'Real', 'Imaginary', 'Argument', 'Conjugate',
-        'Sum', 'Product',
-        'Dot', 'Cross',
-        'Norm', 'Determinant', 'Inverse', 'Transpose', 'MatrixMultiply',
-        'Erf', 'Erfc',
+        'Real',
+        'Imaginary',
+        'Argument',
+        'Conjugate',
+        'Sum',
+        'Product',
+        'Dot',
+        'Cross',
+        'Norm',
+        'Determinant',
+        'Inverse',
+        'Transpose',
+        'MatrixMultiply',
+        'Erf',
+        'Erfc',
         'List',
       ]),
     };
 
-    const targets: Array<[string, { getFunctions: () => Record<string, unknown> }]> = [
+    const targets: Array<
+      [string, { getFunctions: () => Record<string, unknown> }]
+    > = [
       ['javascript', new JavaScriptTarget()],
       ['glsl', new GLSLTarget()],
       ['interval-javascript', new IntervalJavaScriptTarget()],
@@ -392,26 +407,81 @@ describe('COMPILE', () => {
     // set operations, logic, and domain-specific functions.
     const COMPILABLE_MATH_FUNCTIONS = [
       // Arithmetic
-      'Add', 'Subtract', 'Multiply', 'Divide', 'Negate', 'Power', 'Root', 'Sqrt', 'Square',
+      'Add',
+      'Subtract',
+      'Multiply',
+      'Divide',
+      'Negate',
+      'Power',
+      'Root',
+      'Sqrt',
+      'Square',
       // Rounding / parts
-      'Abs', 'Sign', 'Floor', 'Ceil', 'Round', 'Truncate', 'Fract', 'Mod', 'Remainder',
+      'Abs',
+      'Sign',
+      'Floor',
+      'Ceil',
+      'Round',
+      'Truncate',
+      'Fract',
+      'Mod',
+      'Remainder',
       // Exponential / logarithmic
-      'Exp', 'Ln', 'Log', 'Lb',
+      'Exp',
+      'Ln',
+      'Log',
+      'Lb',
       // Trigonometric
-      'Sin', 'Cos', 'Tan', 'Cot', 'Sec', 'Csc',
-      'Arcsin', 'Arccos', 'Arctan', 'Arccot', 'Arccsc', 'Arcsec',
+      'Sin',
+      'Cos',
+      'Tan',
+      'Cot',
+      'Sec',
+      'Csc',
+      'Arcsin',
+      'Arccos',
+      'Arctan',
+      'Arccot',
+      'Arccsc',
+      'Arcsec',
       // Hyperbolic
-      'Sinh', 'Cosh', 'Tanh', 'Coth', 'Csch', 'Sech',
-      'Arsinh', 'Arcosh', 'Artanh', 'Arcoth', 'Arcsch', 'Arsech',
+      'Sinh',
+      'Cosh',
+      'Tanh',
+      'Coth',
+      'Csch',
+      'Sech',
+      'Arsinh',
+      'Arcosh',
+      'Artanh',
+      'Arcoth',
+      'Arcsch',
+      'Arsech',
       // Comparison
-      'Equal', 'NotEqual', 'Less', 'LessEqual', 'Greater', 'GreaterEqual',
+      'Equal',
+      'NotEqual',
+      'Less',
+      'LessEqual',
+      'Greater',
+      'GreaterEqual',
       // Logic
-      'And', 'Or', 'Not',
+      'And',
+      'Or',
+      'Not',
       // Aggregates
-      'Min', 'Max',
+      'Min',
+      'Max',
     ];
 
-    const targets: Array<[string, { getFunctions: () => Record<string, unknown>; getOperators: () => Record<string, unknown> }]> = [
+    const targets: Array<
+      [
+        string,
+        {
+          getFunctions: () => Record<string, unknown>;
+          getOperators: () => Record<string, unknown>;
+        }
+      ]
+    > = [
       ['javascript', new JavaScriptTarget()],
       ['glsl', new GLSLTarget()],
       ['interval-javascript', new IntervalJavaScriptTarget()],
@@ -434,11 +504,11 @@ describe('COMPILE', () => {
         // This test ensures no regressions. If a function is intentionally
         // unsupported in a target, add it to the expected list below.
         const expectedMissing: Record<string, string[]> = {
-          javascript: [],
-          glsl: [],
+          'javascript': [],
+          'glsl': [],
           'interval-javascript': [],
           'interval-glsl': [],
-          python: [],
+          'python': [],
         };
 
         expect(missing.sort()).toEqual((expectedMissing[name] ?? []).sort());

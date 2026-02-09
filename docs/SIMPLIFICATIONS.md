@@ -19,6 +19,32 @@ by priority and category.
 
 \*Limitations are by-design decisions or architectural constraints, not bugs.
 
+### Exact Numeric Folding (Canonicalization)
+
+Canonicalization now folds exact numeric operands in `Add` and `Multiply`
+expressions. This happens automatically when expressions are boxed or parsed
+(before any `.simplify()` call).
+
+**Folding rules:**
+
+| Operator   | Input                     | Canonical Form   | Rule                           |
+| ---------- | ------------------------- | ---------------- | ------------------------------ |
+| `Add`      | `Add(2, x, 5)`           | `Add(x, 7)`     | Integer sum                    |
+| `Add`      | `Add(1/3, x, 2/3)`       | `Add(x, 1)`     | Rational sum                   |
+| `Add`      | `Add(√2, x, √2)`         | `Add(x, 2√2)`   | Radical grouping               |
+| `Add`      | `Add(2, 3)`              | `5`              | Full reduction                 |
+| `Add`      | `Add(1, Complex(0, -1))` | `Complex(1, -1)` | Complex promotion              |
+| `Multiply` | `Multiply(2, x, 5)`      | `Multiply(10, x)` | Integer product              |
+| `Multiply` | `Multiply(1/2, x, 2)`    | `x`              | Identity elimination           |
+| `Multiply` | `Multiply(2, 3)`         | `6`              | Full reduction                 |
+
+**Not folded:**
+
+- Machine floats (e.g., `1.5`, `3.14`) — these are non-exact
+- Infinity and NaN — special values, not numeric literals
+- Single numeric operands — nothing to fold (e.g., `Multiply(5, Pi)` unchanged)
+- Sub-expressions like `1-1` — require evaluation, not just literal folding
+
 ### Issue Severity (Updated after Phase 9)
 
 - **Bugs (incorrect results)**: 0 cases ✅
@@ -107,9 +133,10 @@ These produce mathematically incorrect results and should be fixed first.
 | `\frac{0}{1-1}` | `0`            | `NaN`    | ⚠️ Limitation\* |
 | `\frac{1-1}{0}` | `~∞`           | `NaN`    | ⚠️ Limitation\* |
 
-\*Limitation: Expressions like `1-1` are not evaluated during canonicalization
-or simplification by default to avoid potentially expensive computations. Run an
-explicit evaluation step first:
+\*Limitation: While exact numeric literals (e.g., `Add(2, 5)` &rarr; `7`) are now
+folded during canonicalization, sub-expressions like `1-1` are not evaluated
+during canonicalization because they require simplification of non-literal
+operands. Run an explicit evaluation step first:
 
 ```javascript
 const denom = ce.parse('1-1', { canonical: false }).simplify();

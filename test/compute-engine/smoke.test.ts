@@ -63,7 +63,7 @@ describe('PARSING numbers', () => {
     expect(ce.box({ num: '-12n' }).numericValue).toEqual(-12);
   });
   test(`-2+3-4`, () => {
-    expect(ce.parse('-2+3-4')).toMatchInlineSnapshot(`["Add", -4, -2, 3]`);
+    expect(ce.parse('-2+3-4')).toMatchInlineSnapshot(`-3`);
   });
   test(`-i`, () => {
     expect(ce.parse('-i')).toMatchInlineSnapshot(`["Complex", 0, -1]`);
@@ -74,18 +74,28 @@ describe('PARSING numbers', () => {
 
   // Should not sum, loss of precision (very big intger + small integer)
   test(`1 + 1e199`, () =>
-    expect(ce.parse('1 + 1e199')).toMatchInlineSnapshot(`["Add", 1, 1e+199]`));
+    expect(ce.parse('1 + 1e199')).toMatchInlineSnapshot(`
+      {
+        num: "10000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000001"
+      }
+    `));
 
   test(`421.35e+1000`, () =>
     expect(ce.parse('421.35e+1000')).toMatchInlineSnapshot(`4.2135e+1002`));
 
   test(`\\frac34 + 1e199`, () =>
-    expect(ce.parse('\\frac34 + 1e199')).toMatchInlineSnapshot(
-      `["Add", 1e+199, ["Rational", 3, 4]]`
-    ));
+    expect(ce.parse('\\frac34 + 1e199')).toMatchInlineSnapshot(`
+      [
+        "Rational",
+        {
+          num: "40000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000003"
+        },
+        4
+      ]
+    `));
 
   test(`-5-2-3 (non-canonical)`, () =>
-    expect(ce.parse('-5-2-3')).toMatchInlineSnapshot(`["Add", -5, -3, -2]`));
+    expect(ce.parse('-5-2-3')).toMatchInlineSnapshot(`-10`));
 
   test(`5+3+2 (non-canonical)`, () =>
     expect(parseToJson('5+3+2')).toMatchInlineSnapshot(`
@@ -214,7 +224,7 @@ describe('SERIALIZING Negative factors', () => {
   test(`(-2)\\times(-x)\\times y\\times\\frac{3}{-5}`, () => {
     expect(
       engine.parse('(-2)\\times(-x)\\times y\\times\\frac{3}{-5}').latex
-    ).toMatchInlineSnapshot(`\\frac{-2\\times3xy}{5}`);
+    ).toMatchInlineSnapshot(`\\frac{-6xy}{5}`);
   });
 });
 
@@ -244,18 +254,14 @@ describe('CANONICALIZATION negate', () => {
 });
 describe('CANONICALIZATION Add', () => {
   test('7 + 2 + 5', () =>
-    expect(canonicalToJson('7 + 2 + 5')).toMatchObject(['Add', 2, 5, 7]));
+    expect(canonicalToJson('7 + 2 + 5')).toEqual(14));
 
   test(`7 + \\frac12`, () =>
     expect(canonicalToJson('7 + \\frac12')).toMatchInlineSnapshot(`
       [
-        Add,
-        7,
-        [
-          Rational,
-          1,
-          2,
-        ],
+        Rational,
+        15,
+        2,
       ]
     `));
 
@@ -264,8 +270,7 @@ describe('CANONICALIZATION Add', () => {
       [
         Add,
         x,
-        1,
-        2,
+        3,
       ]
     `));
 
@@ -273,21 +278,13 @@ describe('CANONICALIZATION Add', () => {
     expect(canonicalToJson('2 + \\infty + 1')).toMatchInlineSnapshot(`
       [
         Add,
-        1,
-        2,
+        3,
         PositiveInfinity,
       ]
     `));
 
   test(`7 + (2 + 5) // Associative`, () =>
-    expect(canonicalToJson('7 + (2 + 5)')).toMatchInlineSnapshot(`
-      [
-        Add,
-        2,
-        5,
-        7,
-      ]
-    `));
+    expect(canonicalToJson('7 + (2 + 5)')).toMatchInlineSnapshot(`14`));
 
   test(`-2+a+b`, () =>
     expect(canonicalToJson('-2+a+b')).toMatchInlineSnapshot(`
@@ -320,22 +317,10 @@ describe('CANONICALIZATION Add', () => {
 });
 describe('CANONICALIZATION multiply', () => {
   test('2\\times3', () =>
-    expect(canonicalToJson('2\\times3')).toMatchInlineSnapshot(`
-      [
-        Multiply,
-        2,
-        3,
-      ]
-    `));
+    expect(canonicalToJson('2\\times3')).toMatchInlineSnapshot(`6`));
 
   test(`-2\\times-3`, () =>
-    expect(canonicalToJson('-2\\times-3')).toMatchInlineSnapshot(`
-      [
-        Multiply,
-        2,
-        3,
-      ]
-    `));
+    expect(canonicalToJson('-2\\times-3')).toMatchInlineSnapshot(`6`));
 
   test(`x\\times(-y)`, () =>
     expect(canonicalToJson('x\\times(-y)')).toMatchObject([
@@ -344,43 +329,21 @@ describe('CANONICALIZATION multiply', () => {
     ]));
 
   test(`2\\times\\frac12`, () =>
-    expect(canonicalToJson('2\\times\\frac12')).toMatchInlineSnapshot(`
-      [
-        Multiply,
-        2,
-        [
-          Rational,
-          1,
-          2,
-        ],
-      ]
-    `));
+    expect(canonicalToJson('2\\times\\frac12')).toMatchInlineSnapshot(`1`));
 
   test(`2\\times(5-5)\\times5\\times4`, () =>
-    expect(canonicalToJson('2\\times(5-5)\\times5\\times4'))
-      .toMatchInlineSnapshot(`
-      [
-        Multiply,
-        2,
-        4,
-        5,
-        [
-          Add,
-          -5,
-          5,
-        ],
-      ]
-    `));
+    expect(
+      canonicalToJson('2\\times(5-5)\\times5\\times4')
+    ).toMatchInlineSnapshot(`0`));
 
   test(`(-2)\\times(-x)\\times y\\times\\frac{3}{-5}`, () =>
     expect(canonicalToJson('(-2)\\times(-x)\\times y\\times\\frac{3}{-5}'))
       .toMatchInlineSnapshot(`
       [
         Multiply,
-        -2,
         [
           Rational,
-          3,
+          -6,
           5,
         ],
         x,
@@ -396,10 +359,9 @@ describe('CANONICALIZATION multiply', () => {
     ).toMatchInlineSnapshot(`
       [
         Multiply,
-        -2,
         [
           Rational,
-          2,
+          -4,
           3,
         ],
         3.2,

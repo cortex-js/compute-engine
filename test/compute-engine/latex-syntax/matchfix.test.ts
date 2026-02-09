@@ -104,29 +104,29 @@ describe('MATCHFIX synonyms', () => {
       canonical = ["Triple", "a", "b", "c"]
     `));
   test('\\mathopen{\\lbrack}1, 2\\mathclose{\\rbrack}', () =>
-    expect(check(`\\mathopen{\\lbrack}1, 2\\mathclose{\\rbrack}`))
-      .toMatchInlineSnapshot(`["List", 1, 2]`));
+    expect(
+      check(`\\mathopen{\\lbrack}1, 2\\mathclose{\\rbrack}`)
+    ).toMatchInlineSnapshot(`["List", 1, 2]`));
 });
 
 describe('MATCHFIX abs and norm', () => {
   test('1+|a|+2', () =>
     expect(check('1+|a|+2')).toMatchInlineSnapshot(`
       box       = ["Add", 1, ["Abs", "a"], 2]
-      canonical = ["Add", ["Abs", "a"], 1, 2]
-      simplify  = |a| + 3
+      canonical = ["Add", ["Abs", "a"], 3]
     `));
 
   test('|(1+|a|+2)|', () =>
     expect(check('|(1+|a|+2)|')).toMatchInlineSnapshot(`
       box       = ["Abs", ["Delimiter", ["Add", 1, ["Abs", "a"], 2]]]
-      canonical = ["Abs", ["Add", ["Abs", "a"], 1, 2]]
+      canonical = ["Abs", ["Add", ["Abs", "a"], 3]]
       simplify  = |a| + 3
     `));
 
   test('|1+|a|+2|', () =>
     expect(check('|1+|a|+2|')).toMatchInlineSnapshot(`
       box       = ["Abs", ["Add", 1, ["Abs", "a"], 2]]
-      canonical = ["Abs", ["Add", ["Abs", "a"], 1, 2]]
+      canonical = ["Abs", ["Add", ["Abs", "a"], 3]]
       simplify  = |a| + 3
     `));
 

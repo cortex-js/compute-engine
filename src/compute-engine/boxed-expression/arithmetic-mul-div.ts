@@ -692,13 +692,13 @@ export function canonicalDivide(
   // At least one of op1 or op2 are not numeric value.
   // Try to factor them.
 
-  // @fixme: toNumericValue will collapse any exact value. So 2*x*5 will be 10*x. This is not desirable for canonicalization.
+  // Exact numeric values in operands are now pre-folded by canonicalMultiply,
+  // so toNumericValue here just extracts the remaining coefficient+term.
   const [c1, t1] = op1.toNumericValue();
-  if (c1.isZero) return ce.Zero; // @fixme can't happen? Checked for 0 above
+  console.assert(!c1.isZero); // zeros already filtered above
 
   const [c2, t2] = op2.toNumericValue();
-
-  if (c2.isZero) return ce.NaN; // @fixme can't happen? Checked for 0 above
+  console.assert(!c2.isZero); // zeros already filtered above
 
   const c = c1.div(c2);
 
@@ -847,6 +847,40 @@ export function canonicalMultiply(
   // Filter out ones
   //
   xs = xs.filter((x) => !x.is(1));
+
+  //
+  // Fold exact numeric operands (integers, rationals, radicals)
+  // e.g. Multiply(2, x, 5) → Multiply(10, x)
+  //
+  {
+    const exactNumerics: NumericValue[] = [];
+    const nonNumeric: BoxedExpression[] = [];
+    for (const x of xs) {
+      if (isBoxedNumber(x) && !x.isInfinity && !x.isNaN) {
+        const nv = x.numericValue;
+        if (typeof nv === 'number' || nv.isExact) {
+          exactNumerics.push(
+            typeof nv === 'number' ? ce._numericValue(nv) : nv
+          );
+          continue;
+        }
+      }
+      nonNumeric.push(x);
+    }
+    if (exactNumerics.length >= 2) {
+      let product = exactNumerics[0];
+      for (let i = 1; i < exactNumerics.length; i++)
+        product = product.mul(exactNumerics[i]);
+      if (product.isZero) {
+        // 0 * ±∞ = NaN, 0 * NaN = NaN
+        if (nonNumeric.some((x) => x.isInfinity || x.isNaN)) return ce.NaN;
+        return ce.Zero;
+      }
+      if (!product.eq(1)) nonNumeric.unshift(ce.number(product));
+      xs = nonNumeric;
+    }
+    // else: 0 or 1 exact numerics — xs is unchanged, no folding needed
+  }
 
   //
   // If an integer or a rational is followed by a sqrt or an imaginary unit

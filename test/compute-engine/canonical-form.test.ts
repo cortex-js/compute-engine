@@ -44,8 +44,7 @@ describe('CANONICAL FORMS', () => {
   test('7 + 2 + 5"', () => {
     expect(check('7 + 2 + 5')).toMatchInlineSnapshot(`
       box       = ["Add", 7, 2, 5]
-      canonical = ["Add", 2, 5, 7]
-      simplify  = 14
+      canonical = 14
     `);
   });
 
@@ -167,19 +166,11 @@ describe('CANONICAL FORMS', () => {
         ["Divide", 2, 7],
         ["Sqrt", 5]
       ]
-      canonical = [
-        "Multiply",
-        5,
-        ["Rational", 1, 7],
-        ["Rational", 2, 7],
-        ["Sqrt", 3],
-        ["Sqrt", 5]
-      ]
-      simplify  = 10/49sqrt(15)
+      canonical = ["Multiply", ["Rational", 10, 49], ["Sqrt", 15]]
       eval-auto = 10/49sqrt(15)
       eval-mach = 10/49sqrt(15)
-      N-auto    = 0.790404764532125894938
-      N-mach    = 0.790404764532129
+      N-auto    = 0.790404764532125894935
+      N-mach    = 0.790404764532126
     `);
   });
 
@@ -206,14 +197,7 @@ describe('CANONICAL FORMS', () => {
           ]
         ]
       ]
-      canonical = [
-        "Multiply",
-        ["Add", 1, 2, 3, 4],
-        ["Add", 11, 12, 13, 14],
-        ["Add", 5, 6, 7],
-        ["Add", 8, 9, 10]
-      ]
-      simplify  = 243000
+      canonical = 243000
     `);
   });
 
@@ -222,24 +206,21 @@ describe('CANONICAL FORMS', () => {
   test('2x\\frac{0}{5}"', () => {
     expect(check('2x\\frac{0}{5}')).toMatchInlineSnapshot(`
       box       = ["InvisibleOperator", 2, "x", ["Divide", 0, 5]]
-      canonical = ["Multiply", 0, 2, "x"]
-      simplify  = 0
+      canonical = 0
     `);
   });
 
   test('"2\\times0\\times5\\times4"', () => {
     expect(check('2\\times0\\times5\\times4')).toMatchInlineSnapshot(`
       box       = ["Multiply", 2, 0, 5, 4]
-      canonical = ["Multiply", 0, 2, 4, 5]
-      simplify  = 0
+      canonical = 0
     `);
   });
 
   test('"2\\times(5-5)\\times5\\times4"', () => {
     expect(check('2\\times(5-5)\\times5\\times4')).toMatchInlineSnapshot(`
       box       = ["Multiply", 2, ["Delimiter", ["Subtract", 5, 5]], 5, 4]
-      canonical = ["Multiply", 2, 4, 5, ["Subtract", 5, 5]]
-      simplify  = 0
+      canonical = 0
     `);
   });
 
@@ -688,8 +669,8 @@ describe('CANONICAL FORMS', () => {
       // expect(checkPower('')).toMatchInlineSnapshot();
       expect(checkPower('{a^3}^4')).toMatchInlineSnapshot(`
         box        = ["Power", ["Power", "a", 3], 4]
-        canonForms = ["Power", "a", ["Multiply", 3, 4]]
-        canonical  = ["Power", "a", ["Multiply", 3, 4]]
+        canonForms = ["Power", "a", 12]
+        canonical  = ["Power", "a", 12]
       `);
       //note: 'Multiply' args. are ordered in the output JSON: but the result 'Power'
       //BoxedExpression still has (ordered) operands [b, c].
@@ -951,23 +932,12 @@ describe('COMMUTATIVE ORDER', () => {
         "Pi",
         "y"
       ]
-      canonical = [
-        "Multiply",
-        -2,
-        3,
-        5,
-        ["Rational", 3, 4],
-        "Pi",
-        "x",
-        "y",
-        "z",
-        ["Sqrt", "y"]
-      ]
+      canonical = ["Multiply", ["Rational", -45, 2], "Pi", "x", "y", "z", ["Sqrt", "y"]]
       simplify  = -45/2 * pi * x * z * y^(3/2)
       eval-auto = -45/2 * pi * x * z * y^(3/2)
       eval-mach = -45/2 * pi * x * z * y^(3/2)
-      N-auto    = -70.6858347057703478658 * x * z * y^2
-      N-mach    = -70.6858347057702 * x * z * y^2
+      N-auto    = -70.6858347057703478654 * x * z * y^2
+      N-mach    = -70.6858347057703 * x * z * y^2
     `);
   });
 
@@ -1020,8 +990,7 @@ describe('POLYNOMIAL ORDER', () => {
   test(`Canonical form c+7+a+5+b`, () => {
     expect(check('c+7+a+5+b')).toMatchInlineSnapshot(`
       box       = ["Add", "c", 7, "a", 5, "b"]
-      canonical = ["Add", "a", "b", "c", 5, 7]
-      simplify  = a + b + c + 12
+      canonical = ["Add", "a", "b", "c", 12]
     `);
   });
 
@@ -1044,10 +1013,8 @@ describe('POLYNOMIAL ORDER', () => {
         ["Multiply", 7, "a"],
         ["Multiply", 2, "b"],
         ["Multiply", 5, "c"],
-        3,
-        6
+        9
       ]
-      simplify  = 7a + 2b + 5c + 9
     `);
   });
 
@@ -1080,14 +1047,14 @@ describe('POLYNOMIAL ORDER', () => {
       ]
       canonical = [
         "Add",
-        ["Multiply", 3, 4, "Pi", ["Power", "x", 3]],
         ["Multiply", 2, "Pi", ["Power", "x", 3]],
+        ["Multiply", 12, "Pi", ["Power", "x", 3]],
         ["Power", "x", 3]
       ]
       simplify  = 14pi * x^3 + x^3
       eval-auto = 14pi * x^3 + x^3
       eval-mach = 14pi * x^3 + x^3
-      N-auto    = 44.9822971502571053383 * x^3
+      N-auto    = 44.9822971502571053384 * x^3
       N-mach    = 44.982297150257104 * x^3
     `);
   });
