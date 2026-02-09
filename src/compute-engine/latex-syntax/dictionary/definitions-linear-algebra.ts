@@ -101,12 +101,12 @@ export const DEFINITIONS_LINEAR_ALGEBRA: LatexDictionary = [
     symbolTrigger: 'Vmatrix',
     parse: (parser: Parser) => {
       const columns = parseColumnFormat(parser);
-      const [operator, cells] = parseCells(parser);
+      const [op, cells] = parseCells(parser);
 
       if (columns)
-        return [operator, cells, { str: '‖‖' }, { str: columns }] as Expression;
+        return ['Norm', [op, cells, { str: columns }]] as Expression;
 
-      return [operator, cells, { str: '‖‖' }] as Expression;
+      return ['Norm', [op, cells]] as Expression;
     },
   },
 
@@ -230,13 +230,16 @@ export const DEFINITIONS_LINEAR_ALGEBRA: LatexDictionary = [
   {
     name: 'Trace',
     kind: 'function',
-    symbolTrigger: 'tr',
+    latexTrigger: '\\tr',
   },
+
+  // Also support plain text: tr(A)
+  { symbolTrigger: 'tr', kind: 'function', parse: 'Trace' },
 
   {
     name: 'Determinant',
     kind: 'function',
-    symbolTrigger: 'det',
+    latexTrigger: '\\det',
     serialize: (serializer: Serializer, expr: Expression): string => {
       const arg = operand(expr, 1);
       if (operator(arg) === 'Matrix') {
@@ -252,6 +255,9 @@ export const DEFINITIONS_LINEAR_ALGEBRA: LatexDictionary = [
       return `\\det\\left(${serializer.serialize(arg)}\\right)`;
     },
   },
+
+  // Also support plain text: det(A)
+  { symbolTrigger: 'det', kind: 'function', parse: 'Determinant' },
 
   // MatrixMultiply serializes as multiplication with \cdot
   {

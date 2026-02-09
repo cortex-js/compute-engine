@@ -1281,6 +1281,19 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
     closeTrigger: ['\\right', '\\Vert'],
     parse: (_parser, expr) =>
       isEmptySequence(expr) ? null : (['Norm', expr] as Expression),
+    serialize: (serializer, expr) => {
+      const arg = operand(expr, 1);
+      if (operator(arg) === 'Matrix') {
+        // Re-inject ‖‖ delimiters so the Matrix serializer outputs Vmatrix
+        const data = operand(arg, 1);
+        const colSpec = operand(arg, 2);
+        const matrixWithDelims: Expression = colSpec
+          ? (['Matrix', data, { str: '‖‖' }, colSpec] as Expression)
+          : (['Matrix', data, { str: '‖‖' }] as Expression);
+        return serializer.serialize(matrixWithDelims);
+      }
+      return `\\left\\Vert ${serializer.serialize(arg)}\\right\\Vert`;
+    },
   },
   {
     name: 'PlusMinus',

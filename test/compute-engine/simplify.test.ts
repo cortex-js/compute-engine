@@ -273,7 +273,7 @@ describe('Canonicalization: Operations Involving 0', () => {
 
 describe('Canonicalization: Operations Involving 1', () => {
   test('1x = x', () => checkSimplify('1x', 'x'));
-  test.skip('-1x = x', () => checkSimplify('-1x', 'x'));
+  test('-1x = -x', () => checkSimplify('-1x', '-x'));
   test('x^1 = x', () => checkSimplify('x^1', 'x'));
   test('x/1 = x', () => checkSimplify('x/1', 'x'));
   test('x/(-1) = -x', () => checkSimplify('x/(-1)', '-x'));

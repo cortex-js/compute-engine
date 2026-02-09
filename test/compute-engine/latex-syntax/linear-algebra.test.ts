@@ -44,7 +44,7 @@ describe('Parsing environments', () => {
   it('should parse a Vmatrix', () => {
     const result = ce.parse('\\begin{Vmatrix} a & b \\\\ c & d \\end{Vmatrix}');
     expect(result.toString()).toMatchInlineSnapshot(
-      `Matrix([[a,b],[c,d]], "‖‖")`
+      `||Matrix([[a,b],[c,d]])||`
     );
   });
 

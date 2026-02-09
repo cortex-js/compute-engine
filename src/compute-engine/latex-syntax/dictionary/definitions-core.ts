@@ -893,12 +893,18 @@ export const DEFINITIONS_CORE: LatexDictionary = [
     latexTrigger: '^{-1', // Note: the closing brace is not included
     kind: 'postfix',
     parse: (parser: Parser, lhs: Expression) => {
+      // If the lhs is a Matrix expression, return the matrix inverse
+      if (operator(lhs) === 'Matrix') {
+        parser.match('<}>');
+        return ['Inverse', lhs] as Expression;
+      }
+
       const sym = symbol(lhs);
       if (!sym) return null;
 
       const symType = parser.getSymbolType(sym);
 
-      // If the lhs is a matrix, return the matrix inverse
+      // If the lhs is a matrix-typed symbol, return the matrix inverse
       // i.e. A^{-1} -> Inverse(A)
       if (symType.matches(new BoxedType('matrix'))) {
         parser.match('<}>');

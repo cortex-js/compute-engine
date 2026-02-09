@@ -231,14 +231,31 @@ ce.simplificationRules.push({
   `\begin{vmatrix}...\end{vmatrix}` when the argument is a `Matrix` expression,
   and uses `\det\left(...\right)` for symbol arguments.
 
-- **`A^{-1}` produces `Inverse` for matrix-typed symbols**: When a symbol is
-  declared with type `matrix`, parsing `A^{-1}` now returns `["Inverse", "A"]`
-  instead of `["Power", "A", -1]`. Undeclared symbols still fall through to the
-  default `Power`/`Divide` handling, and function symbols still produce
+- **`\begin{Vmatrix}` now parses to `Norm`**: The `Vmatrix` LaTeX environment
+  now produces `["Norm", ["Matrix", ...]]` instead of
+  `["Matrix", ..., "'‖‖'"]`. Serialization round-trips to
+  `\begin{Vmatrix}...\end{Vmatrix}` when the argument is a `Matrix`, and uses
+  `\left\Vert...\right\Vert` for symbol arguments.
+
+- **`A^{-1}` produces `Inverse` for matrix-typed symbols and matrix
+  expressions**: When a symbol is declared with type `matrix`, parsing `A^{-1}`
+  now returns `["Inverse", "A"]` instead of `["Power", "A", -1]`. This also
+  works for inline matrix expressions, e.g.
+  `\begin{pmatrix}...\end{pmatrix}^{-1}`. Undeclared symbols still fall through
+  to the default `Power`/`Divide` handling, and function symbols still produce
   `InverseFunction` (e.g., `\sin^{-1}` &rarr; `Arcsin`).
 
 - **`Inverse` serializes as `^{-1}`**: `["Inverse", "A"]` now serializes to
   `A^{-1}` instead of `\mathrm{Inverse}(A)`.
+
+- **`Power(A, -1)` canonicalizes to `Inverse(A)` for matrices**: When `A` has
+  a matrix type, `ce.box(["Power", "A", -1])` now canonicalizes to
+  `["Inverse", "A"]` instead of `["Divide", 1, "A"]`.
+
+- **`\det(A)` and `\tr(A)` now parse correctly**: Fixed `Determinant` and
+  `Trace` LaTeX dictionary entries to use `latexTrigger` (`\det`, `\tr`)
+  instead of `symbolTrigger`, which only matches plain identifiers. Both
+  functions also accept plain text forms (`det(A)`, `tr(A)`).
 
 ### Canonicalization
 
