@@ -263,6 +263,17 @@ export function simplifyAbsPower(x: BoxedExpression): RuleStep | undefined {
     }
   }
 
+  // |x|^(p/q) -> x^(p/q) when p is even (Rational form)
+  if (exp.isRational === true && exp.isInteger === false) {
+    const num = exp.numerator;
+    if (num && num.isEven === true) {
+      return {
+        value: innerBase.pow(exp),
+        because: '|x|^(p/q) -> x^(p/q) when p is even',
+      };
+    }
+  }
+
   return undefined;
 }
 

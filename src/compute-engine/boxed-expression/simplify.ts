@@ -262,6 +262,19 @@ function simplifyOperands(
       if (x.operator === 'Ln') {
         return simplify(x, options).at(-1)!.value;
       }
+      // Simplify Abs operands to enable cancellation
+      // (e.g., |xy| -> |x||y| so that |xy| - |x||y| = 0)
+      // Also handle Negate(Abs(...)) which appears in subtraction expressions
+      if (x.operator === 'Abs') {
+        return simplify(x, options).at(-1)!.value;
+      }
+      if (
+        x.operator === 'Negate' &&
+        isBoxedFunction(x) &&
+        x.op1?.operator === 'Abs'
+      ) {
+        return simplify(x, options).at(-1)!.value;
+      }
       // Power expressions with fractional exponents may need sign factoring
       // e.g., (-2x)^{3/5} should become -(2x)^{3/5} for correct real evaluation
       if (
@@ -419,7 +432,13 @@ function simplifyNonCommutativeFunction(
     because === 'ln' ||
     because?.startsWith('ln(') ||
     because?.startsWith('log_');
-  if (!isCheaper(expr, last, options?.costFunction) && !isPowerCombination && !isLogRule)
+  // Root sign extraction: root(-a, n) -> -root(a, n) for odd n
+  const isRootSignRule = because?.startsWith('root(-');
+  // Abs identity rules (|xy| -> |x||y|, |x/y| -> |x|/|y|) normalize structure
+  const isAbsRule = because?.startsWith('|');
+  // Quotient-power distribution: a/(b/c)^d -> a*(c/b)^d eliminates nested fractions
+  const isQuotientPowerRule = because === 'a / (b/c)^d -> a * (c/b)^d';
+  if (!isCheaper(expr, last, options?.costFunction) && !isPowerCombination && !isLogRule && !isRootSignRule && !isAbsRule && !isQuotientPowerRule)
     return steps;
 
   result.at(-1)!.value = last;

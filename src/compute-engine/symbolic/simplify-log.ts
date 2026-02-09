@@ -40,6 +40,28 @@ export function simplifyLog(x: BoxedExpression): RuleStep | undefined {
       return { value: ce.PositiveInfinity, because: 'ln(+inf) -> +inf' };
     }
 
+    // ln(p/q) -> ln(p) - ln(q) for positive rational p/q (not integer)
+    if (arg.operator === 'Rational' && arg.isRational === true && arg.isInteger === false) {
+      const j = arg.json;
+      if (Array.isArray(j) && j[0] === 'Rational') {
+        const p = j[1] as number;
+        const q = j[2] as number;
+        if (p > 0 && q > 0) {
+          if (p === 1) {
+            // ln(1/q) -> -ln(q)
+            return {
+              value: ce._fn('Ln', [ce.number(q)]).neg(),
+              because: 'ln(1/q) -> -ln(q)',
+            };
+          }
+          return {
+            value: ce._fn('Ln', [ce.number(p)]).sub(ce._fn('Ln', [ce.number(q)])),
+            because: 'ln(p/q) -> ln(p) - ln(q)',
+          };
+        }
+      }
+    }
+
     // ln(x^n) -> n*ln(x) when x >= 0 or n is odd or n is irrational
     if (arg.operator === 'Power' && isBoxedFunction(arg)) {
       const base = arg.op1;
@@ -275,6 +297,29 @@ export function simplifyLog(x: BoxedExpression): RuleStep | undefined {
             because: 'log_c(x^n) -> n*log_c(|x|) when n even',
           };
         }
+        // log_c(x^{p/q}) for non-integer rational p/q
+        if (exp.isRational === true && exp.isInteger === false) {
+          const j = exp.json;
+          if (Array.isArray(j) && j[0] === 'Rational') {
+            const p = j[1] as number;
+            const q = j[2] as number;
+            // q even: x >= 0 implied (even root), no |x| needed
+            // q odd, p odd: preserves sign, no |x| needed
+            // q odd, p even: x^{p/q} is non-negative, need |x|
+            if (q % 2 === 0 || p % 2 !== 0) {
+              return {
+                value: exp.mul(ce._fn('Log', [powerBase, logBase])),
+                because: 'log_c(x^{p/q}) -> (p/q)*log_c(x)',
+              };
+            }
+            return {
+              value: exp.mul(
+                ce._fn('Log', [ce._fn('Abs', [powerBase]), logBase])
+              ),
+              because: 'log_c(x^{p/q}) -> (p/q)*log_c(|x|) when p even',
+            };
+          }
+        }
       }
     }
 
@@ -360,6 +405,16 @@ export function simplifyLog(x: BoxedExpression): RuleStep | undefined {
         value: ce._fn('Log', [arg, logBase.op2]).neg(),
         because: 'log_{1/c}(a) -> -log_c(a)',
       };
+    }
+    // Same rule for Rational(1, q): log_{1/q}(a) -> -log_q(a)
+    if (logBase.operator === 'Rational') {
+      const bj = logBase.json;
+      if (Array.isArray(bj) && bj[0] === 'Rational' && bj[1] === 1) {
+        return {
+          value: ce._fn('Log', [arg, ce.number(bj[2] as number)]).neg(),
+          because: 'log_{1/c}(a) -> -log_c(a)',
+        };
+      }
     }
   }
 
@@ -756,6 +811,46 @@ export function simplifyLog(x: BoxedExpression): RuleStep | undefined {
           value: ce._fn('Ln', [denom.op2]),
           because: 'ln(a) / log_c(a) -> ln(c)',
         };
+      }
+
+      // ln(a) / ln(b) -> k when a = b^k for positive integers a, b
+      if (
+        num.operator === 'Ln' &&
+        isBoxedFunction(num) &&
+        denom.operator === 'Ln' &&
+        isBoxedFunction(denom)
+      ) {
+        const a = num.op1;
+        const b = denom.op1;
+        if (
+          a &&
+          b &&
+          a.isInteger === true &&
+          b.isInteger === true &&
+          a.isPositive === true &&
+          b.isPositive === true
+        ) {
+          const aVal = a.re;
+          const bVal = b.re;
+          if (
+            Number.isFinite(aVal) &&
+            Number.isFinite(bVal) &&
+            bVal > 1 &&
+            aVal > 0
+          ) {
+            // Check if a = b^k for some integer k
+            // Use Math.round to handle floating-point imprecision,
+            // then verify with exact integer exponentiation
+            const kRaw = Math.log(aVal) / Math.log(bVal);
+            const k = Math.round(kRaw);
+            if (Math.abs(kRaw - k) < 1e-10 && Math.pow(bVal, k) === aVal) {
+              return {
+                value: ce.number(k),
+                because: 'ln(a)/ln(b) -> k when a = b^k',
+              };
+            }
+          }
+        }
       }
     }
   }

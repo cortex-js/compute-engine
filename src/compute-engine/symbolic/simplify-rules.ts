@@ -344,6 +344,13 @@ export const SIMPLIFY_RULES: Rule[] = [
         if (num.is(0) || num.isSame(denom)) return undefined;
       }
 
+      // Skip Ln/Log divisions — let simplifyLog handle ln(a)/ln(b), etc.
+      if (
+        (num.operator === 'Ln' || num.operator === 'Log') &&
+        (denom.operator === 'Ln' || denom.operator === 'Log')
+      )
+        return undefined;
+
       // Skip if both operands are powers with the same base (let simplifyPower handle it)
       // This preserves symbolic forms like e^x / e^2 -> e^{x-2}
       if (
@@ -366,6 +373,13 @@ export const SIMPLIFY_RULES: Rule[] = [
         denom.operator === 'Power' &&
         isBoxedFunction(denom) &&
         denom.op1.isSame(num)
+      )
+        return undefined;
+      // Skip a / (b/c)^d — let simplifyPower handle it
+      if (
+        denom.operator === 'Power' &&
+        isBoxedFunction(denom) &&
+        denom.op1.operator === 'Divide'
       )
         return undefined;
 
@@ -443,8 +457,12 @@ export const SIMPLIFY_RULES: Rule[] = [
   //
   (x): RuleStep | undefined => {
     if (!isBoxedFunction(x)) return undefined;
-    if (x.operator === 'Ln')
+    if (x.operator === 'Ln') {
+      // Skip ln of non-integer rationals — simplifyLog decomposes ln(p/q) → ln(p) - ln(q)
+      if (x.op1.operator === 'Rational' && x.op1.isInteger === false)
+        return undefined;
       return { value: x.op1.ln(x.ops[1]), because: 'ln' };
+    }
     if (x.operator === 'Log') {
       const logBase = x.ops[1] ?? 10;
       // Skip edge cases that simplifyLog handles correctly:
@@ -460,6 +478,39 @@ export const SIMPLIFY_RULES: Rule[] = [
       // Skip log_c(c^x) — simplifyLog returns x directly
       if (x.op1.operator === 'Power' && isBoxedFunction(x.op1) && x.op1.op1?.isSame(baseExpr))
         return undefined;
+      // Skip Power args — simplifyLog handles these with proper sign/abs tracking:
+      // irrational exponents, non-integer rationals, and even exponents (need |x|)
+      if (x.op1.operator === 'Power' && isBoxedFunction(x.op1) && x.op1.op2) {
+        const exp = x.op1.op2;
+        if (exp.isRational === false || (exp.isRational === true && exp.isInteger === false))
+          return undefined;
+        if (exp.isEven === true)
+          return undefined;
+      }
+      // Skip reciprocal bases (Rational(1,q)) — simplifyLog has a dedicated rule
+      if (baseExpr.operator === 'Rational') {
+        const bj = baseExpr.json;
+        if (Array.isArray(bj) && bj[0] === 'Rational' && bj[1] === 1)
+          return undefined;
+      }
+      // Skip Multiply args containing a factor that is Power(base, ...) —
+      // simplifyLog has log_c(c^x * y) → x + log_c(y) rule
+      if (x.op1.operator === 'Multiply' && isBoxedFunction(x.op1)) {
+        for (const factor of x.op1.ops) {
+          if (factor.operator === 'Power' && isBoxedFunction(factor) && factor.op1?.isSame(baseExpr))
+            return undefined;
+        }
+      }
+      // Skip Divide args containing base match in numerator or denominator —
+      // simplifyLog has log_c(c^x/y) and log_c(y/c^x) rules
+      if (x.op1.operator === 'Divide' && isBoxedFunction(x.op1)) {
+        const num = x.op1.op1;
+        const denom = x.op1.op2;
+        if (num?.operator === 'Power' && isBoxedFunction(num) && num.op1?.isSame(baseExpr))
+          return undefined;
+        if (denom?.operator === 'Power' && isBoxedFunction(denom) && denom.op1?.isSame(baseExpr))
+          return undefined;
+      }
       return { value: x.op1.ln(logBase), because: 'log' };
     }
     return undefined;

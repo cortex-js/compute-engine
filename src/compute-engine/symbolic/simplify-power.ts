@@ -62,6 +62,14 @@ export function simplifyPower(x: BoxedExpression): RuleStep | undefined {
       }
     }
 
+    // Sign extraction for odd roots: root(-a, n) -> -root(a, n) when n is odd
+    if (rootIndex.isOdd === true && arg.isNegative === true) {
+      return {
+        value: ce._fn('Root', [arg.neg(), rootIndex]).neg(),
+        because: 'root(-a, n) -> -root(a, n) when n odd',
+      };
+    }
+
     // root(sqrt(x), n) -> x^{1/(2n)} (nth root of square root)
     if (arg.operator === 'Sqrt' && isBoxedFunction(arg) && arg.op1) {
       const innerBase = arg.op1;
@@ -335,6 +343,11 @@ export function simplifyPower(x: BoxedExpression): RuleStep | undefined {
     const exp = x.op2;
 
     if (!base || !exp) return undefined;
+
+    // x^1 -> x
+    if (exp.is(1)) {
+      return { value: base, because: 'x^1 -> x' };
+    }
 
     // 0^x -> 0 when x is positive (including symbolic like π)
     // Note: 0^0 = NaN and 0^(-x) = ComplexInfinity are handled elsewhere
@@ -658,7 +671,7 @@ export function simplifyPower(x: BoxedExpression): RuleStep | undefined {
       isBoxedFunction(denom) &&
       denom.op1.operator === 'Divide' &&
       isBoxedFunction(denom.op1) &&
-      denom.op1.op2.is(0) === false
+      denom.op1.op2.is(0) !== true
     ) {
       const fracNum = denom.op1.op1;
       const fracDenom = denom.op1.op2;

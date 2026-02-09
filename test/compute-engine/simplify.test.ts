@@ -124,7 +124,7 @@ describe('Canonicalization: Double Powers', () => {
   test('(x^{-2})^{-2} = x^4', () => checkSimplify('(x^{-2})^{-2}', 'x^4'));
   test('(x^3)^{2/5} = x^{6/5}', () => checkSimplify('(x^3)^{2/5}', 'x^{6/5}'));
   test('(x^2)^{1/2} = |x|', () => checkSimplify('(x^2)^{1/2}', '|x|'));
-  test.skip('(x^3)^{1/3} = x', () => checkSimplify('(x^3)^{1/3}', 'x'));
+  test('(x^3)^{1/3} = x', () => checkSimplify('(x^3)^{1/3}', 'x'));
 });
 
 describe('Canonicalization: Negative Signs and Multiplication and Division', () => {
@@ -249,7 +249,7 @@ describe('Canonicalization: Operations Involving 1', () => {
 });
 
 describe('Canonicalization: Ln', () => {
-  test.skip('ln(9)/ln(3) = 2', () =>
+  test('ln(9)/ln(3) = 2', () =>
     checkSimplify('\\frac{\\ln(9)}{\\ln(3)}', 2));
   test('ln(e^x/y)-x = -ln(y)', () =>
     checkSimplify('\\ln(e^x/y)-x', '-\\ln(y)'));
@@ -403,7 +403,7 @@ describe('Rules: Negative Signs and Powers and Roots', () => {
     checkSimplify('(-x)^{3/5}', '-(x^{3/5})'));
   test.skip('(-x)^{3/4} = x^{3/4}', () =>
     checkSimplify('(-x)^{3/4}', 'x^{3/4}'));
-  test.skip('cbrt(-2) = -cbrt(2)', () =>
+  test('cbrt(-2) = -cbrt(2)', () =>
     checkSimplify('\\sqrt[3]{-2}', '-\\sqrt[3]{2}'));
 });
 
@@ -431,7 +431,7 @@ describe('Rules: Powers: Multiplication (float exponents)', () => {
 });
 
 describe('Rules: Powers and Denominators', () => {
-  test.skip('x/(pi/y)^3 = x*y^3/pi^3', () =>
+  test('x/(pi/y)^3 = x*y^3/pi^3', () =>
     checkSimplify('x/(\\pi/y)^3', 'x*y^3/\\pi^3'));
 });
 
@@ -447,8 +447,8 @@ describe('Rules: Powers and Roots', () => {
   test.skip('root4(16b^4) = 2|b|', () =>
     checkSimplify('\\sqrt[4]{16b^{4}}', '2|b|'));
   test('sqrt(x^4) = x^2', () => checkSimplify('\\sqrt{x^4}', 'x^2'));
-  test.skip('root4(x^6) = sqrt(x^3)', () =>
-    checkSimplify('\\sqrt[4]{x^6}', '\\sqrt[2]{x^3}'));
+  test('root4(x^6) = |x|^{3/2}', () =>
+    checkSimplify('\\sqrt[4]{x^6}', ['Power', ['Abs', 'x'], ['Rational', 3, 2]]));
   test('sqrt(x^6) = |x|^3', () => checkSimplify('\\sqrt{x^6}', '|x|^3'));
   test('root4(x^4) = |x|', () => checkSimplify('\\sqrt[4]{x^4}', '|x|'));
 });
@@ -471,13 +471,13 @@ describe('Rules: Ln', () => {
   test('ln(x^3)-3ln(x) = 0', () => checkSimplify('\\ln(x^3)-3\\ln(x)', '0'));
   test('ln(x^sqrt(2)) = sqrt(2)*ln(x)', () =>
     checkSimplify('\\ln(x^\\sqrt{2})', '\\sqrt{2} \\ln(x)'));
-  test.skip('ln(x^{2/3})-4/3*ln(x) = 2/3*ln(x)', () =>
-    checkSimplify('\\ln(x^{2/3})-4/3\\ln(x)', '2/3 \\ln(x)'));
-  test.skip('ln(pi^{2/3})-1/3*ln(pi) = 1/3*ln(pi)', () =>
-    checkSimplify('\\ln(\\pi^{2/3})-1/3\\ln(\\pi)', '1/3 \\ln(\\pi)'));
-  test.skip('ln(sqrt(x))-ln(x)/2 = ln(x)/2', () =>
-    checkSimplify('\\ln(\\sqrt{x})-\\ln(x)/2', '\\ln(x)/2'));
-  test.skip('ln(3)+ln(1/3) = 0', () =>
+  test('ln(x^{2/3})-4/3*ln(x) = -2/3*ln(x)', () =>
+    checkSimplify('\\ln(x^{\\frac{2}{3}})-\\frac{4}{3}\\ln(x)', '-\\frac{2}{3} \\ln(x)'));
+  test('ln(pi^{2/3})-1/3*ln(pi) = 1/3*ln(pi)', () =>
+    checkSimplify('\\ln(\\pi^{\\frac{2}{3}})-\\frac{1}{3}\\ln(\\pi)', '\\frac{1}{3} \\ln(\\pi)'));
+  test('ln(sqrt(x))-ln(x)/2 = 0', () =>
+    checkSimplify('\\ln(\\sqrt{x})-\\ln(x)/2', 0));
+  test('ln(3)+ln(1/3) = 0', () =>
     checkSimplify('\\ln(3)+\\ln(\\frac{1}{3})', 0));
   test('ln(xy)-ln(x) = ln(y)', () =>
     checkSimplify('\\ln(xy)-\\ln(x)', '\\ln(y)'));
@@ -486,8 +486,8 @@ describe('Rules: Ln', () => {
   test('e^{ln(x)+x} = x*e^x', () => checkSimplify('e^{\\ln(x)+x}', 'x*e^x'));
   test('e^{ln(x)-2x} = x*e^{-2x}', () =>
     checkSimplify('e^{\\ln(x)-2x}', 'x*e^{-2x}'));
-  test.skip('e^{ln(x)-y^2} = x/e^{y^2}', () =>
-    checkSimplify('e^{\\ln(x)-y^2}', 'x/e^{y^2}'));
+  test('e^{ln(x)-y^2} = x*exp(-y^2)', () =>
+    checkSimplify('e^{\\ln(x)-y^2}', ['Multiply', 'x', ['Exp', ['Negate', ['Power', 'y', 2]]]]));
   test('e^{ln(x)-2*x} = x*e^{-2*x}', () =>
     checkSimplify('e^{\\ln(x)-2*x}', 'x*e^{-2*x}'));
   test('e^ln(x) = x', () => checkSimplify('e^\\ln(x)', 'x'));
@@ -500,20 +500,20 @@ describe('Rules: Ln', () => {
 });
 
 describe('Rules: Log', () => {
-  test('log_c(x^2) = 2*log_c(x)', () =>
-    checkSimplify('\\log_c(x^2)', '2\\log_c(x)'));
-  test.skip('log_{1/2}(x) = -log_2(x)', () =>
+  test('log_c(x^2) = 2*log_c(|x|)', () =>
+    checkSimplify('\\log_c(x^2)', '2\\log_c(|x|)'));
+  test('log_{1/2}(x) = -log_2(x)', () =>
     checkSimplify('\\log_{1/2}(x)', '-\\log_2(x)'));
   test('log_4(x^3) = 3*log_4(x)', () =>
     checkSimplify('\\log_4(x^3)', '3\\log_4(x)'));
-  test.skip('log_3(x^sqrt(2)) = sqrt(2)*log_3(x)', () =>
+  test('log_3(x^sqrt(2)) = sqrt(2)*log_3(x)', () =>
     checkSimplify('\\log_3(x^\\sqrt{2})', '\\sqrt{2} \\log_3(x)'));
-  test.skip('log_4(x^2) = 2*log_4(|x|)', () =>
+  test('log_4(x^2) = 2*log_4(|x|)', () =>
     checkSimplify('\\log_4(x^2)', '2\\log_4(|x|)'));
-  test.skip('log_4(x^{2/3}) = 2/3*log_4(|x|)', () =>
-    checkSimplify('\\log_4(x^{2/3})', '2/3 \\log_4(|x|)'));
-  test.skip('log_4(x^{7/4}) = 7/4*log_4(x)', () =>
-    checkSimplify('\\log_4(x^{7/4})', '7/4 \\log_4(x)'));
+  test('log_4(x^{2/3}) = 2/3*log_4(|x|)', () =>
+    checkSimplify('\\log_4(x^{\\frac{2}{3}})', '\\frac{2}{3}\\log_4(|x|)'));
+  test('log_4(x^{7/4}) = 7/4*log_4(x)', () =>
+    checkSimplify('\\log_4(x^{\\frac{7}{4}})', '\\frac{7}{4}\\log_4(x)'));
   test('log_{1/2}(0) = infinity', () =>
     checkSimplify('\\log_{1/2}(0)', '\\infty'));
   test('log_c(xy)-log_c(x) = log_c(y)', () =>
@@ -528,11 +528,11 @@ describe('Rules: Log', () => {
   test('c^{3*log_c(x)} = x^3', () => checkSimplify('c^{3\\log_c(x)}', 'x^3'));
   test('c^{log_c(x)/3} = x^{1/3}', () =>
     checkSimplify('c^{\\log_c(x)/3}', 'x^{1/3}'));
-  test.skip('log_c(c^x*y) = x+log_c(y)', () =>
+  test('log_c(c^x*y) = x+log_c(y)', () =>
     checkSimplify('\\log_c(c^x*y)', 'x+\\log_c(y)'));
-  test.skip('log_c(c^x/y) = x-log_c(y)', () =>
+  test('log_c(c^x/y) = x-log_c(y)', () =>
     checkSimplify('\\log_c(c^x/y)', 'x-\\log_c(y)'));
-  test.skip('log_c(y/c^x) = log_c(y)-x', () =>
+  test('log_c(y/c^x) = log_c(y)-x', () =>
     checkSimplify('\\log_c(y/c^x)', '\\log_c(y)-x'));
   test('log_c(c) = 1', () => checkSimplify('\\log_c(c)', 1));
   test('log_c(c^x) = x', () => checkSimplify('\\log_c(c^x)', 'x'));
@@ -560,13 +560,13 @@ describe('Rules: Absolute Value', () => {
     checkSimplify('|\\frac{x}{\\pi}|', '\\frac{|x|}{\\pi}'));
   test('|2/x| = 2/|x|', () =>
     checkSimplify('|\\frac{2}{x}|', '\\frac{2}{|x|}'));
-  test.skip('|x|^{4/3} = x^{4/3}', () => checkSimplify('|x|^{4/3}', 'x^{4/3}'));
-  test.skip('|xy|-|x|*|y| = 0', () => checkSimplify('|xy|-|x|*|y|', '0'));
+  test('|x|^{4/3} = x^{4/3}', () => checkSimplify('|x|^{4/3}', 'x^{4/3}'));
+  test('|xy|-|x|*|y| = 0', () => checkSimplify('|xy|-|x|*|y|', '0'));
   test('||x|+1| = |x|+1', () => checkSimplify('||x|+1|', '|x|+1'));
   test('| |x| | = |x|', () => checkSimplify('| |x| |', '|x|'));
-  test.skip('|2/x|-1/|x| = 1/|x|', () => checkSimplify('|2/x|-1/|x|', '1/|x|'));
-  test.skip('|1/x|-1/|x| = 0', () => checkSimplify('|1/x|-1/|x|', '0'));
-  test.skip('|x||y|-|xy| = 0', () => checkSimplify('|x||y|-|xy|', '0'));
+  test('|2/x|-1/|x| = 1/|x|', () => checkSimplify('|2/x|-1/|x|', '1/|x|'));
+  test('|1/x|-1/|x| = 0', () => checkSimplify('|1/x|-1/|x|', '0'));
+  test('|x||y|-|xy| = 0', () => checkSimplify('|x||y|-|xy|', '0'));
   test('|-x| = |x|', () => checkSimplify('|-x|', '|x|'));
   test('|pi*x| = pi*|x|', () => checkSimplify('|\\pi * x|', '\\pi * |x|'));
   test('|-pi*x| = pi*|x|', () => checkSimplify('|-\\pi * x|', '\\pi * |x|'));
@@ -1102,9 +1102,9 @@ describe('POWER DISTRIBUTION GUARDS', () => {
       `["Divide", ["Power", "Pi", 6], ["Power", "x", 4]]`
     ));
 
-  test('x/(pi/y)^3 stays undistributed', () =>
+  test('x/(pi/y)^3 = xy^3/pi^3', () =>
     expect(simplify('x/(\\pi/y)^3')).toMatchInlineSnapshot(
-      `["Divide", "x", ["Power", ["Divide", "Pi", "y"], 3]]`
+      `["Divide", ["Multiply", "x", ["Power", "y", 3]], ["Power", "Pi", 3]]`
     ));
 });
 
