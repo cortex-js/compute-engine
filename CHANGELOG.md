@@ -169,6 +169,50 @@ ce.simplificationRules.push({
   underdetermined (parametric) solutions to pass through when type predicates
   return `undefined` (unknown) rather than being incorrectly rejected.
 
+- **`Truncate`, `GCD`, `LCM` type handlers**: `Truncate` returns
+  `finite_integer` for finite inputs (matching `Ceil`/`Floor`); `GCD` and `LCM`
+  always return `finite_integer`.
+
+- **`Or` operator support in `solve()`**: Solving `Or(Equal(x,1), Equal(x,2))`
+  returns the union of solutions from each branch, with deduplication. Works for
+  both univariate (returns array of values) and multivariate (returns array of
+  records) cases.
+
+- **Mixed equality + inequality systems**: `solve()` now handles systems
+  combining `Equal` and inequality operators (`Less`, `LessEqual`, `Greater`,
+  `GreaterEqual`). Equalities are solved first, then solutions are filtered
+  against the inequalities.
+
+- **Parametric solutions omit free variables**: Underdetermined linear systems
+  no longer include free variables (self-referential entries) in the result
+  record. Only dependent variables with non-trivial expressions are returned.
+
+### Special Functions
+
+- **Numeric evaluation for Digamma, Trigamma, PolyGamma, Beta, Zeta, LambertW**:
+  These six functions now evaluate numerically when `.N()` is called. Machine
+  precision only; returns unevaluated without numeric approximation.
+  - `Digamma`/`Trigamma`: recurrence + asymptotic with Bernoulli numbers
+  - `PolyGamma`: generalized recurrence for arbitrary order n
+  - `Beta`: via gamma, with log-gamma fallback for large arguments
+  - `Zeta`: Cohen-Villegas-Zagier acceleration, functional equation for Re(s)<0
+  - `LambertW`: Halley's method with branch-point handling
+
+- **Numeric evaluation for Bessel functions (`BesselJ`, `BesselY`, `BesselI`,
+  `BesselK`)**: Integer-order Bessel functions now evaluate numerically.
+  - `BesselJ`: power series for small |x|, Miller's backward recurrence for
+    intermediate values, Hankel asymptotic expansion for large |x|
+  - `BesselY`: DLMF 10.8.3 series for Y_0/Y_1, forward recurrence for higher
+    orders, shared Hankel asymptotic with `BesselJ`
+  - `BesselI`: power series + asymptotic expansion
+  - `BesselK`: series for K_0, Wronskian-derived K_1, forward recurrence for
+    higher orders, asymptotic for large x
+
+- **Numeric evaluation for Airy functions (`AiryAi`, `AiryBi`)**: Power series
+  using Maclaurin coefficients for |x| ≤ 5, asymptotic expansions (exponential
+  decay for Ai, exponential growth for Bi at positive x, oscillatory for
+  negative x) for large arguments.
+
 ## 0.35.6 _2026-02-07_
 
 ### Bug Fixes

@@ -489,3 +489,484 @@ export function lambertW(x: number): number {
 
   return w;
 }
+
+/**
+ * Bessel function of the first kind J_n(x) for integer order n.
+ *
+ * Uses power series for small |x|, asymptotic expansion for large |x|,
+ * and Miller's backward recurrence for intermediate values.
+ *
+ * Reference: Abramowitz & Stegun, Ch. 9; NIST DLMF 10.2, 10.17
+ */
+export function besselJ(n: number, x: number): number {
+  if (!isFinite(x) || !Number.isInteger(n)) return NaN;
+  if (x === 0) return n === 0 ? 1 : 0;
+
+  // J_{-n}(x) = (-1)^n J_n(x) for integer n
+  if (n < 0) {
+    n = -n;
+    return n % 2 === 0 ? besselJ(n, x) : -besselJ(n, x);
+  }
+
+  // J_n(-x) = (-1)^n J_n(x)
+  if (x < 0) return n % 2 === 0 ? besselJ(n, -x) : -besselJ(n, -x);
+
+  // For large x, use asymptotic expansion
+  if (x > 25 + n * n / 2) return besselJAsymptotic(n, x);
+
+  // For small x relative to order, use power series
+  if (x < 5 + n) return besselJSeries(n, x);
+
+  // Intermediate: Miller's backward recurrence
+  return besselJMiller(n, x);
+}
+
+/** Power series: J_n(x) = (x/2)^n Σ_{k=0}^∞ (-x²/4)^k / (k! (n+k)!) */
+function besselJSeries(n: number, x: number): number {
+  const halfX = x / 2;
+  const negQuarter = -(x * x) / 4;
+  let term = 1;
+  // Compute 1/n! as initial denominator factor
+  for (let i = 1; i <= n; i++) term /= i;
+
+  let sum = term;
+  for (let k = 1; k <= 60; k++) {
+    term *= negQuarter / (k * (n + k));
+    sum += term;
+    if (Math.abs(term) < Math.abs(sum) * 1e-16) break;
+  }
+  return sum * Math.pow(halfX, n);
+}
+
+/** Hankel asymptotic expansion for large x.
+ *  Computes the P and Q polynomials used by both J_n and Y_n asymptotics.
+ *  P(n,x) = 1 - (μ-1)(μ-9)/(2!(8x)²) + ...
+ *  Q(n,x) = (μ-1)/(1!(8x)) - (μ-1)(μ-9)(μ-25)/(3!(8x)³) + ...
+ *  where μ = 4n²
+ */
+function hankelPQ(n: number, x: number): [number, number] {
+  const mu = 4 * n * n;
+  let P = 1;
+  let Q = 0;
+
+  // a_k = Π_{j=1}^{k} (μ - (2j-1)²)
+  let ak = 1;
+  const e8x = 8 * x;
+  for (let k = 1; k <= 20; k++) {
+    ak *= (mu - (2 * k - 1) * (2 * k - 1));
+    // Denominators: k! * (8x)^k
+    const denom = factorial(k) * Math.pow(e8x, k);
+    const contrib = ak / denom;
+    if (k % 2 === 1) Q += (k % 4 === 1 ? 1 : -1) * contrib;
+    else P += (k % 4 === 2 ? -1 : 1) * contrib;
+    if (Math.abs(contrib) < 1e-15) break;
+  }
+  return [P, Q];
+}
+
+/** J_n(x) ~ sqrt(2/(πx)) [P cos(χ) - Q sin(χ)] where χ = x - nπ/2 - π/4 */
+function besselJAsymptotic(n: number, x: number): number {
+  const chi = x - (n / 2 + 0.25) * Math.PI;
+  const [P, Q] = hankelPQ(n, x);
+  return Math.sqrt(2 / (Math.PI * x)) * (P * Math.cos(chi) - Q * Math.sin(chi));
+}
+
+/** Miller's backward recurrence for J_n(x).
+ *  Start from a large index M, recur downward using J_{k-1} = (2k/x)J_k - J_{k+1},
+ *  then normalize using J_0 + 2J_2 + 2J_4 + ... = 1.
+ */
+function besselJMiller(n: number, x: number): number {
+  const M = Math.max(n + 20, Math.ceil(x) + 30);
+  let jp1 = 0; // J_{M+1}
+  let jk = 1; // J_M (arbitrary nonzero start)
+  const vals = new Array(M + 1);
+  vals[M] = jk;
+
+  for (let k = M; k >= 1; k--) {
+    const jm1 = ((2 * k) / x) * jk - jp1;
+    jp1 = jk;
+    jk = jm1;
+    vals[k - 1] = jk;
+  }
+
+  // Normalize: J_0 + 2(J_2 + J_4 + ...) = 1
+  let norm = vals[0];
+  for (let k = 2; k <= M; k += 2) norm += 2 * vals[k];
+  const scale = 1 / norm;
+
+  return vals[n] * scale;
+}
+
+/**
+ * Bessel function of the second kind Y_n(x) for integer order n.
+ *
+ * Y_0 and Y_1 computed directly via series/integrals, higher orders via
+ * forward recurrence: Y_{n+1}(x) = (2n/x)Y_n(x) - Y_{n-1}(x).
+ *
+ * Reference: NIST DLMF 10.8, 10.17
+ */
+export function besselY(n: number, x: number): number {
+  if (!isFinite(x) || !Number.isInteger(n)) return NaN;
+  if (x <= 0) return NaN; // Y_n is undefined for x <= 0 (real-valued)
+
+  // Y_{-n}(x) = (-1)^n Y_n(x) for integer n
+  if (n < 0) {
+    n = -n;
+    return n % 2 === 0 ? besselY(n, x) : -besselY(n, x);
+  }
+
+  // For large x, use asymptotic expansion.
+  // The series for Y_n suffers from catastrophic cancellation at large x,
+  // so we switch to asymptotic earlier than for J_n.
+  if (x > 12 + n * n / 4) return besselYAsymptotic(n, x);
+
+  // Compute Y_0 and Y_1 via series, then recur forward
+  const y0 = besselY0(x);
+  if (n === 0) return y0;
+  const y1 = besselY1(x);
+  if (n === 1) return y1;
+
+  let ym1 = y0;
+  let yk = y1;
+  for (let k = 1; k < n; k++) {
+    const yp1 = ((2 * k) / x) * yk - ym1;
+    ym1 = yk;
+    yk = yp1;
+  }
+  return yk;
+}
+
+/** Y_0(x) via Neumann series:
+ *  Y_0(x) = (2/π)[J_0(x)(ln(x/2)+γ) + Σ_{k=1}^∞ (-1)^{k+1} H_k (x/2)^{2k} / (k!)²]
+ *  where H_k = 1 + 1/2 + ... + 1/k
+ */
+function besselY0(x: number): number {
+  const halfX = x / 2;
+  const x2over4 = halfX * halfX;
+  const j0 = besselJ(0, x);
+  let sum = 0;
+  let term = 1;
+  let Hk = 0;
+  for (let k = 1; k <= 60; k++) {
+    Hk += 1 / k;
+    term *= -x2over4 / (k * k);
+    sum -= term * Hk; // (-1)^{k+1} = -(-1)^k
+    if (Math.abs(term * Hk) < Math.abs(sum) * 1e-16) break;
+  }
+  return (2 / Math.PI) * (j0 * (Math.log(halfX) + EULER_MASCHERONI) + sum);
+}
+
+/** Y_1(x) via DLMF 10.8.3 for n=1:
+ *  Y_1(x) = -2/(πx) + (2/π) ln(x/2) J_1(x)
+ *           - (x/2)/π Σ_{k=0}^∞ (-1)^k [ψ(k+1)+ψ(k+2)] (x²/4)^k / (k!(k+1)!)
+ *  where ψ(n) = -γ + H_{n-1}
+ */
+function besselY1(x: number): number {
+  const halfX = x / 2;
+  const x2over4 = halfX * halfX;
+  const j1 = besselJ(1, x);
+
+  let sum = 0;
+  let x2k = 1; // (x²/4)^k
+  let factK = 1; // k!
+  for (let k = 0; k <= 60; k++) {
+    if (k > 0) {
+      factK *= k;
+      x2k *= x2over4;
+    }
+    const factKp1 = factK * (k + 1);
+    // ψ(k+1) = -γ + H_k, ψ(k+2) = -γ + H_{k+1}
+    let Hk = 0;
+    for (let j = 1; j <= k; j++) Hk += 1 / j;
+    const Hkp1 = Hk + 1 / (k + 1);
+    const psiKp1 = -EULER_MASCHERONI + Hk;
+    const psiKp2 = -EULER_MASCHERONI + Hkp1;
+    const sign = k % 2 === 0 ? 1 : -1;
+    const termVal = sign * (psiKp1 + psiKp2) * x2k / (factK * factKp1);
+    sum += termVal;
+    if (k > 3 && Math.abs(termVal) < 1e-16 * Math.abs(sum)) break;
+  }
+
+  return -2 / (Math.PI * x) + (2 / Math.PI) * Math.log(halfX) * j1 - (halfX / Math.PI) * sum;
+}
+
+/** Y_n(x) ~ sqrt(2/(πx)) [P sin(χ) + Q cos(χ)] where χ = x - nπ/2 - π/4 */
+function besselYAsymptotic(n: number, x: number): number {
+  const chi = x - (n / 2 + 0.25) * Math.PI;
+  const [P, Q] = hankelPQ(n, x);
+  return Math.sqrt(2 / (Math.PI * x)) * (P * Math.sin(chi) + Q * Math.cos(chi));
+}
+
+/**
+ * Modified Bessel function of the first kind I_n(x) for integer order n.
+ *
+ * I_n(x) = i^{-n} J_n(ix) — uses power series for small |x|,
+ * scaled Miller's recurrence for intermediate, asymptotic for large |x|.
+ *
+ * Reference: NIST DLMF 10.25, 10.40
+ */
+export function besselI(n: number, x: number): number {
+  if (!isFinite(x) || !Number.isInteger(n)) return NaN;
+  if (x === 0) return n === 0 ? 1 : 0;
+
+  // I_{-n}(x) = I_n(x) for integer n
+  if (n < 0) n = -n;
+
+  // I_n(-x) = (-1)^n I_n(x)
+  if (x < 0) return n % 2 === 0 ? besselI(n, -x) : -besselI(n, -x);
+
+  // For large x, use asymptotic: I_n(x) ~ e^x / sqrt(2πx)
+  if (x > 40) return besselIAsymptotic(n, x);
+
+  // Power series: I_n(x) = (x/2)^n Σ_{k=0}^∞ (x²/4)^k / (k! (n+k)!)
+  return besselISeries(n, x);
+}
+
+/** Power series for I_n(x) = (x/2)^n Σ (x²/4)^k / (k!(n+k)!) */
+function besselISeries(n: number, x: number): number {
+  const halfX = x / 2;
+  const quarter = (x * x) / 4;
+  let term = 1;
+  for (let i = 1; i <= n; i++) term /= i;
+
+  let sum = term;
+  for (let k = 1; k <= 80; k++) {
+    term *= quarter / (k * (n + k));
+    sum += term;
+    if (Math.abs(term) < Math.abs(sum) * 1e-16) break;
+  }
+  return sum * Math.pow(halfX, n);
+}
+
+/** Asymptotic expansion: I_n(x) ~ e^x/sqrt(2πx) [1 - (μ-1)/(8x) + ...]
+ *  where μ = 4n² */
+function besselIAsymptotic(n: number, x: number): number {
+  const mu = 4 * n * n;
+  let term = 1;
+  let sum = 1;
+  for (let k = 1; k <= 12; k++) {
+    const f = mu - (2 * k - 1) * (2 * k - 1);
+    term *= f / (k * 8 * x); // Note: no negation for I (vs J)
+    sum += term;
+    if (Math.abs(term) < 1e-15) break;
+  }
+  return (Math.exp(x) / Math.sqrt(2 * Math.PI * x)) * sum;
+}
+
+/**
+ * Modified Bessel function of the second kind K_n(x) for integer order n.
+ *
+ * K_0 and K_1 computed via series, higher orders via forward recurrence:
+ * K_{n+1}(x) = (2n/x)K_n(x) + K_{n-1}(x).
+ *
+ * Reference: NIST DLMF 10.31, 10.40
+ */
+export function besselK(n: number, x: number): number {
+  if (!isFinite(x) || !Number.isInteger(n)) return NaN;
+  if (x <= 0) return NaN; // K_n only defined for x > 0
+
+  // K_{-n}(x) = K_n(x) for integer n
+  if (n < 0) n = -n;
+
+  // For large x, use asymptotic expansion
+  if (x > 40) return besselKAsymptotic(n, x);
+
+  // Compute K_0 and K_1 via series
+  const k0 = besselK0(x);
+  if (n === 0) return k0;
+  const k1 = besselK1(x);
+  if (n === 1) return k1;
+
+  // Forward recurrence: K_{n+1} = (2n/x) K_n + K_{n-1}
+  let km1 = k0;
+  let kk = k1;
+  for (let k = 1; k < n; k++) {
+    const kp1 = ((2 * k) / x) * kk + km1;
+    km1 = kk;
+    kk = kp1;
+  }
+  return kk;
+}
+
+/** K_0(x) = -(ln(x/2) + γ) I_0(x) + Σ_{k=1}^∞ H_k (x/2)^{2k} / (k!)² */
+function besselK0(x: number): number {
+  const halfX = x / 2;
+  const x2over4 = halfX * halfX;
+  const i0 = besselI(0, x);
+  let sum = 0;
+  let term = 1;
+  let Hk = 0;
+  for (let k = 1; k <= 60; k++) {
+    Hk += 1 / k;
+    term *= x2over4 / (k * k);
+    sum += term * Hk;
+    if (Math.abs(term * Hk) < Math.abs(sum) * 1e-16 && k > 3) break;
+  }
+  return -(Math.log(halfX) + EULER_MASCHERONI) * i0 + sum;
+}
+
+/** K_1(x) via DLMF 10.31.2 for n=1:
+ *  K_1(x) = 1/x + (ln(x/2)+γ) I_1(x) [with sign correction]
+ *           + (x/2) Σ_{k=0}^∞ [ψ(k+1)+ψ(k+2)] (x²/4)^k / (2 k!(k+1)!)
+ *  We use the Wronskian: I_0(x)K_1(x) + I_1(x)K_0(x) = 1/x
+ *  => K_1(x) = (1/x - I_1(x)K_0(x)) / I_0(x)
+ */
+function besselK1(x: number): number {
+  const i0 = besselI(0, x);
+  const i1 = besselI(1, x);
+  const k0 = besselK0(x);
+  return (1 / x - i1 * k0) / i0;
+}
+
+/** Asymptotic expansion: K_n(x) ~ sqrt(π/(2x)) e^{-x} [1 + (μ-1)/(8x) + ...]
+ *  where μ = 4n² */
+function besselKAsymptotic(n: number, x: number): number {
+  const mu = 4 * n * n;
+  let term = 1;
+  let sum = 1;
+  for (let k = 1; k <= 12; k++) {
+    const f = mu - (2 * k - 1) * (2 * k - 1);
+    term *= f / (k * 8 * x);
+    sum += term;
+    if (Math.abs(term) < 1e-15) break;
+  }
+  return Math.sqrt(Math.PI / (2 * x)) * Math.exp(-x) * sum;
+}
+
+/**
+ * Airy function of the first kind Ai(x).
+ *
+ * For x < 0 and small |x|, uses power series.
+ * For large positive x, uses asymptotic: Ai(x) ~ e^{-ξ}/(2√π x^{1/4})
+ * For large negative x, uses asymptotic oscillatory form.
+ * For moderate x, uses power series with sufficient terms.
+ *
+ * Reference: NIST DLMF 9.2, 9.7
+ */
+export function airyAi(x: number): number {
+  if (!isFinite(x)) return NaN;
+
+  // For large positive x, use asymptotic to avoid series convergence issues
+  if (x > 5) {
+    const xi = (2 / 3) * Math.pow(x, 1.5);
+    return airyAiAsymptotic(x, xi);
+  }
+
+  // For large negative x, use asymptotic oscillatory form
+  if (x < -5) {
+    const absX = -x;
+    const xi = (2 / 3) * Math.pow(absX, 1.5);
+    return airyAiNegAsymptotic(absX, xi);
+  }
+
+  // Power series: Ai(x) = c1 f(x) - c2 g(x)
+  // where f(x) = Σ 3^k x^{3k} / (3k)!  (scaled)
+  //       g(x) = Σ 3^k x^{3k+1} / (3k+1)!
+  // c1 = Ai(0) = 1/(3^{2/3} Γ(2/3)), c2 = -Ai'(0) = 1/(3^{1/3} Γ(1/3))
+  const c1 = 1 / (Math.pow(3, 2 / 3) * gamma(2 / 3)); // Ai(0)
+  const c2 = 1 / (Math.pow(3, 1 / 3) * gamma(1 / 3)); // -Ai'(0)
+
+  let f = 1;
+  let g = x;
+  let termF = 1;
+  let termG = x;
+  for (let k = 1; k <= 80; k++) {
+    const k3 = 3 * k;
+    termF *= x * x * x / ((k3 - 1) * k3);
+    termG *= x * x * x / (k3 * (k3 + 1));
+    f += termF;
+    g += termG;
+    if (Math.abs(termF) + Math.abs(termG) < 1e-16 * (Math.abs(f) + Math.abs(g)))
+      break;
+  }
+
+  return c1 * f - c2 * g;
+}
+
+/** Asymptotic Ai(x) for large positive x:
+ *  Ai(x) ~ e^{-ξ} / (2√π x^{1/4}) where ξ = (2/3)x^{3/2} */
+function airyAiAsymptotic(x: number, xi: number): number {
+  const x14 = Math.pow(x, 0.25);
+  let sum = 1;
+  let term = 1;
+  // Asymptotic series coefficients: u_k/((-ξ)^k) ... simplified
+  const ck = [1, 5 / 72, 385 / 10368, 85085 / 2239488, 37182145 / 644972544];
+  for (let k = 1; k < ck.length; k++) {
+    term = ck[k] / Math.pow(xi, k);
+    sum += (k % 2 === 0 ? 1 : -1) * term;
+  }
+  return (Math.exp(-xi) / (2 * Math.sqrt(Math.PI) * x14)) * sum;
+}
+
+/** Asymptotic Ai(x) for large negative x (oscillatory):
+ *  Ai(-x) ~ sin(ξ + π/4) / (√π x^{1/4}) */
+function airyAiNegAsymptotic(absX: number, xi: number): number {
+  const x14 = Math.pow(absX, 0.25);
+  return Math.sin(xi + Math.PI / 4) / (Math.sqrt(Math.PI) * x14);
+}
+
+/**
+ * Airy function of the second kind Bi(x).
+ *
+ * Similar structure to Ai(x) but with different coefficients
+ * and asymptotic behavior (Bi grows for positive x).
+ *
+ * Reference: NIST DLMF 9.2, 9.7
+ */
+export function airyBi(x: number): number {
+  if (!isFinite(x)) return NaN;
+
+  // For large positive x: Bi(x) ~ e^ξ / (√π x^{1/4})
+  if (x > 5) {
+    const xi = (2 / 3) * Math.pow(x, 1.5);
+    return airyBiAsymptotic(x, xi);
+  }
+
+  // For large negative x: Bi(-x) ~ cos(ξ + π/4) / (√π x^{1/4})
+  if (x < -5) {
+    const absX = -x;
+    const xi = (2 / 3) * Math.pow(absX, 1.5);
+    return airyBiNegAsymptotic(absX, xi);
+  }
+
+  // Power series: Bi(x) = √3 [c1 f(x) + c2 g(x)]
+  // Same f, g as Ai but with √3 factor and + sign
+  const c1 = 1 / (Math.pow(3, 2 / 3) * gamma(2 / 3)); // same as Ai
+  const c2 = 1 / (Math.pow(3, 1 / 3) * gamma(1 / 3));
+
+  let f = 1;
+  let g = x;
+  let termF = 1;
+  let termG = x;
+  for (let k = 1; k <= 80; k++) {
+    const k3 = 3 * k;
+    termF *= x * x * x / ((k3 - 1) * k3);
+    termG *= x * x * x / (k3 * (k3 + 1));
+    f += termF;
+    g += termG;
+    if (Math.abs(termF) + Math.abs(termG) < 1e-16 * (Math.abs(f) + Math.abs(g)))
+      break;
+  }
+
+  return Math.sqrt(3) * (c1 * f + c2 * g);
+}
+
+/** Asymptotic Bi(x) for large positive x: Bi(x) ~ e^ξ / (√π x^{1/4}) */
+function airyBiAsymptotic(x: number, xi: number): number {
+  const x14 = Math.pow(x, 0.25);
+  let sum = 1;
+  let term = 1;
+  const ck = [1, 5 / 72, 385 / 10368, 85085 / 2239488, 37182145 / 644972544];
+  for (let k = 1; k < ck.length; k++) {
+    term = ck[k] / Math.pow(xi, k);
+    sum += term; // All positive for Bi
+  }
+  return (Math.exp(xi) / (Math.sqrt(Math.PI) * x14)) * sum;
+}
+
+/** Asymptotic Bi(x) for large negative x (oscillatory):
+ *  Bi(-x) ~ cos(ξ + π/4) / (√π x^{1/4}) */
+function airyBiNegAsymptotic(absX: number, xi: number): number {
+  const x14 = Math.pow(absX, 0.25);
+  return Math.cos(xi + Math.PI / 4) / (Math.sqrt(Math.PI) * x14);
+}

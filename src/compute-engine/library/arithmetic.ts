@@ -39,6 +39,12 @@ import {
   beta,
   zeta,
   lambertW,
+  besselJ,
+  besselY,
+  besselI,
+  besselK,
+  airyAi,
+  airyBi,
 } from '../numerics/special-functions';
 import { factorial2, gcd, lcm } from '../numerics/numeric';
 import { rationalize } from '../numerics/rationals';
@@ -643,6 +649,8 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       broadcastable: true,
       signature: '(order: number, number) -> number',
       type: (ops) => numericTypeHandler(ops),
+      evaluate: ([n, x], { numericApproximation }) =>
+        numericApproximation ? apply2(n, x, besselJ) : undefined,
     },
 
     // Bessel function of the second kind Y_n(x)
@@ -654,6 +662,8 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       broadcastable: true,
       signature: '(order: number, number) -> number',
       type: (ops) => numericTypeHandler(ops),
+      evaluate: ([n, x], { numericApproximation }) =>
+        numericApproximation ? apply2(n, x, besselY) : undefined,
     },
 
     // Modified Bessel function of the first kind I_n(x)
@@ -664,6 +674,8 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       broadcastable: true,
       signature: '(order: number, number) -> number',
       type: (ops) => numericTypeHandler(ops),
+      evaluate: ([n, x], { numericApproximation }) =>
+        numericApproximation ? apply2(n, x, besselI) : undefined,
     },
 
     // Modified Bessel function of the second kind K_n(x)
@@ -676,6 +688,8 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       broadcastable: true,
       signature: '(order: number, number) -> number',
       type: (ops) => numericTypeHandler(ops),
+      evaluate: ([n, x], { numericApproximation }) =>
+        numericApproximation ? apply2(n, x, besselK) : undefined,
     },
 
     // Airy function of the first kind Ai(x)
@@ -687,6 +701,8 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       broadcastable: true,
       signature: '(number) -> number',
       type: (ops) => numericTypeHandler(ops),
+      evaluate: ([x], { numericApproximation }) =>
+        numericApproximation ? apply(x, airyAi) : undefined,
     },
 
     // Airy function of the second kind Bi(x)
@@ -697,6 +713,8 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       broadcastable: true,
       signature: '(number) -> number',
       type: (ops) => numericTypeHandler(ops),
+      evaluate: ([x], { numericApproximation }) =>
+        numericApproximation ? apply(x, airyBi) : undefined,
     },
 
     Ln: {

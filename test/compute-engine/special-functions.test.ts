@@ -165,3 +165,155 @@ describe('LAMBERT W FUNCTION', () => {
     expect(Math.abs(wVal * Math.exp(wVal) - 100)).toBeLessThan(1e-10);
   });
 });
+
+describe('BESSEL J FUNCTION', () => {
+  test('J_0(0) = 1', () => {
+    expectApprox(ce.box(['BesselJ', 0, 0]), 1);
+  });
+
+  test('J_1(0) = 0', () => {
+    expectApprox(ce.box(['BesselJ', 1, 0]), 0);
+  });
+
+  test('J_0(1) ≈ 0.7651976865579666', () => {
+    expectApprox(ce.box(['BesselJ', 0, 1]), 0.7651976865579666);
+  });
+
+  test('J_1(1) ≈ 0.44005058574493355', () => {
+    expectApprox(ce.box(['BesselJ', 1, 1]), 0.44005058574493355);
+  });
+
+  test('J_0(5) ≈ -0.17759677131433830', () => {
+    expectApprox(ce.box(['BesselJ', 0, 5]), -0.17759677131433830, 1e-8);
+  });
+
+  test('J_2(3) ≈ 0.48609126058589108', () => {
+    expectApprox(ce.box(['BesselJ', 2, 3]), 0.48609126058589108, 1e-8);
+  });
+
+  test('J_5(10) ≈ -0.23406152818679364', () => {
+    // Large argument, tests Miller/asymptotic regime
+    expectApprox(ce.box(['BesselJ', 5, 10]), -0.23406152818679364, 1e-6);
+  });
+
+  test('J_0(50) asymptotic regime', () => {
+    // Tests asymptotic expansion for large x
+    expectApprox(ce.box(['BesselJ', 0, 50]), 0.05581232766925048, 1e-6);
+  });
+
+  test('BesselJ without numericApproximation returns unevaluated', () => {
+    const result = ce.box(['BesselJ', 0, 1]).evaluate();
+    expect(result.operator).toBe('BesselJ');
+  });
+});
+
+describe('BESSEL Y FUNCTION', () => {
+  test('Y_0(1) ≈ 0.08825696421567696', () => {
+    expectApprox(ce.box(['BesselY', 0, 1]), 0.08825696421567696, 1e-6);
+  });
+
+  test('Y_1(1) ≈ -0.78121282130028876', () => {
+    expectApprox(ce.box(['BesselY', 1, 1]), -0.78121282130028876, 1e-6);
+  });
+
+  test('Y_0(5) ≈ -0.30851762524903357', () => {
+    expectApprox(ce.box(['BesselY', 0, 5]), -0.30851762524903357, 1e-6);
+  });
+
+  test('Y_2(3) ≈ -0.16040039348492377', () => {
+    expectApprox(ce.box(['BesselY', 2, 3]), -0.16040039348492377, 1e-5);
+  });
+
+  test('Y_0(50) asymptotic regime', () => {
+    expectApprox(ce.box(['BesselY', 0, 50]), -0.09806499547007692, 1e-5);
+  });
+});
+
+describe('BESSEL I FUNCTION', () => {
+  test('I_0(0) = 1', () => {
+    expectApprox(ce.box(['BesselI', 0, 0]), 1);
+  });
+
+  test('I_1(0) = 0', () => {
+    expectApprox(ce.box(['BesselI', 1, 0]), 0);
+  });
+
+  test('I_0(1) ≈ 1.2660658777520084', () => {
+    expectApprox(ce.box(['BesselI', 0, 1]), 1.2660658777520084);
+  });
+
+  test('I_1(1) ≈ 0.56515910399248503', () => {
+    expectApprox(ce.box(['BesselI', 1, 1]), 0.56515910399248503);
+  });
+
+  test('I_0(5) ≈ 27.239871823604447', () => {
+    expectApprox(ce.box(['BesselI', 0, 5]), 27.239871823604447, 1e-8);
+  });
+
+  test('I_2(3) ≈ 2.24521244092995', () => {
+    expectApprox(ce.box(['BesselI', 2, 3]), 2.24521244092995, 1e-8);
+  });
+});
+
+describe('BESSEL K FUNCTION', () => {
+  test('K_0(1) ≈ 0.42102443824070834', () => {
+    expectApprox(ce.box(['BesselK', 0, 1]), 0.42102443824070834, 1e-6);
+  });
+
+  test('K_1(1) ≈ 0.60190723019723457', () => {
+    expectApprox(ce.box(['BesselK', 1, 1]), 0.60190723019723457, 1e-6);
+  });
+
+  test('K_0(5) ≈ 0.0036910983120279868', () => {
+    expectApprox(ce.box(['BesselK', 0, 5]), 0.0036910983120279868, 1e-6);
+  });
+
+  test('K_2(3) ≈ 0.061510458286692960', () => {
+    expectApprox(ce.box(['BesselK', 2, 3]), 0.061510458286692960, 1e-5);
+  });
+});
+
+describe('AIRY Ai FUNCTION', () => {
+  test('Ai(0) ≈ 0.35502805388781724', () => {
+    expectApprox(ce.box(['AiryAi', 0]), 0.35502805388781724, 1e-8);
+  });
+
+  test('Ai(1) ≈ 0.13529241631288141', () => {
+    expectApprox(ce.box(['AiryAi', 1]), 0.13529241631288141, 1e-6);
+  });
+
+  test('Ai(-1) ≈ 0.53556088329235211', () => {
+    expectApprox(ce.box(['AiryAi', -1]), 0.53556088329235211, 1e-6);
+  });
+
+  test('Ai(3) ≈ 0.006591139357460011', () => {
+    expectApprox(ce.box(['AiryAi', 3]), 0.006591139357460011, 1e-5);
+  });
+
+  test('Ai(10) asymptotic (very small)', () => {
+    expectApprox(ce.box(['AiryAi', 10]), 1.1047532552898687e-10, 1e-4);
+  });
+
+  test('AiryAi without numericApproximation returns unevaluated', () => {
+    const result = ce.box(['AiryAi', 1]).evaluate();
+    expect(result.operator).toBe('AiryAi');
+  });
+});
+
+describe('AIRY Bi FUNCTION', () => {
+  test('Bi(0) ≈ 0.61492662744600074', () => {
+    expectApprox(ce.box(['AiryBi', 0]), 0.61492662744600074, 1e-8);
+  });
+
+  test('Bi(1) ≈ 1.2074235949528713', () => {
+    expectApprox(ce.box(['AiryBi', 1]), 1.2074235949528713, 1e-6);
+  });
+
+  test('Bi(-1) ≈ 0.10399738949694461', () => {
+    expectApprox(ce.box(['AiryBi', -1]), 0.10399738949694461, 1e-6);
+  });
+
+  test('Bi(3) ≈ 14.037328963083232', () => {
+    expectApprox(ce.box(['AiryBi', 3]), 14.037328963083232, 1e-5);
+  });
+});
