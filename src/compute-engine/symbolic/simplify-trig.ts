@@ -372,20 +372,20 @@ export function simplifyTrig(x: BoxedExpression): RuleStep | undefined {
 
     // Arctan with infinity -> ±π/2
     if (op === 'Arctan') {
-      if (sym(arg) === 'PositiveInfinity') {
+      if (arg.isInfinity === true && arg.isPositive === true) {
         return { value: ce.Pi.div(2), because: 'arctan(+inf) -> π/2' };
       }
-      if (sym(arg) === 'NegativeInfinity') {
+      if (arg.isInfinity === true && arg.isNegative === true) {
         return { value: ce.Pi.div(-2), because: 'arctan(-inf) -> -π/2' };
       }
     }
 
     // Arccot with infinity
     if (op === 'Arccot') {
-      if (sym(arg) === 'PositiveInfinity') {
+      if (arg.isInfinity === true && arg.isPositive === true) {
         return { value: ce.Zero, because: 'arccot(+inf) -> 0' };
       }
-      if (sym(arg) === 'NegativeInfinity') {
+      if (arg.isInfinity === true && arg.isNegative === true) {
         return { value: ce.Pi, because: 'arccot(-inf) -> π' };
       }
     }
@@ -913,22 +913,8 @@ export function simplifyTrig(x: BoxedExpression): RuleStep | undefined {
     }
   }
 
-  // Arcsin(x) -> 2 * Arctan2(x, 1 + sqrt(1 - x²))
-  if (op === 'Arcsin') {
-    if (!isBoxedFunction(x)) return undefined;
-    const arg = x.op1;
-    if (arg) {
-      return {
-        value: ce
-          ._fn('Arctan2', [
-            arg,
-            ce.One.add(ce._fn('Sqrt', [ce.One.sub(arg.pow(2))])),
-          ])
-          .mul(2),
-        because: 'arcsin(x) -> 2*arctan2(x, 1+sqrt(1-x²))',
-      };
-    }
-  }
+  // Note: arcsin(x) -> arctan2(...) conversion is an expansion, not included
+  // here to preserve function identity for |arcsin(x)| -> arcsin(|x|).
 
   return undefined;
 }

@@ -36,7 +36,7 @@ export function simplifyLog(x: BoxedExpression): RuleStep | undefined {
     }
 
     // ln(+inf) -> +inf
-    if (sym(arg) === 'PositiveInfinity') {
+    if (arg.isInfinity === true && arg.isPositive === true) {
       return { value: ce.PositiveInfinity, because: 'ln(+inf) -> +inf' };
     }
 
@@ -154,13 +154,19 @@ export function simplifyLog(x: BoxedExpression): RuleStep | undefined {
       return { value: ce.NaN, because: 'log base 0 or 1 -> NaN' };
     }
 
-    // log_c(0) -> NaN
+    // log_c(0) -> -inf when c > 1, +inf when 0 < c < 1, NaN otherwise
     if (arg.is(0)) {
-      return { value: ce.NaN, because: 'log(0) -> NaN' };
+      if (logBase.isGreater(1) === true) {
+        return { value: ce.NegativeInfinity, because: 'log_c(0) -> -inf when c > 1' };
+      }
+      if (logBase.isPositive === true && logBase.isLess(1) === true) {
+        return { value: ce.PositiveInfinity, because: 'log_c(0) -> +inf when 0 < c < 1' };
+      }
+      return { value: ce.NaN, because: 'log_c(0) -> NaN' };
     }
 
-    // log_c(c) -> 1
-    if (arg.isSame(logBase)) {
+    // log_c(c) -> 1 (but not when c is infinity — indeterminate form)
+    if (arg.isSame(logBase) && logBase.isInfinity !== true) {
       return { value: ce.One, because: 'log_c(c) -> 1' };
     }
 
@@ -173,8 +179,26 @@ export function simplifyLog(x: BoxedExpression): RuleStep | undefined {
       };
     }
 
-    // log_c(+inf) patterns
-    if (sym(arg) === 'PositiveInfinity') {
+    // log_inf(inf) -> NaN (indeterminate form)
+    if (
+      logBase.isInfinity === true && logBase.isPositive === true &&
+      arg.isInfinity === true
+    ) {
+      return { value: ce.NaN, because: 'log_inf(inf) -> NaN' };
+    }
+
+    // log_inf(x) -> 0 when x is positive, x != 1, and x is finite
+    if (
+      logBase.isInfinity === true && logBase.isPositive === true &&
+      arg.isPositive === true &&
+      arg.is(1) === false &&
+      arg.isFinite === true
+    ) {
+      return { value: ce.Zero, because: 'log_inf(x) -> 0' };
+    }
+
+    // log_c(+inf) patterns (c must be finite)
+    if (arg.isInfinity === true && arg.isPositive === true && logBase.isFinite === true) {
       // log_c(+inf) -> +inf when c > 1
       if (logBase.isGreater(1) === true) {
         return {
@@ -189,16 +213,6 @@ export function simplifyLog(x: BoxedExpression): RuleStep | undefined {
           because: 'log_c(+inf) -> -inf when 0 < c < 1',
         };
       }
-    }
-
-    // log_c(x, +inf) -> 0 when x is positive, x != 1, and x is finite
-    if (
-      sym(logBase) === 'PositiveInfinity' &&
-      arg.isPositive === true &&
-      arg.is(1) === false &&
-      arg.isFinite === true
-    ) {
-      return { value: ce.Zero, because: 'log_inf(x) -> 0' };
     }
 
     // log_c(c^x) -> x

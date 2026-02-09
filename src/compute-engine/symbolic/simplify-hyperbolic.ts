@@ -54,7 +54,7 @@ export function simplifyHyperbolic(x: BoxedExpression): RuleStep | undefined {
     if (!arg) return undefined;
 
     // Hyperbolic with infinity
-    if (isBoxedSymbol(arg) && arg.symbol === 'PositiveInfinity') {
+    if (arg.isInfinity === true && arg.isPositive === true) {
       switch (op) {
         case 'Sinh':
           return { value: ce.PositiveInfinity, because: 'sinh(+inf) -> +inf' };
@@ -71,7 +71,7 @@ export function simplifyHyperbolic(x: BoxedExpression): RuleStep | undefined {
       }
     }
 
-    if (isBoxedSymbol(arg) && arg.symbol === 'NegativeInfinity') {
+    if (arg.isInfinity === true && arg.isNegative === true) {
       switch (op) {
         case 'Sinh':
           return { value: ce.NegativeInfinity, because: 'sinh(-inf) -> -inf' };
@@ -86,12 +86,6 @@ export function simplifyHyperbolic(x: BoxedExpression): RuleStep | undefined {
         case 'Csch':
           return { value: ce.Zero, because: 'csch(-inf) -> 0' };
       }
-    }
-
-    // General infinity check for functions that return NaN
-    if (arg.isInfinity === true) {
-      // Already handled specific cases above for the main hyperbolic functions
-      // This catches any edge cases
     }
 
     // Odd/even function properties with negation
@@ -115,28 +109,10 @@ export function simplifyHyperbolic(x: BoxedExpression): RuleStep | undefined {
       }
     }
 
-    // Exponential conversions
-    // sinh(x) -> (e^x - e^{-x})/2
-    if (op === 'Sinh') {
-      return {
-        value: ce
-          ._fn('Exp', [arg])
-          .sub(ce._fn('Exp', [arg.neg()]))
-          .div(2),
-        because: 'sinh(x) -> (e^x - e^{-x})/2',
-      };
-    }
-
-    // cosh(x) -> (e^x + e^{-x})/2
-    if (op === 'Cosh') {
-      return {
-        value: ce
-          ._fn('Exp', [arg])
-          .add(ce._fn('Exp', [arg.neg()]))
-          .div(2),
-        because: 'cosh(x) -> (e^x + e^{-x})/2',
-      };
-    }
+    // Note: sinh/cosh -> exponential conversions are expansions, not
+    // simplifications. They are intentionally NOT included here to preserve
+    // function identity for rules like |sinh(x)| -> sinh(|x|) and
+    // cosh(|x|) -> cosh(x).
   }
 
   // Handle inverse hyperbolic functions
@@ -146,39 +122,26 @@ export function simplifyHyperbolic(x: BoxedExpression): RuleStep | undefined {
 
     // Inverse hyperbolic with infinity
     if (op === 'Arsinh') {
-      if (isBoxedSymbol(arg) && arg.symbol === 'PositiveInfinity') {
+      if (arg.isInfinity === true && arg.isPositive === true) {
         return { value: ce.PositiveInfinity, because: 'arsinh(+inf) -> +inf' };
       }
-      if (isBoxedSymbol(arg) && arg.symbol === 'NegativeInfinity') {
+      if (arg.isInfinity === true && arg.isNegative === true) {
         return { value: ce.NegativeInfinity, because: 'arsinh(-inf) -> -inf' };
       }
-
-      // arsinh(x) -> ln(x + sqrt(x^2 + 1))
-      return {
-        value: ce._fn('Ln', [
-          arg.add(ce._fn('Sqrt', [arg.pow(2).add(ce.One)])),
-        ]),
-        because: 'arsinh(x) -> ln(x + sqrt(x^2 + 1))',
-      };
+      // Note: arsinh(x) -> ln(...) conversion is an expansion, not included
+      // here to preserve function identity for |arsinh(x)| -> arsinh(|x|).
     }
 
     if (op === 'Arcosh') {
-      if (isBoxedSymbol(arg) && arg.symbol === 'PositiveInfinity') {
+      if (arg.isInfinity === true && arg.isPositive === true) {
         return { value: ce.PositiveInfinity, because: 'arcosh(+inf) -> +inf' };
       }
-      if (isBoxedSymbol(arg) && arg.symbol === 'NegativeInfinity') {
+      if (arg.isInfinity === true && arg.isNegative === true) {
         return { value: ce.NaN, because: 'arcosh(-inf) -> NaN' };
       }
 
-      // arcosh(x) -> ln(x + sqrt(x^2 - 1)) when x > 1
-      if (arg.isGreater(1) === true) {
-        return {
-          value: ce._fn('Ln', [
-            arg.add(ce._fn('Sqrt', [arg.pow(2).sub(ce.One)])),
-          ]),
-          because: 'arcosh(x) -> ln(x + sqrt(x^2 - 1))',
-        };
-      }
+      // Note: arcosh(x) -> ln(...) conversion is an expansion, not included
+      // here to preserve function identity for even function abs rules.
     }
 
     if (op === 'Artanh') {
@@ -187,19 +150,14 @@ export function simplifyHyperbolic(x: BoxedExpression): RuleStep | undefined {
         return { value: ce.NaN, because: 'artanh(±inf) -> NaN' };
       }
 
-      // artanh(x) -> (1/2) * ln((1 + x)/(1 - x))
-      return {
-        value: ce.Half.mul(
-          ce._fn('Ln', [ce.One.add(arg).div(ce.One.sub(arg))])
-        ),
-        because: 'artanh(x) -> (1/2)*ln((1+x)/(1-x))',
-      };
+      // Note: artanh(x) -> ln(...) conversion is an expansion, not included
+      // here to preserve function identity for |artanh(x)| -> artanh(|x|).
     }
 
     if (op === 'Arcoth') {
-      // arcoth(±inf) -> NaN
+      // arcoth(±inf) -> 0 (lim_{x→±∞} arccoth(x) = 0)
       if (arg.isInfinity === true) {
-        return { value: ce.NaN, because: 'arcoth(±inf) -> NaN' };
+        return { value: ce.Zero, because: 'arcoth(±inf) -> 0' };
       }
     }
 

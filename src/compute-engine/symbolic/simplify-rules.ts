@@ -151,6 +151,23 @@ export const SIMPLIFY_RULES: Rule[] = [
     return { value: result, because: 'cancel common polynomial factors' };
   },
 
+  // Quick a/a -> 1 check for identical numerator/denominator
+  // Must run before expand to avoid decomposing the fraction first
+  (x): RuleStep | undefined => {
+    if (x.operator !== 'Divide' || !isBoxedFunction(x)) return undefined;
+    const num = x.op1;
+    const denom = x.op2;
+    if (!num || !denom) return undefined;
+    if (
+      num.isSame(denom) &&
+      num.is(0) === false &&
+      num.isInfinity !== true
+    ) {
+      return { value: x.engine.One, because: 'a/a -> 1' };
+    }
+    return undefined;
+  },
+
   // Try to expand the expression:
   // x*(y+z) -> x*y + x*z
   (x) => {
@@ -428,8 +445,23 @@ export const SIMPLIFY_RULES: Rule[] = [
     if (!isBoxedFunction(x)) return undefined;
     if (x.operator === 'Ln')
       return { value: x.op1.ln(x.ops[1]), because: 'ln' };
-    if (x.operator === 'Log')
-      return { value: x.op1.ln(x.ops[1] ?? 10), because: 'log' };
+    if (x.operator === 'Log') {
+      const logBase = x.ops[1] ?? 10;
+      // Skip edge cases that simplifyLog handles correctly:
+      // base 0 or 1 -> NaN, base infinity -> special handling
+      const baseExpr = typeof logBase === 'number'
+        ? x.engine.number(logBase)
+        : logBase;
+      if (baseExpr.is(0) || baseExpr.is(1) || baseExpr.isInfinity === true)
+        return undefined;
+      // Skip edge cases that simplifyLog handles correctly
+      if (x.op1.is(0)) return undefined;
+      if (x.op1.isInfinity === true) return undefined;
+      // Skip log_c(c^x) — simplifyLog returns x directly
+      if (x.op1.operator === 'Power' && isBoxedFunction(x.op1) && x.op1.op1?.isSame(baseExpr))
+        return undefined;
+      return { value: x.op1.ln(logBase), because: 'log' };
+    }
     return undefined;
   },
 

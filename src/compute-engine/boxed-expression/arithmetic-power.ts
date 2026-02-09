@@ -1,4 +1,5 @@
 import type { NumericPrimitiveType, Type } from '../../common/type/types';
+import { BoxedType } from '../../common/type/boxed-type';
 import type { BoxedExpression } from '../global-types';
 import { SMALL_INTEGER } from '../numerics/numeric';
 import type { Rational } from '../numerics/types';
@@ -108,6 +109,14 @@ export function canonicalPower(
     }
   }
 
+  // Handle special base cases that only need sign/infinity info from the
+  // exponent, before the numeric-exponent guard below.
+  if (isBoxedNumber(a) && a.is(0) && !b.is(0) && !b.isInfinity) {
+    // 0^positive = 0, 0^negative = ComplexInfinity
+    if (b.isPositive === true) return ce.Zero;
+    if (b.isNegative === true) return ce.ComplexInfinity;
+  }
+
   // Onwards, the focus on operations is where is a *numeric* exponent.
   // Therefore, exclude cases - which may otherwise be valid - of the exponent either: being a function (e.g.
   // '0 + 0'), a symbol, or of a non-numeric type.
@@ -182,6 +191,10 @@ export function canonicalPower(
       if (a.is(1)) return ce.One;
     }
 
+    // Matrix inverse: A^{-1} -> Inverse(A)
+    if (a.type.matches(new BoxedType('matrix')))
+      return ce.function('Inverse', [a]);
+
     // (note: case of `0^-1 = ~∞` is covered prior...)
     if (!(a.isCanonical || a.isStructural))
       return ce._fn('Power', [a, ce.number(-1)], { canonical: false });
@@ -247,7 +260,10 @@ export function canonicalPower(
   if (isBoxedNumber(a) && a.isInfinity) {
     // Special handling for NegativeInfinity with integer/rational exponents
     if (a.isNegative) {
-      // (-inf)^n for integer n
+      // (-inf)^n for negative exponents -> 0
+      if (b.isNegative === true) return ce.Zero;
+
+      // (-inf)^n for positive integer n
       if (b.isInteger === true) {
         if (b.isEven === true) return ce.PositiveInfinity; // (-inf)^(even) -> +inf
         if (b.isOdd === true) return ce.NegativeInfinity; // (-inf)^(odd) -> -inf
@@ -276,6 +292,12 @@ export function canonicalPower(
           if (numIsOdd && denomIsOdd) return ce.NegativeInfinity;
         }
       }
+    }
+
+    // PositiveInfinity^b for real b
+    if (a.isPositive) {
+      if (b.isPositive === true) return ce.PositiveInfinity; // +inf^positive -> +inf
+      if (b.isNegative === true) return ce.Zero; // +inf^negative -> 0
     }
 
     // If the exponent is pure imaginary, the result is NaN

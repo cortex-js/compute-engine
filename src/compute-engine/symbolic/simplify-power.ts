@@ -34,6 +34,34 @@ export function simplifyPower(x: BoxedExpression): RuleStep | undefined {
 
     if (!arg || !rootIndex) return undefined;
 
+    // Edge case: 0th root is undefined -> NaN
+    if (rootIndex.is(0)) {
+      return { value: ce.NaN, because: 'root(x, 0) -> NaN' };
+    }
+
+    // Edge case: root(0, n)
+    if (arg.is(0)) {
+      if (rootIndex.isPositive === true) {
+        return { value: ce.Zero, because: 'root(0, n) -> 0 when n > 0' };
+      }
+      return { value: ce.NaN, because: 'root(0, n) -> NaN when n <= 0' };
+    }
+
+    // Edge case: root(1, n) = 1 for all nonzero n
+    if (arg.is(1)) {
+      return { value: ce.One, because: 'root(1, n) -> 1' };
+    }
+
+    // Edge case: root(+inf, n) -> +inf when n > 0
+    if (arg.isInfinity === true && arg.isPositive === true) {
+      if (rootIndex.isPositive === true) {
+        return { value: ce.PositiveInfinity, because: 'root(+inf, n) -> +inf when n > 0' };
+      }
+      if (rootIndex.isNegative === true) {
+        return { value: ce.Zero, because: 'root(+inf, n) -> 0 when n < 0' };
+      }
+    }
+
     // root(sqrt(x), n) -> x^{1/(2n)} (nth root of square root)
     if (arg.operator === 'Sqrt' && isBoxedFunction(arg) && arg.op1) {
       const innerBase = arg.op1;
@@ -133,6 +161,11 @@ export function simplifyPower(x: BoxedExpression): RuleStep | undefined {
   if (op === 'Sqrt' && isBoxedFunction(x)) {
     const arg = x.op1;
     if (!arg) return undefined;
+
+    // Edge case: sqrt(+inf) -> +inf
+    if (arg.isInfinity === true && arg.isPositive === true) {
+      return { value: ce.PositiveInfinity, because: 'sqrt(+inf) -> +inf' };
+    }
 
     // Try factoring perfect square trinomials and difference of squares first
     // This enables simplification of sqrt(x^2+2x+1) -> |x+1|

@@ -256,6 +256,12 @@ function simplifyOperands(
       ) {
         return simplify(x, options).at(-1)!.value;
       }
+      // Simplify Ln/Log operands within Add/Multiply to enable term cancellation
+      // (e.g., ln(x^3) -> 3*ln(x) so that ln(x^3) - 3*ln(x) = 0)
+      // Only simplify Ln (natural log), not Log (which may lose base info)
+      if (x.operator === 'Ln') {
+        return simplify(x, options).at(-1)!.value;
+      }
       // Power expressions with fractional exponents may need sign factoring
       // e.g., (-2x)^{3/5} should become -(2x)^{3/5} for correct real evaluation
       if (
@@ -407,7 +413,13 @@ function simplifyNonCommutativeFunction(
   const isPowerCombination =
     because === 'combined powers' ||
     because === 'combined powers with same base';
-  if (!isCheaper(expr, last, options?.costFunction) && !isPowerCombination)
+  // Log/ln rules from simplifyLog are always valid simplifications
+  // even if structurally more expensive (e.g., ln(x^n) -> n*ln(x))
+  const isLogRule =
+    because === 'ln' ||
+    because?.startsWith('ln(') ||
+    because?.startsWith('log_');
+  if (!isCheaper(expr, last, options?.costFunction) && !isPowerCombination && !isLogRule)
     return steps;
 
   result.at(-1)!.value = last;

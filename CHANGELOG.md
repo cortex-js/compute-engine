@@ -1,19 +1,13 @@
 ## [Unreleased]
 
-### API Changes
+### Breaking API Changes
 
-#### Expression Creation: `form` Replaces `canonical`/`structural`
+This release includes several breaking changes to the public API.
 
-The `canonical` (boolean or array) and `structural` (boolean) options on
-`ce.box()`, `ce.function()`, and `ce.parse()` have been unified into a single
-`form` option.
-
-```ts
-ce.box(['Add', 1, 'x'], { form: 'canonical' }); // default
-ce.box(['Add', 1, 'x'], { form: 'raw' });        // no canonicalization, no binding
-ce.function('Add', [1, 'x'], { form: 'structural' }); // bound, not fully canonical
-ce.box(['Add', 1, 'x'], { form: ['Number', 'Order'] }); // selective passes
-```
+The most significant is the restructuring of the `BoxedExpression` class
+hierarchy and the introduction of type-guarded role interfaces, which improves
+type safety and API ergonomics but requires updates to code that accessed
+role-specific properties directly on `BoxedExpression` instances.
 
 #### Role-Specific Properties Moved to Type-Guarded Interfaces
 
@@ -44,6 +38,19 @@ if (sym(expr) === 'Pi') { /* ... */ }
 Properties that remain on `BoxedExpression`: `.operator`, `.re`/`.im`, `.shape`,
 all arithmetic methods (`.add()`, `.mul()`, etc.), and all numeric predicates
 (`.isPositive`, `.isInteger`, etc.).
+
+#### Expression Creation: `form` Replaces `canonical`/`structural`
+
+The `canonical` (boolean or array) and `structural` (boolean) options on
+`ce.box()`, `ce.function()`, and `ce.parse()` have been unified into a single
+`form` option.
+
+```ts
+ce.box(['Add', 1, 'x'], { form: 'canonical' }); // default
+ce.box(['Add', 1, 'x'], { form: 'raw' });        // no canonicalization, no binding
+ce.function('Add', [1, 'x'], { form: 'structural' }); // bound, not fully canonical
+ce.box(['Add', 1, 'x'], { form: ['Number', 'Order'] }); // selective passes
+```
 
 #### `compile()` Is Now a Free Function
 
@@ -140,141 +147,6 @@ ce.simplificationRules.push({
 });
 ```
 
-### Type Inference
-
-- **Type handlers for 25 operators**: Added explicit `type` handlers to
-  operators that were missing them, enabling the type system to return precise
-  types instead of the broad signature return type.
-  - **Arithmetic**: `Factorial`, `Factorial2`, `Sign` return `finite_integer`;
-    `Ceil` and `Floor` return `finite_integer` for finite inputs, `integer`
-    otherwise.
-  - **Trigonometry**: `Arctan` uses `numericTypeHandler` (returns `finite_real`
-    for real inputs, `finite_number` for complex).
-  - **Complex**: `Real`, `Imaginary`, `Argument` return `finite_real`.
-  - **Number theory**: `Totient`, `Sigma0`, `Sigma1`, `Eulerian`, `Stirling`,
-    `NPartition` return `finite_integer`; `SigmaMinus1` returns
-    `finite_rational`.
-  - **Combinatorics**: `Choose`, `Fibonacci`, `Binomial`, `Multinomial`,
-    `Subfactorial`, `BellNumber` return `finite_integer`.
-
-### Solving
-
-- **`And` operator support for systems of equations**: `solve()` now accepts
-  `And(Equal(...), Equal(...))` in addition to `List(Equal(...), Equal(...))`
-  for representing systems of equations. Both forms route through the same
-  linear, polynomial, and inequality solvers.
-
-- **Parametric solution type filtering**: `filterSolutionByTypes` now uses
-  `=== false` instead of `!== true` for type predicate checks. This allows
-  underdetermined (parametric) solutions to pass through when type predicates
-  return `undefined` (unknown) rather than being incorrectly rejected.
-
-- **`Truncate`, `GCD`, `LCM` type handlers**: `Truncate` returns
-  `finite_integer` for finite inputs (matching `Ceil`/`Floor`); `GCD` and `LCM`
-  always return `finite_integer`.
-
-- **`Or` operator support in `solve()`**: Solving `Or(Equal(x,1), Equal(x,2))`
-  returns the union of solutions from each branch, with deduplication. Works for
-  both univariate (returns array of values) and multivariate (returns array of
-  records) cases.
-
-- **Mixed equality + inequality systems**: `solve()` now handles systems
-  combining `Equal` and inequality operators (`Less`, `LessEqual`, `Greater`,
-  `GreaterEqual`). Equalities are solved first, then solutions are filtered
-  against the inequalities.
-
-- **Parametric solutions omit free variables**: Underdetermined linear systems
-  no longer include free variables (self-referential entries) in the result
-  record. Only dependent variables with non-trivial expressions are returned.
-
-### Special Functions
-
-- **Numeric evaluation for Digamma, Trigamma, PolyGamma, Beta, Zeta, LambertW**:
-  These six functions now evaluate numerically when `.N()` is called, at both
-  machine precision and arbitrary precision (bignum). Returns unevaluated
-  without numeric approximation.
-  - `Digamma`/`Trigamma`: recurrence + asymptotic with Bernoulli numbers
-  - `PolyGamma`: generalized recurrence for arbitrary order n
-  - `Beta`: via gamma, with log-gamma fallback for large arguments
-  - `Zeta`: Cohen-Villegas-Zagier acceleration, functional equation for Re(s)<0
-  - `LambertW`: Halley's method with branch-point handling
-
-- **Arbitrary-precision (bignum) variants for special functions**: When
-  `ce.precision > 15`, `Digamma`, `Trigamma`, `PolyGamma`, `Beta`, `Zeta`, and
-  `LambertW` now compute results to the requested precision using Decimal.js
-  arithmetic. The asymptotic shift threshold scales with precision to maintain
-  accuracy (e.g., `ce.precision = 50` produces 50-digit results for Digamma and
-  Zeta).
-
-- **Numeric evaluation for Bessel functions (`BesselJ`, `BesselY`, `BesselI`,
-  `BesselK`)**: Integer-order Bessel functions now evaluate numerically.
-  - `BesselJ`: power series for small |x|, Miller's backward recurrence for
-    intermediate values, Hankel asymptotic expansion for large |x|
-  - `BesselY`: DLMF 10.8.3 series for Y_0/Y_1, forward recurrence for higher
-    orders, shared Hankel asymptotic with `BesselJ`
-  - `BesselI`: power series + asymptotic expansion
-  - `BesselK`: series for K_0, Wronskian-derived K_1, forward recurrence for
-    higher orders, asymptotic for large x
-
-- **Numeric evaluation for Airy functions (`AiryAi`, `AiryBi`)**: Power series
-  using Maclaurin coefficients for |x| ≤ 5, asymptotic expansions (exponential
-  decay for Ai, exponential growth for Bi at positive x, oscillatory for
-  negative x) for large arguments.
-
-### Linear Algebra
-
-(Fix [#285](https://github.com/cortex-js/compute-engine/issues/285))
-
-- **`\begin{vmatrix}` now parses to `Determinant`**: The `vmatrix` LaTeX
-  environment now produces `["Determinant", ["Matrix", ...]]` instead of
-  `["Matrix", ..., "'||'"]`. Serialization round-trips correctly back to
-  `\begin{vmatrix}...\end{vmatrix}` when the argument is a `Matrix` expression,
-  and uses `\det\left(...\right)` for symbol arguments.
-
-- **`\begin{Vmatrix}` now parses to `Norm`**: The `Vmatrix` LaTeX environment
-  now produces `["Norm", ["Matrix", ...]]` instead of
-  `["Matrix", ..., "'‖‖'"]`. Serialization round-trips to
-  `\begin{Vmatrix}...\end{Vmatrix}` when the argument is a `Matrix`, and uses
-  `\left\Vert...\right\Vert` for symbol arguments.
-
-- **`A^{-1}` produces `Inverse` for matrix-typed symbols and matrix
-  expressions**: When a symbol is declared with type `matrix`, parsing `A^{-1}`
-  now returns `["Inverse", "A"]` instead of `["Power", "A", -1]`. This also
-  works for inline matrix expressions, e.g.
-  `\begin{pmatrix}...\end{pmatrix}^{-1}`. Undeclared symbols still fall through
-  to the default `Power`/`Divide` handling, and function symbols still produce
-  `InverseFunction` (e.g., `\sin^{-1}` &rarr; `Arcsin`).
-
-- **`Inverse` serializes as `^{-1}`**: `["Inverse", "A"]` now serializes to
-  `A^{-1}` instead of `\mathrm{Inverse}(A)`.
-
-- **`Power(A, -1)` canonicalizes to `Inverse(A)` for matrices**: When `A` has
-  a matrix type, `ce.box(["Power", "A", -1])` now canonicalizes to
-  `["Inverse", "A"]` instead of `["Divide", 1, "A"]`.
-
-- **`\det(A)` and `\tr(A)` now parse correctly**: Fixed `Determinant` and
-  `Trace` LaTeX dictionary entries to use `latexTrigger` (`\det`, `\tr`)
-  instead of `symbolTrigger`, which only matches plain identifiers. Both
-  functions also accept plain text forms (`det(A)`, `tr(A)`).
-
-- **`\det A` and `\tr A` work without parentheses**: `Determinant` and `Trace`
-  now accept implicit arguments, so `\det A` parses as `["Determinant", "A"]`
-  (like `\cos x` parses as `["Cos", "x"]`). Implicit arguments bind at
-  multiplication precedence, so `\det 2A + 1` parses as `det(2A) + 1`.
-
-- **`Determinant` serialization uses `\det A` for simple arguments**: Symbol
-  arguments serialize as `\det A` instead of `\det\left(A\right)`. Matrix
-  arguments still serialize as `\begin{vmatrix}...\end{vmatrix}`.
-
-### LaTeX Parsing
-
-- **`arguments: 'implicit'` option for function dictionary entries**: Function
-  entries in the LaTeX dictionary can now set `arguments: 'implicit'` to accept
-  bare arguments without parentheses (e.g., `\det A`), matching the behavior of
-  trig functions. The default remains `'enclosure'` (parentheses required).
-  Applied to `\det`, `\tr`, `\Re`, `\Im`, `\arg`, `\max`, `\min`, `\sup`,
-  `\inf`.
-
 ### Canonicalization
 
 - **Exact numeric folding during canonicalization**: `canonicalAdd` and
@@ -316,6 +188,175 @@ ce.simplificationRules.push({
   combines a real float with imaginary terms even when they are not adjacent in
   the operand list. Previously, only a real immediately followed by an imaginary
   was promoted to a complex number.
+
+### Type Inference
+
+- **Type handlers for 25 operators**: Added explicit `type` handlers to
+  operators that were missing them, enabling the type system to return precise
+  types instead of the broad signature return type.
+  - **Arithmetic**: `Factorial`, `Factorial2`, `Sign` return `finite_integer`;
+    `Ceil` and `Floor` return `finite_integer` for finite inputs, `integer`
+    otherwise.
+  - **Trigonometry**: `Arctan` uses `numericTypeHandler` (returns `finite_real`
+    for real inputs, `finite_number` for complex).
+  - **Complex**: `Real`, `Imaginary`, `Argument` return `finite_real`.
+  - **Number theory**: `Totient`, `Sigma0`, `Sigma1`, `Eulerian`, `Stirling`,
+    `NPartition` return `finite_integer`; `SigmaMinus1` returns
+    `finite_rational`.
+  - **Combinatorics**: `Choose`, `Fibonacci`, `Binomial`, `Multinomial`,
+    `Subfactorial`, `BellNumber` return `finite_integer`.
+  - **`Truncate`, `GCD`, `LCM` type handlers**: `Truncate` returns
+    `finite_integer` for finite inputs (matching `Ceil`/`Floor`); `GCD` and
+    `LCM` always return `finite_integer`.
+
+### Solving
+
+- **`And` operator support for systems of equations**: `solve()` now accepts
+  `And(Equal(...), Equal(...))` in addition to `List(Equal(...), Equal(...))`
+  for representing systems of equations. Both forms route through the same
+  linear, polynomial, and inequality solvers.
+
+- **Parametric solution type filtering**: `filterSolutionByTypes` now uses
+  `=== false` instead of `!== true` for type predicate checks. This allows
+  underdetermined (parametric) solutions to pass through when type predicates
+  return `undefined` (unknown) rather than being incorrectly rejected.
+
+- **`Or` operator support in `solve()`**: Solving `Or(Equal(x,1), Equal(x,2))`
+  returns the union of solutions from each branch, with deduplication. Works for
+  both univariate (returns array of values) and multivariate (returns array of
+  records) cases.
+
+- **Mixed equality + inequality systems**: `solve()` now handles systems
+  combining `Equal` and inequality operators (`Less`, `LessEqual`, `Greater`,
+  `GreaterEqual`). Equalities are solved first, then solutions are filtered
+  against the inequalities.
+
+- **Parametric solutions omit free variables**: Underdetermined linear systems
+  no longer include free variables (self-referential entries) in the result
+  record. Only dependent variables with non-trivial expressions are returned.
+
+### Special Functions
+
+- **Numeric evaluation for Digamma, Trigamma, PolyGamma, Beta, Zeta, LambertW**:
+  These six functions now evaluate numerically when `.N()` is called, at both
+  machine precision and arbitrary precision (bignum). Returns unevaluated
+  without numeric approximation.
+  - `Digamma`/`Trigamma`: recurrence + asymptotic with Bernoulli numbers
+  - `PolyGamma`: generalized recurrence for arbitrary order n
+  - `Beta`: via gamma, with log-gamma fallback for large arguments
+  - `Zeta`: Cohen-Villegas-Zagier acceleration, functional equation for
+    $\operatorname{Re}(s)<0$
+  - `LambertW`: Halley's method with branch-point handling
+
+- **Arbitrary-precision (bignum) variants for special functions**: When
+  `ce.precision > 15`, `Digamma`, `Trigamma`, `PolyGamma`, `Beta`, `Zeta`, and
+  `LambertW` now compute results to the requested precision using bignum
+  arithmetic. The asymptotic shift threshold scales with precision to maintain
+  accuracy (e.g., `ce.precision = 50` produces 50-digit results for Digamma and
+  Zeta).
+
+- **Numeric evaluation for Bessel functions (`BesselJ`, `BesselY`, `BesselI`,
+  `BesselK`)**: Integer-order Bessel functions now evaluate numerically.
+  - `BesselJ`: power series for small $|x|$, Miller's backward recurrence for
+    intermediate values, Hankel asymptotic expansion for large $|x|$
+  - `BesselY`: DLMF 10.8.3 series for $Y_0$/$Y_1$, forward recurrence for higher
+    orders, shared Hankel asymptotic with `BesselJ`
+  - `BesselI`: power series + asymptotic expansion
+  - `BesselK`: series for $K_0$, Wronskian-derived $K_1$, forward recurrence for
+    higher orders, asymptotic for large $x$
+
+- **Numeric evaluation for Airy functions (`AiryAi`, `AiryBi`)**: Power series
+  using Maclaurin coefficients for $|x| \leq 5$, asymptotic expansions
+  (exponential decay for Ai, exponential growth for Bi at positive $x$,
+  oscillatory for negative $x$) for large arguments.
+
+### Linear Algebra
+
+(Fix [#285](https://github.com/cortex-js/compute-engine/issues/285))
+
+- **`\begin{vmatrix}` now parses to `Determinant`**: The `vmatrix` LaTeX
+  environment now produces `["Determinant", ["Matrix", ...]]` instead of
+  `["Matrix", ..., "'||'"]`. Serialization round-trips correctly back to
+  `\begin{vmatrix}...\end{vmatrix}` when the argument is a `Matrix` expression,
+  and uses `\det\left(...\right)` for symbol arguments.
+
+- **`\begin{Vmatrix}` now parses to `Norm`**: The `Vmatrix` LaTeX environment
+  now produces `["Norm", ["Matrix", ...]]` instead of `["Matrix", ..., "'‖‖'"]`.
+  Serialization round-trips to `\begin{Vmatrix}...\end{Vmatrix}` when the
+  argument is a `Matrix`, and uses `\left\Vert...\right\Vert` for symbol
+  arguments.
+
+- **`A^{-1}` produces `Inverse` for matrix-typed symbols and matrix
+  expressions**: When a symbol is declared with type `matrix`, parsing `A^{-1}`
+  now returns `["Inverse", "A"]` instead of `["Power", "A", -1]`. This also
+  works for inline matrix expressions, e.g.
+  `\begin{pmatrix}...\end{pmatrix}^{-1}`. Undeclared symbols still fall through
+  to the default `Power`/`Divide` handling, and function symbols still produce
+  `InverseFunction` (e.g., `\sin^{-1}` &rarr; `Arcsin`).
+
+- **`Inverse` serializes as `^{-1}`**: `["Inverse", "A"]` now serializes to
+  `A^{-1}` instead of `\mathrm{Inverse}(A)`.
+
+- **`Power(A, -1)` canonicalizes to `Inverse(A)` for matrices**: When `A` has a
+  matrix type, `ce.box(["Power", "A", -1])` now canonicalizes to
+  `["Inverse", "A"]` instead of `["Divide", 1, "A"]`.
+
+- **`\det(A)` and `\tr(A)` now parse correctly**: Fixed `Determinant` and
+  `Trace` LaTeX dictionary entries to use `latexTrigger` (`\det`, `\tr`) instead
+  of `symbolTrigger`, which only matches plain identifiers. Both functions also
+  accept plain text forms (`det(A)`, `tr(A)`).
+
+- **`\det A` and `\tr A` work without parentheses**: `Determinant` and `Trace`
+  now accept implicit arguments, so `\det A` parses as `["Determinant", "A"]`
+  (like `\cos x` parses as `["Cos", "x"]`). Implicit arguments bind at
+  multiplication precedence, so `\det 2A + 1` parses as `det(2A) + 1`.
+
+- **`Determinant` serialization uses `\det A` for simple arguments**: Symbol
+  arguments serialize as `\det A` instead of `\det\left(A\right)`. Matrix
+  arguments still serialize as `\begin{vmatrix}...\end{vmatrix}`.
+
+### LaTeX Parsing
+
+- **`arguments: 'implicit'` option for function dictionary entries**: Function
+  entries in the LaTeX dictionary can now set `arguments: 'implicit'` to accept
+  bare arguments without parentheses (e.g., `\det A`), matching the behavior of
+  trig functions. The default remains `'enclosure'` (parentheses required).
+  Applied to `\det`, `\tr`, `\Re`, `\Im`, `\arg`, `\max`, `\min`, `\sup`,
+  `\inf`.
+
+### Simplification
+
+- **Infinity handling for 24+ functions**: `arctan(∞)`, `arccot(±∞)`,
+  `tanh/coth/sech/csch(±∞)`, `arsinh(-∞)`, `arcosh(-∞)`, `arccoth(±∞)`,
+  `arcsch(±∞)`, `π^∞`, `∞^n`, `(-∞)^{-n}`, `log_∞(x)`, `log_{0.5}(∞)`,
+  `√∞`, `∛∞` now all return correct limits.
+
+- **Root edge cases**: `Root(x, 0) → NaN`, `Root(0, n)`, `Root(1, n)`,
+  `Root(+∞, n)`, and `Sqrt(+∞)` now handled correctly.
+
+- **Division edge cases**: `a/a → 1` now works for compound expressions
+  (e.g., `(π+1)/(π+1)`); `2/0 → ComplexInfinity` and `1/(1/0) → 0` propagate
+  correctly.
+
+- **Logarithm edge cases**: Fixed infinity detection in `simplify-log.ts`
+  (was using `sym()` which fails on `BoxedNumber` infinity values); added
+  `log_∞(∞) → NaN`, base-aware `log_c(0)`, guards for `log_1(x)` and
+  `log_c(c^x)` evaluation.
+
+- **Absolute value of odd functions**: `|arcsin(x)|`, `|sinh(x)|`, `|arsinh(x)|`,
+  `|artanh(x)|` now simplify to `f(|x|)`.
+
+- **Even function with abs argument**: `cosh(|x+2|) → cosh(x+2)`.
+
+- **Trig period shifts**: `cot(π+x) → cot(x)`, `csc(π+x) → -csc(x)`.
+
+- **Ln simplification in Add/Multiply operands**: `ln(x^3) − 3·ln(x) → 0`
+  and `ln(x^√2) → √2·ln(x)` now work; cost function bypassed for log rules
+  that are mathematically valid but structurally more expensive.
+
+- **Preserved function identity**: Removed unconditional expansions of
+  `sinh/cosh → exp`, `arsinh/arcosh/artanh → ln`, and `arcsin → arctan2` that
+  prevented abs/odd-function rules from firing.
 
 ### Bug Fixes
 
@@ -406,10 +447,11 @@ ce.simplificationRules.push({
 
 - **Monte Carlo improper integrals**: Fixed two bugs in `monteCarloEstimate()`
   that produced incorrect results (typically `NaN` or `Infinity`) for improper
-  integrals. The change-of-variables estimator was inverted (`f(x) / jacobian`
-  instead of `f(x) * jacobian`), and the finite-interval scale factor `b - a`
-  was applied to transformed domains where it is infinite. Affects `NIntegrate`
-  and compiled `integrate` for any integral with infinite bounds.
+  integrals. The change-of-variables estimator was inverted
+  ($f(x) / \mathrm{jacobian}$ instead of $f(x) * \mathrm{jacobian}$), and the
+  finite-interval scale factor $b - a$ was applied to transformed domains where
+  it is infinite. Affects `NIntegrate` and compiled `integrate` for any integral
+  with infinite bounds.
 
 ### Compilation
 
@@ -1372,8 +1414,8 @@ ce.simplificationRules.push({
 - **Special Function Definitions**: Added type signatures for special
   mathematical functions, enabling them to be used in expressions without type
   errors:
-  - `Zeta` - Riemann zeta function ζ(s)
-  - `Beta` - Euler beta function B(a,b) = Γ(a)Γ(b)/Γ(a+b)
+  - `Zeta` - Riemann zeta function $\zeta(s)$
+  - `Beta` - Euler beta function $B(a,b) = \Gamma(a)\Gamma(b)/\Gamma(a+b)$
   - `LambertW` - Lambert W function (product logarithm)
   - `BesselJ`, `BesselY`, `BesselI`, `BesselK` - Bessel functions of
     first/second kind

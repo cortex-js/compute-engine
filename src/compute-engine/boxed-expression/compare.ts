@@ -268,6 +268,14 @@ export function cmp(
               if (upperNum === aNum && !bounds.upperStrict) return '>=';
             }
           }
+
+          // Fall back to the symbol's known numeric value
+          const bSymNum = b.re;
+          if (typeof bSymNum === 'number' && Number.isFinite(bSymNum)) {
+            const tol = a.engine.tolerance;
+            if (Math.abs(aNum - bSymNum) <= tol) return '=';
+            return aNum < bSymNum ? '<' : '>';
+          }
         }
       }
       return undefined;
@@ -327,6 +335,32 @@ export function cmp(
           // If upperBound = b and not strict (a <= b), then a <= b
           if (upperNum === b && !bounds.upperStrict) return '<=';
         }
+      }
+
+      // Fall back to the symbol's known numeric value (e.g. Pi, ExponentialE)
+      const aNum = a.re;
+      if (typeof aNum === 'number' && Number.isFinite(aNum)) {
+        const tol = a.engine.tolerance;
+        if (Math.abs(aNum - b) <= tol) return '=';
+        return aNum < b ? '<' : '>';
+      }
+    }
+
+    // Handle function expressions (e.g., Negate(Pi)) compared to a number
+    if (isBoxedFunction(a)) {
+      if (b === 0) {
+        const s = a.sgn;
+        if (s === 'zero') return '=';
+        if (s === 'positive') return '>';
+        if (s === 'negative') return '<';
+        if (s === 'non-negative') return '>=';
+        if (s === 'non-positive') return '<=';
+      }
+      const aNum = a.re;
+      if (typeof aNum === 'number' && Number.isFinite(aNum)) {
+        const tol = a.engine.tolerance;
+        if (Math.abs(aNum - b) <= tol) return '=';
+        return aNum < b ? '<' : '>';
       }
     }
     return undefined;
@@ -420,6 +454,17 @@ export function cmp(
             if (upperNum === bNum && !bounds.upperStrict) return '<=';
           }
         }
+      }
+    }
+
+    // Fall back to the symbol's known numeric value (e.g. Pi, ExponentialE)
+    const aNum = a.re;
+    if (typeof aNum === 'number' && Number.isFinite(aNum)) {
+      const bNum = typeof b === 'number' ? b : b.re;
+      if (typeof bNum === 'number' && Number.isFinite(bNum)) {
+        const tol = a.engine.tolerance;
+        if (Math.abs(aNum - bNum) <= tol) return '=';
+        return aNum < bNum ? '<' : '>';
       }
     }
 

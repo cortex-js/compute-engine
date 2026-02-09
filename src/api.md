@@ -5415,6 +5415,7 @@ type FunctionEntry = BaseEntry & Trigger & {
   kind: "function";
   parse:   | Expression
      | FunctionParseHandler;
+  arguments: "enclosure" | "implicit";
 };
 ```
 
@@ -5425,6 +5426,20 @@ A function is a symbol followed by:
 For more complex situations, for example implicit arguments or
 inverse functions postfix (i.e. ^{-1}), use a custom parse handler with a
 entry of kind `expression`.
+
+#### FunctionEntry.arguments?
+
+```ts
+optional arguments: "enclosure" | "implicit";
+```
+
+How arguments are parsed:
+- `'enclosure'` (default): arguments must be enclosed in parentheses,
+  e.g. `\max(a, b)`.
+- `'implicit'`: arguments can be provided with or without parentheses,
+  e.g. `\det A` is parsed as `\det(A)`.
+  Bare arguments are parsed at multiplication precedence, so
+  `\det 2A + 1` is parsed as `\det(2A) + 1`.
 
 </MemberCard>
 
@@ -6090,7 +6105,7 @@ argument was found.
 
 ####### kind?
 
-`"implicit"` | `"enclosure"`
+`"enclosure"` | `"implicit"`
 
 ####### until?
 
