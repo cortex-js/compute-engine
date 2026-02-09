@@ -220,6 +220,331 @@ export function bigGamma(ce: ComputeEngine, z: BigNum): BigNum {
     .mul(x.mul(t.neg().exp()).mul(t.pow(z.add(ce._BIGNUM_HALF))));
 }
 
+// Bernoulli numbers B_{2k} as string constants for bignum cache (k=1..15)
+// More terms than machine version for higher-precision asymptotic expansions
+const BERNOULLI_2K_STRINGS = [
+  '0.16666666666666666666666666666666666666666666666666', // B_2 = 1/6
+  '-0.03333333333333333333333333333333333333333333333333', // B_4 = -1/30
+  '0.02380952380952380952380952380952380952380952380952', // B_6 = 1/42
+  '-0.03333333333333333333333333333333333333333333333333', // B_8 = -1/30
+  '0.07575757575757575757575757575757575757575757575758', // B_10 = 5/66
+  '-0.25311355311355311355311355311355311355311355311355', // B_12 = -691/2730
+  '1.16666666666666666666666666666666666666666666666667', // B_14 = 7/6
+  '-7.09215686274509803921568627450980392156862745098039', // B_16 = -3617/510
+  '54.97117794486215538847117794486215538847117794486216', // B_18 = 43867/798
+  '-529.12424242424242424242424242424242424242424242424242', // B_20 = -174611/330
+  '6192.12318840579710144927536231884057971014492753623188', // B_22 = 854513/138
+  '-86580.25311355311355311355311355311355311355311355311355', // B_24
+  '1425517.16666666666666666666666666666666666666666666666667', // B_26
+  '-27298231.06781609195402298850574712643678160919540229885', // B_28
+  '601580873.90064236838430386817483591677140064236838430387', // B_30
+];
+
+/**
+ * Bignum Digamma function ψ(z) = d/dz ln(Γ(z))
+ * Same algorithm as machine `digamma`: reflection for negative z,
+ * recurrence to shift z > 7, then asymptotic expansion with Bernoulli numbers.
+ */
+export function bigDigamma(ce: ComputeEngine, z: BigNum): BigNum {
+  const BERNOULLI = ce._cache<BigNum[]>('digamma-bernoulli', () =>
+    BERNOULLI_2K_STRINGS.map((x) => ce.bignum(x))
+  );
+
+  if (!z.isFinite()) return ce._BIGNUM_NAN;
+
+  // Reflection formula for negative values: ψ(1-z) = ψ(z) + π·cot(πz)
+  if (z.isNegative()) {
+    if (z.isInteger()) return ce._BIGNUM_NAN; // poles at non-positive integers
+    const pi = ce._BIGNUM_NEGATIVE_ONE.acos();
+    const piZ = pi.mul(z);
+    const cotPiZ = piZ.cos().div(piZ.sin());
+    return bigDigamma(ce, ce._BIGNUM_ONE.sub(z)).sub(pi.mul(cotPiZ));
+  }
+
+  if (z.isZero()) return ce._BIGNUM_NAN; // pole
+
+  // Shift threshold: for p digits of precision, need z ~ p/2
+  // to ensure the asymptotic series terms are small enough
+  const shift = Math.max(7, Math.ceil(ce.precision / 2));
+
+  // Recurrence: ψ(z+1) = ψ(z) + 1/z — shift z up until z > shift
+  let result = ce.bignum(0);
+  let w = z;
+  while (w.lessThan(shift)) {
+    result = result.sub(ce._BIGNUM_ONE.div(w));
+    w = w.add(ce._BIGNUM_ONE);
+  }
+
+  // Asymptotic expansion: ψ(w) ~ ln(w) - 1/(2w) - Σ B_{2k}/(2k·w^{2k})
+  result = result.add(w.ln()).sub(ce._BIGNUM_ONE.div(w.mul(2)));
+  let w2k = w.mul(w); // w^2
+  const w2 = w2k;
+  for (let k = 0; k < BERNOULLI.length; k++) {
+    const term = BERNOULLI[k].div(ce.bignum(2 * (k + 1)).mul(w2k));
+    if (term.abs().lessThan(ce.bignum(10).pow(-ce.precision - 5))) break;
+    result = result.sub(term);
+    w2k = w2k.mul(w2);
+  }
+
+  return result;
+}
+
+/**
+ * Bignum Trigamma function ψ₁(z) = d/dz ψ(z) = d²/dz² ln(Γ(z))
+ * Same recurrence/asymptotic structure as digamma but for the second derivative.
+ */
+export function bigTrigamma(ce: ComputeEngine, z: BigNum): BigNum {
+  const BERNOULLI = ce._cache<BigNum[]>('digamma-bernoulli', () =>
+    BERNOULLI_2K_STRINGS.map((x) => ce.bignum(x))
+  );
+
+  if (!z.isFinite()) return ce._BIGNUM_NAN;
+
+  // Reflection formula: ψ₁(1-z) + ψ₁(z) = π²/sin²(πz)
+  if (z.isNegative()) {
+    if (z.isInteger()) return ce._BIGNUM_NAN;
+    const pi = ce._BIGNUM_NEGATIVE_ONE.acos();
+    const s = pi.mul(z).sin();
+    return pi.mul(pi).div(s.mul(s)).sub(bigTrigamma(ce, ce._BIGNUM_ONE.sub(z)));
+  }
+
+  if (z.isZero()) return ce._BIGNUM_NAN; // pole
+
+  const shift = Math.max(7, Math.ceil(ce.precision / 2));
+
+  // Recurrence: ψ₁(z+1) = ψ₁(z) - 1/z²
+  let result = ce.bignum(0);
+  let w = z;
+  while (w.lessThan(shift)) {
+    result = result.add(ce._BIGNUM_ONE.div(w.mul(w)));
+    w = w.add(ce._BIGNUM_ONE);
+  }
+
+  // Asymptotic: ψ₁(w) ~ 1/w + 1/(2w²) + Σ B_{2k}/w^{2k+1}
+  result = result.add(ce._BIGNUM_ONE.div(w));
+  result = result.add(ce._BIGNUM_ONE.div(w.mul(w).mul(2)));
+  let w2kp1 = w.mul(w).mul(w); // w^3
+  const w2 = w.mul(w);
+  for (let k = 0; k < BERNOULLI.length; k++) {
+    const term = BERNOULLI[k].div(w2kp1);
+    if (term.abs().lessThan(ce.bignum(10).pow(-ce.precision - 5))) break;
+    result = result.add(term);
+    w2kp1 = w2kp1.mul(w2);
+  }
+
+  return result;
+}
+
+/**
+ * Bignum Polygamma function ψₙ(z) = dⁿ/dzⁿ ψ(z)
+ * Delegates to bigDigamma/bigTrigamma for n=0,1.
+ * For n ≥ 2, uses recurrence + asymptotic expansion.
+ */
+export function bigPolygamma(
+  ce: ComputeEngine,
+  n: BigNum,
+  z: BigNum
+): BigNum {
+  const nNum = n.toNumber();
+  if (!Number.isInteger(nNum) || nNum < 0) return ce._BIGNUM_NAN;
+  if (nNum === 0) return bigDigamma(ce, z);
+  if (nNum === 1) return bigTrigamma(ce, z);
+  if (!z.isFinite() || z.isZero()) return ce._BIGNUM_NAN;
+
+  const BERNOULLI = ce._cache<BigNum[]>('digamma-bernoulli', () =>
+    BERNOULLI_2K_STRINGS.map((x) => ce.bignum(x))
+  );
+
+  // Bignum factorial helper (small n, simple loop)
+  const bigFactorial = (m: number): BigNum => {
+    let r = ce._BIGNUM_ONE;
+    for (let i = 2; i <= m; i++) r = r.mul(i);
+    return r;
+  };
+
+  const shift = Math.max(7, Math.ceil(ce.precision / 2));
+
+  // Handle negative z via recurrence shift
+  let w = z;
+  let result = ce.bignum(0);
+  const sign = nNum % 2 === 0 ? -1 : 1;
+
+  if (w.isNegative()) {
+    if (w.isInteger()) return ce._BIGNUM_NAN;
+    const negSign = nNum % 2 === 0 ? 1 : -1;
+    while (w.lessThan(1)) {
+      result = result.add(
+        ce.bignum(negSign).mul(bigFactorial(nNum)).div(w.pow(nNum + 1))
+      );
+      w = w.add(ce._BIGNUM_ONE);
+    }
+  }
+
+  // Recurrence: ψₙ(z+1) = ψₙ(z) + (-1)^n n! / z^{n+1}
+  while (w.lessThan(shift)) {
+    result = result.add(
+      ce.bignum(sign).mul(bigFactorial(nNum)).div(w.pow(nNum + 1))
+    );
+    w = w.add(ce._BIGNUM_ONE);
+  }
+
+  // Asymptotic: ψₙ(w) ~ (-1)^{n+1} [(n-1)!/w^n + n!/(2w^{n+1}) + Σ ...]
+  const signA = nNum % 2 === 0 ? -1 : 1;
+  result = result.add(
+    ce.bignum(signA).mul(bigFactorial(nNum - 1)).div(w.pow(nNum))
+  );
+  result = result.add(
+    ce.bignum(signA).mul(bigFactorial(nNum)).div(w.pow(nNum + 1).mul(2))
+  );
+
+  // Higher-order terms using Bernoulli numbers
+  let wPow = w.pow(nNum + 2);
+  const w2 = w.mul(w);
+  const limit = Math.min(BERNOULLI.length, 10);
+  const tol = ce.bignum(10).pow(-ce.precision - 5);
+  for (let k = 0; k < limit; k++) {
+    const m = 2 * (k + 1);
+    let coeff = ce._BIGNUM_ONE;
+    for (let j = 0; j < m; j++) coeff = coeff.mul(nNum + j);
+    const term = ce.bignum(signA).mul(BERNOULLI[k]).mul(coeff).div(bigFactorial(m).mul(wPow));
+    if (term.abs().lessThan(tol)) break;
+    result = result.add(term);
+    wPow = wPow.mul(w2);
+  }
+
+  return result;
+}
+
+/**
+ * Bignum Beta function B(a, b) = Γ(a)Γ(b)/Γ(a+b)
+ * Uses bigGamma directly.
+ */
+export function bigBeta(ce: ComputeEngine, a: BigNum, b: BigNum): BigNum {
+  return bigGamma(ce, a).mul(bigGamma(ce, b)).div(bigGamma(ce, a.add(b)));
+}
+
+/**
+ * Bignum Riemann zeta function ζ(s)
+ * Uses Cohen-Villegas-Zagier acceleration (same algorithm as machine version).
+ */
+export function bigZeta(ce: ComputeEngine, s: BigNum): BigNum {
+  if (!s.isFinite()) return ce._BIGNUM_NAN;
+  if (s.eq(1)) return ce.bignum(Infinity); // pole
+
+  const pi = ce._BIGNUM_NEGATIVE_ONE.acos();
+
+  // Special value: ζ(0) = -1/2
+  if (s.isZero()) return ce._BIGNUM_HALF.neg();
+
+  // Special values for positive even integers: ζ(2k) = (-1)^{k+1} B_{2k} (2π)^{2k} / (2(2k)!)
+  if (s.isInteger() && s.isPositive()) {
+    const sn = s.toNumber();
+    if (sn % 2 === 0 && sn >= 2 && sn <= 20) {
+      const k = sn / 2;
+      const BERNOULLI = ce._cache<BigNum[]>('digamma-bernoulli', () =>
+        BERNOULLI_2K_STRINGS.map((x) => ce.bignum(x))
+      );
+      const bern = BERNOULLI[k - 1].abs();
+      const twoPi = pi.mul(2);
+      let factVal = ce._BIGNUM_ONE;
+      for (let i = 2; i <= sn; i++) factVal = factVal.mul(i);
+      return bern.mul(twoPi.pow(sn)).div(factVal.mul(2));
+    }
+  }
+
+  // Functional equation for s < 0:
+  // ζ(s) = 2^s π^{s-1} sin(πs/2) Γ(1-s) ζ(1-s)
+  if (s.isNegative()) {
+    return ce
+      .bignum(2)
+      .pow(s)
+      .mul(pi.pow(s.sub(1)))
+      .mul(pi.mul(s).div(2).sin())
+      .mul(bigGamma(ce, ce._BIGNUM_ONE.sub(s)))
+      .mul(bigZeta(ce, ce._BIGNUM_ONE.sub(s)));
+  }
+
+  // Cohen-Villegas-Zagier acceleration for the Dirichlet eta function
+  // Use more terms for higher precision
+  const n = Math.max(22, Math.ceil(ce.precision * 1.3));
+  const d = bigZetaCoefficients(ce, n);
+  const dn = d[n];
+  let sum = ce.bignum(0);
+  for (let k = 0; k <= n; k++) {
+    const sign = k % 2 === 0 ? 1 : -1;
+    sum = sum.add(
+      ce.bignum(sign).mul(d[k].sub(dn)).div(ce.bignum(k + 1).pow(s))
+    );
+  }
+  const eta = ce._BIGNUM_ONE.sub(ce.bignum(2).pow(ce._BIGNUM_ONE.sub(s)));
+  return sum.div(dn.mul(eta)).neg();
+}
+
+/** Bignum Cohen-Villegas-Zagier coefficients */
+function bigZetaCoefficients(ce: ComputeEngine, n: number): BigNum[] {
+  const d = new Array<BigNum>(n + 1);
+  d[0] = ce._BIGNUM_ONE;
+  // Compute d[k] = d[k-1] + C(n, k) using bignum binomial coefficients
+  let binom = ce._BIGNUM_ONE; // C(n, 0)
+  for (let i = 1; i <= n; i++) {
+    binom = binom.mul(n - i + 1).div(i);
+    d[i] = d[i - 1].add(binom);
+  }
+  return d;
+}
+
+/**
+ * Bignum Lambert W function W₀(x): principal branch satisfying W(x)·e^{W(x)} = x.
+ * Uses Halley's method with adaptive precision tolerance.
+ */
+export function bigLambertW(ce: ComputeEngine, x: BigNum): BigNum {
+  if (!x.isFinite()) return x; // ±Infinity, NaN
+  if (x.isZero()) return ce.bignum(0);
+
+  const invE = ce._BIGNUM_ONE.div(ce._BIGNUM_ONE.exp()); // 1/e
+  const negInvE = invE.neg();
+
+  // Branch point: W(-1/e) = -1
+  // Use a tolerance that accounts for machine-precision inputs
+  const tol = ce.bignum(10).pow(-ce.precision);
+  const branchTol = ce.bignum(10).pow(-15); // machine precision tolerance
+  if (x.sub(negInvE).abs().lessThan(branchTol)) return ce._BIGNUM_NEGATIVE_ONE;
+
+  // W is defined for x >= -1/e
+  if (x.lessThan(negInvE)) return ce._BIGNUM_NAN;
+
+  // Initial guess using machine precision
+  let w: BigNum;
+  const xNum = x.toNumber();
+  if (xNum < 0) {
+    const p = Math.sqrt(2 * (Math.E * xNum + 1));
+    w = ce.bignum(-1 + p - p * p / 3 + (11 / 72) * p * p * p);
+  } else if (xNum <= 1) {
+    w = ce.bignum(xNum * (1 - xNum * (1 - 1.5 * xNum)));
+  } else if (xNum < 100) {
+    const lnx = Math.log(xNum);
+    w = ce.bignum(lnx - Math.log(lnx));
+  } else {
+    const l1 = x.ln();
+    const l2 = l1.ln();
+    w = l1.sub(l2).add(l2.div(l1));
+  }
+
+  // Halley's method: converges cubically
+  for (let i = 0; i < 100; i++) {
+    const ew = w.exp();
+    const wew = w.mul(ew);
+    const f = wew.sub(x);
+    const fp = ew.mul(w.add(1));
+    const fpp = ew.mul(w.add(2));
+    const delta = f.div(fp.sub(f.mul(fpp).div(fp.mul(2))));
+    w = w.sub(delta);
+    if (delta.abs().lessThan(tol.mul(w.abs().add(1)))) break;
+  }
+
+  return w;
+}
+
 // Euler-Mascheroni constant
 const EULER_MASCHERONI = 0.5772156649015329;
 

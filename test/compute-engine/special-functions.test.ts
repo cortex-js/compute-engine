@@ -1,3 +1,4 @@
+import { ComputeEngine } from '../../src/compute-engine';
 import { engine } from '../utils';
 
 const ce = engine;
@@ -315,5 +316,107 @@ describe('AIRY Bi FUNCTION', () => {
 
   test('Bi(3) ≈ 14.037328963083232', () => {
     expectApprox(ce.box(['AiryBi', 3]), 14.037328963083232, 1e-5);
+  });
+});
+
+describe('BIGNUM SPECIAL FUNCTIONS', () => {
+  let bigCe: InstanceType<typeof ComputeEngine>;
+  beforeAll(() => {
+    bigCe = new ComputeEngine();
+    bigCe.precision = 50;
+  });
+
+  // Helper to check that a bignum result starts with expected digits
+  function expectBignum(expr: any, expectedPrefix: string) {
+    const result = expr.N();
+    // Use toString() which preserves full bignum precision
+    const str = result.toString();
+    // Remove leading minus if present and compare digits
+    const expected = expectedPrefix.replace('-', '');
+    const actual = str.replace('-', '');
+    const isNeg = expectedPrefix.startsWith('-');
+    const actualNeg = str.startsWith('-');
+    expect(actualNeg).toBe(isNeg);
+    // Check at least 20 matching digits (ignoring leading zeros and decimal points)
+    const expectedDigits = expected.replace('.', '').replace(/^0+/, '');
+    const actualDigits = actual.replace('.', '').replace(/^0+/, '');
+    expect(actualDigits.substring(0, 20)).toBe(expectedDigits.substring(0, 20));
+  }
+
+  test('high-precision ψ(1) = -γ', () => {
+    // Euler-Mascheroni constant to 50+ digits
+    expectBignum(
+      bigCe.box(['Digamma', 1]),
+      '-0.57721566490153286060651209008240243104215933594'
+    );
+  });
+
+  test('high-precision ψ(0.5) = -γ - 2ln(2)', () => {
+    // ψ(0.5) = -γ - 2ln(2) ≈ -1.96351002602142347...
+    expectBignum(
+      bigCe.box(['Digamma', 0.5]),
+      '-1.9635100260214234794187796391751542578575793939'
+    );
+  });
+
+  test('high-precision ψ₁(1) = π²/6', () => {
+    // π²/6 to 50+ digits
+    expectBignum(
+      bigCe.box(['Trigamma', 1]),
+      '1.6449340668482264364724151666460251892189499012'
+    );
+  });
+
+  test('high-precision ζ(3) (Apéry constant)', () => {
+    // Apéry's constant to 50+ digits
+    expectBignum(
+      bigCe.box(['Zeta', 3]),
+      '1.2020569031595942853997381615114499907649862923'
+    );
+  });
+
+  test('high-precision ζ(2) = π²/6', () => {
+    expectBignum(
+      bigCe.box(['Zeta', 2]),
+      '1.6449340668482264364724151666460251892189499012'
+    );
+  });
+
+  test('high-precision B(0.5, 0.5) = π', () => {
+    // bigGamma uses Lanczos-7 which limits precision to ~15 digits
+    // so just check that result is close to π
+    const result = bigCe.box(['Beta', 0.5, 0.5]).N();
+    const val = result.toString();
+    expect(val.startsWith('3.14159265358979')).toBe(true);
+  });
+
+  test('high-precision B(2, 3) = 1/12', () => {
+    const result = bigCe.box(['Beta', 2, 3]).N();
+    const val = result.toString();
+    // For integer args, bigGamma is more accurate
+    expect(val.startsWith('0.0833333333333333')).toBe(true);
+  });
+
+  test('high-precision W(1) (Omega constant)', () => {
+    // Omega constant to 50+ digits
+    expectBignum(
+      bigCe.box(['LambertW', 1]),
+      '0.56714329040978387299996866221035554975381578718'
+    );
+  });
+
+  test('high-precision W(e) = 1', () => {
+    const result = bigCe.box(['LambertW', { num: '2.71828182845904523536028747135266249775724709370' }]).N();
+    const val = result.toString();
+    // Should be 1 or very close to 1
+    expect(val === '1' || val.startsWith('1.0000000000000000000') || val.startsWith('0.9999999999999999999')).toBe(true);
+  });
+
+  test('high-precision PolyGamma(2, 1) = -2ζ(3)', () => {
+    // ψ₂(1) = -2 * ζ(3)
+    expectBignum(
+      bigCe.box(['PolyGamma', 2, 1]),
+      '-2.4041138063191885707994763230228999815299725846'
+    );
   });
 });

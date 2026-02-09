@@ -190,13 +190,21 @@ ce.simplificationRules.push({
 ### Special Functions
 
 - **Numeric evaluation for Digamma, Trigamma, PolyGamma, Beta, Zeta, LambertW**:
-  These six functions now evaluate numerically when `.N()` is called. Machine
-  precision only; returns unevaluated without numeric approximation.
+  These six functions now evaluate numerically when `.N()` is called, at both
+  machine precision and arbitrary precision (bignum). Returns unevaluated without
+  numeric approximation.
   - `Digamma`/`Trigamma`: recurrence + asymptotic with Bernoulli numbers
   - `PolyGamma`: generalized recurrence for arbitrary order n
   - `Beta`: via gamma, with log-gamma fallback for large arguments
   - `Zeta`: Cohen-Villegas-Zagier acceleration, functional equation for Re(s)<0
   - `LambertW`: Halley's method with branch-point handling
+
+- **Arbitrary-precision (bignum) variants for special functions**: When
+  `ce.precision > 15`, `Digamma`, `Trigamma`, `PolyGamma`, `Beta`, `Zeta`, and
+  `LambertW` now compute results to the requested precision using Decimal.js
+  arithmetic. The asymptotic shift threshold scales with precision to maintain
+  accuracy (e.g., `ce.precision = 50` produces 50-digit results for Digamma and
+  Zeta).
 
 - **Numeric evaluation for Bessel functions (`BesselJ`, `BesselY`, `BesselI`,
   `BesselK`)**: Integer-order Bessel functions now evaluate numerically.

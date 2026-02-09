@@ -39,6 +39,12 @@ import {
   beta,
   zeta,
   lambertW,
+  bigDigamma,
+  bigTrigamma,
+  bigPolygamma,
+  bigBeta,
+  bigZeta,
+  bigLambertW,
   besselJ,
   besselY,
   besselI,
@@ -568,8 +574,10 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       broadcastable: true,
       signature: '(number) -> number',
       type: (ops) => numericTypeHandler(ops),
-      evaluate: ([x], { numericApproximation }) =>
-        numericApproximation ? apply(x, digamma) : undefined,
+      evaluate: ([x], { numericApproximation, engine }) =>
+        numericApproximation
+          ? apply(x, digamma, (x) => bigDigamma(engine, x))
+          : undefined,
     },
 
     // Trigamma function ψ₁(x) = d/dx ψ(x) = d²/dx² ln(Γ(x))
@@ -581,8 +589,10 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       broadcastable: true,
       signature: '(number) -> number',
       type: (ops) => numericTypeHandler(ops),
-      evaluate: ([x], { numericApproximation }) =>
-        numericApproximation ? apply(x, trigamma) : undefined,
+      evaluate: ([x], { numericApproximation, engine }) =>
+        numericApproximation
+          ? apply(x, trigamma, (x) => bigTrigamma(engine, x))
+          : undefined,
     },
 
     // PolyGamma function ψₙ(x) = dⁿ/dxⁿ ψ(x)
@@ -596,9 +606,14 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       broadcastable: true,
       signature: '(order: integer, number) -> number',
       type: (ops) => numericTypeHandler(ops),
-      evaluate: ([n, x], { numericApproximation }) =>
+      evaluate: ([n, x], { numericApproximation, engine }) =>
         numericApproximation
-          ? apply2(n, x, (n, x) => polygamma(n, x))
+          ? apply2(
+              n,
+              x,
+              (n, x) => polygamma(n, x),
+              (n, x) => bigPolygamma(engine, n, x)
+            )
           : undefined,
     },
 
@@ -611,8 +626,10 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       broadcastable: true,
       signature: '(number) -> number',
       type: (ops) => numericTypeHandler(ops),
-      evaluate: ([x], { numericApproximation }) =>
-        numericApproximation ? apply(x, zeta) : undefined,
+      evaluate: ([x], { numericApproximation, engine }) =>
+        numericApproximation
+          ? apply(x, zeta, (x) => bigZeta(engine, x))
+          : undefined,
     },
 
     // Beta function B(a,b) = Γ(a)Γ(b)/Γ(a+b) = ∫₀¹ t^(a-1)(1-t)^(b-1) dt
@@ -623,8 +640,10 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       broadcastable: true,
       signature: '(number, number) -> number',
       type: (ops) => numericTypeHandler(ops),
-      evaluate: ([a, b], { numericApproximation }) =>
-        numericApproximation ? apply2(a, b, beta) : undefined,
+      evaluate: ([a, b], { numericApproximation, engine }) =>
+        numericApproximation
+          ? apply2(a, b, beta, (a, b) => bigBeta(engine, a, b))
+          : undefined,
     },
 
     // Lambert W function: W(x)·e^(W(x)) = x
@@ -636,8 +655,10 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       broadcastable: true,
       signature: '(number) -> number',
       type: (ops) => numericTypeHandler(ops),
-      evaluate: ([x], { numericApproximation }) =>
-        numericApproximation ? apply(x, lambertW) : undefined,
+      evaluate: ([x], { numericApproximation, engine }) =>
+        numericApproximation
+          ? apply(x, lambertW, (x) => bigLambertW(engine, x))
+          : undefined,
     },
 
     // Bessel function of the first kind J_n(x)
