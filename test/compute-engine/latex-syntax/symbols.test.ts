@@ -599,15 +599,15 @@ describe('SYMBOLS', () => {
       ).toMatchInlineSnapshot(`____002012abc`);
     });
 
-    test('Serializing ____XXXXXX symbols produces \\unicode', () => {
+    test('Serializing ____XXXXXX symbols produces \\unicode with \\operatorname', () => {
       expect(latex('x____002012y')).toEqual(
-        `\\mathrm{x\\unicode{"2012}y}`
+        `\\operatorname{x\\unicode{"2012}y}`
       );
       expect(latex('speed____002012of____002012sound')).toEqual(
-        `\\mathrm{speed\\unicode{"2012}of\\unicode{"2012}sound}`
+        `\\operatorname{speed\\unicode{"2012}of\\unicode{"2012}sound}`
       );
       expect(latex('____002012abc')).toEqual(
-        `\\mathrm{\\unicode{"2012}abc}`
+        `\\operatorname{\\unicode{"2012}abc}`
       );
     });
 

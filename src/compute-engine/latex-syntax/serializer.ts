@@ -521,7 +521,13 @@ function parseSymbolBody(
   if (styles.length === 0 && style !== 'none') {
     switch (style) {
       case 'auto':
-        if (countTokens(body) > 1) body = `\\mathrm{${body}}`;
+        if (countTokens(body) > 1) {
+          // Use \operatorname for symbols containing \unicode escapes
+          // (these are named symbols, not styled text)
+          if (body.includes('\\unicode'))
+            body = `\\operatorname{${body}}`;
+          else body = `\\mathrm{${body}}`;
+        }
         break;
       case 'operator':
         body = `\\operatorname{${body}}`;
