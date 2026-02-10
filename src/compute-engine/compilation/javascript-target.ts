@@ -1,8 +1,8 @@
 import type { BoxedExpression } from '../global-types';
 import type { MathJsonSymbol } from '../../math-json/types';
 import {
-  isBoxedSymbol,
-  isBoxedFunction,
+  isSymbol,
+  isFunction,
 } from '../boxed-expression/type-guards';
 
 import { chop, factorial, gcd, lcm, limit } from '../numerics/numeric';
@@ -499,11 +499,11 @@ function compileToTarget(
   expr: BoxedExpression,
   target: CompileTarget<BoxedExpression>
 ): CompilationResult {
-  if (expr.operator === 'Function' && isBoxedFunction(expr)) {
+  if (expr.operator === 'Function' && isFunction(expr)) {
     const args = expr.ops;
     const params = args
       .slice(1)
-      .map((x) => (isBoxedSymbol(x) ? x.symbol : '_'));
+      .map((x) => (isSymbol(x) ? x.symbol : '_'));
     const body = BaseCompiler.compile(args[0].canonical, {
       ...target,
       var: (id) => (params.includes(id) ? id : target.var(id)),
@@ -517,7 +517,7 @@ function compileToTarget(
     };
   }
 
-  if (isBoxedSymbol(expr)) {
+  if (isSymbol(expr)) {
     const op = target.operators?.(expr.symbol);
     if (op) {
       const fn = new ComputeEngineFunctionLiteral(`a ${op[0]} b`, ['a', 'b']);

@@ -10,7 +10,7 @@ import {
   isEmptySequence,
   symbol,
 } from '../../../math-json/utils';
-import { Expression, MathJsonSymbol } from '../../../math-json/types';
+import { MathJsonExpression as Expression, MathJsonSymbol } from '../../../math-json/types';
 import { joinLatex } from '../tokenizer';
 
 function parseSingleArg(cmd: string): (parser: Parser) => Expression {

@@ -16,7 +16,7 @@ import type {
 import { applicable } from '../function-utils';
 
 import { DEFAULT_COMPLEXITY } from './constants';
-import { isBoxedFunction } from './type-guards';
+import { isFunction } from './type-guards';
 import { functionResult } from '../../common/type/utils';
 import { isSubtype } from '../../common/type/subtype';
 import { defaultCollectionHandlers } from '../collection-utils';
@@ -326,7 +326,7 @@ export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
       // and body type.
       if (
         this.inferredSignature &&
-        isBoxedFunction(boxedFn) &&
+        isFunction(boxedFn) &&
         boxedFn.operator === 'Function'
       ) {
         const body = boxedFn.ops[0];

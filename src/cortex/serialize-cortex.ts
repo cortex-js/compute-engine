@@ -16,7 +16,7 @@ import {
   COMPARISON_PRECEDENCE,
   NumberSerializationFormat,
 } from '../compute-engine/latex-syntax/types';
-import { Expression } from '../math-json/types';
+import { MathJsonExpression as Expression } from '../math-json/types';
 import {
   serializeHexFloat,
   serializeNumber,

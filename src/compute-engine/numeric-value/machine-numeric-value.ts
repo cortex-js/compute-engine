@@ -1,7 +1,7 @@
 import { Decimal } from 'decimal.js';
 import type { BigNumFactory, SmallInteger } from '../numerics/types';
 import { NumericValue, NumericValueData } from './types';
-import type { Expression } from '../../math-json/types';
+import type { MathJsonExpression as Expression } from '../../math-json/types';
 import { numberToString } from '../numerics/strings';
 import { numberToExpression } from '../numerics/expression';
 import { NumericPrimitiveType } from '../../common/type/types';

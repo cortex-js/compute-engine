@@ -1,5 +1,5 @@
 import type { BoxedExpression, RuleStep } from '../global-types';
-import { isBoxedFunction } from '../boxed-expression/type-guards';
+import { isFunction } from '../boxed-expression/type-guards';
 
 /**
  * Hyperbolic trig simplification rules consolidated from simplify-rules.ts.
@@ -46,7 +46,7 @@ export function simplifyHyperbolic(x: BoxedExpression): RuleStep | undefined {
   const ce = x.engine;
 
   // Handle basic hyperbolic functions
-  if (HYPERBOLIC_FUNCS.has(op) && isBoxedFunction(x)) {
+  if (HYPERBOLIC_FUNCS.has(op) && isFunction(x)) {
     const arg = x.op1;
     if (!arg) return undefined;
 
@@ -86,7 +86,7 @@ export function simplifyHyperbolic(x: BoxedExpression): RuleStep | undefined {
     }
 
     // Odd/even function properties with negation
-    if (arg.operator === 'Negate' && isBoxedFunction(arg)) {
+    if (arg.operator === 'Negate' && isFunction(arg)) {
       const innerArg = arg.op1;
       if (innerArg) {
         // Odd functions: f(-x) = -f(x)
@@ -113,7 +113,7 @@ export function simplifyHyperbolic(x: BoxedExpression): RuleStep | undefined {
   }
 
   // Handle inverse hyperbolic functions
-  if (INVERSE_HYPERBOLIC.has(op) && isBoxedFunction(x)) {
+  if (INVERSE_HYPERBOLIC.has(op) && isFunction(x)) {
     const arg = x.op1;
     if (!arg) return undefined;
 

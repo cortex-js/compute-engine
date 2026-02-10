@@ -1,5 +1,5 @@
 import type { BoxedExpression, RuleStep } from '../global-types';
-import { isBoxedFunction } from '../boxed-expression/type-guards';
+import { isFunction } from '../boxed-expression/type-guards';
 
 /**
  * Abs simplification rules consolidated from simplify-rules.ts.
@@ -41,7 +41,7 @@ const ODD_HYPER = new Set([
 const EVEN_FUNCS = new Set(['Cos', 'Sec', 'Cosh', 'Sech']);
 
 export function simplifyAbs(x: BoxedExpression): RuleStep | undefined {
-  if (x.operator !== 'Abs' || !isBoxedFunction(x)) return undefined;
+  if (x.operator !== 'Abs' || !isFunction(x)) return undefined;
 
   const op = x.op1;
   if (!op) return undefined;
@@ -59,12 +59,12 @@ export function simplifyAbs(x: BoxedExpression): RuleStep | undefined {
   const opOperator = op.operator;
 
   // |-x| -> |x|
-  if (opOperator === 'Negate' && isBoxedFunction(op)) {
+  if (opOperator === 'Negate' && isFunction(op)) {
     return { value: ce._fn('Abs', [op.op1]), because: '|-x| -> |x|' };
   }
 
   // |x * y| patterns
-  if (opOperator === 'Multiply' && isBoxedFunction(op)) {
+  if (opOperator === 'Multiply' && isFunction(op)) {
     const ops = op.ops;
 
     // Find if any factor has known sign
@@ -108,7 +108,7 @@ export function simplifyAbs(x: BoxedExpression): RuleStep | undefined {
   }
 
   // |x / y| patterns
-  if (opOperator === 'Divide' && isBoxedFunction(op)) {
+  if (opOperator === 'Divide' && isFunction(op)) {
     const num = op.op1;
     const denom = op.op2;
 
@@ -154,7 +154,7 @@ export function simplifyAbs(x: BoxedExpression): RuleStep | undefined {
   }
 
   // |x^n| patterns
-  if (opOperator === 'Power' && isBoxedFunction(op)) {
+  if (opOperator === 'Power' && isFunction(op)) {
     const base = op.op1;
     const exp = op.op2;
 
@@ -213,7 +213,7 @@ export function simplifyAbs(x: BoxedExpression): RuleStep | undefined {
   // Odd trig/hyperbolic functions: |f(x)| -> f(|x|)
   if (
     (ODD_TRIG.has(opOperator) || ODD_HYPER.has(opOperator)) &&
-    isBoxedFunction(op)
+    isFunction(op)
   ) {
     const innerArg = op.op1;
     if (innerArg) {
@@ -232,12 +232,12 @@ export function simplifyAbs(x: BoxedExpression): RuleStep | undefined {
  * |x|^n -> x^n when n is even
  */
 export function simplifyAbsPower(x: BoxedExpression): RuleStep | undefined {
-  if (x.operator !== 'Power' || !isBoxedFunction(x)) return undefined;
+  if (x.operator !== 'Power' || !isFunction(x)) return undefined;
 
   const base = x.op1;
   const exp = x.op2;
 
-  if (!base || !exp || base.operator !== 'Abs' || !isBoxedFunction(base))
+  if (!base || !exp || base.operator !== 'Abs' || !isFunction(base))
     return undefined;
 
   const innerBase = base.op1;
@@ -252,7 +252,7 @@ export function simplifyAbsPower(x: BoxedExpression): RuleStep | undefined {
   }
 
   // |x|^(n/m) -> x^(n/m) when n is even and m is odd
-  if (exp.operator === 'Divide' && isBoxedFunction(exp)) {
+  if (exp.operator === 'Divide' && isFunction(exp)) {
     const n = exp.op1;
     const m = exp.op2;
     if (n && m && n.isEven === true && m.isOdd === true) {
@@ -285,10 +285,10 @@ export function simplifyEvenFunctionAbs(
   x: BoxedExpression
 ): RuleStep | undefined {
   const op = x.operator;
-  if (!EVEN_FUNCS.has(op) || !isBoxedFunction(x)) return undefined;
+  if (!EVEN_FUNCS.has(op) || !isFunction(x)) return undefined;
 
   const arg = x.op1;
-  if (!arg || arg.operator !== 'Abs' || !isBoxedFunction(arg)) return undefined;
+  if (!arg || arg.operator !== 'Abs' || !isFunction(arg)) return undefined;
 
   const innerArg = arg.op1;
   if (!innerArg) return undefined;

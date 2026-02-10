@@ -1,5 +1,5 @@
 import type { OneOf } from '../../common/one-of';
-import type { Expression, MathJsonSymbol } from '../../math-json/types';
+import type { MathJsonExpression as Expression, MathJsonSymbol } from '../../math-json/types';
 import type { TypeString } from '../../common/type/types';
 import { BoxedType } from '../../common/type/boxed-type';
 

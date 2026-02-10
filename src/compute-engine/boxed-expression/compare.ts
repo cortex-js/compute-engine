@@ -2,11 +2,11 @@ import { NumericValue } from '../numeric-value/types';
 import type { BoxedExpression } from '../global-types';
 import { getInequalityBoundsFromAssumptions } from './inequality-bounds';
 import {
-  isBoxedNumber,
-  isBoxedFunction,
-  isBoxedSymbol,
-  isBoxedString,
-  isBoxedTensor,
+  isNumber,
+  isFunction,
+  isSymbol,
+  isString,
+  isTensor,
 } from './type-guards';
 // Dynamic import for expand to avoid circular dependency
 // (expand → arithmetic-add → boxed-tensor → abstract-boxed-expression → compare)
@@ -21,9 +21,9 @@ export function same(a: BoxedExpression, b: BoxedExpression): boolean {
   // BoxedFunction
   // Operator and operands must match
   //
-  if (isBoxedFunction(a)) {
+  if (isFunction(a)) {
     if (a.operator !== b.operator) return false;
-    if (!isBoxedFunction(b)) return false;
+    if (!isFunction(b)) return false;
     if (a.nops !== b.nops) return false;
     return a.ops.every((op, i) => same(op, b.ops[i]));
   }
@@ -31,8 +31,8 @@ export function same(a: BoxedExpression, b: BoxedExpression): boolean {
   //
   // BoxedNumber
   //
-  if (isBoxedNumber(a)) {
-    if (!isBoxedNumber(b)) return false;
+  if (isNumber(a)) {
+    if (!isNumber(b)) return false;
     const av = a.numericValue;
     const bv = b.numericValue;
     if (av === bv) return true;
@@ -46,25 +46,25 @@ export function same(a: BoxedExpression, b: BoxedExpression): boolean {
   //
   // BoxedString
   //
-  if (isBoxedString(a) || isBoxedString(b)) {
-    if (!isBoxedString(a) || !isBoxedString(b)) return false;
+  if (isString(a) || isString(b)) {
+    if (!isString(a) || !isString(b)) return false;
     return a.string === b.string;
   }
 
   //
   // BoxedSymbol
   //
-  if (isBoxedSymbol(a) || isBoxedSymbol(b)) {
-    if (!isBoxedSymbol(a) || !isBoxedSymbol(b)) return false;
+  if (isSymbol(a) || isSymbol(b)) {
+    if (!isSymbol(a) || !isSymbol(b)) return false;
     return a.symbol === b.symbol;
   }
 
   //
   // BoxedTensor
   //
-  if (isBoxedTensor(a)) {
+  if (isTensor(a)) {
     if (a.rank !== 0) {
-      if (!isBoxedTensor(b)) return false;
+      if (!isTensor(b)) return false;
       if (a.rank !== b.rank) return false;
       for (let i = 0; i < a.rank; i++)
         if (a.shape[i] !== b.shape[i]) return false;
@@ -107,7 +107,7 @@ export function eq(
   // Note: we could have `1-x` and `x` (a symbol), so they don't have
   // to both be function expressions.
   //
-  if (isBoxedFunction(a) || isBoxedFunction(b)) {
+  if (isFunction(a) || isFunction(b)) {
     // If the function has a special handler for equality, use it
     let cmp = a.operatorDefinition?.eq?.(a, b);
     if (cmp !== undefined) return cmp;
@@ -139,15 +139,15 @@ export function eq(
   //
   // A symbol may have special comparison handlers
   //
-  if (isBoxedSymbol(a)) {
+  if (isSymbol(a)) {
     const cmp = a.valueDefinition?.eq?.(b);
     if (cmp !== undefined) return cmp;
   }
-  if (isBoxedSymbol(b)) {
+  if (isSymbol(b)) {
     const cmp = b.valueDefinition?.eq?.(a);
     if (cmp !== undefined) return cmp;
   }
-  if (isBoxedSymbol(a) && isBoxedSymbol(b)) return a.symbol === b.symbol;
+  if (isSymbol(a) && isSymbol(b)) return a.symbol === b.symbol;
 
   const ce = a.engine;
 
@@ -155,7 +155,7 @@ export function eq(
   // For number literals, we compare the approximate values, that is
   // we want 0.9 and 9/10 to be considered equal
   //
-  if (isBoxedNumber(a) && isBoxedNumber(b)) {
+  if (isNumber(a) && isNumber(b)) {
     if (a.isFinite && b.isFinite) return isZeroWithTolerance(a.sub(b));
     if (a.isNaN || b.isNaN) return false;
     if (a.isInfinity && b.isInfinity && a.sgn === b.sgn) return true;
@@ -182,13 +182,13 @@ export function cmp(
   a: BoxedExpression,
   b: number | BoxedExpression
 ): '<' | '=' | '>' | '>=' | '<=' | undefined {
-  if (isBoxedNumber(a)) {
+  if (isNumber(a)) {
     //
     // Special case when b is a plain machine number
     //
     if (
       typeof b !== 'number' &&
-      isBoxedNumber(b) &&
+      isNumber(b) &&
       typeof b.numericValue === 'number'
     )
       b = b.numericValue;
@@ -215,9 +215,9 @@ export function cmp(
       return av.lt(b) ? '<' : '>';
     }
 
-    if (!isBoxedNumber(b)) {
+    if (!isNumber(b)) {
       // Check if b is a symbol with inequality assumptions
-      if (isBoxedSymbol(b)) {
+      if (isSymbol(b)) {
         const bounds = getInequalityBoundsFromAssumptions(a.engine, b.symbol);
         const aNum =
           typeof a.numericValue === 'number'
@@ -229,7 +229,7 @@ export function cmp(
           // If b has a lower bound > a, then a < b
           if (bounds.lowerBound !== undefined) {
             const lb = bounds.lowerBound;
-            const lowerNum = isBoxedNumber(lb)
+            const lowerNum = isNumber(lb)
               ? typeof lb.numericValue === 'number'
                 ? lb.numericValue
                 : lb.numericValue.re
@@ -249,7 +249,7 @@ export function cmp(
           // If b has an upper bound < a, then a > b
           if (bounds.upperBound !== undefined) {
             const ub = bounds.upperBound;
-            const upperNum = isBoxedNumber(ub)
+            const upperNum = isNumber(ub)
               ? typeof ub.numericValue === 'number'
                 ? ub.numericValue
                 : ub.numericValue.re
@@ -290,14 +290,14 @@ export function cmp(
 
   if (typeof b === 'number') {
     // Check if a is a symbol with inequality assumptions
-    if (isBoxedSymbol(a)) {
+    if (isSymbol(a)) {
       const bounds = getInequalityBoundsFromAssumptions(a.engine, a.symbol);
 
       // We're comparing a (symbol) to b (number)
       // If a has a lower bound >= b, then a > b (or a >= b)
       if (bounds.lowerBound !== undefined) {
         const lb = bounds.lowerBound;
-        const lowerNum = isBoxedNumber(lb)
+        const lowerNum = isNumber(lb)
           ? typeof lb.numericValue === 'number'
             ? lb.numericValue
             : lb.numericValue.re
@@ -317,7 +317,7 @@ export function cmp(
       // If a has an upper bound <= b, then a < b (or a <= b)
       if (bounds.upperBound !== undefined) {
         const ub = bounds.upperBound;
-        const upperNum = isBoxedNumber(ub)
+        const upperNum = isNumber(ub)
           ? typeof ub.numericValue === 'number'
             ? ub.numericValue
             : ub.numericValue.re
@@ -344,7 +344,7 @@ export function cmp(
     }
 
     // Handle function expressions (e.g., Negate(Pi)) compared to a number
-    if (isBoxedFunction(a)) {
+    if (isFunction(a)) {
       if (b === 0) {
         const s = a.sgn;
         if (s === 'zero') return '=';
@@ -369,7 +369,7 @@ export function cmp(
   // Note: we could have `1-x` and `x` (a symbol), so they don't have
   // to both be function expressions.
   //
-  if (isBoxedFunction(a) || isBoxedFunction(b)) {
+  if (isFunction(a) || isFunction(b)) {
     // If the function has a special handler for equality, use it
     const cmp = a.operatorDefinition?.eq?.(a, b);
     if (cmp !== undefined) return '=';
@@ -379,7 +379,7 @@ export function cmp(
 
     // If the difference is not a number, we can't compare
     // For example, '1 + y' and 'x - 1' can't be compared
-    if (!isBoxedNumber(diff)) return undefined;
+    if (!isNumber(diff)) return undefined;
 
     if (typeof diff.numericValue === 'number') {
       if (diff.numericValue === 0) return '=';
@@ -395,9 +395,9 @@ export function cmp(
   //
   // A symbol
   //
-  if (isBoxedSymbol(a)) {
+  if (isSymbol(a)) {
     // A symbol without a value is equal to itself
-    if (isBoxedSymbol(b) && a.symbol === b.symbol) return '=';
+    if (isSymbol(b) && a.symbol === b.symbol) return '=';
 
     // Symbols may have special comparision handlers
     const cmpResult = a.valueDefinition?.cmp?.(b);
@@ -406,7 +406,7 @@ export function cmp(
     if (eqResult === true) return '=';
 
     // Check inequality assumptions for the symbol
-    if (isBoxedNumber(b)) {
+    if (isNumber(b)) {
       const bounds = getInequalityBoundsFromAssumptions(a.engine, a.symbol);
       const bNum =
         typeof b.numericValue === 'number' ? b.numericValue : b.numericValue.re;
@@ -415,7 +415,7 @@ export function cmp(
         // If symbol has a lower bound >= b, then symbol > b (or symbol >= b)
         if (bounds.lowerBound !== undefined) {
           const lb = bounds.lowerBound;
-          const lowerNum = isBoxedNumber(lb)
+          const lowerNum = isNumber(lb)
             ? typeof lb.numericValue === 'number'
               ? lb.numericValue
               : lb.numericValue.re
@@ -435,7 +435,7 @@ export function cmp(
         // If symbol has an upper bound <= b, then symbol < b (or symbol <= b)
         if (bounds.upperBound !== undefined) {
           const ub = bounds.upperBound;
-          const upperNum = isBoxedNumber(ub)
+          const upperNum = isNumber(ub)
             ? typeof ub.numericValue === 'number'
               ? ub.numericValue
               : ub.numericValue.re
@@ -471,8 +471,8 @@ export function cmp(
   //
   // A string
   //
-  if (isBoxedString(a)) {
-    if (!isBoxedString(b)) return undefined;
+  if (isString(a)) {
+    if (!isString(b)) return undefined;
     if (a.string === b.string) return '=';
     return a.string < b.string ? '<' : '>';
   }
@@ -480,8 +480,8 @@ export function cmp(
   //
   // For tensors, only equality applies
   //
-  if (isBoxedTensor(a)) {
-    if (!isBoxedTensor(b)) return undefined;
+  if (isTensor(a)) {
+    if (!isTensor(b)) return undefined;
     if (a.tensor.equals(b.tensor)) return '=';
     return undefined;
   }
@@ -490,7 +490,7 @@ export function cmp(
 }
 
 function isZeroWithTolerance(expr: BoxedExpression): boolean {
-  if (!isBoxedNumber(expr)) return false;
+  if (!isNumber(expr)) return false;
   const n = expr.numericValue;
   const ce = expr.engine;
   if (typeof n === 'number') return ce.chop(n) === 0;

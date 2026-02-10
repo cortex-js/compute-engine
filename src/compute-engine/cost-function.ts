@@ -1,9 +1,9 @@
 import type { BoxedExpression } from './global-types';
 import type { NumericValue } from './numeric-value/types.js';
 import {
-  isBoxedSymbol,
-  isBoxedNumber,
-  isBoxedFunction,
+  isSymbol,
+  isNumber,
+  isFunction,
 } from './boxed-expression/type-guards';
 
 /**
@@ -85,7 +85,7 @@ export function costFunction(expr: BoxedExpression): number {
   const expLogSepCost = (() => {
     if (
       expr.operator !== 'Multiply' ||
-      !isBoxedFunction(expr) ||
+      !isFunction(expr) ||
       expr.ops.length !== 2
     )
       return null;
@@ -94,20 +94,20 @@ export function costFunction(expr: BoxedExpression): number {
       xPow: BoxedExpression,
       ePow: BoxedExpression
     ): { xBase: BoxedExpression; eExp: BoxedExpression } | null => {
-      if (!isBoxedFunction(ePow) || ePow.operator !== 'Power') return null;
-      if (!isBoxedSymbol(ePow.op1) || ePow.op1.symbol !== 'ExponentialE')
+      if (!isFunction(ePow) || ePow.operator !== 'Power') return null;
+      if (!isSymbol(ePow.op1) || ePow.op1.symbol !== 'ExponentialE')
         return null;
 
-      if (!isBoxedFunction(xPow) || xPow.operator !== 'Power') return null;
+      if (!isFunction(xPow) || xPow.operator !== 'Power') return null;
 
       // Match exponent: 1/ln(10)
       const exponent = xPow.op2;
-      if (!isBoxedFunction(exponent) || exponent.operator !== 'Divide')
+      if (!isFunction(exponent) || exponent.operator !== 'Divide')
         return null;
       if (exponent.op1?.is(1) !== true) return null;
 
       const denom = exponent.op2;
-      if (!isBoxedFunction(denom) || denom.operator !== 'Ln') return null;
+      if (!isFunction(denom) || denom.operator !== 'Ln') return null;
       if (denom.op1?.is(10) !== true) return null;
 
       return { xBase: xPow.op1, eExp: ePow.op2 };
@@ -126,13 +126,13 @@ export function costFunction(expr: BoxedExpression): number {
   // 1/ Symbols
   //
 
-  if (isBoxedSymbol(expr)) return 1;
+  if (isSymbol(expr)) return 1;
 
   //
   // 2/ Literal Numeric Values
   //
 
-  if (isBoxedNumber(expr)) return numericCostFunction(expr.numericValue);
+  if (isNumber(expr)) return numericCostFunction(expr.numericValue);
 
   const name = expr.operator;
   let nameCost = 2;
@@ -141,22 +141,22 @@ export function costFunction(expr: BoxedExpression): number {
   else if (name === 'Negate') {
     // Negate(Power(...)) should cost similar to Multiply(-1, Power(...))
     // so that -2^(x+2) is seen as comparable to Multiply(-1, Power(2, Add(x,2)))
-    const fnNeg = isBoxedFunction(expr) ? expr : undefined;
+    const fnNeg = isFunction(expr) ? expr : undefined;
     if (fnNeg?.op1?.operator === 'Power') {
-      const innerPow = isBoxedFunction(fnNeg.op1) ? fnNeg.op1 : undefined;
+      const innerPow = isFunction(fnNeg.op1) ? fnNeg.op1 : undefined;
       if (innerPow) return 3 + costFunction(innerPow.ops[1]);
     }
     nameCost = 4;
   } else if (name === 'Sqrt') {
     // Sqrt with perfect squares inside should be more expensive
     // because √(x²y) should simplify to |x|√y
-    const fnExpr = isBoxedFunction(expr) ? expr : undefined;
+    const fnExpr = isFunction(expr) ? expr : undefined;
     const arg = fnExpr?.ops[0];
-    if (isBoxedFunction(arg) && arg.operator === 'Multiply') {
+    if (isFunction(arg) && arg.operator === 'Multiply') {
       // Check if any factor is a perfect square (Power with even exponent)
       for (const factor of arg.ops) {
         if (
-          isBoxedFunction(factor) &&
+          isFunction(factor) &&
           factor.operator === 'Power' &&
           factor.op2?.isEven === true
         ) {
@@ -167,7 +167,7 @@ export function costFunction(expr: BoxedExpression): number {
     }
     // Also check if arg is directly a perfect square
     if (
-      isBoxedFunction(arg) &&
+      isFunction(arg) &&
       arg.operator === 'Power' &&
       arg.op2?.isEven === true
     ) {
@@ -175,14 +175,14 @@ export function costFunction(expr: BoxedExpression): number {
     }
     // Sqrt(x^{odd}) where odd > 1 can be factored: sqrt(x^5) -> |x|^2 * sqrt(x)
     if (
-      isBoxedFunction(arg) &&
+      isFunction(arg) &&
       arg.operator === 'Power' &&
       arg.op2?.isOdd === true &&
       arg.op2?.isInteger === true
     ) {
       const exp = arg.op2;
       // exp > 1 means (exp - 1) / 2 > 0, i.e., we can factor out something
-      const n = isBoxedNumber(exp) ? exp.numericValue : undefined;
+      const n = isNumber(exp) ? exp.numericValue : undefined;
       if (typeof n === 'number' && n > 1) {
         // Higher penalty (10) to ensure factored form |x|^n * sqrt(x) is preferred
         return 5 + costFunction(arg) + 10;
@@ -196,7 +196,7 @@ export function costFunction(expr: BoxedExpression): number {
     // - If the base is Negate, account for it since (-x)^n and -x^n have same cost
     // - If the base is Multiply, account for its complexity so (ab)^n isn't
     //   artificially cheaper than the distributed form a^n * b^n
-    const fnExprPow = isBoxedFunction(expr) ? expr : undefined;
+    const fnExprPow = isFunction(expr) ? expr : undefined;
     if (fnExprPow) {
       const base = fnExprPow.ops[0];
       const exp = fnExprPow.ops[1];
@@ -205,11 +205,11 @@ export function costFunction(expr: BoxedExpression): number {
         // Add cost for the negate so (-x)^n isn't artificially cheaper than -x^n
         return expCost + 4; // 4 is the Negate nameCost
       }
-      if (base.operator === 'Multiply' && isBoxedFunction(base)) {
+      if (base.operator === 'Multiply' && isFunction(base)) {
         // Check if there's a negative coefficient and a fractional exponent
         // (negative)^{p/q} where q is odd should factor out the sign for correct real evaluation
         const hasNegativeCoef = base.ops.some(
-          (f) => isBoxedNumber(f) && f.isNegative === true
+          (f) => isNumber(f) && f.isNegative === true
         );
         if (hasNegativeCoef && exp.isRational === true && !exp.isInteger) {
           // Heavy penalty to encourage factoring out the negative sign
@@ -230,9 +230,9 @@ export function costFunction(expr: BoxedExpression): number {
   } else if (['Multiply'].includes(name)) {
     // We want 2x to be less expensive than x + x, so if the first operand
     // is a small number coefficient, treat it as cheaper
-    const fnExprMul = isBoxedFunction(expr) ? expr : undefined;
+    const fnExprMul = isFunction(expr) ? expr : undefined;
     const ops = fnExprMul?.ops ?? [];
-    if (ops.length === 2 && isBoxedNumber(ops[0])) {
+    if (ops.length === 2 && isNumber(ops[0])) {
       const coef = ops[0].numericValue;
       // Check if it's a small integer or rational (handles both number and NumericValue types)
       let isSmallCoef = false;
@@ -264,7 +264,7 @@ export function costFunction(expr: BoxedExpression): number {
   else if (['Cos', 'Sin', 'Tan'].includes(name)) nameCost = 10;
   else nameCost = 11;
 
-  const fnExprFinal = isBoxedFunction(expr) ? expr : undefined;
+  const fnExprFinal = isFunction(expr) ? expr : undefined;
   return (
     nameCost +
     (fnExprFinal?.ops.reduce((acc, x) => acc + costFunction(x), 0) ?? 0)
@@ -272,9 +272,9 @@ export function costFunction(expr: BoxedExpression): number {
 }
 
 export function leafCount(expr: BoxedExpression): number {
-  if (isBoxedSymbol(expr)) return 1;
-  if (isBoxedNumber(expr)) return numericCostFunction(expr.numericValue);
-  const fnExpr = isBoxedFunction(expr) ? expr : undefined;
+  if (isSymbol(expr)) return 1;
+  if (isNumber(expr)) return numericCostFunction(expr.numericValue);
+  const fnExpr = isFunction(expr) ? expr : undefined;
   return 1 + (fnExpr?.ops.reduce((acc, x) => acc + leafCount(x), 0) ?? 0);
 }
 

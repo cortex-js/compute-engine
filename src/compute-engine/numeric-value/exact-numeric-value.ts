@@ -21,7 +21,7 @@ import {
   NumericValue,
   NumericValueFactory,
 } from './types';
-import { Expression } from '../../math-json/types';
+import { MathJsonExpression as Expression } from '../../math-json/types';
 import { numberToExpression } from '../numerics/expression';
 import { numberToString } from '../numerics/strings';
 import { NumericPrimitiveType } from '../../common/type/types';

@@ -1,5 +1,5 @@
 import type { BoxedExpression, RuleStep } from '../global-types';
-import { isBoxedFunction, sym } from '../boxed-expression/type-guards';
+import { isFunction, sym } from '../boxed-expression/type-guards';
 
 /**
  * Logarithm simplification rules consolidated from simplify-rules.ts.
@@ -19,7 +19,7 @@ export function simplifyLog(x: BoxedExpression): RuleStep | undefined {
   const op = x.operator;
   const ce = x.engine;
 
-  if (!isBoxedFunction(x)) return undefined;
+  if (!isFunction(x)) return undefined;
 
   // Handle Ln
   if (op === 'Ln') {
@@ -65,7 +65,7 @@ export function simplifyLog(x: BoxedExpression): RuleStep | undefined {
     }
 
     // ln(x^n) -> n*ln(x) when x >= 0 or n is odd or n is irrational
-    if (arg.operator === 'Power' && isBoxedFunction(arg)) {
+    if (arg.operator === 'Power' && isFunction(arg)) {
       const base = arg.op1;
       const exp = arg.op2;
       if (base && exp) {
@@ -93,19 +93,19 @@ export function simplifyLog(x: BoxedExpression): RuleStep | undefined {
     // ln(e^x) -> x
     if (
       arg.operator === 'Power' &&
-      isBoxedFunction(arg) &&
+      isFunction(arg) &&
       sym(arg.op1) === 'ExponentialE'
     ) {
       return { value: arg.op2, because: 'ln(e^x) -> x' };
     }
 
     // ln(e^x * y) -> x + ln(y)
-    if (arg.operator === 'Multiply' && isBoxedFunction(arg)) {
+    if (arg.operator === 'Multiply' && isFunction(arg)) {
       for (let i = 0; i < arg.ops.length; i++) {
         const factor = arg.ops[i];
         if (
           factor.operator === 'Power' &&
-          isBoxedFunction(factor) &&
+          isFunction(factor) &&
           sym(factor.op1) === 'ExponentialE'
         ) {
           const exp = factor.op2;
@@ -123,10 +123,10 @@ export function simplifyLog(x: BoxedExpression): RuleStep | undefined {
     }
 
     // ln(e^x / y) -> x - ln(y)
-    if (arg.operator === 'Divide' && isBoxedFunction(arg)) {
+    if (arg.operator === 'Divide' && isFunction(arg)) {
       if (
         arg.op1?.operator === 'Power' &&
-        isBoxedFunction(arg.op1) &&
+        isFunction(arg.op1) &&
         sym(arg.op1.op1) === 'ExponentialE'
       ) {
         return {
@@ -138,7 +138,7 @@ export function simplifyLog(x: BoxedExpression): RuleStep | undefined {
 
     // ln(x/y) -> ln(x) - ln(y) (quotient rule expansion)
     // Only apply when both x and y are positive (to avoid branch cut issues)
-    if (arg.operator === 'Divide' && isBoxedFunction(arg)) {
+    if (arg.operator === 'Divide' && isFunction(arg)) {
       const num = arg.op1;
       const denom = arg.op2;
       if (num.isPositive === true && denom.isPositive === true) {
@@ -150,10 +150,10 @@ export function simplifyLog(x: BoxedExpression): RuleStep | undefined {
     }
 
     // ln(y / e^x) -> ln(y) - x
-    if (arg.operator === 'Divide' && isBoxedFunction(arg)) {
+    if (arg.operator === 'Divide' && isFunction(arg)) {
       if (
         arg.op2?.operator === 'Power' &&
-        isBoxedFunction(arg.op2) &&
+        isFunction(arg.op2) &&
         sym(arg.op2.op1) === 'ExponentialE'
       ) {
         return {
@@ -254,7 +254,7 @@ export function simplifyLog(x: BoxedExpression): RuleStep | undefined {
     // log_c(c^x) -> x
     if (
       arg.operator === 'Power' &&
-      isBoxedFunction(arg) &&
+      isFunction(arg) &&
       arg.op1?.isSame(logBase)
     ) {
       return { value: arg.op2, because: 'log_c(c^x) -> x' };
@@ -264,7 +264,7 @@ export function simplifyLog(x: BoxedExpression): RuleStep | undefined {
     // This handles log_10(e^x) -> x/ln(10)
     if (
       arg.operator === 'Power' &&
-      isBoxedFunction(arg) &&
+      isFunction(arg) &&
       sym(arg.op1) === 'ExponentialE' &&
       !sym(logBase)?.match(/ExponentialE/)
     ) {
@@ -277,7 +277,7 @@ export function simplifyLog(x: BoxedExpression): RuleStep | undefined {
     // log_c(Exp(x)) -> x / ln(c) when c ≠ e
     if (
       arg.operator === 'Exp' &&
-      isBoxedFunction(arg) &&
+      isFunction(arg) &&
       arg.op1 &&
       !sym(logBase)?.match(/ExponentialE/)
     ) {
@@ -288,7 +288,7 @@ export function simplifyLog(x: BoxedExpression): RuleStep | undefined {
     }
 
     // log_c(x^n) -> n*log_c(x) when x >= 0 or n is odd or n is irrational
-    if (arg.operator === 'Power' && isBoxedFunction(arg)) {
+    if (arg.operator === 'Power' && isFunction(arg)) {
       const powerBase = arg.op1;
       const exp = arg.op2;
       if (powerBase && exp) {
@@ -338,12 +338,12 @@ export function simplifyLog(x: BoxedExpression): RuleStep | undefined {
     }
 
     // log_c(c^x * y) -> x + log_c(y)
-    if (arg.operator === 'Multiply' && isBoxedFunction(arg)) {
+    if (arg.operator === 'Multiply' && isFunction(arg)) {
       for (let i = 0; i < arg.ops.length; i++) {
         const factor = arg.ops[i];
         if (
           factor.operator === 'Power' &&
-          isBoxedFunction(factor) &&
+          isFunction(factor) &&
           factor.op1?.isSame(logBase)
         ) {
           const exp = factor.op2;
@@ -361,10 +361,10 @@ export function simplifyLog(x: BoxedExpression): RuleStep | undefined {
     }
 
     // log_c(c^x / y) -> x - log_c(y)
-    if (arg.operator === 'Divide' && isBoxedFunction(arg)) {
+    if (arg.operator === 'Divide' && isFunction(arg)) {
       if (
         arg.op1?.operator === 'Power' &&
-        isBoxedFunction(arg.op1) &&
+        isFunction(arg.op1) &&
         arg.op1.op1?.isSame(logBase)
       ) {
         return {
@@ -375,10 +375,10 @@ export function simplifyLog(x: BoxedExpression): RuleStep | undefined {
     }
 
     // log_c(y / c^x) -> log_c(y) - x
-    if (arg.operator === 'Divide' && isBoxedFunction(arg)) {
+    if (arg.operator === 'Divide' && isFunction(arg)) {
       if (
         arg.op2?.operator === 'Power' &&
-        isBoxedFunction(arg.op2) &&
+        isFunction(arg.op2) &&
         arg.op2.op1?.isSame(logBase)
       ) {
         return {
@@ -390,7 +390,7 @@ export function simplifyLog(x: BoxedExpression): RuleStep | undefined {
 
     // log_c(x/y) -> log_c(x) - log_c(y) (quotient rule expansion)
     // Only apply when both x and y are positive (to avoid branch cut issues)
-    if (arg.operator === 'Divide' && isBoxedFunction(arg)) {
+    if (arg.operator === 'Divide' && isFunction(arg)) {
       const num = arg.op1;
       const denom = arg.op2;
       if (num.isPositive === true && denom.isPositive === true) {
@@ -412,7 +412,7 @@ export function simplifyLog(x: BoxedExpression): RuleStep | undefined {
     // Change of base: log_{1/c}(a) -> -log_c(a)
     if (
       logBase.operator === 'Divide' &&
-      isBoxedFunction(logBase) &&
+      isFunction(logBase) &&
       logBase.op1?.is(1)
     ) {
       return {
@@ -443,7 +443,7 @@ export function simplifyLog(x: BoxedExpression): RuleStep | undefined {
     if (
       sym(base) === 'ExponentialE' &&
       exp.operator === 'Ln' &&
-      isBoxedFunction(exp)
+      isFunction(exp)
     ) {
       return { value: exp.op1, because: 'e^ln(x) -> x' };
     }
@@ -453,7 +453,7 @@ export function simplifyLog(x: BoxedExpression): RuleStep | undefined {
     if (
       sym(base) === 'ExponentialE' &&
       exp.operator === 'Log' &&
-      isBoxedFunction(exp) &&
+      isFunction(exp) &&
       exp.op1
     ) {
       const logBase = exp.op2;
@@ -480,11 +480,11 @@ export function simplifyLog(x: BoxedExpression): RuleStep | undefined {
     if (
       sym(base) === 'ExponentialE' &&
       exp.operator === 'Add' &&
-      isBoxedFunction(exp)
+      isFunction(exp)
     ) {
       for (let i = 0; i < exp.ops.length; i++) {
         const term = exp.ops[i];
-        if (term.operator === 'Ln' && isBoxedFunction(term)) {
+        if (term.operator === 'Ln' && isFunction(term)) {
           const otherTerms = exp.ops.filter((_, idx) => idx !== i);
           const remaining =
             otherTerms.length === 0
@@ -502,7 +502,7 @@ export function simplifyLog(x: BoxedExpression): RuleStep | undefined {
       // e^(log_c(x) + y) -> x^{1/ln(c)} * e^y
       for (let i = 0; i < exp.ops.length; i++) {
         const term = exp.ops[i];
-        if (term.operator !== 'Log' || !isBoxedFunction(term) || !term.op1)
+        if (term.operator !== 'Log' || !isFunction(term) || !term.op1)
           continue;
 
         const otherTerms = exp.ops.filter((_, idx) => idx !== i);
@@ -534,11 +534,11 @@ export function simplifyLog(x: BoxedExpression): RuleStep | undefined {
     if (
       sym(base) === 'ExponentialE' &&
       exp.operator === 'Multiply' &&
-      isBoxedFunction(exp)
+      isFunction(exp)
     ) {
       for (let i = 0; i < exp.ops.length; i++) {
         const factor = exp.ops[i];
-        if (factor.operator === 'Ln' && isBoxedFunction(factor)) {
+        if (factor.operator === 'Ln' && isFunction(factor)) {
           const otherFactors = exp.ops.filter((_, idx) => idx !== i);
           const y =
             otherFactors.length === 1
@@ -556,9 +556,9 @@ export function simplifyLog(x: BoxedExpression): RuleStep | undefined {
     if (
       sym(base) === 'ExponentialE' &&
       exp.operator === 'Divide' &&
-      isBoxedFunction(exp) &&
+      isFunction(exp) &&
       exp.op1?.operator === 'Ln' &&
-      isBoxedFunction(exp.op1)
+      isFunction(exp.op1)
     ) {
       return {
         value: exp.op1.op1.pow(ce.One.div(exp.op2)),
@@ -569,19 +569,19 @@ export function simplifyLog(x: BoxedExpression): RuleStep | undefined {
     // c^log_c(x) -> x
     if (
       exp.operator === 'Log' &&
-      isBoxedFunction(exp) &&
+      isFunction(exp) &&
       exp.op2?.isSame(base)
     ) {
       return { value: exp.op1, because: 'c^log_c(x) -> x' };
     }
 
     // c^(log_c(x) + y) -> x * c^y
-    if (exp.operator === 'Add' && isBoxedFunction(exp)) {
+    if (exp.operator === 'Add' && isFunction(exp)) {
       for (let i = 0; i < exp.ops.length; i++) {
         const term = exp.ops[i];
         if (
           term.operator === 'Log' &&
-          isBoxedFunction(term) &&
+          isFunction(term) &&
           term.op2?.isSame(base)
         ) {
           const otherTerms = exp.ops.filter((_, idx) => idx !== i);
@@ -600,12 +600,12 @@ export function simplifyLog(x: BoxedExpression): RuleStep | undefined {
     }
 
     // c^(log_c(x) * y) -> x^y
-    if (exp.operator === 'Multiply' && isBoxedFunction(exp)) {
+    if (exp.operator === 'Multiply' && isFunction(exp)) {
       for (let i = 0; i < exp.ops.length; i++) {
         const factor = exp.ops[i];
         if (
           factor.operator === 'Log' &&
-          isBoxedFunction(factor) &&
+          isFunction(factor) &&
           factor.op2?.isSame(base)
         ) {
           const otherFactors = exp.ops.filter((_, idx) => idx !== i);
@@ -624,9 +624,9 @@ export function simplifyLog(x: BoxedExpression): RuleStep | undefined {
     // c^(log_c(x) / y) -> x^(1/y)
     if (
       exp.operator === 'Divide' &&
-      isBoxedFunction(exp) &&
+      isFunction(exp) &&
       exp.op1?.operator === 'Log' &&
-      isBoxedFunction(exp.op1) &&
+      isFunction(exp.op1) &&
       exp.op1.op2?.isSame(base)
     ) {
       return {
@@ -660,21 +660,21 @@ export function simplifyLog(x: BoxedExpression): RuleStep | undefined {
       const term = x.ops[i];
 
       // Direct Ln term
-      if (term.operator === 'Ln' && isBoxedFunction(term)) {
+      if (term.operator === 'Ln' && isFunction(term)) {
         lnTerms.push({ index: i, arg: term.op1, positive: true });
       }
       // Negated Ln or Log term: -ln(x) or -log_c(x) which comes from subtraction
-      else if (term.operator === 'Negate' && isBoxedFunction(term)) {
+      else if (term.operator === 'Negate' && isFunction(term)) {
         const innerTerm = term.op1;
         if (
           innerTerm.operator === 'Ln' &&
-          isBoxedFunction(innerTerm) &&
+          isFunction(innerTerm) &&
           innerTerm.op1
         ) {
           lnTerms.push({ index: i, arg: innerTerm.op1, positive: false });
         } else if (
           innerTerm.operator === 'Log' &&
-          isBoxedFunction(innerTerm) &&
+          isFunction(innerTerm) &&
           innerTerm.op1 &&
           innerTerm.op2
         ) {
@@ -693,7 +693,7 @@ export function simplifyLog(x: BoxedExpression): RuleStep | undefined {
       // Direct Log term
       else if (
         term.operator === 'Log' &&
-        isBoxedFunction(term) &&
+        isFunction(term) &&
         term.op1 &&
         term.op2
       ) {
@@ -788,9 +788,9 @@ export function simplifyLog(x: BoxedExpression): RuleStep | undefined {
       // log_c(a) / log_c(b) -> ln(a) / ln(b)
       if (
         num.operator === 'Log' &&
-        isBoxedFunction(num) &&
+        isFunction(num) &&
         denom.operator === 'Log' &&
-        isBoxedFunction(denom) &&
+        isFunction(denom) &&
         num.op2?.isSame(denom.op2)
       ) {
         return {
@@ -802,9 +802,9 @@ export function simplifyLog(x: BoxedExpression): RuleStep | undefined {
       // log_c(a) / ln(a) -> 1/ln(c)
       if (
         num.operator === 'Log' &&
-        isBoxedFunction(num) &&
+        isFunction(num) &&
         denom.operator === 'Ln' &&
-        isBoxedFunction(denom) &&
+        isFunction(denom) &&
         num.op1?.isSame(denom.op1)
       ) {
         return {
@@ -816,9 +816,9 @@ export function simplifyLog(x: BoxedExpression): RuleStep | undefined {
       // ln(a) / log_c(a) -> ln(c)
       if (
         num.operator === 'Ln' &&
-        isBoxedFunction(num) &&
+        isFunction(num) &&
         denom.operator === 'Log' &&
-        isBoxedFunction(denom) &&
+        isFunction(denom) &&
         num.op1?.isSame(denom.op1)
       ) {
         return {
@@ -830,9 +830,9 @@ export function simplifyLog(x: BoxedExpression): RuleStep | undefined {
       // ln(a) / ln(b) -> k when a = b^k for positive integers a, b
       if (
         num.operator === 'Ln' &&
-        isBoxedFunction(num) &&
+        isFunction(num) &&
         denom.operator === 'Ln' &&
-        isBoxedFunction(denom)
+        isFunction(denom)
       ) {
         const a = num.op1;
         const b = denom.op1;

@@ -1,7 +1,7 @@
 import { parseType } from '../../common/type/parse';
 import { isSubtype } from '../../common/type/subtype';
 import { ListType } from '../../common/type/types';
-import { isBoxedTensor } from '../boxed-expression/boxed-tensor';
+import { isTensor } from '../boxed-expression/boxed-tensor';
 import { totalDegree } from '../boxed-expression/polynomial-degree';
 import { checkArity } from '../boxed-expression/validate';
 import { isFiniteIndexedCollection } from '../collection-utils';
@@ -12,9 +12,9 @@ import {
   Sign,
 } from '../global-types';
 import {
-  isBoxedFunction,
-  isBoxedString,
-  isBoxedSymbol,
+  isFunction,
+  isString,
+  isSymbol,
 } from '../boxed-expression/type-guards';
 
 export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
@@ -72,7 +72,7 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
       complexity: 8200,
       signature: '(value, tuple) -> value',
       type: ([value, shape]) => {
-        const shapeOps = isBoxedFunction(shape) ? shape.ops : undefined;
+        const shapeOps = isFunction(shape) ? shape.ops : undefined;
         if (value.isNumber) {
           // Scalar input
           return parseType(
@@ -88,14 +88,14 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
       },
       evaluate: (ops, { engine: ce }): BoxedExpression | undefined => {
         let op1 = ops[0].evaluate();
-        const targetShape = isBoxedFunction(ops[1])
+        const targetShape = isFunction(ops[1])
           ? ops[1].ops.map((op) => op.re)
           : [];
 
         // Handle empty shape tuple - return scalar
         if (targetShape.length === 0) {
           if (op1.isNumber) return op1;
-          if (isBoxedTensor(op1)) {
+          if (isTensor(op1)) {
             // Return first element as scalar
             const flatData = op1.tensor.flatten();
             return flatData.length > 0 ? ce.box(flatData[0]) : ce.Zero;
@@ -110,10 +110,10 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
 
         // If a finite indexable collection, convert to a list
         // -> BoxedTensor
-        if (!isBoxedTensor(op1) && isFiniteIndexedCollection(op1))
+        if (!isTensor(op1) && isFiniteIndexedCollection(op1))
           op1 = ce.function('List', [...op1.each()]);
 
-        if (isBoxedTensor(op1)) {
+        if (isTensor(op1)) {
           // If shapes match, return as-is
           if (targetShape.join('x') === op1.shape.join('x')) return op1;
 
@@ -139,7 +139,7 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
         // Handle scalar - return single-element list
         if (op1.isNumber) return ce.box(['List', op1]);
 
-        if (isBoxedTensor(op1))
+        if (isTensor(op1))
           return ce.box([
             'List',
             ...op1.tensor.flatten().map((x) => ce.box(x)),
@@ -164,10 +164,10 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
         // Transpose of scalar is the scalar itself
         if (op1.isNumber) return op1;
 
-        if (!isBoxedTensor(op1) && isFiniteIndexedCollection(op1))
+        if (!isTensor(op1) && isFiniteIndexedCollection(op1))
           op1 = ce.function('List', [...op1.each()]);
 
-        if (isBoxedTensor(op1)) {
+        if (isTensor(op1)) {
           const rank = op1.shape.length;
 
           // For rank 1 (vectors), transpose is identity
@@ -204,7 +204,7 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
         // Conjugate transpose of scalar is its conjugate
         if (op1.isNumber) return ce.box(['Conjugate', op1]).evaluate();
 
-        if (isBoxedTensor(op1)) {
+        if (isTensor(op1)) {
           const rank = op1.shape.length;
 
           // For rank 1 (vectors), conjugate transpose is just element-wise conjugate
@@ -245,7 +245,7 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
         // Determinant of scalar (1x1 matrix) is the scalar itself
         if (op1.isNumber) return op1;
 
-        if (isBoxedTensor(op1)) {
+        if (isTensor(op1)) {
           const shape = op1.shape;
           // Vector: not a square matrix
           if (shape.length === 1)
@@ -274,7 +274,7 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
         // Inverse of scalar is 1/scalar
         if (op1.isNumber) return ce.box(['Divide', 1, op1]).evaluate();
 
-        if (isBoxedTensor(op1)) {
+        if (isTensor(op1)) {
           const shape = op1.shape;
           // Vector: not a square matrix
           if (shape.length === 1)
@@ -305,7 +305,7 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
           return ce.box(['Divide', 1, op1]).evaluate();
         }
 
-        if (isBoxedTensor(op1)) return op1.tensor.pseudoInverse()?.expression;
+        if (isTensor(op1)) return op1.tensor.pseudoInverse()?.expression;
 
         return undefined;
       },
@@ -317,7 +317,7 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
     //     domain: ['FunctionOf', 'Values', 'Values'],
     //     evaluate: (ops) => {
     //       const op1 = ops[0];
-    //       if (isBoxedTensor(op1)) return op1.adjoint()?.adjugateMatrix();
+    //       if (isTensor(op1)) return op1.adjoint()?.adjugateMatrix();
 
     //       return undefined;
     //     },
@@ -329,7 +329,7 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
       signature: '(matrix) -> matrix',
       evaluate: (ops) => {
         const op1 = ops[0].evaluate();
-        if (isBoxedTensor(op1)) return op1.tensor.adjugateMatrix()?.expression;
+        if (isTensor(op1)) return op1.tensor.adjugateMatrix()?.expression;
 
         return undefined;
       },
@@ -341,7 +341,7 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
     //     domain: ['FunctionOf', 'Values', 'Values', 'Values'],
     //     evaluate: (ops) => {
     //       const op1 = ops[0];
-    //       // if (isBoxedTensor(op1)) return op1.minor();
+    //       // if (isTensor(op1)) return op1.minor();
 
     //       return undefined;
     //     },
@@ -361,7 +361,7 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
         // Trace of scalar is the scalar itself
         if (op1.isNumber) return op1;
 
-        if (isBoxedTensor(op1)) {
+        if (isTensor(op1)) {
           const shape = op1.shape;
 
           // Vector: trace not defined
@@ -419,7 +419,7 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
           return ce.box(['List']);
         }
 
-        if (!isBoxedTensor(op)) return undefined;
+        if (!isTensor(op)) return undefined;
 
         // Interpret vectors as 1×n matrices (linear forms)
         const shape = op.shape;
@@ -454,7 +454,7 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
         // kernel basis.  If the kernel was computed earlier and stored in a
         // symbol this branch won't fire, which is acceptable — the generic
         // finiteDimension path below will handle it.
-        if (isBoxedFunction(object) && object.operator === 'Kernel') {
+        if (isFunction(object) && object.operator === 'Kernel') {
           const kernelDim = kernelBasisDimension(op);
           if (kernelDim !== undefined) return ce.number(kernelDim);
         }
@@ -462,7 +462,7 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
         // dim(Hom(V, W)) = dim(V) * dim(W) for finite-dimensional objects.
         // Same structural matching caveat as Kernel above.
         if (
-          isBoxedFunction(object) &&
+          isFunction(object) &&
           object.operator === 'Hom' &&
           object.ops.length >= 2
         ) {
@@ -492,7 +492,7 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
 
         // A bare symbol is ambiguous (variable vs named polynomial object),
         // keep it symbolic.
-        if (isBoxedSymbol(op) && !op.isConstant) return undefined;
+        if (isSymbol(op) && !op.isConstant) return undefined;
 
         if (!isPolynomialExpression(op)) return undefined;
 
@@ -522,7 +522,7 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
         const B = ops[1].evaluate();
 
         // Both operands must be tensors
-        if (!isBoxedTensor(A) || !isBoxedTensor(B)) return undefined;
+        if (!isTensor(A) || !isTensor(B)) return undefined;
 
         const shapeA = A.shape;
         const shapeB = B.shape;
@@ -628,7 +628,7 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
         // Scalar → return as-is
         if (op1.isNumber) return op1;
 
-        if (isBoxedTensor(op1)) {
+        if (isTensor(op1)) {
           const shape = op1.shape;
 
           // Vector → create diagonal matrix
@@ -772,17 +772,17 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
           return ce.box(['Abs', x]).evaluate();
         }
 
-        if (!isBoxedTensor(x)) return undefined;
+        if (!isTensor(x)) return undefined;
 
         const shape = x.shape;
 
         // Determine norm type
         let normType: number | string = 2; // Default to L2/Frobenius
         if (normTypeExpr) {
-          const normStr = isBoxedString(normTypeExpr)
+          const normStr = isString(normTypeExpr)
             ? normTypeExpr.string
             : undefined;
-          const normSym = isBoxedSymbol(normTypeExpr)
+          const normSym = isSymbol(normTypeExpr)
             ? normTypeExpr.symbol
             : undefined;
           if (
@@ -927,7 +927,7 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
       evaluate: (ops, { engine: ce }): BoxedExpression | undefined => {
         const M = ops[0].evaluate();
 
-        if (!isBoxedTensor(M)) return undefined;
+        if (!isTensor(M)) return undefined;
 
         const shape = M.shape;
         // Must be a square matrix
@@ -994,7 +994,7 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
       evaluate: (ops, { engine: ce }): BoxedExpression | undefined => {
         const M = ops[0].evaluate();
 
-        if (!isBoxedTensor(M)) return undefined;
+        if (!isTensor(M)) return undefined;
 
         const shape = M.shape;
         // Must be a square matrix
@@ -1008,7 +1008,7 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
         const eigenvaluesExpr = ce.box(['Eigenvalues', M]).evaluate();
         if (
           eigenvaluesExpr.operator !== 'List' ||
-          !isBoxedFunction(eigenvaluesExpr) ||
+          !isFunction(eigenvaluesExpr) ||
           eigenvaluesExpr.ops.length === 0
         ) {
           return undefined;
@@ -1040,7 +1040,7 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
       evaluate: (ops, { engine: ce }): BoxedExpression | undefined => {
         const M = ops[0].evaluate();
 
-        if (!isBoxedTensor(M)) return undefined;
+        if (!isTensor(M)) return undefined;
 
         const shape = M.shape;
         // Must be a square matrix
@@ -1066,7 +1066,7 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
       evaluate: (ops, { engine: ce }): BoxedExpression | undefined => {
         const M = ops[0].evaluate();
 
-        if (!isBoxedTensor(M)) return undefined;
+        if (!isTensor(M)) return undefined;
 
         const shape = M.shape;
         // Must be a square matrix
@@ -1091,7 +1091,7 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
       evaluate: (ops, { engine: ce }): BoxedExpression | undefined => {
         const M = ops[0].evaluate();
 
-        if (!isBoxedTensor(M)) return undefined;
+        if (!isTensor(M)) return undefined;
 
         const shape = M.shape;
         // Must be at least a 2D matrix
@@ -1116,7 +1116,7 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
       evaluate: (ops, { engine: ce }): BoxedExpression | undefined => {
         const M = ops[0].evaluate();
 
-        if (!isBoxedTensor(M)) return undefined;
+        if (!isTensor(M)) return undefined;
 
         const shape = M.shape;
         // Must be a square matrix
@@ -1137,7 +1137,7 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
       evaluate: (ops, { engine: ce }): BoxedExpression | undefined => {
         const M = ops[0].evaluate();
 
-        if (!isBoxedTensor(M)) return undefined;
+        if (!isTensor(M)) return undefined;
 
         const shape = M.shape;
         // Must be a 2D matrix
@@ -1165,7 +1165,7 @@ function computeLU(
   n: number,
   ce: ComputeEngine
 ): { P: BoxedExpression; L: BoxedExpression; U: BoxedExpression } | undefined {
-  if (!isBoxedTensor(M)) return undefined;
+  if (!isTensor(M)) return undefined;
 
   // Convert matrix to numeric array
   const A: number[][] = [];
@@ -1266,7 +1266,7 @@ function computeQR(
   n: number,
   ce: ComputeEngine
 ): { Q: BoxedExpression; R: BoxedExpression } | undefined {
-  if (!isBoxedTensor(M)) return undefined;
+  if (!isTensor(M)) return undefined;
 
   // Convert matrix to numeric array
   const A: number[][] = [];
@@ -1376,7 +1376,7 @@ function computeCholesky(
   n: number,
   ce: ComputeEngine
 ): BoxedExpression | undefined {
-  if (!isBoxedTensor(M)) return undefined;
+  if (!isTensor(M)) return undefined;
 
   // Convert matrix to numeric array
   const A: number[][] = [];
@@ -1445,7 +1445,7 @@ function computeSVD(
   n: number,
   ce: ComputeEngine
 ): { U: BoxedExpression; S: BoxedExpression; V: BoxedExpression } | undefined {
-  if (!isBoxedTensor(M)) return undefined;
+  if (!isTensor(M)) return undefined;
 
   // Convert matrix to numeric array
   const A: number[][] = [];
@@ -1635,7 +1635,7 @@ function getElement(
   j: number,
   ce: ComputeEngine
 ): BoxedExpression {
-  if (!isBoxedTensor(M)) return ce.Zero;
+  if (!isTensor(M)) return ce.Zero;
   const val = M.tensor.at(i, j);
   return val !== undefined ? ce.box(val) : ce.Zero;
 }
@@ -1644,7 +1644,7 @@ function getElement(
  * Check if matrix is diagonal or triangular
  */
 function checkDiagonalOrTriangular(M: BoxedExpression, n: number): boolean {
-  if (!isBoxedTensor(M)) return false;
+  if (!isTensor(M)) return false;
 
   let isUpperTriangular = true;
   let isLowerTriangular = true;
@@ -1672,7 +1672,7 @@ function computeEigenvalues3x3(
   M: BoxedExpression,
   ce: ComputeEngine
 ): BoxedExpression | undefined {
-  if (!isBoxedTensor(M)) return undefined;
+  if (!isTensor(M)) return undefined;
 
   // Get matrix elements
   const a11 = getElement(M, 1, 1, ce).re ?? 0;
@@ -1773,7 +1773,7 @@ function computeEigenvaluesQR(
   n: number,
   ce: ComputeEngine
 ): BoxedExpression | undefined {
-  if (!isBoxedTensor(M)) return undefined;
+  if (!isTensor(M)) return undefined;
 
   // Convert matrix to numeric array
   const A: number[][] = [];
@@ -1902,7 +1902,7 @@ function computeEigenvector(
   n: number,
   ce: ComputeEngine
 ): BoxedExpression | undefined {
-  if (!isBoxedTensor(M)) return undefined;
+  if (!isTensor(M)) return undefined;
 
   const lambdaNum = lambda.re;
   if (lambdaNum === undefined || isNaN(lambdaNum)) {
@@ -1938,7 +1938,7 @@ function computeEigenvector2x2Symbolic(
   lambda: BoxedExpression,
   ce: ComputeEngine
 ): BoxedExpression | undefined {
-  if (!isBoxedTensor(M)) return undefined;
+  if (!isTensor(M)) return undefined;
 
   const a = getElement(M, 1, 1, ce);
   const b = getElement(M, 1, 2, ce);
@@ -2053,7 +2053,7 @@ function tensorToNumericMatrix(
   rowCount: number,
   columnCount: number
 ): number[][] | undefined {
-  if (!isBoxedTensor(tensor)) return undefined;
+  if (!isTensor(tensor)) return undefined;
 
   const matrix: number[][] = [];
   for (let i = 0; i < rowCount; i++) {
@@ -2187,7 +2187,7 @@ function finiteDimension(value: BoxedExpression): number | undefined {
     }
   }
 
-  if (isBoxedTensor(value)) {
+  if (isTensor(value)) {
     if (value.shape.length === 0) return 1;
     return value.shape.reduce((a, b) => a * b, 1);
   }
@@ -2205,16 +2205,16 @@ function finiteDimension(value: BoxedExpression): number | undefined {
  * Infer the dimension of a kernel basis representation.
  */
 function kernelBasisDimension(value: BoxedExpression): number | undefined {
-  if (isBoxedFunction(value) && value.operator === 'List') {
+  if (isFunction(value) && value.operator === 'List') {
     if (value.ops.length === 0) return 0;
     if (
-      value.ops.every((op) => isBoxedFunction(op) && op.operator === 'List')
+      value.ops.every((op) => isFunction(op) && op.operator === 'List')
     ) {
       return value.ops.length;
     }
   }
 
-  if (isBoxedTensor(value) && (value.rank === 1 || value.rank === 2))
+  if (isTensor(value) && (value.rank === 1 || value.rank === 2))
     return value.shape[0];
 
   return undefined;
@@ -2225,8 +2225,8 @@ function kernelBasisDimension(value: BoxedExpression): number | undefined {
  */
 function isPolynomialExpression(value: BoxedExpression): boolean {
   if (value.isNumber) return true;
-  if (isBoxedSymbol(value)) return !value.isConstant;
-  if (!isBoxedFunction(value)) return false;
+  if (isSymbol(value)) return !value.isConstant;
+  if (!isFunction(value)) return false;
   if (value.unknowns.length === 0) return true;
 
   if (
@@ -2313,7 +2313,7 @@ function canonicalMatrix(
 
   const canonOp0 = ops[0].canonical;
   const body =
-    ops[0].operator === 'Vector' && isBoxedFunction(canonOp0)
+    ops[0].operator === 'Vector' && isFunction(canonOp0)
       ? canonOp0.ops[0]
       : canonOp0;
   const delims = ops[1]?.canonical;

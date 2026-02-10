@@ -4,10 +4,10 @@ import { maxDegree, revlex, totalDegree } from './polynomial-degree';
 import { asRadical } from './arithmetic-power';
 import { isOperatorDef } from './utils';
 import {
-  isBoxedNumber,
-  isBoxedFunction,
-  isBoxedSymbol,
-  isBoxedString,
+  isNumber,
+  isFunction,
+  isSymbol,
+  isString,
 } from './type-guards';
 
 export type Order = 'lex' | 'dexlex' | 'grevlex' | 'elim';
@@ -87,8 +87,8 @@ export function equalOrder(a: BoxedExpression, b: BoxedExpression): number {
   // Ranks 2: expression
   // Rank 3: numbers
   const eqRank = (x: BoxedExpression): number => {
-    if (isBoxedSymbol(x)) return 1;
-    if (isBoxedNumber(x)) return 3;
+    if (isSymbol(x)) return 1;
+    if (isNumber(x)) return 3;
     return 2;
   };
   const aRank = eqRank(a);
@@ -96,12 +96,12 @@ export function equalOrder(a: BoxedExpression, b: BoxedExpression): number {
   if (aRank < bRank) return -1;
   if (bRank < aRank) return +1;
   if (aRank === 1) {
-    const aSym = isBoxedSymbol(a) ? a.symbol : '';
-    const bSym = isBoxedSymbol(b) ? b.symbol : '';
+    const aSym = isSymbol(a) ? a.symbol : '';
+    const bSym = isSymbol(b) ? b.symbol : '';
     if (aSym === bSym) return 0;
     return aSym > bSym ? 1 : -1;
   }
-  if (aRank === 3 && isBoxedNumber(a) && isBoxedNumber(b)) {
+  if (aRank === 3 && isNumber(a) && isNumber(b)) {
     const aN = a.numericValue;
     const bN = b.numericValue;
     const af = typeof aN === 'number' ? aN : aN.re;
@@ -141,7 +141,7 @@ export type Rank = (typeof RANKS)[number];
  * sorted.
  */
 function rank(expr: BoxedExpression): Rank {
-  if (isBoxedNumber(expr)) {
+  if (isNumber(expr)) {
     if (typeof expr.numericValue === 'number') {
       return Number.isInteger(expr.numericValue) ? 'integer' : 'real';
     }
@@ -158,16 +158,16 @@ function rank(expr: BoxedExpression): Rank {
   }
 
   // Complex numbers
-  if (isBoxedSymbol(expr) && expr.symbol === 'ImaginaryUnit') return 'complex';
+  if (isSymbol(expr) && expr.symbol === 'ImaginaryUnit') return 'complex';
 
   // Square root of a number
   if (asRadical(expr)) return 'radical';
 
   // Constant symbols (π, e, etc.)
-  if (isBoxedSymbol(expr) && expr.isConstant) return 'constant';
+  if (isSymbol(expr) && expr.isConstant) return 'constant';
 
   // Other symbols
-  if (isBoxedSymbol(expr)) return 'symbol';
+  if (isSymbol(expr)) return 'symbol';
 
   if (isTrigonometricFunction(expr.operator)) return 'trig';
 
@@ -184,15 +184,15 @@ function rank(expr: BoxedExpression): Rank {
 
   if (expr.operator === 'Complex') return expr.im !== 0 ? 'complex' : 'real';
 
-  if (isBoxedFunction(expr) && expr.operator === 'Sqrt') {
-    if (isBoxedNumber(expr.op1) && (expr.op1.isInteger || expr.op1.isRational))
+  if (isFunction(expr) && expr.operator === 'Sqrt') {
+    if (isNumber(expr.op1) && (expr.op1.isInteger || expr.op1.isRational))
       return 'radical';
     return 'power';
   }
 
-  if (isBoxedFunction(expr)) return 'fn';
+  if (isFunction(expr)) return 'fn';
 
-  if (isBoxedString(expr)) return 'string';
+  if (isString(expr)) return 'string';
 
   return 'other';
 }
@@ -249,13 +249,13 @@ export function order(a: BoxedExpression, b: BoxedExpression): number {
 
   if (rankA === 'integer' || rankA === 'rational' || rankA === 'real') {
     let aN: number | import('../numeric-value/types').NumericValue | undefined =
-      isBoxedNumber(a) ? a.numericValue : undefined;
+      isNumber(a) ? a.numericValue : undefined;
     let bN: number | import('../numeric-value/types').NumericValue | undefined =
-      isBoxedNumber(b) ? b.numericValue : undefined;
+      isNumber(b) ? b.numericValue : undefined;
 
-    if (aN === undefined && isBoxedFunction(a) && a.operator === 'Rational')
+    if (aN === undefined && isFunction(a) && a.operator === 'Rational')
       aN = a.op1.re / a.op2.re!;
-    if (bN === undefined && isBoxedFunction(b) && b.operator === 'Rational')
+    if (bN === undefined && isFunction(b) && b.operator === 'Rational')
       bN = b.op1.re / b.op2.re!;
 
     const af = typeof aN === 'number' ? aN : aN!.re;
@@ -265,19 +265,19 @@ export function order(a: BoxedExpression, b: BoxedExpression): number {
   }
 
   if (rankA === 'radical') {
-    if (isBoxedFunction(a) && isBoxedFunction(b)) return order(a.op1, b.op1);
+    if (isFunction(a) && isFunction(b)) return order(a.op1, b.op1);
     return 0;
   }
 
   if (rankA === 'constant' || rankA === 'symbol') {
-    const aSym = isBoxedSymbol(a) ? a.symbol : '';
-    const bSym = isBoxedSymbol(b) ? b.symbol : '';
+    const aSym = isSymbol(a) ? a.symbol : '';
+    const bSym = isSymbol(b) ? b.symbol : '';
     if (aSym === bSym) return 0;
     return aSym > bSym ? 1 : -1;
   }
 
   if (rankA === 'add') {
-    if (!isBoxedFunction(a) || !isBoxedFunction(b)) return 0;
+    if (!isFunction(a) || !isFunction(b)) return 0;
     const aOps = a.ops;
     const bOps = b.ops;
     if (aOps.length !== bOps.length) return bOps.length - aOps.length;
@@ -304,7 +304,7 @@ export function order(a: BoxedExpression, b: BoxedExpression): number {
     }
 
     // console.log('same degree ', order(a.op1, b.op1));
-    if (isBoxedFunction(a) && isBoxedFunction(b)) return order(a.op1, b.op1);
+    if (isFunction(a) && isFunction(b)) return order(a.op1, b.op1);
     return 0;
   }
 
@@ -316,7 +316,7 @@ export function order(a: BoxedExpression, b: BoxedExpression): number {
     const maxDegreeB = maxDegree(b);
     if (maxDegreeA !== maxDegreeB) return maxDegreeA - maxDegreeB;
 
-    if (!isBoxedFunction(a) || !isBoxedFunction(b)) return 0;
+    if (!isFunction(a) || !isFunction(b)) return 0;
     const aOps = a.ops;
     const bOps = b.ops;
 
@@ -329,7 +329,7 @@ export function order(a: BoxedExpression, b: BoxedExpression): number {
   }
 
   if (rankA === 'divide') {
-    if (!isBoxedFunction(a) || !isBoxedFunction(b)) return 0;
+    if (!isFunction(a) || !isFunction(b)) return 0;
     const totalDegreeA = totalDegree(a.op1);
     const totalDegreeB = totalDegree(b.op1);
     if (totalDegreeA !== totalDegreeB) return totalDegreeB - totalDegreeA;
@@ -344,8 +344,8 @@ export function order(a: BoxedExpression, b: BoxedExpression): number {
 
   if (rankA === 'fn' || rankA === 'trig') {
     if (
-      isBoxedFunction(a) &&
-      isBoxedFunction(b) &&
+      isFunction(a) &&
+      isFunction(b) &&
       a.operator == b.operator &&
       a.nops === 1 &&
       b.nops === 1
@@ -364,7 +364,7 @@ export function order(a: BoxedExpression, b: BoxedExpression): number {
   }
 
   if (rankA === 'string') {
-    if (isBoxedString(a) && isBoxedString(b)) {
+    if (isString(a) && isString(b)) {
       if (a.string === b.string) return 0;
       if (b.string < a.string) return -1;
       return +1;
@@ -385,7 +385,7 @@ export function canonicalOrder(
   { recursive = false }: { recursive?: boolean }
 ): BoxedExpression {
   // If the expression is already in canonical form, return it as is
-  if (expr.isCanonical || expr.isStructural || !isBoxedFunction(expr))
+  if (expr.isCanonical || expr.isStructural || !isFunction(expr))
     return expr;
 
   let ops: ReadonlyArray<BoxedExpression> = expr.ops;
@@ -469,26 +469,26 @@ export function eliminationOrder(
 
 /** Get the number of atomic elements in the expression */
 function getLeafCount(expr: BoxedExpression): number {
-  if (!isBoxedFunction(expr)) return 1;
+  if (!isFunction(expr)) return 1;
   return 1 + [...expr.ops].reduce((acc, x) => acc + getLeafCount(x), 0);
 }
 
 function getComplex(a: BoxedExpression): [number, number] {
-  if (isBoxedSymbol(a) && a.symbol === 'ImaginaryUnit') return [0, 1];
-  if (isBoxedNumber(a)) {
+  if (isSymbol(a) && a.symbol === 'ImaginaryUnit') return [0, 1];
+  if (isNumber(a)) {
     if (typeof a.numericValue === 'number') return [a.numericValue, 0];
     const v = a.numericValue;
     return [v.re, v.im];
   }
-  if (isBoxedFunction(a) && a.operator === 'Complex') {
+  if (isFunction(a) && a.operator === 'Complex') {
     const aOp1 = a.op1;
     const aOp2 = a.op2;
-    if (!isBoxedNumber(aOp1)) return [0, 0];
+    if (!isNumber(aOp1)) return [0, 0];
     const re =
       typeof aOp1.numericValue === 'number'
         ? aOp1.numericValue
         : aOp1.numericValue.re;
-    if (!isBoxedNumber(aOp2)) return [0, 0];
+    if (!isNumber(aOp2)) return [0, 0];
     const im =
       typeof aOp2.numericValue === 'number'
         ? aOp2.numericValue

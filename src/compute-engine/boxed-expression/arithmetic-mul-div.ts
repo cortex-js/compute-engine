@@ -4,7 +4,7 @@ import type {
   BoxedExpression,
   IComputeEngine as ComputeEngine,
 } from '../global-types';
-import { isBoxedNumber, isBoxedFunction, isBoxedSymbol } from './type-guards';
+import { isNumber, isFunction, isSymbol } from './type-guards';
 import { NumericValue } from '../numeric-value/types';
 import { ExactNumericValue } from '../numeric-value/exact-numeric-value';
 import type { Rational } from '../numerics/types';
@@ -98,25 +98,25 @@ export class Product {
       return;
     }
 
-    if (isBoxedFunction(term) && term.operator === 'Multiply') {
+    if (isFunction(term) && term.operator === 'Multiply') {
       for (const t of term.ops) this.mul(t, exp);
       return;
     }
 
-    if (isBoxedFunction(term) && term.operator === 'Negate') {
+    if (isFunction(term) && term.operator === 'Negate') {
       this.mul(term.op1, exp);
       this.coefficient = this.coefficient.neg();
       return;
     }
 
     if (this._isCanonical) {
-      if (isBoxedSymbol(term) && term.symbol === 'Nothing') return;
+      if (isSymbol(term) && term.symbol === 'Nothing') return;
 
       exp ??= [1, 1];
 
       // If we're calculating a canonical product, fold exact literals into
       // running terms
-      const num = isBoxedNumber(term) ? term.numericValue : undefined;
+      const num = isNumber(term) ? term.numericValue : undefined;
       if (num !== undefined) {
         if (term.is(1)) return;
 
@@ -184,15 +184,15 @@ export class Product {
         return;
       }
 
-      if (!isBoxedSymbol(term)) {
+      if (!isSymbol(term)) {
         // Skip numeric coefficient extraction for symbolic radicals like √2, ∛2, 2^{1/3}
         // These should stay symbolic rather than evaluating to floats
         const isSymbolicRadical =
-          isBoxedFunction(term) &&
+          isFunction(term) &&
           (term.operator === 'Sqrt' ||
             term.operator === 'Root' ||
             term.operator === 'Power') &&
-          isBoxedNumber(term.op1);
+          isNumber(term.op1);
 
         if (!isSymbolicRadical) {
           // If possible, factor out a rational coefficient
@@ -217,14 +217,14 @@ export class Product {
     const exponent: Rational = exp ?? [1, 1];
 
     // If this is a power expression, extract the exponent
-    if (isBoxedFunction(term) && term.operator === 'Power') {
+    if (isFunction(term) && term.operator === 'Power') {
       // Term is `Power(op1, op2)`
       const r = asRational(term.op2);
       if (r) {
         // Don't extract non-integer exponents for numeric bases
         // This would cause 2^{3/5} to evaluate numerically instead of staying symbolic
         // Only extract when: base is not a number, or exponent is an integer
-        const baseIsNumeric = isBoxedNumber(term.op1);
+        const baseIsNumeric = isNumber(term.op1);
         const expIsInteger = r[1] === 1 || r[1] === -1; // denominator is ±1
         if (!baseIsNumeric || expIsInteger) {
           this.mul(term.op1, rationalMul(exponent, r));
@@ -234,11 +234,11 @@ export class Product {
       }
     }
 
-    if (isBoxedFunction(term) && term.operator === 'Sqrt') {
+    if (isFunction(term) && term.operator === 'Sqrt') {
       // Term is `Sqrt(op1)`
       // Don't extract non-integer exponents for numeric bases
       // This keeps √2 symbolic instead of evaluating to 1.414...
-      const baseIsNumeric = isBoxedNumber(term.op1);
+      const baseIsNumeric = isNumber(term.op1);
       if (!baseIsNumeric) {
         this.mul(term.op1, rationalMul(exponent, [1, 2]));
         return;
@@ -246,13 +246,13 @@ export class Product {
       // Otherwise, keep the Sqrt expression as a single term
     }
 
-    if (isBoxedFunction(term) && term.operator === 'Root') {
+    if (isFunction(term) && term.operator === 'Root') {
       // Term is `Root(op1, op2)`
       const r = asRational(term.op2);
       if (r) {
         // Don't extract non-integer exponents for numeric bases
         // This keeps ∛2 symbolic instead of evaluating to 1.259...
-        const baseIsNumeric = isBoxedNumber(term.op1);
+        const baseIsNumeric = isNumber(term.op1);
         if (!baseIsNumeric) {
           this.mul(term.op1, rationalMul(exponent, inverse(r)));
           return;
@@ -261,7 +261,7 @@ export class Product {
       }
     }
 
-    if (isBoxedFunction(term) && term.operator === 'Divide') {
+    if (isFunction(term) && term.operator === 'Divide') {
       // In order to correctly account for the denominator, invert it.
       // For example, in the case `a^4/a^2' we want to add
       // `a^(-2)` to the product, not `1/a^2`. The former will get the exponent
@@ -532,7 +532,7 @@ export function canonicalDivide(
   // `symbols` because `symbols` includes mathematical constants like Pi and E,
   // which would let expressions like tan(π/2) slip through the guard.
   const op2IsConstantExpression =
-    op2.unknowns.length === 0 && !isBoxedNumber(op2);
+    op2.unknowns.length === 0 && !isNumber(op2);
 
   // 0/0 = NaN, a/0 = ~∞ (a≠0)
   // Note: We only check .is(0) here, not .N().is(0), because .N() can be
@@ -559,8 +559,8 @@ export function canonicalDivide(
   // a/a = 1 (if a ≠ 0 and a is finite)
   if (op2.is(0) === false && op2.isFinite !== false) {
     if (
-      isBoxedSymbol(op1) &&
-      isBoxedSymbol(op2) &&
+      isSymbol(op1) &&
+      isSymbol(op2) &&
       op1.symbol === op2.symbol &&
       op1.isConstant
     )
@@ -581,9 +581,9 @@ export function canonicalDivide(
 
   // -a/-b = a/b
   if (
-    isBoxedFunction(op1) &&
+    isFunction(op1) &&
     op1.operator === 'Negate' &&
-    isBoxedFunction(op2) &&
+    isFunction(op2) &&
     op2.operator === 'Negate'
   ) {
     op1 = op1.op1;
@@ -592,9 +592,9 @@ export function canonicalDivide(
 
   // (a/b)/(c/d) = (a*d)/(b*c)
   if (
-    isBoxedFunction(op1) &&
+    isFunction(op1) &&
     op1.operator === 'Divide' &&
-    isBoxedFunction(op2) &&
+    isFunction(op2) &&
     op2.operator === 'Divide'
   ) {
     return canonicalDivide(
@@ -604,11 +604,11 @@ export function canonicalDivide(
   }
 
   // (a/b)/c = a/(b*c)
-  if (isBoxedFunction(op1) && op1.operator === 'Divide')
+  if (isFunction(op1) && op1.operator === 'Divide')
     return canonicalDivide(op1.op1, canonicalMultiply(ce, [op1.op2, op2]));
 
   // a/(b/c) = (a*c)/b
-  if (isBoxedFunction(op2) && op2.operator === 'Divide')
+  if (isFunction(op2) && op2.operator === 'Divide')
     return canonicalDivide(canonicalMultiply(ce, [op1, op2.op2]), op2.op1);
 
   // a/1 = a
@@ -624,22 +624,22 @@ export function canonicalDivide(
 
   // √a/√b = (1/b)√(ab) as a numeric value
   if (
-    isBoxedFunction(op1) &&
+    isFunction(op1) &&
     op1.operator === 'Sqrt' &&
-    isBoxedFunction(op2) &&
+    isFunction(op2) &&
     op2.operator === 'Sqrt'
   ) {
     const a = asSmallInteger(op1.op1);
     const b = asSmallInteger(op2.op1);
     if (a !== null && b !== null)
       return ce.number(ce._numericValue({ radical: a * b, rational: [1, b] }));
-  } else if (isBoxedFunction(op1) && op1.operator === 'Sqrt') {
+  } else if (isFunction(op1) && op1.operator === 'Sqrt') {
     // √a/b = (1/b)√a as a numeric value
     const a = asSmallInteger(op1.op1);
     const b = asSmallInteger(op2);
     if (a !== null && b !== null)
       return ce.number(ce._numericValue({ radical: a, rational: [1, b] }));
-  } else if (isBoxedFunction(op2) && op2.operator === 'Sqrt') {
+  } else if (isFunction(op2) && op2.operator === 'Sqrt') {
     // a/√b = (a/b)√b as a numeric value
     const a = asSmallInteger(op1);
     const b = asSmallInteger(op2.op1);
@@ -648,8 +648,8 @@ export function canonicalDivide(
   }
 
   // Are both op1 and op2 a numeric value?
-  const v1 = isBoxedNumber(op1) ? op1.numericValue : undefined;
-  const v2 = isBoxedNumber(op2) ? op2.numericValue : undefined;
+  const v1 = isNumber(op1) ? op1.numericValue : undefined;
+  const v2 = isNumber(op2) ? op2.numericValue : undefined;
   if (v1 !== undefined && v2 !== undefined) {
     if (
       (typeof v1 !== 'number' && v1.im !== 0) ||
@@ -745,7 +745,7 @@ export function div(
     // a/0 = ~∞ (a≠0) - ComplexInfinity as "better NaN"
     if (denom === 0) return ce.ComplexInfinity;
 
-    if (isBoxedNumber(num)) {
+    if (isNumber(num)) {
       const n = num.numericValue;
       // If num and denom are literal integers, we keep an exact result
       if (typeof n === 'number') {
@@ -771,7 +771,7 @@ export function div(
     // a/0 = NaN (a≠0)
     if (denom.is(0)) return ce.NaN;
 
-    if (isBoxedNumber(num) && isBoxedNumber(denom)) {
+    if (isNumber(num) && isNumber(denom)) {
       const numV = num.numericValue;
       const denomV = denom.numericValue;
       if (
@@ -854,7 +854,7 @@ export function canonicalMultiply(
     const exactNumerics: NumericValue[] = [];
     const nonNumeric: BoxedExpression[] = [];
     for (const x of xs) {
-      if (isBoxedNumber(x) && !x.isInfinity && !x.isNaN) {
+      if (isNumber(x) && !x.isInfinity && !x.isNaN) {
         const nv = x.numericValue;
         if (typeof nv === 'number' || nv.isExact) {
           exactNumerics.push(
@@ -896,12 +896,12 @@ export function canonicalMultiply(
 
     // Do we have a number literal followed either by a sqrt or an imaginary unit?
 
-    if (isBoxedNumber(x)) {
+    if (isNumber(x)) {
       // Do we have a Sqrt expression?
       if (
-        isBoxedFunction(next) &&
+        isFunction(next) &&
         next.operator === 'Sqrt' &&
-        isBoxedNumber(next.op1) &&
+        isNumber(next.op1) &&
         next.op1.type.matches('finite_integer')
       ) {
         // Next is a sqrt of a literal integer
@@ -927,7 +927,7 @@ export function canonicalMultiply(
           continue;
         }
       } else if (
-        isBoxedNumber(next) &&
+        isNumber(next) &&
         next.numericValue instanceof NumericValue
       ) {
         // Do we have a radical as a numeric value?
@@ -987,13 +987,13 @@ export function canonicalMultiply(
 
 function unnegate(op: BoxedExpression): [BoxedExpression, sign: number] {
   let sign = 1;
-  while (isBoxedFunction(op) && op.operator === 'Negate') {
+  while (isFunction(op) && op.operator === 'Negate') {
     sign = -sign;
     op = op.op1;
   }
 
   // If a negative number, make it positive
-  if (isBoxedNumber(op) && op.isNegative) {
+  if (isNumber(op) && op.isNegative) {
     sign = -sign;
     op = op.neg();
   }
@@ -1007,40 +1007,40 @@ function expandProduct(
   rhs: Readonly<BoxedExpression>
 ): BoxedExpression {
   if (
-    isBoxedFunction(lhs) &&
+    isFunction(lhs) &&
     lhs.operator === 'Negate' &&
-    isBoxedFunction(rhs) &&
+    isFunction(rhs) &&
     rhs.operator === 'Negate'
   )
     return expandProduct(lhs.op1, rhs.op1);
 
   const ce = lhs.engine;
 
-  if (isBoxedFunction(lhs) && lhs.operator === 'Negate')
+  if (isFunction(lhs) && lhs.operator === 'Negate')
     return expandProduct(lhs.op1, rhs).neg();
-  if (isBoxedFunction(rhs) && rhs.operator === 'Negate')
+  if (isFunction(rhs) && rhs.operator === 'Negate')
     return expandProduct(lhs, rhs.op1).neg();
 
   if (
-    isBoxedFunction(lhs) &&
+    isFunction(lhs) &&
     lhs.operator === 'Divide' &&
-    isBoxedFunction(rhs) &&
+    isFunction(rhs) &&
     rhs.operator === 'Divide'
   ) {
     const denom = lhs.op2.mul(rhs.op2);
     return expandProduct(lhs.op1, rhs.op1).div(denom);
   }
 
-  if (isBoxedFunction(lhs) && lhs.operator === 'Divide')
+  if (isFunction(lhs) && lhs.operator === 'Divide')
     return expandProduct(lhs.op1, rhs).div(lhs.op2);
-  if (isBoxedFunction(rhs) && rhs.operator === 'Divide')
+  if (isFunction(rhs) && rhs.operator === 'Divide')
     return expandProduct(lhs, rhs.op1).div(rhs.op2);
 
-  if (isBoxedFunction(lhs) && lhs.operator === 'Add') {
+  if (isFunction(lhs) && lhs.operator === 'Add') {
     const terms: BoxedExpression[] = lhs.ops.map((x) => expandProduct(x, rhs));
     return add(...terms);
   }
-  if (isBoxedFunction(rhs) && rhs.operator === 'Add') {
+  if (isFunction(rhs) && rhs.operator === 'Add') {
     const terms: BoxedExpression[] = rhs.ops.map((x) => expandProduct(lhs, x));
     return add(...terms);
   }
@@ -1069,7 +1069,7 @@ export function mul(...xs: ReadonlyArray<BoxedExpression>): BoxedExpression {
   const exp = expandProducts(ce, xs);
   if (exp) {
     if (exp.operator !== 'Multiply') return exp;
-    if (isBoxedFunction(exp)) xs = exp.ops;
+    if (isFunction(exp)) xs = exp.ops;
   }
 
   return new Product(ce, xs).asRationalExpression();
@@ -1082,7 +1082,7 @@ export function mulN(...xs: ReadonlyArray<BoxedExpression>): BoxedExpression {
   const exp = expandProducts(ce, xs);
   if (exp) {
     if (exp.operator !== 'Multiply') return exp;
-    if (isBoxedFunction(exp)) xs = exp.ops;
+    if (isFunction(exp)) xs = exp.ops;
   }
 
   return new Product(ce, xs).asExpression({ numericApproximation: true });

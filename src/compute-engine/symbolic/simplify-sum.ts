@@ -1,7 +1,7 @@
 import type { BoxedExpression, RuleStep } from '../global-types';
 import {
-  isBoxedFunction,
-  isBoxedNumber,
+  isFunction,
+  isNumber,
   sym,
 } from '../boxed-expression/type-guards';
 
@@ -10,7 +10,7 @@ import {
  * Handles 16 patterns for simplifying Sum expressions.
  */
 export function simplifySum(x: BoxedExpression): RuleStep | undefined {
-  if (x.operator !== 'Sum' || !isBoxedFunction(x)) return undefined;
+  if (x.operator !== 'Sum' || !isFunction(x)) return undefined;
 
   const body = x.op1;
   const limits = x.op2;
@@ -18,7 +18,7 @@ export function simplifySum(x: BoxedExpression): RuleStep | undefined {
     !body ||
     !limits ||
     limits.operator !== 'Limits' ||
-    !isBoxedFunction(limits)
+    !isFunction(limits)
   )
     return undefined;
 
@@ -39,7 +39,7 @@ export function simplifySum(x: BoxedExpression): RuleStep | undefined {
   }
 
   // Handle numeric bounds edge cases
-  if (isBoxedNumber(lower) && isBoxedNumber(upper)) {
+  if (isNumber(lower) && isNumber(upper)) {
     const lowerVal = lower.numericValue;
     const upperVal = upper.numericValue;
     if (
@@ -68,7 +68,7 @@ export function simplifySum(x: BoxedExpression): RuleStep | undefined {
   if (!bodyUnknowns.has(index)) {
     const count = upper.sub(lower).add(ce.One).simplify();
     // Check for empty range with symbolic bounds
-    if (isBoxedNumber(count) && count.numericValue !== undefined) {
+    if (isNumber(count) && count.numericValue !== undefined) {
       const countVal =
         typeof count.numericValue === 'number'
           ? count.numericValue
@@ -99,7 +99,7 @@ export function simplifySum(x: BoxedExpression): RuleStep | undefined {
   // If body is index squared: Sum(n^2, [n, 1, b]) → b(b+1)(2b+1)/6
   if (
     body.operator === 'Power' &&
-    isBoxedFunction(body) &&
+    isFunction(body) &&
     sym(body.op1) === index &&
     body.op2.is(2) &&
     lower.is(1)
@@ -114,7 +114,7 @@ export function simplifySum(x: BoxedExpression): RuleStep | undefined {
   // If body is index cubed: Sum(n^3, [n, 1, b]) → [b(b+1)/2]^2
   if (
     body.operator === 'Power' &&
-    isBoxedFunction(body) &&
+    isFunction(body) &&
     sym(body.op1) === index &&
     body.op2.is(3) &&
     lower.is(1)
@@ -133,7 +133,7 @@ export function simplifySum(x: BoxedExpression): RuleStep | undefined {
   // Alternating unit series: Sum((-1)^n, [n, 0, b]) → (1 + (-1)^b) / 2
   if (
     body.operator === 'Power' &&
-    isBoxedFunction(body) &&
+    isFunction(body) &&
     body.op1.is(-1) &&
     sym(body.op2) === index &&
     lower.is(0)
@@ -145,14 +145,14 @@ export function simplifySum(x: BoxedExpression): RuleStep | undefined {
   }
 
   // Alternating linear series: Sum((-1)^n * n, [n, 0, b]) → (-1)^b * floor((b+1)/2)
-  if (body.operator === 'Multiply' && isBoxedFunction(body) && lower.is(0)) {
+  if (body.operator === 'Multiply' && isFunction(body) && lower.is(0)) {
     // Check for (-1)^n * n pattern
     let hasAlternating = false;
     let hasIndex = false;
     for (const op of body.ops) {
       if (
         op.operator === 'Power' &&
-        isBoxedFunction(op) &&
+        isFunction(op) &&
         op.op1.is(-1) &&
         sym(op.op2) === index
       ) {
@@ -179,7 +179,7 @@ export function simplifySum(x: BoxedExpression): RuleStep | undefined {
 
   // Arithmetic progression: Sum(a + d*n, [n, 0, b]) → (b+1)*a + d*b*(b+1)/2
   // Detect pattern: Add with constant and index-linear term
-  if (body.operator === 'Add' && isBoxedFunction(body)) {
+  if (body.operator === 'Add' && isFunction(body)) {
     let constant: BoxedExpression | null = null;
     let coefficient: BoxedExpression | null = null;
 
@@ -193,7 +193,7 @@ export function simplifySum(x: BoxedExpression): RuleStep | undefined {
         coefficient = coefficient ? coefficient.add(ce.One) : ce.One;
       } else if (
         term.operator === 'Multiply' &&
-        isBoxedFunction(term) &&
+        isFunction(term) &&
         term.ops.some((op) => sym(op) === index)
       ) {
         // c * n form - extract coefficient
@@ -253,7 +253,7 @@ export function simplifySum(x: BoxedExpression): RuleStep | undefined {
   // Also handles: Sum(r^n, [n, 1, b]) → r * (1 - r^b) / (1 - r)
   if (
     body.operator === 'Power' &&
-    isBoxedFunction(body) &&
+    isFunction(body) &&
     sym(body.op2) === index &&
     !new Set(body.op1.unknowns).has(index)
   ) {
@@ -277,7 +277,7 @@ export function simplifySum(x: BoxedExpression): RuleStep | undefined {
   // Sum of binomial coefficients: Sum(C(n,k), [k, 0, n]) → 2^n
   if (
     body.operator === 'Binomial' &&
-    isBoxedFunction(body) &&
+    isFunction(body) &&
     lower.is(0) &&
     sym(body.op2) === index
   ) {
@@ -291,7 +291,7 @@ export function simplifySum(x: BoxedExpression): RuleStep | undefined {
 
   // Alternating binomial sum: Sum((-1)^k * C(n,k), [k, 0, n]) → 0 (for n > 0)
   // Pattern: Multiply with (-1)^k and Binomial(n, k)
-  if (body.operator === 'Multiply' && isBoxedFunction(body) && lower.is(0)) {
+  if (body.operator === 'Multiply' && isFunction(body) && lower.is(0)) {
     let hasBinomial = false;
     let hasAlternating = false;
     let binomialN: BoxedExpression | null = null;
@@ -299,14 +299,14 @@ export function simplifySum(x: BoxedExpression): RuleStep | undefined {
     for (const op of body.ops) {
       if (
         op.operator === 'Binomial' &&
-        isBoxedFunction(op) &&
+        isFunction(op) &&
         sym(op.op2) === index
       ) {
         hasBinomial = true;
         binomialN = op.op1 ?? null;
       } else if (
         op.operator === 'Power' &&
-        isBoxedFunction(op) &&
+        isFunction(op) &&
         op.op1.is(-1) &&
         sym(op.op2) === index
       ) {
@@ -330,7 +330,7 @@ export function simplifySum(x: BoxedExpression): RuleStep | undefined {
         hasIndex = true;
       } else if (
         op.operator === 'Binomial' &&
-        isBoxedFunction(op) &&
+        isFunction(op) &&
         sym(op.op2) === index
       ) {
         hasBinomial = true;
@@ -362,14 +362,14 @@ export function simplifySum(x: BoxedExpression): RuleStep | undefined {
     for (const op of body.ops) {
       if (
         op.operator === 'Power' &&
-        isBoxedFunction(op) &&
+        isFunction(op) &&
         sym(op.op1) === index &&
         op.op2.is(2)
       ) {
         hasIndexSquared = true;
       } else if (
         op.operator === 'Binomial' &&
-        isBoxedFunction(op) &&
+        isFunction(op) &&
         sym(op.op2) === index
       ) {
         hasBinomial = true;
@@ -402,14 +402,14 @@ export function simplifySum(x: BoxedExpression): RuleStep | undefined {
     for (const op of body.ops) {
       if (
         op.operator === 'Power' &&
-        isBoxedFunction(op) &&
+        isFunction(op) &&
         sym(op.op1) === index &&
         op.op2.is(3)
       ) {
         hasIndexCubed = true;
       } else if (
         op.operator === 'Binomial' &&
-        isBoxedFunction(op) &&
+        isFunction(op) &&
         sym(op.op2) === index
       ) {
         hasBinomial = true;
@@ -443,7 +443,7 @@ export function simplifySum(x: BoxedExpression): RuleStep | undefined {
     for (const op of body.ops) {
       if (
         op.operator === 'Power' &&
-        isBoxedFunction(op) &&
+        isFunction(op) &&
         op.op1.is(-1) &&
         sym(op.op2) === index
       ) {
@@ -452,7 +452,7 @@ export function simplifySum(x: BoxedExpression): RuleStep | undefined {
         hasIndexTerm = true;
       } else if (
         op.operator === 'Binomial' &&
-        isBoxedFunction(op) &&
+        isFunction(op) &&
         sym(op.op2) === index
       ) {
         hasBinomial = true;
@@ -476,9 +476,9 @@ export function simplifySum(x: BoxedExpression): RuleStep | undefined {
   // Sum of binomial coefficient squares: Sum(C(n,k)^2, [k, 0, n]) → C(2n, n)
   if (
     body.operator === 'Power' &&
-    isBoxedFunction(body) &&
+    isFunction(body) &&
     body.op1.operator === 'Binomial' &&
-    isBoxedFunction(body.op1) &&
+    isFunction(body.op1) &&
     body.op2.is(2) &&
     lower.is(0)
   ) {
@@ -498,7 +498,7 @@ export function simplifySum(x: BoxedExpression): RuleStep | undefined {
   // Sum of k*(k+1): Sum(k*(k+1), [k, 1, n]) → n(n+1)(n+2)/3
   if (
     body.operator === 'Multiply' &&
-    isBoxedFunction(body) &&
+    isFunction(body) &&
     body.ops.length === 2 &&
     lower.is(1)
   ) {
@@ -507,13 +507,13 @@ export function simplifySum(x: BoxedExpression): RuleStep | undefined {
     const isKTimesKPlus1 =
       (sym(op1) === index &&
         op2.operator === 'Add' &&
-        isBoxedFunction(op2) &&
+        isFunction(op2) &&
         op2.ops.length === 2 &&
         op2.ops.some((o) => sym(o) === index) &&
         op2.ops.some((o) => o.is(1))) ||
       (sym(op2) === index &&
         op1.operator === 'Add' &&
-        isBoxedFunction(op1) &&
+        isFunction(op1) &&
         op1.ops.length === 2 &&
         op1.ops.some((o) => sym(o) === index) &&
         op1.ops.some((o) => o.is(1)));
@@ -537,10 +537,10 @@ export function simplifySum(x: BoxedExpression): RuleStep | undefined {
   // Pattern: Divide with 1 over Multiply(k, k+1) or k*(k-1)
   if (
     body.operator === 'Divide' &&
-    isBoxedFunction(body) &&
+    isFunction(body) &&
     body.op1.is(1) &&
     body.op2.operator === 'Multiply' &&
-    isBoxedFunction(body.op2)
+    isFunction(body.op2)
   ) {
     const denom = body.op2;
     if (denom.ops.length === 2) {
@@ -550,13 +550,13 @@ export function simplifySum(x: BoxedExpression): RuleStep | undefined {
         const isKTimesKPlus1 =
           (sym(d1) === index &&
             d2.operator === 'Add' &&
-            isBoxedFunction(d2) &&
+            isFunction(d2) &&
             d2.ops.length === 2 &&
             d2.ops.some((op) => sym(op) === index) &&
             d2.ops.some((op) => op.is(1))) ||
           (sym(d2) === index &&
             d1.operator === 'Add' &&
-            isBoxedFunction(d1) &&
+            isFunction(d1) &&
             d1.ops.length === 2 &&
             d1.ops.some((op) => sym(op) === index) &&
             d1.ops.some((op) => op.is(1)));
@@ -574,13 +574,13 @@ export function simplifySum(x: BoxedExpression): RuleStep | undefined {
         const isKTimesKMinus1 =
           (sym(d1) === index &&
             d2.operator === 'Add' &&
-            isBoxedFunction(d2) &&
+            isFunction(d2) &&
             d2.ops.length === 2 &&
             d2.ops.some((op) => sym(op) === index) &&
             d2.ops.some((op) => op.is(-1))) ||
           (sym(d2) === index &&
             d1.operator === 'Add' &&
-            isBoxedFunction(d1) &&
+            isFunction(d1) &&
             d1.ops.length === 2 &&
             d1.ops.some((op) => sym(op) === index) &&
             d1.ops.some((op) => op.is(-1)));
@@ -599,7 +599,7 @@ export function simplifySum(x: BoxedExpression): RuleStep | undefined {
   }
 
   // Factor out constants: Sum(c * f(n), [n, a, b]) → c * Sum(f(n), [n, a, b])
-  if (body.operator === 'Multiply' && isBoxedFunction(body)) {
+  if (body.operator === 'Multiply' && isFunction(body)) {
     const constantFactors: BoxedExpression[] = [];
     const indexFactors: BoxedExpression[] = [];
 

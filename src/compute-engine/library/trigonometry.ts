@@ -13,7 +13,7 @@ import { apply2 } from '../boxed-expression/apply';
 
 import { reducedRational } from '../numerics/rationals';
 import type { OperatorDefinition, SymbolDefinitions } from '../global-types';
-import { isBoxedNumber } from '../boxed-expression/type-guards';
+import { isNumber } from '../boxed-expression/type-guards';
 import { numericTypeHandler } from './type-handlers';
 
 //
@@ -57,7 +57,7 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
         if (ce.angularUnit === 'deg') return ops[0];
         if (ops.length !== 1) return ce._fn('Degrees', ops);
         const arg = ops[0];
-        if (!isBoxedNumber(arg) || !arg.isValid) return ce._fn('Degrees', ops);
+        if (!isNumber(arg) || !arg.isValid) return ce._fn('Degrees', ops);
 
         let fArg = arg.re;
 

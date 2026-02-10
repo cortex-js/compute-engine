@@ -1,6 +1,6 @@
 import type {
   BoxedExpression,
-  SemiBoxedExpression,
+  ExpressionInput,
   ValueDefinition,
   BoxedValueDefinition,
   CollectionHandlers,
@@ -53,8 +53,8 @@ export class _BoxedValueDefinition
   // for example when the precision of the Compute Engine is changed.
   private _defValue?:
     | LatexString
-    | SemiBoxedExpression
-    | ((ce: ComputeEngine) => SemiBoxedExpression | null);
+    | ExpressionInput
+    | ((ce: ComputeEngine) => ExpressionInput | null);
 
   // If `null`, the value needs to be recalculated from _defValue
   // If `undefined`, the value is not defined (for example, the symbol `True` does not have a value: the symbol itself *is* the value)
@@ -229,8 +229,8 @@ function dynamicValue(
   value:
     | undefined
     | LatexString
-    | SemiBoxedExpression
-    | ((ce: ComputeEngine) => SemiBoxedExpression | null)
+    | ExpressionInput
+    | ((ce: ComputeEngine) => ExpressionInput | null)
 ) {
   if (value === undefined) return undefined;
 

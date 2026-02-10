@@ -2,7 +2,7 @@ import type {
   BoxedExpression,
   IComputeEngine as ComputeEngine,
 } from '../global-types';
-import { isBoxedFunction, isBoxedSymbol, isBoxedNumber } from './type-guards';
+import { isFunction, isSymbol, isNumber } from './type-guards';
 
 /**
  * Get inequality bounds for a symbol from the assumption database.
@@ -44,7 +44,7 @@ export function getInequalityBoundsFromAssumptions(
     // Assumptions are normalized to Less or LessEqual with RHS = 0
     if (op !== 'Less' && op !== 'LessEqual') continue;
 
-    if (!isBoxedFunction(assumption)) continue;
+    if (!isFunction(assumption)) continue;
     const ops = assumption.ops;
     if (ops.length !== 2) continue;
 
@@ -58,9 +58,9 @@ export function getInequalityBoundsFromAssumptions(
     // Case 1: Negate(symbol) < 0 => -symbol < 0 => symbol > 0
     // This gives us a lower bound of 0
     if (
-      isBoxedFunction(lhs) &&
+      isFunction(lhs) &&
       lhs.operator === 'Negate' &&
-      isBoxedSymbol(lhs.op1) &&
+      isSymbol(lhs.op1) &&
       lhs.op1.symbol === symbol
     ) {
       const bound = ce.Zero;
@@ -75,19 +75,19 @@ export function getInequalityBoundsFromAssumptions(
 
     // Case 2: Add(Negate(symbol), k) < 0 => k - symbol < 0 => symbol > k
     // This gives us a lower bound of k
-    if (isBoxedFunction(lhs) && lhs.operator === 'Add') {
+    if (isFunction(lhs) && lhs.operator === 'Add') {
       let hasNegatedSymbol = false;
       let constantSum = 0;
 
       for (const term of lhs.ops) {
         if (
-          isBoxedFunction(term) &&
+          isFunction(term) &&
           term.operator === 'Negate' &&
-          isBoxedSymbol(term.op1) &&
+          isSymbol(term.op1) &&
           term.op1.symbol === symbol
         ) {
           hasNegatedSymbol = true;
-        } else if (isBoxedNumber(term)) {
+        } else if (isNumber(term)) {
           const val =
             typeof term.numericValue === 'number'
               ? term.numericValue
@@ -112,7 +112,7 @@ export function getInequalityBoundsFromAssumptions(
     }
 
     // Case 3: symbol < 0 => symbol has upper bound 0
-    if (isBoxedSymbol(lhs) && lhs.symbol === symbol) {
+    if (isSymbol(lhs) && lhs.symbol === symbol) {
       const bound = ce.Zero;
       if (
         result.upperBound === undefined ||
@@ -125,14 +125,14 @@ export function getInequalityBoundsFromAssumptions(
 
     // Case 4: Add(symbol, k) < 0 => symbol + k < 0 => symbol < -k
     // This gives us an upper bound of -k
-    if (isBoxedFunction(lhs) && lhs.operator === 'Add') {
+    if (isFunction(lhs) && lhs.operator === 'Add') {
       let hasSymbol = false;
       let constantSum = 0;
 
       for (const term of lhs.ops) {
-        if (isBoxedSymbol(term) && term.symbol === symbol) {
+        if (isSymbol(term) && term.symbol === symbol) {
           hasSymbol = true;
-        } else if (isBoxedNumber(term)) {
+        } else if (isNumber(term)) {
           const val =
             typeof term.numericValue === 'number'
               ? term.numericValue

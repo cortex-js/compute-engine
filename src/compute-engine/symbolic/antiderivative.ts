@@ -12,9 +12,9 @@ import {
   polynomialDivide,
 } from '../boxed-expression/polynomials';
 import {
-  isBoxedFunction,
-  isBoxedNumber,
-  isBoxedSymbol,
+  isFunction,
+  isNumber,
+  isSymbol,
   sym,
 } from '../boxed-expression/type-guards';
 
@@ -54,12 +54,12 @@ function liatePriority(expr: BoxedExpression, index: string): number {
   if (sym(expr) === index) return 3;
   if (
     op === 'Power' &&
-    isBoxedFunction(expr) &&
+    isFunction(expr) &&
     sym(expr.op1) === index &&
     !expr.op2.has(index)
   )
     return 3;
-  if (op === 'Sqrt' && isBoxedFunction(expr) && expr.op1.has(index)) return 3;
+  if (op === 'Sqrt' && isFunction(expr) && expr.op1.has(index)) return 3;
 
   // Trigonometric functions - lower priority (easier to integrate repeatedly)
   if (
@@ -76,7 +76,7 @@ function liatePriority(expr: BoxedExpression, index: string): number {
   if (op === 'Exp') return 1;
   if (
     op === 'Power' &&
-    isBoxedFunction(expr) &&
+    isFunction(expr) &&
     !expr.op1.has(index) &&
     expr.op2.has(index)
   )
@@ -147,24 +147,24 @@ function antiderivativeSimple(
     return ce.box(['Multiply', fn, ce.symbol(index)]).simplify();
 
   // Basic trig
-  if (fn.operator === 'Sin' && isBoxedFunction(fn) && sym(fn.op1) === index)
+  if (fn.operator === 'Sin' && isFunction(fn) && sym(fn.op1) === index)
     return ce.box(['Negate', ['Cos', index]]);
-  if (fn.operator === 'Cos' && isBoxedFunction(fn) && sym(fn.op1) === index)
+  if (fn.operator === 'Cos' && isFunction(fn) && sym(fn.op1) === index)
     return ce.box(['Sin', index]);
 
   // Exponential
-  if (fn.operator === 'Exp' && isBoxedFunction(fn) && sym(fn.op1) === index)
+  if (fn.operator === 'Exp' && isFunction(fn) && sym(fn.op1) === index)
     return fn;
   if (
     fn.operator === 'Power' &&
-    isBoxedFunction(fn) &&
+    isFunction(fn) &&
     sym(fn.op1) === 'ExponentialE' &&
     sym(fn.op2) === index
   )
     return fn;
 
   // Power rule: x^n -> x^(n+1)/(n+1)
-  if (fn.operator === 'Power' && isBoxedFunction(fn) && sym(fn.op1) === index) {
+  if (fn.operator === 'Power' && isFunction(fn) && sym(fn.op1) === index) {
     const exponent = fn.op2;
     if (!exponent.has(index) && !exponent.is(-1)) {
       return ce
@@ -193,7 +193,7 @@ function antiderivativeWithByParts(
   if (simple) return simple;
 
   // For products, try integration by parts
-  if (fn.operator === 'Multiply' && isBoxedFunction(fn)) {
+  if (fn.operator === 'Multiply' && isFunction(fn)) {
     const variableFactors = fn.ops.filter((op) => op.has(index));
     if (variableFactors.length >= 2) {
       const result = tryIntegrationByParts(variableFactors, index, depth);
@@ -222,7 +222,7 @@ function tryUSubstitution(
   fn: BoxedExpression,
   index: string
 ): BoxedExpression | null {
-  if (fn.operator !== 'Multiply' || !isBoxedFunction(fn)) return null;
+  if (fn.operator !== 'Multiply' || !isFunction(fn)) return null;
 
   const ce = fn.engine;
   const factors = fn.ops;
@@ -299,7 +299,7 @@ function getInnerFunction(
 
   if (
     compositeFunctions.includes(op) &&
-    isBoxedFunction(expr) &&
+    isFunction(expr) &&
     expr.nops === 1
   ) {
     const inner = expr.op1;
@@ -313,7 +313,7 @@ function getInnerFunction(
   // Handle e^(g(x)) which is ['Power', 'ExponentialE', g(x)]
   if (
     op === 'Power' &&
-    isBoxedFunction(expr) &&
+    isFunction(expr) &&
     sym(expr.op1) === 'ExponentialE'
   ) {
     const inner = expr.op2;
@@ -360,7 +360,7 @@ function tryLinearSubstitution(
   // or just ax (when b = 0)
   let coefficient: BoxedExpression | null = null;
 
-  if (inner.operator === 'Multiply' && isBoxedFunction(inner)) {
+  if (inner.operator === 'Multiply' && isFunction(inner)) {
     // Check if it's c*x form
     const factors = inner.ops;
     const varFactor = factors.find((f) => sym(f) === index);
@@ -373,7 +373,7 @@ function tryLinearSubstitution(
             : ce.box(['Multiply', ...constFactors]);
       }
     }
-  } else if (inner.operator === 'Add' && isBoxedFunction(inner)) {
+  } else if (inner.operator === 'Add' && isFunction(inner)) {
     // Check for ax + b form
     const terms = inner.ops;
     let linearTerm: BoxedExpression | null = null;
@@ -384,7 +384,7 @@ function tryLinearSubstitution(
         constantTerms.push(term);
       } else if (sym(term) === index) {
         linearTerm = ce.One;
-      } else if (term.operator === 'Multiply' && isBoxedFunction(term)) {
+      } else if (term.operator === 'Multiply' && isFunction(term)) {
         const factors = term.ops;
         const varFactor = factors.find((f) => sym(f) === index);
         if (varFactor) {
@@ -467,11 +467,11 @@ function tryCyclicExpTrigIntegral(
 
   for (const f of factors) {
     // Check for e^x
-    if (f.operator === 'Exp' && isBoxedFunction(f) && sym(f.op1) === index) {
+    if (f.operator === 'Exp' && isFunction(f) && sym(f.op1) === index) {
       expFactor = f;
     } else if (
       f.operator === 'Power' &&
-      isBoxedFunction(f) &&
+      isFunction(f) &&
       sym(f.op1) === 'ExponentialE' &&
       sym(f.op2) === index
     ) {
@@ -483,7 +483,7 @@ function tryCyclicExpTrigIntegral(
     }
   }
 
-  if (!expFactor || !trigFactor || !isBoxedFunction(trigFactor)) return null;
+  if (!expFactor || !trigFactor || !isFunction(trigFactor)) return null;
 
   const trigOp = trigFactor.operator as 'Sin' | 'Cos';
   const trigArg = trigFactor.op1;
@@ -514,7 +514,7 @@ function tryCyclicExpTrigIntegral(
   }
 
   // Case 2: sin(ax) where argument is just a*x (Multiply)
-  if (trigArg.operator === 'Multiply' && isBoxedFunction(trigArg)) {
+  if (trigArg.operator === 'Multiply' && isFunction(trigArg)) {
     // Find the coefficient and the variable
     let coefficient: BoxedExpression | null = null;
     let hasIndex = false;
@@ -604,7 +604,7 @@ const INTEGRATION_RULES: Rule[] = [
       ['Multiply', 2, ['Power', ['Add', ['Multiply', '_a', '_x'], '__b'], 3]],
       ['Multiply', 3, '_a'],
     ],
-    condition: (sub) => filter(sub) && isBoxedNumber(sub._a),
+    condition: (sub) => filter(sub) && isNumber(sub._a),
   },
 
   // \sqrt[3]{ax + b} -> \frac{3}{4a} (ax + b)^{4/3}
@@ -615,7 +615,7 @@ const INTEGRATION_RULES: Rule[] = [
       ['Multiply', 3, ['Power', ['Add', ['Multiply', '_a', '_x'], '__b'], 4]],
       ['Multiply', 4, '_a'],
     ],
-    condition: (sub) => filter(sub) && isBoxedNumber(sub._a),
+    condition: (sub) => filter(sub) && isNumber(sub._a),
   },
 
   // a^x -> \frac{a^x}{\ln(a)} where a is a constant (doesn't contain x)
@@ -640,7 +640,7 @@ const INTEGRATION_RULES: Rule[] = [
   {
     match: ['Power', ['Add', '_x', '__b'], -1],
     replace: ['Ln', ['Abs', ['Add', '_x', '__b']]],
-    condition: (sub) => filter(sub) && isBoxedSymbol(sub._x),
+    condition: (sub) => filter(sub) && isSymbol(sub._x),
   },
 
   // 1/(ax + b) -> \ln(ax + b) / a
@@ -658,7 +658,7 @@ const INTEGRATION_RULES: Rule[] = [
   {
     match: ['Divide', 1, ['Add', '_x', '__b']],
     replace: ['Ln', ['Abs', ['Add', '_x', '__b']]],
-    condition: (sub) => filter(sub) && isBoxedSymbol(sub._x),
+    condition: (sub) => filter(sub) && isSymbol(sub._x),
   },
 
   // \ln(ax + b) -> (ax + b) \ln(ax + b) - ax - b
@@ -1267,7 +1267,7 @@ const INTEGRATION_RULES: Rule[] = [
       ['Exp', '_x'],
       ['Subtract', ['Sin', '_x'], ['Cos', '_x']],
     ],
-    condition: (sub) => filter(sub) && isBoxedSymbol(sub._x),
+    condition: (sub) => filter(sub) && isSymbol(sub._x),
   },
 
   // e^x * cos(x) -> (e^x/2)(sin(x) + cos(x))
@@ -1279,7 +1279,7 @@ const INTEGRATION_RULES: Rule[] = [
       ['Exp', '_x'],
       ['Add', ['Sin', '_x'], ['Cos', '_x']],
     ],
-    condition: (sub) => filter(sub) && isBoxedSymbol(sub._x),
+    condition: (sub) => filter(sub) && isSymbol(sub._x),
   },
 
   // sin(x) * e^x -> (e^x/2)(sin(x) - cos(x)) (commuted order)
@@ -1291,7 +1291,7 @@ const INTEGRATION_RULES: Rule[] = [
       ['Exp', '_x'],
       ['Subtract', ['Sin', '_x'], ['Cos', '_x']],
     ],
-    condition: (sub) => filter(sub) && isBoxedSymbol(sub._x),
+    condition: (sub) => filter(sub) && isSymbol(sub._x),
   },
 
   // cos(x) * e^x -> (e^x/2)(sin(x) + cos(x)) (commuted order)
@@ -1303,7 +1303,7 @@ const INTEGRATION_RULES: Rule[] = [
       ['Exp', '_x'],
       ['Add', ['Sin', '_x'], ['Cos', '_x']],
     ],
-    condition: (sub) => filter(sub) && isBoxedSymbol(sub._x),
+    condition: (sub) => filter(sub) && isSymbol(sub._x),
   },
 
   // e^x * sin(ax) -> (e^x/(a² + 1))(sin(ax) - a*cos(ax)) (no constant term)
@@ -1459,7 +1459,7 @@ function getLinearCoefficients(
   }
 
   // Must be an Add expression
-  if (expr.operator !== 'Add' || !isBoxedFunction(expr)) return null;
+  if (expr.operator !== 'Add' || !isFunction(expr)) return null;
 
   const ops = expr.ops;
   let a: BoxedExpression | null = null;
@@ -1472,7 +1472,7 @@ function getLinearCoefficients(
     } else if (sym(op) === index) {
       // Just x (coefficient 1)
       a = a ? a.add(ce.One) : ce.One;
-    } else if (op.operator === 'Multiply' && isBoxedFunction(op)) {
+    } else if (op.operator === 'Multiply' && isFunction(op)) {
       // Check for c*x form
       const factors = op.ops;
       const varFactor = factors.find((f) => sym(f) === index);
@@ -1516,18 +1516,18 @@ function getQuadraticCoefficients(
     // Check if it's just x² or c*x²
     if (
       expr.operator === 'Power' &&
-      isBoxedFunction(expr) &&
+      isFunction(expr) &&
       sym(expr.op1) === index &&
       expr.op2.is(2)
     ) {
       return { a: ce.One, b: ce.Zero, c: ce.Zero };
     }
-    if (expr.operator === 'Multiply' && isBoxedFunction(expr)) {
+    if (expr.operator === 'Multiply' && isFunction(expr)) {
       const factors = expr.ops;
       const powerFactor = factors.find(
         (f) =>
           f.operator === 'Power' &&
-          isBoxedFunction(f) &&
+          isFunction(f) &&
           sym(f.op1) === index &&
           f.op2.is(2)
       );
@@ -1547,7 +1547,7 @@ function getQuadraticCoefficients(
     return null;
   }
 
-  if (!isBoxedFunction(expr)) return null;
+  if (!isFunction(expr)) return null;
   const ops = expr.ops;
   let a: BoxedExpression = ce.Zero; // coefficient of x²
   let b: BoxedExpression = ce.Zero; // coefficient of x
@@ -1562,19 +1562,19 @@ function getQuadraticCoefficients(
       b = b.add(ce.One);
     } else if (
       op.operator === 'Power' &&
-      isBoxedFunction(op) &&
+      isFunction(op) &&
       sym(op.op1) === index &&
       op.op2.is(2)
     ) {
       // x² term
       a = a.add(ce.One);
-    } else if (op.operator === 'Multiply' && isBoxedFunction(op)) {
+    } else if (op.operator === 'Multiply' && isFunction(op)) {
       const factors = op.ops;
       // Check for c*x² form
       const powerFactor = factors.find(
         (f) =>
           f.operator === 'Power' &&
-          isBoxedFunction(f) &&
+          isFunction(f) &&
           sym(f.op1) === index &&
           f.op2.is(2)
       );
@@ -1625,11 +1625,11 @@ export function antiderivative(
   fn: BoxedExpression,
   index: string
 ): BoxedExpression {
-  if (fn.operator === 'Function' && isBoxedFunction(fn))
+  if (fn.operator === 'Function' && isFunction(fn))
     return antiderivative(fn.op1, index);
-  if (fn.operator === 'Block' && isBoxedFunction(fn))
+  if (fn.operator === 'Block' && isFunction(fn))
     return antiderivative(fn.op1, index);
-  if (fn.operator === 'Delimiter' && isBoxedFunction(fn))
+  if (fn.operator === 'Delimiter' && isFunction(fn))
     return antiderivative(fn.op1, index);
 
   const ce = fn.engine;
@@ -1641,15 +1641,15 @@ export function antiderivative(
   if (!fn.has(index)) return ce.box(['Multiply', fn, ce.symbol(index)]);
 
   // Apply the chain rule
-  if (fn.operator === 'Add' && isBoxedFunction(fn)) {
+  if (fn.operator === 'Add' && isFunction(fn)) {
     const terms = fn.ops.map((op) => antiderivative(op, index));
     return add(...(terms as BoxedExpression[])).evaluate();
   }
 
-  if (fn.operator === 'Negate' && isBoxedFunction(fn))
+  if (fn.operator === 'Negate' && isFunction(fn))
     return antiderivative(fn.op1, index).neg();
 
-  if (fn.operator === 'Multiply' && isBoxedFunction(fn)) {
+  if (fn.operator === 'Multiply' && isFunction(fn)) {
     // Separate constant factors from variable factors
     const constantFactors: BoxedExpression[] = [];
     const variableFactors: BoxedExpression[] = [];
@@ -1708,7 +1708,7 @@ export function antiderivative(
     // Fall through to rule-based matching
   }
 
-  if (fn.operator === 'Divide' && isBoxedFunction(fn)) {
+  if (fn.operator === 'Divide' && isFunction(fn)) {
     // First try to cancel common factors in the numerator and denominator
     // This helps with cases like ∫ (x+1)/(x²+3x+2) dx where (x+1) cancels
     const cancelled = cancelCommonFactors(fn, index);
@@ -1754,7 +1754,7 @@ export function antiderivative(
     if (
       !fn.op1.has(index) &&
       fn.op2.operator === 'Add' &&
-      isBoxedFunction(fn.op2) &&
+      isFunction(fn.op2) &&
       fn.op2.nops === 2
     ) {
       const addOps = fn.op2.ops;
@@ -1762,7 +1762,7 @@ export function antiderivative(
       const powerTerm = addOps.find(
         (op) =>
           op.operator === 'Power' &&
-          isBoxedFunction(op) &&
+          isFunction(op) &&
           sym(op.op1) === index &&
           op.op2.is(2)
       );
@@ -1781,25 +1781,25 @@ export function antiderivative(
     if (
       fn.op1.is(1) &&
       fn.op2.operator === 'Multiply' &&
-      isBoxedFunction(fn.op2) &&
+      isFunction(fn.op2) &&
       fn.op2.nops === 2
     ) {
       const mulOps = fn.op2.ops;
       const xTerm = mulOps.find((op) => sym(op) === index);
       const sqrtTerm = mulOps.find((op) => op.operator === 'Sqrt');
-      if (xTerm && sqrtTerm && isBoxedFunction(sqrtTerm)) {
+      if (xTerm && sqrtTerm && isFunction(sqrtTerm)) {
         const sqrtInner = sqrtTerm.op1;
         // Check if sqrt inner is x² - 1: ['Add', ['Power', 'x', 2], -1]
         if (
           sqrtInner.operator === 'Add' &&
-          isBoxedFunction(sqrtInner) &&
+          isFunction(sqrtInner) &&
           sqrtInner.nops === 2
         ) {
           const innerOps = sqrtInner.ops;
           const powerTerm = innerOps.find(
             (op) =>
               op.operator === 'Power' &&
-              isBoxedFunction(op) &&
+              isFunction(op) &&
               sym(op.op1) === index &&
               op.op2.is(2)
           );
@@ -1836,7 +1836,7 @@ export function antiderivative(
     if (
       (fn.op1.is(1) || !fn.op1.has(index)) &&
       fn.op2.operator === 'Multiply' &&
-      isBoxedFunction(fn.op2)
+      isFunction(fn.op2)
     ) {
       const factors = fn.op2.ops;
       // For each factor f, check if numerator / (product of other factors) = c * d/dx(f)
@@ -1892,7 +1892,7 @@ export function antiderivative(
     // ∫ 1/(ax+b)^n dx = -1/(a(n-1)(ax+b)^(n-1))
     if (fn.op1.is(1) || !fn.op1.has(index)) {
       const denom = fn.op2;
-      if (denom.operator === 'Power' && isBoxedFunction(denom)) {
+      if (denom.operator === 'Power' && isFunction(denom)) {
         const base = denom.op1;
         const exp = denom.op2;
         const n = exp.re;
@@ -1967,7 +1967,7 @@ export function antiderivative(
     // Reduction formula: ∫ 1/(x²+a²)^n dx = x/(2a²(n-1)(x²+a²)^(n-1)) + (2n-3)/(2a²(n-1)) * ∫ 1/(x²+a²)^(n-1) dx
     if (fn.op1.is(1) || !fn.op1.has(index)) {
       const denom = fn.op2;
-      if (denom.operator === 'Power' && isBoxedFunction(denom)) {
+      if (denom.operator === 'Power' && isFunction(denom)) {
         const base = denom.op1;
         const exp = denom.op2;
         const n = exp.re;
@@ -2026,7 +2026,7 @@ export function antiderivative(
       // Handle ∫ 1/((x-r)(x²+bx+c)) dx where quadratic is irreducible
       if (
         denominator.operator === 'Multiply' &&
-        isBoxedFunction(denominator) &&
+        isFunction(denominator) &&
         denominator.nops === 2
       ) {
         const factors = denominator.ops;
@@ -2245,18 +2245,18 @@ export function antiderivative(
 
   // Handle ∫ √(1/(1-x²)) dx = arcsin(x)
   // Canonical form: ['Sqrt', ['Divide', 1, ['Add', ['Negate', ['Power', 'x', 2]], 1]]]
-  if (fn.operator === 'Sqrt' && isBoxedFunction(fn)) {
+  if (fn.operator === 'Sqrt' && isFunction(fn)) {
     const inner = fn.op1;
     if (
       inner.operator === 'Divide' &&
-      isBoxedFunction(inner) &&
+      isFunction(inner) &&
       inner.op1.is(1)
     ) {
       const denom = inner.op2;
       // Check for 1-x² form: ['Add', ['Negate', ['Power', 'x', 2]], 1]
       if (
         denom.operator === 'Add' &&
-        isBoxedFunction(denom) &&
+        isFunction(denom) &&
         denom.nops === 2
       ) {
         const addOps = denom.ops;
@@ -2264,9 +2264,9 @@ export function antiderivative(
         const negPowerTerm = addOps.find(
           (op) =>
             op.operator === 'Negate' &&
-            isBoxedFunction(op) &&
+            isFunction(op) &&
             op.op1.operator === 'Power' &&
-            isBoxedFunction(op.op1) &&
+            isFunction(op.op1) &&
             sym(op.op1.op1) === index &&
             op.op1.op2.is(2)
         );
@@ -2279,7 +2279,7 @@ export function antiderivative(
         const powerTerm = addOps.find(
           (op) =>
             op.operator === 'Power' &&
-            isBoxedFunction(op) &&
+            isFunction(op) &&
             sym(op.op1) === index &&
             op.op2.is(2)
         );
@@ -2300,7 +2300,7 @@ export function antiderivative(
     // These handle ∫√(a² ± x²) dx and ∫√(x² - a²) dx
     if (
       inner.operator === 'Add' &&
-      isBoxedFunction(inner) &&
+      isFunction(inner) &&
       inner.nops === 2
     ) {
       const addOps = inner.ops;
@@ -2309,7 +2309,7 @@ export function antiderivative(
       const x2Term = addOps.find(
         (op) =>
           op.operator === 'Power' &&
-          isBoxedFunction(op) &&
+          isFunction(op) &&
           sym(op.op1) === index &&
           op.op2.is(2)
       );
@@ -2317,9 +2317,9 @@ export function antiderivative(
       const negX2Term = addOps.find(
         (op) =>
           op.operator === 'Negate' &&
-          isBoxedFunction(op) &&
+          isFunction(op) &&
           op.op1.operator === 'Power' &&
-          isBoxedFunction(op.op1) &&
+          isFunction(op.op1) &&
           sym(op.op1.op1) === index &&
           op.op1.op2.is(2)
       );
@@ -2391,27 +2391,27 @@ export function antiderivative(
   }
 
   // Handle basic functions: e^x, sin(x), cos(x), ln(x), x^n
-  if (fn.operator === 'Exp' && isBoxedFunction(fn) && sym(fn.op1) === index) {
+  if (fn.operator === 'Exp' && isFunction(fn) && sym(fn.op1) === index) {
     // ∫e^x dx = e^x
     return fn;
   }
 
-  if (fn.operator === 'Sin' && isBoxedFunction(fn) && sym(fn.op1) === index) {
+  if (fn.operator === 'Sin' && isFunction(fn) && sym(fn.op1) === index) {
     // ∫sin(x) dx = -cos(x)
     return ce.box(['Negate', ['Cos', index]]);
   }
 
-  if (fn.operator === 'Cos' && isBoxedFunction(fn) && sym(fn.op1) === index) {
+  if (fn.operator === 'Cos' && isFunction(fn) && sym(fn.op1) === index) {
     // ∫cos(x) dx = sin(x)
     return ce.box(['Sin', index]);
   }
 
-  if (fn.operator === 'Ln' && isBoxedFunction(fn) && sym(fn.op1) === index) {
+  if (fn.operator === 'Ln' && isFunction(fn) && sym(fn.op1) === index) {
     // ∫ln(x) dx = x*ln(x) - x
     return ce.box(['Subtract', ['Multiply', index, ['Ln', index]], index]);
   }
 
-  if (fn.operator === 'Power' && isBoxedFunction(fn)) {
+  if (fn.operator === 'Power' && isFunction(fn)) {
     // ∫e^x dx = e^x (e^x is parsed as ['Power', 'ExponentialE', 'x'])
     if (sym(fn.op1) === 'ExponentialE' && sym(fn.op2) === index) {
       return fn;
@@ -2420,7 +2420,7 @@ export function antiderivative(
     // ∫x^n dx
     if (sym(fn.op1) === index) {
       const exponent = fn.op2;
-      if (isBoxedNumber(exponent)) {
+      if (isNumber(exponent)) {
         if (exponent.is(-1)) {
           // ∫1/x dx = ln|x|
           return ce.box(['Ln', ['Abs', index]]);

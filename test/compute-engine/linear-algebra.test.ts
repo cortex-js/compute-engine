@@ -1,4 +1,4 @@
-import { Expression } from '../../src/math-json/types';
+import { MathJsonExpression as Expression } from '../../src/math-json/types';
 import { engine as ce } from '../utils';
 
 const v2_n: Expression = ['List', 7, 11];

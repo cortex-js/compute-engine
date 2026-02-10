@@ -1,4 +1,4 @@
-import type { Expression } from '../../math-json/types';
+import type { MathJsonExpression as Expression } from '../../math-json/types';
 
 import { _BoxedExpression } from './abstract-boxed-expression';
 import type {
@@ -14,7 +14,7 @@ import type {
   RuleSteps,
   BoxedExpression,
   ReplaceOptions,
-  SemiBoxedExpression,
+  ExpressionInput,
 } from '../global-types';
 
 import {
@@ -27,10 +27,10 @@ import { Parser } from '../latex-syntax/types';
 
 import { isPrime } from './predicates';
 import {
-  isBoxedString,
-  isBoxedNumber,
-  isBoxedSymbol,
-  isBoxedFunction,
+  isString,
+  isNumber,
+  isSymbol,
+  isFunction,
 } from './type-guards';
 // @todo:
 // export function fixPoint(rule: Rule);
@@ -167,9 +167,9 @@ export const ConditionParent = {
 
 export const CONDITIONS = {
   boolean: (x: BoxedExpression) => x.type.matches('boolean'),
-  string: (x: BoxedExpression) => isBoxedString(x),
-  number: (x: BoxedExpression) => isBoxedNumber(x),
-  symbol: (x: BoxedExpression) => isBoxedSymbol(x),
+  string: (x: BoxedExpression) => isString(x),
+  number: (x: BoxedExpression) => isNumber(x),
+  symbol: (x: BoxedExpression) => isSymbol(x),
   expression: (_x: BoxedExpression) => true,
 
   numeric: (x: BoxedExpression) => {
@@ -353,7 +353,7 @@ function parseModifierExpression(parser: Parser): string | null {
  */
 function parseRulePart(
   ce: ComputeEngine,
-  rule?: string | SemiBoxedExpression | RuleReplaceFunction | RuleFunction,
+  rule?: string | ExpressionInput | RuleReplaceFunction | RuleFunction,
   options?: { canonical?: boolean; autoWildcard?: boolean }
 ): BoxedExpression | undefined {
   if (rule === undefined || typeof rule === 'function') return undefined;
@@ -367,7 +367,7 @@ function parseRulePart(
       expr = expr.map(
         (x) => {
           // Only transform single character symbols. Avoid \pi, \imaginaryUnit, etc..
-          if (isBoxedSymbol(x) && x.symbol.length === 1)
+          if (isSymbol(x) && x.symbol.length === 1)
             return ce.symbol('_' + x.symbol);
           return x;
         },
@@ -537,7 +537,7 @@ function parseRule(
     );
   }
 
-  if (!isBoxedFunction(expr)) {
+  if (!isFunction(expr)) {
     if (systemScope) {
       ce.popScope();
     }
@@ -580,7 +580,7 @@ function parseRule(
     // Evaluate the condition as a predicate
     condFn = (sub: BoxedSubstitution): boolean => {
       const evaluated = condition.subs(sub).canonical.evaluate();
-      return isBoxedSymbol(evaluated) && evaluated.symbol === 'True';
+      return isSymbol(evaluated) && evaluated.symbol === 'True';
     };
   }
 
@@ -635,7 +635,7 @@ function boxRule(
       // then evaluate the condition
       condFn = (x: BoxedSubstitution, _ce: ComputeEngine): boolean => {
         const evaluated = condPattern.subs(x).evaluate();
-        return isBoxedSymbol(evaluated) && evaluated.symbol === 'True';
+        return isSymbol(evaluated) && evaluated.symbol === 'True';
       };
     }
   } else {
@@ -766,7 +766,7 @@ export function applyRule(
 
   let operandsMatched = false;
 
-  if (isBoxedFunction(expr) && options?.recursive) {
+  if (isFunction(expr) && options?.recursive) {
     // Apply the rule to the operands of the expression
     const newOps = expr.ops.map((op) => {
       const subExpr = applyRule(rule, op, {}, options);
@@ -876,7 +876,7 @@ export function applyRule(
   if (isRuleStep(result))
     return canonical ? { ...result, value: result.value.canonical } : result;
 
-  if (!isBoxedExpression(result)) {
+  if (!isExpression(result)) {
     throw new Error(
       'Invalid rule replacement result: expected a BoxedExpression or RuleStep'
     );
@@ -976,11 +976,11 @@ export function matchAnyRules(
  * Replace all occurrences of a wildcard in an expression with a the corresponding non-wildcard, e.g. `_x` -> `x`
  */
 function dewildcard(expr: BoxedExpression): BoxedExpression {
-  if (isBoxedSymbol(expr)) {
+  if (isSymbol(expr)) {
     if (expr.symbol.startsWith('_'))
       return expr.engine.symbol(expr.symbol.slice(1));
   }
-  if (isBoxedFunction(expr)) {
+  if (isFunction(expr)) {
     const ops = expr.ops.map((x) => dewildcard(x));
     return expr.engine.function(expr.operator, ops, { form: 'raw' });
   }
@@ -989,9 +989,9 @@ function dewildcard(expr: BoxedExpression): BoxedExpression {
 
 function getWildcards(expr: BoxedExpression): string[] {
   const wildcards: string[] = [];
-  if (isBoxedSymbol(expr) && expr.symbol.startsWith('_'))
+  if (isSymbol(expr) && expr.symbol.startsWith('_'))
     wildcards.push(expr.symbol);
-  if (isBoxedFunction(expr))
+  if (isFunction(expr))
     expr.ops.forEach((x) => wildcards.push(...getWildcards(x)));
   return wildcards;
 }
@@ -1010,7 +1010,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 function isRuleStep(x: unknown): x is RuleStep {
-  return isRecord(x) && 'because' in x && isBoxedExpression(x.value);
+  return isRecord(x) && 'because' in x && isExpression(x.value);
 }
 
 /** @category Rules */
@@ -1018,6 +1018,6 @@ function isBoxedRule(x: unknown): x is BoxedRule {
   return isRecord(x) && x._tag === 'boxed-rule';
 }
 
-function isBoxedExpression(value: unknown): value is BoxedExpression {
+function isExpression(value: unknown): value is BoxedExpression {
   return value instanceof _BoxedExpression;
 }

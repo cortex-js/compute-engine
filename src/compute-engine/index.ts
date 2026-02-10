@@ -10,7 +10,7 @@ import { hidePrivateProperties } from '../common/utils';
 import type { ConfigurationChangeListener } from '../common/configuration-change';
 
 import type {
-  Expression,
+  MathJsonExpression,
   MathJsonSymbol,
   MathJsonNumberObject,
 } from '../math-json/types';
@@ -36,7 +36,7 @@ import type {
   Rule,
   Scope,
   EvalContext,
-  SemiBoxedExpression,
+  ExpressionInput,
   IComputeEngine,
   BoxedDefinition,
   SymbolDefinition,
@@ -1524,11 +1524,11 @@ export class ComputeEngine implements IComputeEngine {
     return this._cacheStore.getOrBuild(cacheName, build, purge);
   }
 
-  /** Return a boxed expression from a number, string or semiboxed expression.
+  /** Return a boxed expression from a number, string or expression input.
    * Calls `ce.function()`, `ce.number()` or `ce.symbol()` as appropriate.
    */
   box(
-    expr: NumericValue | SemiBoxedExpression,
+    expr: NumericValue | ExpressionInput,
     options?: {
       form?: FormOption;
       scope?: Scope | undefined;
@@ -1540,7 +1540,7 @@ export class ComputeEngine implements IComputeEngine {
 
   function(
     name: string,
-    ops: ReadonlyArray<BoxedExpression> | ReadonlyArray<Expression>,
+    ops: ReadonlyArray<BoxedExpression> | ReadonlyArray<MathJsonExpression>,
     options?: {
       metadata?: Metadata;
       form?: FormOption;
@@ -1577,7 +1577,7 @@ export class ComputeEngine implements IComputeEngine {
   /**
    * Add a `["Hold"]` wrapper to `expr`.
    */
-  hold(expr: SemiBoxedExpression): BoxedExpression {
+  hold(expr: ExpressionInput): BoxedExpression {
     return this._fn('Hold', [this.box(expr, { form: 'raw' })]);
   }
 

@@ -1,4 +1,4 @@
-import type { BoxedExpression, SemiBoxedExpression } from './types-expression';
+import type { BoxedExpression, ExpressionInput } from './types-expression';
 
 import type {
   BoxedSubstitution as KernelBoxedSubstitution,
@@ -32,7 +32,7 @@ export type {
  *
  * @category Pattern Matching
  */
-export type Substitution<T = SemiBoxedExpression> = KernelSubstitution<T>;
+export type Substitution<T = ExpressionInput> = KernelSubstitution<T>;
 
 /**
  * @category Pattern Matching

@@ -22,7 +22,7 @@ read the repository [`README.md`](../README.md).
 
 Top-level free functions for common operations — no `ComputeEngine` setup required:
 
-- `parse(latex)` — parse a LaTeX string into a `BoxedExpression`
+- `parse(latex)` — parse a LaTeX string into an `Expression`
 - `simplify(latex | expr)` — simplify a LaTeX string or expression
 - `evaluate(latex | expr)` — evaluate a LaTeX string or expression
 - `N(latex | expr)` — compute a numeric approximation

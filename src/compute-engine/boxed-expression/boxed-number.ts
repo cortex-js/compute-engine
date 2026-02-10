@@ -1,7 +1,10 @@
 import { Complex } from 'complex-esm';
 import { Decimal } from 'decimal.js';
 
-import type { Expression, MathJsonNumberObject } from '../../math-json';
+import type {
+  MathJsonExpression as Expression,
+  MathJsonNumberObject,
+} from '../../math-json';
 
 import { mul, div } from './arithmetic-mul-div';
 
@@ -48,7 +51,7 @@ import type {
   SimplifyOptions,
   NumberLiteralInterface,
 } from '../global-types';
-import { isBoxedNumber, isBoxedSymbol } from './type-guards';
+import { isNumber, isSymbol } from './type-guards';
 
 /**
  * BoxedNumber
@@ -251,7 +254,7 @@ export class BoxedNumber
 
       return ce.number(this._value.add(rhs));
     }
-    if (isBoxedNumber(rhs)) {
+    if (isNumber(rhs)) {
       // @fastpath
       if (typeof this._value === 'number') {
         if (typeof rhs.numericValue === 'number')
@@ -291,7 +294,7 @@ export class BoxedNumber
       return ce.number(rhs.mul(this._value));
     }
 
-    if (isBoxedNumber(rhs))
+    if (isNumber(rhs))
       return ce.number(ce._numericValue(this._value).mul(rhs.numericValue));
 
     return mul(this, rhs);
@@ -370,7 +373,7 @@ export class BoxedNumber
 
     if (base && this.isSame(base)) return this.engine.One;
     if (
-      (!base || (isBoxedSymbol(base) && base.symbol === 'ExponentialE')) &&
+      (!base || (isSymbol(base) && base.symbol === 'ExponentialE')) &&
       this.symbol === 'ExponentialE'
     )
       return this.engine.One;

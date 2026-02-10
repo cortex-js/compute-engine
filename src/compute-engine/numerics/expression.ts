@@ -1,4 +1,4 @@
-import type { Expression } from '../../math-json';
+import type { MathJsonExpression as Expression } from '../../math-json';
 import { isNumberExpression, isNumberObject } from '../../math-json/utils';
 import { bigint } from './bigint';
 import { numberToString } from './strings';

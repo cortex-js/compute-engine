@@ -4,7 +4,7 @@ import { Decimal } from 'decimal.js';
 import type { BoxedExpression } from '../global-types';
 
 import { bignumPreferred } from './utils';
-import { isBoxedNumber } from './type-guards';
+import { isNumber } from './type-guards';
 
 export function apply(
   expr: BoxedExpression,
@@ -12,7 +12,7 @@ export function apply(
   bigFn?: (x: Decimal) => Decimal | Complex | number,
   complexFn?: (x: Complex) => number | Complex
 ): BoxedExpression | undefined {
-  if (!isBoxedNumber(expr)) return undefined;
+  if (!isNumber(expr)) return undefined;
   const ce = expr.engine;
 
   let result: number | Complex | Decimal | undefined = undefined;
@@ -41,7 +41,7 @@ export function apply2(
   bigFn?: (x1: Decimal, x2: Decimal) => Decimal | Complex | number,
   complexFn?: (x1: Complex, x2: number | Complex) => Complex | number
 ): BoxedExpression | undefined {
-  if (!isBoxedNumber(expr1) || !isBoxedNumber(expr2)) return undefined;
+  if (!isNumber(expr1) || !isNumber(expr2)) return undefined;
 
   const ce = expr1.engine;
 

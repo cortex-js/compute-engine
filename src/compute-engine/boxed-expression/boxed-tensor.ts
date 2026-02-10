@@ -1,4 +1,4 @@
-import type { Expression } from '../../math-json/types';
+import type { MathJsonExpression as Expression } from '../../math-json/types';
 
 import type {
   IComputeEngine as ComputeEngine,
@@ -30,8 +30,8 @@ import { NumericValue } from '../numeric-value/types';
 
 import { _BoxedExpression } from './abstract-boxed-expression';
 import { isWildcard, wildcardName } from './pattern-utils';
-import { hashCode, isBoxedExpression } from './utils';
-import { isBoxedFunction } from './type-guards';
+import { hashCode, isExpression } from './utils';
+import { isFunction } from './type-guards';
 
 /**
  * A boxed tensor represents an expression that can be represented by a tensor.
@@ -136,12 +136,12 @@ export class BoxedTensor<T extends TensorDataType>
   get nops(): number {
     if (this._tensor) return this._tensor.shape[0];
     const s = this.structural;
-    return isBoxedFunction(s) ? s.nops : 0;
+    return isFunction(s) ? s.nops : 0;
   }
 
   get ops(): ReadonlyArray<BoxedExpression> {
     const s = this.structural;
-    return isBoxedFunction(s) ? s.ops : [];
+    return isFunction(s) ? s.ops : [];
   }
 
   get op1(): BoxedExpression {
@@ -151,7 +151,7 @@ export class BoxedTensor<T extends TensorDataType>
       return this.engine.box(data[0]);
     }
     const s = this.structural;
-    return isBoxedFunction(s) ? s.op1 : this.engine.Nothing;
+    return isFunction(s) ? s.op1 : this.engine.Nothing;
   }
 
   get op2(): BoxedExpression {
@@ -161,7 +161,7 @@ export class BoxedTensor<T extends TensorDataType>
       return this.engine.box(data[1]);
     }
     const s = this.structural;
-    return isBoxedFunction(s) ? s.op2 : this.engine.Nothing;
+    return isFunction(s) ? s.op2 : this.engine.Nothing;
   }
 
   get op3(): BoxedExpression {
@@ -171,7 +171,7 @@ export class BoxedTensor<T extends TensorDataType>
       return this.engine.box(data[2]);
     }
     const s = this.structural;
-    return isBoxedFunction(s) ? s.op3 : this.engine.Nothing;
+    return isFunction(s) ? s.op3 : this.engine.Nothing;
   }
 
   //
@@ -316,7 +316,7 @@ export class BoxedTensor<T extends TensorDataType>
         // slice(i - 1) returns a tensor of rank-1 less
         const row = self.tensor.slice(i - 1);
         const rowExpr = row.expression;
-        const rowOps = isBoxedFunction(rowExpr) ? rowExpr.ops : [];
+        const rowOps = isFunction(rowExpr) ? rowExpr.ops : [];
         yield new BoxedTensor(self.engine, {
           ops: rowOps,
           shape: row.shape,
@@ -338,7 +338,7 @@ export class BoxedTensor<T extends TensorDataType>
     } else if (row.rank > 1) {
       // Higher rank tensor: return a new boxed tensor
       const rowExpr = row.expression;
-      const rowOps = isBoxedFunction(rowExpr) ? rowExpr.ops : [];
+      const rowOps = isFunction(rowExpr) ? rowExpr.ops : [];
       return new BoxedTensor(this.engine, {
         ops: rowOps,
         shape: row.shape,
@@ -352,7 +352,7 @@ export class BoxedTensor<T extends TensorDataType>
     pattern: BoxedExpression,
     options?: PatternMatchOptions
   ): BoxedSubstitution | null {
-    if (!isBoxedExpression(pattern))
+    if (!isExpression(pattern))
       pattern = this.engine.box(pattern, { form: 'raw' });
     if (isWildcard(pattern)) return { [wildcardName(pattern)!]: this };
     return this.structural.match(pattern, options);
@@ -390,7 +390,7 @@ export class BoxedTensor<T extends TensorDataType>
   }
 }
 
-export function isBoxedTensor(
+export function isTensor(
   val: unknown
 ): val is BoxedTensor<TensorDataType> {
   return val instanceof BoxedTensor;
@@ -438,7 +438,7 @@ export function expressionTensorInfo(
     // 4a. all nested → recurse
     if (nestedCount === len) {
       for (const item of t) {
-        if (isBoxedFunction(item)) {
+        if (isFunction(item)) {
           visit(item.ops, axis + 1);
           if (!valid) return;
         }
@@ -479,7 +479,7 @@ function expressionAsTensor<T extends TensorDataType = 'expression'>(
 
     for (const item of t) {
       if (!isValid) return;
-      if (item.operator === operator && isBoxedFunction(item))
+      if (item.operator === operator && isFunction(item))
         visit(item.ops, axis + 1);
       else {
         const v = cast(item, dtype);

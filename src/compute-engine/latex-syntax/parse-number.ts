@@ -5,7 +5,7 @@
  * that holds the pre-tokenized formatting strings from ParseLatexOptions.
  */
 
-import type { Expression } from '../../math-json/types';
+import type { MathJsonExpression as Expression } from '../../math-json/types';
 import type { LatexToken, Parser } from './types';
 import { SMALL_INTEGER } from '../numerics/numeric';
 

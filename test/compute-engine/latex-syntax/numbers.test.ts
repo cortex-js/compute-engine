@@ -1,5 +1,5 @@
 import { SerializeLatexOptions } from '../../../src/compute-engine/latex-syntax/public.ts';
-import { isBoxedNumber } from '../../../src/compute-engine/boxed-expression/type-guards';
+import { isNumber } from '../../../src/compute-engine/boxed-expression/type-guards';
 import { exprToString, engine as ce } from '../../utils';
 
 function parse(s: string) {
@@ -9,7 +9,7 @@ function parse(s: string) {
 /** parseVal checks that the result is a numericValue (or an integer) */
 function parseVal(s: string): string | number {
   const expr = ce.parse(s);
-  if (!isBoxedNumber(expr)) return NaN;
+  if (!isNumber(expr)) return NaN;
   const result = expr.numericValue;
   if (typeof result === 'number') return result;
   return result.toString();

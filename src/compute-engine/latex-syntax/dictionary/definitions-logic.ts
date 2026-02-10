@@ -13,7 +13,7 @@ import {
   operands,
   symbol,
 } from '../../../math-json/utils';
-import { Expression } from '../../../math-json';
+import type { MathJsonExpression as Expression } from '../../../math-json';
 import { DEFINITIONS_INEQUALITIES } from './definitions-relational-operators';
 
 // See https://en.wikipedia.org/wiki/List_of_logic_symbols

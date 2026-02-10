@@ -382,7 +382,7 @@ box(expr, options?): BoxedExpression
 
 ####### expr
 
-[`NumericValue`](#numericvalue) | [`SemiBoxedExpression`](#semiboxedexpression)
+[`NumericValue`](#numericvalue) | [`ExpressionInput`](#expressioninput)
 
 ####### options?
 
@@ -410,7 +410,7 @@ function(name, ops, options?): BoxedExpression
 
 ####### ops
 
-readonly [`SemiBoxedExpression`](#semiboxedexpression)[]
+readonly [`ExpressionInput`](#expressioninput)[]
 
 ####### options?
 
@@ -594,7 +594,7 @@ typeError(expectedType, actualType, where?): BoxedExpression
 
 ####### where?
 
-[`SemiBoxedExpression`](#semiboxedexpression)
+[`ExpressionInput`](#expressioninput)
 
 </MemberCard>
 
@@ -608,7 +608,7 @@ hold(expr): BoxedExpression
 
 ####### expr
 
-[`SemiBoxedExpression`](#semiboxedexpression)
+[`ExpressionInput`](#expressioninput)
 
 </MemberCard>
 
@@ -905,7 +905,7 @@ declare(id, def, scope?): IComputeEngine
 \| [`TypeReference`](#typereference)
 \| [`BoxedType`](#boxedtype);
 `inferred`: `boolean`;
-`value`:   \| [`SemiBoxedExpression`](#semiboxedexpression)
+`value`:   \| [`ExpressionInput`](#expressioninput)
 \| (`ce`) => [`BoxedExpression`](#boxedexpression);
 `eq`: (`a`) => `boolean`;
 `neq`: (`a`) => `boolean`;
@@ -981,7 +981,7 @@ declare(id, def, scope?): IComputeEngine
 \| [`TypeReference`](#typereference)
 \| [`BoxedType`](#boxedtype);
 `inferred`: `boolean`;
-`value`:   \| [`SemiBoxedExpression`](#semiboxedexpression)
+`value`:   \| [`ExpressionInput`](#expressioninput)
 \| (`ce`) => [`BoxedExpression`](#boxedexpression);
 `eq`: (`a`) => `boolean`;
 `neq`: (`a`) => `boolean`;
@@ -1075,7 +1075,7 @@ declare(arg1, arg2?, arg3?): IComputeEngine
 \| [`TypeReference`](#typereference)
 \| [`BoxedType`](#boxedtype);
 `inferred`: `boolean`;
-`value`:   \| [`SemiBoxedExpression`](#semiboxedexpression)
+`value`:   \| [`ExpressionInput`](#expressioninput)
 \| (`ce`) => [`BoxedExpression`](#boxedexpression);
 `eq`: (`a`) => `boolean`;
 `neq`: (`a`) => `boolean`;
@@ -1151,7 +1151,7 @@ declare(arg1, arg2?, arg3?): IComputeEngine
 \| [`TypeReference`](#typereference)
 \| [`BoxedType`](#boxedtype);
 `inferred`: `boolean`;
-`value`:   \| [`SemiBoxedExpression`](#semiboxedexpression)
+`value`:   \| [`ExpressionInput`](#expressioninput)
 \| (`ce`) => [`BoxedExpression`](#boxedexpression);
 `eq`: (`a`) => `boolean`;
 `neq`: (`a`) => `boolean`;
@@ -1561,7 +1561,7 @@ ce.angularUnit = 'deg';
 ### AssignValue
 
 ```ts
-type AssignValue = KernelAssignValue<BoxedExpression, SemiBoxedExpression, ComputeEngine>;
+type AssignValue = KernelAssignValue<BoxedExpression, ExpressionInput, ComputeEngine>;
 ```
 
 Assignable value for `ce.assign()`.
@@ -1948,7 +1948,7 @@ box(expr, options?): BoxedExpression
 
 ####### expr
 
-[`NumericValue`](#numericvalue) | [`SemiBoxedExpression`](#semiboxedexpression)
+[`NumericValue`](#numericvalue) | [`ExpressionInput`](#expressioninput)
 
 ####### options?
 
@@ -1976,7 +1976,7 @@ function(name, ops, options?): BoxedExpression
 
 ####### ops
 
-readonly [`SemiBoxedExpression`](#semiboxedexpression)[]
+readonly [`ExpressionInput`](#expressioninput)[]
 
 ####### options?
 
@@ -2160,7 +2160,7 @@ typeError(expectedType, actualType, where?): BoxedExpression
 
 ####### where?
 
-[`SemiBoxedExpression`](#semiboxedexpression)
+[`ExpressionInput`](#expressioninput)
 
 </MemberCard>
 
@@ -2174,7 +2174,7 @@ hold(expr): BoxedExpression
 
 ####### expr
 
-[`SemiBoxedExpression`](#semiboxedexpression)
+[`ExpressionInput`](#expressioninput)
 
 </MemberCard>
 
@@ -2471,7 +2471,7 @@ declare(id, def, scope?): IComputeEngine
 \| [`TypeReference`](#typereference)
 \| [`BoxedType`](#boxedtype);
 `inferred`: `boolean`;
-`value`:   \| [`SemiBoxedExpression`](#semiboxedexpression)
+`value`:   \| [`ExpressionInput`](#expressioninput)
 \| (`ce`) => [`BoxedExpression`](#boxedexpression);
 `eq`: (`a`) => `boolean`;
 `neq`: (`a`) => `boolean`;
@@ -2547,7 +2547,7 @@ declare(id, def, scope?): IComputeEngine
 \| [`TypeReference`](#typereference)
 \| [`BoxedType`](#boxedtype);
 `inferred`: `boolean`;
-`value`:   \| [`SemiBoxedExpression`](#semiboxedexpression)
+`value`:   \| [`ExpressionInput`](#expressioninput)
 \| (`ce`) => [`BoxedExpression`](#boxedexpression);
 `eq`: (`a`) => `boolean`;
 `neq`: (`a`) => `boolean`;
@@ -2641,7 +2641,7 @@ declare(arg1, arg2?, arg3?): IComputeEngine
 \| [`TypeReference`](#typereference)
 \| [`BoxedType`](#boxedtype);
 `inferred`: `boolean`;
-`value`:   \| [`SemiBoxedExpression`](#semiboxedexpression)
+`value`:   \| [`ExpressionInput`](#expressioninput)
 \| (`ce`) => [`BoxedExpression`](#boxedexpression);
 `eq`: (`a`) => `boolean`;
 `neq`: (`a`) => `boolean`;
@@ -2717,7 +2717,7 @@ declare(arg1, arg2?, arg3?): IComputeEngine
 \| [`TypeReference`](#typereference)
 \| [`BoxedType`](#boxedtype);
 `inferred`: `boolean`;
-`value`:   \| [`SemiBoxedExpression`](#semiboxedexpression)
+`value`:   \| [`ExpressionInput`](#expressioninput)
 \| (`ce`) => [`BoxedExpression`](#boxedexpression);
 `eq`: (`a`) => `boolean`;
 `neq`: (`a`) => `boolean`;
@@ -4170,7 +4170,7 @@ does not differ from that of this expr.: then a call this method is analagous to
 
 ####### sub
 
-`Substitution`\<[`SemiBoxedExpression`](#semiboxedexpression)\>
+`Substitution`\<[`ExpressionInput`](#expressioninput)\>
 
 ####### options?
 
@@ -5280,7 +5280,7 @@ Note that ±∞ and NaN are not real numbers.
 
 Narrowed interface for number literal expressions.
 
-Obtained via `isBoxedNumber()`.
+Obtained via `isNumber()`.
 
 <MemberCard>
 
@@ -5306,7 +5306,7 @@ readonly isNumberLiteral: true;
 
 Narrowed interface for symbol expressions.
 
-Obtained via `isBoxedSymbol()`.
+Obtained via `isSymbol()`.
 
 <MemberCard>
 
@@ -5322,7 +5322,7 @@ readonly symbol: string;
 
 Narrowed interface for function expressions.
 
-Obtained via `isBoxedFunction()`.
+Obtained via `isFunction()`.
 
 <MemberCard>
 
@@ -5388,7 +5388,7 @@ readonly op3: BoxedExpression;
 
 Narrowed interface for string expressions.
 
-Obtained via `isBoxedString()`.
+Obtained via `isString()`.
 
 <MemberCard>
 
@@ -5404,7 +5404,7 @@ readonly string: string;
 
 Narrowed interface for tensor expressions.
 
-Obtained via `isBoxedTensor()`.
+Obtained via `isTensor()`.
 
 <MemberCard>
 
@@ -5579,10 +5579,10 @@ indexWhere(predicate): number
 
 <MemberCard>
 
-### SemiBoxedExpression
+### ExpressionInput
 
 ```ts
-type SemiBoxedExpression = 
+type ExpressionInput = 
   | number
   | bigint
   | string
@@ -5592,7 +5592,7 @@ type SemiBoxedExpression =
   | MathJsonSymbolObject
   | MathJsonFunctionObject
   | MathJsonDictionaryObject
-  | readonly [MathJsonSymbol, ...SemiBoxedExpression[]]
+  | readonly [MathJsonSymbol, ...ExpressionInput[]]
   | BoxedExpression;
 ```
 
@@ -5706,7 +5706,7 @@ rule whose `match` is always a symbol.
 
 #### Type Parameters
 
-• T = [`SemiBoxedExpression`](#semiboxedexpression)
+• T = [`ExpressionInput`](#expressioninput)
 
 </MemberCard>
 
@@ -5783,7 +5783,7 @@ Dynamic rule callback.
 ### Rule
 
 ```ts
-type Rule = KernelRule<BoxedExpression, SemiBoxedExpression, ComputeEngine>;
+type Rule = KernelRule<BoxedExpression, ExpressionInput, ComputeEngine>;
 ```
 
 Rule declaration specialized to boxed expression and compute engine types.
@@ -5883,7 +5883,7 @@ type ValueDefinition = BaseDefinition & {
      | BoxedType;
   inferred: boolean;
   value:   | LatexString
-     | SemiBoxedExpression
+     | ExpressionInput
      | (ce) => BoxedExpression | null;
   eq: (a) => boolean | undefined;
   neq: (a) => boolean | undefined;
@@ -5911,7 +5911,7 @@ declared.
 ```ts
 value: 
   | LatexString
-  | SemiBoxedExpression
+  | ExpressionInput
   | (ce) => BoxedExpression | null;
 ```
 

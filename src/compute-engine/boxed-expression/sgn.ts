@@ -1,5 +1,5 @@
 import type { BoxedExpression, Sign } from '../global-types';
-import { isBoxedFunction, isBoxedSymbol, isBoxedNumber } from './type-guards';
+import { isFunction, isSymbol, isNumber } from './type-guards';
 
 export function sgn(expr: BoxedExpression): Sign | undefined {
   const ce = expr.engine;
@@ -13,7 +13,7 @@ export function sgn(expr: BoxedExpression): Sign | undefined {
   //
   // The expression is a function expression
   //
-  if (isBoxedFunction(expr)) {
+  if (isFunction(expr)) {
     const def = expr.operatorDefinition;
     if (def?.sgn) s = def.sgn(expr.ops, { engine: ce });
 
@@ -23,7 +23,7 @@ export function sgn(expr: BoxedExpression): Sign | undefined {
   //
   // A symbol or a number literal
   //
-  if (isBoxedSymbol(expr) || isBoxedNumber(expr)) return expr.sgn;
+  if (isSymbol(expr) || isNumber(expr)) return expr.sgn;
 
   // A string, or a tensor
   return 'unsigned';

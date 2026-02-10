@@ -6,17 +6,17 @@ import { asLatexString, isLatexString } from './latex-syntax/utils';
 import type {
   BoxedExpression,
   Metadata,
-  SemiBoxedExpression,
+  ExpressionInput,
 } from './global-types';
 
 type ValidationHost = {
   string(s: string, metadata?: Metadata): BoxedExpression;
   function(
     name: string,
-    ops: ReadonlyArray<SemiBoxedExpression>,
+    ops: ReadonlyArray<ExpressionInput>,
     options?: { metadata?: Metadata }
   ): BoxedExpression;
-  box(expr: SemiBoxedExpression): BoxedExpression;
+  box(expr: ExpressionInput): BoxedExpression;
 };
 
 export function createErrorExpression(

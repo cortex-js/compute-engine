@@ -1,7 +1,18 @@
 export type { OneOf } from '../common/one-of';
 // export * from '../common/one-of';
 
-export * from '../math-json/types';
+export type {
+  MathJsonExpression,
+  MathJsonAttributes,
+  MathJsonNumberObject,
+  MathJsonSymbolObject,
+  MathJsonStringObject,
+  MathJsonFunctionObject,
+  DictionaryValue,
+  MathJsonDictionaryObject,
+  ExpressionObject,
+  MathJsonSymbol,
+} from '../math-json/types';
 
 export * from '../common/type/boxed-type';
 export * from '../common/type/types';

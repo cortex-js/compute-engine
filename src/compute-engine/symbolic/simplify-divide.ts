@@ -1,7 +1,7 @@
 import type { BoxedExpression, RuleStep } from '../global-types';
 import {
-  isBoxedFunction,
-  isBoxedNumber,
+  isFunction,
+  isNumber,
 } from '../boxed-expression/type-guards';
 import { asRational } from '../boxed-expression/numerics';
 
@@ -20,7 +20,7 @@ import { asRational } from '../boxed-expression/numerics';
  */
 
 export function simplifyDivide(x: BoxedExpression): RuleStep | undefined {
-  if (x.operator !== 'Divide' || !isBoxedFunction(x)) return undefined;
+  if (x.operator !== 'Divide' || !isFunction(x)) return undefined;
 
   const num = x.op1;
   const denom = x.op2;
@@ -41,7 +41,7 @@ export function simplifyDivide(x: BoxedExpression): RuleStep | undefined {
   if (
     num.is(0) &&
     denom.is(0) === false &&
-    (isBoxedNumber(denom) || denom.symbols.length !== 0)
+    (isNumber(denom) || denom.symbols.length !== 0)
   ) {
     return { value: ce.Zero, because: '0/a -> 0' };
   }
@@ -51,7 +51,7 @@ export function simplifyDivide(x: BoxedExpression): RuleStep | undefined {
     num.isSame(denom) &&
     num.is(0) === false &&
     num.isInfinity !== true &&
-    (isBoxedNumber(num) || num.symbols.length !== 0)
+    (isNumber(num) || num.symbols.length !== 0)
   ) {
     return { value: ce.One, because: 'a/a -> 1' };
   }
@@ -62,7 +62,7 @@ export function simplifyDivide(x: BoxedExpression): RuleStep | undefined {
   }
 
   // Check if denominator is a Divide expression
-  if (denom.operator === 'Divide' && isBoxedFunction(denom)) {
+  if (denom.operator === 'Divide' && isFunction(denom)) {
     const denomNum = denom.op1;
     const denomDenom = denom.op2;
 
@@ -97,14 +97,14 @@ export function simplifyDivide(x: BoxedExpression): RuleStep | undefined {
     let denomBase: BoxedExpression | undefined;
     let denomExp: BoxedExpression | undefined;
 
-    if (num.operator === 'Power' && isBoxedFunction(num)) {
+    if (num.operator === 'Power' && isFunction(num)) {
       numBase = num.op1;
       numExp = num.op2;
     } else {
       numBase = num;
       numExp = ce.One;
     }
-    if (denom.operator === 'Power' && isBoxedFunction(denom)) {
+    if (denom.operator === 'Power' && isFunction(denom)) {
       denomBase = denom.op1;
       denomExp = denom.op2;
     } else {

@@ -6,7 +6,7 @@ import type {
   IComputeEngine as ComputeEngine,
   Scope,
 } from './global-types';
-import { isBoxedSymbol, isBoxedFunction } from './boxed-expression/type-guards';
+import { isSymbol, isFunction } from './boxed-expression/type-guards';
 
 /***
  * ### THEORY OF OPERATIONS
@@ -116,24 +116,24 @@ export function canonicalFunctionLiteral(
   //    When evaluating, the type of the symbol need to be checked to
   //    make sure it's a function
   //
-  if (isBoxedSymbol(expr)) return expr;
+  if (isSymbol(expr)) return expr;
 
   //
   // 3/ `BuiltinFunction`, e.g. ["BuiltinFunction", "Sin"]
   //    This operator is just a "tag" indicating the nature of the
   //    symbol.
   //
-  if (expr.operator === 'BuiltinFunction' && isBoxedFunction(expr))
+  if (expr.operator === 'BuiltinFunction' && isFunction(expr))
     return expr.op1;
 
   //
   // 4/ Parenthesized expression, e.g. ["Delimiter", ["Sin", "_"], "'()'"]
   //
-  if (expr.operator === 'Delimiter' && isBoxedFunction(expr)) {
+  if (expr.operator === 'Delimiter' && isFunction(expr)) {
     // If the expression is a sequence, we need to extract the first
     // element
     const exprOp1 = expr.op1;
-    if (isBoxedFunction(exprOp1) && exprOp1.operator === 'Sequence') {
+    if (isFunction(exprOp1) && exprOp1.operator === 'Sequence') {
       if (exprOp1.nops === 1) {
         expr = exprOp1;
       } else {
@@ -144,7 +144,7 @@ export function canonicalFunctionLiteral(
     }
 
     return canonicalFunctionLiteral(
-      isBoxedFunction(expr) ? expr.op1 : undefined
+      isFunction(expr) ? expr.op1 : undefined
     );
   }
 
@@ -153,7 +153,7 @@ export function canonicalFunctionLiteral(
   //
   // If this is a function literal, split the body and the parameters
   // For example, `["Function", ["Add", "x", 1], "x"]`
-  if (expr.operator === 'Function' && isBoxedFunction(expr))
+  if (expr.operator === 'Function' && isFunction(expr))
     return canonicalFunctionLiteralArguments(expr.engine, expr.ops);
 
   //
@@ -223,7 +223,7 @@ export function canonicalFunctionLiteralArguments(
   const params = ops
     .slice(1)
     .map((x) =>
-      isBoxedSymbol(x) ? x : ce.error('expected-a-symbol', x.toString())
+      isSymbol(x) ? x : ce.error('expected-a-symbol', x.toString())
     );
 
   console.assert(block.isScoped);
@@ -231,7 +231,7 @@ export function canonicalFunctionLiteralArguments(
   for (const param of params) {
     // We only declare the parameters that are not already declared
     // in the scope of the body
-    if (isBoxedSymbol(param) && !block.localScope!.bindings.has(param.symbol)) {
+    if (isSymbol(param) && !block.localScope!.bindings.has(param.symbol)) {
       // @todo: we could use the signature to declare a more specific, non-inferred, type
       ce.declare(
         param.symbol,
@@ -268,7 +268,7 @@ function makeLambda(
   const ce = expr.engine;
 
   // If the expression is a symbol, interpret it as an operator
-  if (isBoxedSymbol(expr)) {
+  if (isSymbol(expr)) {
     const sym = expr.symbol;
     return (args) => ce.function(sym, args).evaluate();
   }
@@ -284,8 +284,8 @@ function makeLambda(
   //
   // No arguments, we just need to evaluate the body
   //
-  console.assert(isBoxedFunction(expr));
-  if (!isBoxedFunction(expr)) throw new Error('Invalid function literal');
+  console.assert(isFunction(expr));
+  if (!isFunction(expr)) throw new Error('Invalid function literal');
   if (expr.ops.length === 1) {
     console.assert(expr.ops[0]);
     return () => expr.ops[0].evaluate();
@@ -317,7 +317,7 @@ function makeLambda(
       // Generate unique parameter names to avoid collisions
       const allSymbols = new Set([
         ...body.symbols,
-        ...params.map((p) => (isBoxedSymbol(p) ? p.symbol : '')),
+        ...params.map((p) => (isSymbol(p) ? p.symbol : '')),
       ]);
       const extras = params.slice(args.length).map((_, i) => {
         let name = `_${i + 1}`;
@@ -334,7 +334,7 @@ function makeLambda(
         params
           .slice(args.length)
           .map((param, i) => [
-            isBoxedSymbol(param) ? param.symbol : '',
+            isSymbol(param) ? param.symbol : '',
             extras[i],
           ])
       );
@@ -345,7 +345,7 @@ function makeLambda(
           withArguments: Object.fromEntries(
             params
               .slice(0, args.length)
-              .map((key, i) => [isBoxedSymbol(key) ? key.symbol : '', args[i]])
+              .map((key, i) => [isSymbol(key) ? key.symbol : '', args[i]])
           ),
         })
         .subs(substitutions);
@@ -363,7 +363,7 @@ function makeLambda(
     const result = body.evaluate({
       withArguments: Object.fromEntries(
         params.map((key, i) => [
-          isBoxedSymbol(key) ? key.symbol : '',
+          isSymbol(key) ? key.symbol : '',
           args[i].evaluate(),
         ])
       ),

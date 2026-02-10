@@ -11,8 +11,8 @@ import type {
 } from '../global-types';
 import { spellCheckMessage } from '../boxed-expression/validate';
 import {
-  isBoxedFunction,
-  isBoxedSymbol,
+  isFunction,
+  isSymbol,
   sym,
 } from '../boxed-expression/type-guards';
 
@@ -37,9 +37,9 @@ export const CONTROL_STRUCTURES_LIBRARY: SymbolDefinitions[] = [
       signature: '(value, symbol) -> boolean',
       evaluate: ([value, conds], { engine }) => {
         let conditions: string[] = [];
-        if (isBoxedSymbol(conds)) {
+        if (isSymbol(conds)) {
           conditions = [conds.symbol];
-        } else if (conds.operator === 'And' && isBoxedFunction(conds)) {
+        } else if (conds.operator === 'And' && isFunction(conds)) {
           conditions = conds.ops.map((op) => sym(op) ?? '');
         }
         if (checkConditions(value, conditions)) return engine.True;
@@ -131,11 +131,11 @@ function evaluateBlock(
   let result: BoxedExpression | undefined = undefined;
   for (const op of ops) {
     const h = op.operator;
-    if (h === 'Return' && isBoxedFunction(op)) {
+    if (h === 'Return' && isFunction(op)) {
       result = op.op1.evaluate();
       break;
     }
-    if ((h === 'Break' || h === 'Continue') && isBoxedFunction(op)) {
+    if ((h === 'Break' || h === 'Continue') && isFunction(op)) {
       result = ce.box([h, op.op1.evaluate()]);
       break;
     }
@@ -190,7 +190,7 @@ function* runLoop(
 
     for (const x of collection.each()) {
       result = fn([x]) ?? ce.Nothing;
-      if (result.operator === 'Break' && isBoxedFunction(result))
+      if (result.operator === 'Break' && isFunction(result))
         return result.op1;
       if (result.operator === 'Return') return result;
       i += 1;
@@ -207,7 +207,7 @@ function* runLoop(
   let i = 0;
   while (true) {
     const result = body.evaluate();
-    if (result.operator === 'Break' && isBoxedFunction(result))
+    if (result.operator === 'Break' && isFunction(result))
       return result.op1;
     if (result.operator === 'Return') return result;
     i += 1;

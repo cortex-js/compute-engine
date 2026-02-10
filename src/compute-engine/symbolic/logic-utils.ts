@@ -4,8 +4,8 @@ import type {
 } from '../global-types';
 
 import {
-  isBoxedFunction,
-  isBoxedSymbol,
+  isFunction,
+  isSymbol,
   sym,
 } from '../boxed-expression/type-guards';
 
@@ -16,19 +16,19 @@ import {
 
 /** Helper to get `.op1` from a function expression, or undefined. */
 function fnOp1(expr: BoxedExpression): BoxedExpression | undefined {
-  return isBoxedFunction(expr) ? expr.op1 : undefined;
+  return isFunction(expr) ? expr.op1 : undefined;
 }
 
 /** Helper to get `.op2` from a function expression, or undefined. */
 function fnOp2(expr: BoxedExpression): BoxedExpression | undefined {
-  return isBoxedFunction(expr) ? expr.op2 : undefined;
+  return isFunction(expr) ? expr.op2 : undefined;
 }
 
 /** Helper to get `.ops` from a function expression, or undefined. */
 function fnOps(
   expr: BoxedExpression
 ): ReadonlyArray<BoxedExpression> | undefined {
-  return isBoxedFunction(expr) ? expr.ops : undefined;
+  return isFunction(expr) ? expr.ops : undefined;
 }
 
 /**
@@ -689,13 +689,13 @@ export function extractVariables(expr: BoxedExpression): string[] {
     if (sym(e) === 'True' || sym(e) === 'False') return;
 
     // If it's a symbol (variable), add it
-    if (isBoxedSymbol(e) && e.operator === 'Symbol') {
+    if (isSymbol(e) && e.operator === 'Symbol') {
       variables.add(e.symbol);
       return;
     }
 
     // Recursively process operands
-    if (isBoxedFunction(e)) {
+    if (isFunction(e)) {
       for (const op of e.ops) {
         visit(op);
       }

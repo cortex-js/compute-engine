@@ -2,7 +2,7 @@
 // complex-polar = abs * exp(i * arg)
 
 import type { SymbolDefinitions } from '../global-types';
-import { isBoxedNumber } from '../boxed-expression/type-guards';
+import { isNumber } from '../boxed-expression/type-guards';
 
 export const COMPLEX_LIBRARY: SymbolDefinitions[] = [
   {
@@ -19,7 +19,7 @@ export const COMPLEX_LIBRARY: SymbolDefinitions[] = [
         return re > 0 ? 'positive' : 'negative';
       },
       evaluate: (ops, { engine: ce }) => {
-        if (!isBoxedNumber(ops[0])) return undefined;
+        if (!isNumber(ops[0])) return undefined;
         const op = ops[0].numericValue;
         if (typeof op === 'number') return ops[0];
         return ce.number(op.bignumRe ?? op.re);
@@ -37,7 +37,7 @@ export const COMPLEX_LIBRARY: SymbolDefinitions[] = [
         return im > 0 ? 'positive' : 'negative';
       },
       evaluate: (ops, { engine: ce }) => {
-        if (!isBoxedNumber(ops[0])) return undefined;
+        if (!isNumber(ops[0])) return undefined;
         const op = ops[0].numericValue;
         if (typeof op === 'number') return ce.Zero;
         return ce.number(op.im);
@@ -49,7 +49,7 @@ export const COMPLEX_LIBRARY: SymbolDefinitions[] = [
       signature: '(number) -> real',
       type: () => 'finite_real',
       evaluate: (ops, { engine: ce }) => {
-        if (!isBoxedNumber(ops[0])) return undefined;
+        if (!isNumber(ops[0])) return undefined;
         const op = ops[0].numericValue;
         if (typeof op === 'number') return op >= 0 ? ce.Zero : ce.Pi;
         if (op.im === 0) return op.re >= 0 ? ce.Zero : ce.Pi;
@@ -64,7 +64,7 @@ export const COMPLEX_LIBRARY: SymbolDefinitions[] = [
       complexity: 1200,
       signature: '(number) -> tuple<real, real>',
       evaluate: (ops, { engine: ce }) => {
-        if (!isBoxedNumber(ops[0])) return undefined;
+        if (!isNumber(ops[0])) return undefined;
         return ce.tuple(
           ce.function('Abs', ops).evaluate(),
           ce.function('Argument', ops).evaluate()
@@ -79,7 +79,7 @@ export const COMPLEX_LIBRARY: SymbolDefinitions[] = [
       type: ([z]) => z.type,
       sgn: ([z]) => z.sgn,
       evaluate: (ops, { engine: ce }) => {
-        if (!isBoxedNumber(ops[0])) return undefined;
+        if (!isNumber(ops[0])) return undefined;
         const op = ops[0].numericValue;
         if (typeof op === 'number' || op.im === 0) return ops[0];
         return ce.number(ce.complex(op.re, -op.im));

@@ -22,7 +22,7 @@ import {
 import type { BoxedExpression, SymbolDefinitions } from '../global-types';
 import { bignumPreferred } from '../boxed-expression/utils';
 import { toInteger } from '../boxed-expression/numerics';
-import { isBoxedFunction } from '../boxed-expression/type-guards';
+import { isFunction } from '../boxed-expression/type-guards';
 
 // Geometric mean:
 // Harmonic mean:
@@ -249,7 +249,7 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
 
         // Determine bins
         let binEdges: number[];
-        if (binsArg?.operator === 'List' && isBoxedFunction(binsArg)) {
+        if (binsArg?.operator === 'List' && isFunction(binsArg)) {
           binEdges = binsArg.ops.map((op) => op.re);
         } else {
           const binCount = toInteger(binsArg);

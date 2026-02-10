@@ -54,11 +54,11 @@ configurations.
 Use type guards to safely access specialized properties:
 
 ```js
-import { evaluate, isBoxedNumber } from "@cortex-js/compute-engine";
+import { evaluate, isNumber } from "@cortex-js/compute-engine";
 
 const expr = evaluate("\\frac{5}{2}");
 
-if (isBoxedNumber(expr)) {
+if (isNumber(expr)) {
   console.log(expr.numericValue);  // 2.5 (type-safe access)
   console.log(expr.isInteger);     // false
 }
@@ -67,7 +67,7 @@ if (isBoxedNumber(expr)) {
 ### Working with Symbols
 
 ```js
-import { parse, isBoxedSymbol, sym } from "@cortex-js/compute-engine";
+import { parse, isSymbol, sym } from "@cortex-js/compute-engine";
 
 const expr = parse("x + 1");
 
@@ -78,7 +78,7 @@ if (sym(expr) === "x") {
 
 // Or use full type guard for more access
 const variable = parse("y");
-if (isBoxedSymbol(variable)) {
+if (isSymbol(variable)) {
   console.log(variable.symbol);  // "y"
 }
 ```
@@ -86,12 +86,12 @@ if (isBoxedSymbol(variable)) {
 ### Working with Functions
 
 ```js
-import { parse, isBoxedFunction } from "@cortex-js/compute-engine";
+import { parse, isFunction } from "@cortex-js/compute-engine";
 
 const expr = parse("2x + 3y");
 
 // Access function structure safely
-if (isBoxedFunction(expr)) {
+if (isFunction(expr)) {
   console.log(expr.operator);    // "Add"
   console.log(expr.ops.length);  // 2
 
@@ -111,7 +111,7 @@ import { parse, simplify, expand } from "@cortex-js/compute-engine";
 simplify("x + x").print();
 // ➔ 2x
 
-// Expand from LaTeX or BoxedExpression
+// Expand from LaTeX or Expression
 expand("(x + 1)^2").print();
 // ➔ x^2 + 2x + 1
 
@@ -140,7 +140,7 @@ console.log(solution.y.json);  // 2
 
 **💡 Best Practices:**
 
-- Always use type guards (`isBoxedNumber`, `isBoxedSymbol`, `isBoxedFunction`)
+- Always use type guards (`isNumber`, `isSymbol`, `isFunction`)
   before accessing specialized properties
 - Use the `sym()` helper for quick symbol name checks
 

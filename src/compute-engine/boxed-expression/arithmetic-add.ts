@@ -11,8 +11,8 @@ import type {
   TensorInterface,
   IComputeEngine as ComputeEngine,
 } from '../global-types';
-import { isBoxedTensor } from './boxed-tensor';
-import { isBoxedNumber, isBoxedFunction, isBoxedSymbol } from './type-guards';
+import { isTensor } from './boxed-tensor';
+import { isNumber, isFunction, isSymbol } from './type-guards';
 
 import { MACHINE_PRECISION } from '../numerics/numeric';
 import type { NumericValue } from '../numeric-value/types';
@@ -37,7 +37,7 @@ export function canonicalAdd(
   ops = flatten(ops, 'Add');
 
   // Remove literal 0
-  ops = ops.filter((x) => !isBoxedNumber(x) || !x.is(0));
+  ops = ops.filter((x) => !isNumber(x) || !x.is(0));
 
   if (ops.length === 0) return ce.Zero;
   if (ops.length === 1 && !ops[0].isIndexedCollection) return ops[0];
@@ -50,7 +50,7 @@ export function canonicalAdd(
     const exactNumerics: NumericValue[] = [];
     const rest: BoxedExpression[] = [];
     for (const op of ops) {
-      if (isBoxedNumber(op) && !op.isInfinity && !op.isNaN) {
+      if (isNumber(op) && !op.isInfinity && !op.isNaN) {
         const nv = op.numericValue;
         if (typeof nv === 'number' || nv.isExact) {
           exactNumerics.push(
@@ -81,9 +81,9 @@ export function canonicalAdd(
     let hasIm = false;
 
     for (const op of ops) {
-      if (isBoxedNumber(op)) {
+      if (isNumber(op)) {
         const facExpr = getImaginaryFactor(op);
-        if (facExpr !== undefined && isBoxedNumber(facExpr)) {
+        if (facExpr !== undefined && isNumber(facExpr)) {
           const f = facExpr.numericValue;
           const im = typeof f === 'number' ? f : f.re;
           if (im !== 0 && typeof im === 'number') {
@@ -100,10 +100,10 @@ export function canonicalAdd(
       let realFound = false;
 
       for (const op of ops) {
-        if (isBoxedNumber(op)) {
+        if (isNumber(op)) {
           // Skip pure imaginary terms (already summed above)
           const facExpr = getImaginaryFactor(op);
-          if (facExpr !== undefined && isBoxedNumber(facExpr)) {
+          if (facExpr !== undefined && isNumber(facExpr)) {
             const f = facExpr.numericValue;
             const im = typeof f === 'number' ? f : f.re;
             if (im !== 0 && typeof im === 'number') continue;
@@ -158,7 +158,7 @@ export function add(...xs: ReadonlyArray<BoxedExpression>): BoxedExpression {
   if (!xs.every((x) => x.isValid)) return xs[0].engine._fn('Add', xs);
 
   // Check if any operands are tensors
-  const hasTensors = xs.some((x) => isBoxedTensor(x));
+  const hasTensors = xs.some((x) => isTensor(x));
   if (hasTensors) return addTensors(xs[0].engine, xs);
 
   return new Terms(xs[0].engine, xs).asExpression();
@@ -169,15 +169,15 @@ export function addN(...xs: ReadonlyArray<BoxedExpression>): BoxedExpression {
   if (!xs.every((x) => x.isValid)) return xs[0].engine._fn('Add', xs);
 
   // Check if any operands are tensors
-  const hasTensors = xs.some((x) => isBoxedTensor(x));
+  const hasTensors = xs.some((x) => isTensor(x));
   if (hasTensors) {
     // Evaluate tensors numerically
-    xs = xs.map((x) => (isBoxedTensor(x) ? x.evaluate() : x.N()));
+    xs = xs.map((x) => (isTensor(x) ? x.evaluate() : x.N()));
     return addTensors(xs[0].engine, xs);
   }
 
   // Don't N() the number literals (fractions) to avoid losing precision
-  xs = xs.map((x) => (isBoxedNumber(x) ? x.evaluate() : x.N()));
+  xs = xs.map((x) => (isNumber(x) ? x.evaluate() : x.N()));
   return new Terms(xs[0].engine, xs).N();
 }
 
@@ -196,7 +196,7 @@ function addTensors(
 
   for (const op of ops) {
     const evaluated = op.evaluate();
-    if (isBoxedTensor(evaluated)) {
+    if (isTensor(evaluated)) {
       tensors.push(evaluated);
     } else {
       scalars.push(evaluated);
@@ -294,7 +294,7 @@ export class Terms {
         this.terms = [{ term: ce.ComplexInfinity, coef: [] }];
         return;
       }
-      if (term.isNaN || (isBoxedSymbol(term) && term.symbol === 'Undefined')) {
+      if (term.isNaN || (isSymbol(term) && term.symbol === 'Undefined')) {
         this.terms = [{ term: ce.NaN, coef: [] }];
         return;
       }
@@ -339,7 +339,7 @@ export class Terms {
       return;
     }
 
-    if (isBoxedFunction(term) && term.operator === 'Add') {
+    if (isFunction(term) && term.operator === 'Add') {
       for (const x of term.ops) {
         const [c, t] = x.toNumericValue();
         this._add(coef.mul(c), t);
@@ -347,7 +347,7 @@ export class Terms {
       return;
     }
 
-    if (isBoxedFunction(term) && term.operator === 'Negate') {
+    if (isFunction(term) && term.operator === 'Negate') {
       this._add(coef.neg(), term.op1);
       return;
     }
@@ -361,7 +361,7 @@ export class Terms {
     }
 
     // This is a new term: just add it
-    console.assert(!isBoxedNumber(term) || term.is(1));
+    console.assert(!isNumber(term) || term.is(1));
     this.terms.push({ coef: [coef], term });
   }
 
@@ -382,7 +382,7 @@ export class Terms {
     // Gather all the numericValues and the rest
     for (const { coef, term } of terms) {
       if (coef.length === 0) {
-        if (isBoxedNumber(term)) {
+        if (isNumber(term)) {
           if (typeof term.numericValue === 'number')
             numericValues.push(ce._numericValue(term.numericValue));
           else numericValues.push(term.numericValue);

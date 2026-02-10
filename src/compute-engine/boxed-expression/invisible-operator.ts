@@ -5,10 +5,10 @@ import type {
   IComputeEngine as ComputeEngine,
 } from '../global-types';
 import {
-  isBoxedFunction,
-  isBoxedSymbol,
-  isBoxedString,
-  isBoxedNumber,
+  isFunction,
+  isSymbol,
+  isString,
+  isNumber,
 } from './type-guards';
 
 export function canonicalInvisibleOperator(
@@ -30,7 +30,7 @@ export function canonicalInvisibleOperator(
       const rhs = ops[1];
       if (
         (rhs.operator === 'Divide' || rhs.operator === 'Rational') &&
-        isBoxedFunction(rhs)
+        isFunction(rhs)
       ) {
         const [n, d] = [rhs.op1.canonical.re, rhs.op2.canonical.re];
         if (
@@ -65,9 +65,9 @@ export function canonicalInvisibleOperator(
     // to a symbol (f_a). Canonicalize first to handle this case.
     const lhsCanon = lhs.canonical;
     if (
-      isBoxedSymbol(lhsCanon) &&
+      isSymbol(lhsCanon) &&
       rhs.operator === 'Delimiter' &&
-      isBoxedFunction(rhs)
+      isFunction(rhs)
     ) {
       // We have encountered something like `f(a+b)`, where `f` is not
       // defined. But it also could be `x(x+1)` where `x` is a number.
@@ -101,7 +101,7 @@ export function canonicalInvisibleOperator(
       // Parse the arguments first, in case they reference lhsCanon.symbol
       // i.e. `x(x+1)`.
       let args =
-        isBoxedFunction(rhs.op1) && rhs.op1.operator === 'Sequence'
+        isFunction(rhs.op1) && rhs.op1.operator === 'Sequence'
           ? rhs.op1.ops
           : [rhs.op1];
       args = flatten(args);
@@ -131,14 +131,14 @@ export function canonicalInvisibleOperator(
 
     // Is is an index operation, i.e. "v[1,2]"?
     if (
-      isBoxedSymbol(lhsCanon) &&
+      isSymbol(lhsCanon) &&
       rhs.operator === 'Delimiter' &&
-      isBoxedFunction(rhs) &&
-      isBoxedString(rhs.op2) &&
+      isFunction(rhs) &&
+      isString(rhs.op2) &&
       (rhs.op2.string === '[,]' || rhs.op2.string === '[;]')
     ) {
       const args =
-        isBoxedFunction(rhs.op1) && rhs.op1.operator === 'Sequence'
+        isFunction(rhs.op1) && rhs.op1.operator === 'Sequence'
           ? rhs.op1.ops
           : [rhs.op1];
       return ce.function('At', [lhsCanon, ...args]);
@@ -163,7 +163,7 @@ export function canonicalInvisibleOperator(
         x.isValid &&
         (x.type.isUnknown ||
           x.type.matches('number') ||
-          (x.isIndexedCollection && !isBoxedString(x)))
+          (x.isIndexedCollection && !isString(x)))
     )
   ) {
     // Note: we don't want to use canonicalMultiply here, because
@@ -185,7 +185,7 @@ function flattenInvisibleOperator(
 ): BoxedExpression[] {
   const ys: BoxedExpression[] = [];
   for (const x of ops) {
-    if (x.operator === 'InvisibleOperator' && isBoxedFunction(x))
+    if (x.operator === 'InvisibleOperator' && isFunction(x))
       ys.push(...flattenInvisibleOperator(x.ops));
     else ys.push(x);
   }
@@ -193,11 +193,11 @@ function flattenInvisibleOperator(
 }
 
 function asInteger(expr: BoxedExpression): number {
-  if (isBoxedNumber(expr)) {
+  if (isNumber(expr)) {
     const n = expr.re;
     if (Number.isInteger(n)) return n;
   }
-  if (expr.operator === 'Negate' && isBoxedFunction(expr)) {
+  if (expr.operator === 'Negate' && isFunction(expr)) {
     const n = asInteger(expr.op1);
     if (!Number.isNaN(n)) return -n;
   }

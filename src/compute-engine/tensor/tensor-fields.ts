@@ -6,7 +6,7 @@ import {
   TensorDataType,
   TensorField,
 } from '../global-types';
-import { isBoxedSymbol, isBoxedNumber } from '../boxed-expression/type-guards';
+import { isSymbol, isNumber } from '../boxed-expression/type-guards';
 
 /** @category Tensors */
 export function makeTensorField<DT extends keyof DataTypeMap>(
@@ -510,7 +510,7 @@ export function getExpressionDatatype(expr: BoxedExpression): TensorDataType {
   // Depending on whether the expr is a literal number, a string, etc,
   // return the appropriate datatype.
 
-  if (isBoxedSymbol(expr)) {
+  if (isSymbol(expr)) {
     if (expr.symbol === 'True' || expr.symbol === 'False') return 'bool';
     if (expr.symbol === 'NaN') return 'float64';
     if (expr.symbol === 'PositiveInfinity') return 'float64';
@@ -519,7 +519,7 @@ export function getExpressionDatatype(expr: BoxedExpression): TensorDataType {
     if (expr.symbol === 'ImaginaryUnit') return 'complex128';
   }
 
-  if (isBoxedNumber(expr))
+  if (isNumber(expr))
     switch (expr.type.type) {
       case 'real':
       case 'rational':

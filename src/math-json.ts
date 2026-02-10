@@ -7,7 +7,7 @@
 // **both** MathJSON and the Compute Engine.
 
 export type {
-  Expression,
+  MathJsonExpression,
   MathJsonAttributes,
   MathJsonNumberObject,
   MathJsonSymbolObject,

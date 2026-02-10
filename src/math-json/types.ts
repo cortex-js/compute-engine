@@ -113,7 +113,7 @@ export type MathJsonStringObject = {
 
 /** @category MathJSON */
 export type MathJsonFunctionObject = {
-  fn: [MathJsonSymbol, ...Expression[]];
+  fn: [MathJsonSymbol, ...MathJsonExpression[]];
 } & MathJsonAttributes;
 
 /** @category MathJSON */
@@ -146,7 +146,7 @@ export type ExpressionObject =
  *
  * @category MathJSON
  */
-export type Expression =
+export type MathJsonExpression =
   | ExpressionObject
   // Shortcut for MathJsonNumber in the JavaScript 64-bit float range.
   | number
@@ -155,4 +155,4 @@ export type Expression =
   // Shortcut for a string or a number
   | string
   // Shortcut for a function
-  | readonly [MathJsonSymbol, ...Expression[]];
+  | readonly [MathJsonSymbol, ...MathJsonExpression[]];

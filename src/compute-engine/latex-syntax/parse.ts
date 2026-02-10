@@ -1,5 +1,5 @@
 import type {
-  Expression,
+  MathJsonExpression as Expression,
   ExpressionObject,
   MathJsonSymbol,
 } from '../../math-json/types';

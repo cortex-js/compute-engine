@@ -16,8 +16,8 @@ import {
   toDNF,
 } from '../symbolic/logic-utils';
 import {
-  isBoxedSymbol,
-  isBoxedFunction,
+  isSymbol,
+  isFunction,
   sym,
 } from '../boxed-expression/type-guards';
 import {
@@ -200,7 +200,7 @@ export const LOGIC_LIBRARY: SymbolDefinitions = {
     evaluate: (args, { engine: _engine }) => {
       if (args.length === 0) return undefined;
       const pred = args[0];
-      if (!isBoxedSymbol(pred)) return undefined;
+      if (!isSymbol(pred)) return undefined;
       // Could check if the predicate has a definition and evaluate it
       // For now, predicates remain symbolic
       return undefined;
@@ -260,7 +260,7 @@ function evaluateForAll(
   if (sym(canonicalBody) === 'False') return ce.False;
 
   // Check if body doesn't contain the quantified variable
-  const condOp1 = isBoxedFunction(condition) ? condition.op1 : undefined;
+  const condOp1 = isFunction(condition) ? condition.op1 : undefined;
   const variable = sym(condition) ?? (condOp1 ? sym(condOp1) : undefined);
   if (variable && !bodyContainsVariable(canonicalBody, variable)) {
     // Body doesn't depend on x, so ∀x. P ≡ P
@@ -338,7 +338,7 @@ function evaluateExists(
   if (sym(canonicalBody) === 'False') return ce.False;
 
   // Check if body doesn't contain the quantified variable
-  const condOp1 = isBoxedFunction(condition) ? condition.op1 : undefined;
+  const condOp1 = isFunction(condition) ? condition.op1 : undefined;
   const variable = sym(condition) ?? (condOp1 ? sym(condOp1) : undefined);
   if (variable && !bodyContainsVariable(canonicalBody, variable)) {
     // Body doesn't depend on x, so ∃x. P ≡ P

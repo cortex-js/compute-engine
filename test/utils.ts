@@ -1,10 +1,10 @@
-import { Expression } from '../src/math-json/types';
+import { MathJsonExpression as Expression } from '../src/math-json/types';
 import { ParsingDiagnostic } from '../src/point-free-parser/parsers';
 import { ComputeEngine } from '../src/compute-engine';
 
 import { parseCortex } from '../src/cortex';
 import { _BoxedExpression } from '../src/compute-engine/boxed-expression/abstract-boxed-expression';
-import type { SemiBoxedExpression } from '../src/compute-engine/global-types';
+import type { ExpressionInput } from '../src/compute-engine/global-types';
 
 const MAX_LINE_LENGTH = 72;
 
@@ -32,7 +32,7 @@ engine.declare('f', 'function');
  * @returns
  */
 function exprToStringRecursive(
-  expr: SemiBoxedExpression,
+  expr: ExpressionInput,
   start: number
 ): string {
   const indent = ' '.repeat(start);
@@ -60,7 +60,7 @@ function exprToStringRecursive(
     for (const key of Object.keys(expr)) {
       if (expr[key] instanceof _BoxedExpression) {
         elements[key] = exprToStringRecursive(
-          expr[key] as SemiBoxedExpression,
+          expr[key] as ExpressionInput,
           start + 2
         );
       } else if (expr[key] === null) {
@@ -93,7 +93,7 @@ function exprToStringRecursive(
 }
 
 export function exprToString(
-  expr: SemiBoxedExpression | null | undefined
+  expr: ExpressionInput | null | undefined
 ): string {
   if (typeof expr === 'number') return expr.toString();
   if (!expr) return '';
@@ -144,7 +144,7 @@ type ExprVariant =
  * @returns
  */
 export function checkJson(
-  inExpr: SemiBoxedExpression | null,
+  inExpr: ExpressionInput | null,
   variants?: Array<ExprVariant>
 ): string {
   if (!inExpr) return 'null';

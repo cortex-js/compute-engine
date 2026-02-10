@@ -12,13 +12,13 @@ import { _BoxedExpression } from './abstract-boxed-expression';
 import { hashCode } from './utils';
 import { isWildcard, wildcardName } from './pattern-utils';
 import { BoxedType } from '../../common/type/boxed-type';
-import { DictionaryValue, Expression } from '../../math-json/types';
+import { DictionaryValue, MathJsonExpression as Expression } from '../../math-json/types';
 import { widen } from '../../common/type/utils';
 import {
-  isBoxedFunction,
-  isBoxedString,
-  isBoxedSymbol,
-  isBoxedNumber,
+  isFunction,
+  isString,
+  isSymbol,
+  isNumber,
 } from './type-guards';
 
 /**
@@ -90,7 +90,7 @@ export class BoxedDictionary
       dictionary.operator === 'Pair' ||
       dictionary.operator === 'KeyValuePair'
     ) {
-      if (!isBoxedFunction(dictionary)) return;
+      if (!isFunction(dictionary)) return;
       if (dictionary.nops !== 2) {
         throw new Error(
           `Expected a key/value pair, got ${dictionary.nops} elements`
@@ -98,8 +98,8 @@ export class BoxedDictionary
       }
       const [key, value] = dictionary.ops;
       let k: string;
-      if (isBoxedString(key)) k = key.string;
-      else if (isBoxedSymbol(key)) k = key.symbol;
+      if (isString(key)) k = key.string;
+      else if (isSymbol(key)) k = key.symbol;
       else throw new Error(`Expected a string key, got ${key.type}`);
 
       this._keyValues[k] = value.canonical;
@@ -108,18 +108,18 @@ export class BoxedDictionary
 
     // Parse as a dictionary expression
     if (dictionary.operator === 'Dictionary') {
-      if (!isBoxedFunction(dictionary)) return;
+      if (!isFunction(dictionary)) return;
       for (const pair of dictionary.ops) {
         if (
           pair.operator === 'KeyValuePair' ||
           pair.operator === 'Pair' ||
           pair.operator === 'Tuple'
         ) {
-          if (!isBoxedFunction(pair)) continue;
+          if (!isFunction(pair)) continue;
           const [key, value] = pair.ops;
           let k: string;
-          if (isBoxedString(key)) k = key.string;
-          else if (isBoxedSymbol(key)) k = key.symbol;
+          if (isString(key)) k = key.string;
+          else if (isSymbol(key)) k = key.symbol;
           else return; // Empty dictionary
 
           this._keyValues[k] = value.canonical;
@@ -278,16 +278,16 @@ export class BoxedDictionary
 function boxedExpressionToDictionaryValue(
   value: BoxedExpression
 ): DictionaryValue {
-  if (isBoxedString(value)) return value.string;
-  if (isBoxedSymbol(value)) {
+  if (isString(value)) return value.string;
+  if (isSymbol(value)) {
     if (value.symbol === 'True') return true;
     if (value.symbol === 'False') return false;
     return { sym: value.symbol };
   }
 
-  if (isBoxedNumber(value) && value.type.matches('real')) return value.re;
+  if (isNumber(value) && value.type.matches('real')) return value.re;
 
-  if (value.operator === 'List' && isBoxedFunction(value))
+  if (value.operator === 'List' && isFunction(value))
     return value.ops.map(boxedExpressionToDictionaryValue);
 
   return value.toMathJson({ shorthands: [] });

@@ -8,7 +8,7 @@ import type {
 } from '../global-types';
 
 import { _BoxedExpression } from './abstract-boxed-expression';
-import { hashCode, isBoxedExpression } from './utils';
+import { hashCode, isExpression } from './utils';
 import { isWildcard, wildcardName } from './pattern-utils';
 import { BoxedType } from '../../common/type/boxed-type';
 import { matchesNumber, matchesSymbol } from '../../math-json/utils';
@@ -86,7 +86,7 @@ export class BoxedString extends _BoxedExpression implements StringInterface {
     pattern: BoxedExpression,
     _options?: PatternMatchOptions
   ): BoxedSubstitution | null {
-    if (!isBoxedExpression(pattern))
+    if (!isExpression(pattern))
       pattern = this.engine.box(pattern, { form: 'raw' });
 
     if (isWildcard(pattern)) return { [wildcardName(pattern)!]: this };

@@ -3,10 +3,10 @@ import { mul } from '../boxed-expression/arithmetic-mul-div';
 import type { BoxedExpression } from '../global-types';
 import { add } from '../boxed-expression/arithmetic-add';
 import {
-  isBoxedNumber,
-  isBoxedSymbol,
-  isBoxedFunction,
-  isBoxedString,
+  isNumber,
+  isSymbol,
+  isFunction,
+  isString,
   sym,
 } from '../boxed-expression/type-guards';
 
@@ -175,11 +175,11 @@ export function derivative(
   if (order === 0) return fn;
   const ce = fn.engine;
   let v = '_';
-  if (isBoxedSymbol(fn) && fn.operatorDefinition) {
+  if (isSymbol(fn) && fn.operatorDefinition) {
     // We have, e.g. fn = 'Sin"
     fn = apply(ce.symbol(fn.symbol), [ce.symbol('_')]);
   }
-  if (fn.operator === 'Function' && isBoxedFunction(fn)) {
+  if (fn.operator === 'Function' && isFunction(fn)) {
     // We have, e.g. fn = ['Function', ['Sin', 'x'], 'x']
     v = sym(fn.ops[1]) ?? '_';
     fn = fn.ops[0];
@@ -229,13 +229,13 @@ export function differentiate(
   const ce = expr.engine;
 
   // A few easy ones...
-  if (isBoxedString(expr)) return undefined;
-  if (isBoxedNumber(expr)) return expr.engine.Zero;
-  if (isBoxedSymbol(expr)) {
+  if (isString(expr)) return undefined;
+  if (isNumber(expr)) return expr.engine.Zero;
+  if (isSymbol(expr)) {
     if (expr.symbol === v) return expr.engine.One;
     return expr.engine.Zero;
   }
-  if (!expr.operator || !isBoxedFunction(expr)) return undefined;
+  if (!expr.operator || !isFunction(expr)) return undefined;
 
   // From here on, expr is narrowed to BoxedExpression & FunctionInterface
   if (expr.operator === 'Negate') {

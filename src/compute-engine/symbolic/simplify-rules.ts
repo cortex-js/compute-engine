@@ -7,9 +7,9 @@ import { mul } from '../boxed-expression/arithmetic-mul-div';
 import { simplifyLogicFunction } from './simplify-logic';
 import type { BoxedExpression, Rule, RuleStep } from '../global-types';
 import {
-  isBoxedFunction,
-  isBoxedNumber,
-  isBoxedSymbol,
+  isFunction,
+  isNumber,
+  isSymbol,
   sym,
 } from '../boxed-expression/type-guards';
 import { expand } from '../boxed-expression/expand';
@@ -154,7 +154,7 @@ export const SIMPLIFY_RULES: Rule[] = [
   // Quick a/a -> 1 check for identical numerator/denominator
   // Must run before expand to avoid decomposing the fraction first
   (x): RuleStep | undefined => {
-    if (x.operator !== 'Divide' || !isBoxedFunction(x)) return undefined;
+    if (x.operator !== 'Divide' || !isFunction(x)) return undefined;
     const num = x.op1;
     const denom = x.op2;
     if (!num || !denom) return undefined;
@@ -170,14 +170,14 @@ export const SIMPLIFY_RULES: Rule[] = [
     // Skip expand for Multiply expressions with same-base powers
     // Let simplifyPower handle e^x * e^2 -> e^{x+2} instead of evaluating e^2
     // Also handle bare symbols (a = a^1) as having an implicit power
-    if (x.operator === 'Multiply' && isBoxedFunction(x)) {
+    if (x.operator === 'Multiply' && isFunction(x)) {
       const powerBases = new Map<string, number>();
       for (const op of x.ops) {
         // Get the base: for Power it's op1, for symbols it's the symbol itself
         let baseKey: string | null = null;
-        if (op.operator === 'Power' && isBoxedFunction(op)) {
+        if (op.operator === 'Power' && isFunction(op)) {
           baseKey = JSON.stringify(op.op1.json);
-        } else if (isBoxedSymbol(op)) {
+        } else if (isSymbol(op)) {
           baseKey = JSON.stringify(op.json);
         }
         if (baseKey) {
@@ -197,7 +197,7 @@ export const SIMPLIFY_RULES: Rule[] = [
   // Add, Negate
   //
   (x): RuleStep | undefined => {
-    if (x.operator !== 'Add' || !isBoxedFunction(x)) return undefined;
+    if (x.operator !== 'Add' || !isFunction(x)) return undefined;
     // The Add function has a 'lazy' property, so we need to ensure operands are canonical.
     // Also evaluate purely numeric operands (no unknowns) to simplify expressions like √(1+2) → √3.
     // IMPORTANT: Don't call .simplify() on operands to avoid infinite recursion.
@@ -206,10 +206,10 @@ export const SIMPLIFY_RULES: Rule[] = [
         ...x.ops.map((op) => {
           const canonical = op.canonical;
           // Evaluate purely numeric operands (no unknowns) to simplify them
-          if (canonical.unknowns.length === 0 && isBoxedFunction(canonical)) {
+          if (canonical.unknowns.length === 0 && isFunction(canonical)) {
             const evaluated = canonical.evaluate();
             // Only use evaluated form if it's simpler (a number literal)
-            if (isBoxedNumber(evaluated)) return evaluated;
+            if (isNumber(evaluated)) return evaluated;
           }
           return canonical;
         })
@@ -219,7 +219,7 @@ export const SIMPLIFY_RULES: Rule[] = [
   },
 
   (x): RuleStep | undefined => {
-    if (x.operator !== 'Negate' || !isBoxedFunction(x)) return undefined;
+    if (x.operator !== 'Negate' || !isFunction(x)) return undefined;
     return { value: x.op1.neg(), because: 'negation' };
   },
 
@@ -227,7 +227,7 @@ export const SIMPLIFY_RULES: Rule[] = [
   // Multiply
   //
   (x): RuleStep | undefined => {
-    if (x.operator !== 'Multiply' || !isBoxedFunction(x)) return undefined;
+    if (x.operator !== 'Multiply' || !isFunction(x)) return undefined;
 
     // Check if there are same-base powers that should be combined by simplifyPower
     // e.g., e^x * e^2 should become e^{x+2}, not 7.389... * e^x
@@ -238,10 +238,10 @@ export const SIMPLIFY_RULES: Rule[] = [
       // Get the base: for Power it's op1, for symbols it's the symbol itself
       let baseKey: string | null = null;
       let baseOp: BoxedExpression | null = null;
-      if (op.operator === 'Power' && isBoxedFunction(op)) {
+      if (op.operator === 'Power' && isFunction(op)) {
         baseKey = JSON.stringify(op.op1.json);
         baseOp = op;
-      } else if (isBoxedSymbol(op)) {
+      } else if (isSymbol(op)) {
         baseKey = JSON.stringify(op.json);
         baseOp = op;
       }
@@ -265,14 +265,14 @@ export const SIMPLIFY_RULES: Rule[] = [
       // Check for coefficient * trig²(x) pattern (e.g., 2sin²(x) -> 1-cos(2x))
       const hasTrigSquared =
         (a.operator === 'Power' &&
-          isBoxedFunction(a) &&
+          isFunction(a) &&
           a.op2.is(2) &&
           ['Sin', 'Cos'].includes(a.op1.operator || '')) ||
         (b.operator === 'Power' &&
-          isBoxedFunction(b) &&
+          isFunction(b) &&
           b.op2.is(2) &&
           ['Sin', 'Cos'].includes(b.op1.operator || ''));
-      const hasCoefficient = isBoxedNumber(a) || isBoxedNumber(b);
+      const hasCoefficient = isNumber(a) || isNumber(b);
       if (hasTrigSquared && hasCoefficient) return undefined;
 
       // Check for sin(x) * cos(x) pattern
@@ -297,7 +297,7 @@ export const SIMPLIFY_RULES: Rule[] = [
           // BUT skip Power expressions that should stay symbolic:
           // - e^n (for potential combination with e^x)
           // - n^{p/q} where result is irrational (e.g., 2^{3/5})
-          if (canonical.unknowns.length === 0 && isBoxedFunction(canonical)) {
+          if (canonical.unknowns.length === 0 && isFunction(canonical)) {
             if (canonical.operator === 'Power') {
               // Skip evaluation for e^n to allow power combination rules to work
               if (sym(canonical.op1) === 'ExponentialE') {
@@ -315,7 +315,7 @@ export const SIMPLIFY_RULES: Rule[] = [
             }
             const evaluated = canonical.evaluate();
             // Only use evaluated form if it's simpler (a number literal)
-            if (isBoxedNumber(evaluated)) return evaluated;
+            if (isNumber(evaluated)) return evaluated;
           }
           return canonical;
         })
@@ -328,7 +328,7 @@ export const SIMPLIFY_RULES: Rule[] = [
   // Divide, Rational
   //
   (x): RuleStep | undefined => {
-    if (x.operator === 'Divide' && isBoxedFunction(x)) {
+    if (x.operator === 'Divide' && isFunction(x)) {
       // Be conservative about simplifying division when the denominator is a
       // constant expression (no unknowns) that is not already a number literal.
       // In particular, avoid turning 0/(1-1) into 0, or (1-1)/(1-1) into 1,
@@ -336,7 +336,7 @@ export const SIMPLIFY_RULES: Rule[] = [
       // These cases can be handled by an explicit preliminary evaluation.
       const num = x.op1;
       const denom = x.op2;
-      if (!isBoxedNumber(denom) && denom.symbols.length === 0) {
+      if (!isNumber(denom) && denom.symbols.length === 0) {
         if (num.is(0) || num.isSame(denom)) return undefined;
       }
 
@@ -352,8 +352,8 @@ export const SIMPLIFY_RULES: Rule[] = [
       if (
         num.operator === 'Power' &&
         denom.operator === 'Power' &&
-        isBoxedFunction(num) &&
-        isBoxedFunction(denom)
+        isFunction(num) &&
+        isFunction(denom)
       ) {
         if (num.op1.isSame(denom.op1)) return undefined;
       }
@@ -361,27 +361,27 @@ export const SIMPLIFY_RULES: Rule[] = [
       // e.g., e^x / e -> e^{x-1}
       if (
         num.operator === 'Power' &&
-        isBoxedFunction(num) &&
+        isFunction(num) &&
         num.op1.isSame(denom)
       )
         return undefined;
       if (
         denom.operator === 'Power' &&
-        isBoxedFunction(denom) &&
+        isFunction(denom) &&
         denom.op1.isSame(num)
       )
         return undefined;
       // Skip a / (b/c)^d — let simplifyPower handle it
       if (
         denom.operator === 'Power' &&
-        isBoxedFunction(denom) &&
+        isFunction(denom) &&
         denom.op1.operator === 'Divide'
       )
         return undefined;
 
       return { value: num.div(denom), because: 'division' };
     }
-    if (x.operator === 'Rational' && isBoxedFunction(x) && x.nops === 2)
+    if (x.operator === 'Rational' && isFunction(x) && x.nops === 2)
       return { value: x.op1.div(x.op2), because: 'rational' };
     return undefined;
   },
@@ -390,8 +390,8 @@ export const SIMPLIFY_RULES: Rule[] = [
   // Power, Root, Sqrt
   //
   (x): RuleStep | undefined => {
-    if (!isBoxedFunction(x)) return undefined;
-    if (!isBoxedNumber(x.op1)) return undefined;
+    if (!isFunction(x)) return undefined;
+    if (!isNumber(x.op1)) return undefined;
 
     if (x.operator === 'Sqrt') {
       // sqrt(-10) -> i*sqrt(10)
@@ -403,7 +403,7 @@ export const SIMPLIFY_RULES: Rule[] = [
           because: 'sqrt',
         };
       const val = x.op1.sqrt();
-      if (isExact(isBoxedNumber(val) ? val.numericValue : undefined))
+      if (isExact(isNumber(val) ? val.numericValue : undefined))
         return { value: val, because: 'sqrt' };
       // If the input is already non-exact (a float), return the computed value
       if (!isExact(x.op1.numericValue)) return { value: val, because: 'sqrt' };
@@ -414,7 +414,7 @@ export const SIMPLIFY_RULES: Rule[] = [
     const op2 = x.op2;
 
     // If not both operands are numbers, we can't simplify
-    if (!isBoxedNumber(op2)) return undefined;
+    if (!isNumber(op2)) return undefined;
 
     // If they're both small integers, we can simplify
     if (
@@ -427,7 +427,7 @@ export const SIMPLIFY_RULES: Rule[] = [
         return { value: x.op1.pow(x.op2), because: 'power' };
       if (x.operator === 'Root') {
         const val = x.op1.root(x.op2);
-        if (isExact(isBoxedNumber(val) ? val.numericValue : undefined))
+        if (isExact(isNumber(val) ? val.numericValue : undefined))
           return { value: x.op1.root(x.op2), because: 'root' };
       }
     }
@@ -454,7 +454,7 @@ export const SIMPLIFY_RULES: Rule[] = [
   // Ln, Log (basic evaluation)
   //
   (x): RuleStep | undefined => {
-    if (!isBoxedFunction(x)) return undefined;
+    if (!isFunction(x)) return undefined;
     if (x.operator === 'Ln') {
       // Skip ln of non-integer rationals — simplifyLog decomposes ln(p/q) → ln(p) - ln(q)
       if (x.op1.operator === 'Rational' && x.op1.isInteger === false)
@@ -475,13 +475,13 @@ export const SIMPLIFY_RULES: Rule[] = [
       // Skip log_c(c^x) — simplifyLog returns x directly
       if (
         x.op1.operator === 'Power' &&
-        isBoxedFunction(x.op1) &&
+        isFunction(x.op1) &&
         x.op1.op1?.isSame(baseExpr)
       )
         return undefined;
       // Skip Power args — simplifyLog handles these with proper sign/abs tracking:
       // irrational exponents, non-integer rationals, and even exponents (need |x|)
-      if (x.op1.operator === 'Power' && isBoxedFunction(x.op1) && x.op1.op2) {
+      if (x.op1.operator === 'Power' && isFunction(x.op1) && x.op1.op2) {
         const exp = x.op1.op2;
         if (
           exp.isRational === false ||
@@ -498,11 +498,11 @@ export const SIMPLIFY_RULES: Rule[] = [
       }
       // Skip Multiply args containing a factor that is Power(base, ...) —
       // simplifyLog has log_c(c^x * y) → x + log_c(y) rule
-      if (x.op1.operator === 'Multiply' && isBoxedFunction(x.op1)) {
+      if (x.op1.operator === 'Multiply' && isFunction(x.op1)) {
         for (const factor of x.op1.ops) {
           if (
             factor.operator === 'Power' &&
-            isBoxedFunction(factor) &&
+            isFunction(factor) &&
             factor.op1?.isSame(baseExpr)
           )
             return undefined;
@@ -510,18 +510,18 @@ export const SIMPLIFY_RULES: Rule[] = [
       }
       // Skip Divide args containing base match in numerator or denominator —
       // simplifyLog has log_c(c^x/y) and log_c(y/c^x) rules
-      if (x.op1.operator === 'Divide' && isBoxedFunction(x.op1)) {
+      if (x.op1.operator === 'Divide' && isFunction(x.op1)) {
         const num = x.op1.op1;
         const denom = x.op1.op2;
         if (
           num?.operator === 'Power' &&
-          isBoxedFunction(num) &&
+          isFunction(num) &&
           num.op1?.isSame(baseExpr)
         )
           return undefined;
         if (
           denom?.operator === 'Power' &&
-          isBoxedFunction(denom) &&
+          isFunction(denom) &&
           denom.op1?.isSame(baseExpr)
         )
           return undefined;
@@ -535,7 +535,7 @@ export const SIMPLIFY_RULES: Rule[] = [
   // Min/Max/Supremum/Infimum
   //
   (x): RuleStep | undefined => {
-    if (!isBoxedFunction(x)) return undefined;
+    if (!isFunction(x)) return undefined;
     if (x.operator === 'Max') {
       if (x.nops === 0)
         return { value: x.engine.NegativeInfinity, because: 'max' };
@@ -560,7 +560,7 @@ export const SIMPLIFY_RULES: Rule[] = [
   // Derivative
   //
   (x): RuleStep | undefined => {
-    if (x.operator !== 'Derivative' || !isBoxedFunction(x)) return undefined;
+    if (x.operator !== 'Derivative' || !isFunction(x)) return undefined;
     const ce = x.engine;
     const [f, degree] = x.ops;
     if (x.nops === 2)
@@ -581,7 +581,7 @@ export const SIMPLIFY_RULES: Rule[] = [
   // Hypot
   //
   (x): RuleStep | undefined => {
-    if (x.operator !== 'Hypot' || !isBoxedFunction(x)) return undefined;
+    if (x.operator !== 'Hypot' || !isFunction(x)) return undefined;
     const ce = x.engine;
     return {
       value: ce
@@ -595,7 +595,7 @@ export const SIMPLIFY_RULES: Rule[] = [
   // Congruent
   //
   (x): RuleStep | undefined => {
-    if (x.operator !== 'Congruent' || !isBoxedFunction(x)) return undefined;
+    if (x.operator !== 'Congruent' || !isFunction(x)) return undefined;
     if (x.nops < 3) return undefined;
     const ce = x.engine;
     return {
@@ -619,7 +619,7 @@ export const SIMPLIFY_RULES: Rule[] = [
   // Constructible values of trig functions
   //
   (x): RuleStep | undefined => {
-    if (!isConstructible(x) || !isBoxedFunction(x)) return undefined;
+    if (!isConstructible(x) || !isFunction(x)) return undefined;
     const value = constructibleValues(x.operator, x.op1);
     if (!value) return undefined;
     return { value, because: 'constructible value' };
@@ -629,7 +629,7 @@ export const SIMPLIFY_RULES: Rule[] = [
   // Inverse Function (i.e. sin^{-1})
   //
   (x): RuleStep | undefined => {
-    if (x.operator !== 'InverseFunction' || !isBoxedFunction(x))
+    if (x.operator !== 'InverseFunction' || !isFunction(x))
       return undefined;
     const value = processInverseFunction(x.engine, x.ops);
     if (!value) return undefined;
@@ -640,7 +640,7 @@ export const SIMPLIFY_RULES: Rule[] = [
   // Arctan2
   //
   (expr): RuleStep | undefined => {
-    if (expr.operator !== 'Arctan2' || !isBoxedFunction(expr)) return undefined;
+    if (expr.operator !== 'Arctan2' || !isFunction(expr)) return undefined;
     // See https://en.wikipedia.org/wiki/Argument_(complex_analysis)#Realizations_of_the_function_in_computer_languages
     const [y, x] = expr.ops;
     const ce = expr.engine;
@@ -701,7 +701,7 @@ export const SIMPLIFY_RULES: Rule[] = [
   // Power combination for 2+ operands in Multiply
   //
   (x): RuleStep | undefined => {
-    if (x.operator !== 'Multiply' || !isBoxedFunction(x) || x.ops.length < 2)
+    if (x.operator !== 'Multiply' || !isFunction(x) || x.ops.length < 2)
       return undefined;
 
     const ce = x.engine;
@@ -719,10 +719,10 @@ export const SIMPLIFY_RULES: Rule[] = [
       let base: BoxedExpression;
       let exp: BoxedExpression;
 
-      if (term.operator === 'Power' && isBoxedFunction(term)) {
+      if (term.operator === 'Power' && isFunction(term)) {
         base = term.op1;
         exp = term.op2;
-      } else if (isBoxedSymbol(term)) {
+      } else if (isSymbol(term)) {
         // Bare symbol treated as base^1
         base = term;
         exp = ce.One;
@@ -752,7 +752,7 @@ export const SIMPLIFY_RULES: Rule[] = [
       // --- Rational-radical terms: (num/den)·√radical → prime contributions ---
       // ExactNumericValue stores rational (Rational) and radical (number).
       // Decompose as: radical primes get e/2, |num| primes get e, den primes get -e.
-      if (isBoxedNumber(term)) {
+      if (isNumber(term)) {
         const nv = term.numericValue;
         if (nv instanceof ExactNumericValue && nv.radical > 1) {
           const rational = nv.rational;
@@ -823,7 +823,7 @@ export const SIMPLIFY_RULES: Rule[] = [
         }
       }
 
-      if (!isBoxedNumber(term)) continue;
+      if (!isNumber(term)) continue;
 
       // --- Integer coefficients (positive and negative) ---
       const n = term.re;
@@ -905,7 +905,7 @@ export const SIMPLIFY_RULES: Rule[] = [
         const baseNonZero =
           base.isPositive === true ||
           base.isNegative === true ||
-          isBoxedNumber(base);
+          isNumber(base);
 
         if (baseNonZero) {
           hasCombinations = true;
@@ -986,7 +986,7 @@ function simplifyRelationalOperator(
   // 1/ Simplify both sides of the relational operator
   //
 
-  if (!isBoxedFunction(expr)) return undefined;
+  if (!isFunction(expr)) return undefined;
   const op1 = expr.op1.simplify();
   const op2 = expr.op2.simplify();
   expr = ce._fn(expr.operator, [op1, op2]);
@@ -997,7 +997,7 @@ function simplifyRelationalOperator(
   //
   expr = factor(expr) ?? expr;
   console.assert(isRelationalOperator(expr.operator));
-  if (isBoxedFunction(expr) && expr.nops === 2) {
+  if (isFunction(expr) && expr.nops === 2) {
     // Try f(x) < g(x) -> f(x) - g(x) < 0
     if (!expr.op2.is(0)) {
       const alt = factor(
@@ -1016,7 +1016,7 @@ function simplifyRelationalOperator(
 function simplifySystemOfEquations(
   expr: BoxedExpression
 ): RuleStep | undefined {
-  if (expr.operator !== 'List' || !isBoxedFunction(expr)) return undefined;
+  if (expr.operator !== 'List' || !isFunction(expr)) return undefined;
 
   // Check if every element is an equation or inequality
   if (

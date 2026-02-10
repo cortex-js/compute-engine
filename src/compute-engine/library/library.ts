@@ -38,7 +38,7 @@ import type {
   SymbolDefinitions,
   IComputeEngine as ComputeEngine,
   LibraryDefinition,
-  SemiBoxedExpression,
+  ExpressionInput,
 } from '../global-types';
 import { _BoxedOperatorDefinition } from '../boxed-expression/boxed-operator-definition';
 
@@ -311,7 +311,7 @@ export function setSymbolDefinitions(
         }
       } else {
         const def = new _BoxedValueDefinition(engine, name, {
-          value: engine.box(entry as unknown as SemiBoxedExpression),
+          value: engine.box(entry as unknown as ExpressionInput),
         });
         bindings.set(name, { value: def });
       }

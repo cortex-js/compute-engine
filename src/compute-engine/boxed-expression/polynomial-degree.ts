@@ -1,6 +1,6 @@
 import type { BoxedExpression } from '../global-types';
 import { asSmallInteger } from './numerics';
-import { isBoxedSymbol, isBoxedFunction, isBoxedNumber } from './type-guards';
+import { isSymbol, isFunction, isNumber } from './type-guards';
 
 /**
  * The total degree of an expression is the sum of the
@@ -10,11 +10,11 @@ import { isBoxedSymbol, isBoxedFunction, isBoxedNumber } from './type-guards';
  */
 export function totalDegree(expr: BoxedExpression): number {
   // e.g. "x"
-  if (isBoxedSymbol(expr) && !expr.isConstant) return 1;
+  if (isSymbol(expr) && !expr.isConstant) return 1;
 
-  if (!isBoxedFunction(expr)) return 0;
+  if (!isFunction(expr)) return 0;
 
-  if (expr.operator === 'Power' && isBoxedNumber(expr.op2)) {
+  if (expr.operator === 'Power' && isNumber(expr.op2)) {
     // If the base has no unknowns, the degree is 0, e.g. 2^3
     if (totalDegree(expr.op1) === 0) return 0;
     const deg = asSmallInteger(expr.op2);
@@ -53,11 +53,11 @@ export function totalDegree(expr: BoxedExpression): number {
  */
 export function maxDegree(expr: BoxedExpression): number {
   // e.g. "x"
-  if (isBoxedSymbol(expr) && !expr.isConstant) return 1;
+  if (isSymbol(expr) && !expr.isConstant) return 1;
 
-  if (!isBoxedFunction(expr)) return 0;
+  if (!isFunction(expr)) return 0;
 
-  if (expr.operator === 'Power' && isBoxedNumber(expr.op2)) {
+  if (expr.operator === 'Power' && isNumber(expr.op2)) {
     // If the base has no unknowns, the degree is 0, e.g. 2^3
     if (maxDegree(expr.op1) === 0) return 0;
 
@@ -85,8 +85,8 @@ export function maxDegree(expr: BoxedExpression): number {
 
 export function lex(expr: BoxedExpression): string {
   // Consider symbols, but ignore constants such as "Pi" or "ExponentialE"
-  if (isBoxedSymbol(expr) && !expr.isConstant) return expr.symbol;
-  if (!isBoxedFunction(expr)) return '';
+  if (isSymbol(expr) && !expr.isConstant) return expr.symbol;
+  if (!isFunction(expr)) return '';
   return expr.ops
     .map((x) => lex(x))
     .join(' ')

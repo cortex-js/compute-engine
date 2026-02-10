@@ -10,7 +10,7 @@ import type {
   IndexedCollectionInterface,
 } from '../global-types';
 
-export function isBoxedExpression(x: unknown): x is BoxedExpression {
+function isExpressionImpl(x: unknown): x is BoxedExpression {
   const boxed = x as { _kind?: unknown } | null | undefined;
   return (
     boxed !== null &&
@@ -21,34 +21,79 @@ export function isBoxedExpression(x: unknown): x is BoxedExpression {
   );
 }
 
-export function isBoxedNumber(
+/** Preferred guard for runtime expressions. */
+export function isExpression(x: unknown): x is BoxedExpression {
+  return isExpressionImpl(x);
+}
+
+export function isNumber(
   expr: BoxedExpression | null | undefined
 ): expr is BoxedExpression & NumberLiteralInterface {
   return expr?._kind === 'number';
 }
 
-export function isBoxedSymbol(
+export function isSymbol(
   expr: BoxedExpression | null | undefined
 ): expr is BoxedExpression & SymbolInterface {
   return expr?._kind === 'symbol';
 }
 
-export function isBoxedFunction(
+export function isFunction(
   expr: BoxedExpression | null | undefined
 ): expr is BoxedExpression & FunctionInterface {
   return expr?._kind === 'function' || expr?._kind === 'tensor';
 }
 
-export function isBoxedString(
+export function isString(
   expr: BoxedExpression | null | undefined
 ): expr is BoxedExpression & StringInterface {
   return expr?._kind === 'string';
 }
 
-export function isBoxedTensor(
+export function isTensor(
   expr: BoxedExpression | null | undefined
 ): expr is BoxedExpression & TensorInterface {
   return expr?._kind === 'tensor';
+}
+
+/** @deprecated Use `isExpression()` instead. */
+export function isBoxedExpression(x: unknown): x is BoxedExpression {
+  return isExpressionImpl(x);
+}
+
+/** @deprecated Use `isNumber()` instead. */
+export function isBoxedNumber(
+  expr: BoxedExpression | null | undefined
+): expr is BoxedExpression & NumberLiteralInterface {
+  return isNumber(expr);
+}
+
+/** @deprecated Use `isSymbol()` instead. */
+export function isBoxedSymbol(
+  expr: BoxedExpression | null | undefined
+): expr is BoxedExpression & SymbolInterface {
+  return isSymbol(expr);
+}
+
+/** @deprecated Use `isFunction()` instead. */
+export function isBoxedFunction(
+  expr: BoxedExpression | null | undefined
+): expr is BoxedExpression & FunctionInterface {
+  return isFunction(expr);
+}
+
+/** @deprecated Use `isString()` instead. */
+export function isBoxedString(
+  expr: BoxedExpression | null | undefined
+): expr is BoxedExpression & StringInterface {
+  return isString(expr);
+}
+
+/** @deprecated Use `isTensor()` instead. */
+export function isBoxedTensor(
+  expr: BoxedExpression | null | undefined
+): expr is BoxedExpression & TensorInterface {
+  return isTensor(expr);
 }
 
 export function isDictionary(
@@ -70,11 +115,11 @@ export function isIndexedCollection(
 }
 
 /**
- * Get the symbol name if `expr` is a boxed symbol, otherwise `undefined`.
+ * Get the symbol name if `expr` is a symbol expression, otherwise `undefined`.
  *
- * Convenience helper that combines `isBoxedSymbol()` with `.symbol` access
+ * Convenience helper that combines `isSymbol()` with `.symbol` access
  * so callers can write `sym(expr) === 'Pi'` instead of the more verbose
- * `isBoxedSymbol(expr) && expr.symbol === 'Pi'`.
+ * `isSymbol(expr) && expr.symbol === 'Pi'`.
  */
 export function sym(
   expr: BoxedExpression | null | undefined

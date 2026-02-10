@@ -1,7 +1,7 @@
 import { Complex } from 'complex-esm';
 import { Decimal } from 'decimal.js';
 import type {
-  SemiBoxedExpression,
+  ExpressionInput,
   BoxedExpression,
   CanonicalOptions,
   IComputeEngine as ComputeEngine,
@@ -10,8 +10,8 @@ import type {
 } from '../global-types';
 import type { FormOption } from '../types-serialization';
 
-import {
-  Expression,
+import type {
+  MathJsonExpression as Expression,
   ExpressionObject,
   MathJsonSymbol,
 } from '../../math-json/types';
@@ -50,7 +50,7 @@ import { flatten } from './flatten';
 import { isValueDef } from './utils';
 import { canonicalNegate } from './negate';
 import { canonical } from './canonical-utils';
-import { isBoxedNumber, isBoxedFunction } from './type-guards';
+import { isNumber, isFunction } from './type-guards';
 // Dynamic import to avoid circular dependency
 
 /**
@@ -118,7 +118,7 @@ export function formToInternal(form?: FormOption): {
 
 function boxHold(
   ce: ComputeEngine,
-  expr: SemiBoxedExpression | null,
+  expr: ExpressionInput | null,
   options: { canonical?: CanonicalOptions }
 ): BoxedExpression {
   if (expr instanceof _BoxedExpression) return expr;
@@ -157,7 +157,7 @@ function boxHold(
 export function boxFunction(
   ce: ComputeEngine,
   name: MathJsonSymbol,
-  ops: readonly SemiBoxedExpression[],
+  ops: readonly ExpressionInput[],
   options?: {
     metadata?: Metadata;
     canonical?: CanonicalOptions;
@@ -275,7 +275,7 @@ export function boxFunction(
       if (typeof op1 === 'number') return ce.number(-op1, options);
       if (op1 instanceof Decimal) return ce.number(op1.neg(), options);
       const boxedop1 = ce.box(op1, options);
-      if (isBoxedNumber(boxedop1)) {
+      if (isNumber(boxedop1)) {
         const num = boxedop1.numericValue;
         return ce.number(typeof num === 'number' ? -num : num.neg(), options);
       }
@@ -343,7 +343,7 @@ export function boxFunction(
 
 export function box(
   ce: ComputeEngine,
-  expr: null | undefined | NumericValue | SemiBoxedExpression,
+  expr: null | undefined | NumericValue | ExpressionInput,
   options?: {
     canonical?: CanonicalOptions;
     structural?: boolean;
@@ -377,7 +377,7 @@ export function box(
       );
 
     return canonicalForm(
-      boxFunction(ce, expr[0], expr.slice(1) as SemiBoxedExpression[], {
+      boxFunction(ce, expr[0], expr.slice(1) as ExpressionInput[], {
         canonical,
         structural,
         scope: options?.scope,
@@ -458,7 +458,7 @@ export function box(
 function makeCanonicalFunction(
   ce: ComputeEngine,
   name: string,
-  ops: ReadonlyArray<SemiBoxedExpression>,
+  ops: ReadonlyArray<ExpressionInput>,
   metadata: Metadata | undefined,
   scope: Scope | undefined
 ): BoxedExpression {
@@ -636,10 +636,10 @@ function makeCanonicalFunction(
   //
   if (args.length === 1 && args[0].operator === name) {
     // f(f(x)) -> x
-    if (opDef.involution && isBoxedFunction(args[0])) return args[0].op1;
+    if (opDef.involution && isFunction(args[0])) return args[0].op1;
 
     // f(f(x)) -> f(x)
-    if (opDef.idempotent && isBoxedFunction(xs[0]))
+    if (opDef.idempotent && isFunction(xs[0]))
       return new BoxedFunction(ce, name, xs[0].ops, {
         metadata,
         canonical: true,
@@ -661,7 +661,7 @@ function makeCanonicalFunction(
 function makeNumericFunction(
   ce: ComputeEngine,
   name: MathJsonSymbol,
-  semiOps: ReadonlyArray<SemiBoxedExpression>,
+  semiOps: ReadonlyArray<ExpressionInput>,
   metadata?: Metadata,
   scope?: Scope
 ): BoxedExpression | null {
@@ -811,7 +811,7 @@ function fromNumericValue(
 
 export function semiCanonical(
   ce: ComputeEngine,
-  xs: ReadonlyArray<SemiBoxedExpression>,
+  xs: ReadonlyArray<ExpressionInput>,
   scope?: Scope
 ): ReadonlyArray<BoxedExpression> {
   // Avoid memory allocation if possible

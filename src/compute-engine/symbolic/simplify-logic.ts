@@ -1,5 +1,5 @@
 import type { BoxedExpression } from '../global-types';
-import { isBoxedFunction } from '../boxed-expression/type-guards';
+import { isFunction } from '../boxed-expression/type-guards';
 import {
   evaluateAnd,
   evaluateOr,
@@ -25,7 +25,7 @@ export function simplifyLogicFunction(
     Nor: evaluateNor,
   }[x.operator];
 
-  if (!fn || !isBoxedFunction(x)) return undefined;
+  if (!fn || !isFunction(x)) return undefined;
 
   const value = fn(x.ops, { engine: x.engine });
   if (!value) return undefined;

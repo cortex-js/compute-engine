@@ -9,10 +9,10 @@ import { permutations } from '../../common/utils';
 import { isWildcard, wildcardName, wildcardType } from './pattern-utils';
 import { isOperatorDef } from './utils';
 import {
-  isBoxedNumber,
-  isBoxedFunction,
-  isBoxedSymbol,
-  isBoxedString,
+  isNumber,
+  isFunction,
+  isSymbol,
+  isString,
 } from './type-guards';
 
 function hasWildcards(expr: string | BoxedExpression): boolean {
@@ -20,7 +20,7 @@ function hasWildcards(expr: string | BoxedExpression): boolean {
 
   if (isWildcard(expr)) return true;
 
-  if (isBoxedFunction(expr))
+  if (isFunction(expr))
     return hasWildcards(expr.operator) || expr.ops.some(hasWildcards);
 
   return false;
@@ -96,8 +96,8 @@ function matchOnce(
   //
   // Match a number
   //
-  if (isBoxedNumber(pattern)) {
-    if (!isBoxedNumber(expr)) return null;
+  if (isNumber(pattern)) {
+    if (!isNumber(expr)) return null;
     if (pattern.isEqual(expr)) return substitution;
 
     // Attempt to match the expression to a variant of the pattern
@@ -110,17 +110,17 @@ function matchOnce(
   //
   // Match a string
   //
-  if (isBoxedString(pattern)) {
+  if (isString(pattern)) {
     const str = pattern.string;
-    return isBoxedString(expr) && expr.string === str ? substitution : null;
+    return isString(expr) && expr.string === str ? substitution : null;
   }
 
   //
   // Match a symbol
   //
-  if (isBoxedSymbol(pattern)) {
+  if (isSymbol(pattern)) {
     const symbol = pattern.symbol;
-    if (isBoxedSymbol(expr) && symbol === expr.symbol) return substitution;
+    if (isSymbol(expr) && symbol === expr.symbol) return substitution;
     // Match the symbol to a variant of the pattern
     // (e.g. `x` to `0+x`).
     if (!acceptVariants) return null;
@@ -131,7 +131,7 @@ function matchOnce(
   // Match a function
   //
 
-  if (isBoxedFunction(pattern)) {
+  if (isFunction(pattern)) {
     const useVariations = options.useVariations ?? false;
     const ce = expr.engine;
 
@@ -143,7 +143,7 @@ function matchOnce(
     // This allows patterns like ['Divide', '_num', '_den'] to match rationals like 3/2
     if (
       operator === 'Divide' &&
-      isBoxedNumber(expr) &&
+      isNumber(expr) &&
       !expr.denominator.is(1)
     ) {
       // Create a synthetic Divide expression to match against
@@ -159,7 +159,7 @@ function matchOnce(
     // This handles cases like x/2 which is canonicalized as x * (1/2)
     if (
       operator === 'Divide' &&
-      isBoxedFunction(expr) &&
+      isFunction(expr) &&
       expr.operator === 'Multiply'
     ) {
       const ops = expr.ops;
@@ -167,7 +167,7 @@ function matchOnce(
         const op = ops[i];
 
         // Check if op is a rational number with numerator 1 (i.e., 1/n form)
-        if (isBoxedNumber(op) && op.numerator.is(1) && !op.denominator.is(1)) {
+        if (isNumber(op) && op.numerator.is(1) && !op.denominator.is(1)) {
           // Collect all other operands
           const others = ops.filter((_, j) => j !== i);
           const numerator =
@@ -196,7 +196,7 @@ function matchOnce(
     // This handles cases like x^-1 which is canonicalized as 1/x
     if (
       operator === 'Power' &&
-      isBoxedFunction(expr) &&
+      isFunction(expr) &&
       expr.operator === 'Divide' &&
       expr.op1.is(1)
     ) {
@@ -217,7 +217,7 @@ function matchOnce(
     // This handles cases like x^(1/3) which is canonicalized as Root(x, 3)
     if (
       operator === 'Power' &&
-      isBoxedFunction(expr) &&
+      isFunction(expr) &&
       expr.operator === 'Root'
     ) {
       // Create a synthetic Power expression: Power(x, 1/n)
@@ -265,7 +265,7 @@ function matchOnce(
     if (result !== null) substitution = result;
 
     // If requested, try to match the pattern recursively
-    if (options.recursive && isBoxedFunction(expr))
+    if (options.recursive && isFunction(expr))
       result =
         matchRecursive(expr, pattern, substitution, {
           ...options,
@@ -289,8 +289,8 @@ function matchRecursive(
     acceptVariants?: boolean;
   }
 ): BoxedSubstitution | null {
-  console.assert(isBoxedFunction(expr));
-  if (!isBoxedFunction(expr)) return null;
+  console.assert(isFunction(expr));
+  if (!isFunction(expr)) return null;
   let result: BoxedSubstitution | null = null;
   for (const op of expr.ops) {
     const r = matchOnce(op, pattern, substitution, options);
@@ -331,7 +331,7 @@ function matchVariations(
 
   if (operator === 'Negate') {
     // 0 -> -x (if x=0)
-    if (expr.is(0) && isBoxedFunction(pattern))
+    if (expr.is(0) && isFunction(pattern))
       return matchOnce(ce.Zero, pattern.op1, substitution, varOptions);
   }
 
@@ -341,7 +341,7 @@ function matchVariations(
     if (result !== null) return result;
 
     // a-b -> a+(-b)
-    if (isBoxedFunction(expr) && expr.operator === 'Subtract')
+    if (isFunction(expr) && expr.operator === 'Subtract')
       result = matchVariation('Add', [expr.op1, ['Negate', expr.op2]]);
 
     if (result !== null) return result;
@@ -354,7 +354,7 @@ function matchVariations(
     if (result !== null) return result;
 
     // -a -> 0-a
-    if (isBoxedFunction(expr) && expr.operator === 'Negate')
+    if (isFunction(expr) && expr.operator === 'Negate')
       result = matchVariation('Subtract', [0, expr.op1]);
 
     if (result !== null) return result;
@@ -367,13 +367,13 @@ function matchVariations(
     if (result !== null) return result;
 
     // -x -> -1*x
-    if (isBoxedFunction(expr) && expr.operator === 'Negate') {
+    if (isFunction(expr) && expr.operator === 'Negate') {
       result = matchVariation('Multiply', [-1, expr.op1]);
       if (result !== null) return result;
     }
 
     // x/a -> (1/a)*x
-    if (isBoxedFunction(expr) && expr.operator === 'Divide') {
+    if (isFunction(expr) && expr.operator === 'Divide') {
       result = matchVariation('Multiply', [expr.op1, ['Divide', 1, expr.op2]]);
       if (result !== null) return result;
     }
@@ -397,14 +397,14 @@ function matchVariations(
     if (result !== null) return result;
   }
 
-  if (operator === 'Power' && isBoxedFunction(pattern)) {
+  if (operator === 'Power' && isFunction(pattern)) {
     // Square(x) -> Power(x, 2)
     if (pattern.op2.re === 2 && pattern.op2.im === 0) {
       const result = matchVariation('Square', [expr]);
       if (result !== null) return result;
     }
     // Exp(x) -> Power(E, x)
-    if (isBoxedSymbol(pattern.op1) && pattern.op1.symbol === 'ExponentialE') {
+    if (isSymbol(pattern.op1) && pattern.op1.symbol === 'ExponentialE') {
       const result = matchVariation('Exp', [expr]);
       if (result !== null) return result;
     }
@@ -440,8 +440,8 @@ function matchPermutation(
   options: PatternMatchOptions
 ): BoxedSubstitution | null {
   console.assert(expr.operator === pattern.operator);
-  console.assert(isBoxedFunction(expr) && isBoxedFunction(pattern));
-  if (!isBoxedFunction(expr) || !isBoxedFunction(pattern)) return null;
+  console.assert(isFunction(expr) && isFunction(pattern));
+  if (!isFunction(expr) || !isFunction(pattern)) return null;
 
   const patternOps = pattern.ops;
   const exprOps = expr.ops;
@@ -596,11 +596,11 @@ const MAX_COMBINATIONS = 1000;
  * - Complex expressions: lower specificity
  */
 function anchorSpecificity(anchor: BoxedExpression): number {
-  if (isBoxedNumber(anchor)) return 100;
-  if (isBoxedSymbol(anchor)) return 80;
-  if (isBoxedString(anchor)) return 90;
+  if (isNumber(anchor)) return 100;
+  if (isSymbol(anchor)) return 80;
+  if (isString(anchor)) return 90;
   // Functions - specificity based on depth/complexity
-  if (isBoxedFunction(anchor)) {
+  if (isFunction(anchor)) {
     // More operands = more specific
     const opCount = anchor.nops;
     // Count non-wildcard children for extra specificity
@@ -620,7 +620,7 @@ function matchCommutativeWithAnchors(
   options: PatternMatchOptions
 ): BoxedSubstitution | null {
   const ce = expr.engine;
-  if (!isBoxedFunction(expr) || !isBoxedFunction(pattern)) return null;
+  if (!isFunction(expr) || !isFunction(pattern)) return null;
   const patternOps = pattern.ops;
   const exprOps = [...expr.ops];
 
@@ -905,14 +905,14 @@ function matchArguments(
   options: PatternMatchOptions
 ): BoxedSubstitution | null {
   if (patterns.length === 0) {
-    if (isBoxedFunction(expr) && expr.ops.length === 0) return substitution;
+    if (isFunction(expr) && expr.ops.length === 0) return substitution;
     return null;
   }
 
   const ce = patterns[0].engine;
 
   // We're going to consume the ops array, so make a copy
-  if (!isBoxedFunction(expr)) return null;
+  if (!isFunction(expr)) return null;
   const ops = [...expr.ops];
 
   return matchRemaining(patterns, substitution);

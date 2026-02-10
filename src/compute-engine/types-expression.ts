@@ -1,7 +1,7 @@
 import type { Complex } from 'complex-esm';
 import type { OneOf } from '../common/one-of';
 import type {
-  Expression,
+  MathJsonExpression,
   MathJsonNumberObject,
   MathJsonStringObject,
   MathJsonSymbolObject,
@@ -171,7 +171,7 @@ type Scope = KernelScope<BoxedDefinition>;
 type EvaluateOptions = KernelEvaluateOptions<BoxedExpression>;
 type Rule = KernelRule<
   BoxedExpression,
-  SemiBoxedExpression,
+  ExpressionInput,
   ExpressionComputeEngine
 >;
 type BoxedRule = KernelBoxedRule<BoxedExpression, ExpressionComputeEngine>;
@@ -536,7 +536,7 @@ export interface Tensor<DT extends TensorDataType> extends TensorData<DT> {
  * @category Boxed Expression
  *
  */
-export interface BoxedExpression {
+export interface Expression {
   /** @internal */
   readonly _kind: string;
 
@@ -640,10 +640,12 @@ export interface BoxedExpression {
    *
    * @category Primitive Methods
    */
-  toJSON(): Expression;
+  toJSON(): MathJsonExpression;
 
   /** Serialize to a MathJSON expression with specified options */
-  toMathJson(options?: Readonly<Partial<JsonSerializationOptions>>): Expression;
+  toMathJson(
+    options?: Readonly<Partial<JsonSerializationOptions>>
+  ): MathJsonExpression;
 
   /** MathJSON representation of this expression.
    *
@@ -664,7 +666,7 @@ export interface BoxedExpression {
    * :::
    *
    */
-  readonly json: Expression;
+  readonly json: MathJsonExpression;
 
   /**
    * Output to the console a string representation of the expression.
@@ -1085,7 +1087,7 @@ export interface BoxedExpression {
    *
    */
   subs(
-    sub: Substitution<SemiBoxedExpression>,
+    sub: Substitution<ExpressionInput>,
     options?: { canonical?: CanonicalOptions }
   ): BoxedExpression;
 
@@ -1791,14 +1793,14 @@ export interface BoxedExpression {
 // ── Role Interfaces ─────────────────────────────────────────────────────
 //
 // These interfaces narrow `BoxedExpression` to expression-kind-specific
-// members.  Use the corresponding type guard (`isBoxedNumber`, etc.) to
+// members.  Use the corresponding type guard (`isNumber`, etc.) to
 // narrow an expression, then access these members without `undefined`.
 //
 
 /**
  * Narrowed interface for number literal expressions.
  *
- * Obtained via `isBoxedNumber()`.
+ * Obtained via `isNumber()`.
  *
  * @category Boxed Expression
  */
@@ -1810,7 +1812,7 @@ export interface NumberLiteralInterface {
 /**
  * Narrowed interface for symbol expressions.
  *
- * Obtained via `isBoxedSymbol()`.
+ * Obtained via `isSymbol()`.
  *
  * @category Boxed Expression
  */
@@ -1821,7 +1823,7 @@ export interface SymbolInterface {
 /**
  * Narrowed interface for function expressions.
  *
- * Obtained via `isBoxedFunction()`.
+ * Obtained via `isFunction()`.
  *
  * @category Boxed Expression
  */
@@ -1837,7 +1839,7 @@ export interface FunctionInterface {
 /**
  * Narrowed interface for string expressions.
  *
- * Obtained via `isBoxedString()`.
+ * Obtained via `isString()`.
  *
  * @category Boxed Expression
  */
@@ -1848,7 +1850,7 @@ export interface StringInterface {
 /**
  * Narrowed interface for tensor expressions.
  *
- * Obtained via `isBoxedTensor()`.
+ * Obtained via `isTensor()`.
  *
  * @category Boxed Expression
  */
@@ -1891,15 +1893,15 @@ export interface IndexedCollectionInterface extends CollectionInterface {
   ): number | undefined;
 }
 
-/** A semi boxed expression is a MathJSON expression which can include some
- * boxed terms.
+/** An expression input is a MathJSON expression which can include some
+ * engine expression terms.
  *
  * This is convenient when creating new expressions from portions
- * of an existing `BoxedExpression` while avoiding unboxing and reboxing.
+ * of an existing `Expression` while avoiding unboxing and reboxing.
  *
  * @category Boxed Expression
  */
-export type SemiBoxedExpression =
+export type ExpressionInput =
   | number
   | bigint
   | string
@@ -1909,8 +1911,8 @@ export type SemiBoxedExpression =
   | MathJsonSymbolObject
   | MathJsonFunctionObject
   | MathJsonDictionaryObject
-  | readonly [MathJsonSymbol, ...SemiBoxedExpression[]]
-  | BoxedExpression;
+  | readonly [MathJsonSymbol, ...ExpressionInput[]]
+  | Expression;
 
 /** Interface for dictionary-like structures.
  * Use `isDictionary()` to check if an expression is a dictionary.
@@ -1937,3 +1939,9 @@ export interface EqHandlers {
   eq: (a: BoxedExpression, b: BoxedExpression) => boolean | undefined;
   neq: (a: BoxedExpression, b: BoxedExpression) => boolean | undefined;
 }
+
+/** @deprecated Use `Expression` instead. */
+export type BoxedExpression = Expression;
+
+/** @deprecated Use `ExpressionInput` instead. */
+export type SemiBoxedExpression = ExpressionInput;

@@ -7,7 +7,7 @@ import {
   stringValue,
 } from '../../../math-json/utils';
 import { joinLatex } from '../tokenizer';
-import { Expression } from '../../../math-json/types';
+import { MathJsonExpression as Expression } from '../../../math-json/types';
 import {
   LatexDictionary,
   Serializer,

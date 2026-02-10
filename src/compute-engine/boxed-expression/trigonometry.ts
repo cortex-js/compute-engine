@@ -1,7 +1,7 @@
 import { Complex } from 'complex-esm';
 import { Decimal } from 'decimal.js';
 
-import type { Expression } from '../../math-json/types';
+import type { MathJsonExpression as Expression } from '../../math-json/types';
 import type { LatexString } from '../latex-syntax/types';
 
 import { apply } from './apply';
@@ -14,7 +14,7 @@ import type {
   Sign,
 } from '../global-types';
 import { asLatexString } from '../latex-syntax/utils';
-import { isBoxedNumber, isBoxedSymbol, isBoxedFunction } from './type-guards';
+import { isNumber, isSymbol, isFunction } from './type-guards';
 
 type ConstructibleTrigValues = [
   [numerator: number, denominator: number],
@@ -520,10 +520,10 @@ export function processInverseFunction(
 ): BoxedExpression | undefined {
   if (xs.length !== 1 || !xs[0].isValid) return undefined;
   const expr = xs[0];
-  if (expr.operator === 'InverseFunction' && isBoxedFunction(expr))
+  if (expr.operator === 'InverseFunction' && isFunction(expr))
     return expr.op1.canonical;
 
-  if (!isBoxedSymbol(expr)) return undefined;
+  if (!isSymbol(expr)) return undefined;
   const name = expr.symbol;
 
   const newHead = inverseTrigFuncName(name);
@@ -696,7 +696,7 @@ export function constructibleValues(
   for (const [[n, d], value] of specialValues) {
     const r = value[operator];
     if (r && Math.abs(theta - (Math.PI * n) / d) <= 1e-12) {
-      if (isBoxedSymbol(r) && r.symbol === 'ComplexInfinity') return r;
+      if (isSymbol(r) && r.symbol === 'ComplexInfinity') return r;
       return identitySign * sign < 0 ? r.neg() : r;
     }
   }
@@ -709,7 +709,7 @@ function quadrant(
   theta: BoxedExpression
 ): [number | undefined, number | undefined] {
   // theta = theta.N();
-  if (!theta.isValid || !isBoxedNumber(theta)) return [undefined, undefined];
+  if (!theta.isValid || !isNumber(theta)) return [undefined, undefined];
   if (theta.im !== 0) return [undefined, undefined];
 
   // Normalize the angle to the range [0, 2π)

@@ -1,7 +1,7 @@
 import type { BoxedExpression, RuleStep } from '../global-types';
 import {
-  isBoxedFunction,
-  isBoxedNumber,
+  isFunction,
+  isNumber,
   sym,
 } from '../boxed-expression/type-guards';
 
@@ -10,7 +10,7 @@ import {
  * Handles 13 patterns for simplifying Product expressions.
  */
 export function simplifyProduct(x: BoxedExpression): RuleStep | undefined {
-  if (x.operator !== 'Product' || !isBoxedFunction(x)) return undefined;
+  if (x.operator !== 'Product' || !isFunction(x)) return undefined;
 
   const body = x.op1;
   const limits = x.op2;
@@ -18,7 +18,7 @@ export function simplifyProduct(x: BoxedExpression): RuleStep | undefined {
     !body ||
     !limits ||
     limits.operator !== 'Limits' ||
-    !isBoxedFunction(limits)
+    !isFunction(limits)
   )
     return undefined;
 
@@ -39,7 +39,7 @@ export function simplifyProduct(x: BoxedExpression): RuleStep | undefined {
   }
 
   // Handle numeric bounds edge cases
-  if (isBoxedNumber(lower) && isBoxedNumber(upper)) {
+  if (isNumber(lower) && isNumber(upper)) {
     const lowerVal = lower.numericValue;
     const upperVal = upper.numericValue;
     if (
@@ -68,7 +68,7 @@ export function simplifyProduct(x: BoxedExpression): RuleStep | undefined {
   if (!bodyUnknowns.has(index)) {
     const count = upper.sub(lower).add(ce.One).simplify();
     // Check for empty range with symbolic bounds
-    if (isBoxedNumber(count) && count.numericValue !== undefined) {
+    if (isNumber(count) && count.numericValue !== undefined) {
       const countVal =
         typeof count.numericValue === 'number'
           ? count.numericValue
@@ -95,7 +95,7 @@ export function simplifyProduct(x: BoxedExpression): RuleStep | undefined {
   // Pattern: Add with index and constant
   if (
     body.operator === 'Add' &&
-    isBoxedFunction(body) &&
+    isFunction(body) &&
     body.ops.length === 2 &&
     lower.is(1)
   ) {
@@ -124,14 +124,14 @@ export function simplifyProduct(x: BoxedExpression): RuleStep | undefined {
   }
 
   // Telescoping product: Product((k+1)/k, [k, 1, n]) → n+1
-  if (body.operator === 'Divide' && isBoxedFunction(body) && lower.is(1)) {
+  if (body.operator === 'Divide' && isFunction(body) && lower.is(1)) {
     const num = body.op1;
     const denom = body.op2;
     // Check for (k+1)/k pattern
     if (
       sym(denom) === index &&
       num.operator === 'Add' &&
-      isBoxedFunction(num) &&
+      isFunction(num) &&
       num.ops.length === 2 &&
       num.ops.some((o) => sym(o) === index) &&
       num.ops.some((o) => o.is(1))
@@ -145,7 +145,7 @@ export function simplifyProduct(x: BoxedExpression): RuleStep | undefined {
   // Canonical form is: Add(1, Negate(Power(k, -2))) = 1 + (-k^(-2))
   if (
     body.operator === 'Add' &&
-    isBoxedFunction(body) &&
+    isFunction(body) &&
     body.ops.length === 2 &&
     lower.is(2)
   ) {
@@ -157,16 +157,16 @@ export function simplifyProduct(x: BoxedExpression): RuleStep | undefined {
         hasOne = true;
       } else if (
         op.operator === 'Negate' &&
-        isBoxedFunction(op) &&
+        isFunction(op) &&
         op.op1.operator === 'Power' &&
-        isBoxedFunction(op.op1) &&
+        isFunction(op.op1) &&
         sym(op.op1.op1) === index &&
         op.op1.op2.is(-2)
       ) {
         hasNegInvSq = true;
       } else if (
         op.operator === 'Power' &&
-        isBoxedFunction(op) &&
+        isFunction(op) &&
         sym(op.op1) === index &&
         op.op2.is(-2)
       ) {
@@ -174,12 +174,12 @@ export function simplifyProduct(x: BoxedExpression): RuleStep | undefined {
         // Check if it's negated via Multiply
       } else if (
         op.operator === 'Multiply' &&
-        isBoxedFunction(op) &&
+        isFunction(op) &&
         op.ops.some((o) => o.is(-1)) &&
         op.ops.some(
           (o) =>
             o.operator === 'Power' &&
-            isBoxedFunction(o) &&
+            isFunction(o) &&
             sym(o.op1) === index &&
             o.op2.is(-2)
         )
@@ -202,7 +202,7 @@ export function simplifyProduct(x: BoxedExpression): RuleStep | undefined {
   // Double factorial (odd): Product(2n-1, [n, 1, b]) → (2b-1)!!
   if (
     body.operator === 'Add' &&
-    isBoxedFunction(body) &&
+    isFunction(body) &&
     body.ops.length === 2 &&
     lower.is(1)
   ) {
@@ -211,23 +211,23 @@ export function simplifyProduct(x: BoxedExpression): RuleStep | undefined {
     let constantTerm = 0;
 
     for (const op of body.ops) {
-      if (isBoxedNumber(op) && typeof op.numericValue === 'number') {
+      if (isNumber(op) && typeof op.numericValue === 'number') {
         constantTerm = op.numericValue;
       } else if (
         op.operator === 'Multiply' &&
-        isBoxedFunction(op) &&
+        isFunction(op) &&
         op.ops.length === 2
       ) {
         const [a, b] = op.ops;
         if (
-          isBoxedNumber(a) &&
+          isNumber(a) &&
           typeof a.numericValue === 'number' &&
           sym(b) === index
         ) {
           coefficient = a.numericValue;
           hasLinearTerm = true;
         } else if (
-          isBoxedNumber(b) &&
+          isNumber(b) &&
           typeof b.numericValue === 'number' &&
           sym(a) === index
         ) {
@@ -256,7 +256,7 @@ export function simplifyProduct(x: BoxedExpression): RuleStep | undefined {
   // Double factorial (even): Product(2n, [n, 1, b]) → 2^b * b!
   if (
     body.operator === 'Multiply' &&
-    isBoxedFunction(body) &&
+    isFunction(body) &&
     body.ops.length === 2 &&
     lower.is(1)
   ) {
@@ -279,7 +279,7 @@ export function simplifyProduct(x: BoxedExpression): RuleStep | undefined {
   // Pattern: body is Add with x (constant wrt index) and index
   if (
     body.operator === 'Add' &&
-    isBoxedFunction(body) &&
+    isFunction(body) &&
     body.ops.length === 2 &&
     lower.is(0)
   ) {
@@ -310,7 +310,7 @@ export function simplifyProduct(x: BoxedExpression): RuleStep | undefined {
 
     if (
       body.operator === 'Subtract' &&
-      isBoxedFunction(body) &&
+      isFunction(body) &&
       body.ops.length === 2
     ) {
       const [op1, op2] = body.ops;
@@ -320,14 +320,14 @@ export function simplifyProduct(x: BoxedExpression): RuleStep | undefined {
       }
     } else if (
       body.operator === 'Add' &&
-      isBoxedFunction(body) &&
+      isFunction(body) &&
       body.ops.length === 2
     ) {
       // Check for x + (-k) form
       for (const op of body.ops) {
         if (
           op.operator === 'Negate' &&
-          isBoxedFunction(op) &&
+          isFunction(op) &&
           sym(op.op1) === index
         ) {
           hasNegIndex = true;
@@ -349,7 +349,7 @@ export function simplifyProduct(x: BoxedExpression): RuleStep | undefined {
   }
 
   // Factor out constants: Product(c * f(n), [n, a, b]) → c^(b-a+1) * Product(f(n), [n, a, b])
-  if (body.operator === 'Multiply' && isBoxedFunction(body)) {
+  if (body.operator === 'Multiply' && isFunction(body)) {
     const constantFactors: BoxedExpression[] = [];
     const indexFactors: BoxedExpression[] = [];
 

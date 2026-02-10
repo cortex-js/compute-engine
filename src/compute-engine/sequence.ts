@@ -14,9 +14,9 @@ import type {
 } from './global-types';
 import { isValueDef, updateDef } from './boxed-expression/utils';
 import {
-  isBoxedSymbol,
-  isBoxedNumber,
-  isBoxedFunction,
+  isSymbol,
+  isNumber,
+  isFunction,
 } from './boxed-expression/type-guards';
 
 // ============================================================================
@@ -250,11 +250,11 @@ function checkConstraints(
   const result = substituted.evaluate();
 
   // Check if result is truthy (non-zero number or True)
-  if (isBoxedSymbol(result)) {
+  if (isSymbol(result)) {
     if (result.symbol === 'True') return true;
     if (result.symbol === 'False') return false;
   }
-  if (isBoxedNumber(result)) return result.re !== 0;
+  if (isNumber(result)) return result.re !== 0;
 
   // If we can't determine, assume constraints are not satisfied
   return false;
@@ -339,17 +339,17 @@ export function createSequenceHandler(
     // Extract indices from subscript
     let indices: number[];
 
-    if (subscript.operator === 'Sequence' && isBoxedFunction(subscript)) {
+    if (subscript.operator === 'Sequence' && isFunction(subscript)) {
       // Multi-index: Subscript(P, Sequence(n, k))
       // Evaluate operands in case they contain unevaluated arithmetic (e.g., n-1)
       indices = subscript.ops.map((op) => op.evaluate().re);
-    } else if (subscript.operator === 'Tuple' && isBoxedFunction(subscript)) {
+    } else if (subscript.operator === 'Tuple' && isFunction(subscript)) {
       // Multi-index after canonicalization: Subscript(P, Tuple(n, k))
       // Evaluate operands in case they contain unevaluated arithmetic (e.g., n-1)
       indices = subscript.ops.map((op) => op.evaluate().re);
     } else if (
       subscript.operator === 'Delimiter' &&
-      isBoxedFunction(subscript)
+      isFunction(subscript)
     ) {
       // Alternative: Subscript(P, Delimiter(n, k))
       // Evaluate operands in case they contain unevaluated arithmetic (e.g., n-1)
@@ -425,11 +425,11 @@ export function createSequenceHandler(
       : substituted.evaluate();
 
     // Memoize valid numeric results
-    if (memo && isBoxedNumber(result)) {
+    if (memo && isNumber(result)) {
       memo.set(memoKey, result);
     }
 
-    return isBoxedNumber(result) ? result : undefined;
+    return isNumber(result) ? result : undefined;
   };
 }
 
@@ -659,11 +659,11 @@ export function containsSelfReference(
   expr: BoxedExpression,
   seqName: string
 ): boolean {
-  if (isBoxedFunction(expr)) {
+  if (isFunction(expr)) {
     // Check if this is a Subscript with the sequence name as base
     if (expr.operator === 'Subscript') {
       const op1 = expr.op1;
-      if (isBoxedSymbol(op1) && op1.symbol === seqName) return true;
+      if (isSymbol(op1) && op1.symbol === seqName) return true;
     }
 
     // Recursively check operands
@@ -681,7 +681,7 @@ export function extractIndexVariable(
   subscript: BoxedExpression
 ): string | undefined {
   // Simple symbol
-  if (isBoxedSymbol(subscript)) return subscript.symbol;
+  if (isSymbol(subscript)) return subscript.symbol;
 
   // Look for symbols in expression
   const symbols = subscript.symbols;
@@ -918,7 +918,7 @@ export function generateSequenceTerms(
     const value = expr.evaluate();
 
     // Only include if we got a valid numeric result
-    if (isBoxedNumber(value)) {
+    if (isNumber(value)) {
       terms.push(value);
     } else {
       // If any term fails to evaluate, return undefined

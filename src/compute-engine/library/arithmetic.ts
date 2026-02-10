@@ -86,8 +86,8 @@ import type {
   Sign,
 } from '../global-types';
 import {
-  isBoxedNumber,
-  isBoxedFunction,
+  isNumber,
+  isFunction,
 } from '../boxed-expression/type-guards';
 import { canonical } from '../boxed-expression/canonical-utils';
 
@@ -190,7 +190,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       type: ([x]) => x.type,
       sgn: ([x]) => {
         if (x.is(0)) return 'zero';
-        if (isBoxedNumber(x)) return 'positive';
+        if (isNumber(x)) return 'positive';
         return 'non-negative'; //|x^2+1| fails
       },
       evaluate: ([x]) => evaluateAbs(x),
@@ -244,7 +244,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         if (x.isNonNegative) return 'non-negative';
         if (x.isNonPositive && x.isGreater(-1)) return 'zero';
         if (x.isNonPositive) return 'non-positive';
-        if (x.isReal == false && isBoxedNumber(x))
+        if (x.isReal == false && isNumber(x))
           return x.im! > 0 || x.im! <= -1 ? 'unsigned' : numberSgn(x.re); //.re and .im should be more general.
         return undefined;
       },
@@ -392,7 +392,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       canonical: (args, { engine }) => {
         const x = args[0];
         // We assume that -3! is -(3!) = -6
-        if (isBoxedNumber(x) && x.isNegative)
+        if (isNumber(x) && x.isNegative)
           return engine._fn('Factorial', [x.neg()]).neg();
         return engine._fn('Factorial', [x]);
       },
@@ -400,7 +400,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         const ce = x.engine;
 
         // If argument is symbolic (not a number literal), keep unevaluated
-        if (!isBoxedNumber(x)) return undefined;
+        if (!isNumber(x)) return undefined;
 
         // Is the argument a complex number?
         if (x.im !== 0 && x.im !== undefined)
@@ -427,7 +427,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         const ce = x.engine;
 
         // If argument is symbolic (not a number literal), keep unevaluated
-        if (!isBoxedNumber(x)) return undefined;
+        if (!isNumber(x)) return undefined;
 
         // Is the argument a complex number?
         if (x.im !== 0 && x.im !== undefined)
@@ -495,7 +495,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         if (x.isGreaterEqual(1)) return 'positive';
         if (x.isNonNegative && x.isLess(1)) return 'zero';
         if (x.isNonNegative) return 'non-negative';
-        if (x.isReal == false && isBoxedNumber(x))
+        if (x.isReal == false && isNumber(x))
           return x.im! < 0 || x.im! >= 1 ? 'unsigned' : numberSgn(x.re); //.re and .im should be more general.
         return undefined;
       },
@@ -872,7 +872,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         const n = ops[1]; //base of Mod
         if (n === undefined || n.isReal == false) return undefined;
         if (n.is(0)) return 'unsigned';
-        if (isBoxedNumber(ops[0]) && isBoxedNumber(n)) {
+        if (isNumber(ops[0]) && isNumber(n)) {
           const v = apply2(
             ops[0],
             n,
@@ -1104,7 +1104,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         //
         if (ops.length === 1) {
           const f = ops[0].N();
-          if (!isBoxedNumber(f) || f.im !== 0) return undefined;
+          if (!isNumber(f) || f.im !== 0) return undefined;
           return ce.number(rationalize(f.re));
         }
 
@@ -1195,7 +1195,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       },
       sgn: ([x]) => {
         if (x.isNaN) return 'unsigned';
-        if (isBoxedNumber(x))
+        if (isNumber(x))
           return x.im! >= 0.5 || x.im! <= -0.5
             ? 'unsigned'
             : numberSgn(Math.round(x.re));
@@ -1611,7 +1611,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         const op = ops[0];
         if (
           (op.operator === 'Rational' || op.operator === 'Divide') &&
-          isBoxedFunction(op)
+          isFunction(op)
         )
           return op.op1;
         return engine._fn('Numerator', canonical(engine, ops));
@@ -1623,7 +1623,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         const op = ops[0];
         if (
           (op.operator === 'Rational' || op.operator === 'Divide') &&
-          isBoxedFunction(op)
+          isFunction(op)
         )
           return op.op1.evaluate();
         return op.numerator;
@@ -1645,7 +1645,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         const op = ops[0];
         if (
           (op.operator === 'Rational' || op.operator === 'Divide') &&
-          isBoxedFunction(op)
+          isFunction(op)
         )
           return op.op2;
         const num = asRational(op);
@@ -1659,7 +1659,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         const op = ops[0];
         if (
           (op.operator === 'Rational' || op.operator === 'Divide') &&
-          isBoxedFunction(op)
+          isFunction(op)
         )
           return op.op2.evaluate();
         return op.denominator;
@@ -1681,7 +1681,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         const op = ops[0];
         if (
           (op.operator === 'Rational' || op.operator === 'Divide') &&
-          isBoxedFunction(op)
+          isFunction(op)
         )
           return engine.tuple(...op.ops);
         const num = asRational(op.evaluate());
@@ -1699,7 +1699,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         const op = ops[0];
         if (
           (op.operator === 'Rational' || op.operator === 'Divide') &&
-          isBoxedFunction(op)
+          isFunction(op)
         )
           return ce.tuple(...op.ops);
 
@@ -1882,7 +1882,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
 
 function evaluateAbs(arg: BoxedExpression): BoxedExpression | undefined {
   const ce = arg.engine;
-  if (isBoxedNumber(arg)) {
+  if (isNumber(arg)) {
     const num = arg.numericValue;
     if (typeof num === 'number') return ce.number(Math.abs(num));
     return ce.number(num.abs());
@@ -1900,10 +1900,10 @@ function processMinMaxItem(
   const upper = mode === 'Max' || mode === 'Supremum';
 
   // An interval is continuous
-  if (item.operator === 'Interval' && isBoxedFunction(item)) {
+  if (item.operator === 'Interval' && isFunction(item)) {
     const b = upper ? item.op2 : item.op1;
 
-    if (!b.isNumber || !isBoxedNumber(b)) return [undefined, [item]];
+    if (!b.isNumber || !isNumber(b)) return [undefined, [item]];
     return [b, []];
   }
 
@@ -1918,7 +1918,7 @@ function processMinMaxItem(
     }
   }
 
-  if (item.operator === 'Linspace' && isBoxedFunction(item)) {
+  if (item.operator === 'Linspace' && isFunction(item)) {
     if (item.nops === 1) item = upper ? item.op1 : ce.One;
     else if (upper) item = item.op2;
     else item = item.op1;
@@ -1945,7 +1945,7 @@ function processMinMaxItem(
     return [result, rest];
   }
 
-  if (!item.isNumber || !isBoxedNumber(item)) return [undefined, [item]];
+  if (!item.isNumber || !isNumber(item)) return [undefined, [item]];
   return [item, []];
 }
 

@@ -13,48 +13,48 @@ export type Interval = {
   openEnd: boolean;
 };
 
-function isBoxedNumber(
+function isNumber(
   expr: BoxedExpression | null | undefined
 ): expr is BoxedExpression & NumberLiteralInterface {
   return expr?._kind === 'number';
 }
 
-function isBoxedSymbol(
+function isSymbol(
   expr: BoxedExpression | null | undefined
 ): expr is BoxedExpression & SymbolInterface {
   return expr?._kind === 'symbol';
 }
 
-function isBoxedFunction(
+function isFunction(
   expr: BoxedExpression | null | undefined
 ): expr is BoxedExpression & FunctionInterface {
   return expr?._kind === 'function' || expr?._kind === 'tensor';
 }
 
 export function interval(expr: BoxedExpression): Interval | undefined {
-  if (expr.operator === 'Interval' && isBoxedFunction(expr)) {
+  if (expr.operator === 'Interval' && isFunction(expr)) {
     let op1: BoxedExpression = expr.op1;
     let op2: BoxedExpression = expr.op2;
     let openStart = false;
     let openEnd = false;
-    if (op1.operator === 'Open' && isBoxedFunction(op1)) {
+    if (op1.operator === 'Open' && isFunction(op1)) {
       openStart = true;
       op1 = op1.op1;
-    } else if (op1.operator === 'Closed' && isBoxedFunction(op1)) {
+    } else if (op1.operator === 'Closed' && isFunction(op1)) {
       op1 = op1.op1;
     }
 
-    if (op2.operator === 'Open' && isBoxedFunction(op2)) {
+    if (op2.operator === 'Open' && isFunction(op2)) {
       openEnd = true;
       op2 = op2.op1;
-    } else if (op2.operator === 'Closed' && isBoxedFunction(op2)) {
+    } else if (op2.operator === 'Closed' && isFunction(op2)) {
       op2 = op2.op1;
     }
 
     const start = op1.N();
     const end = op2.N();
 
-    if (!isBoxedNumber(start) || !isBoxedNumber(end)) return undefined;
+    if (!isNumber(start) || !isNumber(end)) return undefined;
 
     return { start: start.re, openStart, end: end.re, openEnd };
   }
@@ -62,7 +62,7 @@ export function interval(expr: BoxedExpression): Interval | undefined {
   //
   // Known sets which are also intervals...
   //
-  if (isBoxedSymbol(expr)) {
+  if (isSymbol(expr)) {
     if (expr.symbol === 'EmptySet')
       return { start: 0, openStart: true, end: 0, openEnd: true };
 

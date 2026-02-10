@@ -1,7 +1,7 @@
 import type { BoxedExpression, RuleStep } from '../global-types';
 import {
-  isBoxedFunction,
-  isBoxedSymbol,
+  isFunction,
+  isSymbol,
 } from '../boxed-expression/type-guards';
 
 /**
@@ -22,7 +22,7 @@ export function simplifyInfinity(x: BoxedExpression): RuleStep | undefined {
   const ce = x.engine;
 
   // Handle Multiply with infinity
-  if (op === 'Multiply' && isBoxedFunction(x) && x.ops.length === 2) {
+  if (op === 'Multiply' && isFunction(x) && x.ops.length === 2) {
     const [a, b] = x.ops;
 
     // Use isInfinity property to detect infinity values
@@ -115,7 +115,7 @@ export function simplifyInfinity(x: BoxedExpression): RuleStep | undefined {
   }
 
   // Handle Divide with infinity
-  if (op === 'Divide' && isBoxedFunction(x)) {
+  if (op === 'Divide' && isFunction(x)) {
     const num = x.op1;
     const denom = x.op2;
 
@@ -166,22 +166,22 @@ export function simplifyInfinity(x: BoxedExpression): RuleStep | undefined {
   }
 
   // Handle Exp function with infinity
-  if (op === 'Exp' && isBoxedFunction(x)) {
+  if (op === 'Exp' && isFunction(x)) {
     const arg = x.op1;
     if (arg) {
       // exp(+inf) -> +inf
-      if (isBoxedSymbol(arg) && arg.symbol === 'PositiveInfinity') {
+      if (isSymbol(arg) && arg.symbol === 'PositiveInfinity') {
         return { value: ce.PositiveInfinity, because: 'exp(+inf) -> +inf' };
       }
       // exp(-inf) -> 0
-      if (isBoxedSymbol(arg) && arg.symbol === 'NegativeInfinity') {
+      if (isSymbol(arg) && arg.symbol === 'NegativeInfinity') {
         return { value: ce.Zero, because: 'exp(-inf) -> 0' };
       }
     }
   }
 
   // Handle Power with infinity
-  if (op === 'Power' && isBoxedFunction(x)) {
+  if (op === 'Power' && isFunction(x)) {
     const base = x.op1;
     const exp = x.op2;
 
@@ -196,7 +196,7 @@ export function simplifyInfinity(x: BoxedExpression): RuleStep | undefined {
 
       // e^(+inf) -> +inf (handle exponential base explicitly)
       if (
-        isBoxedSymbol(base) &&
+        isSymbol(base) &&
         base.symbol === 'ExponentialE' &&
         expIsPosInf
       ) {
@@ -204,7 +204,7 @@ export function simplifyInfinity(x: BoxedExpression): RuleStep | undefined {
       }
       // e^(-inf) -> 0
       if (
-        isBoxedSymbol(base) &&
+        isSymbol(base) &&
         base.symbol === 'ExponentialE' &&
         expIsNegInf
       ) {

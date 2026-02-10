@@ -45,15 +45,21 @@ export {
 } from './compute-engine/free-functions';
 
 export {
+  isExpression,
+  isNumber,
+  isSymbol,
+  isFunction,
+  isString,
+  isTensor,
+  isDictionary,
+  isCollection,
+  isIndexedCollection,
   isBoxedExpression,
   isBoxedNumber,
   isBoxedSymbol,
   isBoxedFunction,
   isBoxedString,
   isBoxedTensor,
-  isDictionary,
-  isCollection,
-  isIndexedCollection,
 } from './compute-engine/boxed-expression/type-guards';
 
 export type { BoxedNumber } from './compute-engine/boxed-expression/boxed-number';

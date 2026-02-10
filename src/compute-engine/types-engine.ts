@@ -17,7 +17,7 @@ import type {
 } from './latex-syntax/types';
 import type { IndexedLatexDictionary } from './latex-syntax/dictionary/definitions';
 
-import type { BoxedExpression, SemiBoxedExpression } from './types-expression';
+import type { BoxedExpression, ExpressionInput } from './types-expression';
 import type {
   Metadata,
   CanonicalOptions,
@@ -48,13 +48,13 @@ import type {
 } from './types-kernel-evaluation';
 import type { LanguageTarget, CompilationResult } from './compilation/types';
 
-type Rule = KernelRule<BoxedExpression, SemiBoxedExpression, IComputeEngine>;
+type Rule = KernelRule<BoxedExpression, ExpressionInput, IComputeEngine>;
 type BoxedRule = KernelBoxedRule<BoxedExpression, IComputeEngine>;
 type BoxedRuleSet = KernelBoxedRuleSet<BoxedExpression, IComputeEngine>;
 type RuleStep = KernelRuleStep<BoxedExpression>;
 type AssignValue = KernelAssignValue<
   BoxedExpression,
-  SemiBoxedExpression,
+  ExpressionInput,
   IComputeEngine
 >;
 type Scope = KernelScope<BoxedDefinition>;
@@ -169,7 +169,7 @@ export interface IComputeEngine extends IBigNum {
   strict: boolean;
 
   box(
-    expr: NumericValue | SemiBoxedExpression,
+    expr: NumericValue | ExpressionInput,
     options?: {
       form?: FormOption;
       scope?: Scope;
@@ -178,7 +178,7 @@ export interface IComputeEngine extends IBigNum {
 
   function(
     name: string,
-    ops: ReadonlyArray<SemiBoxedExpression>,
+    ops: ReadonlyArray<ExpressionInput>,
     options?: {
       metadata?: Metadata;
       form?: FormOption;
@@ -263,10 +263,10 @@ export interface IComputeEngine extends IBigNum {
   typeError(
     expectedType: Type,
     actualType: undefined | Type | BoxedType,
-    where?: SemiBoxedExpression
+    where?: ExpressionInput
   ): BoxedExpression;
 
-  hold(expr: SemiBoxedExpression): BoxedExpression;
+  hold(expr: ExpressionInput): BoxedExpression;
 
   tuple(...elements: ReadonlyArray<number>): BoxedExpression;
   tuple(...elements: ReadonlyArray<BoxedExpression>): BoxedExpression;

@@ -1,4 +1,4 @@
-import type { Expression } from '../../../math-json/types';
+import type { MathJsonExpression as Expression } from '../../../math-json/types';
 import {
   operator,
   isEmptySequence,

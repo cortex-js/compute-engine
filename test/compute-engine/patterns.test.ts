@@ -1,18 +1,18 @@
 import {
   BoxedExpression,
   PatternMatchOptions,
-  SemiBoxedExpression,
+  ExpressionInput,
   Substitution,
 } from '../../src/compute-engine';
 import { _BoxedExpression } from '../../src/compute-engine/boxed-expression/abstract-boxed-expression';
 import { validatePattern } from '../../src/compute-engine/boxed-expression/boxed-patterns';
-import { Expression } from '../../src/math-json/types';
+import { MathJsonExpression as Expression } from '../../src/math-json/types';
 import { engine, latex } from '../utils';
 
 const ce = engine;
 
 function match(
-  pattern: SemiBoxedExpression,
+  pattern: ExpressionInput,
   expr: BoxedExpression | Expression,
   options?: PatternMatchOptions
 ): Substitution | null {
@@ -724,7 +724,7 @@ describe('PATTERNS  MATCH - Sequence wildcards', () => {
 
 const TOLERANCE = 2.22044604925031e-16;
 
-const sameExprs: [SemiBoxedExpression, SemiBoxedExpression][] = [
+const sameExprs: [ExpressionInput, ExpressionInput][] = [
   [1, 1],
   [3.14159265, 3.14159265],
   [3.14159265, { num: '3.14159265' }],

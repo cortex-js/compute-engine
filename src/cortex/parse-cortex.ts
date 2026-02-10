@@ -1,4 +1,4 @@
-import { Expression, MathJsonSymbol } from '../math-json/types';
+import { MathJsonExpression as Expression, MathJsonSymbol } from '../math-json/types';
 import { Origin } from '../common/debug';
 import {
   FatalParsingError,

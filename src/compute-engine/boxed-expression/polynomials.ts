@@ -2,7 +2,7 @@ import type { BoxedExpression } from '../global-types';
 import { asSmallInteger } from './numerics';
 import { add } from './arithmetic-add';
 import { expand } from './expand';
-import { isBoxedNumber, isBoxedFunction, isBoxedSymbol } from './type-guards';
+import { isNumber, isFunction, isSymbol } from './type-guards';
 
 // Re-export degree functions from leaf module (no circular deps)
 export { totalDegree, maxDegree, lex, revlex } from './polynomial-degree';
@@ -107,11 +107,11 @@ function univariateCoefficients(
 function _getDegree(expr: BoxedExpression | undefined): number {
   if (expr === undefined) return 0;
 
-  if (isBoxedSymbol(expr)) {
+  if (isSymbol(expr)) {
     return (expr.valueDefinition?.isConstant ?? false) ? 0 : 1;
   }
 
-  if (isBoxedFunction(expr)) {
+  if (isFunction(expr)) {
     const operator = expr.operator;
     if (operator === 'Power') return expr.op2.re;
 
@@ -147,14 +147,14 @@ export function polynomialDegree(
   variable: string
 ): number {
   // Constant or different symbol
-  if (isBoxedNumber(expr)) return 0;
-  if (isBoxedSymbol(expr)) {
+  if (isNumber(expr)) return 0;
+  if (isSymbol(expr)) {
     if (expr.symbol === variable) return 1;
     // Other symbols (constants or different variables) have degree 0 in this variable
     return 0;
   }
 
-  if (!isBoxedFunction(expr)) {
+  if (!isFunction(expr)) {
     if (expr.has(variable)) return -1;
     return 0;
   }
@@ -245,11 +245,11 @@ export function getPolynomialCoefficients(
     }
 
     // For terms containing the variable, extract the coefficient
-    if (isBoxedSymbol(term) && term.symbol === variable) {
+    if (isSymbol(term) && term.symbol === variable) {
       return addCoefficient(ce.One, 1);
     }
 
-    if (isBoxedFunction(term) && term.operator === 'Negate') {
+    if (isFunction(term) && term.operator === 'Negate') {
       const innerDeg = polynomialDegree(term.op1, variable);
       if (innerDeg === 0) {
         return addCoefficient(term, 0);
@@ -265,9 +265,9 @@ export function getPolynomialCoefficients(
       return true;
     }
 
-    if (isBoxedFunction(term) && term.operator === 'Power') {
+    if (isFunction(term) && term.operator === 'Power') {
       // x^n case
-      if (isBoxedSymbol(term.op1) && term.op1.symbol === variable) {
+      if (isSymbol(term.op1) && term.op1.symbol === variable) {
         const exp = asSmallInteger(term.op2);
         if (exp !== null && exp >= 0) {
           return addCoefficient(ce.One, exp);
@@ -280,7 +280,7 @@ export function getPolynomialCoefficients(
       return false;
     }
 
-    if (isBoxedFunction(term) && term.operator === 'Multiply') {
+    if (isFunction(term) && term.operator === 'Multiply') {
       // Separate coefficient from variable part
       const factors = term.ops;
       let coef: BoxedExpression = ce.One;
@@ -289,12 +289,12 @@ export function getPolynomialCoefficients(
       for (const factor of factors) {
         if (!factor.has(variable)) {
           coef = coef.mul(factor);
-        } else if (isBoxedSymbol(factor) && factor.symbol === variable) {
+        } else if (isSymbol(factor) && factor.symbol === variable) {
           varDeg += 1;
         } else if (
-          isBoxedFunction(factor) &&
+          isFunction(factor) &&
           factor.operator === 'Power' &&
-          isBoxedSymbol(factor.op1) &&
+          isSymbol(factor.op1) &&
           factor.op1.symbol === variable
         ) {
           const exp = asSmallInteger(factor.op2);
@@ -315,7 +315,7 @@ export function getPolynomialCoefficients(
   };
 
   // Process the expanded expression
-  if (isBoxedFunction(expanded) && expanded.operator === 'Add') {
+  if (isFunction(expanded) && expanded.operator === 'Add') {
     for (const term of expanded.ops) {
       if (!processTerm(term)) return null;
     }
@@ -553,7 +553,7 @@ export function cancelCommonFactors(
   expr: BoxedExpression,
   variable: string
 ): BoxedExpression {
-  if (!isBoxedFunction(expr) || expr.operator !== 'Divide') return expr;
+  if (!isFunction(expr) || expr.operator !== 'Divide') return expr;
 
   const numerator = expr.op1;
   const denominator = expr.op2;

@@ -1,11 +1,11 @@
 import { engine } from '../utils';
 import {
-  isBoxedExpression,
-  isBoxedNumber,
-  isBoxedSymbol,
-  isBoxedFunction,
-  isBoxedString,
-  isBoxedTensor,
+  isExpression,
+  isNumber,
+  isSymbol,
+  isFunction,
+  isString,
+  isTensor,
   isDictionary,
   isCollection,
   isIndexedCollection,
@@ -13,39 +13,39 @@ import {
 
 const ce = engine;
 
-describe('isBoxedExpression', () => {
+describe('isExpression', () => {
   test('returns true for any boxed expression', () => {
-    expect(isBoxedExpression(ce.box(42))).toBe(true);
-    expect(isBoxedExpression(ce.box('x'))).toBe(true);
-    expect(isBoxedExpression(ce.parse('x + 1'))).toBe(true);
+    expect(isExpression(ce.box(42))).toBe(true);
+    expect(isExpression(ce.box('x'))).toBe(true);
+    expect(isExpression(ce.parse('x + 1'))).toBe(true);
   });
 
   test('returns false for non-expressions', () => {
-    expect(isBoxedExpression(null)).toBe(false);
-    expect(isBoxedExpression(undefined)).toBe(false);
-    expect(isBoxedExpression(42)).toBe(false);
-    expect(isBoxedExpression('x')).toBe(false);
-    expect(isBoxedExpression({})).toBe(false);
+    expect(isExpression(null)).toBe(false);
+    expect(isExpression(undefined)).toBe(false);
+    expect(isExpression(42)).toBe(false);
+    expect(isExpression('x')).toBe(false);
+    expect(isExpression({})).toBe(false);
   });
 });
 
-describe('isBoxedNumber', () => {
+describe('isNumber', () => {
   test('returns true for numbers', () => {
-    expect(isBoxedNumber(ce.box(42))).toBe(true);
-    expect(isBoxedNumber(ce.box(3.14))).toBe(true);
-    expect(isBoxedNumber(ce.box(['Complex', 1, 2]))).toBe(true);
+    expect(isNumber(ce.box(42))).toBe(true);
+    expect(isNumber(ce.box(3.14))).toBe(true);
+    expect(isNumber(ce.box(['Complex', 1, 2]))).toBe(true);
   });
 
   test('returns false for non-numbers', () => {
-    expect(isBoxedNumber(ce.box('x'))).toBe(false);
-    expect(isBoxedNumber(ce.parse('x + 1'))).toBe(false);
-    expect(isBoxedNumber(null)).toBe(false);
-    expect(isBoxedNumber(undefined)).toBe(false);
+    expect(isNumber(ce.box('x'))).toBe(false);
+    expect(isNumber(ce.parse('x + 1'))).toBe(false);
+    expect(isNumber(null)).toBe(false);
+    expect(isNumber(undefined)).toBe(false);
   });
 
   test('narrows type to NumberLiteralInterface', () => {
     const expr = ce.box(42);
-    if (isBoxedNumber(expr)) {
+    if (isNumber(expr)) {
       // After guard, numericValue is number | NumericValue (no undefined)
       expect(expr.numericValue).not.toBeUndefined();
       expect(expr.isNumberLiteral).toBe(true);
@@ -53,22 +53,22 @@ describe('isBoxedNumber', () => {
   });
 });
 
-describe('isBoxedSymbol', () => {
+describe('isSymbol', () => {
   test('returns true for symbols', () => {
-    expect(isBoxedSymbol(ce.box('x'))).toBe(true);
-    expect(isBoxedSymbol(ce.box('Pi'))).toBe(true);
+    expect(isSymbol(ce.box('x'))).toBe(true);
+    expect(isSymbol(ce.box('Pi'))).toBe(true);
   });
 
   test('returns false for non-symbols', () => {
-    expect(isBoxedSymbol(ce.box(42))).toBe(false);
-    expect(isBoxedSymbol(ce.parse('x + 1'))).toBe(false);
-    expect(isBoxedSymbol(null)).toBe(false);
-    expect(isBoxedSymbol(undefined)).toBe(false);
+    expect(isSymbol(ce.box(42))).toBe(false);
+    expect(isSymbol(ce.parse('x + 1'))).toBe(false);
+    expect(isSymbol(null)).toBe(false);
+    expect(isSymbol(undefined)).toBe(false);
   });
 
   test('narrows type to SymbolInterface', () => {
     const expr = ce.box('x');
-    if (isBoxedSymbol(expr)) {
+    if (isSymbol(expr)) {
       // After guard, symbol is string (no undefined)
       const name: string = expr.symbol;
       expect(name).toBe('x');
@@ -76,22 +76,22 @@ describe('isBoxedSymbol', () => {
   });
 });
 
-describe('isBoxedFunction', () => {
+describe('isFunction', () => {
   test('returns true for function expressions', () => {
-    expect(isBoxedFunction(ce.parse('x + 1'))).toBe(true);
-    expect(isBoxedFunction(ce.parse('\\sin(x)'))).toBe(true);
+    expect(isFunction(ce.parse('x + 1'))).toBe(true);
+    expect(isFunction(ce.parse('\\sin(x)'))).toBe(true);
   });
 
   test('returns false for non-functions', () => {
-    expect(isBoxedFunction(ce.box(42))).toBe(false);
-    expect(isBoxedFunction(ce.box('x'))).toBe(false);
-    expect(isBoxedFunction(null)).toBe(false);
-    expect(isBoxedFunction(undefined)).toBe(false);
+    expect(isFunction(ce.box(42))).toBe(false);
+    expect(isFunction(ce.box('x'))).toBe(false);
+    expect(isFunction(null)).toBe(false);
+    expect(isFunction(undefined)).toBe(false);
   });
 
   test('narrows type to FunctionInterface', () => {
     const expr = ce.parse('x + 1');
-    if (isBoxedFunction(expr)) {
+    if (isFunction(expr)) {
       // After guard, ops is ReadonlyArray<BoxedExpression> (no undefined)
       expect(expr.ops.length).toBeGreaterThan(0);
       expect(expr.nops).toBeGreaterThan(0);
@@ -101,21 +101,21 @@ describe('isBoxedFunction', () => {
   });
 });
 
-describe('isBoxedString', () => {
+describe('isString', () => {
   test('returns true for strings', () => {
-    expect(isBoxedString(ce.box({ str: 'hello' }))).toBe(true);
+    expect(isString(ce.box({ str: 'hello' }))).toBe(true);
   });
 
   test('returns false for non-strings', () => {
-    expect(isBoxedString(ce.box(42))).toBe(false);
-    expect(isBoxedString(ce.box('x'))).toBe(false);
-    expect(isBoxedString(null)).toBe(false);
-    expect(isBoxedString(undefined)).toBe(false);
+    expect(isString(ce.box(42))).toBe(false);
+    expect(isString(ce.box('x'))).toBe(false);
+    expect(isString(null)).toBe(false);
+    expect(isString(undefined)).toBe(false);
   });
 
   test('narrows type to StringInterface', () => {
     const expr = ce.box({ str: 'hello' });
-    if (isBoxedString(expr)) {
+    if (isString(expr)) {
       // After guard, string is string (no undefined)
       const val: string = expr.string;
       expect(val).toBe('hello');
@@ -123,21 +123,21 @@ describe('isBoxedString', () => {
   });
 });
 
-describe('isBoxedTensor', () => {
+describe('isTensor', () => {
   test('returns true for tensors', () => {
-    expect(isBoxedTensor(ce.box(['List', 1, 2, 3]))).toBe(true);
+    expect(isTensor(ce.box(['List', 1, 2, 3]))).toBe(true);
   });
 
   test('returns false for non-tensors', () => {
-    expect(isBoxedTensor(ce.box(42))).toBe(false);
-    expect(isBoxedTensor(ce.box('x'))).toBe(false);
-    expect(isBoxedTensor(null)).toBe(false);
-    expect(isBoxedTensor(undefined)).toBe(false);
+    expect(isTensor(ce.box(42))).toBe(false);
+    expect(isTensor(ce.box('x'))).toBe(false);
+    expect(isTensor(null)).toBe(false);
+    expect(isTensor(undefined)).toBe(false);
   });
 
   test('narrows type to TensorInterface', () => {
     const expr = ce.box(['List', 1, 2, 3]);
-    if (isBoxedTensor(expr)) {
+    if (isTensor(expr)) {
       // After guard, tensor is Tensor<any> (no undefined)
       expect(expr.tensor).toBeDefined();
       expect(expr.shape).toEqual([3]);

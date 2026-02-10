@@ -1,6 +1,6 @@
 import type { BoxedDefinition } from './types-definitions';
 import type { IComputeEngine as ComputeEngine } from './types-engine';
-import type { BoxedExpression, SemiBoxedExpression } from './types-expression';
+import type { BoxedExpression, ExpressionInput } from './types-expression';
 import type {
   Assumption as KernelAssumption,
   AssumeResult,
@@ -84,7 +84,7 @@ export type RuleFunction = KernelRuleFunction<BoxedExpression>;
  */
 export type Rule = KernelRule<
   BoxedExpression,
-  SemiBoxedExpression,
+  ExpressionInput,
   ComputeEngine
 >;
 
@@ -101,7 +101,7 @@ export type BoxedRuleSet = KernelBoxedRuleSet<BoxedExpression, ComputeEngine>;
  */
 export type AssignValue = KernelAssignValue<
   BoxedExpression,
-  SemiBoxedExpression,
+  ExpressionInput,
   ComputeEngine
 >;
 

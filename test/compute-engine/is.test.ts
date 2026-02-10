@@ -1,5 +1,5 @@
 import { ComputeEngine } from '../../src/compute-engine';
-import type { Expression } from '../../src/math-json/types';
+import type { MathJsonExpression as Expression } from '../../src/math-json/types';
 
 export const engine = new ComputeEngine();
 

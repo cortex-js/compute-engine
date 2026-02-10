@@ -1,6 +1,6 @@
 import { widen } from '../common/type/utils';
 import { BoxedExpression, CollectionHandlers } from './global-types';
-import { isBoxedFunction } from './boxed-expression/type-guards';
+import { isFunction } from './boxed-expression/type-guards';
 
 /** If a collection has fewer than this many elements, eagerly evaluate it.
  *
@@ -145,7 +145,7 @@ function basicCollectionIndexWhere(
   expr: BoxedExpression,
   predicate: (element: BoxedExpression) => boolean
 ): number | undefined {
-  if (!isBoxedFunction(expr)) return undefined;
+  if (!isFunction(expr)) return undefined;
   for (let i = 0; i !== expr.nops; i += 1)
     if (predicate(expr.ops[i]!)) return i + 1;
 
@@ -195,17 +195,17 @@ export function basicIndexedCollectionHandlers(): CollectionHandlers {
   return {
     isLazy: (_expr) => false,
 
-    count: (expr) => (isBoxedFunction(expr) ? expr.nops : 0),
+    count: (expr) => (isFunction(expr) ? expr.nops : 0),
 
-    isEmpty: (expr) => !isBoxedFunction(expr) || expr.nops === 0,
+    isEmpty: (expr) => !isFunction(expr) || expr.nops === 0,
 
     isFinite: (_expr) => true,
 
     contains: (expr, target) =>
-      isBoxedFunction(expr) ? expr.ops.some((x) => x.isSame(target)) : false,
+      isFunction(expr) ? expr.ops.some((x) => x.isSame(target)) : false,
 
     iterator: (expr) => {
-      if (!isBoxedFunction(expr))
+      if (!isFunction(expr))
         return { next: () => ({ value: undefined, done: true as const }) };
       let index = 1;
       const last = expr.nops;
@@ -226,7 +226,7 @@ export function basicIndexedCollectionHandlers(): CollectionHandlers {
       expr: BoxedExpression,
       index: number | string
     ): undefined | BoxedExpression => {
-      if (typeof index !== 'number' || !isBoxedFunction(expr)) return undefined;
+      if (typeof index !== 'number' || !isFunction(expr)) return undefined;
       if (index < 0) index = expr.nops + index + 1;
       if (index < 1 || index > expr.nops) return undefined;
       return expr.ops[index - 1];
@@ -237,7 +237,7 @@ export function basicIndexedCollectionHandlers(): CollectionHandlers {
     eltsgn: (_expr) => undefined,
 
     elttype: (expr) => {
-      if (!isBoxedFunction(expr) || expr.nops === 0) return 'unknown';
+      if (!isFunction(expr) || expr.nops === 0) return 'unknown';
       if (expr.nops === 1) return expr.ops[0].type.type;
       return widen(...expr.ops.map((op) => op.type.type));
     },

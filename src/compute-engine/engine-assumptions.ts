@@ -8,7 +8,7 @@ import type {
 import type { MathJsonSymbol } from '../math-json/types';
 
 import { isWildcard, wildcardName } from './boxed-expression/pattern-utils';
-import { isBoxedSymbol, isBoxedFunction } from './boxed-expression/type-guards';
+import { isSymbol, isFunction } from './boxed-expression/type-guards';
 
 import {
   assume as assumeImpl,
@@ -27,7 +27,7 @@ export function ask(
   const patternHasWildcards = (expr: BoxedExpression): boolean => {
     if (expr.operator?.startsWith('_')) return true;
     if (isWildcard(expr)) return true;
-    if (isBoxedFunction(expr)) return expr.ops.some(patternHasWildcards);
+    if (isFunction(expr)) return expr.ops.some(patternHasWildcards);
     return false;
   };
 
@@ -76,7 +76,7 @@ export function ask(
     )
       return [{ pattern: expr }];
 
-    if (!isBoxedFunction(expr)) return [{ pattern: expr }];
+    if (!isFunction(expr)) return [{ pattern: expr }];
     const lhs = op === 'Greater' || op === 'GreaterEqual' ? expr.op2 : expr.op1;
     const rhs = op === 'Greater' || op === 'GreaterEqual' ? expr.op1 : expr.op2;
     const normalizedOp =
@@ -101,10 +101,10 @@ export function ask(
   };
 
   // B1: Element(x, _T) can be answered from the declared/inferred type of x
-  if (pat.operator === 'Element' && isBoxedFunction(pat)) {
+  if (pat.operator === 'Element' && isFunction(pat)) {
     const patOp1 = pat.op1;
     const patOp2 = pat.op2;
-    if (isBoxedSymbol(patOp1) && isWildcard(patOp2)) {
+    if (isSymbol(patOp1) && isWildcard(patOp2)) {
       const typeWildcard = wildcardName(patOp2);
       if (typeWildcard && !typeWildcard.startsWith('__')) {
         const symbolType = ce.box(patOp1.symbol).type;
@@ -125,7 +125,7 @@ export function ask(
       pat.operator === 'GreaterEqual' ||
       pat.operator === 'Less' ||
       pat.operator === 'LessEqual') &&
-    isBoxedFunction(pat) &&
+    isFunction(pat) &&
     isWildcard(pat.op2)
   ) {
     const boundWildcard = wildcardName(pat.op2);
@@ -136,7 +136,7 @@ export function ask(
 
       // Symbol on LHS: Greater(x, _k)
       const patOp1B2 = pat.op1;
-      if (isBoxedSymbol(patOp1B2)) {
+      if (isSymbol(patOp1B2)) {
         const bounds = getInequalityBoundsFromAssumptions(ce, patOp1B2.symbol);
         const bound = isLower ? bounds.lowerBound : bounds.upperBound;
         const strictOk = isLower ? bounds.lowerStrict : bounds.upperStrict;
@@ -208,20 +208,20 @@ export function verify(
       : ce.box(query, { form: 'raw' });
 
     const expr = boxed.evaluate();
-    if (isBoxedSymbol(expr)) {
+    if (isSymbol(expr)) {
       if (expr.symbol === 'True') return true;
       if (expr.symbol === 'False') return false;
     }
 
     const op = expr.operator;
 
-    if (op === 'Not' && isBoxedFunction(expr)) {
+    if (op === 'Not' && isFunction(expr)) {
       const result = verify(ce, expr.op1);
       if (result === undefined) return undefined;
       return !result;
     }
 
-    if (op === 'And' && isBoxedFunction(expr)) {
+    if (op === 'And' && isFunction(expr)) {
       // Kleene 3-valued logic:
       // - if any operand is false, the result is false
       // - if all operands are true, the result is true
@@ -235,7 +235,7 @@ export function verify(
       return hasUnknown ? undefined : true;
     }
 
-    if (op === 'Or' && isBoxedFunction(expr)) {
+    if (op === 'Or' && isFunction(expr)) {
       // Kleene 3-valued logic:
       // - if any operand is true, the result is true
       // - if all operands are false, the result is false

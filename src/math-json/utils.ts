@@ -1,5 +1,5 @@
 import type {
-  Expression,
+  MathJsonExpression as Expression,
   ExpressionObject,
   MathJsonAttributes,
   MathJsonFunctionObject,

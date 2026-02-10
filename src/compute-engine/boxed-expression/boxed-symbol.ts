@@ -1,4 +1,4 @@
-import type { Expression, MathJsonSymbol } from '../../math-json/types';
+import type { MathJsonExpression as Expression, MathJsonSymbol } from '../../math-json/types';
 import { isValidSymbol, validateSymbol } from '../../math-json/symbols';
 
 import type { Type, TypeString } from '../../common/type/types';
@@ -58,7 +58,7 @@ import {
 } from './sgn';
 import { matchesSymbol } from '../../math-json/utils';
 import { getSignFromAssumptions } from '../assume';
-import { isBoxedSymbol } from './type-guards';
+import { isSymbol } from './type-guards';
 
 /**
  * ### BoxedSymbol
@@ -164,15 +164,15 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
     if (other === true)
       return (
         this.symbol === 'True' ||
-        (isBoxedSymbol(this.value) && this.value.symbol === 'True')
+        (isSymbol(this.value) && this.value.symbol === 'True')
       );
     if (other === false)
       return (
         this.symbol === 'False' ||
-        (isBoxedSymbol(this.value) && this.value.symbol === 'False')
+        (isSymbol(this.value) && this.value.symbol === 'False')
       );
 
-    if (other instanceof _BoxedExpression && isBoxedSymbol(other))
+    if (other instanceof _BoxedExpression && isSymbol(other))
       return this.symbol === other.symbol;
 
     // Check if the _value_ of this symbol is equal to the value of other
@@ -282,7 +282,7 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
     // ln(e) = 1 (natural log)
     // ln_c(e) = 1/ln(c) (for other bases)
     if (this.symbol === 'ExponentialE') {
-      if (!base || (isBoxedSymbol(base) && base.symbol === 'ExponentialE'))
+      if (!base || (isSymbol(base) && base.symbol === 'ExponentialE'))
         return this.engine.One;
       return this.engine.One.div(base.ln()); // log_c(e) = 1/ln(c)
     }

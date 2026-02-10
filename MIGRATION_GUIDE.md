@@ -66,24 +66,24 @@ type FormOption =
 
 ## 2. Role-Specific Properties Moved to Role Interfaces
 
-Properties that were previously available on all `BoxedExpression` instances
+Properties that were previously available on all `Expression` instances
 (returning `null` or `undefined` when not applicable) have been removed from
 the base interface. They are now only accessible after narrowing with a type
 guard.
 
-### Removed from `BoxedExpression`
+### Removed from `Expression`
 
 | Property           | Access via                                       |
 |:-------------------|:-------------------------------------------------|
-| `.symbol`          | `isBoxedSymbol(expr)` then `expr.symbol`         |
-| `.string`          | `isBoxedString(expr)` then `expr.string`         |
-| `.ops`             | `isBoxedFunction(expr)` then `expr.ops`          |
-| `.nops`            | `isBoxedFunction(expr)` then `expr.nops`         |
-| `.op1`/`.op2`/`.op3` | `isBoxedFunction(expr)` then `expr.op1` etc.  |
-| `.isFunctionExpression` | `isBoxedFunction(expr)` then `expr.isFunctionExpression` |
-| `.numericValue`    | `isBoxedNumber(expr)` then `expr.numericValue`   |
-| `.isNumberLiteral` | `isBoxedNumber(expr)` then `expr.isNumberLiteral` |
-| `.tensor`          | `isBoxedTensor(expr)` then `expr.tensor`         |
+| `.symbol`          | `isSymbol(expr)` then `expr.symbol`         |
+| `.string`          | `isString(expr)` then `expr.string`         |
+| `.ops`             | `isFunction(expr)` then `expr.ops`          |
+| `.nops`            | `isFunction(expr)` then `expr.nops`         |
+| `.op1`/`.op2`/`.op3` | `isFunction(expr)` then `expr.op1` etc.  |
+| `.isFunctionExpression` | `isFunction(expr)` then `expr.isFunctionExpression` |
+| `.numericValue`    | `isNumber(expr)` then `expr.numericValue`   |
+| `.isNumberLiteral` | `isNumber(expr)` then `expr.isNumberLiteral` |
+| `.tensor`          | `isTensor(expr)` then `expr.tensor`         |
 
 ### Before
 
@@ -100,14 +100,14 @@ if (expr.numericValue !== null) {
 ### After
 
 ```ts
-import { isBoxedSymbol, isBoxedNumber, sym } from '@cortex-js/compute-engine';
+import { isSymbol, isNumber, sym } from '@cortex-js/compute-engine';
 
-if (isBoxedSymbol(expr)) {
+if (isSymbol(expr)) {
   // expr.symbol is `string` — guaranteed non-undefined
   console.log(expr.symbol);
 }
 
-if (isBoxedNumber(expr)) {
+if (isNumber(expr)) {
   // expr.numericValue is `number | NumericValue` — guaranteed non-undefined
   console.log(expr.numericValue);
 }
@@ -120,10 +120,10 @@ if (sym(expr) === 'Pi') {
 
 See Section 6 for the full list of type guards and role interfaces.
 
-**Note:** The `sym()` helper combines `isBoxedSymbol()` check with symbol name access,
+**Note:** The `sym()` helper combines `isSymbol()` check with symbol name access,
 making simple symbol comparisons more concise.
 
-### Still on `BoxedExpression`
+### Still on `Expression`
 
 - `.re` / `.im` — typed `number`, return `NaN` when not applicable
 - `.shape` — typed `number[]`, returns `[]` for scalars
@@ -274,12 +274,12 @@ Nine type guard functions are available for runtime type checking. They narrow
 to role interfaces that provide typed access to properties specific to that
 expression kind. These guards are now **required** to access role-specific
 properties (`.symbol`, `.ops`, `.numericValue`, etc.) that have been removed
-from the base `BoxedExpression` interface.
+from the base `Expression` interface.
 
 ### Before
 
 ```ts
-// Properties were on BoxedExpression, returned null when not applicable
+// Properties were on Expression, returned null when not applicable
 if (expr.symbol !== null) {
   console.log(expr.symbol);
 }
@@ -292,41 +292,41 @@ if (expr.numericValue !== null) {
 
 ```ts
 import {
-  isBoxedNumber,
-  isBoxedSymbol,
-  isBoxedFunction,
-  isBoxedString,
-  isBoxedTensor,
+  isNumber,
+  isSymbol,
+  isFunction,
+  isString,
+  isTensor,
   isDictionary,
   isCollection,
   isIndexedCollection,
-  isBoxedExpression,
+  isExpression,
 } from '@cortex-js/compute-engine';
 
 // Type guards narrow the type — no undefined checks needed
-if (isBoxedNumber(expr)) {
+if (isNumber(expr)) {
   // expr.numericValue is `number | NumericValue` (not undefined)
   // expr.isNumberLiteral is `true` (not boolean)
   console.log(expr.numericValue);
 }
 
-if (isBoxedSymbol(expr)) {
+if (isSymbol(expr)) {
   // expr.symbol is `string` (not undefined)
   console.log(expr.symbol);
 }
 
-if (isBoxedFunction(expr)) {
-  // expr.ops is `ReadonlyArray<BoxedExpression>` (not undefined)
+if (isFunction(expr)) {
+  // expr.ops is `ReadonlyArray<Expression>` (not undefined)
   // expr.isFunctionExpression is `true`
   console.log(expr.ops, expr.nops, expr.op1);
 }
 
-if (isBoxedString(expr)) {
+if (isString(expr)) {
   // expr.string is `string` (not undefined)
   console.log(expr.string);
 }
 
-if (isBoxedTensor(expr)) {
+if (isTensor(expr)) {
   // expr.tensor is `Tensor<any>` (not undefined)
   // expr.shape is `number[]`, expr.rank is `number`
   console.log(expr.shape, expr.rank);
@@ -351,7 +351,7 @@ For quick symbol name checks, use the `sym()` helper:
 import { sym } from '@cortex-js/compute-engine';
 
 // Instead of:
-if (isBoxedSymbol(expr) && expr.symbol === 'Pi') { /* ... */ }
+if (isSymbol(expr) && expr.symbol === 'Pi') { /* ... */ }
 
 // You can write:
 if (sym(expr) === 'Pi') { /* ... */ }
@@ -364,15 +364,15 @@ const name = sym(expr);  // string | undefined
 
 | Guard              | Narrows to                                 |
 |:-------------------|:-------------------------------------------|
-| `isBoxedNumber`    | `BoxedExpression & NumberLiteralInterface`  |
-| `isBoxedSymbol`    | `BoxedExpression & SymbolInterface`         |
-| `isBoxedFunction`  | `BoxedExpression & FunctionInterface`       |
-| `isBoxedString`    | `BoxedExpression & StringInterface`         |
-| `isBoxedTensor`    | `BoxedExpression & TensorInterface`         |
-| `isDictionary`     | `BoxedExpression & DictionaryInterface`     |
-| `isCollection`     | `BoxedExpression & CollectionInterface`     |
-| `isIndexedCollection` | `BoxedExpression & IndexedCollectionInterface` |
-| `isBoxedExpression`   | `BoxedExpression` (from `unknown`)      |
+| `isNumber`    | `Expression & NumberLiteralInterface`  |
+| `isSymbol`    | `Expression & SymbolInterface`         |
+| `isFunction`  | `Expression & FunctionInterface`       |
+| `isString`    | `Expression & StringInterface`         |
+| `isTensor`    | `Expression & TensorInterface`         |
+| `isDictionary`     | `Expression & DictionaryInterface`     |
+| `isCollection`     | `Expression & CollectionInterface`     |
+| `isIndexedCollection` | `Expression & IndexedCollectionInterface` |
+| `isExpression`        | `Expression` (from `unknown`)      |
 
 ---
 
@@ -422,7 +422,7 @@ class MyTarget implements LanguageTarget {
   getOperators(): CompiledOperators { /* ... */ }
   getFunctions(): CompiledFunctions { /* ... */ }
   createTarget(options?: Partial<CompileTarget>): CompileTarget { /* ... */ }
-  compile(expr: BoxedExpression, options?: CompilationOptions): CompilationResult {
+  compile(expr: Expression, options?: CompilationOptions): CompilationResult {
     /* ... */
   }
 }
@@ -470,12 +470,13 @@ expr.simplify({ rules: otherRules });
 
 ## 9. Subpath Exports
 
-MathJSON types can now be imported without pulling in the full engine.
+`Expression` now refers to the compute-engine runtime expression type.
+The MathJSON type has been renamed to `MathJsonExpression`.
 
 ### Before
 
 ```ts
-// Only one import path — pulls in the entire engine
+// MathJSON type (old name)
 import { Expression } from '@cortex-js/compute-engine';
 ```
 
@@ -484,40 +485,41 @@ import { Expression } from '@cortex-js/compute-engine';
 ```ts
 // Full engine
 import { ComputeEngine } from '@cortex-js/compute-engine';
+import type { Expression } from '@cortex-js/compute-engine';
 
 // MathJSON types only (lightweight, no engine code)
-import { Expression } from '@cortex-js/compute-engine/math-json';
+import { MathJsonExpression } from '@cortex-js/compute-engine/math-json';
 ```
 
 ---
 
 ## 10. Removed Properties
 
-The following properties have been removed from the `BoxedExpression` base
+The following properties have been removed from the `Expression` base
 interface. They are now only available on the corresponding role interfaces,
 accessed via type guards.
 
 | Removed Property            | Type Guard → Interface                            |
 |:----------------------------|:--------------------------------------------------|
-| `expr.numericValue`         | `isBoxedNumber()` → `NumberLiteralInterface`      |
-| `expr.isNumberLiteral`      | `isBoxedNumber()` → `NumberLiteralInterface`      |
-| `expr.symbol`               | `isBoxedSymbol()` → `SymbolInterface`             |
-| `expr.string`               | `isBoxedString()` → `StringInterface`             |
-| `expr.isFunctionExpression` | `isBoxedFunction()` → `FunctionInterface`         |
-| `expr.ops`                  | `isBoxedFunction()` → `FunctionInterface`         |
-| `expr.nops`                 | `isBoxedFunction()` → `FunctionInterface`         |
-| `expr.op1` / `op2` / `op3` | `isBoxedFunction()` → `FunctionInterface`         |
-| `expr.tensor`               | `isBoxedTensor()` → `TensorInterface`             |
+| `expr.numericValue`         | `isNumber()` → `NumberLiteralInterface`      |
+| `expr.isNumberLiteral`      | `isNumber()` → `NumberLiteralInterface`      |
+| `expr.symbol`               | `isSymbol()` → `SymbolInterface`             |
+| `expr.string`               | `isString()` → `StringInterface`             |
+| `expr.isFunctionExpression` | `isFunction()` → `FunctionInterface`         |
+| `expr.ops`                  | `isFunction()` → `FunctionInterface`         |
+| `expr.nops`                 | `isFunction()` → `FunctionInterface`         |
+| `expr.op1` / `op2` / `op3` | `isFunction()` → `FunctionInterface`         |
+| `expr.tensor`               | `isTensor()` → `TensorInterface`             |
 
 Accessing these properties without first narrowing with a type guard is now a
 TypeScript compile error.
 
 ```ts
-// Compile error — .symbol does not exist on BoxedExpression
+// Compile error — .symbol does not exist on Expression
 console.log(expr.symbol);
 
 // Correct — narrow first, then access
-if (isBoxedSymbol(expr)) {
+if (isSymbol(expr)) {
   console.log(expr.symbol);  // string, guaranteed
 }
 ```
@@ -541,13 +543,13 @@ if (expr.symbol !== null) {
 
 **After:**
 ```ts
-import { isBoxedSymbol, isBoxedNumber, isBoxedFunction } from '@cortex-js/compute-engine';
+import { isSymbol, isNumber, isFunction } from '@cortex-js/compute-engine';
 
-if (isBoxedSymbol(expr)) {
+if (isSymbol(expr)) {
   return expr.symbol;
-} else if (isBoxedNumber(expr)) {
+} else if (isNumber(expr)) {
   return expr.numericValue.toString();
-} else if (isBoxedFunction(expr)) {
+} else if (isFunction(expr)) {
   return expr.operator;
 }
 ```
@@ -565,9 +567,9 @@ if (expr.ops) {
 
 **After:**
 ```ts
-import { isBoxedFunction } from '@cortex-js/compute-engine';
+import { isFunction } from '@cortex-js/compute-engine';
 
-if (isBoxedFunction(expr)) {
+if (isFunction(expr)) {
   for (const arg of expr.ops) {
     process(arg);
   }
@@ -583,9 +585,9 @@ const value = expr.numericValue ?? 0;  // Default to 0 if not a number
 
 **After:**
 ```ts
-import { isBoxedNumber } from '@cortex-js/compute-engine';
+import { isNumber } from '@cortex-js/compute-engine';
 
-const value = isBoxedNumber(expr) ? expr.numericValue : 0;
+const value = isNumber(expr) ? expr.numericValue : 0;
 ```
 
 ### Pattern: Symbol Name Extraction
@@ -611,10 +613,10 @@ const [P, L, U] = luDecomposition.ops;  // Unsafe - ops might be null
 
 **After:**
 ```ts
-import { isBoxedFunction } from '@cortex-js/compute-engine';
+import { isFunction } from '@cortex-js/compute-engine';
 
 const lu = luDecomposition.evaluate();
-if (isBoxedFunction(lu)) {
+if (isFunction(lu)) {
   const [P, L, U] = lu.ops;
   // Safe to use P, L, U here
 }
@@ -640,7 +642,7 @@ import {
   ComputeEngine,
   compile,
   expand,
-  isBoxedFunction,
+  isFunction,
 } from '@cortex-js/compute-engine';
 
 const ce = new ComputeEngine();

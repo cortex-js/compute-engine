@@ -2,7 +2,7 @@ import type { BoxedExpression, SymbolDefinitions } from '../global-types';
 
 import { checkType } from '../boxed-expression/validate';
 import { hasSymbolicTranscendental } from '../boxed-expression/utils';
-import { isBoxedFunction, sym } from '../boxed-expression/type-guards';
+import { isFunction, sym } from '../boxed-expression/type-guards';
 
 import {
   applicableN1,
@@ -156,7 +156,7 @@ volumes
             f = undefined;
             break;
           }
-          if (f && f.operator === 'Function' && isBoxedFunction(f)) f = f.op1;
+          if (f && f.operator === 'Function' && isFunction(f)) f = f.op1;
           f = differentiate(f!, paramSym);
           if (f === undefined) break;
         }
@@ -167,7 +167,7 @@ volumes
         // which would incorrectly evaluate to 0
         if (
           f?.operator === 'Apply' &&
-          isBoxedFunction(f) &&
+          isFunction(f) &&
           f.op1?.operator === 'Derivative'
         )
           return f;
@@ -220,7 +220,7 @@ volumes
           // If a numeric approximation is requested, equivalent to NIntegrate
           const f = ops[0];
           const firstLimit = ops[1];
-          if (!isBoxedFunction(firstLimit)) return undefined;
+          if (!isFunction(firstLimit)) return undefined;
           const [lower, upper] = [firstLimit.op2.N().re, firstLimit.op3.N().re];
           if (isNaN(lower) || isNaN(upper)) return undefined;
 
@@ -250,7 +250,7 @@ volumes
         }
 
         let expr = ops[0];
-        const argNames = isBoxedFunction(expr)
+        const argNames = isFunction(expr)
           ? expr.ops.slice(1).map((x) => sym(x))
           : [];
 
@@ -263,7 +263,7 @@ volumes
 
         let isIndefinite = true;
         for (let i = limitsSequence.length - 1; i >= 0; i--) {
-          if (!isBoxedFunction(limitsSequence[i])) continue;
+          if (!isFunction(limitsSequence[i])) continue;
           const limitFn = limitsSequence[i] as BoxedExpression &
             import('../global-types').FunctionInterface;
           const [varExpr, lower, upper] = limitFn.ops;

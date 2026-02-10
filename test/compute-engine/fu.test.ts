@@ -7,7 +7,7 @@
  */
 
 import { ComputeEngine } from '../../src/compute-engine';
-import { Expression } from '../../src/math-json/types';
+import { MathJsonExpression as Expression } from '../../src/math-json/types';
 import {
   fu,
   fuSimplify,

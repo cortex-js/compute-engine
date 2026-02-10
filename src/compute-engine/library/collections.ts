@@ -22,7 +22,7 @@ import { CancellationError } from '../../common/interruptible';
 import type {
   BoxedExpression,
   OperatorDefinition,
-  SemiBoxedExpression,
+  ExpressionInput,
   SymbolDefinitions,
 } from '../global-types';
 import { BoxedType } from '../types';
@@ -30,9 +30,9 @@ import { typeToString } from '../../common/type/serialize';
 // BoxedDictionary dynamically imported to avoid circular dependency
 import { canonical } from '../boxed-expression/canonical-utils';
 import {
-  isBoxedFunction,
-  isBoxedString,
-  isBoxedSymbol,
+  isFunction,
+  isString,
+  isSymbol,
   sym,
 } from '../boxed-expression/type-guards';
 
@@ -100,7 +100,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     canonical: canonicalSet,
     eq: (a: BoxedExpression, b: BoxedExpression) => {
       if (a.operator !== b.operator) return false;
-      if (!isBoxedFunction(a) || !isBoxedFunction(b)) return false;
+      if (!isFunction(a) || !isFunction(b)) return false;
       if (a.nops !== b.nops) return false;
       // The elements are not indexed
       const has: (x) => boolean = (x) => b.ops.some((y) => x.isSame(y));
@@ -410,7 +410,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     collection: {
       isLazy: (_expr) => true,
       count: (expr) => {
-        if (!isBoxedFunction(expr)) return undefined;
+        if (!isFunction(expr)) return undefined;
         let count = expr.op3.re;
         if (!isFinite(count)) count = DEFAULT_LINSPACE_COUNT;
         return Math.max(0, Math.floor(count));
@@ -420,7 +420,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         index: number | string
       ): undefined | BoxedExpression => {
         if (typeof index !== 'number') return undefined;
-        if (!isBoxedFunction(expr)) return undefined;
+        if (!isFunction(expr)) return undefined;
         const lower = expr.op1.re;
         const upper = expr.op2.re;
         let count = expr.op3.re;
@@ -432,7 +432,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         );
       },
       iterator: (expr) => {
-        if (!isBoxedFunction(expr))
+        if (!isFunction(expr))
           return { next: () => ({ value: undefined, done: true }) };
         let lower = expr.op1.re;
         let upper = expr.op2.re;
@@ -466,7 +466,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       },
       contains: (expr, target) => {
         if (!target.type.matches('finite_real')) return false;
-        if (!isBoxedFunction(expr)) return false;
+        if (!isFunction(expr)) return false;
         const t = target.re;
         const lower = expr.op1.re;
         const upper = expr.op2.re;
@@ -565,19 +565,19 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     collection: {
       isLazy: (_expr) => true,
       count: (expr) => {
-        if (!isBoxedFunction(expr)) return undefined;
+        if (!isFunction(expr)) return undefined;
         return expr.op1.count;
       },
       isEmpty: (expr) => {
-        if (!isBoxedFunction(expr)) return undefined;
+        if (!isFunction(expr)) return undefined;
         return expr.op1.isEmptyCollection;
       },
       isFinite: (expr) => {
-        if (!isBoxedFunction(expr)) return undefined;
+        if (!isFunction(expr)) return undefined;
         return expr.op1.isFiniteCollection;
       },
       iterator: (expr) => {
-        if (!isBoxedFunction(expr))
+        if (!isFunction(expr))
           return { next: () => ({ value: undefined, done: true }) };
         const f = applicable(expr.op2);
         if (!f) return { next: () => ({ value: undefined, done: true }) };
@@ -596,7 +596,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         };
       },
       at: (expr: BoxedExpression, index: number | string) => {
-        if (!isBoxedFunction(expr)) return undefined;
+        if (!isFunction(expr)) return undefined;
         if (!expr.isIndexedCollection) return undefined;
         if (typeof index !== 'number') return undefined;
         if (!Number.isFinite(index) || index === 0) return undefined;
@@ -630,13 +630,13 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       contains: (expr, target) => {
         // True if target is in the collection and the predicate returns True
         // for that target.
-        if (!isBoxedFunction(expr)) return false;
+        if (!isFunction(expr)) return false;
         if (!expr.contains(target)) return false;
         const f = applicable(expr.op2);
         return sym(f([target])) === 'True';
       },
       iterator: (expr) => {
-        if (!isBoxedFunction(expr))
+        if (!isFunction(expr))
           return { next: () => ({ value: undefined, done: true }) };
         const f = applicable(expr.op2);
         if (!f) return { next: () => ({ value: undefined, done: true }) };
@@ -694,7 +694,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         // Only numeric indexes are supported
         if (typeof index !== 'number' || !Number.isFinite(index) || index === 0)
           return undefined;
-        if (!isBoxedFunction(expr)) return undefined;
+        if (!isFunction(expr)) return undefined;
 
         // Resolve the predicate
         const predicate = applicable(expr.op2);
@@ -794,7 +794,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     collection: {
       isLazy: (_expr) => true,
       count: (expr) => {
-        if (!isBoxedFunction(expr)) return undefined;
+        if (!isFunction(expr)) return undefined;
         let total = 0;
         for (const op of expr.ops) {
           const count = op.count;
@@ -805,11 +805,11 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         return total;
       },
       contains: (expr, target) => {
-        if (!isBoxedFunction(expr)) return false;
+        if (!isFunction(expr)) return false;
         return expr.ops.some((op) => op.contains(target));
       },
       iterator: (expr) => {
-        if (!isBoxedFunction(expr))
+        if (!isFunction(expr))
           return { next: () => ({ value: undefined, done: true }) };
         const iters = expr.ops.map((op) => op.each());
         let index = 0;
@@ -856,7 +856,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         const at = def?.collection?.at;
         if (!at) return undefined;
         const opAtIndex = ops[index];
-        const s = isBoxedString(opAtIndex) ? opAtIndex.string : undefined;
+        const s = isString(opAtIndex) ? opAtIndex.string : undefined;
         if (s !== undefined) expr = at(expr, s) ?? ce.Nothing;
         else {
           const i = ops[index].re;
@@ -886,7 +886,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       isLazy: (_expr) => true,
       count: takeCount,
       isEmpty: (expr) => {
-        if (!isBoxedFunction(expr)) return undefined;
+        if (!isFunction(expr)) return undefined;
         const [xs, op2] = expr.ops;
         if (xs.isEmptyCollection) return true;
         if (xs.isFiniteCollection === false) return false;
@@ -897,7 +897,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         return Math.min(count, n) === 0;
       },
       isFinite: (expr) => {
-        if (!isBoxedFunction(expr)) return undefined;
+        if (!isFunction(expr)) return undefined;
         return expr.op1.isFiniteCollection;
       },
       iterator: takeIterator,
@@ -906,7 +906,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         index: number | string
       ): undefined | BoxedExpression => {
         if (typeof index !== 'number' || index === 0) return undefined;
-        if (!isBoxedFunction(expr)) return undefined;
+        if (!isFunction(expr)) return undefined;
         const n = Math.max(0, toInteger(expr.op2) ?? 0);
         if (n === 0) return undefined;
 
@@ -932,7 +932,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     collection: {
       isLazy: (_expr) => true,
       count: (expr) => {
-        if (!isBoxedFunction(expr)) return undefined;
+        if (!isFunction(expr)) return undefined;
         const [xs, n] = expr.ops;
         const count = xs.count;
         if (count === undefined) return undefined;
@@ -943,11 +943,11 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         return Math.max(0, count - nValue);
       },
       isFinite: (expr) => {
-        if (!isBoxedFunction(expr)) return undefined;
+        if (!isFunction(expr)) return undefined;
         return expr.op1.isFiniteCollection;
       },
       iterator: (expr) => {
-        if (!isBoxedFunction(expr))
+        if (!isFunction(expr))
           return { next: () => ({ value: undefined, done: true }) };
         const [xs, nExpr] = expr.ops;
 
@@ -969,7 +969,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         index: number | string
       ): undefined | BoxedExpression => {
         if (typeof index !== 'number') return undefined;
-        if (!isBoxedFunction(expr)) return undefined;
+        if (!isFunction(expr)) return undefined;
         const [xs, nExpr] = expr.ops;
 
         const n = toInteger(nExpr) ?? 0;
@@ -1011,24 +1011,24 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     collection: {
       isLazy: (_expr) => true,
       count: (expr) => {
-        if (!isBoxedFunction(expr)) return undefined;
+        if (!isFunction(expr)) return undefined;
         const count = expr.op1.count;
         if (count === undefined) return undefined;
         return Math.max(0, count - 1);
       },
       isEmpty: (expr) => {
-        if (!isBoxedFunction(expr)) return undefined;
+        if (!isFunction(expr)) return undefined;
         if (expr.op1.isEmptyCollection) return true;
         const count = expr.op1.count;
         if (count === undefined) return undefined;
         return count <= 1;
       },
       isFinite: (expr) => {
-        if (!isBoxedFunction(expr)) return undefined;
+        if (!isFunction(expr)) return undefined;
         return expr.op1.isFiniteCollection;
       },
       iterator: (expr) => {
-        if (!isBoxedFunction(expr))
+        if (!isFunction(expr))
           return { next: () => ({ value: undefined, done: true }) };
         return {
           next: () => {
@@ -1045,7 +1045,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         index: number | string
       ): undefined | BoxedExpression => {
         if (typeof index !== 'number') return undefined;
-        if (!isBoxedFunction(expr)) return undefined;
+        if (!isFunction(expr)) return undefined;
 
         return expr.op1.at(index > 0 ? index + 1 : index);
       },
@@ -1062,23 +1062,23 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     collection: {
       isLazy: (_expr) => true,
       count: (expr) => {
-        if (!isBoxedFunction(expr)) return undefined;
+        if (!isFunction(expr)) return undefined;
         const count = expr.op1.count;
         if (count === undefined) return undefined;
         return Math.max(0, count - 1);
       },
       isFinite: (expr) => {
-        if (!isBoxedFunction(expr)) return undefined;
+        if (!isFunction(expr)) return undefined;
         return expr.op1.isFiniteCollection;
       },
       isEmpty: (expr) => {
-        if (!isBoxedFunction(expr)) return undefined;
+        if (!isFunction(expr)) return undefined;
         const count = expr.op1.count;
         if (count === undefined) return undefined;
         return count <= 1;
       },
       iterator: (expr) => {
-        if (!isBoxedFunction(expr))
+        if (!isFunction(expr))
           return { next: () => ({ value: undefined, done: true }) };
         const l = expr.op1.count;
         if (l === undefined || l <= 1)
@@ -1099,7 +1099,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         index: number | string
       ): undefined | BoxedExpression => {
         if (typeof index !== 'number') return undefined;
-        if (!isBoxedFunction(expr)) return undefined;
+        if (!isFunction(expr)) return undefined;
         const l = expr.op1.count;
         if (l === undefined) return undefined;
         if (index < 1) index = l + 1 + index;
@@ -1121,7 +1121,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     collection: {
       isLazy: (_expr) => true,
       count: (expr) => {
-        if (!isBoxedFunction(expr)) return undefined;
+        if (!isFunction(expr)) return undefined;
         const start = toInteger(expr.op2) ?? 1;
         const count = expr.op1.count;
         if (count === undefined) return undefined;
@@ -1135,7 +1135,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         index: number | string
       ): undefined | BoxedExpression => {
         if (typeof index !== 'number') return undefined;
-        if (!isBoxedFunction(expr)) return undefined;
+        if (!isFunction(expr)) return undefined;
         const count = expr.op1.count;
         if (count === undefined) return undefined;
         let start = toInteger(expr.op2) ?? 1;
@@ -1148,7 +1148,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         if (end > count) end = count; // Ensure end is within bounds
       },
       iterator: (expr) => {
-        if (!isBoxedFunction(expr))
+        if (!isFunction(expr))
           return { next: () => ({ value: undefined, done: true }) };
         let start = toInteger(expr.op2) ?? 1;
         const count = expr.op1.count;
@@ -1186,23 +1186,23 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     collection: {
       isLazy: (_expr) => true,
       count: (expr) => {
-        if (!isBoxedFunction(expr)) return undefined;
+        if (!isFunction(expr)) return undefined;
         return expr.op1.count;
       },
       isEmpty: (expr) => {
-        if (!isBoxedFunction(expr)) return undefined;
+        if (!isFunction(expr)) return undefined;
         return expr.op1.isEmptyCollection;
       },
       isFinite: (expr) => {
-        if (!isBoxedFunction(expr)) return undefined;
+        if (!isFunction(expr)) return undefined;
         return expr.op1.isFiniteCollection;
       },
       contains: (expr, target) => {
-        if (!isBoxedFunction(expr)) return false;
+        if (!isFunction(expr)) return false;
         return expr.op1.contains(target) ?? false;
       },
       iterator: (expr) => {
-        if (!isBoxedFunction(expr))
+        if (!isFunction(expr))
           return { next: () => ({ value: undefined, done: true }) };
         let index = -1;
         return {
@@ -1219,7 +1219,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         index: number | string
       ): undefined | BoxedExpression => {
         if (typeof index !== 'number') return undefined;
-        if (!isBoxedFunction(expr)) return undefined;
+        if (!isFunction(expr)) return undefined;
         return expr.op1.at(-index);
       },
     },
@@ -1233,23 +1233,23 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     collection: {
       isLazy: (_expr) => true,
       count: (expr) => {
-        if (!isBoxedFunction(expr)) return undefined;
+        if (!isFunction(expr)) return undefined;
         return expr.op1.count;
       },
       isEmpty: (expr) => {
-        if (!isBoxedFunction(expr)) return undefined;
+        if (!isFunction(expr)) return undefined;
         return expr.op1.isEmptyCollection;
       },
       isFinite: (expr) => {
-        if (!isBoxedFunction(expr)) return undefined;
+        if (!isFunction(expr)) return undefined;
         return expr.op1.isFiniteCollection;
       },
       contains: (expr, target) => {
-        if (!isBoxedFunction(expr)) return false;
+        if (!isFunction(expr)) return false;
         return expr.op1.contains(target) ?? false;
       },
       iterator: (expr) => {
-        if (!isBoxedFunction(expr))
+        if (!isFunction(expr))
           return { next: () => ({ value: undefined, done: true }) };
         const l = expr.op1.count;
         if (l === undefined || l <= 0)
@@ -1275,7 +1275,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         index: number | string
       ): undefined | BoxedExpression => {
         if (typeof index !== 'number') return undefined;
-        if (!isBoxedFunction(expr)) return undefined;
+        if (!isFunction(expr)) return undefined;
         const l = expr.op1.count;
         if (l === undefined || l <= 0) return undefined;
         if (index < 1) index = l + 1 + index;
@@ -1296,15 +1296,15 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     collection: {
       isLazy: (_expr) => true,
       count: (expr) => {
-        if (!isBoxedFunction(expr)) return undefined;
+        if (!isFunction(expr)) return undefined;
         return expr.op1.count;
       },
       contains: (expr, target) => {
-        if (!isBoxedFunction(expr)) return false;
+        if (!isFunction(expr)) return false;
         return expr.op1.contains(target) ?? false;
       },
       iterator: (expr) => {
-        if (!isBoxedFunction(expr))
+        if (!isFunction(expr))
           return { next: () => ({ value: undefined, done: true }) };
         const l = expr.op1.count;
         if (l === undefined || l <= 0)
@@ -1330,7 +1330,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         index: number | string
       ): undefined | BoxedExpression => {
         if (typeof index !== 'number') return undefined;
-        if (!isBoxedFunction(expr)) return undefined;
+        if (!isFunction(expr)) return undefined;
         const l = expr.op1.count;
         if (l === undefined || l <= 0) return undefined;
         if (index < 1) index = l + 1 + index;
@@ -1544,14 +1544,14 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         dims: number[],
         index: number[],
         level = 0
-      ): SemiBoxedExpression => {
+      ): ExpressionInput => {
         // Apply the function `fn` to the current index array
         if (level === dims.length) {
           const idx = index.map((i) => ce.number(i));
           return fn(idx) ?? ce.Nothing;
         }
 
-        const arr: ['List', ...SemiBoxedExpression[]] = ['List'];
+        const arr: ['List', ...ExpressionInput[]] = ['List'];
         for (let i = 1; i <= dims[level]; i++) {
           index[level] = i;
           arr.push(fillArray(dims, index, level + 1));
@@ -1685,8 +1685,8 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       for (const item of xs.each()) {
         const keyExpr = f([item]) ?? ce.Nothing;
         const key =
-          (isBoxedSymbol(keyExpr) ? keyExpr.symbol : undefined) ??
-          (isBoxedString(keyExpr) ? keyExpr.string : undefined) ??
+          (isSymbol(keyExpr) ? keyExpr.symbol : undefined) ??
+          (isString(keyExpr) ? keyExpr.string : undefined) ??
           keyExpr.toString();
 
         if (!(key in groups)) groups[key] = [];
@@ -1715,15 +1715,15 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       isLazy: (_expr) => true,
       count: zipCount,
       isFinite: (expr) => {
-        if (!isBoxedFunction(expr)) return undefined;
+        if (!isFunction(expr)) return undefined;
         return expr.ops.every((x) => x.isFiniteCollection);
       },
       isEmpty: (expr) => {
-        if (!isBoxedFunction(expr)) return undefined;
+        if (!isFunction(expr)) return undefined;
         return expr.nops === 0 || expr.ops.every((x) => x.isEmptyCollection);
       },
       iterator: (expr) => {
-        if (!isBoxedFunction(expr))
+        if (!isFunction(expr))
           return { next: () => ({ value: undefined, done: true }) };
         const minCount = zipCount(expr);
         if (minCount === undefined || minCount <= 0)
@@ -1745,7 +1745,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       },
       at: (expr, index) => {
         if (typeof index !== 'number' || index < 1) return undefined;
-        if (!isBoxedFunction(expr)) return undefined;
+        if (!isFunction(expr)) return undefined;
         const minCount = zipCount(expr);
         if (minCount === undefined || index < 1 || index > minCount)
           return undefined;
@@ -1775,7 +1775,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       isLazy: (_expr) => true,
       count: () => Infinity,
       iterator: (expr) => {
-        if (!isBoxedFunction(expr))
+        if (!isFunction(expr))
           return { next: () => ({ value: undefined, done: true }) };
         const f = applicable(expr.op1);
         if (!f) return { next: () => ({ value: undefined, done: true }) };
@@ -1792,7 +1792,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       at: (expr, index) => {
         // @todo: use cache
         if (typeof index !== 'number' || index < 1) return undefined;
-        if (!isBoxedFunction(expr)) return undefined;
+        if (!isFunction(expr)) return undefined;
         const f = applicable(expr.op1);
         if (!f) return undefined;
         let acc = expr.op2 ?? expr.engine.Nothing;
@@ -1818,16 +1818,16 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       isEmpty: (_expr) => false, // Never empty
       isFinite: () => false, // Infinite collection
       contains: (expr, target) => {
-        if (!isBoxedFunction(expr)) return false;
+        if (!isFunction(expr)) return false;
         return expr.op1.isSame(target);
       },
       iterator: (expr) => {
-        if (!isBoxedFunction(expr))
+        if (!isFunction(expr))
           return { next: () => ({ value: undefined, done: true }) };
         return { next: () => ({ value: expr.op1, done: false }) };
       },
       at: (expr, _index) => {
-        if (!isBoxedFunction(expr)) return undefined;
+        if (!isFunction(expr)) return undefined;
         return expr.op1;
       },
     },
@@ -1846,11 +1846,11 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       isEmpty: (expr) => expr.isEmptyCollection,
       isFinite: (expr) => !expr.isEmptyCollection,
       contains: (expr, target) => {
-        if (!isBoxedFunction(expr)) return false;
+        if (!isFunction(expr)) return false;
         return expr.op1.contains(target) ?? false;
       },
       iterator: (expr) => {
-        if (!isBoxedFunction(expr))
+        if (!isFunction(expr))
           return { next: () => ({ value: undefined, done: true }) };
         let index = 1;
         const l = expr.op1.count;
@@ -1868,7 +1868,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       },
       at: (expr, index) => {
         if (typeof index !== 'number' || index < 1) return undefined;
-        if (!isBoxedFunction(expr)) return undefined;
+        if (!isFunction(expr)) return undefined;
         const l = expr.op1.count;
         if (l === undefined || l === 0) return undefined;
         const i = ((index - 1) % l) + 1; // 1-based index
@@ -1888,17 +1888,17 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     collection: {
       isLazy: (_expr) => true,
       count: (expr) => {
-        if (!isBoxedFunction(expr)) return undefined;
-        if (!isBoxedFunction(expr.op2)) return undefined;
+        if (!isFunction(expr)) return undefined;
+        if (!isFunction(expr.op2)) return undefined;
         const dims = expr.op2.ops.map((op) => toInteger(op) ?? 0);
         return dims[0] ?? 0;
       },
       iterator: (expr) => {
-        if (!isBoxedFunction(expr))
+        if (!isFunction(expr))
           return { next: () => ({ value: undefined, done: true }) };
         const f = applicable(expr.op1);
         if (!f) return { next: () => ({ value: undefined, done: true }) };
-        if (!isBoxedFunction(expr.op2))
+        if (!isFunction(expr.op2))
           return { next: () => ({ value: undefined, done: true }) };
         const dims = expr.op2.ops.map((op) => toInteger(op) ?? 0);
         const rows = dims[0] ?? 0;
@@ -1925,10 +1925,10 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       },
       at: (expr, index) => {
         if (typeof index !== 'number' || index < 1) return undefined;
-        if (!isBoxedFunction(expr)) return undefined;
+        if (!isFunction(expr)) return undefined;
         const f = applicable(expr.op1);
         if (!f) return undefined;
-        if (!isBoxedFunction(expr.op2)) return undefined;
+        if (!isFunction(expr.op2)) return undefined;
         const dims = expr.op2.ops.map((op) => toInteger(op) ?? 0);
         const rows = dims[0] ?? 0;
         const cols = dims[1] ?? 0;
@@ -2024,19 +2024,19 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       if (!xs.isCollection) return undefined;
 
       // If the collection is a Record, use its ops directly
-      if (xs.operator === 'Record' && isBoxedFunction(xs))
+      if (xs.operator === 'Record' && isFunction(xs))
         return ce.function('Dictionary', [...xs.ops]);
 
       const entries: BoxedExpression[] = [];
       for (const keyValue of xs.each()) {
-        if (!isBoxedFunction(keyValue) || keyValue.nops !== 2) {
+        if (!isFunction(keyValue) || keyValue.nops !== 2) {
           throw new Error(
             `Expected a collection of pairs, got ${keyValue.type}`
           );
         }
         const key = keyValue.op1;
         const value = keyValue.op2;
-        if (!isBoxedString(key)) {
+        if (!isString(key)) {
           throw new Error(`Expected a string key, got ${key.type}`);
         }
         entries.push(ce.tuple(key, value));
@@ -2054,19 +2054,19 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       if (!xs.isCollection) return undefined;
 
       // If the collection is a Dictionary, use its ops directly
-      if (xs.operator === 'Dictionary' && isBoxedFunction(xs))
+      if (xs.operator === 'Dictionary' && isFunction(xs))
         return ce.function('Record', [...xs.ops]);
 
       const entries: BoxedExpression[] = [];
       for (const keyValue of xs.each()) {
-        if (!isBoxedFunction(keyValue) || keyValue.nops !== 2) {
+        if (!isFunction(keyValue) || keyValue.nops !== 2) {
           throw new Error(
             `Expected a collection of pairs, got ${keyValue.type}`
           );
         }
         const key = keyValue.op1;
         const value = keyValue.op2;
-        if (!isBoxedString(key)) {
+        if (!isString(key)) {
           throw new Error(`Expected a string key, got ${key.type}`);
         }
         entries.push(ce.tuple(key, value));
@@ -2086,7 +2086,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
 export function range(
   expr: BoxedExpression
 ): [lower: number, upper: number, step: number] {
-  if (!isBoxedFunction(expr)) return [1, 0, 0];
+  if (!isFunction(expr)) return [1, 0, 0];
   if (expr.nops === 0) return [1, 0, 0];
 
   let op1 = expr.op1.re;
@@ -2176,13 +2176,13 @@ function canonicalList(
   // \left\lbrack \begin{array}...\end{array} \right\rbrack
 
   const op1 = ops[0];
-  if (ops.length === 1 && op1.operator === 'Matrix' && isBoxedFunction(op1)) {
+  if (ops.length === 1 && op1.operator === 'Matrix' && isFunction(op1)) {
     // Adjust the matrix to have the correct delimiter
     const [body, delimiters, columns] = op1.ops;
 
     if (
       !delimiters ||
-      (isBoxedString(delimiters) && delimiters.string === '..')
+      (isString(delimiters) && delimiters.string === '..')
     ) {
       if (!columns) return ce._fn('Matrix', [body, delimiters]);
       return ce._fn('Matrix', [body, ce.string('[]'), columns]);
@@ -2190,8 +2190,8 @@ function canonicalList(
   }
 
   ops = ops.map((op) => {
-    if (op.operator === 'Delimiter' && isBoxedFunction(op)) {
-      if (op.op1.operator === 'Sequence' && isBoxedFunction(op.op1))
+    if (op.operator === 'Delimiter' && isFunction(op)) {
+      if (op.op1.operator === 'Sequence' && isFunction(op.op1))
         return ce._fn('List', canonical(ce, op.op1.ops));
       return ce._fn('List', [op.op1?.canonical ?? ce.Nothing]);
     }
@@ -2271,7 +2271,7 @@ function joinResultType(ops: ReadonlyArray<BoxedExpression>): Type {
 function defaultCollectionEq(a: BoxedExpression, b: BoxedExpression) {
   // Compare two collections
   if (a.operator !== b.operator) return false;
-  if (!isBoxedFunction(a) || !isBoxedFunction(b)) return false;
+  if (!isFunction(a) || !isFunction(b)) return false;
   if (a.nops !== b.nops) return false;
 
   // The elements are assumed to be in the same order
@@ -2327,7 +2327,7 @@ function enlist(xs: ReadonlyArray<BoxedExpression>): BoxedExpression[] {
   for (const x of xs) {
     if (sym(x) === 'Nothing') continue;
 
-    // if (isBoxedString(x)) {
+    // if (isString(x)) {
     //   if (s === undefined) s = '';
     //   s += x.string;
     //   continue;
@@ -2338,9 +2338,9 @@ function enlist(xs: ReadonlyArray<BoxedExpression>): BoxedExpression[] {
     //   s = undefined;
     // }
 
-    if (x.operator === 'Sequence' && isBoxedFunction(x)) {
+    if (x.operator === 'Sequence' && isFunction(x)) {
       result.push(...enlist([...x.ops]));
-    } else if (isBoxedString(x)) {
+    } else if (isString(x)) {
       // A string is a collection (of strings), but we don't want to iterate it recursively
       // if (s === undefined) s = '';
       // s += x.string;
@@ -2358,7 +2358,7 @@ function enlist(xs: ReadonlyArray<BoxedExpression>): BoxedExpression[] {
 }
 
 function takeIterator(expr: BoxedExpression): Iterator<BoxedExpression> {
-  if (!isBoxedFunction(expr))
+  if (!isFunction(expr))
     return { next: () => ({ value: undefined, done: true }) };
   // Number of elements to take
   const count = Math.max(0, toInteger(expr.op2) ?? 0);
@@ -2381,7 +2381,7 @@ function takeIterator(expr: BoxedExpression): Iterator<BoxedExpression> {
 }
 
 function takeCount(expr: BoxedExpression): number | undefined {
-  if (!isBoxedFunction(expr)) return undefined;
+  if (!isFunction(expr)) return undefined;
   const [xs, op2] = expr.ops;
   const count = xs.count;
   if (count === undefined) return undefined;
@@ -2391,7 +2391,7 @@ function takeCount(expr: BoxedExpression): number | undefined {
 }
 
 function zipCount(expr: BoxedExpression): number | undefined {
-  if (!isBoxedFunction(expr)) return undefined;
+  if (!isFunction(expr)) return undefined;
   const counts = expr.ops.map((x) => x.count);
   if (counts.some((c) => c === undefined)) return undefined;
   if (counts.some((c) => !Number.isFinite(c))) return Infinity;

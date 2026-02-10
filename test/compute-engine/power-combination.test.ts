@@ -1,5 +1,5 @@
 import { engine } from '../utils';
-import type { Expression } from '../../src/math-json/types';
+import type { MathJsonExpression as Expression } from '../../src/math-json/types';
 
 function check(
   latex: string,

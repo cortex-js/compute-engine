@@ -9,8 +9,8 @@ import {
   generateAssignments,
 } from '../symbolic/logic-utils';
 import {
-  isBoxedSymbol,
-  isBoxedFunction,
+  isSymbol,
+  isFunction,
   sym,
 } from '../boxed-expression/type-guards';
 
@@ -73,11 +73,11 @@ export function extractFiniteDomainWithReason(
     return { status: 'error', reason: 'expected-element-expression' };
   }
 
-  if (!isBoxedFunction(condition)) {
+  if (!isFunction(condition)) {
     return { status: 'error', reason: 'expected-element-expression' };
   }
 
-  const variable = isBoxedSymbol(condition.op1)
+  const variable = isSymbol(condition.op1)
     ? condition.op1.symbol
     : undefined;
   if (!variable) {
@@ -114,7 +114,7 @@ export function extractFiniteDomainWithReason(
 
   // Handle explicit sets: ["Set", 1, 2, 3]
   if (domain.operator === 'Set' || domain.operator === 'List') {
-    const values = isBoxedFunction(domain) ? domain.ops : undefined;
+    const values = isFunction(domain) ? domain.ops : undefined;
     if (values && values.length <= 1000) {
       // EL-1: Special case for 2-element Lists with integer values
       // Treat [a, b] as Range(a, b) in Element context for Sum/Product
@@ -155,7 +155,7 @@ export function extractFiniteDomainWithReason(
   }
 
   // Handle Range: ["Range", start, end] or ["Range", start, end, step]
-  if (domain.operator === 'Range' && isBoxedFunction(domain)) {
+  if (domain.operator === 'Range' && isFunction(domain)) {
     const start = asSmallInteger(domain.op1);
     const end = asSmallInteger(domain.op2);
     // op3 may be Nothing (a symbol) when not specified, so check ops length
@@ -192,24 +192,24 @@ export function extractFiniteDomainWithReason(
   // EL-6: Support Open/Closed boundary wrappers
   // e.g., ["Interval", ["Open", 0], 5] → iterates 1, 2, 3, 4, 5
   // e.g., ["Interval", 1, ["Open", 6]] → iterates 1, 2, 3, 4, 5
-  if (domain.operator === 'Interval' && isBoxedFunction(domain)) {
+  if (domain.operator === 'Interval' && isFunction(domain)) {
     let op1: BoxedExpression | undefined = domain.op1;
     let op2: BoxedExpression | undefined = domain.op2;
     let openStart = false;
     let openEnd = false;
 
     // Unwrap Open/Closed boundary markers
-    if (op1?.operator === 'Open' && isBoxedFunction(op1)) {
+    if (op1?.operator === 'Open' && isFunction(op1)) {
       openStart = true;
       op1 = op1.op1;
-    } else if (op1?.operator === 'Closed' && isBoxedFunction(op1)) {
+    } else if (op1?.operator === 'Closed' && isFunction(op1)) {
       op1 = op1.op1;
     }
 
-    if (op2?.operator === 'Open' && isBoxedFunction(op2)) {
+    if (op2?.operator === 'Open' && isFunction(op2)) {
       openEnd = true;
       op2 = op2.op1;
-    } else if (op2?.operator === 'Closed' && isBoxedFunction(op2)) {
+    } else if (op2?.operator === 'Closed' && isFunction(op2)) {
       op2 = op2.op1;
     }
 
@@ -282,7 +282,7 @@ export function extractFiniteDomainWithReason(
     if (
       domainValue &&
       domainValue.operator === 'Set' &&
-      isBoxedFunction(domainValue)
+      isFunction(domainValue)
     ) {
       const values = domainValue.ops;
       if (values && values.length <= 1000) {
@@ -323,7 +323,7 @@ export function bodyContainsVariable(
   variable: string
 ): boolean {
   if (sym(expr) === variable) return true;
-  if (isBoxedFunction(expr)) {
+  if (isFunction(expr)) {
     for (const op of expr.ops) {
       if (bodyContainsVariable(op, variable)) return true;
     }
@@ -344,7 +344,7 @@ export function collectNestedDomains(
 
   // Only collect from same quantifier type (ForAll or Exists)
   if (op !== 'ForAll' && op !== 'Exists') return [];
-  if (!isBoxedFunction(canonicalBody)) return [];
+  if (!isFunction(canonicalBody)) return [];
 
   const condition = canonicalBody.op1;
   const innerBody = canonicalBody.op2;
@@ -370,7 +370,7 @@ export function getInnermostBody(body: BoxedExpression): BoxedExpression {
   const canonicalBody = body.canonical;
   const op = canonicalBody.operator;
 
-  if ((op === 'ForAll' || op === 'Exists') && isBoxedFunction(canonicalBody)) {
+  if ((op === 'ForAll' || op === 'Exists') && isFunction(canonicalBody)) {
     const innerBody = canonicalBody.op2;
     if (innerBody) return getInnermostBody(innerBody);
   }

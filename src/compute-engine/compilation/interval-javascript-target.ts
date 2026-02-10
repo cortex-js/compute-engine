@@ -8,7 +8,7 @@
  */
 
 import type { BoxedExpression } from '../global-types';
-import { isBoxedSymbol, isBoxedNumber } from '../boxed-expression/type-guards';
+import { isSymbol, isNumber } from '../boxed-expression/type-guards';
 
 import { BaseCompiler } from './base-compiler';
 import type {
@@ -128,11 +128,11 @@ const INTERVAL_JAVASCRIPT_FUNCTIONS: CompiledFunctions<BoxedExpression> = {
     const exp = args[1];
     if (base === null) throw new Error('Power: no argument');
     // Check if this is e^x (base is ExponentialE)
-    if (isBoxedSymbol(base) && base.symbol === 'ExponentialE') {
+    if (isSymbol(base) && base.symbol === 'ExponentialE') {
       return `_IA.exp(${compile(exp)})`;
     }
     // Check if exponent is a constant number
-    if (exp && isBoxedNumber(exp) && exp.im === 0) {
+    if (exp && isNumber(exp) && exp.im === 0) {
       const expVal = exp.re;
       if (expVal === 0.5) return `_IA.sqrt(${compile(base)})`;
       if (expVal === 2) return `_IA.square(${compile(base)})`;
@@ -147,7 +147,7 @@ const INTERVAL_JAVASCRIPT_FUNCTIONS: CompiledFunctions<BoxedExpression> = {
     if (exp === null) return `_IA.sqrt(${compile(arg)})`;
     if (exp?.re === 2) return `_IA.sqrt(${compile(arg)})`;
     // nth root = x^(1/n)
-    if (exp && isBoxedNumber(exp) && exp.im === 0) {
+    if (exp && isNumber(exp) && exp.im === 0) {
       return `_IA.pow(${compile(arg)}, ${1 / exp.re})`;
     }
     return `_IA.powInterval(${compile(arg)}, _IA.div(_IA.point(1), ${compile(exp)}))`;

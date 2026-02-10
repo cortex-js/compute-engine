@@ -1,7 +1,7 @@
 import { Complex } from 'complex-esm';
 import { Decimal } from 'decimal.js';
 
-import type { Expression } from '../../math-json/types';
+import type { MathJsonExpression as Expression } from '../../math-json/types';
 
 import { Rational } from '../numerics/types';
 import { isInMachineRange } from '../numerics/numeric-bignum';
@@ -31,10 +31,10 @@ import type {
 } from '../global-types';
 import { isOperatorDef } from './utils';
 import {
-  isBoxedNumber,
-  isBoxedSymbol,
-  isBoxedString,
-  isBoxedFunction,
+  isNumber,
+  isSymbol,
+  isString,
+  isFunction,
 } from './type-guards';
 import { matchesNumber, matchesSymbol } from '../../math-json/utils';
 
@@ -57,7 +57,7 @@ function serializeSubtract(
   options: Readonly<JsonSerializationOptions>,
   metadata?: Metadata
 ): Expression | null {
-  if (isBoxedNumber(a) && a.isNegative) {
+  if (isNumber(a) && a.isNegative) {
     const v = a.numericValue;
     if (typeof v === 'number') {
       return serializeJsonFunction(
@@ -80,7 +80,7 @@ function serializeSubtract(
     }
   }
 
-  if (a.operator === 'Negate' && b.operator !== 'Negate' && isBoxedFunction(a))
+  if (a.operator === 'Negate' && b.operator !== 'Negate' && isFunction(a))
     return serializeJsonFunction(ce, 'Subtract', [b, a.op1], options, metadata);
 
   return null;
@@ -154,12 +154,12 @@ function serializePrettyJsonFunction(
     // e^x -> Exp(x)
     if (
       !exclusions.includes('Exp') &&
-      isBoxedSymbol(args[0]) &&
+      isSymbol(args[0]) &&
       args[0].symbol === 'ExponentialE'
     )
       return serializeJsonFunction(ce, 'Exp', [args[1]], options, metadata);
 
-    if (isBoxedNumber(args[1])) {
+    if (isNumber(args[1])) {
       const exp = asSmallInteger(args[1]);
       // x^2 -> Square(x)
       if (exp === 2 && !exclusions.includes('Square'))
@@ -238,7 +238,7 @@ function serializePrettyJsonFunction(
   }
 
   if (name === 'Add' && args.length === 2 && !exclusions.includes('Subtract')) {
-    if (isBoxedNumber(args[1])) {
+    if (isNumber(args[1])) {
       const t1 = asSmallInteger(args[1]);
       if (t1 !== null && t1 < 0)
         return serializeJsonFunction(
@@ -249,7 +249,7 @@ function serializePrettyJsonFunction(
           metadata
         );
     }
-    if (args[1]?.operator === 'Negate' && isBoxedFunction(args[1])) {
+    if (args[1]?.operator === 'Negate' && isFunction(args[1])) {
       return serializeJsonFunction(
         ce,
         'Subtract',
@@ -270,17 +270,17 @@ function serializePrettyJsonFunction(
   }
 
   if (name === 'Function' && args.length > 0) {
-    if (args[0].operator === 'Block' && isBoxedFunction(args[0])) {
+    if (args[0].operator === 'Block' && isFunction(args[0])) {
       const block = args[0];
       if (block.nops === 1) {
         const params = args.slice(1);
-        if (params.every((x) => isBoxedSymbol(x) && /_\d?/.test(x.symbol))) {
+        if (params.every((x) => isSymbol(x) && /_\d?/.test(x.symbol))) {
           if (
-            isBoxedFunction(block.op1) &&
+            isFunction(block.op1) &&
             block.op1.ops?.every(
               (x, i) =>
-                isBoxedSymbol(x) &&
-                isBoxedSymbol(params[i]) &&
+                isSymbol(x) &&
+                isSymbol(params[i]) &&
                 x.symbol === params[i].symbol
             )
           ) {
@@ -331,7 +331,7 @@ function serializeJsonFunction(
   // Negate(number) is always prettyfied as a negative number, since `-2` gets
   // parsed as `['Negate', 2]` and not `-2`.
   //
-  if (name === 'Negate' && args.length === 1 && isBoxedNumber(args[0])) {
+  if (name === 'Negate' && args.length === 1 && isNumber(args[0])) {
     const num0 = args[0].numericValue;
     if (num0 !== undefined) {
       if (typeof num0 === 'number')
@@ -373,7 +373,7 @@ function serializeJsonFunction(
         metadata
       );
 
-    if (name === 'Root' && args.length === 2 && isBoxedNumber(args[1])) {
+    if (name === 'Root' && args.length === 2 && isNumber(args[1])) {
       const n = asSmallInteger(args[1]);
       if (n === 2) return serializeJsonFunction(ce, 'Sqrt', [args[0]], options);
 
@@ -851,7 +851,7 @@ export function serializeJson(
   const wikidata = expr.wikidata;
 
   // Is it a number literal?
-  if (isBoxedNumber(expr))
+  if (isNumber(expr))
     return serializeJsonNumber(ce, expr.numericValue, options, {
       latex: expr.verbatimLatex,
     });
@@ -863,10 +863,10 @@ export function serializeJson(
   if (expr.type.matches('dictionary')) return expr.toMathJson(options);
 
   // Is it a string?
-  if (isBoxedString(expr)) return serializeJsonString(expr.string, options);
+  if (isString(expr)) return serializeJsonString(expr.string, options);
 
   // Is it a symbol?
-  if (isBoxedSymbol(expr)) {
+  if (isSymbol(expr)) {
     return serializeJsonSymbol(ce, expr.symbol, options, {
       latex: expr.verbatimLatex,
       wikidata,
@@ -874,9 +874,9 @@ export function serializeJson(
   }
 
   // Is it a function?
-  if (isBoxedFunction(expr)) {
+  if (isFunction(expr)) {
     const structuralExpr = expr.structural;
-    const structuralOps = isBoxedFunction(structuralExpr)
+    const structuralOps = isFunction(structuralExpr)
       ? structuralExpr.ops
       : [];
     if (

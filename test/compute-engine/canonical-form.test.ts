@@ -3,7 +3,7 @@ import { _BoxedExpression } from '../../src/compute-engine/boxed-expression/abst
 import { check, exprToString, engine as TEST_ENGINE } from '../utils';
 import type {
   CanonicalForm,
-  SemiBoxedExpression,
+  ExpressionInput,
 } from '../../src/compute-engine/global-types';
 
 describe('CANONICAL FORM RESTRICTIONS', () => {
@@ -694,15 +694,15 @@ describe('CANONICAL FORMS', () => {
 
   describe('Number', () => {
     const ce = TEST_ENGINE;
-    let expr: string | SemiBoxedExpression;
+    let expr: string | ExpressionInput;
 
-    const nonCanon = (input: string | SemiBoxedExpression) =>
+    const nonCanon = (input: string | ExpressionInput) =>
       typeof input === 'string'
         ? ce.parse(input, { form: 'raw' })
         : ce.box(input, { form: 'raw' });
-    const checkNumber = (input: string | SemiBoxedExpression) =>
+    const checkNumber = (input: string | ExpressionInput) =>
       checkForms(input, ['Number'], ce);
-    const canonNumber = (input: string | SemiBoxedExpression) =>
+    const canonNumber = (input: string | ExpressionInput) =>
       typeof input === 'string'
         ? ce.parse(input, { form: 'Number' })
         : ce.box(input, { form: 'Number' });
@@ -742,7 +742,7 @@ describe('CANONICAL FORMS', () => {
        */
       //@note: as of time of writing (CE 0.29.1), the test engine which test-cases in this block use
       //has a precision set to `100`: so all BigNum/Int digits are output.
-      const bigRational: SemiBoxedExpression = [
+      const bigRational: ExpressionInput = [
         'Divide',
         '318982460862894267352492496399',
         '-358796515092200247647243',
@@ -805,7 +805,7 @@ describe('CANONICAL FORMS', () => {
       //each variant: whereas we want to test the 'operator'/type
       test(`Convert to eqv. BoxedNumbers`, () => {
         const expComplexNum = (
-          expr: string | SemiBoxedExpression,
+          expr: string | ExpressionInput,
           type?: NumericType
         ) => {
           expect(nonCanon(expr).operator).toMatchInlineSnapshot(`Complex`);
@@ -1169,7 +1169,7 @@ describe('POLYNOMIAL ORDER', () => {
  * @returns
  */
 function checkForms(
-  inExpr: string | SemiBoxedExpression,
+  inExpr: string | ExpressionInput,
   forms: CanonicalForm[],
   engine?: ComputeEngine
 ): string {

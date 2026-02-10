@@ -10,8 +10,8 @@ import type {
 } from '../global-types';
 import { fuzzyStringMatch } from '../../common/fuzzy-string-match';
 import { isOperatorDef, isValueDef } from './utils';
-import { isBoxedTensor } from './boxed-tensor';
-import { isBoxedSymbol, isBoxedFunction } from './type-guards';
+import { isTensor } from './boxed-tensor';
+import { isSymbol, isFunction } from './type-guards';
 
 /**
  * Return true if a type could be a collection type at runtime.
@@ -148,7 +148,7 @@ export function checkNumericArgs(
     } else if (op.isNumber) {
       // The argument is a number literal or a function whose result is a number
       xs.push(op);
-    } else if (isBoxedSymbol(op) && !ce.lookupDefinition(op.symbol)) {
+    } else if (isSymbol(op) && !ce.lookupDefinition(op.symbol)) {
       // We have an unknown symbol, we'll infer it's a number later
       xs.push(op);
     } else if (op.type.isUnknown || op.type.type === 'any') {
@@ -159,7 +159,7 @@ export function checkNumericArgs(
       // (e.g. `list`, `number | list`). Since numeric functions are
       // threadable, accept it.
       xs.push(op);
-    } else if (isBoxedTensor(op)) {
+    } else if (isTensor(op)) {
       // The argument is a tensor (matrix or vector). Accept it for tensor
       // operations like element-wise addition. Tensor-specific validation
       // (shape compatibility, etc.) happens in the evaluate function.
@@ -523,7 +523,7 @@ function spellcheckSymbols(expr: BoxedExpression): Record<string, string> {
   const knownOperators = getOperatorNames(expr.engine);
 
   if (
-    isBoxedSymbol(expr) &&
+    isSymbol(expr) &&
     !suggestions[expr.symbol] &&
     !expr.symbol.startsWith('_')
   ) {
@@ -532,7 +532,7 @@ function spellcheckSymbols(expr: BoxedExpression): Record<string, string> {
       if (match) suggestions[expr.symbol] = match;
     }
   } else if (
-    isBoxedFunction(expr) &&
+    isFunction(expr) &&
     !suggestions[expr.operator] &&
     !expr.operator.startsWith('_')
   ) {

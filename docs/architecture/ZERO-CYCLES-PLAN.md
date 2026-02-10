@@ -318,7 +318,7 @@ import from the leaf.
 ### 3b. Break `utils → abstract-boxed-expression` (eliminates cycle #19)
 
 `utils.ts` imports `_BoxedExpression` for `instanceof` checks
-(`isBoxedExpression()`). This creates a cycle because the chain
+(`isExpression()`). This creates a cycle because the chain
 `abstract-boxed-expression → compare → ... → utils` closes back.
 
 **Fix**: Replace the `instanceof _BoxedExpression` check with a tag-based
@@ -338,7 +338,7 @@ export abstract class _BoxedExpression {
 // utils.ts — AFTER (no import from abstract-boxed-expression)
 import { BOXED_EXPRESSION_TAG } from './constants'; // or inline the symbol
 
-export function isBoxedExpression(x: unknown): x is BoxedExpression {
+export function isExpression(x: unknown): x is BoxedExpression {
   return x !== null && typeof x === 'object' && BOXED_EXPRESSION_TAG in x;
 }
 ```

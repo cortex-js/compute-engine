@@ -41,10 +41,10 @@ import { BoxedString } from '../boxed-expression/boxed-string';
 import { canonical } from '../boxed-expression/canonical-utils';
 import { isDictionary, isValueDef } from '../boxed-expression/utils';
 import {
-  isBoxedNumber,
-  isBoxedSymbol,
-  isBoxedFunction,
-  isBoxedString,
+  isNumber,
+  isSymbol,
+  isFunction,
+  isString,
   sym,
 } from '../boxed-expression/type-guards';
 
@@ -154,7 +154,7 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
         // This is necessary for `1(2+3)` to be correctly canonicalized to `2+3`.
         const y = canonicalInvisibleOperator(x, { engine });
         if (!y) return engine.Nothing;
-        if (y.operator === 'Multiply' && isBoxedFunction(y))
+        if (y.operator === 'Multiply' && isFunction(y))
           return canonicalMultiply(engine, y.ops);
         return y;
       },
@@ -213,12 +213,12 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
         // the sequence, like `(a, b, c)`. The sequence is used to group
         // the arguments, so it needs to be preserved.
         // If there is a single element, unpack it.
-        if (body.operator === 'Sequence' && isBoxedFunction(body))
+        if (body.operator === 'Sequence' && isFunction(body))
           return ce._fn('Tuple', canonical(ce, body.ops));
 
         body = body.canonical;
 
-        const delim = isBoxedString(args[1]) ? args[1].string : undefined;
+        const delim = isString(args[1]) ? args[1].string : undefined;
 
         // If we have a single argument and parentheses, i.e. `(2)`, return
         // the argument
@@ -242,7 +242,7 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
 
         if (
           (op1.operator === 'Sequence' || op1.operator === 'Delimiter') &&
-          isBoxedFunction(ops[0])
+          isFunction(ops[0])
         )
           ops = flattenSequence(ops[0].ops);
 
@@ -276,7 +276,7 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
       signature: '(string, any*) -> error',
       canonical: (args, { engine: ce }) => {
         const checked = checkType(ce, args[0], 'string');
-        const code = isBoxedString(checked) ? checked.string : undefined;
+        const code = isString(checked) ? checked.string : undefined;
         if (code === 'incompatible-type') {
           return ce._fn('ErrorCode', [ce.string(code), args[1], args[2]]);
         }
@@ -303,17 +303,17 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
       // Note: the operator is lazy and doesn't have a canonical handler:
       // the argument is not canonicalized.
       type: ([x]) => {
-        if (isBoxedSymbol(x)) return 'symbol';
-        if (isBoxedString(x)) return 'string';
-        if (isBoxedNumber(x)) return x.type;
-        if (isBoxedFunction(x)) return functionResult(x.type.type) ?? 'unknown';
+        if (isSymbol(x)) return 'symbol';
+        if (isString(x)) return 'string';
+        if (isNumber(x)) return x.type;
+        if (isFunction(x)) return functionResult(x.type.type) ?? 'unknown';
         return 'unknown';
       },
       // When comparing hold expressions, consider them equal if their
       // arguments are structurally equal.
       eq: (a, b) => {
-        if (b.operator === 'Hold' && isBoxedFunction(b)) b = b.ops[0];
-        if (!isBoxedFunction(a)) return false;
+        if (b.operator === 'Hold' && isFunction(b)) b = b.ops[0];
+        if (!isFunction(a)) return false;
         return a.ops[0].isSame(b);
       },
       evaluate: ([x], { engine }) => engine.hold(x),
@@ -324,11 +324,11 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
       lazy: true,
       signature: '(any) -> unknown',
       type: ([x]) =>
-        x.operator === 'Hold' && isBoxedFunction(x) ? x.op1.type : x.type,
+        x.operator === 'Hold' && isFunction(x) ? x.op1.type : x.type,
       // Note: the operator is lazy and doesn't have a canonical handler:
       // the argument is not canonicalized.
       evaluate: ([x], options) => {
-        if (x.operator === 'Hold' && isBoxedFunction(x)) x = x.op1;
+        if (x.operator === 'Hold' && isFunction(x)) x = x.op1;
         return x.canonical.evaluate(options);
       },
     },
@@ -378,8 +378,8 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
         const s = [x.toString()];
         s.push(''); // Add a newline
 
-        if (isBoxedString(x)) s.push('string');
-        else if (isBoxedSymbol(x)) {
+        if (isString(x)) s.push('string');
+        else if (isSymbol(x)) {
           if (x.valueDefinition) {
             const def = x.valueDefinition;
 
@@ -394,8 +394,8 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
             s.push('symbol');
             s.push(`value: ${x.evaluate().toString()}`);
           }
-        } else if (isBoxedNumber(x)) s.push(x.type.toString());
-        else if (isBoxedFunction(x)) {
+        } else if (isNumber(x)) s.push(x.type.toString());
+        else if (isFunction(x)) {
           s.push(x.type.toString());
           s.push(x.isCanonical ? 'canonical' : 'non-canonical');
         } else s.push("Unknown expression's type");
@@ -426,12 +426,12 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
       canonical: (args, { engine: ce }) => {
         if (args.length !== 1) return null;
         const op1 = args[0];
-        if (isBoxedFunction(op1)) return ce._fn('Sequence', op1.ops);
+        if (isFunction(op1)) return ce._fn('Sequence', op1.ops);
         return ce._fn('Tail', canonical(ce, args));
       },
       // **IMPORTANT** Tail should work on non-canonical expressions
       evaluate: ([x], { engine: ce }) =>
-        isBoxedFunction(x) ? ce._fn('Sequence', x.ops) : ce.Nothing,
+        isFunction(x) ? ce._fn('Sequence', x.ops) : ce.Nothing,
     },
 
     Identity: {
@@ -473,7 +473,7 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
 
         // Note: we can't use checkType() because it canonicalized/bind the argument.
         let symbol = lhs;
-        if (!isBoxedSymbol(symbol)) {
+        if (!isSymbol(symbol)) {
           // If the argument was not a symbol literal, see if we can evaluate it to a symbol
           symbol = checkType(ce, lhs, 'symbol');
         }
@@ -520,7 +520,7 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
         //
         if (
           op1.operator === 'Subscript' &&
-          isBoxedFunction(op1) &&
+          isFunction(op1) &&
           sym(op1.op1)
         ) {
           const seqName = sym(op1.op1)!;
@@ -532,7 +532,7 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
           //
           if (
             subscript?.operator === 'Sequence' &&
-            isBoxedFunction(subscript)
+            isFunction(subscript)
           ) {
             const indices = subscript.ops;
 
@@ -540,7 +540,7 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
             // e.g., P_{0,0} := 1
             if (
               indices.every(
-                (op) => isBoxedNumber(op) && Number.isInteger(op.re)
+                (op) => isNumber(op) && Number.isInteger(op.re)
               )
             ) {
               const key = indices.map((op) => op.re).join(',');
@@ -557,10 +557,10 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
             let allValid = true;
 
             for (const idx of indices) {
-              if (isBoxedSymbol(idx)) {
+              if (isSymbol(idx)) {
                 indexVars.push(idx.symbol);
                 hasSymbols = true;
-              } else if (isBoxedNumber(idx) && Number.isInteger(idx.re)) {
+              } else if (isNumber(idx) && Number.isInteger(idx.re)) {
                 indexVars.push(String(idx.re));
               } else {
                 // Complex expression - try to extract variable
@@ -602,7 +602,7 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
 
           // Case 1: Numeric subscript → base case
           // e.g., L_0 := 1, F_1 := 1
-          if (isBoxedNumber(subscript) && Number.isInteger(subscript.re)) {
+          if (isNumber(subscript) && Number.isInteger(subscript.re)) {
             const index = subscript.re;
             const value = op2.evaluate();
             addSequenceBaseCase(ce, seqName, index, value);
@@ -611,7 +611,7 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
 
           // Case 2: Symbol subscript → check for self-reference
           // e.g., a_n := a_{n-1} + 1  vs  f_n := 2*n + 1
-          if (isBoxedSymbol(subscript)) {
+          if (isSymbol(subscript)) {
             const indexVar = subscript.symbol;
 
             if (containsSelfReference(op2, seqName)) {
@@ -666,7 +666,7 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
       canonical: (args, { engine: ce }) => {
         // Note: we can't use checkType() because it canonicalized/bind the argument.
         let symbolExpr = args[0];
-        if (!isBoxedSymbol(symbolExpr)) {
+        if (!isSymbol(symbolExpr)) {
           // If the argument was not a symbol literal, see if we can evaluate it to a symbol
           symbolExpr = checkType(ce, args[0], 'symbol');
         }
@@ -689,7 +689,7 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
         const t = ops[1].canonical.evaluate();
 
         const type = parseType(
-          (isBoxedString(t) ? t.string : undefined) ?? sym(t) ?? undefined
+          (isString(t) ? t.string : undefined) ?? sym(t) ?? undefined
         );
         if (!isValidType(type)) return undefined;
 
@@ -739,7 +739,7 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
           const result = apply(f, [lower]);
 
           // If we did get a number, return it
-          if (result && isBoxedNumber(result)) return result;
+          if (result && isNumber(result)) return result;
 
           // Fallback: return unevaluated symbolic form
           return ce._fn('EvaluateAt', [f, lower]);
@@ -754,8 +754,8 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
         if (
           fLower &&
           fUpper &&
-          isBoxedNumber(fLower.N()) &&
-          isBoxedNumber(fUpper.N())
+          isNumber(fLower.N()) &&
+          isNumber(fUpper.N())
         ) {
           return fUpper.sub(fLower);
         }
@@ -771,7 +771,7 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
       canonical: ([symbolArg], { engine: ce }) =>
         ce.symbol(
           sym(symbolArg) ??
-            (isBoxedString(symbolArg) ? symbolArg.string : undefined) ??
+            (isString(symbolArg) ? symbolArg.string : undefined) ??
             'Undefined'
         ),
     },
@@ -830,7 +830,7 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
 
         const forms = ops
           .slice(1)
-          .map((x) => sym(x) ?? (isBoxedString(x) ? x.string : undefined))
+          .map((x) => sym(x) ?? (isString(x) ? x.string : undefined))
           .filter((x) => x !== undefined) as CanonicalForm[];
         return canonicalForm(ops[0], forms);
       },
@@ -926,7 +926,7 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
 
       signature: '(collection, any) -> any',
       type: ([op1, op2], { engine: ce }) => {
-        if (isBoxedString(op1) && asSmallInteger(op2) !== null)
+        if (isString(op1) && asSmallInteger(op2) !== null)
           return 'integer';
         if (op1.isIndexedCollection)
           return collectionElementType(op1.type.type) ?? 'any';
@@ -951,12 +951,12 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
           }
           // Check if this would become a compound symbol (simple subscript)
           const sub =
-            (isBoxedString(op2) ? op2.string : undefined) ??
+            (isString(op2) ? op2.string : undefined) ??
             sym(op2) ??
             asSmallInteger(op2)?.toString();
           if (sub) return 'symbol';
           // Check for InvisibleOperator of symbols/numbers (also becomes compound symbol)
-          if (op2.operator === 'InvisibleOperator' && isBoxedFunction(op2)) {
+          if (op2.operator === 'InvisibleOperator' && isFunction(op2)) {
             const parts = op2.ops.map(
               (x) => sym(x) ?? asSmallInteger(x)?.toString()
             );
@@ -973,7 +973,7 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
         op1 = op1.canonical;
         // Is it a string in a base form:
         // `"deadbeef"_{16}` `"0101010"_2?
-        if (isBoxedString(op1)) {
+        if (isString(op1)) {
           const base = asSmallInteger(op2.canonical);
           if (base !== null && base > 1 && base <= 36) {
             const [value, rest] = fromDigits(op1.string, base);
@@ -998,7 +998,7 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
           // For multi-index subscripts (Sequence/Tuple), pass each index as separate arg
           if (
             (op2.operator === 'Sequence' || op2.operator === 'Tuple') &&
-            isBoxedFunction(op2)
+            isFunction(op2)
           )
             return ce._fn('At', [op1, ...op2.ops.map((x) => x.canonical)]);
           return ce._fn('At', [op1, op2.canonical]);
@@ -1016,7 +1016,7 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
         // Is it a compound symbol `x_\operatorname{max}`, `\mu_0`
         if (op1Name) {
           const subStr =
-            (isBoxedString(op2) ? op2.string : undefined) ??
+            (isString(op2) ? op2.string : undefined) ??
             sym(op2) ??
             asSmallInteger(op2)?.toString();
 
@@ -1026,7 +1026,7 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
           // in a Delimiter), concatenate them to form a compound symbol name.
           // e.g., `A_{CD}` -> `A_CD`, `x_{ij}` -> `x_ij`, `T_{max}` -> `T_max`
           // Use parentheses for expressions: `A_{(CD)}` remains as subscript expression.
-          if (op2.operator === 'InvisibleOperator' && isBoxedFunction(op2)) {
+          if (op2.operator === 'InvisibleOperator' && isFunction(op2)) {
             const parts = op2.ops.map(
               (x) => sym(x) ?? asSmallInteger(x)?.toString()
             );
@@ -1036,13 +1036,13 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
           }
         }
 
-        if (op2.operator === 'Sequence' && isBoxedFunction(op2))
+        if (op2.operator === 'Sequence' && isFunction(op2))
           ce._fn('Subscript', [op1, ce._fn('List', op2.ops)]);
 
         // Unwrap Delimiter (parentheses) from the subscript expression
         // e.g., `A_{(n+1)}` -> `["Subscript", "A", ["Add", "n", 1]]`
         let sub = op2;
-        if (op2.operator === 'Delimiter' && isBoxedFunction(op2))
+        if (op2.operator === 'Delimiter' && isFunction(op2))
           sub = op2.op1.canonical;
 
         return ce._fn('Subscript', [op1, sub]);
@@ -1052,7 +1052,7 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
         const [base, subscript] = ops;
 
         // Check if base is a symbol with a subscriptEvaluate handler
-        if (isBoxedSymbol(base)) {
+        if (isSymbol(base)) {
           const def = base.valueDefinition;
           if (def?.subscriptEvaluate) {
             // Evaluate the subscript first
@@ -1093,7 +1093,7 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
         // declared in the current context.
         return ce._fn(
           'Symbol',
-          ops.map((x) => (isBoxedSymbol(x) ? x : x.canonical))
+          ops.map((x) => (isSymbol(x) ? x : x.canonical))
         );
       },
       evaluate: (ops, { engine: ce }) => {
@@ -1102,7 +1102,7 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
           .map(
             (x) =>
               sym(x) ??
-              (isBoxedString(x) ? x.string : undefined) ??
+              (isString(x) ? x.string : undefined) ??
               asSmallInteger(x)?.toString() ??
               ''
           )
@@ -1216,7 +1216,7 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
         'Parse a LaTeX string and evaluate to a corresponding expression',
       signature: '(string) -> any',
       evaluate: ([s], { engine: ce }) =>
-        ce.parse(isBoxedString(s) ? s.string : '') ?? ce.Nothing,
+        ce.parse(isString(s) ? s.string : '') ?? ce.Nothing,
     },
   },
 
@@ -1245,7 +1245,7 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
       evaluate: ([value, format], { engine }) => {
         if (value === undefined) return engine.string('');
         const fmt =
-          (isBoxedString(format) ? format.string : undefined) ?? 'default';
+          (isString(format) ? format.string : undefined) ?? 'default';
 
         if (fmt === 'default') return engine.string(value.toString());
 
@@ -1306,7 +1306,7 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
       description: 'A collection of UTF-8 code units from a string.',
       signature: '(string) -> list<integer>',
       evaluate: ([str], { engine }) => {
-        if (!isBoxedString(str)) return undefined;
+        if (!isString(str)) return undefined;
         const utf8Buffer = (str as BoxedString).buffer;
         // Convert the Uint8Array to a list of integers
         return engine.function(
@@ -1320,7 +1320,7 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
       description: 'A collection of UTF-16 code units from a string.',
       signature: '(string) -> list<integer>',
       evaluate: ([str], { engine }) => {
-        if (!isBoxedString(str)) return undefined;
+        if (!isString(str)) return undefined;
         const utf16Values: number[] = [];
         // Convert the string to a list of Unicode scalars
         for (let i = 0; i < str.string.length; i++) {
@@ -1339,7 +1339,7 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
         'A collection of Unicode scalars from a string, same as UTF-32',
       signature: '(string) -> list<integer>',
       evaluate: ([str], { engine }) => {
-        if (!isBoxedString(str)) return undefined;
+        if (!isString(str)) return undefined;
         const codePoints = (str as BoxedString).unicodeScalars;
         return engine.function(
           'List',
@@ -1352,7 +1352,7 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
       description: 'A collection of grapheme clusters from a string.',
       signature: '(string) -> list<string>',
       evaluate: ([str], { engine }) => {
-        if (!isBoxedString(str)) return undefined;
+        if (!isString(str)) return undefined;
         // Use Intl.Segmenter to split the string into grapheme clusters
         const segmenter = new Intl.Segmenter('en', { granularity: 'grapheme' });
         const graphemes = Array.from(segmenter.segment(str.string), (seg) =>
@@ -1379,7 +1379,7 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
       signature: '(string, (string|integer)?) -> integer',
 
       evaluate: (ops, { engine }) => {
-        let op1str = isBoxedString(ops[0]) ? ops[0].string : undefined;
+        let op1str = isString(ops[0]) ? ops[0].string : undefined;
         const ce = engine;
         if (!op1str) return ce.typeError('string', ops[0]?.type, ops[0]);
 
@@ -1401,7 +1401,7 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
 
         const [value, rest] = fromDigits(
           op1str,
-          (isBoxedString(op2) ? op2.string : undefined) ?? sym(op2) ?? 10
+          (isString(op2) ? op2.string : undefined) ?? sym(op2) ?? 10
         );
 
         if (rest) return ce.error(['unexpected-digit', rest[0]], rest);

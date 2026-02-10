@@ -4,7 +4,7 @@ import type { BoxedType } from '../common/type/boxed-type';
 import type { LatexString, LatexDictionaryEntry } from './latex-syntax/types';
 import type {
   BoxedExpression,
-  SemiBoxedExpression,
+  ExpressionInput,
   CompiledExpression,
 } from './types-expression';
 import type {
@@ -26,7 +26,7 @@ import type {
 export interface ComputeEngine {}
 
 type EvaluateOptions = KernelEvaluateOptions<BoxedExpression>;
-type Rule = KernelRule<BoxedExpression, SemiBoxedExpression, ComputeEngine>;
+type Rule = KernelRule<BoxedExpression, ExpressionInput, ComputeEngine>;
 type BoxedRule = KernelBoxedRule<BoxedExpression, ComputeEngine>;
 type BoxedRuleSet = KernelBoxedRuleSet<BoxedExpression, ComputeEngine>;
 type Scope = KernelScope<BoxedDefinition>;
@@ -53,7 +53,7 @@ export type ValueDefinition = BaseDefinition & {
    * `ComputeEngine` and possible other environment settings */
   value:
     | LatexString
-    | SemiBoxedExpression
+    | ExpressionInput
     | ((ce: ComputeEngine) => BoxedExpression | null);
 
   eq: (a: BoxedExpression) => boolean | undefined;

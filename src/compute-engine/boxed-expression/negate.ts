@@ -2,19 +2,19 @@ import type {
   BoxedExpression,
   IComputeEngine as ComputeEngine,
 } from '../global-types';
-import { isBoxedNumber, isBoxedFunction } from './type-guards';
+import { isNumber, isFunction } from './type-guards';
 import { addOrder, order } from './order';
 
 export function canonicalNegate(expr: BoxedExpression): BoxedExpression {
   // Negate(Negate(x)) -> x
   let sign = -1;
-  while (isBoxedFunction(expr) && expr.operator === 'Negate') {
+  while (isFunction(expr) && expr.operator === 'Negate') {
     expr = expr.op1;
     sign = -sign;
   }
   if (sign === 1) return expr;
 
-  if (isBoxedNumber(expr)) return expr.neg();
+  if (isNumber(expr)) return expr.neg();
 
   return expr.engine._fn('Negate', [expr]);
 }
@@ -29,17 +29,17 @@ export function canonicalNegate(expr: BoxedExpression): BoxedExpression {
 export function negate(expr: BoxedExpression): BoxedExpression {
   // Negate(Negate(x)) -> x
   let sign = -1;
-  while (isBoxedFunction(expr) && expr.operator === 'Negate') {
+  while (isFunction(expr) && expr.operator === 'Negate') {
     expr = expr.op1;
     sign = -sign;
   }
   if (sign === 1) return expr;
 
-  if (isBoxedNumber(expr)) return expr.neg();
+  if (isNumber(expr)) return expr.neg();
 
   const ce = expr.engine;
 
-  if (isBoxedFunction(expr)) {
+  if (isFunction(expr)) {
     // Negate(Subtract(a, b)) -> Subtract(b, a)
     if (expr.operator === 'Subtract') return expr.op2.sub(expr.op1);
 
@@ -85,7 +85,7 @@ export function negateProduct(
   let done = false;
   // If there is `Negate` as one of the args, remove it
   for (const arg of args) {
-    if (!done && isBoxedFunction(arg) && arg.operator === 'Negate') {
+    if (!done && isFunction(arg) && arg.operator === 'Negate') {
       done = true;
       if (!arg.op1.is(1)) result.push(arg.op1);
     } else result.push(arg);
@@ -95,7 +95,7 @@ export function negateProduct(
   if (!done) {
     result = [];
     for (const arg of args) {
-      if (done || (!isBoxedNumber(arg) && !arg.isInteger)) result.push(arg);
+      if (done || (!isNumber(arg) && !arg.isInteger)) result.push(arg);
       else {
         done = true;
         if (!arg.is(-1)) result.push(arg.neg());
@@ -108,7 +108,7 @@ export function negateProduct(
   if (!done) {
     result = [];
     for (const arg of args) {
-      if (done || !isBoxedNumber(arg) || !arg.isNumber) result.push(arg);
+      if (done || !isNumber(arg) || !arg.isNumber) result.push(arg);
       else {
         done = true;
         if (!arg.is(-1)) result.push(arg.neg());

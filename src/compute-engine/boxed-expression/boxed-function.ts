@@ -1,4 +1,4 @@
-import type { Expression } from '../../math-json/types';
+import type { MathJsonExpression as Expression } from '../../math-json/types';
 import type {
   SimplifyOptions,
   ReplaceOptions,
@@ -23,12 +23,12 @@ import type {
 } from '../global-types';
 
 import { isFiniteIndexedCollection, zip } from '../collection-utils';
-import { isBoxedTensor } from './boxed-tensor';
+import { isTensor } from './boxed-tensor';
 import {
-  isBoxedNumber,
-  isBoxedFunction,
-  isBoxedString,
-  isBoxedSymbol,
+  isNumber,
+  isFunction,
+  isString,
+  isSymbol,
 } from './type-guards';
 import type { NumericPrimitiveType } from '../../common/type/types';
 import { Type } from '../../common/type/types';
@@ -258,7 +258,7 @@ export class BoxedFunction
 
   get json(): Expression {
     const s = this.structural;
-    const ops = isBoxedFunction(s) ? s.ops : this._ops;
+    const ops = isFunction(s) ? s.ops : this._ops;
     return [this._operator, ...ops.map((x) => x.json)];
   }
 
@@ -315,7 +315,7 @@ export class BoxedFunction
       if (!def.associative) ys = xs;
       else {
         for (const x of xs) {
-          if (x.operator === this.operator && isBoxedFunction(x))
+          if (x.operator === this.operator && isFunction(x))
             ys.push(...x.ops);
           else ys.push(x);
         }
@@ -356,7 +356,7 @@ export class BoxedFunction
     let expr: BoxedExpression = this;
     if (expr.operator === 'Add') {
       expr = factor(this);
-      if (isBoxedNumber(expr)) {
+      if (isNumber(expr)) {
         if (typeof expr.numericValue === 'number') {
           if (Number.isInteger(expr.numericValue))
             return [ce._numericValue(expr.numericValue), ce.One];
@@ -369,7 +369,7 @@ export class BoxedFunction
     //
     // Negate
     //
-    if (expr.operator === 'Negate' && isBoxedFunction(expr)) {
+    if (expr.operator === 'Negate' && isFunction(expr)) {
       const [coef, rest] = expr.op1.toNumericValue();
       return [coef.neg(), rest];
     }
@@ -377,7 +377,7 @@ export class BoxedFunction
     //
     // Multiply
     //
-    if (expr.operator === 'Multiply' && isBoxedFunction(expr)) {
+    if (expr.operator === 'Multiply' && isFunction(expr)) {
       const rest: BoxedExpression[] = [];
       let coef = ce._numericValue(1);
       for (const arg of expr.ops) {
@@ -393,7 +393,7 @@ export class BoxedFunction
     //
     // Divide
     //
-    if (expr.operator === 'Divide' && isBoxedFunction(expr)) {
+    if (expr.operator === 'Divide' && isFunction(expr)) {
       const [coef1, numer] = expr.op1.toNumericValue();
       const [coef2, denom] = expr.op2.toNumericValue();
       const coef = coef1.div(coef2);
@@ -404,9 +404,9 @@ export class BoxedFunction
     //
     // Power/Sqrt/Root
     //
-    if (expr.operator === 'Power' && isBoxedFunction(expr)) {
+    if (expr.operator === 'Power' && isFunction(expr)) {
       // We can only extract a coef if the exponent is a literal
-      if (!isBoxedNumber(expr.op2)) return [ce._numericValue(1), this];
+      if (!isNumber(expr.op2)) return [ce._numericValue(1), this];
 
       // eslint-disable-next-line prefer-const
       let [coef, base] = expr.op1.toNumericValue();
@@ -421,7 +421,7 @@ export class BoxedFunction
       return [ce._numericValue(1), this];
     }
 
-    if (expr.operator === 'Sqrt' && isBoxedFunction(expr)) {
+    if (expr.operator === 'Sqrt' && isFunction(expr)) {
       const [coef, rest] = expr.op1.toNumericValue();
       // @fastpasth
       if (rest.is(1) || rest.is(0)) {
@@ -431,7 +431,7 @@ export class BoxedFunction
       return [coef.sqrt(), ce.function('Sqrt', [rest])];
     }
 
-    if (expr.operator === 'Root' && isBoxedFunction(expr)) {
+    if (expr.operator === 'Root' && isFunction(expr)) {
       const exp = expr.op2.re;
       if (isNaN(exp) || expr.op2.im !== 0) return [ce._numericValue(1), this];
 
@@ -443,7 +443,7 @@ export class BoxedFunction
     //
     // Abs
     //
-    if (expr.operator === 'Abs' && isBoxedFunction(expr)) {
+    if (expr.operator === 'Abs' && isFunction(expr)) {
       const [coef, rest] = expr.op1.toNumericValue();
       return [coef.abs(), ce.function('Abs', [rest])];
     }
@@ -1047,7 +1047,7 @@ export class BoxedFunction
     if (typeof index === 'string')
       return this.operatorDefinition?.collection?.at?.(this, index);
 
-    if (!isBoxedString(index)) return undefined;
+    if (!isString(index)) return undefined;
     return this.operatorDefinition?.collection?.at?.(this, index.string);
   }
 
@@ -1095,7 +1095,7 @@ export class BoxedFunction
       // Skip broadcasting for Add/Multiply with tensors - they have their own
       // element-wise handling in addTensors/mulTensors
       //
-      const hasTensors = this.ops!.some((x) => isBoxedTensor(x));
+      const hasTensors = this.ops!.some((x) => isTensor(x));
       const skipBroadcastForTensors =
         hasTensors && (this.operator === 'Add' || this.operator === 'Multiply');
       if (
@@ -1185,7 +1185,7 @@ export class BoxedFunction
       // Skip broadcasting for Add/Multiply with tensors - they have their own
       // element-wise handling
       //
-      const hasTensors = this.ops!.some((x) => isBoxedTensor(x));
+      const hasTensors = this.ops!.some((x) => isTensor(x));
       const skipBroadcastForTensors =
         hasTensors && (this.operator === 'Add' || this.operator === 'Multiply');
       if (
@@ -1356,7 +1356,7 @@ function satisfiesInequalities(
 ): boolean {
   return inequalities.every((ineq) => {
     const substituted = ineq.subs(solution, { canonical: true }).evaluate();
-    return isBoxedSymbol(substituted) && substituted.symbol === 'True';
+    return isSymbol(substituted) && substituted.symbol === 'True';
   });
 }
 

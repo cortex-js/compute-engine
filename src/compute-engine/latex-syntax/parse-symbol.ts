@@ -1,4 +1,7 @@
-import { Expression, MathJsonSymbol } from '../../math-json';
+import type {
+  MathJsonExpression as Expression,
+  MathJsonSymbol,
+} from '../../math-json';
 import { EMOJIS, isValidSymbol, validateSymbol } from '../../math-json/symbols';
 import { SYMBOLS } from './dictionary/definitions-symbols';
 import { Parser } from './types';

@@ -9,7 +9,7 @@ import { canonicalPower } from './arithmetic-power';
 import { canonicalOrder } from './order';
 import { asBigint } from './numerics';
 import { isOperatorDef, isImaginaryUnit } from './utils';
-import { isBoxedFunction, isBoxedNumber, isBoxedSymbol } from './type-guards';
+import { isFunction, isNumber, isSymbol } from './type-guards';
 
 export function canonicalForm(
   expr: BoxedExpression,
@@ -75,7 +75,7 @@ export function canonicalForm(
   // Partial canonicalization produces a structural expression, not a fully
   // canonical one. This allows subsequent .canonical calls to perform full
   // canonicalization.
-  if (isBoxedFunction(expr) && expr.isCanonical) {
+  if (isFunction(expr) && expr.isCanonical) {
     expr = expr.engine.function(expr.operator, [...expr.ops!], {
       form: 'structural',
     });
@@ -94,7 +94,7 @@ export function canonicalForm(
 function flattenForm(expr: BoxedExpression) {
   if (!expr.operator) return expr;
 
-  if (!isBoxedFunction(expr) || expr.nops === 0) return expr;
+  if (!isFunction(expr) || expr.nops === 0) return expr;
 
   if (expr.operator === 'Delimiter') return flattenForm(expr.op1);
 
@@ -120,7 +120,7 @@ function flattenForm(expr: BoxedExpression) {
 }
 
 function invisibleOperatorForm(expr: BoxedExpression) {
-  if (!isBoxedFunction(expr)) return expr;
+  if (!isFunction(expr)) return expr;
 
   if (expr.operator === 'InvisibleOperator') {
     return (
@@ -168,7 +168,7 @@ function invisibleOperatorForm(expr: BoxedExpression) {
 function numberForm(expr: BoxedExpression): BoxedExpression {
   //(↓note: this is redundant, since numbers are _always_ boxed as canonical (v27.0), but preserving
   //for explicitness in case things change)
-  if (isBoxedNumber(expr)) return expr.canonical;
+  if (isNumber(expr)) return expr.canonical;
 
   // Ensure that all representations of the imaginary unit are represented
   // with the BoxedNumber variant: this makes further simplifications more
@@ -176,7 +176,7 @@ function numberForm(expr: BoxedExpression): BoxedExpression {
   if (isImaginaryUnit(expr)) return expr.engine.I;
 
   // Only deal with function expressions henceforth
-  if (!isBoxedFunction(expr)) return expr;
+  if (!isFunction(expr)) return expr;
 
   const { engine: ce } = expr;
 
@@ -206,7 +206,7 @@ function numberForm(expr: BoxedExpression): BoxedExpression {
       // If single argument, assume it's imaginary, i.e.
       // `["Complex", 2]` -> `2i`
       const op1 = ops[0];
-      if (isBoxedNumber(op1)) return ce.number(ce.complex(0, op1.re));
+      if (isNumber(op1)) return ce.number(ce.complex(0, op1.re));
 
       return ce._fn('Multiply', [op1, ce.I], { canonical: false });
     }
@@ -234,7 +234,7 @@ function numberForm(expr: BoxedExpression): BoxedExpression {
   //
   if (name === 'Negate' && ops.length === 1) {
     const op1 = ops[0]!;
-    if (isBoxedNumber(op1)) {
+    if (isNumber(op1)) {
       const { numericValue } = op1;
       if (numericValue !== undefined)
         return ce.number(
@@ -263,7 +263,7 @@ function numberForm(expr: BoxedExpression): BoxedExpression {
  */
 function multiplyForm(expr: BoxedExpression) {
   // Recursively visit all sub-expressions
-  if (!isBoxedFunction(expr)) return expr;
+  if (!isFunction(expr)) return expr;
   const ops = expr.ops.map(multiplyForm);
 
   // If this is a multiply, canonicalize it
@@ -277,7 +277,7 @@ function multiplyForm(expr: BoxedExpression) {
 
 function addForm(expr: BoxedExpression) {
   // Recursively visit all sub-expressions
-  if (!isBoxedFunction(expr)) return expr;
+  if (!isFunction(expr)) return expr;
   const ops = expr.ops.map(addForm);
 
   // If this is an addition or subtraction, canonicalize it
@@ -298,7 +298,7 @@ function addForm(expr: BoxedExpression) {
  * from normalized power expressions.
  */
 function powerForm(expr: BoxedExpression) {
-  if (!isBoxedFunction(expr)) return expr;
+  if (!isFunction(expr)) return expr;
 
   const ops = expr.ops.map((expr) => powerForm(expr));
 
@@ -315,8 +315,8 @@ function powerForm(expr: BoxedExpression) {
  * @returns
  */
 function symbolForm(expr: BoxedExpression): BoxedExpression {
-  if (isBoxedSymbol(expr)) return expr.canonical;
-  if (!isBoxedFunction(expr)) return expr;
+  if (isSymbol(expr)) return expr.canonical;
+  if (!isFunction(expr)) return expr;
 
   return expr.engine._fn(expr.operator, expr.ops.map(symbolForm), {
     canonical: false,
@@ -335,11 +335,11 @@ function symbolForm(expr: BoxedExpression): BoxedExpression {
  */
 function divideForm(expr: BoxedExpression) {
   // If this is a divide, canonicalize it
-  if (expr.operator === 'Divide' && isBoxedFunction(expr))
+  if (expr.operator === 'Divide' && isFunction(expr))
     return canonicalDivide(powerForm(expr.op1), powerForm(expr.op2));
 
   // Recursively visit all sub-expressions
-  if (!isBoxedFunction(expr)) return expr;
+  if (!isFunction(expr)) return expr;
 
   return expr.engine._fn(expr.operator, expr.ops.map(divideForm));
 }

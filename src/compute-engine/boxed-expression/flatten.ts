@@ -1,5 +1,5 @@
 import type { BoxedExpression } from '../global-types';
-import { isBoxedFunction, isBoxedSymbol } from './type-guards';
+import { isFunction, isSymbol } from './type-guards';
 
 /**
  *
@@ -25,7 +25,7 @@ export function flatten<
 
   if (operator) {
     const shouldFlatten = (x: BoxedExpression) =>
-      (isBoxedSymbol(x) && x.symbol === 'Nothing') ||
+      (isSymbol(x) && x.symbol === 'Nothing') ||
       x.operator === operator ||
       x.operator === 'Sequence';
 
@@ -36,11 +36,11 @@ export function flatten<
     const ys: BoxedExpression[] = [];
     for (const x of xs) {
       // Skip Nothing
-      if (isBoxedSymbol(x) && x.symbol === 'Nothing') continue;
+      if (isSymbol(x) && x.symbol === 'Nothing') continue;
 
       // If the operator matches, flatten the expression
       if (
-        isBoxedFunction(x) &&
+        isFunction(x) &&
         (x.operator === operator || x.operator === 'Sequence')
       )
         ys.push(...flatten(x.ops, operator, canonicalize));
@@ -53,7 +53,7 @@ export function flatten<
     xs.every(
       (x) =>
         !(
-          (isBoxedSymbol(x) && x.symbol === 'Nothing') ||
+          (isSymbol(x) && x.symbol === 'Nothing') ||
           x.operator === 'Sequence'
         )
     )
@@ -64,10 +64,10 @@ export function flatten<
   const ys: BoxedExpression[] = [];
   for (const x of xs) {
     // Skip Nothing
-    if (isBoxedSymbol(x) && x.symbol === 'Nothing') continue;
+    if (isSymbol(x) && x.symbol === 'Nothing') continue;
 
     // If the operator matches, flatten the expression
-    if (isBoxedFunction(x) && x.operator === 'Sequence')
+    if (isFunction(x) && x.operator === 'Sequence')
       ys.push(...flatten(x.ops, operator, canonicalize));
     else ys.push(x);
   }
@@ -84,14 +84,14 @@ export function flattenSequence(
   const ys: BoxedExpression[] = [];
   for (const x of xs) {
     if (!x.isValid) ys.push(x);
-    else if (isBoxedFunction(x) && x.operator === 'Delimiter') {
+    else if (isFunction(x) && x.operator === 'Delimiter') {
       if (x.op1.operator === 'Sequence') {
-        const seq = isBoxedFunction(x.op1) ? x.op1.ops : [];
+        const seq = isFunction(x.op1) ? x.op1.ops : [];
         // If this is an empty delimiter, i.e. `()`, preserve it as a tuple, don't flatten it.
         if (seq.length === 0) ys.push(x.engine.box(['Tuple']));
         else ys.push(...flattenSequence(seq));
       } else ys.push(x.op1);
-    } else if (isBoxedFunction(x) && x.operator === 'Sequence') {
+    } else if (isFunction(x) && x.operator === 'Sequence') {
       ys.push(...x.ops);
     } else ys.push(x);
   }

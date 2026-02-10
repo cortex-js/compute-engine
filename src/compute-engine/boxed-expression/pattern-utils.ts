@@ -7,7 +7,7 @@
  */
 
 import type { BoxedExpression } from '../global-types';
-import { isBoxedFunction, isBoxedSymbol } from './type-guards';
+import { isFunction, isSymbol } from './type-guards';
 
 /**
  * Check if an expression is a wildcard (universal, sequence, or optional sequence).
@@ -17,7 +17,7 @@ import { isBoxedFunction, isBoxedSymbol } from './type-guards';
  */
 export function isWildcard(expr: BoxedExpression): boolean {
   return (
-    (isBoxedSymbol(expr) && expr.symbol.startsWith('_')) ||
+    (isSymbol(expr) && expr.symbol.startsWith('_')) ||
     expr.operator === 'Wildcard' ||
     expr.operator === 'WildcardSequence' ||
     expr.operator === 'WildcardOptionalSequence'
@@ -39,9 +39,9 @@ export function isWildcard(expr: BoxedExpression): boolean {
  * @returns The wildcard string, or `null` if not a wildcard
  */
 export function wildcardName(expr: BoxedExpression): string | null {
-  if (isBoxedSymbol(expr) && expr.symbol.startsWith('_')) return expr.symbol;
+  if (isSymbol(expr) && expr.symbol.startsWith('_')) return expr.symbol;
 
-  if (isBoxedFunction(expr) && expr.nops === 1) {
+  if (isFunction(expr) && expr.nops === 1) {
     const arg = expr.op1;
     if (expr.operator === 'Wildcard') return `_${arg}`;
     if (expr.operator === 'WildcardSequence') return `__${arg}`;
@@ -79,14 +79,14 @@ export function wildcardType(
     return null;
   }
 
-  if (isBoxedSymbol(expr)) {
+  if (isSymbol(expr)) {
     const symbol = expr.symbol;
     if (!symbol.startsWith('_')) return null;
     if (!symbol.startsWith('__')) return 'Wildcard';
     return symbol.startsWith('___') ? 'OptionalSequence' : 'Sequence';
   }
 
-  if (isBoxedFunction(expr)) {
+  if (isFunction(expr)) {
     if (expr.operator === 'Wildcard') return 'Wildcard';
     if (expr.operator === 'WildcardSequence') return 'Sequence';
     if (expr.operator === 'WildcardOptionalSequence') return 'OptionalSequence';

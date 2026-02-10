@@ -1,4 +1,4 @@
-import { Expression } from '../../../math-json';
+import type { MathJsonExpression as Expression } from '../../../math-json';
 import {
   stringValue,
   operands,

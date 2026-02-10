@@ -9,8 +9,8 @@ import { isRelationalOperator } from '../latex-syntax/utils';
 import { flatten } from '../boxed-expression/flatten';
 import { eq } from '../boxed-expression/compare';
 import {
-  isBoxedNumber,
-  isBoxedFunction,
+  isNumber,
+  isFunction,
 } from '../boxed-expression/type-guards';
 
 //   // eq, lt, leq, gt, geq, neq, approx
@@ -70,7 +70,7 @@ export const RELOP_LIBRARY: SymbolDefinitions = {
     // only by a non-zero constant factor.
     eq: (a, b) => {
       if (a.operator !== b.operator) return undefined;
-      if (!isBoxedFunction(a) || !isBoxedFunction(b)) return undefined;
+      if (!isFunction(a) || !isFunction(b)) return undefined;
 
       const ce = a.engine;
 
@@ -81,8 +81,8 @@ export const RELOP_LIBRARY: SymbolDefinitions = {
       // Handle special cases where expressions are zero (identity equations)
       const s1 = expr1.simplify();
       const s2 = expr2.simplify();
-      const expr1Zero = s1.is(0) || (isBoxedNumber(s1) && s1.re === 0);
-      const expr2Zero = s2.is(0) || (isBoxedNumber(s2) && s2.re === 0);
+      const expr1Zero = s1.is(0) || (isNumber(s1) && s1.re === 0);
+      const expr2Zero = s2.is(0) || (isNumber(s2) && s2.re === 0);
 
       // If both are identities (0 = 0), they're equivalent
       if (expr1Zero && expr2Zero) return true;
@@ -183,7 +183,7 @@ export const RELOP_LIBRARY: SymbolDefinitions = {
     // Comparing two equalities...
     eq: (a, b) => {
       if (a.operator !== b.operator) return false;
-      if (!isBoxedFunction(a) || !isBoxedFunction(b)) return false;
+      if (!isFunction(a) || !isFunction(b)) return false;
       // Equality is commutative
       if (
         (a.op1.isEqual(b.op1) && a.op2.isEqual(b.op2)) ||
@@ -468,10 +468,10 @@ function approxEq(a: BoxedExpression, b: BoxedExpression): boolean | undefined {
   const aN = a.N();
   const bN = b.N();
 
-  if (!isBoxedNumber(aN) || !isBoxedNumber(bN)) return undefined;
+  if (!isNumber(aN) || !isNumber(bN)) return undefined;
 
   const diff = aN.sub(bN);
-  if (!isBoxedNumber(diff)) return undefined;
+  if (!isNumber(diff)) return undefined;
 
   const n = diff.numericValue;
   if (typeof n === 'number') return ce.chop(n) === 0;
@@ -508,7 +508,7 @@ function canonicalRelational(
   const newOps: BoxedExpression[] = [];
   // Separate any nested relational operators
   for (const op of ops) {
-    if (isRelationalOperator(op.operator) && isBoxedFunction(op)) {
+    if (isRelationalOperator(op.operator) && isFunction(op)) {
       nestedRelational.push(op);
       newOps.push(op.ops[op.ops.length - 1]);
     } else newOps.push(op);
@@ -526,7 +526,7 @@ function inequalityEq(
   b: BoxedExpression,
   oppositeOperator?: string
 ): boolean {
-  if (!isBoxedFunction(a) || !isBoxedFunction(b)) return false;
+  if (!isFunction(a) || !isFunction(b)) return false;
 
   if (a.operator === b.operator) {
     if (a.nops !== b.nops) return false;

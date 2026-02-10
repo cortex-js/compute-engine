@@ -1,4 +1,4 @@
-import { Expression } from '../../math-json/types';
+import { MathJsonExpression as Expression } from '../../math-json/types';
 import { countLeaves, operator, operands } from '../../math-json/utils';
 import { DelimiterScale } from './types';
 import { joinLatex } from './tokenizer';

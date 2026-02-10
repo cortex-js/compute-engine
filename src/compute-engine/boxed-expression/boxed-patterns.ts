@@ -57,7 +57,7 @@
 import type { BoxedExpression } from '../global-types';
 
 import { isWildcard, wildcardName, wildcardType } from './pattern-utils';
-import { isBoxedFunction } from './type-guards';
+import { isFunction } from './type-guards';
 
 // Re-export wildcard utilities from leaf module (no circular deps)
 export { isWildcard, wildcardName, wildcardType };
@@ -79,7 +79,7 @@ export { isWildcard, wildcardName, wildcardType };
  * @throws Error if the pattern contains invalid wildcard combinations
  */
 export function validatePattern(pattern: BoxedExpression): void {
-  if (!isBoxedFunction(pattern)) return;
+  if (!isFunction(pattern)) return;
 
   for (let i = 0; i < pattern.ops.length - 1; i++) {
     const current = pattern.ops[i];
