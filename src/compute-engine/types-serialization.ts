@@ -1,4 +1,7 @@
-import type { BoxedExpression, SemiBoxedExpression } from './types-expression';
+import type {
+  BoxedExpression,
+  SemiBoxedExpression,
+} from './types-expression';
 
 /** @category Definitions */
 export type Hold = 'none' | 'all' | 'first' | 'rest' | 'last' | 'most';
@@ -101,8 +104,8 @@ export type JsonSerializationOptions = {
  * @category Pattern Matching
  *
  */
-export type PatternMatchOptions = {
-  substitution?: BoxedSubstitution;
+export type PatternMatchOptions<T = BoxedExpression> = {
+  substitution?: BoxedSubstitution<T>;
   recursive?: boolean;
   useVariations?: boolean;
   /**
@@ -275,4 +278,4 @@ export type Substitution<T = SemiBoxedExpression> = {
  * @category Pattern Matching
  *
  */
-export type BoxedSubstitution = Substitution<BoxedExpression>;
+export type BoxedSubstitution<T = BoxedExpression> = Substitution<T>;

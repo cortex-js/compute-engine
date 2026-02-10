@@ -38,7 +38,7 @@ const GLSL_OPERATORS: CompiledOperators = {
  * GLSL has built-in functions for common mathematical operations.
  * Note: No 'Math.' prefix like JavaScript
  */
-const GLSL_FUNCTIONS: CompiledFunctions = {
+const GLSL_FUNCTIONS: CompiledFunctions<BoxedExpression> = {
   // Basic arithmetic (for when they're called as functions, e.g., with vectors)
   Add: (args, compile) => {
     if (args.length === 0) return '0.0';
@@ -222,16 +222,18 @@ const GLSL_FUNCTIONS: CompiledFunctions = {
 /**
  * GLSL language target implementation
  */
-export class GLSLTarget implements LanguageTarget {
+export class GLSLTarget implements LanguageTarget<BoxedExpression> {
   getOperators(): CompiledOperators {
     return GLSL_OPERATORS;
   }
 
-  getFunctions(): CompiledFunctions {
+  getFunctions(): CompiledFunctions<BoxedExpression> {
     return GLSL_FUNCTIONS;
   }
 
-  createTarget(options: Partial<CompileTarget> = {}): CompileTarget {
+  createTarget(
+    options: Partial<CompileTarget<BoxedExpression>> = {}
+  ): CompileTarget<BoxedExpression> {
     return {
       language: 'glsl',
       operators: (op) => GLSL_OPERATORS[op],
@@ -271,7 +273,7 @@ export class GLSLTarget implements LanguageTarget {
    */
   compile(
     expr: BoxedExpression,
-    options: CompilationOptions = {}
+    options: CompilationOptions<BoxedExpression> = {}
   ): CompilationResult {
     const { functions, vars } = options;
 
@@ -315,7 +317,7 @@ export class GLSLTarget implements LanguageTarget {
    */
   compileToSource(
     expr: BoxedExpression,
-    _options: CompilationOptions = {}
+    _options: CompilationOptions<BoxedExpression> = {}
   ): string {
     // Dynamic import to avoid circular dependency
     const { BaseCompiler } = require('./base-compiler');

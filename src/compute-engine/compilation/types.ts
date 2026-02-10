@@ -1,5 +1,4 @@
 import type { MathJsonSymbol } from '../../math-json/types';
-import type { BoxedExpression } from '../types-expression';
 
 /**
  * Source code in the target language
@@ -9,12 +8,12 @@ export type TargetSource = string;
 /**
  * A compiled function that can be executed
  */
-export type CompiledFunction =
+export type CompiledFunction<Expr = unknown> =
   | string
   | ((
-      args: ReadonlyArray<BoxedExpression>,
-      compile: (expr: BoxedExpression) => TargetSource,
-      target: CompileTarget
+      args: ReadonlyArray<Expr>,
+      compile: (expr: Expr) => TargetSource,
+      target: CompileTarget<Expr>
     ) => TargetSource);
 
 /**
@@ -28,19 +27,19 @@ export type CompiledOperators = Record<
 /**
  * Mapping of function names to their target language implementation
  */
-export type CompiledFunctions = {
-  [id: MathJsonSymbol]: CompiledFunction;
+export type CompiledFunctions<Expr = unknown> = {
+  [id: MathJsonSymbol]: CompiledFunction<Expr>;
 };
 
 /**
  * Target language compilation configuration
  */
-export interface CompileTarget {
+export interface CompileTarget<Expr = unknown> {
   /** Get operator representation for the target language */
   operators?: (op: MathJsonSymbol) => [op: string, prec: number] | undefined;
 
   /** Get function implementation for the target language */
-  functions?: (id: MathJsonSymbol) => CompiledFunction | undefined;
+  functions?: (id: MathJsonSymbol) => CompiledFunction<Expr> | undefined;
 
   /** Get variable representation for the target language */
   var: (id: MathJsonSymbol) => string | undefined;
@@ -67,27 +66,27 @@ export interface CompileTarget {
 /**
  * Base interface for language-specific compilation targets
  */
-export interface LanguageTarget {
+export interface LanguageTarget<Expr = unknown> {
   /** Get the default operators for this language */
   getOperators(): CompiledOperators;
 
   /** Get the default functions for this language */
-  getFunctions(): CompiledFunctions;
+  getFunctions(): CompiledFunctions<Expr>;
 
   /** Create a CompileTarget for this language */
-  createTarget(options?: Partial<CompileTarget>): CompileTarget;
+  createTarget(options?: Partial<CompileTarget<Expr>>): CompileTarget<Expr>;
 
   /** Compile an expression to this language */
   compile(
-    expr: BoxedExpression,
-    options?: CompilationOptions
+    expr: Expr,
+    options?: CompilationOptions<Expr>
   ): CompilationResult;
 }
 
 /**
  * Options for compilation
  */
-export interface CompilationOptions {
+export interface CompilationOptions<Expr = unknown> {
   /**
    * Target language for compilation.
    *
@@ -127,7 +126,7 @@ export interface CompilationOptions {
    * const code = expr.compile({ target: customTarget });
    * ```
    */
-  target?: CompileTarget;
+  target?: CompileTarget<Expr>;
 
   /**
    * Custom operator mappings. Can be:

@@ -24,7 +24,7 @@ export class BaseCompiler {
    */
   static compile(
     expr: BoxedExpression | undefined,
-    target: CompileTarget,
+    target: CompileTarget<BoxedExpression>,
     prec = 0
   ): TargetSource {
     if (expr === undefined) return '';
@@ -76,7 +76,7 @@ export class BaseCompiler {
     h: string,
     args: ReadonlyArray<BoxedExpression>,
     prec: number,
-    target: CompileTarget
+    target: CompileTarget<BoxedExpression>
   ): TargetSource {
     if (h === 'Error') throw new Error('Error');
 
@@ -210,7 +210,7 @@ export class BaseCompiler {
    */
   private static compileBlock(
     args: ReadonlyArray<BoxedExpression>,
-    target: CompileTarget
+    target: CompileTarget<BoxedExpression>
   ): TargetSource {
     // Get all the Declare statements
     const locals: string[] = [];
@@ -248,7 +248,7 @@ export class BaseCompiler {
   private static compileLoop(
     h: string,
     args: ReadonlyArray<BoxedExpression>,
-    target: CompileTarget
+    target: CompileTarget<BoxedExpression>
   ): string {
     if (args === null) throw new Error('Sum/Product: no arguments');
     if (!args[0]) throw new Error('Sum/Product: no body');

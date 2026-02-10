@@ -56,7 +56,7 @@ const JAVASCRIPT_OPERATORS: CompiledOperators = {
 /**
  * JavaScript function implementations
  */
-const JAVASCRIPT_FUNCTIONS: CompiledFunctions = {
+const JAVASCRIPT_FUNCTIONS: CompiledFunctions<BoxedExpression> = {
   Abs: 'Math.abs',
   Add: (args, compile) => {
     if (args.length === 1) return compile(args[0]);
@@ -376,16 +376,18 @@ export class ComputeEngineFunctionLiteral extends Function {
 /**
  * JavaScript language target implementation
  */
-export class JavaScriptTarget implements LanguageTarget {
+export class JavaScriptTarget implements LanguageTarget<BoxedExpression> {
   getOperators(): CompiledOperators {
     return JAVASCRIPT_OPERATORS;
   }
 
-  getFunctions(): CompiledFunctions {
+  getFunctions(): CompiledFunctions<BoxedExpression> {
     return JAVASCRIPT_FUNCTIONS;
   }
 
-  createTarget(options: Partial<CompileTarget> = {}): CompileTarget {
+  createTarget(
+    options: Partial<CompileTarget<BoxedExpression>> = {}
+  ): CompileTarget<BoxedExpression> {
     return {
       language: 'javascript',
       operators: (op) => JAVASCRIPT_OPERATORS[op],
@@ -415,7 +417,7 @@ export class JavaScriptTarget implements LanguageTarget {
 
   compile(
     expr: BoxedExpression,
-    options: CompilationOptions = {}
+    options: CompilationOptions<BoxedExpression> = {}
   ): CompilationResult {
     const { operators, functions, vars, imports = [], preamble } = options;
     const unknowns = expr.unknowns;
@@ -495,7 +497,7 @@ export class JavaScriptTarget implements LanguageTarget {
  */
 function compileToTarget(
   expr: BoxedExpression,
-  target: CompileTarget
+  target: CompileTarget<BoxedExpression>
 ): CompilationResult {
   if (expr.operator === 'Function' && isBoxedFunction(expr)) {
     const args = expr.ops;
@@ -511,7 +513,7 @@ function compileToTarget(
       target: 'javascript',
       success: true,
       code: `(${params.join(', ')}) => ${body}`,
-      run: fn as unknown as (...args: any[]) => any,
+      run: fn as unknown as (...args: number[]) => number,
     };
   }
 
@@ -523,7 +525,7 @@ function compileToTarget(
         target: 'javascript',
         success: true,
         code: `(a, b) => a ${op[0]} b`,
-        run: fn as unknown as (...args: any[]) => any,
+        run: fn as unknown as (...args: number[]) => number,
       };
     }
   }
@@ -534,14 +536,18 @@ function compileToTarget(
     target: 'javascript',
     success: true,
     code: js,
-    run: fn as unknown as (...args: any[]) => any,
+    run: fn as unknown as (...args: number[]) => number,
   };
 }
 
 /**
  * Compile integration function
  */
-function compileIntegrate(args, _, target: CompileTarget): string {
+function compileIntegrate(
+  args,
+  _,
+  target: CompileTarget<BoxedExpression>
+): string {
   const { index, lower, upper } = normalizeIndexingSet(args[1]);
   const f = BaseCompiler.compile(args[0], {
     ...target,

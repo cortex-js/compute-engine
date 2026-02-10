@@ -311,9 +311,9 @@ export class ComputeEngine implements IComputeEngine {
   /** @internal */
   private __cache: {
     [key: string]: {
-      value: any;
-      build: () => any;
-      purge?: (v: unknown) => void;
+      value: unknown;
+      build: () => unknown;
+      purge?: (v: unknown) => unknown;
     };
   } = {};
 
@@ -329,7 +329,8 @@ export class ComputeEngine implements IComputeEngine {
   private _simplificationRulesCachedLength = -1;
 
   /** @internal Registry of compilation targets */
-  private _compilationTargets: Map<string, LanguageTarget> = new Map();
+  private _compilationTargets: Map<string, LanguageTarget<BoxedExpression>> =
+    new Map();
 
   /** @internal Fu trigonometric simplification algorithm */
   _fuAlgorithm = _fu;
@@ -780,7 +781,10 @@ export class ComputeEngine implements IComputeEngine {
    * const code = compile(expr, { to: 'python' });
    * ```
    */
-  registerCompilationTarget(name: string, target: LanguageTarget): void {
+  registerCompilationTarget(
+    name: string,
+    target: LanguageTarget<BoxedExpression>
+  ): void {
     this._compilationTargets.set(name, target);
   }
 
@@ -790,7 +794,9 @@ export class ComputeEngine implements IComputeEngine {
    * @param name - The name of the target (e.g., 'javascript', 'glsl', 'python')
    * @returns The LanguageTarget implementation, or undefined if not found
    */
-  getCompilationTarget(name: string): LanguageTarget | undefined {
+  getCompilationTarget(
+    name: string
+  ): LanguageTarget<BoxedExpression> | undefined {
     return this._compilationTargets.get(name);
   }
 
@@ -1289,7 +1295,7 @@ export class ComputeEngine implements IComputeEngine {
     this._simplificationRules = rules;
     // Invalidate the cached boxed rule set
     this._simplificationRulesCachedLength = -1;
-    delete (this as any).__cache['standard-simplification-rules'];
+    delete this.__cache['standard-simplification-rules'];
   }
 
   /**
@@ -1649,7 +1655,11 @@ export class ComputeEngine implements IComputeEngine {
   ): T {
     if (this.__cache[cacheName] === undefined) {
       try {
-        this.__cache[cacheName] = { build, purge, value: build() };
+        this.__cache[cacheName] = {
+          build: build as () => unknown,
+          purge: purge as ((v: unknown) => unknown) | undefined,
+          value: build(),
+        };
       } catch (e) {
         console.error(
           `Fatal error building cache "${cacheName}":\n\t ${e.toString()}`
@@ -1657,7 +1667,7 @@ export class ComputeEngine implements IComputeEngine {
       }
     }
 
-    return this.__cache[cacheName]?.value;
+    return this.__cache[cacheName]?.value as T;
   }
 
   /** Return a boxed expression from a number, string or semiboxed expression.
@@ -1904,7 +1914,7 @@ export class ComputeEngine implements IComputeEngine {
         this._simplificationRules.length !==
           this._simplificationRulesCachedLength
       ) {
-        delete (this as any).__cache['standard-simplification-rules'];
+        delete this.__cache['standard-simplification-rules'];
       }
 
       const result = this._cache('standard-simplification-rules', () =>

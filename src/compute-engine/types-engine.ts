@@ -200,14 +200,17 @@ export interface IComputeEngine extends IBigNum {
   /** @internal Compile a boxed expression. */
   _compile(
     expr: BoxedExpression,
-    options?: Record<string, any>
+    options?: Record<string, unknown>
   ): CompilationResult;
 
   /** Register a custom compilation target. */
-  registerCompilationTarget(name: string, target: LanguageTarget): void;
+  registerCompilationTarget(
+    name: string,
+    target: LanguageTarget<BoxedExpression>
+  ): void;
 
   /** Get a registered compilation target by name. */
-  getCompilationTarget(name: string): LanguageTarget | undefined;
+  getCompilationTarget(name: string): LanguageTarget<BoxedExpression> | undefined;
 
   /** Return the names of all registered compilation targets. */
   listCompilationTargets(): string[];
@@ -218,7 +221,7 @@ export interface IComputeEngine extends IBigNum {
   /** @internal Fu trigonometric simplification algorithm */
   _fuAlgorithm(
     expr: BoxedExpression,
-    options?: Record<string, any>
+    options?: Record<string, unknown>
   ): RuleStep | undefined;
 
   number(

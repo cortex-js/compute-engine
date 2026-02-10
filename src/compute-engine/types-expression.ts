@@ -937,7 +937,7 @@ export interface BoxedExpression {
    *
    */
   subs(
-    sub: Substitution,
+    sub: Substitution<SemiBoxedExpression>,
     options?: { canonical?: CanonicalOptions }
   ): BoxedExpression;
 
@@ -1052,8 +1052,8 @@ export interface BoxedExpression {
    */
   match(
     pattern: BoxedExpression,
-    options?: PatternMatchOptions
-  ): BoxedSubstitution | null;
+    options?: PatternMatchOptions<BoxedExpression>
+  ): BoxedSubstitution<BoxedExpression> | null;
 
   /**
    *

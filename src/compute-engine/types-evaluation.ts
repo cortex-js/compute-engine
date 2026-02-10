@@ -102,12 +102,12 @@ export type EvaluateOptions = {
  * @category Rules */
 export type RuleReplaceFunction = (
   expr: BoxedExpression,
-  wildcards: BoxedSubstitution
+  wildcards: BoxedSubstitution<BoxedExpression>
 ) => BoxedExpression | undefined;
 
 /** @category Rules */
 export type RuleConditionFunction = (
-  wildcards: BoxedSubstitution,
+  wildcards: BoxedSubstitution<BoxedExpression>,
   ce: ComputeEngine
 ) => boolean;
 

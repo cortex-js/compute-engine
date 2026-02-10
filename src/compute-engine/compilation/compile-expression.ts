@@ -1,6 +1,10 @@
 import type { MathJsonSymbol } from '../../math-json/types';
 import type { BoxedExpression, JSSource } from '../global-types';
-import type { CompilationResult } from './types';
+import type {
+  CompileTarget,
+  CompilationResult,
+  CompilationOptions,
+} from './types';
 import { BaseCompiler } from './base-compiler';
 import { applicableN1 } from '../function-utils';
 
@@ -18,13 +22,16 @@ export function compile(
   expr: BoxedExpression,
   options?: {
     to?: string;
-    target?: any; // CompileTarget, but any to avoid circular deps
+    target?: CompileTarget<BoxedExpression>;
     operators?:
       | Partial<Record<MathJsonSymbol, [op: string, prec: number]>>
       | ((op: MathJsonSymbol) => [op: string, prec: number] | undefined);
-    functions?: Record<MathJsonSymbol, JSSource | ((...any: any[]) => any)>;
+    functions?: Record<
+      MathJsonSymbol,
+      JSSource | ((...args: unknown[]) => unknown)
+    >;
     vars?: Record<MathJsonSymbol, JSSource>;
-    imports?: ((...any: any[]) => any)[];
+    imports?: ((...args: unknown[]) => unknown)[];
     preamble?: string;
     fallback?: boolean;
   }
@@ -59,7 +66,7 @@ export function compile(
       vars: options?.vars,
       imports: options?.imports,
       preamble: options?.preamble,
-    });
+    } as CompilationOptions<BoxedExpression>);
   } catch (e) {
     // @fixme: the fallback needs to handle multiple arguments
     if (options?.fallback ?? true) {

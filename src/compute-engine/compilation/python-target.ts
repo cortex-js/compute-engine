@@ -39,7 +39,7 @@ const PYTHON_OPERATORS: CompiledOperators = {
  * Maps mathematical functions to their NumPy equivalents.
  * Most functions are available in the numpy module with np. prefix.
  */
-const PYTHON_FUNCTIONS: CompiledFunctions = {
+const PYTHON_FUNCTIONS: CompiledFunctions<BoxedExpression> = {
   // Basic arithmetic (for when they're called as functions)
   Add: (args, compile) => {
     if (args.length === 0) return '0';
@@ -266,7 +266,7 @@ const PYTHON_FUNCTIONS: CompiledFunctions = {
  * The generated code is compatible with NumPy arrays and supports
  * vectorized operations.
  */
-export class PythonTarget implements LanguageTarget {
+export class PythonTarget implements LanguageTarget<BoxedExpression> {
   /** Whether to include 'import numpy as np' in generated code */
   private includeImports: boolean;
 
@@ -282,11 +282,13 @@ export class PythonTarget implements LanguageTarget {
     return PYTHON_OPERATORS;
   }
 
-  getFunctions(): CompiledFunctions {
+  getFunctions(): CompiledFunctions<BoxedExpression> {
     return PYTHON_FUNCTIONS;
   }
 
-  createTarget(options: Partial<CompileTarget> = {}): CompileTarget {
+  createTarget(
+    options: Partial<CompileTarget<BoxedExpression>> = {}
+  ): CompileTarget<BoxedExpression> {
     return {
       language: 'python',
       operators: (op) => PYTHON_OPERATORS[op],
@@ -331,7 +333,7 @@ export class PythonTarget implements LanguageTarget {
    */
   compile(
     expr: BoxedExpression,
-    options: CompilationOptions = {}
+    options: CompilationOptions<BoxedExpression> = {}
   ): CompilationResult {
     const code = this.compileToSource(expr, options);
     return { target: 'python', success: true, code };
@@ -344,7 +346,7 @@ export class PythonTarget implements LanguageTarget {
    */
   compileToSource(
     expr: BoxedExpression,
-    _options: CompilationOptions = {}
+    _options: CompilationOptions<BoxedExpression> = {}
   ): string {
     // Dynamic import to avoid circular dependency
     const { BaseCompiler } = require('./base-compiler');

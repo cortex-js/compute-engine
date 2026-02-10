@@ -48,7 +48,7 @@ const INTERVAL_JAVASCRIPT_OPERATORS: CompiledOperators = {
 /**
  * Interval arithmetic function implementations.
  */
-const INTERVAL_JAVASCRIPT_FUNCTIONS: CompiledFunctions = {
+const INTERVAL_JAVASCRIPT_FUNCTIONS: CompiledFunctions<BoxedExpression> = {
   // Basic arithmetic - using function call syntax
   Add: (args, compile) => {
     if (args.length === 0) return '_IA.point(0)';
@@ -288,16 +288,20 @@ function processInput(input: any): any {
 /**
  * Interval arithmetic JavaScript target implementation.
  */
-export class IntervalJavaScriptTarget implements LanguageTarget {
+export class IntervalJavaScriptTarget
+  implements LanguageTarget<BoxedExpression>
+{
   getOperators(): CompiledOperators {
     return INTERVAL_JAVASCRIPT_OPERATORS;
   }
 
-  getFunctions(): CompiledFunctions {
+  getFunctions(): CompiledFunctions<BoxedExpression> {
     return INTERVAL_JAVASCRIPT_FUNCTIONS;
   }
 
-  createTarget(options: Partial<CompileTarget> = {}): CompileTarget {
+  createTarget(
+    options: Partial<CompileTarget<BoxedExpression>> = {}
+  ): CompileTarget<BoxedExpression> {
     return {
       language: 'interval-javascript',
       // Don't use operators - all arithmetic goes through functions
@@ -329,7 +333,7 @@ export class IntervalJavaScriptTarget implements LanguageTarget {
 
   compile(
     expr: BoxedExpression,
-    options: CompilationOptions = {}
+    options: CompilationOptions<BoxedExpression> = {}
   ): CompilationResult {
     const { functions, vars, preamble } = options;
     const unknowns = expr.unknowns;
@@ -383,7 +387,7 @@ export class IntervalJavaScriptTarget implements LanguageTarget {
  */
 function compileToIntervalTarget(
   expr: BoxedExpression,
-  target: CompileTarget
+  target: CompileTarget<BoxedExpression>
 ): CompilationResult {
   const js = BaseCompiler.compile(expr, target);
   const fn = new ComputeEngineIntervalFunction(js, target.preamble);
@@ -391,6 +395,6 @@ function compileToIntervalTarget(
     target: 'interval-js',
     success: true,
     code: js,
-    run: fn as unknown as (...args: any[]) => any,
+    run: fn as unknown as (...args: number[]) => number,
   };
 }

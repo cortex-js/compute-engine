@@ -1043,7 +1043,7 @@ const INTERVAL_GLSL_OPERATORS: CompiledOperators = {
 /**
  * GLSL interval function implementations
  */
-const INTERVAL_GLSL_FUNCTIONS: CompiledFunctions = {
+const INTERVAL_GLSL_FUNCTIONS: CompiledFunctions<BoxedExpression> = {
   Add: (args, compile) => {
     if (args.length === 0) return 'ia_point(0.0)';
     if (args.length === 1) return compile(args[0]);
@@ -1204,12 +1204,12 @@ const INTERVAL_GLSL_FUNCTIONS: CompiledFunctions = {
 /**
  * GLSL interval arithmetic target implementation.
  */
-export class IntervalGLSLTarget implements LanguageTarget {
+export class IntervalGLSLTarget implements LanguageTarget<BoxedExpression> {
   getOperators(): CompiledOperators {
     return INTERVAL_GLSL_OPERATORS;
   }
 
-  getFunctions(): CompiledFunctions {
+  getFunctions(): CompiledFunctions<BoxedExpression> {
     return INTERVAL_GLSL_FUNCTIONS;
   }
 
@@ -1222,7 +1222,9 @@ export class IntervalGLSLTarget implements LanguageTarget {
     return GLSL_INTERVAL_LIBRARY;
   }
 
-  createTarget(options: Partial<CompileTarget> = {}): CompileTarget {
+  createTarget(
+    options: Partial<CompileTarget<BoxedExpression>> = {}
+  ): CompileTarget<BoxedExpression> {
     return {
       language: 'interval-glsl',
       // Don't use operators - all arithmetic goes through functions
@@ -1259,7 +1261,7 @@ export class IntervalGLSLTarget implements LanguageTarget {
 
   compile(
     expr: BoxedExpression,
-    options: CompilationOptions = {}
+    options: CompilationOptions<BoxedExpression> = {}
   ): CompilationResult {
     const { functions, vars } = options;
 
@@ -1296,7 +1298,7 @@ export class IntervalGLSLTarget implements LanguageTarget {
    */
   compileToSource(
     expr: BoxedExpression,
-    _options: CompilationOptions = {}
+    _options: CompilationOptions<BoxedExpression> = {}
   ): string {
     const target = this.createTarget();
     return BaseCompiler.compile(expr, target);
