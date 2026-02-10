@@ -1,4 +1,8 @@
-# Simplification status for issue #178
+# Simplification Snapshot (Issue #178)
+
+> This file tracks issue-specific simplification snapshots and is not the
+> canonical API guide. For current API usage and workflow helper options, see
+> [`docs/README.md`](./README.md) and [`README.md`](../README.md).
 
 Source: cortex-js/compute-engine#178 ("x+x does not simplify to 2x")
 

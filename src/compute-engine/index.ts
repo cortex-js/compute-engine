@@ -170,10 +170,12 @@ import {
   parseAndEvaluate,
   parseAndNumeric,
   parseAndSimplify,
-  type ParseEvaluateOptions,
-  type ParseNumericOptions,
-  type ParseSimplifyOptions,
 } from './engine-workflow-entrypoints';
+import type {
+  WorkflowSimplifyOptions,
+  WorkflowEvaluateOptions,
+  WorkflowNumericOptions,
+} from './types-engine';
 
 export * from './global-types';
 
@@ -1735,14 +1737,14 @@ export class ComputeEngine implements IComputeEngine {
    * If both `simplifyMode` and `simplify.strategy` are provided,
    * `simplify.strategy` wins.
    */
-  parseSimplify(latex: null, options?: ParseSimplifyOptions): null;
+  parseSimplify(latex: null, options?: WorkflowSimplifyOptions): null;
   parseSimplify(
     latex: LatexString,
-    options?: ParseSimplifyOptions
+    options?: WorkflowSimplifyOptions
   ): BoxedExpression;
   parseSimplify(
     latex: LatexString | null,
-    options?: ParseSimplifyOptions
+    options?: WorkflowSimplifyOptions
   ): BoxedExpression | null {
     return parseAndSimplify(this, latex, options);
   }
@@ -1759,14 +1761,14 @@ export class ComputeEngine implements IComputeEngine {
    * If both `evaluateMode` and `evaluate.numericApproximation` are provided,
    * `evaluate.numericApproximation` wins.
    */
-  parseEvaluate(latex: null, options?: ParseEvaluateOptions): null;
+  parseEvaluate(latex: null, options?: WorkflowEvaluateOptions): null;
   parseEvaluate(
     latex: LatexString,
-    options?: ParseEvaluateOptions
+    options?: WorkflowEvaluateOptions
   ): BoxedExpression;
   parseEvaluate(
     latex: LatexString | null,
-    options?: ParseEvaluateOptions
+    options?: WorkflowEvaluateOptions
   ): BoxedExpression | null {
     return parseAndEvaluate(this, latex, options);
   }
@@ -1779,14 +1781,14 @@ export class ComputeEngine implements IComputeEngine {
    * Supports the same parse-mode options as `parseSimplify()` and
    * `parseEvaluate()`.
    */
-  parseNumeric(latex: null, options?: ParseNumericOptions): null;
+  parseNumeric(latex: null, options?: WorkflowNumericOptions): null;
   parseNumeric(
     latex: LatexString,
-    options?: ParseNumericOptions
+    options?: WorkflowNumericOptions
   ): BoxedExpression;
   parseNumeric(
     latex: LatexString | null,
-    options?: ParseNumericOptions
+    options?: WorkflowNumericOptions
   ): BoxedExpression | null {
     return parseAndNumeric(this, latex, options);
   }

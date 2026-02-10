@@ -67,11 +67,5 @@ export function getLatexDictionaryForDomain(
       ? STANDARD_LIBRARIES
       : STANDARD_LIBRARIES.filter((entry) => entry.name === domain);
 
-  const result: LatexDictionaryEntry[] = [];
-  for (const library of libraries) {
-    if (library.latexDictionary)
-      result.push(...(library.latexDictionary as LatexDictionaryEntry[]));
-  }
-
-  return result;
+  return collectLibraryLatexEntries(libraries);
 }

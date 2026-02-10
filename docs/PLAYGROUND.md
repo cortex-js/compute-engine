@@ -1,5 +1,9 @@
 # Playground Test Results
 
+> This file is a snapshot report for `test/playground.ts`, not a complete API
+> reference. For current user-facing API usage, see [`docs/README.md`](./README.md)
+> and the repository [`README.md`](../README.md).
+
 This document summarizes the status of various test snippets from
 `test/playground.ts`.
 
@@ -115,7 +119,8 @@ This document summarizes the status of various test snippets from
 **Note:** `.replace({match: 'a', replace: 2})` on `a*x + b` returns `2` instead
 of `2*x + b`. The bug is in `parseRulePart` (rules.ts:350) which auto-converts
 all single-character symbols to wildcards. So `'a'` becomes `'_a'`, matching ANY
-expression rather than the literal symbol `a`. See TODO.md #23.
+expression rather than the literal symbol `a`. This behavior is tracked in the
+internal backlog.
 
 ### Expected Behavior (Not Bugs)
 
@@ -154,8 +159,8 @@ expression rather than the literal symbol `a`. See TODO.md #23.
 
 **Note:** `isEqual` is for mathematical equality (vs `isSame` for structural
 equality). For equations, `isEqual` should check if `(LHS1-RHS1)/(LHS2-RHS2)`
-simplifies to a non-zero constant, indicating the same solution set. See TODO.md
-#22.
+simplifies to a non-zero constant, indicating the same solution set. This
+behavior is tracked in the internal backlog.
 
 ---
 

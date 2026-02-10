@@ -11,37 +11,95 @@ This document captures the implemented architecture after the recent modularizat
 
 ## Layering Model
 
-1. Kernel type layer
+```
+┌─────────────────────────────────────────────────┐
+│  4. Composition root                            │
+│     index.ts (ComputeEngine)                    │
+│     Composes services, exposes public API        │
+├─────────────────────────────────────────────────┤
+│  3. Runtime services                            │
+│     engine-*.ts                                 │
+│     One bounded concern per file                │
+├─────────────────────────────────────────────────┤
+│  2. Specialized type wrappers                   │
+│     types-*.ts, global-types.ts                 │
+│     Bind kernel generics to concrete types      │
+├─────────────────────────────────────────────────┤
+│  1. Kernel type layer                           │
+│     types-kernel-*.ts                           │
+│     Generic type contracts (no engine imports)  │
+└─────────────────────────────────────────────────┘
+```
+
+### 1. Kernel type layer
 - Files: `types-kernel-*.ts`
 - Responsibility: generic type contracts for evaluation/serialization behavior without engine-specific concrete types.
 - Rule: no dependency on `ComputeEngine` implementation modules.
 
-2. Specialized type wrappers
+### 2. Specialized type wrappers
 - Files: `types-*.ts`, `global-types.ts`
 - Responsibility: bind kernel generics to concrete compute-engine types (`BoxedExpression`, `IComputeEngine`, etc.).
 - Rule: avoid importing runtime implementation modules.
 
-3. Runtime services
+### 3. Runtime services
 - Files: `engine-*.ts`
 - Responsibility: focused implementation concerns (parse entrypoints, startup/bootstrap, configuration lifecycle, numeric config, scope/assumptions/sequences, workflow helpers, validation helpers, extension contracts).
 - Rule: services should not become secondary monoliths; each service owns one bounded concern.
 
-4. Composition root
+### 4. Composition root
 - File: `index.ts` (`ComputeEngine`)
 - Responsibility: compose services, expose public API methods, and own lifecycle orchestration.
 - Rule: business logic should prefer service modules; `ComputeEngine` should remain an API shell and integration point.
 
-## Service Boundaries (Implemented)
+## Service Inventory
 
-- Startup/bootstrap: `engine-startup-coordinator.ts`, `engine-library-bootstrap.ts`
-- Parse defaults/policy: `engine-parse-entrypoint.ts`
-- Workflow API helpers: `engine-workflow-entrypoints.ts`
-- Validation/error expression entrypoints: `engine-validation-entrypoints.ts`
-- Numeric policy/state: `engine-numeric-configuration.ts`
-- Runtime limits/verification state: `engine-runtime-state.ts`
-- Configuration lifecycle/reset fan-out: `engine-configuration-lifecycle.ts`
-- Compilation target registry: `engine-compilation-targets.ts`
-- Extension contracts: `engine-extension-contracts.ts`
+### Startup & Initialization
+| File | Responsibility |
+|------|---------------|
+| `engine-startup-coordinator.ts` | Orchestrates initialization sequence: common numbers, library bootstrap, common symbols |
+| `engine-library-bootstrap.ts` | Resolves library entries, topological sort, loads definitions, collects LaTeX dictionaries |
+| `engine-common-symbols.ts` | Initializes well-known symbol bindings (True, False, Pi, E, Nothing) |
+
+### Parsing & Workflows
+| File | Responsibility |
+|------|---------------|
+| `engine-parse-entrypoint.ts` | Engine-specific parse defaults, symbol type resolution, boxing of parse results |
+| `engine-workflow-entrypoints.ts` | High-level `parseSimplify/parseEvaluate/parseNumeric` combining parse + operation |
+
+### Validation & Errors
+| File | Responsibility |
+|------|---------------|
+| `engine-validation-entrypoints.ts` | Factory functions for error and type-mismatch expressions |
+| `engine-extension-contracts.ts` | Runtime contract validation for compilation targets, libraries, and compile options |
+
+### Engine State
+| File | Responsibility |
+|------|---------------|
+| `engine-numeric-configuration.ts` | Precision, tolerance, angular unit, and Decimal.js configuration |
+| `engine-runtime-state.ts` | Execution limits (time, iteration, recursion) and verification state |
+| `engine-configuration-lifecycle.ts` | Configuration change propagation and reset fan-out |
+| `engine-cache.ts` | Expression and rule-set caching with generation-based invalidation |
+| `engine-latex-dictionary-state.ts` | LaTeX dictionary indexing and rebuild |
+
+### Scoping & Declarations
+| File | Responsibility |
+|------|---------------|
+| `engine-scope.ts` | Lexical scope push/pop, eval context management, symbol lookup |
+| `engine-declarations.ts` | Symbol and operator declaration, type declaration, assignment |
+| `engine-assumptions.ts` | Assumption management, `ask()`, `verify()`, `forget()` |
+| `engine-sequences.ts` | Sequence declaration, OEIS lookup, recurrence evaluation |
+
+### Expression Construction
+| File | Responsibility |
+|------|---------------|
+| `engine-expression-entrypoints.ts` | Symbol and number expression creation with definition binding |
+| `engine-simplification-rules.ts` | Built-in simplification rule initialization |
+
+### Compilation
+| File | Responsibility |
+|------|---------------|
+| `engine-compilation-targets.ts` | Registry for named compilation targets (JavaScript, GLSL, etc.) |
+| `engine-type-resolver.ts` | Type resolution callback for parser integration |
 
 ## Public Workflow API Policy
 
@@ -55,10 +113,13 @@ This document captures the implemented architecture after the recent modularizat
   - Parse presets: `parseMode = strict | permissive`
 
 Precedence rule across workflow helpers:
-- Explicit low-level options win over presets.
+- Explicit low-level options always win over presets.
   - `parse.strict` overrides `parseMode`
   - `evaluate.numericApproximation` overrides `evaluateMode`
   - `simplify.strategy` overrides `simplifyMode`
+- This is implemented via object spread: the preset sets a default, then `...options.parse` overwrites it.
+
+Note: `simplifyMode: 'trigonometric'` maps to the internal `strategy: 'fu'` (the Fu algorithm for trigonometric simplification, named after Fu, Zhong, and Zeng).
 
 ## Extension Contracts (Runtime Guards)
 
@@ -92,12 +153,14 @@ Rules:
 
 ## Guardrails
 
-- Circular dependency budget: `0` (checked in `typecheck` + `check:deps` workflows).
+- **Circular dependency budget: `0`** — no cycles of any kind (runtime or type-only). Checked via `npx madge --circular --extensions ts src/compute-engine`.
+- ESLint `import/no-restricted-paths` enforces layered dependencies (35 zone rules in `.eslintrc.cjs`). Run with `npm run check:deps`.
 - Public type surfaces must not include explicit `any`.
 - Contract tests exist for extension seams (`test/compute-engine/extension-contracts.test.ts`).
 
 ## Immediate Next Work
 
-1. Keep shrinking `ComputeEngine` orchestration by extracting remaining utility glue.
+1. Add tests for library circular dependency detection and compilation target unregistration/re-registration.
 2. Expand extension contract tests to additional compile-target families and compile-edge payloads.
-3. Keep documentation synchronized between kernel contracts and specialized wrappers.
+3. Consider skipping contract validation for built-in compilation targets to reduce startup cost.
+4. Keep documentation synchronized between kernel contracts and specialized wrappers.

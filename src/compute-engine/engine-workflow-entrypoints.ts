@@ -1,6 +1,15 @@
 import type { BoxedExpression } from './global-types';
 import type { LatexString } from './latex-syntax/types';
 import type { ParseEntrypointOptions } from './engine-parse-entrypoint';
+import type {
+  WorkflowParseMode,
+  WorkflowEvaluateMode,
+  WorkflowSimplifyMode,
+  WorkflowParseOptions,
+  WorkflowSimplifyOptions,
+  WorkflowEvaluateOptions,
+  WorkflowNumericOptions,
+} from './types-engine';
 
 type WorkflowHost = {
   parse(
@@ -9,34 +18,13 @@ type WorkflowHost = {
   ): BoxedExpression | null;
 };
 
-export type ParseMode = 'strict' | 'permissive';
-export type EvaluateMode = 'exact' | 'numeric';
-export type SimplifyMode = 'default' | 'trigonometric';
-
-type WorkflowParseOptions = {
-  parseMode?: ParseMode;
-  parse?: ParseEntrypointOptions;
-};
-
-export type ParseSimplifyOptions = {
-  parseMode?: ParseMode;
-  simplifyMode?: SimplifyMode;
-  parse?: ParseEntrypointOptions;
-  simplify?: Parameters<BoxedExpression['simplify']>[0];
-};
-
-export type ParseEvaluateOptions = {
-  parseMode?: ParseMode;
-  evaluateMode?: EvaluateMode;
-  parse?: ParseEntrypointOptions;
-  evaluate?: Parameters<BoxedExpression['evaluate']>[0];
-};
-
-export type ParseNumericOptions = {
-  parseMode?: ParseMode;
-  parse?: ParseEntrypointOptions;
-};
-
+/**
+ * Translate workflow parse-mode preset into low-level parse options.
+ *
+ * **Precedence rule:** explicit `parse.strict` overrides `parseMode`.
+ * For example `{ parseMode: 'permissive', parse: { strict: true } }` results
+ * in `{ strict: true }` because object-spread puts `parse.*` last.
+ */
 function getParseOptions(
   options?: WorkflowParseOptions
 ): ParseEntrypointOptions | undefined {
@@ -46,8 +34,14 @@ function getParseOptions(
   return { strict, ...options.parse };
 }
 
+/**
+ * Translate workflow evaluate-mode preset into low-level evaluate options.
+ *
+ * **Precedence rule:** explicit `evaluate.numericApproximation` overrides
+ * `evaluateMode`.
+ */
 function getEvaluateOptions(
-  options?: ParseEvaluateOptions
+  options?: WorkflowEvaluateOptions
 ): Parameters<BoxedExpression['evaluate']>[0] | undefined {
   if (options?.evaluateMode === undefined) return options?.evaluate;
 
@@ -55,8 +49,17 @@ function getEvaluateOptions(
   return { numericApproximation, ...options.evaluate };
 }
 
+/**
+ * Translate workflow simplify-mode preset into low-level simplify options.
+ *
+ * **Precedence rule:** explicit `simplify.strategy` overrides `simplifyMode`.
+ *
+ * The `'trigonometric'` mode maps to the `'fu'` strategy, which is the
+ * Fu algorithm for trigonometric simplification (named after the paper by
+ * Fu, Zhong, and Zeng).
+ */
 function getSimplifyOptions(
-  options?: ParseSimplifyOptions
+  options?: WorkflowSimplifyOptions
 ): Parameters<BoxedExpression['simplify']>[0] | undefined {
   if (options?.simplifyMode === undefined) return options?.simplify;
 
@@ -67,7 +70,7 @@ function getSimplifyOptions(
 export function parseAndSimplify(
   engine: WorkflowHost,
   latex: LatexString | null,
-  options?: ParseSimplifyOptions
+  options?: WorkflowSimplifyOptions
 ): BoxedExpression | null {
   const parsed = engine.parse(latex, getParseOptions(options));
   if (parsed === null) return null;
@@ -77,7 +80,7 @@ export function parseAndSimplify(
 export function parseAndEvaluate(
   engine: WorkflowHost,
   latex: LatexString | null,
-  options?: ParseEvaluateOptions
+  options?: WorkflowEvaluateOptions
 ): BoxedExpression | null {
   const parsed = engine.parse(latex, getParseOptions(options));
   if (parsed === null) return null;
@@ -87,7 +90,7 @@ export function parseAndEvaluate(
 export function parseAndNumeric(
   engine: WorkflowHost,
   latex: LatexString | null,
-  options?: ParseNumericOptions
+  options?: WorkflowNumericOptions
 ): BoxedExpression | null {
   const parsed = engine.parse(latex, getParseOptions(options));
   if (parsed === null) return null;

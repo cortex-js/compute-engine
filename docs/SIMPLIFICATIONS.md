@@ -1,7 +1,14 @@
 # Simplification Issues Report
 
-This document catalogs simplification behaviors that need attention, organized
-by priority and category.
+> This document is a categorized simplification report and not a full API
+> reference. For current user-facing API documentation, see
+> [`docs/README.md`](./README.md) and [`README.md`](../README.md).
+
+Checked: 2026-02-01 Compute Engine version (package.json): 0.33.0
+
+This document catalogs historical and current simplification behaviors,
+including resolved items and remaining limitations, organized by priority and
+category.
 
 ## Summary
 
