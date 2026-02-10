@@ -60,11 +60,11 @@ This document captures the implemented architecture after the recent modularizat
 | `engine-library-bootstrap.ts` | Resolves library entries, topological sort, loads definitions, collects LaTeX dictionaries |
 | `engine-common-symbols.ts` | Initializes well-known symbol bindings (True, False, Pi, E, Nothing) |
 
-### Parsing & Workflows
+### Parsing & Free Functions
 | File | Responsibility |
 |------|---------------|
 | `engine-parse-entrypoint.ts` | Engine-specific parse defaults, symbol type resolution, boxing of parse results |
-| `engine-workflow-entrypoints.ts` | High-level `parseSimplify/parseEvaluate/parseNumeric` combining parse + operation |
+| `free-functions.ts` | Top-level free functions (`parse`, `simplify`, `evaluate`, `N`, `assign`) backed by a lazy global engine |
 
 ### Validation & Errors
 | File | Responsibility |
@@ -101,25 +101,18 @@ This document captures the implemented architecture after the recent modularizat
 | `engine-compilation-targets.ts` | Registry for named compilation targets (JavaScript, GLSL, etc.) |
 | `engine-type-resolver.ts` | Type resolution callback for parser integration |
 
-## Public Workflow API Policy
+## Free Functions & Lazy Global Engine
 
-- `parseSimplify()`
-  - Parse presets: `parseMode = strict | permissive`
-  - Simplify presets: `simplifyMode = default | trigonometric`
-- `parseEvaluate()`
-  - Parse presets: `parseMode = strict | permissive`
-  - Evaluate presets: `evaluateMode = exact | numeric`
-- `parseNumeric()`
-  - Parse presets: `parseMode = strict | permissive`
+Top-level free functions (`parse`, `simplify`, `evaluate`, `N`, `assign`) are exported from `index.ts` via `free-functions.ts`. They are backed by a lazily-instantiated global `ComputeEngine` accessible via `getDefaultEngine()`.
 
-Precedence rule across workflow helpers:
-- Explicit low-level options always win over presets.
-  - `parse.strict` overrides `parseMode`
-  - `evaluate.numericApproximation` overrides `evaluateMode`
-  - `simplify.strategy` overrides `simplifyMode`
-- This is implemented via object spread: the preset sets a default, then `...options.parse` overwrites it.
+- `parse(latex)` — parse a LaTeX string
+- `simplify(latex | expr)` — simplify a LaTeX string or BoxedExpression
+- `evaluate(latex | expr)` — evaluate a LaTeX string or BoxedExpression
+- `N(latex | expr)` — numeric approximation
+- `assign(id, value)` / `assign({...})` — assign values in the global engine
+- `getDefaultEngine()` — access the shared engine instance for configuration
 
-Note: `simplifyMode: 'trigonometric'` maps to the internal `strategy: 'fu'` (the Fu algorithm for trigonometric simplification, named after Fu, Zhong, and Zeng).
+The global engine is created on first call to any free function, using a dynamic `require('./index')` inside `getDefaultEngine()` to avoid circular dependency (since `index.ts` re-exports `free-functions.ts`).
 
 ## Extension Contracts (Runtime Guards)
 

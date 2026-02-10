@@ -32,6 +32,16 @@ export { BaseCompiler } from './compute-engine/compilation/base-compiler';
 export { expand } from './compute-engine/boxed-expression/expand';
 export { compile } from './compute-engine/compilation/compile-expression';
 
+// Free functions backed by a lazily-instantiated global engine
+export {
+  parse,
+  simplify,
+  evaluate,
+  N,
+  assign,
+  getDefaultEngine,
+} from './compute-engine/free-functions';
+
 export {
   isBoxedExpression,
   isBoxedNumber,

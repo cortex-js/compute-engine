@@ -26,87 +26,38 @@ $ npm install --save @cortex-js/compute-engine
 
 ### Basic Parsing and Evaluation
 
-```js
-import { ComputeEngine } from "@cortex-js/compute-engine";
-
-const ce = new ComputeEngine();
-
-// Parse LaTeX and evaluate
-const result = ce.parse("2^{11}-1").evaluate();
-console.log(result.toString());
-// ➔ 2047
-
-// Check properties
-ce.parse("2^{11}-1 \\in \\Z").evaluate().print();
-// ➔ True
-```
-
-### Workflow Helpers (Parse + Transform)
-
-For common app flows, you can use the high-level workflow helpers:
+No setup required:
 
 ```js
-import { ComputeEngine } from "@cortex-js/compute-engine";
+import { parse, simplify, evaluate, N, assign } from "@cortex-js/compute-engine";
 
-const ce = new ComputeEngine();
-
-// Parse then simplify
-ce.parseSimplify("x + x + 1").print();
+simplify("x + x + 1").print();
 // ➔ 2x + 1
 
-// Select simplification strategy presets
-ce.parseSimplify("2\\sin(x)\\cos(x)", { simplifyMode: "trigonometric" }).print();
-// ➔ sin(2x)
+evaluate("2^{11} - 1").print();
+// ➔ 2047
 
-// Parse then evaluate (using current context)
-ce.assign("x", 3);
-ce.parseEvaluate("x + 2").print();
+N("\\sqrt{2}").print();
+// ➔ 1.414213562...
+
+assign("x", 3);
+evaluate("x + 2").print();
 // ➔ 5
-
-// Parse then compute numeric approximation
-ce.parseNumeric("\\sqrt{2}").print();
-// ➔ 1.414213562...
-
-// Use permissive parsing for plain function names such as sin(x)
-ce.parseSimplify("sin(x)", { parseMode: "permissive" }).print();
-// ➔ sin(x)
-
-// Choose exact or numeric evaluation behavior
-ce.parseEvaluate("\\sqrt{2}", { evaluateMode: "exact" }).print();
-// ➔ sqrt(2)
-ce.parseEvaluate("\\sqrt{2}", { evaluateMode: "numeric" }).print();
-// ➔ 1.414213562...
 ```
 
-These methods return `null` when the input LaTeX is `null`.
-When both a preset and explicit options are provided, explicit `parse`/`evaluate`
-options take precedence. Likewise, explicit `simplify.strategy` takes precedence
-over `simplifyMode`.
-
-### Extension Contracts
-
-Plugin-facing extension points now enforce runtime contracts:
-
-- `ce.registerCompilationTarget(name, target)` validates target names and
-  required `LanguageTarget` methods (`getOperators()`, `getFunctions()`,
-  `createTarget()`, `compile()`).
-- Custom libraries passed with `new ComputeEngine({ libraries: [...] })` are
-  validated for `name`, `requires`, `definitions`, and `latexDictionary` shape.
-- Rule replacement callbacks must return a boxed expression or a valid rule step.
-
-Architecture snapshot: [docs/architecture/CURRENT-ARCHITECTURE.md](docs/architecture/CURRENT-ARCHITECTURE.md)
+These functions use a shared `ComputeEngine` instance created on first use. Use
+`getDefaultEngine()` to configure it, or create your own instance for isolated
+configurations.
 
 ### Working with Numbers (Type-Safe)
 
 Use type guards to safely access specialized properties:
 
 ```js
-import { ComputeEngine, isBoxedNumber } from "@cortex-js/compute-engine";
+import { evaluate, isBoxedNumber } from "@cortex-js/compute-engine";
 
-const ce = new ComputeEngine();
-const expr = ce.parse("\\frac{5}{2}").evaluate();
+const expr = evaluate("\\frac{5}{2}");
 
-// ✓ Modern approach with type guards
 if (isBoxedNumber(expr)) {
   console.log(expr.numericValue);  // 2.5 (type-safe access)
   console.log(expr.isInteger);     // false
@@ -116,10 +67,9 @@ if (isBoxedNumber(expr)) {
 ### Working with Symbols
 
 ```js
-import { ComputeEngine, isBoxedSymbol, sym } from "@cortex-js/compute-engine";
+import { parse, isBoxedSymbol, sym } from "@cortex-js/compute-engine";
 
-const ce = new ComputeEngine();
-const expr = ce.parse("x + 1");
+const expr = parse("x + 1");
 
 // Check if expression is a specific symbol
 if (sym(expr) === "x") {
@@ -127,7 +77,7 @@ if (sym(expr) === "x") {
 }
 
 // Or use full type guard for more access
-const variable = ce.parse("y");
+const variable = parse("y");
 if (isBoxedSymbol(variable)) {
   console.log(variable.symbol);  // "y"
 }
@@ -136,10 +86,9 @@ if (isBoxedSymbol(variable)) {
 ### Working with Functions
 
 ```js
-import { ComputeEngine, isBoxedFunction } from "@cortex-js/compute-engine";
+import { parse, isBoxedFunction } from "@cortex-js/compute-engine";
 
-const ce = new ComputeEngine();
-const expr = ce.parse("2x + 3y");
+const expr = parse("2x + 3y");
 
 // Access function structure safely
 if (isBoxedFunction(expr)) {
@@ -156,21 +105,20 @@ if (isBoxedFunction(expr)) {
 ### Simplification and Manipulation
 
 ```js
-import { ComputeEngine, expand } from "@cortex-js/compute-engine";
+import { parse, simplify, expand } from "@cortex-js/compute-engine";
 
-const ce = new ComputeEngine();
 
 // Simplify expressions
-ce.parse("x + x").simplify().print();
+simplify("x + x").print();
 // ➔ 2x
 
 // Expand expressions (free function)
-const expr = ce.parse("(x + 1)^2");
+const expr = parse("(x + 1)^2");
 expand(expr).print();
 // ➔ x^2 + 2x + 1
 
 // Substitute values
-const expr2 = ce.parse("x^2 + 2x + 1");
+const expr2 = parse("x^2 + 2x + 1");
 expr2.subs({ x: 3 }).evaluate().print();
 // ➔ 16
 ```
@@ -178,10 +126,9 @@ expr2.subs({ x: 3 }).evaluate().print();
 ### Solving Equations
 
 ```js
-const ce = new ComputeEngine();
 
 // Solve linear system
-const system = ce.parse("\\begin{cases}x+y=5\\\\x-y=1\\end{cases}");
+const system = parse("\\begin{cases}x+y=5\\\\x-y=1\\end{cases}");
 const solution = system.solve(["x", "y"]);
 
 console.log(solution.x.json);  // 3
@@ -189,11 +136,13 @@ console.log(solution.y.json);  // 2
 ```
 
 **💡 Best Practices:**
-- Always use type guards (`isBoxedNumber`, `isBoxedSymbol`, `isBoxedFunction`) before accessing specialized properties
-- Import type guards from `@cortex-js/compute-engine` alongside `ComputeEngine`
+
+- Always use type guards (`isBoxedNumber`, `isBoxedSymbol`, `isBoxedFunction`)
+  before accessing specialized properties
 - Use the `sym()` helper for quick symbol name checks
 
-**📚 Learn More:** [Full documentation and guides](https://cortexjs.io/compute-engine/)
+**📚 Learn More:**
+[Full documentation and guides](https://cortexjs.io/compute-engine/)
 
 ## FAQ
 

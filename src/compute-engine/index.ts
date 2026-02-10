@@ -166,18 +166,18 @@ import {
   createErrorExpression,
   createTypeErrorExpression,
 } from './engine-validation-entrypoints';
-import {
-  parseAndEvaluate,
-  parseAndNumeric,
-  parseAndSimplify,
-} from './engine-workflow-entrypoints';
-import type {
-  WorkflowSimplifyOptions,
-  WorkflowEvaluateOptions,
-  WorkflowNumericOptions,
-} from './types-engine';
 
 export * from './global-types';
+
+// Free functions backed by a lazily-instantiated global engine
+export {
+  parse,
+  simplify,
+  evaluate,
+  N,
+  assign,
+  getDefaultEngine,
+} from './free-functions';
 
 export { validatePattern };
 
@@ -1718,79 +1718,6 @@ export class ComputeEngine implements IComputeEngine {
     options?: ParseEntrypointOptions
   ): BoxedExpression | null {
     return parseLatexEntrypoint(this, latex, options);
-  }
-
-  /**
-   * Parse a LaTeX expression then simplify it.
-   *
-   * This is a high-level workflow helper that combines parse and simplify.
-   *
-   * Set `options.parseMode` to:
-   * - `'strict'` to enforce strict LaTeX parsing
-   * - `'permissive'` to accept relaxed forms such as bare function names (`sin(x)`)
-   *
-   * Set `options.simplifyMode` to:
-   * - `'default'` for standard simplification
-   * - `'trigonometric'` to enable Fu-based trigonometric simplification
-   *
-   * If both `parseMode` and `parse.strict` are provided, `parse.strict` wins.
-   * If both `simplifyMode` and `simplify.strategy` are provided,
-   * `simplify.strategy` wins.
-   */
-  parseSimplify(latex: null, options?: WorkflowSimplifyOptions): null;
-  parseSimplify(
-    latex: LatexString,
-    options?: WorkflowSimplifyOptions
-  ): BoxedExpression;
-  parseSimplify(
-    latex: LatexString | null,
-    options?: WorkflowSimplifyOptions
-  ): BoxedExpression | null {
-    return parseAndSimplify(this, latex, options);
-  }
-
-  /**
-   * Parse a LaTeX expression then evaluate it.
-   *
-   * This is a high-level workflow helper that combines parse and evaluate.
-   *
-   * Set `options.evaluateMode` to:
-   * - `'exact'` for exact evaluation when possible
-   * - `'numeric'` for numeric approximation during evaluation
-   *
-   * If both `evaluateMode` and `evaluate.numericApproximation` are provided,
-   * `evaluate.numericApproximation` wins.
-   */
-  parseEvaluate(latex: null, options?: WorkflowEvaluateOptions): null;
-  parseEvaluate(
-    latex: LatexString,
-    options?: WorkflowEvaluateOptions
-  ): BoxedExpression;
-  parseEvaluate(
-    latex: LatexString | null,
-    options?: WorkflowEvaluateOptions
-  ): BoxedExpression | null {
-    return parseAndEvaluate(this, latex, options);
-  }
-
-  /**
-   * Parse a LaTeX expression then compute a numeric approximation.
-   *
-   * This is a high-level workflow helper that combines parse and `N()`.
-   *
-   * Supports the same parse-mode options as `parseSimplify()` and
-   * `parseEvaluate()`.
-   */
-  parseNumeric(latex: null, options?: WorkflowNumericOptions): null;
-  parseNumeric(
-    latex: LatexString,
-    options?: WorkflowNumericOptions
-  ): BoxedExpression;
-  parseNumeric(
-    latex: LatexString | null,
-    options?: WorkflowNumericOptions
-  ): BoxedExpression | null {
-    return parseAndNumeric(this, latex, options);
   }
 
   /**

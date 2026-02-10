@@ -1,130 +1,92 @@
-import { ComputeEngine } from '../../src/compute-engine';
+import {
+  ComputeEngine,
+  parse,
+  simplify,
+  evaluate,
+  N,
+  assign,
+  getDefaultEngine,
+} from '../../src/compute-engine';
 
-describe('Workflow Entrypoints', () => {
-  test('parseSimplify() parses then simplifies', () => {
-    const ce = new ComputeEngine();
-    const result = ce.parseSimplify('1+1');
-
-    expect(result?.toString()).toBe('2');
+describe('Free Functions', () => {
+  test('parse() returns a BoxedExpression', () => {
+    const result = parse('x^2');
+    expect(result).toBeDefined();
+    expect(result.operator).toBe('Power');
   });
 
-  test('parseEvaluate() parses then evaluates with context values', () => {
-    const ce = new ComputeEngine();
-    ce.assign('x', 3);
-
-    const result = ce.parseEvaluate('x+2');
-
-    expect(result?.toString()).toBe('5');
+  test('simplify() simplifies a LaTeX string', () => {
+    const result = simplify('x + x + 1');
+    expect(result.toString()).toBe('2x + 1');
   });
 
-  test('parseNumeric() parses then computes a numeric approximation', () => {
-    const ce = new ComputeEngine();
-    const result = ce.parseNumeric('\\sqrt{2}');
-
-    expect(result).not.toBeNull();
-    expect(result?.isNumber).toBe(true);
-    expect(result?.toString()).not.toBe('Sqrt(2)');
+  test('simplify() simplifies an existing BoxedExpression', () => {
+    const expr = parse('x + x + 1');
+    const result = simplify(expr);
+    expect(result.toString()).toBe('2x + 1');
   });
 
-  test('parseSimplify() supports strict/permissive parse presets', () => {
-    const ce = new ComputeEngine();
-
-    const strictResult = ce.parseSimplify('sin(x)', { parseMode: 'strict' });
-    const permissiveResult = ce.parseSimplify('sin(x)', {
-      parseMode: 'permissive',
-    });
-
-    expect(strictResult?.operator).toBe('Multiply');
-    expect(permissiveResult?.operator).toBe('Sin');
+  test('evaluate() evaluates a LaTeX string', () => {
+    const result = evaluate('2^{11} - 1');
+    expect(result.toString()).toBe('2047');
   });
 
-  test('explicit parse options override parseMode preset', () => {
-    const ce = new ComputeEngine();
-
-    const strictOverride = ce.parseSimplify('sin(x)', {
-      parseMode: 'permissive',
-      parse: { strict: true },
-    });
-    const permissiveOverride = ce.parseSimplify('sin(x)', {
-      parseMode: 'strict',
-      parse: { strict: false },
-    });
-
-    expect(strictOverride?.operator).toBe('Multiply');
-    expect(permissiveOverride?.operator).toBe('Sin');
+  test('evaluate() evaluates an existing BoxedExpression', () => {
+    const expr = parse('2^{11} - 1');
+    const result = evaluate(expr);
+    expect(result.toString()).toBe('2047');
   });
 
-  test('parseSimplify() supports simplification strategy presets', () => {
-    const ce = new ComputeEngine();
-    const input = '2\\sin(x)\\cos(x)';
-
-    const defaultMode = ce.parseSimplify(input, { simplifyMode: 'default' });
-    const trigMode = ce.parseSimplify(input, { simplifyMode: 'trigonometric' });
-    const explicitDefault = ce.parse(input)?.simplify({ strategy: 'default' });
-    const explicitTrig = ce.parse(input)?.simplify({ strategy: 'fu' });
-
-    expect(defaultMode?.toString()).toBe(explicitDefault?.toString());
-    expect(trigMode?.toString()).toBe(explicitTrig?.toString());
+  test('N() returns numeric approximation from LaTeX', () => {
+    const result = N('\\sqrt{2}');
+    expect(result).toBeDefined();
+    expect(result.isNumber).toBe(true);
+    // Should be a decimal, not symbolic
+    expect(result.toString()).not.toBe('Sqrt(2)');
   });
 
-  test('explicit simplify options override simplifyMode preset', () => {
-    const ce = new ComputeEngine();
-    const input = '2\\sin(x)\\cos(x)';
-
-    const defaultOverride = ce.parseSimplify(input, {
-      simplifyMode: 'trigonometric',
-      simplify: { strategy: 'default' },
-    });
-    const trigOverride = ce.parseSimplify(input, {
-      simplifyMode: 'default',
-      simplify: { strategy: 'fu' },
-    });
-
-    expect(defaultOverride?.toString()).toBe(
-      ce.parseSimplify(input, { simplifyMode: 'default' })?.toString()
-    );
-    expect(trigOverride?.toString()).toBe(
-      ce.parseSimplify(input, { simplifyMode: 'trigonometric' })?.toString()
-    );
+  test('N() returns numeric approximation from BoxedExpression', () => {
+    const expr = parse('\\sqrt{2}');
+    const result = N(expr);
+    expect(result).toBeDefined();
+    expect(result.isNumber).toBe(true);
   });
 
-  test('parseEvaluate() supports exact/numeric presets', () => {
-    const ce = new ComputeEngine();
-
-    const exactResult = ce.parseEvaluate('\\sqrt{2}', { evaluateMode: 'exact' });
-    const numericResult = ce.parseEvaluate('\\sqrt{2}', {
-      evaluateMode: 'numeric',
-    });
-
-    expect(exactResult?.toString()).not.toBe(numericResult?.toString());
-    expect(numericResult?.toString()).toBe(ce.parseNumeric('\\sqrt{2}')?.toString());
+  test('assign() + evaluate() uses assigned value', () => {
+    const ce = getDefaultEngine();
+    ce.assign('t', 3);
+    const result = evaluate('t + 2');
+    expect(result.toString()).toBe('5');
+    // Reset by forgetting the symbol
+    ce.forget('t');
   });
 
-  test('explicit evaluate options override evaluateMode preset', () => {
-    const ce = new ComputeEngine();
-
-    const exactOverride = ce.parseEvaluate('\\sqrt{2}', {
-      evaluateMode: 'numeric',
-      evaluate: { numericApproximation: false },
-    });
-    const numericOverride = ce.parseEvaluate('\\sqrt{2}', {
-      evaluateMode: 'exact',
-      evaluate: { numericApproximation: true },
-    });
-
-    expect(exactOverride?.toString()).toBe(
-      ce.parseEvaluate('\\sqrt{2}', { evaluateMode: 'exact' })?.toString()
-    );
-    expect(numericOverride?.toString()).toBe(
-      ce.parseEvaluate('\\sqrt{2}', { evaluateMode: 'numeric' })?.toString()
-    );
+  test('assign() bulk assignment works', () => {
+    const ce = getDefaultEngine();
+    ce.assign({ u: 10, v: 20 });
+    const result = evaluate('u + v');
+    expect(result.toString()).toBe('30');
+    // Reset
+    ce.forget(['u', 'v']);
   });
 
-  test('workflow entrypoints propagate null parse input', () => {
-    const ce = new ComputeEngine();
+  test('getDefaultEngine() returns a ComputeEngine instance', () => {
+    const engine = getDefaultEngine();
+    expect(engine).toBeInstanceOf(ComputeEngine);
+  });
 
-    expect(ce.parseSimplify(null)).toBeNull();
-    expect(ce.parseEvaluate(null)).toBeNull();
-    expect(ce.parseNumeric(null)).toBeNull();
+  test('getDefaultEngine() returns the same instance on repeated calls', () => {
+    const a = getDefaultEngine();
+    const b = getDefaultEngine();
+    expect(a).toBe(b);
+  });
+
+  test('free functions share the same engine', () => {
+    assign('w', 42);
+    // evaluate uses the same engine where w was assigned
+    const result = evaluate('w');
+    expect(result.toString()).toBe('42');
+    // Reset
+    getDefaultEngine().forget('w');
   });
 });
