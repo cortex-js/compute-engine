@@ -3,10 +3,26 @@ import type { BoxedExpression, JSSource } from '../global-types';
 import type {
   CompileTarget,
   CompilationResult,
-  CompilationOptions,
 } from './types';
 import { BaseCompiler } from './base-compiler';
 import { applicableN1 } from '../function-utils';
+import { assertCompilationOptionsContract } from '../engine-extension-contracts';
+
+type CompileExpressionOptions = {
+  to?: string;
+  target?: CompileTarget<BoxedExpression>;
+  operators?:
+    | Partial<Record<MathJsonSymbol, [op: string, prec: number]>>
+    | ((op: MathJsonSymbol) => [op: string, prec: number] | undefined);
+  functions?: Record<
+    MathJsonSymbol,
+    JSSource | ((...args: unknown[]) => unknown)
+  >;
+  vars?: Record<MathJsonSymbol, JSSource>;
+  imports?: unknown[];
+  preamble?: string;
+  fallback?: boolean;
+};
 
 /**
  * Compile a boxed expression.
@@ -20,22 +36,10 @@ import { applicableN1 } from '../function-utils';
  */
 export function compile(
   expr: BoxedExpression,
-  options?: {
-    to?: string;
-    target?: CompileTarget<BoxedExpression>;
-    operators?:
-      | Partial<Record<MathJsonSymbol, [op: string, prec: number]>>
-      | ((op: MathJsonSymbol) => [op: string, prec: number] | undefined);
-    functions?: Record<
-      MathJsonSymbol,
-      JSSource | ((...args: unknown[]) => unknown)
-    >;
-    vars?: Record<MathJsonSymbol, JSSource>;
-    imports?: ((...args: unknown[]) => unknown)[];
-    preamble?: string;
-    fallback?: boolean;
-  }
+  options?: CompileExpressionOptions
 ): CompilationResult {
+  assertCompilationOptionsContract(options);
+
   try {
     // Determine the target to use
     if (options?.target) {
@@ -66,7 +70,7 @@ export function compile(
       vars: options?.vars,
       imports: options?.imports,
       preamble: options?.preamble,
-    } as CompilationOptions<BoxedExpression>);
+    });
   } catch (e) {
     // @fixme: the fallback needs to handle multiple arguments
     if (options?.fallback ?? true) {

@@ -537,6 +537,10 @@ export class ComputeEngine implements IComputeEngine {
    * @param options.tolerance If the absolute value of the difference of two
    * numbers is less than `tolerance`, they are considered equal. Used by
    * `chop()` as well.
+   *
+   * @param options.libraries Optional standard/custom library list.
+   * Custom library entries are validated during startup (name, dependencies,
+   * definitions, and LaTeX dictionary shape).
    */
   constructor(options?: {
     libraries?: readonly (string | LibraryDefinition)[];
@@ -664,6 +668,10 @@ export class ComputeEngine implements IComputeEngine {
    * const expr = ce.parse('x^2 + y^2');
    * const code = compile(expr, { to: 'python' });
    * ```
+   *
+   * Throws if:
+   * - `name` is empty or contains whitespace
+   * - `target` does not implement the required `LanguageTarget` methods
    */
   registerCompilationTarget(
     name: string,
@@ -1724,6 +1732,18 @@ export class ComputeEngine implements IComputeEngine {
    * Parse a LaTeX expression then simplify it.
    *
    * This is a high-level workflow helper that combines parse and simplify.
+   *
+   * Set `options.parseMode` to:
+   * - `'strict'` to enforce strict LaTeX parsing
+   * - `'permissive'` to accept relaxed forms such as bare function names (`sin(x)`)
+   *
+   * Set `options.simplifyMode` to:
+   * - `'default'` for standard simplification
+   * - `'trigonometric'` to enable Fu-based trigonometric simplification
+   *
+   * If both `parseMode` and `parse.strict` are provided, `parse.strict` wins.
+   * If both `simplifyMode` and `simplify.strategy` are provided,
+   * `simplify.strategy` wins.
    */
   parseSimplify(
     latex: null,
@@ -1744,6 +1764,13 @@ export class ComputeEngine implements IComputeEngine {
    * Parse a LaTeX expression then evaluate it.
    *
    * This is a high-level workflow helper that combines parse and evaluate.
+   *
+   * Set `options.evaluateMode` to:
+   * - `'exact'` for exact evaluation when possible
+   * - `'numeric'` for numeric approximation during evaluation
+   *
+   * If both `evaluateMode` and `evaluate.numericApproximation` are provided,
+   * `evaluate.numericApproximation` wins.
    */
   parseEvaluate(
     latex: null,
@@ -1764,6 +1791,9 @@ export class ComputeEngine implements IComputeEngine {
    * Parse a LaTeX expression then compute a numeric approximation.
    *
    * This is a high-level workflow helper that combines parse and `N()`.
+   *
+   * Supports the same parse-mode options as `parseSimplify()` and
+   * `parseEvaluate()`.
    */
   parseNumeric(
     latex: null,

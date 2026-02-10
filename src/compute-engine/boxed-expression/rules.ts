@@ -876,6 +876,12 @@ export function applyRule(
   if (isRuleStep(result))
     return canonical ? { ...result, value: result.value.canonical } : result;
 
+  if (!isBoxedExpression(result)) {
+    throw new Error(
+      'Invalid rule replacement result: expected a BoxedExpression or RuleStep'
+    );
+  }
+
   // (Need to request the canonical variant to account for case of a custom replace: which may not
   // have returned canonical.)
   return { value: canonical ? result.canonical : result, because };
@@ -1004,10 +1010,14 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 function isRuleStep(x: unknown): x is RuleStep {
-  return isRecord(x) && 'because' in x && 'value' in x;
+  return isRecord(x) && 'because' in x && isBoxedExpression(x.value);
 }
 
 /** @category Rules */
 function isBoxedRule(x: unknown): x is BoxedRule {
   return isRecord(x) && x._tag === 'boxed-rule';
+}
+
+function isBoxedExpression(value: unknown): value is BoxedExpression {
+  return value instanceof _BoxedExpression;
 }

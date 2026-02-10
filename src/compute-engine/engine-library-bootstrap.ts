@@ -3,6 +3,7 @@ import type {
   LibraryDefinition,
 } from './global-types';
 import type { LatexDictionaryEntry, LibraryCategory } from './latex-syntax/types';
+import { assertLibraryDefinitionContract } from './engine-extension-contracts';
 
 import {
   STANDARD_LIBRARIES,
@@ -14,7 +15,10 @@ import {
 function resolveLibraryEntry(
   library: string | LibraryDefinition
 ): LibraryDefinition {
-  if (typeof library !== 'string') return library;
+  if (typeof library !== 'string') {
+    assertLibraryDefinitionContract(library);
+    return library;
+  }
 
   const found = STANDARD_LIBRARIES.find((entry) => entry.name === library);
   if (!found) throw new Error(`Unknown standard library: "${library}"`);

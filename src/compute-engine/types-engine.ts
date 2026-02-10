@@ -60,6 +60,42 @@ type AssignValue = KernelAssignValue<
 type Scope = KernelScope<BoxedDefinition>;
 type EvalContext = KernelEvalContext<BoxedExpression, BoxedDefinition>;
 
+/** Parsing policy preset for workflow helpers such as `parseSimplify()`. */
+export type WorkflowParseMode = 'strict' | 'permissive';
+
+/** Evaluation policy preset for workflow helpers such as `parseEvaluate()`. */
+export type WorkflowEvaluateMode = 'exact' | 'numeric';
+
+/** Simplification policy preset for `parseSimplify()`. */
+export type WorkflowSimplifyMode = 'default' | 'trigonometric';
+
+/** Shared options for workflow helpers that begin with parsing. */
+export type WorkflowParseOptions = {
+  /** Parse policy preset. Explicit `parse.strict` takes precedence when provided. */
+  parseMode?: WorkflowParseMode;
+  /** Low-level parse options forwarded to `parse()`. */
+  parse?: Partial<ParseLatexOptions> & { form?: FormOption };
+};
+
+/** Options for `parseSimplify()`. */
+export type WorkflowSimplifyOptions = WorkflowParseOptions & {
+  /** Simplification policy preset. Explicit `simplify.strategy` wins. */
+  simplifyMode?: WorkflowSimplifyMode;
+  /** Options forwarded to `BoxedExpression.simplify()`. */
+  simplify?: Parameters<BoxedExpression['simplify']>[0];
+};
+
+/** Options for `parseEvaluate()`. */
+export type WorkflowEvaluateOptions = WorkflowParseOptions & {
+  /** Evaluation policy preset. Explicit `evaluate.numericApproximation` wins. */
+  evaluateMode?: WorkflowEvaluateMode;
+  /** Options forwarded to `BoxedExpression.evaluate()`. */
+  evaluate?: Parameters<BoxedExpression['evaluate']>[0];
+};
+
+/** Options for `parseNumeric()`. */
+export type WorkflowNumericOptions = WorkflowParseOptions;
+
 /** @internal */
 export interface IComputeEngine extends IBigNum {
   latexDictionary: readonly LatexDictionaryEntry[];
@@ -300,65 +336,41 @@ export interface IComputeEngine extends IBigNum {
 
   parseSimplify(
     latex: null,
-    options?: {
-      parse?: Partial<ParseLatexOptions> & { form?: FormOption };
-      simplify?: Parameters<BoxedExpression['simplify']>[0];
-    }
+    options?: WorkflowSimplifyOptions
   ): null;
   parseSimplify(
     latex: LatexString,
-    options?: {
-      parse?: Partial<ParseLatexOptions> & { form?: FormOption };
-      simplify?: Parameters<BoxedExpression['simplify']>[0];
-    }
+    options?: WorkflowSimplifyOptions
   ): BoxedExpression;
   parseSimplify(
     latex: LatexString | null,
-    options?: {
-      parse?: Partial<ParseLatexOptions> & { form?: FormOption };
-      simplify?: Parameters<BoxedExpression['simplify']>[0];
-    }
+    options?: WorkflowSimplifyOptions
   ): BoxedExpression | null;
 
   parseEvaluate(
     latex: null,
-    options?: {
-      parse?: Partial<ParseLatexOptions> & { form?: FormOption };
-      evaluate?: Parameters<BoxedExpression['evaluate']>[0];
-    }
+    options?: WorkflowEvaluateOptions
   ): null;
   parseEvaluate(
     latex: LatexString,
-    options?: {
-      parse?: Partial<ParseLatexOptions> & { form?: FormOption };
-      evaluate?: Parameters<BoxedExpression['evaluate']>[0];
-    }
+    options?: WorkflowEvaluateOptions
   ): BoxedExpression;
   parseEvaluate(
     latex: LatexString | null,
-    options?: {
-      parse?: Partial<ParseLatexOptions> & { form?: FormOption };
-      evaluate?: Parameters<BoxedExpression['evaluate']>[0];
-    }
+    options?: WorkflowEvaluateOptions
   ): BoxedExpression | null;
 
   parseNumeric(
     latex: null,
-    options?: {
-      parse?: Partial<ParseLatexOptions> & { form?: FormOption };
-    }
+    options?: WorkflowNumericOptions
   ): null;
   parseNumeric(
     latex: LatexString,
-    options?: {
-      parse?: Partial<ParseLatexOptions> & { form?: FormOption };
-    }
+    options?: WorkflowNumericOptions
   ): BoxedExpression;
   parseNumeric(
     latex: LatexString | null,
-    options?: {
-      parse?: Partial<ParseLatexOptions> & { form?: FormOption };
-    }
+    options?: WorkflowNumericOptions
   ): BoxedExpression | null;
 
   pushScope(scope?: Scope, name?: string): void;
