@@ -5,7 +5,6 @@ import { isValidSymbol, validateSymbol } from '../math-json/symbols';
 
 import {
   Type,
-  TypeReference,
   TypeResolver,
   TypeString,
 } from '../common/type/types';
@@ -169,6 +168,7 @@ import {
 import { EngineCacheStore } from './engine-cache';
 import { CompilationTargetRegistry } from './engine-compilation-targets';
 import { SimplificationRuleStore } from './engine-simplification-rules';
+import { createTypeResolver } from './engine-type-resolver';
 
 export * from './global-types';
 
@@ -386,45 +386,7 @@ export class ComputeEngine implements IComputeEngine {
 
   /** @internal */
   get _typeResolver(): TypeResolver {
-    // eslint-disable-next-line @typescript-eslint/no-this-alias
-    const ce = this; // capture this for getter closures
-    return {
-      get names() {
-        // Return all known type names as a string array
-        const types: string[] = [];
-        let scope: Scope | null = ce.context.lexicalScope;
-        while (scope) {
-          if (scope.types) types.push(...Object.keys(scope.types));
-          scope = scope.parent;
-        }
-        return types;
-      },
-
-      resolve: (name: string) => {
-        // Go up the scope chain until we find a definition
-        let scope: Scope | null = ce.context.lexicalScope;
-        while (scope) {
-          if (scope.types?.[name]) return scope.types[name];
-          scope = scope.parent;
-        }
-
-        return undefined;
-      },
-
-      // If no definition was found, but this is a forward lookup, return
-      // a new definition
-      forward: (name: string) => {
-        const ref = {
-          kind: 'reference',
-          name,
-          alias: false,
-          def: undefined,
-        } as TypeReference;
-        ce.context.lexicalScope.types ??= {};
-        ce.context.lexicalScope.types[name] = ref;
-        return ref;
-      },
-    };
+    return createTypeResolver(this);
   }
 
   /**

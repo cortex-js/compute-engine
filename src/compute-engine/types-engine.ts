@@ -565,3 +565,11 @@ export interface IComputeEngine extends IBigNum {
   /** @internal */
   listenToConfigurationChange(tracker: ConfigurationChangeListener): () => void;
 }
+
+declare module './types-expression' {
+  interface ExpressionComputeEngine extends IComputeEngine {}
+}
+
+declare module './types-definitions' {
+  interface ComputeEngine extends IComputeEngine {}
+}

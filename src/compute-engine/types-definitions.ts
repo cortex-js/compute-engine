@@ -8,13 +8,28 @@ import type {
   CompiledExpression,
 } from './types-expression';
 import type {
-  EvaluateOptions,
-  BoxedRule,
-  BoxedRuleSet,
-  Rule,
-  Scope,
-} from './types-evaluation';
-import type { IComputeEngine as ComputeEngine } from './types-engine';
+  EvaluateOptions as KernelEvaluateOptions,
+  Rule as KernelRule,
+  BoxedRule as KernelBoxedRule,
+  BoxedRuleSet as KernelBoxedRuleSet,
+  Scope as KernelScope,
+} from './types-kernel-evaluation';
+
+/**
+ * Compute engine surface used by definition callbacks.
+ *
+ * This interface is augmented by `types-engine.ts` with the concrete
+ * `IComputeEngine` members to avoid type-layer circular dependencies.
+ *
+ * @category Compute Engine
+ */
+export interface ComputeEngine {}
+
+type EvaluateOptions = KernelEvaluateOptions<BoxedExpression>;
+type Rule = KernelRule<BoxedExpression, SemiBoxedExpression, ComputeEngine>;
+type BoxedRule = KernelBoxedRule<BoxedExpression, ComputeEngine>;
+type BoxedRuleSet = KernelBoxedRuleSet<BoxedExpression, ComputeEngine>;
+type Scope = KernelScope<BoxedDefinition>;
 
 /**
  * A bound symbol (i.e. one with an associated definition) has either a type

@@ -6,7 +6,7 @@ echo "Running TypeScript type check..."
 tsc --target es2022 -d --moduleResolution node --allowImportingTsExtensions true --emitDeclarationOnly --outDir /tmp/typecheck ./src/compute-engine.ts
 
 # Circular dependency check
-MAX_CYCLES=4
+MAX_CYCLES=0
 echo ""
 echo "Checking circular dependencies (budget: $MAX_CYCLES)..."
 
@@ -34,6 +34,24 @@ if [ "$CYCLE_COUNT" -lt "$MAX_CYCLES" ]; then
   echo "NOTE: Cycle count ($CYCLE_COUNT) is below budget ($MAX_CYCLES)."
   echo "Please lower MAX_CYCLES in scripts/typecheck.sh to $CYCLE_COUNT to lock in progress."
 fi
+
+echo ""
+echo "Checking public type surfaces for explicit 'any'..."
+
+ANY_PATTERN='as any\b|:\s*any\b|<any>|any\[\]'
+ANY_OUTPUT=$(
+  rg -n --glob 'types*.ts' --glob 'types-*.ts' --glob 'global-types.ts' "$ANY_PATTERN" src/compute-engine || true
+)
+
+if [ -n "$ANY_OUTPUT" ]; then
+  echo "$ANY_OUTPUT"
+  echo ""
+  echo "FAIL: Explicit 'any' found in public type surfaces."
+  echo "Use 'unknown' plus narrowing, or a constrained generic."
+  exit 1
+fi
+
+echo "No explicit 'any' found in public type surfaces."
 
 echo ""
 echo "All checks passed."

@@ -24,25 +24,167 @@ import type {
   CanonicalOptions,
 } from './types-kernel-serialization';
 import type {
-  Sign,
-  BoxedDefinition,
-  BoxedBaseDefinition,
-  BoxedOperatorDefinition,
-  BoxedValueDefinition,
-  SimplifyOptions,
-} from './types-definitions';
-import type {
   EvaluateOptions as KernelEvaluateOptions,
+  BoxedRule as KernelBoxedRule,
   Rule as KernelRule,
   BoxedRuleSet as KernelBoxedRuleSet,
   Scope as KernelScope,
 } from './types-kernel-evaluation';
-import type { IComputeEngine as ComputeEngine } from './types-engine';
+
+/**
+ * Compute engine surface used by expression types.
+ *
+ * This interface is augmented by `types-engine.ts` with the concrete
+ * `IComputeEngine` members to avoid type-layer circular dependencies.
+ *
+ * @category Compute Engine
+ */
+export interface ExpressionComputeEngine {}
+
+type Sign =
+  | 'zero'
+  | 'positive'
+  | 'negative'
+  | 'non-negative'
+  | 'non-positive'
+  | 'not-zero'
+  | 'unsigned';
+
+type BaseDefinition = {
+  description: string | string[];
+  examples: string | string[];
+  url: string;
+  wikidata: string;
+  readonly isConstant?: boolean;
+};
+
+interface BaseCollectionHandlers {
+  iterator: (
+    collection: BoxedExpression
+  ) => Iterator<BoxedExpression, undefined> | undefined;
+  count: (collection: BoxedExpression) => number | undefined;
+  isEmpty?: (collection: BoxedExpression) => boolean | undefined;
+  isFinite?: (collection: BoxedExpression) => boolean | undefined;
+  isLazy?: (collection: BoxedExpression) => boolean;
+  contains?: (
+    collection: BoxedExpression,
+    target: BoxedExpression
+  ) => boolean | undefined;
+  subsetOf?: (
+    collection: BoxedExpression,
+    other: BoxedExpression,
+    strict: boolean
+  ) => boolean | undefined;
+  eltsgn?: (collection: BoxedExpression) => Sign | undefined;
+  elttype?: (collection: BoxedExpression) => Type | undefined;
+}
+
+interface IndexedCollectionHandlers {
+  at: (
+    collection: BoxedExpression,
+    index: number | string
+  ) => undefined | BoxedExpression;
+  indexWhere: (
+    collection: BoxedExpression,
+    predicate: (element: BoxedExpression) => boolean
+  ) => number | undefined;
+}
+
+type CollectionHandlers = BaseCollectionHandlers &
+  Partial<IndexedCollectionHandlers>;
+
+interface BoxedBaseDefinition extends Partial<BaseDefinition> {
+  collection?: CollectionHandlers;
+}
+
+interface BoxedValueDefinition extends BoxedBaseDefinition {
+  holdUntil: 'never' | 'evaluate' | 'N';
+  readonly value: BoxedExpression | undefined;
+  eq?: (a: BoxedExpression) => boolean | undefined;
+  neq?: (a: BoxedExpression) => boolean | undefined;
+  cmp?: (a: BoxedExpression) => '=' | '>' | '<' | undefined;
+  inferredType: boolean;
+  type: BoxedType;
+  subscriptEvaluate?: (
+    subscript: BoxedExpression,
+    options: {
+      engine: ExpressionComputeEngine;
+      numericApproximation?: boolean;
+    }
+  ) => BoxedExpression | undefined;
+}
+
+type OperatorDefinitionFlags = {
+  lazy: boolean;
+  scoped: boolean;
+  broadcastable: boolean;
+  associative: boolean;
+  commutative: boolean;
+  commutativeOrder:
+    | ((a: BoxedExpression, b: BoxedExpression) => number)
+    | undefined;
+  idempotent: boolean;
+  involution: boolean;
+  pure: boolean;
+};
+
+interface BoxedOperatorDefinition
+  extends BoxedBaseDefinition, OperatorDefinitionFlags {
+  complexity: number;
+  inferredSignature: boolean;
+  signature: BoxedType;
+  type?: (
+    ops: ReadonlyArray<BoxedExpression>,
+    options: { engine: ExpressionComputeEngine }
+  ) => Type | TypeString | BoxedType | undefined;
+  sgn?: (
+    ops: ReadonlyArray<BoxedExpression>,
+    options: { engine: ExpressionComputeEngine }
+  ) => Sign | undefined;
+  eq?: (a: BoxedExpression, b: BoxedExpression) => boolean | undefined;
+  neq?: (a: BoxedExpression, b: BoxedExpression) => boolean | undefined;
+  canonical?: (
+    ops: ReadonlyArray<BoxedExpression>,
+    options: { engine: ExpressionComputeEngine; scope: Scope | undefined }
+  ) => BoxedExpression | null;
+  evaluate?: (
+    ops: ReadonlyArray<BoxedExpression>,
+    options: Partial<EvaluateOptions> & { engine?: ExpressionComputeEngine }
+  ) => BoxedExpression | undefined;
+  evaluateAsync?: (
+    ops: ReadonlyArray<BoxedExpression>,
+    options?: Partial<EvaluateOptions> & { engine?: ExpressionComputeEngine }
+  ) => Promise<BoxedExpression | undefined>;
+  evalDimension?: (
+    ops: ReadonlyArray<BoxedExpression>,
+    options: { engine: ExpressionComputeEngine }
+  ) => BoxedExpression;
+  compile?: (expr: BoxedExpression) => CompiledExpression;
+  update(def: unknown): void;
+}
+
+type BoxedDefinition =
+  | { value: BoxedValueDefinition }
+  | { operator: BoxedOperatorDefinition };
 
 type Scope = KernelScope<BoxedDefinition>;
 type EvaluateOptions = KernelEvaluateOptions<BoxedExpression>;
-type Rule = KernelRule<BoxedExpression, SemiBoxedExpression, ComputeEngine>;
-type BoxedRuleSet = KernelBoxedRuleSet<BoxedExpression, ComputeEngine>;
+type Rule = KernelRule<
+  BoxedExpression,
+  SemiBoxedExpression,
+  ExpressionComputeEngine
+>;
+type BoxedRule = KernelBoxedRule<BoxedExpression, ExpressionComputeEngine>;
+type BoxedRuleSet = KernelBoxedRuleSet<
+  BoxedExpression,
+  ExpressionComputeEngine
+>;
+
+type SimplifyOptions = {
+  rules?: null | Rule | ReadonlyArray<BoxedRule | Rule> | BoxedRuleSet;
+  costFunction?: (expr: BoxedExpression) => number;
+  strategy?: 'default' | 'fu';
+};
 
 //
 // ── Tensor & Compilation Types ──────────────────────────────────────────
@@ -406,7 +548,7 @@ export interface BoxedExpression {
    * a context in which to interpret it, such as definition of symbols
    * and functions.
    */
-  readonly engine: ComputeEngine;
+  readonly engine: ExpressionComputeEngine;
 
   /**
    *
