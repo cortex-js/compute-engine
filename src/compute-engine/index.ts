@@ -166,6 +166,9 @@ import {
   lookupOEIS as lookupOEISImpl,
   checkSequenceOEIS as checkSequenceOEISImpl,
 } from './engine-sequences';
+import { EngineCacheStore } from './engine-cache';
+import { CompilationTargetRegistry } from './engine-compilation-targets';
+import { SimplificationRuleStore } from './engine-simplification-rules';
 
 export * from './global-types';
 
@@ -206,10 +209,6 @@ export { BaseCompiler } from './compilation/base-compiler';
 import type { LanguageTarget } from './compilation/types';
 import { compile as _compile } from './compilation/compile-expression';
 import { fu as _fu } from './symbolic/fu';
-import { JavaScriptTarget as _JavaScriptTarget } from './compilation/javascript-target';
-import { GLSLTarget as _GLSLTarget } from './compilation/glsl-target';
-import { IntervalJavaScriptTarget as _IntervalJavaScriptTarget } from './compilation/interval-javascript-target';
-import { IntervalGLSLTarget as _IntervalGLSLTarget } from './compilation/interval-glsl-target';
 
 /**
  *
@@ -309,28 +308,20 @@ export class ComputeEngine implements IComputeEngine {
   private _negBignumTolerance: Decimal;
 
   /** @internal */
-  private __cache: {
-    [key: string]: {
-      value: unknown;
-      build: () => unknown;
-      purge?: (v: unknown) => unknown;
-    };
-  } = {};
+  private _cacheStore = new EngineCacheStore();
 
   private _configurationChangeTracker = new ConfigurationChangeTracker();
 
   /** @internal */
   private _cost?: (expr: BoxedExpression) => number;
 
-  /** @internal Backing array for simplificationRules */
-  private _simplificationRules: Rule[] = [...SIMPLIFY_RULES];
-
-  /** @internal Cached length of _simplificationRules for staleness detection */
-  private _simplificationRulesCachedLength = -1;
+  /** @internal Backing state for simplificationRules */
+  private _simplificationRules = new SimplificationRuleStore([
+    ...SIMPLIFY_RULES,
+  ]);
 
   /** @internal Registry of compilation targets */
-  private _compilationTargets: Map<string, LanguageTarget<BoxedExpression>> =
-    new Map();
+  private _compilationTargets = new CompilationTargetRegistry();
 
   /** @internal Fu trigonometric simplification algorithm */
   _fuAlgorithm = _fu;
@@ -672,13 +663,7 @@ export class ComputeEngine implements IComputeEngine {
     this.pushScope(undefined, 'global');
 
     // Register default compilation targets
-    this._compilationTargets.set('javascript', new _JavaScriptTarget());
-    this._compilationTargets.set('glsl', new _GLSLTarget());
-    this._compilationTargets.set(
-      'interval-js',
-      new _IntervalJavaScriptTarget()
-    );
-    this._compilationTargets.set('interval-glsl', new _IntervalGLSLTarget());
+    this._compilationTargets.registerDefaults();
 
     hidePrivateProperties(this);
   }
@@ -735,12 +720,7 @@ export class ComputeEngine implements IComputeEngine {
     for (const d of Object.values(this._commonSymbols)) d?.reset();
 
     // Purge any caches
-    for (const k of Object.keys(this.__cache))
-      if (this.__cache[k].value) {
-        if (!this.__cache[k].purge) delete this.__cache[k];
-        else
-          this.__cache[k].value = this.__cache[k].purge!(this.__cache[k].value);
-      }
+    this._cacheStore.purgeValues();
 
     // Notify all the listeners that the configuration has changed. This
     // includes all the value and operator definitions
@@ -785,7 +765,7 @@ export class ComputeEngine implements IComputeEngine {
     name: string,
     target: LanguageTarget<BoxedExpression>
   ): void {
-    this._compilationTargets.set(name, target);
+    this._compilationTargets.register(name, target);
   }
 
   /**
@@ -811,7 +791,7 @@ export class ComputeEngine implements IComputeEngine {
    * ```
    */
   listCompilationTargets(): string[] {
-    return [...this._compilationTargets.keys()];
+    return this._compilationTargets.list();
   }
 
   /**
@@ -820,7 +800,7 @@ export class ComputeEngine implements IComputeEngine {
    * @param name - The name of the target to remove
    */
   unregisterCompilationTarget(name: string): void {
-    this._compilationTargets.delete(name);
+    this._compilationTargets.unregister(name);
   }
 
   /** @internal Compile a boxed expression. */
@@ -1288,14 +1268,13 @@ export class ComputeEngine implements IComputeEngine {
    * ```
    */
   get simplificationRules(): Rule[] {
-    return this._simplificationRules;
+    return this._simplificationRules.rules;
   }
 
   set simplificationRules(rules: Rule[]) {
-    this._simplificationRules = rules;
+    this._simplificationRules.rules = rules;
     // Invalidate the cached boxed rule set
-    this._simplificationRulesCachedLength = -1;
-    delete this.__cache['standard-simplification-rules'];
+    this._cacheStore.invalidate('standard-simplification-rules');
   }
 
   /**
@@ -1653,21 +1632,7 @@ export class ComputeEngine implements IComputeEngine {
     build: () => T,
     purge?: (t: T) => T | undefined
   ): T {
-    if (this.__cache[cacheName] === undefined) {
-      try {
-        this.__cache[cacheName] = {
-          build: build as () => unknown,
-          purge: purge as ((v: unknown) => unknown) | undefined,
-          value: build(),
-        };
-      } catch (e) {
-        console.error(
-          `Fatal error building cache "${cacheName}":\n\t ${e.toString()}`
-        );
-      }
-    }
-
-    return this.__cache[cacheName]?.value as T;
+    return this._cacheStore.getOrBuild(cacheName, build, purge);
   }
 
   /** Return a boxed expression from a number, string or semiboxed expression.
@@ -1909,18 +1874,14 @@ export class ComputeEngine implements IComputeEngine {
 
     if (id === 'standard-simplification') {
       // Invalidate cache if rules array was mutated (e.g. via push/splice)
-      if (
-        this._simplificationRulesCachedLength >= 0 &&
-        this._simplificationRules.length !==
-          this._simplificationRulesCachedLength
-      ) {
-        delete this.__cache['standard-simplification-rules'];
+      if (this._simplificationRules.hasMutatedSinceLastCache()) {
+        this._cacheStore.invalidate('standard-simplification-rules');
       }
 
       const result = this._cache('standard-simplification-rules', () =>
-        boxRules(this, this._simplificationRules, { canonical: true })
+        boxRules(this, this._simplificationRules.rules, { canonical: true })
       );
-      this._simplificationRulesCachedLength = this._simplificationRules.length;
+      this._simplificationRules.markCached();
       return result;
     }
 

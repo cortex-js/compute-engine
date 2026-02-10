@@ -58,40 +58,85 @@ const OEIS_BASE_URL = 'https://oeis.org';
 const DEFAULT_TIMEOUT = 10000;
 const DEFAULT_MAX_RESULTS = 5;
 
+type OEISApiResult = {
+  number?: unknown;
+  name?: unknown;
+  data?: unknown;
+  formula?: unknown;
+  comment?: unknown;
+};
+
+function asRecord(value: unknown): Record<string, unknown> | null {
+  if (typeof value === 'object' && value !== null) {
+    return value as Record<string, unknown>;
+  }
+  return null;
+}
+
+function parseSequenceNumber(value: unknown): number | undefined {
+  if (typeof value === 'number' && Number.isInteger(value) && value >= 0) {
+    return value;
+  }
+  if (typeof value === 'string') {
+    const parsed = Number.parseInt(value, 10);
+    if (Number.isInteger(parsed) && parsed >= 0) return parsed;
+  }
+  return undefined;
+}
+
+function parseTerms(value: unknown): number[] {
+  if (typeof value !== 'string') return [];
+  return value
+    .split(',')
+    .map((s) => Number.parseInt(s.trim(), 10))
+    .filter((n) => Number.isFinite(n));
+}
+
+function parseFormula(value: unknown): string | undefined {
+  if (!Array.isArray(value)) return undefined;
+  const first = value.find((v) => typeof v === 'string');
+  return typeof first === 'string' ? first : undefined;
+}
+
+function parseComments(value: unknown): string[] | undefined {
+  if (typeof value === 'string') return [value];
+  if (!Array.isArray(value)) return undefined;
+  const comments = value.filter((item): item is string => typeof item === 'string');
+  return comments.length > 0 ? comments : undefined;
+}
+
+function parseResults(data: unknown): OEISApiResult[] {
+  if (Array.isArray(data)) return data;
+
+  const payload = asRecord(data);
+  if (!payload) return [];
+
+  const results = payload.results;
+  if (!Array.isArray(results)) return [];
+
+  return results;
+}
+
 /**
  * Parse OEIS JSON response into OEISSequenceInfo objects.
  */
-function parseOEISResponse(data: any): OEISSequenceInfo[] {
-  // OEIS returns either an array directly, or an object with 'results' key
-  // depending on the query type
-  let results: any[];
+function parseOEISResponse(data: unknown): OEISSequenceInfo[] {
+  const results = parseResults(data);
 
-  if (Array.isArray(data)) {
-    results = data;
-  } else if (data && data.results && Array.isArray(data.results)) {
-    results = data.results;
-  } else {
-    return [];
-  }
-
-  return results.map((result: any) => {
-    // Parse the sequence terms from the 'data' field
-    const terms = result.data
-      ? result.data.split(',').map((s: string) => parseInt(s.trim(), 10))
-      : [];
-
-    // Get the first formula if available
-    const formula = result.formula?.[0];
+  return results.map((result) => {
+    const sequenceNumber = parseSequenceNumber(result.number);
+    const id =
+      sequenceNumber !== undefined
+        ? `A${String(sequenceNumber).padStart(6, '0')}`
+        : '';
 
     return {
-      id: result.number ? `A${String(result.number).padStart(6, '0')}` : '',
-      name: result.name || '',
-      terms,
-      formula,
-      comments: result.comment,
-      url: result.number
-        ? `${OEIS_BASE_URL}/A${String(result.number).padStart(6, '0')}`
-        : '',
+      id,
+      name: typeof result.name === 'string' ? result.name : '',
+      terms: parseTerms(result.data),
+      formula: parseFormula(result.formula),
+      comments: parseComments(result.comment),
+      url: id ? `${OEIS_BASE_URL}/${id}` : '',
     };
   });
 }
