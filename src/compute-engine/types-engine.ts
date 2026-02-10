@@ -38,15 +38,27 @@ import type {
 } from './types-definitions';
 import type {
   AssumeResult,
-  Rule,
-  BoxedRule,
-  BoxedRuleSet,
-  RuleStep,
-  AssignValue,
-  Scope,
-  EvalContext,
-} from './types-evaluation';
+  Rule as KernelRule,
+  BoxedRule as KernelBoxedRule,
+  BoxedRuleSet as KernelBoxedRuleSet,
+  RuleStep as KernelRuleStep,
+  AssignValue as KernelAssignValue,
+  Scope as KernelScope,
+  EvalContext as KernelEvalContext,
+} from './types-kernel-evaluation';
 import type { LanguageTarget, CompilationResult } from './compilation/types';
+
+type Rule = KernelRule<BoxedExpression, SemiBoxedExpression, IComputeEngine>;
+type BoxedRule = KernelBoxedRule<BoxedExpression, IComputeEngine>;
+type BoxedRuleSet = KernelBoxedRuleSet<BoxedExpression, IComputeEngine>;
+type RuleStep = KernelRuleStep<BoxedExpression>;
+type AssignValue = KernelAssignValue<
+  BoxedExpression,
+  SemiBoxedExpression,
+  IComputeEngine
+>;
+type Scope = KernelScope<BoxedDefinition>;
+type EvalContext = KernelEvalContext<BoxedExpression, BoxedDefinition>;
 
 /** @internal */
 export interface IComputeEngine extends IBigNum {

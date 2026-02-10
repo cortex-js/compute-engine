@@ -22,21 +22,27 @@ import type {
   Substitution,
   BoxedSubstitution,
   CanonicalOptions,
-} from './types-serialization';
+} from './types-kernel-serialization';
 import type {
   Sign,
+  BoxedDefinition,
   BoxedBaseDefinition,
   BoxedOperatorDefinition,
   BoxedValueDefinition,
   SimplifyOptions,
 } from './types-definitions';
 import type {
-  EvaluateOptions,
-  Rule,
-  BoxedRuleSet,
-  Scope,
-} from './types-evaluation';
+  EvaluateOptions as KernelEvaluateOptions,
+  Rule as KernelRule,
+  BoxedRuleSet as KernelBoxedRuleSet,
+  Scope as KernelScope,
+} from './types-kernel-evaluation';
 import type { IComputeEngine as ComputeEngine } from './types-engine';
+
+type Scope = KernelScope<BoxedDefinition>;
+type EvaluateOptions = KernelEvaluateOptions<BoxedExpression>;
+type Rule = KernelRule<BoxedExpression, SemiBoxedExpression, ComputeEngine>;
+type BoxedRuleSet = KernelBoxedRuleSet<BoxedExpression, ComputeEngine>;
 
 //
 // ── Tensor & Compilation Types ──────────────────────────────────────────
